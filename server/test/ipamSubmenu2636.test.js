@@ -6,7 +6,7 @@
  *   ③ 에이전트별 스캔 대역 CSV(ipam/scanRangesCsv.js) — 교체/추가 · 오류 줄이 있는 에이전트는 통째로 막는다 · 이 포탈 별칭
  *   ④ 라우트(실제 api·adminRouter 를 express 에 마운트) — 권한·범위·왕복·적용·감사 로그·스캔 로그 기록
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -14,11 +14,18 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
 
 function runChild(body, { env = {} } = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ipam2636-'));
+  const dir = tmpDir('ipam2636-');
   const script = `
     const SRC = ${JSON.stringify(SRC + '/')};
     const fs = await import('node:fs'); const path = await import('node:path');

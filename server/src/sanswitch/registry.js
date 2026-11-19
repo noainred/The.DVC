@@ -14,10 +14,9 @@
  *    공격자 서버로 선제 전송되는 경로 차단.
  */
 
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { makeLoadError, filterObjectElements, devicesForThisNode as coreDevicesForThisNode, devicesForAgent as coreDevicesForAgent } from '../util/registryCore.js'; // v2.613 PERSIST2613-04
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js';
 import { ssrfBlockReason } from '../collector/registry.js';
@@ -42,24 +41,32 @@ let _db = null;
 const loadErr = makeLoadError();
 export function registryLoadError() { load(); return loadErr.get(); }
 
+// 결정(78 남긴 것 ①): parse 실패(형식 · 복호 포함 — 예전 try 블록과 같은 범위)만 손상이다.
+const parseDb = (text) => {
+  const raw = JSON.parse(text);
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('형식 오류'); // JSON null·배열은 손상(v2.601 규약 — cvp 와 같게)
+  const p = openSecretsDeep(raw);
+  return { devices: filterObjectElements(p.devices).list }; // v2.613 PERSIST2613-04: 객체 원소만(null 원소가 listDevices 의 구조분해를 죽였다)
+};
+const WHAT = 'SAN 스위치 등록부(sanswitch-devices.json)';
 function load() {
-  if (_db) return _db;
-  try {
-    if (fs.existsSync(FILE)) {
-      const raw = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('형식 오류'); // JSON null·배열은 손상(v2.601 규약 — cvp 와 같게)
-      const p = openSecretsDeep(raw);
-      _db = { devices: filterObjectElements(p.devices).list }; // v2.613 PERSIST2613-04: 객체 원소만(null 원소가 listDevices 의 구조분해를 죽였다)
-      return _db;
-    }
-  } catch (e) { preserveCorrupt(FILE, e?.message); loadErr.set(e); } // 손상 원본 보존(사유 포함) — 빈 목록 저장이 전 장비 자격증명을 지우는 사고 방지
+  if (_db && !loadErr.readPending()) return _db;
+  // 손상 원본 보존(사유 포함) — 빈 목록 저장이 전 장비 자격증명을 지우는 사고 방지(loadErr.read 가 preserveCorrupt 한다).
+  // 결정(78 남긴 것 ①): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 원본을 그대로 두고 · 이 빈 값을 캐시로 믿지 않고(30초마다 다시 읽음) · 쓰기를 거절한다.
+  const r = loadErr.read(FILE, parseDb);
+  if (r.kind === 'ok') { _db = r.value; return _db; }
   loadErr.checkCorruptOnly(FILE);
   _db = { devices: [] };
   return _db;
 }
+/** 결정(78 남긴 것 ①): 읽기 오류 중의 쓰기 거절(409) 또는 null — 로드를 먼저 한다. */
+export function registryWriteRefusal() { load(); return loadErr.writeRefusal(WHAT); }
+/** 결정(78 남긴 것 ①): 거절이면 던진다(status 409 · code 'registry-unreadable') — 던지는 저장 함수(saveDevice)의 규약에 맞춘다. */
+function assertWritable() { load(); loadErr.assertWritable(WHAT); }
 
-function persist() {
-  atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep({ version: 1, devices: load().devices }), null, 2), { mode: 0o600 });
+function persist(devices = load().devices) {
+  loadErr.assertWritable(WHAT); // 결정(78 남긴 것 ①): 마지막 방어선 — 어느 경로(엣지 pull · 시드)도 읽기 오류 중에 원본을 덮지 않는다(던진다)
+  atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep({ version: 1, devices }), null, 2), { mode: 0o600 });
   loadErr.clear(); // v2.612 LEFT2612-01
 }
 
@@ -128,6 +135,7 @@ export function sanAccessMoved(existing, input = {}) {
 }
 
 export function saveDevice(input = {}) {
+  assertWritable();   // 결정(78 남긴 것 ①): 읽지 못한 빈 목록과 견주지 않는다(중복 · 상한 판정보다 먼저)
   const db = load();
   const issue = deviceInputIssue(input);
   if (issue) throw new Error(issue);
@@ -139,7 +147,16 @@ export function saveDevice(input = {}) {
   const datacenterId = String(input.datacenterId || '').trim();
 
   const existing = input.id ? db.devices.find((d) => d.id === input.id) : null;
-  const dev = existing || { id: `sw-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, createdAt: Date.now(), pulled: false };
+  // 전체 점검 24회차 #3(재현): host 중복 검사가 신규에만 있고 대소문자를 구별했다 — 수정으로 같은 스위치가 장비 둘이 되어 법인 합산이 두 배였다.
+  //   수정에도 · trim · 소문자로(대량 경로 bulk.js 와 같은 비교) · 메모리를 바꾸기 전에.
+  //   27회차 반증 D-6: 수정은 **host 를 바꿀 때만** 견준다(24회차 전 글자 그대로 비교로 들어간 대소문자 중복 두 대가 비활성화까지 잠기던 것) · 상대 스위치를 밝힌다.
+  const hostKey = host.toLowerCase();
+  const hostChanged = !existing || String(existing.host || '').trim().toLowerCase() !== hostKey;
+  const dupSw = hostChanged ? db.devices.find((d) => d !== existing && String(d.host || '').trim().toLowerCase() === hostKey) : null;
+  if (dupSw) throw new Error(`같은 host 의 스위치가 이미 등록되어 있습니다 — '${String(dupSw.name || dupSw.id || '').slice(0, 80)}'.`);
+  // 24회차 #5(재현): 사본에 고치고 **쓰기가 성공한 뒤에** 메모리를 바꾼다 — 예전에는 저장 실패(비밀 보관 잠금 · 키 없음)에도 메모리가 새 값이라
+  //   폴러가 저장되지 않은 host · 계정 · 비밀번호로 접속하고 중앙 설정 pull 이 그 값을 엣지에 배포했다.
+  const dev = existing ? { ...existing } : { id: `sw-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, createdAt: Date.now(), pulled: false };
   // v2.607(감사 SEC2607-07·LEFT2607-06) → v2.770(R5-E3-4): 판정은 sanAccessMoved 하나(연결 테스트와 공유).
   const moved = sanAccessMoved(existing, input);
   const password = String(input.password ?? '');
@@ -154,21 +171,21 @@ export function saveDevice(input = {}) {
   const vfId = input.vfId === '' || input.vfId == null ? null : Math.max(1, Math.min(128, Math.floor(Number(input.vfId)) || 128));
   Object.assign(dev, { type, name, host, username, agent, datacenterId, collectMethod, sshPort, httpsPort, vfId,
     enabled: input.enabled !== false, note: String(input.note || '').slice(0, 200) });
-  if (!existing) {
-    if (db.devices.length >= MAX_DEVICES) throw new Error(`스위치는 최대 ${MAX_DEVICES}개까지 등록할 수 있습니다.`);
-    if (db.devices.some((d) => d.host === host)) throw new Error('같은 host 의 스위치가 이미 등록되어 있습니다.');
-    db.devices.push(dev);
-  }
-  persist();
+  if (!existing && db.devices.length >= MAX_DEVICES) throw new Error(`스위치는 최대 ${MAX_DEVICES}개까지 등록할 수 있습니다.`);
+  const next = existing ? db.devices.map((d) => (d === existing ? dev : d)) : [...db.devices, dev];
+  persist(next);
+  db.devices = next;
   const { password: _p, ...safe } = dev;
   return { ...safe, hasPassword: !!dev.password, ...(droppedSecrets.length ? { droppedSecrets } : {}) };
 }
 
 export function deleteDevice(id) {
+  assertWritable();   // 결정(78 남긴 것 ①): '없는 스위치' 404 보다 먼저
   const db = load();
   const i = db.devices.findIndex((d) => d.id === id);
   if (i < 0) return false;
-  db.devices.splice(i, 1); persist();
+  const next = db.devices.filter((_, j) => j !== i);
+  persist(next); db.devices = next;   // 24회차 #5: 쓰기 성공 뒤에만
   return true;
 }
 
@@ -189,8 +206,8 @@ export function applyPulledDevices(list, { onRemoved = null } = {}) {
   const keep = db.devices.filter((d) => String(d.agent || '').toLowerCase() !== mine);
   const before = new Set(db.devices.filter((d) => String(d.agent || '').toLowerCase() === mine).map((d) => d.id));
   const next = (list || []).map((d) => ({ ...d, pulled: true }));
-  db.devices = [...keep, ...next];
-  persist();
+  const all = [...keep, ...next];
+  persist(all); db.devices = all;   // 24회차 #5: 쓰기 성공 뒤에만
   // 중앙에서 삭제/이관된 장비의 id — 호출자가 로컬 스냅샷을 지워야 한다(안 지우면 낡은 스냅샷이
   // 매 주기 중앙으로 push 돼 중앙 화면에 orphan 으로 영구 표시된다 — v2.416 리뷰 결함 #4).
   const nextIds = new Set(next.map((d) => d.id));
@@ -214,7 +231,7 @@ export function seedDemoDevices(list = []) {
 }
 
 /**
- * v2.915: 데모 보충 — 등록부가 **데모(mock-san-) 장비뿐**일 때 없는 id 만 덧붙인다(시연 규모로 늘어난 vCenter 의 스위치).
+ * v3.26.0: 데모 보충 — 등록부가 **데모(mock-san-) 장비뿐**일 때 없는 id 만 덧붙인다(시연 규모로 늘어난 vCenter 의 스위치).
  * 사람이 등록한 장비가 하나라도 있으면 0. mock/demo/sanswitch.js 만 부른다. 덧붙인 id 목록을 돌려준다.
  */
 export function topUpDemoDevices(list = []) {

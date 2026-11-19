@@ -24,7 +24,6 @@
  *  - 응답에는 비밀번호를 싣지 않는다(hasPassword 만) · vCenter 자격증명은 여기에 없다(사이트 FD 의 INI 가 갖는다).
  *  - 백업 대상이 있는 vCenter 의 Director 를 바꾸거나 매핑을 지우지 않는다(잡은 옛 Director 의 conf 에 있다) · 매핑·대상이 있는 Director 는 지우지 않는다.
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
@@ -100,9 +99,13 @@ export function readDirectorRecord(d, id) {
 /** 내부 전용(비밀번호 포함). 화면·응답에는 publicSettings 를 쓴다. */
 export function loadSettings() {
   if (_cache) return _cache;
+  // 97회차 F4: 읽기 단계는 등록부 공용 읽기(util/registryCore.js read)다 — 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니라 원본을 옮기지 않고 ·
+  //   캐시하지 않고(30초 간격 재읽기) · 오류(readError)를 세워 쓰기를 거절한다(persist 의 assertWritable). parse · 형식 실패만 아래 catch(예전과 같다 — 보존본).
+  const rr = _loadErr.read(FILE(), (t) => t);
+  if (rr.kind === 'read-error') return emptySettings();
   try {
-    if (fs.existsSync(FILE())) {
-      const raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
+    if (rr.kind === 'ok') {
+      const raw = JSON.parse(rr.value);
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('형식 오류');
       const p = openSecretsDeep(raw);
       const base = emptySettings();
@@ -237,6 +240,7 @@ function clashIssue(list, d) {
 function persist(next) {
   const first = next.directors[0];
   const mirror = first ? (({ id, name, ...rest }) => rest)(first) : undefined;   // 구버전 호환 사본(이름·id 없이 접속값만)
+  _loadErr.assertWritable('Bareos 설정(bareos.json)'); // 97회차 F4: 마지막 방어선 — 읽기 오류 중에는 원본을 덮지 않는다(던진다 — status 409)
   atomicWriteFileSync(FILE(), JSON.stringify(sealSecretsDeep({ ...next, version: 2, ...(mirror ? { director: mirror } : {}) }), null, 2), { mode: 0o600 });
   _cache = next;
   _rev += 1;
@@ -256,6 +260,133 @@ const cloneSettings = (cur) => ({ version: 2, directors: cur.directors.map((d) =
  * @returns {{ settings: object, droppedSecrets: string[] }}  settings 는 publicSettings 모양
  * @throws Error(message = 사람이 읽는 사유, code invalid|conflict)
  */
+/* ───────── 같은 서버 · 같은 Director 판정(101회차 F1 · 104회차 D1 — 판정 하나: install/targets.js 는 여기서 가져다 쓴다) ───────── */
+const lcHost = (s) => String(s ?? '').trim().toLowerCase().replace(/\.$/, '');
+const ipLike = (s) => /^[0-9.]+$/.test(s) || s.includes(':');
+const shortName = (s) => (ipLike(s) ? s : s.split('.')[0]);
+// 루프백 이름 · 주소는 '어느 서버' 인지 말하지 않는다(설치 직후 Rocky 의 호스트 이름 localhost.localdomain) — 대조에서 빼고, 루프백으로 등록된 Director 는 담당 엣지로 대조한다
+const loopback = (s) => s === 'localhost' || s.startsWith('localhost.') || /^127\./.test(s) || s === '::1';
+/** v2.876 resetTarget 의 넓은 대조(거부 쪽)도 같은 글자를 쓴다 — 사본을 두지 않는다. */
+export const hostMatch = Object.freeze({ lcHost, ipLike, shortName, loopback });
+
+/**
+ * 101회차 F1(재현): 재설치의 0단계(초기화)와 전부 되돌리기는 **그 서버의 Bareos 전체**(설정 · 카탈로그 · 패키지)를 지운다 — 같은 서버를 가리키는
+ *   Director 등록이 둘 이상이면(같은 주소 · 다른 콘솔 이름 — 52회차 D1 '같은 Director 에 둘째 vCenter 거부' 뒤 둘째 서비스를 같은 서버의 새 등록으로 묶은 경우)
+ *   다른 등록에 묶인 vCenter 의 잡 설정 · 실행 기록도 함께 지워진다. 예전에는 함께 쓰는 vCenter 확인(53회차 N4) · 대상 수 · M4 가 **그 Director id 하나**만 세어
+ *   확인 없이 지웠다. 이 판정으로 같은 서버의 Director 를 모두 센다.
+ *   주소는 정확히 같을 때(대소문자 · 끝 점 무시) · 한쪽이 점 없는 짧은 이름이면 다른 쪽의 첫 마디와 같을 때만 — resetTarget 의 거부 쪽 대조(짧은 이름끼리 늘 비교)보다 좁다
+ *   (다른 법인의 'bareos.pl.corp' 를 'bareos.kr.corp' 와 같은 서버로 보면 되돌리기가 남의 대상 때문에 막힌다). 루프백으로 등록된 Director 는 담당 엣지가 같을 때.
+ *   104회차(반증 — 재현): 담당 엣지가 **서로 다른** Director 의 주소는 그 엣지의 법인 망에서 읽는 값이다 — 법인마다 같은 사설 주소(192.168.x · 10.x)를 쓰면
+ *   다른 법인의 Director 를 같은 서버로 봐 되돌리기가 남의 법인 대상 때문에 막히고, 재설치 확인이 남의 법인 vCenter 를 '함께 지워짐' 으로 물었다(러너가 읽은
+ *   서버의 모든 주소 ids 에 사설 주소가 든다). 서버 쪽 담당 엣지와 Director 담당 엣지가 **둘 다 있고 다르면** 같은 서버로 보지 않는다(중앙 직접 '' 은 그대로 대조).
+ * @param {{ sshHost?: string, agent?: string, ids?: string[] }} server ids = 러너 · 사전 점검이 읽은 서버 주소 · 이름 · 모든 주소
+ * @returns {(d: object) => boolean}
+ */
+export function sameServerDirector({ sshHost = '', agent = '', ids = [] } = {}) {
+  const names = [sshHost, ...(Array.isArray(ids) ? ids : [])].map(lcHost).filter((x) => x && !loopback(x));
+  const full = new Set(names);
+  const words = names.filter((x) => !ipLike(x));
+  const shortOf = new Set(words.map(shortName));
+  const bare = new Set(words.filter((x) => !x.includes('.')));
+  const a = lcHost(agent);
+  return (d) => {
+    const h = lcHost(d?.host);
+    if (!h) return false;
+    if (loopback(h)) return !!a && !!d?.agent && lcHost(d.agent) === a;
+    if (a && d?.agent && lcHost(d.agent) !== a) return false;   // 104회차: 다른 엣지의 법인 망 주소
+    if (full.has(h)) return true;
+    if (ipLike(h)) return false;
+    return h.includes('.') ? bare.has(shortName(h)) : shortOf.has(h);
+  };
+}
+
+/**
+ * 104회차 D1 우회(사용자 결정 '권장 사항으로 진행' — 2026-11-17): 두 Director 등록이 **같은 Director**(같은 서버의 같은 포트)를 가리키는가.
+ *   주소 판정은 sameServerDirector 와 같은 글자(정확한 주소 · 한쪽 짧은 이름) + **포트가 같고** + 담당 엣지가 같을 때(중앙 직접끼리 포함 —
+ *   주소는 접속하는 쪽의 망에서 읽는 값이라 담당이 다르면 같은 Director 라고 단정하지 않는다). 루프백끼리는 담당이 같을 때만(그 엣지 · 중앙 서버).
+ *   대칭이다(a, b 를 바꿔도 같다 — 시험이 대조).
+ */
+export function sameDirectorEndpoint(a, b) {
+  if (!a || !b) return false;
+  if ((Number(a.port) || 9101) !== (Number(b.port) || 9101)) return false;
+  if (lcHost(a.agent) !== lcHost(b.agent)) return false;
+  const ha = lcHost(a.host); const hb = lcHost(b.host);
+  if (!ha || !hb) return false;
+  if (loopback(ha) || loopback(hb)) return loopback(ha) && loopback(hb);
+  return sameServerDirector({ sshHost: ha })({ host: hb });
+}
+
+/** 104회차: Director id → 같은 Director 를 가리키는 다른 등록 id 들(없으면 키 없음 · 화면 · directorBindIssue 가 같은 판정을 쓴다). */
+export function directorEndpointPeers(directors = []) {
+  const list = Array.isArray(directors) ? directors : [];
+  const out = new Map();
+  for (const d of list) for (const o of list) {
+    if (o === d || o.id === d.id || !sameDirectorEndpoint(d, o)) continue;
+    const a = out.get(d.id) || []; a.push(o.id); out.set(d.id, a);
+  }
+  return out;
+}
+
+/**
+ * 105회차(104회차 D1 반증 — 재현): Director 접속값 바꾸기(주소 · 포트 · 담당)로 **같은 Director 를 새로 가리키게 되는** 경우.
+ *   104 D1 은 매핑 저장(saveSettings)에서만 묶음을 봐, vCenter 가 묶인 등록 B 의 주소를 vCenter 가 묶인 등록 A 의 주소:포트로 바꾸면(PUT Director · 자동 설정)
+ *   그대로 통과했고 · 그 뒤의 매핑 저장은 두 짝을 '이미 묶여 있던 짝'(grandfather — 묶음을 **바뀐** 등록으로 센다)으로 보아 'Director 하나에 vCenter 하나' 를 우회했다.
+ *   바꾸기 전에는 같은 Director 가 아니던 등록(added) 중에, 이 등록에 묶인 vCenter 와 **다른** vCenter 가 묶인 것이 있으면 거부한다.
+ *   이 등록에 묶인 vCenter 가 없으면 새 묶음이 아니다(같은 Director 에 콘솔 등록 하나 더 — 104 와 같다). 이미 같은 Director 이던 짝은 그대로(grandfather).
+ * @returns {string} 사유 · 없으면 ''
+ */
+export function directorMoveBindIssue(id, curDirectors = [], nextDirectors = [], sites = []) {
+  const before = new Set(directorEndpointPeers(curDirectors).get(id) || []);
+  const added = new Set((directorEndpointPeers(nextDirectors).get(id) || []).filter((o) => !before.has(o)));
+  if (!added.size) return '';
+  const list = Array.isArray(sites) ? sites : [];
+  const mine = new Set(list.filter((s) => s?.directorId === id).map((s) => String(s.vcenterId)));
+  if (!mine.size) return '';
+  const theirs = list.filter((s) => added.has(s?.directorId) && !mine.has(String(s.vcenterId)));
+  if (!theirs.length) return '';
+  const nameOf = (x) => (nextDirectors || []).find((d) => d.id === x)?.name || x;
+  const peerNames = [...new Set(theirs.map((s) => nameOf(s.directorId)))].slice(0, 3).map((n) => `‘${n}’`).join(', ');
+  return `Director ‘${nameOf(id)}’ 의 주소 · 포트 · 담당을 이렇게 바꾸면 ${peerNames} 와 같은 Director(같은 주소 · 포트 · 담당)를 가리키게 되는데, 두 등록에 서로 다른 vCenter(‘${[...mine].slice(0, 3).join(', ')}’ · ‘${theirs.slice(0, 3).map((s) => s.vcenterId).join(', ')}’)가 묶여 있습니다 — 서비스 하나 = vCenter 하나 + Bareos 하나입니다. 한쪽 vCenter 의 매핑을 먼저 자기 서비스의 Director 로 옮기세요.`;
+}
+
+/**
+ * 52회차 D1(사용자 결정 — 2026-11-17 '권장 사항으로 진행'): 서비스 1 = vCenter 1 + Bareos 1 — Director 하나에 vCenter 하나.
+ * **새로** 같은 Director 에 둘째 vCenter 를 묶는 저장은 거부한다. 이미 함께 묶여 있던 짝(이전 설정 · 옛 1:1:1 정리 전)은 그대로 둔다
+ * (막으면 운영 중인 법인이 깨진다 — 화면이 경고만 한다 · `sharedDirectorsOf`). 판정은 이 함수 하나(설정 저장 · 완전 설치 시작 · 7단계 매핑).
+ * 104회차(101회차 결정 필요 — 사용자 '권장 사항으로 진행'): 같은 주소:포트를 가리키는 다른 Director 등록(콘솔 이름만 다름)은 **같은 Director** 다 —
+ *   예전에는 Director **id** 로만 묶음을 봐, 같은 주소:포트에 등록을 하나 더 만들어 둘째 vCenter 를 묶으면 이 규칙을 그대로 우회했다(재현).
+ *   같은 Director 를 가리키는 등록들(sameDirectorEndpoint)을 한 묶음으로 세고, 이미 묶여 있던 짝은 그대로 둔다(grandfather — 경고만).
+ * @returns {string} 사유 · 없으면 ''
+ */
+export function directorBindIssue(nextSites = [], curSites = [], directors = []) {
+  const peers = directorEndpointPeers(directors);
+  const nameOf = (id) => directors.find((d) => d.id === id)?.name || id;
+  // 새로 묶는 vCenter(그 Director 묶음에 저장돼 있지 않던 것)마다 — 묶음은 그 Director + 같은 Director 를 가리키는 등록(별 모양 · 비추이 짧은 이름 대조를 사슬로 넓히지 않는다)
+  for (const x of nextSites) {
+    const dir = x?.directorId;
+    if (!dir) continue;
+    const group = new Set([dir, ...(peers.get(dir) || [])]);
+    const vc = String(x.vcenterId);
+    if (curSites.some((c) => c?.directorId && group.has(c.directorId) && String(c.vcenterId) === vc)) continue;   // 이미 묶여 있던 짝(grandfather)
+    const others = nextSites.filter((o) => o !== x && o?.directorId && group.has(o.directorId) && String(o.vcenterId) !== vc);
+    if (!others.length) continue;
+    const viaPeer = others.filter((o) => o.directorId !== dir);
+    if (!viaPeer.length) {
+      return `Director ‘${nameOf(dir)}’ 에는 이미 vCenter ‘${others.map((o) => o.vcenterId).join(', ')}’ 가 묶여 있습니다 — 서비스 하나 = vCenter 하나 + Bareos 하나입니다. ‘${vc}’ 는 그 서비스의 Director 에 묶으세요(같은 Director 에 새 vCenter 를 더 묶지 않습니다).`;
+    }
+    const peerNames = [...new Set(viaPeer.map((o) => nameOf(o.directorId)))].slice(0, 3).map((n) => `‘${n}’`).join(', ');
+    return `Director ‘${nameOf(dir)}’ 는 ${peerNames} 와 같은 Director(같은 주소 · 포트 · 담당)를 가리키는 등록이고, 그 Director 에는 이미 vCenter ‘${others.map((o) => o.vcenterId).join(', ')}’ 가 묶여 있습니다 — 서비스 하나 = vCenter 하나 + Bareos 하나입니다. ‘${vc}’ 는 그 서비스의 Director 에 묶으세요(콘솔 이름만 다른 등록으로 같은 Director 에 새 vCenter 를 더 묶지 않습니다).`;
+  }
+  return '';
+}
+
+/** 52회차 D1: 이미 vCenter 둘 이상이 묶인 Director(경고용 — 저장은 막지 않는다). */
+export function sharedDirectorsOf(s = loadSettings()) {
+  const byDir = new Map();
+  for (const x of s.sites || []) { const a = byDir.get(x.directorId) || []; a.push(x.vcenterId); byDir.set(x.directorId, a); }
+  return [...byDir.entries()].filter(([, vcs]) => vcs.length > 1).map(([id, vcs]) => ({ directorId: id, name: (s.directors || []).find((d) => d.id === id)?.name || id, vcenterIds: vcs }));
+}
+
 export function saveSettings(body = {}, { jobDirs = new Map() } = {}) {
   if (body.director !== undefined) throw fail('invalid', 'Director 접속값은 법인별 Director 화면(설정 › 백업 › Bareos 백업 서버 › Director)에서 저장합니다.');
   const cur = loadSettings();
@@ -287,6 +418,8 @@ export function saveSettings(body = {}, { jobDirs = new Map() } = {}) {
       }
       if ([...dirs].some((id) => id !== now.directorId)) throw fail('conflict', `‘${vc}’ 에 백업 대상이 있어 다른 Director 로 옮길 수 없습니다 — 잡은 지금 Director 의 설정에 있습니다. 백업 대상을 먼저 지우세요.`);
     }
+    // 52회차 D1: Director 하나에 vCenter 하나 — 백업 대상 이동 409(더 구체적인 사유)를 먼저 본 뒤
+    { const why = directorBindIssue(sites, cur.sites, next.directors); if (why) throw fail('invalid', why); }
     next.sites = sites;
   }
   persist(next);
@@ -316,13 +449,17 @@ export function addDirector(body = {}) {
  * @returns {{ director: object(public), droppedSecrets: string[] }}
  * @throws Error(code invalid|not-found)
  */
-export function updateDirector(id, body = {}) {
-  const { next, d, droppedSecrets } = prepareDirectorUpdate(id, body);
+export function updateDirector(id, body = {}, { bindCheck = true } = {}) {
+  const { next, d, droppedSecrets } = prepareDirectorUpdate(id, body, { bindCheck });
   persist(next);
   return { director: publicDirector(d), droppedSecrets };
 }
 
-function prepareDirectorUpdate(id, body) {
+/**
+ * @param {{ bindCheck?: boolean }} [o] 105회차: false = 같은 Director 새 묶음(directorMoveBindIssue)을 보지 않는다 — 완전 설치 4단계 재등록만
+ *   (러너가 읽은 서버 주소로 고쳐 적는다 · 같은 서버의 다른 등록은 사전 점검이 '함께 쓰는 vCenter' 로 이미 확인받았다 — 0단계 초기화 뒤 4단계에서 멈추지 않게).
+ */
+function prepareDirectorUpdate(id, body, { bindCheck = true } = {}) {
   const cur = loadSettings();
   const next = cloneSettings(cur);
   const d = next.directors.find((x) => x.id === id);
@@ -334,7 +471,7 @@ function prepareDirectorUpdate(id, body) {
   if (secretProvided(body.password)) d.password = String(body.password).slice(0, 512);
   let droppedSecrets = [];
   if (moved) droppedSecrets = dropCarriedSecrets(d, body, ['password']);
-  const issue = directorIssue(d) || clashIssue(next.directors, d);
+  const issue = directorIssue(d) || clashIssue(next.directors, d) || (bindCheck ? directorMoveBindIssue(id, cur.directors, next.directors, cur.sites) : '');   // 105회차: 접속값 바꾸기로 D1 우회
   if (issue) throw fail('invalid', issue);
   return { next, d, droppedSecrets };
 }
@@ -439,3 +576,12 @@ export function directorConnSig(d) {
 
 export function onSettingsChange(cb) { _listeners.add(cb); return () => _listeners.delete(cb); }
 export function _resetForTest() { _cache = null; _loadErr.clear(); }
+/**
+ * 시험 전용 — 52회차 D1 이전의 옛 설정(Director 하나에 vCenter 여럿)을 **이미 저장된 파일** 로 놓는다(저장 판정을 거치지 않는다).
+ * 업그레이드 전 설치본의 bareos.json 이 이 모양이고, 그 짝은 이후 저장에서도 그대로 둔다(directorBindIssue). 한 Director 로 여러 vCenter 흐름을 보는 시험의 준비용.
+ */
+export function _seedLegacySitesForTest(sites) {
+  const next = cloneSettings(loadSettings());
+  next.sites = (Array.isArray(sites) ? sites : []).map((x) => { const r = normalizeSite(x); if (r.issue) throw new Error(`시험 준비 매핑 오류: ${r.issue}`); return r.site; });   // 반증 C3b: 조용히 버리지 않는다
+  persist(next);
+}

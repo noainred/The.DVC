@@ -150,19 +150,20 @@ ISO 문자열이 섞여 나오지 않습니다.
 
 ---
 
-## 6. 허용 분류 3종
+## 6. 허용 분류 4종
 
 | 키 | 라벨 | 민감도 | 무엇이 들어가나 |
 |---|---|---|---|
 | `inventory` | 인벤토리 지표 | low | vCenter·호스트·VM·데이터스토어·알람의 **개수와 합계**, 수집 상태. 개별 VM 이름·IP 는 주지 않습니다 |
 | `capacity` | 용량 · 사용량 추이 | medium | 데이터스토어 사용률, 스토리지 장비 용량·증가량. **장비명·법인**이 들어갑니다 |
 | `faults` | 장애 · 알람 현황 | medium | vCenter 알람, 물리 부품 장애. **장비·엔티티 이름**이 들어갑니다 |
+| `san` | SAN 스토리지 성능 | medium | SAN 스위치가 본 **스토리지 어레이별** 처리량 · 회선 사용률 · 편중 · 성능 점검 판정(v2.953). **어레이 이름 · 시리얼 · 법인**이 들어갑니다. vCenter 범위로 나눌 수 없어 범위 지정 키는 403 `needs-full-scope` |
 
 > 포탈 자신의 상태(엣지 주소·내부 IP·버전)는 **공개하지 않습니다.**
 
 ---
 
-## 7. 엔드포인트 8개
+## 7. 엔드포인트 10개
 
 아래 예시는 **목 데이터로 실제 호출해 받은 응답**입니다(형식은 실제와 같고 값은 데모입니다).
 
@@ -182,6 +183,7 @@ ISO 문자열이 섞여 나오지 않습니다.
 | `storageCapacityAllGB` | 사용량 미상 데이터스토어를 포함한 설치 용량(v2.632) |
 | `datastoresUsageUnknown` | 사용량을 읽지 못해 위 두 합계에서 뺀 데이터스토어 수(v2.632) |
 | `vmVcpu` `vmRamMB` `vmProvisionedGB` | VM 에 **할당된** 양(실제 사용량이 아닙니다). `vmProvisionedGB` 는 스토리지 용량을 읽은 VM 만의 합입니다(v2.727) |
+| `vmVcpuUnknown` `vmRamUnknown` | vCPU 수 · 메모리 크기를 읽지 못해 `vmVcpu` · `vmRamMB` 에서 뺀 VM 수(v3.20.1 — 0 으로 채우지 않습니다). 0 보다 크면 그 합은 **읽은 VM 만의 부분 합(최소값)** 이고, `vms` 와 같으면 하나도 읽지 못한 것이라 합 `0` 은 '할당 없음' 이 아니라 **모름**입니다 |
 | `vmStorageUnknown` | 스토리지 용량(`summary.storage.committed`)을 읽지 못해 `vmProvisionedGB` 에서 뺀 VM 수(v2.727 — 0 으로 채우지 않습니다) |
 
 ```json
@@ -194,9 +196,10 @@ ISO 문자열이 섞여 나오지 않습니다.
     "cpuCores": 6936, "cpuTotalMhz": 18288800, "cpuUsedMhz": 10231709,
     "memTotalMB": 112197632, "memUsedMB": 69231477,
     "storageCapacityGB": 1157120, "storageUsedGB": 800543, "storageCapacityAllGB": 1157120, "datastoresUsageUnknown": 0,
-    "vmVcpu": 11957, "vmRamMB": 44269568, "vmProvisionedGB": 736552, "vmStorageUnknown": 0
+    "vmVcpu": 11957, "vmRamMB": 44269568, "vmVcpuUnknown": 0, "vmRamUnknown": 0,
+    "vmProvisionedGB": 736552, "vmStorageUnknown": 0
   },
-  "meta": { "scopedToVcenters": null, "collectedAt": 1789727271549 }
+  "meta": { "scopedToVcenters": null, "collectedAt": 1789727271549, "notCurrentVcenters": 0, "notCurrentVcenterIds": [] }
 }
 ```
 
@@ -207,6 +210,9 @@ ISO 문자열이 섞여 나오지 않습니다.
 > ⚠ (v2.732) 다만 스냅샷 안의 **엣지 위임 vCenter 값은 그 엣지가 마지막으로 보낸 값**입니다 — 엣지의 보고가 끊기면 합계에
 > 낡은 값이 섞입니다. 그런 vCenter 수는 `/inventory/collection` 의 `stale`, 어느 vCenter 인지와 실제 수신 시각은
 > `/inventory/vcenters` 의 행 `stale`·`collectedAt` 으로 확인하세요.
+> ⚠ (126회차) 이 응답의 `meta.notCurrentVcenters`(개수)·`meta.notCurrentVcenterIds`(범위 안 vCenter id)가 **수집이 멈춘 vCenter**
+> (점검중 · 접속 실패 · 엣지 보고 끊김)를 바로 밝힙니다 — 그 vCenter 의 값은 마지막으로 읽은 값이고 합계에 그대로 들어 있습니다.
+> 하나라도 있으면 `meta.note` 가 같은 사실을 문장으로 말합니다(없으면 `note` 없음).
 
 ### 7-2. `GET /inventory/vcenters` — vCenter 별 개수·상태
 
@@ -225,7 +231,7 @@ ISO 문자열이 섞여 나오지 않습니다.
   "meta": {
     "scopedToVcenters": null, "count": 11, "truncated": false, "omitted": 0, "limit": 5000,
     "staleCount": 0, "alarmsUnknownCount": 0,
-    "note": "stale:true 인 행은 지금 값이 아닙니다 — collectedAt 이 그 값을 받은 시각입니다. alarms:null 은 경보를 조회하지 않은 vCenter(0 건이 아닙니다)."
+    "note": "stale:true 인 행은 지금 값이 아닙니다 — collectedAt 이 그 값을 받은 시각입니다(점검중이라 그 시각을 모르면 null). alarms:null 은 경보를 조회하지 않은 vCenter(0 건이 아닙니다)."
   }
 }
 ```
@@ -239,6 +245,8 @@ ISO 문자열이 섞여 나오지 않습니다.
 > ⚠⚠ **`stale: true` 인 행은 지금 값이 아닙니다.** 엣지 위임 vCenter 는 엣지의 보고가 끊겨도 `status` 가 **엣지가 마지막으로 보낸
 > 값 그대로**(대개 `connected`)입니다 — `status` 만 보고 '정상' 으로 판정하지 마세요. 접속 실패 이월은 `status: "unreachable"` 이면서
 > `stale: true` 입니다. `meta.staleCount` 가 그 행 수입니다.
+> ⚠ (126회차) **점검중(`status: "maintenance"`) 행도 `stale: true` 입니다** — 포탈은 점검중 vCenter 의 수집을 멈추고 직전 값을 기한 없이
+> 보여 줍니다. 그 값을 받은 시각을 모르면 `collectedAt` 은 `null` 입니다(예전에는 스냅샷 시각 — '방금 수집' 으로 나갔습니다).
 > ⚠ (v2.732) **`alarms: null` 은 경보 0 건이 아닙니다** — 그 vCenter 는 REST 폴백으로 수집돼 경보를 **조회하지 않았습니다.**
 > 개수는 `meta.alarmsUnknownCount` 입니다. 합계를 낼 때 0 으로 더하지 말고 빼고 몇 곳을 뺐는지 밝히세요.
 
@@ -290,6 +298,9 @@ ISO 문자열이 섞여 나오지 않습니다.
 
 > ⚠ `capacityGB` 가 0 이거나 `usedGB` 를 읽지 못하면 **`usedPct` 는 `null`** 입니다
 > (0 으로 나눈 값을 지어내지 않습니다). `freeGB` 도 같은 규칙입니다.
+> ⚠⚠ (126회차) **수집이 멈춘 vCenter 의 행은 마지막으로 읽은 용량입니다** — 행은 그대로 싣고(지우면 '데이터스토어 없음' 이 됩니다)
+> `meta.notCurrentVcenters`(개수)·`meta.notCurrentVcenterIds`(범위 안 vCenter id — 점검중 · 접속 실패 · 엣지 보고 끊김)로 밝힙니다.
+> 용량 경보를 걸 때 그 vCenter 의 행은 '지금 값' 으로 쓰지 마세요. 오래 멈춰 인벤토리가 빈 vCenter 는 행이 없습니다 — 0 개가 아니라 모르는 것입니다.
 
 ### 7-5. `GET /capacity/storage` — 스토리지 장비 용량
 
@@ -391,11 +402,14 @@ ISO 문자열이 섞여 나오지 않습니다.
 > ⚠⚠ (v2.732) **경보를 조회하지 않은 vCenter 가 있습니다** — REST 폴백으로 수집된 vCenter 는 경보를 읽지 않으므로 그 vCenter 의 행이
 > 없는 것은 '경보 0 건' 이 아닙니다. `meta.alarmsUnknownVcenters`(개수)·`meta.alarmsUnknownVcenterIds`(범위 안 vCenter id 목록)가
 > 그 vCenter 를 밝히고, `meta.note` 가 같은 사실을 문장으로 말합니다.
+> ⚠ (126회차) **수집이 멈춘 vCenter 의 경보는 마지막으로 읽은 목록입니다**(새 경보 · 해소를 모릅니다) —
+> `meta.notCurrentVcenters`·`meta.notCurrentVcenterIds` 가 그 vCenter 를 밝힙니다(7-4 와 같은 판정).
 
 ```json
 "meta": {
   "scopedToVcenters": null, "count": 58, "truncated": false, "omitted": 0, "limit": 5000,
   "mutedCount": 0, "alarmsUnknownVcenters": 0, "alarmsUnknownVcenterIds": [],
+  "notCurrentVcenters": 0, "notCurrentVcenterIds": [],
   "note": "음소거된 알람도 포함하고 muted:true 로 표시합니다 — 목록에서 빼지 않습니다."
 }
 ```
@@ -423,6 +437,51 @@ ISO 문자열이 섞여 나오지 않습니다.
 > ⚠⚠ **`unknown`(확인 불가)과 `absent`(빈 슬롯)를 장애로 세지 마세요.** 실제로 겪은 사례가
 > 있습니다 — 정상 장비의 빈 DIMM 슬롯 12칸을 고장으로 세면 **정상 장비에 장애 12건**이 찍힙니다.
 > 정상으로도 세지 않습니다. `state` 를 그대로 보고 세 갈래로 나누세요.
+
+---
+
+### 7-9. `GET /san-storage/arrays` — SAN 스토리지 어레이별 성능(v2.953)
+
+분류 `san` · 범위 적용 안 함(범위 지정 키는 403 `needs-full-scope`) · 배열 · `?datacenterId=<법인 id>`(쉼표로 여러 개)로 법인을 고를 수 있습니다
+
+필드: `key` `name` `vendor` `serial` `datacenterId` `datacenterName` `state` `nowBps` `nowAt` `utilPct` `avg24Bps` `peak24Bps` `delta7dPct` `imbalanceGroup` `imbalanceRatio` `directors` `ports` `switches` `storageDeviceId` `capacityPct` `alertsUnresolved` `growth30dBytes` `daysToFull`
+
+| 필드 | 뜻 |
+|---|---|
+| `key` `name` `vendor` `serial` | 어레이 식별자(스위치 네임서버 심볼릭 이름 기준 · 예 `SYMMETRIX::000197952952`) · 표시 이름(등록 스토리지가 있으면 그 이름) · 벤더(`powermax` / `powerstore` / `unity` / `other`) · 시리얼(없으면 null) |
+| `datacenterId` `datacenterName` | 어레이가 물린 스위치의 법인 |
+| `state` | 수집 상태 — `ok` / `late`(표본 지연) / `edge-missing`(엣지 미보고) / `none`(표본 없음) / `partial`(부분 합). **`none` · `partial` 은 0 이 아닙니다** |
+| `nowBps` `nowAt` | 지금 처리량(B/s) 과 그 칸의 시각 — 수집 주기 안에서 팹 A/B 표본이 다 모인 마지막 칸. 없으면 **null**(0 이 아닙니다) |
+| `utilPct` | 회선 사용률 % = 송수신 합 ÷ 연결 포트 속도 합(FC 는 전이중이라 이론상 200% 까지) |
+| `avg24Bps` `peak24Bps` `delta7dPct` | 24시간 평균 · 피크(B/s) · 지난 7일 하루 평균 대비 % |
+| `imbalanceGroup` `imbalanceRatio` | 디렉터 · 컨트롤러 편중 — 가장 치우친 디렉터 이름과 어레이 평균 대비 배수(없으면 null) |
+| `directors` `ports` `switches` | 디렉터 묶음 수(구분 못 한 포트는 빼고) · 포트 수 · 스위치 수 |
+| `storageDeviceId` `capacityPct` `alertsUnresolved` | 시리얼로 짝 지은 등록 스토리지 장비의 id · 사용률 % · 미해결 알람 수 — 짝이 없으면 전부 null |
+| `growth30dBytes` `daysToFull` | 짝 지은 장비의 30일 증가량(바이트) · 소진 예상 일수(증가 추세일 때만 · 아니면 null) — 스토리지 증가량 화면과 같은 계산 |
+
+`meta`: `intervalMs`(수집 주기) · `computedAt` · `hostsExcluded`(호스트 HBA 로 분류돼 뺀 연결 수) · `unit: "bytesPerSec"` · 상한 `count` `truncated`.
+
+> ⚠ `nowBps` 가 null 인 행을 0 으로 그리지 마세요 — 그 칸에 표본이 없다는 뜻입니다. `state` 를 함께 보세요.
+
+---
+
+### 7-10. `GET /san-storage/check` — SAN 스토리지 성능 점검 판정(v2.953)
+
+분류 `san` · 범위 적용 안 함(범위 지정 키는 403 `needs-full-scope`) · 배열 · `?datacenterId=` 로 법인을 고를 수 있습니다
+
+필드: `key` `name` `datacenterId` `datacenterName` `overall` `uncheckedCount` `items` `arraySideKeys` `arraySideLastSampleAt` `judgedAt`
+
+| 필드 | 뜻 |
+|---|---|
+| `overall` | 종합 — `ok` / `warn` / `bad` / `unknown`. **`unknown`(확인 불가)은 정상이 아닙니다**(기준 없음 · 표본 없음 · 짝 없음) |
+| `uncheckedCount` | 확인 불가 항목 수(정상 판정이어도 0 이 아닐 수 있습니다 — '정상(일부 미확인)') |
+| `items` | 항목별 상태 객체 — 스위치 측 `imbalance`(디렉터 편중) `fabric`(팹 비대칭) `portSat`(회선 포화) `collect`(수집 상태) + 어레이 측 `dirBusy` `resp` `queue` `cpu` `compare`. 값은 `ok` / `warn` / `bad` / `unknown` / `na`(해당 없음) |
+| `arraySideKeys` `arraySideLastSampleAt` | 어레이가 스스로 보고한 값이 붙은 항목 키 목록과 그 마지막 표본 시각(없으면 빈 배열 · null) |
+| `judgedAt` | 판정 시각(epoch ms) |
+
+`meta`: `summary`(정상 · 주의 · 이상 · 확인 불가 수) · `itemLabels`(항목 키 → 한글 라벨) · 상한.
+
+> 기준값은 포탈 관리자가 '성능 점검 › 기준 설정' 에서 정한 것(벤더 문서 기본값 · 비우면 판정 안 함)이고, 응답에는 넣지 않습니다. 판정 함수는 포탈 화면 · 알림 · 월간 보고서와 **같은 하나**입니다.
 
 ---
 
@@ -472,7 +531,7 @@ ISO 문자열이 섞여 나오지 않습니다.
 | 429 | `rate-limited` | 분당 상한 초과 | `Retry-After` 초 뒤 재시도 |
 | 503 | `not-collected` | 첫 수집 미완료 | **잠시 뒤 재시도**(장애가 아닙니다) |
 | 503 | `unavailable` | 그 기능 모듈을 불러올 수 없음 | 포탈 관리자에게 문의 |
-| 500 | `internal` | 포탈 내부 오류(버그) | 시각과 경로를 포탈 관리자에게 — 재시도해도 같을 수 있습니다 |
+| 500 | `internal` | 포탈 내부 오류(버그). `reason` 은 일반 문구(‘내부 오류 — 요청 id …’)이고 예외 원문은 싣지 않습니다 — 원문은 포탈 서버 로그에만 남습니다 | 응답의 `requestId`(= `X-Request-Id` 헤더)와 시각을 포탈 관리자에게 — 재시도해도 같을 수 있습니다 |
 
 실패 응답 형태(실측):
 

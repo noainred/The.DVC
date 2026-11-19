@@ -7,6 +7,7 @@ import BoldText from '../components/boldText.jsx';
 import { pingEmptyReason } from './pingEmptyText.js';
 import { agoText } from './tools/relTime.js';
 import Select from '../components/Select.jsx';
+import { PING_SETTING_FIELDS, SOURCE_TEXT, settingsLine, sourceLine, monitorText, formOf, payloadOf, pingLoadOf, loadText } from './pingSettingsText.js';
 
 // 상태별 색상(파이썬 원본의 baseline 편차 색상 코딩 이식).
 const COLOR = { ok: '#22c55e', warn: '#eab308', crit: '#f97316', down: '#ef4444', unknown: '#6b7280' };
@@ -58,6 +59,73 @@ function SeriesChart({ data }) {
 
 const EMPTY = { name: '', host: '', kind: 'icmp', port: '', baselineMs: '', note: '', enabled: true };
 
+/**
+ * v2.964 측정 설정(사용자 요청 "화면에서 주기 설정할 수 있게 · ping 은 중단없이 계속 ping").
+ * 모두에게 지금 방식(측정 간격 · 요약 주기 · 시한 · 출처 · 모니터 상태)을 보이고, 관리자(전체 범위)만 고친다 — 저장하면 재시작 없이 바로 적용된다.
+ * 마운트 1회 + 저장 뒤 다시 읽기(15초 폴링하지 않는다). 설정을 못 읽었으면 저장 버튼을 열지 않는다.
+ */
+function PingSettingsCard({ isAdmin }) {
+  const [st, setSt] = useState(null);
+  const [err, setErr] = useState(null);
+  const [form, setForm] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState(null);
+  const gate = useRef(makeLatestGate()).current;
+  const load = () => {
+    const isCurrent = gate.next();
+    fetchJson('/ping/settings').then((r) => { if (isCurrent()) { setSt(r); setErr(null); } }).catch((e) => { if (isCurrent()) setErr(e.message || String(e)); });
+  };
+  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const check = form ? payloadOf(form) : null;
+  const preview = check?.body && st?.load ? pingLoadOf(check.body, st.load.targets) : null;
+  const canEdit = isAdmin && st && !st.loadError && st.load != null;   // load 가 null 이면 범위 계정(전체 범위만 저장)
+  const save = async (body) => {
+    setBusy(true); setNote(null);
+    const r = await putJson('/ping/settings', body).catch((e) => ({ ok: false, reason: e.message }));
+    setBusy(false);
+    if (r?.ok === false) { setNote({ ok: false, text: r.reason || '저장하지 못했습니다' }); return; }
+    setSt(r); setForm(null);
+    setNote({ ok: true, text: `저장했습니다 — 재시작 없이 바로 적용됩니다(${settingsLine(r)}).` });
+  };
+  if (err && !st) return <div className="card" style={{ padding: '8px 12px', marginBottom: 10, fontSize: 12.5 }}>⚠ 측정 설정을 읽지 못했습니다 — {err} <button type="button" className="logout-btn" style={{ padding: '4px 10px', marginLeft: 6 }} onClick={load}>다시 읽기</button></div>;
+  if (!st) return null;
+  return (
+    <div className="card" style={{ padding: '10px 12px', marginBottom: 10, minWidth: 0 }}>
+      <div className="flex between wrap gap" style={{ alignItems: 'center' }}>
+        <div style={{ fontSize: 12.5, minWidth: 0 }}>
+          <b>측정 방식</b> <span>{settingsLine(st)}</span>
+          <span className="muted"> · {sourceLine(st)} · {monitorText(st.monitor)}</span>
+        </div>
+        {canEdit && !form && <button type="button" className="logout-btn" style={{ padding: '6px 12px' }} onClick={() => { setNote(null); setForm(formOf(st)); }}>측정 설정</button>}
+      </div>
+      {st.loadError && <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>⚠ 저장된 측정 설정 파일을 읽지 못해 기본값으로 재고 있습니다(원본은 보존) — {st.loadError.reason}</div>}
+      {note && <div style={{ fontSize: 12.5, marginTop: 6, color: note.ok ? 'var(--green)' : 'var(--red)' }}>{note.ok ? '✓' : '⚠'} {note.text}</div>}
+      {form && canEdit && (
+        <div style={{ marginTop: 10 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(200px, 100%), 1fr))', gap: 10 }}>
+            {PING_SETTING_FIELDS.map((f) => (
+              <label key={f.key} style={{ fontSize: 12, minWidth: 0 }}>
+                {f.label}(초)
+                <input className="input" inputMode="decimal" value={form[f.form]} onChange={(e) => setForm((x) => ({ ...x, [f.form]: e.target.value }))} />
+                <span className="muted" style={{ display: 'block', fontSize: 11, marginTop: 2 }}>{f.hint} · 지금 {SOURCE_TEXT[st.source?.[f.key]] || '—'} · 기본 {formOf(st.defaults)[f.form]}초</span>
+              </label>
+            ))}
+          </div>
+          {check.issues.length ? (
+            <div style={{ fontSize: 12, marginTop: 8, color: 'var(--red)' }}>{check.issues.map((x) => <div key={x.field + x.reason}>⚠ {x.reason}</div>)}</div>
+          ) : preview ? <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>저장하면: {loadText(preview)}</div> : null}
+          <div className="flex gap wrap" style={{ marginTop: 10 }}>
+            <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={busy || !check.body} onClick={() => save(check.body)}>저장</button>
+            <button type="button" className="logout-btn" style={{ padding: '8px 14px' }} disabled={busy} onClick={() => save({ reset: true })} title="화면 값을 지우고 포탈 시작 값(환경 변수 · 기본값)으로 돌아갑니다">기본값으로</button>
+            <button type="button" className="logout-btn" style={{ padding: '8px 14px' }} onClick={() => setForm(null)}>닫기</button>
+          </div>
+          <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>이 포탈이 재는 모든 Ping 대상(vCenter · 엣지 노드 · vCenter 포트)에 적용됩니다. 측정 간격을 줄이면 대상 쪽으로 가는 연결·ping 횟수가 그만큼 늘고, 요약 주기를 줄이면 저장 줄이 늘어납니다.</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function PingMonitor() {
   const { data, error, loading } = usePolling('/ping/status', {}, 15_000);
   const isAdmin = hasRole('admin'); // v2.613 WEB2613-01: 역할은 App 이 채운 현재 사용자 객체에서 읽는다(화면이 /auth/me 를 다시 부르지 않는다).
@@ -85,7 +153,7 @@ export default function PingMonitor() {
       .then((r) => { if (!isCurrent()) return; if (r.ok) setSeries(r); else setSeriesErr(r.reason || '조회 실패'); })
       .catch((e) => { if (isCurrent()) setSeriesErr(e.message); });
   };
-  useEffect(() => { loadSeries(); /* eslint-disable-next-line */ }, [sel, range]);
+  useEffect(() => { loadSeries(); }, [sel, range]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const save = async () => {
     setBusy(true);
@@ -101,7 +169,7 @@ export default function PingMonitor() {
     const r = await delJson(`/ping/targets/${encodeURIComponent(t.id)}`).catch((e) => ({ ok: false, reason: e.message }));
     if (r.ok) { if (sel === t.id) setSel(null); flash(true, '삭제했습니다.'); } else flash(false, r.reason || '삭제 실패');
   };
-  const pollNow = async () => { setBusy(true); const r = await postJson('/ping/poll-now').catch((e) => ({ ok: false, reason: e.message })); setBusy(false); flash(r.ok, r.ok ? `측정 완료 (${r.up ?? 0}/${r.measured ?? 0} 응답)` : (r.reason || '측정 실패')); if (r.ok) setTimeout(loadSeries, 500); };
+  const pollNow = async () => { setBusy(true); const r = await postJson('/ping/poll-now').catch((e) => ({ ok: false, reason: e.message })); setBusy(false); flash(r.ok, r.ok ? (r.mode === 'continuous' ? `지금까지 잰 값을 저장했습니다 (대상 ${r.measured ?? 0}개 중 ${r.up ?? 0}개 응답)` : `측정 완료 (${r.up ?? 0}/${r.measured ?? 0} 응답)`) : (r.reason || '측정 실패')); if (r.ok) setTimeout(loadSeries, 500); };
   const syncVc = async () => { setBusy(true); const r = await postJson('/ping/seed-vcenters').catch((e) => ({ ok: false, reason: e.message })); setBusy(false); flash(r.ok, r.ok ? (r.added ? `vCenter ${r.added}개를 대상으로 추가했습니다.` : '추가할 새 vCenter가 없습니다.') : (r.reason || '동기화 실패')); };
 
   const counts = data?.counts || {};
@@ -117,7 +185,7 @@ export default function PingMonitor() {
           {['ok', 'warn', 'crit', 'down', 'unknown'].map((k) => (counts[k] ? (
             <span key={k} className="badge" style={{ background: `${COLOR[k]}22`, color: COLOR[k], border: `1px solid ${COLOR[k]}55` }}>{LABEL[k]} {counts[k]}</span>
           ) : null))}
-          <span className="muted" style={{ fontSize: 12 }}>총 {targets.length}개 대상 · 자동 측정</span>
+          <span className="muted" style={{ fontSize: 12 }}>총 {targets.length}개 대상 · 연속 측정</span>
         </div>
         {isAdmin && <div className="flex gap">
           <button className="logout-btn" style={{ padding: '7px 12px' }} disabled={busy} onClick={syncVc} title="등록된 vCenter를 Ping 대상으로 자동 추가(TCP 443)">vCenter 동기화</button>
@@ -126,6 +194,7 @@ export default function PingMonitor() {
         </div>}
       </div>
       {msg && <div className="card" style={{ padding: '8px 12px', marginBottom: 10, borderLeft: `3px solid var(--${msg.ok ? 'green' : 'red'})`, fontSize: 13 }}>{msg.ok ? '✓' : '⚠'} {msg.text}</div>}
+      <PingSettingsCard isAdmin={isAdmin} />
 
       {form && isAdmin && (
         <div className="card" style={{ padding: 14, marginBottom: 12 }}>

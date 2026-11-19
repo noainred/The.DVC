@@ -18,6 +18,7 @@
  * TLS: NSX 전용 로컬 dispatcher(security/tlsTrust.js deviceTlsConnect — CA 체인 또는 승인 지문, 2026-10-09 S-02).
  */
 
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { Agent } from 'undici';
 import { constants as cryptoConstants } from 'node:crypto';
 import { config } from '../config.js';
@@ -50,7 +51,7 @@ const norm = (s) => String(s || '').replace(/\/+$/, '');
  * 응답의 `cursor` 로 받는다. 예전에는 cursor 를 무시해 그룹·세그먼트·포트·전송 노드 개수가 **첫 페이지로 조용히**
  * 잘렸다. 상한까지 따라가고, 상한에 걸려 남은 페이지가 있으면 `truncated` 로 밝힌다(조용한 상한 금지).
  */
-export const NSX_LIST_MAX_PAGES = Math.max(1, Number(process.env.NSX_LIST_MAX_PAGES) || 20);
+export const NSX_LIST_MAX_PAGES = Math.max(1, envPositive(process.env.NSX_LIST_MAX_PAGES, 20));
 /** 규칙을 조회하는 DFW 정책 수 상한(정책마다 GET 1회 — 고RTT 매니저 부하). 넘으면 개수를 밝힌다. */
 export const NSX_DFW_POLICY_MAX = 60;
 /** IDS 이벤트는 한 페이지(이 개수)만 받는다 — 닿으면 idsEventsTruncated 로 밝힌다(v2.603 COL-2603-05). */

@@ -27,7 +27,7 @@ export const SETTINGS_KEYS = Object.freeze([
   'gpu-collect', 'gpu-guest', 'gpu-guest-diag', 'guest-account',
   'collectors', 'agent-deploy', 'proxy', 'remote',
   'users', 'edge-users', 'auth-ad', 'feature-usage',
-  'session-security', 'secrets', 'api-keys', 'anomaly', 'host-access', 'peer-trust', 'security-self-check',
+  'session-security', 'secrets', 'api-keys', 'anomaly', 'host-access', 'peer-trust', 'ssh-access', 'security-self-check',
   'alerts', 'mail', 'ai-search', 'tool-categories',
   'vclogs', 'diagnostics', 'perf-monitor', 'log-analysis', 'audit', 'recent-logins', 'login-counts',
   'upgrade', 'about',

@@ -58,6 +58,7 @@ export const STATUS_SPEC = Object.freeze([
   { key: 'push.isidu', label: '아이실론 디렉터리 사용량', group: 'push', mod: '../isidu/push.js', fn: 'isiduPushStatus' }, // v2.736
   { key: 'push.veeam', label: 'Veeam 백업 상태', group: 'push', mod: '../veeam/push.js', fn: 'veeamPushStatus' }, // v2.751
   { key: 'push.partFault', label: '파트 장애', group: 'push', mod: '../partfault/push.js', fn: 'partFaultPushStatus' },
+  { key: 'push.diskBad', label: '디스크 배드 섹터 이력', group: 'push', mod: '../diskbad/edge.js', fn: 'diskBadEdgeStatus' }, // v3.8.0 — 중앙 작업을 가져가 iDRAC Lifecycle 로그를 읽고 결과 push
   /*
    * ⚠ v2.554 에 추가 — v2.552 가 이 워커를 만들면서 **이 표에 넣지 않았다**. 그래서 엣지가
    *   보고하지 못하는 상황(개별 토큰 아님 403 · 잴 링크 0개 · 워커 미동작)을 중앙 화면에서도
@@ -91,6 +92,9 @@ export const STATUS_SPEC = Object.freeze([
   { key: 'pull.users', label: '계정 배포', group: 'pull', mod: '../agent/usersConfigPull.js', fn: 'usersConfigPullStatus' },
   { key: 'pull.partFault', label: '파트 장애 설정', group: 'pull', mod: '../agent/partFaultConfigPull.js', fn: 'partFaultConfigPullStatus' },
   { key: 'pull.bmUsage', label: '베어메탈 사용률 설정(중앙 배포)', group: 'pull', mod: '../agent/bmUsageConfigPull.js', fn: 'bmUsageConfigPullStatus' },
+  { key: 'pull.bmOnboard', label: '베어메탈 서버 등록 배포(중앙 → 엣지 · 7b)', group: 'pull', mod: '../agent/bmOnboardPull.js', fn: 'bmOnboardPullStatus' },
+  { key: 'pull.bmMaint', label: '베어메탈 정비 창 배포(중앙 → 엣지 · 8a)', group: 'pull', mod: '../agent/bmMaintPull.js', fn: 'bmMaintPullStatus' },
+  { key: 'pull.bmFolders', label: '물리서버 폴더 사본(중앙 → 엣지 · v2.996)', group: 'pull', mod: '../agent/bmFoldersPull.js', fn: 'bmFoldersPullStatus' },
 
   // ── 로컬 수집 ──────────────────────────────────────────────────────────────
   /*
@@ -101,10 +105,14 @@ export const STATUS_SPEC = Object.freeze([
    */
   { key: 'collect.inventory', label: 'vCenter 인벤토리 수집', group: 'collect', mod: '../store.js', fn: 'storeStatus' },
   { key: 'collect.storage', label: '스토리지 수집', group: 'collect', mod: '../storage/poller.js', fn: 'storagePollerStatus' },
+  { key: 'collect.storageNodeLoad', label: '아이실론 노드 부하 표본', group: 'collect', mod: '../storage/nodeLoadPoller.js', fn: 'nodeLoadPollerStatus' }, // v2.932(2차 ⑨) — 수집 주기와 따로 도는 가벼운 폴러(중앙·엣지 공용 · 자기 몫 아이실론만)
+  { key: 'collect.storageInspect', label: 'PowerScale 장비 점검', group: 'collect', mod: '../storage/inspect/runner.js', fn: 'inspectRunnerStatus' }, // v2.965 — 중앙 요청 · 주간 회차로만 돈다(엣지는 스스로 회차를 돌리지 않음) · 0건이어도 상태
   { key: 'collect.sanswitch', label: 'SAN 스위치 수집', group: 'collect', mod: '../sanswitch/poller.js', fn: 'sanSwitchPollerStatus' },
   { key: 'collect.sanswitchPerf', label: 'SAN 포트 사용량 수집', group: 'collect', mod: '../sanswitch/perfPoller.js', fn: 'sanSwitchPerfStatus' },
   { key: 'collect.cvp', label: 'CVP 수집', group: 'collect', mod: '../cvp/poller.js', fn: 'cvpPollerStatus' },
+  { key: 'collect.focusMon', label: '서버 집중 모니터링 SSH 수집(서버별 상태)', group: 'collect', mod: '../focusmon/service.js', fn: 'serviceStatus' }, // v2.976 — 중앙 · 엣지 공용(자기 몫 서버만)
   { key: 'collect.isidu', label: '아이실론 디렉터리 사용량 조사', group: 'collect', mod: '../isidu/poller.js', fn: 'isiduPollerStatus' }, // v2.736 — 중앙·엣지 공용(자기 몫 대상만)
+  { key: 'collect.ping', label: 'Ping 연속 측정', group: 'collect', mod: '../ping/monitor.js', fn: 'pingMonitorStatus' }, // v2.964 — 대상마다 쉬지 않는 루프 · 요약 주기 · 마지막 저장(중앙·엣지 공용)
   { key: 'collect.veeam', label: 'Veeam 백업 상태 수집', group: 'collect', mod: '../veeam/poller.js', fn: 'veeamPollerStatus' }, // v2.751 — 중앙·엣지 공용(자기 몫 서버만)
   { key: 'collect.veeamSnap', label: 'Veeam 계정 이벤트 전용 수집', group: 'collect', mod: '../veeam/snapCollector.js', fn: 'veeamSnapCollectorStatus' }, // v2.765 — 직접 수집 vCenter 의 Veeam 계정 이벤트만(로그 폴러가 밀려도 백업 시도는 최신)
   { key: 'collect.pdu', label: 'PDU 수집', group: 'collect', mod: '../pdu/poller.js', fn: 'pduPollerStatus' },
@@ -130,6 +138,7 @@ export const STATUS_SPEC = Object.freeze([
    *   앞의 셋은 상태 export 자체가 없어 `catch { return null; }` 로 **무음 실패**하고 있었다.
    */
   { key: 'push.ping', label: 'Ping 위임', group: 'push', mod: '../agent/pingWorker.js', fn: 'pingWorkerStatus' },
+  { key: 'push.focusMon', label: '서버 집중 모니터링 수집 · 동기화', group: 'push', mod: '../agent/focusMonWorker.js', fn: 'focusMonWorkerStatus' }, // v2.976
   { key: 'push.veeamRun', label: 'Veeam 백업 실행 대행', group: 'push', mod: '../agent/veeamRunWorker.js', fn: 'veeamRunWorkerStatus' }, // v2.818
   { key: 'push.bareosOp', label: 'Bareos 법인 Director 대행', group: 'push', mod: '../agent/bareosOpWorker.js', fn: 'bareosOpWorkerStatus' }, // v2.824
   { key: 'collect.bareos', label: 'Bareos 백업 상태 조회', group: 'collect', mod: '../bareos/poller.js', fn: 'pollerStatus' }, // v2.820 — Director 미설정이면 접속하지 않고 configured:false
@@ -170,11 +179,17 @@ export const STATUS_SPEC = Object.freeze([
    */
   { key: 'service.mail', label: '메일 발송(알림)', group: 'service', mod: '../mail/service.js', fn: 'mailStatus' },
   { key: 'service.runtime', label: 'Node 런타임 호환성', group: 'service', mod: '../util/runtimeCheck.js', fn: 'runtimeStatus' }, // 2026-10-09 검토 I-06
+  // 127회차: 인증 정지 기록 파일을 못 읽는 도구 — 수집은 법인 엣지가 하므로 중앙이 엣지의 이 상태를 볼 수 있어야 한다(값: 파일 기본 이름 · 오류 코드 · 지문 수 — 비밀 · 대상 id 없음).
+  //   util/authGuard.js 는 store.js 등이 부팅에 import 한다(캐시 적중 — 새 타이머 없음).
+  { key: 'service.authStops', label: '인증 정지 기록 파일', group: 'service', mod: '../util/authGuard.js', fn: 'authGuardFilesStatus' },
   // v2.871: 이슈 알림 — 묶음 발송 수·실패·주소 없는 사람 수·대기 인원(계정명·주소 없음). 엣지 포탈도 자기 이슈 알림을 보낸다.
   { key: 'service.issueNotify', label: '이슈 알림(메일·팀 채팅)', group: 'service', mod: '../issues/notify.js', fn: 'issueNotifyStatus' },
   // v2.908: 이슈 자동화 규칙(위키 체크 · 상위 검토 · P0 채팅 실행 수 · 실패) · 다른 알람/백업 실패 → 이슈 자동 등록(만든 수 · 상한 · 실패). 계정명 · 주소 없음.
   { key: 'service.issueAutomation', label: '이슈 자동화 규칙', group: 'service', mod: '../issues/automation.js', fn: 'automationStatus' },
   { key: 'service.issueAlertAuto', label: '다른 알람 → 이슈 자동 등록', group: 'service', mod: '../issues/alertIssues.js', fn: 'alertIssuesStatus' },
+  { key: 'service.sanStorageNotify', label: 'SAN 스토리지 성능 알림', group: 'service', mod: '../sanswitch/storagePerfNotify.js', fn: 'storagePerfNotifyStatus' }, // v2.953 — 중앙만(엣지는 보내지 않음 · 상태는 꺼짐으로 보고)
+  { key: 'service.storageInspectSchedule', label: 'PowerScale 주간 점검 회차 · 보고서', group: 'service', mod: '../storage/inspect/schedule.js', fn: 'inspectScheduleStatus' }, // v2.965 — 중앙만(엣지는 edge:true)
+  { key: 'service.sanStorageReport', label: 'SAN 스토리지 성능 월간 보고서', group: 'service', mod: '../sanswitch/storagePerfReportMail.js', fn: 'storagePerfReportStatus' }, // v2.955 — 알림과 같은 짝(인자 없이 부르면 지금 시각)
 ]);
 
 /** 표의 키 집합 — 중앙 수신이 모르는 키를 조용히 받아들이지 않게 한다. */

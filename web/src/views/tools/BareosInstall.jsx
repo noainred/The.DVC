@@ -10,7 +10,9 @@ import {
   RUNNING_UNKNOWN_OK_LABEL, runningUnknown, volumesSizeText, okOrThrow, rollbackCauseText,
   bundleFromText, importDirStateText, bundleWhereText, bundleStateView, bundleSourceHelp,
   canLink, linkChoices, linkDoneText, isSshAuthFail,
+  sharedIdsOf, sharedAckMatches, SHARED_ACK_LABEL,   // 53회차 N4 · 반증 E1
 } from './bareosInstallText.js';
+import { copyText as copyToClipboard } from '../../util/copyText.js';   // v3.10.6: HTTP 포탈에서도 복사(Clipboard API → execCommand 폴백 · 실패는 false)
 
 /**
  * Bareos 완전 설치(v2.844 · 설정 탭 — 전 법인 범위 관리자만 보인다).
@@ -36,7 +38,7 @@ function Msg({ m }) {
   if (!m) return null;
   return <div className={`banner ${m.ok === false ? 'bad' : m.ok === 'warn' ? 'warn' : 'ok'}`} role={m.ok === false ? 'alert' : 'status'} style={{ marginTop: 10, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}><BoldText text={m.text} /></div>;
 }
-const copyText = (t, say) => { try { navigator.clipboard.writeText(t).then(() => say({ ok: true, text: '복사했습니다.' }), () => say({ ok: false, text: '복사하지 못했습니다 — 직접 선택해 복사하세요.' })); } catch { say({ ok: false, text: '복사하지 못했습니다.' }); } };
+const copyText = (t, say) => { copyToClipboard(t).then((ok) => say(ok ? { ok: true, text: '복사했습니다.' } : { ok: false, text: '복사하지 못했습니다 — 직접 선택해 복사하세요.' }), () => say({ ok: false, text: '복사하지 못했습니다 — 직접 선택해 복사하세요.' })); };
 
 function Stepper({ step, reinstall }) {
   const steps = [['targets', '대상 고르기'], ...(reinstall ? [['reset', '초기화 확인']] : []), ['precheck', '사전 점검'], ['plan', '설치 계획'], ['run', '실행'], ['finish', '마무리']];
@@ -74,7 +76,8 @@ function BundleCard({ ov, onReload, say, writable }) {
         <div style={{ ...ROW, flex: '0 1 auto', minWidth: 0 }}>
           <button type="button" className="login-btn" style={BTN} disabled={busy || !writable || (f && !f.doneAt)} onClick={() => act(async () => okOrThrow(await postJson(`${P}/bundle/fetch`, {})), '번들 받기를 시작했습니다 — 아래에 진행이 보입니다.')}>번들 받기(최신)</button>
           <button type="button" className="logout-btn" style={BTN} disabled={busy || !writable} onClick={() => act(async () => okOrThrow(await postJson(`${P}/bundle/rescan`, {})), '번들 폴더를 다시 확인했습니다(서명·해시).')}>다시 확인</button>
-          {src && <button type="button" className="logout-btn" style={BTN} disabled={busy || !writable} onClick={() => setEdit((e) => (e ? null : { baseUrl: src.savedUrl || '', importDir: src.importDir || '' }))}>{edit ? '받는 곳 닫기' : '받는 곳 · 디렉터리 바꾸기'}</button>}
+          {/* 112회차: 설정 파일 읽기 오류 동안 savedUrl · importDir 은 저장된 값이 아니라 빈 값이다 — 그 값으로 편집 칸을 열지 않는다(다시 읽힌 뒤의 저장이 받는 곳을 지운다). */}
+          {src && <button type="button" className="logout-btn" style={BTN} disabled={busy || !writable || (src.readError === true && !edit)} onClick={() => setEdit((e) => (e ? null : { baseUrl: src.savedUrl || '', importDir: src.importDir || '' }))}>{edit ? '받는 곳 닫기' : '받는 곳 · 디렉터리 바꾸기'}</button>}
         </div>
       </div>
       {edit && src && (
@@ -91,7 +94,7 @@ function BundleCard({ ov, onReload, say, writable }) {
             <BoldText text={bundleSourceHelp(src)} />
           </div>
           <div style={{ ...ROW, marginTop: 8 }}>
-            <button type="button" className="login-btn" style={BTN} disabled={busy || !writable} onClick={() => act(async () => { okOrThrow(await putJson(`${P}/bundle/source`, { baseUrl: edit.baseUrl.trim(), importDir: edit.importDir.trim() }), '저장하지 못했습니다.'); setEdit(null); }, '번들 받는 곳 · 서버 디렉터리를 저장했습니다.')}>저장</button>
+            <button type="button" className="login-btn" style={BTN} disabled={busy || !writable || src.readError === true} onClick={() => act(async () => { okOrThrow(await putJson(`${P}/bundle/source`, { baseUrl: edit.baseUrl.trim(), importDir: edit.importDir.trim() }), '저장하지 못했습니다.'); setEdit(null); }, '번들 받는 곳 · 서버 디렉터리를 저장했습니다.')}>저장</button>
             <button type="button" className="logout-btn" style={BTN} disabled={busy} onClick={() => setEdit(null)}>취소</button>
           </div>
         </div>
@@ -232,6 +235,8 @@ function ResetStep({ t, pre, plan, setPlan, onBack, onNext, onRecheck, busy }) {
   const vols = (pre?.volumes || []).filter((v) => !v.missing);
   const volSize = volumesSizeText(vols);   // v2.846 U-12: 못 읽은 크기를 0 으로 더하지 않는다('일부 모름')
   const nameOk = !r.volumes || String(r.confirmName || '').trim() === String(t.vcenterName).trim();
+  const shared = sharedIdsOf(pre);   // 53회차 N4: 함께 쓰는 다른 vCenter — 따로 확인
+  const sharedOk = !shared.length || sharedAckMatches(r.sharedAck, pre);   // 반증 E1: 본 목록에 묶인 확인
   return (
     <div className="card" style={CARD}>
       <div style={ROW}><b style={{ flex: '1 1 auto' }}>초기화 확인 — {t.vcenterName}</b><Badge cls="amber">초기화 후 재설치</Badge>
@@ -244,7 +249,7 @@ function ResetStep({ t, pre, plan, setPlan, onBack, onNext, onRecheck, busy }) {
             <dt>실행 중 작업</dt><dd style={{ margin: 0 }}>{pre.items.find((i) => i.key === 'running')?.detail || '—'}</dd>
             <dt>카탈로그 DB</dt><dd style={{ margin: 0 }}>{pre.catalogBytes == null ? '읽지 못함(PostgreSQL 꺼짐 또는 DB 없음)' : `bareos · ${bytesText(pre.catalogBytes)}`}</dd>
             <dt>백업 볼륨</dt><dd style={{ margin: 0 }}>{vols.length ? vols.map((v) => `${v.path} · ${v.files == null ? '파일 수 —' : `파일 ${v.files}개`} · ${bytesText(v.bytes)} · 마지막 ${whenText(v.lastAt)}`).join(' / ') : '설정에서 읽은 볼륨 경로 없음'}</dd>
-            <dt>포탈 쪽</dt><dd style={{ margin: 0 }}>{t.resetUnregistered ? '등록된 Director 없음 — 포탈에서 지우는 것은 없습니다(이 서버가 포탈의 어떤 Director 로든 등록돼 있거나 같은 서버에 다른 법인의 설치 작업이 있으면 서버가 거부합니다)' : <>Director 등록 ‘{t.director?.name}’ · 이 법인의 백업 대상 {pre.ledgerTargets == null ? '—' : `${pre.ledgerTargets}개`}(초기화하면 Director 의 잡 설정이 지워집니다 — 포탈 목록은 남고, 마무리 화면이 다시 등록하는 방법을 안내합니다)</>}</dd>
+            <dt>포탈 쪽</dt><dd style={{ margin: 0 }}>{t.resetUnregistered ? '등록된 Director 없음 — 포탈에서 지우는 것은 없습니다(이 서버가 포탈의 어떤 Director 로든 등록돼 있거나 같은 서버에 다른 법인의 설치 작업이 있으면 서버가 거부합니다)' : <>Director 등록 ‘{t.director?.name}’ · 이 서버 Bareos 의 백업 대상 {pre.ledgerTargets == null ? '—' : `${pre.ledgerTargets}개`}(초기화하면 Director 의 잡 설정이 지워집니다 — 포탈 목록은 남고, 마무리 화면이 다시 등록하는 방법을 안내합니다){(pre.sharedVcenters || []).length > 0 && <b style={{ color: '#f87171' }}> · 이 서버의 Bareos 를 함께 쓰는 다른 vCenter {pre.sharedVcenters.length}곳({pre.sharedVcenters.map((x) => `${x.vcenterId} ${x.targets}개`).join(', ')})의 잡 설정 · 실행 기록도 함께 지워집니다</b>}</>}</dd>
           </dl>
           <div className="card" style={DEEP}>
             <label style={{ ...ROW, fontSize: 13 }}><input type="checkbox" checked disabled /> <b>패키지 · 설정 삭제</b> <Badge cls="gray">필수 · 끌 수 없음</Badge></label>
@@ -260,13 +265,19 @@ function ResetStep({ t, pre, plan, setPlan, onBack, onNext, onRecheck, busy }) {
               </div>
             )}
           </div>
+          {shared.length > 0 && (
+            <div className="banner bad" style={{ marginTop: 10, fontSize: 12.5 }}>
+              <b>다른 서비스도 함께 지워집니다.</b> 이 Director 를 vCenter {shared.length}곳({shared.slice(0, 5).join(', ')}{shared.length > 5 ? ' …' : ''})이 함께 씁니다 — 초기화하면 그 vCenter 들의 잡 설정 · 실행 기록{r.volumes ? ' · 백업 볼륨' : ''}도 지워집니다.
+              <label style={{ ...ROW, fontSize: 13, marginTop: 6 }}><input type="checkbox" checked={sharedOk} onChange={(e) => set({ sharedAck: e.target.checked ? shared : false })} /> {SHARED_ACK_LABEL}</label>
+            </div>
+          )}
           <div className="banner" style={{ marginTop: 10, fontSize: 12.5 }}>실행 화면 맨 앞에 <b>0 기존 제거</b> 단계가 붙습니다 — 지운 것은 되돌릴 수 없어, 이 단계가 실패하면 되돌리지 않고 남은 것을 보인 뒤 이어서 다시 합니다.</div>
           <div style={{ ...ROW, marginTop: 10 }}>
             <label style={{ ...ROW, flex: '1 1 auto', fontSize: 13 }}><input type="checkbox" checked={!!r.ack} onChange={(e) => set({ ack: e.target.checked })} /> 위 항목을 지우는 것을 확인했습니다</label>
             <button type="button" className="logout-btn" onClick={onBack}>← 대상 고르기로</button>
-            <button type="button" className="login-btn" disabled={!r.ack || !nameOk} onClick={onNext}>초기화하고 재설치 계획으로 →</button>
+            <button type="button" className="login-btn" disabled={!r.ack || !nameOk || !sharedOk} onClick={onNext}>초기화하고 재설치 계획으로 →</button>
           </div>
-          {(!r.ack || !nameOk) && <div className="muted" style={{ fontSize: 12, textAlign: 'right', marginTop: 4 }}>필요: {!r.ack ? '확인 체크' : '법인 이름 일치'}</div>}
+          {(!r.ack || !nameOk || !sharedOk) && <div className="muted" style={{ fontSize: 12, textAlign: 'right', marginTop: 4 }}>필요: {!r.ack ? '확인 체크' : !nameOk ? '법인 이름 일치' : '함께 쓰는 vCenter 확인 체크'}</div>}
         </>
       )}
     </div>
@@ -291,9 +302,10 @@ function PrecheckStep({ pre, onRecheck, onBack, onNext, onReset, canReset, busy 
           <button type="button" className="login-btn" style={BTN} disabled={busy} onClick={onReset}>초기화 후 재설치로 진행…</button>
         </div>
       )}
+      {pre?.bindIssue && <div className="banner bad" style={{ marginTop: 10, fontSize: 12.5 }}>{pre.bindIssue}</div>}
       <div style={{ ...ROW, marginTop: 10, justifyContent: 'flex-end' }}>
         <button type="button" className="logout-btn" onClick={onBack}>← 앞으로</button>
-        <button type="button" className="login-btn" disabled={!pre || pre.blocked} onClick={onNext}>{pre?.blocked ? '필요: ✗ 조치' : '설치 계획으로 →'}</button>
+        <button type="button" className="login-btn" disabled={!pre || pre.blocked || !!pre.bindIssue} onClick={onNext}>{pre?.blocked ? '필요: ✗ 조치' : pre?.bindIssue ? 'Director 묶음 확인 필요' : '설치 계획으로 →'}</button>
       </div>
     </div>
   );

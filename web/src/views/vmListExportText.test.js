@@ -72,3 +72,23 @@ describe('v2.798 VM 목록 내보내기(v2.800 백업 현황 › Detail 백업 �
     expect(src).not.toMatch(/multi|partRows/, 'v2.800 — 파티션 한 줄 반복은 없앴다');
   });
 });
+
+// 113회차 메인: 못 읽음 안내 — 읽기 오류(원본 그대로 · 보존본 없음)와 손상(보존본 있음)을 가른다. 세 화면(VM 목록 내보내기 · VM 정보 내보내기 · EM 매핑)이 이 문구 하나를 쓴다.
+describe('unreadableNote — 읽기 오류 ≠ 손상', () => {
+  it('못 읽지 않았으면 빈 문구', () => {
+    expect(T.unreadableNote(null, '저장값 파일을 읽지 못해 저장할 수 없습니다')).toBe('');
+    expect(T.unreadableNote({ def: null }, 'x')).toBe('');
+  });
+  it('손상이면 보존본을 말한다', () => {
+    const t = T.unreadableNote({ unreadable: true }, '저장값 파일을 읽지 못해 저장할 수 없습니다');
+    expect(t).toMatch(/손상 사본은 설정 폴더에 남았습니다/);
+    expect(t).not.toMatch(/읽기 오류/);
+  });
+  it('읽기 오류면 없는 보존본을 말하지 않고 원본이 그대로임을 말한다', () => {
+    const t = T.unreadableNote({ unreadable: true, readError: true }, '매핑 파일을 읽지 못했습니다 — 저장하지 않습니다');
+    expect(t).toMatch(/^매핑 파일을 읽지 못했습니다 — 저장하지 않습니다\(읽기 오류/);
+    expect(t).toMatch(/원본은 그대로/);
+    expect(t).not.toMatch(/손상 사본/);
+    expect(t).not.toMatch(/`/);
+  });
+});

@@ -71,6 +71,18 @@ vp_purge_user() {
 }
 # vp_prefix_is_install <prefix> — rm -rf 대상이 이 포탈의 설치본(앱 진입점 또는 번들 Node 런타임)인가.
 vp_prefix_is_install() { [[ -f "$1/app/server/src/index.js" || -x "$1/runtime/node/bin/node" ]]; }
+# vp_note_sibling_backups <prefix> — 설치 폴더 **옆**의 '<prefix>.bak.*' 는 지우지 않고 알리기만 한다(109회차 A-1).
+#   예전에는 'rm -rf "$PREFIX" "$PREFIX".bak.*' 로 함께 지웠다. 이 포탈의 백업은 설치 폴더 **안**(<prefix>/app.bak.<시각> — install.sh ·
+#   앱 내 업그레이드)에만 생기므로 그 글롭에 걸리는 것은 관리자가 손으로 떠 둔 사본(cp -a /opt/vmware-portal /opt/vmware-portal.bak.<날짜>)
+#   뿐이었다 — 설치본인지 확인도 없이(위 vp_prefix_is_install 은 <prefix> 만 본다) 조용히 지워졌다.
+vp_note_sibling_backups() {
+  local p="$1" b
+  for b in "$p".bak.*; do
+    [[ -e "$b" || -L "$b" ]] || continue
+    echo "    참고: $b 는 지우지 않았습니다 — 이 포탈이 만든 것이 아닙니다(포탈의 백업은 설치 폴더 안 app.bak.<시각> 이었습니다). 필요 없으면 직접 지우세요."
+  done
+  return 0
+}
 
 [[ $EUID -eq 0 ]] || { echo "root 권한으로 실행하세요 (sudo)." >&2; exit 1; }
 
@@ -127,7 +139,8 @@ if [[ -d "$TOOLS_DIR" ]]; then rm -rf -- "$TOOLS_DIR" && echo "==> root 소유 �
 
 if vp_prefix_is_install "$PREFIX"; then
   echo "==> 앱/런타임 제거: $PREFIX"
-  rm -rf "$PREFIX" "$PREFIX".bak.* 2>/dev/null || true
+  rm -rf "$PREFIX" 2>/dev/null || true
+  vp_note_sibling_backups "$PREFIX"
 else
   echo "⚠ $PREFIX 에 포탈 설치본(app/server/src/index.js 또는 runtime/node)이 없어 지우지 않습니다 — 경로를 확인한 뒤 직접 정리하세요." >&2
 fi

@@ -108,7 +108,8 @@ test('⑤ 라우트 종류 · 권한 · 상한 · 데모 · 응답 사유 칸 ·
   assert.ok(VCINFO_KINDS.includes('dvpg'));
   assert.equal(VCINFO_PERM.dvpg, 'inv.hosts');
   assert.equal(VCINFO_REFRESH_MS.dvpg, 6 * 3_600_000);
-  const body = vcInfoBody('dvpg', 'vc-a', { at: 1, items: [{ ref: 'dvportgroup-1' }], lagError: 'x', error: null });
+  // 결정(56~75 남긴 것) 69 ③: lagError 원문은 전체 범위 관리자(rawErrors)만 — 칸이 실리는지를 보는 시험이라 rawErrors 를 넘긴다(가린 판본은 decideG1a)
+  const body = vcInfoBody('dvpg', 'vc-a', { at: 1, items: [{ ref: 'dvportgroup-1' }], lagError: 'x', error: null }, { rawErrors: true });
   assert.deepEqual([body.items.length, body.lagError, body.dvsError, body.limits.max], [1, 'x', null, (await import('../src/vcinfo/parse.js')).DVPG_MAX]);
   const { generateSnapshot } = await import('../src/mock/generator.js');
   const { mockVcInfo } = await import('../src/mock/vcinfo.js');

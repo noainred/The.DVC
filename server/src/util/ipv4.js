@@ -54,6 +54,9 @@ export function strictIpv4Num(s) {
 
 /** CIDR·단일 IPv4 목록 항목(관리자 입력 — 느슨히 읽는다)과 정규형 대상 숫자의 일치. 항목이 IP 가 아니면 null. */
 export function cidrMatch(n, entry) {
+  // v3.10.3: n 이 IPv4 수(0~2^32-1 정수)가 아니면 판정하지 않는다. 예전에는 null · NaN 이 비트 연산에서 0(= 0.0.0.0)이 되어
+  //   '0.0.0.0/0' · '0.0.0.0/8' 과 **일치**했다 — 못 읽은 주소가 허용 목록을 통과하는 쪽으로 틀린다(호출부 5곳은 지금 n 을 먼저 거른다).
+  if (!(Number.isInteger(n) && n >= 0 && n <= 0xffffffff)) return null;
   const [base, bits] = String(entry ?? '').trim().split('/');
   const bn = ipToNum(base);
   if (bn == null) return null;

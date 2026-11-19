@@ -38,7 +38,7 @@ const EXAMPLE_SITES = [
   { id: 'vc-ap-northeast', name: 'vcenter-ap-northeast.corp.local' },
 ];
 
-/** v2.915: 목 vCenter 사이트의 베어메탈 대수(`bm`) — 사이트 표에 없는 id(테스트의 가짜 vCenter 등)는 null. */
+/** v3.26.0: 목 vCenter 사이트의 베어메탈 대수(`bm`) — 사이트 표에 없는 id(테스트의 가짜 vCenter 등)는 null. */
 export function mockSiteBareMetal(vcId) {
   const s = SITES.find((x) => x.id === String(vcId || ''));
   return s && Number.isFinite(s.bm) ? s.bm : null;
@@ -54,7 +54,7 @@ export function isMockVcenter(vc) {
 }
 
 /**
- * v2.915 — 고객 시연 규모(사용자 요청 2026-11-19 '30개 데이터 · 물리 서버 1,200대 중 650대 가상화 · 나머지 베어메탈'):
+ * v3.26.0 — 고객 시연 규모(사용자 요청 2026-11-19 '30개 데이터 · 물리 서버 1,200대 중 650대 가상화 · 나머지 베어메탈'):
  * 데이터센터(법인) 30곳 = vCenter 가 있는 20곳(아래) + vCenter 없는 베어메탈 전용 10곳(`BM_ONLY_SITES`).
  * ESXi 호스트 합 **650대**(테스트가 고정) · VM 은 호스트당 약 9대(운영 비율 — 658 호스트 · 5,850 VM).
  * 베어메탈 550대는 30곳 전부에 나눈다 — `bm` 이 그 법인의 베어메탈 대수(이 표 310 + 베어메탈 전용 240 = 550,
@@ -82,13 +82,13 @@ const BASE_SITES = [
   { id: 'vc-cn-south', name: 'vcenter-cn-south-01', city: 'Shenzhen', country: 'China', region: '중국', lat: 22.54, lon: 114.06, hosts: 42, bm: 16 },
   // 바르샤바는 한국에서 RTT 800ms 를 넘는 사이트(운영 환경 — CLAUDE.md)를 흉내 낸다.
   { id: 'vc-pl-central', name: 'vcenter-pl-central-01', city: 'Warsaw', country: 'Poland', region: '유럽', lat: 52.23, lon: 21.01, hosts: 30, bm: 14 },
-  { id: 'vc-uk-south', name: 'vcenter-uk-south-01', city: 'London', country: 'United Kingdom', region: '유럽', lat: 51.51, lon: -0.13, hosts: 32, bm: 15 },
+  { id: 'vc-uk-south', name: 'vcenter-uk-south-01', city: 'London', country: 'United Kingdom', region: '유럽', lat: 51.49, lon: -0.13, hosts: 32, bm: 15 },
   { id: 'vc-us-central', name: 'vcenter-us-central-01', city: 'Dallas', country: 'USA', region: '북미', lat: 32.78, lon: -96.80, hosts: 35, bm: 16 },
   { id: 'vc-mx-north', name: 'vcenter-mx-north-01', city: 'Monterrey', country: 'Mexico', region: '북미', lat: 25.69, lon: -100.32, hosts: 24, bm: 12 },
 ];
 
 /**
- * v2.915 — vCenter 가 없는 데이터센터(법인) 10곳 — 베어메탈·스토리지·네트워크·PDU 만 있다(공장 MES · AI/HPC · DR · 물류).
+ * v3.26.0 — vCenter 가 없는 데이터센터(법인) 10곳 — 베어메탈·스토리지·네트워크·PDU 만 있다(공장 MES · AI/HPC · DR · 물류).
  * `mock/demo/pdu.js demoCorps` 가 DataCenter 로 만들고(id `dc-<slug>`), 베어메탈·스토리지 데모가 이 법인에 장비를 둔다.
  * vCenter 가 아니므로 `mockVcenterIdentities`·`isMockVcenter` 에는 들어가지 않는다.
  */
@@ -113,7 +113,7 @@ export const BM_ONLY_SITES = Object.freeze([
  * 2,242 VM** 이라 그 규모를 재는 수단이 아예 없었다. v2.576 감사가 성능을 "확정 결함 0건" 으로
  * 보고하면서 *"측정은 목 데이터 기준이다"* 를 한계로 적어야 했던 것이 그 때문이다.
  * `MOCK_SCALE=3` 이면 33 vCenter · 558 호스트 · 약 6,700 VM 으로 **운영 규모를 넘어서** 측정된다.
- * v2.915: 기본 데모 자체가 시연 규모(20 vCenter · 650 호스트 · 약 6,000 VM)가 됐다 — 기본 1 이 이미 운영 규모다.
+ * v3.26.0: 기본 데모 자체가 시연 규모(20 vCenter · 650 호스트 · 약 6,000 VM)가 됐다 — 기본 1 이 이미 운영 규모다.
  *
  * ⚠ 기본값은 **1** 이다 — 데모·CI 의 기존 수치(테스트가 고정하는 vCenter 20개)를 바꾸지 않는다.
  * ⚠ 사본 id·name 은 **접미사로만** 구분한다(`-c2`). `mockVcenterList()`·`isMockVcenter()` 가
@@ -167,13 +167,32 @@ const HBA_FC = [
   { model: 'QLogic QLE2692 16Gb FC', speeds: [16, 8] },
 ];
 const HBA_ISCSI = { model: 'Broadcom 57414 25GbE iSCSI', speeds: [25, 25] };
-function wwn(idx, p) { const h = (idx * 131 + p * 17).toString(16).padStart(2, '0'); return `20:00:00:24:ff:${h}:${(p).toString(16).padStart(2, '0')}:${(idx % 256).toString(16).padStart(2, '0')}`; }
-function mkHbas(idx) {
+// v2.935(C-①): 데모 WWN 은 사이트 · 호스트 이름으로 만든다 — 예전 식(idx 만)은 사이트마다 같은 WWN 이 반복되고(호스트 0번이 28개 사이트에 같은 WWN)
+//   idx 가 크면 한 바이트가 3자리 16진이 되어 WWN 형식이 깨졌다(데모 SAN 이 그 호스트를 합성 WWN 으로 바꿔 인벤토리 HBA 와 어긋났다).
+function wwn(idx, p, salt = '') {
+  let x = 2166136261 >>> 0;
+  for (const ch of `${salt}|${idx}|${p}`) x = Math.imul(x ^ ch.charCodeAt(0), 16777619) >>> 0;
+  x = Math.imul(x ^ (x >>> 15), 2246822507) >>> 0; x = Math.imul(x ^ (x >>> 13), 3266489909) >>> 0; x = (x ^ (x >>> 16)) >>> 0;   // 섞기(비슷한 입력의 충돌을 줄인다)
+  const b = [(x >>> 24) & 255, (x >>> 16) & 255, (x >>> 8) & 255, (x & 0xfe) | (p & 1)].map((v) => v.toString(16).padStart(2, '0'));
+  return `20:00:00:24:${b.join(':')}`;
+}
+/** v2.935(C-③): 데모 호스트 물리 NIC(soapClient parsePnics 와 같은 모양) — 업링크 매칭 · CVP 위치 · vmnic 카운터 데모가 NIC 이름 · MAC 을 쓴다.
+ *   예전 데모 호스트에는 NIC 목록이 없어 네트워크 카드가 '인벤토리에 없음' 이었다. MAC 은 사이트 · 호스트 이름으로 만든 결정적 값(가상값). */
+function mkPnics(idx, salt = '') {
+  return [0, 1, 2, 3].map((p) => {
+    let x = 2166136261 >>> 0;
+    for (const ch of `${salt}|nic|${p}`) x = Math.imul(x ^ ch.charCodeAt(0), 16777619) >>> 0;
+    const b = [(x >>> 16) & 255, (x >>> 8) & 255, x & 255].map((v) => v.toString(16).padStart(2, '0'));
+    return { device: `vmnic${p}`, mac: `b8:59:9f:${b.join(':')}`, speedMb: p < 2 ? 25000 : 10000, maxSpeedMb: p < 2 ? 25000 : 10000,
+      link: !(p === 3 && idx % 11 === 3), driver: p < 2 ? 'nmlx5_core' : 'ixgben', vendor: p < 2 ? 'Mellanox Technologies' : 'Intel Corporation', model: p < 2 ? 'ConnectX-4 Lx' : 'X710' };
+  });
+}
+function mkHbas(idx, salt = '') {
   const fc = HBA_FC[idx % HBA_FC.length];
   const hbas = fc.speeds.map((sp, p) => ({
     name: `vmhba${p + 1}`, type: 'FibreChannel', model: fc.model,
     speedGbps: idx % 23 === 0 && p === 1 ? Math.max(8, sp / 2) : sp, // a few links degraded
-    wwn: wwn(idx, p), status: 'online',
+    wwn: wwn(idx, p, salt), status: 'online',
   }));
   if (idx % 4 === 0) hbas.push({ name: 'vmhba64', type: 'iSCSI', model: HBA_ISCSI.model, speedGbps: HBA_ISCSI.speeds[0], wwn: '', status: 'online' });
   return hbas;
@@ -379,14 +398,15 @@ function mkSnapTree(i, n) {
   return out;
 }
 
-function mkVmDev(vm, dsNames = [], nets = []) {
+function mkVmDev(vm, dsNames = [], nets = [], siteNo = 0) {
   const i = vm.idx;
   const netAt = (k) => (nets.length ? nets[(i + k) % nets.length] : null);
   const nic = (k, label) => {
     const n = netAt(k);
     const dvs = n?.type === 'DISTRIBUTED_PORTGROUP';
     return { label, adapter: i % 29 === 0 ? 'E1000E' : 'VMXNET 3', backing: n ? (dvs ? 'dvs' : 'std') : 'other', net: n && !dvs ? n.name : null, netRef: n ? n.name : null,
-      mac: `00:50:56:${((i >> 8) & 0xff).toString(16).padStart(2, '0')}:${(i & 0xff).toString(16).padStart(2, '0')}:${(10 + k).toString(16).padStart(2, '0')}`,
+      // v2.935(C-③): 넷째 바이트에 사이트 번호 — 예전에는 사이트 안 순번만 써서 법인마다 같은 MAC 이 나왔고, 데모 CVP 위치가 다른 법인 것으로 덮였다(VM 위치 카드가 거의 '불일치').
+      mac: `00:50:56:${(siteNo & 0xff).toString(16).padStart(2, '0')}:${((i >> 7) & 0xff).toString(16).padStart(2, '0')}:${((((i & 0x7f) << 1) | (k & 1)) & 0xff).toString(16).padStart(2, '0')}`,
       connected: !(i % 31 === 0 && k === 0), startConnected: true };
   };
   const dsAt = (k, fb) => (dsNames.length ? dsNames[(i + k) % dsNames.length] : fb);
@@ -555,7 +575,7 @@ function buildBaseline() {
     }
 
     const vms = [];
-    // v2.915: 호스트당 7~11대(평균 약 9 — 운영 비율). v2.914 까지 8~16대.
+    // v3.26.0: 호스트당 7~11대(평균 약 9 — 운영 비율). v2.914 까지 8~16대.
     const vmCount = site.hosts * intBetween(7, 11);
     for (let v = 0; v < vmCount; v++) {
       const host = hosts[v % hosts.length];
@@ -664,7 +684,12 @@ export function generateSnapshot() {
         // v2.716: 서비스태그 — 예전엔 없어서 시리얼 조회 'ESXi 호스트' 가 0건이었다. iDRAC 데모 시드(seed.js)와 같은 규칙이라
         //   Dell 호스트는 자기 iDRAC 서버와 태그가 같다(다르면 hostMatch 가 '다른 장비' 로 본다 — v2.682 R3D-04).
         serviceTag: mockServiceTag(`${site.id}|${h.name}`),
-        hbas: mkHbas(h.idx),
+        // v3.6.0(IP 관리 재설계 묶음 다): vmk 주소(관리 · vMotion · 일부 vSAN)와 ESXi 에 설정된 호스트명 — 실수집 soapClient parseVmks · hostDnsName 과 같은 모양.
+        //   mgmtIp 는 싣지 않는다(목 원장 행 수를 바꾸지 않게 — 목 호스트 이름은 IP 가 아니라 원장에 호스트 행이 없다).
+        vmks: mkVmks(site, h.idx),
+        ...mkHostDns(site, h),
+        hbas: mkHbas(h.idx, `${site.id}|${h.name}`),
+        nics: mkPnics(h.idx, `${site.id}|${h.name}`),   // v2.935(C-③)
         gpus: mkGpus(h.idx, site),
         // v2.852: vSphere 데이터센터 이름(실수집 soapClient 와 같은 키) — VM 의 vcDcPath 와 같은 값. GPU 할당 계층의 '데이터센터' 단계.
         vcDatacenter: `DC-${site.id}`,
@@ -708,7 +733,7 @@ export function generateSnapshot() {
 
     // VMs
     const vmOrd = new Map(); // v2.653: 호스트별 VM 순번(mkVmGpu)
-    // v2.915: 호스트 찾기를 이름 색인으로(예전 `hosts.find` 는 VM 마다 전 사이트 호스트를 훑어 650 호스트 · 6,000 VM 에서 틱마다 수백만 번 비교했다).
+    // v3.26.0: 호스트 찾기를 이름 색인으로(예전 `hosts.find` 는 VM 마다 전 사이트 호스트를 훑어 650 호스트 · 6,000 VM 에서 틱마다 수백만 번 비교했다).
     const hostByName = new Map();
     for (const x of hosts) if (x.vcenterId === site.id && !hostByName.has(x.name)) hostByName.set(x.name, x);
     for (const vm of env.vms) {
@@ -747,7 +772,7 @@ export function generateSnapshot() {
         memUsagePct,
         ipAddress: powered ? mkIp(site, vm.idx) : null,
         ipAddresses: powered ? mkIps(site, vm.idx) : [],
-        dns: powered ? mkDns(site, vm.idx) : null,   // v2.695: VM 이 쓰는 DNS 서버(IP 대장에는 들어가지 않는다)
+        dns: powered ? mkDns(site, vm.idx, vm.name) : null,   // v2.695: VM 이 쓰는 DNS 서버(IP 대장에는 들어가지 않는다)
         folder: VM_FOLDERS[(vm.idx * 7 + site.id.length) % VM_FOLDERS.length],
         resourcePool: RES_POOLS[(vm.idx * 3) % RES_POOLS.length],
         // v2.820: Bareos 연동용 정확한 위치(vcenter/vmPlacement.js 와 같은 모양) — 데이터센터는 사이트별 1개, 폴더는 위 folder 의 '/' 경로.
@@ -776,13 +801,13 @@ export function generateSnapshot() {
         gpu: vm.idx % 17 === 0 ? null : mkVmGpu(hostState, vm.idx, ord), // 템플릿은 GPU 를 받지 않는다
         // v2.697(B10): 구성 속성·장치 위생 — 일부(idx%41)는 아직 수집 전(키 없음)이라 화면의 '수집 중' 을 보인다.
         // v2.906: 로컬 데이터스토어에는 그 호스트(마운트 목록의 한 대)의 VM 디스크만 — 예전에는 모든 호스트 VM 이 로컬 DS 에 놓여 마운트 카드가 '공유 호스트 24대' 였다(화면 판독)
-        ...(vm.idx % 41 === 0 ? {} : { cfg: mkVmCfg(vm, powered), dev: mkVmDev(vm, env.datastores.filter((d) => d.storageType !== 'local' || !env.hosts.length || env.hosts[d.idx % env.hosts.length]?.name === vm.host.name).map((d) => d.name), env.networks) }),
+        ...(vm.idx % 41 === 0 ? {} : { cfg: mkVmCfg(vm, powered), dev: mkVmDev(vm, env.datastores.filter((d) => d.storageType !== 'local' || !env.hosts.length || env.hosts[d.idx % env.hosts.length]?.name === vm.host.name).map((d) => d.name), env.networks, SITES.indexOf(site)) }),
         ...((() => { const pc = powered ? mkVmPerfc(vm.idx) : null; return pc ? { perfc: pc } : {}; })()),
       });
     }
 
     // Datastores
-    // v2.915: 데이터스토어 → 그 위에 디스크가 있는 VM 의 호스트(VM 순서) — 예전에는 데이터스토어마다 전 VM 을 다시 훑었다(같은 결과).
+    // v3.26.0: 데이터스토어 → 그 위에 디스크가 있는 VM 의 호스트(VM 순서) — 예전에는 데이터스토어마다 전 VM 을 다시 훑었다(같은 결과).
     const placedByDs = new Map();
     for (const v of vms) {
       if (v.vcenterId !== site.id || !v.host) continue;
@@ -872,6 +897,27 @@ function mkIp(site, idx) {
   const oct = Math.abs(Math.round(site.lat)) % 250;
   return `10.${oct}.${Math.floor(idx / 254) % 254}.${(idx % 253) + 1}`;
 }
+// v3.6.0(호스트명 대조 시연): 게스트 OS 호스트명 — 대부분 VM 이름과 같고, 17대에 1대는 OS 쪽 이름이 다르다(옛 이름). 이름이 없으면 예전 값.
+function guestHostName(name, idx) {
+  const n = String(name || '').toLowerCase();
+  if (!n) return `vm${idx}`;
+  return idx % 17 === 3 ? `${n}-old` : n;
+}
+// v3.6.0: ESXi vmk 주소(목). 관리(vmk0) 는 VM 대역과 겹치지 않는 10.<법인>.250.x, vMotion · vSAN 은 172.20 · 172.21.
+function mkVmks(site, idx) {
+  const oct = Math.abs(Math.round(site.lat)) % 250;
+  const last = (idx % 240) + 10;
+  const out = [{ dev: 'vmk0', ip: `10.${oct}.250.${last}`, mask: '255.255.255.0', pg: 'Management Network' },
+    { dev: 'vmk1', ip: `172.20.${oct}.${last}`, mask: '255.255.255.0', pg: 'vMotion' }];
+  if (idx % 3 === 0) out.push({ dev: 'vmk2', ip: `172.21.${oct}.${last}`, mask: '255.255.255.0', pg: '' });
+  return out;
+}
+// v3.6.0: ESXi 에 설정된 호스트명(목). 대부분 vCenter 이름과 같고, 일부는 옛 이름(대조 '다름' 시연) · 일부는 못 읽음(null).
+function mkHostDns(site, h) {
+  if (h.idx % 13 === 5) return { osHostName: null, osDomain: null };
+  const dom = `${site.id.replace(/^vc-/, '')}.corp.example`;
+  return { osHostName: h.idx % 11 === 4 ? `${h.name}-old` : h.name, osDomain: dom };
+}
 // Some VMs are multi-homed (mgmt + service + storage NIC). Returns 1-3 IPv4s.
 function mkIps(site, idx) {
   const ips = [mkIp(site, idx)];
@@ -881,7 +927,7 @@ function mkIps(site, idx) {
 }
 // v2.695: 게스트가 보고하는 DNS 설정(목). 사내 DNS 는 같은 법인 VM 1·2번의 IP(정체 대조가 VM 으로 찾게),
 //   일부는 공인 DNS·다른 법인 DNS·DHCP·NIC/OS 불일치·미보고(null)로 둔다.
-function mkDns(site, idx) {
+function mkDns(site, idx, name = '') {
   if (idx % 19 === 0) return null;                                   // Tools 가 DNS 를 보고하지 않음(모름)
   const corp = [mkIp(site, 1), mkIp(site, 2)];
   const dom = `${site.id.replace(/^vc-/, '')}.corp.example`;
@@ -890,7 +936,7 @@ function mkDns(site, idx) {
   else if (idx % 41 === 0) servers = ['168.126.63.1', '168.126.63.2'];
   else if (idx % 37 === 0) servers = ['10.0.0.53'];                  // 대장에 없는 주소
   const dhcp = idx % 7 === 0;
-  const stack = { servers, domain: dom, search: [dom, 'corp.example'], dhcp, hostName: `vm${idx}` };
+  const stack = { servers, domain: dom, search: [dom, 'corp.example'], dhcp, hostName: guestHostName(name, idx) };
   const nicServers = idx % 31 === 0 ? [corp[1], '1.1.1.1'] : servers;   // NIC 설정 ≠ OS 실제
   return { servers: [...new Set([...servers, ...nicServers])].slice(0, 8), stack,
     nics: [{ network: 'VM Network', mac: `00:50:56:${(idx >> 8 & 255).toString(16).padStart(2, '0')}:${(idx & 255).toString(16).padStart(2, '0')}:01`,

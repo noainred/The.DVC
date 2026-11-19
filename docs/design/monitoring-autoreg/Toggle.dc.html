@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Monitoring 트리 — 여러 개 선택 · 사용/중지 스위치 (1440)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a111c;color:#c8d6e8;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#9fcaff}a:hover{color:#cfe4ff}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+.pc-mode{display:inline-flex;align-items:center;gap:7px;padding:7px 16px;border-radius:999px;border:1px solid #1e3350;background:#0f1a2b;color:#9fb4cc;font:inherit;font-size:13px}
+.pc-mode.on{background:#1668d8;color:#fff;font-weight:700;border-color:#1668d8}
+.seg{display:inline-flex;border:1px solid #1e3350;border-radius:999px;overflow:hidden;background:#0f1a2b}
+.seg button{padding:7px 16px;border:0;background:transparent;color:#9fb4cc;font:inherit;font-size:13px}
+.seg button.on{background:#1668d8;color:#fff;font-weight:700}
+.pc-card{background:#0f1a2b;border:1px solid #1c2c42;border-radius:8px;padding:11px 14px;border-top:2px solid #1e3350;display:flex;flex-direction:column;gap:3px;min-width:0}
+.pc-card-label{font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.08em;color:#8ea4bd}
+.pc-card-value{font-family:"JetBrains Mono",monospace;font-size:26px;font-weight:600;color:#dbe7f5;line-height:1.15}
+.pc-card.b{border-top-color:#4b9bff}.pc-card.g{border-top-color:#3ddc84}.pc-card.g .pc-card-value{color:#3ddc84}.pc-card.a{border-top-color:#f0a92e}.pc-card.a .pc-card-value{color:#f0a92e}.pc-card.r{border-top-color:#ff5c5c}.pc-card.r .pc-card-value{color:#ff5c5c}.pc-card.o{border-top-color:#6b7f99}
+.pc-card-note{font-size:11px;color:#8ea4bd}
+.pc-panel{background:#0f1a2b;border:1px solid #1c2c42;border-radius:8px;overflow:hidden}
+.pc-panel-head{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;height:22px;font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.1em;color:#8ea4bd}
+.pc-btn{padding:6px 12px;border:1px solid #1e3350;border-radius:6px;background:#0f1a2b;color:#c8d6e8;font:inherit;font-size:12.5px;white-space:nowrap}
+.pc-btn.accent{border-color:#2b6fc0;background:#153357;color:#9fcaff}
+.pc-btn.primary{border-color:#1668d8;background:#1668d8;color:#fff;font-weight:600}
+.pc-chip{padding:5px 11px;border-radius:14px;border:1px solid #1e3350;background:transparent;color:#8ea4bd;font:inherit;font-size:11.5px;font-family:"JetBrains Mono",monospace}
+.pc-chip.on{border-color:#4b9bff;background:#153357;color:#9fcaff}
+.inp{height:30px;padding:0 10px;border-radius:6px;border:1px solid #1e3350;background:#0a141f;color:#c8d6e8;font:inherit;font-size:12.5px}
+.inp::placeholder{color:#8ea4bd}
+.row{display:flex;align-items:center;gap:7px;height:27px;padding:0 12px;font-size:12.5px;color:#cfe0f2;border-left:3px solid transparent;white-space:nowrap;box-sizing:border-box}
+.row.sel{background:#14497f;border-left-color:#4b9bff;color:#fff}
+.row.picked{background:#0f2440}
+.row input{margin:0;width:14px;height:14px;accent-color:#4b9bff;flex:none}
+.row .tg{width:13px;height:13px;flex:none;display:grid;place-items:center;font-size:10px;color:#8ea4bd;border:1px solid #24405f;border-radius:3px}
+.dot{width:9px;height:9px;border-radius:50%;flex:none;display:inline-block}
+.dot.ok{background:#3ddc84}.dot.warn{background:#f0a92e}.dot.bad{background:#ff5c5c;box-shadow:0 0 6px #ff5c5c}.dot.off{background:#7b8fa8}
+.badge{margin-left:auto;font-family:"JetBrains Mono",monospace;font-size:10px;color:#ff8b8b;background:#2a1216;border:1px solid #5f1d1d;border-radius:4px;padding:1px 6px}
+.origin{display:inline-flex;align-items:center;font-size:10px;font-family:"JetBrains Mono",monospace;color:#9fcaff;border:1px solid #1d4ed8;background:#0e1a33;border-radius:4px;padding:0 5px;height:16px}
+.offtag{display:inline-flex;align-items:center;font-size:10px;font-family:"JetBrains Mono",monospace;color:#b8c7d9;border:1px solid #3a4c63;background:#162233;border-radius:4px;padding:0 5px;height:16px}
+.cnt{margin-left:auto;font-family:"JetBrains Mono",monospace;font-size:10.5px;color:#8ea4bd}
+.cnt.pick{color:#9fcaff}
+.thead,.tr{display:grid;grid-template-columns:26px minmax(200px,1fr) 104px 84px minmax(130px,170px) minmax(150px,200px)}
+.thead{background:#132132}
+.th{padding:9px 12px;font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.06em;color:#8ea4bd}
+.th.r{text-align:right}
+.grp{display:flex;align-items:center;gap:12px;height:32px;padding:0 12px;background:#14497f;color:#dceaff;font-family:"JetBrains Mono",monospace;font-size:11.5px;box-sizing:border-box}
+.grp.off{background:#1a2c44;color:#b8c7d9}
+.grp .meta{margin-left:auto;color:#9fcaff;white-space:nowrap}
+.grp.off .meta{color:#9fb4cc}
+.tr{border-bottom:1px solid #131f30;height:32px;align-items:center}
+.tr > div{padding:0 12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tr.off .td-name,.tr.off .td-method{color:#8ea4bd}
+.td-name{color:#dbe7f5;font-size:13px}
+.td-status{font-family:"JetBrains Mono",monospace;font-size:12px}
+.td-status.ok{color:#3ddc84}.td-status.off{color:#8ea4bd}
+.td-num{font-family:"JetBrains Mono",monospace;font-size:12px;color:#8ea4bd;text-align:right}
+.td-reply{font-family:"JetBrains Mono",monospace;font-size:12px;color:#cfe0f2;text-align:right}
+.td-method{font-family:"JetBrains Mono",monospace;font-size:11.5px;color:#8ea4bd}
+.sw{display:inline-flex;align-items:center;gap:7px;height:22px;padding:0 5px 0 9px;border-radius:11px;border:1px solid #3a4c63;background:#0b1727;color:#b8c7d9;font:inherit;font-family:"JetBrains Mono",monospace;font-size:11px;white-space:nowrap}
+.sw i{width:26px;height:14px;border-radius:7px;background:#3a4c63;position:relative;display:inline-block;flex:none}
+.sw i::after{content:"";position:absolute;top:2px;left:2px;width:10px;height:10px;border-radius:50%;background:#dbe7f5}
+.sw.on{border-color:#1f7a4c;color:#7ee2a8;background:#07180e}
+.sw.on i{background:#1f9d5c}
+.sw.on i::after{left:14px;background:#fff}
+.bar{display:flex;align-items:center;gap:14px;height:52px;padding:0 16px;border:1px solid #2b6fc0;background:#0f2440;border-radius:8px;box-sizing:border-box}
+.bar b{color:#fff;font-size:13.5px}
+.bar .sub{font-family:"JetBrains Mono",monospace;font-size:11.5px;color:#9fb4cc}
+</style>
+</helmet>
+<div style="width:1440px;height:900px;box-sizing:border-box;position:relative;overflow:hidden;background:#0a111c">
+  <div style="padding:16px 24px;display:flex;flex-direction:column;gap:12px">
+
+    <div style="display:flex;align-items:center;gap:8px;height:36px">
+      <span class="pc-mode on">인프라</span><span class="pc-mode">서비스</span>
+      <span class="seg" style="margin-left:auto"><button type="button" class="on">트리</button><button type="button">개요</button></span>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:12px;height:24px">
+      <span class="mono" style="font-size:12px;letter-spacing:.14em;color:#8ea4bd">INFRASTRUCTURE PERFORMANCE TESTS</span>
+      <span style="flex:1;height:1px;background:#1c2c42"></span>
+      <span class="mono" style="font-size:11.5px;color:#9fb4cc">Root\설정 연동\네트워크 · 3 host(s)</span>
+      <button class="pc-btn" type="button" style="padding:3px 10px;font-size:12px">설정</button>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:12px;height:86px">
+      <div class="pc-card b"><span class="pc-card-label">TOTAL TESTS</span><span class="pc-card-value">134</span><span class="pc-card-note">53개 대상 그룹</span></div>
+      <div class="pc-card g"><span class="pc-card-label">정상</span><span class="pc-card-value">87</span><span class="pc-card-note">Ok · Host is alive</span></div>
+      <div class="pc-card a"><span class="pc-card-label">경고</span><span class="pc-card-value">4</span><span class="pc-card-note">임계치 근접</span></div>
+      <div class="pc-card r"><span class="pc-card-label">실패</span><span class="pc-card-value">7</span><span class="pc-card-note">No answer · Error</span></div>
+      <div class="pc-card o"><span class="pc-card-label">중지</span><span class="pc-card-value">36</span><span class="pc-card-note">Disabled · 대상 20</span></div>
+      <div class="pc-card o"><span class="pc-card-label">갱신 안 됨</span><span class="pc-card-value">0</span><span class="pc-card-note">주기 초과</span></div>
+      <div class="pc-card o"><span class="pc-card-label">점검 대기</span><span class="pc-card-value">0</span><span class="pc-card-note">아직 실행 안 됨</span></div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:340px 8px minmax(0,1fr);gap:6px;align-items:start;height:622px">
+
+      <div class="pc-panel" style="height:622px;box-sizing:border-box">
+        <div class="pc-panel-head"><span>TEST TREE</span><button class="pc-chip on" type="button" style="padding:2px 9px;font-size:11px">선택 모드 · 13</button></div>
+        <div style="padding:0 12px 10px"><input class="inp" type="search" aria-label="대상 검색" placeholder="대상 검색" style="width:100%;box-sizing:border-box"></div>
+        <div>
+          <div class="row"><input type="checkbox" aria-label="Root 선택"><span class="tg" aria-hidden="true">−</span><span class="dot bad"></span>Root<span class="badge">7</span></div>
+          <div class="row" style="padding-left:28px"><input type="checkbox" aria-label="vCenter 폴더 선택"><span class="tg" aria-hidden="true">+</span><span class="dot bad"></span>vCenter<span class="badge">7</span></div>
+          <div class="row" style="padding-left:28px"><input type="checkbox" aria-label="설정 연동 폴더 선택"><span class="tg" aria-hidden="true">−</span><span class="dot off"></span>설정 연동 <span class="origin">설정</span><span class="cnt pick">13 / 21 선택</span></div>
+          <div class="row" style="padding-left:44px"><input type="checkbox" aria-label="가상화 폴더 선택"><span class="tg" aria-hidden="true">+</span><span class="dot off"></span>가상화<span class="cnt">중지 2</span></div>
+          <div class="row sel" style="padding-left:44px"><input type="checkbox" aria-label="네트워크 폴더 선택"><span class="tg" aria-hidden="true">−</span><span class="dot ok"></span>네트워크<span class="cnt pick" style="color:#dceaff">2 / 3 선택</span></div>
+          <div class="row picked" style="padding-left:60px"><input type="checkbox" checked aria-label="Ashburn 법인 폴더 선택"><span class="tg" aria-hidden="true">−</span><span class="dot off"></span>Ashburn 법인</div>
+          <div class="row picked" style="padding-left:76px"><input type="checkbox" checked aria-label="CVP-ASH-01 선택"><span class="tg" aria-hidden="true">·</span><span class="dot off"></span>CVP-ASH-01 <span class="offtag">중지</span></div>
+          <div class="row picked" style="padding-left:60px"><input type="checkbox" checked aria-label="Frankfurt 법인 폴더 선택"><span class="tg" aria-hidden="true">−</span><span class="dot off"></span>Frankfurt 법인</div>
+          <div class="row picked" style="padding-left:76px"><input type="checkbox" checked aria-label="CVP-FRA-02 선택"><span class="tg" aria-hidden="true">·</span><span class="dot off"></span>CVP-FRA-02 <span class="offtag">중지</span></div>
+          <div class="row" style="padding-left:60px"><input type="checkbox" aria-label="Seoul 법인 폴더 선택"><span class="tg" aria-hidden="true">−</span><span class="dot ok"></span>Seoul 법인</div>
+          <div class="row" style="padding-left:76px"><input type="checkbox" aria-label="CVP-SEO-03 선택"><span class="tg" aria-hidden="true">·</span><span class="dot ok"></span>CVP-SEO-03</div>
+          <div class="row picked" style="padding-left:44px"><input type="checkbox" checked aria-label="서버 폴더 선택"><span class="tg" aria-hidden="true">−</span><span class="dot off"></span>서버<span class="cnt pick">11 선택</span></div>
+          <div class="row picked" style="padding-left:60px"><input type="checkbox" checked aria-label="서버 전역 폴더 선택"><span class="tg" aria-hidden="true">−</span><span class="dot off"></span>전역<span class="cnt">중지 11</span></div>
+          <div class="row picked" style="padding-left:76px"><input type="checkbox" checked aria-label="ai-train-01 선택"><span class="tg" aria-hidden="true">·</span><span class="dot off"></span>ai-train-01 <span class="offtag">중지</span></div>
+          <div class="row picked" style="padding-left:76px"><input type="checkbox" checked aria-label="ai-train-02 선택"><span class="tg" aria-hidden="true">·</span><span class="dot off"></span>ai-train-02 <span class="offtag">중지</span></div>
+          <div class="row picked" style="padding-left:76px"><input type="checkbox" checked aria-label="backup-media-01 선택"><span class="tg" aria-hidden="true">·</span><span class="dot off"></span>backup-media-01 <span class="offtag">중지</span></div>
+          <div class="row picked" style="padding-left:98px;color:#9fb4cc;font-size:12px">… 같은 폴더의 대상 8개 더(모두 선택됨)</div>
+          <div class="row" style="padding-left:44px"><input type="checkbox" aria-label="중앙↔엣지 폴더 선택"><span class="tg" aria-hidden="true">+</span><span class="dot off"></span>중앙↔엣지<span class="cnt">중지 5</span></div>
+        </div>
+      </div>
+
+      <div style="width:8px;height:622px;background:#131f30;border-radius:3px"></div>
+
+      <div class="pc-panel">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 12px 8px">
+          <button class="pc-btn" type="button">＋ 등록</button><button class="pc-btn" type="button">점검 추가</button><button class="pc-btn" type="button">수정</button><button class="pc-btn" type="button">Remove</button>
+          <button class="pc-btn accent" type="button">Refresh</button><button class="pc-btn" type="button">Reset</button><button class="pc-btn" type="button">폴더</button><button class="pc-btn" type="button">로그</button>
+          <span style="width:1px;height:22px;background:#1e3350"></span>
+          <button class="pc-chip on" type="button">ALL</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:0 12px 10px;border-bottom:1px solid #1c2c42">
+          <button class="pc-chip" type="button">OK</button><button class="pc-chip" type="button">WARN</button><button class="pc-chip" type="button">FAIL</button><button class="pc-chip" type="button">STALE</button><button class="pc-chip" type="button">PENDING</button><button class="pc-chip" type="button">DISABLED</button>
+          <input class="inp" type="search" aria-label="Test name 검색" placeholder="Test name 검색" style="margin-left:auto;width:210px">
+        </div>
+        <div class="thead"><div></div><div class="th">TEST NAME</div><div class="th">STATUS</div><div class="th r">RECURREN…</div><div class="th r">REPLY</div><div class="th">TEST METHOD</div></div>
+
+        <div class="grp off"><span>Root\설정 연동\네트워크\Ashburn 법인\CVP-ASH-01\10.80.206.45</span><span class="meta">2 tests · 출처 설정 연동</span><button class="sw" type="button" role="switch" aria-checked="false" aria-label="CVP-ASH-01 감시 사용">중지<i aria-hidden="true"></i></button></div>
+        <div class="tr off"><div><span class="dot off"></span></div><div class="td-name">TCP 443</div><div class="td-status off">Disabled</div><div class="td-num">—</div><div class="td-reply" style="color:#8ea4bd">—</div><div class="td-method">TCP port 443</div></div>
+        <div class="tr off"><div><span class="dot off"></span></div><div class="td-name">인증서 만료(443)</div><div class="td-status off">Disabled</div><div class="td-num">—</div><div class="td-reply" style="color:#8ea4bd">—</div><div class="td-method">SSL certificate expiry</div></div>
+
+        <div class="grp off"><span>Root\설정 연동\네트워크\Frankfurt 법인\CVP-FRA-02\10.118.212.222</span><span class="meta">2 tests · 출처 설정 연동</span><button class="sw" type="button" role="switch" aria-checked="false" aria-label="CVP-FRA-02 감시 사용">중지<i aria-hidden="true"></i></button></div>
+        <div class="tr off"><div><span class="dot off"></span></div><div class="td-name">TCP 443</div><div class="td-status off">Disabled</div><div class="td-num">—</div><div class="td-reply" style="color:#8ea4bd">—</div><div class="td-method">TCP port 443</div></div>
+        <div class="tr off"><div><span class="dot off"></span></div><div class="td-name">인증서 만료(443)</div><div class="td-status off">Disabled</div><div class="td-num">—</div><div class="td-reply" style="color:#8ea4bd">—</div><div class="td-method">SSL certificate expiry</div></div>
+
+        <div class="grp"><span>Root\설정 연동\네트워크\Seoul 법인\CVP-SEO-03\10.155.218.146</span><span class="meta">2 tests · 출처 설정 연동</span><button class="sw on" type="button" role="switch" aria-checked="true" aria-label="CVP-SEO-03 감시 사용">사용<i aria-hidden="true"></i></button></div>
+        <div class="tr"><div><span class="dot ok"></span></div><div class="td-name">TCP 443</div><div class="td-status ok">Ok</div><div class="td-num">212</div><div class="td-reply">14 ms</div><div class="td-method">TCP port 443</div></div>
+        <div class="tr"><div><span class="dot ok"></span></div><div class="td-name">인증서 만료(443)</div><div class="td-status ok">Ok</div><div class="td-num">9</div><div class="td-reply">D-287</div><div class="td-method">SSL certificate expiry</div></div>
+
+        <div style="display:flex;gap:18px;padding:9px 12px;background:#111e30;font-family:'JetBrains Mono',monospace;font-size:11px;color:#8ea4bd"><span>SHOWN 6 / 134</span><span>AVG REPLY 14 ms</span><span>LOCAL SWEEP 12초 전</span><span style="margin-left:auto;color:#3ddc84">● LIVE POLLING</span></div>
+      </div>
+    </div>
+
+    <div class="bar" role="region" aria-label="선택한 대상 일괄 작업">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9fcaff" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="m8 12 3 3 5-6"/></svg>
+      <b>대상 13 · 점검 15 선택</b>
+      <span class="sub">폴더 1(서버\전역 11) + 대상 2 · 지금 모두 중지</span>
+      <span style="margin-left:auto;display:inline-flex;gap:8px;align-items:center">
+        <button class="pc-btn primary" type="button">시험 점검 후 사용</button>
+        <button class="pc-btn" type="button">바로 사용</button>
+        <button class="pc-btn" type="button">중지</button>
+        <span style="width:1px;height:22px;background:#2b4a6f"></span>
+        <button class="pc-btn" type="button" style="border-color:transparent;background:transparent;color:#9fb4cc">선택 해제</button>
+      </span>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

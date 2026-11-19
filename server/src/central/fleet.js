@@ -14,37 +14,66 @@ import { config, clampIntervalMs } from '../config.js';
 import { bumpFleetRev } from '../insights/fleetRev.js';
 import { atomicWriteFileSync, safeLoadText } from '../util/atomicWrite.js'; // v2.582 ARCH-3: 상태 파일도 원자 쓰기(절단본 → 로드 실패 → 다음 저장이 빈 값으로 덮어쓰는 왕복 손상 차단)
 import { registerExitFlush } from '../util/exitFlush.js'; // v2.582 ARCH-4: 디바운스 저장은 종료 시 동기 flush 를 등록한다
-import { capStr } from '../util/capStr.js';
+import { readJsonFile, READ_RETRY_MS } from '../util/jsonFileLoad.js'; // 87회차 ⓐ: 읽기 오류 ≠ 손상(공용 읽기 판정)
+import { inRetryWindow } from '../util/jsonFileRead.js';   // 128회차: 재읽기 간격 판정은 공용(시계가 뒤로 가도 그 차만큼 굳지 않게)
+import { capStr, capTrim } from '../util/capStr.js';
 import { numOrNull } from '../util/numOrNull.js';
+import { sanitizeHwSummary, mgmtHostOf } from '../idrac/hwSummary.js'; // v3.3.0 엣지 하드웨어 요약 · iDRAC 주소 정제(엣지 agent/fleetPush.js 와 짝)
 import { summarizeRegistryError, REGISTRY_ERROR_LABEL } from '../util/registryCore.js'; // v2.744(회귀 검토 GD-R1)
+import { envPositive } from '../util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
 
 const FILE = path.join(config.configDir, 'central-fleet.json');
-const TTL_MS = Number(process.env.CENTRAL_FLEET_TTL_MS) || 30 * 60_000; // 30분 무보고 시 만료
-const MAX_AGENTS = Number(process.env.CENTRAL_FLEET_MAX_AGENTS) || 500; // 에이전트 수 상한(메모리 보호)
+const TTL_MS = envPositive(process.env.CENTRAL_FLEET_TTL_MS, 1_800_000); // 30분 무보고 시 만료 · 54회차: 식 기본값도 envPositive(음수면 바로 만료되던 것)
+const MAX_AGENTS = envPositive(process.env.CENTRAL_FLEET_MAX_AGENTS, 500); // 에이전트 수 상한(메모리 보호)
 // v2.601(감사 CEN2601-03): 원소 상한. 예전에는 에이전트당 50,000 × 500 에이전트를 받았고, 공유 토큰은 본문 agent 이름을
 //   마음대로 고를 수 있어 이름 40개 × 50,000 원소로 RSS 가 크게 불고 central-fleet.json 이 195MB 가 되어 **저장마다 약 1.8초**
 //   이벤트 루프가 멈췄다(JSON.stringify 전량). 현실적인 에이전트당 상한 + 전체 상한 + '검증되지 않은 이름' 별도 상한을 둔다.
 //   잘린 원소는 **개수로 밝힌다**(omitted — 조용한 상한 금지).
-const PER_AGENT_MAX = Number(process.env.CENTRAL_FLEET_MAX_PER_AGENT) || 5_000;
-const TOTAL_MAX = Number(process.env.CENTRAL_FLEET_MAX_TOTAL) || 20_000;
+const PER_AGENT_MAX = envPositive(process.env.CENTRAL_FLEET_MAX_PER_AGENT, 5_000);
+const TOTAL_MAX = envPositive(process.env.CENTRAL_FLEET_MAX_TOTAL, 20_000);
 // 검증되지 않은 이름(공유 토큰 + 중앙이 모르는 이름)은 이름 수·원소 수를 작게 묶는다 — 검증된 엣지의 몫을 밀어내지 못하게.
-const UNVERIFIED_MAX_AGENTS = Number(process.env.CENTRAL_FLEET_MAX_UNVERIFIED_AGENTS) || 20;
-const UNVERIFIED_TOTAL_MAX = Number(process.env.CENTRAL_FLEET_MAX_UNVERIFIED_TOTAL) || 5_000;
+const UNVERIFIED_MAX_AGENTS = envPositive(process.env.CENTRAL_FLEET_MAX_UNVERIFIED_AGENTS, 20);
+const UNVERIFIED_TOTAL_MAX = envPositive(process.env.CENTRAL_FLEET_MAX_UNVERIFIED_TOTAL, 5_000);
 const norm = (s) => String(s || '').trim().toLowerCase();
 
 // null-proto: 에이전트 이름이 '__proto__' 등이어도 프로토타입 오염 없이 일반 키로 저장.
 let cache = Object.create(null); // agent -> { at, generatedAt, baremetal: [...] }
-try {
-  if (fs.existsSync(FILE)) {
-    const p = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-    if (p && typeof p === 'object') cache = Object.assign(Object.create(null), p.fleet || {});
-    // v2.601 CEN2601-03: 상한 이전에 저장된 큰 파일도 에이전트당 상한으로 줄여 올린다(다음 저장이 다시 작아지게).
-    for (const [a, e] of Object.entries(cache)) {
-      if (!e || typeof e !== 'object' || !Array.isArray(e.baremetal)) { delete cache[a]; continue; }
-      if (e.baremetal.length > PER_AGENT_MAX) { e.omitted = (Number(e.omitted) || 0) + (e.baremetal.length - PER_AGENT_MAX); e.baremetal = e.baremetal.slice(0, PER_AGENT_MAX); }
-    }
+/** 파일 본문 → 캐시(상한 이전에 저장된 큰 파일도 줄여 올린다). 던지면 손상. */
+function parseFleetFile(text) {
+  const p = JSON.parse(text);
+  const out = p && typeof p === 'object' ? Object.assign(Object.create(null), p.fleet || {}) : Object.create(null);
+  // v2.601 CEN2601-03: 상한 이전에 저장된 큰 파일도 에이전트당 상한으로 줄여 올린다(다음 저장이 다시 작아지게).
+  for (const [a, e] of Object.entries(out)) {
+    if (!e || typeof e !== 'object' || !Array.isArray(e.baremetal)) { delete out[a]; continue; }
+    if (e.baremetal.length > PER_AGENT_MAX) { e.omitted = (Number(e.omitted) || 0) + (e.baremetal.length - PER_AGENT_MAX); e.baremetal = e.baremetal.slice(0, PER_AGENT_MAX); }
+    // 84회차 F1: 상한 이전에 저장된 긴 generatedAt 도 올릴 때 줄인다(다음 저장이 다시 작아지게)
+    if (typeof e.generatedAt === 'string' && e.generatedAt.length > 40) e.generatedAt = capTrim(e.generatedAt, 40) || null;
   }
-} catch (e) { cache = Object.create(null); console.warn(`[central-fleet] ${path.basename(FILE)} 를 읽지 못해 빈 캐시로 시작합니다(엣지의 다음 push 로 채워집니다): ${safeLoadText(e)}`); }
+  return out;
+}
+// 87회차 ⓐ(84회차 남긴 것 ② — 권장안): 공용 읽기 판정(util/jsonFileLoad.js). 예전 catch 하나는 **읽기 오류**(EACCES · EIO)도 '읽지 못해 빈 캐시' 로 보고
+//   다음 저장(5초 디바운스)이 온전한 원본을 그 사이 들어온 몇 엣지분으로 덮었다. 이제 읽기 오류면 원본을 두고 그동안 저장하지 않으며, 저장 시점에
+//   READ_RETRY_MS 간격으로 다시 읽어 읽히면 메모리에 없는 엣지분만 합친다(메모리 쪽이 더 새 push). 손상은 예전과 같다(빈 캐시 — 엣지의 다음 push 로 채워짐).
+let readBlocked = false; let readRetryAt = 0;
+{
+  const r = readJsonFile(FILE, { parse: parseFleetFile, preserve: false });
+  if (r.kind === 'ok') cache = r.value;
+  else if (r.kind === 'read-error') { readBlocked = true; readRetryAt = Date.now() + READ_RETRY_MS; console.warn(`[central-fleet] ${path.basename(FILE)} 읽기 오류(${(capStr(r.error?.code, 32) || 'read-error')}) — 손상이 아니라 원본은 그대로 둡니다 · 읽힐 때까지 저장하지 않습니다(그동안 빈 캐시 — 엣지의 다음 push 로 채워집니다).`); }
+  else if (r.kind === 'corrupt') console.warn(`[central-fleet] ${path.basename(FILE)} 를 읽지 못해 빈 캐시로 시작합니다(엣지의 다음 push 로 채워집니다): ${safeLoadText(r.error)}`);
+}
+/** 87회차 ⓐ: 저장해도 되는가 — 읽기 오류였으면 간격마다 다시 읽어 합친다. 아직 못 읽으면 false. */
+function fleetWritable() {
+  if (!readBlocked) return true;
+  if (inRetryWindow(Date.now(), readRetryAt, READ_RETRY_MS)) return false;
+  const r = readJsonFile(FILE, { parse: parseFleetFile, preserve: false });
+  if (r.kind === 'read-error') { readRetryAt = Date.now() + READ_RETRY_MS; return false; }
+  if (r.kind === 'ok') { let n = 0; for (const [a, e] of Object.entries(r.value)) if (!(a in cache)) { cache[a] = e; n += 1; } if (n) bumpFleetRev(); }
+  readBlocked = false; readRetryAt = 0;
+  console.warn(`[central-fleet] ${path.basename(FILE)} 다시 읽었습니다(읽기 오류 풀림 — 파일의 엣지분을 합쳤습니다)`);
+  return true;
+}
+/** 87회차 ⓐ: 테스트 · 진단 — 함대 파일을 읽지 못해 저장을 멈춘 상태인가. */
+export function fleetReadBlocked() { return readBlocked; }
 
 let writeTimer = null;
 let writing = false;   // 비동기 원자 쓰기 진행 중
@@ -57,6 +86,7 @@ function persistSoon() {
     // v2.591 L8: 대상 파일에 직접 비동기 쓰기였다(v2.582 ARCH-3 주석은 '원자 쓰기' 라 적었다) — 쓰는 중 종료되면 절단본이
     //   남아 재기동 시 JSON 무효 → 빈 함대로 시작했다(재현: 1MB 시점 exit). 임시 파일에 쓰고 rename 한다(루프를 막지 않게 비동기).
     if (writing) { persistSoon(); return; }
+    if (!fleetWritable()) { persistSoon(); return; }   // 87회차 ⓐ: 읽기 오류 중 — 원본을 덮지 않고 다음 주기에 다시 본다
     writing = true; dirty = false;
     const tmp = `${FILE}.tmp-${process.pid}`;
     (async () => {
@@ -74,6 +104,7 @@ function persistSoon() {
 // 종료(SIGTERM/SIGINT/exit) 시 디바운스 대기 중인 마지막 엣지 보고를 동기로 flush — 재시작 시 ~5초
 // 윈도우 유실 방지. 중앙 역할일 때만 핸들러 등록(테스트/엣지에서 부작용·중복 쓰기 방지).
 export function flushEdgeFleetNow() {
+  if (!fleetWritable()) return;   // 87회차 ⓐ: 읽기 오류 중에는 원본을 덮지 않는다(종료 flush 포함)
   if (writeTimer) { clearTimeout(writeTimer); writeTimer = null; }
   dirty = false;
   try { fs.mkdirSync(path.dirname(FILE), { recursive: true }); atomicWriteFileSync(FILE, JSON.stringify({ fleet: cache }), { mode: 0o600 }); } catch { /* best-effort */ }
@@ -153,6 +184,11 @@ export function setEdgeFleet(agent, baremetal, generatedAt, { verified = true, v
     scanRangeId: typeof b.scanRangeId === 'string' ? capStr(b.scanRangeId, 128) : null,
     // 6차 2(서비스 인벤토리): 태그가 없을 때의 엣지 fleetId — 글자만 · 256자. 구버전 엣지는 없다(null — 승계 없음, 예전과 같다).
     untaggedId: typeof b.untaggedId === 'string' && b.untaggedId.trim() ? capStr(b.untaggedId.trim().toLowerCase(), 256) : null,
+    // v3.3.0(물리서버 폴더 하드웨어): 하드웨어 요약(아는 키만 · 수는 수로 · 글자 상한 · 시각은 수신 시각으로 자름) · iDRAC 관리 주소(호스트 글자만).
+    //   없거나 형식이 아니면 키를 만들지 않는다. 분류 서명(hashList)에는 넣지 않는다 — 인벤토리 시각이 바뀔 때마다 fleet 캐시가 무효화되지 않게.
+    //   **검증된 이름(개별 토큰)만** 받는다(반증 F10 — 주소는 중앙 관리자가 누르는 링크 · SSH 대상이 된다. 공유 토큰의 이름 주장으로 남의 주소를 심지 못하게).
+    ...(verified ? (() => { const hw = sanitizeHwSummary(b.hw, { now: Date.now() }); return hw ? { hw } : {}; })() : {}),
+    ...(verified ? (() => { const h = mgmtHostOf(b.mgmtHost); return h ? { mgmtHost: h } : {}; })() : {}),
   }));
   if (omitted) console.warn(`[central-fleet] '${a}' 베어메탈 ${valid.length}대 중 ${omitted}대를 상한으로 받지 않았습니다(에이전트당 ${PER_AGENT_MAX} · 전체 ${TOTAL_MAX}${verified ? '' : ` · 미검증 이름 합 ${UNVERIFIED_TOTAL_MAX}`}).`);
   if (vcenterBlanked) console.warn(`[central-fleet] '${a}' 가 소유하지 않은 vCenter 로 귀속된 베어메탈 ${vcenterBlanked}대 — 귀속(vcenterId)을 비웠습니다.`);
@@ -165,7 +201,10 @@ export function setEdgeFleet(agent, baremetal, generatedAt, { verified = true, v
   const sig = hashList(list);
   const prev = cache[a];
   const part = sanitizeFleetPartial(partial);
-  cache[a] = { at: Date.now(), generatedAt: typeof generatedAt === 'string' || typeof generatedAt === 'number' ? generatedAt : null, baremetal: list, sig, verified: !!verified, ...(omitted ? { omitted } : {}), ...(vcenterBlanked ? { vcenterBlanked } : {}), ...(part ? { partial: part } : {}) };
+  // 84회차 F1: generatedAt 은 시각 표시로만 쓴다 — 유한수 또는 짧은 글자만(/inventory 14회차 C-3 · 17회차 R-1 과 같은 규칙). 예전에는 글자를
+  //   길이 제한 없이 받아 수 MB 글자가 캐시 · central-fleet.json · 관리 화면 응답에 그대로 남았다(재현: 3MB 글자가 listEdgeFleet 에 그대로).
+  const gen = typeof generatedAt === 'number' && Number.isFinite(generatedAt) ? generatedAt : (typeof generatedAt === 'string' ? (capTrim(generatedAt, 40) || null) : null);
+  cache[a] = { at: Date.now(), generatedAt: gen, baremetal: list, sig, verified: !!verified, ...(omitted ? { omitted } : {}), ...(vcenterBlanked ? { vcenterBlanked } : {}), ...(part ? { partial: part } : {}) };
   if (!prev || prev.sig !== sig) bumpFleetRev(); // 내용이 바뀐 경우에만 캐시 무효화
   persistSoon();
   return { accepted: list.length, omitted, vcenterBlanked, ...(part ? { partial: part } : {}) };
@@ -254,6 +293,8 @@ export function getEdgeFleetServers() {
         scanRangeId: typeof b.scanRangeId === 'string' ? b.scanRangeId : null,
         // 태그가 없었을 때의 중앙 serverId — 서비스 인벤토리가 옛 fl: 고정을 승계하는 데 쓴다(6차 2). 구버전 엣지는 null.
         untaggedServerId: typeof b.untaggedId === 'string' && b.untaggedId ? `edge:${agent}:${b.untaggedId}` : null,
+        // v3.3.0: 엣지가 보낸 하드웨어 요약 · iDRAC 주소(정제본) — 물리서버 폴더만 쓴다(관리 주소는 관리자 판본만 화면에)
+        hw: b.hw || null, mgmtHost: b.mgmtHost || '',
       });
     }
   }

@@ -35,31 +35,33 @@ function inner(xml, name) {
   if (typeof xml !== 'string') return null;
   const openTag = `<${name}`; const closeTag = `</${name}>`;
   const isOpenAt = (i) => { const c = xml.charCodeAt(i + openTag.length); return c === 32 || c === 62; };
-  let i = 0; let s = -1;
-  for (;;) {
-    s = xml.indexOf(openTag, i);
-    if (s < 0) return null;
-    if (isOpenAt(s)) break;                           // <hostX> 를 <host> 로 읽지 않는다
-    i = s + 1;
-  }
+  // <hostX> 를 <host> 로 읽지 않는다 — from 이후 첫 '진짜' 여는 태그 위치(없으면 -1)
+  const nextOpen = (from) => { let i = xml.indexOf(openTag, from); while (i >= 0 && !isOpenAt(i)) i = xml.indexOf(openTag, i + 1); return i; };
+  const s = nextOpen(0);
+  if (s < 0) return null;
   const open = xml.indexOf('>', s);
   if (open < 0) return null;
   if (xml.charCodeAt(open - 1) === 47) return '';     // <host/> 자기닫힘
+  // 69회차 F1(재현 — 장비 출력 O(n²)): 예전에는 반복마다 닫는 태그를 p 부터 다시 찾아, 같은 태그가 k 겹 중첩되면 닫는 태그 앞 구간을
+  //   k 번 훑었다(203KB 본문 1.6초 동기 정지 — 로그 폴러 경로). 다음 여는 · 닫는 태그 위치를 기억해 p 가 그 위치를 지났을 때만 다시 찾는다(선형).
   let depth = 1; let p = open + 1;
+  let no = nextOpen(p); let nc = xml.indexOf(closeTag, p);
   for (;;) {
-    const nc = xml.indexOf(closeTag, p);
     if (nc < 0) return null;
-    let no = xml.indexOf(openTag, p);
-    while (no >= 0 && no < nc && !isOpenAt(no)) no = xml.indexOf(openTag, no + 1);
     if (no >= 0 && no < nc) {
       const e = xml.indexOf('>', no);
       if (e < 0) return null;
       if (xml.charCodeAt(e - 1) !== 47) depth += 1;
-      p = e + 1; continue;
+      p = e + 1;
+      no = nextOpen(p);
+      if (nc < p) nc = xml.indexOf(closeTag, p);
+      continue;
     }
     depth -= 1;
     if (depth === 0) return xml.slice(open + 1, nc);
     p = nc + closeTag.length;
+    nc = xml.indexOf(closeTag, p);
+    if (no >= 0 && no < p) no = nextOpen(p);
   }
 }
 const nameIn = (xml, el) => { const b = inner(xml, el); if (b == null) return null; const n = /<name>([^<]{0,512})<\/name>/.exec(b)?.[1]; return n ? cap(xmlUnescape(n), 128) : null; };

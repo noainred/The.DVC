@@ -147,6 +147,10 @@ test('③④ 설정: 차단 주소 400 · 비밀번호는 응답에 없음 · �
   // 실제로 쓸 설정: 가짜 Director(127.0.0.1) + vc-a·vc-b 매핑
   r = await call('admin', 'PUT', `/settings/directors/${DIR}`, { host: '127.0.0.1', port: fd.port, consoleName: 'portal', password: 'pw-1', timeoutMs: 5000 });
   assert.equal(r.s, 200, r.t);
+  (await import('../src/bareos/settings.js'))._seedLegacySitesForTest([
+      { vcenterId: 'vc-a', directorId: DIR, vcserver: 'vc-a.corp', client: 'kr-fd', storage: 'kr-sd', pool: 'VMwareKR', schedule: 'VMwareNightly', configFile: '/etc/bareos/vmware/vc-a.ini' },
+      { vcenterId: 'vc-b', directorId: DIR, vcserver: 'vc-b.corp', client: 'pl-fd', storage: 'pl-sd', pool: 'VMwarePL', configFile: '/etc/bareos/vmware/vc-b.ini' },
+    ]);   // 52회차 D1: 옛 설정(Director 하나에 vCenter 여럿 — 업그레이드 전 파일)으로 준비 · 이 시험은 한 Director 로 여러 vCenter 흐름을 본다
   r = await call('admin', 'PUT', '/settings', {
     sites: [
       { vcenterId: 'vc-a', directorId: DIR, vcserver: 'vc-a.corp', client: 'kr-fd', storage: 'kr-sd', pool: 'VMwareKR', schedule: 'VMwareNightly', configFile: '/etc/bareos/vmware/vc-a.ini' },

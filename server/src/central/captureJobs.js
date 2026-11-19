@@ -30,6 +30,7 @@
  */
 
 import { sanitizeCaptureResult } from '../net/captureHistory.js';
+import { envPositive } from '../util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
 
 // ── 상태 저장소 ──
 // jobs: reqId → 잡 전체 상태. state 전이: pending →(claim)→ running →(ack=결과)→ done
@@ -43,7 +44,7 @@ const MAX_PENDING = 20;           // 에이전트당 대기 상한(종전과 동
 const MAX_CLAIMS = 2;             // 재인출 한도 — 캡처는 멱등(다시 떠도 무해)이지만 SSH 부하가 있어 2회로 제한
 // claim 기한 여유: SSH 접속 + tcpdump 기동 + 분석 + 결과 POST(재시도 포함) 몫. 캡처 자체
 // 시간(spec.seconds, 1~120s 클램프)은 잡마다 다르므로 인출 시점에 spec 에서 더한다.
-const ACK_GRACE_MS = Number(process.env.CAPTURE_ACK_GRACE_MS) || 60_000;
+const ACK_GRACE_MS = envPositive(process.env.CAPTURE_ACK_GRACE_MS, 60_000);
 
 let seq = 0;
 function newReqId() { return `cap_${Date.now().toString(36)}_${(seq++).toString(36)}`; }

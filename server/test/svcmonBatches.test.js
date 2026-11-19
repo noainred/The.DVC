@@ -5,14 +5,21 @@
  * T38~T46 은 검증에서 실측으로 재현된 결함의 회귀 테스트다(부분 커밋·전 필드 덮어쓰기·
  * 롤백 흔적 주입·형태만 다른 유효 JSON·반환값 aliasing·잘못된 ID·정렬).
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 // config.configDir 은 모듈 로드 시점에 고정된다 — import 보다 **먼저** 설정해야 한다.
-const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'svcmon-batches-'));
+const DIR = tmpDir('svcmon-batches-');
 process.env.CONFIG_DIR = DIR;
 process.env.SVCMON_WORKERS = '0';
 
@@ -124,7 +131,7 @@ test('T33 최근 50건만 유지 — 먼저 기록된 것부터 버린다', () =
   // 기대 개수는 **리터럴 50**으로 단정한다 — 상수를 그대로 기대값에 쓰면 값을 5로 줄여도
   // 통과하는 자기참조 테스트가 된다(회귀 보호 0).
   assert.equal(batches.MAX_BATCHES, 50);
-  assert.deepEqual(batches.SOURCES, ['import', 'generate', 'template']);
+  assert.deepEqual(batches.SOURCES, ['import', 'generate', 'template', 'settings']);
   const ids = [];
   const base = Date.now() - 100000;
   for (let i = 0; i < batches.MAX_BATCHES + 5; i += 1) {

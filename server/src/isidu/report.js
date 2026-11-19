@@ -72,6 +72,8 @@ async function comparison(targetId) {
   const b30 = base30 ? await db.entriesOf(base30.id) : null;
   await yieldIf();
   const denom = denomOf(okScan);
+  const lim7 = !!(okScan.truncated || base7?.truncated);
+  const lim30 = !!(okScan.truncated || base30?.truncated);
   const rows = sortBySize([...cur.entries()].map(([name, v]) => ({ name, bytes: v.bytes, res: v.res })));
   await yieldIf();
   rows.forEach((r, i) => {
@@ -82,11 +84,13 @@ async function comparison(targetId) {
     r.d7 = p7 ? deltaOf(r, p7) : null;
     r.d30 = p30 ? deltaOf(r, p30) : null;
     // 신규: 기준이 있을 때만 판정한다(기준이 없으면 null — 신규라 단정하지 않는다).
-    r.new7 = b7 ? !b7.has(r.name) : null;
-    r.new30 = b30 ? !b30.has(r.name) : null;
+    // 전체 점검 36회차 F5(재현): 현재나 기준 스캔이 폴더 상한으로 잘렸으면(저장한 이름 집합이 전체가 아니다) 신규 · 사라짐도 판정하지 않는다 —
+    //   예전에는 잘려 나간 폴더가 '신규' · '사라짐' 으로 확정돼 KPI · 메일 개수에 들어갔다(실제 변화 0 인데 신규 100 · 사라짐 100).
+    r.new7 = b7 && !lim7 ? !b7.has(r.name) : null;
+    r.new30 = b30 && !lim30 ? !b30.has(r.name) : null;
   });
-  const removed7 = b7 ? sortBySize([...b7.entries()].filter(([name]) => !cur.has(name)).map(([name, v]) => ({ name, bytes: v.bytes, res: v.res }))) : null;
-  const value = { okScan, base7, base30, rows, removed7, denom, sorted: new Map() };
+  const removed7 = b7 && !lim7 ? sortBySize([...b7.entries()].filter(([name]) => !cur.has(name)).map(([name, v]) => ({ name, bytes: v.bytes, res: v.res }))) : null;
+  const value = { okScan, base7, base30, rows, removed7, denom, compareLimited7: !!(b7 && lim7), sorted: new Map() };
   _cache.set(key, { at: Date.now(), value });
   while (_cache.size > CACHE_MAX) _cache.delete(_cache.keys().next().value);
   return { ...value, latest };
@@ -113,7 +117,7 @@ export async function buildReport(targetId, { topN = 10 } = {}) {
   if (c.unavailable) return { state: 'db-unavailable' };
   const { latest } = c;
   if (!c.okScan) return { state: latest?.lastTry ? 'failed-only' : 'no-data', lastTry: latest?.lastTry || null, failStreak: latest?.failStreak || 0 };
-  const { okScan, base7, base30, rows, removed7, denom } = c;
+  const { okScan, base7, base30, rows, removed7, denom, compareLimited7 } = c;
   const n = Math.max(5, Math.min(50, Math.round(Number(topN) || 10)));
   const top = rows.slice(0, n);
   let topBytes = 0; for (const r of top) topBytes += r.bytes;
@@ -141,8 +145,9 @@ export async function buildReport(targetId, { topN = 10 } = {}) {
       denomBytes: denom,
       totalDelta7, totalDelta30,
       users: rows.length,
-      new7: base7 ? rows.filter((r) => r.new7 === true).length : null,
+      new7: base7 && !compareLimited7 ? rows.filter((r) => r.new7 === true).length : null,
       removed7: removed7 ? removed7.length : null,
+      compareLimited: !!compareLimited7,   // 36회차 F5: 폴더 상한으로 잘린 스캔이라 신규 · 사라짐을 판정하지 않았다
       topN: top.length, topBytes, topShare: denom ? topBytes / denom : null,
     },
     sparkTs: sp.ts,
@@ -206,7 +211,7 @@ export async function listUsers(targetId, { q = '', filter = 'all', sort = 'size
   const sp = spark && f !== 'removed' ? await sparksFor(targetId, page.map((r) => r.name), c.okScan.ts - 30 * DAY) : null;
   return {
     state: 'ok', scanId: c.okScan.id, scanTs: c.okScan.ts, total, offset: off, limit: lim, filter: f, sort: srt, dir: asc ? 'asc' : 'desc',
-    hasBase7: !!c.base7, hasBase30: !!c.base30, sparkTs: sp ? sp.ts : [],
+    hasBase7: !!c.base7, hasBase30: !!c.base30, compareLimited: !!c.compareLimited7, sparkTs: sp ? sp.ts : [],   // 38회차 R6
     rows: page.map((r) => (r.removed ? { name: r.name, bytes: r.bytes, res: r.res, removed: true } : rowView(r, sp ? (sp.series.get(r.name) || null) : null))),
   };
 }
@@ -216,7 +221,7 @@ export async function allRows(targetId) {
   const c = await comparison(targetId);
   if (c.unavailable) return { state: 'db-unavailable' };
   if (!c.okScan) return { state: 'no-data', rows: [] };
-  return { state: 'ok', scan: c.okScan, rows: c.rows, removed7: c.removed7 || [], hasBase7: !!c.base7, hasBase30: !!c.base30 };
+  return { state: 'ok', scan: c.okScan, rows: c.rows, removed7: c.removed7 || [], hasBase7: !!c.base7, hasBase30: !!c.base30, compareLimited: !!c.compareLimited7 };
 }
 
 export const TREND_DAYS = Object.freeze([7, 30, 90, 365]);
@@ -295,6 +300,7 @@ async function overviewOf(targetId, pool = OVERVIEW_POOL) {
   const top = (await db.topEntriesOf(okScan.id, pool)) || [];
   const b7 = base7 ? ((await db.entriesByNames(base7.id, top.map((r) => r.name))) || new Map()) : null;
   const denom = denomOf(okScan);
+  const lim7 = !!(okScan.truncated || base7?.truncated);   // 38회차 R1
   const scans = (await db.scansIn(HISTORY_AGENT, targetId, okScan.ts - 30 * DAY, 5000)) || [];
   const points = thinPoints(scans.filter((sc) => sc.ok).map((sc) => ({ ts: sc.ts, bytes: denomOf(sc), partial: (sc.errLines || 0) > 0 })));
   const value = {
@@ -306,7 +312,8 @@ async function overviewOf(targetId, pool = OVERVIEW_POOL) {
     top: top.map((r) => {
       const p = b7 ? b7.get(r.name) : undefined;
       // 기준이 없으면 증감·신규를 판정하지 않는다(null) — 보고서와 같은 규칙.
-      return { rank: r.rank, name: r.name, bytes: r.bytes, res: r.res, share: denom ? r.bytes / denom : null, d7: p ? deltaOf(r, p) : null, new7: b7 ? !b7.has(r.name) : null };
+      // 38회차 R1(반증 — 재현): 보고서(comparison)와 같은 잘림 판정 — 현재나 기준 스캔이 폴더 상한으로 잘렸으면 신규를 판정하지 않는다(개요 카드 · 종합 메일).
+      return { rank: r.rank, name: r.name, bytes: r.bytes, res: r.res, share: denom ? r.bytes / denom : null, d7: p ? deltaOf(r, p) : null, new7: b7 && !lim7 ? !b7.has(r.name) : null };
     }),
   };
   _ovCache.set(key, { at: Date.now(), value });

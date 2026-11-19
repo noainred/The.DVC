@@ -15,7 +15,7 @@ import { enqueueRun } from '../../vmclone/runner.js';
 import { schedulerStatus } from '../../vmclone/scheduler.js';
 import { listMounts } from '../../system/nfsMounts.js';
 import { isAdminReq } from '../../auth/addressMask.js';
-import { listNfsDs, getNfsDs, createNfsDs, deleteNfsDs } from '../../vmclone/nfsDs.js';
+import { listNfsDs, getNfsDs, createNfsDs, deleteNfsDs, nfsDsLoadError } from '../../vmclone/nfsDs.js';
 import { targetsNow, dispatchVmOp } from '../../vmclone/opDispatch.js';
 import { mountUseView, mountUseDenied, setMountUse, corpMountsLoadError } from '../../vmclone/corpMounts.js';
 import { rpoOf } from '../../vmclone/rpo.js';
@@ -179,6 +179,7 @@ api.get('/tools/vm-clone', adminOnly, (req, res) => {
     corps,
     vcenterNames: Object.fromEntries(visibleVcs.map((v) => [String(v.id), vcName.get(String(v.id)) || v.name || v.id])),
     nfsDatastores,
+    ...(nfsDsLoadError() ? { nfsDsLoadError: nfsDsLoadError() } : {}),   // 결정(56~75 남긴 것) 65 ②: 정의 파일을 못 읽었으면 빈 목록이 '정의 없음' 으로 보이지 않게
     ops: listOpsView({ allowed }),
     ...(corpMountsLoadError() ? { corpMountsError: corpMountsLoadError().reason } : {}),
     // v2.797 historyMax: 화면의 14일 실행 격자가 '잡당 최근 N회만 남은 이력' 으로 잘린 날을 0 이 아니라 '일부' 로 표시한다(숫자를 화면에 박지 않는다).
@@ -223,6 +224,9 @@ api.post('/tools/vm-clone/jobs', adminOnly, (req, res) => {
   }
   // v2.793: 법인 NFS 데이터스토어를 골랐으면 그 정의가 같은 vCenter 의 것이어야 한다(데이터스토어 이름은 정의에서 가져온다).
   const body = { ...(req.body || {}) };
+  // 65회차 F3: 데모 표지는 데모 시드(store.saveJob 직접)만 세운다 — 본문의 demo:true 를 받으면 화면에는 켜진 잡인데
+  //   실행기는 'demo-job' 으로 건너뛰고 위임 동기화 · RPO 판정에서도 빠지는 잡이 API 한 번으로 생긴다.
+  delete body.demo;
   if (body.dest && typeof body.dest === 'object' && typeof body.dest.nfsDsId === 'string' && body.dest.nfsDsId) {
     const d = getNfsDs(body.dest.nfsDsId);
     if (!d || String(d.vcenterId) !== vcenterId) return res.status(400).json({ ok: false, reason: '고른 NFS 데이터스토어가 이 vCenter 의 법인 저장소가 아닙니다.' });
@@ -238,7 +242,7 @@ api.post('/tools/vm-clone/jobs', adminOnly, (req, res) => {
     const job = saveJob(body);
     logAudit({ user: req.user?.username, action: 'VM 복제 잡 저장', target: `${job.vcenterId}/${job.vmName}`, detail: `${job.dest.type}${job.dest.datastoreName ? `→${job.dest.datastoreName}` : ''} · ${job.schedule.mode} · 보존 ${job.keep}${job.keepDays ? `개·${job.keepDays}일` : ''}${job.verifyAfter ? ' · 자동 검증' : ''}` });
     res.status(201).json({ ok: true, job });
-  } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
+  } catch (e) { res.status(e?.status === 409 ? 409 : 400).json({ ok: false, reason: e.message, ...(e?.readError ? { code: e.code, readError: true } : {}) }); }   // 103회차 F9: 읽기 오류 중 저장은 409
 });
 
 // v2.767(점검 R2-B3-8): 단건 쓰기는 '조회 밖 404 → 쓰기 밖 403'(server/CLAUDE.md writeVcenters 규약). 예전엔 조회 범위 밖 잡에도 403 을 줘
@@ -260,7 +264,7 @@ api.delete('/tools/vm-clone/jobs/:id', adminOnly, (req, res) => {
   const target = listJobs().find((j) => j.id === req.params.id);
   if (cloneJobDenied(req, res, target)) return;
   let removed;
-  try { removed = deleteJob(req.params.id); } catch (e) { return res.status(400).json({ ok: false, reason: e.message }); }   // v2.793: 엣지의 위임 잡
+  try { removed = deleteJob(req.params.id); } catch (e) { return res.status(e?.status === 409 ? 409 : 400).json({ ok: false, reason: e.message }); }   // v2.793: 엣지의 위임 잡
   if (!removed) return res.status(404).json({ ok: false, reason: '잡을 찾을 수 없습니다.' });
   logAudit({ user: req.user?.username, action: 'VM 복제 잡 삭제', target: req.params.id, detail: '잡 정의만 삭제(만든 클론/사본은 유지)' });
   res.json({ ok: true });
@@ -330,7 +334,7 @@ api.post('/tools/vm-clone/nfs-datastores', adminOnly, (req, res) => {
   const tg = targetsNow().targets.get(vcenterId);
   if (!tg || tg.where === 'conflict' || tg.where === 'none') return res.status(409).json({ ok: false, reason: tg?.reason || '이 vCenter 의 실행 위치를 정할 수 없습니다.' });
   let item;
-  try { item = createNfsDs({ vcenterId, ...(req.body || {}) }, req.user?.username); } catch (e) { return res.status(400).json({ ok: false, reason: e.message }); }
+  try { item = createNfsDs({ vcenterId, ...(req.body || {}) }, req.user?.username); } catch (e) { return res.status(e?.code === 'settings-unreadable' ? 409 : 400).json({ ok: false, reason: e.message, ...(e?.code ? { code: e.code } : {}) }); }   // 65 ②: 파일을 못 읽은 동안은 409
   const op = dispatchOp(res, { kind: 'nfsds-attach', vcenterId, spec: { nfsDsId: item.id, name: item.name, server: item.server, exportPath: item.exportPath, nfsVersion: item.nfsVersion, hostIds }, by: req.user?.username });
   if (!op) return;
   logAudit({ user: req.user?.username, action: 'NFS 데이터스토어 추가', target: `${vcenterId}/${item.name}`, detail: `${item.server}:${item.exportPath} · NFS ${item.nfsVersion} · 호스트 ${hostIds.length}대${op.where === 'edge' ? ` · 담당 엣지 ${op.agent}` : ''}` });
@@ -365,7 +369,7 @@ api.put('/tools/vm-clone/corps/mounts', adminOnly, (req, res) => {
   const ids = req.body?.mountIds;
   if (ids != null && !Array.isArray(ids)) return res.status(400).json({ ok: false, reason: 'mountIds 는 배열 또는 null 이어야 합니다.' });
   let view;
-  try { view = setMountUse(corp.key, ids, req.user?.username); } catch (e) { return res.status(400).json({ ok: false, reason: e.message }); }
+  try { view = setMountUse(corp.key, ids, req.user?.username); } catch (e) { return res.status(e?.status === 409 ? 409 : 400).json({ ok: false, reason: e.message }); }
   logAudit({ user: req.user?.username, action: 'VM 백업 법인 마운트 지정', target: corp.label || corp.key, detail: view ? `사용 ${view.mountIds.length}개(${view.mountIds.join(', ').slice(0, 150)})` : '지정 해제(전부 사용)' });
   res.json({ ok: true, mountUse: view });
 });

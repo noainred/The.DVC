@@ -52,6 +52,14 @@ export const HOST_FORM = Object.freeze({
   'set:ad': 'ldap',
   'set:upgrade-src': 'url',
   'set:package-repo': 'url',
+  // v2.915(설정 연동): 새 6종. CVP 등록부는 URL 또는 host[:port] 를 받는다(cvp/registry.js baseUrlOf) · Veeam·Bareos·아이실론은 주소만 ·
+  //   LLM 은 URL(llm/config.js llmUrlIssue).
+  'set:cvp': 'either',
+  'set:veeam': 'host',
+  'set:veeam-em': 'host',
+  'set:bareos-dir': 'host',
+  'set:isidu-host': 'host',
+  'set:llm': 'url',
 });
 
 /** 인증서 경고 경계(일). 30일은 갱신 리드타임이라 업계 관행이고, 화면이 숫자를 밝힌다. */

@@ -6,6 +6,7 @@
  * 실패는 격리되고 이벤트 루프를 막지 않는다.
  */
 
+import { cleanQuiet, quietWindowAt, quietText } from '../ipam/scanQuiet.js'; // v3.7.0 쉬는 시간
 import { config, clampIntervalMs } from '../config.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
@@ -18,9 +19,11 @@ import { centralStatusOnlySupport } from './centralStatusOnly.js'; // v2.733: �
 import { scanStarted as journalScanStarted, scanFinished as journalScanFinished, registerScanResumer, journalFor, isResumePending } from '../util/scanJournal.js';
 import fs from 'node:fs';
 import path from 'node:path';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { readJsonFile } from '../util/jsonFileLoad.js'; // 85회차 F5: 읽기 오류 ≠ 손상(손상이면 readJsonFile 이 preserveCorrupt)
 import { registerStateFile } from '../util/stateFiles.js';
 import { numOrNull } from '../util/numOrNull.js';
+import { readJsonCapped, EDGE_RESPONSE_MAX_BYTES } from '../util/readCapped.js'; // 87회차 ⓓ(85 E3 — 권장안): 중앙 응답은 상한 읽기(형제 pull 과 같게 — 상한 없는 res.json() 금지)
 
 let timer = null;
 let last = null;
@@ -57,16 +60,16 @@ const STATE_FILE = () => path.join(config.configDir, 'ipscan-agent-state.json');
 let _stateWarned = false;
 let _lastScanRestored = null;   // 기동 때 되살린 마지막 스캔 시각(상태 화면용 — 없으면 null)
 function loadLastScanAt(now = Date.now()) {
-  try {
-    const j = JSON.parse(fs.readFileSync(STATE_FILE(), 'utf8'));
-    const at = numOrNull(j?.lastScanAt);
-    if (at == null || at <= 0 || at > now + 60_000) return null;
-    return at;
-  } catch (e) {
-    // 없음 — 처음 기동(예전처럼 첫 확인에서 스캔한다). 손상 — 원본을 옆에 남기고(arch2582 규약) 같은 동작으로 간다.
-    if (e?.code !== 'ENOENT') { try { preserveCorrupt(STATE_FILE(), e?.message); } catch { /* 보존 실패가 기동을 막지 않게 */ } }
-    return null;
-  }
+  // 없음 — 처음 기동(예전처럼 첫 확인에서 스캔한다). 손상 — 원본을 옆에 남기고(arch2582 규약) 같은 동작으로 간다.
+  // 85회차 F5: 읽기 오류(EACCES · EIO)는 손상이 아니다 — 예전에는 code 가 ENOENT 가 아니면 다 preserveCorrupt 로 원본을 옮겼다.
+  //   공용 판정(util/jsonFileLoad.js readJsonFile)으로 가르고, 읽기 오류면 원본을 두고 '모름'(null — 첫 확인에서 스캔)으로 간다.
+  let r;
+  try { r = readJsonFile(STATE_FILE(), { parse: (t) => JSON.parse(t) }); } catch { return null; }
+  if (r.kind === 'read-error') { console.warn(`[ipscan-agent] 마지막 스캔 시각 파일을 읽지 못했습니다(${String(r.error?.code || r.error?.message || r.error).slice(0, 40)}) — 원본은 그대로 두고 첫 확인에서 스캔합니다`); return null; }
+  if (r.kind !== 'ok') return null;
+  const at = numOrNull(r.value?.lastScanAt);
+  if (at == null || at <= 0 || at > now + 60_000) return null;
+  return at;
 }
 function saveLastScanAt(at) {
   try {
@@ -153,10 +156,10 @@ export async function runIpScanAgentOnce(...args) {
     if (!aRes.ok) {
       // v2.632(감사 EDGE2632-03): 중앙 스캔 설정 파일 손상은 503 settingsUnreadable — '배정 없음' 이 아니라 사유를 남긴다.
       let why = '';
-      if (aRes.status === 503) { try { const b = await aRes.json(); if (b?.reason === 'settingsUnreadable') why = ` — 중앙 스캔 설정 파일을 읽지 못했습니다(${String(b.detail || '').slice(0, 160)})`; } catch { /* 본문 없음 */ } }
+      if (aRes.status === 503) { try { const b = await readJsonCapped(aRes, 64 * 1024, '중앙 오류 응답'); if (b?.reason === 'settingsUnreadable') why = ` — 중앙 스캔 설정 파일을 읽지 못했습니다(${String(b.detail || '').slice(0, 160)})`; } catch { /* 본문 없음 */ } }
       throw new Error(`assignment ${aRes.status}${why}`);
     }
-    const a = await aRes.json();
+    const a = await readJsonCapped(aRes, EDGE_RESPONSE_MAX_BYTES, '중앙 응답');
     _lastCheckAt = Date.now();
     if (!a?.assigned) { _centralIntervalMs = null; last = { at: Date.now(), assigned: false }; return last; }
     _centralIntervalMs = centralIntervalOf(a.intervalMs);
@@ -165,6 +168,16 @@ export async function runIpScanAgentOnce(...args) {
       // 아직 주기 전 — 배정(주기)만 반영. 직전 '배정 조회' 실패는 이번 조회가 성공했으므로 남겨 두지 않고 마지막 스캔 시도의
       // 기록으로 돌아간다(그 시각이 '마지막 실행' 이다). 스캔·결과 보고 실패 기록은 다음 스캔까지 그대로 둔다(숨기지 않는다).
       if (last?.error && last.phase === 'assignment' && _lastScanRecord) last = _lastScanRecord;
+      return last;
+    }
+    // v3.7.0(재설계 묶음 라): 쉬는 시간(중앙 배정 quiet — 이 엣지의 현지 시각으로 판정)에 걸린 주기 회차는 건너뛴다. 기준 시각(_lastScanAt)을
+    //   바꾸지 않는다 — 쉬는 시간이 끝난 첫 틱에 한 번 돈다(몰아서 여러 번 돌지 않는다). 옛 중앙(quiet 없음)이면 예전 그대로.
+    const qw = dueOnly ? quietWindowAt(cleanQuiet(a.quiet)) : null;
+    if (qw) {
+      // v3.8.1: 직전 스캔 · 결과 보고 실패는 쉬는 시간 기록으로 덮지 않는다(무음 실패 금지 — 예전에는 실패가 쉬는 동안 엣지 로그 · 상태에서 사라졌다).
+      //   실패 기록은 그대로 두고 '쉬는 중' 표시만 더한다. 배정 조회 실패는 방금 조회가 성공했으므로 남기지 않는다(위 주기 전 분기와 같은 규칙).
+      const failed = _lastScanRecord?.error ? _lastScanRecord : null;
+      last = failed ? { ...failed, quiet: quietText(qw), quietAt: Date.now() } : { at: Date.now(), assigned: true, skipped: 'quiet', quiet: quietText(qw) };
       return last;
     }
     // 엣지도 스캔을 별도 프로세스에서(v2.363) — 원격지 포탈/에이전트 부하 격리.
@@ -179,7 +192,13 @@ export async function runIpScanAgentOnce(...args) {
     try {
       scanOut = await runScan({
         ranges: a.ranges, ports: a.ports, concurrency: a.concurrency, timeoutMs: a.timeoutMs, reverseDns: a.reverseDns,
+        fwdNames: Array.isArray(a.fwdNames) ? a.fwdNames : undefined, // v2.993: 정방향 DNS 로 물을 물리서버 이름(중앙 배정 — 이 엣지 법인 것만 · 구버전 중앙이면 없음)
         ping: a.ping, // 중앙 배정 설정(v2.359) — 구버전 중앙이면 undefined → 기본 OFF(v2.360)
+        // v2.991 호스트명 확인(mDNS · NetBIOS) — 사용자 결정 '기본 켜짐'. 구버전 중앙(키 없음)도 켜짐이다 — 옛 중앙은 더 보낸 칸을
+        //   정제에서 버리고 표시 이름(hostname)만 받는다(그 이름이 NetBIOS 에서 왔어도 hostname 칸의 뜻은 같다).
+        mdns: a.mdns !== false, netbios: a.netbios !== false,
+        // v3.2.0: 역DNS 이름의 정방향 확인(법인 DNS 에 묻는다) — 옛 중앙(키 없음)이면 켜짐 · 기간은 중앙 설정(없으면 24시간)
+        dnsConfirm: a.dnsConfirm !== false, dnsConfirmHours: a.dnsConfirmHours,
       });
     } catch (se) { scanErr = se; } finally { _lastScanAt = Date.now(); saveLastScanAt(_lastScanAt); journalScanFinished('ipscan-agent', 'scan'); }
     if (scanErr) {
@@ -187,10 +206,10 @@ export async function runIpScanAgentOnce(...args) {
       if (scanErr && typeof scanErr === 'object') scanErr.incompleteReport = await reportScanIncomplete(scanErr, _lastScanAt - scanStarted);
       throw scanErr;
     }
-    const { alive, scanned } = scanOut;
+    const { alive, scanned, nameStats } = scanOut;
     phase = 'report';
     const rRes = await resilientFetch(`${config.agent.centralUrl}/api/central/ip-scan-result`, {
-      method: 'POST', headers: headers(), body: JSON.stringify({ agent: config.agent.name, alive, scanned }), timeoutMs: 30_000, retries: 2,
+      method: 'POST', headers: headers(), body: JSON.stringify({ agent: config.agent.name, alive, scanned, ...(nameStats ? { nameStats } : {}) }), timeoutMs: 30_000, retries: 2,
     });
     // 결과 POST 응답을 검사한다 — 검사하지 않으면 403/거부(토큰 만료·에이전트명 불일치)도
     // '성공 보고'로 기록돼, 실제로는 중앙에 병합되지 않은 스캔을 정상으로 오인한다.
@@ -198,7 +217,7 @@ export async function runIpScanAgentOnce(...args) {
     // v2.607(감사 EDGE2607-02): 200 이어도 중앙은 전체 상한(capped)·형식 오류(dropped)·절단(omitted)으로 일부를 받지 않을 수 있다 —
     //   예전에는 r.ok 만 보고 '성공 alive N' 으로 적어, 중앙 IP 대장에 없는데 엣지 로그 화면은 성공이었다(v2.606 EDGE2606-03 의 형제 누락).
     const drop = ipScanDropOf(await readCentralReply(rRes));
-    last = { at: Date.now(), assigned: true, scanned, alive: alive.length, ...(drop ? { centralDropped: drop } : {}) };
+    last = { at: Date.now(), assigned: true, scanned, alive: alive.length, ...(Number.isFinite(nameStats?.named) ? { named: nameStats.named } : {}), ...(drop ? { centralDropped: drop } : {}) };
     _lastScanRecord = last;
     warnDrop('ipscan-agent', drop);
     return last;

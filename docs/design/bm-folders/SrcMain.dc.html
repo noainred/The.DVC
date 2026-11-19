@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>사용률 — OS 먼저, 안 되면 iDRAC · 출처마다 다른 색</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./bmf.css">
+<link rel="stylesheet" href="./bmf2.css">
+<link rel="stylesheet" href="./why.css">
+<link rel="stylesheet" href="./src.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+</style>
+</helmet>
+<div class="root" style="width:1440px;height:700px">
+  <div class="tb">
+    <span class="logo"><span class="v">V</span><span>VMware Global Monitoring Portal</span></span>
+    <span class="ver">v2.990.0</span>
+    <span class="cmdk"><span>기능 · 탭 · 장비 찾기</span><span class="kbd" style="margin-left:auto">⌘K</span></span>
+    <span class="pill" style="margin-left:auto"><span class="dot" style="background:#22c55e"></span><span>vCenter 28/28</span></span>
+    <span class="pill"><span>admin · 전체 범위</span></span>
+  </div>
+  <div class="body">
+    <nav class="sb" aria-label="주 메뉴">
+      <span class="h">모니터링</span>
+      <a href="#">Overview</a>
+      <a href="#">호스트</a>
+      <a href="#">가상머신</a>
+      <a href="#">IP 관리</a>
+      <span class="h">도구</span>
+      <a href="#" class="on">특수 기능</a>
+      <a href="#">설정</a>
+    </nav>
+    <div class="main">
+      <div class="crumb">특수 기능 › 서버 · 하드웨어 › 물리서버 폴더</div>
+      <h1 class="h1">
+        <span>물리서버 폴더</span>
+        <div class="seg" role="group" aria-label="보기 방식"><button type="button" class="on">목록</button><button type="button">맵</button></div>
+        <span class="sp row"><button class="btn pri" type="button">서버 찾아 등록</button><button class="btn" type="button">CSV</button><button class="btn" type="button">새로고침</button></span>
+      </h1>
+
+      <div class="card cnt" style="position:relative">
+        <div class="fh">
+          <div class="path">
+            <span class="dim" style="font-weight:600">KR-HQ 본사</span><span class="sep">›</span><span>DB</span><span class="sep">›</span><span>Oracle RAC</span>
+            <span class="bdg c">서비스: Oracle RAC</span>
+          </div>
+          <div class="tiles">
+            <div class="tile"><span class="tk2">서버 6대 — 상태</span><span class="tv2"><span class="sd ok"></span>켜짐 6 · 꺼짐 0</span><span class="ts2">사용률 값 없음 1</span></div>
+            <div class="tile"><span class="tk2">CPU(용량 가중)</span><span class="tv2 num">33%</span><span class="ts2">5대 기준 — OS 3 · iDRAC 2</span></div>
+            <div class="tile"><span class="tk2">메모리(용량 가중)</span><span class="tv2 num">58%</span><span class="ts2">5대 기준 — OS 2 · iDRAC 3</span></div>
+            <div class="tile"><span class="tk2">전력</span><span class="tv2 num">2,862 W</span><span class="ts2">6대 합</span></div>
+            <div class="tile"><span class="tk2">부품 장애</span><span class="tv2">0대</span><span class="ts2">모름 0</span></div>
+          </div>
+        </div>
+
+        <div class="rsum" role="group" aria-label="사용률 출처">
+          <span class="rk">사용률을 읽은 곳</span>
+          <button class="rc" type="button"><span class="sw os"></span>OS(SSH) <b>2</b></button>
+          <button class="rc" type="button"><span class="sw id"></span>iDRAC <b>2</b></button>
+          <button class="rc" type="button"><span class="sw os"></span><span class="sw id"></span>지표마다 다름 <b>1</b></button>
+          <button class="rc" type="button"><span class="sw no"></span>없음 <b>1</b></button>
+          <span class="sp note">OS 를 먼저 읽고, 안 되거나 값이 없으면 iDRAC 값을 씁니다 — 막대 색과 표지가 출처입니다</span>
+        </div>
+
+        <table class="t">
+          <thead><tr><th style="width:20%">이름</th><th style="width:19%">모델 · 서비스 태그</th><th style="width:9%">받는 길</th><th style="width:10%">부품 장애</th><th style="width:30%">사용률</th><th style="width:12%">전력</th></tr></thead>
+          <tbody>
+            <tr><td style="height:48px"><span class="nm"><span class="sd ok"></span>kr-ora-rac01</span></td><td>PowerEdge R750 <span class="dim mono">7XK2M03</span></td><td><span class="bdg c">중앙</span></td><td class="dim">없음</td>
+              <td><div class="ucell"><div class="bars"><div class="mb"><span class="ul0">CPU</span><span class="mbt"><i class="os" style="width:38%"></i></span><span class="mbn">38%</span></div><div class="mb"><span class="ul0">MEM</span><span class="mbt"><i class="os" style="width:64%"></i></span><span class="mbn">64%</span></div></div><span class="sc os">OS</span></div></td>
+              <td class="num">486 W</td></tr>
+            <tr><td style="height:48px"><span class="nm"><span class="sd ok"></span>kr-ora-rac02</span></td><td>PowerEdge R750 <span class="dim mono">7XK2N03</span></td><td><span class="bdg c">중앙</span></td><td class="dim">없음</td>
+              <td style="overflow:visible;position:relative">
+                <div class="ucell open"><div class="bars"><div class="mb"><span class="ul0">CPU</span><span class="mbt"><i class="id" style="width:41%"></i></span><span class="mbn">41%</span></div><div class="mb"><span class="ul0">MEM</span><span class="mbt"><i class="id" style="width:66%"></i></span><span class="mbn">66%</span></div></div><span class="sc id">iDRAC</span><span class="note" style="white-space:nowrap">OS 접속 실패</span></div>
+                <div class="tip" role="tooltip" style="top:-6px;right:calc(100% + 10px);width:400px">
+                  <div class="tt"><span>iDRAC 에서 읽은 값입니다</span><span class="sc id sp">iDRAC</span></div>
+                  <div class="try">
+                    <div class="tl"><span class="no2">1</span><span>OS(SSH) — <span class="bad2">실패</span> · 접속 시한 초과 · 06:35</span></div>
+                    <div class="tl"><span class="no2">2</span><span>iDRAC — <span class="ok2">읽음</span> · CPU 41% · 메모리 66% · 06:36</span></div>
+                  </div>
+                  <div class="fx">
+                    <span class="k">OS 마지막 값</span><span class="v">어제 22:10 · CPU 44% · 메모리 67%</span>
+                    <span class="k">OS 주소</span><span class="v mono">10.20.31.42</span>
+                  </div>
+                  <div class="ac"><b>OS 접속이 되면</b> 다음 수집 주기부터 다시 OS 값(파랑)으로 보입니다.</div>
+                  <div class="lk"><a href="#">베어메탈 사용률 › 이 서버</a></div>
+                </div>
+              </td>
+              <td class="num">492 W</td></tr>
+            <tr><td style="height:48px"><span class="nm"><span class="sd ok"></span>kr-ora-rac03</span></td><td>PowerEdge R750 <span class="dim mono">7XK2P03</span></td><td><span class="bdg c">중앙</span></td><td class="dim">없음</td>
+              <td><div class="ucell"><div class="bars"><div class="mb"><span class="ul0">CPU</span><span class="mbt"><i class="os" style="width:29%"></i></span><span class="mbn">29%</span></div><div class="mb"><span class="ul0">MEM</span><span class="mbt"><i class="id" style="width:58%"></i></span><span class="mbn">58%</span></div></div><div class="chips"><span class="sc os">OS</span><span class="sc id">iDRAC</span></div><span class="note" style="white-space:nowrap">메모리만 iDRAC</span></div></td>
+              <td class="num">465 W</td></tr>
+            <tr><td style="height:48px"><span class="nm"><span class="sd ok"></span>kr-ora-rac04</span></td><td>PowerEdge R750xa <span class="dim mono">9HT4Q13</span></td><td><span class="bdg c">중앙</span></td><td class="dim">없음</td>
+              <td><div class="ucell"><div class="bars"><div class="mb"><span class="ul0">CPU</span><span class="mbt"><i class="id" style="width:27%"></i></span><span class="mbn">27%</span></div><div class="mb"><span class="ul0">MEM</span><span class="mbt"><i class="id" style="width:55%"></i></span><span class="mbn">55%</span></div></div><span class="sc id">iDRAC</span><span class="note" style="white-space:nowrap">OS 계정 없음</span></div></td>
+              <td class="num">463 W</td></tr>
+            <tr><td style="height:48px"><span class="nm"><span class="sd ok"></span>kr-ora-rac05</span></td><td>PowerEdge R750 <span class="dim mono">7XK2R03</span></td><td><span class="bdg c">중앙</span></td><td class="dim">없음</td>
+              <td><div class="ucell"><div class="bars"><div class="mb"><span class="ul0">CPU</span><span class="mbt"><i class="os" style="width:31%"></i></span><span class="mbn">31%</span></div><div class="mb"><span class="ul0">MEM</span><span class="mbt"><i class="os" style="width:47%"></i></span><span class="mbn">47%</span></div></div><span class="sc os">OS</span></div></td>
+              <td class="num">478 W</td></tr>
+            <tr><td style="height:48px"><span class="nm"><span class="sd ok"></span>kr-ora-dev02</span></td><td>PowerEdge R650 <span class="dim mono">4BN7R53</span></td><td><span class="bdg c">중앙</span></td><td class="dim">없음</td>
+              <td><div class="ucell"><span class="nx"><span class="nv">CPU · MEM —</span><span class="nr"><span class="nd"></span> OS 계정 없음 · iDRAC 값 없음</span></span><span class="sc no">없음</span></div></td>
+              <td class="num">478 W</td></tr>
+          </tbody>
+        </table>
+
+        <div class="ord">
+          <span class="rk dim">읽는 순서</span>
+          <span class="st2"><span class="sw os"></span>① OS(SSH)</span><span class="arr">안 되거나 값이 없으면 →</span>
+          <span class="st2"><span class="sw id"></span>② iDRAC</span><span class="arr">그래도 없으면 →</span>
+          <span class="st2"><span class="sw no"></span>값 없음 + 이유</span>
+          <span class="sp note">지표마다 따로 정합니다 — CPU 는 OS, 메모리는 iDRAC 일 수 있습니다</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":700}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

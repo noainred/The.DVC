@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>IP 변화 페이지와 채널 알림 예시</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.5}
+a{color:#60a5fa}a:hover{color:#93c5fd}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+.card{background:linear-gradient(180deg,#141b2d,#111726);border:1px solid #243049;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,.4)}
+.muted{color:#8b9bb4}
+.badge{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap}
+.badge.green{background:rgba(34,197,94,.15);color:#4ade80}
+.badge.amber{background:rgba(245,158,11,.15);color:#fbbf24}
+.badge.red{background:rgba(239,68,68,.15);color:#f87171}
+.badge.gray{background:rgba(139,155,180,.15);color:#8b9bb4}
+.badge.blue{background:rgba(59,130,246,.15);color:#60a5fa}
+.badge.purple{background:rgba(168,85,247,.15);color:#c084fc}
+.badge.teal{background:rgba(20,184,166,.16);color:#2dd4bf}
+.tab{padding:8px 14px;border-radius:8px;cursor:pointer;color:#8b9bb4;border:1px solid transparent;background:none;font:inherit;font-size:13px;font-weight:600;white-space:nowrap}
+.tab.active{color:#fff;background:#3b82f6;border-color:#3b82f6}
+.chip{padding:7px 12px;border-radius:8px;cursor:pointer;border:1px solid #243049;background:#1a2236;color:#8b9bb4;font:inherit;font-size:12px;font-weight:600;white-space:nowrap}
+.chip.on{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.grp{font-size:11px;color:#8b9bb4;padding:0 4px 0 10px;white-space:nowrap}
+.input{box-sizing:border-box;background:#141b2d;border:1px solid #243049;color:#e6edf6;padding:7px 12px;border-radius:8px;font:inherit;font-size:13px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+thead th{text-align:left;padding:10px 12px;background:#1a2236;color:#8b9bb4;font-weight:600;font-size:11px;letter-spacing:.5px;white-space:nowrap;border-bottom:1px solid #243049}
+tbody td{padding:9px 12px;border-bottom:1px solid rgba(36,48,73,.5);vertical-align:top}
+tbody tr:last-child td{border-bottom:none}
+.ip{color:#3b82f6;font-weight:700;background:none;border:none;padding:0;font:inherit;font-weight:700;cursor:pointer;white-space:nowrap}
+.new{outline:2px dashed rgba(34,211,238,.6);outline-offset:3px}
+.msg{border:1px solid #243049;border-radius:10px;background:#0f1626;padding:12px 14px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.msg .h{display:flex;align-items:center;gap:8px;font-size:12px;color:#8b9bb4}
+.msg .t{font-weight:700;font-size:13.5px}
+.msg .b{font-size:12.5px;line-height:1.7;overflow-wrap:anywhere}
+</style>
+</helmet>
+<div style="box-sizing:border-box;padding:20px 24px 28px;max-width:1240px;display:flex;flex-direction:column;gap:14px;min-width:0">
+
+  <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px">
+    <span style="font-size:15px;font-weight:700">센터별 IP 관리대장 › IP 변화</span>
+    <div class="muted" style="font-size:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <span style="display:inline-block;width:22px;height:12px;border:2px dashed rgba(34,211,238,.6);border-radius:3px"></span>
+      <span>청록 표시 = 새로 생기는 것 · 주소 · 이름 · 에이전트는 전부 가상</span>
+    </div>
+  </div>
+
+  <div class="card" style="padding:8px 10px;display:flex;flex-wrap:wrap;align-items:center;gap:2px">
+    <span class="grp">IP 대장</span>
+    <button class="tab">대장 목록</button>
+    <button class="tab">서브넷 대장</button>
+    <button class="tab">추천 기능 30선</button>
+    <button class="tab">네트워크 맵</button>
+    <span class="grp">대역</span>
+    <button class="tab">대역 정책</button>
+    <span class="grp">스캔</span>
+    <button class="tab">스캔 대역·설정</button>
+    <button class="tab">스캔 상태</button>
+    <button class="tab">스캔 로그</button>
+    <button class="tab active new">IP 변화</button>
+    <span class="grp">설정·데이터</span>
+    <button class="tab">IPMS 설정</button>
+    <button class="tab">CSV 가져오기·내보내기</button>
+  </div>
+
+  <div class="card" style="padding:16px 18px;display:flex;flex-direction:column;gap:12px">
+    <div style="display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:8px">
+      <b style="font-size:14px">IP 변화 — 스캔이 본 변화 기록</b>
+      <span class="muted" style="font-size:12px">최근 30일 · 62건 · 알림 규칙은 <a href="AlertRules.dc.html">설정 › 알림</a> 에서 켭니다</span>
+    </div>
+
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px">
+      <button class="chip on">전체 (62)</button>
+      <button class="chip">충돌 의심 (2)</button>
+      <button class="chip">MAC 변경 (5)</button>
+      <button class="chip">새 미등록 IP (31)</button>
+      <button class="chip">예약 IP 사용 시작 (3)</button>
+      <button class="chip">호스트명 변경 (9)</button>
+      <button class="chip">DNS 불일치 (12)</button>
+      <span style="flex:1 1 auto"></span>
+      <span class="input" style="color:#8b9bb4;min-width:200px">IP · 이름 · MAC 검색</span>
+      <span class="input" style="color:#e6edf6">에이전트 전체</span>
+    </div>
+
+    <div style="overflow-x:auto;border-radius:10px;border:1px solid #243049;min-width:0">
+      <table style="min-width:1060px">
+        <thead><tr><th>시각</th><th>종류</th><th>IP</th><th>내용</th><th>에이전트</th><th>알림</th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="mono muted" style="white-space:nowrap;font-size:12px">11-13 10:05</td>
+            <td><span class="badge red">충돌 의심</span></td>
+            <td><button class="ip">10.1.0.25</button></td>
+            <td>vCenter 는 VM <b>app-ap-0025</b> <span class="mono muted" style="font-size:12px">00:50:56:01:00:32</span> 의 IP 로 아는데, 스캔에서는 <span class="mono">F4:8E:38:2A:91:0C</span> <span class="muted">(Dell)</span> 가 응답했습니다</td>
+            <td style="white-space:nowrap">이 포탈에서 직접</td>
+            <td><span class="badge green" title="Slack · 메일로 보냈습니다">보냄</span></td>
+          </tr>
+          <tr>
+            <td class="mono muted" style="white-space:nowrap;font-size:12px">11-13 10:05</td>
+            <td><span class="badge amber">MAC 변경</span></td>
+            <td><button class="ip">10.210.5.40</button></td>
+            <td><span class="mono">00:1B:21:7A:44:10</span> <span class="muted">(Intel)</span> → <span class="mono">3C:EC:EF:12:9B:E2</span> <span class="muted">(Super Micro)</span></td>
+            <td style="white-space:nowrap">이 포탈에서 직접</td>
+            <td><span class="badge green">보냄</span></td>
+          </tr>
+          <tr>
+            <td class="mono muted" style="white-space:nowrap;font-size:12px">11-13 09:41</td>
+            <td><span class="badge blue">새 미등록 IP</span></td>
+            <td><button class="ip">10.220.3.87</button></td>
+            <td>처음 응답 · <b>PRN-3F-02</b> <span class="badge purple" style="font-size:10px">NetBIOS</span> · <span class="mono">00:1E:0B:55:C0:71</span> <span class="muted">(HP)</span> · 열린 포트 80 · 443 · 9100</td>
+            <td style="white-space:nowrap">edge-site-a</td>
+            <td><span class="badge green">보냄</span></td>
+          </tr>
+          <tr>
+            <td class="mono muted" style="white-space:nowrap;font-size:12px">11-13 09:41</td>
+            <td><span class="badge blue">새 미등록 IP</span></td>
+            <td><button class="ip">10.220.3.88</button></td>
+            <td>처음 응답 · 이름 없음 · <span class="mono">00:50:56:9A:11:04</span> <span class="badge teal" style="font-size:10px" title="VMware 가상 NIC 의 MAC 대역 — vCenter 에 등록되지 않은 가상 머신일 수 있습니다">가상 NIC</span> · 열린 포트 22</td>
+            <td style="white-space:nowrap">edge-site-a</td>
+            <td><span class="badge green">보냄</span></td>
+          </tr>
+          <tr>
+            <td class="mono muted" style="white-space:nowrap;font-size:12px">11-13 08:05</td>
+            <td><span class="badge amber">예약 IP 사용 시작</span></td>
+            <td><button class="ip">10.210.5.200</button></td>
+            <td>관리상태 <b>예약</b>(담당 김OO · 만료 2026-12-31) 인 IP 가 응답하기 시작했습니다 · 열린 포트 3389</td>
+            <td style="white-space:nowrap">이 포탈에서 직접</td>
+            <td><span class="badge gray" title="이 종류의 알림 규칙이 꺼져 있습니다">규칙 꺼짐</span></td>
+          </tr>
+          <tr>
+            <td class="mono muted" style="white-space:nowrap;font-size:12px">11-13 07:05</td>
+            <td><span class="badge amber">호스트명 변경</span></td>
+            <td><button class="ip">10.210.5.60</button></td>
+            <td><span class="badge purple" style="font-size:10px">NetBIOS</span> FS-OLD → <b>NAS-BACKUP</b></td>
+            <td style="white-space:nowrap">이 포탈에서 직접</td>
+            <td><span class="badge gray">규칙 꺼짐</span></td>
+          </tr>
+          <tr>
+            <td class="mono muted" style="white-space:nowrap;font-size:12px">11-13 07:05</td>
+            <td><span class="badge gray">DNS 불일치</span></td>
+            <td><button class="ip">10.210.5.21</button></td>
+            <td>역DNS 이름 <b>lnx-batch-01.corp.example</b> 의 정방향 주소가 <span class="mono">10.210.7.14</span> 입니다(이 IP 가 아님)</td>
+            <td style="white-space:nowrap">이 포탈에서 직접</td>
+            <td><span class="muted" title="DNS 불일치는 기록만 하고 알리지 않습니다">기록만</span></td>
+          </tr>
+          <tr>
+            <td class="mono muted" style="white-space:nowrap;font-size:12px">11-12 23:41</td>
+            <td><span class="badge blue">새 미등록 IP</span></td>
+            <td><span class="muted">73개</span></td>
+            <td>한 번의 스캔에서 새 IP 73개 — 묶음 상한을 넘어 목록 없이 요약만 기록했습니다(대역 변경 · 장애 복구일 수 있습니다) · <a href="#">대장에서 보기</a></td>
+            <td style="white-space:nowrap">edge-site-b</td>
+            <td><span class="badge green">요약 1건</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <span class="muted" style="font-size:12px">IP 를 누르면 그 IP 의 상세 창이 열립니다. 이 페이지와 알림은 스캔 결과에서 나오므로 대장의 스캔 행과 같이 <b style="color:#e6edf6">범위가 지정된 계정에는 보이지 않습니다.</b></span>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:8px">
+    <b style="font-size:13px">채널로 나가는 알림 — 스캔 한 번 · 종류 하나에 한 건(묶음)</b>
+    <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px">
+      <div class="msg new">
+        <div class="h"><span class="badge red">위험</span><span>Slack · 메일</span></div>
+        <div class="t">[IP 관리] 충돌 의심 1건 — 이 포탈에서 직접</div>
+        <div class="b">10.1.0.25 — vCenter 는 VM app-ap-0025(00:50:56:01:00:32)의 IP 로 아는데 스캔에서는 F4:8E:38:2A:91:0C(Dell)가 응답했습니다.<br><span class="muted">11-13 10:05 스캔 · 포탈 › IP관리 › IP 변화</span></div>
+      </div>
+      <div class="msg new">
+        <div class="h"><span class="badge amber">경고</span><span>Slack · 메일</span></div>
+        <div class="t">[IP 관리] 새 미등록 IP 2개 — edge-site-a</div>
+        <div class="b">10.220.3.87 PRN-3F-02(NetBIOS) · HP · 포트 80,443,9100<br>10.220.3.88 이름 없음 · VMware 가상 NIC · 포트 22<br><span class="muted">11-13 09:41 스캔 · 포탈 › IP관리 › IP 변화</span></div>
+      </div>
+      <div class="msg new">
+        <div class="h"><span class="badge amber">경고</span><span>Slack · 메일</span></div>
+        <div class="t">[IP 관리] 새 미등록 IP 73개 — edge-site-b</div>
+        <div class="b">한 번의 스캔에서 새 IP 가 묶음 상한을 넘었습니다. 대역을 넓혔거나 장애에서 복구된 것일 수 있어 목록은 싣지 않았습니다.<br><span class="muted">11-12 23:41 스캔 · 포탈 › IP관리 › IP 변화</span></div>
+      </div>
+    </div>
+    <span class="muted" style="font-size:12px">알림 본문에는 IP · 이름 · MAC · 제조사 · 열린 포트만 싣습니다. 한 건에 최대 10줄이고 나머지는 ‘외 n개’ 로 줄입니다.</span>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1240,"height":1180}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

@@ -12,9 +12,15 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
 process.env.COLLECTOR_HTTP_ALLOW = '*'; // 2026-10-09 S-09 이후 원격 http 등록은 예외·허용 목록만 — 이 테스트는 평문 픽스처를 쓴다
 
-const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'dvc-2604a-'));
+const CFG = tmpDir('dvc-2604a-');
 Object.assign(process.env, {
   CONFIG_DIR: CFG, CENTRAL_TOKEN: 'shared-2604a', DATA_SOURCE: 'live', AUTH_ENABLED: 'true',
   IPAM_WRITE_WORKER: '0', SSRF_ALLOW_LOOPBACK: 'true',
@@ -330,3 +336,7 @@ test('EDGE2604-01 bmusage: 호스트를 못 읽은 vCenter 로 귀속되거나 �
     assert.deepEqual(tg.hostsUnread?.vcenters, ['vcA']);
   } finally { fs.writeFileSync(path.join(CFG, 'vcenters.json'), JSON.stringify({ vcenters: [] })); }
 });
+
+// v3.18.8: 정리 훅은 파일 끝에서 등록한다 — 시험 사이에 최상위 await 가 있으면 앞 시험이 끝난 시점에 루트 after 가 먼저 돌아
+//   뒤 시험이 쓸 폴더를 지운다(node 22 실측 — audit2590 이 그렇게 깨졌다).
+test.after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });

@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>값 없음 사유 툴팁 — 구조 · 표시 · 동작 규칙</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./bmf.css">
+<link rel="stylesheet" href="./bmf2.css">
+<link rel="stylesheet" href="./why.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+</style>
+</helmet>
+<div class="root" style="width:1000px;height:640px;padding:18px 20px;gap:12px">
+
+  <div class="card st">
+    <h3>툴팁의 구조</h3>
+    <div style="display:flex;gap:16px;align-items:flex-start">
+      <div class="tip s" role="tooltip" style="width:430px;flex:none">
+        <div class="tt"><span class="an">1</span><span>CPU · 메모리 값이 없습니다</span><span class="tn g sp">수집 대상 아님</span><span class="an">2</span></div>
+        <div class="rs"><span class="an">3</span><span><b>OS 계정이 등록되지 않았습니다.</b> iDRAC 으로는 CPU · 메모리를 읽지 못했습니다.</span></div>
+        <div style="display:flex;gap:8px;align-items:flex-start"><span class="an">4</span>
+          <div class="fx" style="flex:1"><span class="k">마지막 값</span><span class="v">없음 — 수집한 적이 없습니다</span><span class="k">판정한 시각</span><span class="v">06:38</span></div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:flex-start"><span class="an">5</span>
+          <div class="ac" style="flex:1"><b>이렇게 하면 보입니다</b> — OS 계정을 등록하면 다음 주기부터 나옵니다.</div>
+        </div>
+        <div class="lk"><span class="an">6</span><a href="#">베어메탈 사용률 › 누락 점검</a><a href="#">OS 계정 등록</a></div>
+      </div>
+      <ul class="ul" style="flex:1;min-width:0">
+        <li><span class="an">1</span><span><b style="color:#e6edf6">무엇이 없는가</b> — 칸 이름을 문장으로. ‘데이터 없음’ 같은 말은 쓰지 않는다.</span></li>
+        <li><span class="an">2</span><span><b style="color:#e6edf6">분류 표지</b> — 수집 대상 아님 · 오래됨 · 수집 실패 · 확인 못 함 넷 중 하나. 칸의 점 색과 같다.</span></li>
+        <li><span class="an">3</span><span><b style="color:#e6edf6">왜</b> — 서버가 판정한 사유 한 문장. 모르면 ‘확인하지 못했습니다’.</span></li>
+        <li><span class="an">4</span><span><b style="color:#e6edf6">확인된 사실</b> — 마지막 값과 시각 · 같은 이유의 대수 · 판정한 시각. 없는 줄은 빼고 지어내지 않는다.</span></li>
+        <li><span class="an">5</span><span><b style="color:#e6edf6">어떻게 하면 보이는가</b> — 풀 방법이 있으면 그 방법, 없으면 ‘확인할 곳’.</span></li>
+        <li><span class="an">6</span><span><b style="color:#e6edf6">바로가기</b> — 그 화면으로 가는 링크. 권한이 없는 화면은 싣지 않는다.</span></li>
+      </ul>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px">
+    <div class="card st">
+      <h3>칸에 보이는 표시</h3>
+      <div class="mini" style="gap:8px">
+        <span class="ln"><span style="width:150px;flex:none"><span class="mb" style="justify-content:flex-start"><span class="mbt"><i style="width:38%"></i></span><span class="mbn">38%</span></span></span><span class="dim">값 있음 — 표시 없음</span></span>
+        <span class="ln"><span style="width:150px;flex:none"><span class="mb" style="justify-content:flex-start"><span class="mbt"></span><span class="mbn">0%</span></span></span><span class="dim">0 은 값이다 — 빈 값처럼 그리지 않는다</span></span>
+        <span class="ln"><span style="width:150px;flex:none"><span class="nx r1"><span class="nv">—</span><span class="nr"><span class="nd"></span> OS 계정 없음</span></span></span><span class="dim">회색 점 — 수집 대상 아님</span></span>
+        <span class="ln"><span style="width:150px;flex:none"><span class="nx r1"><span class="nv">—</span><span class="nr"><span class="nd w"></span> 오래됨 · 2시간 전</span></span></span><span class="dim">호박색 점 — 오래됨</span></span>
+        <span class="ln"><span style="width:150px;flex:none"><span class="nx r1"><span class="nv">—</span><span class="nr"><span class="nd r"></span> 수집 실패</span></span></span><span class="dim">빨간 점 — 시도했지만 실패</span></span>
+        <span class="ln"><span style="width:150px;flex:none"><span class="nx r1"><span class="nv">—</span><span class="nr"><span class="nd u"></span> 확인 못 함</span></span></span><span class="dim">빈 원 — 이유를 모름</span></span>
+      </div>
+      <p>‘—’ 아래 짧은 글자가 이유다 — 올리지 않아도 읽힌다. 색만으로 가르지 않고 글자를 함께 쓴다. 값이 없으면 단위를 붙이지 않는다.</p>
+    </div>
+
+    <div class="card st">
+      <h3>동작</h3>
+      <ul class="ul">
+        <li><i></i><span>마우스를 올리면 잠깐 뒤에 뜨고, 툴팁 안으로 옮겨 가도 닫히지 않는다(링크를 누를 수 있게).</span></li>
+        <li><i></i><span>키보드 — 탭으로 칸에 닿으면 뜨고 Esc 로 닫는다. 칸은 실제 버튼이다.</span></li>
+        <li><i></i><span>터치 — 누르면 아래에서 시트가 올라온다(④).</span></li>
+        <li><i></i><span>표 가장자리에서는 반대쪽으로 뒤집고, 화면 밖으로 나가지 않는다.</span></li>
+        <li><i></i><span>같은 이유가 여럿이면 표 위 띠에 이유별 개수 — 누르면 그 서버만 거른다.</span></li>
+        <li><i></i><span>사유는 서버가 판정해 응답에 싣는다. 화면이 추측하지 않는다 — 사용률은 이미 있는 ‘누락 점검’ 의 사유를 그대로 쓴다.</span></li>
+        <li><i></i><span>비관리자 · 범위 계정 판본에는 계정 이름 · 주소 · 엣지 이름이 없는 문구를 쓴다.</span></li>
+      </ul>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1000,"height":640}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

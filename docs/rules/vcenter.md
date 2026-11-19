@@ -27,6 +27,9 @@
 - v2.898 — vCenter 알람 · 최근 작업 · 권한 목록 · Linked Mode · 업데이트 · vLCM(`vcinfo/`) + 스냅샷 트리 · VM NIC. 캐시는 스냅샷 vCenter 객체 밖이고 호출은 읽기 전용뿐이다
 - v2.901 — 리소스 풀 설정(`vcinfo` pools) · NIC 팀 구성(hcfg.net teaming) · 호스트별 DS 마운트(dscfg mounts) · VMXNET3 권장(nic-legacy) · Linked 범위 가림 · 엣지 vcInfo 계약(키 없음 = 유지 · 낡음 · 만료)
 - v2.906 — 분산 포트그룹 팀 구성 · LACP · VLAN(`vcinfo` dvpg — 6시간 · 이미 받은 포트그룹 moref 만 · Enhanced LACP 의 LAG)
+- v2.935 — ESXi 경로 카운터(`storpath/` — storagePath 그룹 · 한 시간마다 5분 표본 · 비율만 실측)
+- v3.2.1(코드·테스트 표지는 v3.0.1) — vim25 데이터 객체는 스키마 원소 순서로 보낸다(NIC connectable — `vcenter/connectInfo.js` 하나 · 장치 edit 은 읽은 본문 그대로 + connectable 만 교체)
+- 54회차 F4 · F5 — VM 사양 변경 · SOAP 호스트 용량의 못 읽음은 null(0 아님) · 현재 값을 모르면 변경을 막는다 · 용량 판정 서버 ↔ 웹 한 벌
 - (원래 5751행) v2.701 — 클러스터 HA·DRS 점검(A6) + 호스트 네트워크(A10). 클러스터 구성은 클러스터 전용 캐시(`clustercfg/`)이고 vcenter.clusterCfg
 
 ## 본문
@@ -154,6 +157,20 @@
   · `/vms/by-vcenter`: 법인 목록은 **범위가 먼저**(요청 vcenterId·region 으로 넓힐 수 없다 · 범위 밖 법인 이름도 싣지 않는다) · 평균은 구동 VM · 미수집 제외(`vmTotals.usageAvg` — /vms 와 한 벌) ·
     합계 줄 평균은 법인 평균의 평균이 아니다 · 모르는 법인(첫 수집 중·연결 실패·인증 정지이며 VM 0)은 null · 목록 밖 vCenter 의 VM 은 `unlisted` 줄 · memoJson + `scopeKey` + 설정 rev.
   · `/vms` totals 계산은 `inventory/vmTotals.js` 로 **글자 그대로** 옮겼다(vmDist2746 ④ 바이트 대조 통과) — 합의 순서를 바꾸지 말 것(부동소수).
+  · **v3.21.0 `/vms/insight`(VM 탭 '분석' 보기 · 설계 `docs/design/vm-insight` · 집계 `inventory/vmInsight.js` · 회귀 `server/test/vmInsight3210.test.js`)**: **판정을 새로 하지 않는다** —
+    조치 필요 · 신호 = `vmSignalsOf` · 사용률 칸 = `usageBinOf` 를 10% 로 접은 것(90%↑ = 과부하 칸) · 평균 = `usageAvg` 규칙 · 스냅샷 지난 일수 = `hygieneFindings` snap-age 사실 ·
+    OS 계열 = `osKind` · Tools = `toolsRead` + `TOOLS_NEED_UPGRADE` · 모르는 법인 = `corpUnknownOf`(수 전부 null). **법인(vCenter)마다 한 줄**을 주고 **화면이 고른 줄을 더한다**
+    (바로가기 복수 선택에 서버 왕복 없음 — 그래서 `vcenterId` · `vcenterIds` 를 받지 않는다 · 범위가 먼저 · `region` 만). 줄의 값은 더할 수 있는 모양이다: 평균은 `{ sum, n }` ·
+    분포는 칸별 수 · OS 종류는 법인마다 50종까지(상위 8 만 주면 여러 법인 합의 상위 8 이 틀린다 — 접기는 화면) · 상위 목록은 법인마다 N(합집합의 상위 N 은 법인별 상위 N 의 합집합 안).
+    기준값(스냅샷 기준 일수 · 구간 경계 · 크기 칸 · N)은 `thresholds` 로 싣는다(화면에 박지 않는다). 법인별 합 = `/vms` totals · signalCounts(테스트가 대조). memoJson + `scopeKey` + 설정 rev · VM 사이 `createYielder`.
+  · **v3.22.0 `/hosts/insight`(Hypervisor 탭 '분석' 보기 · 설계 `docs/design/host-insight` · 라우트 `routes/api/hostInsight.js` · 집계 `vcenter/hostInsight.js` · 회귀 `server/test/hostInsight3220.test.js`)**:
+    `/vms/insight` 와 같은 꼴(법인마다 한 줄 · 화면이 고른 줄을 더한다 · `vcenterId` · `vcenterIds` 받지 않음 · 범위가 먼저 · `region` 만). **판정을 새로 하지 않는다** —
+    법인 · 클러스터 줄(상태 · 용량 · 여유 · HA · 수용 제어 · DRS · N+1) = `/hosts/corp` 의 `hostCorpOf` 를 같은 입력으로 · 확인 대상 · 과부하(CPU > 90) · 끊김 · 못 읽음 = `platformSummary.hostsSection` ·
+    하드웨어 · 예기치 않은 재부팅 = `/hosts/checks` 의 `hostChecksOf` + `rebootsOf`(권한 `accessOf` 그대로 — 없는 묶음은 **키가 없다**, 0 이 아니다) · 사용률 칸 = `usageBinOf` 10% 접기 ·
+    VM 할당 · 호스트당 VM 수 = `vmSumsOf`(템플릿 제외). 클러스터 칸(`clusters[]`)은 hostCorp 클러스터 줄 + 법인마다 '독립 호스트' 한 줄(`hostStats` — N+1 판정 없음 null).
+    모델 · 버전 · 제조사는 법인마다 상한까지(접기는 화면) · 평균 `{ value(hostCorp 값), sum, n }`. 못 읽음(usageUnknown) · 용량 모름(capUnknown) · 여유 제외(headroom.excluded) · 설정 미수집(cfgUnknown)은 따로 센다 ·
+    개수 모르는 법인은 `unknown:true` + 수 전부 null. 캐시 = memoJson + `scopeKey` + 권한 판본(`accessOf` 결과 c/h/a — 역할 글자 아님) · 60초(재부팅이 로그 DB 를 읽는다) · 호스트 사이 `createYielder`.
+    ⚠ 이 라우트는 `/hosts/:id` 보다 먼저 등록한다. 법인별 합 = `/hosts/corp` 법인 줄 · `/hosts` 합계 · `/hosts/checks` 수(테스트가 실제 라우터로 대조).
   · 웹: 탭 `#/vms/<list|corp|attention>`(첫 조각 vms — 탭 id 그대로) + 도구 6개 링크(`#/tools/<k>` — 도구 키 그대로 · 권한 없으면 숨김 · 그 도구 화면 위에도 같은 줄 · `topMenu vm.also` 로 메뉴 위치 유지).
     법인별·조치 필요는 **15초 폴링 금지**(열 때 1회 + 다시 읽기 · 늦은 응답 버림). KPI 8장 → 타일 5장(값은 그대로 `unitText` — v2.629 고정 테스트 · vCore 는 vCPU 와 같은 값이라 한 줄).
   · VM 클릭 = 오른쪽 드로어(`VmDrawer` — 720 미만 전체 시트). **예전 모달 기능을 빠짐없이**: 버튼 6 · KV 17 · 섹션 6(`EntityDetail.jsx` 에서 꺼내 재사용 — 복제 금지).
@@ -178,6 +195,36 @@
     호스트 · 데이터스토어 모달은 그대로 · `EntityDetail type='vm'` 을 쓰는 다른 5곳(알람 · 탐색 · Platform VM 검색 · VmLink · 호스트 전체 페이지)은 **그대로**(질문 ① 기본값 — 다음 후보).
   · 드로어 · 개체 보기 요약의 24h 스파크(`vmSeries.useDaySeries`)는 `types=cpu,mem` 한 번(예전 2회 로그인 → 1회).
   · 남긴 것: 엣지 위임 vCenter 의 성능을 그 엣지 포탈에서 보는 링크(`findRemoteServer` 안내)는 넣지 않았다(옛 모달에도 없던 것 — 다음 후보).
+    → ✅ **v2.927 에 해결**(아래 v2.927 '엣지 위임 vCenter 의 성능' — 관리자에게 담당 엣지 포탈 링크).
+- **v2.927 — VM 상세 · 성능 그래프 후속 3건(코드·테스트 표지는 v2.926 — 준비 중 main 이 2.926.0(리눅스 성능)을 먼저 써서 2.927.0 으로 게시)(사용자 선택 A '성능 화면·드로어 후속' · 표준)**(웹 `components/EntityDetail.jsx` · `vmMetricsText.js` · `vmperf/VmPerfView.jsx` · `views/VCenters.jsx` ·
+  서버 `vcenter/authStopGate.js skipExtra` · `routes/api/vmMetrics.js edgeHint`. 회귀 `server/test/vmPerf2926.test.js`(3) · 웹 `views/vmPerf2926.test.jsx`(6) · `audit2744k`(링크)):
+  · **VM 상세는 드로어 한 벌** — `EntityDetail type='vm'` 은 `VmDrawer` 로 위임한다(동적 import — VmDrawer 가 EntityDetail 의 섹션을 import 하는 순환을 끊는다 · `rows:[]` 라 ‹ › 잠김 ·
+    signals 없는 항목은 '신호를 함께 받지 않았다'). 알람 · 탐색 · Platform VM 검색 · `VmLink`(도구 표 · 호스트 VM 목록 모달) · 호스트 전체 페이지가 자동으로 드로어다. 옛 VM 모달 본문은 지웠다.
+    모달(z 200) 안에서 연 드로어(z 151)는 그 모달의 쌓임 맥락 안에서 모달 본문 위에 그려진다(Chromium 확인) — 드로어 z 를 올리지 말 것(드로어가 여는 공용 Modal 이 아래로 간다).
+  · **엣지 위임 vCenter 의 성능**: 409 skip(site) 본문에 담당 엣지 포탈 주소 `edge:{id,name,url}` — **관리자만**(`isAdminReq` · 관리 주소 가림 규칙) · 수집 서버 등록부 `remoteAgent` 일치(id/name · 대소문자 무시) ·
+    url 없으면 싣지 않는다. 화면은 `edgePortalHref(edge, vcHash(...monitor))` 로 같은 화면 링크(새 창 · '따로 로그인' 안내). 판정 · 사유 문구 · 로그인 0 은 그대로(`respondIfVcAuthStopped` 의 `skipExtra` 훅).
+  · **vCenter 상세 `key={site.id}`**: 같은 페이지에서 해시로 다른 vCenter 의 개체로 건너뛰면 옛 `obj` 가 남아 '이 VM 이 없습니다' 가 떴다(A/B 재현) — vCenter 가 바뀌면 새로 마운트.
+- **v2.963 — 목록 없이 연 VM 드로어의 신호 · 남은 경로 실검증(사용자 선택 '①② · 표준')**(서버 `routes/api/inventory.js /vms/lookup` · 웹 `views/vms/{vmSeries.jsx useVmSignals·signalsFromLookup, VmDrawer.jsx}`.
+  회귀 `server/test/vmDrawerSig2963.test.js`(3 — `/vms?signals=1` 과 같은 VM 에 같은 신호 대조 · 원본 스냅샷 불변 · 범위 밖 null) · 웹 `views/vms/vmDrawerSig2963.test.jsx`(6)):
+  · `/vms/lookup?signals=1` → `{ vm:{...vm, signals}, snapAgeDays }` — 판정은 `/vms` 와 같은 `vmSignalsOf` + 같은 문맥(`vmSignalCtx`) · **사본에** 싣는다 · signals 없으면 응답 모양 그대로 · 범위 밖은 예전처럼 `{vm:null}`.
+  · 드로어는 `vm.signals` 가 배열이 아닐 때만 **열 때 1회** 묻는다(폴링 없음 · AbortController · 늦은 응답 버림) — 첫 렌더부터 '신호 확인 중'(받지 않았다고 말하지 않는다) ·
+    실패는 '읽지 못했습니다' · 그 VM 이 응답에 없으면 '찾지 못해 계산하지 못했습니다'(신호 없음으로 말하지 않는다) · 기준 일수는 prop(목록 응답) 우선.
+  · ⚠ **`/alarms` 에는 VM 알람이 없다**: 포탈 알람 규칙은 호스트(끊김 · 유지보수 · CPU · 메모리) · 데이터스토어(사용률 · 접근 불가)뿐이고(`soapClient.js` mkAlarm · 목 생성기 같음) REST 폴백은 알람을 만들지 않는다 —
+    알람 화면의 VM 클릭(`ENDPOINT.vm`)은 지금 실데이터로 일어나지 않는다. Chromium 은 VM 알람 행을 **주입**해 경로만 확인했다(드로어 · 신호 정상). vCenter 자체 트리거 알람은 별도 카드(`vcinfo`)다.
+  · 엣지 포탈 링크(v2.927)는 실 엣지 환경에 이 컨테이너가 닿지 않아 **409 응답을 주입**해 Chromium 1440/400 으로 확인했다(안내 아래 · 새 창 · 주소 = 엣지 url + 같은 해시 · `window.opener === null`).
+- **v2.975 — ESXi 호스트 상세도 드로어 한 벌(사용자 요청 '가상화 호스트 정보도 vm 처럼 깔끔하게' · 시안 `docs/design/host-drawer` · 컨펌 '기본값대로')**
+  (웹 `views/hosts/{HostDrawer.jsx, hostDrawerText.js}` · `components/EntityDetail.jsx`(호스트 가지 위임 · `HostCfgSection foldValues`) · `views/{VCenterDetail,Hosts}.jsx` · `views/vcd/treeRows.js treeHostRows` ·
+  `views/vms/vmSeries.jsx useDaySeries(…, { entity, delayMs })`. 서버 변경 없음. 회귀 웹 `views/hosts/hostDrawerText.test.js`(18) · `views/hosts/hostDrawer2975.test.jsx`(12) · `views/vcd/treeRows.test.js`(+3)):
+  · **호스트 모달은 없다** — `EntityDetail type='host'` 는 `HostDrawer`(동적 import · `rows=[]`)로 위임한다. 알람 · 탐색 Top-N · IP 관리 소유 호스트 · 통합 성능 모니터링이 자동으로 드로어다.
+    남은 모달은 데이터스토어뿐. `HostBasicRows` 는 개체 보기 요약 · 전체 페이지가 쓰므로 지우지 않는다. 드로어 뼈대는 VM 과 같은 `.vmh-drawer`(새 틀을 만들지 않는다).
+  · **판정을 새로 하지 않는다**: 신호 줄 = `hostChecksText.reasonBadges`(호스트 표 사유와 같은 목록 · 같은 순서 — 테스트가 대조) · 사실 줄 = `hostCfgText.findingDetail` · 임계값 숫자는 `CPU_ATTENTION_PCT`.
+  · **점검 묶음(`/hosts/checks`)은 vCenter 마다 1회**(드로어가 열려 있는 동안 기억 · 폴링 없음) — 호스트 표에서 열면 표가 가진 `checks.byId` 를 넘겨 **다시 묻지 않는다**(Chromium 확인: 요청 0).
+    못 받은 묶음(권한으로 빠진 `hw`·`boot` 키 · 수집 안 된 `veeam` · 실패)은 '이상 없음' 으로 세지 않고 `checksGap` 이 따로 말한다. 읽는 중에는 '확인 중'.
+  · **24시간 추이는 잠깐 기다렸다 조회**(`delayMs` 400ms) — ‹ › 로 빠르게 넘길 때 지나친 호스트마다 vCenter 로그인이 생기지 않게(Chromium 확인: 5번 넘겨도 마지막 1건). VM 드로어 기본값(0)은 그대로다 — **같은 문제가 VM 에도 있다(남긴 것)**.
+  · 끊김 · 무응답 호스트는 사용률 · 추이 · 구성 판정을 그리지 않는다(`—` · 단위 없음). 타일은 좁다(640px 에서 안쪽 약 110px) — **한 줄에 한 가지만**(처음 판본은 '32코어 · 72.5 / 76.8 GHz' 가 잘렸다).
+  · ‹ › 순서는 연 곳을 따른다: 트리 = `treeHostRows`(검색 중이면 일치한 호스트) · 호스트 표 = `DataTable onVisible` 이 준 행 · 그 밖 = 잠김. 폴링으로 값이 바뀌면 같은 id 의 최신 행을 그린다.
+  · `.vmh-acts > .login-btn, .logout-btn { margin: 0 }` — 공용 단추의 바깥 여백(로그인 화면용 4px)이 드로어 단추 줄을 어긋나게 했다(VM 드로어도 같이 고쳐졌다 · Chromium 확인).
+  · 실 vCenter · 엣지에서는 확인하지 못했다(이 컨테이너) — 끊긴 호스트 · 점검 호스트 · 점검 묶음 실패는 **응답을 주입**해 확인했다. 모달 안에서 연 호스트 드로어(IP 관리)는 따로 보지 않았다(VM 드로어와 같은 CSS).
 - ⚠⚠ **v2.697 — VM 구성 속성(B10)은 30초 인벤토리 요청에 싣지 않는다 — 오래된 VM 부터 주기당 상한만큼 다시 읽는 캐시다**
   (`server/src/vmcfg/`{parse.js(순수 파서·판정·엣지 정제),cache.js,collect.js} + `soapClient.js` 배선 + 웹 `views/vmcfg/vmCfgText.js` + `EntityDetail.jsx VmCfgSection`.
   회귀 `server/test/vmCfg2697.test.js`(변이 5/5) + 웹 `vmCfgText.test.js`(서버·웹 판정 대조)):
@@ -282,7 +329,7 @@
   · ⚠ 조회는 `INDEXED BY idx_events_tracked`(부분 인덱스) — 통계가 없으면 플래너가 `(vcenterId,ts)` 인덱스로 기간의 **모든 이벤트**를 훑었다(EXPLAIN 실측 — 테스트가 계획을 고정).
     옛 DB 는 `detail` 열을 table_info 로 확인해 더한다(v2.603 규칙). 2.702 이전 이벤트는 상세가 null 이고 화면이 개수로 밝힌다.
   · VM 은 이벤트 엔티티 **이름**으로 묶는다(동명 VM 구분 불가 — 화면이 말한다). 과다 이동 기준 = 7일에 10회를 기간에 비례(`churnThreshold`, 최소 3).
-  · 이벤트를 받은 적 없는 vCenter·수집 꺼짐·최소 심각도 > info 는 '이동 없음' 이 아니다(`coverageNote`). 읽기 상한 20,000(`truncated`).
+  · 이벤트를 받은 적 없는 vCenter·수집 꺼짐·최소 심각도 > info 는 '이동 없음' 이 아니다(`coverageNote`). 읽기 상한 20,000(`truncated`) → v2.932: 화면은 행을 모으지 않고 조각으로 흘려보내며 센다(`trackedEventsEach` · 누적기 `createMovesAcc`·`createChangesAcc` · 상한 `SCAN_MAX` 30만 · 잘리면 `coveredSince` — 그 시각 이후는 빠짐없이). CSV 만 `READ_MAX` 2만(시험 `vmChanges2932`).
   · VM 상세는 `/tools/vm-changes/of`(30일·20건, 범위 밖 VM 404) — 모달은 `white-space: nowrap` 을 물려받으므로 이력 줄에 `whiteSpace:'normal'` + 그리드 트랙 `minmax(0,1fr)` 이 필요하다
     (Chromium 판독에서 오른쪽이 잘려 발견 — 같은 원인으로 구성 점검·클러스터 칸의 각주도 잘리고 있어 함께 고쳤다).
   · ⚠ 정직 기록: 실장비 이벤트 본문(configChanges·PermissionAddedEvent)은 합성 입력으로만 확인했다.
@@ -293,7 +340,7 @@
   · 블록 추출은 선형 indexOf 이고 **태그 다음 글자가 공백·'>' 일 때만** 같은 태그다(`<rules>` 를 `<rule>` 로 읽지 않는다 — 테스트 고정). EVC 는 summary 를 읽었는데 키가 없으면 ''(꺼짐), summary 를 못 읽으면 null.
   · 판정: HA 를 켰는지 모르면 수용 제어·모니터링도 판정하지 않는다 · 단일 호스트 클러스터는 single-host 하나 · EVC 혼재는 **연결된 호스트**의 CPU 모델로만.
   · VM 상세의 '이 VM 의 규칙' 은 vmId 에서 **vCenter id 접두를 떼서** moref 를 얻는다(콜론 split 금지 — vCenter id 에 콜론이 있다). 상세 창은 `toolAllowed('cluster-check')` 를 먼저 본다(403 을 만들지 않게).
-  · 엣지 수신은 `sanitizeClusterCfgList`(아는 필드만·규칙 50·VM 참조 100·클러스터 500). **vcenter 객체의 다른 필드(solutions 등)는 여전히 정제하지 않는다**(기존 상태 — 별건).
+  · 엣지 수신은 `sanitizeClusterCfgList`(아는 필드만·규칙 50·VM 참조 100·클러스터 500). ~~vcenter 객체의 다른 필드(solutions 등)는 여전히 정제하지 않는다~~ → licenses·solutions 는 v2.742, **그 밖의 최상위 필드는 ✅ v2.938**(`central/vcenterTop.js` — 아는 키·형식만, 모르는 키는 이름·개수로 응답·콘솔에 · 수집기 키와 표를 대조하는 스윕 `vcenterTop2938`). 새 vcenter 필드를 수집기에 더하면 그 표에도 더할 것.
   · 네트워크(A10)는 호스트 캐시의 선택 경로 묶음 `noNetPath`(20대씩). 업링크 = 스위치 **직속 `<pnic>`**(브리지 nicDevice 아님) · 무차별 = **computedPolicy**(유효 정책) ·
     포트그룹 없는 표준 스위치는 판정에서 뺀다 · 링크 다운은 인벤토리 `host.nics[].link` 를 알 때만 · 포트그룹 드리프트는 목록이 잘렸으면(`pgsTotal > pgs.length`) 비교하지 않는다.
   · ⚠ 정직 기록: 실장비 응답(configurationEx·vswitch·proxySwitch XML)은 합성 입력으로만 확인했다. 위조 전송·MAC 변경은 vSS 기본값이 허용이라 판정하지 않았다(소음).
@@ -463,3 +510,27 @@
   - LACP: vDS `config.lacpGroupConfig` 의 LAG 가 활성 업링크에 있으면 그 LAG, 아니면 포트그룹 `lacpPolicy`. vDS 호출이 실패하면 이름만 다시 읽고 `lagError`(LACP 는 포트그룹 설정만) ·
     이름도 못 읽으면 `dvsError`(화면이 '짝짓지 못함' 으로 말한다 — 지어내지 않는다). 호스트와의 짝은 hcfg.net 의 분산 스위치 **이름**(`dvpgRowsForHost`).
   - 실 vCenter 로 확인하지 못했다(추정 — 응답 모양은 공식 바인딩 기준): `config.lacpGroupConfig` 경로가 받아지는지 · 3rd-party DVS(타입이 VmwareDistributedVirtualSwitch 가 아님)면 vDS 호출 전체가 실패한다(lagError · dvsError 로 남는다).
+
+- **ESXi 경로 카운터(v2.935 C-① — `server/src/storpath/`, 회귀 `test/sanStorPath2935.test.js`)**
+  - vCenter perf `storagePath` 그룹(읽기 · 쓰기 · 지연)을 FC HBA 가 있는 호스트만 **한 시간마다 5분(표본 15개)** QueryPerf 로 읽는다(실시간 20초 · instance `*`).
+    고RTT 함대에서 응답 크기를 묶으려는 선택 — 주기마다 200대(`STORPATH_PER_CYCLE`), 예산 10초 · 4대씩. 실시간 통계 수준 · 인스턴스 이름 형식은 실장비 미확인(추정).
+  - 경로 → 타깃 WWN 은 인스턴스 이름(`fc.<node>:<port>-fc.<node>:<port>-<dev>`) 또는 `vmhbaN:Cn:Tn:Ln` + 멀티패스 rt 표(`hcfg.mp.rt`)로 푼다. 못 풀면 그 경로는 세지 않는다(0 이 아님).
+  - 이력은 인메모리(호스트당 26개 — 5분 스냅샷 스윕)이고 귀속 엔진에는 **비율만** 넘긴다. 엣지가 보낸 `spath` 는 중앙에서 아는 필드만 정제한다(`sanitizeHostSpath`).
+  - v2.940: 못 푼 경로 인스턴스 이름의 원문 표본 5개(`unparsedSamples` — 120자 · 제어문자 제거 · 엣지 정제 포함)를 남기고 호스트 상세 '이름 못 푼 경로' 에 마우스를 올리면 보인다 — 이름 형식이 실장비 미확인이라 처음 붙은 현장에서 확인할 근거.
+- **v2.958 `/tools/vm-track` 의 `?region=`**(허브 범위 바): 사용자 범위(`scopedVcenterIds`)와의 **교집합**으로만 좁힌다(`vmtrack/scopeIds.js trackScopeIds`) · 맞는 vCenter 가 없으면 빈 Set(전체로 넓히지 않는다 — service 는 `scopeIds.has` 로만 거른다) · `vcenterId` 가 있으면 region 은 무시. 회귀 `test/vmtrackScope2958.test.js`.
+- **v3.2.1 — vim25 데이터 객체는 스키마 원소 순서로 보낸다(vCenter SOAP 역직렬화는 순서를 지킨다)**(코드·테스트 표지는 v3.0.1 — 준비 중 main 이 3.1.0 · 3.2.0 을 먼저 써서 3.2.1 로 게시 · 사용자 보고 'network 끊으려고 하는데 안 돼' · '전체 검증'). VM 사양 변경의 NIC 연결 해제가
+  'SOAP 500: Required property allowGuestControl is missing from data object of type VirtualDeviceConnectInfo' 로 늘 실패했다 — `startConnected · connected · allowGuestControl` 순서였다
+  (스키마: migrateConnect? · startConnected · allowGuestControl · connected · status?). NIC 추가도 같은 순서였다(같은 거부 추정).
+  - connectable 조립은 `server/src/vcenter/connectInfo.js` 하나(사양 변경 토글 · NIC 추가 · VM 복제 NIC 끊기). 밖에서 `<connectable><…>` 를 조립하면 소스 스윕이 막는다.
+  - 장치 edit 은 **읽은 장치 본문을 그대로** 되돌려 보내고 connectable 만 바꾼다(MAC · addressType · DVS 포트 · slotInfo 보존 — govc device.connect 와 같은 방식). `key`+`backing` 만으로 다시 만들면 빠진 칸을 vCenter 가 무엇으로 채울지 모른다.
+  - 사용자가 바꾸지 않은 `allowGuestControl` 은 읽은 값을 지킨다. 본문(`deviceInner`)과 `backingXml` 은 열거 불가 — GET `/vm/:id/hardware` 응답에 DVS connectionCookie 를 싣지 않는다.
+  - 새 vim25 쓰기(deviceChange · RelocateSpec 등)를 손으로 조립할 때는 govmomi `vim25/types` 필드 순서(= WSDL sequence)와 대조하는 테스트를 둘 것. 회귀 `server/test/nicConnectInfo301.test.js`(변이 9/9 · 반증 1인).
+  - 남긴 것(반증 판독 — 실환경 미확인): 프로비저닝 RelocateSpec 의 스토리지 정책이 `<profile><profile …><profileName>` 모양이다(스키마는 배열 원소 하나 + 필수 `profileId`) — 정책을 입력한 클론은 거부될 것으로 본다.
+- **v3.10.15 `/tools/vm-track` `vcenterList[].region`**: 화면의 리전 선택용(스냅샷 `location.region` 그대로 · 없으면 빈 글자). `?region=` 의 교집합 규약(v2.958)은 그대로.
+- **54회차 F4 · F5 — 못 읽은 하드웨어 수치는 null(0 아님)**(2026-11-16 · 회귀 `server/test/leftoverC56.test.js` · web `components/vmReconfigText.test.js`):
+  ① VM 사양 변경 `provision/reconfig.js parseHardware` 는 못 읽은(빈 값 · 수 아님 · 0 이하) vCPU · 코어/소켓 · 메모리 · 디스크 용량을 **null** 로 싣고, `buildReconfigSpec` 은
+  현재 값을 모르는 항목의 변경을 **막는다**(fail-closed — 라우트 400 · ReconfigVM_Task 를 보내지 않는다). '증설만' 검사의 기준을 0 으로 두지 말 것 — 어떤 값이든 '증설' 이 된다
+  (전원 OFF VM 은 vCenter 가 vCPU · RAM 감소를 받아들인다). 웹 창의 판정은 `components/vmReconfigText.js` 하나('—' · 입력 잠금 · 계획에 싣지 않음).
+  ② SOAP 호스트 용량(`vcenter/soapClient.js hostCapacityOf`)도 못 읽음 · 0 이하는 null · 총량을 모르면 사용률 null. 용량 판정은 서버 `store.hostCapacityKnown` ↔ 웹 `web/src/hostCapacity.js`
+  (세 칸 — 코어 · 총 MHz · 메모리)가 같은 입력에 같은 답이다(웹 `vcdVirt.virtSum` 도 이것 — 예전 두 칸). ⚠ 실 vCenter 가 끊긴 호스트 · 값 없는 VM 에 무엇을 주는지는 확인하지 못했다
+  (가짜 vCenter 의 '속성 없음 · 0' 만 고정). 예전 판 엣지는 못 읽은 용량을 0 으로 올린다 — 엣지가 업그레이드돼야 위임 vCenter 에도 반영된다.

@@ -71,11 +71,30 @@
     회귀 `test/audit2744fd.test.js`.
 - **토큰 검증은 `resolveTokenUser` 하나로**: `verifyToken`을 직접 호출해 `payload.role`을 신뢰하지 말 것 — tokenVersion 폐기·최신 역할 반영이 우회된다(WS 게이트웨이에서 실제로 뚫렸던 경로).
 - **central 엔드포인트의 agent 바인딩**: `routes/central.js` 미들웨어가 '개별 토큰 ↔ agent' 일치를 강제한다. 새 엔드포인트가 `?agent=`/`body.agent`로 데이터를 고르면 그 미들웨어를 우회하지 않게 할 것(자격증명 횡탈 차단).
+  ⚠ v2.977(심층 방어): agent 는 **글자만**(`agentClaimTypeIssue` 400) · 64자 넘는 주장은 원문으로도 대조. 운영은 index.js `queryNormalizer` 가 central 보다 먼저 배열을 글자로 바꿔 이미 403 이었다
+  (처음 '재현' 은 정규화 없는 맨 express 구성 — 정정). 정규화 순서를 central 뒤로 옮기지 말 것(회귀 `centralAgentType2977` 두 구성).
 - **자격증명 파일은 원자적 쓰기 + 로드 손상 보존**: `util/atomicWrite.js`의 `atomicWriteFileSync`로 쓰고(직접 `fs.writeFileSync` 금지), **로드 catch에서 파싱 실패 시 `preserveCorrupt(FILE)`로 `<file>.corrupt.<ts>` 보존** 후 빈 값 반환. 쓰기만 원자적이고 로드가 손상을 조용히 `[]`로 넘기면, 다음 저장이 온전했던 원본을 빈 목록으로 덮어써 전 자격증명이 영구 유실된다(3차 감사 지적 — vcenters/nsx/collectors/users 4종이 이 비대칭이었음). portal.env(CENTRAL_TOKEN)도 원자적으로 쓴다.
+- **7b SSH 키 저장소(`bmusage/onboard/keyStore.js` · `ssh-keys.json`)**: 관리 = 소유자 등급 + 본인 OTP(`reauth` 는 마지막 게이트) · 응답 · 감사 · 백업 · 엣지 push 에는 지문 · 공개키만
+  (번들 가림 `keyBundle.js` — 봉인본도 싣지 않음) · 손상이면 쓰기 거절(로드 먼저) · 주소가 바뀌면 `keyRef` · `credRef` 승계 없음 · 키가 없으면 비밀번호로 넘어가지 않음 ·
+  키 서버는 엣지 위임 잡에 싣지 않음 · **저장 비밀을 주소에 묶는 쓰기(CSV · bm-storage keyRef/credRef · iDRAC 사본 · 엣지 배포)도 소유자 등급 + OTP**(r2) ·
+  복호 실패 중 쓰기 거절 · 퇴역 키 접속 거부. **묶음 판정은 `bmusage/onboard/bindRule.js` 하나 · 등록부 `applyServerInput` 이 choke point** — `bindApproved === true` 는
+  게이트를 통과한 호출만 세운다(bm-storage 라우트 OTP 뒤 · 온보딩 `plan.binds` · 엣지는 행의 중앙 승인 `bindOk`) · 새 쓰기 경로도 이 함수를 지나게(r3 R-N1). **키 배치(폴더 · 허용 기능)는 쓰기 때도 접속 때와 같은 판정**(`onboard/placement.js keyPlacementIssue` — 분석 · bmBindCheck · 회전: 폴더 밖 거부 · 기능은 경고 — 4회차 D1). 상세 `docs/rules/security-api.md` 7b 항목 ⑨ ⑩ ⑪.
+- **8a 정비 창(`bmusage/maint/*` · `routes/api/bmMaint.js`)**: 억제를 **늘리는** 쓰기(법인 · 태그 · 12h 초과 창 만들기 · 고치기 전/후 · 재확인)는 소유자 등급(`isOwnerTier`), 줄이는 쓰기(지금 끝내기 · 지우기)는 쓰기 범위 ·
+  판정은 `maint/judge.js` 하나(서버 · 엣지 · 화면) · **억제에는 시한**(발생 끝 · 길이 상한을 계산에서도 · 반복 92일 재확인 · 엣지 배포본 24h) · 못 읽은 창 파일은 억제가 아니다 ·
+  인증 거부(authGuard)는 창과 무관 · 배포 인출은 개별 토큰만 · 엣지는 같은 `normalizeWindow` 로 다시 자른다. **서버 대상 = (법인, 키) 쌍**(판정 · 배포 · 쓰기 — IP 키는 법인끼리 겹친다) ·
+  12h 소유자 규칙은 **같은 서버를 덮는 창 전부(소유자 · 법인 · 태그 창 포함)의 합**(`store.coverNeedsOwner` · 재확인 포함 · approvedBy 는 기록만) · rev 없는 쓰기 409 · 해제 알림은 억제하지 않는다 · **재확인은 재확인 라우트 하나**(고치기는 confirmedAt 을 바꾸지 않는다 — 점검 반복 3회차) · 엣지 배포 history 창은 지난 구간 제외용이라 **지금 판정(억제)에서 뺀다**. 상세 `docs/rules/{idrac-server,security-api,edge}.md` 8a 항목.
+- **SSH exec 안 timeout 합 + 여유 ≤ 그 exec 시한**(8b 반증 F1 — 4 · 5단계부터의 결함): 주 명령은 exec 하나라 넘치면 그 주기 전 구획을 잃는다 — 새 구획 · exec 는 `test/bmTop8bBudget.test.js` 기계 산수를 지킨다(needs-restarting ↔ dnf 한 주기 하나).
+- **8b Top-N · 저활용 · 전력(`bmusage/{parse/linuxTop,topStore,idle,powerAgg}.js` · `routes/api/{bmTop,bmIdle,bmPower}.js`)**: Top-N 은 **같은 세션 별도 exec**(주 명령 밖 · 실패 격리) · **comm 만**(인자 · 환경 · 열린 파일 · kill 없음 —
+  top COMMAND 열은 셸 밖으로 내지 않는다) · 줄마다 고정 접두 · awk getline 으로 /proc 을 읽지 않는다(mawk 중단) · 권한 없는 I/O = null · 프로세스 사용자 이름은 관리자 판본만 원문 ·
+  전력 · 저활용은 **범위로 서버를 먼저 거른 뒤** 합한다 · 집계 cfg 에 설정 원본(전 법인 랙)을 넘기지 않는다 · 검토 쓰기 = (법인, 키) 쌍 · 404 → 403 · 비관리자는 계정 단서(gpdb)도 숨김 ·
+  저활용 활동은 포탈 수집 로그인 제외 · 랙 여유는 다 측정된 랙만 · 상세 `docs/rules/{idrac-server,security-api,edge,perf-db}.md` 8b 항목.
 - **소유자 경계는 서버측 강제**: `settingsOwners`(설정 소유 계정)처럼 UI가 숨기는 권한 경계는 서버에서도 검사한다(`routes/admin.js requireSettingsOwner`). 클라이언트 전용 게이트는 admin이 API를 직접 호출해 우회·소유자 목록 탈취가 가능하다.
   - ⚠ **소유자 등급 = 소유자 ∧ 전체 범위**(v2.744 AUTHZ-02, `routes/admin/shared.js requireSettingsOwner`): 소유자 목록에 있어도
     범위가 지정된 계정(scope.vcenters)은 403(`SETTINGS_OWNER_FULL_SCOPE_REASON`)이다. `/auth/me` 의 **`isSettingsOwner`(설정 메뉴 노출 —
     소유자 목록에 있는가) ≠ `settingsOwnerTier`(소유자 등급 라우트를 실제로 통과하는가)** — 화면이 소유자 등급 버튼을 잠글 때는 뒤의 값을 볼 것.
+  - ⚠ **공용 게이트의 쓰기 = 조회 ∧ 쓰기 전체**(6회차 A1 · `writeScopeDenial`): `fullScopeOnlyWith` · `requireSettingsOwner` 는 안전 메서드(GET · HEAD · OPTIONS)만 조회 범위로 보고 그 밖은 `isFullReadWriteScope`(던지면 거부) — 읽기성 POST 예외는 `{ readPost: true }` 로 최소(지금 cvp parse-preview 하나) · 등급 질의(`isOwnerTier`)는 `settingsOwnerGradeDenial`. 상세 `docs/rules/security-api.md`.
+    전체 점검 2회차 V-1: 라우트 안 인라인 검사 · `denyScopedRun` 도 같은 판정 하나 — **`auth/scopeMerge.js denyFleetWrite`**(쓰기 라우트에 `if (scopedVcenterIds(...)) 403` 을 새로 쓰지 말 것 · 회귀 `veeamFullAudit2`).
+    7회차: 쓰기 핸들러가 `scopedVcenterIds` 만 보면 결함이다 — 단건은 조회 밖 404 → 쓰기 밖 403(`writeScopedVcenterIds`), 설정 병합은 `writeMergeScope`, 사용자 관리는 `scopeWithinActor`(대상 조회 · 쓰기 ⊆ 요청자 — 권한 상승 재현 · `scopeWriteFullAudit7`).
   - **백업 라우트도 소유자 경계에 포함**: 백업 아카이브는 `portal.env`(AUTH_SECRET·CENTRAL_TOKEN)·
     `users.json`(TOTP 시크릿)·`vcenters.json` 등 자격증명 사본이라 `/api/admin/backup/*` 전부에
     `requireSettingsOwner`를 건다(v2.210). AUTH_SECRET이 새면 임의 계정 토큰 위조로 OTP 정책·
@@ -85,6 +104,7 @@
     뒤 세 가지는 `security-session.json`에 기록하지 않아 **UI 저장이 지울 수 없다** — 전원이 설정에서
     잠기는 사고의 복구 경로이므로 `fileSettingsOwners()` 합산을 제거하지 말 것.
 - **RDP 자격증명은 티켓으로**: RDP WS 게이트웨이는 username/password/domain을 URL 쿼리스트링에 싣지 않는다 — `proxy/rdpTicket.js`의 1회용 단기 티켓(`POST /api/remote/rdp-ticket`)으로 발급받아 쿼리엔 티켓 ID만 싣고 게이트웨이가 인메모리에서 조회한다(쿼리스트링은 상위 프록시 액세스 로그·브라우저 히스토리에 남음).
+- **WS 주소에 세션 토큰을 싣지 않는다**(132회차): 원격 콘솔 WS 는 1회용 단명 티켓 `wst=`(`proxy/wsTicket.js` · `POST /api/remote/ws-ticket` · rdp-ticket 응답)만 싣고, 게이트웨이가 꺼낸 토큰으로 예전과 같은 판정을 한다(`remoteUpgradeAuth`). 옛 `?token=` 수신은 다음 판에서 제거. 회귀 `wsTicket132`.
 - **서명 확인 화면 끄기(v2.809)는 env warn 과 같은 판정·시한부·소유자+OTP·root 확인 제외**(`upgrade/signatureOverride.js` · `signaturePolicy`) —
   `!runningAsRoot()`·`!t.fatal`·env 우선·`where:'offline'` 제외·상태 파일 등록·인증 꺼짐 409·복원 제외(RESTORE_EXCLUDE)·'지금' 기준 상한 중
   하나라도 빼면 회귀(`test/upgradeSigOverride2809.test.js` 변이 16건 · 반증 1인 M-1·M-2·L-1·L-3 반영).
@@ -114,7 +134,7 @@
   '부트스트랩 → 강제 등록 → 비번 폐기' 3단계로 도달한다. 이 3단계를 하나라도 빼면 안 된다:
   1. OTP 미등록 계정만 비밀번호 로그인 허용(최초 설치·계정 발급 직후 경로).
   2. 그 세션은 `mustEnrollOtp`가 붙고 **`requireEnrolled`가 /api 전 보호 라우터를 차단**한다
-     (`/api/auth/{me,totp/begin,totp/confirm}`만 열림). 새 보호 라우터를 mount 할 때
+     (`/api/auth/{me,totp/begin,totp/confirm}` 와 `/auth/logout` · `/auth/activity` 만 열림 — 19회차 B-3 정정: 뒤 둘은 의도된 것). 새 보호 라우터를 mount 할 때
      `authMiddleware` 뒤에 `requireEnrolled`를 빠뜨리면 등록 전 세션이 그 API를 쓸 수 있다.
   3. `confirmTotpEnroll`이 **passwordHash 삭제 + tokenVersion 인상**을 수행한다 — 이 삭제를
      제거하면 비밀번호 로그인 경로가 영구히 남아 정책이 무의미해진다. admin이면
@@ -171,7 +191,7 @@
     `ipInWriteScope`: 소유 vCenter∩allowed, 미귀속은 claimed 필수)에 scope 를 건다. **새 조회/집계/쓰기
     라우트를 추가하면 반드시 같은 패턴**(요청 필터보다 먼저 scope 교집합)을 적용하고, **memoJson 캐시
     라우트는 `extraKey: scopeKey(...)` 필수**(빠지면 무제한 계정 결과가 범위 계정에 캐시로 샌다 —
-    `/summary`·`/overview` 실제 사례). **vCenter 귀속 없는 데이터(스캔 발견물·미귀속 override·byVcenter
+    `/summary`·`/overview` 실제 사례). 범위 조각은 `util/scopeSig.js` 하나 — 글자 join · 'all' 표식 금지(쉼표 · 'all' id 충돌 — v3.23.2). **vCenter 귀속 없는 데이터(스캔 발견물·미귀속 override·byVcenter
     요약)는 범위 계정에 노출하지 않는다.** 단, 외부 프로그램이 공유하는 `ipam.db` 원장 자체(`syncLedger`)는
     무스코프 유지(외부 리더가 절단본을 받으면 안 됨 — 라우트에서만 scope 주입).
   - ✅ **수정됨(v2.313 보안 감사)**: 아래 조회 갭 2건을 `scopedVcenterIds` 교집합(요청 필터보다 먼저) + `requirePerm` 로 닫음.
@@ -223,6 +243,15 @@
   작업은 범위 계정에 밖이다. GET 은 조회 범위로 보여 주고 쓰기 밖 항목에 `writable:false` 를 달아 화면이 버튼을 잠근다.
   ⚠ v2.904(점검 P-1 — 재현): '전체 범위 관리자'(남의 글 삭제 · 공유 필터 관리 등 isMod 류)는 `auth/scope.js isFullReadWriteScope`(조회 ∧ 쓰기 무제한) 하나로 —
   `!scopedVcenterIds(...)` 만 보면 같은 함정이다. 회귀 `test/wikiIssues2904.test.js`.
+- **전체 점검 19회차(인증 · `securityFullAudit19`)**: 로그인 인증은 진행 중 **계정당 1건 · 출발지당 8건**(AD bind 대기 중 잠금 검사 통과 — 넘치면 429, 실패로 안 셈) ·
+  OTP 가 등록된 계정의 **본인 재등록은 현재 OTP**(begin `currentCode` → 10분 안 confirm — 세션 탈취가 영구 탈취가 되지 않게) ·
+  users.json **읽기 오류는 fail-closed**(원본 유지 · 계정 생성 금지 · 저장 거절) · 권한 파일을 못 읽으면 **최소 권한**(재시작 뒤 보존본만이어도) ·
+  로그인 성공은 그 계정의 실패만큼만 출발지 카운터에서 뺀다 · RDP 티켓은 발급자만 소비. 상세 `docs/rules/security-api.md` '전체 점검 19회차'.
+  20회차(반증): 본인 자격증명 변경의 현재 OTP 판정은 **`auth/otpRebind.js` 하나** — 관리자 라우트를 자기 자신에게 쓰는 경로(OTP · 비밀번호 · 로그인 차단)도 같다 ·
+  읽기 오류 중에는 AD 로그인 · 계정 생성 · 중앙 배포 적용도 막는다 · 확정 게이트 ≥ 쓰기 게이트(`ownerOnly` · `superOnly`).
+- **전체 점검 21 · 22회차(비밀 보관)**: 봉인된 값이 있으면 **키를 새로 만들지 않고 비밀 파일 저장을 거절**(env 누락 재시작 → 저장 한 번이 전 비밀 소거 · 탈출은 `SECRETS_KEY_LOST=true`) ·
+  `openSecretsDeep` 는 비밀 칸만 연다(복호 오라클) · 저장은 쓰기 성공 뒤에 메모리 반영 · SSH 키 KDF rounds 상한(`util/sshKeyKdf.js`).
+- **134회차**: 설정 · 비밀 · 등록부 파일 유무를 `fs.existsSync` 로 가르지 말 것(stat 실패도 false — 권한 · 계정 · 폐기 목록 · 키가 '없음' 으로 열렸다). 곧바로 읽어 ENOENT 만 없음 · `util/fileMissing.js` · 분류표 `existsSyncSweep134`.
 
 ## 옮긴 절 (2026-10-20 — 이 파일을 짧게 유지하려고)
 

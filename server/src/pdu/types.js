@@ -54,6 +54,9 @@ export function summarize(snap) {
     // v2.599(감사 C2599-04): 센서 탐지가 E1xx 아닌 실패로 멈췄으면 센서 수·온도·습도는 부분 집계다.
     ...(snap.sensorsIncomplete ? { sensorsIncomplete: true } : {}),
     powerW: powerVals.length ? powerVals.reduce((a, b) => a + b, 0) : null,
+    // 78회차 F4: 탐지된 유닛 중 일부의 순시 전력만 못 읽었으면(모르는 단위 → toWatts null · 엣지 값이 숫자 아님) 위 합은 **부분 합**이다 —
+    //   unitsIncomplete(탐지가 멈춤)와 같은 뜻으로 밝힌다(누적 전력량 energyPartial · 시계열 partialSamples 와 같은 규약). 합은 그대로 두고 화면이 '부분 합' 표지를 단다.
+    ...(powerVals.length && powerVals.length < units.length ? { powerPartial: true, powerUnitsRead: powerVals.length } : {}),
     // v2.607(감사 COL2607-07): 유닛 일부의 누적 전력량을 못 읽었으면 합계는 부분 합이다 — 전체처럼 내지 않고 null 로 두고
     //   energyPartial·읽은 유닛 수·부분 합(하한)을 따로 밝힌다(unitsIncomplete·sensorsIncomplete 와 같은 규약).
     energyKwh: energyVals.length && energyVals.length === units.length ? round2(sum(energyVals)) : null,

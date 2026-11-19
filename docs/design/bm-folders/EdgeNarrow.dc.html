@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>물리서버 폴더 — 엣지 포탈 400px</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./bmf.css">
+<link rel="stylesheet" href="./bmf2.css">
+<link rel="stylesheet" href="./bmfe.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.n-card{display:flex;gap:10px;padding:10px 12px;border-radius:10px;background:#141b2d;border:1px solid #243049;min-width:0}
+.n-card .col{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1}
+.n-card .l1{display:flex;align-items:center;gap:7px;font-weight:600;font-size:13.5px;min-width:0}
+.n-card .l2{font-size:12px;color:#aebbd0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.b44{height:44px}
+</style>
+</helmet>
+<div class="root" style="width:400px;height:960px">
+  <div class="tb" style="padding:0 12px;gap:10px">
+    <button class="btn" type="button" aria-label="메뉴 열기" style="width:44px;height:36px;padding:0">≡</button>
+    <span class="logo"><span class="v">V</span><span>Monitoring Portal</span></span>
+    <span class="bdg e">엣지</span>
+    <span class="pill" style="margin-left:auto">operator</span>
+  </div>
+  <div class="main" style="padding:12px;gap:10px">
+    <div class="crumb">특수 기능 › 물리서버 폴더</div>
+    <h1 class="h1" style="font-size:17px">물리서버 폴더</h1>
+
+    <div class="sync" role="status">
+      <span class="si"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 4v5h-5"></path><path d="M4 12a8 8 0 0 1 14-5l2 2"></path><path d="M4 20v-5h5"></path><path d="M20 12a8 8 0 0 1-14 5l-2-2"></path></svg></span>
+      <span style="flex:1;min-width:0"><b>중앙에서 받은 폴더</b> · 읽기 전용</span>
+      <span class="sv2" style="flex-basis:100%"><span class="sk">판본</span><b class="mono">r128</b><span class="sk">·</span><b>3분 전</b><span class="sk">받음 · 다음 약 7분 뒤</span></span>
+      <button class="btn b44" type="button" style="flex:1">지금 받기</button>
+      <a class="btn b44" href="#" style="flex:1">중앙에서 편집</a>
+    </div>
+
+    <button class="sel b44" type="button" style="width:100%" aria-label="폴더 고르기">
+      <span style="display:inline-flex;align-items:center;gap:7px;min-width:0;overflow:hidden"><span class="fo"></span><span style="overflow:hidden;text-overflow:ellipsis">vcenter-pl-waw-01 › DB › <b>Oracle RAC</b></span></span><span class="dim">▾</span>
+    </button>
+
+    <div class="row" style="gap:6px">
+      <span class="bdg n">서버 4대</span><span class="bdg g">켜짐 4</span><span class="bdg r">부품 장애 1대</span>
+      <span class="bdg n">CPU 34% · 메모리 61% (4대)</span>
+      <span class="bdg c">서비스: Oracle RAC</span>
+    </div>
+
+    <input class="inp b44" type="text" placeholder="이 폴더 안에서 찾기" aria-label="폴더 안 찾기" style="width:100%">
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <button class="n-card" type="button" style="font:inherit;color:inherit;text-align:left;cursor:pointer"><span class="col"><span class="l1"><span class="sd ok"></span><span>pl-ora-rac01</span></span><span class="l2">PowerEdge R750 · 7XK2M03 · 손 등록</span><span class="l2">CPU 38% · 메모리 64% · 486 W</span></span></button>
+      <button class="n-card" type="button" style="font:inherit;color:inherit;text-align:left;cursor:pointer"><span class="col"><span class="l1"><span class="sd ok"></span><span>pl-ora-rac02</span></span><span class="l2">PowerEdge R750 · 7XK2N03 · 손 등록</span><span class="l2">CPU 41% · 메모리 66% · 492 W</span></span></button>
+      <button class="n-card" type="button" style="font:inherit;color:inherit;text-align:left;cursor:pointer"><span class="col"><span class="l1"><span class="sd bad"></span><span>pl-ora-rac03</span><span class="bdg r sp">전원 장치 1건</span></span><span class="l2">PowerEdge R750 · 7XK2P03 · 손 등록</span><span class="l2">CPU 29% · 메모리 58% · 471 W</span></span></button>
+      <button class="n-card" type="button" style="font:inherit;color:inherit;text-align:left;cursor:pointer"><span class="col"><span class="l1"><span class="sd ok"></span><span>pl-ora-rac04</span><span class="bdg w sp">자동 규칙</span></span><span class="l2">PowerEdge R750xa · 9HT4Q13</span><span class="l2">CPU 27% · 메모리 55% · 463 W</span></span></button>
+    </div>
+
+    <div class="mini">
+      <span class="ln"><span class="fo out"></span><b>이 엣지 밖 등록 1대</b><span class="tag">pl-ora-rac05</span></span>
+      <span class="note">중앙에는 이 폴더에 있지만 이 엣지 목록에 없습니다.</span>
+    </div>
+    <div class="note" style="text-align:center">카드를 누르면 옆 패널 · 등록과 옮기기는 중앙 포탈에서</div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":400,"height":960}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

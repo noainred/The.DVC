@@ -2,35 +2,45 @@
 //   routes/admin/centralTokens.js 로 분리했다(이 파일은 IPAM 전용). 등록 순서는 admin.js 호출 순서가 보존한다.
 import { config, loadVcenterConfig } from '../../config.js';
 import { ledgerInfo } from '../../ipam/db.js';
-import { loadSettings as loadIpamSettings, saveSettings as saveIpamSettings, savedInvalidEntries, invalidEntries, ignoreRanges, getClassifier } from '../../ipam/settings.js';
+import { loadSettings as loadIpamSettings, saveSettings as saveIpamSettings, savedInvalidEntries, invalidEntries, ignoreRanges, getClassifier, ipamSettingsWriteRefusal } from '../../ipam/settings.js';
+import { unreadMark } from '../settingsUnreadMark.js';   // 112회차: 조회 응답의 읽기 오류 표지
 import { makeVcResolver } from '../../ipam/vcResolve.js'; // v2.639: vCenter 이름 해석기 한 벌(모호하면 null — 예전엔 첫 항목을 택했다)
 import { checkRangeList } from '../../ipam/rangeSyntax.js';
 import { listTargets } from '../../agent/deployRegistry.js';
 import { logAudit } from '../../audit.js';
-import { loadScanSettings, saveScanSettings, deleteScanAgent, scanResultList, scanInfo, listScanAgents, getAgentReports, getScanRuns, getScanResults, LOCAL } from '../../ipam/scanStore.js';
+import { loadScanSettings, saveScanSettings, deleteScanAgent, scanResultList, scanInfo, listScanAgents, getAgentReports, getScanRuns, getScanResults, LOCAL, scanSettingsLoadError } from '../../ipam/scanStore.js';
 import { buildScanRangeRows, applyRangeLineOp } from '../../ipam/scanRangeRows.js'; // v2.692: 등록된 스캔 대역 표 · 줄 단위 수정
 import { startScan, scanStatus, rescheduleScanPoller } from '../../ipam/scanPoller.js';
 import { recordScanLog, listScanLog, SCAN_LOG_EVENTS } from '../../ipam/scanLog.js'; // v2.636: 스캔 실행 로그
+import { listChanges, CHANGE_TYPES } from '../../ipam/changeLog.js'; // v3.1.0: IP 변화 기록
 import { scanRangesToCsv, scanRangesSampleCsv, parseScanRangesCsv, analyzeScanRangesImport, LOCAL_AGENT } from '../../ipam/scanRangesCsv.js'; // v2.636: 에이전트별 스캔 대역 CSV
 import { RANGE_CAP } from '../../ipam/scan.js';
 import { agentVcenterIds, suggestAgentSubnets } from '../../ipam/scanDatacenter.js'; // v2.638: 데이터센터 귀속 · /24 대역 제안
 import { currentScanDatacenters, invalidateScanDatacenters, scanDatacenterOf } from '../../ipam/scanDatacenterSource.js';
 import { agentIdracServers } from '../../ipam/scanSuggestSource.js';
 import { hostLedgerIp } from '../../ipam/ledger.js'; // v2.744(감사 후속 FB-2): FQDN 호스트의 관리 IP — IP 원장과 같은 판정(복제 금지)
+import { ipToNum } from '../../util/ipv4.js'; // v3.6.0: vmk 주소의 스캔 뜻 없는 주소 거르기
 import { listDatacenters, datacenterOfVcenter, getDatacenterAssign } from '../../datacenter/store.js';
 import { listScanRanges as listIdracScanRanges } from '../../idrac/scanRanges.js';
-import { idracSubnets, vmSubnets, annotateSubnets, SUBNET_MAX } from '../../ipam/vcRangeSuggest.js'; // v2.690: vCenter 스캔 대역 '/24 가져오기'
+import { idracSubnets, vmSubnets, annotateSubnets, SUBNET_MAX, excludedIpReason } from '../../ipam/vcRangeSuggest.js';
+import { parseQuietInput } from '../../ipam/scanQuiet.js'; // v3.7.0 쉬는 시간
+import { buildScanSchedule } from '../../ipam/scanSchedule.js'; // v3.7.0 주기 스캔 일정
+import { loadReportSettings, reportSettingsError, saveReportSettings, previewReport, sendReport, reportStatus } from '../../ipam/report.js'; // v3.7.0 정기 보고
+import { REPORT_SECTIONS, REPORT_FREQS } from '../../ipam/reportRules.js';
+import { hostVmks } from '../../ipam/serverView.js'; // v3.6.0: 스캔 대역 후보에 ESXi vmk 전체 주소
+import { getSubnetNotes, subnetKey } from '../../ipam/subnetNotes.js'; // v3.6.0: 후보 줄에 대역 용도 // v2.690: vCenter 스캔 대역 '/24 가져오기'
 import { todayStamp } from '../../util/dayKey.js';
 import { readMigrationState, runVcRangeMigration, moveVcRangeManually, removeVcRangeManually, dismissMigration } from '../../ipam/vcRangeMigrate.js'; // v2.691: vCenter 별 대역 → 에이전트
-import { saveVcRanges, removeVcRanges, listVcRanges } from '../../ipam/rangeStore.js';
+import { saveVcRanges, removeVcRanges, listVcRanges, vcRangesLoadError } from '../../ipam/rangeStore.js';
 import { sampleCsv as vcRangesSampleCsv, parseVcRangesCsv, analyzeVcRangesImport } from '../../ipam/vcRangesCsv.js';
 import { listAssignments as listIdracAssignments, getResults as getAgentResults } from '../../central/assignments.js';
 import { listCollectors } from '../../collector/registry.js';
 import { adminOnly, fullScopeOnlyWith } from './shared.js';
 import { store } from '../../store.js';
-import { scopedVcenterIds, writeScopedVcenterIds } from '../../auth/scope.js';
+import { scopedVcenterIds, writeScopedVcenterIds, isFullReadWriteScope } from '../../auth/scope.js';
 import { mergeScopedMap, filterScopedMap, keepScopedFields, ignoredGlobalFields } from '../../auth/scopeMerge.js';
 import { requirePerm as requireCsvPerm } from '../../auth/auth.js';
+import { registerBmOsSuggest } from './bmOsSuggest.js'; // v2.993: 물리서버 OS 주소 제안(설계 bm-folders §13 ②)
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
 const csvPerm = requireCsvPerm('data.csv');
 
@@ -92,13 +102,18 @@ const ipamSettingsInvalid = (body, opt) => invalidEntries(body, opt);
 const invalidReply = (res, invalid) => res.status(400).json({ ok: false, reason: `형식이 올바르지 않은 줄 ${invalid.length}개가 있어 저장하지 않았습니다.`, invalid: invalid.slice(0, 200), invalidCount: invalid.length });
 adminRouter.get('/ipam/settings', adminOnly, (req, res) => {
   const snap = store.get();
-  res.json(ipamSettingsView(loadIpamSettings(), scopedVcenterIds(req.user, snap), snap));
+  // 112회차: 설정 파일을 못 읽은 동안 settings 는 저장된 값이 아니라 빈 목록이다 — 표지를 실어 화면이 편집 폼을 열지 않게 한다
+  //   (저장은 전체 교체 — 다시 읽힌 뒤 빈 폼의 저장이 전 vCenter 의 무시 대역 · 공인/사설 분류를 보존본 없이 지운다).
+  res.json({ ...ipamSettingsView(loadIpamSettings(), scopedVcenterIds(req.user, snap), snap), ...unreadMark(ipamSettingsWriteRefusal()) });
 });
 adminRouter.put('/ipam/settings', adminOnly, (req, res) => {
   const snap = store.get();
   const readAllowed = scopedVcenterIds(req.user, snap);
   const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
-  if (!readAllowed) {
+  { const no = ipamSettingsWriteRefusal(); if (no) return res.status(503).json(no); }   // 107회차: 설정 파일 읽기 오류 중에는 저장하지 않는다(사유를 화면까지)
+  // 전체 점검 25회차 F-1(재현): 바깥 분기가 조회 범위만 봐서 '조회 무제한 + 쓰기 vcA' 관리자가 전역 3목록과 **모든 vCenter 의 무시 대역**을
+  //   본문 그대로 저장했다(vc-b 무시 대역 삭제 · 전역 공인 대역 변경 — 7회차 R-3 '설정 저장 병합' 에서 빠진 라우트). 전체 저장은 조회 ∧ 쓰기 전체만.
+  if (isFullReadWriteScope(req.user, snap)) {
     const invalid = ipamSettingsInvalid(body, { globals: true });
     if (invalid.length) return invalidReply(res, invalid);
     return res.json({ ok: true, ...ipamSettingsView(saveIpamSettings(body), null, snap) });
@@ -137,7 +152,21 @@ adminRouter.get('/ipam/scan/settings', adminOnly, fleetOnly, (req, res) => { // 
     ...scanDatacenterView(agent),             // v2.638: 이 에이전트의 데이터센터 귀속 판정 + 고를 수 있는 DataCenter 목록
   });
 });
-adminRouter.put('/ipam/scan/settings', adminOnly, fleetOnly, (req, res) => {
+/** 25회차 F-3: IP 스캔 배정 파일을 못 읽었으면 409(한 에이전트 저장이 다른 배정을 지우지 않게). */
+function scanCfgUnreadable(res) {
+  const e = scanSettingsLoadError();
+  if (!e) return false;
+  res.status(409).json({ ok: false, code: 'settings-unreadable', reason: 'IP 스캔 배정 파일(ipam-scan.json)을 읽지 못한 상태라 저장하지 않았습니다 — 서비스 점검에서 기본값으로 확정하거나 손상 보존본을 되돌리고 재시작하세요.', loadError: { reason: String(e.reason || '').slice(0, 200) } });
+  return true;
+}
+// 103회차 F19: 스캔 설정 파일을 읽지 못한 동안(읽기 오류 — 원본 그대로)의 쓰기 거절 — 사유를 화면까지(saveAll 이 던지는 409 는 전역 오류 처리기로 가면 사유가 빠진다).
+function scanCfgWritable(_req, res, next) {
+  const e = scanSettingsLoadError();
+  if (e?.readError) return res.status(409).json({ ok: false, code: 'settings-unreadable', readError: true, reason: String(e.reason || '').slice(0, 300) });
+  return next();
+}
+adminRouter.put('/ipam/scan/settings', adminOnly, fleetOnly, scanCfgWritable, (req, res) => {
+  if (scanCfgUnreadable(res)) return;   // 25회차 F-3: 배정 파일 손상 중 쓰기 409
   const agent = (req.body && req.body.agent) || LOCAL;
   // v2.638: 데이터센터는 등록된 DataCenter 만(빈 값 = 자동). 목록에 없는 값을 저장하면 그 에이전트의 스캔 결과가 어디에도 귀속되지 않는다.
   if (req.body && req.body.datacenterId !== undefined && req.body.datacenterId !== '') {
@@ -155,6 +184,11 @@ adminRouter.put('/ipam/scan/settings', adminOnly, fleetOnly, (req, res) => {
     check = checkRangeList(Array.isArray(raw) ? raw : String(raw ?? '').split(/[\n,]/), { reversed: 'error', scanCap: RANGE_CAP });
     if (check.invalid.length) return invalidReply(res, check.invalid.map((x) => ({ field: 'ranges', agent, ...x })));
   }
+  // v3.7.0(재설계 묶음 라): 쉬는 시간 — 잘못된 줄은 버리지 않고 400(사용자가 넣은 창이 조용히 사라지면 그 시간에 스캔이 돈다).
+  if (req.body && req.body.quiet !== undefined) {
+    const q = parseQuietInput(req.body.quiet);
+    if (q.error) return res.status(400).json({ ok: false, reason: q.error, field: 'quiet' });
+  }
   const settings = saveScanSettings(agent, req.body || {});
   invalidateScanDatacenters();
   if (agent === LOCAL) rescheduleScanPoller(); // 로컬 설정만 이 포탈 폴러에 적용
@@ -171,7 +205,14 @@ adminRouter.get('/ipam/scan/suggest', adminOnly, fleetOnly, (req, res) => {
   const idrac = agentIdracServers(agent, inputs.collectors);
   const vcName = {};
   for (const v of snap.vcenters || []) vcName[v.id] = v.name || v.id;
-  const r = suggestAgentSubnets({ vcenterIds: vcIds, vms: snap.vms, hosts: snap.hosts, idrac: idrac.servers, vcName, hostIp: hostLedgerIp });
+  // v3.6.0(재설계 묶음 다 ⑪): ESXi vmk 전체 주소를 후보에 넣는다(루프백 · 링크 로컬 등 스캔 뜻이 없는 주소는 뺀다 — vcRangeSuggest 와 같은 판정).
+  const hostIps = (h) => hostVmks(h).map((v) => v.ip).filter((ip) => { const n = ipToNum(ip); return n != null && !excludedIpReason(n); });
+  const r0 = suggestAgentSubnets({ vcenterIds: vcIds, vms: snap.vms, hosts: snap.hosts, idrac: idrac.servers, vcName, hostIp: hostLedgerIp, hostIps });
+  // v3.6.0: IPMS 무시 대역(전부 무시면 뺀다) · 공인/사설 분류(사설 · 공인 두 묶음) · 대역 용도. 가져오기 창과 같은 판정(annotateSubnets).
+  const ann = annotateSubnets(r0.subnets, { ...ipmsCtx(snap), vcenterIds: vcIds });
+  let notes = {}; try { notes = getSubnetNotes() || {}; } catch { notes = {}; }
+  const subnets = ann.subnets.map((x) => { const p = notes[subnetKey(x.cidr)]?.purpose; return p ? { ...x, purpose: String(p) } : x; });
+  const r = { ...r0, subnets, ignored: ann.ignored, ignoreSources: ann.sources };
   res.json({
     ok: true, agent, ...r,
     vcenters: vcIds.map((id) => ({ id, name: vcName[id] || id })),
@@ -288,7 +329,8 @@ adminRouter.get('/ipam/scan/ranges', adminOnly, fleetOnly, (_req, res) => {
  * v2.692: 줄 단위 추가·수정·삭제. 그 에이전트의 다른 줄은 건드리지 않는다. `old` 가 지금 값과 다르면 409(다른 관리자가 바꿨다).
  * 대역 문법은 저장 PUT 과 같은 판정(checkRangeList — 뒤집힌 범위 오류·스캔 상한 경고).
  */
-adminRouter.post('/ipam/scan/ranges/line', adminOnly, fleetOnly, (req, res) => {
+adminRouter.post('/ipam/scan/ranges/line', adminOnly, fleetOnly, scanCfgWritable, (req, res) => {
+  if (scanCfgUnreadable(res)) return;   // 25회차 F-3: 배정 파일 손상 중 쓰기 409
   const b = req.body || {};
   const agent = String(b.agent || LOCAL).slice(0, 128);
   const op = String(b.op || '');
@@ -313,7 +355,8 @@ adminRouter.post('/ipam/scan/ranges/line', adminOnly, fleetOnly, (req, res) => {
  *   `expect`(화면이 본 대역 목록)가 지금 값과 다르면 409 — 다른 관리자가 그사이 바꿨으면 지우지 않는다(줄 단위 수정과 같은 규칙).
  *   이미 보고된 스캔 결과는 지우지 않는다(보존 기간·해제 판정이 정리한다) — 응답이 그 사실을 말한다.
  */
-adminRouter.post('/ipam/scan/agent/delete', adminOnly, fleetOnly, (req, res) => {
+adminRouter.post('/ipam/scan/agent/delete', adminOnly, fleetOnly, scanCfgWritable, (req, res) => {
+  if (scanCfgUnreadable(res)) return;   // 25회차 F-3: 배정 파일 손상 중 쓰기 409
   const b = req.body || {};
   const agent = String(b.agent || '').trim().slice(0, 128);
   const mode = b.mode === 'agent' ? 'agent' : b.mode === 'ranges' ? 'ranges' : '';
@@ -350,17 +393,21 @@ adminRouter.post('/ipam/scan/agent/delete', adminOnly, fleetOnly, (req, res) => 
  */
 function migrationView() {
   let st = readMigrationState();
+  let held = '';   // 28회차 P-4: 이전을 보류한 사유(배정 파일 손상 등 — 27회차 D-8)를 화면에 싣는다(예전에는 버렸다)
   if (!st?.done && !store.get()?.initial) {
-    try { const r = runVcRangeMigration(); if (r.ran) { st = r.state; try { rescheduleScanPoller(); } catch { /* */ } } } catch { /* 화면이 '아직 이전 안 함' 으로 말한다 */ }
+    try { const r = runVcRangeMigration(); if (r.ran) { st = r.state; try { rescheduleScanPoller(); } catch { /* */ } } else if (r.reason) held = String(r.reason).slice(0, 300); } catch { /* 화면이 '아직 이전 안 함' 으로 말한다 */ }
   }
   const vcName = {};
   for (const v of store.get().vcenters || []) vcName[v.id] = v.name || v.id;
   const remaining = listVcRanges().map((e) => ({ vcenterId: e.vcenterId, vcenterName: vcName[e.vcenterId] || e.vcenterId, ranges: e.ranges || [], enabled: e.enabled !== false }));
   const agents = [...new Set([LOCAL, ...listScanAgents().map((a) => a.name)])];
-  return { ok: true, state: st, remaining, agents };
+  // 결정(56~75 남긴 것) 62: 손상 · 읽기 오류 중 '남은 대역' 빈 목록이 '다 옮김' 으로 보이지 않게 표지(사유 요약 · 읽기 오류 여부).
+  const le = vcRangesLoadError();
+  const remainingLoadError = le ? { reason: String(le.reason || '').slice(0, 300), at: Number.isFinite(le.at) ? le.at : null, readError: !!le.readError } : null;
+  return { ok: true, state: st, remaining, agents, ...(held ? { held } : {}), ...(remainingLoadError ? { remainingLoadError } : {}) };
 }
 adminRouter.get('/ipam/scan/migration', adminOnly, fleetOnly, (_req, res) => { res.json(migrationView()); });
-adminRouter.post('/ipam/scan/migration/move', adminOnly, fleetOnly, (req, res) => {
+adminRouter.post('/ipam/scan/migration/move', adminOnly, fleetOnly, scanCfgWritable, (req, res) => {
   const vcenterId = String(req.body?.vcenterId || '').slice(0, 200);
   const agent = String(req.body?.agent || '').trim().slice(0, 128);
   if (!vcenterId || !agent) return res.status(400).json({ ok: false, reason: 'vcenterId 와 agent 가 필요합니다.' });
@@ -387,6 +434,54 @@ adminRouter.post('/ipam/scan/migration/dismiss', adminOnly, fleetOnly, (_req, re
   res.status(r.ok ? 200 : 404).json({ ...r, ...migrationView() });
 });
 // v2.636: 스캔 실행 로그(시작·종료·실패·건너뜀·엣지 보고·설정 변경) — 형제 status 와 같은 게이트(전 엣지 이름·대역이 들어간다).
+// v3.1.0(설계 ipam-alerts-mac-dns ② — IP관리 › IP 변화): 스캔이 본 변화 기록. 스캔 결과처럼 vCenter 귀속이 없어 스캔 로그와 같은 게이트(관리자 · 전 법인).
+adminRouter.get('/ipam/changes', adminOnly, fleetOnly, (req, res) => {
+  const q = (v) => (typeof v === 'string' ? v : '');
+  res.json({ ok: true, ...listChanges({ type: q(req.query.type), ip: q(req.query.ip), agent: q(req.query.agent), limit: req.query.limit }), types: CHANGE_TYPES });
+});
+/**
+ * v3.7.0(재설계 묶음 라 — 시안 ⑭): 주기 스캔 일정 — 에이전트마다 오늘(포탈 날짜) 스캔 기록 시간표 · 다음 예정 어림 · 늦음 · 걸린 시간 > 주기.
+ *   스캔 로그 · 마지막 보고만 읽는다(장비 왕복 0). 전 법인 데이터라 형제 스캔 라우트와 같은 게이트.
+ */
+adminRouter.get('/ipam/scan/schedule', adminOnly, fleetOnly, (_req, res) => {
+  const agents = listScanAgents();
+  if (!agents.some((x) => x.name === LOCAL)) agents.unshift({ name: LOCAL, ...loadScanSettings(LOCAL) });
+  const { entries } = listScanLog({ limit: 100_000 });
+  res.json({ ok: true, ...buildScanSchedule({ agents, log: entries, reports: getAgentReports() || {} }) });
+});
+/**
+ * v3.7.0(재설계 묶음 라 — 시안 ⑫ ⑬): 정기 보고(IPMS 알람) — 설정 · 상태 · 미리 보기 · 지금 보내기. 전 법인 데이터라 형제 IP 관리 설정과 같은 게이트(관리자 + 전체 범위).
+ *   저장은 잘못된 주소 · 요일 없음 · 모르는 시간대를 자르지 않고 400. 미리 보기는 보내지 않는다(저장하지 않은 화면 값으로 만들 수 있다).
+ */
+adminRouter.get('/ipam/report', adminOnly, fleetOnly, (_req, res) => {
+  const r = loadReportSettings();
+  let datacenters = [];
+  try {
+    const asg = getDatacenterAssign() || {};
+    const vcName = {}; for (const v of store.get().vcenters || []) vcName[v.id] = v.name || v.id;
+    datacenters = listDatacenters().map((d) => ({ id: d.id, name: d.name || d.id, vcenters: Object.keys(asg).filter((k) => String(asg[k]) === String(d.id)).map((k) => vcName[k] || k) }));
+  } catch { datacenters = []; }
+  res.json({ ok: true, report: r, settingsError: reportSettingsError(), status: reportStatus(), datacenters, sections: REPORT_SECTIONS, freqs: REPORT_FREQS });
+});
+adminRouter.put('/ipam/report', adminOnly, fleetOnly, (req, res) => {
+  const r = saveReportSettings(req.body?.report ?? req.body);
+  if (r.error) return res.status(r.readError ? 409 : 400).json({ ok: false, reason: r.error, field: r.field, ...(r.readError ? { readError: true } : {}) });   // 103회차 F11: 읽기 오류는 409
+  logAudit({ user: req.user?.username, action: 'ipam.report.settings', target: 'ipam-report', detail: `${r.report.enabled ? '켜짐' : '꺼짐'} · ${r.report.freq} · ${r.report.time} · ${r.report.clock === 'corp' ? '법인 현지 시각' : '메인 서버 시각'} · 법인 ${Object.keys(r.report.corps).length}곳`, ip: req.ip || '' });
+  res.json({ ok: true, report: r.report, status: reportStatus() });
+});
+adminRouter.post('/ipam/report/preview', adminOnly, fleetOnly, (req, res) => {
+  try {
+    const r = previewReport(req.body?.report ?? null);
+    if (!r.ok) return res.status(400).json({ ok: false, reason: r.error, field: r.field });
+    res.json(r);
+  } catch (e) { res.status(500).json({ ok: false, reason: `미리 보기를 만들지 못했습니다: ${String(e?.message || e).slice(0, 200)}` }); }
+});
+adminRouter.post('/ipam/report/send-now', adminOnly, fleetOnly, async (req, res) => {
+  const target = typeof req.body?.target === 'string' && req.body.target ? req.body.target.slice(0, 64) : 'overall';
+  const results = await sendReport({ slot: Date.now(), target, manual: true, by: req.user?.username || 'admin' });
+  logAudit({ user: req.user?.username, action: 'ipam.report.send-now', target, detail: results.map((x) => x.state).join(','), ip: req.ip || '' });
+  res.json({ ok: results.some((x) => x.state === 'sent'), results, status: reportStatus() });
+});
 adminRouter.get('/ipam/scan/log', adminOnly, fleetOnly, (req, res) => {
   res.json({ ok: true, ...listScanLog({ limit: req.query.limit, agent: req.query.agent, level: req.query.level, event: req.query.event }), events: SCAN_LOG_EVENTS });
 });
@@ -398,6 +493,7 @@ adminRouter.post('/ipam/scan/run', adminOnly, fleetOnly, (_req, res) => {
 adminRouter.get('/ipam/scan/status', adminOnly, fleetOnly, (_req, res) => { // v2.611 LEFT2611-07
   res.json({ status: scanStatus(), info: scanInfo(), runs: getScanRuns(50), reports: getAgentReports() });
 });
+registerBmOsSuggest(adminRouter); // v2.993 — 형제 스캔 라우트와 같은 게이트(관리자 · 전체 범위 — bmOsSuggest.js)
 adminRouter.get('/ipam/scan/results', adminOnly, fleetOnly, (_req, res) => {
   res.json({ results: scanResultList().slice(0, 5000), info: scanInfo() });
 });
@@ -422,7 +518,8 @@ adminRouter.get('/ipam/scan/ranges/sample.csv', csvPerm, adminOnly, fleetOnly, (
   res.setHeader('Content-Disposition', 'attachment; filename="ip-scan-ranges-sample.csv"');
   res.send(scanRangesSampleCsv());
 });
-adminRouter.post('/ipam/scan/ranges/import', csvPerm, adminOnly, fleetOnly, (req, res) => {
+adminRouter.post('/ipam/scan/ranges/import', csvPerm, adminOnly, fleetOnly, scanCfgWritable, (req, res) => {
+  if (scanCfgUnreadable(res)) return;   // 25회차 F-3: 배정 파일 손상 중 쓰기 409
   const { rows, error } = parseScanRangesCsv(String(req.body?.csv || ''));
   if (error) return res.status(400).json({ ok: false, reason: error });
   if (!rows.length) return res.status(400).json({ ok: false, reason: '가져올 데이터 행이 없습니다.' });
@@ -462,7 +559,7 @@ adminRouter.put('/ipam/vc-ranges', adminOnly, (req, res) => {
     try { rescheduleScanPoller(); } catch { /* */ }
     recordScanLog({ event: 'settings', user: req.user?.username, ranges: (r.ranges || []).length, rangesSample: (r.ranges || []).slice(0, 5), message: `vCenter 스캔 대역 저장 — ${String(b.vcenterId || '').slice(0, 120)}` });
   }
-  res.status(r.ok ? 200 : 400).json(r);
+  res.status(r.ok ? 200 : r.code === 'settings-unreadable' ? 409 : 400).json(r);   // 60회차 F1: 파일을 못 읽은 동안은 409
 });
 /**
  * v2.690: vCenter별 스캔 대역 편집기의 '/24 가져오기' — kind=idrac(그 vCenter 의 DataCenter 또는 고른 DataCenter 의 iDRAC 스캔 대역)
@@ -506,7 +603,7 @@ adminRouter.delete('/ipam/vc-ranges/:vcenterId', adminOnly, (req, res) => {
   if (!vcRangeWritable(req.user, req.params.vcenterId)) return res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다.' }); // v2.607 AUTHZ2607-04
   const r = removeVcRanges(req.params.vcenterId);
   if (r.ok) recordScanLog({ event: 'settings', user: req.user?.username, message: `vCenter 스캔 대역 삭제 — ${String(req.params.vcenterId || '').slice(0, 120)}` });
-  res.status(r.ok ? 200 : 404).json(r);
+  res.status(r.ok ? 200 : r.code === 'settings-unreadable' ? 409 : 404).json(r);   // 60회차 F1
 });
 adminRouter.post('/ipam/vc-ranges/scan', adminOnly, fleetOnly, (_req, res) => {
   const r = startScan({ manual: true });
@@ -537,6 +634,9 @@ adminRouter.post('/ipam/vc-ranges/import', csvPerm, adminOnly, (req, res) => {
   //   manage CSV 의 해석기는 이미 모호하면 null 이었다 — 두 규칙을 하나로).
   const rv = makeVcResolver(vcs);
   const resolveVc = (v) => { const r = rv(v); return r.id && vcRangeWritable(req.user, r.id) ? r.id : null; };
+  // 60회차 F1: 파일을 못 읽은 동안은 적용하지 않는다(행마다 같은 거절이 '실패' 로 쌓이지 않게 — 한 번에 409)
+  // 62회차: 미리보기(dryRun)도 — 빈 맵을 기준으로 있는 항목을 전부 '추가' 로 보고했다(덮어쓰기 판정이 사라진 미리보기)
+  { const le = vcRangesLoadError(); if (le) return res.status(409).json({ ok: false, code: 'settings-unreadable', reason: 'vCenter 별 스캔 대역 파일(ipam-vcenter-ranges.json)을 읽지 못한 상태라 가져오지 않았습니다 — 서비스 점검에서 확정하거나 손상 보존본을 되돌리세요.' }); }
   const existing = new Set(listVcRanges().map((e) => e.vcenterId));
   const { report, summary } = analyzeVcRangesImport(rows, { resolveVc, hasExisting: (id) => existing.has(id) });
   if (req.body?.dryRun) {

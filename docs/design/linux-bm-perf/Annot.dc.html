@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>운영 주석 · 공유 링크 · 캡처</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:Inter,"Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#22d3ee}a:hover{color:#67e8f9}
+.card{background:linear-gradient(180deg,#141b2d,#111726);border:1px solid #243049;border-radius:12px;padding:16px 18px;box-shadow:0 4px 24px rgba(0,0,0,.4);min-width:0}
+.dim{color:#8b9bb4}.mono{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:600;border:1px solid #243049;background:#0f1626;color:#8b9bb4;white-space:nowrap}
+.chip.ok{color:#4ade80;border-color:rgba(34,197,94,.35);background:rgba(34,197,94,.1)}
+.chip.warn{color:#fbbf24;border-color:rgba(245,158,11,.35);background:rgba(245,158,11,.1)}
+.chip.info{color:#67e8f9;border-color:rgba(34,211,238,.3);background:rgba(34,211,238,.08)}
+.chip.pur{color:#c084fc;border-color:rgba(168,85,247,.35);background:rgba(168,85,247,.1)}
+.btn{min-height:36px;padding:0 14px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-weight:600;cursor:pointer}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.inp{min-height:36px;padding:0 10px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit;font-size:12.5px;width:100%;box-sizing:border-box}
+.ta{min-height:72px;padding:8px 10px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit;font-size:12.5px;width:100%;box-sizing:border-box;resize:vertical}
+.sel{min-height:34px;padding:0 10px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit;font-size:12.5px}
+table{border-collapse:separate;border-spacing:0;width:100%}
+th{font-size:11.5px;font-weight:600;color:#8b9bb4;text-align:left;padding:6px 8px;border-bottom:1px solid #243049;background:#0f1626;white-space:nowrap;cursor:pointer;vertical-align:bottom}
+td{padding:7px 8px;border-bottom:1px solid #1f2a40;vertical-align:top;font-size:12.5px;line-height:1.5}
+h2{margin:0;font-size:15px;font-weight:700}
+</style>
+</helmet>
+<div style="box-sizing:border-box;max-width:1680px;margin:0 auto;padding:18px 24px 40px;display:flex;flex-direction:column;gap:14px">
+  <div style="min-width:0">
+    <div style="font-size:12px;color:#8b9bb4"><a href="AvgPeak.dc.html">bm-kr1-db01 › 추이</a> › <b style="color:#e6edf6">운영 주석 · 공유</b> · 추천 A + B</div>
+    <h1 style="margin:0;font-size:20px;font-weight:700;letter-spacing:-.01em">운영 주석과 공유 — 사람이 아는 맥락을 추이에 남기고, 보고 있는 화면 그대로를 링크·캡처로 보낸다</h1>
+  </div>
+
+  <!-- 주석이 붙은 추이 -->
+  <div class="card">
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-bottom:6px"><h2>추이 위의 주석 — 기계 이벤트(⑩ 변경 띠)와 같은 줄, 다른 모양</h2><span class="chip pur">주석 3</span><span class="dim" style="font-size:12px;margin-left:auto">차트 위 아무 곳을 길게 누르거나 ‘주석 추가’ → 그 시각에 핀</span><button class="btn" type="button">+ 주석 추가</button></div>
+    <svg viewBox="0 0 1300 250" role="img" aria-label="24시간 await 추이 위에 기계 이벤트 점 2개와 사람 주석 핀 3개가 같은 줄에 찍혀 있다. 11:40 주석은 'pg_dump 수동 실행 — 김운영' 이고 선택 구간 02:00~05:10 에는 '백업 창 — 예정 부하' 주석이 있다" style="width:100%;height:auto;display:block">
+      <rect x="430" y="20" width="190" height="160" fill="rgba(34,211,238,.08)" stroke="rgba(34,211,238,.35)" stroke-dasharray="3 3"></rect>
+      <line x1="150" y1="20" x2="150" y2="180" stroke="#243049"></line><line x1="150" y1="180" x2="1280" y2="180" stroke="#243049"></line>
+      <polyline fill="none" stroke="#8b9bb4" stroke-width="2" points="150,172 250,171 350,172 430,160 480,120 560,116 620,128 700,166 800,168 900,164 1000,140 1100,100 1200,90 1280,88"></polyline>
+      <polyline fill="none" stroke="#f87171" stroke-width="1.5" opacity=".8" points="150,166 250,165 350,166 430,140 480,70 560,66 620,80 700,150 800,154 900,146 1000,96 1100,40 1200,32 1280,30"></polyline>
+      <text x="10" y="40" fill="#e6edf6" font-size="12" font-weight="700">nvme1n1 await</text><text x="10" y="56" fill="#8b9bb4" font-size="11">평균 회색 · 피크 빨강</text>
+      <!-- 이벤트 줄 -->
+      <line x1="150" y1="205" x2="1280" y2="205" stroke="#1f2a40"></line><text x="10" y="209" fill="#8b9bb4" font-size="11">이벤트 · 주석</text>
+      <circle cx="380" cy="205" r="5" fill="#67e8f9"></circle><text x="380" y="232" fill="#67e8f9" font-size="11" text-anchor="middle">22:05 dnf</text>
+      <circle cx="1060" cy="205" r="5" fill="#f87171"></circle><text x="1060" y="232" fill="#f87171" font-size="11" text-anchor="middle">11:40 크론 추가</text>
+      <polygon points="525,196 532,205 525,214 518,205" fill="#c084fc"></polygon><text x="525" y="232" fill="#c084fc" font-size="11" text-anchor="middle">백업 창 — 예정</text>
+      <polygon points="1070,190 1079,200 1070,210 1061,200" fill="#c084fc" stroke="#0a0e17" stroke-width="1.5"></polygon>
+      <polygon points="1240,196 1247,205 1240,214 1233,205" fill="#c084fc"></polygon><text x="1240" y="232" fill="#c084fc" font-size="11" text-anchor="middle">13:35 집중 시작</text>
+      <!-- 주석 말풍선 -->
+      <rect x="880" y="28" width="300" height="78" rx="8" fill="#0f1626" stroke="rgba(168,85,247,.5)"></rect>
+      <text x="892" y="48" fill="#c084fc" font-size="12" font-weight="700">◆ 11:40 · 김운영 · 작업</text>
+      <text x="892" y="66" fill="#e6edf6" font-size="12">pg_dump 수동 실행(개발 요청 · 티켓 OPS-2231)</text>
+      <text x="892" y="82" fill="#8b9bb4" font-size="11">연결: 이슈 #1842 · 위키 ‘DB 백업 절차’ · 범위 11:40~13:50</text>
+      <text x="892" y="98" fill="#8b9bb4" font-size="11">댓글 2 · 수정 11-06 13:52 · 이 서버 + bm-kr1-db02 에도 표시</text>
+      <text x="150" y="246" fill="#8b9bb4" font-size="11">13:40 어제</text><text x="1280" y="246" fill="#8b9bb4" font-size="11" text-anchor="end">13:35</text>
+    </svg>
+    <div class="dim" style="font-size:11.5px;margin-top:6px">기계 이벤트는 ● 점, 사람 주석은 ◆ 핀. 핀을 누르면 말풍선 · 같은 핀이 비교(⑪)·구간 비교(⑩)·집중(집중 모니터링) 화면에도 보인다. 주석은 서버 1대 또는 여러 대(법인 전체까지)에 걸 수 있다.</div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(440px,100%),1fr));gap:14px;align-items:start">
+    <!-- 주석 추가 폼 -->
+    <div class="card" style="border-color:rgba(168,85,247,.4)">
+      <h2 style="margin-bottom:8px">주석 추가</h2>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><label style="display:flex;flex-direction:column;gap:4px;font-size:12px" class="dim">시각<input class="inp" value="2026-11-06 11:40" aria-label="시각"></label><label style="display:flex;flex-direction:column;gap:4px;font-size:12px" class="dim">끝(선택 — 범위 주석)<input class="inp" value="2026-11-06 13:50" aria-label="끝"></label></div>
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:12px" class="dim">종류<select class="sel" aria-label="종류"><option>작업(수동 실행 · 배치)</option><option>변경(설정 · 배포)</option><option>외부 요인(네트워크 · 전원 · 공조)</option><option>사고 · 복구</option><option>메모</option></select></label>
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:12px" class="dim">내용<textarea class="ta" aria-label="내용">pg_dump 수동 실행(개발 요청 · 티켓 OPS-2231) — 근무 시간 실행, 재발 방지 필요</textarea></label>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><label style="display:flex;flex-direction:column;gap:4px;font-size:12px" class="dim">대상<select class="sel" aria-label="대상"><option>이 서버 (bm-kr1-db01)</option><option>선택 서버 2대</option><option>법인 전체 (KR-SEL)</option></select></label><label style="display:flex;flex-direction:column;gap:4px;font-size:12px" class="dim">연결<input class="inp" value="이슈 #1842 · 위키 ‘DB 백업 절차’" aria-label="연결"></label></div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px"><button class="btn primary" type="button">저장</button><button class="btn" type="button">취소</button><span class="dim" style="font-size:11.5px;align-self:center">작성자 · 시각 자동 · 감사 로그 · 수정 이력 보존 · 삭제는 작성자/관리자만(‘삭제됨’ 흔적 유지)</span></div>
+      </div>
+    </div>
+
+    <!-- 공유 -->
+    <div class="card" style="border-color:rgba(34,211,238,.35)">
+      <h2 style="margin-bottom:8px">공유 — 보고 있는 화면 그대로</h2>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div class="dim" style="font-size:12px">링크에 담기는 것: 화면(추이) · 서버(또는 비교 세트) · 기간 · 커서 · 선택 구간 · 장치 토글 · 평균/피크 · 지표군</div>
+        <div style="display:flex;gap:8px"><input class="inp mono" style="font-size:11.5px" value="https://portal.example/#/tools/bm-perf/kr-sel/bm-kr1-db01/trend?range=24h&at=2026-11-06T13:35&sel=02:00-05:10&dev=nvme1n1&view=avgpeak" aria-label="공유 링크" readonly><button class="btn" type="button">복사</button></div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px"><button class="btn" type="button">캡처 PNG (1440 · 2x)</button><button class="btn" type="button">캡처 + 링크를 이슈에 첨부</button><button class="btn" type="button">위키 문서에 삽입</button><button class="btn" type="button">웹훅으로 보내기</button></div>
+        <div style="border:1px solid #243049;border-radius:10px;padding:10px 12px;background:#0f1626;font-size:12px">
+          <div style="font-weight:700;margin-bottom:4px">미리보기 — 캡처에 찍히는 것</div>
+          <div class="dim">서버 · 법인 · 기간 · 커서 시각 · 선택 구간 · 출처(OS 13:35 · iDRAC 13:34) · 피크 수집 방식(B) · 생성 시각과 생성자 · ‘수치는 5분 평균/피크’ 각주 — 보는 사람이 맥락 없이도 읽게</div>
+        </div>
+        <div class="dim" style="font-size:11.5px">링크를 여는 사람은 자기 권한으로 본다(범위 밖이면 404 · 링크가 권한을 주지 않는다). 링크의 서버가 사라졌으면 ‘없음’ 과 마지막 보관분 안내. 캡처는 서버가 만들지 않고 브라우저에서 만든다(기존 CSV 와 같은 쪽).</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-bottom:8px">주석 목록 — bm-kr1-db01 · 최근 30일</h2>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>시각(범위)</th><th>종류</th><th>내용</th><th>대상</th><th>연결</th><th>작성</th></tr></thead>
+      <tbody>
+        <tr><td>11-06 13:35</td><td><span class="chip pur">작업</span></td><td>집중 모니터링 시작 — 디스크 포화 판정 뒤(자동 주석)</td><td>이 서버</td><td>집중 세션 11-06 13:38</td><td class="dim">시스템</td></tr>
+        <tr><td>11-06 11:40 ~ 13:50</td><td><span class="chip pur">작업</span></td><td>pg_dump 수동 실행(개발 요청 · 티켓 OPS-2231)</td><td>이 서버 + bm-kr1-db02</td><td>이슈 #1842 · 위키</td><td>김운영</td></tr>
+        <tr><td>11-06 02:00 ~ 05:10</td><td><span class="chip">외부 요인</span></td><td>백업 창 — 예정 부하(Bareos 스케줄에서 자동)</td><td>법인 KR-SEL</td><td>백업 작업 bm-kr1-db01-full</td><td class="dim">시스템</td></tr>
+        <tr><td>10-28 14:00</td><td><span class="chip warn">사고 · 복구</span></td><td>전산실 B 열 UPS 순간 전압 저하 — PSU 경고 3대</td><td>법인 KR-SEL</td><td>이슈 #1790</td><td>박시설</td></tr>
+      </tbody></table></div>
+    <div class="dim" style="font-size:11.5px;margin-top:8px">저장: 중앙 `bm-perf-annotations`(서버 키 목록 · 시각/범위 · 종류 · 내용 · 연결 · 작성자 · 수정 이력) — 엣지에 두지 않는다(사람이 쓰는 데이터는 중앙). 유지보수 창(⑨)과 집중 세션은 자동 주석으로 들어온다. 검색은 내용·종류·작성자.</div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1600}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

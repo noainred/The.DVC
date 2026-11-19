@@ -18,7 +18,9 @@ export function boldParts(text) {
     if (open < 0) break;
     const close = s.indexOf('**', open + 2);
     if (close < 0) break;                       // 닫는 표시가 없으면 강조로 보지 않는다
-    if (close === open + 2) { i = open + 2; continue; }   // '****' 빈 강조는 무시
+    // '****' 빈 강조는 강조가 아니다 — 앞 '**' 까지를 글자로 남기고 뒤 '**' 부터 다시 본다.
+    // v3.10.9(공통 기능 점검 7회차): 예전엔 `i` 만 옮기고 앞 글자를 넣지 않아 'ab****cd' 가 '**cd' 로 — 'ab' 가 사라졌다.
+    if (close === open + 2) { out.push({ b: false, t: s.slice(i, open + 2) }); i = open + 2; continue; }
     if (open > i) out.push({ b: false, t: s.slice(i, open) });
     out.push({ b: true, t: s.slice(open + 2, close) });
     i = close + 2;

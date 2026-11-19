@@ -8,10 +8,10 @@
  *  · vcenterIds: 비면 자동(짝지어진 B&R 등록의 vCenter 를 따른다) · 있으면 그것(수동)
  *  · 둘 다 비면 항목을 지운다(false 를 쌓지 않는다). 비밀은 없다(이름·id 만).
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../../util/atomicWrite.js';
+import { makeJsonFileReader } from '../../util/jsonFileRead.js';   // 94회차 F2: 읽기 오류 ≠ 손상
 
 const FILE = () => path.join(config.configDir, 'veeam-em-map.json');
 export const MAX_ENTRIES = 2000;
@@ -22,18 +22,24 @@ let rev = 0;
 let unreadable = false;
 export function emMapRev() { return rev; }
 export function emMapUnreadable() { load(); return unreadable; }
+/** 113회차 메인: 못 읽은 까닭이 읽기 오류인가(손상이 아니다 — 원본이 그대로 있고 보존본은 없다). 화면 문구가 가른다. */
+export function emMapReadError() { load(); return unreadable && readErr; }
 
+const parseMap = (t) => {
+  const d = JSON.parse(t);
+  if (!d || typeof d !== 'object' || Array.isArray(d) || typeof d.servers !== 'object' || Array.isArray(d.servers)) throw new Error('형식 오류');
+  return d.servers || {};
+};
+// 94회차 F2(backupMarks.js 와 같은 규칙): 읽기 오류는 원본을 옮기지 않고 · 캐시하지 않고(30초 간격 재읽기) · 그동안 unreadable(저장 거절). 손상은 예전과 같다.
+const _reader = makeJsonFileReader(() => FILE(), { parse: parseMap, tag: 'veeam-em-map' });
+let readErr = false;
 function load() {
   if (cache) return cache;
-  cache = {};
-  const f = FILE();
-  try {
-    if (fs.existsSync(f)) {
-      const d = JSON.parse(fs.readFileSync(f, 'utf8'));
-      if (!d || typeof d !== 'object' || Array.isArray(d) || typeof d.servers !== 'object' || Array.isArray(d.servers)) throw new Error('형식 오류');
-      cache = d.servers || {};
-    }
-  } catch (e) { preserveCorrupt(f, e.message); cache = {}; unreadable = true; }
+  const r = _reader.read();
+  if (r.kind === 'read-error') { if (!readErr) rev++; readErr = true; unreadable = true; return {}; }
+  if (readErr) { readErr = false; unreadable = false; rev++; }
+  if (r.kind === 'ok') cache = r.value;
+  else { cache = {}; if (r.kind === 'corrupt') unreadable = true; }
   return cache;
 }
 
@@ -58,7 +64,7 @@ export function setEmMap({ emId, server, vcenterIds, br }, { knownVcenters = [],
   const b = br == null ? '' : String(br);
   if (b && b !== 'none' && !knownBr.map(String).includes(b)) return { ok: false, status: 400, reason: '등록되지 않은 B&R 서버입니다.' };
   load();
-  if (unreadable) return { ok: false, status: 503, code: 'emMapUnreadable', reason: '매핑 파일을 읽지 못해 저장하지 않습니다(손상 사본은 설정 폴더에 남았습니다).' };
+  if (unreadable) return { ok: false, status: 503, code: 'emMapUnreadable', reason: readErr ? '매핑 파일을 읽지 못해(읽기 오류 — 원본은 그대로 있습니다) 저장하지 않습니다 — 파일 권한 · 디스크를 확인하세요(30초마다 다시 읽습니다).' : '매핑 파일을 읽지 못해 저장하지 않습니다(손상 사본은 설정 폴더에 남았습니다).' };
   const key = mapKey(emId, name);
   const next = { ...cache };
   if (!vcs.length && !b) delete next[key];
@@ -67,7 +73,7 @@ export function setEmMap({ emId, server, vcenterIds, br }, { knownVcenters = [],
     next[key] = { vcenterIds: vcs, br: b, server: name, by: String(user?.username || 'unknown').slice(0, 64), at: new Date().toISOString() };
   }
   atomicWriteFileSync(FILE(), JSON.stringify({ v: 1, servers: next }, null, 2), { mode: 0o600 });
-  cache = next; rev++;
+  cache = next; rev++; _reader.reset();
   return { ok: true, entry: next[key] || null };
 }
 
@@ -85,4 +91,4 @@ export function dropEmMapFor(emId) {
   return keys.length;
 }
 
-export function _resetEmMapForTest() { cache = null; unreadable = false; rev++; }
+export function _resetEmMapForTest() { cache = null; unreadable = false; readErr = false; _reader.reset(); rev++; }

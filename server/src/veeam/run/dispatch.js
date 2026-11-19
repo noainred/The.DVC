@@ -8,8 +8,11 @@
  *  · 정지 중이면 백업 실행·세션 확인을 보내지 않는다(틀린 계정으로 반복하면 잠긴다). 엣지 담당 서버는 그 엣지가 올린 마지막 결과의 정지 표지로 본다.
  *  · 실행 중 자격 거부(authFailed)가 나면 정지로 기록한다 — 모니터링도 함께 멈춘다(같은 계정). 비밀번호를 바꾸면 자동으로 풀린다.
  *  · 정지를 푸는 것은 모니터링 쪽(연결 시험·성공한 수집)이다 — 여기서 풀지 않는다.
+ *  · 127회차(124회차 실측 — 사람이 누른 백업 실행까지 보내지 않았다): **정지 기록 파일을 못 읽어 건너뛰는 것**(util/authGuard — 표지 unread · 시도 0회)은 이 서버에서 인증 실패가
+ *    확인된 것이 아니다 — 사람이 누른 실행 · 조회를 막지 않는다(authGuard 규칙 3). 그 실행이 거부되면 아래에서 실제 정지로 기록되고 그때부터 보내지 않는다(서버당 거부 1회).
  */
 import { authGuard } from '../poller.js';
+import { isUnreadStop } from '../../util/authGuard.js';
 import { getRecord } from '../store.js';
 import { runOp } from './ops.js';
 import { enqueueEdgeOp, RESULT_MS } from './edgeOps.js';
@@ -20,10 +23,10 @@ export function authStopOf(server) {
   if (!server) return null;
   if (server.agent) {
     const st = getRecord(server.id)?.result?.authStop;
-    return st && typeof st === 'object' ? { reason: String(st.reason || '인증 실패').slice(0, 200), since: Number(st.since) || null } : null;
+    return st && typeof st === 'object' && !isUnreadStop(st) ? { reason: String(st.reason || '인증 실패').slice(0, 200), since: Number(st.since) || null } : null;
   }
   const st = authGuard.peekAuthStop(server);
-  return st ? { reason: st.reason, since: st.since } : null;
+  return st && !isUnreadStop(st) ? { reason: st.reason, since: st.since } : null;
 }
 
 /**

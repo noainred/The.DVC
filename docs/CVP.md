@@ -96,6 +96,8 @@ CVP 도 Edge 에 연결되어 있다. 가져올 정보: 스위치 정보·장애
 | 카운터 | `/api/v1/rest/{serial}/Smash/counters/ethIntf/FastCounters/current` | 필드(`inOctets`·`outOctets`·`inErrors`) · 누적값인지 |
 | BGP | `/api/v1/rest/{serial}/Sysdb/routing/bgp/export/vrfBgpPeerInfoStatusEntryTable` | 경로 존재 · 필드(`bgpPeerState`·`bgpPeerAs`·`bgpPeerPrefixesReceived`) |
 | 부품 | `…/Sysdb/environment/{power,cooling,temperature}/status` · `…/Sysdb/hardware/archer/xcvr/status` | 경로·상태 필드명 전부(`state`·`status`·`alertRaised`) |
+| LLDP 이웃(v2.924) | `/api/v1/rest/{serial}/Sysdb/l2discovery/lldp/status/local/1/portStatus` → 포트 → `remoteSystem` → 이웃(포인터 추종 깊이 3 · 링크 올라온 포트만) | 경로 존재 · 필드(`sysName`·`portId`·`chassisId`·`portDescription`) — 전부 추정 |
+| MAC 테이블(v2.924) | `/api/v1/rest/{serial}/Smash/bridging/status/smashFdbStatus` | 경로 존재 · 키 모양(`{fid, addr}`)·필드(`intf`·`entryType`) — 전부 추정 |
 | 로그인 | `/cvpservice/login/authenticate.do`·`logout.do` | 쿠키 이름 `access_token` 과 본문 `sessionId` 중 무엇이 오는지(둘 다 받는다) |
 
 - CVaaS(클라우드) 는 토큰 모드로만 가정했다 — 확인 못 함.

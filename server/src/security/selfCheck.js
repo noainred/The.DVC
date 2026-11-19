@@ -22,7 +22,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { SECRET_FILES, loadSecretsPolicy } from './secretVault.js';
-import { effectiveLoginPolicy, fileUserLoginPolicies, loadSessionSecurity } from './securitySettings.js';
+import { effectiveLoginPolicy, fileUserLoginPolicies, loadSessionSecurity, sessionSecurityRecovery } from './securitySettings.js';
 import { isAdminTier } from '../auth/roles.js';
 import { signatureStatus } from '../upgrade/signature.js'; // 2026-10-09 검토 S-10
 import { adTransportStatus } from '../auth/ad.js'; // 2026-10-09 검토 S-03
@@ -147,12 +147,28 @@ export const RELAX_SWITCHES = [
   { env: 'NSX_TLS_REJECT_UNAUTHORIZED', onValue: 'false', title: 'NSX TLS 검증 예외', why: '장비 인증서 검증 예외 — 이 수집기의 자격증명이 상대 확인 없이 전송된다(기본은 CA 체인 또는 승인 지문).' },
   { env: 'STORAGE_TLS_VERIFY', onValue: 'false', title: '스토리지 수집 TLS 검증 예외', why: '장비 인증서 검증 예외 — 이 수집기의 자격증명이 상대 확인 없이 전송된다(기본은 CA 체인 또는 승인 지문).' },
   { env: 'SANSWITCH_TLS_VERIFY', onValue: 'false', title: 'SAN 스위치 TLS 검증 예외', why: '장비 인증서 검증 예외 — 이 수집기의 자격증명이 상대 확인 없이 전송된다(기본은 CA 체인 또는 승인 지문).' },
+  // 전체 점검 21회차 L-7(재현): 아래 셋이 빠져 켜 둔 채로 '14개 스위치 모두 기본값(보호 켜짐)' 이라고 보고했다.
+  { env: 'VEEAM_TLS_VERIFY', onValue: 'false', title: 'Veeam TLS 검증 예외', why: '장비 인증서 검증 예외 — 이 수집기의 자격증명이 상대 확인 없이 전송된다(기본은 CA 체인 또는 승인 지문).' },
+  { env: 'TLS_PEER_POLICY', onValue: 'observe', title: '장비 TLS 지문 관찰 모드(env)', why: '처음 보는 장비 지문을 받아들이고 기록만 한다 — 화면의 정책보다 env 가 이긴다.' },
+  { env: 'SSH_HOSTKEY_POLICY', onValue: 'observe', title: 'SSH 호스트 키 관찰 모드(env)', why: '처음 보는 SSH 서버 키를 받아들이고 기록만 한다 — 그 서버에 비밀번호가 전달될 수 있다.' },
 ];
 
 /**
- * 지금 이 서버의 보안 상태를 조회한다.
- * users: `listUsers()` 결과(주입 — 테스트에서 대체 가능). 미주입이면 계정 항목은 unknown.
+ * 100회차(98회차 남긴 것 ③): 세션 보안 회복 상태(securitySettings.sessionSecurityRecovery — { source, problem }) → 사람이 읽는 한 줄. 없으면 ''.
+ *   웹(설정 › 세션 보안 — web/src/views/sessionSecurityBody.js)도 같은 이름표를 쓴다 — 두 벌이라 테스트(rebut100)가 이름표를 대조한다.
  */
+export const SESSION_RECOVERY_LABELS = Object.freeze({
+  problem: Object.freeze({ 'read-error': '읽기 오류', corrupt: '손상', missing: '없음' }),
+  source: Object.freeze({ 'last-good': '이 프로세스가 마지막으로 읽은 값', 'trusted-copy': '신뢰 사본(security-session.trusted.json)의 값', strict: '엄격 값(전 계정 OTP 전용 · 단일 세션 · 총 상한 8시간)' }),
+});
+export function sessionRecoveryText(rec) {
+  if (!rec || typeof rec !== 'object') return '';
+  const source = SESSION_RECOVERY_LABELS.source[rec.source];
+  if (!source) return '';
+  const problem = SESSION_RECOVERY_LABELS.problem[rec.problem] || '읽지 못함';
+  return `본 파일(security-session.json) ${problem} — ${source}으로 도는 중이다(화면의 값은 파일 값이 아니다).`;
+}
+
 export function collectSelfCheck({ users = null, env = process.env, dir = null } = {}) {
   const configDir = dir || config.configDir;
   const checks = [];
@@ -279,7 +295,8 @@ export function collectSelfCheck({ users = null, env = process.env, dir = null }
       : pol?.recovered
         ? `정책 파일을 읽지 못해(${pol.problem}) ${pol.recovered === 'last-good' ? '직전 유효 정책' : '신뢰 사본(secrets-policy.trusted.json)'}으로 계속 ${pol.mode === 'encrypted' ? '봉인' : '평문'} 저장 중이다.`
       : (pol?.mode === 'encrypted'
-        ? `봉인 저장(${pol.alg || 'aes-256-gcm'} · 레벨 ${pol.level ?? 2}). 키 파일이 같은 호스트에 있으므로 at-rest 보호이며 호스트 완전 장악은 막지 못한다.`
+        // 21회차 L-7: pol.alg 는 없는 필드였다 — 레벨 1(aes-128-gcm)을 aes-256-gcm 으로 적었다(secretVault LEVELS 와 같은 표)
+        ? `봉인 저장(${pol.algorithm || ({ 1: 'aes-128-gcm', 2: 'aes-256-gcm', 3: 'aes-256-gcm' })[pol.level ?? 2] || 'aes-256-gcm'} · 레벨 ${pol.level ?? 2}). 키 파일이 같은 호스트에 있으므로 at-rest 보호이며 호스트 완전 장악은 막지 못한다.`
         : '평문 저장(기본값). 파일 권한(0600)만이 보호 수단이다.'),
     evidence: 'secrets-policy.json',
     howto: (pol?.locked || pol?.recovered)
@@ -366,18 +383,22 @@ export function collectSelfCheck({ users = null, env = process.env, dir = null }
   }
 
   /* 10. 세션 보안 설정 ---------------------------------------------------- */
-  let sess = null; let sessErr = null;
-  try { sess = loadSessionSecurity(); } catch (e) { sessErr = e?.message || String(e); }
+  let sess = null; let sessErr = null; let sessRec = null;
+  try { sess = loadSessionSecurity(); sessRec = sessionSecurityRecovery(); } catch (e) { sessErr = e?.message || String(e); }
+  // 100회차(98회차 남긴 것 ③ — 결정): 본 파일 대신 직전 값 · 신뢰 사본 · 엄격 값으로 도는 중이면 그 사실을 한 줄로(예전에는 'ok' 로만 보였다 — 서버 응답에만 있었다).
+  const recText = sessionRecoveryText(sessRec);
+  // 100회차(개선): 예전 문구는 없는 필드(demoSessionMode)를 읽어 데모 세션 모드가 늘 '기본' 으로 보였다 — 저장 필드는 demoSession(null · allow · single).
+  const demoLabel = { allow: '중복 허용', single: '중복 차단(단일 세션)' }[sess?.demoSession] || '전역 따름(기본)';
   add({
     id: 'session-security',
     group: '인증·계정',
     title: '세션 보안 설정',
-    status: sessErr ? 'unknown' : 'ok',
+    status: sessErr ? 'unknown' : recText ? 'warn' : 'ok',
     detail: sessErr
       ? `설정을 읽지 못했다: ${sessErr}`
-      : `단일 세션 강제 ${sess?.singleSession ? '켜짐' : '꺼짐'} · 데모 세션 모드 ${sess?.demoSessionMode || '기본'}.`,
-    evidence: 'security-session.json',
-    howto: '',
+      : `단일 세션 강제 ${sess?.singleSession ? '켜짐' : '꺼짐'} · 데모 세션 모드 ${demoLabel}.${recText ? ` ${recText}` : ''}`,
+    evidence: 'security-session.json · security-session.trusted.json',
+    howto: recText ? '설정 › 세션 보안에서 값을 확인하고 본인 OTP 로 다시 저장하면 본 파일이 다시 쓰인다(읽기 오류면 먼저 파일 소유자 · 권한을 고친다).' : '',
   });
 
   return { checks, summary: summarize(checks) };

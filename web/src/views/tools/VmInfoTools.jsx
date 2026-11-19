@@ -14,7 +14,8 @@ export function DupIp({ scope }) {
     { key: 'ip', label: 'IP 주소', render: (d) => <b style={{ color: 'var(--amber)' }}>{d.ip}</b> },
     { key: 'count', label: '중복', align: 'right', render: (d) => <span className="badge red">{d.count}</span> },
     { key: 'crossVcenter', label: '유형', sortValue: (d) => (d.crossVcenter ? 1 : 0), render: (d) => (d.crossVcenter ? <span className="badge amber">vCenter 간</span> : <span className="badge gray">동일</span>) },
-    { key: 'vms', label: '사용 중인 VM', sortValue: (d) => d.count, render: (d) => d.vms.map((v, i) => <span key={v.id}>{i > 0 && ', '}<span className="vcd-link" onClick={() => setDetail(v)}>{v.name}</span></span>) },
+    // v2.977(전체 점검): VM 이름이 한 줄로 이어져(1,058px) 1440px 에서 표가 넘쳤다 — 줄바꿈한다
+    { key: 'vms', label: '사용 중인 VM', sortValue: (d) => d.count, render: (d) => <span style={{ display: 'inline-block', whiteSpace: 'normal', overflowWrap: 'anywhere', maxWidth: 640 }}>{d.vms.map((v, i) => <span key={v.id}>{i > 0 && ', '}<span className="vcd-link" onClick={() => setDetail(v)}>{v.name}</span></span>)}</span> },
   ];
   return (
     <>
@@ -48,6 +49,21 @@ export function upgradeResultMsg(r) {
   return { ok: failed === 0, text: `업그레이드 요청: ${succeeded}/${requested}건${r?.mock ? ' (데모)' : ''}${tail ? ` — ${tail}` : ''}` };
 }
 
+/**
+ * 업그레이드 확인 문구 — 실제로 보낼 대수로 묻는다(전체 점검 32회차 F3: 예전에는 'VM N대' 라고 묻고 앞 2,000개만 보냈다 · 꺼진 VM · 템플릿도 섞였다).
+ * 보낼 VM 이 없으면 null(버튼을 잠근다).
+ */
+export function vmToolsConfirmText(row) {
+  const ids = Array.isArray(row?.ids) ? row.ids.length : 0;
+  if (!ids || row?.unread) return null;
+  const all = Number.isFinite(row?.upgradable) ? row.upgradable : ids;
+  const skipped = Math.max(0, (Number(row?.count) || 0) - all);
+  const parts = [`Tools 버전 ‘${row.version}’ 의 켜진 VM ${ids.toLocaleString()}대를 업그레이드할까요? (재부팅이 필요할 수 있음)`];
+  if (row?.idsTruncated) parts.push(`대상 ${all.toLocaleString()}대 중 처음 ${ids.toLocaleString()}대만 요청합니다 — 나머지는 다시 실행하세요.`);
+  if (skipped) parts.push(`꺼진 VM · 템플릿 ${skipped.toLocaleString()}대는 뺐습니다.`);
+  return parts.join('\n');
+}
+
 export function VmTools({ scope }) {
   const { loading, data, error } = useTool('/tools/vmtools', scope ? { vcenterId: scope } : {});
   const [busy, setBusy] = useState(false);
@@ -58,7 +74,8 @@ export function VmTools({ scope }) {
   if (error) return <ErrorBox message={error} />;
 
   const upgrade = async (row) => {
-    if (!window.confirm(`Tools 버전 '${row.version}' VM ${row.count}대를 업그레이드할까요? (재부팅이 필요할 수 있음)`)) return;
+    const q = vmToolsConfirmText(row);
+    if (!q || !window.confirm(q)) return;
     setBusy(true); setMsg(null);
     try {
       const r = await postJson('/vms/upgrade-tools', { ids: row.ids });
@@ -67,11 +84,12 @@ export function VmTools({ scope }) {
   };
 
   const cols = [
-    { key: 'version', label: 'Tools 버전', render: (r) => <b>{r.version}</b> },
+    { key: 'version', label: 'Tools 버전', render: (r) => (r.unread ? <span className="muted" title="이 VM 들은 Tools 정보가 수집되지 않았습니다(예: REST 방식으로 수집된 vCenter)">{r.version}</span> : <b>{r.version}</b>) },
     { key: 'count', label: 'VM 수', align: 'right' },
-    { key: 'running', label: '정상', align: 'right' },
-    { key: 'outdated', label: '오래됨', align: 'right', render: (r) => <span style={{ color: r.outdated ? 'var(--amber)' : undefined }}>{r.outdated}</span> },
-    { key: 'act', label: '작업', sortable: false, render: (r) => (canManage ? <button className="tab" disabled={busy} onClick={() => upgrade(r)}>업그레이드</button> : null) },
+    { key: 'running', label: '정상', align: 'right', render: (r) => (r.unread ? '—' : r.running) },
+    { key: 'outdated', label: '오래됨', align: 'right', render: (r) => (r.unread ? '—' : <span style={{ color: r.outdated ? 'var(--amber)' : undefined }}>{r.outdated}</span>) },
+    { key: 'notRunning', label: '실행 안 함', align: 'right', render: (r) => (r.unread ? '—' : r.notRunning) },
+    { key: 'act', label: '작업', sortable: false, render: (r) => (canManage && !r.unread ? <button className="tab" disabled={busy || !vmToolsConfirmText(r)} title={vmToolsConfirmText(r) ? undefined : '켜진 VM 이 없습니다'} onClick={() => upgrade(r)}>업그레이드</button> : null) },
   ];
   return (
     <>

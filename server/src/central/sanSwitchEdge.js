@@ -4,6 +4,7 @@
  * (central-agent-* 는 .gitignore 와일드카드로 이미 커밋 차단).
  * 저장 키는 라우트가 req.centralAuth.agent 로 강제한다(agent 바인딩 — server/CLAUDE.md).
  */
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
@@ -129,9 +130,11 @@ function load() {
 }
 
 // v2.591: '지금 수집' 요청 큐의 기준선 — 보관 중인 엣지 스냅샷의 수집 시각(엣지 시계 값).
+// 59회차(58회차 F1 반증 — 재현): 기준선도 단건 경로와 같은 사본(가장 늦은 수집 — edgeSanSwitchSnapshotFor)에서 — 예전 첫 일치는 위임을 옮긴 뒤
+//   중앙 재시작 직후 옛 엣지의 한 달 전 시각을 기준선으로 잡아, 새 엣지가 이미 보관 중인 스냅샷을 다시 보내기만 해도 '지금 수집' 이 완료로 지워졌다.
 setCollectBaseResolver((id) => {
-  for (const rec of load().values()) for (const d of rec?.devices || []) if (String(d?.deviceId) === String(id)) return Number(d.edgeCollectedAt ?? d.collectedAt) || null; // v2.630 A4-02
-  return null;
+  const d = edgeSanSwitchSnapshotFor(id);
+  return d ? (Number(d.edgeCollectedAt ?? d.collectedAt) || null) : null; // v2.630 A4-02: 값은 그 사본의 엣지 시계 원본
 });
 
 /**
@@ -252,6 +255,22 @@ export function edgeSanSwitchSnapshots() {
   for (const [agent, v] of load()) for (const d of v.devices || []) out.push({ ...d, agent, pushedAt: v.at, staleMs: v.at ? now - v.at : null });
   return out;
 }
+/**
+ * 58회차 F1(재현): 한 장비의 엣지 보관분 중 **수집 시각이 가장 늦은 것**(목록 라우트 · storagePerfCore · hostSan 과 같은 규칙). 없으면 null.
+ *   예전 단건 경로(포트 상세 · 조닝 · 점검 · 기준선 · 플로우 인증 정지)는 `edgeSanSwitchSnapshots().find(...)` — **먼저 보관된 엣지**의 사본을 골랐다.
+ *   위임을 옛 엣지(철거 · 오프라인)에서 새 엣지로 옮기면 옛 엣지의 사본이 중앙에 남아, 목록은 새 엣지 값인데 상세 · 월간 점검은 한 달 전 값을 판정했다.
+ */
+export function edgeSanSwitchSnapshotFor(deviceId) {
+  const id = String(deviceId ?? '');
+  let hit = null; let hitAgent = ''; let hitAt = null;
+  for (const [agent, v] of load()) {
+    for (const d of v?.devices || []) {
+      if (String(d?.deviceId) !== id) continue;
+      if (!hit || (d.collectedAt || 0) > (hit.collectedAt || 0)) { hit = d; hitAgent = agent; hitAt = v.at; }
+    }
+  }
+  return hit ? { ...hit, agent: hitAgent, pushedAt: hitAt, staleMs: hitAt ? Date.now() - hitAt : null } : null;
+}
 /** 등록부에서 빠진 장비(orphan)의 엣지 보관분을 목록에서 내리는 기준 — 기본 7일(보고가 끊긴 엣지의 유령 스위치). */
-export const ORPHAN_TTL_MS = Math.max(3_600_000, Number(process.env.CENTRAL_SANSW_ORPHAN_TTL_MS) || 7 * 86_400_000);
+export const ORPHAN_TTL_MS = Math.max(3_600_000, envPositive(process.env.CENTRAL_SANSW_ORPHAN_TTL_MS, 7 * 86_400_000));
 export function _resetForTest() { _map = null; _lastRec.clear(); }

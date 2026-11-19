@@ -25,10 +25,11 @@ import { scopeDbStatus } from '../../auth/scopeStatus.js';
 import { isAdminReq, maskActivityEvents, maskPollerStatus, scrubHosts } from '../../auth/addressMask.js';
 import { requireRole, requirePerm } from '../../auth/auth.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
+import { denyFleetWrite } from '../../auth/scopeMerge.js';   // 전체 점검 7회차 반증 R-2
 import { logAudit } from '../../audit.js';
 import { store } from '../../store.js';
 import { listHorizon } from '../../horizon/horizon.js';
-import { load as loadHzSettings, save as saveHzSettings, LIMITS } from '../../horizon/sessionSettings.js';
+import { load as loadHzSettings, save as saveHzSettings, LIMITS, horizonSessionSettingsLoadError } from '../../horizon/sessionSettings.js';
 import { hzLatestRecords, hzSeriesRange, hzSessionDbStatus, hzUsageRange } from '../../horizon/sessionDb.js';
 import { buildUsageReport, dayRange } from '../../horizon/appUsageReport.js';
 import { KIND_LABEL as USAGE_KIND_LABEL, BASES as USAGE_BASES } from '../../horizon/appUsage.js';
@@ -42,6 +43,7 @@ import { latestRecords as curUserLatest } from '../../curuser/db.js';
 import { load as loadCurUser, staleAfterMs } from '../../curuser/settings.js';
 import { buildReport as buildCurUserReport } from '../../curuser/report.js';
 import { combineSources } from '../../curuser/combine.js';
+import { NOT_TARGET_KINDS as CU_NOT_TARGET } from '../../curuser/aggregate.js';   // 91회차(90 F4 반증): 하한 사유에는 대상 아님 종류를 섞지 않는다
 import { KIND_LABEL as CU_KIND_LABEL } from '../../curuser/guestinfoSource.js';
 import { demoOn, isMockMode } from '../../mock/demo/flags.js'; // v2.708 데모(mock)는 켜진 것처럼
 
@@ -134,7 +136,7 @@ async function usageReport({ days, serverId }) {
   const hit = _usageCache.get(key);
   if (hit) return hit.body;
   const range = await usageRangeShared({ fromDay, toDay, serverId, latestTs });
-  const fresh = latest.filter((r) => Number(r.ts) === latestTs && r.ok && (!serverId || r.serverId === serverId));
+  const fresh = latest.filter((r) => Number(r.ts) === latestTs && r.ok && r.parsed !== false && (!serverId || r.serverId === serverId));   // 41회차 F1
   const report = buildUsageReport(range, {
     fromDay, toDay, intervalMs: s.intervalMs,
     servers: serverId ? 1 : Math.max(1, targetServers(s).length),
@@ -265,7 +267,7 @@ api.get('/tools/horizon-sessions/activity', requirePerm('tools'), (req, res) => 
 });
 
 api.post('/tools/horizon-sessions/collect', requireRole('admin'), async (req, res) => {
-  if (denyScoped(req, res)) return;   // v2.605 AUTHZ2605-02: 조회가 전부 403 인데 실행·설정 변경만 열려 있었다
+  if (denyFleetWrite(req, res, 'Horizon 실시간 사용자 수집 · 설정은 전 법인 공용이라 조회 · 쓰기 모두 전체 범위인 계정만 바꾸거나 실행할 수 있습니다.')) return;   // v2.605 AUTHZ2605-02 · 전체 점검 7회차 반증 R-2(쓰기 범위도)
   const r = await runHzSessionsNow('manual', { demoOnly: isDemoGuest(req.user) }); // v2.720: 데모 계정은 데모 서버만
   logAudit({
     user: req.user?.username, action: 'horizon.sessions.collect', ip: req.ip || '',
@@ -283,6 +285,8 @@ api.get('/tools/horizon-sessions/settings', requirePerm('tools'), async (req, re
   res.json({
     settings: s,
     limits: LIMITS,
+    // 90회차 F3: 설정 파일을 못 읽어 기본값(꺼짐)으로 도는 중이면 밝힌다(사유는 요약 — 파일 조각 없음 · 읽기 오류면 저장은 409).
+    loadError: horizonSessionSettingsLoadError(),
     servers: (() => {
       const list = listHorizon().map((x) => ({ serverId: x.id, id: x.id, name: x.name || x.id, host: x.host, enabled: x.enabled !== false, hasPassword: !!x.hasPassword }));
       return (admin ? list : maskHzRows(list, hosts)).map(({ serverId, ...x }) => x);
@@ -295,7 +299,7 @@ api.get('/tools/horizon-sessions/settings', requirePerm('tools'), async (req, re
 });
 
 api.put('/tools/horizon-sessions/settings', requireRole('admin'), (req, res) => {
-  if (denyScoped(req, res)) return;   // v2.605 AUTHZ2605-02: 조회가 전부 403 인데 실행·설정 변경만 열려 있었다
+  if (denyFleetWrite(req, res, 'Horizon 실시간 사용자 수집 · 설정은 전 법인 공용이라 조회 · 쓰기 모두 전체 범위인 계정만 바꾸거나 실행할 수 있습니다.')) return;   // v2.605 AUTHZ2605-02 · 전체 점검 7회차 반증 R-2(쓰기 범위도)
   const b = req.body || {};
   if (b.servers !== undefined && (!b.servers || typeof b.servers !== 'object' || Array.isArray(b.servers))) {
     return res.status(400).json({ ok: false, reason: 'servers 는 객체여야 합니다.' });
@@ -307,7 +311,13 @@ api.put('/tools/horizon-sessions/settings', requireRole('admin'), (req, res) => 
     if (bad.length) return res.status(400).json({ ok: false, reason: `등록되지 않은 Horizon 서버 id: ${bad.slice(0, 5).join(', ')}` });
   }
   const before = loadHzSettings();
-  const next = saveHzSettings({ ...before, ...b, servers: b.servers === undefined ? before.servers : b.servers });
+  let next;
+  try { next = saveHzSettings({ ...before, ...b, servers: b.servers === undefined ? before.servers : b.servers }); }
+  catch (e) {
+    // 90회차 F3: 설정 파일 읽기 오류 중 저장 거절(원본이 디스크에 그대로 있다 — 기본값 위에 덮지 않는다).
+    if (e?.status === 409) return res.status(409).json({ ok: false, code: e.code || 'settings-unreadable', reason: e.message });
+    throw e;
+  }
   logAudit({
     user: req.user?.username, action: 'horizon.sessions.settings', ip: req.ip || '',
     detail: JSON.stringify({ enabled: next.enabled, intervalMs: next.intervalMs }).slice(0, 300),
@@ -344,9 +354,17 @@ api.get('/tools/current-users/combined', requirePerm('tools'), async (req, res) 
     const kindText = Object.entries(rep.kinds || {})
       .filter(([k]) => k !== 'ok')
       .map(([k, n2]) => `${CU_KIND_LABEL[k] || k} ${n2}대`).join(' · ');
+    // 90회차 F4(재현): 지금 값을 못 읽은 서버(값 오래됨 · 게스트 오류 · 발행 중 · 형식 미인식 · 시계 오차 — 발행기 없음 · VM 없음은 대상 아님)가 섞였으면
+    //   이 이름 목록도 **부분**이다 — VDI 쪽(serversFailed > 0)과 같은 규칙으로 하한을 넘긴다. 예전에는 원문 절단만 보아 40대 중 30대를 못 읽어도
+    //   합집합 카드가 'Windows ∪ VDI'(전체)라고 말했다.
+    const unread = Number(rep.total.vmsTransient) || 0;
+    // 91회차(90 F4 반증): 'N대는 빠졌습니다' 의 사유 목록에 대상 아님(발행기 없음 · VM 없음 — N 에 들지 않는다)을 섞으면 수가 맞지 않았다(3대 — 값 오래됨 2대 · 발행기 없음 5대).
+    const unreadKindText = Object.entries(rep.kinds || {})
+      .filter(([k]) => k !== 'ok' && !CU_NOT_TARGET.includes(k))
+      .map(([k, n2]) => `${CU_KIND_LABEL[k] || k} ${n2}대`).join(' · ');
     windows = recs.length && usable > 0
       // v2.622(감사 DATA-06): 원문 절단 서버가 섞였으면 이 이름 목록은 하한이다 — 합집합에 전달한다.
-      ? { state: 'ok', names: rep.total.names, lowerBound: !!rep.total.usersLowerBound, reason: '', detail: { users: rep.total.users, sessions: rep.total.sessions, kinds: rep.kinds, lastReadAt: rep.lastReadAt } }
+      ? { state: 'ok', names: rep.total.names, lowerBound: !!rep.total.usersLowerBound || unread > 0, reason: unread > 0 ? `지금 값을 읽지 못한 서버 ${unread}대는 빠졌습니다 — ${unreadKindText || '사유 미상'}.` : '', detail: { users: rep.total.users, sessions: rep.total.sessions, kinds: rep.kinds, lastReadAt: rep.lastReadAt, unread } }
       : recs.length
         ? { state: 'failed', names: [], reason: `수집된 서버 ${recs.length}대 중 **지금 값이 유효한 서버가 없습니다** — ${kindText || '사유 미상'}.`,
           detail: { users: null, sessions: null, kinds: rep.kinds, lastReadAt: rep.lastReadAt } }

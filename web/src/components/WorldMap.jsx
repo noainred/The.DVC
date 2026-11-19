@@ -3,6 +3,9 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ComposableMap, Geographies, Geography, Marker } from 'react-simple-maps';
 import geoData from 'world-atlas/countries-110m.json';
 import { Modal } from './Modal.jsx'; // v2.295: ui.jsx(셸) 역참조 순환 절단 — 구현 파일 직접 import
+import { vmOnText, alarmText } from './worldMapText.js';
+import { alarmsUnknown } from '../views/restFallbackText.js';   // 55회차 #6
+import { numOrNull } from '../numOrNull.js';   // 2차 공통 기능 점검 8회차: 못 읽은 지표는 '—'
 
 // 지도 높이 clamp — 대시보드에 과도하게 커지지 않도록 상한을 둔다(이전 상한 1200은 너무 커
 // 화면을 다 차지했다). 저장값이 상한을 넘으면 로드 시 이 값으로 줄어든다.
@@ -17,6 +20,7 @@ function markerStyle(site) {
   if (site.status === 'maintenance') return { fill: '#f59e0b', r: 6, ring: '#f59e0b' };
   if (site.status === 'disabled') return { fill: '#6b7280', r: 5, ring: '#6b7280' };
   if (site.status !== 'connected') return { fill: '#ef4444', r: 7, ring: '#ef4444' };
+  if (alarmsUnknown(site)) return { fill: '#94a3b8', r: 5, ring: '#94a3b8' };   // 55회차 #6: 경보 미조회(REST 폴백) — 상세 창 '—(경보 미조회)' 와 같게, 초록(정상)으로 칠하지 않는다
   if (m.alarmsCritical > 0) return { fill: '#ef4444', r: 6, ring: '#ef4444' };
   if (m.alarmsWarning > 0) return { fill: '#f59e0b', r: 6, ring: '#f59e0b' };
   return { fill: '#22c55e', r: 5, ring: '#22c55e' };
@@ -207,7 +211,7 @@ export default function WorldMap({ sites = [], onSelect, height = 320, onResizeE
           <div className="t-row"><span>위치</span><b>{tip.site.location?.city}, {tip.site.location?.country}</b></div>
           <div className="t-row"><span>상태</span><b>{tip.site.status}</b></div>
           <div className="t-row"><span>호스트</span><b>{tip.site.metrics?.hosts ?? '-'}</b></div>
-          <div className="t-row"><span>VM</span><b>{tip.site.metrics?.vms ?? '-'} ({tip.site.metrics?.vmsPoweredOn ?? 0} on)</b></div>
+          <div className="t-row"><span>VM</span><b>{vmOnText(tip.site.metrics)}</b></div>
           <div className="t-row"><span>CPU</span><b>{unitText(tip.site.metrics?.cpuUsagePct, '%')}</b></div>
           <div className="t-row"><span>메모리</span><b>{unitText(tip.site.metrics?.memUsagePct, '%')}</b></div>
           <div className="t-row"><span>스토리지</span><b>{unitText(tip.site.metrics?.storageUsagePct, '%')}</b></div>
@@ -233,13 +237,13 @@ export default function WorldMap({ sites = [], onSelect, height = 320, onResizeE
               {row('위치', `${picked.location?.city || '-'}, ${picked.location?.country || '-'}`)}
               {row('리전', picked.location?.region || '-')}
               {row('버전', picked.version || '-')}
-              {row('호스트', m.hosts ?? '-')}
-              {row('VM', `${m.vms ?? '-'} (${m.vmsPoweredOn ?? 0} on)`)}
+              {row('호스트', numOrNull(m.hosts) ?? '—')}
+              {row('VM', vmOnText(m))}
               {row('CPU 사용률', unitText(m.cpuUsagePct, '%'))}
               {row('메모리 사용률', unitText(m.memUsagePct, '%'))}
               {row('스토리지 사용률', unitText(m.storageUsagePct, '%'))}
               {m.powerKw > 0 && row('소비전력', `${m.powerKw} kW`)}
-              {row('알람', `위험 ${m.alarmsCritical || 0} · 경고 ${m.alarmsWarning || 0}`)}
+              {row('알람', alarmText(m, picked))}
             </div>
             <div className="flex" style={{ justifyContent: 'flex-end', marginTop: 14 }}>
               <button className="login-btn" style={{ flex: 'none', padding: '9px 16px' }} onClick={() => { onSelect?.(picked.id); setPicked(null); }}>

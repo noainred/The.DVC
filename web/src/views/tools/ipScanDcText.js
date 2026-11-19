@@ -61,20 +61,6 @@ export function coverageOf(cidr, ranges) {
   return covered > 0 ? 'partial' : '';
 }
 
-/** 체크한 /24 를 입력칸 끝에 붙인다 — 이미 전부 들어 있는 것은 넣지 않는다. 결과: { lines, added, skipped }. */
-export function appendSubnets(lines, cidrs) {
-  const cur = Array.isArray(lines) ? lines.slice() : String(lines ?? '').split(/\r?\n/);
-  while (cur.length && !String(cur[cur.length - 1]).trim()) cur.pop();
-  const ranges = rangesOf(cur);
-  let added = 0; let skipped = 0;
-  for (const c of cidrs || []) {
-    if (coverageOf(c, ranges) === 'full') { skipped += 1; continue; }
-    cur.push(c); added += 1;
-    const r = checkRangeSpec(c); if (r.ok) ranges.push([r.lo, r.hi]);
-  }
-  return { lines: cur, added, skipped };
-}
-
 /** 제안 요약 한 줄. */
 export function suggestSummaryText(s) {
   if (!s) return '';

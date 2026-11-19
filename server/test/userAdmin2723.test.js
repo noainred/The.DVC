@@ -11,7 +11,7 @@
  *  ⑤ 상자·표의 한글 폭 — 모든 줄의 표시 폭이 같다(오른쪽 테두리가 밀리지 않는다).
  * 자식 프로세스인 이유: config.js 싱글턴이라 이 프로세스에서 CONFIG_DIR 을 다시 못 가리킨다.
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -19,6 +19,13 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { boxLines, tableLines, dispWidth, loginStateOf } from '../src/tools/userAdminText.js';
+
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
@@ -35,7 +42,7 @@ function child(code, dir, extraEnv = {}) {
 }
 
 test('① 메뉴의 로그인 판정 = 서버의 실제 로그인 판정(48 조합)', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'uadm-'));
+  const dir = tmpDir('uadm-');
   const cases = [];
   for (const role of ['viewer', 'operator', 'admin']) for (const pw of [true, false]) for (const otp of [true, false]) for (const pol of [null, 'password_only', 'otp_only', 'otp_or_password']) cases.push({ role, pw, otp, pol });
   const out = child(`
@@ -89,7 +96,7 @@ test('① 메뉴의 로그인 판정 = 서버의 실제 로그인 판정(48 조�
 });
 
 test('② 계정별 방식 파일은 그 사용자 줄만 바꾼다 · 0600', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'uadm-'));
+  const dir = tmpDir('uadm-');
   fs.writeFileSync(path.join(dir, 'login-policy-users.txt'), '# 운영자 메모\nalice=otp\nbob=password # 서비스 계정\nalice=both\n');
   const out = child(`
     const fs = await import('node:fs'); const path = await import('node:path');
@@ -120,7 +127,7 @@ test('② 계정별 방식 파일은 그 사용자 줄만 바꾼다 · 0600', ()
 });
 
 test('③ 메뉴로 만든 관리자를 비밀번호 로그인으로 지정하면 실제로 비밀번호로 들어간다', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'uadm-'));
+  const dir = tmpDir('uadm-');
   // 2=생성: park / 이름 기본 / 역할 3(admin) / 비번 y / 두 번 / 방식 1(비밀번호) / 만들기 y / 관리자 경고 y
   // 2=생성: choi / 이름 / 역할 3 / 비번 y / 두 번 / 방식 Enter(기본) / y   → 0=종료
   const input = '2\npark\n\n3\ny\nPassw0rd-park\nPassw0rd-park\n1\ny\ny\n2\nchoi\n\n3\ny\nPassw0rd-choi\nPassw0rd-choi\n\ny\n0\n';
@@ -144,7 +151,7 @@ test('③ 메뉴로 만든 관리자를 비밀번호 로그인으로 지정하�
 });
 
 test('④ users.json 이 없을 때 다시 읽기가 시드 비밀번호 파일을 바꾸지 않는다', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'uadm-'));
+  const dir = tmpDir('uadm-');
   const out = child(`
     const fs = await import('node:fs'); const path = await import('node:path');
     const auth = await import(${JSON.stringify(path.join(SRC, 'auth/auth.js'))});

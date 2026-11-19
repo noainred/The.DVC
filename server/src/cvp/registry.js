@@ -11,10 +11,9 @@
  *  - **접속 대상(host·username·authMode)이 바뀌면 저장 비밀을 승계하지 않는다**(util/secretCarry — v2.500).
  *  - 응답에는 비밀을 싣지 않는다(`********` + hasToken/hasPassword).
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { makeLoadError, filterObjectElements, devicesForThisNode as coreDevicesForThisNode, devicesForAgent as coreDevicesForAgent } from '../util/registryCore.js'; // v2.613 PERSIST2613-04
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js';
 import { ssrfBlockReason } from '../collector/registry.js';
@@ -41,24 +40,31 @@ let _db = null;
 const loadErr = makeLoadError();
 export function registryLoadError() { load(); return loadErr.get(); }
 
+// 결정(78 남긴 것 ①): parse 실패(형식 · 복호 포함 — 예전 try 블록과 같은 범위)만 손상이다.
+const parseDb = (text) => {
+  const raw = JSON.parse(text);
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('형식 오류');
+  const p = openSecretsDeep(raw);
+  return { servers: filterObjectElements(p.servers).list }; // v2.613 PERSIST2613-04: 원소 필터는 util/registryCore.js 하나
+};
+const WHAT = 'CVP 등록부(cvp-servers.json)';
 function load() {
-  if (_db) return _db;
-  try {
-    if (fs.existsSync(FILE())) {
-      const raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
-      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('형식 오류');
-      const p = openSecretsDeep(raw);
-      _db = { servers: filterObjectElements(p.servers).list }; // v2.613 PERSIST2613-04: 원소 필터는 util/registryCore.js 하나
-      return _db;
-    }
-  } catch (e) { preserveCorrupt(FILE(), e?.message); loadErr.set(e); }
+  if (_db && !loadErr.readPending()) return _db;
+  // 손상은 보존본으로 옮기고(사유 포함) 오류를 세운다(loadErr.read). 결정(78 남긴 것 ①): 읽기 오류는 원본을 그대로 두고 · 캐시하지 않고 · 쓰기를 거절한다.
+  const r = loadErr.read(FILE(), parseDb);
+  if (r.kind === 'ok') { _db = r.value; return _db; }
   loadErr.checkCorruptOnly(FILE());
   _db = { servers: [] };
   return _db;
 }
+/** 결정(78 남긴 것 ①): 읽기 오류 중의 쓰기 거절(409) 또는 null — 로드를 먼저 한다. */
+export function registryWriteRefusal() { load(); return loadErr.writeRefusal(WHAT); }
+/** 결정(78 남긴 것 ①): 거절이면 던진다(status 409 · code 'registry-unreadable') — 던지는 저장 함수(saveServer)의 규약에 맞춘다. */
+function assertWritable() { load(); loadErr.assertWritable(WHAT); }
 
-function persist() {
-  atomicWriteFileSync(FILE(), JSON.stringify(sealSecretsDeep({ version: 1, servers: load().servers }), null, 2), { mode: 0o600 });
+function persist(servers = load().servers) {
+  loadErr.assertWritable(WHAT); // 결정(78 남긴 것 ①): 마지막 방어선 — 어느 경로(엣지 pull · 시드)도 읽기 오류 중에 원본을 덮지 않는다(던진다)
+  atomicWriteFileSync(FILE(), JSON.stringify(sealSecretsDeep({ version: 1, servers }), null, 2), { mode: 0o600 });
   loadErr.clear(); // v2.612 LEFT2612-01
 }
 
@@ -132,13 +138,15 @@ function normFields(input) {
  * 저장(신규·수정). 반환은 공개 형태 + (접속 대상이 바뀌어 버린 비밀이 있으면) `droppedSecrets`.
  */
 export function saveServer(input = {}) {
+  assertWritable();   // 결정(78 남긴 것 ①): '없는 CVP 서버' · 중복 판정보다 먼저(읽지 못한 빈 목록과 견주지 않는다)
   const db = load();
   const existing = input.id ? db.servers.find((s) => s.id === input.id) : null;
   if (input.id && !existing) throw new Error('없는 CVP 서버입니다.');
   const issue = serverInputIssue(input, existing);
   if (issue) throw new Error(issue);
   const f = normFields(input);
-  const srv = existing || { id: `cvp-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, createdAt: Date.now() };
+  // 25회차 F-6(재현): 사본에 고치고 쓰기 성공 뒤에만 메모리를 바꾼다(저장 실패에도 폴러 · /cvp-config 가 새 host · 토큰을 쓰던 것)
+  const srv = existing ? { ...existing } : { id: `cvp-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, createdAt: Date.now() };
   const moved = !!existing && accessMoved(existing, f, ['host', 'username', 'authMode']);
   let droppedSecrets = [];
   if (moved) droppedSecrets = dropCarriedSecrets(srv, input, ['token', 'password']);
@@ -159,21 +167,25 @@ export function saveServer(input = {}) {
     note: String(input.note ?? '').slice(0, 200),
     updatedAt: Date.now(),
   });
-  if (!existing) {
-    if (db.servers.length >= MAX_SERVERS) throw new Error(`CVP 서버는 최대 ${MAX_SERVERS}개까지 등록할 수 있습니다.`);
-    if (db.servers.some((s) => baseUrlOf(s.host).base === baseUrlOf(f.host).base && agentKeyEq(s.agent, srv.agent))) throw new Error('같은 주소·같은 담당의 CVP 서버가 이미 등록되어 있습니다.');
-    db.servers.push(srv);
-  }
-  persist();
+  if (!existing && db.servers.length >= MAX_SERVERS) throw new Error(`CVP 서버는 최대 ${MAX_SERVERS}개까지 등록할 수 있습니다.`);
+  // 25회차 F-7(재현): 중복(주소 + 담당) 검사가 신규에만 있어 수정으로 같은 CVP 를 두 번 수집했다(장비 행 두 벌 · Overview 부풀림) — 자기 자신을 뺀 목록과
+  //   27회차 반증 D-6: 수정은 **키(주소 · 담당)를 바꿀 때만** 견준다(이미 있던 중복 두 대가 비활성화까지 잠기던 것) · 상대 서버를 밝힌다.
+  const keyChanged = !existing || baseUrlOf(existing.host).base !== baseUrlOf(f.host).base || !agentKeyEq(existing.agent, srv.agent);
+  const dupSrv = keyChanged ? db.servers.find((s) => s !== existing && baseUrlOf(s.host).base === baseUrlOf(f.host).base && agentKeyEq(s.agent, srv.agent)) : null;
+  if (dupSrv) throw new Error(`같은 주소·같은 담당의 CVP 서버가 이미 등록되어 있습니다 — '${String(dupSrv.name || dupSrv.id || '').slice(0, 80)}'.`);
+  const nextList = existing ? db.servers.map((s) => (s === existing ? srv : s)) : [...db.servers, srv];
+  persist(nextList);
+  db.servers = nextList;
   return { ...pub(srv), ...(droppedSecrets.length ? { droppedSecrets: [...new Set(droppedSecrets)] } : {}) };
 }
 
 export function deleteServer(id) {
+  assertWritable();   // 결정(78 남긴 것 ①): '없는 CVP 서버' 404 보다 먼저
   const db = load();
   const i = db.servers.findIndex((s) => s.id === id);
   if (i < 0) return false;
-  db.servers.splice(i, 1);
-  persist();
+  const nextList = db.servers.filter((_, j) => j !== i);
+  persist(nextList); db.servers = nextList;   // 25회차 F-6: 쓰기 성공 뒤에만
   return true;
 }
 
@@ -197,8 +209,8 @@ export function applyPulledServers(list) {
     .filter((s) => s && typeof s === 'object' && typeof s.id === 'string' && s.id)
     .slice(0, MAX_SERVERS)
     .map((s) => ({ ...s, pulled: true }));
-  db.servers = [...keep, ...next];
-  persist();
+  const all = [...keep, ...next];
+  persist(all); db.servers = all;   // 25회차 F-6: 쓰기 성공 뒤에만
   const nextIds = new Set(next.map((s) => s.id));
   return { count: next.length, removed: [...before].filter((id) => !nextIds.has(id)) };
 }
@@ -219,7 +231,7 @@ export function seedDemoServers(list) {
 }
 
 /**
- * v2.915: 데모 보충 — 등록부가 **데모(mock-) 서버뿐**일 때 없는 id 만 덧붙인다(시연 규모로 늘어난 CVP). mock/demo/cvp.js 만 부른다.
+ * v3.26.0: 데모 보충 — 등록부가 **데모(mock-) 서버뿐**일 때 없는 id 만 덧붙인다(시연 규모로 늘어난 CVP). mock/demo/cvp.js 만 부른다.
  */
 export function topUpDemoServers(list) {
   if (!Array.isArray(list) || !list.length) return { ok: false, reason: '보충할 CVP 서버가 없습니다.' };

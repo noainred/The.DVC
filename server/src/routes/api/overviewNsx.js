@@ -7,8 +7,9 @@ import { store, scopedRollups, siteInventoryStale } from '../../store.js';
 import { currentVersion, config } from '../../config.js';
 import { upgradeManager } from '../../upgrade/manager.js';
 import { getGuestGpuHost } from '../../gpu/store.js';
-import { nsxStore } from '../../nsx/store.js';
-import { loadRegistry as loadNsxRegistry } from '../../nsx/registry.js';
+import { nsxStore, nsxAuthGuard } from '../../nsx/store.js';
+import { loadRegistry as loadNsxRegistry, registryLoadError as nsxRegistryLoadError } from '../../nsx/registry.js';
+import { registryMark } from '../settingsUnreadMark.js';   // 133회차: NSX 등록부를 못 읽은 동안의 빈 목록은 '등록 없음' 이 아니다(128회차 F3 의 형제 화면)
 import { fetchGroupMembers } from '../../nsx/client.js';
 import { memoJson, hash, scopeKey } from './shared.js';
 import { visibleNsxManagers, managerInScope, scopedNsxRollup } from '../../nsx/scope.js';
@@ -18,6 +19,7 @@ import { aggregatePhysical } from '../../idrac/physicalCapacity.js'; // v2.486: 
 import { serversByCorp } from '../../idrac/serverByCorp.js';          // v2.526: 법인(vCenter)별 물리 서버 수
 import { numOrNull } from '../../util/numOrNull.js'; // v2.675: /health 의 사용률은 못 읽으면 null
 import { runtimeForHealth } from '../../util/runtimeCheck.js'; // 검토 I-06: Node 런타임 계약·통신 자가 점검
+import { scopeSig } from '../../util/scopeSig.js';
 
 // v2.626: `allPhysicalServers`·`corpAttribution` 은 `idrac/corpAttribution.js` 로 옮겼다 — 법인별 서버 사용량·
 //   베어메탈 사용률이 **같은 귀속 입력**을 쓰게(개요만 DataCenter 규칙을 알던 것이 '물리 서버 없음' 의 원인이었다).
@@ -93,7 +95,7 @@ function physicalCapacity(servers = null) {
 // 버린다(v2.580 TUNE-B '세대 키 캐시는 옛 세대를 버린다').
 const _healthScoped = new Map();
 function healthScopedGlobal(snap, allowed) {
-  const key = `${snap.generatedAt}|${[...allowed].sort().join(',')}`;
+  const key = `${snap.generatedAt}|${scopeSig(allowed)}`;
   const hit = _healthScoped.get(key);
   if (hit) return hit;
   for (const k of _healthScoped.keys()) if (!k.startsWith(`${snap.generatedAt}|`)) _healthScoped.delete(k);
@@ -125,6 +127,26 @@ export function splitNsxGroupId(groupId, managerId, registryIds = []) {
     .sort((a, b) => b.length - a.length)[0];
   if (hit) return { managerId: hit, rawId: full.slice(hit.length + 1) };
   return { managerId: sep > 0 ? full.slice(0, sep) : '', rawId: sep > 0 ? full.slice(sep + 1) : full };
+}
+
+/**
+ * 116회차 F7: 라이브 조회(보안그룹 멤버)가 **이 포탈이 로그인하지 않기로 한 매니저**에 저장 계정으로 로그인하지 않게 하는 판정(순수).
+ *  · 비활성(enabled:false) — 주기 수집은 건너뛰는데(nsx/store.js) 이 경로는 조회 권한(inv.nsx)만 있으면 누구나 그 주소로 Basic 자격증명을 보냈다
+ *    (v2.741 VC-05 '비활성 vCenter 에는 로그인하지 않는다' 의 NSX 형제). 화면은 비활성 매니저의 그룹을 보여 주지 않아 API 직접 호출로만 닿는다.
+ *  · 인증 실패 정지(authStop) — 계정 잠금을 막으려 주기 수집을 멈춘 매니저에 호출마다 로그인 2회(VM · IP 멤버)를 다시 보냈다. 사람의 확인 경로는
+ *    관리자 연결 테스트(설정 › NSX)다 — 성공하면 정지가 풀린다(authGuard 규칙 3 의 '수동 실행' 은 그 경로).
+ * @returns {null|{error:string, reason:string, code:string, authStopped?:object}} 건너뛸 사유(409 본문) 또는 null
+ */
+export function nsxLiveSkip(mgr, authStop = null) {
+  if (mgr?.enabled === false) {
+    const reason = '비활성 NSX Manager 입니다 — 이 포탈이 로그인하지 않으므로 라이브 멤버 조회를 하지 않았습니다.';
+    return { error: reason, reason, code: 'nsx-disabled' };
+  }
+  if (authStop) {
+    const reason = '인증 실패로 수집이 멈춘 NSX Manager 입니다 — 계정 잠금을 막으려고 같은 계정으로 다시 로그인하지 않습니다. 설정 › NSX 에서 비밀번호를 고치거나 연결 테스트로 확인하세요.';
+    return { error: reason, reason, code: 'nsx-auth-stopped', authStopped: { since: authStop.since, at: authStop.at, attempts: authStop.attempts } };
+  }
+  return null;
 }
 
 export function registerOverviewNsx(api) {
@@ -265,6 +287,8 @@ api.get('/nsx', invNsx, (req, res) => {
     securityGroups: scoped ? (snap.securityGroups || []).filter((g) => mIds.has(g.managerId)) : (snap.securityGroups || []),
     // 수집 오류에는 매니저 이름/호스트가 실린다 — 범위 계정에는 보이는 매니저 것만.
     collectionErrors: allowed ? (snap.collectionErrors || []).filter((e) => mIds.has(e.managerId)) : snap.collectionErrors,
+    // 133회차: 목록이 비었을 때만 등록부 표지를 본다(화면이 ‘등록된 NSX Manager가 없습니다 · 추가하세요’ 라고 말하는 그 경우 — 목록이 있으면 이 폴링 경로에서 등록부를 다시 읽지 않는다).
+    ...(managers.length === 0 ? registryMark(nsxRegistryLoadError()) : {}),
   });
 });
 
@@ -285,6 +309,9 @@ api.get('/nsx/group-members', invNsx, async (req, res) => {
   if (!managerInScope(mgr, store.get().vcenters, scopedVcenterIds(req.user, store.get()))) {
     return res.status(404).json({ error: `NSX Manager를 찾을 수 없습니다: ${managerId}` });
   }
+  // 116회차 F7: 비활성 · 인증 정지 매니저에는 로그인하지 않는다(범위 판정 뒤 — 범위 밖은 위에서 이미 404). 정지 기록은 읽기만 한다(peek — 해제는 주 폴러).
+  const skip = nsxLiveSkip(mgr, nsxAuthGuard.peekAuthStop(mgr));
+  if (skip) return res.status(409).json(skip);
   try {
     const data = await fetchGroupMembers(mgr, rawId);
     res.json({ mock: false, ...data });

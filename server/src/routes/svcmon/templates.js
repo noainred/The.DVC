@@ -40,7 +40,7 @@ svcmonRouter.post('/templates', canEdit, fullScopeOnly, (req, res) => {
       detail: `항목 ${t.items.length}${t.items.some((x) => x.insecure) ? ' · insecure=true' : ''}`,
     });
     res.status(201).json({ template: t });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { res.status(e?.status === 409 ? 409 : 400).json({ error: e.message }); }
 });
 
 svcmonRouter.put('/templates/:id', canEdit, fullScopeOnly, (req, res) => {
@@ -52,7 +52,7 @@ svcmonRouter.put('/templates/:id', canEdit, fullScopeOnly, (req, res) => {
       detail: `항목 ${t.items.length} · rev ${t.rev}${t.items.some((x) => x.insecure) ? ' · insecure=true' : ''}`,
     });
     res.json({ template: t });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { res.status(e?.status === 409 ? 409 : 400).json({ error: e.message }); }
 });
 
 svcmonRouter.post('/templates/:id/duplicate', canEdit, fullScopeOnly, (req, res) => {
@@ -61,7 +61,7 @@ svcmonRouter.post('/templates/:id/duplicate', canEdit, fullScopeOnly, (req, res)
     if (!t) return res.status(404).json({ error: '템플릿을 찾을 수 없습니다.' });
     logAudit({ user: req.user?.username, action: 'svcmon.template.add', target: t.name, detail: `복제 ← ${req.params.id}` });
     res.status(201).json({ template: t });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { res.status(e?.status === 409 ? 409 : 400).json({ error: e.message }); }
 });
 
 /** 삭제 — 이미 적용된 점검은 **남긴다**(태그도 유지). 감시를 끊지 않는 쪽이 안전하다. */
@@ -74,7 +74,7 @@ svcmonRouter.delete('/templates/:id', canEdit, fullScopeOnly, (req, res) => {
       detail: `남은 점검 ${r.orphanTests} · 대상 ${r.orphanTargets}`,
     });
     res.json(r);
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { res.status(e?.status === 409 ? 409 : 400).json({ error: e.message }); }
 });
 
 /** 템플릿 내보내기 — 항목 1건=1행(대상 CSV 와 같은 규약). item.key 는 싣지 않는다. */
@@ -162,7 +162,7 @@ svcmonRouter.post('/templates/:id/apply', canEdit, fullScopeOnly, async (req, re
       detail: `${tpl?.name || ''} rev${tpl?.rev} · 추가 ${r.create} · 갱신 ${r.update} · 건너뜀 ${r.skip}${req.body?.overwrite ? ' · overwrite' : ''}`,
     });
     res.json(payload);
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { res.status(e?.status === 409 ? 409 : 400).json({ error: e.message }); }
 });
 
 }

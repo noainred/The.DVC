@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { ssrfBlockReason } from '../collector/registry.js'; // v2.537: 등록 시 SSRF 정적 가드
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { makeLoadError, autoWriteRefusal, manualRemoteWriteRefusal } from '../util/registryCore.js'; // v2.743(감사 EDGE-01): 형제 등록부와 같은 로드 오류 판정(corruptOnlyReason 포함) · v2.744(EDGE-03) 자동 저장 거절
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 import { describeError } from '../util/errors.js';
@@ -99,27 +99,34 @@ export function registryLoadError() {
   return loadErr.get();
 }
 
+// 결정(78 남긴 것 ①): parse 실패(형식 · 복호 포함 — 예전 try 블록과 같은 범위)만 손상이다.
+const parseServers = (text) => { const parsed = JSON.parse(text); return openSecretsDeep(Array.isArray(parsed?.servers) ? parsed.servers : []); }; // 캐시는 평문 보관(v2.296) — 소비 코드 무변경
+const WHAT = 'iDRAC 등록부(idrac.json)';
 export function loadRegistry() {
   // ⚠ 파일이 없을 때의 corruptOnlyReason 판정(설정 폴더 목록)은 여기서 하지 않는다 — loadRegistry 는 요청·폴러마다 불리고,
   //   iDRAC 등록이 없는 엣지는 파일이 없는 것이 정상이다. 판정은 registryLoadError() 가 한다(export 라우트가 부른다).
-  if (!fs.existsSync(FILE)) { _regCache = null; return []; }
-  try {
-    const st = fs.statSync(FILE);
-    if (!_regCache || _regCache.mtimeMs !== st.mtimeMs || _regCache.size !== st.size) {
-      const parsed = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-      _regCache = { mtimeMs: st.mtimeMs, size: st.size, servers: openSecretsDeep(Array.isArray(parsed?.servers) ? parsed.servers : []) }; // 캐시는 평문 보관(v2.296) — 소비 코드 무변경
-      loadErr.clear(); // v2.743(EDGE-01): 파일을 정상으로 읽었다(보존본을 되돌린 경우 포함)
-    }
-    return structuredClone(_regCache.servers);
-  } catch (e) {
-    preserveCorrupt(FILE, e?.message); // v2.322: 파싱 실패 시 손상본 보존(빈 목록 반환이 다음 저장으로 전 자격증명 소거 방지)
-    loadErr.set(e); // v2.743(EDGE-01): 조용한 빈 목록 금지 — export 가 이 사유로 503 을 낸다
-    _regCache = null;
-    return [];
+  let st = null;
+  try { st = fs.statSync(FILE); } catch (e) {
+    if (e?.code === 'ENOENT') { _regCache = null; return []; }
+    // 그 밖의 stat 실패(상위 폴더 권한 등)는 아래 읽기가 읽기 오류로 판정한다
   }
+  if (st && _regCache && !loadErr.readPending() && _regCache.mtimeMs === st.mtimeMs && _regCache.size === st.size) return structuredClone(_regCache.servers);
+  // v2.322: 파싱 실패 시 손상본 보존(빈 목록 반환이 다음 저장으로 전 자격증명 소거 방지 — loadErr.read 가 preserveCorrupt) · v2.743(EDGE-01): 조용한 빈 목록 금지(export 503).
+  // 결정(78 남긴 것 ①): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 원본을 그대로 두고 · 캐시하지 않고(30초마다 다시 읽음) · 저장을 거절한다(saveRegistry).
+  const r = loadErr.read(FILE, parseServers);
+  if (r.kind === 'ok') {
+    _regCache = st ? { mtimeMs: st.mtimeMs, size: st.size, servers: r.value } : null;
+    loadErr.clear(); // v2.743(EDGE-01): 파일을 정상으로 읽었다(보존본을 되돌린 경우 포함)
+    return structuredClone(r.value);
+  }
+  _regCache = null;
+  return [];
 }
+/** 결정(78 남긴 것 ①): 읽기 오류 중의 쓰기 거절(409) 또는 null — 로드를 먼저 한다. 손상(보존본)은 예전처럼 관리자 저장을 막지 않는다. */
+export function registryWriteRefusal() { loadRegistry(); return loadErr.writeRefusal(WHAT); }
 
 function saveRegistry(list) {
+  loadErr.assertWritable(WHAT); // 결정(78 남긴 것 ①): 마지막 방어선 — 어느 경로도 읽기 오류 중에 원본을 보존본도 없이 덮지 않는다(던진다)
   atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep({ servers: list }), null, 2), { mode: 0o600 }); // 암호화 모드면 password 봉인
   loadErr.clear(); // v2.743(EDGE-01): 저장이 성공하면 그때부터는 관리자가 다시 만든 목록이 진실이다(형제 등록부와 같다)
   // 방금 쓴 내용으로 캐시 즉시 동기화(다음 읽기의 재파싱 회피). 실패 시 캐시 무효화가 안전.
@@ -223,7 +230,17 @@ function normalize(body, existing = null) {
   return [entry, null, droppedSecrets];
 }
 
+/**
+ * 7b 온보딩 — 저장과 같은 규칙의 입력 검증(순수 · 단일 소스 — normalize 를 그대로 부른다). 통과면 null, 아니면 사유.
+ * 정규화한 host 도 돌려준다(분석이 기존 항목과 주소를 대조할 때 저장과 같은 꼴로 본다).
+ */
+export function idracInputIssue(body = {}, existing = null) {
+  const [entry, err] = normalize(body, existing);
+  return err ? { issue: err, host: '' } : { issue: null, host: entry.host };
+}
+
 export function addServer(body) {
+  const refused = registryWriteRefusal(); if (refused) return refused;   // 결정(78 남긴 것 ①)
   const list = loadRegistry();
   const [entry, err] = normalize(body);
   if (err) return { ok: false, reason: err };
@@ -234,6 +251,7 @@ export function addServer(body) {
 }
 
 export function updateServer(id, body) {
+  const refused = registryWriteRefusal(); if (refused) return refused;   // 결정(78 남긴 것 ①): '없는 서버' 보다 먼저
   const list = loadRegistry();
   const idx = list.findIndex((s) => s.id === id);
   if (idx === -1) return { ok: false, reason: `없는 서버: ${id}` };
@@ -244,7 +262,20 @@ export function updateServer(id, body) {
   return { ok: true, server: redact(entry), droppedSecrets };
 }
 
+/** 7b(감사 L-6): 여러 항목을 **한 번** 원자적으로 지운다(id 마다 쓰지 않는다). 등록부를 못 읽었으면 쓰지 않는다. 지운 id 목록. */
+export function removeServersBatch(ids = []) {
+  const list = loadRegistry();
+  if (loadErr.get()) return { ok: false, code: 'registry-unreadable', reason: 'iDRAC 등록부를 읽지 못해 지우지 않았습니다.' };
+  const drop = new Set((Array.isArray(ids) ? ids : []).map((x) => String(x)));
+  const removed = list.filter((s) => drop.has(String(s.id))).map((s) => s.id);
+  if (!removed.length) return { ok: true, removed: [] };
+  saveRegistry(list.filter((s) => !drop.has(String(s.id))));
+  dropDerivedCaches(removed);
+  return { ok: true, removed };
+}
+
 export function removeServer(id) {
+  const refused = registryWriteRefusal(); if (refused) return refused;   // 결정(78 남긴 것 ①): '없는 서버' 보다 먼저
   const list = loadRegistry();
   const next = list.filter((s) => s.id !== id);
   if (next.length === list.length) return { ok: false, reason: `없는 서버: ${id}` };
@@ -259,6 +290,9 @@ export function removeServer(id) {
  */
 export function importServers(incoming, mode = 'merge', { replaceScope = null } = {}) {
   if (!Array.isArray(incoming)) return { ok: false, reason: 'servers 배열을 찾을 수 없습니다.' };
+  // 93회차 F2: 등록부 읽기 오류면 먼저 409 결과로 — 예전에는 saveRegistry 의 마지막 방어선(assertWritable)이 던져
+  //   가져오기 · 일괄 등록 · 스캔 등록 · 온보딩이 사유 없는 'bad request'(전역 오류 처리기)나 예외를 받았다(addServer 와 같은 순서).
+  { const refused = registryWriteRefusal(); if (refused) return { ...refused, mode, added: 0, updated: 0, skipped: [] }; }
   const existing = loadRegistry();
   // mode:
   //  - 'replace'            : 레지스트리 전체 교체(기존 모두 삭제 후 incoming만)
@@ -424,6 +458,8 @@ export function registerScanned(found, username, password, mode = 'merge', vcent
  * Returns { ok, updated }.
  */
 export function assignVcenter({ ids = null, vcenterId = '' } = {}) {
+  // 93회차 F2: 읽기 오류면 빈 목록을 읽고 '0대 변경 · 성공' 이라 했다 — 409 거절로.
+  { const refused = registryWriteRefusal(); if (refused) return refused; }
   const vc = String(vcenterId || '').trim();
   const list = loadRegistry();
   const want = Array.isArray(ids) && ids.length ? new Set(ids.map(String)) : null;
@@ -441,6 +477,7 @@ export function assignVcenter({ ids = null, vcenterId = '' } = {}) {
  * (빈 vcenterId는 '미지정' 서버를 삭제). Returns { ok, removed, total }.
  */
 export function deleteServers({ all = false, vcenterId = undefined } = {}) {
+  { const refused = registryWriteRefusal(); if (refused) return refused; }   // 93회차 F2: 던지지 않고 409 결과로(위 importServers 와 같다)
   const list = loadRegistry();
   let next;
   if (all) {
@@ -494,11 +531,18 @@ export function parseCsv(text) {
   return out;
 }
 
+const CARRY_MOVED_REASON = '접속 주소나 계정이 저장값과 달라 저장된 비밀번호를 쓰지 않습니다 — 비밀번호를 입력해 주세요.';   // 91회차 ⓐ — vcenter/registry.js 와 같은 문구
+/** 저장(normalize)과 같은 host 꼴 — 스킴 없으면 https · 끝 / 제거(비교용). 길이를 먼저 자른다(외부 입력 정규식). */
+const testHostKey = (h) => { let t = String(h ?? '').trim().slice(0, 2048); if (!/^https?:\/\//.test(t)) t = `https://${t}`; while (t.endsWith('/')) t = t.slice(0, -1); return t; };
 /** Test connectivity + read current power for a server (uses stored pw if blank). */
 export async function testServer(body) {
   let entry = body;
   if (!entry.password && entry.id) {
     const saved = loadRegistry().find((s) => s.id === entry.id);
+    // 91회차 ⓐ: 저장 경로(normalize — **정규화한** host · username 이 바뀌면 비밀을 버린다, v2.770)와 같은 판정 — 다른 계정명 · 주소로 저장 비밀번호를 보내지 않는다.
+    if (saved && accessMoved(saved, { host: body.host !== undefined ? testHostKey(body.host) : undefined, username: body.username !== undefined ? String(body.username).trim() : undefined }, ['host', 'username'])) {
+      return { ok: false, reason: CARRY_MOVED_REASON };
+    }
     if (saved) entry = { ...saved, ...body, password: saved.password, host: saved.host }; // v2.480(3차 감사 S6): 저장 비밀번호를 물려받는 테스트는 host 도 저장값으로 고정 — body.host 만 공격자 IP 로 바꿔 평문 비밀번호를 받는 경로 차단(PDU S-1 과 같은 규칙)
   }
   if (!entry.host || !entry.username || !entry.password) {
@@ -508,6 +552,9 @@ export async function testServer(body) {
   let host = String(entry.host).trim();
   if (!/^https?:\/\//.test(host)) host = `https://${host}`;
   const normalized = { ...entry, host: host.replace(/\/+$/, '') };
+  // 전체 점검 33회차 F1(재현): 등록(normalize)과 같은 SSRF 정적 가드 — 예전에는 연결 테스트만 루프백 · 링크로컬 · 우회 표기를 그대로 찔렀다
+  //   (IP 리터럴은 dispatcher 의 ssrfLookup 을 타지 않는다). 저장 비밀을 물려받는 테스트는 host 가 저장값이라 등록 때 이미 지났다.
+  { const ssrf = ssrfBlockReason(normalized.host); if (ssrf) return { ok: false, reason: `host 거부: ${ssrf}` }; }
   const started = Date.now();
   try {
     if (entry.type === 'ome') {

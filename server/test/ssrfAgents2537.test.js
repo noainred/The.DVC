@@ -14,7 +14,7 @@
  * ③ iDRAC 스캐너는 IP 리터럴을 그대로 찔렀다 — lookup 훅은 IP 리터럴에 불리지 않는다
  *    (v2.506 문서의 한계). 정적으로 걸러야 하고, **걸렀으면 개수를 말해야** 한다.
  */
-import { test, before } from 'node:test';
+import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -22,12 +22,19 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stripComments } from './_stripComments.js';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
 const read = (p) => fs.readFileSync(path.join(SRC, p), 'utf8');
 const strip = stripComments;   // v2.613 TESTDOC2613-08: 2줄 정규식 판본은 틀렸다(v2.574) — 코어 하나
 
-process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'ssrf2537-'));
+process.env.CONFIG_DIR = tmpDir('ssrf2537-');
 delete process.env.SSRF_ALLOW_LOOPBACK; // 기본(차단) 동작을 검사한다
 
 function walk(dir, out = []) {

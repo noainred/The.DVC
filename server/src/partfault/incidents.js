@@ -44,7 +44,8 @@ export const INCIDENT_END = Object.freeze({
 /** 한 장애에 싣는 타임라인 이벤트 상한(넘친 개수는 eventsOmitted 로 밝힌다). */
 export const INCIDENT_EVENT_MAX = 50;
 
-const closeReasonToEnd = (r) => {
+/** 닫힘 이벤트의 closeReason → 종료 사유 code(INCIDENT_END). 웹 · 다른 조립(bmusage/opsView incidentRow)이 같은 판정을 다시 만들지 않게 내보낸다(반증 W5). */
+export const closeReasonToEnd = (r) => {
   if (r === 'removed') return INCIDENT_END.removed;
   if (r === 'manual') return INCIDENT_END.manual;
   if (r === 'key-migrated') return INCIDENT_END.migrated;

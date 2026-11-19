@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>IP 관리 — 스캔 대역 추가</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+*{box-sizing:border-box}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:36px;padding:0 14px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.btn.sm{min-height:28px;padding:0 10px;font-size:11.5px}
+.input{min-height:36px;border:1px solid #243049;border-radius:8px;background:#0a0e17;color:#e6edf6;font:inherit;font-size:13px;padding:0 10px;min-width:0}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0}
+.muted{color:#8b9bb4}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.tag{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.blue{background:rgba(59,130,246,.18);color:#93c5fd}.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}
+.h2{font-size:14px;font-weight:700;margin:0}
+.seg{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden}
+.seg button{border:0;background:transparent;color:#8b9bb4;font:inherit;font-size:12px;font-weight:600;padding:7px 12px;cursor:pointer}
+.seg button.on{background:#1a2236;color:#e6edf6}
+.gh{display:flex;align-items:center;gap:10px;padding:10px 16px;background:#0f1626;border-top:1px solid #243049;border-bottom:1px solid #243049}
+.cand{all:unset;box-sizing:border-box;display:grid;grid-template-columns:26px minmax(0,1.5fr) minmax(0,1.2fr) auto 74px;gap:12px;align-items:center;width:100%;padding:10px 16px;border-bottom:1px solid #1f2a40;cursor:pointer}
+.cand:hover{background:rgba(59,130,246,.07)}
+.cand.on{background:rgba(59,130,246,.13)}
+.cand.dis{cursor:default;color:#8b9bb4}
+.cand.dis:hover{background:transparent}
+.mk{width:22px;height:22px;border-radius:6px;border:1px solid #3b82f6;display:inline-flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;color:#93c5fd}
+.cand.on .mk{background:#3b82f6;color:#fff}
+.cand.dis .mk{border-color:#243049;color:#8b9bb4}
+.act{font-size:12px;font-weight:700;color:#93c5fd;text-align:right}
+.cand.dis .act{color:#8b9bb4;font-weight:500}
+.st{display:grid;grid-template-columns:minmax(0,1fr) auto 28px;gap:8px;align-items:center;padding:8px 10px;border:1px solid #243049;border-radius:8px;background:#0a0e17;font-size:12.5px}
+.x{all:unset;cursor:pointer;width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;color:#8b9bb4;font-size:14px}
+</style>
+</helmet>
+<div style="width:1240px;min-height:1080px;padding:24px;display:flex;flex-direction:column;gap:14px">
+
+  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px">
+    <a href="Scan.dc.html" class="btn sm" style="background:transparent">‹ 스캔</a>
+    <h1 style="margin:0;font-size:19px;font-weight:800">스캔 대역 추가</h1>
+    <span class="muted">edge-kr1 · VC-KR1 · 서울 1센터</span>
+    <span class="muted" style="font-size:12px;margin-left:auto">vCenter 스냅샷 <span class="mono">14:52</span> · iDRAC 등록 기준</span>
+  </div>
+
+  <div class="card" style="padding:12px 16px;display:flex;flex-wrap:wrap;align-items:center;gap:6px 18px;font-size:12.5px" role="status">
+    <span>이 에이전트가 맡은 <b>VC-KR1</b>(VM · ESXi 호스트)과 <b>iDRAC 등록</b>에서 지금 쓰고 있는 대역 <b>{{n.all}}개</b>를 찾았습니다.</span>
+    <span class="muted">사설 {{n.priv}} · 공인 {{n.pub}} · 이미 스캔 중 {{n.scanning}} · 추가할 수 있음 {{n.addable}}</span>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start">
+
+    <section class="card" style="flex:999 1 620px;overflow:hidden" aria-label="사용 중인 IP 대역">
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:13px 16px">
+        <h2 class="h2">사용 중인 IP 대역</h2>
+        <span class="muted" style="font-size:12px">줄을 누르면 오른쪽에 담깁니다 · 다시 누르면 빠집니다</span>
+        <span class="seg" style="margin-left:auto" role="group" aria-label="출처"><button type="button" class="on">전체</button><button type="button">VM</button><button type="button">ESXi 호스트</button><button type="button">iDRAC</button></span>
+      </div>
+
+      <div class="gh">
+        <h3 class="h2">사설 대역</h3><span class="muted" style="font-size:12px">{{n.priv}}개</span>
+        <button type="button" class="btn sm" style="margin-left:auto" onClick="{{addPriv}}">사설 모두 담기</button>
+      </div>
+      <sc-for list="{{priv}}" as="c" hint-placeholder-count="9">
+      <button type="button" class="{{c.cls}}" aria-pressed="{{c.on}}" onClick="{{c.pick}}">
+        <span class="mk" aria-hidden="true">{{c.mark}}</span>
+        <span style="min-width:0"><span class="mono" style="font-weight:600">{{c.cidr}}</span> <b>{{c.pur}}</b></span>
+        <span class="muted" style="font-size:12px;min-width:0">{{c.src}}</span>
+        <span><span class="{{c.tagCls}}">{{c.tag}}</span></span>
+        <span class="act">{{c.act}}</span>
+      </button>
+      </sc-for>
+
+      <div class="gh">
+        <h3 class="h2">공인 대역</h3><span class="muted" style="font-size:12px">{{n.pub}}개 · 소유한 대역인지 확인한 뒤 담으세요</span>
+        <button type="button" class="btn sm" style="margin-left:auto" onClick="{{addPub}}">공인 모두 담기</button>
+      </div>
+      <sc-for list="{{pub}}" as="c" hint-placeholder-count="2">
+      <button type="button" class="{{c.cls}}" aria-pressed="{{c.on}}" onClick="{{c.pick}}">
+        <span class="mk" aria-hidden="true">{{c.mark}}</span>
+        <span style="min-width:0"><span class="mono" style="font-weight:600">{{c.cidr}}</span> <b>{{c.pur}}</b></span>
+        <span class="muted" style="font-size:12px;min-width:0">{{c.src}}</span>
+        <span><span class="{{c.tagCls}}">{{c.tag}}</span></span>
+        <span class="act">{{c.act}}</span>
+      </button>
+      </sc-for>
+
+      <div style="padding:11px 16px;font-size:12px" class="muted">주소가 아니라 이름으로 등록된 호스트 · iDRAC 3대는 대역을 알 수 없어 넣지 않았습니다. 사설 · 공인은 설정의 분류 기준을 따릅니다.</div>
+    </section>
+
+    <aside class="card" style="flex:1 1 340px;max-width:420px;overflow:hidden" aria-label="담은 대역">
+      <div style="padding:14px 16px;display:flex;align-items:baseline;gap:8px">
+        <h2 class="h2">담은 대역</h2><span class="muted" style="font-size:12px">{{n.picked}}줄 · 주소 {{n.addrs}}개</span>
+        <button type="button" class="btn sm" style="margin-left:auto;background:transparent" onClick="{{clear}}">모두 빼기</button>
+      </div>
+      <div style="padding:0 16px 14px;display:flex;flex-direction:column;gap:7px">
+        <span class="muted" style="font-size:12px;font-weight:600">사설 {{n.pickedPriv}}</span>
+        <sc-for list="{{stPriv}}" as="s" hint-placeholder-count="3">
+        <div class="st"><span><span class="mono">{{s.cidr}}</span> <span class="muted">{{s.pur}}</span></span><span class="mono muted">254</span><button type="button" class="x" aria-label="빼기" onClick="{{s.pick}}">×</button></div>
+        </sc-for>
+        <span class="muted" style="font-size:12px;font-weight:600;margin-top:6px">공인 {{n.pickedPub}}</span>
+        <sc-for list="{{stPub}}" as="s" hint-placeholder-count="1">
+        <div class="st" style="border-color:rgba(245,158,11,.55)"><span><span class="mono">{{s.cidr}}</span> <span class="muted">{{s.pur}}</span></span><span class="mono muted">254</span><button type="button" class="x" aria-label="빼기" onClick="{{s.pick}}">×</button></div>
+        </sc-for>
+        <span class="muted" style="font-size:12px">{{emptyNote}}</span>
+      </div>
+
+      <div style="padding:14px 16px;border-top:1px solid #1f2a40;display:flex;flex-direction:column;gap:8px">
+        <span class="muted" style="font-size:12px;font-weight:600">목록에 없는 대역은 직접 입력</span>
+        <div style="display:flex;gap:8px">
+          <input class="input mono" type="text" aria-label="대역 직접 입력" placeholder="10.0.0.0/24 또는 10.0.0.1-50" style="flex:1">
+          <button type="button" class="btn">담기</button>
+        </div>
+      </div>
+
+      <div style="padding:12px 16px;border-top:1px solid #1f2a40;font-size:12px;color:#fcd34d">{{pubWarn}}</div>
+
+      <div style="padding:14px 16px;border-top:1px solid #1f2a40;background:#0f1626;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
+        <a href="Scan.dc.html" class="btn">취소</a>
+        <a href="Scan.dc.html" class="btn primary">{{saveLabel}}</a>
+      </div>
+    </aside>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1240,"height":1080}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const picked = (this.state && this.state.picked) || { '10.20.32.0/24': true, '10.20.8.0/24': true };
+    const C = [
+      ['priv', '10.20.30.0/24', '웹 서비스망', 'VM 163대 · ESXi 호스트 24대(관리)', 'scanning'],
+      ['priv', '10.20.31.0/24', '앱 서버망', 'VM 150대', 'scanning'],
+      ['priv', '10.20.32.0/24', '개발 · 스테이징', 'VM 101대', 'new'],
+      ['priv', '10.20.33.0/24', '', 'VM 22대', 'new'],
+      ['priv', '10.20.40.0/24', 'vMotion', 'ESXi 호스트 24대(vmk1)', 'new'],
+      ['priv', '10.20.41.0/24', 'vSAN', 'ESXi 호스트 24대(vmk2)', 'new'],
+      ['priv', '10.20.42.0/24', '스토리지망', 'ESXi 호스트 24대(vmk3)', 'new'],
+      ['priv', '10.20.8.0/24', 'iDRAC 관리망', 'iDRAC 88대 · 서비스 1 서울 1센터 서버', 'new'],
+      ['priv', '10.20.9.0/24', '', 'iDRAC 24대 · 서비스 2 이름 없음', 'new'],
+      ['priv', '10.31.9.0/24', '', 'VM 3대', 'overlap'],
+      ['priv', '172.17.0.0/24', '', 'VM 41대', 'hidden'],
+      ['pub', '203.0.113.0/24', 'DMZ 웹', 'VM 6대', 'new'],
+      ['pub', '198.51.100.0/24', '', 'VM 2대', 'new'],
+    ];
+    const toggle = (cidr) => () => { const p = { ...picked }; if (p[cidr]) delete p[cidr]; else p[cidr] = true; this.setState({ picked: p }); };
+    const addAll = (grp) => () => { const p = { ...picked }; C.forEach((c) => { if (c[0] === grp && c[4] === 'new') p[c[1]] = true; }); this.setState({ picked: p }); };
+    const mk = (c) => {
+      const [grp, cidr, pur, src, st] = c;
+      const on = !!picked[cidr] && st === 'new';
+      const dis = st !== 'new';
+      return {
+        grp, cidr, pur: pur || '', src, on: on ? 'true' : 'false',
+        cls: 'cand' + (on ? ' on' : '') + (dis ? ' dis' : ''),
+        mark: on ? '✓' : dis ? '–' : '+',
+        tag: st === 'scanning' ? '이미 스캔 중' : st === 'overlap' ? 'edge-de1 과 겹침' : st === 'hidden' ? '숨길 대역' : '사용 중인 IP 대역',
+        tagCls: st === 'scanning' ? 'tag ok' : st === 'overlap' ? 'tag warn' : st === 'hidden' ? 'tag gray' : 'tag blue',
+        act: on ? '담김' : st === 'scanning' ? '추가 불필요' : st === 'overlap' ? '담을 수 없음' : st === 'hidden' ? '제외됨' : '담기',
+        pick: dis ? () => {} : toggle(cidr), isOn: on, st,
+      };
+    };
+    const all = C.map(mk);
+    const priv = all.filter((c) => c.grp === 'priv');
+    const pub = all.filter((c) => c.grp === 'pub');
+    const stPriv = priv.filter((c) => c.isOn);
+    const stPub = pub.filter((c) => c.isOn);
+    const np = stPriv.length + stPub.length;
+    return {
+      priv, pub, stPriv, stPub,
+      n: { all: all.length, priv: priv.length, pub: pub.length, scanning: all.filter((c) => c.st === 'scanning').length, addable: all.filter((c) => c.st === 'new').length,
+        picked: np, pickedPriv: stPriv.length, pickedPub: stPub.length, addrs: (np * 254).toLocaleString() },
+      emptyNote: np ? '' : '아직 담은 대역이 없습니다 — 왼쪽에서 줄을 누르세요',
+      pubWarn: stPub.length ? '공인 대역 ' + stPub.length + '개를 스캔 대상으로 담았습니다 — 우리 회사가 가진 대역만 스캔하세요.' : '',
+      saveLabel: np ? np + '개 추가하고 저장' : '추가할 대역을 담으세요',
+      addPriv: addAll('priv'), addPub: addAll('pub'),
+      clear: () => this.setState({ picked: {} }),
+    };
+  }
+}
+</script>
+</body>
+</html>

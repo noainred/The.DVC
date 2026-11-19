@@ -23,6 +23,7 @@ import { buildCorpUsage } from '../../corpusage/build.js';
 import { loadBmUsageSettings, bmUsageEnabled } from '../../bmusage/settings.js';
 import { latestUsage } from '../../bmusage/db.js';
 import { numOrNull } from '../../util/numOrNull.js';
+import { capacityOfInventory } from '../../idrac/physicalCapacity.js'; // 전체 점검 33회차 F4: 용량 판정 하나
 import { isMockMode } from '../../mock/demo/flags.js';
 
 const toolsPerm = requirePerm('tools');
@@ -44,12 +45,9 @@ export function mergeLatestRows(...lists) {
 }
 
 /** v2.682(R3S-01): 엣지 행 시각 clamp — 받은 시각(snapAt)보다 뒤면 받은 시각으로. 받은 시각을 모르면 원래 값(숫자만). 순수. */
-export function clampEdgeTs(ts, receivedAt) {
-  const v = numOrNull(ts);
-  const at = numOrNull(receivedAt);
-  if (v == null) return null;
-  return at != null && v > at ? at : v;
-}
+// v2.919: 본체는 util/clampEdgeTs.js(중앙 정제도 쓴다) — import 뒤 다시 내보낸다(`export { x } from` 은 이 스코프에 이름을 만들지 않는다 — v2.575).
+import { clampEdgeTs } from '../../util/clampEdgeTs.js';
+export { clampEdgeTs };
 
 /**
  * v2.629(A6-03): 엣지 보관분 행을 `에이전트소문자|key소문자` 로도 색인한다 — 서비스태그 없는 엣지 서버는 중앙 키와 엣지 키가
@@ -75,11 +73,12 @@ export function rowsByAgentKeyOf(rows) {
 export function makeCapOf({ getInventory, registry = [], remoteServers = [] }) {
   const regByTag = new Map(registry.filter((r) => t(r?.serviceTag)).map((r) => [t(r.serviceTag).toLowerCase(), r]));
   const remByTag = new Map(remoteServers.filter((s) => t(s?.serviceTag)).map((s) => [t(s.serviceTag).toLowerCase(), s]));
+  // 전체 점검 33회차 F4(재현): 코어 · 메모리 판정은 capacityOfInventory 하나(Overview · 하드웨어 요약 · 내보내기와 같은 값) — 예전에는
+  //   CoreCount 만 봐 소켓 합으로 코어를 아는 서버가 여기서만 '코어 모름' 이었다.
   const fromInv = (inv) => {
-    if (!inv || typeof inv !== 'object') return null;
-    const cores = numOrNull(inv.cpu?.cores);
-    const mem = numOrNull(inv.memory?.totalGiB);
-    return (cores || mem) ? { cores, memGB: mem } : null;
+    const cap = capacityOfInventory(inv);
+    if (!cap) return null;
+    return (cap.cores || cap.memGiB) ? { cores: cap.cores, memGB: cap.memGiB } : null;
   };
   return (b) => {
     const tag = t(b?.serviceTag).toLowerCase();

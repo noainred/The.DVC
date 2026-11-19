@@ -26,11 +26,13 @@ function run(req, snap) {
   const scoped = scopeSlice(snap, req.user, qStr(req.query.vcenterId, 128) || undefined);
   const vcName = new Map((scoped.vcenters || []).map((v) => [v.id, v.name || v.id]));
   const by = GROUP_KINDS.includes(req.query.by) ? req.query.by : 'vcenter';
-  const r = analyzeCost(scoped, loadCostSettings(), { by, category: qStr(req.query.category, 128), q: qStr(req.query.q, 128), vcName });
+  const cs = loadCostSettings();
+  const r = analyzeCost(scoped, cs, { by, category: qStr(req.query.category, 128), q: qStr(req.query.q, 128), vcName });
   // v2.744(감사 VC-03): 첫 수집 중·불통(직전 값 없음)·점검중(캐시 없음) vCenter 의 VM 은 합계에 없다 — 0 으로 섞은 부분 합을 전체라 말하지
   //   않게 그 vCenter 목록(범위 안만)과 partial 을 싣는다. 화면이 '읽지 못한 vCenter N곳 제외 — 하한' 을 말한다.
   const notReadVcenters = notReadVcentersOf(scoped);
-  return { ...r, categories: tagCategories(scoped.vcenters), notReadVcenters, partial: notReadPartialOf(notReadVcenters) };
+  // 71회차(69회차 F4 반증): 단가 파일을 읽지 못했으면(unreadable) '단가 미설정' 이 아니다 — 화면이 다시 입력하라고 하지 않게 밝힌다(저장은 거절된다).
+  return { ...r, categories: tagCategories(scoped.vcenters), notReadVcenters, partial: notReadPartialOf(notReadVcenters), settingsUnreadable: cs.unreadable === true };
 }
 
 export function registerCostShowback(api) {
@@ -65,6 +67,8 @@ export function registerCostShowback(api) {
       // v2.744(감사 VC-03): 읽지 못한 vCenter 는 합계에 없다 — 파일만 받은 사람도 알 수 있게 마지막 줄에 밝힌다.
       //   v2.744(회귀 검토 GF-R2): 읽지 못한 것(합계는 하한)과 비활성(수집하지 않음)을 나눠 적고 사유는 한글 — 화면 partial 과 같은 기준.
       for (const l of notReadCsvLines(r.notReadVcenters, { what: '그 vCenter 의 VM 은 합계에 없음' })) lines.push(csvLine([l]));
+      // 전체 점검 32회차 E2: 그룹 상한으로 잘렸으면 밝힌다(형제 CSV 와 같은 모양).
+      if (r.groupsOmitted) { lines.push(csvLine([`(상한으로 ${r.groupsOmitted}개 그룹 생략)`])); res.setHeader('X-Omitted-Rows', String(r.groupsOmitted)); }
       logAudit({ user: req.user?.username, action: 'cost-showback.csv', target: 'cost-showback', detail: `${lines.length - 1} rows · by ${r.by}`, ip: req.ip });
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="cost-showback-${fileStamp()}.csv"`);

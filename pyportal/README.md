@@ -72,6 +72,7 @@ python3 app.py                  # http://<서버>:8095
 | `HUB_HEALTH_TLS_VERIFY` | `true` | 점검 시 TLS 검증(자체서명 때문에 끄려면 `false` — 그 요청에만 적용) |
 | `HUB_HEALTH_ALLOW_PRIVATE` | `true` | 사설 대역(10/172.16/192.168) 점검 허용 |
 | `HUB_MAX_BODY` | `1048576` | 요청 본문 상한(바이트) |
+| `HUB_MAX_CONN_PER_CLIENT` | `48` | 출발지(IP) 하나가 쥘 수 있는 동시 연결 수(전체 64 중) — NAT · 리버스 프록시 뒤라 부족하면 올리고, `0` 이면 끔 |
 | `HUB_PORTAL_URL` | (없음) | 메인 모니터링 포탈 주소. 설정하면 헤더에 **[모니터링 포탈 ↗]** 링크가 나타납니다(`http://`/`https://` 만 인정) |
 
 ---
@@ -91,6 +92,13 @@ python3 app.py                  # http://<서버>:8095
 - 세션은 **서명 토큰**이라 서비스를 재시작해도 유지됩니다(v2.215). 서명 키는
   `$HUB_DATA_DIR/session-secret`(0600)에 보관되며, 비밀번호 변경·계정 중지/삭제 시
   그 계정의 기존 토큰은 즉시 무효가 됩니다.
+- 로그아웃한 토큰은 `$HUB_DATA_DIR/session-revoked.json`(토큰 해시)에 남습니다. 이 파일이 손상됐거나 읽을 수 없으면
+  원본을 보존하고(손상은 `.corrupt.*` 로 옮김, 읽기 오류는 그대로) **그 시점 이전에 발급된 세션을 모두 끊습니다**(전원 다시 로그인 —
+  사유는 설정 › 사용자 구성과 감사 로그에 남음). 읽기 오류가 **같은 파일 상태로 계속되는** 동안은 재기동해도 다시 끊지 않습니다
+  (`session-revoked.failclosed.json` 표지 — 파일이 바뀌거나 다시 읽히면 표지는 지워지고 예전 규칙대로).
+- **본인 비밀번호를 바꿀 때는 현재 비밀번호를 함께 입력**합니다(틀리면 로그인 실패와 같은 출발지별 카운터 · 잠금).
+  admin 이 **viewer** 계정의 비밀번호를 재설정할 때는 묻지 않습니다. admin 을 늘리는 동작(admin 계정 만들기 · 다른 admin 의 비밀번호 재설정 ·
+  다른 계정을 admin 으로 올리기 · 중지된 admin 다시 켜기)은 **요청한 본인의 현재 비밀번호**(`currentPassword`)를 확인합니다(같은 카운터 · 잠금).
 
 | 하위 메뉴 | 할 수 있는 일 |
 |---|---|
@@ -274,7 +282,8 @@ sudo cat /etc/dc-service-hub/initial-settings-password.txt
 | POST/PUT/DELETE | `/api/settings/categories…` | admin | 카테고리 추가·수정·삭제(+`/move`, `/reset`) |
 | GET | `/api/export/csv` | 세션 | 바로가기 CSV 내보내기 |
 | POST | `/api/import/csv` | 세션 | CSV 가져오기(`{"csv": "...", "mode": "append"\|"replace"}`) |
-| GET/POST/PUT/DELETE | `/api/settings/users…` | 세션(변경은 admin) | 계정 관리 |
+| GET/POST/PUT/DELETE | `/api/settings/users…` | 세션(변경은 admin) | 계정 관리 — admin 만들기 · admin 으로 올리기 · 중지된 admin 다시 켜기는 `currentPassword`(요청자 본인) 필요 |
+| POST | `/api/settings/users/<name>/password` | 세션(남의 계정은 admin) | 비밀번호 변경 — 본인 · 다른 admin 대상은 `{"password", "currentPassword"}`(요청자 본인 비밀번호 — 없으면 400 · 틀리면 403 · 잠금 429) |
 | POST/PUT/DELETE | `/api/settings/datacenters…` | admin | 데이터센터 구성 |
 | GET/POST/DELETE | `/api/settings/backups…` | admin | 백업 목록·생성·받기·삭제 |
 | POST | `/api/settings/backups/<name>/restore` | admin | 복원 |
@@ -314,6 +323,8 @@ curl -s -X POST localhost:8095/api/shortcuts -H "X-Settings-Token: $TOKEN" \
 - **비밀번호** — pbkdf2_hmac(sha256) 21만 회 + 계정별 임의 salt. 비밀번호를 바꾸면 그 계정의
   기존 세션이 모두 끊깁니다. 로그인 실패 잠금은 **출발지(IP)별**입니다 — 전역 하나면 아무나
   몇 번 틀리는 것으로 정상 관리자까지 설정 화면에서 밀어낼 수 있습니다(v2.214).
+  로그인에 성공하면 **그 계정으로 틀린 횟수만** 지워집니다 — 다른 계정을 틀린 횟수는 남습니다
+  (자기 계정으로 로그인해 가며 남의 비밀번호를 잠금 없이 대입하지 못하게).
 - **CSRF 차단 (v2.214)** — 세션 쿠키를 **조회(GET/HEAD)에서만** 인정하고 상태변경에는 커스텀
   헤더(`X-Settings-Token`)를 요구합니다. 교차출처 POST 는 `text/plain` 본문이면 프리플라이트 없이
   전송되어 그대로 JSON 으로 파싱되므로, 쿠키만으로 인증되면 CSRF 가 성립합니다.

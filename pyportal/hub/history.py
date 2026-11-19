@@ -68,6 +68,39 @@ class HealthHistory:
         self._row_count = None
         from pathlib import Path
         Path(self._path).parent.mkdir(parents=True, exist_ok=True)
+        try:
+            self._open()
+        except sqlite3.DatabaseError as exc:
+            # 전체 점검 117회차 F6(재현): 손상된 이력 DB('file is not a database' · 'database disk image is malformed')는 예전에 예외가
+            #   AppContext 밖으로 새어 **허브 전체가 기동하지 못했다**(systemd 가 3초마다 다시 띄워도 같은 예외 — 대시보드 · 설정 모두 불능).
+            #   점검 이력은 차트용 부가 자료다 — JSON 저장소와 같은 규칙으로 보존본(<이름>.corrupt.<ts>)으로 옮기고 새 DB 로 시작한다.
+            #   열지 못함(권한 · 잠김 · 디스크 — OperationalError)은 손상이 아니다: 옮기지 않고 예전처럼 그대로 올린다.
+            if isinstance(exc, sqlite3.OperationalError):
+                raise
+            self._preserve_corrupt(exc)
+            self._open()
+
+    def _preserve_corrupt(self, exc) -> None:
+        import os as _os
+        try:
+            self._db.close()
+        except Exception:  # noqa: BLE001 — 닫기 실패가 보존을 막지 않게
+            pass
+        stamp = int(time.time())
+        name = _os.path.basename(self._path)
+        for suffix in ("", "-wal", "-shm"):   # WAL 곁 파일을 남기면 새 DB 가 옛 WAL 을 되감으려 한다
+            try:
+                _os.replace(self._path + suffix, f"{self._path}.corrupt.{stamp}{suffix}")
+            except FileNotFoundError:
+                pass
+            except OSError as move_exc:
+                if not suffix:
+                    print(f"[history] 손상된 {name} 을(를) 옮기지 못했습니다({move_exc}).", flush=True)
+                    raise exc
+        print(f"[history] {name} 이(가) 손상되어({exc}) {name}.corrupt.{stamp} 로 옮기고 새 이력 DB 로 시작합니다"
+              " — 지난 점검 이력(차트)은 비어 보입니다.", flush=True)
+
+    def _open(self):
         self._db = sqlite3.connect(self._path, check_same_thread=False)
         self._db.row_factory = sqlite3.Row
         # v2.500(감사 L6): 다른 데이터 파일(users.json·session-secret·audit.log)은 전부 0600 인데

@@ -4,8 +4,15 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+test.after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 // v2.322 전체 소스 보안 감사 — 확정 12건 조치 회귀 방지(순수 판정·소스 계약 검사).
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'secaudit-2026-test-'));
+const TMP = tmpDir('secaudit-2026-test-');
 process.env.CONFIG_DIR = TMP;
 
 const SRC = new URL('../src/', import.meta.url);
@@ -59,16 +66,43 @@ test('gpu/settings: atomicWriteFileSync 사용 + 로드 catch preserveCorrupt', 
   const s = read('gpu/settings.js');
   assert.match(s, /import \{ atomicWriteFileSync, preserveCorrupt \}/);
   assert.match(s, /atomicWriteFileSync\(FILE,/);
-  assert.match(s, /catch \(e\) \{ preserveCorrupt\(FILE, e\.message\); return \{\}; \}/);
+  assert.match(s, /catch \(e\) \{ (?:_loadErr\.corrupt\(e\); )?preserveCorrupt\(FILE, e\.message\); return \{\}; \}/);   // 36회차 F4: 손상 기억(_loadErr) 뒤 보존
   assert.doesNotMatch(s, /fs\.writeFileSync\(FILE/, 'writeFileSync 직접 쓰기 잔존 금지');
 });
 
 /* ── [LOW] 자격증명 스토어 6종 preserveCorrupt ── */
 test('자격증명 스토어 6종: 로드 catch 에 preserveCorrupt(FILE) 존재', () => {
-  for (const f of ['idrac/registry.js', 'idrac/scanRanges.js', 'gpu/physicalRegistry.js', 'horizon/horizon.js', 'proxy/registry.js', 'agent/deployRegistry.js']) {
+  for (const f of ['horizon/horizon.js', 'agent/deployRegistry.js']) {
     const s = read(f);
     assert.match(s, /preserveCorrupt/, `${f}: preserveCorrupt import/호출`);
     assert.match(s, /import \{ atomicWriteFileSync, preserveCorrupt \}/, `${f}: import`);
+  }
+  // 결정(78 남긴 것 ①): idrac/registry 는 공용 등록부 읽기(util/registryCore.js makeLoadError.read — 손상이면 preserveCorrupt(사유 포함), 읽기 오류는 원본 유지)로 옮겼다.
+  //   손상 → 보존본 · 읽기 오류 → 원본 유지 · 저장 거절은 decideRegistry3189 가 실제 파일로 고정한다.
+  {
+    const s = read('idrac/registry.js');
+    assert.match(s, /import \{ atomicWriteFileSync \} from '\.\.\/util\/atomicWrite\.js'/, 'idrac/registry.js: 원자적 쓰기');
+    assert.match(s, /loadErr\.read\(FILE, parseServers\)/, 'idrac/registry.js: 공용 등록부 읽기(손상 보존)');
+  }
+  // 95회차 F1: gpu/physicalRegistry 도 공용 등록부 읽기(makeLoadError.read — 손상이면 preserveCorrupt, 읽기 오류는 원본 유지 · 쓰기 409)로 옮겼다(gpuAudit95 가 실제 파일로 고정).
+  {
+    const s = read('gpu/physicalRegistry.js');
+    assert.match(s, /import \{ atomicWriteFileSync \} from '\.\.\/util\/atomicWrite\.js'/, 'gpu/physicalRegistry.js: 원자적 쓰기');
+    assert.match(s, /loadErr\.read\(FILE, parsePhysical\)/, 'gpu/physicalRegistry.js: 공용 등록부 읽기(손상 보존)');
+  }
+  // 93회차 F3: idrac/scanRanges 도 공용 등록부 읽기(makeLoadError.read — 손상이면 preserveCorrupt, 읽기 오류는 원본 유지)로 옮겼다(idracPartAudit93 F3 가 실제 파일로 고정).
+  {
+    const s = read('idrac/scanRanges.js');
+    assert.match(s, /import \{ atomicWriteFileSync \} from '\.\.\/util\/atomicWrite\.js'/, 'idrac/scanRanges.js: 원자적 쓰기');
+    assert.match(s, /loadErr\.read\(FILE, parseRanges\)/, 'idrac/scanRanges.js: 공용 등록부 읽기(손상 보존)');
+  }
+  // 76회차 F5: proxy/registry 는 공용 읽기(util/jsonFileLoad makeJsonFileReader — 손상이면 preserveCorrupt, 읽기 오류는 원본 유지)로 옮겼다.
+  //   손상 → 보존본 · 읽기 오류 → 원본 유지는 proxyAudit76 이 실제 파일로 고정한다.
+  {
+    const s = read('proxy/registry.js');
+    assert.match(s, /import \{ atomicWriteFileSync \} from '\.\.\/util\/atomicWrite\.js'/, 'proxy/registry.js: 원자적 쓰기');
+    assert.match(s, /import \{ makeJsonFileReader \} from '\.\.\/util\/jsonFileLoad\.js'/, 'proxy/registry.js: 공용 읽기(손상 보존)');
+    assert.match(s, /makeJsonFileReader\(\(\) => FILE,/, 'proxy/registry.js: 그 파일을 공용 읽기로');
   }
 });
 
@@ -100,9 +134,16 @@ test('sshGateway: mappingAccessIssue 소유·scope 재검사 + handleConnection(
 
 /* ── [LOW·보류] svcmon 비-HTTP SSRF 재검증 — 타임아웃 없는 DNS 재조회가 폴러를 지연시켜
    되돌림. http/soap 의 실행시점 재검증은 유지되어야 한다(회귀 방지). ── */
-test('svcmon/checker: http/soap 실행시점 SSRF 재검증 유지 + 비-HTTP 는 보류 표기', () => {
+test('svcmon/checker: http/soap 실행시점 SSRF 재검증 유지 + 비-HTTP 는 접속 lookup 으로 검증(26회차 F10)', () => {
   const s = read('svcmon/checker.js');
   assert.match(s, /const reason = await ssrfBlockReasonResolved\(test\.url\)/, 'http/soap 재검증 유지');
   assert.doesNotMatch(s, /SSRF_RECHECK_TYPES/, '비-HTTP 재검증(타임아웃 없는 DNS)은 되돌림');
-  assert.match(s, /보류\(v2\.322 보안 감사 LOW/, '보류 사유 주석 존재');
+  // 26회차 F10: v2.322 의 '보류' 사유(시한 없는 DNS)는 v2.537 ssrfLookup(3초 시한)으로 해소 — 접속부마다 lookup 을 붙인다(추가 조회 없음)
+  assert.doesNotMatch(s, /보류\(v2\.322 보안 감사 LOW/, '보류 주석은 정정됐다');
+  const conns = s.match(/(?:net|tls)\.connect\(\{[^}]*\}\)/g) || [];
+  assert.ok(conns.length >= 5, `접속부 ${conns.length}`);
+  for (const c of conns) assert.match(c, /lookup: checkLookup\(/, c);   // 28회차 N-5: 점검 시한에 맞춘 검증 lookup(ssrfLookup 공장)
+  const udp = s.match(/dgram\.createSocket\([^)]*\)/g) || [];
+  assert.ok(udp.length >= 2);
+  for (const c of udp) assert.match(c, /lookup: dgramLookupFor\(/, `dgram 은 bind 주소(0.0.0.0)도 lookup 으로 풀어 ssrfLookup 을 그대로 쓰면 UDP 점검이 전부 실패한다: ${c}`);
 });

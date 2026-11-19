@@ -14,11 +14,14 @@ const INP = { width: '100%', minWidth: 0, boxSizing: 'border-box' };
  * 프로토콜(SSH/RDP)·IP(다중 IP 선택)·포트를 고른 뒤 매핑을 만들고(또는 재사용)
  * 브라우저 SSH 터미널 / RDP 웹 콘솔(없으면 .rdp 다운로드)을 띄운다.
  */
-export function VmRemoteButton({ item }) {
+export function VmRemoteButton({ item, startOpen = false, hideButton = false, onClose = null }) {
+  // v3.3.0(물리서버 폴더 iDRAC 접속): 다른 화면이 '고른 뒤에만' 이 창을 띄우도록 — startOpen(처음부터 열림) · hideButton(버튼 없이 창만) · onClose(닫힐 때 알림).
+  //   ⚠ 이 컴포넌트는 그려지는 순간 대상 IP 도달성 점검(POST /remote/probe)을 보낸다 — 표의 행마다 그리지 말 것(고른 한 대만).
   const ips = item.ipAddresses?.length ? item.ipAddresses : (item.ipAddress ? [item.ipAddress] : []);
   // Guest OS로 Windows/Linux를 인식해 기본 프로토콜·포트를 자동 선택(Windows→RDP/3389, 그 외→SSH/22).
   const isWindows = /windows|win32|win64|microsoft/i.test(item.guestOS || '');
-  const [open, setOpen] = useState(false);
+  const [open, setOpenRaw] = useState(!!startOpen);
+  const setOpen = (v) => { setOpenRaw(v); if (!v && onClose) onClose(); };
   const [protocol, setProtocol] = useState(isWindows ? 'rdp' : 'ssh');
   const [autoProto, setAutoProto] = useState(true); // 사용자가 직접 바꾸기 전까지는 자동 선택 유지
   const [ip, setIp] = useState(ips[0] || '');
@@ -90,10 +93,12 @@ export function VmRemoteButton({ item }) {
 
   return (
     <>
-      <button className="logout-btn" disabled={canRemote === false} title={probeTip} style={{ padding: '8px 14px', opacity: canRemote === false ? 0.5 : 1, color: probeColor || undefined, borderColor: probeColor || undefined }}
-        onClick={() => { setError(null); setOpen(true); }}>
-        🔗 원격 접속{anyLoading ? ' …' : ' ●'}
-      </button>
+      {hideButton ? null : (
+        <button className="logout-btn" disabled={canRemote === false} title={probeTip} style={{ padding: '8px 14px', opacity: canRemote === false ? 0.5 : 1, color: probeColor || undefined, borderColor: probeColor || undefined }}
+          onClick={() => { setError(null); setOpen(true); }}>
+          🔗 원격 접속{anyLoading ? ' …' : ' ●'}
+        </button>
+      )}
 
       {open && (
         <Modal title={`원격 접속 — ${item.name}`} onClose={() => setOpen(false)} width={460}>

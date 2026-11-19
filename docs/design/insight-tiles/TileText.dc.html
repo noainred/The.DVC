@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>지도 칸 글자 시안 — 작은 칸도 읽히게</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+button{font:inherit}
+sc-for,sc-if{display:contents}
+.mono{font-family:"JetBrains Mono",monospace}
+.page{min-height:2600px;padding:22px 24px 28px;display:flex;flex-direction:column;gap:14px;box-sizing:border-box}
+.head{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px}
+.head h1{margin:0;font-size:20px;font-weight:800}
+.head .sub{font-size:12.5px;color:#8b9bb4}
+.demo{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;background:rgba(250,204,21,.06);border:1px dashed rgba(250,204,21,.55);border-radius:12px;padding:10px 14px}
+.demo .dl{font-size:12px;font-weight:800;color:#fde68a;white-space:nowrap}
+.demo .hint{font-size:12px;color:#c3cfe2}
+.seg{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden;background:#0f1626}
+.seg button{border:0;background:transparent;color:#c3cfe2;padding:6px 12px;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+.seg button.on{background:#3b82f6;color:#fff;font-weight:800}
+.seg button.rec::after{content:" ★";color:#fde68a}
+.panel{background:#141b2d;border:1px solid #243049;border-radius:14px;padding:14px 16px 16px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.ph{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 12px}
+.ph h2{margin:0;font-size:15px;font-weight:800}
+.ph .hint{font-size:12px;color:#8b9bb4}
+.ph .rt{margin-left:auto;font-size:12px;color:#8b9bb4;white-space:nowrap}
+.ctl{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;font-size:12px;color:#8b9bb4}
+.gear{border:1px solid #243049;background:#0f1626;color:#e6edf6;border-radius:8px;padding:6px 12px;font-size:12.5px;font-weight:700}
+.cols{position:relative;height:20px;width:1356px}
+.cols span{position:absolute;top:0;font-size:12.5px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-sizing:border-box;padding-left:2px}
+.map{position:relative;width:1356px;overflow:hidden;border-radius:6px}
+.tl{position:absolute;box-sizing:border-box;border:1px solid #141b2d;border-radius:5px;padding:6px 8px;display:flex;flex-direction:column;justify-content:center;gap:3px;text-align:left;color:#fff;cursor:pointer;overflow:hidden;min-width:0}
+.tl b{font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;line-height:1.2}
+.tl span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;opacity:.95;line-height:1.25}
+.tl.one{flex-direction:row;align-items:center;justify-content:flex-start;gap:8px;padding:0 8px}
+.tl.grp{background-image:repeating-linear-gradient(135deg, rgba(255,255,255,.10) 0 8px, transparent 8px 16px);border:1px dashed rgba(255,255,255,.75)}
+.tl.on{outline:2px solid #fde68a;outline-offset:-3px}
+.tl:hover{filter:brightness(1.12)}
+.rk{align-self:flex-start;font-style:normal;font-size:11px;font-weight:800;line-height:1.35;padding:0 6px;border-radius:999px;background:#0b0b0b;color:#fca5a5;border:1px solid #ef4444;white-space:nowrap;flex:none}
+.tl.one .rk{align-self:center}
+.scale{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;font-size:12px;color:#8b9bb4}
+.scale i{display:inline-block;width:14px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.read{display:grid;grid-template-columns:repeat(4, minmax(0, 1fr));gap:10px}
+.rd{background:#0f1626;border:1px solid #243049;border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:3px;min-width:0}
+.rd b{font-family:"JetBrains Mono",monospace;font-size:22px;font-weight:800;line-height:1.1}
+.rd span{font-size:12px;color:#c3cfe2}
+.rd.good b{color:#86efac}
+.rd.bad b{color:#fca5a5}
+.rd.dim b{color:#8b9bb4}
+.note{font-size:12px;color:#8b9bb4;line-height:1.55}
+.two{display:grid;grid-template-columns:minmax(0, 1.25fr) minmax(0, 1fr);gap:14px}
+.tb{display:grid;grid-template-columns:minmax(0, 1.5fr) repeat(5, minmax(0, .8fr));gap:0 10px;align-items:center;padding:8px 0;border-bottom:1px solid #1e293f;font-size:12.5px}
+.tb.th{font-size:11.5px;font-weight:700;color:#8b9bb4;padding-top:0}
+.tb.cur{background:rgba(59,130,246,.10);border-radius:6px}
+.tb .mono{font-weight:700}
+.tb .nm{font-weight:700;padding-left:6px}
+.tb .nm small{display:block;font-weight:400;color:#8b9bb4;font-size:11.5px;margin-top:2px}
+.rule{display:grid;grid-template-columns:minmax(0, 1fr) minmax(0, 1.1fr) minmax(0, 1.6fr);gap:0 12px;padding:8px 0;border-bottom:1px solid #1e293f;font-size:12.5px;align-items:center}
+.rule.th{font-size:11.5px;font-weight:700;color:#8b9bb4;padding-top:0}
+.rule .ex{display:inline-flex;flex-direction:column;gap:2px;background:#256abf;border-radius:5px;padding:5px 8px;color:#fff;max-width:100%;overflow:hidden}
+.rule .ex.row{flex-direction:row;gap:8px;align-items:center}
+.rule .ex.none{width:34px;height:20px;padding:0}
+.lst{display:flex;flex-direction:column;max-height:420px;overflow:auto}
+.lr{display:grid;grid-template-columns:minmax(0, 1.4fr) minmax(0, 1.6fr) 70px 70px 80px;gap:0 12px;align-items:center;padding:7px 0;border-bottom:1px solid #1e293f;font-size:12.5px}
+.lr.th{font-size:11.5px;font-weight:700;color:#8b9bb4;padding-top:0}
+.lr .nm{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.track{display:block;height:8px;border-radius:4px;background:#0f1626;overflow:hidden}
+.track i{display:block;height:100%;border-radius:4px}
+.x{margin-left:auto;border:1px solid #243049;background:#0f1626;color:#e6edf6;border-radius:8px;padding:5px 10px;font-size:12px;font-weight:700;cursor:pointer}
+.empty{font-size:12.5px;color:#8b9bb4;padding:6px 0}
+</style>
+</helmet>
+<main class="page">
+  <header class="head">
+    <h1>지도 칸 글자 — 작은 칸도 읽히게</h1>
+    <span class="sub">‘가상화 호스트 현황’ · ‘VM 현황’ 지도 공용 · 재생(Play)을 누른 뒤 아래 노란 상자의 단추로 비교해 보세요</span>
+  </header>
+
+  <div class="demo" aria-label="시안 비교(실제 화면에는 없는 상자)">
+    <span class="dl">시안 비교</span>
+    <span class="seg" role="group" aria-label="보기 방식"><sc-for list="{{ modes }}" as="m" hint-placeholder-count="6"><button type="button" class="{{ m.cls }}" aria-pressed="{{ m.on }}" onClick="{{ m.pick }}">{{ m.label }}</button></sc-for></span>
+    <span class="dl">클러스터 수</span>
+    <span class="seg" role="group" aria-label="데이터"><sc-for list="{{ datas }}" as="d" hint-placeholder-count="3"><button type="button" class="{{ d.cls }}" aria-pressed="{{ d.on }}" onClick="{{ d.pick }}">{{ d.label }}</button></sc-for></span>
+    <span class="dl">지도 높이</span>
+    <span class="seg" role="group" aria-label="지도 높이"><sc-for list="{{ heights }}" as="x" hint-placeholder-count="3"><button type="button" class="{{ x.cls }}" aria-pressed="{{ x.on }}" onClick="{{ x.pick }}">{{ x.label }}</button></sc-for></span>
+    <span class="hint">이 노란 상자는 시안용입니다 — 실제 화면에는 없습니다</span>
+  </div>
+
+  <section class="panel" aria-label="가상화 호스트 현황">
+    <div class="ph"><h2>가상화 호스트 현황</h2><span class="hint">{{ modeTitle }}</span><span class="rt">{{ modeNote }}</span></div>
+    <div class="ctl">
+      <span>색</span><span class="seg"><button type="button" class="on">한 대 빠진 뒤 메모리</button><button type="button">가장 바쁜 호스트 CPU</button><button type="button">평균 CPU</button><button type="button">평균 메모리</button></span>
+      <span>크기</span><span class="seg"><button type="button" class="on">호스트 수</button><button type="button">코어</button><button type="button">메모리</button></span>
+      <span class="gear">설정 · {{ hText }} ▾</span>
+    </div>
+    <div class="cols" aria-hidden="true"><sc-for list="{{ cols }}" as="g" hint-placeholder-count="4"><span style="left: {{ g.left }}; width: {{ g.width }}">{{ g.text }}</span></sc-for></div>
+    <div class="map" style="height: {{ hPx }}" role="group" aria-label="클러스터 지도">
+      <sc-for list="{{ tiles }}" as="t" hint-placeholder-count="30">
+        <button type="button" class="{{ t.cls }}" title="{{ t.tip }}" onClick="{{ t.click }}" style="left: {{ t.left }}; top: {{ t.top }}; width: {{ t.width }}; height: {{ t.height }}; background-color: {{ t.bg }}"><sc-if value="{{ t.showName }}" hint-placeholder-val="{{ true }}"><b style="font-size: {{ t.fs }}">{{ t.name }}</b></sc-if><sc-if value="{{ t.showLine }}" hint-placeholder-val="{{ true }}"><span style="font-size: {{ t.fs2 }}">{{ t.line }}</span></sc-if><sc-if value="{{ t.risk }}" hint-placeholder-val="{{ false }}"><em class="rk">{{ t.riskText }}</em></sc-if></button>
+      </sc-for>
+    </div>
+    <div class="scale">
+      <span>한 대 빠진 뒤 메모리</span>
+      <span><i style="background: #184f95"></i>50% 미만</span><span><i style="background: #256abf"></i>50–75%</span><span><i style="background: #3987e5"></i>75–90%</span><span><i style="background: #ef4444"></i>90% 이상(경고)</span>
+      <span><em class="rk">못 버팀</em> 한 대가 빠지면 버티지 못하는 클러스터</span>
+      <sc-if value="{{ hasGroup }}" hint-placeholder-val="{{ true }}"><span>빗금 칸 = 작은 클러스터 묶음 — 누르면 아래에 목록이 열립니다</span></sc-if>
+    </div>
+  </section>
+
+  <section class="panel" aria-label="이 방식에서 읽히는 정도">
+    <div class="ph"><h2>이 방식에서 얼마나 읽히나</h2><span class="hint">{{ readHint }}</span></div>
+    <div class="read">
+      <sc-for list="{{ reads }}" as="r" hint-placeholder-count="4"><div class="{{ r.cls }}"><b>{{ r.big }}</b><span>{{ r.text }}</span></div></sc-for>
+    </div>
+    <div class="note">세는 방법: 글자 폭을 어림해(영문 굵은 글자 = 글자 크기 × 0.62 · 한글 = × 0.95) 칸 안쪽 폭 · 높이와 견줍니다. 브라우저가 실제로 그린 폭을 잰 것이 아니라 <b>추정</b>입니다 — 경계에 걸린 칸은 한두 개 달라질 수 있습니다.</div>
+  </section>
+
+  <sc-if value="{{ listOpen }}" hint-placeholder-val="{{ false }}">
+    <section class="panel" aria-label="묶음 안의 클러스터">
+      <div class="ph"><h2>{{ listTitle }}</h2><span class="hint">묶음 안의 클러스터 — 값이 높은 순 · 여기서는 이름이 잘리지 않습니다</span><button type="button" class="x" onClick="{{ closeList }}">닫기 ✕</button></div>
+      <div class="lst">
+        <div class="lr th"><span>클러스터</span><span>한 대 빠진 뒤 메모리</span><span>값</span><span>호스트</span><span>표</span></div>
+        <sc-for list="{{ listRows }}" as="p" hint-placeholder-count="6">
+          <div class="lr"><span class="nm">{{ p.name }}</span><span class="track"><i style="width: {{ p.w }}; background: {{ p.bg }}"></i></span><span class="mono">{{ p.pct }}</span><span class="mono">{{ p.hosts }}</span><span><sc-if value="{{ p.fail }}" hint-placeholder-val="{{ false }}"><em class="rk">못 버팀</em></sc-if></span></div>
+        </sc-for>
+      </div>
+    </section>
+  </sc-if>
+
+  <div class="two">
+    <section class="panel" aria-label="방식 비교">
+      <div class="ph"><h2>방식 비교</h2><span class="hint">지금 고른 클러스터 수 · 지도 높이 기준 — 줄을 고르면 위 지도가 그 방식으로 바뀝니다</span></div>
+      <div class="tb th"><span>방식</span><span>이름이 다 보임</span><span>잘려 보임</span><span>글 없음</span><span>묶음 안</span><span>가장 작은 글자</span></div>
+      <sc-for list="{{ compare }}" as="c" hint-placeholder-count="6">
+        <div class="{{ c.cls }}"><span class="nm">{{ c.label }}<small>{{ c.what }}</small></span><span class="mono">{{ c.full }}</span><span class="mono">{{ c.cut }}</span><span class="mono">{{ c.none }}</span><span class="mono">{{ c.inGroup }}</span><span class="mono">{{ c.minFs }}</span></div>
+      </sc-for>
+      <div class="note">‘묶음 안’ 의 클러스터는 지도에서는 한 칸(빗금)으로 보이고, 눌러서 연 목록에서 이름 · 값을 다 읽습니다. ‘글 없음’ 은 색만 보이는 칸입니다(마우스를 올리면 이름이 뜹니다).</div>
+    </section>
+
+    <section class="panel" aria-label="글자 크기 규칙">
+      <div class="ph"><h2>글자 크기 규칙(B · 추천에 포함)</h2><span class="hint">칸 크기에 따라 네 단계 — 12px 아래로는 내려가지 않습니다</span></div>
+      <div class="rule th"><span>칸 크기</span><span>글자</span><span>보이는 모양</span></div>
+      <div class="rule"><span>큰 칸<br><small style="color:#8b9bb4">폭 220 · 높이 96 이상</small></span><span>이름 16px · 값 13px · 두 줄</span><span><span class="ex"><b style="font-size:16px">Seoul-Sandbox</b><span style="font-size:13px">빠진 뒤 56% · 32대</span></span></span></div>
+      <div class="rule"><span>보통 칸<br><small style="color:#8b9bb4">높이 52 이상</small></span><span>이름 13.5px · 값 12px · 두 줄</span><span><span class="ex"><b style="font-size:13.5px">Dallas-DB</b><span style="font-size:12px">빠진 뒤 59% · 10대</span></span></span></div>
+      <div class="rule"><span>낮은 칸<br><small style="color:#8b9bb4">높이 23 이상</small></span><span>이름 12.5px + 값만 12px · 한 줄</span><span><span class="ex row"><b style="font-size:12.5px">Denver-DB</b><span style="font-size:12px">60%</span></span></span></div>
+      <div class="rule"><span>그보다 작은 칸</span><span>글 없음(색만) — 여럿이면 한 칸으로 묶음(C)</span><span><span class="ex none"></span></span></div>
+      <div class="note">지금은 칸 크기와 상관없이 이름 12.5px · 값 11.5px 고정이고, 칸이 낮으면 글이 위아래로 잘립니다.</div>
+    </section>
+  </div>
+
+  <section class="panel" aria-label="밝혀 둘 것">
+    <div class="ph"><h2>밝혀 둘 것</h2></div>
+    <div class="note">
+      · 클러스터 이름 · 값은 <b>지어낸 가상 값</b>입니다(보내 주신 캡처의 실제 이름은 옮기지 않았습니다). ‘큰 환경’ 은 캡처와 비슷한 모양(한 지역에 22개 · 다른 지역에 2개)으로 만들었고, ‘아주 큰 환경’ 은 한 지역에 46개가 몰린 경우입니다(여러 열로도 모자라 묶음이 생기는 것을 보이려고).<br>
+      · 이 보드는 띄워서 눌러 보지 않았습니다 — 배치 계산(칸이 겹치지 않음 · 넓이 합 = 지도 넓이 · 넓이가 호스트 수에 비례)과 단추 동작만 따로 실행해 확인했습니다. 글자가 실제로 어떻게 그려지는지는 재생으로 봐야 압니다.<br>
+      · <b>A(네모 배치)는 추천에서 뺐습니다.</b> 처음에는 칸을 네모에 가깝게 나누면 풀릴 것으로 봤는데, 세어 보니 칸 폭이 60~100px 로 좁아져 이름이 오히려 더 많이 잘렸습니다(위 ‘방식 비교’ 표). 지금 배치의 문제는 폭이 아니라 <b>높이</b>였습니다 — 비교할 수 있게 보드에는 남겨 두었습니다.<br>
+      · D(여러 열)는 칸이 많은 지역만 두세 열로 나눕니다(열 폭 170px 아래로는 나누지 않음). 칸의 넓이는 여전히 호스트 수에 비례하고, 큰 것부터 왼쪽 열 위에서 아래로 놓입니다.<br>
+      · C 로 묶은 칸의 색은 묶음 안에서 <b>가장 높은 값</b>을 따릅니다(나쁜 것이 묶음에 가려지지 않게). ‘못 버팀’ 이 하나라도 있으면 묶음 칸에 수를 적습니다.
+    </div>
+  </section>
+</main>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2600}}'>
+class Component extends DCLogic {
+  state = { mode: 'rec', data: 'big', h: 760, open: '', sel: '' };
+
+  // 가상 값 — [이름, 호스트 수, 한 대 빠진 뒤 메모리 %, 못 버팀]
+  dataset(kind) {
+    if (kind === 'big') {
+      return [
+        { key: 'na', label: '북미', items: [['Ashburn-DB', 11, 80], ['Ashburn-Analytics', 10, 48], ['SanJose-DB', 10, 58], ['Dallas-DB', 10, 59], ['Chicago-DB', 10, 69], ['Toronto-DB', 10, 61], ['Denver-DB', 10, 60],
+          ['Ashburn-SessionHost', 8, 26], ['SanJose-Analytics', 8, 59], ['Seattle-Analytics', 8, 43], ['Seattle-DB', 8, 67], ['Denver-Analytics', 8, 36], ['Dallas-Analytics', 7, 46], ['Toronto-Analytics', 7, 57],
+          ['Ashburn-Batch', 6, 91], ['Ashburn-Sandbox', 6, 30], ['SanJose-Batch', 6, 90], ['Chicago-Analytics', 6, 108, 1], ['Toronto-Batch', 6, 94, 1], ['Ashburn-DataAPI', 4, 12], ['SaoPaulo-Web', 4, 71], ['SaoPaulo-Edge', 3, 55]] },
+        { key: 'as', label: '아시아', items: [['Seoul-Sandbox', 32, 56], ['Seoul-DB', 27, 71], ['Seoul-Analytics', 21, 73], ['Tokyo-Sandbox', 13, 85], ['Singapore-DB', 10, 60], ['Singapore-Analytics', 8, 40], ['Mumbai-DB', 6, 77], ['Mumbai-Edge', 5, 64]] },
+        { key: 'cn', label: '중국', items: [['Shanghai-DB', 20, 72], ['Shanghai-Analytics', 11, 67], ['Beijing-DB', 10, 72, 1], ['Beijing-Batch-GPU', 8, 83], ['Beijing-Batch-CPU', 8, 33], ['Shenzhen-Analytics', 6, 74], ['Shenzhen-Edge', 4, 102, 1]] },
+        { key: 'eu', label: '유럽', items: [['Frankfurt-Batch', 33, 76], ['Frankfurt-DB', 24, 61, 1]] },
+      ];
+    }
+    if (kind === 'huge') {
+      const roles = ['DB', 'Analytics', 'Batch', 'Web', 'API', 'VDI', 'Sandbox', 'Edge'];
+      const gen = (cities, n, maxSize, seed) => Array.from({ length: n }, (_, i) => { const size = Math.max(2, Math.round(maxSize * Math.pow(0.93, i))); const pct = 20 + ((i * 37 + seed * 11) % 95);
+        return [cities[i % cities.length] + '-' + roles[Math.floor(i / cities.length) % roles.length], size, pct, pct >= 100 ? 1 : 0]; });
+      return [
+        { key: 'na', label: '북미', items: gen(['Ashburn', 'SanJose', 'Dallas', 'Chicago', 'Toronto', 'Denver', 'Seattle'], 46, 14, 1) },
+        { key: 'as', label: '아시아', items: gen(['Seoul', 'Tokyo', 'Singapore', 'Mumbai'], 16, 22, 2) },
+        { key: 'cn', label: '중국', items: gen(['Shanghai', 'Beijing', 'Shenzhen'], 12, 16, 3) },
+        { key: 'eu', label: '유럽', items: gen(['Frankfurt', 'Dublin'], 6, 20, 4) },
+      ];
+    }
+    const mk = (city, sizes, pcts) => sizes.map((s, i) => [city[i % city.length] + '-CL' + (Math.floor(i / city.length) + 1), s, pcts[i], pcts[i] >= 100 ? 1 : 0]);
+    return [
+      { key: 'eu', label: '유럽', items: mk(['Frankfurt', 'Dublin', 'Dubai'], [8, 8, 8, 8, 7, 7, 6], [84, 79, 121, 79, 83, 84, 113]) },
+      { key: 'na', label: '북미', items: mk(['Ashburn', 'SanJose', 'SaoPaulo'], [9, 9, 8, 8, 8, 8], [80, 74, 103, 110, 86, 78]) },
+      { key: 'as', label: '아시아', items: mk(['Seoul', 'Singapore', 'Mumbai'], [8, 7, 7, 7, 7, 6, 6], [85, 128, 94, 83, 85, 90, 81]) },
+      { key: 'cn', label: '중국', items: mk(['Beijing', 'Shanghai'], [8, 8, 7, 7, 6], [89, 99, 82, 73, 90]) },
+    ];
+  }
+
+  // 한 방식의 배치와 글 판정 — { cols, tiles, counts }
+  layoutFor(mode, regions, W, H) {
+    const tw = (s, fs) => { let w = 0; for (const ch of String(s)) w += /[ㄱ-힝]/.test(ch) ? fs * 0.95 : (ch === ' ' ? fs * 0.3 : fs * 0.62); return w; };
+    const bgOf = (p) => (p >= 90 ? '#ef4444' : p >= 75 ? '#3987e5' : p >= 50 ? '#256abf' : '#184f95');
+    const tier = mode === 'b' || mode === 'rec';
+    const group = mode === 'c' || mode === 'rec';
+    const MIN_H = 22.5;                                          // 이름 한 줄(12.5px)이 들어가는 가장 낮은 칸
+    const fitsName = (r, name, fs) => tw(name, fs) <= r.w - 16 && r.h >= fs + 10;
+    const canName = (r, name) => tw(name, 12.5) <= r.w - 16 && r.h >= MIN_H;
+
+    const slice = (items, x, y, w, h) => { const tot = items.reduce((a, t) => a + t.size, 0); let cy = y; return items.map((t) => { const hh = (t.size / tot) * h; const r = { t, x, y: cy, w, h: hh }; cy += hh; return r; }); };
+    const squarify = (items, x, y, w, h) => {
+      const tot = items.reduce((a, t) => a + t.size, 0); const out = [];
+      let rest = items.map((t) => ({ t, a: (t.size / tot) * w * h })); let rx = x, ry = y, rw = w, rh = h;
+      const worst = (row, side) => { const s = row.reduce((a, r) => a + r.a, 0); let mx = 0, mn = Infinity; row.forEach((r) => { if (r.a > mx) mx = r.a; if (r.a < mn) mn = r.a; }); return Math.max((side * side * mx) / (s * s), (s * s) / (side * side * mn)); };
+      while (rest.length) {
+        const side = Math.min(rw, rh); let n = 1;
+        while (n < rest.length && worst(rest.slice(0, n + 1), side) <= worst(rest.slice(0, n), side)) n += 1;
+        const row = rest.slice(0, n); const s = row.reduce((a, r) => a + r.a, 0);
+        if (rw >= rh) { const cw = s / rh; let cy = ry; row.forEach((r) => { const ch = r.a / cw; out.push({ t: r.t, x: rx, y: cy, w: cw, h: ch }); cy += ch; }); rx += cw; rw -= cw; }
+        else { const ch = s / rw; let cx = rx; row.forEach((r) => { const cw = r.a / ch; out.push({ t: r.t, x: cx, y: ry, w: cw, h: ch }); cx += cw; }); ry += ch; rh -= ch; }
+        rest = rest.slice(n);
+      }
+      return out;
+    };
+    // D: 지역 한 줄을 여러 열로 — 칸이 MIN_COL_W 보다 좁아지지 않는 한에서, 가장 낮은 칸이 30px 이상이 되는 가장 적은 열 수. 열 폭 = 그 열의 몫(넓이가 호스트 수에 비례).
+    const MIN_COL_W = 170;
+    const multi = (items, x, y, w, h) => {
+      const tot = items.reduce((a, t) => a + t.size, 0); let best = null;
+      for (let k = 1; k <= 4; k++) {
+        if (k > 1 && w / k < MIN_COL_W) break;
+        const colsK = []; let cur = [], acc = 0, done = 0;
+        items.forEach((t, i) => { cur.push(t); acc += t.size; const left = items.length - i - 1; const target = (tot - done) / (k - colsK.length);
+          if (colsK.length < k - 1 && acc >= target - t.size / 2 && left >= (k - colsK.length - 1)) { colsK.push(cur); done += acc; cur = []; acc = 0; } });
+        if (cur.length) colsK.push(cur);
+        const minH = Math.min(...colsK.map((c) => { const ct = c.reduce((a, t) => a + t.size, 0); return Math.min(...c.map((t) => (t.size / ct) * h)); }));
+        if (!best || minH > best.minH) best = { colsK, minH };
+        if (minH >= 30) { best = { colsK, minH }; break; }
+      }
+      const out = []; let cx = x;
+      best.colsK.forEach((c) => { const ct = c.reduce((a, t) => a + t.size, 0); const cw = (ct / tot) * w; slice(c, cx, y, cw, h).forEach((r) => out.push(r)); cx += cw; });
+      return out;
+    };
+    const arrange = mode === 'a' ? squarify : (mode === 'd' || mode === 'rec') ? multi : slice;
+
+    const colsIn = regions.map((g) => ({ key: g.key, label: g.label, items: g.items.map(([name, size, pct, fail]) => ({ key: g.key + ':' + name, name, size, pct, fail: !!fail || pct >= 100 })).sort((a, b) => b.size - a.size || a.name.localeCompare(b.name)) }))
+      .map((g) => Object.assign(g, { total: g.items.reduce((a, t) => a + t.size, 0) })).sort((a, b) => b.total - a.total);
+    const total = colsIn.reduce((a, g) => a + g.total, 0);
+    const cols = []; const tiles = []; let left = 0;
+    const counts = { full: 0, cut: 0, none: 0, inGroup: 0, clusters: 0 };
+
+    colsIn.forEach((g) => {
+      const cw = (g.total / total) * W;
+      let rects = arrange(g.items, left, 0, cw, H);
+      if (group) {
+        const small = rects.filter((r) => !canName(r, r.t.name)).map((r) => r.t);
+        if (small.length >= 2) {
+          const worstPct = small.reduce((a, t) => Math.max(a, t.pct), 0);
+          const g2 = { key: g.key + ':그 밖', name: '그 밖 ' + small.length + '개', size: small.reduce((a, t) => a + t.size, 0), pct: worstPct, fail: false, group: true, region: g.key, regionLabel: g.label,
+            members: small.slice().sort((a, b) => b.pct - a.pct), failN: small.filter((t) => t.fail).length };
+          const keep = g.items.filter((t) => !small.includes(t)).concat([g2]).sort((a, b) => b.size - a.size);
+          rects = arrange(keep, left, 0, cw, H);
+        }
+      }
+      rects.forEach((r) => {
+        const t = r.t; const line = t.group ? ('가장 높은 값 ' + t.pct + '% · 합 ' + t.size + '대') : ('빠진 뒤 ' + t.pct + '% · ' + t.size + '대');
+        let fs = 12.5, fs2 = 11.5, one = false, showName = true, showLine = true, state = 'full', lineText = line;
+        if (tier) {
+          if (r.w >= 220 && r.h >= 96 && fitsName(r, t.name, 16)) { fs = 16; fs2 = 13; }
+          else if (r.h >= 52 && fitsName(r, t.name, 13.5)) { fs = 13.5; fs2 = 12; }
+          else if (r.h >= 46 && fitsName(r, t.name, 12.5)) { fs = 12.5; fs2 = 12; }
+          else if (r.h >= MIN_H && tw(t.name, 12.5) <= r.w - 16) { fs = 12.5; fs2 = 12; one = true; lineText = t.pct + '%'; showLine = tw(t.name, 12.5) + 8 + tw(lineText, 12) <= r.w - 16; }
+          else { showName = false; showLine = false; state = 'none'; }
+          if (showName && !one && tw(lineText, fs2) > r.w - 16) { lineText = t.pct + '% · ' + t.size + '대'; if (tw(lineText, fs2) > r.w - 16) showLine = false; }
+        } else {
+          one = r.h < 46;
+          const nameFits = tw(t.name, 12.5) <= r.w - 16;
+          if (r.h < 19) state = 'cut';                       // 글 높이(약 15px + 위아래)가 칸보다 커서 위아래로 잘린다
+          else if (!nameFits) state = 'cut';                 // 이름이 … 로 잘린다
+          if (one) showLine = tw(t.name, 12.5) + 8 + tw(line, 11.5) <= r.w - 16 || r.w > 200;
+        }
+        const risk = t.group ? t.failN > 0 : t.fail;
+        const riskText = t.group ? ('못 버팀 ' + t.failN) : (showName ? '못 버팀' : '!');
+        if (t.group) { counts.inGroup += t.members.length; counts.clusters += t.members.length; }
+        else { counts[state] += 1; counts.clusters += 1; }
+        tiles.push({ key: t.key, group: !!t.group, members: t.members || null, region: t.regionLabel || g.label, name: t.name, line: lineText, pct: t.pct, hosts: t.size, x: r.x, y: r.y, w: r.w, h: r.h,
+          fs, fs2, one, showName, showLine, risk, riskText, bg: bgOf(t.pct), state });
+      });
+      cols.push({ key: g.key, left, width: cw, text: g.label + ' · ' + g.total + '대' });
+      left += cw;
+    });
+    return { cols, tiles, counts, minFs: tier ? 12 : 11.5 };
+  }
+
+  renderVals() {
+    const st = this.state; const W = 1356; const H = st.h;
+    const MODES = [
+      ['now', '지금', '지역 = 세로 한 줄 · 칸은 가로 띠 · 글자 고정'],
+      ['a', 'A · 네모 배치', '지역 안을 가로세로로 나눠 칸을 네모에 가깝게(비교용 — 이름이 더 잘립니다)'],
+      ['b', 'B · 글자 크기', '배치는 지금 그대로 · 칸 크기에 맞춘 글자'],
+      ['c', 'C · 작은 칸 묶기', '배치는 지금 그대로 · 이름이 안 들어가는 칸을 한 칸으로'],
+      ['d', 'D · 여러 열', '칸이 많은 지역은 두세 열로 나눠 칸 높이를 키움'],
+      ['rec', '추천 · B + C + D', '여러 열 + 글자 단계 + 그래도 남는 작은 칸 묶기'],
+    ];
+    const regions = this.dataset(st.data);
+    const cur = this.layoutFor(st.mode, regions, W, H);
+    const px = (n) => (Math.round(n * 10) / 10) + 'px';
+    const groupOpen = cur.tiles.find((t) => t.group && t.key === st.open) || null;
+    const tiles = cur.tiles.map((t) => ({
+      cls: 'tl' + (t.one ? ' one' : '') + (t.group ? ' grp' : '') + ((t.group ? st.open === t.key : st.sel === t.key) ? ' on' : ''),
+      tip: t.group ? (t.region + ' — ' + t.name + ' · 누르면 아래에 목록이 열립니다') : (t.name + ' · ' + t.region + ' — 빠진 뒤 ' + t.pct + '% · 호스트 ' + t.hosts + '대 — 누르면 그 법인을 바로가기 선택에 켜고 끕니다'),
+      click: t.group ? () => this.setState({ open: st.open === t.key ? '' : t.key }) : () => this.setState({ sel: st.sel === t.key ? '' : t.key }),
+      left: px(t.x), top: px(t.y), width: px(t.w), height: px(t.h), bg: t.bg,
+      showName: t.showName, showLine: t.showLine, name: t.name, line: t.line, fs: t.fs + 'px', fs2: t.fs2 + 'px', risk: t.risk, riskText: t.riskText,
+    }));
+    const c = cur.counts;
+    const reads = [
+      { cls: 'rd good', big: c.full + ' / ' + c.clusters, text: '이름이 다 보이는 클러스터' },
+      { cls: 'rd' + (c.cut ? ' bad' : ' dim'), big: String(c.cut), text: '잘려 보이는 클러스터(… 또는 위아래 잘림)' },
+      { cls: 'rd' + (c.none ? ' bad' : ' dim'), big: String(c.none), text: '글이 없는 클러스터(색만)' },
+      { cls: 'rd dim', big: String(c.inGroup), text: '묶음 안 — 목록에서 읽는 클러스터' },
+    ];
+    const compare = MODES.map(([k, label, what]) => { const r = this.layoutFor(k, regions, W, H); return {
+      cls: 'tb' + (k === st.mode ? ' cur' : ''), label, what, full: r.counts.full + ' / ' + r.counts.clusters, cut: String(r.counts.cut), none: String(r.counts.none), inGroup: String(r.counts.inGroup), minFs: r.minFs + 'px',
+    }; });
+    const modeRow = MODES.find((m) => m[0] === st.mode);
+    return {
+      modes: MODES.map(([k, label]) => ({ label, on: st.mode === k, cls: (st.mode === k ? 'on' : '') + (k === 'rec' ? ' rec' : ''), pick: () => this.setState({ mode: k, open: '', sel: '' }) })),
+      datas: [['mock', '목 서버 규모 · 25개'], ['big', '큰 환경 · 39개'], ['huge', '아주 큰 환경 · 80개']].map(([k, label]) => ({ label, on: st.data === k, cls: st.data === k ? 'on' : '', pick: () => this.setState({ data: k, open: '', sel: '' }) })),
+      heights: [[520, '크게 520'], [760, '아주 크게 760'], [1200, '최대 1,200']].map(([k, label]) => ({ label, on: st.h === k, cls: st.h === k ? 'on' : '', pick: () => this.setState({ h: k, open: '' }) })),
+      modeTitle: modeRow[1] + ' — ' + modeRow[2],
+      modeNote: '칸 ' + cur.tiles.length + '개 · 클러스터 ' + c.clusters + '개',
+      hText: H.toLocaleString('en-US') + 'px', hPx: H + 'px',
+      cols: cur.cols.map((g) => ({ left: px(g.left), width: px(g.width), text: g.text })),
+      tiles, hasGroup: cur.tiles.some((t) => t.group),
+      readHint: modeRow[1] + ' · 클러스터 ' + c.clusters + '개 · 지도 높이 ' + H.toLocaleString('en-US') + 'px',
+      reads, compare,
+      listOpen: !!groupOpen, listTitle: groupOpen ? (groupOpen.region + ' — ' + groupOpen.name) : '', closeList: () => this.setState({ open: '' }),
+      listRows: groupOpen ? groupOpen.members.map((m) => ({ name: m.name, pct: m.pct + '%', hosts: m.size + '대', fail: m.fail, w: Math.min(100, m.pct) + '%', bg: m.pct >= 90 ? '#ef4444' : m.pct >= 75 ? '#3987e5' : m.pct >= 50 ? '#256abf' : '#184f95' })) : [],
+    };
+  }
+}
+</script>
+</body>
+</html>

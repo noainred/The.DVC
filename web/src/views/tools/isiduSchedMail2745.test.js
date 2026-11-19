@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import {
   blankTarget, formFromTarget, targetBody, mailStateText, targetMailLine,
   MAIL_WHEN_CHOICES, mailDaysOf, isMailTime, mailDaysText, mailScheduleText, nextMailSlots, mailSlotShort,
-  mailScheduleIssue, firstMailScheduleIssue, mailWhenPreview, TARGET_MAIL_CODE_TEXT,
+  mailScheduleIssue, firstMailScheduleIssue, mailWhenPreview, TARGET_MAIL_CODE_TEXT, MAIL_UNREAD_PARTS, mailStateUnreadNote,
 } from './isiduText.js';
 import { nextSlots as digestNextSlots, slotShort as digestSlotShort, daysLabel as digestDaysLabel, scheduleText as digestScheduleText } from './isiduDigestText.js';
 import { BULK_FIELD_KEYS, blankBulk, bulkPatchFrom, patchSummary } from './isiduBulkText.js';
@@ -134,6 +134,36 @@ describe('④ 마지막 메일 기록의 code — 서버 TARGET_MAIL_CODES 와 1
     for (const x of src.matchAll(/\?\s*'(missed-[a-z]+)'\s*:\s*'(missed-[a-z]+)'/g)) { codes.add(x[1]); codes.add(x[2]); }
     expect(codes.size).toBeGreaterThan(3);
     for (const c of codes) expect(M.TARGET_MAIL_CODES, c).toContain(c);
+  });
+  it('메일 기록을 못 읽는 동안의 상태(state-unreadable · 124회차) — 주의 톤 · 서버 사유 그대로 · 회차 · 시각을 붙이지 않는다', () => {
+    const last = { at: NOW, kind: 'result', state: 'skipped', code: 'state-unreadable', readError: true, reason: '메일 기록 파일(isidu-mail-state.json)을 읽지 못해 자동 발송을 멈췄습니다 — 읽기 오류(EIO)' };
+    const v = mailStateText(last, NOW, OFF);
+    expect(v.tone).toBe('warn');
+    expect(v.text).toBe(last.reason);                       // '방금 보내지 않음 —' 을 앞에 붙이지 않는다(지금 상태지 회차 기록이 아니다)
+    expect(mailStateText({ ...last, reason: '' }, NOW, OFF).text).toBe(TARGET_MAIL_CODE_TEXT['state-unreadable']);   // 사유가 없을 때만 화면 문구
+    expect(TARGET_MAIL_CODE_TEXT['state-unreadable']).not.toMatch(/`/);
+  });
+  it('표 칸(parts)에는 짧게 · 전체 사유는 한 줄 문장(text)과 표 위 안내가 말한다(Chromium 검증 — 좁은 칸에 긴 사유가 12줄로 쌓였다)', () => {
+    const reason = '메일 기록 파일(isidu-mail-state.json)을 읽지 못해 자동 발송을 멈췄습니다 — 읽기 오류(EISDIR)이고 원본은 그대로 있습니다(30초마다 다시 읽고, 읽히면 이어 갑니다).';
+    const lastMail = { at: NOW, kind: 'result', state: 'skipped', code: 'state-unreadable', readError: true, reason };
+    const t = { mail: { recipients: 1, when: 'each' }, lastMail };
+    const ml = targetMailLine(t, NOW, OFF);
+    expect(ml.tone).toBe('warn');
+    expect(ml.parts.slice(-MAIL_UNREAD_PARTS.length)).toEqual([...MAIL_UNREAD_PARTS]);
+    expect(ml.parts.join(' ')).not.toContain('EISDIR');            // 칸에는 긴 사유를 넣지 않는다
+    for (const p of MAIL_UNREAD_PARTS) expect(p.length).toBeLessThanOrEqual('아직 보낸 적 없음'.length + 2);   // 한 줄이 평소 문구보다 길지 않게(오른쪽 경계에서 잘린다)
+    expect(ml.text).toContain(reason);                              // 대상 상세의 한 줄에는 전체 사유
+    // 받는 사람이 없는 대상도 같다
+    const none = targetMailLine({ mail: { recipients: 0 }, lastMail }, NOW, OFF);
+    expect(none.parts.slice(-MAIL_UNREAD_PARTS.length)).toEqual([...MAIL_UNREAD_PARTS]);
+    expect(none.text).toContain(reason);
+    // 표 위 안내 — 한 번만(첫 대상의 사유) · 없으면 ''
+    expect(mailStateUnreadNote([{ lastMail: null }, t, t])).toBe(reason);
+    expect(mailStateUnreadNote([{ lastMail: { state: 'sent', at: NOW } }])).toBe('');
+    expect(mailStateUnreadNote(null)).toBe('');
+    // 평소 기록은 그대로(마지막 — …)
+    const sent = targetMailLine({ mail: { recipients: 2, when: 'each' }, lastMail: { at: NOW, state: 'sent', kind: 'result', accepted: 2 } }, NOW, OFF);
+    expect(sent.parts[sent.parts.length - 1]).toMatch(/^마지막 — /);
   });
   it('정기 회차 기록 한 줄 — 회차·사유를 말하고, 놓친 회차는 주의 · DB 실패는 실패', () => {
     const slot = Date.UTC(2026, 9, 19, 23, 0);   // 10/20(화) 08:00 KST

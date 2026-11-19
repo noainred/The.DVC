@@ -14,7 +14,14 @@ import zlib from 'node:zlib';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2768a-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const DIR = tmpDir('audit2768a-');
 process.env.CONFIG_DIR = DIR;
 process.env.DATA_SOURCE = 'mock';
 process.env.AUTH_ENABLED = 'false';
@@ -70,7 +77,7 @@ test('C5-02 — 복원은 예약만 하고, 재시작 전 캐시 모듈의 저�
 });
 
 test('C5-02 — 예약 적용은 config.js 보다 먼저 돈다(db-location.json 을 모듈 평가 때 읽는 실제 소비자)', () => {
-  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2768a-cfg-'));
+  const d = tmpDir('audit2768a-cfg-');
   try {
     const dbDir = path.join(d, 'db-restored');
     fs.mkdirSync(dbDir);
@@ -98,8 +105,11 @@ test('C5-02 — index.js: logbuffer 다음 두 번째 import 가 예약 적용 �
   assert.match(lines[1], /^import '\.\/backup\/stagedRestoreBoot\.js';/);
   const importsOf = (rel) => [...fs.readFileSync(path.join(SRC, rel), 'utf8').matchAll(/^import\s[^;]*?from\s+'([^']+)'|^import\s+'([^']+)'/gm)].map((x) => x[1] || x[2]);
   assert.deepEqual(importsOf('backup/stagedRestoreBoot.js'), ['./stagedRestore.js']);
-  assert.deepEqual(importsOf('backup/stagedRestore.js').filter((s) => !s.startsWith('node:')), ['../util/atomicWrite.js']);
+  // v3.9.0(SSH 공용 접속 반증 D5): 적용 시점 SSH 키 저장소 다시 합치기 — keyBundle.js 도 무의존 leaf 여야 한다(아래에서 고정).
+  // 114회차: 판정 코어 둘(rma/signing.js · bareos/groupRetention.js)을 더 싣는다 — 둘 다 config 를 싣지 않는 leaf 임은 restoreSweep114 가 고정한다.
+  assert.deepEqual(importsOf('backup/stagedRestore.js').filter((s) => !s.startsWith('node:')), ['../util/atomicWrite.js', '../bmusage/onboard/keyBundle.js', '../rma/signing.js', '../bareos/groupRetention.js']);
   assert.deepEqual(importsOf('util/atomicWrite.js').filter((s) => !s.startsWith('node:')), []);
+  assert.deepEqual(importsOf('bmusage/onboard/keyBundle.js').filter((s) => !s.startsWith('node:')), []);
   assert.deepEqual(importsOf('logbuffer.js'), ['./util/capStr.js']);
   assert.deepEqual(importsOf('util/capStr.js').filter((s) => !s.startsWith('node:')), []);
   // CONFIG_DIR 판정은 config.js 와 같다
@@ -129,7 +139,7 @@ test('C5-02 — session-state.json 은 복원하지 않고(사유를 결과에) 
 });
 
 test('C5-02 — 중단 흔적이 있으면 다시 적용하지 않고 · 손상 예약은 원문 없이 옆으로 치운다 · 취소', () => {
-  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2768a-int-'));
+  const d = tmpDir('audit2768a-int-');
   try {
     const bdir = path.join(d, 'backups'); fs.mkdirSync(bdir);
     fs.writeFileSync(path.join(bdir, SR.APPLYING_NAME), '{}');

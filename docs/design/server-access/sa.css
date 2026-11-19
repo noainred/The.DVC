@@ -1,0 +1,38 @@
+/* 서버 접속 공용 모듈 시안 공용 조각 — 색 · 글자는 포탈 토큰(web/src/styles.css :root) 그대로 */
+.pg{box-sizing:border-box;background:#0a0e17;color:#e6edf6;font-family:'Inter','Apple SD Gothic Neo','Noto Sans KR',sans-serif;font-size:13px;line-height:1.55}
+.pg h1{margin:2px 0 0;font-size:22px;font-weight:700;line-height:1.3}
+.pg h2{margin:0;font-size:15px;font-weight:700}
+.pg p{margin:0}
+.crumb{font-size:12px;color:#8b9bb4}
+.dim{color:#8b9bb4}
+.soft{color:#c7d2e4}
+.mono{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px}
+.card{box-sizing:border-box;min-width:0;background:#141b2d;border:1px solid #243049;border-radius:12px;padding:14px 16px}
+.card.hi{border-color:#3b82f6;box-shadow:0 0 0 1px #3b82f6 inset}
+.sec{display:flex;flex-direction:column;gap:8px;min-width:0}
+.tw{overflow-x:auto;border:1px solid #243049;border-radius:12px;background:#141b2d}
+.t{width:100%;border-collapse:collapse;font-size:12.5px}
+.t th{text-align:left;font-weight:600;color:#aebbd0;background:#0f1626;padding:8px 12px;border-bottom:1px solid #243049;white-space:nowrap}
+.t td{padding:9px 12px;border-bottom:1px solid #1f2a40;vertical-align:top}
+.t tr:last-child td{border-bottom:0}
+.t td.k{font-weight:600;white-space:nowrap}
+.t td.rec{background:#12233f}
+.t th.rec{background:#16305a;color:#e6edf6}
+.chip{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11.5px;font-weight:600;white-space:nowrap;border:1px solid transparent;line-height:1.6}
+.c-ok{color:#6ee7b7;background:#0f2a22;border-color:#1f5a47}
+.c-new{color:#93c5fd;background:#12233f;border-color:#274b84}
+.c-part{color:#fcd34d;background:#2a2210;border-color:#5c4a17}
+.c-no{color:#fca5a5;background:#2c1517;border-color:#6b2a2e}
+.c-mut{color:#c7d2e4;background:#1a2236;border-color:#243049}
+.btn{font:inherit;font-size:12.5px;padding:6px 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;cursor:pointer;min-height:32px}
+.btn.p{background:#3b82f6;border-color:#3b82f6;color:#ffffff;font-weight:600}
+.btn.d{border-color:#6b2a2e;color:#fca5a5}
+.inp{box-sizing:border-box;width:100%;font:inherit;font-size:12.5px;padding:7px 10px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;min-height:34px}
+.lbl{display:block;font-size:12px;color:#aebbd0;margin-bottom:4px}
+.note{padding:10px 14px;border-radius:8px;border:1px solid #243049;background:#111726;font-size:12.5px;line-height:1.6}
+.note.w{border-color:#5c4a17;background:#1d1a10}
+.num{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:#12233f;border:1px solid #274b84;color:#93c5fd;font-size:12px;font-weight:700;flex:none}
+.ul{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:#c7d2e4}
+.ul li{display:flex;align-items:flex-start;gap:8px}
+.ul li i{width:6px;height:6px;border-radius:50%;flex:none;margin-top:7px;background:#3b82f6;display:inline-block}
+.code{margin:0;padding:12px 14px;border-radius:10px;border:1px solid #243049;background:#0f1626;color:#c7d2e4;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px;line-height:1.6;overflow-x:auto;white-space:pre}

@@ -85,7 +85,8 @@ test('C-03 날짜 경계 — dayKey 코어를 쓰고, 기본 오프셋(540)에�
   const mv = vc.analyzeMoves(rows, { days: 7, now });
   const today = Math.floor((now + KST) / DAY);
   const expectSeries = [];
-  for (let d = today - 6; d <= today; d++) expectSeries.push(d * DAY - KST);
+  // 결정(56~75 남긴 것) 69 ① — 기대값 갱신: 막대는 since(now − 7일)가 걸친 날(today − 7)부터다(예전 today − 6 — 첫날 이벤트가 막대에 없었다).
+  for (let d = today - 7; d <= today; d++) expectSeries.push(d * DAY - KST);
   assert.deepEqual(mv.series.map((s) => s.day), expectSeries, '예전 `Math.floor((ts + 9h)/DAY)` · `d*DAY − 9h` 와 같은 값');
   assert.equal(mv.series.reduce((a, s) => a + s.moves, 0), 4);
   // vmlife — 생성·삭제 일별 칸

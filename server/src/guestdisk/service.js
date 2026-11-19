@@ -9,10 +9,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { store } from '../store.js';
 import { config, loadVcenterConfig } from '../config.js';
+import { fileMissing } from '../util/fileMissing.js';   // 134회차: '정말 없는가'(ENOENT 만 — existsSync 는 stat 실패도 false)
 import { collectDetails } from '../vcenter/vmExport.js';
 import { parseGuestDisks } from '../vcenter/soapParse.js';
 import { vmSummary, rankReclaim, usageTrend, reclaimAdvice, normUsageFactor, sanitizeGuestDiskVms, vmOwnerByPrefix } from './analyze.js';
-import { commitCollection, listLatest, vmSeries, partSeries, latestOne, coverageByVcenter, currentPartPaths, lastCollectTs, latestHoldMs, pruneOrphanVcenters } from './db.js';
+import { commitCollection, listLatest, vmSeries, partSeries, latestOne, coverageByVcenter, currentPartPaths, lastCollectTs, latestHoldMs, pruneOrphanVcenters, vmPartLatest } from './db.js';
 import { datacenterOfVcenter, listDatacenters } from '../datacenter/store.js';
 import { csvLine } from '../util/csv.js';
 import { reqTimeoutMs } from '../agent/envTimeout.js';
@@ -126,7 +127,7 @@ function knownOf(snap) {
   try {
     reg = loadVcenterConfig();
     const primary = path.join(config.configDir, 'vcenters.json');
-    if (fs.existsSync(primary) && reg.file !== primary) return { ids: null, why: 'registry-unreadable' };
+    if (!fileMissing(primary) && reg.file !== primary) return { ids: null, why: 'registry-unreadable' };   // 134회차: 확인하지 못한 것(stat 실패 — existsSync 는 false)도 '있는데 못 읽음' 이다
   } catch { return { ids: null, why: 'registry-unreadable' }; }
   const out = new Set();
   for (const v of reg?.vcenters || []) if (v && v.id != null && v.id !== '') out.add(String(v.id));
@@ -276,11 +277,17 @@ export async function vmDetail(vmId, { flatPerDayGB = 0.1, days = 0, usageFactor
   const uf = normUsageFactor(usageFactor);   // v2.482: 목록과 같은 배율로 파티션/VM 여유 계산
   const d = Number(days);
   const sinceTs = Number.isFinite(d) && d > 0 ? Date.now() - d * 86_400_000 : 0;
-  const [vs0, ps, curPaths] = await Promise.all([vmSeries(vmId, sinceTs), partSeries(vmId, sinceTs), currentPartPaths(vmId)]);
+  const [vs0, ps, curPaths, pl] = await Promise.all([vmSeries(vmId, sinceTs), partSeries(vmId, sinceTs), currentPartPaths(vmId), vmPartLatest(vmId)]);
   // v2.590 P3: diff-저장은 '안 바뀐 동안' 행이 없다 — 마지막 점 이후 최신 수집 시각까지 값이 유지됐다는 사실을 끝점으로
   // 이어 준다(추이 판정·차트가 '마지막 변화 시점에서 끊긴 선' 이 아니라 지금까지의 평탄선을 본다).
   const tail = (pts, pick) => (pts.length && latest.ts && latest.ts > pts[pts.length - 1].ts ? [...pts, { ...pick(pts[pts.length - 1]), ts: latest.ts, carried: true }] : pts);
-  const vs = tail(vs0, (p) => ({ allocGB: p.allocGB, usedGB: p.usedGB }));
+  // 68회차 F2: 최근 수집에서 여유 공간을 보고하지 않은 파티션(part_latest unknown=1)은 '그때까지 값이 그대로' 가 아니다 — 끝점을 잇지 않고
+  //   회수 판단을 하지 않는다. 예전에는 마지막으로 읽은 값을 최근 수집 시각까지 평탄선으로 이어 '축소 후보(사용량 평탄)' 로 권했다
+  //   (v2.591 R-G1 제거된 파티션과 같은 꼴 — '못 읽은 값은 0 이 아니다'). 이름 없이 개수만 온 부분 합(구버전 엣지)이면 어느 파티션인지
+  //   모르므로 이 VM 의 어느 파티션도 잇지 않는다. VM 합계도 최근 행이 부분 합이면(partial) 잇지 않는다(vm_series 에 부분 합을 넣지 않는 것과 같은 선).
+  const unknownNow = new Set(((pl && pl.vm && pl.vm.vcenterId === latest.vcenterId) ? pl.parts : []).filter((x) => x.unknown).map((x) => x.path));
+  const unnamedPartial = !!latest.partial && unknownNow.size === 0;
+  const vs = latest.partial ? vs0 : tail(vs0, (p) => ({ allocGB: p.allocGB, usedGB: p.usedGB }));
   // 파티션별로 점을 모아 추이 판정.
   const byPath = new Map();
   for (const r of ps) {
@@ -299,8 +306,13 @@ export async function vmDetail(vmId, { flatPerDayGB = 0.1, days = 0, usageFactor
       return { path: e.path, capGB: e.capGB, usedGB: e.usedGB, freeGB: null, trend, removed: true, lastSeenTs: e.points[e.points.length - 1]?.ts ?? null,
         advice: { safe: false, label: '제거됨(최근 수집에 없음) — 회수 대상 아님' } };
     }
+    if (unknownNow.has(e.path)) {
+      const trend = usageTrend(e.points, { flatPerDayGB });
+      return { path: e.path, capGB: e.capGB, usedGB: e.usedGB, freeGB: null, trend, unknownNow: true, lastSeenTs: e.points[e.points.length - 1]?.ts ?? null,
+        advice: { safe: false, label: '값 모름(최근 수집에서 여유 공간 미보고) — 회수 판단 안 함' } };
+    }
     const freeGB = Math.round(Math.max(0, e.capGB - e.usedGB * uf) * 10) / 10;
-    const trend = usageTrend(tail(e.points, (p) => ({ usedGB: p.usedGB, capGB: p.capGB })), { flatPerDayGB });
+    const trend = usageTrend(unnamedPartial ? e.points : tail(e.points, (p) => ({ usedGB: p.usedGB, capGB: p.capGB })), { flatPerDayGB });
     return { path: e.path, capGB: e.capGB, usedGB: e.usedGB, freeGB, trend, advice: reclaimAdvice(freeGB, trend.trend) };
   });
   const vmTrend = usageTrend(vs.map((p) => ({ ts: p.ts, usedGB: p.usedGB })), { flatPerDayGB });

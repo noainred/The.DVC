@@ -4,6 +4,7 @@ import {
   alarmCounts, alarmsOf, maskLicenseKey, licenseUsePct, licenseExpiryText, groupByDatacenter,
   extensionVendor, extensionsState, fleetKeyStats, esxiVersionRows, versionNewer, permEvents, gbText, inventoryCounts,
   PORTAL_ALARM_RULE_TEXT, shortTs,
+  HUB_ENTRY_TAB, entryTab, HOT_TABS, tabClass,
 } from './vcdTabs.js';
 
 describe('vCenter 탭 12개(v2.895) — 목록 · 옛 키 · 기억', () => {
@@ -191,5 +192,33 @@ describe('v2.901 정정 — 이미 수집하는 값을 화면이 수집하지 �
     expect(s).not.toMatch(/\['적용 가능 패치', <span className="badge gray" key="p">수집하지 않음/);
     expect(s).not.toMatch(/패치 · vLCM 준수 상태는 수집하지 않습니다/);
     expect(s).toMatch(/onGo\('updates'\)/);
+  });
+});
+
+// v2.958(사용자 요청 2026-11-10) — 허브(법인 카드 · 표)에서 들어오면 '요약' 부터 · '호스트 및 클러스터' · 'VM' 탭 강조.
+describe('허브 진입 탭 · 강조 탭(v2.958)', () => {
+  const mem = () => { const m = new Map(); return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)) }; };
+  it('entryTab — 허브 진입은 요약이고 기억값으로도 남긴다 · 진입값이 없으면 마지막 본 탭 · 모르는 값은 기억값', () => {
+    const st = mem();
+    saveTab(st, 'vms');
+    expect(entryTab(null, st)).toBe('vms');
+    expect(entryTab(HUB_ENTRY_TAB, st)).toBe('summary');
+    expect(loadTab(st)).toBe('summary');
+    expect(entryTab('nope', st)).toBe('summary');
+    expect(entryTab(undefined, null)).toBe(DEFAULT_TAB);
+  });
+  it('HOT_TABS 는 호스트 및 클러스터 · VM — 열려 있지 않을 때만 .vcd-tab-hot', () => {
+    expect([...HOT_TABS]).toEqual(['hosts', 'vms']);
+    expect(VCD_TABS.filter((t) => HOT_TABS.includes(t.k)).map((t) => t.label)).toEqual(['호스트 및 클러스터', 'VM']);
+    expect(tabClass('hosts', false)).toBe('tab vcd-tab-hot');
+    expect(tabClass('vms', false)).toBe('tab vcd-tab-hot');
+    expect(tabClass('hosts', true)).toBe('login-btn');
+    expect(tabClass('summary', false)).toBe('tab');
+  });
+  it('CSS — 펄스는 모션 줄임이면 멈춘다(정지 강조만)', async () => {
+    const fs = await import('node:fs');
+    const css = fs.readFileSync(new URL('../../styles.css', import.meta.url), 'utf8');
+    expect(css).toMatch(/\.vcd-views \.vcd-tab-hot \{[^}]*animation: vcd-tab-hot/);
+    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{ \.vcd-views \.vcd-tab-hot \{ animation: none/);
   });
 });

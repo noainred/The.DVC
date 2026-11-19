@@ -7,6 +7,7 @@
  *  - 알림: ok→bad/unknown(연속 N회, 기본 2회) 시 notify(key `rma-test:${agent}:${id}`), 복구 시 해소 알림.
  *    'rma-itself' 는 하트비트로 중앙이 판정한다(evaluateRmaItself).
  */
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
@@ -17,9 +18,9 @@ import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';
 import { openSqlite, withOpenCleanup, createLockRetry } from '../util/sqliteOpen.js';
 import { pageArgs } from '../util/pageArgs.js'; // v2.605 LEFT2605-07: 소수 limit 은 SQLite 바인드 datatype mismatch(500)
 const FILE = () => path.join(config.dbDir || config.configDir, 'rma-tests.db');
-const RETENTION_DAYS = Math.max(1, Number(process.env.RMA_TEST_HISTORY_DAYS) || 90);
+const RETENTION_DAYS = Math.max(1, envPositive(process.env.RMA_TEST_HISTORY_DAYS, 90));
 const REPEAT_LOG_MS = 60 * 60_000;
-const BAD_STREAK = Math.max(1, Number(process.env.RMA_TEST_ALERT_STREAK) || 2);
+const BAD_STREAK = Math.max(1, envPositive(process.env.RMA_TEST_ALERT_STREAK, 2));
 const PRUNE_EVERY = 50;
 const latest = new Map();
 let _db = null; let _tick = 0;

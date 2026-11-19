@@ -10,17 +10,19 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchJson, downloadFile, canCsv, hasRole, toolAllowed } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
-import { fmtNum, shortTs, loadOpts, saveOpts, scopeQuery, scopeNote, veeamStateOf } from './backupViewText.js';
+import { fmtNum, shortTs, loadOpts, saveOpts, scopeQuery, scopeNote, veeamStateOf, DETAIL_VC_KEY, openBackupDetail } from './backupViewText.js';
 import { summaryPolicyKpis, bundlesOf, okPct, hhmm, rpoLabel } from './backupSummaryText.js';
 import VeeamHeader, { visibleTabs } from './VeeamHeader.jsx';
 import BackupOptions from './BackupOptions.jsx';
+import Select from '../../components/Select.jsx';
 import BackupSummaryBar from './BackupSummaryBar.jsx';
 import BackupSummaryStale from './BackupSummaryStale.jsx';
 import BackupSummaryTree from './BackupSummaryTree.jsx';
 import BackupSummaryCapSched from './BackupSummaryCapSched.jsx';
 import BackupSummaryErrors from './BackupSummaryErrors.jsx';
+import { poolKpiText } from './bareosPolicyText.js';   // 52회차 F3
 
-export const DETAIL_VC_KEY = 'backup-detail-vc';   // 서머리에서 고른 vCenter 를 세부내용이 이어받는다(이 브라우저에만)
+export { DETAIL_VC_KEY };   // 서머리에서 고른 vCenter 를 세부내용이 이어받는다(이 브라우저에만) — v2.959: 값은 backupViewText.js(v3.19.0: 같은 키로 열던 가상화 플랫폼 KPI 카드는 걷어냈다)
 
 const TONE = { ok: '#86efac', bad: '#fca5a5', warn: '#fcd34d', info: '#93c5fd', muted: 'var(--text-dim)' };
 const CHIP = { bad: { color: '#fca5a5', background: 'rgba(239,68,68,.14)' }, warn: { color: '#fcd34d', background: 'rgba(245,158,11,.14)' }, info: { color: '#93c5fd', background: 'rgba(59,130,246,.14)' }, muted: { color: 'var(--text-dim)', background: 'var(--panel-deep)' } };
@@ -45,10 +47,7 @@ function Stat({ label, value, extra, tone, title }) {
 const Chip = ({ tone = 'muted', children, title }) => <span title={title} style={{ ...CHIP[tone], padding: '2px 9px', borderRadius: 999, fontSize: 11.5, fontWeight: 700, whiteSpace: 'nowrap' }}>{children}</span>;
 const pctText = (x) => (x == null ? '—' : `${x}%`);
 
-export function openDetail(vcId) {
-  try { localStorage.setItem(DETAIL_VC_KEY, vcId); } catch { /* 저장 못 해도 세부내용은 첫 vCenter 로 열린다 */ }
-  window.location.hash = '#/tools/backup-detail';
-}
+export function openDetail(vcId) { openBackupDetail(vcId); }
 
 export default function BackupSummaryTool() {
   const [data, setData] = useState(null);
@@ -58,22 +57,24 @@ export default function BackupSummaryTool() {
   const [csvErr, setCsvErr] = useState(null);
   // v2.837 선택 — 트리 표 · 찾기 결과가 함께 쓴다(시안 '선택은 한 법인 안에서만' — 다른 법인 칸은 화면이 막는다)
   const [sel, setSel] = useState(() => ({ vc: null, ids: new Set() }));
+  // v3.10.17 리전(화면 Select — v3.19.0: 허브 KPI 카드 인계는 걷어냈다) — 숫자 줄 · 두 카드 · 트리 · CSV · 찾기 · 일정 · 에러가 모두 같은 ?region= 으로 센다. 기억하지 않는다(다음에 열면 전체).
+  const [region, setRegion] = useState('');
   const gen = useRef(0);
   // 전원·제외는 서버가 센다(같은 backupRow — 세부내용과 같은 수) · 바꾸면 그 조건으로 다시 읽는다. RPO 기준은 같은 응답에서 고른다.
   const load = useCallback(() => {
     const my = ++gen.current;
     setLoading(true); setError(null);
-    fetchJson('/tools/backup-summary', scopeQuery(opts))
+    fetchJson('/tools/backup-summary', { ...scopeQuery(opts), ...(region ? { region } : {}) })
       .then((r) => { if (my === gen.current) setData(r); })
       .catch((e) => { if (my === gen.current) setError(e); })
       .finally(() => { if (my === gen.current) setLoading(false); });
-  }, [opts.power, opts.excl]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [opts.power, opts.excl, region]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { load(); return () => { gen.current++; }; }, [load]);
   const changeOpts = useCallback((o) => { setOpts(o); saveOpts(o); }, []);
   const csv = useCallback(async () => {
     setCsvErr(null);
-    try { await downloadFile(`/tools/backup-summary.csv?${new URLSearchParams(scopeQuery(opts))}`); } catch (e) { setCsvErr(e); }
-  }, [opts]);
+    try { await downloadFile(`/tools/backup-summary.csv?${new URLSearchParams({ ...scopeQuery(opts), ...(region ? { region } : {}) })}`); } catch (e) { setCsvErr(e); }
+  }, [opts, region]);
   // 선택 바꾸기 — vc 가 다르면 무시(화면이 막지만 한 번 더) · 다 풀리면 법인도 풀린다
   const pick = useCallback((vc, ids, on) => setSel((cur) => {
     if (cur.vc && cur.vc !== vc && cur.ids.size) return cur;
@@ -99,24 +100,34 @@ export default function BackupSummaryTool() {
   const linked = rows.filter((r) => r.veeamState !== 'unlinked').length;
   const veeamAuth = sum('veeamAuth');
   const bareosAllUnknown = rows.length > 0 && rows.every((r) => r.bareosUnknown);
-  const bareosHref = (visibleTabs({ admin: hasRole('admin'), bareosOk: toolAllowed('bareos-backup'), bareosViewOk: toolAllowed('bareos-summary') }).find(([k]) => k === 'bareos') || [])[2];
+  const bareosHref = (visibleTabs({ admin: hasRole('admin'), bareosOk: toolAllowed('bareos-backup'), bareosViewOk: toolAllowed('bareos-summary'), bareosDetailOk: toolAllowed('bareos-detail') }).find(([k]) => k === 'bareos') || [])[2];
   const g = data.bareosGroups;
   const bp = data.bareosPolicy || null;   // v2.839 Director 정책 수집본 요약(범위 안 · 없으면 null — 수집 전)
   const bNext = [g?.next, bp?.next].filter((x) => Number.isFinite(x)).reduce((a, b) => (a == null || b < a ? b : a), null);
   const dirs = data.directors;
-  const scope = { power: opts.power, excl: opts.excl };
+  const scope = { power: opts.power, excl: opts.excl, region };   // region: 찾기(stale) 요청에도 실린다(backupSummaryText.staleQuery)
+  const regionsKnown = Array.isArray(data.regions) ? data.regions : [];
+  const regions = region && !regionsKnown.includes(region) ? [...regionsKnown, region] : regionsKnown;   // 모르는 리전(법인 0)도 고른 값은 보여 준다
+  const pickRegion = (r) => { setRegion(r); clearSel(); };   // 선택은 한 법인 안 — 리전이 바뀌면 푼다
   const link = { marginLeft: 'auto', fontSize: 12, fontWeight: 700, color: '#93c5fd', textDecoration: 'none', whiteSpace: 'nowrap' };
   const partial = rows.filter((r) => r.veeamState && r.veeamState !== 'ok' && r.veeamState !== 'unlinked');
 
   return (
     <div data-backup-summary="" style={{ display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 }}>
-      <VeeamHeader active="summary" desc={`${fmtNum(t.vcenters)}개 법인 · Veeam + Bareos 를 한 기준으로 — 보호 대상 · RPO 충족 · 용량 · 일정 · 에러`}
+      <VeeamHeader active="summary" desc={`${fmtNum(t.vcenters)}개 법인${region ? ` · 리전 ${region}` : ''} · Veeam + Bareos 를 한 기준으로 — 보호 대상 · RPO 충족 · 용량 · 일정 · 에러`}
         actions={<>
           <span className="muted" style={{ fontSize: 12, alignSelf: 'center' }}>기준 {shortTs(data.at)}{error ? ' · 최근 새로고침 실패 — 이전 값' : ''}</span>
           <button type="button" className="tab" disabled={loading} onClick={load} style={{ padding: '6px 14px' }}>{loading ? '읽는 중…' : '새로고침'}</button>
           {canCsv() && <button type="button" className="tab" onClick={csv} style={{ padding: '6px 14px' }}>CSV</button>}
         </>} />
       <div className="flex gap wrap" style={{ alignItems: 'center', rowGap: 6 }}>
+        {(regions.length > 1 || region) && (
+          <Select className="input" value={region} onChange={(e) => pickRegion(e.target.value)} disabled={loading} aria-label="리전" data-backup-region="" style={{ padding: '6px 10px', fontSize: 12.5 }}
+            title="리전을 고르면 그 리전 법인만 셉니다 — 숫자 줄 · 두 카드 · 트리 · CSV · 백업 안 된 VM 찾기 · 용량과 일정 · 에러 로그(가상화 플랫폼에서 리전을 고른 채 백업 카드를 누르면 그 리전으로 열립니다)">
+            <option value="">전체 리전</option>
+            {regions.map((r) => <option key={r} value={r}>{r}{regionsKnown.includes(r) ? '' : '(법인 없음)'}</option>)}
+          </Select>
+        )}
         <BackupOptions opts={opts} onChange={changeOpts} disabled={loading} />
         {note && <span className="muted" style={{ fontSize: 12, overflowWrap: 'anywhere', minWidth: 0 }}>{note}</span>}
       </div>
@@ -141,17 +152,18 @@ export default function BackupSummaryTool() {
             <span style={{ padding: '2px 10px', borderRadius: 999, fontSize: 12, fontWeight: 800, color: '#93c5fd', background: 'rgba(59,130,246,.18)' }}>Veeam</span>
             <b style={{ fontSize: 13 }}>B&amp;R 서버 {fmtNum(sum('veeamServers'))} · EM {em ? fmtNum(em.ems) : '—'} · 잡 {em?.jobs != null ? fmtNum(em.jobs) : '—'}</b>
             <span className="muted" style={{ fontSize: 11.5 }}>연동 법인 {fmtNum(linked)}/{fmtNum(rows.length)}</span>
+            {data.emFleetWide && <span className="muted" style={{ fontSize: 11.5 }} data-em-fleet="" title="EM(Enterprise Manager)은 여러 B&R 서버를 묶어 읽어 리전으로 나눌 수 없습니다 — EM 수 · 잡 · 저장소 사용 · 라이선스 · 30일 추이는 전 법인 값입니다(B&R 서버 수 · 보호 VM · 7일 성공률 · 다음 창은 이 리전 값)">· EM · 저장소 · 라이선스는 전 법인 기준</span>}   {/* v3.10.21 */}
             <a href="#/tools/backup-em" style={link}>Veeam 메뉴 →</a>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 8 }}>
             <Stat label="보호 VM" value={fmtNum(pa?.act?.v)} />
             <Stat label="7일 성공률" value={pctText(okPct(pa?.v7))} tone="ok" title="최근 7일에 끝난 VM 마지막 결과 중 성공·경고 비율(B&R 결과 기준 — 잡 세션 수가 아니다)" />
-            <Stat label="저장소 사용" value={em?.repo ? `${em.repo.usedPct}%` : '—'} extra={em?.repo?.overN ? `${em.repo.overN}곳 90% 넘음` : ''} title={em ? 'EM 이 읽은 저장소 용량 합' : 'EM 자료는 전체 범위 계정만 봅니다'} />
+            <Stat label="저장소 사용" value={em?.repo ? `${em.repo.usedPct}%` : '—'} extra={[em?.repo?.overN ? `${em.repo.overN}곳 90% 넘음` : '', em?.repo?.unknown ? `용량 모름 ${em.repo.unknown}곳 빼고` : ''].filter(Boolean).join(' · ')} title={em ? 'EM 이 읽은 저장소 용량 합' : 'EM 자료는 전체 범위 계정만 봅니다'} />
             <Stat label="다음 창" value={pa?.vnx ? hhmm(pa.vnx) : '—'} extra={pa?.vnx ? `VM ${fmtNum(pa.vnxN)}` : ''} title="Veeam 잡의 다음 실행 중 가장 이른 시각 · 그 뒤 1시간 안에 도는 VM 수" />
           </div>
           <div className="flex wrap" style={{ gap: 6 }}>
             {(veeamAuth > 0 || em?.auth?.length > 0) && <Chip tone="bad" title="인증 실패로 주기 수집을 멈춘 서버(자동 재시도 없음 — 설정에서 계정을 고치세요)">인증 실패 {fmtNum(veeamAuth + (em?.auth?.length || 0))}{em?.auth?.length ? ` (${em.auth.slice(0, 2).join(' · ')})` : ''}</Chip>}
-            {em?.lic && <Chip tone={em.lic.pct >= 90 ? 'warn' : 'muted'}>라이선스 {em.lic.pct}% 사용</Chip>}
+            {em?.lic && <Chip tone={em.lic.pct >= 90 ? 'warn' : 'muted'}>라이선스 {em.lic.pct}% 사용{em.lic.unknown ? ` (모름 ${em.lic.unknown}대 빼고)` : ''}</Chip>}
             {sum('veeamFailed') > 0 && <Chip tone="bad">읽기 실패 서버 {fmtNum(sum('veeamFailed'))}</Chip>}
             {partial.length > 0 && <Chip tone="warn" title={partial.map((r) => `${r.name}(${veeamStateOf(r.veeamState).text})`).join(' · ')}>일부만 읽은 법인 {partial.length}</Chip>}
           </div>
@@ -166,7 +178,7 @@ export default function BackupSummaryTool() {
             <Stat label="보호 VM" value={bareosAllUnknown ? '—' : `${fmtNum(pa?.act?.b)}${t.bareosUnknownSites ? '*' : ''}`} />
             <Stat label="7일 성공률" value={pctText(okPct(pa?.b7))} tone="ok" title="최근 7일에 끝난 VM 마지막 실행 중 성공·경고 비율(포탈 원장 기준)" />
             <Stat label="풀 사용(볼륨)" value={bp?.pools?.maxPct != null ? `${bp.pools.maxPct}%` : '—'} tone={bp?.pools?.full ? 'bad' : undefined}
-              extra={bp?.pools ? `가득 참 ${fmtNum(bp.pools.full)} · 오류 볼륨 ${fmtNum(bp.pools.errorVols)}` : bp ? '풀 수집 실패' : '수집 전'}
+              extra={bp?.pools ? poolKpiText(bp.pools, fmtNum) : bp ? '풀 수집 실패' : '수집 전'}
               title="Director 정책 수집본(하루 1회) — 가장 높은 풀 사용률(MaxVols × MaxVolBytes 를 알 때만) · 새 잡을 받을 볼륨이 없는 풀(가득 참) · 오류 상태 볼륨 — Bareos › 정책 · 일정" />
             <Stat label="다음 회차" value={bNext ? hhmm(bNext) : '—'} extra={bNext ? `그룹 ${g?.next ? fmtNum(g.nextN) : 0} · 스케줄 ${bp?.schedules == null ? '—' : fmtNum(bp.schedules)}` : ''}
               title="포탈 그룹 예약의 다음 회차와 Director 스케줄(정책 수집본)의 다음 실행 중 이른 것 · 그룹 수(1시간 안) · Director 스케줄 수" />
@@ -175,7 +187,8 @@ export default function BackupSummaryTool() {
             {t.stuck == null ? <Chip tone="muted" title="Bareos › 진행 현황 화면이 열려 최근 조회한 값이 있을 때만 셉니다">멈춤 의심 —</Chip> : <Chip tone={t.stuck ? 'warn' : 'muted'}>멈춤 의심 {fmtNum(t.stuck)}</Chip>}
             <Chip tone={pa?.mmBy?.bareos || pa?.bmis ? 'warn' : 'muted'} title="미등록 = 정책 Bareos 인데 잡 없음 · 방식 불일치 = Bareos 잡이 있는데 정책이 Bareos 가 아님">미등록 {fmtNum(pa?.mmBy?.bareos)} · 방식 불일치 {fmtNum(pa?.bmis)}</Chip>
             {dirs && <Chip tone={dirs.failed ? 'bad' : 'muted'}>Director 조회 실패 {fmtNum(dirs.failed)}</Chip>}
-            {t.bareosUnknownSites > 0 && <Chip tone="bad">원장 못 읽은 법인 {fmtNum(t.bareosUnknownSites)}</Chip>}
+            {t.bareosUnknownSites - (t.bareosDirFailSites || 0) > 0 && <Chip tone="bad">원장 못 읽은 법인 {fmtNum(t.bareosUnknownSites - (t.bareosDirFailSites || 0))}</Chip>}
+            {t.bareosDirFailSites > 0 && <Chip tone="bad">Director 조회 실패 법인 {fmtNum(t.bareosDirFailSites)} — 결과 모름</Chip>}
           </div>
         </section>
       </div>
@@ -183,8 +196,8 @@ export default function BackupSummaryTool() {
       <BackupSummaryBar sel={sel} rows={rows} onClear={clearSel} onSaved={load} />
       <BackupSummaryStale scope={scope} rows={rows} sel={sel} onPick={pick} onOpenDetail={openDetail} />
       <BackupSummaryTree rows={rows} opts={opts} reloadKey={data.at} onOpenDetail={openDetail} sel={sel} onPick={pick} />
-      <BackupSummaryCapSched rows={rows} em={em} bp={bp} reloadKey={data.at} />
-      <BackupSummaryErrors reloadKey={data.at} onOpenDetail={openDetail} />
+      <BackupSummaryCapSched rows={rows} em={em} bp={bp} reloadKey={data.at} region={region} emFleetWide={!!data.emFleetWide} />
+      <BackupSummaryErrors reloadKey={data.at} onOpenDetail={openDetail} region={region} />
 
       <div className="card" data-backup-source="" style={{ padding: '10px 14px', fontSize: 11.5, lineHeight: 1.6, color: 'var(--text-dim)' }}>
         <b style={{ color: 'var(--text)' }}>값 출처</b> — 보호 대상 · 정책 · RPO: 백업 정책(Detail 에서 정한 값)과 실제 백업(Veeam 대조 · Bareos 원장)을 VM 마다 같은 판정으로 센 값 ·

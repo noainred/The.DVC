@@ -14,11 +14,12 @@
  *  · 현장에서 끄려면 엣지 portal.env `XFER_TEST_ENABLED=false` — 404 + 사유로 답해 중앙이 '엣지에서 꺼짐' 으로 말한다
  *    (구버전 엣지의 express 기본 404 HTML 과 본문으로 갈린다 — central/edgePull.js kindFor404 와 같은 판정).
  */
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import crypto from 'node:crypto';
 import { config, currentVersion } from '../config.js';
 import { waitDrain } from '../util/waitDrain.js'; // v2.783(점검 Q5): 공용 백프레셔 대기(drain·close·error 중 먼저 — 리스너 전부 뗀다)
 
-export const XFER_TEST_MAX_BYTES = Math.max(1_048_576, Number(process.env.XFER_TEST_MAX_BYTES) || 67108864);   // 기본 64MB(리터럴 — env-doc 생성기가 첫 숫자를 기본값으로 적는다)
+export const XFER_TEST_MAX_BYTES = Math.max(1_048_576, envPositive(process.env.XFER_TEST_MAX_BYTES, 67108864));   // 기본 64MB(리터럴 — env-doc 생성기가 첫 숫자를 기본값으로 적는다)
 export const XFER_TEST_MAX_CONCURRENT = 2;
 const CHUNK = 256 * 1024;
 

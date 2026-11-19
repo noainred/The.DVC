@@ -26,7 +26,14 @@ import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import ssh2 from 'ssh2';
 
-const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'rvh-remote-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const DIR = tmpDir('rvh-remote-');
 process.env.CONFIG_DIR = DIR;
 process.env.AUTH_ENABLED = 'true';
 process.env.OTP_ROLE_ENFORCE = 'false'; // operator 계정을 비밀번호 세션으로 쓰려고(OTP 등록 강제는 이 테스트의 대상이 아니다)
@@ -429,6 +436,7 @@ test('⑦-c 콘솔 입력은 서버측 유휴 활동이다(그룹 F touchSession
       gd._rdpHandleForTest(rws, new URLSearchParams({ mappingId: r.mapping.id, ticket }), auth.resolveTokenUser(tok2), tok2);
       sock.emit('connect');
       sock.emit('data', Buffer.from('4.args,13.VERSION_1_5_0,8.hostname,4.port;'));
+      sock.emit('data', Buffer.from('5.ready,5.$abcd;'));   // 48회차 F1: ready 전 프레임은 guacd 로 가지 않는다 — 활동 판정도 연결 뒤 입력으로
       const m0 = calls.length;
       rws.input('4.sync,8.12345678;');
       rws.input('4.size,4.1024,3.768,2.96;');
@@ -453,4 +461,85 @@ test('⑧ 연결이 모두 닫히면 재검증 타이머·폐기 구독이 남�
   assert.equal(gw.activeSshSessionCount(), 0);
   assert.equal(gw.sshOutputStats().perUserOpen, 0);
   assert.ok(st.closedBy.revoked >= 2 && st.closedBy['session-invalid'] >= 1, JSON.stringify(st.closedBy));
+});
+
+test('48회차 F1: guacd 핸드셰이크(ready) 전의 브라우저 프레임은 guacd 로 가지 않는다 — select · connect 주입 차단', async () => {
+  mkUser('rdp48');
+  reg.saveConfig({ guacd: { host: '127.0.0.1', port: 4822 } });
+  const tok = login('rdp48');
+  const r = reg.addMapping({ protocol: 'rdp', targetHost: '127.0.0.1', targetPort: 3389, owner: 'rdp48', vcenterId: 'vc-a' });
+  assert.equal(r.ok, true, r.reason);
+  const ticket = issueRdpTicket({ username: 'u', password: 'p' }, { owner: 'rdp48' });
+  const sock = Object.assign(new EventEmitter(), {
+    writes: [], destroyed: false,
+    write(s) { if (this.destroyed) throw new Error('destroyed'); this.writes.push(String(s)); return true; },
+    destroy() { this.destroyed = true; setImmediate(() => this.emit('close')); },
+    end() { this.destroy(); }, setTimeout() {},
+  });
+  gd._setRdpDepsForTest({ connect: () => sock });
+  try {
+    const ws = new FakeWs();
+    gd._rdpHandleForTest(ws, new URLSearchParams({ mappingId: r.mapping.id, ticket, width: '1024;7.connect', height: '99999' }), auth.resolveTokenUser(tok), tok);
+    // guacd 연결 전에 공격자가 먼저 보낸다
+    ws.input('6.select,3.ssh;');
+    ws.input('7.connect,11.192.168.7.9,2.22;');
+    sock.emit('connect');
+    assert.ok(sock.writes[0]?.startsWith('6.select,3.rdp;'), `첫 select 는 포탈의 rdp 여야 한다: ${sock.writes[0]}`);
+    assert.ok(!sock.writes.some((s) => s.includes('3.ssh') || s.includes('192.168.7.9')), 'ready 전 브라우저 프레임을 guacd 로 쓰면 안 된다');
+    sock.emit('data', Buffer.from('4.args,13.VERSION_1_5_0,8.hostname,4.port,5.width,6.height;'));
+    const connect = sock.writes.find((s) => s.startsWith('7.connect'));
+    assert.ok(connect && connect.includes('4.1024') && connect.includes('4.8192'), `크기는 정수만 · 범위 밖은 자른다(49회차 F49-3): ${connect}`);
+    sock.emit('data', Buffer.from('5.ready,5.$abcd;'));
+    ws.input('5.mouse,1.1,1.1,1.0;');
+    assert.ok(sock.writes.some((s) => s.startsWith('5.mouse')), 'ready 뒤 입력은 그대로 간다');
+    ws.close(1000, 'bye');
+  } finally { gd._setRdpDepsForTest(null); }
+});
+
+test('48회차 F2(사용자 결정): guacd.tls 면 TLS(인증서 검증)로 열고 secureConnect 뒤에 select · verifyRdpCert 면 ignore-cert=false', async () => {
+  mkUser('rdp48tls');
+  reg.saveConfig({ guacd: { host: 'guacd.corp.example', port: 4823, tls: 'true', verifyRdpCert: true } });
+  assert.equal(reg.getConfig().guacd.tls, true, "저장은 불리언으로('true' 도 켬)");
+  const tok = login('rdp48tls');
+  const r = reg.addMapping({ protocol: 'rdp', targetHost: '127.0.0.1', targetPort: 3389, owner: 'rdp48tls', vcenterId: 'vc-a' });
+  assert.equal(r.ok, true, r.reason);
+  const ticket = issueRdpTicket({ username: 'u', password: 'p' }, { owner: 'rdp48tls' });
+  const sock = Object.assign(new EventEmitter(), {
+    writes: [], destroyed: false,
+    write(s) { this.writes.push(String(s)); return true; },
+    destroy() { this.destroyed = true; setImmediate(() => this.emit('close')); },
+    end() { this.destroy(); }, setTimeout() {},
+  });
+  const calls = { net: 0, tls: [] };
+  gd._setRdpDepsForTest({ connect: () => { calls.net++; return sock; }, tlsConnect: (o) => { calls.tls.push(o); return sock; } });
+  try {
+    const ws = new FakeWs();
+    gd._rdpHandleForTest(ws, new URLSearchParams({ mappingId: r.mapping.id, ticket }), auth.resolveTokenUser(tok), tok);
+    assert.equal(calls.net, 0, 'TLS 설정이면 평문 TCP 로 열지 않는다');
+    assert.equal(calls.tls.length, 1);
+    assert.equal(calls.tls[0].rejectUnauthorized, true, '인증서 검증을 끄지 않는다(이 구간에 RDP 비밀번호가 흐른다)');
+    assert.equal(calls.tls[0].servername, 'guacd.corp.example');
+    assert.equal(calls.tls[0].port, 4823);
+    sock.emit('connect');
+    assert.equal(sock.writes.length, 0, 'TCP 연결만으로는 쓰지 않는다 — TLS 확인(secureConnect) 뒤에');
+    sock.emit('secureConnect');
+    assert.ok(sock.writes[0]?.startsWith('6.select,3.rdp;'));
+    sock.emit('data', Buffer.from('4.args,13.VERSION_1_5_0,8.hostname,11.ignore-cert;'));
+    const connect = sock.writes.find((s) => s.startsWith('7.connect'));
+    assert.ok(connect && connect.endsWith(',5.false;'), `verifyRdpCert 면 ignore-cert=false: ${connect}`);
+    ws.close(1000, 'bye');
+  } finally { gd._setRdpDepsForTest(null); reg.saveConfig({ guacd: { host: '127.0.0.1', port: 4822, tls: false, verifyRdpCert: false } }); }
+  // 기본(예전 동작): 평문 · ignore-cert=true
+  const sock2 = Object.assign(new EventEmitter(), { writes: [], write(s) { this.writes.push(String(s)); return true; }, destroy() {}, end() {}, setTimeout() {} });
+  let netCalls = 0;
+  gd._setRdpDepsForTest({ connect: () => { netCalls++; return sock2; }, tlsConnect: () => { throw new Error('평문 설정인데 TLS'); } });
+  try {
+    const ws2 = new FakeWs();
+    const t2 = issueRdpTicket({ username: 'u', password: 'p' }, { owner: 'rdp48tls' });
+    gd._rdpHandleForTest(ws2, new URLSearchParams({ mappingId: r.mapping.id, ticket: t2 }), auth.resolveTokenUser(tok), tok);
+    assert.equal(netCalls, 1);
+    sock2.emit('connect');
+    sock2.emit('data', Buffer.from('4.args,13.VERSION_1_5_0,11.ignore-cert;'));
+    assert.ok(sock2.writes.find((s) => s.startsWith('7.connect'))?.endsWith(',4.true;'), '기본은 예전처럼 ignore-cert=true');
+  } finally { gd._setRdpDepsForTest(null); }
 });

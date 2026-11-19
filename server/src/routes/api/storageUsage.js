@@ -16,7 +16,9 @@ import { renderUsageWorkbook, XLSX_MIME } from '../../storage/usageXlsx.js';
 import { acquireExport } from '../../util/exportBusy.js';
 import { localStamp } from '../../util/dayKey.js';
 import { MAIL_LIST_MAX, isEmail } from '../../isidu/mailRules.js';
-import { load as loadMailCfg } from '../../mail/settings.js';
+import { load as loadMailCfg, maskedMailList } from '../../mail/settings.js';
+import { store } from '../../store.js';
+import { isFullReadWriteScope } from '../../auth/scope.js';   // 반증 후속 ①: 수신자 주소 가림 기준(GET /admin/mail 과 같다)
 
 const adminOnly = requireRole('admin');
 const csvPerm = requirePerm('data.csv');
@@ -70,10 +72,12 @@ export function registerStorageUsage(api) {
   });
 
   /** 메일 설정·상태. 주소는 이 조회에만 싣는다(상태·기록에는 개수만). */
-  api.get('/tools/storage-usage/mail', adminOnly, fullScopeOnly, (_req, res) => {
+  api.get('/tools/storage-usage/mail', adminOnly, fullScopeOnly, (req, res) => {
     let adminTo = [];
     try { adminTo = (loadMailCfg().defaultTo || []).filter(isEmail).slice(0, MAIL_LIST_MAX); } catch { adminTo = []; }
-    res.json({ ok: true, mail: loadUsageMailSettings(), status: storageUsageMailStatus(), adminTo,
+    // 반증 후속 ①: 통합 관리자 주소는 메일 설정의 기본 받는 사람 원문이다 — 쓰기 범위만 제한된 관리자(조회 전체 — fullScopeOnly 통과)에게는 개수만.
+    const m = maskedMailList(adminTo, isFullReadWriteScope(req.user, store.get()));
+    res.json({ ok: true, mail: loadUsageMailSettings(), status: storageUsageMailStatus(), adminTo: m.list, ...(m.masked ? { adminToCount: m.count, adminToMasked: true } : {}),
       limits: { listMax: MAIL_LIST_MAX }, skipCodes: SKIP_CODES, viewPath: VIEW_PATH, rule: ACTION_RULE, attachDataWeeks: ATTACH_DATA_WEEKS });
   });
 

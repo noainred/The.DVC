@@ -3,6 +3,8 @@ import { fetchJson, putJson, postJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { blankOr } from './blankOr.js';
 import { scopeSavedText } from './scopeSaveMsg.js'; // v2.733(C5-03): 범위 계정의 전역 값 미적용(ignoredGlobal)을 말한다
+import { unreadMarkOf, unreadKind, saveLockedByUnread, shouldReseed } from './settingsUnread.js';   // 112회차: 못 읽은 동안의 기본값 폼으로 저장하지 않는다
+import { SettingsUnreadBanner } from './SettingsUnreadBanner.jsx';
 
 const PRESETS = [1, 3, 6, 12, 24];
 const when = (ts) => (ts ? new Date(ts).toLocaleString('ko-KR') : '없음');
@@ -16,12 +18,14 @@ export default function PowerOffCheckSettings() {
   const [busy, setBusy] = useState('');
   const [msg, setMsg] = useState(null);
   const inited = useRef(false);
+  const seedKind = useRef('');   // 112회차: 폼을 채운 조회의 상태 — 못 읽은 값(기본값)으로 채운 폼은 다시 읽힌 조회에서 다시 채운다
 
   const load = async () => {
     try {
       const d = await fetchJson('/tools/waste/off-check');
       setData(d);
-      if (!inited.current) { inited.current = true; setEnabled(d.settings?.enabled !== false); setHours(String(d.settings?.intervalHours ?? 6)); }
+      const le = unreadMarkOf(d);
+      if (!inited.current || shouldReseed(seedKind.current, le)) { inited.current = true; seedKind.current = unreadKind(le); setEnabled(d.settings?.enabled !== false); setHours(String(d.settings?.intervalHours ?? 6)); }
       setError(null);
     } catch (e) { setError(e.message); }
   };
@@ -31,7 +35,10 @@ export default function PowerOffCheckSettings() {
   if (!data) return <Loading />;
 
   const lim = data.limits || { minHours: 1, maxHours: 168 };
+  const unread = unreadMarkOf(data);
+  const saveLocked = saveLockedByUnread(unread);   // 112회차: 설정 파일 읽기 오류 동안 저장 잠금(서버도 503)
   const save = async () => {
+    if (saveLocked) return;
     setBusy('save'); setMsg(null);
     try {
       // v2.602(감사 LEFT2602-03): 빈 칸은 보내지 않는다 — 서버가 이전 값을 유지한다(예전 `Number(hours) || 6` 은 기본 6시간으로 저장했다).
@@ -58,6 +65,7 @@ export default function PowerOffCheckSettings() {
     <div>
       <div className="card" style={{ marginBottom: 12 }}>
         <div style={{ fontWeight: 700, marginBottom: 6 }}>전원 꺼짐 점검 주기</div>
+        <SettingsUnreadBanner le={unread} what="전원 꺼짐 점검 설정" save="저장" />
         <p className="muted" style={{ fontSize: 12.5, lineHeight: 1.6, margin: '0 0 10px' }}>
           설정한 시간마다 현재 스냅샷의 <b>전원 꺼진 VM</b> 을 기록해, 특수 기능 › Optimization › 전원 꺼짐 표의 <b>'꺼진 지 N일'</b> 에 씁니다.
           처음 꺼진 것으로 보이면 그 시각을 '현재 꺼짐 구간의 시작' 으로 남기고, 다시 켜지면 지웁니다. 실제 꺼진 시각은 직전 점검과 그 점검 사이이므로
@@ -75,7 +83,7 @@ export default function PowerOffCheckSettings() {
           <div className="flex gap" style={{ gap: 4 }}>
             {PRESETS.map((h) => <button key={h} className={Number(hours) === h ? 'login-btn' : 'tab'} style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => setHours(String(h))}>{h}시간</button>)}
           </div>
-          <button className="login-btn" disabled={busy !== ''} onClick={save}>{busy === 'save' ? '저장 중…' : '저장'}</button>
+          <button className="login-btn" disabled={busy !== '' || saveLocked} onClick={save}>{busy === 'save' ? '저장 중…' : '저장'}</button>
           <button className="tab" disabled={busy !== ''} onClick={runNow}>{busy === 'run' ? '점검 중…' : '지금 점검'}</button>
         </div>
         <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>허용 범위 {lim.minHours}~{lim.maxHours}시간. 기본 6시간.</div>

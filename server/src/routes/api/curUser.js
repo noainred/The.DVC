@@ -18,7 +18,7 @@
  */
 import { scopePollerStatus, scopeDbStatus } from '../../auth/scopeStatus.js'; // v2.583
 import { scopedVcenterIds } from '../../auth/scope.js';
-import { mergeScopedMap, filterScopedMap, denyScopedRun, keepScopedFields, ignoredGlobalFields } from '../../auth/scopeMerge.js'; // v2.605 AUTHZ2605-01 · v2.606 AUTHZ2606-05 · v2.607 AUTHZ2607-05
+import { mergeScopedMap, filterScopedMap, denyScopedRun, keepScopedFields, ignoredGlobalFields, writeMergeScope } from '../../auth/scopeMerge.js'; // v2.605 AUTHZ2605-01 · v2.606 AUTHZ2606-05 · v2.607 AUTHZ2607-05
 import { requireRole, requirePerm } from '../../auth/auth.js';
 import { logAudit } from '../../audit.js';
 import { store } from '../../store.js';
@@ -205,7 +205,8 @@ api.put('/tools/curuser/settings', requireRole('admin'), (req, res) => {
   }
   // v2.605 AUTHZ2605-01: 범위 제한 admin 이 GET 으로 받은(범위로 걸러진) vcenters 를 되돌려 보내면
   //   다른 법인의 폴더 설정이 통째로 지워졌다 — 범위 밖 키는 직전 값을 보존한다.
-  const allowed = scopedVcenterIds(req.user, snap);
+  const allowed = writeMergeScope(req);   // 전체 점검 7회차: 병합 · 전역 필드 · 지울 DB 는 쓰기 범위(응답 가림은 조회 범위 — read)
+  const read = scopedVcenterIds(req.user, snap);
   let vcIn = b.vcenters === undefined ? before.vcenters : b.vcenters;
   let ignoredOutOfScope = [];
   if (allowed && b.vcenters !== undefined) {
@@ -213,7 +214,13 @@ api.put('/tools/curuser/settings', requireRole('admin'), (req, res) => {
   }
   // v2.607 AUTHZ2607-05: 전역 필드(enabled·주기·보존일 등)는 전 법인 공용 — 범위 계정의 값은 버리고 밝힌다.
   const kg = keepScopedFields(b, before, allowed, ['vcenters']);
-  const next = saveCurUser({ ...before, ...kg.patch, vcenters: vcIn });
+  let next;
+  try { next = saveCurUser({ ...before, ...kg.patch, vcenters: vcIn }); }
+  catch (e) {
+    // 90회차 F3: 설정 파일 읽기 오류 중 저장 거절(원본이 디스크에 그대로 있다 — 기본값 위에 덮지 않는다).
+    if (e?.status === 409) return res.status(409).json({ ok: false, code: e.code || 'settings-unreadable', reason: e.message });
+    throw e;
+  }
   logAudit({
     user: req.user?.username, action: 'curuser.settings', ip: req.ip || '',
     detail: JSON.stringify({
@@ -222,7 +229,7 @@ api.put('/tools/curuser/settings', requireRole('admin'), (req, res) => {
     }).slice(0, 300),
   });
   // PUT 응답도 GET 과 같은 필터(범위 밖 vCenter 설정을 되돌려 주지 않는다).
-  const safeNext = allowed ? { ...next, vcenters: filterScopedMap(next.vcenters, allowed) } : next;
+  const safeNext = read ? { ...next, vcenters: filterScopedMap(next.vcenters, read) } : next;
   res.json({ ok: true, settings: safeNext, staleIds: staleVcKeys(safeNext.vcenters, snap), limits: LIMITS, staleAfterMs: staleAfterMs(next), ...(ignoredOutOfScope.length ? { ignoredOutOfScope: ignoredOutOfScope.length } : {}), ...ignoredGlobalFields(kg.ignoredGlobal) });
 });
 

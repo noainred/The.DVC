@@ -4,7 +4,7 @@ import { auditMiddleware } from '../../audit.js';
 import { scopedVcenterIds, writeScopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { loadVcenterConfig } from '../../config.js';
-import { loadUiSettings, saveUiSettings } from '../../ui-settings.js';
+import { loadUiSettings, saveUiSettings, uiSettingsWriteRefusal } from '../../ui-settings.js';
 import { upgradeVmTools } from '../../vcenter/soapClient.js';
 import { onDemandLogin, onDemandErrorFields } from '../../vcenter/dsBrowse.js'; // v2.743(VC-03): 주문형 vCenter 로그인 문(판정은 collectTarget·authStopGate 하나)
 import { morefOf } from '../../vcenter/registry.js'; // v2.598 VC2598-06: 콜론 포함 vCenter id 안전한 분해
@@ -20,6 +20,7 @@ import { isAdminReq, scrubHosts } from '../../auth/addressMask.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
 import { isDemoGuest } from '../../auth/demoGuest.js';
 import { vcListUnread, vcListItems, LIST_UNREAD_TEXT } from '../../corelicense/analyze.js'; // v2.742(VC-06): 라이선스 목록을 읽었는가 — 판정 한 벌
+import { TOOLS_IDS_MAX } from '../../inventory/vmToolsDist.js'; // 전체 점검 32회차 E1: 요청 VM 수 상한
 
 /** VM id → 스냅샷 VM 의 vcenterId(없으면 null). v2.598 VC2598-06 — id 를 첫 콜론에서 자르지 않는다. */
 export function upgradeVcOf(snap) {
@@ -299,6 +300,8 @@ api.get('/tools/license-expiry', requirePerm('tools'), async (req, res) => {
 api.post('/vms/upgrade-tools', requireRole('admin', 'operator'), requirePerm('tools'), auditMiddleware, async (req, res) => { // v2.478(감사 S15): 게스트 재부팅 유발 작업 감사
   let ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
   if (!ids.length) return res.status(400).json({ ok: false, reason: '대상 VM이 없습니다.' });
+  // 전체 점검 32회차 E1: 한 요청의 VM 수 상한(화면이 보내는 상한과 같다) — VM 마다 순차 SOAP 왕복이라 RTT 800ms 법인이면 수천 건이 수십 분짜리 요청이 된다.
+  if (ids.length > TOOLS_IDS_MAX) return res.status(400).json({ ok: false, reason: `한 번에 ${TOOLS_IDS_MAX}대까지 요청할 수 있습니다(${ids.length}대 요청).` });
   const snap = store.get();
   // 사용자 scope 강제(쓰기 경로) — id 는 `vcId:moref`. 범위 밖 vCenter 의 VM 에는 Tools 업그레이드를
   // 실행할 수 없다(범위 제한 계정이 타 사이트 VM 을 건드리는 것 차단).
@@ -348,5 +351,8 @@ api.post('/vms/upgrade-tools', requireRole('admin', 'operator'), requirePerm('to
 // Shared UI settings (e.g. dashboard map height) — same for all users.
 api.get('/ui-settings', (_req, res) => res.json(loadUiSettings()));
 // 전 사용자 공유 설정 쓰기 — viewer가 전역 UI 설정을 덮어쓰지 못하게 역할 제한(감사 C2 잔여).
-api.put('/ui-settings', requireRole('admin', 'operator'), (req, res) => res.json(saveUiSettings(req.body || {})));
+api.put('/ui-settings', requireRole('admin', 'operator'), (req, res) => {
+  { const no = uiSettingsWriteRefusal(); if (no) return res.status(503).json(no); }   // 107회차: 설정 파일 읽기 오류 중에는 저장하지 않는다(사유를 화면까지)
+  res.json(saveUiSettings(req.body || {}));
+});
 }

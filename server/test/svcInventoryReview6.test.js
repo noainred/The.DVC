@@ -4,14 +4,21 @@
 //   3·9 새 키 고정과 옛 키 고정이 함께 있으면 중복·충돌로 드러난다 · 4 다른 법인의 별칭 고정은 live 가 아니다(유령).
 //   5 범위 밖 pinCorp·서비스 id 가림 · 6 법인 미지정만 질의 · 8 mutatePins 바뀐 키만 · 유령 목록 상한.
 //   예약 1-b·1-d: folder.rename · folder.remove moveUp · rule/alias/namerule.update.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'svcinv-r6-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const tmp = tmpDir('svcinv-r6-');
 process.env.CONFIG_DIR = tmp;
 
 const { buildInventory } = await import('../src/servicemap/build.js');
@@ -321,7 +328,7 @@ test('예약 1-d: rule/alias/namerule.update 는 대상 서비스만 바꾼다 �
   assert.equal(d.corps.A.aliases[0].serviceId, 's2');
   assert.equal(CORP_OPS['alias.update'](d, { corp: 'A', kind: 'scan', value: 'MES', serviceId: 's2' }).status, 409, '서비스 이름과 같은 별칭은 쓰이지 않는다');
   assert.equal(CORP_OPS['alias.update'](d, { corp: 'A', kind: 'scan', value: 'erp-t', serviceId: 's2' }).status, 404, '종류가 다르면 다른 별칭');
-  assert.deepEqual(CORP_OPS['namerule.update'](d, { corp: 'A', match: 'prefix', value: 'ERP-', serviceId: 's2' }), { result: {} });
+  assert.deepEqual(CORP_OPS['namerule.update'](d, { corp: 'A', match: 'prefix', value: 'ERP-', serviceId: 's2' }), { result: { from: 's1' } }, '바꾸기 전 대상을 결과에 싣는다(7차 반증 6 — 감사)');
   assert.equal(d.corps.A.nameRules[0].serviceId, 's2');
   assert.equal(CORP_OPS['namerule.update'](d, { corp: 'A', match: 'suffix', value: 'erp-', serviceId: 's2' }).status, 404);
 });

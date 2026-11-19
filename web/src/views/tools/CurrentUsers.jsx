@@ -187,7 +187,8 @@ export function WindowsUsersPanel({ scope }) {
           <tbody>
             {vcenters.map((v) => (
               <tr key={v.vcenterId} onClick={() => { setPicked(v.vcenterId === picked ? '' : v.vcenterId); clearHist(); }} style={{ cursor: 'pointer', background: v.vcenterId === picked ? 'var(--hover)' : undefined }}>
-                <td>{v.vcenterName || v.vcenterId}</td>
+                {/* v3.13.5: 행 클릭(법인 고르기)을 키보드로도 — 이름 버튼(aria-pressed) · 행 클릭은 그대로 */}
+                <td data-sort={v.vcenterName || v.vcenterId}><button type="button" className="cell-link" aria-pressed={v.vcenterId === picked} title="이 법인을 고르기 · 다시 누르면 해제" onClick={(e) => { e.stopPropagation(); setPicked(v.vcenterId === picked ? '' : v.vcenterId); clearHist(); }}>{v.vcenterName || v.vcenterId}</button></td>
                 <td data-sort={String(v.users ?? '')}>{usersCountText(v.users, v.usersLowerBound)}</td>
                 <td data-sort={String(v.usersActive ?? '')}>{v.usersActive ?? '—'}</td>
                 <td data-sort={String(v.sessions ?? '')}>{v.sessions ?? '—'}</td>
@@ -376,7 +377,7 @@ function CombinedPanel() {
       )}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
         {/* v2.598: 읽은 출처가 하나도 없으면 서버가 null 을 준다 — '0명' 으로 채우지 않는다. */}
-        <Card label="전체 고유 사용자(합집합)" value={unionValueText(c)} meta={c?.union == null ? '읽은 출처가 없어 확인 불가' : (c?.partial ? '⚠ 일부 출처 누락 — 하한' : c?.unionLowerBound ? '⚠ 계정 목록 상한 — 하한' : 'Windows ∪ VDI')} accent="var(--accent)" />
+        <Card label="전체 고유 사용자(합집합)" value={unionValueText(c)} meta={c?.union == null ? '읽은 출처가 없어 확인 불가' : (c?.partial ? '⚠ 일부 출처 누락 — 하한' : c?.unionLowerBound ? '⚠ 일부만 읽음 — 하한' : 'Windows ∪ VDI')} accent="var(--accent)" />
         <Card label="양쪽 동시" value={c?.both == null ? '—' : `${c.both}명`} meta="Windows 서버와 VDI 에 모두 접속" />
         <Card label="Windows 서버만" value={c?.onlyWindows == null ? '—' : `${c.onlyWindows}명`} meta={SOURCE_STATE_LABEL[src.windows?.state] || ''} />
         <Card label="VDI 만" value={c?.onlyVdi == null ? '—' : `${c.onlyVdi}명`} meta={SOURCE_STATE_LABEL[src.vdi?.state] || ''} />

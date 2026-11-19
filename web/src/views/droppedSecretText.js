@@ -60,5 +60,12 @@ export function passwordDroppedLines(r) {
 export function relaySecretsDroppedText(r) {
   const list = r && Array.isArray(r.secretsDropped) ? r.secretsDropped.filter((x) => typeof x === 'string' && x) : [];
   if (!list.length) return '';
-  return `주소가 바뀌어 저장된 SSH 비밀번호·키를 폐기한 곳 ${list.length}개: ${list.join(', ')} — 다시 입력하세요`;
+  return `접속처(주소 · 경로)가 바뀌어 저장된 SSH 비밀번호·키를 폐기한 곳 ${list.length}개: ${list.join(', ')} — 다시 입력하세요`;
+}
+
+/** 66회차: 중계 토폴로지 가져오기 **미리보기**의 secretsDropped → 문장(아직 저장 전 — '폐기됩니다'). '' 이면 없음. */
+export function relaySecretsWillDropText(r) {
+  const list = r && Array.isArray(r.secretsDropped) ? r.secretsDropped.filter((x) => typeof x === 'string' && x) : [];
+  if (!list.length) return '';
+  return `저장하면 접속처(주소 · 경로)가 바뀌어 저장된 SSH 비밀번호·키가 폐기되는 곳 ${list.length}개: ${list.join(', ')} — 저장 뒤 다시 입력하세요`;
 }

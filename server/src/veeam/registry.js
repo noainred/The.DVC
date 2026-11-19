@@ -11,11 +11,10 @@
  *  - 접속처(host·port·username)가 바뀌면 저장 비밀번호를 승계하지 않는다(util/secretCarry.js). agent 변경은 승계한다(같은 서버).
  *  - 비밀번호 제어문자 거부(헤더·폼 본문 오류 문구로 값이 새지 않게 — storage v2.311 과 같은 이유).
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { makeLoadError, filterObjectElements, devicesForThisNode as coreForThisNode, devicesForAgent as coreForAgent } from '../util/registryCore.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js';
 import { ssrfBlockReason } from '../collector/registry.js';
@@ -34,25 +33,43 @@ let _db = null;
 const loadErr = makeLoadError();
 export function registryLoadError() { load(); return loadErr.get(); }
 
+// 결정(78 남긴 것 ①): parse 실패(형식 · 복호 포함 — 예전 try 블록과 같은 범위)만 손상이다.
+const parseDb = (text) => {
+  const raw = JSON.parse(text);
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('형식 오류');
+  const p = openSecretsDeep(raw);
+  return { servers: filterObjectElements(p.servers).list };
+};
+const WHAT = 'Veeam 서버 등록부(veeam-servers.json)';
 function load() {
-  if (_db) return _db;
-  try {
-    if (fs.existsSync(FILE())) {
-      const raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
-      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('형식 오류');
-      const p = openSecretsDeep(raw);
-      _db = { servers: filterObjectElements(p.servers).list };
-      return _db;
-    }
-  } catch (e) { preserveCorrupt(FILE(), e?.message); loadErr.set(e); }
+  if (_db && !loadErr.readPending()) return _db;
+  // 손상은 보존본으로 옮기고(사유 포함) 오류를 세운다(loadErr.read). 결정(78 남긴 것 ①): 읽기 오류는 원본을 그대로 두고 · 캐시하지 않고 · 쓰기를 거절한다.
+  const r = loadErr.read(FILE(), parseDb);
+  if (r.kind === 'ok') { _db = r.value; return _db; }
   loadErr.checkCorruptOnly(FILE());
   _db = { servers: [] };
   return _db;
 }
+/** 결정(78 남긴 것 ①): 읽기 오류 중의 쓰기 거절(409) 또는 null — 로드를 먼저 한다. */
+export function registryWriteRefusal() { load(); return loadErr.writeRefusal(WHAT); }
+/** 결정(78 남긴 것 ①): 거절이면 던진다(status 409) — 제자리 변경(saveServer · applyPulledServers)보다 먼저 부른다. */
+function assertWritable() { load(); loadErr.assertWritable(WHAT); }
 
-function persist() {
-  atomicWriteFileSync(FILE(), JSON.stringify(sealSecretsDeep({ version: 1, servers: load().servers }), null, 2), { mode: 0o600 });
+function persist(servers = load().servers) {
+  loadErr.assertWritable(WHAT); // 결정(78 남긴 것 ①): 마지막 방어선 — 어느 경로도 읽기 오류 중에 원본을 덮지 않는다(던진다)
+  atomicWriteFileSync(FILE(), JSON.stringify(sealSecretsDeep({ version: 1, servers }), null, 2), { mode: 0o600 });
   loadErr.clear();
+}
+/**
+ * 94회차 F1(87회차 85 E2 확정 — 재현): 새 목록을 **먼저 파일에 쓰고**, 성공했을 때만 메모리에 반영한다.
+ *   예전에는 db.servers 를 바꾼 뒤 persist 해, 쓰기 실패(ENOSPC · 봉인 정책 잠금 · EISDIR)로 던진 뒤에도 메모리만 새 값이었다 —
+ *   pull 은 서명(_lastSig)을 갱신하지 않아 다음 pull 이 같은 목록을 다시 적용하는데, 그때 이전 값이 이미 메모리에서 사라져
+ *   removed · moved 가 비었다(빠진 서버의 결과 · 인증 정지가 남고, 접속처를 고친 서버가 옛 접속처의 인증 정지로 계속 멈춤).
+ *   관리 화면 저장 · 삭제도 실패(400)를 받았는데 폴러는 새 접속처 · 비밀번호로 돌았다(재시작하면 디스크 값으로 되돌아감).
+ */
+function commit(db, next) {
+  persist(next);
+  db.servers = next;
 }
 
 const redact = ({ password, ...d }) => ({ ...d, hasPassword: !!password });
@@ -101,6 +118,7 @@ function normVcenterIds(v) {
 }
 
 export function saveServer(input = {}) {
+  assertWritable();   // 결정(78 남긴 것 ①): 제자리 변경 · '서버를 찾을 수 없습니다' 보다 먼저
   const db = load();
   const issue = serverInputIssue(input);
   if (issue) throw new Error(issue);
@@ -109,7 +127,8 @@ export function saveServer(input = {}) {
   const username = String(input.username || '').trim();
   const existing = input.id ? db.servers.find((d) => d.id === input.id) : null;
   if (input.id && !existing) throw new Error('서버를 찾을 수 없습니다.');
-  const dev = existing || { id: `vbr-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, createdAt: Date.now(), pulled: false };
+  // 94회차 F1: 사본 위에서 고친다(쓰기가 실패하면 메모리의 기존 원소는 그대로 — commit)
+  const dev = existing ? { ...existing } : { id: `vbr-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, createdAt: Date.now(), pulled: false };
   // 접속처(host·port·username)가 바뀌면 옛 비밀번호를 새 접속처로 보내지 않는다(util/secretCarry.js).
   const moved = !!existing && accessMoved({ host: existing.host, port: String(existing.port || DEFAULT_PORT), username: existing.username || '' },
     { host, port: String(port), username }, ['host', 'port', 'username']);
@@ -131,20 +150,18 @@ export function saveServer(input = {}) {
     apiVersion: String(input.apiVersion || '').trim() || DEFAULT_API_VERSION,
     enabled: input.enabled !== false, note: String(input.note || '').slice(0, 200),
   });
-  if (!existing) {
-    if (db.servers.length >= MAX_SERVERS) throw new Error(`Veeam 서버는 최대 ${MAX_SERVERS}대까지 등록할 수 있습니다.`);
-    db.servers.push(dev);
-  }
-  persist();
+  if (!existing && db.servers.length >= MAX_SERVERS) throw new Error(`Veeam 서버는 최대 ${MAX_SERVERS}대까지 등록할 수 있습니다.`);
+  commit(db, existing ? db.servers.map((d) => (d === existing ? dev : d)) : [...db.servers, dev]);
   // v2.761 B4: moved 를 돌려준다 — 호출부(관리 라우트·대량 가져오기)가 옛 접속처의 결과(lastOk)와 인증 정지를 지운다.
   return { ...redact(dev), ...(droppedSecrets.length ? { droppedSecrets } : {}), ...(moved ? { moved: true } : {}) };
 }
 
 export function deleteServer(id) {
+  assertWritable();   // 결정(78 남긴 것 ①)
   const db = load();
   const i = db.servers.findIndex((d) => d.id === id);
   if (i < 0) return false;
-  db.servers.splice(i, 1); persist();
+  commit(db, db.servers.filter((_, k) => k !== i));   // 94회차 F1: 쓰기 성공 뒤에 메모리에서 뺀다
   return true;
 }
 
@@ -178,6 +195,7 @@ export function serversForVcenter(vcenterId) {
  *   (봉인된 비밀번호 포함)가 영구히 남았다. 남기는 것은 이 노드에서 직접 등록한(pulled 아님) 남의 몫뿐이다.
  */
 export function applyPulledServers(list) {
+  assertWritable();   // 결정(78 남긴 것 ①): 읽기 오류 중에는 pull 을 적용하지 않는다(던진다 — 다음 pull 이 다시 시도)
   const db = load();
   const mine = String(config.agent.name || '').toLowerCase();
   const replaced = (d) => d.pulled === true || String(d.agent || '').toLowerCase() === mine;
@@ -192,8 +210,7 @@ export function applyPulledServers(list) {
       vcenterIds: normVcenterIds(d.vcenterIds), apiVersion: RE_API_VER.test(String(d.apiVersion || '')) ? d.apiVersion : DEFAULT_API_VERSION,
       enabled: d.enabled !== false, note: String(d.note || '').slice(0, 200), pulled: true,
     }));
-  db.servers = [...keep, ...clean];
-  persist();
+  commit(db, [...keep, ...clean]);   // 94회차 F1: 쓰기가 실패하면 던지고 메모리는 이전 목록 그대로 — 다음 pull 이 removed · moved 를 다시 계산한다
   const now = new Set(clean.map((d) => d.id));
   const moved = clean.filter((d) => {
     const p = prevById.get(d.id);

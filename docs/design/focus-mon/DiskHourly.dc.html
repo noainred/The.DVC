@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>집중 모니터링 — 디스크 시간별 평균</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#7dd3fc}a:hover{color:#bae6fd}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+.num{font-variant-numeric:tabular-nums}
+.dim{color:#8b9bb4}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.seg{display:inline-flex;flex-wrap:wrap;border:1px solid #243049;border-radius:8px;overflow:hidden;background:#0f1626}
+.seg button{height:34px;padding:0 12px;border:0;border-left:1px solid #243049;background:transparent;color:#8b9bb4;font:inherit;font-size:12.5px;cursor:pointer;white-space:nowrap}
+.seg button:first-child{border-left:0}
+.seg button.on{background:#1a2236;color:#e6edf6;font-weight:600}
+.seg.io button{padding:0 9px;font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11.5px}
+.btn{height:36px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#141b2d;color:#e6edf6;font:inherit;font-size:12.5px;cursor:pointer;white-space:nowrap;box-sizing:border-box}
+.btn[disabled]{opacity:.45;cursor:default}
+.btn.on{background:#2563eb;border-color:#2563eb;color:#fff;font-weight:600}
+.h3{margin:0;font-size:14.5px;font-weight:600}
+.lbl{font-size:12px;color:#8b9bb4;white-space:nowrap}
+.tw{overflow-x:auto}
+.hm{display:grid;grid-template-columns:150px repeat(24,minmax(38px,1fr)) 64px 96px;column-gap:2px;align-items:center;padding:0 16px;min-width:1300px;box-sizing:border-box}
+.hm.ds{height:22px;font-size:11.5px;color:#8b9bb4}
+.hm.ds span{border-left:1px solid #33425f;padding-left:6px;white-space:nowrap;overflow:hidden}
+.hm.hd{height:34px;font-size:11.5px;color:#8b9bb4;background:#0f1626;border-top:1px solid #1f2a40;border-bottom:1px solid #1f2a40}
+.hm.rw{height:30px;border-bottom:1px solid #1a2236}
+.hm.rw.sel{background:rgba(59,130,246,.10)}
+.hm.rw.sum{background:#0f1626}
+.hh{height:28px;width:100%;padding:0;border:0;border-radius:6px;background:transparent;color:#8b9bb4;font:inherit;font-size:11.5px;cursor:pointer}
+.hh:hover{background:#1a2236;color:#e6edf6}
+.hh.on{background:#2563eb;color:#fff;font-weight:600}
+.dvb{display:flex;align-items:baseline;gap:6px;height:28px;width:100%;padding:0 6px;border:0;border-radius:6px;background:transparent;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;text-align:left;white-space:nowrap;overflow:hidden;box-sizing:border-box}
+.dvb:hover{background:#1a2236}
+.dvb small{font-size:11px;font-weight:400;color:#8b9bb4}
+.hc{display:flex;align-items:center;justify-content:flex-end;height:26px;padding:0 4px;border-radius:4px;font-size:11.5px;box-sizing:border-box;white-space:nowrap}
+.hc.part{border-bottom:2px dotted #fbbf24}
+.hc.none{justify-content:center;color:#8b9bb4}
+.r{text-align:right}
+.lg{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#8b9bb4;white-space:nowrap}
+.lg i{display:inline-block;width:14px;height:10px;border-radius:3px}
+.th,.tr{display:grid;align-items:center;column-gap:12px;padding:0 16px;box-sizing:border-box}
+.th{height:46px;font-size:12px;color:#8b9bb4;background:#0f1626;border-top:1px solid #1f2a40;border-bottom:1px solid #1f2a40}
+.tr{height:30px;border-bottom:1px solid #1a2236;font-size:12.5px}
+.tr.sel{background:rgba(59,130,246,.12)}
+.tr.off{color:#8b9bb4}
+.c8{grid-template-columns:112px 100px repeat(8,minmax(60px,1fr)) 116px;min-width:1000px}
+.c13{grid-template-columns:112px 100px repeat(13,minmax(54px,1fr)) 116px;min-width:1290px}
+.hhd{display:flex;flex-direction:column;align-items:flex-end;line-height:1.25}
+.hhd b{font-family:"JetBrains Mono",ui-monospace,monospace;font-weight:500;font-size:11.5px;color:#c3cede}
+.hhd small{font-size:11px;color:#8b9bb4}
+.lk{border:0;background:transparent;color:#7dd3fc;font:inherit;padding:0;cursor:pointer;text-align:left;white-space:nowrap}
+.lk:hover{color:#bae6fd;text-decoration:underline}
+.sub{border-top:1px solid #1f2a40;padding-top:14px;display:flex;flex-direction:column;gap:10px}
+</style>
+</helmet>
+<div style="max-width:1440px;margin:0 auto;box-sizing:border-box;padding:24px 32px 32px;display:flex;flex-direction:column;gap:14px">
+  <div style="display:flex;flex-direction:column;gap:2px">
+    <div class="dim" style="font-size:12px">서버 상세 › pl-db-01 › 디스크 — 보기를 ‘시간별 평균’ 으로 바꿨을 때(새로 만드는 보기 · ‘실시간 표’ 는 지금 화면 그대로입니다)</div>
+    <div class="dim" style="font-size:12px">가상의 서버 · 수치입니다. 날짜 · 지표 · 평균/최고 · 장치 이름 · 시(06, 07 …) 단추가 움직입니다.</div>
+  </div>
+
+  <div class="card" style="padding:14px 0 12px;display:flex;flex-direction:column;gap:10px">
+    <div class="row" style="justify-content:space-between;padding:0 16px">
+      <h2 class="h3">디스크 — 물리 11개 · 파티션 13개 · LVM 볼륨 6개</h2>
+      <div class="row">
+        <div class="seg" role="group" aria-label="보기"><button type="button">실시간 표</button><button type="button" class="on">시간별 평균</button></div>
+        <div class="seg" role="group" aria-label="디스크 범위"><button type="button">트리</button><button type="button" class="on">물리 디스크만</button><button type="button">파티션 · 볼륨만</button></div>
+      </div>
+    </div>
+
+    <div class="row" style="justify-content:space-between;padding:0 16px">
+      <div class="row">
+        <button type="button" class="{{ lastCls }}" onClick="{{ goLast }}">최근 24시간</button>
+        <button type="button" class="btn" disabled="{{ prevDis }}" onClick="{{ goPrev }}">◀ 이전 날</button>
+        <span class="num" style="font-weight:600;min-width:150px;text-align:center">{{ dayLabel }}</span>
+        <button type="button" class="btn" disabled="{{ nextDis }}" onClick="{{ goNext }}">다음 날 ▶</button>
+        <span class="dim" style="font-size:12px">{{ dayNote }}</span>
+      </div>
+      <div class="row">
+        <span class="dim" style="font-size:12px">05:07 에 읽음 · 자동으로 다시 읽지 않습니다</span>
+        <button type="button" class="btn">새로고침</button>
+      </div>
+    </div>
+
+    <div class="row" style="justify-content:space-between;padding:0 16px">
+      <div class="row">
+        <span class="lbl">지표</span>
+        <div class="seg io" role="group" aria-label="지표">
+          <sc-for list="{{ metrics }}" as="m" hint-placeholder-count="13"><button type="button" class="{{ m.cls }}" title="{{ m.ko }}" onClick="{{ m.pick }}">{{ m.name }}</button></sc-for>
+        </div>
+        <span style="font-weight:600">{{ metricKo }}</span><span class="dim" style="font-size:12px">{{ unit }}</span>
+      </div>
+      <div class="row">
+        <span class="lbl">값</span>
+        <div class="seg" role="group" aria-label="값"><sc-for list="{{ kinds }}" as="k" hint-placeholder-count="2"><button type="button" class="{{ k.cls }}" onClick="{{ k.pick }}">{{ k.label }}</button></sc-for></div>
+      </div>
+    </div>
+
+    <div class="tw">
+      <div class="hm ds"><sc-for list="{{ dates }}" as="d" hint-placeholder-count="2"><span style="{{ d.style }}">{{ d.label }}</span></sc-for></div>
+      <div class="hm hd">
+        <span style="padding-left:6px">장치</span>
+        <sc-for list="{{ heads }}" as="h" hint-placeholder-count="24"><button type="button" class="{{ h.cls }}" title="{{ h.tip }}" onClick="{{ h.pick }}">{{ h.label }}</button></sc-for>
+        <span class="r">{{ sumLabel }}</span>
+        <span class="r">가장 높은 시</span>
+      </div>
+      <sc-for list="{{ matrix }}" as="r" hint-placeholder-count="12">
+        <div class="{{ r.cls }}">
+          <button type="button" class="dvb mono" onClick="{{ r.pick }}"><span>{{ r.name }}</span><small>{{ r.sub }}</small></button>
+          <sc-for list="{{ r.cells }}" as="c" hint-placeholder-count="24"><span class="{{ c.cls }}" style="{{ c.style }}" title="{{ c.tip }}">{{ c.txt }}</span></sc-for>
+          <span class="r num" style="font-size:12px;font-weight:600">{{ r.avg }}</span>
+          <span class="r num mono" style="font-size:11.5px;color:#c3cede">{{ r.peak }}</span>
+        </div>
+      </sc-for>
+    </div>
+
+    <div class="row" style="padding:0 16px;gap:14px">
+      <span class="lg">낮음<i style="background:rgba(57,135,229,.08)"></i><i style="background:rgba(57,135,229,.2)"></i><i style="background:rgba(57,135,229,.32)"></i><i style="background:rgba(57,135,229,.44)"></i><i style="background:rgba(57,135,229,.55)"></i>높음(이 표에서 가장 큰 값 대비 로그 비율)</span>
+      <span class="lg"><span class="mono" style="color:#8b9bb4">·</span> 수집하지 않은 시간(0 이 아닙니다)</span>
+      <span class="lg"><span class="mono" style="border-bottom:2px dotted #fbbf24;color:#e6edf6;padding:0 3px">12.3</span> 그 시간의 일부만 수집했거나 진행 중</span>
+      <span class="lg"><span class="mono" style="color:#e6edf6">—</span> 끝난 요청이 없어 값이 없음</span>
+    </div>
+
+    <div class="sub">
+      <div class="row" style="justify-content:space-between;padding:0 16px">
+        <div class="row"><h3 class="h3"><span class="mono">{{ selName }}</span> — 시간별 평균</h3><span class="dim" style="font-size:12px">{{ selSub }}</span></div>
+        <div class="row">
+          <div class="seg" role="group" aria-label="표의 열"><sc-for list="{{ colSeg }}" as="k" hint-placeholder-count="2"><button type="button" class="{{ k.cls }}" onClick="{{ k.pick }}">{{ k.label }}</button></sc-for></div>
+          <button type="button" class="btn" disabled="{{ jumpDis }}">{{ jumpLabel }}</button>
+        </div>
+      </div>
+
+      <div style="padding:0 16px">
+        <div class="row" style="justify-content:space-between">
+          <span style="font-size:12.5px;font-weight:600">{{ chartTitle }}</span>
+          <span class="row" style="gap:14px"><span class="lg"><i style="background:#3987e5"></i>시간 평균</span><span class="lg"><i style="height:2px;border-radius:0;background:#c3cede"></i>그 시간의 최고(1분 평균 중)</span></span>
+        </div>
+        <svg viewBox="0 0 1340 200" role="img" aria-label="{{ chartAria }}" style="display:block;width:100%;height:auto">
+          <rect x="{{ band.x }}" y="12" width="{{ band.w }}" height="160" fill="#7dd3fc" opacity="0.09"></rect>
+          <sc-for list="{{ ticks }}" as="t" hint-placeholder-count="3">
+            <line x1="56" x2="1332" y1="{{ t.y }}" y2="{{ t.y }}" stroke="#243049" stroke-width="1"></line>
+            <text x="50" y="{{ t.ty }}" text-anchor="end" font-size="11" fill="#8b9bb4" font-family="JetBrains Mono, monospace">{{ t.label }}</text>
+          </sc-for>
+          <sc-for list="{{ bars }}" as="b" hint-placeholder-count="24">
+            <g><title>{{ b.tip }}</title>
+              <path d="{{ b.d }}" fill="#3987e5"></path>
+              <line x1="{{ b.x1 }}" x2="{{ b.x2 }}" y1="{{ b.ty }}" y2="{{ b.ty }}" stroke="#c3cede" stroke-width="2" stroke-opacity="{{ b.tickOp }}"></line>
+              <text x="{{ b.cx }}" y="190" text-anchor="middle" font-size="11" fill="#8b9bb4" font-family="JetBrains Mono, monospace">{{ b.lab }}</text>
+            </g>
+          </sc-for>
+        </svg>
+      </div>
+
+      <div class="tw">
+        <div class="{{ thCls }}">
+          <span>시간</span><span>수집</span>
+          <sc-for list="{{ colHeads }}" as="c" hint-placeholder-count="8"><span class="hhd"><b>{{ c.name }}</b><small>{{ c.ko }}</small></span></sc-for>
+          <span class="hhd"><b>최고 지연</b><small>가장 느린 1분</small></span>
+        </div>
+        <sc-for list="{{ detail }}" as="d" hint-placeholder-count="24">
+          <div class="{{ d.cls }}">
+            <button type="button" class="lk mono num" onClick="{{ d.pick }}">{{ d.time }}</button>
+            <span style="{{ d.covStyle }}">{{ d.cov }}</span>
+            <sc-for list="{{ d.cells }}" as="c" hint-placeholder-count="8"><span class="r num" style="{{ c.style }}">{{ c.txt }}</span></sc-for>
+            <span class="r num" style="{{ d.worstStyle }}">{{ d.worst }}</span>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+
+    <div class="dim" style="font-size:12px;padding:0 16px;display:flex;flex-direction:column;gap:3px">
+      <span>시간별 평균 = 그 1시간에 수집한 표본으로 다시 계산한 값입니다 — 횟수 · 처리량은 시간 평균, 지연은 요청 수로 가중합니다(‘구간 평균’ 과 같은 계산). 시(時)는 포탈 시각 기준입니다.</span>
+      <span>‘최고(1분)’ = 그 시간 안의 1분 평균 60개 가운데 가장 높은 값입니다. 시간 평균은 잠깐 튄 값을 가리므로 같이 볼 수 있게 했습니다.</span>
+      <span>수집하지 않은 시간은 ‘·’ 로 비워 둡니다(0 이 아닙니다). 일부만 수집한 시간은 점선 밑줄로 알리고, 덮은 분 수를 아래 표의 ‘수집’ 칸에 적습니다.</span>
+      <span>시간을 고르고 ‘1분 단위 화면으로 이동’ 을 누르면 위쪽 시간 띠가 그 시각으로 옮겨져 그때의 차트 · 실시간 표 · 프로세스를 볼 수 있습니다. 기록은 보관 기간(지금 30일) 안에서만 있습니다.</span>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1900}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { day: 'last', metric: 'wAwait', kind: 'avg', dev: 'sdf', hour: 50, cols: 'summary' }; }
+  renderVals() {
+    const S = this.state;
+    // 시안의 '지금' = 11-12 05:07. 시(H)는 11-10 00시부터 센 번호다(H 53 = 11-12 05시).
+    const NOW_H = 53; const NOW_MIN = 7;
+    const DAY = ['11-10', '11-11', '11-12']; const TAG = ['그제', '어제', '오늘'];
+    const p2 = (n) => (n < 10 ? '0' : '') + n;
+    const rnd = (s) => { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } h ^= h >>> 15; h = Math.imul(h, 2246822507); h ^= h >>> 13; return ((h >>> 0) % 100000) / 100000; };
+    // 덮은 분: null = 아직 오지 않은 시간 · 0 = 수집하지 않은 시간 · 60 미만 = 일부만
+    const cov = (H) => (H > NOW_H ? null : H === NOW_H ? NOW_MIN : H < 20 ? 0 : H === 20 ? 35 : H === 36 ? 22 : H === 37 || H === 38 ? 0 : H === 39 ? 41 : 60);
+    const prof = (k, h) => (k === 'batch' ? (h >= 1 && h <= 3 ? 1.18 : h === 0 || h === 4 ? 0.82 : h >= 9 && h <= 18 ? 0.42 : 0.2) : k === 'day' ? (h >= 9 && h <= 18 ? 0.66 : 0.12) : k === 'low' ? 0.2 : k === 'idle' ? 0.02 : 0);
+    // [이름, 부하 모양, w/s 상한, r/s 상한, 쓰기 KB, 읽기 KB, 읽기 한 건 ms, 쓰기 한 건 ms, 읽기 줄 배수, 쓰기 줄 배수]
+    const DEV = [
+      ['sda', 'low', 26, 0.6, 28, 16, 0.6, 0.05, 4, 4],
+      ['sdb', 'batch', 420, 2.4, 50, 40, 7, 0.03, 1500, 60000],
+      ['sdc', 'batch', 1150, 2.2, 90, 40, 5, 0.03, 2000, 1],
+      ['sdd', 'batch', 640, 3.8, 113, 20, 6, 0.03, 1900, 40000],
+      ['sde', 'batch', 62, 1.6, 252, 16, 14, 19, 700, 700],
+      ['sdf', 'batch', 690, 125, 104, 210, 4, 0.04, 300, 30000],
+      ['sdg', 'batch', 44, 6, 90, 105, 22, 0.04, 520, 1],
+      ['sdh', 'idle', 24, 0, 32, 0, 0, 0.05, 1, 1],
+      ['sdi', 'idle', 48, 0, 128, 0, 0, 0.05, 1, 1],
+      ['sdj', 'day', 560, 2.6, 138, 98, 5, 0.04, 170, 1],
+      ['sdk', 'none', 0, 0, 0, 0, 0, 0, 1, 1],
+    ];
+    const hourOf = (d, H) => {
+      const c = cov(H); if (!c) return null;
+      const L = prof(d[1], H % 24) * (0.82 + 0.36 * rnd(d[0] + ':' + H));
+      const act = Math.min(1, L); const sat = Math.max(0, L - 0.78);
+      const r = d[3] * act; const w = d[2] * act;
+      const ra = r > 0 ? d[6] * (1 + sat * sat * d[8]) : null;
+      const wa = w > 0 ? d[7] * (1 + sat * sat * d[9]) : null;
+      return { c: c, r: r, w: w, rMB: (r * d[5]) / 1024, wMB: (w * d[4]) / 1024, ra: ra, wa: wa, qu: (r * (ra || 0) + w * (wa || 0)) / 1000, util: Math.min(100, L * 100),
+        rrqm: 0, wrqm: d[0] === 'sda' ? w * 0.12 : 0, fa: 1.25 + 2.2 * rnd(d[0] + ':a:' + H), fr: 1.15 + 0.9 * rnd(d[0] + ':r:' + H) };
+    };
+    const RATE = ['r', 'w', 'rMB', 'wMB', 'qu', 'rrqm', 'wrqm'];
+    // 여러 값을 하나로 — add: 장치를 더한다(전체 디스크) · 아니면 무게(덮은 분)로 평균
+    const mix = (list, add) => {
+      let W = 0; let rt = 0; let rn = 0; let wt = 0; let wn = 0; let c = 0; let fa = 0; let fr = 0;
+      const o = { r: 0, w: 0, rMB: 0, wMB: 0, qu: 0, util: 0, rrqm: 0, wrqm: 0 };
+      list.forEach((x) => {
+        const a = x[0]; const g = x[1]; if (!a || !g) return;
+        W += g; RATE.forEach((k) => { o[k] += a[k] * g; });
+        o.util = add ? Math.max(o.util, a.util) : o.util + a.util * g;
+        if (a.ra != null) { rt += a.ra * a.r * g; rn += a.r * g; }
+        if (a.wa != null) { wt += a.wa * a.w * g; wn += a.w * g; }
+        c = Math.max(c, a.c); fa = Math.max(fa, a.fa); fr = Math.max(fr, a.fr);
+      });
+      if (!W) return null;
+      if (!add) { RATE.forEach((k) => { o[k] /= W; }); o.util /= W; }
+      o.ra = rn > 0 ? rt / rn : null; o.wa = wn > 0 ? wt / wn : null; o.c = c; o.fa = fa; o.fr = add ? 1.4 : fr;
+      return o;
+    };
+    const val = (o, k) => {
+      if (!o) return null; const io = o.r + o.w;
+      return k === 'rqsz' ? (io > 0 ? ((o.rMB + o.wMB) * 2048) / io : null)
+        : k === 'await' ? (io > 0 ? (o.r * (o.ra || 0) + o.w * (o.wa || 0)) / io : null)
+        : k === 'svctm' ? (io > 0 ? (o.util * 10) / io : null)
+        : k === 'rAwait' ? o.ra : k === 'wAwait' ? o.wa : o[k];
+    };
+    const SLOW = { await: 1, rAwait: 1, wAwait: 1, qu: 1, svctm: 1 };
+    const top = (o, k) => { const v = val(o, k); return v == null ? null : k === 'util' ? Math.min(100, v * (1 + (o.fr - 1) * 0.6)) : k === 'rqsz' ? v * 1.2 : v * (SLOW[k] ? o.fa : o.fr); };
+    const shown = (o, k) => (S.kind === 'max' ? top(o, k) : val(o, k));
+
+    const COLS = [['rrqm', 'rrqm/s', '읽기 병합', '회/s'], ['wrqm', 'wrqm/s', '쓰기 병합', '회/s'], ['r', 'r/s', '읽기 횟수', '회/s'], ['w', 'w/s', '쓰기 횟수', '회/s'], ['rMB', 'rMB/s', '읽기량', 'MB/s'], ['wMB', 'wMB/s', '쓰기량', 'MB/s'],
+      ['rqsz', 'avgrq-sz', '요청 크기', '섹터(512바이트)'], ['qu', 'avgqu-sz', '대기열', '건'], ['await', 'await', '지연', 'ms'], ['rAwait', 'r_await', '읽기 지연', 'ms'], ['wAwait', 'w_await', '쓰기 지연', 'ms'], ['svctm', 'svctm', '서비스 시간', 'ms'], ['util', '%util', '사용률', '%']];
+    const SUMMARY = ['r', 'w', 'rMB', 'wMB', 'rAwait', 'wAwait', 'qu', 'util'];
+    const K = S.metric; const KC = COLS.filter((c) => c[0] === K)[0];
+    const cell = (v, k) => (v == null ? '—' : k === 'util' ? String(Math.round(v)) : v >= 9999.5 ? (v / 1000).toFixed(1) + 'k' : v >= 999.5 ? Math.round(v).toLocaleString('en-US') : v >= 99.95 ? String(Math.round(v)) : v >= 9.995 ? v.toFixed(1) : v.toFixed(2));
+    const f2 = (v, k) => (v == null ? '—' : k === 'util' ? Math.round(v) + '%' : Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+    const ink = (v, k) => (v == null || !(k === 'await' || k === 'rAwait' || k === 'wAwait') ? '' : v >= 1000 ? 'color:#fca5a5;font-weight:600' : v >= 20 ? 'color:#fbbf24;font-weight:600' : '');
+
+    const hours = []; const h0 = S.day === 'last' ? NOW_H - 23 : S.day * 24;
+    for (let i = 0; i < 24; i++) hours.push(h0 + i);
+    const when = (H) => DAY[Math.floor(H / 24)] + ' ' + p2(H % 24) + '시';
+    const dates = []; hours.forEach((H, i) => { const d = Math.floor(H / 24); const last = dates[dates.length - 1]; if (last && last.d === d) last.n += 1; else dates.push({ d: d, i: i, n: 1 }); });
+
+    const ROWS = [['all', '전체 디스크', '물리 11개 합']].concat(DEV.map((d) => [d[0], d[0], '4.0 TB']));
+    const get = (key, H) => (key === 'all' ? mix(DEV.map((d) => [hourOf(d, H), 1]), true) : hourOf(DEV.filter((d) => d[0] === key)[0], H));
+    const grid = ROWS.map((r) => hours.map((H) => get(r[0], H)));
+    let M = 0; grid.forEach((g) => g.forEach((o) => { const v = shown(o, K); if (v != null && v > M) M = v; }));
+    const shade = (v) => (v == null || v <= 0 || M <= 0 ? '' : 'background:rgba(57,135,229,' + (0.05 + 0.5 * (Math.log(1 + v) / Math.log(1 + M))).toFixed(3) + ')');
+    const kindKo = S.kind === 'max' ? '최고(1분)' : '평균';
+
+    const matrix = ROWS.map((r, i) => {
+      const g = grid[i]; let pk = null; let pv = -1; let mx = null;
+      const cells = hours.map((H, j) => {
+        const c = cov(H); const o = g[j]; const v = shown(o, K);
+        const mark = S.hour === H ? ';box-shadow:inset 0 0 0 1px #7dd3fc' : '';
+        if (c == null) return { txt: '', cls: 'hc', style: mark, tip: when(H) + ' · 아직 오지 않은 시간' };
+        if (c === 0) return { txt: '·', cls: 'hc none mono', style: mark, tip: when(H) + ' · 수집하지 않은 시간' };
+        if (v != null && v > pv) { pv = v; pk = H; }
+        if (v != null && (mx == null || v > mx)) mx = v;
+        return { txt: cell(v, K), cls: 'hc num mono' + (c < 60 ? ' part' : ''), style: shade(v) + mark,
+          tip: r[1] + ' · ' + when(H) + ' · ' + KC[1] + ' ' + kindKo + ' ' + (v == null ? '값 없음(끝난 요청 없음)' : f2(v, K) + (K === 'util' ? '' : ' ' + KC[3])) + ' · ' + (H === NOW_H ? '진행 중 ' + c + '분째' : c + '분 수집') };
+      });
+      const whole = mix(hours.map((H, j) => [g[j], g[j] ? g[j].c : 0]), false);
+      return {
+        cls: 'hm rw' + (r[0] === 'all' ? ' sum' : '') + (r[0] === S.dev ? ' sel' : ''), name: r[1], sub: r[2], cells: cells,
+        avg: S.kind === 'max' ? cell(mx, K) : cell(val(whole, K), K), peak: pk == null ? '—' : p2(pk % 24) + '시 ' + cell(pv, K),
+        pick: () => this.setState({ dev: r[0] }),
+      };
+    });
+
+    const sel = ROWS.filter((r) => r[0] === S.dev)[0] || ROWS[1];
+    const colKeys = S.cols === 'iostat' ? COLS.map((c) => c[0]) : SUMMARY;
+    const gridCls = S.cols === 'iostat' ? 'c13' : 'c8';
+    const detail = hours.map((H) => {
+      const c = cov(H); const o = get(sel[0], H);
+      const base = { time: DAY[Math.floor(H / 24)] + ' ' + p2(H % 24) + ':00', pick: () => this.setState({ hour: S.hour === H ? null : H }) };
+      const cls = 'tr ' + gridCls + (S.hour === H ? ' sel' : '');
+      if (c == null) return Object.assign(base, { cls: cls + ' off', cov: '아직', covStyle: '', cells: colKeys.map(() => ({ txt: '', style: '' })), worst: '', worstStyle: '' });
+      if (!o) return Object.assign(base, { cls: cls + ' off', cov: '수집 안 함', covStyle: '', cells: colKeys.map(() => ({ txt: '·', style: '' })), worst: '·', worstStyle: '' });
+      const a = top(o, 'rAwait'); const b = top(o, 'wAwait'); const wv = a == null && b == null ? null : Math.max(a || 0, b || 0);
+      return Object.assign(base, {
+        cls: cls, cov: c + '분' + (H === NOW_H ? ' · 진행 중' : c < 60 ? ' · 일부' : ''), covStyle: c < 60 ? 'color:#fbbf24' : 'color:#8b9bb4',
+        cells: colKeys.map((k) => ({ txt: f2(val(o, k), k), style: ink(val(o, k), k) })),
+        worst: wv == null ? '—' : f2(wv, 'await') + ' ms', worstStyle: ink(wv, 'await'),
+      });
+    });
+
+    // 차트 — 고른 장치 · 고른 지표의 시간 평균 막대 + 그 시간의 최고(1분) 금
+    const X0 = 56; const X1 = 1332; const YT = 14; const YB = 172; const slot = (X1 - X0) / 24; const BW = 30;
+    const series = hours.map((H) => { const o = get(sel[0], H); return { H: H, a: val(o, K), m: top(o, K), c: cov(H) }; });
+    let ym = 0; series.forEach((s) => { if (s.m != null && s.m > ym) ym = s.m; });
+    const nice = (m) => { if (!(m > 0)) return 1; const e = Math.pow(10, Math.floor(Math.log10(m))); const f = m / e; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * e; };
+    const YM = K === 'util' ? 100 : nice(ym);
+    const yOf = (v) => YB - (Math.min(v, YM) / YM) * (YB - YT);
+    const one = (n) => n.toFixed(1);
+    const barPath = (x, y) => { const rr = Math.min(4, YB - y); return 'M' + one(x) + ',' + YB + 'V' + one(y + rr) + 'Q' + one(x) + ',' + one(y) + ' ' + one(x + rr) + ',' + one(y) + 'H' + one(x + BW - rr) + 'Q' + one(x + BW) + ',' + one(y) + ' ' + one(x + BW) + ',' + one(y + rr) + 'V' + YB + 'Z'; };
+    const bars = series.map((s, i) => {
+      const x = X0 + i * slot + (slot - BW) / 2; const has = s.a != null && s.a > 0;
+      return {
+        d: has ? barPath(x, yOf(s.a)) : '', x1: one(x - 3), x2: one(x + BW + 3), ty: one(s.m == null ? YB : yOf(s.m)), tickOp: s.m != null && s.m > 0 ? '1' : '0',
+        cx: one(x + BW / 2), lab: p2(s.H % 24),
+        tip: when(s.H) + (s.c == null ? ' · 아직 오지 않은 시간' : s.c === 0 ? ' · 수집하지 않은 시간' : ' · 평균 ' + (s.a == null ? '값 없음' : f2(s.a, K)) + ' · 최고(1분) ' + (s.m == null ? '값 없음' : f2(s.m, K)) + ' · ' + s.c + '분 수집'),
+      };
+    });
+    const ticks = [0, 0.5, 1].map((f) => ({ y: one(YB - f * (YB - YT)), ty: one(YB - f * (YB - YT) + 4), label: cell(YM * f, K) }));
+    const hi = hours.indexOf(S.hour);
+    const band = hi < 0 ? { x: '0', w: '0' } : { x: one(X0 + hi * slot), w: one(slot) };
+
+    const days = [0, 1, 2];
+    const prevDay = S.day === 'last' ? 1 : S.day - 1; const nextDay = S.day === 'last' ? null : S.day + 1;
+    return {
+      lastCls: 'btn' + (S.day === 'last' ? ' on' : ''), goLast: () => this.setState({ day: 'last', hour: null }),
+      prevDis: prevDay < 0, goPrev: () => { if (prevDay >= 0) this.setState({ day: prevDay, hour: null }); },
+      nextDis: nextDay == null || nextDay > days.length - 1, goNext: () => { if (nextDay != null && nextDay <= days.length - 1) this.setState({ day: nextDay, hour: null }); },
+      dayLabel: S.day === 'last' ? '11-11 06시 ~ 11-12 05시' : '2026-' + DAY[S.day] + ' (' + TAG[S.day] + ')',
+      dayNote: S.day === 0 ? '이 서버의 기록은 11-10 20시부터 있습니다' : '날짜는 네트워크 카드와 같이 움직입니다',
+      metrics: COLS.map((c) => ({ name: c[1], ko: c[2], cls: c[0] === K ? 'on' : '', pick: () => this.setState({ metric: c[0] }) })),
+      metricKo: KC[2], unit: KC[3],
+      kinds: [['avg', '평균'], ['max', '최고(1분)']].map((k) => ({ label: k[1], cls: S.kind === k[0] ? 'on' : '', pick: () => this.setState({ kind: k[0] }) })),
+      dates: dates.map((d) => ({ style: 'grid-column:' + (d.i + 2) + ' / span ' + d.n, label: DAY[d.d] + ' (' + TAG[d.d] + ')' })),
+      heads: hours.map((H) => ({ label: p2(H % 24), cls: 'hh mono' + (S.hour === H ? ' on' : ''), tip: when(H) + (H === NOW_H ? ' · 진행 중' : ''), pick: () => this.setState({ hour: S.hour === H ? null : H }) })),
+      sumLabel: S.kind === 'max' ? '기간 최고' : '기간 평균',
+      matrix: matrix,
+      selName: sel[1], selSub: sel[0] === 'all' ? '물리 디스크 11개를 더한 값 · 위 표에서 장치 이름을 누르면 바뀝니다' : '4.0 TB · 위 표에서 장치 이름을 누르면 바뀝니다',
+      colSeg: [['summary', '요약 열'], ['iostat', 'iostat 전체 열']].map((k) => ({ label: k[1], cls: S.cols === k[0] ? 'on' : '', pick: () => this.setState({ cols: k[0] }) })),
+      jumpDis: S.hour == null, jumpLabel: S.hour == null ? '시간을 고르면 1분 단위 화면으로 이동' : when(S.hour) + ' 의 1분 단위 화면으로 이동',
+      chartTitle: sel[1] + ' — ' + KC[1] + ' ' + KC[2] + (K === 'util' ? ' (%)' : ' (' + KC[3] + ')') + ' · 최고 눈금 ' + cell(YM, K),
+      chartAria: sel[1] + ' 의 시간별 ' + KC[2] + ' 평균과 그 시간의 최고',
+      band: band, ticks: ticks, bars: bars,
+      thCls: 'th ' + gridCls,
+      colHeads: colKeys.map((k) => { const c = COLS.filter((x) => x[0] === k)[0]; return { name: c[1], ko: c[2] }; }),
+      detail: detail,
+    };
+  }
+}
+</script>
+</body>
+</html>

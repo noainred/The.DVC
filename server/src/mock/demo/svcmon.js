@@ -50,7 +50,7 @@ const T = (name, type, extra = {}) => ({ name, type, intervalSec: 60, ...extra }
 
 /** 스냅샷에서 데모 대상 목록(순수). */
 export function demoSvcmonTargets(snapshot) {
-  // v2.915: 시연 규모 — vCenter 20곳 전부(예전 앞 8곳) + vCenter 없는 데이터센터 10곳의 베어메탈 서비스.
+  // v3.26.0: 시연 규모 — vCenter 20곳 전부(예전 앞 8곳) + vCenter 없는 데이터센터 10곳의 베어메탈 서비스.
   const vcs = (snapshot?.vcenters || []).slice(0, 40);
   const hosts = snapshot?.hosts || [];
   const vms = (snapshot?.vms || []).filter((v) => v.powerState === 'POWERED_ON' && v.ipAddress && !v.template);
@@ -128,7 +128,7 @@ export async function ensureSvcmonDemo() {
   const cur = listTargets();
   let want = demoSvcmonTargets(snap);
   if (cur.length) {
-    // v2.915: v2.914 이전 규모(앞 8곳)로 시드된 데모 설치본 — 전부 데모 대상이고 지금 목록의 절반 미만이면 없는 대상만 보충.
+    // v3.26.0: v2.914 이전 규모(앞 8곳)로 시드된 데모 설치본 — 전부 데모 대상이고 지금 목록의 절반 미만이면 없는 대상만 보충.
     if (!cur.every(isSvcmonDemoBatch) || cur.length >= Math.ceil(want.length / 2)) return { skipped: 'not-empty' };   // 실데이터·사람이 등록한 것이 있으면 시드 안 함
     const have = new Set(cur.map((t) => `${t.path || ''}|${t.name || ''}`));
     want = want.filter((t) => !have.has(`${t.path}|${t.name}`));

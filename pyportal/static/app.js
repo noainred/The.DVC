@@ -66,7 +66,9 @@
     editingDcId: null,
     editingCatId: null,
     busy: false,
-    pendingPane: null
+    pendingPane: null,
+    pwTarget: null,             // 비밀번호 변경 창의 대상 { username, isMe }
+    sessionRevokedError: null   // 결정(56~75 남긴 것): 로그아웃 폐기 목록 fail-closed 사유(서버 /api/settings)
   };
 
   /* ---------------- DOM 헬퍼 ---------------- */
@@ -394,6 +396,8 @@
     { id: "healthy", label: "🟢 정상" },
     { id: "warning", label: "🟠 주의" },
     { id: "unreachable", label: "🔴 응답 없음" },
+    // 56회차 개선: 차단됨(SSRF 가드 — 루프백 · 링크로컬 주소)도 칩으로 — 없으면 그 링크는 '전체 상태' 에만 잡혀 칩 합이 전체와 맞지 않았다
+    { id: "blocked", label: "⛔ 차단됨" },
     { id: "unchecked", label: "⚪ 미점검" },
   ];
 
@@ -561,7 +565,27 @@
     var stats = $("dc-stats");
     clear(stats);
     var sum = state.dcSummary;
-    if (sum) {
+    var metaErr = (state.meta && state.meta.loadErrors) || {};
+    var badFiles = [];
+    if (metaErr.shortcuts) badFiles.push("바로가기");
+    if (metaErr.categories) badFiles.push("분류");
+    if (badFiles.length) {
+      // 47회차 #6: 바로가기 · 분류 파일을 못 읽었으면 '0개' 가 아니라 못 읽음(관리자가 복원할 때까지 저장하지 않는다)
+      stats.appendChild(el("div", { className: "stat" }, [
+        el("div", { className: "stat-label", text: badFiles.join(" · ") + " 목록" }),
+        el("div", { className: "stat-value v-amber", text: "읽지 못함" }),
+        el("div", { className: "stat-note", text: "파일 손상 · 권한 오류 — 관리자가 백업에서 복원해야 합니다" })
+      ]));
+    }
+    if (state.dcLoadError) {
+      // 46회차 H2: 목록 파일을 못 읽었으면 '0곳' 이 아니라 못 읽음(내장 샘플을 대신 보이지 않는다)
+      stats.appendChild(el("div", { className: "stat" }, [
+        el("div", { className: "stat-label", text: "데이터센터 목록" }),
+        el("div", { className: "stat-value v-amber", text: "읽지 못함" }),
+        el("div", { className: "stat-note", text: state.dcLoadError === "unreadable"
+          ? "파일 권한 · 입출력 오류 — 관리자 확인 필요" : "파일 손상 — 관리자가 백업에서 복원해야 합니다" })
+      ]));
+    } else if (sum) {
       [["운영 데이터센터", sum.operational + " / " + sum.total, "정상 가동", "v-emerald"],
        ["평균 PUE", String(sum.avgPue), "에너지 효율", "v-blue"],
        ["총 운용 랙", Number(sum.racks).toLocaleString(), "서버 랙", "v-indigo"],
@@ -816,7 +840,8 @@
                                    text: HEALTH_LABEL[row.status] || row.status })]),
         el("td", { text: row.statusCode ? String(row.statusCode)
                          : (row.port ? ":" + row.port : "-") }),
-        el("td", { text: row.latencyMs != null ? row.latencyMs + "ms" : "-" }),
+        // 31회차 F8: 응답을 받은 행(정상 · 확인 필요)만 지연을 보인다 — 차단 · 응답 없음은 재지 않았거나 '실패까지 걸린 시간' 이라 '0ms' 로 읽혔다.
+        el("td", { text: (row.status === "healthy" || row.status === "warning") && row.latencyMs != null ? row.latencyMs + "ms" : "-" }),
         el("td", { className: "muted", text: row.message || "" })
       ]));
     });
@@ -903,8 +928,18 @@
       state.backupStatus = data.backup;
       state.choices = data.choices;
       state.initialPasswordFile = data.initialPasswordFile;
-      state.backups = (data.backup && data.backup.count) ? state.backups : state.backups;
-      return api("/api/settings/backups");
+      state.sessionRevokedError = data.sessionRevokedError || null;   // 결정(56~75 남긴 것): 폐기 목록 fail-closed 사유
+      // 56회차 F1(재현 — Chromium): 백업 목록은 admin 전용이다(v2.500 L2). viewer 도 이 줄을 불러 403 으로 체인이 끊겨 분류 · 센터 '전체' 목록을
+      //   받지 못했고(수정 폼의 센터 선택지가 표시 개수만큼만), 표시 개수 밖 센터에 연결된 바로가기를 수정 · 저장하면 연결이 '전체 공통' 으로
+      //   바뀌었다. 설정을 열 때마다 'admin 계정만 …' 오류 토스트도 떴다. viewer 는 건너뛰고, admin 도 실패하면 빈 목록으로 이어 간다.
+      if (!(state.session && state.session.role === "admin")) {
+        return { backups: [], status: data.backup };
+      }
+      return api("/api/settings/backups").catch(function (err) {
+        if (err.message.indexOf("로그인") !== -1) throw err;   // 세션 만료는 그대로(로그인 창)
+        toast(err.message, "err");
+        return { backups: [], status: data.backup };
+      });
     }).then(function (data) {
       state.backups = data.backups || [];
       state.backupStatus = data.status || state.backupStatus;
@@ -955,7 +990,7 @@
     dcPool().forEach(function (dc) {
       dcSelect.appendChild(el("option", { value: dc.id, text: dc.code + " · " + dc.city }));
     });
-    dcSelect.value = keepDc || "all";
+    selectKeeping(dcSelect, keepDc || "all");
 
     var regionSelect = $("d-region");
     if (regionSelect && !regionSelect.options.length) {
@@ -963,6 +998,18 @@
         regionSelect.appendChild(el("option", { value: r, text: r }));
       });
     }
+  }
+
+  /* 56회차 F1: 선택지에 없는 저장값을 '선택 없음' 으로 떨어뜨리지 않는다 — select.value 에 없는 값을 넣으면 '' 가 되고, 그대로 저장하면
+     서버가 '전체 공통' 으로 바꿔 굳힌다(센터 목록을 다 받지 못했을 때). 원값을 그대로 보낼 수 있게 그 값의 선택지를 덧붙인다. */
+  function selectKeeping(select, value) {
+    if (!value) return;
+    var found = false;
+    for (var i = 0; i < select.options.length; i += 1) {
+      if (select.options[i].value === value) { found = true; break; }
+    }
+    if (!found) select.appendChild(el("option", { value: value, text: value + " (현재 연결 — 목록 밖)" }));
+    select.value = value;
   }
 
   function resetForm() {
@@ -988,7 +1035,7 @@
     $("f-icon").value = sc.icon || "";
     $("f-description").value = sc.description || "";
     $("f-tags").value = (sc.tags || []).join(", ");
-    $("f-datacenter").value = sc.datacenterId || "all";
+    selectKeeping($("f-datacenter"), sc.datacenterId || "all");   // 56회차 F1
     $("f-favorite").checked = !!sc.isFavorite;
     $("form-title").textContent = "바로가기 수정";
     $("form-submit").textContent = "수정 저장";
@@ -1204,6 +1251,7 @@
   function refreshDatacenters() {
     return api("/api/datacenters").then(function (data) {
       state.datacenters = data.datacenters || [];
+      state.dcLoadError = data.loadError || null;   // 46회차 H2
       state.dcSummary = data.summary || null;
       state.dcRegistered = data.totalRegistered || state.datacenters.length;
       if (data.displayLimit != null) state.dcLimit = data.displayLimit;
@@ -1254,29 +1302,116 @@
       ]));
     });
 
+    // 35회차 R4: 비-admin 에게는 서버가 경로 대신 true(있음)만 준다.
     $("initial-password-note").textContent = state.initialPasswordFile
-      ? "초기 비밀번호 파일이 아직 남아 있습니다: " + state.initialPasswordFile +
+      ? "초기 비밀번호 파일이 아직 남아 있습니다" +
+        (typeof state.initialPasswordFile === "string" ? ": " + state.initialPasswordFile : "(경로는 admin 계정만 볼 수 있습니다)") +
         " — 비밀번호를 변경하면 자동 삭제됩니다."
       : "초기 비밀번호 파일은 삭제된 상태입니다.";
+
+    // 결정(56~75 남긴 것): 로그아웃 폐기 목록(session-revoked.json)을 못 믿어 기동 때 모든 세션을 끊었으면 그 사유
+    var revoked = state.sessionRevokedError;
+    var note = $("session-revoked-note");
+    note.hidden = !revoked;
+    note.textContent = revoked
+      ? "⚠ " + (revoked.file || "session-revoked.json") + " 을(를) " +
+        (revoked.state === "unreadable" ? "읽지 못해(권한 · 입출력 — 원본은 그대로 둠)" : "손상으로 보고 보존본(.corrupt.*)으로 옮기고") +
+        " " + fullStamp(revoked.at) + " 이전에 발급된 세션을 모두 끊었습니다(전원 다시 로그인)" +
+        (revoked.state === "unreadable" ? " — 권한을 고치고 다시 시작할 때까지 로그아웃은 그 계정의 세션을 모두 끊습니다." : ".") +
+        (revoked.resumed ? " 같은 파일 상태로 여전히 읽지 못해 이번 기동은 세션을 다시 끊지 않았습니다." : "")
+      : "";
   }
 
+  /* 결정(56~75 남긴 것 · 31회차 E3): 비밀번호 변경은 창(모달)으로 — 본인 변경은 현재 비밀번호를 함께 보낸다(서버가 확인).
+     예전에는 window.prompt 로 새 비밀번호만 받았다(입력이 가려지지 않았고, 세션만 가로채도 비밀번호를 바꿀 수 있었다). */
   function changeUserPassword(user) {
-    var password = window.prompt("'" + user.username + "' 계정의 새 비밀번호 (8자 이상)");
-    if (password == null) return;
-    api("/api/settings/users/" + encodeURIComponent(user.username) + "/password",
-        { method: "POST", body: { password: password } })
+    var isMe = !!(state.session && state.session.username === user.username);
+    // 반증(결정 G1b ②): 다른 admin 계정 재설정도 요청한 본인(나)의 현재 비밀번호를 확인한다(서버가 같은 판정 — viewer 재설정은 그대로).
+    var needCurrent = isMe || user.role === "admin";
+    state.pwTarget = { username: user.username, isMe: isMe, needCurrent: needCurrent, mode: "password" };
+    $("pw-title").textContent = "비밀번호 변경";
+    $("pw-submit").textContent = "변경";
+    $("pw-new").hidden = false;
+    $("pw-target").textContent = "'" + user.username + "' 계정" +
+      (isMe ? " — 본인 비밀번호는 현재 비밀번호를 확인합니다."
+        : needCurrent ? " — 다른 admin 계정 재설정은 요청한 본인(나)의 현재 비밀번호를 확인합니다."
+        : " — admin 재설정(현재 비밀번호 없이)");
+    $("pw-current").placeholder = isMe ? "현재 비밀번호" : "내 현재 비밀번호";
+    $("pw-current").hidden = !needCurrent;
+    $("pw-current").value = "";
+    $("pw-new").value = "";
+    $("pw-msg").textContent = "";
+    $("pw-modal").hidden = false;
+    setTimeout(function () { (needCurrent ? $("pw-current") : $("pw-new")).focus(); }, 30);
+  }
+
+  function closePasswordModal() {
+    $("pw-modal").hidden = true;
+    $("pw-current").value = "";
+    $("pw-new").value = "";
+    state.pwTarget = null;
+  }
+
+  /* 결정(반증 G1b 남긴 것): 중지된 admin 을 다시 켜는 것도 admin 을 늘리는 동작 — 같은 창에서 내 현재 비밀번호만 받는다(서버가 같은 판정).
+     viewer 다시 켜기 · 중지는 그대로 바로 보낸다. */
+  function enableAdminUser(user) {
+    state.pwTarget = { username: user.username, isMe: false, needCurrent: true, mode: "enable" };
+    $("pw-title").textContent = "admin 계정 다시 켜기";
+    $("pw-submit").textContent = "사용";
+    $("pw-target").textContent = "'" + user.username + "' 계정 — 중지된 admin 계정을 다시 켜려면 요청한 본인(나)의 현재 비밀번호를 확인합니다.";
+    $("pw-current").placeholder = "내 현재 비밀번호";
+    $("pw-current").hidden = false;
+    $("pw-current").value = "";
+    $("pw-new").hidden = true;
+    $("pw-new").value = "";
+    $("pw-msg").textContent = "";
+    $("pw-modal").hidden = false;
+    setTimeout(function () { $("pw-current").focus(); }, 30);
+  }
+
+  function submitEnableAdmin(target) {
+    if (!$("pw-current").value) { setMsg("pw-msg", "내 현재 비밀번호를 입력하세요.", "err"); return; }
+    $("pw-submit").disabled = true;
+    api("/api/settings/users/" + encodeURIComponent(target.username),
+        { method: "PUT", body: { enabled: true, currentPassword: $("pw-current").value } })
+      .then(function (data) {
+        closePasswordModal();
+        state.users = data.users;
+        renderUserSettings();
+        toast("다시 켰습니다.", "ok");
+      })
+      .catch(function (err) { setMsg("pw-msg", err.message, "err"); $("pw-current").value = ""; })
+      .then(function () { $("pw-submit").disabled = false; });
+  }
+
+  function submitPasswordChange() {
+    var target = state.pwTarget;
+    if (!target) return;
+    if (target.mode === "enable") { submitEnableAdmin(target); return; }
+    var body = { password: $("pw-new").value };
+    if (target.needCurrent) {
+      if (!$("pw-current").value) { setMsg("pw-msg", target.isMe ? "현재 비밀번호를 입력하세요." : "내 현재 비밀번호를 입력하세요.", "err"); return; }
+      body.currentPassword = $("pw-current").value;
+    }
+    if (!body.password) { setMsg("pw-msg", "새 비밀번호를 입력하세요.", "err"); return; }
+    $("pw-submit").disabled = true;
+    api("/api/settings/users/" + encodeURIComponent(target.username) + "/password",
+        { method: "POST", body: body })
       .then(function () {
+        closePasswordModal();
         toast("비밀번호를 변경했습니다. 해당 계정은 다시 로그인해야 합니다.", "ok");
-        if (state.session && state.session.username === user.username) {
+        if (target.isMe) {
           clearSession();
           navigate("dashboard");
         }
         return loadSettings();
       })
-      .catch(function (err) { toast(err.message, "err"); });
+      .catch(function (err) { setMsg("pw-msg", err.message, "err"); })
+      .then(function () { $("pw-submit").disabled = false; });
   }
 
   function toggleUser(user) {
+    if (!user.enabled && user.role === "admin") { enableAdminUser(user); return; }
     api("/api/settings/users/" + encodeURIComponent(user.username),
         { method: "PUT", body: { enabled: !user.enabled } })
       .then(function (data) { state.users = data.users; renderUserSettings(); })
@@ -1286,20 +1421,36 @@
   function deleteUser(user) {
     if (!window.confirm("'" + user.username + "' 계정을 삭제할까요?")) return;
     api("/api/settings/users/" + encodeURIComponent(user.username), { method: "DELETE" })
-      .then(function (data) { state.users = data.users; renderUserSettings(); toast("삭제했습니다.", "ok"); })
+      .then(function (data) {
+        state.users = data.users; renderUserSettings(); toast("삭제했습니다.", "ok");
+        // 56회차 F4: 초기 계정(admin)을 지우면 서버가 초기 비밀번호 파일도 지운다 — 안내 문구를 다시 받아 온다
+        if (state.initialPasswordFile) return loadSettings();
+      })
       .catch(function (err) { toast(err.message, "err"); });
+  }
+
+  /* 반증(결정 G1b ②): admin 계정을 만들 때만 '내 현재 비밀번호' 칸을 보인다(서버가 같은 판정). */
+  function syncUserFormCurrent() {
+    var needCurrent = $("u-role").value === "admin";
+    $("u-current-field").hidden = !needCurrent;
+    if (!needCurrent) $("u-current").value = "";
   }
 
   function submitUserForm(event) {
     event.preventDefault();
-    api("/api/settings/users", { method: "POST", body: {
-      username: $("u-name").value, role: $("u-role").value, password: $("u-password").value
-    } }).then(function (data) {
+    var body = { username: $("u-name").value, role: $("u-role").value, password: $("u-password").value };
+    if (body.role === "admin") {
+      if (!$("u-current").value) { setMsg("user-form-msg", "admin 계정을 만들려면 내 현재 비밀번호를 입력하세요.", "err"); return; }
+      body.currentPassword = $("u-current").value;
+    }
+    api("/api/settings/users", { method: "POST", body: body }).then(function (data) {
       state.users = data.users;
       $("user-form").reset();
+      syncUserFormCurrent();
       setMsg("user-form-msg", "추가했습니다.", "ok");
       renderUserSettings();
-    }).catch(function (err) { setMsg("user-form-msg", err.message, "err"); });
+    }).catch(function (err) { setMsg("user-form-msg", err.message, "err"); })
+      .then(function () { $("u-current").value = ""; });   // 비밀번호 칸은 한 번 보내면 비운다
   }
 
   /* ---------------- 설정 4: 백업 ---------------- */
@@ -1331,16 +1482,29 @@
     $("h-interval").value = String(state.settings.health.intervalMinutes);
     $("h-method").value = state.settings.health.method || "port";
 
-    $("backup-count").textContent = "(" + state.backups.length + "개)";
     var status = state.backupStatus || {};
-    $("backup-status").textContent = "저장 위치 " + (status.directory || "-") +
-      " · 총 " + bytes(status.totalBytes || 0) +
-      (status.latest ? " · 최근 " + fullStamp(status.latest.modifiedTs) : " · 백업 없음");
+    // 56회차 F1: 비-admin 은 목록을 받지 않는다 — '0개 · 백업이 없습니다' 로 읽히지 않게 가린 사실을 밝힌다
+    $("backup-count").textContent = status.redacted ? "(—)" : "(" + state.backups.length + "개)";
+    // 31회차 F4: 비-admin 에게는 서버가 백업 현황을 가린다(redacted) — '백업 없음' 으로 읽히지 않게 따로 말한다.
+    $("backup-status").textContent = status.redacted
+      ? "백업 현황(저장 위치 · 파일)은 admin 계정만 볼 수 있습니다."
+      : "저장 위치 " + (status.directory || "-") +
+        " · 총 " + bytes(status.totalBytes || 0) +
+        (status.latest ? " · 최근 " + fullStamp(status.latest.modifiedTs) : " · 백업 없음") +
+        (status.lastError ? " · ⚠ 자동 백업 실패: " + status.lastError.reason : "") +
+        // 46회차 H1: 설정 파일을 못 읽어 기본값으로 동작 중 — 그동안 오래된 백업 정리를 멈춘다
+        (status.settingsLoadError ? " · ⚠ 설정 파일(settings.json)을 " +
+          (status.settingsLoadError === "unreadable" ? "읽지 못해(권한 · 입출력)" : "읽지 못해(손상 — 보존본으로 옮김)") +
+          " 기본값으로 동작 중 — 오래된 백업 정리를 멈췄고 웹훅 알림도 꺼진 상태입니다. 먼저 백업 칸을 확인해 저장하세요" : "") +
+        // 47회차 #5 · #6: 데이터 파일을 못 읽는 동안에도 정리를 멈춘다(정상 목록이 든 마지막 백업을 지키려고)
+        (status.dataLoadErrors ? " · ⚠ 읽지 못한 데이터 파일: " + Object.keys(status.dataLoadErrors).join(", ") +
+          " — 백업에서 복원할 때까지 오래된 백업 정리를 멈췄습니다" : "");
 
     var body = $("backup-tbody");
     clear(body);
     if (!state.backups.length) {
-      body.appendChild(el("tr", {}, [el("td", { className: "muted", text: "백업이 없습니다.",
+      body.appendChild(el("tr", {}, [el("td", { className: "muted",
+                                               text: status.redacted ? "백업 목록은 admin 계정만 볼 수 있습니다." : "백업이 없습니다.",
                                                attrs: { colspan: "4" } })]));
       return;
     }
@@ -1505,6 +1669,11 @@
     var cfg = state.settings.notify;
     $("n-enabled").checked = !!cfg.enabled;
     $("n-url").value = cfg.webhookUrl || "";
+    // 56회차 F1: 비-admin 에게 서버는 웹훅 URL(값이 곧 자격증명)을 비워 보낸다 — 빈 칸을 '웹훅 없음' 으로 읽지 않게 저장 여부를 밝힌다
+    if (!$("n-url").getAttribute("data-placeholder")) $("n-url").setAttribute("data-placeholder", $("n-url").placeholder || "");
+    $("n-url").placeholder = cfg.redacted
+      ? (cfg.hasWebhookUrl ? "저장된 웹훅 URL 있음 — admin 계정만 볼 수 있습니다" : "저장된 웹훅 URL 없음")
+      : $("n-url").getAttribute("data-placeholder");
     $("n-threshold").value = cfg.failThreshold;
     $("n-interval").value = cfg.minIntervalMinutes;
     renderAuditTable();
@@ -1624,14 +1793,32 @@
         { method: "POST", body: {} })
       .then(function (data) {
         state.shortcuts = data.shortcuts || state.shortcuts;
-        state.datacenters = data.datacenters || state.datacenters;
+        // 56회차 개선: data.datacenters 는 등록된 '전체' 다 — 공개 화면 목록(표시 개수 적용)은 아래 refreshDatacenters 가 채운다
         state.users = data.users || state.users;
         state.settings = data.settings || state.settings;
-        toast("복원했습니다: " + (data.restored || []).join(", "), "ok");
-        return loadSettings();
+        var restored = data.restored || [];
+        // 56회차 개선: 계정 파일을 복원하면 서버가 모든 계정의 세션을 끊는다(31회차 F2 — tokenVersion 인상, 의도). 예전에는 곧바로 부른
+        //   loadSettings 가 401 로 로그인 창만 띄워(이유 안내 없음) 설정 화면 위에 남았고, 복원된 분류는 다시 로그인할 때까지 대시보드에 반영되지 않았다.
+        var relogin = restored.indexOf("users") !== -1;
+        toast("복원했습니다: " + restored.join(", ") +
+              (relogin ? " — 모든 계정이 다시 로그인해야 합니다." : ""), "ok");
+        if (relogin) clearSession();
+        return Promise.all([
+          api("/api/meta", { quiet: true }).then(function (meta) {
+            state.meta = meta;
+            state.categories = meta.categories || state.categories;
+          }).catch(function () {}),
+          refreshDatacenters()
+        ]).then(function () { return relogin ? null : loadSettings(); })
+          .then(function () {
+            applyShortcuts(state.shortcuts);
+            fillFormSelects();
+            if (relogin) {
+              if (state.tab === "settings") navigate("dashboard");
+              openLogin("backup");
+            }
+          });
       })
-      .then(function () { return refreshDatacenters(); })
-      .then(function () { applyShortcuts(state.shortcuts); })
       .catch(function (err) { toast(err.message, "err"); });
   }
 
@@ -1987,6 +2174,16 @@
       if (event.key === "Enter") submitLogin();
     });
 
+    // 비밀번호 변경 모달(결정 · 31회차 E3)
+    $("pw-submit").addEventListener("click", submitPasswordChange);
+    $("pw-cancel").addEventListener("click", closePasswordModal);
+    ["pw-current", "pw-new"].forEach(function (id) {
+      $(id).addEventListener("keydown", function (event) {
+        if (event.key === "Enter") submitPasswordChange();
+        if (event.key === "Escape") closePasswordModal();
+      });
+    });
+
     // 링크 점검
     $("btn-check-now").addEventListener("click", runHealthCheck);
     $("history-target").addEventListener("change", function (event) {
@@ -2069,6 +2266,8 @@
     });
 
     $("user-form").addEventListener("submit", submitUserForm);
+    $("u-role").addEventListener("change", syncUserFormCurrent);
+    syncUserFormCurrent();
     $("b-save").addEventListener("click", saveBackupSettings);
     $("b-now").addEventListener("click", backupNow);
     $("h-save").addEventListener("click", saveHealthSettings);
@@ -2101,6 +2300,7 @@
         state.dcSummary = results[1].summary || null;
         state.dcRegistered = results[1].totalRegistered || state.datacenters.length;
         state.dcLimit = results[1].displayLimit || 0;
+        state.dcLoadError = results[1].loadError || null;
         if (!state.selectedDcId && state.datacenters.length) {
           state.selectedDcId = state.datacenters[0].id;
         }

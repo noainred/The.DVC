@@ -61,6 +61,7 @@ import { scanPower, pickPower, powerResult, powerProbe } from '../power.js';
 import { emptySnapshot } from '../types.js';
 import { makeGetter, isCredReject } from './restCommon.js';
 import { numOrNull } from '../../util/numOrNull.js';
+import { envPort } from '../../util/envNumber.js'; // 결정(56~75 남긴 것) 57: 포트 env 는 1~65535 정수만(예전 `Number(env) || 443` 은 −1 · 70000 · 1.5 를 그대로 썼다)
 
 const TB = 1e12; // Unisphere *_tb → 바이트(10진 가정 — 파일 머리말 정직 표기 참조)
 const GB = 1e9;  // Unisphere *_gb → 바이트(TB 와 같은 10진 가정)
@@ -495,7 +496,7 @@ export function applyPowermaxPower(extra, raw) {
 }
 
 export async function collect(device, { signal = null } = {}) {
-  const get = makeGetter(device, { port: Number(process.env.STORAGE_UNISPHERE_PORT) || 8443, signal });
+  const get = makeGetter(device, { port: envPort(process.env.STORAGE_UNISPHERE_PORT, 8443), signal });
   const raw = { caps: {}, srps: {}, srpState: {} };
   const snap = emptySnapshot(device); // 섹션 오류 임시 기록용
   try {

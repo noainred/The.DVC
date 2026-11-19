@@ -6,9 +6,12 @@ import { getDataSource } from '../../runtime-settings.js';
 import { importVcenters } from '../../vcenter/registry.js';
 import { geocode } from '../../vcenter/geocode.js';
 import path from 'node:path';
-import { loadRegistry as loadNsxFull, listRegistry as listNsx, addManager as addNsx, updateManager as updateNsx, removeManager as removeNsx, testConnection as testNsx } from '../../nsx/registry.js';
+import { loadRegistry as loadNsxFull, listRegistry as listNsx, addManager as addNsx, updateManager as updateNsx, removeManager as removeNsx, testConnection as testNsx, registryLoadError as nsxRegistryLoadError } from '../../nsx/registry.js';
+import { registryMark } from '../settingsUnreadMark.js';   // 128회차: 등록부를 못 읽은 동안의 목록은 저장된 목록이 아니다
 import { nsxStore, nsxAuthGuard } from '../../nsx/store.js';
+import { authStopView } from '../../util/authGuard.js';   // 130회차: 못 읽음 표지(unread)를 떨구지 않는 공용 view(127 C1 의 남은 사본)
 import { adminOnly, existsFile, fullScopeOnlyWith } from './shared.js';
+import { safeLoadText } from '../../util/atomicWrite.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { requirePerm as requireCsvPerm } from '../../auth/auth.js';
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
@@ -59,10 +62,11 @@ adminRouter.get('/nsx/managers', adminOnly, (req, res) => {
   let full = new Map();
   try { full = new Map(loadNsxFull().map((m) => [m.id, m])); } catch { /* 목록은 그대로 */ }
   const managers = listNsx().map((m) => {
-    const rec = full.has(m.id) ? nsxAuthGuard.authStopFor(full.get(m.id)) : null;
-    return rec ? { ...m, authStopped: { since: rec.since, at: rec.at, attempts: rec.attempts, reason: rec.reason } } : m;
+    // 130회차(127 반증): 목록은 보기만 한다(peekAuthStop) — 못 읽는 창에서 비활성 매니저(수집하지 않는다)가 이 조회로 자격 지문의 탐침을 받아 가지 않게(routes/admin/vcenters.js 와 같다).
+    const rec = full.has(m.id) ? nsxAuthGuard.peekAuthStop(full.get(m.id)) : null;
+    return rec ? { ...m, authStopped: authStopView(rec) } : m;
   });
-  res.json({ dataSource: getDataSource(), ...scopeNsxManagers(managers, scopedVcenterIds(req.user, store.get())) }); // v2.622(감사 SEC-04)
+  res.json({ dataSource: getDataSource(), ...scopeNsxManagers(managers, scopedVcenterIds(req.user, store.get())), ...registryMark(nsxRegistryLoadError()) }); // v2.622(감사 SEC-04) · 128회차: 표지
 });
 adminRouter.post('/nsx/managers', adminOnly, fleetOnly, (req, res) => {
   const result = addNsx(req.body || {});
@@ -96,7 +100,7 @@ adminRouter.post('/vcenters/import', csvPerm, adminOnly, fleetOnly, (req, res) =
   const list = Array.isArray(body) ? body : body.vcenters;
   const result = importVcenters(list, body.mode === 'replace' ? 'replace' : 'merge');
   if (result.ok) store.refresh().catch(() => {});
-  res.status(result.ok ? 200 : 400).json(result);
+  res.status(result.ok ? 200 : (result.code === 'registry-unreadable' ? 503 : 400)).json(result);   // 118회차: 등록부 읽기 오류 중의 거절은 503
 });
 
 // Default server-side path suggestions for the "server file" import.
@@ -120,9 +124,10 @@ adminRouter.post('/vcenters/import-file', csvPerm, adminOnly, fleetOnly, (req, r
     const list = Array.isArray(json) ? json : json.vcenters;
     const result = importVcenters(list, mode === 'replace' ? 'replace' : 'merge');
     if (result.ok) store.refresh().catch(() => {});
-    res.status(result.ok ? 200 : 400).json({ ...result, file: filePath });
+    res.status(result.ok ? 200 : (result.code === 'registry-unreadable' ? 503 : 400)).json({ ...result, file: filePath });   // 118회차
   } catch (err) {
-    res.status(400).json({ ok: false, reason: `파일 읽기 실패: ${err.message}` });
+    // 72회차(범위 밖 확정 — 메인 처리): JSON.parse 오류 원문은 파일 앞부분(자격증명 조각)을 싣는다 → safeLoadText 규약(v2.744)
+    res.status(400).json({ ok: false, reason: `파일 읽기 실패: ${safeLoadText(err)}` });
   }
 });
 }

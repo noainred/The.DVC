@@ -32,6 +32,21 @@ export function fmtDur(ms) {
   if (n < DAY) return `${Math.floor(n / HOUR)}시간 ${Math.floor((n % HOUR) / 60_000)}분`;
   return `${Math.floor(n / DAY)}일 ${Math.floor((n % DAY) / HOUR)}시간`;
 }
+/**
+ * IP 사용 이력 창의 사용 · 미사용 기간(v2.998.1) — fmtDur 는 스캔 소요(ms · 초)용이라 해제된 적이 없는 IP 의 '총 미사용 기간' 이
+ * '0ms' 로 보였다. 기간은 사람 단위로:
+ *  · 그 종류의 구간이 하나도 없으면(count 0) '없음' — 0 이 아니라 '그런 구간이 없다' 는 사실
+ *  · 1분 미만은 '1분 미만'(방금 시작한 구간 · 같은 시각의 두 이벤트 — 이 표에서 ms · 초는 뜻이 없다)
+ *  · 그 밖은 fmtDur(분 · 시간 · 일). 못 읽은 값은 '—'(numOrNull 규약 — 0 으로 읽지 않는다).
+ */
+export function periodText(ms, count = 1) {
+  if (count === 0) return '없음';
+  if (ms == null || ms === '') return '—';
+  const n = Number(ms);
+  if (!Number.isFinite(n) || n < 0) return '—';
+  if (n < 60_000) return '1분 미만';
+  return fmtDur(n);
+}
 
 /**
  * v2.636: 모달 또는 페이지로 그린다. IP관리 서브메뉴는 `asPage` 로 쓴다 — 예전 모달은 대장 화면 안에 있어서 대장을 다시 읽는

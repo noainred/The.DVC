@@ -1,6 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import BoldText from '../../components/boldText.jsx';
 import { fetchJson, postJson, putJson, delJson, getCurrentUser, downloadFile, canCsv } from '../../api.js';
+import { unreadMarkOf, registryEmptyText } from '../settingsUnread.js';   // 128회차: 등록부를 못 읽은 동안의 빈 목록을 ‘등록 없음’ 으로 보이지 않는다
+import { RegistryUnreadBanner } from '../SettingsUnreadBanner.jsx';
+import { requireChanged } from '../changeResult.js';   // 27회차 반증 D-2: 409(설정 파일 손상 중 거절)를 성공으로 보이지 않게
 import { Loading, ErrorBox, Kpi, Modal } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { droppedSecretNote } from '../droppedSecretText.js';
@@ -31,6 +34,7 @@ import {
   CHART_MODES, seriesGeometryBps, chartCutNote, faultKindLabel, faultRowView, faultEventText, faultKpi, faultScanNote, FAULT_INTRO,
   sampleRows, SAMPLE_NOTE, PREVIEW_NOTE, previewSummary, previewColumns, sampleBadge, SYS_HIGH_PCT,
   eventDeviceRefs, eventDeviceSort,
+  epSummaryText,   // v2.940 위치 조회 주기 요약
 } from './cvpText.js';
 import Select from '../../components/Select.jsx';
 import useSearchHandoff from '../../hooks/useSearchHandoff.js'; // v2.909 헤더 ⌘K 통합 장비 검색 — 검색어 인계
@@ -191,6 +195,8 @@ export default function CvpTool() {
       {view !== 'overview' && kpiNote && <div style={NOTE}><BoldText text={kpiNote} /></div>}
       {view !== 'overview' && unconfirmedNote(kpiTotals) && <div style={NOTE}><BoldText text={unconfirmedNote(kpiTotals)} /></div>}
 
+      {/* 등록부를 못 읽은 동안 — 설정 탭 밖에서도 말한다(Chromium 검증: 개요 탭은 '장비 0' 만 보이고 안내가 없었다). 설정 탭은 등록부 카드 안에 같은 안내가 있다. */}
+      {view !== 'settings' && <RegistryUnreadBanner le={unreadMarkOf(data)} what="CVP 서버 등록부" />}
       <div style={ROW}>
         {[['overview', 'Overview'], ['devices', '장비'], ['models', '모델'], ['traffic', '트래픽'], ['intf', '인터페이스 세부 정보'], ['ports', '포트 사용량'], ['optics', '광신호'], ['power', '전력'], ['events', '이벤트'], ['settings', 'CVP 설정']].map(([k, l]) => (
           <button key={k} type="button" className={`tab${view === k ? ' active' : ''}`} onClick={() => setView(k)}>{l}</button>
@@ -292,16 +298,17 @@ export default function CvpTool() {
       {view === 'settings' && (<>
       <div className="card" style={{ minWidth: 0 }}>
         <b>CVP 서버 {servers.length}대</b>
+        <RegistryUnreadBanner le={unreadMarkOf(data)} what="CVP 서버 등록부" style={{ marginTop: 8, marginBottom: 0 }} />
         {stopped.map((s) => (
           <div key={`stop-${s.id}`} className="banner" style={{ marginTop: 8, borderColor: 'var(--red)' }}>
             <BoldText text={authStopText(s.status.authStopped, s.name || s.id)} />
           </div>
         ))}
         {servers.length === 0 ? (
-          <div style={{ ...NOTE, marginTop: 8 }}>등록된 CVP 서버가 없습니다. {isAdmin ? '아래 ‘등록·설정’ 에서 추가하세요.' : ''}</div>
+          <div style={{ ...NOTE, marginTop: 8 }}>{registryEmptyText(unreadMarkOf(data), 'CVP 서버 등록부') || `등록된 CVP 서버가 없습니다. ${isAdmin ? '아래 ‘등록·설정’ 에서 추가하세요.' : ''}`}</div>
         ) : (
-          <STable minWidth={760} style={{ marginTop: 8 }}>
-            <thead><tr><th>이름</th><th>주소</th><th>수집 위치</th><th>인증</th><th>상태</th><th>장비</th><th>수집 시각</th><th>읽은 경로</th></tr></thead>
+          <STable minWidth={920} style={{ marginTop: 8 }}>
+            <thead><tr><th>이름</th><th>주소</th><th>수집 위치</th><th>인증</th><th>상태</th><th>장비</th><th>수집 시각</th><th>읽은 경로</th><th>위치 조회(주기)</th></tr></thead>
             <tbody>
               {servers.map((s) => {
                 const st = s.status || {};
@@ -321,6 +328,10 @@ export default function CvpTool() {
                       {used.length ? `${used.length}개 항목` : '—'}{miss.length ? ` · 미확인 ${miss.length}` : ''}
                       {st.cvpVersion ? <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>CVP {st.cvpVersion}</div> : null}
                     </td>
+                    {(() => { const e = epSummaryText(st.endpoints); return (
+                      <td style={{ fontSize: 12, whiteSpace: 'normal', minWidth: 160, color: e.warn ? 'var(--amber)' : undefined }} title={e.title} data-sort={st.endpoints?.asked ?? undefined}>
+                        {e.text}{st.endpoints?.at ? <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>{agoText(st.endpoints.at)}</div> : null}
+                      </td>); })()}
                   </tr>
                 );
               })}
@@ -459,8 +470,8 @@ function DeviceModal({ target, onClose, onIntf }) {
                 <span>포트 이름을 누르면 사용률 추이를 봅니다. 사용률은 인터페이스 속도를 알 때만 방향별로 계산합니다. 설명은 부품 주기(기본 30분)마다 읽습니다.</span>
                 {onIntf && <button type="button" className="btn" style={{ padding: '2px 8px' }} onClick={() => onIntf(`${target.cvpId}|${target.key}`)}>인터페이스 세부 정보로 보기</button>}
               </div>
-              <STable minWidth={980} limit={1024}>
-                <thead><tr><th>포트</th><th>설명</th><th>속도</th><th>상태</th><th>관리</th><th>VLAN</th><th>LAG</th><th>수신</th><th>송신</th><th>수신 %</th><th>송신 %</th><th>오류(수/송)</th></tr></thead>
+              <STable minWidth={1060} limit={1024}>
+                <thead><tr><th>포트</th><th>설명</th><th>속도</th><th>상태</th><th>관리</th><th>VLAN</th><th>LAG</th><th>수신</th><th>송신</th><th>수신 %</th><th>송신 %</th><th>오류(수/송)</th><th title="스위치 discards 직전 주기 델타 — 텔레메트리 필드 이름은 실장비 미확인 추정">드롭(수/송)</th></tr></thead>
                 <tbody>
                   {ports.filter((p) => p && typeof p === 'object').slice().sort(byIntfName).map((p) => (
                     <tr key={p.name}>
@@ -477,6 +488,7 @@ function DeviceModal({ target, onClose, onIntf }) {
                       <td data-sort={p.inUtil ?? ''}>{pctText(p.inUtil)}</td>
                       <td data-sort={p.outUtil ?? ''}>{pctText(p.outUtil)}</td>
                       <td>{countText(p.inErr)} / {countText(p.outErr)}</td>
+                      <td data-sort={p.inDrop == null && p.outDrop == null ? '' : (p.inDrop ?? 0) + (p.outDrop ?? 0)}>{countText(p.inDrop)} / {countText(p.outDrop)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -754,8 +766,8 @@ function PortUsageCard({ servers, onOpen }) {
           {ports.length === 0 ? (
             <div style={{ ...NOTE, marginTop: 8 }}>{minUtil > 0 ? `사용률 ${minUtil}% 이상인 포트가 없습니다(사용률을 계산한 포트 기준).` : '사용률을 계산한 포트가 아직 없습니다 — 처리량은 두 번째 수집 주기부터 나오고, 포트 카운터를 읽지 못하면 계산하지 않습니다.'}</div>
           ) : (
-            <STable minWidth={900} style={{ marginTop: 8 }}>
-              <thead><tr><th>장비</th><th>포트</th><th>설명</th><th>속도</th><th>사용률(최대)</th><th>수신</th><th>송신</th><th>오류(수/송)</th><th>CVP</th><th>측정</th></tr></thead>
+            <STable minWidth={980} style={{ marginTop: 8 }}>
+              <thead><tr><th>장비</th><th>포트</th><th>설명</th><th>속도</th><th>사용률(최대)</th><th>수신</th><th>송신</th><th>오류(수/송)</th><th title="스위치 discards 직전 주기 델타 — 텔레메트리 필드 이름은 실장비 미확인 추정">드롭(수/송)</th><th>CVP</th><th>측정</th></tr></thead>
               <tbody>
                 {ports.map((p) => (
                   <tr key={`${p.agent}|${p.cvpId}|${p.key}|${p.port}`}>
@@ -767,6 +779,7 @@ function PortUsageCard({ servers, onOpen }) {
                     <td data-sort={p.inBps ?? ''} style={{ fontSize: 12 }}>{rateText(p.inBps, p.inUtil)}</td>
                     <td data-sort={p.outBps ?? ''} style={{ fontSize: 12 }}>{rateText(p.outBps, p.outUtil)}</td>
                     <td style={{ fontSize: 12 }}>{countText(p.inErr)} / {countText(p.outErr)}</td>
+                    <td style={{ fontSize: 12 }} data-sort={p.inDrop == null && p.outDrop == null ? '' : (p.inDrop ?? 0) + (p.outDrop ?? 0)}>{countText(p.inDrop)} / {countText(p.outDrop)}</td>
                     <td style={{ fontSize: 12 }}>{p.cvpName || p.cvpId}</td>
                     <td style={{ fontSize: 12 }} data-sort={p.rateAt || 0}>{agoText(p.rateAt)}</td>
                   </tr>
@@ -1157,7 +1170,8 @@ function AdminPanel({ onChanged }) {
     if (issue) { setFormNote({ ok: false, text: issue }); return; }
     setBusy(true); setFormNote(null);
     try {
-      const r = isNew ? await postJson('/tools/cvp/servers', body) : await putJson(`/tools/cvp/servers/${encodeURIComponent(form.id)}`, body);
+      // 128회차: postJson 은 409 · putJson 은 409 · 400 을 던지지 않고 본문을 준다 — 등록부 읽기 오류 · 입력 거절(엣지 · 법인 값)에 창을 닫고 ‘저장했습니다.’ 라고 했다.
+      const r = requireChanged(isNew ? await postJson('/tools/cvp/servers', body) : await putJson(`/tools/cvp/servers/${encodeURIComponent(form.id)}`, body));
       const dropped = droppedSecretNote(r);
       await loadAll(); onChanged && onChanged();
       if (dropped) { setFormNote({ ok: false, text: dropped }); setForm((f) => ({ ...f, id: (r && (r.id || (r.server && r.server.id))) || f.id })); }
@@ -1168,7 +1182,7 @@ function AdminPanel({ onChanged }) {
 
   const remove = async (s) => {
     if (!window.confirm(`${s.name || s.id} 을(를) 삭제할까요? 수집된 이력은 보존 기간에 따라 정리됩니다.`)) return;
-    try { await delJson(`/tools/cvp/servers/${encodeURIComponent(s.id)}`); await loadAll(); onChanged && onChanged(); }
+    try { requireChanged(await delJson(`/tools/cvp/servers/${encodeURIComponent(s.id)}`)); await loadAll(); onChanged && onChanged(); }   // 112회차: 409(등록부 읽기 오류) 본문을 삼키지 않는다
     catch (e) { setSmsg({ ok: false, text: `삭제 실패: ${e.message || e}` }); }
   };
 
@@ -1187,7 +1201,7 @@ function AdminPanel({ onChanged }) {
   const saveSettings = async () => {
     setBusy(true); setSmsg(null);
     try {
-      const r = await putJson('/tools/cvp/settings', settingsPayload(sform));
+      const r = requireChanged(await putJson('/tools/cvp/settings', settingsPayload(sform)));
       setSform(settingsToForm(r && r.settings ? r.settings : r));
       setSmsg({ ok: true, text: '설정을 저장했습니다(빈 칸은 이전 값을 유지합니다).' });
       onChanged && onChanged();
@@ -1200,6 +1214,8 @@ function AdminPanel({ onChanged }) {
   const set = (k) => (e) => { const v = e.target.type === 'checkbox' ? e.target.checked : e.target.value; setForm((f) => ({ ...f, [k]: v })); };
   const sset = (k) => (e) => { const v = e.target.type === 'checkbox' ? e.target.checked : e.target.value; setSform((f) => ({ ...f, [k]: v })); };
   const LBL = { fontSize: 12, display: 'grid', gap: 2, minWidth: 0 };
+  // Chromium 검증(1440): 전역 .input 의 min-width 220px 이 수집 설정 칸(열 폭 약 190px)보다 넓어 입력칸이 옆 칸을 덮고 마지막 칸은 카드 밖으로 나갔다 — 칸은 열 폭을 넘지 않게.
+  const GIN = { width: '100%', minWidth: 0, boxSizing: 'border-box' };
 
   return (
     <div style={{ display: 'grid', gap: 12, marginTop: 10, minWidth: 0 }}>
@@ -1208,15 +1224,17 @@ function AdminPanel({ onChanged }) {
         <b>수집 설정</b>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(170px,100%),1fr))', gap: 8, marginTop: 6 }}>
           <label style={{ ...LBL, alignContent: 'end' }}><span><input type="checkbox" checked={!!sform.enabled} onChange={sset('enabled')} /> 수집 켜기</span></label>
-          <label style={LBL}>주기(분, 하한 1)<input className="input" inputMode="decimal" value={sform.intervalMin} onChange={sset('intervalMin')} /></label>
-          <label style={LBL}>원시 보존(일)<input className="input" inputMode="numeric" value={sform.rawRetentionDays} onChange={sset('rawRetentionDays')} /></label>
-          <label style={LBL}>일 롤업 보존(일)<input className="input" inputMode="numeric" value={sform.dailyRetentionDays} onChange={sset('dailyRetentionDays')} /></label>
-          <label style={LBL}>동시 수집 수<input className="input" inputMode="numeric" value={sform.concurrency} onChange={sset('concurrency')} /></label>
-          <label style={LBL}>CVP 당 시한(초)<input className="input" inputMode="numeric" value={sform.deviceTimeoutSec} onChange={sset('deviceTimeoutSec')} /></label>
-          <label style={LBL} title="링크가 올라온 포트의 수신 광량이 이 값 이하이면 주의(장비가 임계를 주면 그것이 먼저입니다)">광신호 주의(dBm 이하)<input className="input" inputMode="decimal" value={sform.xcvrRxWarnDbm} onChange={sset('xcvrRxWarnDbm')} /></label>
-          <label style={LBL} title="링크가 올라온 포트의 수신 광량이 이 값 이하이면 장애로 판정합니다">광신호 장애(dBm 이하)<input className="input" inputMode="decimal" value={sform.xcvrRxFaultDbm} onChange={sset('xcvrRxFaultDbm')} /></label>
+          <label style={LBL}>주기(분, 하한 1)<input className="input" style={GIN} inputMode="decimal" value={sform.intervalMin} onChange={sset('intervalMin')} /></label>
+          <label style={LBL}>원시 보존(일)<input className="input" style={GIN} inputMode="numeric" value={sform.rawRetentionDays} onChange={sset('rawRetentionDays')} /></label>
+          <label style={LBL}>일 롤업 보존(일)<input className="input" style={GIN} inputMode="numeric" value={sform.dailyRetentionDays} onChange={sset('dailyRetentionDays')} /></label>
+          <label style={LBL}>동시 수집 수<input className="input" style={GIN} inputMode="numeric" value={sform.concurrency} onChange={sset('concurrency')} /></label>
+          <label style={LBL}>CVP 당 시한(초)<input className="input" style={GIN} inputMode="numeric" value={sform.deviceTimeoutSec} onChange={sset('deviceTimeoutSec')} /></label>
+          <label style={LBL} title="링크가 올라온 포트의 수신 광량이 이 값 이하이면 주의(장비가 임계를 주면 그것이 먼저입니다)">광신호 주의(dBm 이하)<input className="input" style={GIN} inputMode="decimal" value={sform.xcvrRxWarnDbm} onChange={sset('xcvrRxWarnDbm')} /></label>
+          <label style={LBL} title="링크가 올라온 포트의 수신 광량이 이 값 이하이면 장애로 판정합니다">광신호 장애(dBm 이하)<input className="input" style={GIN} inputMode="decimal" value={sform.xcvrRxFaultDbm} onChange={sset('xcvrRxFaultDbm')} /></label>
           <label style={{ ...LBL, alignContent: 'end' }} title="부품 장애·포트 down·BGP down 전이가 생길 때 알림 채널(설정 › 알림)로 보냅니다. 전이 기록은 이 값과 무관하게 남습니다."><span><input type="checkbox" checked={!!sform.faultAlerts} onChange={sset('faultAlerts')} /> 장애 전이 알림</span></label>
           <label style={{ ...LBL, alignContent: 'end' }}><span><input type="checkbox" checked={sform.faultAlertsClosed !== false} onChange={sset('faultAlertsClosed')} disabled={!sform.faultAlerts} /> 해소도 알림</span></label>
+          <label style={{ ...LBL, alignContent: 'end' }} title="부품 주기(30분)마다 호스트 NIC · 최근 이동 VM · 나머지 VM MAC 을 CVP EndpointLocation 에 묻습니다(CVP 2021.1 이상). 끄면 화면의 ‘지금 조회’ 버튼만 남습니다."><span><input type="checkbox" checked={sform.endpointScan !== false} onChange={sset('endpointScan')} /> 위치(EndpointLocation) 주기 조회</span></label>
+          <label style={LBL} title="CVP 서버 하나에 한 주기 동안 묻는 MAC 수 — 요청 1회 = MAC 1개, 나머지는 다음 주기">위치 조회 상한(주기당 MAC)<input className="input" style={GIN} inputMode="numeric" value={sform.endpointPerCycle} onChange={sset('endpointPerCycle')} disabled={sform.endpointScan === false} /></label>
         </div>
         <div style={{ ...ROW, marginTop: 6 }}>
           <button type="button" className="btn" onClick={saveSettings} disabled={busy}>설정 저장</button>

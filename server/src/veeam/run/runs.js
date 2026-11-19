@@ -17,7 +17,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config, clampIntervalMs } from '../../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../../util/atomicWrite.js';
+import { makeJsonFileReader } from '../../util/jsonFileRead.js';   // 94회차 F2: 읽기 오류 ≠ 손상
 import { registerStateFile } from '../../util/stateFiles.js';
 import { getServerWithSecret } from '../registry.js';
 import { dispatchOp } from './dispatch.js';
@@ -38,15 +39,25 @@ const FINAL = new Set(['success', 'warning', 'failed', 'skipped', 'unknown']);
 let _runs = null;
 let _timer = null;
 let _tracking = false;
+const _trackBusy = new Set();   // 지금 세션을 읽는 서버 id(전체 점검 2회차 V-4 — 서버마다 가드)
 
+/*
+ * 94회차 F2(재현): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 예전에는 catch 하나로 받아 실행 기록을 `.corrupt.*` 로 옮기고 빈 기록으로 돌았다:
+ *   진행 중 실행이 사라져 서버별 409 가드(serverBusy)가 풀리고(같은 서버로 백업 · 빼기 · 삭제가 다시 열림), 다음 저장이 한 건만 든 파일을 썼다.
+ *   이제 원본을 두고 · 캐시하지 않고(30초 간격 재읽기 — 읽히면 그때 재시작 복구를 한다) · 그동안은 **모든 서버를 바쁨으로** 본다(진행 중 실행을 모른다)
+ *   · 저장하지 않는다. 손상(JSON 파싱 실패)은 예전과 같다(보존본 + 빈 기록).
+ */
+const _reader = makeJsonFileReader(() => FILE(), { parse: (t) => JSON.parse(t), tag: 'veeam-run' });
+let _readErr = null;
+/** 실행 기록 파일 읽기 오류({ code }) 또는 null. */
+export function runsLoadError() { load(); return _readErr; }
 function load() {
   if (_runs) return _runs;
-  _runs = [];
-  if (!fs.existsSync(FILE())) return _runs;
-  try {
-    const raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
-    _runs = Array.isArray(raw?.runs) ? raw.runs.filter((r) => r && typeof r === 'object' && typeof r.id === 'string' && Array.isArray(r.vms) && Array.isArray(r.groups)) : [];
-  } catch (e) { preserveCorrupt(FILE(), e?.message); _runs = []; }   // 손상 원본은 보존(감사 근거)하고 빈 기록으로 시작
+  const r = _reader.read();
+  if (r.kind === 'read-error') { _readErr = { code: String(r.error?.code || 'read-error').slice(0, 32) }; return []; }   // 캐시하지 않는다
+  _readErr = null;
+  const raw = r.kind === 'ok' ? r.value : null;   // missing · corrupt(reader 가 보존본으로 옮겼다 — 감사 근거) → 빈 기록
+  _runs = Array.isArray(raw?.runs) ? raw.runs.filter((x) => x && typeof x === 'object' && typeof x.id === 'string' && Array.isArray(x.vms) && Array.isArray(x.groups)) : [];
   // 파일에서 읽은 실행은 **이전 프로세스의 것**이다 — 읽는 이 순간(동기)에만 복구한다. 기동 뒤 타이머에서 복구하면
   // 그 사이 이 프로세스가 시작한 살아 있는 실행까지 '재시작으로 끊김' 으로 닫는다(2차 반증 N1 — 이중 실행 문이 열린다).
   if (recoverRuns(_runs)) persist();
@@ -57,7 +68,8 @@ function trim(runs) {
   for (let i = runs.length - 1; runs.length > MAX_RUNS && i >= 0; i--) if (runs[i].status !== 'running') runs.splice(i, 1);
 }
 function persist() {
-  try { atomicWriteFileSync(FILE(), JSON.stringify({ version: 1, runs: load() }), { mode: 0o600 }); }
+  if (!_runs) { console.warn('[veeam-run] 실행 기록 파일을 읽지 못한 상태라 저장하지 않았습니다(원본을 덮지 않음)'); return; }   // 94회차 F2: 읽기 오류 중(캐시 없음)
+  try { atomicWriteFileSync(FILE(), JSON.stringify({ version: 1, runs: _runs }), { mode: 0o600 }); }
   catch (e) { console.warn(`[veeam-run] 실행 기록 저장 실패: ${e?.message || e}`); }
 }
 
@@ -74,6 +86,8 @@ export function activeRunFor(serverId) { return load().find((r) => r.status === 
 const _manageBusy = new Map();   // serverId → { id, kind, at, user }
 /** 이 서버로 진행 중인 실행 또는 관리 작업 — { id, kind } | null. 백업 실행·복원·빼기·삭제가 모두 이것을 본다. */
 export function serverBusy(serverId) {
+  // 94회차 F2: 실행 기록을 읽지 못하면 진행 중 실행을 모른다 — 바쁨으로 본다(이중 실행 · 진행 중 잡 고치기 방지)
+  if (runsLoadError()) return { id: '', kind: 'runs-unreadable', reason: `백업 실행 기록 파일(${FILE_NAME})을 읽지 못해(읽기 오류 — 원본은 그대로 있습니다) 진행 중인 요청을 확인할 수 없습니다 — 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽습니다).` };
   const run = activeRunFor(serverId);
   if (run) return { id: run.id, kind: run.mode || 'run' };
   return _manageBusy.get(serverId) || null;
@@ -86,6 +100,8 @@ export function claimServer(serverId, kind, user = '') {
   return token;
 }
 export function releaseServer(serverId, token) { if (_manageBusy.get(serverId) === token) _manageBusy.delete(serverId); }
+/** 진행 중인 관리 작업 자리(업그레이드 대기 — veeam/run/inflight.js · 사용자 · 토큰 없이 서버 · 종류 · 시각만). */
+export function manageBusyView() { return [..._manageBusy].map(([serverId, t]) => ({ serverId, kind: t.kind, at: t.at })); }
 
 const vmState = (s) => {
   const t = String(s || '').toLowerCase();
@@ -109,6 +125,7 @@ function settle(run) {
  * 반환은 run(즉시 — 실제 요청은 비동기로 이어진다).
  */
 export function startRun(plan, { user = '', vcById = new Map(), mode = 'quick' } = {}) {
+  if (runsLoadError()) throw new Error('백업 실행 기록 파일을 읽지 못해 실행을 시작하지 않았습니다.');   // 94회차 F2: 마지막 방어선(라우트는 serverBusy 로 먼저 막는다)
   const runs = load();
   const prefix = getRunSettings().jobPrefix;
   const run = {
@@ -220,11 +237,18 @@ export function applySession(run, sessionId, s) {
   }
 }
 
-/** 추적 1회 — 끝나지 않은 세션을 서버마다 한 번에 읽는다(재진입 가드). */
+/**
+ * 추적 1회 — 끝나지 않은 세션을 서버마다 한 번에 읽는다.
+ * 전체 점검 2회차(V-4): 가드는 **서버마다**(`_trackBusy`) — 예전 전역 가드는 꺼진 엣지 하나의 회신 시한(인출 + sessions 최대 약 5분) 동안
+ *   다음 틱을 통째로 건너뛰어, 다른 서버(중앙 직접 등)의 진행률 · 결과 · 409 해제가 20초가 아니라 몇 분씩 늦었다(N8 주석과 어긋남).
+ *   이제 그 서버만 건너뛰고 나머지는 다음 틱에 읽는다. 모으기(동기 구간)는 `_tracking` 이 겹치지 않게 한다.
+ */
 export async function trackOnce(now = Date.now()) {
   if (_tracking) return { skipped: true };
   _tracking = true;
   let changed = false;
+  const mine = [];   // 이번 틱이 맡은 서버
+  const held = new Set();   // 이번 틱이 아직 쥔 서버 id(서버마다 끝나면 뺀다)
   try {
     const active = load().filter((r) => r.status === 'running');
     for (const run of active) {
@@ -240,8 +264,17 @@ export async function trackOnce(now = Date.now()) {
         for (const s of g.sessions) if (!s.finished && s.id) { const a = byServer.get(g.serverId) || []; a.push({ run, g, s }); byServer.set(g.serverId, a); }
       }
     }
-    // 서버마다 병렬(동시 4) — 꺼진 엣지 하나의 회신 시한이 다른 서버의 추적을 늦추지 않게(2차 반증 N8).
-    await poolRun([...byServer], TRACK_CONCURRENCY, async ([serverId, list]) => {
+    for (const e of byServer) if (!_trackBusy.has(e[0])) { _trackBusy.add(e[0]); mine.push(e); held.add(e[0]); }
+  } catch (e) {
+    for (const sid of held) _trackBusy.delete(sid);
+    _tracking = false;
+    if (changed) persist();
+    throw e;
+  }
+  _tracking = false;   // 모으기 끝 — 아래 회신 대기 동안 다음 틱이 다른 서버를 읽는다
+  try {
+    // 서버마다 병렬(동시 4) — 꺼진 엣지 하나의 회신 시한이 다른 서버의 추적을 늦추지 않게(2차 반증 N8 · 다음 틱까지 — V-4).
+    async function trackServer(serverId, list) {
       const server = getServerWithSecret(serverId);
       if (!server) {
         for (const { run, s } of list) { s.finished = true; for (const v of run.vms) if (v.sessionId === s.id && !FINAL.has(v.state)) { v.state = 'unknown'; v.detail = 'Veeam 서버 등록이 삭제돼 결과를 읽을 수 없습니다.'; } }
@@ -259,13 +292,16 @@ export async function trackOnce(now = Date.now()) {
         applySession(run, s.id, x);
         changed = true;
       }
-    });
+    }
+    // 2회차 반증 R-4: 서버마다 회신을 받는 즉시 그 서버의 가드를 푼다 — 틱 끝(가장 느린 서버)까지 붙잡으면 같은 틱에 묶인 빠른 서버가 다음 틱들에서 건너뛰어졌다.
+    //   이 틱이 아직 쥔 서버만(held) 푼다 — 먼저 푼 서버를 다음 틱이 다시 쥐었으면 그 가드를 지우지 않는다.
+    await poolRun(mine, TRACK_CONCURRENCY, async ([serverId, list]) => { try { await trackServer(serverId, list); } finally { held.delete(serverId); _trackBusy.delete(serverId); } });
     for (const run of load().filter((r) => r.status === 'running')) {
       for (const g of run.groups) if (g.state === 'running' && g.sessions.every((s) => s.finished || !s.id)) g.state = 'done';
       settle(run);
     }
   } finally {
-    _tracking = false;
+    for (const sid of held) _trackBusy.delete(sid);   // 예외 경로 대비(정상 경로는 서버마다 이미 풀었다 — 다음 틱이 다시 쥔 서버는 건드리지 않는다)
     if (changed) persist();
   }
   return { ok: true };
@@ -311,4 +347,4 @@ export function startVeeamRunTracker() {
   _timer.unref?.();
 }
 
-export function _resetForTest() { _runs = null; _tracking = false; _manageBusy.clear(); try { fs.rmSync(FILE()); } catch { /* 없음 */ } }
+export function _resetForTest() { _runs = null; _readErr = null; _reader.reset(); _tracking = false; _trackBusy.clear(); _manageBusy.clear(); try { fs.rmSync(FILE()); } catch { /* 없음 */ } }

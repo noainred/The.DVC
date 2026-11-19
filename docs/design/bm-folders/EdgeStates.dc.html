@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>물리서버 폴더 — 엣지 포탈 상태 9가지</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./bmf.css">
+<link rel="stylesheet" href="./bmf2.css">
+<link rel="stylesheet" href="./bmfe.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+</style>
+</helmet>
+<div class="root" style="width:1440px;height:900px;padding:18px 20px;gap:12px">
+  <p class="intro" style="max-width:none">엣지 포탈의 물리서버 폴더 화면이 놓일 수 있는 상태. 원칙 셋 — <b style="color:#e6edf6">받은 시각과 판본을 숨기지 않는다</b> · <b style="color:#e6edf6">받지 못해도 마지막 사본을 지우지 않는다</b> · <b style="color:#e6edf6">서버 값은 이 엣지의 지금 값</b>(중앙을 왕복하지 않는다).</p>
+  <div class="grid3">
+
+    <div class="card st">
+      <h3><span class="n">a</span>정상 — 사본 띠</h3>
+      <div class="sync" role="status">
+        <span class="si"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 4v5h-5"></path><path d="M4 12a8 8 0 0 1 14-5l2 2"></path><path d="M4 20v-5h5"></path><path d="M20 12a8 8 0 0 1-14 5l-2-2"></path></svg></span>
+        <span style="flex:none"><b>중앙에서 받은 폴더</b></span>
+        <span class="sv2"><span class="sk">판본</span><b class="mono">r128</b></span>
+        <span class="sv2"><b>3분 전</b><span class="sk">받음</span></span>
+        <button class="btn sm sp" type="button">지금 받기</button>
+      </div>
+      <p>판본 · 받은 시각 · 다음 받기를 늘 보인다. ‘지금 받기’ 는 쓰기 계정(관리자 · 운영자)만 — 주기를 기다리지 않고 한 번 받아 온다.</p>
+    </div>
+
+    <div class="card st">
+      <h3><span class="n">b</span>방금 받음 — 바뀐 것</h3>
+      <div class="sync" role="status">
+        <span class="si"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"></path></svg></span>
+        <span><b>방금 받았습니다</b> · <span class="mono">r128 → r129</span></span>
+      </div>
+      <div class="mini">
+        <span class="ln"><span class="bdg g">폴더 +1</span><span>GPU › 학습</span></span>
+        <span class="ln"><span class="bdg c">등록 +3</span><span class="dim">pl-gpu-05 · 06 · 07</span></span>
+        <span class="ln"><span class="bdg n">옮김 2</span><span class="bdg w">빠짐 1</span><span class="dim">→ (미분류)</span></span>
+      </div>
+      <p>받은 직후 한 번만 요약을 보인다. 바뀐 것이 없으면 ‘같은 판본입니다’ 한 줄.</p>
+    </div>
+
+    <div class="card st">
+      <h3><span class="n">c</span>중앙과 끊김 — 마지막 사본 유지</h3>
+      <div class="sync w" role="status">
+        <span class="si"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 8v5"></path><path d="M12 17h.01"></path><path d="M10.3 3.9L2.6 17.5A2 2 0 0 0 4.3 20.5h15.4a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"></path></svg></span>
+        <span><b>중앙과 26시간째 연결되지 않습니다</b> — 마지막으로 받은 폴더(<span class="mono">r128</span> · 11-12 04:03)를 보여 줍니다.</span>
+        <button class="btn sm sp" type="button">다시 시도</button>
+      </div>
+      <p>그 사이 중앙에서 바뀐 것은 여기에 없다 — 그 사실을 문장으로 말한다. 사본은 지우지 않는다(한 번의 회선 장애로 폴더가 사라지지 않게). 상단 바의 ‘중앙 연결’ 알약도 같은 색.</p>
+    </div>
+
+    <div class="card st">
+      <h3><span class="n">d</span>받은 적 없음</h3>
+      <div class="sync n" role="status">
+        <span class="si"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v5"></path><path d="M12 16.5h.01"></path></svg></span>
+        <span><b>아직 중앙에서 폴더를 받지 못했습니다</b> — 서버는 모두 (미분류)로 보입니다.</span>
+      </div>
+      <div class="mini">
+        <span class="ln"><span class="bdg n">이유</span><span>중앙에 닿지 못했습니다(연결 실패 · 시간 초과)</span></span>
+        <span class="ln"><span class="bdg n">또는</span><span>중앙이 이 엣지의 토큰을 거부했습니다(403)</span></span>
+        <span class="ln"><span class="bdg n">또는</span><span>첫 받기 전입니다 — 기동 뒤 1분 안에 받습니다</span></span>
+      </div>
+      <p>빈 트리를 ‘폴더가 없다’ 로 보이지 않는다 — 못 받은 것과 없는 것을 가른다. 이유는 워커가 기록한 것 하나만. 중앙 연결 설정이 아예 없는 포탈은 엣지가 아니다 — 지금처럼 자기 저장소로 동작한다.</p>
+    </div>
+
+    <div class="card st">
+      <h3><span class="n">e</span>중앙이 이전 판본</h3>
+      <div class="sync w" role="status">
+        <span class="si"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 8v5"></path><path d="M12 17h.01"></path><path d="M10.3 3.9L2.6 17.5A2 2 0 0 0 4.3 20.5h15.4a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"></path></svg></span>
+        <span><b>중앙 포탈이 폴더를 내려 주지 않는 판본입니다</b> — 중앙을 올리면 받기 시작합니다.</span>
+      </div>
+      <p>중앙이 404 를 주면(기능 없음) 사본이 있으면 그대로 두고, 없으면 d 와 같다. 엣지가 먼저 올라가는 순서(엣지 → 중앙)에서 한동안 보이는 상태.</p>
+    </div>
+
+    <div class="card st">
+      <h3><span class="n">f</span>이 엣지에서 예전에 만든 폴더</h3>
+      <div class="band i">
+        <span>이 엣지에 예전에 만든 폴더 <b>3개</b> · 등록 <b>12대</b>가 따로 저장돼 있습니다. 중앙 사본을 받는 동안에는 쓰이지 않습니다.</span>
+        <span class="row"><button class="btn sm" type="button">목록 보기</button><button class="btn sm" type="button">CSV 로 내려받기</button></span>
+      </div>
+      <p>v2.984 ~ v2.989 사이 엣지 포탈에서 직접 만든 폴더. 지우지 않고, 자동으로 중앙에 합치지도 않는다(이름이 겹칠 수 있다) — 어떻게 할지는 결정 사항.</p>
+    </div>
+
+    <div class="card st">
+      <h3><span class="n">g</span>중앙과 이 엣지의 목록이 다를 때</h3>
+      <div class="mini">
+        <span class="ln"><span class="fo out"></span><b>이 엣지 밖 등록 3</b><span class="dim">중앙 폴더에는 있고 여기 목록엔 없음</span></span>
+        <span class="ln" style="padding-left:21px"><span class="bdg n">중앙이 직접 수집 2</span><span class="bdg w">이 엣지에서 빠짐 1</span></span>
+        <span class="ln"><span class="fo un"></span><b>중앙이 아직 모르는 서버 2</b><span class="dim">여기선 (미분류)</span></span>
+        <span class="ln" style="padding-left:21px"><span class="dim">다음 보고가 올라간 뒤 중앙에서 분류합니다</span></span>
+      </div>
+      <p>두 목록이 다른 것을 숨기지 않고 따로 센다. ‘이 엣지 밖 등록’ 은 합계 · 평균에 넣지 않는다(값이 없다).</p>
+    </div>
+
+    <div class="card st">
+      <h3><span class="n">h</span>조회 계정</h3>
+      <div class="sync" role="status">
+        <span class="si"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 4v5h-5"></path><path d="M4 12a8 8 0 0 1 14-5l2 2"></path><path d="M4 20v-5h5"></path><path d="M20 12a8 8 0 0 1-14 5l-2-2"></path></svg></span>
+        <span style="flex:none"><b>중앙에서 받은 폴더</b></span>
+        <span class="sv2"><span class="sk">판본</span><b class="mono">r128</b></span>
+        <span class="sv2"><b>3분 전</b><span class="sk">받음</span></span>
+      </div>
+      <p>같은 화면에서 ‘지금 받기’ · ‘중앙에서 편집’ 만 빠진다. 서비스 태그 · 관리 주소 가림은 엣지 포탈의 기존 규칙 그대로.</p>
+    </div>
+
+    <div class="card st">
+      <h3><span class="n">i</span>이 엣지가 법인 둘을 수집할 때</h3>
+      <div class="mini">
+        <span class="ln"><span class="co"></span><b>vcenter-pl-waw-01</b><span class="bdg n sp">44</span></span>
+        <span class="ln" style="padding-left:21px"><span class="fo"></span><span>DB</span><span class="dim">12</span><span class="fo"></span><span>WEB</span><span class="dim">14</span><span class="dim">…</span></span>
+        <span class="ln"><span class="co"></span><b>vcenter-pl-krk-01</b><span class="bdg n sp">9</span></span>
+        <span class="ln" style="padding-left:21px"><span class="fo"></span><span>DB</span><span class="dim">5</span><span class="fo un"></span><span style="color:#fbbf24">(미분류)</span><span class="dim">4</span></span>
+      </div>
+      <p>트리 맨 위가 법인(중앙 화면과 같은 모양). 사본 띠는 하나 — 한 번에 받고 판본도 하나다. 대부분의 엣지는 법인 하나라 첫 단이 접혀 보인다.</p>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

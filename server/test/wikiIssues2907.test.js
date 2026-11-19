@@ -6,7 +6,7 @@
  *  4 다른 스페이스로 옮기기(하위 문서 함께 · 두 스페이스 쓰기 범위)
  *  5 이슈 템플릿(내장 3 + 관리자 30 · 전체 범위 관리자만 쓰기)
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -15,11 +15,18 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { pageRefsOf, resolveRef } from '../src/wiki/store.js';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
 
 function run(body, { env = {} } = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'c2907-'));
+  const dir = tmpDir('c2907-');
   const script = `
     const express = (await import('express')).default;
     const { api } = await import(${JSON.stringify(path.join(SRC, 'routes/api.js'))});
@@ -139,7 +146,8 @@ test('1 · 2 · 3 · 4 — 댓글 고치기 · 휴지통 · 링크 · 옮기기'
     await call('DELETE', '/wiki/pages/' + e.id);
     out.expired = wk.purgeExpiredTrash(Date.now() + 31 * 86400000);
   `);
-  assert.deepEqual(out.edit, { s: 200, edits: 1, prev: 1 });
+  // v2.932(점검 B1-01): 고치기 응답에도 고치기 전 원문(prev)을 싣지 않는다 — 저장은 그대로(sweep2932Issues 가 저장 · 응답을 함께 고정)
+  assert.deepEqual(out.edit, { s: 200, edits: 1 }); // prev 칸이 없다(JSON 으로 옮겨 undefined 는 빠진다)
   assert.deepEqual(out.editMails, ['lee@x.co'], '고친 댓글은 새로 언급한 사람에게만');
   assert.equal(out.editOther, 403);
   assert.deepEqual(out.issueEdit, { s: 200, body: '고친 글', edited: true });

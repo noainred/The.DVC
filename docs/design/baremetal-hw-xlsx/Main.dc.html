@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>통합 서버 인벤토리 — 하드웨어 정보 내보내기 버튼</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Noto+Sans+KR:wght@400;500;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#60a5fa}a:hover{color:#93c5fd}
+button{font-family:inherit}
+</style>
+</helmet>
+<div style="width: 1240px; height: 800px; box-sizing: border-box; background: #0a0e17; color: #e6edf6; font-family: Inter, 'Noto Sans KR', 'Apple SD Gothic Neo', system-ui, sans-serif; font-size: 13px; padding: 28px 32px; display: flex; flex-direction: column; gap: 14px;">
+
+  <div style="display: flex; align-items: baseline; gap: 10px;">
+    <h1 style="margin: 0; font-size: 20px; font-weight: 700;">통합 서버 인벤토리</h1>
+    <span style="font-size: 12px; color: #8b9bb4;">특수 기능 › 통합 서버 인벤토리 · 베어메탈 탭</span>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px;">
+    <div style="background: #141b2d; border: 1px solid #243049; border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px;">
+      <span style="font-size: 12px; color: #8b9bb4;">가상화 호스트</span>
+      <span style="font-size: 24px; font-weight: 700; color: #22d3ee;">39</span>
+      <span style="font-size: 11px; color: #8b9bb4;">iDRAC 받침 36대</span>
+    </div>
+    <div style="background: #141b2d; border: 1px solid #f59e0b; border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px;">
+      <span style="font-size: 12px; color: #8b9bb4;">베어메탈 서버</span>
+      <span style="font-size: 24px; font-weight: 700; color: #f59e0b;">10</span>
+      <span style="font-size: 11px; color: #8b9bb4;">전력 측정 8대 · 수동 1</span>
+    </div>
+    <div style="background: #141b2d; border: 1px solid #243049; border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px;">
+      <span style="font-size: 12px; color: #8b9bb4;">베어메탈 총전력</span>
+      <span style="font-size: 24px; font-weight: 700; color: #fbbf24;">3.9 kW</span>
+      <span style="font-size: 11px; color: #8b9bb4;">현재 측정 합계</span>
+    </div>
+    <div style="background: #141b2d; border: 1px solid #243049; border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px;">
+      <span style="font-size: 12px; color: #8b9bb4;">법인 미지정</span>
+      <span style="font-size: 24px; font-weight: 700; color: #f59e0b;">1</span>
+      <span style="font-size: 11px; color: #8b9bb4;">베어메탈 중 소속 법인 없음</span>
+    </div>
+  </div>
+
+  <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;">
+    <div style="display: flex; gap: 8px;">
+      <button type="button" style="height: 36px; padding: 0 14px; border-radius: 8px; border: 1px solid #3b82f6; background: #1d4ed8; color: #ffffff; font-size: 13px; font-weight: 600;">베어메탈 (10)</button>
+      <button type="button" style="height: 36px; padding: 0 14px; border-radius: 8px; border: 1px solid #243049; background: #141b2d; color: #c7d2e3; font-size: 13px;">가상화 호스트 (39)</button>
+    </div>
+    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+      <div style="height: 36px; padding: 0 12px; display: flex; align-items: center; gap: 8px; border-radius: 8px; border: 1px solid #243049; background: #111726; color: #c7d2e3; font-size: 13px; min-width: 170px; justify-content: space-between;"><span>전체 법인(vCenter)</span><span aria-hidden="true" style="color: #8b9bb4;">▾</span></div>
+      <div style="height: 36px; padding: 0 12px; display: flex; align-items: center; border-radius: 8px; border: 1px solid #243049; background: #111726; color: #8b9bb4; font-size: 13px; width: 200px; box-sizing: border-box;">서버/모델/서비스태그 검색</div>
+      <button type="button" style="height: 36px; padding: 0 14px; border-radius: 8px; border: 1px solid #243049; background: #141b2d; color: #c7d2e3; font-size: 13px;">CSV</button>
+      <div style="position: relative; display: flex;">
+        <button type="button" style="height: 36px; padding: 0 14px; display: inline-flex; align-items: center; gap: 8px; border-radius: 8px; border: 1px solid #3b82f6; background: rgba(59, 130, 246, 0.18); color: #e6edf6; font-size: 13px; font-weight: 600; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);">
+          <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8M4.5 7 8 10.5 11.5 7M2.5 13.5h11"></path></svg>
+          하드웨어 정보 내보내기
+        </button>
+        <span style="position: absolute; top: -9px; right: -8px; background: #1d4ed8; color: #ffffff; font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 10px;">새로 추가</span>
+      </div>
+    </div>
+  </div>
+
+  <div style="font-size: 12px; color: #8b9bb4;">베어메탈 10대 표시</div>
+
+  <div style="background: #141b2d; border: 1px solid #243049; border-radius: 12px; overflow: hidden; display: flex; flex-direction: column;">
+    <div style="display: grid; grid-template-columns: 1.5fr 1.2fr 0.9fr 1.6fr 0.8fr 0.7fr; gap: 0; padding: 0 14px; height: 36px; align-items: center; background: #111726; border-bottom: 1px solid #243049; font-size: 12px; color: #8b9bb4; font-weight: 600;">
+      <span>서버 ↕</span><span>모델 ↕</span><span>서비스태그 ↕</span><span>법인(vCenter) ↕</span><span>수집원 ↕</span><span style="text-align: right;">전력 ↕</span>
+    </div>
+    <sc-for list="{{rows}}" as="r" hint-placeholder-count="10">
+      <div style="display: grid; grid-template-columns: 1.5fr 1.2fr 0.9fr 1.6fr 0.8fr 0.7fr; gap: 0; padding: 0 14px; height: 34px; align-items: center; border-bottom: 1px solid #1f2a40; font-size: 13px;">
+        <span style="display: flex; align-items: center; gap: 6px; min-width: 0;"><b style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{r.name}}</b><sc-if value="{{r.badge}}" hint-placeholder-val="{{false}}"><span style="{{r.badgeStyle}}">{{r.badge}}</span></sc-if></span>
+        <span style="color: #8b9bb4; font-size: 12px;">{{r.model}}</span>
+        <span style="color: #8b9bb4; font-size: 12px; font-family: 'JetBrains Mono', monospace;">{{r.tag}}</span>
+        <span style="{{r.corpStyle}}">{{r.corp}}</span>
+        <span style="color: #8b9bb4; font-size: 12px;">{{r.src}}</span>
+        <span style="{{r.wStyle}}">{{r.watts}}</span>
+      </div>
+    </sc-for>
+  </div>
+
+  <div style="font-size: 12px; color: #8b9bb4; line-height: 1.7; display: flex; flex-direction: column; gap: 2px;">
+    <div><b style="color: #e6edf6;">바뀌는 것은 버튼 하나</b> — 지금 화면(KPI · 탭 · 법인 필터 · 검색 · CSV · 표)은 그대로이고, CSV 옆에 ‘하드웨어 정보 내보내기’ 버튼이 생깁니다. 베어메탈 · 가상화 호스트 두 탭 어디서 눌러도 같은 ② 창이 열립니다.</div>
+    <div>창에서 <b style="color: #e6edf6;">물리서버만 · 가상화 서버만 · 둘 다</b>를 고릅니다(창을 연 탭이 기본값). 물리 · 가상화 구분은 이 화면의 판정을 그대로 씁니다 — 분류를 새로 하지 않습니다. 기존 CSV 버튼은 지금처럼 화면에 보이는 7개 열만 내보냅니다.</div>
+    <div>서버 이름 · 법인 · 수치는 모두 가상입니다(시안용).</div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1240,"height":800}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const badge = (bg, fg) => 'font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 10px; white-space: nowrap; background: ' + bg + '; color: ' + fg + ';';
+    const data = [
+      ['bm-db-01', 'PowerEdge R750', '7XK2M03', 'vcenter-ap-northeast-01', 'iDRAC', '512 W', ''],
+      ['bm-db-02', 'PowerEdge R750', '7XK2M04', 'vcenter-ap-northeast-01', 'iDRAC', '498 W', ''],
+      ['bm-backup-01', 'PowerEdge R740xd', '4HT9P13', 'vcenter-ap-northeast-01', 'iDRAC', '386 W', ''],
+      ['bm-gpu-01', 'PowerEdge R750xa', '9QW4Z23', 'vcenter-us-east-01', 'iDRAC', '1,120 W', ''],
+      ['bm-ora-01', 'PowerEdge R650', '2MB7K33', 'vcenter-us-east-01', 'iDRAC', '342 W', ''],
+      ['bm-nas-01', 'PowerEdge R740xd2', '5LC8R43', 'vcenter-eu-central-01', 'OME', '401 W', ''],
+      ['bm-edge-pl-01', 'PowerEdge R640', '8DF3T53', 'vcenter-eu-central-01', 'iDRAC', '288 W', 'edge'],
+      ['bm-edge-pl-02', 'PowerEdge R640', '8DF3T54', 'vcenter-eu-central-01', 'iDRAC', '301 W', 'edge'],
+      ['esx-legacy-07', 'PowerEdge R630', '3GH6N63', 'vcenter-us-west-01', 'vcenter', '', 'manual'],
+      ['bm-lab-01', 'ProLiant DL380 Gen10', 'CZ2941A7X', '', 'iDRAC', '', ''],
+    ];
+    const rows = data.map((d) => ({
+      name: d[0], model: d[1], tag: d[2], src: d[4],
+      corp: d[3] || '미지정',
+      corpStyle: d[3] ? 'font-size: 13px;' : badge('rgba(168, 85, 247, 0.22)', '#d8b4fe') + ' justify-self: start;',
+      watts: d[5] || '미측정',
+      wStyle: 'text-align: right; ' + (d[5] ? 'font-weight: 700;' : 'color: #8b9bb4;'),
+      badge: d[6] === 'edge' ? '엣지 PL' : d[6] === 'manual' ? '수동' : '',
+      badgeStyle: d[6] === 'edge' ? badge('rgba(20, 184, 166, 0.22)', '#5eead4') : badge('rgba(168, 85, 247, 0.22)', '#d8b4fe'),
+    }));
+    return { rows };
+  }
+}
+</script>
+</body>
+</html>

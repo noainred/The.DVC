@@ -5,13 +5,20 @@
  *   이제: 같은 대상 버전으로 성공을 거듭 답하면 noEffect 를 세고 settle × 2^n(상한 6시간)까지 기다린다('no-effect' 상태) ·
  *   상한에 닿으면 한 번 알린다(key …:noeffect) · 엣지가 대상 버전을 보고하면 해소를 한 번.
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'edgesync2869-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const CFG = tmpDir('edgesync2869-');
 Object.assign(process.env, { CONFIG_DIR: CFG, DATA_SOURCE: 'mock' });
 for (const k of ['UPGRADE_EDGE_AUTO', 'UPGRADE_EDGE_SYNC_INTERVAL_MS', 'UPGRADE_EDGES']) delete process.env[k];
 const sync = await import('../src/upgrade/edgeSync.js');

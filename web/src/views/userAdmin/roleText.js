@@ -61,3 +61,15 @@ export function toggleAdminDenied(matrix, key) {
 export const MATRIX_NOTE = '역할에 기능 권한을 켜고 끕니다. **super_admin** 은 항상 전체 권한입니다. **admin** 도 전체 권한이지만 '
   + 'CSV 가져오기/내보내기는 super_admin 이 끌 수 있습니다. 관리자 전용 권한(CSV)은 operator·viewer 에게 줄 수 없습니다. '
   + '서버에서 강제되므로(메뉴를 숨겨도 API 직접 호출 차단), 저장 즉시 각 사용자에 반영됩니다.';
+
+/**
+ * 관리자 대리 OTP 등록 확정 뒤 문구(88회차 F5 — 서버 confirm 응답의 passwordKept).
+ * 서버는 **OTP 전용 정책일 때만** 비밀번호를 지운다(레거시 viewer · 혼용 · 비밀번호 전용은 남긴다 — server/CLAUDE.md v2.272).
+ * 예전 문구는 늘 'OTP로만 로그인합니다' 라 비밀번호가 남은 계정도 그렇게 말했다 — 유출된 비밀번호를 OTP 등록으로 막았다고 오인하게 했다.
+ * passwordKept 를 모르면(옛 서버) 단정하지 않는다.
+ */
+export function otpEnrollDoneText(r) {
+  if (r?.passwordKept === true) return 'OTP 등록 완료 — 이 계정의 로그인 정책이 OTP 전용이 아니라 비밀번호는 지우지 않았습니다(비밀번호 로그인이 계속 됩니다). 막으려면 비밀번호를 바꾸거나 로그인 정책을 확인하세요.';
+  if (r?.passwordKept === false) return 'OTP 등록 완료 — 이제 이 계정은 OTP로만 로그인합니다.';
+  return 'OTP 등록 완료 — 비밀번호를 남겼는지는 로그인 정책에 따릅니다(OTP 전용 정책이면 비밀번호가 지워집니다).';
+}

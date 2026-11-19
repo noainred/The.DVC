@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>표본 주기 분리 · 설정 · 저장 단계 · 상태</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap" rel="stylesheet">
+<style>
+body { margin: 0; background: #0a0e17; color: #e6edf6; font-family: Inter, -apple-system, "Segoe UI", Roboto, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; word-break: keep-all; }
+a { color: #8b9bb4; } a:hover { color: #e6edf6; }
+.card { background: #141b2d; border: 1px solid #243049; border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; min-width: 0; font-size: 12px; line-height: 1.5; }
+.card b.t { font-size: 13px; }
+.step { background: #0f1626; border: 1px solid #243049; border-radius: 10px; padding: 10px 12px; font-size: 12px; line-height: 1.45; flex: 1 1 0; min-width: 0; }
+.step b { display: block; font-size: 12.5px; margin-bottom: 2px; }
+.chev { align-self: center; color: #5d6b85; font-size: 18px; flex: none; }
+.mono { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 11.5px; }
+.muted { color: #8b9bb4; }
+.toggle { display: inline-flex; align-items: center; gap: 8px; }
+.toggle i { width: 34px; height: 18px; border-radius: 999px; background: #2563eb; position: relative; display: inline-block; }
+.toggle i::after { content: ""; position: absolute; right: 2px; top: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; }
+input[type=number] { width: 72px; height: 28px; padding: 0 8px; border: 1px solid #243049; border-radius: 8px; background: #0f1626; color: #e6edf6; font: inherit; font-size: 12px; }
+</style>
+</helmet>
+<div style="width: 1440px; height: 940px; box-sizing: border-box; padding: 20px 24px; display: flex; flex-direction: column; gap: 12px">
+  <div style="font-size: 15px; font-weight: 700">⑨ 표본 주기 분리 — 수집 주기(1시간)와 따로 도는 가벼운 폴러(기본 5분 · 모든 아이실론 켬) <span class="muted" style="font-weight: 400; font-size: 12px">· 설정 3곳 · 흐름 · 산수 · 상태</span></div>
+
+  <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px">
+    <div class="card"><b class="t">설정 › 수집 주기 — 새 칸</b>
+      <label style="display: flex; align-items: center; gap: 8px">노드 부하 표본 주기 <input type="number" value="5" aria-label="노드 부하 표본 주기(분)"> 분</label>
+      <span class="muted">하한 1분 · 상한 60분 · 중앙 배포값(엣지 pull) — 지금의 pollMs·pushMs 와 같은 규약(startAdaptiveTimer · 변경 리스너). 수집 주기보다 길면 표본은 수집 주기마다만 남습니다.</span></div>
+    <div class="card"><b class="t">장비 편집 · 일괄 변경 — 토글</b>
+      <span class="toggle"><i aria-hidden="true"></i>노드 부하 표본 수집(5분) — 아이실론 기본 켬</span>
+      <span class="muted">끄면 1시간 수집의 값만 남습니다(지금 v2.931 동작). SSH 장비는 5분마다 로그인이 생기므로 장비 로그가 늘어난다는 사실을 토글 옆에 말합니다. 인증 실패 정지는 수집 주기 폴러와 공유합니다.</span></div>
+    <div class="card"><b class="t">스토리지 증가량 › ⚙ 저장 기간 — 칸 바뀜·추가</b>
+      <span>노드 부하 원시 <b>7일</b>(지금 30일 → 5분이면 12배라 줄임) · <b>시간 요약 90일(새)</b> · 일 요약 5년</span>
+      <span>클라이언트·프로토콜 원시 <b>2일</b> · 시간 요약 <b>30일</b> · 일 요약 <b>1년</b>(새 칸 3)</span>
+      <span class="muted">업그레이드 때 원시 30일 저장값이 있으면 그대로 두고 기본만 바뀝니다(저장값 우선 — growthSettings 규약).</span></div>
+  </div>
+
+  <div style="display: flex; gap: 8px; align-items: stretch">
+    <div class="step"><b>경량 폴러 <span class="mono muted">storage/nodeLoadPoller.js</span></b>5분 · 켜진 아이실론만 · 동시 3 · 장비당 시한 60초 · 재진입 가드 · 같은 장비가 수집 주기 중이면 이번 표본 건너뜀(_inFlight 공유)</div>
+    <div class="chev">›</div>
+    <div class="step"><b>장비 호출</b>REST 4개 — statistics/current(devid=all, 노드 키 9) · summary/client(limit 상위) · summary/protocol · summary/drive<br>SSH 세션 1 · 명령 4 — isi statistics system / client / protocol / drive (--nodes all --format json)</div>
+    <div class="chev">›</div>
+    <div class="step"><b>표본 1개</b>노드 지표 9(net 2 · disk 4 · cpu · ops · 지연) · 노드별 클라이언트 상위 10(IP·이름·프로토콜·ops·In·Out·지연) · 노드 × 프로토콜(ops·지연) · 드라이브 busy 노드 평균/최대</div>
+    <div class="chev">›</div>
+    <div class="step"><b>로컬 적재</b>트랜잭션 1개 / 표본 · 엣지는 미전송 표본 <b>고리 3개</b>(15분)를 스냅샷 extra 에 실어 push(5분, 기존 경로)</div>
+    <div class="chev">›</div>
+    <div class="step"><b>중앙 정제·적재</b>아는 필드만 · 노드 64 · 클라이언트 10/노드 · 문자열 수치는 수로 · (장비, ts) 중복 무시 · 이름 붙이기는 중앙 인벤토리로</div>
+    <div class="chev">›</div>
+    <div class="step"><b>API · 화면</b>node-load(묶음 2개 추가) · node-clients(노드 드로어) · client-dist(분포·쏠림·후보) — 장비 호출 0 · 폴링 없음</div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px">
+    <div class="card"><b class="t">장비 부담 산수(5분)</b>
+      <span>클러스터 1개 — REST 호출 4 × 12/시간 = <b>48회/시간</b> · SSH 로그인 <b>12회/시간</b>(세션 1 · 명령 4)</span>
+      <span>법인 28개 — REST 1,344회/시간 · SSH 라면 로그인 <b>8,064/일</b> → 장비 감사 로그가 그만큼 늘어납니다. 모두 ‘표본 조회’ 뿐이고 쓰기는 없습니다.</span>
+      <span class="muted">15분으로 바꾸면 1/3. 끄는 것은 장비별 토글.</span></div>
+    <div class="card"><b class="t">행 수 산수(클러스터 1개 · 8 노드)</b>
+      <span>노드 원시 8 × 288 = 2,304행/일 → 7일 1.6만 · 시간 요약 8 × 24 = 192/일 → 90일 1.7만 · 일 요약 8/일</span>
+      <span>클라이언트 원시 8 × 10 × 288 = 23,040행/일 → 2일 4.6만 · 시간 요약 ≤ 8 × 10 × 24 = 1,920/일 → 30일 5.8만 · 일 요약 ≤ 80/일 → 1년 2.9만</span>
+      <span class="muted">64 노드면 8배. 전부 ts·day 인덱스 + 청크 삭제 + 트랜잭션 — 기존 규약.</span></div>
+    <div class="card"><b class="t">push 크기 산수(엣지 → 중앙)</b>
+      <span>표본 1개 ≈ 노드 64 × (지표 9 + 클라이언트 10 × 7필드) ≈ 64 × 0.9 KB ≈ <b>58 KB</b> · 고리 3개 ≈ 170 KB · gzip 뒤 약 1/5</span>
+      <span class="muted">장비당 상한 1 MB(기존) 안. 클라이언트를 20으로 올리면 두 배 — 상한 N 은 설정값으로 두고 기본 10.</span></div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px">
+    <div class="card"><b class="t">클라이언트 없음</b><span class="muted">‘연결 없음’ 이 아니라 <b style="color: #e6edf6">최근 작업한 클라이언트 없음</b>. 쉬는 마운트는 통계에 없다고 문장으로 말합니다.</span></div>
+    <div class="card"><b class="t">SSH JSON 미확인</b><span class="muted">세 모양을 받고 못 읽으면 노드 수집 상태에 ‘client 명령 출력 형식 불명’ + 받은 키. 네트워크·CPU 는 그대로.</span></div>
+    <div class="card"><b class="t">이름 못 찾음</b><span class="muted">인벤토리(VM IP · 호스트 관리 IP · IP 대장)에 없으면 IP 만. 역방향 DNS 는 하지 않습니다(SSRF·지연).</span></div>
+    <div class="card"><b class="t">표본 늦음</b><span class="muted">마지막 표본이 주기의 3배를 넘으면 드로어 머리에 ‘마지막 표본 N분 전’ 을 노랗게. 엣지는 push 지연까지 더해 봅니다.</span></div>
+    <div class="card"><b class="t">수집 꺼짐</b><span class="muted">토글을 끈 장비는 묶음 버튼이 1시간 표본으로 그려지고, 드로어는 ‘표본 수집이 꺼져 있습니다(장비 편집)’ 를 말합니다.</span></div>
+    <div class="card"><b class="t">구버전 엣지</b><span class="muted">표본 고리를 안 보내는 엣지는 1시간 스냅샷만 적재 — 화면이 ‘엣지 v2.93x 이후부터 5분 표본’ 이라고 밝힙니다.</span></div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":940}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

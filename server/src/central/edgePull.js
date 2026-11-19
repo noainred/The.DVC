@@ -28,7 +28,7 @@ import { resilientFetch } from '../util/resilientFetch.js';
 import { withOutboundTag } from '../util/outboundStats.js'; // v2.601 WEB2601-02: 같은 주소 엣지를 기록에서 나눈다
 import { strOf } from '../util/coercionTrap.js'; // v2.604 CEN2604-03: 엣지 본문의 글자 필드는 타입부터 좁힌다
 import { trimTrailingSlashes } from '../util/trimSlashes.js'; // v2.611: 끝 슬래시 제거는 선형 루프 하나
-import { findCollectorByName } from '../collector/registry.js'; // v2.613 EDGE2613-08: 이름 조회 코어는 등록부 하나
+import { findCollectorByName, resolveCollectorByName } from '../collector/registry.js'; // v2.613 EDGE2613-08: 이름 조회 코어는 등록부 하나
 import { isMockMode } from '../mock/demo/flags.js';
 import { isDemoCollector, demoEdgePullBody } from '../mock/demo/edge.js'; // v2.708: 데모 엣지는 접속하지 않고 합성 응답
 import { recordOutbound } from '../util/outboundStats.js';
@@ -37,7 +37,7 @@ import { STATUS_SPEC } from '../edgelog/spec.js';
 
 /** 실패 종류 열거 — 세 pull 모듈이 낼 수 있는 kind 의 **전부**(웹 라벨 맵과 1:1). */
 export const EDGE_PULL_KINDS = Object.freeze([
-  'not-registered', 'disabled-central', 'no-url', // 등록부 단계(네트워크 왕복 없음)
+  'not-registered', 'ambiguous', 'disabled-central', 'no-url', // 등록부 단계(네트워크 왕복 없음) — 87회차 ⓑ: ambiguous(결정 66 ① — 표시 이름이 둘 이상)도 열거에(웹 문구 맵과 1:1)
   'timeout', 'unreachable',                       // 연결 단계
   'auth', 'disabled', 'old-version', 'http', 'bad-body', // 응답 단계
 ]);
@@ -95,7 +95,12 @@ export async function pullFromEdge(agent, path, {
 } = {}) {
   const t0 = Date.now();
   const col = await findCollector(agent);
-  if (!col) return { ok: false, kind: 'not-registered', reason: '수집 서버 등록부에 없는 이름입니다(설정 › 엣지·원격 › 수집 서버(원격)에서 등록하세요).', ms: 0, col: null, fetched: false };
+  if (!col) {
+    // 결정(56~75 남긴 것) 66 ①: 표시 이름이 둘 이상이면 '없는 이름' 이 아니라 '정할 수 없음' 이다(사유는 등록부 코어 하나).
+    let why = null; try { why = resolveCollectorByName(agent); } catch { why = null; }
+    if (why?.issue === 'ambiguous') return { ok: false, kind: 'ambiguous', reason: why.reason, ms: 0, col: null, fetched: false };
+    return { ok: false, kind: 'not-registered', reason: '수집 서버 등록부에 없는 이름입니다(설정 › 엣지·원격 › 수집 서버(원격)에서 등록하세요).', ms: 0, col: null, fetched: false };
+  }
   if (col.enabled === false) return { ok: false, kind: 'disabled-central', reason: '중앙에서 이 수집 서버를 비활성으로 두었습니다.', ms: 0, col, fetched: false };
   if (!t(col.url)) return { ok: false, kind: 'no-url', reason: '이 수집 서버에 URL 이 없습니다.', ms: 0, col, fetched: false };
 

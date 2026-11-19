@@ -1,30 +1,31 @@
 // 메트릭 설정·GPU 게스트/물리·엣지 사용자 — admin.js(구 2,410줄) 분할(v2.285.0). 본문은 원본 그대로, 등록 순서는 admin.js 호출 순서가 보존한다.
 import { store } from '../../store.js';
 import { morefOf } from '../../vcenter/registry.js';   // v2.447: vcenterId 에 콜론이 있어도 안전한 moref 추출(감사 B1)
-import { loadMetricsSettings, saveMetricsSettings, METRICS_LIMITS } from '../../metrics/settings.js';
+import { loadMetricsSettings, saveMetricsSettings, METRICS_LIMITS, metricsSettingsRefusal } from '../../metrics/settings.js';
 import { forceGpuUtilCollect, clearGpuUtilForce } from '../../vcenter/soapClient.js';
 import { metricsSamplerStatus, rescheduleMetricsSampler } from '../../metrics/sampler.js';
-import { loadGpuGuestSettings, saveGpuGuestSettings, redactGpuGuestSettings, resolveVmCreds, resolveCollectMethod } from '../../gpu/settings.js';
+import { loadGpuGuestSettings, saveGpuGuestSettings, redactGpuGuestSettings, resolveVmCreds, resolveCollectMethod, gpuGuestSettingsLoadError } from '../../gpu/settings.js';
 import { gpuGuestStatus, rescheduleGpuGuestPoller, gpuHostIds, vmUsesGpu, getGpuGuestDiag } from '../../gpu/poller.js';
 import { testVmGuest, VimSoapClient } from '../../gpu/guestops.js';
 import { onDemandLogin, onDemandErrorFields } from '../../vcenter/dsBrowse.js'; // v2.743(감사 VC-03): 주문형 vCenter 로그인 문
 import { testVmGuestSsh, detectPhysicalGpu, guestIps, gpuAuthGuard, pinnedIpCheck, unknownPinnedIps } from '../../gpu/sshCollect.js';
-import { listPhysical, addPhysical, updatePhysical, removePhysical, getPhysicalRaw, findPhysicalByHost } from '../../gpu/physicalRegistry.js';
+import { listPhysical, addPhysical, updatePhysical, removePhysical, getPhysicalRaw, findPhysicalByHost, physicalHostIssue, physicalRegistryLoadErrorSummary, physicalWriteRefusal } from '../../gpu/physicalRegistry.js';
 import { getAllPhysicalGpu } from '../../gpu/physicalStore.js';
 import { physicalPollerStatus, pollPhysicalOnce, reschedulePhysicalPoller } from '../../gpu/physicalPoller.js';
 import { getGuestGpuVms } from '../../gpu/store.js';
 import { getAllGpuGuestDiag } from '../../central/gpuGuestDiag.js';
-import { getAssignedGpuGuest, setAssignedGpuGuest, listAssignedGpuGuestAgents, redactAssignedGpuGuest, gpuGuestFoldStatus } from '../../central/agentGpuGuestConfig.js';
+import { getAssignedGpuGuest, setAssignedGpuGuest, listAssignedGpuGuestAgents, redactAssignedGpuGuest, gpuGuestFoldStatus, gpuGuestConfigLoadError } from '../../central/agentGpuGuestConfig.js';
 import { upsertAgentUser, upsertAgentUsersBulk, removeAgentUser, listAgentUsers, listAgentUserAgents, GLOBAL_AGENT } from '../../central/agentUsers.js';
 import { loadVcenterConfig } from '../../config.js';
 import { expandIpList } from '../../idrac/iprange.js';
 import { listCollectors } from '../../collector/registry.js';
 import { adminOnly, maskPw, requireSettingsOwner, fullScopeOnlyWith } from './shared.js';
-import { scopedVcenterIds, inUserScope } from '../../auth/scope.js';
-import { mergeScopedMap, filterScopedMap, keepScopedFields, ignoredGlobalFields, denyScopedRun } from '../../auth/scopeMerge.js';
+import { scopedVcenterIds, inUserScope, inUserWriteScope } from '../../auth/scope.js';
+import { mergeScopedMap, filterScopedMap, keepScopedFields, ignoredGlobalFields, denyScopedRun, writeMergeScope } from '../../auth/scopeMerge.js';
 import { poolRun } from '../../util/pool.js'; // v2.575 IMP-08 — 동시성 풀 단일 소스
 import { strictIpv4Num } from '../../util/ipv4.js';
 import { ipBlockReason } from '../../util/ssrfBlock.js';
+import { accessMoved } from '../../util/secretCarry.js';   // 98회차: 연결 시험의 비밀 승계 판정 — 저장 경로(gpu/settings.js carriedPw)와 같은 판정
 
 // v2.611 AUTHZ2611: 전 법인 등록부·동작은 전체 범위 계정만(v2.607 fleetWideOnly 의 형제 등록부).
 const fleetOnly = fullScopeOnlyWith('물리 GPU 서버·엣지 배포 설정·엣지 사용자는 전 법인에 걸친 등록부라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.');
@@ -143,11 +144,14 @@ adminRouter.get('/metrics/settings', adminOnly, (req, res) => {
 });
 adminRouter.put('/metrics/settings', adminOnly, (req, res) => {
   // v2.611 AUTHZ2611-02: 샘플러 주기·보존일은 전 법인 공용(vCenter 축 없음) — 범위 계정의 값은 적용하지 않고 밝힌다(v2.607 ignoredGlobal).
-  const allowed = scopedVcenterIds(req.user, store.get());
+  const allowed = writeMergeScope(req);   // 전체 점검 7회차: 쓰기 범위(응답 가림은 조회 범위)
   if (allowed) {
     const { ignoredGlobal } = keepScopedFields(req.body || {}, loadMetricsSettings(), allowed, []);
-    return res.json({ ok: true, settings: loadMetricsSettings(), status: scopeSamplerStatus(metricsSamplerStatus(), allowed), ...ignoredGlobalFields(ignoredGlobal) });
+    return res.json({ ok: true, settings: loadMetricsSettings(), status: scopeSamplerStatus(metricsSamplerStatus(), scopedVcenterIds(req.user, store.get())), ...ignoredGlobalFields(ignoredGlobal) });
   }
+  // 95회차(92회차 남긴 것 ②): 읽기 오류 중 저장 거절은 라우트가 먼저 409 + 사유로 답한다 — 모듈이 던지는 409 는 전역 핸들러가 'bad request' 로 바꿔
+  //   사유가 빠졌고, 화면은 r.settings 를 읽다 TypeError 문구를 보였다.
+  { const ref = metricsSettingsRefusal(); if (ref) return res.status(409).json(ref); }
   const settings = saveMetricsSettings(req.body || {});
   rescheduleMetricsSampler(); // apply the new interval immediately
   res.json({ ok: true, settings, status: metricsSamplerStatus() });
@@ -183,10 +187,12 @@ function scopedGpuGuestView(settings, allowed) {
 adminRouter.get('/gpu-guest/settings', adminOnly, (req, res) => {
   const allowed = scopedVcenterIds(req.user, store.get());
   const settings = loadGpuGuestSettings();
-  res.json({ ...scopedGpuGuestView(settings, allowed), status: scopeGpuGuestStatus(gpuGuestStatus(), allowed, settings) });
+  const le = gpuGuestSettingsLoadError();   // 38회차 R2: 손상 · 읽기 오류면 화면이 배너로 밝히고 저장을 잠근다(사유 글자만)
+  res.json({ ...scopedGpuGuestView(settings, allowed), status: scopeGpuGuestStatus(gpuGuestStatus(), allowed, settings), ...(le ? { loadError: { reason: le.reason, at: le.at, readError: !!le.readError } } : {}) });
 });
 adminRouter.put('/gpu-guest/settings', adminOnly, (req, res) => {
-  const allowed = scopedVcenterIds(req.user, store.get());
+  const allowed = writeMergeScope(req);   // 전체 점검 7회차: 병합 · 전역 필드는 쓰기 범위(응답 가림은 조회 범위 — 아래 read)
+  const read = scopedVcenterIds(req.user, store.get());
   const before = loadGpuGuestSettings();
   let body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
   let ignored = []; let ignoredGlobal = [];
@@ -203,11 +209,15 @@ adminRouter.put('/gpu-guest/settings', adminOnly, (req, res) => {
     return res.status(400).json({ ok: false, reason: `고정 IP ${bad.length}개가 그 VM 이 보고한 IP 가 아닙니다 — 저장 자격증명을 VM 이 보고한 적 없는 주소로 보내지 않습니다(VM 의 알려진 IP 중에서 고르세요).`, rejected: bad.slice(0, 50) });
   }
   const droppedSecrets = [];
-  const settings = saveGpuGuestSettings(body, droppedSecrets);
+  let settings;
+  try { settings = saveGpuGuestSettings(body, droppedSecrets); } catch (e) {   // 36회차 F4: 못 읽은 설정은 덮지 않는다
+    if (e?.code === 'settings-unreadable') return res.status(409).json({ ok: false, code: e.code, reason: e.message });
+    throw e;
+  }
   rescheduleGpuGuestPoller();
   reschedulePhysicalPoller();   // v2.597(LC2597-02): 같은 주기 설정을 쓰는 물리 GPU 폴러도
   res.json({
-    ok: true, ...scopedGpuGuestView(settings, allowed), status: scopeGpuGuestStatus(gpuGuestStatus(), allowed, settings),
+    ok: true, ...scopedGpuGuestView(settings, read), status: scopeGpuGuestStatus(gpuGuestStatus(), read, settings),
     ...(droppedSecrets.length ? { droppedSecrets: [...new Set(droppedSecrets)] } : {}),
     ...(ignored.length ? { ignoredOutOfScope: ignored.length } : {}),
     ...ignoredGlobalFields(ignoredGlobal),
@@ -282,6 +292,9 @@ adminRouter.get('/gpu-guest/deploy/:agent', adminOnly, fleetReadOnly, (req, res)
 adminRouter.put('/gpu-guest/deploy/:agent', adminOnly, fleetOnly, (req, res) => {
   const agent = String(req.params.agent || '').trim();
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent 필요' });
+  // 103회차 F14: 배포 파일을 읽지 못한 동안(읽기 오류 — 원본 그대로)은 저장하지 않는다 — 사유를 화면까지(전역 오류 처리기는 사유를 싣지 않는다).
+  const le = gpuGuestConfigLoadError();
+  if (le?.readError) return res.status(409).json({ ok: false, code: 'settings-unreadable', readError: true, reason: String(le.reason || '').slice(0, 300) });
   const droppedSecrets = [];   // v2.612 RECENT2612-05: 로컬 PUT 과 같이 폐기한 비밀을 밝힌다
   setAssignedGpuGuest(agent, req.body || {}, droppedSecrets);
   res.json({ ok: true, ...redactAssignedGpuGuest(agent), ...(droppedSecrets.length ? { droppedSecrets: [...new Set(droppedSecrets)] } : {}) });
@@ -314,37 +327,38 @@ adminRouter.get('/edge-users/:agent', adminOnly, fleetReadOnly, (req, res) => {
 // 사용자 추가/수정(비밀번호 주면 해시로 변환 저장). Body { username, name, role, password }.
 adminRouter.post('/edge-users/:agent', adminOnly, fleetOnly, requireSettingsOwner, (req, res) => {
   const r = upsertAgentUser(req.params.agent, req.body || {});
-  res.status(r.ok ? 200 : 400).json(r.ok ? { ok: true, users: listAgentUsers(req.params.agent) } : r);
+  res.status(r.ok ? 200 : (r.status || 400)).json(r.ok ? { ok: true, users: listAgentUsers(req.params.agent) } : r);
 });
 // 여러 엣지(또는 '*'=모든 엣지)에 같은 사용자를 한 번에 배포. Body { targets:[...], username, name, role, password }.
 adminRouter.post('/edge-users-bulk', adminOnly, fleetOnly, requireSettingsOwner, (req, res) => {
   const { targets, ...spec } = req.body || {};
   const r = upsertAgentUsersBulk(targets, spec);
-  res.status(r.ok ? 200 : 400).json(r);
+  res.status(r.ok ? 200 : (r.status || 400)).json(r);
 });
 // 사용자 제거(다음 pull에 엣지에서도 삭제).
 adminRouter.delete('/edge-users/:agent/:username', adminOnly, fleetOnly, requireSettingsOwner, (req, res) => {
   const r = removeAgentUser(req.params.agent, req.params.username);
-  res.status(r.ok ? 200 : 400).json(r.ok ? { ok: true, users: listAgentUsers(req.params.agent) } : r);
+  res.status(r.ok ? 200 : (r.status || 400)).json(r.ok ? { ok: true, users: listAgentUsers(req.params.agent) } : r);
 });
 
 // ── 물리(베어메탈) 서버 GPU 수집 — IP+계정으로 SSH nvidia-smi(가상화 안 한 서버) ──────
 adminRouter.get('/gpu-physical', adminOnly, (req, res) => {
-  res.json(scopePhysicalView(listPhysical(), getAllPhysicalGpu(), physicalPollerStatus(), scopedVcenterIds(req.user, store.get()))); // v2.622(감사 SEC-03)
+  // 95회차 F1: 등록부 로드 오류(손상 · 읽기 오류 · 보존본만 있음)를 싣는다 — 예전에는 빈 목록이 '등록 없음' 처럼 보였다(요약 — 파일 원문 조각 없음).
+  res.json({ ...scopePhysicalView(listPhysical(), getAllPhysicalGpu(), physicalPollerStatus(), scopedVcenterIds(req.user, store.get())), loadError: physicalRegistryLoadErrorSummary() }); // v2.622(감사 SEC-03)
 });
 adminRouter.post('/gpu-physical', adminOnly, fleetOnly, (req, res) => {
   const r = addPhysical(req.body || {});
   if (r.ok) pollPhysicalOnce().catch(() => {});
-  res.status(r.ok ? 201 : 400).json(r);
+  res.status(r.ok ? 201 : (r.status || 400)).json(r);   // 95회차 F1: 읽기 오류 중 거절은 409
 });
 adminRouter.put('/gpu-physical/:id', adminOnly, fleetOnly, (req, res) => {
   const r = updatePhysical(req.params.id, req.body || {});
   if (r.ok) pollPhysicalOnce().catch(() => {});
-  res.status(r.ok ? 200 : 400).json(r);
+  res.status(r.ok ? 200 : (r.status || 400)).json(r);
 });
 adminRouter.delete('/gpu-physical/:id', adminOnly, fleetOnly, (req, res) => {
   const r = removePhysical(req.params.id);
-  res.status(r.ok ? 200 : 400).json(r);
+  res.status(r.ok ? 200 : (r.status || 400)).json(r);
 });
 adminRouter.post('/gpu-physical/poll', adminOnly, fleetOnly, async (_req, res) => {
   res.json({ ok: true, lastRun: await pollPhysicalOnce({ manual: true }) }); // v2.590: 수동 실행은 인증 실패 정지 서버도 1회 시도
@@ -356,6 +370,8 @@ adminRouter.post('/gpu-physical/auto-register', adminOnly, fleetOnly, async (req
   const host = String(b.host || '').trim();
   const username = String(b.username || '').trim();
   if (!host || !username) return res.status(400).json({ ok: false, reason: 'IP/호스트와 계정이 필요합니다.' });
+  { const why = physicalHostIssue(host); if (why) return res.status(400).json({ ok: false, reason: why }); }   // 36회차 F2 · F3: 접속 전에 수집 경로와 같은 판정
+  { const ref = physicalWriteRefusal(); if (ref) return res.status(ref.status).json(ref); }   // 95회차 F1: 저장하지 못할 등록부면 SSH 접속 전에 거절
   const st = loadGpuGuestSettings();
   const det = await detectPhysicalGpu(host, { username, password: b.password || '' }, { timeoutMs: st.timeoutMs, port: Number(b.port) || 22 });
   if (!det.reachable) return res.status(400).json({ ok: false, reason: `SSH 접속 실패 — ${det.error || '계정/네트워크 확인'}`, detected: det });
@@ -367,8 +383,10 @@ adminRouter.post('/gpu-physical/auto-register', adminOnly, fleetOnly, async (req
   const fields = { name: det.hostname || host, host, port: Number(b.port) || 22, username, password: b.password || '', os, vcenterId: String(b.vcenterId || '').trim(), gpuModels: det.gpuModels, enabled: true };
   const exist = findPhysicalByHost(host);
   let id;
-  if (exist) { updatePhysical(exist.id, fields); id = exist.id; }
-  else { const r = addPhysical(fields); if (!r.ok) return res.status(400).json({ ok: false, reason: r.reason, detected: det }); id = r.id; }
+  // 95회차 F1: 갱신 결과도 본다 — 예전에는 updatePhysical 의 거절을 보지 않고 '갱신됨' 으로 답했다.
+  const r = exist ? updatePhysical(exist.id, fields) : addPhysical(fields);
+  if (!r.ok) return res.status(r.status || 400).json({ ok: false, reason: r.reason, detected: det });
+  id = exist ? exist.id : r.id;
   pollPhysicalOnce().catch(() => {});
   res.json({ ok: true, id, updated: !!exist, noGpu: !det.gpuModels.length, detected: det });
 });
@@ -379,6 +397,7 @@ adminRouter.post('/gpu-physical/bulk-auto-register', adminOnly, fleetOnly, async
   const b = req.body || {};
   const username = String(b.username || '').trim();
   if (!b.ips || !username) return res.status(400).json({ ok: false, reason: 'IP 목록과 계정이 필요합니다.' });
+  { const ref = physicalWriteRefusal(); if (ref) return res.status(ref.status).json(ref); }   // 95회차 F1: 저장하지 못할 등록부면 512대 SSH 접속 전에 거절
   const { ips: list, errors, truncated } = expandIpList(b.ips);
   const MAX = 512;
   const targets = list.slice(0, MAX);
@@ -388,13 +407,16 @@ adminRouter.post('/gpu-physical/bulk-auto-register', adminOnly, fleetOnly, async
   const results = new Array(targets.length);
   // v2.575 IMP-08: 동시성 풀 단일 소스(index 를 함께 받아 결과 순서를 보존한다).
   await poolRun(targets, 8, async (ip, i) => {
+    { const why = physicalHostIssue(ip); if (why) { results[i] = { ip, ok: false, reachable: false, error: why }; return; } }   // 36회차 F2
     const det = await detectPhysicalGpu(ip, { username, password }, { timeoutMs: st.timeoutMs, port }).catch((e) => ({ reachable: false, error: e.message, gpuModels: [] }));
     if (!det.reachable) { results[i] = { ip, ok: false, reachable: false, error: det.error || '접속 실패' }; return; }
     if (!det.gpuModels.length && !force) { results[i] = { ip, ok: false, reachable: true, noGpu: true, host: det.hostname || '' }; return; }
     const os = /microsoft|windows/i.test(det.os) ? 'windows' : 'linux';
     const fields = { name: det.hostname || ip, host: ip, port, username, password, os, vcenterId, gpuModels: det.gpuModels, enabled: true };
     const exist = findPhysicalByHost(ip);
-    if (exist) updatePhysical(exist.id, fields); else addPhysical(fields);
+    // 95회차 F1: 저장 결과를 본다 — 예전에는 반환값을 버려 거절(중복 id · 읽기 오류)도 '등록됨' 으로 셌다.
+    const w = exist ? updatePhysical(exist.id, fields) : addPhysical(fields);
+    if (!w.ok) { results[i] = { ip, ok: false, reachable: true, error: String(w.reason || '저장 실패').slice(0, 300) }; return; }
     results[i] = { ip, ok: true, updated: !!exist, noGpu: !det.gpuModels.length, gpuCount: det.gpuModels.length, host: det.hostname || ip };
   });
   pollPhysicalOnce().catch(() => {});
@@ -406,8 +428,27 @@ adminRouter.post('/gpu-physical/bulk-auto-register', adminOnly, fleetOnly, async
 adminRouter.post('/gpu-physical/test', adminOnly, fleetOnly, async (req, res) => {
   const b = req.body || {};
   let host = String(b.host || '').trim(); let username = String(b.username || '').trim(); let password = String(b.password || ''); let port = Number(b.port) || 22;
-  if (b.id) { const s = getPhysicalRaw(b.id); if (s) { host = s.host; username = s.username; password = b.password || s.password; port = s.port || 22; } }
+  if (b.id) {
+    const s = getPhysicalRaw(b.id);
+    // 100회차(98회차 남긴 것 ③ — 결정 · 91ⓐ · 98 F2 와 같은 규칙): 저장 비밀번호를 쓸 때 본문의 주소 · 포트 · 계정이 저장값과 다르면 예전에는 조용히 저장값으로
+    //   바꿔 시험해 '입력한 서버' 의 결과처럼 보였다. 이제 거절한다(비밀은 보내지 않는다 — 저장 경로 physicalRegistry 의 accessMoved(host · port · username) 와 같은 키).
+    //   본문에 없거나 빈 칸은 '저장값 그대로' 다(행의 '테스트' 버튼은 { id } 만 보낸다).
+    if (s && !b.password && s.password) {
+      const probe = {};
+      if (String(b.host ?? '').trim()) probe.host = String(b.host).trim();
+      if (String(b.username ?? '').trim()) probe.username = String(b.username).trim();
+      if (b.port != null && String(b.port).trim() !== '') probe.port = Number(b.port) || 22;
+      if (accessMoved({ host: s.host, port: s.port || 22, username: s.username }, probe, ['host', 'port', 'username'])) {
+        return res.json({ ok: false, method: 'carry-refused', code: 'carry-refused', host: s.host, port: s.port || 22, login: false, read: false, error: '입력한 주소 · 포트 · 계정이 저장값과 달라 저장된 비밀번호를 쓰지 않습니다 — 비밀번호를 함께 입력하거나, 먼저 저장한 뒤 시험하세요.', trace: [] });
+      }
+    }
+    // 105회차(100회차 반증): 비밀번호를 새로 준 시험은 저장 비밀을 쓰지 않는다 — 본문 주소 · 포트 · 계정을 쓰고 빈 칸만 저장값(/collectors/test 의 'url || saved.url' 과 같다).
+    //   예전에는 이때도 저장 주소로 바꿔, 주소와 비밀번호를 함께 고친 시험이 옛 서버에 새 비밀번호로 붙은 결과를 '입력한 서버' 결과처럼 보였다.
+    if (s && b.password) { host = host || s.host; username = username || s.username; port = (b.port != null && String(b.port).trim() !== '') ? port : (s.port || 22); }
+    else if (s) { host = s.host; username = s.username; password = s.password; port = s.port || 22; }
+  }
   if (!host || !username) return res.status(400).json({ ok: false, reason: 'host, username이 필요합니다.' });
+  { const why = physicalHostIssue(host); if (why) return res.json({ ok: false, host, port, login: false, read: false, error: why, trace: [] }); }   // 36회차 F3: 'VMware Tools' 사유 대신
   const st = loadGpuGuestSettings();
   const seed = b.revealCreds ? [{ t: Date.now(), msg: `🔓 자격증명: id=${username} · pw=${maskPw(password)} · 포트=${port}` }] : [];
   try {
@@ -428,6 +469,8 @@ adminRouter.post('/gpu-guest/test', adminOnly, async (req, res) => {
   if (!vcenterId || !Array.isArray(items) || !items.length) return res.status(400).json({ error: 'vcenterId + items 필요' });
   const snap = store.get();
   if (!inUserScope(req.user, snap, String(vcenterId))) return res.status(404).json({ error: 'vCenter 를 찾을 수 없습니다.' }); // v2.611: 범위 밖 게스트에 로그인하지 않는다
+  // 전체 점검 7회차 반증 R-3: 게스트 로그인은 쓰기 등급(형제 deep-search/probe · 게스트 조사 잡과 같게) — 조회는 되지만 쓰기 밖이면 403
+  if (!inUserWriteScope(req.user, snap, String(vcenterId))) return res.status(403).json({ error: '조회 전용 범위 — 이 vCenter 는 수정 권한이 없습니다.' });
   const vmById = new Map((snap.vms || []).filter((v) => v.vcenterId === vcenterId).map((v) => [v.id, v]));
   // 호스트명 → 다운로드 후보 호스트(vCenter 실제 IP → ESXi IP → ESXi FQDN).
   const dlByHost = new Map();
@@ -481,7 +524,16 @@ adminRouter.post('/gpu-guest/test', adminOnly, async (req, res) => {
         let creds;
         if (it.useShared) creds = sharedForOs;
         // passwordless = 비번 없는 계정 → 빈 비번으로 인증(저장값으로 폴백하지 않음).
-        else if (it.username) creds = { username: it.username, password: it.passwordless ? '' : (it.password || (vcShared.vms?.[it.vmId]?.password || '')), passwordless: !!it.passwordless };
+        else if (it.username) {
+          // 98회차(재현): 저장 경로(gpu/settings.js carriedPw — v2.611 계정명이 바뀌면 저장 비밀번호를 승계하지 않는다)와 같은 판정. 예전에는 입력한 계정명이
+          //   저장된 VM 별 계정과 달라도 그 VM 의 저장 비밀번호를 새 계정명으로 보냈다(틀린 조합의 로그인 — 계정 잠금 위험 · 다른 계정에 저장 비밀번호 노출).
+          const storedVm = vcShared.vms?.[it.vmId];
+          if (!it.passwordless && !it.password && storedVm?.password && accessMoved(storedVm, { username: it.username }, ['username'])) {
+            results[i] = { vmId: it.vmId, login: false, read: false, error: '계정명이 저장값과 달라 저장된 비밀번호를 쓰지 않습니다 — 비밀번호를 입력해 주세요.', trace: [{ t: Date.now(), msg: '✗ 건너뜀 — 입력한 계정명이 저장된 VM 계정과 달라 저장 비밀번호를 보내지 않음' }] };
+            continue;
+          }
+          creds = { username: it.username, password: it.passwordless ? '' : (it.password || (storedVm?.password || '')), passwordless: !!it.passwordless };
+        }
         else creds = resolveVmCreds(s, vcenterId, it.vmId, isWindows);
         if (!creds || !creds.username) { results[i] = { vmId: it.vmId, login: false, read: false, error: '계정 없음', trace: [{ t: Date.now(), msg: '✗ 건너뜀 — 사용할 계정 없음(공용/별도 계정 미설정)' }] }; continue; }
         const moref = morefOf(v.id, v.vcenterId || vcenterId);
@@ -490,7 +542,11 @@ adminRouter.post('/gpu-guest/test', adminOnly, async (req, res) => {
         const preferIp = it.ip !== undefined ? String(it.ip || '').trim() : ((s.vcenters[vcenterId]?.vmIps || {})[it.vmId] || '');
         // v2.480(3차 감사 S5): 요청에 비밀번호를 직접 싣지 않은(공용/저장 자격증명) 테스트는 SSH 대상 IP 를 그 VM 의 알려진 IP 로만 —
         // {vmId, useShared:true, ip:'공격자'} 로 법인 공용 비밀번호를 외부 sshd 에 보내던 경로 차단.
-        if (preferIp && !(it.username && it.password)) {
+        // 전체 점검 36회차 F1(재현 — 높음): 판정은 '요청에 글자가 있나' 가 아니라 **이번에 쓸 비밀번호가 요청 본문에서 왔나** 다 — 예전에는
+        //   useShared:true 에 아무 username/password 를 덧붙이면 이 검사를 건너뛰고 실제로는 저장된 법인 공용 비밀번호를 임의 IP 의 sshd 로 보냈다.
+        //   useShared 는 본문 계정을 무시하므로 언제나 핀 검사 · 별도 계정도 비밀번호를 저장값에서 물려받으면 핀 검사.
+        const ownSecret = !it.useShared && !!it.username && (!!it.password || !!it.passwordless);
+        if (preferIp && !ownSecret) {
           // v2.606(LEFT2606-01): 폴러와 같은 판정 헬퍼(gpu/sshCollect.js pinnedIpCheck)를 쓴다.
           const pin = pinnedIpCheck(v, preferIp);
           if (!pin.ok) { results[i] = { vmId: it.vmId, login: false, read: false, error: '요청 IP 가 이 VM 의 알려진 IP 가 아님', trace: [{ t: Date.now(), msg: `✗ 거부 — ${preferIp} 는 VM 의 알려진 IP(${pin.known.join(', ') || '없음'})가 아닙니다(저장 자격증명 보호)` }] }; continue; }

@@ -21,6 +21,7 @@ import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
 import { VimSoapClient } from '../vcenter/soapClient.js';
 import { vcDispatcher } from '../vcenter/restClient.js';
+import { connectInfoXml, readConnectFlag, withConnectable, deviceInnerOf } from '../vcenter/connectInfo.js';   // v3.0.1: connectable 조립은 한 곳(스키마 순서)
 import { trimTrailingSlashes } from '../util/trimSlashes.js'; // v2.793: '/\/+$/' 는 O(n²) — 루프로 뗀다(CLAUDE.md 정규식 규약)
 
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
@@ -271,9 +272,8 @@ export function nicBlocksOf(deviceXml) {
     const type = /^[^>]*xsi:type="([^"]+)"/.exec(piece)?.[1] || '';
     if (!NIC_TYPE_RE.test(type)) continue;
     const open = piece.indexOf('>');
-    const close = piece.lastIndexOf('</VirtualDevice>');
-    if (open < 0 || close < open) continue;
-    out.push({ type, inner: piece.slice(open + 1, close) });
+    if (open < 0 || piece.lastIndexOf('</VirtualDevice>') < open) continue;
+    out.push({ type, inner: deviceInnerOf(piece) });
   }
   return out;
 }
@@ -287,13 +287,8 @@ export function nicBlocksOf(deviceXml) {
 export function nicDisconnectSpec(deviceXml) {
   const nics = nicBlocksOf(deviceXml);
   const changes = nics.map(({ type, inner }) => {
-    const guest = /<connectable>[\s\S]*?<allowGuestControl>(true|false)<\/allowGuestControl>/.exec(inner)?.[1] || 'false';
-    const conn = `<connectable><startConnected>false</startConnected><allowGuestControl>${guest}</allowGuestControl><connected>false</connected></connectable>`;
-    let body;
-    if (/<connectable>[\s\S]*?<\/connectable>/.test(inner)) body = inner.replace(/<connectable>[\s\S]*?<\/connectable>/, conn);
-    else if (/<slotInfo[\s>]/.test(inner)) body = inner.replace(/<slotInfo[\s>]/, (m) => `${conn}${m}`);
-    else if (/<controllerKey>/.test(inner)) body = inner.replace('<controllerKey>', `${conn}<controllerKey>`);
-    else body = `${inner}${conn}`;
+    const guest = readConnectFlag(inner, 'allowGuestControl') === true;   // 못 읽으면 false(예전과 같음 — 끊는 쪽이라 게스트 재연결을 열지 않는다)
+    const body = withConnectable(inner, connectInfoXml({ startConnected: false, allowGuestControl: guest, connected: false }));
     return `<deviceChange><operation>edit</operation><device xsi:type="${esc(type)}">${body}</device></deviceChange>`;
   });
   return { specXml: changes.join(''), count: changes.length };

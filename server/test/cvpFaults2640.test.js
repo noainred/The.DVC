@@ -7,13 +7,19 @@
  *   다음 스캔에서 ok 로 바뀌면 close 이벤트 · 장비 ts 가 낡으면 held(device-stale) · 알림은 send 목으로 순서·건수 · closeFaultManual ·
  *   prune 이 fault_event 를 지움 · applyFaultTransition 트랜잭션 실패 시 ROLLBACK.
  */
-import { test, before } from 'node:test';
+import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'cvpfaults2640-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+
+process.env.CONFIG_DIR = tmpDir('cvpfaults2640-');
 
 const F = await import('../src/cvp/faults.js');
 const { observeDevice, transition, HOLD_REASON, devIdOf } = F;
@@ -351,3 +357,7 @@ test('cvpFaultScanStatus — enabled/intervalMs/at/last · 디바운스 한 번�
   assert.equal(scan.cvpFaultScanStatus().enabled, false);
   assert.equal(scan.cvpFaultScanStatus().servers, 0);
 });
+
+// v3.18.8: 정리 훅은 파일 끝에서 등록한다 — 시험 사이에 최상위 await 가 있으면 앞 시험이 끝난 시점에 루트 after 가 먼저 돌아
+//   뒤 시험이 쓸 폴더를 지운다(node 22 실측 — audit2590 이 그렇게 깨졌다).
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });

@@ -4,6 +4,7 @@ import { usePolling, toolAllowed } from '../../api.js';
 import { STable } from '../../components/STable.jsx';
 import { Panel, KpiCard, PctCell, Bar, LevelBadge, PollState, Empty } from '../ui.jsx';
 import { datastoreTypeCounts, datastoresOver, storageRows, sanCells, sanTotals, fmtInt, fmtPct, fmtBytesTB, colorOf, rowMatches, ageText, tsMs } from '../consoleData.js';
+import { unreadMarkOf, registryEmptyText } from '../../views/settingsUnread.js';   // 133회차: SAN 스위치 등록부를 못 읽은 동안의 빈 목록을 ‘등록 없음’ 으로 말하지 않는다
 import { storageUsageUnknownNote } from '../../views/vcCardText.js'; // v2.631(감사 WEB2631-08) — 사용량 미상 DS 제외 사실
 
 export default function ConsoleStorage({ global: g, scope, polls, perms }) {
@@ -17,6 +18,7 @@ export default function ConsoleStorage({ global: g, scope, polls, perms }) {
   const arrays = storageRows(polls.stor.data?.devices, polls.stor.data?.types).filter((r) => rowMatches(r, scope.q));
   const cells = sanCells(san.data?.devices);
   const st = sanTotals(cells);
+  const sanUnreadText = registryEmptyText(unreadMarkOf(san.data), 'SAN 스위치 등록부');   // 133회차: '' 이면 평소 문구
   const dsOver = datastoresOver(dsAll.filter((d) => rowMatches(d, scope.q)), 85, fc.data?.items, 8);
   const arrOk = arrays.filter((a) => a.ok === true).length, arrBad = arrays.filter((a) => a.ok === false).length;
 
@@ -27,7 +29,7 @@ export default function ConsoleStorage({ global: g, scope, polls, perms }) {
         <KpiCard label="스토리지 어레이" value={polls.stor.data ? fmtInt(arrays.length) : '—'} accent="#0891b2" meta={polls.stor.data ? (arrays.length ? `수집 정상 ${arrOk} · 실패 ${arrBad} · 미수집 ${arrays.length - arrOk - arrBad}` : '등록된 장비 없음') : perms.storage ? '수집 대기' : "권한 필요('tools')"} />
         <KpiCard label="전사 사용률" value={fmtPct(g?.storageUsagePct)} accent={colorOf(g?.storageUsagePct)} meta={g ? [`${g.storageUsedTB} / ${g.storageTotalTB} TB (vCenter 데이터스토어 합)`, storageUsageUnknownNote(g)].filter(Boolean).join(' · ') : '수집 대기'} />
         <KpiCard label="임계 초과 DS" value={polls.ds.data ? fmtInt(over90) : '—'} accent="#ef4444" meta={polls.ds.data ? `≥ 90% ${over90} · ≥ 95% ${over95} (서버 알람 기준과 동일)` : '수집 대기'} />
-        <KpiCard label="SAN 스위치" value={san.data ? fmtInt(st.devices) : '—'} accent="#f59e0b" meta={san.data ? (st.measured ? `포트 ${fmtInt(st.online)}/${fmtInt(st.total)} 온라인 · 오프라인 ${st.offline} · 결함 ${st.faulty}${st.failed ? ` · 수집 실패 ${st.failed}대` : ''}` : st.failed ? `수집 실패 ${st.failed}대` : st.devices ? '포트 스냅샷 없음' : '등록된 장비 없음') : canSan ? '수집 대기' : "권한 필요('tools')"} />
+        <KpiCard label="SAN 스위치" value={san.data && !(sanUnreadText && !st.devices) ? fmtInt(st.devices) : '—'} accent="#f59e0b" meta={san.data ? (st.measured ? `포트 ${fmtInt(st.online)}/${fmtInt(st.total)} 온라인 · 오프라인 ${st.offline} · 결함 ${st.faulty}${st.failed ? ` · 수집 실패 ${st.failed}대` : ''}` : st.failed ? `수집 실패 ${st.failed}대` : st.devices ? '포트 스냅샷 없음' : sanUnreadText ? '등록부를 읽지 못함' : '등록된 장비 없음') : canSan ? '수집 대기' : "권한 필요('tools')"} />
       </div>
 
       <div className="dvc-grid2">
@@ -61,7 +63,7 @@ export default function ConsoleStorage({ global: g, scope, polls, perms }) {
         <div className="dvc-col">
           <Panel title="SAN 스위치 포트" sub={san.data ? `${st.devices}대 · 셀 = 스위치 · 온라인/전체` : ''}>
             <PollState poll={san} skipped={canSan ? null : "특수 기능('tools') 권한이 없어 /tools/sanswitch 를 조회하지 않습니다."}>
-              {cells.length === 0 ? <Empty><b>등록된 SAN 스위치가 없습니다.</b><br />특수 기능 › SAN 스위치 모니터링에서 Brocade 스위치를 등록하면 포트 상태가 표시됩니다.</Empty> : (
+              {cells.length === 0 ? (sanUnreadText ? <Empty><b>{sanUnreadText}</b><br />특수 기능 › SAN 스위치 모니터링에서 사유를 확인하세요.</Empty> : <Empty><b>등록된 SAN 스위치가 없습니다.</b><br />특수 기능 › SAN 스위치 모니터링에서 Brocade 스위치를 등록하면 포트 상태가 표시됩니다.</Empty>) : (
                 <>
                   <div className="dvc-cells">
                     {cells.map((c) => (

@@ -30,7 +30,7 @@ import { remoteTmpDir } from '../agent/deploy.js';
 import { openConsole } from './console.js';
 import { probe } from './director.js';
 import { isResourceName, OWN_TYPES, OWN_PER_TYPE } from './names.js';
-import { loadSettings, updateDirector, directorIssue, directorCred, directorById } from './settings.js';
+import { loadSettings, updateDirector, directorIssue, directorCred, directorById, directorMoveBindIssue } from './settings.js';
 import { bareosAuthGuard } from './service.js';
 import { ipBlockReason, ssrfBlockReasonResolved } from '../util/ssrfBlock.js';
 
@@ -333,6 +333,13 @@ export function planDirector(b = {}, ctx = null) {
   const lc = (x) => String(x || '').toLowerCase();
   const clash = cur.directors.find((o) => o.id !== dir.id && lc(o.host) === lc(ssh.host) && Number(o.port) === directorPort && o.consoleName === consoleName);
   if (clash) throw fail('invalid', `같은 콘솔(${ssh.host}:${directorPort} · ${consoleName})을 ‘${clash.name}’ Director 가 이미 씁니다 — 다른 콘솔 이름을 쓰세요.`);
+  // 105회차(104회차 D1 반증): 자동 설정은 끝에 이 Director 의 주소 · 포트를 SSH 주소로 저장한다 — 그 저장이 'Director 하나에 vCenter 하나' 를 새로 어기면
+  //   원격을 바꾼 **뒤에** 저장에서 거부되고 되돌리기를 탄다. 중앙 판정(ctx 없음 — 엣지 대행 · 완전 설치는 ctx 를 준다)에서 먼저 본다(updateDirector 와 같은 판정).
+  if (!ctx) {
+    const nextDirs = cur.directors.map((o) => (o.id === dir.id ? { ...o, host: ssh.host, port: directorPort } : o));
+    const bind = directorMoveBindIssue(dir.id, cur.directors, nextDirs, cur.sites);
+    if (bind) throw fail('invalid', bind);
+  }
   for (const k of ['fileSet', 'jobDefs', 'restoreJob']) {
     if (!isResourceName(cur.defaults[k] || '')) throw fail('invalid', `설정 › 백업 › Bareos 백업 서버 › 공통 기본값의 ${k} 이름이 비어 있거나 올바르지 않습니다 — 먼저 기본값을 저장하세요.`);
   }
@@ -475,7 +482,7 @@ export async function setupDirector(b = {}, ctx = null) {
  * 사실이 아니므로 지운다(남기면 수동 조회가 성공할 때까지 주기 조회가 멈춘다).
  */
 function clearStaleAuthStop(directorId) {
-  try { const d = directorById(directorId); if (d) bareosAuthGuard.clearAuthStop(directorCred(d).id); } catch { /* 설정을 못 읽으면 그대로 */ }
+  try { const d = directorById(directorId); if (d) bareosAuthGuard.clearAuthStop(directorCred(d).id, { verified: false }); } catch { /* 설정을 못 읽으면 그대로 */ }
 }
 
 /* ───────────────────────── ② 사이트 FD INI ───────────────────────── */

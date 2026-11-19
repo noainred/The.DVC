@@ -22,14 +22,17 @@ test('sanitizeGuestDiskVms — 식별불가 행 제거·숫자 강제·파티션
   assert.equal(out.length, 2, 'vmId 없는 행은 제외');
   assert.equal(out[0].vmName, 'W1');
   assert.equal(out[0].parts[0].capGB, 100);
-  // 음수·비유한 값은 0 으로 강제(트래픽 없음/오염 방지), vmName 없으면 vmId 로 폴백.
-  assert.equal(out[1].allocGB, 0);
-  assert.equal(out[1].usedGB, 0);
+  // 결정(56~75 남긴 것) 68 P1 — 기대값 갱신: 음수·비유한·글자 값은 예전에 0 으로 강제했다('0 GB VM · 비어 있는 파티션' 으로 적재 · 추이에 남았다).
+  //   이제 null(못 읽음)이다 — VM 합계 null 은 commitCollection 이 적재하지 않고 skippedVms 로 세고, 값을 못 읽은 파티션은 '값 모름' 으로 센다.
+  //   vmName 없으면 vmId 로 폴백(그대로).
+  assert.equal(out[1].allocGB, null);
+  assert.equal(out[1].usedGB, null);
   assert.equal(out[1].vmName, 'vc:vm-2');
-  assert.equal(out[1].parts[0].capGB, 0);
-  assert.equal(out[1].parts[0].usedGB, 0);
-  // partCount 미지정이면 실제 파티션 수로 채운다(null/잡음 파티션은 걸러진 뒤 카운트).
-  assert.equal(out[1].partCount, 1);
+  assert.equal(out[1].parts.length, 0, '용량 −1 · 사용 NaN 인 D: 는 0 으로 저장하지 않는다');
+  assert.equal(out[1].partsUnknown, 1);
+  assert.deepEqual(out[1].unknownPaths, ['D:\\']);
+  // partCount 미지정이면 실제(저장한) 파티션 수로 채운다(null/잡음 · 값 모름 파티션은 걸러진 뒤 카운트).
+  assert.equal(out[1].partCount, 0);
 });
 
 test('sanitizeGuestDiskVms — VM/파티션 상한으로 폭주 방지', () => {

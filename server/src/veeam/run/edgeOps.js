@@ -23,7 +23,7 @@ export const PICKUP_MS = clampIntervalMs(Number(process.env.VEEAM_RUN_PICKUP_MS)
 export const RESULT_MS = Object.freeze({ quickBackup: 4 * 60_000, portalJob: 5 * 60_000, sessions: 3 * 60_000, repos: 2 * 60_000, vmPoints: 3 * 60_000, restoreVm: 4 * 60_000, jobExclude: 3 * 60_000, deleteBackup: 5 * 60_000 });
 export const MARGIN_MS = 30_000;
 const MAX_PER_AGENT = 50;
-const TAKE_MAX = 5;
+export const TAKE_MAX = 5;
 const _ops = new Map(); // id → op
 const lc = (s) => String(s ?? '').trim().toLowerCase();
 
@@ -65,11 +65,13 @@ export function enqueueEdgeOp(server, kind, args = {}) {
 }
 
 /** 이 엣지 몫 대기 작업을 꺼낸다(상태 변경 작업 먼저). 비밀은 없다 — 서버 id 와 남은 시간(ttlMs)뿐. */
-export function takeEdgeOps(agentName) {
+export function takeEdgeOps(agentName, max = TAKE_MAX) {
   const me = lc(agentName);
   if (!me) return [];
+  // 52회차 F5: 엣지가 알려 온 빈 자리만큼만(bareos 대행 v2.824 P2 와 같은 모양) — 없거나 틀리면 기본 상한
+  const n = Math.max(0, Math.min(TAKE_MAX, Number.isInteger(max) ? max : TAKE_MAX));
   const mineQ = [..._ops.values()].filter((o) => o.status === 'queued' && lc(o.agent) === me)
-    .sort((a, b) => (MUTATING.has(b.kind) - MUTATING.has(a.kind)) || (a.at - b.at)).slice(0, TAKE_MAX);
+    .sort((a, b) => (MUTATING.has(b.kind) - MUTATING.has(a.kind)) || (a.at - b.at)).slice(0, n);
   return mineQ.map((op) => {
     op.status = 'dispatched';
     clearTimeout(op.timer);

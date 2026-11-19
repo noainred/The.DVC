@@ -102,7 +102,7 @@ export function filterPeers(peers = [], { kind = 'all', state = 'all', q = '' } 
 export function policyNote(kind, policy = {}) {
   const label = KIND_LABEL[kind] || kind;
   if (policy.source === 'env') return `환경변수 ${policy.envKey || ''} 가 ${label} 정책을 정하고 있어 화면에서 바꿀 수 없습니다.`;
-  if (policy.origin === 'load-error') return '장비 신뢰 파일을 읽지 못해 승인된 지문만 허용으로 닫았습니다(손상 원본은 보존). 파일을 복구하거나 지문을 다시 승인하세요.';
+  if (policy.origin === 'load-error') return '장비 신뢰 파일을 읽지 못해 승인된 지문만 허용으로 닫았습니다(원본은 그 자리에 있거나 옆에 보존돼 있습니다 — 위 안내). 파일을 복구하거나 지문을 다시 승인하세요.';
   if (policy.origin === 'upgrade-migration' && policy.mode === 'observe') {
     return '이 설치는 업그레이드로 **관찰 모드**에서 시작했습니다(업그레이드 직후 수집이 끊기지 않게). 관찰 지문을 장비에서 확인·승인한 뒤 **승인된 지문만 허용**으로 바꾸세요.';
   }

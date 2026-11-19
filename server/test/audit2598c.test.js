@@ -4,14 +4,21 @@
  * 권한 항목은 **실제 라우터를 express 에 마운트해** 상태코드·응답 필드로 본다(소스 grep 이 아니다).
  * 각 테스트는 수정을 되돌리면 실패하도록 입력을 골랐다(변이 검증은 보고서에 기록).
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import express from 'express';
 
-const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'a2598c-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const CFG = tmpDir('a2598c-');
 process.env.CONFIG_DIR = CFG;
 process.env.DATA_SOURCE = 'mock';
 process.env.CENTRAL_URL = 'https://central.example.internal:8443';
@@ -234,7 +241,7 @@ test('CENTRAL-03 — 스캔 결과의 수치·found 원소를 정제한다(객�
   assert.equal(typeof saved.at, 'number');
 
   // 이미 저장된 오염 파일도 로드 시 정제된다 — 새 프로세스로 확인(모듈 캐시를 피한다).
-  const cfg2 = fs.mkdtempSync(path.join(os.tmpdir(), 'a2598c-r-'));
+  const cfg2 = tmpDir('a2598c-r-');
   fs.writeFileSync(path.join(cfg2, 'agent-results.json'), JSON.stringify({ e1: { at: 9, scanned: { x: 1 }, found: [null, { ip: '1.2.3.4' }] }, bad: 'str' }));
   const { execFileSync } = await import('node:child_process');
   const out = execFileSync(process.execPath, ['-e', `import('./src/central/assignments.js').then(m=>console.log(JSON.stringify(m.getResults())))`],

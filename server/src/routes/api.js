@@ -11,9 +11,11 @@ import { registerReports } from './api/reports.js';
 import { registerSearchNotes } from './api/searchNotes.js';
 import { registerInvSearch } from './api/invSearch.js'; // v2.909 헤더 ⌘K 통합 장비 검색
 import { registerIpamExport } from './api/ipamExport.js';
+import { registerIpamServer } from './api/ipamServer.js'; // v3.6.0 IP 관리 서버 보기 · 호스트명 대조
 import { registerVmExport } from './api/vmExport.js';   // v2.799 VM 전체 정보 내보내기(ipamExport.js 에서 옮김)
 import { registerHostExport } from './api/hostExport.js'; // v2.802 vCenter 화면 '호스트 · 클러스터 엑셀'(호스트 1대 = 시트 1장)
 import { registerHostCorp } from './api/hostCorp.js'; // v2.811 ESXi 호스트 화면 '법인별' 보기 집계(/hosts/:id 보다 먼저)
+import { registerHostInsight } from './api/hostInsight.js'; // v3.22.0 Hypervisor 탭 '분석' 보기 집계(/hosts/:id 보다 먼저)
 import { registerHostChecks } from './api/hostChecks.js'; // v2.805 ESXi 호스트 화면 '점검' 열 집계 + 호스트 단건(상세 페이지)
 import { registerHardwareGpu } from './api/hardwareGpu.js';
 import { registerChecksLogs } from './api/checksLogs.js';
@@ -38,16 +40,37 @@ import { registerBareosManage } from './api/bareosManage.js'; // v2.845 법인�
 import { registerBareosLive } from './api/bareosLive.js'; // v2.833 Bareos 진행 현황판(관리 도구 bareos-backup 의 '진행 현황' 탭 — 화면이 열린 동안만 Director 상태 조회) // v2.830 Bareos 백업 그룹(관리 도구 bareos-backup 의 '백업 그룹' 탭 — 포탈이 스케줄 실행)
 import { registerStorageMon } from './api/storageMon.js'; // 스토리지 모니터링(Isilon 등, v2.302)
 import { registerSanSwitch } from './api/sanSwitch.js';   // SAN 스위치 모니터링(Brocade FOS, v2.410)
+import { registerHostSan } from './api/hostSan.js';
+import { registerSanStorage } from './api/sanStorage.js'; // v2.948 SAN 스토리지 성능(독립 도구 san-storage — 어레이 · 디렉터 · 컨트롤러별 처리량 · 점검 · 매핑)
+import { registerPsInspect } from './api/psInspect.js'; // v2.965 PowerScale 장비 점검(독립 도구 ps-inspect — 법인별 주간 점검 · 보고서 · Top 10 노드 편중)
+import { registerSanFlow } from './api/sanFlow.js';       // v2.935(C-②) Brocade Flow Vision 플로우 모니터(포탈이 dvc_ 플로우를 만들고 읽는다)       // v2.920 호스트 ↔ SAN 조닝·트래픽 귀속 + CVP 업링크 매칭
 import { registerCvp } from './api/cvp.js';               // Arista CloudVision(CVP) 네트워크 스위치(v2.608)
 import { registerCvpBulk } from './api/cvpBulk.js';       // CVP 서버 CSV·자유텍스트 대량 등록(v2.641)
 import { registerPartFaults } from './api/partFaults.js'; // 파트 장애(물리 부품 장애 기록·알림, v2.547)
+import { registerDiskBad } from './api/diskBad.js'; // 디스크 배드 섹터 분석(v3.8.0)
 import { registerEdgeLog } from './api/edgeLog.js'; // 엣지 로그·진행상태(중앙이 당긴다 + 폴백, v2.549)
 import { registerBmUsage } from './api/bmUsage.js'; // 베어메탈 사용률(CPU·MEM·디스크·NET·HBA, v2.550)
+import { registerBmPerfOps } from './api/bmPerfOps.js'; // v2.929 리눅스 성능 5단계(집중 모니터링 · 변경 이벤트 · 베이스라인 · 구간 비교 · 알림 규칙)
+import { registerBmCompare } from './api/bmCompare.js'; // 6단계 리눅스 성능 — 서버 비교(2~5대) · 5대 동시 집중 · 저장된 세트
+import { registerBmCollectHealth } from './api/bmCollectHealth.js'; // 6단계 — 수집 건강 보드(메타 모니터링)
+import { registerBmAnnotations } from './api/bmAnnotations.js'; // 6단계 — 운영 주석(중앙 저장)
+import { registerBmOnboard } from './api/bmOnboard.js'; // 7b단계 — SSH 키 저장소 · 공통 계정 · 서버 등록(온보딩) · 누락 점검
+import { registerSshAccess } from './api/sshAccess.js'; // v3.9.0 설정 › 보안 › SSH 공용 접속(7b 키 저장소 위 — 폴더 · 서버별 키 · 키 보안)
+import { registerBmMaint } from './api/bmMaint.js'; // 8a단계 — 정비 창 · 알림 억제
+import { registerBmCapacity } from './api/bmCapacity.js'; // 8a단계 — 용량 소진 예측
+import { registerBmTop } from './api/bmTop.js'; // 8b단계 — 프로세스 Top-N
+import { registerBmIdle } from './api/bmIdle.js'; // 8b단계 — 저활용 서버 찾기
+import { registerBmKeyOverlaps } from './api/bmKeyOverlaps.js'; // 다음 점검 ①(2차) — 식별 키가 겹치는 서버 · 사용자 결정
+import { registerBmPower } from './api/bmPower.js'; // 8b단계 — 전력 · 온도 집계
+import { registerBmPlaybookSlo } from './api/bmPlaybookSlo.js'; // 6단계 — 진단 플레이북 · 목표선(SLO)
+import { registerBmLogs } from './api/bmLogs.js'; // 7a단계 리눅스 성능 — 로그 분석(서버 상세 ‘로그’ 탭 · 함대 표)
 import { registerServerSensors } from './api/serverSensors.js'; // 서버 온도 › 센서 상세(v2.659)
 import { registerCorpUsage } from './api/corpUsage.js'; // 법인별 서버 사용량(전체·물리·가상화, v2.625)
 import { registerSvcInventory } from './api/svcInventory.js'; // 서비스 인벤토리(VM + 베어메탈 · 법인 › 폴더 › 서비스 · 전역 카탈로그, v2.887)
+import { registerBmFolders } from './api/bmFolders.js'; // 물리서버 폴더(베어메탈을 법인 › 폴더로 등록 · 찾아 일괄 등록, v2.984)
 import { registerLinkCheck } from './api/linkCheck.js'; // 통신 점검(중앙↔엣지·vCenter·엣지↔엣지, v2.552)
 import { registerXferSpeed } from './api/xferSpeed.js'; // 법인 간 전송 속도(중앙↔엣지 10MB 왕복, v2.735)
+import { registerFocusMon } from './api/focusMon.js'; // 집중 모니터링(v2.976) — 리눅스 서버 최대 20대 실시간 · DB 30일
 import { registerIsilonDirUsage } from './api/isilonDirUsage.js'; // 아이실론 디렉터리 사용량(사용자 폴더 du Top N·추이, v2.736)
 import { registerStorageUsage } from './api/storageUsage.js'; // 스토리지 사용량 보고서(일간·주간·월간 표·비교·예약 메일, v2.789)
 import { registerPortalCheck } from './api/portalCheck.js'; // 포탈 점검 › 토큰 점검(v2.560)
@@ -63,6 +86,7 @@ import { registerBackupManage } from './api/backupManage.js'; // 포탈 백업 �
 import { registerRelayCheck } from './api/relaycheck.js';     // HAProxy 경로 점검(v2.429)
 import { registerRelayTopo } from './api/relaytopo.js';       // 중계 토폴로지·HAProxy 구성(v2.431)
 import { registerBmStorage } from './api/bmstor.js'; // 베어메탈 스토리지(SSH df 마운트 합산, v2.340)
+import { registerServerInfo } from './api/serverInfo.js'; // v3.25 서버 정보(서버 접속 2단계 — 기본 구성 + 디스크 · 누를 때만)
 import { registerCompareMatrix } from './api/compareMatrix.js';   // v2.499: 비교 매트릭스(가로 vCenter × 세로 클러스터/스토리지)
 import { registerPerfClient } from './api/perfClient.js'; // v2.498: 브라우저 장기 로딩(hang) 보고 수신
 import { registerVmTrack } from './api/vmtrack.js'; // VM 수량 추이(00/12시 스냅샷 + 증감 상세, v2.345)
@@ -126,9 +150,11 @@ registerReports(api);
 registerSearchNotes(api);
 registerInvSearch(api);
 registerIpamExport(api);
+registerIpamServer(api);
 registerVmExport(api);
 registerHostExport(api);
 registerHostCorp(api);
+registerHostInsight(api);
 registerHostChecks(api);
 registerHardwareGpu(api);
 registerChecksLogs(api);
@@ -152,17 +178,38 @@ registerBareosInstall(api);
 registerBareosManage(api);
 registerBareosLive(api);
 registerStorageMon(api);
+registerPsInspect(api); // v2.965
 registerSanSwitch(api);
+registerSanStorage(api);   // v2.948 — /tools/san-storage*(조회 tools+전체 범위 · 매핑 · 임계값 PUT 은 전체 범위 관리자)
+registerHostSan(api);
+registerSanFlow(api);   // v2.935 — /tools/san-flow*(전체 범위 관리자 · 만들기 · 지우기는 OTP 재인증)   // v2.920 — /hosts/:id/san-attribution · /hosts/:id/net-uplinks · /tools/sanswitch/attribution
 registerCvp(api);
 registerCvpBulk(api);
 registerPartFaults(api);
+registerDiskBad(api);
 registerEdgeLog(api);
 registerBmUsage(api);
+registerBmPerfOps(api);
+registerBmCompare(api);
+registerBmCollectHealth(api);
+registerBmAnnotations(api);
+registerBmOnboard(api);
+registerSshAccess(api);
+registerBmMaint(api);
+registerBmCapacity(api);
+registerBmTop(api);
+registerBmIdle(api);
+registerBmKeyOverlaps(api);
+registerBmPower(api);
+registerBmPlaybookSlo(api);
+registerBmLogs(api);
 registerCorpUsage(api);
 registerSvcInventory(api);
+registerBmFolders(api);
 registerServerSensors(api);
 registerLinkCheck(api);
 registerXferSpeed(api);
+registerFocusMon(api);
 registerIsilonDirUsage(api);
 registerStorageUsage(api);
 registerPortalCheck(api);
@@ -180,6 +227,7 @@ registerBackupManage(api);
 registerRelayCheck(api);
 registerRelayTopo(api);
 registerBmStorage(api);
+registerServerInfo(api);
 registerVmTrack(api);
 registerVmHygiene(api);
 registerHostHygiene(api);

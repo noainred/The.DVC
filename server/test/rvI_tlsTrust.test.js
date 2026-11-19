@@ -18,10 +18,17 @@ import path from 'node:path';
 import https from 'node:https';
 import { fileURLToPath } from 'node:url';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const FX = path.join(HERE, 'fixtures', 'rvI-tls');
 const pem = (n) => fs.readFileSync(path.join(FX, n));
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'rvI-tls-'));
+const TMP = tmpDir('rvI-tls-');
 process.env.CONFIG_DIR = TMP;
 delete process.env.TLS_PEER_POLICY;
 delete process.env.SSH_HOSTKEY_POLICY;
@@ -210,9 +217,13 @@ test('④-b insecure(env=false) 는 그 수집기에만 예외다 — 다른 수
   const dev = await fakeDevice('self-b');
   try {
     const insecure = T.deviceTlsConnect({ subsystem: 'rvi-exc', envKey: 'RVI_EXC_TLS', envRaw: 'false', tls: {} });
+    // 전후 비교(2026-11-13 전량 verify 1회 실패 — 1 !== 0): _resetPeerTrustForTest 는 메모리만 비워 앞 시험이 디스크에 남긴 지문을 다시 읽는다.
+    //   앞 시험 가짜 장비의 포트를 OS 가 이 장비에 다시 주면 그 기록이 '이 포트' 로 보였다(재사용 + 디스크 재로드 — 혼자 12회 동시 실행으로는 재현 안 됨, 재로드는 스크립트로 확인).
+    const peersHere = () => PT.listPeers({ kind: 'tls' }).filter((x) => x.port === dev.port).length;
+    const before = peersHere();
     const r1 = await post(insecure, dev.port);
     assert.equal(r1.ok, true, '명시적 예외는 예전처럼 통과해야 한다');
-    assert.equal(PT.listPeers({ kind: 'tls' }).filter((x) => x.port === dev.port).length, 0, '예외 경로가 지문 저장소를 건드렸다');
+    assert.equal(peersHere(), before, '예외 경로가 지문 저장소를 건드렸다');
     const r2 = await post(mk('rvi-other', undefined), dev.port);
     assert.equal(r2.ok, false, '다른 수집기까지 예외가 번졌다');
     const st = T.tlsTrustStatus();

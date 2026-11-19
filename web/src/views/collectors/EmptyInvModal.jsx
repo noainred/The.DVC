@@ -25,6 +25,7 @@ import {
   statusValue, relevantLogs,
   collectModeText,
 } from './emptyInvText.js';
+import { backdropClose } from '../../components/backdropClose.js'; // 96회차(95회차 남긴 것 ①): 창 안에서 끌다 배경에서 떼면 닫히던 것 — 누름 · 뗌 모두 배경일 때만
 
 // v2.613 DEPS2613-11: 상대시각은 공용 코어 relTime.agoText 하나다(로컬 ago 사본 제거).
 
@@ -35,6 +36,7 @@ const FETCH_KIND_TEXT = Object.freeze({
   unreachable: '중앙이 그 엣지에 닿지 못했습니다 — 요청을 등록해 두었고, 엣지가 스스로 인출해 회신하면 여기에 나타납니다.',
   timeout: '응답이 시한을 넘겼습니다 — 요청을 등록해 두었고, 엣지가 스스로 인출해 회신하면 여기에 나타납니다.',
   'not-registered': '이 이름이 수집 서버 등록부에 없습니다 — 설정 › 엣지·원격 › 수집 서버(원격)에서 등록하세요.',
+  ambiguous: '같은 표시 이름의 수집 서버가 둘 이상이라 어느 엣지인지 정할 수 없습니다 — 설정 › 엣지·원격 › 수집 서버(원격)에서 표시 이름을 겹치지 않게 바꾸세요.',
   'disabled-central': '중앙에서 이 수집 서버를 비활성으로 두었습니다.',
   'no-url': '이 수집 서버에 URL 이 없습니다.',
   'bad-body': '응답 형식이 달랐습니다 — 그 주소가 정말 엣지 포탈인지 확인하세요.',
@@ -82,7 +84,7 @@ export default function EmptyInvModal({ agent, push, onClose }) {
   };
 
   return (
-    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="modal-overlay" {...backdropClose(() => onClose())}>
       <EscClose onClose={onClose} />
       <div className="modal" style={{ maxWidth: 820, width: '100%', maxHeight: '86vh', overflow: 'auto', minWidth: 0 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 8 }}>

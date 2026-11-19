@@ -50,6 +50,12 @@ export const GROUPS = Object.freeze([
     desc: 'vCenter 알람과 물리 부품 장애. 장비·엔티티 이름이 들어갑니다.',
     sensitivity: 'medium',
   },
+  {
+    key: 'san',
+    label: 'SAN 스토리지 성능',
+    desc: 'SAN 스위치 포트 사용량으로 본 스토리지 어레이별 처리량 · 편중 · 성능 점검 판정과 어레이 측(디렉터 · 노드 · SP) 값. 어레이 이름 · 시리얼 · 법인이 들어가고 vCenter 범위로 나눌 수 없어 전체 범위 키만 씁니다(v2.950).',
+    sensitivity: 'medium',
+  },
 ]);
 
 export const GROUP_KEYS = Object.freeze(GROUPS.map((g) => g.key));
@@ -60,21 +66,25 @@ export const GROUP_BY_KEY = Object.freeze(Object.fromEntries(GROUPS.map((g) => [
  *
  * `fields` 는 **계약**이다 — 여기 적힌 것만 응답에 나가고, 테스트가 실제 응답 키와 대조한다.
  * `scoped: true` 면 키의 vCenter 범위가 적용된다(빈 범위 = 전체).
+ * `list` 는 `data` 가 배열(행 목록)인가 — OpenAPI 스키마가 이 값을 쓴다(67회차 F3: 예전에는 선언이 없어 필드에 id · deviceId · partKey 가
+ *   있는지로 추측했고, `key` 를 쓰는 `/san-storage/*` 두 경로가 실제로는 배열인데 문서에는 객체 하나로 나갔다). 새 경로는 반드시 적는다
+ *   (`test/contentApiAudit67.test.js` 가 핸들러의 project/projectAll 과 대조한다).
  */
 export const ENDPOINTS = Object.freeze([
   {
-    path: '/inventory/summary', group: 'inventory', method: 'GET', scoped: true,
+    path: '/inventory/summary', list: false, group: 'inventory', method: 'GET', scoped: true,
     // v2.632: storageCapacityGB·storageUsedGB 는 **사용량을 읽은 DS 만**(내부 /summary 와 같은 기준 — 사용률 계산용).
     //   설치 용량 전체는 storageCapacityAllGB, 사용량을 못 읽어 뺀 DS 수는 datastoresUsageUnknown.
     // v2.727(C-01): vmProvisionedGB 는 스토리지를 읽은 VM 만의 합 — 못 읽어 뺀 VM 수는 vmStorageUnknown.
+    // v3.19.2: vmVcpu · vmRamMB 도 읽은 VM 만의 합(값은 예전 그대로) — 못 읽어 뺀 VM 수는 vmVcpuUnknown · vmRamUnknown.
     summary: '전 vCenter 합계 — 개수와 자원 총량(스토리지 용량·사용은 사용량을 읽은 DS 기준, 설치 용량 전체는 storageCapacityAllGB)',
     fields: ['vcenters', 'hosts', 'vms', 'vmsPoweredOn', 'templates', 'datastores', 'networks', 'clusters',
       'cpuCores', 'cpuTotalMhz', 'cpuUsedMhz', 'memTotalMB', 'memUsedMB', 'storageCapacityGB', 'storageUsedGB',
       'storageCapacityAllGB', 'datastoresUsageUnknown',
-      'vmVcpu', 'vmRamMB', 'vmProvisionedGB', 'vmStorageUnknown'],
+      'vmVcpu', 'vmRamMB', 'vmVcpuUnknown', 'vmRamUnknown', 'vmProvisionedGB', 'vmStorageUnknown'],
   },
   {
-    path: '/inventory/vcenters', group: 'inventory', method: 'GET', scoped: true,
+    path: '/inventory/vcenters', list: true, group: 'inventory', method: 'GET', scoped: true,
     summary: 'vCenter 별 개수·상태 — 이름과 id 는 주고 자격증명·주소는 주지 않는다',
     // v2.732(점검 2회차 B2-01·B2-05): collectedAt 은 그 값을 실제로 받은 시각(위임 → 엣지 push 수신 · 접속 실패 이월 → 마지막
     //   정상 수집), stale 은 그 값이 낡았는가(true/false), alarms 는 경보를 조회하지 않은 vCenter(REST 폴백)면 null.
@@ -82,7 +92,7 @@ export const ENDPOINTS = Object.freeze([
   },
   {
     // v2.599(AUTHZ-2599-04): 범위 키에는 그 범위 vCenter 만 센다 — 내부 /health(v2.583)와 같은 기준.
-    path: '/inventory/collection', group: 'inventory', method: 'GET', scoped: true,
+    path: '/inventory/collection', list: false, group: 'inventory', method: 'GET', scoped: true,
     summary: '수집 상태 — 첫 수집 중(pending)과 접속 실패(unreachable)를 구분해 준다',
     /*
      * ⚠ 상태값은 스냅샷의 실제 값(`connected`·`pending`·`unreachable`·`maintenance`)을
@@ -94,17 +104,17 @@ export const ENDPOINTS = Object.freeze([
     fields: ['registered', 'connected', 'pending', 'unreachable', 'maintenance', 'stale', 'generatedAt', 'source', 'intervalMs'],
   },
   {
-    path: '/capacity/datastores', group: 'capacity', method: 'GET', scoped: true,
+    path: '/capacity/datastores', list: true, group: 'capacity', method: 'GET', scoped: true,
     summary: '데이터스토어 용량·사용률',
     fields: ['id', 'vcenterId', 'name', 'type', 'capacityGB', 'usedGB', 'freeGB', 'usedPct'],
   },
   {
-    path: '/capacity/storage', group: 'capacity', method: 'GET', scoped: false, requiresFullScope: true,
+    path: '/capacity/storage', list: true, group: 'capacity', method: 'GET', scoped: false, requiresFullScope: true,
     summary: '스토리지 장비 용량 — 읽지 못한 값은 null 이고 0 으로 채우지 않는다',
     fields: ['deviceId', 'name', 'type', 'totalBytes', 'usedBytes', 'usedPct', 'collectedAt', 'usedUnknown'],
   },
   {
-    path: '/capacity/storage-growth', group: 'capacity', method: 'GET', scoped: false, requiresFullScope: true,
+    path: '/capacity/storage-growth', list: true, group: 'capacity', method: 'GET', scoped: false, requiresFullScope: true,
     summary: '스토리지 증가량 — 기준선이 없으면 null(추정으로 메우지 않는다)',
     // v2.604: resolutionBytes — 반올림 표기 용량 장비의 해상도(정확하면 null).
     // v2.682(R3A-07): excludedFromTotals — 'retired'|'stale'|null(meta 합계 기준에서 빠졌는가).
@@ -113,7 +123,7 @@ export const ENDPOINTS = Object.freeze([
     fields: ['deviceId', 'name', 'usedBytes', 'totalBytes', 'observedDays', 'growth', 'growthSpanDays', 'unknownUsed', 'resolutionBytes', 'excludedFromTotals'],
   },
   {
-    path: '/faults/alarms', group: 'faults', method: 'GET', scoped: true,
+    path: '/faults/alarms', list: true, group: 'faults', method: 'GET', scoped: true,
     summary: 'vCenter 알람 — 음소거된 것은 제외하지 않고 muted 로 밝힌다',
     fields: ['id', 'vcenterId', 'entity', 'entityType', 'name', 'severity', 'triggeredAt', 'muted'],
   },
@@ -124,9 +134,21 @@ export const ENDPOINTS = Object.freeze([
     //   데이터가 세션 경로에서 거절되고 키 경로에서 열리던 비대칭이다. 응답 필드 `agent`(법인 엣지
     //   이름)·`deviceKey`(서비스태그)가 그대로 실린다.
     //   부품 장애는 **agent(법인 엣지) 축**이라 vCenter 범위와 교집합할 수 없다 → 전체 범위 키만.
-    path: '/faults/parts', group: 'faults', method: 'GET', scoped: false, requiresFullScope: true,
+    path: '/faults/parts', list: true, group: 'faults', method: 'GET', scoped: false, requiresFullScope: true,
     summary: '물리 부품 장애 — 확인 불가(unknown)를 정상으로도 장애로도 세지 않는다',
     fields: ['partKey', 'agent', 'scope', 'deviceKey', 'kind', 'partId', 'state', 'openedAt', 'lastSeenAt', 'reason'],
+  },
+  // v2.953 — SAN 스토리지 성능(법인 축만 · vCenter 범위 미적용 → `requiresFullScope` 로 게이트가 403 needs-full-scope · 어레이 이름·시리얼이 들어간다).
+  {
+    path: '/san-storage/arrays', list: true, group: 'san', method: 'GET', scoped: false, requiresFullScope: true,
+    summary: '어레이별 스위치 측 처리량 — 지금 · 회선 사용률 · 24시간 평균/피크 · 7일 대비 · 편중 · 수집 상태 · 30일 용량 증가(짝 지은 스토리지)',
+    fields: ['key', 'name', 'vendor', 'serial', 'datacenterId', 'datacenterName', 'state', 'nowBps', 'nowAt', 'utilPct', 'avg24Bps', 'peak24Bps', 'delta7dPct',
+      'imbalanceGroup', 'imbalanceRatio', 'directors', 'ports', 'switches', 'storageDeviceId', 'capacityPct', 'alertsUnresolved', 'growth30dBytes', 'daysToFull'],
+  },
+  {
+    path: '/san-storage/check', list: true, group: 'san', method: 'GET', scoped: false, requiresFullScope: true,
+    summary: '어레이별 성능 점검 판정 — 종합 · 미확인 수 · 항목별 상태(스위치 측 4 + 어레이 측 5) · 어레이 측 표본 유무',
+    fields: ['key', 'name', 'datacenterId', 'datacenterName', 'overall', 'uncheckedCount', 'items', 'arraySideKeys', 'arraySideLastSampleAt', 'judgedAt'],
   },
 ]);
 

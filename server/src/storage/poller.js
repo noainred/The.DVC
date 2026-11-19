@@ -21,7 +21,7 @@ import * as vplex from './collectors/vplex.js';           // v2.311(vplex·metro
 import { collectAreasOnce } from './areasCollector.js';
 import { areasExtraFields } from './onefsAreaSummary.js'; // v2.730 검토 I-03
 import { enabledAreas, ONEFS_AREAS } from './onefsCatalog.js';
-import { saveCapacityPoint, saveAreaResults } from './db.js';
+import { saveCapacityPoint, saveAreaResults, saveNodeLoadPoint } from './db.js';
 import { recordActivity } from './activityLog.js';
 import { runtimeIntervals, runtimeIntervalSource, centralIntervalsInfo, startAdaptiveTimer, applyOwnIntervals } from './intervals.js';
 
@@ -29,11 +29,12 @@ import { withDeadline, deadlineMs } from '../proxy/sshExec.js';
 import { poolRun } from '../util/pool.js'; // v2.575 IMP-08 — 동시성 풀 단일 소스
 // v2.708 데모(mock): 등록부 시드·이력 백필·타입별 합성 스냅샷. live 에서는 mock- 장비를 건너뛴다.
 import { isMockMode, ensureStorageDemo, demoStorageSnapshot, isDemoId, demoIsilonAreas } from '../mock/demo/storage.js';
+import { envPositive, ENV_INT_MAX } from '../util/envNumber.js'; // 결정(56~75 남긴 것) 57 · 58: 시한 · 개수 env 의 Infinity · 2^31 초과 · 음수는 기본값(예전 `Math.max(하한, Number(env) || 기본)` 은 Infinity · 3e9 를 통과시켜 setTimeout 이 1ms 로 바꿨다 · 개수는 무제한)
 /** 장비당 수집 타임아웃 — 느린 어레이 1대가 전체 주기를 막지 않게(기본 3분, 하한 30초). */
-const DEVICE_TIMEOUT_MS = Math.max(30_000, Number(process.env.STORAGE_DEVICE_TIMEOUT_MS) || 180_000);
+const DEVICE_TIMEOUT_MS = Math.max(30_000, envPositive(process.env.STORAGE_DEVICE_TIMEOUT_MS, 180_000, { max: ENV_INT_MAX }));
 // v2.598 T2598-01: OneFS 영역 수집(66 엔드포인트 직렬)의 시한 — 예전엔 없어서 응답 없는 장비 하나가 최대 약 16.5분
 // 동안 폴러의 재진입 가드를 붙잡았다. 장비 수집 시한과 따로 둔다(고RTT 현장의 정상 영역 수집이 3분을 넘을 수 있다).
-const AREAS_TIMEOUT_MS = Math.max(60_000, Number(process.env.STORAGE_AREAS_TIMEOUT_MS) || 300_000);
+const AREAS_TIMEOUT_MS = Math.max(60_000, envPositive(process.env.STORAGE_AREAS_TIMEOUT_MS, 300_000, { max: ENV_INT_MAX }));
 const COLLECTORS = { isilon: isilon.collect, powerstore: powerstore.collect, unity480: unity.collect,
   xtremio: xtremio.collect, vmax: powermax.collect, powermax: powermax.collect,
   vplex: vplex.collect, metronode: vplex.collect };
@@ -67,6 +68,22 @@ const _inFlight = new Map();
  *   주기 쪽은 이것을 실패가 아니라 `inFlightSkipped` 로 따로 센다(인증 정지 null 과 같은 취급 — 새 장애처럼 보이지 않게).
  */
 export const IN_FLIGHT_BUSY = Symbol('storage-in-flight');
+/*
+ * v2.932(2차 ⑨): 경량 표본 폴러(nodeLoadPoller.js)와 장비 점유를 나눈다 — 같은 장비에 세션을 둘 열지 않는다(Unity 세션 상한·SSH 로그인 수).
+ *  · 표본은 **수집 주기가 그 장비를 잡고 있으면 건너뛴다**(IN_FLIGHT_BUSY — 1시간 수집이 우선).
+ *  · 수집 주기가 시작될 때 표본이 진행 중이면 **그 표본이 끝날 때까지 기다린다**(표본 시한 60초가 상한) — 표본 때문에 1시간 수집이
+ *    한 주기 빠지는 쪽이 더 나쁘다(그 장비의 용량·영역·노드 상태가 2시간 묵는다). 기다린 뒤 다시 점유를 확인한다(같은 틱).
+ */
+const _sampleFlight = new Map(); // deviceId → Promise(진행 중 표본)
+/** 표본 폴러 전용 — 점유 중이면 IN_FLIGHT_BUSY(시작하지 않는다), 아니면 fn 의 결과. */
+export function runSampleExclusive(dev, fn) {
+  const id = dev?.id;
+  if (id == null || _inFlight.has(id) || _sampleFlight.has(id)) return Promise.resolve(IN_FLIGHT_BUSY);
+  const p = Promise.resolve().then(fn).finally(() => { if (_sampleFlight.get(id) === p) _sampleFlight.delete(id); });
+  _sampleFlight.set(id, p);
+  return p;
+}
+export function sampleInFlightIds() { return [..._sampleFlight.keys()]; }
 
 async function collectOne(dev, { periodic = false } = {}) {
   // v2.528: **주기 수집만** 인증 실패 장비를 건너뛴다. 수동 실행('지금 수집'·연결 테스트)은
@@ -75,6 +92,8 @@ async function collectOne(dev, { periodic = false } = {}) {
     const stop = authStopFor(dev);
     if (stop) return null;
   }
+  const sp = _sampleFlight.get(dev.id);
+  if (sp) await sp.catch(() => {}); // v2.932 — 진행 중인 5분 표본이 끝날 때까지(≤ 표본 시한). 실패해도 상관없다 — 점유만 본다.
   if (_inFlight.has(dev.id)) return IN_FLIGHT_BUSY; // v2.770(R5-E2-04) — 확인과 등록 사이에 await 가 없다(같은 틱)
   const startedAt = Date.now();
   const entry = { id: dev.id, name: dev.name || dev.id, at: startedAt };
@@ -133,6 +152,8 @@ async function collectOneInner(dev, startedAt) {
   putSnapshot(snap);
   // 용량 시계열(v2.308) — 성공 수집마다 1점 적재(추이 그래프/DB 저장 요구).
   try { await saveCapacityPoint(snap); } catch { /* DB 비활성 환경 — 스냅샷 경로는 계속 */ }
+  // v2.926 — 노드 부하(네트워크·디스크·CPU) 시계열. 노드 값이 없는 타입은 nodeLoadRowsOf 가 'no-load' 로 건너뛴다(던지지 않는다).
+  try { await saveNodeLoadPoint(snap); } catch { /* DB 비활성 — 스냅샷 경로는 계속 */ }
   // OneFS API 전 영역 수집(v2.308, 40개 표) — 스냅샷보다 무거워 별도 주기(기본 60분)로.
   // mock 모드는 요약만 시뮬레이션. 실패는 영역별 요약에 그대로 남는다(은폐 금지).
   if (snap.ok && dev.type === 'isilon') {
@@ -322,6 +343,6 @@ export function startStoragePoller() {
 }
 export function storagePollerStatus() {
   // v2.733(감사 C4-03): snapshotSave — 스냅샷 파일 저장 상태(대기·쓰기·실패 횟수·마지막 오류 코드. 경로·원문 없음).
-  return { ..._last, intervalMs: pollMs(), areasMs: areasEveryMs(), busy: _busy, inFlight: [..._inFlight.values()],
+  return { ..._last, intervalMs: pollMs(), areasMs: areasEveryMs(), busy: _busy, inFlight: [..._inFlight.values()], sampleInFlight: sampleInFlightIds(),
     intervals: runtimeIntervalSource(), intervalsCentral: centralIntervalsInfo(), snapshotSave: snapshotStoreStatus() };
 }

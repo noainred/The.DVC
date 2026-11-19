@@ -18,10 +18,13 @@
  */
 
 import crypto from 'node:crypto';
+import { envPositive } from '../util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
 
-const MAX_FAILS = Number(process.env.LOGIN_MAX_FAILS) || 8;
-const LOCKOUT_MS = Number(process.env.LOGIN_LOCKOUT_MS) || 15 * 60_000;
-const WINDOW_MS = Number(process.env.LOGIN_FAIL_WINDOW_MS) || 15 * 60_000;
+const MAX_FAILS = envPositive(process.env.LOGIN_MAX_FAILS, 8);
+// 54회차(다른 세션 v3.17.6 반증 — 재현): 시간 env 도 envPositive — `Number(env) || 기본` 은 음수를 통과시켜 30회 실패 뒤에도 잠기지 않았다
+//   (같은 파일의 횟수 env 만 바뀌었고, 기본값이 식이라 숫자 리터럴 스윕도 놓쳤다).
+const LOCKOUT_MS = envPositive(process.env.LOGIN_LOCKOUT_MS, 900_000);   // 15분 — 55회차 #3: 기본값은 숫자로(docs/ENV.md 생성기가 식을 읽지 못한다)
+const WINDOW_MS = envPositive(process.env.LOGIN_FAIL_WINDOW_MS, 900_000);   // 15분
 const DISABLED = process.env.LOGIN_RATELIMIT_DISABLED === 'true';
 
 const attempts = new Map(); // key -> { count, first, lockUntil }
@@ -47,7 +50,7 @@ const keyOf = (ip, username) => `${keyPart(ip)}|${keyPart(username)}`;
 // 단, 임계값을 낮게 잡으면 '아무나 몇 번 틀려 정상 관리자 로그인을 봉쇄'하는 가용성 공격이 되므로
 // per-IP 의 GLOBAL_FACTOR 배(기본 10×)로 높여, 단일 출발지 그리핑은 per-IP 잠금이 먼저 막고
 // 계정 전역 잠금은 진짜 분산 공격(다수 IP)에서만 발동하게 한다(pyportal SessionStore 와 동형).
-const GLOBAL_FACTOR = Number(process.env.LOGIN_GLOBAL_FACTOR) || 10;
+const GLOBAL_FACTOR = envPositive(process.env.LOGIN_GLOBAL_FACTOR, 10);
 const ACCT_MAX_FAILS = MAX_FAILS * GLOBAL_FACTOR;
 const acctKeyOf = (username) => `acct:${keyPart(username)}`; // ':' 라 per-IP('|') 키와 불충돌
 
@@ -77,9 +80,9 @@ const acctKeyOf = (username) => `acct:${keyPart(username)}`; // ':' 라 per-IP('
  *    `req.socket.remoteAddress` 고정이라 프록시 뒤 전 사용자가 한 키를 공유했다.
  * 정직한 한계: 그래도 공유 NAT 에서 48회 실패가 누적되면 그 출발지가 60초 잠긴다.
  */
-const IP_FACTOR = Number(process.env.LOGIN_IP_FACTOR) || 6;
+const IP_FACTOR = envPositive(process.env.LOGIN_IP_FACTOR, 6);
 const IP_MAX_FAILS = MAX_FAILS * IP_FACTOR;
-const IP_LOCKOUT_MS = Math.max(1_000, Number(process.env.LOGIN_IP_LOCKOUT_MS) || 60_000);
+const IP_LOCKOUT_MS = Math.max(1_000, envPositive(process.env.LOGIN_IP_LOCKOUT_MS, 60_000));   // 54회차: 같은 판정 하나
 const ipKeyOf = (ip) => `ip:${keyPart(ip)}`;                               // ':' 접두 — 위 두 키와 불충돌
 
 /**
@@ -158,20 +161,28 @@ export function recordLoginFailure(ip, username, now = Date.now()) {
 /** 로그인 성공 시 호출 — per-IP + 계정 전역 카운터/잠금 모두 해제(정상 로그인이 앞선 실패를 리셋). */
 export function recordLoginSuccess(ip, username) {
   if (DISABLED) return;
+  // 전체 점검 19회차 A-5(재현): 출발지 카운터(계정명 무관 — 사용자명 로테이션 · 열거 · scrypt 소모 차단)를 **통째로** 지우면 공격자가 자기 계정
+  //   성공을 40회마다 끼워 출발지 한도를 영원히 비웠다(300회 실패 중 차단 0회). 이제 **이 계정이 이 출발지에서 낸 실패 수만큼만** 뺀다 —
+  //   본인 오타(NAT 뒤 정상 사용자)는 예전처럼 풀리고, 다른 이름으로 뿌린 실패는 남는다. 이미 잠긴 출발지는 건드리지 않는다.
+  const own = attempts.get(keyOf(ip, username));
+  const src = attempts.get(ipKeyOf(ip));
+  if (src && !(src.lockUntil > Date.now())) {
+    src.count = Math.max(0, (src.count || 0) - (own?.count || 0));
+    if (src.count === 0) attempts.delete(ipKeyOf(ip));
+  }
   attempts.delete(keyOf(ip, username));
   attempts.delete(acctKeyOf(username));
-  attempts.delete(ipKeyOf(ip));   // 정상 로그인 1회가 출발지 카운터도 리셋(NAT 오탐 완화)
 }
 
 /* --------------------- OTP 재인증 잠금(별도 키 공간, 감사 M1) --------------------- */
 // 6자리 OTP는 100만 조합뿐이라 시도 제한이 없으면 온라인 무차별이 현실적이다. 계정 단위로
 // 집계한다(IP는 넣지 않음 — 프록시/NAT/IP 로테이션으로 계정별 누적 잠금이 무력화되므로).
 // 키는 'otp:<user>' 로 파이프(|)가 없어 로그인 키('<ip>|<user>')와 절대 충돌하지 않는다.
-const OTP_MAX_FAILS = Number(process.env.OTP_MAX_FAILS) || 5;
-const OTP_LOCKOUT_MS = Number(process.env.OTP_LOCKOUT_MS) || 10 * 60_000;
+const OTP_MAX_FAILS = envPositive(process.env.OTP_MAX_FAILS, 5);
+const OTP_LOCKOUT_MS = envPositive(process.env.OTP_LOCKOUT_MS, 600_000);   // 10분 · 54회차
 // 창이 잠금보다 길면 잠금 해제 직후 카운터가 0이라 다시 풀 횟수를 시도할 수 있다(감사 L9).
 // 그래서 창은 잠금 시간 이하로 클램프한다.
-const OTP_WINDOW_MS = Math.min(Number(process.env.OTP_FAIL_WINDOW_MS) || 10 * 60_000, OTP_LOCKOUT_MS);
+const OTP_WINDOW_MS = Math.min(envPositive(process.env.OTP_FAIL_WINDOW_MS, 600_000), OTP_LOCKOUT_MS);   // 10분 · 54회차
 const OTP_DISABLED = DISABLED || process.env.OTP_RATELIMIT_DISABLED === 'true';
 
 const otpKeyOf = (username) => `otp:${keyPart(username)}`;

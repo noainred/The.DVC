@@ -4,12 +4,19 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+test.after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 // v2.294 회귀 방지 — Demo/Guest(내장 데모 계정) 중복 접속 설정.
 // '설정 › 세션 보안'의 demoSession(null=전역 따름 | 'allow' 중복 허용 | 'single' 중복 차단)이
 // 전역 singleSession 과 독립적으로 데모 계정에만 적용되는지, 그리고 sid 발급(로그인)과
 // 검사(resolveTokenUser)가 같은 판정 함수(singleSessionRequired)를 타 비대칭이 없는지 고정한다.
 // 격리 CONFIG_DIR — auth/securitySettings/sessions 모두 import 시점 CONFIG_DIR 을 쓴다.
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'demo-session-test-'));
+const TMP = tmpDir('demo-session-test-');
 process.env.CONFIG_DIR = TMP;
 process.env.AUTH_SECRET = 'test-secret-demo-session';
 delete process.env.OTP_ROLE_ENFORCE;

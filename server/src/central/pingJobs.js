@@ -31,6 +31,7 @@
  * vCenterId 기준으로 키잉한다(UI는 vcenterId를, 에이전트는 자기 vcenters.json의 id를 앎).
  */
 import { capStr } from '../util/capStr.js';
+import { envPositive } from '../util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
 
 const pending = new Map();  // vcenterId -> Map<ip, { at, tries }>          (요청됐으나 아직 인출 안 된 IP)
 const inflight = new Map(); // vcenterId -> Map<ip, { deadline, tries }>    (인출됐고 결과(ack) 대기 중인 IP)
@@ -50,13 +51,13 @@ const MAX_RESULT_IPS = 512;
 const MAX_RESULT_VCS = 256;
 const MAX_VC_ID_LEN = 128;
 // 인출(claim) 후 결과(ack) 기한 — 근거는 파일 헤더 주석(최악 ~12초 실행 + 회신의 2배 이상 여유).
-const ACK_TIMEOUT_MS = Number(process.env.PING_ACK_TIMEOUT_MS) || 30_000;
+const ACK_TIMEOUT_MS = envPositive(process.env.PING_ACK_TIMEOUT_MS, 30_000);
 // IP당 재인출 한도 — 초과 시 폐기(UI는 unknown). ping 은 저비용·멱등이라 2회면 충분하고,
 // 무한 재시도는 죽은 엣지에 같은 IP 를 영원히 돌리는 낭비가 된다.
 const MAX_TRIES = 2;
 // v2.590 P11: 인출되지 않은 대기 IP 의 만료. 담당 엣지가 폴(4초)을 돌고 있으면 수 초 안에 가져간다 — 이 시간이 지나도
 // 대기면 엣지가 꺼졌거나 이 vCenter 를 담당하지 않는다. 예전에는 대기에 만료가 없어 화면이 영원히 '확인 중…' 이었다.
-const PENDING_TTL_MS = Number(process.env.PING_PENDING_TTL_MS) || 90_000;
+const PENDING_TTL_MS = envPositive(process.env.PING_PENDING_TTL_MS, 90_000);
 
 /**
  * 만료 in-flight 재수확 — 기한 내 결과(ack)가 없는 IP 를 처리한다.

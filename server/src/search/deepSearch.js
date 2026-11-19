@@ -150,6 +150,18 @@ export const PROBE_SKIP_TEXT = Object.freeze({
 });
 
 /**
+ * 116회차 F8(재현): 게스트 탐침 대상 수 상한 — 1~PROBE_MAX_VMS 정수(0 · 음수 · 숫자 아님은 기본 100). 예전 라우트의 `Math.min(500, Number(maxVms) || 100)` 은
+ * 음수(-5)를 그대로 써 `slice(0, -5)` 가 **뒤 5대만 빼고 전부**를 대상으로 삼았다 — 후보가 많으면 상한 500 을 넘겼고 감사 줄은 '상한 -5대' 였다
+ * (llm/nlSearch.js nlResultLimit · /vms limit 와 같은 함정). 판정은 여기 하나 — 라우트와 guestProbe 가 같이 쓴다.
+ */
+export const PROBE_MAX_VMS = 500;
+export function probeMaxVms(v) {
+  const n = Math.trunc(Number(v));
+  if (!Number.isFinite(n) || n <= 0) return 100;
+  return Math.min(n, PROBE_MAX_VMS);
+}
+
+/**
  * 게스트 탐침 — candidates(스냅샷 1차 통과 VM)를 vCenter별로 묶어 로그인 후 스크립트 실행.
  * probe: { type:'gpuDriver'|'process', pattern? }. 반환 { matched[], checked, errors[], notCollected[], authStopped{} }.
  *
@@ -164,7 +176,7 @@ export const PROBE_SKIP_TEXT = Object.freeze({
  *   · 게스트 계정 거부는 vCenter 거부가 아니다(isVcAuthError 가 guestAuth 를 제외) — 이 기록에 올리지 않는다.
  */
 export async function guestProbe(candidates, probe, { guestUser = '', guestPass = '', maxVms = 100, concurrency = 4 } = {}) {
-  const eligible = candidates.filter((v) => v.powerState === 'POWERED_ON' && v.toolsStatus === 'RUNNING').slice(0, maxVms);
+  const eligible = candidates.filter((v) => v.powerState === 'POWERED_ON' && v.toolsStatus === 'RUNNING').slice(0, probeMaxVms(maxVms));
   const byVc = new Map();
   for (const v of eligible) { if (!byVc.has(v.vcenterId)) byVc.set(v.vcenterId, []); byVc.get(v.vcenterId).push(v); }
   const gset = loadGpuGuestSettings();

@@ -28,7 +28,7 @@ export function relayRunText(r) {
   return `점검 완료 — 대상 ${show(r.total)} · 정상 ${show(r.okCount)} · 실패 ${show(r.fail)}${sec}${demo}`;
 }
 
-const PHASE = { ok: '정상', refused: '리스너 없음', timeout: '무응답', unreach: '경로 없음', tls: 'TLS 무응답', http: 'HTTP 무응답', identity: '대상 불일치', auth: '토큰 거부', hq: '중앙 아님', banner: 'SSH 아님', unknown: '오류' };
+const PHASE = { ok: '정상', refused: '리스너 없음', timeout: '무응답', unreach: '경로 없음', tls: 'TLS 무응답', cert: 'TLS 인증서', http: 'HTTP 무응답', identity: '대상 불일치', auth: '토큰 거부', hq: '중앙 아님', banner: 'SSH 아님', unknown: '오류' };
 
 export default function RelayCheckTool() {
   // ⚠ 훅은 전부 조기 return 위에(React #310 회귀 방지).
@@ -83,6 +83,14 @@ export default function RelayCheckTool() {
         연속 {form.failStreak}회 실패하면 알림 채널(설정 › 알림)로 발화하고 복구 시 한 번 더 알립니다. 실패 행을 펼치면 원인 후보·조치·haproxy.cfg 예시가 보입니다.
         <div className="muted" style={{ marginTop: 4 }}>정직한 한계: 중앙에서 보이는 결과만 판정합니다(중계 엣지 내부의 haproxy 로그는 읽지 않음). '무응답'은 방화벽·경로·호스트 다운을 구분하지 못하므로 조치 목록의 순서대로 확인하세요.</div>
       </div>
+
+      {/* 78회차 F8: 설정 파일을 못 읽어 기본값(점검 · 알림 켜짐 · 수동 호스트 없음)으로 도는 중이면 밝힌다 — 예전에는 아무 표지 없이 기본값이었다. */}
+      {data.loadError && (
+        <div className="card error-box" style={{ padding: 10, marginBottom: 12, fontSize: 13, textAlign: 'left' }}>
+          점검 설정을 읽지 못해 기본값으로 돌고 있습니다 — {data.loadError.reason}
+          {data.loadError.readError ? ' (읽기 오류라 저장은 거절됩니다 — 파일 권한 · 디스크를 고치면 저절로 풀립니다)' : ' (손상 원본은 보존본으로 옮겼습니다 — 아래 설정을 다시 저장하거나 서비스 점검에서 확정 · 보존본을 되돌리면 풀립니다)'}
+        </div>
+      )}
 
       <div className="kpis" style={{ marginBottom: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))' }}>
         <Kpi label="점검 대상" value={(data.targets || []).length} meta={`호스트 ${new Set((data.targets || []).map((t) => t.host)).size} × 프로파일 ${form.profile.length}`} />
@@ -143,12 +151,12 @@ export default function RelayCheckTool() {
               <React.Fragment key={r.target.key}>
                 <tr style={{ cursor: r.ok ? 'default' : 'pointer', background: r.ok ? undefined : 'rgba(239,68,68,.08)' }} onClick={() => !r.ok && setOpen(open === r.target.key ? null : r.target.key)}>
                   <td>{r.target.site || <span className="muted">—</span>}</td>
-                  <td><code>{r.target.host}</code></td>
+                  <td style={{ whiteSpace: 'normal', maxWidth: 190, overflowWrap: 'anywhere' }}><code>{r.target.host}</code></td>
                   <td data-sort={r.target.port}>:{r.target.port}</td>
                   <td title={kinds[r.target.kind]?.desc || ''}>{r.target.label}</td>
                   <td className="muted">{r.target.expectAgent || (r.target.kind === 'hq-portal' ? '이 중앙' : '—')}</td>
                   <td data-sort={r.ok ? 1 : 0}><span className={`badge ${r.ok ? 'green' : 'red'}`}>{PHASE[r.phase] || r.phase}</span>{!r.ok && r.failStreak > 1 ? <span className="muted" style={{ fontSize: 10.5, marginLeft: 4 }}>연속 {r.failStreak}</span> : null}{r.alerted ? <span className="badge amber" style={{ marginLeft: 4, fontSize: 10 }}>알림됨</span> : null}</td>
-                  <td style={{ fontSize: 12, maxWidth: 360, whiteSpace: 'normal' }}>{r.ok ? <span className="muted">{r.detail}</span> : <span style={{ color: 'var(--red)' }}>{r.error}</span>}</td>
+                  <td style={{ fontSize: 12, maxWidth: 240, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{r.ok ? <span className="muted">{r.detail}</span> : <span style={{ color: 'var(--red)' }}>{r.error}</span>}</td>
                   <td data-sort={r.ms}>{r.ms ?? '—'}</td>
                   <td>{agoText(r.lastOkAt)}</td>
                   <td>{agoText(r.at)}</td>

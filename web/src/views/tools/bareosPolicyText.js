@@ -11,6 +11,11 @@ export const POLICY_CMD_KEYS = Object.freeze(Object.keys(POLICY_CMD_LABEL));
 const CODE_TEXT = { denied: '권한 없음', jsonrpc: 'Director 거부', timeout: '시한 초과', aborted: '시한 초과', skipped: '건너뜀', 'auth-stopped': '인증 정지', auth: '인증 실패', pam: '인증 실패', tls: 'TLS 실패',
   connect: '접속 실패', 'not-configured': '설정 덜 됨', 'edge-relay': '엣지 대행', off: '끔', unknown: '결과 모름' };
 export const codeText = (c) => CODE_TEXT[c] || (c ? '실패' : '');
+/** 52회차 F3: 풀 합계 문구 — 모르는 가득 참 · 오류 볼륨을 0 으로 보이지 않는다(서버 addPoolKpi 와 같은 칸). */
+export function poolKpiText(p, fmt = (n) => String(n)) {
+  if (!p) return '';
+  return `가득 참 ${fmt(p.full)}${p.unknownFull ? ` · 판정 모름 ${fmt(p.unknownFull)}` : ''} · 오류 볼륨 ${fmt(p.errorVols)}${p.errorVolsUnknown ? `(볼륨 모르는 풀 ${fmt(p.errorVolsUnknown)})` : ''}`;
+}
 
 /** Director 한 줄의 결과 — 성공 n / 시도 m · 실패 항목 글자. 수집 전이면 null. */
 export function directorResult(d) {

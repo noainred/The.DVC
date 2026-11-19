@@ -44,11 +44,11 @@
  * 길이만 검사하므로 CRLF 가 들어올 수 있다(실측).
  */
 
-import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 103회차 F3: 읽기 오류 ≠ 손상
 import { TEST_TYPES, KINDS, TEST_FIELDS, SUBST_KEYS } from './testSchema.js';
 import { DEFAULT_PORTS } from './checker.js';
 import {
@@ -475,14 +475,25 @@ let cache = null;   // { version:1, templates:[...] }
  * (실측: 5가지 입력 모두 백업 0개·원본 소실). CLAUDE.md '로드 손상 보존' 불변조건.
  * 전체 시드 + persist 는 ENOENT(진짜 최초 설치) 또는 손상 보존 직후에만 일어난다.
  */
+/*
+ * 103회차 F3(재현 — EISDIR): 예전에는 읽기 단계 실패(디렉터리 · 권한 · EIO)도 preserveCorrupt 로 원본(사용자 템플릿)을 옮긴 뒤 **내장 템플릿으로 시드 + 저장**했다 —
+ *   목록 화면을 한 번 여는 것만으로 사용자 템플릿이 보존본에만 남았다(권한을 고쳐도 원본 자리는 내장본). 읽기 오류는 손상이 아니다:
+ *   원본을 두고 · 내장 템플릿을 **캐시하지 않고** 보여 주며(30초 간격 재읽기 — util/jsonFileRead.js) · 쓰기(persistOrThrow)는 409 로 거절한다.
+ */
+const _reader = makeJsonFileReader(FILE, { parse: (t) => t, preserve: false, tag: 'svcmon-templates' });
+let _readErr = null;   // { at, code }
+/** 103회차 F3: 템플릿 파일 읽기 오류(원본은 그대로)면 `{ at, code }`, 아니면 null. */
+export function templatesReadError() { loadDb(); return _readErr ? { ..._readErr } : null; }
 function loadDb() {
   if (cache) return cache;
   let raw = null;
-  try {
-    raw = fs.readFileSync(FILE(), 'utf8');
-  } catch (e) {
-    if (e.code !== 'ENOENT') preserveCorrupt(FILE(), e?.message);   // 디렉터리·권한 등
+  const rr = _reader.read();
+  if (rr.kind === 'read-error') {
+    if (!_readErr) _readErr = { at: Date.now(), code: String(rr.error?.code || 'read-error').slice(0, 32) };
+    return { version: 1, templates: builtinTemplates() };   // 캐시 · 저장하지 않는다
   }
+  _readErr = null;
+  if (rr.kind === 'ok') raw = rr.value;
   let parsed = null;
   if (raw !== null) {
     try { parsed = JSON.parse(raw); } catch (e) { preserveCorrupt(FILE(), e?.message); }
@@ -590,6 +601,11 @@ function persist() {
  * 디바운스 저장 구조라 가능하지만, 여기 CRUD 는 요청당 1회 즉시 저장이라 롤백이 더 안전하다).
  */
 function persistOrThrow(rollback) {
+  // 103회차 F3: 읽기 오류 중에는 캐시가 없어(cache=null) persist() 가 '썼다' 고 답한다 — 그 전에 거절한다(라우트 409 · 사유는 화면까지).
+  if (_readErr) {
+    try { rollback(); } catch { /* 캐시하지 않은 임시 목록 */ }
+    throw Object.assign(new Error(`템플릿 파일(svcmon-templates.json)을 읽지 못한 상태라 저장하지 않았습니다 — 읽기 오류(${_readErr.code})이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽습니다).`), { status: 409, code: 'settings-unreadable', readError: true });
+  }
   if (persist()) return;
   try { rollback(); } catch { /* 롤백 실패는 로그만 — 아래 예외로 호출부가 알게 된다 */ }
   throw new Error('템플릿 파일 저장에 실패했습니다(디스크 공간·권한·CONFIG_DIR 확인). 변경은 적용되지 않았습니다.');
@@ -1023,4 +1039,4 @@ export function materializeForTarget(templateId, target) {
   return { tests, errors };
 }
 
-export function _resetTemplateCache() { cache = null; }
+export function _resetTemplateCache() { cache = null; _readErr = null; _reader.reset(); }

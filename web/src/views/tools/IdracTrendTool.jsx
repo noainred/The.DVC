@@ -117,7 +117,7 @@ export default function IdracTrendTool() {
   if (listErr && !list) return <ErrorBox error={listErr} />;
   if (!list) return <Loading label="iDRAC 서버" />;
   if (!allServers.length) {
-    return <div className="card muted">{list.scoped ? `범위 안에 보이는 iDRAC 서버가 없습니다(범위 밖 ${list.omittedOutOfScope || 0}대 제외).` : '등록된 iDRAC 서버가 없습니다 — 서버 분석에서 iDRAC 을 등록하거나 스캔하세요.'}</div>;
+    return <div className="card muted">{list.scoped ? `범위 안에 보이는 iDRAC 서버가 없습니다(범위 밖 ${list.omittedOutOfScope || 0}대 제외).` : '등록된 iDRAC 서버가 없습니다 — Physical Server 에서 iDRAC 을 등록하거나 스캔하세요.'}</div>;
   }
 
   const pts = data?.points || [];

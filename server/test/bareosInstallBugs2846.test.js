@@ -7,7 +7,7 @@
  *  D-2 러너 0단계의 실행 중 작업 판정(실제 bash) — 못 읽으면 멈춤 · 화면 동의(RUNNING_UNKNOWN_OK — 그 회차만)로만 진행 · 사전 점검도 같은 판정
  *  D-4 전부 되돌리기 M4 를 재설치(기존 Director)에도 · D-7 원장을 못 읽으면 거부(503)
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -16,8 +16,15 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bi2846-'));
+const tmp = tmpDir('bi2846-');
 process.env.CONFIG_DIR = tmp;
 process.env.DATA_SOURCE = 'mock';
 
@@ -426,7 +433,7 @@ const BCONSOLE = {
 
 /** 재설치 전 서버 — 옛 bareos 패키지 · /etc/bareos · 카탈로그 DB · (켜진) Director. */
 function runnerEnv({ bconsole = 'authFail', dirActive = true } = {}) {
-  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'bi2846r-'));
+  const base = tmpDir('bi2846r-');
   const P = path.join(base, 'root'); const FAKE = path.join(base, 'fake'); const BIN = path.join(base, 'bin');
   for (const d of [P, FAKE, BIN]) fs.mkdirSync(d, { recursive: true });
   for (const [n, s] of Object.entries(SHIMS)) fs.writeFileSync(path.join(BIN, n), s, { mode: 0o755 });

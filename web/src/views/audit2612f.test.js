@@ -23,7 +23,11 @@ describe('WEB2612-01 IPAM — 서브넷·시트 조회 실패를 0개·빈 시�
   it('실패 상태를 두고 KPI 는 — 로 말한다', () => {
     expect(s).toMatch(/setSubnetsErr\(e\?\.message/);
     expect(s).toMatch(/setSheetErr\(err\)/);
-    expect(s).toMatch(/value=\{subnetsErr \? '—' : subnets\.length\}/);
+    // v3.4.0: KPI 카드는 '현황' 탭(IpamHome)으로 옮겼다 — 목록을 못 읽으면 사용률을 0% 가 아니라 '—' 로, 탭의 대역 수는 감춘다.
+    expect(s).toMatch(/!subnetsErr && subnets\.length \?/);
+    const home = code('views/tools/IpamHome.jsx');
+    expect(home).toMatch(/utilSummary\(subnetsErr \? null : subnets\)/);
+    expect(home).toMatch(/\{u \? pctText\(u\.pct\) : '—'\}/);
   });
 });
 

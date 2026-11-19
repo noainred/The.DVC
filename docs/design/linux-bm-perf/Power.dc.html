@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>전력 · 온도 집계</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:Inter,"Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#22d3ee}a:hover{color:#67e8f9}
+.card{background:linear-gradient(180deg,#141b2d,#111726);border:1px solid #243049;border-radius:12px;padding:16px 18px;box-shadow:0 4px 24px rgba(0,0,0,.4);min-width:0}
+.dim{color:#8b9bb4}.mono{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:600;border:1px solid #243049;background:#0f1626;color:#8b9bb4;white-space:nowrap}
+.chip.ok{color:#4ade80;border-color:rgba(34,197,94,.35);background:rgba(34,197,94,.1)}
+.chip.warn{color:#fbbf24;border-color:rgba(245,158,11,.35);background:rgba(245,158,11,.1)}
+.chip.bad{color:#f87171;border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.1)}
+.tile{border:1px solid #243049;border-radius:10px;padding:10px 12px;background:#0f1626;min-width:0;display:flex;flex-direction:column;gap:4px}
+.tile .h{font-size:11.5px;color:#8b9bb4;font-weight:600}.tile .v{font-size:20px;font-weight:800;line-height:1.1}.tile .s{font-size:11.5px;color:#8b9bb4;overflow-wrap:anywhere}
+table{border-collapse:separate;border-spacing:0;width:100%}
+th{font-size:11.5px;font-weight:600;color:#8b9bb4;text-align:left;padding:6px 8px;border-bottom:1px solid #243049;background:#0f1626;white-space:nowrap;cursor:pointer;vertical-align:bottom}
+td{padding:7px 8px;border-bottom:1px solid #1f2a40;vertical-align:top;font-size:12.5px;line-height:1.5}
+h2{margin:0;font-size:15px;font-weight:700}
+.ok{color:#4ade80}.warn{color:#fbbf24}.bad{color:#f87171}
+.ev{display:inline-block;width:14px;text-align:center;font-weight:700}.ev.a{color:#4ade80}.ev.b{color:#fbbf24}.ev.c{color:#8b9bb4}
+</style>
+<div style="box-sizing:border-box;max-width:1680px;margin:0 auto;padding:18px 24px 40px;display:flex;flex-direction:column;gap:14px">
+  <div style="min-width:0">
+    <div style="font-size:12px;color:#8b9bb4"><a href="Main.dc.html">함대 보드</a> › <b style="color:#e6edf6">전력 · 온도</b> · 법인 KR-SEL · 추천 5</div>
+    <h1 style="margin:0;font-size:20px;font-weight:700;letter-spacing:-.01em">전력 · 온도 집계 — 이미 수집하는 iDRAC 전력과 흡기 온도를 랙 · 법인 단위로 합산해 전력량 · 상한 여유 · 더운 서버를 본다</h1>
+    <div class="dim" style="font-size:12px;margin-top:4px">새 수집 없음 — 기존 iDRAC 폴러의 전력 샘플(power_samples · 시간당 롤업 power_hourly)과 센서 표본(흡기·최대 온도 · 팬) · 기존 전력 대시보드(법인·리전 분해)를 베어메탈 랙 단위로 확장 · 수치는 가상</div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 12px;margin-bottom:10px"><h2>법인 KR-SEL · 1,000대</h2><span class="chip ok">측정 962</span><span class="chip">미측정 38(iDRAC 없음 21 · 읽기 실패 17)</span><span class="dim" style="font-size:12px;margin-left:auto">iDRAC 11-07 00:20 읽음 · 합계는 측정분만(추정으로 메우지 않는다)</span></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(220px,100%),1fr));gap:10px">
+      <div class="tile"><div class="h">지금 합계</div><div class="v">187.4 kW</div><div class="s">서버 샘플 합 · 랙 24 · 평균 195 W/대</div></div>
+      <div class="tile"><div class="h">24h 전력량</div><div class="v">4,420 kWh</div><div class="s">시간 평균 W × 1h 합(power_hourly) · 월 누적 26.1 MWh</div></div>
+      <div class="tile"><div class="h">24h 피크</div><div class="v warn">203.9 kW</div><div class="s">11-06 14:00 · 7일 피크 대비 +3%</div></div>
+      <div class="tile"><div class="h">랙 상한 여유 최소</div><div class="v warn">4% (A-07)</div><div class="s">랙 상한은 설정값(kW) · iDRAC PowerCap 설정 서버 212 — 상한 걸린 서버 3(성능 억제 가능 · 교차 판정)</div></div>
+      <div class="tile"><div class="h">흡기 온도 ≥ 27 °C</div><div class="v bad">9대</div><div class="s">기준 27 °C(설정 · 모델별 권장은 ○) · 최대 31.2 °C bm-kr1-gp06</div></div>
+      <div class="tile"><div class="h">팬 경고</div><div class="v warn">2</div><div class="s">파트 장애 ⑦ 에서 가져옴(fans 수집 상태 포함) · 여기서 재판정하지 않는다</div></div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:14px;align-items:start">
+    <div class="card">
+      <h2 style="margin-bottom:8px">랙별 표 — 여유 적은 순</h2>
+      <div style="overflow-x:auto"><table>
+        <thead><tr><th>랙</th><th>서버</th><th>지금 kW</th><th>24h 평균</th><th>24h 피크</th><th>상한(설정)</th><th>여유</th><th>흡기 평균/최대</th><th>팬</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">A-07</td><td>42</td><td>9.6</td><td>9.1</td><td class="warn">9.8</td><td>10.2</td><td class="bad">4%</td><td>25.1 / <span class="bad">31.2</span></td><td class="warn">1</td></tr>
+          <tr><td class="mono">A-03</td><td>40</td><td>8.9</td><td>8.4</td><td>9.2</td><td>10.2</td><td class="warn">10%</td><td>24.0 / 27.4</td><td>—</td></tr>
+          <tr><td class="mono">B-12</td><td>44</td><td>8.1</td><td>7.9</td><td>8.6</td><td>12.0</td><td>28%</td><td>22.8 / 25.0</td><td>—</td></tr>
+          <tr><td class="mono">B-04</td><td>38</td><td>7.4</td><td>7.0</td><td>7.9</td><td>12.0</td><td>34%</td><td>23.1 / 26.2</td><td class="warn">1</td></tr>
+          <tr><td class="mono">C-01</td><td>36</td><td>6.2</td><td>6.0</td><td>6.5</td><td class="dim">미설정</td><td class="dim">—</td><td>22.4 / 24.1</td><td>—</td></tr>
+          <tr><td class="dim">미매핑</td><td class="dim">61</td><td class="dim">11.8</td><td class="dim">11.2</td><td class="dim">12.4</td><td class="dim">—</td><td class="dim">—</td><td class="dim">23.0 / 28.0</td><td class="dim">—</td></tr>
+        </tbody></table></div>
+      <div class="dim" style="font-size:11.5px;margin-top:8px">랙·위치(U)는 15차 등록 CSV 의 ‘랙/위치’ 열 또는 iDRAC 의 위치 속성(있을 때 ○) · 없으면 ‘미매핑’ 으로 묶어 따로 센다 · 랙 클릭 → 서버 목록(전력 · 온도 · U 순).</div>
+    </div>
+    <div class="card">
+      <h2 style="margin-bottom:8px">24h 전력 추이 — 법인 합계 · 랙 A-07</h2>
+      <svg viewBox="0 0 560 200" width="100%" style="display:block">
+        <rect x="0" y="0" width="560" height="200" fill="#0f1626" rx="8"/>
+        <g font-size="10" fill="#8b9bb4" font-family="JetBrains Mono,monospace"><text x="8" y="30">210</text><text x="8" y="100">190</text><text x="8" y="170">170 kW</text><text x="48" y="192">00:00</text><text x="248" y="192">12:00</text><text x="448" y="192">24:00</text></g>
+        <polyline fill="none" stroke="#22d3ee" stroke-width="2" points="48,120 88,124 128,126 168,122 208,110 248,90 288,70 318,52 348,60 388,78 428,98 468,112 508,118 540,120"/>
+        <text x="300" y="46" font-size="10" fill="#fbbf24">피크 203.9 · 14:00</text>
+        <polyline fill="none" stroke="#a78bfa" stroke-width="1.5" points="48,150 128,152 208,146 288,134 318,128 348,132 428,142 508,148 540,150"/>
+        <text x="60" y="146" font-size="9" fill="#a78bfa">A-07 (×10 스케일)</text>
+        <line x1="48" y1="40" x2="540" y2="40" stroke="#f87171" stroke-dasharray="3 3" opacity=".6"/><text x="440" y="36" font-size="9" fill="#f87171">법인 계약 상한(설정)</text>
+      </svg>
+      <h2 style="margin:12px 0 8px">흡기 온도 분포 — 962대</h2>
+      <svg viewBox="0 0 560 90" width="100%" style="display:block">
+        <rect x="0" y="0" width="560" height="90" fill="#0f1626" rx="8"/>
+        <g><rect x="48" y="50" width="40" height="20" fill="#22d3ee" opacity=".6"/><rect x="98" y="30" width="40" height="40" fill="#22d3ee" opacity=".7"/><rect x="148" y="14" width="40" height="56" fill="#22d3ee" opacity=".8"/><rect x="198" y="22" width="40" height="48" fill="#22d3ee" opacity=".8"/><rect x="248" y="40" width="40" height="30" fill="#22d3ee" opacity=".7"/><rect x="298" y="56" width="40" height="14" fill="#fbbf24" opacity=".8"/><rect x="348" y="64" width="40" height="6" fill="#f87171" opacity=".9"/></g>
+        <g font-size="10" fill="#8b9bb4" font-family="JetBrains Mono,monospace"><text x="48" y="84">18</text><text x="98" y="84">20</text><text x="148" y="84">22</text><text x="198" y="84">24</text><text x="248" y="84">26</text><text x="298" y="84">27+</text><text x="348" y="84">29+ °C</text></g>
+      </svg>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(560px,100%),1fr));gap:14px;align-items:start">
+    <div class="card">
+      <h2 style="margin-bottom:8px">온도 상위 서버</h2>
+      <div style="overflow-x:auto"><table>
+        <thead><tr><th>서버</th><th>랙 · U</th><th>흡기</th><th>최대(CPU/배기)</th><th>팬</th><th>전력 W</th><th>전력 상한</th><th>참고</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">bm-kr1-gp06</td><td class="mono">A-07 · 38</td><td class="bad">31.2</td><td class="bad">78</td><td>84%</td><td>412</td><td class="warn">걸림(400 W)</td><td>상단 U · 상한 걸림 → CPU 클럭 억제 가능(교차 판정 ⑤ 와 함께)</td></tr>
+          <tr><td class="mono">bm-kr1-gp05</td><td class="mono">A-07 · 36</td><td class="bad">29.8</td><td class="warn">71</td><td>80%</td><td>398</td><td>—</td><td>같은 랙 상단 — 랙 급기 의심(사람 확인)</td></tr>
+          <tr><td class="mono">bm-kr1-db01</td><td class="mono">A-03 · 12</td><td class="warn">27.4</td><td>62</td><td>61%</td><td>301</td><td>—</td><td>—</td></tr>
+          <tr><td class="mono">bm-kr1-air02</td><td class="dim">미매핑</td><td class="warn">28.0</td><td>60</td><td class="dim">못 읽음</td><td>244</td><td>—</td><td>팬 수집 실패 ≠ 정상(파트 장애 F1 규칙)</td></tr>
+        </tbody></table></div>
+      <div class="dim" style="font-size:11.5px;margin-top:8px">흡기 기준은 설정값(기본 27 °C). 모델별 Dell 권장 흡기 범위는 ○ — 구현 때 모델 문서를 인용해 넣고, 없으면 ‘설정값’ 이라고만 적는다.</div>
+    </div>
+    <div class="card">
+      <h2 style="margin-bottom:8px">계산 · 저장 · 알림 · 정직하게 적어 둘 것</h2>
+      <div style="overflow-x:auto"><table>
+        <thead><tr><th>항목</th><th>내용</th></tr></thead>
+        <tbody>
+          <tr><td>전력</td><td>서버 샘플(기존 iDRAC 폴러 주기) → power_hourly(sum·cnt·max·min) → 랙·법인 합 · kWh = 시간 평균 W × 1h 합 · 비용(원/kWh)은 설정에 넣을 때만 금액 표시</td></tr>
+          <tr><td>상한</td><td>랙 상한 = 설정 kW · 서버 상한 = iDRAC PowerCap(LimitInWatts · 기존 fetchInventory powerCap) · ‘걸림’ = 측정 W ≥ 상한 × 0.98</td></tr>
+          <tr><td>온도</td><td>fetchSensors 의 inletCelsius · maxCelsius · 팬 표본 — <b>시계열 저장·롤업 범위는 구현 때 확인</b>(지금은 센서 표본 보관 주기를 코드에서 다시 봐야 한다 ○)</td></tr>
+          <tr><td>미측정</td><td>iDRAC 없음 · 전력 읽기 실패 · 전력 0 보고(Redfish 가 0 을 주는 모델) 는 합계에서 빼고 수를 적는다 · PDU 측정은 범위 밖</td></tr>
+          <tr><td>알림 ⑨</td><td>랙 여유 &lt; 10% · 흡기 &gt; 설정값 지속 15분 · 24h 피크가 7일 피크 +20% · 서버 상한 걸림 지속 — 기본 꺼짐</td></tr>
+          <tr><td>연계</td><td>저활용 ㉑ 의 전력 축 · 정비 창 ⑲ 구간 제외 · 기존 전력 대시보드(법인·리전)와 같은 숫자여야 한다(한 소스 · 두 화면) → 구현 때 교차 검증 테스트</td></tr>
+        </tbody></table></div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1900}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

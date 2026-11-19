@@ -7,20 +7,31 @@
  */
 
 // 서버 권한 키(requirePerm) → 사람이 읽는 이름. 없는 키는 원문을 그대로 보여준다(추측 금지).
+// v3.17.4(2차 공통 기능 점검 3회차): 이 표가 서버 카탈로그(server/src/auth/permissions.js PERMISSION_CATALOG)와 갈라져 있었다 —
+//   서버 키 20개 중 6개만 있었고(dashboard · inv.* · insights · settings · upgrade · users.manage · guest.deploy · data.csv · issues.request 없음),
+//   서버에 없는 키 7개(vm.power · host.power · ipam · idrac · nsx · backup · audit)가 남아 있었다. 그래서 가장 흔한 403(inv.vms 등)이
+//   '필요: inv.vms 권한' 처럼 원문 키로 보였다. 이름은 서버 카탈로그의 label 그대로이고, server/test/commonRound13_3173.test.js 가 두 벌을 대조한다.
 export const PERM_LABEL = {
-  tools: '특수 기능(도구)',
-  'vm.console': 'VM 콘솔 열기',
-  'vm.reconfig': 'VM 사양 변경',
-  'vm.power': 'VM 전원 제어',
-  'vm.provision': 'VM 생성·복제',
-  'host.power': '호스트 전원 제어',
-  'remote.access': '원격 접속(RDP/SSH)',
-  svcmon: '성능점검 관리',
-  ipam: 'IP 관리',
-  idrac: '서버 하드웨어(iDRAC)',
-  nsx: 'NSX 네트워크',
-  backup: '백업·복원',
-  audit: '감사 로그',
+  dashboard: '대시보드·요약·플랫폼·탐색',
+  'inv.hosts': '호스트',
+  'inv.vms': '가상머신',
+  'inv.datastores': '스토리지',
+  'inv.networks': '네트워크',
+  'inv.nsx': 'NSX',
+  'inv.alarms': '알람(음소거 포함)',
+  tools: '특수 기능(IPAM·핑·검색 등)',
+  insights: '인사이트(FinOps·이상탐지 등)',
+  svcmon: '서비스 모니터(성능점검)',
+  'remote.access': '원격 접속(SSH/RDP 터널)',
+  'vm.console': '원격 콘솔(VMRC/웹 콘솔)',
+  'vm.reconfig': 'VM 사양 변경(재구성)',
+  'vm.provision': 'VM 프로비저닝(생성)',
+  'guest.deploy': '게스트 계정 배포',
+  settings: '설정',
+  upgrade: '업그레이드',
+  'users.manage': '사용자·권한 관리',
+  'data.csv': 'CSV 가져오기/내보내기',
+  'issues.request': '이슈 요청 등록(요청 유형만)',
 };
 export const ROLE_LABEL = { super_admin: '슈퍼 관리자(super_admin)', admin: '관리자(admin)', operator: '운영자(operator)', viewer: '조회자(viewer)' };
 
@@ -137,4 +148,23 @@ export function errorBoxInput(raw) {
   const status = typeof st === 'number' && Number.isInteger(st) && st >= 100 && st <= 599 ? st : null;
   const http = status ? raw : null;
   return { text, perm: status === 403 ? raw : null, http };
+}
+
+/**
+ * 전체 점검 132회차(129회차 추정 E4) — ErrorBox 가 **같은 문구로 한 번 찾은** HTTP 정보(403 권한 정보 · 상태코드)를 붙든다. 순수.
+ *
+ * 왜: 문자열 메시지의 상태코드는 api.js 의 사이드 채널 메모에서 되찾는데, 그 메모는 5분 뒤(또는 다른 오류가 50건 넘게 쌓이면) 지워진다.
+ *   usePolling 은 403 에서 폴링을 멈추고 문구를 그대로 두므로, 403 화면을 5분 넘게 열어 둔 뒤 다시 그리면(부모의 주기 폴링 · 노트북 깨어남)
+ *   ‘접근 제어 안내’ 가 빨간 ‘오류: …’ 로 바뀌었다(5xx 의 ‘일시적 미가용’ 안내도 같다). 표시 중인 상자의 판정은 메모의 수명과 무관해야 한다.
+ * 규칙: 문구가 같으면 이번에 못 찾은 정보는 직전에 찾은 것으로 채운다. 문구가 바뀌면 버린다(다른 오류에 옛 권한 정보를 붙이지 않는다).
+ * @param {{current: any}} ref   상자마다 하나(useRef)
+ * @param {string} text          정규화한 문구
+ * @param {{perm: object|null, http: object|null}} found  이번 렌더에서 찾은 것
+ * @returns {{text: string, perm: object|null, http: object|null}}
+ */
+export function holdHttpInfo(ref, text, found) {
+  const prev = ref && ref.current && ref.current.text === text ? ref.current : null;
+  const next = { text, perm: found?.perm || prev?.perm || null, http: found?.http || prev?.http || null };
+  if (ref) ref.current = next;
+  return next;
 }

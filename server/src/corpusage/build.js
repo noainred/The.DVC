@@ -102,6 +102,17 @@ export function srcOfRow(row) {
   return 'idrac';
 }
 
+/**
+ * v2.993(출처 색 — 설계 bm-folders §13): 행의 지표별 출처(`src_cm` 두 글자 — bmusage/usage.js srcCmOf)를 { cpu, mem } 으로.
+ *   값: 'os' · 'idrac'(텔레메트리 · 대체 수집 모두) · null(그 지표 값 없음). 칸이 없거나 꼴이 틀리면 null(모름 — 행 출처로 돌아간다).
+ */
+const CM_OF = Object.freeze({ o: 'os', i: 'idrac', e: 'idrac', '-': null });
+export function srcByOfRow(row) {
+  const v = typeof row?.src_cm === 'string' ? row.src_cm : '';
+  if (!/^[oie-]{2}$/.test(v)) return null;
+  return { cpu: CM_OF[v[0]], mem: CM_OF[v[1]] };
+}
+
 /** 행 시각이 지금보다 이만큼 넘게 앞서면 '지금 값' 이 아니다(시계 오차 허용 — v2.682 R3S-01). */
 export const FUTURE_SKEW_MS = 5 * 60_000;
 
@@ -149,7 +160,10 @@ export function judgeServer({ role, row = null, host = null, now, freshMs, vcUnr
     const cpuPct = rowCpu != null ? rowCpu : hc;
     const memPct = rowMem != null ? rowMem : hm;
     const filled = [rowCpu == null && hc != null ? 'cpu' : null, rowMem == null && hm != null ? 'mem' : null].filter(Boolean);
-    return { state: 'ok', cpuPct, memPct, src: srcOfRow(row), at: rowAt, ...(filled.length ? { filledFromVcenter: filled } : {}) };
+    const by = srcByOfRow(row);
+    // v2.993(출처 색): 지표별 출처 — vCenter 로 채운 지표는 'vcenter'. 행에 칸이 없으면(구버전 엣지 · 칸 추가 전 행) srcBy 를 싣지 않는다(화면은 행 출처로).
+    const srcBy = by ? { cpu: rowCpu == null && hc != null ? 'vcenter' : by.cpu, mem: rowMem == null && hm != null ? 'vcenter' : by.mem } : null;
+    return { state: 'ok', cpuPct, memPct, src: srcOfRow(row), ...(srcBy ? { srcBy } : {}), at: rowAt, ...(filled.length ? { filledFromVcenter: filled } : {}) };
   }
   if (hc != null || hm != null) return { state: 'ok', cpuPct: hc, memPct: hm, src: 'vcenter', at: null };
   if (hasRow) return { state: 'stale', cpuPct: null, memPct: null, src: srcOfRow(row), at: rowAt };

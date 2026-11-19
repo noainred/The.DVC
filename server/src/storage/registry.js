@@ -15,10 +15,9 @@
  *    자격증명이 공격자 서버로 선제 전송되는 경로 차단).
  */
 
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { makeLoadError, filterObjectElements, devicesForThisNode as coreDevicesForThisNode, devicesForAgent as coreDevicesForAgent } from '../util/registryCore.js'; // v2.613 PERSIST2613-04
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js';
 import { ssrfBlockReason } from '../collector/registry.js';
@@ -43,25 +42,33 @@ let _db = null;
 const loadErr = makeLoadError();
 export function registryLoadError() { load(); return loadErr.get(); }
 
+// 결정(78 남긴 것 ①): parse 실패(형식 · 복호 포함 — 예전 try 블록과 같은 범위)만 손상이다.
+const parseDb = (text) => {
+  // 암호화 모드로 봉인 저장된 password 를 로드 경계에서 복호(소비자는 평문만 본다).
+  const raw = JSON.parse(text);
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('형식 오류'); // JSON null·배열은 손상(v2.601 규약 — cvp 와 같게)
+  const p = openSecretsDeep(raw);
+  return { devices: filterObjectElements(p.devices).list }; // v2.613 PERSIST2613-04: 객체 원소만(null 원소가 listDevices 의 구조분해를 죽였다)
+};
+const WHAT = '스토리지 등록부(storage-devices.json)';
 function load() {
-  if (_db) return _db;
-  try {
-    if (fs.existsSync(FILE)) {
-      // 암호화 모드로 봉인 저장된 password 를 로드 경계에서 복호(소비자는 평문만 본다).
-      const raw = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('형식 오류'); // JSON null·배열은 손상(v2.601 규약 — cvp 와 같게)
-      const p = openSecretsDeep(raw);
-      _db = { devices: filterObjectElements(p.devices).list }; // v2.613 PERSIST2613-04: 객체 원소만(null 원소가 listDevices 의 구조분해를 죽였다)
-      return _db;
-    }
-  } catch (e) { preserveCorrupt(FILE, e?.message); loadErr.set(e); } // 손상 원본 보존(사유 포함) — 빈 목록 저장이 전 장비 자격증명을 지우는 사고 방지
+  if (_db && !loadErr.readPending()) return _db;
+  // 손상 원본 보존(사유 포함) — 빈 목록 저장이 전 장비 자격증명을 지우는 사고 방지(loadErr.read 가 preserveCorrupt 한다).
+  // 결정(78 남긴 것 ①): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 원본을 그대로 두고 · 이 빈 값을 캐시로 믿지 않고(30초마다 다시 읽음) · 쓰기를 거절한다.
+  const r = loadErr.read(FILE, parseDb);
+  if (r.kind === 'ok') { _db = r.value; return _db; }
   loadErr.checkCorruptOnly(FILE);
   _db = { devices: [] };
   return _db;
 }
+/** 결정(78 남긴 것 ①): 읽기 오류 중의 쓰기 거절(409) 또는 null — 로드를 먼저 한다(첫 호출이 쓰기여도 상태가 서게). */
+export function registryWriteRefusal() { load(); return loadErr.writeRefusal(WHAT); }
+/** 결정(78 남긴 것 ①): 거절이면 던진다(status 409 · code 'registry-unreadable') — 던지는 저장 함수(saveDevice)의 규약에 맞춘다. */
+function assertWritable() { load(); loadErr.assertWritable(WHAT); }
 
-function persist() {
-  atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep({ version: 1, devices: load().devices }), null, 2), { mode: 0o600 });
+function persist(devices = load().devices) {
+  loadErr.assertWritable(WHAT); // 결정(78 남긴 것 ①): 마지막 방어선 — 어느 경로(엣지 pull · 시드)도 읽기 오류 중에 원본을 덮지 않는다(던진다)
+  atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep({ version: 1, devices }), null, 2), { mode: 0o600 });
   loadErr.clear(); // v2.612 LEFT2612-01
 }
 
@@ -101,7 +108,23 @@ export function deviceInputIssue(input = {}) {
   return null;
 }
 
+/**
+ * 접속처가 바뀌었는가(저장 비밀 승계 금지 판정 — 순수). 전체 점검 23회차 S-1(SAN 스위치 v2.770 sanAccessMoved 와 같은 판단):
+ *   연결 테스트가 host 만 비교해, 같은 host 에서 계정 · SSH 포트만 바꿔도 저장 비밀번호로 로그인을 시도했다(계정 잠금 위험 · 테스트는 성공인데 저장은 폐기).
+ *   SSH 포트는 이전 · 새 수집 방식이 **둘 다 ssh** 일 때만 비교한다(CSV 왕복의 거짓 폐기 방지 — 아래 saveDevice 주석).
+ */
+export function storageAccessMoved(existing, input = {}) {
+  if (!existing) return false;
+  const type = String(input.type || existing.type || '').trim();
+  const sshPortIn = Math.max(1, Math.min(65535, Math.floor(Number(input.sshPort)) || 22));
+  const bothSsh = existing.collectMethod === 'ssh' && normalizeCollectMethod(type, String(input.collectMethod || '')) === 'ssh';
+  return accessMoved(
+    { host: existing.host, username: existing.username || '', port: bothSsh ? (existing.sshPort || 22) : '' },
+    { host: String(input.host || '').trim(), username: String(input.username || '').trim(), port: bothSsh ? sshPortIn : '' }, ['host', 'username', 'port']);
+}
+
 export function saveDevice(input = {}) {
+  assertWritable();   // 결정(78 남긴 것 ①): 읽지 못한 빈 목록과 견주지 않는다(중복 · 상한 판정보다 먼저)
   const db = load();
   const issue = deviceInputIssue(input);
   if (issue) throw new Error(issue); // 검증 규칙은 deviceInputIssue 단일 소스(위 주석)
@@ -113,19 +136,23 @@ export function saveDevice(input = {}) {
   const datacenterId = String(input.datacenterId || '').trim();
 
   const existing = input.id ? db.devices.find((d) => d.id === input.id) : null;
-  const dev = existing || { id: `st-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, createdAt: Date.now(), pulled: false };
+  // 24회차(SAN #5 의 형제): 사본에 고치고 쓰기 성공 뒤에만 메모리를 바꾼다(저장 실패에도 폴러 · 엣지 배포가 저장 안 된 값을 쓰던 것)
+  const dev = existing ? { ...existing } : { id: `st-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, createdAt: Date.now(), pulled: false };
+  // 전체 점검 23회차 S-2(재현): 중복(host+type) 검사가 신규 등록에만 있어, 기존 장비를 다른 장비와 같은 host 로 고치면 같은 어레이가 두 대가 됐다
+  //   (증가량 · 보고표 · 전력 합계 이중 계산 · 세션 둘 · CSV 멱등 키 깨짐). 수정도 **자기 자신을 뺀** 등록부와 견준다 — 메모리를 바꾸기 전에.
+  //   27회차 반증 D-6: 수정은 **이번 수정이 키(host · type)를 바꿀 때만** 견준다 — 예전(검사 없는 수정)에 이미 생긴 중복 두 대가
+  //   비활성화 · 비밀번호 저장까지 둘 다 잠기던 것(삭제만 남았다). 이미 있던 충돌은 막지 않는다.
+  if (existing && (String(existing.host || '').trim() !== host || String(existing.type || '').trim() !== type)) {
+    const dupU = duplicateIssue(db.devices.filter((d) => d !== existing), { host, type });
+    if (dupU) { const e = new Error(dupU.message); e.conflict = dupU.conflict; throw e; }
+  }
   // 접속처 변경 시 비번 이월 금지(uagmon M3) — 새 비번을 명시해야 저장된다.
   // v2.607(감사 SEC2607-07·LEFT2607-06): 예전에는 host 만 봤다 — username·SSH 포트를 바꿔도 옛 비밀번호가 새 계정·포트로
   //   로그인 시도됐다(계정 잠금 위험). 공용 판정 accessMoved(host·username·port)를 쓴다. ⚠ agent(수집 엣지) 변경은
   //   승계한다 — 위임 수집에 비밀번호가 필요하고 접속처(장비)는 같다. 버린 키는 droppedSecrets 로 응답에 싣는다.
   //   SSH 포트는 **이전·새 수집 방식이 둘 다 ssh 일 때만** 비교한다 — CSV 내보내기는 ssh 가 아니면 포트 칸을 비워
   //   (csv.js exportedSshPort) 왕복만으로 포트가 기본값으로 바뀌어 보이고, 그때 쓰지 않는 포트로 비밀을 버리면 거짓 폐기다.
-  const sshPortIn = Math.max(1, Math.min(65535, Math.floor(Number(input.sshPort)) || 22));
-  const bothSsh = !!existing && existing.collectMethod === 'ssh'
-    && normalizeCollectMethod(type, String(input.collectMethod || '')) === 'ssh';
-  const moved = !!existing && accessMoved(
-    { host: existing.host, username: existing.username || '', port: bothSsh ? (existing.sshPort || 22) : '' },
-    { host, username, port: bothSsh ? sshPortIn : '' }, ['host', 'username', 'port']);
+  const moved = storageAccessMoved(existing, { ...input, type, host, username });   // 23회차 S-1: 저장 · 단건 · 대량 연결 테스트가 같은 판정
   const password = String(input.password ?? '');
   let droppedSecrets = [];
   if (password) dev.password = password;
@@ -137,6 +164,11 @@ export function saveDevice(input = {}) {
   const collectMethod = normalizeCollectMethod(type, String(input.collectMethod || ''));
   const sshPort = Math.max(1, Math.min(65535, Math.floor(Number(input.sshPort)) || 22));
   Object.assign(dev, { type, name, host, username, agent, datacenterId, collectMethod, sshPort, enabled: input.enabled !== false, note: String(input.note || '').slice(0, 200) });
+  // v2.932(2차 ⑨): 노드 부하 5분 표본 — 아이실론만 뜻이 있고 기본 켬. 요청에 없으면 이전 값 유지(옛 화면이 끄지 않게) · 처음이면 켬.
+  // v2.952: REST 로 수집하는 어레이(PowerMax · VMAX · PowerStore · Unity)도 같은 토글 — 디렉터 · 노드 · SP 성능 5분 표본(arrayPerf.js). SSH 변형은 경로가 없어 토글을 두지 않는다.
+  const sampleCapable = type === 'isilon' || (['powermax', 'vmax', 'powerstore', 'unity480'].includes(type) && collectMethod === 'api');
+  if (sampleCapable) dev.nodeLoadEnabled = Object.hasOwn(input, 'nodeLoadEnabled') ? input.nodeLoadEnabled !== false : (existing ? existing.nodeLoadEnabled !== false : true);
+  else delete dev.nodeLoadEnabled;
   if (!existing) {
     if (db.devices.length >= MAX_DEVICES) throw new Error(`장비는 최대 ${MAX_DEVICES}개까지 등록할 수 있습니다.`);
     // v2.522: 중복이면 **어느 장비와 충돌하는지** 함께 던진다(사용자 신고 '표에는 없는데
@@ -145,18 +177,21 @@ export function saveDevice(input = {}) {
     // 장비가 중복 생성된다(storage/duplicate.js 머리말 참조).
     const dup = duplicateIssue(db.devices, { host, type });
     if (dup) { const e = new Error(dup.message); e.conflict = dup.conflict; throw e; }
-    db.devices.push(dev);
   }
-  persist();
+  const next = existing ? db.devices.map((d) => (d === existing ? dev : d)) : [...db.devices, dev];
+  persist(next);
+  db.devices = next;
   const { password: _p, ...safe } = dev;
   return { ...safe, hasPassword: !!dev.password, ...(droppedSecrets.length ? { droppedSecrets } : {}) };
 }
 
 export function deleteDevice(id) {
+  assertWritable();   // 결정(78 남긴 것 ①): '장비를 찾을 수 없습니다' 404 보다 먼저
   const db = load();
   const i = db.devices.findIndex((d) => d.id === id);
   if (i < 0) return false;
-  db.devices.splice(i, 1); persist();
+  const next = db.devices.filter((_, j) => j !== i);
+  persist(next); db.devices = next;   // 쓰기 성공 뒤에만
   return true;
 }
 
@@ -185,8 +220,8 @@ export function applyPulledDevices(list) {
   const mine = String(config.agent.name || '').toLowerCase();
   const keep = db.devices.filter((d) => String(d.agent || '').toLowerCase() !== mine); // 남의 것/로컬은 보존
   const before = new Set(db.devices.filter((d) => String(d.agent || '').toLowerCase() === mine).map((d) => String(d.id)));
-  db.devices = [...keep, ...(list || []).map((d) => ({ ...d, pulled: true }))];
-  persist();
+  const all = [...keep, ...(list || []).map((d) => ({ ...d, pulled: true }))];
+  persist(all); db.devices = all;   // 쓰기 성공 뒤에만
   // v2.596(감사 EF-3 — 재현): 이 엣지에서 빠진 장비(삭제·다른 엣지로 이동)의 id 를 돌려준다 — 호출부가 로컬 스냅샷을 지워야
   //   다음 push 에 유령 장비로 실리지 않는다(SAN 스위치와 같은 규칙).
   const now = new Set((list || []).map((d) => String(d.id)));
@@ -211,7 +246,7 @@ export function seedDevicesIfEmpty(list) {
 }
 
 /**
- * v2.915: 데모 보충 — 등록부가 **데모(mock-) 장비뿐**일 때 없는 id 만 덧붙인다(v2.914 이전 규모로 시드된 데모 설치본이 시연 규모로 늘게).
+ * v3.26.0: 데모 보충 — 등록부가 **데모(mock-) 장비뿐**일 때 없는 id 만 덧붙인다(v2.914 이전 규모로 시드된 데모 설치본이 시연 규모로 늘게).
  * 사람이 등록한 장비가 하나라도 있으면 아무것도 하지 않는다. mock/demo/storage.js 만 부른다.
  */
 export function topUpDemoDevices(list) {

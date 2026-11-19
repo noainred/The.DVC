@@ -411,7 +411,8 @@ test('⚠ 추이 조회의 agent 키가 적재 키와 같다 — 엣지에서 �
    */
   const route = fs.readFileSync(path.join(import.meta.dirname, '../src/routes/api/bmUsage.js'), 'utf8');
   const poller = fs.readFileSync(path.join(import.meta.dirname, '../src/bmusage/poller.js'), 'utf8');
-  assert.match(poller, /insertUsage\(rows, config\.agent\?\.name \|\| ''\)/, '적재 키');
+  // v2.922: 장치별 이력(devices·mounts)을 세 번째 인자로 함께 넘긴다 — 키 식은 그대로.
+  assert.match(poller, /insertUsage\(rows, config\.agent\?\.name \|\| ''(?:, \{ devices, mounts \})?\)/, '적재 키');
   assert.match(route, /const agent = config\.agent\?\.name \|\| '';/, '조회 키가 적재 키와 같아야 한다');
   assert.ok(!/const agent = tg\.isEdge \? '' : ''/.test(route), "'' 로 굳힌 코드가 남아 있다");
 });

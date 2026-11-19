@@ -244,12 +244,14 @@ export function untilText(ms) {
  * v2.846 버그 점검(U-9): resultsKnown=false(그 법인 Director 인증 정지 · 조회 실패 · 미설정 — 서버 tree.director.resultsKnown, 판정은 vmView.directorState 하나)면
  *   결과 칸은 마지막으로 읽은 값이라 세지 않는다 — ok·warn·fail·run·never 는 null, unknown = VM 수(통합·법인별 현황 corpCounts 와 같은 규칙).
  */
-export function memberResults(rows, { resultsKnown = true } = {}) {
+export function memberResults(rows, { resultsKnown = true, partial = false } = {}) {
   const out = { n: 0, ok: 0, warn: 0, fail: 0, cancel: 0, run: 0, never: 0 };
   for (const r of Array.isArray(rows) ? rows : []) {
     out.n++;
     const b = r?.b;
     if (b?.run) out.run++;
+    // 반증 G1(55회차 #9): 잘린 조회(서버 director.partial)면 진행 중 VM 의 마지막 결과는 옛 값일 수 있다 — 성공 · 실패로 세지 않는다(corpCounts 와 같은 판정)
+    if (partial && b?.run) { out.runUnread = (out.runUnread || 0) + 1; continue; }
     if (b?.st === 'ok') out.ok++;
     else if (b?.st === 'warning') out.warn++;
     else if (b?.st === 'error') out.fail++;

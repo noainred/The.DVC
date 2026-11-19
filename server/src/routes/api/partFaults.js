@@ -31,12 +31,13 @@ import { buildIncidentsAsync, summarizeKindsAsync } from '../../partfault/incide
 import { createYielder } from '../../util/timeSlice.js';
 import { runPartFaultsNow, partFaultStatus } from '../../partfault/poller.js';
 import { partFaultPushStatus, pushPartFaultsNow } from '../../partfault/push.js';
-import { loadPartFaultSettings, savePartFaultSettings, partFaultEnabled, settingsForAgent } from '../../partfault/settings.js';
+import { loadPartFaultSettings, savePartFaultSettings, partFaultEnabled, settingsForAgent, partFaultSettingsWriteRefusal } from '../../partfault/settings.js';
 import { hookStatus } from '../../partfault/hooks.js';
 import { mergeEdgeReports } from '../../central/partFaultEdge.js';
 import { listCollectors } from '../../collector/registry.js';
 import { allCollectorStatus } from '../../collector/state.js';
 import { config, currentVersion } from '../../config.js';
+import { envPositive } from '../../util/envNumber.js';
 import { isAdminReq, addressMatcher, maskedIdToken, maskedAddressName, scrubberFor } from '../../auth/addressMask.js';
 import { summarizeRegistryError, REGISTRY_ERROR_LABEL } from '../../util/registryCore.js';
 
@@ -104,6 +105,8 @@ export function classifyEdges({ collectors = [], status = {}, reports = [], minV
       agent: name, enabled: c.enabled !== false, version: version || null, kind,
       ...(kind === 'off' ? { offSource: sw.source || null } : {}),
       at: r?.at || null, ageMs: r?.ageMs ?? null, protocol: r?.protocol || null,
+      // 96회차 ⓐ(93회차 F5): 이 엣지 보고가 시리얼 키 파트 이름을 싣는가 — 아니면(옛 판) 교체 뒤 옛 장애가 '누락' 보류로 남는다(화면이 밝힌다). 보고 없음은 null.
+      replaceRule: r ? r.idents === true : null,
       devices: r?.devices ?? null, devicesFailed: r?.devicesFailed ?? null, open: r?.open ?? null,
       rejected: r?.rejected || 0, omitted: r?.omitted || 0, partsOmitted: r?.partsOmitted || 0, scannedDropped: !!r?.scannedDropped,
     });
@@ -113,7 +116,7 @@ export function classifyEdges({ collectors = [], status = {}, reports = [], minV
     const key = t(r.agent).toLowerCase();
     if (seen.has(key)) continue;
     rows.push({ agent: r.agent, enabled: null, version: r.version || null, kind: r.legacy ? 'legacy' : (r.stale ? 'stale' : 'fresh'), unregistered: true,
-      at: r.at, ageMs: r.ageMs, protocol: r.protocol, devices: r.devices, devicesFailed: r.devicesFailed, open: r.open, rejected: r.rejected || 0, omitted: r.omitted || 0, partsOmitted: r.partsOmitted || 0, scannedDropped: !!r.scannedDropped });
+      replaceRule: r.idents === true, at: r.at, ageMs: r.ageMs, protocol: r.protocol, devices: r.devices, devicesFailed: r.devicesFailed, open: r.open, rejected: r.rejected || 0, omitted: r.omitted || 0, partsOmitted: r.partsOmitted || 0, scannedDropped: !!r.scannedDropped });
   }
   const counts = {};
   for (const x of rows) counts[x.kind] = (counts[x.kind] || 0) + 1;
@@ -261,7 +264,7 @@ export function parseDays(v, def = 30) {
 /** 장애별 목록 상한 — 종류별 집계는 상한 **전** 전체로 낸다(잘린 목록으로 세면 부분 합이다). */
 export const INCIDENT_LIST_MAX = 2_000;
 /** 기간 이벤트 읽기 상한 — 넘으면 오래된 쪽이 빠지고 응답 scan.coveredSince 가 실제로 읽은 시작을 말한다. */
-export const INCIDENT_EVENT_READ_MAX = Math.max(1_000, Math.trunc(Number(process.env.PARTFAULT_INCIDENT_EVENT_MAX) || 100_000));
+export const INCIDENT_EVENT_READ_MAX = Math.max(1_000, envPositive(process.env.PARTFAULT_INCIDENT_EVENT_MAX, 100_000));   // 102회차: Infinity → 기본값(예전엔 읽기 상한이 꺼졌다)
 const INCIDENT_MEMO_MS = 30_000;
 const _incMemo = new Map();   // days → { key, at, value } | { key, promise }
 
@@ -346,6 +349,8 @@ api.get('/tools/part-faults', toolsPerm, fullScopeOnly, async (req, res) => {
     push: role === 'edge' ? pushView(partFaultPushStatus(), isAdmin) : null,
     hook: hookStatus(),
     settings: isAdmin ? loadPartFaultSettings() : null,
+    // 96회차(93회차 F4 화면): 설정 파일 읽기 오류면 위 settings 는 기본값(꺼짐)이다 — 관리자가 끈 것이 아니다. 고정 문구 사유만(파일 조각 없음).
+    ...(isAdmin && partFaultSettingsWriteRefusal() ? { settingsUnreadable: { reason: String(partFaultSettingsWriteRefusal().reason || '').slice(0, 300) } } : {}),
   });
 });
 
@@ -439,6 +444,8 @@ api.get('/tools/part-faults/status', toolsPerm, fullScopeOnly, async (req, res) 
  */
 api.put('/tools/part-faults/settings', adminOnly, fullScopeOnly, (req, res) => {
   if (config.agent.centralUrl) return res.status(409).json({ ok: false, reason: '엣지에서는 스위치를 저장할 수 없습니다 — 중앙 설정이 내려옵니다.' });
+  // 93회차 F4: 설정 파일 읽기 오류면 기본값(꺼짐) 위에 저장하지 않는다 — 사유를 실은 409(예전: 원본을 손상으로 옮긴 뒤 새 파일).
+  { const no = partFaultSettingsWriteRefusal(); if (no) return res.status(409).json(no); }
   const before = loadPartFaultSettings();
   const s = savePartFaultSettings(req.body || {});
   logAudit({ user: req.user?.username, action: '파트 장애 스위치 저장', detail: `enabled ${before.enabled}→${s.enabled} · 엣지별 ${Object.keys(s.edges).length}곳` });

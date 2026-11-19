@@ -6,6 +6,7 @@
  * 정렬은 **형제끼리만**(같은 부모 아래) — 표 전체를 한 줄로 정렬하면 계층이 깨진다. 값이 없는 형제는 항상 뒤.
  */
 import { numOrNull } from '../../numOrNull.js';
+import { dayStamp } from '../../dayStamp.js';
 
 export const ALLOC_LEVELS = Object.freeze([
   { depth: 1, label: '법인' }, { depth: 2, label: '데이터센터' }, { depth: 3, label: '클러스터' },
@@ -36,10 +37,14 @@ export function totalsNote(t) {
   if (spare != null && spare < 0) { notes.push('할당이 용량을 넘음 — 확인 필요'); tone = 'warn'; } else if (pct != null && pct >= 90) { notes.push('포화'); tone = 'warn'; }
   if (t.allocUnknown) { notes.push(`할당 모르는 VM ${t.allocUnknown}`); tone = 'warn'; }
   if (t.capUnknown) { notes.push(`용량 모르는 GPU ${t.capUnknown}`); tone = 'warn'; }
+  // 42회차 R2: GPU 를 못 읽은 끊긴 호스트(GPU VM 이 있는) — 합계는 부분이고 그 시각 일 이력에 쓰지 않았다
+  if (numOrNull(t.hostsDown) > 0) { notes.push(`GPU 를 못 읽은 끊긴 호스트 ${t.hostsDown}대 — 합계는 부분`); tone = 'warn'; }
   if (t.noPlacement) notes.push(`배치 정보 없는 GPU ${t.noPlacement}`);
   if (t.offUnknown) notes.push(`꺼진 VM 용량 모름 ${t.offUnknown}대`);   // v2.870 감사 A4-01: 꺼진 VM 합에서 빠진 수(엑셀 totalsCells 와 같은 말)
   if (t.unplaced) notes.push(`미배치 VM ${t.unplaced}`);
   if (t.hostUseUnknown && t.hosts > 1) notes.push(`CPU·메모리 사용률 ${t.hostUseUnknown}대 제외`);   // v2.868: 끊김·못 읽음 — 읽은 호스트 기준
+  // v2.939 개선 5: 꺼진 VM 을 모두 켜면 예비보다 많이 필요(호스트 행만 — 서버 buildHostAlloc offOverGB · 엑셀 totalsCells 와 같은 말)
+  if (numOrNull(t.offOverGB) > 0) { notes.push(`꺼진 VM 을 모두 켜면 ${numText(t.offOverGB)} GB 모자람`); if (!tone) tone = 'warn'; }
   if (!notes.length && t.vmsOn === 0 && t.gpus > 0) { notes.push('할당 VM 없음 — 전부 예비'); tone = 'free'; }
   if (!t.gpus && t.vsga) notes.push('vSGA 만 — 할당형 GPU 없음(합계 제외)');
   return { note: notes.join(' · '), tone };
@@ -103,17 +108,51 @@ export function pickVcenters(tree, vcSel) {
 
 const TOT_KEYS = ['hosts', 'gpus', 'vsga', 'capGB', 'capUnknown', 'allocGB', 'allocUnknown', 'offGB', 'offUnknown', 'vmsOn', 'vmsOff', 'unplaced', 'freeGpus', 'noPlacement'];
 const r1 = (n) => Math.round(n * 10) / 10;
+/** 44회차 R6: 고른(없으면 전체) 법인 칩 가운데 GPU 호스트 수를 모르는 것 — 끊긴 호스트(hostsDown)는 hostsDownByVc 로 따로 센다. */
+export function unknownChipsOf(chips, vcSel) {
+  const pick = vcSel && vcSel.size ? (chips || []).filter((c) => vcSel.has(c.id)) : (chips || []);
+  return pick.filter((c) => c?.unknown && c.unknown !== 'hostsDown');
+}
+const unknownReasonText = (list) => [...new Set(list.map((c) => CORP_UNKNOWN_TEXT[c.unknown] || '모름'))].join(' · ');
 /**
- * v2.853: 고른 법인들의 합계 — 서버 합계(allocTree.js finishTotals)와 같은 규칙: 용량·할당 중 모르는 것이 섞이면 예비·할당률은 null
- * (부분 합을 예비로 보이지 않는다). 하나도 안 고르면 서버 전체 합계를 그대로 쓴다.
+ * v2.853: 고른 법인들의 합계 — 용량·할당 중 모르는 것이 섞이면 예비·할당률은 null(부분 합을 예비로 보이지 않는다). 하나도 안 고르면 서버 전체 합계를 그대로 쓴다.
+ * 44회차 R7(정정): '서버 합계와 같은 규칙' 이지만 값은 다를 수 있다 — 서버는 반올림 전 합을 반올림하고, 여기서는 이미 반올림한 법인 합계를 더한다(0.1 GB 안팎 차이).
+ * 44회차 R6: chips 를 주면 GPU 호스트 수를 모르는 법인(수집 전 · 접속 불가 · 수집 꺼짐 · 점검 중 · 상한)을 corpsUnknown 으로 센다 —
+ *   고른 법인에 있으면 예비 · 할당률을 내지 않는다. 전체(선택 없음)는 서버 합계(엑셀 KPI 와 같은 값)를 그대로 두고 개수만 밝힌다(합계가 하나도 없으면 비운다).
  */
-export function sumTotals(tree, vcSel) {
-  if (!vcSel || !vcSel.size) return tree?.totals || null;
+export function sumTotals(tree, vcSel, { chips = null } = {}) {
+  const corpsUnknown = chips ? unknownChipsOf(chips, vcSel).length : 0;
+  if (!vcSel || !vcSel.size) {
+    const T = tree?.totals || null;
+    if (!T || !corpsUnknown) return T;
+    const none = !(tree?.vcenters || []).length;
+    return { ...T, corpsUnknown, ...(none ? { spareGB: null, allocPct: null } : {}) };
+  }
   const t = Object.fromEntries(TOT_KEYS.map((k) => [k, 0]));
   for (const vc of pickVcenters(tree, vcSel)) for (const k of TOT_KEYS) t[k] += numOrNull(vc.totals?.[k]) || 0;
-  const known = t.capUnknown === 0 && t.allocUnknown === 0;
-  return { ...t, capGB: r1(t.capGB), allocGB: r1(t.allocGB), offGB: r1(t.offGB),
+  // 43회차 R2: 고른 법인의 끊긴 GPU 호스트(계층 노드가 없는 법인 포함 — hostsDownByVc) — 있으면 용량이 부분이라 예비 · 할당률을 내지 않는다(서버 합계와 같은 규칙)
+  let hostsDown = 0;
+  for (const id of vcSel) hostsDown += numOrNull(tree?.hostsDownByVc?.[id]) || 0;
+  const known = t.capUnknown === 0 && t.allocUnknown === 0 && hostsDown === 0 && corpsUnknown === 0;
+  // 45회차 F3: 고른 법인에 계층 노드가 하나도 없고 모르는 법인(끊긴 호스트 · 모름 칩)뿐이면 용량 · 할당 · 수량도 0 이 아니라 모름
+  if (!pickVcenters(tree, vcSel).length && (hostsDown || corpsUnknown)) {
+    return { ...t, ...(hostsDown ? { hostsDown } : {}), ...(corpsUnknown ? { corpsUnknown } : {}), hosts: null, gpus: null, freeGpus: null, capGB: null, allocGB: null, offGB: null, spareGB: null, allocPct: null };
+  }
+  return { ...t, ...(hostsDown ? { hostsDown } : {}), ...(corpsUnknown ? { corpsUnknown } : {}), capGB: r1(t.capGB), allocGB: r1(t.allocGB), offGB: r1(t.offGB),
     spareGB: known ? r1(t.capGB - t.allocGB) : null, allocPct: known && t.capGB > 0 ? Math.round((t.allocGB / t.capGB) * 100) : null };
+}
+/**
+ * 43회차 R2: 계층이 비거나 고른 법인에 행이 없을 때의 문구 — 끊긴 GPU 호스트가 있으면 '없음' 이 아니라 '못 읽음'.
+ * 44회차 R6: chips 를 주면 칩의 '모름' 사유(수집 전 · 접속 불가 · 수집 꺼짐 · 점검 중 · 상한)도 같은 판정으로 — 칩은 '—' 인데 문구만 '없습니다' 이던 어긋남.
+ */
+export function allocEmptyText(tree, vcSel, { query = '', chips = null } = {}) {
+  const ids = vcSel && vcSel.size ? [...vcSel] : Object.keys(tree?.hostsDownByVc || {});
+  const down = ids.reduce((a, id) => a + (numOrNull(tree?.hostsDownByVc?.[id]) || 0), 0);
+  if (query) return `‘${query}’ 에 맞는 법인·호스트·VM 이 없습니다`;
+  if (down) return `GPU VM 이 있는 호스트 ${down}대가 끊겨 GPU 를 읽지 못했습니다 — GPU 호스트가 없다는 뜻이 아닙니다`;
+  const unk = chips ? unknownChipsOf(chips, vcSel) : [];
+  if (unk.length) return `법인 ${unk.length}곳의 GPU 호스트 수를 모릅니다(${unknownReasonText(unk)}) — GPU 호스트가 없다는 뜻이 아닙니다`;
+  return vcSel && vcSel.size ? '고른 법인에 GPU 가 설치된 호스트가 없습니다' : 'GPU 가 설치된 호스트가 없습니다';
 }
 
 /**
@@ -128,14 +167,15 @@ export function sumTotals(tree, vcSel) {
  * @returns {''|'pending'|'unreachable'|'disabled'|'maintenance'|'truncated'}
  */
 export const CORP_INV_EMPTY = Object.freeze(['pending', 'unreachable', 'disabled', 'maintenance']);
-export function corpUnknownOf(meta, hasNode, truncated = 0) {
+export function corpUnknownOf(meta, hasNode, truncated = 0, hostsDown = 0) {
   if (hasNode) return '';
   const st = typeof meta?.status === 'string' ? meta.status : '';
   if (!meta?.stale && CORP_INV_EMPTY.includes(st)) return st;
+  if (Number(hostsDown) > 0) return 'hostsDown';   // 42회차 R2: 서버와 같은 판정(GPU VM 이 있는 끊긴 호스트뿐 — 0대가 아니라 모름)
   return truncated > 0 ? 'truncated' : '';
 }
 export const CORP_UNKNOWN_TEXT = Object.freeze({
-  pending: '수집 전', unreachable: '접속 불가', disabled: '수집 꺼짐', maintenance: '점검 중', truncated: '상한으로 잘림',
+  pending: '수집 전', unreachable: '접속 불가', disabled: '수집 꺼짐', maintenance: '점검 중', truncated: '상한으로 잘림', hostsDown: 'GPU 호스트 끊김',
 });
 
 /** 칩 글자(제목 · 개수) — 모르면 0 이 아니라 '—'(v2.871 A4-02). */
@@ -151,7 +191,7 @@ export function corpChips(tree, vcs) {
   const truncated = Number(tree?.truncated) || 0;
   return list.map((x) => {
     const node = byId.get(x.id);
-    const unknown = corpUnknownOf(x.site, !!node, truncated);
+    const unknown = corpUnknownOf(x.site, !!node, truncated, tree?.hostsDownByVc?.[x.id]);
     // 모르면 hosts·gpus 는 null(0 이 아니다 — 소비처는 corpChipText 로 글자를 만든다)
     return { ...x, unknown, hosts: unknown ? null : node?.totals?.hosts || 0, gpus: unknown ? null : node?.totals?.gpus || 0 };
   }).sort((a, b) => a.id.localeCompare(b.id));
@@ -291,4 +331,143 @@ export function allocExportQuery({ scope = '', vcSel = null, depth = 'vm', sheet
   if (sheets && sheets.length && sheets.length < EXPORT_SHEETS.length) p.set('sheets', EXPORT_SHEETS.map((s) => s.key).filter((k) => sheets.includes(k)).join(','));
   const q = p.toString();
   return q ? `?${q}` : '';
+}
+
+/* ── v2.939 개선 4 · 배치 추천('어디에 놓을 수 있나') ───────────────────────────────────────────────── */
+/** 프로파일 이름 → 할당 GB(서버 gpu/vgpuProfile.js vgpuProfileGB 와 같은 규칙 — 시험이 같은 입력으로 대조). 못 읽으면 null. */
+export function profileGB(profile) {
+  const s = String(profile ?? '').trim();
+  if (!s || s.length > 128) return null;
+  const m = /-(\d{1,3})([a-z]{1,2})\d?$/i.exec(s);   // 41회차 F7: 서버와 같은 규칙(B 시리즈 …-2b4)
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isFinite(n) ? (n === 0 ? 0.5 : n) : null;
+}
+/** 프로파일의 GPU 계열(nvidia_l4-12q → l4 · grid_a100-3-40c → a100)과 MIG 여부(가운데 슬라이스 숫자가 있으면). 형식 밖이면 null. */
+export function profileFamily(profile) {
+  const m = /^[a-z0-9]+_([a-z0-9]+)-(?:(\d{1,2})-)?\d{1,3}[a-z]{1,2}$/i.exec(String(profile ?? '').trim());
+  return m ? { family: m[1].toLowerCase(), mig: m[2] != null } : null;
+}
+/** GPU 모델 이름이 그 계열인가 — 낱말 단위(L4 가 L40S 에 맞지 않게). 'NVIDIA A100 80GB PCIe' · 'GA102GL [A40]' 모두 낱말로 자른다. */
+export const modelHasFamily = (model, family) => !!family && String(model || '').toLowerCase().split(/[^a-z0-9]+/).includes(family);
+/** 화면 고르기 목록 — 계층에서 쓰이는 vGPU 프로파일(켜진·꺼진 VM 모두)과 그 VM 수, 많이 쓰는 순. */
+export function profileOptions(tree, vcSel = null) {
+  const m = new Map();
+  for (const vc of pickVcenters(tree, vcSel)) for (const dc of vc.datacenters) for (const cl of dc.clusters) for (const h of cl.hosts) {
+    for (const v of [...h.gpus.flatMap((g) => g.vms), ...h.unplaced, ...h.off]) if (v.profile && v.vgpuDevices > 0) m.set(v.profile, (m.get(v.profile) || 0) + 1);
+  }
+  return [...m.entries()].map(([profile, vms]) => ({ profile, vms })).sort((a, b) => b.vms - a.vms || a.profile.localeCompare(b.profile));
+}
+/**
+ * 그 프로파일 VM 을 하나 더 놓을 수 있는 GPU(순수). 판정은 서버가 계산한 슬롯(gpu.slots)과 용량만 쓴다:
+ *   · 같은 프로파일이 올라간 vGPU GPU 의 남은 슬롯(slots.free > 0) — 먼저(빈 GPU 를 아껴 두는 쪽 · 남은 슬롯이 적은 것부터)
+ *   · 비어 있는 vGPU GPU 중 모델이 프로파일 계열과 같고 용량 ≥ 프로파일 GB — 용량 ÷ 프로파일 GB 장
+ *   뺀다: 끊긴 호스트 · 유지보수 모드 호스트(v2.951 — 수집기가 connectionState 'MAINTENANCE' 로 싣는다 · 그 호스트엔 VM 을 켤 수 없다) ·
+ *   배치 정보 없는 GPU(모름) · 혼합 크기 · 다른 프로파일 GPU · 패스스루 · vSGA · 용량 모름.
+ *   MIG 프로파일은 빈 GPU 의 장 수가 MIG 구성에 달려 있어 '추정' 으로 표시한다.
+ * @returns {{ per: number|null, mig: boolean, family: string|null, rows: object[], same: number, empty: number, skipped: object }}
+ */
+export function placementCandidates(tree, profile, vcSel = null) {
+  const per = profileGB(profile);
+  const fam = profileFamily(profile);
+  const out = { per, mig: !!fam?.mig, family: fam?.family || null, rows: [], same: 0, empty: 0, skipped: { down: 0, maint: 0, noPlacement: 0, mixed: 0, otherProfile: 0, capUnknown: 0, small: 0 } };
+  if (per == null || !fam) return out;
+  for (const vc of pickVcenters(tree, vcSel)) for (const dc of vc.datacenters) for (const cl of dc.clusters) for (const h of cl.hosts) {
+    const down = h.connectionState === 'DISCONNECTED' || h.connectionState === 'NOT_RESPONDING';
+    const maint = h.connectionState === 'MAINTENANCE';   // v2.951(점검): 예전에는 유지보수 모드 호스트의 GPU 도 '놓을 수 있음' 으로 보였다
+    const skipHost = () => { if (down) out.skipped.down += 1; else out.skipped.maint += 1; };
+    for (const g of h.gpus) {
+      if (g.mode !== 'vgpu') continue;
+      const base = { id: `${h.id || h.name}|${g.idx}`, vc: vc.id, vcName: vc.name, cluster: cl.name, host: h.name, gpu: g.idx, model: g.model };
+      if (g.vms.length && g.slots?.profile === profile) {
+        if (!(g.slots.free > 0)) continue;
+        if (down || maint) { skipHost(); continue; }
+        out.rows.push({ ...base, kind: 'same', fit: g.slots.free, now: `${profile} · ${g.slots.used}/${g.slots.total} 슬롯`, note: '같은 프로파일 GPU 의 남은 슬롯' });
+        out.same += g.slots.free;
+        continue;
+      }
+      if (!modelHasFamily(g.model, fam.family)) continue;
+      if (down || maint) { skipHost(); continue; }
+      if (!g.placement) { out.skipped.noPlacement += 1; continue; }
+      if (g.vms.length) { if (g.slots?.mixed) out.skipped.mixed += 1; else out.skipped.otherProfile += 1; continue; }
+      if (g.capGB == null) { out.skipped.capUnknown += 1; continue; }
+      if (g.capGB < per) { out.skipped.small += 1; continue; }
+      const fit = Math.floor(g.capGB / per);
+      out.rows.push({ ...base, kind: 'empty', fit, now: '비어 있음', note: fam.mig ? `빈 GPU — ${fit}장은 용량 기준 추정(MIG 구성에 따라 다름)` : '빈 GPU — 이 프로파일을 올리면 다른 프로파일은 못 올림' });
+      out.empty += fit;
+    }
+  }
+  out.rows.sort((a, b) => (a.kind === b.kind ? (a.kind === 'same' ? a.fit - b.fit : b.fit - a.fit) || a.host.localeCompare(b.host) : a.kind === 'same' ? -1 : 1));
+  return out;
+}
+
+/* ── v2.939 개선 10 · 새로 고침 뒤 펼침 ─────────────────────────────────────────────────────────────── */
+/**
+ * 새로 고침으로 새로 생긴 노드(법인 · 데이터센터 · 클러스터 · 호스트 · GPU)를 지금 펼침 단계대로 펼친다(순수). 이미 있던 노드는 사용자가
+ * 접고 편 그대로 둔다. 예전에는 펼침 목록을 그대로 두어 새로 생긴 법인·호스트가 접힌 채로 보였다.
+ */
+export function openAfterRefresh(open, oldTree, newTree, level) {
+  if (!open) return open;
+  const known = openForLevel(oldTree, 7);
+  const next = new Set(open);
+  for (const id of openForLevel(newTree, level)) if (!known.has(id)) next.add(id);
+  return next;
+}
+
+/* ── v2.939 개선 2 · 수집 점검 글자 ─────────────────────────────────────────────────────────────────── */
+/** 판정 → 글자·색(서버 allocDiag verdicts). 관측할 대상이 없으면 '판단 불가' — 없다고 단정하지 않는다. */
+export function diagVerdicts(d) {
+  if (!d || !d.totals) return [];
+  const t = d.totals; const v = d.verdicts || {};
+  const tone = (x) => (x === 'yes' ? 'ok' : x === 'unknown' ? '' : 'warn');
+  return [
+    { key: 'placement', title: 'GPU 별 VM 배치 정보', tone: tone(v.placement),
+      text: v.placement === 'unknown' ? '판단 불가 — vGPU GPU 가 없습니다'
+        : v.placement === 'yes' ? `읽힘 — vGPU GPU ${t.vgpuGpus}장 모두`
+          : `vGPU GPU ${t.vgpuGpus}장 중 ${t.vgpuNoPlacement}장은 배치 정보가 없습니다 — 그 법인의 수집 서버(엣지)가 구버전일 수 있습니다(업그레이드하면 채워짐)` },
+    { key: 'offListed', title: '꺼진 VM 이 GPU 별 목록에 오는가', tone: '',
+      text: v.offListed === 'yes' ? `온다 — 꺼진 vGPU VM ${t.offVgpuVms}대 중 ${t.offListed}대가 목록에 있음(할당에는 넣지 않음 — 결과는 같습니다)`
+        : v.offListed === 'no' ? `오지 않는다 — 꺼진 vGPU VM ${t.offVgpuVms}대 모두 목록에 없음`
+          : '판단 불가 — 배치 정보가 있는 호스트에 꺼진 vGPU VM 이 없습니다' },
+    { key: 'ptPciRead', title: '켜진 패스스루 VM 의 장치 주소', tone: tone(v.ptPciRead),
+      text: v.ptPciRead === 'unknown' ? '판단 불가 — 켜진 패스스루 VM 이 없습니다'
+        : v.ptPciRead === 'yes' ? `읽힘 — ${t.ptOnVms}대 모두(GPU 와 NIC · HBA 를 주소로 가릅니다)`
+          : `${t.ptOnVms}대 중 ${t.ptOnPciRead}대만 읽힘 — 나머지는 장치를 모두 GPU 로 셉니다(구버전 수집기 또는 주소를 주지 않는 vCenter)` },
+    { key: 'profiles', title: 'vGPU 프로파일 이름 → GB', tone: tone(v.profiles),
+      text: v.profiles === 'unknown' ? '판단 불가 — vGPU GPU 가 없습니다'
+        : v.profiles === 'yes' ? '모두 읽힘'
+          : `못 읽은 VM ${t.unparsedVms}대 — 아래 이름이 규칙(…-<GB><문자>)과 다릅니다. 그 VM 의 할당은 ‘모름’ 으로 셉니다` },
+    { key: 'nonGpu', title: 'GPU 가 아닌 패스스루(NIC · HBA)', tone: '',
+      text: t.nonGpuPtVms ? `${t.nonGpuPtVms}대가 가짐 — ${t.nonGpuOnlyVms}대는 GPU 장치가 없어 GPU VM 에서 뺐습니다` : '없음(또는 주소를 몰라 가르지 못함)' },
+    { key: 'cap', title: 'GPU 용량', tone: t.capUnknown ? 'warn' : '',
+      text: `${t.capUnknown ? `모름 ${t.capUnknown}장 · ` : ''}${t.capModel ? `모델명 추정 ${t.capModel}장(패스스루 — PCI 정보에 메모리 없음)` : '모델명 추정 없음'}` },
+  ];
+}
+
+/* ── v2.939 개선 7 · 추이 ───────────────────────────────────────────────────────────────────────────── */
+/** 추이 조회 쿼리 — 화면 범위(scope = 법인 하나로 연 화면 · 고른 법인 칩)를 vcenterIds 로. 서버가 조회 범위와 먼저 교집합을 낸다. */
+export function historyQuery({ days = 90, vcSel = null, scope = '' } = {}) {
+  const p = new URLSearchParams();
+  p.set('days', String(days));
+  const ids = scope ? [scope] : vcSel && vcSel.size ? [...vcSel] : [];
+  if (ids.length) p.set('vcenterIds', ids.join(','));
+  return `?${p.toString()}`;
+}
+const signed = (v, unit) => (v == null ? '—' : `${v > 0 ? '+' : ''}${numText(v)} ${unit}`);
+/** 추세 → 글자. 소진 예상이 없으면 '—' 와 그 이유(점 부족 · 늘지 않음 · 들쭉날쭉) — '소진 안 함' 으로 단정하지 않는다. */
+export function trendText(t, now = Date.now(), { total = false } = {}) {
+  if (!t) return { change: '—', perDay: '—', left: '—', why: '이력 없음' };
+  // v2.951(점검): 마지막 보고가 오래된 법인은 '오늘부터 N일 뒤' 를 내지 않는다(서버 allocTrend 가 stale 일수를 싣는다).
+  //   합계는 '보고 없음' 이 아니라 '합계 없음' — 법인 하나가 빠진 날은 합계를 내지 않으므로(부분 합 금지) 다른 법인은 보고 중이어도 합계 끝이 멈춘다.
+  if (t.stale) {
+    return total
+      ? { change: signed(t.change30, 'GB'), perDay: '—', left: `— (합계 없음 ${t.stale}일)`, why: `최근 ${t.stale}일은 보고가 빠진 법인이 있어 합계를 내지 않았습니다 — 아래 표에서 '보고 없음' 법인을 확인하세요` }
+      : { change: signed(t.change30, 'GB'), perDay: '—', left: `— (보고 없음 ${t.stale}일)`, why: `마지막 보고가 ${t.stale}일 전 — 지금 추세를 모릅니다` };
+  }
+  if (t.over) return { change: signed(t.change30, 'GB'), perDay: t.gbPerDay == null ? '—' : `${signed(Math.round(t.gbPerDay * 10) / 10, 'GB')}/일`, left: '이미 넘음', why: '마지막 날 할당이 용량보다 큽니다 — 확인이 필요합니다' };
+  const why = t.daysLeft != null ? '최근 30일 할당 증가 기울기로 낸 추정' : t.points < 7 ? `최근 30일 점이 ${t.points}개 — 7개 이상이어야 냅니다`
+    : !(t.gbPerDay > 0) ? '최근 30일 할당이 늘지 않았습니다' : '증가가 들쭉날쭉해(결정계수 0.3 미만) 내지 않습니다';
+  const left = t.daysLeft == null ? '—' : t.daysLeft === 0 ? '지금(예비 없음)'
+    : `${t.daysLeft}일 뒤 (${dayStamp(now + t.daysLeft * 86_400_000)})`;   // 포탈 날짜(UTC 자르기 금지 — dayStamp 스윕)
+  return { change: signed(t.change30, 'GB'), perDay: t.gbPerDay == null ? '—' : `${signed(Math.round(t.gbPerDay * 10) / 10, 'GB')}/일`, left, why };
 }

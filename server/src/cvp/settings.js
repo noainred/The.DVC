@@ -9,10 +9,10 @@
  *  - 엣지는 중앙 값을 pull 해서 쓴다(`applyCentralSettings`) — 엣지가 자기 복사본을 고집하면 중앙에서 바꾼 값이 영원히 안 먹는다.
  *  - 로드 손상은 preserveCorrupt(설정이 조용히 사라지지 않게).
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { makeJsonFileReader, READ_RETRY_MS } from '../util/jsonFileRead.js';   // 103회차 F20: 읽기 오류 ≠ 손상
 import { makeSettingsLoadError } from '../util/settingsLoadError.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { clampSetting } from '../util/clampSetting.js'; // v2.613 DEPS2613-12 · RUNTIME2613-08: 숫자 설정 정규화는 하나(빈 칸 = 미지정)
@@ -32,6 +32,8 @@ export const LIMITS = Object.freeze({
   //   기본값은 흔한 10G SR/LR 수신 감도 근처로 잡은 **추정**이다 — 현장 광 모듈에 맞춰 CVP 설정에서 바꾼다.
   xcvrRxWarnDbm: { min: -40, max: 0, def: -10 },
   xcvrRxFaultDbm: { min: -40, max: 0, def: -14 },
+  // v2.935(C-③): EndpointLocation 주기 수집 — 부품 주기(30분)마다 CVP 서버 하나에 묻는 MAC 수 상한(요청 1회 = MAC 1개 · 나머지는 다음 주기).
+  endpointPerCycle: { min: 1, max: 2000, def: 200 },
 });
 
 
@@ -43,7 +45,8 @@ export function normalizeSettings(input = {}) {
    *   (파트 장애 v2.548 과 같은 opt-in — 켜지 않아도 전이 기록은 남는다). faultAlertsClosed — 해소도 알린다(기본 켬).
    *   판정은 중앙에서만 돈다(cvp/faultScan.js) — 엣지는 이 값을 받아도 쓰지 않는다.
    */
-  const out = { enabled: src.enabled === true, faultAlerts: src.faultAlerts === true, faultAlertsClosed: src.faultAlertsClosed !== false };
+  // v2.935(C-③): endpointScan — EndpointLocation 주기 수집(기본 켬 · CVP 수집 자체가 opt-in 이라 수집을 켠 CVP 에만 간다). 끄면 버튼 조회만 남는다.
+  const out = { enabled: src.enabled === true, faultAlerts: src.faultAlerts === true, faultAlertsClosed: src.faultAlertsClosed !== false, endpointScan: src.endpointScan !== false };
   for (const [k, l] of Object.entries(LIMITS)) {
     out[k] = clampSetting(src[k], l); // v2.613 DEPS2613-12: 빈 값·비숫자는 기본값(numOrNull 판정)
   }
@@ -59,6 +62,7 @@ export function mergeSettings(cur, patch = {}) {
   if (typeof p.enabled === 'boolean') next.enabled = p.enabled;
   if (typeof p.faultAlerts === 'boolean') next.faultAlerts = p.faultAlerts;
   if (typeof p.faultAlertsClosed === 'boolean') next.faultAlertsClosed = p.faultAlertsClosed;
+  if (typeof p.endpointScan === 'boolean') next.endpointScan = p.endpointScan;   // v2.935(C-③)
   for (const [k, l] of Object.entries(LIMITS)) {
     const n = numOrNull(p[k]);
     if (n == null) continue;            // 빈 칸·비숫자 = 미지정(이전 값 유지)
@@ -68,7 +72,9 @@ export function mergeSettings(cur, patch = {}) {
 }
 
 let _cache = null;
-const _loadErr = makeSettingsLoadError(() => FILE(), { label: 'CloudVision 수집 설정', confirm: () => saveSettings({}) });
+const _reader = makeJsonFileReader(() => FILE(), { parse: (t) => t, preserve: false, tag: 'cvp-settings' });   // 103회차 F20
+// 27회차 반증 D-3: 확정은 보존 칸을 최대값으로(기본 7일 · 730일로 확정하면 그 직후 정리가 긴 이력을 지웠다)
+const _loadErr = makeSettingsLoadError(() => FILE(), { label: 'CloudVision 수집 설정 — 확정 시 보존은 최대값(이력을 지우지 않음)', confirm: () => saveSettings({ rawRetentionDays: LIMITS.rawRetentionDays.max, dailyRetentionDays: LIMITS.dailyRetentionDays.max }) });
 /** v2.631(EDGE2631-01): 설정 파일을 못 읽었으면 사유(배포 라우트가 설정을 싣지 않는다), 읽었으면 null. */
 export function cvpSettingsLoadError() { loadSettings(); return _loadErr.get(); }
 export function loadSettings() {
@@ -76,10 +82,14 @@ export function loadSettings() {
   let raw = {};
   // v2.631(EDGE2631-01): 로드 오류를 기억한다 — 손상 → 보존 → 기본값을 /api/central/cvp-config 가 내려보내면 엣지
   //   applyCentralSettings 가 그 기본값으로 현장 설정을 덮었다(등록부 손상만 503 이었다). 배포 라우트는 이 오류면 설정을 싣지 않는다.
-  if (!fs.existsSync(FILE())) _loadErr.missing();
+  // 103회차 F20(재현 — EISDIR): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 예전에는 원본을 보존본으로 옮겨 재시작 뒤 '보존본만 있음' 이 되고
+  //   확정(최대 보존)이나 수동 복구로만 풀렸다. 이제 원본을 두고 · 캐시하지 않고(30초 간격 재읽기) · 표지(readError — 배포 503 · 저장 409 · 정리 보류는 그대로).
+  const rr = _reader.read();
+  if (rr.kind === 'read-error') { _loadErr.readError(rr.error, { retryMs: READ_RETRY_MS }); return { ...normalizeSettings({}) }; }
+  if (rr.kind === 'missing') _loadErr.missing();
   else {
     try {
-      raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
+      raw = JSON.parse(rr.value);
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('객체가 아닌 JSON 값');
       _loadErr.ok();
     } catch (e) { _loadErr.corrupt(e); preserveCorrupt(FILE(), e?.message); raw = {}; }
@@ -122,4 +132,4 @@ export function applyCentralSettings(remote) {
   return true;
 }
 
-export function _resetForTest() { _cache = null; _loadErr.ok(); }
+export function _resetForTest() { _cache = null; _loadErr.ok(); _reader.reset(); }

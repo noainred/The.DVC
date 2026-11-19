@@ -18,9 +18,10 @@
  * ⚠ **엣지당 대기 1건**이다. 연타가 큐를 부풀리지 않게 같은 엣지의 새 요청은 **기존 것을 덮어쓴다**
  *   (최신 요청이 사용자가 지금 원하는 것이다).
  */
-const ACK_TIMEOUT_MS = Math.max(10_000, Number(process.env.EDGELOG_ACK_TIMEOUT_MS) || 60_000);
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
+const ACK_TIMEOUT_MS = Math.max(10_000, envPositive(process.env.EDGELOG_ACK_TIMEOUT_MS, 60_000));
 const MAX_TRIES = 2;
-const REQ_TTL_MS = Math.max(60_000, Number(process.env.EDGELOG_REQ_TTL_MS) || 10 * 60_000);
+const REQ_TTL_MS = Math.max(60_000, envPositive(process.env.EDGELOG_REQ_TTL_MS, 10 * 60_000));
 const MAX_AGENTS = 200;
 
 const t = (v) => String(v ?? '').trim();

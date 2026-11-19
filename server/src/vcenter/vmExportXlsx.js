@@ -19,6 +19,15 @@ import { localStamp } from '../util/dayKey.js';
 import { BORDER, PAL, fill, kindOf, cellLook, applyLook, styleDataRow, styleHeadRow, depthTint, folderLabel, barText, numFmtOf } from './vmXlsxStyle.js';
 import { sumText, pctOf } from './vmExportSummary.js';
 
+/** 130회차: 수집이 멈춘 vCenter 의 인벤토리는 마지막으로 읽은 값이다 — ‘기준 <만든 시각>’ 옆에 그 사실과 읽은 시각을 적는다(정상이면 ''). */
+export function invNotCurrentText(meta) {
+  const nc = meta?.invNotCurrent;
+  if (!nc) return '';
+  const at = typeof nc.at === 'number' && Number.isFinite(nc.at) && nc.at > 0 ? `${localStamp(nc.at, meta.offsetMin)} 에 읽은 값` : '읽은 시각 모름';
+  return `⚠ 이 vCenter 의 수집이 멈춰 있어(${nc.why || '읽지 못함'}) 인벤토리 값(전원 · 사양 · 용량)은 마지막으로 읽은 값입니다 — ${at}`;
+}
+const invTail = (meta) => { const t = invNotCurrentText(meta); return t ? ` · ${t}` : ''; };
+
 export const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 export const VM_EXPORT_SHEETS = Object.freeze(['요약', '폴더 트리', '데이터', '읽는 법']);
 const MISSING = '수집 안 됨';   // vmExportCatalog.MISSING 과 같은 값(테스트 대조) — 워커가 카탈로그를 끌어오지 않게 글자만 둔다
@@ -153,7 +162,7 @@ function summarySheet(wb, p) {
   t.getCell(1).font = { bold: true, size: 16, color: { argb: PAL.title } };
   t.height = 24;
   const live = liveResultText(meta.live);
-  ws.addRow([`기준 ${localStamp(meta.at, meta.offsetMin)} ${p.cond?.offsetLabel || ''} · 대상 ${p.cond?.target || ''} ${meta.rows ?? ''}대 · 고른 항목 ${p.cond?.items ?? (p.cols || []).length}개${live ? ` · 실시간 보강 ${live}` : ''} · 이 시트는 고른 항목과 상관없이 인벤토리로 셉니다`])
+  ws.addRow([`기준 ${localStamp(meta.at, meta.offsetMin)} ${p.cond?.offsetLabel || ''} · 대상 ${p.cond?.target || ''} ${meta.rows ?? ''}대 · 고른 항목 ${p.cond?.items ?? (p.cols || []).length}개${live ? ` · 실시간 보강 ${live}` : ''} · 이 시트는 고른 항목과 상관없이 인벤토리로 셉니다${invTail(meta)}`])
     .getCell(1).font = { color: { argb: PAL.muted } };
   ws.addRow([]);
   if (!S) { ws.addRow(['요약 숫자를 만들지 못했습니다 — ‘데이터’ 시트를 보세요.']).getCell(1).font = { color: { argb: PAL.muted } }; return ws; }
@@ -264,7 +273,7 @@ async function treeSheet(wb, p) {
   ws.columns = [{ width: nameW }, ...w.map((x) => ({ width: Math.max(10, x) }))];
   const t = ws.addRow([`${meta.vcenterName || meta.vcenterId || ''} — VM 전체 정보 · 폴더 트리`]);
   t.getCell(1).font = { bold: true, size: 13, color: { argb: PAL.title } };
-  ws.addRow([`기준 ${localStamp(meta.at, meta.offsetMin)} ${p.cond?.offsetLabel || ''} · ${p.cond?.target || ''} ${meta.rows ?? n}대 · 왼쪽 위 1~${Math.min(OUTLINE_MAX, Math.max(2, ...flat.map((e) => (e.kind === 'vm' ? e.depth : e.node.depth) + 1)))} 단추로 단계별 접기 · 폴더 행 왼쪽 −/+ 로 그 폴더만 접기 · 폴더 행 숫자는 하위 VM 합계${idxAll.length > idx.length ? ` · 열이 많아 앞 ${idx.length}개만(전체 ${idxAll.length}개는 ‘데이터’ 시트)` : ''}`])
+  ws.addRow([`기준 ${localStamp(meta.at, meta.offsetMin)} ${p.cond?.offsetLabel || ''} · ${p.cond?.target || ''} ${meta.rows ?? n}대${invTail(meta)} · 왼쪽 위 1~${Math.min(OUTLINE_MAX, Math.max(2, ...flat.map((e) => (e.kind === 'vm' ? e.depth : e.node.depth) + 1)))} 단추로 단계별 접기 · 폴더 행 왼쪽 −/+ 로 그 폴더만 접기 · 폴더 행 숫자는 하위 VM 합계${idxAll.length > idx.length ? ` · 열이 많아 앞 ${idx.length}개만(전체 ${idxAll.length}개는 ‘데이터’ 시트)` : ''}`])
     .getCell(1).font = { color: { argb: PAL.muted } };
   styleHeadRow(ws.addRow(head), { height: 32 });
   const kinds = idx.map((i) => kindOf(cols[i].key));
@@ -348,6 +357,7 @@ function guideSheet(wb, p) {
     ['대상', `${p.cond?.target || ''} ${p.meta.rows}대`.trim()],
     ['만든 시각', `${localStamp(p.meta.at, p.meta.offsetMin)} ${p.cond?.offsetLabel || ''}`.trim()],
     ['실시간 보강', liveResultText(p.meta.live)],
+    ...(invNotCurrentText(p.meta) ? [['인벤토리', invNotCurrentText(p.meta)]] : []),
     ['고른 항목', `${p.cond?.items ?? cols.length}개 · ${cols.length}열${p.cond?.prefName ? ` · 저장값 ‘${p.cond.prefName}’` : ''}`],
   ];
   for (const [k, v] of kv) { const r = g.addRow([k, v]); r.getCell(1).font = { color: { argb: PAL.muted } }; }

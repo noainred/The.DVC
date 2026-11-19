@@ -11,6 +11,7 @@
  *   포탈 시각 오프셋 env 가 달라도 깨지지 않게.
  */
 import { test, after } from 'node:test';
+import { decodeSubject } from './_mailDecode.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -29,8 +30,7 @@ const readState = () => { try { return JSON.parse(fs.readFileSync(path.join(TMP,
 const listen = (srv) => new Promise((r) => srv.listen(0, '127.0.0.1', () => r(srv.address().port)));
 
 function decodeMail(raw) {
-  const m = /^Subject: (.*)$/mi.exec(raw);
-  const subject = m ? m[1].replace(/=\?UTF-8\?B\?([^?]*)\?=/gi, (_x, b) => Buffer.from(b, 'base64').toString('utf8')) : '';
+  const subject = decodeSubject(raw);   // v3.10.4: 접힌 긴 제목까지(test/_mailDecode.js)
   const out = []; let mode = 'hdr'; let buf = '';
   for (const line of raw.split('\n')) {
     if (/^Content-Transfer-Encoding:\s*base64/i.test(line)) { mode = 'wait'; continue; }

@@ -21,10 +21,73 @@ const applyPattern = (pat, n, pad) => {
  *   perVm: optional [{ name, hostname, ip }] (overrides pattern expansion)
  * }
  */
+/*
+ * 74회차 F1: 펼치기 전 입력 상한 — 상한이 없어 작은 본문 하나가 서버를 멈추거나 죽였다(실측):
+ *   pad 1,000,000 × 500대 = 이름 10억 글자 · 15.7초 블로킹 / 이름 패턴 900KB × 500대 = 힙 4GB 초과로 프로세스 종료 /
+ *   추가 NIC 20,000개 × 500대 = 1.3초 + 미리보기 응답 수백 MB. `/api/provision/preview` 는 화면이 입력할 때마다 부른다
+ *   (자릿수 칸에 큰 수를 치는 실수만으로 포탈 전체가 멈춘다). 넘으면 펼치지 않고 사유를 돌려준다(잘라서 통과시키지 않는다).
+ *   VM 하나의 가상 NIC 는 vSphere 구성 최대치가 10개라 추가 NIC 는 9개까지다.
+ */
+export const PAD_MAX = 32;
+export const PATTERN_MAX = 255;
+export const EXTRA_NICS_MAX = 9;
+const START_MAX = 1e9;
+
+/** 펼치기 전 상한 검사 — 사유 목록(비면 통과). */
+function inputLimitErrors(spec, guest) {
+  const errs = [];
+  const pad = Number(spec.pad);
+  if (Number.isFinite(pad) && Math.round(pad) > PAD_MAX) errs.push(`자릿수(pad)는 ${PAD_MAX} 이하여야 합니다 (요청: ${Math.round(pad)}).`);
+  for (const [label, v] of [['이름 패턴', spec.namePattern], ['Hostname 패턴', guest.hostnamePattern]]) {
+    if (v != null && String(v).length > PATTERN_MAX) errs.push(`${label}은 ${PATTERN_MAX}자 이하여야 합니다 (요청: ${String(v).length}자).`);
+  }
+  if (Array.isArray(guest.extraNics) && guest.extraNics.length > EXTRA_NICS_MAX) {
+    errs.push(`추가 NIC 는 ${EXTRA_NICS_MAX}개까지입니다(VM 하나의 가상 NIC 최대 10개 — 요청: ${guest.extraNics.length}개).`);
+  } else if (Array.isArray(guest.extraNics)) {
+    // 객체가 아닌 원소(null 등)는 e.ipMode 에서 TypeError → 미리보기 500 이었다 — 사유로 돌려준다.
+    const bad = guest.extraNics.findIndex((e) => !e || typeof e !== 'object' || Array.isArray(e));
+    if (bad >= 0) errs.push(`추가 NIC ${bad + 1}번째 항목이 올바르지 않습니다.`);
+  }
+  return errs;
+}
+
+/**
+ * 결정(56~75 남긴 것) 74 ③: 연속 IP 범위(첫 IP ~ 마지막 IP)가 서브넷 마스크 · 게이트웨이로 정해지는 서브넷 밖으로 나가는가.
+ *   서브넷 = (게이트웨이가 있으면 게이트웨이, 없으면 시작 IP) & 마스크. 범위가 연속이라 양 끝만 보면 된다.
+ *   네트워크 · 브로드캐스트 주소도 사유로 본다(게스트에 넣으면 통신하지 않는다).
+ *   마스크가 비었거나 연속 비트가 아니거나 /31 · /32 면 판정하지 않는다(null — 이 검사의 범위 밖).
+ * @returns {string|null} 사유(없으면 null)
+ */
+export function subnetRangeError(label, base, count, { subnetMask = '', gateway = '' } = {}) {
+  if (base == null || !(count > 0)) return null;
+  const m = ipToNum(String(subnetMask || '').trim());
+  if (m == null || m === 0) return null;
+  const inv = (~m) >>> 0;
+  if (((inv + 1) & inv) !== 0) return null;   // 연속 비트가 아닌 마스크(예: 255.0.255.0)
+  if (inv < 3) return null;   // /31 · /32 는 점대점 · 호스트 경로라 게이트웨이가 서브넷 밖일 수 있다 — 판정하지 않는다
+  const gw = gateway ? ipToNum(String(gateway).trim()) : null;
+  const ref = gw ?? base;
+  const net = (ref & m) >>> 0;
+  const bcast = (net | inv) >>> 0;
+  const last = base + count - 1;
+  const where = `${numToIp(net)}/${32 - Math.log2(inv + 1)}${gw != null ? `(게이트웨이 ${numToIp(gw)})` : ''}`;
+  if (((base & m) >>> 0) !== net || ((last & m) >>> 0) !== net) {
+    return `${label} ${numToIp(base)} ~ ${numToIp(last)} 이(가) 서브넷 ${where} 밖으로 나갑니다 — 시작 IP · 개수 · 마스크 · 게이트웨이를 확인하세요.`;
+  }
+  if (base === net || last === bcast) {
+    return `${label} ${numToIp(base)} ~ ${numToIp(last)} 이(가) 서브넷 ${where} 의 ${base === net ? '네트워크' : '브로드캐스트'} 주소를 포함합니다.`;
+  }
+  return null;
+}
+
 export function expandSpec(spec = {}) {
   const errors = [];
   const guest = spec.guest || {};
   const dhcp = guest.ipMode === 'dhcp';
+  {
+    const lim = inputLimitErrors(spec, guest);
+    if (lim.length) return { vms: [], errors: lim };
+  }
 
   // Explicit per-VM list wins.
   if (Array.isArray(spec.perVm) && spec.perVm.length) {
@@ -39,6 +102,9 @@ export function expandSpec(spec = {}) {
       hostname: String(v.hostname || v.name || '').trim(),
       ip: dhcp ? '' : String(v.ip || '').trim(),
     }));
+    // 74회차 F1: 항목 이름도 패턴과 같은 길이 상한(본문 한도만큼의 이름 하나가 작업 · 저장 파일 · 응답에 그대로 실린다).
+    const long = vms.findIndex((v) => v.name.length > PATTERN_MAX || v.hostname.length > PATTERN_MAX);
+    if (long >= 0) return { vms: [], errors: [`VM 목록 ${long + 1}번째 항목의 이름 · Hostname 은 ${PATTERN_MAX}자 이하여야 합니다.`] };
     if (!dhcp) for (const v of vms) if (v.ip && ipToNum(v.ip) == null) errors.push(`잘못된 IP: ${v.ip} (${v.name})`);
     const seen = new Set(); const dup = new Set();
     for (const v of vms) { if (seen.has(v.name)) dup.add(v.name); else seen.add(v.name); }
@@ -60,7 +126,11 @@ export function expandSpec(spec = {}) {
   if (rawCount > 500) errors.push(`한 번에 최대 500대까지 생성할 수 있습니다 (요청: ${rawCount}대).`);
   let count = Math.max(0, Math.min(500, rawCount));
   if (useList && count < 1) count = Math.min(500, ipList.length);
-  const start = Math.round(Number(spec.startIndex) || 1);
+  // 74회차 F3: 시작 번호 0 을 1 로 바꾸지 않는다(예전 `Number(x) || 1` — 0 을 넣어도 1 부터 만들었다). 비었거나 숫자가 아니면 기본 1,
+  //   음수 · 너무 큰 값은 사유를 돌려준다(음수는 'web-0-3' 같은 이름이 됐다).
+  const startRaw = spec.startIndex == null || spec.startIndex === '' ? NaN : Number(spec.startIndex);
+  const start = Number.isFinite(startRaw) ? Math.round(startRaw) : 1;
+  if (start < 0 || start > START_MAX) errors.push(`시작 번호는 0 이상 ${START_MAX} 이하여야 합니다 (요청: ${start}).`);
   const pad = Math.max(0, Math.round(Number(spec.pad) || 0));
   if (!spec.namePattern) errors.push('이름 패턴이 필요합니다 (예: web-{n}).');
   if (count < 1) errors.push('생성 개수는 1 이상이어야 합니다.');
@@ -70,10 +140,15 @@ export function expandSpec(spec = {}) {
     if (ipList.length < count) errors.push(`IP가 부족합니다 — VM ${count}대에 IP ${ipList.length}개. (한 줄에 하나씩 입력)`);
   }
 
+  // 74회차 F2: 연속 IP 가 255.255.255.255 를 넘으면 0.0.0.0 으로 돌아갔다(numToIp 는 2^32 로 나머지) — 오류 없이 엉뚱한 IP 를 넣었다.
+  const IP_LAST = 0xFFFFFFFF;
+  const overflow = (base) => base != null && count > 0 && base + count - 1 > IP_LAST;
   let ipBase = null;
   if (!dhcp && !useList && guest.ipStart) {
     ipBase = ipToNum(guest.ipStart);
     if (ipBase == null) errors.push(`잘못된 시작 IP: ${guest.ipStart}`);
+    else if (overflow(ipBase)) errors.push(`시작 IP ${guest.ipStart} 에서 ${count}대를 연속 배정하면 255.255.255.255 를 넘습니다.`);
+    else { const e = subnetRangeError('연속 IP', ipBase, count, guest); if (e) errors.push(e); }   // 74 ③
   }
 
   // Additional NICs (NIC2, NIC3 …) applied IN ORDER (vSphere maps nicSettingMap
@@ -81,7 +156,12 @@ export function expandSpec(spec = {}) {
   const extraNics = (Array.isArray(guest.extraNics) ? guest.extraNics : []).map((e, idx) => {
     const edhcp = e.ipMode === 'dhcp';
     let base = null;
-    if (!edhcp && e.ipStart) { base = ipToNum(e.ipStart); if (base == null) errors.push(`NIC${idx + 2} 잘못된 시작 IP: ${e.ipStart}`); }
+    if (!edhcp && e.ipStart) {
+      base = ipToNum(e.ipStart);
+      if (base == null) errors.push(`NIC${idx + 2} 잘못된 시작 IP: ${e.ipStart}`);
+      else if (overflow(base)) errors.push(`NIC${idx + 2} 시작 IP ${e.ipStart} 에서 ${count}대를 연속 배정하면 255.255.255.255 를 넘습니다.`);
+      else { const se = subnetRangeError(`NIC${idx + 2} 연속 IP`, base, count, e); if (se) errors.push(se); }   // 74 ③
+    }
     return { edhcp, base, subnetMask: e.subnetMask || '', gateway: e.gateway || '', mac: String(e.mac || '').trim() };
   });
 

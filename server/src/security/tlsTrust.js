@@ -162,7 +162,10 @@ export function loadCaBundle({ force = false } = {}) {
   }
   let text;
   try { text = fs.readFileSync(file, 'utf8'); } catch (e) {
-    _bundle = { key, certs: [], info: { present: true, file, error: `읽지 못했습니다(${String(e?.code || e?.message || e).slice(0, 80)})` } };
+    // 110회차(재현): 읽기 오류를 **stat 열쇠로 기억하지 않는다** — 그 열쇠(mtime · size · inode)는 권한을 고쳐도(chmod 는 mtime 을 바꾸지 않는다) · 일시 오류(EIO)가
+    //   지나가도 그대로라, 번들이 다시 읽히는데도 재시작 전까지 '읽지 못했습니다' 로 남아 사설 CA 로 서명한 장비가 계속 거부됐다. 오류 전용 열쇠로 두면 다음 확인(1초 뒤)이 다시 읽는다.
+    const code = String(e?.code || e?.message || e).slice(0, 80);
+    _bundle = { key: `err-read|${code}`, certs: [], info: { present: true, file, error: `읽지 못했습니다(${code})` } };
     return _bundle;
   }
   const p = parseBundle(text);
@@ -348,7 +351,8 @@ const CTX_OR_VERIFY_KEYS = new Set([...CTX_KEYS, 'ca', 'rejectUnauthorized', 'ti
  * @param {object} [o.tls]       tls.connect 옵션(lookup·minVersion·ciphers·secureOptions·timeout …). rejectUnauthorized·ca 는 무시한다.
  * @param {string} [o.strictHint] 엄격 모드 거부 문구의 조치(env 가 아닌 화면 설정으로 엄격을 켜는 수집기 — CVP)
  */
-export function deviceTlsConnect({ subsystem, envKey = '', envRaw, mode, tls: tlsOpts = {}, label, strictHint } = {}) {
+export function deviceTlsConnect({ subsystem, envKey = '', envRaw, mode, tls: tlsOpts = {}, label, strictHint, resume = true } = {}) {
+  // v3.26: resume:false — TLS 세션을 이어 쓰지 않는다(매번 전체 핸드셰이크). WinRM NTLM 채널 바인딩은 연결마다 서버 인증서가 필요한데 이어 쓴 세션은 인증서를 주지 않는다(실측).
   const info = tlsModeInfo(envRaw);
   const m = TLS_VERIFY_MODES.includes(mode) ? mode : info.mode;
   const sub = registerSubsystem(subsystem, { mode: m, envKey, envRaw: envKey ? info.raw : null, unknownEnv: envKey ? info.unknown : false, label, strictHint });
@@ -360,7 +364,7 @@ export function deviceTlsConnect({ subsystem, envKey = '', envRaw, mode, tls: tl
   if (m === 'insecure') {
     // 명시적 예외 — 예전 동작 그대로(어떤 인증서든). 상태가 '예외 사용 중' 으로 말한다.
     console.warn(`[tlsTrust] ⚠ ${sub.label}: ${envKey || '설정'} 으로 인증서 검증 예외를 쓰고 있습니다 — 이 경로의 자격증명은 상대 확인 없이 전송됩니다.`);
-    const raw = buildConnector({ ...tlsOpts, rejectUnauthorized: false, ...(timeout ? { timeout } : {}) });
+    const raw = buildConnector({ ...tlsOpts, rejectUnauthorized: false, ...(resume ? {} : { maxCachedSessions: 0 }), ...(timeout ? { timeout } : {}) });
     return function connect(opts, cb) {
       if (opts?.protocol === 'https:') sub.counts.insecure++; else sub.counts.plain++;
       return raw(opts, cb);
@@ -370,6 +374,7 @@ export function deviceTlsConnect({ subsystem, envKey = '', envRaw, mode, tls: tl
   const plain = buildConnector({ ...base, ...(timeout ? { timeout } : {}) });
   const sessions = new Map(); // `${idName}|${port}` → { session, via, fingerprint, meta, at, bundleKey }
   const remember = (key, session, v, bundleKey) => {
+    if (!resume) return;   // 이어 쓰지 않는 연결(WinRM)의 세션은 기억하지 않는다(같은 주소의 다른 기능이 꺼내 쓰지 않게)
     if (!session) return;
     if (sessions.size >= SESSION_MAX && !sessions.has(key)) sessions.delete(sessions.keys().next().value);
     sessions.set(key, { session, via: v.via, fingerprint: v.fingerprint, meta: v.meta, at: Date.now(), bundleKey });
@@ -383,7 +388,7 @@ export function deviceTlsConnect({ subsystem, envKey = '', envRaw, mode, tls: tl
     const idName = sni || hostname;
     const bundle = loadCaBundle();
     const key = `${idName}|${port}`;
-    let cached = sessions.get(key) || null;
+    let cached = sessions.get(key) || null;   // 세션 목록은 이 연결 함수(하위 시스템) 안에만 있다 — resume:false 면 아무것도 기억하지 않아 비어 있다
     if (cached && (cached.bundleKey !== bundle.key || Date.now() - cached.at > SESSION_TTL_MS)) { sessions.delete(key); cached = null; }
     const connector = buildConnector({
       ...base,

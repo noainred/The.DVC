@@ -2,7 +2,7 @@
  * v2.421 — SAN 스위치 연결 테스트 진단: 실패 분류·추적 로그·사전 점검·비동기 실행 등록부·엣지 대행·
  * SSH 추적(ssh -vvv 상당)·구형 알고리즘 폴백.
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -11,7 +11,14 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import ssh2 from 'ssh2';
 
-process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'sansw2421-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+process.env.CONFIG_DIR = tmpDir('sansw2421-');
 // 2026-10-09 검토 S-01(그룹 H): 새 설치(빈 CONFIG_DIR)의 SSH 호스트키 정책은 '승인된 키만'(enforce)이다. 이 파일은 호스트키가 주제가
 // 아니라 관찰 모드로 둔다 — 서버마다 새 키를 만들면 포트가 재사용될 때 '키가 바뀜' 으로 거부되므로 파일당 키 하나를 같이 쓴다.
 process.env.SSH_HOSTKEY_POLICY = 'observe';

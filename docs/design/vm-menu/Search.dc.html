@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Virtual Machine 메뉴 — 바로가기에서 글자로 법인 찾기</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd;text-decoration:none}a:hover{color:#bfdbfe}
+.muted{color:#8b9bb4}
+.app{display:flex;min-height:760px}
+.side{flex:0 0 236px;background:#0f1626;border-right:1px solid #1f2a40;padding:14px 10px;display:flex;flex-direction:column;gap:4px;box-sizing:border-box}
+.brand{display:flex;align-items:center;gap:10px;padding:4px 8px 14px;font-weight:800;font-size:15px}
+.brand .logo{width:26px;height:26px;border-radius:7px;background:#3b82f6;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:14px}
+.brand .ver{font-family:"JetBrains Mono",monospace;font-size:11px;font-weight:700;color:#67e8f9;border:1px solid rgba(34,211,238,.45);border-radius:999px;padding:1px 8px}
+.mi{display:flex;align-items:center;gap:10px;min-height:36px;padding:0 10px;border-radius:8px;color:#aebbd0;font-weight:600;font-size:13.5px}
+.mi .n{margin-left:auto;font-family:"JetBrains Mono",monospace;font-size:11px;color:#8b9bb4}
+.mi.grp{background:rgba(34,211,238,.10);color:#e6edf6;box-shadow:inset 3px 0 0 #22d3ee}
+.sub{display:flex;align-items:center;gap:10px;min-height:34px;padding:0 10px 0 30px;border-radius:8px;color:#aebbd0;font-size:13px}
+.sub i{width:5px;height:5px;border-radius:50%;background:#5d6b85;flex:none}
+.sub.on{background:rgba(34,211,238,.12);color:#fff;font-weight:700}
+.sub.on i{background:#22d3ee}
+.page{flex:1;min-width:0;padding:22px 24px 28px;display:flex;flex-direction:column;gap:14px;box-sizing:border-box}
+.scope{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.scope select,.scope input{height:34px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit;padding:0 10px}
+.scope input{flex:0 1 220px;min-width:0}
+.scope span{font-size:12px;color:#8b9bb4}
+.head{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px}
+.head h1{margin:0;font-size:20px;font-weight:800}
+.head .snap{margin-left:auto;font-size:12px;color:#8b9bb4;font-family:"JetBrains Mono",monospace;white-space:nowrap}
+.tabs{display:grid;grid-template-columns:repeat(3, minmax(0, 1fr));gap:12px}
+.tab{display:flex;flex-direction:column;gap:7px;padding:13px 16px 12px;border-radius:12px;background:#141b2d;border:1px solid #243049;color:#e6edf6;min-width:0}
+.tab.on{border-color:#3b82f6;background:#1a2236;box-shadow:inset 0 -3px 0 #3b82f6}
+.tab .lb{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:700;color:#8b9bb4}
+.tab.on .lb{color:#93c5fd}
+.tab .lb .sb{font-weight:500}
+.tab .bd{margin-left:auto;font-family:"JetBrains Mono",monospace;font-size:11px;font-weight:800;border-radius:999px;padding:1px 7px;white-space:nowrap}
+.bd.warn{background:rgba(245,158,11,.16);color:#fcd34d}.bd.crit{background:rgba(239,68,68,.16);color:#fca5a5}
+.tab .val{font-family:"JetBrains Mono",monospace;font-size:30px;font-weight:800;line-height:1}
+.tab .parts{display:flex;flex-wrap:wrap;gap:4px 10px;font-size:12px;color:#8b9bb4}
+.tab .parts b{color:#e6edf6;font-weight:600}
+.tab .parts b.g{color:#86efac}.tab .parts b.r{color:#fca5a5}
+.chips{display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:#111a2e;border:1px solid #243049;border-radius:12px;padding:10px 12px}
+.chips .ql{color:#8b9bb4;font-size:12px;white-space:nowrap}
+.chips .find{height:32px;width:170px;box-sizing:border-box;border-radius:999px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit;font-size:12.5px;padding:0 12px}
+.chips .find.on{border-color:#3b82f6;box-shadow:0 0 0 2px rgba(59,130,246,.25)}
+.chip{display:inline-flex;align-items:center;gap:6px;min-height:32px;background:rgba(148,163,184,.08);border:1px solid #243049;color:#e6edf6;border-radius:999px;padding:0 13px;font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+.chip i{width:8px;height:8px;border-radius:50%;background:#f59e0b;flex:none}
+.chip b{font-family:"JetBrains Mono",monospace;font-size:11px;color:#fcd34d}
+.chip mark{background:rgba(59,130,246,.35);color:#fff;border-radius:3px;padding:0 1px}
+.chips .lg{font-size:12px;color:#8b9bb4}
+.chips .fold{margin-left:auto;min-height:28px;border:0;background:transparent;color:#aebbd0;font:inherit;font-size:12px;cursor:pointer}
+.grid{display:grid;grid-template-columns:repeat(3, minmax(0, 1fr));gap:16px}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;padding:16px 18px;display:flex;flex-direction:column;gap:12px;min-width:0;color:#e6edf6}
+.ch{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
+.nm{font-weight:700;font-size:15px}
+.loc{font-size:12px;color:#8b9bb4;margin-top:3px}
+.st{display:inline-flex;align-items:center;height:20px;padding:0 9px;border-radius:999px;font-size:11px;font-weight:700;background:rgba(34,197,94,.14);color:#86efac;white-space:nowrap}
+.cnt{display:flex;flex-wrap:wrap;align-items:flex-end;gap:6px 22px}
+.cnt div{display:flex;flex-direction:column;gap:1px}
+.cnt b{font-size:18px;font-weight:800;line-height:1.1}
+.cnt span{font-size:11.5px;color:#8b9bb4}
+.cnt .al b{color:#f87171}
+.cnt .bk{border:1px solid rgba(34,197,94,.5);border-radius:6px;padding:4px 9px;background:rgba(34,197,94,.06)}
+.cnt .bk b{color:#4ade80}
+.bar{display:flex;flex-direction:column;gap:7px}
+.bar .bl{display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#8b9bb4}
+.bar .bl b{color:#e6edf6;font-weight:700}
+.bar .tr{height:6px;border-radius:3px;background:rgba(148,163,184,.15);overflow:hidden}
+.bar .tr i{display:block;height:100%;border-radius:3px;background:#22c55e}
+.bar .tr i.a{background:#f59e0b}
+.ft{display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#8b9bb4;border-top:1px solid #1f2a40;padding-top:10px}
+.hint{align-self:start;border:1px dashed #33425f;border-radius:12px;padding:14px 16px;font-size:12.5px;line-height:1.6;color:#aebbd0}
+.hint b{color:#e6edf6}
+</style>
+</helmet>
+
+<div class="app">
+  <nav class="side" aria-label="메뉴">
+    <div class="brand"><span class="logo">V</span>The Davinci<span class="ver">v3.18.13</span></div>
+    <a class="mi" href="#">Overview</a>
+    <a class="mi" href="#">Summary</a>
+    <a class="mi" href="#">서비스 인벤토리</a>
+    <a class="mi grp" href="#">서버<span class="n">5</span></a>
+    <a class="sub on" href="#" aria-current="page"><i></i>Virtual Machine</a>
+    <a class="sub" href="#"><i></i>Bare Metal Server</a>
+    <a class="sub" href="#"><i></i>Physical Server</a>
+    <a class="sub" href="#"><i></i>베어메탈 사용률</a>
+    <a class="sub" href="#"><i></i>통합 서버 인벤토리</a>
+    <a class="mi" href="#">스토리지<span class="n">8</span></a>
+    <a class="mi" href="#">네트워크<span class="n">6</span></a>
+  </nav>
+
+  <main class="page">
+    <div class="scope">
+      <select aria-label="리전"><option>전체 리전</option></select>
+      <select aria-label="vCenter"><option>전체 vCenter</option></select>
+      <input type="search" aria-label="검색" placeholder="vCenter · 호스트 · VM 이름 · IP">
+      <span>범위 · 검색은 vCenter · 호스트 · VM 탭에 함께 적용됩니다</span>
+    </div>
+
+    <header class="head">
+      <h1>Virtual Machine</h1>
+      <span class="snap">스냅샷 오전 10:35:02</span>
+    </header>
+
+    <nav class="tabs" aria-label="Virtual Machine 보기">
+      <a class="tab on" href="#" aria-current="true">
+        <span class="lb">vCenter<span class="sb">· 법인</span></span>
+        <span class="val">11</span>
+        <span class="parts"><span><b class="g">연결 11</b></span><span><b>불가 0</b></span><span><b>REST 폴백 0</b></span><span><b>엣지 위임 0</b></span><span><b class="r">알람 42</b></span></span>
+      </a>
+      <a class="tab" href="#">
+        <span class="lb">Virtual Machine<span class="sb">· VM</span><span class="bd crit">조치 필요 473</span></span>
+        <span class="val">2,242</span>
+        <span class="parts"><span><b class="g">구동 1,966</b></span><span><b>정지 276</b></span><span><b>사용률 미수집 0</b></span><span><b>템플릿 138</b></span></span>
+      </a>
+      <a class="tab" href="#">
+        <span class="lb">Hypervisor<span class="sb">· ESXi 호스트</span><span class="bd warn">확인 대상 19</span></span>
+        <span class="val">186</span>
+        <span class="parts"><span><b>연결 186</b></span><span><b>점검 0</b></span><span><b>끊김 0</b></span><span><b>미수집 0</b></span><span><b>클러스터 25</b></span></span>
+      </a>
+    </nav>
+
+    <div class="chips" aria-label="바로가기 — 법인 찾기와 고르기">
+      <span class="ql">바로가기</span>
+      <input class="find on" type="search" aria-label="법인 찾기" value="us">
+      <button class="chip" type="button" aria-pressed="false"><i></i>vc-<mark>us</mark>-east <b>5</b></button>
+      <button class="chip" type="button" aria-pressed="false"><i></i>vc-<mark>us</mark>-west <b>4</b></button>
+      <span class="lg">‘us’ 가 든 법인 2곳 · 11곳 중 · 지우면 전체가 다시 보입니다</span>
+      <button class="fold" type="button" aria-expanded="true">접기 ▴</button>
+    </div>
+
+    <div class="grid">
+      <a class="card" href="#">
+        <div class="ch"><div><div class="nm">vcenter-us-east-01</div><div class="loc">Ashburn, USA · 북미</div></div><span class="st">Connected</span></div>
+        <div class="cnt"><div><b>24</b><span>호스트 →</span></div><div><b>240</b><span>VM (209 on) →</span></div><div class="al"><b>5</b><span>알람</span></div><div class="bk"><b>156/0</b><span>veeam/bareos</span></div></div>
+        <div class="bar"><div class="bl"><span>CPU</span><b>59% · 1279.2/2167.2 GHz</b></div><div class="tr"><i style="width:59%"></i></div></div>
+        <div class="bar"><div class="bl"><span>메모리</span><b>62% · 8.4/13.6 TB</b></div><div class="tr"><i style="width:62%"></i></div></div>
+        <div class="bar"><div class="bl"><span>스토리지</span><b>84% · 123.7/148 TB</b></div><div class="tr"><i class="a" style="width:84%"></i></div></div>
+        <div class="ft"><span>v8.0.2 · build 22617221</span><span>vc-us-east →</span></div>
+      </a>
+      <a class="card" href="#">
+        <div class="ch"><div><div class="nm">vcenter-us-west-01</div><div class="loc">San Jose, USA · 북미</div></div><span class="st">Connected</span></div>
+        <div class="cnt"><div><b>18</b><span>호스트 →</span></div><div><b>144</b><span>VM (125 on) →</span></div><div class="al"><b>4</b><span>알람</span></div><div class="bk"><b>91/0</b><span>veeam/bareos</span></div></div>
+        <div class="bar"><div class="bl"><span>CPU</span><b>62% · 1015.8/1632 GHz</b></div><div class="tr"><i style="width:62%"></i></div></div>
+        <div class="bar"><div class="bl"><span>메모리</span><b>59% · 6.6/11.3 TB</b></div><div class="tr"><i style="width:59%"></i></div></div>
+        <div class="bar"><div class="bl"><span>스토리지</span><b>85% · 98.4/116 TB</b></div><div class="tr"><i class="a" style="width:85%"></i></div></div>
+        <div class="ft"><span>v8.0.2 · build 22617221</span><span>vc-us-west →</span></div>
+      </a>
+      <div class="hint">
+        <b>글자를 넣으면 그 글자가 든 법인이 모두 보입니다.</b><br>
+        예: ‘AAA’ · ‘AAB’ 가 있을 때 ‘AA’ 를 넣으면 둘 다. 대문자 · 소문자를 가리지 않고, 이름 중간에 있어도 찾습니다.<br>
+        칩과 카드가 함께 좁혀지고, 위 숫자 3장은 그대로입니다(찾기는 범위를 바꾸지 않습니다).<br>
+        법인을 켜 둔 상태라면 칩만 좁혀져 더 골라 넣을 수 있고, 카드는 켠 법인 그대로입니다.
+      </div>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":760}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

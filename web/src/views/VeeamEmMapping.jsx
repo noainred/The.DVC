@@ -10,6 +10,7 @@ import { sendJson } from '../api.js';
 import { STable } from '../components/STable.jsx';
 import Select from '../components/Select.jsx';
 import { brMatchText, vcMatchText, reflectText, mappingSummary, TONE, brRegisterDraft, brRegisterIssue, serverCountWarnings } from './tools/backupEmText.js';
+import { unreadableNote } from './vmListExportText.js';   // 113회차 메인: 읽기 오류 ≠ 손상 — 못 읽음 안내는 한 벌
 
 const rowKey = (r) => `${r.emId}|${String(r.name).toLowerCase()}`;
 
@@ -74,7 +75,7 @@ export default function VeeamEmMapping({ mapping, onSaved }) {
         짝지은 B&R 직접 수집이 정상이면 그쪽이 우선이고, 읽기 실패·첫 수집 대기일 때만 EM 기록으로 채웁니다. EM 기록에는 진행 중·진행률이 없습니다.
       </div>
       {serverCountWarnings(mapping?.counts).map((t) => <div key={t} className="banner warn">{t}</div>)}
-      {mapping?.unreadable && <div className="banner warn">매핑 파일을 읽지 못했습니다 — 저장하지 않습니다(손상 사본은 설정 폴더에 남았습니다).</div>}
+      {mapping?.unreadable && <div className="banner warn">{unreadableNote(mapping, '매핑 파일을 읽지 못했습니다 — 저장하지 않습니다')}</div>}
       {msg && <div className={`banner ${msg.ok ? 'info' : 'warn'}`}>{msg.text}</div>}
       {!rows.length ? <div className="muted" style={{ fontSize: 13 }}>아직 EM 수집 결과가 없습니다 — EM 을 등록하고 '지금 수집' 을 누르면 백업 서버 목록이 나옵니다.</div> : (
         <STable minWidth={1000} style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>

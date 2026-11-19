@@ -17,7 +17,7 @@ import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 import * as fosSsh from './collectors/fosSsh.js';
 import * as fosRest from './collectors/fosRest.js';
 import { withDeadline, isSshAuthError } from '../proxy/sshExec.js';
-import { createAuthGuard } from '../util/authGuard.js';
+import { createAuthGuard, authStopView } from '../util/authGuard.js';
 import { credFingerprintParts } from '../util/credFingerprint.js';
 import { classifyFailure, makeTracer } from './testDiag.js';
 import { precheckTarget } from './precheck.js';
@@ -28,7 +28,9 @@ import { setRateCadence, lastRateResult } from './rates.js';   // v2.742 DEV-06:
 import { poolRun as pool } from '../util/pool.js'; // v2.579(ARCH-01): 동시성 풀 단일 소스 — 손으로 쓴 사본 제거(첫 rejection 전파 = 예전과 같은 의미)
 
 const CONCURRENCY = Math.max(1, Math.min(16, Number(process.env.SANSW_CONCURRENCY) || 4));
-const DEVICE_TIMEOUT_MS = Math.max(30_000, Number(process.env.SANSW_DEVICE_TIMEOUT_MS) || 120_000);
+// 58회차 F3(재현): 장비 시한은 fosSsh 의 값 **하나**를 쓴다 — 식을 두 벌 두어 'Infinity' · '-Infinity' 에서 갈렸다(여기는 Infinity → withDeadline 기본 60초 ·
+//   -Infinity → 30초, fosSsh 는 120초로 보고 세션 예산 100초를 잡아 예산 가드보다 시한이 먼저 세션을 끊었다 — 받은 출력 전부 소실).
+const DEVICE_TIMEOUT_MS = fosSsh.DEVICE_TIMEOUT_MS;
 
 /** 주기(ms) — 포트 상태는 스토리지 용량보다 자주 봐야 해 기본 5분. 하한 60초. */
 // v2.599 T2599-02: 상한도 둔다(2^31 초과 → setTimeout 1ms 루프).
@@ -50,6 +52,8 @@ const _inFlight = new Map();
  * 정지 id 는 장비 id — 엣지는 자기 몫 장비·자기 정지 파일을 쓰므로 법인 사이에 충돌하지 않는다.
  */
 export const sanAuthGuard = createAuthGuard({ file: 'sanswitch-auth-stops.json' });
+/** v2.935(C-② 반증 L-11): 이 장비를 지금 수집 중인가 — 플로우 작업이 같은 스위치에 세션을 겹치지 않게 기다리는 데 쓴다. */
+export const isDeviceCollecting = (id) => _inFlight.has(String(id));
 
 /** 오류가 스위치 **자격증명 거부**인가(출처: ssh2 의 level·정식 문구, REST 로그인의 '인증 실패(401)'). */
 export function isSanAuthError(err) {
@@ -57,7 +61,7 @@ export function isSanAuthError(err) {
   return isSshAuthError(err) || /인증 실패\(401\)/.test(String(err.message || ''));
 }
 
-const stopView = (rec) => (rec ? { since: rec.since, at: rec.at, attempts: rec.attempts, reason: rec.reason } : null);
+const stopView = authStopView;   // 127회차: 사본 대신 공용(못 읽음 표지 unread 를 떨구지 않는다)
 
 /** 정지 사실을 스냅샷 `extra` 에 싣는다(평문이 아닌 자격증명 지문 포함 — 엣지 위임 장비의 배포 대조용). */
 function withAuthStopExtra(snap, full, rec) {

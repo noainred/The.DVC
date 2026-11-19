@@ -15,6 +15,7 @@ import {
   issueTone, ISSUE_TONE_LABEL, decBytesText, reportSizeText, elapsedKo, durKo, pctText, volumeNames, clockOf,
   classifyLogLine, filterLogLines, splitHit, parseJobDetail, jobTimeline, LOG_WHO_LABEL,
 } from './bareosText.js';
+import { copyText as copyToClipboard } from '../../util/copyText.js';   // v3.10.6: HTTP 포탈에서도 복사(Clipboard API → execCommand 폴백 · 실패는 false)
 
 const BASE = '/tools/bareos-backup';
 const enc = encodeURIComponent;
@@ -163,7 +164,7 @@ function JobReportView({ rep, detail, truncated, vmName, jobid, onRunFull = null
   ];
   const copy = () => {
     const t = reportText(rep, { vmName, jobid });
-    try { navigator.clipboard.writeText(t).then(() => setCopied('복사했습니다.'), () => setCopied('복사하지 못했습니다.')); } catch { setCopied('복사하지 못했습니다.'); }
+    copyToClipboard(t).then((ok) => setCopied(ok ? '복사했습니다.' : '복사하지 못했습니다.'), () => setCopied('복사하지 못했습니다.'));
   };
   return (
     <div style={{ maxHeight: paneH, overflow: 'auto', paddingRight: 2 }}>
@@ -403,7 +404,7 @@ function RawLogView({ rows, lines, paneH = LOG_PANE_H }) {
     return c;
   }, [rows]);
   const copy = () => {
-    try { navigator.clipboard.writeText(lines.join('\n')).then(() => setCopied('복사했습니다.'), () => setCopied('복사하지 못했습니다.')); } catch { setCopied('복사하지 못했습니다.'); }
+    copyToClipboard(lines.join('\n')).then((ok) => setCopied(ok ? '복사했습니다.' : '복사하지 못했습니다.'), () => setCopied('복사하지 못했습니다.'));
   };
   return (
     // 탭 본문 높이(LOG_PANE_H)를 세로로 나눈다 — 도구 줄이 좁은 화면에서 여러 줄로 접혀도 로그 상자가 남은 높이만 채워 창 높이가 탭마다 같다

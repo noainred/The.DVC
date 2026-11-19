@@ -6,7 +6,7 @@ import { listPhysical } from '../../gpu/physicalRegistry.js';
 import { listRegistry as listServers, addServer, testServer, loadRegistry as loadIdracRegistry, isHpeEntry } from '../../idrac/registry.js';
 import { getPollerStatus, pollNow, pollNowManual, idracAuthStops } from '../../idrac/poller.js';
 import { purgeStalePower, measuredPowerBreakdown } from '../../idrac/service.js';
-import { loadPowerSettings, savePowerSettings } from '../../idrac/powerSettings.js';
+import { loadPowerSettings, savePowerSettings, powerSettingsWriteRefusal } from '../../idrac/powerSettings.js';
 import { getInventory as getIdracInventory } from '../../idrac/invCache.js';
 import { idracGpuCounts, gpuModelOf, gpuCountable } from '../../idrac/gpuCount.js'; // v2.683: Overview GPU 카드와 같은 집계
 import { idracServerVcOf, idracCorpIndex } from '../../idrac/corpAttribution.js'; // v2.630 R2630-01: 범위 귀속 한 벌 · v2.909 판정 함수도 이쪽
@@ -22,6 +22,8 @@ import { snapMemo } from '../../util/snapCache.js';
 import { listDatacenters, getDatacenterAssign } from '../../datacenter/store.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { adminOnly, hostVcByTag, hostNameByTag, hostNicsByTag, withMappedVc, remoteServersResolved, analysisServersWithRemote, invForServer, fullScopeOnlyWith } from './shared.js';
+import { scanSiteIndex, withScanDatacenter } from '../../insights/analysisServers.js'; // v2.969: 상태 보드도 Agent 스캔 대역 법인
+import { scopeSig } from '../../util/scopeSig.js';
 // v2.611 AUTHZ2611: 전 법인 등록부·동작은 전체 범위 계정만(v2.607 fleetWideOnly 의 형제 등록부).
 const fleetOnly = fullScopeOnlyWith('iDRAC 등록·연결 테스트·즉시 수집·전력 설정은 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꾸거나 실행할 수 있습니다.');
 
@@ -177,7 +179,24 @@ adminRouter.get('/idrac', adminOnly, async (req, res) => {
     .filter((s) => !seen.has(String(s.id)))
     .map((s) => { remoteInv.set(String(s.id), s.inv || null); return { id: s.id, name: s.name, host: s.host, serviceTag: s.serviceTag || '', model: s.model || s.inv?.system?.model || '', vcenterId: s.vcenterId || '', mappedVcenterId: s.vcenterId || mapTag(s), datacenterId: s.datacenterId || '', type: s.type || 'idrac', vendor: s.vendor === 'hpe' || s.vendor === 'dell' ? s.vendor : '', remote: true, collectorId: s.collectorId, hasInventory: !!s.inv }; });
   // v2.629(AUTHZ2629-03): 범위 계정은 귀속 vCenter 가 허용 집합인 서버만(BMC 주소·계정명·서비스태그 전 법인분 유출 차단).
-  const r = scopeIdracServers(req, local.concat(remote));
+  // v2.969(사용자 요청 '서버 분석에서도 수집한 Agent 이름에 따라 분류'): 상태 보드 · 법인별 서버 정보가 쓰는 이 목록에도 **Agent 로 스캔한 대역 → 그 Agent 의
+  //   법인** 단계(withScanDatacenter — v2.660)를 건다. 예전에는 온도 · 추이 · 검색 · 하드웨어 내보내기(analysisServersWithRemote)만 이 단계를 거쳐, 같은 서버가
+  //   서버 분석의 탭마다 다른 법인(또는 미지정)으로 보였다. 이미 법인이 있거나 vCenter → 법인 할당이 있는 서버는 건드리지 않는다(그 함수 규칙).
+  //   ⚠ 범위 절단(scopeIdracServers)은 vCenter 기준이라 이 값에 영향받지 않는다 — 표시(법인 묶음)만 바뀐다.
+  //   ⚠ 등록부 값인 datacenterId 는 덮지 않고 **scanDatacenterId** 로 따로 싣는다 — datacenterId 는 '교체' 스캔의 지울 범위를 정하는 값이라
+  //     화면이 행을 그대로 저장하는 경로가 생겨도 등록부가 바뀌지 않게. 웹 dcOfServer 가 datacenterId → vCenter 할당 → scanDatacenterId 순으로 읽는다
+  //     (서버 analysisScope.serverInScope 와 같은 결과 — 스캔 단계는 vCenter 할당이 없을 때만 채운다).
+  let withDc = (s) => s;
+  try {
+    const idx = scanSiteIndex(); const asg = getDatacenterAssign();
+    withDc = (s) => {
+      if (!s || s.type === 'ome' || String(s.datacenterId || '').trim()) return s;
+      const r = withScanDatacenter(s, idx, asg);
+      if (r === s) return s;
+      return { ...s, ...(r.datacenterId ? { scanDatacenterId: r.datacenterId } : {}), ...(r.dcSource ? { dcSource: r.dcSource } : {}), ...(r.scanSite ? { scanSite: r.scanSite } : {}) };
+    };
+  } catch { /* 색인을 못 만들면 예전처럼 */ }
+  const r = scopeIdracServers(req, local.map(withDc).concat(remote.map(withDc)));
   // v2.728: ?parts=1 이면 행마다 부품 상태 요약(장애·경고·확인 불가·빈 슬롯 개수 — 판정은 partfault 추출기 그대로, **표시 전용**).
   //   V4·관제 콘솔이 이 경로를 60초마다 폴링하므로 기본은 싣지 않는다(서버 분석 › 법인별 서버 정보 목록만 요청한다).
   //   요약은 인벤토리 수집 시각으로 기억해 목록을 열 때마다 전 서버를 다시 추출하지 않고(serverPartsCell — 실측 1,000대
@@ -207,7 +226,7 @@ adminRouter.get('/idrac', adminOnly, async (req, res) => {
 adminRouter.post('/idrac', adminOnly, fleetOnly, async (req, res) => {
   const result = addServer(req.body || {});
   if (result.ok) pollNow().catch(() => {});
-  res.status(result.ok ? 201 : 400).json(result);
+  res.status(result.ok ? 201 : (result.status || 400)).json(result);   // 결정(78 남긴 것 ①): 등록부 읽기 오류는 409
 });
 
 // NOTE: 파라미터 라우트 PUT/DELETE '/idrac/:id'는 '/idrac/scan-ranges'·'/idrac/power-settings'
@@ -230,6 +249,7 @@ adminRouter.post('/idrac/poll', adminOnly, fleetOnly, async (_req, res) => {
 // 전력 집계 표시 설정 — excludeUnmapped: vCenter 미매핑 측정 전력을 총합/보고/목록에서 제외.
 adminRouter.get('/idrac/power-settings', adminOnly, (_req, res) => res.json({ ok: true, settings: loadPowerSettings() }));
 adminRouter.put('/idrac/power-settings', adminOnly, fleetOnly, async (req, res) => {
+  { const no = powerSettingsWriteRefusal(); if (no) return res.status(409).json(no); }   // 96회차 ⓑ: 설정 파일 읽기 오류 — 기본값 위에 쓰지 않는다
   const settings = savePowerSettings(req.body || {});
   await store.refresh().catch(() => {}); // Overview 총합/보고 즉시 반영
   logAudit({ user: req.user?.username, action: '전력 집계 설정 변경', target: `미매핑 제외=${settings.excludeUnmapped}` });
@@ -265,7 +285,7 @@ adminRouter.get('/idrac/hardware-summary', adminOnly, (req, res) => {
   const merged = scoped.servers;
   const servers = merged.filter((s) => (!dcFilter || dcOf(s) === (dcFilter === '__unmapped__' ? '' : dcFilter)) && (dcFilter !== '__unmapped__' || !dcOf(s)));
   const byModel = new Map(), byCpu = new Map(), byMem = new Map(), byGpu = new Map();
-  let collected = 0, missing = 0, totalGpuCards = 0;
+  let collected = 0, missing = 0, totalGpuCards = 0, gpuUnread = 0;
   const bump = (map, key, by = 1) => { const k = String(key || '').trim(); if (!k) return; map.set(k, (map.get(k) || 0) + by); };
   for (const s of servers) {
     const inv = invForServer(s);
@@ -277,12 +297,14 @@ adminRouter.get('/idrac/hardware-summary', adminOnly, (req, res) => {
     bump(byCpu, cpuLabel);
     const gib = inv.memory?.totalGiB;
     if (gib != null && Number.isFinite(Number(gib))) bump(byMem, `${Math.round(Number(gib))} GiB`);
+    // 47회차 #7: Processors 컬렉션을 못 읽은 서버는 GPU 0장이 아니다(GPU 찾기 · 카드와 같은 판정 — 합계는 최소값)
+    if (inv.collections && inv.collections.gpus === 'failed') { gpuUnread++; continue; }
     for (const g of (inv.gpus || [])) { const m = (g.model || g.name || '').trim(); if (m) { bump(byGpu, m); totalGpuCards++; } }
   }
   const toArr = (map, numericKey = false) => [...map.entries()].map(([key, count]) => ({ key, count }))
     .sort((a, b) => (numericKey ? (parseInt(b.key) - parseInt(a.key)) : 0) || b.count - a.count || NUM_COLLATOR.compare(String(a.key), String(b.key)));
   res.json({
-    ok: true, datacenterId: dcFilter, totalServers: servers.length, collected, missing, totalGpuCards,
+    ok: true, datacenterId: dcFilter, totalServers: servers.length, collected, missing, totalGpuCards, gpuUnread,
     byModel: toArr(byModel), byCpu: toArr(byCpu), byMemory: toArr(byMem, true), byGpu: toArr(byGpu),
     ...scopeFields(scoped),
   });
@@ -590,7 +612,7 @@ adminRouter.get('/idrac/gpu-inventory', adminOnly, (req, res) => {
     totalGpus: counts.gpus,
     models,
     servers: serverList.sort((a, b) => b.gpuCount - a.gpuCount),
-    collectedServers: counts.invRead + counts.invStale, totalServers: counts.count,
+    collectedServers: counts.invRead + counts.invStale - (counts.gpuUnread || 0), totalServers: counts.count, gpuUnread: counts.gpuUnread || 0, gpuUnreadServers: counts.gpuUnreadServers || [],   // 46회차 I1: GPU 목록을 못 읽은 서버는 수집으로 세지 않는다
     inventoryStale: counts.invStale, gpusStale: counts.gpusStale, gpusUnnamed: counts.gpusUnnamed, disabledServers: counts.disabled,
     physicalServers: physCount, physicalGpus: physGpus,
     missing,
@@ -608,7 +630,7 @@ adminRouter.get('/idrac/parts-inventory', adminOnly, async (req, res) => {
     if (cat && !isPartCat(cat)) return res.status(400).json({ ok: false, reason: `알 수 없는 카테고리: ${cat}` });
     // v2.629(AUTHZ2629-03): 범위 계정은 귀속 서버만 — 캐시 키에 범위를 넣는다(없으면 먼저 연 사람의 판본이 나간다).
     const sc = idracScopeOf(req);
-    const key = `parts|${sc ? [...sc.allowed].sort().join(',') : 'all'}|${req.originalUrl}`;
+    const key = `parts|${scopeSig(sc ? sc.allowed : null)}|${req.originalUrl}`;
     const payload = await snapMemo('idrac-parts', key, 15_000, () => {
       const r = scopeIdracServers(req, analysisServersWithRemote(req));
       const out = partBuckets(r.servers, invForServer, { cat, q: String(req.query.q || '') });

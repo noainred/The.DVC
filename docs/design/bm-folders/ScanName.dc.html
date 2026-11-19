@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>IP 스캔 — 호스트 이름을 찾는 방법</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./bmf.css">
+<link rel="stylesheet" href="./bmf2.css">
+<link rel="stylesheet" href="./why.css">
+<link rel="stylesheet" href="./src.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+</style>
+</helmet>
+<div class="root" style="width:1440px;height:450px;padding:18px 20px;gap:12px">
+  <p class="intro" style="max-width:none">IP 스캔은 지금 <b style="color:#e6edf6">역방향 DNS</b> 한 가지로만 호스트 이름을 채운다 — 그 기록이 없는 IP 는 이름이 빈다. 이름을 찾는 방법을 늘리고, 스캔 결과에 <b style="color:#e6edf6">어떻게 찾았는지</b>를 함께 보인다.</p>
+
+  <div style="display:grid;grid-template-columns:1.35fr 1fr;gap:12px;min-height:0">
+    <div class="card" style="display:flex;flex-direction:column;min-width:0">
+      <div class="fh" style="padding:10px 14px 8px"><div class="row"><b>스캔 결과</b><span class="note">KR-HQ 관리망 10.20.31.0/24</span><span class="sp row"><button class="qf" type="button">이름 있음 212</button><button class="qf sel" type="button" aria-pressed="true">이름 없음 31</button></span></div></div>
+      <table class="t">
+        <thead><tr><th style="width:17%">IP</th><th style="width:25%">호스트 이름</th><th style="width:24%">어떻게 찾았나</th><th style="width:18%">열린 포트</th><th style="width:16%">마지막 확인</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">10.20.31.41</td><td><b>kr-ora-rac01</b></td><td><span class="bdg n">역방향 DNS</span></td><td class="mono">22 · 443</td><td class="dim">06:40</td></tr>
+          <tr><td class="mono">10.20.31.42</td><td><b>kr-ora-rac02</b></td><td><span class="bdg c">정방향 DNS</span> <span class="dim">새로</span></td><td class="mono">22</td><td class="dim">06:40</td></tr>
+          <tr><td class="mono">10.20.31.61</td><td><b>kr-db-11</b></td><td><span class="bdg c">SSH 접속 뒤 확인</span> <span class="dim">새로</span></td><td class="mono">22</td><td class="dim">06:40</td></tr>
+          <tr><td class="mono">10.20.31.70</td><td><b>idrac-kr-ora-rac01</b></td><td><span class="bdg c">인증서 이름</span> <span class="dim">새로</span></td><td class="mono">443</td><td class="dim">06:40</td></tr>
+          <tr><td class="mono">10.20.31.88</td><td><span class="nx r1"><span class="nv">—</span><span class="nr"><span class="nd"></span> 어느 방법으로도 못 찾음</span></span></td><td class="dim">—</td><td class="mono">22</td><td class="dim">06:40</td></tr>
+          <tr><td class="mono">10.20.31.93</td><td><span class="kv2"><b>kr-app-05</b><span class="s">역방향 DNS 는 kr-app-old-05</span></span></td><td><span class="bdg c">정방향 DNS</span> <span class="bdg w">이름이 서로 다름</span></td><td class="mono">22 · 8080</td><td class="dim">06:40</td></tr>
+        </tbody>
+      </table>
+      <div class="foot">이름이 방법마다 다르면 둘 다 보이고 하나로 정하지 않습니다 · 이름 없는 IP 는 물리서버 OS 주소 제안에 쓰이지 않습니다</div>
+    </div>
+
+    <div class="card st">
+      <h3>이름을 찾는 방법</h3>
+      <div>
+        <div class="opt"><input class="chk" type="checkbox" checked="checked" disabled="disabled" aria-label="역방향 DNS — 지금 쓰는 방법" style="margin-top:3px"><div><span class="ot">역방향 DNS</span> <span class="bdg n">지금 있음</span><p>IP 로 이름을 묻는다. 그 기록을 등록해 둔 IP 만 이름이 나온다.</p></div></div>
+        <div class="opt"><input class="chk" type="checkbox" checked="checked" aria-label="정방향 DNS" style="margin-top:3px"><div><span class="ot">정방향 DNS</span> <span class="bdg c">새로</span><p>물리서버의 호스트 이름(iDRAC 이 읽은 이름)을 DNS 에 물어 IP 를 받는다. 스캔 대역 안의 IP 만 채택한다. 계정 없이 OS 주소를 찾는 핵심 방법.</p></div></div>
+        <div class="opt"><input class="chk" type="checkbox" aria-label="인증서 이름" style="margin-top:3px"><div><span class="ot">인증서 이름</span> <span class="bdg c">새로</span><p>443 이 열린 IP 의 인증서에 적힌 이름을 읽는다. 로그인하지 않는다. 주로 iDRAC · 웹 서버의 이름이 나온다.</p></div></div>
+        <div class="opt"><input class="chk" type="checkbox" aria-label="SSH 접속 뒤 확인" style="margin-top:3px"><div><span class="ot">SSH 접속 뒤 확인</span> <span class="bdg c">새로</span><p>OS 계정이 <b style="color:#e6edf6">이미 등록된</b> 서버만 접속해 이름을 확인한다. 모르는 IP 에 로그인을 시도하지 않는다(계정 잠금 방지).</p></div></div>
+      </div>
+      <p>찾는 일은 스캔을 맡은 쪽(법인 엣지)이 그 법인 안에서 한다 — 이름과 방법만 중앙에 올린다.</p>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":450}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

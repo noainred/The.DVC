@@ -19,7 +19,7 @@ import { guardCell } from '../util/csv.js';
 import { portalParts } from '../util/dayKey.js';
 import fs from 'node:fs';
 import path from 'node:path';
-import { getLogSettings, logDir, ROTATE_UNITS, ROTATE_LABEL } from './logsettings.js';
+import { getLogSettings, logDir, logDirPath, ROTATE_UNITS, ROTATE_LABEL, logSettingsLoadError, LOG_LIMITS } from './logsettings.js';
 
 const HEADER = ['시각', '경로', '대상', '호스트', '점검명', '유형', '상태', '응답', 'ms', '연속횟수'];
 const BOM = '﻿';
@@ -144,6 +144,9 @@ function schedule() {
  */
 export function appendResult({ ts, target, test, result, changed }) {
   const cfg = getLogSettings();
+  // 28회차 N-3(재현): 보관 설정을 못 읽는 동안은 **기록을 멈춘다** — 기록 위치(dirPath) · 기록 여부(enabled) · 총량 상한을 모르는 채 기본 위치(CONFIG_DIR — 시스템 디스크)에
+  //   총량 상한 없이 쌓였다(꺼 둔 기록도 다시 켜졌다). 점검 · 화면 · 알림은 그대로 돈다(이 함수는 CSV 기록만). 멈춘 수는 stats.pausedUnreadable.
+  if (logSettingsLoadError()) { stats.pausedUnreadable = (stats.pausedUnreadable || 0) + 1; return; }
   if (!cfg.enabled) return;
   if (cfg.mode === 'changes' && !changed) return;
   const line = [
@@ -172,6 +175,10 @@ export function appendResult({ ts, target, test, result, changed }) {
  * mtime(수정시각) 오름차순으로 '진짜 오래된 것부터' 지우고, 현재 열려 있는 파일(curFile)은 제외한다.
  */
 export function pruneOld(dir, cfg = getLogSettings()) {
+  // 26회차 F1 · 27회차 D-4: 보관 설정을 못 읽은 동안은 기본값(90개)이 아니라 설정 상한(파일 3650개)으로만 지운다 — 총량은 설정이 '0 = 무제한' 을
+  //   허용하므로 총량 기준으로는 지우지 않는다(사용자가 둘 수 있었던 어떤 설정보다 많이 지우지 않게).
+  //   ⚠ 28회차 N-3 정정: '파일 수 상한이 디스크를 묶는다' 는 성립하지 않았다(512MB 분할 파일도 개수라 수 TB) — 그래서 손상 중에는 기록 자체를 멈춘다(appendResult).
+  if (logSettingsLoadError()) cfg = { ...cfg, keepFiles: LOG_LIMITS.keepFilesMax, maxTotalMB: 0 };
   try {
     const rd = () => fs.readdirSync(dir).filter((f) => /^results-.*\.csv$/.test(f))
       .map((f) => { let st; try { st = fs.statSync(path.join(dir, f)); } catch { return null; } return { f, size: st.size, mtime: st.mtimeMs, cur: path.join(dir, f) === curFile }; })
@@ -254,20 +261,29 @@ export function closeCsvLogAsync(timeoutMs = 3000) {
 /** 설정 화면용 현황. */
 export function logStatus() {
   const cfg = getLogSettings();
-  const dir = logDir();
   let files = [];
-  try {
+  let filesUnreadable = false;
+  // 62회차(61회차 F2 의 형제 — 재현): 로그 디렉터리를 만들 수 없으면(부모 권한 · 떨어진 마운트 · 경로 중간이 파일) logDir() 이 던져 GET /svcmon/log 가 500 이었고,
+  //   설정 화면 두 곳이 오류 상자만 그려 그 경로를 고칠 화면이 열리지 않았다 — 경로는 보이고 목록은 '못 읽음'.
+  let dir;
+  try { dir = logDir(); } catch { dir = logDirPath(); filesUnreadable = true; }
+  if (!filesUnreadable) try {
     files = fs.readdirSync(dir).filter((f) => /^results-.*\.csv$/.test(f)).sort().reverse()
-      .map((f) => { const st = fs.statSync(path.join(dir, f)); return { name: f, sizeBytes: st.size, modifiedAt: st.mtimeMs }; });
-  } catch { /* 접근 실패 → 빈 목록 */ }
+      // 61회차 F2(재현): 한 파일의 stat 실패(끊긴 링크 · 권한)가 목록 전체를 비워 화면이 '파일 0개 · 0 B' 라고 했다 — 정리(pruneOld) ·
+      //   보유 범위(listLogWindows)처럼 그 파일만 뺀다.
+      .map((f) => { try { const st = fs.statSync(path.join(dir, f)); return { name: f, sizeBytes: st.size, modifiedAt: st.mtimeMs }; } catch { return null; } })
+      .filter(Boolean);
+  } catch (e) { if (e?.code !== 'ENOENT') filesUnreadable = true; }   // 폴더가 아직 없으면(첫 기록 전) 빈 목록 · 그 밖(권한 · 입출력)은 '0개' 가 아니라 못 읽음
   return {
     ...cfg, dir,
     rotateUnits: ROTATE_UNITS,
     rotateLabels: ROTATE_LABEL,
     files: files.slice(0, 100),
-    fileCount: files.length,
-    totalBytes: files.reduce((a, f) => a + f.sizeBytes, 0),
+    fileCount: filesUnreadable ? null : files.length,
+    totalBytes: filesUnreadable ? null : files.reduce((a, f) => a + f.sizeBytes, 0),
+    ...(filesUnreadable ? { filesUnreadable: true } : {}),   // 61회차 F2: 화면이 '파일 0개' 대신 '목록을 읽지 못함'
     stats: logStats(),
+    settingsUnreadable: !!logSettingsLoadError(),   // 26회차 F1: 화면이 저장 버튼을 잠그고 서비스 점검으로 안내한다
   };
 }
 

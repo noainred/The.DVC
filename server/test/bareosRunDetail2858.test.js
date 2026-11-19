@@ -6,13 +6,20 @@
  *  ④ 데모 실행 길이(env BAREOS_DEMO_RUN_MS) — 기본 30초 · 범위 밖 · 숫자 아님은 기본값
  *  ⑤ 진행 현황 응답에 relayLimits(엣지 대행 Director 로그 시한 — 화면이 숫자를 박지 않게)
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'bareos2858-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+process.env.CONFIG_DIR = tmpDir('bareos2858-');
 const { prevSameLevel, levelKey, runningRow } = await import('../src/routes/api/bareosLive.js');
 
 test('① 지난 같은 레벨 실행 — 성공 · 같은 레벨 · 바이트 아는 것 중 가장 새 것', () => {

@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>서버 등록 · 온보딩 — CSV/Excel · 엣지/중앙 수집 경로</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:Inter,"Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#22d3ee}a:hover{color:#67e8f9}
+.card{background:linear-gradient(180deg,#141b2d,#111726);border:1px solid #243049;border-radius:12px;padding:16px 18px;box-shadow:0 4px 24px rgba(0,0,0,.4);min-width:0}
+.dim{color:#8b9bb4}.mono{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:600;border:1px solid #243049;background:#0f1626;color:#8b9bb4;white-space:nowrap}
+.chip.ok{color:#4ade80;border-color:rgba(34,197,94,.35);background:rgba(34,197,94,.1)}
+.chip.warn{color:#fbbf24;border-color:rgba(245,158,11,.35);background:rgba(245,158,11,.1)}
+.chip.bad{color:#f87171;border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.1)}
+.chip.info{color:#67e8f9;border-color:rgba(34,211,238,.3);background:rgba(34,211,238,.08)}
+.chip.pur{color:#c084fc;border-color:rgba(168,85,247,.35);background:rgba(168,85,247,.1)}
+.seg{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden;background:#0f1626}
+.seg button{min-height:34px;padding:0 12px;border:0;background:transparent;color:#8b9bb4;font:inherit;font-weight:600;cursor:pointer;font-size:12px}
+.seg button.on{background:#1a2236;color:#e6edf6;box-shadow:inset 0 -2px 0 #22d3ee}
+.btn{min-height:36px;padding:0 14px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-weight:600;cursor:pointer}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.sel{min-height:34px;padding:0 10px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit;font-size:12.5px}
+.inp{min-height:34px;padding:0 10px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit;font-size:12.5px;box-sizing:border-box}
+table{border-collapse:separate;border-spacing:0;width:100%}
+th{font-size:11.5px;font-weight:600;color:#8b9bb4;text-align:left;padding:6px 8px;border-bottom:1px solid #243049;background:#0f1626;white-space:nowrap;cursor:pointer;vertical-align:bottom}
+td{padding:7px 8px;border-bottom:1px solid #1f2a40;vertical-align:top;font-size:12.5px;line-height:1.5;white-space:nowrap}
+.step{display:flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid #243049;border-radius:10px;background:#0f1626;font-weight:600;font-size:12.5px}
+.step.on{border-color:#22d3ee;color:#e6edf6}.step .n{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:11px;background:#1a2236;color:#8b9bb4;font-size:12px}.step.on .n{background:#22d3ee;color:#0a0e17}
+.drop{border:2px dashed #243049;border-radius:12px;padding:18px;text-align:center;background:#0f1626}
+h2{margin:0;font-size:15px;font-weight:700}
+.ok{color:#4ade80}.warn{color:#fbbf24}.bad{color:#f87171}
+</style>
+</helmet>
+<div style="box-sizing:border-box;max-width:1680px;margin:0 auto;padding:18px 24px 40px;display:flex;flex-direction:column;gap:14px">
+
+  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px">
+    <div style="min-width:0">
+      <div style="font-size:12px;color:#8b9bb4">설정 › 베어메탈 성능 › <b style="color:#e6edf6">서버 등록 · 온보딩</b></div>
+      <h1 style="margin:0;font-size:20px;font-weight:700;letter-spacing:-.01em">서버 등록 — CSV/Excel 일괄 · 공통 계정 · 수집 경로(엣지 / 중앙) 배정 · 검증</h1>
+      <div class="dim" style="font-size:12px;margin-top:4px">새 등록부를 만들지 않는다 — 한 장의 표가 기존 iDRAC 등록부 · OS 계정 등록부(베어메탈 스토리지) · 분류 태그 · 용도/역할 · CVP 매핑에 나눠 들어간다 · 관리자 + 전체 범위(범위 계정은 자기 법인 행만 · 쓰기 범위 밖 403)</div>
+    </div>
+    <div style="flex:1 1 20px"></div>
+    <button class="btn" type="button">템플릿 내려받기 (CSV · XLSX)</button><button class="btn" type="button">현재 등록 내보내기</button>
+  </div>
+
+  <!-- 단계 -->
+  <div style="display:flex;flex-wrap:wrap;gap:8px"><div class="step"><span class="n">1</span>파일 올리기</div><div class="step on"><span class="n">2</span>미리보기 · 검증</div><div class="step"><span class="n">3</span>공통 계정 · 경로 확인</div><div class="step"><span class="n">4</span>연결 시험(표본)</div><div class="step"><span class="n">5</span>적용 · 엣지 배포</div></div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(440px,100%),1fr));gap:14px;align-items:start">
+    <div class="card">
+      <h2 style="margin-bottom:8px">1 · 파일 올리기 — CSV 또는 Excel(.xlsx 첫 시트)</h2>
+      <div class="drop"><div style="font-weight:700">servers-kr-sel.xlsx · 1,012행 · 14열</div><div class="dim" style="font-size:12px;margin-top:4px">머리글은 템플릿 이름 또는 별칭(한/영) 자동 인식 · 인코딩 UTF-8/EUC-KR 감지 · 수식·서식 무시 · 상한 5,000행/파일(설정) · 업로드는 서버에 보관하지 않는다(미리보기용 메모리)</div></div>
+      <div style="overflow-x:auto;margin-top:10px"><table>
+        <thead><tr><th>열</th><th>필수</th><th>뜻 · 규칙</th><th>어디로</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">name</td><td>●</td><td>서버 이름(호스트명 권장) · 중복 금지</td><td>iDRAC · OS 등록부 공통</td></tr>
+          <tr><td class="mono">corp</td><td>●</td><td>법인 코드(= vCenter = 엣지) · 모르면 ‘미귀속’ — 기본 제외</td><td>분류 귀속(assign)</td></tr>
+          <tr><td class="mono">idrac_host</td><td>○</td><td>iDRAC 주소(스킴 없이) · 없으면 OS 만</td><td>iDRAC 등록부</td></tr>
+          <tr><td class="mono">idrac_cred</td><td>○</td><td>공통 계정 이름(아래 3) 또는 ‘개별’(비밀은 파일에 넣지 않는다 — 넣으면 거부)</td><td>iDRAC 등록부(봉인)</td></tr>
+          <tr><td class="mono">service_tag</td><td>○</td><td>Dell 서비스 태그 · 있으면 식별 키</td><td>iDRAC 등록부 · 분류 키</td></tr>
+          <tr><td class="mono">os_host · os_port</td><td>○</td><td>SSH 주소 · 포트(기본 22) · 없으면 iDRAC 만</td><td>OS 계정 등록부</td></tr>
+          <tr><td class="mono">os_cred</td><td>○</td><td>공통 계정 이름 또는 ‘개별’(계정명만)</td><td>OS 계정 등록부(봉인)</td></tr>
+          <tr><td class="mono">os_key</td><td>○</td><td><b>SSH 키 저장소의 키 이름</b>(예 kr-ops-ed25519) · 비면 공통 계정의 기본 키 · 비밀번호 인증이면 ‘password’ · 키 파일 내용은 넣지 않는다(거부)</td><td>OS 등록부 keyRef</td></tr>
+          <tr><td class="mono">collect_via</td><td>●</td><td><b>edge</b>(법인 엣지) / <b>central</b>(중앙 직접) / <b>auto</b>(법인에 엣지 있으면 edge, 없으면 central — 기본)</td><td>등록부 agent 필드</td></tr>
+          <tr><td class="mono">class</td><td>○</td><td>baremetal / virtualization / exclude · 비면 자동 판정</td><td>fleet-tags</td></tr>
+          <tr><td class="mono">purposes · role</td><td>○</td><td>용도(airflow,gpdb,…) · 역할(db/web/cache/file/general) · 비면 자동 감지·‘일반’</td><td>purposes · 역할 프로파일</td></tr>
+          <tr><td class="mono">mounts</td><td>○</td><td>공간 측정 마운트(; 구분) · 비면 전체 마운트</td><td>OS 등록부 mounts</td></tr>
+          <tr><td class="mono">switch · port</td><td>○</td><td>CVP 스위치 · 포트 수동 매핑(NIC=포트; 구분)</td><td>CVP 매핑</td></tr>
+          <tr><td class="mono">enabled · note</td><td>○</td><td>켬/끔 · 메모</td><td>등록부</td></tr>
+        </tbody></table></div>
+    </div>
+
+    <div class="card" style="border-color:rgba(34,211,238,.35)">
+      <h2 style="margin-bottom:8px">2 · 미리보기 · 검증 — 적용 전에 전부 말한다(기존 CSV 가져오기 분석과 같은 규칙)</h2>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px"><span class="chip ok">신규 842</span><span class="chip info">갱신 158 (기존 서버와 이름·태그 일치)</span><span class="chip warn">경고 19</span><span class="chip bad">거부 12</span><span class="chip">변화 없음 0</span></div>
+      <div style="overflow-x:auto"><table>
+        <thead><tr><th>행</th><th>name</th><th>corp</th><th>경로</th><th>판정</th><th>이유</th></tr></thead>
+        <tbody>
+          <tr><td>7</td><td class="mono">bm-kr1-db01</td><td>KR-SEL</td><td><span class="chip ok">edge → KR-SEL</span></td><td><span class="chip info">갱신</span></td><td>os_cred 변경(개별 → 공통 ‘kr-ops’) · 주소 그대로라 비밀 승계 없음</td></tr>
+          <tr><td>23</td><td class="mono">bm-kr1-gp09</td><td>KR-SEL</td><td><span class="chip ok">edge → KR-SEL</span></td><td><span class="chip ok">신규</span></td><td>—</td></tr>
+          <tr><td>41</td><td class="mono">bm-kr1-web12</td><td>KR-SEL</td><td><span class="chip warn">central (요청)</span></td><td><span class="chip warn">경고</span></td><td>법인에 엣지가 있는데 central 요청 — 중앙↔서버 RTT 820ms · 허용하되 표시</td></tr>
+          <tr><td>88</td><td class="mono">bm-kr1-old03</td><td>KR-SEL</td><td class="dim">—</td><td><span class="chip bad">거부</span></td><td>idrac_host 와 os_host 둘 다 비어 있음(수집 경로 없음)</td></tr>
+          <tr><td>120</td><td class="mono">bm-kr1-fs02</td><td>KR-SEL</td><td><span class="chip ok">edge</span></td><td><span class="chip bad">거부</span></td><td>os_cred 열에 비밀번호 원문 — 파일에 비밀 금지(공통 계정 이름을 쓰십시오)</td></tr>
+          <tr><td>233</td><td class="mono">bm-x-9921</td><td class="dim">(빈 값)</td><td><span class="chip warn">central</span></td><td><span class="chip warn">경고</span></td><td>법인 미귀속 — 등록은 되지만 수집 기본 제외(귀속 뒤 포함)</td></tr>
+          <tr><td>519</td><td class="mono">bm-pl1-app03</td><td>PL-WAW</td><td><span class="chip ok">edge → PL-WAW</span></td><td><span class="chip bad">거부</span></td><td>idrac_host 169.254.1.9 — 링크로컬(SSRF 가드)</td></tr>
+          <tr><td>774</td><td class="mono">bm-us1-db05</td><td>US-EAST</td><td><span class="chip ok">edge → US-EAST</span></td><td><span class="chip warn">경고</span></td><td>같은 service_tag 가 11행에도 있음 — 뒤 행 무시</td></tr>
+        </tbody></table></div>
+      <div class="dim" style="font-size:11.5px;margin-top:8px">검증 항목: 필수 열 · 중복(이름 · 서비스 태그 · 주소) · 주소 형식과 SSRF 가드(링크로컬 · 루프백 · 우회 표기) · 비밀 원문 금지 · 법인 존재 · 엣지 존재 · 공통 계정 존재 · 마운트 경로 정제. 거부 행은 적용에서 빠지고 결과 CSV(판정 열 추가)를 내려준다. ‘갱신’ 에서 주소가 바뀐 행은 저장 비밀을 승계하지 않는다(secretCarry 규약).</div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(440px,100%),1fr));gap:14px;align-items:start">
+    <div class="card" style="border-color:rgba(168,85,247,.35)">
+      <h2 style="margin-bottom:8px">3 · 공통 계정 — 파일에는 이름만, 비밀은 여기서 한 번</h2>
+      <div style="overflow-x:auto"><table>
+        <thead><tr><th>이름</th><th>종류</th><th>계정</th><th>인증</th><th>적용 법인</th><th>쓰는 서버</th><th>상태</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">kr-ops</td><td>OS(SSH)</td><td class="mono">portal-ro</td><td>키 <span class="mono">kr-ops-ed25519</span>(저장소)</td><td>KR-SEL</td><td>983</td><td><span class="chip ok">봉인 저장 · 11-06 시험 통과</span></td></tr>
+          <tr><td class="mono">kr-gpadmin</td><td>OS(SSH)</td><td class="mono">gpadmin</td><td>키 <span class="mono">kr-gpadmin-2026</span>(저장소)</td><td>KR-SEL(GPDB 9대)</td><td>9</td><td><span class="chip ok">통과</span></td></tr>
+          <tr><td class="mono">kr-idrac</td><td>iDRAC</td><td class="mono">portalmon</td><td>비밀번호 · 읽기 전용 역할</td><td>KR-SEL</td><td>1,004</td><td><span class="chip warn">401 2대 — 개별 계정 서버</span></td></tr>
+          <tr><td class="mono">pl-ops</td><td>OS(SSH)</td><td class="mono">monitor</td><td>비밀번호</td><td>PL-WAW</td><td>212</td><td><span class="chip">키 인증 권장</span></td></tr>
+        </tbody></table></div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px"><button class="btn" type="button">+ 공통 계정</button><button class="btn" type="button">키 회전(모든 서버 재시험)</button><span class="dim" style="font-size:11.5px;align-self:center">계정은 등록부 비밀 봉인 규약(secretVault)으로 저장 · 파일·화면·API 어디에도 원문 없음 · 회전은 이전 키로 접속 가능한 동안만</span></div>
+      <div class="dim" style="font-size:11.5px;margin-top:8px">정직하게: 포탈이 서버에 계정·키를 **만들어 주지는 않는다**(배포는 현장 구성 관리 몫). 포탈은 이미 있는 읽기 전용 계정을 쓸 뿐이고, 필요한 권한 목록(/proc 읽기 · df · ss · journalctl 그룹 · /proc/pid/io 는 root 또는 CAP_SYS_PTRACE)을 템플릿 설명서에 적는다.</div>
+    </div>
+
+    <div class="card" style="border-color:rgba(168,85,247,.35)">
+      <h2 style="margin-bottom:8px">3-b · SSH 키 저장소 — 키를 여러 개 등록해 두고 서버 등록 때 고른다</h2>
+      <div style="overflow-x:auto"><table>
+        <thead><tr><th>키 이름</th><th>종류 · 지문</th><th>등록</th><th>쓰는 서버</th><th>공통 계정</th><th>회전 예정</th><th>상태</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">kr-ops-ed25519</td><td>ed25519 · <span class="mono dim">SHA256:9fK2…Qx1</span></td><td>2026-09-01 · 김운영</td><td>983</td><td>kr-ops</td><td>2027-03 (180일)</td><td><span class="chip ok">사용 중</span></td></tr>
+          <tr><td class="mono">kr-gpadmin-2026</td><td>ed25519 · <span class="mono dim">SHA256:Lm7…aZ4</span></td><td>2026-10-12 · 이DBA</td><td>9</td><td>kr-gpadmin</td><td>2027-04</td><td><span class="chip ok">사용 중</span></td></tr>
+          <tr><td class="mono">kr-ops-rsa-legacy</td><td>rsa-4096 · <span class="mono dim">SHA256:Tt0…p8E</span></td><td>2025-02-14 · 김운영</td><td>12</td><td class="dim">(개별 지정)</td><td class="warn">지남 — 2026-02</td><td><span class="chip warn">회전 권고 · 12대가 아직 이 키</span></td></tr>
+          <tr><td class="mono">pl-monitor-ed25519</td><td>ed25519 · <span class="mono dim">SHA256:Ba3…k9Q</span></td><td>2026-11-06 · 박PL</td><td>0</td><td class="dim">—</td><td>2027-05</td><td><span class="chip">미사용 — pl-ops 를 키로 바꾸면 적용</span></td></tr>
+          <tr><td class="mono">us-east-ops</td><td>ecdsa-p256 · <span class="mono dim">SHA256:Rr1…v2M</span></td><td>2026-06-30 · 최운영</td><td>340</td><td>us-ops</td><td>2026-12</td><td><span class="chip ok">사용 중</span></td></tr>
+        </tbody></table></div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;align-items:center"><button class="btn" type="button">+ 키 등록 (붙여넣기 · 파일)</button><button class="btn" type="button">공개키 복사 (authorized_keys 용)</button><button class="btn" type="button">회전 — 새 키로 바꾸고 전 서버 재시험</button><span class="dim" style="font-size:11.5px">개인키는 봉인 저장(secretVault) · 화면·API·내보내기에는 지문과 공개키만 · 비밀번호(passphrase) 있는 키도 지원 · 삭제는 쓰는 서버가 0 일 때만</span></div>
+      <div style="margin-top:12px;border:1px solid #243049;border-radius:10px;padding:10px 12px;background:#0f1626">
+        <div style="font-weight:700;font-size:12.5px;margin-bottom:6px">서버 하나 등록·수정 폼 — 키를 고르는 자리</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr));gap:8px;align-items:end">
+          <label style="display:flex;flex-direction:column;gap:4px;font-size:12px" class="dim">서버 이름<input class="inp" value="bm-kr1-db01" aria-label="서버 이름"></label>
+          <label style="display:flex;flex-direction:column;gap:4px;font-size:12px" class="dim">OS 주소 · 포트<input class="inp" value="10.20.1.21 : 22" aria-label="OS 주소"></label>
+          <label style="display:flex;flex-direction:column;gap:4px;font-size:12px" class="dim">계정<select class="sel" aria-label="계정"><option>공통 kr-ops (portal-ro)</option><option>공통 kr-gpadmin (gpadmin)</option><option>개별 입력</option></select></label>
+          <label style="display:flex;flex-direction:column;gap:4px;font-size:12px" class="dim">인증<select class="sel" aria-label="인증"><option>SSH 키 — kr-ops-ed25519 (공통 계정 기본)</option><option>SSH 키 — kr-gpadmin-2026</option><option>SSH 키 — kr-ops-rsa-legacy (회전 권고)</option><option>SSH 키 — us-east-ops</option><option>비밀번호</option></select></label>
+          <label style="display:flex;flex-direction:column;gap:4px;font-size:12px" class="dim">수집 경로<select class="sel" aria-label="수집 경로"><option>auto → edge KR-SEL</option><option>edge KR-SEL</option><option>central</option></select></label>
+          <button class="btn" type="button">연결 시험</button>
+        </div>
+        <div class="dim" style="font-size:11.5px;margin-top:6px">키를 바꾸면 저장 전에 시험을 권한다 · ‘개별 입력’ 은 비밀번호 또는 이 서버만의 키(저장소에 ‘개별 · 서버명’ 으로 들어간다 — 두 벌을 두지 않는다) · 주소가 바뀌면 저장 비밀·키 참조를 승계하지 않는다.</div>
+      </div>
+      <div class="dim" style="font-size:11.5px;margin-top:8px">저장: 키 저장소 `ssh-keys.json`(id · 이름 · 종류 · 지문 · 공개키 · 봉인 개인키 · passphrase 봉인 · 등록자 · 등록일 · 회전 예정일) — 등록부와 같은 계약(원자적 쓰기 · 손상 보존 · 봉인). OS 등록부의 `password` 자리에 `keyRef` 가 더해지고, 기존 비밀번호 항목은 그대로 동작한다. CSV 는 `os_key` 열로 참조. 키 회전은 ‘새 키 등록 → 서버 authorized_keys 에 배포(현장) → 포탈에서 참조 교체 + 전 서버 재시험 → 옛 키 쓰는 서버 0 이면 삭제’ 순서이고 포탈은 authorized_keys 를 건드리지 않는다.</div>
+    </div>
+
+    <div class="card" style="border-color:rgba(34,197,94,.35)">
+      <h2 style="margin-bottom:8px">4 · 수집 경로 — 엣지 또는 중앙, 서버마다 하나</h2>
+      <div style="overflow-x:auto"><table>
+        <thead><tr><th>법인</th><th>엣지</th><th>edge</th><th>central</th><th>auto 결과</th><th>판정</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">KR-SEL</td><td>kr-sel-edge01 <span class="chip ok">온라인</span></td><td>1,004</td><td>8</td><td>edge</td><td><span class="chip ok">정상 · central 8대는 요청(경고 표시)</span></td></tr>
+          <tr><td class="mono">PL-WAW</td><td>pl-waw-edge01 <span class="chip ok">온라인</span></td><td>212</td><td>0</td><td>edge</td><td><span class="chip ok">정상</span></td></tr>
+          <tr><td class="mono">US-EAST</td><td>us-east-edge01 <span class="chip warn">오래됨 23분</span></td><td>340</td><td>0</td><td>edge</td><td><span class="chip warn">엣지 통신 점검 — 배정은 유지</span></td></tr>
+          <tr><td class="mono">BR-SAO</td><td class="dim">없음</td><td>0</td><td>58</td><td>central</td><td><span class="chip">엣지 없는 법인 — 중앙 직접(예외 경로 · RTT 표시)</span></td></tr>
+          <tr><td class="dim">미귀속</td><td class="dim">—</td><td>0</td><td>14</td><td>central</td><td><span class="chip warn">수집 기본 제외 — 귀속 먼저</span></td></tr>
+        </tbody></table></div>
+      <ul style="margin:10px 0 0;padding-left:18px;display:flex;flex-direction:column;gap:5px;font-size:12.5px" class="dim">
+        <li><b style="color:#e6edf6">경계는 지금 코드 그대로</b>: 엣지는 자기 agent 의 서버만, 중앙은 agent 없는(= central) 서버만 수집한다(`remoteAgent` — 같은 서버를 두 곳이 열지 않는다). 배정을 바꾸면 중앙 설정이 엣지로 배포되고 다음 주기부터 바뀐 쪽이 읽는다.</li>
+        <li><b style="color:#e6edf6">auto</b> = 법인에 온라인 엣지가 있으면 edge, 없으면 central. 엣지가 사라져도 자동으로 central 로 넘기지 않는다(원문이 법인 밖으로 나가는 결정은 사람이).</li>
+        <li><b style="color:#e6edf6">중앙 직접</b>은 RTT·동시성을 따로 보여 주고(수집 건강 보드), 800ms+ 법인은 경고한다.</li>
+        <li>이력은 수집한 쪽 DB 에 쌓인다 — 경로를 바꾸면 이전 이력은 이전 쪽에 남고 화면이 ‘경로 변경 시각’ 을 적는다(합치지 않는다).</li>
+      </ul>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(440px,100%),1fr));gap:14px;align-items:start">
+    <div class="card">
+      <h2 style="margin-bottom:8px">5 · 연결 시험(표본) → 적용 · 엣지 배포</h2>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px"><span class="dim">표본</span><select class="sel"><option>법인마다 5대(기본)</option><option>법인마다 20대</option><option>전부 (1,000대 · 약 3분)</option></select><button class="btn" type="button">시험 실행</button><span class="dim" style="font-size:11.5px">시험은 엣지가 수행(경로대로) · 결과는 읽기 전용 · 인증 거부는 그 서버를 ‘인증 정지’ 후보로 표시(적용 뒤 자동 재시도 없음)</span></div>
+      <div style="overflow-x:auto"><table>
+        <thead><tr><th>법인 · 경로</th><th>표본</th><th>OS(SSH)</th><th>iDRAC</th><th>감지된 용도</th><th>비고</th></tr></thead>
+        <tbody>
+          <tr><td>KR-SEL · edge</td><td>5</td><td class="ok">5/5 · 중앙값 3.1s</td><td class="ok">5/5</td><td>gpdb 2 · airflow 1 · 일반 2</td><td class="dim">—</td></tr>
+          <tr><td>KR-SEL · central(8)</td><td>3</td><td class="warn">3/3 · 중앙값 4.9s (RTT 820ms)</td><td class="ok">3/3</td><td>일반 3</td><td class="warn">edge 권장</td></tr>
+          <tr><td>US-EAST · edge</td><td>5</td><td class="dim">시험 불가 — 엣지 오래됨</td><td class="dim">—</td><td class="dim">—</td><td class="warn">통신 점검 뒤</td></tr>
+          <tr><td>BR-SAO · central</td><td>5</td><td class="bad">2/5 · 거부 3 (pl-ops 계정 아님)</td><td class="ok">5/5</td><td>—</td><td class="bad">공통 계정 확인</td></tr>
+        </tbody></table></div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px"><button class="btn primary" type="button">적용 (신규 842 · 갱신 158) 및 엣지 배포</button><button class="btn" type="button">결과 CSV</button><span class="dim" style="font-size:11.5px;align-self:center">적용은 원자적 쓰기 · 감사 로그(누가 · 몇 행 · 파일 이름) · 되돌리기용 직전 등록부 스냅샷 1벌 · 배포는 법인 단위(기존 설정 배포 경로)</span></div>
+    </div>
+    <div class="card">
+      <h2 style="margin-bottom:8px">누락 · 등록 점검 — 보드 커버리지와 같은 숫자</h2>
+      <div style="overflow-x:auto"><table>
+        <thead><tr><th>상태</th><th>서버</th><th>조치</th></tr></thead>
+        <tbody>
+          <tr><td><span class="chip ok">둘 다</span></td><td>842</td><td class="dim">—</td></tr>
+          <tr><td><span class="chip info">OS 만</span></td><td>31</td><td>iDRAC 주소 추가(스캔 결과 제안 12대 — ‘제안 적용’)</td></tr>
+          <tr><td><span class="chip warn">iDRAC 만</span></td><td>128</td><td>os_host + 공통 계정 지정 — 이름이 같은 DNS 레코드 제안 97대</td></tr>
+          <tr><td><span class="chip">없음</span></td><td>11</td><td>주소 둘 다 없음 — 파일에서 거부된 행</td></tr>
+          <tr><td><span class="chip warn">미귀속</span></td><td>14</td><td>법인 지정</td></tr>
+        </tbody></table></div>
+      <div class="dim" style="font-size:11.5px;margin-top:8px">‘제안’ 은 iDRAC 스캔 결과·DNS 이름 일치에서 나오고 사람이 적용을 누를 때만 등록된다(자동 등록 없음). 이 표는 수집 건강(⑫)·보드 KPI 와 같은 계산을 쓴다. 수치·이름은 가상.</div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2150}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

@@ -57,6 +57,9 @@ describe('셸 머리 높이 측정은 공용 훅 하나', () => {
     };
     walk(root);
     expect(hits).toEqual(['hooks/useStickyOffset.js']);
+    // v3.10.12(공통 기능 점검 10회차): 지운 셸(V3·V5·V6 — v2.747)의 머리 선택자를 다시 넣지 않는다.
+    const hook = read('../../hooks/useStickyOffset.js');
+    expect(hook).toMatch(/export const STICKY_HEADS = '\.topbar';/);
     const st = read('../SpecialTools.jsx');
     expect(st).toMatch(/const headH = useStickyHeadH\(!tool\);/);
     expect(st).not.toMatch(/setHeadH/);

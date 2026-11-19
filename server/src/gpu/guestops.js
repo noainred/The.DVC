@@ -19,6 +19,7 @@ import crypto from 'node:crypto';
 import { VimSoapClient } from '../vcenter/soapClient.js';
 import { vcDispatcher } from '../vcenter/restClient.js';
 import { readTextCapped } from '../util/readCapped.js';
+import { envPositive } from '../util/envNumber.js';
 import { NO_REDIRECT, refuseRedirect } from '../util/noRedirect.js'; // v2.742(INJPKG-08): 게스트 파일 전송은 리다이렉트를 따라가지 않는다
 
 // mig.mode.current(Enabled/Disabled/N/A)를 5번째 컬럼으로 추가 수집 → MIG(분할 GPU) 가시화.
@@ -143,7 +144,7 @@ async function refuseTransferRedirect(res) {
  * 게스트 결과 파일 본문 상한(v2.603 감사 SEC2603-06). nvidia-smi 출력은 수 KB 인데 예전에는 `res.text()` 로 **상한 없이**
  * 읽어, 게스트가 만든(또는 바꿔치기한) 큰 파일이 중앙 메모리로 통째로 들어올 수 있었다. `GPU_GUEST_FILE_MAX_BYTES`.
  */
-export const GUEST_FILE_MAX_BYTES = Math.max(65_536, Number(process.env.GPU_GUEST_FILE_MAX_BYTES) || 8 * 1048576);
+export const GUEST_FILE_MAX_BYTES = Math.max(65_536, envPositive(process.env.GPU_GUEST_FILE_MAX_BYTES, 8 * 1048576));   // 102회차: Infinity → 기본값(예전엔 이 상한이 꺼졌다)
 
 /**
  * 파일 전송 응답 본문을 상한까지만 읽는다 — 넘으면 `{ text:'', error }`(던지지 않는다 — 호출부의 실패 경로 그대로).

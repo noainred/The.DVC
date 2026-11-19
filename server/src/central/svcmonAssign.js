@@ -17,7 +17,6 @@
  * **ack 로 적용 결과를 회신**해야 `active` 로 전이한다(그전엔 `pending`).
  */
 
-import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
@@ -25,6 +24,7 @@ import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { logAudit } from '../audit.js';
 import { capStr } from '../util/capStr.js';
 import { makeSettingsLoadError } from '../util/settingsLoadError.js';
+import { makeJsonFileReader, READ_RETRY_MS } from '../util/jsonFileRead.js';   // 103회차 F2: 읽기 오류 ≠ 손상
 
 const FILE = () => path.join(config.configDir, 'central-svcmon-assign.json');
 
@@ -57,10 +57,23 @@ const _loadErr = makeSettingsLoadError(() => FILE(), { label: '성능점검 엣�
 /** 배정 파일을 못 읽었으면 { at, reason }, 읽었으면 null. */
 export function svcmonAssignLoadError() { load(); return _loadErr.get(); }
 
+/*
+ * 103회차 F2(재현 — EISDIR): 예전 catch 하나는 **읽기 오류**도 손상으로 보고 온전한 원본(전 엣지 배정)을 `.corrupt.*` 로 옮긴 뒤 빈 배정을 캐시했다 —
+ *   관리자가 엣지 하나를 배정하면 그 한 건만 든 파일이 되어(관리자 저장이 로드 오류를 해제) 다른 엣지는 assigned:false 를 받아 중앙 배포 점검을 전부 지웠다.
+ *   이제 읽기 오류는 원본을 두고 · 캐시하지 않고(30초 간격 재읽기 — util/jsonFileRead.js) · 표지(readError)를 세운다(설정 pull 503 은 그대로) ·
+ *   관리자 저장도 409 로 거절한다(원본이 그 자리에 있어 rename 이 보존본도 없이 덮는다). parse · 형식 실패는 예전과 같다.
+ */
+const _reader = makeJsonFileReader(FILE, { parse: (t) => t, preserve: false, tag: 'svcmon-assign' });
 function load() {
   if (cache) return cache;
+  const rr = _reader.read();
+  if (rr.kind === 'read-error') {
+    if (!rr.deferred || !_loadErr.get()?.readError) _loadErr.readError(rr.error, { retryMs: READ_RETRY_MS });
+    return { v: 1, agents: Object.create(null) };   // 캐시하지 않는다 — save() 가 거절한다
+  }
   try {
-    const parsed = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
+    if (rr.kind === 'missing') { const e = new Error('ENOENT'); e.code = 'ENOENT'; throw e; }
+    const parsed = JSON.parse(rr.value);
     const agents = parsed && typeof parsed.agents === 'object' && !Array.isArray(parsed.agents)
       ? parsed.agents : null;
     if (!agents) throw new Error('agents 가 객체가 아닙니다(형식 불일치)');
@@ -77,6 +90,11 @@ function load() {
 
 /** @param {{admin?:boolean}} [o] 관리자 저장이면 로드 오류를 해제한다. 로드 오류 중 비관리 저장은 쓰지 않는다. */
 function save({ admin = false } = {}) {
+  // 103회차 F2: 읽기 오류 중에는 관리자 저장도 받지 않는다(라우트 409) — 지금 메모리는 캐시하지 않은 빈 배정이다.
+  if (_loadErr.get()?.readError) {
+    if (!admin) return false;
+    throw Object.assign(new Error(`엣지 배정 파일(${path.basename(FILE())})을 읽지 못한 상태라 저장하지 않았습니다 — 읽기 오류이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 저장이 다시 열립니다).`), { status: 409, code: 'settings-unreadable', readError: true });
+  }
   if (!admin && _loadErr.get()) return false;
   atomicWriteFileSync(FILE(), JSON.stringify(cache));
   if (admin) _loadErr.ok();
@@ -145,6 +163,9 @@ export function setAssignment(agent, scope = {}, targets = [], { user = '' } = {
     state: prev && prev.sig === sig ? (prev.state || 'pending') : 'pending',
     pulledAt: prev && prev.sig === sig ? (prev.pulledAt || 0) : 0,
     ack: prev && prev.sig === sig ? (prev.ack || null) : null,
+    // v2.988(반증 R1): 오류 없이 적용된 sig 이력(sig → 시각, 최근 OK_SIGS_MAX 개) — 배정이 엣지가 이미 적용한 sig 로 되돌아오면(A→B→A)
+    //   엣지는 unchanged 를 받고 다시 ack 하지 않는다. 그때 '변경 없음' pull 을 적용 확인으로 쓰려면 그 sig 가 오류 없이 적용된 적이 있어야 한다.
+    ...(prev?.okSigs ? { okSigs: prev.okSigs } : {}),
     // v2.630(감사 R2630-06): 엣지 push 주기는 배정 내용과 무관하다 — 재배정해도 유지한다.
     ...(prev?.lastExpectMs ? { lastExpectMs: prev.lastExpectMs } : {}),
   };
@@ -236,6 +257,46 @@ export function markPulled(agent, sig) {
  * 적용 수가 배포 수와 다르면 `state` 를 `mismatch` 로 두고 그대로 노출한다 — 조용히
  * 성공으로 넘기면 감시 공백이 정상으로 보인다.
  */
+const OK_SIGS_MAX = 8;
+/** sig → 시각 객체에 하나를 더하고 최근 OK_SIGS_MAX 개만 남긴다(파일에서 읽은 값은 모양을 믿지 않는다). */
+function okSigsWith(cur, sig, at) {
+  const ent = (cur && typeof cur === 'object' && !Array.isArray(cur) ? Object.entries(cur) : [])
+    .filter(([k, v]) => typeof k === 'string' && k !== sig && Number.isFinite(Number(v)));
+  ent.push([sig, at]);
+  ent.sort((x, y) => Number(y[1]) - Number(x[1]));
+  return Object.fromEntries(ent.slice(0, OK_SIGS_MAX).map(([k, v]) => [k, Number(v)]));
+}
+
+// v2.988(반증 R1): '변경 없음' pull 로 확인한 시각 — 엣지가 지금 sig 를 적용해 두고 있다는 확인(메모리 · 파일에 쓰지 않는다 — pull 마다 저장하면 EDGE2629-01).
+//   재시작하면 비고 다음 pull(기본 5분)에 다시 생긴다. sig 가 바뀌면 그 값은 맞지 않아 쓰이지 않는다.
+const _confirmed = new Map();   // agent -> { sig, at }
+
+/**
+ * 엣지가 지금 배정 sig 로 물어 unchanged 를 받았을 때(routes/central.js /svcmon-config) — 그 sig 가 **오류 없이 적용된 적이 있을 때만** 확인으로 남긴다
+ *   (엣지는 검증에서 거부된 sig 로도 백오프 동안 묻는다 — agent/svcmonConfigPull.js failedSig).
+ */
+export function noteUnchangedPull(agent, sig, now = Date.now()) {
+  const name = String(agent || '').trim();
+  const a = load().agents[name];
+  if (!a || !sig || a.sig !== sig) return false;
+  const ok = a.okSigs && typeof a.okSigs === 'object' ? Number(a.okSigs[sig]) : NaN;
+  if (!Number.isFinite(ok)) return false;
+  _confirmed.set(name, { sig, at: now });
+  return true;
+}
+
+/**
+ * 시험 판정용 — 지금 배정 sig · ack 시각 · '변경 없음' 확인 시각(지금 sig 일 때만). 배정이 없으면 null.
+ * @returns {{sig:string, ackAt:number, confirmAt:number}|null}
+ */
+export function assignReadiness(agent) {
+  const name = String(agent || '').trim();
+  const a = load().agents[name];
+  if (!a) return null;
+  const c = _confirmed.get(name);
+  return { sig: String(a.sig || ''), ackAt: Number(a.ack?.at) || 0, confirmAt: c && c.sig === a.sig ? c.at : 0 };
+}
+
 export function ackAssignment(agent, { sig, applied = {}, removed = 0, errors = [] } = {}) {
   const db = load();
   const name = String(agent || '').trim();
@@ -256,6 +317,7 @@ export function ackAssignment(agent, { sig, applied = {}, removed = 0, errors = 
   const want = a.counts || { targets: 0, tests: 0 };
   const exact = added === want.targets && tests === want.tests;
   a.ack = { at: Date.now(), added, tests, removed: cnt(removed), errors: errs, ...(errorsInvalid ? { errorsInvalid: true } : {}), exact };
+  if (!errs.length && !errorsInvalid) a.okSigs = okSigsWith(a.okSigs, sig, a.ack.at);
   a.state = errs.length ? 'error' : (errorsInvalid ? 'mismatch' : (exact ? 'active' : 'mismatch'));
   save();
   logAudit({
@@ -265,4 +327,4 @@ export function ackAssignment(agent, { sig, applied = {}, removed = 0, errors = 
   return { ok: true, state: a.state, exact };
 }
 
-export function _resetAssignCache() { cache = null; _loadErr.ok(); }
+export function _resetAssignCache() { cache = null; _loadErr.ok(); _confirmed.clear(); _reader.reset(); }

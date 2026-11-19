@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Monitoring 개요 — 기술 뷰 (1440)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a111c;color:#c8d6e8;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:12.5px;line-height:1.4}
+a{color:#9fcaff}a:hover{color:#cfe4ff}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+.top{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid #1c2c42;background:#0b1522;flex-wrap:wrap}
+.top h1{margin:0;font-size:14px;font-weight:600;color:#e8f1fb}
+.pc-mode{display:inline-flex;align-items:center;gap:7px;padding:5px 13px;border-radius:999px;border:1px solid #1e3350;background:#0f1a2b;color:#9fb4cc;font:inherit;font-size:12px}
+.pc-mode.on{background:#1668d8;color:#fff;font-weight:700;border-color:#1668d8}
+.tv{display:inline-flex;align-items:center;height:26px;border:1px solid #1e3350;border-radius:6px;background:#0a141f;font-family:"JetBrains Mono",monospace;font-size:11.5px;color:#9fcaff;overflow:hidden}
+.tv span{padding:0 8px;color:#8ea4bd;background:#0f1a2b;border-right:1px solid #1e3350;height:100%;display:inline-flex;align-items:center}
+.tv b{padding:0 9px;font-weight:500}
+.pc-btn{padding:5px 11px;border:1px solid #1e3350;border-radius:6px;background:#0f1a2b;color:#c8d6e8;font:inherit;font-size:12px;white-space:nowrap}
+.pc-btn.accent{border-color:#2b6fc0;background:#153357;color:#9fcaff}
+.w{background:#0f1a2b;border:1px solid #1c2c42;border-radius:8px;display:flex;flex-direction:column;min-width:0;overflow:hidden}
+.wh{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid #131f30;font-size:11px;letter-spacing:.06em;color:#8ea4bd;font-family:"JetBrains Mono",monospace}
+.wh em{font-style:normal;margin-left:auto;color:#5f7fa3;letter-spacing:0;font-size:10.5px}
+.ms{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:10px}
+.ms .t{background:#0f1a2b;border:1px solid #1c2c42;border-left:4px solid #1e3350;border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.ms .t span{font-family:"JetBrains Mono",monospace;font-size:10.5px;letter-spacing:.08em;color:#8ea4bd}
+.ms .t b{font-family:"JetBrains Mono",monospace;font-size:26px;font-weight:600;color:#dbe7f5;line-height:1.1}
+.ms .t small{font-size:11px;color:#7b93ae}
+.ms .ok{border-left-color:#3ddc84}.ms .ok b{color:#3ddc84}.ms .warn{border-left-color:#f0a92e}.ms .warn b{color:#f0a92e}.ms .bad{border-left-color:#ff5c5c}.ms .bad b{color:#ff5c5c}.ms .stale{border-left-color:#64748b}.ms .pend{border-left-color:#4b9bff}.ms .off{border-left-color:#7b8fa8}.ms .tot{border-left-color:#4b9bff}
+.cs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;padding:10px 12px}
+.cs div{border-radius:6px;padding:7px 8px;display:flex;flex-direction:column;gap:2px;min-width:0;border:1px solid #1c2c42;background:#0a141f}
+.cs div b{font-family:"JetBrains Mono",monospace;font-size:15px;color:#dbe7f5}
+.cs div span{font-size:10.5px;color:#8ea4bd;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cs div i{font-style:normal;font-family:"JetBrains Mono",monospace;font-size:10px;color:#8ea4bd}
+.cs .ok{border-color:#1f5a3a;background:#07180e}.cs .ok b{color:#3ddc84}
+.cs .warn{border-color:#5a3d07;background:#1b1305}.cs .warn b{color:#f0a92e}
+.cs .bad{border-color:#5f1d1d;background:#1d0a0a}.cs .bad b{color:#ff5c5c}
+.cs .off{opacity:.6}
+.tl{display:flex;flex-direction:column;gap:5px;padding:10px 12px}
+.tl div{display:grid;grid-template-columns:150px minmax(0,1fr) 64px;align-items:center;gap:8px;font-size:11.5px}
+.tl .bar{height:9px;background:#131f30;border-radius:2px;overflow:hidden}
+.tl .bar i{display:block;height:100%;background:#4b9bff}
+.tl .n{font-family:"JetBrains Mono",monospace;color:#cfe0f2;text-align:right;font-size:11px}
+.tl .k{color:#c8d6e8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.legend{display:flex;gap:12px;font-size:11px;color:#8ea4bd;padding:0 12px 8px;flex-wrap:wrap}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+table{border-collapse:collapse;width:100%;table-layout:fixed}
+th{font-family:"JetBrains Mono",monospace;font-size:10.5px;letter-spacing:.05em;font-weight:500;color:#8ea4bd;text-align:left;padding:7px 9px;background:#132132;white-space:nowrap}
+td{padding:6px 9px;border-bottom:1px solid #131f30;vertical-align:middle;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
+.pill{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:4px;font-family:"JetBrains Mono",monospace;font-size:10.5px;font-weight:600;white-space:nowrap}
+.pill.ok{background:#0f3d24;color:#4ade80}.pill.warn{background:#4a3105;color:#fbbf24}.pill.bad{background:#4c1414;color:#f87171}.pill.off{background:#1a2236;color:#8ea4bd}.pill.stale{background:#1f2937;color:#cbd5e1}
+.ev{display:grid;grid-template-columns:62px 80px minmax(0,1fr);gap:10px;padding:5px 12px;border-bottom:1px solid #131f30;font-size:11.5px;align-items:center}
+.ev .t{font-family:"JetBrains Mono",monospace;color:#8ea4bd;font-size:11px}
+svg text{font-family:"JetBrains Mono",monospace;font-size:9.5px;fill:#8ea4bd}
+.note{font-size:11px;color:#7b93ae;padding:6px 12px 10px;line-height:1.5}
+</style>
+</helmet>
+<div style="width:1440px;height:1180px;box-sizing:border-box;display:flex;flex-direction:column;background:#0a111c;overflow:hidden">
+  <div class="top">
+    <span class="pc-mode on">인프라</span><span class="pc-mode">서비스</span>
+    <h1 style="margin-left:6px">Monitoring · 개요 (기술 뷰)</h1>
+    <span class="tv"><span>path</span><b>Root\*</b></span>
+    <span class="tv"><span>edge</span><b>*</b></span>
+    <span class="tv"><span>origin</span><b>*</b></span>
+    <span class="tv"><span>type</span><b>*</b></span>
+    <span style="margin-left:auto;display:inline-flex;gap:8px;align-items:center">
+      <span class="tv"><span>time</span><b>최근 24시간</b></span>
+      <span class="tv"><span>live</span><b style="color:#3ddc84">● 15s</b></span>
+      <button class="pc-btn" type="button">트리 보기</button>
+      <button class="pc-btn accent" type="button">＋ 등록</button>
+    </span>
+  </div>
+
+  <div style="padding:12px 16px;display:flex;flex-direction:column;gap:10px;overflow:hidden">
+
+    <div class="ms">
+      <div class="t tot"><span>TOTAL TESTS</span><b>123</b><small>44 대상 · 11 폴더</small></div>
+      <div class="t ok"><span>OK</span><b>101</b><small>82.1%</small></div>
+      <div class="t warn"><span>WARN</span><b>9</b><small>cert D-30 미만 6 · 응답 지연 3</small></div>
+      <div class="t bad"><span>ALERT</span><b>4</b><small>no answer 3 · http 5xx 1</small></div>
+      <div class="t stale"><span>NO DATA</span><b>0</b><small>주기 3배 초과</small></div>
+      <div class="t pend"><span>PENDING</span><b>0</b><small>아직 실행 안 됨</small></div>
+      <div class="t off"><span>DISABLED</span><b>9</b><small>설정 연동 신규 8 · 사라짐 1</small></div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:420px minmax(0,1fr) 360px;gap:10px">
+      <div class="w">
+        <div class="wh">체크 상태 · 출처(종류)별<em>worst state per target</em></div>
+        <div class="cs">
+          <div class="ok"><span>vCenter</span><b>9</b><i>ok 9</i></div>
+          <div class="warn"><span>NSX</span><b>2</b><i>warn 1 (cert D-21)</i></div>
+          <div class="ok"><span>수집 서버(엣지)</span><b>5</b><i>ok 5</i></div>
+          <div class="bad"><span>iDRAC</span><b>61</b><i>bad 2 · warn 3</i></div>
+          <div class="ok"><span>스토리지(API)</span><b>3</b><i>ok 3</i></div>
+          <div class="ok"><span>스토리지(SSH)</span><b>2</b><i>ok 2</i></div>
+          <div class="bad"><span>SAN 스위치</span><b>4</b><i>bad 1 (ssh timeout)</i></div>
+          <div class="ok"><span>PDU</span><b>3</b><i>ok 3</i></div>
+          <div class="warn"><span>SMTP</span><b>1</b><i>warn (EHLO 2.1s)</i></div>
+          <div class="ok"><span>AD / LDAP</span><b>1</b><i>ok</i></div>
+          <div class="off"><span>CVP · Veeam · Bareos</span><b>0</b><i>미등록</i></div>
+          <div class="ok"><span>수동 등록</span><b>27</b><i>ok 26 · warn 1</i></div>
+        </div>
+      </div>
+      <div class="w">
+        <div class="wh">ALERT · WARN 추이 · 24시간 · 1시간 버킷<em>svcmon/log/analyze(hour)</em></div>
+        <svg viewBox="0 0 600 150" width="100%" height="150" role="img" aria-label="24시간 동안 시간별 실패·경고 건수 막대와 평균 응답 ms 선">
+          <line x1="40" y1="120" x2="560" y2="120" stroke="#1c2c42"/><line x1="40" y1="80" x2="560" y2="80" stroke="#131f30"/><line x1="40" y1="40" x2="560" y2="40" stroke="#131f30"/>
+          <text x="8" y="124">0</text><text x="8" y="84">4</text><text x="8" y="44">8</text>
+          <text x="566" y="44">120</text><text x="566" y="84">60</text><text x="566" y="124">0 ms</text>
+          <text x="40" y="140">15:00</text><text x="170" y="140">21:00</text><text x="300" y="140">03:00</text><text x="430" y="140">09:00</text><text x="530" y="140">15:00</text>
+          <g>
+            <rect x="46" y="110" width="10" height="10" fill="#f0a92e"/><rect x="68" y="110" width="10" height="10" fill="#f0a92e"/><rect x="90" y="100" width="10" height="20" fill="#f0a92e"/><rect x="90" y="90" width="10" height="10" fill="#ff5c5c"/>
+            <rect x="112" y="110" width="10" height="10" fill="#f0a92e"/><rect x="134" y="110" width="10" height="10" fill="#f0a92e"/><rect x="156" y="110" width="10" height="10" fill="#f0a92e"/><rect x="178" y="110" width="10" height="10" fill="#f0a92e"/>
+            <rect x="200" y="110" width="10" height="10" fill="#f0a92e"/><rect x="222" y="110" width="10" height="10" fill="#f0a92e"/><rect x="244" y="100" width="10" height="20" fill="#f0a92e"/>
+            <rect x="266" y="110" width="10" height="10" fill="#f0a92e"/><rect x="288" y="110" width="10" height="10" fill="#f0a92e"/><rect x="310" y="110" width="10" height="10" fill="#f0a92e"/>
+            <rect x="332" y="110" width="10" height="10" fill="#f0a92e"/><rect x="354" y="110" width="10" height="10" fill="#f0a92e"/><rect x="376" y="100" width="10" height="20" fill="#f0a92e"/><rect x="376" y="70" width="10" height="30" fill="#ff5c5c"/>
+            <rect x="398" y="100" width="10" height="20" fill="#f0a92e"/><rect x="398" y="80" width="10" height="20" fill="#ff5c5c"/><rect x="420" y="100" width="10" height="20" fill="#f0a92e"/><rect x="420" y="90" width="10" height="10" fill="#ff5c5c"/>
+            <rect x="442" y="110" width="10" height="10" fill="#f0a92e"/><rect x="464" y="110" width="10" height="10" fill="#f0a92e"/><rect x="486" y="100" width="10" height="20" fill="#f0a92e"/>
+            <rect x="508" y="100" width="10" height="20" fill="#f0a92e"/><rect x="508" y="90" width="10" height="10" fill="#ff5c5c"/><rect x="530" y="80" width="10" height="40" fill="#f0a92e"/><rect x="530" y="40" width="10" height="40" fill="#ff5c5c"/>
+          </g>
+          <polyline fill="none" stroke="#4b9bff" stroke-width="1.5" points="51,96 73,95 95,92 117,96 139,97 161,96 183,95 205,97 227,96 249,93 271,96 293,97 315,96 337,96 359,95 381,84 403,86 425,90 447,95 469,96 491,94 513,92 535,78"/>
+        </svg>
+        <div class="legend"><span><i style="background:#ff5c5c"></i>ALERT(bad)</span><span><i style="background:#f0a92e"></i>WARN</span><span><i style="background:#4b9bff"></i>평균 응답 ms(우축)</span><span style="margin-left:auto">원천: CSV 로그 집계(시간 버킷은 있음 · 5분 버킷은 추가)</span></div>
+      </div>
+      <div class="w">
+        <div class="wh">엣지 보고 · 지연<em>/svcmon/edge-state</em></div>
+        <table>
+          <colgroup><col><col style="width:62px"><col style="width:58px"><col style="width:72px"></colgroup>
+          <thead><tr><th>EDGE</th><th>ROWS</th><th>AGE</th><th>STATE</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">mock-Edge-Frankfurt</td><td class="mono">41</td><td class="mono">12s</td><td><span class="pill ok">OK</span></td></tr>
+            <tr><td class="mono">mock-Edge-Virginia</td><td class="mono">18</td><td class="mono">41s</td><td><span class="pill ok">OK</span></td></tr>
+            <tr><td class="mono">mock-Edge-Shanghai</td><td class="mono">9</td><td class="mono">2m 10s</td><td><span class="pill ok">OK</span></td></tr>
+            <tr><td class="mono">mock-Edge-Singapore</td><td class="mono">6 / 6 미실행</td><td class="mono">—</td><td><span class="pill bad">무보고</span></td></tr>
+            <tr><td class="mono">mock-Edge-Seoul</td><td class="mono">0</td><td class="mono">8s</td><td><span class="pill off">배정 없음</span></td></tr>
+            <tr><td class="mono">중앙(직접)</td><td class="mono">22</td><td class="mono">live</td><td><span class="pill ok">OK</span></td></tr>
+          </tbody>
+        </table>
+        <div class="note">무보고 엣지의 항목은 ‘알 수 없음’(stale 아님 — unknown) · 무보고/재개 알림은 이미 있음(svcmonSilence)</div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:420px minmax(0,1fr) 360px;gap:10px">
+      <div class="w">
+        <div class="wh">호스트 맵 · 대상 44 · 법인별 · 최악 상태<em>hex = target</em></div>
+        <svg viewBox="0 0 396 150" width="100%" height="150" role="img" aria-label="대상 44개를 법인별로 육각형으로 늘어놓고 최악 상태 색으로 칠한 호스트 맵">
+          <defs><polygon id="hx" points="0,-11 9.5,-5.5 9.5,5.5 0,11 -9.5,5.5 -9.5,-5.5"/></defs>
+          <text x="12" y="14">PL-WRO 14</text>
+          <g fill="#3ddc84"><use href="#hx" transform="translate(22,34)"/><use href="#hx" transform="translate(42,34)"/><use href="#hx" transform="translate(62,34)"/><use href="#hx" transform="translate(82,34)"/><use href="#hx" transform="translate(102,34)"/><use href="#hx" transform="translate(32,52)"/><use href="#hx" transform="translate(52,52)"/><use href="#hx" transform="translate(72,52)"/><use href="#hx" transform="translate(112,52)"/><use href="#hx" transform="translate(22,70)"/><use href="#hx" transform="translate(42,70)"/></g>
+          <g fill="#f0a92e"><use href="#hx" transform="translate(122,34)"/><use href="#hx" transform="translate(92,52)"/></g>
+          <g fill="#ff5c5c"><use href="#hx" transform="translate(62,70)"/></g>
+          <text x="152" y="14">US-IAD 9</text>
+          <g fill="#3ddc84"><use href="#hx" transform="translate(162,34)"/><use href="#hx" transform="translate(182,34)"/><use href="#hx" transform="translate(202,34)"/><use href="#hx" transform="translate(222,34)"/><use href="#hx" transform="translate(172,52)"/><use href="#hx" transform="translate(192,52)"/><use href="#hx" transform="translate(212,52)"/><use href="#hx" transform="translate(162,70)"/></g>
+          <g fill="#ff5c5c"><use href="#hx" transform="translate(232,52)"/></g>
+          <text x="262" y="14">KR-ICN 8</text>
+          <g fill="#3ddc84"><use href="#hx" transform="translate(272,34)"/><use href="#hx" transform="translate(292,34)"/><use href="#hx" transform="translate(312,34)"/><use href="#hx" transform="translate(332,34)"/><use href="#hx" transform="translate(282,52)"/><use href="#hx" transform="translate(302,52)"/><use href="#hx" transform="translate(322,52)"/></g>
+          <g fill="#f0a92e"><use href="#hx" transform="translate(342,52)"/></g>
+          <text x="12" y="98">CN-SHA 5</text>
+          <g fill="#3ddc84"><use href="#hx" transform="translate(22,118)"/><use href="#hx" transform="translate(42,118)"/><use href="#hx" transform="translate(62,118)"/><use href="#hx" transform="translate(82,118)"/></g>
+          <g fill="#ff5c5c"><use href="#hx" transform="translate(102,118)"/></g>
+          <text x="152" y="98">SG-SIN 4 · 무보고</text>
+          <g fill="#475569"><use href="#hx" transform="translate(162,118)"/><use href="#hx" transform="translate(182,118)"/><use href="#hx" transform="translate(202,118)"/><use href="#hx" transform="translate(222,118)"/></g>
+          <text x="262" y="98">전역 · 수동 4</text>
+          <g fill="#3ddc84"><use href="#hx" transform="translate(272,118)"/><use href="#hx" transform="translate(292,118)"/><use href="#hx" transform="translate(312,118)"/></g>
+          <g fill="#f0a92e"><use href="#hx" transform="translate(332,118)"/></g>
+        </svg>
+        <div class="legend"><span><i style="background:#3ddc84"></i>ok</span><span><i style="background:#f0a92e"></i>warn</span><span><i style="background:#ff5c5c"></i>alert</span><span><i style="background:#475569"></i>unknown(무보고)</span><span style="margin-left:auto">클릭 → 트리에서 선택</span></div>
+      </div>
+      <div class="w">
+        <div class="wh">응답 느린 점검 TOP 8 · 최근 결과<em>reply ms</em></div>
+        <div class="tl">
+          <div><span class="k">vc-br-sao · HTTP /sdk/…</span><span class="bar"><i style="width:100%;background:#f0a92e"></i></span><span class="n">1,842 ms</span></div>
+          <div><span class="k">vc-me-uae · HTTP /sdk/…</span><span class="bar"><i style="width:68%;background:#f0a92e"></i></span><span class="n">1,251 ms</span></div>
+          <div><span class="k">smtp · 배너+EHLO</span><span class="bar"><i style="width:60%;background:#f0a92e"></i></span><span class="n">2,104 ms</span></div>
+          <div><span class="k">vc-us-east · 인증서 443</span><span class="bar"><i style="width:34%"></i></span><span class="n">620 ms</span></div>
+          <div><span class="k">nsx-mgr-ashburn · HTTP</span><span class="bar"><i style="width:30%"></i></span><span class="n">551 ms</span></div>
+          <div><span class="k">r750-iad-b03 · /redfish/v1/</span><span class="bar"><i style="width:22%"></i></span><span class="n">402 ms</span></div>
+          <div><span class="k">pmax-2500-icn · TCP 8443</span><span class="bar"><i style="width:9%"></i></span><span class="n">161 ms</span></div>
+          <div><span class="k">edge-frankfurt · /api/health</span><span class="bar"><i style="width:7%"></i></span><span class="n">131 ms</span></div>
+        </div>
+        <div class="note">고RTT 법인(브라질·UAE)은 엣지 배정이 없어 중앙에서 재고 있다 — 값이 회선 왕복을 포함한다. 엣지 배정이 생기면 수십 ms 로 내려간다(xfer-ping 실측과 같은 구조).</div>
+      </div>
+      <div class="w">
+        <div class="wh">연속 실패 · 인증서 만료 임박<em>streak · cert D-days</em></div>
+        <table>
+          <colgroup><col><col style="width:84px"><col style="width:70px"></colgroup>
+          <thead><tr><th>TEST</th><th>STATE</th><th>VALUE</th></tr></thead>
+          <tbody>
+            <tr><td>san-brocade-iad-02 · SSH 22</td><td><span class="pill bad">ALERT</span></td><td class="mono">×412</td></tr>
+            <tr><td>r750-fra-c07 · /redfish/v1/</td><td><span class="pill bad">ALERT</span></td><td class="mono">×38</td></tr>
+            <tr><td>r750-sha-a02 · TCP 443</td><td><span class="pill bad">ALERT</span></td><td class="mono">×6</td></tr>
+            <tr><td>vc-cn-east · HTTP /sdk/…</td><td><span class="pill bad">ALERT</span></td><td class="mono">×3</td></tr>
+            <tr><td>nsx-mgr-frankfurt · cert</td><td><span class="pill warn">WARN</span></td><td class="mono">D-21</td></tr>
+            <tr><td>ome-seoul · cert</td><td><span class="pill warn">WARN</span></td><td class="mono">D-26</td></tr>
+            <tr><td>edge-shanghai · cert</td><td><span class="pill warn">WARN</span></td><td class="mono">D-38</td></tr>
+          </tbody>
+        </table>
+        <div class="note">연속 횟수는 폴러가 이미 센다(streak) — 개선 ② 실패 알림은 이 전이를 쓴다</div>
+      </div>
+    </div>
+
+    <div class="w">
+      <div class="wh">상태 전이 이벤트<em>결과 상태 변화만 · 폴링 15s</em></div>
+      <div class="ev"><span class="t">15:21:40</span><span class="pill bad">ok→bad</span><span>vc-cn-east · HTTP /sdk/vimServiceVersions.xml — ECONNREFUSED · 엣지 mock-Edge-Shanghai · 3회 연속 → 알림 발송(개선 ② · key svcmon.test.bad:t-4c1a9e)</span></div>
+      <div class="ev"><span class="t">15:12:05</span><span class="pill warn">ok→warn</span><span>smtp · 배너+EHLO — 2,104 ms &gt; warnMs 2,000</span></div>
+      <div class="ev"><span class="t">14:58:30</span><span class="pill ok">bad→ok</span><span>r750-iad-b03 · /redfish/v1/ — 200 · 402 ms · 실패 9분</span></div>
+      <div class="ev"><span class="t">14:50:02</span><span class="pill off">disabled</span><span>설정 연동 — 새 대상 8 중지 상태로 등록(배치 settings:20261106-1450) · 담당 엣지 배정 동기화 Frankfurt(+8)</span></div>
+      <div class="note">원천 — 상태·응답·연속: /svcmon/state · 시간 집계: /svcmon/log/analyze · 엣지: /svcmon/edge-state · 전이 이벤트는 새로 쌓아야 한다(지금은 결과만 있고 이력 큐가 없다 — 메모리 링버퍼 500건 + CSV 로그).</div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1180}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

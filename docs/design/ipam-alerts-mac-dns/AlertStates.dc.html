@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>IP 변화 알림의 상태 8종</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.5}
+a{color:#60a5fa}a:hover{color:#93c5fd}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+.muted{color:#8b9bb4}
+.badge{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap}
+.badge.green{background:rgba(34,197,94,.15);color:#4ade80}
+.badge.amber{background:rgba(245,158,11,.15);color:#fbbf24}
+.badge.red{background:rgba(239,68,68,.15);color:#f87171}
+.badge.gray{background:rgba(139,155,180,.15);color:#8b9bb4}
+.badge.blue{background:rgba(59,130,246,.15);color:#60a5fa}
+.st{box-sizing:border-box;min-width:0;background:linear-gradient(180deg,#141b2d,#111726);border:1px solid #243049;border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+.st h3{margin:0;font-size:13px;font-weight:700;display:flex;align-items:center;gap:8px}
+.st h3 i{font-style:normal;display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:#1a2236;border:1px solid #243049;font-size:11px;color:#8b9bb4;flex:none}
+.cell{border:1px solid #1f2a40;border-radius:8px;background:#0f1626;padding:9px 12px;display:flex;flex-direction:column;gap:6px;min-height:44px;justify-content:center;font-size:12.5px}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:7px;min-width:0}
+.rule{font-size:12px;color:#8b9bb4;line-height:1.65}
+.rule b{color:#e6edf6;font-weight:600}
+</style>
+</helmet>
+<div style="box-sizing:border-box;padding:20px 24px 28px;max-width:1240px;display:flex;flex-direction:column;gap:14px;min-width:0">
+
+  <div style="display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:10px">
+    <span style="font-size:15px;font-weight:700">IP 변화 알림 — 알리지 않는 경우와 줄이는 경우 8종</span>
+    <span class="muted" style="font-size:12px">보지 못한 것을 ‘변화’ 로 세지 않습니다 · 주소 · 이름은 가상</span>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px">
+
+    <div class="st">
+      <h3><i>1</i>대역을 처음 스캔</h3>
+      <div class="cell">
+        <div class="row"><span class="badge gray">기준선</span><span class="mono">10.230.4.0/24</span></div>
+        <div class="row"><span class="muted">응답 38개 기록 · 알림 없음</span></div>
+      </div>
+      <div class="rule">대역 한 줄을 <b>처음 끝까지 스캔한 결과</b>는 기준선입니다. 그다음 스캔부터 처음 보이는 IP 가 ‘새 미등록 IP’ 입니다.</div>
+    </div>
+
+    <div class="st">
+      <h3><i>2</i>한 번에 너무 많음</h3>
+      <div class="cell">
+        <div class="row"><span class="badge blue">새 미등록 IP</span><b>73개</b></div>
+        <div class="row"><span class="muted">요약 1건 · 목록 없음</span></div>
+      </div>
+      <div class="rule">묶음 상한(설정값)을 넘으면 <b>요약 한 건</b>만 보냅니다. 대역을 넓혔거나 장애에서 복구된 경우가 대부분입니다.</div>
+    </div>
+
+    <div class="st">
+      <h3><i>3</i>두 MAC 사이를 오감</h3>
+      <div class="cell">
+        <div class="row"><span class="badge amber">MAC 변경</span><span class="mono">10.210.5.9</span></div>
+        <div class="row"><span class="badge gray">이중화 의심</span><span class="muted">최근 6회 중 4회 전환</span></div>
+      </div>
+      <div class="rule">같은 두 MAC 을 오가면 <b>처음 한 번만</b> 알리고 ‘이중화 의심’ 으로 표시합니다. 알림 제외는 사람이 정합니다(자동으로 빼지 않음).</div>
+    </div>
+
+    <div class="st">
+      <h3><i>4</i>스캔이 끝까지 못 감</h3>
+      <div class="cell">
+        <div class="row"><span class="badge amber">스캔 미완료</span><span class="muted">시한 초과</span></div>
+        <div class="row"><span class="muted">변화 판정 보류</span></div>
+      </div>
+      <div class="rule">시한에 걸린 스캔은 이름 · MAC 단계에 닿지 못합니다. <b>비교하지 않고</b> 다음 완료 스캔을 기다립니다(지금의 해제 판정 보류와 같은 규칙).</div>
+    </div>
+
+    <div class="st">
+      <h3><i>5</i>다른 서브넷의 IP</h3>
+      <div class="cell">
+        <div class="row"><span class="mono">10.44.2.17</span><span class="muted">MAC —</span></div>
+        <div class="row"><span class="muted">충돌 · MAC 변경 판정 안 함</span></div>
+      </div>
+      <div class="rule">MAC 은 스캐너와 <b>같은 서브넷</b>에서만 보입니다. 모르는 MAC 을 ‘변경 없음’ 으로 읽지 않습니다 — 그 IP 는 새 IP · 예약 · 호스트명 변화만 봅니다.</div>
+    </div>
+
+    <div class="st">
+      <h3><i>6</i>이전 버전 에이전트</h3>
+      <div class="cell">
+        <div class="row"><span>edge-site-b</span><span class="badge gray">방식 보고 없음</span></div>
+        <div class="row"><span class="muted">새 IP · 예약 IP · 역DNS 이름 변경만</span></div>
+      </div>
+      <div class="rule">MAC · 확인 방식을 보내지 않는 엣지는 <b>알 수 있는 변화만</b> 봅니다. 엣지가 올라오면 그 스캔을 기준선으로 삼아 MAC 을 기록하기 시작합니다.</div>
+    </div>
+
+    <div class="st">
+      <h3><i>7</i>보내지 못함</h3>
+      <div class="cell">
+        <div class="row"><span class="badge red">발송 실패</span><span class="muted">Slack 403</span></div>
+        <div class="row"><span class="muted">IP 변화 페이지 ‘알림’ 칸에 표시</span></div>
+      </div>
+      <div class="rule">채널이 거부하면 지금의 알림 엔진 규칙대로 다시 시도하고, 끝내 실패하면 <b>실패로 표시</b>합니다. 변화 기록은 발송과 무관하게 남습니다.</div>
+    </div>
+
+    <div class="st">
+      <h3><i>8</i>기록만</h3>
+      <div class="cell">
+        <div class="row"><span class="badge gray">규칙 꺼짐</span><span class="badge gray">에이전트 제외</span></div>
+        <div class="row"><span class="muted">페이지에는 남음</span></div>
+      </div>
+      <div class="rule">규칙을 껐거나 ‘알리지 않을 에이전트’ 면 <b>보내지 않고 기록만</b> 합니다. 기록은 보존 기간이 지나면 지웁니다(스캔 결과와 같은 보존 일수).</div>
+    </div>
+
+  </div>
+
+  <div class="rule" style="border:1px solid #243049;border-radius:10px;background:#0f1626;padding:10px 14px">
+    <b>충돌 의심의 해소</b> — 다음 완료 스캔에서 그 IP 에 vCenter 가 아는 MAC 이 응답하거나, vCenter 에서 그 VM 의 IP 가 바뀌면 해소로 봅니다. 스캔이 그 IP 를 보지 못한 동안은 해소도 유지도 아닌 ‘모름’ 으로 두고 알림을 다시 보내지 않습니다.
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1240,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

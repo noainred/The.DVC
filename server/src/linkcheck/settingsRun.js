@@ -28,7 +28,7 @@ export function identityCheckerFor(kind, target = {}, ctx = {}) {
     return { json: (j) => (t(j?.RedfishVersion) || t(j?.['@odata.id']) ? null : 'Redfish 서비스 루트가 아닙니다 — 이 주소가 iDRAC 이 아닐 수 있습니다.') };
   }
   if (id === 'edge') {
-    const c = ctx.collectors?.get?.(t(target.ref)) || ctx.collectors?.get?.(t(target.name)) || null;
+    const c = ctx.collectors?.get?.(t(target.ref)) || ctx.collectorsByName?.get?.(t(target.name)) || null;   // 16회차 T-2: ref = id · 이름은 유일할 때만
     if (!c) return null;
     const others = (ctx.collectorIds || []).filter((x) => x !== t(c.id));
     return { json: (j) => { const iss = identityIssue({ id: t(c.id), name: t(c.name) }, j, others); return iss ? iss.reason : null; } };
@@ -53,7 +53,7 @@ function headersFor(kind, target, ctx) {
   const h = { Accept: 'application/json, application/xml, text/xml, */*' };
   if (spec?.probe?.authMode !== 'token') return { headers: h };
   if (kind === 'set:collector') {
-    const c = ctx.collectors?.get?.(t(target.ref)) || ctx.collectors?.get?.(t(target.name)) || null;
+    const c = ctx.collectors?.get?.(t(target.ref)) || ctx.collectorsByName?.get?.(t(target.name)) || null;   // 16회차 T-2: ref = id · 이름은 유일할 때만
     const tok = t(c?.token);
     if (!tok) return { skip: '이 수집 서버에 토큰이 저장돼 있지 않습니다 — 설정 › 엣지·원격 › 수집 서버(원격)에서 토큰을 넣으세요.' };
     return { headers: { ...h, 'X-Collector-Token': tok } };

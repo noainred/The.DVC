@@ -169,6 +169,17 @@ function macOf(seed) {
  * @param {number} now
  * @param {{watts?:number|null}} [o]
  */
+const DEMO_OS = Object.freeze([
+  ['Red Hat Enterprise Linux', '9.2'], ['Rocky Linux', '9.3'], ['Microsoft Windows Server 2022 Standard', '10.0.20348'], ['Ubuntu', '22.04.4 LTS'],
+]);
+/** 데모 OS 이름 — ESXi 호스트는 VMware ESXi, 베어메탈은 목록에서 고정 선택 · 5대에 1대는 iSM 없음(빈 값). */
+function demoOsOf(id, kind) {
+  const h = demoHash(`os|${id}`);
+  if (h % 5 === 0) return {};
+  if (kind === 'esxi') return { osName: 'VMware ESXi', osVersion: '8.0.2' };
+  const [osName, osVersion] = DEMO_OS[h % DEMO_OS.length];
+  return { osName, osVersion };
+}
 export function demoInventory(server, p, now = Date.now(), { watts = null } = {}) {
   const id = String(server.id);
   const plan = demoFaultPlan(id, now);
@@ -187,6 +198,8 @@ export function demoInventory(server, p, now = Date.now(), { watts = null } = {}
       hostName, model: p.model, manufacturer: 'Dell Inc.', serviceTag: tag, serialNumber: `CN${String(demoHash(`sn|${id}`)).slice(0, 10)}`,
       sku: tag, hpe: false, assetTag: '', uuid: `4c4c4544-00${String(demoHash(`u|${id}`) % 100).padStart(2, '0')}-4d10-80${String(demoHash(`u2|${id}`) % 100).padStart(2, '0')}-${tag.toLowerCase().padEnd(12, '0').slice(0, 12)}`,
       biosVersion: bios, powerState: 'On', health: sysHealth, indicatorLED: 'Off',
+      // v3.3.0: OS 이름(iDRAC ServerOS 속성 — iSM 이 있어야 채워진다). 데모는 서버마다 고정 — 5대에 1대는 iSM 없음(빈 값)으로 '—' 를 보인다
+      ...demoOsOf(id, p.kind),
     },
     idrac: { firmwareVersion: idracFw, model: '15G Monolithic', type: 'BMC', dateTime: new Date(now).toISOString(), ipmiVersion: '2.0' },
     cpu: { count: p.sockets, model: p.cpuModel, cores: p.sockets * p.coresPerSocket, threads: p.sockets * p.coresPerSocket * 2, health: 'OK' },
@@ -211,6 +224,8 @@ export function demoInventory(server, p, now = Date.now(), { watts = null } = {}
     const boss = i < 2;
     const pf = plan.disk && i === diskN - 1;
     return {
+      // Dell 이 Drive 자원에 붙이는 Id(FQDD) 꼴 — 디스크 배드 섹터 이력이 디스크 값 · 로그 위치를 이 Id 로 맞춘다(v3.10.1 데모).
+      id: boss ? `Disk.Direct.${i}-${i}:AHCI.SL.2-1` : `Disk.Bay.${i}:Enclosure.Internal.0-1:RAID.Integrated.1-1`,
       name: boss ? `SSD ${i} (BOSS)` : `Solid State Disk 0:1:${i}`,
       model: boss ? 'MTFDDAV480TDS' : 'KPM6XRUG3T84', serial: `S${String(demoHash(`d${i}|${id}`)).slice(0, 9)}`,
       capacityGB: boss ? 480 : 3840, media: 'SSD', protocol: boss ? 'SATA' : 'SAS',
@@ -289,7 +304,7 @@ const ROLES = [
 ];
 
 /**
- * v2.915 — 시연 규모(물리 서버 1,200대 중 베어메탈 550대)의 역할 사양. 이름의 역할 토큰이 다른 데모 판정에 쓰인다
+ * v3.26.0 — 시연 규모(물리 서버 1,200대 중 베어메탈 550대)의 역할 사양. 이름의 역할 토큰이 다른 데모 판정에 쓰인다
  * (베어메탈 사용률: 이름에 'db' → FC HBA · 'db|gpu' → 25GbE — `baremetal.js demoBmUsageRow`). 전부 Dell(iDRAC 데모가 받친다).
  * gpus: null 이면 GPU 2~4장(서버 해시), 배열이면 그대로.
  */
@@ -399,7 +414,7 @@ export function primeBareMetalSpecs(snapshot) {
 let _seedDone = false;
 /**
  * 베어메탈 시드 — mock 이고, 등록부가 mock 항목뿐일 때만. 사양 캐시는 매번 채운다(재시작 뒤에도 프로필이 같게).
- * v2.915: 예전에는 `mock-bmsrv-` 가 하나라도 있으면 건너뛰었다 — 그러면 v2.914 이전 규모(17대)로 시드된 데모 설치본이
+ * v3.26.0: 예전에는 `mock-bmsrv-` 가 하나라도 있으면 건너뛰었다 — 그러면 v2.914 이전 규모(17대)로 시드된 데모 설치본이
  * 시연 규모(550대)로 늘지 않는다. 이제 **있는 것이 사양의 절반 미만일 때만 빠진 id 를 보충**한다(사람이 데모 서버 몇 대를
  * 지운 것은 되살리지 않는다). 등록부 저장은 한 번에 묶는다(addServer 를 550번 부르면 매번 전체 파일을 다시 쓴다).
  */
@@ -490,7 +505,7 @@ export async function mockIdracDemoTick(snapshot, { now = Date.now() } = {}) {
   if (!_sensorBackfilled) {
     _sensorBackfilled = true;
     // 24시간 · 5분 간격 — 서버 상세 센서 탭·스파크라인이 기동 직후부터 그려지게(실장비 폴러는 1분마다 쌓는다).
-    // v2.915: 시연 규모(789대 × 288시점 ≈ 23만 표본)에서 한 번에 돌면 기동 직후 이벤트 루프가 1초 넘게 멈췄다 — 시점 몇 개마다 양보.
+    // v3.26.0: 시연 규모(789대 × 288시점 ≈ 23만 표본)에서 한 번에 돌면 기동 직후 이벤트 루프가 1초 넘게 멈췄다 — 시점 몇 개마다 양보.
     let steps = 0;
     for (let t = now - DAY; t < now - 4 * MIN; t += 5 * MIN) {
       for (const { server, profile } of list) {
@@ -555,7 +570,7 @@ export async function backfillTrendMetrics(list, { now = Date.now() } = {}) {
   const prof = new Map(list.map((x) => [String(x.server.id), x.profile]));
   const base = analysisServersWithRemote().filter((s) => prof.has(String(s.id)));
   let steps = 0; let rowsN = 0;
-  // v2.915: 서버가 많으면(시연 규모 789대) 최근 24시간을 15분 간격으로 — 5분이면 14일 250만 행(약 630MB)이었다.
+  // v3.26.0: 서버가 많으면(시연 규모 789대) 최근 24시간을 15분 간격으로 — 5분이면 14일 250만 행(약 630MB)이었다.
   for (const t of backfillTimes(now, { recentStepMs: list.length > 300 ? 15 * MIN : 5 * MIN })) {
     const fake = base.map((s) => {
       const r = demoSensorReadingAt(prof.get(String(s.id)), t);
@@ -580,7 +595,7 @@ export async function backfillTrendMetrics(list, { now = Date.now() } = {}) {
     push('', 'inlet', rep.totals?.inlet); push('', 'exhaust', rep.totals?.exhaust); push('', 'cpu', rep.totals?.cpu);
     if (rows.length) { db.insertMany(rows, t); rowsN += rows.length; }
     steps += 1;
-    // v2.915: 시점마다 수천 행 — 서버가 많으면 매 시점 양보(예전 4시점마다는 시연 규모에서 한 번에 1만 행 넘게 붙잡았다).
+    // v3.26.0: 시점마다 수천 행 — 서버가 많으면 매 시점 양보(예전 4시점마다는 시연 규모에서 한 번에 1만 행 넘게 붙잡았다).
     if (list.length > 300 || steps % 4 === 0) await yieldNow();
   }
   console.log(`[mock] iDRAC 추이 데모 백필: ${base.length}대 · ${steps}시점 · ${rowsN}행(14일)`);
@@ -598,7 +613,7 @@ export async function backfillPower(list, { now = Date.now() } = {}) {
     try { const st = db.hourlyStats ? db.hourlyStats(server.id, now - 14 * DAY, now - 2 * DAY) : []; return !(st && st.length >= 3); } catch { return true; }
   });
   if (!need.length) return { skipped: 'exists' };
-  // v2.915: 시점 묶음마다 적재하고 양보한다 — 시연 규모(789대 × 456시점 ≈ 36만 표본)를 한 트랜잭션으로 넣으면 기동 직후 수 초 멈췄다.
+  // v3.26.0: 시점 묶음마다 적재하고 양보한다 — 시연 규모(789대 × 456시점 ≈ 36만 표본)를 한 트랜잭션으로 넣으면 기동 직후 수 초 멈췄다.
   let total = 0; let batch = [];
   const flush = () => { if (batch.length) { db.insertMany(batch); total += batch.length; batch = []; } };
   try {

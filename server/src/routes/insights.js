@@ -3,9 +3,10 @@
  * 토폴로지, 인시던트 타임라인, ChatOps. /api 하위(로그인 필요)에 마운트. 설정 변경은 admin.
  */
 
+import crypto from 'node:crypto';
 import { pageArgs } from '../util/pageArgs.js';
 import { Router } from 'express';
-import { requireRole } from '../auth/auth.js';
+import { requireRole, requirePerm } from '../auth/auth.js';
 import { store, usageReadable } from '../store.js';
 import { scopedVcenterIds } from '../auth/scope.js';
 import { userHasPermission } from '../auth/permissions.js';
@@ -18,12 +19,13 @@ import { unreadVcenterReasons } from '../metrics/unreadVcenters.js'; // v2.733(C
 import { filterMeasuredByMapping, loadPowerSettings } from '../idrac/powerSettings.js';
 import { keepMappedMeasured } from '../idrac/attribution.js';
 import { snapMemo, sendCached } from '../util/snapCache.js';
-import { computeFinOps, loadFinopsConfig, saveFinopsConfig } from '../insights/finops.js';
+import { computeFinOps, loadFinopsConfig, saveFinopsConfig, finopsWriteRefusal } from '../insights/finops.js';
+import { unreadMark } from './settingsUnreadMark.js';   // 112회차: 조회 응답의 읽기 오류 표지
 import { computePowerBreakdown } from '../insights/powerBreakdown.js';
-import { getDatacenterAssign, listDatacenters } from '../datacenter/store.js';
+import { getDatacenterAssign, listDatacenters, datacenterOfVcenter } from '../datacenter/store.js';
 import { getFleetInventory, fleetGhostReport } from '../insights/fleetInventory.js'; // v2.783(점검 Q2 P-B3): prune 은 화면과 같은 유령 판정
-import { setFleetTag, pruneFleetTags, loadFleetTags, applyFleetExclude } from '../insights/fleetTags.js';
-import { setFleetAssign, setFleetAssignMany, applyFleetAssign, pruneFleetAssign, loadFleetAssign } from '../insights/fleetAssign.js';
+import { setFleetTag, pruneFleetTags, loadFleetTags, applyFleetExclude, fleetTagsLoadError } from '../insights/fleetTags.js';
+import { setFleetAssign, setFleetAssignMany, applyFleetAssign, pruneFleetAssign, loadFleetAssign, fleetAssignLoadError, fleetAssignRefusal } from '../insights/fleetAssign.js';
 import { fleetRev } from '../insights/fleetRev.js';
 import { fleetPartialsSummary } from '../central/fleet.js'; // v2.607 LEFT2607-02
 import { loadRegistry, updateServer, assignVcenter } from '../idrac/registry.js';
@@ -36,6 +38,18 @@ import { buildGraph } from '../insights/graph.js';
 import { getIncidents } from '../insights/incidents.js';
 import { chatOps } from '../llm/chatops.js';
 import { isAdminReq, addressMatcher, maskedIdToken, maskedAddressName } from '../auth/addressMask.js';
+import { isDemoGuest } from '../auth/demoGuest.js';
+import { acquireExport } from '../util/exportBusy.js';
+import { fileStamp, localStamp } from '../util/dayKey.js';
+import { getInventory } from '../idrac/invCache.js';
+import { allRemoteServers } from '../collector/remoteInventory.js';
+import { catalogForClient, resolveFields, BASIC_KEYS } from '../insights/hwExport/catalog.js';
+import { makeInvOf, selectServers, buildHwModel, KINDS, UNASSIGNED } from '../insights/hwExport/rows.js';
+import { buildDcIndex, makeCorpOf, VC_PREFIX } from '../insights/hwExport/corp.js';
+import { analysisServersWithRemote, collectorToDatacenterMap, collectorDcMaps } from '../insights/analysisServers.js';
+import { loadCollectors } from '../collector/registry.js';
+import { renderHwExport, SPEC_MAX } from '../insights/hwExport/render.js';
+import { getPrefs as getHwPrefs, setPref as setHwPref, FMTS as HW_FMTS, BANDS as HW_BANDS } from '../insights/hwExport/prefs.js';
 
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
 import { fullScopeOnlyWith } from './admin/shared.js';
@@ -101,6 +115,26 @@ function vcPowerSkippedReport(slice, vcSkip) {
   return loadPowerSettings().includeVcenterPower === false ? null : vcPowerSkippedOf(slice.hosts, vcSkip);
 }
 
+/**
+ * 70회차 F1(범위 누수 · 재현): 범위 조각(scoped — 범위 계정 또는 고른 vCenter)의 측정 전력 목록 — /finops · /power-breakdown 한 함수.
+ *   ① 수동 소속(fleet-assign)은 **전 vCenter** 로 검사한다. 예전에는 조각의 vCenter 집합(validIds)으로 검사해, 관리자가 vc-b 로 옮긴 원격 베어메탈의
+ *      수동 소속이 무시되고 원격 수집기 귀속(vc-a)이 남아 vc-a 범위 계정 · ?vcenterId=vc-a 합계 · topHosts 에 그 서버 이름 · 전력이 실렸다
+ *      (전체 보기와 통합 서버 인벤토리는 vc-b — classifyFleet 은 수동 소속이 원격 귀속을 이긴다). 그 유효성 검사는 '없는 법인으로의 귀속 차단' 이다.
+ *   ② limit(범위 계정 · vCenter 를 고른 보기): 명시 귀속이 조각 밖의 **실제** vCenter 면 이름 · 서비스태그 맞춤으로 조각 안에 끌어오지 않는다 —
+ *      resolveServerVcenter 는 명시 귀속이 조각에 없으면 이름 맞춤으로 넘어가 다른 법인 서버를 조각 vCenter 로 셌다(전체 보기는 그 서버를 명시 vCenter 에 센다).
+ *      중앙 목록에 없는 vCenter(엣지 보고 · 지워진 vCenter)는 예전처럼 이름 · 태그 맞춤에 맡긴다.
+ */
+export function measuredForSlice(raw, snap, scoped, { limit = false } = {}) {
+  const allIds = new Set((snap?.vcenters || []).map((v) => v.id));
+  let measured = filterMeasuredByMapping(applyFleetExclude(applyFleetAssign(raw, allIds)), scoped);
+  if (limit && Array.isArray(measured)) {
+    const inSlice = new Set((scoped?.vcenters || []).map((v) => v.id));
+    const elsewhere = (m) => { const vc = String(m?.vcenterId || '').trim(); return !!vc && allIds.has(vc) && !inSlice.has(vc); };
+    measured = keepMappedMeasured(measured.filter((m) => !elsewhere(m)), scoped);
+  }
+  return measured;
+}
+
 // --- FinOps: 전력 → kWh·비용·CO2 ---
 insightsRouter.get('/finops', async (req, res) => {
   try {
@@ -112,21 +146,20 @@ insightsRouter.get('/finops', async (req, res) => {
     const scopeLimited = scopedVcenterIds(req.user, snap) != null;
     // v2.583(감사 확정): ?vcenterId= 가 키에 없어 다른 vCenter(또는 전체)의 결과가 60초 동안 그대로 나갔다(형제 /power-breakdown 은 넣는다).
     const key = `${snap.generatedAt}|${JSON.stringify(loadPowerSettings())}|${JSON.stringify(loadFinopsConfig())}|${fleetRev()}|${scopeKey(req.user, snap)}|vc:${String(req.query.vcenterId || '')}`;
-    const validIds = new Set((scoped.vcenters || []).map((v) => v.id));
     const payload = await snapMemo('finops', key, 60_000, async () => {
       // v2.733(C2-02): 읽지 못한 vCenter·끊긴 호스트의 vCenter 추정 전력은 '지금 값' 이 아니다 — 합산에서 빼고 개수로 밝힌다.
       const vcSkip = vcPowerSkipOf(scoped);
-      let measured = filterMeasuredByMapping(applyFleetExclude(applyFleetAssign(await allMeasuredPower({ hosts: scoped.hosts, vcenterFirst: true, ...vcSkip }), validIds)), scoped);
       // v2.785(GV P-B4): vCenter 를 고르면(전체 범위 계정 포함) 그 vCenter 에 귀속된 서버만 — 예전에는 범위 계정만 걸러, 전체 범위 계정의
       //   ?vcenterId=X 가 다른 vCenter 서버 전력을 '(미매핑)' 으로 더한 전 함대 값이 됐다(형제 /power-breakdown 은 vcFilter 로 뺀다).
-      if (scopeLimited || String(req.query.vcenterId || '')) measured = keepMappedMeasured(measured, scoped);
+      // 70회차 F1: 수동 소속은 전 vCenter 로 검사 · 조각 밖 실제 vCenter 귀속은 끌어오지 않는다(measuredForSlice).
+      const measured = measuredForSlice(await allMeasuredPower({ hosts: scoped.hosts, vcenterFirst: true, ...vcSkip }), snap, scoped, { limit: scopeLimited || !!String(req.query.vcenterId || '') });
       return { ...computeFinOps(scoped, measured), vcPowerSkipped: vcPowerSkippedReport(scoped, vcSkip) };
     });
     if (isAdminReq(req)) sendCached(req, res, key, payload);
     else sendCached(req, res, `${key}|masked`, maskFinopsPayload(payload, insightsMatcher(snap)));
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
-insightsRouter.get('/finops/config', (_req, res) => res.json(loadFinopsConfig()));
+insightsRouter.get('/finops/config', (_req, res) => res.json({ ...loadFinopsConfig(), ...unreadMark(finopsWriteRefusal()) }));   // 112회차: 못 읽은 동안 단가는 기본값 — 화면이 저장을 잠근다
 
 // --- 전력 분석: 법인(vCenter)·모델·지역별 소비전력 분해 ---
 insightsRouter.get('/power-breakdown', async (req, res) => {
@@ -136,18 +169,19 @@ insightsRouter.get('/power-breakdown', async (req, res) => {
     const assign = getDatacenterAssign();
     const datacenters = listDatacenters();
     // DataCenter 할당/목록이 바뀌면 캐시 무효화되도록 키에 포함.
-    const dcKey = `${JSON.stringify(assign)}|${datacenters.map((d) => `${d.id}:${d.name}`).join(',')}`;
+    const dcKey = `${JSON.stringify(assign)}|${datacenters.map((d) => `${d.id}:${d.name}`).join(',')}|${collectorDcSig()}`;   // v2.972: 수집 서버 ↔ 법인 매칭이 바뀌면 키도
     const scoped = scopeSlice(snap, req.user, vc); // 범위 제한 계정은 자기 vCenter 전력만
     // ⚠ scope 강제(확정 버그 수정) — /finops 와 같은 이유. 이 라우트는 servers[] 로 서버 이름·
     // 서비스태그·모델·와트를 그대로 내려주므로 누수 영향이 더 크다.
     const scopeLimited = scopedVcenterIds(req.user, snap) != null;
     const key = `${snap.generatedAt}|${vc}|${JSON.stringify(loadPowerSettings())}|${fleetRev()}|${dcKey}|${scopeKey(req.user, snap)}`;
-    const validIds = new Set((scoped.vcenters || []).map((v) => v.id));
     const payload = await snapMemo('power-breakdown', key, 60_000, async () => {
       const vcSkip = vcPowerSkipOf(scoped); // v2.733(C2-02) — /finops 와 같은 판정
-      let measured = filterMeasuredByMapping(applyFleetExclude(applyFleetAssign(await allMeasuredPower({ hosts: scoped.hosts, vcenterFirst: true, ...vcSkip }), validIds)), scoped);
-      if (scopeLimited) measured = keepMappedMeasured(measured, scoped);
-      return { ...computePowerBreakdown(scoped, measured, { vcenterId: vc, assign, datacenters }), vcPowerSkipped: vcPowerSkippedReport(scoped, vcSkip) };
+      // 70회차 F1: /finops 와 같은 함수(수동 소속은 전 vCenter 로 검사 · 조각 밖 실제 vCenter 귀속은 끌어오지 않는다).
+      const measured = measuredForSlice(await allMeasuredPower({ hosts: scoped.hosts, vcenterFirst: true, ...vcSkip }), snap, scoped, { limit: scopeLimited || !!vc });
+      let collectorDc = null; let collectorDcManual = null;
+      try { ({ map: collectorDc, manual: collectorDcManual } = collectorDcMaps()); } catch { collectorDc = null; collectorDcManual = null; }   // v2.972: 수집 서버 ↔ 법인 매칭(사용자 지정 → 이름 맞춤)
+      return { ...computePowerBreakdown(scoped, measured, { vcenterId: vc, assign, datacenters, collectorDc, collectorDcManual }), vcPowerSkipped: vcPowerSkippedReport(scoped, vcSkip) };
     });
     if (isAdminReq(req)) sendCached(req, res, key, payload);
     else sendCached(req, res, `${key}|masked`, maskPowerBreakdownPayload(payload, insightsMatcher(snap)));
@@ -157,6 +191,7 @@ insightsRouter.get('/power-breakdown', async (req, res) => {
 //   범위 관리자가 바꿀 수 있었고 감사 기록도 없었다.
 const fleetOnly = fullScopeOnlyWith('FinOps 요금·PUE·탄소 계수는 전 법인 비용 계산에 함께 쓰이는 공용 설정이라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.');
 insightsRouter.put('/finops/config', adminOnly, fleetOnly, (req, res) => {
+  { const no = finopsWriteRefusal(); if (no) return res.status(503).json(no); }   // 107회차: 설정 파일 읽기 오류 중에는 저장하지 않는다(사유를 화면까지)
   const saved = saveFinopsConfig(req.body || {});
   const keys = Object.keys(req.body && typeof req.body === 'object' ? req.body : {}).slice(0, 20).join(',');
   logAudit({ user: req.user?.username, action: 'insights.finops.config', detail: keys || '(빈 변경)', ip: req.ip || '' });
@@ -176,28 +211,210 @@ insightsRouter.get('/fleet', async (req, res) => {
       return res.status(403).json({ ok: false, reason: '통합 서버 인벤토리는 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다.' });
     }
     // 캐시 키: 스냅샷 생성시각 + 플릿 리비전(태그/소속/레지스트리 변경 시 즉시 +1). 매 요청 파일 읽기 없음.
-    const key = `${snap.generatedAt}|${fleetRev()}`;
-    const full = await snapMemo('fleet', key, 60_000, async () => getFleetInventory(snap));
-    const { liveKeys, ...payload1 } = full; // liveKeys는 prune 내부용 — 응답에서 제외
+    const key0 = `${snap.generatedAt}|${fleetRev()}`;
+    const raw = await snapMemo('fleet', key0, 60_000, async () => getFleetInventory(snap));
+    // v2.969: 행마다 법인(DataCenter) — 서버 분석 · 하드웨어 내보내기와 같은 판정(hwCorpContext — 수집한 Agent 의 법인 기준). 법인 설정(목록 · vCenter 할당)이 바뀌면 키가 바뀐다.
+    // 스캔 대역 법인 · 수집 서버 → 법인 · 원격 목록은 fleetRev 를 올리지 않는다 — 1분 단위 칸을 키에 넣어 ETag 도 바뀌게 한다(304 로 옛 본문을 붙잡지 않게 — 반증 2969 F8).
+    const key = `${key0}|dc:${hwDcSignature()}|t:${Math.floor(Date.now() / 60_000)}`;
+    const full = await snapMemo('fleet-corp', key, 60_000, async () => enrichFleetCorp(raw, hwCorpContext(snap)));
+    // liveKeys는 prune 내부용 — 응답에서 제외. bareMetalDupes(다음 점검 ① 2차)도 내부용 — 베어메탈 사용률 라우트가 범위 · 가림을 걸어 따로 내준다.
+    const { liveKeys, bareMetalDupes: _dupes, ...payload1 } = full;
     // 서비스 인벤토리 6차 반증 F2: untaggedServerId(엣지 '태그 없을 때 id' — 고정 승계 내부용)도 응답에서 뺀다.
     //   IP 스캔 등록 iDRAC 은 등록부 id 가 곧 IP 라 'edge:<agent>:10.x.x.x' 가 되어 비관리자 주소 가림(maskFleetPayload)을 비켜 갔다(재현).
-    const payload0 = { ...payload1, bareMetal: Array.isArray(payload1.bareMetal) ? payload1.bareMetal.map(({ untaggedServerId: _u, ...r }) => r) : payload1.bareMetal };
+    // v2.961: collectorId(원격 출처 행의 수집 서버 id — 베어메탈 사용률 위임 판정 내부용)도 응답에서 뺀다.
+    //   반증 F4: 가상화 호스트의 idracCollectorId(받침 원격 항목의 수집 서버 id)도 내부용이라 뺀다.
+    const payload0 = { ...payload1, bareMetal: Array.isArray(payload1.bareMetal) ? payload1.bareMetal.map(({ untaggedServerId: _u, collectorId: _c, ...r }) => r) : payload1.bareMetal,
+      virtualizationHosts: Array.isArray(payload1.virtualizationHosts) ? payload1.virtualizationHosts.map(({ idracCollectorId: _c, ...r }) => r) : payload1.virtualizationHosts };
     // v2.607(감사 LEFT2607-02): 엣지 부분 목록·상한 제외·귀속 비움 요약. 이 라우트는 범위 계정에 403 이라(위) 여기서는 늘 싣는다.
     //   부분 상태는 fleetRev 를 올리지 않을 수 있어(목록 내용이 같으면) ETag 키에 요약을 함께 넣는다.
     const fleetPartials = fleetPartialsSummary({ detail: isAdminReq(req) }); // v2.744(회귀 검토 GD-R1): 등록부 손상 사유의 위치는 관리자에게만(maskFleetPayload 는 이 요약을 건드리지 않는다)
-    const payload = { ...payload0, fleetPartials };
-    const fpKey = `${key}|fp:${JSON.stringify(fleetPartials)}`;
+    // 결정(56~75 남긴 것) 70 ①: 수동 분류 · 소속 파일을 못 읽었으면 그 사실을 싣는다(예전에는 표지 없이 자동 분류만 보였다) — 사유는 요약(파일 조각 없음).
+    const tagsErr = fleetTagsLoadError(); const assignErr = fleetAssignLoadError();
+    const fleetStoreErrors = tagsErr || assignErr ? { ...(tagsErr ? { tags: tagsErr } : {}), ...(assignErr ? { assign: assignErr } : {}) } : null;
+    const payload = { ...payload0, fleetPartials, ...(fleetStoreErrors ? { fleetStoreErrors } : {}) };
+    const fpKey = `${key}|fp:${JSON.stringify(fleetPartials)}|se:${JSON.stringify(fleetStoreErrors)}`;
     if (isAdminReq(req)) sendCached(req, res, fpKey, payload);
     else sendCached(req, res, `${fpKey}|masked`, maskFleetPayload(payload, insightsMatcher(snap)));
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
+// --- 서버 하드웨어 정보 내보내기(v2.967 — 승인 시안 docs/design/baremetal-hw-xlsx · 사용자 기본안 7가지 2026-11-11) ---
+// 게이트는 GET /fleet 과 같다(전체 범위 계정만 — 미귀속 베어메탈 하드웨어가 들어간다) + 파일 내보내기 권한 data.csv(v2.643 규약).
+// 엑셀은 동시 1건(util/exportBusy — 없으면 포탈을 죽인다, security-api.md) · 워커 스레드에서 만든다(insights/hwExport/render.js).
+// 관리자가 아니면 adminOnly 값(iDRAC 주소 · MAC · UUID)은 카탈로그에서 빠지고, 주소로 등록된 서버 이름 · Hostname 은 가린다(maskFleetPayload 와 같은 matcher).
+const hwCsvPerm = requirePerm('data.csv');
+const HW_FULL_SCOPE_REASON = '서버 하드웨어 정보 내보내기는 전체 범위(vCenter 제한 없는) 계정만 쓸 수 있습니다 — 통합 서버 인벤토리와 같은 기준입니다.';
+const hwFullScopeOnly = fullScopeOnlyWith(HW_FULL_SCOPE_REASON);
+async function hwFleetOf(snap) {
+  return snapMemo('fleet', `${snap.generatedAt}|${fleetRev()}`, 60_000, async () => getFleetInventory(snap));   // GET /fleet 과 같은 캐시(같은 키)
+}
+/**
+ * v2.968: 법인 = 법인(DataCenter) — 서버 분석 화면과 같은 판정(insights/hwExport/corp.js 머리말 · 사용자 신고 '법인별 서버 분리가 안 됨').
+ * 서버 분석 목록(스캔 대역 법인 · 서비스태그로 찾은 vCenter 까지 채운 것)으로 색인을 만들고, 행 → 법인 함수와 법인 표시 순서(설정의 법인 순서)를 준다.
+ */
+export function hwCorpContext(snap) {
+  const dcs = (() => { try { return listDatacenters() || []; } catch { return []; } })();
+  const dcNames = new Map(dcs.map((d) => [String(d.id), String(d.name || d.id)]));
+  const vcNames = new Map((snap?.vcenters || []).map((v) => [String(v.id), String(v.name || v.id)]));
+  const dcOfVc = (vc) => { try { return datacenterOfVcenter(vc) || ''; } catch { return ''; } };
+  let index = { byId: new Map(), byTag: new Map() };
+  try { index = buildDcIndex(analysisServersWithRemote(null), dcOfVc); } catch { /* 색인을 못 만들면 vCenter 할당만으로(더 많은 서버가 미지정 — 지어내지 않는다) */ }
+  // 엣지 보고 행의 에이전트 → 법인(수집 서버 id · 이름, 대소문자 무시 — analysisServers.scanSiteIndex 의 agentDc 와 같은 맞춤)
+  let agentDc = () => ''; let collectorIds = [];
+  try {
+    const byCollector = collectorToDatacenterMap();   // 사용자 매칭 → 이름 맞춤(analysisServers.collectorDcMaps 하나)
+    const cols = loadCollectors();
+    collectorIds = cols.map((c) => String(c?.id || '')).filter(Boolean);   // v2.985(P2 · 반증 D4): remote:<수집 서버>:… 최장 일치용
+    const lower = new Map([...byCollector].map(([k, v]) => [String(k).toLowerCase(), v]));
+    for (const c of cols) { const n = String(c?.name || '').toLowerCase(); if (n && !lower.has(n)) lower.set(n, byCollector.get(String(c.id)) || ''); }
+    agentDc = (a) => byCollector.get(a) || lower.get(String(a).toLowerCase()) || '';
+  } catch { /* 수집 서버 등록부를 못 읽으면 에이전트 귀속 없이 */ }
+  const corpOf = makeCorpOf({ index, dcOfVc, dcName: (id) => dcNames.get(id) || '', vcName: (id) => vcNames.get(id) || '', agentDc, collectorIds });
+  return { corpOf, dcOrder: dcs.map((d) => String(d.id)), dcOfVc, datacenters: dcs.map((d) => ({ id: String(d.id), name: String(d.name || d.id) })) };
+}
+/** v2.972: 수집 서버 ↔ 법인 매칭(사용자 지정 · 이름 라벨) 서명 — 매칭을 바꾸면 법인 판정 캐시 키가 바뀌게. */
+export function collectorDcSig() {
+  try { return loadCollectors().map((c) => `${c.id}:${c.datacenterId || ''}:${c.datacenter || ''}`).sort().join(','); } catch { return ''; }
+}
+/** 법인 설정 서명(목록 이름 · vCenter 할당 · 수집 서버 매칭) — /fleet 응답 캐시 키. 못 읽으면 ''(그 경우 fleetRev · 스냅샷으로만 바뀐다). */
+export function hwDcSignature() {
+  try {
+    const list = (listDatacenters() || []).map((d) => `${d.id}=${d.name || ''}`).join(',');
+    const asg = Object.entries(getDatacenterAssign() || {}).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}>${v}`).join(',');
+    return crypto.createHash('sha1').update(`${list}|${asg}|${collectorDcSig()}`).digest('base64').slice(0, 16);
+  } catch { return ''; }
+}
+/**
+ * v2.969(사용자 요청 '통합 서버 인벤토리 화면도 법인(DataCenter) 기준으로' · 'Agent 자동 판정만'): 분류 결과의 행마다 corpId · corpName · corpSource(· 미지정이면 corpWhy)를 싣고,
+ * 법인 목록(corps — 화면 필터 · 칩)과 지정에 쓸 법인(DataCenter) 목록(datacenters), '법인 미지정' 수를 덧붙인다. 원본은 바꾸지 않는다(캐시 공유).
+ */
+export function enrichFleetCorp(full, cc) {
+  if (!full || typeof full !== 'object') return full;
+  const tag = (rows, k) => (Array.isArray(rows) ? rows.map((r) => { const c = cc.corpOf(r, k) || { id: '', name: '미지정', src: '' }; return { ...r, corpId: c.id, corpName: c.id ? c.name : '', corpSource: c.src || '', ...(c.id ? {} : { corpWhy: c.why || '', ...(c.whyCode ? { corpWhyCode: c.whyCode } : {}) }) }; }) : rows);
+  const bareMetal = tag(full.bareMetal, 'bm');
+  const virtualizationHosts = tag(full.virtualizationHosts, 'vh');
+  const out = { ...full, bareMetal, virtualizationHosts, corps: hwCorpRoster(full, cc), datacenters: cc.datacenters || [] };
+  if (full.summary && Array.isArray(bareMetal)) out.summary = { ...full.summary, bareMetalNoCorp: bareMetal.filter((b) => !b.corpId).length };
+  return out;
+}
+/**
+ * 법인 목록(창의 칩) — 서버가 한 대라도 있는 법인만, 설정의 법인 순서 → (법인 할당 없는 vCenter 묶음) → 미지정 순.
+ * 대수는 분류 결과에 같은 corpOf 를 적용해 센다(화면에서 더하지 않게 · 파일과 같은 판정).
+ */
+export function hwCorpRoster(fleet, { corpOf, dcOrder = [] }) {
+  const m = new Map();
+  const bump = (row, k) => {
+    const c = corpOf(row, k) || { id: '', name: '미지정' };
+    const id = c.id || UNASSIGNED;
+    if (!m.has(id)) m.set(id, { id, name: c.id ? c.name : '미지정', bm: 0, vh: 0 });
+    m.get(id)[k]++;
+  };
+  for (const b of fleet?.bareMetal || []) bump(b, 'bm');
+  for (const h of fleet?.virtualizationHosts || []) bump(h, 'vh');
+  const pos = new Map(dcOrder.map((id, i) => [id, i]));
+  const tier = (c) => (c.id === UNASSIGNED ? 2 : c.id.startsWith(VC_PREFIX) ? 1 : 0);
+  const rank = (c) => (pos.has(c.id) ? pos.get(c.id) : Number.MAX_SAFE_INTEGER);
+  return [...m.values()].sort((a, b) => tier(a) - tier(b) || rank(a) - rank(b) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+}
+/** 쿼리 → 내보내기 선택(검증). 모르는 값은 기본값 · 모르는 법인 id 는 버린다. */
+export function hwExportOpts(q, { admin = false, corpIds = [] } = {}) {
+  const pick = (v, list, def) => (list.includes(String(v ?? '')) ? String(v) : def);
+  const format = pick(q.format, HW_FMTS, 'xlsx');
+  const kind = pick(q.kind, KINDS, 'bm');
+  const band = pick(q.band, HW_BANDS, 'band');
+  const spec = format === 'xlsx' && String(q.spec ?? '') === '1';
+  const fields = resolveFields(q.fields ? String(q.fields) : BASIC_KEYS, { admin });
+  let corps = null;
+  const raw = String(q.corps ?? '').trim();
+  if (raw && raw !== 'all') {
+    const known = new Set(corpIds.map(String));
+    corps = new Set(raw.split(',').map((x) => x.trim()).filter((x) => known.has(x)).slice(0, 500));
+    if (!corps.size) return { ok: false, reason: '고른 법인이 없습니다(알 수 없는 법인 id 는 버립니다).' };
+  }
+  return { ok: true, format, kind, band, spec, fields, corps };
+}
+const asciiName = (s) => String(s || '').replace(/[^A-Za-z0-9._-]+/g, '_').replace(/_+/g, '_').slice(0, 120);
+export function hwExportFileBase({ kind, corps, roster, stamp }) {
+  const kindWord = kind === 'vh' ? 'esxi-hosts' : kind === 'both' ? 'all-servers' : 'baremetal';
+  let scope = 'all';
+  if (corps) {
+    const picked = roster.filter((c) => corps.has(c.id));
+    scope = picked.length === 1 ? (picked[0].id === UNASSIGNED ? 'unassigned' : picked[0].name) : `${picked.length}corps`;
+  }
+  return `server-hardware_${kindWord}_${scope}_${stamp}`;
+}
+
+insightsRouter.get('/fleet/hardware-meta', hwCsvPerm, hwFullScopeOnly, async (req, res) => {
+  try {
+    const snap = store.get();
+    const fleet = await hwFleetOf(snap);
+    const admin = isAdminReq(req);
+    const cc = hwCorpContext(snap);
+    // 화면(통합 서버 인벤토리)의 vCenter 필터 → 법인 id('화면 필터대로' 가 쓴다). 법인 할당이 없는 vCenter 는 그 vCenter 묶음.
+    const vcCorp = Object.fromEntries((snap?.vcenters || []).map((v) => [String(v.id), cc.dcOfVc(String(v.id)) || `${VC_PREFIX}${v.id}`]));
+    res.set('Cache-Control', 'no-store').json({
+      ok: true, admin, specMax: SPEC_MAX, catalog: catalogForClient({ admin }), basicKeys: BASIC_KEYS,
+      corps: hwCorpRoster(fleet, cc), vcCorp, prefs: getHwPrefs(req.user?.username)?.def || null,
+    });
+  } catch { res.status(500).json({ ok: false, reason: '내보내기 정보를 만들지 못했습니다.' }); }
+});
+
+insightsRouter.put('/fleet/hardware-prefs', requireRole('admin', 'operator'), hwCsvPerm, hwFullScopeOnly, (req, res) => {
+  if (isDemoGuest(req.user)) return res.status(403).json({ ok: false, reason: '데모 계정은 저장할 수 없습니다.' });
+  const v = req.body && typeof req.body === 'object' ? req.body.value : null;
+  const r = setHwPref(req.user?.username, 'default', v);
+  if (!r.ok) return res.status(r.status || 400).json({ ok: false, reason: r.reason, ...(r.code ? { [r.code]: true } : {}) });
+  res.json({ ok: true, prefs: r.prefs.def });
+});
+
+insightsRouter.get('/fleet/hardware-export', hwCsvPerm, hwFullScopeOnly, async (req, res) => {
+  const snap = store.get();
+  const admin = isAdminReq(req);
+  let fleet;
+  try { fleet = await hwFleetOf(snap); } catch { return res.status(500).json({ ok: false, reason: '통합 서버 인벤토리를 만들지 못했습니다.' }); }
+  const cc = hwCorpContext(snap);
+  const roster = hwCorpRoster(fleet, cc);
+  const o = hwExportOpts(req.query || {}, { admin, corpIds: roster.map((c) => c.id) });
+  if (!o.ok) return res.status(400).json({ ok: false, error: 'bad_request', reason: o.reason });
+  const lock = acquireExport('fleet.hardware.export', req);
+  if (!lock.ok) return res.status(lock.status).json(lock.body);
+  const ac = new AbortController();
+  const onClose = () => { if (!res.writableEnded) ac.abort(); };
+  req.on('close', onClose);
+  try {
+    const invOf = makeInvOf({ getInventory, registry: loadRegistry(), remoteServers: allRemoteServers() });
+    const corpRank = new Map(roster.map((c, i) => [c.id === UNASSIGNED ? '' : c.id, i]));
+    const servers = selectServers(fleet, { kind: o.kind, corps: o.corps, invOf, match: admin ? null : insightsMatcher(snap), corpOf: cc.corpOf, corpRank });
+    const model = await buildHwModel(servers, o.fields, { admin, spec: o.spec });
+    const now = Date.now();
+    const kindText = o.kind === 'vh' ? '가상화 서버(ESXi 호스트)만' : o.kind === 'both' ? '물리서버 + 가상화 서버' : '물리서버(베어메탈)만';
+    const scopeText = o.corps ? roster.filter((c) => o.corps.has(c.id)).map((c) => c.name).join(' · ') : '모든 법인';
+    const meta = { basis: `${scopeText} · ${kindText} · 서버 ${servers.length}대 · 기준 ${localStamp(now)}`, kindText, band: o.band, admin };
+    const base = hwExportFileBase({ kind: o.kind, corps: o.corps, roster, stamp: fileStamp(now) });
+    const out = await renderHwExport(model, { format: o.format, baseName: asciiName(base), meta, signal: ac.signal });
+    logAudit({ user: req.user?.username, action: 'fleet.hardware.export', target: o.kind, detail: `${o.format}${out.ext === 'zip' ? '(zip)' : ''} · 서버 ${servers.length} · 값 ${o.fields.length}${o.spec ? ' · 사양서' : ''}`, ip: req.ip || '' });
+    res.setHeader('Content-Type', out.mime);
+    res.setHeader('Content-Disposition', `attachment; filename="${asciiName(base)}.${out.ext}"; filename*=UTF-8''${encodeURIComponent(`${base}.${out.ext}`)}`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.end(out.buffer);
+  } catch (e) {
+    if (!res.headersSent) {
+      const aborted = e?.code === 'aborted';
+      res.status(aborted ? 499 : 500).json({ ok: false, error: 'export_failed', reason: aborted ? '요청이 끊겨 멈췄습니다.' : `파일을 만들지 못했습니다${e?.code === 'timeout' ? '(시간 초과)' : ''}.` });
+    }
+  } finally {
+    req.off('close', onClose);
+    lock.release();
+  }
+});
+
 // 수동 분류 예외 지정/해제(관리자). body: { key, tag: 'baremetal'|'virtualization'|'exclude'|'auto' }
 // 전체 vCenter 재폴링(store.refresh) 없이 fleetRev만 올려 다음 GET에서 즉시 재계산(고RTT·30개 환경 보호).
 insightsRouter.put('/fleet/tag', adminOnly, fleetFullScopeOnly, (req, res) => {
   const r = setFleetTag(req.body?.key, req.body?.tag);
   if (r.ok) logAudit({ user: req.user?.username, action: '플릿 분류 변경', target: String(req.body?.key || ''), detail: String(req.body?.tag || 'auto'), ip: req.ip || '' });
   // v2.732(점검 2회차 B5-03): 실패(입력 거부·디스크 쓰기 실패)를 200 {ok:false} 로 주던 것 — 형제 /fleet/assign 처럼 400.
-  res.status(r.ok ? 200 : 400).json(r);
+  // 결정(56~75 남긴 것) 70 ①: 파일을 못 읽은 동안의 거절은 409(settings-unreadable — 다른 저장소와 같은 코드).
+  res.status(r.ok ? 200 : r.code === 'settings-unreadable' ? 409 : 400).json(r);
 });
 // 베어메탈 서버의 소속 법인(vCenter) 등록/해제(관리자). body: { serverId, serviceTag, key, vcenterId }.
 // iDRAC 레지스트리에 등록된 서버는 레지스트리 vcenterId(전력 귀속과 공유)를 직접 갱신하고(권위 소스),
@@ -229,7 +446,7 @@ insightsRouter.put('/fleet/assign', adminOnly, fleetFullScopeOnly, (req, res) =>
     serverId: String(req.body?.serverId || '').trim(), serviceTag: String(req.body?.serviceTag || '').trim(),
     key: String(req.body?.key || '').trim(), vcenterId, validIds,
   });
-  if (!r.ok) return res.status(400).json(r);
+  if (!r.ok) return res.status(r.code === 'settings-unreadable' ? 409 : 400).json(r);   // 70 ①
   logAudit({ user: req.user?.username, action: '플릿 법인 귀속', target: String(req.body?.key || req.body?.serviceTag || req.body?.serverId || ''), detail: vcenterId ? `→ ${vcenterId} (${r.via})` : `해제 (${r.via})`, ip: req.ip || '' });
   res.json({ ok: true, via: r.via, vcenterId });
 });
@@ -243,6 +460,8 @@ insightsRouter.put('/fleet/assign-bulk', adminOnly, fleetFullScopeOnly, (req, re
   if (!items.length) return res.status(400).json({ ok: false, reason: 'items가 비었습니다.' });
   const validIds = new Set((store.get().vcenters || []).map((v) => v.id));
   if (vcenterId && !validIds.has(vcenterId)) return res.status(400).json({ ok: false, reason: `존재하지 않는 vCenter id: ${vcenterId}` });
+  // 결정(56~75 남긴 것) 70 ①: 소속 파일을 못 읽은 동안은 레지스트리 몫도 바꾸지 않는다(반쯤 적용된 일괄 귀속을 만들지 않게) — 409.
+  { const no = fleetAssignRefusal(); if (no) return res.status(409).json(no); }
 
   const regIds = new Set(loadRegistry().filter((s) => s.type !== 'ome').map((s) => String(s.id)));
   const regTargets = [];      // 레지스트리 갱신 대상 serverId
@@ -399,13 +618,20 @@ insightsRouter.get('/forecast', async (req, res) => {
 // --- 보안 자세(CVE/EOL) --- 범위 제한 계정은 자기 vCenter 호스트만(전 사이트 ESXi/CVE 노출 방지).
 insightsRouter.get('/security', (req, res) => res.json(computeSecurityPosture(scopeSlice(store.get(), req.user, req.query.vcenterId))));
 
+/** 70회차 F3: 토폴로지 · 구성도의 vCenter 고르기 목록 — 사용자 범위 안 vCenter 전부(요청의 ?vcenterId 로 줄이지 않는다). */
+export function vcPickList(snap, user) {
+  return (scopeSlice(snap, user, null).vcenters || []).map((v) => ({ id: v.id, name: v.name || v.id }));
+}
+
 // --- 토폴로지·의존성 ---
 insightsRouter.get('/topology', async (req, res) => {
   const snap = store.get();
   const vc = req.query.vcenterId || null; const host = req.query.host || null;
   const scoped = scopeSlice(snap, req.user, vc); // 범위 제한 계정은 자기 vCenter 구성만
   const key = `${snap.generatedAt}|${vc || ''}|${host || ''}|${scopeKey(req.user, snap)}`;
-  const payload = await snapMemo('topology', key, 60_000, async () => buildTopology(scoped, { vcenterId: vc, host }));
+  // 70회차 F3: 고르기 목록(vcenters)은 범위 안 vCenter 전부 — 조각(scoped)은 고른 vCenter 하나로 줄어 있어, 하나를 고르면 목록이 그 하나만 남아
+  //   다른 vCenter 로 바로 옮길 수 없었다(트리는 그대로 고른 것만). 범위 밖 vCenter 는 여전히 싣지 않는다(scopeSlice 범위만).
+  const payload = await snapMemo('topology', key, 60_000, async () => ({ ...buildTopology(scoped, { vcenterId: vc, host }), vcenters: vcPickList(snap, req.user) }));
   sendCached(req, res, key, payload);
 });
 
@@ -419,7 +645,7 @@ insightsRouter.get('/graph', async (req, res) => {
   // 명시 전달해야 한다(전 사이트 NSX 매니저 노출 차단 — graph.js allowedVcIds 주석 참고).
   const allowedVcIds = scopedVcenterIds(req.user, snap);
   const key = `${snap.generatedAt}|${vms ? 1 : 0}|${vc || ''}|${host || ''}|${scopeKey(req.user, snap)}`;
-  const payload = await snapMemo('graph', key, 60_000, async () => buildGraph(scoped, { vms, vcenterId: vc, host, allowedVcIds }));
+  const payload = await snapMemo('graph', key, 60_000, async () => ({ ...buildGraph(scoped, { vms, vcenterId: vc, host, allowedVcIds }), vcenters: vcPickList(snap, req.user) })); // 70회차 F3 — /topology 와 같은 목록
   sendCached(req, res, key, payload);
 });
 
@@ -434,5 +660,9 @@ insightsRouter.get('/incidents', (req, res) => res.json(getIncidents({
 insightsRouter.post('/chatops', async (req, res) => {
   // v2.591 S1: inv.* 권한이 없는 종류의 원본 객체·이름을 싣지 않는다(`/search/nl` 과 같은 기준).
   try { res.json(await chatOps(req.body?.question || req.body?.q || '', scopedVcenterIds(req.user, store.get()), { can: (k) => userHasPermission(req.user, k) })); }
-  catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+  catch (e) {
+    // 결정(56~75 남긴 것) 67: LLM 동시 실행 상한(llm/limit.js) — 429 + 사유 '다른 질의 처리 중'.
+    if (e?.status === 429) { res.set('Retry-After', '5'); return res.status(429).json({ ok: false, error: e.code || 'llm-busy', reason: e.message }); }
+    res.status(500).json({ ok: false, reason: e.message });
+  }
 });

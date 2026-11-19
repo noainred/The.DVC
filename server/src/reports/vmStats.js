@@ -60,10 +60,25 @@ export function vmStatsFor(vmId) {
   };
 }
 
-export function vmStatsMeta() {
+/**
+ * 누적기 메타 — 추적 VM 수 · 가장 이른 관측 시작.
+ * 72회차 F1: `ids`(VM id 목록)를 주면 그 VM 들만 센다 — 라이트사이징 리포트가 범위 계정에 **함대 전체** 추적 수와 관측 시작을
+ *   싣고 있었다(범위 밖 VM 수 유출 · 화면 '관측 시작' 도 범위 밖 VM 기준). 주지 않으면 예전처럼 전부.
+ */
+export function vmStatsMeta(ids) {
   let oldest = null;
-  for (const e of acc.values()) if (oldest == null || e.sinceTs < oldest) oldest = e.sinceTs;
-  return { tracked: acc.size, sinceTs: oldest };
+  if (ids == null) {
+    for (const e of acc.values()) if (oldest == null || e.sinceTs < oldest) oldest = e.sinceTs;
+    return { tracked: acc.size, sinceTs: oldest };
+  }
+  let tracked = 0;
+  for (const id of new Set(ids)) {
+    const e = acc.get(id);
+    if (!e) continue;
+    tracked += 1;
+    if (oldest == null || e.sinceTs < oldest) oldest = e.sinceTs;
+  }
+  return { tracked, sinceTs: oldest };
 }
 
 /** 테스트용 초기화. */

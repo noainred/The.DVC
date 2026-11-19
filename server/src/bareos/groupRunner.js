@@ -14,8 +14,9 @@
 import { listGroups, getGroup, claimSlots, recordMisses, recordFire, recordPrune, markSending, groupsLoadError, setSkipKey, recordFireCancel } from './groups.js';
 import { PRUNE_WAIT_MAX_MS } from './groupRetention.js';
 import { decideFire, CATCHUP_MS, slotKey, nextSlot } from './groupSchedule.js';
-import { jobDigests, markPending, patchJob, registryLoadError, inBatch, markCancelReq, applyRunRow, clearPending } from './registry.js';
+import { jobDigests, markPending, patchJob, registryLoadError, inBatch, markCancelReq, applyRunRow, clearPending, runUnknownHeld, markRunUnknown } from './registry.js';
 import { onDirector, isDemoActive, effectiveSettings } from './service.js';
+import { lateRunJobs } from './lateReplies.js'; // v2.938: 엣지 대행 늦은 회신 반영(제안 6번)
 import { jobDirectorId } from './settings.js';
 import { RUN_JOBS_MAX, MID_COMMAND_CODES } from './ops.js';
 import { PICKUP_MS, RESULT_MS } from './edgeOps.js';
@@ -168,6 +169,8 @@ export async function runGroup(groupId, { trigger = 'manual', by = '', level = n
       if (!j.enabled) { it.reason = '비활성 대상입니다 — 백업 대상 탭에서 활성화하세요.'; continue; }
       if (j.missingInDirector) { it.reason = 'Director 에 이 잡이 없습니다(누가 설정을 지웠을 수 있음).'; continue; }
       if (j.pending?.jobid) { it.reason = `이미 실행 중입니다(jobid ${j.pending.jobid}).`; continue; }
+      // 전체 점검 5회차(R-1): 직전 실행 요청이 결과 모름이면(단건 · 다른 그룹 덩어리) 잠시 보내지 않는다 — 단건 '지금 실행' 과 같은 판정(registry.runUnknownHeld)
+      if (runUnknownHeld(j)) { it.reason = '직전 실행 요청의 결과를 모릅니다(Director 가 받았을 수 있습니다) — 같은 백업이 두 번 돌지 않게 잠시 보내지 않습니다. Director 에서 실행 여부를 확인하세요.'; continue; }
       if (!tryLockJob(j.id)) { it.reason = '이 대상의 다른 요청을 처리하는 중입니다.'; continue; }
       locked.push(j.id);
       send.push({ it, job: j, dir: jobDirectorId(j, settings) });
@@ -192,7 +195,7 @@ export async function runGroup(groupId, { trigger = 'manual', by = '', level = n
           const sig = signal || AbortSignal.timeout(RUN_DEADLINE_MS);
           res = await onDirector(dir, 'runJobs', {
             items: chunk.map((s, k) => ({ key: k, job: s.job.bareosJob, level: lvl, ...(g.storage ? { storage: g.storage } : {}), ...(g.pool ? { pool: g.pool } : {}) })),
-          }, { trigger: trigger === 'timer' ? 'timer' : 'manual', signal: sig });
+          }, { trigger: trigger === 'timer' ? 'timer' : 'manual', signal: sig, onLate: lateRunJobs(chunk.map((s) => s.job.id), { level: lvl, by: by || '예약', trigger: trigger === 'timer' ? 'group-schedule' : 'group' }) });   // v2.938 늦은 회신
         } catch (e) {
           // Director 호출이 통째로 실패 — 잡마다 lastError 를 덮지 않는다(잡이 아니라 Director·전달의 문제다 · v2.830 검토 L3)
           const st = chunkErrorState(e);
@@ -201,6 +204,8 @@ export async function runGroup(groupId, { trigger = 'manual', by = '', level = n
             s.it.state = st;
             s.it.reason = st === 'unknown' ? `결과 모름 — ${reasonOf(e)} Director 에서 실행 여부를 확인하세요.` : st === 'notsent' ? `보내지 못함 — ${reasonOf(e)}` : reasonOf(e);
           }
+          // 전체 점검 5회차(R-1): 실패는 잡마다 lastError 를 덮지 않지만(L3) 결과 모름은 표지를 남긴다 — 바로 뒤 단건 · 그룹 '지금 실행' 이 다시 보내지 않게(runUnknownHeld · 쓰기 한 번)
+          if (st === 'unknown') markRunUnknown(chunk.map((s) => s.job.id), `그룹 ‘${g.name}’ 실행 결과 모름 — ${reasonOf(e).slice(0, 200)}`);
           continue;
         }
         const byKey = new Map((Array.isArray(res) ? res : []).map((r) => [r.key, r]));
@@ -213,6 +218,7 @@ export async function runGroup(groupId, { trigger = 'manual', by = '', level = n
             markPending(s.job.id, { jobid: r.jobid, level: lvl, by: by || '예약', trigger: trigger === 'timer' ? 'group-schedule' : 'group' });
             Object.assign(s.it, { state: 'started', jobid: r.jobid });
           } else if (st === 'unknown') {
+            patchJob(s.job.id, { lastError: { at: Date.now(), message: `그룹 ‘${g.name}’ 실행 결과 모름 — Director 에서 확인하세요.`, unknown: true } });   // 전체 점검 5회차(R-1) — inBatch 안이라 쓰기는 한 번
             Object.assign(s.it, { state: 'unknown', reason: r ? `결과 모름 — ${r.message || '명령 도중 연결이 끊겼습니다'} — Director 가 받았는지 알 수 없습니다. Director 에서 확인하세요.` : 'Director 회신에 이 항목이 없습니다 — 실행됐는지 알 수 없습니다.' });
           } else if (st === 'notsent') {
             Object.assign(s.it, { state: 'notsent', reason: r.message || '보내지 못함' });

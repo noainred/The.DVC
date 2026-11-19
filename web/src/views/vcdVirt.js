@@ -4,6 +4,7 @@
 // 'Off VM 포함' 체크박스(v2.333)와의 관계: **합산 대상 VM 은 호출부가 결정한다.** 체크를 해제하면
 // 호출부가 POWERED_OFF 를 제외한 목록을 넘기고, 그러면 CPU·MEM 가상화율도 켜진 VM 기준으로 다시
 // 계산된다(v2.334 — 사용자 요구). 이 모듈은 전원 상태를 보지 않으므로 필터 정책이 한 곳에만 남는다.
+import { hostCapacityKnown } from '../hostCapacity.js';   // 54회차 F5: 용량 판정은 서버와 같은 한 벌
 
 /**
  * 호스트명 -> 할당 vCPU 합계 / 할당 메모리(MB) 합계.
@@ -40,15 +41,17 @@ export function countByHost(vms) {
  *                      /vms 응답 상한에 걸릴 수 있는 대형 vCenter 에서도 전체 수는 서버 값이 정확하다.
  */
 export function virtSum(hosts, vcpu, vmem, vmCount) {
-  let alloc = 0, cores = 0, vmc = 0, memAlloc = 0, memPhys = 0;
+  let alloc = 0, cores = 0, vmc = 0, memAlloc = 0, memPhys = 0, capUnknown = 0;
   for (const h of hosts || []) {
     alloc += (vcpu && vcpu.get(h.name)) || 0;
-    cores += Number(h.cpuCores) || 0;
     vmc += vmCount ? vmCount.get(h.name) || 0 : Number(h.vmCount) || 0;
     memAlloc += (vmem && vmem.get(h.name)) || 0;
-    memPhys += Number(h.memTotalMB) || 0;
+    // 54회차(다른 세션 9 · 10회차 반증 — 재현): 용량(코어 · 메모리)을 못 읽은 호스트가 하나라도 있으면 분모가 부분 합이라 비율이 부풀었다(다 읽었으면 1.25 가 2.5 · 주의 · 위험 색).
+    //   모르면 분모를 null(배지 없음 · 표 '—'). 54회차 F5: 판정은 서버 store.hostCapacityKnown 과 같은 web/src/hostCapacity.js 하나(코어 · MHz · 메모리 셋 —
+    //   예전에는 여기만 두 칸이라 같은 호스트를 서버 요약 · 알림은 '미상' 으로, 이 트리는 '읽음' 으로 판정했다).
+    if (hostCapacityKnown(h)) { cores += h.cpuCores; memPhys += h.memTotalMB; } else capUnknown += 1;
   }
-  return { alloc, cores, vmc, memAlloc, memPhys };
+  return { alloc, cores: capUnknown ? null : cores, vmc, memAlloc, memPhys: capUnknown ? null : memPhys, capUnknown };
 }
 
 /**

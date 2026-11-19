@@ -8,13 +8,20 @@
 //   ⑤ 설정(스냅샷 기준 일수)을 바꾸면 같은 스냅샷에서도 다음 요청부터 새 판정(캐시 키에 설정 개정)
 //   ⑥ /vms/by-vcenter — 법인 합 = 전체 · 평균은 구동 VM 의 평균(법인 평균의 평균 아님) · 모르는 법인은 null · 목록 밖 vCenter 의 VM 은 unlisted 줄
 //   ⑦ 범위 계정 — 자기 vCenter 줄만(다른 법인 이름도 없다) · 요청 필터(vcenterId)로 넓힐 수 없다 · 캐시가 섞이지 않는다
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'vmHub2909-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const TMP = tmpDir('vmHub2909-');
 process.env.CONFIG_DIR = TMP;
 process.env.DATA_SOURCE = 'mock';
 process.env.AUTH_ENABLED = 'false';

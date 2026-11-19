@@ -6,10 +6,10 @@
  * 4066 IRS vCenter, 4067 IRS SSH, 4068 IRS 포탈, 4001 HQ 포탈) **호스트 × 프로파일** 로 점검 대상을 자동 생성한다.
  * 호스트는 수집 서버 목록의 URL 호스트에서 자동으로 뽑고, 수동 호스트를 더할 수 있다. 파일: CONFIG_DIR/relaycheck-settings.json.
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { makeJsonFileLoader } from '../util/jsonFileLoad.js';   // 78회차 F8: 읽기 오류 ≠ 손상 · 못 읽음 표지(결정 G2 공용 로더)
 import { numOrNull } from '../util/numOrNull.js';
 
 const FILE = () => path.join(config.configDir, 'relaycheck-settings.json');
@@ -66,17 +66,25 @@ export function normalizeSettings(input = {}) {
 }
 
 let _cache = null;
+/*
+ * 78회차 F8: 예전 catch 하나는 **읽기 오류**(EACCES · EIO · EISDIR)도 손상으로 보고 온전한 원본을 옮겼고(사유도 없이 — preserveCorrupt(FILE())),
+ *   손상이든 읽기 오류든 기본값(점검 켜짐 · 알림 켜짐 · 수동 호스트 · 제외 목록 없음)으로 **아무 표지 없이** 돌았다 — 화면 · 서비스 점검 어디에도
+ *   설정을 잃었다는 말이 없었고 다음 저장이 그 기본값 위에 썼다. 판정은 공용 로더 하나다: 손상만 보존본으로 옮기고(사유와 함께), 읽기 오류는 원본을 두고
+ *   30초마다 다시 읽으며 그동안 저장을 409 로 거절한다. 오류는 GET 응답(loadError)과 서비스 점검에 실린다. 도는 값은 예전처럼 기본값이다
+ *   (점검 자체는 읽기 전용 프로브라 멈추지 않는다). v2.601 TIM2601-03(객체가 아닌 JSON = 손상)은 아래 parseStrictObject 가 그대로 한다(null 포함).
+ */
+// 78회차: 예전 판정 그대로 — `null` 도 손상이다(공용 parseJsonObject 는 null 을 {} 로 읽는다 · v2.601 TIM2601-03 이 null 파일을 손상 보존으로 고정).
+const parseStrictObject = (t) => { const v = JSON.parse(t); if (!v || typeof v !== 'object' || Array.isArray(v)) throw new SyntaxError('객체가 아닌 JSON 값'); return v; };
+const _file = makeJsonFileLoader(FILE, { label: 'HAProxy 경로 점검 설정(relaycheck-settings.json) — 확정하면 기본값(점검 · 알림 켜짐 · 수동 호스트 없음)으로 저장됩니다', confirm: () => saveSettings({}), parse: parseStrictObject, tag: 'relaycheck' });
+const copyOf = (c) => ({ ...c, profile: c.profile.map((p) => ({ ...p })), hosts: c.hosts.map((h) => ({ ...h })), exclude: [...c.exclude] });
 export function loadSettings() {
-  if (_cache) return { ..._cache, profile: _cache.profile.map((p) => ({ ...p })), hosts: _cache.hosts.map((h) => ({ ...h })), exclude: [..._cache.exclude] };
-  let raw = {};
-  try { if (fs.existsSync(FILE())) raw = JSON.parse(fs.readFileSync(FILE(), 'utf8')); } catch { preserveCorrupt(FILE()); raw = {}; }
-  // v2.601(감사 TIM2601-03 — 재현): 파일 내용이 유효한 JSON 값 null·배열·숫자면 JSON.parse 는 성공해 손상 보존을 건너뛰고
-  // 정규화가 TypeError 로 던졌다(_cache 가 안 채워져 **매 호출** 던진다 → 이 로더를 getMs 로 쓰는 적응 타이머가 멈췄다).
-  // 객체가 아니면 손상으로 보고 보존한 뒤 기본값으로 시작한다(bmusage/settings.js readFile 과 같은 판정).
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) { preserveCorrupt(FILE(), '객체가 아닌 JSON 값'); raw = {}; }
-  _cache = normalizeSettings(raw);
-  return loadSettings();
+  if (_cache && !_file.recheckDue()) return copyOf(_cache);   // 오류 중에는 캐시를 믿지 않고 간격마다 다시 판정(보존본을 되돌리면 재시작 없이 풀린다)
+  const r = _file.load();
+  _cache = normalizeSettings(r.kind === 'ok' ? r.value : {});
+  return copyOf(_cache);
 }
+/** 설정 파일을 못 읽었으면 `{ reason, at, readError }`(요약 — 파일 조각 없음), 읽었으면 null. */
+export function relayCheckSettingsLoadError() { loadSettings(); return _file.marker(); }
 // v2.591 L10: 값이 바뀌면 무장된 타이머를 즉시 재무장하게 알린다(v2.409 '값 변경 시 즉시 재무장' 규약 — vmseries·curuser 와 같은 형태).
 //   없으면 주기를 길게 둔 뒤 줄여도 옛 주기(최대 6시간)가 지나야 새 주기가 먹었다.
 const _listeners = new Set();
@@ -86,6 +94,12 @@ export function saveSettings(input = {}) {
   // v2.604(감사 LEFT2604-02 — 재현): 저장은 전체 교체라, 화면이 비운 칸(Number('')*1000 = 0)이 **기본값**으로 떨어졌다
   //   (6시간 주기 → 5분 · 실패 10회 → 2회 · 오류 없이 '저장됨'). 숫자 칸의 빈 값·0 이하·숫자 아님은 '미지정' = **현재 값 유지**
   //   (세 값 모두 0 이하가 뜻을 갖지 않는다). 양수는 예전처럼 한도로 자른다.
+  // 78회차 F8: 읽기 오류면 원본이 디스크에 그대로 있다 — 기본값 위에 쓰면 그 원본(수동 호스트 · 제외 목록)을 덮는다(라우트 409).
+  loadSettings();
+  if (_file.loadError()?.readError) {
+    const no = _file.refusal('HAProxy 경로 점검 설정');
+    throw Object.assign(new Error(no?.reason || 'HAProxy 경로 점검 설정 파일을 읽지 못해 저장하지 않았습니다.'), { status: 409, code: 'settings-unreadable' });
+  }
   if (input && typeof input === 'object' && !Array.isArray(input)) {
     const cur = loadSettings();
     const merged = { ...input };
@@ -96,7 +110,8 @@ export function saveSettings(input = {}) {
   const next = normalizeSettings(input);
   atomicWriteFileSync(FILE(), JSON.stringify({ version: 1, ...next }, null, 2), { mode: 0o600 });
   _cache = next;
+  _file.saved();
   notifyChange();
   return loadSettings();
 }
-export function _resetForTest() { _cache = null; }
+export function _resetForTest() { _cache = null; _file.saved(); }

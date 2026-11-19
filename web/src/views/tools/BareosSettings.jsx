@@ -18,7 +18,9 @@ import {
   VMWARE_POOL_FULL, VMWARE_SCHEDULE, WEEKDAYS, WEEKDAY_LABEL, MAPPING_FIELDS, newMappingRow, vcSlug,
   fillResultText, directorPlanFiles, directorConflicts, freeConsoleName, consoleTaken, conflictText, ownFromPaths, catalogErrorText,
   directorAgentAdvice, directorAgentAdviceText, defaultsPatch, mergeDefaultsOnReload,
+  bindAllowed, BIND_ONE_TEXT, BIND_PEER_TEXT, SHARED_DIRECTOR_TEXT,   // 52회차 D1 · 104회차 같은 Director 의 다른 등록
 } from './bareosText.js';
+import { copyText as copyToClipboard } from '../../util/copyText.js';   // v3.10.6: HTTP 포탈에서도 복사(Clipboard API → execCommand 폴백 · 실패는 false)
 
 /**
  * Bareos VM 백업 › 설정(v2.823 법인별 Director — 전체 범위 관리자).
@@ -50,7 +52,7 @@ const hostOf = (v) => String(v?.host || '').replace(/^https?:\/\//, '').replace(
 /** 클립보드 복사 + 결과 안내(W13 — 실패를 삼키지 않는다). */
 const copyWith = (say) => (text) => {
   const fail = () => say({ ok: false, text: '복사하지 못했습니다 — 글을 직접 선택해 복사하세요.' });
-  try { navigator.clipboard.writeText(text).then(() => say({ ok: true, text: '복사했습니다.' }), fail); } catch { fail(); }
+  copyToClipboard(text).then((ok) => (ok ? say({ ok: true, text: '복사했습니다.' }) : fail()), fail);
 };
 
 function Msg({ m }) {
@@ -82,6 +84,16 @@ export function DiagStages({ stages }) {
 // v2.878: hashBase — 구획 주소의 앞부분. 기본은 새 자리(전체 설정 › vCenter 관리 › Bareos 백업 서버 = #/settings/bareos/<구획>) ·
 //   설정 화면을 못 여는 관리자는 예전 자리(#/tools/bareos-backup/settings/<구획>)에서 같은 화면을 쓴다(BareosBackupTool).
 export const SETTINGS_HASH_BASE = Object.freeze(['settings', 'bareos']);
+/** 전체 점검 6회차(W-5): Director 자동 설정의 풀 값 — 보낼 값과 미리 보기가 같은 하나 · 범위는 서버 autoSetup.normVmwareExtras 와 같다. */
+export function dirPoolsOf(d) { return { fullDays: Number(d?.fullDays), incrDays: Number(d?.incrDays), maxVolumeGB: Number(d?.maxVolumeGB) }; }
+export function dirPoolsIssue(d) {
+  const p = dirPoolsOf(d);
+  const ok = (x, max) => Number.isInteger(x) && x >= 1 && x <= max;
+  if (!ok(p.fullDays, 3650) || !ok(p.incrDays, 3650)) return '풀 보존 기간(1~3650일)';
+  if (!ok(p.maxVolumeGB, 1024)) return '볼륨 최대 크기(1~1024 GB)';
+  return '';
+}
+
 export default function SettingsTab({ onSaved, writable = true, hashBase = SETTINGS_HASH_BASE }) {
   const [s, setS] = useState(null);
   const [err, setErr] = useState(null);
@@ -187,7 +199,7 @@ export default function SettingsTab({ onSaved, writable = true, hashBase = SETTI
                     <td data-sort={d.host || ''} style={{ fontSize: 12.5 }}><span style={{ fontFamily: 'var(--font-mono)' }}>{d.host ? `${d.host}:${d.port}` : '—'}</span><div className="muted" style={{ fontSize: 11.5 }}>콘솔 {d.consoleName || '—'} · {d.tlsMax || '—'}</div></td>
                     <td data-sort={d.agent || ''} style={{ fontSize: 12.5 }}>{d.agent ? <span className="badge blue">엣지 {d.agent}</span> : <span className="muted">중앙 직접</span>}</td>
                     <td>{d.hasPassword ? <span className="badge green">저장됨</span> : <span className="badge gray">없음</span>}</td>
-                    <td data-sort={vcs.length} style={{ fontSize: 12.5 }}><div style={{ maxWidth: 320, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{vcs.length ? `${vcs.length} · ${vcs.join(' · ')}` : '—'}</div></td>
+                    <td data-sort={vcs.length} style={{ fontSize: 12.5 }}><div style={{ maxWidth: 320, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{vcs.length ? `${vcs.length} · ${vcs.join(' · ')}` : '—'}</div>{vcs.length > 1 && !s.demo && <span className="badge amber" title={SHARED_DIRECTOR_TEXT}>vCenter 둘 이상</span>}</td>
                     <td className="right" data-sort={d.jobs ?? 0}>{d.jobs ?? 0}</td>
                     <td><button type="button" className="logout-btn" style={BTN} onClick={() => setSel(sel === d.id ? '' : d.id)}>{sel === d.id ? '닫기' : '편집'}</button></td>
                   </tr>
@@ -447,6 +459,7 @@ function DirectorEditor({ s, dir, locked, onReload, onSaved, onClose, onDeleted 
 
   // vCenter 묶기 — 표의 행이 곧 매핑이다(체크하면 빈 매핑 행을 만든다 · 저장은 아래 '매핑 저장')
   const bound = new Set(rows.map((x) => x.vcenterId));
+  const savedHere = new Set(mine.map((x) => x.vcenterId));   // 52회차 D1: 저장된 짝은 그대로 둔다
   // W2·W17: 새로 묶으면 vcserver(등록부 주소)·INI 경로를 미리 채우고, 저장된 vCenter 를 껐다 켜면 저장본을 되살린다
   const toggleVc = (vc, on) => {
     if (on) {
@@ -545,20 +558,28 @@ function DirectorEditor({ s, dir, locked, onReload, onSaved, onClose, onDeleted 
         <div className="card" style={{ padding: 12, minWidth: 0, background: 'var(--panel-deep)' }}>
           <b>이 Director 에 묶는 vCenter</b>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8, maxHeight: 260, overflow: 'auto' }}>
-            {s.vcenters.map((v) => {
+            {(() => {
+              // 104회차: 같은 Director(주소 · 포트 · 담당)를 가리키는 다른 등록에 저장된 vCenter — 서버가 준 sameEndpoint(판정은 서버 하나)
+              const peerIds = new Set(dir.sameEndpoint || []);
+              const peerSaved = new Set(s.sites.filter((x) => peerIds.has(x.directorId)).map((x) => x.vcenterId));
+              return s.vcenters.map((v) => {
               const other = s.sites.find((x) => x.vcenterId === v.id && x.directorId !== dir.id);
               const otherName = other ? s.directors.find((d) => d.id === other.directorId)?.name || other.directorId : '';
               const on = bound.has(v.id);
               const lockedVc = on && lockedRow(v.id);
+              const oneOnly = !other && !bindAllowed(v.id, bound, savedHere, peerSaved);   // 52회차 D1: Director 하나에 vCenter 하나 · 104회차 같은 Director 의 다른 등록도
+              const byPeer = oneOnly && bindAllowed(v.id, bound, savedHere);   // 이 등록만 보면 되는데 다른 등록 때문에 막힘
               return (
                 <label key={v.id} style={{ ...ROW, justifyContent: 'space-between', padding: '6px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--panel)', opacity: other ? 0.6 : 1, cursor: other || lockedVc ? 'default' : 'pointer' }}>
-                  <span style={{ ...ROW, gap: 8 }}><input type="checkbox" checked={on} disabled={!!other || lockedVc || busy === 'suggest'} onChange={(e) => toggleVc(v.id, e.target.checked)} /><span>{v.name}</span></span>
-                  <span className="muted" style={{ fontSize: 11.5 }}>{other ? `${otherName} 에 묶임` : lockedVc ? `백업 대상 ${jobsOn(v.id)} — 대상을 지워야 뺄 수 있습니다` : on ? (mine.some((x) => x.vcenterId === v.id) ? '묶임' : '저장 전') : '—'}</span>
+                  <span style={{ ...ROW, gap: 8 }}><input type="checkbox" checked={on} disabled={!!other || lockedVc || oneOnly || busy === 'suggest'} title={oneOnly ? (byPeer ? BIND_PEER_TEXT : BIND_ONE_TEXT) : undefined} onChange={(e) => toggleVc(v.id, e.target.checked)} /><span>{v.name}</span></span>
+                  <span className="muted" style={{ fontSize: 11.5 }}>{other ? `${otherName} 에 묶임` : oneOnly ? (byPeer ? '같은 Director 의 다른 등록에 vCenter 가 묶여 있음' : '다른 vCenter 가 묶여 있음') : lockedVc ? `백업 대상 ${jobsOn(v.id)} — 대상을 지워야 뺄 수 있습니다` : on ? (mine.some((x) => x.vcenterId === v.id) ? '묶임' : '저장 전') : '—'}</span>
                 </label>
               );
-            })}
+            }); })()}
           </div>
-          <div className="muted" style={{ fontSize: 11.5, marginTop: 8, lineHeight: 1.6 }}>vCenter 하나는 Director 하나에만 묶습니다. 백업 대상이 있는 vCenter 는 다른 Director 로 옮길 수 없습니다(잡은 지금 Director 의 설정에 있습니다).</div>
+          <div className="muted" style={{ fontSize: 11.5, marginTop: 8, lineHeight: 1.6 }}>vCenter 하나는 Director 하나에만, Director 하나에는 vCenter 하나만 묶습니다(서비스 하나 = vCenter 하나 + Bareos 하나). 백업 대상이 있는 vCenter 는 다른 Director 로 옮길 수 없습니다(잡은 지금 Director 의 설정에 있습니다).</div>
+          {savedHere.size > 1 && !s.demo && <div style={{ fontSize: 11.5, marginTop: 6, color: 'var(--amber)', lineHeight: 1.6 }}>⚠ {SHARED_DIRECTOR_TEXT}</div>}
+          {(dir.sameEndpoint || []).length > 0 && !s.demo && <div style={{ fontSize: 11.5, marginTop: 6, color: 'var(--amber)', lineHeight: 1.6 }}>⚠ 같은 Director(같은 주소 · 포트 · 담당)를 가리키는 다른 등록이 있습니다: {(dir.sameEndpoint || []).map((id) => s.directors.find((d) => d.id === id)?.name || id).join(', ')} — vCenter 묶기는 이 등록들을 한 Director 로 셉니다(이미 묶인 짝은 그대로 둡니다).</div>}
         </div>
       </div>
 
@@ -709,7 +730,7 @@ function AutoSetupPanel({ s, dir, rows, editCount, cat, unsaved, locked, onDirec
   const runDirector = async () => {
     setBusy('2');
     const body = { ...sshBody, otp: ssh.otp, directorPort: Number(d.directorPort) || 9101, consoleName: d.consoleName, restoreClient: d.restoreClient, restoreStorage: d.restoreStorage, restorePool: d.restorePool,
-      ...(d.usePools ? { pools: { fullDays: Number(d.fullDays), incrDays: Number(d.incrDays), maxVolumeGB: Number(d.maxVolumeGB) } } : {}),
+      ...(d.usePools ? { pools: dirPoolsOf(d) } : {}),
       ...(d.useSchedule ? { schedule: { fullDay: d.fullDay, time: d.time } } : {}) };
     try {
       const r = await postJson(url('director'), body, withRelayWait({}, dir, s.relayLimits, 'setup.director', { setup: true }));
@@ -777,14 +798,15 @@ function AutoSetupPanel({ s, dir, rows, editCount, cat, unsaved, locked, onDirec
   // v2.841: 사전 점검(또는 앞선 409)이 알려 준 남의 파일과 2단계가 놓을 파일이 겹치면 OTP 를 쓰기 전에 막는다(서버도 쓰기 전에 다시 막는다)
   const ownKnown = (pf?.confFiles || extraOwn.length) ? [...(pf?.confFiles || []), ...extraOwn] : null;
   const conflicts = directorConflicts(directorPlanFiles({ defaults: s.defaults, consoleName: d.consoleName, pools: d.usePools, schedule: d.useSchedule }), ownKnown) || [];
-  const dReady = sshOk && otpOk && d.restoreClient && d.restoreStorage && d.restorePool && !conflicts.length && !any;
-  const dMissing = missingText([[sshOk, 'SSH 주소·비밀번호'], [d.restoreClient && d.restoreStorage && d.restorePool, '복원 잡 FD·스토리지·풀'], [!conflicts.length, '겹치는 파일 정리(위 안내)'], [otpOk, 'OTP 6자리']]);
+  const poolsBad = d.usePools ? dirPoolsIssue(d) : '';   // 전체 점검 6회차(W-5): 서버(autoSetup.normVmwareExtras)와 같은 범위 — 범위 밖이면 OTP 를 쓰기 전에 잠근다
+  const dReady = sshOk && otpOk && d.restoreClient && d.restoreStorage && d.restorePool && !conflicts.length && !poolsBad && !any;
+  const dMissing = missingText([[!poolsBad, poolsBad], [sshOk, 'SSH 주소·비밀번호'], [d.restoreClient && d.restoreStorage && d.restorePool, '복원 잡 FD·스토리지·풀'], [!conflicts.length, '겹치는 파일 정리(위 안내)'], [otpOk, 'OTP 6자리']]);
   // W3: FD INI 는 저장된 매핑의 vcserver·INI 경로를 쓴다 — 비어 있으면 4단계(채움 → 저장)가 먼저다
   const siteReady = !!(site && site.vcserver && site.configFile);
   const fReady = sshOk && siteReady && f.vcuser && f.vcpass && f.vcthumbprint && otpOk && !unsaved && !any;
   const fMissing = missingText([[site, '저장된 매핑의 vCenter'], [!site || siteReady, '매핑의 vcserver·INI 경로(4단계 채움 → 저장)'], [!unsaved, '매핑 저장(표에 저장하지 않은 변경)'], [sshOk, 'SSH 주소·비밀번호'], [f.vcuser && f.vcpass, 'vCenter 계정·비밀번호'], [f.vcthumbprint, '지문'], [otpOk, 'OTP 6자리']]);
   const prep = directorPrepBlock({ defaults: s.defaults, consoleName: d.consoleName, anyClient: d.restoreClient || 'bareos-fd', anyStorage: d.restoreStorage || 'File', anyPool: d.restorePool || 'Full',
-    pools: d.usePools ? { fullDays: Number(d.fullDays) || 90, incrDays: Number(d.incrDays) || 30, maxVolumeGB: Number(d.maxVolumeGB) || 50 } : null,
+    pools: d.usePools ? dirPoolsOf(d) : null,   // 미리 보기 = 보낼 값(예전에는 빈 칸을 90/30/50 으로 채워 보이고 실제로는 0 을 보내 400)
     schedule: d.useSchedule ? { fullDay: d.fullDay, time: d.time } : null });
 
   return (

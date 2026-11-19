@@ -84,8 +84,24 @@ export async function getPlacement(vcenterId) {
   return { clusters, hosts: hostsOut, datastores: datastoresOut, folders, resourcePools, profiles, foldersSource, authStopped, ...(skipReason ? { skipReason } : {}), editable: { folders: true, resourcePools: true, profiles: true } };
 }
 
+/**
+ * 74회차 F5 · F6: 입력은 받지만 생성(provision/vsphere.js cloneOne)이 **적용하지 않는** 배치 항목 — 화면이 그 사실을 밝힌다.
+ *   · 폴더 · 리소스 풀: 이름 → MoRef 해석이 없어 원본 VM 의 폴더 · 리소스 풀에 만든다(예전부터 — 화면 문구는 적용되는 것처럼 말했다).
+ *   · 스토리지 프로파일: 이름 → SPBM 프로파일 UUID 해석이 없다(예전 본문은 스키마에 없는 모양이라 보내지 않는다 — vsphere.js 주석).
+ *   · 클러스터: 호스트 목록을 좁히는 칸이다 — 호스트를 고르지 않으면 원본 VM 의 호스트(클러스터)에 만든다.
+ * @returns {string[]} 적용하지 않는 키(cleanPlacement 의 키 이름) — 비면 전부 적용.
+ */
+export function placementNotApplied(p = {}) {
+  const c = cleanPlacement(p);
+  const out = [];
+  if (c.cluster && !c.host) out.push('cluster');
+  for (const k of ['folder', 'resourcePool', 'storageProfile']) if (c[k]) out.push(k);
+  return out;
+}
+
 /** Normalize an incoming placement payload (all optional, trimmed strings). */
 export function cleanPlacement(p = {}) {
+  if (!p || typeof p !== 'object') p = {};   // 74회차: null · 문자열 placement 는 TypeError(500) 였다 — 빈 배치로
   const s = (v) => String(v ?? '').trim();
   return {
     cluster: s(p.cluster), host: s(p.host), datastore: s(p.datastore),

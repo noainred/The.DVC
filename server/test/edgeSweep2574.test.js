@@ -10,7 +10,7 @@
  * ⚠ v2.566 교훈도 여기서 함께 고정한다 — push/pull 진입 함수는 **실제로 호출하는 테스트**가
  * 있어야 TDZ 급 결함이 잡힌다(순수 헬퍼만 고정하면 통과하면서 놓친다).
  */
-import { test, describe } from 'node:test';
+import { test, describe, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -18,9 +18,16 @@ import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 import { stripComments } from './_stripComments.js';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 // v2.613 TESTDOC2613-05: 아래 IMP-06 이 push/pull 진입 함수를 **실제로 부른다** — 개발 트리의 `server/config`
 //   (실제 등록부·자격증명이 있을 수 있다)를 읽지 않게 임시 디렉터리를 먼저 잡는다(config.js 는 로드 시 1회 읽는다).
-process.env.CONFIG_DIR = process.env.CONFIG_DIR || fs.mkdtempSync(path.join(os.tmpdir(), 'edgesweep2574-'));
+process.env.CONFIG_DIR = process.env.CONFIG_DIR || tmpDir('edgesweep2574-');
 const { STATUS_SPEC } = await import('../src/edgelog/spec.js');
 
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src');

@@ -16,11 +16,11 @@
  * 보안: 원자적 쓰기 + 로드 손상 보존, host/url SSRF 가드, 경로/호스트 화이트리스트.
  */
 
-import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 103회차 F1: 읽기 오류 ≠ 손상
 import { ssrfBlockReason } from '../collector/registry.js';
 import { DEFAULT_PORTS } from './checker.js';
 import { TEST_TYPES, KINDS, TEST_FIELDS, TARGET_FIELDS } from './testSchema.js';
@@ -57,10 +57,33 @@ let byTestId = null;      // testId -> { target, test }
 let saveTimer = null;
 let dirty = false;
 
+/*
+ * 103회차 F1(재현 — EISDIR): 예전 catch 하나는 **읽기 오류**(EACCES · EIO · EISDIR)도 손상으로 보고 온전한 원본(전 감시 대상 · 폴더)을 `.corrupt.*` 로 옮긴 뒤
+ *   빈 목록을 캐시했다 — 다음 등록 한 번이 그 한 건만 든 svcmon.json 을 썼고, 엣지 배정(PUT /assign · 설정 연동 동기화)은 빈 목록을 스냅샷으로 굳혀
+ *   엣지가 중앙 배포 점검을 전부 지웠다. 읽기 단계는 공용 읽기(util/jsonFileRead.js — 30초 간격 재읽기): 읽기 오류는 원본을 두고 · 캐시하지 않고
+ *   (빈 목록을 돌려준다) · save()(모든 쓰기의 길목)가 409 로 거절한다. parse 실패는 아래 catch(예전과 같다 — 보존본 + 빈 목록).
+ */
+const _reader = makeJsonFileReader(FILE, { parse: (t) => t, preserve: false, tag: 'svcmon' });
+let _readErr = null;   // { at, code } — 마지막 읽기가 읽기 오류
+/** 103회차 F1: svcmon.json 읽기 오류(원본은 그대로)면 `{ at, code }`, 아니면 null. */
+export function svcmonStoreReadError() { load(); return _readErr ? { ..._readErr } : null; }
+/** 103회차 F1: 읽기 오류 중 쓰기 거절(라우트 409) — 사람이 읽는 사유 포함. 없으면 null. */
+export function svcmonStoreWriteRefusal() {
+  if (!svcmonStoreReadError()) return null;
+  return { ok: false, status: 409, code: 'settings-unreadable', readError: true,
+    reason: `서비스 감시 대상 파일(svcmon.json)을 읽지 못한 상태라 저장하지 않았습니다 — 읽기 오류(${_readErr.code})이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 저장이 다시 열립니다).` };
+}
 function load() {
   if (db) return db;
+  const rr = _reader.read();
+  if (rr.kind === 'read-error') {
+    if (!_readErr) _readErr = { at: Date.now(), code: String(rr.error?.code || 'read-error').slice(0, 32) };
+    return { targets: [], folders: [], sort: { infra: 'manual', service: 'manual' } };   // 캐시하지 않는다 — 쓰기는 save() 가 거절한다
+  }
+  if (_readErr) { _readErr = null; byTestId = null; rev += 1; }   // 다시 읽혔다 — 빈 목록으로 만든 색인 · 응답 캐시를 버린다
   try {
-    const parsed = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
+    if (rr.kind === 'missing') { const e = new Error('ENOENT'); e.code = 'ENOENT'; throw e; }
+    const parsed = JSON.parse(rr.value);
     db = {
       targets: Array.isArray(parsed?.targets) ? parsed.targets.filter(Boolean) : [],
       folders: Array.isArray(parsed?.folders) ? parsed.folders.filter(Boolean) : [],
@@ -75,6 +98,9 @@ function load() {
 
 /** 디바운스 저장 — 대량 변경을 한 번의 원자적 쓰기로 묶는다. */
 function save({ immediate = false } = {}) {
+  // 103회차 F1: 읽기 오류 중에는 어떤 쓰기도 받지 않는다 — 빈 목록 위의 변경이 원본(전 감시 대상)을 덮지 않게(라우트 409).
+  const ref = svcmonStoreWriteRefusal();
+  if (ref) throw Object.assign(new Error(ref.reason), { status: 409, code: ref.code, readError: true });
   rev += 1;
   byTestId = null;
   dirty = true;
@@ -240,7 +266,37 @@ function cleanTest(data, existing = null, { endpoints = true } = {}) {
   return compact(t);
 }
 
-function cleanTarget(data, existing = null) {
+/**
+ * v2.915(설정 연동): 대상의 **출처** — 포탈 설정 카탈로그(linkcheck/settingsLinks.js)의 어느 항목에서 만들어졌는가.
+ *
+ * ⚠ 서버만 발급한다(`batch` 와 같은 원칙). 사용자 입력(`/targets` · `/targets/bulk` · CSV · 템플릿)으로 들어온 `origin` 은
+ *   cleanTarget 이 읽지 않는다 — 받아들이면 남의 출처를 달아 다음 동기화가 그 대상을 '주소 변경'·'사라짐' 으로 덮어쓴다.
+ *   설정 연동 경로만 `opts.origin`(cleanTarget) · `trustedOrigin`(planBulkTargets) 로 넘긴다.
+ * 수정 경로(updateTarget)는 기존 값을 **승계**한다 — 손으로 호스트를 고쳐도 출처가 남아야 다음 감지가 '주소 변경' 으로 다시 묻는다.
+ * 화이트리스트·길이 상한은 여기 하나다(키를 늘리면 이 함수만 고친다 — 저장 후 재로드 키 집합이 같아야 한다).
+ */
+export function cleanOrigin(o) {
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return undefined;
+  const key = text(o.key, 200);
+  const kind = text(o.kind, 40);
+  if (!key || !/^set:[a-z0-9-]{1,30}$/.test(kind) || !key.startsWith(`${kind}|`)) return undefined;
+  const port = portOf(o.port);
+  const out = {
+    key, kind,
+    ref: text(o.ref, 160) || undefined,
+    host: text(o.host, 253) || undefined,
+    port,
+    corp: text(o.corp, 80) || undefined,
+    syncedAt: num(o.syncedAt, 0, Number.MAX_SAFE_INTEGER, undefined),
+    gone: num(o.gone, 0, Number.MAX_SAFE_INTEGER, undefined),
+    // 사라짐 처리 때 설정 연동이 **켜져 있던 대상을 중지**했으면 1 — 다시 나타나 적용하면 다시 켠다(사람이 꺼 둔 것은 켜지 않는다).
+    goneOff: o.goneOff ? 1 : undefined,
+  };
+  if (!out.gone) { delete out.gone; delete out.goneOff; }
+  return compact(out);
+}
+
+function cleanTarget(data, existing = null, opts = {}) {
   const base = existing || {};
   const target = { id: base.id || ('g-' + crypto.randomUUID().slice(0, 8)) };
   for (const f of TARGET_FIELDS) {
@@ -258,7 +314,12 @@ function cleanTarget(data, existing = null) {
   // 밀리초 타임스탬프이므로 상한을 1e9(=1970-01-12)로 두면 값이 들어올 때 뭉개진다.
   target.order = num(data.order, 0, Number.MAX_SAFE_INTEGER, base.order ?? Date.now());
   // 대량 등록 배치 태그 — 롤백이 '정확히 그 배치만' 지우는 근거.
-  target.batch = text(data.batch, 40, base.batch || '') || undefined;
+  //   전체 점검 26회차 F6(재현): 예전에는 data.batch(사용자 입력)를 받았다 — 'mock-demo' 로 고치면 live 폴러가 데모로 보고 점검을 건너뛰고,
+  //   'central:<sig>' 면 엣지 재배정 때 지워지고, 남의 import 배치 id 면 그 배치 롤백이 함께 지웠다. 이제 origin 과 같게 **서버만** 발급한다 —
+  //   opts.batch(대량 등록의 서버 태그 · 엣지 pull · 데모 시드) 또는 기존 값 승계. data.batch 는 읽지 않는다.
+  target.batch = (Object.prototype.hasOwnProperty.call(opts, 'batch') ? text(opts.batch, 40, '') : (base.batch || '')) || undefined;
+  // 출처 — opts.origin 이 있으면(null 포함) 그 값으로, 없으면 기존 값 승계. data.origin 은 **읽지 않는다**(cleanOrigin 머리말).
+  target.origin = Object.prototype.hasOwnProperty.call(opts, 'origin') ? cleanOrigin(opts.origin) : (base.origin ? cleanOrigin(base.origin) : undefined);
   target.tests = base.tests || [];
 
   if (!target.name) throw new Error('대상 이름을 입력하세요.');
@@ -422,6 +483,9 @@ export function addTarget(data) {
   const dbx = load();
   if (dbx.targets.length >= MAX_TARGETS) throw new Error(`대상은 최대 ${MAX_TARGETS}개까지입니다.`);
   const t = cleanTarget(data);
+  // 전체 점검 26회차 F4(재현): 단건 추가 · 수정만 (구분 · 경로 · 이름 소문자) 중복을 보지 않았다 — 대량 등록 · CSV · 엣지 pull 은 이 키로 대상을 가린다.
+  //   같은 키가 둘이면 엣지 적용이 둘째를 건너뛰어 배정이 mismatch 로 굳고(둘째는 엣지에서 영영 점검되지 않음) CSV 왕복이 실패했다.
+  dupTargetCheck(dbx, t, null);
   // 경로가 폴더 목록에 없으면 자동 등록(트리에서 즉시 보이게).
   // 폴더 상한 초과로 던질 수 있으므로 대상 push 보다 **먼저** — 순서를 바꾸면 실패한 등록의
   // 대상이 메모리에 남는다.
@@ -468,11 +532,14 @@ function ensureFolderPath(dbx, kind, p) {
   return missing.length;
 }
 
-export function updateTarget(id, data) {
+export function updateTarget(id, data, opts = {}) {
   const dbx = load();
   const i = dbx.targets.findIndex((t) => t.id === id);
   if (i < 0) return null;
-  const next = cleanTarget(data, dbx.targets[i]);
+  // opts.origin 은 설정 연동(svcmon/settingsSync.js)만 넘긴다 — 라우트(/targets/:id)는 data 만 넘기므로 출처를 바꿀 수 없다.
+  const next = cleanTarget(data, dbx.targets[i], Object.prototype.hasOwnProperty.call(opts, 'origin') ? { origin: opts.origin } : {});
+  // 26회차 F4 · 27회차 D-6 교훈: 수정은 **키(구분 · 경로 · 이름)를 바꿀 때만** 견준다(이미 있던 중복 두 대가 사용/중지 · 주소 수정까지 잠기지 않게)
+  if (dupKey(next) !== dupKey(dbx.targets[i])) dupTargetCheck(dbx, next, dbx.targets[i]);
   ensureFolderPath(dbx, next.kind, next.path);   // 실패 시 기존 대상을 덮어쓰지 않는다
   dbx.targets[i] = next;
   save();
@@ -511,6 +578,38 @@ export function updateTest(targetId, testId, data) {
   return target.tests[i];
 }
 
+/**
+ * 사용/중지 일괄 전환(v2.960 쉬운 등록 A) — 대상 · 점검의 `enabled` **하나만** 바꾸고 저장은 한 번.
+ * 다른 칸은 건드리지 않는다(cleanTarget/cleanTest 재검증을 거치지 않는다 — 이름 · 주소 검증 실패로 켜기가 막히지 않게).
+ * @param {{targets?:string[], tests?:{targetId:string,testId:string}[], enabled:boolean}} input
+ * @returns {{changed:number, unchanged:number, missing:string[], agents:string[], targetIds:string[]}}
+ *   agents = 바뀐 대상의 담당 엣지(배정 동기화 대상) · targetIds = 실제로 바뀐 대상(점검만 바뀐 대상 포함)
+ */
+export function setEnabledMany({ targets = [], tests = [], enabled } = {}) {
+  const on = enabled === true;
+  const dbx = load();
+  const byId = new Map(dbx.targets.map((x) => [x.id, x]));
+  const out = { changed: 0, unchanged: 0, missing: [], agents: [], targetIds: [] };
+  const touched = new Set();
+  for (const id of new Set((Array.isArray(targets) ? targets : []).map((v) => String(v ?? '').trim()).filter(Boolean))) {
+    const tg = byId.get(id);
+    if (!tg) { out.missing.push(id); continue; }
+    if ((tg.enabled !== false) === on) { out.unchanged += 1; continue; }
+    tg.enabled = on; out.changed += 1; touched.add(tg);
+  }
+  for (const p of (Array.isArray(tests) ? tests : [])) {
+    const tg = byId.get(String(p?.targetId ?? '').trim());
+    const x = tg?.tests.find((y) => y.id === String(p?.testId ?? '').trim());
+    if (!x) { out.missing.push(`${p?.targetId}/${p?.testId}`); continue; }
+    if ((x.enabled !== false) === on) { out.unchanged += 1; continue; }
+    x.enabled = on; out.changed += 1; touched.add(tg);
+  }
+  for (const tg of touched) { out.targetIds.push(tg.id); if (String(tg.agent || '').trim()) out.agents.push(String(tg.agent).trim()); }
+  out.agents = [...new Set(out.agents)];
+  if (out.changed) save();
+  return out;
+}
+
 export function deleteTest(targetId, testId) {
   const dbx = load();
   const target = dbx.targets.find((t) => t.id === targetId);
@@ -524,6 +623,12 @@ export function deleteTest(targetId, testId) {
 
 /** 대상 동일성 — 한 폴더 안에서는 이름이 식별자다(CSV 행 그룹핑과 같은 키). */
 const dupKey = (t) => `${t.kind} ${t.path} ${t.name.toLowerCase()}`;
+/** 단건 추가 · 수정의 중복 검사(26회차 F4) — 자기 자신(self)은 뺀다. 대량 등록(planBulkTargets)과 같은 키. */
+function dupTargetCheck(dbx, t, self) {
+  const k = dupKey(t);
+  const hit = dbx.targets.find((x) => x !== self && dupKey(x) === k);
+  if (hit) throw new Error(`같은 폴더(${t.path || '최상위'})에 같은 이름의 대상이 이미 있습니다 — '${String(hit.name).slice(0, 80)}'(이름은 대소문자를 가리지 않습니다).`);
+}
 
 /**
  * 대량 등록(가져오기·자동 생성) — 검증을 **전량 끝낸 뒤** 한 번의 저장으로 커밋한다.
@@ -540,9 +645,9 @@ const dupKey = (t) => `${t.kind} ${t.path} ${t.name.toLowerCase()}`;
  * @returns {{added:number, errors:object[], skipped:object[], newFolders:number, newTests:number,
  *            committed:boolean, saved:boolean}}
  */
-export function bulkAddTargets(list = [], { atomic = true, dedup = true, batch = '' } = {}) {
+export function bulkAddTargets(list = [], { atomic = true, dedup = true, batch = '', trustedOrigin = false, trustedBatch = false } = {}) {
   const dbx = load();
-  const plan = planBulkTargets(list, { dedup, batch });
+  const plan = planBulkTargets(list, { dedup, batch, trustedOrigin, trustedBatch });
   const fail = plan.over.length > 0 || (atomic && plan.errors.length > 0);
   if (fail) {
     return {
@@ -576,7 +681,7 @@ export function bulkAddTargets(list = [], { atomic = true, dedup = true, batch =
  * 대량 등록 계획 — **저장하지 않고** 커밋과 똑같은 검증을 수행한다.
  * 미리보기와 실제 등록이 다른 코드로 판정하면 "미리보기는 통과인데 등록은 실패"가 생긴다.
  */
-export function planBulkTargets(list = [], { dedup = true, batch = '' } = {}) {
+export function planBulkTargets(list = [], { dedup = true, batch = '', trustedOrigin = false, trustedBatch = false } = {}) {
   const dbx = load();
   const errors = [];
   const skipped = [];
@@ -590,7 +695,9 @@ export function planBulkTargets(list = [], { dedup = true, batch = '' } = {}) {
 
   list.forEach((row, i) => {
     try {
-      const t = cleanTarget({ ...row, batch: row?.batch || batch });
+      // trustedOrigin 은 설정 연동만 켠다 — 가져오기·대량 등록 행의 origin 은 버린다(cleanOrigin 머리말).
+      // 26회차 F6: 행의 batch 는 trustedBatch(엣지 pull 롤백이 이전 배포분을 되살릴 때 — 서버가 발급했던 태그)일 때만 쓴다
+      const t = cleanTarget(row && typeof row === 'object' ? row : {}, null, { ...(trustedOrigin ? { origin: row?.origin } : {}), batch: (trustedBatch && row?.batch) || batch });
       const key = dupKey(t);
       if (dedup && nameIdx.has(key)) {
         skipped.push({ row: i + 1, name: t.name, path: t.path, reason: '이미 있는 대상(구분+경로+이름 중복)' });
@@ -659,4 +766,4 @@ export function batchCounts() {
   return m;
 }
 
-export function _resetCache() { db = null; byTestId = null; rev += 1; dirty = false; }
+export function _resetCache() { db = null; byTestId = null; rev += 1; dirty = false; _readErr = null; _reader.reset(); }

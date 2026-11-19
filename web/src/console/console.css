@@ -204,3 +204,13 @@
   .dvc-body { padding: 16px; }
   .dvc-top { padding: 10px 16px; }
 }
+/* v2.999 업그레이드 뒤 새로고침 안내 — 콘솔(밝은 바탕)에서 같은 상자를 밝은 색으로(styles.css .upg-* 의 색만 덮는다) */
+.dvc .upg-box { background: #ffffff; border-color: #e5e7eb; color: #0f172a; }
+.dvc .upg-title, .dvc .upg-ver, .dvc .upg-list li { color: #0f172a; }
+.dvc .upg-sub, .dvc .upg-verline, .dvc .upg-chg-h, .dvc .upg-more .n { color: #6b7280; }
+.dvc .upg-chg { background: #f8f9fb; border-color: #e5e7eb; }
+.dvc .upg-chip { background: #f3f4f6; border-color: #e5e7eb; color: #4b5563; }
+.dvc .upg-chip.new { border-color: #0d9488; color: #0f766e; }
+.dvc .upg-ico { color: #0891b2; background: rgba(8, 145, 178, .1); }
+.dvc .upg-list li::before { background: #0891b2; }
+.dvc .upg-more { color: #2563eb; }

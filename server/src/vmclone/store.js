@@ -33,12 +33,12 @@
  * 보존정책이 고아 클론을 인식 못 해 스토리지가 새는 같은 구조의 사고가 난다).
  */
 
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { portalParts, portalMs, localStamp } from '../util/dayKey.js';
 import { makeSettingsLoadError } from '../util/settingsLoadError.js';
+import { makeJsonFileReader, READ_RETRY_MS } from '../util/jsonFileRead.js';   // 103회차 F9: 읽기 오류 ≠ 손상
 
 const FILE = path.join(config.configDir, 'vm-clone.json');
 const MAX_JOBS = 200;
@@ -56,11 +56,23 @@ const _loadErr = makeSettingsLoadError(() => FILE, { label: 'VM 백업 잡(vm-cl
 /** 잡 파일을 못 읽었으면 { at, reason }, 읽었으면 null — 위임 동기화 라우트가 응답 전에 본다. */
 export function jobsLoadError() { load(); return _loadErr.get(); }
 
+/*
+ * 103회차 F9(재현 — EISDIR): 예전 catch 하나는 **읽기 오류**도 손상으로 보고 원본(잡 정의 · 클론 원장)을 `.corrupt.*` 로 옮긴 뒤 빈 목록을 캐시했다 —
+ *   관리자 저장(saveJob)이 로드 오류를 풀면서 그 한 건만 든 파일을 썼다(위임 동기화가 다음 pull 에 나머지 잡을 엣지에서 지운다 · 보존정책이 원장을 잃는다).
+ *   읽기 단계는 공용 읽기(util/jsonFileRead.js — 30초 간격 재읽기): 읽기 오류는 원본을 두고 · 캐시하지 않고 · 표지(readError — 위임 동기화 503 은 그대로)를 세우고 ·
+ *   관리자 저장도 409 로 거절한다(writeFile). parse 실패는 예전과 같다.
+ */
+const _reader = makeJsonFileReader(() => FILE, { parse: (t) => t, preserve: false, tag: 'vmclone' });
 function load() {
   if (_db) return _db;
+  const rr = _reader.read();
+  if (rr.kind === 'read-error') {
+    _loadErr.readError(rr.error, { retryMs: READ_RETRY_MS });
+    return { jobs: [], ops: [] };   // 캐시하지 않는다 — 쓰기는 writeFile 이 거절한다(persist 는 오류 중 쓰지 않는다)
+  }
   try {
-    if (fs.existsSync(FILE)) {
-      const p = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+    if (rr.kind === 'ok') {
+      const p = JSON.parse(rr.value);
       _db = { jobs: Array.isArray(p.jobs) ? p.jobs : [], ops: Array.isArray(p.ops) ? p.ops : [] };
       _loadErr.ok();
       return _db;
@@ -76,6 +88,8 @@ function load() {
 
 function writeFile() {
   const db = load();
+  // 103회차 F9: 읽기 오류 중에는 db 가 캐시하지 않은 빈 목록이다 — 원본 자리를 그것으로 덮지 않는다(라우트 409).
+  if (_loadErr.get()?.readError) throw Object.assign(new Error('VM 백업 잡 파일(vm-clone.json)을 읽지 못한 상태라 저장하지 않았습니다 — 읽기 오류이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 저장이 다시 열립니다).'), { status: 409, code: 'settings-unreadable', readError: true });
   atomicWriteFileSync(FILE, JSON.stringify({ version: 1, jobs: db.jobs, ops: db.ops }, null, 2), { mode: 0o600 });
 }
 /**
@@ -601,4 +615,4 @@ export function jobVmIds(vcenterId) {
   return load().jobs.filter((j) => j.vcenterId === vcenterId && j.enabled).map((j) => j.vmId);
 }
 
-export function _resetForTest() { _db = null; } // CONFIG_DIR 교체 테스트용
+export function _resetForTest() { _db = null; _reader.reset(); } // CONFIG_DIR 교체 테스트용

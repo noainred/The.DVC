@@ -4,6 +4,7 @@
  * 공통 스키마(NormalizedSnapshot)로 정규화한다 — 화면·집계·위임 경로는 타입 무관(types.js 계약).
  * ⚠ 실장비 검증 전: 경로·필드는 PowerStore REST 문서 지식 기반 — 섹션별 오류 문구로 드러남.
  */
+import { envPositive } from '../../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { emptySnapshot } from '../types.js';
 import { makeGetter, makeRawGetter, makePoster, tryAny, isCredReject } from './restCommon.js';
 import { numOrNull } from '../../util/numOrNull.js';
@@ -12,6 +13,7 @@ import { healthWord } from '../healthWord.js'; // v2.599(감사 C2599-06) — �
 //   쓰는데, 여기서 import 하면 powerstore.js → (동적) powerstoreSsh.js → powerstore.js 순환이 생긴다(arch2579 SCC 상한).
 import { pickLatestSpacePoint, isActiveAlert } from './powerstoreCore.js';
 import { applyScannedPower, powerProbe } from '../power.js';
+import { envPort } from '../../util/envNumber.js'; // 결정(56~75 남긴 것) 57: 포트 env 는 1~65535 정수만(예전 `Number(env) || 443` 은 −1 · 70000 · 1.5 를 그대로 썼다)
 export { pickLatestSpacePoint, isActiveAlert };
 
 /** 미해결 알람 조회 상한(v2.599 C2599-08) — 닿으면 '이상' 으로 밝힌다(조용한 상한 금지). */
@@ -203,7 +205,7 @@ export function applyPowerstorePower(extra, raw) {
   applyScannedPower(extra, raw.psus.map((x) => x?.extra_details ?? x), { source, scope: 'psu' });
 }
 
-const PORT = () => Number(process.env.STORAGE_POWERSTORE_PORT) || 443;
+const PORT = () => envPort(process.env.STORAGE_POWERSTORE_PORT, 443);
 /** metrics/generate 의 집계 구간 — 짧을수록 최신이지만 아직 집계 전이라 빌 수 있어 하루가 무난. */
 const METRICS_INTERVAL = process.env.STORAGE_POWERSTORE_METRICS_INTERVAL || 'One_Day';
 
@@ -361,7 +363,7 @@ export async function collect(device, { signal = null } = {}) {
     // 정상이라 섹션 오류로 키우지 않고 조용히 건너뛴다(위 sect 맵에 없는 key 라 자동으로 그렇다).
     // ⚠ select 로 필요한 필드만, limit 으로 상한을 둔다 — 볼륨 수천 개의 전체 객체를 받으면
     //   파싱·push·중앙 저장이 모두 무거워진다(요약만 스냅샷에 남는다 — normalize 참고).
-    const LIMIT = Math.max(100, Number(process.env.STORAGE_POWERSTORE_LIST_LIMIT) || 2000);
+    const LIMIT = Math.max(100, envPositive(process.env.STORAGE_POWERSTORE_LIST_LIMIT, 2000));
     // v2.607(감사 COL2607-05): limit 에 닿은 목록은 전부 `<키>Truncated` 로 밝힌다 — 예전에는 볼륨만 표시해
     //   파일시스템 1,200개 장비의 앞 1,000개 합이 전체처럼, 호스트 수가 1,000 으로 단정됐다(조용한 상한 금지).
     const listStep = async (key, path, limit) => {

@@ -64,6 +64,18 @@ function trust() { if (!_trust || Date.now() - _trustAt > 60_000) { _trust = loa
 let _trustForTest = null;
 export function _setTrustForTest(t) { _trustForTest = t; }
 const T = () => _trustForTest || trust();
+/** 번들 본체 받기 시한 — resilientFetch 상한(30분 · normFetchTimeoutMs)과 같게(본문 읽기까지 이 시한 안 · 전체 점검 11회차 B-33). */
+export const TAR_FETCH_MS = 1_800_000;
+/**
+ * 전체 점검 11회차(B-30 — 재현): 검증 기억의 열쇠에 **지금 신뢰 상태**(키 id · 회수 여부 · fatal)를 넣는다 — 예전 열쇠(판 + 본체 크기 · 시각)만 보면
+ *   호스트 신뢰 파일로 서명 키를 회수해도 그 키로 서명돼 이미 기억된 번들이 '사용 가능' 으로 남아 엣지에 root 로 설치됐다.
+ */
+function trustSig(t) {
+  try {
+    const ids = t?.byId instanceof Map ? [...t.byId] : Object.entries(t?.byId || {});
+    return `${ids.map(([id, k]) => `${id}:${k?.revoked ? 'r' : 'a'}`).sort().join(',')}|${t?.fatal ? 'F' : ''}`;
+  } catch { return `x${Date.now()}`; }   // 표지를 못 만들면 기억을 쓰지 않는다
+}
 
 /** 파일 해시 — 스트림(수백 MB 를 동기로 읽어 이벤트 루프를 막지 않는다 — 루트 규칙 '요청 경로 동기 블로킹 금지'). */
 export function sha256File(p) {
@@ -107,9 +119,10 @@ export async function verifyLocal(version, dir = bundleDir(), { settle = false }
     if (why === 'symlink') return { ok: false, code: 'symlink', reason: '심링크는 쓰지 않습니다 — 실제 파일을 두세요' };
     if (why) return { ok: false, code: why, reason: '일반 파일이 아닙니다' };
   }
-  let st;
-  try { st = fs.statSync(tarP); } catch { return { ok: false, code: 'missing', reason: '본체 파일이 없습니다' }; }
-  const key = `${version}:${st.size}:${st.mtimeMs}`;
+  let st; let sc; let sm;
+  try { st = fs.statSync(tarP); sc = fs.statSync(conP); sm = fs.statSync(manP); } catch { return { ok: false, code: 'missing', reason: '본체 파일이 없습니다' }; }
+  // B-30: manifest · 내용 목록이 바뀌거나 신뢰 키(회수)가 바뀌면 다시 판정한다(본체 해시가 같아도 서명 판정은 그 순간의 신뢰로)
+  const key = `${version}:${st.size}:${st.mtimeMs}:${sc.size}:${sc.mtimeMs}:${sm.size}:${sm.mtimeMs}:${trustSig(T())}`;
   const ck = vkey(dir, version);
   const hit = _verified.get(ck);
   if (hit && hit.key === key) return hit.result;
@@ -241,7 +254,8 @@ export async function fetchLatestBundle({ baseUrl = bundleBaseUrl(), dir = bundl
     const pre = verifyBundle({ pointer, manifestText: manifestBuf.toString('utf8'), contentsBuf, contentsSha256: crypto.createHash('sha256').update(contentsBuf).digest('hex'), tar: { size: pointer.tarball.size, sha256: pointer.tarball.sha256 } }, T());
     if (!pre.ok) return fin({ ok: false, reason: pre.reason });
     st.phase = 'tarball';
-    const tr = await doFetch(`${baseUrl}/${tarName(v)}`, { timeoutMs: 3_600_000, retries: 1 });
+    // 전체 점검 11회차(B-33): resilientFetch 시한 상한은 30분(normFetchTimeoutMs) — 1시간을 적어도 30분으로 깎였다(본문 읽기도 같은 시한). 실제 값을 적는다.
+    const tr = await doFetch(`${baseUrl}/${tarName(v)}`, { timeoutMs: TAR_FETCH_MS, retries: 1 });
     if (!tr.ok) return fin({ ok: false, reason: `번들 본체를 받지 못했습니다(HTTP ${tr.status}).` });
     part = path.join(dir, `.${tarName(v)}.part`);
     const h = crypto.createHash('sha256');
@@ -264,7 +278,9 @@ export async function fetchLatestBundle({ baseUrl = bundleBaseUrl(), dir = bundl
     const r = await verifyLocal(v, dir);
     return fin(r.ok ? { ok: true, version: v } : { ok: false, reason: r.reason });
   } catch (e) {
-    return fin({ ok: false, reason: `번들 받기 실패 — ${String(e?.code || e?.message || e).slice(0, 160)}` });
+    // B-33: 시한 끊김은 DOMException(code 23 · name TimeoutError) — 숫자 '23' 대신 문구로
+    const timedOut = e?.name === 'TimeoutError' || e?.cause?.name === 'TimeoutError';
+    return fin({ ok: false, reason: timedOut ? `번들 받기 시한(${Math.round(TAR_FETCH_MS / 60_000)}분)이 지났습니다 — 받은 ${Math.round(st.sent / 1_048_576)}MB 에서 끊겼습니다(망 속도 확인 · 다시 받기).` : `번들 받기 실패 — ${String((typeof e?.code === 'string' && e.code) || e?.message || e).slice(0, 160)}` });
   } finally {
     if (part) { try { fs.unlinkSync(part); } catch { /* */ } }
   }

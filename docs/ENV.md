@@ -1,9 +1,9 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **707개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **756개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
-- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-11-04)
+- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-11-19)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다.
 - `portal.env.example` 에 예시가 있는 키는 ✅, 없는 키는 빈칸으로 표시한다.
 - 기본값 칸이 비어 있으면 코드에서 한 줄로 추출하지 못한 것이다(해당 파일을 참조).
@@ -12,30 +12,31 @@
 > (`docs/rules/storage.md` '스토리지 폴러 주기는 중앙 배포값' 참조).
 
 
-## 공용 유틸 (37)
+## 공용 유틸 (38)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `API_RATE_DISABLED` | `''` |  | util/rateLimit.js |
 | `API_RATE_LIMIT` | `1800` |  | util/rateLimit.js |
 | `API_RATE_WINDOW_MS` | `60000` |  | util/rateLimit.js |
-| `BIG_JSON_MAX_BYTES` |  |  | util/bigJsonGate.js |
-| `BIG_JSON_MAX_CONCURRENT` |  |  | util/bigJsonGate.js |
-| `BIG_JSON_PER_AGENT` |  |  | util/bigJsonGate.js |
-| `BIG_JSON_READ_DEADLINE_MS` |  |  | util/bigJsonGate.js |
-| `BIG_JSON_SESSION_MAX_CONCURRENT` |  |  | util/bigJsonGate.js |
-| `BIG_JSON_SESSION_READ_DEADLINE_MS` |  |  | util/bigJsonGate.js |
+| `BIG_JSON_MAX_BYTES` | `100663296` |  | util/bigJsonGate.js |
+| `BIG_JSON_MAX_CONCURRENT` | `6` |  | util/bigJsonGate.js |
+| `BIG_JSON_PER_AGENT` | `2` |  | util/bigJsonGate.js |
+| `BIG_JSON_READ_DEADLINE_MS` | `300000` |  | util/bigJsonGate.js |
+| `BIG_JSON_SESSION_MAX_CONCURRENT` | `2` |  | util/bigJsonGate.js |
+| `BIG_JSON_SESSION_READ_DEADLINE_MS` | `120000` |  | util/bigJsonGate.js |
 | `BMUSAGE_TZ_OFFSET_MIN` |  |  | util/dayKey.js |
-| `EDGE_EXPORT_MAX_BYTES` | `64` |  | util/readCapped.js |
-| `EDGE_RESPONSE_MAX_BYTES` | `16` |  | util/readCapped.js |
+| `EDGE_EXPORT_MAX_BYTES` | `67108864` |  | util/readCapped.js |
+| `EDGE_RESPONSE_MAX_BYTES` | `16777216` |  | util/readCapped.js |
+| `EXPORT_LOCK_MAX_MS` | `1800000(30분 — 1분~6시간)` |  | util/exportBusy.js |
 | `GZIP_MIN_BYTES` | `1024` |  | util/compress.js |
 | `LINKCHECK_TZ_OFFSET_MIN` |  |  | util/dayKey.js |
 | `LOOP_LAG_INTERVAL_MS` | `30000` |  | util/loopLag.js |
 | `LOOP_LAG_MONITOR` | `기본 적용('0' 로 끄기)` |  | perf/monitor.js, util/loopLag.js |
 | `LOOP_LAG_WARN_MS` | `500` |  | util/loopLag.js |
 | `PORTAL_TZ_OFFSET_MIN` |  |  | util/dayKey.js |
-| `PRUNE_CHUNK_ROWS` |  |  | util/chunkedPrune.js |
-| `PRUNE_MAX_ROWS` |  |  | util/chunkedPrune.js |
+| `PRUNE_CHUNK_ROWS` | `20000` |  | util/chunkedPrune.js |
+| `PRUNE_MAX_ROWS` | `1000000` |  | util/chunkedPrune.js |
 | `SCAN_RESUME` | `''` |  | util/scanJournal.js |
 | `SCAN_RESUME_DELAY_MS` |  |  | util/scanJournal.js |
 | `SNAP_CACHE_PER_NAME` | `32` |  | util/snapCache.js |
@@ -54,7 +55,7 @@
 | `WAN_TLS_CA_FILE` | `''` | ✅ | util/resilientFetch.js |
 | `WAN_TLS_INSECURE` | `기본 적용('true' 로 끄기)` | ✅ | util/resilientFetch.js |
 
-## 공통 (217)
+## 공통 (236)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -75,9 +76,10 @@
 | `BAREOS_EDGE_PICKUP_MS` | `120000` |  | bareos/edgeOps.js |
 | `BMUSAGE_ACTIVITY_MAX` | `500` |  | bmusage/activityLog.js |
 | `BMUSAGE_ALERT_MAX` | `40` |  | bmusage/notify.js |
-| `BMUSAGE_CMD_TIMEOUT_MS` |  |  | bmusage/collectors/osSsh.js |
-| `BMUSAGE_CONCURRENCY` | `4` |  | bmusage/poller.js |
+| `BMUSAGE_CMD_TIMEOUT_MS` | `34000` |  | bmusage/collectors/osSsh.js |
+| `BMUSAGE_CONCURRENCY` | `32` |  | bmusage/poller.js |
 | `BMUSAGE_COUNT_CACHE_MS` | `60000` |  | bmusage/db.js |
+| `BMUSAGE_CYCLE_MAX_MS` |  |  | bmusage/poller.js |
 | `BMUSAGE_DEVICE_TIMEOUT_MS` | `60000` |  | bmusage/poller.js |
 | `BMUSAGE_ENABLED` | `''` |  | bmusage/settings.js |
 | `BMUSAGE_ENT_API_MS` | `20000` |  | bmusage/collectors/idracEnterprise.js |
@@ -87,28 +89,34 @@
 | `BMUSAGE_ENT_PROBE_PER_RUN` | `10` |  | bmusage/poller.js |
 | `BMUSAGE_ENT_SSH_READY_MS` | `12000` |  | bmusage/collectors/idracEnterprise.js |
 | `BMUSAGE_ENTERPRISE` | `''` |  | bmusage/settings.js |
+| `BMUSAGE_ENVELOPE_MAX_BYTES` | `8388608` |  | bmusage/edgePull.js |
+| `BMUSAGE_INSERT_CHUNK_ROWS` | `256` |  | bmusage/db.js |
 | `BMUSAGE_LIST_BUDGET` | `20` |  | bmusage/poller.js |
-| `BMUSAGE_SESSION_BUDGET_MS` |  |  | bmusage/collectors/osSsh.js |
-| `BMUSAGE_SSH_TIMEOUT_MS` |  |  | bmusage/collectors/osSsh.js |
+| `BMUSAGE_MIGRATE_CHUNK_ROWS` | `500` |  | bmusage/monthMigrate.js |
+| `BMUSAGE_MONTH_COUNT_CACHE_MS` | `600000` |  | bmusage/monthStore.js |
+| `BMUSAGE_MONTH_MAX_OPEN` | `24` |  | bmusage/monthStore.js |
+| `BMUSAGE_REPAIR_BUDGET_MS` | `1000` |  | bmusage/monthStore.js |
+| `BMUSAGE_SESSION_BUDGET_MS` | `50000` |  | bmusage/collectors/osSsh.js |
+| `BMUSAGE_SSH_TIMEOUT_MS` | `15000` |  | bmusage/collectors/osSsh.js |
 | `BOARD_MAX_BYTES` |  |  | bulletin/store.js |
 | `CAPACITY_DB_PATH` |  |  | config.js |
 | `CAPACITY_MON_ENABLED` | `기본 적용('false' 로 끄기)` |  | config.js |
 | `CAPACITY_PUSH` | `기본 적용('false' 로 끄기)` |  | config.js |
-| `CAPACITY_PUSH_INTERVAL_MS` |  |  | config.js |
-| `CAPACITY_RAW_RETENTION_HOURS` |  |  | config.js |
-| `CAPACITY_ROLLUP_RETENTION_DAYS` |  |  | config.js |
-| `CAPACITY_SAMPLE_INTERVAL_MS` |  |  | config.js |
-| `CLUSTER_CFG_PER_CYCLE` |  |  | config.js |
-| `CLUSTER_CFG_REFRESH_MS` |  |  | config.js |
+| `CAPACITY_PUSH_INTERVAL_MS` | `60000` |  | config.js |
+| `CAPACITY_RAW_RETENTION_HOURS` | `72` |  | config.js |
+| `CAPACITY_ROLLUP_RETENTION_DAYS` | `400` |  | config.js |
+| `CAPACITY_SAMPLE_INTERVAL_MS` | `30000` |  | config.js |
+| `CLUSTER_CFG_PER_CYCLE` | `50` |  | config.js |
+| `CLUSTER_CFG_REFRESH_MS` | `1800000` |  | config.js |
 | `CLUSTER_CFG_SCAN` | `기본 적용('false' 로 끄기)` |  | config.js |
 | `COLLECT_CONCURRENCY` | `8` |  | store.js |
 | `COLLECTOR_PULL_CONCURRENCY` | `4` |  | config.js |
-| `COLLECTOR_PULL_INTERVAL_MS` |  | ✅ | config.js |
+| `COLLECTOR_PULL_INTERVAL_MS` | `60000` | ✅ | config.js |
 | `COLLECTOR_TIMEOUT_MS` | `20000` |  | config.js |
 | `COLLECTOR_TOKEN` |  | ✅ | config.js |
-| `CONTENTION_PER_CYCLE` |  |  | config.js |
-| `CONTENTION_REFRESH_MS` |  |  | config.js |
-| `CONTENTION_SAMPLES` |  |  | config.js |
+| `CONTENTION_PER_CYCLE` | `400` |  | config.js |
+| `CONTENTION_REFRESH_MS` | `900000` |  | config.js |
+| `CONTENTION_SAMPLES` | `15` |  | config.js |
 | `CONTENTION_SCAN` | `기본 적용('false' 로 끄기)` |  | config.js |
 | `CORS_ORIGINS` | `''` |  | index.js |
 | `CSP` | `기본 아님('off' 일 때만 적용)` |  | index.js |
@@ -117,54 +125,60 @@
 | `CURUSER_DB_PATH` |  |  | curuser/db.js |
 | `CURUSER_FIRST_DELAY_MS` | `120000` |  | curuser/poller.js |
 | `CURUSER_VM_SERIES` | `''` |  | curuser/db.js |
-| `CVP_BODY_MAX_BYTES` | `8` |  | cvp/client.js |
+| `CVP_BODY_MAX_BYTES` | `8388608` |  | cvp/client.js |
 | `CVP_DEVICE_CONCURRENCY` | `6` |  | cvp/client.js |
-| `CVP_DEVICE_TIMEOUT_MS` |  |  | cvp/collectRequests.js |
+| `CVP_DEVICE_TIMEOUT_MS` | `120000` |  | cvp/collectRequests.js |
 | `CVP_EVENT_RETENTION_DAYS` |  |  | cvp/db.js |
-| `CVP_EVENTS_BODY_MAX` | `4` |  | cvp/client.js |
+| `CVP_EVENTS_BODY_MAX` | `4194304` |  | cvp/client.js |
 | `CVP_FAULT_SCAN_DEBOUNCE_MS` |  |  | cvp/faultScan.js |
 | `CVP_FOLLOW_CONCURRENCY` | `4` |  | cvp/client.js |
 | `CVP_FOLLOW_MAX` | `160` |  | cvp/client.js |
-| `CVP_HTTP_TIMEOUT_MS` |  |  | cvp/client.js |
+| `CVP_HTTP_TIMEOUT_MS` | `30000` |  | cvp/client.js |
+| `CVP_L2` | `''` |  | cvp/client.js |
 | `CVP_PARTS_EVERY_MS` |  |  | cvp/faults.js |
-| `CVP_PUSH_CHUNK_BYTES` | `700` |  | cvp/push.js |
+| `CVP_PUSH_CHUNK_BYTES` | `716800` |  | cvp/push.js |
 | `CVP_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | cvp/push.js |
 | `CVP_PUSH_MAX_ROUNDS` | `10` |  | cvp/push.js |
-| `CVP_PUSH_MS` | `5` |  | cvp/push.js |
+| `CVP_PUSH_MS` | `300000` |  | cvp/push.js |
 | `CVP_PUSH_ROWS` | `20000` |  | cvp/push.js |
 | `CVP_SETTINGS_LOCAL` | `''` |  | cvp/settings.js |
-| `CVP_ZERO_PRUNE_HOLD_MS` | `60` |  | cvp/poller.js |
+| `CVP_ZERO_PRUNE_HOLD_MS` | `3600000` |  | cvp/poller.js |
 | `DATA_SOURCE` |  | ✅ | config.js |
 | `DATACENTER` | `''` |  | config.js |
 | `DIRUSAGE_DB_PATH` |  |  | dirusage/db.js |
 | `DIRUSAGE_JOB_TIMEOUT_MS` | `900000` |  | dirusage/scheduler.js |
 | `DIRUSAGE_TICK_MS` | `60000` |  | dirusage/scheduler.js |
-| `DS_CFG_PER_CYCLE` |  |  | config.js |
-| `DS_CFG_REFRESH_MS` |  |  | config.js |
+| `DISKBAD_CONCURRENCY` | `4` |  | diskbad/scan.js |
+| `DISKBAD_DB_PATH` |  |  | diskbad/db.js |
+| `DISKBAD_MAX_ENTRIES` | `50000` |  | diskbad/scan.js |
+| `DISKBAD_SERVER_TIMEOUT_MS` | `600000` |  | diskbad/scan.js |
+| `DS_CFG_PER_CYCLE` | `500` |  | config.js |
+| `DS_CFG_REFRESH_MS` | `1800000` |  | config.js |
 | `DS_CFG_SCAN` | `기본 적용('false' 로 끄기)` |  | config.js |
 | `EDGE_MODE` | `''` | ✅ | config.js |
+| `FOCUSMON_MAX_STREAMS` | `40` |  | focusmon/runner.js |
+| `GPU_ALLOC_DB_PATH` |  |  | config.js |
 | `GUESTDISK_CONCURRENCY` | `4` |  | guestdisk/poller.js |
 | `GUESTDISK_DB_PATH` |  |  | guestdisk/db.js |
-| `GUESTDISK_TIMEOUT_MS` |  |  | guestdisk/service.js |
-| `HOST_CFG_PER_CYCLE` |  |  | config.js |
-| `HOST_CFG_REFRESH_MS` |  |  | config.js |
+| `GUESTDISK_TIMEOUT_MS` | `120000` |  | guestdisk/service.js |
+| `HOST_CFG_PER_CYCLE` | `40` |  | config.js |
+| `HOST_CFG_REFRESH_MS` | `21600000` |  | config.js |
 | `HOST_CFG_SCAN` | `기본 적용('false' 로 끄기)` |  | config.js |
 | `IDRAC_DB_PATH` |  | ✅ | config.js |
 | `IDRAC_ENABLED` | `기본 적용('false' 로 끄기)` | ✅ | config.js |
-| `IDRAC_POLL_CONCURRENCY` |  |  | config.js |
-| `IDRAC_POLL_INTERVAL_MS` |  | ✅ | config.js |
+| `IDRAC_POLL_CONCURRENCY` | `16` |  | config.js |
+| `IDRAC_POLL_INTERVAL_MS` | `60000` | ✅ | config.js |
 | `IDRAC_RAW_RETENTION_DAYS` | `0` |  | config.js |
-| `IDRAC_RETENTION_DAYS` |  | ✅ | config.js |
-| `IDRAC_SCAN_INTERVAL_MS` |  |  | config.js |
+| `IDRAC_RETENTION_DAYS` | `90` | ✅ | config.js |
+| `IDRAC_SCAN_INTERVAL_MS` | `21600000` |  | config.js |
 | `IDRAC_TIMEOUT_MS` | `15000` |  | config.js |
 | `IPAM_DB_PATH` |  |  | config.js |
 | `ISIDU_CONCURRENCY` | `2` |  | isidu/poller.js |
 | `ISIDU_PUSH_MS` | `600000` |  | isidu/push.js |
 | `ISIDU_PUSH_ROWS` | `60000` |  | isidu/push.js |
-| `ISIDU_SSH_KEY` | `''` |  | isidu/sshKey.js |
 | `ISSUES_MAX_BYTES` |  |  | issues/store.js |
 | `JSON_BODY_LIMIT` | `'16mb'` |  | index.js |
-| `LEDGER_FULL_CHECK_MS` |  |  | store.js |
+| `LEDGER_FULL_CHECK_MS` | `600000` |  | store.js |
 | `LINKCHECK_COUNT_CACHE_MS` | `60000` |  | linkcheck/db.js |
 | `LINKCHECK_DETAIL_MAX` | `8000` |  | linkcheck/db.js |
 | `LINKCHECK_ENABLED` | `''` |  | linkcheck/settings.js |
@@ -178,21 +192,22 @@
 | `PARTFAULT_DB_PATH` |  |  | partfault/db.js |
 | `PARTFAULT_ENABLED` |  |  | partfault/settings.js |
 | `PARTFAULT_HOOK_DEBOUNCE_MS` |  |  | partfault/hooks.js |
-| `PARTFAULT_POLL_MS` | `10` |  | partfault/poller.js |
+| `PARTFAULT_POLL_MS` | `600000` |  | partfault/poller.js |
 | `PARTFAULT_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | partfault/push.js |
 | `PARTFAULT_PUSH_MAX_DEVICES` | `5000` |  | partfault/push.js |
-| `PARTFAULT_PUSH_MS` | `10` |  | partfault/push.js |
+| `PARTFAULT_PUSH_MS` | `600000` |  | partfault/push.js |
 | `PARTFAULT_RETENTION_DAYS` |  |  | partfault/settings.js |
-| `PERF_HANG_LOG_MAX_BYTES` | `8` |  | perf/hangLog.js |
+| `PERF_HANG_LOG_MAX_BYTES` | `8388608` |  | perf/hangLog.js |
 | `PERF_HANG_LOG_MAX_LINES` | `20000` |  | perf/hangLog.js |
 | `PERF_HANG_LOG_MAX_PER_MIN` | `60` |  | perf/hangLog.js |
 | `PERF_INFLIGHT_MAX_AGE_MS` | `600000` |  | perf/monitor.js |
 | `PING_DB_PATH` |  |  | config.js |
-| `PING_MON_CONCURRENCY` |  |  | config.js |
+| `PING_MON_CONCURRENCY` | `8` |  | config.js |
 | `PING_MON_ENABLED` | `기본 적용('false' 로 끄기)` |  | config.js |
-| `PING_MON_INTERVAL_MS` |  |  | config.js |
-| `PING_MON_RETENTION_DAYS` |  |  | config.js |
-| `PING_MON_TIMEOUT_MS` |  |  | config.js |
+| `PING_MON_INTERVAL_MS` | `60000` |  | config.js |
+| `PING_MON_PROBE_MS` | `1000` |  | config.js |
+| `PING_MON_RETENTION_DAYS` | `365` |  | config.js |
+| `PING_MON_TIMEOUT_MS` | `2500` |  | config.js |
 | `POLL_INTERVAL_MS` | `30000` | ✅ | config.js |
 | `PORT` | `4000` | ✅ | config.js |
 | `PORTAL_SYSTEMD_UNIT` | `'vmware-portal'` |  | loganalysis/journal.js |
@@ -210,12 +225,16 @@
 | `STALL_WATCH` | `기본 아님('0' 일 때만 적용)` |  | perf/stallWatch.js |
 | `STALL_WATCH_HEAP_WARN_PCT` | `85` |  | perf/stallWatch.js |
 | `STALL_WATCH_MS` | `10000` |  | perf/stallWatch.js |
+| `STORPATH_PER_CYCLE` | `200` |  | config.js |
+| `STORPATH_REFRESH_MS` | `3600000` |  | config.js |
+| `STORPATH_SAMPLES` | `15` |  | config.js |
+| `STORPATH_SCAN` | `기본 적용('false' 로 끄기)` |  | config.js |
 | `SVCMON_ROLE` | `''` |  | config.js |
-| `TAG_REFRESH_MS` |  |  | config.js |
+| `TAG_REFRESH_MS` | `21600000` |  | config.js |
 | `TAG_SCAN` | `기본 적용('false' 로 끄기)` |  | config.js |
 | `TEMP_DB_PATH` |  |  | config.js |
 | `TEMP_RAW_RETENTION_DAYS` | `0` |  | config.js |
-| `TEMP_RETENTION_DAYS` |  |  | config.js |
+| `TEMP_RETENTION_DAYS` | `1830` |  | config.js |
 | `TEMP_SAMPLE_INTERVAL_MS` | `60000` |  | config.js |
 | `TOTP_ISSUER` | `'VMware Portal'` |  | config.js |
 | `TRUST_PROXY` |  | ✅ | index.js |
@@ -229,33 +248,33 @@
 | `UPGRADE_REMOTE_BASE` |  | ✅ | config.js |
 | `UPGRADE_TOKEN` | `''` |  | config.js |
 | `UPGRADE_WATCH_DIR` | `''` | ✅ | config.js |
-| `VC_PROPS_MAX_PAGES` |  |  | config.js |
-| `VC_PROPS_PAGE_SIZE` |  |  | config.js |
+| `VC_PROPS_MAX_PAGES` | `10000` |  | config.js |
+| `VC_PROPS_PAGE_SIZE` | `1000` |  | config.js |
 | `VC_PROPS_PAGING` | `기본 적용('false' 로 끄기)` |  | config.js |
 | `VC_SOAP_METRICS` | `기본 적용('false' 로 끄기)` |  | config.js |
 | `VC_TLS_CIPHERS` | `'DEFAULT@SECLEVEL=0'` |  | config.js |
 | `VC_TLS_MIN_VERSION` | `'TLSv1'` |  | config.js |
 | `VC_WAIT_UPDATES` | `기본 아님('true' 일 때만 적용)` |  | config.js |
-| `VC_WAIT_UPDATES_FULL_MS` |  |  | config.js |
+| `VC_WAIT_UPDATES_FULL_MS` | `21600000` |  | config.js |
 | `VCENTERS_EXAMPLE_FALLBACK` | `기본 아님('true' 일 때만 적용)` |  | config.js |
 | `VEEAM_CONCURRENCY` | `4` |  | veeam/poller.js |
-| `VEEAM_EM_DEADLINE_MS` |  |  | veeam/em/poller.js |
+| `VEEAM_EM_DEADLINE_MS` | `240000` |  | veeam/em/poller.js |
 | `VEEAM_EM_POLL_MS` | `900000` |  | veeam/em/poller.js |
 | `VEEAM_EM_VM_BUDGET_MS` |  |  | veeam/em/client.js |
-| `VEEAM_HTTP_TIMEOUT_MS` |  |  | veeam/client.js, veeam/em/client.js |
+| `VEEAM_HTTP_TIMEOUT_MS` | `60000` |  | veeam/client.js, veeam/em/client.js |
 | `VEEAM_POLL_MS` | `600000` |  | veeam/poller.js |
-| `VEEAM_RUN_DEADLINE_MS` | `24` |  | veeam/run/runs.js |
-| `VEEAM_RUN_HTTP_TIMEOUT_MS` |  |  | veeam/run/client.js |
-| `VEEAM_RUN_PICKUP_MS` | `2` |  | veeam/run/edgeOps.js |
+| `VEEAM_RUN_DEADLINE_MS` | `86400000` |  | veeam/run/runs.js |
+| `VEEAM_RUN_HTTP_TIMEOUT_MS` | `60000` |  | veeam/run/client.js |
+| `VEEAM_RUN_PICKUP_MS` | `120000` |  | veeam/run/edgeOps.js |
 | `VEEAM_RUN_TRACK_MS` | `20000` |  | veeam/run/runs.js |
-| `VEEAM_SERVER_DEADLINE_MS` |  |  | veeam/poller.js |
+| `VEEAM_SERVER_DEADLINE_MS` | `240000` |  | veeam/poller.js |
 | `VEEAM_SNAP_CONCURRENCY` | `6` |  | veeam/snapCollector.js |
 | `VEEAM_TLS_VERIFY` |  |  | veeam/client.js, veeam/em/client.js 외 1 |
-| `VM_CFG_PER_CYCLE` |  |  | config.js |
-| `VM_CFG_REFRESH_MS` |  |  | config.js |
+| `VM_CFG_PER_CYCLE` | `1000` |  | config.js |
+| `VM_CFG_REFRESH_MS` | `1800000` |  | config.js |
 | `VM_CFG_SCAN` | `기본 적용('false' 로 끄기)` |  | config.js |
-| `VM_DEV_PER_CYCLE` |  |  | config.js |
-| `VM_DEV_REFRESH_MS` |  |  | config.js |
+| `VM_DEV_PER_CYCLE` | `150` |  | config.js |
+| `VM_DEV_REFRESH_MS` | `21600000` |  | config.js |
 | `VM_LIST_XLSX_TIMEOUT_MS` | `180000` |  | veeam/vmListXlsx.js |
 | `VM_LIST_XLSX_WORKER` | `'1'` |  | veeam/vmListXlsx.js |
 | `VMDNS_HISTORY_INTERVAL_MS` | `600000` |  | vmdns/poller.js |
@@ -272,6 +291,7 @@
 | `VMSERIES_READY_PCT` |  |  | vmseries/settings.js |
 | `VMSERIES_RETENTION_DAYS` |  |  | vmseries/settings.js |
 | `WIKI_MAX_BYTES` |  |  | wiki/store.js |
+| `WINRM_TLS_VERIFY` |  |  | winrm/client.js |
 | `XFER_SPEED_ENABLED` | `''` |  | xferspeed/settings.js |
 | `XFER_TEST_ENABLED` | `''` |  | xferspeed/serve.js |
 | `XFER_TEST_MAX_BYTES` | `67108864` |  | xferspeed/serve.js |
@@ -306,10 +326,10 @@
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
-| `BACKUP_STARTUP_DELAY_MS` |  |  | backup/settings.js |
+| `BACKUP_STARTUP_DELAY_MS` | `600000` |  | backup/settings.js |
 | `CONFIG_DIR` |  | ✅ | backup/stagedRestore.js, config.js 외 2 |
 
-## 베어메탈 스토리지 (8)
+## 베어메탈 스토리지 (13)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -319,30 +339,35 @@
 | `BMSTOR_HISTORY_DB_PATH` |  |  | bmstor/historyDb.js |
 | `BMSTOR_HISTORY_INTERVAL_HOURS` |  |  | bmstor/history.js |
 | `BMSTOR_HISTORY_RETENTION_DAYS` |  |  | bmstor/history.js |
+| `BMSTOR_IO_DB_PATH` |  |  | bmstor/ioDb.js |
+| `BMSTOR_IO_R15_DAYS` | `31` |  | bmstor/ioDb.js |
+| `BMSTOR_IO_R1H_DAYS` | `730` |  | bmstor/ioDb.js |
+| `BMSTOR_IO_RAW_DAYS` | `3` |  | bmstor/ioDb.js |
+| `BMSTOR_IO_SAMPLE_SEC` |  |  | bmstor/diskstats.js |
 | `BMSTOR_PUSH_TIMEOUT_MS` | `180000` |  | bmstor/poller.js |
-| `BMSTOR_SSH_TIMEOUT_MS` |  |  | bmstor/collect.js |
+| `BMSTOR_SSH_TIMEOUT_MS` | `15000` |  | bmstor/collect.js |
 
 ## 보안 (17)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
-| `LOGIN_FAIL_WINDOW_MS` | `15` |  | security/loginRateLimit.js |
+| `LOGIN_FAIL_WINDOW_MS` | `900000` |  | security/loginRateLimit.js |
 | `LOGIN_GLOBAL_FACTOR` | `10` |  | security/loginRateLimit.js |
 | `LOGIN_IP_FACTOR` | `6` |  | security/loginRateLimit.js |
 | `LOGIN_IP_LOCKOUT_MS` | `60000` |  | security/loginRateLimit.js |
-| `LOGIN_LOCKOUT_MS` | `15` |  | security/loginRateLimit.js |
+| `LOGIN_LOCKOUT_MS` | `900000` |  | security/loginRateLimit.js |
 | `LOGIN_MAX_FAILS` | `8` |  | security/loginRateLimit.js |
 | `LOGIN_POLICY_USERS` | `''` |  | security/securitySettings.js |
 | `LOGIN_RATELIMIT_DISABLED` | `기본 아님('true' 일 때만 적용)` |  | security/loginRateLimit.js |
 | `NODE_EXTRA_CA_CERTS` |  |  | security/tlsTrust.js |
-| `OTP_FAIL_WINDOW_MS` | `10` |  | security/loginRateLimit.js |
-| `OTP_LOCKOUT_MS` | `10` |  | security/loginRateLimit.js |
+| `OTP_FAIL_WINDOW_MS` | `600000` |  | security/loginRateLimit.js |
+| `OTP_LOCKOUT_MS` | `600000` |  | security/loginRateLimit.js |
 | `OTP_MAX_FAILS` | `5` |  | security/loginRateLimit.js |
 | `OTP_RATELIMIT_DISABLED` | `기본 아님('true' 일 때만 적용)` |  | security/loginRateLimit.js |
+| `SECRETS_KEY_LOST` | `기본 아님('true' 일 때만 적용)` |  | security/guestScanScheduler.js, security/secretVault.js |
 | `SETTINGS_OWNERS` | `''` | ✅ | security/securitySettings.js |
 | `SSH_HOSTKEY_POLICY` | `미지정 — peer-trust.json 정책(새 설치 enforce · 기존 현장 observe)` |  | security/peerTrust.js |
 | `TLS_PEER_POLICY` | `미지정 — peer-trust.json 정책(새 설치 enforce · 기존 현장 observe)` |  | security/peerTrust.js |
-| `X` |  |  | security/tlsTrust.js, util/dayKey.js 외 1 |
 
 ## 분석 도구 (10)
 
@@ -359,19 +384,20 @@
 | `USER_ADMIN_CAN_RESTART` | `기본 아님('1' 일 때만 적용)` |  | tools/user-admin.js |
 | `VCENTER_PASSWORD` |  |  | tools/bareos-probe.js |
 
-## 서비스 모니터 (9)
+## 서비스 모니터 (10)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
-| `SVCMON_BATCH` |  |  | svcmon/pool.js |
-| `SVCMON_CONCURRENCY` |  |  | svcmon/pool.js |
+| `SVCMON_BATCH` | `250` |  | svcmon/pool.js |
+| `SVCMON_CONCURRENCY` | `256` |  | svcmon/pool.js |
 | `SVCMON_ENABLED` | `기본 적용('false' 로 끄기)` |  | svcmon/poller.js |
-| `SVCMON_MAX_PER_TICK` |  |  | svcmon/poller.js |
-| `SVCMON_PROC_CONCURRENCY` |  |  | svcmon/pool.js |
-| `SVCMON_TICK_MS` |  |  | svcmon/poller.js |
-| `SVCMON_WARM_MAX_MS` |  |  | svcmon/poller.js |
-| `SVCMON_WORKERS` |  |  | svcmon/capacity.js, svcmon/pool.js |
-| `SVCMON_XLSX_MAX_UNCOMPRESSED_BYTES` | `64` |  | svcmon/formats.js |
+| `SVCMON_MAX_PER_TICK` | `4000` |  | svcmon/capacity.js |
+| `SVCMON_PROC_CONCURRENCY` | `64` |  | svcmon/pool.js |
+| `SVCMON_TICK_MS` | `5000` |  | svcmon/capacity.js |
+| `SVCMON_TRIAL_EDGE_MS` | `900000` |  | svcmon/trial.js |
+| `SVCMON_WARM_MAX_MS` | `900000` |  | svcmon/poller.js |
+| `SVCMON_WORKERS` |  |  | svcmon/capacity.js |
+| `SVCMON_XLSX_MAX_UNCOMPRESSED_BYTES` | `67108864` |  | svcmon/formats.js |
 
 ## 수집 서버 (9)
 
@@ -384,10 +410,10 @@
 | `COLLECTOR_REMOTE_BYHOST_MAX` |  |  | collector/remoteInventory.js |
 | `COLLECTOR_REMOTE_SERVERS_MAX` | `20000` |  | collector/remoteInventory.js |
 | `EDGE_PUSH_TIMEOUT_MS` |  |  | collector/upgradePush.js, upgrade/upgrade.js |
-| `POWER_CURRENT_STALE_MS` | `2` |  | collector/state.js, idrac/service.js |
+| `POWER_CURRENT_STALE_MS` | `7200000` |  | collector/state.js, idrac/service.js |
 | `UPGRADE_PUSH_CONCURRENCY` | `4` |  | collector/upgradePush.js |
 
-## 스토리지 수집 (26)
+## 스토리지 수집 (34)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -396,23 +422,31 @@
 | `STORAGE_AREAS_TIMEOUT_MS` | `300000` |  | storage/poller.js |
 | `STORAGE_CLI_RAW_LIMIT` | `4000` |  | storage/collectors/cliSsh.js |
 | `STORAGE_CLI_SESSION_BUDGET_MS` | `150000` |  | storage/collectors/cliSsh.js, storage/collectors/isilonSsh.js |
-| `STORAGE_CLI_TIMEOUT_MS` |  |  | storage/collectors/cliSsh.js |
+| `STORAGE_CLI_TIMEOUT_MS` | `45000` |  | storage/collectors/cliSsh.js |
 | `STORAGE_CONFIG_PULL_MS` | `5 * 60_000` |  | storage/intervals.js |
 | `STORAGE_DAILY_KEEP_DAYS` |  |  | storage/db.js, storage/growthSettings.js |
 | `STORAGE_DEVICE_TIMEOUT_MS` | `180000` |  | storage/collectRequests.js, storage/collectors/isilonSsh.js 외 1 |
 | `STORAGE_HISTORY_KEEP_DAYS` |  |  | storage/db.js, storage/growthSettings.js |
-| `STORAGE_HTTP_TIMEOUT_MS` |  |  | storage/collectors/isilon.js, storage/collectors/restCommon.js |
+| `STORAGE_HTTP_TIMEOUT_MS` | `15000` |  | storage/collectors/isilon.js, storage/collectors/restCommon.js |
+| `STORAGE_INSPECT_TIMEOUT_MS` | `180000` |  | storage/inspect/runner.js |
 | `STORAGE_INTERVALS_LOCAL` | `''` |  | storage/intervals.js |
 | `STORAGE_ISILON_PORT` | `8080` |  | storage/collectors/isilon.js |
+| `STORAGE_NODECLIENT_DAILY_KEEP_DAYS` |  |  | storage/db.js, storage/growthSettings.js |
+| `STORAGE_NODECLIENT_HOURLY_KEEP_DAYS` |  |  | storage/db.js, storage/growthSettings.js |
+| `STORAGE_NODECLIENT_KEEP_DAYS` |  |  | storage/db.js, storage/growthSettings.js |
+| `STORAGE_NODELOAD_HOURLY_KEEP_DAYS` |  |  | storage/db.js, storage/growthSettings.js |
+| `STORAGE_NODELOAD_KEEP_DAYS` |  |  | storage/db.js, storage/growthSettings.js |
+| `STORAGE_NODELOAD_MS` | `5 * 60_000` |  | storage/intervals.js |
+| `STORAGE_NODELOAD_TIMEOUT_MS` | `60000` |  | storage/nodeLoadPoller.js |
 | `STORAGE_POLL_MS` | `60 * 60_000` |  | storage/intervals.js |
 | `STORAGE_POWERSTORE_LIST_LIMIT` | `2000` |  | storage/collectors/powerstore.js |
 | `STORAGE_POWERSTORE_METRICS_INTERVAL` | `'OneDay'` |  | storage/collectors/powerstore.js |
-| `STORAGE_POWERSTORE_PORT` | `443` |  | storage/collectors/powerstore.js |
+| `STORAGE_POWERSTORE_PORT` | `443` |  | storage/collectors/arrayPerf.js, storage/collectors/powerstore.js |
 | `STORAGE_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | storage/push.js |
 | `STORAGE_PUSH_MS` | `5 * 60_000` |  | storage/intervals.js |
 | `STORAGE_TLS_VERIFY` |  |  | storage/collectors/isilon.js, storage/collectors/restCommon.js |
-| `STORAGE_UNISPHERE_PORT` | `8443` |  | storage/collectors/powermax.js |
-| `STORAGE_UNITY_PORT` | `443` |  | storage/collectors/unity.js |
+| `STORAGE_UNISPHERE_PORT` | `8443` |  | storage/collectors/arrayPerf.js, storage/collectors/powermax.js |
+| `STORAGE_UNITY_PORT` | `443` |  | storage/collectors/arrayPerf.js, storage/collectors/unity.js |
 | `STORAGE_VPLEX_PORT` | `443` |  | storage/collectors/vplex.js |
 | `STORAGE_XLSX_TIMEOUT_MS` | `300000` |  | storage/usageXlsx.js |
 | `STORAGE_XLSX_WORKER` | `'1'` |  | storage/usageXlsx.js |
@@ -440,59 +474,62 @@
 | `UPGRADE_TLS_INSECURE` | `기본 적용('true' 로 끄기)` |  | upgrade/upgradeAgent.js |
 | `UPGRADE_VERSIONS_MAX_BYTES` | `1048576` |  | upgrade/versionsDoc.js |
 
-## 엣지 에이전트 (50)
+## 엣지 에이전트 (53)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `AGENT_BAREOS_OP_POLL_MS` | `5000` |  | agent/bareosOpWorker.js |
+| `AGENT_BM_FOLDERS_PULL_MS` | `600000` |  | agent/bmFoldersPull.js |
+| `AGENT_BM_MAINT_PULL_MS` | `600000` |  | agent/bmMaintPull.js |
+| `AGENT_BM_ONBOARD_PULL_MS` | `600000` |  | agent/bmOnboardPull.js |
 | `AGENT_BMSTOR_POLL_MS` | `10000` |  | agent/bmstorWorker.js |
-| `AGENT_BMUSAGE_CONFIG_PULL_MS` | `10` |  | agent/bmUsageConfigPull.js |
+| `AGENT_BMUSAGE_CONFIG_PULL_MS` | `600000` |  | agent/bmUsageConfigPull.js |
 | `AGENT_CAPTURE_POLL_MS` | `4000` |  | agent/captureWorker.js |
 | `AGENT_CONFIG_PUSH_MS` | `1800000` |  | agent/configPush.js |
 | `AGENT_CONFIG_PUSH_TARGET_BYTES` | `15728640` |  | agent/configPush.js |
 | `AGENT_CURUSER_CHUNK_BYTES` | `700000` |  | agent/curUserPush.js |
-| `AGENT_CURUSER_CONFIG_PULL_MS` | `10` |  | agent/curUserConfigPull.js |
-| `AGENT_CURUSER_PUSH_TIMEOUT_MS` |  |  | agent/curUserPush.js |
+| `AGENT_CURUSER_CONFIG_PULL_MS` | `600000` |  | agent/curUserConfigPull.js |
+| `AGENT_CURUSER_PUSH_TIMEOUT_MS` | `60000` |  | agent/curUserPush.js |
 | `AGENT_DEPLOY_CONCURRENCY` | `2` | ✅ | agent/bulkDeploy.js |
-| `AGENT_DEPLOY_TIMEOUT_MS` |  | ✅ | agent/bulkDeploy.js |
+| `AGENT_DEPLOY_TIMEOUT_MS` | `900000` | ✅ | agent/bulkDeploy.js |
 | `AGENT_EDGELOG_POLL_MS` |  |  | agent/edgeLogWorker.js |
-| `AGENT_FLEET_CENTRAL_TTL_MS` |  |  | agent/fleetPush.js |
-| `AGENT_FLEET_WITHHOLD_MAX_MS` | `20` |  | agent/fleetPush.js |
-| `AGENT_GPU_GUEST_WITHHOLD_MAX_MS` | `15` |  | agent/gpuGuestPush.js |
-| `AGENT_GUESTDISK_PUSH_TIMEOUT_MS` |  |  | agent/guestDiskPush.js |
+| `AGENT_FLEET_CENTRAL_TTL_MS` | `1800000` |  | agent/fleetPush.js |
+| `AGENT_FLEET_WITHHOLD_MAX_MS` | `1200000` |  | agent/fleetPush.js |
+| `AGENT_GPU_GUEST_WITHHOLD_MAX_MS` | `900000` |  | agent/gpuGuestPush.js |
+| `AGENT_GUESTDISK_PUSH_TIMEOUT_MS` | `120000` |  | agent/guestDiskPush.js |
 | `AGENT_IDRAC_SCAN_POLL_MS` | `5000` |  | agent/idracScanWorker.js |
 | `AGENT_LINKCHECK` | `''` |  | agent/linkCheckWorker.js |
 | `AGENT_LOGQ_POLL_MS` | `4000` |  | agent/logQueryWorker.js |
-| `AGENT_PARTFAULT_CONFIG_PULL_MS` | `10` |  | agent/partFaultConfigPull.js |
+| `AGENT_PARTFAULT_CONFIG_PULL_MS` | `600000` |  | agent/partFaultConfigPull.js |
 | `AGENT_PING_POLL_MS` | `4000` |  | agent/pingWorker.js |
 | `AGENT_PUSH_FLEET` | `기본 적용('false' 로 끄기)` |  | agent/fleetPush.js |
 | `AGENT_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | agent/curUserPush.js, agent/fleetPush.js 외 4 |
-| `AGENT_PUSH_TIMEOUT_MS` |  |  | agent/fleetPush.js, agent/inventoryPush.js |
+| `AGENT_PUSH_TIMEOUT_MS` | `60000` |  | agent/fleetPush.js, agent/inventoryPush.js |
 | `AGENT_VEEAM_RUN_POLL_MS` | `5000` |  | agent/veeamRunWorker.js |
 | `AGENT_VMSERIES_CHUNK_BYTES` | `700000` |  | agent/vmSeriesPush.js |
-| `AGENT_VMSERIES_CONFIG_PULL_MS` | `10` |  | agent/vmSeriesConfigPull.js |
-| `AGENT_VMSERIES_PUSH_TIMEOUT_MS` |  |  | agent/vmSeriesPush.js |
+| `AGENT_VMSERIES_CONFIG_PULL_MS` | `600000` |  | agent/vmSeriesConfigPull.js |
+| `AGENT_VMSERIES_PUSH_TIMEOUT_MS` | `120000` |  | agent/vmSeriesPush.js |
 | `BAREOS_CONFIG_PULL_MS` | `300000` |  | agent/bareosConfigPull.js |
 | `CURUSER_LOCAL` | `''` |  | agent/curUserConfigPull.js, curuser/settings.js |
-| `CVP_CONFIG_PULL_MS` | `5` |  | agent/cvpConfigPull.js |
+| `CVP_CONFIG_PULL_MS` | `300000` |  | agent/cvpConfigPull.js |
 | `EDGE_ADVERTISE_URL` | `''` | ✅ | agent/selfRegister.js |
 | `ISIDU_CONFIG_PULL_MS` | `300000` |  | agent/isiduConfigPull.js |
-| `LASTGOOD_HOLD_MS` | `6` |  | agent/inventoryPush.js, central/inventory.js 외 2 |
-| `SANSW_CONFIG_PULL_MS` | `5` |  | agent/sanSwitchConfigPull.js |
-| `SVCMON_CONFIG_FAIL_BACKOFF_MS` |  |  | agent/svcmonConfigPull.js |
+| `LASTGOOD_HOLD_MS` | `21600000` |  | agent/inventoryPush.js, central/inventory.js 외 2 |
+| `SANSW_CONFIG_PULL_MS` | `300000` |  | agent/sanSwitchConfigPull.js |
+| `SVCMON_CONFIG_FAIL_BACKOFF_MS` | `1800000` |  | agent/svcmonConfigPull.js |
 | `SVCMON_CONFIG_PULL` | `기본 적용('false' 로 끄기)` |  | agent/svcmonConfigPull.js |
-| `SVCMON_CONFIG_PULL_MS` |  |  | agent/svcmonConfigPull.js |
-| `SVCMON_PULL_TIMEOUT_MS` |  |  | agent/svcmonConfigPull.js |
+| `SVCMON_CONFIG_PULL_MS` | `300000` |  | agent/svcmonConfigPull.js |
+| `SVCMON_PULL_TIMEOUT_MS` | `60000` |  | agent/svcmonConfigPull.js |
 | `SVCMON_PUSH` | `기본 적용('false' 로 끄기)` |  | agent/svcmonPush.js |
-| `SVCMON_PUSH_CHUNK` |  |  | agent/svcmonPush.js |
+| `SVCMON_PUSH_CHUNK` | `2000` |  | agent/svcmonPush.js |
 | `SVCMON_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | agent/svcmonPush.js |
-| `SVCMON_PUSH_INTERVAL_MS` |  |  | agent/svcmonPush.js |
-| `SVCMON_PUSH_TIMEOUT_MS` |  |  | agent/svcmonPush.js |
+| `SVCMON_PUSH_INTERVAL_MS` | `60000` |  | agent/svcmonPush.js |
+| `SVCMON_PUSH_TIMEOUT_MS` | `30000` |  | agent/svcmonPush.js |
 | `VEEAM_CONFIG_PULL_MS` | `300000` |  | agent/veeamConfigPull.js |
 | `VMCLONE_DELEGATION` | `기본 적용('false' 로 끄기)` |  | agent/vmCloneWorker.js |
-| `VMCLONE_REPORT_TIMEOUT_MS` |  |  | agent/vmCloneWorker.js |
-| `VMCLONE_SYNC_MS` |  |  | agent/vmCloneWorker.js |
-| `VMCLONE_SYNC_TIMEOUT_MS` |  |  | agent/vmCloneWorker.js |
+| `VMCLONE_REPORT_TIMEOUT_MS` | `30000` |  | agent/vmCloneWorker.js |
+| `VMCLONE_SYNC_MS` | `30000` |  | agent/vmCloneWorker.js |
+| `VMCLONE_SYNC_TIMEOUT_MS` | `30000` |  | agent/vmCloneWorker.js |
 | `VMSERIES_LOCAL_SETTINGS` | `기본 적용('true' 로 끄기)` |  | agent/vmSeriesConfigPull.js |
 
 ## 원격 명령(RMA) (38)
@@ -501,7 +538,7 @@
 |---|---|---|---|
 | `AGENT_CENTRAL_TOKEN` |  |  | config.js, rma/agent.js |
 | `AGENT_NAME` |  | ✅ | config.js, rma/agent.js |
-| `CENTRAL_URL` | `''` | ✅ | config.js, rma/agent.js |
+| `CENTRAL_URL` | `''` | ✅ | config.js, focusmon/alerts.js 외 2 |
 | `COLLECTOR_DATACENTER` |  | ✅ | config.js, rma/agent.js |
 | `EDGE_TOKEN` | `''` | ✅ | config.js, rma/agent.js |
 | `RMA_ACK_GRACE_MS` | `30000` |  | rma/jobs.js |
@@ -510,20 +547,20 @@
 | `RMA_ALLOW_SSH` | `기본 아님('true' 일 때만 적용)` | ✅ | rma/agent.js |
 | `RMA_AUDIT_LOG` |  | ✅ | rma/agent.js |
 | `RMA_COMMENT` | `''` | ✅ | rma/agent.js |
-| `RMA_CRED_CACHE_MS` | `10` |  | rma/agent.js |
+| `RMA_CRED_CACHE_MS` | `600000` |  | rma/agent.js |
 | `RMA_DISABLED_COMMANDS` |  |  | rma/agent.js |
 | `RMA_DISABLED_TESTS` |  |  | rma/agent.js |
 | `RMA_ENABLED_COMMANDS` |  | ✅ | rma/agent.js |
 | `RMA_ENABLED_TESTS` |  | ✅ | rma/agent.js |
 | `RMA_FAILURE_LOG` |  | ✅ | rma/agent.js |
 | `RMA_FILE_ROOTS` |  | ✅ | rma/agent.js |
-| `RMA_HEARTBEAT_PURGE_MS` | `7` |  | rma/jobs.js |
+| `RMA_HEARTBEAT_PURGE_MS` | `604800000` |  | rma/jobs.js |
 | `RMA_HEARTBEAT_STALE_MS` | `90000` |  | rma/jobs.js |
 | `RMA_HISTORY_DAYS` | `90` |  | rma/historyDb.js |
 | `RMA_INSTANCE` |  |  | rma/agent.js |
 | `RMA_LONGPOLL_MS` | `20000` | ✅ | rma/agent.js |
 | `RMA_MAX_INSTANCES_PER_AGENT` | `32` |  | rma/jobs.js |
-| `RMA_MAX_OUTPUT` | `256` | ✅ | rma/exec.js, rma/jobs.js |
+| `RMA_MAX_OUTPUT` | `262144` | ✅ | rma/exec.js, rma/jobs.js |
 | `RMA_OFFLINE_CMD_FAIL` | `''` |  | rma/agent.js |
 | `RMA_OFFLINE_CMD_OK` | `''` | ✅ | rma/agent.js |
 | `RMA_OFFLINE_MINUTES` | `0` | ✅ | rma/agent.js |
@@ -558,7 +595,7 @@
 | `PROXY_SSH_USER` | `''` |  | proxy/registry.js |
 | `PROXY_VALIDATE_CMD` | `'haproxy -c -f {file}'` |  | proxy/registry.js |
 | `REMOTE_IDLE_TIMEOUT_MS` |  |  | proxy/sshGateway.js |
-| `REMOTE_MAPPING_TTL_MS` | `24` |  | proxy/expiry.js |
+| `REMOTE_MAPPING_TTL_MS` | `86400000` |  | proxy/expiry.js |
 | `REMOTE_MAX_SESSIONS` | `80` |  | proxy/sshGateway.js |
 | `REMOTE_MAX_SESSIONS_PER_USER` | `20` |  | proxy/sshGateway.js |
 | `REMOTE_REVALIDATE_MS` | `30000` |  | proxy/sshGateway.js |
@@ -566,23 +603,26 @@
 | `REMOTE_WS_LOW_WATER_BYTES` | `262144` |  | proxy/sshGateway.js |
 | `REMOTE_WS_MAX_QUEUE_BYTES` | `8388608` |  | proxy/sshGateway.js |
 | `REMOTE_WS_STALL_MS` | `60000` |  | proxy/sshGateway.js |
-| `SSH_EXEC_MAX_OUTPUT` | `4` |  | proxy/sshExec.js |
-| `SSH_EXEC_TIMEOUT_MS` |  |  | proxy/sshExec.js |
+| `SSH_EXEC_MAX_OUTPUT` | `4194304` |  | proxy/sshExec.js |
+| `SSH_EXEC_TIMEOUT_MS` | `60000` |  | proxy/sshExec.js |
 | `SSH_LEGACY_FALLBACK` | `기본 적용('0' 로 끄기)` | ✅ | proxy/sshExec.js |
 | `SSH_PAGER_MAX_PAGES` | `400` |  | proxy/sshExec.js |
 | `SSH_PTY_COLS` | `1000` |  | proxy/sshExec.js |
 | `SSH_PTY_ROWS` | `200` |  | proxy/sshExec.js |
-| `SSH_READY_TIMEOUT_MS` |  |  | proxy/sshExec.js, proxy/sshGateway.js |
+| `SSH_READY_TIMEOUT_MS` | `60000` |  | proxy/sshExec.js, proxy/sshGateway.js |
 
-## 인사이트 (6)
+## 인사이트 (9)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
-| `DB_HEALTH_COUNT_MAX_BYTES` | `512` |  | insights/dbHealth.js |
-| `DB_HEALTH_FULL_MAX_BYTES` | `256` |  | insights/dbHealth.js |
-| `DB_HEALTH_QUICK_MAX_BYTES` | `512` |  | insights/dbHealth.js |
+| `DB_HEALTH_COUNT_MAX_BYTES` | `536870912` |  | insights/dbHealth.js |
+| `DB_HEALTH_FULL_MAX_BYTES` | `268435456` |  | insights/dbHealth.js |
+| `DB_HEALTH_QUICK_MAX_BYTES` | `536870912` |  | insights/dbHealth.js |
+| `HW_EXPORT_SPEC_MAX` | `300` |  | insights/hwExport/render.js |
+| `HW_EXPORT_XLSX_TIMEOUT_MS` | `300000` |  | insights/hwExport/render.js |
+| `HW_EXPORT_XLSX_WORKER` | `'1'` |  | insights/hwExport/render.js |
 | `PORTAL_DB_MIN_FORECAST_MS` | `3600000` |  | insights/portalDb.js |
-| `PORTAL_DB_SAMPLE_MS` | `10` |  | insights/portalDb.js |
+| `PORTAL_DB_SAMPLE_MS` | `600000` |  | insights/portalDb.js |
 | `SERIAL_INDEX_CACHE_MS` | `30000` |  | insights/serialLookup.js |
 
 ## 인증·권한 (17)
@@ -620,67 +660,68 @@
 | `RELAYTOPO_CONCURRENCY` | `4` | ✅ | relaytopo/ops.js |
 | `RELAYTOPO_SSH_TIMEOUT_MS` | `45000` | ✅ | relaytopo/ops.js |
 
-## 중앙(위임 수집) (57)
+## 중앙(위임 수집) (58)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
-| `BMUSAGE_PULL_STALE_MS` | `30` |  | central/bmUsageEdgePull.js |
-| `BMUSAGE_PULL_TIMEOUT_MS` | `20000` |  | central/bmUsageEdgePull.js, routes/api/bmUsage.js |
+| `BMUSAGE_PULL_STALE_MS` | `1800000` |  | central/bmUsageEdgePull.js |
+| `BMUSAGE_PULL_TIMEOUT_MS` | `20000` |  | central/bmCapacityPull.js, central/bmComparePull.js 외 5 |
 | `CAPTURE_ACK_GRACE_MS` | `60000` |  | central/captureJobs.js |
-| `CENTRAL_AGENT_CONFIG_MAX_BYTES` | `32` |  | central/agentConfig.js |
-| `CENTRAL_AGENT_IDENTITY_MAX` |  |  | central/agentIdentity.js |
-| `CENTRAL_AGENT_IDENTITY_UNVERIFIED_MAX` |  |  | central/agentIdentity.js |
-| `CENTRAL_EDGE_AGENT_EVICT_MS` | `24` |  | central/edgeRecord.js |
-| `CENTRAL_EDGE_AGENT_MAX_BYTES` | `16` |  | central/edgeRecord.js |
-| `CENTRAL_EDGE_DEVICE_MAX_BYTES` | `1024` |  | central/edgeRecord.js |
+| `CENTRAL_AGENT_CONFIG_MAX_BYTES` | `33554432` |  | central/agentConfig.js |
+| `CENTRAL_AGENT_IDENTITY_MAX` | `2000` |  | central/agentIdentity.js |
+| `CENTRAL_AGENT_IDENTITY_UNVERIFIED_MAX` | `64` |  | central/agentIdentity.js |
+| `CENTRAL_EDGE_AGENT_EVICT_MS` | `86400000` |  | central/edgeRecord.js |
+| `CENTRAL_EDGE_AGENT_MAX_BYTES` | `16777216` |  | central/edgeRecord.js |
+| `CENTRAL_EDGE_DEVICE_MAX_BYTES` | `1048576` |  | central/edgeRecord.js |
 | `CENTRAL_EDGE_MAX_AGENTS` | `128` |  | central/edgeRecord.js |
 | `CENTRAL_FLEET_MAX_AGENTS` | `500` |  | central/fleet.js |
 | `CENTRAL_FLEET_MAX_PER_AGENT` | `5000` |  | central/fleet.js |
 | `CENTRAL_FLEET_MAX_TOTAL` | `20000` |  | central/fleet.js |
 | `CENTRAL_FLEET_MAX_UNVERIFIED_AGENTS` | `20` |  | central/fleet.js |
 | `CENTRAL_FLEET_MAX_UNVERIFIED_TOTAL` | `5000` |  | central/fleet.js |
-| `CENTRAL_FLEET_TTL_MS` | `30` |  | central/fleet.js |
+| `CENTRAL_FLEET_TTL_MS` | `1800000` |  | central/fleet.js |
 | `CENTRAL_FLEET_UNREADABLE_HOLD_MS` | `86400000` |  | central/fleet.js |
-| `CENTRAL_INVENTORY_PERSIST_MS` |  |  | central/inventory.js |
-| `CENTRAL_PDU_TTL_MS` | `6` |  | central/pduEdge.js |
+| `CENTRAL_INVENTORY_PERSIST_MS` | `30000` |  | central/inventory.js |
+| `CENTRAL_PDU_TTL_MS` | `21600000` |  | central/pduEdge.js |
 | `CENTRAL_RESULT_AGENTS_MAX` | `500` |  | central/assignments.js |
-| `CENTRAL_SANSW_ORPHAN_TTL_MS` | `7` |  | central/sanSwitchEdge.js |
+| `CENTRAL_SANSW_ORPHAN_TTL_MS` | `604800000` |  | central/sanSwitchEdge.js |
 | `CENTRAL_TOKEN` | `''` | ✅ | central/token.js, config.js 외 1 |
-| `CENTRAL_VCENTER_OWNER_NOTE_MAX` |  |  | central/agentIdentity.js |
+| `CENTRAL_VCENTER_OWNER_NOTE_MAX` | `4096` |  | central/agentIdentity.js |
 | `EDGELOG_ACK_TIMEOUT_MS` | `60000` |  | central/edgeLogJobs.js |
 | `EDGELOG_KEEP_PER_AGENT` | `10` |  | central/edgeLogStore.js |
 | `EDGELOG_LINE_CAP` | `1000` |  | central/edgeLogStore.js |
 | `EDGELOG_MAX_AGENTS` | `200` |  | central/edgeLogStore.js |
 | `EDGELOG_PULL_TIMEOUT_MS` | `20000` |  | central/edgeLogPull.js |
-| `EDGELOG_REQ_TTL_MS` | `10` |  | central/edgeLogJobs.js |
-| `EDGELOG_SNAP_MAX_BYTES` | `2` |  | central/edgeLogStore.js |
+| `EDGELOG_REQ_TTL_MS` | `600000` |  | central/edgeLogJobs.js |
+| `EDGELOG_SNAP_MAX_BYTES` | `2097152` |  | central/edgeLogStore.js |
 | `EDGELOG_STATUS_ITEM_CAP` | `200` |  | central/edgeLogStore.js |
-| `EDGELOG_STATUS_MAX_BYTES` | `512` |  | central/edgeLogStore.js |
-| `IDRAC_PUSH_TIMEOUT_MS` |  |  | central/idracScanPush.js |
+| `EDGELOG_STATUS_MAX_BYTES` | `524288` |  | central/edgeLogStore.js |
+| `IDRAC_PUSH_TIMEOUT_MS` | `900000` |  | central/idracScanPush.js |
 | `IDRAC_SCAN_ACK_TIMEOUT_MS` | `90000` |  | central/idracScanJobs.js |
-| `INGEST_PLAIN_WARN_BYTES` | `512` |  | central/ingestStats.js |
+| `INGEST_PLAIN_WARN_BYTES` | `524288` |  | central/ingestStats.js |
 | `INGEST_PLAIN_WARN_STREAK` | `3` |  | central/ingestStats.js |
 | `INGEST_REJECT_KEEP` | `50` |  | central/ingestReject.js |
 | `INGEST_REJECT_MAX_AGENTS` | `500` |  | central/ingestReject.js |
-| `ISIDU_EDGE_NUDGE_TIMEOUT_MS` |  |  | central/isiduRemote.js |
+| `ISIDU_EDGE_NUDGE_TIMEOUT_MS` | `30000` |  | central/isiduRemote.js |
 | `LINKCHECK_REPORT_LINK_MAX` | `500` |  | central/linkCheckEdge.js |
-| `LINKCHECK_REPORT_STALE_MS` | `3` |  | central/linkCheckEdge.js |
+| `LINKCHECK_REPORT_STALE_MS` | `10800000` |  | central/linkCheckEdge.js |
 | `PARTFAULT_EDGE_DEVICE_PART_MAX` | `2000` |  | central/partFaultEdge.js |
 | `PARTFAULT_EDGE_MAX_DEVICES` | `5000` |  | central/partFaultEdge.js |
 | `PARTFAULT_EDGE_REPORT_PART_MAX` | `50000` |  | central/partFaultEdge.js |
 | `PING_ACK_TIMEOUT_MS` | `30000` |  | central/pingJobs.js |
 | `PING_PENDING_TTL_MS` | `90000` |  | central/pingJobs.js |
 | `PORTAL_ENV_FILE` |  |  | central/token.js |
-| `PORTALCHECK_PULL_STALE_MS` | `30` |  | central/tokenCheckPull.js |
+| `PORTALCHECK_PULL_STALE_MS` | `1800000` |  | central/tokenCheckPull.js |
 | `PORTALCHECK_PULL_TIMEOUT_MS` | `20000` |  | central/tokenCheckPull.js |
-| `SVCMON_EDGE_MAX_AGENTS` |  |  | central/svcmonEdge.js |
-| `SVCMON_EDGE_MAX_ROWS` |  |  | central/svcmonEdge.js |
-| `SVCMON_EDGE_REGRESS_GC_HOLD_MS` |  |  | central/svcmonEdge.js |
-| `SVCMON_EDGE_SILENCE_MIN_MS` |  |  | central/svcmonEdge.js |
-| `SVCMON_EDGE_SKEW_WARN_MS` |  |  | central/svcmonEdge.js |
-| `SVCMON_EDGE_WARM_GC_HOLD_MS` |  |  | central/svcmonEdge.js |
+| `SVCMON_EDGE_MAX_AGENTS` | `64` |  | central/svcmonEdge.js |
+| `SVCMON_EDGE_MAX_ROWS` | `20000` |  | central/svcmonEdge.js |
+| `SVCMON_EDGE_META_ALERT_HOLD_MS` | `180000` |  | central/svcmonEdge.js |
+| `SVCMON_EDGE_REGRESS_GC_HOLD_MS` | `180000` |  | central/svcmonEdge.js |
+| `SVCMON_EDGE_SILENCE_MIN_MS` | `300000` |  | central/svcmonEdge.js |
+| `SVCMON_EDGE_SKEW_WARN_MS` | `60000` |  | central/svcmonEdge.js |
+| `SVCMON_EDGE_WARM_GC_HOLD_MS` | `1800000` |  | central/svcmonEdge.js |
 | `SVCMON_SILENCE_ALERT` | `기본 적용('false' 로 끄기)` |  | central/svcmonSilence.js |
-| `SVCMON_SILENCE_TICK_MS` |  |  | central/svcmonSilence.js |
+| `SVCMON_SILENCE_TICK_MS` | `60000` |  | central/svcmonSilence.js |
 
 ## 추이 트래킹 (3)
 
@@ -694,14 +735,14 @@
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
-| `HEALTH_PROBE_TIMEOUT_MS` |  |  | health/network.js |
+| `HEALTH_PROBE_TIMEOUT_MS` | `5000` |  | health/network.js |
 
 ## API 라우트 (37)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `BAREOS_BUNDLE_BASE_URL` | `''` |  | bareos/install/bundle.js, routes/api/bareosInstall.js |
-| `BMUSAGE_PULL_BUDGET_MS` |  |  | routes/api/bmUsage.js |
+| `BMUSAGE_PULL_BUDGET_MS` | `150000` |  | routes/api/bmUsage.js |
 | `BMUSAGE_PULL_CONCURRENCY` | `4` |  | routes/api/bmUsage.js |
 | `CENTRAL_INVENTORY_OWNER_HANDOVER_HOURS` |  |  | routes/central.js |
 | `CENTRAL_REQUIRE_AGENT_TOKEN` | `기본 아님('true' 일 때만 적용)` |  | routes/central.js |
@@ -723,7 +764,7 @@
 | `RIGHTSIZE_MIN_COVERAGE_PCT` |  |  | routes/api/toolsCapacity.js |
 | `RIGHTSIZE_MIN_DAYS` |  |  | routes/api/toolsCapacity.js |
 | `RIGHTSIZE_READY_WARN_PCT` |  |  | routes/api/toolsCapacity.js |
-| `RMA_CRED_RATE_PER_MIN` | `120` |  | routes/central.js |
+| `RMA_CRED_RATE_PER_MIN` | `120` |  | routes/central/pduSanRoutes.js |
 | `SANSW_PROBLEM_PORT_MAX` | `40` |  | routes/api/sanSwitch.js |
 | `SECRETS_KEY` |  |  | routes/admin/opsSettings.js, security/secretVault.js |
 | `SVCMON_XLSX_MAX_BYTES` | `8000000` |  | routes/svcmon/shared.js |
@@ -738,16 +779,18 @@
 | `WASTE_EXPORT_MAX_REPORTS` | `200` |  | routes/api/toolsCapacity.js |
 | `WASTE_SPARK_MAX_VMS` | `24` |  | routes/api/toolsCapacity.js |
 
-## GPU (6)
+## GPU (8)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
-| `GPU_GUEST_FILE_MAX_BYTES` | `8` |  | gpu/guestops.js |
-| `GUEST_GPU_MAX_HOSTS` |  |  | gpu/store.js |
-| `GUEST_GPU_MAX_HOSTS_PER_AGENT` |  |  | gpu/store.js |
-| `GUEST_GPU_MAX_VMS` |  |  | gpu/store.js |
-| `GUEST_GPU_MAX_VMS_PER_AGENT` |  |  | gpu/store.js |
-| `GUEST_GPU_TTL_MS` |  |  | gpu/store.js |
+| `GPU_ALLOC_XLSX_TIMEOUT_MS` | `300000` |  | gpu/allocTreeXlsx.js |
+| `GPU_ALLOC_XLSX_WORKER` | `'1'` |  | gpu/allocTreeXlsx.js |
+| `GPU_GUEST_FILE_MAX_BYTES` | `8388608` |  | gpu/guestops.js |
+| `GUEST_GPU_MAX_HOSTS` | `10000` |  | gpu/store.js |
+| `GUEST_GPU_MAX_HOSTS_PER_AGENT` | `4000` |  | gpu/store.js |
+| `GUEST_GPU_MAX_VMS` | `50000` |  | gpu/store.js |
+| `GUEST_GPU_MAX_VMS_PER_AGENT` | `20000` |  | gpu/store.js |
+| `GUEST_GPU_TTL_MS` | `1800000` |  | gpu/store.js |
 
 ## Horizon (6)
 
@@ -765,10 +808,10 @@
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `BMUSAGE_MAX_REPORTS` | `6` |  | idrac/redfish.js |
-| `BMUSAGE_REPORT_TTL_MS` | `6` |  | idrac/redfish.js |
-| `BMUSAGE_SENSOR_TTL_MS` | `6` |  | idrac/redfish.js |
+| `BMUSAGE_REPORT_TTL_MS` | `21600000` |  | idrac/redfish.js |
+| `BMUSAGE_SENSOR_TTL_MS` | `21600000` |  | idrac/redfish.js |
 | `IDRAC_AUTH_CACHE_MAX` | `4096` |  | idrac/redfish.js |
-| `IDRAC_SENSOR_BUDGET_MS` |  |  | idrac/redfish.js |
+| `IDRAC_SENSOR_BUDGET_MS` | `45000` |  | idrac/redfish.js |
 | `IDRAC_SENSOR_MEMBER_MAX` | `250` |  | idrac/redfish.js |
 | `IDRAC_SENSOR_SAMPLES` | `1440` |  | idrac/sensorStore.js |
 | `IDRAC_TEMP_SERIES` | `기본 적용('false' 로 끄기)` |  | idrac/serverTempSeries.js |
@@ -776,17 +819,17 @@
 | `IDRAC_TREND_AIRFLOW` | `기본 적용('false' 로 끄기)` |  | idrac/serverTrendSeries.js |
 | `IDRAC_TREND_SERIES` | `기본 적용('false' 로 끄기)` |  | idrac/serverTrendSeries.js |
 | `OME_POWER_CONCURRENCY` | `16` |  | idrac/ome.js |
-| `PARTFAULT_INV_MAX_AGE_MS` | `90` |  | idrac/serverParts.js, partfault/scan.js |
+| `PARTFAULT_INV_MAX_AGE_MS` | `5400000` |  | idrac/serverParts.js, partfault/scan.js |
 | `POWER_NDJSON_MAX_ROWS` | `2000000` |  | idrac/db.js |
 | `ROOMTEMP_STALE_CAP_MS` |  |  | idrac/roomTemp.js |
-| `ROOMTEMP_STALE_MS` | `15` |  | idrac/roomTemp.js |
+| `ROOMTEMP_STALE_MS` | `900000` |  | idrac/roomTemp.js |
 | `VC_TLS_REJECT_UNAUTHORIZED` |  | ✅ | config.js, idrac/ome.js 외 3 |
 
 ## IP 관리 (12)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
-| `IPAM_DB_LOCK_RETRY_MS` |  |  | ipam/db.js |
+| `IPAM_DB_LOCK_RETRY_MS` | `30000` |  | ipam/db.js |
 | `IPAM_FPING` | `기본 아님('0' 일 때만 적용)` |  | ipam/scan.js |
 | `IPAM_PING_CONCURRENCY` | `8` |  | ipam/scan.js |
 | `IPAM_SCAN_DEADLINE_MS` |  |  | ipam/scanRunner.js |
@@ -799,12 +842,13 @@
 | `IPAM_XLSX_TIMEOUT_MS` | `600000` |  | ipam/excel.js |
 | `IPAM_XLSX_WORKER` | `'1'` |  | ipam/excel.js |
 
-## LLM (4)
+## LLM (5)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `LLM_ENABLED` | `기본 아님('true' 일 때만 적용)` |  | llm/config.js |
-| `LLM_TIMEOUT_MS` |  |  | llm/config.js |
+| `LLM_MAX_CONCURRENT` | `2` |  | llm/limit.js |
+| `LLM_TIMEOUT_MS` | `30000` |  | llm/config.js |
 | `OLLAMA_MODEL` | `'llama3.1'` |  | llm/config.js |
 | `OLLAMA_URL` | `'http://localhost:11434'` |  | llm/config.js |
 
@@ -827,30 +871,33 @@
 | `PDU_POLL_MS` | `5 * 60_000` |  | pdu/intervals.js |
 | `PDU_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | pdu/push.js |
 | `PDU_PUSH_MS` | `5 * 60_000` |  | pdu/intervals.js |
-| `PDU_PUSH_WITHHOLD_MAX_MS` | `15` |  | pdu/push.js |
+| `PDU_PUSH_WITHHOLD_MAX_MS` | `900000` |  | pdu/push.js |
 | `PDU_RETAIN_DAYS` | `400` |  | pdu/db.js |
 | `PDU_SESSION_BUDGET_MS` | `75000` |  | pdu/collectors/apcSsh.js |
 | `PDU_THRESHOLDS_LOCAL` | `기본 아님('1' 일 때만 적용)` |  | pdu/thresholds.js |
 
-## SAN 스위치 (34)
+## SAN 스위치 (37)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
+| `SAN_FLOW_SHOW_MS` | `900000` |  | sanswitch/flowJobs.js |
 | `SANHEALTH_DB_PATH` |  |  | sanswitch/healthHistory.js |
 | `SANHEALTH_MAX_RUNS` | `24` |  | sanswitch/healthHistory.js |
+| `SANSTORAGE_CHECK_DB_PATH` |  |  | sanswitch/storageCheckHistory.js |
+| `SANSTORAGE_CHECK_MAX_RUNS` | `48` |  | sanswitch/storageCheckHistory.js |
 | `SANSW_ALIAS_MAX` | `8000` |  | sanswitch/zoning.js |
-| `SANSW_CAPS_TTL_MS` | `6` |  | sanswitch/collectors/fosSsh.js |
+| `SANSW_CAPS_TTL_MS` | `21600000` |  | sanswitch/collectors/fosSsh.js |
 | `SANSW_CLI_RAW_LIMIT` | `4000` |  | sanswitch/collectors/fosSsh.js |
 | `SANSW_CLI_SESSION_BUDGET_MS` | `100000` |  | sanswitch/collectors/fosSsh.js |
-| `SANSW_CLI_TIMEOUT_MS` |  |  | sanswitch/collectors/fosSsh.js |
+| `SANSW_CLI_TIMEOUT_MS` | `45000` |  | sanswitch/collectors/fosSsh.js |
 | `SANSW_CONCURRENCY` | `4` |  | sanswitch/poller.js |
-| `SANSW_DEVICE_TIMEOUT_MS` | `120000` |  | sanswitch/collectRequests.js, sanswitch/collectors/fosSsh.js 외 1 |
-| `SANSW_HTTP_TIMEOUT_MS` |  |  | sanswitch/collectors/fosRest.js |
+| `SANSW_DEVICE_TIMEOUT_MS` | `120000` |  | sanswitch/collectors/fosSsh.js |
+| `SANSW_HTTP_TIMEOUT_MS` | `20000` |  | sanswitch/collectors/fosRest.js |
 | `SANSW_PERF_ACTIVITY_MAX` | `500` |  | sanswitch/perfActivityLog.js |
 | `SANSW_PERF_CONCURRENCY` | `2` |  | sanswitch/perfPoller.js |
 | `SANSW_PERF_DEVICE_TIMEOUT_MS` |  |  | sanswitch/perfPoller.js |
 | `SANSW_PERF_LOCAL` | `''` | ✅ | sanswitch/perfSettings.js |
-| `SANSW_PERF_PUSH_CHUNK_BYTES` | `700` |  | sanswitch/perfPush.js |
+| `SANSW_PERF_PUSH_CHUNK_BYTES` | `716800` |  | sanswitch/perfPush.js |
 | `SANSW_PERF_PUSH_MS` |  | ✅ | sanswitch/perfPush.js |
 | `SANSW_PERF_PUSH_ROWS` | `20000` | ✅ | sanswitch/perfPush.js |
 | `SANSW_PERF_QUERY_MAX_MS` | `60000` |  | sanswitch/perfDb.js |
@@ -858,15 +905,15 @@
 | `SANSW_PERF_ROLLUP_15M_DAYS` | `31` |  | sanswitch/perfDb.js |
 | `SANSW_PERF_ROLLUP_BACKFILL` | `''` |  | sanswitch/perfDb.js |
 | `SANSW_PERF_ROLLUP_BACKFILL_DELAY_MS` | `120000` |  | sanswitch/perfDb.js |
-| `SANSW_POLL_MS` | `5` |  | sanswitch/poller.js |
-| `SANSW_PUSH_CHUNK_BYTES` | `700` |  | sanswitch/push.js |
-| `SANSW_PUSH_DEVICE_MAX_BYTES` | `900` |  | sanswitch/push.js |
+| `SANSW_POLL_MS` | `300000` |  | sanswitch/poller.js |
+| `SANSW_PUSH_CHUNK_BYTES` | `716800` |  | sanswitch/push.js |
+| `SANSW_PUSH_DEVICE_MAX_BYTES` | `921600` |  | sanswitch/push.js |
 | `SANSW_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | sanswitch/perfPush.js, sanswitch/push.js |
-| `SANSW_PUSH_MS` | `5` |  | sanswitch/push.js |
+| `SANSW_PUSH_MS` | `300000` |  | sanswitch/push.js |
 | `SANSW_PUSH_PORT_LIMIT` | `64` |  | sanswitch/push.js |
 | `SANSW_PUSH_PORTS` | `''` |  | sanswitch/push.js |
-| `SANSW_TEST_PICKUP_MS` | `10` | ✅ | sanswitch/testRuns.js |
-| `SANSW_TEST_RESULT_MS` | `5` | ✅ | sanswitch/testRuns.js |
+| `SANSW_TEST_PICKUP_MS` | `600000` | ✅ | sanswitch/testRuns.js |
+| `SANSW_TEST_RESULT_MS` | `300000` | ✅ | sanswitch/testRuns.js |
 | `SANSW_ZONE_MAX` | `4000` |  | sanswitch/zoning.js |
 | `SANSWITCH_ACTIVITY_MAX` | `500` |  | sanswitch/activityLog.js |
 | `SANSWITCH_TLS_VERIFY` |  |  | sanswitch/collectors/fosRest.js |
@@ -877,7 +924,7 @@
 |---|---|---|---|
 | `HOST_EXPORT_XLSX_TIMEOUT_MS` | `300000` |  | vcenter/hostExportXlsx.js |
 | `HOST_EXPORT_XLSX_WORKER` | `'1'` |  | vcenter/hostExportXlsx.js |
-| `PERF_COUNTER_TTL_MS` | `6` |  | vcenter/soapClient.js |
+| `PERF_COUNTER_TTL_MS` | `21600000` |  | vcenter/soapClient.js |
 | `VC_KEEPALIVE_MS` | `4000` |  | vcenter/restClient.js |
 | `VM_EXPORT_XLSX_TIMEOUT_MS` | `300000` |  | vcenter/vmExportXlsx.js |
 | `VM_EXPORT_XLSX_WORKER` | `'1'` |  | vcenter/vmExportXlsx.js |
@@ -886,14 +933,16 @@
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
-| `VMCLONE_VERIFY_TIMEOUT_MIN` |  |  | vmclone/vsOps.js |
+| `VMCLONE_VERIFY_TIMEOUT_MIN` | `10` |  | vmclone/vsOps.js |
 
-## VM 프로비저닝 (1)
+## VM 프로비저닝 (3)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `PROVISION_CONCURRENCY` | `4` |  | provision/jobs.js |
+| `PROVISION_TASK_TIMEOUT_MS` | `3600000` |  | provision/jobs.js |
+| `PROVISION_TRACK_POLL_MS` | `15000` |  | provision/jobs.js |
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 707
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 756

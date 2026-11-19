@@ -48,7 +48,8 @@ export function registerDirUsage(adminRouter) {
     const body = req.body || {};
     const errs = validate({ ...loadCfg(), ...body });
     if (errs.length) return res.status(400).json({ ok: false, reason: errs[0], errors: errs });
-    const saved = saveCfg(body);
+    let saved;
+    try { saved = saveCfg(body); } catch (e) { if (e?.status === 409) return res.status(409).json({ ok: false, code: e.code, reason: e.message }); throw e; }   // 97회차 F14: 설정 파일 읽기 오류
     logAudit({
       user: req.user?.username, action: '폴더 사용량 리포트 설정 저장',
       detail: `대상 ${saved.targets.length}개 · 메일 ${saved.mail.enabled ? `켜짐(${saved.mail.to.length}명)` : '꺼짐'} · 스케줄 ${saved.enabled ? '켜짐' : '꺼짐'}`,

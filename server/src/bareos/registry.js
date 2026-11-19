@@ -9,7 +9,7 @@
  *   pending: { jobid, since, level, by, trigger } | null,   // 포탈이 실행했고 아직 끝나지 않은 백업
  *   cancelReq: { jobid, at, by, via:'single'|'group' } | null,   // v2.867 그 실행에 취소를 보냈다(판정은 cancelState.js — 지금 도는 실행일 때만 유효)
  *   lastRun: { jobid, status, state, level, startedAt, endedAt, bytes, files, errors, checkedAt } | null,
- *   lastError: { at, message } | null,
+ *   lastError: { at, message, unknown? } | null,   // unknown: 단건 · 그룹 실행이 결과 모름(전체 점검 3 · 5회차 — runUnknownHeld 가 잠시 다시 보내기를 막는다)
  *   missingInDirector: boolean,                         // Director `.jobs` 에 없으면 true(누가 conf 를 지웠다)
  *   restores: [ { jobid, fromJobids, mode, target, status, state, startedAt, endedAt, by, at, batchId?, nic?, finish? } ],   // 최근 RESTORES_KEEP 건
  *     v2.861 batchId(묶음 복원) · nic('disconnect'|'keep' — 새 VM 은 끊기가 기본) · finish{ nic:'pending'|'ok'|'failed'|'skipped', detail, at, opId?, tries? }
@@ -23,7 +23,6 @@
  *   화면은 vcenterId 가 필요하다. 원장이 손상되면 Director 의 잡은 남고 포탈만 모른다 — 그래서 손상 보존(preserveCorrupt)이
  *   필수다(빈 원장으로 저장하면 되살릴 근거가 사라진다 — vmclone/store.js 와 같은 이유).
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
@@ -65,9 +64,13 @@ const _loadErr = makeLoadError();
 
 function load() {
   if (_db) return _db;
+  // 97회차 F4: 읽기 단계는 등록부 공용 읽기(util/registryCore.js read)다 — 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니라 원본을 옮기지 않고 ·
+  //   캐시하지 않고(30초 간격 재읽기) · 오류(readError)를 세워 쓰기를 거절한다(persist 의 assertWritable). parse · 형식 실패만 아래 catch(예전과 같다 — 보존본).
+  const rr = _loadErr.read(FILE(), (t) => t);
+  if (rr.kind === 'read-error') return { jobs: [], retired: [] };
   try {
-    if (fs.existsSync(FILE())) {
-      const p = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
+    if (rr.kind === 'ok') {
+      const p = JSON.parse(rr.value);
       if (!p || typeof p !== 'object' || Array.isArray(p)) throw new Error('형식 오류');
       _db = {
         jobs: (Array.isArray(p.jobs) ? p.jobs : []).filter((j) => j && typeof j === 'object' && typeof j.id === 'string'),
@@ -118,6 +121,7 @@ function persist() {
 function writeNow() {
   const db = load();
   // v2.828: 들여쓰기 없이 쓴다(3,000개에서 크기·직렬화 시간이 약 절반 — 위 MAX_JOBS 실측). 읽기는 예전 들여쓴 파일도 같다.
+  _loadErr.assertWritable('백업 대상 원장(bareos-jobs.json)'); // 97회차 F4: 마지막 방어선 — 읽기 오류 중에는 원본을 덮지 않는다(던진다 — status 409)
   atomicWriteFileSync(FILE(), JSON.stringify({ version: 1, jobs: db.jobs, retired: db.retired }), { mode: 0o600 });
   _dirty = false;
   _loadErr.clear();
@@ -329,9 +333,24 @@ export function deleteJob(id, { directorId = '' } = {}) {
   return true;
 }
 
+/** 전체 점검 3회차(B-3): 단건 실행이 '결과 모름' 으로 끝난 뒤 다시 누르기를 막는 시간 — 그 사이 폴러 대조(list jobs days=)가 실제 실행을 원장에 넣으면 먼저 풀린다. */
+export const RUN_UNKNOWN_HOLD_MS = 10 * 60_000;
+/** 결과 모름으로 끝난 직전 실행 요청이 아직 붙잡혀 있는가(그 뒤 시작한 실행이 원장에 보이면 풀린다). */
+export function runUnknownHeld(job, now = Date.now()) {
+  const le = job?.lastError;
+  if (!le?.unknown || !Number.isFinite(le.at) || now - le.at >= RUN_UNKNOWN_HOLD_MS) return false;
+  const st = Number.isFinite(job?.lastRun?.startedAt) ? job.lastRun.startedAt : null;
+  return !(st !== null && st >= le.at - 120_000);   // Director 현지 시각 · 왕복 여유 2분
+}
+/** 여러 대상에 '실행 결과 모름' 표지(쓰기 한 번 — 그룹 덩어리 · 전체 점검 5회차 R-1). 던지지 않는다(원장 쓰기 실패는 콘솔). */
+export function markRunUnknown(ids, message) {
+  try { inBatch(() => { for (const id of ids || []) patchJob(id, { lastError: { at: Date.now(), message: String(message || '').slice(0, 300), unknown: true } }); }); }
+  catch (e) { console.warn(`[bareos] 결과 모름 표지 기록 실패: ${String(e?.message || e).slice(0, 160)}`); }
+}
 /** 실행 시작 기록(포탈이 run 을 보냈다). */
-export function markPending(id, { jobid, level, by, trigger = 'manual' }) {
-  return patchJob(id, { pending: { jobid, since: Date.now(), level, by: String(by || ''), trigger }, lastError: null });
+export function markPending(id, { jobid, level, by, trigger = 'manual', late = false }) {
+  // v2.938 반증 B-4: 늦은 회신은 trigger 를 바꾸지 않고 late 표지를 따로 단다(화면 triggerText 가 'group-late' 를 '수동' 으로 읽었다)
+  return patchJob(id, { pending: { jobid, since: Date.now(), level, by: String(by || ''), trigger, ...(late ? { late: true } : {}) }, lastError: null });
 }
 
 /**
@@ -359,12 +378,21 @@ export function applyRunRow(id, row, now = Date.now()) {
   let changed = false;
   // v2.822.3(C2-2 — 재현): 끝난 실행을 따로 남긴다(최근 FINISHED_KEEP 건). 포탈이 시작한 실행이 끝날 때 더 큰 jobid(대기 중인 스케줄 실행)가
   //   이미 lastRun 이면 그 결과가 어디에도 남지 않아 실패 메일에서 빠졌다. 실패 메일(notify)이 이 목록도 본다.
-  if (isFinalStatus(row.status) && !(j.finishedRuns || []).some((x) => x.jobid === rec.jobid)) {
+  const seenFin = isFinalStatus(row.status) ? (Array.isArray(j.finishedRuns) ? j.finishedRuns : []).find((x) => x.jobid === rec.jobid) : null;
+  if (isFinalStatus(row.status) && !seenFin) {
     // v2.858: 바이트 · 시작 시각도 남긴다 — 진행 현황의 '지난 같은 레벨 실행' 기준(실행 중이면 lastRun 이 그 실행이라 끝난 값은 여기에만 있다)
     const { jobid, status, state, level, startedAt, endedAt, bytes, errors } = rec;
     j.finishedRuns = [...(Array.isArray(j.finishedRuns) ? j.finishedRuns : []), { jobid, status, state, level, startedAt, endedAt, bytes, errors, checkedAt: now }]
       .sort((a, b) => a.jobid - b.jobid).slice(-FINISHED_KEEP);
     changed = true;
+  } else if (seenFin) {
+    // 전체 점검 1회차(B-2): 같은 실행을 먼저 덜 자세한 행(대조용 `list jobs days=` — 바이트가 비어 온다)으로 받았으면 뒤에 온 자세한 행(llist)으로
+    //   **빈 칸만** 채운다(아는 값은 바꾸지 않는다 — lastRun 과 같은 규칙). 예전에는 처음 행으로 굳어 다음 실행이 시작되면 '지난 같은 레벨' 기준이 사라졌다.
+    for (const k of ['level', 'startedAt', 'endedAt', 'bytes', 'errors']) {
+      const empty = k === 'level' ? !seenFin[k] : (seenFin[k] === null || seenFin[k] === undefined);
+      const has = k === 'level' ? !!rec[k] : (rec[k] !== null && rec[k] !== undefined);
+      if (empty && has) { seenFin[k] = rec[k]; changed = true; }
+    }
   }
   // 마지막으로 **백업이 만들어진**(T·W) 시각 — 잘린 목록과 무관하게 남긴다(S14 · 더 새 값만)
   if ((row.status === 'T' || row.status === 'W') && Number.isFinite(rec.endedAt) && rec.endedAt > 0 && !(Number.isFinite(j.lastOkAt) && j.lastOkAt >= rec.endedAt)) {
@@ -406,6 +434,34 @@ export function addRestore(id, rec) {
   const st = rec?.unknown === true ? { jobid: null, status: '', state: 'unknown' } : { status: 'C', state: 'queued' };
   j.restores = [{ ...rec, ...st, at: Date.now() }, ...(Array.isArray(j.restores) ? j.restores : [])].slice(0, RESTORES_KEEP);
   persist();
+  return copy(j);
+}
+
+/**
+ * v2.938(제안 6번 — v2.824 '남긴 것' runJob·restore 늦은 회신 미반영): 시한으로 '결과 모름' 으로 남긴 복원 행(jobid 없음 · state unknown)에
+ * 엣지의 늦은 회신이 rid 를 주면 그 행을 열린 복원(queued)으로 바꾼다 — 그래야 폴러가 그 복원을 추적해 결과를 남긴다.
+ * 같은 묶음(batchId — 단건 복원은 lateKey)의 결과 모름 행 하나만 바꾼다. 이미 jobid 가 있거나(다른 경로가 채웠다) 같은 rid 가 다른 행에 있으면 하지 않는다.
+ * 반증 B-5: 보낸 뒤(sentAt) 대상이 다시 묶였으면(runsEpoch — 재설치 · Director 변경) 옛 카탈로그의 rid 라 반영하지 않는다.
+ * 반증 B-1: 묶음 밖 단건 쓰기가 실패하면 메모리를 되돌린다(patchJob 과 같은 규약). 여러 건은 호출부가 inBatch 로 묶는다.
+ * @returns {object|null} 바꾼 job 사본(바꾸지 않았으면 null)
+ */
+export function lateResolveRestore(jobId, key, { rid, chain = [] } = {}, now = Date.now(), { sentAt = 0 } = {}) {
+  if (!Number.isInteger(rid) || rid <= 0 || !key) return null;
+  const db = load();
+  const j = db.jobs.find((x) => x.id === jobId);
+  if (!j || !Array.isArray(j.restores)) return null;
+  if (sentAt && Number(j.runsEpoch) > sentAt) return null;
+  if (j.restores.some((x) => x.jobid === rid)) return null;
+  const r = j.restores.find((x) => x.state === 'unknown' && !x.jobid && (x.batchId === key || x.lateKey === key));
+  if (!r) return null;
+  const before = { ...r };
+  Object.assign(r, { jobid: rid, fromJobids: Array.isArray(chain) ? chain.slice(0, 400) : [], status: 'C', state: 'queued', lateAt: now });
+  delete r.unknown;
+  try { persist(); } catch (e) {
+    for (const k of Object.keys(r)) delete r[k];
+    Object.assign(r, before);
+    throw e;
+  }
   return copy(j);
 }
 

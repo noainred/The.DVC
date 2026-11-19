@@ -7,11 +7,10 @@
  *  - 접속처(host·port·username)가 바뀌면 저장 비밀번호를 승계하지 않는다(util/secretCarry.js).
  *  - 비밀번호·계정 제어문자 거부(헤더·오류 문구로 값이 새지 않게).
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../../util/atomicWrite.js';
 import { makeLoadError, filterObjectElements } from '../../util/registryCore.js';
 import { openSecretsDeep, sealSecretsDeep } from '../../security/secretVault.js';
 import { ssrfBlockReason } from '../../collector/registry.js';
@@ -27,25 +26,36 @@ let _db = null;
 const loadErr = makeLoadError();
 export function emRegistryLoadError() { load(); return loadErr.get(); }
 
+// 결정(78 남긴 것 ①): parse 실패(형식 · 복호 포함 — 예전 try 블록과 같은 범위)만 손상이다.
+const parseDb = (text) => {
+  const raw = JSON.parse(text);
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('형식 오류');
+  const p = openSecretsDeep(raw);
+  return { ems: filterObjectElements(p.ems).list };
+};
+const WHAT = 'Veeam Enterprise Manager 등록부(veeam-em.json)';
 function load() {
-  if (_db) return _db;
-  try {
-    if (fs.existsSync(FILE())) {
-      const raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
-      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('형식 오류');
-      const p = openSecretsDeep(raw);
-      _db = { ems: filterObjectElements(p.ems).list };
-      return _db;
-    }
-  } catch (e) { preserveCorrupt(FILE(), e?.message); loadErr.set(e); }
+  if (_db && !loadErr.readPending()) return _db;
+  // 손상은 보존본으로 옮기고(사유 포함) 오류를 세운다(loadErr.read). 결정(78 남긴 것 ①): 읽기 오류는 원본을 그대로 두고 · 캐시하지 않고 · 쓰기를 거절한다.
+  const r = loadErr.read(FILE(), parseDb);
+  if (r.kind === 'ok') { _db = r.value; return _db; }
   loadErr.checkCorruptOnly(FILE());
   _db = { ems: [] };
   return _db;
 }
+/** 결정(78 남긴 것 ①): 읽기 오류 중의 쓰기 거절(409) 또는 null — 로드를 먼저 한다. */
+export function emRegistryWriteRefusal() { load(); return loadErr.writeRefusal(WHAT); }
+function assertWritable() { load(); loadErr.assertWritable(WHAT); }
 
-function persist() {
-  atomicWriteFileSync(FILE(), JSON.stringify(sealSecretsDeep({ version: 1, ems: load().ems }), null, 2), { mode: 0o600 });
+function persist(ems = load().ems) {
+  loadErr.assertWritable(WHAT); // 결정(78 남긴 것 ①): 마지막 방어선 — 읽기 오류 중에 원본을 덮지 않는다(던진다)
+  atomicWriteFileSync(FILE(), JSON.stringify(sealSecretsDeep({ version: 1, ems }), null, 2), { mode: 0o600 });
   loadErr.clear();
+}
+/** 94회차 F1(형제 — veeam/registry.js commit 과 같은 규칙): 새 목록을 먼저 쓰고 성공했을 때만 메모리에 반영한다(쓰기 실패 뒤 메모리만 새 접속처 · 비밀번호로 돌지 않게). */
+function commit(db, next) {
+  persist(next);
+  db.ems = next;
 }
 
 const redact = ({ password, ...d }) => ({ ...d, hasPassword: !!password });
@@ -77,6 +87,7 @@ export function emInputIssue(input = {}) {
 
 /** 저장(추가·수정). 접속처가 바뀌면 moved:true · 옛 비밀번호 폐기 시 droppedSecrets. */
 export function saveEm(input = {}) {
+  assertWritable();   // 결정(78 남긴 것 ①): 제자리 변경 · '찾을 수 없습니다' 보다 먼저
   const db = load();
   const issue = emInputIssue(input);
   if (issue) throw new Error(issue);
@@ -85,7 +96,7 @@ export function saveEm(input = {}) {
   const username = String(input.username || '').trim();
   const existing = input.id ? db.ems.find((d) => d.id === input.id) : null;
   if (input.id && !existing) throw new Error('Enterprise Manager 를 찾을 수 없습니다.');
-  const dev = existing || { id: `vem-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, createdAt: Date.now() };
+  const dev = existing ? { ...existing } : { id: `vem-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, createdAt: Date.now() };   // 94회차 F1: 사본 위에서
   const moved = !!existing && accessMoved({ host: existing.host, port: String(existing.port || DEFAULT_EM_PORT), username: existing.username || '' },
     { host, port: String(port), username }, ['host', 'port', 'username']);
   const password = String(input.password ?? '');
@@ -101,19 +112,17 @@ export function saveEm(input = {}) {
     name: String(input.name || '').trim(), host, port, username,
     enabled: input.enabled !== false, note: String(input.note || '').slice(0, 200),
   });
-  if (!existing) {
-    if (db.ems.length >= MAX_EMS) throw new Error(`Enterprise Manager 는 최대 ${MAX_EMS}대까지 등록할 수 있습니다.`);
-    db.ems.push(dev);
-  }
-  persist();
+  if (!existing && db.ems.length >= MAX_EMS) throw new Error(`Enterprise Manager 는 최대 ${MAX_EMS}대까지 등록할 수 있습니다.`);
+  commit(db, existing ? db.ems.map((d) => (d === existing ? dev : d)) : [...db.ems, dev]);
   return { ...redact(dev), ...(droppedSecrets.length ? { droppedSecrets } : {}), ...(moved ? { moved: true } : {}) };
 }
 
 export function deleteEm(id) {
+  assertWritable();   // 결정(78 남긴 것 ①)
   const db = load();
   const i = db.ems.findIndex((d) => d.id === id);
   if (i < 0) return false;
-  db.ems.splice(i, 1); persist();
+  commit(db, db.ems.filter((_, k) => k !== i));   // 94회차 F1
   return true;
 }
 

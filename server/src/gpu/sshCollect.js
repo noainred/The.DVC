@@ -10,7 +10,7 @@
 
 import { withSsh, withDeadline, isSshAuthError } from '../proxy/sshExec.js';
 import { parseNvidiaSmiCsv, gpuLostError, NVSMI_QUERY } from './guestops.js';
-import { createAuthGuard } from '../util/authGuard.js';
+import { createAuthGuard, authStopView } from '../util/authGuard.js';
 import { strictIpv4Num } from '../util/ipv4.js';
 import { ipBlockReason } from '../util/ssrfBlock.js';
 
@@ -36,7 +36,7 @@ export const gpuAuthGuard = createAuthGuard({ file: 'gpu-auth-stops.json' });
 export const guestAccountStopDev = (vcId, creds) => ({ id: `acct|${vcId}|${String(creds?.username || '')}`, username: creds?.username, password: creds?.password });
 
 /** 정지 기록 → 화면·API 용(해시 제외). */
-export const gpuStopView = (rec) => (rec ? { since: rec.since, at: rec.at, attempts: rec.attempts, reason: rec.reason } : null);
+export const gpuStopView = authStopView;   // 127회차: 사본 대신 공용(못 읽음 표지 unread 를 떨구지 않는다)
 /** 게스트 작업(VMware Tools) 또는 SSH 의 **자격증명 거부**인가. */
 export function isGpuAuthError(err) {
   if (!err) return false;

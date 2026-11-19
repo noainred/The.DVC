@@ -1,11 +1,18 @@
 // v2.632 감사 그룹 D(권한·보안) 회귀 — AX3-01..08. 실제 라우터를 express 에 띄워 상태코드·응답으로 본다.
-import { test, before } from 'node:test';
+import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2632d-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const CFG = tmpDir('audit2632d-');
 process.env.CONFIG_DIR = CFG;
 process.env.DATA_SOURCE = 'mock';
 process.env.AUTH_ENABLED = 'false';
@@ -92,9 +99,10 @@ test('AX3-03: RDP 티켓은 필드 길이 상한(거부)과 사용자당 보관 
   const ids = [];
   for (let i = 0; i < t.MAX_TICKETS_PER_OWNER + 5; i++) ids.push(t.issueRdpTicket({ username: 'u', password: String(i) }, { owner: 'op' }));
   const other = t.issueRdpTicket({ username: 'v', password: 'z' }, { owner: 'other' });
-  assert.equal(t.consumeRdpTicket(ids[0]), null, '같은 사용자의 가장 오래된 티켓은 밀려난다');
-  assert.ok(t.consumeRdpTicket(ids[ids.length - 1]), '최신 티켓은 남는다');
-  assert.ok(t.consumeRdpTicket(other), '다른 사용자의 티켓은 밀어내지 않는다');
+  // 전체 점검 19회차 A-11: 소비는 발급자만(user 대조)
+  assert.equal(t.consumeRdpTicket(ids[0], { user: 'op' }), null, '같은 사용자의 가장 오래된 티켓은 밀려난다');
+  assert.ok(t.consumeRdpTicket(ids[ids.length - 1], { user: 'op' }), '최신 티켓은 남는다');
+  assert.ok(t.consumeRdpTicket(other, { user: 'other' }), '다른 사용자의 티켓은 밀어내지 않는다');
 });
 
 test('AX3-04: GPU 시계열 JSON 내보내기는 스트리밍이고 동시 1건 가드(409)를 갖는다', async () => {

@@ -1,7 +1,7 @@
 // views/vms/VmsByCorp.jsx — 가상화 서버 '법인별' 탭(v2.909 · 시안 docs/design/vm-screen ③).
 //   숫자·판정은 서버 /vms/by-vcenter(inventory/vmByVcenter.js) — 화면은 그리기만 한다. 법인 = vCenter 1:1.
 //   15초 폴링 금지(무거운 집계 · 규칙) — 탭을 열 때 1회 + '다시 읽기' 버튼. 늦게 온 이전 응답은 버린다(요청 번호).
-//   행을 누르면 위 필터 바의 vCenter 를 그 법인으로 바꾸고 '현황' 탭으로 간다(onPick).
+//   행을 누르면 위 필터 바의 vCenter 를 그 법인으로 바꾸고 '목록' 보기로 간다(onPick — v3.21.0 에 '현황' 이 '목록' 으로 이름만 바뀌었다).
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchJson } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
@@ -77,7 +77,7 @@ export default function VmsByCorp({ filters, onPick }) {
       <section className="vmh-card" aria-label="법인별 가상화 서버 현황">
         <div className="vmh-card-head">
           <b>법인별 현황</b>
-          <span className="vmh-note">행을 누르면 위 필터의 vCenter 를 그 법인으로 바꾸고 ‘현황’ 탭으로 갑니다 · 열 제목을 누르면 정렬</span>
+          <span className="vmh-note">행을 누르면 위 필터의 vCenter 를 그 법인으로 바꾸고 ‘목록’ 보기로 갑니다 · 열 제목을 누르면 정렬</span>
           <span className="vmh-grow" />
           {loading && <span className="muted" style={{ fontSize: 12 }} role="status">다시 읽는 중…</span>}
           <button type="button" className="tab" style={{ flex: 'none', padding: '6px 11px' }} onClick={load} disabled={loading}>다시 읽기</button>
@@ -105,7 +105,7 @@ export default function VmsByCorp({ filters, onPick }) {
                 return (
                   <tr key={c.id}>
                     <td data-sort={c.name}>
-                      <button type="button" className="vmh-name-btn" onClick={() => onPick && onPick(c.id)} title={`${c.name} — 이 법인의 VM 만 현황 탭에서 봅니다`}>{c.name}</button>
+                      <button type="button" className="vmh-name-btn" onClick={() => onPick && onPick(c.id)} title={`${c.name} — 이 법인의 VM 만 목록 보기에서 봅니다`}>{c.name}</button>
                       {c.unlisted && <span className="vmh-badge gray" style={{ marginLeft: 6 }} title="vCenter 목록에 없는 id 의 VM 입니다(이월 값·경합)">목록 밖</span>}
                       {m.mark && <span className="muted" style={{ marginLeft: 6 }} title={m.title}>{m.mark}</span>}
                       <span className="vmh-l2">

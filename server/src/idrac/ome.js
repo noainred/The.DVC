@@ -13,6 +13,7 @@
  * inventory/summary power. Device discovery still works without the plugin.
  */
 
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { Agent } from 'undici';
 import { constants as cryptoConstants } from 'node:crypto';
 import { config } from '../config.js';
@@ -189,7 +190,7 @@ export async function fetchOmeDevices(entry) {
     let usedMetricService = false;
     // 장치별 전력 조회를 동시성 캡으로 병렬화 — 직렬 N×RTT(예: 500대×800ms)로 OME 폴이
     // 타임아웃되던 문제 방지. per-device 실패는 격리(eachLimited)되어 전체를 막지 않는다.
-    const conc = Number(process.env.OME_POWER_CONCURRENCY) || 16;
+    const conc = envPositive(process.env.OME_POWER_CONCURRENCY, 16);
     await eachLimited(devices, conc, async (d) => {
       let watts = await c.powerViaMetricService(d.id).catch(() => null);
       if (watts != null) usedMetricService = true;

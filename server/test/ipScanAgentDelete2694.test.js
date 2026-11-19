@@ -1,7 +1,7 @@
 // v2.694: '스캔 대역·설정 › ② 에이전트별 대역·보고 현황' 의 에이전트별 대역 삭제(사용자 요청 "등록된 에이전트별 대역 삭제하는 기능").
 //   mode 'ranges' = 대역만 비움(포트·주기는 남는다) · 'agent' = 설정·보고 기록까지 · 화면이 본 목록(expect)과 다르면 409 ·
 //   이 포탈은 등록 삭제 불가(400) · 범위 계정 403. 실제 admin 라우터를 띄워 상태코드로 본다.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -9,10 +9,17 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src');
 
 function runChild(body, { user, setup }) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ipscan2694-'));
+  const dir = tmpDir('ipscan2694-');
   setup?.(dir);
   const script = `
     const SRC = ${JSON.stringify(SRC + '/')};

@@ -12,7 +12,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'df2587-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+test.after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const DIR = tmpDir('df2587-');
 process.env.CONFIG_DIR = DIR;
 
 const { buildDataFlow, linkState, kindOf, catOf, CATS, STALE_MIN_MS, STALE_FACTOR } = await import('../src/dataflow/build.js');
@@ -156,7 +163,7 @@ test('⑥ 중앙 라우터 GET 은 선언 경로로 기록된다(매칭 안 된 
 });
 
 test('⑦ 라우트 — admin 200 · 범위 계정 403 · 응답에 토큰 없음', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'df2587r-'));
+  const dir = tmpDir('df2587r-');
   fs.writeFileSync(path.join(dir, 'collectors.json'), JSON.stringify({ collectors: [{ id: 'gm1', name: 'GM1', url: 'https://127.0.0.1:1/x?token=Q', token: 'SECRET-TOKEN-XYZ', enabled: true }] }));
   const script = `
     process.env.CONFIG_DIR = ${JSON.stringify(dir)}; process.env.DATA_SOURCE = 'mock'; process.env.AUTH_ENABLED = 'false'; process.env.COLLECTOR_PULL_INTERVAL_MS = '0';

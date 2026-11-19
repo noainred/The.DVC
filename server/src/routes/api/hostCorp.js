@@ -9,18 +9,18 @@
 import { requirePerm } from '../../auth/auth.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { store, usageReadable, hostCapacityKnown } from '../../store.js';
-import { memoJson, applyFilters, scopeKey } from './shared.js';
+import { memoJson, applyFilters, scopeKey, vcenterPickOf, vcenterPickKey } from './shared.js';
 import { accessOf } from './hostExport.js';
 import { hostCorpOf } from '../../vcenter/hostCorp.js';
 import { getPingDb } from '../../ping/db.js';
 import { listTargets } from '../../ping/store.js';
-import { REGIONS } from '../../util/regions.js';
 
 const invHosts = requirePerm('inv.hosts');
 const RTT_FRESH_MS = 30 * 60_000;   // 30분보다 오래된 핑 값은 '지금 RTT' 로 보이지 않게 at 과 함께 싣는다(화면이 흐리게)
 
 /** 핑 모니터의 vCenter 대상(seedVcenterTargets 가 'vc_<id 소문자>' 로 만든다) 마지막 값. 실패하면 전부 null. */
-async function rttReader() {
+/** 법인(vCenter) RTT — 핑 모니터의 마지막 값. 7b 온보딩(중앙 직접 800ms+ 경고)도 같은 함수를 쓴다(복제 금지). */
+export async function rttReader() {
   try {
     const db = await getPingDb();
     const ids = new Set(listTargets('vcenter').filter((t) => t.enabled !== false).map((t) => t.id));
@@ -41,18 +41,21 @@ export function registerHostCorp(api) {
       const allowed = scopedVcenterIds(req.user, snap);
       let hosts = applyFilters(snap.hosts || [], req.query, snap, ['name', 'cluster'], req.user);
       if (req.query.state) hosts = hosts.filter((h) => h.connectionState === req.query.state);
-      const region = typeof req.query.region === 'string' && REGIONS.includes(req.query.region) ? req.query.region : null;
-      const vcId = typeof req.query.vcenterId === 'string' ? req.query.vcenterId : null;
+      // v3.22.1: 정해진 4리전으로 거르지 않는다 — 범위 바는 등록 데이터에만 있는 리전('Unknown' 등)도 고르게 하므로(platformText.scopeRegionOptions)
+      //   그 글자를 버리면 전 법인 합이 나왔다. /hosts · /vms/insight 처럼 location.region 과 그대로 비교한다.
+      const region = typeof req.query.region === 'string' && req.query.region ? req.query.region : null;
+      // v3.20.0: 고른 법인(vcenterId 하나 또는 vcenterIds 목록 — shared.js vcenterPickOf · 호스트는 applyFilters 가 같은 함수로 거른다).
+      const pick = vcenterPickOf(req.query, snap);
       // 법인 목록은 scope 가 먼저(요청 필터보다) — 범위 밖 vCenter 는 이름도 싣지 않는다.
       const vcenters = (snap.vcenters || [])
         .filter((v) => !allowed || allowed.has(v.id))
-        .filter((v) => !vcId || v.id === vcId)
+        .filter((v) => !pick || pick.has(v.id))
         .filter((v) => !region || v.location?.region === region);
       const vms = (snap.vms || []).filter((v) => !allowed || allowed.has(v.vcenterId));
       const narrowed = !!(req.query.q || req.query.state || req.query.notes);
       const rttOf = await rttReader();
       const r = hostCorpOf({ vcenters, hosts, vms, readable: usageReadable, capKnown: hostCapacityKnown, rttOf, access: { cluster: access.cluster }, dropEmpty: narrowed });
       return { ok: true, ...r, initial: snap.initial === true, generatedAt: snap.generatedAt || null };
-    }, { ttlMs: 30_000, extraKey: `${scopeKey(req.user, store.get())}|${access.cluster ? 'c' : '-'}` });
+    }, { ttlMs: 30_000, extraKey: `${scopeKey(req.user, store.get())}|${vcenterPickKey(req.query, store.get())}|${access.cluster ? 'c' : '-'}` });
   });
 }

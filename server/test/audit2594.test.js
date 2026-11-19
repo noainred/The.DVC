@@ -4,19 +4,27 @@
  * 각 테스트는 **수정을 되돌리면 실패하도록** 입력을 골랐다(변이 검증은 릴리스 노트에 기록).
  * 상태를 가진 모듈은 임시 CONFIG_DIR 을 먼저 정한 뒤 동적으로 불러온다(node --test 는 파일마다 프로세스가 따로다).
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stripComments } from './_stripComments.js';
+import { centralSource } from './_centralSource.js'; // v2.954: central.js 가 영역별 파일로 나뉘었다(소스 스윕은 합친 소스로)
+
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
 const read = (p) => stripComments(fs.readFileSync(path.join(SRC, p), 'utf8'));
 
-const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'a2594-'));
+const CFG = tmpDir('a2594-');
 process.env.CONFIG_DIR = CFG;
 process.env.DATA_SOURCE = 'mock';
 
@@ -128,17 +136,20 @@ test('SEC-2594-04 — vmware-config 다운로드 파일명은 안전한 문자�
   assert.ok(!/vmware-config-\$\{data\.meta\.scope\}/.test(s));
 });
 
-/* ── EDGE2-01 svcmon 엣지 보고 부속 객체 크기 상한 ── */
-test('EDGE2-01 — svcmon 엣지 poller·caps·log 가 16KB 를 넘으면 버리고 그 사실을 남긴다', async () => {
+/* ── EDGE2-01 svcmon 엣지 보고 부속 객체 크기 상한 → 26회차 F5: 아는 필드만(크기는 필드 정제로 묶인다) ── */
+test('EDGE2-01 · 26회차 F5 — svcmon 엣지 poller·caps·log 는 아는 필드 · 수 · 길이 상한으로만 상주한다', async () => {
   const m = await import('../src/central/svcmonEdge.js');
-  const big = { junk: 'x'.repeat(40_000) };
-  m.ingestReport('edge-big', { snapId: 's1', seq: 1, total: 1, poller: big, caps: { portalPort: 4000, blob: 'y'.repeat(40_000) }, log: { small: 1 }, rows: [] });
+  const big = { junk: 'x'.repeat(40_000), tickMs: '1000' };
+  m.ingestReport('edge-big', { snapId: 's1', seq: 1, total: 1, poller: big, caps: { portalPort: 4000, blob: 'y'.repeat(40_000), version: 'v'.repeat(500) }, log: { small: 1, lastError: 'E'.repeat(5000) }, rows: [] });
   const a = m.getAgentRaw('edge-big');
-  assert.equal(a.poller.dropped, true);
-  assert.ok(a.poller.bytes > m.EDGE_AUX_MAX_BYTES);
-  assert.equal(a.caps.dropped, true);
-  assert.equal(a.portalPort, 4000, '포트는 원본에서 읽는다');
-  assert.deepEqual(a.log, { small: 1 }, '작은 객체는 그대로');
+  assert.equal(a.poller.junk, undefined, '모르는 필드는 버린다');
+  assert.equal(a.poller.tickMs, 1000, '문자열 수치는 수로');
+  assert.equal(a.caps.blob, undefined);
+  assert.ok(a.caps.version.length <= 40);
+  assert.equal(a.portalPort, 4000, '포트는 정제한 caps 에서 읽는다');
+  assert.equal(a.log.small, undefined);
+  assert.ok(a.log.lastError.length <= 300);
+  assert.ok(JSON.stringify({ p: a.poller, c: a.caps, l: a.log }).length < 2000, '정제한 부속 객체는 작다');
 });
 
 /* ── EDGE2-02 SAN 사용량 엣지 상태 퇴출 순서 ── */
@@ -149,7 +160,7 @@ test('EDGE2-02 — 방금 보고한 엣지는 상한 퇴출에서 밀려나지 �
 
 /* ── EDGE2-03·04 ── */
 test('EDGE2-03 — ip-scan-result 는 병합한 개수만 보고한다 · EDGE2-04 진행 보고 실패를 남긴다', () => {
-  const c = read('routes/central.js');
+  const c = centralSource();
   assert.match(c, /merged: validAlive\.length/);
   assert.match(c, /alive: validAlive\.length/);
   const w = read('agent/idracScanWorker.js');

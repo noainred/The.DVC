@@ -143,8 +143,7 @@ test('VC-02 ④ 라우트 /tools/esxi-temp — 끊긴 호스트는 행·호스�
     const r = await fetch(base + '/api/tools/esxi-temp');
     const b = await r.json();
     srv.close();
-    process.stdout.write('@@' + JSON.stringify({ status: r.status, vc, downId: down.id, cluster: down.cluster || 'standalone', b }) + '\\n');
-    process.exit(0);
+    process.stdout.write('@@' + JSON.stringify({ status: r.status, vc, downId: down.id, cluster: down.cluster || 'standalone', b }) + '\\n', () => process.exit(0));   // v3.26.0: 출력이 다 나간 뒤 종료(시연 규모 응답 수백 KB 가 파이프에서 잘렸다)
   `);
   assert.equal(o.status, 200);
   const b = o.b;
@@ -345,8 +344,7 @@ test('LEFT-05·DB-05 ④ /tools/waste/export 는 비동기판을 쓰고(주석 �
     const r = await fetch(base + '/api/tools/waste/export?days=7');
     const ab = Buffer.from(await r.arrayBuffer());
     srv.close();
-    process.stdout.write('@@' + JSON.stringify({ status: r.status, type: r.headers.get('content-type'), b64: ab.toString('base64') }) + '\\n');
-    process.exit(0);
+    process.stdout.write('@@' + JSON.stringify({ status: r.status, type: r.headers.get('content-type'), b64: ab.toString('base64') }) + '\\n', () => process.exit(0));   // v3.26.0: 출력이 다 나간 뒤 종료(시연 규모 응답 수백 KB 가 파이프에서 잘렸다)
   `, { WASTE_EXPORT_MAX_REPORTS: '3' });
   assert.equal(o.status, 200, Buffer.from(o.b64, 'base64').toString('utf8').slice(0, 300));
   assert.equal(o.type, 'application/zip');

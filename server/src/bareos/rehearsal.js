@@ -13,11 +13,11 @@
  *  · 중앙 전용(엣지는 기동하지 않는다). 인증 정지된 Director 는 주기 실행에서 건너뛴다(trigger 'timer').
  * 상태 파일: CONFIG_DIR/bareos-rehearsal.json(정책 — 비밀 없음) · bareos-rehearsal-state.json(회차 · 마지막 검증 · 시도 시각 · Director 마다 최근 결과 RUNS_PER_DIR 건 — v2.874).
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { store } from '../store.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
+import { readJsonFile } from '../util/jsonFileRead.js';   // 97회차 F4: 상태 파일 읽기 오류 ≠ 손상
 import { makeLoadError } from '../util/registryCore.js';
 import { registerStateFile } from '../util/stateFiles.js';
 import { DAY_OFFSET_MIN } from '../util/dayKey.js';
@@ -31,10 +31,13 @@ import { loadSettings, jobDirectorId, directorById } from './settings.js';
 import { bulkRestorePlan, placementDrift } from './restore.js';
 import { capacityShortfall } from '../vmclone/capacity.js';
 import { onDirector, isDemoActive, effectiveSettings, isEdgeNode } from './service.js';
+import { lateRestores } from './lateReplies.js'; // v2.938: 엣지 대행 늦은 회신 반영(제안 6번)
 import { noteRestoreBatchStart, noteRestoreBatchEnd } from './inflight.js';
 import { drActiveVcenterIds } from './drRunner.js';
 import { RESTORES_DEADLINE_MS } from './edgeOps.js';
 import { logAudit } from '../audit.js';
+import { unreadVcenterReasons } from '../metrics/unreadVcenters.js';   // 126회차: '지금 값이 아닌 vCenter' 공용 판정(사본 금지)
+import { notReadWhyText } from '../corelicense/analyze.js';            // 사유 한글(점검중 · 연결 실패 · 보고 낡음) — 문구 한 벌
 
 export const TICK_MS = 60_000;
 export const PER_CORP_MAX = 10;
@@ -78,9 +81,13 @@ export function normPolicy(body = {}) {
 
 export function loadPolicy() {
   if (_cfg) return _cfg;
+  // 97회차 F4: 읽기 단계는 등록부 공용 읽기(util/registryCore.js read)다 — 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니라 원본을 옮기지 않고 ·
+  //   캐시하지 않고(30초 간격 재읽기) · 오류(readError)를 세워 쓰기를 거절한다(persist 의 assertWritable). parse · 형식 실패만 아래 catch(예전과 같다 — 보존본).
+  const rr = _loadErr.read(FILE(), (t) => t);
+  if (rr.kind === 'read-error') return { ...DEFAULTS, datastores: {}, savedBy: '', savedAt: null };
   try {
-    if (fs.existsSync(FILE())) {
-      const p = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
+    if (rr.kind === 'ok') {
+      const p = JSON.parse(rr.value);
       if (!p || typeof p !== 'object' || Array.isArray(p)) throw new Error('형식 오류');
       _cfg = { ...normPolicy(p), savedBy: String(p.savedBy || '').slice(0, 64), savedAt: Number.isFinite(p.savedAt) ? p.savedAt : null };
       _loadErr.clear();
@@ -101,6 +108,7 @@ export function policyLoadError() { loadPolicy(); return _loadErr.get(); }
 export function savePolicy(body, { by = '', now = Date.now() } = {}) {
   if (policyLoadError()) throw fail('unreadable', '복원 검증 정책 파일을 읽지 못해 저장하지 않습니다 — 손상본을 확인하세요.');
   const next = { ...normPolicy(body), savedBy: String(by || '').slice(0, 64), savedAt: now };
+  _loadErr.assertWritable('Bareos 복원 검증 정책(bareos-rehearsal.json)'); // 97회차 F4: 마지막 방어선 — 읽기 오류 중에는 원본을 덮지 않는다(던진다 — status 409)
   atomicWriteFileSync(FILE(), JSON.stringify(next, null, 2), { mode: 0o600 });
   _cfg = next;
   return { ...next };
@@ -108,9 +116,16 @@ export function savePolicy(body, { by = '', now = Date.now() } = {}) {
 
 function state() {
   if (_state) return _state;
-  try { _state = fs.existsSync(STATE_FILE()) ? JSON.parse(fs.readFileSync(STATE_FILE(), 'utf8')) : {}; } catch (e) {
-    // 반증 F2: 조용히 비우면 오늘 회차 기록이 사라져 같은 날 다시 돈다 — 보존하고 이 프로세스에서는 검증을 멈춘다(재시작하면 새 상태로)
-    preserveCorrupt(STATE_FILE(), e?.message); _stateBad = '복원 검증 상태 파일이 손상돼 보존했습니다 — 같은 날 두 번 돌지 않게 이 프로세스에서는 검증을 멈췄습니다(재시작하면 새로 시작)';
+  // 97회차 F4: 읽기 단계(readJsonFile)와 parse 를 가른다 — 읽기 오류는 손상이 아니라 원본을 옮기지 않는다(같은 날 두 번 돌지 않게 멈추는 것은 같다 · 상태 파일도 쓰지 않는다).
+  const rs = readJsonFile(STATE_FILE(), { parse: (t) => JSON.parse(t) });
+  if (rs.kind === 'ok') _state = rs.value;
+  else if (rs.kind === 'missing') _state = {};
+  else if (rs.kind === 'read-error') {
+    _stateBad = `복원 검증 상태 파일을 읽지 못했습니다(읽기 오류 ${String(rs.error?.code || '').slice(0, 32)} — 원본은 그대로 둡니다) — 같은 날 두 번 돌지 않게 이 프로세스에서는 검증을 멈췄습니다(파일 권한 · 디스크를 고치고 재시작하세요)`;
+    console.warn(`[bareos] ${_stateBad}`); _state = {};
+  } else {
+    // 반증 F2: 조용히 비우면 오늘 회차 기록이 사라져 같은 날 다시 돈다 — 보존하고(readJsonFile 이 옮겼다) 이 프로세스에서는 검증을 멈춘다(재시작하면 새 상태로)
+    _stateBad = '복원 검증 상태 파일이 손상돼 보존했습니다 — 같은 날 두 번 돌지 않게 이 프로세스에서는 검증을 멈췄습니다(재시작하면 새로 시작)';
     console.warn(`[bareos] ${_stateBad}`); _state = {};
   }
   if (!_state || typeof _state !== 'object' || Array.isArray(_state)) _state = {};
@@ -258,10 +273,17 @@ export async function runRehearsal(dirId, { trigger = 'timer', by = 'rehearsal',
   const dsUse = new Map();
   const GIB = 1024 ** 3;
   const chosen = [];
+  // 126회차(재현): 수집이 멈춘 vCenter(점검중 · 수집 실패 이월 · 담당 엣지의 보고 끊김 — 공용 판정)의 데이터스토어 여유 · VM 목록은 **마지막으로 읽은 값**이다
+  //   (store 가 수집 실패는 최대 6시간, 위임 보고 끊김 · 점검중은 기한 없이 이어 서빙한다). 그 여유로 '넉넉하다' 고 판정해 복원을 보내면 그사이 찬
+  //   데이터스토어를 채우고(그 위의 VM 이 멈춘다), 이름 겹침 검사도 옛 목록으로 통과한다. 끝맺음 검사(finishBlock)는 중앙 직접의 점검중 · 위임만 막아
+  //   수집 실패 이월과 엣지 실행(보고 끊김)은 그대로 보냈다. 사람이 보지 않는 정기 작업은 모르면 보내지 않는다(위 F5 와 같은 쪽).
+  const unreadVc = unreadVcenterReasons(snap);
   for (const j of cands) {
     if (chosen.length >= policy.perCorp) break;
     const fb = finishBlock(j.vcenterId);
     if (fb) { skip(j, fb); continue; }
+    const ur = unreadVc.get(String(j.vcenterId));
+    if (ur) { skip(j, `이 vCenter 의 수집이 멈춰 있어(${notReadWhyText(ur)}) 데이터스토어 여유 · VM 목록이 지금 값이 아닙니다 — 건너뛰었습니다(수집이 돌아오면 다음 회차에 다시 봅니다)`); continue; }
     let homeKey = ''; let homeNeed = 0;
     if (!policy.datastores[j.vcenterId]) {
       const vm = vmById.get(j.vmId);
@@ -305,12 +327,12 @@ export async function runRehearsal(dirId, { trigger = 'timer', by = 'rehearsal',
       return { key: i, jobid: x.jobid, name: job.bareosJob, client: site?.client || job.client, restoreJob: settings.defaults.restoreJob, pluginOptions: x.plan.pluginOptions };
     });
     let out;
-    try { out = await onDirector(dirId, 'restores', { items: sendItems }, { trigger, signal: AbortSignal.timeout(RESTORES_DEADLINE_MS) }); } catch (e) {   // v2.870 감사 A5-01
+    try { out = await onDirector(dirId, 'restores', { items: sendItems }, { trigger, signal: AbortSignal.timeout(RESTORES_DEADLINE_MS), onLate: lateRestores(ready.map((x) => ({ jobId: x.id, batchId: runId }))) }); } catch (e) {   // v2.870 감사 A5-01 · v2.938 늦은 회신
       const why = String(e?.message || e).slice(0, 300);
       const unknown = !!e?.unknown || e?.code === 'unknown';
       for (const x of ready) run.items.push({ jobId: x.id, vmName: x.vmName, ok: false, reason: unknown ? `결과 모름 — ${why}` : why });
       // v2.874(점검 B5-01): 결과 모름은 원장에 남긴다 — 그 VM 을 다음 회차 · 사람의 복원이 다시 보내지 않게(restoreHeld · 이름 예약)
-      if (unknown) { try { inBatch(() => ready.forEach((x, i) => addRestore(x.id, { unknown: true, mode: 'newVm', target: x.plan.target, by, client: sendItems[i].client, batchId: runId, nic: 'disconnect', verify: true, rehearsal: runId }))); } catch (e2) { console.warn(`[bareos] 복원 검증 ${runId} 결과 모름 기록 실패: ${e2?.message || e2}`); } }
+      if (unknown) { try { inBatch(() => ready.forEach((x, i) => addRestore(x.id, { unknown: true, mode: 'newVm', target: x.plan.target, by, client: sendItems[i].client, batchId: runId, nic: 'disconnect', verify: true, deleteOnOk: policy.deleteOnOk, rehearsal: runId }))); } catch (e2) { console.warn(`[bareos] 복원 검증 ${runId} 결과 모름 기록 실패: ${e2?.message || e2}`); } }
       logAudit({ user: by, action: 'Bareos 복원 검증', target: directorById(dirId, settings)?.name || dirId, detail: `실패 — ${why}` });
       return finishRun({ ok: false, started: 0, reason: why, audited: true });
     }
@@ -330,7 +352,7 @@ export async function runRehearsal(dirId, { trigger = 'timer', by = 'rehearsal',
         } else {
           const unknown = !r || r.code === 'unknown';
           // v2.874(점검 B5-01): 결과 모름은 원장에 남긴다(다시 보내지 않게)
-          if (unknown) addRestore(job.id, { unknown: true, mode: 'newVm', target: x.plan.target, by, client: sendItems[i].client, batchId: runId, nic: 'disconnect', verify: true, rehearsal: runId });
+          if (unknown) addRestore(job.id, { unknown: true, mode: 'newVm', target: x.plan.target, by, client: sendItems[i].client, batchId: runId, nic: 'disconnect', verify: true, deleteOnOk: policy.deleteOnOk, rehearsal: runId });   // v2.938 반증 B-3: 늦은 회신이 이 행을 열면 정책대로 남기거나 지운다
           run.items.push({ jobId: job.id, vmName: job.vmName, ok: false, reason: r?.message || 'Director 회신에 없음 — 결과 모름' });
         }
       });

@@ -7,17 +7,19 @@
 import { requirePerm } from '../../auth/auth.js';
 import { logAudit } from '../../audit.js';
 import { store } from '../../store.js';
-import { memoJson, scopeSlice, scopeKey } from './shared.js';
+import { memoJson, scopeSlice, scopeKey, SCOPE_KEY_ALL } from './shared.js';
 import { capStr } from '../../util/capStr.js';
 import { isAdminDetailUser } from '../../auth/demoGuest.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { fileStamp } from '../../util/dayKey.js';
-import { analyzeHostCfg } from '../../hostcfg/analyze.js';
+import { analyzeHostCfg, hostCfgSummaryByVc } from '../../hostcfg/analyze.js';
+import { isSummaryQuery, SUMMARY_TOP_N } from './toolSummary.js';   // v3.22.0 Hypervisor 분석 화면 요약 — 같은 라우트 · 같은 게이트 안에서
 import { HOST_CFG_CODES } from '../../hostcfg/parse.js';
 import { hostCfgStatus } from '../../hostcfg/cache.js';
 import { config } from '../../config.js';
 import { analyzeReboots } from '../../hostcfg/reboots.js';
 import { HOSTOPS_TYPES } from '../../vmchanges/eventDetail.js';
+import { eventLastTsOf } from '../../vmchanges/analyze.js';   // 71회차: 마지막 이벤트 시각(지금 + 여유 이하 MAX — 69회차 F2 한 벌)
 import { getLogsDb } from '../../logs/db.js';
 import { eventNotCollectedMap } from '../../logs/coverage.js'; // v2.733(C1-01): 이 포탈이 지금 이벤트를 수집하지 않는 vCenter(사유)
 import { loadLogSettings } from '../../logs/settings.js';
@@ -45,10 +47,20 @@ function run(snap, req) {
 
 export function registerHostHygiene(api) {
   api.get('/tools/host-hygiene', toolsPerm, (req, res) => memoJson(req, res, 'host-hygiene', (snap) => {
+    // v3.22.0: ?summary=1 — 법인별 줄 + 법인별 상위 N(Hypervisor 분석 화면). 게이트(tools · toolGate 'host-hygiene')와 범위(scopeSlice)는 그대로 ·
+    //   화면 조건(code · sev · q)은 보지 않는다 · 수집 상태(오류 원문)는 싣지 않는다. memo 열쇠는 URL 이라 원본과 다른 칸이다.
+    if (isSummaryQuery(req.query)) {
+      const scoped = scopeSlice(snap, req.user, qStr(req.query.vcenterId, 128) || undefined);
+      const vcName = new Map((scoped.vcenters || []).map((v) => [v.id, v.name || v.id]));
+      const notReadVcenters = notReadVcentersOf(scoped);
+      return { summary: true, tool: 'host-hygiene', ...hostCfgSummaryByVc(scoped, { vcName, topN: SUMMARY_TOP_N }),
+        notReadVcenters, partial: notReadPartialOf(notReadVcenters),
+        scan: { enabled: config.hostCfgScan, refreshMs: config.hostCfgRefreshMs }, initial: snap.initial === true, generatedAt: snap.generatedAt || null };
+    }
     const r = run(snap, req);
     // v2.744(감사 AUTHZ-01): 판정은 isAdminDetailUser — 데모 계정(요청 문맥 admin + demoGuest)은 operator 와 같은 판본이고, memo 키도 역할 문자열이 아니라
     //   판정 결과(a/u)로 만든다(역할 문자열이면 데모와 진짜 관리자가 같은 캐시 칸을 써 한쪽 판본이 다른 쪽에 나간다).
-    const full = isAdminDetailUser(req.user) && scopeKey(req.user, snap) === 'all';
+    const full = isAdminDetailUser(req.user) && scopeKey(req.user, snap) === SCOPE_KEY_ALL;
     return {
       ...r, codes: HOST_CFG_CODES, initial: snap.initial === true, generatedAt: snap.generatedAt || null,
       scan: { enabled: config.hostCfgScan, refreshMs: config.hostCfgRefreshMs, perCycle: config.hostCfgPerCycle },
@@ -75,7 +87,7 @@ export function registerHostHygiene(api) {
     // v2.733(C1-01): 지금 이벤트를 수집하지 않는 vCenter(위임·비활성·점검중)는 '이벤트 없음' 행에 사유를 싣는다(reboots.js) —
     //   옛 이벤트가 남아 있어도 지금 상태를 그것으로 판정하지 않는다.
     const ncMap = eventNotCollectedMap();
-    const cov = new Map(ids.map((id) => [id, { firstTs: db.firstTs(id) || null, lastTs: db.lastTs(id) || null, why: ncMap.get(id) || null }]));
+    const cov = new Map(ids.map((id) => [id, { firstTs: db.firstTs(id) || null, lastTs: eventLastTsOf(db, id), why: ncMap.get(id) || null }]));   // 71회차(69회차 남긴 것 ②): 미래 행 경계 — 이력 화면과 같은 함수
     const s = loadLogSettings();
     return {
       ...analyzeReboots(scoped.hosts, events, { days, vcName, coverageOf: (id) => cov.get(id) || null, readFrom }),

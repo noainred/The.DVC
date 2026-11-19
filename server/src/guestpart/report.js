@@ -19,6 +19,11 @@ import { DAY_OFFSET_MIN } from '../util/dayKey.js';
 const DAY = 86_400_000;
 export const LIST_LIMIT = 300;
 export const GROWTH_DAYS = 7;
+/** '곧 가득 참' — 가득 참 예상(etaDays)이 이 일수 안인 초과 행(화면 KPI · 요약이 같은 값). */
+export const SOON_DAYS = 30;
+/** v3.21.0 요약(VM 분석 화면) — 초과 파티션 사용률 구간의 경계(첫 칸 = 기준 이상 ~ 첫 경계 미만 · 마지막 칸 = CRIT_PCT 이상). 표시 구간이지 판정이 아니다. */
+export const OVER_BIN_EDGES = Object.freeze([85, 90, CRIT_PCT]);
+export const SUMMARY_TOP_N = 5;
 
 /*
  * 파티션 최신 값 기억 — 화면 갱신마다 전 함대 행(5,850 VM × 파티션 약 1.6만 행 추정)을 DB 에서 다시 읽지 않는다.
@@ -108,10 +113,10 @@ function collectState(parts, allowed) {
 
 /**
  * 전체(또는 범위 안) 개요.
- * @param {{allowed:Set|null, thr?:number|null, mode?:string|null, vcenterId?:string|null, q?:string, os?:string, limit?:number, now?:number, all?:boolean}} o
- *   all=true 면 목록 상한 없이(CSV·메일).
+ * @param {{allowed:Set|null, thr?:number|null, mode?:string|null, vcenterId?:string|null, q?:string, os?:string, limit?:number, now?:number, all?:boolean, byVc?:boolean}} o
+ *   all=true 면 목록 상한 없이(CSV·메일). byVc=true(all 과 함께)면 vCenter 별 요약 Map(byVc)을 덧붙인다(overviewSummary 전용 — JSON 으로 내보내지 않는다).
  */
-export async function overview({ allowed = null, thr = null, mode = null, vcenterId = null, q = '', os = 'all', limit = LIST_LIMIT, now = Date.now(), all = false } = {}) {
+export async function overview({ allowed = null, thr = null, mode = null, vcenterId = null, q = '', os = 'all', limit = LIST_LIMIT, now = Date.now(), all = false, byVc = false } = {}) {
   const settings = loadSettings();
   const snap = store.get();
   const meta = vcMeta(snap);
@@ -120,7 +125,7 @@ export async function overview({ allowed = null, thr = null, mode = null, vcente
   const inv = inventory(snap, allowed);
   // vCenter 별 집계
   const per = new Map();
-  const vcOf = (id) => { let x = per.get(id); if (!x) { x = { reportedVms: new Set(), overVms: new Set(), overParts: 0, crit: 0, maxPct: null, unknownParts: 0, ignoredParts: 0, lastTs: 0, thr: null }; per.set(id, x); } return x; };
+  const vcOf = (id) => { let x = per.get(id); if (!x) { x = { reportedVms: new Set(), overVms: new Set(), overParts: 0, crit: 0, maxPct: null, unknownParts: 0, unknownVms: 0, ignoredParts: 0, lastTs: 0, thr: null }; per.set(id, x); } return x; };
   for (const p of ev.parts) {
     const x = vcOf(p.vcenterId);
     x.reportedVms.add(p.vmId); x.lastTs = Math.max(x.lastTs, p.ts || 0); x.thr = p.thr;
@@ -130,6 +135,8 @@ export async function overview({ allowed = null, thr = null, mode = null, vcente
     if (p.over) { x.overParts++; if (p.crit) x.crit++; }
   }
   for (const v of ev.vms.values()) if (v.over) { vcOf(v.vcenterId).overVms.add(v.vmId); if (ev.mode === 'vm' && v.crit) vcOf(v.vcenterId).crit++; }
+  // 결정(56~75 남긴 것) 68 D1: 판정 단위 'vm' 에서 값 모름 파티션이 있는 VM 은 판정하지 않는다 — 초과 · 정상 어디에도 넣지 않고 따로 센다.
+  if (ev.mode === 'vm') for (const v of ev.vms.values()) if (v.unknown > 0) vcOf(v.vcenterId).unknownVms++;
   const holdMs = latestHoldMs();
   const vcIds = new Set([...meta.keys()].filter((id) => !allowed || allowed.has(id)));
   for (const id of per.keys()) vcIds.add(id);
@@ -143,7 +150,7 @@ export async function overview({ allowed = null, thr = null, mode = null, vcente
     return { id, name: m.name, region: m.region, corp: m.corp, site: m.site,
       guests: iv.guests, reported, notReported: Math.max(0, iv.guests - reported), offNotReported,
       overVms: x ? x.overVms.size : 0, overParts: x ? x.overParts : 0, crit: x ? x.crit : 0, maxPct: x ? x.maxPct : null,
-      unknownParts: x ? x.unknownParts : 0, ignoredParts: x ? x.ignoredParts : 0,
+      unknownParts: x ? x.unknownParts : 0, ignoredParts: x ? x.ignoredParts : 0, unknownVms: ev.mode === 'vm' ? (x ? x.unknownVms : 0) : null,
       lastTs: x && x.lastTs ? x.lastTs : null, stale: !!(x && x.lastTs && now - x.lastTs > holdMs),
       thr: settings.vcThresholds[id] ?? null };
   }).sort((a, b) => b.overVms - a.overVms || (b.maxPct ?? -1) - (a.maxPct ?? -1) || a.name.localeCompare(b.name));
@@ -174,12 +181,71 @@ export async function overview({ allowed = null, thr = null, mode = null, vcente
       guests: sumGuests, reported: vcenters.reduce((a, v) => a + v.reported, 0), notReported: sumNot,
       offNotReported: vcenters.reduce((a, v) => a + v.offNotReported, 0),
       overVms: overVmSet.size, overParts: ev.mode === 'part' ? total : ev.parts.filter((p) => overVmSet.has(p.vmId) && !p.ignored && p.pct != null && p.pct >= p.thr).length,
-      crit: rows.filter((r) => r.crit).length, soon: shown.filter((r) => r.etaDays != null && r.etaDays < 30).length,
+      crit: rows.filter((r) => r.crit).length, soon: shown.filter((r) => r.etaDays != null && r.etaDays < SOON_DAYS).length,
       unknownParts: vcenters.reduce((a, v) => a + v.unknownParts, 0),
+      // 68 D1: 'vm' 단위에서 값 모름 파티션 때문에 판정하지 않은 VM 수(파티션 단위면 VM 합계로 판정하지 않으므로 null — 0 이 아니다).
+      unknownVms: ev.mode === 'vm' ? vcenters.reduce((a, v) => a + (v.unknownVms || 0), 0) : null,
     },
     vcenters, rows: shown, total, limited: !all && total > shown.length,
     ignored: ignoredSummary(ev.parts),
     collect: collectState(parts, allowed),
+    // v3.21.0: 요약(byVc) — 화면 목록(rows)이 아니라 이 함수가 판정한 **전체** 초과 행으로 vCenter 별로 묶는다(all=true 일 때만 rows 가 전체다).
+    ...(byVc && all ? { byVc: summarizeByVc(ev, rows, overVmSet) } : {}),
+  };
+}
+
+/**
+ * v3.21.0 VM 분석 화면 요약 — overview 의 판정 결과(ev · 초과 행 전체 · 초과 VM 집합)를 vCenter 별로 센다(새 판정 없음).
+ *   overParts 는 kpi 와 같은 식(파티션 단위 = 초과 행 · VM 단위 = 초과 VM 의 기준 이상 파티션) · soon 은 kpi 와 같은 식(SOON_DAYS) — 단 화면 목록 상한 없이.
+ *   osOver = 초과 VM 의 OS 계열별 수(파티션 경로로 정한 계열 — rules.osOfPath) · overBins = 초과 파티션의 사용률 구간(OVER_BIN_EDGES).
+ *   fullest = 가장 찬 순(도구 목록과 같은 정렬) 상위 N · soonest = 가득 참 예상이 빠른 순 상위 N(예상을 모르는 행은 넣지 않는다).
+ */
+function summarizeByVc(ev, rows, overVmSet) {
+  const m = new Map();
+  const of = (id) => { let x = m.get(id); if (!x) { x = { overParts: 0, soon: 0, osOver: { win: 0, lnx: 0, other: 0 }, overBins: OVER_BIN_EDGES.map(() => 0).concat(0), fullest: [], soonest: [], _vms: new Set() }; m.set(id, x); } return x; };
+  const binOf = (pct) => { let i = 0; while (i < OVER_BIN_EDGES.length && pct >= OVER_BIN_EDGES[i]) i++; return i; };
+  const overPart = (p) => !p.ignored && p.pct != null && (ev.mode === 'part' ? p.over : overVmSet.has(p.vmId) && p.pct >= p.thr);
+  for (const p of ev.parts) {
+    if (!overPart(p)) continue;
+    const x = of(p.vcenterId);
+    x.overParts++; x.overBins[binOf(p.pct)]++;
+  }
+  const pick = (r) => ({ vmId: r.vmId, vmName: r.vmName, os: r.os, path: r.path, capGB: r.capGB, usedGB: r.usedGB, freeGB: r.freeGB, pct: r.pct, crit: r.crit, thr: r.thr,
+    growth7dGB: r.growth7dGB ?? null, etaDays: r.etaDays ?? null, ts: r.ts });
+  for (const r of rows) {   // rows 는 이미 '가장 찬 순'(사용률 내림 · 여유 오름)
+    const x = of(r.vcenterId);
+    if (r.etaDays != null && r.etaDays < SOON_DAYS) x.soon++;
+    if (!x._vms.has(r.vmId)) { x._vms.add(r.vmId); x.osOver[r.os === 'win' || r.os === 'lnx' ? r.os : 'other']++; }
+    if (x.fullest.length < SUMMARY_TOP_N) x.fullest.push(pick(r));
+    if (r.etaDays != null) x.soonest.push(r);
+  }
+  for (const x of m.values()) {
+    x.soonest = x.soonest.sort((a, b) => a.etaDays - b.etaDays || b.pct - a.pct).slice(0, SUMMARY_TOP_N).map(pick);
+    delete x._vms;
+  }
+  return m;
+}
+
+/**
+ * v3.21.0 VM 분석 화면 요약 — 법인(vCenter)별 줄 + 법인별 상위 N. 화면은 고른 법인의 줄을 더하고 상위 N 을 다시 고른다(선택을 바꿀 때 서버 왕복 없음).
+ *   overview 를 목록 상한 없이(all) 한 번 돌려 그 판정을 그대로 묶는다 — 화면 목록(LIST_LIMIT)에 잘린 행으로 세지 않는다.
+ *   범위(allowed)는 overview 안에서 다른 무엇보다 먼저 좁힌다(범위 밖 vCenter 의 줄이 없다).
+ */
+export async function overviewSummary({ allowed = null, thr = null, mode = null, now = Date.now() } = {}) {
+  const r = await overview({ allowed, thr, mode, now, all: true, byVc: true });
+  const empty = { overParts: 0, soon: 0, osOver: { win: 0, lnx: 0, other: 0 }, overBins: OVER_BIN_EDGES.map(() => 0).concat(0), fullest: [], soonest: [] };
+  const rows = r.vcenters.map((v) => {
+    const x = r.byVc.get(v.id) || empty;
+    return { vcenterId: v.id, name: v.name, region: v.region, corp: v.corp, site: v.site,
+      guests: v.guests, reported: v.reported, notReported: v.notReported, offNotReported: v.offNotReported,
+      overVms: v.overVms, overParts: x.overParts, crit: v.crit, soon: x.soon, maxPct: v.maxPct, unknownParts: v.unknownParts, unknownVms: v.unknownVms,
+      ignoredParts: v.ignoredParts, lastTs: v.lastTs, stale: v.stale, thr: v.thr,
+      osOver: x.osOver, overBins: x.overBins, top: { fullest: x.fullest, soonest: x.soonest } };
+  });
+  return {
+    mode: r.mode, now: r.now, offsetMin: r.offsetMin,
+    thresholds: { defaultThr: r.defaultThr, thr: r.thr, critPct: CRIT_PCT, soonDays: SOON_DAYS, growthDays: GROWTH_DAYS, overBinEdges: [...OVER_BIN_EDGES] },
+    topN: SUMMARY_TOP_N, rows, collect: r.collect,
   };
 }
 
@@ -204,8 +270,9 @@ export async function vcenterDetail(vcenterId, { allowed = null, thr = null, mod
     if (!v) {
       const iv = inv.vms.get(p.vmId) || {};
       const sv = ev.vms.get(p.vmId);
+      // 68 D1: unknownParts = 무시하지 않은 값 모름 파티션 수 — 'vm' 단위면 이 수가 0 보다 클 때 합계로 판정하지 않았다(pct null).
       v = { vmId: p.vmId, vmName: p.vmName, host: iv.host || '', cluster: iv.cluster || '', guestOS: iv.os || '', over: !!sv?.over, crit: !!sv?.crit,
-        pct: sv?.pct ?? null, maxPct: sv?.maxPct ?? null, ts: p.ts, parts: [] };
+        pct: sv?.pct ?? null, maxPct: sv?.maxPct ?? null, unknownParts: sv?.unknown ?? 0, ts: p.ts, parts: [] };
       byVm.set(p.vmId, v);
     }
     v.parts.push({ path: p.path, os: p.os, capGB: r1(p.capGB), usedGB: r1(p.usedGB), freeGB: p.capGB == null || p.usedGB == null ? null : r1(p.capGB - p.usedGB),
@@ -243,7 +310,8 @@ export async function vcenterDetail(vcenterId, { allowed = null, thr = null, mod
       overVms: overVms.length, overParts: ev.parts.filter((p) => p.over).length,
       crit: ev.parts.filter((p) => !p.ignored && p.pct != null && p.pct >= CRIT_PCT).length,
       critFreeGB: r1(ev.parts.filter((p) => !p.ignored && p.pct != null && p.pct >= CRIT_PCT).reduce((a, p) => a + (p.capGB - p.usedGB), 0)),
-      unknownParts: ev.parts.filter((p) => !p.ignored && p.pct == null).length },
+      unknownParts: ev.parts.filter((p) => !p.ignored && p.pct == null).length,
+      unknownVms: ev.mode === 'vm' ? [...ev.vms.values()].filter((v) => v.unknown > 0).length : null },
     histogram: histogram(ev.parts),
     clusters: [...cl.values()].sort((a, b) => b.over - a.over || b.total - a.total),
     vms: list, total: (onlyOver ? overVms : allVms).length, onlyOver: !!onlyOver,
@@ -294,6 +362,15 @@ export async function vmPartitions(vm, { now = Date.now() } = {}) {
   };
 }
 
+/**
+ * 68 D1: 'vm' 단위에서 값 모름 파티션 때문에 판정하지 않은 VM 안내(메일 · CSV 공용) — 없거나 파티션 단위면 ''.
+ * @param {{mode:string, kpi?:{unknownVms?:number|null}}} r overview 결과
+ */
+export function unknownVmsNote(r) {
+  const n = r?.mode === 'vm' ? Number(r?.kpi?.unknownVms) : 0;
+  return n > 0 ? `값 모름 파티션이 있어 VM 합계로 판정하지 않은 게스트 ${n}대 — 초과에도 정상에도 넣지 않았습니다(이 목록에 없음 · 포탈의 vCenter 상세에서 확인).` : '';
+}
+
 /** CSV(초과 목록 전체). 빈 칸은 0 이 아니라 빈 값. 수식 가드 + BOM. */
 export function overCsv(r) {
   const head = ['vCenter', 'VM', 'OS', '파티션', '할당(GB)', '사용(GB)', '남은 용량(GB)', '사용률(%)', '임계(%)', `${r.growthDays}일 증가(GB)`, '가득 참 예상(일)', '수집 시각'];
@@ -304,5 +381,8 @@ export function overCsv(r) {
     lines.push(csvLine([x.vcenterName, x.vmName, osText[x.os] || '', x.path ?? `파티션 ${x.partCount ?? ''}개 합계`, x.capGB ?? '', x.usedGB ?? '', x.freeGB ?? '', x.pct ?? '', x.thr ?? '',
       x.growth7dGB ?? '', x.etaDays ?? '', at(x.ts)]));
   }
+  // 68 D1: 'vm' 단위에서 판정하지 않은 VM(값 모름 파티션)은 이 목록에 없다 — 파일만 받은 사람이 '그 밖은 정상' 으로 읽지 않게 마지막 줄에 밝힌다.
+  const unk = unknownVmsNote(r);
+  if (unk) lines.push(csvLine([unk]));
   return CSV_BOM + lines.join('\r\n') + '\r\n';
 }

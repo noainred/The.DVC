@@ -1,7 +1,7 @@
 // v2.633 — 손상 보존본만 남은 중앙 설정 파일을 관리자가 **기본값으로 확정**하는 경로(자동 해제 없음).
 //   ① 등록된 설정 모듈 13개 전부가 confirm 을 가진다(소스 스윕) ② 13개 파일 모두 실제로 확정되고 보존본은 남는다
 //   ③ 라우트: admin + 전체 범위만 · 감사 로그 · 모르는 파일 404 · 이미 정상 409 ④ util 실패 코드 ⑤ 서비스 점검 행이 확정 가능 표시를 싣는다.
-import { test, before } from 'node:test';
+import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -9,7 +9,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stripComments } from './_stripComments.js';
 
-const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2633-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const CFG = tmpDir('audit2633-');
 process.env.CONFIG_DIR = CFG;
 process.env.DATA_SOURCE = 'mock';
 process.env.AUTH_ENABLED = 'true'; // 인증 꺼짐이면 requireRole 이 익명(admin)으로 통과시킨다 — 역할 게이트를 보려면 켠다(req.user 는 테스트가 넣는다)
@@ -24,10 +31,18 @@ const FILES = ['linkcheck-settings.json', 'rma-schedules.json', 'central-svcmon-
   'agent-assignments.json', 'central-agent-gpu-guest.json',
   'isidu-settings.json',   // v2.736 아이실론 디렉터리 사용량(엣지에 대상을 배포한다)
   'pdu-thresholds.json',   // v2.769(점검 R4-D4-02) PDU 임계치도 pdu-config 로 엣지에 배포한다(손상이면 thresholdsUnreadable)
-  'vm-clone.json'];        // v2.793 VM 백업 잡 정의도 담당 엣지에 위임(vm-clone-sync)한다 — 손상이면 503 settingsUnreadable
+  'vm-clone.json',         // v2.793 VM 백업 잡 정의도 담당 엣지에 위임(vm-clone-sync)한다 — 손상이면 503 settingsUnreadable
+  'bmusage-tuning.json',   // v2.923 베어메탈 튜닝 권장값 덮어쓰기 — 손상이면 튜닝 판정 503 settingsUnreadable(덮어쓰기를 무시한 판정을 정상처럼 보이지 않게)
+  'bm-perf-rules.json',    // v2.929 (아래 줄 계속)
+  // 6단계: 저장된 비교 세트 · 운영 주석(손상이면 읽기 503 · 쓰기 거부 — 빈 목록으로 덮지 않는다) · 목표선(손상이면 기본 목표 + loadError)
+  'bm-perf-compare-sets.json', 'bm-perf-annotations.json', 'bm-perf-slo.json',
+  'maintenance-windows.json',   // 8a단계 정비 창 — 손상이면 읽기 503 · 쓰기 거부 · 이 노드 창으로 억제하지 않음 · 배포 인출 503   // v2.929 리눅스 성능 알림 규칙 · 집중 모니터링 — 손상이면 기본값(규칙 전부 꺼짐)으로 돌고 주기 상태에 skipped:'settings-unreadable' · 규칙 화면 · 서비스 점검이 손상을 밝힌다
+  'bm-key-decisions.json',  // 다음 점검 ①(2차) 식별 키 겹침 결정 — 손상이면 읽기 503 · 쓰기 거부 · 결정을 하나도 적용하지 않음(별도 키 수집도 멈춘다)
+  ];
 const MODULES = ['linkcheck/settings.js', 'rma/schedules.js', 'central/svcmonAssign.js', 'ipam/scanStore.js', 'bmusage/settings.js',
   'vmseries/settings.js', 'sanswitch/perfSettings.js', 'storage/intervals.js', 'cvp/settings.js', 'partfault/settings.js',
-  'pdu/intervals.js', 'curuser/settings.js', 'central/assignments.js', 'central/agentGpuGuestConfig.js', 'isidu/settings.js', 'pdu/thresholds.js', 'vmclone/store.js'];
+  'pdu/intervals.js', 'curuser/settings.js', 'central/assignments.js', 'central/agentGpuGuestConfig.js', 'isidu/settings.js', 'pdu/thresholds.js', 'vmclone/store.js',
+  'bmusage/tuning/overrides.js', 'bmusage/perfRules.js', 'bmusage/compareSets.js', 'bmusage/annotations.js', 'bmusage/slo.js', 'bmusage/maint/store.js', 'bmusage/keyDecisions.js'];
 for (const f of FILES) fs.writeFileSync(path.join(CFG, `${f}.corrupt.2026-09-27T00-00-00`), 'x');
 
 const express = (await import('express')).default;
@@ -60,19 +75,26 @@ before(async () => {
   SCOPED = { username: 'adm2', role: 'admin', scope: { vcenters: [vc] } };
 });
 
-test('① 설정 로드 오류를 만드는 모든 모듈이 label + confirm 을 준다(새 모듈이 빠지면 확정 버튼이 뜨지 않는다) — v2.736 16개 · v2.769 17개(PDU 임계치) · v2.793 18개(VM 백업 잡)', () => {
+test('① 설정 로드 오류를 만드는 모든 모듈이 label + confirm 을 준다(새 모듈이 빠지면 확정 버튼이 뜨지 않는다) — v2.736 16개 · v2.769 17개(PDU 임계치) · v2.793 18개(VM 백업 잡) · v2.923 19개(튜닝 덮어쓰기) · v2.929 20개(성능 알림 규칙) · 6단계 23개(비교 세트 · 운영 주석 · 목표선) · 8a단계 24개(정비 창) · 다음 점검 ①(2차) 25개(식별 키 겹침 결정) · 전체 점검 17회차 26개(엣지 배포 사용자) · 19회차 27개(권한 매트릭스) · 23회차 28개(스토리지 보존 기간) · 25회차 30개(IP 관리 예약 · 메모) · 26회차 32개(성능점검 로그 보관 · 실패 알림) · 36회차 34개(Horizon 등록부 · GPU 게스트 설정) · 58회차 38개(SAN 스토리지 성능 알림 · 보고서 메일 · 점검 임계값 · 분류 매핑) · 60회차 40개(IP 관리 대역 용도 · vCenter 별 스캔 대역) · 결정 G2 49개(공용 로더 — fleet 태그 · 소속 · 게시판 · 공지 · 메일 · DataCenter · VM DNS 정책 · NFS 정의 · PowerScale 점검 설정)', () => {
   const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : e.name.endsWith('.js') ? [path.join(d, e.name)] : []));
   const calls = [];
   for (const f of walk(SRC)) {
     if (f.endsWith(path.join('util', 'settingsLoadError.js'))) continue;
+    if (f.endsWith(path.join('util', 'jsonFileLoad.js'))) continue;   // 결정(56~75 남긴 것) G2: 공용 로더 자신(label · confirm 을 그대로 넘긴다)
     const s = stripComments(fs.readFileSync(f, 'utf8'));
-    for (const m of s.matchAll(/makeSettingsLoadError\(([^\n]*)/g)) calls.push({ f: path.relative(SRC, f), line: m[1] });
+    // 결정(56~75 남긴 것) G2: 공용 로더(util/jsonFileLoad.js makeJsonFileLoader)도 makeSettingsLoadError 로 등록한다 — 같이 센다.
+    for (const m of s.matchAll(/(?:makeSettingsLoadError|makeJsonFileLoader)\(([^\n]*)/g)) calls.push({ f: path.relative(SRC, f), line: m[1] });
   }
-  assert.equal(calls.length, 18, `등록 수가 바뀌었다 — 테스트의 FILES 목록도 갱신할 것: ${calls.map((c) => c.f).join(', ')}`);
+  // 결정 G2(49개): 공용 로더로 옮긴 IP 관리 예약 · 메모(2 — 등록 수 그대로) + 새로 등재한 fleet-tags · fleet-assign · 게시판 · 공지 · 메일 · DataCenter ·
+  //   VM DNS 정책 · VM 백업 NFS 정의 · PowerScale 점검 설정(9).
+  // 78회차 F8(50개): HAProxy 경로 점검 설정(relaycheck/settings.js)을 공용 로더로 옮기며 새로 등재 — 예전에는 손상 · 읽기 오류가 아무 표지 없이 기본값이었다.
+  // 90회차 F3(51개): Horizon 실시간 사용자 수집 설정(horizon/sessionSettings.js)을 공용 로더로 옮기며 새로 등재 — 예전에는 읽기 오류도 손상으로 보고
+  //   원본을 옮겼고 손상 · 읽기 오류가 아무 표지 없이 기본값(꺼짐)이었다. 엣지에 배포하는 설정이 아니라 아래 FILES(⑤) 에는 넣지 않는다.
+  assert.equal(calls.length, 51, `등록 수가 바뀌었다 — 테스트의 FILES 목록도 갱신할 것: ${calls.map((c) => c.f).join(', ')}`);
   for (const c of calls) assert.ok(/label:\s*'[^']+'/.test(c.line) && /confirm:/.test(c.line), `${c.f}: label·confirm 이 없다 — ${c.line}`);
 });
 
-test('⑤ 서비스 점검 목록: 18개 전부 못 읽음 + 이름·확정 가능 표시(값은 싣지 않는다)', () => {
+test('⑤ 서비스 점검 목록: 23개 전부 못 읽음 + 이름·확정 가능 표시(값은 싣지 않는다)', () => {
   const errs = util.listSettingsLoadErrors();
   const names = errs.map((e) => e.file).sort();
   assert.deepEqual(names, [...FILES].sort());
@@ -93,7 +115,13 @@ test('③ 라우트 게이트: operator 403 · 범위 관리자 403 · 파일 �
 test('② 18개 전부 관리자 확정이 성공하고, 오류가 풀리며, 보존본은 남는다 · 두 번째는 409 · 감사 로그', async () => {
   const u = '/tools/service-check/settings-files/confirm';
   for (const f of FILES) {
-    const r = await call(api, FULL, 'POST', u, { file: f });
+    // 전체 점검 20회차 반증 F8: 쓰기 라우트가 super_admin 전용인 설정(아이실론)은 확정도 super_admin — admin 은 403
+    if (f === 'isidu-settings.json') assert.equal((await call(api, FULL, 'POST', u, { file: f })).status, 403, 'isidu 확정은 super_admin');
+    //   쓰기 라우트가 설정 소유자 등급인 설정(베어메탈 SLO · 알림 규칙 · 튜닝)은 확정도 소유자 — admin 은 403
+    const OWNER_ONLY = ['bm-perf-slo.json', 'bm-perf-rules.json', 'bmusage-tuning.json'];
+    if (OWNER_ONLY.includes(f)) assert.equal((await call(api, FULL, 'POST', u, { file: f })).status, 403, `${f} 확정은 설정 소유자`);
+    const who = f === 'isidu-settings.json' ? { ...FULL, superAdmin: true } : OWNER_ONLY.includes(f) ? { ...FULL, username: 'noainred' } : FULL;
+    const r = await call(api, who, 'POST', u, { file: f });
     assert.equal(r.status, 200, `${f}: ${JSON.stringify(r.body)}`);
     assert.equal(r.body.ok, true);
     assert.ok(fs.existsSync(path.join(CFG, f)), `${f}: 기본값 파일이 써지지 않았다`);

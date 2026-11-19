@@ -1,0 +1,48 @@
+/**
+ * bmusage/missReason.js — 수집 결과(OS · iDRAC) → **못 읽은 사유 code**(순수 · 코어 하나).
+ *   5단계 집중 모니터링(분 결측 사유)과 6단계 수집 건강(주기 실패 사유)이 같은 함수를 쓴다(두 벌 금지 — focus/run.js 에서 옮겼다).
+ *   code 는 FOCUS_MISS 와 같은 열거(웹 문구 표 1:1) — 경로가 없으면 'no-path'(결측이 아니다 · 호출부가 그렇게 다룬다) · 읽었으면 ''.
+ */
+import { isAuthFailureText, isPeerRejectText } from '../util/authGuard.js';
+
+/** OS 결과 → 사유(없으면 ''). authStopped(주기 수집이 인증 정지로 시도하지 않음)는 'auth-stopped'. */
+export function osMissOf(os) {
+  if (!os) return 'no-path';
+  if (os.ok) return '';
+  if (os.authStopped) return 'auth-stopped';
+  // v3.9.0(점검 B-8): 접속 전에 자격 해석이 막았다(키 사용 중지 · 폴더 · 허용 기능 · 퇴역 · 바꿔치기 · 저장소 못 읽음) — 접속 오류(ssh-error)가 아니라 ‘설정 때문에 시도 안 함’.
+  // 재확인 N4: 집중 모니터링 분마다 다시 해석이 등록 꺼짐 · 엣지 지정으로 막은 것은 그 사유 그대로(대상 해석과 같은 code — 키 · 계정 설정이 아니다).
+  if (os.authErrorCode === 'os-disabled' || os.authErrorCode === 'os-edge') return os.authErrorCode;
+  if (os.authErrorCode) return 'cred-config';
+  const e = String(os.error || '');
+  if (os.busy) return 'pool-busy';
+  // 1회차 점검 D5(a): 수집 명령 exec 자체가 실패(osSsh execError) — 시한이면 timeout · 채널 오류는 ssh-error · 출력 상한은 error(OS 종류 문제가 아니다).
+  if (os.execError === 'timeout') return 'timeout';
+  if (os.execError === 'channel') return 'ssh-error';
+  if (os.execError) return 'error';
+  if (isPeerRejectText(e)) return 'host-key';
+  if (isAuthFailureText(e)) return 'auth';
+  if (/시한 초과|timeout|타임아웃/i.test(e)) return 'timeout';
+  if (/어느 형식으로도|Linux/i.test(e)) return 'not-linux';
+  return 'ssh-error';
+}
+/**
+ * iDRAC 텔레메트리 결과 → 사유(없으면 '').
+ *   1회차 점검 D5(b): 예전에는 아래 셋이 모두 'unreachable'(‘iDRAC 미도달 — 네트워크 · 서비스 확인’)이었다 — 조치가 다르다.
+ *     'forbidden'      — 403(인증은 통했고 그 리포트가 허락되지 않음: 라이선스 · 계정 권한 — redfish.js redfishFailKind 가 auth 와 따로 둔 값)
+ *     'ids-unmatched'  — 리포트는 왔는데 아는 메트릭 id 가 없다(상세의 응답 id 목록이 근거)
+ *     'cert-untrusted' — 장비 인증서를 신뢰하지 않아 연결을 끊었다(장비 신뢰 — PEER_REJECT_MARKERS)
+ */
+export function idracMissOf(idr) {
+  if (!idr) return 'no-path';
+  if (idr.ok) return '';
+  if (idr.busy) return 'pool-busy';
+  if (idr.kind === 'auth') return 'auth';
+  if (idr.kind === 'auth-stopped') return 'auth-stopped';
+  if (idr.kind === 'timeout') return 'timeout';
+  if (idr.kind === 'no-telemetry' || idr.kind === 'empty-report') return 'no-telemetry';
+  if (idr.kind === 'forbidden') return 'forbidden';
+  if (idr.kind === 'ids-unmatched') return 'ids-unmatched';
+  if (isPeerRejectText(String(idr.error || ''))) return 'cert-untrusted';
+  return 'unreachable';
+}

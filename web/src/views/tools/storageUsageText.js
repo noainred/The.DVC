@@ -88,6 +88,15 @@ export function deltaOf(prev, cur) {
   const a = numOrNull(prev?.usedBytes); const b = numOrNull(cur?.usedBytes);
   return a == null || b == null ? null : b - a;
 }
+/** 57회차 F2: 두 기간의 합계가 같은 장비들로 이뤄졌나 — 한쪽 기간에만 값(사용량까지 읽은 칸)이 있는 장비 수(서버 usageReport.setChangeOf 사본). */
+export function setChangeOf(devs, i, j) {
+  let n = 0;
+  for (const d of devs || []) {
+    const a = d?.cells?.[i]; const b = d?.cells?.[j];
+    if (!!(a && a.usedBytes != null) !== !!(b && b.usedBytes != null)) n += 1;
+  }
+  return n;
+}
 
 /* ── 칸 표지 ─────────────────────────────────────────────────────────── */
 /**
@@ -152,12 +161,16 @@ export function groupSummary(key, label, list, periods) {
   const prev = n > 1 ? cells[n - 2] : null;
   const first = cells.find((c) => c.counted > 0) || null;
   const fi = first ? cells.indexOf(first) : -1;
-  const rangeOk = !!(first && cur && fi < n - 1 && !first.partial && !cur.partial);
+  // 57회차 F2: 두 끝이 완전한 합계여도 장비 구성이 다르면(그 사이 새로 등록 · 꺼짐) 빼지 않는다 — 새 장비의 사용량 전체가 '증가' 로 보였다.
+  const rangeOk = !!(first && cur && fi < n - 1 && !first.partial && !cur.partial) && setChangeOf(list, fi, n - 1) === 0;
   const range = rangeOk ? deltaOf(first, cur) : null;
+  const both = !!(prev && cur && !prev.partial && !cur.partial && prev.counted > 0 && cur.counted > 0);
+  const changed = both ? setChangeOf(list, n - 2, n - 1) : 0;
   return {
     key, label, devices: list.length, cells, cur,
-    delta: prev && cur && !prev.partial && !cur.partial ? deltaOf(prev, cur) : null,
-    deltaWhy: prev && cur && (prev.partial || cur.partial) ? '두 시점 중 하나가 부분 합이라 변화를 내지 않았습니다' : '',
+    delta: prev && cur && !prev.partial && !cur.partial && !changed ? deltaOf(prev, cur) : null,
+    deltaWhy: prev && cur && (prev.partial || cur.partial) ? '두 시점 중 하나가 부분 합이라 변화를 내지 않았습니다'
+      : changed ? `두 시점의 장비 구성이 달라(한쪽에만 있는 장비 ${changed}대 — 새로 등록 · 꺼짐) 변화를 내지 않았습니다` : '',
     range, rangeSteps: rangeOk ? n - 1 - fi : 0,
     avg: rangeOk && n - 1 - fi > 0 ? range / (n - 1 - fi) : null,
   };
@@ -290,6 +303,16 @@ export const isEmail = (s) => typeof s === 'string' && s.length <= 254 && EMAIL_
 export function parseMailList(text) {
   const parts = String(text || '').split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean);
   return { list: parts.filter(isEmail), invalid: parts.filter((s) => !isEmail(s)) };
+}
+/**
+ * 결정 G2 · G3 반증 후속 ①: 서버가 통합 관리자 주소를 가렸으면(adminToMasked — 쓰기 범위가 제한된 관리자) 개수만 온다. 받는 사람 수를 세는 함수가
+ *   그대로 쓰게 겹치지 않는 자리 표시 주소를 그 수만큼 만든다(추가 주소와의 겹침은 알 수 없어 최대치로 센다). 가리지 않았으면 원래 목록.
+ * @param {{adminTo?:string[], adminToCount?:number, adminToMasked?:boolean}|null} srv
+ */
+export function adminToForCount(srv) {
+  if (!srv?.adminToMasked) return Array.isArray(srv?.adminTo) ? srv.adminTo : [];
+  const n = Number.isFinite(srv.adminToCount) && srv.adminToCount > 0 ? Math.min(Math.floor(srv.adminToCount), 1000) : 0;
+  return Array.from({ length: n }, (_, i) => `masked-${i}@masked.invalid`);
 }
 export function recipientCount(includeAdmin, adminTo, extra) {
   const seen = new Set();

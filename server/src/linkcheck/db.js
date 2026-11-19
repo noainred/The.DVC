@@ -28,6 +28,7 @@
  *
  * ⚠ 하루 경계는 **한국 시각(UTC+9)** 이다(v2.531·v2.550 과 같은 값·같은 이유).
  */
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
@@ -40,9 +41,9 @@ import { openSqlite, createLockRetry } from '../util/sqliteOpen.js';
 import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';
 const lockRetry = createLockRetry();
 export { DAY_OFFSET_MIN, dayKey };
-const COUNT_CACHE_MS = Math.max(0, Number(process.env.LINKCHECK_COUNT_CACHE_MS) || 60_000);
+const COUNT_CACHE_MS = Math.max(0, envPositive(process.env.LINKCHECK_COUNT_CACHE_MS, 60_000));
 /** 상세 원문 1건의 상한 — 넘으면 자르고 **잘렸다고 밝힌다**(조용한 상한 금지). */
-export const DETAIL_MAX_BYTES = Math.max(1_000, Number(process.env.LINKCHECK_DETAIL_MAX) || 8_000);
+export const DETAIL_MAX_BYTES = Math.max(1_000, envPositive(process.env.LINKCHECK_DETAIL_MAX, 8_000));
 
 let _db = null; let _tried = false; let _opening = null; let _tick = 0; let _counts = null;
 

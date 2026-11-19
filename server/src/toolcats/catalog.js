@@ -45,8 +45,8 @@ export const PRESET = Object.freeze([
   {
     id: 'server', label: '서버', icon: '🖥️',
     tools: ['fleet', 'hardware', 'serveranalysis', 'idrac-trend', 'serial-lookup', 'esxi', 'host-hygiene', 'esxitemp', 'roomtemp',
-      'powermap', 'pdu', 'gpu', 'gpu-alloc', 'hba', 'nic-speed', 'nic-models', 'rma', 'bm-storage', 'part-faults',
-      'bm-usage', 'corp-usage', 'power-total', 'svc-inventory'],
+      'powermap', 'pdu', 'gpu', 'gpu-alloc', 'hba', 'nic-speed', 'nic-models', 'rma', 'bm-storage', 'part-faults', 'disk-bad',
+      'bm-usage', 'focus-mon', 'corp-usage', 'power-total', 'svc-inventory', 'bm-folders', 'server-info'],
   },
   {
     id: 'network', label: '네트워크', icon: '🌐',
@@ -55,7 +55,7 @@ export const PRESET = Object.freeze([
   },
   {
     id: 'storage', label: '스토리지', icon: '💾',
-    tools: ['storage-mon', 'storage-growth', 'storage-usage', 'storage-track', 'bm-storage', 'san-switch', 'dsusage', 'thinvms',
+    tools: ['storage-mon', 'ps-inspect', 'storage-growth', 'storage-usage', 'storage-track', 'bm-storage', 'san-switch', 'san-storage', 'dsusage', 'thinvms',
       'dir-usage', 'isilon-dirusage', 'portaldb', 'snapshots', 'snapshot-age', 'vm-hygiene', 'storage-paths', 'orphanvmdk', 'guest-disk', 'guest-partition'],
   },
   {
@@ -86,22 +86,27 @@ export const PRESET = Object.freeze([
   {
     id: 'ops', label: '운영 작업', icon: '🛠️',
     tools: ['rma', 'vmprovision', 'vm-clone', 'backup-run', 'bareos-backup', 'agent-scans', 'shutdown', 'credentials',
-      'diskadd', 'backup', 'massdeploy', 'service-hub', 'mail-diag', 'edge-log', 'edge-tokens'],
+      'diskadd', 'backup', 'massdeploy', 'service-hub', 'mail-diag', 'edge-log', 'edge-tokens', 'san-flow'],
   },
 ]);
 
+/*
+ * 72회차 F4: 입력은 **글자 · 수만** 글자로 읽는다 — `String({toString:1})` 은 "Cannot convert object to primitive value" 를 던져
+ *   PUT /admin/tool-categories 가 400 이 아니라 500 이 됐다(v2.603 coercionTrap · usermenu v2.727 B-02 와 같은 판단). 그 밖의 값은 ''.
+ */
+const str = (v) => (typeof v === 'string' ? v : (typeof v === 'number' && Number.isFinite(v) ? String(v) : ''));
 // 제어문자만 제거한다(공백·하이픈은 이름에 정상적으로 쓰인다).
 // eslint-disable-next-line no-control-regex
-const clean = (s, max) => String(s ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, max);
+const clean = (s, max) => str(s).replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, max);
 
 /** 카테고리 1건 정규화 — 저장 전에 통과시킨다. */
 export function normCategory(c, i = 0) {
-  const rawId = String(c?.id || '').trim().toLowerCase();
+  const rawId = str(c?.id).trim().toLowerCase();
   const id = CAT_ID_RE.test(rawId) ? rawId : `cat${i + 1}`;
   const seen = new Set();
   const tools = [];
   for (const t of Array.isArray(c?.tools) ? c.tools : []) {
-    const k = String(t || '').trim().toLowerCase();
+    const k = str(t).trim().toLowerCase();
     if (!TOOL_KEY_RE.test(k) || seen.has(k)) continue;   // 같은 카테고리 안의 중복만 제거한다
     seen.add(k);
     tools.push(k);
@@ -120,11 +125,11 @@ export function normCategory(c, i = 0) {
 /** 카테고리 1건의 문제점(순수). 없으면 null. */
 export function categoryIssue(c) {
   if (!c || typeof c !== 'object') return '카테고리가 비어 있습니다.';
-  const id = String(c.id || '').trim().toLowerCase();
+  const id = str(c.id).trim().toLowerCase();
   if (!CAT_ID_RE.test(id)) return "id 는 영소문자·숫자·하이픈만 쓸 수 있습니다(예: 'network').";
   if (!clean(c.label, MAX_LABEL)) return '이름을 입력하세요.';
-  const bad = (Array.isArray(c.tools) ? c.tools : []).find((t) => !TOOL_KEY_RE.test(String(t || '').trim().toLowerCase()));
-  if (bad) return `도구 키 형식 오류: ${String(bad).slice(0, 30)}`;
+  const bad = (Array.isArray(c.tools) ? c.tools : []).find((t) => !TOOL_KEY_RE.test(str(t).trim().toLowerCase()));
+  if (bad) return `도구 키 형식 오류: ${str(bad).slice(0, 30) || '(글자 아님)'}`;
   return null;
 }
 
@@ -135,9 +140,9 @@ export function validate(cfg) {
   if (cats.length > MAX_CATEGORIES) out.push(`카테고리는 최대 ${MAX_CATEGORIES}개까지입니다.`);
   for (const [i, c] of cats.entries()) {
     const e = categoryIssue(c);
-    if (e) out.push(`카테고리 ${i + 1}(${c?.label || c?.id || '이름 없음'}): ${e}`);
+    if (e) out.push(`카테고리 ${i + 1}(${clean(c?.label, MAX_LABEL) || str(c?.id) || '이름 없음'}): ${e}`);
   }
-  const ids = cats.map((c) => String(c?.id || '').trim().toLowerCase());
+  const ids = cats.map((c) => str(c?.id).trim().toLowerCase());
   if (new Set(ids).size !== ids.length) out.push('카테고리 id 가 중복되었습니다.');
   // v2.679: 개발 단계·이름 덮어쓰기 — 오류만 여기서 막는다(없는 단계 참조는 경고 — validateStages 참고).
   for (const e of validateStages(cfg).errors) out.push(e);
@@ -175,9 +180,9 @@ export const DEFAULT_STAGES = Object.freeze([
 
 /** 단계 1건 정규화 — 형식이 틀린 id 는 `stage<n>`, 팔레트 밖 색은 팔레트 첫 색. */
 export function normStage(s, i = 0) {
-  const rawId = String(s?.id || '').trim().toLowerCase();
+  const rawId = str(s?.id).trim().toLowerCase();
   const id = CAT_ID_RE.test(rawId) ? rawId : `stage${i + 1}`;
-  const color = STAGE_COLORS.includes(String(s?.color || '').toLowerCase()) ? String(s.color).toLowerCase() : STAGE_COLORS[i % STAGE_COLORS.length];
+  const color = STAGE_COLORS.includes(str(s?.color).toLowerCase()) ? str(s.color).toLowerCase() : STAGE_COLORS[i % STAGE_COLORS.length];
   return { id, label: clean(s?.label, MAX_LABEL) || id, color };
 }
 
@@ -207,7 +212,7 @@ export function normOverride(o) {
   // 설명은 줄바꿈도 제어문자라 지워진다 — 카드 설명은 2줄 clamp 한 단락이다.
   const desc = clean(o.desc, MAX_DESC);
   if (desc) out.desc = desc;
-  const stage = String(o.stage ?? '').trim().toLowerCase();
+  const stage = str(o.stage).trim().toLowerCase();
   if (stage && CAT_ID_RE.test(stage)) out.stage = stage;
   return Object.keys(out).length ? out : null;
 }
@@ -257,10 +262,10 @@ export function validateStages(cfg) {
   if (stages.length > MAX_STAGES) errors.push(`개발 단계는 최대 ${MAX_STAGES}개까지입니다.`);
   const ids = [];
   for (const [i, s] of stages.entries()) {
-    const id = String(s?.id || '').trim().toLowerCase();
+    const id = str(s?.id).trim().toLowerCase();
     if (!CAT_ID_RE.test(id)) errors.push(`단계 ${i + 1}: id 는 영소문자·숫자·하이픈만 쓸 수 있습니다.`);
     if (!clean(s?.label, MAX_LABEL)) errors.push(`단계 ${i + 1}: 이름을 입력하세요.`);
-    if (s?.color != null && !STAGE_COLORS.includes(String(s.color).toLowerCase())) errors.push(`단계 ${i + 1}: 색은 정해진 팔레트에서만 고를 수 있습니다.`);
+    if (s?.color != null && !STAGE_COLORS.includes(str(s.color).toLowerCase())) errors.push(`단계 ${i + 1}: 색은 정해진 팔레트에서만 고를 수 있습니다.`);
     ids.push(id);
   }
   if (new Set(ids).size !== ids.length) errors.push('개발 단계 id 가 중복되었습니다.');
@@ -270,7 +275,7 @@ export function validateStages(cfg) {
   if (cfg?.stageDisplay != null && !STAGE_DISPLAYS.includes(cfg.stageDisplay)) errors.push('단계 표시 방식은 badge 또는 suffix 입니다.');
   if (Array.isArray(st) && ov && typeof ov === 'object') {
     const known = new Set(ids);
-    const dangling = Object.entries(ov).filter(([, o]) => o?.stage && !known.has(String(o.stage).toLowerCase())).map(([k]) => k);
+    const dangling = Object.entries(ov).filter(([, o]) => o?.stage && !known.has(str(o.stage).toLowerCase())).map(([k]) => k);
     if (dangling.length) warnings.push(`없는 단계를 가리키는 기능 ${dangling.length}개는 기본 단계로 옮겼습니다.`);
   }
   return { errors, warnings };

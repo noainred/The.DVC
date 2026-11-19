@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>SAN 비교 — 법인 ‘서울’ 선택</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums}
+.muted{color:#8b9bb4}
+.num{font-family:"JetBrains Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums;white-space:nowrap}
+.card{background:linear-gradient(180deg,#141b2d,#111726);border:1px solid #243049;border-radius:14px;box-shadow:0 4px 24px rgba(0,0,0,.4);min-width:0}
+.btn{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 14px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.seg{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden;background:#0f1626}
+.seg button{height:30px;padding:0 11px;border:0;border-left:1px solid #243049;background:transparent;color:#8b9bb4;font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
+.seg button:first-child{border-left:0}
+.seg button.on{background:rgba(59,130,246,.22);color:#93c5fd;font-weight:700}
+.chip{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 11px;border-radius:14px;border:1px solid #243049;background:#0f1626;color:#8b9bb4;font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
+.chip.on{border-color:#34e0b4;color:#34e0b4}
+.tag{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.bm{background:rgba(52,224,180,.14);color:#5eead4}
+.tag.pmax{background:rgba(59,130,246,.16);color:#93c5fd}
+.tag.vmax{background:rgba(168,85,247,.16);color:#d8b4fe}
+.tag.ok{background:rgba(34,197,94,.14);color:#86efac}
+.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}
+.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}
+.shell{display:flex;min-height:1180px}
+.side{width:236px;flex:none;background:#0f1626;border-right:1px solid #1f2a40;opacity:.45;padding:18px 16px;display:flex;flex-direction:column;gap:14px;font-size:13px;color:#8b9bb4}
+.side .on{color:#e6edf6;font-weight:700}
+.top{height:44px;background:rgba(12,17,30,.9);border-bottom:1px solid #1f2a40;opacity:.45}
+.main{flex:1;min-width:0;display:flex;flex-direction:column}
+.content{padding:14px 24px 32px;display:flex;flex-direction:column;gap:14px;min-width:0}
+.crumb{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:12px;color:#8b9bb4}
+.crumb b{color:#e6edf6}
+.subtabs{display:flex;align-items:flex-end;gap:4px;border-bottom:1px solid #243049}
+.subtab{height:36px;padding:0 14px;border:0;border-bottom:2px solid transparent;background:transparent;color:#8b9bb4;font:inherit;font-size:13.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+.subtab.on{color:#e6edf6;border-bottom-color:#34e0b4}
+.lbl{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12px;letter-spacing:.16em;color:#8b9bb4}
+.lbl::first-letter{color:#34e0b4}
+.status{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12px;color:#8b9bb4;line-height:1.8}
+.status b{color:#e6edf6;font-weight:600}
+/* 법인 바로가기(공용 DeviceFacetBar · .vc-quicknav 와 같은 모양) */
+.qn{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 14px;border:1px solid #243049;border-radius:12px;background:#0f1626}
+.qn-label{font-size:12px;color:#8b9bb4;white-space:nowrap;min-width:74px}
+.qn-btn{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 12px;border-radius:999px;border:1px solid #243049;background:#141b2d;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+.qn-btn.on{background:rgba(59,130,246,.22);border-color:#3b82f6;color:#93c5fd}
+.qn-btn small{font-weight:600;color:#fbbf24;font-size:11px}
+.qn-btn.on small{color:#93c5fd}
+.qn-dot{width:8px;height:8px;border-radius:50%;flex:none}
+.sum{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));min-width:0}
+.sum > div{padding:18px 22px;border-right:1px solid #1f2a40;min-width:0}
+.sum > div:last-child{border-right:0}
+.who{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;color:#8b9bb4;margin-top:12px}
+.sw{width:10px;height:10px;border-radius:3px;flex:none}
+.big{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-top:4px}
+.big .v{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:34px;font-weight:700;line-height:1;white-space:nowrap}
+.big .v small{font-size:16px;color:#8b9bb4;font-weight:600;margin-left:2px}
+.big .s{font-size:12.5px;color:#8b9bb4}
+.bar{display:block;position:relative;height:8px;border-radius:8px;background:#1f2a40;overflow:hidden;margin-top:8px}
+.bar > span{position:absolute;left:0;top:0;bottom:0;border-radius:8px}
+.delta{margin-top:14px;padding-top:12px;border-top:1px dashed #243049;font-size:12.5px;color:#8b9bb4;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.delta b{color:#e6edf6;font-family:"JetBrains Mono",ui-monospace,monospace}
+.tblwrap{overflow-x:auto;min-width:0}
+table{border-collapse:collapse;width:100%;min-width:1080px;font-size:12.5px}
+th{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11.5px;font-weight:600;letter-spacing:.04em;color:#8b9bb4;text-align:left;padding:8px 10px;border-bottom:1px solid #243049;background:#0f1626;white-space:nowrap}
+th.r,td.r{text-align:right}
+td{padding:8px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-space:nowrap}
+tr.pin td{background:#0f1626;font-weight:700}
+td .sub{display:block;font-size:11px;color:#8b9bb4;font-weight:400;white-space:normal}
+.pbar{display:inline-block;position:relative;width:76px;height:5px;border-radius:5px;background:rgba(148,163,184,.15);overflow:hidden;vertical-align:middle;margin-right:6px}
+.pbar > span{position:absolute;left:0;top:0;bottom:0;border-radius:5px}
+.pct{font-family:"JetBrains Mono",ui-monospace,monospace;font-weight:700;font-size:12px}
+.part{color:#fbbf24}
+.sech{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:6px 12px;margin-bottom:10px}
+.sech .hint{font-size:11.5px;color:#8b9bb4}
+.src{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:18px;min-width:0}
+.rule{display:flex;gap:10px;align-items:flex-start;font-size:12.5px;line-height:1.6;padding:8px 0;border-top:1px solid #1f2a40}
+.rule .n{font-family:"JetBrains Mono",ui-monospace,monospace;color:#34e0b4;flex:none;width:18px}
+.rule b{color:#e6edf6}
+.form{border:1px solid #243049;border-radius:12px;background:#0f1626;padding:14px 16px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;font-size:12.5px}
+.form label{display:flex;flex-direction:column;gap:4px;color:#8b9bb4}
+.form .in{height:32px;border:1px solid #243049;border-radius:8px;background:#141b2d;color:#e6edf6;padding:0 10px;display:flex;align-items:center;justify-content:space-between;font-size:12.5px}
+.form .in.new{border-color:#34e0b4}
+.form .in span{color:#8b9bb4;font-size:11px}
+.foot{font-size:11.5px;color:#8b9bb4;margin-top:10px;line-height:1.6}
+</style>
+</helmet>
+<div class="shell">
+  <aside class="side" aria-hidden="true">
+    <div style="font-weight:800;color:#e6edf6">The Davinci</div>
+    <div>개요</div><div>vCenter</div><div>가상화 서버</div><div>스토리지</div><div class="on">특수 기능</div><div>설정</div>
+  </aside>
+  <div class="main">
+    <div class="top" aria-hidden="true"></div>
+    <div class="content">
+      <div class="crumb"><span>특수 기능</span><span>›</span><b>베어메탈 스토리지</b><span class="mono muted" style="margin-left:auto">#/tools/bm-storage/compare?dc=seoul</span></div>
+      <div class="subtabs">
+        <button class="subtab" type="button">현황</button>
+        <button class="subtab on" type="button">SAN 비교</button>
+      </div>
+
+      <!-- 법인 바로가기 — 서울 선택 -->
+      <div class="qn">
+        <span class="qn-label">법인 바로가기</span>
+        <button class="qn-btn on" type="button" aria-pressed="true"><span class="qn-dot" style="background:#22c55e"></span>서울 <small>5</small></button>
+        <button class="qn-btn" type="button" aria-pressed="false"><span class="qn-dot" style="background:#22c55e"></span>프랑크푸르트 <small>2</small></button>
+        <button class="qn-btn" type="button" aria-pressed="false"><span class="qn-dot" style="background:#f59e0b"></span>폴란드 <small>1</small></button>
+        <button class="qn-btn" type="button" aria-pressed="false"><span class="qn-dot" style="background:#22c55e"></span>미국 동부 <small>1</small></button>
+        <button class="qn-btn" type="button" aria-pressed="false"><span class="qn-dot" style="background:#f59e0b"></span>(법인 미지정) <small>5</small></button>
+        <button class="qn-btn" type="button" style="margin-left:auto">✕ 필터 해제</button>
+        <span class="muted" style="flex-basis:100%;font-size:11.5px">숫자 = 그 법인의 비교 대상(베어메탈 서버 + 어레이) · 점 = 그 법인에서 가장 높은 사용률 색 · 고른 법인은 파랗게 · 여러 개 선택 가능 · 주소 ?dc= 로 북마크</span>
+      </div>
+
+      <div class="status"><span style="color:#22c55e">●</span> 법인 <b>서울</b> · 베어메탈 <b>4대</b>(I/O 측정 3대 · <span style="color:#fbbf24">측정 불가 1대</span>) · 어레이 <b>1대</b> PMAX-2500-KR1 · 최근 수집 <b>3분 전</b> · 포트 표본 <b>2분 전</b> · 용량 스냅샷 <b>41분 전</b></div>
+
+      <div class="card sum">
+        <div>
+          <div class="lbl">▸ 용량 사용률 · 서울</div>
+          <div class="who"><span class="sw" style="background:#34e0b4"></span>베어메탈 · 서울 4대</div>
+          <div class="big"><span class="v">60.2<small>%</small></span><span class="s">90.2 TB / 149.8 TB</span></div>
+          <span class="bar"><span style="width:60.2%;background:#34e0b4"></span></span>
+          <div class="who"><span class="sw" style="background:#3b82f6"></span>SAN · PMAX-2500-KR1</div>
+          <div class="big"><span class="v">68.9<small>%</small></span><span class="s">124.0 TB / 180.0 TB</span></div>
+          <span class="bar"><span style="width:68.9%;background:#3b82f6"></span></span>
+          <div class="delta">차이 <b>−8.7%p</b> 이 법인은 SAN 이 더 찼습니다</div>
+        </div>
+        <div>
+          <div class="lbl">▸ 전송 속도 · 서울</div>
+          <div class="who"><span class="sw" style="background:#34e0b4"></span>베어메탈 · 3대 측정 합</div>
+          <div class="big"><span class="v">190<small>MB/s</small></span><span class="s">읽기 137 · 쓰기 53 MB/s</span></div>
+          <div class="muted" style="font-size:11.5px;margin-top:6px">2초 표본 · <span class="part">hpc-node-03 측정 불가(합에 없음)</span></div>
+          <div class="who"><span class="sw" style="background:#3b82f6"></span>SAN · PMAX-2500-KR1 · 1시간 평균</div>
+          <div class="big"><span class="v">1.03<small>GB/s</small></span><span class="s">피크 2.40 GB/s · 포트 8 · 스위치 2</span></div>
+          <div class="delta">배율 <b>5.4배</b> SAN 쪽이 많습니다 <span class="muted">· 참고치</span></div>
+        </div>
+      </div>
+
+      <div class="card" style="padding:18px 22px">
+        <div class="sech">
+          <div class="lbl">▸ 비교 표 · 서울 <span style="letter-spacing:0;color:#8b9bb4">· 베어메탈 그룹은 서울 서버만으로 다시 합산 · 어레이 1</span></div>
+          <span class="hint">그룹 이름 뒤 ‘서울 2/3대’ = 그 그룹 전체 3대 중 서울 2대</span>
+        </div>
+        <div class="tblwrap">
+        <table>
+          <thead><tr><th>구분</th><th>이름</th><th>법인 · 그룹</th><th class="r">총 용량</th><th class="r">사용량</th><th>사용률</th><th class="r">전송 속도</th><th class="r">피크</th><th>측정 기준</th><th>상태</th></tr></thead>
+          <tbody>
+            <tr class="pin"><td><span class="tag bm">베어메탈</span></td><td>서울 합계<span class="sub">서버 4대</span></td><td class="muted">서울</td><td class="r num">149.8 TB</td><td class="r num">90.2 TB</td><td><span class="pbar"><span style="width:60.2%;background:#22c55e"></span></span><span class="pct" style="color:#4ade80">60.2%</span></td><td class="r num">190 MB/s<span class="sub part">3/4대 측정 합</span></td><td class="r num muted">—</td><td class="muted" style="font-size:11.5px">df · I/O 2초 표본 · 3분 전</td><td><span class="tag ok">정상</span></td></tr>
+            <tr class="pin"><td><span class="tag pmax">SAN</span></td><td>서울 합계<span class="sub">PowerMax 1대</span></td><td class="muted">서울</td><td class="r num">180.0 TB</td><td class="r num">124.0 TB</td><td><span class="pbar"><span style="width:68.9%;background:#22c55e"></span></span><span class="pct" style="color:#4ade80">68.9%</span></td><td class="r num">1.03 GB/s</td><td class="r num">2.40 GB/s</td><td class="muted" style="font-size:11.5px">Unisphere 41분 전 · 포트 8 · 스위치 2</td><td><span class="tag ok">정상</span></td></tr>
+            <tr><td><span class="tag bm">베어메탈</span></td><td>DB<span class="sub">oradb-prod-01</span></td><td class="muted">서울 1/2대</td><td class="r num">24.3 TB</td><td class="r num">17.8 TB</td><td><span class="pbar"><span style="width:73.2%;background:#22c55e"></span></span><span class="pct" style="color:#4ade80">73.2%</span></td><td class="r num">97 MB/s</td><td class="r num muted">—</td><td class="muted" style="font-size:11.5px">df · 2초 표본 · 3분 전</td><td><span class="tag ok">정상</span></td></tr>
+            <tr><td><span class="tag pmax">PowerMax</span></td><td>PMAX-2500-KR1<span class="sub">시리얼 000120001234</span></td><td>서울</td><td class="r num">180.0 TB</td><td class="r num">124.0 TB</td><td><span class="pbar"><span style="width:68.9%;background:#22c55e"></span></span><span class="pct" style="color:#4ade80">68.9%</span></td><td class="r num">1.03 GB/s</td><td class="r num">2.40 GB/s</td><td class="muted" style="font-size:11.5px">Unisphere 41분 전 · 포트 8 · 스위치 2</td><td><span class="tag ok">정상</span></td></tr>
+            <tr><td><span class="tag bm">베어메탈</span></td><td>HPC<span class="sub">hpc-node-01 · 03</span></td><td class="muted">서울 2/3대</td><td class="r num">121.0 TB</td><td class="r num">72.6 TB</td><td><span class="pbar"><span style="width:60%;background:#22c55e"></span></span><span class="pct" style="color:#4ade80">60.0%</span></td><td class="r num part">43 MB/s<span class="sub part">1/2대 — 부분 합</span></td><td class="r num muted">—</td><td class="muted" style="font-size:11.5px">df · 2초 표본 · 3분 전</td><td><span class="tag warn">1대 측정 불가</span></td></tr>
+            <tr><td><span class="tag bm">베어메탈</span></td><td>AI<span class="sub">ai-train-01</span></td><td class="muted">서울 1/2대</td><td class="r num">111.0 TB</td><td class="r num">56.0 TB</td><td><span class="pbar"><span style="width:50.5%;background:#22c55e"></span></span><span class="pct" style="color:#4ade80">50.5%</span></td><td class="r num">50 MB/s</td><td class="r num muted">—</td><td class="muted" style="font-size:11.5px">df · 2초 표본 · 3분 전</td><td><span class="tag ok">정상</span></td></tr>
+          </tbody>
+        </table>
+        </div>
+        <div class="foot">‘한눈에’ 막대와 서버별 디스크 I/O 표도 같은 법인으로 좁혀집니다(생략). 여러 법인을 고르면 법인마다 합계 행을 따로 둡니다(SAN 스위치 ‘스토리지 사용량 분석’ 의 split 과 같은 규칙).</div>
+      </div>
+
+      <!-- 베어메탈 법인 축의 출처 -->
+      <div class="card" style="padding:18px 22px">
+        <div class="sech">
+          <div class="lbl">▸ 베어메탈 서버의 법인은 어디서 오나 <span style="letter-spacing:0;color:#8b9bb4">· 지금은 법인 축이 없다(엣지 이름뿐)</span></div>
+        </div>
+        <div class="src">
+          <div>
+            <div class="rule"><span class="n">1</span><span><b>서버 등록 폼의 ‘법인’ 선택(새 필드 · 선택).</b> 스토리지 모니터링 장비 폼과 같은 DataCenter 목록. CSV 열 <span class="mono">datacenter</span> 도 같이 받는다(비우면 유지).</span></div>
+            <div class="rule"><span class="n">2</span><span><b>비어 있고 엣지(agent)가 있으면 그 엣지의 법인.</b> 수집 서버(원격)에 귀속 vCenter 가 있으면 그 vCenter 의 DataCenter — 법인 · vCenter · 엣지가 1:1:1 인 운영 구조 그대로. 화면은 ‘엣지로 추정’ 표지를 붙인다.</span></div>
+            <div class="rule"><span class="n">3</span><span><b>둘 다 없으면 ‘(법인 미지정)’.</b> 칩에 따로 세고(위 5대), 전체 보기에서는 그대로 보인다. 숨기지 않는다.</span></div>
+            <div class="rule"><span class="n">4</span><span><b>SAN 어레이 · 스위치는 이미 법인(datacenterId)이 있다</b> — 그대로 쓴다. 어레이는 등록 법인, 전송 속도는 그 법인 스위치만 합산(SAN 스위치 화면과 같은 기준).</span></div>
+          </div>
+          <div>
+            <div class="muted" style="font-size:12px;margin-bottom:8px">서버 추가 / 수정 폼 — 새 칸 하나</div>
+            <div class="form">
+              <label>이름<span class="in">hpc-node-03</span></label>
+              <label>그룹 <span class="in">HPC, 서울</span></label>
+              <label>호스트(IP/FQDN) *<span class="in">172.20.14.33</span></label>
+              <label>수집 주체<span class="in">엣지 위임 — fra-edge</span></label>
+              <label>법인 <span style="font-size:11px">(선택 · 비우면 엣지의 법인)</span><span class="in new">서울<span>DataCenter 목록 · ▾</span></span></label>
+              <label>측정할 마운트 포인트 *<span class="in">/ , /data</span></label>
+            </div>
+            <div class="foot">그룹은 관점별 묶음(최대 3개)이고 법인은 한 서버에 하나다 — 둘을 섞지 않는다. 데모 서버의 ‘서울’ · ‘프랑크푸르트’ 그룹은 법인이 아니라 그룹 이름이다(시드에 법인 값을 따로 넣는다).</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1180}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

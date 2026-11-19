@@ -7,13 +7,20 @@
  *  BUG-B  `ping/store.js` 가 손상 파일을 조용히 빈 값으로 읽어 다음 save() 가 대상 전부를 덮어썼다
  *         (v2.447 alarm-mutes B4 와 같은 유형). 원본을 `.corrupt.<ts>` 로 보존해야 한다.
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stripComments } from './_stripComments.js';
+
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src');
 const read = (f) => stripComments(fs.readFileSync(path.join(ROOT, f), 'utf8'));
@@ -35,7 +42,7 @@ test('BUG-A 소스 — node:sqlite 를 지연 로드해 모듈 핸들을 만드�
 });
 
 test('BUG-A 실행 — storage/db.js 를 동시에 두 경로가 열어도 파일 핸들은 하나다', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'arch2580-'));
+  const dir = tmpDir('arch2580-');
   process.env.CONFIG_DIR = dir;
   const m = await import('../src/storage/db.js');
   await Promise.all([m.capacityResets(), m.dailySpans()]);
@@ -45,7 +52,7 @@ test('BUG-A 실행 — storage/db.js 를 동시에 두 경로가 열어도 파�
 });
 
 test('BUG-B — ping 대상 파일이 손상되면 원본을 보존하고 경고한다(조용한 빈 값 금지)', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'arch2580-ping-'));
+  const dir = tmpDir('arch2580-ping-');
   process.env.CONFIG_DIR = dir;
   const { config } = await import('../src/config.js');
   config.configDir = dir;

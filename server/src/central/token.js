@@ -72,10 +72,12 @@ export function setCentralToken(token) {
   const val = String(token || '').trim();
   const issue = tokenValueIssue(val);
   if (issue) throw new Error(issue);
+  // 84회차 F3: 파일에 먼저 쓴다 — 쓰지 못하면(읽기 오류 포함) 던지고 실행 중 값도 바꾸지 않는다. 예전에는 메모리를 먼저 바꿔
+  //   저장 실패 시 지금 프로세스는 새 토큰 · 파일은 옛 토큰으로 갈라졌다(재시작하면 조용히 옛 토큰으로 돌아간다).
+  persistEnv('CENTRAL_TOKEN', val);      // 리붓 후에도 유지
   process.env.CENTRAL_TOKEN = val;
   if (!config.central) config.central = {};
   config.central.token = val;            // 즉시 적용(재시작 불필요)
-  persistEnv('CENTRAL_TOKEN', val);      // 리붓 후에도 유지
   return val;
 }
 
@@ -92,7 +94,11 @@ function persistEnv(key, val) {
   let text = '';
   // Windows 배치 파일은 ANSI 일 수 있다 — latin1 로 읽고 써서 바이트를 그대로 둔다(utf8 로 다시 쓰면 주석의 비-ASCII 가 깨진다).
   const enc = isWin ? 'latin1' : 'utf8';
-  try { if (fs.existsSync(ENV_FILE)) text = fs.readFileSync(ENV_FILE, enc); } catch { /* */ }
+  // 84회차 F3(재현): 파일이 **있는데 읽지 못하면**(EACCES · EIO 등) 던진다 — 예전에는 빈 파일로 보고 그 한 줄만 남긴 portal.env 를 원자적으로
+  //   써서 AUTH_SECRET · DATA_SOURCE 등 나머지 설정이 다음 재시작에 사라졌다(upsertEnvKeyStrict 와 같은 규칙 — 없음 ≠ 읽지 못함).
+  // 134회차: 유무를 `fs.existsSync` 로 가르면 stat 실패(EIO · ESTALE · 폴더 권한)가 '없음' 이 되어 위 규칙을 건너뛴다(그 한 줄만 든 파일로 덮는다) — ENOENT 만 없음.
+  try { text = fs.readFileSync(ENV_FILE, enc); }
+  catch (e) { if (e?.code !== 'ENOENT') throw new Error(`${path.basename(ENV_FILE)} 를 읽지 못해 저장하지 않았습니다(${e?.code || '읽기 오류'}) — 파일 권한 · 소유자를 확인하세요(지금 값은 바뀌지 않았습니다).`); }
   // 기존 같은 키 라인(있다면) 교체, 없으면 추가. Windows 는 CRLF(cmd 가 LF 만 있는 배치 파일의 줄을 잘못 읽는 경우가 있다 —
   //   portal.env.example.bat 머리말의 'CRLF 로 저장' 과 같은 이유).
   const out = renderEnvFile(text, key, val);
@@ -103,8 +109,8 @@ function persistEnv(key, val) {
 }
 
 /**
- * v2.776(엣지 개별 토큰 자동 적용): env 파일 한 키를 **엄격하게** 바꾼다 — 읽지 못하면 던진다(위 persistEnv 는 읽기 실패를 빈 파일로 보고
- *   그 한 줄만 남긴 파일을 쓴다 — 토큰 하나 바꾸려다 portal.env 전체를 잃는다). 되돌리기용으로 바꾸기 전 원문을 돌려준다(파일이 없었으면 null).
+ * v2.776(엣지 개별 토큰 자동 적용): env 파일 한 키를 **엄격하게** 바꾼다 — 읽지 못하면 던진다(87회차 정정: 위 persistEnv 도 84회차 F3 부터
+ *   같은 규칙이다 — 예전에는 읽기 실패를 빈 파일로 보고 그 한 줄만 남긴 파일을 썼다). 되돌리기용으로 바꾸기 전 원문을 돌려준다(파일이 없었으면 null).
  * @returns {{ prevText: string|null, file: string }}
  */
 export function upsertEnvKeyStrict(key, val, file = ENV_FILE) {
@@ -113,7 +119,7 @@ export function upsertEnvKeyStrict(key, val, file = ENV_FILE) {
   if (issue) throw new Error(issue);
   const enc = isWin ? 'latin1' : 'utf8';
   let prevText = null;
-  if (fs.existsSync(file)) prevText = fs.readFileSync(file, enc);   // 읽기 실패(EACCES 등)는 그대로 던진다
+  try { prevText = fs.readFileSync(file, enc); } catch (e) { if (e?.code !== 'ENOENT') throw e; }   // 읽기 실패(EACCES 등)는 그대로 던진다 · 134회차: 없음은 ENOENT 뿐(existsSync 는 stat 실패도 false)
   const out = renderEnvFile(prevText || '', key, String(val));
   atomicWriteFileSync(file, isWin ? Buffer.from(out, 'latin1') : out, { mode: 0o600 });
   return { prevText, file };

@@ -12,7 +12,9 @@
  *   409 + `skipReason` 으로 답한다(authStopGate.js respondIfVcAuthStopped). 예전에는 그 본문을 몰라 '조회 실패: …' 로 그리고
  *   20초마다 같은 409 를 다시 받았다. 이제 `skip` 으로 따로 돌려주고 자동 갱신을 멈춘다(문구는 vcAuthStopText 한 벌).
  */
-import { skipSingleText } from '../views/vcAuthStopText.js';
+import { skipSingleText, authStopSingleText } from '../views/vcAuthStopText.js';
+import { isUnreadStop } from '../views/tools/storageAuthText.js';
+import { numOrNull } from '../numOrNull.js';
 
 /**
  * @param {unknown} err fetchJson 이 던진 오류(HttpError 면 `status`·`body` 가 있다)
@@ -23,12 +25,16 @@ export function metricErrorState(err) {
   if (body && typeof body === 'object' && body.authStopped === true) {
     // ⚠ `Number(null) === 0` — 모르면 횟수를 말하지 않는다(v2.525 규약).
     const a = body.attempts;
-    const attempts = a == null || a === '' || !Number.isFinite(Number(a)) ? null : Number(a);
-    const since = body.since == null || body.since === '' || !Number.isFinite(Number(body.since)) ? null : Number(body.since);
-    return { authStopped: { attempts, since, reason: String(body.reason || '') }, skip: null, message: String(body.reason || err.message || '') };
+    // v3.10.9(공통 기능 점검 7회차): 손으로 쓴 판정은 공백 문자열('  ')·배열([])을 0 으로 통과시켰다 — 공용 numOrNull 로.
+    const attempts = numOrNull(a);
+    const since = numOrNull(body.since);
+    return { authStopped: { attempts, since, reason: String(body.reason || ''), ...(body.unread === true ? { unread: true } : {}) }, skip: null, message: String(body.reason || err.message || '') };
   }
   if (body && typeof body === 'object' && typeof body.skipReason === 'string' && body.skipReason) {
-    return { authStopped: null, skip: { skipReason: body.skipReason, reason: String(body.reason || '') }, message: String(body.reason || err.message || '') };
+    // v2.926: 엣지 위임이면 서버가(관리자에게만) 담당 엣지 포탈 주소를 싣는다 — 아는 모양(url 문자열)일 때만 받는다.
+    const e = body.edge;
+    const edge = e && typeof e === 'object' && typeof e.url === 'string' && e.url ? { id: String(e.id ?? ''), name: String(e.name || e.id || ''), url: e.url } : null;
+    return { authStopped: null, skip: { skipReason: body.skipReason, reason: String(body.reason || ''), edge }, message: String(body.reason || err.message || '') };
   }
   return { authStopped: null, skip: null, message: String(err?.message || err || '') };
 }
@@ -45,7 +51,23 @@ export function metricSkipText(skip) {
 /** 인증 실패 정지 안내(자동 갱신을 멈췄다는 사실 + 조치). */
 export function metricAuthStopText(stop) {
   if (!stop) return '';
+  // 127회차: 정지 기록 파일을 못 읽어 조회하지 않은 것은 인증 실패가 아니다(판정 · 문구는 vcAuthStopText 한 벌) — '실패 0회 · 계정이 잠깁니다' 라고 말하지 않는다.
+  if (isUnreadStop(stop)) return `${authStopSingleText(stop)} 자동 갱신도 멈췄습니다 — 아래 ‘다시 조회’ 는 1회만 시도합니다.`;
   return `**인증 실패로 멈춘 vCenter 라 자동 갱신을 멈췄습니다**${stop.attempts != null ? `(실패 ${stop.attempts}회)` : ''}.`
     + ' 같은 계정으로 반복 로그인하면 **계정이 잠깁니다**. 비밀번호를 고치거나 설정 › vCenter 연결 테스트가 성공하면 다시 조회합니다.'
     + ' 아래 ‘다시 조회’ 는 1회만 시도합니다.';
+}
+
+/**
+ * v2.926 — 엣지 포탈의 같은 화면 주소: `<엣지 url>/<hash>`. http(s) 가 아닌 주소 · 빈 값은 null(링크를 그리지 않는다).
+ * 끝의 '/' 는 선형으로 떼어 낸다(정규식 `/\/+$/` 금지 — O(n²)).
+ */
+export function edgePortalHref(edge, hash) {
+  let base = typeof edge?.url === 'string' ? edge.url.trim() : '';
+  if (!/^https?:\/\//i.test(base)) return null;
+  let end = base.length;
+  while (end > 0 && base[end - 1] === '/') end -= 1;
+  base = base.slice(0, end);
+  const h = typeof hash === 'string' ? hash : '';
+  return `${base}/${h.startsWith('#') ? h : `#${h}`}`;
 }

@@ -34,7 +34,7 @@ function baseWatts(name, model = '') {
 }
 
 // mock Dell 호스트를 iDRAC로 1회 등록. 전력 이력 백필은 demo/idrac.js.
-// v2.915: 비어 있을 때 + **mock 항목뿐이고 ESXi 데모 등록이 그 규모의 절반 미만일 때 빠진 호스트만 보충**(v2.914 이전 규모 186 호스트로
+// v3.26.0: 비어 있을 때 + **mock 항목뿐이고 ESXi 데모 등록이 그 규모의 절반 미만일 때 빠진 호스트만 보충**(v2.914 이전 규모 186 호스트로
 //   시드된 데모 설치본이 650 호스트 규모로 늘게 — 사람이 등록한 서버가 하나라도 있으면 건드리지 않는다). 저장은 한 번에 묶는다.
 async function ensureIdracSeed(snapshot) {
   if (idracSeeded) return;

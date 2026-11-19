@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>IP 관리 — 물리서버 이름과 같은 IP 를 OS 접속 주소로 제안</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./bmf.css">
+<link rel="stylesheet" href="./bmf2.css">
+<link rel="stylesheet" href="./why.css">
+<link rel="stylesheet" href="./src.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+</style>
+</helmet>
+<div class="root" style="width:1440px;height:760px">
+  <div class="tb">
+    <span class="logo"><span class="v">V</span><span>VMware Global Monitoring Portal</span></span>
+    <span class="ver">v2.990.0</span>
+    <span class="pill" style="margin-left:auto"><span>admin · 전체 범위</span></span>
+  </div>
+  <div class="body">
+    <nav class="sb" aria-label="주 메뉴">
+      <span class="h">모니터링</span>
+      <a href="#">Overview</a>
+      <a href="#">호스트</a>
+      <a href="#" class="on">IP 관리</a>
+      <span class="h">도구</span>
+      <a href="#">특수 기능</a>
+      <a href="#">설정</a>
+    </nav>
+    <div class="main">
+      <div class="crumb">IP 관리 › IP 스캔</div>
+      <h1 class="h1"><span>IP 스캔</span><span class="sp row"><button class="btn" type="button">지금 스캔</button><button class="btn" type="button">새로고침</button></span></h1>
+
+      <div class="card cnt">
+        <div class="tabs" role="tablist">
+          <button type="button" role="tab">스캔 결과</button>
+          <button type="button" role="tab" class="on" aria-selected="true">물리서버 OS 주소 제안 <span class="bdg c">29</span></button>
+          <button type="button" role="tab">스캔 대역</button>
+        </div>
+
+        <div class="sumbar" style="border-bottom:1px solid #1f2a40">
+          <div><div class="big num">118</div><div class="cap">물리서버(KR-HQ 본사)</div></div>
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:6px">
+            <div class="stk" style="height:10px" role="img" aria-label="OS 주소 등록됨 71, 제안 있음 29, 고르기 필요 4, 못 찾음 14"><i style="width:60.2%;background:#22c55e"></i><i class="sa" style="width:24.6%"></i><i class="su" style="width:3.4%"></i><i class="sx" style="width:11.8%"></i></div>
+            <div class="row" style="gap:16px">
+              <span class="lg"><i style="background:#22c55e"></i>OS 주소 등록됨 <b style="color:#e6edf6">71</b></span>
+              <span class="lg"><i style="background:#3b82f6"></i>제안 있음 <b style="color:#e6edf6">29</b></span>
+              <span class="lg"><i style="background:#f59e0b"></i>고르기 필요 <b style="color:#e6edf6">4</b></span>
+              <span class="lg"><i style="background:#8b9bb4"></i>못 찾음 <b style="color:#e6edf6">14</b></span>
+            </div>
+          </div>
+          <span class="note" style="max-width:360px">iDRAC 이 읽은 서버의 호스트 이름과 <b style="color:#e6edf6">같은 이름</b>을 가진 IP 를 스캔 결과에서 찾습니다. 대소문자는 무시하고, 도메인 뒤는 떼고 견줍니다.</span>
+        </div>
+
+        <div class="bar">
+          <span class="selbar">2건 고름<button class="btn sm pri" type="button">고른 제안을 OS 주소로 등록</button></span>
+          <button class="qf sel" type="button" aria-pressed="true">제안 있음 29</button>
+          <button class="qf" type="button">고르기 필요 4</button>
+          <button class="qf" type="button">못 찾음 14</button>
+          <button class="qf" type="button">등록된 주소와 다름 1</button>
+          <span class="sp note">주소만 넣습니다 — 계정 · 비밀번호는 넣지 않고, 등록 전에는 접속을 시도하지 않습니다</span>
+        </div>
+
+        <table class="t">
+          <thead><tr><th style="width:3%"><input class="chk" type="checkbox" aria-label="보이는 제안 전체 선택"></th><th style="width:19%">물리서버 · iDRAC 이 읽은 호스트 이름</th><th style="width:15%">찾은 IP</th><th style="width:17%">어떻게 찾았나</th><th style="width:10%">SSH(22)</th><th style="width:22%">상태</th><th style="width:14%">할 일</th></tr></thead>
+          <tbody>
+            <tr class="picked"><td style="height:44px"><input class="chk" type="checkbox" checked="checked" aria-label="kr-ora-rac02 제안 선택"></td><td><span class="kv2"><b>kr-ora-rac02</b><span class="s mono">7XK2N03 · 이름 kr-ora-rac02</span></span></td><td class="mono">10.20.31.42</td><td><span class="bdg n">역방향 DNS</span> 이름 일치</td><td><span class="bdg g">열림</span></td><td><span class="bdg c">제안</span> 이름이 같은 IP 하나</td><td><button class="btn sm" type="button">등록</button></td></tr>
+            <tr class="picked"><td style="height:44px"><input class="chk" type="checkbox" checked="checked" aria-label="kr-web-07 제안 선택"></td><td><span class="kv2"><b>kr-web-07</b><span class="s mono">4BN7W53 · 이름 kr-web-07.corp.local</span></span></td><td class="mono">10.20.33.17</td><td><span class="bdg n">정방향 DNS</span> 이름으로 조회</td><td><span class="bdg g">열림</span></td><td><span class="bdg c">제안</span> 이름이 같은 IP 하나</td><td><button class="btn sm" type="button">등록</button></td></tr>
+            <tr><td style="height:44px"><input class="chk" type="checkbox" disabled="disabled" aria-label="kr-db-11 은 고르기가 먼저입니다"></td><td><span class="kv2"><b>kr-db-11</b><span class="s mono">9HT4V13 · 이름 kr-db-11</span></span></td><td><span class="kv2"><span class="mono">10.20.31.61</span><span class="mono">10.20.41.61</span></span></td><td><span class="bdg n">역방향 DNS</span> 둘 다 일치</td><td><span class="bdg g">둘 다 열림</span></td><td><span class="bdg w">고르기 필요</span> 같은 이름의 IP 가 둘</td><td><button class="btn sm" type="button">IP 고르기</button></td></tr>
+            <tr><td style="height:44px"><input class="chk" type="checkbox" disabled="disabled" aria-label="kr-bak-02 는 제안하지 않습니다"></td><td><span class="kv2"><b>kr-bak-02</b><span class="s mono">7XK2S03 · 이름 kr-bak-02</span></span></td><td class="mono">10.20.35.9</td><td><span class="bdg n">역방향 DNS</span> 이름 일치</td><td><span class="bdg r">닫힘</span></td><td><span class="bdg n">제안 안 함</span> 이름은 같지만 SSH 포트가 닫혀 있음</td><td class="dim">—</td></tr>
+            <tr><td style="height:44px"><input class="chk" type="checkbox" disabled="disabled" aria-label="kr-gpu-03 은 이름이 없습니다"></td><td><span class="kv2"><b>kr-gpu-03</b><span class="s mono">5CD9T73 · 이름을 못 읽음</span></span></td><td class="dim">—</td><td class="dim">—</td><td class="dim">—</td><td><span class="bdg n">못 찾음</span> iDRAC 이 호스트 이름을 읽지 못했음</td><td><button class="btn sm" type="button">직접 넣기</button></td></tr>
+            <tr><td style="height:44px"><input class="chk" type="checkbox" disabled="disabled" aria-label="kr-ora-rac03 은 등록된 주소와 다릅니다"></td><td><span class="kv2"><b>kr-ora-rac03</b><span class="s mono">7XK2P03 · 이름 kr-ora-rac03</span></span></td><td><span class="kv2"><span class="mono">10.20.31.43</span><span class="s">등록된 주소 10.20.31.99</span></span></td><td><span class="bdg n">정방향 DNS</span> 이름으로 조회</td><td><span class="bdg g">열림</span></td><td><span class="bdg w">등록된 주소와 다름</span> 자동으로 바꾸지 않음</td><td><button class="btn sm" type="button">견주어 보기</button></td></tr>
+            <tr class="done"><td style="height:44px"><input class="chk" type="checkbox" disabled="disabled" aria-label="kr-ora-rac01 은 이미 등록됨"></td><td><span class="kv2"><b style="color:#c7d2e4">kr-ora-rac01</b><span class="s mono">7XK2M03 · 이름 kr-ora-rac01</span></span></td><td class="mono">10.20.31.41</td><td><span class="bdg n">역방향 DNS</span> 이름 일치</td><td><span class="bdg g">열림</span></td><td><span class="bdg g">등록됨</span> 등록된 주소와 같음</td><td class="dim">—</td></tr>
+          </tbody>
+        </table>
+        <div class="foot">
+          <span>118대 중 7대가 보입니다 · 같은 법인의 스캔 대역 안에서만 찾습니다 · 물리서버 폴더의 ‘OS 계정 없음’ 이유에서 이 화면으로 올 수 있습니다</span>
+          <span class="sp">마지막 스캔 06:40 · 이름 찾기 방법 2개 켜짐</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":760}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

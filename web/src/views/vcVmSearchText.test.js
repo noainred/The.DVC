@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { vmSearchTerm, vmSearchSummary, vcNameOf, powerLabel, memText } from './vcVmSearchText.js';
+import { vmSearchTerm, vmSearchSummary, vcNameOf, powerLabel, memText, vmSearchScopeParams, vmSearchScopeText } from './vcVmSearchText.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -30,5 +30,33 @@ describe('전체 vCenter VM 이름 조회(v2.671)', () => {
     expect(src).toMatch(/nameOnly: '1'/);
     expect(src).toMatch(/can\('inv\.vms'\)/);
     expect(src).not.toMatch(/usePolling\('\/vms'/);
+  });
+});
+
+describe('v3.13.1 — VM 이름 조회가 허브 범위(리전 · vCenter)를 따른다', () => {
+  it('vmSearchScopeParams — vCenter 가 있으면 vCenter 만 · 없으면 리전 · 둘 다 없으면 빈 객체(전체 — v2.671)', () => {
+    expect(vmSearchScopeParams({ region: '유럽', vcenterId: 'vc1' })).toEqual({ vcenterId: 'vc1' });
+    expect(vmSearchScopeParams({ region: ' 유럽 ' })).toEqual({ region: '유럽' });
+    expect(vmSearchScopeParams({})).toEqual({}); expect(vmSearchScopeParams(null)).toEqual({});
+  });
+  it('v3.20.0 — 고른 법인 목록: 1곳 vcenterId · 2곳 이상 vcenterIds(쉼표) · 판정은 hubScopeQuery 한 벌', () => {
+    expect(vmSearchScopeParams({ region: '유럽', vcenterIds: ['vc1'] })).toEqual({ vcenterId: 'vc1' });
+    expect(vmSearchScopeParams({ region: '유럽', vcenterIds: ['vc1', 'vc2'] })).toEqual({ vcenterIds: 'vc1,vc2' });
+    expect(vmSearchScopeParams({ region: ' 유럽 ', vcenterIds: [] })).toEqual({ region: '유럽' });
+    const src = fs.readFileSync(path.join(HERE, 'vcVmSearchText.js'), 'utf8');
+    expect(src).toMatch(/return hubScopeQuery\(/);
+  });
+  it('범위 글자 — scopeLabel 의 ‘전체’ 만 ‘전체 vCenter’ · 0건 문구에 범위를 적는다', () => {
+    expect(vmSearchScopeText('전체')).toBe('전체 vCenter'); expect(vmSearchScopeText('')).toBe('전체 vCenter');
+    expect(vmSearchScopeText('리전 유럽 · 3법인')).toBe('리전 유럽 · 3법인');
+    expect(vmSearchSummary('web', { total: 0, items: [] }, '리전 유럽 · 3법인')).toBe('VM 이름에 "web" 이 들어간 VM 이 없습니다(리전 유럽 · 3법인).');
+    expect(vmSearchSummary('web', { total: 0, items: [] })).toBe('VM 이름에 "web" 이 들어간 VM 이 없습니다(전체 vCenter).');
+  });
+  it('소스 계약 — 화면이 범위를 요청과 제목에 싣고, 범위가 바뀌면 다시 찾는다', () => {
+    const src = fs.readFileSync(path.join(HERE, 'VCenters.jsx'), 'utf8');
+    expect(src).toMatch(/limit: VM_SEARCH_LIMIT, \.\.\.vmSearchScopeParams\(scope\) \}/);
+    expect(src).toMatch(/\[term, allowed, scope\?\.region, scopeIdsOf\(scope\)\.join\('\\n'\)\]/);   // v3.20.0: 고른 법인 목록이 바뀌어도 다시 찾는다
+    expect(src).toMatch(/<b>VM 이름 검색 — \{scopeText\}<\/b>/);
+    expect(src).toMatch(/<VmNameSearch term=\{vmSearchTerm\(query\)\} sites=\{sites\} scope=\{\{ region: regSel, vcenterIds: vcSel \}\} scopeText=\{vmSearchScopeText\(kpiScope\)\} \/>/);
   });
 });

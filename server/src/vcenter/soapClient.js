@@ -10,16 +10,18 @@
  * 자격증명을 싣지 않는 probe 라 판정하지 않는다.
  */
 
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { inferGpuMemGB } from '../gpu/gpuModelMem.js';
 import tls from 'node:tls';
 import { config } from '../config.js';
 import { loadMetricsSettings } from '../metrics/settings.js';
 import { refreshVcInfo, refreshVcRest, VCINFO_BUDGET_MS, VCREST_BUDGET_MS } from '../vcinfo/collect.js';   // v2.898 vCenter 알람·작업·권한
-import { parseObjectContent, xmlUnescape, snapshotInfo, effectiveRequestTimeoutMs, retrieveResultToObjectXml } from './soapParse.js';
+import { parseObjectContent, xmlUnescape, snapshotInfo, effectiveRequestTimeoutMs, retrieveResultToObjectXml, returnvalBodies, returnvalBlocks, exactTagBodies, execAfter, firstTagInner, perfIdMarks } from './soapParse.js';
 import { vcDispatcher, vcRequestSignal } from './restClient.js';
 import { parseObjectContentAsync } from '../util/soapParsePool.js';
 import { splitHostPort } from '../util/hostPort.js';   // v2.603(LEFT2603-02): IPv6 host:port 분리
 import { parseEntityPerfBatchXml, summarizeVmUsage } from './perfBatch.js'; // v2.492: 다중 VM 기간 사용률(엔티티별 파싱)
+import { HOST_NIC_COUNTERS, NIC_REALTIME_SAMPLES, parsePerfInstancesXml, summarizeNicPerf } from './nicPerf.js'; // v2.925(B-③) vmnic 드롭·에러
 
 // soapParse.js로 분리된 순수 파서를 재-export(기존 import 경로 호환: 테스트가 여기서 가져옴).
 export { parseObjectContent, xmlUnescape };
@@ -32,6 +34,8 @@ import { refreshHostCfg, HOST_CFG_BUDGET_MS } from '../hostcfg/collect.js';   //
 import { get as hostCfgCacheGet } from '../hostcfg/cache.js';
 import { refreshContention, CONTENTION_BUDGET_MS } from '../contention/collect.js';   // v2.706(C2·C3)
 import { get as contentionGet } from '../contention/cache.js';
+import { refreshStorPath, STORPATH_BUDGET_MS, hasFcHba } from '../storpath/collect.js';   // v2.935(C-①) ESXi 경로 카운터
+import { get as storPathGet } from '../storpath/cache.js';
 import { dsUuidOf } from '../contention/parse.js';
 import { refreshDsCfg, getDsCfg, DS_CFG_BUDGET_MS } from '../dscfg/collect.js';   // v2.700(A17)
 import { refreshClusterCfg, getClusterCfg, CLUSTER_CFG_BUDGET_MS } from '../clustercfg/collect.js';   // v2.701(A6)
@@ -174,7 +178,7 @@ const PERF_COUNTER_CACHE = new Map();
  */
 const PERF_RETENTION_CACHE = new Map();
 export const PERF_RETENTION_DEFAULT = Object.freeze({ realtime: 3600, day: 86400, week: 604800, month: 2592000, year: 31536000 });
-const PERF_COUNTER_TTL_MS = Math.max(60_000, Number(process.env.PERF_COUNTER_TTL_MS) || 6 * 3_600_000);
+const PERF_COUNTER_TTL_MS = Math.max(60_000, envPositive(process.env.PERF_COUNTER_TTL_MS, 6 * 3_600_000));
 
 export class VimSoapClient {
   /**
@@ -228,7 +232,8 @@ export class VimSoapClient {
       if (invalidLogin) { err.authFailed = true; err.status = res.status; }
       // v2.591: fault 상세 타입을 싣는다(`<detail><XxxFault xsi:type="Xxx">`). 게스트 계정 거부(`InvalidGuestLogin`)를
       //   문구(faultstring)가 아니라 **타입으로** 가르기 위해서다 — gpu/guestops.js 가 이 값을 본다.
-      const ft = /<detail>[\s\S]*?xsi:type="(?:[\w-]+:)?([\w]+)"/.exec(text)?.[1] || /<detail>\s*<(?:[\w-]+:)?([\w]+?)(?:Fault)?[\s>]/.exec(text)?.[1] || '';
+      // 89회차 F2: 첫 `<detail>` 뒤의 xsi:type 은 선형(execAfter — 오류 본문에 닫히지 않은 `<detail>` 이 반복되면 2차였다).
+      const ft = execAfter(text, '<detail>', /xsi:type="(?:[\w-]+:)?([\w]+)"/)?.[1] || /<detail>\s*<(?:[\w-]+:)?([\w]+?)(?:Fault)?[\s>]/.exec(text)?.[1] || '';
       if (ft) err.fault = ft;
       throw err;
     }
@@ -241,7 +246,7 @@ export class VimSoapClient {
     );
     const pick = (tag) => new RegExp(`<${tag}[^>]*>([^<]+)</${tag}>`).exec(xml)?.[1];
     // Friendly vCenter version/build/name live in <about>.
-    const about = /<about>([\s\S]*?)<\/about>/.exec(xml)?.[1] || '';
+    const about = exactTagBodies(xml, '<about>', '</about>', 1)[0] || '';   // 89회차 F2: 선형
     const aboutPick = (tag) => new RegExp(`<${tag}[^>]*>([^<]+)</${tag}>`).exec(about)?.[1];
     this.sc = {
       propertyCollector: pick('propertyCollector'),
@@ -395,10 +400,8 @@ export class VimSoapClient {
     const xml = await this.#call(
       `<QueryPerf xmlns="urn:vim25"><_this type="PerformanceManager">${this.sc.perfManager}</_this>${specs}</QueryPerf>`
     );
-    const re = /<returnval[^>]*>([\s\S]*?)<\/returnval>/g;
-    let m;
-    while ((m = re.exec(xml))) {
-      const blk = m[1];
+    // 89회차 F2: returnval 경계는 선형(returnvalBodies — 같은 결과).
+    for (const blk of returnvalBodies(xml)) {
       const ent = /<entity type="HostSystem">([^<]+)<\/entity>/.exec(blk)?.[1];
       // 샘플값 <value>N</value> 하나를 뽑는다(형제 파서 queryHostGpuUtil/queryEntityPerf와 동일).
       // 이전의 이중 <value> 정규식은 계열 래퍼가 <value xsi:type="PerfMetricIntSeries">처럼 속성을
@@ -428,10 +431,8 @@ export class VimSoapClient {
     const xml = await this.#call(
       `<QueryPerf xmlns="urn:vim25"><_this type="PerformanceManager">${this.sc.perfManager}</_this>${specs}</QueryPerf>`
     );
-    const re = /<returnval[^>]*>([\s\S]*?)<\/returnval>/g;
-    let m;
-    while ((m = re.exec(xml))) {
-      const blk = m[1];
+    // 89회차 F2: returnval 경계는 선형(returnvalBodies — 같은 결과).
+    for (const blk of returnvalBodies(xml)) {
       const ent = /<entity type="HostSystem">([^<]+)<\/entity>/.exec(blk)?.[1];
       if (!ent) continue;
       const vals = [...blk.matchAll(/<value>(\d+)<\/value>/g)].map((x) => Number(x[1]));
@@ -499,8 +500,8 @@ export class VimSoapClient {
     const levels = new Map();
     for (const blk of xml.split('<PerfCounterInfo').slice(1)) {
       const key = /<key>(\d+)<\/key>/.exec(blk)?.[1];
-      const name = /<nameInfo>[\s\S]*?<key>(\w+)<\/key>/.exec(blk)?.[1];
-      const group = /<groupInfo>[\s\S]*?<key>(\w+)<\/key>/.exec(blk)?.[1];
+      const name = execAfter(blk, '<nameInfo>', /<key>(\w+)<\/key>/)?.[1];   // 89회차 F2: 선형
+      const group = execAfter(blk, '<groupInfo>', /<key>(\w+)<\/key>/)?.[1];
       const rollup = /<rollupType>(\w+)<\/rollupType>/.exec(blk)?.[1];
       if (key && name && group && rollup) {
         const full = `${group}.${name}.${rollup}`;
@@ -556,7 +557,7 @@ export class VimSoapClient {
     const xml = await this.#call(
       `<QueryPerf xmlns="urn:vim25"><_this type="PerformanceManager">${this.sc.perfManager}</_this>${spec}</QueryPerf>`
     );
-    const rv = /<returnval[^>]*>([\s\S]*?)<\/returnval>/.exec(xml)?.[1] || '';
+    const rv = returnvalBodies(xml, { max: 1 })[0] || '';   // 89회차 F2: 선형(첫 블록)
     const times = [...rv.matchAll(/<timestamp>([^<]+)<\/timestamp>/g)].map((m) => m[1]);
     const vals = [...rv.matchAll(/<value>(-?\d+)<\/value>/g)].map((m) => Number(m[1]));
     const n = Math.min(times.length, vals.length);
@@ -586,6 +587,24 @@ export class VimSoapClient {
       `<QueryPerf xmlns="urn:vim25"><_this type="PerformanceManager">${this.sc.perfManager}</_this>${spec}</QueryPerf>`
     );
     return parsePerfMultiXml(xml, ids);
+  }
+
+  /**
+   * v2.925(B-③) — 한 엔티티의 카운터 여러 개를 **인스턴스별로**(instance '*') 한 번의 QueryPerf 로. 호스트 net.* 은 인스턴스가 vmnic 이름이다.
+   * 반환은 parsePerfInstancesXml 모양(집계 계열 '' 은 버린다).
+   */
+  async queryEntityPerfInstances(entityType, ref, counterIds, intervalId, { maxSample = 0 } = {}) {
+    const ids = [...new Set((counterIds || []).filter(Boolean).map(String))];
+    if (!ids.length) return parsePerfInstancesXml('', []);
+    const metricIds = ids.map((id) => `<metricId><counterId>${id}</counterId><instance>*</instance></metricId>`).join('');
+    const spec =
+      `<querySpec><entity type="${entityType}">${ref}</entity>` +
+      (maxSample ? `<maxSample>${maxSample}</maxSample>` : '') +
+      metricIds + `<intervalId>${intervalId}</intervalId></querySpec>`;
+    const xml = await this.#call(
+      `<QueryPerf xmlns="urn:vim25"><_this type="PerformanceManager">${this.sc.perfManager}</_this>${spec}</QueryPerf>`
+    );
+    return parsePerfInstancesXml(xml, ids);
   }
 
   /**
@@ -820,6 +839,31 @@ export function vmDns(netXml, ipStackXml) {
   }
   return { servers, stack, nics };
 }
+/** vmk 하나당 최대 이만큼만 싣는다(비정상 응답이 스냅샷을 키우지 않게). */
+export const VMK_MAX = 32;
+/**
+ * v3.6.0(IP 관리 재설계 묶음 다): ESXi `config.network.vnic`(HostVirtualNic 배열) → [{ dev, ip, mask, pg }].
+ * IPv4 정규형만 싣는다(IPv6 · DHCP 로 아직 주소가 없는 vmk 는 뺀다). `pg` 는 표준 스위치 포트그룹 이름 — 분산 스위치 vmk 는 이름이 없어 ''.
+ * ipV6Config 블록을 먼저 지운다(그 안의 <ipAddress> 를 IPv4 자리로 읽지 않게). 순서는 vCenter 가 준 순서(보통 vmk0 이 먼저).
+ */
+export function parseVmks(xml) {
+  const out = [];
+  for (const blk of xmlBlocks(xml, 'HostVirtualNic', VMK_MAX)) {
+    const v4 = stripXmlBlocks(blk, 'ipV6Config');
+    const ip = String(xmlText(v4, 'ipAddress') || '').trim();
+    if (!isIPv4(ip)) continue;
+    const mask = String(xmlText(v4, 'subnetMask') || '').trim();
+    out.push({ dev: String(xmlText(blk, 'device') || '').slice(0, 32), ip, mask: isIPv4(mask) ? mask : '', pg: String(xmlText(stripXmlBlocks(blk, 'spec'), 'portgroup') || '').slice(0, 128) });
+  }
+  return out;
+}
+/** v3.6.0: ESXi `config.network.dnsConfig`(HostDnsConfig) → { osHostName, osDomain }. 없으면 둘 다 null(못 읽음). */
+export function hostDnsName(xml) {
+  const s = String(xml || '');
+  const h = String(xmlText(s, 'hostName') || '').trim();
+  const d = String(xmlText(s, 'domainName') || '').trim();
+  return { osHostName: h || null, osDomain: d || null };
+}
 export function vmIps(netXml, primary) {
   const ips = extractIPv4s(netXml, primary);
   return { ipAddress: ips[0] || (isIPv4(primary) ? String(primary) : null), ipAddresses: ips };
@@ -830,14 +874,12 @@ function vmGateways(ipStackXml) {
   if (!ipStackXml) return [];
   const out = new Set();
   // 각 <ipRoute> 블록에서 network=0.0.0.0 & prefixLength=0 이면 <gateway><ipAddress>를 채택.
-  const routeRe = /<ipRoute>([\s\S]*?)<\/ipRoute>/g;
-  let m;
-  while ((m = routeRe.exec(ipStackXml))) {
-    const blk = m[1];
+  // 89회차 F2: 블록 경계 · 게이트웨이 찾기는 선형(exactTagBodies · execAfter — 같은 결과).
+  for (const blk of exactTagBodies(ipStackXml, '<ipRoute>', '</ipRoute>')) {
     const net = /<network>([^<]*)<\/network>/.exec(blk)?.[1] || '';
     const prefix = /<prefixLength>(\d+)<\/prefixLength>/.exec(blk)?.[1] || '';
     if ((net === '0.0.0.0' || net === '::') && (prefix === '0' || prefix === '')) {
-      const gw = /<gateway>[\s\S]*?<ipAddress[^>]*>([^<]+)<\/ipAddress>/.exec(blk)?.[1];
+      const gw = execAfter(blk, '<gateway>', /<ipAddress[^>]*>([^<]+)<\/ipAddress>/)?.[1];
       if (gw && isIPv4(gw)) out.add(gw);
     }
   }
@@ -1050,7 +1092,7 @@ export function parseTemps(xml) {
      * v2.605(COL2605-05, 가능성): 판독 0 + healthState unknown 은 BMC 미준비·센서 미장착의 '못 읽음' 이다 —
      *   그대로 두면 흡기 0℃(급냉)로 채택·적재된다. 이 조합만 건너뛴다(정상 판독 0℃ 는 healthState 가 있다).
      */
-    const hkey = /<healthState>[\s\S]*?<key>([^<]*)<\/key>/.exec(blk)?.[1] || '';
+    const hkey = execAfter(blk, '<healthState>', /<key>([^<]*)<\/key>/)?.[1] || '';   // 89회차 F2: 선형
     if (reading === 0 && /^unknown$/i.test(hkey.trim())) continue;
     const c = Math.round(reading * (10 ** mod) * 10) / 10;
     if (c > -50 && c < 200) temps.push({ name: name.trim(), c });
@@ -1210,20 +1252,20 @@ export function parsePerfMultiXml(xml, counterIds = []) {
   const ids = [...new Set((counterIds || []).filter(Boolean).map(String))];
   const out = new Map(ids.map((id) => [id, []]));
   if (!ids.length) return out;
-  const rv = /<returnval[^>]*>([\s\S]*?)<\/returnval>/.exec(xml || '')?.[1] || '';
+  const rv = returnvalBodies(xml || '', { max: 1 })[0] || '';   // 75회차: 선형(soapParse.js — 게으른 정규식은 닫히지 않은 태그 반복에 O(n²))
   if (!rv) return out;
   // sampleInfo 는 계열이 아니라 엔티티 단위로 한 번(공통 타임스탬프).
   const times = [...rv.matchAll(/<timestamp>([^<]+)<\/timestamp>/g)].map((m) => m[1]);
-  const marks = [...rv.matchAll(/<id>([\s\S]*?)<\/id>/g)];
+  const marks = perfIdMarks(rv);
   const picked = new Map(); // cid -> 채택한 instance
   for (let i = 0; i < marks.length; i++) {
-    const cid = /<counterId>(\d+)<\/counterId>/.exec(marks[i][1])?.[1];
+    const cid = /<counterId>(\d+)<\/counterId>/.exec(marks[i].inner)?.[1];
     if (!cid || !out.has(cid)) continue;
-    const instance = /<instance>([^<]*)<\/instance>/.exec(marks[i][1])?.[1] || '';
+    const instance = /<instance>([^<]*)<\/instance>/.exec(marks[i].inner)?.[1] || '';
     // 이미 담았으면 건너뛴다 — 단 '인스턴스 계열 → 집계 계열' 로의 승격만 허용.
     if (picked.has(cid) && !(picked.get(cid) !== '' && instance === '')) continue;
-    const from = marks[i].index + marks[i][0].length;
-    const to = i + 1 < marks.length ? marks[i + 1].index : rv.length;
+    const from = marks[i].end;
+    const to = i + 1 < marks.length ? marks[i + 1].start : rv.length;
     const vals = [...rv.slice(from, to).matchAll(/<value>(-?\d+)<\/value>/g)].map((m) => Number(m[1]));
     if (!vals.length) continue;
     const n = Math.min(times.length, vals.length);
@@ -1383,6 +1425,28 @@ export async function fetchEntityMetrics(vc, entityType, moref, types, interval,
   }
 }
 export const fetchVmMetrics = (vc, moref, types, interval, opts) => fetchEntityMetrics(vc, 'VirtualMachine', moref, types, interval, opts);
+
+/**
+ * v2.925(B-③) — 호스트 물리 NIC(vmnic)별 드롭·에러·패킷·KBps, **실시간 최근 1시간**(로그인 1회 · QueryPerf 1회).
+ *   카탈로그에 없는 카운터는 던지지 않고 missingCounters 로(나머지는 보여 준다). 요약 규약은 nicPerf.js summarizeNicPerf.
+ *   주기 수집이 아니다 — 화면 버튼으로만 부른다(고RTT vCenter 에 로그인을 늘리지 않게).
+ */
+export async function fetchHostNicStats(vc, moref) {
+  const c = new VimSoapClient(vc);
+  await c.login();
+  try {
+    const map = await c.perfCounterMap();
+    const idOf = {}; const missing = [];
+    for (const [k, key] of Object.entries(HOST_NIC_COUNTERS)) { const id = map.get(key); if (id) idOf[k] = String(id); else missing.push(k); }
+    const parsed = Object.keys(idOf).length
+      ? await c.queryEntityPerfInstances('HostSystem', moref, Object.values(idOf), PERF_INTERVALS.realtime, { maxSample: NIC_REALTIME_SAMPLES })
+      : parsePerfInstancesXml('', []);
+    const sum = summarizeNicPerf(parsed, idOf);
+    return { ok: true, interval: 'realtime', sampleSec: PERF_INTERVALS.realtime, ...sum, missingCounters: missing, instancesTruncated: !!parsed.truncated };
+  } finally {
+    await c.logout();
+  }
+}
 export const fetchHostMetrics = (vc, moref, types, interval, opts) => fetchEntityMetrics(vc, 'HostSystem', moref, types, interval, opts);
 
 /**
@@ -1839,15 +1903,32 @@ export function eventFilterXml(sinceTs, { userNames = null, eventTypeIds = null 
 // XML 특수문자 이스케이프(collector moref가 &<> 포함 가능).
 function escXml(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
+/**
+ * 데이터스토어 용량 · 여유 · 사용량(SOAP summary.*) — 순수.
+ * 91회차 ⓒ(89회차 결정 — 권장안): 용량을 못 읽으면 0 이 아니라 null(REST 폴백 v2.733 C2-06 과 같은 규칙 — 루트 '못 읽은 값은 0 이 아니다').
+ *   예전 `num()` 은 '0 GB 데이터스토어' 를 만들어 사용량 미상(store.dsUsageUnknownOf — capacityGB === null 또는 > 0)에서도 빠졌다.
+ *   용량을 모르면 여유 · 사용량도 판정하지 않는다(REST 와 같이).
+ * v2.598 VC2598-07: freeSpace 가 없으면(접근 불가 DS 등) 예전엔 여유 0 → 사용량 = 전체 = **100% · critical 알람**이 됐다.
+ *   못 읽은 여유는 null 이고 사용량·사용률도 null 이다(REST 폴백 v2.597 C2597-08 과 같은 규칙).
+ */
+export function soapDatastoreSpace(p) {
+  const capBytes = numOrNull(p?.['summary.capacity']);
+  const capacityGB = capBytes == null ? null : Math.round(capBytes / 1024 ** 3);
+  const freeRaw = p?.['summary.freeSpace'];
+  const freeKnown = capacityGB != null && freeRaw != null && freeRaw !== '' && Number.isFinite(Number(freeRaw));
+  const freeGB = freeKnown ? Math.round(Number(freeRaw) / 1024 ** 3) : null;
+  const usedGB = freeKnown ? Math.max(0, capacityGB - freeGB) : null;
+  return { capacityGB, freeGB, usedGB, usagePct: usedGB == null || !(capacityGB > 0) ? null : pct(usedGB, capacityGB) };
+}
+
 /** ReadNextEvents 응답의 <returnval> 블록들을 파싱. */
 export function parseEventsXml(xml) {
   const out = [];
-  const re = /<returnval\b([^>]*)>([\s\S]*?)<\/returnval>/g;
-  let m;
-  while ((m = re.exec(xml))) {
-    const attrs = m[1] || '', body = m[2] || '';
+  // 89회차 F2: returnval 경계 · 태그 본문 찾기는 선형(returnvalBlocks · firstTagInner — 예전 정규식과 같은 결과). 닫히지 않은 태그 반복에 2차였다
+  //   (실측 200KB: 블록 0.33초 · 한 블록 안 `<key` 반복 2.2초).
+  for (const { attrs, body } of returnvalBlocks(xml, { wordBoundary: true })) {
     const type = /xsi:type="([^"]+)"/.exec(attrs)?.[1] || /(?:^|\s)type="([^"]+)"/.exec(attrs)?.[1] || 'Event';
-    const pick = (tag) => new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)</${tag}>`).exec(body)?.[1];
+    const pick = (tag) => firstTagInner(body, tag);
     const key = pick('key');
     const createdTime = pick('createdTime');
     const userName = (pick('userName') || '').trim();
@@ -1901,6 +1982,22 @@ export function vmUsagePctOrNull(rawUsed, total, readable = true) {
 }
 // v2.719(감사 B1-09): 바이트 → GB, 못 읽은 값은 null(0 이면 '디스크 0GB' 라는 거짓이 되고 비용 배분의 '용량 모름' 경로가 막힌다).
 const gbOrNull = (v) => { const n = numOrNull(v); return n == null ? null : Math.round(n / 1024 ** 3); };
+/**
+ * 54회차 F5: 호스트 용량(summary.hardware 의 코어 · 코어당 MHz · 메모리 바이트) — 못 읽었거나(속성 없음 · 빈 값 · 수 아님) 0 이하면 **null**.
+ *   예전에는 `num()` 이 그 셋을 0 으로 실어 `store.hostCapacityKnown`(셋 다 수인가)을 통과했다 — 용량을 모르는 호스트가 '코어 0 · 메모리 0' 으로
+ *   용량 합 · 가상화율 · 오버커밋 알림의 분모에 섞였다(REST 폴백 C2-06 이 고친 것과 같은 모양). 0 코어 · 0MHz · 0MB 호스트는 실재하지 않아 '비정상 = 못 읽음' 이다.
+ *   ⚠ 실 vCenter 가 끊긴 호스트에 무엇을 주는지는 이 환경에서 확인하지 못했다 — 이 함수는 '없음 · 비정상' 입력의 처리만 정한다.
+ * @param {Record<string, unknown>} p  HostSystem 속성(parseObjectContent 결과)
+ * @returns {{cores:number|null, mhz:number|null, cpuTotalMhz:number|null, memTotalMB:number|null}}
+ */
+export function hostCapacityOf(p = {}) {
+  const pos = (v) => { const n = numOrNull(v); return n != null && n > 0 ? n : null; };
+  const cores = pos(p['summary.hardware.numCpuCores']);
+  const mhz = pos(p['summary.hardware.cpuMhz']);
+  const memBytes = pos(p['summary.hardware.memorySize']);
+  const memMB = memBytes == null ? null : Math.round(memBytes / 1048576);
+  return { cores, mhz, cpuTotalMhz: cores != null && mhz != null ? cores * mhz : null, memTotalMB: memMB > 0 ? memMB : null };
+}
 
 // v2.719(감사 S1-01): 부가 갱신(구성·호스트·경합·DS·클러스터·태그)은 vCenter 수집 데드라인 안에서만 돈다.
 //   각 갱신의 자체 예산 합(약 115초)이 데드라인(최소 90초)보다 커서, 고RTT vCenter 에서 부가 갱신이 본 인벤토리까지
@@ -1962,6 +2059,8 @@ export async function collectFromVCenterSoap(vc, { signal = null, deadlineAt = D
         'summary.hardware.vendor', 'summary.hardware.model', 'summary.hardware.otherIdentifyingInfo', 'config.storageDevice.hostBusAdapter',
         'runtime.healthSystemRuntime.systemHealthInfo.numericSensorInfo',
         'summary.managementServerIp', 'config.network.vnic', 'config.network.pnic',
+        // v3.6.0(IP 관리 재설계 묶음 다 — 호스트명 대조): ESXi 에 설정된 호스트명 · 도메인. 같은 조회에 속성 하나라 SOAP 왕복은 늘지 않는다.
+        'config.network.dnsConfig',
         'summary.quickStats.overallCpuUsage', 'summary.quickStats.overallMemoryUsage',
         // v2.706(C4): 부팅 시각 — '유지보수 모드 없이 재부팅된 호스트(PSOD·정전 후보)' 판정. 시각 하나라 응답이 거의 늘지 않는다.
         'runtime.bootTime'] },
@@ -2033,11 +2132,10 @@ export async function collectFromVCenterSoap(vc, { signal = null, deadlineAt = D
     const hosts = [];
     for (const o of objs.filter((x) => x.type === 'HostSystem')) {
       const p = o.props;
-      const cores = num(p['summary.hardware.numCpuCores']);
-      const mhz = num(p['summary.hardware.cpuMhz']);
-      const cpuTotalMhz = cores * mhz;
+      // 54회차 F5: 못 읽은 용량은 null(hostCapacityOf) — store.hostCapacityKnown 이 거짓이 되어 용량 합 · 비율에서 빠지고 '미상 N대' 로 센다.
+      //   사용률은 분모(총량)를 모르면 null 이다(예전 pct(x, 0) = 0% 라는 거짓). 사용량(quickStats)의 처리는 예전 그대로.
+      const { cores, mhz, cpuTotalMhz, memTotalMB } = hostCapacityOf(p);
       const cpuUsageMhz = num(p['summary.quickStats.overallCpuUsage']);
-      const memTotalMB = Math.round(num(p['summary.hardware.memorySize']) / 1048576);
       const memUsageMB = num(p['summary.quickStats.overallMemoryUsage']);
       const maint = p['runtime.inMaintenanceMode'] === 'true';
       const conn = p['runtime.connectionState'];
@@ -2056,11 +2154,11 @@ export async function collectFromVCenterSoap(vc, { signal = null, deadlineAt = D
         cpuCores: cores,
         cpuTotalMhz,
         cpuUsageMhz,
-        cpuUsagePct: pct(cpuUsageMhz, cpuTotalMhz),
+        cpuUsagePct: cpuTotalMhz == null ? null : pct(cpuUsageMhz, cpuTotalMhz),
         memTotalMB,
         memUsageMB,
-        memUsagePct: pct(memUsageMB, memTotalMB),
-        cpuThreads: num(p['summary.hardware.numCpuThreads']) || cores,
+        memUsagePct: memTotalMB == null ? null : pct(memUsageMB, memTotalMB),
+        cpuThreads: num(p['summary.hardware.numCpuThreads']) || cores,   // 54회차 F5: 스레드 · 코어 둘 다 못 읽으면 null(예전 0)
         // v2.703(A13): 소켓 수 — 코어 라이선스(소켓당 최소 16코어) 산정. 못 읽으면 null(1 소켓으로 지어내지 않는다).
         cpuSockets: Number(p['summary.hardware.numCpuPkgs']) > 0 ? Number(p['summary.hardware.numCpuPkgs']) : null,
         // CPU 모델명(예: 'Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz'). 못 받으면 빈 문자열 —
@@ -2073,6 +2171,10 @@ export async function collectFromVCenterSoap(vc, { signal = null, deadlineAt = D
         // 게스트 파일 회수용: vCenter 실제 IP(호스트가 보고) + ESXi 관리 IP(vmk).
         mgmtServerIp: p['summary.managementServerIp'] || '',
         mgmtIp: (/<ipAddress[^>]*>([^<]+)<\/ipAddress>/.exec(p['config.network.vnic'] || '')?.[1]) || '',
+        // v3.6.0(IP 관리 재설계 묶음 다 — 서버 보기 · 스캔 대역 후보): vmk 전체(관리 · vMotion · vSAN · 스토리지). 이미 받는 vnic 속성이라 왕복 0.
+        vmks: parseVmks(p['config.network.vnic']),
+        // v3.6.0(호스트명 대조 'OS' 칸): ESXi 자신에 설정된 호스트명(config.network.dnsConfig.hostName). 못 읽으면 null(이름을 지어내지 않는다).
+        ...hostDnsName(p['config.network.dnsConfig']),
         gpus: (() => {
           const gfx = parseGpus(p['config.graphicsInfo']);
           // vGPU/vSGA로 이미 잡힌 물리 GPU(pciId)는 패스쓰루에서 제외해 이중 집계 방지.
@@ -2219,6 +2321,13 @@ export async function collectFromVCenterSoap(vc, { signal = null, deadlineAt = D
       await runAux('contention', 'CPU 경합·디스크 지연', CONTENTION_BUDGET_MS, (budgetMs) => refreshContention(c, vc.id, { vms: liveVms, hostRefs: liveHosts, budgetMs, signal }));
       for (const [ref, h] of hostByRef) { const e = contentionGet(vc.id, 'host', ref); if (e) h.perfc = e; }
     }
+    // v2.935(C-①): ESXi 경로별 스토리지 카운터 — FC HBA 가 있는 연결 호스트만, 매시 한 번 최근 창(storpath/collect.js).
+    //   경로 이름을 풀 때 hcfg.mp.targets(rt) · hbas 를 쓰므로 hostcfg 뒤에 돈다. 캐시 값을 host.spath 로 싣는다.
+    if (c.sc.perfManager) {
+      const fcHosts = [...hostByRef].filter(([, h]) => h.connectionState !== 'DISCONNECTED' && hasFcHba(h)).map(([ref, h]) => ({ ref, host: h }));
+      await runAux('storpath', 'ESXi 경로 카운터', STORPATH_BUDGET_MS, (budgetMs) => refreshStorPath(c, vc.id, { hosts: fcHosts, budgetMs, signal }));
+      for (const [ref, h] of hostByRef) { const e = storPathGet(vc.id, ref); if (e) h.spath = e; }
+    }
 
     const vms = [];
     for (const o of objs.filter((x) => x.type === 'VirtualMachine')) {
@@ -2264,8 +2373,9 @@ export async function collectFromVCenterSoap(vc, { signal = null, deadlineAt = D
         ...vmIps(p['guest.net'], p['guest.ipAddress']),
         gateways: vmGateways(p['guest.ipStack']),
         dns: vmDns(p['guest.net'], p['guest.ipStack']),   // v2.695: VM 이 쓰는 DNS 서버(IP 와 분리)
-        toolsStatus: p['guest.toolsRunningStatus'] === 'guestToolsRunning' ? 'RUNNING'
-          : powered ? 'NOT_RUNNING' : 'NOT_RUNNING',
+        // v3.19.0: 예전 식 `powered ? 'NOT_RUNNING' : 'NOT_RUNNING'` 은 양쪽이 같아 뜻이 없었다 — 값은 그대로 둘(RUNNING/NOT_RUNNING)이다
+        //   (inventory/vmToolsDist.js 머리말 · 소비처가 이 두 값을 전제한다). 미설치 · 오래됨은 toolsVersionStatus 가 가른다.
+        toolsStatus: p['guest.toolsRunningStatus'] === 'guestToolsRunning' ? 'RUNNING' : 'NOT_RUNNING',
         toolsVersion: p['guest.toolsVersion'] || '',
         toolsVersionStatus: p['guest.toolsVersionStatus2'] || '',
         hwVersion: p['config.version'] || '',
@@ -2310,22 +2420,12 @@ export async function collectFromVCenterSoap(vc, { signal = null, deadlineAt = D
 
     const datastores = objs.filter((x) => x.type === 'Datastore').map((o) => {
       const p = o.props;
-      const capacityGB = Math.round(num(p['summary.capacity']) / 1024 ** 3);
-      // v2.598 VC2598-07: freeSpace 가 없으면(접근 불가 DS 등) 예전엔 여유 0 → 사용량 = 전체 = **100% · critical
-      // 알람**이 됐다. 못 읽은 여유는 null 이고 사용량·사용률도 null 이다(REST 폴백 v2.597 C2597-08 과 같은 규칙).
-      const freeRaw = p['summary.freeSpace'];
-      const freeKnown = freeRaw != null && freeRaw !== '' && Number.isFinite(Number(freeRaw));
-      const freeGB = freeKnown ? Math.round(Number(freeRaw) / 1024 ** 3) : null;
-      const usedGB = freeKnown ? Math.max(0, capacityGB - freeGB) : null;
       return {
         id: `${vc.id}:${o.ref}`,
         vcenterId: vc.id,
         name: p.name,
         type: p['summary.type'],
-        capacityGB,
-        freeGB,
-        usedGB,
-        usagePct: usedGB == null || !(capacityGB > 0) ? null : pct(usedGB, capacityGB),
+        ...soapDatastoreSpace(p),   // 91회차 ⓒ: capacityGB · freeGB · usedGB · usagePct(못 읽은 용량은 null)
         accessible: p['summary.accessible'] !== 'false',
         ...parseDatastoreStorage(p['info'], p['summary.type']),
         // v2.700(A17): VMFS 주 버전 — 이미 받는 info 에서(왕복 0). VMFS 가 아니면 키가 없다.
@@ -2473,10 +2573,8 @@ export async function collectFoldersAndPools(vc) {
  */
 export function parseHostGpuPerf(xml, keyOf) {
   const out = new Map();
-  const re = /<returnval[^>]*>([\s\S]*?)<\/returnval>/g;
-  let m;
-  while ((m = re.exec(String(xml || '')))) {
-    const blk = m[1];
+  // 89회차 F2: returnval 경계는 선형(returnvalBodies — 같은 결과).
+  for (const blk of returnvalBodies(String(xml || ''))) {
     const ent = /<entity type="HostSystem">([^<]+)<\/entity>/.exec(blk)?.[1];
     if (!ent) continue;
     const series = {};

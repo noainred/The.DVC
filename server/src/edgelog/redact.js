@@ -11,6 +11,7 @@
  *  · ⚠ **키를 지우지 않고 표식을 남긴다** — 지우면 화면이 '그 필드가 없다' 고 오해한다(v2.538 규약).
  *  · 값이 없거나 빈 문자열이면 그대로 둔다 — `''` 자체가 진단이다(배포가 비밀을 안 실어 왔다).
  *  · 깊이·노드 수 상한이 있다(순환 참조·거대 객체가 이 함수에서 멈추지 않게).
+ *  · 72회차 F3: 글자 값은 로그 줄 규칙(`redactLogLine` — URL 사용자정보 비밀번호 · `KEY=값` · Bearer 등)으로도 훑는다.
  *
  * ⚠ **이것은 최후 방어선이지 면죄부가 아니다.** 새 `*Status()` 를 만들 때 비밀을 넣지 않는 것이 먼저다.
  */
@@ -20,6 +21,28 @@ import { isSecretEnvKey } from '../util/envRedact.js';
 export const MASK = '[가림]';
 const MAX_DEPTH = 8;
 const MAX_NODES = 5_000;
+/** 72회차 F3: 글자 값 하나를 가림 정규식에 넣는 상한(collect.js SCAN_MAX 와 같은 값 — 정규식은 길이 한정 선형). */
+const STR_SCAN_MAX = 16_384;
+/*
+ * 75회차(72회차 F3 반증 — 재현): 상한을 넘는 글자를 **먼저 자르고 가렸다** — 자른 자리에 걸친 비밀은 끝 표지('@' · 닫는 따옴표)가 잘려
+ *   앞부분이 원문으로 남았다(`https://svc:SuperSecretPassw0…` · `password: "[가림]" def …`). 18회차 A-1 · collect.js 줄과 같은 순서로
+ *   **가린 뒤 자른다** — 상한 + 꼬리(따옴표 값 4,096 · URL 비밀번호 512 + 키 앞부분)까지 훑고, 자른 결과가 다시 가려도 그대로인 자리
+ *   (고정점)에서 자른다 — 중앙이 한 번 더 가려도 글자 · 개수가 바뀌지 않게(멱등). 자른 표지 앞의 공백은 그 때문이다.
+ */
+const SCAN_TAIL = 4_700;
+const CUT_MARK = ' …[길이 상한]';
+const lastWs = (s, from) => Math.max(s.lastIndexOf(' ', from), s.lastIndexOf('\n', from), s.lastIndexOf('\t', from));
+function cutRedacted(red) {
+  let end = STR_SCAN_MAX;
+  for (let i = 0; i < 4; i += 1) {
+    const out = `${red.slice(0, end)}${CUT_MARK}`;
+    if (redactLogLine(out) === out) return out;
+    const ws = lastWs(red, end - 1);   // 자른 자리의 토큰(반쯤 잘린 가림 표식 · 닫는 따옴표가 잘린 값)을 통째로 버린다
+    if (ws <= 0) break;
+    end = ws;
+  }
+  return redactLogLine(`${red.slice(0, end)}${CUT_MARK}`);
+}
 
 /** 이 키의 값을 가려야 하는가. 정확 일치(SECRET_FIELDS) + env 스타일 접미(SECRET_KEY_RE). */
 export function isSecretKey(k) {
@@ -46,6 +69,27 @@ export function redactDeep(input) {
 
   const walk = (v, depth) => {
     if (++nodes > MAX_NODES) { truncated = true; return '[상한]'; }
+    /*
+     * 72회차 F3: 글자 값도 줄 규칙(redactLogLine)으로 훑는다 — 키 이름 규칙만으로는 **값 속 비밀**을 못 잡았다. 실제 경로:
+     *   inventoryPushStatus · fleetPushStatus 등 열 곳 넘는 *Status() 가 `centralUrl: config.agent.centralUrl` 을 그대로 싣는다.
+     *   v2.599 가 로그 줄에서 가린 `https://user:pw@central` 비밀번호가 진행상태 값으로는 그대로 중앙 화면에 갔다(형제 누락).
+     *   바뀐 값만 센다(이미 가린 값은 그대로 — 두 번 지나도 개수가 늘지 않는다). 아주 긴 글자는 앞부분만 훑고 자른다(정규식 입력 상한).
+     */
+    if (typeof v === 'string') {
+      // 앞 단계(엣지)가 이미 자른 값(표지로 끝나고 상한 + 표지 길이 안)은 다시 자르지 않는다 — 통째로 훑는다(75회차).
+      const preCut = v.length > STR_SCAN_MAX && v.length <= STR_SCAN_MAX + CUT_MARK.length && v.endsWith(CUT_MARK);
+      if (v.length > STR_SCAN_MAX && !preCut) {
+        truncated = true;
+        const win = v.slice(0, STR_SCAN_MAX + SCAN_TAIL);
+        const red = redactLogLine(win);
+        if (red !== win) masked += 1;
+        return cutRedacted(red);
+      }
+      if (preCut) truncated = true;
+      const r = redactLogLine(v);
+      if (r !== v) masked += 1;
+      return r;
+    }
     if (v === null || typeof v !== 'object') return v;
     if (depth >= MAX_DEPTH) { truncated = true; return '[깊이 상한]'; }
     if (seen.has(v)) return '[순환]';
@@ -54,7 +98,7 @@ export function redactDeep(input) {
     const out = {};
     for (const [k, val] of Object.entries(v)) {
       // 빈 값은 그대로 — `''`·null 자체가 진단이다(비밀이 실려 오지 않았다는 사실).
-      if (isSecretKey(k) && val !== '' && val != null) { out[k] = MASK; masked += 1; continue; }
+      if (isSecretKey(k) && val !== '' && val != null) { out[k] = MASK; if (val !== MASK) masked += 1; continue; }
       out[k] = walk(val, depth + 1);
     }
     return out;
@@ -102,6 +146,41 @@ const maskValue = (pre, v) => {
   const q = v[0] === '"' || v[0] === "'" ? v[0] : '';
   return q ? `${pre}${q}${MASK}${q}` : `${pre}${MASK}`;
 };
+/*
+ * 리눅스 성능 7a단계(서버 로그 분석 — bmusage/logs): **서버 시스템 로그 줄**(journald · dmesg · /var/log/secure · audit · GPDB · Airflow)의 표본 가림.
+ *   redactLogLine(포탈 자체 로그 규칙)을 먼저 거친 뒤 로그용 규칙을 더한다(설계 §19 ‘로그 샘플’ 행 — password= · Authorization: · 키 블록 · 개인정보 꼴):
+ *    · `pass=` · `pwd=` · `pw=` · `passwd=` 값(포탈 로그에서는 ‘점검 통과(pass=)’ 식별자라 안 가렸지만 서버 로그에서는 비밀 쪽이 흔하다)
+ *    · `Authorization:` 뒤 줄 끝까지(Basic · Digest · Bearer 외 스킴 — Negotiate · 사용자 지정 스킴 — 넘치게 가리는 쪽을 택했다)
+ *    · PEM 머리 줄(`-----BEGIN … PRIVATE KEY-----`)과 **줄 전체가 긴 base64** 인 줄(키 본문 — 줄 단위라 블록을 이어 볼 수 없어 꼴로 가린다)
+ *    · 개인정보 꼴: 전자우편 · 주민등록번호 · 휴대전화 · 카드번호(4자리 넷) · sudo COMMAND 의 **인자**(명령 경로만 남긴다 — `mysql -p비밀` 같은 인자에 비밀이 실린다)
+ *   ⚠ 줄 길이를 먼저 자른다(MAX_SYSLOG_LINE) — 모든 정규식은 길이 한정 반복(ReDoS 비율 테스트: test/bmLogs7aRedact.test.js).
+ *   ⚠ 완전할 수 없다(자유 문자열) — 화면이 ‘가림은 꼴 기반이라 빠질 수 있다’ 를 말한다. 원문 전체를 저장 · 전송하지 않는 것이 1차 방어다(이 함수는 표본 5줄용).
+ */
+export const MAX_SYSLOG_LINE = 1_000;
+const SYS_PASS_RE = /((?:^|[\s,;?&"'(])(?:pass|pwd|pw|passwd|passphrase)\s{0,2}=\s{0,2})("[^"\n]{0,512}"|'[^'\n]{0,512}'|[^\s,;&"')]{1,512})/gi;
+const SYS_AUTHZ_RE = /\b((?:Proxy-)?Authorization\s{0,2}[=:]\s{0,2}).{1,1024}$/i;
+const PEM_RE = /-----(?:BEGIN|END) [A-Z0-9 ]{0,40}PRIVATE KEY(?: BLOCK)?-----/;
+const B64_LINE_RE = /^\s{0,8}[A-Za-z0-9+/]{40,1024}={0,2}\s{0,8}$/;
+const EMAIL_RE = /\b[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63}){1,8}\b/g;
+const RRN_RE = /\b\d{6}-?[1-8]\d{6}\b/g;
+const PHONE_RE = /\b01[016789]-?\d{3,4}-?\d{4}\b/g;
+const CARD_RE = /\b\d{4}[ -]\d{4}[ -]\d{4}[ -]\d{1,4}\b/g;
+const SUDO_CMD_RE = /(; COMMAND=)(\S{1,256})[ \t].{0,1024}$/;
+export function redactSystemLogLine(line) {
+  let s = String(line == null ? '' : line);
+  if (s.length > MAX_SYSLOG_LINE) s = s.slice(0, MAX_SYSLOG_LINE);
+  if (PEM_RE.test(s)) return `${MASK} — 키 블록 머리 줄`;
+  if (B64_LINE_RE.test(s)) return `${MASK} — 긴 base64 줄(키 본문일 수 있음)`;
+  return redactLogLine(s)
+    // ⚠ 대문자 PWD= 는 작업 폴더(sudo 로그 · 환경 변수 PWD)다 — 비밀이 아니다(Chromium 판독: sudo 표본의 PWD=/home/… 가 가려졌다).
+    .replace(SYS_PASS_RE, (m, pre, v) => (/(?:^|[^A-Za-z])PWD\s{0,2}=\s{0,2}$/.test(pre) ? m : (v === MASK || v === `"${MASK}"` || v === `'${MASK}'` ? pre + v : `${pre}${MASK}`)))
+    .replace(SYS_AUTHZ_RE, (_m, pre) => `${pre}${MASK}`)
+    .replace(SUDO_CMD_RE, (_m, pre, cmd) => `${pre}${cmd} ${MASK}(인자)`)
+    .replace(EMAIL_RE, `${MASK}(메일)`)
+    .replace(RRN_RE, `${MASK}(주민번호)`)
+    .replace(PHONE_RE, `${MASK}(전화)`)
+    .replace(CARD_RE, `${MASK}(카드)`);
+}
 export function redactLogLine(line) {
   return String(line == null ? '' : line)
     .replace(JSON_SECRET_RE, (_m, pre, v) => maskValue(pre, v))
@@ -110,5 +189,5 @@ export function redactLogLine(line) {
     .replace(/\b(Bearer\s+)\S+/gi, `$1${MASK}`)
     .replace(/\b((?:Proxy-)?Authorization\s*[=:]\s*(?:Basic|Digest)\s+)\S+/gi, `$1${MASK}`)
     .replace(/(\b[a-z][a-z0-9+.-]{0,20}:\/\/[^\s/@:]{1,256}:)[^\s/@]{1,512}@/gi, `$1${MASK}@`)
-    .replace(/(X-[A-Za-z-]*Token\s*[=:]\s*)\S+/gi, `$1${MASK}`);
+    .replace(/(X-[A-Za-z-]{0,64}Token\s*[=:]\s*)\S+/gi, `$1${MASK}`);   // 전체 점검 16회차(T-3): 반복 상한(앵커 없는 무제한 반복 — 'X-' 가 많은 줄에 O(n²))
 }

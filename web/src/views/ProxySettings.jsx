@@ -1,8 +1,28 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson, postJson, putJson, delJson } from '../api.js';
+import { requireChanged } from './changeResult.js';   // 112회차: delJson 은 409 · 400 을 던지지 않고 본문을 준다 — 거절(등록부 읽기 오류 · 사용 중)을 삭제 성공으로 읽지 않는다
 import { Loading, ErrorBox, Modal } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
 import { blankOr } from './blankOr.js';
+import { guacdFlag, guacdPlaintextRemote, GUACD_TEXT } from './proxyGuacdText.js';
+
+/** 48회차 F2(사용자 결정): guacd TLS · RDP 대상 인증서 검증 옵션 + 평문 원격 경고 — 기본 프록시 · 추가 프록시 공용. */
+// v3.18.6 화면 검증: 이 칸은 .spec-grid 안이라 그 label 규칙(flex-direction: column)이 체크박스를 글자 위로 띄운다 — 행 방향을 직접 준다.
+function GuacdOptions({ g, onFlag }) {
+  return (
+    <div style={{ gridColumn: '1 / -1', minWidth: 0 }}>
+      <div className="flex gap" style={{ flexWrap: 'wrap', alignItems: 'center', fontSize: 13 }}>
+        <label className="flex gap" style={{ flexDirection: 'row', alignItems: 'center' }} title={GUACD_TEXT.tlsHint}>
+          <input type="checkbox" checked={guacdFlag(g?.tls)} onChange={(e) => onFlag('tls', e.target.checked)} /> {GUACD_TEXT.tls}
+        </label>
+        <label className="flex gap" style={{ flexDirection: 'row', alignItems: 'center' }} title={GUACD_TEXT.verifyHint}>
+          <input type="checkbox" checked={guacdFlag(g?.verifyRdpCert)} onChange={(e) => onFlag('verifyRdpCert', e.target.checked)} /> {GUACD_TEXT.verify}
+        </label>
+      </div>
+      {guacdPlaintextRemote(g) ? <div style={{ marginTop: 6, fontSize: 12, color: 'var(--amber)' }}>⚠ {GUACD_TEXT.plaintextWarn}</div> : null}
+    </div>
+  );
+}
 
 // v2.606(감사 WEB2606-04): 포트 칸은 원문 문자열 상태로 두고, 보낼 때 빈 칸은 빼서(undefined — JSON 에서 빠진다) 서버가
 // 이전 값을 유지하게 한다. 예전 `Number('')` 는 0 을, 추가 프록시 칸은 '' 를 저장했고 화면은 `|| 22` 로 22 를 보였다.
@@ -78,7 +98,7 @@ export default function ProxySettings() {
   const removeProxyForm = async (p) => {
     if (!window.confirm(`프록시 '${p.name}'을(를) 삭제할까요?`)) return;
     // v2.611 WEB2611-08: 삭제 실패를 삼키지 않는다.
-    try { await delJson(`/remote/proxies/${p.id}`); } catch (e) { flash(false, `프록시 삭제 실패: ${e?.message || e}`); }
+    try { requireChanged(await delJson(`/remote/proxies/${p.id}`)); } catch (e) { flash(false, `프록시 삭제 실패: ${e?.message || e}`); }
     await load();
   };
 
@@ -103,6 +123,7 @@ export default function ProxySettings() {
           <label>공개 포트 시작<input className="input" type="number" value={cfg.publicPortBase ?? ''} onChange={(e) => setCfg({ ...cfg, publicPortBase: e.target.value })} /></label>
           <label>guacd 호스트(RDP 웹콘솔, 선택)<input className="input" value={cfg.guacd.host} onChange={(e) => setCfg({ ...cfg, guacd: { ...cfg.guacd, host: e.target.value } })} placeholder="(없으면 .rdp 다운로드)" /></label>
           <label>guacd 포트<input className="input" type="number" value={cfg.guacd.port ?? ''} onChange={(e) => setCfg({ ...cfg, guacd: { ...cfg.guacd, port: e.target.value } })} /></label>
+          <GuacdOptions g={cfg.guacd} onFlag={(k, v) => setCfg({ ...cfg, guacd: { ...cfg.guacd, [k]: v } })} />
         </div>
         <div className="flex gap" style={{ marginTop: 10 }}>
           <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={saveCfg}>저장</button>
@@ -259,6 +280,7 @@ export function ProxyEditor({ initial, onSave, onClose }) {
         <div className="spec-grid" style={{ marginTop: 6 }}>
           <label>guacd 호스트<input className="input" value={p.guacd?.host || ''} onChange={setSub('guacd', 'host')} /></label>
           <label>포트<input className="input" type="number" value={p.guacd?.port ?? ''} onChange={setSub('guacd', 'port')} /></label>
+          <GuacdOptions g={p.guacd} onFlag={(k, v) => setP((s) => ({ ...s, guacd: { ...s.guacd, [k]: v } }))} />
         </div>
       </div>
       <div className="flex gap" style={{ marginTop: 14 }}>

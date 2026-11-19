@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>IP 관리 — 주기 스캔 일정</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+*{box-sizing:border-box}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:36px;padding:0 14px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.btn.sm{min-height:28px;padding:0 10px;font-size:11.5px}
+.input{min-height:36px;border:1px solid #243049;border-radius:8px;background:#0a0e17;color:#e6edf6;font:inherit;font-size:13px;padding:0 10px;min-width:0}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0}
+.muted{color:#8b9bb4}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.tag{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.blue{background:rgba(59,130,246,.18);color:#93c5fd}.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}
+.h2{font-size:14px;font-weight:700;margin:0}
+.seg{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden}
+.seg a{color:#8b9bb4;font-size:12.5px;font-weight:600;padding:8px 14px;text-decoration:none}
+.seg a.on{background:#1a2236;color:#e6edf6}
+.st{display:flex;flex-direction:column;gap:2px;padding:0 20px;border-left:1px solid #1f2a40}
+.st b{font-size:20px;font-weight:800;line-height:1.1}
+.st span{font-size:11.5px;color:#8b9bb4}
+.fld{display:flex;flex-direction:column;gap:5px;font-size:12px;color:#8b9bb4;min-width:0}
+.ck{display:grid;grid-template-columns:18px minmax(0,1fr);gap:2px 9px;align-items:start;cursor:pointer}
+.ck input{margin:2px 0 0;width:15px;height:15px}
+.ck b{font-size:13px;font-weight:600}
+.ck span{grid-column:2;font-size:11.5px;color:#8b9bb4}
+.gridrow{display:grid;grid-template-columns:150px 150px minmax(0,1fr) 92px;gap:12px;align-items:center}
+.hrs{display:grid;grid-template-columns:repeat(24,minmax(0,1fr));gap:2px}
+.hrs span{font-size:10.5px;color:#8b9bb4;text-align:left;font-family:"JetBrains Mono",ui-monospace,monospace}
+.ag{all:unset;box-sizing:border-box;cursor:pointer;width:100%;padding:9px 16px;border-top:1px solid #1f2a40}
+.ag:hover{background:rgba(59,130,246,.06)}
+.ag.sel{background:#1a2236;box-shadow:inset 3px 0 0 #3b82f6}
+.c{height:22px;border-radius:3px;background:#0f1626;display:flex;align-items:center;justify-content:center}
+.c i{display:block;width:60%;height:12px;border-radius:3px}
+.c.done i{background:#4783f0}
+.c.next i{border:1.5px solid #4783f0}
+.c.live i{background:#22d3ee;width:86%}
+.c.miss i{border:1.5px dashed #f59e0b}
+.c.quiet{background:repeating-linear-gradient(135deg,#1a2236 0 4px,#0f1626 4px 8px)}
+.c.nowc{outline:1px solid #8b9bb4;outline-offset:1px}
+.lg{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:#8b9bb4}
+.lg .c{width:22px;height:16px}
+.lg .c i{height:9px}
+</style>
+</helmet>
+<div style="width:1400px;min-height:1160px;padding:24px;display:flex;flex-direction:column;gap:14px">
+
+  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px">
+    <h1 style="margin:0;font-size:19px;font-weight:800">스캔</h1>
+    <span class="seg" role="group" aria-label="스캔 보기">
+      <a href="Scan.dc.html">에이전트 · 대역</a><a href="ScanSchedule.dc.html" class="on">주기 일정</a><a href="Scan.dc.html">실행 기록</a>
+    </span>
+    <span class="muted" style="font-size:12px;margin-left:auto">지금 <span class="mono">14:52</span> · 시간표는 포탈 시각입니다</span>
+  </div>
+
+  <section class="card" style="padding:16px 18px;display:flex;flex-wrap:wrap;align-items:center;gap:14px 0" aria-label="주기 스캔 상태">
+    <div style="display:flex;flex-direction:column;gap:3px;padding-right:20px">
+      <h2 class="h2">주기 스캔</h2>
+      <span class="muted" style="font-size:12px">법인 엣지가 정한 주기마다 자기 대역을 스캔합니다</span>
+    </div>
+    <div class="st"><b style="color:#86efac">28</b><span>켜짐 / 29곳</span></div>
+    <div class="st"><b style="color:#22d3ee">2</b><span>지금 스캔 중</span></div>
+    <div class="st"><b style="color:#fcd34d">1</b><span>회차 놓침(보고 없음)</span></div>
+    <div class="st"><b>1</b><span>꺼짐</span></div>
+    <div class="st"><b class="mono" style="font-size:17px">15:02</b><span>가장 가까운 다음 스캔 · edge-pl1</span></div>
+  </section>
+
+  <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start">
+
+    <section class="card" style="flex:999 1 720px;overflow:hidden" aria-label="오늘 시간표">
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;padding:13px 16px">
+        <h2 class="h2">오늘 시간표</h2>
+        <span class="lg"><span class="c done"><i></i></span>끝남</span>
+        <span class="lg"><span class="c live"><i></i></span>스캔 중</span>
+        <span class="lg"><span class="c next"><i></i></span>예정</span>
+        <span class="lg"><span class="c miss"><i></i></span>놓침</span>
+        <span class="lg"><span class="c quiet"></span>쉬는 시간</span>
+        <span class="muted" style="font-size:12px;margin-left:auto">29곳 중 9곳 · 줄을 누르면 오른쪽에서 고칩니다</span>
+      </div>
+      <div class="gridrow" style="padding:6px 16px;background:#0f1626;border-top:1px solid #243049;border-bottom:1px solid #243049">
+        <span class="muted" style="font-size:11.5px;font-weight:700">에이전트</span><span class="muted" style="font-size:11.5px;font-weight:700">일정</span>
+        <span class="hrs"><span>0</span><span></span><span></span><span>3</span><span></span><span></span><span>6</span><span></span><span></span><span>9</span><span></span><span></span><span>12</span><span></span><span></span><span>15</span><span></span><span></span><span>18</span><span></span><span></span><span>21</span><span></span><span></span></span>
+        <span class="muted" style="font-size:11.5px;font-weight:700;text-align:right">다음 스캔</span>
+      </div>
+      <sc-for list="{{agents}}" as="a" hint-placeholder-count="9">
+      <button type="button" class="{{a.cls}}" aria-pressed="{{a.on}}" onClick="{{a.pick}}">
+        <span class="gridrow">
+          <span style="min-width:0"><b>{{a.name}}</b><br><span class="muted" style="font-size:11.5px">{{a.corp}}</span></span>
+          <span style="font-size:12px;min-width:0">{{a.sched}}<br><span class="muted" style="font-size:11.5px">{{a.schedSub}}</span></span>
+          <span class="hrs" role="img" aria-label="{{a.aria}}">
+            <span class="{{a.h0}}"><i></i></span><span class="{{a.h1}}"><i></i></span><span class="{{a.h2}}"><i></i></span><span class="{{a.h3}}"><i></i></span><span class="{{a.h4}}"><i></i></span><span class="{{a.h5}}"><i></i></span><span class="{{a.h6}}"><i></i></span><span class="{{a.h7}}"><i></i></span><span class="{{a.h8}}"><i></i></span><span class="{{a.h9}}"><i></i></span><span class="{{a.h10}}"><i></i></span><span class="{{a.h11}}"><i></i></span><span class="{{a.h12}}"><i></i></span><span class="{{a.h13}}"><i></i></span><span class="{{a.h14}}"><i></i></span><span class="{{a.h15}}"><i></i></span><span class="{{a.h16}}"><i></i></span><span class="{{a.h17}}"><i></i></span><span class="{{a.h18}}"><i></i></span><span class="{{a.h19}}"><i></i></span><span class="{{a.h20}}"><i></i></span><span class="{{a.h21}}"><i></i></span><span class="{{a.h22}}"><i></i></span><span class="{{a.h23}}"><i></i></span>
+          </span>
+          <span style="text-align:right"><span class="mono" style="font-weight:600">{{a.next}}</span><br><span class="{{a.stCls}}">{{a.st}}</span></span>
+        </span>
+      </button>
+      </sc-for>
+      <div style="padding:11px 16px;font-size:12px;border-top:1px solid #1f2a40" class="muted">칸 하나가 한 시간입니다. 테두리가 있는 칸이 지금 시각입니다. 놓친 회차는 몰아서 다시 돌리지 않습니다.</div>
+    </section>
+
+    <aside style="flex:1 1 340px;max-width:400px;display:flex;flex-direction:column;gap:14px;min-width:0">
+      <section class="card" style="overflow:hidden" aria-label="고른 에이전트의 일정">
+        <div style="padding:16px 18px 12px;display:flex;flex-direction:column;gap:4px">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span style="font-size:16px;font-weight:700">{{sel.name}}</span><span class="muted">{{sel.corp}}</span><span class="{{sel.stCls}}">{{sel.st}}</span></div>
+          <span class="muted" style="font-size:12px">{{sel.load}}</span>
+        </div>
+        <div style="padding:0 18px 16px;display:flex;flex-direction:column;gap:12px">
+          <label class="ck"><input type="checkbox" checked><b>주기 스캔 켜기</b><span>끄면 ‘지금 스캔’ 을 누를 때만 돕니다</span></label>
+          <label class="ck"><input type="checkbox"><b>기본 일정 따르기</b><span>아래 ‘기본 일정’ 값을 그대로 씁니다</span></label>
+          <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">
+            <label class="fld">주기<select class="input"><option>{{sel.every}}</option><option>30분마다</option><option>1시간마다</option><option>2시간마다</option><option>6시간마다</option><option>하루 한 번</option></select></label>
+            <label class="fld">스캔 속도<select class="input"><option>보통</option><option>느리게 — 회선 부담 줄이기</option><option>빠르게</option><option>직접 정함</option></select></label>
+            <label class="fld">동시에 스캔하는 IP 수<input class="input mono" type="text" value="128" aria-describedby="conc-help"></label>
+            <label class="fld">쉬는 시간(그 법인 현지 시각)<input class="input mono" type="text" value="{{sel.quiet}}" placeholder="없음 — 예: 02:00-06:00"></label>
+          </div>
+          <span id="conc-help" class="muted" style="font-size:12px">속도를 고르면 동시 IP 수가 따라 바뀝니다. 숫자를 직접 고치면 ‘직접 정함’ 이 됩니다. 쉬는 시간에는 새 회차를 시작하지 않고, 돌던 스캔은 끝까지 돕니다.</span>
+          <div style="font-size:12px;border:1px solid #243049;border-radius:8px;padding:10px 12px;background:#0a0e17">{{sel.advice}}</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button type="button" class="btn primary">저장</button>
+            <button type="button" class="btn">지금 한 번 스캔</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="card" style="padding:16px 18px;display:flex;flex-direction:column;gap:12px" aria-label="기본 일정">
+        <div><h2 class="h2">기본 일정</h2><span class="muted" style="font-size:12px">따로 정하지 않은 에이전트 21곳이 따릅니다</span></div>
+        <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">
+          <label class="fld">주기<select class="input"><option>1시간마다</option></select></label>
+          <label class="fld">스캔 속도<select class="input"><option>보통</option></select></label>
+          <label class="fld">동시에 스캔하는 IP 수<input class="input mono" type="text" value="128"></label>
+          <label class="fld">쉬는 시간(현지 시각)<input class="input mono" type="text" placeholder="없음"></label>
+        </div>
+        <label class="ck"><input type="checkbox" checked><b>에이전트마다 시작 분을 흩어 놓기</b><span>모든 법인이 정각에 한꺼번에 보고하지 않게</span></label>
+        <button type="button" class="btn" style="align-self:flex-start">기본 일정 저장</button>
+      </section>
+    </aside>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1400,"height":1160}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const NOW = 14;
+    const cur = (this.state && this.state.sel) || 'edge-jp1';
+    // 에이전트: [이름, 법인, 주기(시간), 시작 분, 쉬는 시간 [a,b) 포탈 시각, 상태, 대역, 주소, 최근 걸린 시간, 쉬는 시간 입력값]
+    const A = [
+      ['edge-kr1', 'VC-KR1 · 서울', 1, 40, null, 'ok', 38, '9,652', '6분 12초', ''],
+      ['edge-us1', 'VC-US1 · 미국 동부', 1, 51, null, 'live', 31, '7,874', '5분 40초', ''],
+      ['이 포탈에서 직접', 'VC-KR2 · 부산', 1, 49, null, 'live', 14, '3,556', '9분 05초', ''],
+      ['edge-pl1', 'VC-PL1 · 폴란드', 1, 2, null, 'late', 3, '568', '2분 41초', ''],
+      ['edge-de1', 'VC-DE1 · 독일', 2, 36, null, 'ok', 19, '4,826', '4분 20초', ''],
+      ['edge-us2', 'VC-US2 · 미국 동부', 6, 29, null, 'ok', 12, '3,048', '52분', ''],
+      ['edge-jp1', 'VC-JP1 · 도쿄', 1, 33, [2, 6], 'ok', 8, '2,032', '3분 10초', '02:00-06:00'],
+      ['edge-in1', 'VC-IN1 · 인도', 1, 27, null, 'ok', 6, '1,524', '2분 02초', ''],
+      ['edge-br1', 'VC-BR1 · 브라질', 0, 0, null, 'off', 9, '2,286', '—', ''],
+    ];
+    const pad = (n) => String(n).padStart(2, '0');
+    const EVERY = { 0: '꺼짐', 1: '1시간마다', 2: '2시간마다', 6: '6시간마다' };
+    const first = { 2: 0, 6: 2 };
+    const mk = (r) => {
+      const [name, corp, every, min, quiet, st, nets, addrs, took, quietTxt] = r;
+      const o = { name, corp, on: name === cur ? 'true' : 'false', cls: 'ag' + (name === cur ? ' sel' : ''), pick: () => this.setState({ sel: name }) };
+      let next = '—';
+      for (let h = 0; h < 24; h++) {
+        let k = '';
+        const inQuiet = quiet && h >= quiet[0] && h < quiet[1];
+        const due = every > 0 && (every === 1 || (h - (first[every] || 0)) % every === 0);
+        if (inQuiet) k = 'quiet';
+        else if (due) {
+          if (h < NOW) k = (st === 'late' && h > 11) ? 'miss' : 'done';
+          else if (h === NOW) k = st === 'live' ? 'live' : st === 'late' ? 'miss' : (min <= 52 ? 'done' : 'next');
+          else { k = 'next'; if (next === '—') next = pad(h) + ':' + pad(min); }
+        }
+        o['h' + h] = 'c' + (k ? ' ' + k : '') + (h === NOW ? ' nowc' : '');
+      }
+      o.next = next;
+      o.sched = EVERY[every] + (every ? ' · ' + pad(min) + '분' : '');
+      o.schedSub = quiet ? '현지 ' + quietTxt + ' 쉼' : every ? '쉬는 시간 없음' : '지금 스캔만';
+      o.st = st === 'ok' ? '정상' : st === 'live' ? '스캔 중' : st === 'late' ? '놓침 3회' : '꺼짐';
+      o.stCls = st === 'ok' ? 'tag ok' : st === 'live' ? 'tag blue' : st === 'late' ? 'tag warn' : 'tag gray';
+      o.aria = name + ' 오늘 일정 — ' + o.sched + ', 다음 스캔 ' + next;
+      o.every = EVERY[every]; o.quiet = quietTxt;
+      o.load = '대역 ' + nets + '개 · 주소 ' + addrs + '개 · 최근 걸린 시간 ' + took;
+      o.advice = name === 'edge-us2'
+        ? '한 번에 52분이 걸립니다. 주기를 1시간보다 짧게 잡으면 앞 스캔이 끝나기 전에 다음 회차가 옵니다 — 그럴 때는 겹쳐 돌리지 않고 그 회차를 건너뜁니다.'
+        : st === 'late' ? '11:02 이후 보고가 없어 세 번 놓쳤습니다. 일정 문제가 아니라 엣지 연결 문제일 수 있습니다 — 통신 지도에서 확인하세요.'
+        : st === 'off' ? '주기 스캔이 꺼져 있습니다. 켜면 기본 일정(1시간마다)으로 시작합니다.'
+        : '한 번에 ' + took + ' 걸려 지금 주기(' + EVERY[every] + ')에 여유가 있습니다.';
+      return o;
+    };
+    const agents = A.map(mk);
+    return { agents, sel: agents.find((a) => a.name === cur) || agents[0] };
+  }
+}
+</script>
+</body>
+</html>

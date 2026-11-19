@@ -1,7 +1,7 @@
 // 용량/낭비/씬/VM파인더/온도/용량예측 — api.js(구 2,445줄) 분할(v2.283.0). 본문은 원본 그대로, 등록 순서는 api.js 호출 순서가 보존한다.
-import { scopedVcenterIds, inUserScope } from '../../auth/scope.js';
+import { scopedVcenterIds, inUserScope, writeScopedVcenterIds } from '../../auth/scope.js';
 import { scopePollerStatus } from '../../auth/scopeStatus.js';
-import { mergeScopedIds, denyScopedRun, keepScopedFields, ignoredGlobalFields } from '../../auth/scopeMerge.js'; // v2.605 AUTHZ2605-01: 범위 계정 PUT 은 범위 밖 키를 보존한다 · v2.607 AUTHZ2607-05 전역 필드
+import { mergeScopedIds, denyScopedRun, keepScopedFields, ignoredGlobalFields, writeMergeScope } from '../../auth/scopeMerge.js'; // v2.605 AUTHZ2605-01: 범위 계정 PUT 은 범위 밖 키를 보존한다 · v2.607 AUTHZ2607-05 전역 필드
 import { requireRole, requirePerm } from '../../auth/auth.js'; // v2.478(감사 S5): /tools/* 조회도 tools 권한 게이트   // 설정 변경/데이터 삭제는 관리자 전용
 import { logAudit } from '../../audit.js';
 import { acquireExport } from '../../util/exportBusy.js'; // v2.575 — 내보내기 동시 1건 가드(단일 소스)
@@ -18,8 +18,9 @@ import { sheetsToWorkbook } from '../../tools/wasteExportXlsx.js';
 import { renderRightsizeHtml } from '../../tools/rightsizeHtml.js';
 import { zipManyAsync } from '../../util/zip.js'; // v2.742(LEFT-05·DB-05): 내보내기 zip 은 비동기판(결과 바이트는 zipMany 와 같다)
 import { withJob, withJobSync } from '../../perf/monitor.js'; // v2.498: 루프 정체가 관측되면 '그때 이 작업이 돌았다' 를 남긴다
-import { poweredOffSinceFor } from '../../tools/powerOff.js'; // v2.483: 전원 꺼진 VM 의 꺼진 시각
-import { loadPowerOffSettings, savePowerOffSettings, LIMITS as POWEROFF_LIMITS } from '../../tools/powerOffSettings.js'; // v2.484
+import { poweredOffSinceFor, offSinceByVc, OFF_AGE_EDGES } from '../../tools/powerOff.js'; // v2.483: 전원 꺼진 VM 의 꺼진 시각
+import { loadPowerOffSettings, savePowerOffSettings, powerOffWriteRefusal, LIMITS as POWEROFF_LIMITS } from '../../tools/powerOffSettings.js'; // v2.484
+import { unreadMark } from '../settingsUnreadMark.js';   // 112회차: 조회 응답의 읽기 오류 표지
 import { powerOffPollerStatus, runPowerOffCheckNow } from '../../tools/powerOffPoller.js';
 import { diskBreakdown, analyzeDiskTrend, diskTrendPolicyFromEnv } from '../../tools/diskTrend.js';
 import { getMetricsDb } from '../../metrics/db.js';
@@ -34,8 +35,10 @@ import { metricsSamplerStatus, samplerWithheldOf, unreadVcenterReasons } from '.
 import { DEFAULT_MAX_AGE_MS } from '../../idrac/roomTemp.js';
 import { TEMP_SERIES_DETAIL } from '../../idrac/serverTempSeries.js'; // v2.556: 스파크 메트릭 선택(흡기 계열은 상세 적재일 때만 있다)
 import { vmperfHistory, vmperfMeta, vmperfDiskUsage, dropVmperfDb, dbFileName, VMPERF_METRICS, VMPERF_DISK_METRICS, VMPERF_VMDISK_METRICS } from '../../metrics/vmperfDb.js';
-import { loadVmperfSettings, saveVmperfSettings, VMPERF_LIMITS } from '../../metrics/vmperfSettings.js';
+import { loadVmperfSettings, saveVmperfSettings, vmperfSettingsRefusal, VMPERF_LIMITS } from '../../metrics/vmperfSettings.js';
 import { memoJson, hash, eachLimited, scopeSlice, scopeKey } from './shared.js';
+import { isSummaryQuery, groupByVc, SUMMARY_TOP_N } from './toolSummary.js'; // v3.21.0 VM 분석 화면 요약 — 같은 라우트 · 같은 게이트 안에서
+import { capacityForecastSummaryByVc } from '../../dscfg/summary.js'; // v3.22.0 Hypervisor 분석 화면 — 용량 예측 요약
 import { dsGrowthFor } from '../../tools/dsGrowth.js'; // v2.672 운영 장애: 용량 예측 증가율 — 롤업 전용·스냅샷 무관 캐시·시간 기준 양보
 import { lowerTerm } from '../../search/deepSearch.js'; // v2.629 AUTHZ2629-01: 검색어 1회 소문자화 + 길이 상한(한 벌)
 import { numOrNull } from '../../util/numOrNull.js'; // v2.578: 요청 기간 등 '읽지 못한 수치' 를 0 으로 둔갑시키지 않는다
@@ -64,6 +67,26 @@ export function diskHistoryPoint(e) {
     reclaimGB,
     ...(legacy ? { reclaimLegacy: true } : {}),
   };
+}
+
+/**
+ * 111회차: 'VM 정밀 검색' 유휴 판정(순수). avg = 1주 평균(없으면 1일 평균) CPU %.
+ * 평균을 못 읽었으면(null) **사유와 무관하게** null(판정 불가) — false('사용')로 접지 않는다. 읽었으면 '켜져 있고 기준 이하' 일 때만 유휴.
+ */
+export function vmFinderIdle(vm, avg, threshold) {
+  if (avg == null) return null;
+  return vm?.powerState === 'POWERED_ON' && avg <= threshold;
+}
+
+/**
+ * 111회차: 고아 VMDK 보류 창(시간) 해석(순수). 0 은 '보류 판정 끔' 이라 **명시적으로 0 을 보낸 경우만** 0 이다 —
+ * 못 읽은 값(글자 · 빈 값 · 음수)은 예전처럼 0(안전장치 끔)이 아니라 기본 24시간. 상한 720시간.
+ */
+export const ORPHAN_RECENT_HOURS_DEFAULT = 24;
+export function orphanRecentHours(raw) {
+  const n = numOrNull(raw);
+  if (n == null || n < 0) return ORPHAN_RECENT_HOURS_DEFAULT;
+  return Math.min(720, n);
 }
 
 export function registerToolsCapacity(api) {
@@ -181,27 +204,35 @@ function overAllocatedReport(scoped, vms, { top = 50 } = {}) {
   // v2.631(감사 AX2-02): 사용률을 읽지 못한 VM(REST 폴백 vCenter·엣지 정제로 null)은 0% 가 아니다 — 그 지표의
   //   합산·후보 판정에서 빼고 개수를 밝힌다. 예전 `Number(x) || 0` 은 그 VM 을 메모리 과할당 1순위(할당 전량 유휴)로 만들었다.
   const usageUnknown = { cpu: 0, mem: 0 };
+  // v3.21.0(VM 분석 화면 요약): 같은 누계를 vCenter 별로도 쌓는다 — 요약이 법인별 할당 · 사용 · 미사용을 다시 계산하지 않게(판정 한 벌).
+  //   wasteReport 가 요약을 만들 때만 쓰고 지운다(응답에 실리지 않음 — Map 은 JSON 으로 {} 가 된다).
+  const perVc = new Map();
+  const pv = (id) => { let e = perVc.get(id); if (!e) { e = { poweredOn: 0, cpuAllocMhz: 0, cpuUsedMhz: 0, memAllocMB: 0, memUsedMB: 0, usageUnknownCpu: 0, usageUnknownMem: 0, excludedNoHostMhz: 0 }; perVc.set(id, e); } return e; };
   const items = [];
   for (const v of on) {
+    const e = pv(v.vcenterId);
+    e.poweredOn += 1;
     const vcpu = Number(v.cpuCount) || 0;
     const memMB = Number(v.memMB) || 0;
     const cpuPct = numOrNull(v.cpuUsagePct);
     const memPct = numOrNull(v.memUsagePct);
-    if (cpuPct == null) usageUnknown.cpu += 1;
-    if (memPct == null) usageUnknown.mem += 1;
+    if (cpuPct == null) { usageUnknown.cpu += 1; e.usageUnknownCpu += 1; }
+    if (memPct == null) { usageUnknown.mem += 1; e.usageUnknownMem += 1; }
     const mhzPerCore = hostMhz.get(`${v.vcenterId}|${v.host}`);
     // 메모리는 호스트 정보 없이도 계산 가능(MB 단위 그대로).
     const mUsed = memPct == null ? null : memMB * (memPct / 100);
-    if (mUsed != null) { memAllocMB += memMB; memUsedMB += mUsed; }
+    if (mUsed != null) { memAllocMB += memMB; memUsedMB += mUsed; e.memAllocMB += memMB; e.memUsedMB += mUsed; }
     let cAlloc = null; let cUsed = null;
     if (mhzPerCore && vcpu > 0) {
       cAlloc = vcpu * mhzPerCore;
       if (cpuPct != null) {
         cUsed = cAlloc * (cpuPct / 100);
         cpuAllocMhz += cAlloc; cpuUsedMhz += cUsed;
+        e.cpuAllocMhz += cAlloc; e.cpuUsedMhz += cUsed;
       }
     } else if (vcpu > 0) {
       excludedNoHostMhz += 1; // 호스트 MHz 미상 — clock 합계에서 제외(추정 금지)
+      e.excludedNoHostMhz += 1;
     }
     items.push({
       id: v.id, name: v.name, vcenterId: v.vcenterId, host: v.host || '', cluster: v.cluster || '',
@@ -227,6 +258,7 @@ function overAllocatedReport(scoped, vms, { top = 50 } = {}) {
   return {
     // wasteReport 가 vCenter 별 후보 수를 세고 지운다(응답에는 실리지 않음).
     cpuCandidatesList: cpuCand.map((x) => ({ vcenterId: x.vcenterId })), memCandidatesList: memCand.map((x) => ({ vcenterId: x.vcenterId })),
+    perVcAlloc: perVc,   // v3.21.0: wasteReport 가 지운다(요약만 쓴다)
     thresholds: { cpuIdlePct: CPU_IDLE_PCT, memIdlePct: MEM_IDLE_PCT },
     poweredOnVms: on.length,
     excludedNoHostMhz,     // 호스트 코어 MHz 를 몰라 clock 집계에서 빠진 VM 수(투명성)
@@ -252,7 +284,7 @@ function overAllocatedReport(scoped, vms, { top = 50 } = {}) {
  * (수치 불일치 방지). topOff/topOther 로 상위 N 절단을 제어한다(화면 300/50, 내보내기 전량은 Infinity).
  * byVcenter: vCenter 별 현황(사용자 요구 'vCenter 별 전체 현황') — 절단 전 전체 기준.
  */
-function wasteReport(scoped, vms, { topOff = 300, topOther = 50 } = {}) {
+function wasteReport(scoped, vms, { topOff = 300, topOther = 50, keepPerVc = false } = {}) {
   const r1 = (x) => Number((x || 0).toFixed(1));
   const off = vms.filter((v) => v.powerState !== 'POWERED_ON');
   const snaps = vms.filter((v) => (v.snapshotCount || 0) > 0);
@@ -276,7 +308,9 @@ function wasteReport(scoped, vms, { topOff = 300, topOther = 50 } = {}) {
   for (const v of overAllocated.cpuCandidatesList || []) bump(v.vcenterId, (e) => { e.cpuCandidates++; });
   for (const v of overAllocated.memCandidatesList || []) bump(v.vcenterId, (e) => { e.memCandidates++; });
   delete overAllocated.cpuCandidatesList; delete overAllocated.memCandidatesList;
+  const perVcAlloc = overAllocated.perVcAlloc; delete overAllocated.perVcAlloc;
   return {
+    ...(keepPerVc ? { perVcAlloc } : {}),   // v3.21.0: 요약(wasteSummary)만 — 화면 응답 · 내보내기에는 없다
     overAllocated,
     poweredOff: { count: off.length, storageGB: sumKnown(off, 'storageGB'), storageUnknown: unknownOf(off, 'storageGB'),   // v2.727(C-01)
       vms: top(off, (v) => numOrNull(v.storageGB) ?? -1, topOff).map((v) => ({ id: v.id, name: v.name, vcenterId: v.vcenterId, storageGB: numOrNull(v.storageGB), guestOS: v.guestOS })) },
@@ -288,6 +322,60 @@ function wasteReport(scoped, vms, { topOff = 300, topOther = 50 } = {}) {
   };
 }
 
+/**
+ * v3.21.0 VM 분석 화면 요약(`/tools/waste?summary=1` — docs/design/vm-insight §4-2 · §8) — 법인(vCenter)별 줄 + 법인별 상위 N.
+ *   본문은 wasteReport 를 **상한 없이**(내보내기 전량과 같은 옵션) 한 번 돌려 그 판정 · 정렬을 그대로 묶는다(새 판정 없음):
+ *   후보 수 · 꺼짐 점유 · 스냅샷 · Tools · Thin 은 byVcenter(절단 전 전체), CPU · 메모리 할당 · 사용 · 미사용은 overAllocatedReport 의 vCenter 별 누계,
+ *   상위 N 은 도구의 정렬(미사용 큰 순 · 디스크 큰 순 · 스냅샷 큰 순 · Tools 는 도구 순서)을 vCenter 별로 앞에서 N 개.
+ *   회수 가능 스토리지(추정) = poweredOffGB + thinReclaimGB(웹 wasteViewText.reclaimStorage 와 같은 식 — 화면이 그 함수로 더한다).
+ *   꺼진 VM 의 vCPU · 메모리 · 스냅샷 보유 수는 할당 합 · 개수다(판정이 아니다) — vCPU · 메모리를 못 읽은 꺼진 VM 은 합에서 빼고 offAllocUnknown 으로 센다.
+ *   꺼진 지 구간은 DB 조회라 따로 — `/tools/waste/off-since?summary=1`(두 단계 · 화면이 뒤이어 채운다).
+ */
+function wasteSummary(scoped, vms) {
+  const r1 = (x) => Math.round((Number(x) || 0) * 10) / 10;
+  const w = wasteReport(scoped, vms, { topOff: Infinity, topOther: Infinity, keepPerVc: true });
+  const N = SUMMARY_TOP_N;
+  const cpuTop = groupByVc(w.overAllocated.cpuTop); const memTop = groupByVc(w.overAllocated.memTop);
+  const offTop = groupByVc(w.poweredOff.vms); const snapTop = groupByVc(w.snapshots.vms); const toolsTop = groupByVc(w.noTools.vms);
+  const offAlloc = new Map();
+  const thinVms = new Map();
+  for (const v of vms) {
+    if (v.thin) thinVms.set(v.vcenterId, (thinVms.get(v.vcenterId) || 0) + 1);   // wasteReport 의 thin 집합과 같은 조건
+    if (v.powerState === 'POWERED_ON') continue;
+    let e = offAlloc.get(v.vcenterId);
+    if (!e) { e = { offVcpu: 0, offMemGB: 0, offAllocUnknown: 0, offWithSnapshots: 0 }; offAlloc.set(v.vcenterId, e); }
+    const c = numOrNull(v.cpuCount); const m = numOrNull(v.memMB);
+    if (c == null || m == null) e.offAllocUnknown += 1;
+    if (c != null) e.offVcpu += c;
+    if (m != null) e.offMemGB += m / 1024;
+    if ((Number(v.snapshotCount) || 0) > 0) e.offWithSnapshots += 1;
+  }
+  const byVc = new Map(w.byVcenter.map((e) => [e.vcenterId, e]));
+  const ids = new Set([...(scoped.vcenters || []).map((v) => v.id), ...byVc.keys()]);
+  const vcName = new Map((scoped.vcenters || []).map((v) => [v.id, v.name || v.id]));
+  const rows = [...ids].map((id) => {
+    const b = byVc.get(id) || { vms: 0, poweredOff: 0, poweredOffGB: 0, poweredOffStorageUnknown: 0, snapshots: 0, snapshotGB: 0, noTools: 0, thinReclaimGB: 0, thinUncommittedUnknown: 0, cpuCandidates: 0, memCandidates: 0 };
+    const a = w.perVcAlloc.get(id) || { poweredOn: 0, cpuAllocMhz: 0, cpuUsedMhz: 0, memAllocMB: 0, memUsedMB: 0, usageUnknownCpu: 0, usageUnknownMem: 0, excludedNoHostMhz: 0 };
+    const o = offAlloc.get(id) || { offVcpu: 0, offMemGB: 0, offAllocUnknown: 0, offWithSnapshots: 0 };
+    return {
+      vcenterId: id, name: vcName.get(id) || id, vms: b.vms, poweredOnVms: a.poweredOn,
+      // 할당 · 사용은 원값(MHz · MB, 소수 첫째 자리) — 화면이 고른 법인을 더한 뒤 GHz · GB 로 바꾼다(반올림한 값을 더하면 합이 어긋난다).
+      cpu: { allocMhz: r1(a.cpuAllocMhz), usedMhz: r1(a.cpuUsedMhz), idleMhz: r1(a.cpuAllocMhz - a.cpuUsedMhz), candidates: b.cpuCandidates },
+      mem: { allocMB: r1(a.memAllocMB), usedMB: r1(a.memUsedMB), idleMB: r1(a.memAllocMB - a.memUsedMB), candidates: b.memCandidates },
+      usageUnknown: { cpu: a.usageUnknownCpu, mem: a.usageUnknownMem }, excludedNoHostMhz: a.excludedNoHostMhz,
+      poweredOff: b.poweredOff, poweredOffGB: b.poweredOffGB, poweredOffStorageUnknown: b.poweredOffStorageUnknown,
+      offVcpu: o.offVcpu, offMemGB: r1(o.offMemGB), offAllocUnknown: o.offAllocUnknown, offWithSnapshots: o.offWithSnapshots,
+      snapshots: b.snapshots, snapshotGB: b.snapshotGB, noTools: b.noTools,
+      thinVms: thinVms.get(id) || 0, thinReclaimGB: b.thinReclaimGB, thinUncommittedUnknown: b.thinUncommittedUnknown,
+      top: {
+        mem: (memTop.get(id) || []).slice(0, N), cpu: (cpuTop.get(id) || []).slice(0, N),
+        poweredOff: (offTop.get(id) || []).slice(0, N), snapshots: (snapTop.get(id) || []).slice(0, N), noTools: (toolsTop.get(id) || []).slice(0, N),
+      },
+    };
+  }).sort((x, y) => String(x.vcenterId).localeCompare(String(y.vcenterId)));
+  return { thresholds: w.overAllocated.thresholds, topN: N, rows };
+}
+
 // Waste report — 자원 낭비 후보 모음(스냅샷 기반): 전원 꺼진 VM, 스냅샷 보유 VM,
 // thin 회수가능, Tools 미설치. (고아 VMDK는 데이터스토어 파일 스캔이 필요해 미포함)
 api.get('/tools/waste', requirePerm('tools'), (req, res) => memoJson(req, res, 'tools-waste', (snap) => {
@@ -296,6 +384,9 @@ api.get('/tools/waste', requirePerm('tools'), (req, res) => memoJson(req, res, '
   // overAllocatedReport 가 '코어당 MHz' 조회표로만 쓰므로, 폴더 선택(클러스터를 넘나듦)에서
   // 호스트까지 거르면 CPU clock 환산이 통째로 '근거 없음' 이 된다.
   const scoped = scopeSlice(snap, req.user, vcId);
+  // v3.21.0: ?summary=1 — 법인별 줄 + 법인별 상위 N(VM 분석 화면). 게이트(tools · toolGate 'waste')와 범위(scopeSlice)는 그대로이고,
+  //   클러스터 · 폴더(group)는 보지 않는다(법인 줄이 하위 범위로 잘리면 화면이 더한 수가 법인 합이 아니다). memo 열쇠는 URL 이라 원본과 다른 칸이다.
+  if (isSummaryQuery(req.query)) return { summary: true, tool: 'waste', scope: vcId || 'all', ...wasteSummary(scoped, scoped.vms.filter((v) => !v.template)) };
   const group = normGroupQuery(req.query);
   const vms = filterVmsByGroup(scoped.vms, group).filter((v) => !v.template);
   return {
@@ -440,10 +531,18 @@ api.get('/tools/groups', requirePerm('tools'), (req, res) => memoJson(req, res, 
 api.get('/tools/waste/off-since', requirePerm('tools'), async (req, res) => {
   const vcId = req.query.vcenterId ? String(req.query.vcenterId) : '';
   const snap = store.get();
-  const off = filterVmsByGroup(scopeSlice(snap, req.user, vcId).vms, normGroupQuery(req.query))
+  // v3.21.0: ?summary=1 — 법인별 꺼진 지 구간 + 오래 꺼진 순 상위 N(VM 분석 화면의 둘째 단계). 클러스터 · 폴더는 보지 않는다(/tools/waste?summary=1 과 같은 대상).
+  const summary = isSummaryQuery(req.query);
+  const off = (summary ? scopeSlice(snap, req.user, vcId).vms : filterVmsByGroup(scopeSlice(snap, req.user, vcId).vms, normGroupQuery(req.query)))
     .filter((v) => !v.template && v.powerState !== 'POWERED_ON');
   try {
     const r = await poweredOffSinceFor(off.map((v) => ({ id: v.id, name: v.name, vcenterId: v.vcenterId })));
+    if (summary) {
+      const m = offSinceByVc(off.map((v) => ({ id: v.id, name: v.name, vcenterId: v.vcenterId, storageGB: numOrNull(v.storageGB) })), r.rows, SUMMARY_TOP_N);
+      const rows = [...m.entries()].map(([vcenterId, e]) => ({ vcenterId, poweredOff: Object.values(e.buckets).reduce((a, b) => a + b, 0), buckets: e.buckets, top: { oldest: e.oldest } }))
+        .sort((a, b) => String(a.vcenterId).localeCompare(String(b.vcenterId)));
+      return res.json({ summary: true, tool: 'waste/off-since', scope: vcId || 'all', generatedAt: Date.now(), ageEdges: [...OFF_AGE_EDGES], topN: SUMMARY_TOP_N, sources: r.sources, rows });
+    }
     res.json({ scope: vcId || 'all', generatedAt: Date.now(), ...r });
   } catch (e) {
     res.status(500).json({ ok: false, reason: `꺼진 시각 조회 실패: ${e.message}` });
@@ -665,11 +764,12 @@ api.get('/tools/waste/off-check', requirePerm('tools'), (req, res) => {
   // v2.583(감사 검증 지적 — v2.574 SEC-05 형제 누락): lastResult 의 vcenters·offVms·newStreaks·cleared 는
   //   전 법인 합계다. 범위 계정에는 시각·소요만 남긴다(scopePollerStatus).
   const allowed = scopedVcenterIds(req.user, store.get());
-  res.json({ ok: true, ...scopePollerStatus(powerOffPollerStatus(), allowed), limits: POWEROFF_LIMITS });
+  res.json({ ok: true, ...scopePollerStatus(powerOffPollerStatus(), allowed), limits: POWEROFF_LIMITS, ...unreadMark(powerOffWriteRefusal()) });   // 112회차: 못 읽은 동안 settings 는 기본값 — 화면이 저장을 잠근다
 });
 api.put('/tools/waste/off-check/settings', requireRole('admin'), (req, res) => {
   // v2.607 AUTHZ2607-05: 이 설정은 전부 전 법인 공용(사용 여부·주기) — 범위 계정의 값은 적용하지 않고 밝힌다.
-  const allowed = scopedVcenterIds(req.user, store.get());
+  const allowed = writeMergeScope(req);   // 전체 점검 7회차: 쓰기 범위가 제한된 계정도 '범위 계정'
+  { const no = powerOffWriteRefusal(); if (no) return res.status(503).json(no); }   // 107회차: 설정 파일 읽기 오류 중에는 저장하지 않는다(사유를 화면까지)
   const kg = keepScopedFields(req.body || {}, loadPowerOffSettings(), allowed, []);
   const next = allowed ? loadPowerOffSettings() : savePowerOffSettings(kg.patch);
   if (!allowed) logAudit({ user: req.user?.username, action: '전원 꺼짐 점검 설정 변경', detail: `enabled=${next.enabled} interval=${next.intervalHours}h`, ip: req.ip || '' });
@@ -973,6 +1073,9 @@ api.get('/tools/waste/settings', requirePerm('tools'), (req, res) => {
 });
 
 api.put('/tools/waste/settings', requireRole('admin'), (req, res) => {
+  // 92회차 F2: 설정 파일 읽기 오류 중에는 저장하지 않는다(기본값 위에 쓰면 보존일 · 대상 목록을 덮는다 — 원본은 디스크에 그대로).
+  const unreadable = vmperfSettingsRefusal();
+  if (unreadable) return res.status(409).json(unreadable);
   const b = req.body || {};
   const snap = store.get();
   const validIds = new Set((snap.vcenters || []).map((v) => v.id));
@@ -991,7 +1094,8 @@ api.put('/tools/waste/settings', requireRole('admin'), (req, res) => {
   // v2.605 AUTHZ2605-01: 범위 제한 admin 은 GET 이 걸러 준 목록을 되돌려 보낸다 — 그것을 전체 목록으로
   //   저장하면 다른 법인이 대상에서 빠지고 그 DB 파일까지 지워졌다. 범위 밖 id 는 직전 값을 보존하고,
   //   범위 밖 DB·전체 합계 DB 는 이 계정의 저장으로 지우지 않는다(trackTotal 은 전 법인 계열이라 보존).
-  const allowed = scopedVcenterIds(req.user, snap);
+  const allowed = writeMergeScope(req);   // 전체 점검 7회차: 병합 · 전역 필드 · 지울 DB 는 쓰기 범위(조회만 보면 쓰기를 줄인 관리자가 다른 법인을 대상에서 빼 DB 파일까지 지웠다)
+  const read = scopedVcenterIds(req.user, snap);
   let ignoredOutOfScope = []; let unapplied = null; let unappliedReason = null;
   // v2.607 AUTHZ2607-05: 전역 필드(enabled·retentionDays·trackTotal 등)는 전 법인 공용 — 범위 계정의 값은 버리고 밝힌다
   //   (예전에는 범위 admin 이 보존일을 1일로 내려 전 법인 VM 성능 이력을 prune 시켰다).
@@ -1029,7 +1133,7 @@ api.put('/tools/waste/settings', requireRole('admin'), (req, res) => {
     detail: dropped.length ? `DB 삭제: ${dropped.join(', ')}` : '', ip: req.ip || '',
   });
   // PUT 응답도 GET 과 같은 필터 — 범위 밖 id 를 응답으로 되돌려 주지 않는다.
-  const safeNext = allowed ? { ...next, vcenterIds: (next.vcenterIds || []).filter((id) => allowed.has(id)) } : next;
+  const safeNext = read ? { ...next, vcenterIds: (next.vcenterIds || []).filter((id) => read.has(id)) } : next;   // 응답 가림은 조회 범위
   res.json({ ok: true, settings: safeNext, staleIds: vmperfStaleIds(safeNext.vcenterIds, snap), dropped, ...(ignoredOutOfScope.length ? { ignoredOutOfScope: ignoredOutOfScope.length } : {}), ...(unapplied ? { unapplied, unappliedReason } : {}), ...ignoredGlobalFields(kg.ignoredGlobal) });
 });
 
@@ -1042,9 +1146,11 @@ api.delete('/tools/waste/settings/data', requireRole('admin'), (req, res) => {
   }
   const vcId = String(req.query.vcenterId ?? '');
   // v2.605 AUTHZ2605-01: 범위 제한 admin 은 범위 밖 vCenter·전체 합계(전 법인 계열) DB 를 지울 수 없다.
-  const allowedDel = scopedVcenterIds(req.user, store.get());
+  // 전체 점검 7회차(2회차 반증 R-3): 되돌릴 수 없는 삭제라 쓰기 범위로 판정(조회만 보면 쓰기를 줄인 관리자가 범위 밖 · 전체 합계 DB 를 지웠다) · 던지면 거부
+  let allowedDel;
+  try { allowedDel = writeScopedVcenterIds(req.user, store.get()); } catch { allowedDel = new Set(); }
   if (allowedDel && (vcId === '' || !allowedDel.has(vcId))) {
-    return res.status(403).json({ ok: false, requiredOwner: true, reason: '범위 밖 vCenter 또는 전체 합계 데이터는 전체 범위 계정만 지울 수 있습니다.' });
+    return res.status(403).json({ ok: false, requiredOwner: true, reason: '쓰기 범위 밖 vCenter 또는 전체 합계 데이터는 조회 · 쓰기 전체 범위 계정만 지울 수 있습니다.' });
   }
   const removed = dropVmperfDb(vcId);
   logAudit({ user: req.user?.username, action: 'VM 성능 트래킹 데이터 삭제', target: vcId || '(전체 합계)', detail: `파일 ${removed}개`, ip: req.ip || '' });
@@ -1354,9 +1460,12 @@ api.post('/tools/vm-finder', requirePerm('tools'), async (req, res) => {
       const a = it.avgWeekCpu ?? it.avgDayCpu;
       // v2.733(C3-01): 인증 정지로 평균을 못 읽은 VM 은 '유휴 아님(false)' 이 아니라 판정 불가(null)다.
       // v2.744(VC-04): 직접 수집 대상이 아니라 조회하지 않은 VM 도 같다(판정 불가).
-      it.idle = (it.authStopped || it.skipReason) && a == null ? null : (it.powerState === 'POWERED_ON' && a != null && a <= threshold);
+      // 111회차: 평균을 못 읽은 사유를 가리지 않는다 — 성능 조회 실패(시한 · 통신 오류) · vCenter 설정 없음 · 표본 0 인 VM 도 판정 불가(null)다.
+      //   예전에는 그 VM 이 false 라 화면이 평균 '—' 옆에 '사용' 배지를 그렸다(못 읽은 값을 정상으로). 판정은 vmFinderIdle 하나.
+      it.idle = vmFinderIdle(it, a, threshold);
     }
     result.idleCount = targets.filter((x) => x.idle).length;
+    result.idleUnknown = targets.filter((x) => x.idle == null).length;   // 111회차: 평균을 못 읽어 판정하지 않은 VM 수(유휴에도 사용에도 넣지 않는다)
     result.idleThreshold = threshold;
   }
   res.json(result);
@@ -1809,8 +1918,17 @@ api.get('/tools/capacity-forecast', requirePerm('tools'), (req, res) => memoJson
     items.push({ id: d.id, name: d.name, vcenterId: d.vcenterId, type: d.type, capacityGB: d.capacityGB, usedGB: d.usedGB, freeGB, usagePct: d.usagePct, growthGBperDay: slope == null ? null : Number(slope.toFixed(2)), daysToFull, synthesized, growthPoints: g?.points ?? 0, growthSince: g?.firstTs ?? null });
   }
   items.sort((a, b) => (a.daysToFull ?? Infinity) - (b.daysToFull ?? Infinity));
+  const growthInfo = { source: 'rollup', windowDays: growth.windowDays, at: growth.at, stale: growth.stale, refreshing: growth.refreshing, error: growth.error };
+  // v3.22.0: ?summary=1 — 법인별 줄 + 법인별 상위 N(Hypervisor 분석 화면 · dscfg/summary.js). 게이트(tools · toolGate 'capacity-forecast')와 범위(allowed)는 위 그대로 ·
+  //   항목(소진 예상일 · 합성 여부)도 위에서 만든 것 그대로 센다. mock · synthesized 표시를 그대로 싣는다. memo 열쇠는 URL 이라 원본과 다른 칸이다.
+  if (isSummaryQuery(req.query)) {
+    const vcs = (snap.vcenters || []).filter((v) => (!allowed || allowed.has(v.id)) && (!vcId || v.id === vcId));
+    const vcName = new Map(vcs.map((v) => [v.id, v.name || v.id]));
+    const sm = capacityForecastSummaryByVc(items, { vcenters: vcs }, { vcName, topN: SUMMARY_TOP_N });
+    return { summary: true, tool: 'capacity-forecast', scope: vcId || 'all', mock, synthesized: items.some((x) => x.synthesized), ...sm, growth: growthInfo };
+  }
   // 추세의 근거(정직): 롤업만 · 기준 시각 · 오래됐는지 · 계산 오류. 롤업 도입 이전 구간은 쓰지 않는다(항목의 growthSince 가 첫 점).
-  return { scope: vcId || 'all', mock, items, growth: { source: 'rollup', windowDays: growth.windowDays, at: growth.at, stale: growth.stale, refreshing: growth.refreshing, error: growth.error } };
+  return { scope: vcId || 'all', mock, items, growth: growthInfo };
 }, { ttlMs: 30_000, extraKey: scopeKey(req.user, store.get()) }));
 
 /**
@@ -1866,8 +1984,8 @@ api.get('/tools/orphan-vmdk', requirePerm('tools'), async (req, res) => {
     return res.status(404).json({ ok: false, reason: '데이터스토어를 찾을 수 없습니다.' });
   }
   // 보류 창(시간) — 화면이 조절한다. 0 은 '보류 판정 끔'(명시적 선택).
-  const recentHours = req.query.recentHours === undefined ? 24
-    : Math.max(0, Math.min(720, Number(req.query.recentHours) || 0));
+  // 111회차: `Number(x) || 0` 은 못 읽은 값(?recentHours=abc · 빈 값)을 0 = '보류 끔' 으로 만들었다 — 판정은 orphanRecentHours.
+  const recentHours = orphanRecentHours(req.query.recentHours);
   try {
     res.json({ ok: true, ...(await scanOrphanDisks(dsId, { recentHours })) });
   } catch (e) {

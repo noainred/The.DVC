@@ -44,17 +44,29 @@ describe('순서 · 추가 · 빼기 · 그룹', () => {
     expect(m.map((x) => x.id).slice(0, 3)).toEqual(['overview', 'server', 'summary']);
     expect(changeCount(g, m)).toBe(1); // summary 하나만 자리가 바뀌었다
   });
+  it('v3.19.0: 옛 저장 형식(tab:vms)을 편집 화면에서 다시 저장하면 새 형식(tab:vcenters)이 되고 같은 항목으로 풀린다 · 라벨은 새 이름', () => {
+    const old = { v: 1, groups: [{ id: 'server', children: [{ tab: 'vms' }, { tab: 'hosts' }] }, { id: 'tools', tab: 'tools' }] };
+    const ed = toEditable(resolveMenu({ mine: old, catalog: TOOLS }).groups);
+    const srv = ed.find((x) => x.id === 'server');
+    expect(srv.children.map((c) => [c.key, c.id, c.label])).toEqual([['tab:vcenters', 'virt', 'Virtual Machine'], ['tab:hosts', 'hv', 'Hypervisor']]);
+    const stored = toStored(ed);
+    expect(stored.groups.find((x) => x.id === 'server').children).toEqual([{ tab: 'vcenters' }, { tab: 'hosts' }]);
+    // 다시 읽어도 같은 편집 모양(옛 형식 · 새 형식이 같은 메뉴)
+    expect(sameMenu(toEditable(resolveMenu({ mine: stored, catalog: TOOLS }).groups), ed)).toBe(true);
+    // 기본 메뉴에 이미 있는 항목이라 tab:vms 로 다시 더할 수 없다(같은 항목 두 자리 금지)
+    expect(placedIn(ed, 'tab:vcenters')).toMatchObject({ single: false });
+  });
   it('항목 ▲▼·✕ 는 그 그룹 안에서만', () => {
     const g = base();
     const gi = g.findIndex((x) => x.id === 'server');
     const m = moveItem(g, gi, 0, 1);
-    expect(m[gi].children.map((c) => c.id).slice(0, 2)).toEqual(['esxi', 'vm']);
+    expect(m[gi].children.map((c) => c.id).slice(0, 2)).toEqual(['hv', 'virt']);   // v2.994: 서버 그룹 첫 둘은 Virtual Machine(VM)(v3.19.0 이름 Virtual Machine) · Hypervisor
     expect(moveItem(g, gi, 0, -1)).toBe(g);
     expect(moveItem(g, 0, 0, 1)).toBe(g); // 단독 항목
     const r = removeItem(m, gi, 0);
-    expect(r[gi].children.map((c) => c.id)[0]).toBe('vm');
-    expect(changeCount(g, r)).toBe(1); // esxi 가 빠졌다(아래 항목이 밀린 것은 바뀐 것이 아니다)
-    expect(changeCount(g, m)).toBe(1); // vm·esxi 를 맞바꾼 것은 하나가 움직인 것
+    expect(r[gi].children.map((c) => c.id)[0]).toBe('virt');
+    expect(changeCount(g, r)).toBe(1); // hv 가 빠졌다(아래 항목이 밀린 것은 바뀐 것이 아니다)
+    expect(changeCount(g, m)).toBe(1); // virt·hv 를 맞바꾼 것은 하나가 움직인 것
   });
   it('특수 기능 도구를 더한다 — 같은 도구는 한 그룹에만, 단독 그룹에는 못 넣는다', () => {
     const g = base();

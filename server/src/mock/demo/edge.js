@@ -44,6 +44,9 @@ export function isDemoCollector(c) {
   try { return /\.demo\.invalid$/i.test(new URL(String(c.url || '')).hostname); } catch { return false; }
 }
 
+/** 데모 엣지 목록(이름 · 데이터센터) — 설정 연동 '법인 엣지' 배정 후보(데모 전용). */
+export function demoEdgeList() { return DEMO_EDGES.map((e) => ({ id: e.id, name: e.name, datacenter: e.datacenter })); }
+
 export function demoEdgeUrl(e) { return `https://${e.slug}.demo.invalid:4000`; }
 
 // 엣지의 id 와 이름은 같다(실제 엣지는 AGENT_NAME 이 곧 수집 서버 id 다 — 다르면 '아는 엣지' 목록에 두 줄로 보인다).

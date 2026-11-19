@@ -13,7 +13,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'veeamEmVm2795-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const DIR = tmpDir('veeamEmVm2795-');
 process.env.CONFIG_DIR = DIR;
 process.env.DATA_SOURCE = 'live';
 delete process.env.CENTRAL_URL;
@@ -247,4 +254,25 @@ test('H 등록 — .gitignore · 포탈 DB 목록 · DB 안내', async () => {
   assert.match(fs.readFileSync(path.join(root, 'server/src/insights/portalDb.js'), 'utf8'), /'veeam-em-vms\.json':/);
   const { DB_GUIDE_DATA } = await import('../src/insights/dbGuideData.js');
   assert.ok(DB_GUIDE_DATA['veeam-em-vms.json']?.sources?.includes('server/src/veeam/em/vmStore.js'));
+});
+
+test('전체 점검 12회차(V-30) — 잘린 읽기는 실제로 읽은 가장 오래된 시각까지 기준을 올린다 · 오류로만 미완결이어도 창은 첫 채움을 넘지 않는다', async () => {
+  const since = NOW - 24 * H;
+  const rows = Array.from({ length: 2500 }, (_, i) => ({ VmDisplayName: `vm${i}`, Name: `vm${i}@x`, Result: 'Success', State: 'Stopped', CreationTimeUTC: iso(NOW - i * 30_000), EndTimeUTC: iso(NOW - i * 30_000), ...srvLink('S') }));
+  const fake = { mask: (x) => x, get: async (p) => { const q = new URLSearchParams(p.split('?')[1]); const page = Number(q.get('page')); return { Entities: { X: { X: rows.slice((page - 1) * EC.VM_PAGE, page * EC.VM_PAGE) } } }; } };
+  // 예산이 첫 쪽 뒤 끊긴다 → 그 쪽의 가장 오래된 행 시각이 capFloor
+  let tick = NOW; const clock = () => (tick += 50_000);
+  const r = await EC.readVmBackups(fake, { since, budgetMs: 60_000, clock });
+  assert.equal(r.complete, false);
+  assert.equal(r.capFloor, NOW - (EC.VM_PAGE - 1) * 30_000, '첫 쪽의 가장 오래된 행');
+  assert.equal(r.windowMs, EC.VM_WINDOW_MS);
+  // 합치기: 잘렸으면 since 를 그 시각까지 올린다(예전: 고정 → 창이 날마다 커졌다)
+  VS.mergeEmVms('em-v30', 'tgt', { ...r, since }, { startedAt: NOW });
+  assert.equal(VS.emVmSince('em-v30', 'tgt'), r.capFloor);
+  // 오류로만 미완결(capFloor 없음) — 옛 since 가 첫 채움 창보다 오래됐으면 창으로 자른다
+  VS.mergeEmVms('em-v30b', 'tgt', { since: NOW - 30 * 24 * H, complete: false, capFloor: null, windowMs: EC.VM_WINDOW_MS, tasks: [], points: [] }, { startedAt: NOW });
+  assert.equal(VS.emVmSince('em-v30b', 'tgt'), NOW - EC.VM_WINDOW_MS);
+  // 완결이면 예전 그대로(시작 − 겹침)
+  VS.mergeEmVms('em-v30c', 'tgt', { since, complete: true, tasks: [], points: [] }, { startedAt: NOW });
+  assert.equal(VS.emVmSince('em-v30c', 'tgt'), NOW - VS.OVERLAP_MS);
 });

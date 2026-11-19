@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>지금 — IP 스캔과 호스트명 (v2.914 목 서버 캡처)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.5}
+a{color:#60a5fa}a:hover{color:#93c5fd}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+.muted{color:#8b9bb4}
+.shot{display:block;width:100%;height:auto;border:1px solid #243049;border-radius:10px}
+.n{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:rgba(245,158,11,.18);color:#fbbf24;font-size:11px;font-weight:700;flex:none}
+.note{display:flex;align-items:flex-start;gap:8px;font-size:12.5px;line-height:1.6}
+.note b{font-weight:600}
+.fact{border:1px solid #243049;border-radius:10px;background:#0f1626;padding:12px 14px;display:flex;flex-direction:column;gap:6px;font-size:12.5px;line-height:1.6}
+.fact code{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11.5px;color:#93c5fd}
+</style>
+</helmet>
+<div style="box-sizing:border-box;padding:20px 24px 28px;max-width:1240px;display:flex;flex-direction:column;gap:14px;min-width:0">
+
+  <div style="display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:10px">
+    <span style="font-size:15px;font-weight:700">지금 — IP 관리 › 대장 목록 · 스캔 설정</span>
+    <span class="muted" style="font-size:12px">v2.914.0 목 서버 캡처 · 스캔 결과 12건은 이 시안을 위해 심은 가상 데이터(이름 있는 것 3건)</span>
+  </div>
+
+  <img class="shot" src="/_blob/c69b447d8aab5c165e04de4f05ab861d" alt="지금의 대장 목록 — 스캔만 필터. 열은 IP 주소, 분류, 센터, 서버종류, 확인 방식, 관리상태, 소유 자원, 전원, OS 종류, OS 버전, ESXi 호스트">
+
+  <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 20px">
+    <div class="note"><span class="n">1</span><span><b>‘호스트명’ 열이 없습니다.</b> 스캔 IP 의 이름은 ‘소유 자원’ 칸에, 그리고 표 오른쪽 끝 ‘ESXi 호스트’ 칸에 한 번 더 들어갑니다(잘려 보이는 gw… · lnx… · esx…).</span></div>
+    <div class="note"><span class="n">2</span><span><b>이름을 찾는 방법은 역DNS 하나입니다.</b> PTR 레코드가 없는 IP 는 ‘소유 자원’ 칸에 IP 가 그대로 다시 적힙니다(10.210.5.11 · SMB,RDP,WinRM).</span></div>
+    <div class="note"><span class="n">3</span><span><b>이름을 어디서 알았는지 표시가 없습니다.</b> 직접 넣은 이름(관리상태 편집 › 호스트명)과 스캔이 찾은 이름이 같은 모양입니다.</span></div>
+    <div class="note"><span class="n">4</span><span><b>이름이 없는 IP 만 모아 볼 방법이 없습니다.</b> 출처 대조 칩에 ‘스캔만’ 은 있지만 ‘호스트명 없음’ 은 없습니다.</span></div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:minmax(0,480fr) minmax(0,690fr);gap:20px;align-items:start">
+    <div style="display:flex;flex-direction:column;gap:8px;min-width:0">
+      <img class="shot" src="/_blob/4c50b2d81e23f7cd4341a0046067ba4f" alt="스캔 IP 를 눌렀을 때의 창 — 이 IP에 연결된 자원 상세를 열 수 없습니다">
+      <div class="note"><span class="n">5</span><span><b>스캔 IP 를 누르면 안내 창뿐입니다.</b> 열린 포트 · 이름 · 최초/마지막 확인 · 사용 이력이 나오지 않습니다(‘IP 사용 이력’ 창은 서브넷 대장에서만 열립니다).</span></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px;min-width:0">
+      <img class="shot" src="/_blob/96de717c4da557366e5da1452cf4d81e" alt="스캔 설정 편집기 아래쪽 — 포트, 주기·동시성·타임아웃, 역DNS 호스트명 체크, ICMP ping 병행, 보존 일수">
+      <div class="note"><span class="n">6</span><span><b>스캔 설정에서 이름과 관련된 칸은 ‘역DNS 호스트명’ 하나</b>이고, 스캔이 이름을 몇 개 찾았는지는 어디에도 나오지 않습니다.</span></div>
+    </div>
+  </div>
+
+  <div class="fact">
+    <b>코드에서 확인한 것</b>
+    <span>스캔은 응답한 IP 에 대해 <code>dns.reverse()</code> 만 부릅니다 — <code>server/src/ipam/scan.js</code> ‘reverseMany’. mDNS · NetBIOS 같은 다른 방법은 없습니다.</span>
+    <span>엣지가 보낸 결과에서 중앙이 받는 칸은 IP · 열린 포트 · 서비스 · 호스트명 넷뿐입니다 — <code>server/src/ipam/scanStore.js</code> ‘cleanAliveHost’. 출처를 실으려면 이 목록도 함께 넓혀야 합니다.</span>
+    <span>대장의 스캔 행은 <code>ownerName = 호스트명 또는 IP</code> · <code>hostName = 호스트명</code> 으로 만들어지고, 목록은 <code>hostName</code> 을 ‘ESXi 호스트’ 라는 제목의 열에 그립니다 — <code>ledger.js</code> · <code>IpamCore.jsx</code>.</span>
+    <span>직접 넣는 이름은 이미 있습니다 — ‘IP 관리상태 편집 › 호스트명(자동 수집 호스트명을 덮어쓸 이름)’, <code>IpamEditors.jsx</code>.</span>
+    <span>Angry IP Scanner 의 Hostname 칸은 공개 소스 기준으로 <b>역DNS → mDNS(UDP 5353 멀티캐스트) → NetBIOS(UDP 137)</b> 순서입니다. mDNS · NetBIOS 는 그 프로그램이 ‘로컬(LAN)’ 로 판정한 대상에만 시도합니다.</span>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1240,"height":1200}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

@@ -1,12 +1,19 @@
 // 서비스 인벤토리 5차 검토 3차 반영 — docs/design/service-map/README.md §5차 검토(사용자 '3차 진행해줘' · 표준 + 반증 1인).
 //   M4·R13 이름 규칙 적용 순서 · M5·R14 태그 여럿(서비스에 걸리는 값 · 모호 표시) · R10 판정 보류 시작 시각·출처 · R11 유령 정리 개수 확인 · M11·R19 CSV 열.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'svcinv-r5c-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const tmp = tmpDir('svcinv-r5c-');
 process.env.CONFIG_DIR = tmp;
 
 const { autoResolve, buildIndex, sortNameRules } = await import('../src/servicemap/resolve.js');

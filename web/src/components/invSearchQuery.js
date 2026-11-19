@@ -86,6 +86,8 @@ const SCREEN = Object.freeze({
 export const canFilter = (kind) => !!SCREEN[kind]?.target;
 export const HANDOFF_TARGETS = Object.freeze([...new Set(Object.values(SCREEN).map((s) => s.target).filter(Boolean))]);
 export const FOCUS_TARGETS = Object.freeze(Object.values(SCREEN).map((s) => s.focus).filter(Boolean));
+/** v2.955: SCREEN 표 밖의 인계 target — 팔레트의 'SAN 스토리지 성능에서 찾기' 행 · SAN 스토리지 성능 상세 → Flow Vision 타깃 WWN. 받는 화면이 있어야 한다(테스트가 소스로 대조). */
+export const EXTRA_HANDOFF_TARGETS = Object.freeze(['san-storage', 'san-flow:targets']);
 
 const masked = (row) => !!row?.addrHidden && String(row?.name || '').endsWith('(이름 가림)');
 
@@ -121,15 +123,16 @@ export function normPlan(plan) {
   return { hash: plan.hash.slice(0, 400), handoffs };
 }
 
-/** ‘모두 보기’ 링크의 화면 이름. */
+/** ‘모두 보기’ 링크의 화면 이름. v2.994: 서버 분석 → 'Physical Server'(메뉴 이름 변경 — 종류 키 server · gpu 는 그대로). */
 export const LIST_SCREEN = Object.freeze({
-  vm: '가상머신 탭', host: 'VM호스트 탭', datastore: '스토리지 탭', vcenter: 'Platform', server: '서버 분석',
-  gpu: '서버 분석 › GPU', storage: '스토리지 모니터링', sanswitch: 'SAN 스위치', netswitch: 'Arista CVP', pdu: 'PDU 정보', ip: 'IP관리',
+  vm: '가상머신 탭', host: 'VM호스트 탭', datastore: '스토리지 탭', vcenter: 'Platform', server: 'Physical Server',
+  gpu: 'Physical Server › GPU', storage: '스토리지 모니터링', sanswitch: 'SAN 스위치', netswitch: 'Arista CVP', pdu: 'PDU 정보', ip: 'IP관리',
 });
 
 // ── 최근 연 항목(컨펌 ④ — 브라우저 localStorage 10개). 저장소가 막혀 있으면 조용히 빈 목록(편의 기능). ──
 export const RECENT_KEY = 'ui.invSearch.recent';
 export const RECENT_MAX = 10;
+export const RECENT_ID_MAX = 300;
 /**
  * 계정별 키(반증 L-4 — 같은 브라우저를 쓰는 다음 계정에게 앞 계정이 연 장비 이름 · 법인 · vCenter/VM id 가 보이지 않게).
  * 계정을 모르면 저장하지 않는 키(null)를 돌려준다.
@@ -154,11 +157,34 @@ export function pushRecent(item, storage = globalThis.localStorage, now = Date.n
   const plan = normPlan(item?.plan);
   if (!plan) return readRecent(storage, key);
   const entry = { kind: String(item.kind || ''), name: String(item.name || '').slice(0, 120), corp: String(item.corp || '').slice(0, 80), plan, at: now };
+  // v2.928(B4): 행 id — 서버가 '최근 연 장비' 가산점을 줄 때만 쓴다(그 검색에서 이미 보이는 행 안에서). 없으면 싣지 않는다.
+  const id = typeof item.id === 'string' ? item.id.slice(0, RECENT_ID_MAX) : '';
+  if (id) entry.id = id;
   const sig = (x) => `${x.plan.hash}|${x.plan.handoffs.map((h) => h.join('|')).join('|')}`;
   const next = [entry, ...readRecent(storage, key).filter((x) => sig(x) !== sig(entry))].slice(0, RECENT_MAX);
   try { storage?.setItem(key, JSON.stringify(next)); } catch { /* 저장 차단 — 무시 */ }
   return next;
 }
+
+/**
+ * v2.928(B4): 최근 연 장비 → 검색 요청의 `recent=종류|id,…`(서버 `parseRecent` 와 같은 모양 · 10개).
+ * id 에 구분자(',')가 든 항목은 뺀다 — 서버가 나눠 읽다 다른 값이 되지 않게. 이 값은 순서 가산점에만 쓰인다.
+ */
+export function recentIdsParam(recent) {
+  const out = [];
+  for (const x of Array.isArray(recent) ? recent : []) {
+    if (out.length >= RECENT_MAX) break;
+    const kind = typeof x?.kind === 'string' ? x.kind : '';
+    const id = typeof x?.id === 'string' ? x.id.slice(0, RECENT_ID_MAX) : '';
+    if (!kind || !id || kind.includes('|') || kind.includes(',') || id.includes(',')) continue;
+    const s = `${kind}|${id}`;
+    if (!out.includes(s)) out.push(s);
+  }
+  return out.join(',');
+}
+
+/** 서버가 달아 주는 일치 표지(`via`) → 행 옆 배지 글자. 이름에 없는데 왜 나왔는지 알린다. */
+export const VIA_LABEL = Object.freeze({ tag: '태그', notes: '메모 일치', recent: '최근' });
 
 export function clearRecent(storage = globalThis.localStorage, key = RECENT_KEY) {
   try { if (key) storage?.removeItem(key); } catch { /* 무시 */ }
@@ -225,7 +251,7 @@ export function metaParts(row, { mode = 'all', needle = '' } = {}) {
   const out = [];
   const add = (t, extra = {}) => { if (t) out.push({ t: String(t), ...extra }); };
   const ip = shownIp(row, mode === 'ip' || /^[0-9.]+$/.test(String(needle).trim()) ? needle : '');
-  const more = Array.isArray(row.ips) && row.ips.length > 1 ? ` 외 ${row.ips.length - 1}` : '';
+  const more = Array.isArray(row.ips) && row.ips.length > 1 ? `\u00a0외\u00a0${row.ips.length - 1}` : '';
   const serial = shownSerial(row, mode, needle);
   // 상태는 법인 바로 뒤 — 메타가 길면 오른쪽이 잘리므로 판단에 쓰는 값을 앞에 둔다(1440 실측: 끝에 두면 '사용 62%' 가 잘렸다).
   const st = () => add(row.statusText, { dot: statusTone(row.status) });
@@ -246,7 +272,7 @@ export function metaParts(row, { mode = 'all', needle = '' } = {}) {
 
 /** 행 오른쪽 '어디로 가나' 표기. */
 export const TO_LABEL = Object.freeze({
-  vm: '가상머신 › 상세', host: 'VM호스트 › 상세', datastore: '스토리지 탭', vcenter: 'Platform', server: '서버 분석 › 정보',
+  vm: '가상머신 › 상세', host: 'VM호스트 › 상세', datastore: '스토리지 탭', vcenter: 'Platform', server: 'Physical Server › 정보',
   gpu: 'GPU 인벤토리', storage: '스토리지 모니터링', sanswitch: 'SAN 스위치', netswitch: 'Arista CVP', pdu: 'PDU 정보', ip: 'IP관리',
 });
 

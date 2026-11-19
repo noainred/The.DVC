@@ -15,7 +15,7 @@ import ExportPreviewModal from '../components/ExportPreviewModal.jsx';   // v2.8
 import { PREVIEW_BIG } from './tools/exportPreviewText.js';
 import {
   SLOT_COUNT, NAME_MAX, SAVE_WHAT, folderOptions, vmsInFolder, availBadge, moveCol, toggleCol, addCols, dropCols,
-  valueToSave, applyValue, initialState, slotLabel, defaultLine, savedText, exportBody,
+  valueToSave, applyValue, initialState, slotLabel, defaultLine, savedText, exportBody, unreadableNote,
 } from './vmListExportText.js';
 
 const TONE = { ok: '#86efac', run: '#93c5fd', warn: '#fcd34d', none: 'var(--text-dim)' };
@@ -149,7 +149,7 @@ export default function VmListExportDialog({ vcenterId, vcName, vms, screenReq, 
               <button type="button" className={save ? 'login-btn' : 'tab'} style={{ flex: 'none' }} disabled={!st.cols.length || prefs?.unreadable} onClick={() => (save ? setSave(null) : openSave())}>지금 설정 저장하기…</button>
             </span>
           </div>
-          <div className="muted" style={{ fontSize: 12 }}>{prefs?.unreadable ? '저장값 파일을 읽지 못해 저장할 수 없습니다(손상 사본은 설정 폴더에 남았습니다).' : defaultLine(prefs)}</div>
+          <div className="muted" style={{ fontSize: 12 }}>{prefs?.unreadable ? unreadableNote(prefs, '저장값 파일을 읽지 못해 저장할 수 없습니다') : defaultLine(prefs)}</div>
           {save && (
             <div className="flex gap wrap" style={{ alignItems: 'flex-end', gap: '12px 24px', paddingTop: 8, borderTop: '1px solid var(--border-soft)' }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>

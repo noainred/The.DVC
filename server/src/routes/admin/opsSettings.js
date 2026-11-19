@@ -1,22 +1,23 @@
 // 감사·알림·일일리포트·인증서·이상탐지·세션보안·OS스캔·프로비저닝 저장 — admin.js(구 2,410줄) 분할(v2.285.0). 본문은 원본 그대로, 등록 순서는 admin.js 호출 순서가 보존한다.
 import { config } from '../../config.js';
 import { verifyUserOtp, getUser, listUsers } from '../../auth/auth.js';
-import { saveSessionSecurity, loadConfiguredSecurity, managedAdminOwners } from '../../security/securitySettings.js';
+import { saveSessionSecurity, loadConfiguredSecurity, managedAdminOwners, sessionSecurityRecovery } from '../../security/securitySettings.js';
 import { loadSecretsPolicy, saveSecretsPolicy, migrateSecretFiles, SECRET_FILES } from '../../security/secretVault.js';
-import { saveOsScanSettings, runOsScanNow, osScanStatus } from '../../inventory/osScanner.js';
+import { saveOsScanSettings, runOsScanNow, osScanStatus, osScanWriteRefusal } from '../../inventory/osScanner.js';
 import { getOsResults, osSummary } from '../../inventory/osStore.js';
 import { listAudit, logAudit } from '../../audit.js';
 import { loginHistorySummary, parseLoginRange } from '../../security/loginHistory.js'; // v2.912: 설정 › 로그 › 최근 로그인 · 로그인 횟수
-import { alertStatus, saveAlertConfig, testAlert, getAnomalySettings, saveAnomalySettings } from '../../alerts.js';
+import { alertStatus, saveAlertConfig, alertConfigWriteRefusal, testAlert, getAnomalySettings, saveAnomalySettings } from '../../alerts.js';
 import { createJob as createProvisionJob } from '../../provision/jobs.js';
 import { updateSaved, removeSaved, getSaved } from '../../provision/saved.js';
 import { store } from '../../store.js';
 import { inUserWriteScope, inUserScope, scopedVcenterIds } from '../../auth/scope.js';
 import { ssrfBlockReasonResolved } from '../../collector/registry.js';
-import { dailyReportStatus, saveDailyReportSettings, runDailyReportNow } from '../../reports/dailyReport.js';
+import { dailyReportStatus, saveDailyReportSettings, runDailyReportNow, dailyReportWriteRefusal } from '../../reports/dailyReport.js';
+import { unreadMark } from '../settingsUnreadMark.js';   // 112회차: 조회 응답의 읽기 오류 표지
 import { refreshCerts } from '../../security/certMonitor.js';
 import { adminOnly, requireSettingsOwner, fullScopeOnlyWith, SETTINGS_OWNER_FULL_SCOPE_REASON } from './shared.js';
-import { mergeScopedMap, filterScopedMap, denyScopedRun } from '../../auth/scopeMerge.js'; // v2.606 AUTHZ2606-07
+import { mergeScopedMap, filterScopedMap, denyScopedRun, denyFleetWrite, writeMergeScope } from '../../auth/scopeMerge.js'; // v2.606 AUTHZ2606-07
 import { todayStamp } from "../../util/dayKey.js";
 import { csvLine } from '../../util/csv.js'; // v2.741(WEB-02 후속): CSV 수식 가드 한 벌
 import { requirePerm as requireCsvPerm } from '../../auth/auth.js';
@@ -95,17 +96,19 @@ export function scopedOwnerWarnings(owners) {
 export function registerOpsSettings(adminRouter) {
 
 // Audit log viewer (누가 언제 무엇을 했는지).
-adminRouter.get('/audit', adminOnly, (req, res) => {
-  // v2.607 AUTHZ2607-07: 감사 로그는 전 사용자·전 법인 작업 기록이고 target 에 vCenter 축이 없는 항목이 많아 나눌 수
-  //   없다 — 범위 계정 403(v2.525 규약. 같은 파일 /alerts 는 범위로 거른다).
-  if (scopedVcenterIds(req.user, store.get())) return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '감사 로그는 전 사용자·전 법인 기록이라 전체 범위(vCenter 제한 없는) 계정만 볼 수 있습니다.' });
+// v2.607 AUTHZ2607-07: 감사 로그는 전 사용자·전 법인 작업 기록이고 target 에 vCenter 축이 없는 항목이 많아 나눌 수
+//   없다 — 범위 계정 403(v2.525 규약. 같은 파일 /alerts 는 범위로 거른다).
+// v2.932(점검 C1-04): 거부는 fullScopeOnlyWith 모양({ok,error,reason}) — 예전 본문의 `requiredOwner:true` 때문에 화면(AccessDenied)이
+//   '설정 소유 계정 목록에 등록하라' 는 틀린 원인 · 틀린 조치를 말했다(실제 원인은 범위 — admin/shared.js v2.744 규약). 아래 /login-history 도 같다.
+const auditFullScope = fullScopeOnlyWith('감사 로그는 전 사용자·전 법인 기록이라 전체 범위(vCenter 제한 없는) 계정만 볼 수 있습니다.');
+const loginHistoryFullScope = fullScopeOnlyWith('로그인 기록은 전 사용자의 접속 기록이라 전체 범위(vCenter 제한 없는) 계정만 볼 수 있습니다.');
+adminRouter.get('/audit', adminOnly, auditFullScope, (req, res) => {
   res.json(listAudit({ limit: req.query.limit, offset: req.query.offset, user: req.query.user, q: req.query.q }));
 });
 
 // v2.912 — 로그인 기록(설정 › 로그 › 최근 로그인 · 로그인 횟수). 전 사용자의 로그인 시각·IP 라 감사 로그와 같은 기준이다:
 //   관리자 + 전체 범위 계정만(범위 계정 403). 집계는 메모리 배열 한 번 훑기라 캐시하지 않는다(화면은 열 때 · 버튼으로만 부른다).
-adminRouter.get('/login-history', adminOnly, (req, res) => {
-  if (scopedVcenterIds(req.user, store.get())) return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '로그인 기록은 전 사용자의 접속 기록이라 전체 범위(vCenter 제한 없는) 계정만 볼 수 있습니다.' });
+adminRouter.get('/login-history', adminOnly, loginHistoryFullScope, (req, res) => {
   const now = Date.now();
   const range = parseLoginRange(req.query.from, req.query.to, now);
   if (range?.error) return res.status(400).json({ ok: false, error: 'bad-range', reason: range.error });
@@ -115,7 +118,9 @@ adminRouter.get('/login-history', adminOnly, (req, res) => {
 });
 
 // Alerting: config + current firing/recent, save config, send a test notification.
-adminRouter.get('/alerts', adminOnly, (req, res) => res.json(scopeAlertStatus(alertStatus(), scopedVcenterIds(req.user, store.get()))));
+// 112회차: 알림 설정 파일을 못 읽은 동안 config 는 저장된 값이 아니라 기본값(채널 꺼짐 · 웹훅 주소 없음)이다 — 표지를 실어 화면이 그 기본값 폼의 저장을 잠그게 한다
+//   (다시 읽힌 뒤의 저장이 웹훅 주소 · 임계를 보존본 없이 덮는다 — 409 는 읽기 오류가 이어지는 동안만 막는다).
+adminRouter.get('/alerts', adminOnly, (req, res) => res.json({ ...scopeAlertStatus(alertStatus(), scopedVcenterIds(req.user, store.get())), ...unreadMark(alertConfigWriteRefusal()) }));
 adminRouter.put('/alerts', adminOnly, fleetOnly, async (req, res) => {
   // 웹훅 URL은 서버가 대신 POST하는 주소 — SSRF resolved 가드(DNS 해석 결과까지)로 검증.
   // 루프백/링크로컬로 해석되는 이름을 저장해 두고 알림이 내부를 찌르는 우회를 차단한다.
@@ -126,13 +131,16 @@ adminRouter.put('/alerts', adminOnly, fleetOnly, async (req, res) => {
       if (ssrf) return res.status(400).json({ ok: false, reason: `${key} 웹훅 URL: ${ssrf}` });
     }
   }
+  const unreadable = alertConfigWriteRefusal();   // 103회차 F12: 읽기 오류 중 저장 거절 — 사유를 화면까지
+  if (unreadable) return res.status(409).json(unreadable);
   res.json({ ok: true, config: saveAlertConfig(req.body || {}) });
 });
 adminRouter.post('/alerts/test', adminOnly, fleetOnly, async (req, res) => res.json(await testAlert(req.user?.username)));
 
 // 일일 헬스체크 리포트 — 스케줄 설정 + 즉시 발송(테스트).
-adminRouter.get('/report/daily', adminOnly, (_req, res) => res.json(dailyReportStatus()));
+adminRouter.get('/report/daily', adminOnly, (_req, res) => res.json({ ...dailyReportStatus(), ...unreadMark(dailyReportWriteRefusal()) }));   // 112회차: 못 읽은 동안 설정은 기본값(꺼짐) — 화면이 저장을 잠근다
 adminRouter.put('/report/daily', adminOnly, fleetOnly, (req, res) => {
+  { const no = dailyReportWriteRefusal(); if (no) return res.status(503).json(no); }   // 107회차: 설정 파일 읽기 오류 중에는 저장하지 않는다(사유를 화면까지)
   const s = saveDailyReportSettings(req.body || {});
   logAudit({ user: req.user?.username || 'unknown', action: '일일 리포트 설정 변경', detail: `enabled=${s.enabled} ${String(s.hour).padStart(2, '0')}:${String(s.minute).padStart(2, '0')}` });
   res.json({ ok: true, settings: s });
@@ -164,7 +172,7 @@ function scopeAnomaly(st, allowed) {
 }
 adminRouter.get('/anomaly', adminOnly, (req, res) => res.json(scopeAnomaly(getAnomalySettings(), scopedVcenterIds(req.user, store.get()))));
 adminRouter.put('/anomaly', adminOnly, (req, res) => {
-  const allowed = scopedVcenterIds(req.user, store.get());
+  const allowed = writeMergeScope(req);   // 전체 점검 7회차: 병합 · 전역 필드는 쓰기 범위(응답 가림은 조회 범위)
   const body = req.body || {};
   if (!allowed) return res.json({ ok: true, settings: saveAnomalySettings(body) });
   const before = getAnomalySettings();
@@ -174,7 +182,7 @@ adminRouter.put('/anomaly', adminOnly, (req, res) => {
   if (body.threshold !== undefined && body.threshold !== '' && Number(body.threshold) !== before.threshold) ignoredGlobal.push('threshold');
   const settings = saveAnomalySettings({ enabled: before.enabled, threshold: before.threshold, perVcenter: m.merged });
   res.json({
-    ok: true, settings: scopeAnomaly(settings, allowed),
+    ok: true, settings: scopeAnomaly(settings, scopedVcenterIds(req.user, store.get())),
     ...(m.ignored.length ? { ignoredOutOfScope: m.ignored.length } : {}),
     ...(ignoredGlobal.length ? { ignoredGlobal, ignoredReason: '전역 임계·사용 여부는 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다 — 적용하지 않았습니다.' } : {}),
   });
@@ -217,7 +225,8 @@ adminRouter.put('/secrets/policy', adminOnly, requireSettingsOwner, (req, res) =
 adminRouter.get('/security/session', adminOnly, requireSettingsOwner, (_req, res) => {
   const cur = loadConfiguredSecurity();
   const ownerWarnings = scopedOwnerWarnings(cur.settingsOwners);
-  res.json({ ...cur, autoOwners: managedAdminOwners(), ...(ownerWarnings.length ? { ownerWarnings } : {}) });
+  const recovery = sessionSecurityRecovery();   // 98회차: 본 파일 대신 직전 값 · 신뢰 사본 · 엄격 값으로 도는 중이면 그 사실(화면의 값이 파일 값이 아니다)
+  res.json({ ...cur, autoOwners: managedAdminOwners(), ...(ownerWarnings.length ? { ownerWarnings } : {}), ...(recovery ? { recovery } : {}) });
 });
 adminRouter.put('/security/session', adminOnly, requireSettingsOwner, (req, res) => {
   const username = req.user?.username || 'unknown';
@@ -237,7 +246,11 @@ adminRouter.put('/security/session', adminOnly, requireSettingsOwner, (req, res)
     after = saveSessionSecurity({ idleLogoutEnabled: req.body?.idleLogoutEnabled, idleLogoutMin: req.body?.idleLogoutMin, settingsOwners: req.body?.settingsOwners, loginPolicy: req.body?.loginPolicy, singleSession: req.body?.singleSession, demoSession: req.body?.demoSession,
       sessionWarnEnabled: req.body?.sessionWarnEnabled, sessionWarnMin: req.body?.sessionWarnMin, sessionExtendMin: req.body?.sessionExtendMin, sessionMaxHours: req.body?.sessionMaxHours,
       bareosSetupOtp: req.body?.bareosSetupOtp });
-  } catch (e) { return res.status(400).json({ ok: false, reason: e.message }); }
+  } catch (e) {
+    // 91회차(88회차 결정 — 권장안): 저장 예외의 상태를 살린다 — 읽기 오류 중 저장 거절(503 settings-unreadable)을 400(입력 오류)으로 바꾸면 화면이 '입력이 틀렸다' 로 읽는다.
+    const st = Number(e?.status);
+    return res.status(st >= 400 && st < 600 ? st : 400).json({ ok: false, reason: e.message, ...(e?.code ? { code: String(e.code).slice(0, 64) } : {}) });
+  }
   const fmt = (s) => (s.idleLogoutEnabled ? `${s.idleLogoutMin}분` : '비활성');
   const polLabel = (p) => ({ otp_only: 'OTP 전용', otp_or_password: 'OTP+비밀번호(혼용)', password_only: '비밀번호 전용' }[p] || '기본(고권한 OTP 전용)');
   // Demo/Guest 중복 접속 모드 라벨(v2.294) — 감사 로그에 사람이 읽는 형태로 남긴다.
@@ -269,13 +282,12 @@ function scopedOsScanStatus(req) {
   if (!allowed) return st;
   return { ...st, summary: osSummary((r) => allowed.has(String(r.vcenterId))), lastFound: null, lastErr: null, lastAuth: null, lastSkipped: null, scoped: true, fleetRunHidden: true }; // v2.732: lastSkipped 는 전 vCenter 목록
 }
-adminRouter.get('/os-scan', adminOnly, (req, res) => res.json(scopedOsScanStatus(req)));
+adminRouter.get('/os-scan', adminOnly, (req, res) => res.json({ ...scopedOsScanStatus(req), ...unreadMark(osScanWriteRefusal()) }));   // 112회차: 못 읽은 동안 settings 는 기본값 — 화면이 저장을 잠근다
 // v2.606 AUTHZ2606-06: 스캔 설정은 전역이다 — 범위 admin 이 켠 주기 스캔은 전 vCenter 게스트에 로그인한다(v2.599 가 수동
 //   실행에서 막은 것을 설정으로 우회). 범위 계정의 변경은 403(Horizon settings PUT v2.605 와 같은 판단).
 adminRouter.put('/os-scan/settings', adminOnly, (req, res) => {
-  if (scopedVcenterIds(req.user, store.get())) {
-    return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '실제 OS 스캔 설정은 전 법인 공용이고 전 vCenter 게스트에 로그인합니다 — 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.' });
-  }
+  if (denyFleetWrite(req, res, '실제 OS 스캔 설정은 전 법인 공용이고 전 vCenter 게스트에 로그인합니다 — 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.')) return;   // 전체 점검 2회차 V-1(조회 ∧ 쓰기 전체)
+  { const no = osScanWriteRefusal(); if (no) return res.status(503).json(no); }   // 107회차: 설정 파일 읽기 오류 중에는 저장하지 않는다(사유를 화면까지)
   const status = scopedOsScanStatus(req);   // 예전과 같은 순서(저장 전 상태 + 저장 결과) — 전체 범위 admin 응답은 그대로
   res.json({ ok: true, ...status, settings: saveOsScanSettings(req.body || {}) });
 });
@@ -283,10 +295,13 @@ adminRouter.put('/os-scan/settings', adminOnly, (req, res) => {
 //   (미지정이면 전 vCenter 를 돌아 범위 밖 게스트에 로그인한다).
 adminRouter.post('/os-scan/run', adminOnly, async (req, res) => {
   const vcId = String(req.body?.vcenterId || '');
-  const allowed = scopedVcenterIds(req.user, store.get());
+  // 전체 점검 7회차: 게스트에 로그인하는 실행 — 조회 밖 404 → 쓰기 밖 403(전 vCenter 실행은 조회 ∧ 쓰기 전체만)
+  const read = scopedVcenterIds(req.user, store.get());
+  const allowed = writeMergeScope(req);
   if (allowed) {
     if (!vcId) return res.status(400).json({ ok: false, reason: '범위가 제한된 계정은 스캔할 vCenter 를 지정해야 합니다.' });
-    if (!allowed.has(vcId)) return res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다.' });
+    if (read && !read.has(vcId)) return res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다.' });
+    if (!allowed.has(vcId)) return res.status(403).json({ ok: false, error: 'forbidden', reason: '조회 전용 범위 — 이 vCenter 는 실행 권한이 없습니다.' });
   }
   res.json(await runOsScanNow(vcId));
 });
@@ -359,11 +374,11 @@ function savedScopeDenied(req, res, item) {
 adminRouter.put('/provision/saved/:id', adminOnly, (req, res) => {
   if (savedScopeDenied(req, res, getSaved(req.params.id))) return;
   const r = updateSaved(req.params.id, req.body || {});
-  res.status(r.ok ? 200 : 404).json(r);
+  res.status(r.ok ? 200 : r.readError ? 503 : 404).json(r);   // 74회차 F9: 파일 읽기 오류는 '없음'(404)이 아니다
 });
 adminRouter.delete('/provision/saved/:id', adminOnly, (req, res) => {
   if (savedScopeDenied(req, res, getSaved(req.params.id))) return;
   const r = removeSaved(req.params.id);
-  res.status(r.ok ? 200 : 404).json(r);
+  res.status(r.ok ? 200 : r.readError ? 503 : 404).json(r);   // 74회차 F9
 });
 }

@@ -45,10 +45,13 @@ const StorageMonTool = React.lazy(() => import('./tools/StorageMonTool.jsx'));
 const StorageGrowthTool = React.lazy(() => import('./tools/StorageGrowthTool.jsx'));
 const StorageUsageTool = React.lazy(() => import('./tools/StorageUsageTool.jsx')); // v2.789 스토리지 사용량 보고서
 const PartFaults = React.lazy(() => import('./tools/PartFaults.jsx'));   // 파트 장애(v2.547)
+const DiskBadTool = React.lazy(() => import('./tools/DiskBadTool.jsx'));   // 디스크 배드 섹터 분석(v3.8.0)
 const EdgeLog = React.lazy(() => import('./tools/EdgeLog.jsx'));         // 엣지 로그·진행상태(v2.549)
 const BmUsage = React.lazy(() => import('./tools/BmUsage.jsx'));         // 베어메탈 사용률(v2.550)
+const FocusMonTool = React.lazy(() => import('./tools/FocusMonTool.jsx')); // 집중 모니터링 — 리눅스 서버 실시간 성능 · iostat 비교(v2.976)
 const CorpUsage = React.lazy(() => import('./tools/CorpUsage.jsx'));
 const SvcInventory = React.lazy(() => import('./tools/SvcInventory.jsx')); // v2.887 서비스 인벤토리
+const BmFolders = React.lazy(() => import('./tools/BmFolders.jsx')); // v2.984 물리서버 폴더
 const PowerTotal = React.lazy(() => import('./tools/PowerTotal.jsx')); // v2.664 전체 소비 전력
 const IdracTrend = React.lazy(() => import('./tools/IdracTrendTool.jsx')); // iDRAC 통합 추이(v2.660)     // 법인별 서버 사용량(v2.625)
 const LinkCheck = React.lazy(() => import('./tools/LinkCheck.jsx'));     // 통신 점검(중앙↔엣지·vCenter, v2.552)
@@ -60,7 +63,11 @@ const IsilonDirUsageTool = React.lazy(() => import('./tools/IsilonDirUsageTool.j
 const DataFlow = React.lazy(() => import('./tools/DataFlow.jsx'));       // 데이터 흐름 지도(포탈 사이 전 경로, v2.587)
 const DeviceFlow = React.lazy(() => import('./tools/DeviceFlow.jsx'));   // 3단 지도(장비 → 엣지 → 메인, v2.588)
 const BmStorageTool = React.lazy(() => import('./tools/BmStorageTool.jsx'));
+const ServerInfoTool = React.lazy(() => import('./tools/ServerInfoTool.jsx'));   // v3.25 서버 정보(서버 접속 2단계)
 const SanSwitchTool = React.lazy(() => import('./tools/SanSwitchTool.jsx'));
+const SanFlowTool = React.lazy(() => import('./tools/SanFlowTool.jsx'));   // v2.935(C-②) Flow Vision 플로우 모니터
+const SanStorageTool = React.lazy(() => import('./tools/SanStorageTool.jsx'));   // v2.948 SAN 스토리지 성능(독립 도구)
+const PsInspectTool = React.lazy(() => import('./tools/PsInspectTool.jsx'));     // v2.965 PowerScale 장비 점검(독립 도구)
 const CvpTool = React.lazy(() => import('./tools/CvpTool.jsx'));         // Arista CloudVision(v2.608)
 const VmHygieneTool = React.lazy(() => import('./tools/VmHygieneTool.jsx')); // VM 구성 점검(v2.698)
 const HostHygieneTool = React.lazy(() => import('./tools/HostHygieneTool.jsx')); // ESXi 호스트 구성 점검(v2.699)
@@ -218,11 +225,13 @@ export default function SpecialTools({ defaultScope = '' } = {}) {
     fetchJson('/admin/tool-categories')
       .then((r) => {
         if (!alive) return;
-        const ok = !!(r && r.settings && typeof r.settings === 'object');
+        // 112회차: 서버가 분류 설정 파일을 못 읽은 동안의 조회(기본값 + loadError)는 '읽지 못함' 으로 본다 — 그 기본값으로 이름 · 단계 편집기를 열어 저장하면 기존 설정이 지워진다.
+        const unreadLe = r && r.loadError && r.loadError.readError === true ? r.loadError : null;
+        const ok = !!(r && r.settings && typeof r.settings === 'object') && !unreadLe;
         setCats(ok ? r.settings : null);
         setCatMeta({ limits: r?.limits || {}, defaultStages: r?.defaultStages || [] });
         setCatsState(ok ? 'ok' : 'error');
-        setCatsErr(ok ? '' : (r?.reason || '설정 응답에 settings 가 없습니다'));
+        setCatsErr(ok ? '' : ((unreadLe && unreadLe.reason) || r?.reason || '설정 응답에 settings 가 없습니다'));
       })
       .catch((e) => {
         // 카테고리는 편의 기능이다 — 못 읽어도 화면은 동작해야 한다. 단 편집기는 열지 않는다(D-01).
@@ -625,10 +634,13 @@ function ToolPanel({ tool, onBack, isAdmin, defaultScope = '', cfg = null }) {
       {tool === 'storage-growth' && <StorageGrowthTool />}
       {tool === 'storage-usage' && <StorageUsageTool isAdmin={isAdmin} />}
       {tool === 'part-faults' && <PartFaults />}
+      {tool === 'disk-bad' && <DiskBadTool />}
       {tool === 'edge-log' && <EdgeLog />}
       {tool === 'bm-usage' && <BmUsage />}
+      {tool === 'focus-mon' && <FocusMonTool />}
       {tool === 'corp-usage' && <CorpUsage scope={scope} />}
       {tool === 'svc-inventory' && <SvcInventory />}
+      {tool === 'bm-folders' && <BmFolders />}
       {tool === 'power-total' && <PowerTotal />}
       {tool === 'idrac-trend' && <IdracTrend />}
       {tool === 'link-check' && <LinkCheck />}
@@ -640,7 +652,11 @@ function ToolPanel({ tool, onBack, isAdmin, defaultScope = '', cfg = null }) {
       {tool === 'data-flow' && <DataFlow />}
       {tool === 'device-flow' && <DeviceFlow />}
       {tool === 'bm-storage' && <BmStorageTool />}
+      {tool === 'server-info' && <ServerInfoTool />}
       {tool === 'san-switch' && <SanSwitchTool />}
+      {tool === 'san-flow' && <SanFlowTool />}
+      {tool === 'san-storage' && <SanStorageTool />}
+      {tool === 'ps-inspect' && <PsInspectTool />}
       {tool === 'cvp' && <CvpTool />}
       {tool === 'pdu' && <PduTool />}
       {tool === 'rma' && <RemoteCommand />}

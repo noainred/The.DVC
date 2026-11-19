@@ -6,8 +6,10 @@
 
 import { config, clampIntervalMs, loadVcenterConfig } from '../config.js';
 import { resilientFetch } from '../util/resilientFetch.js';
+import { createChangeLogger } from '../util/logThrottle.js';
 import { getLogsDb } from '../logs/db.js';
 import { agentNameHeader } from '../util/agentNameHeader.js'; // v2.620(RECENT2620-02)
+import { readJsonCapped, EDGE_RESPONSE_MAX_BYTES } from '../util/readCapped.js'; // 87회차 ⓓ(85 E3 — 권장안): 중앙 응답은 상한 읽기(형제 pull 과 같게 — 상한 없는 res.json() 금지)
 
 let timer = null;
 let running = false; // 재진입 방지
@@ -31,6 +33,9 @@ const POLL_MS = clampIntervalMs(Number(process.env.AGENT_LOGQ_POLL_MS) || 4_000,
  * 만들 때 그 표에 함께 넣을 것(v2.554 규약).
  */
 let _last = null;
+// 85회차 F3: 인출 실패(403 · 5xx · 연결 실패)는 4초마다 반복된다 — 형제 워커(ping · capture · bmstor — v2.591 PR-5)처럼 같은 사유는 10분에 한 줄.
+//   예전에는 거부가 계속되는 동안 하루 2만 줄 넘게 같은 경고가 저널을 채웠다. 상태(_last)는 매번 갱신한다(엣지 로그 화면은 그대로).
+const _logChange = createChangeLogger({ windowMs: 10 * 60_000 });
 
 function headers() {
   return { 'Content-Type': 'application/json', ...agentNameHeader(config.agent.name), ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
@@ -54,10 +59,10 @@ async function runLogQueryWorkerInner() {
     if (!r.ok) {
       _last = { at: Date.now(), ms: Date.now() - t0, ok: false, httpStatus: r.status, phase: 'poll',
         error: r.status === 403 ? '중앙이 토큰을 거부했습니다(403) — CENTRAL_TOKEN 을 확인하세요.' : `중앙 응답 HTTP ${r.status}` };
-      console.warn(`[logq-agent] 인출 실패: ${_last.error}`);
+      if (_logChange('인출', _last.error)) console.warn(`[logq-agent] 인출 실패: ${_last.error}`);
       return null;
     }
-    const { queries } = await r.json();
+    const { queries } = await readJsonCapped(r, EDGE_RESPONSE_MAX_BYTES, '중앙 응답');
     if (!queries || !queries.length) { _last = { at: Date.now(), ms: Date.now() - t0, ok: true, queries: 0 }; return null; }
     const db = await getLogsDb();
     let sent = 0; const failures = [];
@@ -85,7 +90,8 @@ async function runLogQueryWorkerInner() {
           failures.push({ vcenterId: q.vcenterId, httpStatus: 413, bytes: Buffer.byteLength(body),
             error: `중앙이 본문 크기를 거부(413) — ${rows.length}줄 ${(Buffer.byteLength(body) / 1024).toFixed(0)}KB. 조회 줄 수를 줄이거나 중앙에 BIG_JSON 등록이 필요합니다.` });
         } else if (!post.ok) {
-          failures.push({ vcenterId: q.vcenterId, httpStatus: post.status, error: `결과 보고 HTTP ${post.status}` });
+          // 전체 점검 14회차(C-5): 410 = 중앙이 그 조회를 모른다(만료 · 중앙 재시작) — 다시 보내도 같다
+          failures.push({ vcenterId: q.vcenterId, httpStatus: post.status, error: post.status === 410 ? '중앙이 이 조회를 모릅니다(시한이 지났거나 중앙이 재시작) — 결과를 버립니다' : `결과 보고 HTTP ${post.status}` });
         } else { sent += 1; }
       } catch (e) {
         failures.push({ vcenterId: q.vcenterId, httpStatus: null, error: String(e?.message || e).slice(0, 200) });
@@ -98,7 +104,7 @@ async function runLogQueryWorkerInner() {
     return { at: Date.now() };
   } catch (e) {
     _last = { at: Date.now(), ms: Date.now() - t0, ok: false, phase: 'run', error: String(e?.message || e).slice(0, 300) };
-    console.warn(`[logq-agent] 실패: ${_last.error}`);   // 무음 실패 금지
+    if (_logChange('실패', _last.error)) console.warn(`[logq-agent] 실패: ${_last.error}`);   // 무음 실패 금지 · 85회차 F3: 같은 사유는 10분에 한 줄
     return null;
   }
 }

@@ -7,7 +7,7 @@
  * 모든 점검은 try/catch로 격리되어 하나가 실패해도 전체 패널이 죽지 않는다.
  */
 
-import { store } from '../store.js';
+import { store, siteInventoryStale } from '../store.js';
 import { alertStatus } from '../alerts.js';
 import { metricsSamplerStatus } from '../metrics/sampler.js';
 import { gpuGuestStatus } from '../gpu/poller.js';
@@ -34,6 +34,8 @@ import { config } from '../config.js';
  */
 import * as m_store from '../store.js';
 import * as m_storagePoller from '../storage/poller.js';
+import * as m_nodeLoadPoller from '../storage/nodeLoadPoller.js'; // v2.932 아이실론 노드 부하 표본
+import * as m_inspectRunner from '../storage/inspect/runner.js'; // v2.965 PowerScale 장비 점검 실행기
 import * as m_sanPoller from '../sanswitch/poller.js';
 import * as m_sanPerfPoller from '../sanswitch/perfPoller.js';
 import * as m_cvpPoller from '../cvp/poller.js';
@@ -58,6 +60,8 @@ import * as m_bmUsagePoller from '../bmusage/poller.js';
 import * as m_linkCheckPoller from '../linkcheck/poller.js';
 import * as m_xferSpeedPoller from '../xferspeed/poller.js';
 import * as m_isiduPoller from '../isidu/poller.js';   // v2.736 아이실론 디렉터리 사용량
+import * as m_focusMonService from '../focusmon/service.js'; // v2.976 집중 모니터링(사람이 시작한 SSH 수집 — 1초 틱)
+import * as m_pingMonitor from '../ping/monitor.js';   // v2.964 Ping 연속 측정
 import * as m_veeamPoller from '../veeam/poller.js';   // v2.751 Veeam 백업 상태
 import * as m_veeamSnapCollector from '../veeam/snapCollector.js';   // v2.765 Veeam 계정 이벤트 전용 수집
 import * as m_bareosPoller from '../bareos/poller.js';   // v2.820 Bareos 백업 상태 조회
@@ -76,14 +80,18 @@ import * as m_partFaultPoller from '../partfault/poller.js';
 import { stallWatchStatus } from '../perf/stallWatch.js';
 import { scanJournalStatus } from '../util/scanJournal.js';   // v2.737: 재시작으로 중단된 스캔 기록·재개
 import { bigJsonStats } from '../util/bigJsonGate.js';
-import { listSettingsLoadErrors } from '../util/settingsLoadError.js';
+import { listSettingsLoadErrors, recheckSettingsFiles } from '../util/settingsLoadError.js';
 import { bulletinHealth } from '../bulletin/store.js'; // 2026-10-09 검토 I-05
 import { runtimeServiceRow } from '../util/runtimeCheck.js'; // 2026-10-09 검토 I-06
+import { authGuardHealthRow } from '../util/authGuard.js'; // 127회차: 인증 정지 기록 파일을 못 읽는 도구(전 가드 한 행)
+import { secretsKeyMissing } from '../security/secretVault.js'; // 135회차 결정 D-d: 자격증명 암호화 키를 쓸 수 없는 상태(읽는 곳이 0곳이었다 — 콘솔 한 줄뿐)
 
 /** spec `mod` 경로 → 모듈. 표에 새 모듈이 생기면 여기에 한 줄 더한다(테스트가 빠진 것을 잡는다). */
 const MODS = Object.freeze({
   '../store.js': m_store,
   '../storage/poller.js': m_storagePoller,
+  '../storage/nodeLoadPoller.js': m_nodeLoadPoller,
+  '../storage/inspect/runner.js': m_inspectRunner,
   '../sanswitch/poller.js': m_sanPoller,
   '../sanswitch/perfPoller.js': m_sanPerfPoller,
   '../cvp/poller.js': m_cvpPoller,
@@ -108,6 +116,8 @@ const MODS = Object.freeze({
   '../linkcheck/poller.js': m_linkCheckPoller,
   '../xferspeed/poller.js': m_xferSpeedPoller,
   '../isidu/poller.js': m_isiduPoller,
+  '../focusmon/service.js': m_focusMonService,
+  '../ping/monitor.js': m_pingMonitor,
   '../veeam/poller.js': m_veeamPoller,
   '../veeam/snapCollector.js': m_veeamSnapCollector,
   '../bareos/poller.js': m_bareosPoller,
@@ -140,7 +150,7 @@ export const CENTRAL_ONLY_SPEC = Object.freeze([
 ]);
 
 /** 고정 항목이 이미 다루는 spec 키 — 같은 폴러를 두 줄로 그리지 않는다(고정 항목 쪽에 `specKey` 를 단다). */
-const FIXED_SPEC_KEY = Object.freeze({ vcenter: 'collect.inventory', metrics: 'collect.metrics', 'gpu-guest': 'collect.gpuGuest', ipscan: 'collect.ipamScan' });
+const FIXED_SPEC_KEY = Object.freeze({ vcenter: 'collect.inventory', metrics: 'collect.metrics', 'gpu-guest': 'collect.gpuGuest', ipscan: 'collect.ipamScan', 'auth-stops': 'service.authStops' });
 
 const MIN = 60_000;
 const ago = (ts) => (ts ? Date.now() - ts : null);
@@ -151,6 +161,21 @@ const atOf = (x) => (typeof x === 'number' && Number.isFinite(x) ? x : (x && typ
 const wrap = (key, label, fn) => { try { return { key, label, ...fn() }; } catch (e) { return { key, label, status: 'warn', detail: `점검 오류: ${e.message}`, at: Date.now() }; } };
 
 const finite = (v) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null);
+/**
+ * 서비스 점검의 '자격증명 암호화 키' 한 행(135회차 결정 D-d). 사유 문장은 secretVault 가 만든 것 그대로다(경로 · 키 값 없음 — 'CONFIG_DIR/secrets-key' 라는 이름과 오류 코드뿐).
+ * @param {string|null} [why] secretsKeyMissing() — 테스트 주입
+ * @returns {{status:'ok'|'warn', detail:string, at:number}}
+ */
+export function secretsKeyRow(why = secretsKeyMissing(), now = Date.now()) {
+  if (!why) return { status: 'ok', detail: '키 사용 가능(암호화를 쓰지 않는 설치도 정상입니다)', at: now };
+  return {
+    status: 'warn',
+    detail: `${String(why).slice(0, 400)} 그동안 비밀(비밀번호 · 토큰) 저장은 거절되고 저장된 자격증명은 열리지 않아 그 자격증명을 쓰는 수집 · 접속이 실패할 수 있습니다. `
+      + '키 파일을 읽지 못한 것이 일시적이었어도 재시작해야 풀립니다.',
+    at: now,
+  };
+}
+
 /** 폴러 상태 객체에서 '마지막 실행 시각' — 모듈마다 이름이 다르다(at · last.at · lastRun(.at) · lastRunTs · lastRunAt · lastTickAt · lastPollAt · lastTick). */
 export function pollerLastAt(st) {
   if (!st || typeof st !== 'object') return null;
@@ -255,6 +280,29 @@ export function asyncStatusRow(s, opts = {}, now = Date.now()) {
   return pollerCheck(s.value, opts);
 }
 
+/**
+ * 고정 항목 '지표 샘플러' 행(순수 — now · uptimeMs 주입). 본문은 예전 그대로이고 한 가지만 더했다.
+ * 111회차: 실행 기록이 없는데(lastRun 없음) 기동 후 정체 경계를 넘겼으면 warn — 예전에는 `age == null` 이 'ok' 로 떨어져, 기동 뒤 첫 주기를
+ *   끝내지 못한 샘플러(첫 주기가 DB 열기 · 적재 대기에 매달림 · lastRun 을 세우기 전에 매번 던짐)가 끝까지 '정상 · 활성' 이었다. 주기를 한 번이라도
+ *   끝낸 뒤 멈춘 경우는 예전에도 '오래됨' 으로 잡혔다 — 빠져 있던 것은 '한 번도' 쪽이다. pollerCheck 의 같은 규칙(v2.590 W1)과 같은 경계.
+ *   샘플러는 기동 12초 뒤 첫 샘플을 돌고, 적재(insert) 실패는 삼키고 lastRun 을 세운다(metrics/sampler.js) — 그 경우는 이 행이 아니라 콘솔 경고다.
+ */
+export function metricsSamplerRow(m, { now = Date.now(), uptimeMs = process.uptime() * 1000 } = {}) {
+  const last = atOf(m?.lastRun);
+  const age = last == null ? null : (last ? now - last : null);
+  // v2.591(3차 감사 R-H1): 정체 경계는 **설정된 샘플 주기의 2배**(최소 30분). 30분 고정이면 주기를 60분으로 둔 현장에서
+  // 멀쩡한 샘플러가 매번 '주의' 가 된다(v2.590 atOf 수정 전에는 NaN 이라 경고 자체가 안 났다 — 수정이 새 거짓을 만들었다).
+  const iv = Number(m?.intervalMs);
+  const staleMs = Math.max(30 * MIN, Number.isFinite(iv) && iv > 0 ? iv * 2 : 0);
+  const off = m?.enabled === false;
+  const never = !off && last == null && uptimeMs > staleMs;
+  return {
+    status: off ? 'off' : ((age != null && age > staleMs) || never) ? 'warn' : 'ok',
+    detail: `${off ? '비활성' : '활성'}${last != null ? ` · 최근 ${Math.round(age / MIN)}분 전` : ''}${never ? ` · 실행 기록 없음(기동 ${Math.round(uptimeMs / MIN)}분) — 경계를 넘겼는데 한 번도 돌지 않았습니다` : ''}`,
+    at: last ?? now,
+  };
+}
+
 export function getServiceCheck(opts = {}) {
   const checks = [];
 
@@ -264,11 +312,16 @@ export function getServiceCheck(opts = {}) {
   checks.push(wrap('vcenter', 'vCenter 수집', () => {
     const s = store.get();
     const total = (s.vcenters || []).length;
-    const conn = (s.vcenters || []).filter((v) => v.status === 'connected').length;
+    // 126회차(재현): 위임 vCenter 는 담당 엣지의 보고가 끊겨도 status 가 엣지가 마지막으로 보낸 'connected' 그대로다(store 병합 — stale 표지만 붙는다).
+    //   그것을 연결로 세어 엣지 여러 곳이 멈췄는데 'N/N 연결 · 정상' 이었다. 헤더 · /health 와 같은 판정(store.siteInventoryStale)으로 따로 세고
+    //   주의로 올린다 — 접속 실패(down)가 아니라 확인 불가라 전부 끊겨도 down 으로 단정하지 않는다.
+    const connected = (s.vcenters || []).filter((v) => v.status === 'connected');
+    const edgeSilent = connected.filter(siteInventoryStale).length;
+    const conn = connected.length - edgeSilent;
     const age = ago(Date.parse(s.generatedAt));
     const stale = age != null && age > 5 * MIN;
-    const status = total === 0 ? 'off' : conn === 0 ? 'down' : (conn < total || stale) ? 'warn' : 'ok';
-    return { status, detail: `${conn}/${total} 연결${stale ? ' · 스냅샷 지연' : ''} · ${age != null ? Math.round(age / 1000) + '초 전' : '-'}`, at: Date.parse(s.generatedAt) || Date.now() };
+    const status = total === 0 ? 'off' : (conn === 0 && !edgeSilent) ? 'down' : (conn < total || stale) ? 'warn' : 'ok';
+    return { status, detail: `${conn}/${total} 연결${edgeSilent ? ` · 엣지 보고 끊김 ${edgeSilent}` : ''}${stale ? ' · 스냅샷 지연' : ''} · ${age != null ? Math.round(age / 1000) + '초 전' : '-'}`, at: Date.parse(s.generatedAt) || Date.now() };
   }));
 
   // v2.617: 메인 이벤트 루프 멈춤 감시(perf/stallWatch.js). 이 행은 루프가 **풀린 뒤에** 읽히므로 '지금 멈춤' 이 아니라
@@ -316,6 +369,8 @@ export function getServiceCheck(opts = {}) {
   // v2.632(감사 AX1-2632-02): 엣지에 배포되는 중앙 설정 파일을 못 읽으면 설정 pull 이 503 으로 답한다(엣지는 직전 설정 유지).
   //   예전에는 그 사실이 화면·로그 어디에도 없어 '엣지가 조용히 멈췄다' 로만 보였다. 파일 이름과 사유를 싣는다(값은 싣지 않는다).
   checks.push(wrap('settings-files', '중앙 설정 파일', () => {
+    // 결정(반증 G2 · G3 남긴 것): 조회 때 다시 판정하는 로더들의 재판정을 한 번(30초 간격 · 오류가 선 것만) — 보존본을 되돌린 줄이 그 모듈이 불릴 때까지 남지 않게.
+    recheckSettingsFiles();
     const errs = listSettingsLoadErrors();
     if (!errs.length) return { status: 'ok', detail: '엣지 배포 설정 파일 읽기 정상', at: Date.now() };
     const names = errs.slice(0, 6).map((e) => (e.label ? `${e.label}(${e.file})` : e.file)).join(', ');
@@ -323,6 +378,15 @@ export function getServiceCheck(opts = {}) {
       detail: `읽지 못한 설정 파일 ${errs.length}개(${names}${errs.length > 6 ? ` 외 ${errs.length - 6}개` : ''}) — 해당 설정 pull 은 503 으로 답하고 엣지는 직전 설정을 유지합니다. 손상 보존본을 복구하거나, 그 설정 화면에서 다시 저장하거나, 관리자가 이 행의 [기본값으로 확정] 으로 지금 기본값을 저장하세요(그 기본값이 전 엣지에 배포됩니다).`,
       at: Math.min(...errs.map((e) => e.at || Date.now())), files: errs };
   }));
+
+  // 127회차(124회차 결정 D-A · 남긴 것): 인증 정지 기록 파일(<도구>-auth-stops.json)을 못 읽는 도구 — 예전에는 콘솔 한 줄뿐이었다(unreadable() 소비처 0곳).
+  //   그동안은 자격 지문마다 한 대상으로 먼저 확인하며 수집한다(util/authGuard.js 머리말). 가드마다 한 줄이 아니라 한 행 — 파일 이름은 기본 이름만.
+  checks.push(wrap('auth-stops', '인증 정지 기록 파일', () => authGuardHealthRow()));
+
+  // 135회차 결정 D-d(권장안 — 메인 구현): 자격증명 암호화 키를 쓸 수 없는 상태(키 파일을 읽지 못함 · 봉인된 비밀은 있는데 키가 없음). 그동안 비밀 저장은 거절되고
+  //   저장된 자격증명은 복호되지 않아(빈 값) 그 자격증명을 쓰는 수집 · 접속이 실패한다. 134회차부터는 기동 순간의 읽기 오류 한 번으로도 재시작까지 이 상태다 —
+  //   그런데 이 상태를 읽는 곳이 없었다(`secretsKeyMissing()` 호출부 0곳 · 콘솔 경고가 유일한 단서 — CLAUDE.md '무음 실패 금지').
+  checks.push(wrap('secrets-key', '자격증명 암호화 키', () => secretsKeyRow()));
 
   // 2026-10-09 검토 I-05: 게시판·공지 — 메모리에 받은 변경이 디스크에 저장되지 않고 있으면 warn(재시작하면 사라질 수 있다).
   //   pending 60초 경계는 화면(10초)보다 넉넉하게 — 묶음 저장 창마다 이 행이 깜빡이지 않게.
@@ -375,16 +439,7 @@ export function getServiceCheck(opts = {}) {
     return { status: slow ? 'warn' : 'ok', detail: parts.join(' · '), at: Number(last?.finishedAt) || Number(last?.at) || Date.now() };
   }));
 
-  checks.push(wrap('metrics', '지표 샘플러', () => {
-    const m = metricsSamplerStatus();
-    const last = atOf(m.lastRun);
-    const age = last == null ? null : ago(last);
-    // v2.591(3차 감사 R-H1): 정체 경계는 **설정된 샘플 주기의 2배**(최소 30분). 30분 고정이면 주기를 60분으로 둔 현장에서
-    // 멀쩡한 샘플러가 매번 '주의' 가 된다(v2.590 atOf 수정 전에는 NaN 이라 경고 자체가 안 났다 — 수정이 새 거짓을 만들었다).
-    const iv = Number(m.intervalMs);
-    const staleMs = Math.max(30 * MIN, Number.isFinite(iv) && iv > 0 ? iv * 2 : 0);
-    return { status: m.enabled === false ? 'off' : (age != null && age > staleMs) ? 'warn' : 'ok', detail: `${m.enabled === false ? '비활성' : '활성'}${last != null ? ` · 최근 ${Math.round(age / MIN)}분 전` : ''}`, at: last ?? Date.now() };
-  }));
+  checks.push(wrap('metrics', '지표 샘플러', () => metricsSamplerRow(metricsSamplerStatus())));
 
   checks.push(wrap('gpu-guest', 'GPU 게스트 수집', () => {
     const g = gpuGuestStatus();
@@ -452,7 +507,7 @@ export function getServiceCheck(opts = {}) {
     if (spec.centralOnly && isEdge) { skippedOnEdge.push(spec.key); continue; }
     checks.push({ ...specRow(spec, opts), specKey: spec.key });
   }
-  const notCovered = STATUS_SPEC.filter((x) => x.group !== 'collect').map((x) => x.key);
+  const notCovered = STATUS_SPEC.filter((x) => x.group !== 'collect' && !covered.has(x.key)).map((x) => x.key);   // 127회차: 고정 행이 다루는 service.* (인증 정지 기록 파일)는 '대상 밖' 이 아니다
   const coverage = {
     fixed: fixedCount,
     pollers: specs.length - skippedOnEdge.length,

@@ -237,6 +237,10 @@ export function edgeNote(edges) {
   // 중앙 수신 상한(v2.548 S2) — 잘린 장비는 '닫지 않는 쪽' 으로 보류된다. 조용히 줄이지 않는다.
   const partsOmitted = rows.reduce((a, r) => a + num(r.partsOmitted), 0);
   if (partsOmitted) bits.push(`**수신 상한으로 잘린 파트 ${partsOmitted}개**(그 장비의 장애는 해소로 처리하지 않습니다 — 엣지 보고가 비정상적으로 큽니다)`);
+  // 96회차 ⓐ(93회차 F5): 정상 보고인데 시리얼 키 파트 이름을 싣지 않는 옛 판 엣지 — 교체 규칙이 맞지 않는다(그 엣지를 올려야 효과가 난다).
+  //   replaceRule 이 없는 응답(옛 중앙)은 세지 않는다(모름 — 지어내지 않는다).
+  const noReplace = rows.filter((r) => r.kind === 'fresh' && r.replaceRule === false).length;
+  if (noReplace) bits.push(`교체 판정 미지원 ${noReplace}곳(그 엣지를 업그레이드해야 시리얼로 식별한 PSU · 디스크를 교체한 뒤 옛 장애가 ‘제거됨’ 으로 닫힙니다 — 그 전까지는 ‘누락’ 보류이며 수동 닫기로 정리)`);
   const scannedDropped = rows.filter((r) => r.scannedDropped).length;
   if (scannedDropped) bits.push(`요약(scanned)이 너무 커서 버린 엣지 ${scannedDropped}곳`);
   // v2.603: 중앙이 일부러 끈 엣지는 '주의' 대상이 아니다(조치할 것이 없다) — 개수는 위 문구가 밝힌다.
@@ -347,6 +351,8 @@ export function holdText(holdReason) {
     'edge-legacy': '판정 보류 — 구버전 수집 서버(해소를 판정할 수 없음 — 업그레이드 필요)',
     // v2.744(감사 EDGE-01): 그 수집 서버가 자기 장비 등록부를 읽지 못해 이 장비를 판정하지 않았다 — 재배정·삭제(unassigned)가 아니다.
     'registry-unreadable': '판정 보류 — 수집 서버가 장비 등록부를 읽지 못함(그 수집 서버의 등록 파일 확인)',
+    // 8a단계 ②: 정비 창(전이 보류) 안 — 창이 끝난 뒤 첫 점검에서 다시 판정한다.
+    maintenance: '판정 보류 — 정비 창 안(창이 끝나면 다시 판정)',
   };
   return map[holdReason] || '';
 }
@@ -356,7 +362,7 @@ export function holdText(holdReason) {
  * @returns {string} 보류가 없으면 빈 문자열
  */
 export function holdNote(open = []) {
-  const by = { unknown: 0, 'device-failed': 0, 'collection-failed': 0, missing: 0, unassigned: 0, 'no-report': 0, 'edge-stale': 0, 'edge-legacy': 0, 'registry-unreadable': 0 };
+  const by = { unknown: 0, 'device-failed': 0, 'collection-failed': 0, missing: 0, unassigned: 0, 'no-report': 0, 'edge-stale': 0, 'edge-legacy': 0, 'registry-unreadable': 0, maintenance: 0 };
   for (const p of open) if (by[p?.holdReason] != null) by[p.holdReason] += 1;
   const total = Object.values(by).reduce((a, b) => a + b, 0);
   if (!total) return '';
@@ -367,6 +373,7 @@ export function holdNote(open = []) {
   if (by.missing) bits.push(`이번 목록에 없음 ${by.missing}건`);
   if (by['no-report']) bits.push(`수집 서버 보고 없음 ${by['no-report']}건`);
   if (by['edge-stale']) bits.push(`수집 서버 보고 오래됨 ${by['edge-stale']}건`);
+  if (by.maintenance) bits.push(`정비 창 안 ${by.maintenance}건(창이 끝나면 다시 판정)`);
   if (by['edge-legacy']) bits.push(`구버전 수집 서버 ${by['edge-legacy']}건(업그레이드 전까지 해소 판정 불가)`);
   // v2.744(감사 EDGE-01): 등록부를 고치면 다음 점검에서 다시 판정한다 — 관리자가 닫을 일이 아니다(unassigned 와 조치가 다르다).
   if (by['registry-unreadable']) bits.push(`수집 서버 장비 등록부 손상 ${by['registry-unreadable']}건(그 수집 서버의 등록 파일을 복구하면 다시 판정합니다)`);

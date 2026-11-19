@@ -12,7 +12,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { makeJsonFileLoader } from '../util/jsonFileLoad.js';   // 결정(56~75 남긴 것) 70 ①
 import { bumpFleetRev } from './fleetRev.js';
 
 const FILE = path.join(config.configDir, 'fleet-assign.json');
@@ -26,16 +27,27 @@ function fileMtimeMs() {
   try { const st = fs.statSync(FILE); return `${st.mtimeMs}:${st.size}`; } catch { return ''; }
 }
 
+/*
+ * 결정(56~75 남긴 것) 70 ①(fleetTags.js 와 같은 판단): 읽기 오류는 원본을 두고 빈 값을 캐시하지 않는다(30초 간격 재읽기) · 손상은 보존 + 서비스 점검 등재 ·
+ *   오류 중 쓰기 거절(settings-unreadable — 라우트 409). 예전에는 EACCES · EMFILE 에도 원본을 .corrupt 로 옮겨 수동 소속이 전부 사라졌다.
+ */
+const _file = makeJsonFileLoader(() => FILE, { label: '통합 서버 인벤토리 — 베어메탈 소속 법인 수동 등록(fleet-assign) — 확정하면 수동 소속이 모두 비워집니다(자동 귀속으로 돌아감)', confirm: () => { atomicWriteFileSync(FILE, JSON.stringify({ assign: {} }, null, 2)); cache = {}; cacheMtimeMs = fileMtimeMs(); _file.saved(); bumpFleetRev(); }, tag: 'fleet-assign' });
+/** 소속 파일을 못 읽었으면 { reason, at, readError }, 아니면 null(응답 표지 — 70 ①). */
+export function fleetAssignLoadError() { loadFleetAssign(); return _file.marker(); }
+const refused = () => _file.refusal('통합 서버 인벤토리 소속 법인 수동 등록');
+let _unread = false;
+/** 쓰기 거절 응답(409 본문) 또는 null — 일괄 귀속 라우트가 레지스트리를 바꾸기 전에 본다(70 ①). */
+export function fleetAssignRefusal() { loadFleetAssign(); return refused(); }
+
 export function loadFleetAssign() {
   const mtime = fileMtimeMs();
-  if (cache && mtime === cacheMtimeMs) return cache;
-  try {
-    const p = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-    cache = p && typeof p.assign === 'object' && p.assign ? p.assign : {};
-  } catch (e) {
-    preserveCorrupt(FILE, e.message);
-    cache = {};
-  }
+  if (cache && mtime === cacheMtimeMs && !_file.recheckDue()) return cache;   // 결정 G2 반증 후속 ③: 오류 중에는 캐시를 믿지 않고 30초마다 다시 판정(보존본을 되돌리면 재시작 없이 풀린다)
+  const hadErr = !!_file.loadError();
+  const r = _file.load();
+  if (r.kind === 'read-error') { cache = null; if (!_unread) { _unread = true; bumpFleetRev(); } return {}; }   // 70 ①: 캐시하지 않는다
+  if (_unread) { _unread = false; bumpFleetRev(); } else if (hadErr && r.kind === 'ok') bumpFleetRev();   // 후속 ③: 손상 → 되돌림도 플릿 캐시를 버린다   // 70 ①: 읽기 오류 구간 경계에서 플릿 캐시를 버린다(fleetTags.js 와 같다)
+  const p = r.kind === 'ok' ? r.value : null;
+  cache = p && typeof p.assign === 'object' && p.assign && !Array.isArray(p.assign) ? p.assign : {};
   cacheMtimeMs = mtime;
   return cache;
 }
@@ -52,6 +64,7 @@ export function setFleetAssign(key, vcenterId, validIds = null) {
   if (vc.length > 128) return { ok: false, reason: 'vcenterId가 너무 깁니다.' };
   if (vc && validIds && !validIds.has(vc)) return { ok: false, reason: `존재하지 않는 vCenter id: ${vc}` };
   const cur = loadFleetAssign();
+  { const no = refused(); if (no) return no; }   // 70 ①: 읽지 못한 값 위에 덮어쓰지 않는다
   if (!vc && !(k in cur)) return { ok: true, assign: cur };  // 해제인데 이미 없음 → 불필요한 디스크 write 생략
   if (cur[k] === vc) return { ok: true, assign: cur };        // 값 동일 → no-op
   const next = { ...cur };
@@ -71,6 +84,7 @@ export function setFleetAssign(key, vcenterId, validIds = null) {
  */
 export function setFleetAssignMany(entries = [], validIds = null) {
   const next = { ...loadFleetAssign() };
+  { const no = refused(); if (no) return no; }   // 70 ①
   let changed = 0;
   for (const [rawKey, rawVc] of entries) {
     const k = norm(rawKey);
@@ -119,6 +133,7 @@ export function applyFleetAssign(measured, validIds = null) {
 export function pruneFleetAssign(liveKeys) {
   const live = liveKeys instanceof Set ? liveKeys : new Set(liveKeys || []);
   const cur = loadFleetAssign();
+  if (refused()) return 0;   // 70 ①: 읽지 못한 동안은 정리하지 않는다
   const next = {};
   let removed = 0;
   for (const [k, v] of Object.entries(cur)) { if (live.has(k)) next[k] = v; else removed += 1; }
@@ -135,5 +150,6 @@ export function pruneFleetAssign(liveKeys) {
 export function resetFleetAssign() {
   cache = {};
   cacheMtimeMs = '';
+  _file.resetRetry();
   try { if (fs.existsSync(FILE)) fs.unlinkSync(FILE); } catch { /* */ }
 }

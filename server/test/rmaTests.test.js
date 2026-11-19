@@ -4,8 +4,15 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+test.after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 // v2.418 RMA 확장 — 점검 카탈로그/실행기·스케줄 배정·결과 상태/알림·정책·IP 허용·sudoers.
-process.env.CONFIG_DIR = process.env.CONFIG_DIR || fs.mkdtempSync(path.join(os.tmpdir(), 'rma-tests-'));
+process.env.CONFIG_DIR = process.env.CONFIG_DIR || tmpDir('rma-tests-');
 
 const { buildTest, scheduleItemIssue, judge, testCatalog } = await import('../src/rma/tests.js');
 const { runTest, pathAllowed } = await import('../src/rma/testRunner.js');
@@ -51,7 +58,7 @@ test('runTest: 네이티브 점검(tcp/disk/memory/load/file 계열)이 실제�
   assert.equal((await runTest({ test: 'disk-free', args: { path: '/', minFreePct: 100 } })).status, 'bad');
   assert.equal((await runTest({ test: 'memory', args: { minFreeMB: 1 } })).status, 'ok');
   assert.equal((await runTest({ test: 'load', args: { maxLoadPerCore: 1000 } })).status, 'ok');
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rma-files-'));
+  const dir = tmpDir('rma-files-');
   fs.writeFileSync(path.join(dir, 'a.log'), 'ok line\nERROR one\nERROR two\n');
   const roots = [dir];
   assert.equal((await runTest({ test: 'file-exists', args: { path: path.join(dir, 'a.log') } }, { fileRoots: roots })).status, 'ok');

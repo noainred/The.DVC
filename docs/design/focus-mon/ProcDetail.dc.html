@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>집중 모니터링 — 프로세스 세부 정보</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#7dd3fc}a:hover{color:#bae6fd}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+.num{font-variant-numeric:tabular-nums}
+.dim{color:#8b9bb4}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.btn{height:34px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#141b2d;color:#e6edf6;font:inherit;font-size:12.5px;cursor:pointer;white-space:nowrap;box-sizing:border-box}
+.h3{margin:0;font-size:14.5px;font-weight:600}
+.badge{display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:11px;font-size:12px;font-weight:600;white-space:nowrap;background:rgba(139,155,180,.16);color:#c3cede}
+.badge.ok{background:rgba(34,197,94,.14);color:#86efac}
+.tw{overflow-x:auto}
+.pgrid{display:grid;grid-template-columns:86px 120px minmax(260px,1fr) minmax(140px,220px) 96px;column-gap:14px;align-items:center;padding:0 16px;min-width:760px;box-sizing:border-box}
+.pth{height:34px;font-size:12px;color:#8b9bb4;background:#0f1626;border-top:1px solid #1f2a40;border-bottom:1px solid #1f2a40}
+.prow{width:100%;height:40px;border:0;border-bottom:1px solid #1a2236;background:transparent;color:#e6edf6;font:inherit;font-size:12.5px;text-align:left;cursor:pointer}
+.prow:hover{background:#18213a}
+.prow.sel{background:rgba(59,130,246,.14);border-bottom-color:transparent}
+.meter{display:flex;align-items:center;gap:10px;min-width:0}
+.meter .t{flex:1;height:6px;border-radius:3px;background:#1b2a48;overflow:hidden;min-width:40px}
+.meter .f{display:block;height:6px;border-radius:3px;background:#3987e5}
+.more{justify-self:end;font-size:12px;color:#7dd3fc;white-space:nowrap}
+.panel{background:#0f1626;border-top:1px solid #2b3a59;border-bottom:1px solid #2b3a59;padding:16px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(460px,100%),1fr));gap:12px}
+.pc{background:#141b2d;border:1px solid #243049;border-radius:10px;padding:12px 14px 14px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.pc h4{margin:0;font-size:13.5px;font-weight:600}
+.big{font-size:26px;font-weight:700;line-height:1.1}
+.unit{font-size:13px;color:#8b9bb4}
+.lg{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#8b9bb4;white-space:nowrap}
+.lg i{display:inline-block;width:10px;height:10px;border-radius:3px}
+.lock{padding:8px 10px;border-radius:8px;border:1px solid rgba(245,158,11,.35);background:rgba(245,158,11,.07);color:#fcd34d;font-size:12.5px;line-height:1.5;overflow-wrap:anywhere}
+.kv{display:grid;grid-template-columns:104px minmax(0,1fr);column-gap:12px;align-items:baseline;min-height:26px;border-bottom:1px solid #1a2236;font-size:12.5px}
+.kv .k{color:#8b9bb4}
+.kv .v{overflow-wrap:anywhere}
+.kv small{display:block;font-size:11.5px;color:#8b9bb4}
+.sb{display:grid;grid-template-columns:minmax(0,1fr) 78px 78px;column-gap:12px;align-items:center;min-height:26px;border-bottom:1px solid #1a2236;font-size:12.5px}
+.r{text-align:right}
+.cap{font-size:12px;color:#8b9bb4;overflow-wrap:anywhere}
+</style>
+</helmet>
+<div style="max-width:1440px;margin:0 auto;box-sizing:border-box;padding:24px 32px 32px;display:flex;flex-direction:column;gap:14px">
+  <div style="display:flex;flex-direction:column;gap:2px">
+    <div class="dim" style="font-size:12px">서버 상세 › pl-db-01 › CPU 를 많이 쓰는 프로세스 — 줄을 누르면 그 줄 아래에 세부 정보가 펼쳐집니다(프로세스 탭의 상위 30 에서도 같습니다)</div>
+    <div class="dim" style="font-size:12px">가상의 서버 · 수치입니다. 다섯 줄을 눌러 보세요 — rsync 는 수집 계정의 프로세스(디스크 읽기 · 쓰기가 보이는 경우), node_exporter 는 30위 밖으로 나갔던 구간이 있는 경우입니다.</div>
+  </div>
+
+  <div class="card" style="padding:14px 0 12px;display:flex;flex-direction:column;gap:10px">
+    <div class="row" style="justify-content:space-between;padding:0 16px">
+      <h2 class="h3">CPU 를 많이 쓰는 프로세스 — 상위 5 <span class="dim" style="font-size:12.5px;font-weight:500">· 지금(가장 최근 표본)</span></h2>
+      <div class="row"><span class="dim" style="font-size:12px">줄을 누르면 세부 정보</span><a href="#procs">상위 30개 전부 보기</a></div>
+    </div>
+    <div class="tw">
+      <div class="pgrid pth"><span>PID</span><span>사용자</span><span>CPU(1코어 = 100%)</span><span>명령</span><span></span></div>
+      <sc-for list="{{ rowsA }}" as="r" hint-placeholder-count="1">
+        <button type="button" class="{{ r.cls }}" aria-expanded="{{ r.exp }}" onClick="{{ r.pick }}">
+          <span class="mono num">{{ r.pid }}</span><span class="mono dim">{{ r.user }}</span>
+          <span class="meter"><span class="t"><span class="f" style="{{ r.fill }}"></span></span><span class="num" style="width:58px;text-align:right">{{ r.cpu }}</span></span>
+          <span class="mono" style="font-weight:600">{{ r.comm }}</span><span class="more">{{ r.more }}</span>
+        </button>
+      </sc-for>
+
+      <sc-if value="{{ open }}" hint-placeholder-val="{{ true }}">
+        <div class="panel">
+          <div class="row" style="justify-content:space-between">
+            <div class="row"><span class="mono" style="font-size:18px;font-weight:700">{{ p.comm }}</span><span class="mono dim">PID {{ p.pid }}</span><span class="{{ p.unitCls }}">{{ p.unitBadge }}</span><span class="badge">{{ p.rankBadge }}</span></div>
+            <div class="row"><span class="dim" style="font-size:12px">최근 5분 · 23:07 ~ 23:12 · 위쪽 시간 띠를 따라갑니다</span><button type="button" class="btn" onClick="{{ close }}">닫기</button></div>
+          </div>
+          <div class="cards">
+            <sc-for list="{{ cards }}" as="c" hint-placeholder-count="6">
+              <div class="pc">
+                <div class="row" style="justify-content:space-between"><h4>{{ c.title }}</h4><span class="row" style="gap:12px"><sc-for list="{{ c.legend }}" as="l" hint-placeholder-count="2"><span class="lg"><i style="{{ l.dot }}"></i>{{ l.label }}</span></sc-for></span></div>
+                <sc-if value="{{ c.hasBig }}" hint-placeholder-val="{{ true }}">
+                  <div class="row" style="align-items:baseline;gap:8px"><span class="big num">{{ c.big }}</span><span class="unit">{{ c.unit }}</span><span class="dim" style="font-size:12.5px">{{ c.sub }}</span></div>
+                </sc-if>
+                <sc-if value="{{ c.hasNotice }}" hint-placeholder-val="{{ false }}"><div class="lock">{{ c.notice }}</div></sc-if>
+                <sc-if value="{{ c.hasChart }}" hint-placeholder-val="{{ true }}">
+                  <svg viewBox="0 0 640 150" role="img" aria-label="{{ c.aria }}" style="display:block;width:100%;height:auto">
+                    <sc-for list="{{ c.yt }}" as="t" hint-placeholder-count="3">
+                      <line x1="44" x2="632" y1="{{ t.y }}" y2="{{ t.y }}" stroke="#243049" stroke-width="1"></line>
+                      <text x="38" y="{{ t.ty }}" text-anchor="end" font-size="11" fill="#8b9bb4" font-family="JetBrains Mono, monospace">{{ t.label }}</text>
+                    </sc-for>
+                    <sc-for list="{{ c.areas }}" as="a" hint-placeholder-count="2"><path d="{{ a.d }}" fill="{{ a.fill }}" opacity="0.5"></path></sc-for>
+                    <sc-for list="{{ c.lines }}" as="s" hint-placeholder-count="2"><path d="{{ s.d }}" fill="none" stroke="{{ s.stroke }}" stroke-width="2" stroke-linejoin="round"></path></sc-for>
+                    <sc-for list="{{ c.xt }}" as="t" hint-placeholder-count="6"><text x="{{ t.x }}" y="142" text-anchor="middle" font-size="11" fill="#8b9bb4" font-family="JetBrains Mono, monospace">{{ t.label }}</text></sc-for>
+                  </svg>
+                </sc-if>
+                <sc-for list="{{ c.rows }}" as="x" hint-placeholder-count="0">
+                  <div class="{{ x.cls }}"><span class="{{ x.kCls }}">{{ x.k }}</span><span class="{{ x.vCls }}">{{ x.v }}<small>{{ x.s }}</small></span><span class="r num">{{ x.w }}</span></div>
+                </sc-for>
+                <sc-for list="{{ c.foot }}" as="f" hint-placeholder-count="1"><div class="cap">{{ f.text }}</div></sc-for>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-for list="{{ rowsB }}" as="r" hint-placeholder-count="4">
+        <button type="button" class="{{ r.cls }}" aria-expanded="{{ r.exp }}" onClick="{{ r.pick }}">
+          <span class="mono num">{{ r.pid }}</span><span class="mono dim">{{ r.user }}</span>
+          <span class="meter"><span class="t"><span class="f" style="{{ r.fill }}"></span></span><span class="num" style="width:58px;text-align:right">{{ r.cpu }}</span></span>
+          <span class="mono" style="font-weight:600">{{ r.comm }}</span><span class="more">{{ r.more }}</span>
+        </button>
+      </sc-for>
+    </div>
+    <div class="dim" style="font-size:12px;padding:0 16px;display:flex;flex-direction:column;gap:3px">
+      <span>세부 값은 CPU 상위 30개에 든 프로세스만 수집합니다 — 30위 밖으로 나간 구간은 차트가 끊깁니다(0 이 아닙니다).</span>
+      <span>명령 인자 · 환경 변수 · 열린 파일은 수집하지 않습니다(인자에 비밀번호가 흔합니다). 사용자 이름은 관리자에게만 보입니다.</span>
+      <span>디스크 읽기 · 쓰기량은 수집 계정이 그 프로세스의 주인이거나 root 일 때만 나옵니다. 네트워크 사용량은 리눅스가 프로세스별로 주지 않아 서버 전체를 참고로 보입니다.</span>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1640}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { sel: 25109 }; }
+  renderVals() {
+    const S = this.state;
+    const N = 60; const X0 = 44; const X1 = 632; const YT = 8; const YB = 124;
+    const BLUE = '#3987e5'; const ORANGE = '#d95926';
+    const ACCOUNT = 'dvcmon'; const CORES = 16; const MEM_GB = 64;
+    const rnd = (s) => { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } h ^= h >>> 15; h = Math.imul(h, 2246822507); h ^= h >>> 13; return ((h >>> 0) % 100000) / 100000; };
+    // 부드러운 흔들림(이웃 3점 평균) — base × (1 ± amp)
+    const ser = (seed, base, amp, gap) => { const raw = []; for (let i = -1; i <= N; i++) raw.push(rnd(seed + ':' + i)); const out = []; for (let i = 0; i < N; i++) { const z = (raw[i] + raw[i + 1] + raw[i + 2]) / 3; out.push(gap && i >= gap[0] && i < gap[1] ? null : base * (1 - amp + 2 * amp * z)); } return out; };
+    const one = (n) => n.toFixed(1);
+    const last = (a) => { for (let i = a.length - 1; i >= 0; i--) if (a[i] != null) return a[i]; return null; };
+    const xAt = (i) => X0 + (i / (N - 1)) * (X1 - X0);
+    const nice = (m) => { if (!(m > 0)) return 1; const e = Math.pow(10, Math.floor(Math.log10(m))); const f = m / e; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * e; };
+    const maxOf = (list) => { let m = 0; list.forEach((a) => a.forEach((v) => { if (v != null && v > m) m = v; })); return m; };
+    const fmt = (v) => (v >= 1000 ? Math.round(v).toLocaleString('en-US') : v >= 100 ? String(Math.round(v)) : v >= 10 ? v.toFixed(1) : v >= 1 ? v.toFixed(1) : v === 0 ? '0' : v.toFixed(2));
+    // 차트 한 장: areas [{lo, hi, fill}] · lines [{vals, stroke}] — 값이 없는 점에서 끊는다
+    const chart = (areas, lines, ymIn) => {
+      const ym = ymIn || nice(maxOf(lines.map((l) => l.vals).concat(areas.map((a) => a.hi))));
+      const y = (v) => YB - (Math.min(v, ym) / ym) * (YB - YT);
+      const line = (vals) => { let d = ''; let pen = false; for (let i = 0; i < N; i++) { const v = vals[i]; if (v == null) { pen = false; continue; } d += (pen ? 'L' : 'M') + one(xAt(i)) + ',' + one(y(v)); pen = true; } return d; };
+      const area = (lo, hi) => { let d = ''; let seg = []; const flush = () => { if (seg.length > 1) { d += 'M' + seg.map((i) => one(xAt(i)) + ',' + one(y(hi[i]))).join('L'); for (let k = seg.length - 1; k >= 0; k--) d += 'L' + one(xAt(seg[k])) + ',' + one(y(lo[seg[k]])); d += 'Z'; } seg = []; }; for (let i = 0; i < N; i++) { if (hi[i] == null) flush(); else seg.push(i); } flush(); return d; };
+      return {
+        yt: [0, 0.5, 1].map((f) => ({ y: one(YB - f * (YB - YT)), ty: one(YB - f * (YB - YT) + 4), label: fmt(ym * f) })),
+        areas: areas.map((a) => ({ d: area(a.lo, a.hi), fill: a.fill })),
+        lines: lines.map((l) => ({ d: line(l.vals), stroke: l.stroke })),
+        xt: [0, 12, 24, 36, 48, 59].map((i) => ({ x: one(xAt(i)), label: '23:' + (7 + Math.round(i / 12) < 10 ? '0' : '') + (7 + Math.round(i / 12)) })),
+      };
+    };
+    const avg = (a) => { let s = 0; let n = 0; a.forEach((v) => { if (v != null) { s += v; n += 1; } }); return n ? s / n : null; };
+    const top = (a) => { let m = null; a.forEach((v) => { if (v != null && (m == null || v > m)) m = v; }); return m; };
+
+    // [pid, 이름, 사용자, CPU%, 커널 몫, 스레드, 시작, 시작부터, 부모, 서비스, 서비스 설명, 이름으로 본 설명, RSS GB, 가상 GB, 큰 폴트/s, 디스크 대기 %, 읽기·쓰기 MB/s(없으면 null), 같은 이름 수, 30위 밖 구간]
+    const P = [
+      [25109, 'java', 'app', 340.4, 0.12, 212, '11-09 19:12', '3일 4시간 전', 'systemd (PID 1)', 'tomcat.service', 'systemd 서비스 · /system.slice/tomcat.service', '자바 가상 머신(JVM) — 어떤 자바 프로그램인지는 서비스 이름으로 봅니다', 6.2, 24.1, 0.2, 4.2, null, [[25109, 340.4, 6.2], [1412, 11.6, 1.1]], 2, null],
+      [10334, 'postgres', 'postgres', 101.8, 0.22, 1, '11-12 22:59', '13분 전', 'postgres (PID 10200) — 같은 서비스의 주 프로세스', 'postgresql-13.service', 'systemd 서비스 · /system.slice/postgresql-13.service', 'PostgreSQL 데이터베이스 — 접속 하나마다 프로세스가 하나씩 뜹니다', 1.4, 9.3, 3.1, 31.5, null, [[10334, 101.8, 1.4], [10335, 101.8, 1.3], [10336, 97.2, 1.3], [10337, 88.4, 1.2], [10200, 0.3, 0.2]], 37, null],
+      [10335, 'postgres', 'postgres', 101.8, 0.2, 1, '11-12 22:59', '13분 전', 'postgres (PID 10200) — 같은 서비스의 주 프로세스', 'postgresql-13.service', 'systemd 서비스 · /system.slice/postgresql-13.service', 'PostgreSQL 데이터베이스 — 접속 하나마다 프로세스가 하나씩 뜹니다', 1.3, 9.3, 2.6, 28.9, null, [[10334, 101.8, 1.4], [10335, 101.8, 1.3], [10336, 97.2, 1.3], [10337, 88.4, 1.2], [10200, 0.3, 0.2]], 37, null],
+      [31877, 'rsync', 'dvcmon', 38.2, 0.45, 1, '11-12 23:04', '8분 전', 'bash (PID 31802)', '', '사용자 세션에서 실행 — systemd 서비스가 아닙니다(/user.slice/user-1001.slice/session-412.scope)', '파일 동기화 · 복사 도구', 0.05, 0.3, 0, 22.4, [85.2, 0.1], [[31877, 38.2, 0.05], [31878, 2.1, 0.02]], 2, null],
+      [2211, 'node_exporter', 'prometheus', 4.1, 0.5, 9, '10-02 09:00', '41일 전', 'systemd (PID 1)', 'node_exporter.service', 'systemd 서비스 · /system.slice/node_exporter.service', '', 0.03, 0.7, 0, 0, null, [[2211, 4.1, 0.03]], 1, [18, 31]],
+    ];
+    const topCpu = P[0][3];
+    const mkRow = (d, i) => ({
+      pid: String(d[0]), user: d[2], cpu: d[3].toFixed(1) + '%', comm: d[1], fill: 'width:' + Math.max(1.5, (d[3] / topCpu) * 100).toFixed(1) + '%',
+      cls: 'prow pgrid' + (S.sel === d[0] ? ' sel' : ''), exp: S.sel === d[0] ? 'true' : 'false', more: S.sel === d[0] ? '접기' : '세부 정보',
+      pick: () => this.setState({ sel: S.sel === d[0] ? null : d[0] }), i: i,
+    });
+    const rows = P.map(mkRow);
+    const si = P.findIndex((d) => d[0] === S.sel);
+    const rowsA = si < 0 ? rows : rows.slice(0, si + 1);
+    const rowsB = si < 0 ? [] : rows.slice(si + 1);
+    const d = si < 0 ? P[0] : P[si];
+    const key = String(d[0]);
+    const gap = d[19];
+
+    // 마지막 점을 목록의 '지금' 값에 맞춘다(목록과 패널의 숫자가 같게)
+    const pin = (a, v) => { const l = last(a); return l ? a.map((x) => (x == null ? null : (x * v) / l)) : a; };
+    const cpuAll = pin(ser(key + ':cpu', d[3], 0.14, gap), d[3]);
+    const cpuSys = cpuAll.map((v) => (v == null ? null : v * d[4]));
+    const cpuUsr = cpuAll.map((v, i) => (v == null ? null : v - cpuSys[i]));
+    const zero = cpuAll.map((v) => (v == null ? null : 0));
+    const rss = pin(ser(key + ':rss', d[12], 0.03, gap), d[12]);
+    const bw = pin(ser(key + ':bw', d[15], d[15] > 0 ? 0.35 : 0, gap), d[15]);
+    const io = d[16];
+    const ioR = io ? pin(ser(key + ':ior', io[0], 0.25, gap), io[0]) : null;
+    const ioW = io ? pin(ser(key + ':iow', io[1], 0.5, gap), io[1]) : null;
+    const netRx = ser('srv:rx', 48, 0.3, null).map((v, i) => (i > 20 && i < 34 ? v * 6 : v));
+    const netTx = ser('srv:tx', 29, 0.3, null);
+    const gapText = gap ? ' · 23:08 ~ 23:09 는 30위 밖(값 없음)' : '';
+    const gb = (v) => (v >= 1 ? v.toFixed(1) + ' GB' : Math.round(v * 1024) + ' MB');
+    const kv = (k, v, s) => ({ cls: 'kv', kCls: 'k', vCls: 'v', k: k, v: v, s: s || '', w: '' });
+
+    const cards = [
+      { title: '어떤 프로세스인가', legend: [], hasBig: false, big: '', unit: '', sub: '', hasNotice: false, notice: '', hasChart: false, aria: '', yt: [], areas: [], lines: [], xt: [],
+        rows: [
+          kv('이름', d[1], d[11] ? '이름으로 본 설명: ' + d[11] : '이름으로 아는 설명이 없습니다'),
+          kv('서비스', d[9] || '없음', d[10]),
+          kv('부모 프로세스', d[8]),
+          kv('사용자', d[2], d[2] === ACCOUNT ? '수집 계정과 같은 계정입니다' : ''),
+          kv('시작', d[6], d[7]),
+          kv('스레드', d[5] + '개'),
+          kv('같은 이름', '이 서버에 ' + d[18] + '개', d[18] > 1 ? '오른쪽 아래 카드에 CPU 순으로' : ''),
+          kv('명령 인자', '수집하지 않습니다', '인자에 비밀번호가 들어 있는 경우가 흔합니다'),
+        ],
+        foot: [{ text: '이름 · 부모 · 스레드 · 시작은 /proc/<pid>/stat, 서비스는 /proc/<pid>/cgroup 에서 읽습니다(일반 계정으로 읽힙니다).' }] },
+      Object.assign({ title: 'CPU 사용량', legend: [{ dot: 'background:' + BLUE, label: '사용자' }, { dot: 'background:' + ORANGE, label: '커널' }], hasBig: true,
+        big: (last(cpuAll) == null ? '—' : last(cpuAll).toFixed(1)), unit: '%', sub: '= ' + (last(cpuAll) / 100).toFixed(1) + '코어 분량 · 서버 ' + CORES + '코어의 ' + Math.round(last(cpuAll) / CORES) + '%',
+        hasNotice: false, notice: '', hasChart: true, aria: d[1] + ' 의 CPU 사용량 추이(사용자 · 커널)', rows: [],
+        foot: [{ text: '구간 평균 ' + avg(cpuAll).toFixed(1) + '% · 최고 ' + top(cpuAll).toFixed(1) + '% · 1코어 = 100%(스레드가 여럿이면 100% 를 넘습니다)' + gapText }] },
+        chart([{ lo: zero, hi: cpuUsr, fill: BLUE }, { lo: cpuUsr, hi: cpuAll, fill: ORANGE }], [{ vals: cpuAll, stroke: '#c3cede' }])),
+      Object.assign({ title: '메모리', legend: [{ dot: 'background:' + BLUE, label: '실제 사용(RSS)' }], hasBig: true,
+        big: gb(last(rss)).split(' ')[0], unit: gb(last(rss)).split(' ')[1], sub: '서버 메모리 ' + MEM_GB + ' GB 의 ' + ((last(rss) / MEM_GB) * 100).toFixed(1) + '%',
+        hasNotice: false, notice: '', hasChart: true, aria: d[1] + ' 의 메모리 사용량 추이', rows: [],
+        foot: [{ text: '가상 메모리 ' + gb(d[13]) + ' · 스왑 0 · 디스크에서 다시 읽은 페이지(major fault) ' + d[14] + '회/초' + gapText }] },
+        chart([], [{ vals: rss, stroke: BLUE }])),
+      io
+        ? Object.assign({ title: '디스크', legend: [{ dot: 'background:' + BLUE, label: '읽기' }, { dot: 'background:' + ORANGE, label: '쓰기' }], hasBig: true,
+          big: last(ioR).toFixed(1), unit: 'MB/s 읽기', sub: '쓰기 ' + last(ioW).toFixed(1) + ' MB/s · 디스크를 기다린 시간 ' + last(bw).toFixed(1) + '%',
+          hasNotice: false, notice: '', hasChart: true, aria: d[1] + ' 의 디스크 읽기 · 쓰기 추이', rows: [],
+          foot: [{ text: '수집 계정(' + ACCOUNT + ')이 주인인 프로세스라 읽기 · 쓰기량(/proc/<pid>/io)을 읽을 수 있습니다.' }] },
+          chart([], [{ vals: ioR, stroke: BLUE }, { vals: ioW, stroke: ORANGE }]))
+        : Object.assign({ title: '디스크', legend: [{ dot: 'background:' + BLUE, label: '디스크를 기다린 시간' }], hasBig: true,
+          big: last(bw) == null ? '—' : last(bw).toFixed(1), unit: '%', sub: '이 프로세스가 디스크 입출력을 기다리며 보낸 시간의 비율',
+          hasNotice: true, notice: '읽기 · 쓰기량(MB/s)은 읽을 수 없습니다 — /proc/' + d[0] + '/io 는 이 프로세스의 계정(' + d[2] + ')이나 root 만 읽을 수 있고, 수집 계정은 ' + ACCOUNT + ' 입니다.',
+          hasChart: true, aria: d[1] + ' 의 디스크 대기 시간 추이', rows: [],
+          foot: [{ text: '기다린 시간은 /proc/<pid>/stat 의 42번째 칸(일반 계정으로 읽힙니다). 어느 디스크인지는 서버 상세의 디스크 표에서 봅니다.' + gapText }] },
+          chart([], [{ vals: bw, stroke: BLUE }], d[15] > 0 ? null : 1)),
+      Object.assign({ title: '네트워크', legend: [{ dot: 'background:' + BLUE, label: '서버 전체 수신' }, { dot: 'background:' + ORANGE, label: '서버 전체 송신' }], hasBig: false, big: '', unit: '', sub: '',
+        hasNotice: true, notice: '프로세스별 네트워크 사용량은 읽을 수 없습니다 — 리눅스는 프로세스별 네트워크 바이트를 /proc 에 남기지 않습니다(root 도구 nethogs · eBPF 가 있어야 하고 RHEL 7.8 기본 설치에는 없습니다).',
+        hasChart: true, aria: '같은 시간의 서버 전체 네트워크 수신 · 송신', rows: [],
+        foot: [{ text: '참고 — 같은 시간의 서버 전체(bond0) Mb/s 입니다. 이 프로세스의 몫이 아닙니다. 위 CPU 차트와 같은 시간축이라 함께 움직이는지 견줘 볼 수 있습니다.' }] },
+        chart([], [{ vals: netRx, stroke: BLUE }, { vals: netTx, stroke: ORANGE }])),
+      { title: '같은 이름의 프로세스 — ' + d[18] + '개', legend: [], hasBig: false, big: '', unit: '', sub: '', hasNotice: false, notice: '', hasChart: false, aria: '', yt: [], areas: [], lines: [], xt: [],
+        rows: [{ cls: 'sb', kCls: 'dim', vCls: 'r dim', k: 'PID', v: 'CPU', s: '', w: '메모리' }].concat(d[17].map((x) => ({ cls: 'sb', kCls: 'mono' + (x[0] === d[0] ? '' : ' dim'), vCls: 'r num', k: x[0] + (x[0] === d[0] ? ' (이 프로세스)' : ''), v: x[1].toFixed(1) + '%', s: '', w: gb(x[2]) }))),
+        foot: [{ text: d[18] > d[17].length ? 'CPU 순 위에서 ' + d[17].length + '개 — 나머지 ' + (d[18] - d[17].length) + '개는 합쳐서 CPU ' + (d[18] * 0.4).toFixed(1) + '% 입니다.' : '이 서버에서 이름이 같은 프로세스 전부입니다.' }] },
+    ];
+
+    return {
+      rowsA: rowsA, rowsB: rowsB, open: si >= 0,
+      p: { comm: d[1], pid: String(d[0]), unitBadge: d[9] ? '서비스 ' + d[9] : '서비스 아님', unitCls: d[9] ? 'badge ok' : 'badge', rankBadge: 'CPU ' + (si < 0 ? 1 : si + 1) + '위' },
+      close: () => this.setState({ sel: null }),
+      cards: cards,
+    };
+  }
+}
+</script>
+</body>
+</html>

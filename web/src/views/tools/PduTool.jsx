@@ -9,7 +9,7 @@ import { Loading, ErrorBox, SearchBox } from '../../components/ui.jsx';
 import EscClose from '../../components/EscClose.jsx';
 import PduCharts from './PduCharts.jsx';
 import BoldText from '../../components/boldText.jsx';
-import { authStopInfo, authStopSummary } from './storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
+import { authStopInfo, authStopSummary, authStopSummaryUnreadOnly, authStopShort } from './storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
 import { collectDropNote } from './collectDropText.js'; // v2.591: 결과 없이 폐기된 위임 '지금 수집' 요청
 import { agoText } from './relTime.js';
 import { edgeClockAheadMark, edgeClockFootnote } from './edgeLateText.js'; // v2.631 A6-2631-04: 엣지 시계 빠름 표지
@@ -17,6 +17,7 @@ import { hostText, addressHiddenNote } from './addressHiddenText.js'; // v2.599 
 import { missingChoice } from '../idrac/scanRangeFormText.js'; // v2.630 WEB2630-03
 import { changedIntervalBody } from '../settingsFormDiff.js'; // v2.630 WEB2630-02
 import { requireChanged } from '../changeResult.js'; // v2.742(WEB-03): 200 {ok:false} 를 성공으로 읽지 않는다
+import { unreadKind, staleSeedLock } from '../settingsUnread.js';   // 133회차: 임계치 파일을 못 읽은 동안 연 창(기본값으로 채움)의 저장을 잠근다(112회차 규약)
 import useSearchHandoff, { useFocusHandoff } from '../../hooks/useSearchHandoff.js'; // v2.911 ⌘K 통합 장비 검색 — 검색어 · 고른 장비
 
 /**
@@ -103,7 +104,7 @@ export default function PduTool() {
   };
   const remove = async (d) => {
     if (!window.confirm(`'${d.name}' (${d.host}) PDU 를 삭제할까요?\n※ 수집된 시계열은 남습니다.`)) return;
-    try { await delJson(`/tools/pdu/devices/${encodeURIComponent(d.id)}`); await load(); } catch (e) { setError(e.message); }
+    try { requireChanged(await delJson(`/tools/pdu/devices/${encodeURIComponent(d.id)}`)); await load(); } catch (e) { setError(e.message); }   // 112회차: 409(등록부 읽기 오류) 본문을 삼키지 않는다
   };
   const collect = async (d) => {
     setBusy(true);
@@ -161,10 +162,18 @@ export default function PduTool() {
 
       {msg && <div className={msg.ok ? 'card' : 'card error-box'} style={{ padding: 10, marginBottom: 12, fontSize: 13 }}>{msg.text}</div>}
       {error && data && <div className="card error-box" style={{ padding: 10, marginBottom: 12, fontSize: 13 }}>폴링 오류: {error}</div>}
+      {/* 78회차 개선: 등록부 · 임계치 · 주기 파일을 못 읽었으면 빈 목록 · 기본값이 정상처럼 보이지 않게 밝힌다(서버 pduLoadErrors). */}
+      {data?.loadErrors && (
+        <div className="card error-box" style={{ padding: 10, marginBottom: 12, fontSize: 13, textAlign: 'left' }}>
+          {data.loadErrors.registry && <div>PDU 등록부를 읽지 못했습니다 — {data.loadErrors.registry}. 아래 목록은 실제 등록 상태가 아닐 수 있습니다(서비스 점검 참고).</div>}
+          {data.loadErrors.thresholds && <div>임계치 설정을 읽지 못해 기본값으로 판정합니다 — {data.loadErrors.thresholds}</div>}
+          {data.loadErrors.intervals && <div>수집 주기 설정을 읽지 못해 env · 기본 주기로 돕니다 — {data.loadErrors.intervals}</div>}
+        </div>
+      )}
 
       {/* v2.590(감사 F2): 인증 실패로 **주기 수집을 멈춘** PDU — 조용히 멈추지 않는다(authGuard 규칙 1). */}
       {authStopSummary(devices.filter((d) => d.snapshot?.authStopped), { unit: '대', what: 'PDU' }) && (
-        <div className="card" style={{ padding: 10, marginBottom: 12, fontSize: 13, borderColor: 'var(--red)' }}>
+        <div className="card" data-auth-stop-summary style={{ padding: 10, marginBottom: 12, fontSize: 13, borderColor: authStopSummaryUnreadOnly(devices.filter((d) => d.snapshot?.authStopped)) ? 'var(--amber)' : 'var(--red)' }}>
           <BoldText text={authStopSummary(devices.filter((d) => d.snapshot?.authStopped), { unit: '대', what: 'PDU' })} />
           <span className="muted"> 행의 수집 버튼은 정지와 무관하게 1회 시도하고, 성공하면 정지가 풀립니다.</span>
         </div>
@@ -195,7 +204,7 @@ export default function PduTool() {
         </div>
       )}
       {tab === 'list' && (devices.length === 0 ? (
-        <div className="muted" style={{ fontSize: 13 }}>등록된 PDU 가 없습니다. ‘+ PDU 추가’ 또는 CSV 가져오기로 등록하세요.</div>
+        <div className="muted" style={{ fontSize: 13 }}>{data?.loadErrors?.registry ? 'PDU 등록부를 읽지 못했습니다 — 목록이 비어 보여도 등록이 없는 것이 아닙니다.' : '등록된 PDU 가 없습니다. ‘+ PDU 추가’ 또는 CSV 가져오기로 등록하세요.'}</div>
       ) : (
         <div className="table-wrap">
           {/* v2.447(감사 I5): v2.422 에서 표 181개를 STable 로 바꿀 때 이 표 하나가 raw table 로 남아
@@ -222,7 +231,7 @@ export default function PduTool() {
                         </b>
                         {d.enabled === false && <span className="badge" style={{ marginLeft: 6 }}>중지</span>}
                         {s && !s.ok && (s.authStopped
-                          ? <span className="badge red" style={{ marginLeft: 6, whiteSpace: 'nowrap' }} title={`${authStopInfo(s.authStopped, { what: '이 PDU' })?.detail || ''} — 펼치면 사유를 봅니다`}>인증 실패 정지</span>
+                          ? <span className="badge red" style={{ marginLeft: 6, whiteSpace: 'nowrap' }} title={`${authStopInfo(s.authStopped, { what: '이 PDU' })?.detail || ''} — 펼치면 사유를 봅니다`}>{authStopShort(s.authStopped)}</span>
                           : <span className="badge red" style={{ marginLeft: 6 }} title={s.error}>오류</span>)}
                         {(s?.violations || []).length > 0 && (
                           <span className="badge" style={{ marginLeft: 6, background: s.violations.some((v) => v.severity === 'critical') ? 'rgba(239,68,68,.2)' : 'rgba(245,158,11,.2)', color: s.violations.some((v) => v.severity === 'critical') ? '#ef4444' : '#f59e0b' }}
@@ -451,7 +460,8 @@ function CsvModal({ onClose }) {
   const [busy, setBusy] = useState(false);
   const doImport = async () => {
     setBusy(true); setResult(null);
-    try { setResult(await postJson('/tools/pdu/csv/import', { csv })); }
+    // 128회차: 등록부 읽기 오류 거절(409)은 failed 없이 사유(reason)만 온다 — 그대로 두면 ‘추가 0 · 수정 0’ 만 보이고 왜 안 됐는지가 사라졌다.
+    try { const r = await postJson('/tools/pdu/csv/import', { csv }); setResult(r?.ok === false && !Array.isArray(r.failed) ? { ...r, failed: [r.reason || '가져오지 못했습니다(사유 미상).'] } : r); }
     catch (e) { setResult({ ok: false, failed: [e.message] }); } finally { setBusy(false); }
   };
   return (
@@ -465,6 +475,7 @@ function CsvModal({ onClose }) {
         <div className="muted" style={{ fontSize: 12.5, marginBottom: 10, lineHeight: 1.6 }}>
           열: <code>name, host, username, sshPort, datacenter, agent, enabled, note, password</code><br />
           같은 <b>host</b> 가 이미 있으면 <b>수정</b>, 없으면 추가됩니다(내보내기 → 편집 → 가져오기 왕복 안전).{' '}
+          수정 행의 <b>빈 칸은 기존 값을 유지</b>합니다(agent 를 비워도 중앙 직접으로 바뀌지 않습니다) — 값을 지우려면 그 칸에 ‘-’ 하나를 적으세요. 새 장비의 빈 칸은 기본값입니다.{' '}
           <b>비밀번호는 내보내지 않습니다</b>(가져오기에서 비워 두면 기존 값 유지).
           센서/PDU 수량 열이 없는 것은 의도입니다 — 자동 탐지합니다.
         </div>
@@ -487,6 +498,13 @@ function CsvModal({ onClose }) {
               <div className="error-box" style={{ padding: 8, marginTop: 8, textAlign: 'left' }}>
                 실패 {result.failed.length}건<br />
                 {result.failed.slice(0, 20).map((f, i) => <div key={i}>{f}</div>)}
+              </div>
+            )}
+            {/* 78회차 F5: 접속처가 바뀌어 저장 비밀번호를 버린 행 — 수정은 됐지만 비밀번호를 다시 넣어야 수집된다(조용히 버리지 않는다). */}
+            {(result.droppedSecrets || []).length > 0 && (
+              <div className="error-box" style={{ padding: 8, marginTop: 8, textAlign: 'left' }}>
+                비밀번호 폐기 {result.droppedSecrets.length}건 — 비밀번호를 다시 입력해야 수집됩니다<br />
+                {result.droppedSecrets.slice(0, 20).map((f, i) => <div key={i}>{f.line}행({f.host}): {f.reason}</div>)}
               </div>
             )}
           </div>
@@ -556,10 +574,17 @@ function ThresholdModal({ data, onClose }) {
   const [enabled, setEnabled] = useState(cur.enabled !== false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
+  // 133회차(128회차 추정 E2 — 재현): 이 창은 열 때의 임계치로 칸을 한 번 채우고 **늘 전 키**를 저장한다. 임계치 파일을 읽기 오류로 못 읽은 동안 열면 칸이 기본값이고,
+  //   파일이 다시 읽힌 뒤의 ‘저장’ 이 저장돼 있던 임계치 · 감시 사용 여부를 그 기본값으로 덮었다(서버의 409 는 읽기 오류가 이어지는 동안만 막는다 — 덮인 전 키가
+  //   엣지 배포 대상이 된다). 열 때 못 읽은 상태였으면 다시 읽힌 뒤에도 잠근다(닫고 다시 열어야 저장된 값이 보인다).
+  const thLe = data.thresholdsLoadError || null;
+  const [openedKind] = useState(() => unreadKind(thLe));
+  const lockWhy = staleSeedLock(openedKind, thLe, { what: 'PDU 임계치' });
   const save = async () => {
+    if (lockWhy) return;
     setBusy(true); setMsg(null);
     try {
-      await postJson('/tools/pdu/thresholds', { enabled, ...vals });
+      requireChanged(await postJson('/tools/pdu/thresholds', { enabled, ...vals }));   // 128회차: 임계치 파일 읽기 오류 거절(409)을 ‘저장했습니다.’ 로 읽지 않는다
       setMsg({ ok: true, text: '저장했습니다. 다음 수집 주기부터 적용됩니다.' });
       setTimeout(onClose, 900);
     } catch (e) { setMsg({ ok: false, text: e.message }); } finally { setBusy(false); }
@@ -592,9 +617,10 @@ function ThresholdModal({ data, onClose }) {
             </div>
           ))}
         </div>
-        <button className="login-btn" style={{ flex: 'none', padding: '8px 18px', marginTop: 14 }} disabled={busy} onClick={save}>
+        <button className="login-btn" style={{ flex: 'none', padding: '8px 18px', marginTop: 14 }} disabled={busy || !!lockWhy} onClick={save}>
           {busy ? '저장 중…' : '저장'}
         </button>
+        {lockWhy && <div className="card error-box" role="alert" style={{ marginTop: 10, padding: 10, fontSize: 13, textAlign: 'left', whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{lockWhy}</div>}
         {msg && <div className={msg.ok ? 'card' : 'card error-box'} style={{ marginTop: 10, padding: 10, fontSize: 13 }}>{msg.text}</div>}
       </div>
     </>

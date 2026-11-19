@@ -219,7 +219,8 @@ export class BareosSession {
   async _authText(deadlineAt, what) {
     for (;;) {
       const f = await this._next(deadlineAt);
-      if (f.data) return f.data.toString('utf8').replace(/\0+$/, '');
+      // 전체 점검 11회차(B-32): 인증 단계 프레임(상한 4MB)에 앵커 끝 무제한 반복(/\0+$/)은 O(n²) — 먼저 자르고 끝의 NUL 은 선형으로 뗀다
+    if (f.data) { let t = f.data.subarray(0, 4096).toString('utf8'); let e = t.length; while (e > 0 && t.charCodeAt(e - 1) === 0) e--; t = t.slice(0, e); return t; }
       if (f.sig === BNET.TERMINATE) throw err('auth', `Director 가 ${what} 단계에서 연결을 끊었습니다(콘솔 이름·비밀번호·접속 허용을 확인하세요).`);
       // 그 밖의 신호는 건너뛴다
     }

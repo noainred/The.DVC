@@ -17,6 +17,7 @@
  * v2.613(CONTRACT2613-01 · EDGE2613-02): 사다리(등록부 → fetch → 401/403 → 404 → http → bad-body)는 `central/edgePull.js
  *   pullFromEdge` **하나**다 — 여기는 시한 env·`retries:0`(점검은 재시도가 판정을 흐린다)·저장·정제만 갖는다.
  */
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { resilientFetch } from '../util/resilientFetch.js';
 import { pullFromEdge } from './edgePull.js'; // v2.613 CONTRACT2613-01·EDGE2613-02: 당김 사다리는 하나(등록부 → fetch → 상태코드 → 본문)
 import { capTrim } from '../util/capStr.js'; // v2.606 TIM2606-02: 보관 글자는 평탄화(SlicedString 이 응답 원문을 붙잡지 않게)
@@ -31,7 +32,7 @@ export const MIN_EDGE_VERSION = '2.560.0';
 export const PULL_TIMEOUT_MS = Math.min(60_000, Math.max(3_000, Number(process.env.PORTALCHECK_PULL_TIMEOUT_MS) || 20_000));
 const TIMEOUT_MS = PULL_TIMEOUT_MS;
 /** 보고가 이보다 오래되면 화면이 '낡았다' 고 말한다(값을 지우지는 않는다). */
-export const STALE_MS = Math.max(60_000, Number(process.env.PORTALCHECK_PULL_STALE_MS) || 30 * 60_000);
+export const STALE_MS = Math.max(60_000, envPositive(process.env.PORTALCHECK_PULL_STALE_MS, 30 * 60_000));
 
 const t = (v) => String(v ?? '').trim();
 /** agent(소문자) → 보고 레코드 */

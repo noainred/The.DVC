@@ -56,7 +56,9 @@ function seedOriginal() {
 }
 const corruptCopies = () => fs.readdirSync(DIR).filter((n) => n.startsWith('peer-trust.json.corrupt.'));
 
-test('① 읽기 실패 → 원본 보존 · 연결 기록이 원본을 덮지 않는다 · 재시작 뒤에도 enforce(observe 로 내려가지 않음)', () => {
+// 119회차(결정 — 읽기 실패 ≠ 손상): ① ② 의 기대가 바뀌었다. v2.732 는 읽지 못한 원본을 .corrupt.* 로 옮기고 닫힌 정책을 그 자리에 썼다 — 이제 원본을 **그 자리에 두고**
+//   쓰기를 막는다(⑤ 의 '옮기지 못함' 갈래와 같은 writeBlocked). 지키는 것은 같다: 원본(승인 목록)이 남는다 · 연결 기록이 덮지 않는다 · observe 로 내려가지 않는다.
+test('① 읽기 실패 → 원본 그대로(옮기지 않음) · 연결 기록이 원본을 덮지 않는다 · 재시작 뒤에도 enforce(observe 로 내려가지 않음)', () => {
   const orig = seedOriginal();
   denyRead();
   pt._resetPeerTrustForTest();
@@ -64,38 +66,40 @@ test('① 읽기 실패 → 원본 보존 · 연결 기록이 원본을 덮지 �
   const st = pt.peerTrustStatus();
   assert.equal(st.loadError?.code, 'unreadable');
   assert.equal(st.loadError?.detail, 'EACCES');
+  assert.equal(st.loadError?.writeBlocked, true);
+  assert.equal(st.loadError?.readError, true);
   assert.equal(pt.getPeerPolicy('ssh').mode, 'enforce');
-  // 읽기 실패 동안 처음 보는 장비 — enforce 라 거부·대기 기록(2초 묶음 저장) → 즉시 flush
+  // 읽기 실패 동안 처음 보는 장비 — enforce 라 거부·대기 기록(메모리에만) → flush 는 쓰지 않는다
   assert.equal(pt.checkPeer('ssh', '10.0.0.9', 22, FP_B).ok, false);
   pt.flushPeerTrust();
-  unpatch();
-  // 원본의 승인 지문이 어딘가(보존본)에 그대로 남아 있어야 한다
-  const copies = corruptCopies();
-  assert.equal(copies.length, 1, '읽지 못한 원본을 .corrupt.* 로 보존한다');
-  assert.equal(realRead.call(fs, path.join(DIR, copies[0]), 'utf8'), orig, '보존본은 원본 그대로');
-  // 재시작 — 기존 현장 표지가 있어도 observe 로 열지 않는다
+  // 여전히 못 읽는 채로 재시작 — 기존 현장 표지가 있어도 observe 로 열지 않는다
   pt._resetPeerTrustForTest();
   const ssh = pt.getPeerPolicy('ssh'); const tls = pt.getPeerPolicy('tls');
   assert.equal(ssh.mode, 'enforce', '재시작 뒤 ssh observe 하향 금지');
   assert.equal(tls.mode, 'enforce', '재시작 뒤 tls observe 하향 금지');
   assert.equal(ssh.origin, 'load-error');
   assert.notEqual(ssh.origin, 'upgrade-migration');
-  // 새 파일은 닫힌 정책을 담는다(파일 자체가 근거)
-  const now = JSON.parse(realRead.call(fs, FILE, 'utf8'));
-  assert.deepEqual(now.policy, { ssh: 'enforce', tls: 'enforce' });
+  unpatch();
+  // 원본은 그 자리에 글자 그대로 — 보존본(.corrupt.*)을 만들지 않는다
+  assert.equal(corruptCopies().length, 0, '읽기 실패는 손상이 아니다 — 원본을 옮기지 않는다');
+  assert.equal(realRead.call(fs, FILE, 'utf8'), orig, '원본이 그대로');
+  // 권한을 고치고 재시작하면 원래 정책 · 승인 지문이 그대로 읽힌다
+  pt._resetPeerTrustForTest();
+  assert.equal(pt.peerTrustStatus().loadError, null);
+  assert.equal(pt.checkPeer('ssh', '10.0.0.5', 22, FP_A).reason, 'approved');
 });
 
-test('② 읽기 실패 직후 아무 연결 없이 재시작해도 enforce', () => {
-  seedOriginal();
+test('② 읽기 실패 직후 아무 연결 없이 재시작해도 enforce — 파일은 건드리지 않는다', () => {
+  const orig = seedOriginal();
   denyRead();
   pt._resetPeerTrustForTest();
   pt.initPeerTrust();
-  unpatch();
-  assert.deepEqual(JSON.parse(realRead.call(fs, FILE, 'utf8')).policy, { ssh: 'enforce', tls: 'enforce' }, '닫힌 정책을 곧바로 파일에 남긴다');
+  assert.equal(realRead.call(fs, FILE, 'utf8'), orig, '닫힌 정책은 메모리에만 — 원본 자리에 쓰지 않는다');
   pt._resetPeerTrustForTest();
   assert.equal(pt.getPeerPolicy('ssh').mode, 'enforce');
   assert.equal(pt.getPeerPolicy('tls').mode, 'enforce');
-  assert.equal(corruptCopies().length, 1);
+  unpatch();
+  assert.equal(corruptCopies().length, 0);
 });
 
 test('③ 손상 파일 → 보존 뒤 쓰기 없이 재시작해도 enforce(예전: 파일 없음 → observe)', () => {

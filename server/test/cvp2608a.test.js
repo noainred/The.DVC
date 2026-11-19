@@ -4,13 +4,20 @@
  * 등록부 비밀 승계(접속 대상 변경 시 폐기) · SSRF 차단 · 설정 빈 칸(이전 값 유지) · 수신 정제(남의 cvp_id·비객체 원소).
  * ⚠ 실장비 CVP 응답을 본 적이 없다 — 픽스처는 관용 형태로 **합성**했다(docs/CVP.md 정직 기록).
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'cvp2608a-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+process.env.CONFIG_DIR = tmpDir('cvp2608a-');
 const P = await import('../src/cvp/parse.js');
 
 const MIN = 60_000;
@@ -59,7 +66,7 @@ test('notifications — 와일드카드(all) 응답은 update 키가 개체, 개
   assert.deepEqual(P.portsSummary(r.ports), { total: 3, up: 1, down: 1 }, 'down 은 관리상 켜진 포트만(쓰지 않는 포트를 장애로 세지 않는다)');
   const single = { notifications: [{ path: '/Smash/counters/ethIntf/FastCounters/current/Ethernet1', updates: { inOctets: { key: 'inOctets', value: 100 }, outOctets: { key: 'outOctets', value: 50 } } }] };
   const c = P.parseCounters(JSON.stringify(single));
-  assert.deepEqual(c.counters.get('Ethernet1'), { inOctets: 100, outOctets: 50, inErrors: null, outErrors: null }, '없는 오류 카운터는 0 이 아니라 null');
+  assert.deepEqual(c.counters.get('Ethernet1'), { inOctets: 100, outOctets: 50, inErrors: null, outErrors: null, inDiscards: null, outDiscards: null }, '(v2.922 드롭 후보 포함) 없는 오류 카운터는 0 이 아니라 null');
 });
 
 test('오류 본문(인식 필드 없음)을 포트·카운터·부품·피어로 지어내지 않는다', () => {

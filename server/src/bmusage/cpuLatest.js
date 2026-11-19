@@ -8,6 +8,7 @@
  * 실패는 삼키지 않고 `error` 로 돌려준다(호출부가 화면에 밝힌다).
  */
 import { numOrNull } from '../util/numOrNull.js';
+import { clampEdgeTs } from '../util/clampEdgeTs.js';
 
 export const freshOfInterval = (ms) => Math.max(30 * 60_000, 3 * (numOrNull(ms) || 300_000));
 
@@ -21,7 +22,10 @@ export async function cpuLatestRows() {
     let s = null; try { s = loadBmUsageSettings(); } catch { s = null; }
     try { out.bmEnabled = typeof bmUsageEnabled === 'function' ? !!bmUsageEnabled(s) : !!s?.enabled; } catch { out.bmEnabled = null; }
     const edges = (() => { try { return edge.listEdgeBmUsage(); } catch { return []; } })();
-    const edgeRows = edges.flatMap((e) => (e?.snap?.rows || []).filter((r) => r && typeof r === 'object').map((r) => ({ ...r, _freshMs: freshOfInterval(e?.snap?.settings?.intervalMs) })));
+    // 전체 점검 34회차 F1(재현): 엣지 행 시각은 중앙이 받은 시각(snapAt)으로 자른다 — corpUsage · svcInventory 와 같은 식. 빠져 있어
+    //   시계가 앞선 엣지가 멈춘 뒤에도 그 CPU 값이 센서 상세에서 'ok', iDRAC 통합 추이에서 fresh 로 매 분 적재됐다.
+    const edgeRows = edges.flatMap((e) => (e?.snap?.rows || []).filter((r) => r && typeof r === 'object')
+      .map((r) => ({ ...r, ts: clampEdgeTs(r.ts, numOrNull(e?.snapAt)), _freshMs: freshOfInterval(e?.snap?.settings?.intervalMs) })));
     out.rows = [...central.map((r) => ({ ...r, _freshMs: freshOfInterval(s?.intervalMs) })), ...edgeRows];
   } catch (e) { out.error = String(e?.message || e).slice(0, 200); }
   return out;

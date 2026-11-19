@@ -9,16 +9,18 @@ import fs from 'node:fs';
 import { morefOf } from '../vcenter/registry.js';   // v2.447: vcenterId 에 콜론이 있어도 안전한 moref 추출(감사 B1)
 import path from 'node:path';
 import { config, loadVcenterConfig } from '../config.js';
+import { fileMissing } from '../util/fileMissing.js';   // 134회차: '정말 없는가'(ENOENT 만 — existsSync 는 stat 실패도 false)
 import { store } from '../store.js';
 import { VimSoapClient } from '../gpu/guestops.js';
 import { loadGpuGuestSettings, resolveVmCreds } from '../gpu/settings.js';
 import { detectGuestOs } from './osDetect.js';
 import { upsertOs, getScanInfo, osSummary, pruneMissing } from './osStore.js';
-import { atomicWriteFileSync, safeLoadText } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, safeLoadText, corruptBackupPath } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 107회차: 읽기 오류 ≠ 손상(공용 읽기 — 30초 간격 재읽기)
 import { vcAuthGuard, isVcAuthError } from '../vcenter/restClient.js';
 import { splitDirectCollectTargets, skippedCountsOf } from '../vcenter/collectTarget.js'; // v2.732(B4-01): 직접 수집 대상 판정(store.js 주 폴러와 같은 조건)
 import { gpuAuthGuard, isGpuAuthError, guestAccountStopDev } from '../gpu/sshCollect.js';
-import { authStopView, createAuthBreaker, runWithBreakerWarmup } from '../util/authGuard.js';
+import { authStopView, authStopText, createAuthBreaker, runWithBreakerWarmup } from '../util/authGuard.js';
 import { demoOn, isMockMode } from '../mock/demo/flags.js';
 import { demoRealOs } from '../mock/demo/users.js'; // v2.708 데모(mock 에서만)
 
@@ -32,7 +34,7 @@ const DEFAULTS = { enabled: false, intervalMin: 720, scope: 'all', maxVms: 200, 
  */
 function backupCorrupt(err) {
   try {
-    const bak = `${FILE}.corrupt.${Date.now()}`;
+    const bak = corruptBackupPath(FILE);   // v3.25.1: 같은 밀리초 보존본을 덮어쓰지 않게
     fs.renameSync(FILE, bak);
     // v2.744(최종 수정분 검토 RV2744F-LOAD-01): 사유는 요약(safeLoadText) — V8 JSON.parse 오류 원문은 파일 조각을 싣는다(콘솔 → /admin/logs·엣지 로그).
     console.warn(`[osscan] ${FILE} 읽기/파싱 실패(${safeLoadText(err) || '사유 미상'}) — ${bak}로 보존하고 기본 설정으로 시작합니다.`);
@@ -40,16 +42,30 @@ function backupCorrupt(err) {
 }
 
 let cache = null;
+/*
+ * 107회차(재현 — EISDIR): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 예전 catch 하나는 온전한 원본을 .corrupt 로 옮기고 빈 값 · 기본값을 캐시해
+ *   다음 저장이 원본 자리를 덮었다. 읽기 단계는 공용 읽기: 원본을 두고 · 캐시하지 않고(30초 간격 재읽기) · 저장을 거절한다(503 settingsUnreadable). parse 실패는 예전과 같다.
+ */
+const _reader = makeJsonFileReader(() => FILE, { parse: (t) => t, preserve: false, tag: 'os-scan' });
+let _readErr = '';
+/** 107회차: 읽기 오류 중의 저장 거절 본문(503) 또는 null. */
+export function osScanWriteRefusal() {
+  loadOsScanSettings();
+  return _readErr ? { ok: false, status: 503, code: 'settingsUnreadable', readError: true, reason: `OS 스캔 설정 파일(${path.basename(FILE)})을 읽지 못해 저장하지 않았습니다 — 읽기 오류(${_readErr})이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 저장이 다시 열립니다).` } : null;
+}
 export function loadOsScanSettings() {
   if (cache) return cache;
+  const rr = _reader.read();
+  const unread = rr.kind === 'read-error';   // 107회차: 기본값(꺼짐)으로 돌되 캐시하지 않는다 — 쓰기는 거절한다
+  _readErr = unread ? String(rr.error?.code || 'read-error').slice(0, 32) : '';
   let p = {};
   try {
-    if (fs.existsSync(FILE)) {
-      p = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+    if (rr.kind === 'ok') {
+      p = JSON.parse(rr.value);
       if (!p || typeof p !== 'object' || Array.isArray(p)) throw new Error('객체가 아님'); // 형식 불일치도 손상
     }
   } catch (e) { p = {}; backupCorrupt(e); }
-  cache = {
+  const out = {
     enabled: !!p.enabled,
     intervalMin: clamp(p.intervalMin, 5, 100000, DEFAULTS.intervalMin),
     scope: p.scope || 'all',
@@ -60,7 +76,8 @@ export function loadOsScanSettings() {
     lastAuth: (p.lastAuth && typeof p.lastAuth === 'object' && !Array.isArray(p.lastAuth)) ? p.lastAuth : null,
     lastSkipped: Array.isArray(p.lastSkipped) ? p.lastSkipped : null,   // v2.732(B4-01): 직접 수집 대상이 아니라 스캔하지 않은 vCenter
   };
-  return cache;
+  if (!unread) cache = out;
+  return out;
 }
 // v2.595(감사 DEPS2595-01): 빈 칸('')은 0 이 아니라 미지정 — 이전 값을 유지한다(util/clampSetting.js).
 function clamp(v, mn, mx, d) { return clampSetting(v, { min: mn, max: mx, def: d }); }
@@ -81,7 +98,7 @@ export function saveOsScanSettings(body = {}) {
 }
 // 원자적 쓰기 — 스캔 1회마다 lastRun/lastFound를 저장하므로(주기 기본 12시간, 수동 실행 포함)
 // 부분기록 시 설정이 기본값으로 리셋되어 스캐너가 조용히 꺼진다. tmp+fsync+rename으로 방지.
-function write(obj) { try { atomicWriteFileSync(FILE, JSON.stringify(obj, null, 2), { mode: 0o600 }); } catch { /* */ } cache = null; }
+function write(obj) { if (osScanWriteRefusal()) return;   /* 107회차: 읽기 오류 중에는 기본값 위에 쓰지 않는다(스캔 결과 기록 포함) */ try { atomicWriteFileSync(FILE, JSON.stringify(obj, null, 2), { mode: 0o600 }); } catch { /* */ } cache = null; }
 
 
 /**
@@ -127,7 +144,7 @@ async function scanVcenter(vc, targets, settings, { manual = false } = {}) {
   //   해제는 주 폴러·연결 테스트만). 수동 실행은 막지 않는다.
   if (!manual) {
     const st = vcAuthGuard.peekAuthStop(vc);
-    if (st) { auth.vcStopped = authStopView(st); errs.push(`로그인:vCenter 인증 실패로 주기 스캔 정지(${st.attempts}회)`); return { found, errs, auth }; }
+    if (st) { auth.vcStopped = authStopView(st); errs.push(`로그인:${authStopText(st, `vCenter 인증 실패로 주기 스캔 정지(${st.attempts}회)`)}`); return { found, errs, auth }; }
   }
   // v2.591(감사 F2): 한 실행 안의 회로 차단기 — 같은 게스트 계정의 거부가 연속 3회면 그 계정의 남은 VM 을 시작하지
   //   않는다(공용 도메인 계정이면 한 번에 수백 회 실패 로그온이 난다). 첫 로그인 성공 전까지는 하나씩 돈다.
@@ -260,7 +277,7 @@ async function runOsScanNowInner(scopeVcId, manual) {
 function registryVcIds() {
   try {
     const r = loadVcenterConfig();
-    if (!r.file && fs.existsSync(path.join(config.configDir, 'vcenters.json'))) return null;
+    if (!r.file && !fileMissing(path.join(config.configDir, 'vcenters.json'))) return null;   // 134회차: 확인하지 못한 것(stat 실패 — existsSync 는 false)도 '있는데 못 읽음' 이다(전 vCenter 의 OS 기록을 지우지 않게)
     return (r.vcenters || []).map((v) => v?.id).filter(Boolean);
   } catch { return null; }
 }

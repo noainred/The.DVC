@@ -9,6 +9,8 @@ import { Frame } from './ipamShared.jsx';
 import { RangeCheck, RangeMsg, RANGE_TA } from './VcScanRangeEditor.jsx';
 import { checkRangeList, ipmsSettingsErrors, normalizeRangeText, sameIpmsSettings, serverInvalidText, vcenterOptionLabel, vcenterOptions } from './ipmsRangeText.js';
 import Select from '../../components/Select.jsx';
+import { unreadMarkOf, saveLockedByUnread } from '../settingsUnread.js';   // 112회차: 못 읽은 동안의 빈 설정으로 편집 폼을 열지 않는다
+import { SettingsUnreadBanner } from '../SettingsUnreadBanner.jsx';
 
 const SECTION = { border: '1px solid var(--border)', borderRadius: 10, padding: 12, minWidth: 0 };
 
@@ -24,6 +26,12 @@ export function IpmsSettings({ onClose, asPage = false, access = 'unknown' }) {
   const [vc, setVc] = useState('');
   const [msg, setMsg] = useState(null);         // { ok, text, list? } 하나의 모양
   const [saving, setSaving] = useState(false);
+  // 112회차: 서버가 설정 파일을 못 읽은 동안의 조회(빈 목록 + loadError)로는 폼을 채우지 않는다 — 저장이 전체 교체라, 다시 읽힌 뒤 그 빈 폼(· 그 위의 편집 초안)의 저장이
+  //   전 vCenter 의 무시 대역 · 공인/사설 분류를 지웠다. 안내와 ‘다시 확인’ 만 보이고, 읽히면 저장된 값으로 폼을 연다.
+  const [unread, setUnread] = useState(null);
+  const loadSettings = () => fetchJson('/admin/ipam/settings')
+    .then((r) => { const le = unreadMarkOf(r); setUnread(le); setLoadErr(null); if (!saveLockedByUnread(le)) { d.load(r.settings); setMeta(metaOf(r)); } })
+    .catch((e) => setLoadErr(e));
   const metaOf = (r) => ({ invalidSaved: r?.invalidSaved || [], orphanVcenters: r?.orphanVcenters || [], omittedOutOfScope: r?.omittedOutOfScope || 0 });
   // v2.637: vCenter 목록 조회 실패를 삼키지 않는다 — 예전 `.catch(() => {})` 는 선택기가 비어 vc 가 '' 인 채로
   //   'vCenter별 무시 대역' 입력이 `vcenters['']` 에 저장됐다(어느 vCenter 에도 적용되지 않는다 — 오류 없이 사라지는 입력).
@@ -31,7 +39,7 @@ export function IpmsSettings({ onClose, asPage = false, access = 'unknown' }) {
     .then((list) => { const arr = Array.isArray(list) ? list : []; setVcs(arr); setVcsErr(null); if (arr[0]) setVc((cur) => cur || arr[0].id); })
     .catch((e) => setVcsErr(e?.message || String(e)));
   useEffect(() => {
-    fetchJson('/admin/ipam/settings').then((r) => { d.load(r.settings); setMeta(metaOf(r)); }).catch((e) => setLoadErr(e));
+    loadSettings();
     loadVcs();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // 등록 목록이 비었거나 실패했어도 설정에만 남은(삭제된) vCenter 가 있으면 그것을 고를 수 있어야 한다 — 선택이 빈 채로 두지 않는다.
@@ -42,6 +50,7 @@ export function IpmsSettings({ onClose, asPage = false, access = 'unknown' }) {
   }, [vcs, meta, vc]);
 
   const nameOf = (id) => (vcs || []).find((v) => v.id === id)?.name || id;
+  if (saveLockedByUnread(unread)) return <Frame asPage={asPage} title="IPMS 설정" onClose={onClose}><SettingsUnreadBanner le={unread} what="IPMS 설정(무시 대역 · 공인/사설 분류)" save="①·③ 저장" formHidden onRecheck={loadSettings} /></Frame>;
   if (!s) return <Frame asPage={asPage} title="IPMS 설정" onClose={onClose}>{loadErr ? <ErrorBox message={loadErr} /> : <Loading />}</Frame>;
 
   const opts = vcenterOptions(vcs, s, d.base, meta.orphanVcenters);

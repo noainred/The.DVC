@@ -198,11 +198,12 @@
 .vmd.pending .vmd-body { opacity: 0.55; transition: opacity 0.15s; }
 .vmd .vmd-table { min-width: 1100px; }
 .vmd .vmd-table tbody tr:hover { background: var(--vmd-row-hover); }
-.vmd .vmd-name { position: relative; display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.vmd .vmd-name { position: relative; display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; max-width: 210px; } /* v2.977: 긴 이름 + ‘빠른 확인’ 이 한 줄로 239px — 줄바꿈 허용 */
+.vmd .vmd-name .cell-link { white-space: normal; overflow-wrap: anywhere; text-align: left; }
 .vmd .vmd-pdot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
-.vmd .vmd-ub { display: inline-flex; align-items: center; gap: 8px; min-width: 120px; white-space: nowrap; }
+.vmd .vmd-ub { display: inline-flex; align-items: center; gap: 6px; min-width: 96px; white-space: nowrap; } /* v2.977: 120 → 96(1440px 에서 오른쪽 열이 숨었다) */
 .vmd .vmd-ub.none { min-width: 0; color: var(--text-faint); }
-.vmd .vmd-ub-bar { flex: 1 1 auto; height: 6px; min-width: 60px; border-radius: 3px; background: var(--border-soft); overflow: hidden; display: block; }
+.vmd .vmd-ub-bar { flex: 1 1 auto; height: 6px; min-width: 44px; border-radius: 3px; background: var(--border-soft); overflow: hidden; display: block; }
 .vmd .vmd-ub-bar > span { display: block; height: 100%; border-radius: 3px; }
 .vmd .vmd-ub-v { width: 44px; text-align: right; font-family: var(--mono); font-size: 12px; }
 
@@ -258,3 +259,7 @@
   .vmd .vmd-bin-fill,
   .vmd .vmd-seg-i { transition: none; }
 }
+
+/* v2.915 가상화 플랫폼 — 이름은 개체 보기 링크, 드로어는 옆의 '빠른 확인'(작은 글자 버튼). 1440 표 폭을 늘리지 않게 한 줄에 둔다. */
+.vmd .vmd-name .vmd-quick { background: none; border: 1px solid var(--border); border-radius: 6px; padding: 1px 6px; font: inherit; font-size: 10.5px; color: var(--text-dim); cursor: pointer; white-space: nowrap; }
+.vmd .vmd-name .vmd-quick:hover { color: var(--text); border-color: var(--accent); }

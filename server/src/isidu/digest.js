@@ -10,10 +10,10 @@
  *  · 기록(보냄·생략·실패·놓침)은 주소 없이 개수만 남긴다. 사람이 누른 '지금 보내기' 는 '새 조사 없으면 생략' 을 보지 않는다.
  *  · 메일 서버·'아이실론 디렉터리 사용량' 종류의 켜기/끄기·SMTP 인증 정지는 공용 메일 서비스가 판정한다(그 결과를 그대로 기록한다).
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 119회차: 읽기 오류 ≠ 손상(공용 읽기 — 30초 간격 재읽기)
 import { registerStateFile } from '../util/stateFiles.js';
 import { sendPortalMail } from '../mail/service.js';
 import { load as loadMailCfg } from '../mail/settings.js';
@@ -25,6 +25,7 @@ import {
   digestOf, normalizeDigest, planDigestTick, nextDigestSlots, digestRecipients, buildDigestModel, scanMarkOf, slotLabel, DIGEST_HISTORY_MAX, digestPoolOf,
 } from './digestRules.js';
 import { renderDigestMail } from './mailHtml.js';
+import { effectiveSince, CLOCK_TOL_MS } from '../xferspeed/schedule.js';   // 90회차 F5: 시계가 뒤로 가 미래가 된 since 보정(대상별 정기 발송 SCHED-03 과 같은 규칙)
 
 registerStateFile('isidu-digest-state.json');
 const FILE = () => path.join(config.configDir, 'isidu-digest-state.json');   // ⚠ 리터럴 형태 유지 — scripts/config-doc.mjs 가 이 모양으로 찾는다
@@ -40,14 +41,27 @@ const MISSED_TEXT = {
 };
 
 let _state = null; // { lastSlot, lastSentAt, lastScanMark, history: [] }
+/*
+ * 119회차(재현 — EIO): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 예전 catch 하나는 온전한 처리 기록을 .corrupt 로 옮기고 lastSlot 없이 새로 시작해
+ *   같은 회차를 한 번 더 보내고(허용 30분 안) 발송 기록 · '새 조사 없으면 생략' 기준(lastScanMark)을 잃었다. 읽기 단계는 공용 읽기: 원본을 두고 · 캐시하지 않고 ·
+ *   그동안 쓰지 않고 · **정기 발송을 멈춘다**(마지막 회차를 모르면 틱마다 같은 메일을 다시 보낸다). 읽히면 재시작 없이 이어 간다. parse 실패(손상)는 예전과 같다.
+ */
+const _stReader = makeJsonFileReader(() => FILE(), { parse: (t) => t, preserve: false, tag: 'isidu-digest' });
+let _stReadErr = '';
+const stateUnreadText = () => `종합 메일 처리 기록 파일(${path.basename(FILE())})을 읽지 못해 정기 발송을 멈췄습니다 — 읽기 오류(${_stReadErr})이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 이어서 보냅니다).`;
 function state() {
   if (_state) return _state;
+  const rr = _stReader.read();
+  if (rr.kind === 'read-error') { _stReadErr = String(rr.error?.code || 'read-error').slice(0, 32); return { lastSlot: null, lastSentAt: null, lastScanMark: null, history: [] }; }   // 캐시하지 않는다 — save 가 쓰지 않고 틱이 멈춘다
+  _stReadErr = '';
   try {
-    const raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
+    if (rr.kind === 'missing') throw Object.assign(new Error('없음'), { code: 'ENOENT' });
+    const raw = JSON.parse(rr.value);
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('형식 오류');
     const num = (v) => (Number.isFinite(Number(v)) && v !== null && v !== '' ? Number(v) : null);
     _state = {
       lastSlot: num(raw.lastSlot), lastSentAt: num(raw.lastSentAt), lastScanMark: num(raw.lastScanMark),
+      ...(num(raw.sinceFrom) != null && num(raw.sinceCap) != null ? { sinceFrom: num(raw.sinceFrom), sinceCap: num(raw.sinceCap) } : {}),
       history: (Array.isArray(raw.history) ? raw.history : []).filter((h) => h && typeof h === 'object').slice(0, DIGEST_HISTORY_MAX),
     };
   } catch (e) {
@@ -57,7 +71,9 @@ function state() {
   return _state;
 }
 function save() {
-  try { atomicWriteFileSync(FILE(), JSON.stringify(state()), { mode: 0o600 }); }
+  const st = state();
+  if (_stReadErr) return;   // 119회차: 못 읽은 처리 기록 위에 쓰지 않는다
+  try { atomicWriteFileSync(FILE(), JSON.stringify(st), { mode: 0o600 }); }
   catch (e) { console.warn(`[isidu-digest] 상태 파일을 저장하지 못했습니다(메모리로 계속 — 재시작하면 같은 회차를 한 번 더 볼 수 있습니다): ${e.message}`); }
 }
 /** 기록 한 줄(주소 없음 — 개수만). 최신이 앞이다. */
@@ -91,6 +107,22 @@ async function buildModel(digest, { excludeDemo, now }) {
   const ovById = new Map((Array.isArray(ov) ? ov : []).filter((x) => x && x.id).map((x) => [x.id, x]));
   const model = buildDigestModel(rows, ovById, { now, topN: digest.topN, corpTopM: digest.corpTopM, excludeDemo });
   return { model, buildMs: Date.now() - t0 };
+}
+
+/**
+ * 90회차 F5(재현): 실효 종합 메일 설정 — since 가 지금보다 한참 뒤면(저장할 때 서버 시계가 앞서 있었다 · NTP 보정으로 뒤로 감) 그 시각까지
+ *   회차가 한 번도 서지 않아 종합 메일이 **기록도 없이** 멈췄다(대상별 정기 발송은 v2.745 SCHED-03 이 이미 보정한다 — 같은 꼴). 설정 파일은 고치지 않고
+ *   상태에 sinceFrom · sinceCap 을 남겨 지금으로 잡는다(그 since 값일 때만 쓴다 — 일정을 다시 정의하면 since 가 바뀌어 저절로 빠진다).
+ *   rebase 가 참이면 상태를 쓴다(틱만 — 화면 조회는 읽기만 한다).
+ */
+function effectiveDigest(d, now, { rebase = false } = {}) {
+  const st = state();
+  if (rebase && d.since != null && d.since > now + CLOCK_TOL_MS && st.sinceFrom !== d.since) {
+    st.sinceFrom = d.since; st.sinceCap = now; save();
+    console.warn(`[isidu-digest] 서버 시계가 뒤로 가 종합 메일 보내는 때를 저장한 시각(${slotLabel(d.since)})이 지금보다 뒤였습니다 — 지금으로 다시 잡았습니다(소급해 보내지 않습니다).`);
+  }
+  const since = effectiveSince({ since: d.since }, st);
+  return since > 0 && since !== d.since ? { ...d, since } : d;
 }
 
 const recipientsOf = (d) => {
@@ -154,7 +186,10 @@ export async function digestTick(now = Date.now()) {
   if (_busy) return { action: 'busy' };
   _busy = true;
   try {
-    const d = digestOf(loadSettings().mail?.digest);
+    // 119회차: 처리 기록을 못 읽은 동안에는 회차를 판정하지 않는다(보내지도 · 놓침으로 적지도 않는다 — 읽히면 그 기록으로 다시 판정한다).
+    state();
+    if (_stReadErr) { _lastTick = { at: now, action: 'unreadable' }; _lastError = { at: Date.now(), message: stateUnreadText().slice(0, 300) }; return { action: 'unreadable', readError: true, reason: stateUnreadText() }; }
+    const d = effectiveDigest(digestOf(loadSettings().mail?.digest), now, { rebase: true });
     const st = state();
     const plan = planDigestTick({ digest: d, state: st, now, bootAt: BOOT_AT });
     _lastTick = { at: now, action: plan.action };
@@ -207,7 +242,8 @@ export function isiduDigestStatus(now = Date.now()) {
   const st = state();
   const rc = recipientsOf(d);
   return {
-    enabled: d.enabled, next: nextDigestSlots(d, now, 3), lastSlot: st.lastSlot, lastSentAt: st.lastSentAt,
+    // 90회차 F5: 다음 회차는 틱과 같은 실효 since 로 계산한다.
+    enabled: d.enabled, next: nextDigestSlots(effectiveDigest(d, now), now, 3), lastSlot: st.lastSlot, lastSentAt: st.lastSentAt,
     history: st.history.map((h) => ({ ...h })), busy: _busy, lastTick: _lastTick, lastError: _lastError, edge: isEdge(),
     recipients: { total: rc.to.length, fromAdmin: rc.fromAdmin, fromExtra: rc.fromExtra, dupes: rc.dupes },
   };
@@ -219,5 +255,5 @@ export function startIsiduDigest() {
   _timer.unref?.();
 }
 
-export function _resetForTest() { _state = null; _chain = Promise.resolve(); _busy = false; _lastTick = null; _lastError = null; if (_timer) { clearInterval(_timer); _timer = null; } }
+export function _resetForTest() { _state = null; _stReader.reset(); _stReadErr = ''; _chain = Promise.resolve(); _busy = false; _lastTick = null; _lastError = null; if (_timer) { clearInterval(_timer); _timer = null; } }
 export const _bootAtForTest = () => BOOT_AT;

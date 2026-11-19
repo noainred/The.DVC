@@ -18,6 +18,7 @@
  * **트랜잭션 1회**(수백 행 INSERT 의 fsync 를 1회로 — 무트랜잭션 대량 write 가 이벤트 루프를
  * 막은 사고가 이 저장소에 있다). 파일 권한 0600.
  */
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
@@ -145,7 +146,7 @@ async function open() {
  * **캐시라는 사실을 `countsAt` 으로 밝힌다**. 적재·prune 이 행 수를 바꾸면 버린다(방금 쓴 값이 안 보이면 '저장이 안 됐나' 로 읽힌다).
  */
 let _counts = null;   // { v:{latestRows,seriesRows,vmSeriesRows}, at }
-const COUNT_CACHE_MS = Math.max(0, Number(process.env.CURUSER_COUNT_CACHE_MS) || 60_000);
+const COUNT_CACHE_MS = Math.max(0, envPositive(process.env.CURUSER_COUNT_CACHE_MS, 60_000));
 
 /** 기능 가용성 — 화면이 '비활성' 사유를 그대로 말한다(조용히 빈 화면을 만들지 않는다). */
 export async function curUserDbStatus() {

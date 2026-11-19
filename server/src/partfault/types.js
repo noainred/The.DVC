@@ -152,6 +152,7 @@ export const HOLD_REASON = Object.freeze({
   edgeStale: 'edge-stale',                  // 그 엣지의 마지막 보고가 오래됨(기본 3시간) — 장비가 아니라 엣지 문제(v2.548 리뷰 H7)
   edgeLegacy: 'edge-legacy',                // 구 프로토콜 엣지(v2.547) — 해소를 판정할 수 없어 업그레이드 전까지 열려 있다
   registryUnreadable: 'registry-unreadable', // v2.744(EDGE-01): 그 장비군 등록부를 읽지 못함 — 목록에서 빠진 것이 재배정·삭제가 아니다(닫지 않음)
+  maintenance: 'maintenance',               // 8a단계 ②: 정비 창(전이 보류를 켠 창) 안 — 열린 장애를 닫지도 바꾸지도 않고 새 장애를 열지 않는다(창 끝 뒤 주기에 재판정)
 });
 
 /**
@@ -160,6 +161,12 @@ export const HOLD_REASON = Object.freeze({
  * 구분해 줄 수 없다).
  */
 export const PUSH_PROTOCOL = 2;
+/**
+ * 96회차 ⓐ(93회차 F5): 프로토콜 2 안의 **호환 확장 판** — 엣지가 장비마다 `serialLabels`(시리얼 키 파트의 키 꼬리 → 이름)를 싣는다.
+ *   중앙은 이 판의 보고에서만 그 파트를 keyKind 'serial' · 실제 이름으로 되살려 33회차 교체 규칙을 엣지 위임 서버에도 적용한다.
+ *   옛 판 엣지(표지 없음)는 예전 그대로(키 꼬리 → keyKind 'name' — 교체 뒤 옛 장애는 '누락' 보류). `v` 는 올리지 않는다(옛 중앙 호환).
+ */
+export const PART_IDENTS_VERSION = 1;
 
 /**
  * Redfish 인벤토리 컬렉션 이름 → 이 계약의 파트 종류(v2.548 F1). `redfish.js fetchInventory` 가

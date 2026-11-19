@@ -5,7 +5,7 @@
  *  TUNE-1/2 ipam memo + ?q · TUNE-3 esxi-temp memo · TUNE-4 vmseries 핸들 상한
  * ⚠ 소스 검사는 주석을 먼저 제거한다(v2.535 규약 — `test/_stripComments.js`).
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -13,6 +13,13 @@ import path from 'node:path';
 import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { stripComments } from './_stripComments.js';
+
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
@@ -118,7 +125,7 @@ test('ARCH-1 스윕 — configDir JSON 을 읽고 원자 쓰기로 저장하는 
 test('ARCH-1 실행 — 손상된 ipam-annotations.json 은 .corrupt 로 보존되고 빈 값으로 시작한다', async () => {
   // 자식 프로세스: 이 파일의 다른 테스트가 ledger→annotations 를 기본 configDir 로 이미 로드했으므로 격리한다.
   const { spawnSync } = await import('node:child_process');
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dvc-corrupt2582-'));
+  const dir = tmpDir('dvc-corrupt2582-');
   fs.writeFileSync(path.join(dir, 'ipam-annotations.json'), '{"10.0.0.1": {"note": "x"'); // 절단본
   const script = `
     const m = await import(${JSON.stringify(path.join(SRC, 'ipam/annotations.js'))});
@@ -200,7 +207,7 @@ test('ARCH-5 — 카운터 카탈로그의 <level> 을 읽어 표본 없음 사�
 
 /* ── BUG-1: iDRAC 스캔 위임 워커 무음 실패 ───────────────────────────────────── */
 test('BUG-1 — 중앙이 403 을 돌려주면 워커 상태에 lastPollError 가 남는다(조용한 null 금지)', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dvc-idracw2582-'));
+  const dir = tmpDir('dvc-idracw2582-');
   process.env.CONFIG_DIR = dir; process.env.SSRF_ALLOW_LOOPBACK = 'true';
   const { config } = await import('../src/config.js'); config.configDir = dir;
   const srv = http.createServer((req, res) => { res.statusCode = 403; res.setHeader('Content-Type', 'application/json'); res.end('{"error":"forbidden"}'); });
@@ -220,7 +227,7 @@ test('BUG-1 — 중앙이 403 을 돌려주면 워커 상태에 lastPollError �
 
 /* ── BUG-2: storage collect-all ──────────────────────────────────────────── */
 test('BUG-2 — /tools/storage/collect-all 은 엣지 위임 장비의 재수집 요청을 등록하고 개수를 밝힌다', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dvc-collall2582-'));
+  const dir = tmpDir('dvc-collall2582-');
   process.env.CONFIG_DIR = dir; process.env.DATA_SOURCE = 'mock';
   const { config } = await import('../src/config.js'); config.configDir = dir;
   const reg = await import('../src/storage/registry.js');

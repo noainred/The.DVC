@@ -106,7 +106,7 @@ export default function BareosPoolsTab({ bare = false, reloadKey = 0 } = {}) {
           <span>풀 <b>{k.pools == null ? '—' : fmtNum(k.pools)}</b> <span className="muted">(Director {fmtNum(collected)}/{fmtNum(dirs.length)} 수집)</span></span>
           <span>볼륨 <b>{k.vols == null ? '—' : fmtNum(k.vols)}</b></span>
           <span style={{ color: k.full > 0 ? TONE.bad : undefined }}>가득 참 <b>{k.full == null ? '—' : fmtNum(k.full)}</b>{k.unknownFull ? <span className="muted"> · 판정 모름 {fmtNum(k.unknownFull)}</span> : null}</span>
-          <span style={{ color: k.errorVols > 0 ? TONE.bad : undefined }}>오류 볼륨 <b>{k.errorVols == null ? '—' : fmtNum(k.errorVols)}</b></span>
+          <span style={{ color: k.errorVols > 0 ? TONE.bad : undefined }}>오류 볼륨 <b>{k.errorVols == null ? '—' : fmtNum(k.errorVols)}</b>{k.errorVolsUnknown ? <span className="muted"> · 볼륨 모르는 풀 {fmtNum(k.errorVolsUnknown)}</span> : null}</span>
           <span>최대 사용 <b>{k.maxPct == null ? '—' : `${k.maxPct}%`}</b></span>
           <span>클라이언트 <b>{k.clients == null ? '—' : fmtNum(k.clients)}</b></span>
         </div>
@@ -116,7 +116,7 @@ export default function BareosPoolsTab({ bare = false, reloadKey = 0 } = {}) {
         <Kpi label="볼륨" value={k.vols == null ? '—' : fmtNum(k.vols)} sub="풀 행의 NumVols 합" />
         <Kpi label="가득 참" value={k.full == null ? '—' : fmtNum(k.full)} color={k.full > 0 ? TONE.bad : undefined}
           sub={`새 잡을 받을 볼륨이 없는 풀${k.unknownFull ? ` · 판정 모름 ${fmtNum(k.unknownFull)}` : ''}`} />
-        <Kpi label="오류 볼륨" value={k.errorVols == null ? '—' : fmtNum(k.errorVols)} color={k.errorVols > 0 ? TONE.bad : undefined} sub="VolStatus Error" />
+        <Kpi label="오류 볼륨" value={k.errorVols == null ? '—' : fmtNum(k.errorVols)} color={k.errorVols > 0 ? TONE.bad : undefined} sub={`VolStatus Error${k.errorVolsUnknown ? ` · 볼륨 모르는 풀 ${fmtNum(k.errorVolsUnknown)}` : ''}`} />
         <Kpi label="최대 사용 %" value={k.maxPct == null ? '—' : `${k.maxPct}%`} sub="MaxVols × MaxVolBytes 를 알 때만" />
         <Kpi label="클라이언트" value={k.clients == null ? '—' : fmtNum(k.clients)} sub={k.clients == null ? '수집 전 · 명령 꺼짐 · 실패' : 'File · Job Retention'} />
       </div>}

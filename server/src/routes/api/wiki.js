@@ -79,14 +79,22 @@ async function persistView(req) {
   return out;
 }
 /* ───── v2.907 댓글 @멘션 자동완성 · 댓글 → 이슈(시안 docs/design/wiki-mention · 사용자 '모두 적용' — 추천안 5개 그대로) ───── */
-/** 댓글 글 → 언급한 실제 이름(알림과 같은 해석 — 로컬 계정 · 메일 주소 표 · 이 문서 참여자 중 가장 긴 접두). */
-function mentionedIn(body, participants) {
+const fullWriter = (req) => canWrite(req) && isFullReadWriteScope(req.user, store.get());
+/**
+ * 댓글 글 → 언급한 실제 이름(가장 긴 접두). 전체 범위 쓰기 계정은 알림과 같은 해석(로컬 계정 · 메일 주소 표 · 이 문서 참여자).
+ * v2.932(점검 B1-06): 그 밖의 계정은 멘션 자동완성(mentionCandidates)과 같은 후보(참여자 + 볼 수 있는 이슈에 나온 이름 + 자기)로만 푼다 —
+ *   예전에는 담당자 400 문구 · 관찰자 · skipped 가 '그 이름의 계정이 있는가 · 그 법인을 보는가' 를 알려 주는 판정이 됐다(감사 A3-02 의 옆길).
+ *   알림 수신 해석(notify.js queueWikiEvent)은 응답에 나오지 않으므로 그대로다.
+ */
+function mentionedIn(req, body, participants, access) {
   const viewers = issueViewers();
   const settings = loadIssueSettings();
-  const known = new Set([...viewers.localNames, ...(settings.notify?.people || []).map((p) => p.username), ...participants]);
-  return { names: resolveMentions(mentionsOf(body), known), viewers, settings };
+  const full = fullWriter(req);
+  const known = full
+    ? new Set([...viewers.localNames, ...(settings.notify?.people || []).map((p) => p.username), ...participants])
+    : new Set([...participants, ...knownNames(access), userOf(req)]);
+  return { names: resolveMentions(mentionsOf(body), known), viewers, settings, restricted: !full };
 }
-const fullWriter = (req) => canWrite(req) && isFullReadWriteScope(req.user, store.get());
 /** 메일이 갈지 — 알림이 켜져 있고(메일 · 위키/할당 종류) 주소 표에 있는 사람. 주소 유무 이름은 전체 범위 쓰기 계정에게만. */
 function mailOutlook(req, settings, names) {
   const n = settings.notify || {};
@@ -106,14 +114,15 @@ function issueFromComment(req, pageId, cid, want) {
   const open = findByOrigin(sameOrigin);
   if (open.length) return { key: open[0].key, existing: true };
   const prev = findByOrigin(sameOrigin, { openOnly: false }).sort((a, b) => b.createdAt - a.createdAt)[0] || null;
-  const { names, viewers, settings } = mentionedIn(comment.body, pageParticipants(pageId, access).names);
-  const plan = planCommentIssue({ page, comment, req: want || {}, mentioned: names, canWrite: canWrite(req), canSee: viewers.canSee });
+  const { names, viewers, settings, restricted } = mentionedIn(req, comment.body, pageParticipants(pageId, access).names, access);
+  const plan = planCommentIssue({ page, comment, req: want || {}, mentioned: names, canWrite: canWrite(req), canSee: viewers.canSee, restricted });
   const auto = plan.requestOnly && settings.autoAssign?.enabled ? suggestAssignee({ component: '', vcenterId: plan.body.vcenterId }, settings, issueStats().byAssignee, viewers.canSee) : null;
   const x = createIssue(plan.body, userOf(req), { access, known: knownSpaces(), auto, requestOnly: plan.requestOnly, origin: plan.origin });
   if (prev) { try { addLink(x.key, { type: 'relates', key: prev.key }, userOf(req), { access }); } catch { /* 옛 이슈를 볼 수 없거나 연결 상한 — 잇지 않는다 */ } }
   setCommentIssue(pageId, cid, x.key, { access });
   audit(req, plan.requestOnly ? 'issue.request' : 'issue.create', x.key, `위키 댓글 ${pageId}/${cid}${x.assignee ? ` → ${x.assignee}` : ''}`);
-  return { key: x.key, assignee: x.assignee || '', watchers: plan.watchers, skipped: plan.skipped, requestOnly: plan.requestOnly, relatedTo: prev?.key || '', ...mailOutlook(req, settings, [x.assignee, ...plan.watchers].filter(Boolean)) };
+  // v2.932(점검 B1-06): 뺀 사람(그 법인을 볼 수 없는 사람)의 이름은 전체 범위 쓰기 계정에게만 — 그 밖은 수만(skippedN)
+  return { key: x.key, assignee: x.assignee || '', watchers: plan.watchers, ...(restricted ? {} : { skipped: plan.skipped }), skippedN: plan.skipped.length, requestOnly: plan.requestOnly, relatedTo: prev?.key || '', ...mailOutlook(req, settings, [x.assignee, ...plan.watchers].filter(Boolean)) };
 }
 /** v2.907 기한이 지난 휴지통 항목을 영구히 지우고 그 첨부 · 즐겨찾기를 정리한다(목록 · 지우기 때 — 폴링하지 않는다). */
 function dropExpiredTrash() {
@@ -351,8 +360,8 @@ export function registerWiki(api) {
       // v2.907 댓글 → 이슈: 저장 전에 거를 수 있는 것(담당자 = 언급한 사람 · 그 법인을 볼 수 있는가 · 유형 · 우선순위 · 제목 · 권한)을 먼저 — 400 이면 댓글도 저장하지 않는다
       if (want) {
         const pp = pageParticipants(req.params.id, access);
-        const { names, viewers } = mentionedIn(str(req.body?.body), pp.names);
-        planCommentIssue({ page: { id: req.params.id, title: '', spaceId: pp.spaceId }, comment: { id: '0', body: str(req.body?.body), author: userOf(req) }, req: want, mentioned: names, canWrite: canWrite(req), canSee: viewers.canSee });
+        const { names, viewers, restricted } = mentionedIn(req, str(req.body?.body), pp.names, access);
+        planCommentIssue({ page: { id: req.params.id, title: '', spaceId: pp.spaceId }, comment: { id: '0', body: str(req.body?.body), author: userOf(req) }, req: want, mentioned: names, canWrite: canWrite(req), canSee: viewers.canSee, restricted });
       }
       const cm = addComment(req.params.id, req.body || {}, userOf(req), { access });
       let issue = null; let issueError = '';

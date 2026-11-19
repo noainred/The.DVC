@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>디스크 배드 섹터 분석 — 과거 기록 읽기 실행</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.muted{color:#8b9bb4}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:10px;min-width:0;box-sizing:border-box}
+.h{font-size:13.5px;font-weight:700}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+.btn.pri{background:#3b82f6;border-color:#3b82f6;color:#ffffff}
+.seg{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden;background:#0f1626;flex-wrap:wrap}
+.seg button{all:unset;cursor:pointer;display:inline-flex;align-items:center;min-height:32px;padding:0 12px;font-size:12.5px;font-weight:700;color:#8b9bb4;white-space:nowrap}
+.seg button.on{background:#3b82f6;color:#ffffff}
+.tag{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;font-size:11.5px;font-weight:700;white-space:nowrap}
+.tag.bad{background:rgba(239,68,68,.16);color:#fca5a5}
+.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}
+.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}
+.tag.ok{background:rgba(34,197,94,.14);color:#86efac}
+.tag.blue{background:rgba(59,130,246,.18);color:#93c5fd}
+table{border-collapse:collapse;width:100%}
+th{font-size:12px;font-weight:600;color:#8b9bb4;text-align:left;padding:9px 10px;background:#0f1626;border-bottom:1px solid #243049;white-space:nowrap}
+th button{all:unset;cursor:pointer}
+th.r,td.r{text-align:right}
+td{padding:9px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;font-size:12.5px;line-height:1.5;white-space:nowrap}
+.box{overflow-x:auto;border:1px solid #243049;border-radius:10px}
+.note{font-size:11.5px;color:#8b9bb4;margin-top:3px;font-weight:400}
+.kpi{border:1px solid #243049;border-radius:10px;background:#0f1626;padding:10px 12px;min-width:0;display:flex;flex-direction:column;gap:2px}
+.kpi b{font-size:22px;font-weight:800;line-height:1.2}
+.kpi span{font-size:11.5px;color:#8b9bb4}
+.src{display:grid;grid-template-columns:150px minmax(0,1fr);gap:6px 14px;align-items:center;font-size:12.5px}
+.stack{display:flex;height:14px;border-radius:4px;overflow:hidden;gap:2px;background:#0a0e17}
+.stack i{display:block;height:100%}
+.dot{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px}
+.leg{display:flex;gap:4px 16px;flex-wrap:wrap;font-size:11.5px;color:#aebbd0;line-height:1.6}
+.li{display:flex;gap:8px;align-items:flex-start;font-size:12.5px;line-height:1.6}
+.li i{flex:none;width:6px;height:6px;border-radius:50%;background:#3b82f6;margin-top:7px}
+.sw{display:inline-flex;align-items:center;gap:8px;font-size:12.5px;font-weight:700}
+.sw i{display:inline-block;width:34px;height:20px;border-radius:999px;background:#3b82f6;position:relative}
+.sw i::after{content:"";position:absolute;top:3px;left:17px;width:14px;height:14px;border-radius:50%;background:#ffffff}
+.prog{height:8px;border-radius:4px;background:#0f1626;overflow:hidden;min-width:90px}
+.prog i{display:block;height:100%;background:#3b82f6}
+</style>
+</helmet>
+<div style="width:100%;min-height:1620px;box-sizing:border-box;background:#0a0e17;padding:20px 24px 40px;color:#e6edf6;font-family:'Inter','Noto Sans KR','Apple SD Gothic Neo',sans-serif;font-size:13px">
+<div style="max-width:1392px;margin:0 auto;display:flex;flex-direction:column;gap:14px;min-width:0">
+
+  <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:10px 16px;flex-wrap:wrap">
+    <div style="min-width:0">
+      <div style="font-size:22px;font-weight:800">디스크 배드 섹터 분석 — 점검 › 과거 기록 읽기</div>
+      <div class="muted">활성 로그가 닿지 않는 때의 기록을 보관 로그 · 디스크 값 · 시스템 이벤트 로그에서 찾습니다. <span class="tag gray" style="margin-left:6px">숫자는 예시</span></div>
+    </div>
+    <div class="seg" role="tablist" aria-label="보기">
+      <button type="button">요약</button>
+      <button type="button">디스크 목록</button>
+      <button type="button">국가 · 법인</button>
+      <button type="button">모델</button>
+      <button type="button">추이</button>
+      <button type="button">서버</button>
+      <button type="button">근거</button>
+      <button type="button" class="on" aria-current="page">점검</button>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,200px),1fr));gap:10px">
+    <div class="kpi"><b>658</b><span>서버</span></div>
+    <div class="kpi" style="border-color:rgba(245,158,11,.55)"><b>412</b><span>활성 로그만 본 서버</span></div>
+    <div class="kpi"><b>246</b><span>보관 로그까지 본 서버</span></div>
+    <div class="kpi"><b>3,410</b><span>값을 읽은 디스크 (전체 11,980)</span></div>
+    <div class="kpi" style="border-color:rgba(239,68,68,.55)"><b>37</b><span>과거 출처에서 새로 찾은 기록 디스크</span></div>
+  </div>
+
+  <div class="card">
+    <div class="h">출처가 닿는 서버 <span class="muted" style="font-weight:400">장비가 그 출처를 주는가 — 정기 점검이 함께 확인합니다</span></div>
+    <div class="src">
+      <span>보관 로그 내보내기</span>
+      <div class="stack" role="img" aria-label="보관 로그 내보내기 — 지원 540대, 지원 안 함 71대, 아직 모름 47대"><i style="width:82.1%;background:#0d9488"></i><i style="width:10.8%;background:#b45309"></i><i style="width:7.1%;background:#243049"></i></div>
+      <span></span>
+      <div class="leg"><span><span class="dot" style="background:#0d9488"></span>지원 540</span><span><span class="dot" style="background:#b45309"></span>지원 안 함 71 (펌웨어가 낮음)</span><span><span class="dot" style="background:#243049;border:1px solid #5d6b85"></span>아직 모름 47</span></div>
+      <span>디스크 값</span>
+      <div class="stack" role="img" aria-label="디스크 값 — 읽힘 198대, 라이선스 없음 301대, 보고서 꺼짐 112대, 아직 모름 47대"><i style="width:30.1%;background:#a855f7"></i><i style="width:45.7%;background:#b45309"></i><i style="width:17%;background:#64748b"></i><i style="width:7.2%;background:#243049"></i></div>
+      <span></span>
+      <div class="leg"><span><span class="dot" style="background:#a855f7"></span>읽힘 198</span><span><span class="dot" style="background:#b45309"></span>라이선스 없음 301</span><span><span class="dot" style="background:#64748b"></span>보고서가 꺼져 있음 112</span><span><span class="dot" style="background:#243049;border:1px solid #5d6b85"></span>아직 모름 47</span></div>
+      <span>시스템 이벤트 로그</span>
+      <div class="stack" role="img" aria-label="시스템 이벤트 로그 — 읽힘 611대, 아직 모름 47대"><i style="width:92.9%;background:#3b82f6"></i><i style="width:7.1%;background:#243049"></i></div>
+      <span></span>
+      <div class="leg"><span><span class="dot" style="background:#3b82f6"></span>읽힘 611</span><span><span class="dot" style="background:#243049;border:1px solid #5d6b85"></span>아직 모름 47</span></div>
+    </div>
+    <span class="muted" style="font-size:12px;line-height:1.6">‘보고서가 꺼져 있음’ 은 장비에서 켜야 읽을 수 있습니다. 포탈은 장비 설정을 바꾸지 않고, 켜는 방법만 안내합니다.</span>
+  </div>
+
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+      <div class="h">법인별 <span class="muted" style="font-weight:400">28개 중 5개 · 활성 로그가 짧은 순</span></div>
+      <button class="btn" type="button">엑셀</button>
+    </div>
+    <div class="box">
+    <table style="min-width:1220px">
+      <thead><tr>
+        <th><button type="button">국가 · 법인</button></th>
+        <th class="r"><button type="button">서버</button></th>
+        <th class="r" aria-sort="ascending"><button type="button">활성 로그 길이 ▲</button></th>
+        <th><button type="button">보관 로그까지 읽음</button></th>
+        <th class="r"><button type="button">값을 읽은 서버</button></th>
+        <th class="r"><button type="button">새로 찾은 기록</button></th>
+        <th><button type="button">마지막 실행</button></th>
+        <th data-nosort="1">동작</th>
+      </tr></thead>
+      <tbody>
+        <tr><td>폴란드 · PL 브로츠와프</td><td class="r mono">38</td><td class="r mono">1일</td><td>0 / 38</td><td class="r mono">0</td><td class="r muted">—</td><td class="muted">—</td><td><button class="btn" type="button">보관 로그 읽기</button></td></tr>
+        <tr><td>미국 · US 동부</td><td class="r mono">52</td><td class="r mono">12일</td><td><div style="display:flex;align-items:center;gap:8px"><div class="prog"><i style="width:38%"></i></div><span class="mono">20 / 52</span></div><div class="note">읽는 중 · 지금 US-DB-R650-021</div></td><td class="r mono">9</td><td class="r mono">3</td><td class="mono">11-14 22:20 ~</td><td><button class="btn" type="button">중단</button></td></tr>
+        <tr><td>중국 · CN 난징</td><td class="r mono">43</td><td class="r mono">31일</td><td>43 / 43</td><td class="r mono">12</td><td class="r mono"><b>5</b></td><td class="mono">11-14 22:41</td><td><button class="btn" type="button">다시 읽기</button></td></tr>
+        <tr><td>인도 · IN 첸나이</td><td class="r mono">71</td><td class="r mono">45일</td><td>0 / 49<div class="note">22대는 지원 안 함</div></td><td class="r mono">0</td><td class="r muted">—</td><td class="muted">—</td><td><button class="btn" type="button">보관 로그 읽기</button></td></tr>
+        <tr><td style="border-bottom:none">한국 · KR 본사</td><td style="border-bottom:none" class="r mono">96</td><td style="border-bottom:none" class="r mono">64일</td><td style="border-bottom:none">0 / 96</td><td style="border-bottom:none" class="r mono">96</td><td style="border-bottom:none" class="r mono">2<div class="note">디스크 값에서</div></td><td style="border-bottom:none" class="muted">—</td><td style="border-bottom:none"><button class="btn" type="button">보관 로그 읽기</button></td></tr>
+      </tbody>
+    </table>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,560px),1fr));gap:14px">
+
+    <div class="card">
+      <div class="h">보관 로그 읽기 실행</div>
+      <div class="seg" role="group" aria-label="범위">
+        <button type="button" class="on" aria-pressed="true">아직 안 읽은 서버 전부</button>
+        <button type="button" aria-pressed="false">법인 골라서</button>
+        <button type="button" aria-pressed="false">서버 한 대</button>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,150px),1fr));gap:10px">
+        <div class="kpi"><b>392</b><span>대상 서버 (지원하는 서버만)</span></div>
+        <div class="kpi"><b>1 ~ 3분</b><span>서버 한 대 (첫 실행에서 실제로 잽니다)</span></div>
+        <div class="kpi"><b>법인마다 따로</b><span>법인 노드에서 한 번에 한 대</span></div>
+      </div>
+      <div class="li"><i></i><span>자동으로 돌지 않습니다. 관리자가 누를 때만 시작합니다.</span></div>
+      <div class="li"><i></i><span>장비에 보내는 것은 내보내기 요청 한 번과 파일 받기입니다. 장비 설정은 바꾸지 않습니다.</span></div>
+      <div class="li"><i></i><span>파일은 법인 노드에서 풀고, 디스크 기록과 본 기간만 중앙으로 올립니다.</span></div>
+      <div class="li"><i></i><span>서버마다 한 번 읽으면 그 뒤는 6시간 점검이 활성 로그를 이어 읽습니다.</span></div>
+      <div class="li"><i></i><span>정기 점검 · 다른 수동 점검과 같은 노드에서 겹치지 않습니다. 겹치면 시작하지 못했다고 알립니다.</span></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn pri" type="button">보관 로그 읽기 시작</button><button class="btn" type="button">대상 서버 보기</button></div>
+    </div>
+
+    <div class="card">
+      <div class="h">앞으로의 기록 지키기 <span class="muted" style="font-weight:400">활성 로그가 다시 며칠로 줄지 않게</span></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;border:1px solid #243049;border-radius:10px;background:#0f1626;padding:10px 12px">
+        <div style="min-width:0"><b>포탈의 iDRAC 접속에 세션 재사용</b><div class="note">지금은 요청마다 로그인합니다. 켜면 한 번 로그인한 세션을 계속 씁니다.</div></div>
+        <span class="sw"><i aria-hidden="true"></i>켬</span>
+      </div>
+      <div class="src" style="grid-template-columns:150px minmax(0,1fr)">
+        <span>적용된 서버</span>
+        <div class="stack" role="img" aria-label="세션 재사용 — 적용 603대, 기존 방식 유지 55대"><i style="width:91.6%;background:#3b82f6"></i><i style="width:8.4%;background:#64748b"></i></div>
+        <span></span>
+        <div class="leg"><span><span class="dot" style="background:#3b82f6"></span>세션 재사용 603</span><span><span class="dot" style="background:#64748b"></span>기존 방식 유지 55 (장비가 세션을 주지 않음)</span></div>
+        <span>iDRAC 의 로그인 묶기</span>
+        <div class="stack" role="img" aria-label="로그인 묶기 설정 — 켜짐 88대, 꺼짐 411대, 모름 159대"><i style="width:13.4%;background:#0d9488"></i><i style="width:62.5%;background:#b45309"></i><i style="width:24.1%;background:#243049"></i></div>
+        <span></span>
+        <div class="leg"><span><span class="dot" style="background:#0d9488"></span>켜짐 88</span><span><span class="dot" style="background:#b45309"></span>꺼짐 411</span><span><span class="dot" style="background:#243049;border:1px solid #5d6b85"></span>모름 159</span></div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,150px),1fr));gap:10px">
+        <div class="kpi"><b>31일</b><span>활성 로그 길이 중앙값 — 적용 전</span></div>
+        <div class="kpi"><b class="muted">—</b><span>적용 뒤 (로그가 쌓이는 대로 표시)</span></div>
+      </div>
+      <span class="muted" style="font-size:12px;line-height:1.6">로그인 묶기는 장비 설정이라 포탈이 바꾸지 않습니다. 상태만 보여 주고 켜는 방법을 안내합니다. 세션 재사용은 이미 밀려난 기록을 되살리지 못합니다. 앞으로의 기록만 지킵니다.</span>
+    </div>
+
+  </div>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1620}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

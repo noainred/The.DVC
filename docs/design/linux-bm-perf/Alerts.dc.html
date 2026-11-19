@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>알림 규칙 연결 · 베이스라인 이탈</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:Inter,"Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#22d3ee}a:hover{color:#67e8f9}
+.card{background:linear-gradient(180deg,#141b2d,#111726);border:1px solid #243049;border-radius:12px;padding:16px 18px;box-shadow:0 4px 24px rgba(0,0,0,.4);min-width:0}
+.dim{color:#8b9bb4}.mono{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:600;border:1px solid #243049;background:#0f1626;color:#8b9bb4;white-space:nowrap}
+.chip.ok{color:#4ade80;border-color:rgba(34,197,94,.35);background:rgba(34,197,94,.1)}
+.chip.warn{color:#fbbf24;border-color:rgba(245,158,11,.35);background:rgba(245,158,11,.1)}
+.chip.bad{color:#f87171;border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.1)}
+.chip.info{color:#67e8f9;border-color:rgba(34,211,238,.3);background:rgba(34,211,238,.08)}
+.btn{min-height:36px;padding:0 14px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-weight:600;cursor:pointer}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.sel{min-height:34px;padding:0 10px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit;font-size:12.5px}
+.inp{min-height:34px;padding:0 10px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit;font-size:12.5px;width:70px}
+table{border-collapse:separate;border-spacing:0;width:100%}
+th{font-size:11.5px;font-weight:600;color:#8b9bb4;text-align:left;padding:6px 8px;border-bottom:1px solid #243049;background:#0f1626;white-space:nowrap;cursor:pointer;vertical-align:bottom}
+td{padding:7px 8px;border-bottom:1px solid #1f2a40;vertical-align:middle;font-size:12.5px;line-height:1.5}
+.sw{display:inline-block;width:34px;height:20px;border-radius:10px;background:#1a2236;border:1px solid #243049;position:relative;vertical-align:middle}
+.sw.on{background:#22d3ee;border-color:#22d3ee}.sw i{position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:7px;background:#e6edf6}.sw.on i{left:16px;background:#0a0e17}
+h2{margin:0;font-size:15px;font-weight:700}
+.hm{display:inline-block;min-width:40px;text-align:center;padding:3px 5px;border-radius:5px;font-weight:600;font-size:11.5px}
+.h0{background:rgba(34,197,94,.14);color:#4ade80}.h1{background:rgba(245,158,11,.16);color:#fbbf24}.h2{background:rgba(239,68,68,.18);color:#f87171}.hb{background:rgba(34,211,238,.14);color:#67e8f9}
+</style>
+</helmet>
+<div style="box-sizing:border-box;max-width:1680px;margin:0 auto;padding:18px 24px 40px;display:flex;flex-direction:column;gap:14px">
+
+  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px">
+    <div style="min-width:0">
+      <div style="font-size:12px;color:#8b9bb4">설정 › 베어메탈 성능 › <b style="color:#e6edf6">알림 규칙</b> · 추천 1 (알림 연결) + 2 (베이스라인 이탈)</div>
+      <h1 style="margin:0;font-size:20px;font-weight:700;letter-spacing:-.01em">알림 규칙 — 판정 변화 · 교차 판정 · 집중 결론 · 베이스라인 이탈을 기존 알림·이슈에 연결</h1>
+      <div class="dim" style="font-size:12px;margin-top:4px">기존 베어메탈 사용률 알림(기본 꺼짐 · 상태 파일 · 재시작 뒤 재발송 없음)과 파트 장애 → 이슈 자동 등록 문지기를 그대로 쓴다 · 관리자 + 전체 범위만 저장 · 범위 계정은 읽기</div>
+    </div>
+    <div style="flex:1 1 20px"></div>
+    <button class="btn" type="button">시험 실행 (지난 24시간에 대 보기 — 만들지 않음)</button>
+    <button class="btn primary" type="button">저장</button>
+  </div>
+
+  <!-- 규칙 표 -->
+  <div class="card">
+    <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 12px;margin-bottom:8px"><h2>규칙 — 켠 것만 저장한다(false 를 쌓지 않는다)</h2><span class="dim" style="font-size:12px">조건은 엣지가 판정한 값의 ‘변화’ 에만 걸린다(같은 상태가 계속이면 다시 보내지 않음) · 지속 시간 · 재발 억제 · 유지보수 창 억제 · 하루 상한</span></div>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>켬</th><th>규칙</th><th>조건</th><th>지속</th><th>재발 억제</th><th>채널</th><th>이슈 자동 등록</th><th>집중 모니터링</th><th>법인 예외</th></tr></thead>
+      <tbody>
+        <tr><td><span class="sw on"><i></i></span></td><td><b>USE 판정 변화</b></td><td>정상/경계 → <select class="sel"><option>포화 또는 오류</option><option>병목(둘 다)</option><option>오류만</option></select></td><td><input class="inp" value="2"> 주기</td><td><input class="inp" value="60"> 분</td><td><span class="chip">메일</span> <span class="chip">웹훅</span></td><td><span class="sw on"><i></i></span> <span class="dim">상한 20/일</span></td><td><span class="sw on"><i></i></span> <span class="dim">자동 10분</span></td><td class="dim">PL-WAW 제외</td></tr>
+        <tr><td><span class="sw on"><i></i></span></td><td><b>교차 판정 성립</b></td><td><select class="sel"><option>① 전력·열 제한</option><option>② SMART 전조</option><option>③ ECC+MCE</option><option>④ 드롭 층</option><option>⑤ 서버↔포트 불일치</option><option>전부</option></select></td><td>1 주기</td><td>24 시간</td><td><span class="chip">메일</span> <span class="chip">이슈</span></td><td><span class="sw on"><i></i></span></td><td><span class="sw"><i></i></span></td><td class="dim">—</td></tr>
+        <tr><td><span class="sw on"><i></i></span></td><td><b>집중 모니터링 결론</b></td><td>세션 종료 시 판정이 <select class="sel"><option>정상으로 안 돌아옴</option><option>어떤 결론이든</option></select></td><td class="dim">—</td><td class="dim">세션당 1회</td><td><span class="chip">메일</span> <span class="chip">웹훅</span></td><td><span class="sw on"><i></i></span> <span class="dim">세션 링크 첨부</span></td><td class="dim">—</td><td class="dim">—</td></tr>
+        <tr style="background:rgba(34,211,238,.05)"><td><span class="sw on"><i></i></span></td><td><b>베이스라인 이탈</b> <span class="chip info">추천 2</span></td><td>지난 <input class="inp" value="4" style="width:46px">주 같은 요일·시각 평균 대비 ±<input class="inp" value="40" style="width:46px">% · 지표 <select class="sel"><option>CPU · 디스크 await · 네트워크</option><option>전부</option></select></td><td><input class="inp" value="3"> 주기</td><td>4 시간</td><td><span class="chip">웹훅</span></td><td><span class="sw"><i></i></span></td><td><span class="sw on"><i></i></span></td><td class="dim">표본 4주 미만이면 안 걸림</td></tr>
+        <tr><td><span class="sw"><i></i></span></td><td><b>점검 소모품</b> <span class="chip">추천 7</span></td><td>chrony 오프셋 · 실패 유닛 · OOM · dmesg 오류율 · 인증서 만료 중 하나라도 기준 밖</td><td>1 주기</td><td>12 시간</td><td><span class="chip">메일</span></td><td><span class="sw"><i></i></span></td><td><span class="sw"><i></i></span></td><td class="dim">—</td></tr>
+        <tr><td><span class="sw"><i></i></span></td><td><b>용도 프로파일 점검 실패</b></td><td>Airflow 스케줄러 하트비트 · GPDB 다운 세그먼트 등 프로파일 checks 의 CRITICAL</td><td>1 주기</td><td>30 분</td><td><span class="chip">메일</span> <span class="chip">웹훅</span></td><td><span class="sw on"><i></i></span></td><td><span class="sw on"><i></i></span></td><td class="dim">—</td></tr>
+      </tbody></table></div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;margin-top:10px;font-size:12.5px">
+      <span class="dim">유지보수 창 억제</span><span class="chip ok">켬 — 백업 창(Bareos·Veeam 스케줄에서 자동) + 수동 창</span>
+      <span class="dim">하루 상한(법인당)</span><span class="chip">알림 50 · 이슈 20 · 자동 집중 10</span>
+      <span class="dim">상태 파일</span><span class="mono dim" style="font-size:11.5px">bm-perf-alert-state.json (엣지) — 재시작마다 전 서버가 ‘새 알림’ 이 되지 않게</span>
+    </div>
+  </div>
+
+  <!-- 베이스라인 보기 -->
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(560px,100%),1fr));gap:14px;align-items:start">
+    <div class="card">
+      <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 12px;margin-bottom:6px"><h2>베이스라인 띠 — 추이 탭에 겹쳐 보이는 모습 (bm-kr1-db01 · 디스크 await)</h2><span class="dim" style="font-size:12px">띠 = 지난 4주 같은 요일·같은 시각(1시간 롤업)의 평균 ±40% · 밖으로 나간 구간만 색</span></div>
+      <svg viewBox="0 0 640 220" role="img" aria-label="24시간 await 추이 위에 지난 4주 같은 요일 베이스라인 띠. 새벽 2시에서 5시는 띠 자체가 높아 정상 범위이고, 12시 이후 상승은 띠 밖이라 이탈로 표시" style="width:100%;height:auto;display:block">
+        <line x1="40" y1="10" x2="40" y2="190" stroke="#243049"></line><line x1="40" y1="190" x2="630" y2="190" stroke="#243049"></line>
+        <polygon fill="rgba(34,211,238,.12)" stroke="rgba(34,211,238,.35)" points="40,182 120,182 200,176 260,120 320,96 380,112 440,170 500,182 560,182 630,180 630,188 560,189 500,189 440,186 380,170 320,156 260,172 200,186 120,189 40,189"></polygon>
+        <polyline fill="none" stroke="#8b9bb4" stroke-width="2" points="40,186 120,185 200,180 260,140 320,118 380,130 440,178 500,186 560,180 630,150"></polyline>
+        <rect x="560" y="10" width="70" height="180" fill="rgba(239,68,68,.10)"></rect>
+        <polyline fill="none" stroke="#f87171" stroke-width="2.5" points="560,180 600,160 630,150"></polyline>
+        <text x="48" y="24" fill="#67e8f9" font-size="11">띠 안 = 평소와 같음 (새벽 백업 창도 평소)</text>
+        <text x="626" y="24" fill="#f87171" font-size="11" text-anchor="end">13:00~ 띠 밖 +190% · 이탈</text>
+        <text x="40" y="208" fill="#8b9bb4" font-size="11">13:40 어제</text><text x="320" y="208" fill="#8b9bb4" font-size="11" text-anchor="middle">02:00</text><text x="630" y="208" fill="#8b9bb4" font-size="11" text-anchor="end">13:35</text>
+      </svg>
+      <div class="dim" style="font-size:11.5px;margin-top:6px">계산은 일·시간 롤업만 쓴다(ML 없음). 표본이 4주 미만이거나 그 시각에 결측이 많으면 띠를 그리지 않고 ‘베이스라인 없음’ 이라고 적는다. 새벽 백업 창처럼 ‘원래 높은’ 시간은 띠가 같이 높아 이탈로 세지 않는다.</div>
+    </div>
+    <div class="card">
+      <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 12px;margin-bottom:6px"><h2>베이스라인 이탈 — 보드 칸 · 알림 문구</h2><span class="dim" style="font-size:12px">USE 매트릭스에 ‘B’ 칸 추가(지표별 이탈 배수) · 문구는 숫자와 근거를 같이</span></div>
+      <div style="overflow-x:auto"><table>
+        <thead><tr><th>서버</th><th>CPU</th><th>디스크 await</th><th>네트워크</th><th>메모리</th><th>베이스라인</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">bm-kr1-db01</td><td><span class="hm h0">1.1×</span></td><td><span class="hm h2">2.9×</span></td><td><span class="hm h0">1.0×</span></td><td><span class="hm h0">1.0×</span></td><td class="dim">4주 · 결측 2%</td></tr>
+          <tr><td class="mono">bm-pl1-app03</td><td><span class="hm h2">3.4×</span></td><td><span class="hm h0">0.9×</span></td><td><span class="hm h0">1.2×</span></td><td><span class="hm h0">1.0×</span></td><td class="dim">4주</td></tr>
+          <tr><td class="mono">bm-kr1-bk01</td><td><span class="hm h0">1.0×</span></td><td><span class="hm hb">1.0×</span></td><td><span class="hm h0">1.0×</span></td><td><span class="hm h0">1.0×</span></td><td class="dim">4주 · 백업 창 — 평소와 같음</td></tr>
+          <tr><td class="mono">bm-us1-db05</td><td><span class="hm">—</span></td><td><span class="hm">—</span></td><td><span class="hm">—</span></td><td><span class="hm">—</span></td><td class="dim">표본 1주 — 아직 없음</td></tr>
+        </tbody></table></div>
+      <div style="border:1px solid #243049;border-radius:10px;padding:10px 12px;background:#0f1626;margin-top:10px;font-size:12.5px">
+        <div class="dim" style="font-size:11.5px;margin-bottom:4px">알림 문구 예(웹훅·메일 같은 본문)</div>
+        <div class="mono" style="font-size:12px;line-height:1.6">[KR-SEL] bm-kr1-db01 디스크 await 베이스라인 이탈 2.9× — 13:05~13:35 평균 18ms, 지난 4주 목요일 같은 시각 평균 6.2ms(±40% 띠 밖) · 3주기 지속 · USE 판정 ‘디스크 포화’ · 자동 집중 모니터링 시작(10분) · 상세 https://…/#/tools/bm-perf/kr-sel/bm-kr1-db01/trend?at=13:35</div>
+      </div>
+      <div class="dim" style="font-size:11.5px;margin-top:8px">문구는 ‘무엇이 · 얼마나 · 무엇 대비 · 언제부터’ 를 적고 단정형 원인은 쓰지 않는다. 같은 서버·같은 규칙은 재발 억제 시간 안에 다시 보내지 않는다.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-bottom:8px">규칙 · 정직 기록</h2>
+    <ul style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;font-size:12.5px" class="dim">
+      <li>판정·베이스라인 계산은 <b style="color:#e6edf6">엣지</b>가 하고 알림 발송도 엣지가 한다(중앙 알림 설정을 엣지에 배포 — 베어메탈 사용률 설정 배포와 같은 길). 중앙은 발송 기록을 봉투로 받아 ‘알림 이력’ 에 보여 준다.</li>
+      <li>이슈 자동 등록은 기존 문지기(관리자 + 전체 범위 · 하루 상한 · 법인 예외 · 시험 실행 = 지난 N시간에 대 보기, 만들지 않음)를 그대로 쓴다.</li>
+      <li>베이스라인은 ‘지난 4주 같은 요일·시각’ 의 1시간 롤업 평균이다 — 휴일·월말 같은 달력 효과는 모른다(화면이 말한다). 4주 미만·결측 많음이면 걸지 않는다. ML 이상 탐지는 채택하지 않았다.</li>
+      <li>알림 채널(메일·웹훅)은 기존 알림 설정의 것을 재사용하고 새 채널을 만들지 않는다. 웹훅 URL 은 비밀이라 화면에 싣지 않는다.</li>
+    </ul>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1750}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

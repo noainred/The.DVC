@@ -2,7 +2,7 @@
 //   RECENT2602-02 PowerMax '미수집' 경보 · LEFT2602-04 iDRAC 섀시 Power 부분 합 · COL-2602-01 NSX 클러스터 상태 실패 ·
 //   COL-2602-04 XtremIO 33번째 이후 클러스터 · SEC2602-02 PDU parseCode · SEC2602-03 bmstor sanitizeMounts ·
 //   EDGE2602-05 PDU '지금 수집' 실패도 즉시 push.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -11,7 +11,14 @@ import http from 'node:http';
 import https from 'node:https';
 import { execFileSync } from 'node:child_process';
 
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2602d-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const TMP = tmpDir('audit2602d-');
 process.env.CONFIG_DIR = TMP;
 // 2026-10-09 S-02: 가짜 HTTPS 장비는 openssl 자체서명이다 — 장비 인증서 지문 정책을 observe(처음 본 장비는 기록 후 통과)로 둔다
 // (새 설치 기본은 enforce 라 승인 전에는 자격증명을 보내지 않는다 — security/tlsTrust.js). 이 테스트가 보는 것은 TLS 가 아니다.

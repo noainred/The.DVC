@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>물리서버 폴더 — 맵 보기와 서버 옆 패널</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./bmf.css">
+<link rel="stylesheet" href="./bmf2.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+</style>
+</helmet>
+<div class="root" style="width:1440px;height:960px">
+  <div class="tb">
+    <span class="logo"><span class="v">V</span><span>VMware Global Monitoring Portal</span></span>
+    <span class="ver">v2.914.0</span>
+    <span class="cmdk"><span>기능 · 탭 · 장비 찾기</span><span class="kbd" style="margin-left:auto">⌘K</span></span>
+    <span class="pill" style="margin-left:auto"><span class="dot" style="background:#22c55e"></span><span>vCenter 28/28</span></span>
+    <span class="pill"><span>admin · 전체 범위</span></span>
+  </div>
+  <div class="body">
+    <nav class="sb" aria-label="주 메뉴">
+      <span class="h">모니터링</span>
+      <a href="#">Overview</a>
+      <a href="#">Platform</a>
+      <a href="#">호스트</a>
+      <a href="#">가상머신</a>
+      <span class="h">도구</span>
+      <a href="#" class="on">특수 기능</a>
+      <a href="#">설정</a>
+    </nav>
+    <div class="main">
+      <div class="crumb">특수 기능 › 서버 · 하드웨어 › 물리서버 폴더</div>
+      <h1 class="h1">
+        <span>물리서버 폴더</span>
+        <div class="seg" role="group" aria-label="보기 방식"><button type="button">목록</button><button type="button" class="on">맵</button></div>
+        <button class="sel" type="button" aria-label="저장한 보기"><span><span class="dim">보기</span> 기본</span><span class="dim">▾</span></button>
+        <span class="sp row"><button class="btn pri" type="button">서버 찾아 등록</button><button class="btn" type="button">새로고침</button></span>
+      </h1>
+
+      <div class="card bar" style="border-bottom:1px solid #243049">
+        <div class="qbar" style="flex:1">
+          <span class="tok"><span class="tk">법인</span><span class="tv">KR-HQ</span></span>
+          <span class="ph">이름 · 모델 · 폴더로 거르기</span>
+        </div>
+        <span class="note">묶기</span>
+        <button class="sel" type="button"><span>폴더</span><span class="dim">▾</span></button>
+        <span class="note">색</span>
+        <button class="sel" type="button"><span>CPU 사용률</span><span class="dim">▾</span></button>
+        <span class="row" style="gap:10px">
+          <span class="lg">0%<span class="hxs" style="gap:2px;flex-wrap:nowrap"><i class="hx u1" style="width:16px;height:10px;border-radius:2px"></i><i class="hx u2" style="width:16px;height:10px;border-radius:2px"></i><i class="hx u3" style="width:16px;height:10px;border-radius:2px"></i><i class="hx u4" style="width:16px;height:10px;border-radius:2px"></i><i class="hx u5" style="width:16px;height:10px;border-radius:2px"></i></span>100%</span>
+          <span class="lg"><i class="hx na" style="width:10px;height:10px;border-radius:2px"></i>못 읽음</span>
+          <span class="lg"><i class="hx off" style="width:10px;height:10px;border-radius:2px"></i>꺼짐</span>
+          <span class="lg"><i class="hx u2 bad" style="width:10px;height:10px;border-radius:2px"></i>부품 장애</span>
+        </span>
+      </div>
+
+      <div class="pane">
+        <div class="card cnt" style="padding:12px;gap:10px;overflow:hidden">
+          <div class="row"><span class="co"></span><span style="font-weight:700;font-size:14px">KR-HQ 본사</span><span class="bdg c">중앙</span><span class="note">124대 · 폴더 6개 · 등록 73 · 미분류 51</span><span class="note sp">칸 하나 = 서버 한 대 · 칸을 누르면 옆 패널</span></div>
+
+          <div class="grp">
+            <div class="gh"><span class="fo"></span>DB <span class="gc">32</span></div>
+            <div style="display:grid;grid-template-columns:minmax(0,3fr) minmax(0,5fr);gap:10px">
+              <div class="grp in">
+                <div class="gh"><span class="fo"></span>Oracle RAC <span class="gc">12</span><span class="tag sp">CPU 31%</span></div>
+                <div class="hxs big"><i class="hx u3"></i><i class="hx u3"></i><i class="hx u2 bad pick"></i><i class="hx u3"></i><i class="hx u1"></i><i class="hx u1"></i><i class="hx u1"></i><i class="hx u2"></i><i class="hx u1"></i><i class="hx na"></i><i class="hx u2"></i><i class="hx u2"></i></div>
+              </div>
+              <div class="grp in">
+                <div class="gh"><span class="fo"></span>MySQL <span class="gc">20</span><span class="tag sp">CPU 38%</span></div>
+                <div class="hxs big"><i class="hx u2"></i><i class="hx u3"></i><i class="hx u2"></i><i class="hx u2"></i><i class="hx u4"></i><i class="hx u3"></i><i class="hx u2"></i><i class="hx u1"></i><i class="hx u2"></i><i class="hx u3"></i><i class="hx u2"></i><i class="hx u2"></i><i class="hx u3"></i><i class="hx u1"></i><i class="hx u2"></i><i class="hx u2"></i><i class="hx u3"></i><i class="hx u2"></i><i class="hx u1"></i><i class="hx u2"></i></div>
+              </div>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px">
+            <div class="grp">
+              <div class="gh"><span class="fo"></span>AI · GPU <span class="gc">18</span><span class="tag sp">CPU 74%</span></div>
+              <div class="hxs big"><i class="hx u5"></i><i class="hx u4"></i><i class="hx u5"></i><i class="hx u4"></i><i class="hx u4"></i><i class="hx u5"></i><i class="hx u3"></i><i class="hx u4"></i><i class="hx u5 bad"></i><i class="hx u4"></i><i class="hx u4"></i><i class="hx u3"></i><i class="hx u5"></i><i class="hx u4"></i><i class="hx u2"></i><i class="hx u4"></i><i class="hx u5"></i><i class="hx u4"></i></div>
+            </div>
+            <div class="grp">
+              <div class="gh"><span class="fo"></span>백업 · 미디어 서버 <span class="gc">9</span><span class="tag sp">CPU 14%</span></div>
+              <div class="hxs big"><i class="hx u1"></i><i class="hx u1"></i><i class="hx u2"></i><i class="hx u1"></i><i class="hx u1"></i><i class="hx u1"></i><i class="hx u2"></i><i class="hx u1"></i><i class="hx u1"></i></div>
+            </div>
+            <div class="grp">
+              <div class="gh"><span class="fo"></span>계측 · 시험 <span class="gc">14</span><span class="tag sp">CPU 9%</span></div>
+              <div class="hxs big"><i class="hx u1"></i><i class="hx u1"></i><i class="hx u1"></i><i class="hx off"></i><i class="hx u1"></i><i class="hx u2"></i><i class="hx u1"></i><i class="hx u1"></i><i class="hx off"></i><i class="hx u1"></i><i class="hx u1"></i><i class="hx u1"></i><i class="hx u1"></i><i class="hx u1"></i></div>
+            </div>
+          </div>
+
+          <div class="grp un">
+            <div class="gh"><span class="fo un"></span><span style="color:#fbbf24">(미분류)</span> <span class="gc">51</span><span class="note" style="font-weight:400">— 아직 폴더가 없는 서버</span><button class="btn sm sp" type="button">찾아 등록…</button></div>
+            <div class="hxs big"><i class="hx u2"></i><i class="hx u1"></i><i class="hx u3"></i><i class="hx u2"></i><i class="hx u2"></i><i class="hx u4"></i><i class="hx u1"></i><i class="hx u2"></i><i class="hx na"></i><i class="hx u2"></i><i class="hx u3"></i><i class="hx u1"></i><i class="hx u2"></i><i class="hx u2"></i><i class="hx u5"></i><i class="hx u4"></i><i class="hx u4"></i><i class="hx u5"></i><i class="hx u4"></i><i class="hx u5"></i><i class="hx u4"></i><i class="hx u5"></i><i class="hx u4"></i><i class="hx u4"></i><i class="hx u5"></i><i class="hx u2"></i><i class="hx u1"></i><i class="hx u1"></i><i class="hx u2"></i><i class="hx u3"></i><i class="hx u2"></i><i class="hx off"></i><i class="hx u1"></i><i class="hx u2"></i><i class="hx u2 bad"></i><i class="hx u3"></i><i class="hx u2"></i><i class="hx u1"></i><i class="hx u1"></i><i class="hx na"></i><i class="hx u2"></i><i class="hx u3"></i><i class="hx u2"></i><i class="hx u2"></i><i class="hx u1"></i><i class="hx u3"></i><i class="hx u2"></i><i class="hx u2"></i><i class="hx u1"></i><i class="hx u2"></i><i class="hx u3"></i></div>
+            <div class="note">밝은 칸 11대가 붙어 있습니다 — 이름 앞부분 <span class="mono">kr-gpu-*</span> · ‘AI · GPU’ 폴더 후보</div>
+          </div>
+          <div class="box tw2" style="margin-top:auto;flex:none">
+            <table class="t dense">
+              <thead><tr><th>폴더</th><th class="r">서버</th><th class="r">CPU ▼</th><th class="r">메모리</th><th class="r">전력</th><th>부품 장애</th><th>참고</th></tr></thead>
+              <tbody>
+                <tr><td><span class="nm"><span class="fo"></span>AI · GPU</span></td><td class="r num">18</td><td><div class="mb"><span class="mbt" style="width:90px"><i style="width:74%" class="hi"></i></span><span class="mbn">74%</span></div></td><td><div class="mb"><span class="mbt" style="width:90px"><i style="width:66%"></i></span><span class="mbn">66%</span></div></td><td class="r num">19,440 W</td><td><span class="bdg r">1</span></td><td class="dim">CPU 70% 이상</td></tr>
+                <tr><td><span class="nm"><span class="fo un"></span>(미분류)</span></td><td class="r num">51</td><td><div class="mb"><span class="mbt" style="width:90px"><i style="width:41%"></i></span><span class="mbn">41%</span></div></td><td><div class="mb"><span class="mbt" style="width:90px"><i style="width:48%"></i></span><span class="mbn">48%</span></div></td><td class="r num">15,870 W</td><td><span class="bdg r">1</span></td><td class="dim">못 읽음 2 · 꺼짐 1</td></tr>
+                <tr><td><span class="nm"><span class="fo"></span>DB / MySQL</span></td><td class="r num">20</td><td><div class="mb"><span class="mbt" style="width:90px"><i style="width:38%"></i></span><span class="mbn">38%</span></div></td><td><div class="mb"><span class="mbt" style="width:90px"><i style="width:61%"></i></span><span class="mbn">61%</span></div></td><td class="r num">5,930 W</td><td><span class="dim">없음</span></td><td class="dim"></td></tr>
+                <tr><td><span class="nm"><span class="fo"></span>DB / Oracle RAC</span></td><td class="r num">12</td><td><div class="mb"><span class="mbt" style="width:90px"><i style="width:31%"></i></span><span class="mbn">31%</span></div></td><td><div class="mb"><span class="mbt" style="width:90px"><i style="width:54%"></i></span><span class="mbn">54%</span></div></td><td class="r num">4,221 W</td><td><span class="bdg r">1</span></td><td class="dim">못 읽음 1</td></tr>
+                <tr><td><span class="nm"><span class="fo"></span>백업 · 미디어 서버</span></td><td class="r num">9</td><td><div class="mb"><span class="mbt" style="width:90px"><i style="width:14%"></i></span><span class="mbn">14%</span></div></td><td><div class="mb"><span class="mbt" style="width:90px"><i style="width:35%"></i></span><span class="mbn">35%</span></div></td><td class="r num">2,210 W</td><td><span class="dim">없음</span></td><td class="dim"></td></tr>
+                <tr><td><span class="nm"><span class="fo"></span>계측 · 시험</span></td><td class="r num">14</td><td><div class="mb"><span class="mbt" style="width:90px"><i style="width:9%"></i></span><span class="mbn">9%</span></div></td><td><div class="mb"><span class="mbt" style="width:90px"><i style="width:22%"></i></span><span class="mbn">22%</span></div></td><td class="r num">2,380 W</td><td><span class="dim">없음</span></td><td class="dim">꺼짐 2</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card dw" role="complementary" aria-label="서버 상세">
+          <div class="dwh">
+            <div class="row"><span class="sd bad" aria-label="부품 장애"></span><span style="font-size:15px;font-weight:700">kr-ora-rac03</span><button class="btn sm sp" type="button" aria-label="패널 닫기">닫기</button></div>
+            <div class="row" style="gap:5px">
+              <span class="tag">법인:KR-HQ</span><span class="tag">폴더:DB/Oracle RAC</span><span class="tag">모델:R940</span><span class="tag">태그:9JM4P21</span><span class="tag">출처:중앙</span>
+            </div>
+          </div>
+          <div class="tabs" role="tablist"><button type="button" class="on">개요</button><button type="button">지표</button><button type="button">부품 · 장애 1</button><button type="button">등록 이력</button></div>
+          <div class="dwb">
+            <div class="band r"><span><b>PSU 1 — 전원 공급 장치 2 고장</b> · 11-11 03:12 부터</span></div>
+            <div class="kv">
+              <span class="kk">전원</span><span>켜짐</span>
+              <span class="kk">CPU</span><div class="mb" style="justify-content:flex-start"><span class="mbt" style="width:150px"><i style="width:39%"></i></span><span class="mbn">39%</span></div>
+              <span class="kk">메모리</span><div class="mb" style="justify-content:flex-start"><span class="mbt" style="width:150px"><i style="width:69%"></i></span><span class="mbn">69%</span></div>
+              <span class="kk">전력</span><span class="num">588 W</span>
+              <span class="kk">iDRAC</span><span><span class="mono">10.20.31.13</span> · <a href="#">열기</a></span>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:6px">
+              <span class="sec">CPU 사용률 — 지난 24시간</span>
+              <svg viewBox="0 0 356 84" width="356" height="84" role="img" aria-label="CPU 사용률 24시간 추이 — 30%에서 48% 사이">
+                <line x1="0" y1="21" x2="356" y2="21" stroke="#243049" stroke-width="1"></line>
+                <line x1="0" y1="42" x2="356" y2="42" stroke="#243049" stroke-width="1"></line>
+                <line x1="0" y1="63" x2="356" y2="63" stroke="#243049" stroke-width="1"></line>
+                <polyline fill="none" stroke="#4c8df6" stroke-width="2" stroke-linejoin="round" points="0,58 22,56 44,57 66,52 88,49 110,46 132,44 154,47 176,45 198,43 220,46 242,50 264,52 286,51 308,53 330,50 356,51"></polyline>
+                <text x="352" y="17" text-anchor="end" font-size="10" fill="#8b9bb4">75%</text>
+                <text x="352" y="38" text-anchor="end" font-size="10" fill="#8b9bb4">50%</text>
+                <text x="352" y="80" text-anchor="end" font-size="10" fill="#8b9bb4">0%</text>
+              </svg>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:7px">
+              <span class="sec">폴더</span>
+              <div class="mini">
+                <span class="ln"><span class="fo"></span><b>KR-HQ 본사 › DB › Oracle RAC</b></span>
+                <span class="ln dim">등록 admin · 2026-11-10 14:02 · 손으로 등록</span>
+              </div>
+              <div class="row"><button class="btn sm" type="button">다른 폴더로 옮기기</button><button class="btn sm" type="button">폴더에서 빼기</button></div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:5px">
+              <span class="sec">바로가기</span>
+              <span><a href="#">서비스 인벤토리 ‘Oracle RAC’</a> · <a href="#">통합 서버 인벤토리</a> · <a href="#">부품 장애 이력</a></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":960}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

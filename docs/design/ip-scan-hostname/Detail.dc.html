@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>스캔 IP 상세 — 호스트명과 방식별 결과</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#05080f;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.5}
+a{color:#60a5fa}a:hover{color:#93c5fd}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+.muted{color:#8b9bb4}
+.badge{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap}
+.badge.green{background:rgba(34,197,94,.15);color:#4ade80}
+.badge.amber{background:rgba(245,158,11,.15);color:#fbbf24}
+.badge.gray{background:rgba(139,155,180,.15);color:#8b9bb4}
+.badge.blue{background:rgba(59,130,246,.15);color:#60a5fa}
+.badge.purple{background:rgba(168,85,247,.15);color:#c084fc}
+.badge.teal{background:rgba(20,184,166,.16);color:#2dd4bf}
+.btn{padding:7px 12px;border-radius:8px;cursor:pointer;font:inherit;font-size:12px;font-weight:600;background:#1a2236;border:1px solid #243049;color:#8b9bb4;white-space:nowrap}
+.btn.primary{border:none;background:linear-gradient(135deg,#3b82f6,#2563eb);color:#fff;font-weight:700}
+.k{font-size:12px;color:#8b9bb4}
+.v{font-size:13px;margin-top:2px}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+thead th{text-align:left;padding:8px 12px;background:#1a2236;color:#8b9bb4;font-weight:600;font-size:11px;letter-spacing:.5px;white-space:nowrap;border-bottom:1px solid #243049}
+tbody td{padding:8px 12px;border-bottom:1px solid rgba(36,48,73,.5);vertical-align:top}
+tbody tr:last-child td{border-bottom:none}
+.new{outline:2px dashed rgba(34,211,238,.6);outline-offset:4px}
+</style>
+</helmet>
+<div style="width:700px;height:1000px;box-sizing:border-box;padding:30px;background:#05080f">
+  <div style="box-sizing:border-box;width:640px;background:linear-gradient(180deg,#141b2d,#111726);border:1px solid #243049;border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,.55);padding:20px 22px;display:flex;flex-direction:column;gap:16px">
+
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+      <h2 style="margin:0;font-size:16px;font-weight:700">IP 10.210.5.60 — 스캔으로 확인한 IP</h2>
+      <button class="btn">닫기</button>
+    </div>
+
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:12px">
+      <span class="badge teal">스캔 확인</span>
+      <span class="badge green">사용 중</span>
+      <span class="badge green">사설</span>
+      <span class="muted">스캔한 곳</span><span>이 포탈에서 직접</span>
+      <span class="muted">· 데이터센터 미정</span>
+    </div>
+
+    <div class="new" style="border:1px solid #1f2a40;border-radius:12px;background:#0f1626;padding:14px 16px;display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px">
+        <div style="display:flex;flex-direction:column;gap:4px;min-width:0">
+          <span class="k">호스트명</span>
+          <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px">
+            <span style="font-size:18px;font-weight:700;overflow-wrap:anywhere">fs-old.corp.example</span>
+            <span class="badge blue">역DNS</span>
+            <span class="badge amber">이름 다름</span>
+          </div>
+        </div>
+        <button class="btn">이름 직접 지정</button>
+      </div>
+
+      <div style="border:1px solid #243049;border-radius:10px;overflow:hidden">
+        <table>
+          <thead><tr><th>확인 방식</th><th>결과</th><th>확인 시각</th></tr></thead>
+          <tbody>
+            <tr>
+              <td style="white-space:nowrap"><span class="badge blue">역DNS</span> <span class="muted" style="font-size:11px">PTR 조회</span></td>
+              <td><b>fs-old.corp.example</b></td>
+              <td class="muted mono" style="white-space:nowrap;font-size:12px">11-13 07:05</td>
+            </tr>
+            <tr>
+              <td style="white-space:nowrap"><span class="badge green">mDNS</span> <span class="muted" style="font-size:11px">UDP 5353</span></td>
+              <td class="muted">응답 없음</td>
+              <td class="muted mono" style="white-space:nowrap;font-size:12px">11-13 07:05</td>
+            </tr>
+            <tr>
+              <td style="white-space:nowrap"><span class="badge purple">NetBIOS</span> <span class="muted" style="font-size:11px">UDP 137</span></td>
+              <td><b>NAS-BACKUP</b> <span class="muted" style="font-size:12px">· 그룹 CORP</span></td>
+              <td class="muted mono" style="white-space:nowrap;font-size:12px">11-13 07:05</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div style="border:1px solid rgba(245,158,11,.35);border-left:4px solid #f59e0b;border-radius:8px;background:#141b2d;padding:8px 12px;font-size:12.5px;line-height:1.55">
+        역DNS 와 NetBIOS 가 서로 다른 이름을 답했습니다. DNS 레코드가 예전 장비를 가리키고 있을 수 있습니다 — 어느 쪽이 맞는지는 포탈이 판정하지 않습니다.
+      </div>
+
+      <div class="muted" style="font-size:12px">표시 이름은 직접 넣은 이름 &gt; 역DNS &gt; mDNS &gt; NetBIOS 순으로 고릅니다. 방식은 ‘스캔 대역·설정’ 에서 에이전트마다 켜고 끕니다.</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <span class="k">열린 포트 <span style="font-size:11px">(마지막 스캔)</span></span>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">
+        <span class="badge gray">SMB <span class="mono">445</span></span>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-wrap:wrap;gap:14px 26px">
+      <div style="min-width:120px"><div class="k">확인 방식</div><div class="v"><span class="badge teal">Ping스캔</span></div></div>
+      <div style="min-width:120px"><div class="k">최초 확인</div><div class="v mono" style="font-size:12.5px">2026-10-23 09:12</div></div>
+      <div style="min-width:120px"><div class="k">마지막 확인</div><div class="v mono" style="font-size:12.5px">2026-11-13 07:05</div></div>
+      <div style="min-width:120px"><div class="k">총 사용 기간</div><div class="v">20일 21시간</div></div>
+      <div style="min-width:120px"><div class="k">총 미사용 기간</div><div class="v">0분</div></div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <span class="k">사용 이력</span>
+      <div style="border:1px solid #243049;border-radius:10px;overflow:hidden">
+        <table>
+          <thead><tr><th>시각</th><th>변화</th><th>호스트명</th></tr></thead>
+          <tbody>
+            <tr>
+              <td class="mono" style="white-space:nowrap;font-size:12px">2026-11-02 14:30</td>
+              <td style="white-space:nowrap"><span class="badge amber new" style="outline-offset:2px">이름 변경</span></td>
+              <td><span class="badge purple">NetBIOS</span> FS-OLD → <b>NAS-BACKUP</b></td>
+            </tr>
+            <tr>
+              <td class="mono" style="white-space:nowrap;font-size:12px">2026-10-23 09:12</td>
+              <td style="white-space:nowrap"><span class="badge green">사용 시작</span></td>
+              <td>fs-old.corp.example <span class="badge blue">역DNS</span> · FS-OLD <span class="badge purple">NetBIOS</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="muted" style="font-size:12px">‘이름 변경’ 은 같은 방식이 전과 다른 이름을 답했을 때만 적습니다(응답이 없던 스캔은 이름 변경이 아닙니다).</div>
+    </div>
+
+    <div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end">
+      <button class="btn">IP 관리상태 편집</button>
+      <button class="btn primary" style="padding:8px 16px">닫기</button>
+    </div>
+  </div>
+
+  <div class="muted" style="width:640px;margin-top:14px;font-size:12px;line-height:1.7">
+    지금은 스캔 IP 를 누르면 ‘이 IP에 연결된 자원 상세를 열 수 없습니다’ 만 나옵니다(보드 ⓪). 이 창은 이미 있는 ‘IP 사용 이력’ 창에 청록 표시 두 곳(호스트명 묶음 · 이름 변경 줄)을 더한 것입니다. 주소 · 이름 · 시각은 가상입니다.
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":700,"height":1000}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

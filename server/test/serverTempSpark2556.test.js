@@ -5,7 +5,7 @@
  * 메트릭 선택은 순수 함수로, 라우트 계약은 **실제 express 앱에 마운트해 상태코드·본문으로**
  * 본다(소스 grep 이 아니다 — v2.506 이 그 실수를 했다. authzGates2536 과 같은 하니스).
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -13,6 +13,13 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { sparkMetricFor, sparkMetricFallback } from '../src/tools/serverTemp.js';
+
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
@@ -44,7 +51,7 @@ test('흡기 계열이 비었을 때의 대체는 최고 센서 하나뿐', () =
 
 /** 실제 라우터를 띄워 POST 한다. viewerScope 가 있으면 그 범위의 계정으로 요청한다. */
 function postSpark(body, { scope = null } = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tempspark2556-'));
+  const dir = tmpDir('tempspark2556-');
   const script = `
     const express = (await import('express')).default;
     const { api } = await import(${JSON.stringify(path.join(SRC, 'routes/api.js'))});

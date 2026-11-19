@@ -16,12 +16,19 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+test.after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 /*
  * ⚠ 저장소 `server/config` 오염 방지 — **모듈 import 전에** CONFIG_DIR 을 고정한다.
  *   `config.js` 의 `dbDir` 은 모듈 로드 시 확정되므로 정적 import 로는 늦다(v2.552 자체 검증에서
  *   실제로 `config/link-check.db` 가 생기고 이전 실행의 행이 남아 테스트가 깨졌다).
  */
-process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'linkcheck-test-'));
+process.env.CONFIG_DIR = tmpDir('linkcheck-test-');
 
 const { buildLinks, edgePairs, parseTarget, linkIdOf, publicLink, LINK_KINDS, CENTRAL_KINDS, EDGE_KINDS } = await import('../src/linkcheck/links.js');
 const { judge, failKindOfCode, summaryText, fixHint, slowestPhase, PHASES, FAIL_KINDS } = await import('../src/linkcheck/phases.js');

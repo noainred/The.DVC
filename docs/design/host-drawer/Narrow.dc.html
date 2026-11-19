@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>호스트 드로어 — 400px 전체 화면 시트</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#111726;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.muted{color:#8b9bb4}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.btn.icon{width:44px;height:44px;padding:0;font-size:18px}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap;flex:none}
+.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}.tag.crit{background:rgba(239,68,68,.16);color:#fca5a5}.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;flex:none}
+.sheet{width:400px;min-height:1640px;box-sizing:border-box;background:#111726;display:flex;flex-direction:column;min-width:0}
+.dh{padding:12px 14px 10px;border-bottom:1px solid #1f2a40;display:flex;flex-direction:column;gap:8px}
+.dh .ttl{display:flex;align-items:center;gap:6px;min-width:0}
+.dh h2{margin:0;font-size:16px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1 1 auto;min-width:0}
+.badges{display:flex;flex-wrap:wrap;gap:6px}
+.crumb{font-size:12px;color:#8b9bb4;display:flex;flex-wrap:wrap;gap:4px 6px;align-items:center}
+.acts{display:grid;grid-template-columns:repeat(2, minmax(0, 1fr));gap:6px;padding:10px 14px;border-bottom:1px solid #1f2a40;background:#141b2d}
+.acts .wide{grid-column:1 / -1}
+.body{flex:1;padding:12px 14px 16px;display:flex;flex-direction:column;gap:16px;min-width:0}
+.sec{display:flex;flex-direction:column;gap:8px;min-width:0}
+.sh{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+.sh h3{margin:0;font-size:12.5px;font-weight:700;color:#8b9bb4}
+.sh h3 b{color:#e6edf6}
+.sh a{font-size:12px;text-decoration:underline;white-space:nowrap}
+.tiles{display:grid;grid-template-columns:repeat(2, minmax(0, 1fr));gap:8px}
+.tile{background:#141b2d;border:1px solid #243049;border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.tile .lb{font-size:11px;color:#8b9bb4;font-weight:600}
+.tile .v{font-size:20px;font-weight:800;line-height:1}
+.tile .v small{font-size:11px;color:#8b9bb4;font-weight:600;margin-left:2px}
+.tile .s{font-size:11px;color:#8b9bb4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.spark{height:26px;width:100%}
+.rows{display:flex;flex-direction:column;gap:6px}
+.row{display:flex;align-items:flex-start;gap:10px;padding:9px 12px;background:#141b2d;border:1px solid #243049;border-radius:10px;min-width:0}
+.row .t{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.row .t b{font-size:12.5px}
+.row .t span{font-size:11.5px;color:#8b9bb4}
+.kv{display:grid;grid-template-columns:minmax(0, 1fr);background:#141b2d;border:1px solid #243049;border-radius:10px;padding:2px 12px}
+.kv div{display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid #1f2a40;font-size:12.5px;min-width:0}
+.kv div.last{border-bottom:0}
+.kv span{color:#8b9bb4;flex:none}
+.kv b{font-weight:600;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.fold{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 6px 6px 12px;background:#141b2d;border:1px solid #243049;border-radius:10px;font-size:12px;color:#8b9bb4}
+.fold span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.df{padding:10px 14px;border-top:1px solid #1f2a40;background:#141b2d;display:flex;flex-wrap:wrap;gap:8px 12px;font-size:12.5px;align-items:center}
+.df a{text-decoration:none;padding:6px 0}
+</style>
+</helmet>
+
+<aside class="sheet" aria-label="호스트 상세 — esx-kr1-02.kr.dvc.example">
+  <div class="dh">
+    <div class="ttl">
+      <span class="dot" style="background:#22c55e" title="연결됨"></span>
+      <h2>esx-kr1-02.kr.dvc.example</h2>
+      <button class="btn icon" type="button" aria-label="이전 호스트">‹</button>
+      <button class="btn icon" type="button" aria-label="다음 호스트">›</button>
+      <button class="btn icon" type="button" aria-label="닫기">×</button>
+    </div>
+    <div class="badges"><span class="tag crit">CPU 99%</span><span class="tag crit">쓰는 스위치의 업링크 끊김</span><span class="tag warn">Veeam 최근 백업 없는 VM</span><span class="tag warn">구성·보안 주의 2 · 참고 2</span></div>
+    <div class="crumb">
+      <span class="tag ok">정상</span><span class="tag ok">전원 On</span><a href="#">VC-KR1</a><span>›</span><span>Cluster-A</span><span>·</span><span>ESXi 8.0.3</span><span>·</span><span class="mono">2/20</span>
+    </div>
+  </div>
+  <div class="acts">
+    <a href="#" class="btn primary wide">⤢ 개체 보기</a>
+    <button class="btn" type="button">VM 14대 보기</button>
+    <a href="#" class="btn">성능 그래프 보기</a>
+    <a href="#" class="btn">통합 성능 모니터링</a>
+    <a href="#" class="btn">전체 페이지 상세</a>
+  </div>
+
+  <div class="body">
+    <section class="sec">
+      <div class="sh"><h3>한눈에 · 24시간 추이는 열 때 1회</h3></div>
+      <div class="tiles">
+        <div class="tile"><span class="lb">CPU</span><span class="v mono" style="color:#fca5a5">99<small>%</small></span>
+          <svg class="spark" viewBox="0 0 100 26" preserveAspectRatio="none" aria-hidden="true"><polyline fill="none" stroke="#ef4444" stroke-width="1.5" points="0,17 10,15 20,16 30,11 40,12 50,8 60,9 70,5 80,4 90,3 100,2"></polyline></svg>
+          <span class="s">32코어 · 76.0 / 76.8 GHz</span></div>
+        <div class="tile"><span class="lb">메모리</span><span class="v mono" style="color:#86efac">59<small>%</small></span>
+          <svg class="spark" viewBox="0 0 100 26" preserveAspectRatio="none" aria-hidden="true"><polyline fill="none" stroke="#a855f7" stroke-width="1.5" points="0,13 10,13 20,12 30,12 40,13 50,12 60,11 70,12 80,11 90,11 100,11"></polyline></svg>
+          <span class="s">151 / 256 GB</span></div>
+        <div class="tile"><span class="lb">VM</span><span class="v mono">14<small>대</small></span>
+          <span class="s">켜짐 12 · 꺼짐 2</span>
+          <span class="s">vCPU:코어 1.6 : 1</span></div>
+        <div class="tile"><span class="lb">전력 · 온도</span><span class="v mono">458<small>W</small></span>
+          <span class="s">iDRAC 실측</span>
+          <span class="s">36.9°C · 최고 67.8°C</span></div>
+      </div>
+    </section>
+
+    <section class="sec">
+      <div class="sh"><h3>신호 3 — 봐야 할 것</h3><a href="#">모니터</a></div>
+      <div class="rows">
+        <div class="row"><span class="dot" style="background:#ef4444;margin-top:4px"></span><div class="t"><b>CPU 90% 초과</b><span>CPU 99% · 76,032 / 76,800 MHz</span><span>서버 경보와 같은 임계값입니다.</span></div></div>
+        <div class="row"><span class="dot" style="background:#ef4444;margin-top:4px"></span><div class="t"><b>쓰는 스위치의 업링크 끊김</b><span>DSwitch-Prod · vmnic3 링크 내려감 (업링크 2개 중 1개)</span><span>남은 업링크가 끊기면 통신이 끊깁니다.</span></div></div>
+        <div class="row"><span class="dot" style="background:#f59e0b;margin-top:4px"></span><div class="t"><b>Veeam 최근 백업 없는 VM</b><span>VM 14대 중 4대 · 있음 9 · 확인 불가 1</span></div></div>
+      </div>
+    </section>
+
+    <section class="sec">
+      <div class="sh"><h3>하드웨어 · 배치</h3></div>
+      <div class="kv">
+        <div><span>제조사 / 모델</span><b>Dell Inc. / PowerEdge R760</b></div>
+        <div><span>서비스 태그</span><b class="mono">7XK2M93</b></div>
+        <div><span>ESXi</span><b>8.0.3 (build 24022510)</b></div>
+        <div><span>업타임</span><b>2일 · 부팅 11-09 06:05</b></div>
+        <div><span>CPU</span><b>2소켓 · 32코어 / 64스레드</b></div>
+        <div><span>CPU 모델</span><b>AMD EPYC 9354 32-Core Processor</b></div>
+        <div><span>메모리</span><b>256 GB · 사용 151 GB</b></div>
+        <div><span>물리 NIC</span><b>4개 · 링크 끊김 1</b></div>
+        <div><span>스토리지 경로</span><b>LUN 14 · 경로 48 · 죽은 경로 0</b></div>
+        <div><span>HBA / GPU</span><b>2개 / 1개</b></div>
+        <div><span>클러스터</span><b>Cluster-A</b></div>
+        <div><span>vCenter</span><b>VC-KR1 · DC-KR1</b></div>
+        <div class="last"><span>vCenter ID</span><b class="mono">vc-kr1:host-1042</b></div>
+      </div>
+    </section>
+
+    <section class="sec">
+      <div class="sh"><h3>구성 · 보안 — 확인할 항목 <b>4</b></h3><a href="#">구성</a></div>
+      <div class="rows">
+        <div class="row"><span class="tag warn">주의</span><div class="t"><b>시간 동기화(NTP)가 설정되지 않았거나 멈춰 있습니다</b><span>NTP 서버를 지정하고 ntpd 를 켜세요 · NTP 서버 없음</span></div></div>
+        <div class="row"><span class="tag warn">주의</span><div class="t"><b>링크가 내려간 업링크가 있습니다</b><span>DSwitch-Prod/vmnic3</span></div></div>
+        <div class="row"><span class="tag gray">참고</span><div class="t"><b>잠금 모드(lockdown)가 꺼져 있습니다</b></div></div>
+        <div class="row"><span class="tag gray">참고</span><div class="t"><b>ESXi Shell 시간 제한이 없습니다</b></div></div>
+      </div>
+      <div class="fold"><span>읽은 값 25개 · 3시간 전</span><button class="btn" type="button" aria-expanded="false">펼치기 ▾</button></div>
+    </section>
+
+    <section class="sec">
+      <div class="sh"><h3>이어지는 섹션</h3></div>
+      <div class="kv">
+        <div><span>CPU 경합 · 디스크 지연</span><b>Ready 1.3% · 지연 6 ms</b></div>
+        <div><span>클러스터 — Cluster-A</span><b>HA 켜짐 · DRS 완전 자동</b></div>
+        <div><span>스토리지 어댑터(HBA)</span><b>2 · 표는 가로 스크롤 상자</b></div>
+        <div><span>GPU</span><b>1 · 사용률 25%</b></div>
+        <div class="last"><span>서버 소비전력(iDRAC)</span><b>458 W</b></div>
+      </div>
+      <div class="muted" style="font-size:11px;line-height:1.5">이 시안에서는 줄여 그렸습니다 — 실제로는 ② 와 같은 섹션이 한 열로 이어집니다.</div>
+    </section>
+  </div>
+
+  <div class="df">
+    <span class="muted">개체 보기:</span>
+    <a href="#">요약</a><a href="#">모니터</a><a href="#">구성</a><a href="#">사용 권한</a><a href="#">VM</a><a href="#">리소스 풀</a><a href="#">데이터스토어</a><a href="#">네트워크</a><a href="#">업데이트</a>
+  </div>
+</aside>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":400,"height":1640}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

@@ -1,12 +1,19 @@
 // v2.719 감사 그룹 E — VM 가용성 정직성(B1-01·02·03·08) · 스냅샷 정책 알림 요약 상한(B1-05) · 경합 측정 시각(B1-06) ·
 // 이전 준비도 Tools 판정(B1-07) · 운영 이벤트 조각 읽기(S1-04) · VM 변경 이력 entity 인덱스(S1-05) · VM DNS 메모리 기준 정리(S1-06).
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2719e-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const TMP = tmpDir('audit2719e-');
 process.env.CONFIG_DIR = TMP;
 process.env.DATA_SOURCE = 'live';   // VM DNS 데모 이력 채우기가 끼어들지 않게
 delete process.env.VMDNS_HISTORY_RETENTION_DAYS;

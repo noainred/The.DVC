@@ -296,6 +296,7 @@ test('④ 지문 읽기: openssl 출력 파싱 · IP 는 SNI 없음 · 못 읽�
   const r = await A.readFdThumbprint({ vcenterId: 'vc-a', host: '10.20.30.41', password: SSH_PW });
   assert.equal(r.thumbprint, '56F597FE60521773D073A2ED47CE07282CE6FE9C');
   assert.match(srv.st.cmds.at(-1), /-connect vc-a\.corp:443 -servername vc-a\.corp </);
+  (await import('../src/bareos/settings.js'))._seedLegacySitesForTest([{ vcenterId: 'vc-a', directorId: DIR, vcserver: 'vc-a.corp', client: 'kr-fd', storage: 'kr-sd', pool: 'VMwareKR', configFile: '/etc/bareos/vmware/vc-a.ini' }, { vcenterId: 'vc-b', directorId: DIR, vcserver: '10.1.1.1', client: 'pl-fd', storage: 'pl-sd', pool: 'P', configFile: '/etc/bareos/vmware/vc-b.ini' }]);   // 52회차 D1: 옛 설정(Director 하나에 vCenter 여럿 — 업그레이드 전 파일)으로 준비 · 이 시험은 한 Director 로 여러 vCenter 흐름을 본다
   S.saveSettings({ sites: [{ vcenterId: 'vc-a', directorId: DIR, vcserver: 'vc-a.corp', client: 'kr-fd', storage: 'kr-sd', pool: 'VMwareKR', configFile: '/etc/bareos/vmware/vc-a.ini' }, { vcenterId: 'vc-b', directorId: DIR, vcserver: '10.1.1.1', client: 'pl-fd', storage: 'pl-sd', pool: 'P', configFile: '/etc/bareos/vmware/vc-b.ini' }] });
   await A.readFdThumbprint({ vcenterId: 'vc-b', host: '10.20.30.41', password: SSH_PW });
   assert.match(srv.st.cmds.at(-1), /-connect 10\.1\.1\.1:443 </);

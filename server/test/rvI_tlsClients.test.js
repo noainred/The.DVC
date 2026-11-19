@@ -16,10 +16,17 @@ import https from 'node:https';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const FX = path.join(HERE, 'fixtures', 'rvI-tls');
 const pem = (n) => fs.readFileSync(path.join(FX, n));
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'rvI-tlscl-'));
+const TMP = tmpDir('rvI-tlscl-');
 process.env.CONFIG_DIR = TMP;
 process.env.SSRF_ALLOW_LOOPBACK = 'true';   // 가짜 장비가 127.0.0.1 이다(등록부·baseUrlOf 의 정적 SSRF 검사 통과용)
 for (const k of ['TLS_PEER_POLICY', 'VC_TLS_REJECT_UNAUTHORIZED', 'HORIZON_TLS_VERIFY', 'STORAGE_TLS_VERIFY', 'SANSWITCH_TLS_VERIFY', 'NSX_TLS_REJECT_UNAUTHORIZED']) delete process.env[k];
@@ -216,7 +223,7 @@ test('상태 — 수집기별 판정 모드가 등록되고 예외는 없다(기
 });
 
 test('예외 env(=false)는 그 수집기에만 — 다른 수집기·업그레이드·중앙↔엣지 TLS 는 그대로(별도 프로세스)', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rvI-tlsexc-'));
+  const tmp = tmpDir('rvI-tlsexc-');
   const script = `
     import https from 'node:https'; import fs from 'node:fs';
     const FX = ${JSON.stringify(FX)};

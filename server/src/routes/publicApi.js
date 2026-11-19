@@ -28,11 +28,15 @@ import path from 'node:path';
 import { endpointAllowed, project, projectAll, ENDPOINTS, GROUPS } from '../publicapi/allowlist.js';
 import { buildOpenApi } from '../publicapi/openapi.js';
 import { numOrNull } from '../util/numOrNull.js';
+import { vmSumsOf } from '../vcenter/vmSums.js'; // v3.19.2 — VM 할당 합(vmVcpu · vmRamMB)의 '못 읽음' 판정은 내부 /summary 와 같은 코어
 import { clusterCountOf } from '../clustercfg/analyze.js'; // v2.743 LEFT-07 — 내부 /summary 와 같은 클러스터 개수
-import { msOrNull } from '../publicapi/time.js';
+import { msOrNull, vcCollectedAtOf, isMaintenanceVc } from '../publicapi/time.js';
+import { unreadVcenterReasons } from '../metrics/unreadVcenters.js';   // 126회차: '지금 값이 아닌 vCenter' 공용 판정(지표 샘플러 · 알림 · /metrics 와 한 벌)
 import { isAdminReq, addressMatcher, extendMatcher, maskedNameLabel } from '../auth/addressMask.js';
 
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
+import { newRid } from '../perf/requestId.js';   // 결정(56~75) 67 ①: 500 응답의 요청 id(index.js 가 붙이지 않은 경로 — 시험 mount 등)
+import { deviceContextOf, buildListCore, runCheck } from '../sanswitch/storagePerfCore.js';   // v2.953 — SAN 스토리지 성능 판정 코어(화면 · 알림 · 보고서와 같은 함수)
 export const API_VERSION = 'v1';
 /** 목록 응답 상한 — 넘치면 `meta.truncated`·`meta.omitted` 로 **밝힌다**. */
 const LIST_MAX = 5000;
@@ -105,6 +109,19 @@ async function storageNameMasker() {
   };
 }
 
+/**
+ * 126회차(공통 스윕 — 수집이 멈춘 vCenter 의 마지막 값): 범위 안에서 **지금 값이 아닌** vCenter 의 표지(meta 조각).
+ *   store 는 수집이 멈춘 vCenter(점검중 · 수집 실패 이월 · 담당 엣지의 보고 끊김)의 마지막 인벤토리를 계속 서빙한다 — 그 데이터스토어 용량 · 경보 · 합계가
+ *   이 응답에 그대로 실린다. 예전에는 그 사실이 `/inventory/vcenters` · `/inventory/collection` 에만 있어 용량 · 경보만 읽는 소비자는 알 길이 없었고,
+ *   점검중 vCenter 는 그 두 경로에도 '낡았다' 는 표지가 없었다. 판정은 공용 `metrics/unreadVcenters.js`(사본 금지). 인벤토리가 비어 행이 없는
+ *   vCenter(장기 장애 · 첫 캐시 없음)도 여기 든다 — 행이 없는 것은 '0 개' 가 아니다.
+ */
+function notCurrentMetaOf(snap, inScope) {
+  const ids = [...unreadVcenterReasons(snap).keys()].filter((id) => inScope(id));
+  return { notCurrentVcenters: ids.length, notCurrentVcenterIds: ids };
+}
+const NOT_CURRENT_NOTE = (n) => (n ? ` 수집이 멈춘 vCenter ${n}곳(점검중 · 접속 실패 · 엣지 보고 끊김 — notCurrentVcenterIds)의 값은 마지막으로 읽은 값이고 지금 값이 아닙니다(행이 없으면 0 이 아니라 모르는 것입니다).` : '');
+
 /** 상한 적용 + 잘린 사실 표기. */
 function capped(rows) {
   const all = Array.isArray(rows) ? rows : [];
@@ -116,6 +133,20 @@ function capped(rows) {
  * 허용 목록 게이트 + 스냅샷·범위 준비.
  * ⚠ 게이트를 핸들러마다 손으로 쓰면 한 곳을 빠뜨린다 — 이 래퍼를 반드시 쓸 것.
  */
+/** 결정(56~75 남긴 것) 67 ①: 공개 API 500 의 외부 문구(원문 없음 — 요청 id 로 서버 로그와 대조). */
+export const publicInternalReason = (rid) => `내부 오류 — 요청 id ${String(rid || '').slice(0, 64) || '—'}(포탈 관리자에게 이 id 와 시각을 알려 주세요).`;
+
+/**
+ * 120회차(114 F7 반증 — 재현): 범위 키의 vCenter 가 **전부** 등록돼 있지 않은가(scope-empty) — 게이트(guarded)와 자기점검(GET /)이 같은 판정을 쓴다.
+ *   114회차는 자기점검의 allowed 를 endpointAllowed 하나로 맞췄지만 게이트에는 403 이 하나 더 있었다(scope-empty) — 그 키의 자기점검은 여전히
+ *   allowed:true 인데 실제 호출은 전부 403 이었다. 존재 여부를 모르면(unknown == null) 비었다고 하지 않는다(게이트와 같게).
+ * @param {Set<string>} allowed  범위 vCenter id(null 이 아닌 것만 넘긴다)
+ */
+function scopeUnknownOf(allowed, snap) {
+  const unknown = unknownScopeVcenters([...allowed], knownVcenterIdsNow(snap));
+  return { unknown, empty: !!(unknown && allowed.size > 0 && unknown.length === allowed.size) };
+}
+
 function guarded(apiPath, handler) {
   return (req, res) => {
     const gate = endpointAllowed(req.apiKey, apiPath);
@@ -140,8 +171,8 @@ function guarded(apiPath, handler) {
      *   개수를 밝힌다. 존재 여부를 **모르면**(등록부·스냅샷 둘 다 못 읽음) 거절하지 않는다.
      */
     if (allowed != null) {
-      const unknown = unknownScopeVcenters([...allowed], knownVcenterIdsNow(snap));
-      if (unknown && allowed.size > 0 && unknown.length === allowed.size) {
+      const { unknown, empty } = scopeUnknownOf(allowed, snap);   // 120회차: 자기점검(GET /)과 같은 판정 하나
+      if (empty) {
         return res.status(403).json({ ok: false, error: 'scope-empty', code: 'scope-empty', endpoint: apiPath,
           reason: `이 키의 범위 vCenter ${unknown.length}곳이 전부 등록돼 있지 않습니다(삭제됐거나 id 가 틀렸습니다) — 설정 › 연동 키에서 범위를 고쳐야 합니다.` });
       }
@@ -156,9 +187,15 @@ function guarded(apiPath, handler) {
     Promise.resolve()
       .then(() => handler({ req, res, snap, inScope, fields, scopeMeta, apiPath }))
       .catch((e) => {
+        /*
+         * 결정(56~75 남긴 것) 67 ①: 외부 포탈로 나가는 reason 에 내부 예외 원문(SQLite · TypeError 문구 — 최대 200자)을 싣지 않는다.
+         *   일반 문구 + 요청 id(응답 requestId · X-Request-Id 헤더 — index.js 가 /api 요청마다 붙인다)만 주고, 원문은 서버 로그에만 남겨 요청 id 로 대조한다.
+         */
+        const rid = String(req.reqId || '') || newRid();
+        try { console.error(`[public-api] 500 ${apiPath} 요청 id ${rid} 키 ${String(req.apiKey?.fp || '').slice(0, 16) || '—'}: ${e?.stack || e}`); } catch { /* 로깅 실패가 응답을 막지 않게 */ }
         if (res.headersSent) return;   // 이미 보낸 뒤의 오류는 덮어쓰지 않는다
-        res.status(500).json({ ok: false, error: 'internal', code: 'internal',
-          reason: String(e?.message || e).slice(0, 200) });
+        res.status(500).json({ ok: false, error: 'internal', code: 'internal', requestId: rid,
+          reason: publicInternalReason(rid) });
       });
   };
 }
@@ -170,11 +207,23 @@ v1.use(apiKeyAuth());
 /** 이 키로 무엇을 쓸 수 있는지 — 상대 포탈이 스스로 확인하는 자기점검 경로. */
 v1.get('/', (req, res) => {
   const mine = new Set(req.apiKey?.groups || []);
+  // 120회차(재현): 범위의 vCenter 가 전부 등록돼 있지 않은 키는 게이트가 모든 경로를 403 scope-empty 로 거절한다 — 자기점검도 그렇게 말한다.
+  //   첫 수집 전(snap 없음 — 게이트는 503 not-collected)에는 판정하지 않는다.
+  const snap = store.get();
+  const scope = snap ? scopedVcenterIds(req.user, snap) : null;
+  const scopeEmpty = scope != null && scopeUnknownOf(scope, snap).empty;
   envelope(res, '/', {
     key: { name: req.apiKey?.name || '', groups: [...mine], fp: req.apiKey?.fp || '', expiresAt: req.apiKey?.expiresAt ?? null },
     groups: GROUPS.map((g) => ({ ...g, allowed: mine.has(g.key) })),
-    endpoints: ENDPOINTS.map((e) => ({ path: e.path, method: e.method, group: e.group, summary: e.summary, fields: e.fields, allowed: mine.has(e.group) })),
-  }, { note: 'allowed:false 인 항목은 이 키로 403 입니다 — 설정 › 연동 키에서 분류를 켜야 합니다.' });
+    // 114회차(110 추정 4 — 재현): 경로의 allowed 는 실제 게이트와 **같은 판정 하나**(endpointAllowed)로 낸다. 예전에는 분류만 봐서(mine.has) 범위를 지정한 키에
+    //   전체 범위 전용 경로(requiresFullScope — 스토리지 · 부품 장애 · SAN)가 allowed:true 로 나갔다 — 실제 호출은 403 needs-full-scope 인데 아래 문구는
+    //   'allowed:false 가 403' 이라고 했다(자기점검이 틀린 답). 안 되는 까닭은 deniedBy 에 싣는다(조치가 다르다 — 분류 켜기 / 범위 없는 키).
+    endpoints: ENDPOINTS.map((e) => {
+      const gate = endpointAllowed(req.apiKey, e.path);
+      const code = gate.ok ? (scopeEmpty ? 'scope-empty' : null) : gate.code;   // 게이트의 순서 그대로(분류 · 전체 범위 전용 → 범위가 빔)
+      return { path: e.path, method: e.method, group: e.group, summary: e.summary, fields: e.fields, allowed: !code, ...(code ? { deniedBy: code } : {}) };
+    }),
+  }, { note: 'allowed:false 인 항목은 이 키로 403 입니다 — deniedBy 가 까닭입니다(group-denied · no-groups = 설정 › 연동 키에서 분류를 켜야 합니다 · needs-full-scope = vCenter 범위를 지정한 키로는 조회할 수 없는 자원입니다 — 범위 없는 키가 필요합니다 · scope-empty = 이 키의 범위 vCenter 가 전부 등록돼 있지 않습니다 — 설정 › 연동 키에서 범위를 고쳐야 합니다).' });
 });
 
 /** OpenAPI 3.1 — 이 키가 쓸 수 있는 것만 담는다(없는 경로를 문서로 알려주지 않는다). */
@@ -184,6 +233,19 @@ v1.get('/openapi.json', (req, res) => {
 });
 
 /* ── inventory ────────────────────────────────────────────────────────────── */
+
+/**
+ * v3.19.2: /inventory/summary 의 VM 할당 합 — 내부 /summary 와 같은 판정 코어(vcenter/vmSums.js · 템플릿 포함).
+ * 못 읽은 cpuCount · memMB(null · '')는 0 으로 더하지 않고 센다: 합은 읽은 VM 만(값 · 타입은 예전 그대로 — 수),
+ * 못 읽어 뺀 VM 수는 vmVcpuUnknown · vmRamUnknown(vmStorageUnknown 과 같은 규약).
+ * ⚠ VM 을 하나도 못 읽었을 때 내부 /summary 는 null 을 주지만 여기는 계약(수)을 지켜 0 이다 — 소비자는
+ *   vmVcpuUnknown === vms 로 '모름' 을 가린다(docs/API-PUBLIC.md).
+ * ⚠ 핸들러 밖에 둔 이유: scripts/api-doc.mjs 스캐너는 guarded(...) 인자를 3000자까지만 읽는다 — 핸들러 본문에 긴 주석을 더하면 문서 생성이 실패한다.
+ */
+function vmAllocFields(vms) {
+  const s = vmSumsOf(vms, { includeTemplates: true });
+  return { vmVcpu: s.vcpu, vmRamMB: s.memMB, vmVcpuUnknown: s.vcpuUnknown, vmRamUnknown: s.memUnknown };
+}
 
 v1.get('/inventory/summary', guarded('/inventory/summary', ({ res, snap, inScope, fields, scopeMeta, apiPath }) => {
   const vcs = (snap.vcenters || []).filter((v) => inScope(v.id));
@@ -222,14 +284,15 @@ v1.get('/inventory/summary', guarded('/inventory/summary', ({ res, snap, inScope
     storageUsedGB: sum(dssR, dsUsedOf),
     storageCapacityAllGB: sum(dss, (d) => d.capacityGB),
     datastoresUsageUnknown: dss.filter(dsUsageUnknownOf).length,
-    vmVcpu: sum(vms, (v) => v.cpuCount),
-    vmRamMB: sum(vms, (v) => v.memMB),
+    ...vmAllocFields(vms),   // v3.19.2: vmVcpu · vmRamMB(읽은 VM 만) + vmVcpuUnknown · vmRamUnknown
     // v2.727(감사 C-01): storageGB 는 v2.719 부터 못 읽으면 null — 합은 읽은 VM 만이고(sum 이 null 을 건너뛴다) 뺀 수를
     //   vmStorageUnknown 으로 밝힌다(내부 /summary allocation.vmStorageUnknown · datastoresUsageUnknown 과 같은 규약).
     vmProvisionedGB: sum(vms, (v) => v.storageGB),
     vmStorageUnknown: vms.filter((v) => numOrNull(v.storageGB) == null).length,
   };
-  return envelope(res, apiPath, project(row, fields), { ...scopeMeta, collectedAt: msOrNull(snap.generatedAt) });
+  // 126회차: 합계에는 수집이 멈춘 vCenter 의 마지막 값이 섞여 있다(내부 /summary 와 같은 합 — 값은 그대로 두고 표지만 싣는다).
+  const nc = notCurrentMetaOf(snap, inScope);
+  return envelope(res, apiPath, project(row, fields), { ...scopeMeta, collectedAt: msOrNull(snap.generatedAt), ...nc, ...(nc.notCurrentVcenters ? { note: NOT_CURRENT_NOTE(nc.notCurrentVcenters).trim() } : {}) });
 }));
 
 /**
@@ -241,19 +304,9 @@ v1.get('/inventory/summary', guarded('/inventory/summary', ({ res, snap, inScope
  * 3일 전에 멈춘 vCenter 도 '방금 수집' 으로 나갔다(문서는 'generatedAt 과 collectedAt 의 차이가 데이터의 나이' 라고 안내한다).
  * ⚠ `snap.generatedAt` 은 ISO 문자열이다(`store.js`) — msOrNull 로 epoch ms 로 통일한다.
  */
-// v2.771(R6-F3-5): export 는 회귀 테스트(audit2771e)가 직접 부르기 위해서다.
-export function vcCollectedAtOf(v, snap) {
-  // v2.771(점검 R6-F3-5): 엣지가 자기 수집 실패로 lastGood 을 이월해 보낸 항목(unreachable + staleSince)은 받은 시각이 아니라
-  //   그 값의 시각이다 — receivedAt 만 보면 최대 6시간 묵은 값이 '방금' 으로 나갔다(직접 수집 이월은 staleSince 를 쓰는데 비대칭).
-  //   엣지 시각은 수신 시각을 넘지 못한다(min — store 병합이 이미 자르지만 여기서도 자른다).
-  if (v?.collectSource === 'site') {
-    const rcv = msOrNull(v.receivedAt);
-    const since = v.status === 'unreachable' ? msOrNull(v.staleSince) : null;
-    return rcv != null && since != null && since > 0 ? Math.min(rcv, since) : rcv;
-  }
-  if (v?.stale === true && v.staleSince != null) return msOrNull(v.staleSince);
-  return msOrNull(v?.collectedAt ?? snap.generatedAt);
-}
+// v2.771(R6-F3-5): export 는 회귀 테스트(audit2771e)가 직접 부르기 위해서다. 130회차: 본체는 publicapi/time.js 로 옮겼다 — VM 내보내기(vcenter/vmExport.js)가
+//   같은 판정으로 '인벤토리를 읽은 시각' 을 말해야 하는데 도메인은 routes/ 를 import 할 수 없다(arch2579 ①). 판정은 그 파일 하나다(사본 금지).
+export { vcCollectedAtOf };
 
 v1.get('/inventory/vcenters', guarded('/inventory/vcenters', ({ res, snap, inScope, fields, scopeMeta, apiPath }) => {
   const rows = (snap.vcenters || []).filter((v) => inScope(v.id)).map((v) => {
@@ -268,7 +321,8 @@ v1.get('/inventory/vcenters', guarded('/inventory/vcenters', ({ res, snap, inSco
       collectedAt: vcCollectedAtOf(v, snap),
       // v2.732(B2-01): 이 행의 값이 낡았는가 — 담당 엣지의 push 가 기준 시간을 넘긴 위임 vCenter(status 는 엣지가 마지막으로
       //   보낸 값 그대로) 또는 접속 실패로 마지막 정상 값을 이월 중인 vCenter(status unreachable).
-      stale: v.stale === true,
+      // 126회차: 점검중도 직전 캐시(지금 값이 아니다) — 상태만으로는 소비자가 '값이 얼어 있다' 를 알 수 없었다.
+      stale: v.stale === true || isMaintenanceVc(v),
     };
   });
   const c = capped(rows);
@@ -276,7 +330,7 @@ v1.get('/inventory/vcenters', guarded('/inventory/vcenters', ({ res, snap, inSco
   const alarmsUnknownCount = rows.filter((r) => r.alarms == null).length;
   return envelope(res, apiPath, projectAll(c.rows, fields), {
     ...scopeMeta, ...c.meta, staleCount, alarmsUnknownCount,
-    note: 'stale:true 인 행은 지금 값이 아닙니다 — collectedAt 이 그 값을 받은 시각입니다. alarms:null 은 경보를 조회하지 않은 vCenter(0 건이 아닙니다).',
+    note: 'stale:true 인 행은 지금 값이 아닙니다 — collectedAt 이 그 값을 받은 시각입니다(점검중이라 그 시각을 모르면 null). alarms:null 은 경보를 조회하지 않은 vCenter(0 건이 아닙니다).',
   });
 }));
 
@@ -325,7 +379,8 @@ v1.get('/capacity/datastores', guarded('/capacity/datastores', ({ res, snap, inS
     };
   });
   const c = capped(rows);
-  return envelope(res, apiPath, projectAll(c.rows, fields), { ...scopeMeta, ...c.meta });
+  const nc = notCurrentMetaOf(snap, inScope);   // 126회차: 수집이 멈춘 vCenter 의 용량은 마지막 값이다(행은 그대로 — 표지만)
+  return envelope(res, apiPath, projectAll(c.rows, fields), { ...scopeMeta, ...c.meta, ...nc, ...(nc.notCurrentVcenters ? { note: NOT_CURRENT_NOTE(nc.notCurrentVcenters).trim() } : {}) });
 }));
 
 v1.get('/capacity/storage', guarded('/capacity/storage', async ({ req, res, fields, apiPath }) => {
@@ -511,14 +566,16 @@ v1.get('/faults/alarms', guarded('/faults/alarms', ({ res, snap, inScope, fields
    *   예전에는 meta 가 그 사실을 말하지 않아 외부 포탈이 그 법인을 '경보 없음' 으로 표시했다. 범위 안 vCenter 만 센다.
    */
   const unknownVcIds = (snap.vcenters || []).filter((v) => inScope(v.id) && vcAlarmsUnknown(v)).map((v) => String(v.id));
+  const nc = notCurrentMetaOf(snap, inScope);   // 126회차: 수집이 멈춘 vCenter 의 경보는 마지막으로 읽은 목록이다(새 경보 · 해소를 모른다)
   return envelope(res, apiPath, projectAll(c.rows, fields), {
     ...scopeMeta, ...c.meta, mutedCount: c.rows.filter((r) => r.muted).length,
     alarmsUnknownVcenters: unknownVcIds.length,
     alarmsUnknownVcenterIds: unknownVcIds,
+    ...nc,
     note: '음소거된 알람도 포함하고 muted:true 로 표시합니다 — 목록에서 빼지 않습니다.'
       + (unknownVcIds.length
         ? ` 경보를 조회하지 않은 vCenter ${unknownVcIds.length}곳(REST 폴백 수집)은 목록에 없습니다 — 0 건이 아니라 모르는 것입니다(alarmsUnknownVcenterIds).`
-        : ''),
+        : '') + NOT_CURRENT_NOTE(nc.notCurrentVcenters),
   });
 }));
 
@@ -560,6 +617,37 @@ v1.get('/faults/parts', guarded('/faults/parts', async ({ req, res, fields, apiP
     note: "확인 불가(unknown)·빈 슬롯(absent)은 장애로 세지 않습니다 — state 를 그대로 보세요."
       + (hide ? ' 관리 주소(IP)로 된 장비 식별자는 내부 화면과 같은 불투명 토큰(masked-…)으로 가렸습니다(토큰은 포탈 재시작마다 바뀝니다).' : ''),
   });
+}));
+
+/* ── v2.953 SAN 스토리지 성능 — 법인 축만(vCenter 범위로 나눌 수 없다 → 허용 목록 `requiresFullScope` 가 게이트에서 403 needs-full-scope · 빈 목록을 주지 않는다 — /capacity/storage 와 같은 규약) ── */
+v1.get('/san-storage/arrays', guarded('/san-storage/arrays', async ({ req, res, fields, scopeMeta, apiPath }) => {
+  const ctx = await deviceContextOf({ admin: isAdminReq(req), dcQuery: req.query.datacenterId });
+  const b = await buildListCore(ctx, null);
+  const rows = b.rows.map((r) => ({
+    key: r.key, name: r.name, vendor: r.vendor, serial: r.serial || null, datacenterId: r.datacenterId || null, datacenterName: r.datacenterName || null, state: r.state,
+    nowBps: r.now?.bps ?? null, nowAt: r.now?.ts ?? null, utilPct: r.utilPct ?? null, avg24Bps: r.avg24 ?? null, peak24Bps: r.peak24 ?? null, delta7dPct: r.delta7d ?? null,
+    imbalanceGroup: r.imbalance?.group ?? null, imbalanceRatio: r.imbalance?.ratio ?? null,
+    directors: (r.directors || []).filter((d) => d.parsed).length, ports: r.portCount ?? null, switches: (r.switches || []).length,
+    storageDeviceId: r.capacity?.deviceId ?? null, capacityPct: r.capacity?.pct ?? null, alertsUnresolved: r.capacity?.alerts ?? null,
+    growth30dBytes: r.growth?.bytes30d ?? null, daysToFull: r.growth?.daysToFull ?? null,
+  }));
+  const c = capped(rows);
+  return envelope(res, apiPath, projectAll(c.rows, fields), { ...scopeMeta, ...c.meta, computedAt: b.agg7d?.computedAt ?? null, intervalMs: b.st?.intervalMs ?? null,
+    hostsExcluded: b.counts?.host ?? null, unit: 'bytesPerSec',
+    note: 'nowBps 는 수집 주기 안에서 팹 A/B 표본이 다 모인 마지막 칸(없으면 null — 0 이 아닙니다). growth30dBytes · daysToFull 은 시리얼로 짝 지은 스토리지 장비의 일 롤업(없으면 null).' });
+}));
+v1.get('/san-storage/check', guarded('/san-storage/check', async ({ req, res, fields, scopeMeta, apiPath }) => {
+  const ctx = await deviceContextOf({ admin: isAdminReq(req), dcQuery: req.query.datacenterId });
+  const b = await buildListCore(ctx, null);
+  const r = await runCheck(b, { signal: null });
+  const rows = r.results.map((x) => ({
+    key: x.key, name: x.name, datacenterId: x.datacenterId || null, datacenterName: x.datacenterName || null, overall: x.overall, uncheckedCount: x.uncheckedCount ?? 0,
+    items: Object.fromEntries(Object.entries(x.items || {}).map(([k, v]) => [k, v.status])),
+    arraySideKeys: x.arraySide?.keys || [], arraySideLastSampleAt: x.arraySide?.lastSampleTs ?? null, judgedAt: r.judgedAt,
+  }));
+  const c = capped(rows);
+  return envelope(res, apiPath, projectAll(c.rows, fields), { ...scopeMeta, ...c.meta, summary: r.summary, itemLabels: Object.fromEntries((r.items || []).map((i) => [i.k, i.label])),
+    note: "unknown 은 '확인 불가'(기준 없음 · 표본 없음 · 짝 없음) — 정상이 아닙니다. 항목 상태 ok · warn · bad · unknown · na." });
 }));
 
 /* ── 미선언 경로 ──────────────────────────────────────────────────────────── */

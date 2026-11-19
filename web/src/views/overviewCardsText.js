@@ -53,7 +53,8 @@ export function firstCollectNotice(ov) {
 export function gpuCardValue(g) {
   if (!g) return { value: null, partial: false, unknown: false };
   // v2.683: 오래된 인벤토리의 카드도 합계에 들어간다(사용자 결정 "iDRAC 에 등록된 카드만") — '읽음' 은 인벤토리가 있는 서버 전부.
-  const read = (Number(g.inventoryRead) || 0) + (Number(g.inventoryStale) || 0);
+  // 46회차 I1: GPU 목록(Processors)을 못 읽은 서버는 '읽음' 이 아니다(합계는 최소값)
+  const read = (Number(g.inventoryRead) || 0) + (Number(g.inventoryStale) || 0) - (Number(g.gpuUnread) || 0);
   const servers = Number(g.servers) || 0;
   const unknown = servers > 0 && read === 0;
   const partial = !unknown && read < servers;
@@ -63,8 +64,9 @@ export function gpuCardValue(g) {
 export function gpuCardMeta(g) {
   if (!g) return '';
   const v = gpuCardValue(g);
-  const read = (Number(g.inventoryRead) || 0) + (Number(g.inventoryStale) || 0);
+  const read = (Number(g.inventoryRead) || 0) + (Number(g.inventoryStale) || 0) - (Number(g.gpuUnread) || 0);
   return `iDRAC 인벤토리 카드만 · 수집 ${countText(read)}/${countText(g.servers)}대`
+    + (g.gpuUnread ? ` · GPU 목록을 못 읽은 서버 ${countText(g.gpuUnread)}대` : '')
     + (g.gpusStale ? ` · 오래된 인벤토리 ${countText(g.inventoryStale)}대의 ${countText(g.gpusStale)}장 포함` : g.inventoryStale ? ` · 오래된 인벤토리 ${countText(g.inventoryStale)}대` : '')
     + (g.gpusUnnamed ? ` · 모델 미상 ${countText(g.gpusUnnamed)}장 포함` : '')
     + (v.unknown ? ' · 아직 읽은 서버가 없습니다' : v.partial ? ' · 미수집 서버 제외(최소값)' : '');
@@ -80,7 +82,7 @@ export function cardMeta(k, c) {
   switch (k) {
     case 'datacenters': return '설정 › DataCenter 등록 수';
     case 'farms': return '설정 › 수집 Agent 등록 수';
-    case 'physical': { const p = c.physical; return `서버 분석 등록 · 인벤토리 수집 ${countText(p.inventoryRead)}대${p.inventoryStale ? ` · 오래된 인벤토리 ${countText(p.inventoryStale)}` : ''}${p.disabled ? ` · 비활성 ${countText(p.disabled)}대 제외` : ''}`; }
+    case 'physical': { const p = c.physical; return `Physical Server 등록 · 인벤토리 수집 ${countText(p.inventoryRead)}대${p.inventoryStale ? ` · 오래된 인벤토리 ${countText(p.inventoryStale)}` : ''}${p.disabled ? ` · 비활성 ${countText(p.disabled)}대 제외` : ''}`; }
     case 'virtual': { const v = c.virtual; return `구동 ${countText(v.poweredOn)}${v.templates ? ` · 템플릿 ${countText(v.templates)}` : ''} · vCenter ${countText(v.vcenters)}${v.vcentersPending ? ` (첫 수집 중 ${v.vcentersPending})` : ''}`; }
     case 'gpus': return gpuCardMeta(c.gpus);
     case 'storage': { const s = c.storage; if (s.totalBytes == null) return s.devices ? `용량을 읽은 장비 없음(${s.devices}대${s.stale ? ` · 오래된 값 ${s.stale}` : ''})` : '등록된 스토리지 없음';
@@ -110,7 +112,7 @@ export function powerTotalKw(d) {
  * v2.682 R3S-07: 원천 오류 문구 — 서버는 admin 이 아니면 원문 대신 true(실패 사실만)를 준다. 원문이 있으면 그대로,
  *   없으면 '사유는 관리자에게만 표시' 로 말한다. 실패가 없으면 ''.
  */
-const SOURCE_LABEL = { servers: '서버 전력', network: '네트워크(CVP)', storage: '스토리지', serversRegistry: '서버 분석 등록부' };
+const SOURCE_LABEL = { servers: '서버 전력', network: '네트워크(CVP)', storage: '스토리지', serversRegistry: 'Physical Server 등록부' };
 export function sourceErrorsText(errors) {
   const ent = Object.entries(errors || {}).filter(([, v]) => v);
   if (!ent.length) return '';

@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>공통 기능 — 좁은 화면 400px</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#60a5fa}a:hover{color:#93c5fd}
+</style>
+</helmet>
+<div style="box-sizing: border-box; min-height: 1200px; padding: 16px 12px 32px; background: #0a0e17; color: #e6edf6; font-family: 'Inter', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif; font-size: 13px; line-height: 1.5; display: flex; flex-direction: column; gap: 12px">
+
+  <div>
+    <div style="font-size: 12px; color: #8b9bb4">특수 기능 › 포탈 점검</div>
+    <h1 style="margin: 2px 0 0; font-size: 18px; font-weight: 700">포탈 점검</h1>
+  </div>
+
+  <div style="display: flex; flex-wrap: wrap; gap: 6px">
+    <button type="button" style="font: inherit; font-size: 12.5px; min-height: 44px; padding: 5px 12px; border-radius: 8px; border: 1px solid #243049; background: #1a2236; color: #e6edf6; cursor: pointer">토큰 점검</button>
+    <button type="button" style="font: inherit; font-size: 12.5px; min-height: 44px; padding: 5px 12px; border-radius: 8px; border: 1px solid #243049; background: #1a2236; color: #e6edf6; cursor: pointer">인벤토리 점검</button>
+    <button type="button" style="font: inherit; font-size: 12.5px; min-height: 44px; padding: 5px 12px; border-radius: 8px; border: 1px solid #243049; background: #1a2236; color: #e6edf6; cursor: pointer">아키텍처 점검</button>
+    <button type="button" style="font: inherit; font-size: 12.5px; min-height: 44px; padding: 5px 12px; border-radius: 8px; border: 1px solid #243049; background: #1a2236; color: #e6edf6; cursor: pointer">법인별 실환경 확인</button>
+    <button type="button" aria-pressed="true" style="font: inherit; font-size: 12.5px; font-weight: 600; min-height: 44px; padding: 5px 12px; border-radius: 8px; border: 1px solid #3b82f6; background: #3b82f6; color: #ffffff; cursor: pointer">공통 기능</button>
+  </div>
+
+  <div style="padding: 10px 12px; border-radius: 8px; border: 1px solid #243049; background: #141b2d; font-size: 12.5px; line-height: 1.6">
+    새 헬퍼 · 컴포넌트를 만들기 전에 여기서 먼저 찾습니다.
+    <div style="color: #8b9bb4">v3.9.0 빌드 때 만든 목록 · 이 포탈에서 다시 만들 수 없습니다</div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px">
+    <button type="button" aria-pressed="true" style="font: inherit; color: #e6edf6; text-align: left; cursor: pointer; min-width: 0; background: #141b2d; border: 1px solid #3b82f6; box-shadow: 0 0 0 1px #3b82f6 inset; border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 4px">
+      <span style="font-size: 12px; color: #8b9bb4">공용 모듈</span>
+      <span style="font-size: 22px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums">154</span>
+    </button>
+    <button type="button" style="font: inherit; color: #e6edf6; text-align: left; cursor: pointer; min-width: 0; background: #141b2d; border: 1px solid #243049; border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 4px">
+      <span style="font-size: 12px; color: #8b9bb4">공용 위치 밖</span>
+      <span style="font-size: 22px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums">77</span>
+    </button>
+    <button type="button" style="font: inherit; color: #e6edf6; text-align: left; cursor: pointer; min-width: 0; background: #141b2d; border: 1px solid #243049; border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 4px">
+      <span style="font-size: 12px; color: #8b9bb4">사용처 0</span>
+      <span style="font-size: 22px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums">2</span>
+    </button>
+    <button type="button" style="font: inherit; color: #e6edf6; text-align: left; cursor: pointer; min-width: 0; background: #141b2d; border: 1px solid #243049; border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 4px">
+      <span style="font-size: 12px; color: #8b9bb4">테스트 0</span>
+      <span style="font-size: 22px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums">25</span>
+    </button>
+    <button type="button" style="grid-column: 1 / -1; font: inherit; color: #e6edf6; text-align: left; cursor: pointer; min-width: 0; background: #141b2d; border: 1px solid #243049; border-radius: 12px; padding: 10px 12px; display: flex; align-items: baseline; justify-content: space-between; gap: 8px">
+      <span style="font-size: 12px; color: #8b9bb4">서버 · 웹 두 벌</span>
+      <span style="font-size: 22px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums">4</span>
+    </button>
+  </div>
+
+  <div style="background: #141b2d; border: 1px solid #243049; border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 10px; min-width: 0">
+    <label style="display: flex; flex-direction: column; gap: 4px">
+      <span style="font-size: 12px; color: #8b9bb4">찾기</span>
+      <input type="search" placeholder="모듈 이름 · 내보내는 이름 · 설명" style="min-width: 0; min-height: 44px; box-sizing: border-box; font: inherit; font-size: 13px; padding: 7px 10px; border-radius: 8px; border: 1px solid #243049; background: #0f1626; color: #e6edf6">
+    </label>
+    <label style="display: flex; flex-direction: column; gap: 4px">
+      <span style="font-size: 12px; color: #8b9bb4">구분</span>
+      <select style="min-height: 44px; font: inherit; font-size: 13px; padding: 7px 10px; border-radius: 8px; border: 1px solid #243049; background: #0f1626; color: #e6edf6">
+        <option>전체 231</option>
+        <option>서버 유틸 88</option>
+        <option>웹 컴포넌트 45</option>
+        <option>웹 훅 7</option>
+        <option>웹 유틸 2</option>
+        <option>웹 최상위 12</option>
+        <option>공용 위치 밖 77</option>
+      </select>
+    </label>
+
+    <div style="overflow-x: auto; min-width: 0; border: 1px solid #1f2a40; border-radius: 8px">
+      <div role="table" aria-label="공통 기능 목록" style="min-width: 760px; font-size: 12.5px">
+        <div role="row" style="display: grid; grid-template-columns: 150px minmax(0, 1fr) 64px 48px 56px; column-gap: 12px; padding: 8px 10px; background: #0f1626; color: #8b9bb4; font-weight: 600; border-bottom: 1px solid #243049">
+          <span role="columnheader">모듈</span>
+          <span role="columnheader">하는 일</span>
+          <span role="columnheader" aria-sort="descending" style="text-align: right; color: #e6edf6">사용처 ▼</span>
+          <span role="columnheader" style="text-align: right">영역</span>
+          <span role="columnheader" style="text-align: right">테스트</span>
+        </div>
+        <sc-for list="{{rows}}" as="r" hint-placeholder-count="8">
+          <div role="row" style="display: grid; grid-template-columns: 150px minmax(0, 1fr) 64px 48px 56px; column-gap: 12px; padding: 9px 10px; border-bottom: 1px solid #1f2a40; align-items: start">
+            <div role="cell" style="min-width: 0">
+              <a href="Detail.dc.html" style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-weight: 500; text-decoration: none; overflow-wrap: anywhere">{{r.name}}</a>
+              <div style="font-size: 11px; color: #8b9bb4">{{r.scope}}</div>
+            </div>
+            <div role="cell" style="min-width: 0; color: #d5deec">{{r.summary}}</div>
+            <div role="cell" style="text-align: right; font-variant-numeric: tabular-nums; font-weight: 600">{{r.users}}</div>
+            <div role="cell" style="text-align: right; font-variant-numeric: tabular-nums">{{r.areas}}</div>
+            <div role="cell" style="text-align: right; font-variant-numeric: tabular-nums">{{r.tests}}</div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+    <div style="font-size: 12px; color: #8b9bb4">표는 상자 안에서 옆으로 밀어 봅니다 · 내보내는 이름은 모듈을 눌러 상세에서</div>
+    <button type="button" style="font: inherit; font-size: 12.5px; min-height: 44px; padding: 5px 12px; border-radius: 8px; border: 1px solid #243049; background: #1a2236; color: #e6edf6; cursor: pointer">더 보기 (231개 중 8개)</button>
+  </div>
+
+  <div style="font-size: 12px; color: #8b9bb4; line-height: 1.7">‘사용처 0’ · ‘테스트 0’ 은 판정이 아니라 살펴볼 후보입니다. 모듈 상세는 좁은 화면에서 화면 전체를 덮는 창으로 열립니다.</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":400,"height":1200}}'>
+class Component extends DCLogic {
+renderVals() {
+const raw = [
+['config.js', '공용 위치 밖', '요청 시한 env 정규화(무의존 leaf 모듈)', 507, 87, 173],
+['api.js', '웹 최상위', '진행 중 요청 레지스트리 + 장기 로딩(hang) 보고', 395, 19, 42],
+['STable.jsx', '웹 컴포넌트', 'STable — <table> 대체 컴포넌트(v2.422)', 300, 15, 5],
+['ui.jsx', '웹 컴포넌트', '공용 UI 재수출 셸(v2.295)', 285, 11, 5],
+['numOrNull.js', '서버 유틸 · 두 벌', '‘읽지 못한 수치’ 를 0 으로 둔갑시키지 않는 단일 판정', 283, 59, 5],
+['atomicWrite.js', '서버 유틸', '원자적 파일 쓰기 — 임시파일에 기록 후 rename 으로 교체', 249, 72, 8],
+['store.js', '공용 위치 밖', 'v2.617', 205, 44, 296],
+['Select.jsx', '웹 컴포넌트', '공용 드롭다운(v2.708) — 날 <select> 대신 이것을 쓴다', 193, 11, 0]
+];
+return { rows: raw.map((a) => ({ name: a[0], scope: a[1], summary: a[2], users: a[3], areas: a[4], tests: a[5] })) };
+}
+}
+</script>
+</body>
+</html>

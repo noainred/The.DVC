@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>보안 강화 방안 — 점검표</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:Inter,"Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#22d3ee}a:hover{color:#67e8f9}
+.card{background:linear-gradient(180deg,#141b2d,#111726);border:1px solid #243049;border-radius:12px;padding:16px 18px;box-shadow:0 4px 24px rgba(0,0,0,.4);min-width:0}
+.dim{color:#8b9bb4}.mono{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:600;border:1px solid #243049;background:#0f1626;color:#8b9bb4;white-space:nowrap}
+.chip.ok{color:#4ade80;border-color:rgba(34,197,94,.35);background:rgba(34,197,94,.1)}
+.chip.warn{color:#fbbf24;border-color:rgba(245,158,11,.35);background:rgba(245,158,11,.1)}
+.chip.bad{color:#f87171;border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.1)}
+.chip.info{color:#67e8f9;border-color:rgba(34,211,238,.3);background:rgba(34,211,238,.08)}
+table{border-collapse:separate;border-spacing:0;width:100%}
+th{font-size:11.5px;font-weight:600;color:#8b9bb4;text-align:left;padding:6px 8px;border-bottom:1px solid #243049;background:#0f1626;white-space:nowrap;vertical-align:bottom}
+td{padding:7px 8px;border-bottom:1px solid #1f2a40;vertical-align:top;font-size:12.5px;line-height:1.5}
+h2{margin:0;font-size:15px;font-weight:700}
+.kpi .label{color:#8b9bb4;font-size:12px;font-weight:600;letter-spacing:.5px}.kpi .value{font-size:26px;font-weight:800;margin-top:6px;line-height:1;text-align:center}.kpi .meta{font-size:12px;color:#8b9bb4;margin-top:8px}
+</style>
+</helmet>
+<div style="box-sizing:border-box;max-width:1680px;margin:0 auto;padding:18px 24px 40px;display:flex;flex-direction:column;gap:14px">
+  <div style="min-width:0">
+    <div style="font-size:12px;color:#8b9bb4">설계 › <b style="color:#e6edf6">보안 강화 방안</b> — 리눅스 베어메탈 통합 성능(1~15차)에 대한 위협 · 대책 · 기존 규약 재사용 · 상태</div>
+    <h1 style="margin:0;font-size:20px;font-weight:700;letter-spacing:-.01em">보안 강화 방안 — 이 기능이 새로 만드는 공격면을 먼저 적고, 대책마다 저장소의 기존 불변조건을 잇는다</h1>
+    <div class="dim" style="font-size:12px;margin-top:4px">상태: <span class="chip ok">설계 반영</span> 시안에 이미 들어 있음 · <span class="chip info">기존 규약</span> server/CLAUDE.md 불변조건 그대로 · <span class="chip warn">구현 때 확인</span> 설계는 있으나 실장비·코드로 확인 필요 · <span class="chip">현장 권고</span> 포탈 밖(서버 쪽) 조치</div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr));gap:14px">
+    <div class="card kpi"><div class="label">새 공격면</div><div class="value">7</div><div class="meta">SSH 키 저장소 · 1,000대 SSH 세션 · 엣지 샘플러 스크립트 · 로그 샘플 · CSV/Excel 업로드 · 집중/스냅샷 실행 · CVP 매핑</div></div>
+    <div class="card kpi"><div class="label">기존 규약 재사용</div><div class="value" style="color:#4ade80">14</div><div class="meta">봉인 · 승계 금지 · authGuard · 호스트키 검증 · SSRF · 정제 화이트리스트 · scope 404/403 · OTP 등급 · 감사 · …</div></div>
+    <div class="card kpi"><div class="label">구현 때 확인</div><div class="value" style="color:#fbbf24">6</div><div class="meta">샘플러 무결성 · 로그 가림 규칙 · Excel 파서 · 키 passphrase · 집중 상한 산수 · ReDoS 비율</div></div>
+    <div class="card kpi"><div class="label">현장 권고</div><div class="value">5</div><div class="meta">읽기 전용 계정 · ForceCommand/rbash · sshd 소스 제한 · iDRAC 읽기 역할 · 키 배포 절차</div></div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-bottom:8px">1 · 자격증명 — SSH 키 저장소 · 공통 계정 · iDRAC 계정</h2>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th style="width:230px">위협</th><th>대책</th><th style="width:260px">기존 규약 · 근거</th><th style="width:110px">상태</th></tr></thead>
+      <tbody>
+        <tr><td>키 저장소 유출 = 1,000대 접근</td><td>개인키·passphrase 는 secretVault 봉인(정책 손상 시 fail-safe 잠금) · 파일 0600 · 원자적 쓰기 · 손상 보존 · 화면·API·내보내기·백업 아카이브에는 지문·공개키만 · 백업 복원은 소유자 등급 · 키 삭제는 사용 서버 0 일 때만</td><td><span class="chip info">기존 규약</span> secretVault S-07 · atomicWrite/preserveCorrupt · 백업 소유자 경계</td><td><span class="chip ok">설계 반영</span></td></tr>
+        <tr><td>키 관리 권한 남용</td><td>키 등록·회전·삭제 · 공통 계정 비밀 입력은 <b>설정 소유자 등급 + 본인 OTP 재인증 + 감사 로그</b> · 조회는 관리자 · 범위 계정은 자기 법인 서버의 ‘어느 키를 쓰는지’ 만</td><td><span class="chip info">기존 규약</span> requireSettingsOwner(소유자 ∧ 전체 범위) · OTP 재인증 · audit</td><td><span class="chip ok">설계 반영</span></td></tr>
+        <tr><td>주소 바꿔치기로 저장 비밀 유출</td><td>서버 주소가 바뀌면 저장 비밀·키 참조를 승계하지 않는다 · 연결 시험은 저장 주소로만(요청 주소로 저장 비밀 전송 금지)</td><td><span class="chip info">기존 규약</span> secretCarry · v2.480 연결 테스트 규칙</td><td><span class="chip ok">설계 반영</span></td></tr>
+        <tr><td>계정 잠금 · 브루트포스 유발</td><td>인증 거부는 주기 수집·집중·스냅샷 모두 즉시 정지, 자동 재시도 없음 · 수동만 허용 · 정지 id 는 agent|경로|키</td><td><span class="chip info">기존 규약</span> util/authGuard.js · bmusage v2.550</td><td><span class="chip ok">설계 반영</span></td></tr>
+        <tr><td>키 수명 · 알고리즘</td><td>ed25519 권장 · rsa &lt; 3072 · dsa/ecdsa-sha1 등록 거부 · 회전 예정일(기본 180일 · 설정) 지나면 경고 · passphrase 지원</td><td class="dim">일반 관행(○) — 공식 권고 문서는 구현 때 인용</td><td><span class="chip warn">구현 때 확인</span></td></tr>
+        <tr><td>서버 쪽 계정 권한 과다</td><td>포탈 계정은 <b>읽기 전용</b>(sudo 없음) · 스냅샷의 /proc/pid/io 는 CAP_SYS_PTRACE 또는 포기(‘확인 불가’) · 가능하면 <span class="mono">authorized_keys</span> 에 <span class="mono">restrict,command="…/portal-ro.sh"</span>(ForceCommand) 로 허용 명령 고정 · 소스 IP 를 엣지로 제한(<span class="mono">from="10.20.0.5"</span>)</td><td class="dim">OpenSSH authorized_keys 옵션(○ — 구현 때 man 인용) · 포탈은 authorized_keys 를 건드리지 않는다</td><td><span class="chip">현장 권고</span></td></tr>
+        <tr><td>iDRAC 계정</td><td>읽기 전용 역할(Operator 아님) · 텔레메트리 전용 계정 분리 · 세션 수 상한(iDRAC 는 동시 세션 제한이 있어 동시성 32 가 Redfish 쪽에도 걸리지 않게 경로별 상한) · TLS 검증은 WAN 규칙과 같은 로컬 디스패처(전역 끄기 금지)</td><td><span class="chip info">기존 규약</span> 전역 TLS 디스패처 금지 · v2.480 호스트 고정</td><td><span class="chip warn">구현 때 확인</span>(세션 상한 수치)</td></tr>
+      </tbody></table></div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-bottom:8px">2 · 접속 · 명령 실행 — 1,000대 SSH · 스냅샷 · 집중 · 샘플러</h2>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th style="width:230px">위협</th><th>대책</th><th style="width:260px">기존 규약 · 근거</th><th style="width:110px">상태</th></tr></thead>
+      <tbody>
+        <tr><td>중간자 · 가짜 서버</td><td>SSH 호스트키 검증(판정 못 하면 통과시키지 않음 — 무음 TOFU 금지) · 지문 변경은 ‘장비 신뢰’ 화면에서 사람이 확인 뒤에만 재접속 · 등록·온보딩 연결 시험에서 지문을 저장</td><td><span class="chip info">기존 규약</span> proxy/sshExec.js hostVerifier · peerTrust</td><td><span class="chip ok">설계 반영</span></td></tr>
+        <tr><td>명령 주입(마운트 · PID · 유닛 이름 · 로그 경로)</td><td>셸에 넣는 값은 화이트리스트 정규식 뒤에만(선행 ‘-’ 차단) · 마운트는 sanitizeMounts · PID/N 은 숫자 · 유닛 이름은 systemd 이름 규칙 · 프로파일 로그 경로는 카탈로그 상수(사용자 입력 아님) · 원격 출력(장치명 · 유닛명)도 재검증</td><td><span class="chip info">기존 규약</span> 셸 명령 조립 규칙 · bmstor sanitizeMounts · RMA argv</td><td><span class="chip ok">설계 반영</span></td></tr>
+        <tr><td>엣지 샘플러 스크립트 변조(서버 쪽)</td><td>스크립트는 포탈 번들에 고정 · 설치 때 sha256 기록 · 수거 때 서버의 스크립트 해시를 읽어 다르면 ‘변조/다름’ 으로 표시하고 그 서버 샘플을 쓰지 않는다 · 스크립트는 읽기 전용 명령만 · 서버에 쓰는 파일은 로컬 샘플 파일 하나</td><td class="dim">upgrade 서명(Ed25519)·RMA HMAC 패턴을 참고 — 샘플러는 서명 검증까지는 두지 않는다(해시 대조)</td><td><span class="chip warn">구현 때 확인</span></td></tr>
+        <tr><td>집중 모니터링 · 스냅샷 남용(DoS)</td><td>operator 이상 · 사유 필수 · 감사 · 법인당 동시 집중 상한 · 하루 상한 · 서버당 동시 1건 · 세션 예산 50초 · 전역 풀 공유 · 재발 억제 30분 · 간격 하한 30초</td><td><span class="chip info">기존 규약</span> 폴러 재진입 가드 · 동시성 풀 · withDeadline</td><td><span class="chip ok">설계 반영</span></td></tr>
+        <tr><td>동시성 32 로 인한 서버·엣지 부하</td><td>경로별(SSH · Redfish) 상한 분리 · 엣지 자원 작으면 env 로 낮춤 · 수집 건강 보드가 ‘주기 소요 80%’ 를 경고 · iDRAC 세션 상한 고려</td><td>v2.918 동시성 32 · 수집 건강(⑫)</td><td><span class="chip warn">구현 때 확인</span>(1,000대 실측)</td></tr>
+        <tr><td>출력 폭주(로그 · ps)</td><td>구획마다 줄 수·바이트 상한(SSH exec 출력 상한 4MB 기존) · 넘치면 ‘잘림’ 표시 · 정규식은 길이를 먼저 자르고 선형으로(ReDoS 회귀는 비율로 테스트)</td><td><span class="chip info">기존 규약</span> EXEC_MAX_OUTPUT · 정규식 규칙(루트 CLAUDE.md)</td><td><span class="chip warn">구현 때 확인</span>(규칙 카탈로그 전수)</td></tr>
+      </tbody></table></div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-bottom:8px">3 · 전송 · 저장 — 중앙↔엣지 · 엣지 DB · 로그 샘플</h2>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th style="width:230px">위협</th><th>대책</th><th style="width:260px">기존 규약 · 근거</th><th style="width:110px">상태</th></tr></thead>
+      <tbody>
+        <tr><td>엣지 봉투 위·변조 · 과대</td><td>중앙은 아는 필드만 · 객체만 · 상한 · 문자열 수치는 수로 정제(새 필드는 화이트리스트에 추가) · agent 이름은 인증된 것 · 시각은 수신 시각으로 자르고 원본 따로 · 봉투 크기 상한(400대/봉투 · gzip · BIG_JSON) · 413 로그</td><td><span class="chip info">기존 규약</span> ‘엣지가 보낸 것은 정제한다’ · central agent 바인딩</td><td><span class="chip ok">설계 반영</span></td></tr>
+        <tr><td>평문 전송</td><td>중앙↔엣지 HTTPS 기본(평문은 승인된 예외만 · 자기등록은 하향 불가) · WAN TLS 검증 기본 ON · 사설 CA 는 덧붙이기</td><td><span class="chip info">기존 규약</span> transportPolicy S-09 · WAN_TLS_INSECURE 의미</td><td><span class="chip ok">설계 반영</span></td></tr>
+        <tr><td>엣지 DB 유출(월 파일 · 장치별 · 로그 샘플)</td><td>DB 파일 0600 · 비밀 없음(지표·판정·가림 샘플만) · 로그 원문 미보관 · 보존 기간 뒤 파일 삭제 · 백업 번들 포함 여부는 설정(기본 제외 — 크기)</td><td><span class="chip info">기존 규약</span> 데이터 파일 권한 · 백업 CHANGE_WATCH_EXCLUDE</td><td><span class="chip ok">설계 반영</span></td></tr>
+        <tr><td>로그 샘플에 비밀·개인정보</td><td>샘플 5줄은 redact(토큰·비밀번호 키) + 로그용 규칙(password= · Authorization: · 키 블록 · 카드/주민번호 꼴) · 보안 패널의 IP·계정은 상위 N 만 · ‘분류 안 됨’ 줄은 세기만 하고 버린다</td><td><span class="chip info">기존 규약</span> edgelog/redact.js · ‘비밀 값은 어떤 API 응답에도 싣지 않는다’</td><td><span class="chip warn">구현 때 확인</span>(규칙 보강)</td></tr>
+        <tr><td>CSV/Excel 업로드</td><td>상한 5,000행 · 메모리 미리보기만(파일 미보관) · 비밀 원문 행 거부 · SSRF 가드(링크로컬·루프백·우회 표기) · Excel 은 수식·서식·외부 링크 무시(값만) · 내보내기 때 셀이 <span class="mono">= + - @</span> 로 시작하면 앞에 ' 를 붙여 수식 주입 차단</td><td><span class="chip info">기존 규약</span> ssrfBlockReason · 큰 본문 게이트 · CSV 토크나이저</td><td><span class="chip warn">구현 때 확인</span>(exceljs 파서 · 수식 주입 가드)</td></tr>
+      </tbody></table></div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-bottom:8px">4 · 접근 제어 · 감사 · 운영</h2>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th style="width:230px">위협</th><th>대책</th><th style="width:260px">기존 규약 · 근거</th><th style="width:110px">상태</th></tr></thead>
+      <tbody>
+        <tr><td>범위 밖 서버 열람 · 조작</td><td>모든 조회에 vCenter scope 교집합(요청 필터보다 먼저) · 단건은 inUserScope → 조회 밖 404(존재 은닉) · 쓰기(집중 · 스냅샷 · 등록 · 주석 · 매핑)는 쓰기 범위 밖 403 · 법인 귀속 없는 서버는 범위 계정에 미노출 · memoJson 캐시는 scopeKey · 서버 비교의 ‘법인 간 허용’ 은 범위 계정에 없음</td><td><span class="chip info">기존 규약</span> scope 전면 적용 · writeVcenters · ‘조회 밖 404 → 쓰기 밖 403’</td><td><span class="chip ok">설계 반영</span></td></tr>
+        <tr><td>권한 세분</td><td>보기(viewer) · 시험/집중/스냅샷/주석(operator) · 등록/알림 규칙/프로파일/플레이북(admin) · 키·공통 계정·백업(설정 소유자 + OTP) · 카탈로그 adminOnly 와 API 게이트를 테스트가 대조</td><td><span class="chip info">기존 규약</span> permissions 매트릭스 · requirePerm · toolcats</td><td><span class="chip ok">설계 반영</span></td></tr>
+        <tr><td>조작 흔적 없음</td><td>감사 로그: 등록·갱신·삭제(행 수 · 파일 이름) · 키 등록/회전/삭제 · 공통 계정 변경 · 집중/스냅샷 실행(사유) · 알림 규칙 변경 · 주석 생성/수정/삭제 · 매핑 확정 · 목표선 변경 — 전부 사용자·시각·대상·IP</td><td><span class="chip info">기존 규약</span> audit() · 감사 로그 규약(security-api.md)</td><td><span class="chip ok">설계 반영</span></td></tr>
+        <tr><td>공유 링크로 권한 우회</td><td>링크는 상태만 담고 권한을 주지 않는다(여는 사람 권한 · 404) · 캡처는 브라우저 생성 · 웹훅 URL 은 비밀(화면 미노출)</td><td><span class="chip info">기존 규약</span> 미인증 응답 규칙 · 웹훅 EXCLUDED_KINDS</td><td><span class="chip ok">설계 반영</span></td></tr>
+        <tr><td>의존성 취약점</td><td>Excel 읽기·캡처 라이브러리 추가 전 <span class="mono">npm audit --omit=dev</span>(critical 차단) · 버전 고정 · 불필요하면 CSV 만으로 시작</td><td><span class="chip info">기존 규약</span> dep-audit 스킬 · CI audit</td><td><span class="chip warn">구현 때 확인</span></td></tr>
+        <tr><td>보안 이벤트를 못 봄</td><td>로그 분석(⑮) 보안 분류 → 알림 규칙 ‘보안 high’(기본 꺼짐 · 법인 옵트인) · 외부 IP SSH 실패 집중 · root 직접 로그인 · 계정 변경 · 포탈 자체 로그인 실패 패턴 모듈 재사용 · 차단·잠금은 하지 않는다(알림까지)</td><td><span class="chip info">기존 규약</span> logs/loginFailPattern.js · 이슈 자동 등록 문지기</td><td><span class="chip ok">설계 반영</span></td></tr>
+      </tbody></table></div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-bottom:8px">5 · 현장 권고(포탈 밖) · 검증 계획</h2>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(440px,100%),1fr));gap:12px;font-size:12.5px">
+      <div style="border:1px solid #243049;border-radius:10px;padding:10px 12px;background:#0f1626"><div style="font-weight:700;margin-bottom:4px">현장 권고(템플릿 설명서에 싣는다)</div><ul class="dim" style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px"><li>포탈 전용 읽기 계정(sudo 없음) · 키 인증만 · <span class="mono">authorized_keys</span> 에 <span class="mono">restrict,from="엣지IP",command="portal-ro.sh"</span></li><li>sshd: <span class="mono">PermitRootLogin no</span> · 비밀번호 인증 끄기(가능하면) · 접속 소스 제한(방화벽)</li><li>iDRAC: 읽기 전용 역할 계정 · 텔레메트리 계정 분리 · 기본 계정 비활성</li><li>키 배포·회전은 구성 관리(Ansible 등)로 — 포탈은 참조만</li><li>SELinux 를 끄는 GPDB 요구는 그 호스트에 한정하고 이유를 기록</li></ul></div>
+      <div style="border:1px solid #243049;border-radius:10px;padding:10px 12px;background:#0f1626"><div style="font-weight:700;margin-bottom:4px">검증 계획(구현 때 — 위험한 수정이라 전체 검증 권장)</div><ul class="dim" style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px"><li>반증 1인: 키 저장소 · 봉투 정제 · scope(404/403) · 집중 상한 · 샘플러 해시 대조</li><li>변이 검증: 비밀이 응답·내보내기·백업에 실리는지(SECRET_FIELDS 스윕) · 주소 변경 시 승계 0</li><li>ReDoS: 로그 규칙 카탈로그 전수를 비율 테스트</li><li>보안 감사 에이전트(security-auditor)로 신규 라우트 전수 — ‘범위 참조 0건’ 파일 확인</li><li>Chromium 1440/400 + 목 서버로 범위 계정 화면(법인 간 토글 미노출 · 404) 확인</li></ul></div>
+    </div>
+    <div class="dim" style="font-size:11.5px;margin-top:10px">정직하게: 이 표의 ‘기존 규약’ 은 server/CLAUDE.md · docs/rules/security-api.md 의 불변조건을 가리키며 새 코드가 그것을 따른다는 설계 선언이다 — 따랐는지는 구현 뒤 테스트·감사로만 확인된다. OpenSSH 옵션·키 알고리즘 권고는 일반 관행(○)이고 구현 때 man 페이지·배포판 문서를 인용한다. 샘플러 스크립트 무결성은 해시 대조까지이고 서명 검증은 두지 않았다(비용 대비).</div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2400}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

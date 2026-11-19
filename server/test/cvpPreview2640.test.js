@@ -7,14 +7,21 @@
  *   · cleanStatus 가 samples 를 좁힌다 — head 5000 → 4096 · 모르는 키 제거 · 17종 → 16 · 없으면 필드 생략(구버전 엣지)
  * ⚠ 목 CVP 응답은 합성이다(실장비 CVP 를 본 적이 없다 — docs/CVP.md). 실측 근거가 생기면 픽스처를 실제 형식으로 바꿀 것.
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 
-process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'cvpPreview2640-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+process.env.CONFIG_DIR = tmpDir('cvpPreview2640-');
 process.env.SSRF_ALLOW_LOOPBACK = 'true';
 
 const PV = await import('../src/cvp/preview.js');
@@ -51,7 +58,7 @@ test('previewParse — 9종 각각 합성 응답을 읽고 count·keys 를 돌�
 
   const r4 = PV.previewParse('counters', noti('/Smash/counters/ethIntf/FastCounters/current/Ethernet1', { inOctets: { key: 'inOctets', value: 100 }, outOctets: { key: 'outOctets', value: 50 } }));
   assert.equal(r4.ok, true); assert.equal(r4.count, 1);
-  assert.deepEqual(r4.items[0], { name: 'Ethernet1', inOctets: 100, outOctets: 50, inErrors: null, outErrors: null }, 'Map 을 배열로 · 없는 카운터는 null');
+  assert.deepEqual(r4.items[0], { name: 'Ethernet1', inOctets: 100, outOctets: 50, inErrors: null, outErrors: null, inDiscards: null, outDiscards: null }, '(v2.922 드롭 후보 포함) Map 을 배열로 · 없는 카운터는 null');
 
   const r5 = PV.previewParse('bgp', noti('/bgp/all', { '10.0.0.1': { value: { bgpPeerState: 'Established', bgpPeerAs: 65001, bgpPeerPrefixesReceived: 42 } }, '10.0.0.2': { value: { bgpPeerState: 'Idle', bgpPeerAs: 65002 } } }));
   assert.equal(r5.ok, true); assert.equal(r5.count, 2);

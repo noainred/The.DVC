@@ -46,3 +46,6 @@ describe('vmHygieneText', () => {
     for (const r of reasons) if (!['off', 'edge', 'before-hour', 'already-sent', 'sent', 'error'].includes(r)) expect(web.NOTIFY_NOW_TEXT[r], r).toBeTruthy();
   });
 });
+describe('71회차 — 설정 파일을 읽지 못한 판정 배너', () => {
+  it('기본 기준으로 판정했다는 사실을 말한다', () => { expect(web.SETTINGS_UNREADABLE_NOTE).toMatch(/기본 기준/); expect(web.SETTINGS_UNREADABLE_NOTE.includes('`')).toBe(false); });
+});

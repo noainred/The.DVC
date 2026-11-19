@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>물리서버 폴더 — 대안: 엣지에서 편집(중앙에 전달)</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./bmf.css">
+<link rel="stylesheet" href="./bmf2.css">
+<link rel="stylesheet" href="./bmfe.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+</style>
+</helmet>
+<div class="root" style="width:1000px;height:700px;padding:18px 20px;gap:12px">
+  <p class="intro" style="max-width:none">①은 엣지에서 보기만 한다. 이 판은 <b style="color:#e6edf6">엣지에서도 바꿀 수 있게 할 때</b>의 모습 — 바꾼 것은 엣지에 저장하지 않고 <b style="color:#e6edf6">중앙에 전달해 중앙이 저장</b>한 뒤 사본을 다시 받는다(저장소는 하나).</p>
+
+  <div class="card cnt" style="flex:none">
+    <div class="fh">
+      <div class="path">
+        <span class="dim" style="font-weight:600">vcenter-pl-waw-01</span><span class="sep">›</span><span>WEB</span>
+        <span class="bdg e">중앙에 전달해 저장</span>
+        <span class="sp row"><button class="btn pri" type="button">서버 찾아 등록</button><button class="btn" type="button">하위 폴더</button><button class="btn" type="button">이름 바꾸기</button></span>
+      </div>
+    </div>
+    <div class="bar">
+      <span class="selbar">2대 고름<button class="btn sm" type="button">다른 폴더로 옮기기</button><button class="btn sm" type="button">폴더에서 빼기</button></span>
+      <span class="note sp">고른 서버: pl-web-07 · pl-web-08</span>
+    </div>
+    <div class="tw2">
+      <table class="t">
+        <thead><tr><th style="width:5%"><input class="chk" type="checkbox" aria-label="전체 선택"></th><th style="width:35%">이름</th><th style="width:30%">모델 · 서비스 태그</th><th class="r" style="width:15%">CPU</th><th class="r" style="width:15%">메모리</th></tr></thead>
+        <tbody>
+          <tr class="picked"><td><input class="chk" type="checkbox" checked="checked" aria-label="pl-web-07 선택"></td><td><span class="nm"><span class="sd ok"></span>pl-web-07</span></td><td>PowerEdge R650 <span class="dim mono">4BN7R53</span></td><td><div class="mb"><span class="mbt"><i style="width:22%"></i></span><span class="mbn">22%</span></div></td><td><div class="mb"><span class="mbt"><i style="width:47%"></i></span><span class="mbn">47%</span></div></td></tr>
+          <tr class="picked"><td><input class="chk" type="checkbox" checked="checked" aria-label="pl-web-08 선택"></td><td><span class="nm"><span class="sd ok"></span>pl-web-08</span></td><td>PowerEdge R650 <span class="dim mono">4BN7S53</span></td><td><div class="mb"><span class="mbt"><i style="width:19%"></i></span><span class="mbn">19%</span></div></td><td><div class="mb"><span class="mbt"><i style="width:44%"></i></span><span class="mbn">44%</span></div></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px">
+    <div class="card st">
+      <h3><span class="n">1</span>전달 중</h3>
+      <div class="sync n" role="status">
+        <span class="si"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h13"></path><path d="M13 6l6 6-6 6"></path></svg></span>
+        <span><b>중앙에 전달하는 중</b> — pl-web-07 · 08 → WEB › 정적</span>
+      </div>
+      <p>그 폴더의 버튼만 잠근다. 폴란드 · 미국 동부처럼 왕복이 느린 곳은 몇 초 걸린다 — 요청은 한 번에 묶어 하나만 보낸다.</p>
+    </div>
+    <div class="card st">
+      <h3><span class="n">2</span>중앙이 저장함</h3>
+      <div class="sync" role="status">
+        <span class="si"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"></path></svg></span>
+        <span><b>중앙이 저장했습니다</b> · <span class="mono">r129</span> · 사본을 새로 받았습니다</span>
+      </div>
+      <p>화면은 새 사본으로 다시 그린다 — 엣지가 스스로 ‘바뀐 척’ 하지 않는다. 중앙 감사 로그에는 엣지 이름과 계정이 함께 남는다.</p>
+    </div>
+    <div class="card st">
+      <h3><span class="n">3</span>중앙과 끊겨 있음</h3>
+      <div class="sync w" role="status">
+        <span class="si"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path></svg></span>
+        <span><b>지금은 바꿀 수 없습니다</b> — 중앙과 연결되지 않았습니다(보기는 됩니다).</span>
+      </div>
+      <p>끊긴 동안의 변경을 엣지에 쌓아 두었다가 나중에 보내지 않는다 — 그 사이 중앙에서 바뀐 것과 어긋나면 누구 것이 맞는지 정할 수 없다.</p>
+    </div>
+    <div class="card st">
+      <h3><span class="n">4</span>그 사이 중앙에서 바뀜</h3>
+      <div class="sync r" role="status">
+        <span class="si"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 8v5"></path><path d="M12 17h.01"></path><circle cx="12" cy="12" r="9"></circle></svg></span>
+        <span><b>바꾸지 않았습니다</b> — 이 화면의 판본(<span class="mono">r128</span>)보다 중앙이 새 판본입니다.</span>
+        <button class="btn sm sp" type="button">새 사본 받기</button>
+      </div>
+      <p>엣지는 자기가 본 판본을 함께 보낸다. 다르면 중앙이 거절하고, 엣지는 새 사본을 받아 사람이 다시 본 뒤 누른다.</p>
+    </div>
+  </div>
+
+  <div class="band i">
+    <span>이 판을 고르면 추가로 필요한 것 — 엣지 계정을 중앙 쓰기 권한에 대응시키는 규칙(누가 그 법인을 바꿀 수 있는가) · 엣지 → 중앙 쓰기 통로 · 엣지 이름이 남는 감사 기록.</span>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1000,"height":700}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

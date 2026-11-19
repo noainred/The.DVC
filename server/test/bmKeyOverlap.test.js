@@ -1,0 +1,547 @@
+/**
+ * 다음 점검 ①(2차) — 반증(F1~F5) · 사용자 결정 회귀(실제 api 라우터 · 실제 분류 · 실제 대상 해석).
+ *   사용자 결정(2026-11-08): "겹치는 노드의 IP · hostname · service tag 등을 수집해서 사용자가 추가할지 여부를 결정"
+ *   ① 반증 r0b — 가상화 호스트 동명(서비스태그 없음 · 다른 vCenter)이 예전에는 사유 없이 빠졌다 → 겹침 목록 · 결정 ‘추가’ 면 별도 키로 대상
+ *   ② 겹침 목록 · 결정 API — 범위(범위 밖 법인 행 · 상대는 이름도 개수도 없음) · 주소는 관리자 판본만 · 조회 밖 404 → 쓰기 밖 403 · 추가 → 별도 키로 수집 대상 ·
+ *      키 겹침 409 · 제외 유지 · 되돌리기 · 기록만 남은 결정 되돌리기 · 손상 파일 503 + 결정 미적용 · 감사
+ *   ③ 반증 r1 · r1b(F2) — 용도 태그: A 쓰기 뒤 B 판정 불변 · B 해제가 A 를 지우지 않음 · 예전 키 행은 범위 밖 법인에도 걸리면 409 · 전체 범위는 법인별로 나눠 옮김 · 계정명
+ *   ④ 반증 r2(F3) — 범위 계정의 키 충돌 수는 보이는 줄로 · peers 없음
+ *   ⑤ 반증 r3(F4) — 귀속 없음 후보는 노드까지 갈라 ‘-@노드’ 로 고른다(사유 수 = 후보 수)
+ */
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+const DIR = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 'bmkeyovl-'));
+process.env.CONFIG_DIR = DIR;
+process.env.AUTH_ENABLED = 'true';
+process.env.DATA_SOURCE = 'live';
+process.env.SETTINGS_OWNERS = 'own';
+fs.writeFileSync(path.join(DIR, 'permissions.json'), JSON.stringify({ schemaVersion: 2, matrix: { operator: ['dashboard', 'tools'], viewer: ['dashboard', 'tools'], toolsDenied: { operator: [], viewer: [] } } }));
+delete process.env.CENTRAL_URL;
+test.after(() => fs.rmSync(DIR, { recursive: true, force: true }));
+
+const USERS = {
+  adm: { username: 'adm', role: 'admin', scope: null },
+  admA: { username: 'adma', role: 'admin', scope: { vcenters: ['vcA'] } },
+  admB: { username: 'admb', role: 'admin', scope: { vcenters: ['vcB'] } },
+  opA: { username: 'opa', role: 'operator', scope: { vcenters: ['vcA'] } },
+  opB: { username: 'opb', role: 'operator', scope: { vcenters: ['vcB'] } },
+  opABwA: { username: 'opabwa', role: 'operator', scope: { vcenters: ['vcA', 'vcB'], writeVcenters: ['vcA'] } },
+  vw: { username: 'vw', role: 'viewer', scope: null },
+};
+let _srv = null;
+async function app(t) {
+  const { store } = await import('../src/store.js');
+  store.snapshot = { ...(store.snapshot || {}), hosts: store.snapshot?.hosts || [], vcenters: [{ id: 'vcA', name: 'A 법인' }, { id: 'vcB', name: 'B 법인' }] };
+  if (!_srv) {
+    const express = (await import('express')).default;
+    const { api } = await import('../src/routes/api.js');
+    const a = express();
+    a.use(express.json());
+    a.use((req, _res, next) => { req.user = USERS[req.headers['x-u']] || null; next(); });
+    a.use('/api', api);
+    const srv = await new Promise((r) => { const s = a.listen(0, '127.0.0.1', () => r(s)); });
+    _srv = { srv, base: `http://127.0.0.1:${srv.address().port}/api/tools/bm-usage` };
+  }
+  const call = async (u, method, p, body) => {
+    const r = await fetch(`${_srv.base}${p}`, { method, headers: { 'x-u': u, 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
+    return { status: r.status, body: await r.json() };
+  };
+  return { call };
+}
+test.after(() => { _srv?.srv.close(); });
+
+/** 공통 태그 두 대(vcA · vcB) — 실제 classifyFleet 이 vcB 를 bareMetalDupes 로 남긴다(반증 r0). */
+async function junkFleet(t) {
+  fs.writeFileSync(path.join(DIR, 'idrac.json'), JSON.stringify({ servers: [
+    { id: 'r-a1', name: 'wb-a1', host: 'https://10.20.0.11', username: 'u', password: 'p', vcenterId: 'vcA', serviceTag: 'To Be Filled By O.E.M.' },
+    { id: 'r-b1', name: 'wb-b1', host: 'https://10.20.0.12', username: 'u', password: 'p', vcenterId: 'vcB', serviceTag: 'To Be Filled By O.E.M.' },
+  ] }));
+  fs.writeFileSync(path.join(DIR, 'bm-storage.json'), JSON.stringify({ servers: [] }));
+  fs.writeFileSync(path.join(DIR, 'bmusage-settings.json'), JSON.stringify({ enabled: true, corps: { vcA: true, vcB: true }, osSsh: false, idracTelemetry: true }));
+  (await import('../src/bmusage/settings.js'))._resetForTest();
+  const poller = await import('../src/bmusage/poller.js');
+  const { classifyFleet } = await import('../src/insights/fleetInventory.js');
+  const servers = [
+    { serverId: 'r-a1', serverName: 'wb-a1', serviceTag: 'To Be Filled By O.E.M.', source: 'idrac', vcenterId: 'vcA' },
+    { serverId: 'r-b1', serverName: 'wb-b1', serviceTag: 'To Be Filled By O.E.M.', source: 'idrac', vcenterId: 'vcB' },
+  ];
+  poller._setFleetForTest(async () => classifyFleet({ hosts: [], vcenters: [{ id: 'vcA', name: 'A 법인' }, { id: 'vcB', name: 'B 법인' }], servers, tags: {}, assign: {} }));
+  t.after(() => poller._setFleetForTest(null));
+  return poller;
+}
+
+test('① 반증 r0b — 가상화 호스트 동명(서비스태그 없음 · 다른 vCenter)은 겹침 목록으로 · 결정 ‘추가’ 면 별도 키로 대상', async () => {
+  const { resolveTargets } = await import('../src/bmusage/targets.js');
+  const KD = await import('../src/bmusage/keyDecisions.js');
+  const vcenters = [{ id: 'vcA', name: 'A' }, { id: 'vcB', name: 'B' }];
+  const virt = [
+    { name: 'esxi-01', fleetId: 'esxi-01', vcenterId: 'vcA', serviceTag: '', idracServerId: 'r-a' },
+    { name: 'esxi-01', fleetId: 'esxi-01', vcenterId: 'vcB', serviceTag: '', idracServerId: 'r-b' },
+  ];
+  const registry = [{ id: 'r-a', host: 'https://ia', username: 'u', password: 'p' }, { id: 'r-b', host: 'https://ib', username: 'u', password: 'p' }];
+  const settings = { corps: { vcA: true, vcB: true }, idracTelemetry: true, osSsh: false, includeVirtualization: true };
+  const r = resolveTargets({ bareMetal: [], virtHosts: virt, vcenters, registry, settings });
+  assert.deepEqual(r.targets.map((x) => `${x.vcenterId}|${x.key}`), ['vcA|esxi-01']);
+  assert.equal(r.keyOverlaps.length, 1, '예전(반증 r0b): skipped 0 · keyConflicts 0 — 사유 없이 빠졌다');
+  const o = r.keyOverlaps[0];
+  assert.deepEqual([o.role, o.vcenterId, o.name, o.idracHost, o.dupOf.vcenterId, o.dupOf.sameIdrac || false], ['virt', 'vcB', 'esxi-01', 'https://ib', 'vcA', false]);
+  assert.equal(o.decidedKey, 'vcB:host:esxi-01');
+  const decisions = new Map([[o.oid, { oid: o.oid, decision: 'add', key: o.decidedKey }]]);
+  const r2 = resolveTargets({ bareMetal: [], virtHosts: virt, vcenters, registry, settings, decisions });
+  assert.deepEqual(r2.targets.map((x) => `${x.vcenterId}|${x.key}|${x.keyKind}`).sort(), ['vcA|esxi-01|fleetId', 'vcB|vcB:host:esxi-01|decided']);
+  assert.equal(r2.keyOverlaps[0]?.collecting ?? false, false, '추가한 뒤에는 겹침이 아니라 대상(이 판정에서는 목록에서 빠진다 — 키가 갈렸다)');
+  assert.equal(KD.overlapIdOf({ role: 'virt', vcenterId: 'vcB', name: 'esxi-01' }), o.oid);
+  // 중앙: 엣지가 맡는 서버(remoteAgent)의 겹침은 그 엣지가 수집하므로 올리지 않는다 · 이 노드 서버가 엣지 보고 서버에 밀린 것은 올린다(겹친 상대 = 엣지 보고)
+  const dupes = [
+    { serverId: '10.5.5.5', fleetId: '10.5.5.5', name: 'local-ip', serviceTag: '', source: 'idrac', vcenterId: 'vcA', remoteAgent: '', dupOf: { name: 'edge-ip', vcenterId: 'vcB', source: 'edge', remoteAgent: 'Edge-B' } },
+    { serverId: 'edge:Edge-C:10.6.6.6', fleetId: '10.6.6.6', name: 'edge-ip2', serviceTag: '', source: 'edge', vcenterId: 'vcB', remoteAgent: 'Edge-C', dupOf: null },
+  ];
+  const r3 = resolveTargets({ bareMetal: [], dupes, registry: [{ id: '10.5.5.5', host: 'https://10.5.5.5', username: 'u', password: 'p' }], settings: { corps: { vcA: true, vcB: true }, idracTelemetry: true }, isEdge: false, agentName: '' });
+  assert.deepEqual(r3.keyOverlaps.map((x) => [x.name, x.dupOf?.edge, x.idracHost]), [['local-ip', true, 'https://10.5.5.5']], '엣지 위임 서버는 그 엣지가 · 이 노드 서버만');
+  const r4 = resolveTargets({ bareMetal: [], dupes, registry: [], settings: { corps: { vcA: false, vcB: true }, idracTelemetry: true }, isEdge: false, agentName: '' });
+  assert.equal(r4.keyOverlaps.length, 0, '꺼진 법인 서버는 겹침과 무관하게 대상이 아니다(목록에 싣지 않는다)');
+});
+
+test('② 겹침 목록 · 결정 — 범위 · 주소 · 404 → 403 · 추가(별도 키로 대상) · 키 겹침 409 · 제외 유지 · 되돌리기 · 손상 503 · 감사', async (t) => {
+  const { call } = await app(t);
+  const poller = await junkFleet(t);
+  const KD = await import('../src/bmusage/keyDecisions.js');
+  KD._resetKeyDecisionsForTest();
+  const adm = await call('adm', 'GET', '/key-overlaps');
+  assert.equal(adm.status, 200, JSON.stringify(adm.body));
+  assert.equal(adm.body.items.length, 1);
+  const it = adm.body.items[0];
+  assert.deepEqual([it.vcenterId, it.name, it.serviceTag, it.idracHost, it.source, it.dupOf?.vcenterId, it.decidedKey], ['vcB', 'wb-b1', 'To Be Filled By O.E.M.', 'https://10.20.0.12', 'idrac', 'vcA', 'vcB:r-b1']);
+  assert.deepEqual(adm.body.counts, { total: 1, pending: 1, added: 0, excluded: 0 });
+  // 범위: A 계정에는 B 법인 행이 없고 개수도 0 · B 운영자는 행은 보지만 상대(A 법인)는 이름도 없고 주소도 없다(비관리자) · B 관리자는 주소를 본다
+  const a = await call('opA', 'GET', '/key-overlaps');
+  assert.deepEqual([a.body.items.length, a.body.counts.total], [0, 0]);
+  const b = await call('opB', 'GET', '/key-overlaps');
+  assert.equal(b.body.items.length, 1); assert.equal(b.body.items[0].dupOf, null, '범위 밖 상대는 싣지 않는다'); assert.equal(b.body.items[0].idracHost, undefined); assert.equal(b.body.addressHidden, true);
+  assert.ok(!JSON.stringify(b.body).includes('wb-a1') && !JSON.stringify(b.body).includes('10.20.0.1'), '다른 법인 서버 이름 · 주소가 없다');
+  const ab = await call('admB', 'GET', '/key-overlaps');
+  assert.equal(ab.body.items[0].idracHost, 'https://10.20.0.12'); assert.equal(ab.body.items[0].dupOf, null);
+  // 주 화면 개수(보이는 법인 것만)
+  assert.deepEqual((await call('opB', 'GET', '')).body.keyOverlaps, { total: 1, pending: 1, added: 0 });
+  assert.deepEqual((await call('opA', 'GET', '')).body.keyOverlaps, { total: 0, pending: 0, added: 0 });
+  // 쓰기 게이트 — 조회 밖 404 · 조회 되고 쓰기 밖 403 · viewer 403(역할) · 형식 400
+  assert.equal((await call('opA', 'POST', '/key-overlaps/decision', { oid: it.oid, decision: 'add' })).status, 404);
+  assert.equal((await call('opABwA', 'POST', '/key-overlaps/decision', { oid: it.oid, decision: 'add' })).status, 403);
+  assert.equal((await call('vw', 'POST', '/key-overlaps/decision', { oid: it.oid, decision: 'add' })).status, 403);
+  assert.equal((await call('opB', 'POST', '/key-overlaps/decision', { oid: it.oid, decision: 'maybe' })).status, 400);
+  assert.equal((await call('opB', 'POST', '/key-overlaps/decision', { oid: 'bm|vcB|nope', decision: 'add' })).status, 404);
+  // 추가 — 다음 대상 해석에서 별도 키로 대상(서비스태그로 등록을 찾지 않는다 — 자기 iDRAC) · 이미 수집 중인 A 서버의 키는 그대로
+  const add = await call('opB', 'POST', '/key-overlaps/decision', { oid: it.oid, decision: 'add' });
+  assert.equal(add.status, 200, JSON.stringify(add.body)); assert.equal(add.body.key, 'vcB:r-b1');
+  const tg = await poller.currentTargets();
+  assert.deepEqual(tg.targets.map((x) => `${x.vcenterId}|${x.key}|${x.idrac?.regId}`).sort(), ['vcA|TO BE FILLED BY O.E.M.|r-a1', 'vcB|vcB:r-b1|r-b1']);
+  assert.equal(tg.keyOverlaps[0].collecting, true);
+  const after = await call('adm', 'GET', '/key-overlaps');
+  assert.equal(after.body.items[0].decision.decision, 'add'); assert.equal(after.body.items[0].decision.by, 'opb', '관리자 판본은 결정한 사람');
+  assert.equal((await call('opB', 'GET', '/key-overlaps')).body.items[0].decision.by, undefined, '비관리자는 결정한 사람을 싣지 않는다');
+  // 새 키는 처음 쓰는 이름 — 성능 상세가 그 서버로 열린다(옛 키의 주석 · 정비 창이 따라오지 않는다)
+  const det = await call('adm', 'GET', `/perf/${encodeURIComponent('vcB:r-b1')}?vcenterId=vcB`);
+  assert.equal(det.status, 200); assert.equal(det.body.target.serverId, 'r-b1');
+  // 키 겹침 409 — 지금 대상이 그 별도 키를 이미 쓰면(다른 서버) 결정하지 않는다
+  const { bmKeyDecisionWrite } = await import('../src/routes/api/bmKeyOverlaps.js');
+  const fakeTg = { targets: [{ key: 'vcB:r-b1', vcenterId: 'vcB' }], keyOverlaps: [{ ...tg.keyOverlaps[0], decision: null }] };
+  const taken = await bmKeyDecisionWrite({ user: USERS.adm, body: { oid: it.oid, decision: 'add' } }, { currentTargets: async () => fakeTg });
+  assert.equal(taken.status, 409); assert.equal(taken.body.code, 'key-taken');
+  // 제외 유지 → 되돌리기(결정 없음 = 수집 안 함 · 쌓인 값은 지우지 않는다)
+  assert.equal((await call('opB', 'POST', '/key-overlaps/decision', { oid: it.oid, decision: 'exclude' })).status, 200);
+  assert.deepEqual((await poller.currentTargets()).targets.map((x) => x.vcenterId), ['vcA'], '제외 유지 — 수집하지 않는다');
+  assert.equal((await call('opABwA', 'DELETE', `/key-overlaps/decision?oid=${encodeURIComponent(it.oid)}`)).status, 403, '되돌리기도 쓰기 범위');
+  const clr = await call('opB', 'DELETE', `/key-overlaps/decision?oid=${encodeURIComponent(it.oid)}`);
+  assert.equal(clr.status, 200, JSON.stringify(clr.body));
+  assert.equal((await call('opB', 'GET', '/key-overlaps')).body.items[0].decision, null);
+  // 기록만 남은 결정(겹침이 풀린 서버) — 되돌리기는 결정 기록의 법인으로 게이트
+  await KD.setKeyDecision({ oid: 'bm|vcB|gone-1', decision: 'exclude', vcenterId: 'vcB', serverId: 'gone-1', name: 'gone' }, { by: 'adm' });
+  assert.equal((await call('opA', 'DELETE', '/key-overlaps/decision?oid=bm%7CvcB%7Cgone-1')).status, 404, '조회 밖');
+  assert.equal((await call('opB', 'DELETE', '/key-overlaps/decision?oid=bm%7CvcB%7Cgone-1')).status, 200);
+  // 감사
+  const { auditEntriesWithAction } = await import('../src/audit.js');
+  const au = auditEntriesWithAction('bm-usage.key-decision');
+  assert.ok(au.length >= 4, `감사 ${au.length}건(추가 · 제외 · 되돌리기 · 기록 되돌리기)`);
+  // 손상 — 읽기 503 · 쓰기 거부 · 결정을 적용하지 않는다(별도 키 수집 멈춤 — sourceErrors 로 밝힌다)
+  assert.equal((await call('opB', 'POST', '/key-overlaps/decision', { oid: it.oid, decision: 'add' })).status, 200);
+  fs.writeFileSync(path.join(DIR, 'bm-key-decisions.json'), '{ broken');
+  const bad = await call('adm', 'GET', '/key-overlaps');
+  assert.equal(bad.status, 503); assert.equal(bad.body.code, 'settingsUnreadable');
+  const tgBad = await poller.currentTargets();
+  assert.deepEqual(tgBad.targets.map((x) => x.vcenterId), ['vcA'], '못 읽으면 결정을 적용하지 않는다');
+  assert.ok(tgBad.sourceErrors.some((x) => x.source === 'key-decisions'));
+  assert.equal((await call('opB', 'POST', '/key-overlaps/decision', { oid: it.oid, decision: 'exclude' })).status, 503, '손상이면 쓰기 거부(빈 목록으로 덮지 않는다)');
+  assert.ok(fs.readdirSync(DIR).some((f) => f.startsWith('bm-key-decisions.json.corrupt.')), '손상본 보존');
+  for (const f of fs.readdirSync(DIR).filter((x) => x.startsWith('bm-key-decisions.json'))) fs.rmSync(path.join(DIR, f));
+  KD._resetKeyDecisionsForTest();
+});
+
+test('③ 반증 r1 · r1b(F2) — 용도 태그는 (법인, 키) 쌍으로 저장: A 쓰기 뒤 B 판정 불변 · B 해제가 A 를 지우지 않음 · 예전 키 행은 범위 계정이 지우지 않음(G2) · 계정명', async (t) => {
+  const { call } = await app(t);
+  const IP = '10.1.1.5';
+  // ⚠ OS 계정 등록부(bmstor)는 프로세스 캐시라 시험마다 바꾸지 않는다 — iDRAC 경로(등록부는 매번 읽는다)로 대상을 만든다.
+  fs.writeFileSync(path.join(DIR, 'idrac.json'), JSON.stringify({ servers: [{ id: 's-a1', name: 'bm-a1', host: 'https://10.30.0.1', username: 'u', password: 'p', vcenterId: 'vcA' }] }));
+  fs.writeFileSync(path.join(DIR, 'bmusage-settings.json'), JSON.stringify({ enabled: true, corps: { vcA: true }, osSsh: false, idracTelemetry: true }));
+  (await import('../src/bmusage/settings.js'))._resetForTest();
+  const poller = await import('../src/bmusage/poller.js');
+  poller._setFleetForTest(async () => ({ bareMetal: [{ serverId: 's-a1', fleetId: IP, name: 'bm-a1', serviceTag: '', vcenterId: 'vcA', vcName: 'A 법인' }], virtualizationHosts: [] }));
+  const E = await import('../src/central/bmUsageEdgePull.js');
+  E._resetForTest();
+  E.putEdgeBmUsage('Edge-B', { ok: true, snap: { targets: [{ key: IP, name: 'b-ip', serviceTag: '', keyKind: 'fleetId', vcenterId: 'vcB', vcName: 'B 법인', paths: ['os'] }], perf: [], rows: [] } });
+  t.after(() => { poller._setFleetForTest(null); E._resetForTest(); });
+  const FT = await import('../src/insights/fleetTags.js');
+  const profile = async (u, vc) => (await call(u, 'GET', `/perf/${IP}/profile${vc ? `?vcenterId=${vc}` : ''}`)).body;
+  assert.equal((await call('admA', 'PUT', '/purpose', { key: IP, role: 'db' })).status, 200);
+  assert.equal((await profile('admA')).manual?.role, 'db', 'A 서버에는 태그');
+  assert.equal((await profile('adm', 'vcB')).manual, null, 'B 서버 판정은 그대로(반증 r1: role db · by adma)');
+  assert.equal((await profile('admB')).manual, null, 'B 관리자에게 A 관리자 계정명이 보이지 않는다');
+  assert.equal(FT.fleetPurposeOf(`vcA|${IP}`)?.role, 'db', '저장 키 = 법인|키');
+  assert.equal(FT.fleetPurposeOf(IP), null, '예전(키 단독) 행을 새로 만들지 않는다');
+  // B 해제는 A 를 지우지 않는다(반증 r1b)
+  assert.equal((await call('admB', 'PUT', '/purpose', { key: IP, clear: true })).status, 200);
+  assert.equal((await profile('admA')).manual?.role, 'db');
+  // 예전 키 행(법인 구분 없음) — 2차 재확인 G2: 범위 계정은 **지우지 않는다**(쌍 행만) · 중앙이 엣지를 맡기면(보관분) 전체 범위도 나누지 않는다(모르는 서버가 있다)
+  FT.setFleetPurpose(`vcA|${IP}`, null, {});
+  assert.equal(FT.setFleetPurpose(IP, { role: 'web' }, { by: 'legacy-user', knownRoles: ['web', 'db', 'general', 'batch', 'storage'], knownApps: [] }).ok, true);
+  assert.equal((await profile('adm', 'vcB')).manual?.role, 'web', '예전 행은 읽기에서 그대로 걸린다(저장 이전 없음)');
+  assert.equal((await profile('admB')).manual?.by, undefined, '예전 행(어느 법인 것인지 모름)의 계정명은 범위 계정에 싣지 않는다');
+  assert.equal((await profile('adm', 'vcB')).manual?.by, 'legacy-user', '전체 범위 관리자는 본다');
+  const wA = await call('admA', 'PUT', '/purpose', { key: IP, role: 'db' });
+  assert.equal(wA.status, 200, JSON.stringify(wA.body)); assert.equal(wA.body.legacyRemains, true, '예전 행이 남았다고 말한다');
+  assert.equal(FT.fleetPurposeOf(IP)?.role, 'web', '범위 계정은 예전 행을 지우지 않는다(G2 — 예전: 보이는 대상만 세고 지웠다)');
+  assert.equal((await profile('admA')).manual?.role, 'db', 'A 는 쌍 행(자기 서버)');
+  assert.equal((await profile('adm', 'vcB')).manual?.role, 'web', 'B 는 예전 값 그대로');
+  const full = await call('adm', 'PUT', '/purpose', { key: IP, role: 'cache', vcenterId: 'vcA' });
+  assert.equal(full.status, 200, JSON.stringify(full.body)); assert.equal(full.body.legacyRemains, true, '엣지 보관분이 있으면(맡긴 엣지) 전체 범위도 나누지 않는다');
+  assert.equal(FT.fleetPurposeOf(IP)?.role, 'web');
+  const cl = await call('admA', 'PUT', '/purpose', { key: IP, clear: true });
+  assert.equal(cl.status, 200); assert.match(cl.body.legacyNote, /예전 태그가 남아/, '지워도 예전 값이 보인다고 말한다(‘자동 감지로 돌아갑니다’ 가 아니다)');
+  assert.equal((await profile('admA')).manual?.role, 'web', '쌍 행을 지우면 예전 행이 다시 보인다(정직)');
+  FT.setFleetPurpose(IP, null, {}); FT.setFleetPurpose(`vcA|${IP}`, null, {}); FT.setFleetPurpose(`vcB|${IP}`, null, {});
+});
+
+test('④ 반증 r2(F3) — 범위 계정의 키 충돌 수는 보이는 줄의 고유 키 · peers 없음', async (t) => {
+  const { call } = await app(t);
+  fs.writeFileSync(path.join(DIR, 'idrac.json'), JSON.stringify({ servers: ['a1', 'a2', 'a3', 'b1', 'b2'].map((id, i) => ({ id, name: id, host: `https://10.40.0.${i + 2}`, username: 'u', password: 'p' })) }));
+  fs.writeFileSync(path.join(DIR, 'bmusage-settings.json'), JSON.stringify({ enabled: true, corps: { vcA: true, vcB: true }, osSsh: false, idracTelemetry: true }));
+  (await import('../src/bmusage/settings.js'))._resetForTest();
+  const poller = await import('../src/bmusage/poller.js');
+  poller._setFleetForTest(async () => ({ bareMetal: [
+    { serverId: 'a1', fleetId: 'K1', name: 'a-one', serviceTag: '', vcenterId: 'vcA' }, { serverId: 'a2', fleetId: 'K1', name: 'a-two', serviceTag: '', vcenterId: 'vcA' },
+    { serverId: 'a3', fleetId: 'K2', name: 'a-three', serviceTag: '', vcenterId: 'vcA' }, { serverId: 'b1', fleetId: 'K2', name: 'b-one', serviceTag: '', vcenterId: 'vcB' },
+    { serverId: 'b2', fleetId: 'K3', name: 'b-ok', serviceTag: '', vcenterId: 'vcB' },
+  ], virtualizationHosts: [] }));
+  t.after(() => poller._setFleetForTest(null));
+  const adm = await call('adm', 'GET', '');
+  assert.equal(adm.body.counts.keyConflicts, 2);
+  const b = await call('opB', 'GET', '');
+  assert.equal(b.body.counts.keyConflicts, 1, '반증 r2: 2(B 와 무관한 K1 포함)');
+  assert.deepEqual(b.body.keyConflicts, [{ key: 'K2', names: ['b-one'], keyKind: 'fleetId', vcenterId: 'vcB', role: 'bm' }], 'peers(범위 밖 서버까지 센 수) 없음');
+});
+
+test('⑤ 반증 r3(F4) — 귀속 없음 후보는 노드까지 갈라 ‘-@노드’ 로 고른다(사유 수 = 후보 수 = 버튼 수)', async () => {
+  const { _resolvePerfTargetForTest: R, perfTargetFail } = await import('../src/routes/api/bmUsage.js');
+  const D = {
+    currentTargets: async () => ({ targets: [{ key: 'K', name: 'local-unassigned', vcenterId: '' }] }),
+    listEdgeBmUsage: async () => [
+      { agent: 'Edge-B', snapAt: 2, snap: { targets: [{ key: 'K', name: 'edge-b', vcenterId: 'vcB' }] } },
+      { agent: 'Edge-C', snapAt: 1, snap: { targets: [{ key: 'K', name: 'edge-c-unassigned', vcenterId: '' }] } },
+    ],
+  };
+  const amb = perfTargetFail(await R({}, D, { allowed: null, isAdmin: true, key: 'K' }));
+  assert.equal(amb.code, 'ambiguous-key');
+  const me = (await import('../src/config.js')).config.agent?.name || '';
+  const un = [{ vcenterId: '', vcName: null, unassigned: true, agent: me, via: 'local', pick: `-@${me}` }, { vcenterId: '', vcName: null, unassigned: true, agent: 'Edge-C', via: 'edge', pick: '-@Edge-C' }]   // G4: via 로 이 노드 · 엣지를 가른다
+    .sort((x, y) => x.pick.localeCompare(y.pick));
+  assert.deepEqual(amb.candidates, [{ vcenterId: 'vcB', vcName: null }, ...un], '예전: 후보 2(이 노드 · 엣지 C 귀속 없음이 한 쌍으로 합쳐짐) · 웹 버튼 1');
+  assert.match(amb.reason, /3개 법인/);
+  assert.equal((await R({}, D, { allowed: null, isAdmin: true, key: 'K', vcenterId: '-@Edge-C' })).target.name, 'edge-c-unassigned');
+  assert.equal((await R({}, D, { allowed: null, isAdmin: true, key: 'K', vcenterId: `-@${me}` })).target.name, 'local-unassigned');
+  assert.equal((await R({}, D, { allowed: null, isAdmin: true, key: 'K', vcenterId: 'vcB' })).target.name, 'edge-b');
+  assert.equal(await R({}, D, { allowed: new Set(['vcB', 'vcC']), isAdmin: false, key: 'K', vcenterId: '-@Edge-C' }), null, '범위 계정은 귀속 없음을 못 고른다');
+  assert.equal((await R({}, D, { allowed: new Set(['vcB']), isAdmin: false, key: 'K' })).target.name, 'edge-b', '범위 계정 후보는 B 하나');
+});
+
+test('⑥ 실제 getFleetInventory — 전력 미보고 등록부 서버가 공통 태그로 서버 목록 단계에서 빠지던 것(stage universe)도 겹침 목록에', async (t) => {
+  await app(t);
+  fs.writeFileSync(path.join(DIR, 'idrac.json'), JSON.stringify({ servers: [
+    { id: 'u-a1', name: 'uw-a1', host: 'https://10.60.0.11', username: 'u', password: 'p', vcenterId: 'vcA', serviceTag: 'To Be Filled By O.E.M.' },
+    { id: 'u-b1', name: 'uw-b1', host: 'https://10.60.0.12', username: 'u', password: 'p', vcenterId: 'vcB', serviceTag: 'To Be Filled By O.E.M.' },
+  ] }));
+  fs.writeFileSync(path.join(DIR, 'bmusage-settings.json'), JSON.stringify({ enabled: true, corps: { vcA: true, vcB: true }, osSsh: false, idracTelemetry: true }));
+  (await import('../src/bmusage/settings.js'))._resetForTest();
+  const { getFleetInventory } = await import('../src/insights/fleetInventory.js');
+  const { store } = await import('../src/store.js');
+  const inv = await getFleetInventory({ ...store.get(), hosts: [] });
+  assert.deepEqual(inv.bareMetal.filter((b) => b.serverId.startsWith('u-')).map((b) => b.serverId), ['u-a1'], '분류는 그대로(한 대)');
+  const d = inv.bareMetalDupes.filter((x) => x.serverId === 'u-b1');
+  assert.equal(d.length, 1, '예전: 서버 목록 단계에서 사유 없이 빠졌다');
+  assert.deepEqual([d[0].stage, d[0].why, d[0].vcenterId, d[0].dupOf?.serverId], ['universe', 'tag', 'vcB', 'u-a1']);
+  const poller = await import('../src/bmusage/poller.js');
+  poller._setFleetForTest(null);
+  const tg = await poller.currentTargets();
+  const o = tg.keyOverlaps.find((x) => x.serverId === 'u-b1');
+  assert.ok(o, '실제 대상 해석의 겹침 목록에 보인다');
+  assert.deepEqual([o.vcenterId, o.idracHost, o.dupOf?.name], ['vcB', 'https://10.60.0.12', 'uw-a1']);
+  // 서버 분석 응답(/insights/fleet)에는 싣지 않는다(내부용 — 범위 · 가림을 그 라우트가 하지 않는다)
+  const src = fs.readFileSync(new URL('../src/routes/insights.js', import.meta.url), 'utf8');
+  assert.match(src, /const \{ liveKeys, bareMetalDupes: _dupes, \.\.\.payload1 \} = full;/);
+});
+
+test('⑦ 같은 장비는 겹침이 아니다(전력 보고분과 같은 등록 id) · 공통 태그 서버의 주소 · 수집 경로를 남의 등록에서 집지 않는다', async (t) => {
+  await app(t);
+  // (a) 전력을 보고하는 등록부 서버는 서버 목록에 자기 id 로 이미 있다 — 자기 태그에 걸려 ‘겹침’ 으로 오르지 않는다 · 같은 공통 태그의 다른 서버만 오른다
+  fs.writeFileSync(path.join(DIR, 'idrac.json'), JSON.stringify({ servers: [
+    { id: 'p-a1', name: 'pw-a1', host: 'https://10.70.0.11', username: 'u', password: 'p', vcenterId: 'vcA', serviceTag: 'To Be Filled By O.E.M.' },
+    { id: 'p-b1', name: 'pw-b1', host: 'https://10.70.0.12', username: 'u', password: 'p', vcenterId: 'vcB', serviceTag: 'To Be Filled By O.E.M.' },
+  ] }));
+  const { getDb } = await import('../src/idrac/db.js');
+  const db = await getDb();
+  db.insert('p-a1', 210, Date.now()); db.insert('p-b1', 220, Date.now());
+  const { getFleetInventory } = await import('../src/insights/fleetInventory.js');
+  const { store } = await import('../src/store.js');
+  const inv = await getFleetInventory({ ...store.get(), hosts: [] });
+  const d = inv.bareMetalDupes.filter((x) => String(x.serverId).startsWith('p-'));
+  assert.deepEqual(d.map((x) => x.serverId), ['p-b1'], '전력 보고분 자신(p-a1)은 겹침이 아니다 · 전력 집계가 같은 공통 태그로 뺀 p-b1 만');
+  // (b) 등록 id 가 아닌 겹침 서버(예: OME · 원격)의 공통 태그로 남의 등록(iDRAC 주소 · 계정)을 집지 않는다 — 목록 주소 · ‘추가’ 뒤 수집 경로 둘 다
+  const { resolveTargets } = await import('../src/bmusage/targets.js');
+  const registry = [{ id: 'r-a1', host: 'https://10.80.0.11', username: 'u', password: 'p', serviceTag: 'To Be Filled By O.E.M.' }];
+  const bareMetal = [{ serverId: 'r-a1', fleetId: 'to be filled by o.e.m.', name: 'a1', serviceTag: 'To Be Filled By O.E.M.', vcenterId: 'vcA' }];
+  const dupes = [{ serverId: 'ome:e1:x9', fleetId: 'to be filled by o.e.m.', name: 'ome-x9', serviceTag: 'To Be Filled By O.E.M.', source: 'ome', vcenterId: 'vcB', remoteAgent: '', dupOf: { name: 'a1', vcenterId: 'vcA', source: 'idrac' } }];
+  const settings = { corps: { vcA: true, vcB: true }, idracTelemetry: true };
+  const r = resolveTargets({ bareMetal, dupes, registry, settings });
+  assert.equal(r.keyOverlaps[0].idracHost, '', '남의 iDRAC 주소를 싣지 않는다');
+  const oid = r.keyOverlaps[0].oid;
+  const r2 = resolveTargets({ bareMetal, dupes, registry, settings, decisions: new Map([[oid, { oid, decision: 'add', key: 'vcB:ome:e1:x9' }]]) });
+  assert.deepEqual(r2.targets.map((x) => x.idrac?.regId), ['r-a1'], '추가한 서버가 남의 iDRAC(r-a1)으로 수집되지 않는다');
+  assert.deepEqual(r2.skipped.filter((x) => x.key === 'vcB:ome:e1:x9').map((x) => x.reason), ['no-idrac'], '경로 없음으로 밝힌다');
+});
+
+/* ═══════════ 2차 재확인(G1 ~ G4) — 재현 rvn1/v2 r1c · r1d · r9 · r3b 를 회귀로 ═══════════ */
+const ROLES5 = ['web', 'db', 'cache', 'file', 'general'];
+async function oneLocal(t, { bareMetal, idrac, corps = { vcA: true }, edges = {} }) {
+  fs.writeFileSync(path.join(DIR, 'idrac.json'), JSON.stringify({ servers: idrac }));
+  fs.writeFileSync(path.join(DIR, 'bmusage-settings.json'), JSON.stringify({ enabled: true, corps, osSsh: false, idracTelemetry: true }));
+  (await import('../src/bmusage/settings.js'))._resetForTest();
+  const poller = await import('../src/bmusage/poller.js');
+  poller._setFleetForTest(async () => ({ bareMetal, virtualizationHosts: [] }));
+  const E = await import('../src/central/bmUsageEdgePull.js');
+  E._resetForTest();
+  for (const [a, snap] of Object.entries(edges)) E.putEdgeBmUsage(a, { ok: true, snap });
+  t.after(() => { poller._setFleetForTest(null); E._resetForTest(); });
+  return { E, FT: await import('../src/insights/fleetTags.js') };
+}
+
+test('⑧ G1(r1c) — 공통 서비스 태그(To Be Filled By O.E.M.)는 전역 열쇠가 아니다: 범위 관리자 A 쓰기는 A 쌍 행 · 엣지 B 서버 판정 · 계정명 불변 · B 해제가 A 를 지우지 않음', async (t) => {
+  const { call } = await app(t);
+  const TAG = 'To Be Filled By O.E.M.'; const K = TAG.toUpperCase();
+  const { FT } = await oneLocal(t, {
+    bareMetal: [{ serverId: 's-a1', name: 'wb-a1', serviceTag: TAG, vcenterId: 'vcA', vcName: 'A 법인' }],
+    idrac: [{ id: 's-a1', name: 'wb-a1', host: 'https://10.31.0.1', username: 'u', password: 'p', vcenterId: 'vcA' }],
+    edges: { 'Edge-B': { targets: [{ key: K, keyKind: 'serviceTag', name: 'wb-b1', serviceTag: K, vcenterId: 'vcB', vcName: 'B 법인', paths: ['os'] }], perf: [], rows: [] } },
+  });
+  const P = `/perf/${encodeURIComponent(K)}`;
+  const w = await call('admA', 'PUT', '/purpose', { key: K, role: 'db' });
+  assert.equal(w.status, 200, JSON.stringify(w.body)); assert.equal(w.body.keyScope, 'pair', '공통 태그 → 쌍 키');
+  assert.equal(FT.fleetPurposeOf(`vcA|${K}`)?.role, 'db'); assert.equal(FT.fleetPurposeOf(K), null, '전역 태그 행을 만들지 않는다');
+  const b = (await call('admB', 'GET', `${P}/profile`)).body;
+  assert.equal(b.via, 'edge'); assert.equal(b.manual, null, '예전: B 프로필 role db · by adma(반증 r1c)');
+  assert.notEqual((await call('opB', 'GET', `${P}/tuning`)).body.role, 'db', '튜닝 판정도 그대로');
+  assert.equal((await call('admB', 'PUT', '/purpose', { key: K, clear: true })).status, 200);
+  assert.equal((await call('admA', 'GET', `${P}/profile`)).body.manual?.role, 'db', 'B 해제가 A 태그를 지우지 않는다');
+  FT.setFleetPurpose(`vcA|${K}`, null, {});
+});
+
+test('⑨ G1 — 고유 서비스 태그: 판정기가 complete(엣지 없음)면 전역 태그 키 + 이 서버의 쌍 행을 지움 · 엣지 보관분이 있으면(모름) 쌍 키', async (t) => {
+  const { call } = await app(t);
+  const TAG = 'ABCD123';
+  const fx = { bareMetal: [{ serverId: 's-u1', name: 'uq-1', serviceTag: TAG, vcenterId: 'vcA', vcName: 'A 법인' }],
+    idrac: [{ id: 's-u1', name: 'uq-1', host: 'https://10.32.0.1', username: 'u', password: 'p', vcenterId: 'vcA' }] };
+  const { FT, E } = await oneLocal(t, fx);
+  assert.equal(FT.setFleetPurpose(`vcA|${TAG}`, { role: 'web' }, { by: 'x', knownRoles: ROLES5, knownApps: [] }).ok, true);   // 판정기가 모를 때 쓴 쌍 행
+  const w = await call('admA', 'PUT', '/purpose', { key: TAG, role: 'db' });
+  assert.equal(w.status, 200, JSON.stringify(w.body)); assert.equal(w.body.keyScope, 'tag');
+  assert.equal(FT.fleetPurposeOf(TAG)?.role, 'db'); assert.equal(FT.fleetPurposeOf(`vcA|${TAG}`), null, '쌍 행이 새 값을 가리지 않게 지운다');
+  assert.equal((await call('admA', 'GET', `/perf/${TAG}/profile`)).body.manual?.by, 'adma', '전역 태그(그 서버 것)는 범위 관리자에게도 계정명');
+  E.putEdgeBmUsage('Edge-Z', { ok: true, snap: { targets: [{ key: 'OTHER1', keyKind: 'serviceTag', name: 'z', serviceTag: 'OTHER1', vcenterId: 'vcZ' }], perf: [], rows: [] } });
+  const w2 = await call('admA', 'PUT', '/purpose', { key: TAG, role: 'cache' });
+  assert.equal(w2.body.keyScope, 'pair', '맡긴 엣지가 있으면 그 엣지의 서버를 다 모른다 → 쌍 키');
+  assert.equal((await call('admA', 'GET', `/perf/${TAG}/profile`)).body.manual?.role, 'cache', '읽기는 쌍 먼저');
+  FT.setFleetPurpose(TAG, null, {}); FT.setFleetPurpose(`vcA|${TAG}`, null, {});
+});
+
+test('⑩ G2(r1d) — 예전 키 행: 엣지 보관분이 없을 때 범위 관리자 쓰기가 다른 법인 서버의 태그를 지우지 않는다 · 단일 노드의 전체 범위는 대상이 아닌 서버까지 나눠 옮김', async (t) => {
+  const { call } = await app(t);
+  const IP = '10.1.1.5';
+  const { FT, E } = await oneLocal(t, {
+    bareMetal: [{ serverId: 's-a1', fleetId: IP, name: 'bm-a1', serviceTag: '', vcenterId: 'vcA', vcName: 'A 법인' },
+      { serverId: 's-b9', fleetId: IP, name: 'bm-b9', serviceTag: '', vcenterId: 'vcB', vcName: 'B 법인' }],   // vcB 는 꺼진 법인 → 대상이 아닌 서버(corp-off)
+    idrac: [{ id: 's-a1', name: 'bm-a1', host: 'https://10.33.0.1', username: 'u', password: 'p', vcenterId: 'vcA' }],
+  });
+  const legacy = () => FT.setFleetPurpose(IP, { role: 'web' }, { by: 'old-owner', knownRoles: ROLES5, knownApps: [] });
+  assert.equal(legacy().ok, true);
+  const w = await call('admA', 'PUT', '/purpose', { key: IP, role: 'db' });   // 엣지 보관분 없음(첫 당김 전)
+  assert.equal(w.status, 200); assert.equal(w.body.legacyRemains, true);
+  const edgeB = { targets: [{ key: IP, keyKind: 'fleetId', name: 'b-ip', serviceTag: '', vcenterId: 'vcB', vcName: 'B 법인', paths: ['os'] }], perf: [], rows: [] };
+  E.putEdgeBmUsage('Edge-B', { ok: true, snap: edgeB });   // 첫 당김이 뒤에 도착
+  assert.equal((await call('admB', 'GET', `/perf/${IP}/profile`)).body.manual?.role, 'web', '예전: B manual null(태그 잃음 · 되돌릴 기록 없음)');
+  // 단일 노드(엣지 없음) · 전체 범위 — 같은 키의 대상이 아닌 서버(vcB corp-off)까지 쌍으로 나눠 옮긴 뒤 예전 행을 지운다
+  E._resetForTest(); FT.setFleetPurpose(`vcA|${IP}`, null, {});
+  const full = await call('adm', 'PUT', '/purpose', { key: IP, vcenterId: 'vcA', role: 'cache' });
+  assert.equal(full.status, 200, JSON.stringify(full.body)); assert.equal(full.body.legacyRemains, undefined);
+  assert.equal(FT.fleetPurposeOf(IP), null, '예전 행 정리');
+  assert.deepEqual([FT.fleetPurposeOf(`vcA|${IP}`)?.role, FT.fleetPurposeOf(`vcB|${IP}`)?.role, FT.fleetPurposeOf(`vcB|${IP}`)?.by], ['cache', 'web', 'old-owner'], '대상이 아닌 서버의 값 · 처음 단 사람 보존');
+  FT.setFleetPurpose(`vcA|${IP}`, null, {}); FT.setFleetPurpose(`vcB|${IP}`, null, {});
+});
+
+test('⑪ G3(r9) — ‘추가’ 한 서버의 OS 등록은 법인이 맞는 것만: 같은 이름 다른 법인 등록으로 SSH 하지 않음 · 법인 미지정 · 다른 법인뿐이면 OS 경로 없음(사유)', async () => {
+  const { classifyFleet } = await import('../src/insights/fleetInventory.js');
+  const { resolveTargets } = await import('../src/bmusage/targets.js');
+  const vcenters = [{ id: 'vcA', name: 'A' }, { id: 'vcB', name: 'B' }];
+  const servers = [
+    { serverId: 'r-a', serverName: 'db01', serviceTag: 'To Be Filled By O.E.M.', source: 'idrac', vcenterId: 'vcA' },
+    { serverId: 'r-b', serverName: 'db01', serviceTag: 'To Be Filled By O.E.M.', source: 'idrac', vcenterId: 'vcB' },
+  ];
+  const f = classifyFleet({ hosts: [], vcenters, servers });
+  const registry = [{ id: 'r-a', host: 'https://10.1.9.1', username: 'ua', password: 'p' }, { id: 'r-b', host: 'https://10.2.9.1', username: 'ub', password: 'p' }];
+  const oa = { id: 'oa', name: 'db01', host: '10.1.0.5', vcenterId: 'vcA', port: 22, username: 'os-a', password: 'pa', mounts: [] };
+  const ob = { id: 'ob', name: 'db01', host: '10.2.0.5', vcenterId: 'vcB', port: 22, username: 'os-b', password: 'pb', mounts: [] };
+  const st = { corps: { vcA: true, vcB: true }, idracTelemetry: true, osSsh: true };
+  const run = (bmServers) => {
+    const r0 = resolveTargets({ bareMetal: f.bareMetal, dupes: f.bareMetalDupes, registry, bmServers, settings: st });
+    const dec = new Map(r0.keyOverlaps.map((o) => [o.oid, { oid: o.oid, decision: 'add', key: o.decidedKey }]));
+    return { r0, r1: resolveTargets({ bareMetal: f.bareMetal, dupes: f.bareMetalDupes, registry, bmServers, settings: st, decisions: dec }) };
+  };
+  let { r0, r1 } = run([oa, ob]);
+  const bOf = (r) => r.targets.find((x) => x.vcenterId === 'vcB');
+  assert.equal(r0.keyOverlaps[0].osHost, '10.2.0.5', '겹침 행의 OS 주소도 자기 법인 것');
+  assert.deepEqual([bOf(r1).idrac.host, bOf(r1).osHost?.host, bOf(r1).osHost?.username], ['https://10.2.9.1', '10.2.0.5', 'os-b'], '예전: OS 10.1.0.5(os-a · 등록 법인 vcA)');
+  ({ r0, r1 } = run([{ ...oa, vcenterId: undefined }, { ...ob, vcenterId: undefined }]));   // 7b 이전 등록(법인 미지정) — 같은 이름 · 다른 주소
+  assert.equal(r0.keyOverlaps[0].osIssue, 'os-ambiguous');
+  assert.equal(bOf(r1).osHost, null); assert.deepEqual(bOf(r1).missing, ['os-ambiguous'], '‘추가’ 한 서버는 법인이 맞는 등록만 — OS 경로 없음(사유)');
+  assert.equal(r1.targets.find((x) => x.vcenterId === 'vcA').osHost, null, '일반 대상도 같은 이름 · 다른 주소면 어느 장비인지 모른다(예전: 첫 등록)');
+  ({ r0, r1 } = run([{ ...ob, vcenterId: undefined }]));   // 법인 미지정 등록 하나(이름 db01) — 일반 대상은 예전대로 · ‘추가’ 한 서버는 법인을 모르면 쓰지 않는다(strict)
+  assert.equal(r0.keyOverlaps[0].osIssue, 'os-ambiguous', '겹침 행: 법인 미지정 등록은 이 서버 것인지 모른다');
+  assert.equal(bOf(r1).osHost, null); assert.deepEqual(bOf(r1).missing, ['os-ambiguous']);
+  assert.equal(r1.targets.find((x) => x.vcenterId === 'vcA').osHost?.id, 'ob', '일반 대상은 예전과 같다(법인 미지정 · 주소 하나 — 회귀 없음)');
+  ({ r0, r1 } = run([oa]));   // A 법인 등록뿐
+  assert.equal(r0.keyOverlaps[0].osIssue, 'os-foreign');
+  assert.equal(bOf(r1).osHost, null); assert.deepEqual(bOf(r1).missing, ['os-foreign']);
+  assert.equal(r1.targets.find((x) => x.vcenterId === 'vcA').osHost?.id, 'oa', 'A 서버는 그대로 자기 등록');
+});
+
+test('⑫ G3 A/B — 일반 대상의 OS 찾기: 법인 미지정 · 이름 하나뿐인 등록(지금 현장 대부분)은 예전과 같은 등록을 고른다 · 달라지는 셋만 다르다', async () => {
+  const { indexOsHosts, pickOsEntry, hostKey } = await import('../src/bmusage/targets.js');
+  const norm = (v) => String(v || '').trim().toLowerCase();
+  const oldPick = (os, regHost, name) => os.byHost.get(hostKey(regHost)) || os.byName.get(norm(name)) || os.byHost.get(hostKey(name)) || null;
+  let seed = 7; const rnd = (n) => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
+  let same = 0;
+  for (let c = 0; c < 400; c += 1) {
+    const names = Array.from({ length: 6 }, (_, i) => `srv-${c}-${i}`);
+    const reg = names.map((n, i) => ({ id: `o${i}`, name: n, host: rnd(3) === 0 ? `10.9.${c % 250}.${i}` : `${n}.corp`, mounts: [] }));
+    if (rnd(4) === 0) reg.push({ ...reg[0], id: 'dup' });   // 같은 장비 중복 등록(같은 주소)
+    const os = indexOsHosts(reg);
+    for (let i = 0; i < 8; i += 1) {
+      const name = rnd(5) === 0 ? `nope-${i}` : names[rnd(6)]; const regHost = rnd(3) === 0 ? reg[rnd(reg.length)].host : '';
+      const vc = ['vcA', 'vcB', ''][rnd(3)];
+      assert.equal(pickOsEntry(os, { regHost, name, vc }).entry, oldPick(os, regHost, name), `${c}/${i}`);
+      same += 1;
+    }
+  }
+  assert.equal(same, 3200);
+  // 달라지는 셋 — ① 다른 법인 지정 등록은 쓰지 않음 ② 같은 이름 · 다른 주소(법인 미지정)는 모호 ③ 지정 · 미지정이 섞이면 이 법인 지정 등록
+  const r1 = indexOsHosts([{ name: 'x', host: '10.0.0.1', vcenterId: 'vcB' }]);
+  assert.deepEqual(pickOsEntry(r1, { name: 'x', vc: 'vcA' }), { entry: null, reason: 'os-foreign' });
+  const r2 = indexOsHosts([{ name: 'x', host: '10.0.0.1' }, { name: 'x', host: '10.0.0.2' }]);
+  assert.deepEqual(pickOsEntry(r2, { name: 'x', vc: 'vcA' }), { entry: null, reason: 'os-ambiguous' });
+  const mine = { name: 'x', host: '10.0.0.2', vcenterId: 'vcA' };
+  assert.equal(pickOsEntry(indexOsHosts([{ name: 'x', host: '10.0.0.1' }, mine]), { name: 'x', vc: 'vcA' }).entry, mine);
+  assert.equal(pickOsEntry(indexOsHosts([{ name: 'x', host: '10.0.0.1' }]), { name: 'x', vc: 'vcA', strict: true }).reason, 'os-ambiguous', 'strict 는 법인 미지정을 쓰지 않는다');
+});
+
+test('⑬ G1 판정기(순수) — 공통 기본값 · 꼴 · 둘 이상 법인 · 겹침 목록 · 모름(complete=false) · 저장 키 규칙', async () => {
+  const CT = await import('../src/bmusage/commonTag.js');
+  const PK = await import('../src/bmusage/purposeKey.js');
+  for (const x of ['To Be Filled By O.E.M.', 'Default string', 'System Serial Number', '0000000', 'XXXXXXXX', '1234567', 'N/A', '.', '', '  ']) assert.equal(CT.isPlaceholderTag(x), true, x);
+  for (const x of ['ABCD123', '7XK9P2J', 'CZ1234ABCD', 'SGH123ABC']) assert.equal(CT.isPlaceholderTag(x), false, x);
+  // 3차 재확인 보강(반증 r12 — 목록 밖 값): 끝 점 없음 · 붙여 씀 · 밑줄 · 접두 · 전각 · 0폭 문자
+  for (const x of ['To Be Filled By O.E.M', 'NotSpecified', 'Not_Specified', 'Unspecified', 'S/N: N/A', 'SerialNumber', 'CHANGEME', 'Ｔｏ Ｂｅ Ｆｉｌｌｅｄ Ｂｙ Ｏ．Ｅ．Ｍ．', 'To Be Filled By O.E.M.\u200b', '\ufeffDefault String', 'Not\u00adSpecified']) assert.equal(CT.isPlaceholderTag(x), true, JSON.stringify(x));
+  const j = CT.commonTagJudge({ rows: [{ serviceTag: 'MULTI01', vcenterId: 'vcA' }, { serviceTag: 'multi01', vcenterId: 'vcB' }, { serviceTag: 'ONE0001', vcenterId: 'vcA' }, { serviceTag: 'ONE0001', vcenterId: 'vcA' }], overlapTags: ['DUP0001'] });
+  assert.deepEqual(['MULTI01', 'ONE0001', 'DUP0001', 'To Be Filled By O.E.M.'].map((x) => j.tagKeyOk(x)), [false, true, false, false]);
+  assert.equal(CT.commonTagJudge({ rows: [], complete: false }).tagKeyOk('ONE0001'), false, '모르면 전역 열쇠로 쓰지 않는다');
+  // 둘 이상 법인 판정도 같은 정규화(0폭 문자 · 전각) — 보이지 않는 글자 하나로 다른 태그처럼 보이지 않게
+  const jz = CT.commonTagJudge({ rows: [{ serviceTag: 'ZWS1234', vcenterId: 'vcA' }, { serviceTag: 'ZWS1234\u200b', vcenterId: 'vcB' }, { serviceTag: 'FWD1234', vcenterId: 'vcA' }, { serviceTag: 'ＦＷＤ１２３４', vcenterId: 'vcB' }] });
+  assert.deepEqual([jz.tagKeyOk('ZWS1234'), jz.tagKeyOk('FWD1234')], [false, false]);
+  assert.equal(CT.tagJudgeOf({ isEdge: true, targets: [] }, []).complete, true, '엣지는 자기 함대를 다 안다');
+  assert.equal(CT.tagJudgeOf({ targets: [], skipped: [{ reason: 'edge-delegated', serviceTag: 'Q' }] }, []).complete, false, '중앙이 엣지에 맡긴 서버가 있으면 모름');
+  const tg = { key: 'ONE0001', serviceTag: 'ONE0001', keyKind: 'serviceTag', vcenterId: 'vcA' };
+  assert.deepEqual(PK.purposeWriteKeyOf(tg, 'ONE0001', j), { k: 'ONE0001', source: 'tag', clearPair: 'vcA|ONE0001' });
+  assert.deepEqual(PK.purposeWriteKeyOf({ ...tg, key: 'MULTI01', serviceTag: 'MULTI01' }, 'MULTI01', j), { k: 'vcA|MULTI01', source: 'pair', legacy: 'MULTI01' });
+  assert.deepEqual(PK.purposeWriteKeyOf(tg, 'ONE0001'), { k: 'vcA|ONE0001', source: 'pair', legacy: 'ONE0001' }, '판정기 없으면 쌍 키(보수적)');
+  assert.deepEqual(PK.purposeKeysOf(tg, 'ONE0001', j).map((x) => x.source), ['pair', 'tag'], '읽기는 늘 쌍 먼저');
+  assert.deepEqual(PK.purposeKeysOf({ key: '10.1.1.5', keyKind: 'fleetId', vcenterId: 'vcA' }).map((x) => [x.k, x.source]), [['vcA|10.1.1.5', 'pair'], ['10.1.1.5', 'legacy']]);
+});
+
+test('⑭ G1 — 7b 일괄 등록의 용도 · 역할도 같은 규칙: 공통 태그는 적용하지 않음(purpose-common-tag) · 분석이 정한 저장 키(쌍)로 씀 · 전역 태그면 쌍 행을 지움', async () => {
+  const RUN = await import('../src/bmusage/onboard/onboardRun.js');
+  const FT = await import('../src/insights/fleetTags.js');
+  const D = await RUN.defaultOnboardDeps();
+  const HDR = 'name,corp,idrac_host,idrac_cred,service_tag,os_host,os_port,os_cred,os_key,collect_via,class,purposes,role,mounts,enabled,note';
+  const map = { TAGC01: { vcenterId: 'vcA', common: true }, TAGP01: { vcenterId: 'vcA', common: false, purposeKey: 'vcA|TAGP01' }, TAGG01: { vcenterId: 'vcA', common: false, purposeKey: 'TAGG01', clearPair: 'vcA|TAGG01' } };
+  const ctx = RUN.buildOnboardCtx({ D, corps: [{ id: 'vcA', name: 'KR-SEL' }], isEdge: false, myCorps: [], edgeOf: () => null, rttOf: () => ({ rttMs: 30, fresh: true }),
+    canView: () => true, canWrite: () => true, fullScope: true, ownerTier: true, tagTarget: (tag) => map[tag] || null, fleetHas: null }).ctx;
+  const one = async (line) => RUN.analyzeUpload(Buffer.from(`${HDR}\r\n${line}\r\n`, 'utf8'), { ctx });
+  let a = await one('g1c,KR-SEL,,,TAGC01,10.71.0.1,22,개별:root,password,central,,,db,/,,');
+  assert.ok(a.rows[0].warnings.some((w) => w.code === 'purpose-common-tag'), '공통 태그 → 적용 안 함(어느 서버 것인지 모른다)'); assert.equal(a.rows[0].plan.role, '');
+  a = await one('g1p,KR-SEL,,,TAGP01,10.71.0.2,22,개별:root,password,central,,,db,/,,');
+  assert.equal(a.rows[0].plan.purposeKey, 'vcA|TAGP01');
+  assert.equal(RUN.applyOnboard(a.rows, { D, by: 'own' }).ok, true);
+  assert.deepEqual([FT.fleetPurposeOf('vcA|TAGP01')?.role, FT.fleetPurposeOf('TAGP01')], ['db', null], '쌍 키로 썼다(전역 태그 행 없음)');
+  assert.equal(FT.setFleetPurpose('vcA|TAGG01', { role: 'web' }, { knownRoles: ROLES5, knownApps: [] }).ok, true);
+  a = await one('g1g,KR-SEL,,,TAGG01,10.71.0.3,22,개별:root,password,central,,,db,/,,');
+  assert.equal(RUN.applyOnboard(a.rows, { D, by: 'own' }).ok, true);
+  assert.deepEqual([FT.fleetPurposeOf('TAGG01')?.role, FT.fleetPurposeOf('vcA|TAGG01')], ['db', null], '전역 태그로 쓰면 그 서버의 쌍 행을 지운다');
+  for (const k of ['vcA|TAGP01', 'TAGG01']) FT.setFleetPurpose(k, null, {});
+});
+
+test('⑮ 3차 재확인 H1(r13) — 7b 엣지 배포 적용도 같은 공통 태그 판정: 공통 태그 · 같은 태그 행 둘은 용도를 적용하지 않음 · 고유 태그는 그 태그로 · 대상을 못 읽으면 적용하지 않음', async () => {
+  const EA = await import('../src/bmusage/onboard/edgeApply.js');
+  const FT = await import('../src/insights/fleetTags.js');
+  const TAG = 'To Be Filled By O.E.M.';
+  const row = (name, tag, host, role) => ({ name, corp: 'vcB', serviceTag: tag, osHost: host, osPort: 22, osUser: 'mon', apps: [], role, mounts: ['/'], enabled: true, bindOk: true });
+  const edgeTg = async () => ({ isEdge: true, targets: [], skipped: [] });
+  const r = await EA.applyEdgeDeployment([row('h1-b1', TAG, '10.2.5.11', 'db'), row('h1-u1', 'UNIQ7X1', '10.2.5.12', 'web')], { sig: 'h1-s1', corps: [{ id: 'vcB', name: 'B 법인' }], myCorps: ['vcB'], currentTargets: edgeTg });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  const P = FT.loadFleetPurposes();
+  assert.equal(Object.hasOwn(P, TAG.toLowerCase()), false, '예전: 공통 태그 전역 열쇠로 role db 저장(반증 r13)');
+  assert.equal(FT.fleetPurposeOf('UNIQ7X1')?.role, 'web', '고유 태그(이번 배포에 하나 · 판정기 complete)는 예전처럼 그 태그로');
+  const r2 = await EA.applyEdgeDeployment([row('h1-u2', 'UNIQ7X2', '10.2.5.13', 'db')], { sig: 'h1-s2', corps: [{ id: 'vcB', name: 'B 법인' }], myCorps: ['vcB'], currentTargets: async () => { throw new Error('대상 못 읽음'); } });
+  assert.equal(r2.ok, true); assert.equal(FT.fleetPurposeOf('UNIQ7X2'), null, '대상을 못 읽으면 적용하지 않는다(전역 태그로 쓰지 않는 쪽)');
+  const r3 = await EA.applyEdgeDeployment([row('h1-u3', 'UNIQ7X3', '10.2.5.14', 'db')], { sig: 'h1-s3', corps: [{ id: 'vcB', name: 'B 법인' }], myCorps: ['vcB'],
+    currentTargets: async () => ({ isEdge: true, targets: [{ key: 'UNIQ7X3', keyKind: 'serviceTag', serviceTag: 'UNIQ7X3', vcenterId: 'vcB' }, { key: 'vcB:r9', keyKind: 'decided', serviceTag: 'UNIQ7X3', vcenterId: 'vcB' }], skipped: [] }) });
+  assert.equal(r3.ok, true); assert.equal(FT.fleetPurposeOf('UNIQ7X3'), null, '그 엣지에 같은 태그 서버가 둘이면 어느 것인지 몰라 적용하지 않는다');
+  const r4 = await EA.applyEdgeDeployment([row('h1-d1', 'DUP7X1', '10.2.5.15', 'db'), row('h1-d2', 'DUP7X1', '10.2.5.16', 'web')], { sig: 'h1-s4', corps: [{ id: 'vcB', name: 'B 법인' }], myCorps: ['vcB'], currentTargets: edgeTg });
+  assert.equal(r4.ok, true); assert.equal(FT.fleetPurposeOf('DUP7X1'), null, '이번 배포에 같은 태그 행이 둘이면(둘째는 dup-tag 거부) 첫 행도 어느 서버 것인지 몰라 적용하지 않는다');
+  FT.setFleetPurpose('UNIQ7X1', null, {});
+});
+
+test('⑯ 3차 재확인 H2(r14) — iDRAC 없이 OS 등록을 법인 불일치로 잃은 서버는 사유가 OS 쪽(os-foreign · os-ambiguous)으로 보인다 · 귀속 없음 대상의 법인 지정 등록은 os-ambiguous', async () => {
+  const { resolveTargets, indexOsHosts, pickOsEntry, NO_PATH_REASON } = await import('../src/bmusage/targets.js');
+  const E = (id, name, host, vc) => ({ id, name, host, ...(vc ? { vcenterId: vc } : {}), port: 22, username: `u-${id}`, password: 'p', mounts: [] });
+  const bm = [{ serverId: 'b', fleetId: 'b', name: 'db01', serviceTag: 'BBBBBB1', vcenterId: 'vcB' }];
+  const r = resolveTargets({ bareMetal: bm, registry: [], bmServers: [E('a1', 'db01', '10.1.0.5', 'vcA')], settings: { corps: { vcB: true }, idracTelemetry: true, osSsh: true } });
+  assert.deepEqual(r.skipped.map((x) => [x.reason, x.osIssue, x.idracIssue]), [['os-foreign', 'os-foreign', 'no-idrac']], '예전: reason no-idrac 하나(OS 등록 문제를 모름)');
+  assert.deepEqual(r.counts.byReason, { 'os-foreign': 1 });
+  assert.ok(NO_PATH_REASON['os-foreign'] && NO_PATH_REASON['os-ambiguous']);
+  const r2 = resolveTargets({ bareMetal: bm, registry: [], bmServers: [E('u1', 'db01', '10.0.0.5'), E('u2', 'db01', '10.0.0.6')], settings: { corps: { vcB: true }, idracTelemetry: true, osSsh: true } });
+  assert.equal(r2.skipped[0].reason, 'os-ambiguous');
+  const r3 = resolveTargets({ bareMetal: bm, registry: [], bmServers: [], settings: { corps: { vcB: true }, idracTelemetry: true, osSsh: true } });
+  assert.equal(r3.skipped[0].reason, 'no-idrac', 'OS 등록 자체가 없으면 예전 사유 그대로');
+  const P = (list, o) => pickOsEntry(indexOsHosts(list), o).reason;
+  assert.equal(P([E('b1', 'db01', '10.2.0.5', 'vcB')], { name: 'db01', vc: '', strict: true }), 'os-ambiguous', '법인을 모르는 대상에게 법인 지정 등록은 ‘다른 법인’ 이 아니라 ‘모름’(예전 표기 os-foreign)');
+  assert.equal(P([E('b1', 'db01', '10.2.0.5', 'vcB')], { name: 'db01', vc: '' }), 'os-ambiguous');
+});

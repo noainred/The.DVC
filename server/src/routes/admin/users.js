@@ -1,12 +1,14 @@
 // 사용자 관리·권한 매트릭스·비밀번호·TOTP — admin.js(구 2,410줄) 분할(v2.285.0). 본문은 원본 그대로, 등록 순서는 admin.js 호출 순서가 보존한다.
+import { isSelfTarget, requireCurrentOtp, selfRebindVerified, clearSelfRebind } from '../../auth/otpRebind.js';   // 20회차 반증 F1
 import { listUsers, createUser, updateUser, deleteUser, beginTotpEnroll, confirmTotpEnroll, disableTotp, setLocalPassword, clearLoginCredentials, actorIsSuperAdmin } from '../../auth/auth.js';
-import { PERMISSION_CATALOG, ROLES, ADMIN_TOGGLE_KEYS, loadMatrix, saveMatrix, resetMatrix, rolePermissions, USER_TOOL_MODES, setUserTools, userToolOverrides, effectiveToolAccess } from '../../auth/permissions.js';
+import { PERMISSION_CATALOG, ROLES, ADMIN_TOGGLE_KEYS, loadMatrix, saveMatrix, resetMatrix, permissionsWriteRefusal, rolePermissions, USER_TOOL_MODES, setUserTools, userToolOverrides, effectiveToolAccess } from '../../auth/permissions.js';
 // v2.506: 도구 거부목록의 '서버 집행 가능 여부' 를 권한 화면에 함께 내려준다(무음 실패 제거).
 import { enforcedToolKeys, TOOL_ENFORCEMENT_NOTES } from '../../auth/toolAccess.js';
 import { logAudit } from '../../audit.js';
 import { adminOnly } from './shared.js';
 import { store } from '../../store.js';
-import { scopedVcenterIds, writeScopedVcenterIds } from '../../auth/scope.js';
+import { scopedVcenterIds, writeScopedVcenterIds, isFullReadWriteScope } from '../../auth/scope.js';
+import { denyFleetWrite } from '../../auth/scopeMerge.js';   // 전체 점검 2회차 V-1 — 전 법인 공용 쓰기는 조회 ∧ 쓰기 전체
 
 /*
  * ⚠⚠ v2.607 AUTHZ2607-01 — 범위(scope) 제한 admin 의 사용자 관리 경계.
@@ -27,15 +29,20 @@ function scopeOf(raw) {
   return { vcenters: arrOf(raw.vcenters), regions: arrOf(raw.regions), writeVcenters: arrOf(raw.writeVcenters) };
 }
 function subset(inner, outer) {
-  if (!inner) return false;         // 전체 범위(null)는 어떤 범위의 부분집합도 아니다
-  if (!outer) return true;
+  if (!outer) return true;          // 바깥이 무제한이면 무엇이든 안이다(조회 무제한 · 쓰기 제한 요청자 — 전체 점검 7회차)
+  if (!inner) return false;         // 전체 범위(null)는 제한된 범위의 부분집합이 아니다
   for (const id of inner) if (!outer.has(id)) return false;
   return true;
 }
-/** 대상 scope(원시)가 요청자(req.user) 범위 안인가. 요청자가 전체 범위면 항상 true. */
+/**
+ * 대상 scope(원시)가 요청자(req.user) 범위 안인가. 요청자가 조회 ∧ 쓰기 전체 범위면 항상 true.
+ * 전체 점검 7회차(2회차 반증 R-1 — 재현): 예전 첫 줄은 '조회 범위가 무제한이면 true' 라, writeVcenters 로 쓰기만 줄인 관리자가
+ *   자기 · 남의 scope 를 null(조회 · 쓰기 무제한)로 바꾸거나 전체 범위 관리자를 만들고 그 비밀번호 · OTP 를 대리 설정했다(v2.733 · v2.904 함정과 같은 모양).
+ *   이제 대상의 조회 ⊆ 요청자 조회(무제한이면 통과) · 대상의 쓰기 ⊆ 요청자 쓰기(요청자 쓰기가 제한이면 대상도 그 안이어야 한다).
+ */
 function scopeWithinActor(rawScope, actor, snap) {
+  if (isFullReadWriteScope(actor, snap)) return true;
   const actorRead = scopedVcenterIds(actor, snap);
-  if (!actorRead) return true;
   const sc = scopeOf(rawScope);
   if (!sc) return false;
   const u = { scope: sc };
@@ -48,12 +55,16 @@ function userScopeRaw(username) {
   const u = listUsers().find((x) => x.username === username);
   return u ? u : null;
 }
-/** 범위 계정이 대상 계정을 다룰 수 없으면 응답하고 true(404 — 존재 은닉). */
+/**
+ * 범위 계정이 대상 계정을 다룰 수 없으면 응답하고 true. 조회 범위 계정은 404(목록에 보이지 않는 계정 — 존재 은닉),
+ * 조회 무제한 · 쓰기 제한 계정은 403(목록에 보이는 계정 — 조회 밖 404 → 쓰기 밖 403 규약 · 전체 점검 7회차).
+ */
 function denyTargetOutOfScope(req, res) {
   const snap = store.get();
-  if (!scopedVcenterIds(req.user, snap)) return false;
+  if (isFullReadWriteScope(req.user, snap)) return false;
   const t = userScopeRaw(req.params.username);
   if (t && scopeWithinActor(t.scope, req.user, snap)) return false;
+  if (t && !scopedVcenterIds(req.user, snap)) { res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: SCOPE_DENY_REASON }); return true; }
   res.status(404).json({ ok: false, reason: '사용자를 찾을 수 없습니다.' });
   return true;
 }
@@ -101,7 +112,7 @@ adminRouter.get('/users', adminOnly, (req, res) => {
 // 자격증명 변경과 같은 등급의 보안 작업이므로 감사로그를 남긴다(이전에는 기록이 없었다).
 adminRouter.post('/users', adminOnly, (req, res) => {
   const snap = store.get();
-  if (scopedVcenterIds(req.user, snap) && !scopeWithinActor((req.body || {}).scope, req.user, snap)) {
+  if (!isFullReadWriteScope(req.user, snap) && !scopeWithinActor((req.body || {}).scope, req.user, snap)) {   // 전체 점검 7회차: 쓰기 제한 계정도
     logAudit({ user: req.user?.username, action: '사용자 생성 거부', target: String((req.body || {}).username || ''), detail: '범위 밖 scope', ip: req.ip || '' });
     return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: SCOPE_DENY_REASON });
   }
@@ -112,7 +123,7 @@ adminRouter.post('/users', adminOnly, (req, res) => {
 
 adminRouter.patch('/users/:username', adminOnly, (req, res) => {
   if (denyTargetOutOfScope(req, res)) return;
-  if (scopedVcenterIds(req.user, store.get()) && (req.body || {}).scope !== undefined && !scopeWithinActor((req.body || {}).scope, req.user, store.get())) {
+  if (!isFullReadWriteScope(req.user, store.get()) && (req.body || {}).scope !== undefined && !scopeWithinActor((req.body || {}).scope, req.user, store.get())) {   // 전체 점검 7회차
     logAudit({ user: req.user?.username, action: '사용자 수정 거부', target: req.params.username, detail: '범위 밖 scope', ip: req.ip || '' });
     return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: SCOPE_DENY_REASON });
   }
@@ -139,6 +150,8 @@ adminRouter.get('/permissions', adminOnly, (_req, res) => {
     roles: ROLES,
     matrix: { admin: rolePermissions('admin'), ...m, users: ov.users },
     ...(ov.scoped ? { scoped: true, omittedOutOfScope: ov.omitted, byHidden: ov.byHidden } : {}),
+    // 22회차 반증 D-11: 권한 파일을 못 읽어 최소 권한으로 동작 중이면 밝힌다(화면이 잠금 행을 실제 설정처럼 보이지 않게)
+    ...(() => { const r = permissionsWriteRefusal(); return r ? { loadError: { code: r.body.code, reason: r.body.reason } } : {}; })(),
     // v2.643: admin 행에서 끌 수 있는 키(CSV)와 그것을 바꿀 수 있는가(super_admin 만). super_admin 은 항상 전체.
     adminToggleKeys: ADMIN_TOGGLE_KEYS,
     canEditAdminRow: actorIsSuperAdmin(_req.user || null),
@@ -188,13 +201,13 @@ adminRouter.put('/user-tools/:username', adminOnly, (req, res) => {
       : (r.reason || ''),
     ip: req.ip || '',
   });
-  if (!r.ok) return res.status(400).json(r);
+  if (!r.ok) return res.status(r.status || 400).json(r);
   // v2.741 AUTHZ-01: 성공 응답의 전체 목록도 GET /permissions 와 같은 경계(범위 밖 계정 항목·설정자 미노출).
   const ov = overridesForActor(userToolOverrides(), req.user, store.get());
   res.json({ ok: true, entry: r.entry, effective: eff, users: ov.users, ...(ov.scoped ? { scoped: true, omittedOutOfScope: ov.omitted, byHidden: ov.byHidden } : {}) });
 });
 adminRouter.put('/permissions', adminOnly, (req, res) => {
-  if (scopedVcenterIds(req.user, store.get())) return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '역할별 기능 권한은 전 사용자 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.' }); // v2.607 AUTHZ2607-01
+  if (denyFleetWrite(req, res, '역할별 기능 권한은 전 사용자 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.')) return; // v2.607 AUTHZ2607-01 · 전체 점검 2회차 V-1(조회 ∧ 쓰기 전체)
   const b = req.body || {};
   const next = b.matrix || b; // { operator:[...], viewer:[...], toolsDenied:{...} } 또는 { matrix:{...} }
   // v2.643: admin 행(CSV 등 관리자 전용 키)을 바꾸는 것은 super_admin 만 — admin 이 스스로 권한을 되살리지 못하게.
@@ -208,16 +221,18 @@ adminRouter.put('/permissions', adminOnly, (req, res) => {
     }
     adminDenied = next.adminDenied;
   }
+  { const refused = permissionsWriteRefusal(); if (refused) return res.status(refused.status).json(refused.body); }   // 20회차 F5
   const matrix = saveMatrix({ operator: next.operator, viewer: next.viewer, toolsDenied: next.toolsDenied, adminDenied });
   logAudit({ user: req.user?.username, action: '기능 권한 매트릭스 변경', target: 'permissions', detail: `operator=${matrix.operator.length}·viewer=${matrix.viewer.length}·거부(op/vw)=${matrix.toolsDenied.operator.length}/${matrix.toolsDenied.viewer.length}·admin끔=${(matrix.adminDenied || []).join(',') || '없음'}`, ip: req.ip || '' });
   res.json({ ok: true, matrix: { admin: rolePermissions('admin'), ...matrix } });
 });
 adminRouter.post('/permissions/reset', adminOnly, (req, res) => {
-  if (scopedVcenterIds(req.user, store.get())) return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '역할별 기능 권한은 전 사용자 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.' }); // v2.607 AUTHZ2607-01
+  if (denyFleetWrite(req, res, '역할별 기능 권한은 전 사용자 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.')) return; // v2.607 AUTHZ2607-01 · 전체 점검 2회차 V-1(조회 ∧ 쓰기 전체)
   // v2.643: 초기화는 admin 행(adminDenied)도 기본(허용)으로 되돌린다 — admin 이 super_admin 의 결정을 우회하지 못하게.
   if ((loadMatrix().adminDenied || []).length && !actorIsSuperAdmin(req.user || null)) {
     return res.status(403).json({ ok: false, error: 'forbidden', code: 'super-admin-only', reason: 'super_admin 이 끈 admin 권한(CSV)이 있어 초기화는 super_admin 만 할 수 있습니다.' });
   }
+  { const refused = permissionsWriteRefusal({ reset: true }); if (refused) return res.status(refused.status).json(refused.body); }   // 20회차 F5(손상이면 초기화는 허용 · 읽기 오류는 거절)
   const matrix = resetMatrix();
   logAudit({ user: req.user?.username, action: '기능 권한 매트릭스 초기화', target: 'permissions', ip: req.ip || '' });
   res.json({ ok: true, matrix: { admin: rolePermissions('admin'), ...matrix } });
@@ -228,9 +243,28 @@ adminRouter.post('/permissions/reset', adminOnly, (req, res) => {
 // ⚠ 자격증명 변경 4경로(비번 설정·로그인 차단·OTP 등록·OTP 해제)는 모두 actor 를 넘긴다 —
 // 보호 계정(수퍼관리자·설정소유자)을 다른 admin 이 대리 변경하면 그 계정으로 로그인할 수 있게 되어
 // 계정 탈취가 된다(auth.js credentialGuardDenied). 한 곳만 빠져도 우회가 성립한다.
+/*
+ * 전체 점검 20회차 반증 F1(재현): 아래 자격증명 변경 라우트를 **자기 자신**에게 쓰면 본인 경로(/auth/totp/*)의 '현재 OTP' 요구(19회차 A-2)를
+ *   그대로 비켜 갔다 — 탈취한 admin 세션이 자기 OTP 를 다시 묶거나 해제 · 비밀번호 설정 · 로그인 차단으로 영구 탈취 · 주인 잠금을 했다.
+ *   대상 = 요청자이고 OTP 가 등록된 계정이면 같은 판정(auth/otpRebind.js)으로 현재 코드를 받는다. 다른 사람 대상(폰 분실 대리 등록)은 그대로.
+ */
+const otpCtx = (req, purpose) => ({ sid: req.user?.sid, purpose });   // 22회차 반증 D-10: 세션 · 동작 단위 기억
+function denySelfWithoutOtp(req, res, what, purpose) {
+  if (!isSelfTarget(req, req.params.username)) return false;
+  // 같은 세션 · 같은 동작에서 10분 안에 현재 코드를 이미 확인했으면 다시 묻지 않는다 — 같은 코드를 다시 보내면 재사용 방지(minCounter)에 걸린다
+  //   (예: OTP 전용 계정 해제 → 서버가 임시 비밀번호를 요구 → 화면이 비밀번호를 받아 다시 보냄).
+  if (selfRebindVerified(req.params.username, otpCtx(req, purpose))) return false;
+  const need = requireCurrentOtp(req.params.username, (req.body || {}).currentCode, what, otpCtx(req, purpose));
+  if (!need) return false;
+  logAudit({ user: req.user?.username, action: `${what} 거부(본인 — 현재 OTP 확인 실패)`, target: req.params.username, ip: req.ip || '' });
+  res.status(need.status).json(need.body);
+  return true;
+}
 adminRouter.post('/users/:username/password', adminOnly, (req, res) => {
   if (denyTargetOutOfScope(req, res)) return;   // v2.607 AUTHZ2607-01
+  if (denySelfWithoutOtp(req, res, '비밀번호 설정', 'password')) return;   // 20회차 F1
   const r = setLocalPassword(req.params.username, (req.body || {}).password, { actor: req.user?.username, actorUser: req.user });
+  if (r.ok) clearSelfRebind(req.params.username, otpCtx(req, 'password'));
   if (r.ok) logAudit({ user: req.user?.username, action: '사용자 비밀번호 설정', target: req.params.username, ip: req.ip || '' });
   else logAudit({ user: req.user?.username, action: '사용자 비밀번호 설정 거부', target: req.params.username, detail: r.reason || '', ip: req.ip || '' });
   res.status(r.ok ? 200 : 400).json(r);
@@ -238,7 +272,9 @@ adminRouter.post('/users/:username/password', adminOnly, (req, res) => {
 // 로그인 차단(관리자) — 비밀번호/OTP 를 모두 제거해 로그인 불가 상태로 되돌린다(데모 계정 잠금).
 adminRouter.delete('/users/:username/password', adminOnly, (req, res) => {
   if (denyTargetOutOfScope(req, res)) return;   // v2.607 AUTHZ2607-01
+  if (denySelfWithoutOtp(req, res, '로그인 차단', 'clear')) return;   // 20회차 F1
   const r = clearLoginCredentials(req.params.username, { actor: req.user?.username, actorUser: req.user });
+  if (r.ok) clearSelfRebind(req.params.username, otpCtx(req, 'clear'));
   if (r.ok) logAudit({ user: req.user?.username, action: '사용자 로그인 차단(자격증명 제거)', target: req.params.username, ip: req.ip || '' });
   else logAudit({ user: req.user?.username, action: '사용자 로그인 차단 거부', target: req.params.username, detail: r.reason || '', ip: req.ip || '' });
   res.status(r.ok ? 200 : 400).json(r);
@@ -251,23 +287,30 @@ adminRouter.delete('/users/:username/password', adminOnly, (req, res) => {
 // (auth.js credentialGuardDenied). 대리 등록은 감사로그에 남긴다 — 강력한 권한 작업이다.
 adminRouter.post('/users/:username/totp/begin', adminOnly, (req, res) => {
   if (denyTargetOutOfScope(req, res)) return;   // v2.607 AUTHZ2607-01
+  if (denySelfWithoutOtp(req, res, 'OTP 재등록', 'rebind')) return;   // 20회차 F1(확인 사실은 같은 세션에서 10분 기억 — 아래 confirm 이 본다)
   const r = beginTotpEnroll(req.params.username, req.get('host') || '', { actor: req.user?.username, actorUser: req.user });
   if (!r.ok) logAudit({ user: req.user?.username, action: 'OTP 대리 등록 거부', target: req.params.username, detail: r.reason || '', ip: req.ip || '' });
   res.status(r.ok ? 200 : 400).json(r);
 });
 adminRouter.post('/users/:username/totp/confirm', adminOnly, (req, res) => {
   if (denyTargetOutOfScope(req, res)) return;   // v2.607 AUTHZ2607-01
+  if (isSelfTarget(req, req.params.username) && !selfRebindVerified(req.params.username, otpCtx(req, 'rebind'))) {   // 20회차 F1
+    return res.status(403).json({ ok: false, needCurrentOtp: true, reason: '본인 계정의 OTP 재등록입니다 — 시작할 때 지금 OTP 코드를 확인한 뒤 10분 안에 확정하세요.' });
+  }
   const r = confirmTotpEnroll(req.params.username, (req.body || {}).code, { actor: req.user?.username, actorUser: req.user });
+  if (r.ok && isSelfTarget(req, req.params.username)) clearSelfRebind(req.params.username, otpCtx(req, 'rebind'));
   if (r.ok) logAudit({ user: req.user?.username, action: 'OTP 대리 등록 확정', target: req.params.username, ip: req.ip || '' });
   res.status(r.ok ? 200 : 400).json(r);
 });
 adminRouter.post('/users/:username/totp/disable', adminOnly, (req, res) => {
   if (denyTargetOutOfScope(req, res)) return;   // v2.607 AUTHZ2607-01
+  if (denySelfWithoutOtp(req, res, 'OTP 해제', 'disable')) return;   // 20회차 F1
   // ⚠ req.body 를 통째로 넘기면 안 된다 — `force` 는 콘솔 복구 도구 전용 신뢰 플래그인데,
   // 클라이언트가 `{"force":true}` 를 실어 수퍼관리자 OTP 해제 가드를 무력화할 수 있었다
   // (재감사에서 실행 재현: 해제 → 임시 비번 로그인 → 자력 OTP 등록 → 계정 탈취).
   // 허용 필드만 골라 넘기고, force 는 서버 내부에서만 설정한다.
   const r = disableTotp(req.params.username, { password: (req.body || {}).password, actor: req.user?.username, actorUser: req.user });
+  if (r.ok) clearSelfRebind(req.params.username, otpCtx(req, 'disable'));   // 22회차 D-10: 한 번 확인 = 한 번 변경
   if (r.ok) logAudit({ user: req.user?.username, action: 'OTP 해제(관리자)', target: req.params.username, ip: req.ip || '' });
   else logAudit({ user: req.user?.username, action: 'OTP 해제 거부', target: req.params.username, detail: r.reason || '', ip: req.ip || '' });
   res.status(r.ok ? 200 : 400).json(r);

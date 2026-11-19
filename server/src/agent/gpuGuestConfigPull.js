@@ -17,6 +17,7 @@ import { createChangeLogger } from '../util/logThrottle.js';
 import { classifyCentral404 } from '../util/central404.js'; // v2.613 DEPS2613-06·EDGE2613-06: 404 사유(central 꺼짐/거절/엔드포인트 없음) 판정
 import { resilientFetch } from '../util/resilientFetch.js';
 import { applyPulledGpuGuestSettings } from '../gpu/settings.js';
+import { readJsonCapped, EDGE_RESPONSE_MAX_BYTES } from '../util/readCapped.js'; // 87회차 ⓓ(85 E3 — 권장안): 중앙 응답은 상한 읽기(형제 pull 과 같게 — 상한 없는 res.json() 금지)
 
 let timer = null;
 let last = null; // { at, applied, at:서버지정시각, error }
@@ -54,7 +55,7 @@ async function _pullGpuGuestConfigNow() {
     // v2.727(감사 D-01): 중앙 배포 파일 손상(503 settingsUnreadable)은 '중앙 지정 없음' 이 아니다 — 로컬 설정(직전 적용분)을 그대로 두고
     //   사유를 상태(last.reason)·콘솔에 남긴다. 예전에는 중앙이 200 assigned:false 를 내려 구분할 수 없었다.
     if (res.status === 503) {
-      let b = null; try { b = await res.json(); } catch { b = null; }
+      let b = null; try { b = await readJsonCapped(res, 64 * 1024, '중앙 오류 응답'); } catch { b = null; }
       if (b && b.reason === 'settingsUnreadable') {
         const detail = String(b.detail || '중앙 GPU 게스트 배포 파일을 읽지 못했습니다').slice(0, 300);
         last = { ...(last || {}), at: Date.now(), applied: false, ok: false, reason: 'settingsUnreadable', error: detail };
@@ -63,7 +64,7 @@ async function _pullGpuGuestConfigNow() {
       }
     }
     if (!res.ok) throw new Error(`gpu-guest-config <- ${res.status}`);
-    const body = await res.json();
+    const body = await readJsonCapped(res, EDGE_RESPONSE_MAX_BYTES, '중앙 응답');
     if (!body || !body.assigned || !body.settings) { last = { at: Date.now(), applied: false, reason: '중앙 지정 없음' }; return { ok: true, applied: false }; }
     const sig = crypto.createHash('sha1').update(JSON.stringify(body.settings)).digest('hex');
     if (sig === lastSig) { last = { at: Date.now(), applied: false, reason: '변경 없음', srvAt: body.at || 0 }; return { ok: true, applied: false, unchanged: true }; }

@@ -14,6 +14,7 @@ import { pollNow } from '../idrac/poller.js';
 import { makeScanAuthPolicy } from '../idrac/scanAuth.js';
 import { tryAcquireScan, releaseScan } from '../idrac/scanPoller.js'; // v2.621(감사 LIFE-01)
 import { createChangeLogger } from '../util/logThrottle.js';
+import { readJsonCapped, EDGE_RESPONSE_MAX_BYTES } from '../util/readCapped.js'; // 87회차 ⓓ(85 E3 — 권장안): 중앙 응답은 상한 읽기(형제 pull 과 같게 — 상한 없는 res.json() 금지)
 
 let timer = null;
 // v2.727(감사 D-01): 중앙 설정 파일 손상(503 settingsUnreadable)은 주기마다 같은 사유라 같은 사유는 10분에 한 줄만 콘솔에.
@@ -34,11 +35,11 @@ async function pullAssignment() {
   const url = `${config.agent.centralUrl}/api/central/assignment?agent=${encodeURIComponent(config.agent.name)}`;
   const res = await resilientFetch(url, { headers: headers(), timeoutMs: 20_000, retries: 2 });
   if (res.status === 503) {
-    let body = null; try { body = await res.json(); } catch { body = null; }
+    let body = null; try { body = await readJsonCapped(res, 64 * 1024, '중앙 오류 응답'); } catch { body = null; }
     if (body && body.reason === 'settingsUnreadable') return { unreadable: true, detail: String(body.detail || '중앙 iDRAC 스캔 배정 파일을 읽지 못했습니다').slice(0, 300) };
   }
   if (!res.ok) throw new Error(`assignment -> ${res.status}`);
-  return res.json();
+  return readJsonCapped(res, EDGE_RESPONSE_MAX_BYTES, '중앙 응답');
 }
 
 /**

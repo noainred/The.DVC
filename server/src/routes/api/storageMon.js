@@ -6,14 +6,19 @@ import { requireRole, requirePerm } from '../../auth/auth.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { STORAGE_TYPES, collectMethodsFor, normalizeCollectMethod } from '../../storage/types.js';
-import { listDevices, listDevicesWithSecrets, saveDevice, deleteDevice, deviceInputIssue, getDeviceWithSecret, registryLoadError } from '../../storage/registry.js';
+import { listDevices, listDevicesWithSecrets, saveDevice, deleteDevice, deviceInputIssue, getDeviceWithSecret, registryLoadError, storageAccessMoved, registryWriteRefusal } from '../../storage/registry.js';
 import { requireSettingsOwner } from '../admin/shared.js';
 import { localSnapshots, dropSnapshot } from '../../storage/store.js';
 import { collectDeviceNow, storagePollerStatus, pollStorageOnce, testDeviceConnection } from '../../storage/poller.js';
 import { edgeStorageSnapshots, edgeStorageReports } from '../../central/storageEdge.js';
 import { listActivity } from '../../storage/activityLog.js';
 import { areaSummary, areaJson, capacityHistory, capacityHistoryAll, dbAvailable,
-  dailySeries, dailySpans, dayIndex, dayLabel, dayStartMs, pruneNow, effectiveKeepDays, DAY_OFFSET_MIN, capacityResets } from '../../storage/db.js';
+  dailySeries, dailySpans, dayIndex, dayLabel, dayStartMs, pruneNow, effectiveKeepDays, DAY_OFFSET_MIN, capacityResets,
+  nodeLoadQuery, nodeLoadJobs, nodeLoadOldest,
+  nodeClientsQuery, nodeClientsLatest, nodeProtoQuery, nodeClientOldest, nodeLoadNodeIds, nodeLoadSampleCount } from '../../storage/db.js'; // v2.932 클라이언트·프로토콜
+import { nodeLoadWindow, buildNodeLoadSeries, jobsSeriesOf, NODE_LOAD_GROUPS, BASELINE, CLUSTER_AGG, METRIC_BY_KEY,
+  NODE_LOAD_LIMIT, clientNodeMatrix, nodeSkew, rebalanceCandidates, FIXED_SHARE_DEF, SKEW_FACTOR_DEF, protoKeyOf } from '../../storage/nodeLoad.js';   // v2.926 노드 부하 추이 · v2.932 재배치 판정
+import { buildClientNameIndex, nameClientRows, nameStats } from '../../storage/clientNames.js'; // v2.932 IP → 인벤토리 이름(역방향 DNS 없음)
 import { growthMatrix, normalizePeriods, DEFAULT_PERIODS } from '../../storage/growth.js';
 import { GROWTH_SPEC, loadGrowthSettings, saveGrowthSettings } from '../../storage/growthSettings.js';
 import { AREA_LABEL } from '../../storage/onefsCatalog.js';
@@ -21,11 +26,11 @@ import { listDatacenters } from '../../datacenter/store.js';
 import { knownAgentNames } from '../../central/knownAgents.js';
 import { devicesToCsv, sampleCsv, parseDevicesCsv, analyzeImport, methodChangeHints,
   devicesToText, sampleText, parseDevicesText, TEXT_FIELDS } from '../../storage/csv.js';
-import { enrichAdvice, selectRows } from '../../util/bulkImport.js';
+import { enrichAdvice, selectRows, fillBlankFromSaved } from '../../util/bulkImport.js';
 import { startBulkTest, publicRun, passedLines } from '../../util/bulkRun.js';
 import { requestCollect, hasPendingRequest, recentCollectDrops } from '../../storage/collectRequests.js';
 import { INTERVAL_SPEC, loadIntervalConfig, saveIntervalConfig, intervalsForAgent,
-  envIntervals, runtimeIntervalSource, applyOwnIntervals } from '../../storage/intervals.js';
+  envIntervals, runtimeIntervalSource, applyOwnIntervals, storageIntervalsWriteRefusal, storageIntervalsLoadError } from '../../storage/intervals.js';
 
 import { isDemoGuest } from '../../auth/demoGuest.js'; // v2.720(감사 B2-04)
 import { isDemoId } from '../../mock/demo/storage.js';
@@ -156,10 +161,12 @@ api.post('/tools/storage/test', adminOnly, fullScopeOnly, async (req, res) => {
   // 수정 화면은 비밀번호를 비워 보낸다(= '기존 유지'). host 가 그대로일 때만 저장분을 쓴다.
   let password = String(body.password || '');
   let pwSource = 'input';
-  if (!password && existing && existing.host === host) { password = existing.password || ''; pwSource = 'stored'; }
+  // 23회차 S-1: host 만이 아니라 계정 · SSH 포트까지(저장과 같은 판정 storageAccessMoved) — 바뀌었으면 저장 비밀번호를 쓰지 않는다
+  const moved = !!existing && storageAccessMoved(existing, body);
+  if (!password && existing && !moved) { password = existing.password || ''; pwSource = 'stored'; }
   if (!password) {
-    return res.status(400).json({ ok: false, reason: existing && existing.host !== host
-      ? 'host 를 변경했으므로 비밀번호를 다시 입력해야 테스트할 수 있습니다(저장된 비밀번호는 새 주소로 보내지 않습니다).'
+    return res.status(400).json({ ok: false, reason: existing && moved
+      ? '접속처(host · 계정 · SSH 포트)를 바꿨으므로 비밀번호를 다시 입력해야 테스트할 수 있습니다(저장된 비밀번호는 바뀐 접속처로 보내지 않습니다).'
       : '비밀번호를 입력하세요.' });
   }
 
@@ -207,10 +214,12 @@ api.post('/tools/storage/devices', adminOnly, fullScopeOnly, (req, res) => {
     res.status(201).json({ ok: true, device: d });
     // v2.522: 중복 거부는 **충돌 장비를 함께** 내려준다 — 화면이 '그 장비 보기'로 필터를 풀고
     // 데려간다(사유만 주면 13개 법인·42대에서 사용자가 찾을 수 없다는 실제 신고).
-  } catch (e) { res.status(400).json({ ok: false, reason: e.message, conflict: e.conflict || null }); }
+  } catch (e) { res.status(e?.status === 409 ? 409 : 400).json({ ok: false, reason: e.message, conflict: e.conflict || null, ...(e?.readError ? { code: e.code, readError: true } : {}) }); }   // 결정(78 남긴 것 ①): 등록부 읽기 오류는 409
 });
 
 api.delete('/tools/storage/devices/:id', adminOnly, fullScopeOnly, (req, res) => {
+  const refused = registryWriteRefusal();   // 결정(78 남긴 것 ①): 읽기 오류 중에는 409(읽지 못한 빈 목록으로 '없음' 을 답하지 않는다)
+  if (refused) return res.status(409).json(refused);
   if (!deleteDevice(req.params.id)) return res.status(404).json({ ok: false, reason: '장비를 찾을 수 없습니다.' });
   dropSnapshot(req.params.id); // 지운 장비의 낡은 스냅샷이 화면에 유령으로 남지 않게
   logAudit({ user: req.user?.username, action: '스토리지 장비 삭제', target: req.params.id });
@@ -293,10 +302,14 @@ api.post('/tools/storage/devices/:id/collect', adminOnly, fullScopeOnly, async (
 
 /** 현재 설정 + 이 노드(중앙)의 실효 주기 + 항목 사양(하한/기본/설명 — UI 폼의 단일 소스). */
 api.get('/tools/storage/intervals', adminOnly, fullScopeOnly, (_req, res) => {
+  // 112회차(106회차가 남긴 것 — 재현): 주기 파일을 못 읽은 동안 아래 config 는 저장된 값이 아니라 빈 지정이다 — 그 사실을 싣지 않아 화면이 빈 폼을 그렸고,
+  //   다시 읽힌 뒤의 저장(전체 교체)이 엣지별 주기를 보존본 없이 전부 지웠다(409 는 읽기 오류가 이어지는 동안만 막는다). 화면이 저장을 잠그고 폼을 다시 채운다.
+  const le = storageIntervalsLoadError();
   res.json({
     ok: true,
     spec: INTERVAL_SPEC,
     config: loadIntervalConfig(),
+    ...(le ? { loadError: { reason: String(le.reason || '').slice(0, 300), readError: le.readError === true } } : {}),   // 112회차
     // 중앙 자신(직접 수집 장비 = agent '')이 지금 쓰는 값과 그 출처(central/env/default).
     central: { effective: runtimeIntervalSource(), env: envIntervals() },
     agents: knownAgentNames(),
@@ -311,6 +324,8 @@ api.get('/tools/storage/intervals', adminOnly, fullScopeOnly, (_req, res) => {
  * (전 키를 채워 배포하면 현장 설정을 통째로 덮어쓰기 때문 — intervals.js 계약).
  */
 api.put('/tools/storage/intervals', adminOnly, fullScopeOnly, (req, res) => {
+  // 105회차 A5: 주기 파일 읽기 오류(원본 그대로) 중에는 저장하지 않는다 — 사유를 화면까지.
+  { const ref = storageIntervalsWriteRefusal(); if (ref) return res.status(409).json(ref); }
   try {
     const r = saveIntervalConfig({ global: req.body?.global || {}, agents: req.body?.agents || {} });
     // 중앙 자신은 pull 축이 없으므로 저장 즉시 반영(엣지는 다음 config pull 때 받는다).
@@ -335,15 +350,24 @@ const dcNameMap = () => { try { const m = new Map(listDatacenters().map((x) => [
  * 가져오기 본문 → 파싱 결과(v2.513). `text` 가 오면 자유텍스트, 아니면 기존 CSV.
  * 두 경로가 **같은 행 형태**를 만들어 뒤 파이프라인(analyzeImport → saveDevice)을 공유한다.
  */
+/** 결정(78 남긴 것 ③): 행 필드 ← 저장 장비(비밀 없음). 수정 행의 빈 칸만 이것으로 채운다(storage/csv.js KEEP_ON_BLANK). */
+const ST_FROM_SAVED = {
+  name: (d) => d.name || '', username: (d) => d.username || '', collectMethod: (d) => String(d.collectMethod || '').toLowerCase(),
+  sshPort: (d) => (d.sshPort == null ? '' : String(d.sshPort)), datacenter: (d) => d.datacenterId || '', agent: (d) => d.agent || '',
+  enabled: (d) => d.enabled !== false, note: (d) => d.note || '',
+};
 function stParseBody(body = {}) {
   const raw = String(body.text ?? body.csv ?? '');
   const format = body.format === 'text' || (body.text != null && body.csv == null) ? 'text' : 'csv';
-  if (format === 'text') {
-    const r = parseDevicesText(raw, { defaults: body.defaults || {} });
-    return { ...r, format, raw };
+  const r = format === 'text'
+    ? { ...parseDevicesText(raw, { defaults: body.defaults || {} }), format, raw }
+    : { ...parseDevicesCsv(raw), warnings: [], headerUsed: null, order: TEXT_FIELDS, format, raw };
+  // 결정(78 남긴 것 ③): 수정 행(같은 host+type)의 빈 칸은 저장값 유지 — 드라이런 · 연결 테스트 · 저장이 모두 이 채운 행을 본다(드라이런 통과 = 저장 성공).
+  if (Array.isArray(r.rows) && r.rows.length) {
+    const byKey = new Map(listDevices().map((d) => [`${d.host}|${d.type}`, d]));
+    r.rows = fillBlankFromSaved(r.rows, (row) => byKey.get(`${row.host}|${row.type}`), ST_FROM_SAVED);
   }
-  const r = parseDevicesCsv(raw);
-  return { ...r, warnings: [], headerUsed: null, order: TEXT_FIELDS, format, raw };
+  return r;
 }
 
 /**
@@ -400,6 +424,8 @@ api.get('/tools/storage/devices/sample.txt', csvPerm, adminOnly, fullScopeOnly, 
  * 파일 내 중복(host+type) 검출. UI 는 검증 통과 후에만 실행 버튼을 활성화한다.
  */
 api.post('/tools/storage/devices/import', csvPerm, adminOnly, fullScopeOnly, (req, res) => {
+  const refused = registryWriteRefusal();   // 결정(78 남긴 것 ①): 읽기 오류 중에는 409 — 빈 목록과 대조하면 전부 '추가' 로 보인다(드라이런 포함)
+  if (refused) return res.status(409).json(refused);
   const { rows, error, warnings, headerUsed, order, format, raw } = stParseBody(req.body || {});
   if (error) return res.status(400).json({ ok: false, reason: error });
   if (!rows.length) return res.status(400).json({ ok: false, reason: '가져올 데이터 행이 없습니다.' });
@@ -458,13 +484,16 @@ api.post('/tools/storage/devices/import', csvPerm, adminOnly, fullScopeOnly, (re
   let added = 0, updated = 0; const failed = [];
 
   for (const row of sel.picked) {
-    const id = existing.get(key(row.host, row.type));
+    // 결정 작업 중 발견(재현 — decideRegistry3189 ③): v2.545 가 map 값을 장비 객체로 바꾼 뒤 여기만 `.id` 를 빠뜨려 **객체를 id 로** 넘겼다 —
+    //   saveDevice 가 그 id 로 장비를 못 찾아 신규로 보고 '같은 host 의 같은 타입 장비가 이미 등록돼 있습니다' 로 떨어졌다(드라이런은 '수정' 이라 했는데 수정 행이 전부 실패).
+    const id = existing.get(key(row.host, row.type))?.id;
     const input = {
       id, type: row.type, name: row.name, host: row.host, username: row.username,
       collectMethod: row.collectMethod, sshPort: row.sshPort, datacenterId: resolveDc(row.datacenter),
       agent: row.agent, enabled: row.enabled, note: row.note,
     };
     if (row._hasPassword) input.password = row.password; // 비우면 기존 유지(saveDevice 규칙)
+    if (row.nodeLoadEnabled !== undefined) input.nodeLoadEnabled = row.nodeLoadEnabled; // v2.938: 빈 칸은 키를 만들지 않는다(normalizeDevice 가 기존 값을 유지)
     try {
       saveDevice(input);
       if (id) updated++; else added++;
@@ -483,6 +512,8 @@ api.post('/tools/storage/devices/import', csvPerm, adminOnly, fullScopeOnly, (re
  * ⚠ 자동 재시도 없음 — 잘못된 비밀번호를 반복하면 어레이 계정이 잠긴다(bulkRun 이 강제).
  */
 api.post('/tools/storage/devices/import/test', csvPerm, adminOnly, fullScopeOnly, (req, res) => {
+  const refused = registryWriteRefusal();   // 결정(78 남긴 것 ①): 읽지 못한 빈 목록과 대조하지 않는다(저장 비밀번호 판정도 못 한다)
+  if (refused) return res.status(409).json(refused);
   const p = stParseBody(req.body || {});
   if (p.error) return res.status(400).json({ ok: false, reason: p.error });
 
@@ -523,6 +554,7 @@ api.post('/tools/storage/devices/import/test', csvPerm, adminOnly, fullScopeOnly
         const prev = existing.get(key(row.host, row.type));
         const full = prev ? getDeviceWithSecret(prev.id) : null;
         if (!full?.password) return { ok: false, reason: '비밀번호가 없습니다 — 신규 등록이면 password 열에 비밀번호를 적으세요.' };
+        if (storageAccessMoved(full, input)) return { ok: false, reason: '계정 · SSH 포트가 저장된 값과 달라 저장 비밀번호로 시험하지 않습니다 — password 열에 비밀번호를 적으세요.' };   // 23회차 S-1
         input.password = full.password;
       }
       try {
@@ -589,6 +621,156 @@ function usageRange(query = {}) {
 api.get('/tools/storage/devices/:id/history', toolsPerm, fullScopeOnly, async (req, res) => {
   const { spanMs, bucketMs, range } = usageRange(req.query);
   res.json({ db: await dbAvailable(), range, spanMs, bucketMs, points: await capacityHistory(req.params.id, Date.now() - spanMs, bucketMs) });
+});
+
+/**
+ * 노드 부하 추이(v2.926 — 사용자 요청 "노드별 io network 부하를 저장하고 차트로" · "기간별 시간별로 이전 기록" · "Disk io 추가" ·
+ * 성능 추천 ①CPU ④잡 엔진 ⑤지난주 같은 구간). 설계 `docs/design/isilon-node-load/README.md` §4.3.
+ *  · ?range=24h|7d|30d|90d · ?group=net|disk|cpu(한 번에 한 묶음 — 단위가 달라 겹치지 않는다) · ?end=<ms>(창 끝 — 이전 구간 보기).
+ *  · 24h·7d 는 원시 표(7d 는 4시간 버킷 평균 + 최대), 30d·90d 는 일 롤업 — 원시 폴백 없음. 미래 end 는 지금으로 자르고 clamped.
+ *  · 클러스터 값은 그 칸의 노드를 **전부** 읽었을 때만(부분 합 금지 — nodeLoad.buildNodeLoadSeries). 비교 구간도 같은 규칙.
+ *  · 장비 호출 0 — DB 만 읽는다. 폴링하지 않는다(화면이 마운트·조작 때만 부르고, 최신 창은 새 수집이 올 때 다시 부른다).
+ * 게이트는 용량 추이와 같다(toolsPerm + fullScopeOnly). 데모 계정은 데모 장비만(아니면 404 — 존재를 말하지 않는다).
+ */
+const NL_HOUR_MS = 3_600_000; const NL_DAY_MS = 24 * NL_HOUR_MS;
+/**
+ * v2.932(2차 ⑨): 장비의 표본 간격 — 수집 주기(pollMs)와 노드 부하 표본 주기(nodeLoadMs — 켜진 아이실론만) 중 짧은 것. 화면 문구·창 계산(15분 칸 여부)이 이 값을 쓴다.
+ * 엣지 장비는 중앙이 배포한 값이 없으면 중앙 env 기본값으로 본다(엣지 portal.env 현장 값은 중앙이 모른다 — devicePollMsByAgent 와 같은 한계).
+ */
+function sampleIntervalOf(dev, devs) {
+  const { envPoll, pollOf } = devicePollMsByAgent(devs);
+  const agent = dev?.agent || '';
+  const pollMs = dev ? (pollOf.get(agent) ?? envPoll) : envPoll;
+  let nodeLoadMs = null;
+  try { nodeLoadMs = Number(intervalsForAgent(agent)?.nodeLoadMs); } catch { nodeLoadMs = null; }
+  if (!(Number.isFinite(nodeLoadMs) && nodeLoadMs > 0)) nodeLoadMs = Number(envIntervals()?.nodeLoadMs) || 300_000;
+  const sampleEnabled = !!dev && dev.type === 'isilon' && dev.nodeLoadEnabled !== false;
+  return { pollMs, nodeLoadMs, sampleEnabled, sampleMs: sampleEnabled ? Math.min(pollMs, nodeLoadMs) : pollMs };
+}
+/** 원시 보존 밖의 '원시' 창은 시간 요약 1시간 칸으로(원시 폴백이 아니라 요약으로 내려간다 — historyRollup 규약). */
+const kindOutsideRaw = (start, kind, bucketMs, rawCut) => (kind === 'raw' && start < rawCut ? { kind: 'bucket', bucketMs: NL_HOUR_MS } : { kind, bucketMs });
+const demoGuard = (req, res, id) => { if (isDemoGuest(req.user) && !isDemoId(id)) { res.status(404).json({ ok: false, error: 'not-found' }); return true; } return false; };
+
+api.get('/tools/storage/devices/:id/node-load', toolsPerm, fullScopeOnly, async (req, res) => {
+  const id = String(req.params.id || '');
+  if (demoGuard(req, res, id)) return;
+  const group = Object.hasOwn(NODE_LOAD_GROUPS, String(req.query.group)) ? String(req.query.group) : 'net';
+  const metrics = NODE_LOAD_GROUPS[group];
+  const devs = listDevices();
+  const dev = devs.find((d) => d.id === id) || null;
+  const si = sampleIntervalOf(dev, devs);
+  const now = Date.now();
+  const keep = effectiveKeepDays();
+  const rawCut = now - keep.nodeRaw * NL_DAY_MS;
+  const w = nodeLoadWindow({ range: req.query.range, end: req.query.end, now, sampleMs: si.sampleMs });
+  // v2.932: 원시 보존(기본 7일) 밖의 24시간 창과 비교 구간(지난주 = 보존 경계)은 시간 요약으로 — 예전엔 비교 선이 보존에 잘려 비었다.
+  const mk = kindOutsideRaw(w.start, w.kind, w.bucketMs, rawCut);
+  const q = await nodeLoadQuery(id, { group, kind: mk.kind, from: w.start, to: w.end, bucketMs: mk.bucketMs });
+  const series = buildNodeLoadSeries(q.rows, metrics, { kind: mk.kind });
+  const B = BASELINE[w.range];
+  const bk = kindOutsideRaw(w.start - B.shiftMs, w.kind, w.bucketMs, rawCut);
+  const bq = await nodeLoadQuery(id, { group, kind: bk.kind, from: w.start - B.shiftMs, to: w.end - B.shiftMs, bucketMs: bk.bucketMs });
+  const bs = buildNodeLoadSeries(bq.rows, metrics, { kind: bk.kind });
+  const jobs = jobsSeriesOf(await nodeLoadJobs(id, w.start, w.end));
+  // v2.932(2차 ③): 프로토콜 묶음은 노드 × 프로토콜 표(창 평균·최대)를 함께 준다 — 화면 '프로토콜 표'.
+  const protoTable = group === 'proto' ? (await nodeProtoQuery(id, { from: w.start, to: w.end })).rows : undefined;
+  res.json({
+    ok: true, db: q.db, deviceId: id, group, metrics,
+    units: Object.fromEntries(metrics.map((k) => [k, METRIC_BY_KEY.get(k).unit])),
+    clusterAgg: Object.fromEntries(metrics.map((k) => [k, CLUSTER_AGG[k]])),
+    range: w.range, days: w.days, spanMs: w.spanMs, start: w.start, end: w.end, past: w.past, clamped: w.clamped,
+    kind: mk.kind, bucketMs: mk.bucketMs, source: q.source || (mk.kind === 'daily' ? 'daily' : 'raw'), sampleMs: si.sampleMs, sample: si, offsetMin: DAY_OFFSET_MIN, now,
+    // 화면이 '몇 칸까지 과거로 갈 수 있나' 를 계산한다 — 7일 이하는 원시(그 뒤 시간 요약), 그 위는 일 롤업.
+    oldest: await nodeLoadOldest(id), rawMaxDays: 7, retention: { rawDays: keep.nodeRaw, hourlyDays: keep.nodeHourly, dailyDays: keep.daily },
+    nodeLimit: NODE_LOAD_LIMIT, truncated: q.truncated,
+    ...series,
+    baseline: { label: B.label, shiftMs: B.shiftMs, cols: bs.cols.map((t) => t + B.shiftMs), cluster: bs.cluster, clusterNodes: bs.clusterNodes, kind: bk.kind },
+    jobs: jobs.list, jobsKnown: jobs.known,
+    ...(protoTable ? { protoTable } : {}),
+  });
+});
+
+/**
+ * 노드 드로어(v2.932 2차 ③ — 사용자 요청 "특정 노드를 클릭하면 그 노드에서 연결된 클라이언트가 어떤 프로토콜을 사용해서 노드를 사용하고 있는지").
+ *  · ?node=<lnn> 필수 · ?range=24h|7d(기본 24h) · ?end=<ms>(이전 구간).
+ *  · `latest` = 창 안 가장 최근 표본(원시)의 클라이언트 — '지금' 열. 과거 창(past)에서는 비운다(그 창의 '지금' 은 없다).
+ *  · `clients` = 창의 시간 요약 평균(2시간 미만 창은 원시) + 노드 비중(share %)·고정(fixed — 창 ops 의 fixedShare 이상이 이 노드) · 다른 노드도 쓰는가(otherNodes).
+ *    비중은 **전 노드**의 클라이언트 × 노드 행렬로 계산한다 — 이 노드만 보면 '고정' 을 판정할 수 없다.
+ *  · 이름은 포탈 인벤토리(VM IP · 호스트 이름/관리 IP)에서만(역방향 DNS 없음 — clientNames.js). 장비 호출 0 · 폴링 없음.
+ *  · '클라이언트 없음' 은 '연결 없음' 이 아니다 — 쉬는 마운트는 통계에 없다(화면 문구). 게이트는 node-load 와 같다(toolsPerm + fullScopeOnly · 데모 404).
+ */
+api.get('/tools/storage/devices/:id/node-clients', toolsPerm, fullScopeOnly, async (req, res) => {
+  const id = String(req.params.id || '');
+  if (demoGuard(req, res, id)) return;
+  const node = numOrNull(req.query.node);
+  if (node == null || !Number.isSafeInteger(node) || node < 0) return res.status(400).json({ ok: false, reason: 'node(노드 번호)가 필요합니다.' });
+  const devs = listDevices(); const dev = devs.find((d) => d.id === id) || null;
+  const si = sampleIntervalOf(dev, devs);
+  const now = Date.now();
+  const range = String(req.query.range) === '7d' ? '7d' : '24h';
+  const w = nodeLoadWindow({ range, end: req.query.end, now, sampleMs: si.sampleMs });
+  const all = await nodeClientsQuery(id, { from: w.start, to: w.end });
+  const matrix = clientNodeMatrix(all.rows.map((r) => ({ client: r.client, name: r.name, proto: r.proto, node: r.node, ops: r.opsSum })), { fixedShare: FIXED_SHARE_DEF, limit: 2000 });
+  const shareOf = new Map(matrix.clients.map((c) => [c.client, c]));
+  const idx = buildClientNameIndex(store.get());
+  const clients = nameClientRows(all.rows.filter((r) => r.node === node).map((r) => {
+    const m = shareOf.get(r.client);
+    return { ...r, share: m?.share?.[node] ?? null, fixed: !!m?.fixed && m?.top === node,
+      otherNodes: Object.keys(m?.nodes || {}).map(Number).filter((n) => n !== node).sort((a, b) => a - b) };
+  }), idx).sort((a, b) => (b.opsSum ?? 0) - (a.opsSum ?? 0));
+  const latest = w.past ? { ts: null, rows: [] } : await nodeClientsLatest(id, node, w.start);
+  const protos = (await nodeProtoQuery(id, { from: w.start, to: w.end })).rows.filter((r) => r.node === node);
+  const keep = effectiveKeepDays();
+  res.json({
+    ok: true, db: all.db, deviceId: id, node, range, days: w.days, start: w.start, end: w.end, past: w.past, clamped: w.clamped, now, offsetMin: DAY_OFFSET_MIN,
+    sample: si, source: all.source || null, lateMs: si.sampleMs * 3,
+    latest: { ts: latest.ts, rows: nameClientRows(latest.rows, idx), staleMs: latest.ts ? now - latest.ts : null },
+    clients, protos, names: nameStats(clients), thresholds: { fixedShare: FIXED_SHARE_DEF },
+    oldest: await nodeClientOldest(id), retention: { clientRawDays: keep.clientRaw, clientHourlyDays: keep.clientHourly, clientDailyDays: keep.clientDaily },
+  });
+});
+
+/**
+ * 클라이언트 분포 · 재배치 보드(v2.932 2차 ③ — 사용자 요청 "노드가 많은데 특정 노드에 치우치는 이슈 … 노드에 연결된 서버를 확인해서 재배치").
+ *  · ?range=24h|7d|30d(기본 7d) · ?proto=<nfs|smb|…|all> · ?end · ?fixed=0.5~1(고정 비중 — 기본 FIXED_SHARE_DEF) · ?skew=1.1~5(쏠림 배수 — 기본 SKEW_FACTOR_DEF).
+ *  · 행렬: 클라이언트(상위 50 — ops 합) × 노드 비중. 쏠림: 노드 ops 합 ≥ 노드 평균 × skew(노드 집합은 창 안 노드 부하 기록의 노드 — ops 0 인 노드도 분모).
+ *  · 재배치 후보: 쏠린 노드의 고정 클라이언트를 가장 한가한 노드로(탐욕 — nodeLoad.rebalanceCandidates). **계산일 뿐이다 — 포탈은 아무것도 바꾸지 않는다**(응답 note).
+ */
+api.get('/tools/storage/devices/:id/client-dist', toolsPerm, fullScopeOnly, async (req, res) => {
+  const id = String(req.params.id || '');
+  if (demoGuard(req, res, id)) return;
+  const devs = listDevices(); const dev = devs.find((d) => d.id === id) || null;
+  const si = sampleIntervalOf(dev, devs);
+  const now = Date.now();
+  const range = ['24h', '7d', '30d'].includes(String(req.query.range)) ? String(req.query.range) : '7d';
+  const w = nodeLoadWindow({ range, end: req.query.end, now, sampleMs: si.sampleMs });
+  const proto = req.query.proto && String(req.query.proto) !== 'all' ? protoKeyOf(req.query.proto) : '';
+  const clamp = (v, lo, hi, def) => { const n = numOrNull(v); return n == null ? def : Math.max(lo, Math.min(hi, n)); };
+  const fixedShare = clamp(req.query.fixed, 0.5, 1, FIXED_SHARE_DEF);
+  const factor = clamp(req.query.skew, 1.1, 5, SKEW_FACTOR_DEF);
+  const q = await nodeClientsQuery(id, { from: w.start, to: w.end });
+  // 창 합(ops_sum — 표본마다의 ops/s 를 더한 값)을 표본 수로 나눠 **창 평균 ops/s** 로(Chromium 판독: 합을 ops/s 로 적으면 '1,345,191 ops/s' 같은 거짓 단위가 된다).
+  //   비율·고정·쏠림·후보 순서는 나누기 전과 같다(상수 배). 표본에 없던 순간은 0 으로 센 평균이다.
+  const samples = await nodeLoadSampleCount(id, { from: w.start, to: w.end });
+  const perS = (v) => (numOrNull(v) == null ? null : (samples > 0 ? v / samples : v));
+  const rows = q.rows.filter((r) => !proto || r.proto === proto).map((r) => ({ client: r.client, name: r.name, proto: r.proto, node: r.node, ops: perS(r.opsSum) }));
+  const nodeIds = await nodeLoadNodeIds(id, { from: w.start, to: w.end });
+  const matrix = clientNodeMatrix(rows, { fixedShare, limit: 50 });
+  const skew = nodeSkew(matrix.nodeTotals, nodeIds, { factor });
+  const idx = buildClientNameIndex(store.get());
+  const clients = nameClientRows(matrix.clients, idx);
+  const nameOf = new Map(clients.map((c) => [c.client, c]));
+  const candidates = rebalanceCandidates(matrix, skew, { max: 10 }).map((c) => ({ ...c, name: nameOf.get(c.client)?.name || c.name || '', nameSource: nameOf.get(c.client)?.nameSource || null }));
+  const keep = effectiveKeepDays();
+  res.json({
+    ok: true, db: q.db, deviceId: id, range, days: w.days, start: w.start, end: w.end, past: w.past, clamped: w.clamped, now, offsetMin: DAY_OFFSET_MIN,
+    sample: si, source: q.source || null, proto: proto || 'all', protos: [...new Set(q.rows.map((r) => r.proto).filter(Boolean))].sort(),
+    nodes: skew.nodes, mean: skew.mean, thresholds: { fixedShare, skewFactor: factor },
+    samples, basis: samples > 0 ? '창 평균 ops/s — 창의 표본 수로 나눈 값(표본에 없던 순간은 0 · 1시간 수집 스냅샷도 표본으로 세어 약간 낮을 수 있습니다)' : '창 합(표본 수를 세지 못해 나누지 않았습니다)',
+    clients, clientsTotal: new Set(rows.map((r) => r.client)).size, candidates, names: nameStats(clients),
+    note: '재배치 후보는 계산일 뿐입니다 — 포탈은 장비·클라이언트 설정을 바꾸지 않습니다. 고정 클라이언트를 다른 노드(SmartConnect 풀·마운트 대상)로 옮기는 작업은 운영자가 합니다.',
+    oldest: await nodeClientOldest(id), retention: { clientRawDays: keep.clientRaw, clientHourlyDays: keep.clientHourly, clientDailyDays: keep.clientDaily },
+  });
 });
 
 /**
@@ -704,7 +886,10 @@ api.get('/tools/storage-growth/settings', toolsPerm, fullScopeOnly, (req, res) =
  * `prune:true` 일 때만 즉시 정리한다(화면이 '지금 정리' 를 눌렀을 때).
  */
 api.post('/tools/storage-growth/settings', adminOnly, fullScopeOnly, requireSettingsOwner, async (req, res) => {
-  const { values, issues } = saveGrowthSettings(req.body || {});
+  let saved;
+  try { saved = saveGrowthSettings(req.body || {}); }
+  catch (e) { if (e?.code === 'settings-unreadable') return res.status(409).json({ ok: false, code: e.code, reason: e.message }); throw e; }   // 23회차 S-3
+  const { values, issues } = saved;
   let pruned = false;
   if (req.body?.prune === true) pruned = await pruneNow();
   logAudit({

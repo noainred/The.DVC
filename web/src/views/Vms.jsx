@@ -8,15 +8,21 @@ import { VM_PAGE_SIZE, vmPageQueryKey, resetNoticeText, pageNavState, vmPageSumm
 import { EMPTY_FACETS, facetParams, facetKey, hasFacet, clearFacet, chipList, facetErrorText, specText, specSort, selectionView } from './vmDistText.js';
 import { VmDistPanels, VmDistChips, VmUsageBar, VmNameCell, VmMobileList, useNarrowScreen } from './VmDistPanels.jsx';
 // v2.909 가상화 서버 허브(시안 docs/design/vm-screen 시안 1): 탭(현황 · 법인별 · 조치 필요 ‖ VM 도구 6) · 타일 5장 · 신호 열 · 드로어.
-import VmHubTabs from './vms/VmHubTabs.jsx';
+import VmHubTabs, { canHubTool } from './vms/VmHubTabs.jsx';
 import VmDrawer from './vms/VmDrawer.jsx';
-import { HUB_VIEW_KEYS, signalText, usageTone, TONE_COLOR, barW } from './vms/vmHubText.js';
+import { HUB_VIEW_KEYS, HUB_OVER_TOOL, hubViewOf, signalText, usageTone, TONE_COLOR, barW } from './vms/vmHubText.js';
 import { tabFromHash, isUnderBase } from '../hooks/hashTab.js';
-import { currentHash, goHash } from './vcd/vcdRoute.js';
+import { currentHash, goHash, vcHash } from './vcd/vcdRoute.js';
+// v2.915 가상화 플랫폼 허브(설계 docs/design/virt-platform-menu 시안 A ④): 이 화면은 허브의 'VM 탭' 본문 — 제목 · 스냅샷 시각은 허브가. 탭 줄 오른쪽에 이 탭 고유 조건(전원 · 메모 · IPMS · 호스트 칩),
+//   '전체 VM' 타일은 '조치 필요' 신호 분해 타일로(전체 수는 허브 엔티티 탭에), VM 이름 = 개체 보기(드로어는 '빠른 확인'), 호스트 이름 = 호스트 탭을 그 호스트로.
+import Select from '../components/Select.jsx';
+import { signalSegments } from './platform/platformText.js';
 import './vms/vmHub.css';
 
 const VmsByCorp = React.lazy(() => import('./vms/VmsByCorp.jsx'));
 const VmsAttention = React.lazy(() => import('./vms/VmsAttention.jsx'));
+// v3.21.0: '분석'(첫 보기) · '과할당' — 설계 docs/design/vm-insight. 값은 /vms/insight(법인마다 한 줄) — 고른 법인의 합은 화면이 낸다.
+const VmInsight = React.lazy(() => import('./vms/VmInsight.jsx'));
 const HUB_BASE = ['vms'];
 
 /** Render every IPv4 a VM has (multi-homed), one per line; IPv6 is excluded upstream. */
@@ -28,37 +34,56 @@ function ipList(vm) {
 
 
 /**
- * v2.909: 허브 보기 — #/vms/<list|corp|attention>. 브라우저가 아닌 곳(렌더 시험)에서도 던지지 않는다(currentHash).
+ * v2.909: 허브 보기 — #/vms/<insight|list|corp|attention|over>. 브라우저가 아닌 곳(렌더 시험)에서도 던지지 않는다(currentHash).
  * useHashTab 과 같은 규약(base 아래의 해시 변화만 받는다)이지만 window 가 없는 렌더 시험을 위해 이 화면 안에 둔다.
+ * v3.21.0: 주소의 보기만 돌려준다(없으면 null) — 보기가 없을 때(#/vms) 무엇을 열지는 hubViewOf(기본 '분석' · 검색어 · 호스트 조건이 있으면 '목록').
  */
 function useHubView() {
-  const [view, setView] = useState(() => tabFromHash(currentHash(), HUB_BASE, HUB_VIEW_KEYS) || 'list');
+  const [view, setView] = useState(() => tabFromHash(currentHash(), HUB_BASE, HUB_VIEW_KEYS) || null);
   useEffect(() => {
-    const onHash = () => { const h = currentHash(); if (isUnderBase(h, HUB_BASE)) setView(tabFromHash(h, HUB_BASE, HUB_VIEW_KEYS) || 'list'); };
+    const onHash = () => { const h = currentHash(); if (isUnderBase(h, HUB_BASE)) setView(tabFromHash(h, HUB_BASE, HUB_VIEW_KEYS) || null); };
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
   return view;
 }
 
-/** 가상화 서버 화면 셸 — 머리 · 탭 · 보기 전환 · VM 드로어(현황·조치 필요 공용). onPickVcenter = 위 필터 바의 vCenter 를 바꾼다(App). */
-export default function Vms({ filters, onPickVcenter }) {
-  const view = useHubView();
+/** 가상화 서버 화면 셸 — 머리 · 탭 · 보기 전환 · VM 드로어(목록·조치 필요 공용). onPickVcenter = 위 필터 바의 vCenter 를 바꾼다(App).
+ *  v3.21.0: scopeIds · scopeRegion · onScopeIds = 허브 범위(바로가기 고른 법인 · 리전)와 그 갱신(App) — 분석 보기의 지도 칸 · 지역 줄이 켜고 끈다. */
+export default function Vms({ filters, onPickVcenter, cond = null, host = '', onHost = null, onGoHost = null, scopeIds = null, scopeRegion = null, onScopeIds = null }) {
+  const view = hubViewOf(useHubView(), { q: filters?.q, host, canOver: canHubTool(HUB_OVER_TOOL) });
   const [drawer, setDrawer] = useState(null);       // 열린 VM(드로어) — 목록이 바뀌어도 연 순간의 값을 보여 준다(넘기면 새 값)
   const rowsRef = useRef([]);                        // 지금 화면에 그린 행(정렬 반영 — DataTable onVisible) → 드로어 ‹ › 순서
   const [hub, setHub] = useState({ sc: null, snapAt: null });
   const open = (vm, rows) => { if (rows) rowsRef.current = rows; setDrawer(vm); };
   const onVisible = (rows) => { rowsRef.current = rows; };
   const sc = hub.sc;
+  // v2.915: 탭 줄 오른쪽 = 이 탭 고유 조건(공용 범위 바에서 내려온 전원 · 메모 · IPMS) + 호스트 표에서 넘어온 '그 호스트의 VM' 칩
+  const right = (cond || host) ? (
+    <>
+      {cond?.menuFilter && (
+        <Select sort={false} className="select" value={cond.menuFilter.value} onChange={(e) => cond.menuFilter.onChange(e.target.value)} aria-label="전원">
+          {cond.menuFilter.options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </Select>
+      )}
+      {cond && <label title="메모 포함 — 체크하면 검색에 메모(Notes) 내용도 포함합니다. (기본: 미포함)"><input type="checkbox" checked={cond.qNotes} onChange={(e) => cond.setQNotes(e.target.checked)} /> 메모</label>}
+      {cond && <label title="IPMS 포함 — 체크하면 IP로 검색할 때 IPMS(IP 스캔) 자료의 해당 대역 IP도 함께 보여줍니다."><input type="checkbox" checked={cond.qIpms} onChange={(e) => cond.setQIpms(e.target.checked)} /> IPMS</label>}
+      {host && (
+        <span className="badge blue" title="호스트 표에서 넘어온 조건 — 이 호스트의 VM 만 보입니다">호스트 {host}
+          <button type="button" className="ht-chip-x" style={{ marginLeft: 6 }} onClick={() => onHost && onHost('')} aria-label="호스트 조건 해제">✕</button>
+        </span>
+      )}
+    </>
+  ) : null;
   return (
     <div className="vmh">
-      <header className="vmh-head">
-        <h1>가상화 서버</h1>
-        <span className="vmh-sub">vCenter 가 보고한 VM · 이름 · IP · OS 검색은 위 필터 바에서 합니다</span>
-        {hub.snapAt && <span className="vmh-snap" title="이 화면 값의 기준(인벤토리 스냅샷 시각)">스냅샷 {new Date(hub.snapAt).toLocaleTimeString('ko-KR')}</span>}
-      </header>
-      <VmHubTabs active={view} attention={sc ? sc.any : null} />
-      {view === 'list' && <VmsList filters={filters} onOpen={open} onVisible={onVisible} onHub={setHub} selectedId={drawer?.id} />}
+      <VmHubTabs active={view} attention={sc ? sc.any : null} right={right} />
+      {(view === 'insight' || view === 'over') && (
+        <React.Suspense fallback={<Loading />}>
+          <VmInsight mode={view} filters={filters} scopeIds={scopeIds} scopeRegion={scopeRegion} onScopeIds={onScopeIds} onHub={setHub} />
+        </React.Suspense>
+      )}
+      {view === 'list' && <VmsList filters={filters} onOpen={open} onVisible={onVisible} onHub={setHub} selectedId={drawer?.id} onGoHost={onGoHost} />}
       {view === 'corp' && (
         <React.Suspense fallback={<Loading />}>
           <VmsByCorp filters={filters} onPick={(id) => { if (onPickVcenter) onPickVcenter(id); goHash('#/vms/list'); }} />
@@ -74,7 +99,7 @@ export default function Vms({ filters, onPickVcenter }) {
   );
 }
 
-function VmsList({ filters, onOpen, onVisible, onHub, selectedId }) {
+function VmsList({ filters, onOpen, onVisible, onHub, selectedId, onGoHost = null }) {
   const [gpuOnly, setGpuOnly] = useState(false);
   const [gpuType, setGpuType] = useState(''); // '' | vgpu | passthrough | mixed
   // v2.746 C안: 분포 패널에서 고른 구간(cpuBin·memBin·power·osName) — 이 화면 안 상태다. GPU 칸은 새 상태를 만들지 않고
@@ -171,23 +196,28 @@ function VmsList({ filters, onOpen, onVisible, onHub, selectedId }) {
     // v2.909: 신호(서버 판정 inventory/vmSignals.js — signals=1 일 때만 실린다)는 **열을 늘리지 않고 VM 이름 아래 줄**에 배지로 둔다.
     //   이 표는 1440 에서도 오른쪽 열이 가로 스크롤 밖이다(v2.898 부터 · A/B 확인). 신호를 끝 열에 두면 보이지 않았고(1차),
     //   VM 다음 열로 끼우면 기본 정렬 열인 CPU 값이 밀려 잘렸다(2차 Chromium 확인) — 그래서 이름 칸 안에 둔다.
+    // v2.915(상세 한 규칙): 이름 = 개체 보기(#/vcenters/<vc>/vm/<id> — 브레드크럼) · 드로어는 이름 옆 '빠른 확인'(‹ › 이동은 그대로)
     { key: 'name', label: hasSig ? 'VM · 신호' : 'VM', render: (v) => (
       <>
-        <VmNameCell vm={v} onOpen={openVm} />
+        <VmNameCell vm={v} onOpen={openVm} href={v.vcenterId && v.id ? vcHash(v.vcenterId, { type: 'vm', id: v.id }) : undefined} />
         {Array.isArray(v.signals) && v.signals.length > 0 && (
           <span className="vmh-sig" style={{ display: 'flex', marginTop: 4 }}>{v.signals.map((k) => { const x = signalText(k, { days }); return <span key={k} className={`vmh-badge ${x.badge}`} title={x.desc}>{x.short}</span>; })}</span>
         )}
       </>
     ) },
-    { key: 'vcenterId', label: 'vCenter', render: (v) => <span className="muted">{v.vcenterId}</span> },
-    { key: 'guestOS', label: 'Guest OS' },
+    { key: 'vcenterId', label: 'vCenter', render: (v) => <span className="muted" style={{ display: 'inline-block', whiteSpace: 'normal', overflowWrap: 'anywhere', maxWidth: 110 }}>{v.vcenterId}</span> },
+    // v2.977(전체 점검): Guest OS 는 두 줄까지 접는다(192px 한 줄이 1440px 에서 메모리 · 디스크 · 호스트 열을 가로 스크롤 뒤로 밀었다)
+    { key: 'guestOS', label: 'Guest OS', render: (v) => <span style={{ display: 'inline-block', whiteSpace: 'normal', maxWidth: 150, lineHeight: 1.3 }}>{v.guestOS || '—'}</span> },
     { key: 'ipAddress', label: 'IP', render: (v) => ipList(v) },
     { key: 'spec', label: 'vCPU · RAM', align: 'right', sortValue: specSort, render: (v) => <span className="tabular">{specText(v)}</span> },
-    ...(showGpuCol ? [{ key: 'gpu', label: 'GPU', sortValue: (v) => v.gpu?.type || '', render: (v) => <GpuBadge gpu={v.gpu} /> }] : []),
+    ...(showGpuCol ? [{ key: 'gpu', label: 'GPU', sortValue: (v) => v.gpu?.type || '', render: (v) => <GpuBadge gpu={v.gpu} compact /> }] : []),
     { key: 'cpuUsagePct', label: 'CPU', render: (v) => <VmUsageBar pct={v.cpuUsagePct} /> },
     { key: 'memUsagePct', label: '메모리', render: (v) => <VmUsageBar pct={v.memUsagePct} /> },
     { key: 'storageGB', label: '디스크', align: 'right', render: (v) => (v.storageGB != null ? `${v.storageGB} GB` : '—') },
-    { key: 'host', label: '호스트', render: (v) => <span className="muted">{v.host}</span> },
+    // v2.915 교차 링크: 호스트 이름을 누르면 호스트 탭을 그 호스트로(이름 정확 일치 — 칩으로 해제)
+    { key: 'host', label: '호스트', render: (v) => (onGoHost && v.host
+      ? <button type="button" className="cell-link" style={{ color: 'var(--text-dim)', whiteSpace: 'normal', overflowWrap: 'anywhere', maxWidth: 140, textAlign: 'left' }} onClick={() => onGoHost(v.host)} title="호스트 탭을 이 호스트로">{v.host}</button>
+      : <span className="muted" style={{ display: 'inline-block', whiteSpace: 'normal', overflowWrap: 'anywhere', maxWidth: 140 }}>{v.host || '—'}</span>) },
   ];
 
   const t = view.totals;
@@ -213,11 +243,14 @@ function VmsList({ filters, onOpen, onVisible, onHub, selectedId }) {
           {/* v2.909(시안 ② 타일 5장): 예전 KPI 8장의 값을 묶었다 — 빠진 값 없음(vCore 는 vCPU 와 같은 값이라 한 줄). 값은 unitText(못 읽으면 '—'). */}
           <div className="section-title" style={{ marginTop: 0, fontSize: 13, color: 'var(--text-dim)' }}>글로벌 가상머신 요약</div>
           <section className="vmh-tiles" aria-label="요약" style={{ marginBottom: 12 }}>
-            <div className="vmh-tile">
-              <div className="lb"><span>전체 VM</span>{sigCounts && sigCounts.any > 0 && <a href="#/vms/attention" style={{ fontSize: 12 }}>조치 필요 {fmt(sigCounts.any)} ▸</a>}</div>
-              <div className="val">{fmt(t.count)}</div>
-              <div className="vmh-bar" aria-hidden="true"><i style={{ width: `${t.count ? Math.round((t.poweredOn / t.count) * 100) : 0}%`, background: 'var(--green)' }} /></div>
-              <div className="sub"><span>구동중 {fmt(t.poweredOn)}</span><span>정지 {fmt(t.poweredOff)}</span></div>
+            {/* v2.915(시안 §4.0-2): 전체 VM(구동 · 정지)은 허브의 엔티티 탭이 말한다 — 이 자리는 '조치 필요' 의 신호 분해(서버 signalCounts 그대로). 신호 집계가 없으면 '—'. */}
+            <div className="vmh-tile" style={sigCounts?.any > 0 ? { borderColor: 'rgba(239, 68, 68, 0.45)' } : undefined} data-tile="attention">
+              <div className="lb"><span>조치 필요</span>{sigCounts && sigCounts.any > 0 && <a href="#/vms/attention" style={{ fontSize: 12 }}>조치 필요 탭 ▸</a>}</div>
+              <div className="val" style={{ color: sigCounts?.any > 0 ? '#f87171' : undefined }}>{sigCounts ? fmt(sigCounts.any) : '—'}</div>
+              <div className="vmh-seg" aria-hidden="true">
+                {signalSegments(sigCounts).map((s) => <i key={s.k} style={{ width: `${s.pct}%`, background: s.tone === 'red' ? 'var(--red)' : s.tone === 'amber' ? 'var(--amber)' : 'var(--text-faint)' }} />)}
+              </div>
+              <div className="sub">{signalSegments(sigCounts).map((s) => <span key={s.k} style={{ color: s.n > 0 && s.tone === 'red' ? '#fca5a5' : s.n > 0 && s.tone === 'amber' ? '#fcd34d' : undefined }}>{s.label} {s.n == null ? '—' : fmt(s.n)}</span>)}</div>
             </div>
             <div className="vmh-tile">
               <div className="lb"><span>평균 CPU 사용량</span><small>구동중 VM 기준</small></div>

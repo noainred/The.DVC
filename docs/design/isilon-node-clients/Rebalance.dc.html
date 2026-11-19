@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>클라이언트 분포 — 노드 × 클라이언트 · 쏠림 · 재배치 후보</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap" rel="stylesheet">
+<style>
+body { margin: 0; background: #0a0e17; color: #e6edf6; font-family: Inter, -apple-system, "Segoe UI", Roboto, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; word-break: keep-all; }
+a { color: #8b9bb4; } a:hover { color: #e6edf6; }
+table { border-collapse: collapse; width: 100%; font-size: 12px; }
+th { text-align: left; font-weight: 600; color: #8b9bb4; font-size: 11px; padding: 7px 8px; border-bottom: 1px solid #243049; white-space: nowrap; background: #0f1626; }
+td { padding: 6px 8px; border-bottom: 1px solid #1f2a40; vertical-align: middle; white-space: nowrap; }
+.mono { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 11.5px; }
+.m { display: block; height: 22px; border-radius: 3px; font-family: "JetBrains Mono", monospace; font-size: 10.5px; line-height: 22px; text-align: center; color: #e6edf6; }
+.tag { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 10.5px; font-weight: 600; border: 1px solid #243049; color: #8b9bb4; }
+.tag.fix { background: rgba(245,158,11,.14); color: #fbbf24; border-color: rgba(245,158,11,.35); }
+.seg { display: inline-flex; border: 1px solid #243049; border-radius: 8px; overflow: hidden; flex-wrap: wrap; }
+.seg button { display: inline-flex; align-items: center; height: 30px; padding: 0 10px; border: 0; border-left: 1px solid #243049; background: transparent; color: #8b9bb4; font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.seg button:first-child { border-left: 0; }
+.seg .on { background: rgba(59,130,246,.22); color: #e6edf6; }
+</style>
+</helmet>
+<div style="width: 1440px; height: 1000px; box-sizing: border-box; padding: 20px 24px; display: flex; flex-direction: column; gap: 12px">
+  <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px">
+    <div style="font-family: 'JetBrains Mono', monospace; font-size: 12px; letter-spacing: .06em; color: #8b9bb4">장비 상세 › 노드 부하 추이 › 보기 <span style="color: #e6edf6">클라이언트 분포</span> · PS-FRA-01 · 7일</div>
+    <div style="display: flex; align-items: center; gap: 8px; margin-left: auto"><span style="font-size: 12px; color: #8b9bb4">값</span><div class="seg"><button class="on">ops 비중</button><button>In + Out</button><button>ops/s</button></div></div>
+    <div style="display: flex; align-items: center; gap: 8px"><span style="font-size: 12px; color: #8b9bb4">프로토콜</span><div class="seg"><button class="on">전체</button><button>NFS</button><button>SMB</button><button>S3</button></div></div>
+    <button type="button" style="height: 30px; padding: 0 12px; border: 1px solid #243049; border-radius: 8px; background: #141b2d; color: #e6edf6; font: inherit; font-size: 12px; cursor: pointer">CSV 내보내기</button>
+  </div>
+
+  <div style="display: flex; gap: 14px; align-items: flex-start; flex: 1; min-height: 0">
+    <div style="flex: 999 1 760px; min-width: 0; background: #141b2d; border: 1px solid #243049; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px">
+      <div style="font-size: 14px; font-weight: 700">클라이언트 × 노드 <span style="font-weight: 400; color: #8b9bb4; font-size: 12px">· 칸 = 그 클라이언트의 7일 ops 중 그 노드 비중(%) · 한 색조 · 행은 ops 많은 순(상위 14 / 관측 31)</span></div>
+      <div style="display: grid; grid-template-columns: 150px 120px repeat(8, minmax(0, 1fr)) 70px; gap: 3px 6px; align-items: center; font-size: 11.5px">
+        <div style="color: #8b9bb4; font-size: 11px">클라이언트</div><div style="color: #8b9bb4; font-size: 11px">이름 · 프로토콜</div>
+        <div class="mono" style="text-align: center; color: #8b9bb4">노드 1</div><div class="mono" style="text-align: center; color: #8b9bb4">2</div><div class="mono" style="text-align: center; color: #8b9bb4">3</div><div class="mono" style="text-align: center; color: #fcd34d; font-weight: 700">4</div><div class="mono" style="text-align: center; color: #8b9bb4">5</div><div class="mono" style="text-align: center; color: #8b9bb4">6</div><div class="mono" style="text-align: center; color: #8b9bb4">7</div><div class="mono" style="text-align: center; color: #8b9bb4">8</div><div style="color: #8b9bb4; font-size: 11px; text-align: right">ops/s</div>
+
+        <div class="mono">10.94.60.21</div><div>db-fra-02 <span style="color: #8b9bb4">NFS</span></div><i class="m" style="background: #0f1626"></i><i class="m" style="background: #0f1626"></i><i class="m" style="background: #0f1626"></i><i class="m" style="background: #b7d3f6; color: #0a0e17">100</i><i class="m" style="background: #0f1626"></i><i class="m" style="background: #0f1626"></i><i class="m" style="background: #0f1626"></i><i class="m" style="background: #0f1626"></i><div class="mono" style="text-align: right">1,410</div>
+        <div class="mono">10.94.60.35</div><div>hpc-fra-11 <span style="color: #8b9bb4">NFS</span></div><i class="m" style="background: #0f1626"></i><i class="m" style="background: #184f95">2</i><i class="m" style="background: #0f1626"></i><i class="m" style="background: #b7d3f6; color: #0a0e17">98</i><i class="m" style="background: #0f1626"></i><i class="m" style="background: #0f1626"></i><i class="m" style="background: #0f1626"></i><i class="m" style="background: #0f1626"></i><div class="mono" style="text-align: right">880</div>
+        <div class="mono">10.94.60.40</div><div>hpc-fra-12 <span style="color: #8b9bb4">NFS</span></div><i class="m" style="background: #b7d3f6; color: #0a0e17">97</i><i class="m" style="background: #0f1626"></i><i class="m" style="background: #184f95">3</i><i class="m" style="background: #0f1626"></i><i class="m" style="background: #0f1626"></i><i class="m" style="background: #0f1626"></i><i class="m" style="background: #0f1626"></i><i class="m" style="background: #0f1626"></i><div class="mono" style="text-align: right">760</div>
+        <div class="mono">10.94.61.8</div><div>media-fra-01 <span style="color: #8b9bb4">SMB</span></div><i class="m" style="background: #0f1626"></i><i class="m" style="background: #0f1626"></i><i class="m" style="background: #0f1626"></i><i class="m" style="background: #b7d3f6; color: #0a0e17">96</i><i class="m" style="background: #184f95">4</i><i class="m" style="background: #0f1626"></i><i class="m" style="background: #0f1626"></i><i class="m" style="background: #0f1626"></i><div class="mono" style="text-align: right">620</div>
+        <div class="mono">10.94.60.77</div><div style="color: #8b9bb4">— <span>NFS</span></div><i class="m" style="background: #2a78d6">22</i><i class="m" style="background: #184f95">9</i><i class="m" style="background: #2a78d6">18</i><i class="m" style="background: #5598e7">41</i><i class="m" style="background: #184f95">6</i><i class="m" style="background: #0f1626"></i><i class="m" style="background: #184f95">4</i><i class="m" style="background: #0f1626"></i><div class="mono" style="text-align: right">410</div>
+        <div class="mono">10.94.62.14</div><div>bk-fra-01 <span style="color: #8b9bb4">SMB</span></div><i class="m" style="background: #0f1626"></i><i class="m" style="background: #0f1626"></i><i class="m" style="background: #0f1626"></i><i class="m" style="background: #b7d3f6; color: #0a0e17">100</i><i class="m" style="background: #0f1626"></i><i class="m" style="background: #0f1626"></i><i class="m" style="background: #0f1626"></i><i class="m" style="background: #0f1626"></i><div class="mono" style="text-align: right">360</div>
+        <div class="mono">10.94.60.52</div><div>web-fra-03 <span style="color: #8b9bb4">NFS</span></div><i class="m" style="background: #0f1626"></i><i class="m" style="background: #0f1626"></i><i class="m" style="background: #b7d3f6; color: #0a0e17">99</i><i class="m" style="background: #0f1626"></i><i class="m" style="background: #0f1626"></i><i class="m" style="background: #0f1626"></i><i class="m" style="background: #184f95">1</i><i class="m" style="background: #0f1626"></i><div class="mono" style="text-align: right">340</div>
+        <div class="mono">10.94.60.90</div><div>s3-gw-fra <span style="color: #8b9bb4">S3</span></div><i class="m" style="background: #2a78d6">17</i><i class="m" style="background: #2a78d6">16</i><i class="m" style="background: #2a78d6">16</i><i class="m" style="background: #5598e7">33</i><i class="m" style="background: #184f95">6</i><i class="m" style="background: #184f95">5</i><i class="m" style="background: #184f95">4</i><i class="m" style="background: #184f95">3</i><div class="mono" style="text-align: right">180</div>
+        <div class="mono">10.94.63.3</div><div>ai-fra-01 <span style="color: #8b9bb4">NFS</span></div><i class="m" style="background: #0f1626"></i><i class="m" style="background: #0f1626"></i><i class="m" style="background: #0f1626"></i><i class="m" style="background: #0f1626"></i><i class="m" style="background: #b7d3f6; color: #0a0e17">100</i><i class="m" style="background: #0f1626"></i><i class="m" style="background: #0f1626"></i><i class="m" style="background: #0f1626"></i><div class="mono" style="text-align: right">150</div>
+        <div class="mono">10.94.60.11</div><div>app-fra-07 <span style="color: #8b9bb4">SMB</span></div><i class="m" style="background: #0f1626"></i><i class="m" style="background: #b7d3f6; color: #0a0e17">100</i><i class="m" style="background: #0f1626"></i><i class="m" style="background: #0f1626"></i><i class="m" style="background: #0f1626"></i><i class="m" style="background: #0f1626"></i><i class="m" style="background: #0f1626"></i><i class="m" style="background: #0f1626"></i><div class="mono" style="text-align: right">120</div>
+        <div style="grid-column: 1 / -1; color: #8b9bb4; font-size: 11.5px; padding-top: 4px">… 상위 14 · 빈 칸은 그 노드에서 관측 0 · 행을 누르면 그 클라이언트의 7일 노드 추이(언제 어느 노드에 있었나) · 열 머리(노드)를 누르면 그 노드 드로어</div>
+      </div>
+      <div style="display: flex; flex-wrap: wrap; gap: 10px; font-size: 11.5px; color: #8b9bb4; align-items: center"><span>0%</span><span style="display: inline-flex; gap: 2px" aria-hidden="true"><i style="width: 14px; height: 9px; background: #184f95; border-radius: 2px; display: inline-block"></i><i style="width: 14px; height: 9px; background: #2a78d6; border-radius: 2px; display: inline-block"></i><i style="width: 14px; height: 9px; background: #5598e7; border-radius: 2px; display: inline-block"></i><i style="width: 14px; height: 9px; background: #86b6ef; border-radius: 2px; display: inline-block"></i><i style="width: 14px; height: 9px; background: #b7d3f6; border-radius: 2px; display: inline-block"></i></span><span>100%</span><span>· 한 칸만 밝은 행 = 한 노드에 고정된 클라이언트 · 여러 칸이 고른 행 = SmartConnect 가 분산 중</span></div>
+    </div>
+
+    <div style="flex: 1 1 420px; min-width: 0; display: flex; flex-direction: column; gap: 12px">
+      <div style="background: #141b2d; border: 1px solid #243049; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px">
+        <div style="font-size: 14px; font-weight: 700">노드 쏠림 <span style="font-weight: 400; color: #8b9bb4; font-size: 12px">· 7일 ops 합 · 평균 대비</span></div>
+        <div style="display: flex; flex-direction: column; gap: 5px; font-size: 12px">
+          <div style="display: grid; grid-template-columns: 52px minmax(0, 1fr) 90px 60px; gap: 8px; align-items: center"><span style="font-weight: 700">노드 4</span><span style="height: 12px; background: #3987e5; border-radius: 0 4px 4px 0; width: 100%"></span><span class="mono" style="text-align: right">4,120 ops/s</span><span class="mono" style="text-align: right; color: #fcd34d">2.3×</span></div>
+          <div style="display: grid; grid-template-columns: 52px minmax(0, 1fr) 90px 60px; gap: 8px; align-items: center"><span>노드 3</span><span style="height: 12px; background: #3987e5; border-radius: 0 4px 4px 0; width: 58%"></span><span class="mono" style="text-align: right">2,390</span><span class="mono" style="text-align: right">1.3×</span></div>
+          <div style="display: grid; grid-template-columns: 52px minmax(0, 1fr) 90px 60px; gap: 8px; align-items: center"><span>노드 1</span><span style="height: 12px; background: #3987e5; border-radius: 0 4px 4px 0; width: 44%"></span><span class="mono" style="text-align: right">1,810</span><span class="mono" style="text-align: right">1.0×</span></div>
+          <div style="display: grid; grid-template-columns: 52px minmax(0, 1fr) 90px 60px; gap: 8px; align-items: center"><span>노드 5</span><span style="height: 12px; background: #3987e5; border-radius: 0 4px 4px 0; width: 36%"></span><span class="mono" style="text-align: right">1,480</span><span class="mono" style="text-align: right">0.8×</span></div>
+          <div style="display: grid; grid-template-columns: 52px minmax(0, 1fr) 90px 60px; gap: 8px; align-items: center"><span>노드 2</span><span style="height: 12px; background: #3987e5; border-radius: 0 4px 4px 0; width: 30%"></span><span class="mono" style="text-align: right">1,240</span><span class="mono" style="text-align: right">0.7×</span></div>
+          <div style="display: grid; grid-template-columns: 52px minmax(0, 1fr) 90px 60px; gap: 8px; align-items: center"><span>노드 7</span><span style="height: 12px; background: #3987e5; border-radius: 0 4px 4px 0; width: 24%"></span><span class="mono" style="text-align: right">990</span><span class="mono" style="text-align: right">0.6×</span></div>
+          <div style="display: grid; grid-template-columns: 52px minmax(0, 1fr) 90px 60px; gap: 8px; align-items: center"><span>노드 6</span><span style="height: 12px; background: #3987e5; border-radius: 0 4px 4px 0; width: 16%"></span><span class="mono" style="text-align: right">660</span><span class="mono" style="text-align: right">0.4×</span></div>
+          <div style="display: grid; grid-template-columns: 52px minmax(0, 1fr) 90px 60px; gap: 8px; align-items: center"><span>노드 8</span><span style="height: 12px; background: #3987e5; border-radius: 0 4px 4px 0; width: 7%"></span><span class="mono" style="text-align: right">300</span><span class="mono" style="text-align: right">0.2×</span></div>
+        </div>
+        <div style="font-size: 11.5px; color: #8b9bb4">쏠림 기준(노드 평균의 1.5배)은 설정값 — 노드 4 만 넘습니다. 노드 평균 1,790 ops/s.</div>
+      </div>
+
+      <div style="background: #141b2d; border: 1px solid #243049; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px">
+        <div style="font-size: 14px; font-weight: 700">재배치 후보 <span style="font-weight: 400; color: #8b9bb4; font-size: 12px">· 계산일 뿐 — 포탈은 아무것도 바꾸지 않습니다</span></div>
+        <div style="overflow-x: auto; border: 1px solid #1f2a40; border-radius: 10px">
+          <table>
+            <thead><tr><th>클라이언트</th><th>지금</th><th>제안</th><th style="text-align: right">옮기는 ops/s</th><th>뒤 노드 4 / 제안 노드</th></tr></thead>
+            <tbody>
+              <tr><td><span class="mono">10.94.60.21</span> db-fra-02 <span class="tag fix">고정</span></td><td>노드 4</td><td>노드 8</td><td class="mono" style="text-align: right">1,410</td><td class="mono">2,710 / 1,710</td></tr>
+              <tr><td><span class="mono">10.94.60.35</span> hpc-fra-11 <span class="tag fix">고정</span></td><td>노드 4</td><td>노드 6</td><td class="mono" style="text-align: right">880</td><td class="mono">1,830 / 1,540</td></tr>
+              <tr><td><span class="mono">10.94.61.8</span> media-fra-01 <span class="tag fix">고정</span></td><td>노드 4</td><td>노드 7</td><td class="mono" style="text-align: right">620</td><td class="mono">1,210 / 1,610</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div style="font-size: 11.5px; color: #8b9bb4; line-height: 1.55">제안 규칙 — 쏠린 노드의 ‘고정’ 클라이언트를 ops 큰 순으로, 그때마다 가장 한가한 노드에 배정(탐욕). 한 번에 평균 아래로 내려가면 멈춥니다. 실제로 옮기는 방법(NFS 마운트 대상 IP 변경 · SmartConnect 존/정책)은 장비·클라이언트 쪽 작업이라 여기 적지 않습니다 — 옮긴 뒤에는 이 화면이 다음 표본부터 새 분포를 보여 줍니다.</div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

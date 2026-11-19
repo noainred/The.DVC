@@ -16,23 +16,34 @@
 import os from 'node:os';
 import { Worker } from 'node:worker_threads';
 import { parseObjectContent } from '../vcenter/soapParse.js';
+import { envNonNegative, ENV_INT_MAX } from './envNumber.js';
 
 // 이 크기(문자) 미만 XML은 워커로 넘기지 않고 인라인 파싱(오프로딩 오버헤드 회피).
-const MIN_OFFLOAD_CHARS = Number(process.env.SOAP_PARSE_MIN_CHARS || 262_144); // 256KB
+// 102회차 F4: 예전 `Number(env || 기본값)` 은 숫자 아님 → NaN(`길이 < NaN` 이 거짓이라 작은 XML 까지 전부 워커로), Infinity → 큰 XML 도 인라인
+//   (메인 루프 블로킹 — 끄는 키는 SOAP_PARSE_WORKERS=0 이다)이었다. '0' = 항상 오프로드는 의미라 지킨다(envNonNegative) · 그 밖은 기본값.
+const MIN_OFFLOAD_CHARS = envNonNegative(process.env.SOAP_PARSE_MIN_CHARS, 262_144, { max: ENV_INT_MAX }); // 256KB
 // 워커 수(0이면 오프로딩 완전 비활성 → 항상 인라인).
-const WORKER_COUNT = (() => {
-  const env = process.env.SOAP_PARSE_WORKERS;
-  if (env != null && env !== '') return Math.max(0, Number(env) || 0);
-  return Math.max(1, Math.min(4, (os.cpus()?.length || 2) - 1));
-})();
+// 102회차 F5(재현): 예전 `Math.max(0, Number(env) || 0)` 은 상한이 없어 SOAP_PARSE_WORKERS=Infinity 면 ensurePool 의 `i < WORKER_COUNT` 가
+//   끝나지 않아 **첫 큰 SOAP 응답에서 메인 스레드가 워커를 끝없이 만들며 멈췄다**(4초 뒤 강제 종료 — 정상 6 은 7ms), 1e4 면 스레드 1만 개 ·
+//   2.5 면 3개였다. 숫자 아님 · 음수 · 공백도 0(오프로딩 꺼짐)으로 읽었다. 이제 '0' = 끔(의미)만 0 이고, 정수 1~SOAP_PARSE_WORKERS_MAX 밖은 기본값.
+export const SOAP_PARSE_WORKERS_MAX = 64;
+const WORKER_COUNT = envNonNegative(process.env.SOAP_PARSE_WORKERS, Math.max(1, Math.min(4, (os.cpus()?.length || 2) - 1)), { max: SOAP_PARSE_WORKERS_MAX });
 
 const encoder = new TextEncoder();
 let pool = null; // { workers:[{w, busy}], queue:[], pending:Map, seq } | null(비활성/실패)
 let poolBroken = false; // 초기화가 한 번 실패하면 이후 계속 인라인(재시도 폭주 방지)
 
+const RESPAWN_WINDOW_MS = 60_000;
+export const RESPAWN_MAX = 5;
+let _respawns = [];
+let _respawnWarned = false;
+
+let _workerUrlOverride = null;
 function workerUrl() {
-  return new URL('./parseWorker.js', import.meta.url);
+  return _workerUrlOverride || new URL('./parseWorker.js', import.meta.url);
 }
+/** 테스트 전용 — 워커 진입점을 바꾼다(뜨자마자 죽는 워커로 재생성 한도를 확인한다). */
+export function _setWorkerUrlForTest(u) { _workerUrlOverride = u || null; }
 
 function spawnWorker() {
   const w = new Worker(workerUrl());
@@ -68,7 +79,25 @@ function spawnWorker() {
     }
     if (pool) {
       pool.workers = pool.workers.filter((s) => s !== slot);
-      try { pool.workers.push(spawnWorker()); } catch { /* 재생성 실패 시 남은 워커로 지속 */ }
+      // v3.10.5(공용 유틸 점검 3회차): 재생성에 한도를 둔다 — 워커가 뜨자마자 죽으면(설치본에 parseWorker.js 가 없거나 깨짐) 'error' →
+      //   재생성 → 'error' 가 쉬지 않고 이어져 스레드를 끝없이 만들고 버렸다. 1분에 RESPAWN_MAX 번을 넘으면 더 만들지 않고,
+      //   남은 워커가 없으면 풀을 접고 메인 스레드에서 파싱한다(수집은 멈추지 않는다 — 큐의 작업도 그 자리에서 처리).
+      const now = Date.now();
+      _respawns = _respawns.filter((t) => now - t < RESPAWN_WINDOW_MS);
+      if (_respawns.length < RESPAWN_MAX) {
+        _respawns.push(now);
+        try { pool.workers.push(spawnWorker()); } catch { /* 재생성 실패 시 남은 워커로 지속 */ }
+      } else if (!_respawnWarned) {
+        _respawnWarned = true;
+        try { console.warn(`[soap-parse] 파싱 워커가 1분에 ${RESPAWN_MAX}번 넘게 죽어 더 띄우지 않습니다 — 남은 워커${pool.workers.length ? ` ${pool.workers.length}개` : '가 없어 메인 스레드'}로 파싱합니다.`); } catch { /* */ }
+      }
+      if (!pool.workers.length) {
+        const p = pool;
+        pool = null;
+        poolBroken = true;
+        for (const t of p.queue.splice(0)) { try { t.resolve(parseObjectContent(t.xml)); } catch (e) { t.reject(e); } }
+        return;
+      }
       // ⚠ 회귀 방지(v2.287, 확정 버그 #8): 죽은 워커가 물고 있던 1건만 재처리하고 drain 을
       // 부르지 않으면, 큐에 대기 중이던 나머지 파싱 작업의 Promise 가 영원히 pending 으로 남는다
       // (drain 은 push·다른 워커 message 에서만 돌고, parseObjectContentAsync 엔 타임아웃이 없다).
@@ -144,5 +173,5 @@ export async function shutdownParsePool() {
 
 /** 테스트용 내부 상태 확인. */
 export function _poolInfo() {
-  return { workerCount: WORKER_COUNT, minOffloadChars: MIN_OFFLOAD_CHARS, active: !!pool, broken: poolBroken };
+  return { workerCount: WORKER_COUNT, minOffloadChars: MIN_OFFLOAD_CHARS, active: !!pool, broken: poolBroken, respawnsInWindow: _respawns.length };
 }

@@ -11,6 +11,7 @@
  * CENTRAL_URL 설정 시 동작(=에이전트). AGENT_PUSH_FLEET=false 로 끌 수 있다.
  */
 
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import zlib from 'node:zlib';
 import { promisify } from 'node:util';
 import { config, loadVcenterConfig, clampIntervalMs } from '../config.js';
@@ -25,6 +26,8 @@ import { registryLoadError, loadRegistry } from '../idrac/registry.js'; // v2.74
 import { centralStatusOnlySupport, sendStatusOnly, FLEET_STATUS_ONLY_MIN_CENTRAL } from './centralStatusOnly.js'; // v2.744(감사 EDGE-01)
 import { createChangeLogger } from '../util/logThrottle.js';
 import { summarizeRegistryError } from '../util/registryCore.js'; // v2.744(회귀 검토 GD-R1)
+import { getInventory } from '../idrac/invCache.js';
+import { hwSummaryOf, mgmtHostOf } from '../idrac/hwSummary.js'; // v3.3.0 물리서버 폴더 하드웨어 요약 · iDRAC 주소(중앙 central/fleet.js 정제와 짝)
 
 /**
  * v2.604(감사 EDGE2604-01 — 재현): 이 엣지가 **직접 수집하는** vCenter 중 호스트를 아직 읽지 못한 것(순수 판정).
@@ -59,7 +62,7 @@ export function unreadHostVcenters(snap, registered = []) {
  * 귀속 없는 항목만 빼고** 보낸다(그 둘이 ESXi 를 받치는 iDRAC 이 베어메탈로 둔갑할 수 있는 항목이다). 뺀 개수와
  * 못 읽은 vCenter 는 본문·상태·콘솔에 밝힌다(조용한 축약 금지). ⚠ 뺀 항목은 중앙에서 그 동안 보이지 않는다(정직 기록).
  */
-export const FLEET_WITHHOLD_MAX_MS = Math.max(60_000, Number(process.env.AGENT_FLEET_WITHHOLD_MAX_MS) || 20 * 60_000);
+export const FLEET_WITHHOLD_MAX_MS = Math.max(60_000, envPositive(process.env.AGENT_FLEET_WITHHOLD_MAX_MS, 20 * 60_000));
 let withholdSince = null;
 
 /**
@@ -202,7 +205,17 @@ export async function pushFleetNow() {
     if (regErr) return await reportRegistryUnreadable(regErr);
     const snap = store.get();
     let registered = [];
-    try { registered = loadVcenterConfig()?.vcenters || []; } catch { registered = []; }
+    let vcCfg = null;
+    try { vcCfg = loadVcenterConfig(); registered = vcCfg?.vcenters || []; } catch { registered = []; }
+    // 118회차(84회차 남긴 것 ①): vCenter 등록부를 **못 읽었고 마지막으로 읽은 목록도 없으면** 아래 '호스트 못 읽은 vCenter' 보류가 빈 목록으로 통과한다 —
+    //   수집도 그 주기를 건너뛰어(store) 스냅샷에 호스트가 없으므로 ESXi 를 받치는 iDRAC 이 전부 베어메탈로 올라간다. 보내지 않는다(상태 · 콘솔에 사유).
+    //   시한: 따로 붙잡지 않는다 — 중앙은 마지막 수신부터 TTL(기본 30분) 뒤 이 엣지 목록을 '보고 없음' 으로 내린다(빈 목록 · 틀린 목록 교체가 아니다).
+    if (vcCfg?.readError && !vcCfg.file) {
+      const note = `vCenter 등록부(vcenters.json)를 읽지 못해(${vcCfg.readError}) 어느 iDRAC 이 ESXi 호스트인지 판정할 수 없습니다 — 베어메탈 목록을 보내지 않았습니다(파일 권한 · 소유자 · 디스크를 확인하세요 · 읽히면 다음 주기에 보냅니다)`;
+      last = { at: Date.now(), sent: 0, error: note, skipped: true, vcRegistryUnreadable: { code: vcCfg.readError }, note };
+      if (_regLog('vc-registry', String(vcCfg.readError))) console.warn(`[fleet-push] ${note}`);
+      return { ok: false, skipped: true, vcRegistryUnreadable: true, reason: note };
+    }
     const unread = unreadHostVcenters(snap, registered);
     const maxMs = fleetWithholdMaxMs(config.agent.inventoryIntervalMs || 300_000);
     const dec = fleetWithholdDecision(unread, withholdSince, Date.now(), maxMs, lastFullOkAt);
@@ -220,14 +233,21 @@ export async function pushFleetNow() {
     // 중앙에 반영하므로 watts는 보내지 않는다(이중계상 방지). 중앙은 서비스태그로 dedup해 병합한다.
     // v2.887(서비스 인벤토리 — 4차 검토 반증 3): 그 서버를 등록한 **중앙 스캔 엔트리 id**(등록부 scanRangeId) 를 함께 싣는다.
     //   라벨(서비스명)은 중앙에만 있으므로 조인은 중앙이 한다(엣지가 라벨을 지어내지 않는다). 등록부를 못 읽으면 빈 값.
-    const scanIdOf = (() => {
-      try { const m = new Map(loadRegistry().map((r) => [String(r.id), String(r.scanRangeId || '')])); return (b) => m.get(String(b.serverId || '')) || ''; }
-      catch { return () => ''; }
-    })();
-    let baremetal = (inv.bareMetal || []).map((b) => ({
-      fleetId: b.fleetId, name: b.name, model: b.model, serviceTag: b.serviceTag,
-      vcenterId: b.vcenterId, source: b.source, scanRangeId: scanIdOf(b), untaggedId: fleetUntaggedId(b),
-    }));
+    const regById = (() => { try { return new Map(loadRegistry().map((r) => [String(r.id), r])); } catch { return null; } })();
+    const scanIdOf = (b) => (regById ? String(regById.get(String(b.serverId || ''))?.scanRangeId || '') : '');
+    // v3.3.0(물리서버 폴더 하드웨어 — 사용자 요청 'iDRAC 에서 수집한 데이터 보여줘'): 엣지 iDRAC 등록부 서버의 하드웨어 요약 · 관리 주소.
+    //   중앙은 엣지가 올린 서버의 인벤토리를 갖지 않는다(수집 서버 pull 과 다르다) — 요약만 싣는다(부품별 목록은 그 엣지 포탈에서).
+    //   인벤토리를 아직 못 읽었거나 등록부 밖(OME 등)이면 키를 만들지 않는다(구버전 중앙은 모르는 키를 버린다).
+    const hwOf = (b) => { if (b.source !== 'idrac') return null; try { return hwSummaryOf(getInventory(String(b.serverId || ''))); } catch { return null; } };
+    const mgmtOf = (b) => (b.source === 'idrac' && regById ? mgmtHostOf(regById.get(String(b.serverId || ''))?.host) : '');
+    let baremetal = (inv.bareMetal || []).map((b) => {
+      const hw = hwOf(b); const mgmtHost = mgmtOf(b);
+      return {
+        fleetId: b.fleetId, name: b.name, model: b.model, serviceTag: b.serviceTag,
+        vcenterId: b.vcenterId, source: b.source, scanRangeId: scanIdOf(b), untaggedId: fleetUntaggedId(b),
+        ...(hw ? { hw } : {}), ...(mgmtHost ? { mgmtHost } : {}),
+      };
+    });
     let partialInfo = null;
     if (dec.mode === 'partial') {
       const { keep, dropped } = partialBareMetal(baremetal, unread);

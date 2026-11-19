@@ -10,7 +10,7 @@
  *  ④ B3-06 범위 관리자는 게시판에서 관리자 권한이 없다(남의 글 수정·고정·삭제 403, 표시 플래그 false) — 자기 글은 그대로.
  *  ⑤ B3-07 범위 계정에는 비용 단가·태그 정책 설정의 updatedBy(계정명)가 null 이다 — 전체 범위 응답은 그대로(v2.721 vm-hygiene 규칙).
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -18,8 +18,15 @@ import path from 'node:path';
 import http from 'node:http';
 import express from 'express';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 // config.js 가 import 시점에 굳으므로 src 를 부르기 전에 고정한다.
-const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'a2732h-'));
+const CFG = tmpDir('a2732h-');
 process.env.CONFIG_DIR = CFG;
 process.env.DATA_SOURCE = 'mock';
 process.env.AUTH_ENABLED = 'true';

@@ -13,7 +13,14 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'veeam2762b-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const DIR = tmpDir('veeam2762b-');
 process.env.CONFIG_DIR = DIR;
 process.env.DATA_SOURCE = 'live';
 const VC1 = 'pl:vc01';   // Veeam 연동 · 다른 vCenter 로 적힌 VM 만(주소 불일치)
@@ -126,7 +133,7 @@ test('E1 — 표지 파일이 손상이면 어느 vCenter 인지 모르므로 �
 
 test('E2 — 로그 폴러는 전용 DB 에 먼저 넣는다(로그 DB 적재가 도중에 끝나도 전용 DB 에 빠진 행이 없다 · 실제 pollLogsOnce)', { timeout: 120_000 }, () => {
   const src = fileURLToPath(new URL('../src', import.meta.url));
-  const cdir = fs.mkdtempSync(path.join(os.tmpdir(), 'veeam2762b-e2-'));
+  const cdir = tmpDir('veeam2762b-e2-');
   const child = path.join(cdir, 'child.mjs');
   fs.writeFileSync(child, `
 const R = process.argv[2];

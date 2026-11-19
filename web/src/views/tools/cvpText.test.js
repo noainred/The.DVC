@@ -131,7 +131,9 @@ describe('지금 수집', () => {
 describe('폼', () => {
   it('설정 빈 칸은 보내지 않는다', () => {
     const b = T.settingsPayload({ enabled: true, intervalMin: '', rawRetentionDays: '7', dailyRetentionDays: ' ', concurrency: '2', deviceTimeoutSec: '' });
-    expect(b).toEqual({ enabled: true, faultAlerts: false, faultAlertsClosed: true, rawRetentionDays: 7, concurrency: 2 });
+    expect(b).toEqual({ enabled: true, faultAlerts: false, faultAlertsClosed: true, endpointScan: true, rawRetentionDays: 7, concurrency: 2 });   // v2.935(C-③) endpointScan 은 불리언(빈 칸 규칙 밖)
+    expect(T.settingsPayload({ endpointScan: false, endpointPerCycle: '50' })).toMatchObject({ endpointScan: false, endpointPerCycle: 50 });
+    expect(T.settingsToForm({ endpointPerCycle: null }).endpointPerCycle).toBe('');
     const c = T.settingsPayload({ enabled: false, intervalMin: '5', deviceTimeoutSec: '120' });
     expect(c.intervalMs).toBe(300_000);
     expect(c.deviceTimeoutMs).toBe(120_000);
@@ -475,7 +477,7 @@ describe('v2.643 이벤트 장비 — 시리얼 대신 호스트명', () => {
   });
 });
 
-import { faultKindLabel as fkl2648 } from './cvpText.js';
+import { faultKindLabel as fkl2648 , epSummaryText } from './cvpText.js';
 describe('v2.648 슬롯 전원 표시', () => {
   it('ecb › LinecardN 은 슬롯 전원 · 일반 PSU 는 그대로', () => {
     expect(fkl2648('psu', 'ecb › Linecard4')).toBe('슬롯 전원(카드)');
@@ -546,5 +548,16 @@ describe('streamingMeta (v2.721 감사 R2-03)', () => {
     expect(T.streamingMeta({ devices: 5, streaming: 3 })).toBe('스트리밍 아님 2');
     expect(T.streamingMeta({})).toBe('');
     expect(T.streamingMeta({ devices: 3, streaming: 1, notStreaming: 2, unconfirmed: 2, unconfirmedBy: { 'not-streaming': 2 } })).toBe('스트리밍 아님 2');
+  });
+});
+
+describe('v2.940 위치 조회 주기 요약(C-③ 남긴 것)', () => {
+  it('요약 · 멈춘 사유 · 없으면 —', () => {
+    expect(epSummaryText({ asked: 200, ok: 150, none: 40, errors: 0, cut: 10 }).text).toBe('물음 200 · 위치 있음 150 · 없음 40 · 못 물음 10');
+    const s = epSummaryText({ asked: 3, ok: 0, none: 0, errors: 3, cut: 197, stopped: 'auth' });
+    expect(s.text).toContain('401 · 403 이 이어져 멈춤'); expect(s.warn).toBe(true);
+    expect(epSummaryText({ asked: 0, ok: 0, none: 0, cut: 200, stopped: 'budget' }).text).toContain('수집 예산 부족으로 건너뜀');
+    expect(epSummaryText(null).text).toBe('—');
+    expect(epSummaryText({ asked: null, ok: null, none: null }).text).toBe('물음 — · 위치 있음 — · 없음 —');
   });
 });

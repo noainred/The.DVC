@@ -179,7 +179,8 @@ export function staleQueryOf(q = {}) {
   const src = STALE_SOURCES.includes(String(q.src)) ? String(q.src) : 'all';
   const flag = (v) => String(v ?? '1') !== '0';
   const vc = typeof q.vc === 'string' ? q.vc.slice(0, 128) : '';   // v2.837 법인 하나(빈 값 = 범위 안 전체)
-  return { n: ok ? n : null, unit, src, excludeNone: flag(q.excludeNone), onlyOn: flag(q.onlyOn), includeNever: flag(q.includeNever), vc, windowMs: ok ? n * STALE_UNIT_MS[unit] : null };
+  const region = typeof q.region === 'string' ? q.region.trim().slice(0, 64) : '';   // v3.10.17 리전(빈 값 = 전체 — Summary 의 리전 Select 를 따른다)
+  return { n: ok ? n : null, unit, src, excludeNone: flag(q.excludeNone), onlyOn: flag(q.onlyOn), includeNever: flag(q.includeNever), vc, region, windowMs: ok ? n * STALE_UNIT_MS[unit] : null };
 }
 
 /**

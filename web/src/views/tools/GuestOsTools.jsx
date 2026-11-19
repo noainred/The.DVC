@@ -11,6 +11,14 @@ import { STable } from '../../components/STable.jsx';
 import { dayStamp } from '../../dayStamp.js';
 import BoldText from '../../components/boldText.jsx';
 import { guestAuthLines } from '../authSkipText.js'; // v2.591(감사 F2): 게스트 계정 인증 실패 정지·차단기
+import { saveBlob } from '../../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나(즉시 revoke · 문서 밖 click 금지)
+import { unreadMarkOf, unreadKind, saveLockedByUnread, shouldReseed } from '../settingsUnread.js';   // 112회차: 못 읽은 동안의 기본값 폼으로 저장하지 않는다
+import { SettingsUnreadBanner } from '../SettingsUnreadBanner.jsx';
+
+// v3.13.7 설정 칸 한 묶음(이름 · 칸 · 단위) — 줄이 바뀌어도 함께 움직인다
+const FIELD = { alignItems: 'center', gap: 6, whiteSpace: 'nowrap' };
+// v3.13.9 필터 묶음(이름 + 버튼들) — 줄이 바뀌어도 함께 움직인다
+const FILTER_GROUP = { alignItems: 'center', gap: 6, flex: 'none' };
 
 
 export function GuestOs({ scope }) {
@@ -60,14 +68,19 @@ export function GuestOs({ scope }) {
         <button className={view === 'vcenter' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setView('vcenter')}>vCenter별 ({(data.byVcenter || []).length})</button>
         <SearchBox className="input" style={{ maxWidth: 260 }} placeholder={view === 'vcenter' ? 'vCenter 이름 검색' : 'OS 이름 검색 (예: Windows, Ubuntu 22)'} value={q} onChange={setQ} />
         <span style={{ width: 8 }} />
-        <span className="muted" style={{ fontSize: 12 }}>전원</span>
-        {[['all', '전체'], ['on', '켜짐'], ['off', '꺼짐']].map(([k, l]) => (
-          <button key={k} className={power === k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 11px', fontSize: 12 }} onClick={() => setPower(k)}>{l}</button>
-        ))}
-        <span className="muted" style={{ fontSize: 12, marginLeft: 6 }}>종류</span>
-        {[['all', '전체'], ['vm', 'VM'], ['template', '템플릿']].map(([k, l]) => (
-          <button key={k} className={kind === k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 11px', fontSize: 12 }} onClick={() => setKind(k)}>{l}</button>
-        ))}
+        {/* v3.13.9: 이름과 버튼을 한 묶음(role=group)으로 — 400px 에서 '전원 [전체]' 다음 줄에 '켜짐 꺼짐 종류 [전체] …' 처럼 갈라져 켜짐 · 꺼짐이 '종류' 것처럼 보였다. 고른 버튼은 aria-pressed. */}
+        <span role="group" aria-label="전원" className="flex" style={FILTER_GROUP}>
+          <span className="muted" style={{ fontSize: 12 }}>전원</span>
+          {[['all', '전체'], ['on', '켜짐'], ['off', '꺼짐']].map(([k, l]) => (
+            <button key={k} type="button" aria-pressed={power === k} className={power === k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 11px', fontSize: 12 }} onClick={() => setPower(k)}>{l}</button>
+          ))}
+        </span>
+        <span role="group" aria-label="종류" className="flex" style={FILTER_GROUP}>
+          <span className="muted" style={{ fontSize: 12 }}>종류</span>
+          {[['all', '전체'], ['vm', 'VM'], ['template', '템플릿']].map(([k, l]) => (
+            <button key={k} type="button" aria-pressed={kind === k} className={kind === k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 11px', fontSize: 12 }} onClick={() => setKind(k)}>{l}</button>
+          ))}
+        </span>
       </div>
       {view === 'vcenter' ? (
         // vCenter별 — 각 행 클릭 시 그 vCenter의 OS별 VM 수·할당 vCPU 분해를 펼친다(사용자 요구).
@@ -132,8 +145,7 @@ export function GuestOsVmsModal({ label, params, onClose }) {
     const lines = [head.join(',')];
     for (const r of items) lines.push([r.name, r.vcenterId, r.cluster, r.host, r.cpu, r.memGB, r.diskGB ?? '', r.ip, r.powerState === 'POWERED_ON' ? 'On' : 'Off'].map(esc).join(','));   // v2.727(C-01): 못 읽은 용량은 빈 칸
     const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = `guestos-${String(label).replace(/[^a-zA-Z0-9._-]+/g, '_')}-${dayStamp()}.csv`; a.click(); URL.revokeObjectURL(url);
+    saveBlob(blob, `guestos-${String(label).replace(/[^a-zA-Z0-9._-]+/g, '_')}-${dayStamp()}.csv`);
   };
   const cols = [
     { key: 'name', label: 'VM', render: (r) => <VmLink name={r.name} vcenterId={r.vcenterId} label={r.name} /> },
@@ -186,7 +198,16 @@ export function RealOs({ scope }) {
   const [busy, setBusy] = useState('');
   const [msg, setMsg] = useState(null);
 
-  const loadStatus = () => fetchJson('/admin/os-scan').then((r) => { setSt((cur) => ({ ...(cur || {}), ...r, settings: cur?.dirty ? cur.settings : r.settings })); setErr(null); }).catch((e) => setErr(e.message));
+  // 112회차: 서버가 스캔 설정 파일을 못 읽은 동안 settings 는 기본값이다 — 못 읽은 값으로 채운 폼(그 위의 편집 포함)은 상태가 바뀐 조회에서 서버값으로 다시 채운다.
+  //   표지(loadError)는 조회마다 새로 둔다(펼침 병합이라 예전 표지가 남지 않게).
+  const loadStatus = () => fetchJson('/admin/os-scan').then((r) => {
+    setSt((cur) => {
+      const le = unreadMarkOf(r);
+      const keep = !!cur?.dirty && !shouldReseed(unreadKind(unreadMarkOf(cur)), le);
+      return { ...(cur || {}), ...r, loadError: le, dirty: keep, settings: keep ? cur.settings : r.settings };
+    });
+    setErr(null);
+  }).catch((e) => setErr(e.message));
   // v2.611 WEB2611-07·08: 세대 가드(범위·필터를 바꾼 뒤 늦게 온 이전 응답은 버린다) +
   // 조회 실패를 '스캔 결과가 없습니다' 로 칠하지 않는다(직전 결과는 그대로 두고 배너로 말한다).
   const resGen = useRef(0);
@@ -206,14 +227,16 @@ export function RealOs({ scope }) {
       });
   };
   useEffect(() => { loadStatus(); /* eslint-disable-next-line */ }, []);
-  useEffect(() => { loadResults(); /* eslint-disable-next-line */ }, [scope, mm]);
+  useEffect(() => { loadResults(); }, [scope, mm]);
 
   if (err) return <ErrorBox message={err} />;
   if (!st) return <Loading />;
   const s = st.settings || {};
   const setS = (patch) => setSt((cur) => ({ ...cur, dirty: true, settings: { ...cur.settings, ...patch } }));
 
-  const saveSettings = async () => { setBusy('save'); setMsg(null); try { const r = await putJson('/admin/os-scan/settings', s); setSt((c) => ({ ...c, ...r, dirty: false })); setMsg('저장됨'); } catch (e) { setMsg(e.message); } finally { setBusy(''); } };
+  const unread = unreadMarkOf(st);
+  const saveLocked = saveLockedByUnread(unread);   // 112회차: 설정 파일 읽기 오류 동안 저장 잠금(서버도 503)
+  const saveSettings = async () => { if (saveLocked) return; setBusy('save'); setMsg(null); try { const r = await putJson('/admin/os-scan/settings', s); setSt((c) => ({ ...c, ...r, loadError: null, dirty: false })); setMsg('저장됨'); } catch (e) { setMsg(e.message); } finally { setBusy(''); } };
   const runNow = async () => { setBusy('run'); setMsg(null); try { const r = await postJson('/admin/os-scan/run', scope ? { vcenterId: scope } : {}); setMsg(r.ok ? `스캔 완료 — 탐지 ${r.found ?? 0}건` : `오류: ${r.reason || '실패'}`); await loadStatus(); await loadResults(); } catch (e) { setMsg(e.message); } finally { setBusy(''); } };
   const exportCsv = async () => {
     const qs = new URLSearchParams({ ...(scope ? { vcenterId: scope } : {}), ...(mm ? { mismatch: '1' } : {}) }).toString();
@@ -226,10 +249,11 @@ export function RealOs({ scope }) {
     { key: 'vmName', label: 'VM', render: (r) => <VmLink name={r.vmName} vcenterId={r.vcenterId} label={r.vmName} /> },
     { key: 'vcenterId', label: 'vCenter', render: (r) => <span className="muted">{r.vcenterId}</span> },
     { key: 'host', label: '호스트', render: (r) => <span className="muted" style={{ fontSize: 12, maxWidth: 160, display: 'inline-block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', verticalAlign: 'bottom' }} title={r.host}>{r.host || '—'}</span> },
-    { key: 'esxiGuestOS', label: 'ESXi 보고', render: (r) => <span style={{ fontSize: 12 }}>{r.esxiGuestOS || '—'}</span> },
+    // v2.977(전체 점검): 긴 OS 이름이 한 줄로 이어져 1440px 에서 '불일치' · '스캔' 열이 가로 스크롤 뒤로 갔다 — 두 칸을 접는다
+    { key: 'esxiGuestOS', label: 'ESXi 보고', render: (r) => <span style={{ fontSize: 12, display: 'inline-block', whiteSpace: 'normal', overflowWrap: 'anywhere', maxWidth: 150 }}>{r.esxiGuestOS || '—'}</span> },
     // v2.742 VC-04: 스캔이 실패해도 직전에 읽은 OS 는 남는다 — 그 값이 '마지막으로 읽은 값' 임을 같은 칸이 말한다(지금 읽은 척하지 않는다).
     { key: 'os', label: '실제 OS', render: (r) => (r.os
-      ? <span><b>{r.os}</b>{r.error ? <span className="badge amber" style={{ marginLeft: 6 }} title={`최근 스캔 실패: ${r.error}${r.okAt ? ` · 마지막 성공 ${new Date(r.okAt).toLocaleString('ko-KR')}` : ''}`}>최근 실패 · 이전 값</span> : null}</span>
+      ? <span style={{ display: 'inline-block', whiteSpace: 'normal', overflowWrap: 'anywhere', maxWidth: 210 }}><b>{r.os}</b>{r.error ? <span className="badge amber" style={{ marginLeft: 6 }} title={`최근 스캔 실패: ${r.error}${r.okAt ? ` · 마지막 성공 ${new Date(r.okAt).toLocaleString('ko-KR')}` : ''}`}>최근 실패 · 이전 값</span> : null}</span>
       : <span className="badge red" title={r.error}>실패</span>) },
     { key: 'osVersion', label: '버전', render: (r) => r.osVersion || '—' },
     { key: 'family', label: '계열', render: (r) => r.family ? <span className="badge gray">{r.family}</span> : '—' },
@@ -247,17 +271,20 @@ export function RealOs({ scope }) {
       </div>
 
       <div className="card" style={{ padding: 14, marginBottom: 12 }}>
+        <SettingsUnreadBanner le={unread} what="실제 OS 스캔 설정" save="설정 저장" onRecheck={loadStatus} />
         <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>게스트 OS에서 <code>/etc/os-release</code>·<code>/etc/redhat-release</code>(Linux)·<code>Win32_OperatingSystem</code>(Windows)를 직접 읽어 <b>실제 설치 OS</b>를 확인합니다(ESXi 보고값과 별개). 계정은 <b>설정 › GPU 게스트 수집</b>의 OS별 계정을 사용합니다. 상단 <b>vCenter 선택</b>이 스캔 범위입니다.</p>
         <div className="flex gap wrap" style={{ alignItems: 'center', gap: 14 }}>
           <label className="flex gap" style={{ alignItems: 'center', cursor: 'pointer' }}><input type="checkbox" checked={!!s.enabled} onChange={(e) => setS({ enabled: e.target.checked })} /> <b>주기 스캔</b></label>
-          <span className="muted">주기</span><input className="input" type="number" min={5} style={{ width: 90 }} value={s.intervalMin} onChange={(e) => setS({ intervalMin: e.target.value })} /><span className="muted">분</span>
-          <span className="muted">최대</span><input className="input" type="number" min={1} style={{ width: 80 }} value={s.maxVms} onChange={(e) => setS({ maxVms: e.target.value })} /><span className="muted">대/회</span>
-          <span className="muted">재스캔</span><input className="input" type="number" min={0} style={{ width: 70 }} value={s.rescanDays} onChange={(e) => setS({ rescanDays: e.target.value })} /><span className="muted">일(0=안함)</span>
-          <span className="muted">동시</span><input className="input" type="number" min={1} max={16} style={{ width: 56 }} value={s.concurrency} onChange={(e) => setS({ concurrency: e.target.value })} />
+          {/* v3.13.7: 이름 · 칸 · 단위를 한 묶음(label)으로 — 400px 에서 줄이 바뀔 때 '분 최대' 처럼 앞 칸의 단위와 다음 칸의 이름이 한 줄에 붙고 칸과 떨어졌다. label 이라 칸의 이름도 된다.
+              숫자 칸은 minWidth 0 — 전역 '.input { min-width: 220px }' 가 width 90 · 80 · 70 · 56 을 덮어 칸이 늘 220px 이었다. */}
+          <label className="flex" style={FIELD}><span className="muted">주기</span><input className="input" type="number" min={5} style={{ width: 90, minWidth: 0 }} value={s.intervalMin} onChange={(e) => setS({ intervalMin: e.target.value })} /><span className="muted">분</span></label>
+          <label className="flex" style={FIELD}><span className="muted">최대</span><input className="input" type="number" min={1} style={{ width: 80, minWidth: 0 }} value={s.maxVms} onChange={(e) => setS({ maxVms: e.target.value })} /><span className="muted">대/회</span></label>
+          <label className="flex" style={FIELD}><span className="muted">재스캔</span><input className="input" type="number" min={0} style={{ width: 70, minWidth: 0 }} value={s.rescanDays} onChange={(e) => setS({ rescanDays: e.target.value })} /><span className="muted">일(0=안함)</span></label>
+          <label className="flex" style={FIELD}><span className="muted">동시</span><input className="input" type="number" min={1} max={16} style={{ width: 56, minWidth: 0 }} value={s.concurrency} onChange={(e) => setS({ concurrency: e.target.value })} /></label>
         </div>
-        <div className="flex gap" style={{ marginTop: 12, alignItems: 'center' }}>
-          <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={busy === 'save'} onClick={saveSettings}>설정 저장</button>
-          <button className="logout-btn" style={{ padding: '8px 16px' }} disabled={busy === 'run'} onClick={runNow}>{busy === 'run' ? '스캔 중…' : `지금 스캔 (${scope || '전체 vCenter'})`}</button>
+        <div className="flex gap" style={{ marginTop: 12, alignItems: 'center', flexWrap: 'wrap', rowGap: 8 }}>{/* v3.13.7 버튼 여러 개 행은 flexWrap — 400px 에서 '지금 스캔(전체 vCenter)' 이 세 줄로 접히고 오류 문구가 짓눌렸다 */}
+          <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={busy === 'save' || saveLocked} onClick={saveSettings}>설정 저장</button>
+          <button className="logout-btn" style={{ padding: '8px 16px', flex: 'none', whiteSpace: 'nowrap' }} disabled={busy === 'run'} onClick={runNow}>{busy === 'run' ? '스캔 중…' : `지금 스캔 (${scope || '전체 vCenter'})`}</button>
           {st.fleetRunHidden ? <span className="muted" style={{ fontSize: 12 }}>마지막 실행 결과(탐지 수·오류·인증 정지)는 전 vCenter 기준이라 범위가 제한된 계정에는 표시하지 않습니다.</span> : null}
           {st.lastErr ? <span className="muted" style={{ fontSize: 12, color: 'var(--amber)' }}>최근 오류: {st.lastErr.slice(0, 60)}</span> : null}
           {msg && <span className="muted" style={{ fontSize: 13 }}>{msg}</span>}

@@ -12,10 +12,10 @@
  *  · 데모(mock) 는 Director 에 닿지 않는 합성값(`demoHealth`) · 엣지에서는 돌지 않는다(중앙 전용).
  * 설정: CONFIG_DIR/bareos-health.json · 상태: bareos-health-state.json(비밀 없음 — 주소 · 경로 · 지문 · 바이트 수만).
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
+import { readJsonFile } from '../util/jsonFileRead.js';   // 97회차 F4: 상태 파일 읽기 오류 ≠ 손상
 import { makeLoadError } from '../util/registryCore.js';
 import { registerStateFile } from '../util/stateFiles.js';
 import { localClock, localStamp, dayIndex } from '../util/dayKey.js';
@@ -76,9 +76,13 @@ export function normHealth(body = {}) {
 }
 export function loadHealthCfg() {
   if (_cfg) return _cfg;
+  // 97회차 F4: 읽기 단계는 등록부 공용 읽기(util/registryCore.js read)다 — 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니라 원본을 옮기지 않고 ·
+  //   캐시하지 않고(30초 간격 재읽기) · 오류(readError)를 세워 쓰기를 거절한다(persist 의 assertWritable). parse · 형식 실패만 아래 catch(예전과 같다 — 보존본).
+  const rr = _loadErr.read(FILE(), (t) => t);
+  if (rr.kind === 'read-error') return { ...normHealth({}), savedBy: '', savedAt: null };
   try {
-    if (fs.existsSync(FILE())) {
-      const p = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
+    if (rr.kind === 'ok') {
+      const p = JSON.parse(rr.value);
       if (!p || typeof p !== 'object' || Array.isArray(p)) throw new Error('형식 오류');
       _cfg = { ...normHealth(p), savedBy: String(p.savedBy || '').slice(0, 64), savedAt: Number.isFinite(p.savedAt) ? p.savedAt : null };
       _loadErr.clear();
@@ -97,15 +101,21 @@ export function healthLoadError() { loadHealthCfg(); return _loadErr.get(); }
 export function saveHealthCfg(body, { by = '', now = Date.now() } = {}) {
   if (healthLoadError()) throw fail('unreadable', '사전 점검 설정 파일을 읽지 못해 저장하지 않습니다 — 손상본을 확인하세요.');
   const next = { ...normHealth(body), savedBy: String(by || '').slice(0, 64), savedAt: now };
+  _loadErr.assertWritable('Bareos 사전 점검 설정(bareos-health.json)'); // 97회차 F4: 마지막 방어선 — 읽기 오류 중에는 원본을 덮지 않는다(던진다 — status 409)
   atomicWriteFileSync(FILE(), JSON.stringify(next, null, 2), { mode: 0o600 });
   _cfg = next;
   return { ...next };
 }
 
 /* ───────── 상태 ───────── */
+let _stateReadErr = false;   // 97회차 F4
 function state() {
   if (_state) return _state;
-  try { _state = fs.existsSync(STATE_FILE()) ? JSON.parse(fs.readFileSync(STATE_FILE(), 'utf8')) : {}; } catch { preserveCorrupt(STATE_FILE()); _state = {}; }
+  // 97회차 F4: 읽기 단계(readJsonFile)와 parse 를 가른다 — 읽기 오류(EACCES · EIO · EISDIR)는 원본을 옮기지 않고 이 프로세스에서는 빈 상태로 돌며
+  //   그동안 상태 파일을 쓰지 않는다(saveState — 원본을 덮지 않게). 손상은 예전처럼 보존본으로 옮긴다.
+  const rs = readJsonFile(STATE_FILE(), { parse: (t) => JSON.parse(t) });
+  _stateReadErr = rs.kind === 'read-error';
+  _state = rs.kind === 'ok' ? rs.value : {};
   if (!_state || typeof _state !== 'object' || Array.isArray(_state)) _state = {};
   if (!_state.corps || typeof _state.corps !== 'object' || Array.isArray(_state.corps)) _state.corps = {};
   if (!_state.disks || typeof _state.disks !== 'object' || Array.isArray(_state.disks)) _state.disks = {};
@@ -115,9 +125,10 @@ function state() {
 function trimKeys(o) { const k = Object.keys(o); if (k.length > KEYS_MAX) for (const x of k.slice(0, k.length - KEYS_MAX)) delete o[x]; }
 function saveState() {
   const s = state(); trimKeys(s.corps); trimKeys(s.disks);
+  if (_stateReadErr) return;   // 97회차 F4: 읽기 오류 중에는 원본 상태 파일을 덮지 않는다
   try { atomicWriteFileSync(STATE_FILE(), JSON.stringify(s), { mode: 0o600 }); } catch (e) { console.warn(`[bareos] 사전 점검 상태를 저장하지 못했습니다(${e?.message || e})`); }
 }
-export function _resetHealthForTest() { _cfg = null; _state = null; _running = null; _mailBusy = false; _inflight.clear(); _loadErr.clear(); }
+export function _resetHealthForTest() { _cfg = null; _state = null; _running = null; _mailBusy = false; _inflight.clear(); _loadErr.clear(); _stateReadErr = false; }
 
 /* ───────── 판정(순수) ───────── */
 const VC_TEXT = {

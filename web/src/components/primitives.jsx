@@ -7,6 +7,8 @@
 // ⚠ components/ 아래 파일은 './ui.jsx'(셸)가 아니라 이 파일/Modal.jsx 를 직접 import 할 것 —
 // 셸 역참조는 순환의 씨앗이다(views/ 는 셸 사용 유지: 86개 소비자 import 무변경).
 import React, { useMemo, useState, useEffect, useRef } from 'react';
+import { pressable, onPressKey } from './pressable.js';
+import { uniqueKeys, baseRowKey } from './tableKeys.js';   // v3.13.4 행 key 고유화(겹치면 정렬마다 표가 불어났다)   // v3.13.2 DataTable 정렬 머리 키보드
 // 권한 거부(403) 안내 — AccessDenied 는 api.js 만 참조하므로 이 import 로 순환이 생기지 않는다
 // (api.js 는 컴포넌트를 import 하지 않는다). 위 '순환의 씨앗' 주의사항과 배치되지 않음.
 import { permissionInfoFor, httpInfoFor, reportLoadingStall, ensurePerfClientConfig, pollLoadingServerStatus } from '../api.js';
@@ -19,16 +21,18 @@ import TaskWho from './TaskWho.jsx';
 import ServiceDown from './ServiceDown.jsx';
 import { serviceDownKind } from './serviceDownText.js';
 import { numOrNull } from '../numOrNull.js';
-import { errorBoxInput } from './accessDeniedText.js';
+import { errorBoxInput, holdHttpInfo } from './accessDeniedText.js';
+import { compareCellValues } from './sortableText.js';
 
 /** VM GPU 배지 — vGPU/패스쓰루/혼합. Vms.jsx 에 있던 것을 공용으로 옮겼다(상세 화면 단일화). */
 const GPU_TYPE = { vgpu: ['vGPU', 'green'], passthrough: ['패스쓰루', 'amber'], mixed: ['혼합', 'purple'] };
-export function GpuBadge({ gpu }) {
+export function GpuBadge({ gpu, compact = false }) {
   if (!gpu) return <span className="muted">—</span>;
   const [label, cls] = GPU_TYPE[gpu.type] || ['GPU', 'gray'];
+  // compact(v2.977): 표 칸이 좁을 때 — 프로필은 마우스를 올리면(title) 보인다(가상머신 목록 1440px 에서 GPU 칸이 163px 를 차지해 오른쪽 열이 숨었다)
   return (
     <span className={`badge ${cls}`} title={gpu.profile || gpu.model || ''}>
-      {label}{gpu.count > 1 ? ` ×${gpu.count}` : ''}{gpu.profile ? ` · ${gpu.profile}` : ''}
+      {label}{gpu.count > 1 ? ` ×${gpu.count}` : ''}{gpu.profile && !compact ? ` · ${gpu.profile}` : ''}
     </span>
   );
 }
@@ -44,10 +48,7 @@ export function Kpi({ label, value, unit, meta, pct, accent, onClick, title }) {
   return (
     <div
       className={`card kpi${onClick ? ' kpi-click' : ''}`}
-      onClick={onClick}
-      role={onClick ? 'button' : undefined}
-      tabIndex={onClick ? 0 : undefined}
-      onKeyDown={onClick ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } } : undefined}
+      {...pressable(onClick)}   // v3.10.19: 키보드 접근 한 벌(components/pressable.js)
       title={title ?? (onClick ? '클릭하여 보기' : undefined)}
       style={accent ? { '--kpi-accent': accent } : undefined}
     >
@@ -56,9 +57,10 @@ export function Kpi({ label, value, unit, meta, pct, accent, onClick, title }) {
         {value}
         {unit && <small> {unit}</small>}
       </div>
-      {typeof pct === 'number' && (
+      {/* v3.17.3: NaN 도 typeof 'number' 라 'NaN%' 막대(초록)를 그렸다 — 유한수일 때만, 폭은 0~100 */}
+      {typeof pct === 'number' && Number.isFinite(pct) && (
         <div className="usage-bar">
-          <span style={{ width: `${Math.min(pct, 100)}%`, background: usageColor(pct) }} />
+          <span style={{ width: `${Math.max(0, Math.min(pct, 100))}%`, background: usageColor(pct) }} />
         </div>
       )}
       {meta && <div className="meta">{meta}</div>}
@@ -73,7 +75,7 @@ export function UsageCell({ pct }) {
   return (
     <span className="nowrap">
       <span className="mini-bar">
-        <span style={{ width: `${Math.min(v, 100)}%`, background: usageColor(v) }} />
+        <span style={{ width: `${Math.max(0, Math.min(v, 100))}%`, background: usageColor(v) }} />
       </span>{' '}
       <span className="pct tabular">{v}%</span>
     </span>
@@ -148,11 +150,10 @@ export function DataTable({
   const sorted = useMemo(() => {
     const col = columns.find((c) => c.key === sort.key);
     const val = (r) => (col?.sortValue ? col.sortValue(r) : r[sort.key]);
+    // v3.17.3: 비교는 공용 compareCellValues — 빈 값('' · '—' · NaN 포함)은 방향과 무관하게 뒤 · 글자는 숫자 인식(Collator 재사용).
     return [...rows].sort((a, b) => {
-      const x = val(a), y = val(b);
-      if (x == null) return 1;
-      if (y == null) return -1;
-      const cmp = typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y));
+      const { empty, cmp } = compareCellValues(val(a), val(b));
+      if (empty != null) return empty;
       return sort.dir === 'asc' ? cmp : -cmp;
     });
   }, [rows, sort, columns]);
@@ -162,9 +163,10 @@ export function DataTable({
 
   // ⚠ 자르는 것은 **정렬 뒤**다(위 주석). limit 0/미지정은 전부 그린다.
   const shown = limit > 0 ? sorted.slice(0, limit) : sorted;
+  const rowKeys = uniqueKeys(shown.map(baseRowKey));   // v3.13.4 행 key 고유화 — 같은 id/key 가 둘 이상이면 ~n(라이선스 표: 가림 키가 vCenter 마다 같아 정렬마다 표가 불어났다)
   // 보이는 행을 호출부에 알린다(키 목록이 바뀔 때만 — 매 렌더 호출하면 부모가 무한 갱신된다).
   const shownKey = shown.map((r) => r.key ?? r.id ?? '').join(',');
-  useEffect(() => { if (onVisible) onVisible(shown); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [shownKey]);
+  useEffect(() => { if (onVisible) onVisible(shown); }, [shownKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className={bare ? '' : 'table-wrap'} style={{ overflow: 'auto', maxHeight }}>
@@ -172,7 +174,8 @@ export function DataTable({
         <thead>
           <tr>
             {columns.map((c) => (
-              <th key={c.key} onClick={() => toggle(c.key)} style={{ textAlign: c.align || 'left' }}>
+              <th key={c.key} onClick={() => toggle(c.key)} tabIndex={0} onKeyDown={onPressKey(() => toggle(c.key))}
+                aria-sort={sort.key === c.key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'} style={{ textAlign: c.align || 'left' }}>
                 {c.label}{sort.key === c.key ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : ''}
               </th>
             ))}
@@ -183,7 +186,7 @@ export function DataTable({
             <tr><td colSpan={columns.length} className="center muted" style={{ padding: 30 }}>{emptyText}</td></tr>
           )}
           {shown.map((r, i) => {
-            const rk = r.id || r.key || i;
+            const rk = rowKeys[i];
             // v2.653: 선택 인자 — expandedKey 와 같은 행 아래에 renderExpanded(r) 을 한 줄 펼친다(정렬·limit 뒤라 보이는 행에만).
             const open = renderExpanded && expandedKey != null && (r.key ?? r.id) === expandedKey;
             return (
@@ -208,10 +211,13 @@ export function DataTable({
 
 /** Standard "총 N개 …" result count, with an indicator when a filter is active. */
 export function ResultCount({ total = 0, shown, label, filtered }) {
+  // 95회차: total 이 null · 글자면 toLocaleString 이 던져(null) 화면 전체가 죽거나 글자 그대로였다 — 수로 읽고, 못 읽으면 '—'(0 이 아니다)
+  const t = numOrNull(total);
+  const sh = numOrNull(shown);
   return (
     <div className="muted result-count" style={{ marginBottom: 10 }}>
-      총 <b style={{ color: 'var(--text)' }}>{total.toLocaleString()}</b>개 {label}
-      {shown != null && shown < total && <span> (상위 {shown.toLocaleString()}개 표시)</span>}
+      총 <b style={{ color: 'var(--text)' }}>{t == null ? '—' : t.toLocaleString()}</b>개 {label}
+      {sh != null && t != null && sh < t && <span> (상위 {sh.toLocaleString()}개 표시)</span>}
       {filtered && <span className="badge blue" style={{ marginLeft: 8 }}>필터 적용 중</span>}
     </div>
   );
@@ -337,12 +343,16 @@ export function ErrorBox({ message: msgProp, error, info = null }) {
   // 사이드 채널(문자열 키)을 빗나가 `오류: {객체}` 로 그려져 React #31 로 탭 전체가 죽었다.
   // 객체에 상태코드가 있으면 그 객체가 곧 HTTP 정보다(403 만 AccessDenied — 계약 유지).
   const norm = errorBoxInput(message);
-  const perm = info || norm.perm || permissionInfoFor(norm.text);
+  // 132회차(129 E4): 사이드 채널 메모는 5분 뒤 지워진다 — 이 상자가 같은 문구로 한 번 찾은 정보는 문구가 바뀔 때까지 붙든다(holdHttpInfo).
+  //   예전에는 403 화면을 5분 넘게 열어 둔 뒤 다시 그리면 '접근 제어 안내' 가 빨간 '오류: …' 로 바뀌었다.
+  const heldRef = useRef(null);
+  const held = holdHttpInfo(heldRef, norm.text, { perm: info || norm.perm || permissionInfoFor(norm.text), http: norm.http || httpInfoFor(norm.text) });
+  const perm = held.perm;
   if (perm) return <AccessDenied info={perm} message={norm.text} />;
   // v2.459: 5xx·네트워크 실패는 '오류'가 아니라 **일시적 미가용**(업그레이드 중 재시작 포함)이다.
   // 빨간 "오류: Failed to fetch" 로 두면 사용자가 데이터 손실·자기 잘못으로 오해해 새로고침을
   // 반복한다. 403 → AccessDenied 와 같은 단일 지점 처리.
-  const http = norm.http || httpInfoFor(norm.text);
+  const http = held.http;
   const kind = serviceDownKind(norm.text, http);
   if (kind) return <ServiceDown kind={kind} message={norm.text} http={http} />;
   return <div className="error-box">오류: {norm.text}</div>;

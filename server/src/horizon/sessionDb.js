@@ -246,7 +246,7 @@ export async function commitHzSessions({ ts, records = [], series = [], maxUsers
       //   (누적은 원래 하한이다). 실패한 주기는 쌍이 없고 cover 의 ok_cycles 가 늘지 않는다.
       const day = dayKey(ts);
       if (day && r.kind !== 'auth-stopped' && r.kind !== 'mock') {
-        h.st.upCover.run(day, String(r.serverId), r.ok ? 1 : 0, Number(ts), Number(ts));
+        h.st.upCover.run(day, String(r.serverId), r.ok && r.parsed !== false && r.kind !== 'unparsed' ? 1 : 0, Number(ts), Number(ts));   // 41회차 F1: 못 읽은 주기는 '수집 성공' 이 아니다
         if (r.ok) {
           for (const p of r.usage?.pairs || []) {
             if (!p?.userKey || !p?.serviceKey) continue;
@@ -322,6 +322,9 @@ export async function hzLatestRecords() {
   const j = (s, d) => { try { return JSON.parse(s); } catch { return d; } };
   return h.st.allLatest.all().map((r) => ({
     serverId: r.server_id, name: r.name, host: r.host, ts: Number(r.ts), ok: !!r.ok,
+    // 41회차 F1(재현): 계정 필드를 못 읽은 주기(kind 'unparsed')는 DB 왕복 뒤에도 '못 읽음' 이다 — parsed 를 복원하지 않아 combineServers 가
+    //   읽은 서버로 세어 전체 고유 사용자 0명 · 추이 0 · 지금 접속 '0' 이 나왔다.
+    parsed: r.kind !== 'unparsed',
     kind: r.kind, error: r.error || '',
     users: nOrNull(r.users), usersConnected: nOrNull(r.users_connected),
     sessions: nOrNull(r.sessions), connected: nOrNull(r.connected),

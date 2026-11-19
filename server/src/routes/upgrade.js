@@ -6,10 +6,13 @@ import path from 'node:path';
 import { currentVersion, config } from '../config.js';
 import { requireRole } from '../auth/auth.js';
 import { upgradeManager } from '../upgrade/manager.js';
+import { holdPushIfBusy, clearPushHold } from '../upgrade/pushHold.js';   // 51회차 #3
 import { bundleShaIssue } from '../upgrade/upgrade.js'; // v2.480(3차 감사): 엣지 수신 번들 sha256 검증
+import { checkpointConfigDbs } from '../upgrade/dbCheckpoint.js';   // 86회차 F3: 설치 전 WAL 체크포인트(수집기 라우트와 같은 순서)
 import { upgradeFromBundleBytes, restartProcess } from '../upgrade/upgrade.js';
 import { decodeManifestHeader, MANIFEST_HEADER } from '../upgrade/signature.js'; // v2.730(검토 S-10): push 의 서명 manifest
-import { loadSettings as loadUpgradeSettings, upgradeTokenDropped } from '../upgrade/settings.js'; // v2.731(A3-01 ①)
+import { loadSettings as loadUpgradeSettings, upgradeTokenDropped, upgradeSettingsWriteRefusal } from '../upgrade/settings.js'; // v2.731(A3-01 ①)
+import { unreadMark } from './settingsUnreadMark.js';   // 123회차: 조회 응답의 읽기 오류 표지
 import { ssrfBlockReason } from '../collector/registry.js';
 
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
@@ -147,8 +150,14 @@ export function detectInstallState(dir) {
 const adminOnly = [requireRole('admin'), fullScopeOnlyWith('업그레이드 제어는 포탈 전체에 적용되므로 전체 범위(vCenter 제한 없는) 관리자만 할 수 있습니다.')];
 
 // Current upgrade status (version, config summary, last check/result).
+/*
+ * 123회차(112회차 분류표 'out' 대조 — 재현): 설정 파일(upgrade.json)을 읽지 못한 동안 아래 값은 저장된 설정이 아니라 마지막으로 읽은 값(기동 뒤 한 번도 못 읽었으면 env 기본값)이다 —
+ *   표지가 없어 화면이 그 값으로 편집 폼을 채웠고, 다시 읽힌 뒤의 저장이 원격 소스 주소 · 자동 적용을 그 값으로 덮고 저장된 토큰을 폐기했다(주소가 바뀌면 토큰을 승계하지 않는다).
+ *   조회가 표지(loadError.readError — routes/settingsUnreadMark.js)를 싣고 화면이 저장을 잠근다. 다시 읽혔으면 매니저도 저장된 설정으로 돌아온다(syncSettingsAfterUnread).
+ */
+const statusView = () => { upgradeManager.syncSettingsAfterUnread(); return { ...upgradeManager.status(), ...unreadMark(upgradeSettingsWriteRefusal()) }; };
 upgradeRouter.get('/status', adminOnly, (_req, res) => {
-  res.json(upgradeManager.status());
+  res.json(statusView());
 });
 
 // Check both sources for a newer version (no install).
@@ -173,7 +182,7 @@ upgradeRouter.post('/restart', adminOnly, (_req, res) => {
 
 // Read the editable upgrade settings (token redacted).
 upgradeRouter.get('/settings', adminOnly, (_req, res) => {
-  res.json(upgradeManager.status());
+  res.json(statusView());
 });
 
 // 현재 서버 상태를 분석해 설치 경로(installDir) 자동 감지값과 점검 근거를 돌려준다(읽기 전용).
@@ -192,6 +201,9 @@ upgradeRouter.put('/settings', adminOnly, (req, res) => {
   // 경로/URL 형식 검증 — 통과하지 못하면 저장하지 않는다(감사 H16).
   const bad = validateUpgradeSettings(b);
   if (bad) return res.status(400).json({ ok: false, reason: bad });
+  // 103회차 F5: 설정 파일을 읽지 못한 동안(읽기 오류 — 원본 그대로)은 저장하지 않는다 — 사유를 화면까지(전역 오류 처리기는 사유를 싣지 않는다).
+  const unreadable = upgradeSettingsWriteRefusal();
+  if (unreadable) return res.status(409).json(unreadable);
   const allowed = ['enabled', 'watchDir', 'installDir', 'packageName', 'remoteBase', 'token', 'pollIntervalMs', 'autoApply', 'edgeAutoUpgrade']; // v2.859: 엣지 자동 업그레이드
   const partial = {};
   for (const k of allowed) if (b[k] !== undefined) partial[k] = b[k];
@@ -258,14 +270,23 @@ upgradeRouter.post('/edge-sync', adminOnly, async (req, res) => {
 // Edge endpoint: accept a tar.gz bundle pushed by the portal and self-install.
 // Raw gzip body; admin-gated like the rest.
 upgradeRouter.post('/bundle', adminOnly, express.raw({ type: ['application/gzip', 'application/octet-stream'], limit: '210mb' }),
-  (req, res) => {
+  async (req, res) => {
     const s = upgradeManager.settings;
     if (!upgradeManager.enabled) return res.status(409).json({ ok: false, reason: 'auto-upgrade disabled' });
     if (!s.installDir) return res.status(409).json({ ok: false, reason: 'installDir not set' });
     if (!req.body || !req.body.length) return res.status(400).json({ ok: false, reason: 'empty bundle' });
     const shaIssue = bundleShaIssue(req.get('x-bundle-sha256'), req.body);
     if (shaIssue) return res.status(400).json({ ok: false, reason: shaIssue });
+    // 86회차 F3(재현): 설정 디렉터리 재귀 복사(preserveUserConfig) 전에 라이브 WAL SQLite 체크포인트 — 형제 수집기 라우트(/api/collector/upgrade) ·
+    //   자동 적용(manager) · 보류 해제(pushHold) 는 하는데 옛 방식 엣지 push 만 빠져 .db 와 -wal 이 다른 순간으로 복사될 수 있었다(best-effort).
+    try { await checkpointConfigDbs(config.configDir); } catch { /* never block upgrade */ }
 
+    // 51회차 #3(사용자 결정): 재시작 요청 push 는 자동 적용과 같은 진행 중 작업을 같은 상한까지 기다린다 — 설치 자체를 미룬다(upgrade/pushHold.js).
+    if (String(req.query.restart) === 'true') {
+      const held = holdPushIfBusy({ bytes: req.body, installDir: s.installDir, pkgName: s.packageName,
+        manifestText: decodeManifestHeader(req.get(MANIFEST_HEADER)), where: 'push-edge', source: 'edge-push' });
+      if (held) { upgradeManager.lastResult = { at: Date.now(), source: 'edge-push', ...held }; return res.json(held); }
+    } else clearPushHold();
     // v2.730(검토 S-10): 배포자 서명 — 이 엣지가 가진 신뢰 공개키로 설치 전에 검증한다(정책 require 이면 manifest 없이는 설치하지 않는다).
     const result = upgradeFromBundleBytes(req.body, s.installDir, currentVersion(), s.packageName,
       { manifestText: decodeManifestHeader(req.get(MANIFEST_HEADER)), where: 'push-edge' });

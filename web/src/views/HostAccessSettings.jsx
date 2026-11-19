@@ -3,12 +3,28 @@ import { fetchJson, putJson, postJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
 import Select from '../components/Select.jsx';
+import { unreadMarkOf, unreadKind, saveLockedByUnread, shouldReseed } from './settingsUnread.js';   // 112회차: 못 읽은 동안의 기본값 초안으로 저장 · 적용하지 않는다
+import { SettingsUnreadBanner } from './SettingsUnreadBanner.jsx';
 
 /**
  * 호스트 접근 제어(v2.485) — 이 서버(포탈 호스트)의 SSH·웹(80/443/포탈 포트) 클라이언트 제어와 OS 방화벽 추가 규칙.
  * 엔진은 firewalld. 적용은 런타임 → N분 안에 확정하지 않으면 자동 되돌림(commit-confirm). 적용/확정에 본인 OTP.
  */
 const when = (ts) => (ts ? new Date(ts).toLocaleString('ko-KR') : '—');
+
+/**
+ * 되돌림 실패 배너 문구(순수 — 결정(56~75 남긴 것) 64 F2 시한). 서버가 처음 실패부터 시한(revertRetryWindowMs) 안에서만 자동으로 다시 되돌리고,
+ *   지나면 revertGaveUp 을 세운다(pending 은 남는다). 시한 숫자는 API 값으로만 말한다(모르면 말하지 않는다).
+ */
+export function revertBannerText(pend, windowMs) {
+  if (!pend || !pend.revertError) return '';
+  const why = String(pend.revertError).slice(0, 200);
+  const hours = Number(windowMs) > 0 ? Math.round((Number(windowMs) / 3_600_000) * 10) / 10 : null;
+  if (pend.revertGaveUp === true) {
+    return `되돌림 실패 — 수동 조치 필요: firewall-cmd --reload 가 ${hours != null ? `처음 실패부터 ${hours}시간` : '자동 재시도 시한'} 동안 계속 실패해 자동 재시도를 멈췄습니다(${why}). 확정하지 않은 런타임 규칙이 아직 남아 있습니다 — firewalld 상태를 확인한 뒤 되돌리기 버튼으로 다시 시도하세요.`;
+  }
+  return `되돌림(firewall-cmd --reload)이 실패해 런타임 규칙이 아직 남아 있습니다 — ${why}. 자동으로 다시 시도합니다${hours != null ? `(처음 실패부터 ${hours}시간까지)` : ''} — 되돌리기 버튼으로 바로 다시 시도할 수 있습니다.`;
+}
 const listToText = (a) => (a || []).join('\n');
 const textToList = (t) => String(t || '').split(/[\s,]+/).map((x) => x.trim()).filter(Boolean);
 
@@ -70,13 +86,16 @@ export default function HostAccessSettings() {
   const [otpFor, setOtpFor] = useState(null); // 'apply' | 'confirm'
   const [now, setNow] = useState(Date.now());
   const inited = useRef(false);
+  // 112회차: 초안 폼을 채운 조회의 상태('' 읽음 · 'read' 읽기 오류) — 못 읽은 값(기본값)으로 채운 폼은 다시 읽힌 조회에서 편집 중이어도 서버값으로 다시 채운다.
+  const seedKind = useRef('');
 
   const load = useCallback(async (resetDraft = false) => {
     try {
       const d = await fetchJson('/admin/host-access');
       setData(d); setError(null);
       // 편집 폼은 최초 1회(또는 명시 리셋)만 서버값으로 채운다 — 15초 폴링이 편집 중인 값을 되돌리지 않게.
-      if (!inited.current || resetDraft) { inited.current = true; setDraft(fromServer(d.draft)); }
+      const le = unreadMarkOf(d);
+      if (!inited.current || resetDraft || shouldReseed(seedKind.current, le)) { inited.current = true; seedKind.current = unreadKind(le); setDraft(fromServer(d.draft)); }
     } catch (e) { setError(e.message); }
   }, []);
   useEffect(() => {
@@ -110,14 +129,21 @@ export default function HostAccessSettings() {
   const eng = data.engine; const cur = eng?.current;
   const pend = data.pending; const remain = pend ? Math.max(0, Math.round((pend.deadline - now) / 1000)) : 0;
   const upd = (k, v) => setDraft({ ...draft, [k]: v });
+  // 112회차: 설정 파일 읽기 오류 동안은 초안 저장 · 적용을 잠근다(서버도 503) — 지금 초안은 기본값이다. 되돌리기는 막지 않는다(안전한 방향).
+  const unread = unreadMarkOf(data);
+  const saveLocked = saveLockedByUnread(unread);
   const updExtra = (i, k, v) => upd('extra', draft.extra.map((r, j) => (j === i ? { ...r, [k]: v } : r)));
 
   return (
     <div>
+      <SettingsUnreadBanner le={unread} what="호스트 접근 제어 설정" save="초안 저장 · 적용" />
       {pend && (
         <div className="card" style={{ marginBottom: 12, borderLeft: '4px solid var(--amber)' }}>
           <b>⏳ 확정 대기 중</b> — {when(pend.at)} 에 {pend.by || '?'} 가 런타임에 적용. <b>{Math.floor(remain / 60)}분 {remain % 60}초</b> 안에 확정하지 않으면 자동으로 되돌립니다.
           {' '}SSH 가 필요하면 다른 창에서 접속을 먼저 확인하세요.
+          {/* 64회차 F2: 되돌림(--reload)이 실패하면 서버가 pending 을 남기고 다시 시도한다 — '0분 0초 안에' 만 보이면 이미 되돌린 것처럼 읽힌다. */}
+          {/* 결정(56~75) 64 F2 시한: 처음 실패부터 서버 시한(revertRetryWindowMs)이 지나면 자동 재시도를 멈춘다(revertGaveUp) — 수동 조치 필요. */}
+          {pend.revertError && <div style={{ color: 'var(--red)', marginTop: 6 }}>{revertBannerText(pend, data.revertRetryWindowMs)}</div>}
           <div className="flex gap" style={{ marginTop: 8 }}>
             <button className="login-btn" disabled={busy !== ''} onClick={() => setOtpFor('confirm')}>✅ 확정(영구 반영, OTP)</button>
             <button className="tab" disabled={busy !== ''} onClick={() => run('revert')}>↩ 되돌리기</button>
@@ -213,9 +239,9 @@ export default function HostAccessSettings() {
       <div className="card">
         <div className="flex gap wrap" style={{ alignItems: 'center', gap: 10 }}>
           <label className="flex gap" style={{ alignItems: 'center', gap: 6, fontSize: 13 }}>확정 대기(분) <input className="input" type="number" min={1} max={30} style={{ width: 70 }} value={draft.confirmMinutes} onChange={(e) => upd('confirmMinutes', e.target.value)} /></label>
-          <button className="tab" disabled={busy !== ''} onClick={() => run('draft')}>초안 저장</button>
+          <button className="tab" disabled={busy !== '' || saveLocked} onClick={() => run('draft')}>초안 저장</button>
           <button className="tab" disabled={busy !== '' || !eng?.ok} onClick={() => run('plan')}>🔍 계획 보기(실행 안 함)</button>
-          <button className="login-btn" disabled={busy !== '' || !eng?.ok || !!pend} onClick={() => setOtpFor('apply')}>▶ 적용(런타임, {draft.confirmMinutes || 5}분 내 확정, OTP)</button>
+          <button className="login-btn" disabled={busy !== '' || !eng?.ok || !!pend || saveLocked} onClick={() => setOtpFor('apply')}>▶ 적용(런타임, {draft.confirmMinutes || 5}분 내 확정, OTP)</button>
         </div>
         <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>적용은 런타임에만 반영됩니다. 새 창에서 SSH/포탈 접속을 확인한 뒤 '확정' 을 눌러야 영구 설정이 됩니다. 확정하지 않으면 자동으로 되돌리며, 포탈이 재시작돼도 기한은 이어집니다.</div>
         {msg && <div style={{ marginTop: 8, fontSize: 13, color: msg.ok ? 'var(--green)' : 'var(--red)' }}>{msg.text}</div>}

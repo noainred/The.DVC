@@ -13,7 +13,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bareosgroups-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const tmp = tmpDir('bareosgroups-');
 process.env.CONFIG_DIR = tmp;
 process.env.DATA_SOURCE = 'mock';
 process.env.AUTH_ENABLED = 'true';
@@ -90,6 +97,10 @@ before(async () => {
   let r = await call('admin', 'POST', '/settings/directors', { name: '한국', host: '127.0.0.1', port: fd.port, consoleName: 'portal', password: 'pw-1', timeoutMs: 5000 });
   assert.equal(r.s, 201, r.t);
   const dir = r.j.director.id;
+  (await import('../src/bareos/settings.js'))._seedLegacySitesForTest([
+      { vcenterId: 'vc-a', directorId: dir, vcserver: 'vc-a.corp', client: 'kr-fd', storage: 'kr-sd', pool: 'VMwareKR', schedule: 'VMwareNightly', configFile: '/etc/bareos/vmware/vc-a.ini' },
+      { vcenterId: 'vc-b', directorId: dir, vcserver: 'vc-b.corp', client: 'kr-fd', storage: 'kr-sd', pool: 'VMwareKR', configFile: '/etc/bareos/vmware/vc-b.ini' },
+    ]);   // 52회차 D1: 옛 설정(Director 하나에 vCenter 여럿 — 업그레이드 전 파일)으로 준비 · 이 시험은 한 Director 로 여러 vCenter 흐름을 본다
   r = await call('admin', 'PUT', '/settings', {
     sites: [
       { vcenterId: 'vc-a', directorId: dir, vcserver: 'vc-a.corp', client: 'kr-fd', storage: 'kr-sd', pool: 'VMwareKR', schedule: 'VMwareNightly', configFile: '/etc/bareos/vmware/vc-a.ini' },

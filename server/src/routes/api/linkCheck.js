@@ -20,7 +20,7 @@ import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { publicLink, LINK_KINDS, KIND_KEYS, EDGE_KINDS, MIN_EDGE_VERSION } from '../../linkcheck/links.js';
 import { PHASES, PHASE_LABEL, FAIL_KINDS } from '../../linkcheck/phases.js';
-import { loadLinkCheckSettings, saveLinkCheckSettings, linkCheckEnabled, DEFAULTS } from '../../linkcheck/settings.js';
+import { loadLinkCheckSettings, saveLinkCheckSettings, linkCheckEnabled, linkCheckSettingsWriteRefusal, linkCheckSettingsLoadError, DEFAULTS } from '../../linkcheck/settings.js';
 import { centralLinks, pollOnce, linkCheckPollerStatus } from '../../linkcheck/poller.js';
 import { latestAll, samplesOf, eventsOf, eventDetail, dailyOf, dbStatus } from '../../linkcheck/db.js';
 import { allEdgeLinkReports, reportStaleLimitMs } from '../../central/linkCheckEdge.js';
@@ -33,6 +33,8 @@ import { configFindings, resultFindings, mergeFindings, hostCountsOf, HOST_FORM,
 import { ipBlockReason } from '../../collector/registry.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
 import { pageArgs } from '../../util/pageArgs.js';
+import { isFullReadWriteScope } from '../../auth/scope.js';   // 반증 후속 ①: SMTP 계정 가림 기준(GET /admin/mail 과 같다)
+import { maskedSmtpUser } from '../../mail/settings.js';
 
 const adminOnly = requireRole('admin');
 // v2.583: 같은 6줄이 라우트 파일 8곳에 복사돼 있었다 — 공용 팩토리 하나로(사유 문구는 그대로).
@@ -52,12 +54,18 @@ export function registerLinkCheck(api) {
  */
 api.get('/tools/link-check', adminOnly, fullScopeOnly, async (_req, res) => {
   const s = loadLinkCheckSettings();
+  // 106회차(105회차 A5 덜 고침): 설정 파일을 못 읽은 동안 아래 settings 는 저장된 값이 아니라 기본값이다 — 그 사실을 싣지 않아 화면이 기본값으로 폼을 채웠고,
+  //   다시 읽힌 뒤의 저장이 저장된 설정(켜짐 · 짝 · 종류)을 그 기본값으로 덮었다(409 는 읽기 오류가 이어지는 동안만 막는다). 화면이 저장을 잠그고 폼을 다시 채운다.
+  const settingsLe = linkCheckSettingsLoadError();
   const { all, counts, problems, collectors } = centralLinks();
   const latest = await latestAll();
   const byId = new Map(latest.map((r) => [r.link_id, r]));
   // v2.770(점검 R5-E1-3): 엣지 보고 낡음 경계는 주기에 맞춘 값 하나 — 각 보고의 stale 과 응답의 reportStaleMs 가 같은 값이다.
   const reportStaleMs = reportStaleLimitMs(s.intervalMs);
   const reports = allEdgeLinkReports({ staleMs: reportStaleMs });
+  // 65회차 F1: 보고는 인증된 토큰의 agent 표기로 저장된다 — 링크의 from(등록부 이름)과 대소문자만 다를 수 있다
+  //   (수신 · 배정 · 버전 대조는 전부 대소문자 무시). 표기 그대로 찾으면 보고가 와도 행의 edgeReport 가 null 이었다.
+  const reportByLc = new Map(Object.entries(reports).map(([k, v]) => [t(k).toLowerCase(), v]));
   /*
    * 엣지 버전 — `allCollectorStatus()` 는 **수집 서버 id** 로 키가 잡히고 값에는 엣지가 스스로
    * 보고한 `agent` 가 들어 있다. 링크의 `from` 은 등록부의 **이름**이므로 **둘 다** 키로 넣는다.
@@ -76,7 +84,7 @@ api.get('/tools/link-check', adminOnly, fullScopeOnly, async (_req, res) => {
   const nowTs = Date.now();
   const rows = all.map((l) => {
     const r = byId.get(l.id) || null;
-    const rep = l.by === 'edge' ? (reports[l.from] || null) : null;
+    const rep = l.by === 'edge' ? (reportByLc.get(t(l.from).toLowerCase()) || null) : null;
     return {
       ...publicLink(l),
       latest: r ? {
@@ -115,6 +123,7 @@ api.get('/tools/link-check', adminOnly, fullScopeOnly, async (_req, res) => {
       dnsTimeoutMs: s.dnsTimeoutMs, tcpTimeoutMs: s.tcpTimeoutMs, tlsTimeoutMs: s.tlsTimeoutMs, httpTimeoutMs: s.httpTimeoutMs,
       sampleRetentionDays: s.sampleRetentionDays, eventRetentionDays: s.eventRetentionDays, dailyRetentionDays: s.dailyRetentionDays,
     },
+    ...(settingsLe ? { settingsLoadError: { reason: String(settingsLe.reason || '').slice(0, 300), readError: settingsLe.readError === true } } : {}),   // 106회차
     links: rows, counts, problems,
     minEdgeVersion: MIN_EDGE_VERSION, // v2.613 CONTRACT2613-05: 구버전 판정 기준은 서버가 준다(웹 기본값에 기대지 않는다)
     /*
@@ -222,8 +231,11 @@ api.get('/tools/link-check/settings', adminOnly, fullScopeOnly, (_req, res) => {
  * ⚠ **측정값이 없는 것을 '정상' 으로 칠하지 않는다**(v2.552 규약) — 화면이 `latest === null` 을
  *   '측정 없음' 으로 다룬다.
  */
-api.get('/tools/link-check/targets', adminOnly, fullScopeOnly, async (_req, res) => {
+api.get('/tools/link-check/targets', adminOnly, fullScopeOnly, async (req, res) => {
   const built = await buildSettingsTargets();
+  // 반증 후속 ①: 메일 발송 설정의 SMTP 계정 이름은 전체 범위 관리자(조회 ∧ 쓰기 무제한)만 원문 — 쓰기 범위만 제한된 관리자(fullScopeOnly 통과)에게는 있음 표지만.
+  const fullRw = isFullReadWriteScope(req.user, store.get());
+  const smtpFacts = (p) => (p.kind === 'set:smtp' && p.facts && typeof p.facts === 'object' ? { ...p, facts: { ...p.facts, ...maskedSmtpUser(p.facts.user, fullRw) } } : p);
   const latest = await latestAll();
   const byId = new Map(latest.map((r) => [r.link_id, r]));
   const hostCounts = hostCountsOf(built.targets);
@@ -245,7 +257,7 @@ api.get('/tools/link-check/targets', adminOnly, fullScopeOnly, async (_req, res)
       r ? resultFindings(x, { ok: !!r.ok, phase: r.phase, failKind: r.fail_kind, reached: r.reached }, pseudoSteps) : [],
     );
     return {
-      ...publicTarget(x),
+      ...smtpFacts(publicTarget(x)),
       ...(x.bad ? { bad: x.bad } : {}),
       latest: r ? {
         ts: r.ts, ok: !!r.ok, phase: r.phase, failKind: r.fail_kind, reached: r.reached,
@@ -275,6 +287,8 @@ api.get('/tools/link-check/targets', adminOnly, fullScopeOnly, async (_req, res)
 });
 
 api.put('/tools/link-check/settings', adminOnly, fullScopeOnly, (req, res) => {
+  // 105회차 A5: 설정 파일 읽기 오류(원본 그대로) 중에는 저장하지 않는다 — 사유를 화면까지(전역 오류 처리기는 사유를 싣지 않는다).
+  { const ref = linkCheckSettingsWriteRefusal(); if (ref) return res.status(409).json(ref); }
   const next = saveLinkCheckSettings(req.body || {});
   logAudit({
     user: req.user?.username, action: 'link-check.settings', ip: req.ip || '',

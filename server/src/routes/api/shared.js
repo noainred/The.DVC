@@ -5,6 +5,7 @@ import { store } from '../../store.js';
 import { snapMemo, sendCached } from '../../util/snapCache.js';
 import { poolRun } from '../../util/pool.js'; // v2.579: 동시성 풀 단일 소스
 import { linregSlope } from '../../util/linreg.js';
+import { scopeSig, SCOPE_SIG_ALL } from '../../util/scopeSig.js';
 
 
 // 동시 다발 폴링/클릭 최적화 — 여러 사용자가 같은 스냅샷에 대해 같은 무거운 계산을 각자 재실행하던
@@ -18,6 +19,21 @@ export async function memoJson(req, res, name, compute, { ttlMs = 12_000, extraK
     const snap = store.get();
     const key = `${snap.generatedAt}|${req.originalUrl}|${extraKey}`;
     const payload = await snapMemo(name, key, ttlMs, async () => compute(snap));
+    // v2.919: 계산 결과가 `__status`(정수, 200 이 아님)를 가지면 그 상태 코드로 본문만 보낸다(sendCached 의 캐시 헤더·304 경로를 타지 않는다) — 단건 404(존재 은닉)·400 을
+    //   캐시된 경로에서도 지키기 위해서다. 열쇠에 범위 서명이 들어가므로 범위가 다른 사용자끼리 404 를 공유하지 않는다.
+    if (payload && typeof payload === 'object' && Number.isInteger(payload.__status) && payload.__status !== 200) {
+      const { __status: code, ...body } = payload;
+      res.status(code).json(body);
+      return;
+    }
+    // v2.932(점검 E1-08): `__noStore` 가 붙은 결과(예: 엣지 대행 실패)는 ETag·304 없이 no-store 로 보낸다 — ETag 가 열쇠 해시라
+    //   실패 본문에 붙은 ETag 가 같은 열쇠의 다음 성공 응답을 304 로 가리지 않게. 서버 쪽 짧은 memo(ttl)는 그대로다(엣지를 두드리지 않게).
+    if (payload && typeof payload === 'object' && payload.__noStore === true) {
+      const { __noStore: _n, ...body } = payload;
+      res.set('Cache-Control', 'no-store');
+      res.json(body);
+      return;
+    }
     sendCached(req, res, key, payload);
   } catch (e) {
     // async 경로라 Express가 sync throw처럼 자동 처리하지 못한다 — 직접 500으로 응답(클라 hang 방지).
@@ -39,12 +55,62 @@ export { linregSlope };
 // 호출부 12곳이 이 이름을 쓰므로 별칭으로 남긴다 — 새 코드는 `poolRun`/`poolSettled` 를 직접 쓸 것.
 export const eachLimited = poolRun;
 
+// v3.20.0(허브 복수 법인 — 설계 docs/design/vm-menu §6 '바로가기 복수 선택'): `?vcenterIds=a,b,…` 해석은 이 함수 하나다(복제 금지 —
+//   applyFilters · scopeSlice · /hosts/corp · /vms/by-vcenter · /platform/summary 가 모두 이것을 쓴다).
+//   · 단일 `vcenterId` 가 있으면 목록은 무시한다(null — 단일이 우선). 목록이 없으면(키 없음 · 빈 글자) null = 필터 없음.
+//   · 쉼표로 나누고 앞뒤 공백 · 빈 값 · 중복을 버리고, id 하나가 200자를 넘으면 버린다. 개수는 min(등록 vCenter 수, 200) — 넘으면 앞에서 자른다.
+//   · 목록을 보냈는데 남은 것이 없으면 [] — **필터 없음이 아니라 0건**이다(이상한 목록이 전체 조회가 되면 안 된다). 글자가 아닌 값(배열 · 객체)도 [].
+//   · 사용자 조회 범위(scope) 교집합은 부르는 쪽이 **먼저** 건다(applyFilters 순서) — 범위 밖 id 는 결과에 섞이지 않고, 범위 밖 id 만 보내면 0건.
+//   · 점검 dbg3221: 웹(platformText.hubScopeQuery)은 id 마다 encodeURIComponent 한 뒤 쉼표로 잇는다 — 등록부가 id 에 쉼표를 허용하므로
+//     날 글자로 이으면 'KR,Seoul' 이 둘로 갈려 그 법인이 조용히 빠졌다. 나눈 조각마다 decodeVcenterIdPart(잘못된 % 줄은 날 글자 그대로 — 옛 웹 호환).
+//     길이 상한은 **푼 뒤** 의 id 에 건다. 원문 상한은 인코딩으로 늘어나는 길이(UTF-8 3바이트 × '%XX' 3글자)를 감안한다.
+export const VCENTER_IDS_MAX = 200;
+export const VCENTER_ID_LEN_MAX = 200;
+const VCENTER_IDS_RAW_MAX = VCENTER_IDS_MAX * (VCENTER_ID_LEN_MAX * 9 + 1);
+/** 쉼표 목록 조각 하나를 푼다 — 웹 platformText.decodeScopeIdPart 와 같은 뜻(시험이 같은 입력으로 대조). */
+export function decodeVcenterIdPart(part) {
+  const s = String(part ?? '');
+  if (!s.includes('%')) return s;
+  try { return decodeURIComponent(s); } catch { return s; }
+}
+export function parseVcenterIds(query, snap) {
+  if (query?.vcenterId) return null;
+  const raw = query?.vcenterIds;
+  if (raw === undefined || raw === null || raw === '') return null;
+  if (typeof raw !== 'string') return [];
+  const cap = Math.min(VCENTER_IDS_MAX, Array.isArray(snap?.vcenters) ? snap.vcenters.length : 0);
+  const seen = new Set();
+  const out = [];
+  for (const part of raw.slice(0, VCENTER_IDS_RAW_MAX).split(',')) {
+    if (out.length >= cap) break;
+    const id = decodeVcenterIdPart(part).trim();
+    if (!id || id.length > VCENTER_ID_LEN_MAX || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
+/** 요청이 고른 법인(vcenterId 하나 또는 vcenterIds 목록) — Set, 고르지 않았으면 null. 범위 교집합은 부르는 쪽이 먼저 건다. */
+export function vcenterPickOf(query, snap) {
+  if (query?.vcenterId) return new Set([query.vcenterId]);
+  const ids = parseVcenterIds(query, snap);
+  return ids ? new Set(ids) : null;
+}
+/** memoJson extraKey 용 — 정규화한(중복 제거 · 정렬) 고른 법인 목록. 고르지 않았으면 '-'(빈 목록 [] 의 'vs:[]' 와 다르다).
+ *  v3.23.2: 서명은 util/scopeSig.js — 예전 'v' + join(',') 은 %2C 로 고른 쉼표 id ['KR,Seoul'] 과 ['KR','Seoul'] 이 같은 열쇠였다. */
+export function vcenterPickKey(query, snap) {
+  const p = vcenterPickOf(query, snap);
+  return p ? `v${scopeSig(p)}` : '-';
+}
+
 export function applyFilters(items, query, snap, searchFields = ['name'], user = null) {
   let out = items;
   // 사용자 scope 를 먼저 강제 — 요청 필터로 우회할 수 없게(서버측 데이터 경계).
   const allowed = scopedVcenterIds(user, snap);
   if (allowed) out = out.filter((x) => allowed.has(x.vcenterId));
-  if (query.vcenterId) out = out.filter((x) => x.vcenterId === query.vcenterId);
+  // v3.20.0: 고른 법인(vcenterId 하나 또는 vcenterIds 목록 — parseVcenterIds). 범위로 거른 뒤라 범위 밖 id 는 섞이지 않는다.
+  const pick = vcenterPickOf(query, snap);
+  if (pick) out = out.filter((x) => pick.has(x.vcenterId));
   if (query.region) {
     // Set 조회(v2.343 #8) — 배열 includes 는 항목마다 vCenter 목록 재스캔(O(N×vC), 28개면 항목당 28회).
     const ids = new Set(snap.vcenters.filter((v) => v.location?.region === query.region).map((v) => v.id));
@@ -73,21 +139,29 @@ export function sortBy(items, key, order = 'desc') {
 // 공통: 사용자 scope를 먼저 강제(범위 제한 계정이 전 사이트 리포트를 못 보게)하고, memoJson
 // 캐시 키에 scope 서명을 섞는다 — 스코프가 다른 사용자가 같은 URL 캐시를 공유하면 데이터 경계가
 // 무너진다(기존 /tools/* 집계에는 없던 보강).
+// v3.20.0: 세 번째 인자는 vCenter id 글자(예전 그대로) 또는 고른 법인 Set(vcenterPickOf — 빈 Set 은 0건). 범위가 먼저다.
 export function scopeSlice(snap, user, vcenterId) {
   const allowed = scopedVcenterIds(user, snap);
+  const picked = vcenterId instanceof Set ? vcenterId : (vcenterId ? new Set([vcenterId]) : null);
   const pick = (arr) => {
     let out = arr || [];
     if (allowed) out = out.filter((x) => allowed.has(x.vcenterId));
-    if (vcenterId) out = out.filter((x) => x.vcenterId === vcenterId);
+    if (picked) out = out.filter((x) => picked.has(x.vcenterId));
     return out;
   };
   return {
     ...snap,
-    vcenters: (snap.vcenters || []).filter((v) => (!allowed || allowed.has(v.id)) && (!vcenterId || v.id === vcenterId)),
+    vcenters: (snap.vcenters || []).filter((v) => (!allowed || allowed.has(v.id)) && (!picked || picked.has(v.id))),
     hosts: pick(snap.hosts), vms: pick(snap.vms), datastores: pick(snap.datastores), alarms: pick(snap.alarms),
   };
 }
-export const scopeKey = (user, snap) => { const a = scopedVcenterIds(user, snap); return a ? [...a].sort().join(',') : 'all'; };
+// 범위 서명 — 캐시 열쇠(memoJson extraKey 등)에 들어간다. **단사여야 한다**(서로 다른 허용 집합 = 다른 글자).
+//   dbg3231: 예전 `[...a].sort().join(',')` · 무제한 'all' 은 등록부가 허용하는 id(쉼표 · 'all')로 충돌했다 —
+//   ['KR,Seoul'] 과 ['KR','Seoul'] 이 같은 열쇠, scope ['all'] 과 무제한이 같은 열쇠라 범위 밖 법인의 응답 캐시를 받았다.
+//   무제한은 범위 서명이 될 수 없는 표식(SCOPE_KEY_ALL), 범위는 's:' + JSON 배열(정렬)로 잇는다. 무제한 판정은 이 표식과 비교한다('all' 글자 비교 금지).
+//   v3.23.2: 서명 규칙은 util/scopeSig.js 하나(쓰기 범위 · 고른 법인 · 각 모듈 캐시 열쇠도 같은 함수).
+export const SCOPE_KEY_ALL = SCOPE_SIG_ALL;
+export const scopeKey = (user, snap) => scopeSig(scopedVcenterIds(user, snap));
 
 /** Map a guest OS string to a coarse family for distribution charts. */
 export function osFamily(os = '') {

@@ -38,6 +38,9 @@ describe('costText', () => {
   });
   it('단가 안내 — 없음·일부·전부', () => {
     expect(ratesNote({ ratesSet: 0 })).toMatch(/할당량만/);
+    // 71회차(69회차 F4 반증): 단가 파일을 읽지 못한 것은 '설정 안 됨' 이 아니다 — 다시 입력하라고 하지 않는다
+    expect(ratesNote({ ratesSet: 0, settingsUnreadable: true })).toMatch(/읽지 못해/);
+    expect(ratesNote({ ratesSet: 0, settingsUnreadable: true })).not.toMatch(/입력합니다/);
     expect(ratesNote({ ratesSet: 1, partialRates: true, rates: { vcpu: 1, ramGB: null, storageGB: null } })).toMatch(/메모리·스토리지/);
     expect(ratesNote({ ratesSet: 3, partialRates: false })).toBeNull();
     expect(notesText({ notes: {} })).toBeNull();

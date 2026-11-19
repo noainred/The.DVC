@@ -1,7 +1,3 @@
-import React from 'react';
-import { serverStateText, requesterText } from '../perfClientLogic.js';
-import { getCurrentUser } from '../api.js';
-
 /**
  * '불러오는 중' 의 한 작업 줄 아래에 **누가 지연시키는가** 를 보인다(v2.583) — 사용자 요청:
  * "불러오는 중… 이라는 메시지 나올 때 누가 이 메시지의 지연을 발생시켰는지 ID 도 같이 보여줘."
@@ -16,6 +12,10 @@ import { getCurrentUser } from '../api.js';
  *    서버인지 전송·브라우저인지가 여기서 갈린다(문구·판정은 perfClientLogic.serverStateText 하나).
  * Loading 과 GlobalProgress 가 같이 쓴다(두 곳이 각자 그리면 문구가 갈라진다).
  */
+import React from 'react';
+import { serverStateText, requesterText } from '../perfClientLogic.js';
+import { getCurrentUser } from '../api.js';
+
 const TONE_COLOR = { busy: 'var(--amber)', done: 'var(--green)', unknown: 'var(--red)', pending: undefined };
 const MONO = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
 

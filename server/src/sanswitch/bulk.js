@@ -79,6 +79,7 @@ export function devicesToText(devices, dcName = (x) => x) {
     comment: [
       'SAN 스위치 목록(자유텍스트) — 이 파일을 고쳐 그대로 가져올 수 있습니다.',
       '· 열 구분: 탭 · | · 쉼표 · 공백 중 아무거나. 빈칸은 `-`.',
+      '· 이미 있는 스위치(같은 host)를 고칠 때: 비운 칸 · 적지 않은 항목은 기존 값 유지, `-` 는 그 값을 비움(agent 를 `-` 로 두면 중앙 직접 수집).',
       '· 비밀번호는 보안상 내보내지 않습니다 — 새로 넣을 때만 마지막 열에 적으세요(비우면 기존 유지).',
     ].join('\n'),
   });
@@ -98,8 +99,8 @@ export function sampleCsv() {
     csvLine([`# type: ${impl}`, '# name: 표시명', '# host: IP/FQDN', '# username: 접속 계정',
       `# collectMethod: ${mHint}`, '# sshPort: 기본 22', '# httpsPort: REST 기본 443',
       '# vfId: Virtual Fabric 1~128(없으면 비움)', '# datacenter: 법인 이름 또는 ID',
-      '# agent: 엣지 이름(비우면 중앙 직접 수집)', '# enabled: true|false', '# note: 메모',
-      '# password: 비우면 기존 유지(신규는 필수)']),
+      '# agent: 엣지 이름(신규는 비우면 중앙 직접 수집 · 수정 행은 빈 칸 = 기존 유지, - = 중앙 직접)', '# enabled: true|false', '# note: 메모',
+      '# password: 비우면 기존 유지(신규는 필수) — 수정 행(같은 host)의 빈 칸은 모두 기존 값 유지, 값을 지우려면 - 하나']),
     csvLine(['brocade', 'WA-SAN-01', '10.30.0.11', 'admin', 'ssh', '22', '', '', 'WA', 'agent-WA', 'true', '팹 A', 'ChangeMe!1']),
     csvLine(['brocade', 'WA-SAN-02', '10.30.0.12', 'admin', 'ssh', '22', '', '128', 'WA', 'agent-WA', 'true', '팹 B · VF 128', 'ChangeMe!2']),
   ];
@@ -118,7 +119,7 @@ export function sampleText() {
     'brocade  WA-SAN-01  10.30.0.11  admin  ssh  22  -  -  WA  agent-WA  true  "팹 A"  ChangeMe!1',
     'brocade  WA-SAN-02  10.30.0.12  admin  ssh  22  -  128  WA  agent-WA  true  "팹 B · VF 128"  ChangeMe!2',
     '',
-    '# ② 키=값형 — 아는 항목만 적습니다(순서 무관, 한글 키도 가능).',
+    '# ② 키=값형 — 아는 항목만 적습니다(순서 무관, 한글 키도 가능). 이미 있는 스위치는 적지 않은 항목 · 빈 칸이 기존 값을 유지합니다(지우려면 -).',
     'type=brocade name=OC2-SAN-01 host=10.40.0.11 계정=admin 비밀번호=ChangeMe!3 법인=OC2',
     '',
     '# ③ 헤더형 — 첫 줄에 열 이름을 적으면 그 순서로 읽습니다(엑셀에서 헤더까지 복사한 경우).',
@@ -130,10 +131,20 @@ export function sampleText() {
 
 /* ────────────────── 가져오기 파싱 ────────────────── */
 
-/** 공통 정규화 — CSV·자유텍스트가 **같은 행 형태**를 만든다(뒤 파이프라인 공유). */
-function normRow(line, get) {
+/**
+ * 결정(78 남긴 것 ③ — CSV 빈 칸 계약): 수정 행의 **빈 칸(또는 파일에 없는 열)** 은 저장값 유지 · **`-` 하나** 는 비움(명시 — 새 장비면 기본값).
+ *   행의 `_blank` = 빈 칸이었던 필드(아래 목록 중) — 라우트(routes/api/sanSwitch.js swParseBody)가 수정 행이면 저장값으로 채운다(util/bulkImport.js fillBlankFromSaved).
+ *   예전에는 빈 agent 가 엣지 위임 스위치를 중앙 직접 수집으로, 빈 enabled 가 꺼 둔 스위치를 켬으로, 빈 포트 · 계정이 기본값으로 바꿨다(비밀번호 폐기까지).
+ *   type · host 는 식별 키, password 는 이미 '빈 칸 = 유지' 라 목록 밖이다.
+ */
+export const KEEP_ON_BLANK = Object.freeze(['name', 'username', 'collectMethod', 'sshPort', 'httpsPort', 'vfId', 'datacenter', 'agent', 'enabled', 'note']);
+
+/** 공통 정규화 — CSV·자유텍스트가 **같은 행 형태**를 만든다(뒤 파이프라인 공유). `isBlank(f)` = 그 칸이 비었거나 열이 없다(`-` 는 비지 않은 것). */
+function normRow(line, get, isBlank = () => false) {
   const password = get('password', { trim: false });
+  const blank = KEEP_ON_BLANK.filter((f) => isBlank(f));
   return {
+    ...(blank.length ? { _blank: blank } : {}),
     _line: line,
     type: get('type').toLowerCase(),
     name: get('name'),
@@ -180,7 +191,7 @@ export function parseDevicesCsv(text) {
     };
     if (!get('name') && !get('host')) return;          // 완전 빈 행
     if (get('type').startsWith('#')) return;           // 샘플 주석 행
-    out.push(normRow(n + 2, get));
+    out.push(normRow(n + 2, get, (f) => col[f] == null || unguardCell(cells[col[f]] ?? '').trim() === ''));
   });
   if (!out.length) return { rows: [], error: 'name·host 가 모두 빈 행만 있습니다.' };
   return { rows: out, order: COLUMNS.filter((c) => col[c] != null) };
@@ -190,7 +201,7 @@ export function parseDevicesText(text, { defaults = {} } = {}) {
   const r = parseFreeRows(text, { fields: COLUMNS, aliases: ALIASES, defaults });
   if (r.error) return { rows: [], error: r.error, warnings: r.warnings, headerUsed: null, order: COLUMNS };
   const rows = r.rows
-    .map((row) => normRow(row._line, (f) => unmark(row[f])))
+    .map((row) => normRow(row._line, (f) => unmark(row[f]), (f) => String(row[f] ?? '').trim() === ''))
     .filter((row) => row.name || row.host);
   if (!rows.length) return { rows: [], error: 'name·host 가 모두 빈 줄만 있습니다.', warnings: r.warnings, headerUsed: r.headerUsed, order: r.headerUsed || COLUMNS };
   return { rows, warnings: r.warnings, headerUsed: r.headerUsed, order: r.headerUsed || COLUMNS };

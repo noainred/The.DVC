@@ -13,28 +13,60 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config, clampIntervalMs } from '../config.js';
 import { isMockVcenter } from '../mock/generator.js';
-import { atomicWriteFileSync, safeLoadText } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, safeLoadText, corruptBackupPath } from '../util/atomicWrite.js';
 import { registerExitFlush } from '../util/exitFlush.js';
+import { capStr } from '../util/capStr.js';
+import { readJsonFile, READ_RETRY_MS } from '../util/jsonFileLoad.js'; // 87회차 ⓐ: 읽기 오류 ≠ 손상(공용 읽기 판정)
+import { inRetryWindow } from '../util/jsonFileRead.js';   // 128회차: 재읽기 간격 판정은 공용(시계가 뒤로 가도 그 차만큼 굳지 않게)
+import { envPositive } from '../util/envNumber.js';   // 55회차: 양수 env 는 하나로
 
 const FILE = path.join(config.configDir, 'central-inventory.json');
 
 // null-proto 캐시: 에이전트가 제어하는 vcenterId가 '__proto__'/'constructor' 등이어도 프로토타입을
 // 오염시키지 않고 일반 키로 저장된다(엔트리가 Object.keys에서 사라져 prune/persist 누락되는 것 방지).
 let cache = Object.create(null); // vcenterId -> { at, agent, generatedAt, data:{...} }
-try {
-  if (fs.existsSync(FILE)) { const p = JSON.parse(fs.readFileSync(FILE, 'utf8')); if (p && typeof p === 'object') cache = Object.assign(Object.create(null), p.inventory || p || {}); }
-} catch (e) {
-  cache = Object.create(null);
-  // 손상 파일 보존 — 조용히 비우면 다음 push의 persist가 손상본을 덮어써, 콜드 스타트에
-  // 인벤토리가 비었던 원인을 사후에 알 수 없다. <file>.corrupt.<ts>로 옮기고 경고만 남긴다
-  // (빈 캐시로 기동은 계속 — 다음 push가 오면 자동 복구되는 캐시이므로 기동 실패로 만들지 않는다).
-  try {
-    const bak = `${FILE}.corrupt.${Date.now()}`;
-    fs.renameSync(FILE, bak);
-    // v2.744(최종 수정분 검토 RV2744F-LOAD-01): 사유는 요약(safeLoadText) — V8 JSON.parse 오류 원문은 파일 조각을 싣는다(콘솔 → /admin/logs·엣지 로그).
-    console.warn(`[central] ${FILE} 파싱 실패(${safeLoadText(e) || '사유 미상'}) — ${bak}로 보존하고 빈 인벤토리로 시작합니다.`);
-  } catch { /* 보존 실패가 기동을 막지 않게 */ }
+// 87회차 ⓐ(84회차 남긴 것 ② — 권장안): 공용 읽기 판정(util/jsonFileLoad.js). 예전 catch 하나는 **읽기 오류**(EACCES · EIO)도 손상으로 보고 온전한 원본을
+//   `.corrupt.*` 로 옮겼다(소유 엣지 지정 — 관리자 해제 · 지정 포함 — 까지 보존본에만 남는다). 이제 읽기 오류는 원본을 두고 빈 캐시로 시작하되 **저장하지 않는다**
+//   (원자적 rename 이 원본을 덮는다). 저장 시점에 READ_RETRY_MS 간격으로 다시 읽어 읽히면 합친다 — 메모리에 없는 vCenter 는 파일 값, 둘 다 있으면
+//   소유 엣지가 같을 때만 메모리(더 새 push), 다르면 파일(그동안 TOFU 로 다른 엣지가 가져간 소유를 되돌린다). 손상은 예전과 같다(보존 후 빈 캐시).
+const parseInventoryFile = (text) => { const p = JSON.parse(text); return p && typeof p === 'object' ? Object.assign(Object.create(null), p.inventory || p || {}) : Object.create(null); };
+let readBlocked = false; let readRetryAt = 0;
+{
+  const r = readJsonFile(FILE, { parse: parseInventoryFile, preserve: false });
+  if (r.kind === 'ok') cache = r.value;
+  else if (r.kind === 'read-error') {
+    readBlocked = true; readRetryAt = Date.now() + READ_RETRY_MS;
+    console.warn(`[central] ${path.basename(FILE)} 읽기 오류(${(capStr(r.error?.code, 32) || 'read-error')}) — 손상이 아니라 원본은 그대로 둡니다 · 읽힐 때까지 저장하지 않고 ${Math.round(READ_RETRY_MS / 1000)}초마다 다시 읽습니다(그동안 빈 인벤토리로 시작).`);
+  } else if (r.kind === 'corrupt') {
+    // 손상 파일 보존 — 조용히 비우면 다음 push의 persist가 손상본을 덮어써, 콜드 스타트에
+    // 인벤토리가 비었던 원인을 사후에 알 수 없다. <file>.corrupt.<ts>로 옮기고 경고만 남긴다
+    // (빈 캐시로 기동은 계속 — 다음 push가 오면 자동 복구되는 캐시이므로 기동 실패로 만들지 않는다).
+    try {
+      const bak = corruptBackupPath(FILE);   // v3.25.1: 같은 밀리초 보존본을 덮어쓰지 않게
+      fs.renameSync(FILE, bak);
+      // v2.744(최종 수정분 검토 RV2744F-LOAD-01): 사유는 요약(safeLoadText) — V8 JSON.parse 오류 원문은 파일 조각을 싣는다(콘솔 → /admin/logs·엣지 로그).
+      console.warn(`[central] ${FILE} 파싱 실패(${safeLoadText(r.error) || '사유 미상'}) — ${bak}로 보존하고 빈 인벤토리로 시작합니다.`);
+    } catch { /* 보존 실패가 기동을 막지 않게 */ }
+  }
 }
+/** 87회차 ⓐ: 저장해도 되는가 — 읽기 오류였으면 간격마다 다시 읽어 합친다(위 규칙). 아직 못 읽으면 false. */
+function inventoryWritable() {
+  if (!readBlocked) return true;
+  if (inRetryWindow(Date.now(), readRetryAt, READ_RETRY_MS)) return false;
+  const r = readJsonFile(FILE, { parse: parseInventoryFile, preserve: false });
+  if (r.kind === 'read-error') { readRetryAt = Date.now() + READ_RETRY_MS; return false; }
+  if (r.kind === 'ok') {
+    for (const [id, f] of Object.entries(r.value)) {
+      const m = cache[id];
+      if (!m || String(m.agent || '').toLowerCase() !== String(f?.agent || '').toLowerCase()) cache[id] = f;
+    }
+  }
+  readBlocked = false; readRetryAt = 0;
+  console.warn(`[central] ${path.basename(FILE)} 다시 읽었습니다(읽기 오류 풀림 — 파일의 인벤토리 · 소유 엣지를 합쳤습니다)`);
+  return true;
+}
+/** 87회차 ⓐ: 테스트 · 진단 — 위임 인벤토리 파일을 읽지 못해 저장을 멈춘 상태인가. */
+export function inventoryReadBlocked() { return readBlocked; }
 
 let writeTimer = null;
 let writing = false; // 쓰기 중 재진입 방지 — tmp 충돌 및 늦게 끝난 이전 본문이 최신본을 덮는 것 차단
@@ -47,12 +79,13 @@ let syncGen = 0;
  * 재시작이 끼면 사라졌다(해제한 소유권이 되살아나 새 엣지가 계속 403). 대기 중 디바운스는 이 저장이 흡수한다.
  */
 function persistNowSync() {
+  if (!inventoryWritable()) throw new Error(`${path.basename(FILE)} 를 읽지 못한 상태라 저장하지 않았습니다(읽기 오류 — 원본은 그대로) — 파일 권한 · 소유자를 확인하세요(읽히면 다음 저장이 반영합니다).`);   // 87회차 ⓐ
   if (writeTimer) { clearTimeout(writeTimer); writeTimer = null; }
   syncGen += 1;
   atomicWriteFileSync(FILE, JSON.stringify({ inventory: cache }), { mode: 0o600 });
 }
 // 종료 시 대기 중(또는 진행 중)인 디바운스 저장을 동기로 끝낸다 — 캐시 본문도 마지막 5초 창을 잃지 않는다.
-registerExitFlush('central/inventory', () => { if (writeTimer || writing) persistNowSync(); });
+registerExitFlush('central/inventory', () => { if ((writeTimer || writing) && inventoryWritable()) persistNowSync(); });   // 87회차 ⓐ: 읽기 오류 중에는 원본을 덮지 않는다
 // v2.617: 5초 → 기본 30초. 매 저장이 위임 vCenter 전체 캐시(수 MB~수십 MB)를 JSON.stringify 하는데, 엣지 28곳이 1분마다
 //   push 하면 거의 5초마다 돌아 그 문자열 사본이 계속 힙에 생겼다. 캐시는 다음 push 로 복구되고 종료 시 동기 flush 가
 //   있으므로(registerExitFlush) 창을 늘려도 정상 재시작에서 잃는 것은 없다. 비정상 종료 시 최대 이 창만큼 잃는다.
@@ -63,6 +96,7 @@ function persistSoon() {
   writeTimer = setTimeout(() => {
     writeTimer = null;
     if (writing) { persistSoon(); return; } // 이전 쓰기 진행 중 — 다음 디바운스 주기로 미룸
+    if (!inventoryWritable()) { persistSoon(); return; } // 87회차 ⓐ: 읽기 오류 중 — 원본을 덮지 않고 다음 주기에 다시 본다
     // 타이머 콜백의 동기 예외(stringify 문자열 길이 상한 초과·mkdir 실패 등)는 uncaught가 되어
     // 프로세스를 죽이므로 반드시 격리한다.
     try {
@@ -88,7 +122,7 @@ function persistSoon() {
 }
 
 /** 마지막 정상 목록 보존 창 — store.js LASTGOOD_HOLD_MS 와 같은 값·같은 env(순환 import 를 피해 여기서 읽는다). */
-const HOLD_MS = Number(process.env.LASTGOOD_HOLD_MS) || 6 * 3_600_000;
+const HOLD_MS = envPositive(process.env.LASTGOOD_HOLD_MS, 21_600_000);   // 6시간 · 55회차 #4: store.js 와 같은 판정(음수 · Infinity 를 통과시키지 않는다 — 한 기준)
 // v2.601(감사 EDGE2601-03): maintenance 추가 — 엣지 agent/inventoryPush.js UNREAD_STATUSES 와 같은 집합(한 기준). 캐시 없는
 //   점검중 vCenter(엣지 재시작 직후)의 빈 조각이 마지막 정상 목록을 지우지 않게 상태만 갱신한다(보존은 HOLD_MS 까지).
 const UNREAD = new Set(['unreachable', 'pending', 'maintenance']);

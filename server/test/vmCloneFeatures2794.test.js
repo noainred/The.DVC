@@ -6,7 +6,7 @@
  *  R — 실제 라우터: 그 데이터스토어를 쓰는 잡이 있으면 409 · 법인 마운트 지정(조회 밖 404 → 쓰기 밖 403) · 지정 밖 마운트 잡 저장 거부 ·
  *      기존 잡이 같은 마운트를 그대로 두는 수정은 허용.
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -14,12 +14,19 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(HERE, '..');
 const SRC = path.join(ROOT, 'src');
 const J = (p) => JSON.stringify(pathToFileURL(path.join(SRC, p)).href);
 
-process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'vmc2794f-'));
+process.env.CONFIG_DIR = tmpDir('vmc2794f-');
 const { pruneList, clampKeepDays, normalizeJobDef } = await import('../src/vmclone/store.js');
 const { pruneNfsBackups } = await import('../src/vmclone/runner.js');
 const { detachNasFromHost } = await import('../src/vmclone/vsphere.js');
@@ -43,7 +50,7 @@ test('K1: pruneList — 개수 + 기간 · 최근 1개는 남긴다 · 시각 �
 });
 
 test('K2: pruneNfsBackups — 이 잡의 온전한 백업만 · 개수 + 기간(manifest 시각) · 최근 1개 · 마운트 밖 금지', () => {
-  const mp = fs.mkdtempSync(path.join(os.tmpdir(), 'vmc2794f-mp-'));
+  const mp = tmpDir('vmc2794f-mp-');
   const root = path.join(mp, 'vcA', 'web01__vm-1');
   const job = { vcenterId: 'vcA', vmId: 'vcA:vm-1', keep: 10, keepDays: 30 };
   const mk = (stamp, daysAgo, owner = job) => {
@@ -56,7 +63,7 @@ test('K2: pruneNfsBackups — 이 잡의 온전한 백업만 · 개수 + 기간(
   const removed = pruneNfsBackups(mp, root, job);
   assert.deepEqual(removed, ['20260801-0200', '20260901-0200']);
   assert.deepEqual(fs.readdirSync(root).sort(), ['20260601-0200', '20260701-0200', '20261001-0200', '20261025-0200']);
-  const onlyOld = fs.mkdtempSync(path.join(os.tmpdir(), 'vmc2794f-mp2-'));
+  const onlyOld = tmpDir('vmc2794f-mp2-');
   const r2 = path.join(onlyOld, 'x');
   for (const [s, d] of [['20250101-0000', 300], ['20250201-0000', 270]]) { fs.mkdirSync(path.join(r2, s), { recursive: true }); fs.writeFileSync(path.join(r2, s, 'manifest.json'), JSON.stringify({ vcenterId: 'vcA', vmId: 'vcA:vm-1', at: new Date(Date.now() - d * DAY).toISOString() })); }
   assert.deepEqual(pruneNfsBackups(onlyOld, r2, job), ['20250101-0000'], '전부 오래돼도 최근 1개는 남긴다');
@@ -118,7 +125,7 @@ test('D2: applyDetachResult — 성공 호스트는 기록 삭제 · 실패 호�
 });
 
 function runLive(script) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vmc2794r-'));
+  const dir = tmpDir('vmc2794r-');
   const boot = `
     const express = (await import('express')).default;
     const { store } = await import(${J('store.js')});
@@ -260,7 +267,7 @@ test('M3: renderFailureMail — HTML 이스케이프 · 제목 VM 3개까지 · 
 });
 
 test('M4: tick — 실패를 한 통으로 보내고 기준을 옮긴다 · 발송 실패면 옮기지 않는다 · 메일이 꺼져 있으면 기준만 옮긴다', () => {
-  const cfg = fs.mkdtempSync(path.join(os.tmpdir(), 'vmc2794m-'));
+  const cfg = tmpDir('vmc2794m-');
   fs.writeFileSync(path.join(cfg, 'vm-clone.json'), JSON.stringify({ version: 1, ops: [], jobs: [{ id: 'j1', vcenterId: 'vcA', vmId: 'vcA:vm-1', vmName: 'web01', dest: { type: 'datastore', datastoreName: 'ds' }, schedule: { mode: 'manual' }, keep: 2, enabled: true, clones: [], history: [] }] }));
   const script = `
     import { mock } from 'node:test';

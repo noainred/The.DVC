@@ -12,6 +12,7 @@
  * 인벤토리가 아예 없는 서버의 GPU 는 알 수 없다 — `invMissing` 이 0 이 아니면 합계는 최소값이다.
  */
 import { numOrNull } from '../util/numOrNull.js';
+import { readInvArr } from './hwSummary.js';
 
 /** 인벤토리가 이보다 오래되면 '지금 수집된' 값이 아니다(인벤토리 주기 30분 — 넉넉히 하루). 합계에는 넣고 따로 센다. */
 export const INVENTORY_STALE_MS = 24 * 3_600_000;
@@ -37,7 +38,8 @@ export const gpuModelOf = (g) => String(g?.model || g?.name || '').trim();
  */
 export function idracGpuCounts(servers, invOf, now = Date.now(), onServer = null) {
   let count = 0; let disabled = 0; let ome = 0; let invRead = 0; let invStale = 0; let invMissing = 0;
-  let gpus = 0; let gpusStale = 0; let gpusUnnamed = 0; let serversWithGpu = 0;
+  let gpus = 0; let gpusStale = 0; let gpusUnnamed = 0; let serversWithGpu = 0; let gpuUnread = 0;
+  const gpuUnreadServers = [];   // 47회차 #7: 어느 서버인지 화면이 밝힐 수 있게(상한 50)
   for (const s of servers || []) {
     if (!s) continue;
     if (s.type === 'ome') { ome += 1; continue; }
@@ -48,12 +50,15 @@ export function idracGpuCounts(servers, invOf, now = Date.now(), onServer = null
     const at = tsMs(inv.collectedAt);
     const stale = at != null && now - at > INVENTORY_STALE_MS;
     if (stale) invStale += 1; else invRead += 1;
-    const list = (Array.isArray(inv.gpus) ? inv.gpus : []).filter((g) => g && typeof g === 'object');
+    // 46회차 I1(재현): Processors 컬렉션을 못 읽은 서버('failed')는 'GPU 0장' 이 아니라 못 읽음 — hwSummary 와 같은 판정(readInvArr).
+    //   예전에는 그 서버를 읽은 서버로 세어 카드 합계가 '최소값' 표지 없이 줄었다. 인벤토리 자체는 읽었으므로 invRead 는 그대로 두고 따로 센다.
+    const list = readInvArr(inv, 'gpus');
+    if (list == null) { gpuUnread += 1; if (gpuUnreadServers.length < 50) gpuUnreadServers.push({ id: s.id, name: s.name || s.id }); continue; }
     gpus += list.length;
     if (stale) gpusStale += list.length;
     gpusUnnamed += list.filter((g) => !gpuModelOf(g)).length;
     if (list.length) serversWithGpu += 1;
     if (onServer) onServer(s, inv, list, stale);
   }
-  return { count, disabled, ome, invRead, invStale, invMissing, gpus, gpusStale, gpusUnnamed, serversWithGpu };
+  return { count, disabled, ome, invRead, invStale, invMissing, gpus, gpusStale, gpusUnnamed, serversWithGpu, gpuUnread, gpuUnreadServers };
 }

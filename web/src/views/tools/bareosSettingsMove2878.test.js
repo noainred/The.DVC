@@ -33,7 +33,7 @@ describe('Bareos 설정 자리 옮김(v2.878)', () => {
   });
   it('설정 화면 — 백업 묶음(v2.905 재배치)에 bareos 하위 키(도구 권한으로 보임) · 본문은 BareosSettingsPage', () => {
     const s = read('../Settings.jsx');
-    expect(s).toMatch(new RegExp(`\\{ k: '${BAREOS_SETTINGS_KEY}', label: 'Bareos 백업 서버', C: BareosSettingsPage, group: 'backups', show: \\(\\) => toolAllowed\\('bareos-backup'\\) \\}`));
+    expect(s).toMatch(new RegExp(`\\{ k: '${BAREOS_SETTINGS_KEY}', label: 'Bareos 백업 서버', C: BareosSettingsPage, group: 'backups', desc: '[^']+', show: \\(\\) => toolAllowed\\('bareos-backup'\\) \\}`));
     expect(s).toMatch(/\(!s\.show \|\| s\.show\(\)\)/);   // visibleSubs 가 show 를 본다
     const page = read('../BareosSettingsPage.jsx');
     expect(page).toMatch(/toolAllowed\('bareos-backup'\) && fullScope/);   // 도구 권한 + 전체 범위(서버 fullScopeOnly 와 같은 화면 게이트)

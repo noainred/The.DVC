@@ -246,7 +246,8 @@ export function combinedNote(c) {
   const parts = [`전체 고유 사용자 **${lb ? '최소 ' : ''}${c.union}명** = Windows 서버 ∪ Horizon(VDI)`];
   if (lb) {
     const src = (c.lowerBoundSources || []).map((x) => x?.label).filter(Boolean).join(' · ');
-    parts.push(`⚠ ${src || '일부 출처'} 의 계정 목록이 상한으로 잘려 합집합·겹친 인원은 **최소값**입니다`);
+    // 90회차 F4: 하한의 이유는 계정 목록 상한만이 아니다(읽지 못한 서버 · 세션 페이지 절단도) — 이유를 하나로 단정하지 않는다.
+    parts.push(`⚠ ${src || '일부 출처'} 는 일부만 읽어(계정 목록 상한 · 읽지 못한 서버 · 원문 절단) 합집합·겹친 인원은 **최소값**입니다`);
   }
   if (c.both > 0) parts.push(`양쪽에 동시에 있는 사람 **${c.both}명**(단순 합 ${c.sum}명에서 중복을 뺐습니다)`);
   else if (c.sum !== c.union) parts.push(`단순 합 ${c.sum}명`);
@@ -301,3 +302,14 @@ export const TRUST_NOTE = 'Horizon Connection Server 가 보고한 세션 목록
 
 /** 조회 경로 표시 — 404('이 버전에 없는 경로') 를 사용자가 확인할 수 있게. */
 export const SESSION_PATH_NOTE = '조회 경로: GET /rest/inventory/v1/sessions (page·size 페이징). 이 경로가 404 면 Connection Server 버전이 노출하지 않는 것입니다.';
+
+/**
+ * 91회차(90회차 결정 ⓐ): 같은 사유로 연속 N주기 실패한 서버는 전체 추이 부분 합 판정에서 뺐다 — 그 사실을 말한다(현재 사용자 persistentFailNote 와 같은 문장 틀).
+ *   서버 poller.lastResult.serversPersistent(개수) · persistentCycles(N). 없거나 0 이면 빈 문자열.
+ */
+export function hzPersistentNote(lastResult) {
+  const n = Number(lastResult?.serversPersistent) || 0;
+  if (!(n > 0)) return '';
+  const cyc = Number(lastResult?.persistentCycles) || 0;
+  return `서버 **${n}대**는 같은 사유로 ${cyc > 0 ? `${cyc}주기 넘게` : '여러 주기 동안'} 계속 실패해 **전체 추이 계산에서 제외**했습니다 — 추이는 나머지 서버의 값이고, 제외한 서버의 사용자는 들어 있지 않습니다.`;
+}

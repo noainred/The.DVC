@@ -40,7 +40,9 @@ export function createStaticGzip(distDir) {
     const raw = await fs.promises.readFile(file);
     const buf = await gzip(raw, { level: 9 });
     const prev = cache.get(name);
-    if (prev) total -= prev.buf.length;
+    // v3.10.5(공용 유틸 점검 3회차): 옛 판본을 합계에서 뺐으면 캐시에서도 지운다. 예전에는 빼기만 하고 새 판본이 상한에 걸리면 옛 판본을
+    //   캐시에 남겨 둔 채 돌아가 — 메모리에는 있는데 합계에는 없는 바이트가 쌓였다(상한이 실제보다 느슨해진다).
+    if (prev) { total -= prev.buf.length; cache.delete(name); }
     if (total + buf.length > STATIC_GZIP_MAX_BYTES) return null;
     cache.set(name, { mtimeMs: st.mtimeMs, buf, size: raw.length });
     total += buf.length;

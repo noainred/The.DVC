@@ -45,6 +45,12 @@ export function headerSafeText(v) {
 
 /** 아주 느슨한 주소 형식 검사 — 릴레이가 최종 판정하므로 여기서는 명백한 오류만 막는다. */
 const ADDR_RE = /^[^\s@<>,;]+@[^\s@<>,;]+\.[^\s@<>,;]+$/;
+/*
+ * 108회차 A5(재현): 주소 하나의 길이 상한 — ADDR_RE 의 도메인 쪽 `X+\.X+$` 는 X 가 '.' 도 받아, 끝이 맞지 않는 긴 입력
+ *   (`x@a.a.a.…@`)에서 점마다 되짚어 O(n²) 였다(4만 자 1.3초 · 16만 자 16초 동기 — 설정 저장 · 발송 경로의 이벤트 루프가 멈춘다).
+ *   길이를 먼저 본다(RFC 5321: 로컬 64 + '@' + 도메인 255 = 320 — 그보다 긴 주소는 릴레이도 받지 않는다).
+ */
+export const ADDR_MAX_LEN = 320;
 
 /** 주소 목록 정규화: 문자열/배열 → 중복 없는 배열. 형식이 틀린 항목은 이유와 함께 돌려준다. */
 export function normalizeAddresses(input) {
@@ -55,7 +61,7 @@ export function normalizeAddresses(input) {
   for (const s of raw) {
     const a = String(s || '').trim();
     if (!a) continue;
-    if (HEADER_UNSAFE.test(a) || !ADDR_RE.test(a)) { bad.push(a.slice(0, 80)); continue; }
+    if (a.length > ADDR_MAX_LEN || HEADER_UNSAFE.test(a) || !ADDR_RE.test(a)) { bad.push(a.slice(0, 80)); continue; }
     const k = a.toLowerCase();
     if (seen.has(k)) continue;
     seen.add(k);
@@ -70,7 +76,18 @@ export function encodeHeaderWord(s) {
   if (!v) return '';
   // eslint-disable-next-line no-control-regex
   if (/^[\x20-\x7e]*$/.test(v)) return v;             // 순수 ASCII 는 그대로
-  return `=?UTF-8?B?${Buffer.from(v, 'utf8').toString('base64')}?=`;
+  // v3.10.4(공용 유틸 점검 2회차): encoded-word 하나는 75자를 넘으면 안 되고(RFC 2047 §2) 헤더 한 줄은 998자 상한이다(RFC 5322 §2.1.1).
+  //   예전에는 제목 전체를 한 덩어리로 인코딩해 한글 25자쯤부터 75자를 넘었고, 긴 경보 제목은 998자까지 넘길 수 있었다.
+  //   UTF-8 39바이트(= base64 52자 + 12자 틀 = 64자) 단위로 글자 경계에서 나눠 접는다(CRLF + 공백 — 디코더는 단어 사이 공백을 지운다).
+  //   'Subject: ' 를 붙여도 첫 줄이 78자 권고 안에 든다.
+  const words = [];
+  let cur = '';
+  for (const ch of v) {
+    if (cur && Buffer.byteLength(cur + ch, 'utf8') > 39) { words.push(cur); cur = ''; }
+    cur += ch;
+  }
+  if (cur) words.push(cur);
+  return words.map((w) => `=?UTF-8?B?${Buffer.from(w, 'utf8').toString('base64')}?=`).join('\r\n ');
 }
 
 /**
@@ -93,7 +110,8 @@ export function formatDisplayName(n) {
     cur += ch;
   }
   if (cur) words.push(cur);
-  return words.map((w) => (/^[\x20-\x7e]*$/.test(w) ? `=?UTF-8?B?${Buffer.from(w, 'utf8').toString('base64')}?=` : encodeHeaderWord(w))).join(' ');
+  // v3.10.4: 단어마다 직접 인코딩한다 — encodeHeaderWord 는 39바이트에서 접으므로(제목용) 45바이트 표시 이름 단어 안에 CRLF 가 끼었다.
+  return words.map((w) => `=?UTF-8?B?${Buffer.from(w, 'utf8').toString('base64')}?=`).join(' ');
 }
 
 /** base64 본문을 76자로 접는다(RFC 2045 권장 줄 길이). */
@@ -322,7 +340,7 @@ export async function sendMail(cfg, msg, opts = {}) {
   const port = Number(cfg.port) || (cfg.secure ? 465 : 25);
   const timeoutMs = Math.max(1000, Number(cfg.timeoutMs) || 20_000);
   const from = String(cfg.from || '').trim();
-  if (!from || HEADER_UNSAFE.test(from) || !ADDR_RE.test(from)) throw new Error('보내는 사람(From) 주소가 올바르지 않습니다.');
+  if (!from || from.length > ADDR_MAX_LEN || HEADER_UNSAFE.test(from) || !ADDR_RE.test(from)) throw new Error('보내는 사람(From) 주소가 올바르지 않습니다.');
 
   const to = normalizeAddresses(msg.to);
   const cc = normalizeAddresses(msg.cc || []);

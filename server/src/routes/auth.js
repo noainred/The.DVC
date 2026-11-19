@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { config } from '../config.js';
 import { authenticate, signToken, verifyToken, authMiddleware, requireEnrolled, requireRole, getUser, beginTotpEnroll, confirmTotpEnroll, setupState, adShadowBlockOf, loginTokenExpSec, extendTokenExpSec, revokeTokenSession, touchSessionActivity, noteIssuedSession, resolveTokenUser } from '../auth/auth.js';
+import { otpEnrolled, requireCurrentOtp, selfRebindVerified, clearSelfRebind } from '../auth/otpRebind.js';   // 19회차 A-2 · 20회차 F1 — 판정 하나
 import { roleToolsDenied, effectiveToolAccess, userPermissions } from '../auth/permissions.js';
 import { loadAdConfig, saveAdConfig, testAd, adTransportStatus } from '../auth/ad.js';
 import { requireSettingsOwner, fullScopeOnlyWith } from './admin/shared.js';
@@ -17,6 +18,13 @@ import { loadUsageSettings, noticeText, userKeyOf } from '../usage/settings.js';
 import { isDemoGuest } from '../auth/demoGuest.js';
 const loginFailGate = createDenyAuditGate();
 const loginBlockedGate = createDenyAuditGate();
+
+/** 19회차 A-1: 진행 중 로그인 인증(계정 소문자 → 건수 · 출발지 → 건수). 끝나면 finally 가 지운다. */
+const _inflightUser = new Map();
+const _inflightIp = new Map();
+// 출발지당 동시 인증. 로컬 인증은 동기라 겹치지 않는다 — ⚠ 리버스 프록시 뒤인데 TRUST_PROXY 가 없으면 모든 사용자가 한 출발지라
+//   **포탈 전체의 동시 AD 로그인이 8건**으로 묶인다(9번째는 429 — 잠시 뒤 다시). 그 배포는 TRUST_PROXY 를 켤 것(20회차 반증 F7).
+const LOGIN_INFLIGHT_PER_IP = 8;
 
 export const authRouter = Router();
 // v2.574 BUG-03: express 4 는 async 핸들러의 throw 를 잡지 않아 그 요청이 **응답 없이
@@ -85,7 +93,25 @@ authRouter.post('/login', async (req, res) => {
       .json({ error: `로그인 시도가 일시적으로 잠겼습니다. ${gate.retryAfterSec}초 후 다시 시도하세요.` });
   }
 
-  const user = await authenticate(username, password);
+  // 전체 점검 19회차 A-1(재현): 잠금은 인증 **전**에 보고 실패는 인증이 **끝난 뒤** 센다 — AD bind 를 기다리는 동안 같은 계정 · 출발지의
+  //   동시 요청이 모두 검사를 통과해 DC 까지 갔다(동시 200건 → bind 200회, 설계 한도 8회). 진행 중 인증을 **계정당 1건 · 출발지당
+  //   LOGIN_INFLIGHT_PER_IP 건**으로 묶는다 — 넘치면 인증하지 않고 429(실패로 세지 않는다 — 정상 사용자의 두 번 클릭이 잠금을 부르지 않게).
+  //   로컬 계정 인증은 동기라 겹치지 않는다(이 묶음은 AD 처럼 기다리는 인증에서만 걸린다).
+  // 20회차 반증 F6: 같은 AD 계정의 표기 변형(kim · KIM · kim@corp.local · CORP\kim)이 따로 세이지 않게 도메인 앞뒤를 떼고 비교한다(묶음 키만 — 잠금 키는 그대로)
+  const ukey = username.trim().toLowerCase().replace(/^[^\\]*\\/, '').replace(/@.*$/, '') || username.toLowerCase();
+  if ((_inflightUser.get(ukey) || 0) >= 1 || (_inflightIp.get(gateIp) || 0) >= LOGIN_INFLIGHT_PER_IP) {
+    const sum = loginBlockedGate(gateIp);
+    if (sum.write) logAudit({ user: username, action: '로그인 보류(진행 중 인증)', detail: `같은 계정 · 출발지의 로그인 확인이 진행 중${foldedNote(sum.folded)}`, ip, xff });
+    return res.status(429).set('Retry-After', '2').json({ error: '같은 계정(또는 출발지)의 로그인 확인이 진행 중입니다. 잠시 후 다시 시도하세요.' });
+  }
+  _inflightUser.set(ukey, (_inflightUser.get(ukey) || 0) + 1);
+  _inflightIp.set(gateIp, (_inflightIp.get(gateIp) || 0) + 1);
+  let user;
+  try { user = await authenticate(username, password); }
+  finally {
+    const du = (_inflightUser.get(ukey) || 1) - 1; if (du > 0) _inflightUser.set(ukey, du); else _inflightUser.delete(ukey);
+    const di = (_inflightIp.get(gateIp) || 1) - 1; if (di > 0) _inflightIp.set(gateIp, di); else _inflightIp.delete(gateIp);
+  }
   if (!user) {
     const lk = recordLoginFailure(gateIp, username);
     // v2.682 R3A-05: 같은 이름 로컬 계정 때문에 AD 를 시도하지 않은 실패면 감사 detail 에 그 사유를 남긴다(응답은 그대로 — 계정 열거 단서 금지).
@@ -162,13 +188,15 @@ authRouter.post('/login', async (req, res) => {
  *  · settingsOwnerTier — 소유자 등급 라우트(requireSettingsOwner — 세션 보안·자격증명 저장 방식·백업·메일·공유 중앙 토큰 등)를
  *    **실제로 통과하는가**(v2.744 AUTHZ-02: 소유자 + 전체 범위). 판정을 복제하지 않으려고 그 미들웨어를 그대로 불러 결과만 본다 —
  *    화면은 이 값으로 소유자 등급 화면·버튼을 잠근다(소유자이지만 범위 계정이면 isSettingsOwner true · settingsOwnerTier false).
+ *    6회차 A1: 쓰기 판정으로 묻는다 — 조회는 무제한이고 쓰기 범위만 일부인 소유자도 false(쓰기 라우트가 403 이라 버튼을 잠그는 것이 맞다).
  */
 function ownerFields(user) {
   const owners = (() => { try { return loadSessionSecurity().settingsOwners || []; } catch { return []; } })();
   const isSettingsOwner = !config.auth.enabled || owners.includes(user?.username); // username 만(위 주석 참고)
   let settingsOwnerTier = false;
   const sink = { status() { return sink; }, json() { return sink; } };
-  try { requireSettingsOwner({ user }, sink, () => { settingsOwnerTier = true; }); } catch { settingsOwnerTier = false; }
+  // 6회차 A1: 소유자 등급 버튼은 **쓰기**라 쓰기 메서드로 묻는다 — 쓰기 범위가 일부 법인인 소유자는 false(그 버튼의 저장이 403 이다 · 조회 GET 은 그대로 통과).
+  try { requireSettingsOwner({ user, method: 'POST' }, sink, () => { settingsOwnerTier = true; }); } catch { settingsOwnerTier = false; }
   return { isSettingsOwner, settingsOwnerTier };
 }
 
@@ -327,10 +355,27 @@ function auditTotpSelf(req, action, { detail, gate } = {}) {
   if (gate) { const sum = gate(user); if (!sum.write) return; note = foldedNote(sum.folded); }
   logAudit({ user, action, target: user, detail: ((detail || '') + note).replace(/^ · /, '') || undefined, ip: clientIp(req) });
 }
+/*
+ * 전체 점검 19회차 A-2(재현): 이미 OTP 를 등록한 계정의 **본인 재등록**은 지금 OTP 코드(currentCode)를 요구한다. 예전에는 세션 토큰만으로
+ *   begin → confirm 이 되어, 탈취한 세션이 활성 시크릿을 공격자 앱으로 바꾸고(OTP 전용이면 비밀번호도 지움 · tokenVersion 인상으로 주인 세션 종료)
+ *   **영구 계정 탈취**가 됐다. 등록 전 세션(mustEnrollOtp — 처음 등록)은 예전 그대로 코드 없이 · 폰 분실은 관리자 대리 등록 · otp-enroll.sh.
+ *   begin 에서 확인한 사실은 계정별로 10분 기억하고, 확정은 그 기억이 있을 때만 받는다(begin 만 막으면 남은 pending 시크릿으로 confirm 만 부를 수 있다).
+ */
 authRouter.post('/totp/begin', authMiddleware, (req, res) => {
   if (req.user?.authSrc !== 'local' || !getUser(req.user.username)) {
     auditTotpSelf(req, 'OTP 등록 시작 거부(본인)', { detail: LOCAL_ONLY.reason, gate: totpFailAuditGate });
     return res.status(400).json(LOCAL_ONLY);
+  }
+  // 20회차 반증 F2: OTP 미등록 · 등록 강제가 아닌 세션(viewer 기본 · 비밀번호 정책 계정)이 세션만으로 OTP 를 **더해** 영구 로그인 수단을 얻지 못하게 —
+  //   본인 등록은 등록 강제 세션(mustEnrollOtp — ForceOtpEnroll 화면)과 이미 등록된 계정의 재등록(현재 코드)만. 그 밖은 관리자 대리 등록.
+  if (!otpEnrolled(req.user.username) && !req.user?.mustEnrollOtp) {
+    auditTotpSelf(req, 'OTP 등록 시작 거부(본인 — 등록 강제 아님)', { gate: totpFailAuditGate });
+    return res.status(403).json({ ok: false, reason: '본인 OTP 등록은 등록이 필요한 세션에서만 할 수 있습니다 — 관리자에게 대리 등록을 요청하세요.' });
+  }
+  const need = requireCurrentOtp(req.user.username, (req.body || {}).currentCode, 'OTP 재등록', { sid: req.user?.sid, purpose: 'rebind' });
+  if (need) {
+    auditTotpSelf(req, 'OTP 재등록 거부(본인 — 현재 코드 확인 실패)', { gate: totpFailAuditGate });
+    return res.status(need.status).json(need.body);
   }
   const r = beginTotpEnroll(req.user.username, req.get('host') || '', { actor: req.user.username, actorUser: req.user });
   if (r.ok) auditTotpSelf(req, 'OTP 등록 시작(본인)', { gate: totpBeginAuditGate });
@@ -342,7 +387,16 @@ authRouter.post('/totp/confirm', authMiddleware, (req, res) => {
     auditTotpSelf(req, 'OTP 등록 확정 실패(본인)', { detail: LOCAL_ONLY.reason, gate: totpFailAuditGate });
     return res.status(400).json(LOCAL_ONLY);
   }
+  if (!otpEnrolled(req.user.username) && !req.user?.mustEnrollOtp) {   // 20회차 반증 F2(begin 과 같은 규칙)
+    auditTotpSelf(req, 'OTP 등록 확정 거부(본인 — 등록 강제 아님)', { gate: totpFailAuditGate });
+    return res.status(403).json({ ok: false, reason: '본인 OTP 등록은 등록이 필요한 세션에서만 할 수 있습니다 — 관리자에게 대리 등록을 요청하세요.' });
+  }
+  if (!selfRebindVerified(req.user.username, { sid: req.user?.sid, purpose: 'rebind' })) {
+    auditTotpSelf(req, 'OTP 재등록 확정 거부(본인 — 현재 코드 확인 없음)', { gate: totpFailAuditGate });
+    return res.status(403).json({ ok: false, needCurrentOtp: true, reason: '이미 OTP 가 등록된 계정입니다 — 재등록 시작(begin)에서 지금 OTP 코드를 확인한 뒤 10분 안에 확정하세요.' });
+  }
   const r = confirmTotpEnroll(req.user.username, (req.body || {}).code, { actor: req.user.username, actorUser: req.user });
+  if (r.ok) clearSelfRebind(req.user.username, { sid: req.user?.sid, purpose: 'rebind' });
   if (r.ok) auditTotpSelf(req, 'OTP 등록 확정(본인)');
   else auditTotpSelf(req, 'OTP 등록 확정 실패(본인)', { detail: r.reason || '', gate: totpFailAuditGate });
   res.status(r.ok ? 200 : 400).json(r);
@@ -374,6 +428,7 @@ authRouter.put('/ad-config', ...adminOnly, adFleetOnly, requireSettingsOwner, (r
   catch (e) {
     // S-03: 새로 저장하는 평문 ldap://·잘못된 CA 등은 400 + 사유(저장하지 않는다).
     if (e?.status === 400) return res.status(400).json({ ok: false, reason: e.message, field: e.field, code: e.code });
+    if (e?.status === 503) return res.status(503).json({ ok: false, reason: e.message, code: e.code });   // 88회차 F3: 설정 파일 읽기 오류 — 저장 거절(사유를 그대로)
     throw e;
   }
   logAudit({ user: req.user?.username, action: 'AD 설정 변경', detail: `사용=${ad.enabled ? '켬' : '끔'}·전송=${adTransportStatus(ad).mode}·정책=${ad.policyEpoch}`, ip: clientIp(req) });

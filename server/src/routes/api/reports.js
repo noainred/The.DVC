@@ -15,6 +15,7 @@ import { computeUnprotected, mergeSnapRows } from '../../reports/unprotected.js'
 import { loadLogSettings } from '../../logs/settings.js';
 import { vmStatsFor, vmStatsMeta } from '../../reports/vmStats.js';
 import { certStatus } from '../../security/certMonitor.js';
+import { visibleNsxManagers } from '../../nsx/scope.js';   // 결정(56~75) 72: NSX 인증서 귀속 판정은 /nsx 와 같은 함수
 import { dailyReportStatus } from '../../reports/dailyReport.js';
 import { forecastCapacity } from '../../insights/forecast.js';
 import { alertStatus } from '../../alerts.js';
@@ -58,15 +59,25 @@ export function withDemoForecast(r, snap, vcFilter = '') {
   return { ...r, datastores: rows.slice(0, 100), soon: rows.filter((x) => x.daysToLimit <= 30).slice(0, 30), synthesized: rows.length > 0 };
 }
 
-// 인증서 목록도 scope 적용 — vCenter 항목은 허용 집합으로 거르고, NSX는 범위 제한 계정에는 숨긴다.
+// 인증서 목록도 scope 적용 — vCenter 항목은 허용 집합으로 거르고, NSX 는 귀속 vCenter 로 거른다.
+// 결정(56~75 남긴 것) 72: 예전에는 범위 계정 · vCenter 필터 조회에 NSX 인증서를 **전부** 숨겼다. v2.929 부터 항목에 vcenterId 가 있어
+//   nsx/scope.js visibleNsxManagers(/nsx 화면과 같은 판정 하나)로 거른다 — 범위 계정에는 귀속 vCenter 가 허용 집합 안인 매니저만,
+//   **무귀속(vcenterId 없음)은 숨김 유지**(인증서 항목에는 지역이 없어 지역 귀속은 쓰지 않는다). vCenter 필터 조회는 그 vCenter 귀속분만.
+//   일일 보고(reports/dailyReport.js — 알림 채널로 보내는 전 함대 보고)는 사용자 범위가 없어 그대로다.
+export function scopedCertItems(items, allowed, vcenterId = '', vcenters = []) {
+  return (Array.isArray(items) ? items : []).filter((it) => {
+    if (!it) return false;
+    if (it.kind === 'vcenter') return (!allowed || allowed.has(it.id)) && (!vcenterId || it.id === vcenterId);
+    if (it.kind !== 'nsx') return !allowed && !vcenterId;   // 모르는 종류는 예전 규칙(전체 범위 · 필터 없음에서만)
+    const vc = typeof it.vcenterId === 'string' ? it.vcenterId : '';
+    if (vcenterId && vc !== vcenterId) return false;
+    return visibleNsxManagers([{ vcenterId: vc, region: '' }], vcenters, allowed).length > 0;
+  });
+}
 function scopedCerts(user, snap, vcenterId) {
   const c = certStatus();
   const allowed = scopedVcenterIds(user, snap);
-  const items = (c.items || []).filter((it) => {
-    if (it.kind === 'vcenter') return (!allowed || allowed.has(it.id)) && (!vcenterId || it.id === vcenterId);
-    return !allowed && !vcenterId; // nsx: 전체 범위 조회에서만
-  });
-  return { ...c, items };
+  return { ...c, items: scopedCertItems(c.items, allowed, typeof vcenterId === 'string' ? vcenterId : '', snap?.vcenters || []) };
 }
 
 export function registerReports(api) {
@@ -119,7 +130,9 @@ api.get('/tools/report/certs', requirePerm('tools'), (req, res) => {
 // ⑤ VM 라이트사이징 — 관측 평균/피크(vmStats 누적) 기반 축소 추천.
 api.get('/tools/report/rightsizing', requirePerm('tools'), (req, res) => memoJson(req, res, 'report-rightsizing', (snap) => {
   const scoped = scopeSlice(snap, req.user, req.query.vcenterId);
-  return { ...computeRightsizing(scoped.vms, vmStatsFor), stats: vmStatsMeta() };
+  // 72회차 F1: 범위 계정 · vCenter 를 고른 조회의 누적 메타는 그 VM 들만(함대 전체 추적 수를 싣지 않는다).
+  const narrowed = !!scopedVcenterIds(req.user, snap) || !!req.query.vcenterId;
+  return { ...computeRightsizing(scoped.vms, vmStatsFor), stats: vmStatsMeta(narrowed ? (scoped.vms || []).map((v) => v.id) : undefined) };
 }, { extraKey: scopeKey(req.user, store.get()), ttlMs: 30_000 }));
 
 // ⑥ 용량 고갈 예측 — 기존 forecastCapacity(선형회귀) 재사용(특수기능 진입점).

@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>미리보기 · 적용 — 추가/변경/사라짐 (1440)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a111c;color:#c8d6e8;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#9fcaff}a:hover{color:#cfe4ff}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+.overlay{position:absolute;inset:0;background:rgba(5,10,18,.78)}
+.modal{position:absolute;left:100px;top:30px;width:1240px;background:#0f1a2b;border:1px solid #24405f;border-radius:10px;box-shadow:0 24px 60px rgba(0,0,0,.55);display:flex;flex-direction:column;overflow:hidden}
+.modal-head{display:flex;align-items:center;gap:9px;padding:13px 16px;border-bottom:1px solid #1c2c42}
+.modal-head b{color:#e8f1fb;font-size:14px}
+.pc-btn{padding:7px 14px;border:1px solid #1e3350;border-radius:6px;background:#0f1a2b;color:#c8d6e8;font:inherit;font-size:12.5px}
+.pc-btn.primary{border-color:#1668d8;background:#1668d8;color:#fff;font-weight:600}
+.pc-btn:disabled{opacity:.45}
+.sum{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
+.sum div{background:#0a141f;border:1px solid #1c2c42;border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:3px}
+.sum span{font-family:"JetBrains Mono",monospace;font-size:10.5px;letter-spacing:.08em;color:#8ea4bd}
+.sum b{font-family:"JetBrains Mono",monospace;font-size:22px;font-weight:600;color:#dbe7f5}
+.sum .add b{color:#3ddc84}.sum .chg b{color:#f0a92e}.sum .gone b{color:#ff5c5c}.sum .skip b{color:#8ea4bd}
+.sum small{font-size:11px;color:#7b93ae}
+.step{background:#0a141f;border:1px solid #1c2c42;border-radius:10px;overflow:hidden}
+.step h3{margin:0;padding:10px 14px;font-size:13px;color:#e8f1fb;border-bottom:1px solid #1c2c42;display:flex;align-items:center;gap:10px}
+.step h3 small{font-weight:400;color:#8ea4bd;font-size:11.5px}
+table{border-collapse:collapse;width:100%;table-layout:fixed}
+th{font-family:"JetBrains Mono",monospace;font-size:10.5px;letter-spacing:.06em;color:#8ea4bd;text-align:left;padding:7px 10px;background:#132132;font-weight:500;white-space:nowrap}
+td{padding:7px 10px;border-bottom:1px solid #131f30;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;vertical-align:middle}
+.tag{display:inline-block;padding:1px 6px;border-radius:5px;font-size:10.5px;font-family:"JetBrains Mono",monospace;border:1px solid #1e3350;color:#8ea4bd;background:#0f1a2b;margin-right:4px}
+.tag.add{color:#3ddc84;border-color:#1f5a3a;background:#07180e}
+.tag.chg{color:#f0a92e;border-color:#5a3d07;background:#1b1305}
+.tag.gone{color:#ff5c5c;border-color:#5f1d1d;background:#1d0a0a}
+.tag.skip{color:#8ea4bd}
+.res{display:inline-flex;align-items:center;gap:6px}
+.res i{width:8px;height:8px;border-radius:50%;display:inline-block}
+.sel{height:30px;padding:0 26px 0 10px;border-radius:6px;border:1px solid #1e3350;background:#0f1a2b;color:#c8d6e8;font:inherit;font-size:12px;appearance:none;-webkit-appearance:none;background-image:linear-gradient(45deg,transparent 50%,#8ea4bd 50%),linear-gradient(135deg,#8ea4bd 50%,transparent 50%);background-position:calc(100% - 13px) 12px,calc(100% - 8px) 12px;background-size:5px 5px;background-repeat:no-repeat}
+.cb{width:15px;height:15px;border-radius:4px;border:1px solid #3b4a66;background:#0a141f;display:inline-block;position:relative;flex:none;vertical-align:middle}
+.cb.on{background:#1668d8;border-color:#1668d8}
+.cb.on::after{content:"";position:absolute;left:4px;top:1px;width:4px;height:8px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
+.lbl{font-size:12px;color:#9fb4cc;display:inline-flex;align-items:center;gap:8px}
+.warnbox{border:1px solid #5a3d07;border-left:3px solid #f0a92e;background:#1b1305;border-radius:8px;padding:9px 12px;font-size:12px;color:#f6d28a;line-height:1.55}
+</style>
+</helmet>
+<div style="width:1440px;height:1060px;box-sizing:border-box;position:relative;overflow:hidden;background:#0a111c">
+  <div class="overlay" aria-hidden="true"></div>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="pv-title">
+    <div class="modal-head"><b id="pv-title">＋ 등록 — 미리보기</b><span class="mono" style="font-size:11.5px;color:#9fb4cc">설정된 시스템 12건 선택 · 템플릿 ‘종류별 기본’</span><span style="margin-left:auto;font-size:12px;color:#8ea4bd">전부 성공 또는 전부 취소 — 오류 1건이면 0건 등록</span></div>
+    <div style="padding:14px 16px;display:flex;flex-direction:column;gap:12px">
+
+      <div class="sum">
+        <div class="add"><span>추가</span><b>11</b><small>새 대상 11 · 점검 27</small></div>
+        <div class="chg"><span>주소 변경 반영</span><b>1</b><small>vc-cn-east — host 교체</small></div>
+        <div class="gone"><span>설정에서 사라짐</span><b>1</b><small>isilon-sgp — 중지로 표시(삭제 안 함)</small></div>
+        <div class="skip"><span>건너뜀</span><b>1</b><small>같은 경로·이름 이미 있음</small></div>
+        <div><span>오류</span><b style="color:#3ddc84">0</b><small>SSRF 차단 · 형식 오류 없음</small></div>
+      </div>
+
+      <section class="step">
+        <h3>등록될 대상 <small>경로는 ‘설정 연동\그룹\법인’ · 엣지는 담당 엣지(등록값 → 관측값 → 중앙) · 등록 직후 중지</small></h3>
+        <div style="overflow:auto;max-height:420px">
+        <table>
+          <colgroup><col style="width:84px"><col style="width:190px"><col style="width:250px"><col style="width:250px"><col><col style="width:150px"><col style="width:120px"></colgroup>
+          <thead><tr><th>결과</th><th>이름</th><th>트리 경로</th><th>호스트 : 포트</th><th>점검(템플릿 치환 결과)</th><th>점검 위치</th><th>출처</th></tr></thead>
+          <tbody>
+            <tr><td><span class="tag add">추가</span></td><td style="color:#dbe7f5">vc-eu-central</td><td class="mono">설정 연동\가상화\PL-WRO</td><td class="mono">vcenter-eu-central-01.demo.invalid : 443</td><td><span class="tag">tcp 443 · 120s</span><span class="tag">cert 443 · D-30 · 1d</span><span class="tag">http https://{host}/sdk/vimServiceVersions.xml · 200 · 300s</span></td><td>mock-Edge-Frankfurt</td><td class="mono">vcenter|vc-eu-central</td></tr>
+            <tr><td><span class="tag add">추가</span></td><td style="color:#dbe7f5">vc-us-east</td><td class="mono">설정 연동\가상화\US-IAD</td><td class="mono">vcenter-us-east-01.demo.invalid : 443</td><td><span class="tag">tcp 443</span><span class="tag">cert D-30</span><span class="tag">http /sdk/vimServiceVersions.xml 200</span></td><td>mock-Edge-Virginia</td><td class="mono">vcenter|vc-us-east</td></tr>
+            <tr><td><span class="tag chg">변경</span></td><td style="color:#dbe7f5">vc-cn-east</td><td class="mono">설정 연동\가상화\CN-SHA</td><td class="mono"><s style="color:#7b93ae">10.30.1.5</s> → vcenter-cn-east-01.demo.invalid : 443</td><td><span class="tag">점검 3개 그대로(결과·연속 횟수 유지 — id 승계)</span></td><td>mock-Edge-Shanghai</td><td class="mono">vcenter|vc-cn-east</td></tr>
+            <tr><td><span class="tag add">추가</span></td><td style="color:#dbe7f5">mock-Edge-Frankfurt</td><td class="mono">설정 연동\중앙↔엣지\PL-WRO</td><td class="mono">edge-frankfurt.demo.invalid : 443</td><td><span class="tag">tcp 443</span><span class="tag">cert D-30</span><span class="tag">http https://{host}/api/health · 200 · 키워드 status</span></td><td>중앙</td><td class="mono">collector|mock-Edge-Frankfurt</td></tr>
+            <tr><td><span class="tag add">추가</span></td><td style="color:#dbe7f5">mock-Edge-Seoul</td><td class="mono">설정 연동\중앙↔엣지\KR-ICN</td><td class="mono">edge-seoul.demo.invalid : 443</td><td><span class="tag">tcp 443</span><span class="tag">cert D-30</span><span class="tag">http /api/health 200</span></td><td>중앙</td><td class="mono">collector|mock-Edge-Seoul</td></tr>
+            <tr><td><span class="tag add">추가</span></td><td style="color:#dbe7f5">r750-fra-a01</td><td class="mono">설정 연동\서버\PL-WRO</td><td class="mono">10.20.1.11 : 443</td><td><span class="tag">tcp 443</span><span class="tag">http https://{host}/redfish/v1/ · 200 · 자체서명 허용</span></td><td>mock-Edge-Frankfurt</td><td class="mono">idrac|7KX2M93</td></tr>
+            <tr><td><span class="tag add">추가</span></td><td style="color:#dbe7f5">unity-480-fra</td><td class="mono">설정 연동\스토리지\PL-WRO</td><td class="mono">unity-fra.demo.invalid : 443</td><td><span class="tag">tcp 443</span><span class="tag">cert D-30</span><span class="tag">http https://{host}/ · 기대코드 비움(500 미만 정상)</span></td><td>mock-Edge-Frankfurt</td><td class="mono">storage|st-0a91</td></tr>
+            <tr><td><span class="tag add">추가</span></td><td style="color:#dbe7f5">pmax-2500-icn</td><td class="mono">설정 연동\스토리지\KR-ICN</td><td class="mono">unisphere-icn.demo.invalid : 8443</td><td><span class="tag">tcp 8443</span><span class="tag">cert 8443 · D-30</span></td><td>중앙</td><td class="mono">storage|st-1c44</td></tr>
+            <tr><td><span class="tag add">추가</span></td><td style="color:#dbe7f5">san-brocade-fra-01</td><td class="mono">설정 연동\네트워크\PL-WRO</td><td class="mono">10.20.3.21 : 22</td><td><span class="tag">ssh 22 · 배너 · 300s</span></td><td>mock-Edge-Frankfurt</td><td class="mono">sanswitch|sw-fra-01</td></tr>
+            <tr><td><span class="tag add">추가</span></td><td style="color:#dbe7f5">pdu-apc-icn-01</td><td class="mono">설정 연동\전력\KR-ICN</td><td class="mono">10.10.9.31 : 22</td><td><span class="tag">ssh 22 · 배너</span></td><td>중앙</td><td class="mono">pdu|pdu-icn-01</td></tr>
+            <tr><td><span class="tag add">추가</span></td><td style="color:#dbe7f5">cvp-fra</td><td class="mono">설정 연동\네트워크 관리\PL-WRO</td><td class="mono">cvp.demo.invalid : 443</td><td><span class="tag">tcp 443</span><span class="tag">cert D-30</span></td><td>mock-Edge-Frankfurt</td><td class="mono">cvp|cvp-fra</td></tr>
+            <tr><td><span class="tag add">추가</span></td><td style="color:#dbe7f5">veeam-br-fra</td><td class="mono">설정 연동\백업\PL-WRO</td><td class="mono">veeam-fra.demo.invalid : 9419</td><td><span class="tag">tcp 9419</span><span class="tag">cert 9419 · D-30</span></td><td>mock-Edge-Frankfurt</td><td class="mono">veeam|vb-fra</td></tr>
+            <tr><td><span class="tag add">추가</span></td><td style="color:#dbe7f5">bareos-dir-fra</td><td class="mono">설정 연동\백업\PL-WRO</td><td class="mono">bareos-fra.demo.invalid : 9101</td><td><span class="tag">tcp 9101</span></td><td>mock-Edge-Frankfurt</td><td class="mono">bareos|dir_fra</td></tr>
+            <tr><td><span class="tag gone">사라짐</span></td><td style="color:#dbe7f5">isilon-sgp</td><td class="mono">설정 연동\스토리지\SG-SIN</td><td class="mono">isilon-sgp.demo.invalid : 22</td><td><span class="tag">대상 g-9f21ab 중지 — 점검·결과 보존</span></td><td>mock-Edge-Singapore</td><td class="mono">storage|st-7e20 (없음)</td></tr>
+            <tr style="opacity:.6"><td><span class="tag skip">건너뜀</span></td><td style="color:#dbe7f5">nsx-mgr-frankfurt</td><td class="mono">설정 연동\가상화\PL-WRO</td><td class="mono">nsx-fra.corp.local : 443</td><td><span class="tag">같은 경로·이름의 대상이 이미 있음(출처 없음 — 손으로 등록한 것)</span></td><td>—</td><td class="mono">nsx|nsx-fra</td></tr>
+          </tbody>
+        </table>
+        </div>
+      </section>
+
+      <div style="display:grid;grid-template-columns:minmax(0,1fr) 420px;gap:12px">
+        <section class="step">
+          <h3>종류별 기본 점검(설정 연동 템플릿) <small>통신 점검 카탈로그의 probe 와 같은 깊이 — 무인증 · 401/403 = 정상</small></h3>
+          <table>
+            <colgroup><col style="width:170px"><col><col style="width:110px"></colgroup>
+            <thead><tr><th>종류</th><th>점검</th><th>깊이</th></tr></thead>
+            <tbody>
+              <tr><td>vCenter</td><td><span class="tag">tcp 443</span><span class="tag">cert D-30</span><span class="tag">http /sdk/vimServiceVersions.xml 200</span></td><td class="mono">identity</td></tr>
+              <tr><td>수집 서버(엣지)</td><td><span class="tag">tcp</span><span class="tag">cert</span><span class="tag">http /api/health 200 · 키워드 "status"</span></td><td class="mono">identity</td></tr>
+              <tr><td>iDRAC</td><td><span class="tag">tcp 443</span><span class="tag">http /redfish/v1/ 200 · 자체서명</span></td><td class="mono">identity</td></tr>
+              <tr><td>NSX · OME · 스토리지(API) · Horizon</td><td><span class="tag">tcp</span><span class="tag">cert</span><span class="tag">http / · 기대코드 비움</span></td><td class="mono">http</td></tr>
+              <tr><td>SAN(SSH) · PDU · 베어메탈 · GPU 서버</td><td><span class="tag">ssh 배너 (등록 sshPort)</span></td><td class="mono">ssh</td></tr>
+              <tr><td>CVP · Veeam · Bareos · AD/LDAP</td><td><span class="tag">tcp (등록 포트)</span><span class="tag">cert (TLS 포트만)</span></td><td class="mono">tcp · tls</td></tr>
+              <tr><td>SMTP</td><td><span class="tag">smtp 배너 · EHLO</span></td><td class="mono">smtp</td></tr>
+            </tbody>
+          </table>
+          <div class="warnbox" style="margin:10px">http 점검은 기대 상태코드(expectStatus)를 <b>비우면 500 미만을 전부 정상</b>으로 봅니다(checker.js:169) — 무인증 장비(200·401·403)는 비워 두고, 제품을 증명하는 identity 종류(vCenter·엣지·iDRAC)만 200 을 고정합니다. 새 점검 엔진은 필요 없습니다.</div>
+        </section>
+        <section class="step" style="padding:12px 14px;display:flex;flex-direction:column;gap:10px">
+          <h3 style="padding:0 0 8px;border:0">적용 옵션</h3>
+          <label class="lbl" for="o-state">등록 직후 상태 <select id="o-state" class="sel"><option>중지 (권장 — 확인 후 켬)</option><option>사용</option></select></label>
+          <label class="lbl" for="o-gone">설정에서 사라진 대상 <select id="o-gone" class="sel"><option>중지로 표시 (기본 — 삭제하지 않음)</option><option>그대로 둠</option><option>삭제 (배치 되돌리기 가능)</option></select></label>
+          <label class="lbl"><span class="cb on" role="checkbox" aria-checked="true" aria-label="주소 변경 반영"></span>주소가 바뀐 대상은 설정값으로 갱신(점검 id 승계)</label>
+          <label class="lbl"><span class="cb on" role="checkbox" aria-checked="true" aria-label="엣지 배정 동기화"></span>담당 엣지에 배정 동기화(PUT /assign · byAgent)</label>
+          <label class="lbl"><span class="cb" role="checkbox" aria-checked="false" aria-label="자동 등록"></span>이 종류의 새 설정 항목을 앞으로 자동 등록(중지 상태로)</label>
+          <div style="font-size:11.5px;color:#7b93ae;line-height:1.55;border-top:1px solid #1c2c42;padding-top:8px">배치 <span class="mono" style="color:#9fcaff">settings:20261106-1524</span> 로 등록 이력에 남고 되돌리기가 됩니다. 중앙(<span class="mono">SVCMON_ROLE=central</span>)은 점검을 직접 돌리지 않으므로 배정 뒤 엣지가 ack 해야 ‘활성’이 됩니다.</div>
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:auto"><button class="pc-btn" type="button">뒤로</button><button class="pc-btn primary" type="button">13건 적용 (추가 11 · 변경 1 · 중지 1)</button></div>
+        </section>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1060}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

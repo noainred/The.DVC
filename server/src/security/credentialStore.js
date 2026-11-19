@@ -17,6 +17,7 @@
  *    파일에 남기지 않는다(schedule/outbox 파일에도 없음). 사용마다 감사 + useCount/lastUsed 갱신.
  *  - SSH 키는 저장 시 ssh2 로 파싱 검증(형식·패스프레이즈)하고 공개키 SHA-256 지문만 화면에 보인다.
  */
+import { sshKdfRoundsIssue } from '../util/sshKeyKdf.js';   // 21회차 L-6
 import { strictIpv4Num, cidrMatch } from '../util/ipv4.js';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -28,6 +29,8 @@ import { registerExitFlush } from '../util/exitFlush.js';
 import { openSecretsDeep, sealSecretsDeep } from './secretVault.js';
 import { ssrfBlockReason } from '../collector/registry.js';
 import { isMockMode } from '../mock/demo/flags.js';
+import { parseJsonObject } from '../util/jsonObject.js'; // v3.17.2: 객체가 아닌 JSON(수 · 글자 · 배열)은 깨진 JSON 과 같이 — 손상 보존 경로로
+import { makeJsonFileReader } from '../util/jsonFileRead.js'; // 88회차 F4: 읽기 오류 ≠ 손상
 
 const FILE = () => path.join(config.configDir, 'credentials.json');
 const MAX_ITEMS = 500;
@@ -52,7 +55,7 @@ const USAGE_FILE = () => path.join(config.configDir, 'credentials-usage.json');
 const USAGE_DEBOUNCE_MS = 5_000;
 let _usageTimer = null;
 function loadUsage() {
-  try { if (fs.existsSync(USAGE_FILE())) return JSON.parse(fs.readFileSync(USAGE_FILE(), 'utf8')) || {}; } catch { /* 카운터는 손실 허용 */ }
+  try { if (fs.existsSync(USAGE_FILE())) return parseJsonObject(fs.readFileSync(USAGE_FILE(), 'utf8')); } catch { /* 카운터는 손실 허용 */ }
   return {};
 }
 function flushUsage() {
@@ -71,30 +74,49 @@ function scheduleUsagePersist() {
 registerExitFlush('security/credentialStore.usage', () => { if (_usageTimer) { clearTimeout(_usageTimer); flushUsage(); } });
 export function _flushUsageForTest() { if (_usageTimer) { clearTimeout(_usageTimer); _usageTimer = null; } flushUsage(); }
 
+/*
+ * 88회차 F4(재현 — EIO 한 번): 예전 load 는 읽기 오류(EACCES · EIO · EISDIR)도 손상과 같은 catch 로 받아 **원본(봉인된 전 계정)을 .corrupt 로 옮기고**
+ *   빈 목록을 캐시했다 — 디스크가 돌아와도 · 재시작해도 원본이 옆으로 치워져 있어 브로커가 전 계정을 '없음' 으로 답했고, 다음 등록 한 건이 그 한 건만의
+ *   파일을 새로 썼다. 이제(결정 78 ① 과 같은 규칙) 읽기 오류는 원본을 그대로 두고 · 빈 목록을 캐시하지 않고(30초마다 다시 읽음) · 그동안 쓰기는 거절한다
+ *   (브로커 · 사전 검사는 '없음' — 닫히는 쪽). 손상(파싱 실패 · 객체 아님)은 예전처럼 보존본으로 옮긴다.
+ */
+const _reader = makeJsonFileReader(() => FILE(), { parse: (t) => JSON.parse(t), tag: 'credentials' });
+let _readErr = null;
+/** credentials.json 을 읽지 못해(ENOENT 아닌 읽기 오류) 쓰기를 거절하는 중이면 { at, code }, 아니면 null. */
+export function credentialsReadError() { return _readErr; }
 function load() {
   if (_db) return _db;
-  try {
-    if (fs.existsSync(FILE())) {
-      const p = openSecretsDeep(JSON.parse(fs.readFileSync(FILE(), 'utf8')));
+  const r = _reader.read();
+  if (r.kind === 'read-error') {
+    _readErr = { at: _readErr?.at || Date.now(), code: String(r.error?.code || 'read-error').slice(0, 32) };
+    return { items: [] };   // 캐시하지 않는다(다음 호출이 30초 뒤 다시 읽는다) — persist 가 이 상태의 쓰기를 거절한다
+  }
+  _readErr = null;
+  if (r.kind === 'ok') {
+    try {
+      const p = openSecretsDeep(r.value);
       const usage = loadUsage();
       _db = { items: (Array.isArray(p.items) ? p.items : []).map((c) => {
         const u = usage[c.id];
         return u ? { ...c, useCount: Math.max(Number(c.useCount) || 0, Number(u.useCount) || 0), lastUsedAt: u.lastUsedAt || c.lastUsedAt || null, lastUsedBy: u.lastUsedBy || c.lastUsedBy || '' } : c;
       }) };
       return _db;
-    }
-  } catch { preserveCorrupt(FILE()); }
-  _db = { items: [] };
+    } catch { preserveCorrupt(FILE()); }   // JSON 은 맞지만 모양이 틀림(null 등) — 예전과 같이 손상으로 보존
+  }
+  _db = { items: [] };   // missing · corrupt(손상본은 readJsonFile 이 보존)
   return _db;
 }
-function persist() {
-  atomicWriteFileSync(FILE(), JSON.stringify(sealSecretsDeep({ version: 1, items: load().items }), null, 2), { mode: 0o600 });
+function persist(items = load().items) {
+  if (_readErr) throw Object.assign(new Error(`통합 계정 파일(credentials.json)을 읽지 못하는 상태(${_readErr.code})라 저장하지 않았습니다 — 원본을 덮지 않습니다. 파일 소유자 · 권한을 고친 뒤 다시 시도하세요.`), { code: 'CREDENTIALS_UNREADABLE', status: 503 });   // 88회차 F4
+  atomicWriteFileSync(FILE(), JSON.stringify(sealSecretsDeep({ version: 1, items }), null, 2), { mode: 0o600 });
 }
 const newId = () => `cred_${Date.now().toString(36)}_${(seq++).toString(36)}_${crypto.randomBytes(3).toString('hex')}`;
 const lc = (s) => String(s || '').trim().toLowerCase();
 
 /** SSH 개인키 검증 + 공개키 SHA-256 지문(순수). 실패 시 { ok:false, reason }. 비밀은 반환하지 않는다. */
 export function inspectPrivateKey(privateKey, passphrase = '') {
+  const kdfIssue = sshKdfRoundsIssue(privateKey);   // 21회차 L-6: parseKey 전에(동기 bcrypt — rounds 는 키 안의 값)
+  if (kdfIssue) return { ok: false, reason: kdfIssue };
   const parsed = ssh2.utils.parseKey(String(privateKey || ''), passphrase || undefined);
   if (parsed instanceof Error) {
     const msg = /passphrase|decrypt|encrypted/i.test(parsed.message) ? '개인키가 암호화되어 있습니다 — 패스프레이즈를 확인하세요.' : `개인키 형식을 읽을 수 없습니다(${parsed.message.slice(0, 80)})`;
@@ -181,7 +203,9 @@ export function saveCredential(input = {}, { actor = '' } = {}) {
   const issue = credentialInputIssue(input, { existing });
   if (issue) throw new Error(issue);
   const now = Date.now();
-  const rec = existing || { id: newId(), createdAt: now, createdBy: actor, useCount: 0 };
+  // 전체 점검 21회차 L-1(재현): 사본에 고치고 **저장이 성공한 뒤에** 메모리를 바꾼다 — 예전에는 저장이 실패해도(S-07 잠금 · 디스크) 메모리에 들어가
+  //   브로커가 그 비밀을 내줬고, 삭제는 목록에서 사라졌다가 재시작 뒤 되살아났다(peerTrust assertWritable 과 같은 방향).
+  const rec = existing ? structuredClone(existing) : { id: newId(), createdAt: now, createdBy: actor, useCount: 0 };
   rec.name = String(input.name).trim(); rec.kind = input.kind; rec.username = String(input.username).trim();
   rec.hosts = listOf(input.hosts); rec.agents = listOf(input.agents); rec.note = String(input.note || '').slice(0, 300);
   if (input.kind === 'password') {
@@ -200,8 +224,10 @@ export function saveCredential(input = {}, { actor = '' } = {}) {
   rec.updatedAt = now; rec.updatedBy = actor;
   if (actor === 'mock-demo') rec.demo = true;
   else if (existing && isDemoCredential(existing)) rec.demo = false;   // 사람이 고쳐 저장하면 자기 계정이 된다(v2.719 R1-07)
-  if (!existing) { if (db.items.length >= MAX_ITEMS) throw new Error(`계정은 최대 ${MAX_ITEMS}개`); db.items.push(rec); }
-  persist();
+  if (!existing && db.items.length >= MAX_ITEMS) throw new Error(`계정은 최대 ${MAX_ITEMS}개`);
+  const next = existing ? db.items.map((x) => (x === existing ? rec : x)) : [...db.items, rec];
+  persist(next);
+  db.items = next;
   return publicView(rec);
 }
 
@@ -209,8 +235,10 @@ export function deleteCredential(id) {
   const db = load();
   const i = db.items.findIndex((x) => x.id === id);
   if (i < 0) return null;
-  const [gone] = db.items.splice(i, 1);
-  persist();
+  const gone = db.items[i];
+  const next = db.items.filter((_, j) => j !== i);
+  persist(next);   // 21회차 L-1: 저장 성공 뒤에만 메모리에서 뺀다
+  db.items = next;
   return publicView(gone);
 }
 
@@ -243,4 +271,4 @@ export function credentialUsable(id, { agent, host }) {
   return { ok: true, name: c.name, kind: c.kind, username: c.username };
 }
 
-export function _resetCredentials() { _db = null; }
+export function _resetCredentials() { _db = null; _readErr = null; _reader.reset(); }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { fmtAgo, num, fmtW, fmtWh, fmtKg, fmtBytes, dec1 } from './fmt.js';
+import { fmtAgo, num, fmtW, fmtWh, fmtKg, fmtBytes, dec1, fmtDate, fmtTime } from './fmt.js';
 
 // v2.319 모듈화 #9 — 통합 이동한 포맷터의 의미를 고정(이동 중 동작이 바뀌지 않았음을 보증).
 describe('util/fmt', () => {
@@ -39,5 +39,29 @@ describe('util/fmt', () => {
     expect(num(null)).toBe('—');
     expect(num(1234567)).toBe((1234567).toLocaleString());
     expect(dec1(1.26)).toBe('1.3');
+  });
+  // v3.10.7(공통 기능 점검 5회차): `Number('') === 0` 이라 빈 문자열이 '0 W'·'0 kWh'·'0 kg'·'0' 으로 둔갑했다.
+  it('못 읽은 값(빈 문자열 · 공백 · 배열)은 0 이 아니라 —', () => {
+    for (const v of ['', '  ', [], {}]) {
+      expect(fmtW(v)).toBe('—');
+      expect(fmtWh(v)).toBe('—');
+      expect(fmtKg(v)).toBe('—');
+      expect(num(v)).toBe('—');
+      expect(dec1(v)).toBe('—');
+    }
+    expect(num('abc')).toBe('—');       // 예전엔 'NaN'
+    expect(fmtW(0)).toBe('0 W');         // 0 은 값이다
+    expect(fmtW('1500')).toBe('1.5 kW'); // 숫자 문자열은 수로
+    expect(num(0)).toBe('0');
+  });
+  it('fmtDate · fmtTime — 못 읽는 시각은 Invalid Date 가 아니라 —', () => {
+    expect(fmtDate('abc')).toBe('—');
+    expect(fmtTime('not-a-date')).toBe('—');
+    expect(fmtTime(NaN)).toBe('—');
+    expect(fmtTime(null)).toBe('—');
+    expect(fmtTime(0)).toBe('—');        // 0(epoch)은 '기록 없음' 관례 그대로
+    expect(fmtDate(new Date(Number.NaN))).toBe('—');
+    expect(fmtTime(Date.UTC(2026, 10, 14))).not.toBe('—');
+    expect(fmtDate('2026-11-14T00:00:00Z')).not.toBe('—');
   });
 });

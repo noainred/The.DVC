@@ -92,8 +92,8 @@ describe('화면 소스 규약', () => {
     expect(src).toMatch(/fetchJson\(`\/admin\/login-history\$\{q\}`\)/);
   });
   it('설정 › 로그 묶음에 두 화면이 있다', () => {
-    expect(settings).toMatch(/\{ k: 'recent-logins', label: '최근 로그인', C: RecentLogins, group: 'log' \}/);
-    expect(settings).toMatch(/\{ k: 'login-counts', label: '로그인 횟수', C: LoginCounts, group: 'log' \}/);
+    expect(settings).toMatch(/\{ k: 'recent-logins', label: '최근 로그인', C: RecentLogins, group: 'log', desc: '/);   // v2.916: 설명 한 줄(desc)
+    expect(settings).toMatch(/\{ k: 'login-counts', label: '로그인 횟수', C: LoginCounts, group: 'log', desc: '/);
   });
   it('문구에 백틱 · 별표 강조가 없다', () => {
     const text = [...src.matchAll(/>([^<>{}]+)</g)].map((m) => m[1]).join('\n');

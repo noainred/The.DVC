@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson, usePolling } from '../api.js';
+import { requireChanged } from './changeResult.js';   // 128회차: 409(비활성 · 인증 정지 vCenter) 사유를 빈 결과 카드로 삼키지 않는다
 import { Loading } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
 import Select from '../components/Select.jsx';
@@ -46,7 +47,7 @@ export default function GuestAccount() {
     setBusy(true); setMsg(null); setRes(null);
     try {
       const r = await postJson('/admin/guest/add-user', { vcenterId: vc, vmIds: [...sel], username: f.username, password: f.password, sudo: f.sudo, nopasswd: f.nopasswd, guestUser: f.guestUser, guestPass: f.guestPass });
-      setRes(r);
+      setRes(requireChanged(r));
     } catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(false); }
   };
 

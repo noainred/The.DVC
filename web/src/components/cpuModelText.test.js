@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { cpuModelText, cpuModelCell } from './cpuModelText.js';
+import { cpuModelText, cpuModelCell, CPU_MODEL_MAX } from './cpuModelText.js';
 
 describe('cpuModelText (v2.556)', () => {
   it('Intel 원문의 군더더기를 걷어낸다', () => {
@@ -29,4 +29,14 @@ describe('cpuModelText (v2.556)', () => {
   it('다듬어도 같은 값이면 툴팁을 중복해 붙이지 않는다', () => {
     expect(cpuModelCell('AMD EPYC 9354 32-Core').title).toBe('');
   });
+  // v3.10.12(공통 기능 점검 10회차): 정규식 전에 길이를 자른다 — 예전엔 공백 4만 자에 1.5초(O(n²)).
+  it('긴 원문은 정규식 전에 자른다(O(n²) 방지) — 앞부분 정리는 그대로', () => {
+    const long = `Intel(R) Xeon(R) Gold 6338 CPU${' '.repeat(100_000)}x`;
+    const t = performance.now();
+    const out = cpuModelText(long);
+    expect(performance.now() - t).toBeLessThan(200);   // 수정 전 판본은 약 9초(4만 자 1,490ms 실측의 제곱 비례)
+    expect(out).toBe('Intel Xeon Gold 6338');
+    expect(cpuModelCell(long).title.length).toBeLessThanOrEqual(CPU_MODEL_MAX);
+  });
 });
+

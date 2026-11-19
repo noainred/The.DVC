@@ -10,6 +10,9 @@ import {
   keyMeta, allUsageKeys, fmtInt, fmtDur, fmtBytes, FEATURE_LIMIT, avgPerView, pctText, trendOf, fmtWhen, bucketShares, perDay, usageHints, filterUsers, filterFeatures,
 } from './featureUsageText.js';
 import './featureUsage.css';
+import { backdropClose } from '../components/backdropClose.js'; // 96회차(95회차 남긴 것 ①): 창 안에서 끌다 배경에서 떼면 닫히던 것 — 누름 · 뗌 모두 배경일 때만
+import { unreadFixText } from './loadErrorText.js';   // 128회차: 읽기 오류면 보존본이 없다 — 사유별 조치 문구는 한 벌
+import { unreadMarkOf, saveLockedByUnread } from './settingsUnread.js';   // 133회차: 못 읽은 동안의 기본값 폼으로 저장하지 않는다(112회차 규약)
 
 /**
  * 설정 › 사용자 › 기능 사용 현황(v2.913 · 설계 docs/design/feature-usage · 사용자 요청 "사용자별로 어떤 기능을 사용하는지 트래킹 — UI 개선을 위해").
@@ -454,7 +457,7 @@ function UserDrawer({ user, days, ctx, overall, onClose }) {
   const mine = d ? bucketShares(d.byKey, ctx) : null;
   const all = overall ? bucketShares(overall.byKey, ctx) : null;
   return (
-    <div className="fu-overlay" role="presentation" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="fu-overlay" role="presentation" {...backdropClose(() => onClose())}>
       <aside className="fu-drawer" role="dialog" aria-label={`${user} 상세`}>
         <div className="fu-dh">
           <div style={{ minWidth: 0 }}>
@@ -541,7 +544,12 @@ function UsageSettings() {
   const st = data.status || {};
   const set = (patch) => setForm((f) => ({ ...f, ...patch }));
   const dirty = JSON.stringify(form) !== JSON.stringify(data.settings);
+  // 133회차(128회차 추정 E1 — 재현): 설정 파일을 읽기 오류로 못 읽은 동안의 settings 는 기본값(꺼짐 · 보관 180일 · 제외 1명 · 기본 고지)이다. 이 폼은 전 칸을 함께 보내므로,
+  //   그 폼에서 한 칸만 바꿔 둔 채 파일이 다시 읽힌 뒤 ‘저장’ 하면 저장돼 있던 보관 일수 · 제외 계정 · 고지 문구가 기본값으로 덮였다(서버의 409 는 읽기 오류가 이어지는
+  //   동안만 막는다 — 보관 일수가 줄면 그만큼의 기록이 지워진다). 폼은 조회마다 다시 채우므로, 폼을 채운 조회가 읽기 오류였으면 저장을 잠그고 ‘다시 확인’ 으로 다시 채운다.
+  const saveLocked = saveLockedByUnread(unreadMarkOf(data));
   const save = async () => {
+    if (saveLocked) return;
     setSaving(true); setMsg('');
     try {
       const r = await putJson('/admin/usage/settings', { enabled: form.enabled, idleMin: Number(form.idleMin), keepDays: Number(form.keepDays), excluded: form.excluded, noticeEnabled: form.noticeEnabled, notice: form.notice || null });
@@ -570,7 +578,7 @@ function UsageSettings() {
     <div className="fu-sgrid">
       <div className="card fu-panel">
         <div className="fu-ph"><b>수집</b><span className="muted">저장은 설정 소유자 · 감사 로그에 무엇이 어떻게 바뀌었는지 남습니다</span></div>
-        {data.loadError && <div className="fu-band crit">설정 파일을 읽지 못했습니다({data.loadError.reason}) — 지금은 꺼짐으로 동작합니다. 손상본은 .corrupt.&lt;시각&gt; 으로 보존했습니다. 저장하면 이 값으로 다시 시작합니다.</div>}
+        {data.loadError && <div className="fu-band crit">설정 파일을 읽지 못했습니다({data.loadError.reason}) — 지금은 꺼짐으로 동작합니다. {unreadFixText(data.loadError, { corrupt: '손상본은 .corrupt.<시각> 으로 보존했습니다. 저장하면 이 값으로 다시 시작합니다.' })}{saveLocked && <> 아래 값은 저장된 설정이 아니라 기본값이라 다시 읽힐 때까지 ‘저장’ 을 잠급니다. <button type="button" className="btn" onClick={() => setSeq((n) => n + 1)}>다시 확인</button></>}</div>}
         <div className="fu-row">
           <div className="l">기능 사용 기록<small>끄면 그 순간부터 신호를 받지 않습니다. 켜고 끈 시각과 계정을 남깁니다.</small></div>
           <div className="c">
@@ -603,7 +611,7 @@ function UsageSettings() {
               {form.excluded.map((x) => (
                 <span key={x} className="fu-chipx">{x}<button type="button" aria-label={`${x} 제외 해제`} onClick={() => set({ excluded: form.excluded.filter((y) => y !== x) })}>×</button></span>
               ))}
-              <input className="input fu-exin" placeholder="계정 추가 후 Enter" aria-label="제외할 계정" value={exIn} onChange={(e) => setExIn(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addEx(); } }} />
+              <input className="input fu-exin" placeholder="계정 추가 후 Enter" aria-label="제외할 계정" value={exIn} onChange={(e) => setExIn(e.target.value)} onKeyDown={(e) => { if (e.nativeEvent?.isComposing || e.keyCode === 229) return; if (e.key === 'Enter') { e.preventDefault(); addEx(); } }} />
               <button type="button" className="btn btn-sm" onClick={addEx}>추가</button>
             </div>
             <div className="note">데모 계정은 기본으로 제외되어 있습니다. 제외를 풀어도 지난 기록은 생기지 않습니다(최대 {data.limits.excluded}개).</div>
@@ -625,7 +633,7 @@ function UsageSettings() {
           <span className="muted">{data.settings.updatedAt ? `마지막 저장 ${fmtWhen(data.settings.updatedAt)} · ${data.settings.updatedBy || '—'}` : '아직 저장한 적이 없습니다(기본값)'}</span>
           {msg && <span className={msg.startsWith('저장했습니다') ? 'fu-ok' : 'fu-bad'}>{msg}</span>}
           <button type="button" className="btn" disabled={!dirty || saving} onClick={() => setForm(data.settings)}>되돌리기</button>
-          <button type="button" className="btn primary" disabled={!dirty || saving} onClick={save}>{saving ? '저장 중…' : '저장'}</button>
+          <button type="button" className="btn primary" disabled={!dirty || saving || saveLocked} onClick={save}>{saving ? '저장 중…' : '저장'}</button>
         </div>
       </div>
 

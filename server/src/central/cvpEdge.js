@@ -18,7 +18,7 @@ import { numOrNull } from '../util/numOrNull.js';
 import { capStr } from '../util/capStr.js';
 import { setCvpCollectBaseResolver, ackCvpCollect } from '../cvp/collectRequests.js';
 import { CANDIDATES } from '../cvp/client.js';
-import { DEVICE_MAX, PORT_MAX, PEER_MAX, PART_MAX, PART_STATES, PSU_W_MAX } from '../cvp/parse.js';
+import { DEVICE_MAX, PORT_MAX, PEER_MAX, PART_MAX, PART_STATES, PSU_W_MAX, FDB_MAX, LLDP_MAX } from '../cvp/parse.js';
 import { cmpVersion } from '../util/cmpVersion.js'; // v2.613 CONTRACT2613-04: 엣지 버전 게이트
 
 const FILE = path.join(config.configDir, 'central-agent-cvp.json');
@@ -122,8 +122,16 @@ function load() {
 
 setCvpCollectBaseResolver((id) => {
   // v2.631 A6-2631-01: 기준선은 **엣지 시계 원본**(edgeCollectedAt) — ack 와 같은 시계여야 한다(v2.630 A4-02 의 CVP 판).
-  for (const rec of load().values()) for (const s of rec?.servers || []) if (s?.cvpId === String(id)) return numOrNull(s.edgeCollectedAt ?? s.collectedAt);
-  return null;
+  // 59회차(SAN · 스토리지 R2 와 같은 꼴): 여러 엣지가 같은 CVP 사본을 들고 있으면(위임을 옮김) **수집 시각(수신 시각으로 자른 값)이 가장 늦은 사본** —
+  //   첫 일치는 옛 엣지의 낡은 시각을 기준선으로 잡아 새 엣지의 같은 스냅샷 재전송을 '지금 수집' 완료로 지웠다.
+  let hit = null;
+  for (const rec of load().values()) {
+    for (const s of rec?.servers || []) {
+      if (s?.cvpId !== String(id)) continue;
+      if (!hit || (numOrNull(s.collectedAt) ?? 0) > (numOrNull(hit.collectedAt) ?? 0)) hit = s;
+    }
+  }
+  return hit ? numOrNull(hit.edgeCollectedAt ?? hit.collectedAt) : null;
 });
 
 const s = (v, n) => capStr(v, n);
@@ -170,7 +178,8 @@ export function cleanSamples(v, now = Date.now()) {
 
 /** CVP 상태 1건 정제(아는 필드만). */
 export function cleanStatus(x, now = Date.now()) {
-  const auth = isPlainObj(x.authStopped) ? { since: numOrNull(x.authStopped.since), at: numOrNull(x.authStopped.at), attempts: numOrNull(x.authStopped.attempts), reason: s(x.authStopped.reason, 300) } : null;
+  // 25회차 F-9: 인증 정지 시각도 수신 시각으로 자른다(같은 함수의 다른 시각처럼 tsClamp — 4회차 V-9 Veeam 과 같은 유형)
+  const auth = isPlainObj(x.authStopped) ? { since: tsClamp(x.authStopped.since, now), at: tsClamp(x.authStopped.at, now), attempts: numOrNull(x.authStopped.attempts), reason: s(x.authStopped.reason, 300) } : null;
   const seen = {};
   if (isPlainObj(x.seenFields)) for (const [k, v] of Object.entries(x.seenFields).slice(0, 32)) if (KINDS.has(k) && Array.isArray(v)) seen[k] = v.filter((y) => typeof y === 'string').slice(0, 40).map((y) => s(y, 64));
   const samples = cleanSamples(x.samples, now);
@@ -191,6 +200,10 @@ export function cleanStatus(x, now = Date.now()) {
     ...(x.partsDueUnread === true ? { partsDueUnread: true, partsNotTried: numOrNull(x.partsNotTried) } : {}), // v2.612 RECENT2612-01: 시도 못 한 대수
     ...(isPlainObj(x.pruneHeld) ? { pruneHeld: { since: tsClamp(x.pruneHeld.since, now), untilMs: numOrNull(x.pruneHeld.untilMs), had: numOrNull(x.pruneHeld.had), reason: s(x.pruneHeld.reason, 300) } } : {}),
     ...(samples ? { samples } : {}), // v2.640: 원문 표본(구버전 엣지는 없다 — 필드 자체를 생략)
+    // v2.940(C-③ 남긴 것): EndpointLocation 주기 요약 — 아는 필드만 · 수 · 멈춤 사유는 열거값만(예전에는 정제 목록에 없어 버려졌다 — 화면이 보여 줄 수 없었다).
+    ...(isPlainObj(x.endpoints) ? { endpoints: { at: tsClamp(x.endpoints.at, now), asked: numOrNull(x.endpoints.asked), ok: numOrNull(x.endpoints.ok), none: numOrNull(x.endpoints.none),
+      errors: numOrNull(x.endpoints.errors), cut: numOrNull(x.endpoints.cut), unsupported: x.endpoints.unsupported === true,
+      stopped: ['budget', 'auth', 'conn'].includes(x.endpoints.stopped) ? x.endpoints.stopped : null } } : {}),
     ...(Array.isArray(x.probes) ? { probes: cleanProbes(x.probes, now) } : {}), // v2.641: 경로 탐색 표본
     ...(isPlainObj(x.events) ? { events: {
       bySeverity: Object.fromEntries([...SEVS].map((k) => [k, numOrNull(x.events.bySeverity?.[k])])), total: numOrNull(x.events.total),
@@ -224,6 +237,7 @@ export function cleanDevice(x, now = Date.now(), cnt = { ports: 0 }) {
       duplex: sOrNull(p.duplex, 48), fwdModel: sOrNull(p.fwdModel, 48), mac: sOrNull(p.mac, 32), mtu: numOrNull(p.mtu), operRaw: sOrNull(p.operRaw, 48),
       oper: LINK.has(p.oper) ? p.oper : 'unknown', admin: LINK.has(p.admin) ? p.admin : 'unknown', vlan: s(p.vlan, 32), lag: s(p.lag, 64),
       inBps: numOrNull(p.inBps), outBps: numOrNull(p.outBps), inUtil: numOrNull(p.inUtil), outUtil: numOrNull(p.outUtil), inErr: numOrNull(p.inErr), outErr: numOrNull(p.outErr),
+      inDrop: numOrNull(p.inDrop), outDrop: numOrNull(p.outDrop),   // v2.922(3a): 포트 드롭(추정 경로 — 못 읽으면 null)
     })),
   };
   if (Array.isArray(x.ports) && x.ports.length > PORT_MAX) cnt.ports += x.ports.length - PORT_MAX;
@@ -319,7 +333,11 @@ export function sanitizeCvpBody(body, owned, now = Date.now()) {
     if (!own(r[0])) { dropped.notOwned++; continue; }
     const key = s(r[1], 128); const port = s(r[2], 64); const ts = tsClamp(r[3], now);
     if (!key || !port || ts == null) { dropped.badRow++; continue; }
-    rows.push([r[0], key, port, ts, numOrNull(r[4]), numOrNull(r[5]), numOrNull(r[6]), numOrNull(r[7]), numOrNull(r[8]), numOrNull(r[9])]);
+    // v2.922(반증 D3): 새 엣지 행은 12칸(뒤 두 칸 = 포트 드롭 in/out — 추정 경로)이다. 정제가 10칸으로 자르면 드롭이 중앙에서 영원히 비었다.
+    //   구 엣지 10칸 행은 10칸 그대로 둔다 — 적재가 '드롭을 보내지 않은 행' 과 '드롭을 못 읽은(null) 행' 을 구분한다(db.importSamples).
+    const row = [r[0], key, port, ts, numOrNull(r[4]), numOrNull(r[5]), numOrNull(r[6]), numOrNull(r[7]), numOrNull(r[8]), numOrNull(r[9])];
+    if (r.length >= 12) row.push(numOrNull(r[10]), numOrNull(r[11]));
+    rows.push(row);
   }
   const touch = [];
   for (const t of Array.isArray(b.touch) ? b.touch.slice(0, 20_000) : []) {
@@ -359,7 +377,55 @@ export function sanitizeCvpBody(body, owned, now = Date.now()) {
       eventsByCvp.set(cvpId, out);
     }
   }
-  return { servers, devicesByCvp, rows, touch, deviceKeys, devicesUnavailable: b.devicesUnavailable === true, dropped, devSamples, eventsByCvp };
+  // v2.924(SAN·CVP 설계 B-②): LLDP 이웃 · MAC 테이블 — 소유한 CVP 만 · 장비 키·시각 · MAC 12자 16진 · VLAN 0..4095(모르면 null) · 문자열 상한 · 개수 상한.
+  //   fdb/lldp 가 배열이 아니면 그 쪽은 싣지 않는다(undefined — 중앙 저장소가 이전 목록을 그대로 둔다).
+  const l2ByCvp = new Map();
+  let nL2 = 0;
+  for (const x of Array.isArray(b.l2) ? b.l2 : []) {
+    if (!isPlainObj(x)) { dropped.notObject++; continue; }
+    if (!own(x.cvpId)) { dropped.notOwned++; continue; }
+    if (nL2 >= DEVICE_MAX) { dropped.overCount++; continue; }
+    const r = cleanL2(x, now);
+    if (!r) { dropped.badRow++; continue; }
+    if (!l2ByCvp.has(x.cvpId)) l2ByCvp.set(x.cvpId, []);
+    l2ByCvp.get(x.cvpId).push(r);
+    nL2++;
+  }
+  // v2.935(SAN·CVP 설계 C-③): EndpointLocation 결과 — 소유한 CVP 만 · MAC 12자 16진 · 상태 4종 · 위치 16개 · 문자열 상한 · VLAN 범위 · 시각은 수신 시각으로 자른다.
+  const epByCvp = new Map();
+  let nEp = 0;
+  for (const x of Array.isArray(b.ep) ? b.ep : []) {
+    if (!isPlainObj(x)) { dropped.notObject++; continue; }
+    if (!own(x.cvpId)) { dropped.notOwned++; continue; }
+    if (nEp >= EP_PUSH_MAX) { dropped.overCount++; continue; }
+    const r = cleanEp(x, now);
+    if (!r) { dropped.badRow++; continue; }
+    if (!epByCvp.has(x.cvpId)) epByCvp.set(x.cvpId, []);
+    epByCvp.get(x.cvpId).push(r);
+    nEp++;
+  }
+  return { servers, devicesByCvp, rows, touch, deviceKeys, devicesUnavailable: b.devicesUnavailable === true, dropped, devSamples, eventsByCvp, l2ByCvp, epByCvp };
+}
+
+/** v2.935(C-③): 한 번에 받는 EndpointLocation 결과 상한(엣지 push 한 번 — 엣지도 CVP 마다 500 개씩 보낸다). */
+export const EP_PUSH_MAX = 4000;
+const EP_STATUS = new Set(['ok', 'none', 'error', 'unsupported']);
+const epStr = (v, n) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, n) : null);
+/** EndpointLocation 결과 하나 정제(순수) — 모양이 아니면 null. */
+export function cleanEp(x, now = Date.now()) {
+  if (!isPlainObj(x)) return null;
+  const mac = typeof x.mac === 'string' ? x.mac.toLowerCase() : '';
+  if (!/^[0-9a-f]{12}$/.test(mac) || !EP_STATUS.has(x.status)) return null;
+  const at0 = Number(x.at);
+  if (!Number.isFinite(at0) || at0 <= 0) return null;
+  const locations = x.status === 'ok' && Array.isArray(x.locations) ? x.locations.slice(0, 16).filter(isPlainObj).map((l) => ({
+    device: epStr(l.device, 64), port: epStr(l.port, 64), vlan: Number.isInteger(l.vlan) && l.vlan >= 0 && l.vlan <= 4095 ? l.vlan : null,
+    learnedAt: epStr(l.learnedAt, 40), macType: epStr(l.macType, 40), likelihood: epStr(l.likelihood, 40),
+  })).filter((l) => l.device && l.port) : [];
+  // 엣지 시각은 수신 시각으로 자르고 **원본은 따로**(v2.940 — C-③ 반증 L-10 · 루트 CLAUDE.md '엣지가 보낸 것은 정제한다'): 잘렸을 때만 edgeAt 을 싣는다.
+  const at = Math.min(Math.trunc(at0), now);
+  // 반증 L-1: 상태 · 수집 시각과 같은 허용 오차(5초) — 그 안이면 전송 지연과 구분할 수 없어 표지를 달지 않는다(잡음 '+0초' 금지).
+  return { mac, at, ...(Math.trunc(at0) - now > EDGE_CLOCK_AHEAD_TOLERANCE_MS ? { edgeAt: Math.trunc(at0) } : {}), status: x.status, ...(epStr(x.reason, 200) ? { reason: epStr(x.reason, 200) } : {}), locations };
 }
 
 /**
@@ -410,3 +476,49 @@ export function edgeCvpSummary() {
   });
 }
 export function _resetForTest() { _map = null; }
+
+/** v2.924(B-②): L2 레코드 1건 정제. 반환 null = 버림. fdb 행 [mac, vlan, port] · lldp 행 [port, idx, sysName, portId, portDesc, chassisId]. */
+const MAC12 = /^[0-9a-f]{12}$/;
+export function cleanL2(x, now = Date.now()) {
+  if (!isPlainObj(x)) return null;
+  const key = s(x.key, 128);
+  if (!key || key === '__proto__' || key === 'constructor' || key === 'prototype') return null;
+  const ts = tsClamp(x.ts, now);
+  if (ts == null) return null;
+  const out = { key, ts };
+  // v2.924(반증 M-3): 종류마다 읽은 시각(엣지 시각은 수신 시각으로 자른다) — 없으면 ts.
+  const fa = tsClamp(x.fdbAt, now); const la = tsClamp(x.lldpAt, now);
+  if (fa != null) out.fdbAt = fa;
+  if (la != null) out.lldpAt = la;
+  if (Array.isArray(x.fdb)) {
+    const rows = [];
+    for (const e of x.fdb) {
+      if (!Array.isArray(e) || e.length < 3) continue;
+      const mac = typeof e[0] === 'string' ? e[0].toLowerCase() : '';
+      const port = s(e[2], 64);
+      if (!MAC12.test(mac) || !port) continue;
+      const v = numOrNull(e[1]);
+      rows.push([mac, v != null && v >= 0 && v <= 4095 ? Math.trunc(v) : null, port]);
+      if (rows.length >= FDB_MAX) break;
+    }
+    out.fdb = rows;
+    const m = isPlainObj(x.fdbMeta) ? x.fdbMeta : {};
+    out.fdbMeta = { truncated: Math.max(0, numOrNull(m.truncated) ?? 0),
+      portsOverCap: Array.isArray(m.portsOverCap) ? m.portsOverCap.filter(isPlainObj).slice(0, 64).map((o) => ({ port: s(o.port, 64), macs: numOrNull(o.macs) })) : [] };
+  }
+  if (Array.isArray(x.lldp)) {
+    const rows = [];
+    for (const e of x.lldp) {
+      if (!Array.isArray(e) || e.length < 2) continue;
+      const port = s(e[0], 64);
+      if (!port) continue;
+      rows.push([port, s(e[1], 64) || '0', s(e[2], 255), s(e[3], 128), s(e[4], 200), s(e[5], 128)]);
+      if (rows.length >= LLDP_MAX) break;
+    }
+    out.lldp = rows;
+    out.lldpTruncated = Math.max(0, numOrNull(x.lldpTruncated) ?? 0);
+  }
+  if (out.fdb === undefined && out.lldp === undefined) return null;
+  return out;
+}
+

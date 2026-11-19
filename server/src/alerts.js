@@ -10,11 +10,11 @@
  * re-notifies after cooldown while still active, and notes resolution.
  */
 
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from './config.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from './util/atomicWrite.js';
-import { store, SITE_STALE_MS } from './store.js';
+import { makeJsonFileReader, readJsonFile } from './util/jsonFileRead.js';   // 103회차 F12: 읽기 오류 ≠ 손상
+import { store, SITE_STALE_MS, hostCapacityKnown } from './store.js';
 import { logAudit } from './audit.js';
 import { resilientFetch } from './util/resilientFetch.js';
 import { ssrfBlockReasonResolved } from './collector/registry.js';
@@ -25,7 +25,14 @@ import { numOrNull } from './util/numOrNull.js';   // v2.506: DNS 리바인딩(T
 import { sendPortalMail } from './mail/service.js'; // 공용 메일 발송(v2.454)
 import { headerSafeText } from './util/smtp.js'; // v2.743(INJPKG-03): 메일 제목 제어문자 정리(buildMime 과 같은 판정)
 import { registerExitFlush } from './util/exitFlush.js';
-import { unreadVcenterReasons } from './metrics/unreadVcenters.js'; // v2.768(점검 R3-C5-03): '지금 값 아님' 판정 한 벌
+import { unreadVcenterReasons } from './metrics/unreadVcenters.js';
+import { getScanResults, macIpCount, getAgentReports, listScanAgents, loadScanSettings, LOCAL } from './ipam/scanStore.js';   // v3.1.0: IP 충돌 의심 규칙(스캔이 본 ARP MAC)
+import { findConflicts } from './ipam/conflict.js';
+import { duplicateAlerts, subnetFullAlerts, scanStaleAlerts, DUP_MANY_KEY, dupBundleEndTitle, dupBundledExpiredTitle, DUP_BUNDLED_EXPIRED_DETAIL } from './ipam/instantAlerts.js'; // v3.7.0 바로 알림 3가지 · 결정 62 묶음 문구
+import { peekIpamRows, listSubnets } from './ipam/ledger.js';
+import { withSubnetNotes } from './ipam/subnetNotes.js';
+import { setConflictSuspects } from './ipam/conflictState.js';
+import { buildGpuAllocTree } from './gpu/allocTree.js';   // v2.939 개선 6: 법인 GPU 할당률 규칙(계층과 같은 합계) // v2.768(점검 R3-C5-03): '지금 값 아님' 판정 한 벌
 // v2.604(감사 SEC2604-03): 채널 웹훅 URL 은 그 자체가 비밀(경로에 토큰이 들어 있다)이라 암호화 모드에서 봉인한다.
 // 메모리는 평문이다 — 화면·연결 테스트·발송은 예전과 같다. 평문 파일(구버전·평문 모드)은 그대로 읽힌다.
 import { openSecretsDeep, sealSecretsDeep, FILE_EXTRA_SECRET_FIELDS } from './security/secretVault.js';
@@ -49,7 +56,22 @@ const DEFAULTS = {
     datastorePct: { enabled: true, threshold: 90 },
     ramOvercommitPct: { enabled: false, threshold: 120 },
     vcpuPerCore: { enabled: false, threshold: 5 },
+    // v2.939 개선 6(사용자 결정 '기본 끔 · 켜면 90%'): 법인(vCenter) GPU 할당률 ≥ 임계. 예비가 음수(할당 > 용량)면 위험.
+    gpuAllocPct: { enabled: false, threshold: 90 },
+    // v3.1.0(설계 docs/design/ipam-alerts-mac-dns ① · 컨펌 '기본값 — 충돌 의심만 켬'): IP 스캔이 본 변화. 충돌 의심은 상태형(이 엔진의 평가 —
+    //   threshold = 연속 스캔 수), 나머지 넷은 사건형(ipam/changeNotify.js 가 스캔 한 번 · 종류 하나에 한 건으로 묶어 보낸다 — ipamNewIp.threshold = 묶음 상한).
+    ipamConflict: { enabled: true, threshold: 2 },
+    ipamMacChange: { enabled: false },
+    ipamNewIp: { enabled: false, threshold: 50 },
+    ipamReservedUp: { enabled: false },
+    ipamRename: { enabled: false },
+    // v3.7.0(재설계 묶음 라 — 바로 알림 3가지 · 사용자 결정 '함께 넣는다'): 상태형(처음 넘은 때 한 번 · 회복 한 번). 기본 끔 — 켜면 아래 임계.
+    ipamDuplicate: { enabled: false },
+    ipamSubnetFull: { enabled: false, threshold: 90 },   // 대역 점유율(%) — 대장 + 예약 + DHCP
+    ipamScanStale: { enabled: false, threshold: 3 },     // 주기의 몇 배
   },
+  // v3.1.0: IP 변화 알림을 보내지 않을(기록만 할) 스캔 에이전트 — 대역을 새로 넣는 동안 등.
+  ipamQuietAgents: [],
   cooldownMin: 60,
   intervalSec: 60,
   // 채널 무관 전역 중복 억제 창(분) — 엔진의 firing/cooldown을 거치지 않고 notify()를 직접
@@ -67,7 +89,24 @@ export const RULE_THRESHOLD_RANGE = Object.freeze({
   ramOvercommitPct: { min: 1, max: 10000 },
   vcpuPerCore: { min: 0.1, max: 1000, float: true },
   massVmPowerOff: { min: 1, max: 100000 },
+  gpuAllocPct: { min: 1, max: 100 },
+  ipamConflict: { min: 1, max: 10 },   // 연속 스캔 수(같은 MAC 을 이어 본 횟수 — scanStore arp.n)
+  ipamNewIp: { min: 1, max: 1000 },    // 묶음 상한 — 넘으면 요약 한 건
+  ipamSubnetFull: { min: 50, max: 100 }, // v3.7.0 대역 점유율(%)
+  ipamScanStale: { min: 2, max: 48 },    // v3.7.0 주기의 몇 배
 });
+/** v3.1.0: 알리지 않을 에이전트 목록 정제 — 글자만 · 64자 · 200개 · 중복 제거(대소문자 무시). */
+export function cleanQuietAgents(v) {
+  const out = []; const seen = new Set();
+  for (const x of Array.isArray(v) ? v.slice(0, 500) : []) {
+    if (typeof x !== 'string') continue;
+    const t = x.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 64);
+    if (!t || seen.has(t.toLowerCase())) continue;
+    seen.add(t.toLowerCase()); out.push(t);
+    if (out.length >= 200) break;
+  }
+  return out;
+}
 
 /** 임계치 1개 정규화(순수). 미지정이면 prev 를 돌려준다. */
 export function normalizeRuleThreshold(rule, v, prev) {
@@ -97,12 +136,33 @@ export function mergeRules(curRules = {}, bodyRules = {}) {
 }
 
 let cache = null;
+/*
+ * 103회차 F12(재현 — EISDIR): 예전 catch 하나는 **읽기 오류**도 손상으로 보고 원본(채널 · 봉인된 웹훅 주소 · 규칙 임계)을 `.corrupt.*` 로 옮긴 뒤 기본값을 캐시했다 —
+ *   권한을 고쳐도 재시작 전까지 알림이 기본값(채널 꺼짐)으로 돌았고, 다음 저장이 그 기본값 위에 웹훅 주소 없는 파일을 썼다.
+ *   읽기 단계는 공용 읽기(util/jsonFileRead.js — 30초 간격 재읽기): 읽기 오류는 원본을 두고 · 기본값을 **캐시하지 않고** · 저장을 409 로 거절한다.
+ *   parse · 복호 실패는 예전과 같다(보존본 + 기본값).
+ */
+const _cfgReader = makeJsonFileReader(() => FILE, { parse: (t) => t, preserve: false, tag: 'alerts' });
+let _cfgReadErr = null;   // { at, code }
+/** 103회차 F12: 알림 설정 읽기 오류 중의 쓰기 거절(라우트 409) 또는 null. */
+export function alertConfigWriteRefusal() {
+  loadAlertConfig();
+  if (!_cfgReadErr) return null;
+  return { ok: false, status: 409, code: 'settings-unreadable', readError: true,
+    reason: `알림 설정 파일(${path.basename(FILE)})을 읽지 못한 상태라 저장하지 않았습니다 — 읽기 오류(${_cfgReadErr.code})이고 원본(웹훅 주소 포함)은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 저장이 다시 열립니다).` };
+}
 export function loadAlertConfig() {
   if (cache) return cache;
+  const rr = _cfgReader.read();
+  if (rr.kind === 'read-error') {
+    if (!_cfgReadErr) _cfgReadErr = { at: Date.now(), code: String(rr.error?.code || 'read-error').slice(0, 32) };
+    return structuredClone(DEFAULTS);   // 캐시하지 않는다 — 저장은 saveAlertConfig 가 거절한다
+  }
+  _cfgReadErr = null;
   cache = structuredClone(DEFAULTS);
   try {
-    if (fs.existsSync(FILE)) {
-      const s = openSecretsDeep(JSON.parse(fs.readFileSync(FILE, 'utf8')), URL_SECRET_FIELDS);
+    if (rr.kind === 'ok') {
+      const s = openSecretsDeep(JSON.parse(rr.value), URL_SECRET_FIELDS);
       cache = {
         channels: {
           slack: { ...DEFAULTS.channels.slack, ...s.channels?.slack },
@@ -117,12 +177,15 @@ export function loadAlertConfig() {
         cooldownMin: clampSetting(s.cooldownMin, { min: 1, max: 10_080, def: DEFAULTS.cooldownMin }),
         intervalSec: clampSetting(s.intervalSec, { min: 15, max: ALERT_INTERVAL_MAX_SEC, def: DEFAULTS.intervalSec }),
         suppressWindowMin: clampSetting(s.suppressWindowMin, { min: 0, max: 10_080, def: DEFAULTS.suppressWindowMin }),
+        ipamQuietAgents: cleanQuietAgents(s.ipamQuietAgents),   // v3.1.0
       };
     }
   } catch (e) { preserveCorrupt(FILE, e.message); /* defaults */ }
   return cache;
 }
 export function saveAlertConfig(body = {}) {
+  const ref = alertConfigWriteRefusal();   // 103회차 F12
+  if (ref) throw Object.assign(new Error(ref.reason), { status: 409, code: ref.code, readError: true });
   const cur = loadAlertConfig();
   const next = {
     channels: {
@@ -138,6 +201,8 @@ export function saveAlertConfig(body = {}) {
     // v2.607 WEB2607-04: 빈 칸('')은 '미지정' 이다 — 예전 `Number('') || 0` 은 빈 칸 저장을 0(= 억제 끔)으로 바꿨다.
     //   명시적 0 만 값이다(v2.596 규약: numOrNull(v) ?? cur).
     suppressWindowMin: Math.max(0, numOrNull(body.suppressWindowMin) ?? (cur.suppressWindowMin ?? 5)),
+    // v3.1.0: 본문에 없으면 이전 값 유지(다른 화면의 저장이 지우지 않게)
+    ipamQuietAgents: Array.isArray(body.ipamQuietAgents) ? cleanQuietAgents(body.ipamQuietAgents) : cleanQuietAgents(cur.ipamQuietAgents),
   };
   atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep(next, undefined, URL_SECRET_FIELDS), null, 2), { mode: 0o600 });
   cache = next; // 메모리는 평문(sealSecretsDeep 는 복제본을 봉인한다)
@@ -160,7 +225,7 @@ export function unreadVcenterIds(snap) {
   for (const v of snap?.vcenters || []) if (v && v.id != null && UNREAD_VC_EXTRA_STATUS.has(v.status)) out.add(String(v.id));
   return out;
 }
-const UNREAD_VC_KEY_RE = /^(alarm|host|ds):/;
+const UNREAD_VC_KEY_RE = /^(alarm|host|ds|gpualloc):/;   // 45회차 F1: 수집 꺼짐 · 장기 장애로 인벤토리가 비면 gpualloc 도 노드가 사라져 '해소' 로 기록됐다
 
 /*
  * v2.769(점검 R4-D1-5): '엣지 보고 끊김'(vcstale:) 판정 기준 시각 = max(receivedAt, 프로세스 기동 시각).
@@ -184,6 +249,14 @@ export function evaluate(snap, cfg = loadAlertConfig()) {
   // 판정 보류 키(값을 못 읽음) — 발생 중이면 해소하지 않는다. 배열 원소가 아니라 숨은 속성이다(기존 소비처·비교 무변경).
   const held = new Set();
   Object.defineProperty(out, 'held', { value: held, enumerable: false });
+  // v3.8.1: 키 앞부분으로 보류(이번 회차에 그 종류 전체를 판정하지 못했다 — 어떤 키가 발생 중인지 평가 쪽은 모른다).
+  const heldPrefixes = new Set();
+  Object.defineProperty(out, 'heldPrefixes', { value: heldPrefixes, enumerable: false });
+  const heldPrefixExempt = new Set();   // 130회차: 접두 보류에서 빼는 더 긴 접두(읽힌 vCenter 의 것 — 아래 오버커밋 절)
+  Object.defineProperty(out, 'heldPrefixExempt', { value: heldPrefixExempt, enumerable: false });
+  // 결정(56~75 남긴 것) 62: 중복 IP 묶음 회차에 보류한 IP 별 키(held 의 부분집합) — 보류 시한을 넘기면 '해소' 가 아니라 '묶음으로 대체' 로 정리 기록한다.
+  const bundled = new Set();
+  Object.defineProperty(out, 'bundled', { value: bundled, enumerable: false });
   // v2.607 LEFT2607-04: REST 폴백으로 수집된 vCenter 는 경보를 **조회하지 않았다**(restClient.js alarmsUnknown:true —
   //   alarms:[] 는 '경보 0건' 이 아니다). 예전엔 그 vCenter 의 발생 중 위험 알람이 목록에서 빠졌다는 이유로 '해소' 알림이
   //   나갔다. 그 vCenter 의 경보 해소 판정을 보류한다(tick 이 st.alert.vcenterId 로 본다 — 키에는 vCenter 축이 없다).
@@ -198,7 +271,10 @@ export function evaluate(snap, cfg = loadAlertConfig()) {
   //   아니다). 이미 발생 중인 것은 목록에서 빠지지만 위 unreadVc 로 해소가 보류된다(HELD_MAX_MS 규칙 그대로) — 재발송도 없다.
   const reasons = unreadVcenterReasons(snap);
   const staleVc = new Set([...reasons].filter(([, r]) => r === 'stale').map(([id]) => id));
-  const fresh = (x) => !staleVc.has(String(x?.vcenterId ?? ''));
+  // 126회차(재현): v2.768 은 신규 억제를 stale(낡은 위임)에만 걸었다 — **점검중**(직전 캐시를 기한 없이 서빙) · **수집 실패 이월**(LASTGOOD — 최대 6시간)
+  //   vCenter 의 마지막 값(DS 92% · 끊긴 호스트 · 위험 경보)은 목록에 계속 실려 쿨다운마다 '지금 발생 중' 으로 재발송됐다(점검중은 끝없이).
+  //   공용 판정의 세 사유 전부를 '지금 값이 아니다' 로 본다 — 이미 발생 중인 것은 unreadVc 로 해소가 보류되고(HELD_MAX_MS) 다시 읽히면 그때 판정한다.
+  const fresh = (x) => !reasons.has(String(x?.vcenterId ?? ''));
   // v2.720(감사 B1-01): 상한으로 잘린 꼬리는 '발생 중인데 이번 목록에 안 실린 것' 이다 — 순서만 바뀌어 101번째로 밀린
   //   알림을 해소로 기록하고 다시 들어오면 새 알림으로 재발송하던 것. 잘린 항목의 키를 판정 보류로 둔다.
   const holdTail = (list, cap, keyOf) => { for (const x of list.slice(cap)) { const k = keyOf(x); if (k) held.add(k); } return list.slice(0, cap); };
@@ -239,24 +315,130 @@ export function evaluate(snap, cfg = loadAlertConfig()) {
       out.push({ key: `ds:${d.id}`, vcenterId: d.vcenterId || '', severity: d.usagePct >= 95 ? 'critical' : 'warning', title: `데이터스토어 용량 ${d.usagePct}%: ${d.name}`, detail: `${d.vcenterId} · 여유 ${d.freeGB}GB` });
     }
   }
+  // v2.939 개선 6: 법인 GPU 할당률(GPU 할당율 화면 · 엑셀과 같은 계층 합계 — gpu/allocTree.js). 모르는 값이 섞여 할당률이 없거나
+  //   지금 값을 읽지 못한 법인(unreadVc · 낡은 위임 보고)은 판정 보류(held — 해소로 기록하지 않는다). 계층이 상한으로 잘렸으면 어느 법인이
+  //   덜 셌는지 몰라 전부 보류한다(새로 내지도 해소하지도 않는다).
+  if (R.gpuAllocPct?.enabled) {
+    const th = Number(R.gpuAllocPct.threshold) || 90;
+    const tree = buildGpuAllocTree(snap);
+    if (tree.truncated) heldPrefixes.add('gpualloc:');   // 45회차 F2: 주석대로 '전부' — GPU 호스트가 통째로 잘린 법인은 루프에 없어 해소로 나갔다
+    for (const vc of tree.vcenters) {
+      const key = `gpualloc:${vc.id}`;
+      const t = vc.totals;
+      if (tree.truncated || unreadVc.has(String(vc.id)) || staleVc.has(String(vc.id)) || numOrNull(t.allocPct) == null) { held.add(key); continue; }
+      if (t.allocPct < th) continue;
+      const over = numOrNull(t.spareGB) != null && t.spareGB < 0;
+      out.push({ key, vcenterId: vc.id, severity: over ? 'critical' : 'warning', title: `GPU 할당률 ${t.allocPct}%: ${vc.name || vc.id}`,
+        detail: `${vc.id} · 할당 ${t.allocGB} / 전체 ${t.capGB} GB · 예비 ${t.spareGB} GB${over ? ' — 할당이 용량을 넘음(확인 필요)' : ''} · GPU ${t.gpus}장 · 호스트 ${t.hosts}대` });
+    }
+    // 44회차 R3(반증 — 재현): GPU 호스트가 전부 끊긴 법인은 계층 노드가 없다 — 위 루프에 없어 발생 중이던 알림이 '해소' 로 나갔다. 일부만 끊긴 법인과 같이 보류.
+    for (const id of Object.keys(tree.hostsDownByVc || {})) held.add(`gpualloc:${id}`);
+  }
+  // v3.1.0(설계 ipam-alerts-mac-dns ③): IP 충돌 의심 — VM 의 IP 에 그 VM 의 NIC 이 아닌 MAC 이 연속 N회 응답(판정 ipam/conflict.js 하나).
+  //   모르는 것(NIC MAC 미수집 · 여러 VM · 지난 스캔에 못 봄 · MAC 이 지워짐) · 지금 값을 못 읽은 vCenter 의 VM 은 판정 보류(held — 해소로 기록하지 않는다).
+  //   판정은 규칙을 꺼도 한다(대장 · 추천 카드 표시 — ipam/conflictState.js). 알림만 규칙을 따른다.
+  {
+    const results = getScanResults();
+    const scanOf = (ip) => (Object.prototype.hasOwnProperty.call(results, ip) ? results[ip] : null);
+    const reps = getAgentReports() || {};
+    const lastScanOf = (a) => { const k = a || '__local__'; return Object.prototype.hasOwnProperty.call(reps, k) ? numOrNull(reps[k]?.at) : null; };
+    const { suspects, unknown } = findConflicts(snap, scanOf, { streak: R.ipamConflict?.threshold, macIpCount, lastScanOf });
+    setConflictSuspects(suspects);
+    if (R.ipamConflict?.enabled) {
+      for (const u of unknown) held.add(`ipconflict:${u.ip}`);
+      for (const c of suspects) {
+        const key = `ipconflict:${c.ip}`;
+        if (unreadVc.has(String(c.vm.vcenterId)) || staleVc.has(String(c.vm.vcenterId))) { held.add(key); continue; }
+        const scanner = !c.agent || c.agent === '__local__' ? '이 포탈' : c.agent;
+        out.push({ key, vcenterId: c.vm.vcenterId, scanAgent: c.agent || '__local__', severity: 'critical', title: `IP 충돌 의심: ${c.ip} (${c.vm.name || c.vm.id})`,
+          detail: `${c.vm.vcenterId} · VM 의 NIC MAC ${c.vmMacs.join(', ')} 이 아닌 ${c.mac}${c.vendor ? `(${c.vendor})` : ''} 이 연속 ${c.seen}회 응답 — 스캐너(${scanner})의 이웃 표`
+            + `${c.otherVm ? ` · 그 MAC 은 다른 VM(${c.otherVm.name || c.otherVm.id}) 의 NIC 입니다` : ''} · 같은 IP 를 두 장비가 쓰거나 VM 의 IP 보고가 오래됐을 수 있습니다` });
+      }
+    }
+  }
+  // v3.7.0(재설계 묶음 라): IP 관리 바로 알림 — 중복 IP · 대역 가득 참 · 스캔 보고 끊김(판정 ipam/instantAlerts.js). 대장은 store 가 30초마다 만드는
+  //   캐시(같은 세대면 그대로)를 읽는다 — 규칙을 켠 경우에만. 실패는 격리한다(다른 규칙 평가를 막지 않는다).
+  // v3.8.1: 원장은 **캐시에 있을 때만** 읽는다(peekIpamRows) — 없으면(새 스냅샷 직후 원장 동기화가 아직 안 끝남) 그 회차는 판정을 보류한다
+  //   (발생 중인 중복 · 가득 참은 해소로 기록하지 않는다 — heldPrefixes). 예전에는 그 자리에서 원장을 동기로 다시 만들어 평가 주기마다 이벤트 루프를 막을 수 있었다.
+  //   캐시가 있으면 listSubnets 도 같은 원장 캐시를 쓴다(대역 목록 기억 — 다시 만들지 않는다).
+  if (R.ipamDuplicate?.enabled || R.ipamSubnetFull?.enabled) {
+    try {
+      const led = peekIpamRows(snap, '', null);
+      if (!led) {
+        if (R.ipamDuplicate?.enabled) heldPrefixes.add('ipdup:');
+        if (R.ipamSubnetFull?.enabled) heldPrefixes.add('ipfull:');
+      } else {
+        if (R.ipamDuplicate?.enabled) {
+          const d = duplicateAlerts(led.rows, { unreadVc: new Set([...unreadVc, ...staleVc]) });
+          for (const k of d.held) held.add(k);
+          for (const k of d.bundled || []) bundled.add(k);
+          for (const x of d.alerts.slice(0, 300)) out.push(x);
+        }
+        // 62회차(60회차 F3 의 형제 — 재현): 상한 300 을 넘은 꼬리는 '발생 중인데 이번 목록에 안 실린 것' 이다 — slice 로 버리면 순서가 밀린
+        //   발생 중 '대역 가득 참' 이 해소로 기록 · 발송됐다(305개 중 5개). 다른 상한 목록과 같이 holdTail(판정 보류).
+        if (R.ipamSubnetFull?.enabled) for (const x of holdTail(subnetFullAlerts(withSubnetNotes(listSubnets(snap, '', null)), { threshold: R.ipamSubnetFull.threshold }), 300, (a) => a.key)) out.push(x);
+      }
+    } catch (e) {
+      // 평가 실패도 '해소' 가 아니다 — 보류한다.
+      heldPrefixes.add('ipdup:'); heldPrefixes.add('ipfull:');
+      console.warn(`[alerts] IP 관리 바로 알림 평가 실패: ${e?.message || e}`);
+    }
+  }
+  if (R.ipamScanStale?.enabled) {
+    try {
+      const agents = listScanAgents();
+      if (!agents.some((a) => a.name === LOCAL)) agents.unshift({ name: LOCAL, ...loadScanSettings(LOCAL) });
+      const st = scanStaleAlerts(agents, getAgentReports() || {}, { threshold: R.ipamScanStale.threshold, label: (a) => (a === LOCAL ? '이 포탈' : a) });
+      for (const k of st.held) held.add(k);
+      for (const x of st.alerts) out.push(x);
+    } catch (e) { console.warn(`[alerts] 스캔 보고 끊김 평가 실패: ${e?.message || e}`); }
+  }
   if (R.ramOvercommitPct?.enabled || R.vcpuPerCore?.enabled) {
     const byC = new Map();
     for (const h of snap.hosts || []) {
       const k = `${h.vcenterId} ${h.cluster || 'standalone'}`;
-      const c = byC.get(k) || { name: h.cluster || 'standalone', vc: h.vcenterId, cores: 0, memGB: 0, vcpu: 0, ramGB: 0 };
-      c.cores += h.cpuCores || 0; c.memGB += (h.memTotalMB || 0) / 1024; byC.set(k, c);
+      const c = byC.get(k) || { name: h.cluster || 'standalone', vc: h.vcenterId, cores: 0, memGB: 0, vcpu: 0, ramGB: 0, capUnknown: 0 };
+      // 2차 공통 기능 점검 9회차: 못 읽은 용량(연결 끊긴 호스트 · REST 폴백)을 0 으로 더하면 분모만 줄어 그 클러스터 VM 들의 할당은 그대로라
+      //   **오버커밋을 부풀린 거짓 알림**이 났다(CLAUDE.md '부분 합은 정상에도 장애에도 넣지 않는다'). 판정은 용량 도구(routes/api/toolsCapacity.js ·
+      //   v2.733 C2-06)와 같은 store.hostCapacityKnown 하나 — 못 읽은 호스트가 하나라도 있으면 그 클러스터의 오버커밋 판정은 건너뛴다.
+      if (hostCapacityKnown(h)) { c.cores += h.cpuCores; c.memGB += h.memTotalMB / 1024; } else c.capUnknown++;
+      byC.set(k, c);
     }
     for (const v of snap.vms || []) {
       if (v.powerState !== 'POWERED_ON' || v.template) continue;
       const k = `${v.vcenterId} ${v.cluster || 'standalone'}`;
       const c = byC.get(k); if (c) { c.vcpu += v.cpuCount || 0; c.ramGB += (v.memMB || 0) / 1024; }
     }
+    // 126회차(재현): 지금 값을 읽지 못한 vCenter(점검중 · 수집 실패 · 낡은 위임 · 첫 수집 중 · 비활성 — unreadVc)의 클러스터는 판정하지 않는다.
+    //   예전에는 ① 그 vCenter 의 마지막 인벤토리로 오버커밋을 새로 내고 쿨다운마다 재발송했고(alarm/host/ds 와 달리 stale 도 거르지 않았다)
+    //   ② 보존 창을 넘겨 인벤토리가 비면 클러스터가 byC 에서 사라져 발생 중이던 알림이 **'해소'** 로 나갔다(45회차 F1 gpualloc 과 같은 꼴 —
+    //   이 키들은 vcenterId 필드가 없어 tick 의 UNREAD_VC_KEY_RE 보류에도 걸리지 않았다). 키가 `<종류>:<vCenter id>:<클러스터>` 라 접두로 보류한다
+    //   (사라진 클러스터까지 덮는다 · 범위 판정 routes/admin/opsSettings.js alertVcenterOf 와 같은 접두 대조).
+    for (const id of unreadVc) {
+      if (R.ramOvercommitPct?.enabled) heldPrefixes.add(`ramoc:${id}:`);
+      if (R.vcpuPerCore?.enabled) heldPrefixes.add(`vcpuoc:${id}:`);
+    }
+    // 130회차(126 반증 — 재현): vCenter id 에는 콜론이 올 수 있다(v2.598 규약 — routes/admin/opsSettings.js alertVcenterOf · GPU 오버레이의 최장 접두 대조).
+    //   못 읽은 vCenter 'a' 의 접두 `ramoc:a:` 가 **읽힌** vCenter 'a:b' 의 키 `ramoc:a:b:<클러스터>` 까지 덮어, 'a:b' 에서 실제로 해소된 오버커밋이
+    //   'a' 를 못 읽는 동안 발생 중으로 남고 시한(HELD_MAX_MS) 뒤 해소 알림 없이 끊겼다. 읽힌 vCenter 의 접두를 따로 실어 **더 긴 접두가 이기게** 한다(tick).
+    for (const v of snap.vcenters || []) {
+      const id2 = v && v.id != null ? String(v.id) : '';
+      if (!id2 || unreadVc.has(id2) || ![...unreadVc].some((id) => id2.startsWith(`${id}:`))) continue;
+      heldPrefixExempt.add(`ramoc:${id2}:`); heldPrefixExempt.add(`vcpuoc:${id2}:`);
+    }
     for (const c of byC.values()) {
-      if (R.ramOvercommitPct?.enabled && c.memGB > 0) {
+      if (unreadVc.has(String(c.vc))) continue;   // 126회차: 위 접두 보류 — 새로 내지도 해소하지도 않는다
+      // 9회차 보완: 판정을 건너뛴 클러스터는 '해소' 가 아니라 '모름' 이다 — 이미 발생 중인 오버커밋 알림이 호스트 하나가 끊긴 순간
+      //   거짓 '해소' 알림을 내지 않게 보류 키로 둔다(HELD_MAX_MS 시한 그대로 — 오래 못 읽으면 알림 없이 끊긴다).
+      if (c.capUnknown) {
+        if (R.ramOvercommitPct?.enabled) held.add(`ramoc:${c.vc}:${c.name}`);
+        if (R.vcpuPerCore?.enabled) held.add(`vcpuoc:${c.vc}:${c.name}`);
+      }
+      if (R.ramOvercommitPct?.enabled && c.memGB > 0 && !c.capUnknown) {
         const pct = Math.round((c.ramGB / c.memGB) * 100);
         if (pct >= (Number(R.ramOvercommitPct.threshold) || 120)) out.push({ key: `ramoc:${c.vc}:${c.name}`, severity: 'warning', title: `RAM 오버커밋 ${pct}%: ${c.name}`, detail: `${c.vc} · 할당 ${Math.round(c.ramGB)}/${Math.round(c.memGB)}GB` });
       }
-      if (R.vcpuPerCore?.enabled && c.cores > 0) {
+      if (R.vcpuPerCore?.enabled && c.cores > 0 && !c.capUnknown) {
         const ratio = Number((c.vcpu / c.cores).toFixed(1));
         if (ratio >= (Number(R.vcpuPerCore.threshold) || 5)) out.push({ key: `vcpuoc:${c.vc}:${c.name}`, severity: 'warning', title: `vCPU:코어 ${ratio}:1: ${c.name}`, detail: `${c.vc} · vCPU ${c.vcpu}/코어 ${c.cores}` });
       }
@@ -606,8 +788,12 @@ let _restored = null;   // key -> { since, lastNotified, resolvedAt?, retries? }
 function loadAlertState() {
   if (_restored) return _restored;
   _restored = new Map();
+  // 103회차 F12: 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 원본을 보존본으로 옮기지 않는다(발송 상태라 빈 상태로 시작하고 다음 저장이 다시 쓴다).
+  const rr = readJsonFile(STATE_FILE, { parse: (t) => t, preserve: false });
+  if (rr.kind === 'read-error') { console.warn(`[alerts] 상태 파일을 읽지 못했습니다(읽기 오류 ${String(rr.error?.code || '').slice(0, 32)}) — 원본은 옮기지 않고 빈 상태로 시작합니다`); return _restored; }
   try {
-    const j = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+    if (rr.kind === 'missing') { const e = new Error('ENOENT'); e.code = 'ENOENT'; throw e; }
+    const j = JSON.parse(rr.value);
     for (const [k, v] of Object.entries(j?.firing || {})) {
       if (v && Number.isFinite(v.since)) {
         const e = { since: v.since, lastNotified: Number(v.lastNotified) || 0 };
@@ -649,6 +835,10 @@ function saveAlertStateSoon() {
   _stateTimer.unref?.();
 }
 registerExitFlush('alerts-state', () => { if (_stateTimer) writeAlertStateNow(); });
+/** 테스트 전용(103회차) — 알림 설정 캐시 · 읽기 오류 표지. */
+export function _resetAlertConfigForTest() { cache = null; _cfgReadErr = null; _cfgReader.reset(); }
+/** 테스트 전용(103회차) — 상태 파일을 읽어(첫 평가와 같은 경로) 이어받을 항목 수를 돌려준다. */
+export function _loadAlertStateForTest() { return loadAlertState().size; }
 export function _resetAlertStateForTest() { firing.clear(); _restored = null; _pendingSend.clear(); clearTimeout(_stateTimer); _stateTimer = null; }
 export { refreshState as _refreshStateForTest, writeAlertStateNow as _writeAlertStateForTest };
 const recent = [];          // recent notifications (in-memory, newest first)
@@ -656,6 +846,8 @@ let timer = null;
 let vmPowerPrev = null;      // vmId -> powerState (직전 스냅샷, 동시 다운 감지용)
 
 function pushRecent(entry) { recent.unshift(entry); if (recent.length > 200) recent.pop(); }
+/** v3.1.0: 엔진 밖 사건형 발송(IP 변화 묶음 — ipam/changeNotify.js)을 '최근 통지' 목록에도 남긴다. */
+export function noteEventSent(alert, channels) { pushRecent({ at: new Date().toISOString(), ...alert, channels }); }
 
 /**
  * v2.908 알람 상태 구독(이슈 자동 등록 — issues/alertIssues.js). 평가가 끝날 때마다 { now, firing:[{key, alert, since}], resolved:[{key, alert}] } 를 준다.
@@ -733,6 +925,12 @@ async function refreshState(cfg, sendEnabled) {
   try { active = evaluate(snap, cfg); } catch { active = []; }
   // 판정 보류 키는 아래 concat(새 배열) 전에 잡아 둔다 — 숨은 속성은 concat 으로 옮겨지지 않는다.
   const held = active.held instanceof Set ? active.held : new Set();
+  const heldPrefixes = active.heldPrefixes instanceof Set ? [...active.heldPrefixes] : [];   // v3.8.1
+  // 130회차: 접두 보류는 **가장 긴 접두**가 정한다 — 못 읽은 vCenter 'a' 의 접두가 읽힌 vCenter 'a:b' 의 키를 덮지 않게(evaluate 의 heldPrefixExempt).
+  const heldExempt = active.heldPrefixExempt instanceof Set ? [...active.heldPrefixExempt] : [];
+  const longest = (list, key) => list.reduce((n, p) => (p.length > n && key.startsWith(p) ? p.length : n), -1);
+  const prefixHeld = (key) => { const h = longest(heldPrefixes, key); return h >= 0 && h > longest(heldExempt, key); };
+  const bundled = active.bundled instanceof Set ? active.bundled : new Set();   // 결정 62: 중복 IP 묶음으로 보류한 IP 별 키
   const alarmsHeldVc = active.alarmsHeldVcenters instanceof Set ? active.alarmsHeldVcenters : new Set(); // v2.607 LEFT2607-04
   const unreadVc = active.unreadVcenters instanceof Set ? active.unreadVcenters : new Set(); // v2.720(감사 B1-01)
   // 동시 다운 감지: 직전 스냅샷과 비교(전이). 규칙 켜져 있을 때만 알림에 포함하되,
@@ -782,20 +980,30 @@ async function refreshState(cfg, sendEnabled) {
   }
   // resolve
   const resolvedNow = []; // v2.908 이슈 자동 등록 구독자에게
+  const dupLeft = active.reduce((n, a) => n + (typeof a?.key === 'string' && a.key.startsWith('ipdup:') && a.key !== DUP_MANY_KEY ? 1 : 0), 0);   // 결정 62
   for (const [key, st] of [...firing.entries()]) {
     if (seen.has(key)) { if (st.heldSince) { st.heldSince = 0; changed = true; } continue; }
     // v2.598 RECENT2598-03: 값을 못 읽은 항목은 해소가 아니다 — 발생 상태를 유지한다. 오래(HELD_MAX_MS) 못 읽으면 알림 없이
     // 끊는다(복구가 아니라 **모르는 것**이다 — '해소' 알림을 내지 않는다).
     const alarmHeld = key.startsWith('alarm:') && alarmsHeldVc.has(String(st.alert?.vcenterId ?? ''));
     const vcUnread = UNREAD_VC_KEY_RE.test(key) && unreadVc.has(String(st.alert?.vcenterId ?? '')); // v2.720(감사 B1-01)
-    if (held.has(key) || alarmHeld || vcUnread) {
+    if (held.has(key) || prefixHeld(key) || alarmHeld || vcUnread) {
       if (!st.heldSince) { st.heldSince = now; changed = true; }
       if (now - st.heldSince < HELD_MAX_MS) continue;
-      firing.delete(key); rememberEnded(restored, key, st, now, cooldownMs); changed = true; continue;
+      firing.delete(key); rememberEnded(restored, key, st, now, cooldownMs); changed = true;
+      // 결정(56~75 남긴 것) 62: 중복 IP 묶음으로 보류된 IP 별 알림은 시한을 넘겨도 '해소' 가 아니다(중복은 묶음 알림이 계속 알린다) —
+      //   알림 없이 조용히 사라지지 않게 '묶음으로 대체 — 개별 상태 모름' 으로 기록만 한다(resolved 구독자에게는 보내지 않는다).
+      if (bundled.has(key)) {
+        pushRecent({ at: new Date().toISOString(), key, title: dupBundledExpiredTitle(st.alert?.title), detail: DUP_BUNDLED_EXPIRED_DETAIL, severity: 'info',
+          ...(st.alert?.vcenterId ? { vcenterId: st.alert.vcenterId } : {}) });
+      }
+      continue;
     }
     firing.delete(key); rememberEnded(restored, key, st, now, cooldownMs); changed = true;
-    pushRecent({ at: new Date().toISOString(), key, title: `해소: ${st.alert.title}`, severity: 'resolved' });
-    resolvedNow.push({ key, alert: st.alert });
+    // 결정(56~75 남긴 것) 62: 중복 IP 묶음 키가 빠진 것은 '상한 아래로 내려옴' 일 수 있다 — 남은 중복이 있으면 그 수를 사실대로 말한다(개별 알림으로 계속).
+    const endTitle = key === DUP_MANY_KEY ? dupBundleEndTitle(dupLeft) : null;
+    pushRecent({ at: new Date().toISOString(), key, title: endTitle || `해소: ${st.alert.title}`, severity: 'resolved' });
+    resolvedNow.push({ key, alert: endTitle ? { ...st.alert, title: endTitle } : st.alert });
   }
   emitAlertState({ now, firing: [...firing.entries()].map(([key, st]) => ({ key, alert: st.alert, since: st.since })), resolved: resolvedNow });
   // 복원 목록은 **쿨다운이 남은 동안만** 들고 있는다 — 기동 직후에는 스냅샷이 아직 비어(첫 수집 중) 활성 목록이 0 이라

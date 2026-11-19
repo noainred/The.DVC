@@ -1,6 +1,6 @@
 // Horizon 등록·svcmon 할당 — admin.js(구 2,410줄) 분할(v2.285.0). 본문은 원본 그대로, 등록 순서는 admin.js 호출 순서가 보존한다.
 import { config } from '../../config.js';
-import { listHorizon as listHorizonServers, upsertHorizon, removeHorizon, testHorizon, horizonInputIssue, featureSummary, invalidateHorizonLicenseCache } from '../../horizon/horizon.js';
+import { listHorizon as listHorizonServers, upsertHorizon, removeHorizon, testHorizon, horizonInputIssue, featureSummary, invalidateHorizonLicenseCache, horizonLoadError } from '../../horizon/horizon.js';
 import { clearHzNoEndpoint } from '../../horizon/sessionPoller.js';
 import * as hzBulk from '../../horizon/bulk.js';                     // v2.525: CSV/자유텍스트 대량 등록
 import { enrichAdvice, selectRows } from '../../util/bulkImport.js';
@@ -18,16 +18,17 @@ const fleetOnly = fullScopeOnlyWith('Horizon 연결 서버·엣지 스캔 배정
 export function registerHorizonAssign(adminRouter) {
 
 // ---- Horizon Connection Server (라이선스 만료일 확인용 등록) ---------------
-adminRouter.get('/horizon', adminOnly, fleetOnly, (_req, res) => res.json({ servers: listHorizonServers() }));
+// 36회차 F4: 등록부를 못 읽었으면 GET 이 그 사실(loadError)을 싣고 쓰기는 409 — 빈 목록이 '등록 없음' 으로 읽히지 않게.
+adminRouter.get('/horizon', adminOnly, fleetOnly, (_req, res) => { const servers = listHorizonServers(); const le = horizonLoadError(); res.json({ servers, ...(le ? { loadError: { reason: le.reason, at: le.at } } : {}) }); });
 adminRouter.post('/horizon', adminOnly, fleetOnly, (req, res) => {
   const r = upsertHorizon(req.body || {});
   if (r.ok) logAudit({ user: req.user?.username, action: 'Horizon 서버 등록/수정', target: String(req.body?.id || ''), ip: req.ip || '' });
-  res.status(r.ok ? 200 : 400).json(r);
+  res.status(r.ok ? 200 : (r.status || 400)).json(r);
 });
 adminRouter.delete('/horizon/:id', adminOnly, fleetOnly, (req, res) => {
   const r = removeHorizon(req.params.id);
   if (r.ok) logAudit({ user: req.user?.username, action: 'Horizon 서버 삭제', target: req.params.id, ip: req.ip || '' });
-  res.status(r.ok ? 200 : 400).json(r);
+  res.status(r.ok ? 200 : (r.status || 400)).json(r);
 });
 adminRouter.post('/horizon/test', adminOnly, fleetOnly, async (req, res) => {
   const r = await testHorizon(req.body || {});
@@ -201,17 +202,17 @@ adminRouter.get('/assignments', adminOnly, fleetOnly, (_req, res) => {
 
 adminRouter.post('/assignments', adminOnly, fleetOnly, (req, res) => {
   const result = addAssignment(req.body || {});
-  res.status(result.ok ? 201 : 400).json(result);
+  res.status(result.ok ? 201 : (result.status || 400)).json(result);
 });
 
 adminRouter.put('/assignments/:agent', adminOnly, fleetOnly, (req, res) => {
   const result = updateAssignment(req.params.agent, req.body || {});
-  res.status(result.ok ? 200 : 400).json(result);
+  res.status(result.ok ? 200 : (result.status || 400)).json(result);
 });
 
 adminRouter.delete('/assignments/:agent', adminOnly, fleetOnly, (req, res) => {
   const result = removeAssignment(req.params.agent);
-  res.status(result.ok ? 200 : 404).json(result);
+  res.status(result.ok ? 200 : (result.status || 404)).json(result);
 });
 
 // Import assignments from CSV text or a JSON array. Body:
@@ -222,6 +223,6 @@ adminRouter.post('/assignments/import', csvPerm, adminOnly, fleetOnly, (req, res
   if (typeof b.csv === 'string') list = parseAssignmentsCsv(b.csv);
   else list = Array.isArray(b) ? b : b.assignments;
   const result = importAssignments(list, b.mode === 'replace' ? 'replace' : 'merge');
-  res.status(result.ok ? 200 : 400).json(result);
+  res.status(result.ok ? 200 : (result.status || 400)).json(result);
 });
 }

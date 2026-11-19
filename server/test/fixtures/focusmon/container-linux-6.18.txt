@@ -1,0 +1,818 @@
+##HELLO 1
+uname Linux 6.18.44-fc-v378 x86_64
+rel 
+tck 100
+page 4096
+ncpu 4
+hidepid 0
+host vm
+##END
+##T 5503.42 1794405627
+##STAT
+cpu  12557 0 4171 2180192 1783 0 689 752 0 0
+cpu0 2910 0 1064 545042 459 0 303 207 0 0
+cpu1 2945 0 1100 545224 480 0 165 180 0 0
+cpu2 3557 0 1069 544617 534 0 50 193 0 0
+cpu3 3143 0 936 545308 309 0 169 170 0 0
+procs_running 2
+procs_blocked 0
+##LOAD
+0.00 0.02 0.00 3/116 7457
+##MEM
+MemTotal:       16472084 kB
+MemFree:        15716828 kB
+MemAvailable:   15841960 kB
+Buffers:            5636 kB
+Cached:           316088 kB
+SwapCached:            0 kB
+Active:           153036 kB
+Inactive:         451536 kB
+Active(anon):         72 kB
+Inactive(anon):   299644 kB
+Active(file):     152964 kB
+Inactive(file):   151892 kB
+Unevictable:       14728 kB
+Mlocked:           10460 kB
+SwapTotal:             0 kB
+SwapFree:              0 kB
+Zswap:                 0 kB
+Zswapped:              0 kB
+Dirty:               144 kB
+Writeback:             0 kB
+AnonPages:        297692 kB
+Mapped:           159848 kB
+Shmem:             16720 kB
+KReclaimable:      55840 kB
+Slab:              81124 kB
+SReclaimable:      55840 kB
+SUnreclaim:        25284 kB
+KernelStack:        1952 kB
+PageTables:         4280 kB
+SecPageTables:         0 kB
+NFS_Unstable:          0 kB
+Bounce:                0 kB
+WritebackTmp:          0 kB
+CommitLimit:     8236040 kB
+Committed_AS:     439348 kB
+VmallocTotal:   34359738367 kB
+VmallocUsed:        6720 kB
+VmallocChunk:          0 kB
+Percpu:              992 kB
+AnonHugePages:         0 kB
+ShmemHugePages:        0 kB
+ShmemPmdMapped:        0 kB
+FileHugePages:         0 kB
+FilePmdMapped:         0 kB
+Balloon:               0 kB
+HugePages_Total:       0
+HugePages_Free:        0
+HugePages_Rsvd:        0
+HugePages_Surp:        0
+Hugepagesize:       2048 kB
+Hugetlb:               0 kB
+DirectMap4k:       20480 kB
+DirectMap2M:     2076672 kB
+DirectMap1G:    16777216 kB
+##NET
+Inter-|   Receive                                                |  Transmit
+ face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
+    lo: 36245975    5275    0    0    0     0          0         0 36245975    5275    0    0    0     0       0          0
+  ifb0:       0       0    0    0    0     0          0         0        0       0    0    0    0     0       0          0
+  ifb1:       0       0    0    0    0     0          0         0        0       0    0    0    0     0       0          0
+  eth0: 91726246   49196    0    3    0     0          0         0 323602344   50258    0    0    0     0       0          0
+##DISK
+   7       0 loop0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+   7       1 loop1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+   7       2 loop2 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+   7       3 loop3 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+   7       4 loop4 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+   7       5 loop5 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+   7       6 loop6 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+   7       7 loop7 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+ 254       0 vda 75480 9161 6610890 14095 41712 30807 5749040 28593 0 17368 47478 12427 3 6392240 2791 2138 1997
+ 254      16 vdb 9 0 20 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+ 254      32 vdc 2019 2 311994 534 0 0 0 0 0 780 534 0 0 0 0 0 0
+ 254      48 vdd 138 8 73018 30 0 0 0 0 0 20 30 0 0 0 0 0 0
+ 254      64 vde 20 0 1140 2 0 0 0 0 0 4 2 0 0 0 0 0 0
+ 254      80 vdf 23 0 1184 1 0 0 0 0 0 0 1 0 0 0 0 0 0
+ 253       0 zram0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+##NETTOPO
+i eth0 -1 up 1 - - - -
+i ifb0 -1 down 0 - - - -
+i ifb1 -1 down 0 - - - -
+##BLK
+NAME="zram0" KNAME="zram0" PKNAME="" TYPE="disk" SIZE="0" MOUNTPOINT=""
+NAME="vda" KNAME="vda" PKNAME="" TYPE="disk" SIZE="274877906944" MOUNTPOINT="/"
+NAME="vdb" KNAME="vdb" PKNAME="" TYPE="disk" SIZE="9891840" MOUNTPOINT="/opt/rclone"
+NAME="vdc" KNAME="vdc" PKNAME="" TYPE="disk" SIZE="375787520" MOUNTPOINT="/opt/claude-code"
+NAME="vdd" KNAME="vdd" PKNAME="" TYPE="disk" SIZE="51904512" MOUNTPOINT="/opt/env-runner"
+NAME="vde" KNAME="vde" PKNAME="" TYPE="disk" SIZE="749568" MOUNTPOINT="/mnt/skills/public"
+NAME="vdf" KNAME="vdf" PKNAME="" TYPE="disk" SIZE="6115328" MOUNTPOINT="/mnt/skills/examples"
+##PS
+    1 root
+    2 root
+    3 root
+    4 root
+    5 root
+    6 root
+    7 root
+    8 root
+   10 root
+   11 root
+   13 root
+   14 root
+   15 root
+   16 root
+   17 root
+   18 root
+   19 root
+   20 root
+   21 root
+   22 root
+   23 root
+   24 root
+   25 root
+   26 root
+   27 root
+   28 root
+   29 root
+   30 root
+   31 root
+   32 root
+   33 root
+   34 root
+   35 root
+   36 root
+   37 root
+   38 root
+   39 root
+   40 root
+   41 root
+   42 root
+   44 root
+   46 root
+   47 root
+   48 root
+   49 root
+   50 root
+   51 root
+   52 root
+   53 root
+   54 root
+   55 root
+   56 root
+   57 root
+   58 root
+   59 root
+   60 root
+   61 root
+   62 root
+   63 root
+   64 root
+   65 root
+   68 root
+   82 root
+   83 root
+   85 root
+   86 root
+   88 64321
+   89 root
+  118 root
+  156 root
+  166 root
+ 4781 root
+ 6097 root
+ 6098 root
+ 6494 root
+ 7327 root
+ 7341 root
+ 7342 root
+ 7343 root
+ 7428 root
+ 7437 root
+ 7438 root
+ 7477 root
+ 7478 root
+##PROC
+1 178 13 26 1833 process_api
+10 0 1 26 0 kworker_0:0H-events_highpri
+11 22 1 26 0 kworker_0:1-events
+118 6 1 180 0 kworker_1:1H-kblockd
+13 0 1 26 0 kworker_R-mm_percpu_wq
+14 1 1 26 0 ksoftirqd_0
+15 12 1 26 0 rcu_preempt
+156 87 10 186 10601 environment-man
+16 0 1 26 0 rcu_exp_par_gp_kthread_worker_0
+166 6061 13 189 99160 claude
+17 0 1 26 0 rcu_exp_gp_kthread_worker
+18 5 1 26 0 migration_0
+19 0 1 26 0 cpuhp_0
+2 0 1 26 0 kthreadd
+20 0 1 26 0 cpuhp_1
+21 31 1 26 0 migration_1
+22 1 1 26 0 ksoftirqd_1
+23 0 1 26 0 kworker_1:0-slub_flushwq
+24 0 1 26 0 kworker_1:0H-kblockd
+25 0 1 26 0 cpuhp_2
+26 31 1 26 0 migration_2
+27 0 1 27 0 ksoftirqd_2
+28 0 1 27 0 kworker_2:0-slub_flushwq
+29 0 1 27 0 kworker_2:0H-events_highpri
+3 0 1 26 0 pool_workqueue_release
+30 0 1 27 0 cpuhp_3
+31 31 1 27 0 migration_3
+32 1 1 27 0 ksoftirqd_3
+33 0 1 27 0 kworker_3:0-slub_flushwq
+34 0 1 27 0 kworker_3:0H-kblockd
+35 0 1 28 0 kdevtmpfs
+36 0 1 28 0 kworker_R-inet_frag_wq
+37 0 1 28 0 rcu_tasks_kthread
+38 0 1 28 0 rcu_tasks_rude_kthread
+39 0 1 28 0 rcu_tasks_trace_kthread
+4 0 1 26 0 kworker_R-rcu_gp
+40 0 1 29 0 kauditd
+41 0 1 29 0 khungtaskd
+42 0 1 29 0 oom_reaper
+44 0 1 29 0 kworker_R-writeback
+46 27 1 29 0 kcompactd0
+47 0 1 29 0 ksmd
+4781 0 1 366612 0 kworker_0:0
+48 0 1 29 0 khugepaged
+49 0 1 29 0 kworker_R-kblockd
+5 0 1 26 0 kworker_R-sync_wq
+50 0 1 29 0 kworker_R-blkcg_punt_bio
+51 12 1 30 0 kworker_3:1-events
+52 13 1 30 0 kworker_2:1-events
+53 19 1 31 0 kworker_1:1-events
+54 0 1 36 0 watchdogd
+55 0 1 36 0 kworker_R-quota_events_unbound
+56 4 1 42 0 kworker_2:1H-kblockd
+57 0 1 42 0 kswapd0
+58 0 1 42 0 kworker_R-xfsalloc
+59 0 1 42 0 kworker_R-xfs_mru_cache
+6 0 1 26 0 kworker_R-kvfree_rcu_reclaim
+60 0 1 42 0 kworker_u17:0
+6097 10 1 494682 0 kworker_u16:1-iou_exit
+6098 11 1 494682 0 kworker_u16:4-iou_exit
+61 0 1 43 0 kworker_R-kthrotld
+62 0 1 43 0 irq_24-ACPI:Ged
+63 0 1 43 0 irq_25-ACPI:Ged
+64 0 1 46 0 hwrng
+6494 1 1 495390 0 kworker_u16:5-iou_exit
+65 0 1 51 0 kworker_R-kstrp
+68 5 1 53 0 kworker_0:1H-kblockd
+7 0 1 26 0 kworker_R-slub_flushwq
+7327 0 1 536869 0 kworker_u16:0-iou_exit
+7341 0 1 544283 0 kworker_u16:2-iou_exit
+7342 0 1 544283 0 kworker_u16:3-ext4-rsv-conversion
+7343 0 1 544284 0 kworker_u16:6
+7428 0 1 550336 837 bash
+7437 0 1 550340 394 timeout
+7438 0 1 550340 775 bash
+7479 0 1 550345 364 cat
+7480 0 1 550345 493 awk
+7481 0 1 550345 365 head
+8 0 1 26 0 kworker_R-netns
+82 0 1 120 0 kworker_R-ext4-rsv-conversion
+83 19 1 120 0 kworker_3:1H-kblockd
+85 0 1 127 0 kworker_R-ext4-rsv-conversion
+86 0 1 127 0 kworker_R-ext4-rsv-conversion
+88 39 1 128 704 6
+89 0 1 168 457 sh
+##END
+##T 5504.46 1794405628
+##STAT
+cpu  12559 0 4174 2180603 1783 0 689 753 0 0
+cpu0 2911 0 1065 545146 459 0 303 207 0 0
+cpu1 2946 0 1100 545327 480 0 165 180 0 0
+cpu2 3557 0 1070 544719 534 0 50 193 0 0
+cpu3 3144 0 936 545411 309 0 169 170 0 0
+procs_running 1
+procs_blocked 0
+##LOAD
+0.00 0.02 0.00 1/116 7487
+##MEM
+MemTotal:       16472084 kB
+MemFree:        15721536 kB
+MemAvailable:   15850472 kB
+Buffers:            5944 kB
+Cached:           319368 kB
+SwapCached:            0 kB
+Active:           153676 kB
+Inactive:         448184 kB
+Active(anon):         96 kB
+Inactive(anon):   293172 kB
+Active(file):     153580 kB
+Inactive(file):   155012 kB
+Unevictable:       14728 kB
+Mlocked:           10460 kB
+SwapTotal:             0 kB
+SwapFree:              0 kB
+Zswap:                 0 kB
+Zswapped:              0 kB
+Dirty:               208 kB
+Writeback:             0 kB
+AnonPages:        291224 kB
+Mapped:           159632 kB
+Shmem:             16720 kB
+KReclaimable:      55976 kB
+Slab:              81368 kB
+SReclaimable:      55976 kB
+SUnreclaim:        25392 kB
+KernelStack:        1944 kB
+PageTables:         3184 kB
+SecPageTables:         0 kB
+NFS_Unstable:          0 kB
+Bounce:                0 kB
+WritebackTmp:          0 kB
+CommitLimit:     8236040 kB
+Committed_AS:     439348 kB
+VmallocTotal:   34359738367 kB
+VmallocUsed:        6704 kB
+VmallocChunk:          0 kB
+Percpu:              992 kB
+AnonHugePages:         0 kB
+ShmemHugePages:        0 kB
+ShmemPmdMapped:        0 kB
+FileHugePages:         0 kB
+FilePmdMapped:         0 kB
+Balloon:               0 kB
+HugePages_Total:       0
+HugePages_Free:        0
+HugePages_Rsvd:        0
+HugePages_Surp:        0
+Hugepagesize:       2048 kB
+Hugetlb:               0 kB
+DirectMap4k:       20480 kB
+DirectMap2M:     2076672 kB
+DirectMap1G:    16777216 kB
+##NET
+Inter-|   Receive                                                |  Transmit
+ face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
+    lo: 36245975    5275    0    0    0     0          0         0 36245975    5275    0    0    0     0       0          0
+  ifb0:       0       0    0    0    0     0          0         0        0       0    0    0    0     0       0          0
+  ifb1:       0       0    0    0    0     0          0         0        0       0    0    0    0     0       0          0
+  eth0: 91726246   49196    0    3    0     0          0         0 323602344   50258    0    0    0     0       0          0
+##DISK
+   7       0 loop0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+   7       1 loop1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+   7       2 loop2 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+   7       3 loop3 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+   7       4 loop4 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+   7       5 loop5 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+   7       6 loop6 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+   7       7 loop7 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+ 254       0 vda 75563 9220 6617762 14104 41712 30807 5749040 28593 0 17376 47487 12427 3 6392240 2791 2138 1997
+ 254      16 vdb 9 0 20 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+ 254      32 vdc 2019 2 311994 534 0 0 0 0 0 780 534 0 0 0 0 0 0
+ 254      48 vdd 138 8 73018 30 0 0 0 0 0 20 30 0 0 0 0 0 0
+ 254      64 vde 20 0 1140 2 0 0 0 0 0 4 2 0 0 0 0 0 0
+ 254      80 vdf 23 0 1184 1 0 0 0 0 0 0 1 0 0 0 0 0 0
+ 253       0 zram0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+##END
+##T 5505.47 1794405629
+##STAT
+cpu  12560 0 4174 2181006 1783 0 689 753 0 0
+cpu0 2911 0 1066 545246 459 0 303 207 0 0
+cpu1 2946 0 1100 545428 480 0 165 180 0 0
+cpu2 3557 0 1070 544819 534 0 50 193 0 0
+cpu3 3144 0 936 545511 309 0 169 170 0 0
+procs_running 1
+procs_blocked 0
+##LOAD
+0.00 0.02 0.00 1/116 7496
+##MEM
+MemTotal:       16472084 kB
+MemFree:        15721904 kB
+MemAvailable:   15850856 kB
+Buffers:            5944 kB
+Cached:           319372 kB
+SwapCached:            0 kB
+Active:           153696 kB
+Inactive:         447960 kB
+Active(anon):         88 kB
+Inactive(anon):   292968 kB
+Active(file):     153608 kB
+Inactive(file):   154992 kB
+Unevictable:       14728 kB
+Mlocked:           10460 kB
+SwapTotal:             0 kB
+SwapFree:              0 kB
+Zswap:                 0 kB
+Zswapped:              0 kB
+Dirty:               212 kB
+Writeback:             0 kB
+AnonPages:        291328 kB
+Mapped:           159644 kB
+Shmem:             16720 kB
+KReclaimable:      55992 kB
+Slab:              81372 kB
+SReclaimable:      55992 kB
+SUnreclaim:        25380 kB
+KernelStack:        1944 kB
+PageTables:         3192 kB
+SecPageTables:         0 kB
+NFS_Unstable:          0 kB
+Bounce:                0 kB
+WritebackTmp:          0 kB
+CommitLimit:     8236040 kB
+Committed_AS:     439348 kB
+VmallocTotal:   34359738367 kB
+VmallocUsed:        6704 kB
+VmallocChunk:          0 kB
+Percpu:              992 kB
+AnonHugePages:         0 kB
+ShmemHugePages:        0 kB
+ShmemPmdMapped:        0 kB
+FileHugePages:         0 kB
+FilePmdMapped:         0 kB
+Balloon:               0 kB
+HugePages_Total:       0
+HugePages_Free:        0
+HugePages_Rsvd:        0
+HugePages_Surp:        0
+Hugepagesize:       2048 kB
+Hugetlb:               0 kB
+DirectMap4k:       20480 kB
+DirectMap2M:     2076672 kB
+DirectMap1G:    16777216 kB
+##NET
+Inter-|   Receive                                                |  Transmit
+ face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
+    lo: 36245975    5275    0    0    0     0          0         0 36245975    5275    0    0    0     0       0          0
+  ifb0:       0       0    0    0    0     0          0         0        0       0    0    0    0     0       0          0
+  ifb1:       0       0    0    0    0     0          0         0        0       0    0    0    0     0       0          0
+  eth0: 91726856   49198    0    3    0     0          0         0 323604402   50260    0    0    0     0       0          0
+##DISK
+   7       0 loop0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+   7       1 loop1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+   7       2 loop2 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+   7       3 loop3 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+   7       4 loop4 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+   7       5 loop5 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+   7       6 loop6 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+   7       7 loop7 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+ 254       0 vda 75563 9220 6617762 14104 41712 30807 5749040 28593 0 17376 47487 12427 3 6392240 2791 2138 1997
+ 254      16 vdb 9 0 20 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+ 254      32 vdc 2019 2 311994 534 0 0 0 0 0 780 534 0 0 0 0 0 0
+ 254      48 vdd 138 8 73018 30 0 0 0 0 0 20 30 0 0 0 0 0 0
+ 254      64 vde 20 0 1140 2 0 0 0 0 0 4 2 0 0 0 0 0 0
+ 254      80 vdf 23 0 1184 1 0 0 0 0 0 0 1 0 0 0 0 0 0
+ 253       0 zram0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+##END
+##T 5506.48 1794405630
+##STAT
+cpu  12560 0 4175 2181408 1783 0 689 753 0 0
+cpu0 2912 0 1066 545346 459 0 303 207 0 0
+cpu1 2946 0 1101 545528 480 0 165 180 0 0
+cpu2 3557 0 1070 544920 534 0 50 193 0 0
+cpu3 3144 0 936 545612 309 0 169 170 0 0
+procs_running 1
+procs_blocked 0
+##LOAD
+0.00 0.02 0.00 1/116 7505
+##MEM
+MemTotal:       16472084 kB
+MemFree:        15721440 kB
+MemAvailable:   15850396 kB
+Buffers:            5944 kB
+Cached:           319376 kB
+SwapCached:            0 kB
+Active:           153704 kB
+Inactive:         448308 kB
+Active(anon):         96 kB
+Inactive(anon):   293312 kB
+Active(file):     153608 kB
+Inactive(file):   154996 kB
+Unevictable:       14728 kB
+Mlocked:           10460 kB
+SwapTotal:             0 kB
+SwapFree:              0 kB
+Zswap:                 0 kB
+Zswapped:              0 kB
+Dirty:               216 kB
+Writeback:             0 kB
+AnonPages:        291472 kB
+Mapped:           159632 kB
+Shmem:             16720 kB
+KReclaimable:      55992 kB
+Slab:              81364 kB
+SReclaimable:      55992 kB
+SUnreclaim:        25372 kB
+KernelStack:        1944 kB
+PageTables:         3192 kB
+SecPageTables:         0 kB
+NFS_Unstable:          0 kB
+Bounce:                0 kB
+WritebackTmp:          0 kB
+CommitLimit:     8236040 kB
+Committed_AS:     439348 kB
+VmallocTotal:   34359738367 kB
+VmallocUsed:        6704 kB
+VmallocChunk:          0 kB
+Percpu:              992 kB
+AnonHugePages:         0 kB
+ShmemHugePages:        0 kB
+ShmemPmdMapped:        0 kB
+FileHugePages:         0 kB
+FilePmdMapped:         0 kB
+Balloon:               0 kB
+HugePages_Total:       0
+HugePages_Free:        0
+HugePages_Rsvd:        0
+HugePages_Surp:        0
+Hugepagesize:       2048 kB
+Hugetlb:               0 kB
+DirectMap4k:       20480 kB
+DirectMap2M:     2076672 kB
+DirectMap1G:    16777216 kB
+##NET
+Inter-|   Receive                                                |  Transmit
+ face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
+    lo: 36245975    5275    0    0    0     0          0         0 36245975    5275    0    0    0     0       0          0
+  ifb0:       0       0    0    0    0     0          0         0        0       0    0    0    0     0       0          0
+  ifb1:       0       0    0    0    0     0          0         0        0       0    0    0    0     0       0          0
+  eth0: 91728054   49200    0    3    0     0          0         0 323606773   50262    0    0    0     0       0          0
+##DISK
+   7       0 loop0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+   7       1 loop1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+   7       2 loop2 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+   7       3 loop3 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+   7       4 loop4 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+   7       5 loop5 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+   7       6 loop6 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+   7       7 loop7 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+ 254       0 vda 75563 9220 6617762 14104 41712 30807 5749040 28593 0 17376 47487 12427 3 6392240 2791 2138 1997
+ 254      16 vdb 9 0 20 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+ 254      32 vdc 2019 2 311994 534 0 0 0 0 0 780 534 0 0 0 0 0 0
+ 254      48 vdd 138 8 73018 30 0 0 0 0 0 20 30 0 0 0 0 0 0
+ 254      64 vde 20 0 1140 2 0 0 0 0 0 4 2 0 0 0 0 0 0
+ 254      80 vdf 23 0 1184 1 0 0 0 0 0 0 1 0 0 0 0 0 0
+ 253       0 zram0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+##END
+##T 5507.49 1794405631
+##STAT
+cpu  12561 0 4176 2181811 1783 0 689 753 0 0
+cpu0 2912 0 1066 545447 459 0 303 207 0 0
+cpu1 2946 0 1101 545629 480 0 165 180 0 0
+cpu2 3557 0 1071 545021 534 0 50 193 0 0
+cpu3 3144 0 936 545713 309 0 169 170 0 0
+procs_running 2
+procs_blocked 0
+##LOAD
+0.00 0.02 0.00 1/113 7514
+##MEM
+MemTotal:       16472084 kB
+MemFree:        15721568 kB
+MemAvailable:   15850524 kB
+Buffers:            5944 kB
+Cached:           319376 kB
+SwapCached:            0 kB
+Active:           153712 kB
+Inactive:         448272 kB
+Active(anon):        104 kB
+Inactive(anon):   293276 kB
+Active(file):     153608 kB
+Inactive(file):   154996 kB
+Unevictable:       14728 kB
+Mlocked:           10460 kB
+SwapTotal:             0 kB
+SwapFree:              0 kB
+Zswap:                 0 kB
+Zswapped:              0 kB
+Dirty:               216 kB
+Writeback:             0 kB
+AnonPages:        291484 kB
+Mapped:           159616 kB
+Shmem:             16720 kB
+KReclaimable:      55992 kB
+Slab:              81348 kB
+SReclaimable:      55992 kB
+SUnreclaim:        25356 kB
+KernelStack:        1912 kB
+PageTables:         3116 kB
+SecPageTables:         0 kB
+NFS_Unstable:          0 kB
+Bounce:                0 kB
+WritebackTmp:          0 kB
+CommitLimit:     8236040 kB
+Committed_AS:     439348 kB
+VmallocTotal:   34359738367 kB
+VmallocUsed:        6656 kB
+VmallocChunk:          0 kB
+Percpu:              992 kB
+AnonHugePages:         0 kB
+ShmemHugePages:        0 kB
+ShmemPmdMapped:        0 kB
+FileHugePages:         0 kB
+FilePmdMapped:         0 kB
+Balloon:               0 kB
+HugePages_Total:       0
+HugePages_Free:        0
+HugePages_Rsvd:        0
+HugePages_Surp:        0
+Hugepagesize:       2048 kB
+Hugetlb:               0 kB
+DirectMap4k:       20480 kB
+DirectMap2M:     2076672 kB
+DirectMap1G:    16777216 kB
+##NET
+Inter-|   Receive                                                |  Transmit
+ face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
+    lo: 36245975    5275    0    0    0     0          0         0 36245975    5275    0    0    0     0       0          0
+  ifb0:       0       0    0    0    0     0          0         0        0       0    0    0    0     0       0          0
+  ifb1:       0       0    0    0    0     0          0         0        0       0    0    0    0     0       0          0
+  eth0: 91728610   49206    0    3    0     0          0         0 323607929   50269    0    0    0     0       0          0
+##DISK
+   7       0 loop0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+   7       1 loop1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+   7       2 loop2 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+   7       3 loop3 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+   7       4 loop4 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+   7       5 loop5 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+   7       6 loop6 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+   7       7 loop7 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+ 254       0 vda 75563 9220 6617762 14104 41712 30807 5749040 28593 0 17376 47487 12427 3 6392240 2791 2138 1997
+ 254      16 vdb 9 0 20 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+ 254      32 vdc 2019 2 311994 534 0 0 0 0 0 780 534 0 0 0 0 0 0
+ 254      48 vdd 138 8 73018 30 0 0 0 0 0 20 30 0 0 0 0 0 0
+ 254      64 vde 20 0 1140 2 0 0 0 0 0 4 2 0 0 0 0 0 0
+ 254      80 vdf 23 0 1184 1 0 0 0 0 0 0 1 0 0 0 0 0 0
+ 253       0 zram0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+##END
+##T 5508.51 1794405632
+##STAT
+cpu  12562 0 4176 2182213 1783 0 689 753 0 0
+cpu0 2912 0 1066 545548 459 0 303 208 0 0
+cpu1 2946 0 1101 545730 480 0 165 180 0 0
+cpu2 3557 0 1071 545121 534 0 50 193 0 0
+cpu3 3145 0 936 545814 309 0 169 170 0 0
+procs_running 1
+procs_blocked 0
+##LOAD
+0.00 0.02 0.00 1/113 7523
+##MEM
+MemTotal:       16472084 kB
+MemFree:        15721856 kB
+MemAvailable:   15850820 kB
+Buffers:            5944 kB
+Cached:           319384 kB
+SwapCached:            0 kB
+Active:           153800 kB
+Inactive:         447828 kB
+Active(anon):         96 kB
+Inactive(anon):   292924 kB
+Active(file):     153704 kB
+Inactive(file):   154904 kB
+Unevictable:       14728 kB
+Mlocked:           10460 kB
+SwapTotal:             0 kB
+SwapFree:              0 kB
+Zswap:                 0 kB
+Zswapped:              0 kB
+Dirty:               224 kB
+Writeback:             0 kB
+AnonPages:        291148 kB
+Mapped:           159652 kB
+Shmem:             16720 kB
+KReclaimable:      55996 kB
+Slab:              81348 kB
+SReclaimable:      55996 kB
+SUnreclaim:        25352 kB
+KernelStack:        1896 kB
+PageTables:         3188 kB
+SecPageTables:         0 kB
+NFS_Unstable:          0 kB
+Bounce:                0 kB
+WritebackTmp:          0 kB
+CommitLimit:     8236040 kB
+Committed_AS:     439348 kB
+VmallocTotal:   34359738367 kB
+VmallocUsed:        6656 kB
+VmallocChunk:          0 kB
+Percpu:              992 kB
+AnonHugePages:         0 kB
+ShmemHugePages:        0 kB
+ShmemPmdMapped:        0 kB
+FileHugePages:         0 kB
+FilePmdMapped:         0 kB
+Balloon:               0 kB
+HugePages_Total:       0
+HugePages_Free:        0
+HugePages_Rsvd:        0
+HugePages_Surp:        0
+Hugepagesize:       2048 kB
+Hugetlb:               0 kB
+DirectMap4k:       20480 kB
+DirectMap2M:     2076672 kB
+DirectMap1G:    16777216 kB
+##NET
+Inter-|   Receive                                                |  Transmit
+ face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
+    lo: 36245975    5275    0    0    0     0          0         0 36245975    5275    0    0    0     0       0          0
+  ifb0:       0       0    0    0    0     0          0         0        0       0    0    0    0     0       0          0
+  ifb1:       0       0    0    0    0     0          0         0        0       0    0    0    0     0       0          0
+  eth0: 91728610   49206    0    3    0     0          0         0 323607929   50269    0    0    0     0       0          0
+##DISK
+   7       0 loop0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+   7       1 loop1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+   7       2 loop2 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+   7       3 loop3 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+   7       4 loop4 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+   7       5 loop5 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+   7       6 loop6 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+   7       7 loop7 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+ 254       0 vda 75563 9220 6617762 14104 41712 30807 5749040 28593 0 17376 47487 12427 3 6392240 2791 2138 1997
+ 254      16 vdb 9 0 20 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+ 254      32 vdc 2019 2 311994 534 0 0 0 0 0 780 534 0 0 0 0 0 0
+ 254      48 vdd 138 8 73018 30 0 0 0 0 0 20 30 0 0 0 0 0 0
+ 254      64 vde 20 0 1140 2 0 0 0 0 0 4 2 0 0 0 0 0 0
+ 254      80 vdf 23 0 1184 1 0 0 0 0 0 0 1 0 0 0 0 0 0
+ 253       0 zram0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+##PROC
+1 178 13 26 1833 process_api
+10 0 1 26 0 kworker_0:0H-events_highpri
+11 22 1 26 0 kworker_0:1-mm_percpu_wq
+118 6 1 180 0 kworker_1:1H-kblockd
+13 0 1 26 0 kworker_R-mm_percpu_wq
+14 1 1 26 0 ksoftirqd_0
+15 13 1 26 0 rcu_preempt
+156 87 10 186 10601 environment-man
+16 0 1 26 0 rcu_exp_par_gp_kthread_worker_0
+166 6062 10 189 99056 claude
+17 0 1 26 0 rcu_exp_gp_kthread_worker
+18 5 1 26 0 migration_0
+19 0 1 26 0 cpuhp_0
+2 0 1 26 0 kthreadd
+20 0 1 26 0 cpuhp_1
+21 31 1 26 0 migration_1
+22 1 1 26 0 ksoftirqd_1
+23 0 1 26 0 kworker_1:0-slub_flushwq
+24 0 1 26 0 kworker_1:0H-kblockd
+25 0 1 26 0 cpuhp_2
+26 31 1 26 0 migration_2
+27 0 1 27 0 ksoftirqd_2
+28 0 1 27 0 kworker_2:0-slub_flushwq
+29 0 1 27 0 kworker_2:0H-events_highpri
+3 0 1 26 0 pool_workqueue_release
+30 0 1 27 0 cpuhp_3
+31 31 1 27 0 migration_3
+32 1 1 27 0 ksoftirqd_3
+33 0 1 27 0 kworker_3:0-slub_flushwq
+34 0 1 27 0 kworker_3:0H-kblockd
+35 0 1 28 0 kdevtmpfs
+36 0 1 28 0 kworker_R-inet_frag_wq
+37 0 1 28 0 rcu_tasks_kthread
+38 0 1 28 0 rcu_tasks_rude_kthread
+39 0 1 28 0 rcu_tasks_trace_kthread
+4 0 1 26 0 kworker_R-rcu_gp
+40 0 1 29 0 kauditd
+41 0 1 29 0 khungtaskd
+42 0 1 29 0 oom_reaper
+44 0 1 29 0 kworker_R-writeback
+46 27 1 29 0 kcompactd0
+47 0 1 29 0 ksmd
+4781 0 1 366612 0 kworker_0:0
+48 0 1 29 0 khugepaged
+49 0 1 29 0 kworker_R-kblockd
+5 0 1 26 0 kworker_R-sync_wq
+50 0 1 29 0 kworker_R-blkcg_punt_bio
+51 12 1 30 0 kworker_3:1-mm_percpu_wq
+52 13 1 30 0 kworker_2:1-events
+53 19 1 31 0 kworker_1:1-mm_percpu_wq
+54 0 1 36 0 watchdogd
+55 0 1 36 0 kworker_R-quota_events_unbound
+56 4 1 42 0 kworker_2:1H-kblockd
+57 0 1 42 0 kswapd0
+58 0 1 42 0 kworker_R-xfsalloc
+59 0 1 42 0 kworker_R-xfs_mru_cache
+6 0 1 26 0 kworker_R-kvfree_rcu_reclaim
+60 0 1 42 0 kworker_u17:0
+6097 10 1 494682 0 kworker_u16:1-iou_exit
+6098 11 1 494682 0 kworker_u16:4-iou_exit
+61 0 1 43 0 kworker_R-kthrotld
+62 0 1 43 0 irq_24-ACPI:Ged
+63 0 1 43 0 irq_25-ACPI:Ged
+64 0 1 46 0 hwrng
+6494 1 1 495390 0 kworker_u16:5-iou_exit
+65 0 1 51 0 kworker_R-kstrp
+68 5 1 53 0 kworker_0:1H-kblockd
+7 0 1 26 0 kworker_R-slub_flushwq
+7327 0 1 536869 0 kworker_u16:0-iou_exit
+7341 0 1 544283 0 kworker_u16:2-iou_exit
+7342 0 1 544283 0 kworker_u16:3-events_unbound
+7343 0 1 544284 0 kworker_u16:6
+7428 0 1 550336 837 bash
+7437 0 1 550340 394 timeout
+7438 0 1 550340 775 bash
+7527 0 1 550852 364 cat
+7528 0 1 550852 515 awk
+7529 0 1 550852 365 head
+8 0 1 26 0 kworker_R-netns
+82 0 1 120 0 kworker_R-ext4-rsv-conversion
+83 19 1 120 0 kworker_3:1H-kblockd
+85 0 1 127 0 kworker_R-ext4-rsv-conversion
+86 0 1 127 0 kworker_R-ext4-rsv-conversion
+88 39 1 128 704 6
+89 0 1 168 457 sh
+##END

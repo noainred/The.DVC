@@ -4,7 +4,7 @@
  */
 import { requireRole, requirePerm } from '../../auth/auth.js';
 import { logAudit } from '../../audit.js';
-import { loadTopology, loadTopologyRaw, saveTopology, parseTopologyTable, topologyToCsv, mergeImport, normalizeTopology, redactTopology, DEFAULT_SERVICES, TARGETS } from '../../relaytopo/store.js';
+import { loadTopology, loadTopologyRaw, saveTopology, parseTopologyTable, topologyToCsv, mergeImport, normalizeTopology, redactTopology, DEFAULT_SERVICES, TARGETS, relayTopologyReadError } from '../../relaytopo/store.js';
 import { validateTopology, kindForService } from '../../relaytopo/validate.js';
 import { renderManagedBlock } from '../../relaytopo/haproxy.js';
 import { fetchSite, fetchAll, applySite, testNode, lastResults, resolveNodeAccess } from '../../relaytopo/ops.js';
@@ -35,7 +35,15 @@ const toolsPerm = requirePerm('tools');
 // v2.744(감사 AUTHZ-01): 관리자 판본(전 사이트 IP·SSH 계정·haproxy.cfg 원문·portal.env 발췌·배포 대상)은 isAdminDetailUser 하나로 정한다 —
 //   mock 데모 계정은 요청 문맥이 role 'admin' 이라 예전 `role === 'admin'` 판정을 그대로 통과해 operator 보다 넓게 봤다(v2.743 AUTHZ-01 의 형제).
 const isAdmin = (req) => isAdminDetailUser(req.user);
-const RE_DC = /^[^\s/\\]{1,40}$/;
+const RE_DC = /^[^\u0000-\u001f\u007f\u2028\u2029]{1,40}$/; // eslint-disable-line no-control-regex -- 63회차 F4: 저장(store.js str — 제어 문자만 거른다)이 받는 사이트 이름을 그대로 받는다(공백 · '/' 가 든 이름이 가져오기 · 적용 · SSH 테스트에서 400 이었다)
+
+/** 비-admin 응답용 — 노드의 주소·SSH 계정명을 비운다(구조·서비스 구성·DC 이름은 남긴다). */
+// v2.594(감사 R2594-06): 주소를 비우면 화면이 'IRS 있음' 을 판정할 수 없다 — 존재 여부만 불리언으로 남긴다.
+const maskNode = (n) => (n ? { ...n, privateIp: '', publicIp: '', vcenterIp: '', present: !!(n.privateIp || n.publicIp), ssh: { ...(n.ssh || {}), username: '' } } : n);
+// 결정(56~75 남긴 것) 63 ②: 사이트 비고(note — 자유 문구 200자)도 가린다 — 주소 · 계정을 적어 두면 가린 판본에 그대로 보였다. 있었다는 사실만 남긴다(noteHidden).
+export function maskTopology(t) {
+  return { ...t, main: maskNode(t.main), sites: (t.sites || []).map((s) => ({ ...s, edge: maskNode(s.edge), irs: maskNode(s.irs), sshTargetId: '', note: '', ...(s.note ? { noteHidden: true } : {}) })) };
+}
 
 export function registerRelayTopo(api) {
 api.get('/tools/relaytopo', toolsPerm, (req, res) => {
@@ -57,6 +65,8 @@ api.get('/tools/relaytopo', toolsPerm, (req, res) => {
   //   점검 결과(issues)는 문구에 주소가 들어가므로 개수만 준다.
   res.json({
     ok: true, admin, topology: admin ? topo : maskTopology(topo), issues: admin ? issues : [],
+    // 103회차 F4: 읽기 오류(원본 그대로 · 저장 거절 중)면 빈 토폴로지를 '없음' 으로 단정하지 않게 표지를 싣는다.
+    ...(relayTopologyReadError() ? { loadError: { readError: true, code: relayTopologyReadError().code, since: relayTopologyReadError().at } } : {}),
     ...(admin ? {} : { addressHidden: true, issueCount: issues.length }),
     results: lastResults({ full: admin }),                       // 비-admin 에는 cfg/env 본문 제거
     access: admin ? access : {},                                 // 접속 경로·자격증명 출처는 admin 만
@@ -65,12 +75,6 @@ api.get('/tools/relaytopo', toolsPerm, (req, res) => {
     kinds: topo.services.map((s) => ({ key: s.key, kind: kindForService(s, topo.main) })),
   });
 });
-/** 비-admin 응답용 — 노드의 주소·SSH 계정명을 비운다(구조·서비스 구성·DC 이름은 남긴다). */
-// v2.594(감사 R2594-06): 주소를 비우면 화면이 'IRS 있음' 을 판정할 수 없다 — 존재 여부만 불리언으로 남긴다.
-const maskNode = (n) => (n ? { ...n, privateIp: '', publicIp: '', vcenterIp: '', present: !!(n.privateIp || n.publicIp), ssh: { ...(n.ssh || {}), username: '' } } : n);
-function maskTopology(t) {
-  return { ...t, main: maskNode(t.main), sites: (t.sites || []).map((s) => ({ ...s, edge: maskNode(s.edge), irs: maskNode(s.irs), sshTargetId: '' })) };
-}
 function accessView(raw, site, role) { const a = resolveNodeAccess(raw, site, role); return { host: a.host || '', port: a.port || 0, via: a.via || '', source: a.source || '', error: a.error || '' }; }
 
 api.put('/tools/relaytopo', adminOnly, fullScopeOnly, (req, res) => {
@@ -79,7 +83,7 @@ api.put('/tools/relaytopo', adminOnly, fullScopeOnly, (req, res) => {
     logAudit({ user: req.user?.username, action: '중계 토폴로지 저장', detail: `sites=${saved.sites.length} services=${saved.services.map((s) => `${s.key}:${s.listenPort}`).join(',')}`, ip: req.ip });
     // v2.606 WEB2606-10: 버린 서비스 행(포트 비움·잘못된 key·중복 포트)과 이월하지 않은 비밀을 응답에 싣는다(조용한 축소 금지).
     res.json({ ok: true, topology: saved, servicesDropped: saved.servicesDropped || [], servicesReset: !!saved.servicesReset, secretsDropped: saved.secretsDropped || [], issues: validateTopology(saved, loadCollectors()) });
-  } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
+  } catch (e) { res.status(e?.status === 409 ? 409 : 400).json({ ok: false, reason: e.message, ...(e?.readError ? { code: e.code, readError: true } : {}) }); }
 });
 
 /** 가져오기: body { text?(표/CSV/TSV 붙여넣기 또는 파일 내용), json?(내보낸 JSON 객체), replace?, apply? }. apply=false 면 미리보기만. */
@@ -92,12 +96,14 @@ api.post('/tools/relaytopo/import', csvPerm, adminOnly, fullScopeOnly, (req, res
     else { if (String(text).length > 2_000_000) throw new Error('입력이 2MB 를 넘습니다.'); parsed = parseTopologyTable(text); }
     if (!parsed.sites.length && !(parsed.main?.privateIp || parsed.main?.publicIp)) return res.status(400).json({ ok: false, reason: '인식된 행이 없습니다. 열 순서(Datacenter, Server(Main/Edge/IRS), private IP, public IP …) 또는 내보낸 CSV/JSON 을 확인하세요.', skipped: parsed.skipped });
     const merged = mergeImport(loadTopologyRaw(), parsed, { replace: !!replace });
-    const preview = redactTopology(normalizeTopology(merged, loadTopologyRaw()));
-    if (!apply) return res.json({ ok: true, preview, format, parsedSites: parsed.sites.length, skipped: parsed.skipped.slice(0, 50), issues: validateTopology(preview, loadCollectors()) });
+    const pn = normalizeTopology(merged, loadTopologyRaw());
+    const preview = redactTopology(pn);
+    // 66회차 개선: 미리보기도 '적용하면 버려질 저장 비밀' 을 말한다 — 예전에는 적용 응답에서야 알았다(같은 정규화 결과의 비열거 필드).
+    if (!apply) return res.json({ ok: true, preview, format, parsedSites: parsed.sites.length, skipped: parsed.skipped.slice(0, 50), secretsDropped: pn.secretsDropped || [], issues: validateTopology(preview, loadCollectors()) });
     const saved = saveTopology(merged);
     logAudit({ user: req.user?.username, action: '중계 토폴로지 가져오기', detail: `format=${format} sites=${parsed.sites.length} replace=${!!replace} skipped=${parsed.skipped.length}`, ip: req.ip });
     res.json({ ok: true, topology: saved, format, parsedSites: parsed.sites.length, skipped: parsed.skipped.slice(0, 50), servicesDropped: saved.servicesDropped || [], servicesReset: !!saved.servicesReset, secretsDropped: saved.secretsDropped || [], issues: validateTopology(saved, loadCollectors()) });
-  } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
+  } catch (e) { res.status(e?.status === 409 ? 409 : 400).json({ ok: false, reason: e.message, ...(e?.readError ? { code: e.code, readError: true } : {}) }); }
 });
 
 /** 내보내기(비밀 없음): ?format=json|csv */

@@ -92,7 +92,7 @@ export default function BackupManageModal({ vmId, onClose }) {
         {d.servers.length > 1 ? (
           <label style={field}>Veeam 서버
             <Select className="select" value={serverId} onChange={(e) => { setServerId(e.target.value); readPoints(e.target.value); }} aria-label="Veeam 서버">
-              {d.servers.map((s) => <option key={s.id} value={s.id}>{`${s.name}${s.authStopped ? ' (인증 정지)' : ''}${s.active ? ' (진행 중)' : ''}`}</option>)}
+              {d.servers.map((s) => <option key={s.id} value={s.id}>{`${s.name}${s.authStopped ? ' (인증 정지)' : ''}${s.active ? ' (진행 중)' : ''}${s.busyUnknown ? ' (진행 여부 모름)' : ''}`}</option>)}
             </Select>
           </label>
         ) : null}

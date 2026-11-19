@@ -14,7 +14,7 @@
  */
 
 import { logAudit } from '../../audit.js';
-import { listTargetsCopy, bulkAddTargets, TEST_TYPES, KINDS, LIMITS } from '../../svcmon/store.js';
+import { listTargetsCopy, bulkAddTargets, svcmonStoreWriteRefusal, TEST_TYPES, KINDS, LIMITS } from '../../svcmon/store.js';
 import { TARGET_FIELDS, TEST_FIELDS, CSV_COLUMNS } from '../../svcmon/testSchema.js';
 import { csvLines, sampleCsv, REQUIRED_COLUMNS } from '../../svcmon/csvio.js';
 import {
@@ -233,6 +233,7 @@ svcmonRouter.post('/targets/import', canEdit, fullScopeOnly, csvPermUnlessJson, 
   if (typeof req.body?.expectedCount === 'number' && req.body.expectedCount !== dry.create) {
     return res.status(409).json({ ...payload, error: '미리보기 이후 목록이 바뀌었습니다. 미리보기를 다시 확인하세요.' });
   }
+  { const unreadable = svcmonStoreWriteRefusal(); if (unreadable) return res.status(409).json({ ...payload, error: unreadable.reason, code: unreadable.code, readError: true }); }   // 103회차 F1: 읽기 오류 중 등록 거절(사유를 화면까지)
   const batch = 'b-' + Math.random().toString(36).slice(2, 10);
   const r = bulkAddTargets(parsed.targets, { batch });
   if (!r.committed) return res.status(400).json({ ...payload, ...r, error: '검증에 실패해 등록하지 않았습니다.' });

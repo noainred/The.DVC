@@ -4,8 +4,10 @@
  * Returns a structured log so the UI can show what happened on the remote host.
  */
 
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { Client as SSHClient } from 'ssh2';
 import crypto from 'node:crypto';
+import { StringDecoder } from 'node:string_decoder';
 import { createRequire } from 'node:module';
 import { reqTimeoutMs } from '../agent/envTimeout.js';
 import { withDeadline, deadlineMs } from '../util/deadline.js';
@@ -149,7 +151,7 @@ const LEGACY_ALGOS = (() => {
 })();
 const NO_MATCH = /no matching (key exchange|host key|cipher|MAC|compression)|Handshake failed/i;
 
-function connect({ host, port = 22, username, password, privateKey, passphrase, readyTimeout = SSH_READY_TIMEOUT_MS, signal, trace = null, verbose = false, _legacy = false }) {
+function connect({ host, port = 22, username, password, privateKey, passphrase, readyTimeout = SSH_READY_TIMEOUT_MS, signal, trace = null, verbose = false, _legacy = false, singlePasswordAttempt = false }) {
   const say = (msg, level) => { try { trace?.(msg, level); } catch { /* */ } };
   return new Promise((resolve, reject) => {
     if (signal?.aborted) return reject(new Error('SSH 접속 취소(타임아웃)'));
@@ -176,7 +178,7 @@ function connect({ host, port = 22, username, password, privateKey, passphrase, 
       if (LEGACY_FALLBACK && LEGACY_ALGOS && !_legacy && NO_MATCH.test(e.message || '')) {
         say('알고리즘 협상 실패 → 구형 알고리즘(diffie-hellman-group1-sha1/ssh-dss/aes-cbc 등)까지 열어 1회 재시도합니다.', 'warn');
         try { conn.end(); } catch { /* */ }
-        connect({ host, port, username, password, privateKey, passphrase, readyTimeout, signal, trace, verbose, _legacy: true }).then(resolve, reject);
+        connect({ host, port, username, password, privateKey, passphrase, readyTimeout, signal, trace, verbose, _legacy: true, singlePasswordAttempt }).then(resolve, reject);
         return;
       }
       reject(e);
@@ -208,7 +210,22 @@ function connect({ host, port = 22, username, password, privateKey, passphrase, 
       if (r.ok && r.reason !== 'approved') say(`SSH 호스트키 ${r.algo} ${r.fp} — ${r.reason === 'observed-new' ? '처음 관찰(미승인 · 관찰 모드)' : '관찰 키(미승인 · 관찰 모드)'}`, 'warn');
     });
     if (privateKey) { auth.privateKey = privateKey; if (passphrase) auth.passphrase = passphrase; }
-    else { auth.password = password; auth.tryKeyboard = true; }
+    else {
+      auth.password = password; auth.tryKeyboard = true;
+      // v3.25(서버 접속 반증 F1 — 재현): ssh2 의 기본 처리기는 서버가 허용한 방식을 보지 않고 password 가 거부되면 **같은 비밀번호로 keyboard-interactive 를
+      //   한 번 더** 보낸다 — 로그인 한 번에 틀린 비밀번호가 두 번 닿아 계정 잠금 횟수가 두 배가 된다(SSSD/AD 처럼 k-i 를 켠 서버).
+      //   `singlePasswordAttempt` 면 password 한 번만 — 서버가 password 방식을 **아예 받지 않을 때만**(그 시도는 비밀번호 확인까지 가지 않는다) k-i 로 간다.
+      //   계정 단위 정지를 쓰는 경로(서버 접속 코어 · 한 대 확인 · 연결 시험 · 베어메탈 사용률 · 스토리지 수집)가 켠다. 다른 장비 수집기는 예전 그대로.
+      if (singlePasswordAttempt) {
+        let tried = 0;
+        auth.authHandler = (left) => {
+          tried += 1;
+          if (tried === 1) return 'password';
+          if (tried === 2 && Array.isArray(left) && !left.includes('password') && left.includes('keyboard-interactive')) return 'keyboard-interactive';
+          return false;
+        };
+      }
+    }
     if (_legacy) auth.algorithms = LEGACY_ALGOS;
     // '자세히'(ssh -vvv 상당): ssh2 의 debug 콜백은 소켓 연결·ident 교환·KEXINIT·인증 방식 시도·채널 열기까지
     // 프로토콜 단계마다 한 줄씩 남긴다. 비밀번호는 찍히지 않는다(ssh2 가 로그에 넣지 않음).
@@ -223,7 +240,7 @@ function connect({ host, port = 22, username, password, privateKey, passphrase, 
 // 대신 인라인 타이머로 stream 을 닫고 reject 해, 매달린 채널도 정리한다.
 // 출력 누적 상한(v2.417) — 고장 장비가 타임아웃까지 출력을 흘리면 메모리가 무한히 자란다.
 // 넘치면 채널을 닫고 reject(정직: 절단본을 성공으로 넘기지 않는다). execCapture 는 자체 2MB 캡.
-const EXEC_MAX_OUTPUT = Math.max(64 * 1024, Number(process.env.SSH_EXEC_MAX_OUTPUT) || 4 * 1024 * 1024);
+export const EXEC_MAX_OUTPUT = Math.max(64 * 1024, envPositive(process.env.SSH_EXEC_MAX_OUTPUT, 4 * 1024 * 1024));
 function exec(conn, command, rawTimeoutMs = SSH_EXEC_TIMEOUT_MS, opts = {}) {
   const timeoutMs = execTimeoutMs(rawTimeoutMs, opts);
   return new Promise((resolve, reject) => {
@@ -232,14 +249,18 @@ function exec(conn, command, rawTimeoutMs = SSH_EXEC_TIMEOUT_MS, opts = {}) {
       let stdout = '', stderr = '', done = false, bytes = 0;
       const finish = (fn, arg) => { if (done) return; done = true; clearTimeout(timer); fn(arg); };
       const kill = () => { try { stream.close?.(); } catch { /* */ } try { stream.destroy?.(); } catch { /* */ } };
+      // v3.25(서버 접속 반증 F6): `partial: true` 면 시한 · 출력 상한에서 던지지 않고 **받은 만큼** 돌려준다(timedOut · truncated 표지) —
+      //   구획 표지로 나눈 읽기 묶음이 끝까지 오지 못해도 온 칸은 쓴다(끝 표지가 없으면 호출부가 ‘잘림’ 으로 본다). 기본은 예전 그대로(던진다).
       const timer = setTimeout(() => {
         kill();
+        if (opts.partial) return finish(resolve, { command, code: null, stdout, stderr, timedOut: true });
         finish(reject, new Error(`SSH exec 타임아웃(${Math.round(timeoutMs / 1000)}s): ${command}`));
       }, timeoutMs);
       timer.unref?.();
       const onChunk = (which) => (d) => {
         bytes += d.length;
-        if (bytes > EXEC_MAX_OUTPUT) { kill(); return finish(reject, new Error(`SSH exec 출력 상한(${Math.round(EXEC_MAX_OUTPUT / 1024)}KB) 초과: ${command}`)); }
+        const cap = opts.partial && Number(opts.maxBytes) > 0 ? Math.min(Number(opts.maxBytes), EXEC_MAX_OUTPUT) : EXEC_MAX_OUTPUT;
+        if (bytes > cap) { kill(); if (opts.partial) return finish(resolve, { command, code: null, stdout, stderr, truncated: true }); return finish(reject, new Error(`SSH exec 출력 상한(${Math.round(cap / 1024)}KB) 초과: ${command}`)); }
         if (which === 'out') stdout += d.toString(); else stderr += d.toString();
       };
       stream.on('data', onChunk('out'));
@@ -247,6 +268,47 @@ function exec(conn, command, rawTimeoutMs = SSH_EXEC_TIMEOUT_MS, opts = {}) {
       stream.on('error', (e) => finish(reject, e));          // 채널/연결 오류로도 반드시 결말 짓는다
       stream.stderr.on('error', () => { /* stderr 스트림 오류는 비치명 — 무시 */ });
       stream.on('close', (code) => finish(resolve, { command, code, stdout, stderr }));
+    });
+  });
+}
+
+/**
+ * v2.976 집중 모니터링 — **스스로 끝나지 않는 명령의 줄을 그때그때 넘긴다**(execCapture 는 정해진 시간을 모은 뒤 한 번에 돌려준다).
+ * 대상 서버에서 2초마다 /proc 을 찍는 반복문이 몇 시간 돈다 — 출력을 쌓아 두면 메모리가 계속 자라므로 **줄 단위로 넘기고 버린다**.
+ *  · 줄이 `maxLine`(기본 16KB)보다 길면 그 세션을 끊는다(정상 /proc 줄은 수백 바이트 — 끝없는 한 줄은 이상 출력이다).
+ *    `cutLong: true` 면 끊지 않고 앞 `maxLine` 만 한 줄로 넘기고 다음 줄바꿈까지 버린다(v3.11.0 디스크 점검 — 출력에 대상 서버 로그가 들어간다). 자른 줄 수는 `cutLines`.
+ *  · stderr 는 앞 4KB 만 남긴다(진단용). 채널이 닫히면 `{code, stderr, lines}` 로 끝난다.
+ *  · `signal` 이 오면 채널을 닫는다(세션은 withSsh 가 같은 signal 로 끊는다).
+ *  · UTF-8 이 청크 경계에서 잘려도 깨지지 않게 StringDecoder 로 잇는다.
+ */
+const STREAM_STDERR_MAX = 4096;
+function execStream(conn, command, { onLine, maxLine = 16 * 1024, cutLong = false, signal } = {}) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(new Error('SSH 스트림 취소'));
+    conn.exec(command, { pty: false }, (err, stream) => {
+      if (err) return reject(err);
+      const dec = new StringDecoder('utf8');
+      let buf = ''; let stderr = ''; let lines = 0; let done = false; let skip = false; let cutLines = 0;
+      const kill = () => { try { stream.close?.(); } catch { /* */ } try { stream.destroy?.(); } catch { /* */ } };
+      const onAbort = () => { kill(); finish(resolve, { command, code: null, aborted: true, stderr, lines, cutLines }); };
+      const finish = (fn, arg) => { if (done) return; done = true; signal?.removeEventListener('abort', onAbort); fn(arg); };
+      signal?.addEventListener('abort', onAbort, { once: true });
+      const emit = (line) => { lines += 1; try { onLine?.(line); } catch { /* 소비자 오류가 스트림을 끊지 않게 */ } };
+      stream.on('data', (d) => {
+        if (done) return;
+        buf += dec.write(d);
+        let i;
+        if (skip) { i = buf.indexOf('\n'); if (i < 0) { buf = ''; return; } buf = buf.slice(i + 1); skip = false; }
+        while ((i = buf.indexOf('\n')) >= 0) { emit(buf.slice(0, i).replace(/\r$/, '')); buf = buf.slice(i + 1); }
+        if (buf.length > maxLine) {
+          if (cutLong) { emit(buf.slice(0, maxLine)); buf = ''; skip = true; cutLines += 1; return; }
+          kill(); finish(reject, new Error(`SSH 스트림 한 줄이 상한(${Math.round(maxLine / 1024)}KB)을 넘었습니다`));
+        }
+      });
+      stream.stderr.on('data', (d) => { if (stderr.length < STREAM_STDERR_MAX) stderr += d.toString().slice(0, STREAM_STDERR_MAX - stderr.length); });
+      stream.on('error', (e) => finish(reject, e));
+      stream.stderr.on('error', () => { /* 비치명 */ });
+      stream.on('close', (code) => { if (buf && !skip) emit(buf); buf = ''; finish(resolve, { command, code, stderr, lines, cutLines }); });
     });
   });
 }
@@ -338,8 +400,8 @@ const ANSI_RE = /\x1b\[[0-9;?]*[A-Za-z]/g;
  * `rows` 를 크게 두는 것은 페이저가 덜 뜨게 하려는 것이고, 페이저 자동 응답은 그대로 둔다.
  */
 const WIDE_PTY = Object.freeze({
-  rows: Math.max(24, Number(process.env.SSH_PTY_ROWS) || 200),
-  cols: Math.max(80, Number(process.env.SSH_PTY_COLS) || 1000),
+  rows: Math.max(24, envPositive(process.env.SSH_PTY_ROWS, 200)),
+  cols: Math.max(80, envPositive(process.env.SSH_PTY_COLS, 1000)),
   width: 0,
   height: 0,
   term: 'vt100',
@@ -517,7 +579,7 @@ export function stripChoiceLines(text) {
  */
 export function execAnswered(conn, command, {
   timeoutMs: rawTimeoutMs = SSH_EXEC_TIMEOUT_MS,
-  maxAnswers = Math.max(1, Number(process.env.SSH_PAGER_MAX_PAGES) || 400),
+  maxAnswers = Math.max(1, envPositive(process.env.SSH_PAGER_MAX_PAGES, 400)),
   rules = ['pager'],
   pty = true,
 } = {}) {
@@ -717,6 +779,8 @@ export async function withSsh(creds, fn, { signal = creds?.signal } = {}) {
     // pcap/트래픽 캡처가 최대 120초를 허용하면서 전송 계층은 60초에 끊어 항상 실패했다).
     exec: async (cmd, timeoutMs, opts) => { const r = await (trace ? traced('exec', cmd, () => exec(conn, cmd, timeoutMs, opts)) : exec(conn, cmd, timeoutMs, opts)); log.push(r); return r; },
     // 스스로 끝나지 않는 갱신형 명령(portperfshow 등) 전용 — captureMs 만큼 모으고 채널을 닫는다.
+    // v2.976 집중 모니터링 — 끝나지 않는 명령의 줄을 그때그때 넘긴다(쌓지 않는다). 세션 시한은 호출자의 signal 이 정한다.
+    execStream: (cmd, opts) => execStream(conn, cmd, opts),
     execCapture: async (cmd, captureMs) => { const r = await (trace ? traced('capture', cmd, () => execCapture(conn, cmd, captureMs)) : execCapture(conn, cmd, captureMs)); log.push(r); return r; },
     // 페이저로 멈추는 명령(errshow 등) — 프롬프트에 자동 응답해 끝까지 받는다(상한·시한 있음).
     execPaged: async (cmd, opts) => { const r = await (trace ? traced('paged', cmd, () => execPaged(conn, cmd, opts)) : execPaged(conn, cmd, opts)); log.push(r); return r; },
@@ -745,3 +809,6 @@ export async function withSsh(creds, fn, { signal = creds?.signal } = {}) {
 export { withDeadline, deadlineMs };
 /** 테스트 전용 — 내보내지 않는 캡처 경로의 상한을 가짜 채널로 확인한다(v2.607 SEC2607-04). */
 export const _sshExecInternals = { execCapture };
+
+/** 시험 전용 — 가짜 연결로 줄 넘기기 · 긴 줄 자르기를 고정한다(test/focusMonAudit3110 ⑪). */
+export { execStream as _execStreamForTest };

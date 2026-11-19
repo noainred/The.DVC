@@ -13,7 +13,11 @@
 export function splitHostPort(raw, defPort = 443) {
   const s = String(raw ?? '').trim();
   if (!s) return null;
-  const noScheme = s.replace(/^[a-z][a-z0-9+.-]*:\/\//i, '').replace(/[/?#].*$/, '');
+  const authority = s.replace(/^[a-z][a-z0-9+.-]*:\/\//i, '').replace(/[/?#].*$/, '');
+  // 108회차 A7(재현): 사용자 정보(`user:pw@`)는 호스트가 아니다 — 떼고 본다. 예전에는 `https://user:pw@host:8443` 의 콜론 둘을
+  //   '대괄호 없는 IPv6' 로 읽어 host 가 'user:pw@host:8443'(비밀번호가 든 지어낸 호스트) · 포트 443 이 됐다. '@' 하나짜리는 URL 이 이미 떼고 있었다.
+  const at = authority.lastIndexOf('@');
+  const noScheme = at >= 0 ? authority.slice(at + 1) : authority;
   if (!noScheme) return null;
   // 대괄호 없는 IPv6 리터럴(콜론 2개 이상) — 포트를 구분할 수 없으므로 전체가 호스트다.
   if (!noScheme.startsWith('[') && (noScheme.match(/:/g) || []).length >= 2) {

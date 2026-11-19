@@ -13,13 +13,14 @@
  *   hostnameOverride  자동 hostname을 덮어쓸 이름
  *   reservedUntil ISO 문자열 — 예약 만료 시각(없으면 무기한)
  *   note          한 줄 비고(메모/태그는 annotations.js가 담당, 여기는 상태성 비고)
+ *   macAlertOff   v3.1.0 — 이 IP 의 'MAC 변경' 알림 제외(이중화 장비 등 · 변화 기록은 계속)
  *   updatedAt/updatedBy
  */
 
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { makeJsonFileLoader, READ_RETRY_MS } from '../util/jsonFileLoad.js';   // 25회차 F-4 · 결정(56~75 남긴 것) 62
 import { isIpv4 } from './scan.js';
 import { canonIp } from '../util/ipv4.js';
 import { DAY_MS, DAY_OFFSET_MIN, dayStartMs, dayKey } from '../util/dayKey.js';
@@ -35,11 +36,38 @@ let cache = null;
 let rev = 0; // override 변경 리비전(대장 캐시 무효화 키)
 export function overridesRev() { return rev; }
 
+/*
+ * 전체 점검 25회차 F-4(재현): 손상되면 표지 없이 빈 값으로 넘어가 ① 예약 · 담당 기록이 화면과 ipam.db 에서 사라지고 ② 다음 저장 한 번이 그 한 건만 든
+ *   파일을 만들었다(서비스 점검에도 없었다). 이제 로드 오류를 세우고(서비스 점검 목록) 오류 중 쓰기는 거절한다 — 해제는 확정 · 보존본 복구.
+ */
+// 결정(56~75 남긴 것) 62(62회차 남긴 것): 읽기 오류(EACCES · EISDIR · EIO)는 손상이 아니다 — 공용 로더가 원본을 두고 캐시하지 않으며(30초 간격 재읽기) 확정을 열지 않는다.
+const _file = makeJsonFileLoader(() => FILE, { label: 'IP 관리 예약 · 담당(override)', confirm: () => persist({ ...load() }), tag: 'ipam' });
+/** override 파일을 못 읽었으면 { at, reason, readError? }, 아니면 null. */
+export function overridesLoadError() { load(); return _file.loadError(); }
+/** 응답 표지 — { reason, at, readError } 또는 null(62: 예약 · 담당 GET 표지). */
+export function overridesLoadMarker() { load(); return _file.marker(); }
+let _unread = false;   // 62: 읽기 오류 구간에 들어가고 나올 때 rev 를 올린다(annotations.js 와 같다 — 원장 캐시가 빈 예약으로 만든 결과를 붙잡지 않게)
 function load() {
-  if (cache) return cache;
-  cache = {};
-  try { if (fs.existsSync(FILE)) cache = JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}; } catch (e) { preserveCorrupt(FILE, e.message); cache = {}; }
+  if (cache && !_file.recheckDue()) return cache;   // 결정 G2 반증 후속 ③: 오류 중에는 캐시를 믿지 않고 30초마다 다시 판정(보존본을 되돌리면 재시작 없이 풀린다)
+  const hadErr = !!_file.loadError();
+  const r = _file.load();
+  if (r.kind === 'read-error') { if (!_unread) { _unread = true; rev++; } armRecheck(); return {}; }   // 62: 원본을 두고 빈 값을 캐시하지 않는다(쓰기는 refusal 로 막힌다)
+  const recovered = r.kind === 'ok' && (_unread || hadErr);
+  if (_unread) { _unread = false; rev++; } else if (recovered) rev++;   // 손상 → 되돌림도 원장 캐시를 버린다
+  cache = r.kind === 'ok' ? r.value : {};
+  armRecheck();
   return cache;
+}
+/*
+ * 결정 G2 반증 후속 ④: 오류(읽기 오류 · 손상) 동안에는 30초 뒤 스스로 한 번 다시 판정한다(오류가 풀릴 때까지 이어서). 예전에는 누군가 load() 를
+ *   부를 때까지(화면을 안 열면 원장 전량 확인 10분) 회복을 몰랐다 — 회복하면 위에서 rev 가 올라 다음 갱신 주기의 원장 입력 지문(ipamRevKey)이 바뀌고
+ *   ipam.db 가 다시 만들어진다. 오류가 없으면 타이머를 걸지 않는다(unref — 프로세스 종료를 막지 않는다).
+ */
+let _recheckTimer = null;
+function armRecheck() {
+  if (_recheckTimer || !_file.loadError()) return;
+  _recheckTimer = setTimeout(() => { _recheckTimer = null; try { load(); } catch { /* 다음 접근이 다시 판정한다 */ } }, READ_RETRY_MS + 1_000);
+  _recheckTimer.unref?.();
 }
 
 /** 전체 맵 { ip: {status, owner, label, deviceType, hostnameOverride, reservedUntil, note, updatedAt, updatedBy} }. */
@@ -90,6 +118,10 @@ function clean(partial = {}) {
   }
   if (partial.owner !== undefined) out.owner = String(partial.owner || '').trim().slice(0, 200);
   if (partial.label !== undefined) out.label = String(partial.label || '').trim().slice(0, 200);
+  // v3.4.0 묶음 나(재설계 — docs/design/ipam-redesign §5-0 '용도 = 새 필드'): IP 용도 · 요청자 · 할당자. label(표시 이름)과 다른 칸이다.
+  if (partial.purpose !== undefined) out.purpose = String(partial.purpose || '').trim().slice(0, 200);
+  if (partial.requester !== undefined) out.requester = String(partial.requester || '').trim().slice(0, 200);
+  if (partial.assigner !== undefined) out.assigner = String(partial.assigner || '').trim().slice(0, 200);
   if (partial.deviceType !== undefined) {
     const d = String(partial.deviceType || '').trim().toLowerCase();
     out.deviceType = DEVICE_TYPES.includes(d) ? d : '';
@@ -102,19 +134,23 @@ function clean(partial = {}) {
     if (!v) out.reservedUntil = null;
     else out.reservedUntil = reservedUntilIso(v);
   }
+  // v3.1.0: 'MAC 변경 알림 제외'(이중화 장비 등 — 기록은 계속한다 · ipam/changeNotify.js). 불리언 참만 켠다.
+  if (partial.macAlertOff !== undefined) out.macAlertOff = partial.macAlertOff === true;
   return out;
 }
 
 // 의미 있는 값이 하나도 없으면 레코드를 제거(빈 껍데기 방지).
 function isEmpty(rec) {
-  return !rec || (!rec.status && !rec.owner && !rec.label && !rec.deviceType
-    && !rec.hostnameOverride && !rec.note && !rec.reservedUntil && !rec.claimedVcenterId);
+  return !rec || (!rec.status && !rec.owner && !rec.label && !rec.deviceType && !rec.purpose && !rec.requester && !rec.assigner
+    && !rec.hostnameOverride && !rec.note && !rec.reservedUntil && !rec.claimedVcenterId && !rec.macAlertOff);
 }
 
 function persist(data) {
   atomicWriteFileSync(FILE, JSON.stringify(data, null, 2), { mode: 0o600 });
   cache = data; rev++;
+  _file.saved();
 }
+const refusal = () => _file.refusal('IP 관리 예약 · 담당');   // 62: 사유가 읽기 오류 · 손상을 가른다(조치가 다르다)
 
 /**
  * 한 IP의 override를 생성/수정/삭제. 부분 업데이트(주어진 필드만 갱신).
@@ -124,7 +160,8 @@ export function setOverride(ip, partial = {}, user) {
   const raw = String(ip || '').trim();
   const key = canonIp(raw);
   if (!key) return { ok: false, reason: '유효한 IPv4 주소가 아닙니다.' };
-  const data = load();
+  if (overridesLoadError()) return refusal();   // 25회차 F-4
+  const data = { ...load() };   // 25회차 F-5: 사본에 고치고 persist 성공 뒤에만 캐시 교체(쓰기 실패 시 메모리≠디스크 방지)
   const prev = data[key] || (raw !== key ? data[raw] : null) || {};
   if (raw !== key && data[raw]) delete data[raw];   // 예전에 원문 키로 저장된 유령 항목을 정규 키로 옮긴다
   const next = { ...prev, ...clean(partial) };
@@ -144,7 +181,8 @@ export function setOverride(ip, partial = {}, user) {
 export function clearOverride(ip) {
   const raw = String(ip || '').trim();
   const key = canonIp(raw) || raw;
-  const data = load();
+  if (overridesLoadError()) return refusal();   // 25회차 F-4
+  const data = { ...load() };   // 25회차 F-5: 사본에 고치고 persist 성공 뒤에만 캐시 교체(쓰기 실패 시 메모리≠디스크 방지)
   let hit = false;
   for (const k of new Set([raw, key])) if (data[k]) { delete data[k]; hit = true; }
   if (hit) persist(data);
@@ -194,11 +232,12 @@ export function invalidBatchResult(invalid) {
  * v2.744(감사 WEB-02): opts.rejectInvalid 면 무효 토큰이 하나라도 있을 때 아무것도 쓰지 않고 거부한다(라우트는 이 판정을 먼저 한다).
  */
 export function setOverrideBatch(ips, partial = {}, user, opts = {}) {
+  if (overridesLoadError()) return refusal();   // 25회차 F-4
   const { ips: list, invalid } = splitBatchIps(ips); // 유효 IPv4만(정규형 — v2.594), 중복 제거
   if (opts?.rejectInvalid) { const bad = invalidBatchResult(invalid); if (bad) return bad; }
   if (!list.length) return { ok: false, reason: '유효한 대상 IP가 없습니다.', ...(invalid.length ? { invalid: invalid.slice(0, INVALID_SHOW_MAX), invalidCount: invalid.length } : {}) };
   if (list.length > MAX_BATCH) return { ok: false, reason: `한 번에 ${MAX_BATCH}개까지만 일괄 적용할 수 있습니다.` };
-  const data = load();
+  const data = { ...load() };   // 25회차 F-5: 사본에 고치고 persist 성공 뒤에만 캐시 교체(쓰기 실패 시 메모리≠디스크 방지)
   const patch = clean(partial);
   const now = new Date().toISOString();
   const by = user?.username || 'unknown';
@@ -223,7 +262,8 @@ export function setOverrideBatch(ips, partial = {}, user, opts = {}) {
  * @returns {{ok:true, changed:number, removed:number}}
  */
 export function setOverridesMany(entries, user) {
-  const data = load();
+  if (overridesLoadError()) return refusal();   // 25회차 F-4
+  const data = { ...load() };   // 25회차 F-5: 사본에 고치고 persist 성공 뒤에만 캐시 교체(쓰기 실패 시 메모리≠디스크 방지)
   const now = new Date().toISOString();
   const by = user?.username || 'unknown';
   let changed = 0; let removed = 0;

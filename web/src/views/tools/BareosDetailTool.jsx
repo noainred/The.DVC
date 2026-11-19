@@ -20,7 +20,7 @@ import { BareosHealthCard } from './BareosHealth.jsx';   // v2.892 사전 점검
 import {
   bareosClass, directorStateOf, directorLineText, resultsUnknownText, numText, shortTs, fmtGb, stText, ST_TONE, runLine, bytesText,
   DETAIL_FILTERS, DETAIL_FILTERS_MAIN, DETAIL_FILTERS_MORE, detailFilterCounts, lvText, buildBareosTree, flattenBareosTree, initialBareosOpen, BAREOS_RPO_DAYS, BAREOS_DETAIL_VC_KEY,
-  resultBar, corpAttention, saveTargetFocus,
+  resultBar, corpAttention, saveTargetFocus, rowResultKnown,
 } from './bareosViewText.js';
 
 const TONE = { ok: '#86efac', warn: '#fcd34d', bad: '#fca5a5', run: '#93c5fd', muted: 'var(--text-dim)', bareos: '#fdba74' };
@@ -89,7 +89,7 @@ export default function BareosDetailTool() {
   useEffect(() => { setSel(null); setOpen(null); }, [vcId]);
   const pickVc = (id) => { setVcId(id); try { localStorage.setItem(BAREOS_DETAIL_VC_KEY, id); } catch { /* 이 브라우저에만 */ } };
   const known = data?.director?.resultsKnown !== false;
-  const fopts = useMemo(() => ({ rpoDays, now: data?.at || Date.now(), resultsKnown: known, marksKnown: !data?.marksUnreadable, registryKnown: !data?.registryUnreadable }), [rpoDays, data, known]);
+  const fopts = useMemo(() => ({ rpoDays, now: data?.at || Date.now(), resultsKnown: known, partial: data?.director?.partial === true, marksKnown: !data?.marksUnreadable, registryKnown: !data?.registryUnreadable }), [rpoDays, data, known]);   // 55회차 #9 partial
   const rows = useMemo(() => (Array.isArray(data?.rows) ? data.rows : []), [data]);
   const counts = useMemo(() => detailFilterCounts(rows, fopts), [rows, fopts]);
   const tree = useMemo(() => buildBareosTree(rows, { filter, q, ...fopts }), [rows, filter, q, fopts]);
@@ -236,7 +236,7 @@ export default function BareosDetailTool() {
                     </div>
                   );
                 }
-                const r = row.row; const isSel = sel === r.id; const k = bareosClass(r.b, fopts);
+                const r = row.row; const isSel = sel === r.id; const k = bareosClass(r.b, fopts); const rk = rowResultKnown(r, fopts);   // 101회차 F3: 잘린 조회의 진행 중 VM — 칩 · 오래됨도 모름(필터 · 수 · CSV 와 같게)
                 return (
                   <div role="row" key={row.key} aria-selected={isSel} style={{ display: 'grid', gridTemplateColumns: GRID, alignItems: 'center', borderTop: '1px solid var(--border-soft)', background: isSel ? 'rgba(59,130,246,.12)' : undefined }}>
                     <div role="gridcell" style={{ minWidth: 0, paddingLeft: pad + 20 }}>
@@ -250,8 +250,8 @@ export default function BareosDetailTool() {
                     </div>
                     <div role="gridcell" style={{ padding: '0 6px', fontSize: 12, color: r.power === 'POWERED_ON' ? '#86efac' : 'var(--text-dim)' }}>{r.power === 'POWERED_ON' ? '켜짐' : r.power ? '꺼짐' : '—'}</div>
                     <div role="gridcell" style={{ padding: '0 10px 0 6px', textAlign: 'right', fontSize: 12, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{fmtGb(r.gb)}</div>
-                    <div role="gridcell" style={{ padding: '4px 6px', minWidth: 0 }}><RunCell b={r.b} known={known} /></div>
-                    <div role="gridcell" style={{ padding: '0 6px', fontFamily: 'var(--mono)', fontSize: 12, whiteSpace: 'nowrap', color: known && k.old ? '#fb923c' : undefined }}>{r.b?.job ? shortTs(r.b.ok) : '—'}{known && k.old ? ` · ${data.rpoDays}일+` : ''}</div>
+                    <div role="gridcell" style={{ padding: '4px 6px', minWidth: 0 }}><RunCell b={r.b} known={rk} /></div>
+                    <div role="gridcell" style={{ padding: '0 6px', fontFamily: 'var(--mono)', fontSize: 12, whiteSpace: 'nowrap', color: rk && k.old ? '#fb923c' : undefined }}>{r.b?.job ? shortTs(r.b.ok) : '—'}{rk && k.old ? ` · ${data.rpoDays}일+` : ''}</div>
                     <div role="gridcell" style={{ padding: '0 14px 0 6px', fontSize: 12, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: k.missing || k.off || r.gone ? TONE.warn : 'var(--text-dim)' }}>{stateText(r)}</div>
                   </div>
                 );
@@ -269,7 +269,7 @@ export default function BareosDetailTool() {
                   <b style={{ fontSize: 16, overflowWrap: 'anywhere' }}>{selRow.name}</b><MethodBadge method={selRow.method || ''} small />
                 </div>
                 {snapshotChip(selRow.snaps) && <Note tone="warn">{snapshotChip(selRow.snaps)} — {SNAPSHOT_TITLE}</Note>}
-                <RunCell b={selRow.b} known={known} />
+                <RunCell b={selRow.b} known={rowResultKnown(selRow, fopts)} />
                 <dl style={{ margin: 0, display: 'grid', gridTemplateColumns: 'auto minmax(0, 1fr)', gap: '5px 12px', fontSize: 12.5 }}>
                   <dt className="muted">잡</dt><dd style={{ margin: 0, fontFamily: 'var(--mono)', fontSize: 12, overflowWrap: 'anywhere' }}>{selRow.job?.name || (selRow.b?.job === false ? '없음(미등록)' : '—')}</dd>
                   <dt className="muted">상태</dt><dd style={{ margin: 0 }}>{stateText(selRow)}{selRow.b?.missing ? ' · Director 에 잡이 없음(누가 설정을 지웠을 수 있음)' : ''}</dd>

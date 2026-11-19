@@ -27,6 +27,7 @@ function busyPollSupport() {
   return centralStatusOnlySupport({ minVersion: IDRAC_BUSY_POLL_MIN_CENTRAL });
 }
 import { agentNameHeader } from '../util/agentNameHeader.js'; // v2.620(RECENT2620-02)
+import { readJsonCapped, EDGE_RESPONSE_MAX_BYTES } from '../util/readCapped.js'; // 87회차 ⓓ(85 E3 — 권장안): 중앙 응답은 상한 읽기(형제 pull 과 같게 — 상한 없는 res.json() 금지)
 let last = null;
 // v2.599 T2599-02: 주기 env 도 [하한, MAX_TIMER_MS] 로 가둔다 — 2^31 초과·음수는 setInterval 에서 1ms 루프가 된다.
 const POLL_MS = clampIntervalMs(Number(process.env.AGENT_IDRAC_SCAN_POLL_MS) || 5_000, 5_000, 1_000);
@@ -186,7 +187,7 @@ async function runIdracScanWorkerInner() {
       noteFail(r.status === 403 ? 'auth' : 'http', `HTTP ${r.status}`);
       return null;
     }
-    const body = await r.json();
+    const body = await readJsonCapped(r, EDGE_RESPONSE_MAX_BYTES, '중앙 응답');
     const jobs = body?.jobs;
     lastPollAt = Date.now(); lastPollError = null; failStreak = 0;
     if (busyPoll) {

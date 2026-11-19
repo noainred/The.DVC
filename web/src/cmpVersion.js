@@ -8,9 +8,11 @@ export function cmpVersion(a, b) {
   const parse = (v) => {
     const s = String(v ?? '').trim().replace(/^v/i, '');
     if (!s) return null;
-    const parts = s.split('.').map((x) => Number(x));
-    if (!parts.length || parts.some((x) => !Number.isFinite(x))) return null;
-    return parts;
+    // v3.10.7(공통 기능 점검 5회차): 세그먼트는 **숫자 글자만**. 예전엔 `Number(x)` 로 읽어 빈 세그먼트(`3..10`·`3.10.`)가
+    //   `Number('') === 0` 으로 '0' 이 됐고(못 읽은 값이 0 으로 둔갑 — v2.561 규약), `0x10`·`1e3`·` 5` 도 숫자로 통과했다.
+    const raw = s.split('.');
+    if (raw.some((x) => !/^\d{1,9}$/.test(x))) return null;
+    return raw.map(Number);
   };
   const pa = parse(a); const pb = parse(b);
   if (!pa || !pb) return null;

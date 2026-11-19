@@ -11,6 +11,7 @@ import { createChangeLogger } from '../util/logThrottle.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { pingMany } from '../util/ping.js';
 import { agentHeaders, withAgentQuery } from './agentNameCarry.js'; // v2.629 A6-01: 원문 이름 헤더는 한글 이름에서 fetch 가 던진다
+import { readJsonCapped, EDGE_RESPONSE_MAX_BYTES } from '../util/readCapped.js'; // 87회차 ⓓ(85 E3 — 권장안): 중앙 응답은 상한 읽기(형제 pull 과 같게 — 상한 없는 res.json() 금지)
 
 let timer = null;
 let running = false; // 재진입 방지(긴 ping이 다음 4s 틱과 겹쳐 중복 인출/실행되는 것 차단)
@@ -41,7 +42,7 @@ function headers() {
 const _logChange = createChangeLogger({ windowMs: 10 * 60_000 });
 async function httpFail(stage, r) {
   let reason = '';
-  try { const b = await r.json(); reason = String(b?.reason || b?.error || '').slice(0, 200); } catch { /* 본문 없음 */ }
+  try { const b = await readJsonCapped(r, 64 * 1024, '중앙 오류 응답'); reason = String(b?.reason || b?.error || '').slice(0, 200); } catch { /* 본문 없음 */ }
   const msg = `${stage} HTTP ${r.status}${reason ? ` — ${reason}` : ''}`;
   _last = { at: Date.now(), ok: false, error: msg, status: r.status };
   if (_logChange(stage, msg)) console.warn(`[ping-agent] ${msg}`);
@@ -54,7 +55,7 @@ async function postResult(url, body, timeoutMs) {
   catch (e) { const msg = `결과 회신 실패 — ${String(e?.message || e).slice(0, 200)}`; if (_logChange('회신', msg)) console.warn(`[ping-agent] ${msg}`); return msg; }
   if (r.ok) return null;
   let reason = '';
-  try { const b = await r.json(); reason = String(b?.reason || b?.error || '').slice(0, 200); } catch { /* 본문 없음 */ }
+  try { const b = await readJsonCapped(r, 64 * 1024, '중앙 오류 응답'); reason = String(b?.reason || b?.error || '').slice(0, 200); } catch { /* 본문 없음 */ }
   const msg = `결과 회신 HTTP ${r.status}${reason ? ` — ${reason}` : ''}`;
   if (_logChange('회신', msg)) console.warn(`[ping-agent] ${msg}`);
   return msg;
@@ -75,7 +76,7 @@ async function runPingWorkerInner() {
     const url = `${config.agent.centralUrl}/api/central/ping-jobs?vcenters=${encodeURIComponent(vcIds.join(','))}`;
     const r = await resilientFetch(withAgentQuery(url, config.agent.name), { headers: headers(), timeoutMs: 15_000, retries: 2 });
     if (!r.ok) return await httpFail('인출', r);
-    const { jobs } = await r.json();
+    const { jobs } = await readJsonCapped(r, EDGE_RESPONSE_MAX_BYTES, '중앙 응답');
     if (!jobs || !Object.keys(jobs).length) { _last = { at: Date.now(), ok: true, jobs: 0 }; return null; } // v2.600 EDGE2600-07: 성공 인출(0건)도 상태 갱신 — 끈적한 오류 방지
     let postErr = null;
     for (const [vcenterId, ips] of Object.entries(jobs)) {
@@ -89,7 +90,8 @@ async function runPingWorkerInner() {
   } catch (e) {
     const msg = String(e?.message || e).slice(0, 300);
     _last = { at: Date.now(), ok: false, error: msg };
-    console.warn('[ping-agent] 실패: ' + msg);
+    // 85회차 F3: 중앙이 닿지 않는 동안(연결 거부 · 시한) 4초마다 같은 줄이 저널에 쌓였다 — HTTP 실패(v2.591 PR-5)와 같게 같은 사유는 10분에 한 줄.
+    if (_logChange('실패', msg)) console.warn('[ping-agent] 실패: ' + msg);
     return null;
   }
 }

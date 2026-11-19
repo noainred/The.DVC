@@ -6,7 +6,9 @@
  *  GET  /api/ping/series?id=&range=   단일 대상 시계열 — 인증
  *  GET  /api/ping/targets             대상 목록 — 인증
  *  POST/PUT/DELETE /api/ping/targets  대상 관리 — 관리자
- *  POST /api/ping/poll-now            즉시 1회 측정 — 관리자
+ *  POST /api/ping/poll-now            지금 측정 — 관리자(v2.964: 연속 측정 중이면 지금 창을 바로 마감해 쓴다)
+ *  GET  /api/ping/settings            측정 설정(측정 간격 · 요약 주기 · 시한 + 출처 · 범위 · 모니터 상태) — 인증
+ *  PUT  /api/ping/settings            측정 설정 저장(재시작 없이 바로 적용) — 관리자 · 전체 범위
  *  POST /api/ping/seed-vcenters       vCenter 자동 등록 — 관리자
  *
  * 네트워크 체크(서버 Ping, source=edge — 엣지 노드 TCP, DataCenter 그룹):
@@ -22,7 +24,7 @@
 
 import express from 'express';
 import { requireRole } from '../auth/auth.js';
-import { scopedVcenterIds } from '../auth/scope.js';
+import { scopedVcenterIds, writeScopedVcenterIds } from '../auth/scope.js';
 import { isAdminDetailUser } from '../auth/demoGuest.js';
 import { store } from '../store.js';
 import { loadVcenterConfig } from '../config.js';
@@ -32,7 +34,8 @@ import {
 } from '../ping/store.js';
 import { statusAll, seriesOf, overviewGrouped } from '../ping/service.js';
 import { getPingDb } from '../ping/db.js';
-import { pollOnce } from '../ping/monitor.js';
+import { pingNow, pingMonitorStatus } from '../ping/monitor.js';
+import { loadPingSettings, savePingSettings, pingLoadOf } from '../ping/settings.js';
 import { listCollectors } from '../collector/registry.js';
 import { listDatacenters, getDatacenterOrder } from '../datacenter/store.js';
 
@@ -56,8 +59,10 @@ const rangeMsOf = (q, def = '1d') => RANGES[String(q || def)] || RANGES[def];
 // 전 vCenter 관리 호스트명·IP·응답시간을 열람하던 갭(CLAUDE.md "조회 라우트 scope 는 예외 없이")
 // 을 닫는다. vCenter 타깃 id 는 'vc_<vcenterId>' 이므로 그 접두를 벗겨 허용 집합과 대조한다.
 // manual 타깃(vCenter 귀속 없음)은 그대로 두고(기존 동작), edge 타깃은 별도 라우트(DC 그룹)다.
-function vcScope(req) {
-  const allowed = scopedVcenterIds(req.user, store.get()); // null = 전체 허용
+function vcScope(req, { write = false } = {}) {
+  // 전체 점검 7회차: 쓰기 판정은 쓰기 범위(조회 범위와의 교집합 — 둘 다 무제한이면 null). 던지면 빈 범위(거부).
+  let allowed;
+  try { allowed = write ? writeScopedVcenterIds(req.user, store.get()) : scopedVcenterIds(req.user, store.get()); } catch { allowed = new Set(); } // null = 전체 허용
   const vcIdOf = (id) => (String(id).startsWith('vc_') ? String(id).slice(3) : null);
   // v2.597(감사 AUTHZ-2597-01): 대상 객체에 vcenterId 가 있으면 그것이 귀속이다 — id 접두('vc_')만 보면 vcenterId 만
   //   가진 대상(수동 등록 등)이 범위 밖인데도 이름·관리 IP·RTT 가 보였다.
@@ -120,8 +125,15 @@ pingRouter.get('/series', async (req, res) => {
 //   · 범위 계정은 source 를 manual·vcenter 밖으로 바꾸지 못한다(edge·vcport 는 전 법인 공용 목록이다).
 //   전체 범위 admin 은 예전 그대로(scope.all).
 const LISTED_SOURCES = new Set(['manual', 'vcenter']);
-function scopedWriteDenied(req, { id = null, existing = false } = {}) {
-  const scope = vcScope(req);
+/**
+ * 전체 점검 7회차(2회차 반증 R-3): 조회 밖 → 404 · 조회는 되지만 쓰기 밖 → 403(규약). 예전에는 조회 범위만 봐서 쓰기 범위를 줄인 관리자가
+ *   범위 밖 법인 대상을 등록 · 수정 · 삭제(이력째)했다. 반환: false | 404 | 403.
+ */
+function scopedWriteDenied(req, opts = {}) {
+  if (scopeDeniedBy(vcScope(req), req, opts)) return 404;
+  return scopeDeniedBy(vcScope(req, { write: true }), req, opts) ? 403 : false;
+}
+function scopeDeniedBy(scope, req, { id = null, existing = false } = {}) {
   if (scope.all) return false;
   const body = req.body || {};
   if (existing) {
@@ -142,21 +154,27 @@ function scopedWriteDenied(req, { id = null, existing = false } = {}) {
 const scopeNotFound = (res) => res.status(404).json({ ok: false, reason: '없는 대상' });
 // 범위 계정에는 전 vCenter·전 대상을 건드리는 일괄 작업을 열지 않는다(seed-vcenters·vcport·poll-now).
 function denyScopedBulk(req, res, what) {
-  if (vcScope(req).all) return false;
+  if (vcScope(req, { write: true }).all) return false;   // 전체 점검 7회차: 조회 ∧ 쓰기 전체만
   res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: `${what}은(는) 전 vCenter 대상을 바꿉니다 — 전체 범위(vCenter 제한 없는) 계정만 할 수 있습니다.` });
   return true;
 }
 
 pingRouter.post('/targets', adminOnly, (req, res) => {
-  if (scopedWriteDenied(req)) return res.status(404).json({ ok: false, reason: '범위 밖 vCenter 대상은 등록할 수 없습니다.' });
+  const d = scopedWriteDenied(req);
+  if (d === 403) return res.status(403).json({ ok: false, error: 'forbidden', reason: '조회 전용 범위 — 이 법인 대상은 수정 권한이 없습니다.' });
+  if (d) return res.status(404).json({ ok: false, reason: '범위 밖 vCenter 대상은 등록할 수 없습니다.' });
   const r = addTarget(req.body || {}); res.status(r.ok ? 200 : 400).json(r);
 });
 pingRouter.put('/targets/:id', adminOnly, (req, res) => {
-  if (scopedWriteDenied(req, { id: req.params.id, existing: true })) return scopeNotFound(res);
+  const d = scopedWriteDenied(req, { id: req.params.id, existing: true });
+  if (d === 403) return res.status(403).json({ ok: false, error: 'forbidden', reason: '조회 전용 범위 — 이 법인 대상은 수정 권한이 없습니다.' });
+  if (d) return scopeNotFound(res);
   const r = updateTarget(req.params.id, req.body || {}); res.status(r.ok ? 200 : 400).json(r);
 });
 pingRouter.delete('/targets/:id', adminOnly, async (req, res) => {
-  if (scopedWriteDenied(req, { id: req.params.id, existing: true })) return scopeNotFound(res);
+  const d = scopedWriteDenied(req, { id: req.params.id, existing: true });
+  if (d === 403) return res.status(403).json({ ok: false, error: 'forbidden', reason: '조회 전용 범위 — 이 법인 대상은 수정 권한이 없습니다.' });
+  if (d) return scopeNotFound(res);
   const r = removeTarget(req.params.id);
   // v2.603(감사 DB2603-02 후속): 이력 삭제는 청크로 나눠 **백그라운드**에서 끝까지 돈다(대상 1년치 ≈ 52만 행을 응답 경로에서
   // 기다리지 않는다). 대상은 이미 목록에서 빠졌으므로 화면에 영향이 없고, 실패는 조용히 버리지 않고 콘솔에 남긴다.
@@ -176,8 +194,38 @@ pingRouter.delete('/targets/:id', adminOnly, async (req, res) => {
 
 pingRouter.post('/poll-now', adminOnly, async (req, res) => {
   if (denyScopedBulk(req, res, '즉시 전체 측정')) return;
-  try { const r = await pollOnce(); res.json({ ok: true, ...(r || {}) }); }
+  try { const r = await pingNow(); res.json({ ok: true, ...(r || {}) }); }
   catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+});
+
+/**
+ * v2.964 측정 설정(사용자 요청 "화면에서 주기 설정할 수 있게 · ping 은 중단없이 계속 ping").
+ * 조회는 인증만(주기·시한·모니터 상태 — 주소 없음). 부하 산수(대상 수 × 측정 간격)는 전 대상 수가 들어가므로 전체 범위 계정에만 싣는다.
+ * 저장은 관리자 · 전체 범위(전 대상의 측정 방식을 바꾼다 — poll-now 와 같은 기준). 범위·형식이 틀리면 400 field, 설정 파일을 못 읽은 상태면 503.
+ */
+function settingsBody(req, s = loadPingSettings()) {
+  const full = vcScope(req).all;
+  const live = full ? listTargets().filter((t) => t.enabled !== false && !String(t.id).startsWith('mock-')).length : null;
+  return {
+    ok: true,
+    probeIntervalMs: s.probeIntervalMs, summaryIntervalMs: s.summaryIntervalMs, timeoutMs: s.timeoutMs,
+    source: s.source, defaults: s.defaults, ranges: s.ranges, updatedAt: s.updatedAt, updatedBy: full ? s.updatedBy : null,
+    loadError: s.loadError ? { reason: s.loadError.reason } : null,
+    monitor: pingMonitorStatus(),
+    load: full ? pingLoadOf(s, live) : null,
+  };
+}
+pingRouter.get('/settings', (req, res) => {
+  try { res.json(settingsBody(req)); }
+  catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+});
+pingRouter.put('/settings', adminOnly, (req, res) => {
+  if (denyScopedBulk(req, res, 'Ping 측정 설정')) return;
+  const b = req.body && typeof req.body === 'object' ? req.body : {};
+  const patch = b.reset === true ? { reset: true } : Object.fromEntries(['probeIntervalMs', 'summaryIntervalMs', 'timeoutMs'].filter((k) => k in b).map((k) => [k, b[k]]));
+  const r = savePingSettings(patch, { actor: req.user?.username || '' });
+  if (!r.ok) return res.status(r.field ? 400 : (loadPingSettings().loadError ? 503 : 500)).json({ ok: false, field: r.field, reason: r.reason, ...(!r.field && loadPingSettings().loadError ? { code: 'settingsUnreadable' } : {}) });   // 107회차: 화면이 503 을 '일시 장애' 로 바꾸지 않게 code 를 싣는다
+  res.json(settingsBody(req, r.settings));
 });
 
 pingRouter.post('/seed-vcenters', adminOnly, (req, res) => {
@@ -253,14 +301,28 @@ pingRouter.get('/vcport/overview', async (req, res) => {
 
 pingRouter.get('/vcport/ports', (_req, res) => res.json({ ports: getVcPorts() }));
 
+/*
+ * 121회차(118회차 반증 R3): vCenter 등록부를 **못 읽었고 마지막으로 읽은 목록도 없으면**(loadVcenterConfig 의 `readError && !file` — '등록 0개' 가 아니라 모름)
+ *   빈 목록으로 vCenter×포트 대상을 다시 만들지 않는다 — 대상 전부(사용자가 고친 기준값 · 켬/끔 포함)가 지워진다. 503 + 사유(화면은 사유를 그대로 보인다).
+ */
+function vcRegistryUnknown503(res) {
+  let c = null;
+  try { c = loadVcenterConfig(); } catch { c = null; }
+  if (!(c && c.readError && !c.file)) return false;
+  res.status(503).json({ ok: false, code: 'registry-unreadable', registryUnreadable: true, readError: true, reason: `vCenter 등록부(vcenters.json)를 읽지 못해(읽기 오류 ${c.readError}) vCenter 포트 대상을 바꾸지 않았습니다 — 지금 맞추면 대상이 전부 지워집니다. 파일 권한 · 소유자 · 디스크를 확인한 뒤 다시 시도하세요.` });
+  return true;
+}
+
 pingRouter.put('/vcport/ports', adminOnly, (req, res) => {
   if (denyScopedBulk(req, res, 'vCenter 포트 지정')) return;
+  if (vcRegistryUnknown503(res)) return;   // 121회차 R3
   const r = setVcPorts((req.body || {}).ports, vcenterList());
   res.status(r.ok ? 200 : 400).json(r);
 });
 
 pingRouter.post('/vcport/sync', adminOnly, (req, res) => {
   if (denyScopedBulk(req, res, 'vCenter 포트 대상 동기화')) return;
+  if (vcRegistryUnknown503(res)) return;   // 121회차 R3
   const r = syncVcPortTargets(vcenterList());
   res.status(r.ok ? 200 : 400).json(r);
 });

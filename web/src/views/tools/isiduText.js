@@ -312,7 +312,7 @@ export function kpiCards(rep, target, now = Date.now()) {
   const res = rep.scan?.sizeMode === 'k' ? '정확(-k)' : '반올림(-h)';
   return [
     { key: 'total', label: '디렉터리 전체', value: bytesText(k.denomBytes), sub: `7일 ${d7.text} · ${res}`, tone: d7.tone },
-    { key: 'users', label: '사용자 폴더', value: countText(k.users), sub: rep.base7 ? `신규 ${countText(k.new7)} · 사라짐 ${countText(k.removed7)} (7일 전 대비)` : '신규·사라짐: 7일 전 수집 없음' },
+    { key: 'users', label: '사용자 폴더', value: countText(k.users), sub: k.compareLimited ? '신규·사라짐: 폴더 상한으로 잘린 조사라 판정하지 않음' : rep.base7 ? `신규 ${countText(k.new7)} · 사라짐 ${countText(k.removed7)} (7일 전 대비)` : '신규·사라짐: 7일 전 수집 없음' },
     { key: 'top', label: `Top ${k.topN || 10} 비중`, value: shareText(k.topShare), sub: `${bytesText(k.topBytes)} / ${bytesText(k.denomBytes)}`, bar: numOrNull(k.topShare) },
     { key: 'last', label: '마지막 수집', value: agoText(rep.scan?.ts, now), sub: `소요 ${durationText(rep.scan?.durationMs)} · ${everyText(target?.intervalHours)} · ${nodeText(rep.scan?.node || '')}` },
   ];
@@ -395,6 +395,7 @@ export function keyRows(targets, mainKey, edges) {
  */
 export const EDGE_CALL_TEXT = Object.freeze({
   'not-registered': '메인의 수집 서버 등록부에 이 엣지가 없습니다 — 설정 › 수집 서버(원격)에 엣지 포탈 URL·토큰을 등록하면 바로 보낼 수 있습니다.',
+  ambiguous: '메인의 수집 서버 등록부에 이 표시 이름이 둘 이상이라 어느 엣지인지 정할 수 없습니다 — 설정 › 수집 서버(원격)에서 표시 이름을 겹치지 않게 바꾸세요.',
   'disabled-central': '메인에서 이 수집 서버를 비활성으로 두었습니다 — 설정 › 수집 서버(원격)에서 켜세요.',
   'no-url': '이 수집 서버에 URL 이 없습니다 — 등록부에 엣지 포탈 주소를 넣으세요.',
   timeout: '엣지가 시한 안에 답하지 않았습니다 — 엣지가 바쁘거나 회선이 느립니다.',
@@ -463,7 +464,8 @@ export function usersFootNote(res, shownCount) {
   const total = numOrNull(res.total) || 0;
   const from = (numOrNull(res.offset) || 0) + 1;
   const to = (numOrNull(res.offset) || 0) + (numOrNull(shownCount) || 0);
-  if (!total) return '조건에 맞는 폴더가 없습니다.';
+  // 38회차 R6: 잘린 조사라 신규 · 사라짐을 판정하지 않았으면 '없음' 이 아니라 그 사실을 말한다.
+  if (!total) return res.compareLimited && (res.filter === 'new' || res.filter === 'removed') ? '신규 · 사라짐은 판정하지 않았습니다(폴더 상한으로 잘린 조사).' : '조건에 맞는 폴더가 없습니다.';
   const rest = Math.max(0, total - to);
   return `${countText(total)}개 중 ${countText(from)}–${countText(to)}${rest ? ` · 나머지 ${countText(rest)}개는 다음 쪽이나 검색으로 엽니다` : ''}.`;
 }
@@ -910,6 +912,8 @@ export const TARGET_MAIL_CODE_TEXT = Object.freeze({
   'missed-late': '정한 시각을 한참 지나 확인한 회차라 보내지 않았습니다(몰아서 보내지 않습니다)',
   'missed-clock': '서버 시계가 뒤로 가 보내는 때를 저장한 시각이 지금보다 뒤였던 동안의 회차라 보내지 않았습니다(소급해 보내지 않습니다)',
   'no-recipients': '보낼 때 받는 사람이 없었습니다',
+  // 124회차: 메일 기록 파일을 못 읽는 동안의 '지금 상태'(기록이 아니다). 서버 사유가 원인(읽기 오류 원문)을 말하므로 화면은 그것을 먼저 쓴다 — 이 문구는 사유가 없을 때만.
+  'state-unreadable': '메일 기록 파일을 읽지 못해 자동 발송을 멈췄습니다(읽기 오류 — 원본은 그대로 있고, 읽히면 이어 갑니다)',
 });
 const MISSED_CODES = new Set(['missed-down', 'missed-late', 'missed-clock']);
 
@@ -918,6 +922,8 @@ function lastReasonText(last) {
   const code = last?.code;
   // 같은 code 'no-report' 라도 실패(결과 DB 를 열지 못함)는 서버 사유가 원인을 말한다 — 화면 문구로 덮지 않는다.
   if (code === 'no-report' && last.state === 'failed') return last.reason || '결과 DB 를 열지 못해 보내지 않았습니다';
+  // 못 읽는 동안의 상태는 서버 사유가 원인을 말한다(읽기 오류 원문 · 다시 읽는 간격) — 화면 문구로 덮지 않는다.
+  if (code === 'state-unreadable') return last.reason || TARGET_MAIL_CODE_TEXT[code];
   if (code && Object.hasOwn(TARGET_MAIL_CODE_TEXT, code)) {
     const n = numOrNull(last.count);
     return `${TARGET_MAIL_CODE_TEXT[code]}${MISSED_CODES.has(code) && n != null && n > 1 ? ` — 놓친 회차 ${countText(n)}번` : ''}`;
@@ -931,6 +937,8 @@ export function mailStateText(last, now = Date.now(), offsetMin = MAIL_DEF_OFFSE
   const when = agoText(last.at, now) || '';
   const what = last.kind === 'failure' ? '실패 알림' : last.schedule ? `정기 결과 메일${numOrNull(last.slot) != null ? `(${mailSlotShort(last.slot, offsetMin)} 회차)` : ''}` : '결과 메일';
   if (last.state === 'sent') return { tone: 'ok', text: `${what} ${when} 보냄 · ${countText(last.accepted ?? last.to)}명${last.manual ? ' (수동)' : ''}` };
+  // 메일 기록을 못 읽는 동안: '방금 보내지 않음' 이 아니라 '자동 발송이 멈춰 있다' 는 지금 상태다 — 회차 · 시각을 붙이지 않고 주의 톤으로 사유만 말한다.
+  if (last.state === 'skipped' && last.code === 'state-unreadable') return { tone: 'warn', text: lastReasonText(last) };
   if (last.state === 'skipped' && MISSED_CODES.has(last.code)) return { tone: 'warn', text: `${what} ${when} 놓침 — ${lastReasonText(last)}` };
   if (last.state === 'skipped') return { tone: 'muted', text: `${what} ${when} 보내지 않음 — ${lastReasonText(last)}` };
   return { tone: 'bad', text: `${what} ${when} 보내지 못함 — ${lastReasonText(last)}` };
@@ -944,10 +952,14 @@ export function mailStateText(last, now = Date.now(), offsetMin = MAIL_DEF_OFFSE
 export function targetMailLine(t, now = Date.now(), offsetMin = MAIL_DEF_OFFSET) {
   const m = t?.mail;
   const last = t?.lastMail ? mailStateText(t.lastMail, now, offsetMin) : null;
+  // 메일 기록 파일을 못 읽는 동안(state-unreadable)의 사유는 길다(읽기 오류 원문 · 다시 읽는 간격 · 수동 발송 안내). 표 칸(parts)에는 짧게 적고
+  //   전체 사유는 한 줄 문장(text — 대상 상세)과 표 위 안내(mailStateUnreadNote)가 말한다 — Chromium 검증에서 좁은 칸에 12줄로 쌓여 행이 화면 절반을 차지했다.
+  const unreadMail = t?.lastMail?.code === 'state-unreadable';
+  const lastParts = last ? (unreadMail ? MAIL_UNREAD_PARTS : [`마지막 — ${last.text}`]) : [];
   if (!m || !(m.recipients > 0)) {
     if (!last) return null;
-    const parts = ['받는 사람이 없습니다(지금은 보내지 않습니다)', `마지막 — ${last.text}`];
-    return { tone: last.tone, text: `결과 메일: ${parts.join(' · ')}`, parts };
+    const head = '받는 사람이 없습니다(지금은 보내지 않습니다)';
+    return { tone: last.tone, text: `결과 메일: ${[head, `마지막 — ${last.text}`].join(' · ')}`, parts: [head, ...lastParts] };
   }
   const opts = [`받는 사람 ${countText(m.recipients)}명`];
   const sched = m.when === 'schedule';
@@ -960,6 +972,25 @@ export function targetMailLine(t, now = Date.now(), offsetMin = MAIL_DEF_OFFSET)
   if (m.onlyOnChange) opts.push('변화 없으면 생략');
   if (m.onFailure) opts.push(sched ? '실패 알림(조사 직후)' : '실패 알림');
   // parts: 표 칸처럼 좁은 자리에서 한 조각씩 줄을 바꿔 그리게(v2.745 — 한 문장을 74px 칸에 넣으면 글자 단위로 쪼개져 행이 13줄이 됐다).
-  const parts = [...opts, last ? `마지막 — ${last.text}` : '아직 보낸 적 없음'];
-  return { tone: last ? last.tone : 'muted', text: `결과 메일: ${parts.join(' · ')}`, parts };
+  const parts = [...opts, ...(last ? lastParts : ['아직 보낸 적 없음'])];
+  const full = [...opts, last ? `마지막 — ${last.text}` : '아직 보낸 적 없음'];
+  return { tone: last ? last.tone : 'muted', text: `결과 메일: ${full.join(' · ')}`, parts };
+}
+
+/**
+ * 표 칸에 적는 짧은 문구 — 메일 기록 파일을 못 읽는 동안(전체 사유는 표 위 안내 · 대상 상세가 말한다).
+ * 두 조각으로 나눈다 — 이 표는 1440px 에서 오른쪽 칸이 가로 스크롤 경계에 걸려 한 줄이 '아직 보낸 적 없음' 보다 길면 글자가 잘려 보였다(Chromium 재확인).
+ */
+export const MAIL_UNREAD_PARTS = Object.freeze(['자동 발송 멈춤', '메일 기록 읽기 오류']);
+
+/**
+ * 대상 목록 위의 안내 한 줄 — 메일 기록 파일을 못 읽어 자동 발송이 멈춘 동안의 서버 사유(파일 단위라 대상마다 같다 — 한 번만 말한다). 없으면 ''.
+ * @param {Array<object>} targets 서버 목록의 대상(lastMail 을 본다)
+ */
+export function mailStateUnreadNote(targets) {
+  for (const t of Array.isArray(targets) ? targets : []) {
+    const l = t?.lastMail;
+    if (l && l.code === 'state-unreadable') return String(l.reason || TARGET_MAIL_CODE_TEXT['state-unreadable']);
+  }
+  return '';
 }

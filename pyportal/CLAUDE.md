@@ -114,3 +114,24 @@
 ## v2.769 버그 점검 4회차 조치 — 되돌리지 말 것(`tests/test_audit2769.py`)
 - **요청 전체 시한 ≠ 소켓 시한**(`pinned.total_deadline_seconds` — 기본 소켓 × 3, 상한 90초 · env `HUB_HEALTH_TOTAL_TIMEOUT` 우선): v2.768 은 둘을 같은 값(4초)으로 잡아 RTT 800ms TLS 대상의 정상 서버가 '응답 시간 초과' 로 떨어졌다. 배수는 4 미만(드립 시험 상한 = 시한 × 4). 웹훅도 같은 구조.
 - **헤더 단계에서 워치독이 끊었으면 시한 초과**(`deadline.fired` 를 `opener.open` 직후·HTTPError 에서 본다): 평문 http.client 는 shutdown 뒤 EOF 를 '헤더 끝' 으로 읽어 잘린 상태줄만으로 healthy 가 됐다(TLS 와 판정이 갈렸다).
+
+## 전체 점검 31회차 조치 — 되돌리지 말 것(`tests/test_audit_full31.py`)
+- **사용자 라우트는 `USER_PATTERN` + 디코드**(`server.py _user_arg`): 생성은 1~64자 아무 글자를 받으므로 관리 라우트를 ID_PATTERN 으로 좁히면 `.`·`@`·한글 계정을 폐기할 수 없다.
+- **복원은 계정별 tokenVersion 을 max(복원값, 현재값)+1 로**(`backup._bump_token_versions`) · **로그아웃 폐기 목록은 `session-revoked.json`**(토큰 SHA-256 — 원문 금지) · 실패 카운터는 시간 창 안만.
+- **users.json 읽기 오류(OSError)는 손상이 아니다**(`read_json(strict_io=True)`): 옮기지 않고 저장 · 새 admin 생성을 막는다. 콘솔 복구는 데이터 폴더 소유자로(root 거부).
+- 핀 연결 opener 는 `ProxyHandler({})` — 환경 프록시가 끼면 '대상 IP : 프록시 포트' 로 붙는다. 센터 id `all` 은 예약어.
+- 35회차 반증: 폐기 목록에는 **서명 · 만료가 유효한 토큰만**(미인증 로그아웃으로 파일이 자라지 않게 · 상한) · 백업도 users.json 을 strict 로 읽는다 · 못 읽음 상태 쓰기는 **바꾸기 전에** 거절 · 비-admin 에게 경로(초기 비밀번호 파일 포함) 금지 · 사용자명 `.`·`..`·`/` 거부.
+- 46회차: settings · categories · datacenters 도 **손상 · 읽기 오류 ≠ 첫 기동**(`jsonfile.read_json_state` — 보존본이 남아 있으면 재기동 뒤에도 'corrupt') — seed · 기본값을 파일에 굳히지 않고 쓰기 거절 · 바로가기는 분류 · 센터 원값 유지(`StoreUnavailable`) · 설정을 못 읽는 동안 백업 정리 중지 · CSV '교체' 는 같은 URL 의 id 를 이어받는다(`tests/test_audit_full46.py`).
+- 117회차(`tests/test_audit_full117.py`): **로그인 성공은 그 계정의 실패만 지운다**(`SessionStore.note_failure/note_success(client, username)` — 통째로 지우면 viewer 계정 하나로 admin 비밀번호를 잠금 없이 대입) ·
+  **비밀번호 → KDF 바이트는 `auth._pw_bytes`(surrogatepass) 하나로**(해시 · 검증 · 더미가 같은 입력 — strict 인코딩이면 짝 없는 서로게이트 비밀번호가 있는 계정만 400 이라 계정 열거) ·
+  **요청 본문 · 서버 파일 JSON 은 `_reject_lone_surrogates` 를 지난다**(저장소는 메모리를 먼저 바꾸고 파일에 쓴다 — UTF-8 로 못 쓰는 글자가 들어오면 저장은 실패하고 메모리에만 남아 공개 목록이 깨진다) ·
+  **마지막 admin 보호는 사본에 적용해 검사한 뒤 원본에**(`UserStore.update` — 거절한 강등 · 중지가 메모리에 남으면 재기동 전까지 admin 0명) ·
+  **이력 DB 는 부가 자료**: 손상(`DatabaseError`)은 `.corrupt.<ts>` 로 옮기고 새로 시작 · 열기 실패(`OperationalError`)는 옮기지 않는다 · 적재 실패가 알림 판정 · 점검 응답을 막지 않는다(`app._run_health_check`).
+  ⚠ 위 '소켓 타임아웃' 항목의 `timeout = 20` 은 **유휴 연결만** 정리한다 — 헤더를 조금씩 흘리는 연결(고전 slowloris)은 막지 못한다(재현). 124회차: **출발지(IP)당 동시 연결 상한**(`HubServer` · `HUB_MAX_CONN_PER_CLIENT` 기본 48 · 0 = 끔)으로 한 출발지가 64칸을 다 쥐지 못한다 — 여러 출발지로 나눈 공격은 앞단 프록시의 일.
+- 124회차(`tests/test_rebut124.py` — 117 반증): **걸려 있는 출발지 잠금은 성공으로 풀리지 않는다**(잠금 검사가 PBKDF2 앞이라 오답과 함께 보낸 자기 계정 로그인이 잠금 뒤에 끝나면 잠금을 지웠다 — `note_success` 는 실패 수만 뺀다) ·
+  **전역 실패 창도 그 계정의 실패만 뺀다**(`_global_fails` = (시각, 계정 이름) — 통째로 비우면 유효 계정 하나의 주기적 로그인으로 전역 잠금이 걸리지 않는다).
+- 131회차(`tests/test_rebut131.py` — 124 반증): **인증(PBKDF2)을 부르는 경로는 `_begin_auth_attempt` → `finally: end_attempt`**(`SessionStore.begin_attempt` — 잠금 검사와 함께 진행 중인 시도를 예약한다.
+  `lock_remaining` 만 보고 인증하면 잠금 검사와 실패 기록 사이의 동시 요청이 임계를 넘겨 평가된다 — 임계 8 에 동시 오답 33~38건) · **잠금 끝 · 실패 창은 벽시계라 `_purge_fails` 가 '지금 + 잠금 시간' 으로 다시 잡는다**(시계가 9시간 뒤로 가면 잠금 300초가 9시간 5분이 됐다 — 풀지는 않는다).
+- 134회차(`tests/test_sweep134.py`): **있는데 못 읽은 세션 서명 키를 새 키로 덮지 않는다**(`SessionStore._load_secret` — 읽기 오류면 이 프로세스만 임의 키 · 정말 없을 때만 만든다) ·
+  `read_json_state` 는 폴더 수준 읽기 오류도 'unreadable'(예외로 내보내지 않는다) · 파일 유무는 `Path.exists()`(3.13 실측: 권한 · 입출력 오류를 올린다)로 — `os.path.exists` 는 그 오류를 False 로 삼킨다(쓰지 말 것).
+- v3.18.8 결정(`tests/test_decide_g1b.py`): 폐기 목록을 못 읽으면 **fail-closed**(그 시점 이전 토큰 거부 · 기록 못 한 로그아웃은 계정 단위 폐기로 접음) · 백업 이름은 밀리초 + 순번으로 **덮어쓰지 않음**(정렬은 시각 키) · 복원은 저장소 잠금 5개를 고정 순서로 · **본인 비밀번호 변경은 현재 비밀번호 확인**(로그인과 같은 실패 카운터).

@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>호스트명 칸의 상태 9종</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.5}
+a{color:#60a5fa}a:hover{color:#93c5fd}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+.muted{color:#8b9bb4}
+.badge{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap}
+.badge.green{background:rgba(34,197,94,.15);color:#4ade80}
+.badge.amber{background:rgba(245,158,11,.15);color:#fbbf24}
+.badge.gray{background:rgba(139,155,180,.15);color:#8b9bb4}
+.badge.blue{background:rgba(59,130,246,.15);color:#60a5fa}
+.badge.purple{background:rgba(168,85,247,.15);color:#c084fc}
+.badge.teal{background:rgba(20,184,166,.16);color:#2dd4bf}
+.mini{padding:1px 7px;border-radius:8px;border:1px dashed #36507a;background:none;color:#93c5fd;font:inherit;font-size:11px;font-weight:600;cursor:pointer}
+.st{box-sizing:border-box;min-width:0;background:linear-gradient(180deg,#141b2d,#111726);border:1px solid #243049;border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+.st h3{margin:0;font-size:13px;font-weight:700;display:flex;align-items:center;gap:8px}
+.st h3 i{font-style:normal;display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:#1a2236;border:1px solid #243049;font-size:11px;color:#8b9bb4;flex:none}
+.cell{border:1px solid #1f2a40;border-radius:8px;background:#0f1626;padding:9px 12px;display:flex;flex-direction:column;gap:7px;min-height:44px;justify-content:center}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:7px;min-width:0}
+.ip{color:#3b82f6;font-weight:700;width:92px;flex:none}
+.rule{font-size:12px;color:#8b9bb4;line-height:1.65}
+.rule b{color:#e6edf6;font-weight:600}
+</style>
+</helmet>
+<div style="box-sizing:border-box;padding:20px 24px 28px;max-width:1240px;display:flex;flex-direction:column;gap:14px;min-width:0">
+
+  <div style="display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:10px">
+    <span style="font-size:15px;font-weight:700">호스트명 칸이 보이는 모양 — 상태 9종</span>
+    <span class="muted" style="font-size:12px">못 찾음 · 안 물어봄 · 오래됨은 서로 다른 상태로 둡니다 · 주소 · 이름은 가상</span>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px">
+
+    <div class="st">
+      <h3><i>1</i>이름을 찾음</h3>
+      <div class="cell">
+        <div class="row"><span>gw-b1.corp.example</span><span class="badge blue">역DNS</span></div>
+        <div class="row"><span>web-stg-02.local</span><span class="badge green">mDNS</span></div>
+        <div class="row"><span>WIN-APP01</span><span class="badge purple">NetBIOS</span></div>
+        <div class="row"><span>idrac-r740-b12</span><span class="badge teal">수동</span></div>
+      </div>
+      <div class="rule">배지는 <b>그 이름을 어디서 알았는지</b>입니다. 여러 방식이 답하면 직접 넣은 이름 &gt; 역DNS &gt; mDNS &gt; NetBIOS 순으로 하나를 표시합니다.</div>
+    </div>
+
+    <div class="st">
+      <h3><i>2</i>응답 없음</h3>
+      <div class="cell">
+        <div class="row"><span class="muted">—</span><button class="mini">+ 이름</button></div>
+      </div>
+      <div class="rule">켜 둔 방식이 <b>모두 답하지 않았습니다.</b> 이름을 지어내지 않고 ‘—’ 로 둡니다. ‘+ 이름’ 으로 직접 넣을 수 있습니다(운영자 · 관리자).</div>
+    </div>
+
+    <div class="st">
+      <h3><i>3</i>확인 안 함</h3>
+      <div class="cell">
+        <div class="row"><span class="muted">—</span><span class="muted" style="font-size:11px">확인 안 함</span></div>
+      </div>
+      <div class="rule">그 에이전트의 방식이 <b>모두 꺼져 있습니다.</b> ‘응답 없음’ 과 구분합니다 — 묻지 않은 것은 없는 것이 아닙니다.</div>
+    </div>
+
+    <div class="st">
+      <h3><i>4</i>방식마다 이름이 다름</h3>
+      <div class="cell">
+        <div class="row"><span>fs-old.corp.example</span><span class="badge blue">역DNS</span><span class="badge amber">이름 다름</span></div>
+      </div>
+      <div class="rule">우선순위대로 표시하고 <b>다르다는 사실만</b> 알립니다. 어느 쪽이 맞는지 판정하지 않습니다. IP 를 누르면 방식별 결과가 나옵니다(보드 ②).</div>
+    </div>
+
+    <div class="st">
+      <h3><i>5</i>지난 스캔에서는 답이 없었음</h3>
+      <div class="cell">
+        <div class="row"><span style="color:#8b9bb4">WIN-APP02</span><span class="badge purple">NetBIOS</span><span class="muted" style="font-size:11px">11-13 05:05 확인</span></div>
+      </div>
+      <div class="rule">이번 스캔에서 그 방식이 답하지 않아도 <b>전에 확인한 이름을 지우지 않고</b> 언제 확인한 이름인지 붙입니다. 그 방식이 연속으로 여러 번(기본 3회) 답하지 않으면 그때 지웁니다.</div>
+    </div>
+
+    <div class="st">
+      <h3><i>6</i>이름이 바뀜</h3>
+      <div class="cell">
+        <div class="row"><span class="mono muted" style="font-size:12px">11-02 14:30</span><span class="badge amber">이름 변경</span></div>
+        <div class="row"><span class="badge purple">NetBIOS</span><span>FS-OLD → <b>NAS-BACKUP</b></span></div>
+      </div>
+      <div class="rule">IP 의 <b>사용 이력에 한 줄</b> 남깁니다. 같은 방식이 전과 다른 이름을 답했을 때만 — 답이 없던 스캔은 이름 변경이 아닙니다.</div>
+    </div>
+
+    <div class="st">
+      <h3><i>7</i>이전 버전 에이전트</h3>
+      <div class="cell">
+        <div class="row"><span>lnx-app-07.corp.example</span><span class="badge blue">역DNS</span></div>
+        <div class="row"><span class="muted" style="font-size:12px">에이전트 표</span><span class="mono" style="font-size:12px">97 / 233</span><span class="badge gray">방식 보고 없음</span></div>
+      </div>
+      <div class="rule">이 버전보다 낮은 엣지는 <b>역DNS 만</b> 합니다. 이름은 역DNS 로 표시하고, 에이전트 표에 ‘방식 보고 없음’ 을 붙여 mDNS · NetBIOS 가 없는 이유를 알립니다.</div>
+    </div>
+
+    <div class="st">
+      <h3><i>8</i>스캔이 끝까지 못 감</h3>
+      <div class="cell">
+        <div class="row"><span>WIN-APP01</span><span class="badge purple">NetBIOS</span></div>
+      </div>
+      <div class="rule">시한에 걸린 스캔은 이름 확인 단계에 닿지 못합니다. <b>전에 확인한 이름을 그대로</b> 두고, ‘스캔 미완료’ 안내는 지금의 스캔 상태 화면 그대로입니다.</div>
+    </div>
+
+    <div class="st">
+      <h3><i>9</i>VM · ESXi 호스트 행</h3>
+      <div class="cell">
+        <div class="row"><span class="ip">10.1.0.2</span><span>web-ap-0002.corp.example</span><span class="badge blue">역DNS</span></div>
+        <div class="row"><span class="ip">10.1.4.9</span><span class="muted">—</span><span class="muted" style="font-size:11px">스캔 대역 밖</span></div>
+      </div>
+      <div class="rule">vCenter 가 아는 IP 도 <b>스캔 대역에 들어 있으면</b> 스캔이 찾은 이름을 붙입니다. 대역 밖이면 ‘—’ — VM 이름은 지금처럼 ‘소유 자원’ 칸에 있습니다.</div>
+    </div>
+
+  </div>
+
+  <div class="rule" style="border:1px solid #243049;border-radius:10px;background:#0f1626;padding:10px 14px">
+    <b>범위가 제한된 계정</b> — 스캔으로만 확인한 IP 는 지금처럼 보이지 않습니다. 스캔이 찾은 이름도 스캔 결과이므로 같은 규칙을 따릅니다(자기 범위의 VM 행에도 붙이지 않음).
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1240,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

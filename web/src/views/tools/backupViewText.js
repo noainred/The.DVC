@@ -847,3 +847,15 @@ export function loadStaleOpts(storage, key = STALE_KEY) {   // v2.836 key — Su
 export function saveStaleOpts(o, storage, key = STALE_KEY) {
   try { (storage === undefined ? globalThis.localStorage : storage)?.setItem(key, JSON.stringify(o)); } catch { /* 저장 못 해도 동작 */ }
 }
+
+/**
+ * v2.959: Backup 현황 · Detail 이 이어받는 vCenter(이 브라우저에만) — 여는 곳은 이 키 · 이 함수 하나를 쓴다(복제 금지).
+ * 지금 호출처는 서머리의 openDetail 하나다(v3.19.0 에 가상화 플랫폼 KPI 카드를 걷어냈다 — 전에는 그 카드도 같이 썼다).
+ * storage · go 는 테스트용 주입(기본은 브라우저). 저장 못 해도 세부내용은 첫 vCenter 로 열린다.
+ */
+export const DETAIL_VC_KEY = 'backup-detail-vc';
+export function openBackupDetail(vcId, { storage = (typeof localStorage !== 'undefined' ? localStorage : null), go = (h) => { window.location.hash = h; } } = {}) {
+  const id = String(vcId || '').trim();
+  if (id) { try { storage?.setItem?.(DETAIL_VC_KEY, id); } catch { /* 이 브라우저에만 — 저장 못 해도 화면은 열린다 */ } }
+  go('#/tools/backup-detail');
+}

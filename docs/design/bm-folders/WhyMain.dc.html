@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>물리서버 폴더 — 빈 값에 짧은 사유와 툴팁</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./bmf.css">
+<link rel="stylesheet" href="./bmf2.css">
+<link rel="stylesheet" href="./why.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+</style>
+</helmet>
+<div class="root" style="width:1440px;height:900px">
+  <div class="tb">
+    <span class="logo"><span class="v">V</span><span>VMware Global Monitoring Portal</span></span>
+    <span class="ver">v2.990.0</span>
+    <span class="cmdk"><span>기능 · 탭 · 장비 찾기</span><span class="kbd" style="margin-left:auto">⌘K</span></span>
+    <span class="pill" style="margin-left:auto"><span class="dot" style="background:#22c55e"></span><span>vCenter 28/28</span></span>
+    <span class="pill"><span>admin · 전체 범위</span></span>
+  </div>
+  <div class="body">
+    <nav class="sb" aria-label="주 메뉴">
+      <span class="h">모니터링</span>
+      <a href="#">Overview</a>
+      <a href="#">Platform</a>
+      <a href="#">호스트</a>
+      <a href="#">가상머신</a>
+      <a href="#">데이터스토어</a>
+      <a href="#">네트워크</a>
+      <a href="#">IP 관리</a>
+      <a href="#">알람</a>
+      <span class="h">도구</span>
+      <a href="#" class="on">특수 기능</a>
+      <a href="#">게시판</a>
+      <a href="#">위키</a>
+      <a href="#">설정</a>
+    </nav>
+    <div class="main">
+      <div class="crumb">특수 기능 › 서버 · 하드웨어 › 물리서버 폴더</div>
+      <h1 class="h1">
+        <span>물리서버 폴더</span>
+        <div class="seg" role="group" aria-label="보기 방식"><button type="button" class="on">목록</button><button type="button">맵</button></div>
+        <span class="sp row"><button class="btn pri" type="button">서버 찾아 등록</button><button class="btn" type="button">CSV</button><button class="btn" type="button">새로고침</button></span>
+      </h1>
+
+      <div class="pane">
+        <div class="card tree">
+          <div class="th">
+            <div class="seg" role="group" aria-label="트리 보기"><button type="button" class="on">법인별</button><button type="button">폴더 이름별</button></div>
+            <input class="inp" type="text" placeholder="폴더 · 법인 이름 찾기" aria-label="폴더 · 법인 이름 찾기" style="width:100%">
+          </div>
+          <div class="rows">
+            <button class="tr" type="button"><span class="tw"></span><span class="nm">전체 물리서버</span><span class="ct">503</span></button>
+            <button class="tr" type="button"><span class="tw">▾</span><span class="co"></span><span class="nm">KR-HQ 본사</span><span class="bdg c" style="margin-left:auto">중앙</span><span class="ct" style="margin-left:0">118</span></button>
+            <button class="tr d1" type="button"><span class="tw">▾</span><span class="fo"></span><span class="nm">DB</span><span class="ct">31</span></button>
+            <button class="tr d2 on" type="button"><span class="tw"></span><span class="fo"></span><span class="nm">Oracle RAC</span><span class="ct">5</span></button>
+            <button class="tr d2" type="button"><span class="tw"></span><span class="fo"></span><span class="nm">MySQL</span><span class="ct">26</span></button>
+            <button class="tr d1" type="button"><span class="tw"></span><span class="fo"></span><span class="nm">WEB</span><span class="ct">40</span></button>
+            <button class="tr d1 un" type="button"><span class="tw"></span><span class="fo un"></span><span class="nm">(미분류)</span><span class="ct">47</span></button>
+            <button class="tr" type="button"><span class="tw">▸</span><span class="co"></span><span class="nm">PL-WAW 폴란드</span><span class="bdg e" style="margin-left:auto">엣지</span><span class="ct" style="margin-left:0">47</span></button>
+            <button class="tr" type="button"><span class="tw">▸</span><span class="co"></span><span class="nm">US-EAST 미국 동부</span><span class="bdg e" style="margin-left:auto">엣지</span><span class="ct" style="margin-left:0">62</span></button>
+          </div>
+        </div>
+
+        <div class="card cnt" style="position:relative">
+          <div class="fh">
+            <div class="path">
+              <span class="dim" style="font-weight:600">KR-HQ 본사</span><span class="sep">›</span><span>DB</span><span class="sep">›</span><span>Oracle RAC</span>
+              <span class="bdg c">서비스: Oracle RAC</span>
+            </div>
+            <div class="tiles">
+              <div class="tile"><span class="tk2">서버 5대 — 상태</span><span class="tv2"><span class="sd ok"></span>켜짐 5 · 꺼짐 0</span><span class="ts2">사용률 값 없음 3</span></div>
+              <div class="tile"><span class="tk2">CPU(용량 가중)</span><span class="tv2 num">36%</span><span class="ts2">2대 기준 · 3대 값 없음</span></div>
+              <div class="tile"><span class="tk2">메모리(용량 가중)</span><span class="tv2 num">60%</span><span class="ts2">2대 기준 · 3대 값 없음</span></div>
+              <div class="tile"><span class="tk2">전력</span><span class="tv2 num">1,443 W</span><span class="ts2">3대 합 · 2대 값 없음</span></div>
+              <div class="tile" style="border-color:rgba(239,68,68,.45)"><span class="tk2">부품 장애</span><span class="tv2" style="color:#fca5a5">1대</span><span class="ts2">모름 1</span></div>
+            </div>
+          </div>
+
+          <div class="rsum" role="group" aria-label="값이 없는 이유별 개수">
+            <span class="rk">값이 없는 칸</span>
+            <span class="rk">사용률 3대</span>
+            <button class="rc" type="button"><span class="nd w"></span>오래됨 <b>1</b></button>
+            <button class="rc" type="button"><span class="nd"></span>OS 계정 없음 <b>1</b></button>
+            <button class="rc" type="button"><span class="nd"></span>엣지 기록 없음 <b>1</b></button>
+            <span class="vr"></span>
+            <span class="rk">전력 2대</span>
+            <button class="rc" type="button"><span class="nd"></span>iDRAC 전력 미보고 <b>1</b></button>
+            <button class="rc" type="button"><span class="nd"></span>엣지 보고에 없음 <b>1</b></button>
+            <span class="vr"></span>
+            <span class="rk">부품 장애 1대</span>
+            <button class="rc" type="button"><span class="nd u"></span>확인 못 함 <b>1</b></button>
+          </div>
+
+          <table class="t">
+            <thead><tr><th style="width:22%">이름</th><th style="width:20%">모델 · 서비스 태그</th><th style="width:10%">받는 길</th><th style="width:15%">부품 장애</th><th style="width:19%">사용률</th><th style="width:14%">전력</th></tr></thead>
+            <tbody>
+              <tr><td style="height:46px"><span class="nm"><span class="sd ok"></span>kr-ora-rac01</span></td><td>PowerEdge R750 <span class="dim mono">7XK2M03</span></td><td><span class="bdg c">중앙</span></td><td class="dim">없음</td>
+                <td><div style="display:flex;flex-direction:column;gap:3px"><div class="mb" style="justify-content:flex-start"><span class="dim" style="width:32px">CPU</span><span class="mbt"><i style="width:38%"></i></span><span class="mbn">38%</span></div><div class="mb" style="justify-content:flex-start"><span class="dim" style="width:32px">MEM</span><span class="mbt"><i style="width:64%"></i></span><span class="mbn">64%</span></div></div></td>
+                <td class="num">486 W</td></tr>
+              <tr><td style="height:46px"><span class="nm"><span class="sd ok"></span>kr-ora-rac02</span></td><td>PowerEdge R750 <span class="dim mono">7XK2N03</span></td><td><span class="bdg c">중앙</span></td><td class="dim">없음</td>
+                <td><button class="nx" type="button" aria-label="사용률 값 없음 — 오래됨 2시간 14분. 이유 보기"><span class="nv">CPU · MEM —</span><span class="nr"><span class="nd w"></span> 오래됨 · 2시간 14분 전</span></button></td>
+                <td class="num">492 W</td></tr>
+              <tr><td style="height:46px"><span class="nm"><span class="sd bad"></span>kr-ora-rac03</span></td><td>PowerEdge R750 <span class="dim mono">7XK2P03</span></td><td><span class="bdg c">중앙</span></td><td><span class="bdg r">전원 장치 1건</span></td>
+                <td style="overflow:visible;position:relative">
+                  <button class="nx open" type="button" aria-expanded="true" aria-label="사용률 값 없음 — OS 계정 없음. 이유 보기"><span class="nv">CPU · MEM —</span><span class="nr"><span class="nd"></span> OS 계정 없음</span></button>
+                  <div class="tip" role="tooltip" style="top:calc(100% + 4px);right:-40px">
+                    <span class="ar"></span>
+                    <div class="tt"><span>CPU · 메모리 값이 없습니다</span><span class="tn g sp">수집 대상 아님</span></div>
+                    <div class="rs"><span class="nd"></span><span><b>OS 계정이 등록되지 않았습니다.</b> 이 서버는 iDRAC 으로 CPU · 메모리를 읽지 못했고, OS(SSH)로 읽을 계정도 없습니다.</span></div>
+                    <div class="fx">
+                      <span class="k">마지막 값</span><span class="v">없음 — 수집한 적이 없습니다</span>
+                      <span class="k">읽고 있는 것</span><span class="v">전력 · 부품 장애(iDRAC)</span>
+                      <span class="k">판정한 시각</span><span class="v">06:38 · 베어메탈 사용률 누락 점검</span>
+                    </div>
+                    <div class="ac"><b>이렇게 하면 보입니다</b> — 베어메탈 스토리지 등록부에 이 서버의 OS 계정을 넣으면 다음 수집 주기부터 값이 나옵니다.</div>
+                    <div class="lk"><a href="#">베어메탈 사용률 › 누락 점검</a><a href="#">OS 계정 등록</a></div>
+                  </div>
+                </td>
+                <td class="num">465 W</td></tr>
+              <tr><td style="height:46px"><span class="nm"><span class="sd na"></span>kr-ora-rac04</span></td><td>PowerEdge R750xa <span class="dim mono">9HT4Q13</span></td><td><span class="bdg e">엣지</span></td>
+                <td><button class="nx r1" type="button" aria-label="부품 장애 확인 못 함. 이유 보기"><span class="nd u"></span><span class="nr">확인 못 함</span></button></td>
+                <td><button class="nx" type="button" aria-label="사용률 값 없음 — 엣지 기록 없음. 이유 보기"><span class="nv">CPU · MEM —</span><span class="nr"><span class="nd"></span> 엣지 기록 없음</span></button></td>
+                <td><button class="nx" type="button" aria-label="전력 값 없음 — 엣지 보고에 없음. 이유 보기"><span class="nv">—</span><span class="nr"><span class="nd"></span> 엣지 보고에 없음</span></button></td></tr>
+              <tr><td style="height:46px"><span class="nm"><span class="sd ok"></span>kr-ora-dev02</span></td><td>PowerEdge R650 <span class="dim mono">4BN7R53</span></td><td><span class="bdg c">중앙</span></td><td class="dim">없음</td>
+                <td><div style="display:flex;flex-direction:column;gap:3px"><div class="mb" style="justify-content:flex-start"><span class="dim" style="width:32px">CPU</span><span class="mbt"><i style="width:34%"></i></span><span class="mbn">34%</span></div><div class="mb" style="justify-content:flex-start"><span class="dim" style="width:32px">MEM</span><span class="mbt"><i style="width:55%"></i></span><span class="mbn">55%</span></div></div></td>
+                <td><button class="nx" type="button" aria-label="전력 값 없음 — iDRAC 전력 미보고. 이유 보기"><span class="nv">—</span><span class="nr"><span class="nd"></span> iDRAC 전력 미보고</span></button></td></tr>
+            </tbody>
+          </table>
+          <div class="foot">
+            <span>5대 · 값이 없는 칸은 평균 · 합계에 넣지 않습니다 · ‘—’ 아래 글자가 이유이고, 올리거나 누르면 자세한 설명이 나옵니다</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

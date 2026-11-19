@@ -2,6 +2,9 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import BoldText from '../../components/boldText.jsx';   // v2.447: 서버 문구의 **강조** 별표 노출 방지(감사 I6)
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
 import { fetchJson, postJson, delJson, canCsv, hasRole } from '../../api.js';
+import { unreadMarkOf, registryEmptyText } from '../settingsUnread.js';   // 128회차: 등록부를 못 읽은 동안의 빈 목록을 ‘등록 없음’ 으로 보이지 않는다
+import { RegistryUnreadBanner } from '../SettingsUnreadBanner.jsx';
+import { requireChanged } from '../changeResult.js';   // 112회차: delJson 은 409 · 400 을 던지지 않고 본문을 준다 — 거절(등록부 읽기 오류 · 사용 중)을 삭제 성공으로 읽지 않는다
 import { droppedSecretNote } from '../droppedSecretText.js';
 import { agoText } from './relTime.js';
 import { edgeClockAheadMark, edgeClockFootnote } from './edgeLateText.js'; // v2.631 A6-2631-04: 엣지 시계 빠름 표지
@@ -10,9 +13,10 @@ import { statusText, traceText, isActive, phaseLabel, testSnapView } from './san
 import SanZoningPanel from './SanZoningPanel.jsx';
 import SanPortUsage from './SanPortUsage.jsx';   // v2.748 📊 포트 사용량(시안 A안 개정 2)
 import SanPortMap from './SanPortMap.jsx';       // v2.748 🔲 포트 배치(스위치 한 대 전체 포트)
+import SanHostAttrib from './SanHostAttrib.jsx'; // v2.920 호스트 귀속(가상화 호스트 HBA ↔ 조닝 ↔ 스토리지 트래픽 — 시안 D-③)
 import { Loading, ErrorBox, Kpi, UsageCell, Modal, SearchBox } from '../../components/ui.jsx';
 import { stateLabel, stateTone, opticalHealth, errorLevel, capacityLevel, aggregate,
-  throughputText, throughputTitle, filterPorts, shortDeviceName, saturationPct, saturationLevel, bytesPerSecText,
+  throughputText, throughputTitle, filterPorts, otherErrorsTitle, shortDeviceName, saturationPct, saturationLevel, bytesPerSecText,
   toChartRows, topSeries, bps, sortPorts, nextSort, sortRows, seriesStats,
   RX_WARN_DBM, RX_BAD_DBM, alertsMeta, usedPctText, switchesMeta, perfPartialNote, perfPartialMark, rateNotReadyText, fruText } from './sanSwitchPorts.js';
 import { STable } from '../../components/STable.jsx';
@@ -21,7 +25,7 @@ import CollectActivity from './CollectActivity.jsx';
 import { perfDiagText, diagBorder, perfCollectSummary } from './sanPerfDiagText.js';
 import { portsScopeNote } from './sanPortsScopeText.js';
 import { DeviceHealthPanel, AllHealthCheck } from './SanHealthCheck.jsx';
-import { authStopInfo, authStopSummary, credFpText } from './storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
+import { authStopInfo, authStopSummary, authStopSummaryUnreadOnly, authStopShort, credFpText } from './storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
 import { collectDropNote } from './collectDropText.js'; // v2.591: 결과 없이 폐기된 위임 '지금 수집' 요청
 import { hostText, addressHiddenNote } from './addressHiddenText.js'; // v2.599 AUTHZ-2599-03
 import { powerText } from './sanPowerText.js';
@@ -29,6 +33,7 @@ import { CapacityCard, TrafficCard, DcGrid } from './SanSwitchV2Parts.jsx'; // v
 import { trackFetch, freshState, freshNote, clockText } from './sanFreshText.js'; // 검토 I-04: 목록 갱신 실패를 숨기지 않는다
 import { FreshNote } from './SanFreshNote.jsx';
 import { headStatus, lastCollectedAt, sortSwitches, hotCount, rowMark, LIST_SORTS } from './sanSwitchViewText.js';
+import { copyText as copyToClipboard } from '../../util/copyText.js';   // v3.10.6: HTTP 포탈에서도 복사(Clipboard API → execCommand 폴백 · 실패는 false)
 import { perfAvgOf, perfMaxOf, dcGrandTotals, dcUnmeasuredNote, dcSharePct } from './sanStorageSumText.js'; // v2.721(감사 R1-02·R2-01·R2-02): 측정 없음은 null
 import { missingChoice } from '../idrac/scanRangeFormText.js'; // v2.630 WEB2630-03: 목록에 없는 저장값을 그대로 보인다
 import useSearchHandoff from '../../hooks/useSearchHandoff.js'; // v2.909 헤더 ⌘K 통합 장비 검색 — 검색어 인계
@@ -86,6 +91,7 @@ export default function SanSwitchTool() {
   const [dcPerf, setDcPerf] = useState(null);      // 법인 단위 스토리지 사용량 분석 모달
   const [bulkOpen, setBulkOpen] = useState(false);  // 대량 등록 모달(v2.513) — 훅은 조기 return 위에
   const [healthOpen, setHealthOpen] = useState(false); // 전체 점검 모달(v2.519) — 훅은 조기 return 위에
+  const [attribOpen, setAttribOpen] = useState(false); // 호스트 귀속 모달(v2.920) — 훅은 조기 return 위에
   const [portFilter, setPortFilter] = useState('all');
   const [portQ, setPortQ] = useState('');
   const [infoOpen, setInfoOpen] = useState(false);   // 장비 일반 정보 펼침
@@ -148,20 +154,23 @@ export default function SanSwitchTool() {
     : { ...EMPTY_FORM, agent: '', datacenterId: data.datacenters?.[0]?.id || '' });
 
   const save = async () => {
-    setBusy(true); setMsg(null);
+    setBusy(true); setMsg(null); setFormNote(null);
     try {
-      const r = await postJson('/tools/sanswitch/devices', form);
+      // 128회차: postJson 은 409 를 던지지 않고 본문을 준다 — 등록부 읽기 오류 거절(409)에 창을 닫고 ‘저장되었습니다.’ 라고 했다.
+      const r = requireChanged(await postJson('/tools/sanswitch/devices', form));
       const dropNote = droppedSecretNote(r); // v2.607 WEB2607-03: 접속처 변경으로 저장 비밀번호 폐기 — 폼 유지
       if (dropNote) { setForm((f) => ({ ...f, password: '' })); await load(); setFormNote(dropNote); }
       else { setForm(null); setFormNote(null); await load(); setMsg('저장되었습니다.'); }
     }
-    catch (e) { setMsg(`저장 실패: ${e.message}`); }
+    // 릴리스 전 Chromium 검증(119~131회차 묶음): 거절 사유를 창 **밖**(목록 위 한 줄)에만 적어, 창이 열린 동안에는 저장을 눌러도 아무 일도 없는 것처럼 보였다
+    //   (128회차가 409 를 실패로 읽게 고쳤지만 사유가 보이는 자리는 그대로였다) — 창 안에 보인다. 창이 이미 닫힌 경우를 위해 목록 위에도 남긴다.
+    catch (e) { setFormNote(`저장 실패: ${e.message}`); setMsg(`저장 실패: ${e.message}`); }
     finally { setBusy(false); }
   };
   const remove = async (r) => {
     if (!window.confirm(`'${r.name}' 스위치 등록을 삭제할까요? 수집된 스냅샷도 함께 지워집니다.`)) return;
     setBusy(true);
-    try { await delJson(`/tools/sanswitch/devices/${r.id}`); await load(); setMsg('삭제되었습니다.'); }
+    try { requireChanged(await delJson(`/tools/sanswitch/devices/${r.id}`)); await load(); setMsg('삭제되었습니다.'); }
     catch (e) { setMsg(`삭제 실패: ${e.message}`); }
     finally { setBusy(false); }
   };
@@ -229,7 +238,7 @@ export default function SanSwitchTool() {
         <div style={{ minWidth: 0 }}>
           <h1>SAN 스위치 모니터링</h1>
           {(() => {
-            const hs = headStatus(rows, dcChips.length);
+            const hs = headStatus(rows, dcChips.length, registryEmptyText(unreadMarkOf(data), 'SAN 스위치 등록부') ? 'SAN 스위치 등록부를 읽지 못했습니다(아래 안내)' : '');   // 전체 문장은 아래 배너 · 표 안이 말한다(머리 줄은 짧게)
             const dot = hs.tone === 'ok' ? 'var(--green)' : hs.tone === 'warn' ? 'var(--amber)' : hs.tone === 'bad' ? 'var(--red)' : 'var(--text-faint)';
             const last = lastCollectedAt(rows);
             return (
@@ -249,6 +258,10 @@ export default function SanSwitchTool() {
           <button type="button" className="san2-btn"
             title="등록된 SAN 스위치를 월간 점검 체크리스트로 판정해 이상 유무를 요약하고, 세부 보고서를 PDF 로 내려받습니다. 스위치에 새로 접속하지 않고 마지막 수집 스냅샷을 판정합니다."
             onClick={() => setHealthOpen(true)}>전체 점검</button>
+          {/* v2.920 호스트 귀속 — 가상화 호스트의 HBA WWN 을 스위치 포트·zone·등록 스토리지에 대조해 어느 스토리지에 얼마나 트래픽이 가는지(확정/추정). 법인 칩 선택을 범위로 쓴다. */}
+          <button type="button" className="san2-btn"
+            title="가상화 호스트의 HBA WWN 을 스위치 포트 · zone · 네임서버 역할 · 등록 스토리지(시리얼)에 대조해 호스트별로 어느 스토리지에 얼마나 트래픽이 가는지 봅니다(확정/추정 분리). 법인 칩 선택을 그대로 범위로 씁니다."
+            onClick={() => setAttribOpen(true)}>호스트 귀속</button>
           <button type="button" className="san2-btn" disabled={busy}
             title="중앙이 직접 수집하는 스위치를 지금 다시 수집하고, 엣지 위임 스위치는 재수집 요청을 등록합니다(엣지는 다음 설정 pull 때 수집 후 바로 push)."
             onClick={collectAll}>전체 수집</button>
@@ -261,9 +274,10 @@ export default function SanSwitchTool() {
       </div>
 
       <FreshNote note={listNote} style={{ marginBottom: 12 }} />
+      <RegistryUnreadBanner le={unreadMarkOf(data)} what="SAN 스위치 등록부" />
 
       {/* 포트 용량 — '용량'은 포트 용량이다. 라이선스 없는 포트는 여유에서 빠진다. */}
-      <CapacityCard agg={agg} scopeLabel={dcSel.size ? `선택 ${dcSel.size}개 법인` : '전체'} />
+      <CapacityCard agg={agg} scopeLabel={dcSel.size ? `선택 ${dcSel.size}개 법인` : '전체'} registryUnread={!!registryEmptyText(unreadMarkOf(data), 'SAN 스위치 등록부')} />
 
       {/* 스토리지 트래픽(v2.669) — 법인 선택을 그대로 범위로 쓴다. */}
       <TrafficCard datacenterIds={[...dcSel].map(dcIdOfName).filter(Boolean)} selected={dcSel.size} isAdmin={hasRole('admin')} />
@@ -276,7 +290,7 @@ export default function SanSwitchTool() {
 
       {/* v2.590(감사 F2): 인증 실패로 **주기 수집을 멈춘** 스위치 — 조용히 멈추지 않는다(authGuard 규칙 1). */}
       {authStopSummary(rows.filter((r) => r.snap?.extra?.authStopped), { unit: '대', what: 'SAN 스위치' }) && (
-        <div className="card" style={{ marginBottom: 10, padding: '10px 14px', fontSize: 13, borderColor: TONE.bad }}>
+        <div className="card" data-auth-stop-summary style={{ marginBottom: 10, padding: '10px 14px', fontSize: 13, borderColor: authStopSummaryUnreadOnly(rows.filter((r) => r.snap?.extra?.authStopped)) ? TONE.warn : TONE.bad }}>
           <BoldText text={authStopSummary(rows.filter((r) => r.snap?.extra?.authStopped), { unit: '대', what: 'SAN 스위치' })} />
           <span className="muted"> 행의 ‘수집’ 은 정지와 무관하게 1회 시도하고, 성공하면 정지가 풀립니다. 포트 사용량 수집도 같은 계정이라 함께 멈춥니다.</span>
         </div>
@@ -331,9 +345,10 @@ export default function SanSwitchTool() {
               return (
                 <tr key={r.id} {...(mark ? { 'data-mark': '1', style: { '--row-mark': mark } } : {})}>
                   <td>
-                    <button className="tab" style={{ padding: '2px 8px', fontWeight: 600 }} onClick={() => openDetail(r)} title="클릭하면 포트 상세를 봅니다">{r.name}</button>
+                    <button className="tab" style={{ padding: '2px 8px', fontWeight: 600, whiteSpace: 'normal', overflowWrap: 'anywhere', maxWidth: 200, textAlign: 'left' }} onClick={() => openDetail(r)} title="클릭하면 포트 상세를 봅니다">{r.name}</button>
                     {/* 스위치가 스스로 보고한 이름(switchshow 의 switchName)을 함께 — 등록 표시명과 다를 수 있다(사용자 요구). */}
-                    <div className="muted" style={{ fontSize: 11 }}>
+                    {/* v2.977(전체 점검): 보고 이름 · 주소 줄이 한 줄로 이어져 1440px 에서 '동작' 열이 24px 밀렸다 — 폭을 묶고 접는다 */}
+                    <div className="muted" style={{ fontSize: 11, whiteSpace: 'normal', overflowWrap: 'anywhere', maxWidth: 200 }}>
                       {s?.name && s.name !== r.name ? <><b style={{ fontWeight: 600 }}>{s.name}</b>{' · '}</> : null}
                       {hostText(r.host)}{r.vfId ? ` · VF ${r.vfId}` : ''}
                     </div>
@@ -352,9 +367,9 @@ export default function SanSwitchTool() {
                         // v2.516: 실패 배지는 버튼이다(툴팁에만 사유를 두지 않는다) — 상세 창이 수집 오류 원문·섹션별 사유를 보여준다.
                         <button type="button" className="badge" style={{ background: TONE.bad, color: '#fff', cursor: 'pointer', border: 0, whiteSpace: 'nowrap' }}
                           title={s?.extra?.authStopped
-                            ? `인증 실패로 주기 수집을 멈췄습니다 — ${authStopInfo(s.extra.authStopped, { what: '이 스위치' })?.detail || ''}\n\n(클릭하면 상세 창에서 사유와 자격증명 지문을 봅니다)`
+                            ? `${authStopInfo(s.extra.authStopped, { what: '이 스위치' })?.title || ''} — ${authStopInfo(s.extra.authStopped, { what: '이 스위치' })?.detail || ''}\n\n(클릭하면 상세 창에서 사유와 자격증명 지문을 봅니다)`
                             : `실패 사유: ${failReason(s)}\n\n(클릭하면 상세 창에서 전문을 봅니다)`}
-                          onClick={() => openDetail(r)}>{s?.extra?.authStopped ? '인증 실패 정지 ⓘ' : '실패 ⓘ'}</button>
+                          onClick={() => openDetail(r)}>{s?.extra?.authStopped ? `${authStopShort(s.extra.authStopped)} ⓘ` : '실패 ⓘ'}</button>
                       )}
                   </td>
                   <td data-sort={s?.ok && lvl !== 'unknown' ? p.usedPct : ''}>
@@ -383,7 +398,7 @@ export default function SanSwitchTool() {
               );
             })}
             {!shown.length && <tr><td colSpan={9} className="muted" style={{ textAlign: 'center', padding: 24 }}>
-              {rows.length ? '검색어/법인 필터에 맞는 스위치가 없습니다 — 검색어를 지우거나 법인 선택을 해제하세요.' : "등록된 SAN 스위치가 없습니다. 오른쪽 위 '+ 스위치 등록'으로 추가하세요."}
+              {rows.length ? '검색어/법인 필터에 맞는 스위치가 없습니다 — 검색어를 지우거나 법인 선택을 해제하세요.' : (registryEmptyText(unreadMarkOf(data), 'SAN 스위치 등록부') || "등록된 SAN 스위치가 없습니다. 오른쪽 위 '+ 스위치 등록'으로 추가하세요.")}
             </td></tr>}
           </tbody>
         </STable>
@@ -426,8 +441,13 @@ export default function SanSwitchTool() {
         </Modal>
       )}
 
+      {attribOpen && (
+        <Modal title={`호스트 귀속 — SAN 조닝 · 트래픽${dcSel.size ? ` — ${[...dcSel].join(', ')}` : ' — 전체'}`} onClose={() => setAttribOpen(false)} width={1400}>
+          <SanHostAttrib datacenterIds={[...dcSel].map(dcIdOfName).filter(Boolean)} datacenters={data.datacenters || []} dcNameOf={dcName} />
+        </Modal>
+      )}
       {canCsv() && bulkOpen && (
-        <BulkDeviceIo base="/tools/sanswitch" title="SAN 스위치 대량 등록 — CSV · 자유텍스트" keyLabel="host"
+        <BulkDeviceIo base="/tools/sanswitch" title="SAN 스위치 대량 등록 — CSV · 자유텍스트" keyLabel="host" blankKeeps
           onClose={() => setBulkOpen(false)} onDone={() => { setBulkOpen(false); load(); }} />
       )}
     </>
@@ -438,48 +458,52 @@ export default function SanSwitchTool() {
 function DeviceForm({ form, setForm, data, save, busy, runTest, test, setTest, stopTestPoll, formNote, setFormNote }) {
   const set = (k) => (e) => setForm((p) => ({ ...p, [k]: e.target.value }));
   const type = data.types.find((t) => t.type === form.type) || data.types[0];
+  // Chromium 검증(1440 · 400): 전역 .input 의 min-width 220px 과 긴 선택지 글자 때문에 ‘수집 방식’ 선택 칸이 옆 칸(계정)을 덮었고, 한 줄 전체인 ‘메모’ 만 글자 옆에 칸이 붙었다.
+  //   라벨은 글자 위 · 칸 아래로 쌓고(grid), 칸은 열 폭을 넘지 않게 한다(그리드 자식 min-width:0 규칙).
+  const FL = { fontSize: 12, display: 'grid', gap: 3, minWidth: 0, alignContent: 'start' };
+  const FI = { width: '100%', minWidth: 0, boxSizing: 'border-box' };
   return (
     <Modal title={form.id ? 'SAN 스위치 수정' : 'SAN 스위치 등록'} onClose={() => { setForm(null); setTest(null); setFormNote?.(null); stopTestPoll(); }} width={760}>
       {formNote && <div style={{ margin: '0 0 10px', padding: '8px 12px', borderRadius: 8, fontSize: 12.5, background: 'rgba(245,158,11,.12)', color: 'var(--amber)' }}>{formNote}</div>}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 10 }}>
-        <label style={{ fontSize: 12 }}>표시명<input className="input" value={form.name} onChange={set('name')} placeholder="예: SAN-A-01" /></label>
-        <label style={{ fontSize: 12 }}>host (IP/호스트명)<input className="input" value={form.host} onChange={set('host')} placeholder="10.10.10.11" /></label>
-        <label style={{ fontSize: 12 }}>타입
-          <Select className="input" value={form.type} onChange={(e) => setForm((p) => ({ ...p, type: e.target.value, collectMethod: (data.types.find((t) => t.type === e.target.value)?.methods || [])[0]?.value || 'ssh' }))}>
+        <label style={FL}>표시명<input className="input" style={FI} value={form.name} onChange={set('name')} placeholder="예: SAN-A-01" /></label>
+        <label style={FL}>host (IP/호스트명)<input className="input" style={FI} value={form.host} onChange={set('host')} placeholder="10.10.10.11" /></label>
+        <label style={FL}>타입
+          <Select className="input" style={FI} value={form.type} onChange={(e) => setForm((p) => ({ ...p, type: e.target.value, collectMethod: (data.types.find((t) => t.type === e.target.value)?.methods || [])[0]?.value || 'ssh' }))}>
             {data.types.map((t) => <option key={t.type} value={t.type} disabled={!t.implemented}>{t.label}{t.implemented ? '' : ' (예정)'}</option>)}
           </Select>
         </label>
-        <label style={{ fontSize: 12 }}>수집 방식
-          <Select sort={false} className="input" value={form.collectMethod} onChange={set('collectMethod')}
+        <label style={FL}>수집 방식
+          <Select sort={false} className="input" style={FI} value={form.collectMethod} onChange={set('collectMethod')}
             title={(type?.methods || []).find((m) => m.value === form.collectMethod)?.hint || ''}>
             {(type?.methods || []).map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
           </Select>
         </label>
-        <label style={{ fontSize: 12 }}>계정<input className="input" value={form.username} onChange={set('username')} autoComplete="off" /></label>
-        <label style={{ fontSize: 12 }}>비밀번호
-          <input className="input" type="password" value={form.password} onChange={set('password')} autoComplete="new-password"
+        <label style={FL}>계정<input className="input" style={FI} value={form.username} onChange={set('username')} autoComplete="off" /></label>
+        <label style={FL}>비밀번호
+          <input className="input" style={FI} type="password" value={form.password} onChange={set('password')} autoComplete="new-password"
             placeholder={form.hasPassword ? '(변경할 때만 입력)' : ''} />
         </label>
-        <label style={{ fontSize: 12 }}>SSH 포트<input className="input" type="number" value={form.sshPort} onChange={set('sshPort')} /></label>
-        <label style={{ fontSize: 12 }}>법인(DataCenter)
-          <Select className="input" value={form.datacenterId} onChange={set('datacenterId')}>
+        <label style={FL}>SSH 포트<input className="input" style={FI} type="number" value={form.sshPort} onChange={set('sshPort')} /></label>
+        <label style={FL}>법인(DataCenter)
+          <Select className="input" style={FI} value={form.datacenterId} onChange={set('datacenterId')}>
             <option value="">(미지정)</option>
             {(() => { const m = missingChoice((data.datacenters || []).map((d) => d.id), form.datacenterId); return m ? <option value={m.value}>{m.label}</option> : null; })()}
             {(data.datacenters || []).map((d) => <option key={d.id} value={d.id}>{d.name || d.id}</option>)}
           </Select>
         </label>
-        <label style={{ fontSize: 12 }}>수집 주체
-          <Select className="input" value={form.agent} onChange={set('agent')}
+        <label style={FL}>수집 주체
+          <Select className="input" style={FI} value={form.agent} onChange={set('agent')}
             title="중앙에서 스위치에 직접 닿지 않으면 그 법인의 엣지를 지정하세요. 엣지가 현지에서 수집해 중앙으로 올립니다.">
             <option value="">중앙이 직접 수집</option>
             {(() => { const m = missingChoice(data.agents || [], form.agent); return m ? <option value={m.value}>엣지 {m.label}</option> : null; })()}
             {(data.agents || []).map((a) => <option key={a} value={a}>엣지 {a}</option>)}
           </Select>
         </label>
-        <label style={{ fontSize: 12 }} title="Virtual Fabrics 를 쓰는 장비에서 특정 논리 스위치만 볼 때 지정합니다. 비워두면 기본 컨텍스트만 수집합니다.">
-          VF ID (선택)<input className="input" type="number" value={form.vfId} onChange={set('vfId')} placeholder="예: 128" />
+        <label style={FL} title="Virtual Fabrics 를 쓰는 장비에서 특정 논리 스위치만 볼 때 지정합니다. 비워두면 기본 컨텍스트만 수집합니다.">
+          VF ID (선택)<input className="input" style={FI} type="number" value={form.vfId} onChange={set('vfId')} placeholder="예: 128" />
         </label>
-        <label style={{ fontSize: 12, gridColumn: '1 / -1' }}>메모<input className="input" value={form.note} onChange={set('note')} /></label>
+        <label style={{ ...FL, gridColumn: '1 / -1' }}>메모<input className="input" style={FI} value={form.note} onChange={set('note')} /></label>
       </div>
       <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>
         {(type?.methods || []).find((m) => m.value === form.collectMethod)?.hint}
@@ -515,8 +539,8 @@ function TestResult({ run }) {
   const trace = run.trace || [];
   useEffect(() => { if (active && logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, [trace.length, active]);
   const copy = async () => {
-    try { await navigator.clipboard.writeText(`${statusText(run)}\n${test.reason ? `사유: ${test.reason}\n` : ''}${test.hint ? `안내: ${test.hint}\n` : ''}\n${traceText(trace)}`); setCopied(true); setTimeout(() => setCopied(false), 1500); }
-    catch { setCopied(false); }
+    if (await copyToClipboard(`${statusText(run)}\n${test.reason ? `사유: ${test.reason}\n` : ''}${test.hint ? `안내: ${test.hint}\n` : ''}\n${traceText(trace)}`)) { setCopied(true); setTimeout(() => setCopied(false), 1500); }
+    else setCopied(false);
   };
   const debugCount = trace.filter((l) => l.level === 'debug').length;
   return (
@@ -694,7 +718,7 @@ function RangePicker({ hours, setHours, range, setRange }) {
           <label>시작 <input className="input" type="datetime-local" value={fromStr} onChange={(e) => setFromStr(e.target.value)} style={{ width: 200 }} /></label>
           <label>끝 <input className="input" type="datetime-local" value={toStr} onChange={(e) => setToStr(e.target.value)} style={{ width: 200 }} placeholder="비우면 지금" /></label>
           <button className="login-btn" style={{ flex: 'none', padding: '4px 12px' }} onClick={apply}>적용</button>
-          <span className="muted">끝을 비우면 지금까지 · 최대 {RANGE_MAX_DAYS}일 · 보관 기간(설정 › 수집 › SAN 스위치 포트 사용량) 밖의 시각은 데이터가 없습니다.</span>
+          <span className="muted">끝을 비우면 지금까지 · 최대 {RANGE_MAX_DAYS}일 · 보관 기간(설정 › 수집 주기·임계 › SAN 스위치 포트 사용량) 밖의 시각은 데이터가 없습니다.</span>
           {issue && <span style={{ color: TONE.bad }}>{issue}</span>}
         </div>
       )}
@@ -1135,6 +1159,10 @@ function DcStoragePerf({ dcPerf, onClose }) {
 
   return (
     <Modal title={`스토리지 사용량 분석 — ${scopeLabel}`} onClose={onClose} width={1180}>
+      {/* v2.948: 독립 도구 'SAN 스토리지 성능'(디렉터 · 컨트롤러별 · 트렌드 · 점검)으로 가는 링크 — 이 모달은 사용자 결정('기존 메뉴도 보존')대로 남긴다. 같은 서버 집계를 읽는다. */}
+      <div className="muted" style={{ fontSize: 12.5, marginBottom: 8 }}>
+        디렉터 · 컨트롤러별 처리량 · 1년 트렌드 · 성능 점검은 새 화면에서 — <a href="#/tools/san-storage" style={{ color: 'var(--mint)' }}>SAN 스토리지 성능 열기 →</a>
+      </div>
       {/* 범위 선택 — '전체 법인'과 개별 법인을 여기서 바로 오간다. */}
       <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 8 }}>
         <span className="muted" style={{ fontSize: 12, minWidth: 42 }}>🏢 범위</span>
@@ -1204,7 +1232,7 @@ function DcStoragePerf({ dcPerf, onClose }) {
                 있고 장비에서 실패하는 상황에서도 사용자가 멀쩡한 설정을 의심하며 헤맸다(장비별 진단은
                 장비 상세 › 사용량 분석 탭이 `perfDiag` 로 사유를 말한다). */}
             {data.perfEnabled === false
-              ? <><b>설정 › 수집 › SAN 스위치 포트 사용량</b> 에서 수집을 켜야 <code>portperfshow</code> 로 쌓기 시작합니다(기본 꺼짐).</>
+              ? <><b>설정 › 수집 주기·임계 › SAN 스위치 포트 사용량</b> 에서 수집을 켜야 <code>portperfshow</code> 로 쌓기 시작합니다(기본 꺼짐).</>
               : <>포트 사용량 수집은 <b>켜져 있습니다</b> — 표본이 없는 이유는 스위치마다 다릅니다. 장비를 눌러 <b>사용량 분석</b> 탭을 열면 그 스위치의 사유(첫 주기 대기 / 엣지 미보고 / 명령 실패 등)를 알려줍니다.</>}
             {data.unavailable ? <div style={{ color: 'var(--amber)', marginTop: 4 }}>이 서버는 시계열 DB(node:sqlite)를 쓸 수 없어 이력이 저장되지 않습니다.</div> : null}
             {!data.switches.length ? <div style={{ marginTop: 4 }}>이 법인에 등록된 스위치가 없습니다.</div> : null}
@@ -1296,7 +1324,7 @@ function DcStoragePerf({ dcPerf, onClose }) {
                     <td>
                       {s.capacity
                         ? <span title={`${s.capacity.name} (${s.capacity.type})`}>
-                            <UsageCell pct={s.capacity.pct ?? 0} />
+                            <UsageCell pct={s.capacity.pct /* 24회차 #7: 못 읽은 사용률은 0% 막대가 아니라 '—'(UsageCell 이 null 을 그린다) */} />
                             <span className="muted" style={{ fontSize: 10.5, display: 'block', ...ELLIPSIS }}>{s.capacity.name}</span>
                           </span>
                         : <span className="muted" title="등록된 스토리지와 시리얼이 일치하지 않아 용량을 붙이지 않았습니다(억지 매칭 금지).">—</span>}
@@ -1492,8 +1520,8 @@ function PortDetail({ detail, setDetail, closeDetail, portFilter, setPortFilter,
                           : null}
                         <div className="muted" style={{ ...ELLIPSIS, fontSize: 10.5 }}>{(p.attached || []).join(', ') || '—'}</div>
                       </td>
-                      <td style={{ color: TONE[el.level === 'ok' ? 'muted' : el.level] }}>
-                        {p.errCrc ?? '—'} / {p.errLinkFail ?? '—'} / {p.errLossSync ?? '—'}
+                      <td style={{ color: TONE[el.level === 'ok' ? 'muted' : el.level] }} title={otherErrorsTitle(p)}>
+                        {p.errCrc ?? '—'} / {p.errLinkFail ?? '—'} / {p.errLossSync ?? '—'}{otherErrorsTitle(p) ? ' ⓘ' : ''}
                       </td>
                       <td style={{ color: oh.level === 'none' ? TONE.muted : TONE[oh.level] }} title={oh.why}>
                         {p.rxPowerDbm ?? '—'} / {p.txPowerDbm ?? '—'}{oh.level === 'bad' || oh.level === 'warn' ? ' ⚠' : ''}

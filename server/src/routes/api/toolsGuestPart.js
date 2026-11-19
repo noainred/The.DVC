@@ -13,8 +13,10 @@ import { isAdminDetailUser } from '../../auth/demoGuest.js';
 import { logAudit } from '../../audit.js';
 import { store } from '../../store.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
-import { overview, vcenterDetail, overCsv, vmPartitions } from '../../guestpart/report.js';
-import { load as loadSettings, save as saveSettings, publicSettings, settingsLoadError } from '../../guestpart/settings.js';
+import { overview, overviewSummary, vcenterDetail, overCsv, vmPartitions } from '../../guestpart/report.js';
+import { isSummaryQuery } from './toolSummary.js';   // v3.21.0 VM 분석 화면 요약 — 같은 라우트 · 같은 게이트 안에서
+import { load as loadSettings, save as saveSettings, publicSettings, settingsLoadError, guestPartWriteRefusal } from '../../guestpart/settings.js';
+import { unreadMark } from '../settingsUnreadMark.js';   // 112회차: 조회 응답의 읽기 오류 표지
 import { thresholdOk, MODES, RANGES, IGNORE_TEXT, CRIT_PCT, WIN_ISO_MAX_GB } from '../../guestpart/rules.js';
 import { mailStatus, previewMail, sendDigest, sendVcenter, sendTest } from '../../guestpart/notify.js';
 import { load as loadGuestDiskSettings } from '../../guestdisk/settings.js';
@@ -51,6 +53,9 @@ export function registerToolsGuestPart(api) {
     const allowed = scopedVcenterIds(req.user, store.get());
     const v = viewQuery(req.query);
     if (v.issue) return res.status(400).json({ ok: false, reason: v.issue });
+    // v3.21.0: ?summary=1 — 법인별 줄 + 법인별 상위 N(VM 분석 화면). 게이트(tools · toolGate 'guest-partition')와 범위는 이 라우트 그대로다.
+    //   화면 조건(vcenterId · 검색 · OS · limit)은 보지 않는다 — 범위 안 법인 전부의 줄을 주고 화면이 고른 법인을 더한다.
+    if (isSummaryQuery(req.query)) return res.json({ ok: true, summary: true, tool: 'guest-partition', ...(await overviewSummary({ allowed, thr: v.thr, mode: v.mode })) });
     const vcenterId = req.query.vcenterId ? String(req.query.vcenterId) : null;
     if (vcenterId && allowed && !allowed.has(vcenterId)) return res.status(404).json({ ok: false, error: 'not found' });
     const os = ['win', 'lnx', 'other'].includes(req.query.os) ? req.query.os : 'all';
@@ -89,12 +94,14 @@ export function registerToolsGuestPart(api) {
     const full = isAdminDetailUser(req.user) && !allowed;
     const gd = loadGuestDiskSettings();
     res.json({ ok: true, settings: full ? loadSettings() : publicSettings(undefined, allowed), full, collect: { enabled: gd.enabled, intervalHours: gd.intervalHours }, meta: meta(),
-      loadError: settingsLoadError() ? '설정 파일을 읽지 못해 기본값으로 보여 줍니다 — 원본은 .corrupt 로 보존했습니다.' : null });
+      // 112회차: 읽기 오류(107회차 — 원본을 옮기지 않는다)인데도 '.corrupt 로 보존했습니다' 라고 말했다 — 문구를 가르고, 화면이 저장을 잠그게 표지(settingsLoadError.readError)를 싣는다.
+      loadError: settingsLoadError() ? (guestPartWriteRefusal() ? '설정 파일을 읽지 못해 기본값으로 보여 줍니다 — 읽기 오류이고 원본은 그대로 있습니다.' : '설정 파일을 읽지 못해 기본값으로 보여 줍니다 — 원본은 .corrupt 로 보존했습니다.') : null,
+      ...unreadMark(guestPartWriteRefusal(), 'settingsLoadError') });
   });
 
   api.put('/tools/guest-partition/settings', adminOnly, fullScopeOnly, (req, res) => {
     const r = saveSettings(req.body || {});
-    if (r.error) return res.status(400).json({ ok: false, reason: r.error, field: r.field || null });
+    if (r.error) return res.status(r.status === 503 ? 503 : 400).json({ ok: false, reason: r.error, field: r.field || null, ...(r.status === 503 ? { code: r.code, readError: true } : {}) });   // 107회차: 설정 파일 읽기 오류는 503 settingsUnreadable
     const s = r.settings;
     logAudit({ user: req.user?.username, action: '게스트 파티션 사용률 설정 변경', detail: `임계 ${s.threshold}% · ${s.mode} · vCenter 별 임계 ${Object.keys(s.vcThresholds).length} · 통합 메일 ${s.mail.digest.enabled ? '켜짐' : '꺼짐'} · vCenter 메일 ${Object.keys(s.mail.vcenters).length}`, ip: req.ip || '' });
     res.json({ ok: true, settings: s });

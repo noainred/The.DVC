@@ -24,6 +24,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { fileMissing } from '../util/fileMissing.js';   // 134회차: '정말 없는가'(ENOENT 만 — existsSync 는 stat 실패도 false)
 import { makeSettingsLoadError } from '../util/settingsLoadError.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { clampSetting } from '../util/clampSetting.js'; // v2.613 DEPS2613-12 · RUNTIME2613-08: 숫자 설정 정규화는 하나(빈 칸 = 미지정)
@@ -109,10 +110,15 @@ export function load() {
   let raw = {};
   // v2.631(EDGE2631-01): 손상 → 보존 → 기본값(꺼짐·vcenters {})을 /api/central/curuser-config 가 내려보내면 엣지 applyCentral 이
   //   폴더 범위 사본까지 지운다(중앙 원본은 이미 .corrupt 로 치워져 유일한 정상 사본이 사라진다) — 로드 오류를 기억해 503 으로 답한다.
-  if (!fs.existsSync(FILE())) _loadErr.missing();
+  if (fileMissing(FILE())) _loadErr.missing();   // 134회차: 없음은 ENOENT 뿐 — stat 실패(폴더 수준 EACCES · EIO · ESTALE)는 아래 읽기가 읽기 오류로 가른다
   else {
+    // 90회차 F3(재현): 읽기 단계 실패(EACCES · EIO · EISDIR)는 손상이 아니다 — 예전 catch 하나는 그것도 손상으로 보고 온전한 원본을
+    //   `.corrupt` 로 옮겼다(결정 G2 의 같은 꼴). 원본을 두고 기본값(꺼짐)으로 돌되 **캐시하지 않는다**(다음 읽기가 다시 본다) · 저장은 거절(save).
+    let text;
+    try { text = fs.readFileSync(FILE(), 'utf8'); }
+    catch (e) { _loadErr.readError(e); const d = normalize({}); return { ...d, vcenters: { ...d.vcenters } }; }
     try {
-      raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
+      raw = JSON.parse(text);
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('객체가 아닌 JSON 값');
       _loadErr.ok();
     } catch (e) { _loadErr.corrupt(e); preserveCorrupt(FILE(), e?.message); raw = {}; }
@@ -123,9 +129,14 @@ export function load() {
 
 export function save(input = {}) {
   const before = _cache ? JSON.stringify(_cache) : null;
+  const cur = load();
+  // 90회차 F3: 읽기 오류면 원본이 디스크에 그대로 있다 — 기본값 위에 쓰면 폴더 범위 · 주기를 덮는다(라우트 409 · 엣지 applyCentral 은 실패로 남는다).
+  if (_loadErr.get()?.readError) {
+    throw Object.assign(new Error('현재 사용자 수집 설정 파일(curuser-settings.json)을 읽지 못한 상태라 저장하지 않았습니다 — 읽기 오류이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(읽히면 저장이 다시 열립니다).'), { status: 409, code: 'settings-unreadable' });
+  }
   // v2.733(점검 3회차 C4-04): 캐시·리스너는 **디스크 쓰기 성공 뒤에만** — 예전에는 먼저 바꿔, 저장 실패 응답 뒤에도 메모리 값이
   //   /curuser-config 로 엣지에 배포되고 폴러가 그 주기로 재무장했다(재시작하면 옛 값). 엣지 applyCentral 도 이 save 를 지난다.
-  const next = normalize(keepPrevBlankNumbers(input, load()));
+  const next = normalize(keepPrevBlankNumbers(input, cur));
   atomicWriteFileSync(FILE(), JSON.stringify({ version: 1, ...next }, null, 2), { mode: 0o600 });
   _cache = next;
   _loadErr.ok();

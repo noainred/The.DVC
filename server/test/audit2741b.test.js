@@ -6,7 +6,7 @@
  *  TIMING-06    IP 스캔(중앙·엣지)이 재시작마다 주기와 무관하게 대역 전체를 다시 스캔했다(v2.737 재개는 유지).
  * 재시작은 실제 자식 프로세스 두 개(같은 CONFIG_DIR)로 흉내 낸다 — vmclone/vsphere.js·store.js(스냅샷)만 가짜다.
  */
-import { test, mock } from 'node:test';
+import { test, mock, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -14,7 +14,14 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2741b-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const TMP = tmpDir('audit2741b-');
 process.env.CONFIG_DIR = TMP;
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(HERE, '..', 'src');
@@ -63,7 +70,7 @@ function runChild(cfg, body, mockOpts) {
   return JSON.parse(res.stdout.trim().split('\n').pop());
 }
 function newCfg() {
-  const cfg = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2741b-vc-'));
+  const cfg = tmpDir('audit2741b-vc-');
   fs.writeFileSync(path.join(cfg, 'vcenters.json'), JSON.stringify({ vcenters: [{ id: 'vc1', host: 'https://127.0.0.1:1', username: 'u', password: 'p' }] }));
   return cfg;
 }
@@ -196,7 +203,7 @@ test('TIMING-01 snapshotTreeList — 트리 노드의 ref·이름만, currentSna
 
 test('TIMING-01 NFS 중단분 — 기록한 폴더가 manifest 없이 남아 있으면 지운다(마운트 안·스탬프 형식만)', () => {
   const cfg = newCfg();
-  const mp = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2741b-nfs-'));
+  const mp = tmpDir('audit2741b-nfs-');
   const partial = path.join(mp, 'web01', '20261015-0200');
   const complete = path.join(mp, 'web01', '20261014-0200');
   for (const d of [partial, complete]) fs.mkdirSync(d, { recursive: true });
@@ -281,7 +288,7 @@ test('TIMING-06 중앙 firstScanDelayMs — 마지막 완료 스캔이 주기 �
 });
 
 test('TIMING-06 중앙 startIpScanPoller — 영속된 마지막 완료(LOCAL)가 주기 안이면 기동 30초 스캔을 하지 않는다', () => {
-  const cfg = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2741b-ip-'));
+  const cfg = tmpDir('audit2741b-ip-');
   fs.writeFileSync(path.join(cfg, 'ipam-scan.json'), JSON.stringify({ agents: { __local__: { enabled: true, ranges: ['10.255.255.0/30'], intervalMs: 6 * HOUR } } }));
   fs.writeFileSync(path.join(cfg, 'ipam-scan-agents.json'), JSON.stringify({ __local__: { at: Date.now() - HOUR, scanned: 2, alive: 0 } }));
   const script = `
@@ -313,7 +320,7 @@ test('TIMING-06 엣지 — 마지막 스캔 시각을 파일에 남겨, 재시�
     });
   });
   await new Promise((r) => srv.listen(0, '127.0.0.1', r));
-  const cfg = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2741b-edge-'));
+  const cfg = tmpDir('audit2741b-edge-');
   const central = `http://127.0.0.1:${srv.address().port}`;
   const env = { ...process.env, CONFIG_DIR: cfg, CENTRAL_URL: central, AGENT_NAME: 'edge-t6', CENTRAL_TOKEN: 'x', SSRF_ALLOW_LOOPBACK: 'true' };
   const child = (body) => new Promise((resolve, reject) => {

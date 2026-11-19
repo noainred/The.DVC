@@ -18,7 +18,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, safeLoadText } from '../util/atomicWrite.js';
+import { READ_RETRY_MS, nowMs, inRetryWindow } from '../util/jsonFileRead.js';   // 97회차 F10: 읽기 오류 재읽기 간격 · 시계 · 128회차: 간격 판정은 공용
 import { auditEntriesWithAction } from '../audit.js';
 
 const FILE = path.join(config.configDir, 'login-history.ndjson');
@@ -50,8 +51,20 @@ function cleanRow(r) {
   return { ts: r.ts, user, ip: clip(r.ip, 70), role: clip(r.role, 32), src };
 }
 
+/*
+ * v2.932(점검 C1-03): 첫 기동(파일 없음)의 첫 로그인이 2회로 세졌다 — routes/auth.js 가 같은 로그인의 감사 줄을 **먼저 동기로** 쓰고
+ *   (logAudit) 이어서 recordLoginSuccessEvent 를 부르므로, 그 안의 첫 load() 가 방금 쓴 줄까지 옮겨 온 뒤 같은 로그인을 다시 push 했다.
+ *   지금 기록하려는 로그인과 같은 계정 · 같은 IP(둘 다 있을 때) · 기록 시각 앞 BACKFILL_SKIP_MS 안의 감사 줄 **가장 늦은 한 줄만** 뺀다.
+ *   라우트 순서(logAudit 앞에 load)에 기대지 않는다 — 다른 로그인 경로가 생겨도 같은 순서면 같은 결과다. 한 줄만 빼므로 그 창 안의
+ *   다른 로그인(같은 계정이 몇 초 사이 두 번)은 남는다.
+ */
+const BACKFILL_SKIP_MS = 10_000;
+function isSameLogin(a, b) {
+  return a.user === b.user && a.ts <= b.ts + 1_000 && a.ts >= b.ts - BACKFILL_SKIP_MS && (!a.ip || !b.ip || a.ip === b.ip);
+}
+
 /** 감사 로그의 '로그인' 줄 → 레코드(첫 기동 1회). 역할은 detail 첫 조각이 알려진 역할일 때만 쓴다(지어내지 않는다). */
-function backfillFromAudit() {
+function backfillFromAudit(current = null) {
   let list = [];
   try { list = auditEntriesWithAction('로그인'); } catch { list = []; }
   const out = [];
@@ -63,6 +76,9 @@ function backfillFromAudit() {
     if (r) out.push(r);
   }
   out.sort((a, b) => a.ts - b.ts);
+  if (current) {
+    for (let i = out.length - 1; i >= 0; i--) if (isSameLogin(out[i], current)) { out.splice(i, 1); break; }
+  }
   return out;
 }
 
@@ -71,23 +87,35 @@ function writeAll(list) {
   atomicWriteFileSync(FILE, list.length ? list.map((r) => JSON.stringify(r)).join('\n') + '\n' : '', { mode: 0o600 });
 }
 
-function load() {
-  if (rows) return rows;
+/** @param {object|null} current 지금 기록하려는 로그인(recordLoginSuccessEvent — 첫 기동 backfill 에서 같은 줄을 뺀다, C1-03) */
+let _readRetryAt = 0;      // 97회차 F10: 읽기 오류 뒤 다시 읽을 시각
+function load(current = null) {
+  if (rows && !(meta.readError && !inRetryWindow(nowMs(), _readRetryAt, READ_RETRY_MS))) return rows;   // 128회차: 시계가 뒤로 갔으면 기다리지 않는다
+  const pending = rows || [];   // 97회차 F10: 읽기 오류 동안 메모리에 쌓인 기록 — 다시 읽히면 파일이 진실이다(덧붙임이 된 줄은 파일에 있고, 실패한 줄은 디스크에 닿지 못했다)
+  const wasReadError = !!meta.readError;
   rows = [];
   let text = null;
   try { text = fs.readFileSync(FILE, 'utf8'); } catch (e) {
-    if (e?.code === 'ENOENT') {
-      // 처음 — 감사 로그에 남아 있는 로그인 줄을 옮겨 온다. 실패해도 빈 기록으로 시작한다(다음 로그인부터 쌓인다).
-      rows = backfillFromAudit();
-      meta.backfilled = rows.length;
-      try { writeAll(rows); } catch (we) { console.warn(`[login-history] 첫 기록 파일을 쓰지 못했습니다(${safeLoadText(we) || '사유 미상'})`); }
-      if (rows.length) console.log(`[login-history] 감사 로그에 남아 있던 로그인 ${rows.length}건을 옮겨 왔습니다(그 이전 기록은 없습니다)`);
+    if (e?.code !== 'ENOENT') {
+      // 97회차 F10(재현 — EISDIR): 읽지 못함(권한 · 디스크)은 **손상이 아니다** — 예전에는 원본을 보존본으로 옮기고 빈 기록으로 시작해, 권한을 바로잡아도
+      //   보관 기간 전체 기록이 보존본에만 남았다(다음 정리 저장이 새 기록만으로 썼다). 이제 원본은 그대로 두고 · 그동안 통째 쓰기(정리)를 하지 않고 ·
+      //   READ_RETRY_MS(30초) 간격으로 다시 읽는다. 화면은 loadError 로 '기록을 읽지 못함' 을 밝힌다(0 으로 단정 금지 — 예전과 같다).
+      if (!meta.readError) console.warn(`[login-history] 기록 파일을 읽지 못했습니다(${safeLoadText(e) || '사유 미상'}) — 손상이 아니라 원본은 그대로 둡니다 · ${Math.round(READ_RETRY_MS / 1000)}초마다 다시 읽습니다`);
+      meta.loadError = safeLoadText(e) || '사유 미상';
+      meta.readError = String(e?.code || 'read-error').slice(0, 32);
+      _readRetryAt = nowMs() + READ_RETRY_MS;
+      rows = pending;
       return rows;
     }
-    // 읽지 못함(권한 등) — 덮어쓰기 전에 원본을 보존하고 빈 기록으로 시작한다. 화면은 loadError 로 '기록을 읽지 못함' 을 밝힌다(0 으로 단정 금지).
-    meta.loadError = safeLoadText(e) || '사유 미상';
-    console.warn(`[login-history] 기록 파일을 읽지 못했습니다(${meta.loadError}) — 원본을 보존하고 새로 시작합니다`);
-    preserveCorrupt(FILE, e?.message || '');
+    if (wasReadError) { meta.readError = null; meta.loadError = null; rows = pending; return rows; }   // 97회차 F10: 읽기 오류 뒤 파일이 없어졌다 — backfill 하지 않고 메모리 기록으로 이어 간다
+  }
+  if (wasReadError && text != null) { meta.readError = null; meta.loadError = null; console.warn('[login-history] 기록 파일을 다시 읽었습니다(읽기 오류 풀림)'); }
+  if (text == null) {
+    // 처음 — 감사 로그에 남아 있는 로그인 줄을 옮겨 온다. 실패해도 빈 기록으로 시작한다(다음 로그인부터 쌓인다).
+    rows = backfillFromAudit(current);
+    meta.backfilled = rows.length;
+    try { writeAll(rows); } catch (we) { console.warn(`[login-history] 첫 기록 파일을 쓰지 못했습니다(${safeLoadText(we) || '사유 미상'})`); }
+    if (rows.length) console.log(`[login-history] 감사 로그에 남아 있던 로그인 ${rows.length}건을 옮겨 왔습니다(그 이전 기록은 없습니다)`);
     return rows;
   }
   let bad = 0;
@@ -107,6 +135,7 @@ function maybeTrim(now) {
   // 보관 기간 정리는 하루 한 번이면 충분하다(가장 오래된 줄이 하루 이상 넘었을 때만 — 매 로그인마다 전체를 다시 쓰지 않는다).
   const overAge = rows.length > 0 && rows[0].ts < cut - DAY && now - lastTrimAt > DAY;
   if (!overCount && !overAge) return;
+  if (meta.readError) return;   // 97회차 F10: 읽기 오류 중에는 통째 쓰기(정리)로 원본을 덮지 않는다
   lastTrimAt = now;
   rows = rows.filter((r) => r.ts >= cut).slice(-LOGIN_HISTORY_MAX);
   try { writeAll(rows); } catch (e) { console.warn(`[login-history] 정리 저장 실패(${safeLoadText(e) || '사유 미상'})`); }
@@ -120,7 +149,7 @@ export function recordLoginSuccessEvent(e = {}) {
   const now = Number.isFinite(e.at) ? e.at : Date.now();
   const r = cleanRow({ ts: now, user: e.user, ip: e.ip, role: e.role, src: e.src });
   if (!r) return false;
-  load();
+  load(r);
   rows.push(r);
   try {
     fs.mkdirSync(path.dirname(FILE), { recursive: true });
@@ -215,4 +244,4 @@ export function loginHistorySummary({ now = Date.now(), range = null, accounts =
 }
 
 /** 테스트 전용 — 메모리 상태를 비운다(다음 호출이 파일을 다시 읽는다). */
-export function _resetLoginHistoryForTest() { rows = null; meta = { skipped: 0, backfilled: 0, loadError: null }; lastTrimAt = 0; }
+export function _resetLoginHistoryForTest() { rows = null; meta = { skipped: 0, backfilled: 0, loadError: null }; lastTrimAt = 0; _readRetryAt = 0; }

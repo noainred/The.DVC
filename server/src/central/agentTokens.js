@@ -22,8 +22,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, safeLoadText } from '../util/atomicWrite.js';
+import { fileMissing } from '../util/fileMissing.js';   // 134회차: '정말 없는가'(ENOENT 만 — existsSync 는 stat 실패도 false)
 import { capStr } from '../util/capStr.js';
 import { makeLoadError, summarizeRegistryError } from '../util/registryCore.js'; // v2.771(점검 R6-F4-2): '읽지 못함' 표지
+import { makeJsonFileReader, READ_RETRY_MS } from '../util/jsonFileLoad.js'; // 87회차 ⓐ: 읽기 오류 ≠ 손상(공용 읽기 판정)
 
 const FILE = path.join(config.configDir, 'central-agent-tokens.json');
 const sha256 = (s) => crypto.createHash('sha256').update(String(s), 'utf8').digest();
@@ -38,33 +40,61 @@ let cache = null; // [{ agent, hash(hex), createdAt, lastUsedAt, note }]
  *   다시 나타나면(사람이 보존본을 되돌림) 다시 읽는다. 첫 설치(파일·보존본 모두 없음)는 오류가 아니다. 해제는 정상 읽기·관리자 발급/회수 저장뿐.
  */
 const loadErr = makeLoadError();
+/*
+ * 87회차 ⓐ(84회차 남긴 것 ② — 권장안): 공용 읽기 판정(util/jsonFileLoad.js)을 쓴다. 예전에는 `JSON.parse(readFileSync)` 하나의 catch 가
+ *   **읽기 오류**(EACCES · EIO — 권한 · 소유자 · 디스크)도 손상으로 보고 온전한 토큰 파일을 `.corrupt.*` 로 옮겼다 — 권한을 고쳐도 원본은 보존본에만 남았고
+ *   503 이 '보존본을 되돌리거나 다시 발급하라' 고 안내해, 발급 한 번이 그 토큰 하나만 든 파일을 썼다(다른 모든 엣지의 개별 토큰 소실).
+ *   이제 읽기 오류는 원본을 두고(옮기지 않는다) · 결과를 캐시로 믿지 않으며(READ_RETRY_MS 간격으로 다시 읽어 읽히면 재시작 없이 풀린다) ·
+ *   발급 · 회수 · 사용 시각 저장을 거절한다(원자적 rename 이 보존본도 없이 원본을 덮는다). 손상(parse 실패)은 예전과 같다(보존 → 503 → 발급으로 풀림).
+ */
+const parseTokens = (text) => { const parsed = JSON.parse(text); return Array.isArray(parsed?.tokens) ? parsed.tokens.filter((t) => t && t.agent && t.hash) : []; };
+let reader = null; let readerFile = '';
+let readPending = false;   // 마지막 읽기가 읽기 오류였다 — 캐시(빈 목록)를 믿지 않는다
+function readTokens() {
+  if (!reader || readerFile !== FILE) { readerFile = FILE; reader = makeJsonFileReader(() => FILE, { parse: parseTokens, preserve: true, tag: 'central-token' }); }
+  return reader.read();
+}
 
 function load() {
-  if (cache && !loadErr.get()) return cache;
-  let exists = false;
-  try { exists = fs.existsSync(FILE); } catch { exists = false; }
-  if (!exists) {
+  if (cache && !loadErr.get() && !readPending) return cache;
+  // 134회차(재현): `fs.existsSync` 는 stat 실패(폴더 수준 EACCES · EIO · ESTALE)도 false 다 — 못 읽은 토큰 파일이 '없음' 이 되어 빈 목록을 **표지 없이 재시작까지** 캐시했다
+  //   (개별 토큰 엣지 전부 401 · 그동안의 발급 한 번이 그 토큰 하나만 든 파일로 원본을 덮는다). 정말 없을 때(ENOENT)만 이 지름길을 탄다 — 그 밖은 아래 공용 읽기가 가른다.
+  const exists = !fileMissing(FILE);
+  if (!exists && !readPending) {
     // 표지가 선 채 파일이 없으면(보존본으로 옮겨진 뒤) 빈 목록 그대로 — 매 요청 existsSync 1회뿐이다.
     if (!cache) { loadErr.checkCorruptOnly(FILE); cache = []; }
     return cache;
   }
-  try {
-    const parsed = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-    cache = Array.isArray(parsed?.tokens) ? parsed.tokens.filter((t) => t && t.agent && t.hash) : [];
-    loadErr.clear();
+  const r = readTokens();
+  if (r.kind === 'read-error') {
+    // 87회차 ⓐ: 원본은 그대로 · 처음 시각 유지 · 사유는 고정 문구 + 시스템 오류 코드(파일 조각 없음 — summarizeRegistryError 가 sysCode 를 뽑는다)
+    const code = (capStr(r.error?.code, 32) || 'read-error');
+    if (!readPending || !loadErr.get()) { loadErr.set(`${code}: 읽기 오류 — 손상이 아니라 원본은 그대로 둡니다`); }
+    readPending = true;
+    cache = [];
     return cache;
-  } catch (e) {
-    // 손상 파일을 조용히 빈 값으로 덮어쓰면 전 엣지 토큰이 유실된다 → 보존 후 경고.
-    // v2.744(최종 수정분 검토 RV2744F-LOAD-01): 사유는 요약(safeLoadText) — V8 JSON.parse 오류 원문은 파일 조각을 싣는다(콘솔 → /admin/logs·엣지 로그).
-    try { fs.renameSync(FILE, `${FILE}.corrupt.${Date.now()}`); } catch { /* */ }
-    console.error(`[central-token] central-agent-tokens.json 파싱 실패(${safeLoadText(e) || '사유 미상'}) — 손상본을 .corrupt로 보존했습니다. 개별 토큰 인증은 보존본을 되돌리거나 토큰을 다시 발급할 때까지 503 으로 답합니다.`);
-    loadErr.set(e);
   }
+  if (readPending) { readPending = false; loadErr.clear(); }
+  if (r.kind === 'ok') { cache = r.value; loadErr.clear(); return cache; }
+  if (r.kind === 'missing') { if (!cache) cache = []; loadErr.checkCorruptOnly(FILE); return cache; }
+  // 손상 파일을 조용히 빈 값으로 덮어쓰면 전 엣지 토큰이 유실된다 → 보존(reader 가 preserveCorrupt 로 옮겼다) 후 경고.
+  // v2.744(최종 수정분 검토 RV2744F-LOAD-01): 사유는 요약(safeLoadText) — V8 JSON.parse 오류 원문은 파일 조각을 싣는다(콘솔 → /admin/logs·엣지 로그).
+  console.error(`[central-token] central-agent-tokens.json 파싱 실패(${safeLoadText(r.error) || '사유 미상'}) — 손상본을 .corrupt로 보존했습니다. 개별 토큰 인증은 보존본을 되돌리거나 토큰을 다시 발급할 때까지 503 으로 답합니다.`);
+  loadErr.set(r.error);
   cache = [];
   return cache;
 }
 
+/** 87회차 ⓐ: 읽기 오류 중의 쓰기 거절 사유(발급 · 회수) — 원본이 그 자리에 있어 저장이 보존본도 없이 덮는다. 아니면 null. */
+function writeRefusal() {
+  load();
+  if (!readPending) return null;
+  return `엣지 개별 토큰 파일(central-agent-tokens.json)을 읽지 못한 상태라 저장하지 않았습니다 — 읽기 오류이고 원본은 그대로 있습니다. 파일 권한 · 소유자(포탈 서비스 계정) · 디스크를 확인하세요(${Math.round(READ_RETRY_MS / 1000)}초마다 다시 읽고, 읽히면 저장이 다시 열립니다).`;
+}
+
 function save() {
+  // 87회차 ⓐ: 마지막 방어선 — 읽기 오류 중에는 어느 경로(발급 · 회수 · touch)도 원본을 덮지 않는다.
+  if (readPending) throw Object.assign(new Error(writeRefusal() || '엣지 개별 토큰 파일을 읽지 못한 상태라 저장하지 않았습니다.'), { code: 'registry-unreadable', readError: true });
   // v2.771(R6-F4-2): 다시 읽지 않고 메모리 목록(cache — 발급·회수·touch 가 고친 것)을 쓴다. 표지가 선 동안 load() 는 파일을 다시 읽으므로
   //   보존 rename 이 실패해 손상 파일이 남아 있으면 방금 발급한 항목이 빈 목록으로 덮였다.
   atomicWriteFileSync(FILE, JSON.stringify({ tokens: cache || load() }, null, 2), { mode: 0o600 });
@@ -80,7 +110,7 @@ export function agentTokensLoadError() {
   const e = loadErr.get();
   if (!e) return null;
   const s = summarizeRegistryError(e);
-  return { at: Number.isFinite(e.at) ? e.at : null, code: s?.code || null, text: s?.text || '사유 미상' };
+  return { at: Number.isFinite(e.at) ? e.at : null, code: s?.code || null, text: s?.text || '사유 미상', ...(readPending ? { readError: true } : {}) };   // 87회차 ⓐ: 읽기 오류는 조치가 다르다(권한 · 소유자)
 }
 
 /** 개별 토큰이 하나라도 발급돼 있는가(있으면 per-agent 인증 경로가 활성). */
@@ -99,6 +129,7 @@ export function issueAgentToken(agent, { note = '' } = {}) {
   const name = String(agent || '').trim();
   if (!name) return { ok: false, reason: '에이전트 이름이 필요합니다.' };
   if (!/^[A-Za-z0-9._-]{1,64}$/.test(name)) return { ok: false, reason: '에이전트 이름 형식이 올바르지 않습니다(영숫자·._- 64자 이내).' };
+  const refused = writeRefusal(); if (refused) return { ok: false, code: 'registry-unreadable', status: 409, readError: true, reason: refused };   // 87회차 ⓐ
   const token = crypto.randomBytes(32).toString('base64url'); // 256bit — 공유 토큰보다 강하게
   const list = load();
   const i = list.findIndex((t) => norm(t.agent) === norm(name));
@@ -119,6 +150,7 @@ export function issueAgentToken(agent, { note = '' } = {}) {
 }
 
 export function revokeAgentToken(agent) {
+  const refused = writeRefusal(); if (refused) return { ok: false, code: 'registry-unreadable', status: 409, readError: true, reason: refused };   // 87회차 ⓐ: '발급된 토큰이 없습니다' 로 답하지 않게
   const list = load();
   const next = list.filter((t) => norm(t.agent) !== norm(agent));
   if (next.length === list.length) return { ok: false, reason: `발급된 토큰이 없습니다: ${agent}` };
@@ -160,4 +192,4 @@ export function resolveAgentByToken(token) {
 }
 
 /** 테스트용 — 캐시를 비워 파일을 다시 읽게 한다. */
-export function _resetAgentTokenCache() { cache = null; loadErr.clear(); }
+export function _resetAgentTokenCache() { cache = null; loadErr.clear(); readPending = false; reader = null; }

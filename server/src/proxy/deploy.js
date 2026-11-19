@@ -8,7 +8,7 @@
 import { withSsh } from './sshExec.js';
 import { fileStamp } from '../util/dayKey.js';
 import { haproxyAddress } from '../util/hostPort.js';
-import { mappingConfigIssue } from './registry.js';
+import { mappingConfigIssue, mappingNameText } from './registry.js';
 
 const BEGIN = '# >>> portal-remote-access (auto-generated — do not edit) >>>';
 const END = '# <<< portal-remote-access (auto-generated) <<<';
@@ -21,7 +21,7 @@ export function buildConfigBlock(mappings, { bindAddress = '*' } = {}) {
     //   블록 전체를 거부해 그 프록시의 이후 배포가 전부 실패했다. 건너뛴 사실은 주석으로 남기고 호출부가 그 매핑을 error 로 표시한다.
     if (mappingConfigIssue(m)) { lines.push(`# skipped ra_${String(m?.id ?? '').replace(/[^\w-]/g, '').slice(0, 40)} — invalid mapping (port/host)`, ''); continue; }
     lines.push(
-      `listen ra_${m.id}   # ${m.name} (${m.protocol})`,
+      `listen ra_${m.id}   # ${mappingNameText(m.name)} (${mappingNameText(m.protocol, 16)})`,   // 76회차 F2: 예전 저장본의 제어 문자도 줄 밖으로 내지 않는다
       `    bind ${bindAddress}:${m.publicPort}`,
       '    mode tcp',
       '    option tcplog',

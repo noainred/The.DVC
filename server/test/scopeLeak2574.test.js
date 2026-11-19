@@ -10,7 +10,7 @@
  *   응답 본문으로** 본다. 소스 grep 은 미들웨어 순서가 바뀌어도 통과한다(v2.506 교훈).
  *   자식 프로세스인 이유: `config.js` 싱글턴이라 이 프로세스에서 CONFIG_DIR 을 다시 못 가리킨다.
  */
-import { test, describe } from 'node:test';
+import { test, describe, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -21,6 +21,13 @@ import { stripComments } from './_stripComments.js';
 import { scopeEdgeSettings } from '../src/routes/api/bmUsage.js';
 import { scopeVmSeriesStatus } from '../src/routes/api/vmSeries.js';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
 const read = (p) => stripComments(fs.readFileSync(path.join(SRC, p), 'utf8'));
@@ -29,7 +36,7 @@ const read = (p) => stripComments(fs.readFileSync(path.join(SRC, p), 'utf8'));
 
 /** vCenter 3개를 등록하고, 범위 계정(vc-a 만)과 전체 계정으로 같은 경로를 친다. */
 function compare(paths) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'scope2574-'));
+  const dir = tmpDir('scope2574-');
   fs.writeFileSync(path.join(dir, 'vcenters.json'), JSON.stringify({
     vcenters: [
       { id: 'vc-a', name: 'A', host: 'a.example', username: 'u', password: 'p' },

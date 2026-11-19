@@ -167,6 +167,9 @@ export function completeEdgeOp(id, agentName, result) {
   }
   if (lc(op.agent) !== lc(agentName)) return { ok: false, status: 403, reason: '이 작업의 대상 엣지가 아닙니다.' };
   if (op.status !== 'dispatched') return { ok: false, status: 409, reason: '아직 인출되지 않은 작업입니다.' };
+  // 전체 점검 1회차(B-1): 이것이 그 작업의 회신이다 — 엣지가 시한 안에 '결과 모름'(unknown · 필수 값 없음)으로 답했어도 같은 id 로 다시 회신하지 않는다.
+  //   onLate 를 남기면 finish 가 늦은 회신 대기(_late)에 15분 올려 자동 업그레이드(inflight.runningBareosWork)를 붙잡았다 — 늦은 회신 대기는 시한 · abort 로 닫은 작업만.
+  op.onLate = null;
   finish(op, sanitizeEdgeResult(op.kind, result));
   return { ok: true };
 }

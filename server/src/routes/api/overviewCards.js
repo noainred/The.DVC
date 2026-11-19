@@ -190,7 +190,7 @@ export function registerOverviewCards(api) {
         farms: farms || { count: null, reason: FLEET_ONLY },
         physical: { count: pc.count, inventoryRead: pc.invRead, inventoryStale: pc.invStale, disabled: pc.disabled },
         virtual: { count: vms.length, poweredOn: vms.filter((v) => v.powerState === 'POWERED_ON').length, templates: vms.filter((v) => v.template).length, vcenters: vcs.length, vcentersPending: vcPending },
-        gpus: { count: pc.gpus, inventoryRead: pc.invRead, inventoryStale: pc.invStale, inventoryMissing: pc.invMissing, gpusStale: pc.gpusStale, gpusUnnamed: pc.gpusUnnamed, servers: pc.count },
+        gpus: { count: pc.gpus, inventoryRead: pc.invRead, inventoryStale: pc.invStale, inventoryMissing: pc.invMissing, gpusStale: pc.gpusStale, gpusUnnamed: pc.gpusUnnamed, gpuUnread: pc.gpuUnread || 0, servers: pc.count },   // 46회차 I1
         storage: storage || { totalBytes: null, reason: FLEET_ONLY },
         network: network || { count: null, reason: FLEET_ONLY },
         power: power || { totalWatts: null, reason: FLEET_ONLY },
@@ -225,9 +225,13 @@ export function registerOverviewCards(api) {
         if (TREND_CACHE.size > 64) TREND_CACHE.delete(TREND_CACHE.keys().next().value);
       }
       res.setHeader('Cache-Control', 'no-store');
-      res.json(await p);
+      // 73회차 F3: 원천 오류 원문은 admin + 전체 범위에게만(형제 /overview/cards 의 v2.682 R3S-07 규칙) — 캐시는 역할과 무관하게 공유하므로 내보낼 때 가린다.
+      res.json(trendErrorsFor(await p, allowed == null && isAdminReq(req)));
     } catch (e) {
-      if (!res.headersSent) res.status(500).json({ ok: false, reason: e?.message || String(e) });
+      // 75회차(73회차 F3 반증): 500 사유도 200 경로와 같은 판정(admin + 전체 범위) — 범위 관리자에게는 원문이 실렸다.
+      let full = false;
+      try { full = isAdminReq(req) && !scopedVcenterIds(req.user, store.get() || {}); } catch { full = false; }
+      if (!res.headersSent) res.status(500).json({ ok: false, reason: full ? (e?.message || String(e)) : '추이를 만들지 못했습니다.' });
     }
   });
 
@@ -246,6 +250,20 @@ export function registerOverviewCards(api) {
       return { ok: true, ...out };
     }, { ttlMs: 20_000, extraKey: `role:${admin ? 'admin' : 'user'}` });
   });
+}
+
+/**
+ * 73회차 F3: 추이 응답의 지표별 `error`(원천 오류 원문 — DB 경로 · SQLite 문구가 실릴 수 있다)를 admin + 전체 범위가 아니면
+ *   `errorHidden:true` 로 바꾼다. 형제 /overview/cards 의 cardErrorsFor(v2.682 R3S-07)와 같은 규칙. 원본(캐시)은 바꾸지 않는다.
+ */
+export function trendErrorsFor(body, admin) {
+  if (admin || !body || typeof body !== 'object') return body;
+  const out = { ...body };
+  for (const k of ['virtual', 'storage', 'power', 'physical']) {
+    const m = out[k];
+    if (m && typeof m === 'object' && m.error) { const { error: _e, ...rest } = m; out[k] = { ...rest, errorHidden: true }; }
+  }
+  return out;
 }
 
 const TREND_TTL_MS = 5 * 60_000;

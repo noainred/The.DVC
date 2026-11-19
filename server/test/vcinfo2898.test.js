@@ -215,7 +215,9 @@ async function serve(user) {
 test('④ 라우트 — 범위 밖 · 없는 vCenter 404 · 권한 목록 관리자만 · 사용자 이름은 관리자 판본만 · 아직 읽지 않음은 따로 말한다', async () => {
   await seedSnapshot({ vcenters: [{ id: 'vcA', name: 'A', status: 'connected' }, { id: 'vcB', name: 'B', status: 'connected' }] });
   C._resetVcInfo();
-  await C.refreshVcInfo(fakeClient(), { id: 'vcA' }, { now: Date.now() });
+  // v2.915 정정: 예전 `now: Date.now()` 는 고정 날짜 작업 기록(TASK_INFO 2026-11-05)이 보관 기한(TASK_KEEP_MS 24시간)을 넘는 날부터
+  //   mergeTasks 가 전부 버려 items[0] 이 없었다(시한폭탄 — 2026-11-06 기준 커밋에서도 실패). 기준 시각을 기록과 같은 날로 고정한다.
+  await C.refreshVcInfo(fakeClient(), { id: 'vcA' }, { now: Date.parse('2026-11-05T03:00:00Z') });
   const admin = await serve({ username: 'adm', role: 'admin', scope: null });
   const viewer = await serve({ username: 'v', role: 'viewer', scope: null });
   const scoped = await serve({ username: 's', role: 'admin', scope: { vcenters: ['vcB'] } });
@@ -411,10 +413,11 @@ test('반증 중-1 — 중앙이 vcInfo 를 모르는 버전(또는 미상)이�
 
 test('반증 중-2 — 한 번도 읽지 못한 상태는 0건이 아니라 아직 읽지 않음(오류와 함께)', async () => {
   const { vcInfoBody } = await import('../src/routes/api/vcInfo.js');
-  const b = vcInfoBody('tasks', 'v', { at: null, items: [], error: 'NoPermission' }, { admin: true });
+  // 결정(56~75 남긴 것) 69 ③: 오류 원문은 전체 범위 관리자(rawErrors)만 — 이 시험은 원문 문장을 보므로 rawErrors 를 넘긴다(가린 판본은 decideG1a)
+  const b = vcInfoBody('tasks', 'v', { at: null, items: [], error: 'NoPermission' }, { admin: true, rawErrors: true });
   assert.equal(b.at, null);
   assert.match(b.notCollected, /아직 한 번도 읽지 못했습니다 — NoPermission/);
-  assert.match(vcInfoBody('vlcm', 'v', { at: null, error: 'REST 로그인 실패 — 권한 없음(401)' }).notCollected, /REST 로그인 실패/);
+  assert.match(vcInfoBody('vlcm', 'v', { at: null, error: 'REST 로그인 실패 — 권한 없음(401)' }, { rawErrors: true }).notCollected, /REST 로그인 실패/);
   assert.match(vcInfoBody('perms', 'v', { at: null, items: [], retryAt: 5 }).notCollected, /아직 읽지 않았습니다/);
   assert.equal(vcInfoBody('tasks', 'v', { at: 1, items: [] }).notCollected, undefined, '읽었는데 0건이면 0건이다');
   assert.deepEqual(vcInfoBody('tasks', 'v', null).limits, { max: P.VCINFO_LIMITS.tasks, keepMs: P.TASK_KEEP_MS }, '상한 · 보관 기간은 API 값으로');

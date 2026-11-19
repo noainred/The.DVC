@@ -24,6 +24,7 @@ import { buildHostExport, clusterChoices, clusterKeys, HOST_EXPORT_PARTS, HOSTS_
 import { renderHostExportWorkbook, XLSX_MIME } from '../../vcenter/hostExportXlsx.js';
 import { analyzeReboots } from '../../hostcfg/reboots.js';
 import { HOSTOPS_TYPES } from '../../vmchanges/eventDetail.js';
+import { eventLastTsOf } from '../../vmchanges/analyze.js';   // 71회차: 마지막 이벤트 시각(지금 + 여유 이하 MAX — 69회차 F2 한 벌)
 import { getLogsDb } from '../../logs/db.js';
 import { eventNotCollectedMap } from '../../logs/coverage.js';
 import { listRegistry } from '../../idrac/registry.js';
@@ -115,7 +116,7 @@ async function rebootsOf(vc, hosts) {
   const events = truncated ? got.slice(0, READ_MAX) : got;
   const readFrom = truncated && events.length ? events[events.length - 1].ts : null;
   const why = eventNotCollectedMap().get(vc.id) || null;
-  const cov = { firstTs: db.firstTs(vc.id) || null, lastTs: db.lastTs(vc.id) || null, why };
+  const cov = { firstTs: db.firstTs(vc.id) || null, lastTs: eventLastTsOf(db, vc.id, now), why };   // 71회차(69회차 남긴 것 ②): 미래 행 경계
   const r = analyzeReboots(hosts, events, { now, days: BOOT_DAYS, vcName: new Map([[vc.id, vc.name || vc.id]]), coverageOf: () => cov, readFrom });
   return new Map(r.rows.map((x) => [x.id, x]));
 }

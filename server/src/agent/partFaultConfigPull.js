@@ -14,6 +14,7 @@ import { createChangeLogger } from '../util/logThrottle.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { applyCentral } from '../partfault/settings.js';
 import { agentHeaders, withAgentQuery } from './agentNameCarry.js'; // v2.629 A6-01: 원문 이름 헤더는 한글 이름에서 fetch 가 던진다
+import { readJsonCapped, EDGE_RESPONSE_MAX_BYTES } from '../util/readCapped.js'; // 87회차 ⓓ(85 E3 — 권장안): 중앙 응답은 상한 읽기(형제 pull 과 같게 — 상한 없는 res.json() 금지)
 const _log404 = createChangeLogger({ windowMs: 10 * 60_000 }); // v2.600 EDGE2600-06: 같은 404 사유는 10분에 한 줄
 
 const PULL_MS = clampIntervalMs(Number(process.env.AGENT_PARTFAULT_CONFIG_PULL_MS) || 10 * 60_000, 10 * 60_000, 60_000); // v2.600 EDGE2600-05: 상한 추가
@@ -39,7 +40,7 @@ export async function pullPartFaultConfigNow() {
       return last;
     }
     if (!res.ok) throw new Error(`partfault-config -> ${res.status}`);
-    const body = await res.json();
+    const body = await readJsonCapped(res, EDGE_RESPONSE_MAX_BYTES, '중앙 응답');
     const s = body?.settings;
     if (!s || typeof s !== 'object') throw new Error('설정 본문 없음');
     const applied = applyCentral(s);

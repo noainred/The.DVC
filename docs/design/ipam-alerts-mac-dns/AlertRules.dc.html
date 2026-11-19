@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>알림 규칙 — IP 관리 변화 묶음</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.5}
+a{color:#60a5fa}a:hover{color:#93c5fd}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+.card{background:linear-gradient(180deg,#141b2d,#111726);border:1px solid #243049;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,.4)}
+.muted{color:#8b9bb4}
+.badge{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap}
+.badge.green{background:rgba(34,197,94,.15);color:#4ade80}
+.badge.amber{background:rgba(245,158,11,.15);color:#fbbf24}
+.badge.red{background:rgba(239,68,68,.15);color:#f87171}
+.badge.gray{background:rgba(139,155,180,.15);color:#8b9bb4}
+.badge.teal{background:rgba(20,184,166,.16);color:#2dd4bf}
+.btn{padding:7px 12px;border-radius:8px;cursor:pointer;font:inherit;font-size:12px;font-weight:600;background:#1a2236;border:1px solid #243049;color:#8b9bb4;white-space:nowrap}
+.btn.primary{border:none;background:linear-gradient(135deg,#3b82f6,#2563eb);color:#fff;font-weight:700;font-size:14px;padding:9px 18px}
+.input{box-sizing:border-box;background:#141b2d;border:1px solid #243049;color:#e6edf6;padding:8px 12px;border-radius:8px;font:inherit;font-size:13px}
+.rule{display:flex;align-items:flex-start;gap:12px;padding:11px 0;border-bottom:1px solid rgba(36,48,73,.6)}
+.rule:last-child{border-bottom:none}
+.rule input[type=checkbox]{width:16px;height:16px;margin:3px 0 0;accent-color:#3b82f6;flex:none}
+.rule .tx{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:2px}
+.rule .tx b{font-weight:600}
+.rule .tx span{font-size:12px;color:#8b9bb4;line-height:1.6}
+.rule .opt{flex:none;display:flex;align-items:center;gap:6px;font-size:12px;color:#8b9bb4}
+.tag{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;border:1px solid #243049;background:#0f1626;font-size:12px}
+.new{outline:2px dashed rgba(34,211,238,.6);outline-offset:4px}
+</style>
+</helmet>
+<div style="box-sizing:border-box;padding:20px 24px 28px;max-width:1240px;display:flex;flex-direction:column;gap:14px;min-width:0">
+
+  <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px">
+    <div style="display:flex;flex-direction:column;gap:2px">
+      <span class="muted" style="font-size:12px">설정 › 알림·메일 › 알림</span>
+      <span style="font-size:18px;font-weight:700">알림</span>
+    </div>
+    <div class="muted" style="font-size:12px;display:flex;align-items:center;gap:8px">
+      <span style="display:inline-block;width:22px;height:12px;border:2px dashed rgba(34,211,238,.6);border-radius:3px"></span>
+      <span>청록 표시 = 새로 생기는 것 · 통지 채널 카드는 지금과 같아 생략</span>
+    </div>
+  </div>
+
+  <div class="card" style="padding:18px 20px;display:flex;flex-direction:column;gap:4px">
+    <b style="font-size:14px">임계치 / 조건 규칙</b>
+    <div class="rule"><input type="checkbox" checked aria-label="위험 알람 발생"><div class="tx"><b>위험(critical) 알람 발생</b></div></div>
+    <div class="rule"><input type="checkbox" checked aria-label="vCenter 수집 실패"><div class="tx"><b>vCenter 수집 실패(연결 불가)</b></div></div>
+    <div class="rule"><input type="checkbox" checked aria-label="데이터스토어 사용률"><div class="tx"><b>데이터스토어 사용률 ≥ (%)</b></div><div class="opt"><input class="input" style="width:110px" value="90" aria-label="임계 %"></div></div>
+    <div class="muted" style="font-size:12px;padding:8px 0 2px">… 호스트 연결 끊김 · VM 대량 전원 꺼짐 · RAM 오버커밋 · vCPU:코어 · 법인 GPU 할당률(지금 그대로)</div>
+  </div>
+
+  <div class="card new" style="padding:18px 20px;display:flex;flex-direction:column;gap:6px">
+    <div style="display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:8px">
+      <b style="font-size:14px">IP 관리 — 스캔이 본 변화</b>
+      <a href="Main.dc.html" style="font-size:12px;text-decoration:none">IP관리 › IP 변화에서 기록 보기 ›</a>
+    </div>
+    <span class="muted" style="font-size:12px;line-height:1.7">IP 스캔이 끝날 때마다 지난 결과와 비교합니다. 알림은 <b style="color:#e6edf6">스캔 한 번 · 종류 하나에 한 건</b>으로 묶어 보내고, 끈 종류도 ‘IP 변화’ 페이지에는 기록합니다.</span>
+
+    <div class="rule">
+      <input type="checkbox" checked aria-label="충돌 의심">
+      <div class="tx"><b>충돌 의심 <span class="badge red" style="margin-left:4px">위험</span></b>
+        <span>vCenter 가 아는 VM 의 IP 에, 그 VM 의 NIC 이 아닌 MAC 이 응답합니다. 연속 2회 스캔에서 같게 보일 때 알리고(횟수는 설정값), 해소될 때까지 ‘현재 발생 중’ 에 남으며, 그 VM 의 MAC 이 다시 응답하면 해소 알림을 보냅니다. 스캐너와 같은 서브넷의 IP 만 판정합니다.</span></div>
+    </div>
+    <div class="rule">
+      <input type="checkbox" aria-label="MAC 변경">
+      <div class="tx"><b>MAC 변경 <span class="badge amber" style="margin-left:4px">경고</span></b>
+        <span>같은 IP 의 MAC 이 지난 스캔과 다릅니다(장비 교체 · IP 재사용 · 충돌). 이중화 장비처럼 정상적으로 바뀌는 IP 는 ‘IP 관리상태 편집 › MAC 변경 알림 제외’ 로 뺍니다.</span></div>
+    </div>
+    <div class="rule">
+      <input type="checkbox" aria-label="새 미등록 IP">
+      <div class="tx"><b>새 미등록 IP <span class="badge amber" style="margin-left:4px">경고</span></b>
+        <span>vCenter 가 모르는 IP 가 처음 응답했습니다. 그 대역을 <b style="color:#e6edf6">처음 끝까지 스캔한 결과는 기준선</b>으로만 삼고 알리지 않습니다.</span></div>
+      <div class="opt"><span>묶음 상한</span><input class="input" style="width:80px" value="50" aria-label="묶음 상한"><span>개</span></div>
+    </div>
+    <div class="rule">
+      <input type="checkbox" aria-label="예약 · 폐기 IP 사용 시작">
+      <div class="tx"><b>예약 · 폐기 IP 사용 시작 <span class="badge amber" style="margin-left:4px">경고</span></b>
+        <span>관리상태가 ‘예약’ 또는 ‘폐기’ 인 IP(직접 지정 · 대역 정책)가 응답하기 시작했습니다.</span></div>
+    </div>
+    <div class="rule">
+      <input type="checkbox" aria-label="호스트명 변경">
+      <div class="tx"><b>호스트명 변경 <span class="badge amber" style="margin-left:4px">경고</span></b>
+        <span>같은 확인 방식(역DNS · mDNS · NetBIOS)이 지난번과 다른 이름을 답했습니다.</span></div>
+    </div>
+    <div class="rule">
+      <input type="checkbox" disabled aria-label="DNS 불일치">
+      <div class="tx"><b class="muted">DNS 불일치 <span class="badge gray" style="margin-left:4px">기록만</span></b>
+        <span>역DNS 이름의 정방향 주소가 그 IP 가 아닙니다. 수가 많고 급하지 않아 알리지 않고 ‘IP 변화’ · 대장의 표시로만 남깁니다.</span></div>
+    </div>
+
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding-top:10px">
+      <span style="font-weight:600">알리지 않을 에이전트</span>
+      <span class="tag">edge-site-b <button class="btn" style="padding:0 6px;border:none;background:none" aria-label="edge-site-b 빼기">×</button></span>
+      <button class="btn">+ 에이전트 고르기</button>
+      <span class="muted" style="font-size:12px">고른 에이전트의 변화는 기록만 합니다(대역을 새로 넣는 동안 등).</span>
+    </div>
+  </div>
+
+  <div class="card" style="padding:14px 20px;display:flex;flex-wrap:wrap;align-items:center;gap:12px">
+    <label style="display:flex;align-items:center;gap:8px">재통지 쿨다운(분) <input class="input" style="width:120px" value="60"></label>
+    <label style="display:flex;align-items:center;gap:8px">평가 주기(초) <input class="input" style="width:120px" value="60"></label>
+    <button class="btn primary">저장</button>
+    <span class="muted" style="font-size:12px">저장하면 바로 적용됩니다(재시작 불필요). 빈 칸은 이전 값을 유지합니다.</span>
+  </div>
+
+  <div class="muted" style="font-size:12px;line-height:1.75;display:flex;flex-direction:column;gap:2px">
+    <div><b style="color:#e6edf6">사건과 상태</b> — ‘충돌 의심’ 은 풀릴 때까지 이어지는 상태라 지금의 알림 엔진(발생 · 쿨다운 재통지 · 해소)에 넣습니다. 나머지 넷은 한 번 일어난 사건이라 ‘현재 발생 중’ 에 남지 않고 ‘최근 통지’ 와 ‘IP 변화’ 페이지에 남습니다.</div>
+    <div><b style="color:#e6edf6">채널</b> — 위 통지 채널(Slack · Teams · Webhook · 메일) 그대로입니다. IP 변화만 따로 보내는 채널은 두지 않았습니다.</div>
+    <div><b style="color:#e6edf6">기본값(제안)</b> — 충돌 의심만 켬, 나머지는 끔. 쿨다운은 ‘충돌 의심’ 에만 적용됩니다.</div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1240,"height":1060}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
