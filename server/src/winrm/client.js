@@ -30,15 +30,26 @@ export class WinrmError extends Error {
   constructor(kind, message) { super(message); this.name = 'WinrmError'; this.kind = kind; }
 }
 
-let _connect = null;
-/** 장비 TLS 판정을 거치는 connect 함수(한 번 만든다). 연결마다 서버 인증서(DER)를 꺼내 채널 바인딩에 쓴다. */
-function connectFn() {
-  if (!_connect) _connect = deviceTlsConnect({ subsystem: 'winrm', envKey: 'WINRM_TLS_VERIFY', envRaw: process.env.WINRM_TLS_VERIFY, label: 'Windows 원격 관리(WinRM)', tls: withSsrfLookup({}), resume: false });   // 채널 바인딩에 연결마다 서버 인증서가 필요하다
-  return _connect;
+/**
+ * 장비 TLS 판정을 거치는 connect(호출마다 — 세션을 이어 쓰지 않으니 기억할 것도 없다) — `tls` 는 호출부가 `withSsrfLookup` 으로 감싼 옵션(DNS 리바인딩 차단 · ssrfAgents2537 스윕).
+ *   TLS 세션을 이어 쓰지 않는다(resume:false — 채널 바인딩에 연결마다 서버 인증서가 필요하다 · 이어 쓴 세션은 인증서를 주지 않는다 · 실측).
+ */
+const winrmTlsConnect = (tls) => deviceTlsConnect({ subsystem: 'winrm', envKey: 'WINRM_TLS_VERIFY', envRaw: process.env.WINRM_TLS_VERIFY, label: 'Windows 원격 관리(WinRM)', tls, resume: false });
+/**
+ * 연결 하나만 허락하고(두 번째 연결은 바이트 0 으로 거절 — 반증 F1) 판정을 통과한 소켓의 서버 인증서(DER)를 st.certDer 에 남긴다.
+ *   인증서를 못 꺼내면(이어 쓴 세션 등) 채널 바인딩이 0 이 되어 확장 보호(EPA)를 켠 서버가 거부한다 — 비밀번호를 보내기 전에 끊는다.
+ */
+function guardedConnect(base, st) {
+  return (opts, cb) => {
+    st.connects += 1;
+    if (st.connects > 1) return cb(new WinrmError('connection-split', 'WinRM 연결이 끊겨 다시 붙어야 합니다 — NTLM 은 연결 단위 인증이라 이번 읽기를 그만둡니다(로그인 거부가 아닙니다).'));
+    return base(opts, (err, socket) => {
+      if (!err && socket && typeof socket.getPeerCertificate === 'function') { try { st.certDer = socket.getPeerCertificate(false)?.raw || null; } catch { st.certDer = null; } }
+      if (!err && socket && !st.certDer) { try { socket.destroy(); } catch { /* */ } return cb(new WinrmError('tls-peer', 'WinRM 서버 인증서를 꺼내지 못해(채널 바인딩) 연결하지 않았습니다.')); }
+      return cb(err, socket);
+    });
+  };
 }
-
-/** 시험용 — env 를 바꾼 뒤 다시 만든다. */
-export function _resetWinrmForTest() { _connect = null; }
 
 async function readBody(res, max = MAX_RESPONSE) {
   const chunks = []; let n = 0;
@@ -66,23 +77,12 @@ export async function winrmRun({ host, port = WINRM_PORT, username, domain = '',
   if (!host || !username || typeof password !== 'string' || !password) throw new WinrmError('no-secret', 'WinRM 접속에는 계정과 비밀번호가 필요합니다(키 로그인은 SSH 방식에서만 됩니다).');
   if (!HOST_RE.test(String(host)) || String(host).length > 253) throw new WinrmError('bad-host', 'WinRM 접속처 글자가 올바르지 않습니다.');
   const t0 = Date.now();
-  let certDer = null;
-  const base = connectFn();
   // 연결 하나만(NTLM 연결 단위 인증) · 판정을 통과한 소켓의 인증서를 채널 바인딩에 쓴다.
   //   v3.26 반증 F1(재현): undici `connections: 1` 은 끊긴 뒤 **다시 연결하는 것**을 막지 않는다 — 인증 뒤 끊기면 다음 요청이 인증 없이 새 연결로 가 401 을 받아
-  //   ‘로그인 거부’ → 계정 정지가 됐고, CHALLENGE 뒤 끊기면 AUTHENTICATE 가 다른 연결로 갔다. 두 번째 연결은 바이트를 보내기 전에 거절한다.
-  let connects = 0;
+  //   ‘로그인 거부’ → 계정 정지가 됐고, CHALLENGE 뒤 끊기면 AUTHENTICATE 가 다른 연결로 갔다. 두 번째 연결은 바이트를 보내기 전에 거절한다(guardedConnect).
+  const st = { connects: 0, certDer: null };
   const agent = new Agent({ connections: 1, pipelining: 1, keepAliveTimeout: 30_000, bodyTimeout: timeoutMs, headersTimeout: Math.min(timeoutMs, 60_000),
-    connect: (opts, cb) => {
-      connects += 1;
-      if (connects > 1) return cb(new WinrmError('connection-split', 'WinRM 연결이 끊겨 다시 붙어야 합니다 — NTLM 은 연결 단위 인증이라 이번 읽기를 그만둡니다(로그인 거부가 아닙니다).'));
-      return base(opts, (err, socket) => {
-      if (!err && socket && typeof socket.getPeerCertificate === 'function') { try { certDer = socket.getPeerCertificate(false)?.raw || null; } catch { certDer = null; } }
-      // 인증서를 못 꺼내면(이어 쓴 세션 등) 채널 바인딩이 0 이 되어 확장 보호(EPA)를 켠 서버가 거부한다 — 비밀번호를 보내기 전에 끊는다
-      if (!err && socket && !certDer) { try { socket.destroy(); } catch { /* */ } return cb(new WinrmError('tls-peer', 'WinRM 서버 인증서를 꺼내지 못해(채널 바인딩) 연결하지 않았습니다.')); }
-      cb(err, socket);
-      });
-    } });
+    connect: guardedConnect(winrmTlsConnect(withSsrfLookup({})), st) });
   const ac = new AbortController();
   // 시한 · 호출부 취소가 오면 연결째 끊는다 — undici 는 연결(TLS 핸드셰이크) 중인 요청의 abort 를 그 연결이 끝날 때까지 미룬다(실측: 1.5초 시한이 10.5초에 끝남).
   //   Agent 를 부수면 호출은 바로 끝난다. 다만 핸드셰이크 중이던 소켓 자체는 연결 시한(약 10초)에 닫힌다(반증 F7 — 비밀은 그 소켓으로 나가지 않는다).
@@ -128,7 +128,7 @@ export async function winrmRun({ host, port = WINRM_PORT, username, domain = '',
     let ch;
     try { ch = NTLM.readChallenge(chBuf); } catch (e) { throw new WinrmError('fault', String(e?.message || e)); }
     let message;
-    try { ({ message } = NTLM.authenticateMessage({ user: username, domain, password, negotiate: neg, challenge: ch, certDer })); }
+    try { ({ message } = NTLM.authenticateMessage({ user: username, domain, password, negotiate: neg, challenge: ch, certDer: st.certDer })); }
     catch (e) { throw new WinrmError('cbt', String(e?.message || e).slice(0, 200)); }   // 채널 바인딩을 정할 수 없으면 AUTHENTICATE 를 보내지 않는다(F2)
     // ③ AUTHENTICATE 와 함께 셸 만들기(같은 연결)
     const created = await call(WS.ACTION.create, WS.createShellBody(), { options: WS.CREATE_OPTIONS }, `Negotiate ${message.toString('base64')}`);
