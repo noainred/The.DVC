@@ -162,7 +162,9 @@ function createGenMemo(max) {
   memo.clear = () => m.clear();
   return memo;
 }
-const scopeKeyOf = (scopeIds) => (scopeIds ? `s:${[...scopeIds].map(String).sort().join(',')}` : '*');
+// 범위 서명 — **단사여야 한다**(dbg3231 2회차: 예전 `join(',')` 은 등록부가 허용하는 쉼표 id 로 충돌해 ['KR,Seoul'] 과 ['KR','Seoul'] 이
+//   같은 기억을 받았다 — 범위 밖 vCenter 의 합계 · id 가 범위 계정에 나갔다). routes/api/shared.js scopeKey 와 같은 꼴: 's:' + JSON(정렬 배열) · 무제한 '*'.
+const scopeKeyOf = (scopeIds) => (scopeIds ? `s:${JSON.stringify([...scopeIds].map(String).sort())}` : '*');
 const _seriesMemo = createGenMemo(6);
 const _changeLogMemo = createGenMemo(6);   // v2.744(감사 DB-01): 스토리지 변경 이력 — 시각별
 /** 테스트용 — 기억 크기·비우기. */

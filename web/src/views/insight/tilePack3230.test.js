@@ -115,7 +115,7 @@ describe('③ C · 작은 칸 묶기', () => {
   it('worstMember — 가장 높은 값(모름은 뒤로)', () => {
     const ms = [{ id: 'a', size: 5, v: 40 }, { id: 'b', size: 3, v: null }, { id: 'c', size: 2, v: 91 }];
     expect(worstMember(ms, (m) => m.v)).toEqual({ member: ms[2], value: 91 });
-    expect(worstMember([{ id: 'x', size: 1, v: null }], (m) => m.v)).toEqual({ member: { id: 'x', size: 1, v: null }, value: null });
+    expect(worstMember([{ id: 'x', size: 1, v: null }], (m) => m.v)).toEqual({ member: null, value: null });   // dbg3231 3회차: 모두 모름이면 대표 없음
     expect(worstMember([], (m) => m.v).member).toBe(null);
   });
 });
@@ -154,7 +154,8 @@ describe('⑤ 그리기 소스 계약(Treemap.jsx · 두 화면)', () => {
     for (const f of ['../vms/VmInsight.jsx', '../hosts/HostInsight.jsx']) {
       const s = read(f);
       expect(s).toMatch(/groupView=\{groupView\} onWidth=\{setMapW\}/);
-      expect(s).toMatch(/mapW \? maxTilesPacked\(layout, mapW\) : maxTilesInCol\(layout\)/);
+      expect(s).toMatch(/packedAuto \? maxTilesPacked\(layout, mapW[,)]/);   // dbg3231: 좁은 화면이면 옛 폭을 쓰지 않는다(packedAuto = mapW ∧ 넓은 화면)
+      expect(s).toMatch(/: maxTilesInCol\(layout\)/);
       expect(s).toMatch(/worstMember\(members/);
     }
     expect(read('../hosts/HostInsight.jsx')).toMatch(/whereOf=\{\(t\) => corpName\(t\.row\)\}/);   // 클러스터 이름은 법인마다 겹칠 수 있다 — 목록에 법인 칸
