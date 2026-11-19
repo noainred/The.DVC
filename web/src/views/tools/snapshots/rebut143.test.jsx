@@ -57,8 +57,9 @@ describe('N143-1 — 요약의 ‘지금 값을 못 읽은 vCenter’', () => {
 describe('N143-6 — 추이 설명은 그림과 같은 줄', () => {
   const days = Array.from({ length: 6 }, (_, i) => `2026-11-${String(10 + i).padStart(2, '0')}`);
   const row = (day, id, status, gb) => ({ day, vcenter_id: id, status, vms: status === 'ok' ? 1 : null, snaps: status === 'ok' ? 1 : null, gb: status === 'ok' ? gb : null, gb_unknown: status === 'ok' ? 0 : null, over: 0 });
-  // va 10 GB 매일 정상 · vm2 30 GB — 뒤 3일 점검중(뺀 날) · vb REST 폴백(no-snap) 처음부터
-  const rows = days.flatMap((d, i) => [row(d, 'va', 'ok', 10), row(d, 'vm2', i >= 3 ? 'maintenance' : 'ok', 30), row(d, 'vb', 'no-snap')]);
+  // va 10 GB 매일 정상 · vm2 30 GB — 뒤 3일 점검중(뺀 날) · vb 처음부터 못 읽음(빠진 날)
+  // 147회차(143 결정 D1): REST 수집(no-snap)은 이제 점검중처럼 묶음에서 뺀다 — ‘빠진 날’ 재료는 unreachable 로 바꿨다(REST 는 decide147.test.jsx)
+  const rows = days.flatMap((d, i) => [row(d, 'va', 'ok', 10), row(d, 'vm2', i >= 3 ? 'maintenance' : 'ok', 30), row(d, 'vb', 'unreachable')]);
   const first = new Map([['va', days[0]], ['vm2', days[0]], ['vb', days[0]]]);
   const hist = (ids) => ({ ok: true, status: { available: true, recordHour: 3, retentionDays: 400, started: days[0] }, days,
     series: aggregateDays(days, rows, new Set(ids), first),
@@ -66,7 +67,7 @@ describe('N143-6 — 추이 설명은 그림과 같은 줄', () => {
   it('법인을 고르면 처음 · 마지막 · 빠진 날을 그 법인 줄에서 센다', () => {
     const h = hist(['va', 'vm2', 'vb']);
     const all = T.trendOf(h, '', 'gb');
-    expect(all.first).toBe(null); expect(all.missingDays).toBe(6);   // REST vCenter 하나가 전체 합을 매일 비운다(D1)
+    expect(all.first).toBe(null); expect(all.missingDays).toBe(6);   // 못 읽은 vCenter 하나가 전체 합을 매일 비운다(일시 실패 — 빠진 날)
     const a = T.trendOf(h, 'vc:va', 'gb');
     expect([a.first, a.last, a.missingDays]).toEqual([10, 10, 0]);
     expect(a.values).toEqual(T.seriesValues(h.byCorp['vc:va'], 'gb'));

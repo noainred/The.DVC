@@ -46,6 +46,8 @@
 .snp-spark.s { height: 18px; border-radius: 4px; }
 .snp-spark.w { height: 44px; }
 .snp-spark .gap { position: absolute; top: 0; bottom: 0; background: repeating-linear-gradient(135deg, rgba(148,163,184,.25) 0 3px, transparent 3px 6px); }
+/* 147회차: 일부 vCenter(점검중 · 비활성 · REST 수집)를 빼고 더한 날 — 아래 띠(부분 합을 표시 없이 잇지 않는다) */
+.snp-spark .ex { position: absolute; bottom: 0; height: 3px; background: #f59e0b; opacity: .85; }
 
 .snp-panel { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .snp-ph { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; }

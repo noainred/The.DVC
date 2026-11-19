@@ -6,6 +6,9 @@
  *     그날 점은 값이 아니라 `null` + missing 수다. ‘기록이 아직 시작되지 않은’ vCenter(그 vCenter 의 첫 행보다 앞)는 빠진 것으로 세지 않는다.
  *   · 반증 3: 점검중(maintenance) · 비활성(disabled)은 그날 묶음에서 **뺀다**(빠진 것으로 세면 한 곳이 오래 점검중이면 전 함대 추이가 매일 비었다 —
  *     metrics/unreadVcenters.js 의 v2.621 RECENT-03 과 같은 함정). 뺀 수는 excluded 로 따로 싣는다.
+ *   · 147회차(143 결정 D1 — 사용자 ‘권장안대로 반영’): REST 수집('no-snap' — 스냅샷 개수를 받지 않는다)도 뺀다(excluded · 그 가운데 수는 excludedRest).
+ *     REST 폴백은 일시 실패가 아니라 수집 방식의 성질이라 빠진 날로 세면 SOAP 으로 돌아올 때까지 전 범위 추이가 매일 비었다(반증 3 과 같은 함정).
+ *     일시 실패(unreachable · stale · pending)와 일부만 읽은 날(partial)은 그대로 빠진 날이다. 판정은 읽을 때(status 로) 하므로 이미 기록된 날에도 적용된다.
  *   · 크기를 못 읽은 VM 이 있는 날의 크기 합은 null(개수 · 기준 넘김 수는 그대로 — 그 VM 은 행이 있다).
  *   · 법인(묶음) 판정은 view.js 와 같다(DataCenter → 없으면 vCenter). 법인별 추이도 같은 규칙으로 서버가 만든다(화면에 두 번째 판정을 두지 않는다).
  *   · 범위 · 고른 법인 교집합은 부르는 라우트가 먼저 건 집합(vcIds)으로만 읽는다.
@@ -40,9 +43,13 @@ export function dayKeys(now, days) {
   return out;
 }
 
+/** 그날 묶음에서 빼는 상태 → 사유('maint' = 점검중 · 비활성 · 'rest' = REST 수집). 그 밖(ok 아님)은 빠진 날. 추이 · 빠진 날(gaps)이 같이 쓴다. */
+const EXCLUDE_KIND = new Map([['maintenance', 'maint'], ['disabled', 'maint'], ['no-snap', 'rest']]);
+export const excludeKindOf = (status) => EXCLUDE_KIND.get(status) || null;
+
 /**
- * 날별 합(순수 — 시험용). rows = snap_vcday 행, vcIds = 이 묶음의 vCenter, firstOk = vcId → 첫 'ok' 날.
- * @returns {{day:string, vms:number|null, snaps:number|null, gb:number|null, gbUnknown:number|null, over:number|null, missing:number}[]}
+ * 날별 합(순수 — 시험용). rows = snap_vcday 행, vcIds = 이 묶음의 vCenter, firstOk = vcId → 그 vCenter 의 첫 기록 날(상태 무관 — 반증 2).
+ * @returns {{day:string, vms:number|null, snaps:number|null, gb:number|null, gbUnknown:number|null, over:number|null, missing:number, excluded:number, excludedRest:number}[]}
  */
 export function aggregateDays(days, rows, vcIds, firstOk) {
   const byDay = new Map();
@@ -53,19 +60,20 @@ export function aggregateDays(days, rows, vcIds, firstOk) {
   }
   return days.map((day) => {
     const m = byDay.get(day) || new Map();
-    let missing = 0; let excluded = 0; let any = false;
+    let missing = 0; let excluded = 0; let excludedRest = 0; let any = false;
     const acc = { vms: 0, snaps: 0, gb: 0, gbUnknown: 0, over: 0 };
     for (const id of vcIds) {
       const f = firstOk.get(id);
       if (!f || day < f) continue;            // 이 vCenter 는 그날 아직 기록을 시작하지 않았다
       const r = m.get(id);
-      if (r && (r.status === 'maintenance' || r.status === 'disabled')) { excluded += 1; continue; }
+      const ex = r ? excludeKindOf(r.status) : null;
+      if (ex) { excluded += 1; if (ex === 'rest') excludedRest += 1; continue; }
       if (!r || r.status !== 'ok') { missing += 1; continue; }
       any = true;
       acc.vms += r.vms || 0; acc.snaps += r.snaps || 0; acc.gb += r.gb || 0; acc.gbUnknown += r.gb_unknown || 0; acc.over += r.over || 0;
     }
-    if (missing || !any) return { day, vms: null, snaps: null, gb: null, gbUnknown: null, over: null, missing, excluded };
-    return { day, vms: acc.vms, snaps: acc.snaps, gb: acc.gbUnknown ? null : r1(acc.gb), gbUnknown: acc.gbUnknown, over: acc.over, missing: 0, excluded };
+    if (missing || !any) return { day, vms: null, snaps: null, gb: null, gbUnknown: null, over: null, missing, excluded, excludedRest };
+    return { day, vms: acc.vms, snaps: acc.snaps, gb: acc.gbUnknown ? null : r1(acc.gb), gbUnknown: acc.gbUnknown, over: acc.over, missing: 0, excluded, excludedRest };
   });
 }
 
@@ -100,12 +108,12 @@ export async function historySeries({ vcIds, days, now = Date.now(), corpOf }) {
   const rowsOf = (ids) => { const out = []; for (const id of ids) for (const r of rowsByVc.get(id) || []) out.push(r); return out; };
   const byCorp = {};
   for (const [c, ids] of groups) byCorp[c] = aggregateDays(keys, rowsOf(ids), ids, firstOk);
-  // 빠진 날 — vCenter 별(그 기간 안에서 기록을 시작한 뒤 'ok' 가 아닌 날)
+  // 빠진 날 — vCenter 별(그 기간 안에서 기록을 시작한 뒤 'ok' 도 뺀 날(점검중 · 비활성 · REST 수집 — excludeKindOf)도 아닌 날)
   const gaps = [];
   for (const id of vcIds) {
     const f = firstOk.get(id);
     if (!f) continue;
-    const ok = new Set((rowsByVc.get(id) || []).filter((r) => r.status === 'ok' || r.status === 'maintenance' || r.status === 'disabled').map((r) => r.day));
+    const ok = new Set((rowsByVc.get(id) || []).filter((r) => r.status === 'ok' || excludeKindOf(r.status)).map((r) => r.day));
     const miss = keys.filter((d) => d >= f && !ok.has(d) && d !== keys[keys.length - 1]);   // 오늘은 아직 기록 전일 수 있어 세지 않는다
     if (miss.length) gaps.push({ vcenterId: id, days: miss.length, last: miss[miss.length - 1] });
   }

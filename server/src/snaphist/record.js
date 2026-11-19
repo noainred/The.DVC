@@ -10,7 +10,8 @@
  *     인벤토리에 있는 VM(vmIds)을 같이 넘긴다. 집합을 모르는 VM(개수는 있는데 줄기 · 이름을 못 읽음)의 열린 항목은 db 가 닫지 않는다.
  *   · 스냅샷 하나의 열쇠 = **생성 시각**(VM 안에서 유일 — 이름을 바꿔도 같은 스냅샷이다. 반증 4). 생성 시각을 모르면(이름 목록만) `|이름` —
  *     db 가 이름이 같은 열린 항목과 양방향으로 맞춘다(반증 5 · 6).
- *   · 반증 1(재현): REST 폴백 수집(collectSource 'rest')은 스냅샷 개수를 받지 않는다 — 그날은 'no-snap' 사유로 빠진 날이다.
+ *   · 반증 1(재현): REST 폴백 수집(collectSource 'rest')은 스냅샷 개수를 받지 않는다 — 그날은 'no-snap' 사유만 남긴다(‘0개’ 가 아니다).
+ *     추이는 그날 그 vCenter 를 점검중 · 비활성처럼 묶음에서 뺀다(147회차 — history.excludeKindOf · 일시 실패와 달리 빠진 날로 세지 않는다).
  *     엣지가 REST 로 받은 위임 vCenter(collectSource 'site' + collectMethod 'rest')도 같다(138회차 — 사유 판정은 view.vcReadIssue 하나).
  *     SOAP 수집에서도 개수를 못 읽은 VM 이 있으면 status 'partial' — db 는 그날 사유만 남기고(행 · 항목 없음 — 138회차 정정) 추이에 넣지 않는다(부분 합 금지).
  *   · 반증 8: 백업 도구(Veeam)가 백업할 때마다 만들고 지우는 임시 스냅샷(soapParse.VEEAM_SNAP_NAME)은 항목으로 만들지 않는다 —

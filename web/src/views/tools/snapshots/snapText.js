@@ -316,10 +316,33 @@ export function trendOf(hist, corp, metric) {
   const values = seriesValues(series, metric);
   const first = values.find((v) => v != null) ?? null;
   const last = [...values].reverse().find((v) => v != null) ?? null;
+  // 값이 있는 날만(뺀 vCenter 하나뿐이면 그날은 null — 더한 것이 없다). 147회차: 그림의 띠와 같은 날(그 지표 값이 있는 날)로 센다
+  const idx = excludedMarks(series, values);
+  const exDays = idx.map((i) => series[i]);
+  const onlyDays = series.filter((p) => p && numOrNull(p.vms) == null && !(p.missing > 0) && p.excluded > 0);   // 뺀 vCenter 뿐이라 합이 없는 날
   return { values, first, last, missingDays: series.filter((p) => p && p.missing > 0).length,
-    excludedDays: series.filter((p) => p && numOrNull(p.vms) != null && p.excluded > 0).length,   // 값이 있는 날만(뺀 vCenter 하나뿐이면 그날은 null — 더한 것이 없다)
-    excludedOnlyDays: series.filter((p) => p && numOrNull(p.vms) == null && !(p.missing > 0) && p.excluded > 0).length };   // 뺀 vCenter 뿐이라 합이 없는 날
+    excludedDays: exDays.length, excludedOnlyDays: onlyDays.length,
+    excludedWhy: excludedWhyText(exDays), excludedOnlyWhy: excludedWhyText(onlyDays), excludedIdx: idx };
 }
+
+/**
+ * 뺀 사유 — 서버 history.aggregateDays 의 excluded(뺀 vCenter 수) · excludedRest(그 가운데 REST 수집 — 스냅샷 개수를 받지 않는다).
+ * 147회차(143 결정 D1): REST 수집 vCenter 도 그날 묶음에서 뺀다. 그 날들에 실제로 있던 사유만 적는다(한 사유로 단정하지 않는다).
+ * excludedRest 가 없는 응답(예전 서버 — REST 를 빼지 않았다)은 전부 점검중 · 비활성이다.
+ */
+export function excludedWhyText(points) {
+  let maint = false; let rest = false;
+  for (const p of points || []) {
+    const ex = numOrNull(p?.excluded) ?? 0;
+    const r = Math.min(ex, numOrNull(p?.excludedRest) ?? 0);
+    if (r > 0) rest = true;
+    if (ex - r > 0) maint = true;
+  }
+  return [maint ? '점검중 · 비활성' : '', rest ? 'REST 수집' : ''].filter(Boolean).join(' · ');
+}
+
+/** 일부 vCenter 를 빼고 더한 날의 위치(그림에 값이 있는 날만) — 그림이 그날을 표시한다(부분 합을 표시 없이 잇지 않는다 — 147회차). */
+export const excludedMarks = (series, values) => (series || []).map((p, i) => (p && values[i] != null && p.excluded > 0 ? i : -1)).filter((i) => i >= 0);
 
 /**
  * SVG 꺾은선 조각 — null 은 선을 끊는다(빠진 날을 0 으로 잇지 않는다). 값은 0 ~ 최대값을 높이 h 에 맞춘다.
