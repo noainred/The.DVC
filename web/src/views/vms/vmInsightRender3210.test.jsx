@@ -66,6 +66,17 @@ describe('분석 보기 렌더', () => {
     const order = ['디스크가 차 가는 VM', '오래된 스냅샷', '꺼진 VM', 'VM 수 추이와 생성 · 삭제'];
     for (let i = 0; i < order.length; i += 1) expect(at(order[i]), order[i]).toBeGreaterThan(i ? at(order[i - 1]) : -1);
   });
+  it('v3.23.2 — 오래된 스냅샷 카드의 ‘모두 보기’: 도구 권한이 있으면 스냅샷 도구 링크 + ‘조치 필요’, 없으면 ‘조치 필요’ 만', () => {
+    perm.tools = true;
+    const on = render({});
+    expect(on).toMatch(/<a class="ins-link" href="#\/tools\/snapshots">‘스냅샷 있는 VM’ 에서 모두 보기 →<\/a>/);
+    expect(on).toMatch(/href="#\/vms\/attention"[^>]*>기준을 넘긴 VM 만 ‘조치 필요’ 에서 보기 →/);
+    expect(on.indexOf('#/tools/snapshots')).toBeLessThan(on.indexOf('기준을 넘긴 VM 만'));
+    perm.tools = false;
+    const off = render({});
+    expect(off).not.toMatch(/#\/tools\/snapshots/);
+    expect(off).toMatch(/href="#\/vms\/attention"[^>]*>‘조치 필요’ 에서 모두 보기 →/);
+  });
   it('도구 권한이 없으면 성능 · 구성 점검 묶음 · 과할당 보기가 없다', () => {
     perm.tools = false;
     const t = text(render({}));
