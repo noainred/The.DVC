@@ -30,7 +30,7 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
 .top .rt{margin-left:auto;display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-size:12px;color:#8b9bb4}
 .btn{border:1px solid #243049;background:#0f1626;color:#e6edf6;border-radius:8px;padding:6px 12px;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap}
 .btn.sm{padding:4px 10px;font-size:12px}
-.rule{display:grid;grid-template-columns:repeat(3, minmax(0, 1fr));gap:10px}
+.rule{display:grid;grid-template-columns:repeat(4, minmax(0, 1fr));gap:10px}
 .rl{background:#0f1626;border:1px solid #243049;border-radius:10px;padding:8px 12px;display:flex;flex-direction:column;gap:3px;min-width:0;font-size:12.5px;color:#c3cfe2}
 .rl .t{font-size:11.5px;font-weight:700;color:#8b9bb4;display:flex;align-items:center}
 .rl b{font-family:"JetBrains Mono",monospace;font-weight:700;color:#e6edf6}
@@ -100,8 +100,8 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
 .selbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;background:rgba(59,130,246,.12);border:1px solid #3b82f6;border-radius:10px;padding:8px 12px;font-size:12.5px}
 .selbar b{font-family:"JetBrains Mono",monospace}
 .tbl{overflow-x:auto}
-.rows{min-width:1180px;display:flex;flex-direction:column}
-.row{display:grid;grid-template-columns:28px minmax(0, 1.2fr) minmax(0, 1.65fr) minmax(0, 1fr) 46px minmax(0, 1fr) 54px minmax(0, 1.4fr);gap:0 12px;align-items:center;padding:8px 8px;border-bottom:1px solid #1e293f;color:#e6edf6;font-size:12.5px;box-sizing:border-box}
+.rows{min-width:1290px;display:flex;flex-direction:column}
+.row{display:grid;grid-template-columns:28px minmax(0, 1.2fr) minmax(0, 1.6fr) minmax(0, 1fr) 46px minmax(0, 1fr) 104px 54px minmax(0, 1.35fr);gap:0 12px;align-items:center;padding:8px 8px;border-bottom:1px solid #1e293f;color:#e6edf6;font-size:12.5px;box-sizing:border-box}
 .row:hover{background:rgba(59,130,246,.06)}
 .row.open{background:rgba(59,130,246,.12)}
 .row.th{padding:0 8px 6px;border-bottom:1px solid #243049}
@@ -122,6 +122,18 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
 .track{display:block;height:8px;border-radius:4px;background:#0f1626;overflow:hidden}
 .track i{display:block;height:100%;border-radius:4px}
 .c-n{text-align:right;font-weight:700}
+.c-chg{display:grid;grid-template-columns:34px minmax(0, 1fr);gap:6px;align-items:center}
+.c-chg b{font-size:12px;font-weight:700;white-space:nowrap;text-align:right}
+.spk.s{height:18px;border-radius:4px}
+.spk.w{height:44px}
+.hist{display:grid;grid-template-columns:96px 280px minmax(0, 1fr);gap:4px 14px;align-items:center;padding:8px 8px 8px 40px;background:#0f1626;border-bottom:1px solid #1a2438;font-size:12px;color:#c3cfe2}
+.hist .hl{font-weight:700;color:#8b9bb4;display:flex;align-items:center}
+.hist .he{grid-column:1 / -1;color:#8b9bb4;line-height:1.55}
+.grow{display:grid;grid-template-columns:minmax(0, 1.2fr) minmax(0, 1.5fr) 120px 150px 110px minmax(0, 1fr);gap:0 14px;align-items:center;padding:9px 8px;border-bottom:1px solid #1e293f;font-size:12.5px}
+.grow.th{font-size:11.5px;font-weight:700;color:#8b9bb4;padding:0 8px 6px;border-bottom:1px solid #243049}
+.grow b{display:block;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.grow small{display:block;font-size:11.5px;color:#8b9bb4;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tg.ok{color:#86efac;border-color:rgba(134,239,172,.5)}
 .pw{font-style:normal;font-size:11.5px;font-weight:700;padding:2px 8px;border-radius:999px;border:1px solid #243049;color:#8b9bb4;white-space:nowrap}
 .pw.on{color:#86efac;border-color:rgba(134,239,172,.45)}
 .c-tags{display:flex;flex-wrap:wrap;gap:4px;align-items:center;font-size:11.5px;color:#8b9bb4}
@@ -176,6 +188,7 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
     <div class="rl"><span class="t">사내 기준<i class="nw"></i></span><span>나이 <b>7일</b> · 한 VM 에 <b>3개</b> · 크기 <b>100 GB</b> · 예외 목록 <b>{{ exCount }}</b> · 템플릿은 판정하지 않음</span><a href="#">‘VM 구성 점검’ 설정에서 바꿉니다 →</a></div>
     <div class="rl"><span class="t">VMware 권고(참고선)<i class="nw"></i></span><span>한 스냅샷은 <b>72시간</b> 안에 · 줄기는 <b>2~3개</b>(최대 32개) · 스냅샷은 백업이 아님</span><span class="note">사내 기준보다 짧습니다 — 판정이 아니라 참고로만 보입니다</span></div>
     <div class="rl"><span class="t">알림<i class="nw"></i></span><span>매일 <b>09시</b> 기준을 넘긴 VM 목록을 알림 — <b>켜짐</b></span><span class="note">‘VM 구성 점검’ 의 알림 설정을 여기서 보여 주기만 합니다</span></div>
+    <div class="rl"><span class="t">스냅샷 이력 DB<i class="nw"></i></span><span>하루 <b>1번</b> 기록 · 시작 <b>{{ histStart }}</b> · 보관 <b>400일</b></span><span class="note">{{ histGap }}</span></div>
   </div>
 
   <section class="kpis" aria-label="요약">
@@ -184,7 +197,7 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
     </sc-for>
   </section>
 
-  <div class="sec"><h2>법인별<i class="nw"></i></h2><span class="hint">카드를 누르면 그 법인만 봅니다 · 막대 = 나이 구간 · 아래 그림 = 스냅샷 크기 30일 추이 · 정리는 그 법인의 vCenter 에서 합니다</span></div>
+  <div class="sec"><h2>법인별<i class="nw"></i></h2><span class="hint">카드를 누르면 그 법인만 봅니다 · 막대 = 나이 구간 · 아래 그림 = 스냅샷 크기 30일 추이(이력 DB) · 정리는 그 법인의 vCenter 에서 합니다</span></div>
   <section class="cards" aria-label="법인별 요약">
     <sc-for list="{{ corps }}" as="c" hint-placeholder-count="5">
       <button type="button" class="{{ c.cls }}" aria-pressed="{{ c.on }}" onClick="{{ c.pick }}" title="{{ c.tip }}">
@@ -215,12 +228,16 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
     </section>
 
     <section class="panel" aria-label="추이와 신호">
-      <div class="ph"><h2>크기 추이 · 30일<i class="nw"></i></h2><span class="hint">{{ trendScope }}</span></div>
+      <div class="ph"><h2>추이<i class="nw"></i></h2><span class="hint">{{ trendScope }}</span></div>
+      <div class="flt">
+        <span class="seg" role="group" aria-label="무엇을 볼지"><sc-for list="{{ tMetrics }}" as="m" hint-placeholder-count="3"><button type="button" class="{{ m.cls }}" aria-pressed="{{ m.on }}" onClick="{{ m.pick }}">{{ m.label }}</button></sc-for></span>
+        <span class="seg" role="group" aria-label="기간"><sc-for list="{{ tPeriods }}" as="m" hint-placeholder-count="3"><button type="button" class="{{ m.cls }}" aria-pressed="{{ m.on }}" onClick="{{ m.pick }}">{{ m.label }}</button></sc-for></span>
+      </div>
       <div class="trend" role="img" aria-label="{{ trendCap }}"><i style="clip-path: {{ trendPoly }}"></i></div>
       <div class="tcap"><span>{{ trendCap }}</span><span>{{ trendChange }}</span></div>
       <div class="ph"><h2>신호<i class="nw"></i></h2><span class="hint">누르면 그 신호가 있는 VM 만 봅니다</span></div>
       <div>
-        <sc-for list="{{ signals }}" as="s" hint-placeholder-count="9">
+        <sc-for list="{{ signals }}" as="s" hint-placeholder-count="10">
           <button type="button" class="{{ s.cls }}" aria-pressed="{{ s.on }}" onClick="{{ s.pick }}"><span class="l">{{ s.label }}<small>{{ s.hint }}</small></span><span class="n" style="color: {{ s.color }}">{{ s.n }}</span></button>
         </sc-for>
       </div>
@@ -229,7 +246,20 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
   </div>
 
   <section class="panel" aria-label="스냅샷이 있는 VM">
-    <div class="ph"><h2>스냅샷이 있는 VM</h2><span class="hint">제목을 누르면 정렬 · VM 이름을 누르면 스냅샷 줄기가 펼쳐집니다 · 왼쪽 칸으로 골라 정리 요청을 만듭니다</span></div>
+    <div class="ph"><h2>스냅샷이 있는 VM</h2><span class="hint">제목을 누르면 정렬 · VM 이름을 누르면 스냅샷 줄기와 이력이 펼쳐집니다 · 왼쪽 칸으로 골라 정리 요청을 만듭니다</span>
+      <span class="rt seg" role="group" aria-label="지금 있는 것과 정리된 것"><sc-for list="{{ tabs }}" as="m" hint-placeholder-count="2"><button type="button" class="{{ m.cls }}" aria-pressed="{{ m.on }}" onClick="{{ m.pick }}">{{ m.label }}</button></sc-for></span></div>
+    <sc-if value="{{ tabGone }}" hint-placeholder-val="{{ false }}">
+      <div class="note">이력 DB 가 ‘어제는 있었는데 오늘은 없는 스냅샷’ 을 찾아 적은 목록입니다<i class="nw"></i> — 지금 화면은 최근 수집분만 알아서 이 목록을 만들 수 없습니다.</div>
+      <div class="tbl"><div class="rows">
+        <div class="grow th"><span>VM</span><span>없어진 스냅샷 · 만든 계정</span><span>없어진 날</span><span>있었던 기간</span><span>회수한 크기</span><span>표시</span></div>
+        <sc-for list="{{ goneRows }}" as="g" hint-placeholder-count="6">
+          <div class="grow"><span><b>{{ g.name }}</b><small>{{ g.sub }}</small></span><span><b>{{ g.snap }}</b><small>{{ g.who }}</small></span><span class="mono">{{ g.date }}</span><span class="mono">{{ g.lived }}</span><span class="mono">{{ g.gb }}</span><span class="c-tags"><sc-if value="{{ g.fast }}" hint-placeholder-val="{{ true }}"><em class="tg ok">기준 안에 정리</em></sc-if><sc-if value="{{ g.late }}" hint-placeholder-val="{{ false }}"><em class="tg a">기준을 넘겨 정리</em></sc-if></span></div>
+        </sc-for>
+        <sc-if value="{{ goneEmpty }}" hint-placeholder-val="{{ false }}"><div class="empty">이 범위에서 지난 30일에 없어진 스냅샷이 없습니다.</div></sc-if>
+      </div></div>
+      <div class="sum"><span>{{ goneSum }}</span></div>
+    </sc-if>
+    <sc-if value="{{ tabNow }}" hint-placeholder-val="{{ true }}">
     <div class="flt">
       <span class="lb">빠른 보기</span>
       <sc-for list="{{ chips }}" as="c" hint-placeholder-count="8"><button type="button" class="{{ c.cls }}" aria-pressed="{{ c.on }}" onClick="{{ c.pick }}">{{ c.label }}<b>{{ c.n }}</b></button></sc-for>
@@ -251,7 +281,7 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
       <div class="rows">
         <div class="row th">
           <button type="button" class="{{ allCls }}" aria-pressed="{{ allOn }}" aria-label="보이는 VM 모두 고르기" onClick="{{ selAll }}">{{ allMark }}</button>
-          <sc-for list="{{ heads }}" as="h" hint-placeholder-count="7"><button type="button" class="{{ h.cls }}" onClick="{{ h.sort }}" title="{{ h.tip }}">{{ h.label }}<span aria-hidden="true">{{ h.arrow }}</span></button></sc-for>
+          <sc-for list="{{ heads }}" as="h" hint-placeholder-count="8"><button type="button" class="{{ h.cls }}" onClick="{{ h.sort }}" title="{{ h.tip }}">{{ h.label }}<span aria-hidden="true">{{ h.arrow }}</span></button></sc-for>
         </div>
         <sc-for list="{{ rows }}" as="r" hint-placeholder-count="16">
           <sc-if value="{{ r.isGroup }}" hint-placeholder-val="{{ false }}">
@@ -268,12 +298,16 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
               <span class="c-bar"><span class="track"><i style="width: {{ r.dw }}; background: {{ r.dbg }}"></i></span><b class="mono" style="color: {{ r.dfg }}">{{ r.days }}</b></span>
               <span class="c-n mono" style="color: {{ r.cfg }}">{{ r.count }}</span>
               <span class="c-bar"><span class="track"><i style="width: {{ r.gw }}; background: #3b82f6"></i></span><b class="mono">{{ r.gb }}</b></span>
+              <span class="c-chg" title="{{ r.chgTip }}"><span class="spk s" aria-hidden="true"><i style="clip-path: {{ r.poly }}"></i></span><b class="mono" style="color: {{ r.chgFg }}">{{ r.chg }}</b></span>
               <span><em class="{{ r.pwCls }}">{{ r.pw }}</em></span>
-              <span class="c-tags"><sc-if value="{{ r.tAge }}" hint-placeholder-val="{{ true }}"><em class="tg a" title="사내 기준 나이를 넘김">나이</em></sc-if><sc-if value="{{ r.tH72 }}" hint-placeholder-val="{{ false }}"><em class="tg h" title="사내 기준 안이지만 VMware 권고 72시간을 넘김">72시간</em></sc-if><sc-if value="{{ r.tCnt }}" hint-placeholder-val="{{ false }}"><em class="tg n" title="한 VM 에 스냅샷이 기준보다 많음">개수</em></sc-if><sc-if value="{{ r.tGb }}" hint-placeholder-val="{{ false }}"><em class="tg g" title="크기 기준을 넘김">크기</em></sc-if><sc-if value="{{ r.tDs }}" hint-placeholder-val="{{ false }}"><em class="tg r" title="이 VM 이 놓인 데이터스토어 사용률이 높음">DS {{ r.dsPct }}</em></sc-if><sc-if value="{{ r.tCons }}" hint-placeholder-val="{{ false }}"><em class="tg r" title="디스크 통합 필요">통합</em></sc-if><sc-if value="{{ r.tBk }}" hint-placeholder-val="{{ false }}"><em class="tg p" title="백업 도구가 남긴 임시 스냅샷">백업</em></sc-if><sc-if value="{{ r.tMem }}" hint-placeholder-val="{{ false }}"><em class="tg p" title="메모리까지 담은 스냅샷이 있음">메모리</em></sc-if><sc-if value="{{ r.tEx }}" hint-placeholder-val="{{ false }}"><em class="tg x">{{ r.exText }}</em></sc-if><span>{{ r.note }}</span></span>
+              <span class="c-tags"><sc-if value="{{ r.tAge }}" hint-placeholder-val="{{ true }}"><em class="tg a" title="사내 기준 나이를 넘김">나이</em></sc-if><sc-if value="{{ r.tH72 }}" hint-placeholder-val="{{ false }}"><em class="tg h" title="사내 기준 안이지만 VMware 권고 72시간을 넘김">72시간</em></sc-if><sc-if value="{{ r.tCnt }}" hint-placeholder-val="{{ false }}"><em class="tg n" title="한 VM 에 스냅샷이 기준보다 많음">개수</em></sc-if><sc-if value="{{ r.tGb }}" hint-placeholder-val="{{ false }}"><em class="tg g" title="크기 기준을 넘김">크기</em></sc-if><sc-if value="{{ r.tDs }}" hint-placeholder-val="{{ false }}"><em class="tg r" title="이 VM 이 놓인 데이터스토어 사용률이 높음">DS {{ r.dsPct }}</em></sc-if><sc-if value="{{ r.tCons }}" hint-placeholder-val="{{ false }}"><em class="tg r" title="디스크 통합 필요">통합</em></sc-if><sc-if value="{{ r.tBk }}" hint-placeholder-val="{{ false }}"><em class="tg p" title="백업 도구가 남긴 임시 스냅샷">백업</em></sc-if><sc-if value="{{ r.tMem }}" hint-placeholder-val="{{ false }}"><em class="tg p" title="메모리까지 담은 스냅샷이 있음">메모리</em></sc-if><sc-if value="{{ r.tGrow }}" hint-placeholder-val="{{ false }}"><em class="tg r" title="지난 7일 사이 10 GB 넘게 커짐(이력 DB)">커짐</em></sc-if><sc-if value="{{ r.tEx }}" hint-placeholder-val="{{ false }}"><em class="tg x">{{ r.exText }}</em></sc-if><span>{{ r.note }}</span></span>
             </div>
           </sc-if>
           <sc-if value="{{ r.isNode }}" hint-placeholder-val="{{ false }}">
             <div class="node"><span class="n1" style="padding-left: {{ r.pad }}"><i class="br"></i><b>{{ r.name }}</b><sc-if value="{{ r.cur }}" hint-placeholder-val="{{ false }}"><em class="tg cur">지금 위치</em></sc-if></span><span>{{ r.made }}</span><span class="mono">{{ r.days }}</span><span>{{ r.kind }}</span></div>
+          </sc-if>
+          <sc-if value="{{ r.isHist }}" hint-placeholder-val="{{ false }}">
+            <div class="hist"><span class="hl">이력 · 30일<i class="nw"></i></span><span class="spk w" aria-hidden="true"><i style="clip-path: {{ r.poly }}"></i></span><span>{{ r.cap }}</span><span class="he">{{ r.events }}</span></div>
           </sc-if>
           <sc-if value="{{ r.isFoot }}" hint-placeholder-val="{{ false }}">
             <div class="foot"><span>{{ r.ds }}</span><span class="mu">{{ r.text }}</span><a href="#">VM 상세 열기 →</a><button type="button" class="btn sm">30일 보류…(관리자)<i class="nw"></i></button></div>
@@ -283,14 +317,15 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
       </div>
     </div>
     <div class="sum"><span>{{ sumText }}</span></div>
+    </sc-if>
   </section>
 
-  <div class="note">이 보드의 VM · 법인 · 클러스터 · 계정 이름과 수치(추이 포함)는 모두 지어낸 가상 값입니다 — 보내 주신 캡처의 실제 이름은 옮기지 않았고, 대수와 모양만 비슷하게 맞췄습니다. 이 화면은 보기 전용입니다(지우기 · 되돌리기 단추는 두지 않습니다).</div>
+  <div class="note">이 보드의 VM · 법인 · 클러스터 · 계정 이름과 수치(추이 · 이력 포함)는 모두 지어낸 가상 값입니다 — 보내 주신 캡처의 실제 이름은 옮기지 않았고, 대수와 모양만 비슷하게 맞췄습니다. 이 화면은 보기 전용입니다(지우기 · 되돌리기 단추는 두지 않습니다).</div>
 </main>
 </x-dc>
 <script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2600}}'>
 class Component extends DCLogic {
-  state = { from: 'card', f: 'old', corp: '', band: '', q: '', sort: 'days', dir: 'desc', open: '', group: 'corp', closed: {}, sel: {}, req: '' };
+  state = { from: 'card', f: 'old', corp: '', band: '', q: '', sort: 'days', dir: 'desc', open: '', group: 'corp', closed: {}, sel: {}, req: '', tab: 'now', tm: 'gb', tp: 30 };
 
   // 가상 값(판정은 vmhygiene/analyze.js hygieneFindings 와 같은 규칙 — 템플릿 · 예외 목록의 VM 은 판정하지 않는다)
   //   [id, 이름, 법인, 클러스터, 호스트, 전원, 스냅샷 수, 크기 GB(null = 못 읽음), 지난 일수(null = 생성일 못 읽음), 예외, 줄기 [이름, 지난 일수, 종류],
@@ -324,7 +359,13 @@ class Component extends DCLogic {
   renderVals() {
     const st = this.state;
     const AGE = 7, H72 = 3, CNT = 3, GBLIM = 100, E1 = 30, E2 = 90, DSLIM = 85;
-    const GONE7 = { '서울': 1, '애슈번': 1 };                       // 지난 7일에 스냅샷이 없어진 VM(가상 값 — 이력에서 셈)
+    // 이력 DB 가 적어 둔 ‘없어진 스냅샷’(가상 값) — [VM, 법인, 클러스터, 스냅샷 이름, 있었던 일수, 없어진 지 며칠, 그때 크기 GB, 만든 계정]
+    const GONE = [
+      ['pay-db-01', '서울', 'SEL-PRD', 'before-patch', 2, 1, 3.1, 'park.dba'], ['web-front-09', '싱가포르', 'SIN-PRD', 'before-deploy', 9, 3, 5.2, 'kim.ops'],
+      ['dev-sw-2101', '애슈번', 'IAD-DEV', 'dev-sw-2101_base', 120, 5, 180.4, 'lee.dev'], ['erp-batch-03', '상하이', 'SHA-PRD', '백업 임시 스냅샷', 1, 12, 0.8, 'svc-backup'],
+      ['ipam-app-01', '서울', 'SEL-PRD', 'before-schema-change', 15, 16, 6, 'park.dba'], ['gw-edge-11', '프랑크푸르트', 'FRA-PRD', 'VM 스냅샷 2026-05-02', 170, 24, 22.5, null],
+    ].map(([name, corp, cluster, snap, lived, ago, gb, who]) => ({ name, corp, cluster, snap, lived, ago, gb, who }));
+    const HIST_DAYS = 90;                                          // 이력 기록을 시작한 지(가상 값)
     const C = { blue: '#4b7bb8', amber: '#f59e0b', serious: '#f0865a', red: '#ef4444', gray: '#64748b' };
     const num = (n) => Number(n).toLocaleString('en-US');
     const gbText = (g) => (g == null ? '—' : g >= 1024 ? (Math.round((g / 1024) * 10) / 10).toFixed(1) + ' TB' : g >= 100 ? Math.round(g) + ' GB' : (Math.round(g * 10) / 10) + ' GB');
@@ -340,10 +381,14 @@ class Component extends DCLogic {
       const over = judged && v.days != null && v.days >= AGE;
       const s = { age: over, h72: judged && v.days != null && v.days >= H72, cnt: judged && v.count > CNT, big: judged && v.gb != null && v.gb > GBLIM,
         ds: v.ds[1] != null && v.ds[1] >= DSLIM, cons: v.cons, bk: v.bk, mem: v.tree.some((n) => n[2] === 'mem') };
-      return { ...v, over, s, first: over && (s.big || s.ds || s.cons), band: bandOf(v), nTags: Object.values(s).filter(Boolean).length };
+      // 지난 7일 변화(이력 DB) — 못 읽은 값은 null · 7일 안에 생긴 것은 ‘새로’
+      const isNew = v.days != null && v.days < 7;
+      const d7 = v.gb == null || v.days == null ? null : isNew ? v.gb : v.gb - v.gb * (0.6 + 0.4 * (v.days - 7) / Math.max(1, v.days));
+      s.grow = !isNew && d7 != null && d7 >= 10;
+      return { ...v, over, s, isNew, d7, first: over && (s.big || s.ds || s.cons), band: bandOf(v), nTags: Object.values(s).filter(Boolean).length };
     });
     const MATCH = { all: () => true, old: (v) => v.over, h72: (v) => v.s.h72, first: (v) => v.first, cnt: (v) => v.s.cnt, big: (v) => v.s.big, ds: (v) => v.s.ds, cons: (v) => v.s.cons,
-      bk: (v) => v.s.bk, mem: (v) => v.s.mem, nodesc: (v) => !v.desc, off: (v) => v.power === 'off', skip: (v) => v.skip };
+      bk: (v) => v.s.bk, mem: (v) => v.s.mem, grow: (v) => v.s.grow, nodesc: (v) => !v.desc, off: (v) => v.power === 'off', skip: (v) => v.skip };
     const VIEWS = [['all', '전체'], ['old', '사내 기준 넘김'], ['h72', '72시간 넘김'], ['first', '먼저 볼 것'], ['cons', '통합 필요'], ['bk', '백업 도구가 남긴 것'], ['off', '전원 꺼짐'], ['skip', '판정 안 함']];
     const SIGNALS = [
       ['old', '사내 기준(' + AGE + '일)을 넘김', '‘VM 구성 점검’ 과 같은 판정', '#fbbf24'],
@@ -354,6 +399,7 @@ class Component extends DCLogic {
       ['cons', '디스크 통합 필요', '지운 뒤에도 델타가 남은 VM', '#fca5a5'],
       ['bk', '백업 도구가 남긴 임시 스냅샷', '백업이 끝났는데 하루 넘게 남아 있습니다', '#d8b4fe'],
       ['mem', '메모리까지 담은 스냅샷', '파일이 메모리 크기만큼 더 큽니다', '#d8b4fe'],
+      ['grow', '7일 사이 10 GB 넘게 커짐', '이력 DB 로 셉니다 — 지금은 알 수 없는 값', '#fca5a5'],
       ['nodesc', '설명이 없음', '왜 만들었는지 적혀 있지 않습니다', '#c3cfe2'],
     ];
     const viewLabel = Object.fromEntries(VIEWS.concat(SIGNALS.map((s) => [s[0], s[1]])));
@@ -361,7 +407,7 @@ class Component extends DCLogic {
     const q = st.q.trim().toLowerCase();
     const hit = (v) => !q || [v.name, v.corp, v.cluster, v.host, v.who || '', v.desc].concat(v.tree.map((n) => n[0])).some((s) => String(s).toLowerCase().includes(q));
     const shown = scoped.filter(MATCH[st.f]).filter((v) => !st.band || v.band === st.band).filter(hit);
-    const key = { name: (v) => v.name.toLowerCase(), old: (v) => String(v.tree[0][0]).toLowerCase(), days: (v) => v.days, count: (v) => v.count, gb: (v) => v.gb, pw: (v) => v.power, tags: (v) => v.nTags }[st.sort];
+    const key = { name: (v) => v.name.toLowerCase(), old: (v) => String(v.tree[0][0]).toLowerCase(), days: (v) => v.days, count: (v) => v.count, gb: (v) => v.gb, chg: (v) => v.d7, pw: (v) => v.power, tags: (v) => v.nTags }[st.sort];
     const cmp = (a, b) => { const x = key(a), y = key(b); if (x == null && y == null) return 0; if (x == null) return 1; if (y == null) return -1; const c = x < y ? -1 : x > y ? 1 : 0; return st.dir === 'asc' ? c : -c; };
     shown.sort(cmp);
 
@@ -371,8 +417,17 @@ class Component extends DCLogic {
       return 'linear-gradient(to right, ' + parts.join(', ') + ')'; };
     // 30일 추이(가상) — 스냅샷이 있던 날부터 조금씩 커진 것으로 둔다
     const contrib = (v, d) => (v.gb == null ? 0 : v.days == null ? v.gb : v.days < d ? 0 : v.gb * (0.6 + 0.4 * (v.days - d) / Math.max(1, v.days)));
-    const series = (xs) => Array.from({ length: 30 }, (_, i) => xs.reduce((a, v) => a + contrib(v, 29 - i), 0));
-    const polyOf = (ys) => { const m = Math.max(1, ...ys); return 'polygon(0% 100%, ' + ys.map((y, i) => (Math.round((i / 29) * 1000) / 10) + '% ' + (Math.round((100 - (y / m) * 88) * 10) / 10) + '%').join(', ') + ', 100% 100%)'; };
+    const goneAt = (g, d) => (d > g.ago && d <= g.ago + g.lived ? g.gb * (0.6 + 0.4 * (g.ago + g.lived - d) / Math.max(1, g.lived)) : 0);
+    // d 일 전의 값 — gb: 크기 합 · n: 스냅샷이 있던 VM 수 · over: 그날 기준을 넘겨 있던 VM 수(없어진 스냅샷도 그때는 있었다)
+    const valueAt = (xs, gs, metric, d) => {
+      if (metric === 'gb') return xs.reduce((a, v) => a + contrib(v, d), 0) + gs.reduce((a, g) => a + goneAt(g, d), 0);
+      const names = new Set();
+      xs.forEach((v) => { if (metric === 'n' ? (v.days == null || v.days >= d) : (!v.skip && v.days != null && v.days - d >= AGE)) names.add(v.name); });
+      gs.forEach((g) => { const alive = d > g.ago && d <= g.ago + g.lived; if (alive && (metric === 'n' || g.ago + g.lived - d >= AGE)) names.add(g.name); });
+      return names.size; };
+    const series = (xs, gs, metric = 'gb', period = 30) => { const K = Math.min(period, 60); return Array.from({ length: K + 1 }, (_, i) => valueAt(xs, gs, metric, period * (1 - i / K))); };
+    const polyOf = (ys) => { const m = Math.max(1, ...ys); const L = Math.max(1, ys.length - 1); return 'polygon(0% 100%, ' + ys.map((y, i) => (Math.round((i / L) * 1000) / 10) + '% ' + (Math.round((100 - (y / m) * 88) * 10) / 10) + '%').join(', ') + ', 100% 100%)'; };
+    const goneScoped = GONE.filter((g) => !st.corp || g.corp === st.corp);
 
     // 요약(고른 법인 안에서)
     const overs = scoped.filter((v) => v.over);
@@ -380,13 +435,13 @@ class Component extends DCLogic {
     const ageUnknown = scoped.filter((v) => v.days == null).length;
     const maxAge = scoped.reduce((m, v) => (v.days != null && v.days > m ? v.days : m), -1);
     const newN = scoped.filter((v) => v.days != null && v.days < 7).length;
-    const goneN = st.corp ? (GONE7[st.corp] || 0) : Object.values(GONE7).reduce((a, n) => a + n, 0);
+    const gone7 = goneScoped.filter((g) => g.ago < 7); const goneN = gone7.length;
     const kpis = [
       { label: '스냅샷이 있는 VM', big: num(scoped.length), color: '#e6edf6', sub: (st.corp ? st.corp + ' 법인' : '전체 법인') + ' · 판정하지 않는 VM ' + scoped.filter((v) => v.skip).length + '대 포함' },
       { label: '사내 기준(' + AGE + '일)을 넘긴 VM', big: num(overs.length), color: overs.length ? '#fbbf24' : '#86efac', sub: '72시간(권고) 넘김 ' + scoped.filter((v) => v.s.h72).length + '대' + (ageUnknown ? ' · 생성일 못 읽음 ' + ageUnknown + '대는 따로' : '') },
       { label: '스냅샷 크기', big: gbText(sumGb(scoped)), color: '#67e8f9', sub: '기준을 넘긴 VM 을 정리하면 약 ' + gbText(sumGb(overs)) + (gbUnknown ? ' · 못 읽음 ' + gbUnknown + '대는 합에 없음' : '') },
       { label: '스냅샷 수', big: num(scoped.reduce((a, v) => a + v.count, 0)) + '개', color: '#e6edf6', sub: maxAge >= 0 ? '가장 오래된 것 ' + dayText(maxAge) + ' 전' : '생성일을 읽은 스냅샷이 없습니다' },
-      { label: '지난 7일', big: '+' + newN + ' · −' + goneN, color: '#e6edf6', sub: '새로 생긴 VM ' + newN + '대 · 스냅샷이 없어진 VM ' + goneN + '대' },
+      { label: '지난 7일', big: '+' + newN + ' · −' + goneN, color: '#e6edf6', sub: '새로 생긴 VM ' + newN + '대 · 정리된 스냅샷 ' + goneN + '개(회수 약 ' + gbText(gone7.reduce((a, g) => a + g.gb, 0)) + ')' },
     ];
 
     // 법인 카드
@@ -396,8 +451,8 @@ class Component extends DCLogic {
     stat.sort((a, b) => b.nOld - a.nOld || b.gb - a.gb);
     const corps = stat.map((s) => ({
       name: s.name, on: st.corp === s.name, cls: 'cc' + (st.corp === s.name ? ' on' : ''), over: s.nOld ? '넘김 ' + s.nOld : '넘김 없음',
-      line1: s.n + '대 · ' + gbText(s.gb) + ' · 정리하면 ' + gbText(s.gbOld), grad: gradOf(s.xs), spark: polyOf(series(s.xs)),
-      line2: s.oldest >= 0 ? '가장 오래된 것 ' + dayText(s.oldest) : '판정한 스냅샷 없음',
+      line1: s.n + '대 · ' + gbText(s.gb) + ' · 정리하면 ' + gbText(s.gbOld), grad: gradOf(s.xs), spark: polyOf(series(s.xs, GONE.filter((g) => g.corp === s.name))),
+      line2: (s.oldest >= 0 ? '가장 오래된 것 ' + dayText(s.oldest) : '판정한 스냅샷 없음') + ' · 30일 정리 ' + GONE.filter((g) => g.corp === s.name).length + '건',
       tip: s.name + ' — 스냅샷이 있는 VM ' + s.n + '대(기준 넘김 ' + s.nOld + '대) · ' + gbText(s.gb) + ' — 누르면 이 법인만 봅니다',
       pick: () => this.setState({ corp: st.corp === s.name ? '' : s.name, open: '', req: '' }),
     }));
@@ -419,7 +474,8 @@ class Component extends DCLogic {
     const off = scoped.length - scoped.filter((v) => v.days != null && v.gb != null).length;
 
     // 추이
-    const ys = series(scoped); const d0 = ys[0], d1 = ys[29], diff = d1 - d0;
+    const ys = series(scoped, goneScoped, st.tm, st.tp); const d0 = ys[0], d1 = ys[ys.length - 1], diff = d1 - d0;
+    const tText = (n) => (st.tm === 'gb' ? gbText(n) : Math.round(n) + '대');
     const signals = SIGNALS.map(([k, label, hint, color]) => { const n = scoped.filter(MATCH[k]).length; return { label, hint, n: String(n), color: n ? color : '#64748b', on: st.f === k, cls: 'sg' + (st.f === k ? ' on' : ''), pick: () => this.setState({ f: st.f === k ? 'all' : k, open: '' }) }; });
 
     // 표 — 묶음
@@ -434,7 +490,7 @@ class Component extends DCLogic {
       const lines = o.map((v, i) => (i + 1) + '. ' + v.name + ' (' + v.cluster + ') — ' + dayText(v.days) + ' · ' + gbText(v.gb) + ' · 스냅샷 ' + v.count + '개 · ' + (v.who ? '만든 계정 ' + v.who : '만든 계정 모름') + (v.s.cons ? ' · 통합 필요' : '') + (v.s.ds ? ' · 데이터스토어 ' + v.ds[1] + '%' : ''));
       return '[' + title + '] 스냅샷 정리 요청 — ' + (onlyOver ? '사내 기준 ' + AGE + '일을 넘긴 VM ' : '고른 VM ') + o.length + '대 · 약 ' + gbText(sumGb(o)) + '\n' + (lines.length ? lines.join('\n') : '(해당하는 VM 이 없습니다)') + '\n지우기 전에 통합 필요 표시와 데이터스토어 여유를 먼저 확인해 주세요. 계속 둘 스냅샷은 사유와 기한을 알려 주세요.'; };
 
-    const HEADS = [['name', 'VM', 'asc', ''], ['old', '가장 오래된 스냅샷 · 만든 계정', 'asc', ''], ['days', '지난 일수', 'desc', ''], ['count', '개수', 'desc', ' r'], ['gb', '크기', 'desc', ''], ['pw', '전원', 'asc', ''], ['tags', '신호', 'desc', '']];
+    const HEADS = [['name', 'VM', 'asc', ''], ['old', '가장 오래된 스냅샷 · 만든 계정', 'asc', ''], ['days', '지난 일수', 'desc', ''], ['count', '개수', 'desc', ' r'], ['gb', '크기', 'desc', ''], ['chg', '7일 변화', 'desc', ''], ['pw', '전원', 'asc', ''], ['tags', '신호', 'desc', '']];
     const heads = HEADS.map(([k, label, first, extra]) => ({
       label, cls: 'hd' + extra + (st.sort === k ? ' on' : ''), arrow: st.sort === k ? (st.dir === 'asc' ? '▲' : '▼') : '',
       tip: label + ' 순으로 정렬', sort: () => this.setState(st.sort === k ? { dir: st.dir === 'asc' ? 'desc' : 'asc' } : { sort: k, dir: first }),
@@ -443,7 +499,7 @@ class Component extends DCLogic {
     const w = (n, m) => (n == null ? '0%' : Math.max(2, Math.round((n / m) * 100)) + '%');
     const fg = { new: '#c3cfe2', d7: '#fcd34d', d30: '#fdba74', d90: '#fca5a5', ex: '#c3cfe2', unk: '#8b9bb4' };
     const KIND = { mem: '메모리까지 담음', q: '파일 시스템을 멈추고 찍음', '': '디스크만' };
-    const NO = { isGroup: false, isReq: false, isVm: false, isNode: false, isFoot: false };
+    const NO = { isGroup: false, isReq: false, isVm: false, isNode: false, isHist: false, isFoot: false };
     const rows = [];
     order.forEach((gk) => {
       const xs = bucket[gk]; const closed = !!st.closed[gk];
@@ -466,10 +522,17 @@ class Component extends DCLogic {
           name: v.name, sub: (st.group === 'corp' ? '' : v.corp + ' · ') + v.cluster + ' · ' + v.host, oldest: v.tree[0][0],
           made: dateOf(v.days) + (v.days == null ? '' : ' 만듦') + ' · ' + (v.who ? v.who : '만든 계정 모름'), desc: v.desc ? '설명: ' + v.desc : '설명 없음',
           dw: w(v.days, maxD), dbg: v.skip ? '#64748b' : bandBg[v.band], dfg: fg[v.band], days: dayText(v.days), count: String(v.count), cfg: v.s.cnt ? '#fdba74' : '#e6edf6',
-          gw: w(v.gb, maxG), gb: gbText(v.gb), pw: v.power === 'on' ? '켜짐' : '꺼짐', pwCls: 'pw' + (v.power === 'on' ? ' on' : ''),
+          gw: w(v.gb, maxG), gb: gbText(v.gb), poly: polyOf(series([v], GONE.filter((g) => g.name === v.name))),
+          chg: v.d7 == null ? '—' : v.isNew ? '새로' : v.d7 >= 0.05 ? '+' + gbText(v.d7) : '그대로', chgFg: v.s.grow ? '#fca5a5' : v.isNew ? '#93c5fd' : '#c3cfe2',
+          chgTip: v.d7 == null ? '크기 또는 생성일을 못 읽어 변화를 셀 수 없습니다' : v.isNew ? '지난 7일 안에 생긴 스냅샷입니다' : '지난 7일 사이 ' + gbText(v.d7) + ' 커졌습니다(이력 DB)', tGrow: v.s.grow,
+          pw: v.power === 'on' ? '켜짐' : '꺼짐', pwCls: 'pw' + (v.power === 'on' ? ' on' : ''),
           tAge: v.s.age, tH72: v.s.h72 && !v.s.age, tCnt: v.s.cnt, tGb: v.s.big, tDs: v.s.ds, dsPct: v.ds[1] + '%', tCons: v.s.cons, tBk: v.s.bk, tMem: v.s.mem, tEx: v.skip, exText: v.tpl ? '템플릿' : '예외', note: notes.join(' · ') });
         if (open) {
           v.tree.forEach((n, i) => rows.push({ ...NO, isNode: true, pad: Math.min(i, 6) * 16 + 'px', name: n[0], cur: i === v.tree.length - 1, made: dateOf(n[1]), days: dayText(n[1]), kind: KIND[n[2]] }));
+          const mine = GONE.filter((g) => g.name === v.name); const hs = series([v], mine);
+          const ev = v.tree.filter((n) => n[1] != null).map((n) => [n[1], dateOf(n[1]) + ' ‘' + n[0] + '’ 생김']).concat(mine.map((g) => [g.ago, dateOf(g.ago) + ' ‘' + g.snap + '’ 없어짐(' + g.lived + '일 동안 있었음)'])).sort((a, b) => a[0] - b[0]);
+          rows.push({ ...NO, isHist: true, poly: polyOf(hs), cap: v.gb == null ? '크기를 못 읽어 그림이 비어 있습니다' : '30일 전 ' + gbText(hs[0]) + ' → 오늘 ' + gbText(hs[hs.length - 1]),
+            events: ev.length ? ev.map((e) => e[1]).join(' · ') : '기록된 사건이 없습니다' });
           rows.push({ ...NO, isFoot: true, ds: '데이터스토어 ' + v.ds[0] + ' — ' + (v.ds[1] == null ? '사용률 못 읽음' : '사용 ' + v.ds[1] + '%' + (v.s.ds ? '(높음 — 스냅샷이 커지면 찹니다)' : '')) + ' · 줄기 깊이 ' + v.tree.length + '(권고 2~3)',
             text: '크기는 VM 한 대의 합계입니다 — 스냅샷 하나하나의 크기는 수집하지 않습니다.' });
         }
@@ -485,7 +548,7 @@ class Component extends DCLogic {
     if (st.band) pills.push({ label: '나이 · ' + bandLabel[st.band], clear: () => this.setState({ band: '', open: '' }) });
     if (q) pills.push({ label: '찾기 · ' + st.q.trim(), clear: () => this.setState({ q: '' }) });
 
-    const RESET = { open: '', q: '', band: '', sel: {}, req: '', closed: {}, group: 'corp' };
+    const RESET = { open: '', q: '', band: '', sel: {}, req: '', closed: {}, group: 'corp', tab: 'now' };
     const ENTRIES = [
       ['card', '‘오래된 스냅샷’ 카드의 모두 보기', { f: 'old', sort: 'days', dir: 'desc', corp: '' }, '‘사내 기준 넘김’ 이 켜지고 법인별 · 오래된 순으로 열립니다 — 카드의 수와 표의 대수가 같습니다'],
       ['scope', '카드에서 법인을 고른 채로', { f: 'old', sort: 'days', dir: 'desc', corp: '서울' }, '카드에서 고른 법인을 그대로 들고 옵니다(지금은 늘 전체 범위로 열립니다)'],
@@ -498,8 +561,16 @@ class Component extends DCLogic {
       exCount: all.filter((v) => v.ex).length + '건',
       kpis, corps, xTicks, yTicks, zoneLeft: pos(AGE), zoneBottom: pos(GBLIM), dots, bands,
       offPlot: off ? '그림에 없는 VM ' + off + '대 — 생성일 또는 크기를 못 읽었습니다(표에는 있습니다)' : '',
-      trendScope: (st.corp ? st.corp + ' 법인' : '전체 법인') + ' · 스냅샷 크기 합',
-      trendPoly: polyOf(ys), trendCap: '30일 전 ' + gbText(d0) + ' → 오늘 ' + gbText(d1), trendChange: (diff >= 0 ? '+' : '−') + gbText(Math.abs(diff)) + ' · 지난 7일 새로 ' + newN + '대 · 없어짐 ' + goneN + '대',
+      trendScope: (st.corp ? st.corp + ' 법인' : '전체 법인') + ' · 이력 DB 에서 읽습니다',
+      trendPoly: polyOf(ys), trendCap: st.tp + '일 전 ' + tText(d0) + ' → 오늘 ' + tText(d1), trendChange: (diff >= 0 ? '+' : '−') + tText(Math.abs(diff)) + ' · 지난 7일 새로 ' + newN + '대 · 정리 ' + goneN + '개',
+      tMetrics: [['gb', '크기'], ['n', 'VM 수'], ['over', '기준 넘긴 VM 수']].map(([k, label]) => ({ label, on: st.tm === k, cls: st.tm === k ? 'on' : '', pick: () => this.setState({ tm: k }) })),
+      tPeriods: [[7, '7일'], [30, '30일'], [HIST_DAYS, HIST_DAYS + '일(기록 시작부터)']].map(([k, label]) => ({ label, on: st.tp === k, cls: st.tp === k ? 'on' : '', pick: () => this.setState({ tp: k }) })),
+      histStart: dateOf(HIST_DAYS) + '(' + HIST_DAYS + '일째)', histGap: '빠진 날 — 상하이 2일(수집하지 못한 날은 0 으로 적지 않고 비워 둡니다)',
+      tabs: [['now', '지금 있는 것 ' + scoped.length], ['gone', '정리된 것 · 30일 ' + goneScoped.length]].map(([k, label]) => ({ label, on: st.tab === k, cls: st.tab === k ? 'on' : '', pick: () => this.setState({ tab: k, open: '' }) })),
+      tabNow: st.tab === 'now', tabGone: st.tab === 'gone',
+      goneRows: goneScoped.slice().sort((a, b) => a.ago - b.ago).map((g) => ({ name: g.name, sub: g.corp + ' · ' + g.cluster, snap: g.snap, who: g.who ? '만든 계정 ' + g.who : '만든 계정 모름', date: dateOf(g.ago), lived: g.lived + '일', gb: gbText(g.gb), fast: g.lived < AGE, late: g.lived >= AGE })),
+      goneEmpty: goneScoped.length === 0,
+      goneSum: goneScoped.length ? '지난 30일 정리 ' + goneScoped.length + '개 · 회수 약 ' + gbText(goneScoped.reduce((a, g) => a + g.gb, 0)) + ' · 평균 ' + Math.round(goneScoped.reduce((a, g) => a + g.lived, 0) / goneScoped.length) + '일 만에 정리 · 기준(' + AGE + '일) 안에 정리한 비율 ' + Math.round((goneScoped.filter((g) => g.lived < AGE).length / goneScoped.length) * 100) + '%' : '',
       signals, ghostN: (st.corp ? (st.corp === '상하이' ? 1 : 0) : 1) + '대',
       chips: VIEWS.map(([k, label]) => ({ label, n: String(scoped.filter(MATCH[k]).length), on: st.f === k, cls: 'chip' + (st.f === k ? ' on' : ''), pick: () => this.setState({ f: k, open: '' }) })),
       q: st.q, onFind: (e) => this.setState({ q: e.target.value, open: '' }),

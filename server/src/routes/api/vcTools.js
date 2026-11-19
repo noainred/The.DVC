@@ -1,5 +1,5 @@
 // vCenter 목록 + 중복IP/솔루션/VMtools/스냅샷 도구 — api.js(구 2,445줄) 분할(v2.283.0). 본문은 원본 그대로, 등록 순서는 api.js 호출 순서가 보존한다.
-import { scopedVcenterIds } from '../../auth/scope.js';
+import { scopedVcenterIds, inUserScope } from '../../auth/scope.js';
 import { requirePerm } from '../../auth/auth.js'; // v2.479(감사 S-4)
 import { store } from '../../store.js';
 import { sortByOrder } from '../../vcenter/order.js';
@@ -9,6 +9,11 @@ import { listDatacenters, datacenterOfVcenter } from '../../datacenter/store.js'
 import { vcListUnread, vcListItems, LIST_UNREAD_TEXT } from '../../corelicense/analyze.js'; // v2.742(VC-06): 확장 목록을 읽었는가 — 판정 한 벌
 import { isAdminReq } from '../../auth/addressMask.js';
 import { vmToolsDistribution, TOOLS_IDS_MAX } from '../../inventory/vmToolsDist.js';
+import { snapshotToolView } from '../../snaphist/view.js';
+import { historyStatus, historySeries, goneList, vmHistory, dayAgo, clampDays } from '../../snaphist/history.js';
+import { snapHistGeneration } from '../../snaphist/db.js';
+import { loadVmHygieneSettings } from '../../vmhygiene/settings.js';
+import { memoJson, scopeKey, vcenterPickOf, vcenterPickKey } from './shared.js';
 
 export function registerVcTools(api) {
 
@@ -144,21 +149,61 @@ api.get('/tools/vmtools', requirePerm('tools'), (req, res) => {
 });
 
 // VMs that have snapshots (optionally per vCenter).
-api.get('/tools/snapshots', requirePerm('tools'), (req, res) => {
-  const snap = store.get();
-  let vms = snap.vms.filter((v) => (v.snapshotCount || 0) > 0);
+// v3.26.0(설계 docs/design/snapshots): 응답은 snaphist/view.js 하나가 만든다 — 판정은 hygieneFindings(‘오래된 스냅샷’ 카드와 같은 함수) ·
+//   못 읽은 크기 · 생성일은 null · 법인 = DataCenter · 고른 법인(vcenterId 하나 또는 vcenterIds 목록 — 범위 뒤에 건다).
+//   예전 키(count · totalSizeGB · items[].snapshotSizeGB …)는 그대로 둔다. 범위가 먼저다(scopedVcenterIds — 요청 필터보다 먼저).
+api.get('/tools/snapshots', requirePerm('tools'), (req, res) => memoJson(req, res, 'tools-snapshots', (snap) => {
+    let dcNames = new Map();
+    try { dcNames = new Map(listDatacenters().map((d) => [d.id, d.name || d.id])); } catch { /* 목록 실패 — vCenter 이름으로 묶는다 */ }
+    let hygiene = null;
+    try { hygiene = loadVmHygieneSettings(); } catch { hygiene = null; }
+    return snapshotToolView(snap, {
+      allowed: scopedVcenterIds(req.user, snap), pick: vcenterPickOf(req.query, snap), hygiene, now: Date.now(),
+      dcOf: (id) => datacenterOfVcenter(id), dcNames,
+    });
+  }, { extraKey: `${scopeKey(req.user, store.get())}|${vcenterPickKey(req.query, store.get())}`, ttlMs: 20_000 }));
+
+// v3.26.0 스냅샷 이력(snaphist — 하루 1번 기록). 범위 → 고른 법인 순으로 vCenter 를 고른 뒤 그 vCenter 의 기록만 읽는다.
+//   부분 합은 추이에 넣지 않는다(빠진 vCenter 가 있는 날은 null + missing — snaphist/history.js aggregateDays).
+const snapCorpOf = () => {
+  let dcNames = new Map();
+  try { dcNames = new Map(listDatacenters().map((d) => [d.id, d.name || d.id])); } catch { /* vCenter 로 묶는다 */ }
+  return (id) => {
+    let dc = '';
+    try { dc = String(datacenterOfVcenter(id) || ''); } catch { dc = ''; }
+    return { corpId: dc ? `dc:${dc}` : `vc:${id}`, corpName: dc ? (dcNames.get(dc) || dc) : null };
+  };
+};
+api.get('/tools/snapshots/history', requirePerm('tools'), (req, res) => memoJson(req, res, 'tools-snapshots-history', async (snap) => {
   const allowed = scopedVcenterIds(req.user, snap);
-  if (allowed) vms = vms.filter((v) => allowed.has(v.vcenterId));
-  if (req.query.vcenterId) vms = vms.filter((v) => v.vcenterId === req.query.vcenterId);
-  const items = vms.map((v) => ({
-    id: v.id, name: v.name, vcenterId: v.vcenterId, host: v.host, cluster: v.cluster,
-    snapshotCount: v.snapshotCount, snapshotSizeGB: v.snapshotSizeGB || 0,
-    powerState: v.powerState, guestOS: v.guestOS,
-  }));
-  res.json({
-    count: items.length,
-    totalSizeGB: Math.round(items.reduce((a, v) => a + (v.snapshotSizeGB || 0), 0) * 10) / 10,
-    items,
-  });
+  const pick = vcenterPickOf(req.query, snap);
+  const vcIds = new Set((snap.vcenters || []).map((v) => String(v.id)).filter((id) => (!allowed || allowed.has(id)) && (!pick || pick.has(id))));
+  const days = clampDays(req.query.days, 30);
+  const now = Date.now();
+  const status = await historyStatus();
+  if (!status.available) return { ok: true, status };
+  const [series, gone, ago] = await Promise.all([
+    historySeries({ vcIds, days, now, corpOf: snapCorpOf() }),
+    goneList({ vcIds, sinceTs: now - days * 86_400_000 }),
+    dayAgo({ vcIds, n: 7, now }),
+  ]);
+  return { ok: true, status, ...(series || {}), gone: gone?.items || [], goneMore: !!gone?.more, ago7: ago };
+}, { extraKey: `${scopeKey(req.user, store.get())}|${vcenterPickKey(req.query, store.get())}|g${snapHistGeneration()}`, ttlMs: 60_000 }));
+
+api.get('/tools/snapshots/history/vm', requirePerm('tools'), async (req, res) => {
+  const snap = store.get();
+  const vcenterId = typeof req.query.vcenterId === 'string' ? req.query.vcenterId : '';
+  const vmId = typeof req.query.vmId === 'string' ? req.query.vmId.slice(0, 200) : '';
+  // 범위 밖 vCenter 는 404(존재 은닉) — scopedVcenterIds 교집합과 같은 판정(inUserScope)
+  if (!vcenterId || !vmId || !inUserScope(req.user, snap, vcenterId) || !(snap.vcenters || []).some((v) => String(v.id) === vcenterId)) {
+    return res.status(404).json({ ok: false, reason: '찾을 수 없습니다.' });
+  }
+  try {
+    const h = await vmHistory({ vcenterId, vmId, days: clampDays(req.query.days, 30) });
+    if (!h) return res.json({ ok: true, available: false });
+    res.json({ ok: true, available: true, ...h });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 200) });
+  }
 });
 }

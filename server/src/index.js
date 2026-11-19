@@ -147,6 +147,7 @@ import { startBmstorPoller } from './bmstor/poller.js';           // 베어메�
 import { startBmstorHistory } from './bmstor/historySampler.js';  // 〃 디스크 사용량 12시간 이력(v2.635) — 별도 DB, 장비 접속 없음
 import { startBmstorWorker } from './agent/bmstorWorker.js';       // 〃 폴링 위임 워커(엣지, v2.341)
 import { startVmtrackPoller } from './vmtrack/poller.js';          // VM 수량 추이 00/12시 스냅샷(v2.345)
+import { startSnapHistPoller } from './snaphist/poller.js';       // VM 별 스냅샷 이력 하루 1번(v3.26.0)
 import { startVmHygieneNotifier } from './vmhygiene/notifier.js'; // VM 구성 점검 스냅샷 정책 일일 알림(v2.698, 기본 꺼짐)
 import { startVmDnsHistory } from './vmdns/poller.js';              // VM DNS 서버 설정 변경 이력(v2.696) — 스냅샷만 읽는다
 import { startGuestDiskPoller } from './guestdisk/poller.js';       // 게스트 디스크 회수 리포트(v2.459)
@@ -658,6 +659,7 @@ const stagger = [
   startBmstorWorker, // 〃 폴링 위임 워커(v2.341) — CENTRAL_URL 미설정이면 자기기동 안 함
   () => startGpuAllocHistory(() => store.get()), // GPU 할당율 일 단위 이력(v2.939) — 기동 2분 뒤 첫 회 · 1시간 · 재진입 가드 · vCenter 왕복 0
   startVmtrackPoller, // VM 수량 추이(v2.345) — 60초 틱, 슬롯(00/12시) 미기록 시에만 수집 + 재진입 가드
+  startSnapHistPoller, // VM 별 스냅샷 이력(v3.26.0) — 60초 틱, 하루 1번(기본 3시 뒤) 미기록 vCenter 만 · 재진입 가드 · vCenter 왕복 없음
   startVmHygieneNotifier, // VM 스냅샷 정책 일일 알림(v2.698) — 10분마다 확인, 설정이 켜졌을 때만 하루 1회
   startVmDnsHistory, // VM DNS 변경 이력(v2.696) — 적응형 타이머(기본 10분) + 재진입 가드, 스냅샷만 비교(vCenter 왕복 0)
   startDirUsageScheduler, // 폴더 사용량 Top-N 리포트(v2.454) — 60초 틱 + 재진입 가드, 설정 꺼짐이면 결과 수거만

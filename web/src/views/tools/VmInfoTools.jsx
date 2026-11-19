@@ -100,28 +100,4 @@ export function VmTools({ scope }) {
   );
 }
 
-export function Snapshots({ scope }) {
-  const { loading, data, error } = useTool('/tools/snapshots', scope ? { vcenterId: scope } : {});
-  const [detail, setDetail] = useState(null);
-  if (loading) return <Loading />;
-  if (error) return <ErrorBox message={error} />;
-  const cols = [
-    { key: 'name', label: 'VM', render: (v) => <button className="cell-link" onClick={() => setDetail(v)}>{v.name}</button> },
-    { key: 'vcenterId', label: 'vCenter', render: (v) => <span className="muted">{v.vcenterId}</span> },
-    { key: 'host', label: '호스트', render: (v) => <span className="muted">{v.host}</span> },
-    { key: 'snapshotCount', label: '개수', align: 'right' },
-    { key: 'snapshotSizeGB', label: '용량', align: 'right', render: (v) => tb(v.snapshotSizeGB) },
-    { key: 'powerState', label: '전원', render: (v) => <StateBadge state={v.powerState} /> },
-  ];
-  return (
-    <>
-      <div className="kpis" style={{ marginBottom: 14 }}>
-        <Card label="스냅샷 보유 VM" value={data.count} accent={data.count ? 'var(--amber)' : 'var(--green)'} />
-        <Card label="총 스냅샷 용량" value={tb(data.totalSizeGB)} accent="var(--accent-2)" />
-      </div>
-      {data.items.length === 0 ? <div className="card" style={{ borderColor: 'var(--green)' }}><b style={{ color: 'var(--green)' }}>✓ 스냅샷이 있는 VM이 없습니다.</b></div>
-        : <DataTable columns={cols} rows={data.items} initialSort={{ key: 'snapshotSizeGB', dir: 'desc' }} />}
-      {detail && <EntityDetail type="vm" item={detail} onClose={() => setDetail(null)} />}
-    </>
-  );
-}
+// v3.26.0: ‘스냅샷 있는 VM’ 은 tools/snapshots/SnapshotTool.jsx 로 옮겼다(시안 docs/design/snapshots).

@@ -534,3 +534,10 @@
   ② SOAP 호스트 용량(`vcenter/soapClient.js hostCapacityOf`)도 못 읽음 · 0 이하는 null · 총량을 모르면 사용률 null. 용량 판정은 서버 `store.hostCapacityKnown` ↔ 웹 `web/src/hostCapacity.js`
   (세 칸 — 코어 · 총 MHz · 메모리)가 같은 입력에 같은 답이다(웹 `vcdVirt.virtSum` 도 이것 — 예전 두 칸). ⚠ 실 vCenter 가 끊긴 호스트 · 값 없는 VM 에 무엇을 주는지는 확인하지 못했다
   (가짜 vCenter 의 '속성 없음 · 0' 만 고정). 예전 판 엣지는 못 읽은 용량을 0 으로 올린다 — 엣지가 업그레이드돼야 위임 vCenter 에도 반영된다.
+- **v3.26.0 — 스냅샷 화면 · VM 별 스냅샷 이력 DB(`server/src/snaphist/` · 웹 `views/tools/snapshots/`)**(사용자 ‘기본값대로 구현해’ · 세 단계 중 1단계 · 표준 + 이력 DB 반증 1회 — 확정 9건 수정. 설계 `docs/design/snapshots`). 회귀 `server/test/snapHist3260.test.js` · 웹 `snapshots/snapTool3260.test.jsx`.
+  - **판정은 `vmhygiene/analyze.js hygieneFindings` 하나**(‘오래된 스냅샷’ 카드 · ‘VM 구성 점검’ 과 같다) — 화면(snapText)은 서버가 준 `sig` · `band` 로 거르고 묶기만 한다. 지난 일수도 판정과 같은 `snapshotOldestTs` 만(줄기 시각으로 보충하면 band 와 sig.age 가 갈린다 — 반증 9).
+  - 스냅샷이 있는데 크기 0 이면 못 읽은 것(`view.snapGbOf` — layoutEx 가 없으면 수집기가 0 을 남긴다). 데이터스토어는 `vm.dev.disks[].datastore`(같은 vCenter 안 이름) 중 가장 찬 것.
+  - 이력 기록: 하루 1번(`SNAPHIST_HOUR` 기본 3시 뒤) · 스냅샷이 있는 VM 만 · 한 트랜잭션 · 같은 날 'ok' 는 덮지 않는다. **못 읽은 vCenter(unreadVcenters · pending · disabled) · REST 폴백(`collectSource:'rest'` — 개수가 없다)은 행 없이 사유만**(‘0개’ 로 적지 않는다 — 반증 1) · 개수를 못 읽은 VM 이 있으면 'partial'(추이에 넣지 않는다).
+  - ‘없어진 스냅샷’ 은 그 VM 의 집합을 **알 때만**(개수 0 · 줄기/이름이 개수만큼) · VM 이 인벤토리에서 사라지면 사유 'vm'. 열쇠는 생성 시각(이름 변경은 같은 스냅샷 — 반증 4), 모르면 '|이름' 이고 양방향으로 하나씩 짝짓는다(`db.matchItems` — 반증 5 · 6). 백업 도구 임시 스냅샷(`soapParse.VEEAM_SNAP_NAME`)은 항목으로 만들지 않는다(반증 8).
+  - 추이(`history.aggregateDays`): 기록 시작 = 그 vCenter 의 첫 행(상태 무관 — 반증 2) · 빠진 vCenter 가 있는 날은 null + missing(부분 합 금지) · 점검중 · 비활성은 묶음에서 뺀다(excluded — 한 곳이 오래 점검중이면 전 함대가 비던 함정, 반증 3) · 크기를 못 읽은 VM 이 있는 날의 크기 합은 null. 없어진 목록은 읽기 창을 다 쓰면 `goneMore`(반증 7).
+  - 라우트 `/tools/snapshots`(+`/history` · `/history/vm`): 범위 → 고른 법인 순 · memoJson 열쇠에 `scopeKey` + `vcenterPickKey`(+ 이력 세대) · VM 단건은 범위 밖 404. 카드의 ‘모두 보기’ 는 `#/tools/snapshots/old/<vCenter id>`(본체 합과 같은 집합 toolIds — `snapText.buildSnapHash`).

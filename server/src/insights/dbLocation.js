@@ -38,6 +38,7 @@ export const MIGRATABLE = [
   { file: 'veeam-history.db', label: 'Veeam 일 단위 이력(라이선스·저장소 용량 · 400일)' },
   { file: 'gpu-alloc.db', label: 'GPU 할당율 일 단위 이력(법인별 용량 · 할당 · 800일 — v2.939)' },
   { file: 'vm-track.db', label: 'VM 수량·스토리지 추이' },
+  { file: 'snap-history.db', label: 'VM 별 스냅샷 이력' },   // v3.26.0 snaphist/db.js
   { file: 'storage-history.db', label: '스토리지 장비 이력' },
   // ▼ v2.379 이후 추가된 DB — 등재가 누락돼 있었다(v2.451 수정).
   //   이 파일들은 config.dbDir 을 **이미 따르므로**(rma/historyDb.js·rma/testResults.js·

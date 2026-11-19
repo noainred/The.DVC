@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **333개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **334개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-11-19)
@@ -271,6 +271,7 @@
 | `service-map.json` | 설정 | 서비스 인벤토리 저장소(v2.887, docs/design/service-map/README.md 시안 A 3차 + 4차 검토). | ✅ | ✅ |  | servicemap/store.js |
 | `session-state.json` | 설정 | 세션 폐기·유휴 상태(로그아웃·폐기 기록, 검토 S-05·S-06) | ✅ | ✅ | ✅ | auth/sessionState.js |
 | `settings-owners.txt` | 텍스트 | 설정 소유자 목록(백업·비밀 CSV 등 최상위 권한) | ✅ |  | ✅ | security/securitySettings.js |
+| `snap-history.db` | DB | VM 별 스냅샷 이력 DB(v3.26.0 — 사용자 ‘VM 별 스냅샷 이력 DB 추가’ · 설계 docs/design/snapshots §5). |  |  | ✅ | snaphist/db.js |
 | `ssh` | 디렉터리 | 아이실론 디렉터리 사용량 SSH 키 디렉터리(ssh/isidu_key — 0700/0600, v2.736) |  |  | ✅ | util/sshKeyStore.js |
 | `ssh-access-installed.json` | 설정 | 서버에서 읽은 `~/.ssh/authorized_keys` 의 **공개키 지문**(v3.9.0 · 설계 docs/design/ssh-access §9). | ✅ | ✅ | ✅ | sshaccess/installed.js |
 | `ssh-access-state.json` | 설정 | SSH 공용 접속의 **상태 파일**(v3.9.0 · 설계 docs/design/ssh-access §8 · §9) — 접속 판정에 쓰는 것만 둔다. | ✅ | ✅ | ✅ | sshaccess/state.js |
