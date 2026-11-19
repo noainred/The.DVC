@@ -5,7 +5,7 @@
 
 - 생성: `node scripts/common-doc.mjs` · 최신 여부: `node scripts/common-doc.mjs --check`
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다. 설명을 고치려면 그 모듈의 **머리 주석 첫 단락**을 고친다.
-- 훑은 소스 4484개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
+- 훑은 소스 4489개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
 
 ## 읽는 법 · 한계
 
@@ -122,7 +122,7 @@
 | `compress.js` | 경량 gzip 응답 압축 + ETag/304 미들웨어 — 외부 의존성 없이 Node 내장 zlib/crypto만 사용 (에어갭 배포 호환). res.json()을 감싸 큰 JSON 응답만 비동기 gzip한다(동기 gzipSync로 이벤트 루프를 막지 않음). res.s… | `compression` | 1 | 1 | 2 |
 | `loopLag.js` | 이벤트 루프 지연(lag) 모니터 — 대용량 동기 작업(수집 SOAP 파싱·집계·bulk write)이 메인 루프를 얼마나 오래 막는지 계측한다. docs/ARCH-HEAVY-JOB-ISOLATION.md §10-0 '계측 먼저'의 구현 — 실제 병목(수집 재구성 vs… | `startLoopLagMonitor` | 1 | 1 | 2 |
 | `parseWorker.js` | worker_threads 워커 — RetrieveProperties 응답 XML의 정규식 파싱(CPU 바운드)을 메인 이벤트 루프 밖에서 수행한다. 28개 vCenter를 매 주기 수집할 때 수 MB XML을 메인 스레드에서 파싱하면 그동안 HTTP 응답/다른 vCe… | (없음) | 1 | 1 | 0 |
-| `queryNormalize.js` | 쿼리스트링 정규화 — **`req.query` 의 모든 값은 문자열이다**(v2.575 BUG-22). | `normalizeQuery` `queryNormalizer` `default` | 1 | 1 | 8 |
+| `queryNormalize.js` | 쿼리스트링 정규화 — **`req.query` 의 모든 값은 문자열이다**(v2.575 BUG-22). | `normalizeQuery` `queryNormalizer` `default` | 1 | 1 | 9 |
 | `releaseFile.js` | RedHat 계열의 /etc/redhat-release 처럼, CONFIG_DIR에 현재 포탈 버전을 한 줄로 명시하는 릴리스 파일(CONFIG_DIR/vmware-portal-release)을 기록한다. | `writeReleaseFile` `RELEASE_FILE` | 1 | 1 | 1 |
 | `soapParsePool.js` | SOAP 파싱 워커 풀 — RetrieveProperties 응답의 CPU 바운드 정규식 파싱을 worker_threads로 오프로딩해 메인 이벤트 루프 블로킹을 없앤다(28+ vCenter·고RTT 환경에서 매 주기 파싱이 메인 스레드를 점유하면 HTTP 응답/다른… | `_setWorkerUrlForTest` `parseObjectContentAsync` `shutdownParsePool` `_poolInfo` `SOAP_PARSE_WORKERS_MAX` `RESPAWN_MAX` | 1 | 1 | 4 |
 | `staticGzip.js` | 빌드 자산(해시 이름·불변)의 gzip 전송(v2.596, 감사 PERFWEB-02 — 실측). | `acceptsGzip` `createStaticGzip` `STATIC_GZIP_MAX_BYTES` | 1 | 1 | 3 |
@@ -216,7 +216,7 @@
 
 | 모듈 | 하는 일 | 내보내는 이름 | 사용처 | 영역 | 테스트 |
 |---|---|---|---|---|---|
-| `api.js` | v2.498: 진행 중 요청 레지스트리 + 장기 로딩(hang) 보고. perfClient 는 api.js 를 import 하지 않으므로 순환이 없다(설정 조회는 fetchJson 을 인자로 받는다). | `noteHttpError` `permissionInfoFor` `httpInfoFor` `fetchJson` `postJson` `sendJson` 외 35 | 412 | 20 | 61 |
+| `api.js` | v2.498: 진행 중 요청 레지스트리 + 장기 로딩(hang) 보고. perfClient 는 api.js 를 import 하지 않으므로 순환이 없다(설정 조회는 fetchJson 을 인자로 받는다). | `noteHttpError` `permissionInfoFor` `httpInfoFor` `fetchJson` `postJson` `sendJson` 외 35 | 412 | 20 | 62 |
 | `numOrNull.js` | `numOrNull`(웹) — '읽지 못한 수치' 를 0 으로 둔갑시키지 않는 단일 판정. | `numOrNull` `default` | 162 | 12 | 2 |
 | `dayStamp.js` | 브라우저 쪽 날짜 표기(v2.582 BUG-3) — 내려받기 파일명·만료일은 **사용자의 로컬 날짜**다. `new Date().toISOString().slice(0, 10)` 은 UTC 날짜라 한국 시각 00:00~09:00 에는 **어제**가 된다 (보고서 파일명… | `dayStamp` | 25 | 5 | 1 |
 | `regions.js` | 지역(region) 목록 — 웹 단일 소스(v2.575 IMP-10). ⚠ 값은 서버 `server/src/util/regions.js` 와 **글자 그대로 같아야 한다**(웹은 서버 소스를 import 할 수 없어 복사가 불가피하다). `web/src/regions.`… | `REGIONS` `default` | 5 | 2 | 2 |
@@ -242,9 +242,9 @@
 | 모듈 | 하는 일 | 사용처 | 다른 영역 | 테스트 |
 |---|---|---|---|---|
 | `server/src/config.js` | (머리 주석 없음) | 514 | 88 | 186 |
-| `server/src/store.js` | (머리 주석 없음) | 210 | 44 | 348 |
+| `server/src/store.js` | (머리 주석 없음) | 210 | 44 | 352 |
 | `server/src/collector/registry.js` | Collector registry — the list of remote collector agents (one per datacenter) the central portal pulls power from. Stored in CONFIG_DIR/collectors.jso… | 83 | 32 | 55 |
-| `server/src/security/secretVault.js` | 설정 파일 자격증명(비밀번호·SSH 키·토큰)의 저장 방식(평문/암호화) 중앙 모듈(v2.296). | 41 | 29 | 34 |
+| `server/src/security/secretVault.js` | 설정 파일 자격증명(비밀번호·SSH 키·토큰)의 저장 방식(평문/암호화) 중앙 모듈(v2.296). | 41 | 29 | 36 |
 | `server/src/mock/demo/flags.js` | 데모(DATA_SOURCE=mock) 모드 공용 판정(v2.708). | 85 | 26 | 3 |
 | `server/src/alerts.js` | Alerting — evaluates threshold/condition rules against the current snapshot on an interval and pushes notifications to Slack(incoming webhook) and/or… | 31 | 23 | 38 |
 | `server/src/proxy/sshExec.js` | Small SSH helper built on ssh2: connect, run commands, and upload files via SFTP. Shared by the proxy auto-deploy and the agent auto-deploy features.… | 50 | 17 | 31 |
@@ -260,8 +260,8 @@
 | `server/src/audit.js` | Audit log — records security/operational actions (who did what, when) so the portal's write operations (VM 생성, 원격접속, 설정 변경 등)이 추적된다. Appended to CONFI… | 134 | 11 | 47 |
 | `server/src/security/tlsTrust.js` | 장비 TLS 상대 인증(2026-10-09 검토 S-02) — 자격증명을 보내는 HTTPS 연결이 **정말 그 장비인지** 확인한다. | 15 | 11 | 7 |
 | `server/src/auth/auth.js` | (머리 주석 없음) | 147 | 10 | 67 |
+| `server/src/metrics/unreadVcenters.js` | '지금 값' 으로 쓰지 않는 vCenter 와 그 사유(순수 leaf — import 0). | 19 | 10 | 7 |
 | `server/src/runtime-settings.js` | Runtime-adjustable settings that can be changed from the portal UI (and persisted), overriding the env defaults. Currently: the data source (mock \| li… | 19 | 10 | 28 |
-| `server/src/metrics/unreadVcenters.js` | '지금 값' 으로 쓰지 않는 vCenter 와 그 사유(순수 leaf — import 0). | 17 | 10 | 6 |
 | `server/src/storage/registry.js` | 스토리지 장비 등록부(v2.302). | 28 | 9 | 44 |
 | `server/src/gpu/settings.js` | GPU 게스트 수집 설정 — 어떤 법인(vCenter)의 패스쓰루 GPU VM을 게스트 OS 계정으로 모니터링할지, 폴링 주기/동시성/타임아웃, 그리고 vCenter별 게스트 OS 자격증명을 보관한다. config/gpu-guest.json (gitignore, 060… | 13 | 9 | 15 |
 | `server/src/perf/monitor.js` | 서버 성능 측정기(v2.498). 요청 지연·이벤트 루프 정체·진행 중 요청을 **상시 O(1)** 로 계측하고, 임계를 넘은 것만 남긴다. 설정 › 서버 성능 측정 화면(/api/admin/perf)이 이 값을 읽는다. | 13 | 9 | 4 |
@@ -279,9 +279,9 @@
 | `server/src/dscfg/collect.js` | 데이터스토어 운영 속성 갱신(v2.700 — A17). 인벤토리 수집 한 주기 안에서 오래된 DS 부터 상한만큼. 캐시는 vmcfg 처럼 인메모리이고 DS 전용이다(다른 캐시의 prune 이 지우지 않게). 실패는 격리한다. | 7 | 7 | 2 |
 | `server/src/auth/scope.js` | 사용자 데이터 범위(scope) 해석 — "이 사용자가 볼 수 있는 vCenter"를 계산한다. scope = { vcenters:[id...], regions:[name...] }. 둘 다 비면 제한 없음(전체). 명시 vCenter + 지정 리전에 속한 모든 vCe… | 107 | 6 | 9 |
 | `server/src/svcmon/store.js` | 성능점검 대상/폴더 저장소 — `CONFIG_DIR/svcmon.json` 전용 파일(포탈 코어와 분리). | 21 | 6 | 26 |
-| `server/src/logs/db.js` | vCenter 이벤트 로그 장기 보관 DB. vCenter는 이벤트를 단기간만 보관하므로, 포탈이 주기적으로 수집해 여기 누적한다. Node 내장 SQLite(--experimental-sqlite) 우선, 없으면 NDJSON 폴백. 중복은 (vcenterId, key… | 17 | 6 | 47 |
+| `server/src/logs/db.js` | vCenter 이벤트 로그 장기 보관 DB. vCenter는 이벤트를 단기간만 보관하므로, 포탈이 주기적으로 수집해 여기 누적한다. Node 내장 SQLite(--experimental-sqlite) 우선, 없으면 NDJSON 폴백. 중복은 (vcenterId, key… | 17 | 6 | 48 |
 | `server/src/partfault/types.js` | 물리 파트 장애의 **공용 계약**(순수, v2.547). | 16 | 6 | 10 |
-| `server/src/bmstor/registry.js` | 베어메탈 스토리지 서버 목록 + 설정(v2.340). CONFIG_DIR/bm-storage.json (0600, 원자적 쓰기, 손상 보존, v2.296 비밀 봉인) — 수집 서버/배포 대상 레지스트리와 동일 계약. | 15 | 6 | 32 |
+| `server/src/bmstor/registry.js` | 베어메탈 스토리지 서버 목록 + 설정(v2.340). CONFIG_DIR/bm-storage.json (0600, 원자적 쓰기, 손상 보존, v2.296 비밀 봉인) — 수집 서버/배포 대상 레지스트리와 동일 계약. | 15 | 6 | 34 |
 | `server/src/sanswitch/registry.js` | SAN 스위치 등록부(v2.410). | 15 | 6 | 49 |
 | `server/src/storage/store.js` | 이 노드가 수집한 최신 스냅샷 보관(v2.302). deviceId → NormalizedSnapshot. 재시작 후에도 마지막 뷰가 비지 않게 파일로 영속 (자격증명 없음 — 정규화 스냅샷만. 그래도 계정 목록이 있어 0600 + gitignore). 시계열(용량 추… | 15 | 6 | 15 |
 | `server/src/central/edgeRecord.js` | 엣지가 push 한 **장비 스냅샷 원소**의 수신 정리와, 그 보관 파일의 쓰기(v2.599). | 14 | 6 | 9 |
@@ -305,7 +305,7 @@
 | `server/src/gpu/guestops.js` | VMware Tools 게스트 작업으로 게스트 OS 안에서 nvidia-smi를 실행해 GPU 사용률을 수집한다(패스쓰루 GPU는 ESXi에서 안 보이므로 게스트에서만 알 수 있음). | 10 | 5 | 15 |
 | `server/src/idrac/service.js` | Glue between the iDRAC registry (which server maps to which ESXi host) and the power-sample DB. Provides host-name → power lookups for the API and the… | 10 | 5 | 9 |
 | `server/src/nsx/store.js` | In-memory NSX aggregator + poller. Mirrors the vCenter store design: each NSX Manager is polled in parallel with a per-manager timeout so one slow/ hi… | 10 | 5 | 11 |
-| `server/src/bmusage/onboard/refs.js` | SSH 키 저장소 ↔ OS 계정 등록부(bm-storage.json) 연결(7b단계 · 설계 PROFILES §18). | 9 | 5 | 8 |
+| `server/src/bmusage/onboard/refs.js` | SSH 키 저장소 ↔ OS 계정 등록부(bm-storage.json) 연결(7b단계 · 설계 PROFILES §18). | 9 | 5 | 9 |
 | `server/src/collector/puller.js` | Central-portal puller: periodically fetch each registered collector agent's /api/collector/export and merge its host→power into shared state. Per-host… | 9 | 5 | 23 |
 | `server/src/upgrade/manager.js` | Orchestrates the auto-upgrade feature for the running portal: tracks the last check, runs the optional background watcher (local folder + remote sourc… | 9 | 5 | 22 |
 | `server/src/collector/datacenterMatch.js` | 수집기(에이전트)를 등록된 DataCenter(법인)에 매칭하는 순수 함수. collector.datacenter 라벨 / collector.id / collector.name 후보를 순서대로 보고, DataCenter의 id 또는 name과 대소문자 무시로 일치하면… | 8 | 5 | 3 |

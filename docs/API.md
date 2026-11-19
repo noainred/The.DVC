@@ -825,13 +825,13 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/datastores/:id/browse` | 권한 `inv.datastores` | [server/src/routes/api/inventory.js:593](../server/src/routes/api/inventory.js#L593) |
 | GET | `/health` | — | [server/src/routes/api/overviewNsx.js:154](../server/src/routes/api/overviewNsx.js#L154) |
 | GET | `/hosts` | 권한 `inv.hosts` | [server/src/routes/api/inventory.js:365](../server/src/routes/api/inventory.js#L365) |
-| GET | `/hosts/:id` | 권한 `inv.hosts` | [server/src/routes/api/hostChecks.js:67](../server/src/routes/api/hostChecks.js#L67) |
+| GET | `/hosts/:id` | 권한 `inv.hosts` | [server/src/routes/api/hostChecks.js:80](../server/src/routes/api/hostChecks.js#L80) |
 | POST | `/hosts/:id/endpoint-locate` | 권한 `inv.hosts` | [server/src/routes/api/hostSan.js:382](../server/src/routes/api/hostSan.js#L382) |
 | GET | `/hosts/:id/metrics` | 권한 `inv.hosts` | [server/src/routes/api/vmMetrics.js:201](../server/src/routes/api/vmMetrics.js#L201) |
 | GET | `/hosts/:id/net-uplinks` | 권한 `inv.hosts` | [server/src/routes/api/hostSan.js:261](../server/src/routes/api/hostSan.js#L261) |
 | GET | `/hosts/:id/nic-stats` | 권한 `inv.hosts` | [server/src/routes/api/vmMetrics.js:231](../server/src/routes/api/vmMetrics.js#L231) |
 | GET | `/hosts/:id/san-attribution` | 권한 `inv.hosts` | [server/src/routes/api/hostSan.js:205](../server/src/routes/api/hostSan.js#L205) |
-| GET | `/hosts/checks` | 권한 `inv.hosts` | [server/src/routes/api/hostChecks.js:43](../server/src/routes/api/hostChecks.js#L43) |
+| GET | `/hosts/checks` | 권한 `inv.hosts` | [server/src/routes/api/hostChecks.js:56](../server/src/routes/api/hostChecks.js#L56) |
 | GET | `/hosts/corp` | 권한 `inv.hosts` | [server/src/routes/api/hostCorp.js:38](../server/src/routes/api/hostCorp.js#L38) |
 | GET | `/hosts/insight` | 권한 `inv.hosts` | [server/src/routes/api/hostInsight.js:26](../server/src/routes/api/hostInsight.js#L26) |
 | GET | `/idrac/host-power` | 권한 `inv.hosts` | [server/src/routes/api/vmMetrics.js:318](../server/src/routes/api/vmMetrics.js#L318) |
@@ -1532,7 +1532,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 | POST | `/tools/service-check/settings-files/confirm` | 역할 `admin` · `settingsFleetOnly` | [server/src/routes/api/checksLogs.js:239](../server/src/routes/api/checksLogs.js#L239) |
 | GET | `/tools/snapshots` | 권한 `tools` | [server/src/routes/api/vcTools.js:155](../server/src/routes/api/vcTools.js#L155) |
 | GET | `/tools/snapshots/history` | 권한 `tools` | [server/src/routes/api/vcTools.js:177](../server/src/routes/api/vcTools.js#L177) |
-| GET | `/tools/snapshots/history/vm` | 권한 `tools` | [server/src/routes/api/vcTools.js:193](../server/src/routes/api/vcTools.js#L193) |
+| GET | `/tools/snapshots/history/vm` | 권한 `tools` | [server/src/routes/api/vcTools.js:194](../server/src/routes/api/vcTools.js#L194) |
 | GET | `/tools/solutions` | 권한 `tools` | [server/src/routes/api/vcTools.js:67](../server/src/routes/api/vcTools.js#L67) |
 | GET | `/tools/storage` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:85](../server/src/routes/api/storageMon.js#L85) |
 | GET | `/tools/storage-growth` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:793](../server/src/routes/api/storageMon.js#L793) |
