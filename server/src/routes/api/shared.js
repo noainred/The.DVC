@@ -5,6 +5,7 @@ import { store } from '../../store.js';
 import { snapMemo, sendCached } from '../../util/snapCache.js';
 import { poolRun } from '../../util/pool.js'; // v2.579: 동시성 풀 단일 소스
 import { linregSlope } from '../../util/linreg.js';
+import { scopeSig, SCOPE_SIG_ALL } from '../../util/scopeSig.js';
 
 
 // 동시 다발 폴링/클릭 최적화 — 여러 사용자가 같은 스냅샷에 대해 같은 무거운 계산을 각자 재실행하던
@@ -95,10 +96,11 @@ export function vcenterPickOf(query, snap) {
   const ids = parseVcenterIds(query, snap);
   return ids ? new Set(ids) : null;
 }
-/** memoJson extraKey 용 — 정규화한(중복 제거 · 정렬) 고른 법인 목록. 고르지 않았으면 '-'(빈 목록 [] 의 'v' 와 다르다). */
+/** memoJson extraKey 용 — 정규화한(중복 제거 · 정렬) 고른 법인 목록. 고르지 않았으면 '-'(빈 목록 [] 의 'vs:[]' 와 다르다).
+ *  v3.23.2: 서명은 util/scopeSig.js — 예전 'v' + join(',') 은 %2C 로 고른 쉼표 id ['KR,Seoul'] 과 ['KR','Seoul'] 이 같은 열쇠였다. */
 export function vcenterPickKey(query, snap) {
   const p = vcenterPickOf(query, snap);
-  return p ? `v${[...p].map(String).sort().join(',')}` : '-';
+  return p ? `v${scopeSig(p)}` : '-';
 }
 
 export function applyFilters(items, query, snap, searchFields = ['name'], user = null) {
@@ -157,8 +159,9 @@ export function scopeSlice(snap, user, vcenterId) {
 //   dbg3231: 예전 `[...a].sort().join(',')` · 무제한 'all' 은 등록부가 허용하는 id(쉼표 · 'all')로 충돌했다 —
 //   ['KR,Seoul'] 과 ['KR','Seoul'] 이 같은 열쇠, scope ['all'] 과 무제한이 같은 열쇠라 범위 밖 법인의 응답 캐시를 받았다.
 //   무제한은 범위 서명이 될 수 없는 표식(SCOPE_KEY_ALL), 범위는 's:' + JSON 배열(정렬)로 잇는다. 무제한 판정은 이 표식과 비교한다('all' 글자 비교 금지).
-export const SCOPE_KEY_ALL = '*';
-export const scopeKey = (user, snap) => { const a = scopedVcenterIds(user, snap); return a ? `s:${JSON.stringify([...a].map(String).sort())}` : SCOPE_KEY_ALL; };
+//   v3.23.2: 서명 규칙은 util/scopeSig.js 하나(쓰기 범위 · 고른 법인 · 각 모듈 캐시 열쇠도 같은 함수).
+export const SCOPE_KEY_ALL = SCOPE_SIG_ALL;
+export const scopeKey = (user, snap) => scopeSig(scopedVcenterIds(user, snap));
 
 /** Map a guest OS string to a coarse family for distribution charts. */
 export function osFamily(os = '') {

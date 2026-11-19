@@ -62,6 +62,7 @@ import { jobPolicyResolver, policyRev } from '../../bareos/policy.js';
 import { listGroups, groupsLoadError, groupsRev } from '../../bareos/groups.js';
 import { getMarks, marksUnreadable, marksRev } from '../../veeam/backupMarks.js';
 import { registryHosts, vcHostOf } from '../../bareos/vcHost.js';
+import { scopeSig } from '../../util/scopeSig.js';
 
 const adminOnly = requireRole('admin');
 const fullScopeOnly = fullScopeOnlyWith('Bareos Director 설정은 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 볼 수 있습니다.');
@@ -449,7 +450,7 @@ api.get('/tools/bareos-backup', adminOnly, (req, res) => memoJson(req, res, 'bar
 function bareosListKey(req) {
   const snap = store.get();
   let w = 'err';
-  try { const ws = writeScopedVcenterIds(req.user, snap); w = ws ? [...ws].sort().join(',') : 'all'; } catch { w = 'err'; }
+  try { w = scopeSig(writeScopedVcenterIds(req.user, snap)); } catch { w = 'err'; }
   const p = pollerStatus();
   const dirs = Object.entries(p.directors || {}).map(([k, v]) => `${k}:${v?.at ?? ''}:${v?.ok}:${v?.relay || ''}:${v?.code || ''}`).join(',');
   let auth = '';
