@@ -124,9 +124,13 @@ export default function HostInsight({ filters = {}, scopeIds = null, scopeRegion
   };
   const scale = hostScale(fill);
   const clusterCells = layout.cols.flatMap((c) => c.tiles);
-  const overN = fill.crit != null ? clusterCells.filter((t) => fillStep(fill.val(t.cell), fill).over).length : 0;
+  // r145: ‘지금 … N칸’ 은 오래된 법인(stale — 139회차부터 점검중 vCenter 포함)의 칸을 세지 않는다 — 옛 값이 지금 경고로 셈되어 같은 화면의 ‘과부하 호스트’(합에서 뺌)와 갈렸다.
+  //   칸은 빗금으로 그대로 그리고, 경계를 넘은 오래된 칸 수는 따로 밝힌다(오래됨은 정상에도 장애에도 넣지 않고 따로 센다).
+  const overOf = (stale) => (fill.crit != null ? clusterCells.filter((t) => (t.row?.stale === true) === stale && fillStep(fill.val(t.cell), fill).over).length : 0);
+  const overN = overOf(false);
+  const overStaleN = overOf(true);
   const unknownN = clusterCells.filter((t) => fill.val(t.cell) == null).length;
-  const scaleNote = `파랑 = 값의 크기 · 빨강 = ${unitText(fill.crit, '%')} 이상인 칸만 — 지금 ‘${fill.label}’ 기준으로 ${fmtU(overN, '칸')}입니다(${fmtU(clusterCells.length, '칸')} 중).`
+  const scaleNote = `파랑 = 값의 크기 · 빨강 = ${unitText(fill.crit, '%')} 이상인 칸만 — 지금 ‘${fill.label}’ 기준으로 ${fmtU(overN, '칸')}입니다(${fmtU(clusterCells.length, '칸')} 중)${overStaleN ? ` — 경계를 넘은 오래된 값 ${fmtU(overStaleN, '칸')}은 세지 않았습니다` : ''}.`
     + (access.cluster ? ' ‘못 버팀’ 표는 색 기준과 상관없이 붙습니다.' : '')
     + (unknownN ? ` 값 모름(회색) ${fmtU(unknownN, '칸')}${fill.key === 'n1mem' ? ' — 독립 호스트 · 용량을 모르는 호스트가 있는 클러스터는 빠진 뒤 값이 없습니다' : ''}.` : '');
   const hiddenNote = layout.hidden.length ? ` 칸 없음 ${fmtU(layout.hidden.length, '개')}(크기 값 모름 또는 0): ${layout.hidden.slice(0, 6).map((t) => t.label).join(' · ')}${layout.hidden.length > 6 ? ' 외' : ''}` : '';

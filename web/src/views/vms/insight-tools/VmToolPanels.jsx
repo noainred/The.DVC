@@ -18,7 +18,7 @@ import React, { useState } from 'react';
 import './vmTools.css';
 import { useToolSummary } from './useToolSummary.js';
 import {
-  fmtN, fmtU, fmt1, gbText, pctText, corpNameOf, missingText, synthNote, barPct, toolLabel, gateOf,
+  fmtN, fmtU, fmt1, gbText, pctText, corpNameOf, missingText, synthNote, barPct, toolLabel, gateOf, staleOf,
 } from './toolSumText.js';
 import {
   guestPartView, offView, trackView, lifeView, contentionView, contentionRule, contentionEmpty, hygieneView, slotText, dayText, osName, HYGIENE_CODE_ROWS, WARM, NEUTRAL,
@@ -142,7 +142,8 @@ function OffPanel({ vcIds, rows, canTool }) {
       <PanelHead title="꺼진 VM" hint={`전원이 꺼진 VM(템플릿 제외) — 특수 기능 ‘${toolLabel('waste')}’ 의 ‘전원 꺼짐’ 조사(꺼진 지 며칠) 요약입니다`} rule={rule}
         q={{ ...q, loading: q.loading || qs.loading }} onReload={reload} />
       {/* r140: 꺼진 지(off-since) 값이 있는데 다시 받기가 실패하면 그것도 ‘다시 받기에 실패’ 로 밝힌다 — 예전에는 waste 의 오류만 보아 옛 구간 · 목록이 조용히 남았다 */}
-      <PanelState q={q.data ? { ...q, error: q.error || (qs.data && qs.error) || null } : q} view={v} waitText="꺼진 VM 요약을 받는 중입니다…">
+      {/* r145: 안내의 받은 시각은 실패한 도구의 것(staleOf) — 예전에는 waste 의 시각이라 waste 를 새로 받고 off-since 만 실패하면 옛 구간을 방금 값이라 말했다 */}
+      <PanelState q={q.data ? (() => { const sx = staleOf([q, qs]); return sx.error ? { ...q, error: sx.error, at: sx.at } : { ...q, error: null }; })() : q} view={v} waitText="꺼진 VM 요약을 받는 중입니다…">
         {v && (
           <div className="vit-gp">
             <div className="vit-sum">
@@ -217,8 +218,9 @@ function TrendPanel({ vcIds, rows, canTool }) {
   // 두 도구 중 하나라도 값이 있으면 그린다 — 둘 다 못 받았을 때만 오류(권한 안내 포함) 자리.
   //   r140: 값이 있는 도구의 다시 받기 실패는 싣는다(PanelState 의 ‘다시 받기에 실패했습니다 — 아래는 … 값입니다’) — 예전에는 값이 하나라도 있으면 오류를 null 로 지워
   //   다시 받기가 실패해도 옛 값만 조용히 남았다(useToolSummary 규약: error 와 data 가 함께 있으면 값 + 실패 안내). 처음부터 못 온 쪽은 아래 ‘받지 못했습니다’ 줄이 밝힌다.
-  const staleErr = (canTrack && qt.data && qt.error) || (canLife && ql.data && ql.error) || null;
-  const main = { data: qt.data || ql.data, error: !qt.data && !ql.data ? (qt.error || ql.error) : staleErr, loading: qt.loading || ql.loading, at: qt.at || ql.at };
+  //   r145: 안내의 받은 시각은 실패한 도구의 것(staleOf) — 예전 main.at(vm-track 우선)은 vm-track 을 새로 받고 vm-lifecycle 만 실패하면 옛 값을 방금 값이라 말했다.
+  const stale = staleOf([canTrack && qt, canLife && ql]);
+  const main = { data: qt.data || ql.data, error: !qt.data && !ql.data ? (qt.error || ql.error) : stale.error, loading: qt.loading || ql.loading, at: qt.at || ql.at };
   const span = t && t.max != null && t.min != null ? t.max - t.min : 0;
   const yOf = (n) => (span > 0 ? ((n - t.min) / span) * 100 : 50);
   return (
@@ -226,7 +228,7 @@ function TrendPanel({ vcIds, rows, canTool }) {
       <PanelHead title="VM 수 추이 · 생성/삭제"
         hint={`특수 기능 ${[canTrack ? `‘${toolLabel('vm-track')}’` : '', canLife ? `‘${toolLabel('vm-lifecycle')}’` : ''].filter(Boolean).join(' · ')} 의 요약입니다`}
         rule={rule} q={main} onReload={reload} />
-      <PanelState q={main} waitText="추이 · 생성/삭제 요약을 받는 중입니다…">
+      <PanelState q={stale.error && main.data ? { ...main, at: stale.at } : main} waitText="추이 · 생성/삭제 요약을 받는 중입니다…">
         <div className="vit-gp">
           <div className="vit-sum">
             {canTrack && t && (t.current != null

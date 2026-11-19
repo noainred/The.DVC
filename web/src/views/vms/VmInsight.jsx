@@ -150,11 +150,14 @@ export default function VmInsight({ mode = 'insight', filters = {}, scopeIds = n
   };
   const scale = [...scaleLegend(fill.steps, { crit: fill.crit }).map((text, i) => ({ text, bg: RAMP[i] })),
     ...(fill.crit != null ? [{ text: `${fill.crit}% 이상(경고)`, bg: CRIT_BG }] : []), { text: '값 모름', bg: NONE_BG }];
-  const overN = fill.crit != null ? picked.all.filter((r) => r.unknown !== true && fillStep(fill.val(r), fill).over).length : 0;
+  // r145: ‘지금 … N곳’ 은 오래된 법인(stale — 139회차부터 점검중 vCenter 포함)을 세지 않는다(옛 값을 지금 경고로 세지 않게 · 합과 같은 법인 집합) — 경계를 넘은 오래된 법인 수는 따로.
+  const overOf = (rs) => (fill.crit != null ? rs.filter((r) => fillStep(fill.val(r), fill).over).length : 0);
+  const overN = overOf(picked.all.filter((r) => r.unknown !== true && r.stale !== true));
+  const overStaleN = overOf(picked.all.filter((r) => r.unknown !== true && r.stale === true));
   const scaleNote = fill.key === 'disk' && !gp.data
     ? (gp.loading ? '게스트 파티션 요약을 받는 중입니다 — 받기 전에는 칸이 회색(값 모름)입니다.' : `게스트 파티션 요약을 받지 못했습니다${gp.error ? `(${gp.error.message || gp.error})` : ''} — 칸이 회색(값 모름)입니다.`)
     : fill.crit != null
-      ? `파랑 = 값의 크기 · 빨강 = ${fill.crit}% 이상인 법인만. 지금 ${fill.crit}% 를 넘는 법인은 ${overN}곳입니다.`
+      ? `파랑 = 값의 크기 · 빨강 = ${fill.crit}% 이상인 법인만. 지금 ${fill.crit}% 이상인 법인은 ${overN}곳입니다${overStaleN ? `(경계를 넘은 오래된 값 ${overStaleN}곳은 세지 않았습니다)` : ''}.`
       : '이 색 기준에는 정해진 경계가 없어 경고색을 쓰지 않습니다(파랑 단계만). ‘평균 CPU’ · ‘평균 메모리’ 로 바꾸면 경계를 넘은 법인만 빨강이 됩니다.';
   const hiddenNote = layout.hidden.length ? `칸 없음 ${layout.hidden.length}곳(값 모름 또는 0): ${layout.hidden.map((t) => t.label).join(' · ')}` : '';
   const regions = regionRows(picked.used, total);
