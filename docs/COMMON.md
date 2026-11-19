@@ -5,7 +5,7 @@
 
 - 생성: `node scripts/common-doc.mjs` · 최신 여부: `node scripts/common-doc.mjs --check`
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다. 설명을 고치려면 그 모듈의 **머리 주석 첫 단락**을 고친다.
-- 훑은 소스 4472개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
+- 훑은 소스 4473개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
 
 ## 읽는 법 · 한계
 
@@ -33,7 +33,7 @@
 | 모듈 | 하는 일 | 내보내는 이름 | 사용처 | 영역 | 테스트 |
 |---|---|---|---|---|---|
 | `numOrNull.js` | `numOrNull` — '읽지 못한 수치' 를 0 으로 둔갑시키지 않는 단일 판정 (v2.561). | `numOrNull` `default` | 302 | 65 | 4 |
-| `atomicWrite.js` | 원자적 파일 쓰기 — 임시파일에 기록 후 rename으로 교체한다. writeFileSync는 기록 도중 크래시/정전 시 파일을 truncate/부분기록 상태로 남겨, 다음 로드에서 JSON 파싱 실패 → 빈 값 반환 → 다음 저장이 손상본을 덮어쓰며 데이터가 영구 유… | `atomicWriteFileSync` `classifyLoadReason` `loadReasonWhere` `summarizeLoadReason` `safeLoadText` `preserveCorrupt` 외 1 | 258 | 73 | 11 |
+| `atomicWrite.js` | 원자적 파일 쓰기 — 임시파일에 기록 후 rename으로 교체한다. writeFileSync는 기록 도중 크래시/정전 시 파일을 truncate/부분기록 상태로 남겨, 다음 로드에서 JSON 파싱 실패 → 빈 값 반환 → 다음 저장이 손상본을 덮어쓰며 데이터가 영구 유… | `atomicWriteFileSync` `classifyLoadReason` `loadReasonWhere` `summarizeLoadReason` `safeLoadText` `corruptBackupPath` 외 2 | 258 | 73 | 12 |
 | `dayKey.js` | 날짜 경계 코어 — 하나다(v2.582 ARCH-2). | `resolveDayOffsetMin` `toMs` `dayKey` `todayStamp` `dayIndex` `dayStartMs` 외 9 | 136 | 35 | 38 |
 | `envNumber.js` | 환경변수의 '양수' 설정값(상한 · 개수 · 시한 · 지연)을 읽는다(v3.17.6 · 2차 공통 기능 점검 5회차). | `envPositive` `envNonNegative` `ENV_INT_MAX` `TCP_PORT_MAX` `ENV_DEFAULT_MAX` `envPort` 외 1 | 128 | 36 | 4 |
 | `capStr.js` | 외부 문자열을 **상주 구조**(Map 키·보관 레코드)에 넣을 때의 길이 상한(v2.606 감사 TIM2606-02). | `flatStr` `capStr` `capTrim` | 108 | 24 | 2 |
