@@ -29,7 +29,8 @@ import VmToolPanels from './insight-tools/VmToolPanels.jsx';
 import VmOverView from './insight-tools/VmOverView.jsx';
 import { checkItems } from './insight-tools/vmToolChecks.js';
 import { useToolSummary } from './insight-tools/useToolSummary.js';
-import { toolLabel, toolHref } from './insight-tools/toolSumText.js';
+import { toolLabel } from './insight-tools/toolSumText.js';
+import { buildSnapHash } from '../tools/snapshots/snapText.js';
 import '../insight/insight.css';
 
 const C = Object.freeze({ blue: '#3987e5', orange: '#d95926', gray: '#4b5873', amber: '#f59e0b', serious: '#ec835a', red: '#ef4444', none: NONE_BG, faint: '#8b9bb4' });
@@ -269,7 +270,7 @@ export default function VmInsight({ mode = 'insight', filters = {}, scopeIds = n
             <>
               {/* 시안 순서(§4-1 · §4-3 · §8 · §10): 디스크 → 오래된 스냅샷 → 꺼진 VM → 추이 */}
               <VmToolPanels vcIds={toolIds} rows={rows} group="capacity" canTool={toolCan} only={['disk']} />
-              <SnapPanel s={s} th={th} tops={tops} nameOf={nameOf} canSnapTool={canTool('snapshots')} />
+              <SnapPanel s={s} th={th} tops={tops} nameOf={nameOf} canSnapTool={canTool('snapshots')} snapVcIds={ids.length || region ? toolIds : []} />
               <VmToolPanels vcIds={toolIds} rows={rows} group="capacity" canTool={toolCan} only={['off', 'trend']} />
             </>
           )}
@@ -283,7 +284,7 @@ export default function VmInsight({ mode = 'insight', filters = {}, scopeIds = n
 }
 
 /** 오래된 스냅샷 — ‘조치 필요’ 의 snapOld 신호 그대로(서버 집계 reclaim · 법인별 상위 N 병합). */
-function SnapPanel({ s, th, tops, nameOf, canSnapTool = false }) {
+function SnapPanel({ s, th, tops, nameOf, canSnapTool = false, snapVcIds = [] }) {
   const r = s.reclaim || {};
   const d = numOrNull(th.snapAgeDays);
   const bands = snapBands(r, th);
@@ -313,9 +314,9 @@ function SnapPanel({ s, th, tops, nameOf, canSnapTool = false }) {
             { key: 'n', value: fmtN(r.snapOldSnaps), text: '스냅샷 수' },
           ]} />
           <StackBar segs={bands} tall />
-          {/* v3.23.2(사용자 요청): 스냅샷 도구로 가는 ‘모두 보기’ — 도구 권한이 있을 때만. 도구는 기준과 무관하게 스냅샷이 있는 VM 전부를 전체 범위로 보여 준다
-              (범위 인계는 받는 쪽이 없어 싣지 않는다 — ToolParts ToolLink 주석). 기준을 넘긴 VM 만 보는 길(‘조치 필요’)은 그대로 둔다. */}
-          {canSnapTool && <a className="ins-link" href={toolHref('snapshots')}>‘{toolLabel('snapshots')}’ 에서 모두 보기 →</a>}
+          {/* v3.23.2(사용자 요청): 스냅샷 도구로 가는 ‘모두 보기’ — 도구 권한이 있을 때만. v3.26.0: 받는 쪽(SnapshotTool)이 생겨 ‘사내 기준 넘김’ 보기 +
+              고른 법인(본체 합과 같은 집합 toolIds — 오래됨 · 모름 법인 제외)을 주소에 싣는다(snapText.buildSnapHash) — 카드의 수와 도구 표의 대수가 같다. ‘조치 필요’ 길은 그대로 둔다. */}
+          {canSnapTool && <a className="ins-link" href={buildSnapHash('old', snapVcIds)}>‘{toolLabel('snapshots')}’ 에서 모두 보기 →</a>}
           <a className="ins-link" href="#/vms/attention" style={canSnapTool ? { fontWeight: 500 } : undefined}>{canSnapTool ? '기준을 넘긴 VM 만 ‘조치 필요’ 에서 보기 →' : '‘조치 필요’ 에서 모두 보기 →'}</a>
           {canHubTool('vm-hygiene') && <a className="ins-link" href="#/tools/vm-hygiene" style={{ fontWeight: 500 }}>기준 일수와 예외 목록은 ‘VM 구성 점검’ 설정에서 →</a>}
         </div>

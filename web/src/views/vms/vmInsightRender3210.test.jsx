@@ -69,7 +69,8 @@ describe('분석 보기 렌더', () => {
   it('v3.23.2 — 오래된 스냅샷 카드의 ‘모두 보기’: 도구 권한이 있으면 스냅샷 도구 링크 + ‘조치 필요’, 없으면 ‘조치 필요’ 만', () => {
     perm.tools = true;
     const on = render({});
-    expect(on).toMatch(/<a class="ins-link" href="#\/tools\/snapshots">‘스냅샷 있는 VM’ 에서 모두 보기 →<\/a>/);
+    expect(on).toMatch(/<a class="ins-link" href="#\/tools\/snapshots\/old">‘스냅샷 있는 VM’ 에서 모두 보기 →<\/a>/);
+    expect(render({ scopeIds: ["va", "vb", "vs"] })).toMatch(/href="#\/tools\/snapshots\/old\/va,vb"/);   // v3.26.0 고른 법인을 싣는다(본체 합과 같은 집합 — 오래된 vs 는 뺀다)
     expect(on).toMatch(/href="#\/vms\/attention"[^>]*>기준을 넘긴 VM 만 ‘조치 필요’ 에서 보기 →/);
     expect(on.indexOf('#/tools/snapshots')).toBeLessThan(on.indexOf('기준을 넘긴 VM 만'));
     perm.tools = false;
