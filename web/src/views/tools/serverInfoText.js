@@ -20,7 +20,7 @@ export const kbText = (v) => (numOrNull(v) == null ? '—' : sizeText(Number(v) 
 export const CODE_TEXT = Object.freeze({
   ok: '읽음', unparsed: '일부만 읽음', 'maybe-windows': 'OS 종류 확인 필요', 'not-found': '서버 없음', 'registry-unreadable': '등록부 못 읽음',
   'edge-delegated': '엣지에서 읽음', disabled: '수집 꺼짐', 'not-configured': '계정 없음', cred: '계정 판정에서 막힘', 'auth-rejected': '로그인 거부',
-  'same-cred-rejected': '같은 계정 거부로 건너뜀', hostkey: '호스트키 미승인', timeout: '시한 초과', 'exec-timeout': '명령 시한 · 일부만', 'exec-truncated': '출력 상한 · 일부만',
+  'same-cred-rejected': '같은 계정 거부로 건너뜀', hostkey: '호스트키 미승인', tls: '인증서 확인 실패', timeout: '시한 초과', 'exec-timeout': '명령 시한 · 일부만', 'exec-truncated': '출력 상한 · 일부만',
   connect: '접속 실패', 'no-plan': '읽기 묶음 없음', error: '내부 오류',
 });
 export const codeTone = (code) => (code === 'ok' ? 'ok' : ['unparsed', 'maybe-windows', 'edge-delegated', 'disabled', 'not-configured', 'exec-timeout', 'exec-truncated'].includes(code) ? 'warn' : 'bad');

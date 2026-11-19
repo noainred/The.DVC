@@ -556,14 +556,14 @@ async function loginOnce(s, { accountId = '', auth = '', ignoreAccountStop = fal
     const meta = { secretVersion: a.secretVersion ?? null, keyFingerprint: '' };
     if (!a.password) return { ok: false, kind: 'winrm-needs-password', reason: REFS.AUTH_ERROR['winrm-needs-password'], ...meta };
     const { winrmRun, WINRM_PORT } = await import('../winrm/client.js');
-    const { ntlmNameOf } = await import('./readServer.js');
+    const { ntlmNameOf, WINRM_CBT_REASON } = await import('./readServer.js');
     const { username, domain } = ntlmNameOf(a.username);
     try {
       await winrmRun({ host: String(s.host), port: Number(port) || WINRM_PORT, username, domain, password: a.password, command: 'hostname', timeoutMs: 30_000 });
       return { ok: true, kind: 'ok', authKind: 'password', ms: Date.now() - t0, ...meta };
     } catch (e) {
       const k = e?.kind || '';
-      if (k === 'tls-peer' || k === 'cbt') return { ok: false, kind: 'tls', reason: 'WinRM 인증서를 신뢰하지 않아 끊었습니다 — 설정 › 보안 › 장비 신뢰에서 지문을 확인 · 승인하세요.', ...meta };
+      if (k === 'tls-peer' || k === 'cbt') return { ok: false, kind: 'tls', reason: k === 'cbt' ? WINRM_CBT_REASON : 'WinRM 인증서를 신뢰하지 않아 끊었습니다 — 설정 › 보안 › 장비 신뢰에서 지문을 확인 · 승인하세요.', ...meta };
       if (k === 'auth-rejected') return { ok: false, kind: 'auth-rejected', reason: '로그인이 거부됐습니다(다시 시도하지 않습니다 — 계정 잠금 방지).', ...meta };
       return { ok: false, kind: 'connect', reason: `WinRM 에 접속하지 못했습니다(${String(e?.message || e).replace(/\s+/g, ' ').slice(0, 100)})`, ...meta };
     }

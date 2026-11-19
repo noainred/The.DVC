@@ -4,7 +4,8 @@
  * 하는 일: cmd 원격 셸 하나를 만들고(Create) → 명령 하나(Command) → 출력을 끝까지 받고(Receive 반복) → 셸을 지운다(Delete).
  *   명령은 **호출부가 고정 값으로 넘긴 PowerShell 하나**(읽기 묶음 — serverinfo 가 만든다). 사용자 입력을 명령에 끼워 넣지 않는다.
  * 읽기는 정규식으로 필요한 칸만(ShellId · CommandId · Stream · CommandState · ExitCode · Fault 이유) — XML 파서 의존을 두지 않는다.
- *   응답 크기는 호출부(client.js)가 자른다. 이 모듈은 외부 입력을 앵커 있는 비탐욕 패턴으로만 읽는다(루트 CLAUDE.md 정규식 규칙).
+ *   응답 크기는 호출부(client.js)가 자른다. 이 모듈은 외부 입력을 **길이 상한이 있고 서로 겹치지 않는 반복**으로만 읽는다(루트 CLAUDE.md 정규식 규칙 —
+ *   예전 이 줄은 ‘앵커 있는 비탐욕 패턴’ 이라 적었지만 실제로는 앵커 · 비탐욕이 아니었고, Stream 의 `\s+` + `[^>]{0,300}` 겹침이 남아 있었다 · 136회차 newcode136 ①).
  * ⚠ 실제 Windows 응답으로는 아직 확인하지 못했다 — 형식은 MS-WSMV 문서 예시를 따랐다(설계 README §7). 시험은 그 예시 모양의 가짜 서버로 한다.
  */
 import crypto from 'node:crypto';
@@ -94,7 +95,8 @@ export function parseCommandId(xml) {
  */
 export function parseReceive(xml) {
   const out = { stdout: [], stderr: [], done: false, exitCode: null };
-  const re = /<(?:[A-Za-z0-9_]+:)?Stream\s+([^>]{0,300})>([A-Za-z0-9+/=\s]{0,1048576})<\/(?:[A-Za-z0-9_]+:)?Stream>/g;
+  // 이름 뒤 공백은 한 글자(`\s`)만 — `\s+` 는 뒤의 `[^>]{0,300}` 와 겹쳐 공백 k 개마다 300번 되돌아갔다(136회차: 공백 640KB 응답 하나 0.38초 · Receive 마다 반복)
+  const re = /<(?:[A-Za-z0-9_]+:)?Stream\s([^>]{0,300})>([A-Za-z0-9+/=\s]{0,1048576})<\/(?:[A-Za-z0-9_]+:)?Stream>/g;
   let m;
   while ((m = re.exec(xml))) {
     const name = /Name="(stdout|stderr)"/.exec(m[1]);

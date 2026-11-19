@@ -32,6 +32,12 @@ export const READ_DEADLINE_MS = 60_000;
 export const READ_CODES = Object.freeze(['ok', 'not-found', 'registry-unreadable', 'edge-delegated', 'disabled', 'not-configured', 'cred', 'auth-rejected', 'same-cred-rejected',
   'hostkey', 'tls', 'timeout', 'exec-timeout', 'exec-truncated', 'connect', 'no-plan']);
 
+/**
+ * 인증서는 믿었지만(TLS 판정 통과) 그 서명 알고리즘으로 채널 바인딩 해시를 정할 수 없어 AUTHENTICATE 를 보내지 않은 경우(`cbt` — RFC 5929 4.1 · Ed25519 · RSASSA-PSS 등).
+ *   장비 신뢰 승인으로는 풀리지 않는다 — ‘승인하세요’ 로 안내하면 이미 승인한 사람이 같은 곳을 맴돈다(136회차).
+ */
+export const WINRM_CBT_REASON = 'WinRM 서버 인증서의 서명 알고리즘(Ed25519 · RSASSA-PSS 등)으로는 채널 바인딩 값을 정할 수 없어 비밀번호를 보내지 않았습니다 — 장비 신뢰 승인으로는 풀리지 않습니다. WinRM 인증서를 RSA · ECDSA(SHA-256 계열) 서명 인증서로 바꾸세요.';
+
 /** NTLM 에 보낼 계정명 · 도메인(로그인 이름 하나에서 — keyStore.loginNameOf 의 두 꼴): DOMAIN\user → (user, DOMAIN) · user@dom → (user@dom, '') · 로컬 → (user, ''). */
 export function ntlmNameOf(loginName) {
   const s = t(loginName, 300);
@@ -103,7 +109,7 @@ export async function readServer(serverId, { feature, plan = {}, deadlineMs = RE
       return { ok: true, out: { code: out.exitCode, stdout: out.stdout, stderr: out.stderr } };
     } catch (e) {
       const k = e?.kind || '';
-      return { ok: false, error: String(e?.message || e), authFailed: k === 'auth-rejected', tls: k === 'tls-peer' || k === 'cbt', timeout: k === 'timeout' || sig.aborted, tooLarge: k === 'too-large' };
+      return { ok: false, error: String(e?.message || e), authFailed: k === 'auth-rejected', tls: k === 'tls-peer' || k === 'cbt', cbt: k === 'cbt', timeout: k === 'timeout' || sig.aborted, tooLarge: k === 'too-large' };
     }
   }, '서버 읽기 시한 초과').catch((e) => ({ ok: false, error: String(e?.message || e), timeout: true }));
   const viaAccount = srv.credAccountId && srv.credVersion != null;
@@ -122,7 +128,7 @@ export async function readServer(serverId, { feature, plan = {}, deadlineMs = RE
     const code = r.authFailed ? 'auth-rejected' : r.hostkey ? 'hostkey' : r.tls ? 'tls' : r.tooLarge ? 'exec-truncated' : r.timeout ? 'timeout' : 'connect';
     const reason = code === 'auth-rejected' ? '로그인이 거부됐습니다(다시 시도하지 않습니다 — 계정 잠금 방지).'
       : code === 'hostkey' ? '호스트키를 신뢰하지 않아 끊었습니다 — 설정 › 보안 › 장비 신뢰에서 지문을 확인 · 승인하세요.'
-        : code === 'tls' ? 'WinRM 인증서를 신뢰하지 않아 끊었습니다(비밀번호를 보내지 않았습니다) — 설정 › 보안 › 장비 신뢰에서 지문을 확인 · 승인하세요.'
+        : code === 'tls' ? (r.cbt ? WINRM_CBT_REASON : 'WinRM 인증서를 신뢰하지 않아 끊었습니다(비밀번호를 보내지 않았습니다) — 설정 › 보안 › 장비 신뢰에서 지문을 확인 · 승인하세요.')
           : code === 'exec-truncated' ? '출력이 상한을 넘었습니다(WinRM 은 받은 칸을 돌려주지 않습니다).'
         : code === 'timeout' ? `시한 안에 끝나지 않았습니다(${Math.round(deadlineMs / 1000)}초).`
           : `접속하지 못했습니다(${String(r.error || '').replace(/\s+/g, ' ').slice(0, 120)})`;

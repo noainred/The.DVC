@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { cellText, CODE_TEXT, codeTone, sourceText, summaryText, osText, shownOf, bytesText } from './serverInfoText.js';
 
 const base = (o = {}) => ({ model: { value: 'GX-650', missing: false }, cpuCores: { value: 64, missing: false }, memBytes: { value: 512 * 1024 ** 3, missing: false }, ...o });
@@ -27,6 +30,14 @@ describe('서버 정보 — 표시 도우미', () => {
   it('코드 글 · 색 — 서버 코드 전부에 글이 있다', () => {
     for (const c of ['ok', 'unparsed', 'maybe-windows', 'not-found', 'registry-unreadable', 'edge-delegated', 'disabled', 'not-configured', 'cred', 'auth-rejected', 'same-cred-rejected', 'hostkey', 'timeout', 'exec-timeout', 'exec-truncated', 'connect', 'no-plan']) expect(CODE_TEXT[c], c).toBeTruthy();
     expect(codeTone('ok')).toBe('ok'); expect(codeTone('exec-timeout')).toBe('warn'); expect(codeTone('auth-rejected')).toBe('bad');
+  });
+  it('136회차 — 서버 readServer.READ_CODES 전부에 글이 있다(손으로 적은 목록이 아니라 서버 소스와 대조 · WinRM 의 tls 가 빠져 코드 글자가 그대로 보였다)', () => {
+    const src = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../../server/src/sshaccess/readServer.js'), 'utf8');
+    const m = /export const READ_CODES = Object\.freeze\(\[([^\]]{1,2000})\]\)/.exec(src);
+    expect(m, 'READ_CODES 를 찾지 못함').toBeTruthy();
+    const codes = [...m[1].matchAll(/'([a-z-]{1,40})'/g)].map((x) => x[1]);
+    expect(codes).toContain('tls');
+    for (const c of codes) expect(CODE_TEXT[c], c).toBeTruthy();
   });
   it('계정이 오는 곳 · OS 글', () => {
     expect(sourceText({ agent: 'e1' }).label).toBe('엣지가 읽음');
