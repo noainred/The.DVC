@@ -13,6 +13,7 @@ import { config } from '../config.js';
 import { atomicWriteFileSync, safeLoadText } from '../util/atomicWrite.js';
 import { makeJsonFileReader } from '../util/jsonFileLoad.js';   // 결정(56~75 남긴 것) 71
 import { numOrNull } from '../util/numOrNull.js';
+import { activeHoldMap, onHoldsChange } from './holds.js';
 
 export const SETTINGS_FILE_NAME = 'vm-hygiene.json';
 const FILE = () => path.join(config.configDir, 'vm-hygiene.json');
@@ -62,6 +63,12 @@ export function applyPatch(cur, body = {}) {
 
 // 결정(56~75 남긴 것) 71: 읽기 오류 뒤 다시 읽기는 공용 리더의 재읽기 간격(30초) — 요청마다 동기로 다시 읽지 않는다(cost/settings.js 와 같은 판단).
 const _reader = makeJsonFileReader(FILE, { parse: (t) => { const p = JSON.parse(t); if (!isObj(p)) throw new Error('객체가 아닙니다'); return p; }, tag: 'vm-hygiene' });
+/**
+ * v3.28.0: 스냅샷 보류(holds.js)를 **열거되지 않는 속성** holds 로 붙인다 — 판정(hygieneFindings)은 보고, 저장 · 응답 · rev 에는 섞이지 않는다.
+ * 보류를 바꾸면 캐시를 버린다(onHoldsChange). 기한은 판정이 지금 시각으로 다시 본다.
+ */
+const withHolds = (o) => { try { Object.defineProperty(o, 'holds', { value: activeHoldMap(), enumerable: false, configurable: true }); } catch { /* 얼린 객체 — 보류 없이 */ } return o; };
+onHoldsChange(() => { cache = null; });
 export function loadVmHygieneSettings() {
   if (cache) return cache;
   let base = { ...DEFAULTS, notify: { ...DEFAULTS.notify } };
@@ -70,7 +77,7 @@ export function loadVmHygieneSettings() {
   const r = _reader.read();
   if (r.kind === 'read-error') {
     const { updatedAt: _a, updatedBy: _b, ...core0 } = base;
-    return { ...core0, updatedAt: null, updatedBy: null, unreadable: true, rev: 'unreadable' };
+    return withHolds({ ...core0, updatedAt: null, updatedBy: null, unreadable: true, rev: 'unreadable' });
   }
   if (r.kind === 'ok') {
     const p = r.value;
@@ -81,7 +88,7 @@ export function loadVmHygieneSettings() {
     console.warn(`[vm-hygiene] 설정 파일을 읽지 못했습니다 — 원본을 .corrupt 로 보존하고 기본값으로 시작합니다: ${safeLoadText(r.error) || '사유 미상'}`);
   }
   const { updatedAt = null, updatedBy = null, ...core } = base;
-  cache = { ...core, updatedAt, updatedBy, rev: revOf(core) };
+  cache = withHolds({ ...core, updatedAt, updatedBy, rev: revOf(core) });
   return cache;
 }
 

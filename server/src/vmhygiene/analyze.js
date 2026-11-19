@@ -33,14 +33,26 @@ function exceptedBy(vm, exceptions) {
   return exceptions.find((e) => hay.includes(String(e).toLowerCase())) || null;
 }
 
+/**
+ * v3.28.0 스냅샷 보류(vmhygiene/holds.js) — 설정 s 에 열거되지 않는 속성 holds(Map, 키 'vCenter id\nVM id')로 붙어 온다.
+ * 기한이 지나지 않은 보류만 판정에서 뺀다(기한은 여기서 지금 시각으로 다시 본다 — 캐시된 Map 이 기한을 넘겨도 빼지 않는다).
+ */
+export function holdOf(vm, s, now = Date.now()) {
+  const m = s && s.holds instanceof Map ? s.holds : null;
+  if (!m || !vm) return null;
+  const h = m.get(`${vm.vcenterId}\n${vm.id}`);
+  return h && Number(h.until) > now ? h : null;
+}
+
 /** VM 하나의 이 모듈 판정(B10 판정은 vmCfgFindings 가 따로). */
 export function hygieneFindings(vm, s, now = Date.now()) {
   const out = [];
   const add = (code, facts = {}) => out.push({ code, sev: HYGIENE_CODES[code], facts });
-  if (!vm || vm.template === true) return { findings: out, excepted: null };
+  if (!vm || vm.template === true) return { findings: out, excepted: null, held: null };
   const exc = exceptedBy(vm, s.exceptions);
+  const held = exc ? null : holdOf(vm, s, now);
   const cnt = Number.isFinite(vm.snapshotCount) ? vm.snapshotCount : 0;
-  if (!exc && cnt > 0) {
+  if (!exc && !held && cnt > 0) {
     const ageDays = Number.isFinite(vm.snapshotOldestTs) && vm.snapshotOldestTs > 0 ? Math.floor((now - vm.snapshotOldestTs) / DAY) : null;
     if (ageDays != null && ageDays >= s.snapAgeDays) add('snap-age', { days: ageDays, limit: s.snapAgeDays });
     if (cnt > s.snapCount) add('snap-count', { count: cnt, limit: s.snapCount });
@@ -66,7 +78,7 @@ export function hygieneFindings(vm, s, now = Date.now()) {
     const days = Math.floor((now - boot) / DAY);
     if (days >= s.uptimeDays) add('uptime-long', { days, limit: s.uptimeDays });
   }
-  return { findings: out, excepted: exc };
+  return { findings: out, excepted: exc, held };
 }
 
 /**
