@@ -58,6 +58,8 @@ import BmCapacityFleet from './BmCapacityFleet.jsx'; // 8a단계 용량 소진 �
 import BmIdleFleet from './BmIdleFleet.jsx'; // 8b단계 ㉑ 저활용 서버 함대 보기
 import BmPowerFleet from './BmPowerFleet.jsx'; // 8b단계 ㉒ 전력 · 온도 함대 보기
 import BmMaintPanel from './BmMaintPanel.jsx'; // 8a단계 정비 창 · 알림 억제(설정 절)
+import { getCurrentUser } from '../../api.js'; // 결정 반영(2026-11-19 ③) — 보존 줄이기 표지(settingsOwnerTier)
+import { retentionOwnerNote } from './bmWriteText.js';
 import { addKey } from './bmCompareText.js';
 import { refOf, parseRef, normRef } from './bmPerfUrl.js'; // 다음 점검 ①: 서버 = (법인, 키) 쌍 — 상세 · 비교 · 공유 링크에 법인을 싣는다
 import { parseShareHash } from './bmShare.js'; // 6단계 공유 링크(#/tools/bm-usage/share?… — 도구 키 그대로) // v2.929(5단계): 리눅스 성능 알림 규칙 · 집중 · 베이스라인 · 소모품 기준(별도 파일 · 별도 절)
@@ -330,6 +332,8 @@ export function BmUsage() {
     saveSettings({ [field]: n * scale }).then((saved) => {
       const v = Number(saved?.[field]);
       if (saved && Number.isFinite(v) && input && input.isConnected) input.value = String(Math.round(v / scale));
+      // 결정 반영(2026-11-19 ③): 저장하지 못했으면(403 보존 줄이기 · 409 등) 칸을 저장된 값으로 되돌린다 — 입력한 값이 남으면 저장된 것처럼 보인다.
+      else if (!saved && input && input.isConnected) input.value = String(Math.round((Number(form?.[field]) || 0) / scale));
     });
   }
 
@@ -939,6 +943,10 @@ export function BmUsage() {
               <input type="checkbox" checked={!!form.includeVirtualization} onChange={(e) => saveSettings({ includeVirtualization: e.target.checked })} disabled={dl} /> ESXi 호스트도 iDRAC 로 수집
             </label>
           </div>
+          {/* 결정 반영(2026-11-19 ③): 보존 줄이기는 설정 소유자만 — 서버 PUT 이 다시 막는다(표지는 /auth/me settingsOwnerTier · 중앙 배포 중이면 보존 칸이 잠겨 말하지 않는다). */}
+          {retentionOwnerNote(getCurrentUser(), canGlobal && !data?.central?.managed) && (
+            <p className="bmo-note" role="note" style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}>{retentionOwnerNote(getCurrentUser(), canGlobal && !data?.central?.managed)}</p>
+          )}
           <p style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}>
             <BoldText text={esxiCollectNote(form)} />
           </p>

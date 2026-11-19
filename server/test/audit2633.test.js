@@ -118,7 +118,8 @@ test('② 18개 전부 관리자 확정이 성공하고, 오류가 풀리며, �
     // 전체 점검 20회차 반증 F8: 쓰기 라우트가 super_admin 전용인 설정(아이실론)은 확정도 super_admin — admin 은 403
     if (f === 'isidu-settings.json') assert.equal((await call(api, FULL, 'POST', u, { file: f })).status, 403, 'isidu 확정은 super_admin');
     //   쓰기 라우트가 설정 소유자 등급인 설정(베어메탈 SLO · 알림 규칙 · 튜닝)은 확정도 소유자 — admin 은 403
-    const OWNER_ONLY = ['bm-perf-slo.json', 'bm-perf-rules.json', 'bmusage-tuning.json'];
+    //   결정 반영(2026-11-19 ③): 사용률 설정(bmusage-settings.json)도 — 확정은 보존을 기본값으로 다시 써 못 읽은 지금 값보다 줄 수 있다(거부 쪽)
+    const OWNER_ONLY = ['bm-perf-slo.json', 'bm-perf-rules.json', 'bmusage-tuning.json', 'bmusage-settings.json'];
     if (OWNER_ONLY.includes(f)) assert.equal((await call(api, FULL, 'POST', u, { file: f })).status, 403, `${f} 확정은 설정 소유자`);
     const who = f === 'isidu-settings.json' ? { ...FULL, superAdmin: true } : OWNER_ONLY.includes(f) ? { ...FULL, username: 'noainred' } : FULL;
     const r = await call(api, who, 'POST', u, { file: f });

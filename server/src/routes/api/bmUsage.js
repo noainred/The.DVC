@@ -23,6 +23,7 @@ import { loadBmUsageSettings, saveBmUsageSettings, bmUsageEnabled, DEFAULTS, ent
 import { edgeCorpsSource } from '../../bmusage/edgeCorps.js'; // v2.927 중앙에서 켜기 — 엣지별 법인 매핑
 import { listAgentTokens } from '../../central/agentTokens.js';
 import { fullReadWriteScopeOnlyWith, requireSettingsOwner } from '../admin/shared.js';
+import { settingsOwnerGradeDenial } from '../admin/shared.js'; // 결정 반영(2026-11-19 ③) — 보존 줄이기는 설정 소유자 등급(isOwnerTier 와 같은 하나)
 import { knownAgentNames } from '../../central/knownAgents.js';
 import { unassignedCauses, CAUSE as UNASSIGNED_CAUSE } from '../../bmusage/attribution.js';
 import { TIER_LABEL } from '../../bmusage/license.js';
@@ -48,6 +49,7 @@ import { buildPerfEntry, PERF_COL_META, compactPerfEntry } from '../../bmusage/p
 import { hwFactsReader } from '../../bmusage/hwFacts.js';
 import { freshMsFor } from '../../bmusage/useJudge.js';
 import { PERF_DEFAULTS } from '../../bmusage/settings.js';
+import { retentionShrink } from '../../bmusage/settings.js'; // 결정 반영(2026-11-19 ③) — 이 저장이 보존 칸을 저장된 값보다 줄이는가
 import { scopeSig } from '../../util/scopeSig.js';
 
 const toolsPerm = requirePerm('tools');
@@ -1586,6 +1588,23 @@ api.put('/tools/bm-usage/settings', adminOnly, (req, res) => {
   //   전역 필드를 기본값으로 다시 쓰고 손상 표지를 지우던 경로를 막는다(그 밖은 409 — saveBmUsageSettings 가 판정).
   const confirmLoadError = fullRw && req.body?.confirmDefaults === true;
   delete body.confirmDefaults;
+  /*
+   * 결정 반영(2026-11-19 ③ 사용자): 보존 기간을 **저장된 값보다 줄이는** 저장은 설정 소유자 등급만(settingsOwnerGradeDenial — bmOnboard.isOwnerTier 와 같은 하나) —
+   *   줄이면 다음 보존 정리가 그만큼 이력을 지운다(되돌릴 수 없다). 늘리기 · 같은 값은 그대로(전체 범위 관리자). 판정 입력은 settings.retentionShrink
+   *   (저장과 같은 정규화 · 원시 · 롤업 + store 의 보존 칸). 설정을 못 읽은 동안의 확정 저장은 지금 값을 몰라 줄어듦으로 본다(거부 쪽).
+   *   범위 계정은 위 keepScopedFields 가 전역 값을 이미 버려 여기 걸리지 않는다. 403 이면 **아무것도 저장하지 않는다**(같은 요청의 법인 칸 · 다른 전역 값 포함).
+   *   화면 표지는 /auth/me settingsOwnerTier(requireSettingsOwner 를 그대로 부른 값 — 전역 값을 저장할 수 있는 계정에서는 이 판정과 같은 답).
+   */
+  const shrunk = retentionShrink(body, { confirmLoadError });
+  if (shrunk.shrink.length) {
+    const g = settingsOwnerGradeDenial(req);
+    if (g) {
+      return res.status(403).json({ ok: false, error: 'forbidden', code: 'retention-owner', fields: shrunk.shrink, ...(g.requiredOwner ? { requiredOwner: true } : {}),
+        reason: shrunk.unknown
+          ? '설정 파일을 읽지 못한 동안의 확정 저장은 보존 기간을 줄일 수 있어(지금 값을 모릅니다) 설정 소유 계정만 할 수 있습니다 — 아무것도 저장하지 않았습니다.'
+          : '보존 기간을 줄이는 저장은 설정 소유 계정만 할 수 있습니다 — 줄이면 다음 보존 정리가 그만큼 이력을 지웁니다(되돌릴 수 없음). 아무것도 저장하지 않았습니다(늘리기 · 다른 칸은 따로 저장하세요).' });
+    }
+  }
   let next;
   try { next = saveBmUsageSettings(body, { confirmLoadError }); } catch (e) {   // 34회차 F4: 읽지 못한 설정 파일은 덮지 않는다
     if (e?.code === 'settings-unreadable') return res.status(409).json({ ok: false, code: e.code, reason: e.message, ...(e.corrupt ? { corrupt: true } : {}) });

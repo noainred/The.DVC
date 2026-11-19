@@ -72,3 +72,15 @@ export function corpsSavePatch({ corps = {}, vcenters = [], id, on, fullRw = fal
 }
 /** 쓰기 범위 밖 법인 칸의 마우스 설명(재확인 R1 — 서버 vcenters[].writable). */
 export const CORP_READ_ONLY_TITLE = '조회 전용 법인(쓰기 범위 밖) — 수집을 켜고 끌 수 없습니다';
+
+/**
+ * 결정 반영(2026-11-19 ③): 보존 기간(원시 · 롤업)을 **줄이는** 저장은 설정 소유자 등급만이다(서버 설정 PUT 403 code ‘retention-owner’ — 아무것도 저장하지 않는다).
+ *   등급은 /auth/me settingsOwnerTier(서버가 requireSettingsOwner 를 그대로 불러 만든 값 — 판정 사본이 아니다) · 인증 꺼짐(Anonymous)은 소유자.
+ *   전역 값을 저장할 수 있는 카드(canGlobal — 서버 actions.settingsGlobal)에서만 말한다(그 밖은 카드 전체가 읽기 전용 안내다) · 소유자에게는 ''.
+ *   ‘줄이려 하는가’ 는 여기서 비교하지 않는다 — 서버가 저장된 값 · 정규화로 판정한다. 칸 옆 표지로 저장 전에 알린다.
+ */
+export const RETENTION_OWNER_NOTE = '보존 기간 줄이기는 설정 소유자만 할 수 있습니다 — 줄이면 그만큼 이력이 지워집니다(되돌릴 수 없음). 늘리기는 저장됩니다.';
+export function retentionOwnerNote(user, canGlobal) {
+  if (!canGlobal) return '';
+  return user?.settingsOwnerTier === true || user?.name === 'Anonymous' ? '' : RETENTION_OWNER_NOTE;
+}

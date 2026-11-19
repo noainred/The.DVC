@@ -19,11 +19,14 @@
  * ⚠ 중앙이 펼쳐 보낸 태그 창(origin 'central')은 **펼친 keys 만**으로 맞춘다(반증 F10 — 엣지 로컬 용도 태그로 넓히면 엣지 판정 ≠ 중앙 판정).
  * ⚠ 지운 창은 **묘비**(deleted.at)다: 지금 판정(maintStateFor)에서는 빠지고, 지난 구간(coverIntervals — ⑤ 분모 제외 · 추이 음영 · 변경 묶음)에는
  *   **지운 시각까지** 남는다(소급 소거 금지 — 그때 정비였던 사실은 지운 뒤에도 그때의 일이다). 묘비는 보관 90일(store.KEEP_ENDED_DAYS)까지.
+ * ⚠ 결정 반영(2026-11-19 ② 사용자): 지난 구간은 **만든 시각(w.at) 이후만**이다 — 오늘 만든 매일 창이 지난 31일을 덮지 않는다(3회차 D2 재현).
+ *   만든 시각 전 발생은 빼고, 걸친 발생은 그 시각부터로 자른다(묘비의 ‘지운 시각까지’ 와 대칭 — 그 시각 전에는 창이 없었다). 지금 판정은 그대로다.
  * ⚠ 엣지의 배포 history 창(history: true — 중앙이 끝남 · 지움 · 만료 창을 지난 구간용으로 함께 보낸다: 점검 반복 3회차 D2)도 같은 뜻이다 —
  *   지금 판정(activeOccurrence)에서 빠지고 지난 구간에만 남는다. 그래서 엣지의 ⑤ 제외 · 음영이 중앙과 같은 과거를 본다.
  * ⚠ 요청 경로 비용(반증 F6): windowStatus 는 다음 · 지난 발생을 **지금에서 바깥으로 조각 탐색**한다(400일 전부를 세지 않는다).
  */
 import { occurrencesBetween, occurrenceAt, maxMinOf, MIN, DAY } from './schedule.js';
+import { numOrNull } from '../../util/numOrNull.js';
 
 export const SCOPES = Object.freeze(['alerts', 'hold', 'focus', 'collect', 'exclude']);
 export const TARGET_KINDS = Object.freeze(['server', 'tag', 'corp']);
@@ -69,14 +72,21 @@ export function expiresAt(w) {
 /**
  * [from, to) 와 겹치는 **유효 발생**(순수) — ‘지금 끝내기’ 로 자른 끝 · 만료 뒤 발생 없음 · 길이 상한(일정 계산이 이미 자름).
  *   지운 창: 기본은 없음(지금 판정 · 상태). history=true(지난 구간 — coverIntervals)면 **지운 시각까지**의 발생(묘비 — 소급 소거 금지).
- * @returns {Array<{start:number, end:number, cut?:boolean, deleted?:boolean}>}
+ *   결정 반영(2026-11-19 ②): history=true 는 **만든 시각(w.at)부터**다 — 그 전 발생은 빼고 걸친 발생은 시작을 만든 시각으로 자른다(born 표지).
+ *     만든 시각은 고치기에도 유지된다(store.editWindow at: cur.at) · 엣지 배포본도 싣는다(deploy SEND_FIELDS · normalizeWindow · bareWin) — 중앙 · 엣지가 같은 답.
+ *     일회 창도 같은 규칙이다(시작이 지난 일회 창 — 만들 때 끝이 지금 뒤면 받는다 — 은 만든 시각부터만 지난 구간에 든다).
+ *     만든 시각을 모르면(형식 밖 · 옛 꼴 — numOrNull null) 자르지 않는다(예전 그대로 — 0 으로 읽지 않는다).
+ *   ‘지금 끝내기’ 판정(endedOccStart)과 만료(exp)는 일정의 원래 시작으로 본다(자른 시작이 아니다).
+ * @returns {Array<{start:number, end:number, cut?:boolean, deleted?:boolean, born?:boolean}>}
  */
 export function effectiveOccurrences(w, from, to, { history = false } = {}) {
   if (!w || !w.schedule) return [];
   const del = w.deleted ? Number(w.deleted.at) : null;
   if (w.deleted && !(history && Number.isFinite(del))) return [];
+  const born = history ? numOrNull(w.at) : null;
   const exp = expiresAt(w);
-  const list = occurrencesBetween(w.schedule, w.tz, from, Math.min(to, del ?? to));
+  const lo = born != null ? Math.max(from, born) : from;
+  const list = occurrencesBetween(w.schedule, w.tz, lo, Math.min(to, del ?? to));
   const out = [];
   for (const o of list) {
     if (exp != null && o.start >= exp) continue;
@@ -85,7 +95,8 @@ export function effectiveOccurrences(w, from, to, { history = false } = {}) {
     const ea = Number(w.endedAt);
     if (Number.isFinite(ea) && ea < end && (w.schedule.kind === 'once' || Number(w.endedOccStart) === o.start)) { end = Math.max(o.start, ea); cut = true; }
     if (del != null && del < end) { end = Math.max(o.start, del); gone = true; }
-    if (end > o.start && end > from && o.start < to) out.push({ start: o.start, end, ...(cut ? { cut: true } : {}), ...(gone ? { deleted: true } : {}) });
+    const start = born != null && born > o.start ? born : o.start;
+    if (end > start && end > from && start < to) out.push({ start, end, ...(cut ? { cut: true } : {}), ...(gone ? { deleted: true } : {}), ...(start !== o.start ? { born: true } : {}) });
   }
   return out;
 }
