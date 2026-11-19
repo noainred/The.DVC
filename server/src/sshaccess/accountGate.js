@@ -16,8 +16,9 @@
  *     (run 이 받는 authed() — 호출부가 로그인 직후 부르면 그때 풀어 준다: 대기 = 계정당 로그인 1회 · 명령 시간까지 기다리지 않는다).
  *     유효 시간은 **탐침의 성공으로만** 새로 연다(성공했던 판의 접속 성공으로 늘리면 쉬지 않고 수집하는 동안 다시 탐침할 때가 오지 않는다) ·
  *     시계가 뒤로 가면(나이 < 0) 지난 것으로 본다(탐침 하나 — 닫히는 쪽). 서버 수만큼 차례로 보내는 상한은 쓰지 않는다(공통 계정 200대 · 800ms RTT 면 주기를 넘는다).
- *   · 성공했던 판의 다시 탐침이 연달아 OTHER_MAX 번 판정을 못 내면(연결 실패 · 시한 — 서버가 꺼졌거나 망 장애) 그 판을 한 유효 시간 동안 예전처럼 믿는다(거부는 듣는다) —
+ *   · 성공했던 판의 다시 탐침이 연달아 OTHER_MAX 번 판정을 못 내고 **그 대기의 합이 OTHER_MIN_MS(1분) 이상**이면(시한 — 망 장애) 그 판을 한 유효 시간 동안 예전처럼 믿는다(거부는 듣는다) —
  *     망 장애 때 한 계정의 서버 수만큼 차례로 기다리며 동시 수집 칸을 묶지 않게. 처음 판(성공한 적 없음)은 예전처럼 하나씩 끝까지.
+ *     151회차: 빨리 끝나는 실패(접속 거부 · 호스트키 — 폐기 · 재설치 서버)는 합이 하한에 닿지 않아 완화하지 않는다(셋만으로 D1 이 늘 꺼지던 것 — 재현).
  * 키 로그인(credVersion 없음)은 이 문을 지나지 않는다(키 거부는 계정 잠금 횟수에 들지 않는 것이 보통이고, 정지도 비밀번호 판에만 건다).
  * 판정(rejected)은 호출부가 **접속 단계 판정**으로 넘긴다(bm-storage `authFailed` · bm-usage `isSshAuthError` — 명령 출력의 'Permission denied' 로 멈추지 않게 · 반증 F3).
  * 상태는 메모리뿐이다(재시작하면 첫 주기에 다시 탐침 — 그것으로 충분하다). 대기는 장비 시한 **밖**에서 한다(호출부가 run 안에서 시한을 연다).
@@ -26,10 +27,16 @@ import { accountStopFor, setAccountStop } from './state.js';
 
 const okVersion = new Map();   // accountId → { v: 성공한 비밀번호 판(문자열), at: 그 판의 탐침이 로그인에 성공한 시각 }
 const inflight = new Map();    // `${id}|${ver}` → Promise<'ok' | 'rejected' | 'other'>
-const otherRounds = new Map(); // `${id}|${ver}` → 성공했던 판의 다시 탐침이 연달아 판정을 못 낸 수(146회차)
+const otherRounds = new Map(); // `${id}|${ver}` → { n: 성공했던 판의 다시 탐침이 연달아 판정을 못 낸 수(146회차), ms: 그 탐침들이 걸린 시간의 합(151회차) }
 /** 146회차: 성공했던 판을 기다리지 않는 유효 시간 · 다시 탐침이 판정을 못 내도 되는 연속 횟수. */
 export const OK_TTL_MS = 120_000;
 export const OTHER_MAX = 3;
+/**
+ * 151회차(146 반증 — 재현): 완화는 판정을 못 낸 다시 탐침들이 **실제로 기다리게 한 시간의 합**이 이 값을 넘을 때만(망 장애 · 시한 — 146 이 막으려던 순차 대기).
+ *   횟수만 보면 빨리 끝나는 실패(접속 거부 · 호스트키 · 꺼진 sshd — 폐기 · 재설치 서버)가 등록부 앞에 셋만 있어도 **매 다시 탐침마다** 완화에 들어가
+ *   AD 비밀번호가 바뀐 뒤 동시 수만큼 틀린 비밀번호가 갔다(D1 이 그 계정에서 늘 꺼짐 — 실제 bm-storage 주기 4회 · 동시 8 시험 5회). 빠른 실패는 순차여도 거의 기다리지 않는다.
+ */
+export const OTHER_MIN_MS = 60_000;
 const NOOP = () => {};
 /** 성공했던 판이 아직 유효한가 — 나이가 음수(시계가 뒤로 감)면 지난 것으로 본다. */
 const okFresh = (o, v, now) => !!o && o.v === v && now - o.at >= 0 && now - o.at < OK_TTL_MS;
@@ -81,6 +88,7 @@ export async function gateAccountLogin(srv, run, { feature = '', rejected, stopp
     const mine = new Promise((r) => { done = r; });
     inflight.set(key, mine);
     const hadOk = !!prevOk && prevOk.v === v;   // 성공했던 판의 다시 탐침(146회차)
+    const t0 = Date.now();                       // 151회차: 이 탐침이 기다리게 한 시간(완화 하한)
     let settled = false;
     // 판정은 한 번만 — 로그인 직후(authed) 또는 run 이 끝날 때. 자리도 그때 한 번 비운다(먼저 풀린 뒤 새 탐침이 잡은 자리를 run 끝에 지우지 않게).
     const settle = (verdict) => {
@@ -89,8 +97,9 @@ export async function gateAccountLogin(srv, run, { feature = '', rejected, stopp
       if (verdict === 'ok') { okVersion.set(id, { v, at: Date.now() }); otherRounds.delete(key); }
       else if (verdict === 'rejected') { otherRounds.delete(key); noteRejected(); }
       else if (hadOk) {
-        const n = (otherRounds.get(key) || 0) + 1;
-        if (n >= OTHER_MAX) { otherRounds.delete(key); okVersion.set(id, { v, at: Date.now() }); } else otherRounds.set(key, n);
+        const prev = otherRounds.get(key) || { n: 0, ms: 0 };
+        const cur = { n: prev.n + 1, ms: prev.ms + Math.max(0, Date.now() - t0) };   // 시계가 뒤로 가면 0(완화 쪽으로 세지 않는다)
+        if (cur.n >= OTHER_MAX && cur.ms >= OTHER_MIN_MS) { otherRounds.delete(key); okVersion.set(id, { v, at: Date.now() }); } else otherRounds.set(key, cur);
       }
       inflight.delete(key);
       done(verdict);

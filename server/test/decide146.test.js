@@ -160,7 +160,8 @@ test('③ D1 — 탐침 실패(던짐 · 시한 · 연결)면 다음 하나가 �
   const fails = [async () => { throw new Error('boom'); }, async () => ({ ok: false, timeout: true, error: '시한 초과' }), async () => ({ ok: false, error: 'connect ECONNREFUSED' })];
   const order = [];
   // 모두 판정을 못 낸다(첫 셋은 던짐 · 시한 · 연결 실패, 나머지도 연결 실패) — 처음 셋은 하나씩, 그 뒤 나머지 일곱은 함께
-  const run = async () => { const i = k++; order.push(['s', i]); active += 1; maxActive = Math.max(maxActive, active); await wait(15); active -= 1; order.push(['e', i]); if (i < fails.length) return fails[i](); return { ok: false, error: 'connect ECONNREFUSED' }; };
+  //   151회차: 망 장애처럼 첫 셋은 각각 25초 기다리게 한다(시계를 옮겨 흉내 — 완화는 그 대기의 합이 OTHER_MIN_MS 이상일 때만 · 빠른 실패는 rebut151 ① ②)
+  const run = async () => { const i = k++; order.push(['s', i]); active += 1; maxActive = Math.max(maxActive, active); await wait(15); if (i < fails.length) clock.offset += 25_000; active -= 1; order.push(['e', i]); if (i < fails.length) return fails[i](); return { ok: false, error: 'connect ECONNREFUSED' }; };
   const rs = await Promise.allSettled(Array.from({ length: 10 }, (_, i) => G.gateAccountLogin({ ...s0, name: `o-${i}` }, run, opts)));
   assert.equal(k, 10, '모두 접속했다(막히지 않음)');
   assert.equal(rs.filter((x) => x.status === 'rejected').length, 1, '던진 탐침은 그 호출에만 던진다');

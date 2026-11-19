@@ -133,6 +133,7 @@ export async function runSnapshotLocal({ target, reason, by = '', settings = {},
         host: String(target.osHost.host).trim(), port: Number(target.osHost.port) || 22,
         username: String(target.osHost.username || 'root'), password: target.osHost.password || '', privateKey: target.osHost.privateKey || undefined, passphrase: target.osHost.passphrase || undefined,
         readyTimeout: SNAPSHOT_READY_MS, signal,
+        singlePasswordAttempt: true,   // 151회차(재현): 비밀번호는 한 번만 — 예전엔 거부되면 keyboard-interactive 로 같은 비밀번호를 한 번 더(틀린 비밀번호 2회 · 계정 잠금 횟수 · v3.25 반증 F1)
       }, async ({ exec }) => exec(SNAPSHOT_COMMAND, SNAPSHOT_CMD_MS)), '진단 스냅샷 시한 초과');
       const parsed = parseSnapshot(out?.stdout || '', { topN: snapCfg.topN, dmesgLines: snapCfg.dmesgLines });
       // 구획 표지가 하나도 없으면(Windows · 제한 셸) 리눅스 스냅샷이 아니다.
