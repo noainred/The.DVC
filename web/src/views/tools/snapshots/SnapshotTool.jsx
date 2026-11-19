@@ -24,7 +24,7 @@ import { vcHash } from '../../vcd/vcdRoute.js';
 import {
   BANDS, BAND_COLOR, BAND_FG, bandLabels, VIEWS, signalDefs, matchKey, sortItems, gbSum, groupItems, GROUPS, bandGradient, summaryOf, corpCards,
   logPos, gbText, daysText, dateText, requestText, CSV_HEAD, csvRow, parseSnapHash, buildSnapHash,
-  changeMap, changeKey, clearedSince, seriesValues, lineGeom, goneRows, goneSummary, GROW_GB, corpFootText, unreadSumText, trendOf, excludedMarks,
+  changeMap, changeKey, clearedSince, seriesValues, lineGeom, goneRows, goneSummary, GROW_GB, corpFootText, unreadSumText, trendOf, excludedMarks, trendCaption,
 } from './snapText.js';
 import './snapshots.css';
 
@@ -184,9 +184,8 @@ export default function SnapshotTool({ scope = '', initial = null, initialHist =
     .filter((r) => !corp || (data?.corps || []).find((c) => c.id === corp)?.vcenters?.some((v) => v.id === r.vcenterId));
   const gSum = goneSummary(gRows);
   const trend = trendOf(hist, corp, tm);   // 그림 · 설명이 같은 줄(143회차)
-  const tFirst = trend.first; const tLast = trend.last;
   const tText = (v) => (v == null ? '—' : tm === 'gb' ? gbText(v) : `${Math.round(v).toLocaleString('en-US')}대`);
-  const missingDays = trend.missingDays;
+  const tCap = trendCaption(trend, tp, tText);
   // 법인 카드 그림 — 값 · 뺀 날(아래 띠) 위치(147회차: REST 수집 vCenter 도 빼고 더한다 — 그날을 그림에 표시)
   const cardSpark = new Map(cards.filter((c) => hist?.byCorp?.[c.id]).map((c) => { const v = seriesValues(hist.byCorp[c.id], 'gb'); return [c.id, { values: v, marks: excludedMarks(hist.byCorp[c.id], v) }]; }));
   const cardMarked = [...cardSpark.values()].some((x) => x.marks.length);
@@ -308,9 +307,8 @@ export default function SnapshotTool({ scope = '', initial = null, initialHist =
               </div>
               <Spark cls="w" values={trend.values} marks={trend.excludedIdx} label={`${TREND_METRICS.find((m) => m[0] === tm)[1]} ${tp}일 추이`} />
               {/* 147회차(143 결정 D1): 뺀 사유는 그 날들에 실제로 있던 것만(점검중 · 비활성 · REST 수집 — snapText.excludedWhyText) · 뺀 날은 그림 아래 띠 */}
-              <div className="snp-tcap"><span>{tFirst == null ? (missingDays ? '기록한 날마다 값을 못 읽은 vCenter 가 있어 합을 그리지 않았습니다' : trend.excludedOnlyDays ? `${trend.excludedOnlyWhy} vCenter 뿐이라 합을 그리지 않았습니다` : '아직 기록이 없습니다') : `${tp}일 중 처음 ${tText(tFirst)} → 마지막 ${tText(tLast)}`}</span>
-                <span>{[missingDays ? `빠진 날 ${missingDays}일(선이 끊김)` : '', trend.excludedDays ? `${trend.excludedWhy} vCenter 를 빼고 더한 날 ${trend.excludedDays}일(아래 띠)` : '',
-                  tFirst != null && trend.excludedOnlyDays ? `${trend.excludedOnlyWhy} vCenter 뿐이라 합이 없는 날 ${trend.excludedOnlyDays}일(선이 끊김)` : ''].filter(Boolean).join(' · ')}</span></div>
+              {/* 149회차: 설명 두 줄은 snapText.trendCaption 하나(처음 · 마지막이 일부를 뺀 합이면 그 값에 · 합이 없는 날의 사유를 빠짐없이) */}
+              <div className="snp-tcap"><span>{tCap[0]}</span><span>{tCap[1]}</span></div>
             </>
           )}
           <div className="snp-ph"><h3>신호</h3><span className="hint">누르면 그 신호가 있는 VM 만 봅니다</span></div>

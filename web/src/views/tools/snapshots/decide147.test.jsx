@@ -66,7 +66,8 @@ describe('147 — 화면', () => {
     const html = renderToStaticMarkup(<SnapshotTool initial={data} initialHist={hist(['va', 'vr', 'vm2', 'vs'])} />);
     const p = trendPanel(html);
     expect(p).not.toMatch(/기록한 날마다 값을 못 읽은 vCenter 가 있어 합을 그리지 않았습니다/);   // 예전(D1): REST vCenter 하나가 매일 비웠다
-    expect(p).toMatch(/30일 중 처음 45 GB → 마지막 10 GB/);
+    // 149회차: 처음 · 마지막이 일부 vCenter 를 뺀 합이면 그 값에 붙여 말한다(뺀 수가 달라 생긴 45 → 10 이 정리된 양처럼 읽히지 않게 — rebut149.test.jsx)
+    expect(p).toMatch(/30일 중 처음 45 GB\(일부 vCenter 를 뺀 합\) → 마지막 10 GB\(일부 vCenter 를 뺀 합\)/);
     expect(p).toMatch(/점검중 · 비활성 · REST 수집 vCenter 를 빼고 더한 날 6일\(아래 띠\)/);
     expect(exCount(p)).toBe(6);
     // 법인 카드 그림 — REST 를 오가는 VC-S 줄은 합이 없는 날(빗금)이지 띠가 아니다 · 띠가 있는 카드가 없으면 머리말에 띠 설명을 싣지 않는다

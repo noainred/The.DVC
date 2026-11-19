@@ -320,9 +320,48 @@ export function trendOf(hist, corp, metric) {
   const idx = excludedMarks(series, values);
   const exDays = idx.map((i) => series[i]);
   const onlyDays = series.filter((p) => p && numOrNull(p.vms) == null && !(p.missing > 0) && p.excluded > 0);   // 뺀 vCenter 뿐이라 합이 없는 날
+  // 149회차: 그날 합은 있는데(VM 수) 이 지표만 없는 날 = 크기를 못 읽은 VM 이 있는 날(크기 합 null — 그림은 빗금) · 처음 · 마지막이 일부를 뺀 합인가
+  const unknownDays = series.filter((p, i) => p && values[i] == null && numOrNull(p.vms) != null).length;
+  const fi = values.findIndex((v) => v != null);
+  const li = values.length - 1 - [...values].reverse().findIndex((v) => v != null);
   return { values, first, last, missingDays: series.filter((p) => p && p.missing > 0).length,
-    excludedDays: exDays.length, excludedOnlyDays: onlyDays.length,
-    excludedWhy: excludedWhyText(exDays), excludedOnlyWhy: excludedWhyText(onlyDays), excludedIdx: idx };
+    excludedDays: exDays.length, excludedOnlyDays: onlyDays.length, unknownDays,
+    excludedWhy: excludedWhyText(exDays), excludedOnlyWhy: excludedWhyText(onlyDays), excludedIdx: idx,
+    firstEx: fi >= 0 && idx.includes(fi), lastEx: fi >= 0 && idx.includes(li) };
+}
+
+/**
+ * 추이 아래 설명 두 줄 [첫 줄, 둘째 줄] — 그림에서 선이 끊긴 날(빗금)과 띠를 사유 · 수로 빠짐없이 밝힌다(149회차 — 147 반증).
+ *   · 처음 · 마지막 값이 일부 vCenter 를 뺀 합(띠가 있는 날)이면 그 값에 붙여 말한다 — 147 판은 ‘처음 45 GB → 마지막 10 GB’ 처럼
+ *     부분 합끼리(또는 전체 합과) 견준 수를 표시 없이 보였다(뺀 수가 달라 생긴 차이가 정리된 양처럼 읽혔다).
+ *   · 합이 하나도 없을 때 사유가 둘 이상(빠진 날 · 뺀 vCenter 뿐인 날 · 크기를 못 읽은 날)이면 한 사유로 단정하지 않고 둘째 줄에 수를 나눠 적는다 —
+ *     147 판은 REST 수집 vCenter 뿐인 법인 줄에 빠진 날(오늘 기록 전 포함)이 하루라도 있으면 ‘기록한 날마다 값을 못 읽은 vCenter 가 있어’ · ‘빠진 날 1일’ 만 말하고
+ *     나머지 날(REST 로 뺀 날)을 설명하지 않았다.
+ *   · 크기를 못 읽은 VM 이 있는 날(크기 합 null)은 빠진 날도 뺀 날도 아니다 — 예전에는 설명이 없었고 모든 날이 그러면 ‘아직 기록이 없습니다’ 였다(v3.27.0 부터).
+ * @param {ReturnType<typeof trendOf>} t
+ * @param {number} days  기간(일)
+ * @param {(v:number|null)=>string} valueText
+ * @returns {[string, string]}
+ */
+export function trendCaption(t, days, valueText) {
+  const kinds = [t.missingDays ? 'm' : '', t.excludedOnlyDays ? 'x' : '', t.unknownDays ? 'u' : ''].filter(Boolean);
+  let head;
+  if (t.first == null) {
+    head = !kinds.length ? '아직 기록이 없습니다'
+      : kinds.length > 1 ? '합을 그린 날이 없습니다 — 사유는 아래와 같습니다'
+        : kinds[0] === 'm' ? '기록한 날마다 값을 못 읽은 vCenter 가 있어 합을 그리지 않았습니다'
+          : kinds[0] === 'x' ? `${t.excludedOnlyWhy} vCenter 뿐이라 합을 그리지 않았습니다`
+            : '크기를 못 읽은 VM 이 있어 크기 합을 그리지 않았습니다';
+  } else {
+    const mark = (ex) => (ex ? '(일부 vCenter 를 뺀 합)' : '');
+    head = `${days}일 중 처음 ${valueText(t.first)}${mark(t.firstEx)} → 마지막 ${valueText(t.last)}${mark(t.lastEx)}`;
+  }
+  const detail = t.first != null || kinds.length > 1;   // 사유가 하나뿐이고 그린 합이 없으면 첫 줄이 이미 말했다
+  const tail = [t.missingDays ? `빠진 날 ${t.missingDays}일(선이 끊김)` : '',
+    t.excludedDays ? `${t.excludedWhy} vCenter 를 빼고 더한 날 ${t.excludedDays}일(아래 띠)` : '',
+    detail && t.excludedOnlyDays ? `${t.excludedOnlyWhy} vCenter 뿐이라 합이 없는 날 ${t.excludedOnlyDays}일(선이 끊김)` : '',
+    detail && t.unknownDays ? `크기를 못 읽은 VM 이 있어 크기 합이 없는 날 ${t.unknownDays}일(선이 끊김)` : ''].filter(Boolean).join(' · ');
+  return [head, tail];
 }
 
 /**
