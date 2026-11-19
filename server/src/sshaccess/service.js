@@ -533,14 +533,16 @@ const storesIssue = (what) => {
  * 공통 계정 하나로 저장된 서버 주소에 **한 번** 로그인해 본다(한 대 먼저 확인 · 한 대로 다시 확인). 자동 재시도 없음(계정 잠금 방지).
  * 주소는 등록부 저장값 — 요청 주소를 받지 않는다(v2.480). 자격은 resolveOsAuth 하나로(법인 사용 중지 · 바꿔치기 · 폴더 · OS 계열을 같은 판정으로 본다).
  * @param {object} s  등록부 원본 서버
- * @param {{accountId:string, auth?:''|'password', ignoreAccountStop?:boolean, candidate?:{username:string, password:string}|null}} o
- *        candidate — 아직 저장하지 않은 비밀번호로 확인(공통 계정 저장 전). 그때는 키를 쓰지 않는다.
+ * @param {{accountId:string, auth?:''|'password', ignoreAccountStop?:boolean, candidate?:{username:string, password:string, corps?:string[]}|null}} o
+ *        candidate — 아직 저장하지 않은 비밀번호로 확인(공통 계정 저장 전). 그때는 키를 쓰지 않는다. corps = 그 계정의 법인(사용 중지 판정 — 141회차).
  */
 async function loginOnce(s, { accountId = '', auth = '', ignoreAccountStop = false, candidate = null, via = '', port = null } = {}) {
   let a;
   if (candidate) {
     // 법인 사용 중지는 저장 전 확인에도 본다(멈춰 둔 법인에 새 비밀번호를 보내지 않게).
-    const si = ST.stopMatch({ corps: [t(s.vcenterId)].filter(Boolean), serverId: t(s.id), addr: '', serverCorp: t(s.vcenterId) });
+    //   141회차(재현 — 137 남긴 것 P2): **계정 법인**도 — 접속 때 판정(refs.resolveOsAuth stopIssue)은 서버 · 계정 법인을 함께 보는데 여기는 서버 법인만 봐서,
+    //   법인 없는 서버가 자기 credRef 로 쓰는 다른 법인 계정의 새 비밀번호가 그 법인 사용 중지(긴급 조치) 중에도 나갔다.
+    const si = ST.stopMatch({ corps: [t(s.vcenterId), ...(Array.isArray(candidate.corps) ? candidate.corps.map((c) => t(c, 128)) : [])].filter(Boolean), serverId: t(s.id), addr: '', serverCorp: t(s.vcenterId) });
     if (si?.unreadable) return { ok: false, kind: 'state-unreadable', reason: REFS.AUTH_ERROR['account-state-unreadable'] };
     if (si) return { ok: false, kind: 'corp-stopped', reason: REFS.AUTH_ERROR['account-corp-stopped'] };
     a = { ok: true, username: candidate.username, password: candidate.password, authKind: 'password' };
@@ -780,7 +782,7 @@ export async function saveAccountChecked({ input = {}, verifyServerId = '', by =
       if (dryRun) return { ok: true, dry: true };
       const probe = { ...before, ...dry.next, username: t(input.username ?? before.username, 128), os: dry.next.os, logon: dry.next.logon, domain: dry.next.domain, kind: 'os' };
       const tef = REFS.effectiveAccountOf(target);   // v3.26: 그 서버가 WinRM 으로 붙으면 새 비밀번호 확인도 WinRM 으로
-      const r = await loginOnce(target, { candidate: { username: KS.loginNameOf(probe), password: pw }, via: tef.via || '', port: tef.port || null });
+      const r = await loginOnce(target, { candidate: { username: KS.loginNameOf(probe), password: pw, corps: [before.corp, dry.next.corp] }, via: tef.via || '', port: tef.port || null });
       if (!r.ok) return { ok: false, code: 'verify-failed', status: 409, reason: `${target.name || target.host} 에서 새 비밀번호로 로그인하지 못해 저장하지 않았습니다 — ${r.reason || r.kind}`, verified: { server: target.name || target.host, ok: false, kind: r.kind } };
       verified = { server: target.name || target.host, ok: true };
     }

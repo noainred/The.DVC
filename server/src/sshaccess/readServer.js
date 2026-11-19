@@ -90,7 +90,9 @@ export async function readServer(serverId, { feature, plan = {}, deadlineMs = RE
   const [srv] = withResolvedAuth([raw], { feature, winrm: viaWinrm });
   const auth = { kind: srv.privateKey ? 'key' : 'password', account: t(srv.credAccountName || '', 64), source: t(srv.credSource || (srv.keyRef || srv.credRef ? 'own' : ''), 16) };
   if (srv.authErrorCode && srv.authErrorCode !== 'no-cred') return { ok: false, code: 'cred', credCode: srv.authErrorCode, reason: String(srv.authError || '').slice(0, 300), os, auth };
-  if (!srv.privateKey && !srv.password) return { ok: false, code: 'not-configured', os, auth, reason: '이 서버에 정한 계정이 없습니다(따로 정함 · 물려받기 승인 모두 없음) — 설정 › 보안 › 서버 접속에서 정하세요.' };
+  // 141회차(137 남긴 것 P3): 해석이 ‘자격 없음’(no-cred — 승인은 있는데 물려받을 지정이 없음 · 비밀번호 고정인데 계정에 비밀번호가 없음)이면 그 사유를 말한다
+  //   (‘승인 모두 없음’ 은 승인된 서버에 틀린 말이었다). code 는 예전 그대로 not-configured(화면 code 표).
+  if (!srv.privateKey && !srv.password) return { ok: false, code: 'not-configured', os, auth, reason: srv.authErrorCode === 'no-cred' ? AUTH_ERROR['no-cred'] : '이 서버에 정한 계정이 없습니다(따로 정함 · 물려받기 승인 모두 없음) — 설정 › 보안 › 서버 접속에서 정하세요.' };
   // 시한은 탐침 대기 밖에서 연다(run 안) — 호출부 signal(일괄 취소)과 합친다. 시한이 오면 세션째 끊는다(withSsh signal).
   const run = () => withDeadline(deadlineMs, (sig) => withSsh({ host: String(srv.host), port: Number(srv.port) || 22, username: srv.username || 'root', password: srv.password || '',
     privateKey: srv.privateKey, passphrase: srv.passphrase, readyTimeout: READ_LOGIN_TIMEOUT_MS, singlePasswordAttempt: true, signal: signal ? AbortSignal.any([sig, signal]) : sig },

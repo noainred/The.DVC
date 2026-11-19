@@ -169,11 +169,16 @@ test('② 계층 해석 — 승인 전 물려받지 않음 · OS 단계가 이�
   assert.equal(BM.inheritActive(byName('l1')), false);
   assert.equal(REFS.effectiveAccountOf(byName('l1')).pending, true);
   BM.saveBmServer({ id: l1s.id, host: '127.0.0.1', port: SSHD.port, mounts: ['/'], name: 'l1' });
-  assert.equal(BM.inheritActive(byName('l1')), true, '같은 주소 · OS 로 돌아오면 그 승인 그대로(승인 칸은 주소 · 포트 · OS 의 값)');
+  // 141회차(결정 — 137 남긴 것 P4): 같은 주소 · OS 로 돌아와도 승인은 살아나지 않는다(효력을 잃는 쓰기에서 죽는다 — OTP 없는 저장이 되살렸다). 다시 승인(소유자 + OTP).
+  assert.equal(BM.inheritActive(byName('l1')), false, '되돌려도 OTP 없이 살아나지 않는다');
+  assert.equal(BM.setBmServerInherit(l1s.id, { on: true, expectAddr: addrOf(byName('l1')), by: 'own' }).ok, true);
+  assert.equal(BM.inheritActive(byName('l1')), true, '다시 승인하면 산다');
   // OS 를 바꾸면 풀린다(다른 OS 계정이 OTP 없이 가지 않게)
   BM.saveBmServer({ id: byName('w1').id, host: '127.0.0.1', port: SSHD.port, mounts: ['/'], name: 'w1', os: 'linux' });
   assert.equal(BM.inheritActive(byName('w1')), false);
   BM.saveBmServer({ id: byName('w1').id, host: '127.0.0.1', port: SSHD.port, mounts: ['/'], name: 'w1', os: 'windows' });
+  assert.equal(BM.inheritActive(byName('w1')), false, '141회차: OS 를 되돌려도 살아나지 않는다');
+  assert.equal(BM.setBmServerInherit(byName('w1').id, { on: true, expectAddr: addrOf(byName('w1')), by: 'own' }).ok, true);
   assert.equal(BM.inheritActive(byName('w1')), true);
   // 자기 자격(서버 비밀번호)이 있으면 계층을 보지 않는다
   const own1 = srv({ name: 'own1', vcenterId: 'vcA', os: 'linux', password: 'Own-1' });

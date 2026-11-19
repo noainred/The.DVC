@@ -231,6 +231,8 @@ export const AUTH_ERROR = Object.freeze({
   'account-other-corp': '다른 법인의 공통 계정입니다 — 계층 지정으로는 다른 법인 계정을 물려받지 않습니다.',
   // 137회차: 해석 결과 자격이 없음(승인만 하고 물려받을 지정이 없음 · 비밀번호 고정인데 계정에 비밀번호가 없음) — 빈 비밀번호로 시도하지 않는다.
   'no-cred': '이 서버가 쓸 접속 자격(키 · 비밀번호)이 없어 접속하지 않았습니다(빈 비밀번호로 시도하지 않습니다) — 물려받을 계층 지정이 없거나 그 계정에 이 방식의 비밀이 없습니다. 설정 › 보안 › 서버 접속에서 정하세요.',
+  // 141회차: 물려받기 승인이 효력을 잃은(승인 뒤 주소 · 포트 · OS · 법인이 바뀐) 서버 — 예전 무자격 항목처럼 root + 빈 비밀번호로 붙지 않는다.
+  'inherit-stale': '물려받기 승인 뒤 이 서버의 주소 · 포트 · OS · 법인이 바뀌어 계층 지정을 물려받지 않습니다 — 접속하지 않았습니다(빈 비밀번호로 시도하지 않습니다). 설정 › 보안 › 서버 접속에서 다시 승인하거나 이 서버의 계정을 정하세요.',
 });
 
 /**
@@ -419,7 +421,12 @@ export function withResolvedAuth(list = [], { feature = '', winrm = false } = {}
   return (Array.isArray(list) ? list : []).map((s) => {
     if (!s || typeof s !== 'object') return s;
     // 예전 항목(서버 비밀번호) — 그대로. v3.24: 자기 자격이 없는 승인된 서버(계층 지정을 물려받음)는 해석한다.
-    if (!t(s.keyRef) && !t(s.credRef) && (hasOwnCred(s) || !inheritActive(s))) return s;
+    if (!t(s.keyRef) && !t(s.credRef) && (hasOwnCred(s) || !inheritActive(s))) {
+      // 141회차(재현): 승인이 효력을 잃은 서버(승인 뒤 주소 · 포트 · OS · 법인이 바뀜 — 화면 ‘승인 대기(…바뀜) · 다시 승인하세요’)는 예전 무자격 항목이 아니다 —
+      //   137 A1(지정 없는 승인)과 같은 이유로 root + 빈 비밀번호로 붙지 않는다. 엣지 위임 서버는 그 엣지가 정한다(예전 그대로).
+      if (!hasOwnCred(s) && s.inherit && !t(s.agent)) return { ...s, password: '', authError: AUTH_ERROR['inherit-stale'], authErrorCode: 'inherit-stale' };
+      return s;
+    }
     const a = resolveOsAuth(s, { feature, winrm });
     // v3.24: 공통 계정 출처(계정 id · 이름 · 비밀번호 판)를 싣는다 — 수집 결과를 본 곳이 계정 사용 기록 · 계정 단위 정지에 쓴다(sshaccess/outcome.js). 비밀은 아니다.
     const accOut = { ...(a.accountId ? { credAccountId: a.accountId, credAccountName: a.accountName || '', credSource: a.source || '', ...(a.secretVersion != null ? { credVersion: a.secretVersion } : {}) } : (a.source ? { credSource: a.source } : {})),
