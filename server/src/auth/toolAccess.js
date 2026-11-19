@@ -36,6 +36,7 @@ import { roleToolsDenied, userToolAllowed, effectiveToolAccess } from './permiss
  */
 export const TOOL_PATH_KEYS = Object.freeze({
   'bm-storage': 'bm-storage',
+  'server-info': 'server-info',   // v3.25 서버 정보(서버 접속 2단계 — /tools/server-info · /tools/server-info/read)
   capacity: 'capacity',
   // ⚠ v2.506 수정: 예전에는 이 세그먼트를 `'capacity-forecast'` 키로 매핑했는데, `/tools/capacity-forecast`
   // 를 실제로 부르는 화면은 **`forecast`**(용량 추세/예측, CapacityTools.jsx:102)다. UI 키

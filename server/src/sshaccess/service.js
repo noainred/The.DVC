@@ -44,6 +44,8 @@ export const FEATURE_CATALOG = Object.freeze([
   Object.freeze({ id: 'disk-audit-install', label: '디스크 점검 프로그램 설치(root)', tool: 'focus-mon', ready: true, note: '서버 집중 모니터링 › 디스크 점검의 자동 설치 — 이 기능을 직접 켠 키만 · 비밀번호 없는 sudo 또는 root 계정이어야 합니다' }),
   // v3.18.0 — 서버 집중 모니터링 › 대상 · 키의 접속 자동 준비(수집 계정 · 공개키를 root 로 한 번). 직접 켠 키만(예전 키 제외) · '설치' 와 따로 켠다.
   Object.freeze({ id: 'focus-mon-prep', label: '집중 모니터링 접속 준비(root)', tool: 'focus-mon', ready: true, note: '서버 집중 모니터링 › 대상 · 키의 접속 자동 준비 — 수집 계정을 만들고 공개키를 넣습니다 · 이 기능을 직접 켠 키만 · 비밀번호 없는 sudo 또는 root 계정이어야 합니다' }),
+  // v3.25 — 특수 기능 ‘서버 정보’(서버 접속 2단계): 기본 구성 + 디스크를 누를 때만 읽기 전용으로(sudo 없음). 기능 목록이 있는 키 · 계정은 이 기능을 켜야 쓴다.
+  Object.freeze({ id: 'server-info', label: '서버 정보', tool: 'server-info', ready: true, note: 'OS · 하드웨어 · CPU · 메모리 · 디스크 · 파일시스템을 누를 때만 읽기 전용 명령으로(sudo 없음 — 권한이 필요한 칸은 ‘못 읽음 · 권한’)' }),
 ]);
 
 /** 이 노드가 아는 법인(vCenter) — id · 이름 · DataCenter 이름. */
@@ -274,7 +276,7 @@ export async function readInstalledKeys({ serverId, oncePassword = '', by = '' }
   };
   let rec;
   try {
-    const out = await withSsh({ host: String(s.host), port: Number(s.port) || 22, username: auth.username, password: auth.password || '', privateKey: auth.privateKey, passphrase: auth.passphrase, readyTimeout: 15_000 },
+    const out = await withSsh({ host: String(s.host), port: Number(s.port) || 22, username: auth.username, password: auth.password || '', privateKey: auth.privateKey, passphrase: auth.passphrase, readyTimeout: 15_000, singlePasswordAttempt: true },
       async ({ exec }) => exec(READ_COMMAND, 15_000));
     const p = parseReadOutput(out?.stdout || '');
     if (!p.ok) rec = { host: s.host, port: Number(s.port) || 22, username: auth.username, file: '~/.ssh/authorized_keys', keys: [], error: p.reason };
@@ -551,7 +553,7 @@ async function loginOnce(s, { accountId = '', auth = '', ignoreAccountStop = fal
   const t0 = Date.now();
   try {
     // ‘echo ok’ — Linux 셸 · Windows cmd · PowerShell 어디서나 같은 출력(uname 은 Windows 에 없다).
-    await withSsh({ host: String(s.host), port: Number(s.port) || 22, username: a.username, password: a.password || '', privateKey: a.privateKey, passphrase: a.passphrase, readyTimeout: 15_000 },
+    await withSsh({ host: String(s.host), port: Number(s.port) || 22, username: a.username, password: a.password || '', privateKey: a.privateKey, passphrase: a.passphrase, readyTimeout: 15_000, singlePasswordAttempt: true },   // v3.25 반증 F1: 비밀번호는 한 번만(k-i 재시도 없음 — 계정 잠금 횟수)
       async ({ exec }) => exec('echo ok', 10_000));
     return { ok: true, kind: 'ok', authKind: a.authKind, ms: Date.now() - t0, secretVersion: a.secretVersion ?? null, keyFingerprint: a.keyFingerprint || '' };
   } catch (e) {
