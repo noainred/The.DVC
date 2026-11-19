@@ -128,3 +128,18 @@ describe('148회차 D1 — ‘오래됨 N곳’ 이 사유(notCurrent)를 가른
     expect(t).toMatch(/지금 ‘가장 바쁜 호스트 CPU’ 기준으로 0칸입니다\(4칸 중\) — 경계를 넘은 오래된 값 3칸은 세지 않았습니다/);
   });
 });
+
+
+// 150회차 반증이 남긴 시험 공백(메인 추가): ‘그 밖 N개’ 묶음 칸(groupView)의 색을 ‘이상(≥)’ 으로 바꾸는 변이가 살아남았다
+//   (묶음은 지도가 잰 폭으로만 생겨 서버 렌더 시험으로는 만들 수 없다). 칸 · 묶음 칸 · ‘N칸’ 셈 · 범례가 같은 경계를 쓰는 근거는
+//   ‘fillStep 의 둘째 인자가 늘 같은 fill 객체’ 하나다 — 그 모양을 소스로 고정한다(경계 종류를 덮어쓴 객체 · 일부만 넘긴 객체 금지).
+const { stripComments } = await import('../../test/_stripComments.js');
+const fsMod = await import('node:fs');
+const SRC = stripComments(fsMod.readFileSync(new URL('./HostInsight.jsx', import.meta.url), 'utf8'));
+describe('150회차 반증 — 묶음 칸도 같은 경계(fillStep 둘째 인자 = fill)', () => {
+  it('HostInsight 의 fillStep 호출은 모두 둘째 인자가 정확히 fill 이다(칸 · 묶음 칸 · 셈)', () => {
+    const calls = [...SRC.matchAll(/fillStep\(([^()]*(?:\([^()]*\)[^()]*)*)\)/g)].map((m) => m[1]);
+    expect(calls.length).toBeGreaterThanOrEqual(3);   // tileView · groupView · overOf
+    for (const args of calls) expect(args.replace(/\s+/g, '').split(',').pop()).toBe('fill');
+  });
+});
