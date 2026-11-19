@@ -42,7 +42,7 @@
 .snp-cc .tx { font-size: 12px; color: #c3cfe2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .snp-gbar { display: block; height: 10px; border-radius: 5px; background: var(--panel-deep); }
 .snp-spark { display: block; height: 30px; background: var(--panel-deep); border-radius: 6px; position: relative; overflow: hidden; }
-.snp-spark i { position: absolute; inset: 0; background: #3b82f6; opacity: .6; }
+.snp-spark svg { position: absolute; inset: 0; display: block; }
 .snp-spark.s { height: 18px; border-radius: 4px; }
 .snp-spark.w { height: 44px; }
 .snp-spark .gap { position: absolute; top: 0; bottom: 0; background: repeating-linear-gradient(135deg, rgba(148,163,184,.25) 0 3px, transparent 3px 6px); }
@@ -142,6 +142,10 @@
 .snp-node .br { display: inline-block; width: 10px; height: 10px; border-left: 1px solid #4b5b78; border-bottom: 1px solid #4b5b78; margin: 0 8px 4px 0; flex: none; }
 .snp-foot { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; }
 .snp-empty { font-size: 12.5px; color: var(--text-dim); padding: 14px 8px; }
+.snp-hist { display: grid; grid-template-columns: 96px minmax(0, 280px) minmax(0, 1fr); gap: 4px 14px; align-items: center; font-size: 12px; color: #c3cfe2; }
+.snp-hist .hl { font-weight: 700; color: var(--text-dim); }
+.snp-hist .ev { grid-column: 1 / -1; color: var(--text-dim); line-height: 1.55; }
+@media (max-width: 720px) { .snp-hist { grid-template-columns: minmax(0, 1fr); } }
 .snp-sum { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-size: 12px; color: var(--text-dim); }
 
 @media (max-width: 1200px) {

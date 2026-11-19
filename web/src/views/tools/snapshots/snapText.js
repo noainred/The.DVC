@@ -235,3 +235,87 @@ export function buildSnapHash(view, vcIds = []) {
   const ids = (vcIds || []).filter(Boolean).map((id) => encodeURIComponent(String(id))).join(',');
   return `#/tools/snapshots/${VIEW_KEYS.includes(view) ? view : 'all'}${ids ? `/${ids}` : ''}`;
 }
+
+// ── 2단계(v3.27.0) — 스냅샷 이력 DB 로 그리는 것 ──────────────────────────────────────────
+
+/**
+ * 7일 변화 — ago7 = 서버 /tools/snapshots/history 의 ago7({day, okVcenters, rows}).
+ * 7일 전 그 vCenter 를 'ok' 로 기록하지 않았으면 그 VM 의 변화는 모른다(null — ‘그대로’ 로 적지 않는다).
+ * @returns {Map<string, {kind:'new'|'grew'|'shrank'|'same', gb:number|null}>}
+ */
+export function changeMap(items, ago7) {
+  const out = new Map();
+  if (!ago7 || !Array.isArray(ago7.rows)) return out;
+  const okVc = new Set(ago7.okVcenters || []);
+  const before = new Map(ago7.rows.map((r) => [`${r.vcenterId}\n${r.vmId}`, r]));
+  for (const x of items) {
+    if (!okVc.has(String(x.vcenterId))) continue;
+    const k = changeKey(x);
+    const b = before.get(k);
+    if (!b) { out.set(k, { kind: 'new', gb: numOrNull(x.snapGB) }); continue; }
+    const now = numOrNull(x.snapGB); const was = numOrNull(b.gb);
+    if (now == null || was == null) { out.set(k, { kind: 'same', gb: null }); continue; }
+    const d = Math.round((now - was) * 10) / 10;
+    out.set(k, { kind: d >= 0.1 ? 'grew' : d <= -0.1 ? 'shrank' : 'same', gb: d });
+  }
+  return out;
+}
+
+/** 7일 전에는 스냅샷이 있었는데 지금은 없는 VM(정리했거나 VM 이 없어짐) — 값이 낡은 vCenter 는 모른다(뺀다). */
+export function clearedSince(items, ago7, staleVcIds = new Set()) {
+  if (!ago7 || !Array.isArray(ago7.rows)) return null;
+  const now = new Set(items.map(changeKey));
+  const out = ago7.rows.filter((r) => !staleVcIds.has(String(r.vcenterId)) && !now.has(`${r.vcenterId}\n${r.vmId}`));
+  const g = out.reduce((a, r) => { const n = numOrNull(r.gb); if (n == null) a.unknown += 1; else a.gb += n; return a; }, { gb: 0, unknown: 0 });
+  return { n: out.length, gb: Math.round(g.gb * 10) / 10, gbUnknown: g.unknown };
+}
+
+/** 추이 한 줄의 값 — metric 'gb' | 'vms' | 'over'. 빠진 날은 null(선이 끊긴다). */
+export const seriesValues = (series, metric) => (series || []).map((p) => (p ? numOrNull(p[metric]) : null));
+
+/**
+ * SVG 꺾은선 조각 — null 은 선을 끊는다(빠진 날을 0 으로 잇지 않는다). 값은 0 ~ 최대값을 높이 h 에 맞춘다.
+ * @returns {{d:string, area:string, max:number|null, gaps:number[]}}  gaps = 빠진 날의 x 위치(%)
+ */
+export function lineGeom(values, w = 100, h = 30) {
+  const n = values.length;
+  const nums = values.filter((v) => v != null);
+  const max = nums.length ? Math.max(...nums) : null;
+  if (!n || max == null) return { d: '', area: '', max, gaps: values.map((_, i) => i) };
+  const x = (i) => (n === 1 ? w / 2 : Math.round((i / (n - 1)) * w * 100) / 100);
+  const y = (v) => Math.round((h - (max > 0 ? (v / max) * (h - 2) : 0) - 1) * 100) / 100;
+  let d = ''; let area = ''; let seg = [];
+  const flush = () => {
+    if (!seg.length) return;
+    d += seg.map(([i, v], j) => `${j ? 'L' : 'M'}${x(i)},${y(v)}`).join('');
+    area += `M${x(seg[0][0])},${h}${seg.map(([i, v]) => `L${x(i)},${y(v)}`).join('')}L${x(seg[seg.length - 1][0])},${h}Z`;
+    seg = [];
+  };
+  const gaps = [];
+  values.forEach((v, i) => { if (v == null) { flush(); gaps.push(i); } else seg.push([i, v]); });
+  flush();
+  return { d, area, max, gaps };
+}
+
+/** 정리된 스냅샷 줄 — 있었던 기간 = (생성 시각, 없으면 처음 본 시각) → 없어진 것을 처음 본 시각. 기준 안 정리 = 그 기간 < 기준 일수. */
+export function goneRows(gone, corpOfVc, ageDays) {
+  const DAY = 86_400_000;
+  return (gone || []).map((g) => {
+    const from = numOrNull(g.createTs) ?? numOrNull(g.firstSeen);
+    const lived = from != null && numOrNull(g.goneAt) != null ? Math.max(0, Math.floor((g.goneAt - from) / DAY)) : null;
+    return { ...g, corpName: corpOfVc(g.vcenterId), lived, fromCreate: numOrNull(g.createTs) != null,
+      inTime: ageDays != null && lived != null ? lived < ageDays : null };
+  });
+}
+
+/** 정리 실적 요약 — 사유 'vm'(VM 이 없어짐)은 정리 실적에 넣지 않는다. */
+export function goneSummary(rows) {
+  const snap = rows.filter((r) => r.reason !== 'vm');
+  const lived = snap.map((r) => r.lived).filter((d) => d != null);
+  const judged = snap.filter((r) => r.inTime != null);
+  return {
+    n: snap.length, vm: rows.length - snap.length,
+    avgLived: lived.length ? Math.round(lived.reduce((a, d) => a + d, 0) / lived.length) : null,
+    inTimePct: judged.length ? Math.round((judged.filter((r) => r.inTime).length / judged.length) * 100) : null,
+  };
+}
