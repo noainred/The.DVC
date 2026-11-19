@@ -21,6 +21,10 @@ export const DEMO_TARGETS = Object.freeze([
   { id: 'mock-isidu-sel', label: '서울 사용자 홈', deviceId: 'mock-st-ps-sel-01', path: '/ifs/data/workspace/users', sizeMode: 'h', users: 260, bigGiB: 900, errEvery: 0 },
   { id: 'mock-isidu-fra', label: 'Frankfurt 프로젝트', deviceId: 'mock-st-ps-fra-01', path: '/ifs/data/workspace/projects', sizeMode: 'h', users: 90, bigGiB: 2600, errEvery: 3 },
   { id: 'mock-isidu-ash', label: 'Ashburn 사용자 홈(정확)', deviceId: 'mock-st-ps-ash-01', path: '/ifs/data/workspace/users', sizeMode: 'k', users: 140, bigGiB: 420, errEvery: 0 },
+  // v3.26.0 시연 규모 — 새 아이실론(도쿄 · 대전 AI/HPC · 토론토 AI/HPC)
+  { id: 'mock-isidu-tyo', label: 'Tokyo 사용자 홈', deviceId: 'mock-st-ps-tyo-01', path: '/ifs/data/workspace/users', sizeMode: 'h', users: 180, bigGiB: 640, errEvery: 0 },
+  { id: 'mock-isidu-djn', label: '대전 AI 데이터셋', deviceId: 'mock-st-ps-djn-01', path: '/ifs/data/ai/datasets', sizeMode: 'h', users: 70, bigGiB: 9800, errEvery: 4 },
+  { id: 'mock-isidu-yyz', label: 'Toronto 연구 프로젝트', deviceId: 'mock-st-ps-yyz-01', path: '/ifs/data/research/projects', sizeMode: 'h', users: 60, bigGiB: 5200, errEvery: 0 },
 ]);
 const SPEC = new Map(DEMO_TARGETS.map((d) => [d.id, d]));
 
@@ -117,13 +121,16 @@ export async function ensureIsiduDemo({ now = Date.now(), days = 60 } = {}) {
       const S = await import('../../isidu/settings.js');
       const devices = reg.listDevices();
       const cur = S.loadSettings();
-      if (!cur.targets.length && !S.isiduSettingsLoadError()) {
-        const have = DEMO_TARGETS.filter((d) => devices.some((x) => x.id === d.deviceId && x.type === 'isilon'));
+      // v3.26.0: 대상이 비었거나 **데모 대상뿐**이면(v2.914 이전 규모 — 3개) 없는 데모 대상을 보충한다. 사람이 만든 대상이 있으면 건드리지 않는다.
+      const demoOnly = cur.targets.every((t) => String(t?.id || '').startsWith('mock-isidu-'));
+      if (demoOnly && !S.isiduSettingsLoadError()) {
+        const haveIds = new Set(cur.targets.map((t) => String(t.id)));
+        const have = DEMO_TARGETS.filter((d) => !haveIds.has(d.id) && devices.some((x) => x.id === d.deviceId && x.type === 'isilon'));
         if (have.length) {
           const { pickAgent, pickDatacenter } = await import('../../cvp/formChoices.js');
           const r = S.saveSettings({
-            targets: have.map((d) => ({ id: d.id, label: d.label, deviceId: d.deviceId, path: d.path, sizeMode: d.sizeMode, intervalHours: 24, topN: 10, timeoutMin: 120, auth: 'key', username: 'root' })),
-            retentionDays: 400,
+            targets: [...cur.targets, ...have.map((d) => ({ id: d.id, label: d.label, deviceId: d.deviceId, path: d.path, sizeMode: d.sizeMode, intervalHours: 24, topN: 10, timeoutMin: 120, auth: 'key', username: 'root' }))],
+            retentionDays: cur.retentionDays || 400,
           }, { devices, agents: [], dcs: [], pickAgent, pickDatacenter, ssrfBlockReason: () => null });
           if (r.ok) out.seeded = have.length; else out.seedError = r.error;
         }

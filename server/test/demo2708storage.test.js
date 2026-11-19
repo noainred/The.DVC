@@ -32,7 +32,7 @@ const NOW = Math.floor(Date.now() / 3_600_000) * 3_600_000 - 30 * 60_000; // 정
 
 test('① 합성 스냅샷 — 결정적이고 타입마다 다르며 정직 규칙을 지킨다', () => {
   const devs = demo.demoStorageDevices();
-  assert.ok(devs.length >= 10 && devs.length <= 20, `장비 수 ${devs.length}`);
+  assert.equal(devs.length, 44, `장비 수 ${devs.length}`);   // v3.26.0 시연 규모(예전 17대)
   assert.ok(devs.every((d) => d.id.startsWith('mock-')), 'id 는 mock- 접두');
   assert.ok(new Set(devs.map((d) => d.type)).size >= 7, '여러 타입');
   for (const d of devs) assert.equal(reg.deviceInputIssue(d), null, `${d.name} 등록 검증 통과`);
@@ -41,7 +41,7 @@ test('① 합성 스냅샷 — 결정적이고 타입마다 다르며 정직 규
   assert.deepEqual(a, b, '같은 입력 = 같은 출력');
   assert.ok(a.every((s) => s.extra.mock === true && s.extra.demo === true), 'MOCK 배지 근거를 싣는다');
   const failed = a.filter((s) => !s.ok);
-  assert.equal(failed.length, 1, '최근 수집 실패 1대');
+  assert.equal(failed.length, 2, '최근 수집 실패 2대(두바이 · 바르샤바 고RTT)');
   assert.equal(failed[0].capacity.totalBytes, null, '실패 스냅샷의 수치는 null(0 TB 거짓 금지)');
   assert.ok(a.filter((s) => s.ok && s.nodes.unhealthy > 0).length >= 2, '노드 비정상 장비 2대 이상');
   const virt = a.filter((s) => s.type === 'vplex' || s.type === 'metronode');
@@ -49,7 +49,7 @@ test('① 합성 스냅샷 — 결정적이고 타입마다 다르며 정직 규
   const real = a.filter((s) => s.ok && s.type !== 'vplex' && s.type !== 'metronode');
   assert.ok(real.every((s) => capacityPointEligible(s).ok), '용량 장비는 적재 가능');
   assert.ok(real.filter((s) => s.extra.power?.watts > 0).length >= 8, '전력을 읽은 장비가 여럿');
-  assert.equal(real.filter((s) => s.extra.powerProbe).length, 1, '전원 필드 없음 1대');
+  assert.equal(real.filter((s) => s.extra.powerProbe).length, 2, '전원 필드 없음 2대');
   // 과거로 갈수록 사용량이 줄어든다(증가 추세) · 실패는 최근 몇 시간만
   const isi = devs.find((d) => d.type === 'isilon');
   const past = demo.demoStorageSnapshot(isi, NOW - 90 * 86_400_000, NOW);
@@ -64,11 +64,11 @@ test('② mock 이 아니면 아무것도 하지 않는다 · live 폴러는 moc
   assert.equal(await demo.ensureStorageDemo({ now: NOW }), null);
   assert.equal(reg.listDevices().length, 0, 'live 에서는 시드하지 않는다');
   // 데모 시드 잔재가 남아 있어도 live 수집은 그 장비에 접속하지 않는다.
-  assert.equal(reg.seedDevicesIfEmpty(demo.demoStorageDevices()).seeded, 17);
+  assert.equal(reg.seedDevicesIfEmpty(demo.demoStorageDevices()).seeded, 44);
   const { pollStorageOnce } = await import('../src/storage/poller.js');
   const r = await pollStorageOnce();
   assert.deepEqual([r.ok, r.fail], [0, 0], 'mock- 장비를 수집하지 않았다');
-  assert.equal(bmReg.seedBmServersIfEmpty(demo.demoBmServers()).seeded, 11);
+  assert.equal(bmReg.seedBmServersIfEmpty(demo.demoBmServers()).seeded, 24);
   const { bmCollectNow } = await import('../src/bmstor/poller.js');
   const b = await bmCollectNow('interval');
   assert.equal(b.servers, 0, 'live bmstor 는 mock- 서버를 수집하지 않는다');
@@ -91,8 +91,8 @@ test('④ mock — 등록부 시드 + 일 롤업·베어메탈 12시간 이력 �
   demo._resetStorageDemoForTest();
   const out = await demo.ensureStorageDemo({ now: NOW });
   assert.equal(out.demo, true);
-  assert.equal(out.storageSeed.seeded, 17);
-  assert.equal(out.bmSeed.seeded, 11);
+  assert.equal(out.storageSeed.seeded, 44);
+  assert.equal(out.bmSeed.seeded, 24);
   const spans = await sdb.dailySpans();
   const isi = spans['mock-st-ps-sel-01'];
   assert.ok(isi && isi.observed >= 390, `일 롤업 ${isi?.observed}일`);
@@ -114,10 +114,10 @@ test('④ mock — 등록부 시드 + 일 롤업·베어메탈 12시간 이력 �
   // mock 폴러: 시드된 장비를 합성 수집(실패 1대)
   const { pollStorageOnce } = await import('../src/storage/poller.js');
   const r = await pollStorageOnce();
-  assert.deepEqual([r.ok, r.fail], [16, 1]);
+  assert.deepEqual([r.ok, r.fail], [42, 2]);   // v3.26.0 — 44대 중 실패 2대(두바이 · 바르샤바)
   const { bmCollectNow, getBmLatest } = await import('../src/bmstor/poller.js');
   const b = await bmCollectNow('interval');
-  assert.equal(b.okCount, 10, '활성 10대 합성 수집');
+  assert.equal(b.okCount, 23, '활성 23대 합성 수집');
   assert.ok([...getBmLatest().values()].every((x) => x.ok && x.mounts.length));
 });
 

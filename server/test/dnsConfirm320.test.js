@@ -276,7 +276,8 @@ test('⑥ /tools/ipam dnsFwd 칸(일치는 판정만 · 어긋남은 이름 · �
     const out = {};
     try {
       const led0 = await call('/tools/ipam');
-      const vm = led0.j.rows.find((r) => r.ownerType === 'vm');
+      // v3.26.0: 중복이 아닌 VM 행 — 목 VM IP 는 사이트 VM 이 253대를 넘으면 한 번 겹친다(mkIp). 시연 규모에서 첫 VM 행(10.1.0.1)이 중복이라 카드가 두 번 셌다.
+      const vm = led0.j.rows.find((r) => r.ownerType === 'vm' && !r.duplicate);
       const ss = await import(SRC + 'ipam/scanStore.js');
       ss.mergeScanResults([{ ip: vm.ip, openPorts: [22], services: ['SSH'], names: { dns: 'vm-old.corp' }, tried: ['dns'], dnsFwd: { v: 'none', at: 3 } }], Date.now(), '__local__');
       const led = await call('/tools/ipam');
