@@ -221,7 +221,7 @@ function commit(next) {
     return { ok: false, code: 'store-changed-outside', status: 409,
       reason: outside < 0
         ? `SSH 키 저장소 파일을 다시 읽지 못해(${String(dd.reason || '').slice(0, 60)}) 포탈 밖 변경 여부를 모릅니다 — 바꾸지 않았습니다.`
-        : `SSH 키 저장소 파일이 포탈 밖에서 바뀌어(${outside}곳) 바꾸지 않았습니다 — 설정 › 보안 › SSH 공용 접속 › 키 보안에서 확인한 뒤 ‘키 저장소 다시 읽기’ 를 누르세요.` };
+        : `SSH 키 저장소 파일이 포탈 밖에서 바뀌어(${outside}곳) 바꾸지 않았습니다 — 설정 › 보안 › 서버 접속(SSH · Windows) › 키 보안에서 확인한 뒤 ‘키 저장소 다시 읽기’ 를 누르세요.` };
   }
   try {
     fs.mkdirSync(path.dirname(FILE), { recursive: true });

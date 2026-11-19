@@ -10,7 +10,7 @@ export const DASH = '—';
 /** 준비에 쓸 계정 상태(서버 CRED_STATES + edge-unknown). */
 export const PREP_CRED_TEXT = Object.freeze({
   ok: { tone: 'ok', label: '할 수 있음', hint: '' },
-  feature: { tone: 'warn', label: '못 함 — 키에 ‘접속 준비’ 가 꺼짐', hint: '그 키의 ‘쓸 수 있는 기능’ 에서 ‘집중 모니터링 접속 준비(root)’ 를 켜면 됩니다(설정 › 보안 › SSH 공용 접속 — 엣지 서버는 그 엣지 포탈에서).' },
+  feature: { tone: 'warn', label: '못 함 — 키에 ‘접속 준비’ 가 꺼짐', hint: '그 키의 ‘쓸 수 있는 기능’ 에서 ‘집중 모니터링 접속 준비(root)’ 를 켜면 됩니다(설정 › 보안 › 서버 접속(SSH · Windows) — 엣지 서버는 그 엣지 포탈에서).' },
   noentry: { tone: 'warn', label: '못 함 — 준비에 쓸 계정 없음', hint: 'SSH 공용 접속에 이 서버(같은 주소 · 포트)도, 이 법인의 공통 계정도 없습니다 — 엣지에서 root 로 쓰는 키를 그 엣지 포탈의 SSH 공용 접속에 한 번 등록하세요.' },
   ambig: { tone: 'warn', label: '고르면 됨 — 공통 계정이 여럿', hint: '‘접속 준비’ 를 켠 이 법인의 공통 계정이 둘 이상입니다 — 줄에서 계정을 고르세요.' },
   dup: { tone: 'warn', label: '못 함 — 같은 주소 서버가 둘', hint: 'SSH 공용 접속에 같은 주소 · 포트로 등록된 서버가 둘 이상이라 어느 자격인지 모릅니다.' },

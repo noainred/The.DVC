@@ -1,5 +1,5 @@
 /**
- * sshAccessText.js — 설정 › 보안 › SSH 공용 접속 화면의 문구 · 표시 도우미(순수 — React · api.js 를 import 하지 않는다: vitest node 환경).
+ * sshAccessText.js — 설정 › 보안 › 서버 접속(SSH · Windows) 화면의 문구 · 표시 도우미(순수 — React · api.js 를 import 하지 않는다: vitest node 환경).
  * 판정(이 서버에 이 키를 쓸 수 있는가 · 키 점검 등급)은 서버가 한다 — 여기는 서버가 준 값을 글자로 바꾸고 목록을 묶기만 한다.
  */
 

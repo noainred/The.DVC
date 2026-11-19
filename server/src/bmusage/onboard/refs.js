@@ -120,7 +120,7 @@ export function rotateKey(fromId, toId, { now = Date.now() } = {}) {
   // 4회차 점검 D1(메인 결정): 옛 키로 되던 수집 기능이 새 키의 ‘쓸 수 있는 기능’ 에 없으면 **경고**(기능 제한은 의도일 수 있다 — 회전은 막지 않는다).
   //   연결 시험(conn-test)은 허용 기능을 보지 않아 화면이 권하는 ‘전 서버 재시험’ 이 통과한다 — 그 차이를 결과가 말한다. 판정은 placement.lostFeatures(= keyPlacementIssue).
   const lost = (r1.ids.length || r2.changed) ? lostFeatures(from, to) : [];
-  const warnings = lost.length ? [{ code: 'key-feature', features: lost, text: `새 키의 ‘쓸 수 있는 기능’ 에 ${featureLabels(lost)} 이(가) 없어 그 수집은 회전 뒤 이 키로 접속하지 않습니다(연결 시험은 이 제한을 보지 않아 통과합니다) — 의도한 제한이 아니면 설정 › 보안 › SSH 공용 접속 › 키 폴더에서 새 키의 기능을 넓히세요.` }] : [];
+  const warnings = lost.length ? [{ code: 'key-feature', features: lost, text: `새 키의 ‘쓸 수 있는 기능’ 에 ${featureLabels(lost)} 이(가) 없어 그 수집은 회전 뒤 이 키로 접속하지 않습니다(연결 시험은 이 제한을 보지 않아 통과합니다) — 의도한 제한이 아니면 설정 › 보안 › 서버 접속(SSH · Windows) › 키 폴더에서 새 키의 기능을 넓히세요.` }] : [];
   return { ok: true, servers: r1.ids, accounts: r2.changed || 0, ...(warnings.length ? { warnings } : {}) };
 }
 
@@ -215,11 +215,11 @@ export const AUTH_ERROR = Object.freeze({
   'account-kind': '공통 계정 참조가 OS 계정이 아닙니다.',
   'store-unreadable': 'SSH 키 저장소(ssh-keys.json)를 읽지 못해 키로 접속하지 않았습니다.',
   // v3.9.0 SSH 공용 접속(설계 docs/design/ssh-access §8 · §9)
-  'account-tampered': '공통 계정(계정명 · 법인 · 기본 키 · 비밀번호)이 포탈 밖에서 바뀌었습니다 — 이 계정으로는 접속하지 않습니다. 설정 › 보안 › SSH 공용 접속 › 키 보안을 확인하세요.',
-  'key-tampered': 'SSH 키 원문의 지문이 등록 때와 다릅니다(바꿔치기 의심) — 이 키로는 접속하지 않습니다. 설정 › 보안 › SSH 공용 접속 › 키 보안을 확인하고 키를 새로 등록하세요.',
-  'key-folder': 'SSH 키가 다른 법인 · 다른 서버의 폴더에 있어 이 서버에는 쓰지 않습니다 — 설정 › 보안 › SSH 공용 접속에서 이 서버의 폴더에 있는 키를 고르세요.',
-  'key-feature': '이 SSH 키는 이 기능에 허용되지 않았습니다 — 설정 › 보안 › SSH 공용 접속 › 키 폴더에서 키의 ‘쓸 수 있는 기능’ 을 확인하세요.',
-  'corp-stopped': '이 법인의 SSH 키 사용이 중지됐습니다(긴급 조치) — 설정 › 보안 › SSH 공용 접속에서 재개하기 전에는 키로 접속하지 않습니다.',
+  'account-tampered': '공통 계정(계정명 · 법인 · 기본 키 · 비밀번호)이 포탈 밖에서 바뀌었습니다 — 이 계정으로는 접속하지 않습니다. 설정 › 보안 › 서버 접속(SSH · Windows) › 키 보안을 확인하세요.',
+  'key-tampered': 'SSH 키 원문의 지문이 등록 때와 다릅니다(바꿔치기 의심) — 이 키로는 접속하지 않습니다. 설정 › 보안 › 서버 접속(SSH · Windows) › 키 보안을 확인하고 키를 새로 등록하세요.',
+  'key-folder': 'SSH 키가 다른 법인 · 다른 서버의 폴더에 있어 이 서버에는 쓰지 않습니다 — 설정 › 보안 › 서버 접속(SSH · Windows)에서 이 서버의 폴더에 있는 키를 고르세요.',
+  'key-feature': '이 SSH 키는 이 기능에 허용되지 않았습니다 — 설정 › 보안 › 서버 접속(SSH · Windows) › 키 폴더에서 키의 ‘쓸 수 있는 기능’ 을 확인하세요.',
+  'corp-stopped': '이 법인의 SSH 키 사용이 중지됐습니다(긴급 조치) — 설정 › 보안 › 서버 접속(SSH · Windows)에서 재개하기 전에는 키로 접속하지 않습니다.',
   'state-unreadable': 'SSH 공용 접속 상태 파일(ssh-access-state.json)을 읽지 못해 키로 접속하지 않았습니다 — 사용 중지 기록을 모르는 채 키를 쓰지 않습니다.',
   // v3.24 서버 접속(설계 docs/design/server-access) — 공통 계정 · 계층 지정
   'account-state-unreadable': '서버 접속 상태 파일(ssh-access-state.json)을 읽지 못해 공통 계정으로 접속하지 않았습니다 — 계층 지정 · 정지 기록을 모르는 채 저장된 비밀번호를 보내지 않습니다.',

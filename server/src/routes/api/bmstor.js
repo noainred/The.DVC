@@ -117,7 +117,7 @@ export async function bmPlacementIssue(body = {}, ex = null, bind = null) {
     // 4회차 재확인 I1: 이 화면의 '법인' 칸은 데이터센터라 vcenterId 를 보내지 못한다 — 법인(vCenter) 귀속이 없는 서버에는 어느 법인 폴더 키도 맞지 않으니
     //   '이 법인 폴더 키를 고르세요' 대신 갈 길(전역 키 · 서버 등록에서 법인 지정)을 말한다. 키 이름 · 폴더는 싣지 않는다(존재 은닉).
     if (!server.vcenterId) return { error: '이 서버에는 법인(vCenter) 귀속이 없어 법인 · 서버 폴더에 있는 SSH 키(직접 고른 키 또는 공통 계정의 기본 키)를 쓸 수 없습니다 — 전역 키를 고르거나, 서버 등록(CSV)에서 법인을 지정한 뒤 고르세요.', code: 'key-folder', status: 409 };
-    return { error: 'SSH 키(직접 고른 키 또는 공통 계정의 기본 키)가 다른 법인 · 다른 서버의 폴더에 있어 이 서버에는 쓸 수 없습니다 — 이 서버 법인(또는 이 서버)의 폴더에 있는 키를 고르세요(설정 › 보안 › SSH 공용 접속).', code: 'key-folder', status: 409 };
+    return { error: 'SSH 키(직접 고른 키 또는 공통 계정의 기본 키)가 다른 법인 · 다른 서버의 폴더에 있어 이 서버에는 쓸 수 없습니다 — 이 서버 법인(또는 이 서버)의 폴더에 있는 키를 고르세요(설정 › 보안 › 서버 접속(SSH · Windows)).', code: 'key-folder', status: 409 };
   }
   const acc = b.cred ? KS.accountById(b.cred) : null;
   const unchanged = !!ex && String(ex.credRef || '') === b.cred && String(ex.vcenterId || '') === server.vcenterId;
