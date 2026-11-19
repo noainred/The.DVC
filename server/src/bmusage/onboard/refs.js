@@ -223,6 +223,7 @@ export const AUTH_ERROR = Object.freeze({
   'state-unreadable': 'SSH 공용 접속 상태 파일(ssh-access-state.json)을 읽지 못해 키로 접속하지 않았습니다 — 사용 중지 기록을 모르는 채 키를 쓰지 않습니다.',
   // v3.24 서버 접속(설계 docs/design/server-access) — 공통 계정 · 계층 지정
   'account-state-unreadable': '서버 접속 상태 파일(ssh-access-state.json)을 읽지 못해 공통 계정으로 접속하지 않았습니다 — 계층 지정 · 정지 기록을 모르는 채 저장된 비밀번호를 보내지 않습니다.',
+  'winrm-needs-password': 'WinRM 으로 붙는 Windows 단계 계정에 비밀번호가 없습니다(WinRM 은 비밀번호 로그인만 — 키로는 붙지 않습니다) — 설정 › 보안 › 서버 접속 › 공통 계정에서 비밀번호를 넣으세요.',
   'account-stopped': '이 공통 계정은 로그인 거부로 정지됐습니다(계정 잠금 방지 — 이 계정을 쓰는 서버 전부) — 설정 › 보안 › 서버 접속에서 비밀번호를 고치거나 ‘한 대로 다시 확인’ 을 하세요.',
   'account-corp-stopped': '이 법인의 저장 계정 · 키 사용이 중지됐습니다(긴급 조치) — 설정 › 보안 › 서버 접속에서 재개하기 전에는 공통 계정으로 접속하지 않습니다.',
   'account-feature': '이 공통 계정은 이 기능에 허용되지 않았습니다 — 설정 › 보안 › 서버 접속에서 계정의 ‘쓸 수 있는 기능’ 을 확인하세요.',
@@ -264,7 +265,9 @@ export function effectiveAccountOf(server = {}) {
   }
   if (!hit) return { source: 'none', ...(mismatch ? { mismatch: true } : {}) };
   if (!active) return { source: 'none', pending: true, level: hit.level, accountId: hit.account };
-  return { source: hit.level === 'all' ? 'corp' : 'os', level: hit.level, accountId: hit.account, auth: hit.auth || '' };
+  // v3.26(3단계): Windows 단계 지정은 접속 방식(WinRM HTTPS)과 포트를 함께 가질 수 있다(설계 D11 — OS 종류 단계에). 없으면 SSH.
+  const via = hit.level === 'windows' && hit.via === 'winrm' ? { via: 'winrm', port: Number.isInteger(hit.port) ? hit.port : null } : {};
+  return { source: hit.level === 'all' ? 'corp' : 'os', level: hit.level, accountId: hit.account, auth: hit.auth || '', ...via };
 }
 /*
  * 키 배치 판정(keyPlacementIssue · ALWAYS_ALLOWED_FEATURES)은 순수 모듈 placement.js 로 옮겼다(4회차 점검 D1 — 온보딩 분석이 같은 함수를 직접 부른다).
@@ -307,7 +310,8 @@ function integrityOk(m, parsed) {
  * @returns {{ok:true, username:string, password:string, privateKey?:string, passphrase?:string, authKind:'key'|'password'|'none', keyFingerprint?:string, keyName?:string}
  *          | {ok:false, code:string, error:string}}
  */
-export function resolveOsAuth(server = {}, { feature = '', ignoreAccountStop = false } = {}) {
+export function resolveOsAuth(server = {}, { feature = '', ignoreAccountStop = false, winrm = false } = {}) {
+  // winrm — 호출부가 **WinRM 으로 붙을 때만** true(서버 정보 코어 · 먼저 확인). SSH 기능(사용률 · 스토리지 · 연결 시험 …)은 지정에 WinRM 이 있어도 예전 그대로 키 우선이다(v3.26 반증 F3).
   // ignoreAccountStop — ‘한 대로 다시 확인’(sshaccess/service.verifyAccount) 하나만: 계정 단위 정지를 푸는 확인 한 번은 정지를 넘어야 한다(사람이 누름 · 한 번 · 자동 재시도 없음).
   const keyRef = t(server.keyRef);
   let credRef = t(server.credRef);
@@ -336,9 +340,13 @@ export function resolveOsAuth(server = {}, { feature = '', ignoreAccountStop = f
   //   v3.24: Windows AD 계정은 도메인을 붙인 로그인 이름(keyStore.loginNameOf 하나).
   const username = (acc ? KS.loginNameOf(acc) : '') || t(server.username) || 'root';
   // osAuth 'password' = 비밀번호 고정(공통 계정에 기본 키가 있어도 — CSV os_key ‘password’). v3.24: 물려받은 지정의 auth 'password' 도 같다.
-  const pwPinned = server.osAuth === 'password' || inherited?.auth === 'password';
+  // v3.26: WinRM 은 비밀번호(NTLM)만 — 기본 키가 있어도 비밀번호로(키가 없으면 붙지 않는다).
+  const viaWinrm = winrm === true && inherited?.via === 'winrm' && server.os === 'windows';
+  const pwPinned = server.osAuth === 'password' || inherited?.auth === 'password' || viaWinrm;
   const useKey = pwPinned ? '' : (keyRef || (acc && acc.keyRef) || '');
-  const accMeta = acc ? { accountId: acc.id, accountName: acc.name, source: inherited ? inherited.source : 'own' } : (inherited ? {} : { source: 'own' });
+  const accMeta = { ...(acc ? { accountId: acc.id, accountName: acc.name, source: inherited ? inherited.source : 'own' } : (inherited ? {} : { source: 'own' })),
+    ...(viaWinrm ? { via: 'winrm', viaPort: inherited.port || null } : {}) };
+  if (viaWinrm && !(acc && acc.password)) return { ok: false, code: 'winrm-needs-password', error: AUTH_ERROR['winrm-needs-password'], ...accMeta };
   if (useKey) {
     const m = KS.keyMaterial(useKey);
     if (!m.ok) return { ok: false, code: m.code, error: AUTH_ERROR[m.code] || AUTH_ERROR['key-missing'] };
@@ -405,14 +413,15 @@ export function authCredOf(s = {}) {
  * 폴러용 — OS 등록부 원본에 해석한 자격을 덧씌운다(원본 객체는 바꾸지 않는다). 해석 실패 항목은 authError 를 달아
  * 수집이 접속하지 않고 그 사유로 실패하게 한다(빈 비밀번호로 시도해 인증 실패 · 계정 잠금을 부르지 않게).
  */
-export function withResolvedAuth(list = [], { feature = '' } = {}) {
+export function withResolvedAuth(list = [], { feature = '', winrm = false } = {}) {
   return (Array.isArray(list) ? list : []).map((s) => {
     if (!s || typeof s !== 'object') return s;
     // 예전 항목(서버 비밀번호) — 그대로. v3.24: 자기 자격이 없는 승인된 서버(계층 지정을 물려받음)는 해석한다.
     if (!t(s.keyRef) && !t(s.credRef) && (hasOwnCred(s) || !inheritActive(s))) return s;
-    const a = resolveOsAuth(s, { feature });
+    const a = resolveOsAuth(s, { feature, winrm });
     // v3.24: 공통 계정 출처(계정 id · 이름 · 비밀번호 판)를 싣는다 — 수집 결과를 본 곳이 계정 사용 기록 · 계정 단위 정지에 쓴다(sshaccess/outcome.js). 비밀은 아니다.
-    const accOut = a.accountId ? { credAccountId: a.accountId, credAccountName: a.accountName || '', credSource: a.source || '', ...(a.secretVersion != null ? { credVersion: a.secretVersion } : {}) } : (a.source ? { credSource: a.source } : {});
+    const accOut = { ...(a.accountId ? { credAccountId: a.accountId, credAccountName: a.accountName || '', credSource: a.source || '', ...(a.secretVersion != null ? { credVersion: a.secretVersion } : {}) } : (a.source ? { credSource: a.source } : {})),
+      ...(a.via ? { via: a.via, viaPort: a.viaPort || null } : {}) };   // v3.26: 접속 방식(비밀 아님)
     if (!a.ok) return { ...s, password: '', authError: a.error, authErrorCode: a.code, ...accOut, ...(a.keyFingerprint ? { keyFingerprint: a.keyFingerprint } : {}) };
     return { ...s, username: a.username, password: a.password, ...accOut, ...(a.privateKey ? { privateKey: a.privateKey, passphrase: a.passphrase, keyFingerprint: a.keyFingerprint, keyName: a.keyName } : {}) };
   });

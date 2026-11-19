@@ -44,6 +44,8 @@ export const FEATURE_CATALOG = Object.freeze([
   Object.freeze({ id: 'disk-audit-install', label: '디스크 점검 프로그램 설치(root)', tool: 'focus-mon', ready: true, note: '서버 집중 모니터링 › 디스크 점검의 자동 설치 — 이 기능을 직접 켠 키만 · 비밀번호 없는 sudo 또는 root 계정이어야 합니다' }),
   // v3.18.0 — 서버 집중 모니터링 › 대상 · 키의 접속 자동 준비(수집 계정 · 공개키를 root 로 한 번). 직접 켠 키만(예전 키 제외) · '설치' 와 따로 켠다.
   Object.freeze({ id: 'focus-mon-prep', label: '집중 모니터링 접속 준비(root)', tool: 'focus-mon', ready: true, note: '서버 집중 모니터링 › 대상 · 키의 접속 자동 준비 — 수집 계정을 만들고 공개키를 넣습니다 · 이 기능을 직접 켠 키만 · 비밀번호 없는 sudo 또는 root 계정이어야 합니다' }),
+  // v3.25 — 특수 기능 ‘서버 정보’(서버 접속 2단계): 기본 구성 + 디스크를 누를 때만 읽기 전용으로(sudo 없음). 기능 목록이 있는 키 · 계정은 이 기능을 켜야 쓴다.
+  Object.freeze({ id: 'server-info', label: '서버 정보', tool: 'server-info', ready: true, note: 'OS · 하드웨어 · CPU · 메모리 · 디스크 · 파일시스템을 누를 때만 읽기 전용 명령으로(sudo 없음 — 권한이 필요한 칸은 ‘못 읽음 · 권한’)' }),
 ]);
 
 /** 이 노드가 아는 법인(vCenter) — id · 이름 · DataCenter 이름. */
@@ -93,6 +95,7 @@ function publicServer(s, { accById, keyById }) {
     keyMode: t(s.keyRef) ? 'pinned' : (effKey ? 'corp-default' : (s.osAuth === 'password' || s.password || (acc && acc.password) ? 'password' : 'none')),
     // v3.24 계층: os(서버 OS 종류) · source(own 따로 정함 · os/corp 물려받음 · none) · inherit(승인 상태) · pending(지정은 있는데 승인 없음/주소 바뀜) · mismatch(법인 단계 계정 OS 다름)
     os: SERVER_OS.includes(s.os) ? s.os : '', source: ea.source, level: ea.level || '', pending: !!ea.pending, mismatch: !!ea.mismatch,
+    via: ea.via === 'winrm' ? 'winrm' : 'ssh', viaPort: ea.via === 'winrm' ? (ea.port || null) : null,   // v3.26 — 물려받은 Windows 단계 지정의 접속 방식
     inheritApproved: inheritActive(s), inheritStale: !!s.inherit && !inheritActive(s) && !t(s.agent), inheritAt: s.inherit?.at || null, inheritBy: s.inherit ? t(s.inherit.by, 64) : '',
     ownCred: hasOwnCred(s), accountId: acc ? acc.id : '', loginName: acc ? KS.loginNameOf(acc) : '',
     detectedOs: detectedOsOf(s),
@@ -274,7 +277,7 @@ export async function readInstalledKeys({ serverId, oncePassword = '', by = '' }
   };
   let rec;
   try {
-    const out = await withSsh({ host: String(s.host), port: Number(s.port) || 22, username: auth.username, password: auth.password || '', privateKey: auth.privateKey, passphrase: auth.passphrase, readyTimeout: 15_000 },
+    const out = await withSsh({ host: String(s.host), port: Number(s.port) || 22, username: auth.username, password: auth.password || '', privateKey: auth.privateKey, passphrase: auth.passphrase, readyTimeout: 15_000, singlePasswordAttempt: true },
       async ({ exec }) => exec(READ_COMMAND, 15_000));
     const p = parseReadOutput(out?.stdout || '');
     if (!p.ok) rec = { host: s.host, port: Number(s.port) || 22, username: auth.username, file: '~/.ssh/authorized_keys', keys: [], error: p.reason };
@@ -533,7 +536,7 @@ const storesIssue = (what) => {
  * @param {{accountId:string, auth?:''|'password', ignoreAccountStop?:boolean, candidate?:{username:string, password:string}|null}} o
  *        candidate — 아직 저장하지 않은 비밀번호로 확인(공통 계정 저장 전). 그때는 키를 쓰지 않는다.
  */
-async function loginOnce(s, { accountId = '', auth = '', ignoreAccountStop = false, candidate = null } = {}) {
+async function loginOnce(s, { accountId = '', auth = '', ignoreAccountStop = false, candidate = null, via = '', port = null } = {}) {
   let a;
   if (candidate) {
     // 법인 사용 중지는 저장 전 확인에도 본다(멈춰 둔 법인에 새 비밀번호를 보내지 않게).
@@ -542,16 +545,34 @@ async function loginOnce(s, { accountId = '', auth = '', ignoreAccountStop = fal
     if (si) return { ok: false, kind: 'corp-stopped', reason: REFS.AUTH_ERROR['account-corp-stopped'] };
     a = { ok: true, username: candidate.username, password: candidate.password, authKind: 'password' };
   } else {
-    a = REFS.resolveOsAuth({ ...s, keyRef: '', credRef: accountId, osAuth: auth === 'password' ? 'password' : '', inherit: undefined, password: '' }, { feature: 'conn-test', ignoreAccountStop });
+    // v3.26 반증 F4: WinRM 으로 확인하면 비밀번호로 해석한다(키 + 비밀번호 계정에서 키를 고르면 WinRM 확인이 늘 실패했다)
+    a = REFS.resolveOsAuth({ ...s, keyRef: '', credRef: accountId, osAuth: auth === 'password' || via === 'winrm' ? 'password' : '', inherit: undefined, password: '' }, { feature: 'conn-test', ignoreAccountStop });
     if (!a.ok) return { ok: false, kind: a.code, reason: a.error };
     if (a.authKind === 'none') return { ok: false, kind: 'no-secret', reason: '이 공통 계정에는 키 · 비밀번호가 없습니다.' };
   }
+  const t0 = Date.now();
+  // v3.26: Windows 단계 지정이 WinRM 이면 같은 확인을 WinRM HTTPS + NTLM 으로(비밀번호만 · 다시 시도 없음 · 인증서는 장비 신뢰 판정)
+  if (via === 'winrm' && s.os === 'windows') {
+    const meta = { secretVersion: a.secretVersion ?? null, keyFingerprint: '' };
+    if (!a.password) return { ok: false, kind: 'winrm-needs-password', reason: REFS.AUTH_ERROR['winrm-needs-password'], ...meta };
+    const { winrmRun, WINRM_PORT } = await import('../winrm/client.js');
+    const { ntlmNameOf } = await import('./readServer.js');
+    const { username, domain } = ntlmNameOf(a.username);
+    try {
+      await winrmRun({ host: String(s.host), port: Number(port) || WINRM_PORT, username, domain, password: a.password, command: 'hostname', timeoutMs: 30_000 });
+      return { ok: true, kind: 'ok', authKind: 'password', ms: Date.now() - t0, ...meta };
+    } catch (e) {
+      const k = e?.kind || '';
+      if (k === 'tls-peer' || k === 'cbt') return { ok: false, kind: 'tls', reason: 'WinRM 인증서를 신뢰하지 않아 끊었습니다 — 설정 › 보안 › 장비 신뢰에서 지문을 확인 · 승인하세요.', ...meta };
+      if (k === 'auth-rejected') return { ok: false, kind: 'auth-rejected', reason: '로그인이 거부됐습니다(다시 시도하지 않습니다 — 계정 잠금 방지).', ...meta };
+      return { ok: false, kind: 'connect', reason: `WinRM 에 접속하지 못했습니다(${String(e?.message || e).replace(/\s+/g, ' ').slice(0, 100)})`, ...meta };
+    }
+  }
   const { withSsh } = await import('../proxy/sshExec.js');
   const { isAuthFailureText, isPeerRejectText } = await import('../util/authGuard.js');
-  const t0 = Date.now();
   try {
     // ‘echo ok’ — Linux 셸 · Windows cmd · PowerShell 어디서나 같은 출력(uname 은 Windows 에 없다).
-    await withSsh({ host: String(s.host), port: Number(s.port) || 22, username: a.username, password: a.password || '', privateKey: a.privateKey, passphrase: a.passphrase, readyTimeout: 15_000 },
+    await withSsh({ host: String(s.host), port: Number(s.port) || 22, username: a.username, password: a.password || '', privateKey: a.privateKey, passphrase: a.passphrase, readyTimeout: 15_000, singlePasswordAttempt: true },   // v3.25 반증 F1: 비밀번호는 한 번만(k-i 재시도 없음 — 계정 잠금 횟수)
       async ({ exec }) => exec('echo ok', 10_000));
     return { ok: true, kind: 'ok', authKind: a.authKind, ms: Date.now() - t0, secretVersion: a.secretVersion ?? null, keyFingerprint: a.keyFingerprint || '' };
   } catch (e) {
@@ -580,7 +601,7 @@ function levelAfter(s, corp, assignAfter, accById) {
  *  · 이 지정을 지금 물려받게 되는 승인된 서버가 있으면 **그중 한 대(verifyServerId)로 먼저 로그인**해 본다 — 실패하면 저장하지 않는다.
  * @returns {Promise<object>} { ok, affected, verified? }
  */
-export async function setAssignment({ corp, level, accountId = '', auth = '', verifyServerId = '', by = '', dryRun = false } = {}) {
+export async function setAssignment({ corp, level, accountId = '', auth = '', via = '', port = null, verifyServerId = '', by = '', dryRun = false } = {}) {
   const si = storesIssue('바꾸지 않았습니다'); if (si) return si;
   const c = t(corp, 128);
   if (!(await corpList()).some((x) => x.id === c)) return { ok: false, code: 'bad-corp', status: 404, reason: '그런 법인(vCenter)이 없습니다.' };
@@ -595,6 +616,8 @@ export async function setAssignment({ corp, level, accountId = '', auth = '', ve
     if (acc.corp && acc.corp !== c) return { ok: false, code: 'account-other-corp', status: 409, reason: '다른 법인의 공통 계정은 이 법인에 지정할 수 없습니다(전 법인 공용 계정 또는 이 법인 계정만).' };
     if (level !== 'all' && KS.accountFamily(acc) !== level) return { ok: false, code: 'account-os', status: 409, reason: `${LEVEL_TEXT[level]} 단계에는 ${LEVEL_TEXT[level]} 계정만 지정할 수 있습니다.` };
     if (!acc.password && !acc.keyRef) return { ok: false, code: 'no-secret', status: 409, reason: '키도 비밀번호도 없는 계정입니다.' };
+    if (via === 'winrm' && level !== 'windows') return { ok: false, code: 'bad-via', status: 400, reason: 'WinRM 은 Windows 단계에만 정할 수 있습니다.' };
+    if (via === 'winrm' && !acc.password) return { ok: false, code: 'winrm-needs-password', status: 409, reason: REFS.AUTH_ERROR['winrm-needs-password'] };
   }
   const now = {};
   for (const lv of ST.ASSIGN_LEVELS) { const x = ST.assignFor(c, lv); if (x && !x.unreadable) now[lv] = x; }
@@ -609,7 +632,7 @@ export async function setAssignment({ corp, level, accountId = '', auth = '', ve
     const target = willUse.find((s) => s.id === t(verifyServerId, 64));
     if (!target) return { ok: false, code: 'need-verify', status: 409, reason: `이 지정을 지금 물려받는 서버 ${willUse.length}대 중 한 대를 골라 먼저 로그인해 보세요(저장 전 확인).`, candidates: willUse.slice(0, 50).map((s) => ({ id: s.id, name: s.name || s.host })) };
     if (dryRun) return { ok: true, dry: true };
-    const r = await loginOnce(target, { accountId: acc.id, auth });
+    const r = await loginOnce(target, { accountId: acc.id, auth, via: level === 'windows' ? via : '', port });
     noteCredOutcome({ ...target, credAccountId: acc.id, credAccountName: acc.name, ...(r.secretVersion != null ? { credVersion: r.secretVersion } : {}), keyFingerprint: r.keyFingerprint || '' },
       { ok: !!r.ok, rejected: !r.ok && r.kind === 'auth-rejected', code: r.kind, feature: 'conn-test', trigger: 'manual', by });
     if (!r.ok) return { ok: false, code: 'verify-failed', status: 409, reason: `${target.name || target.host} 에서 확인하지 못해 지정을 저장하지 않았습니다 — ${r.reason || r.kind}`, verified: { server: target.name || target.host, ok: false, kind: r.kind } };
@@ -617,7 +640,7 @@ export async function setAssignment({ corp, level, accountId = '', auth = '', ve
     if (r.secretVersion) { KS.markAccountVerified(acc.id, { serverName: target.name || target.host, secretVersion: r.secretVersion }); ST.clearAccountStop(acc.id, { by, accountName: acc.name, why: '계층 지정 저장 전 확인 성공' }); }
   }
   if (dryRun) return { ok: true, dry: true };
-  const w = ST.setAssign(c, level, acc ? { account: acc.id, auth } : null, { by });
+  const w = ST.setAssign(c, level, acc ? { account: acc.id, auth, via: level === 'windows' && via === 'winrm' ? 'winrm' : '', port: level === 'windows' && via === 'winrm' ? port : null } : null, { by });
   if (!w.ok) return w;
   return { ok: true, affected: affected.length, willUse: willUse.length, ...(verified ? { verified } : {}) };
 }
@@ -653,7 +676,7 @@ export async function approveInherit({ ids = [], expectAddrs = {}, expectKeys = 
   }
   const using = targets.filter((x) => x.ef.source === 'os' || x.ef.source === 'corp');
   const groups = new Map();   // `${계정}|${로그인 방식}` → 그 계정을 쓰게 되는 서버들
-  for (const x of using) { const k = `${x.ef.accountId}|${x.ef.auth || ''}`; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(x); }
+  for (const x of using) { const k = `${x.ef.accountId}|${x.ef.auth || ''}|${x.ef.via || ''}|${x.ef.port || ''}`; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(x); }
   if (groups.size > APPROVE_MAX_ACCOUNTS) return { ok: false, code: 'too-many-accounts', status: 409, reason: `고른 서버들이 쓰게 될 공통 계정이 ${groups.size}개입니다 — ${APPROVE_MAX_ACCOUNTS}개 이하로 나눠 승인하세요(계정마다 한 대씩 먼저 확인합니다).` };
   if (dryRun) return { ok: true, dry: true };
   const verifiedAll = [];
@@ -661,7 +684,7 @@ export async function approveInherit({ ids = [], expectAddrs = {}, expectKeys = 
     const pick = xs.find((x) => x.s.id === t(verifyServerId, 64)) || xs[0];
     const acc = accById.get(pick.ef.accountId);
     if (!acc) return { ok: false, code: 'account-missing', status: 409, reason: REFS.AUTH_ERROR['account-missing'] };
-    const r = await loginOnce(pick.s, { accountId: acc.id, auth: pick.ef.auth });
+    const r = await loginOnce(pick.s, { accountId: acc.id, auth: pick.ef.auth, via: pick.ef.via || '', port: pick.ef.port || null });
     noteCredOutcome({ ...pick.s, credAccountId: acc.id, credAccountName: acc.name, ...(r.secretVersion != null ? { credVersion: r.secretVersion } : {}), keyFingerprint: r.keyFingerprint || '' },
       { ok: !!r.ok, rejected: !r.ok && r.kind === 'auth-rejected', code: r.kind, feature: 'conn-test', trigger: 'manual', by });
     if (!r.ok) return { ok: false, code: 'verify-failed', status: 409, reason: `${pick.s.name || pick.s.host}(${acc.name}) 에서 확인하지 못해 아무것도 승인하지 않았습니다 — ${r.reason || r.kind}`, verified: { server: pick.s.name || pick.s.host, account: acc.name, ok: false, kind: r.kind }, verifiedAll };
@@ -756,7 +779,8 @@ export async function saveAccountChecked({ input = {}, verifyServerId = '', by =
       if (!target) return { ok: false, code: 'need-verify', status: 409, reason: `이 계정을 쓰는 서버 ${servers.length}대 중 한 대를 골라 새 비밀번호로 먼저 로그인해 보세요(저장 전 확인).`, candidates: servers.slice(0, 50).map((s) => ({ id: s.id, name: s.name || s.host })) };
       if (dryRun) return { ok: true, dry: true };
       const probe = { ...before, ...dry.next, username: t(input.username ?? before.username, 128), os: dry.next.os, logon: dry.next.logon, domain: dry.next.domain, kind: 'os' };
-      const r = await loginOnce(target, { candidate: { username: KS.loginNameOf(probe), password: pw } });
+      const tef = REFS.effectiveAccountOf(target);   // v3.26: 그 서버가 WinRM 으로 붙으면 새 비밀번호 확인도 WinRM 으로
+      const r = await loginOnce(target, { candidate: { username: KS.loginNameOf(probe), password: pw }, via: tef.via || '', port: tef.port || null });
       if (!r.ok) return { ok: false, code: 'verify-failed', status: 409, reason: `${target.name || target.host} 에서 새 비밀번호로 로그인하지 못해 저장하지 않았습니다 — ${r.reason || r.kind}`, verified: { server: target.name || target.host, ok: false, kind: r.kind } };
       verified = { server: target.name || target.host, ok: true };
     }
@@ -783,7 +807,7 @@ export async function verifyAccount({ accountId, serverId, by = '' } = {}) {
   const ea = REFS.effectiveAccountOf(s);
   const uses = ea.accountId === acc.id && (ea.source === 'own' || ea.source === 'os' || ea.source === 'corp');
   if (!uses) return { ok: false, code: 'not-using', status: 409, reason: '이 서버는 이 계정을 쓰지 않습니다 — 이 계정을 쓰는 서버로 확인하세요.' };
-  const r = await loginOnce(s, { accountId: acc.id, auth: ea.auth || (s.osAuth === 'password' ? 'password' : ''), ignoreAccountStop: true });
+  const r = await loginOnce(s, { accountId: acc.id, auth: ea.auth || (s.osAuth === 'password' ? 'password' : ''), ignoreAccountStop: true, via: ea.via || '', port: ea.port || null });
   noteCredOutcome({ ...s, credAccountId: acc.id, credAccountName: acc.name, ...(r.secretVersion != null ? { credVersion: r.secretVersion } : {}), keyFingerprint: r.keyFingerprint || '' },
     { ok: !!r.ok, rejected: !r.ok && r.kind === 'auth-rejected', code: r.kind, feature: 'conn-test', trigger: 'manual', by });
   if (!r.ok) return { ok: false, code: 'verify-failed', status: 409, reason: r.reason || r.kind, kind: r.kind };

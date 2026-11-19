@@ -144,7 +144,8 @@ export function registerSshAccess(api) {
   const judgeFirst = (fn) => async (req, res, next) => {
     try { const r = await fn(bodyOf(req), req); if (r && r.ok === false) return send(res, r); return next(); } catch (e) { return next(e); }
   };
-  const assignArgs = (b) => ({ corp: t(b.corp, 128), level: t(b.level, 16), accountId: t(b.accountId, 32), auth: b.auth === 'password' ? 'password' : '', verifyServerId: t(b.verifyServerId, 64) });
+  const assignArgs = (b) => ({ corp: t(b.corp, 128), level: t(b.level, 16), accountId: t(b.accountId, 32), auth: b.auth === 'password' ? 'password' : '', verifyServerId: t(b.verifyServerId, 64),
+    via: b.via === 'winrm' ? 'winrm' : '', port: Number.isInteger(Number(b.port)) && Number(b.port) >= 1 && Number(b.port) <= 65535 ? Number(b.port) : null });   // v3.26 WinRM(Windows 단계만 — 서비스가 다시 본다)
   const inheritArgs = (b) => ({
     ids: Array.isArray(b.ids) ? b.ids.slice(0, 1000).map((x) => t(x, 64)) : [],
     expectAddrs: b.expectAddrs && typeof b.expectAddrs === 'object' && !Array.isArray(b.expectAddrs) ? Object.fromEntries(Object.entries(b.expectAddrs).slice(0, 1000).map(([k, v]) => [t(k, 64), typeof v === 'string' ? t(v, 400) : ''])) : {},
