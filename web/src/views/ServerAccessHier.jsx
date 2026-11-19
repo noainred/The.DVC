@@ -315,7 +315,7 @@ export function AccountsTab({ v, corpName, reload, say }) {
   });
   const verify = () => run('verify', async (code) => {
     const r = must(await postJson(`/settings/ssh-access/accounts/${encodeURIComponent(ver.account.id)}/verify`, { serverId: ver.serverId, otp: code }));
-    say(`${ver.account.name} — ${r.server} 에서 로그인됨${r.resumed ? ' · 계정 정지를 풀었습니다' : ''}.`, 'ok'); setVer(null); reload();
+    say(`${ver.account.name} — ${r.server} 에서 로그인됨${r.resumed ? ' · 계정 정지를 풀었습니다' : ''}${r.stopKept ? ' · 키로 로그인해 비밀번호는 확인하지 못했습니다 — 계정 정지는 그대로입니다(비밀번호로 쓰는 서버로 다시 확인하거나 ‘정지 풀기’)' : ''}.`, r.stopKept ? 'warn' : 'ok'); setVer(null); reload();
   });
   const resume = (a) => run(`resume:${a.id}`, async (code) => {
     must(await delJson(`/settings/ssh-access/accounts/${encodeURIComponent(a.id)}/stop?otp=${encodeURIComponent(code)}`));

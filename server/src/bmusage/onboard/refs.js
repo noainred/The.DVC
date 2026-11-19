@@ -229,6 +229,8 @@ export const AUTH_ERROR = Object.freeze({
   'account-feature': '이 공통 계정은 이 기능에 허용되지 않았습니다 — 설정 › 보안 › 서버 접속에서 계정의 ‘쓸 수 있는 기능’ 을 확인하세요.',
   'account-os': '공통 계정의 OS(Linux · Windows)가 서버의 OS 와 다릅니다 — 다른 OS 의 비밀번호를 보내지 않습니다. 서버의 OS 종류나 계정을 확인하세요.',
   'account-other-corp': '다른 법인의 공통 계정입니다 — 계층 지정으로는 다른 법인 계정을 물려받지 않습니다.',
+  // 137회차: 해석 결과 자격이 없음(승인만 하고 물려받을 지정이 없음 · 비밀번호 고정인데 계정에 비밀번호가 없음) — 빈 비밀번호로 시도하지 않는다.
+  'no-cred': '이 서버가 쓸 접속 자격(키 · 비밀번호)이 없어 접속하지 않았습니다(빈 비밀번호로 시도하지 않습니다) — 물려받을 계층 지정이 없거나 그 계정에 이 방식의 비밀이 없습니다. 설정 › 보안 › 서버 접속에서 정하세요.',
 });
 
 /**
@@ -423,6 +425,9 @@ export function withResolvedAuth(list = [], { feature = '', winrm = false } = {}
     const accOut = { ...(a.accountId ? { credAccountId: a.accountId, credAccountName: a.accountName || '', credSource: a.source || '', ...(a.secretVersion != null ? { credVersion: a.secretVersion } : {}) } : (a.source ? { credSource: a.source } : {})),
       ...(a.via ? { via: a.via, viaPort: a.viaPort || null } : {}) };   // v3.26: 접속 방식(비밀 아님)
     if (!a.ok) return { ...s, password: '', authError: a.error, authErrorCode: a.code, ...accOut, ...(a.keyFingerprint ? { keyFingerprint: a.keyFingerprint } : {}) };
+    // 137회차(재현): 해석이 ‘자격 없음’(none)이면 접속하지 않는다 — 승인만 하고 지정이 없는(지운) 서버 · 비밀번호 고정인데 계정에 비밀번호가 없는 서버를
+    //   폴러가 root(또는 계정명) + **빈 비밀번호**로 매 주기 로그인했다(collect · osSsh 는 authError 만 본다). 화면은 ‘미설정 — 접속하지 않습니다’ 라고 말한다.
+    if (a.authKind === 'none') return { ...s, password: '', authError: AUTH_ERROR['no-cred'], authErrorCode: 'no-cred', ...accOut };
     return { ...s, username: a.username, password: a.password, ...accOut, ...(a.privateKey ? { privateKey: a.privateKey, passphrase: a.passphrase, keyFingerprint: a.keyFingerprint, keyName: a.keyName } : {}) };
   });
 }

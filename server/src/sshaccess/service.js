@@ -812,6 +812,9 @@ export async function verifyAccount({ accountId, serverId, by = '' } = {}) {
     { ok: !!r.ok, rejected: !r.ok && r.kind === 'auth-rejected', code: r.kind, feature: 'conn-test', trigger: 'manual', by });
   if (!r.ok) return { ok: false, code: 'verify-failed', status: 409, reason: r.reason || r.kind, kind: r.kind };
   if (r.secretVersion) KS.markAccountVerified(acc.id, { serverName: s.name || s.host, secretVersion: r.secretVersion });
+  // 137회차(재현): 계정 단위 정지는 **비밀번호 거부**에 걸린다 — 키로 로그인한 확인(키 우선 서버)은 비밀번호를 확인하지 않았으므로 정지를 풀지 않는다
+  //   (풀면 비밀번호 고정 서버들이 틀린 비밀번호를 다시 보낸다). 키로 확인됐으면 그렇다고 말한다 — 풀기는 비밀번호로 쓰는 서버의 확인 · ‘정지 풀기’ · 새 비밀번호.
+  if (r.authKind !== 'password') return { ok: true, server: s.name || s.host, resumed: false, authKind: r.authKind || '', ...(ST.accountStopFor(acc.id, KS.accountSecretVersion(acc))?.at ? { stopKept: true } : {}) };
   const c = ST.clearAccountStop(acc.id, { by, accountName: acc.name, why: `${s.name || s.host} 에서 다시 확인 성공` });
   return { ok: true, server: s.name || s.host, resumed: !c.already };
 }
