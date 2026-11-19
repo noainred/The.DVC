@@ -216,6 +216,16 @@ test('⑦ 코어 연결(3단계) — Windows 단계 지정이 WinRM 이면 readS
   assert.ok(ST.accountStopFor(a.account.id, KS.accountSecretVersion(KS.accountById(a.account.id))));
   const again = await RS.readServer(s.id, { feature: 'server-info', plan: P.SERVER_INFO_PLAN });
   assert.equal(again.code, 'cred'); assert.equal(W.st.auths.length, 1, '정지된 계정은 보내지 않는다');
+  // 같은 계정을 WinRM 으로 물려받는 3대를 동시에 — 계정 탐침이 하나만 보낸다(WinRM 경로도 accountGate 를 지난다)
+  ST.clearAccountStop(a.account.id, { by: 't' });
+  KS.saveAccount({ id: a.account.id, password: 'Ad-Old-1' }, { by: 't' });   // 새 판 — 틀린 비밀번호
+  const more = [2, 3].map((i) => { const r0 = BM.saveBmServer({ name: `file0${i}`, host: '127.0.0.1', port: 22, vcenterId: 'vcW', os: 'windows', addrOnly: true, mounts: ['/'] }); const x = BM.listBmServersRaw().find((y) => y.id === r0.server.id); assert.equal(BM.setBmServerInherit(x.id, { on: true, expectAddr: '127.0.0.1:22|root', expectKey: BM.inheritKeyOf(x), by: 't' }).ok, true); return x; });
+  W.st.auths.length = 0;
+  const all3 = await Promise.all([s, ...more].map((x) => RS.readServer(x.id, { feature: 'server-info', plan: P.SERVER_INFO_PLAN })));
+  assert.equal(W.st.auths.length, 1, `탐침 하나 — ${JSON.stringify(all3.map((x) => x.code))}`);
+  // Windows 단계 밖에는 접속 방식을 남기지 않는다(상태 파일 모양)
+  ST.setAssign('vcW', 'linux', { account: a.account.id, auth: '', via: 'winrm', port: 5986 }, { by: 't' });
+  assert.equal(ST.assignFor('vcW', 'linux').via, undefined); ST.setAssign('vcW', 'linux', null, { by: 't' });
   // 비밀번호가 없는 계정(키만)은 WinRM 으로 붙지 않는다(NTLM 은 비밀번호만 — 기본 키로 넘어가지 않는다)
   const REFS = await import('../src/bmusage/onboard/refs.js');
   ST.clearAccountStop(a.account.id, { by: 't' });

@@ -388,7 +388,7 @@ export function deviceTlsConnect({ subsystem, envKey = '', envRaw, mode, tls: tl
     const idName = sni || hostname;
     const bundle = loadCaBundle();
     const key = `${idName}|${port}`;
-    let cached = resume ? (sessions.get(key) || null) : null;
+    let cached = sessions.get(key) || null;   // 세션 목록은 이 연결 함수(하위 시스템) 안에만 있다 — resume:false 면 아무것도 기억하지 않아 비어 있다
     if (cached && (cached.bundleKey !== bundle.key || Date.now() - cached.at > SESSION_TTL_MS)) { sessions.delete(key); cached = null; }
     const connector = buildConnector({
       ...base,
