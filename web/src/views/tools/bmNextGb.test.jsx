@@ -6,7 +6,7 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { facetRows, csvOf, missingFootnotes, shownPaths, shownMissing, pathsText } from './bmUsageText.js';
+import { facetRows, csvOf, missingFootnotes, shownPaths, shownMissing, pathsText, pullKindLabel, edgePullState } from './bmUsageText.js';
 import { WRITE_WHY_TEXT, gateWhy } from './bmWriteText.js';
 import { SNAP_CODE_TEXT, snapPathBasisNote } from './bmOpsText.js';
 
@@ -55,5 +55,26 @@ describe('⑥ 스냅샷 표지 · 근거', () => {
     const tab = src('BmSnapshotTab.jsx');
     expect(tab).toMatch(/snapPathBasisNote\(list\.resp\?\.pathBasis\)/);
     expect(tab).toMatch(/SNAP_REASON_CODES = Object\.freeze\(\[[^\]]*'auth-unresolved'/);
+  });
+});
+
+describe('재확인 — 엣지 당김 실패 kind 는 낱말로(원문 too-large 를 보이지 않는다)', () => {
+  it('too-large → 응답 상한 초과 · 실패 · 마지막 시도 실패 두 문구 · 수집 건강 칸', () => {
+    expect(pullKindLabel('too-large')).toBe('응답 상한 초과');
+    expect(pullKindLabel('bad-body')).toBe('형식 다름');
+    expect(pullKindLabel('weird')).toBe('weird');
+    expect(pullKindLabel('')).toBe('실패');
+    expect(pullKindLabel(null)).toBe('실패');
+    const now = Math.floor(Date.now() / 3_600_000) * 3_600_000;
+    const att = { ok: false, kind: 'too-large', reason: '엣지 응답이 상한을 넘었습니다' };
+    const f = edgePullState({ hasUrl: true, lastAttempt: att }, { now });
+    expect(f.state).toBe('failed');
+    expect(f.why).toMatch(/^응답 상한 초과: /);
+    expect(f.why).not.toMatch(/too-large/);
+    const s2 = edgePullState({ hasUrl: true, snapAt: now - 60_000, lastAttempt: att }, { now });
+    expect(s2.state).toBe('stale-failed');
+    expect(s2.why).toMatch(/응답 상한 초과: /);
+    expect(s2.why).not.toMatch(/too-large/);
+    expect(src('BmCollectHealth.jsx')).toMatch(/pullKindLabel\(x\.lastAttempt\.kind\)/);
   });
 });

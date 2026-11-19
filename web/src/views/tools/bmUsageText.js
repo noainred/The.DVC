@@ -22,11 +22,15 @@ import { csvCell } from '../../util/csv.js';
  */
 
 import { agoText as _ago, elapsedText as _elapsed } from './relTime.js';
+import { EDGE_PULL_FAIL_LABEL } from './tokenCheckText.js'; // 다음 작업 재확인 — 당김 실패 kind 낱말 하나(원문 kind 를 보이지 않게)
 import { numOrNull } from '../../numOrNull.js';
 import { toneVar } from './toneVar.js';
 const t = (v) => String(v ?? '').trim();
 /** ⚠ `v == null` 을 **먼저** 본다 — `Number(null)===0`·`Number('')===0` 이라 결측이 0 으로 둔갑한다. */
 const n = numOrNull;   // v2.576: 사본 금지 — 코어는 하나다(사본은 Number([])===0 을 막지 못했다)
+
+/** 엣지 당김 실패 kind → 짧은 낱말(공용 표 EDGE_PULL_FAIL_LABEL — 모르는 kind 는 그대로 · 없으면 ‘실패’). */
+export const pullKindLabel = (k) => EDGE_PULL_FAIL_LABEL[String(k || '')] || String(k || '') || '실패';
 
 /** 퍼센트 표시. 값이 없으면 단위를 붙이지 않는다(`— %` 는 0% 처럼 읽힌다 — v2.534 규약). */
 export function pctText(v) {
@@ -918,7 +922,7 @@ export function edgePullState(row = {}, { minEdgeVersion = '', staleMs = 30 * 60
       why: att.kind === 'old-version' ? `이 엣지에 해당 경로가 없습니다 — v${minEdgeVersion} 이상으로 업그레이드해야 합니다(다시 눌러도 같습니다).`
         : att.kind === 'auth' ? '수집 서버 토큰이 맞지 않습니다 — 중앙 등록값과 그 엣지의 설정을 대조하세요(다시 눌러도 같습니다).'
           : att.kind === 'disabled' ? '그 엣지에서 수집 서버 토큰이 설정돼 있지 않습니다.'
-            : `${t(att.kind) || '실패'}: ${t(att.reason)}`,
+            : `${pullKindLabel(att.kind)}: ${t(att.reason)}`,
     };
   }
   if (row.enabledOnEdge === false) {
@@ -940,7 +944,7 @@ export function edgePullState(row = {}, { minEdgeVersion = '', staleMs = 30 * 60
   }
   const old = now - at > staleMs;
   if (att && !att.ok) {
-    return { state: 'stale-failed', label: '마지막 시도 실패', tone: 'warn', why: `아래 값은 ${ageText(at, now)} 가져온 것이고, **가장 최근 시도는 실패**했습니다 — ${t(att.kind)}: ${t(att.reason)}` };
+    return { state: 'stale-failed', label: '마지막 시도 실패', tone: 'warn', why: `아래 값은 ${ageText(at, now)} 가져온 것이고, **가장 최근 시도는 실패**했습니다 — ${pullKindLabel(att.kind)}: ${t(att.reason)}` };
   }
   if (old) return { state: 'stale', label: '낡음', tone: 'warn', why: `${ageText(at, now)} 가져온 값입니다 — 지금 값을 보려면 다시 가져오세요.` };
   return { state: 'ok', label: '보관분 있음', tone: 'ok', why: `${ageText(at, now)} 가져온 값입니다.` };

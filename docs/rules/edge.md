@@ -1000,5 +1000,5 @@
   ③ **수신 상한 초과는 따로**: `util/readCapped.js` 가 상한 오류에 `code: 'too-large'` 를 달고, 공용 사다리(`central/edgePull.js pullFromEdge`)는 2xx 인데 본문이 상한(EDGE_RESPONSE_MAX_BYTES)을 넘으면
      kind `too-large`(사유 = 상한 문장 + ‘형식 오류가 아니라 크기 상한’). 예전에는 bad-body ‘응답 형식이 다릅니다(엣지가 아닌 서버에 닿았을 수 있습니다)’ 였다. 상태 코드 판정(auth · 404 · http)이 먼저인 순서는 그대로 —
      바뀌는 것은 예전 bad-body 였던 이 경우의 kind · 사유뿐이다. 이 사다리를 쓰는 화면 문구 맵 다섯(edgeLogText FETCH_KIND_TEXT · EmptyInvModal · focusMonText WAKE_TEXT · isiduText EDGE_CALL_TEXT · tokenCheckText)에 too-large 를 넣었다
-     (그 밖 호출부 — bmTop · bmCapacity · bmLogs · bmCompare · bmPerfOps · 스냅샷 대행 — 는 kind · reason 을 그대로 넘긴다 · kind 로 분기하는 서버 코드는 edgeLogPull 의 접두 규칙뿐이고 too-large 는 bad-body 와 같은 갈래).
+     (그 밖 호출부 — bmTop · bmCapacity · bmLogs · bmCompare · bmPerfOps · 스냅샷 대행 — 는 kind · reason 을 그대로 넘긴다 · kind 로 분기하는 서버 코드는 edgeLogPull 의 접두 규칙 · routes/api/{edgeLog,bmFolders,bmCompare,bmTop}.js · central/isiduRemote.js 이고(재확인 정정 — 처음엔 '접두 규칙뿐' 이라 적었다), 어느 곳도 too-large 를 따로 고르지 않아 bad-body 와 같은 갈래로 간다. 웹의 kind 원문 표시 두 곳(bmUsageText 마지막 시도 문구 · BmCollectHealth 마지막 시도 칸)은 공용 낱말 표 `EDGE_PULL_FAIL_LABEL` 로 바꿨다).
   ④ 엣지 스냅샷 응답 정제의 code 표는 `bmusage/snapshot/command.js SNAPSHOT_CODES` 하나(예전 사본에 auth-unresolved 가 없어 엣지의 ‘참조 미해석’ 이 ssh-error 로 바뀌었다).
