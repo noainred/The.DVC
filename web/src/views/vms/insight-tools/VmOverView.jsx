@@ -12,7 +12,7 @@
 import { unitText } from '../../unitText.js'; // v3.21.0: 값이 없으면 단위 없는 ‘—’(BUG-20 규약)
 import React, { useEffect, useState } from 'react';
 import './vmTools.css';
-import { fetchJson, toolAllowed } from '../../../api.js';
+import { fetchJson, toolAllowed, can as canPerm } from '../../../api.js';
 import { useLatest } from '../../../hooks/useLatest.js';
 import { useToolSummary } from './useToolSummary.js';
 import { fmtN, fmtU, fmt1, gbText, mbText, ghzText, pctText, pctOf, corpNameOf, hostAvgMemGB, hostsEq, missingText, synthNote, barPct, toolLabel, gateOf } from './toolSumText.js';
@@ -45,10 +45,12 @@ export default function VmOverView({ vcIds = [], rows = [], canTool }) {
   const [kind, setKind] = useState('mem');
   const [corps, setCorps] = useState(null);   // /hosts/corp 법인 줄(S2 환산) — 못 받으면 null
   const run = useLatest();
+  // r140: /hosts/corp 는 inv.hosts 게이트 — 그 권한이 없는 역할에는 부르지 않는다(403 을 만들지 않고 환산만 뺀다 · 아래 note 가 그 사실을 말한다).
+  const canHosts = canPerm('inv.hosts');
   useEffect(() => {
-    if (!can) return;
+    if (!can || !canHosts) return;
     run(fetchJson('/hosts/corp'), (d) => setCorps(Array.isArray(d?.corps) ? d.corps : null), () => setCorps(null));
-  }, [can, run]);
+  }, [can, canHosts, run]);
   if (!can) return null;
 
   const t = overTotals(q.data, vcIds);

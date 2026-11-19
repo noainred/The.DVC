@@ -141,7 +141,8 @@ function OffPanel({ vcIds, rows, canTool }) {
     <section className="vit-panel" aria-label="꺼진 VM">
       <PanelHead title="꺼진 VM" hint={`전원이 꺼진 VM(템플릿 제외) — 특수 기능 ‘${toolLabel('waste')}’ 의 ‘전원 꺼짐’ 조사(꺼진 지 며칠) 요약입니다`} rule={rule}
         q={{ ...q, loading: q.loading || qs.loading }} onReload={reload} />
-      <PanelState q={q} view={v} waitText="꺼진 VM 요약을 받는 중입니다…">
+      {/* r140: 꺼진 지(off-since) 값이 있는데 다시 받기가 실패하면 그것도 ‘다시 받기에 실패’ 로 밝힌다 — 예전에는 waste 의 오류만 보아 옛 구간 · 목록이 조용히 남았다 */}
+      <PanelState q={q.data ? { ...q, error: q.error || (qs.data && qs.error) || null } : q} view={v} waitText="꺼진 VM 요약을 받는 중입니다…">
         {v && (
           <div className="vit-gp">
             <div className="vit-sum">
@@ -214,7 +215,10 @@ function TrendPanel({ vcIds, rows, canTool }) {
   const rule = [t?.days != null ? `추이 ${t.days}일` : '', l?.days != null ? `생성/삭제 지난 ${l.days}일` : ''].filter(Boolean).join(' · ');
   const reload = () => { if (canTrack) qt.reload(); if (canLife) ql.reload(); };
   // 두 도구 중 하나라도 값이 있으면 그린다 — 둘 다 못 받았을 때만 오류(권한 안내 포함) 자리.
-  const main = { data: qt.data || ql.data, error: !qt.data && !ql.data ? (qt.error || ql.error) : null, loading: qt.loading || ql.loading, at: qt.at || ql.at };
+  //   r140: 값이 있는 도구의 다시 받기 실패는 싣는다(PanelState 의 ‘다시 받기에 실패했습니다 — 아래는 … 값입니다’) — 예전에는 값이 하나라도 있으면 오류를 null 로 지워
+  //   다시 받기가 실패해도 옛 값만 조용히 남았다(useToolSummary 규약: error 와 data 가 함께 있으면 값 + 실패 안내). 처음부터 못 온 쪽은 아래 ‘받지 못했습니다’ 줄이 밝힌다.
+  const staleErr = (canTrack && qt.data && qt.error) || (canLife && ql.data && ql.error) || null;
+  const main = { data: qt.data || ql.data, error: !qt.data && !ql.data ? (qt.error || ql.error) : staleErr, loading: qt.loading || ql.loading, at: qt.at || ql.at };
   const span = t && t.max != null && t.min != null ? t.max - t.min : 0;
   const yOf = (n) => (span > 0 ? ((n - t.min) / span) * 100 : 50);
   return (

@@ -5,7 +5,7 @@
 //   새 판정 없음 — 신호 · 기준값은 응답의 thresholds, 도구 패널은 각 도구 판정. 도구 권한이 없으면 그 패널 · ‘과할당’ 칸을 숨긴다(canHubTool — 허브 도구 칸과 같은 판정).
 //   mode='over' 면 ‘과할당’ 보기(VmOverView — Optimization 요약)를 같은 응답의 법인 줄로 그린다.
 import React, { useEffect, useMemo, useState } from 'react';
-import { usePolling, toolAllowed } from '../../api.js';
+import { usePolling, toolAllowed, can } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { useNarrowScreen } from '../../components/useNarrowScreen.js';
@@ -79,7 +79,8 @@ export default function VmInsight({ mode = 'insight', filters = {}, scopeIds = n
   const waste = useToolSummary('/tools/waste', null, { enabled: canTool('waste') });
   // 분포 묶음을 펼쳤을 때만: 호스트 법인 요약(S2 환산 기준 — 고른 범위 호스트 한 대의 평균 메모리 · memo 30초)
   const distOpen = mode === 'insight' && !folded.dist;
-  const hostCorp = useLazyJson('/hosts/corp', region ? { region } : {}, distOpen);
+  //   r140: /hosts/corp 는 inv.hosts 게이트(서버 routes/api/hostCorp.js) — VM 탭(inv.vms)만 있는 역할에는 부르지 않는다(마운트마다 403 을 만들지 않게 · 환산은 생략).
+  const hostCorp = useLazyJson('/hosts/corp', region ? { region } : {}, distOpen && can('inv.hosts'));
 
   const s = useMemo(() => sumVmRows(picked.used), [picked]);
   const usedIds = useMemo(() => picked.used.map((r) => String(r.id)), [picked]);

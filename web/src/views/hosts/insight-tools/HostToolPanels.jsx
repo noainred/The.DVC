@@ -152,7 +152,11 @@ function DsPanel({ vcIds, rows, canTool }) {
   const nameOf = corpNameOf(rows, [...(qf.data?.rows || []), ...(qp.data?.rows || [])]);
   // 두 도구 중 먼저 온 것부터 그린다 — 한쪽이 늦어도 다른 쪽을 기다리지 않는다. 둘 다 없을 때만 PanelState(받는 중 · 못 받음 · 권한 안내).
   const lead = canFc ? qf : qp;
-  const both = { data: (canFc && qf.data) || (canSp && qp.data) || null, error: lead.error, loading: qf.loading || qp.loading, at: Math.max(qf.at || 0, qp.at || 0) || null };
+  //   r140: 값이 있으면 오류는 **값이 있는 도구의 다시 받기 실패**만 싣는다 — 예전 lead.error 는 예측이 처음부터 못 왔는데(경로만 옴) PanelState 가
+  //   ‘다시 받기에 실패했습니다 — 아래는 … 값입니다’ 라고 말했다(예측 실패는 아래 ‘용량 예측 요약을 받지 못했습니다’ 가 따로 밝힌다). 값이 없으면 예전 그대로 lead.error.
+  const bothData = (canFc && qf.data) || (canSp && qp.data) || null;
+  const staleErr = (canFc && qf.data && qf.error) || (canSp && qp.data && qp.error) || null;
+  const both = { data: bothData, error: bothData ? staleErr : lead.error, loading: qf.loading || qp.loading, at: Math.max(qf.at || 0, qp.at || 0) || null };
   const reload = () => { if (canFc) qf.reload(); if (canSp) qp.reload(); };
   const soonMax = f ? f.soonest.reduce((a, x) => Math.max(a, Number(x.usagePct) || 0), 0) : 0;
   const deadMax = p ? p.deadHosts.reduce((a, x) => Math.max(a, Number(x.paths) || 0), 0) : 0;
