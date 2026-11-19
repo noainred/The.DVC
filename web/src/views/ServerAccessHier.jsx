@@ -66,7 +66,10 @@ export function HierTab({ v, corpName, reload, say }) {
   const pickNode = (id) => { setSel(id); setPicked(new Set()); setEdit(null); setOwn(null); setVerifyCands(null); };
 
   const saveAssign = (clear) => run('assign', async (code) => {
-    const body = { corp: node.corp, level, accountId: clear ? '' : (edit?.accountId || ''), auth: clear ? '' : (edit?.auth || ''), verifyServerId: verifyId, otp: code };
+    // v3.25(3단계): Windows 단계는 접속 방식(SSH · WinRM HTTPS)과 WinRM 포트를 함께 저장한다(설계 D11)
+    const winrm = !clear && level === 'windows' && edit?.via === 'winrm';
+    const body = { corp: node.corp, level, accountId: clear ? '' : (edit?.accountId || ''), auth: clear ? '' : (edit?.auth || ''), verifyServerId: verifyId, otp: code,
+      ...(winrm ? { via: 'winrm', port: Number(edit.port) || 5986 } : {}) };
     const r = must(await putJson('/settings/ssh-access/assign', body));
     say(clear ? `${path} 단계의 지정을 지웠습니다 — 물려받던 서버 ${r.affected}대는 위 단계 또는 미설정으로 갑니다.`
       : `${path} 단계에 계정을 정했습니다 — 지금 물려받는 서버 ${r.willUse}대${r.verified ? ` · ${r.verified.server} 에서 먼저 확인함` : ''}.`, 'ok');
@@ -147,6 +150,7 @@ export function HierTab({ v, corpName, reload, say }) {
             {curAcc ? (
               <dl className="sah-dl">
                 <dt>계정</dt><dd><b>{curAcc.name}</b> · {accountKindText(curAcc)} · <code>{curAcc.loginName || curAcc.username}</code>{na.state === 'inherit' && <span className="ssa-sub"> — 법인 단계에서 물려받음</span>}</dd>
+                {level === 'windows' && <><dt>접속 방식</dt><dd>{na.assign?.via === 'winrm' ? `WinRM HTTPS · 포트 ${na.assign.port || 5986}(NTLM — 인증서는 장비 신뢰에서 승인)` : 'SSH(OpenSSH Server)'}</dd></>}
                 <dt>로그인</dt><dd>{AUTH_TEXT[na.assign?.auth || '']}{curAcc.keyRef ? ` · 기본 키 ${(v.keys || []).find((k) => k.id === curAcc.keyRef)?.name || '없음'}` : ''}</dd>
                 <dt>비밀번호</dt><dd>{passwordAgeText(curAcc)}</dd>
                 <dt>닿는 서버</dt><dd>{central.filter((s) => s.accountId === curAcc.id && (s.source === 'os' || s.source === 'corp')).length}대 물려받음 · 승인 대기 {central.filter((s) => s.pending).length}대</dd>
@@ -154,7 +158,7 @@ export function HierTab({ v, corpName, reload, say }) {
             ) : <p className="ssa-note">{na.blockedByOs ? '법인 단계 계정의 OS 가 달라 이 단계에는 닿지 않습니다 — 여기에 계정을 정하세요.' : (node.kind === 'corp' ? '이 법인 단계에는 계정이 없습니다. OS 마다 계정이 다르면 비워 두고 OS 종류 단계에 정합니다.' : '이 단계와 위 단계 모두 계정이 없습니다 — 이 아래 서버는 따로 정한 서버만 접속합니다.')}</p>}
             {!edit ? (
               <div className="ssa-acts">
-                <button className="btn btn-sm" type="button" disabled={stateUnknown} onClick={() => setEdit({ accountId: na.state === 'set' ? curAcc?.id || '' : '', auth: na.state === 'set' ? na.assign?.auth || '' : '' })}>{na.state === 'set' ? '다른 계정으로 바꾸기' : '여기서 정하기'}</button>
+                <button className="btn btn-sm" type="button" disabled={stateUnknown} onClick={() => setEdit({ accountId: na.state === 'set' ? curAcc?.id || '' : '', auth: na.state === 'set' ? na.assign?.auth || '' : '', via: na.state === 'set' ? na.assign?.via || '' : '', port: na.state === 'set' ? na.assign?.port || '' : '' })}>{na.state === 'set' ? '다른 계정으로 바꾸기' : '여기서 정하기'}</button>
                 {na.state === 'set' && <button className="btn btn-sm" type="button" disabled={!!busy} onClick={() => saveAssign(true)}>{busy === 'assign' ? '지우는 중…' : (node.kind === 'corp' ? '지우기' : '위에서 물려받기(지우기)')}</button>}
                 {na.state === 'set' && <Otp value={otp} onChange={setOtp} />}
               </div>
@@ -167,6 +171,15 @@ export function HierTab({ v, corpName, reload, say }) {
                 <label className="ssa-field">로그인 방식 <Select sort={false} className="select select-sm" value={edit.auth} onChange={(e) => setEdit({ ...edit, auth: e.target.value })}>
                   {Object.entries(AUTH_TEXT).map(([k, t]) => <option key={k || 'key'} value={k}>{t}</option>)}
                 </Select></label>
+                {level === 'windows' && (
+                  <label className="ssa-field">접속 방식 <Select sort={false} className="select select-sm" value={edit.via || ''} onChange={(e) => setEdit({ ...edit, via: e.target.value })}>
+                    <option value="">SSH</option><option value="winrm">WinRM HTTPS</option>
+                  </Select></label>
+                )}
+                {level === 'windows' && edit.via === 'winrm' && <p className="ssa-note">WinRM 은 NTLMv2 · 비밀번호 로그인만(키 없음) · 서버 인증서는 설정 › 보안 › 장비 신뢰에서 승인한 것만 · Windows 단계를 물려받는 서버에만 닿습니다(따로 정한 서버는 SSH).</p>}
+                {level === 'windows' && edit.via === 'winrm' && (
+                  <label className="ssa-field">WinRM 포트 <input className="input" inputMode="numeric" value={edit.port || ''} placeholder="5986" onChange={(e) => setEdit({ ...edit, port: e.target.value.replace(/[^0-9]/g, '').slice(0, 5) })} /></label>
+                )}
                 {verifyChoices.length > 0 && (
                   <label className="ssa-field">먼저 확인할 서버 <Select sort={false} className="select select-sm" value={verifyId} onChange={(e) => setVerifyId(e.target.value)}>
                     <option value="">고르세요</option>
@@ -236,7 +249,7 @@ export function HierTab({ v, corpName, reload, say }) {
                     <td data-sort={s.os || ''}>{s.os ? OS_LABEL[s.os] : <span className="ssa-sub">미지정</span>}{!s.os && s.detectedOs && <div className="ssa-sub">수집: {OS_LABEL[s.detectedOs]}</div>}{s.os && s.detectedOs && s.detectedOs !== s.os && <div className="ssa-sub" style={{ color: toneVar('warn') }}>수집과 다름({OS_LABEL[s.detectedOs]})</div>}</td>
                     <td data-sort={st.label}><Chip tone={st.tone} title={st.title}>{st.label}</Chip>{s.inheritApproved && s.inheritAt && <div className="ssa-sub">승인 {dateTime(s.inheritAt)}{s.inheritBy ? ` · ${s.inheritBy}` : ''}</div>}</td>
                     <td data-sort={s.accountName || ''}>{s.accountMissing ? <Chip tone="bad">계정 없음</Chip> : s.accountName ? <><b>{s.accountName}</b><div className="ssa-sub"><code>{s.loginName || s.username}</code></div></> : <span className="ssa-sub">—</span>}
-                      <div className="ssa-sub">{KEY_MODE_TEXT[s.keyMode] || s.keyMode}{s.keyName && <> · <code>{s.keyName}</code></>}</div></td>
+                      <div className="ssa-sub">{s.via === 'winrm' ? `WinRM HTTPS:${s.viaPort || 5986} · 비밀번호` : <>{KEY_MODE_TEXT[s.keyMode] || s.keyMode}{s.keyName && <> · <code>{s.keyName}</code></>}</>}</div></td>
                     <td data-nosort>
                       {s.agent ? <span className="ssa-sub">그 엣지에서</span> : (
                         <div className="ssa-acts sah-stack">

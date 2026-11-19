@@ -63,6 +63,7 @@ const IsilonDirUsageTool = React.lazy(() => import('./tools/IsilonDirUsageTool.j
 const DataFlow = React.lazy(() => import('./tools/DataFlow.jsx'));       // 데이터 흐름 지도(포탈 사이 전 경로, v2.587)
 const DeviceFlow = React.lazy(() => import('./tools/DeviceFlow.jsx'));   // 3단 지도(장비 → 엣지 → 메인, v2.588)
 const BmStorageTool = React.lazy(() => import('./tools/BmStorageTool.jsx'));
+const ServerInfoTool = React.lazy(() => import('./tools/ServerInfoTool.jsx'));   // v3.25 서버 정보(서버 접속 2단계)
 const SanSwitchTool = React.lazy(() => import('./tools/SanSwitchTool.jsx'));
 const SanFlowTool = React.lazy(() => import('./tools/SanFlowTool.jsx'));   // v2.935(C-②) Flow Vision 플로우 모니터
 const SanStorageTool = React.lazy(() => import('./tools/SanStorageTool.jsx'));   // v2.948 SAN 스토리지 성능(독립 도구)
@@ -651,6 +652,7 @@ function ToolPanel({ tool, onBack, isAdmin, defaultScope = '', cfg = null }) {
       {tool === 'data-flow' && <DataFlow />}
       {tool === 'device-flow' && <DeviceFlow />}
       {tool === 'bm-storage' && <BmStorageTool />}
+      {tool === 'server-info' && <ServerInfoTool />}
       {tool === 'san-switch' && <SanSwitchTool />}
       {tool === 'san-flow' && <SanFlowTool />}
       {tool === 'san-storage' && <SanStorageTool />}

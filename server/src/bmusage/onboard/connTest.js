@@ -26,7 +26,7 @@ async function testOnce(s0, a) {
   const { isAuthFailureText, isPeerRejectText } = await import('../../util/authGuard.js');
   const t0 = Date.now();
   try {
-    const out = await withSsh({ host: String(s0.host), port: Number(s0.port) || 22, username: a.username, password: a.password || '', privateKey: a.privateKey, passphrase: a.passphrase, readyTimeout: 15_000 },
+    const out = await withSsh({ host: String(s0.host), port: Number(s0.port) || 22, username: a.username, password: a.password || '', privateKey: a.privateKey, passphrase: a.passphrase, readyTimeout: 15_000, singlePasswordAttempt: true },
       async ({ exec }) => exec('uname -s', 10_000));
     const os = String(out?.stdout || '').trim().slice(0, 32);
     return { ok: true, kind: 'ok', authKind: a.authKind, os: /^[A-Za-z0-9_.-]{1,32}$/.test(os) ? os : '', ms: Date.now() - t0 };

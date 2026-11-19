@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **332개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **333개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-11-19)
@@ -266,6 +266,7 @@
 | `secrets-policy.trusted.json` | 설정 | 자격증명 저장 방식 정책의 신뢰 사본(S-07) | ✅ | ✅ | ✅ | security/secretVault.js |
 | `security-session.json` | 설정 | 세션 보안 설정 — 유휴 자동 로그아웃(분) 등. CONFIG_DIR/security-session.json. | ✅ |  | ✅ | security/securitySettings.js |
 | `security-session.trusted.json` | 설정 | 세션 보안 설정의 신뢰 사본(98회차 — S-07 과 같은 모양) | ✅ |  | ✅ | security/securitySettings.js |
+| `server-info.json` | 설정 | 서버 정보 **마지막 읽은 값** 보관(서버당 한 줄 · CONFIG_DIR/server-info.json · 비밀 없음). | ✅ | ✅ | ✅ | serverinfo/store.js |
 | `service-map-pins.json` | 설정 | 서비스 인벤토리 저장소(v2.887, docs/design/service-map/README.md 시안 A 3차 + 4차 검토). | ✅ | ✅ |  | servicemap/store.js |
 | `service-map.json` | 설정 | 서비스 인벤토리 저장소(v2.887, docs/design/service-map/README.md 시안 A 3차 + 4차 검토). | ✅ | ✅ |  | servicemap/store.js |
 | `session-state.json` | 설정 | 세션 폐기·유휴 상태(로그아웃·폐기 기록, 검토 S-05·S-06) | ✅ | ✅ | ✅ | auth/sessionState.js |

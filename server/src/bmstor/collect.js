@@ -122,6 +122,7 @@ export async function collectServer(server) {
       username: server.username || 'root', password: server.password || '',
       privateKey: server.privateKey || undefined, passphrase: server.passphrase || undefined,
       readyTimeout: reqTimeoutMs(process.env.BMSTOR_SSH_TIMEOUT_MS, 15_000),   // v2.605 TIM2605-04: [1초, 10분]
+      singlePasswordAttempt: true,   // v3.25 반증 F1: 비밀번호는 한 번만(k-i 재시도 없음 — 계정 잠금 횟수)
     }, async ({ exec }) => {
       const out = await exec(`df -P -k -- ${mounts.join(' ')}`);
       // v2.915: 같은 세션에서 디스크 I/O 표본(상수 명령 · 입력 없음). df 가 요청 마운트를 하나도 못 찾았으면 I/O 는 시도하지 않는다.
