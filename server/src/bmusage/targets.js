@@ -502,13 +502,8 @@ export function resolveTargets({ bareMetal = [], virtHosts = [], vcenters = [], 
     for (let i = targets.length - 1; i >= 0; i -= 1) if (bad.has(targets[i].key)) targets.splice(i, 1);
   }
 
-  const counts = { targets: targets.length, skipped: skipped.length, idrac: 0, os: 0, both: 0 };
+  const counts = { targets: targets.length, skipped: skipped.length, ...pathCountsOf(targets) };
   counts.virt = targets.filter((x) => x.role === 'virt').length;
-  for (const x of targets) {
-    if (x.paths.includes('idrac')) counts.idrac += 1;
-    if (x.paths.includes('os')) counts.os += 1;
-    if (x.paths.length > 1) counts.both += 1;
-  }
   /*
    * 라이선스 등급 분포 — 화면이 '이 법인은 Enterprise 가 N대' 라고 말할 수 있게.
    * ⚠ `unknown` 을 Enterprise 에 흡수하지 않는다(v2.548 규약: 확인 못 한 것을 한쪽으로 접지 않는다).
@@ -529,6 +524,22 @@ export function resolveTargets({ bareMetal = [], virtHosts = [], vcenters = [], 
   for (const o of keyOverlaps) o.collecting = !!(o.decision?.decision === 'add' && liveKeys.has(o.decision.key));
   counts.keyOverlaps = keyOverlaps.length;
   return { targets, skipped, counts, keyConflicts, keyOverlaps };
+}
+
+/**
+ * 경로별 대수(KPI ‘OS 경로’ · ‘iDRAC 경로’ · 둘 다) — 대상 해석 · 주 조회 범위 계정 · 데모 표시 경로(poller.currentTargets)가 같은 함수.
+ *   다음 작업 ④: 표시 경로(pathsShown — 데모(mock) 대상의 합성 OS 표지 · mock/demo/baremetal.js demoDisplayTargets)가 있으면 그것으로 센다 —
+ *   칩 · 표 · CSV 와 같은 값. 실운영 대상에는 pathsShown 이 없으므로 예전과 같다(paths).
+ */
+export function pathCountsOf(list = []) {
+  const c = { idrac: 0, os: 0, both: 0 };
+  for (const x of list || []) {
+    const p = Array.isArray(x?.pathsShown) ? x.pathsShown : (Array.isArray(x?.paths) ? x.paths : []);
+    if (p.includes('idrac')) c.idrac += 1;
+    if (p.includes('os')) c.os += 1;
+    if (p.length > 1) c.both += 1;
+  }
+  return c;
 }
 
 /**
@@ -681,6 +692,10 @@ export function publicSkipped(s = {}) {
   return rest;
 }
 
+/*
+ * 다음 작업 ⑤(2026-11-19): 이 출력의 필드는 bmusage/publicFields.js PUBLIC_TARGET_SPEC 이 전부 안다 — 엣지 봉투를 받는 중앙 정제가 그 표만 받는다.
+ *   대상(targets.push)이나 여기에 칸을 더하면 표에도 넣는다(시험 bmUsageNextGb 가 실제 출력 · 소스와 대조).
+ */
 export function publicTarget(x = {}) {
   const { idrac, osHost, osRegId: _osRegId, ...rest } = x;   // 4회차 D2: osRegId(고른 OS 등록 id — 누락 점검 전용)는 응답 · 엣지 봉투에 싣지 않는다
   return {
@@ -688,6 +703,9 @@ export function publicTarget(x = {}) {
     idracHost: idrac ? idrac.host : null,
     osHostName: osHost ? (osHost.host || '') : null,
     osMounts: osHost ? (osHost.mounts || []).length : null,
+    // 다음 작업 ⑥(2026-11-19): 키 · 공통 계정 참조를 해석하지 못한 OS 등록(onboard/refs.js authError — 사유 글은 싣지 않는다 · 참 · 거짓만).
+    //   엣지 대행 대상의 스냅샷 표지가 실행과 같은 답을 내게(snapshot/run.js snapshotPublicPathIssue). OS 경로가 없으면 null.
+    osAuthUnresolved: osHost ? !!osHost.authError : null,
     // v2.744(감사 LEFT-08 ②): HBA 사용률 분모 근거(포트 수만 — 주소·식별자 없음). 이 노드가 수집한 적이 없으면 null.
     hbaBasis: hbaBasisFor(rest.key),
   };

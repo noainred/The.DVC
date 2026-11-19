@@ -40,6 +40,7 @@ const FETCH_KIND_TEXT = Object.freeze({
   'disabled-central': '중앙에서 이 수집 서버를 비활성으로 두었습니다.',
   'no-url': '이 수집 서버에 URL 이 없습니다.',
   'bad-body': '응답 형식이 달랐습니다 — 그 주소가 정말 엣지 포탈인지 확인하세요.',
+  'too-large': '엣지 응답이 중앙 수신 상한(EDGE_RESPONSE_MAX_BYTES)을 넘어 읽기를 멈췄습니다 — 형식 오류가 아니라 크기 문제입니다.',   // 다음 작업 ⑤(c)
 });
 
 export default function EmptyInvModal({ agent, push, onClose }) {

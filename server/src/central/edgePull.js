@@ -3,7 +3,7 @@
  *
  * v2.549(edge-log) → v2.554(bm-usage) → v2.560(token-check) 순으로 같은 사다리
  *   `findCollector → enabled/url → withOutboundTag(resilientFetch X-Collector-Token) → catch timeout/unreachable →
- *    readJsonCapped → 401/403 auth → 404 kindFor404(disabled|old-version) → !ok http → bad-body`
+ *    readJsonCapped → 401/403 auth → 404 kindFor404(disabled|old-version) → !ok http → (상한 초과 too-large — 다음 작업 ⑤) → bad-body`
  * 가 **글자 단위로 세 벌** 복사돼 있었고 실제로 갈라져 있었다 — v2.604 CEN2604-03(404 본문 `reason` 이 객체면 `String()` 이
  * '[object Object]' 가 된다)이 bm-usage 에만 적용돼 같은 입력에 세 답(disabled/'[object Object]' · disabled/'(형식 오류)' ·
  * old-version)이 나왔다. CLAUDE.md '코어는 하나다'(v2.513·v2.533·v2.575 IMP-08·v2.579 ARCH-01). 세 모듈은 이제 **저장(put*)만**
@@ -27,6 +27,7 @@ import { readJsonCapped, EDGE_RESPONSE_MAX_BYTES } from '../util/readCapped.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { withOutboundTag } from '../util/outboundStats.js'; // v2.601 WEB2601-02: 같은 주소 엣지를 기록에서 나눈다
 import { strOf } from '../util/coercionTrap.js'; // v2.604 CEN2604-03: 엣지 본문의 글자 필드는 타입부터 좁힌다
+import { capStr } from '../util/capStr.js'; // 다음 작업 ⑤(c): 상한 오류 문장 절단(상주 문자열 — TIM2607-01)
 import { trimTrailingSlashes } from '../util/trimSlashes.js'; // v2.611: 끝 슬래시 제거는 선형 루프 하나
 import { findCollectorByName, resolveCollectorByName } from '../collector/registry.js'; // v2.613 EDGE2613-08: 이름 조회 코어는 등록부 하나
 import { isMockMode } from '../mock/demo/flags.js';
@@ -40,6 +41,7 @@ export const EDGE_PULL_KINDS = Object.freeze([
   'not-registered', 'ambiguous', 'disabled-central', 'no-url', // 등록부 단계(네트워크 왕복 없음) — 87회차 ⓑ: ambiguous(결정 66 ① — 표시 이름이 둘 이상)도 열거에(웹 문구 맵과 1:1)
   'timeout', 'unreachable',                       // 연결 단계
   'auth', 'disabled', 'old-version', 'http', 'bad-body', // 응답 단계
+  'too-large', // 다음 작업 ⑤(c): 응답이 수신 상한(EDGE_RESPONSE_MAX_BYTES)을 넘음 — 예전에는 bad-body(‘엣지가 아닌 서버’)로 뭉갰다
 ]);
 
 const t = (v) => String(v ?? '').trim();
@@ -130,7 +132,8 @@ export async function pullFromEdge(agent, path, {
 
   const ms = Date.now() - t0;
   let body = null;
-  try { body = await readJsonCapped(res, EDGE_RESPONSE_MAX_BYTES, label); } catch { body = null; } // v2.583: 크기 상한
+  let capWhy = '';   // 다음 작업 ⑤(c): 크기 상한 초과(readCapped 의 code 'too-large') — JSON 형식 오류와 가른다
+  try { body = await readJsonCapped(res, EDGE_RESPONSE_MAX_BYTES, label); } catch (e) { body = null; if (e?.code === 'too-large') capWhy = capStr(e.message, 200); } // v2.583: 크기 상한
 
   const fail = (kind, reason) => ({ ok: false, kind, reason, ms, body, col, fetched: true });
   if (res.status === 401 && missing401) return fail('old-version', `이 엣지에 ${pathOnly} 가 없습니다 — v${minVersion} 이상으로 업그레이드해야 ${what} 수 있습니다.`);
@@ -138,6 +141,9 @@ export async function pullFromEdge(agent, path, {
   if (res.status === 404) { const k = kindFor404(body, { path: pathOnly, minVersion, what }); return fail(k.kind, k.reason); }
   const bodyWhy = isObj(body) ? strOf(body.reason, 300) : '';
   if (!res.ok) return fail('http', `HTTP ${res.status}${bodyWhy ? ` (${bodyWhy})` : ''}`);
+  // 다음 작업 ⑤(c) 2026-11-19(10회차 의심 1): 2xx 인데 본문이 수신 상한을 넘었으면 ‘형식이 다름’ 이 아니다 — 상한 · 크기를 말한다(조치: 엣지 봉투 축소 · 수신 상한 env).
+  //   상태 코드 판정(auth · 404 · http)은 예전 그대로 먼저다 — 바뀌는 것은 예전 bad-body 였던 이 경우의 kind · 사유뿐이다.
+  if (capWhy) return fail('too-large', `${capWhy} — 형식 오류가 아니라 크기 상한입니다(중앙 수신 상한 EDGE_RESPONSE_MAX_BYTES).`);
   if (!bodyOk(body)) return fail('bad-body', bodyWhy || '응답 형식이 다릅니다(엣지가 아닌 서버에 닿았을 수 있습니다).');
   return { ok: true, ms, body, col, fetched: true };
 }

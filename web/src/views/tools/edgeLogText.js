@@ -101,6 +101,7 @@ export const FETCH_KIND_TEXT = Object.freeze({
   unreachable: '중앙에서 그 엣지로 **닿지 못했습니다**(방화벽·주소·정지).',
   http: '엣지가 오류 상태코드로 답했습니다.',
   'bad-body': '응답 형식이 다릅니다 — 엣지가 아닌 서버(프록시·로드밸런서)에 닿았을 수 있습니다.',
+  'too-large': '엣지 응답이 중앙 **수신 상한**(EDGE_RESPONSE_MAX_BYTES)을 넘어 읽기를 멈췄습니다 — 형식 오류가 아니라 크기 문제입니다.',   // 다음 작업 ⑤(c)
   error: '요청 처리 중 오류가 났습니다.',
 });
 

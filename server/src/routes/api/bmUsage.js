@@ -26,7 +26,7 @@ import { fullReadWriteScopeOnlyWith, requireSettingsOwner } from '../admin/share
 import { knownAgentNames } from '../../central/knownAgents.js';
 import { unassignedCauses, CAUSE as UNASSIGNED_CAUSE } from '../../bmusage/attribution.js';
 import { TIER_LABEL } from '../../bmusage/license.js';
-import { publicTarget, publicSkipped, maskTargetAddress, maskBmIdentity, NO_PATH_REASON } from '../../bmusage/targets.js';
+import { publicTarget, publicSkipped, maskTargetAddress, maskBmIdentity, NO_PATH_REASON, pathCountsOf } from '../../bmusage/targets.js';
 import { maskActivityEvents, maskPollerStatus, scrubHosts, addressMatcher, isAdminReq, scrubberFor, maskedIdToken, MASK_TOKEN_PREFIX } from '../../auth/addressMask.js';
 import { nodePairIdOf } from '../../bmusage/maint/judge.js'; // 다음 점검 ①: 서버 = (법인, 키) 쌍 — 정비 창 판정과 같은 식별 함수(targetIdOf · 귀속 없음은 노드까지 — 4회차 D3 로 하나로)
 import { currentTargets, pollBmUsageOnce, bmUsageStatus, authStopsFor, sourceErrorsView, usageDetailFor } from '../../bmusage/poller.js';
@@ -794,12 +794,17 @@ export async function bmFaultsFleetView(req, snap, deps = {}) {
 
 /* ── 진단 스냅샷(원격 명령 실행 경로 — 규약은 bmusage/snapshot/run.js 머리말 · security-api.md v2.923) ─────────── */
 const _snapInflight = new Set();   // 중앙 → 엣지 대행 중복 전송 막기(같은 서버 동시 1건 — 엣지도 다시 막는다)
-/** 10회차 L2: 스냅샷 실행 표지 = 데모 · 역할(bmGate) ∧ OS 경로(실행이 409 no-os-path 로 거절하는 판정 그대로) — 예전에는 경로를 보지 않아 iDRAC 만 서버에 실행 칸이 열리고 누르면 409. */
-export function snapRunGateOf(req, snap, target, osPathIssue, via = 'local') {   // 10회차 L2 시험이 직접 부른다
+/**
+ * 10회차 L2: 스냅샷 실행 표지 = 데모 · 역할(bmGate) ∧ 경로(실행이 409 로 거절하는 판정 그대로) — 예전에는 경로를 보지 않아 iDRAC 만 서버에 실행 칸이 열리고 누르면 409.
+ *   다음 작업 ⑥ · ④: 경로 판정 = snapshot/run.js 의 함수 둘(이 노드 대상 snapshotOsPathIssue · 엣지 대행 대상 snapshotPublicPathIssue) — no-os-path · auth-unresolved · demo-target.
+ *   호출부(GET 보관분)가 둘을 넘긴다 — 여기는 판정 사본을 두지 않는다.
+ */
+export function snapRunGateOf(req, snap, target, osPathIssue, via = 'local', publicPathIssue = null) {   // 10회차 L2 · 다음 작업 ⑥ 시험이 직접 부른다
   const g = bmGate(req, 'snapshotRun', { snap });
   if (!g.ok) return g;
-  // 이 노드 대상은 실행과 같은 함수(osHost) · 엣지 대행 대상은 봉투의 공개 대상(osHost 를 싣지 않는다 — publicTarget)이라 그 경로 표지(paths 'os' = 엣지가 OS 등록을 해석함)로.
-  const why = via === 'edge' ? (Array.isArray(target?.paths) && !target.paths.includes('os') ? 'no-os-path' : null) : osPathIssue(target);
+  // 이 노드 대상은 실행과 같은 함수(osHost) · 엣지 대행 대상은 봉투의 공개 대상(osHost 를 싣지 않는다 — publicTarget)이라 그 표지(paths · osAuthUnresolved · demoOs)로.
+  //   판정 사본을 두지 않는다 — 엣지 판정 함수를 받지 못하면 판정하지 않는다(엣지가 실행 때 다시 거절한다).
+  const why = via === 'edge' ? (typeof publicPathIssue === 'function' ? publicPathIssue(target) : null) : osPathIssue(target);
   return why ? { ok: false, why } : g;
 }
 export function scrubSnapshot(res, isAdmin) {   // 9회차 G1 시험이 직접 부른다
@@ -873,7 +878,11 @@ export async function bmSnapshotRead(req, snap, deps = {}) {
   const code = res?.code || (res?.ok ? 'ok' : 'edge');
   // 반증 W4: 실행 칸을 잠글지 화면이 알 수 있게 — 쓰기 범위(조건 없이 · 실행 라우트와 같은 판정). 역할(operator 이상)은 화면이 따로 본다.
   // 8회차 F2: 데모 · 역할 표지(실행 라우트 앞의 authMiddleware denyDemoGuest · writeRole 과 같은 판정 — bmGate) — 예전에는 writable 만 실어 데모 계정에 실행 칸이 열리고 누르면 403.
-  const body = scrubSnapshot({ ...res, key, via: found.via, ...(found.via === 'edge' ? { agent: found.agent } : {}), writable: inUserWriteScope(req.user, snap, t(found.target.vcenterId)), actions: { run: snapRunGateOf(req, snap, found.target, (await import('../../bmusage/snapshot/run.js')).snapshotOsPathIssue, found.via) } }, isAdmin);
+  // 다음 작업 ⑥(b): 엣지 대행 대상의 경로 표지는 중앙이 마지막으로 가져온 봉투(공개 대상)를 본다 — 그 시각(보관분 snapAt)을 싣는다(화면이 ‘엣지 보관분 기준’ 을 밝힌다).
+  const S = await import('../../bmusage/snapshot/run.js');
+  const pathBasis = found.via === 'edge' ? { via: 'edge', at: Number(found.rec?.snapAt) || null } : { via: 'local' };
+  const body = scrubSnapshot({ ...res, key, via: found.via, ...(found.via === 'edge' ? { agent: found.agent } : {}), writable: inUserWriteScope(req.user, snap, t(found.target.vcenterId)),
+    actions: { run: snapRunGateOf(req, snap, found.target, S.snapshotOsPathIssue, found.via, S.snapshotPublicPathIssue) }, pathBasis }, isAdmin);
   const st = code === 'ok' ? 200 : snapStatus(code);
   return st === 200 ? body : { __status: st, ...body };
 }
@@ -1031,9 +1040,7 @@ api.get('/tools/bm-usage', toolsPerm, async (req, res) => {
       ? { ...tg.counts, targets: targets.length, skipped: skipped.length, byReason: skippedCounts,
           keyConflicts: new Set(applyScope(tg.keyConflicts || [], allowed).map((x) => x.key)).size,   // 반증 F3: 전역 수 대신 보이는 줄의 고유 키
           keyOverlaps: applyScope(tg.keyOverlaps || [], allowed).length,
-          idrac: targets.filter((x) => (x.paths || []).includes('idrac')).length,
-          os: targets.filter((x) => (x.paths || []).includes('os')).length,
-          both: targets.filter((x) => (x.paths || []).length > 1).length }
+          ...pathCountsOf(targets) }   // 다음 작업 ④: 표시 경로(데모 표지)까지 같은 함수(bmusage/targets.js) — 칩 · 표 · CSV 와 같은 값
       : tg.counts;
     const keys = new Set(targets0.map((x) => x.key));
     // 최신값은 **대상 목록 안의 것만** 준다(법인을 끄거나 등록이 사라진 서버의 옛 값이 새어 나가지 않게).
