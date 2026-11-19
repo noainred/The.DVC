@@ -15,7 +15,7 @@ import { vcHash } from '../vcd/vcdRoute.js';
 import { pickRows, toolIdsOf, fmtN, fmtU, gbText, shareText, barPct } from '../insight/insightCore.js';
 import { treemapLayout, maxTilesInCol, fillStep, tileColors, scaleLegend, RAMP, CRIT_BG, NONE_BG } from '../insight/treemap.js';
 import { mapHeightOf, autoMapHeight } from '../insight/insightPrefs.js';
-import { maxTilesPacked, worstMember } from '../insight/tilePack.js'; // v3.23.0 지도 칸 글자(설계 docs/design/insight-tiles)
+import { maxTilesPacked, worstMember, groupCountsText } from '../insight/tilePack.js'; // v3.23.0 지도 칸 글자(설계 docs/design/insight-tiles)
 import { useFolded, useLazyJson } from '../insight/useInsight.js';
 import Treemap from '../insight/Treemap.jsx';
 import { useMapPrefs, MapSizeSeg, MapSizeBox } from '../insight/MapSize.jsx';
@@ -114,7 +114,9 @@ export default function VmInsight({ mode = 'insight', filters = {}, scopeIds = n
   const fill = fills.find((f) => f.key === fillKey) || fills[0];
   const size = SIZE_DEFS.find((z) => z.key === sizeKey) || SIZE_DEFS[0];
   const layout = treemapLayout(mapGroups(picked.all, size));
-  const maxTiles = mapW ? maxTilesPacked(layout, mapW) : maxTilesInCol(layout);
+  // dbg3231: 좁은 화면(세로 띠)에서는 넓을 때 잰 옛 폭을 쓰지 않는다 — 자동 높이는 여러 열을 놓을 때만 실제 배치(가장 긴 작은 열) 기준.
+  const packedAuto = !!mapW && !narrow;
+  const maxTiles = packedAuto ? maxTilesPacked(layout, mapW) : maxTilesInCol(layout);
   const mapH = mapHeightOf(mapPrefs, maxTiles);
   const selSet = ids.length ? new Set(ids) : null;
   const pct0 = (v) => (v == null ? '—' : `${Math.round(v)}%`);
@@ -129,12 +131,18 @@ export default function VmInsight({ mode = 'insight', filters = {}, scopeIds = n
     };
   };
   // v3.23.0: ‘그 밖 N개’ 칸 — 색은 구성원 중 가장 높은 값(나쁜 것이 묶음에 가려지지 않게) · 누르면 아래에 목록
+  //   dbg3231: 대표 값은 오래되지 않은 법인에서 먼저(오래된 값이 묶음 칸을 지금 값처럼 칠하지 않게) · 오래됨 · 모름 구성원은 따로 센다 — 대표가 오래됐거나 모두 오래됐으면 빗금.
   const groupView = (members, g) => {
-    const { member, value } = worstMember(members, (m) => fill.val(m.row));
+    const isStale = (m) => m.row?.stale === true;
+    const { member, value } = worstMember(members, (m) => fill.val(m.row), isStale);
     const col = tileColors(fillStep(value, fill));
+    const staleN = members.filter(isStale).length;
+    const unknownN = members.filter((m) => numOrNull(fill.val(m.row)) == null).length;
+    const repStale = !!member && isStale(member) && value != null;
     return {
-      title: g.label, line: `가장 높은 ${fill.short} ${pct0(value)} · 합 ${size.text(g.size)}`, bg: col.bg, ink: col.ink,
-      tip: `${g.label} — 칸이 너무 작아 한 칸으로 묶은 법인(${members.map((m) => corpName(m.row)).join(' · ')}) · 색은 가장 높은 값(${member ? corpName(member.row) : '—'}) · 누르면 아래에 목록이 열립니다`,
+      title: g.label, line: `가장 높은 ${fill.short} ${pct0(value)}${repStale ? '(오래됨)' : ''} · 합 ${size.text(g.size)}`, bg: col.bg, ink: col.ink,
+      stale: repStale || (members.length > 0 && staleN === members.length),
+      tip: `${g.label} — 칸이 너무 작아 한 칸으로 묶은 법인(${members.map((m) => corpName(m.row)).join(' · ')}) · ${member ? `색은 가장 높은 값(${corpName(member.row)}${repStale ? ' — 값이 오래됨' : ''})` : '색 = 값 모름(값이 있는 구성원 없음)'}${groupCountsText(staleN, unknownN, repStale)} · 누르면 아래에 목록이 열립니다`,
     };
   };
   const scale = [...scaleLegend(fill.steps, { crit: fill.crit }).map((text, i) => ({ text, bg: RAMP[i] })),
@@ -191,9 +199,9 @@ export default function VmInsight({ mode = 'insight', filters = {}, scopeIds = n
         <MapSizeSeg prefs={mapPrefs} onPrefs={setMapPrefs} maxTiles={maxTiles} open={cfgOpen} onOpen={setCfgOpen} />
       </div>
       {cfgOpen && <MapSizeBox prefs={mapPrefs} onPrefs={setMapPrefs} maxTiles={maxTiles} onClose={() => setCfgOpen(false)} narrow={narrow}
-        autoNote={`자동 = 가장 긴 지역의 칸 수로 정합니다(지금 ${autoMapHeight(maxTiles)}px)`} />}
+        autoNote={packedAuto ? `자동 = 칸이 많은 지역을 여러 열로 나눈 뒤 가장 긴 열의 칸 수로 정합니다(지금 ${autoMapHeight(maxTiles)}px)` : `자동 = 가장 긴 지역의 칸 수로 정합니다(지금 ${autoMapHeight(maxTiles)}px)`} />}
       {layout.cols.length
-        ? <Treemap layout={layout} heightPx={mapH} tileView={tileView} groupView={groupView} onWidth={setMapW} selected={selSet} onToggle={onScopeIds ? toggleId : null} label="VM 현황 — 법인 칸"
+        ? <Treemap layout={layout} heightPx={mapH} tileView={tileView} groupView={groupView} onWidth={setMapW} valOf={(t) => fill.val(t.row)} selected={selSet} onToggle={onScopeIds ? toggleId : null} label="VM 현황 — 법인 칸"
           colText={(c) => `${c.label} · ${size.text(c.total)}`} />
         : <div className="ins-note">그릴 법인 칸이 없습니다 — 범위 안 법인의 크기 값이 없거나 0 입니다.</div>}
       <div className="ins-scale">

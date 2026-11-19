@@ -106,6 +106,9 @@ a.ins-td:hover { border-color: var(--accent); }
 .ins-tl.t-none b, .ins-tl.t-none span { display: none; }
 .ins-tl.t-none .ins-mk { align-self: center; font-size: 9.5px; padding: 0 3px; }
 .ins-tl.grp { border: 1px dashed rgba(255, 255, 255, 0.75); background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0 8px, transparent 8px 16px); }
+/* dbg3231 2회차: .ins-tl.grp 와 .ins-tl.stale 은 명시도가 같아(클래스 2개) 뒤의 .grp 빗금이 오래됨 빗금을 덮었다 — 오래된 묶음 칸이 지금 값 묶음 칸과 똑같아 보였다.
+   오래된 묶음 칸은 두 빗금을 겹친다(클래스 3개 — 반드시 .ins-tl.grp 뒤에 둔다). */
+.ins-tl.grp.stale { background-image: repeating-linear-gradient(135deg, rgba(0, 0, 0, 0.18) 0 6px, transparent 6px 12px), repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0 8px, transparent 8px 16px); }
 .ins-grp { display: flex; flex-direction: column; gap: 8px; background: var(--bg-soft); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; min-width: 0; }
 .ins-grph { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; min-width: 0; }
 .ins-grph b { font-size: 13.5px; font-weight: 800; color: var(--text); }
@@ -114,6 +117,9 @@ a.ins-td:hover { border-color: var(--accent); }
 .ins-grpn { display: inline-flex; align-items: center; gap: 7px; border: 0; background: transparent; color: var(--text); font: inherit; font-weight: 700; padding: 0; cursor: pointer; text-align: left; }
 .ins-grpn i { width: 12px; height: 12px; border-radius: 3px; flex: none; }
 .ins-grpn.on { color: #fde68a; }
+/* dbg3231 2회차: 목록 줄의 오래된 값 — 견본에 지도 칸과 같은 빗금 · 값 칸에 ‘(오래됨)’ */
+.ins-grpn i.stale { background-image: repeating-linear-gradient(135deg, rgba(0, 0, 0, 0.35) 0 2px, transparent 2px 4px); }
+.ins-grpst { color: var(--text-dim); font-weight: 700; }
 /* v3.22.0 칸 안의 작은 표(Hypervisor ‘못 버팀’ — 색이 아니라 표로 · S6). 칸이 낮으면(한 줄) 옆에 붙는다. 범례의 같은 표는 .ins-mk 를 그대로 쓴다. */
 .ins-mk { align-self: flex-start; font-style: normal; font-size: 10.5px; font-weight: 800; line-height: 1.3; padding: 0 6px; border-radius: 999px; background: #0b0b0b; color: #fca5a5; border: 1px solid #ef4444; white-space: nowrap; flex: none; }
 .ins-tl.one .ins-mk { align-self: center; }
