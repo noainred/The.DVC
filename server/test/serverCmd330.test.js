@@ -176,11 +176,13 @@ test('③ 출력 다듬기 — 터미널 제어 순서 · 제어문자 · CR 을
   const c = P.cleanOutput(many, { maxLines: 10 });
   assert.equal(c.lines, 10); assert.equal(c.cut, true);
   assert.equal(P.cleanOutput('x'.repeat(100), { maxLineChars: 10 }).text, 'x'.repeat(10));
-  // 선형(비율) — 같은 꼴을 4배로 늘려도 시간이 4배 남짓(제곱이면 16배)
-  const time = (n) => { const s = '\x1b['.repeat(n) + '\n'.repeat(n) + 'z'; const t0 = process.hrtime.bigint(); for (let i = 0; i < 3; i += 1) P.cleanOutput(s, { maxLines: 1e9 }); return Number(process.hrtime.bigint() - t0); };
-  time(2000);
-  const a = time(8000); const b = time(32000);
-  assert.ok(b / a < 10, `선형이어야 — ${a} → ${b} (${(b / a).toFixed(1)}배)`);
+  // 선형(비율) — 같은 꼴을 8배로 늘려도 시간이 8배 남짓(제곱이면 64배). 전량 실행 부하에서 1ms 짜리 측정이 흔들려 15배가 나온 적이 있다(간헐) —
+  //   크기를 키우고(수십 ms) 다섯 번 중 가장 빠른 값으로 비교한다.
+  const once = (n) => { const s = '\x1b['.repeat(n) + '\n'.repeat(n) + 'z'; const t0 = process.hrtime.bigint(); P.cleanOutput(s, { maxLines: 1e9 }); return Number(process.hrtime.bigint() - t0); };
+  const best = (n) => Math.min(...Array.from({ length: 5 }, () => once(n)));
+  best(4000);
+  const a = best(8000); const b = best(64000);
+  assert.ok(b / a < 24, `선형이어야 — ${a} → ${b} (${(b / a).toFixed(1)}배 · 8배 늘림)`);
 });
 
 test('③-2 끝 코드 표지 — 문장 수와 같을 때만 믿는다 · 124 는 시한 · 141(뒤 head 가 닫음)은 0 · 흉내 낸 표지로 수가 어긋나면 모름', () => {

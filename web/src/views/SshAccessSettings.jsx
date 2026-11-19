@@ -501,7 +501,7 @@ function FeaturesTab({ v }) {
         <tbody>{(v.features || []).map((f) => (
           <tr key={f.id}><td data-sort={f.label}><b>{f.label}</b>{f.ready === false && <div><Chip tone="muted">다음 단계 — 아직 접속하지 않음</Chip></div>}</td><td className="ssa-sub">{f.note}</td>
             <td className="right" data-sort={keys.filter((k) => (k.features || []).includes(f.id)).length}>{keys.filter((k) => (k.features || []).includes(f.id)).length}</td>
-            <td className="right" data-sort={f.explicit ? -1 : keys.filter((k) => k.features == null).length}>{f.explicit ? <span className="ssa-sub" title="예전 방식 키는 이 기능에 쓰지 않습니다 — 키마다 직접 켭니다">해당 없음(직접 켜야)</span> : keys.filter((k) => k.features == null).length}</td></tr>
+            <td className="right" data-sort={f.explicit ? '' : keys.filter((k) => k.features == null).length}>{f.explicit ? <span className="ssa-sub" title="예전 방식 키는 이 기능에 쓰지 않습니다 — 키마다 직접 켭니다">해당 없음(직접 켜야)</span> : keys.filter((k) => k.features == null).length}</td></tr>
         ))}</tbody>
       </STable>
       <p className="ssa-note">모든 기능이 같은 한 곳(서버 고정 키 → 법인 기본 키 → 비밀번호)에서 계정을 받습니다. 키마다 ‘쓸 수 있는 기능’ 에 없는 기능은 그 키로 접속하지 않습니다. 로그인이 거부되면 그 기능이 그 서버의 주기 접속을 멈춥니다(기능마다 따로 — 계정 잠금 방지).</p>

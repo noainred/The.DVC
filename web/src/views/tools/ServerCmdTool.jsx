@@ -12,6 +12,7 @@ import Select from '../../components/Select.jsx';
 import { fmtAgo, fmtTime } from '../../util/fmt.js';
 import { copyText } from '../../util/copyText.js';
 import { numOrNull } from '../../numOrNull.js';
+import { unitText } from '../unitText.js';   // 값이 없으면 단위 없이 ‘—’(루트 CLAUDE.md)
 import { CODE_TEXT, CRED_TEXT, codeTone, pickIssue, sourceText, osText, paramsText, resultText, msText, resultCounts, copyAllText, outHead } from './serverCmdText.js';
 import { Chip } from '../sshAccessParts.jsx';   // 서버 접속 화면과 같은 칩(같은 CSS)
 import { toneVar } from './toneVar.js';
@@ -136,7 +137,7 @@ export default function ServerCmdTool() {
       <div className="ssa-head">
         <div className="ssa-title">
           <h3>서버 명령 실행</h3>
-          <p className="ssa-note">등록된 서버에 <b>정해 둔 확인 명령</b>을 누를 때만 돌리고 출력을 봅니다. 읽기 전용 · sudo 를 쓰지 않음 · 명령 글자를 직접 넣는 칸은 없습니다. 출력은 저장하지 않고 포탈 메모리에 마지막 실행 한 건만 {v.limits?.ttlMin ?? '—'}분 둡니다. 계정은 설정 › 보안 › 서버 접속(SSH · Windows)에서 정합니다 — 공통 계정 · 키는 ‘쓸 수 있는 기능’ 에서 ‘서버 명령 실행’ 을 직접 켜야 쓰고, 서버에 따로 정한 비밀번호는 기능 목록이 없어 그대로 씁니다.</p>
+          <p className="ssa-note">등록된 서버에 <b>정해 둔 확인 명령</b>을 누를 때만 돌리고 출력을 봅니다. 읽기 전용 · sudo 를 쓰지 않음 · 명령 글자를 직접 넣는 칸은 없습니다. 출력은 저장하지 않고 포탈 메모리에 마지막 실행 한 건만 {unitText(v.limits?.ttlMin, '분')} 둡니다. 계정은 설정 › 보안 › 서버 접속(SSH · Windows)에서 정합니다 — 공통 계정 · 키는 ‘쓸 수 있는 기능’ 에서 ‘서버 명령 실행’ 을 직접 켜야 쓰고, 서버에 따로 정한 비밀번호는 기능 목록이 없어 그대로 씁니다.</p>
         </div>
         <button className="btn btn-sm" type="button" onClick={load}>다시 읽기(화면)</button>
       </div>
@@ -234,7 +235,7 @@ export default function ServerCmdTool() {
             </tbody>
           </STable>
           <div className="ssa-acts" style={{ justifyContent: 'space-between' }}>
-            <span className="ssa-sub">선택 <b>{pickedIds.length}</b>대 · 한 번에 최대 {max ?? '—'}대 · 동시에 {v.limits?.concurrency ?? '—'}대씩</span>
+            <span className="ssa-sub">선택 <b>{pickedIds.length}</b>대 · 한 번에 최대 {unitText(max, '대')} · 동시에 {unitText(v.limits?.concurrency, '대씩')}</span>
             <button className="btn btn-sm primary" type="button" disabled={busy || running || !paramsOk || !pickedIds.length || max == null || pickedIds.length > max} onClick={run}>
               {running ? `실행 중 ${v.job.done}/${v.job.total}대…` : `선택한 ${pickedIds.length}대에 실행`}
             </button>
@@ -250,7 +251,7 @@ export default function ServerCmdTool() {
         <div className="ssa-acts">
           <span className="scm-num">3</span><h4 style={{ margin: 0 }}>결과</h4>
           {last ? <span className="ssa-sub">{last.label}{paramsText(lastPreset, last.params) ? ` · ${paramsText(lastPreset, last.params)}` : ''} · {fmtTime(last.startedAt)} · {last.by} 실행 · {last.rows.length} / {last.total}대 끝남</span>
-            : <span className="ssa-sub">아직 실행하지 않았거나, 지난 출력이 지워졌습니다({v.limits?.ttlMin ?? '—'}분이 지나면 지웁니다).</span>}
+            : <span className="ssa-sub">아직 실행하지 않았거나, 지난 출력이 지워졌습니다({unitText(v.limits?.ttlMin, '분')}이 지나면 지웁니다).</span>}
         </div>
         {last && (
           <>
@@ -280,8 +281,8 @@ export default function ServerCmdTool() {
                         : <span className="ssa-sub">{r.code === 'cred' && CRED_TEXT[r.credCode] ? CRED_TEXT[r.credCode] : (r.reason || CODE_TEXT[r.code] || '—')}</span>}
                       {r.ran && r.partial && <div className="ssa-sub" style={{ color: toneVar('warn') }}>{r.reason}</div>}
                     </td>
-                    <td data-sort={r.ran ? r.lines : -1}>{r.ran ? r.lines : '—'}{r.cut && <div><Chip tone="warn">잘림</Chip></div>}</td>
-                    <td data-sort={r.ms ?? -1}>{msText(r.ms)}</td>
+                    <td data-sort={r.ran ? r.lines : ''}>{r.ran ? r.lines : '—'}{r.cut && <div><Chip tone="warn">잘림</Chip></div>}</td>
+                    <td data-sort={r.ms ?? ''}>{msText(r.ms)}</td>
                     <td data-nosort>{r.ran ? <button className="btn btn-sm" type="button" aria-expanded={open.has(r.id)} onClick={() => toggleOpen(r.id)}>{open.has(r.id) ? '접기' : '펼치기'}</button> : <span className="ssa-sub">—</span>}</td>
                   </tr>
                 ))}

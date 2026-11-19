@@ -1526,10 +1526,10 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/secret-scan` | 역할 `admin` · `fleetOnly` | [server/src/routes/api/toolsInfo.js:40](../server/src/routes/api/toolsInfo.js#L40) |
 | GET | `/tools/serial-lookup` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/serialLookup.js:73](../server/src/routes/api/serialLookup.js#L73) |
 | GET | `/tools/serial-lookup/export.csv` | 권한 `data.csv`, `tools` · `fullScopeOnly` | [server/src/routes/api/serialLookup.js:102](../server/src/routes/api/serialLookup.js#L102) |
-| GET | `/tools/server-cmd` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/serverCmd.js:29](../server/src/routes/api/serverCmd.js#L29) |
-| GET | `/tools/server-cmd/output` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/serverCmd.js:39](../server/src/routes/api/serverCmd.js#L39) |
-| GET | `/tools/server-cmd/preview` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/serverCmd.js:31](../server/src/routes/api/serverCmd.js#L31) |
-| POST | `/tools/server-cmd/run` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/serverCmd.js:40](../server/src/routes/api/serverCmd.js#L40) |
+| GET | `/tools/server-cmd` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/serverCmd.js:35](../server/src/routes/api/serverCmd.js#L35) |
+| GET | `/tools/server-cmd/output` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/serverCmd.js:45](../server/src/routes/api/serverCmd.js#L45) |
+| GET | `/tools/server-cmd/preview` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/serverCmd.js:38](../server/src/routes/api/serverCmd.js#L38) |
+| POST | `/tools/server-cmd/run` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/serverCmd.js:46](../server/src/routes/api/serverCmd.js#L46) |
 | GET | `/tools/server-info` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/serverInfo.js:21](../server/src/routes/api/serverInfo.js#L21) |
 | POST | `/tools/server-info/read` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/serverInfo.js:25](../server/src/routes/api/serverInfo.js#L25) |
 | GET | `/tools/service-check` | 권한 `tools` | [server/src/routes/api/checksLogs.js:223](../server/src/routes/api/checksLogs.js#L223) |
