@@ -131,6 +131,20 @@ test('① /auth/me settingsOwnerTier = 소유자 GET 의 실제 판정(계정 �
   assert.equal(got?.s, 403, 'GET 이어도 판정이 던지면 거부(기본값 false)');
 });
 
+test('① 재확인 N2 — 세션 보안 소유자 경고가 게이트와 같은 판정(쓰기 일부 소유자도 경고 · 쓰기 범위 사유) · 판정이 던지면 경고', async () => {
+  const ops = await import('../src/routes/admin/opsSettings.js');
+  const w = ops.scopedOwnerWarnings(['own', 'wown', 'sown', 'adm', 'nobody']);
+  const by = Object.fromEntries(w.map((x) => [x.username, x]));
+  assert.deepEqual(Object.keys(by).sort(), ['sown', 'wown'], JSON.stringify(w));
+  assert.equal(by.wown.reason, SH.SETTINGS_OWNER_WRITE_SCOPE_REASON, '쓰기 일부 — 게이트(requireSettingsOwner)가 내는 사유와 같다');
+  assert.equal(by.wown.writeScope, 'partial');
+  assert.equal(by.sown.reason, SH.SETTINGS_OWNER_FULL_SCOPE_REASON, '조회 범위 — 예전 사유 그대로');
+  // 경고 ⟺ 실제 게이트: 경고된 계정은 소유자 GET 403 · 경고 없는 소유자는 200
+  for (const who of ['own', 'wown', 'sown']) {
+    assert.equal((await call(who, 'GET', '/api/admin/backup/status')).s === 200, !by[who], `${who}: 경고 ⟺ 403`);
+  }
+});
+
 /* ── ② ─────────────────────────────────────────────────────────────────── */
 const J = await import('../src/bmusage/maint/judge.js');
 const SC = await import('../src/bmusage/maint/schedule.js');
@@ -163,6 +177,9 @@ test('② 순수 — 지금 만든 매일 창은 지난 31일을 덮지 않는�
   // 만든 시각을 모르면(형식 밖 · 옛 꼴) 자르지 않는다(0 으로 읽지 않는다 — 예전 그대로)
   const wn = daily(null, { confirmedAt: T0 });   // 재확인 시각은 있다(만료 판정은 그대로)
   assert.equal(J.coverIntervals([wn], TARGET, T0 - 31 * DAY, T0, { scope: 'exclude' }).length, 32);
+  // 재확인 S3: at 키가 **없는** 옛 꼴(undefined) — Number(undefined)=NaN 으로 읽으면 지난 구간이 통째로 사라진다(null 만 넣으면 Number(null)=0 이 같은 답이라 못 잡는다)
+  const wu = daily(T0); delete wu.at;
+  assert.equal(J.coverIntervals([wu], TARGET, T0 - 31 * DAY, T0, { scope: 'exclude' }).length, 32, 'at 이 없으면 자르지 않는다(사라지지 않는다)');
   // 일회 창(시작이 지난 일회 창 — 만들 때 끝이 지금 뒤면 받는다)도 같은 규칙
   const once = { ...daily(T0), id: 'once', schedule: { kind: 'once', start: ymdhm(T0 - 2 * HOUR), end: ymdhm(T0 + HOUR) } };
   assert.deepEqual(J.coverIntervals([once], TARGET, T0 - DAY, T0 + DAY).map((x) => [x.from, x.to]), [[T0, T0 + HOUR]]);
