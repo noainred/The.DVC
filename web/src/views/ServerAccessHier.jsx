@@ -173,9 +173,10 @@ export function HierTab({ v, corpName, reload, say }) {
                 </Select></label>
                 {level === 'windows' && (
                   <label className="ssa-field">접속 방식 <Select sort={false} className="select select-sm" value={edit.via || ''} onChange={(e) => setEdit({ ...edit, via: e.target.value })}>
-                    <option value="">SSH(OpenSSH Server)</option><option value="winrm">WinRM HTTPS(NTLM · 비밀번호만)</option>
+                    <option value="">SSH</option><option value="winrm">WinRM HTTPS</option>
                   </Select></label>
                 )}
+                {level === 'windows' && edit.via === 'winrm' && <p className="ssa-note">WinRM 은 NTLMv2 · 비밀번호 로그인만(키 없음) · 서버 인증서는 설정 › 보안 › 장비 신뢰에서 승인한 것만 · Windows 단계를 물려받는 서버에만 닿습니다(따로 정한 서버는 SSH).</p>}
                 {level === 'windows' && edit.via === 'winrm' && (
                   <label className="ssa-field">WinRM 포트 <input className="input" inputMode="numeric" value={edit.port || ''} placeholder="5986" onChange={(e) => setEdit({ ...edit, port: e.target.value.replace(/[^0-9]/g, '').slice(0, 5) })} /></label>
                 )}

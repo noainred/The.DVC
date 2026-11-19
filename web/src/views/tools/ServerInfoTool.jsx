@@ -4,7 +4,7 @@
  * 계정 · 로그인은 설정 › 보안 › 서버 접속(SSH · Windows)이 정한다 — 이 화면은 계정을 고르지 않는다.
  * 못 읽은 칸은 ‘— 못 읽음 · 권한’ 처럼 이유를 보이고 0 으로 채우지 않는다.
  */
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { fetchJson, postJson } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
@@ -20,11 +20,14 @@ const BASE_ROWS = [
 ];
 
 function Detail({ s, onClose }) {
+  const ref = useRef(null);
+  // 상세는 표 아래에 열린다 — 누른 뒤 그 자리로 옮겨 보인다(화면 확인: 표가 길면 열린 줄 모르고 지나쳤다)
+  useEffect(() => { ref.current?.scrollIntoView?.({ block: 'start', behavior: 'smooth' }); }, [s.id]);
   const r = s.result;
   const sh = shownOf(r);
   const src = sh?.src || null;
   return (
-    <section className="ssa-sec" aria-label={`${s.name} 서버 정보`}>
+    <section className="ssa-sec" aria-label={`${s.name} 서버 정보`} ref={ref}>
       <div className="ssa-acts">
         <h4 style={{ margin: 0 }}>{s.name}</h4><Chip>{osText(s.os)}</Chip>
         {r && <Chip tone={codeTone(r.code)}>{CODE_TEXT[r.code] || r.code}</Chip>}

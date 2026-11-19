@@ -545,7 +545,8 @@ async function loginOnce(s, { accountId = '', auth = '', ignoreAccountStop = fal
     if (si) return { ok: false, kind: 'corp-stopped', reason: REFS.AUTH_ERROR['account-corp-stopped'] };
     a = { ok: true, username: candidate.username, password: candidate.password, authKind: 'password' };
   } else {
-    a = REFS.resolveOsAuth({ ...s, keyRef: '', credRef: accountId, osAuth: auth === 'password' ? 'password' : '', inherit: undefined, password: '' }, { feature: 'conn-test', ignoreAccountStop });
+    // v3.26 반증 F4: WinRM 으로 확인하면 비밀번호로 해석한다(키 + 비밀번호 계정에서 키를 고르면 WinRM 확인이 늘 실패했다)
+    a = REFS.resolveOsAuth({ ...s, keyRef: '', credRef: accountId, osAuth: auth === 'password' || via === 'winrm' ? 'password' : '', inherit: undefined, password: '' }, { feature: 'conn-test', ignoreAccountStop });
     if (!a.ok) return { ok: false, kind: a.code, reason: a.error };
     if (a.authKind === 'none') return { ok: false, kind: 'no-secret', reason: '이 공통 계정에는 키 · 비밀번호가 없습니다.' };
   }
@@ -562,7 +563,7 @@ async function loginOnce(s, { accountId = '', auth = '', ignoreAccountStop = fal
       return { ok: true, kind: 'ok', authKind: 'password', ms: Date.now() - t0, ...meta };
     } catch (e) {
       const k = e?.kind || '';
-      if (k === 'tls-peer') return { ok: false, kind: 'tls', reason: 'WinRM 인증서를 신뢰하지 않아 끊었습니다 — 설정 › 보안 › 장비 신뢰에서 지문을 확인 · 승인하세요.', ...meta };
+      if (k === 'tls-peer' || k === 'cbt') return { ok: false, kind: 'tls', reason: 'WinRM 인증서를 신뢰하지 않아 끊었습니다 — 설정 › 보안 › 장비 신뢰에서 지문을 확인 · 승인하세요.', ...meta };
       if (k === 'auth-rejected') return { ok: false, kind: 'auth-rejected', reason: '로그인이 거부됐습니다(다시 시도하지 않습니다 — 계정 잠금 방지).', ...meta };
       return { ok: false, kind: 'connect', reason: `WinRM 에 접속하지 못했습니다(${String(e?.message || e).replace(/\s+/g, ' ').slice(0, 100)})`, ...meta };
     }

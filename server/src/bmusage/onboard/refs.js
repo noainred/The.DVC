@@ -310,7 +310,8 @@ function integrityOk(m, parsed) {
  * @returns {{ok:true, username:string, password:string, privateKey?:string, passphrase?:string, authKind:'key'|'password'|'none', keyFingerprint?:string, keyName?:string}
  *          | {ok:false, code:string, error:string}}
  */
-export function resolveOsAuth(server = {}, { feature = '', ignoreAccountStop = false } = {}) {
+export function resolveOsAuth(server = {}, { feature = '', ignoreAccountStop = false, winrm = false } = {}) {
+  // winrm — 호출부가 **WinRM 으로 붙을 때만** true(서버 정보 코어 · 먼저 확인). SSH 기능(사용률 · 스토리지 · 연결 시험 …)은 지정에 WinRM 이 있어도 예전 그대로 키 우선이다(v3.26 반증 F3).
   // ignoreAccountStop — ‘한 대로 다시 확인’(sshaccess/service.verifyAccount) 하나만: 계정 단위 정지를 푸는 확인 한 번은 정지를 넘어야 한다(사람이 누름 · 한 번 · 자동 재시도 없음).
   const keyRef = t(server.keyRef);
   let credRef = t(server.credRef);
@@ -340,7 +341,7 @@ export function resolveOsAuth(server = {}, { feature = '', ignoreAccountStop = f
   const username = (acc ? KS.loginNameOf(acc) : '') || t(server.username) || 'root';
   // osAuth 'password' = 비밀번호 고정(공통 계정에 기본 키가 있어도 — CSV os_key ‘password’). v3.24: 물려받은 지정의 auth 'password' 도 같다.
   // v3.26: WinRM 은 비밀번호(NTLM)만 — 기본 키가 있어도 비밀번호로(키가 없으면 붙지 않는다).
-  const viaWinrm = inherited?.via === 'winrm' && server.os === 'windows';
+  const viaWinrm = winrm === true && inherited?.via === 'winrm' && server.os === 'windows';
   const pwPinned = server.osAuth === 'password' || inherited?.auth === 'password' || viaWinrm;
   const useKey = pwPinned ? '' : (keyRef || (acc && acc.keyRef) || '');
   const accMeta = { ...(acc ? { accountId: acc.id, accountName: acc.name, source: inherited ? inherited.source : 'own' } : (inherited ? {} : { source: 'own' })),
@@ -412,12 +413,12 @@ export function authCredOf(s = {}) {
  * 폴러용 — OS 등록부 원본에 해석한 자격을 덧씌운다(원본 객체는 바꾸지 않는다). 해석 실패 항목은 authError 를 달아
  * 수집이 접속하지 않고 그 사유로 실패하게 한다(빈 비밀번호로 시도해 인증 실패 · 계정 잠금을 부르지 않게).
  */
-export function withResolvedAuth(list = [], { feature = '' } = {}) {
+export function withResolvedAuth(list = [], { feature = '', winrm = false } = {}) {
   return (Array.isArray(list) ? list : []).map((s) => {
     if (!s || typeof s !== 'object') return s;
     // 예전 항목(서버 비밀번호) — 그대로. v3.24: 자기 자격이 없는 승인된 서버(계층 지정을 물려받음)는 해석한다.
     if (!t(s.keyRef) && !t(s.credRef) && (hasOwnCred(s) || !inheritActive(s))) return s;
-    const a = resolveOsAuth(s, { feature });
+    const a = resolveOsAuth(s, { feature, winrm });
     // v3.24: 공통 계정 출처(계정 id · 이름 · 비밀번호 판)를 싣는다 — 수집 결과를 본 곳이 계정 사용 기록 · 계정 단위 정지에 쓴다(sshaccess/outcome.js). 비밀은 아니다.
     const accOut = { ...(a.accountId ? { credAccountId: a.accountId, credAccountName: a.accountName || '', credSource: a.source || '', ...(a.secretVersion != null ? { credVersion: a.secretVersion } : {}) } : (a.source ? { credSource: a.source } : {})),
       ...(a.via ? { via: a.via, viaPort: a.viaPort || null } : {}) };   // v3.26: 접속 방식(비밀 아님)

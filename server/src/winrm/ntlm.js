@@ -6,7 +6,7 @@
  * 규격: MS-NLMP(NEGOTIATE · CHALLENGE · AUTHENTICATE 메시지 · NTOWFv2 · NTLMv2 응답 · MIC · 채널 바인딩). 시험은 RFC 1320 MD4 벡터와
  *   MS-NLMP 4.2.4 NTLMv2 예시 값(User/Domain/Password)으로 계산을 대조한다 — **실제 Windows 서버로는 아직 확인하지 못했다**(정직 기록 · 설계 README §7).
  *
- * 하는 일만: 비밀번호는 NT 해시로만 쓰고 메시지에 원문을 싣지 않는다 · LM 응답은 보내지 않는다(빈 칸) · NTLMv1 은 쓰지 않는다.
+ * 하는 일만: 비밀번호는 NT 해시로만 쓰고 메시지에 원문을 싣지 않는다 · LM 칸은 규격대로(시각이 있으면 Z(24) · 없으면 LMv2) · NTLMv1 은 쓰지 않는다.
  * 하지 않는 일: 메시지 봉인(Sealing — WinRM HTTP 5985 의 본문 암호화)은 구현하지 않는다 — 이 모듈은 HTTPS(5986) 위에서만 쓴다(TLS 가 본문을 지킨다).
  */
 import crypto from 'node:crypto';
@@ -120,18 +120,55 @@ export function fileTime(ms = Date.now()) {
   const b = Buffer.alloc(8); b.writeBigUInt64LE(v); return b;
 }
 
+/* ── 채널 바인딩(RFC 5929 tls-server-end-point · MS-NLMP 3.1.5.2.2) ─────────────── */
+
+/** DER TLV 하나(길이 검사 — 서버 인증서는 장비가 준 값이다). */
+function tlv(buf, off) {
+  if (off + 2 > buf.length) throw new Error('인증서 DER 이 잘렸습니다');
+  const tag = buf[off]; let len = buf[off + 1]; let o = off + 2;
+  if (len & 0x80) {
+    const n = len & 0x7f;
+    if (n < 1 || n > 4 || o + n > buf.length) throw new Error('인증서 DER 길이가 올바르지 않습니다');
+    len = 0; for (let i = 0; i < n; i += 1) len = len * 256 + buf[o + i];
+    o += n;
+  }
+  if (o + len > buf.length) throw new Error('인증서 DER 칸이 밖을 가리킵니다');
+  return { tag, start: o, end: o + len };
+}
+function oidText(b) {
+  const out = [Math.floor(b[0] / 40), b[0] % 40]; let v = 0;
+  for (let i = 1; i < b.length && i < 64; i += 1) { v = v * 128 + (b[i] & 0x7f); if (!(b[i] & 0x80)) { out.push(v); v = 0; } }
+  return out.join('.');
+}
+/** 인증서(DER)의 서명 알고리즘 OID — Certificate ::= SEQUENCE { tbsCertificate, signatureAlgorithm, signature }. */
+export function certSignatureOid(der) {
+  const cert = tlv(der, 0);
+  if (cert.tag !== 0x30) throw new Error('인증서가 SEQUENCE 가 아닙니다');
+  const tbs = tlv(der, cert.start);
+  const alg = tlv(der, tbs.end);
+  const oid = tlv(der, alg.start);
+  if (alg.tag !== 0x30 || oid.tag !== 0x06) throw new Error('인증서 서명 알고리즘을 읽지 못했습니다');
+  return oidText(der.subarray(oid.start, oid.end));
+}
 /**
- * 채널 바인딩(RFC 5929 tls-server-end-point · MS-NLMP 3.1.5.2.2 — 서버 인증서 해시) → MsvAvChannelBindings 값(16바이트 MD5).
- * 인증서 서명 알고리즘이 MD5 · SHA-1 이거나 모르면 SHA-256(RFC 5929 4.1).
+ * RFC 5929 4.1 — 서명이 해시 하나를 쓰고 그것이 MD5 · SHA-1 이 아니면 그 해시, MD5 · SHA-1 이면 SHA-256. 그 밖(Ed25519 · RSASSA-PSS 등 · 모르는 OID)은 null —
+ *   호출부는 AUTHENTICATE 를 보내지 않는다(틀린 바인딩으로 보내면 맞는 비밀번호가 거부돼 계정 정지가 걸린다 · v3.26 반증 F2: Node 의 X509Certificate 에 서명 알고리즘 칸이 없어 늘 SHA-256 이었다).
+ */
+const SIG_HASH = new Map([
+  ['1.2.840.113549.1.1.4', 'sha256'], ['1.2.840.113549.1.1.5', 'sha256'], ['1.2.840.113549.1.1.14', 'sha224'], ['1.2.840.113549.1.1.11', 'sha256'], ['1.2.840.113549.1.1.12', 'sha384'], ['1.2.840.113549.1.1.13', 'sha512'],
+  ['1.2.840.10045.4.1', 'sha256'], ['1.2.840.10045.4.3.1', 'sha224'], ['1.2.840.10045.4.3.2', 'sha256'], ['1.2.840.10045.4.3.3', 'sha384'], ['1.2.840.10045.4.3.4', 'sha512'],
+  ['1.2.840.10040.4.3', 'sha256'], ['2.16.840.1.101.3.4.3.2', 'sha256'],
+]);
+export function certHashAlg(der) {
+  try { return SIG_HASH.get(certSignatureOid(Buffer.from(der))) || null; } catch { return null; }
+}
+/**
+ * 채널 바인딩 값(MsvAvChannelBindings — 16바이트 MD5). 알고리즘을 정할 수 없으면 던진다(보내지 않는다).
  * @param {Buffer} certDer  서버 인증서 DER
  */
 export function channelBindingHash(certDer) {
-  let alg = 'sha256';
-  try {
-    const x = new crypto.X509Certificate(certDer);
-    const m = /sha(384|512)/i.exec(String(x.toLegacyObject?.().signatureAlgorithm || x.signatureAlgorithm || ''));
-    if (m) alg = `sha${m[1]}`;
-  } catch { alg = 'sha256'; }
+  const alg = certHashAlg(certDer);
+  if (!alg) throw new Error('서버 인증서의 서명 알고리즘으로 채널 바인딩 해시를 정할 수 없습니다(RFC 5929) — 보내지 않습니다');
   const appData = Buffer.concat([Buffer.from('tls-server-end-point:', 'latin1'), crypto.createHash(alg).update(certDer).digest()]);
   // gss_channel_bindings_struct: initiator(addrtype 4 + len 4) · acceptor(4 + 4) · application_data(len 4 + data) — 주소는 비운다
   const head = Buffer.alloc(20); head.writeUInt32LE(appData.length, 16);
@@ -150,7 +187,7 @@ export function ntlmv2Response({ ntHash, serverChallenge, clientChallenge, times
 }
 
 /**
- * AUTHENTICATE_MESSAGE(Type 3) — NTLMv2 응답 + (서버가 시각을 줬으면) MIC + 채널 바인딩. LM 응답은 0 바이트.
+ * AUTHENTICATE_MESSAGE(Type 3) — NTLMv2 응답 + (서버가 시각을 줬으면) MIC + 채널 바인딩. LM 칸은 Z(24) 또는 LMv2(MS-NLMP 3.3.2).
  * @param {{user:string, domain:string, password:string, workstation?:string, negotiate:Buffer, challenge:object, certDer?:Buffer|null,
  *          clientChallenge?:Buffer, now?:number}} o  clientChallenge · now 는 시험용(기본: 무작위 · 지금). challenge 는 readChallenge 결과(raw 포함).
  * @returns {{message:Buffer, sessionKey:Buffer, flags:number}}
@@ -170,7 +207,9 @@ export function authenticateMessage({ user, domain, password, workstation = '', 
   pairs.push({ id: AV.EOL, value: Buffer.alloc(0) });
   const { ntResponse, sessionBaseKey } = ntlmv2Response({ ntHash: ntowfv2(user, domain, password), serverChallenge: ch.challenge, clientChallenge: cc, timestamp: ts, targetInfo: avPairsBuffer(pairs) });
   const flags = (NEGOTIATE_FLAGS & ch.flags) >>> 0;
-  const payload = { lm: Buffer.alloc(0), nt: ntResponse, dom: utf16(domain), user: utf16(user), ws: utf16(workstation), key: Buffer.alloc(0) };
+  // LM 칸(MS-NLMP 3.3.2): 서버가 시각(MsvAvTimestamp)을 줬으면 Z(24) · 아니면 LMv2(HMAC(NTOWFv2, 서버 챌린지 + 클라이언트 챌린지) + 클라이언트 챌린지) — v3.26 반증(빈 칸은 규격 밖)
+  const lm = withMic ? Buffer.alloc(24) : Buffer.concat([hmacMd5(ntowfv2(user, domain, password), ch.challenge, cc), cc]);
+  const payload = { lm, nt: ntResponse, dom: utf16(domain), user: utf16(user), ws: utf16(workstation), key: Buffer.alloc(0) };
   const HEAD = 88;   // 서명 8 · 종류 4 · 칸 6×8 · 플래그 4 · 버전 8 · MIC 16
   const order = ['lm', 'nt', 'dom', 'user', 'ws', 'key'];
   const fieldAt = { lm: 12, nt: 20, dom: 28, user: 36, ws: 44, key: 52 };

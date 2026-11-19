@@ -16,7 +16,7 @@
  */
 import crypto from 'node:crypto';
 import { listBmServersRaw, registryLoadError } from '../bmstor/registry.js';
-import { withResolvedAuth, AUTH_ERROR } from '../bmusage/onboard/refs.js';
+import { withResolvedAuth, effectiveAccountOf, AUTH_ERROR } from '../bmusage/onboard/refs.js';
 import { withSsh, isSshAuthError, isSshHostKeyError } from '../proxy/sshExec.js';
 import { withDeadline } from '../util/deadline.js';
 import { gateAccountLogin } from './accountGate.js';
@@ -78,7 +78,10 @@ export async function readServer(serverId, { feature, plan = {}, deadlineMs = RE
   const os = raw.os === 'windows' ? 'windows' : 'linux';
   const step = plan[os];
   if (!step || typeof step.command !== 'string' || !step.command) return { ok: false, code: 'no-plan', os, reason: `이 기능은 ${os === 'windows' ? 'Windows' : 'Linux'} 읽기 묶음이 없습니다.` };
-  const [srv] = withResolvedAuth([raw], { feature });
+  // 접속 방식은 **계층 지정에서만** 정한다(effectiveAccountOf — 등록부 원본의 via 칸은 보지 않는다 · v3.26 반증 F9). 물려받은 Windows 단계 지정이 WinRM 일 때만.
+  const ef = effectiveAccountOf(raw);
+  const viaWinrm = os === 'windows' && (ef.source === 'os') && ef.via === 'winrm';
+  const [srv] = withResolvedAuth([raw], { feature, winrm: viaWinrm });
   const auth = { kind: srv.privateKey ? 'key' : 'password', account: t(srv.credAccountName || '', 64), source: t(srv.credSource || (srv.keyRef || srv.credRef ? 'own' : ''), 16) };
   if (srv.authErrorCode) return { ok: false, code: 'cred', credCode: srv.authErrorCode, reason: String(srv.authError || '').slice(0, 300), os, auth };
   if (!srv.privateKey && !srv.password) return { ok: false, code: 'not-configured', os, auth, reason: '이 서버에 정한 계정이 없습니다(따로 정함 · 물려받기 승인 모두 없음) — 설정 › 보안 › 서버 접속에서 정하세요.' };
@@ -90,18 +93,17 @@ export async function readServer(serverId, { feature, plan = {}, deadlineMs = RE
     .then((x) => ({ ok: true, out: x.out }))
     .catch((e) => ({ ok: false, error: String(e?.message || e), hostkey: isSshHostKeyError(e), authFailed: isSshAuthError(e), timeout: sig.aborted || !!signal?.aborted })), '서버 읽기 시한 초과')
     .catch((e) => ({ ok: false, error: String(e?.message || e), timeout: true }));
-  // v3.26: Windows 단계 지정이 WinRM 이면 WinRM HTTPS + NTLM 으로(비밀번호만 — resolveOsAuth 가 키를 쓰지 않게 이미 막았다)
-  const viaWinrm = os === 'windows' && srv.via === 'winrm';
+  // v3.26: Windows 단계 지정이 WinRM 이면 WinRM HTTPS + NTLM 으로(비밀번호만 — resolveOsAuth(winrm) 가 키를 쓰지 않게 이미 막았다)
   if (viaWinrm && (!step.winrm || !srv.password)) return { ok: false, code: 'no-plan', os, auth, reason: 'WinRM 으로 읽을 묶음이나 비밀번호가 없습니다.' };
   const runWinrm = () => withDeadline(deadlineMs, async (sig) => {
     const { username, domain } = ntlmNameOf(srv.username);
     try {
-      const out = await winrmRun({ host: String(srv.host), port: Number(srv.viaPort) || WINRM_PORT, username, domain, password: srv.password, command: step.winrm.command, args: [...step.winrm.args],
+      const out = await winrmRun({ host: String(srv.host), port: Number(ef.port) || WINRM_PORT, username, domain, password: srv.password, command: step.winrm.command, args: [...step.winrm.args],
         timeoutMs: Math.max(5_000, deadlineMs - 2_000), signal: signal ? AbortSignal.any([sig, signal]) : sig, maxBytes: step.maxBytes || 1024 * 1024 });
       return { ok: true, out: { code: out.exitCode, stdout: out.stdout, stderr: out.stderr } };
     } catch (e) {
       const k = e?.kind || '';
-      return { ok: false, error: String(e?.message || e), authFailed: k === 'auth-rejected', tls: k === 'tls-peer', timeout: k === 'timeout' || sig.aborted, tooLarge: k === 'too-large' };
+      return { ok: false, error: String(e?.message || e), authFailed: k === 'auth-rejected', tls: k === 'tls-peer' || k === 'cbt', timeout: k === 'timeout' || sig.aborted, tooLarge: k === 'too-large' };
     }
   }, '서버 읽기 시한 초과').catch((e) => ({ ok: false, error: String(e?.message || e), timeout: true }));
   const viaAccount = srv.credAccountId && srv.credVersion != null;

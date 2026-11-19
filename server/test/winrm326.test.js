@@ -79,7 +79,7 @@ function verifyAuth({ neg, chal, auth, accounts, certDer }) {
   return 'ok';
 }
 const b64 = (s) => Buffer.from(s).toString('base64');
-async function fakeWinrm({ cert = 'server-ok', accounts = { 'corp\\svc': 'Right-1' }, stdout = 'hello from windows\r\n', exitCode = 0, receiveTimeouts = 0, hugeOutput = 0 } = {}) {
+async function fakeWinrm({ cert = 'server-ok', accounts = { 'corp\\svc': 'Right-1' }, stdout = 'hello from windows\r\n', exitCode = 0, receiveTimeouts = 0, hugeOutput = 0, dropAfterCreate = false, neverDone = false, rejectAfterAuth = false } = {}) {
   const st = { conns: 0, auths: [], authHeaders: 0, requests: [], receiveTimeouts: 0 };
   const certDer = new crypto.X509Certificate(pem(`${cert}.crt`)).raw;
   const srv = https.createServer({ key: pem(`${cert}.key`), cert: pem(`${cert}.crt`) }, (req, res) => {
@@ -103,11 +103,13 @@ async function fakeWinrm({ cert = 'server-ok', accounts = { 'corp\\svc': 'Right-
         sock.ntlmOk = true;
       }
       const action = /<a:Action[^>]{0,80}>([^<]{1,200})</.exec(body)?.[1] || '';
+      if (rejectAfterAuth && action === WS.ACTION.command) { res.writeHead(401, { 'www-authenticate': 'Negotiate' }); return res.end(); }   // 같은 연결에서 세션을 잃음(서버 쪽 만료 흉내)
       res.setHeader('content-type', 'application/soap+xml;charset=UTF-8');
-      if (action === WS.ACTION.create) return res.end('<s:Envelope><s:Body><rsp:Shell><rsp:ShellId>11111111-2222-3333-4444-555555555555</rsp:ShellId></rsp:Shell></s:Body></s:Envelope>');
+      if (action === WS.ACTION.create) { res.setHeader('connection', dropAfterCreate ? 'close' : 'keep-alive'); res.end('<s:Envelope><s:Body><rsp:Shell><rsp:ShellId>11111111-2222-3333-4444-555555555555</rsp:ShellId></rsp:Shell></s:Body></s:Envelope>'); return undefined; }
       if (action === WS.ACTION.command) return res.end('<s:Envelope><s:Body><rsp:CommandResponse><rsp:CommandId>AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE</rsp:CommandId></rsp:CommandResponse></s:Body></s:Envelope>');
       if (action === WS.ACTION.receive) {
         if (st.receiveTimeouts < receiveTimeouts) { st.receiveTimeouts += 1; res.statusCode = 500; return res.end('<s:Envelope><s:Body><s:Fault><s:Code><s:Value>s:Receiver</s:Value></s:Code><s:Reason><s:Text>timed out</s:Text></s:Reason><s:Detail><w:TimedOut/></s:Detail></s:Fault></s:Body></s:Envelope>'); }
+        if (neverDone) return res.end('<s:Envelope><s:Body><rsp:ReceiveResponse><rsp:Stream Name="stdout" CommandId="AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE">eA==</rsp:Stream></rsp:ReceiveResponse></s:Body></s:Envelope>');
         const out = hugeOutput ? 'x'.repeat(hugeOutput) : stdout;
         return res.end(`<s:Envelope><s:Body><rsp:ReceiveResponse><rsp:Stream Name="stdout" CommandId="AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE">${b64(out)}</rsp:Stream><rsp:Stream Name="stderr" CommandId="AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"></rsp:Stream><rsp:CommandState CommandId="AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE" State="http://schemas.microsoft.com/wbem/wsman/1/windows/shell/CommandState/Done"><rsp:ExitCode>${exitCode}</rsp:ExitCode></rsp:CommandState></rsp:ReceiveResponse></s:Body></s:Envelope>`);
       }
@@ -147,6 +149,39 @@ test('③ 거부 — 틀린 비밀번호는 한 번만(다시 시도하지 않�
   await assert.rejects(C.winrmRun({ host: '127.0.0.1', port: W.port, username: 'svc', domain: 'CORP', password: 'Wrong-9', command: 'hostname' }), (e) => e.kind === 'auth-rejected');
   assert.deepEqual(W.st.auths, ['bad-proof']);
   assert.equal(W.st.requests.filter((x) => x.auth).length, 2, 'NEGOTIATE · AUTHENTICATE 각 한 번 — 재시도 없음');
+});
+
+test('③-b 반증(review326) — 연결이 갈리면 로그인 거부가 아니다 · 끝(Done)이 없으면 실패 · 응답 상한 · 접속처 글자 · 채널 바인딩 해시 알고리즘', async (t) => {
+  // F1: 인증 뒤 서버가 연결을 끊으면 다음 요청은 새 연결 — 바이트를 보내기 전에 거절(인증 없는 요청이 401 을 받아 ‘거부’ 로 보이지 않게)
+  const W = await fakeWinrm({ dropAfterCreate: true });
+  t.after(() => W.close());
+  await assert.rejects(C.winrmRun({ host: '127.0.0.1', port: W.port, username: 'svc', domain: 'CORP', password: 'Right-1', command: 'hostname' }), (e) => e.kind === 'connection-split');
+  assert.deepEqual(W.st.auths, ['ok']); assert.equal(W.st.conns, 1, '두 번째 연결을 열지 않았다');
+  // F1 둘째 겹: 같은 연결에서 인증 뒤에 받은 401 은 세션을 잃은 것 — 로그인 거부(계정 정지 대상)가 아니다
+  const Wr = await fakeWinrm({ rejectAfterAuth: true });
+  t.after(() => Wr.close());
+  await assert.rejects(C.winrmRun({ host: '127.0.0.1', port: Wr.port, username: 'svc', domain: 'CORP', password: 'Right-1', command: 'hostname' }), (e) => e.kind === 'session-lost');
+  // F6: Done 이 끝내 오지 않으면 성공이 아니다
+  const W2 = await fakeWinrm({ neverDone: true });
+  t.after(() => W2.close());
+  await assert.rejects(C.winrmRun({ host: '127.0.0.1', port: W2.port, username: 'svc', domain: 'CORP', password: 'Right-1', command: 'hostname' }), (e) => e.kind === 'timeout');
+  // F5: 응답 하나가 상한(640KB)을 넘으면 읽기를 그만둔다(출력 상한과 별개)
+  const W3 = await fakeWinrm({ hugeOutput: 600_000 });
+  t.after(() => W3.close());
+  await assert.rejects(C.winrmRun({ host: '127.0.0.1', port: W3.port, username: 'svc', domain: 'CORP', password: 'Right-1', command: 'x', maxBytes: 4 * 1024 * 1024 }), (e) => e.kind === 'too-large');
+  // F10: 접속처 글자 — '@' · '#' · '/' 로 접속처를 바꾸지 않는다
+  for (const h of ['decoy.invalid@127.0.0.1', '127.0.0.1#x', 'a/b']) await assert.rejects(C.winrmRun({ host: h, username: 'svc', password: 'x', command: 'x' }), (e) => e.kind === 'bad-host', h);
+  // F2: 채널 바인딩 해시는 인증서 서명 알고리즘을 따른다(RFC 5929 4.1) — 순환 검증이 아니라 crypto 로 따로 계산해 대조
+  const FX2 = path.join(HERE, 'fixtures', 'winrm-cbt');
+  const der = (f) => new crypto.X509Certificate(fs.readFileSync(f)).raw;
+  const rfc = (d, alg) => { const app = Buffer.concat([Buffer.from('tls-server-end-point:', 'latin1'), crypto.createHash(alg).update(d).digest()]); const h = Buffer.alloc(20); h.writeUInt32LE(app.length, 16); return crypto.createHash('md5').update(Buffer.concat([h, app])).digest().toString('hex'); };
+  const d384 = der(path.join(FX2, 'p384-sha384.crt')); const d512 = der(path.join(FX2, 'rsa-sha512.crt')); const ded = der(path.join(FX2, 'ed25519.crt')); const d256 = der(path.join(FX, 'server-ok.crt'));
+  assert.equal(N.certHashAlg(d384), 'sha384'); assert.equal(N.certHashAlg(d512), 'sha512'); assert.equal(N.certHashAlg(d256), 'sha256'); assert.equal(N.certHashAlg(ded), null);
+  assert.equal(N.channelBindingHash(d384).toString('hex'), rfc(d384, 'sha384'));
+  assert.equal(N.channelBindingHash(d512).toString('hex'), rfc(d512, 'sha512'));
+  assert.notEqual(N.channelBindingHash(d384).toString('hex'), rfc(d384, 'sha256'), '예전(늘 SHA-256)과 다르다');
+  assert.throws(() => N.channelBindingHash(ded), /정할 수 없/);
+  assert.equal(N.certHashAlg(Buffer.from([0x30, 0x82, 0xff, 0xff])), null, '잘린 DER 은 모름');
 });
 
 test('④ 상대 확인 — 승인하지 않은 자체서명 인증서는 TLS 단계에서 끊고 인증 머리를 하나도 보내지 않는다', async (t) => {
@@ -236,10 +271,20 @@ test('⑦ 코어 연결(3단계) — Windows 단계 지정이 WinRM 이면 readS
   assert.equal(ko.ok, true, ko.reason);
   ST.setAssign('vcW', 'windows', { account: ko.account.id, auth: '', via: 'winrm', port: W.port }, { by: 't' });
   const cur = BM.listBmServersRaw().find((x) => x.id === s.id);
-  assert.equal(REFS.resolveOsAuth(cur, { feature: 'server-info' }).code, 'winrm-needs-password');
+  assert.equal(REFS.resolveOsAuth(cur, { feature: 'server-info', winrm: true }).code, 'winrm-needs-password');
+  // 반증 F3: SSH 로 붙는 기능(사용률 · 스토리지 · 연결 시험 …)은 지정에 WinRM 이 있어도 키 우선 그대로 — 비밀번호 고정이 번지지 않는다
+  const sshAuth = REFS.resolveOsAuth(cur, { feature: 'server-info' });
+  assert.equal(sshAuth.ok, true); assert.equal(sshAuth.authKind, 'key'); assert.equal(sshAuth.via, undefined);
   const n0 = W.st.requests.length;
   assert.equal((await RS.readServer(s.id, { feature: 'server-info', plan: P.SERVER_INFO_PLAN })).credCode, 'winrm-needs-password');
   assert.equal(W.st.requests.length, n0, '키로 WinRM 에 붙지 않는다(요청 0)');
+  // 반증 F4: 키 + 비밀번호 계정(로그인 방식 기본 ‘키 먼저’)을 WinRM 으로 확인하면 비밀번호로 해석한다 — 예전에는 키를 골라 늘 실패
+  const both = KS.saveAccount({ name: 'kr-both', kind: 'os', corp: 'vcW', os: 'windows', logon: 'ad', domain: 'CORP', username: 'svc', keyRef: k.key.id, password: 'Ad-Right-1' }, { by: 't' });
+  assert.equal(both.ok, true, both.reason);
+  ST.setAssign('vcW', 'windows', { account: both.account.id, auth: '', via: 'winrm', port: W.port }, { by: 't' });
+  const vb = await SVC.verifyAccount({ accountId: both.account.id, serverId: s.id, by: 't' });
+  assert.equal(vb.ok, true, vb.reason);
+  assert.equal((await RS.readServer(s.id, { feature: 'server-info', plan: P.SERVER_INFO_PLAN })).ok, true, 'WinRM 읽기도 비밀번호로');
   // 미승인 자체서명 인증서 — TLS 단계에서 끊고 인증 머리 0
   const W2 = await fakeWinrm({ cert: 'self-a' });
   t.after(() => W2.close());

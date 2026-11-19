@@ -17,7 +17,13 @@ import { deviceTlsConnect, unwrapTlsPeer } from '../security/tlsTrust.js';
 import { withSsrfLookup } from '../util/ssrfLookup.js';   // DNS 리바인딩 차단(다른 장비 클라이언트와 같은 연결 옵션)
 
 export const WINRM_PORT = 5986;
-const MAX_RESPONSE = 4 * 1024 * 1024;
+// 응답 하나의 상한 — 청한 MaxEnvelopeSize(512KB · wsman.envelope)보다 조금 크게(v3.26 반증 F5: 4MB 응답 하나를 읽는 데 0.2~0.5초 — 이벤트 루프)
+const MAX_RESPONSE = 640 * 1024;
+/** Receive 시한 Fault(아직 출력 없음)를 다시 받는 횟수 상한 · Receive 전체 횟수 상한 — 넘치면 실패(성공으로 돌려주지 않는다 · F5 · F6). */
+const MAX_RECEIVE_TIMEOUTS = 60;
+const MAX_RECEIVES = 400;
+/** 접속처 글자 — 이름 · IPv4 · IPv6(괄호 없이)만(URL 을 글자로 만들 때 '@' · '#' · '/' 가 접속처를 바꾸지 않게 · F10). */
+const HOST_RE = /^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,62})(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,62}))*|[0-9A-Fa-f:.]{2,45})$/;
 
 /** 이 모듈의 오류 — kind 로 호출부가 가른다(auth-rejected 는 인증 정지 · 계정 단위 정지 대상). */
 export class WinrmError extends Error {
@@ -58,20 +64,28 @@ const negotiateOf = (headers) => {
  */
 export async function winrmRun({ host, port = WINRM_PORT, username, domain = '', password, command, args = [], timeoutMs = 60_000, signal, maxBytes = 1024 * 1024 } = {}) {
   if (!host || !username || typeof password !== 'string' || !password) throw new WinrmError('no-secret', 'WinRM 접속에는 계정과 비밀번호가 필요합니다(키 로그인은 SSH 방식에서만 됩니다).');
+  if (!HOST_RE.test(String(host)) || String(host).length > 253) throw new WinrmError('bad-host', 'WinRM 접속처 글자가 올바르지 않습니다.');
   const t0 = Date.now();
   let certDer = null;
   const base = connectFn();
   // 연결 하나만(NTLM 연결 단위 인증) · 판정을 통과한 소켓의 인증서를 채널 바인딩에 쓴다.
+  //   v3.26 반증 F1(재현): undici `connections: 1` 은 끊긴 뒤 **다시 연결하는 것**을 막지 않는다 — 인증 뒤 끊기면 다음 요청이 인증 없이 새 연결로 가 401 을 받아
+  //   ‘로그인 거부’ → 계정 정지가 됐고, CHALLENGE 뒤 끊기면 AUTHENTICATE 가 다른 연결로 갔다. 두 번째 연결은 바이트를 보내기 전에 거절한다.
+  let connects = 0;
   const agent = new Agent({ connections: 1, pipelining: 1, keepAliveTimeout: 30_000, bodyTimeout: timeoutMs, headersTimeout: Math.min(timeoutMs, 60_000),
-    connect: (opts, cb) => base(opts, (err, socket) => {
+    connect: (opts, cb) => {
+      connects += 1;
+      if (connects > 1) return cb(new WinrmError('connection-split', 'WinRM 연결이 끊겨 다시 붙어야 합니다 — NTLM 은 연결 단위 인증이라 이번 읽기를 그만둡니다(로그인 거부가 아닙니다).'));
+      return base(opts, (err, socket) => {
       if (!err && socket && typeof socket.getPeerCertificate === 'function') { try { certDer = socket.getPeerCertificate(false)?.raw || null; } catch { certDer = null; } }
       // 인증서를 못 꺼내면(이어 쓴 세션 등) 채널 바인딩이 0 이 되어 확장 보호(EPA)를 켠 서버가 거부한다 — 비밀번호를 보내기 전에 끊는다
       if (!err && socket && !certDer) { try { socket.destroy(); } catch { /* */ } return cb(new WinrmError('tls-peer', 'WinRM 서버 인증서를 꺼내지 못해(채널 바인딩) 연결하지 않았습니다.')); }
       cb(err, socket);
-    }) });
+      });
+    } });
   const ac = new AbortController();
   // 시한 · 호출부 취소가 오면 연결째 끊는다 — undici 는 연결(TLS 핸드셰이크) 중인 요청의 abort 를 그 연결이 끝날 때까지 미룬다(실측: 1.5초 시한이 10.5초에 끝남).
-  //   Agent 를 부수면 연결 중인 소켓도 닫혀 바로 끝난다.
+  //   Agent 를 부수면 호출은 바로 끝난다. 다만 핸드셰이크 중이던 소켓 자체는 연결 시한(약 10초)에 닫힌다(반증 F7 — 비밀은 그 소켓으로 나가지 않는다).
   const kill = (reason) => { if (!ac.signal.aborted) ac.abort(reason); agent.destroy(reason).catch(() => {}); };
   const onAbort = () => kill(signal?.reason instanceof WinrmError ? signal.reason : new WinrmError('timeout', 'WinRM 시한 초과(호출부 취소)'));
   if (signal) { if (signal.aborted) onAbort(); else signal.addEventListener('abort', onAbort, { once: true }); }
@@ -88,13 +102,15 @@ export async function winrmRun({ host, port = WINRM_PORT, username, domain = '',
       const ex = unwrapTlsPeer(e);
       if (ex?.name === 'TlsPeerError') throw new WinrmError('tls-peer', ex.message);
       if (ex instanceof WinrmError) throw ex;
+      for (let c = e, i = 0; c && i < 6; c = c.cause, i += 1) if (c instanceof WinrmError) throw c;   // connect 단계에서 던진 우리 오류(연결 갈림 등)
       if (ac.signal.aborted) throw (ac.signal.reason instanceof WinrmError ? ac.signal.reason : new WinrmError('timeout', 'WinRM 시한 초과'));
       throw new WinrmError('connect', `WinRM 에 접속하지 못했습니다(${String(ex?.code || ex?.message || ex).replace(/\s+/g, ' ').slice(0, 120)})`);
     }
   };
   const call = async (action, body, { selector = '', options = '' } = {}, auth = '') => {
     const r = await post(WS.envelope({ to: url, action, selector, body, options, timeoutS: Math.max(5, Math.floor(timeoutMs / 1000) - 2) }), auth);
-    if (r.status === 401) throw new WinrmError('auth-rejected', 'authentication failed — WinRM 이 로그인을 거부했습니다(다시 시도하지 않습니다).');
+    // 로그인 거부는 **AUTHENTICATE 를 실은 요청**의 401 만이다(F1) — 그 뒤의 401 은 세션을 잃은 것(로그인 거부로 계정을 멈추지 않는다)
+    if (r.status === 401) throw (auth ? new WinrmError('auth-rejected', 'authentication failed — WinRM 이 로그인을 거부했습니다(다시 시도하지 않습니다).') : new WinrmError('session-lost', 'WinRM 인증 세션을 잃었습니다(로그인 거부가 아닙니다).'));
     if (r.status >= 400) {
       const why = WS.faultReason(r.text);
       if (action === WS.ACTION.receive && WS.isReceiveTimeout(r.text)) return { timeout: true, text: r.text };
@@ -111,7 +127,9 @@ export async function winrmRun({ host, port = WINRM_PORT, username, domain = '',
     if (!chBuf) throw new WinrmError('fault', 'WinRM 이 NTLM CHALLENGE 를 주지 않았습니다(Negotiate · NTLM 인증이 꺼져 있거나 Kerberos 만 허용 — Kerberos 는 지원하지 않습니다).');
     let ch;
     try { ch = NTLM.readChallenge(chBuf); } catch (e) { throw new WinrmError('fault', String(e?.message || e)); }
-    const { message } = NTLM.authenticateMessage({ user: username, domain, password, negotiate: neg, challenge: ch, certDer });
+    let message;
+    try { ({ message } = NTLM.authenticateMessage({ user: username, domain, password, negotiate: neg, challenge: ch, certDer })); }
+    catch (e) { throw new WinrmError('cbt', String(e?.message || e).slice(0, 200)); }   // 채널 바인딩을 정할 수 없으면 AUTHENTICATE 를 보내지 않는다(F2)
     // ③ AUTHENTICATE 와 함께 셸 만들기(같은 연결)
     const created = await call(WS.ACTION.create, WS.createShellBody(), { options: WS.CREATE_OPTIONS }, `Negotiate ${message.toString('base64')}`);
     const shellId = WS.parseShellId(created.text);
@@ -120,14 +138,16 @@ export async function winrmRun({ host, port = WINRM_PORT, username, domain = '',
       const cmd = await call(WS.ACTION.command, WS.commandBody(command, args), { selector: shellId, options: WS.COMMAND_OPTIONS });
       commandId = WS.parseCommandId(cmd.text);
       const out = { stdout: [], stderr: [], n: 0 };
-      let exitCode = null;
-      for (let i = 0; i < 1000; i += 1) {
+      let exitCode = null; let done = false; let waits = 0;
+      for (let i = 0; i < MAX_RECEIVES && !done; i += 1) {
         const rr = await call(WS.ACTION.receive, WS.receiveBody(commandId), { selector: shellId });
-        if (rr.timeout) continue;
+        if (rr.timeout) { waits += 1; if (waits > MAX_RECEIVE_TIMEOUTS) throw new WinrmError('timeout', 'WinRM 명령이 끝나지 않았습니다(출력 없음 시한이 계속됨).'); continue; }
         const p = WS.parseReceive(rr.text);
         for (const k of ['stdout', 'stderr']) for (const b of p[k]) { out.n += b.length; if (out.n > maxBytes) throw new WinrmError('too-large', `출력이 ${Math.round(maxBytes / 1024)}KB 를 넘었습니다`); out[k].push(b); }
-        if (p.done) { exitCode = p.exitCode; break; }
+        if (p.done) { exitCode = p.exitCode; done = true; }
       }
+      // 끝(Done)을 받지 못했으면 실패다 — 받은 만큼을 성공으로 돌려주지 않는다(F6 · ‘전부 아니면 실패’)
+      if (!done) throw new WinrmError('timeout', 'WinRM 명령의 끝(Done)을 받지 못했습니다.');
       return { stdout: Buffer.concat(out.stdout).toString('utf8'), stderr: Buffer.concat(out.stderr).toString('utf8').slice(0, 4000), exitCode, ms: Date.now() - t0 };
     } finally {
       // 정리 — 실패해도 결과를 바꾸지 않는다(시한이 이미 지났으면 하지 않는다)
