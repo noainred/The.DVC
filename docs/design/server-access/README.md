@@ -208,3 +208,19 @@
 
 **검증**: `server/test/serverInfo325.test.js` 7건(⑦ 반증 수정분 — k-i 겸용 가짜 sshd 에서 틀린 비밀번호 1회 · 같은 비밀번호 4대 → 1회 · 429 · 멈추는 명령 → 받은 칸 · 꺼진 서버 시도 0 · 보관 파일 회복) · 웹 `serverInfoText.test.js` 5건 · 초판 6건(명령 상수 · 안쪽 시한 산수 · cmd 한도 · 해석(권한 · 잘림 · 표지 위조 · 0 이 아님) · 가짜 sshd 로 코어(계정 없으면 시도 0 · 허용 기능 밖 계정 시도 0 · 거부 한 번 → 계정 정지 → 시도 더 없음) · 실제 라우터(범위 관리자 · viewer 403 · 응답 · 감사에 비밀 없음) · 보관 파일 손상 보존).
 
+### 8.4 3단계(v3.26 — 2026-11-19) — WinRM HTTPS + NTLMv2
+
+| 설계 | 구현 | 위치 |
+|---|---|---|
+| NTLMv2(④) | MD4(RFC 1320 — 이 Node 의 OpenSSL 3 에 md4 가 없다) · NTOWFv2 · NTLMv2 응답 · **MIC**(세션 기본 키 — 키 교환 없음) · **채널 바인딩**(tls-server-end-point — 서버 인증서 해시). LM · NTLMv1 · 봉인(5985)은 하지 않는다 | `server/src/winrm/ntlm.js` |
+| WS-Management | cmd 셸 Create → Command(PowerShell 프로그램 + 인자 · cmd 셸 건너뜀) → Receive(Done 까지 · 시한 Fault 는 다시 받기) → Signal · Delete. 응답은 앵커 · 길이 상한 정규식으로 필요한 칸만 | `winrm/wsman.js` |
+| 전송 | HTTPS 5986 · 연결 하나(NTLM 은 연결 단위) · 인증서는 장비 신뢰 판정(`deviceTlsConnect` 하위 시스템 `winrm` · env `WINRM_TLS_VERIFY`) — **판정 전에는 아무 바이트도 보내지 않는다** · TLS 세션을 이어 쓰지 않는다(채널 바인딩에 연결마다 인증서가 필요 — 실측) · DNS 리바인딩 차단 · 시한이면 연결째 끊는다(실측: 연결 중 시한이 10.5초로 밀리던 것을 고침) · 거부면 다시 시도하지 않는다 | `winrm/client.js` |
+| 어디에 정하나(D11) | **Windows 단계 지정**에 접속 방식(SSH · WinRM)과 포트 — 상태 파일 `assign.<법인>.windows.via/port`. 물려받은 서버만 WinRM(따로 정한 서버는 SSH) · WinRM 은 비밀번호만(`winrm-needs-password`) | `sshaccess/state.js` · `refs.effectiveAccountOf` · 화면 ‘계정 계층’ |
+| 코어 · 확인 | `readServer` 가 WinRM 으로도 같은 탐침 · 결과 기록 · 계정 정지 · 지정 저장 · 승인 · 새 비밀번호 · 한 대로 다시 확인의 **먼저 확인도 WinRM 으로** | `sshaccess/readServer.js` · `service.loginOnce` |
+
+**실제 Windows 서버로는 확인하지 못했다**(이 환경에 없음). 계산은 MS-NLMP 4.2.4 예시 값으로, 전체 흐름은 **서버 쪽 검증을 직접 구현한 가짜 WinRM 서버**(NTProofStr · MIC · 채널 바인딩을 비밀번호로 다시 계산해 대조)로 시험했다 —
+첫 실서버 연결 때 확인할 것: ① AD 계정 표기(DOMAIN\\user · UPN) ② 로컬 계정(도메인 빈 값) ③ 확장 보호(EPA) 켠 서버 ④ HealthStatus · BusType 열거값 ⑤ 출력 인코딩(UTF-8).
+WinRM 은 명령 시한에 받은 칸을 돌려주지 않는다(전부 아니면 실패 — SSH 와 다름).
+
+**검증**: `server/test/winrm326.test.js` 7건(MD4 · NTLMv2 벡터 · 성공(연결 하나 · 셸 정리) · 틀린 비밀번호 한 번 · 미승인 인증서는 인증 머리 0 · 시한 · 출력 상한 · Receive 시한 Fault · 응답 읽기 선형 · 코어 연결: 지정 저장 확인 · 읽기 · 거부 → 계정 정지 → 다음 0 · 키 전용 계정 요청 0 · 미승인 인증서).
+

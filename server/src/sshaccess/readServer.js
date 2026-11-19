@@ -10,7 +10,8 @@
  *   자격이 없으면 붙지 않는다(빈 비밀번호로 시도해 계정을 잠그지 않게).
  * 시한: 로그인(readyTimeout) + 명령(plan.timeoutMs) < 장비 시한(deadlineMs) — 시험이 산수를 고정한다. 명령 시한 · 출력 상한에 걸리면 던지지 않고 받은 만큼 돌려준다
  *   (`code: 'exec-timeout' | 'exec-truncated'` + stdout — 기능이 끝 표지로 잘림을 판정한다 · 로그인은 성공이므로 탐침은 ok — 반증 F6).
- * 전송: 지금은 SSH 하나(Windows 는 OpenSSH Server + PowerShell — 설계 D2 1단계). WinRM 은 3단계에서 같은 자리에 붙는다.
+ * 전송: SSH(Windows 는 OpenSSH Server + PowerShell) 또는 **WinRM HTTPS + NTLMv2**(v3.26 — Windows 단계 지정이 WinRM 일 때 · 비밀번호만 · 인증서는 장비 신뢰 판정 ·
+ *   같은 탐침 · 같은 결과 기록). WinRM 은 명령 시한에 받은 칸을 돌려주지 않는다(전부 아니면 실패 — 한계). 실제 Windows 서버로는 확인하지 못했다(설계 §8.4).
  * 돌려주는 것: 비밀 없음 — `{ ok, code, reason, os, via, auth:{kind, account, source}, stdout, stderr, ms }`(stdout 은 기능이 해석한다 · 화면 · 저장에 원문을 싣지 않는다).
  */
 import crypto from 'node:crypto';
@@ -19,6 +20,7 @@ import { withResolvedAuth, AUTH_ERROR } from '../bmusage/onboard/refs.js';
 import { withSsh, isSshAuthError, isSshHostKeyError } from '../proxy/sshExec.js';
 import { withDeadline } from '../util/deadline.js';
 import { gateAccountLogin } from './accountGate.js';
+import { winrmRun, WINRM_PORT } from '../winrm/client.js';   // v3.26(3단계) — Windows 단계 지정이 WinRM 일 때
 import { noteCredOutcome } from './outcome.js';
 
 const t = (v, n = 256) => String(v ?? '').trim().slice(0, n);
@@ -28,7 +30,15 @@ export const READ_DEADLINE_MS = 60_000;
 
 /** 읽기 결과 코드(화면 문구 · 시험이 같은 열쇠를 쓴다). */
 export const READ_CODES = Object.freeze(['ok', 'not-found', 'registry-unreadable', 'edge-delegated', 'disabled', 'not-configured', 'cred', 'auth-rejected', 'same-cred-rejected',
-  'hostkey', 'timeout', 'exec-timeout', 'exec-truncated', 'connect', 'no-plan']);
+  'hostkey', 'tls', 'timeout', 'exec-timeout', 'exec-truncated', 'connect', 'no-plan']);
+
+/** NTLM 에 보낼 계정명 · 도메인(로그인 이름 하나에서 — keyStore.loginNameOf 의 두 꼴): DOMAIN\user → (user, DOMAIN) · user@dom → (user@dom, '') · 로컬 → (user, ''). */
+export function ntlmNameOf(loginName) {
+  const s = t(loginName, 300);
+  const i = s.indexOf('\\');
+  if (i > 0) return { username: s.slice(i + 1), domain: s.slice(0, i) };
+  return { username: s, domain: '' };
+}
 
 /**
  * 일괄 문(서버 단독 비밀번호 — 반증 F2): 같은 계정명 · 비밀번호(해시 — 원문을 열쇠로 두지 않는다)로 가는 일괄 안의 접속은 첫 결과를 본 뒤에.
@@ -80,27 +90,45 @@ export async function readServer(serverId, { feature, plan = {}, deadlineMs = RE
     .then((x) => ({ ok: true, out: x.out }))
     .catch((e) => ({ ok: false, error: String(e?.message || e), hostkey: isSshHostKeyError(e), authFailed: isSshAuthError(e), timeout: sig.aborted || !!signal?.aborted })), '서버 읽기 시한 초과')
     .catch((e) => ({ ok: false, error: String(e?.message || e), timeout: true }));
+  // v3.26: Windows 단계 지정이 WinRM 이면 WinRM HTTPS + NTLM 으로(비밀번호만 — resolveOsAuth 가 키를 쓰지 않게 이미 막았다)
+  const viaWinrm = os === 'windows' && srv.via === 'winrm';
+  if (viaWinrm && (!step.winrm || !srv.password)) return { ok: false, code: 'no-plan', os, auth, reason: 'WinRM 으로 읽을 묶음이나 비밀번호가 없습니다.' };
+  const runWinrm = () => withDeadline(deadlineMs, async (sig) => {
+    const { username, domain } = ntlmNameOf(srv.username);
+    try {
+      const out = await winrmRun({ host: String(srv.host), port: Number(srv.viaPort) || WINRM_PORT, username, domain, password: srv.password, command: step.winrm.command, args: [...step.winrm.args],
+        timeoutMs: Math.max(5_000, deadlineMs - 2_000), signal: signal ? AbortSignal.any([sig, signal]) : sig, maxBytes: step.maxBytes || 1024 * 1024 });
+      return { ok: true, out: { code: out.exitCode, stdout: out.stdout, stderr: out.stderr } };
+    } catch (e) {
+      const k = e?.kind || '';
+      return { ok: false, error: String(e?.message || e), authFailed: k === 'auth-rejected', tls: k === 'tls-peer', timeout: k === 'timeout' || sig.aborted, tooLarge: k === 'too-large' };
+    }
+  }, '서버 읽기 시한 초과').catch((e) => ({ ok: false, error: String(e?.message || e), timeout: true }));
   const viaAccount = srv.credAccountId && srv.credVersion != null;
+  const doRun = viaWinrm ? runWinrm : run;
   const gated = viaAccount
-    ? () => gateAccountLogin(srv, run, { feature, rejected: (x) => x?.authFailed === true, stopped: (code) => ({ ok: false, gated: code }) })
-    : (!srv.privateKey && typeof credGate === 'function' ? () => credGate(credKey(srv), run) : run);
+    ? () => gateAccountLogin(srv, doRun, { feature, rejected: (x) => x?.authFailed === true, stopped: (code) => ({ ok: false, gated: code }) })
+    : (!srv.privateKey && typeof credGate === 'function' ? () => credGate(credKey(srv), doRun) : doRun);
   const r = await gated();
   if (r.gated) return { ok: false, code: 'cred', credCode: r.gated, os, auth, reason: AUTH_ERROR[r.gated] || AUTH_ERROR['account-stopped'] };
   if (r.sameCredRejected) return { ok: false, code: 'same-cred-rejected', os, auth, reason: '같은 계정명 · 비밀번호로 이번 일괄에서 먼저 읽은 서버가 로그인을 거부해 이 서버에는 보내지 않았습니다(계정 잠금 방지).' };
   // 키 · 공통 계정 사용 기록 + 로그인 거부면 계정 단위 정지(outcome 하나 — 접속 단계 판정만)
   if (srv.keyFingerprint || srv.credAccountId) noteCredOutcome(srv, { ok: !!r.ok, rejected: r.authFailed === true, code: r.ok ? 'ok' : (r.timeout ? 'timeout' : 'fail'), feature, trigger, by });
   const ms = Date.now() - t0;
+  const via = viaWinrm ? 'winrm' : 'ssh';
   if (!r.ok) {
-    const code = r.authFailed ? 'auth-rejected' : r.hostkey ? 'hostkey' : r.timeout ? 'timeout' : 'connect';
+    const code = r.authFailed ? 'auth-rejected' : r.hostkey ? 'hostkey' : r.tls ? 'tls' : r.tooLarge ? 'exec-truncated' : r.timeout ? 'timeout' : 'connect';
     const reason = code === 'auth-rejected' ? '로그인이 거부됐습니다(다시 시도하지 않습니다 — 계정 잠금 방지).'
       : code === 'hostkey' ? '호스트키를 신뢰하지 않아 끊었습니다 — 설정 › 보안 › 장비 신뢰에서 지문을 확인 · 승인하세요.'
+        : code === 'tls' ? 'WinRM 인증서를 신뢰하지 않아 끊었습니다(비밀번호를 보내지 않았습니다) — 설정 › 보안 › 장비 신뢰에서 지문을 확인 · 승인하세요.'
+          : code === 'exec-truncated' ? '출력이 상한을 넘었습니다(WinRM 은 받은 칸을 돌려주지 않습니다).'
         : code === 'timeout' ? `시한 안에 끝나지 않았습니다(${Math.round(deadlineMs / 1000)}초).`
           : `접속하지 못했습니다(${String(r.error || '').replace(/\s+/g, ' ').slice(0, 120)})`;
-    return { ok: false, code, reason, os, via: 'ssh', auth, ms };
+    return { ok: false, code, reason, os, via, auth, ms };
   }
   const out = r.out || {};
   const exit = out.code;
-  const base = { os, via: 'ssh', auth, ms, exit: Number.isInteger(exit) ? exit : null, stdout: String(out.stdout || ''), stderr: String(out.stderr || '').slice(0, 2000) };
+  const base = { os, via, auth, ms, exit: Number.isInteger(exit) ? exit : null, stdout: String(out.stdout || ''), stderr: String(out.stderr || '').slice(0, 2000) };
   if (out.timedOut) return { ok: false, code: 'exec-timeout', reason: `명령이 시한(${Math.round((step.timeoutMs || 0) / 1000)}초) 안에 끝나지 않았습니다 — 받은 칸만 씁니다.`, partial: true, ...base };
   if (out.truncated) return { ok: false, code: 'exec-truncated', reason: '출력이 상한을 넘어 잘랐습니다 — 받은 칸만 씁니다.', partial: true, ...base };
   return { ok: true, code: 'ok', ...base };

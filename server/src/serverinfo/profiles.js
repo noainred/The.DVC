@@ -208,10 +208,13 @@ export function parseWindows(text) {
   return { base, disks, fs, truncated, failed: [...failed].slice(0, 8), missing: { disks: disks == null, fs: fs == null } };
 }
 
-/** readServer 에 넘기는 계획(OS 마다 고정 명령 하나). */
+/** WinRM(3단계)으로 돌릴 때 — 같은 스크립트를 PowerShell 프로그램 + 인자로(cmd 셸을 거치지 않는다 · WINRS_SKIP_CMD_SHELL). */
+export const WIN_WINRM = Object.freeze({ command: 'powershell', args: Object.freeze(['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(WIN_SCRIPT, 'utf16le').toString('base64')]) });
+
+/** readServer 에 넘기는 계획(OS 마다 고정 명령 하나 · Windows 는 SSH 한 줄과 WinRM 프로그램 + 인자 둘 다). */
 export const SERVER_INFO_PLAN = Object.freeze({
   linux: Object.freeze({ command: LINUX_COMMAND, timeoutMs: LINUX_EXEC_TIMEOUT_MS }),
-  windows: Object.freeze({ command: WIN_COMMAND, timeoutMs: WIN_EXEC_TIMEOUT_MS }),
+  windows: Object.freeze({ command: WIN_COMMAND, timeoutMs: WIN_EXEC_TIMEOUT_MS, winrm: WIN_WINRM }),
 });
 /** OS 별 해석. Linux 로 읽었는데 표지가 하나도 없고 cmd 오류 꼴이면 Windows 일 수 있다고 알린다(저절로 다른 OS 로 다시 읽지 않는다). */
 export function parseFor(os, text, stderr = '') {
