@@ -5,13 +5,13 @@
 
 - 생성: `node scripts/common-doc.mjs` · 최신 여부: `node scripts/common-doc.mjs --check`
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다. 설명을 고치려면 그 모듈의 **머리 주석 첫 단락**을 고친다.
-- 훑은 소스 4489개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
+- 훑은 소스 4496개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
 
 ## 읽는 법 · 한계
 
 - **하는 일**: 그 파일 맨 앞 주석의 첫 단락(150자에서 자름). 머리 주석이 없는 모듈은 4개다.
 - **사용처**: 그 모듈을 import 하는 파일 수(테스트 제외). **영역**: 사용처가 속한 폴더 수(서버 `server/src/<영역>` · 웹 `web/src/<영역>`, `views/tools` 는 따로).
-- **테스트**: 그 모듈의 경로를 **import 하거나 문자열로 가리키는**(소스 스윕) 테스트 파일 수. 경로를 조각으로 조합하면(`path.join(SRC, 'util', 'x.js')`) 세지 못하므로 0 이 '검증 없음' 을 뜻하지는 않는다(0 인 모듈 15개).
+- **테스트**: 그 모듈의 경로를 **import 하거나 문자열로 가리키는**(소스 스윕) 테스트 파일 수. 경로를 조각으로 조합하면(`path.join(SRC, 'util', 'x.js')`) 세지 못하므로 0 이 '검증 없음' 을 뜻하지는 않는다(0 인 모듈 14개).
 - 사용처로 세는 것은 정적 import · 재수출 · 문자열 리터럴 동적 import 다. 경로를 런타임에 조합하는 동적 import 는 세지 못했다 — 8건 · 파일 8개(`server/src/edgelog/collect.js` · `server/src/linkcheck/settingsLinks.js` · `server/src/portalcheck/archScan.js` · `server/src/routes/api/bmFolders.js` · `server/src/routes/api/partFaults.js` · `server/src/routes/central/storageRoutes.js` · `server/src/routes/central.js` · `scripts/tools-catalog.mjs`).
 - 사용처 수는 '얼마나 널리 쓰이는가' 이지 품질 지표가 아니다.
 
@@ -21,10 +21,10 @@
 |---|---|---|---|---|
 | 서버 공용 유틸 | `server/src/util/` | 95 | 0 | 6 |
 | 웹 공용 컴포넌트 | `web/src/components/` | 49 | 0 | 7 |
-| 웹 공용 훅 | `web/src/hooks/` | 8 | 0 | 2 |
+| 웹 공용 훅 | `web/src/hooks/` | 8 | 0 | 1 |
 | 웹 공용 유틸 | `web/src/util/` | 4 | 0 | 0 |
 | 웹 최상위 공용 모듈 | `web/src/` | 14 | 0 | 0 |
-| **합계** | | **170** | **0** | **15** |
+| **합계** | | **170** | **0** | **14** |
 
 ## 서버 공용 유틸 — `server/src/util/` (95)
 
@@ -122,7 +122,7 @@
 | `compress.js` | 경량 gzip 응답 압축 + ETag/304 미들웨어 — 외부 의존성 없이 Node 내장 zlib/crypto만 사용 (에어갭 배포 호환). res.json()을 감싸 큰 JSON 응답만 비동기 gzip한다(동기 gzipSync로 이벤트 루프를 막지 않음). res.s… | `compression` | 1 | 1 | 2 |
 | `loopLag.js` | 이벤트 루프 지연(lag) 모니터 — 대용량 동기 작업(수집 SOAP 파싱·집계·bulk write)이 메인 루프를 얼마나 오래 막는지 계측한다. docs/ARCH-HEAVY-JOB-ISOLATION.md §10-0 '계측 먼저'의 구현 — 실제 병목(수집 재구성 vs… | `startLoopLagMonitor` | 1 | 1 | 2 |
 | `parseWorker.js` | worker_threads 워커 — RetrieveProperties 응답 XML의 정규식 파싱(CPU 바운드)을 메인 이벤트 루프 밖에서 수행한다. 28개 vCenter를 매 주기 수집할 때 수 MB XML을 메인 스레드에서 파싱하면 그동안 HTTP 응답/다른 vCe… | (없음) | 1 | 1 | 0 |
-| `queryNormalize.js` | 쿼리스트링 정규화 — **`req.query` 의 모든 값은 문자열이다**(v2.575 BUG-22). | `normalizeQuery` `queryNormalizer` `default` | 1 | 1 | 9 |
+| `queryNormalize.js` | 쿼리스트링 정규화 — **`req.query` 의 모든 값은 문자열이다**(v2.575 BUG-22). | `normalizeQuery` `queryNormalizer` `default` | 1 | 1 | 10 |
 | `releaseFile.js` | RedHat 계열의 /etc/redhat-release 처럼, CONFIG_DIR에 현재 포탈 버전을 한 줄로 명시하는 릴리스 파일(CONFIG_DIR/vmware-portal-release)을 기록한다. | `writeReleaseFile` `RELEASE_FILE` | 1 | 1 | 1 |
 | `soapParsePool.js` | SOAP 파싱 워커 풀 — RetrieveProperties 응답의 CPU 바운드 정규식 파싱을 worker_threads로 오프로딩해 메인 이벤트 루프 블로킹을 없앤다(28+ vCenter·고RTT 환경에서 매 주기 파싱이 메인 스레드를 점유하면 HTTP 응답/다른… | `_setWorkerUrlForTest` `parseObjectContentAsync` `shutdownParsePool` `_poolInfo` `SOAP_PARSE_WORKERS_MAX` `RESPAWN_MAX` | 1 | 1 | 4 |
 | `staticGzip.js` | 빌드 자산(해시 이름·불변)의 gzip 전송(v2.596, 감사 PERFWEB-02 — 실측). | `acceptsGzip` `createStaticGzip` `STATIC_GZIP_MAX_BYTES` | 1 | 1 | 3 |
@@ -192,7 +192,7 @@
 |---|---|---|---|---|---|
 | `useHashTab.js` | 하위 탭을 URL 해시에 실어 **새로고침·북마크·뒤로가기에서 유지**한다(v2.438). | `useHashTab` | 42 | 4 | 2 |
 | `hashTab.js` | 해시 라우팅의 하위 탭 계산(순수, v2.438). | `hashSegments` `isUnderBase` `tabFromHash` `buildHash` `movedTabHash` `legacyShellHash` 외 3 | 14 | 7 | 3 |
-| `useLatest.js` | 늦게 도착한 이전 응답이 최신 화면을 덮어쓰지 못하게 하는 세대 가드(v2.447, 감사 B16). | `useLatest` `default` | 12 | 2 | 0 |
+| `useLatest.js` | 늦게 도착한 이전 응답이 최신 화면을 덮어쓰지 못하게 하는 세대 가드(v2.447, 감사 B16). | `useLatest` `default` | 12 | 2 | 1 |
 | `searchHandoff.js` | 화면 사이의 검색어 인계(v2.616, V5 통합 검색). | `onSearchHandoff` `handoffSearch` `handoffMany` `takeSearch` `stashForNewTab` `consumeNewTabHandoff` 외 3 | 9 | 4 | 1 |
 | `useSearchHandoff.js` | 검색어 인계(hooks/searchHandoff.js, v2.616)를 받는 화면용 훅(v2.909 통합 장비 검색). | `useFocusHandoff` `default` | 8 | 2 | 0 |
 | `useActiveTabInView.js` | 가로로 넘치는 탭 줄에서 **열린 탭이 보이게 그 줄만** 옮긴다(v3.10.16 · 가상화 플랫폼 점검 4회차). - 허브 탭 줄(HubTabs · v2.915)에 있던 규칙을 vCenter 상세 · 개체 보기(VM · 호스트)의 `.vcd-views` 도 쓰게 뺀… | `keepActiveTabInView` `default` | 4 | 4 | 1 |
@@ -216,7 +216,7 @@
 
 | 모듈 | 하는 일 | 내보내는 이름 | 사용처 | 영역 | 테스트 |
 |---|---|---|---|---|---|
-| `api.js` | v2.498: 진행 중 요청 레지스트리 + 장기 로딩(hang) 보고. perfClient 는 api.js 를 import 하지 않으므로 순환이 없다(설정 조회는 fetchJson 을 인자로 받는다). | `noteHttpError` `permissionInfoFor` `httpInfoFor` `fetchJson` `postJson` `sendJson` 외 35 | 412 | 20 | 62 |
+| `api.js` | v2.498: 진행 중 요청 레지스트리 + 장기 로딩(hang) 보고. perfClient 는 api.js 를 import 하지 않으므로 순환이 없다(설정 조회는 fetchJson 을 인자로 받는다). | `noteHttpError` `permissionInfoFor` `httpInfoFor` `fetchJson` `postJson` `sendJson` 외 35 | 412 | 20 | 66 |
 | `numOrNull.js` | `numOrNull`(웹) — '읽지 못한 수치' 를 0 으로 둔갑시키지 않는 단일 판정. | `numOrNull` `default` | 162 | 12 | 2 |
 | `dayStamp.js` | 브라우저 쪽 날짜 표기(v2.582 BUG-3) — 내려받기 파일명·만료일은 **사용자의 로컬 날짜**다. `new Date().toISOString().slice(0, 10)` 은 UTC 날짜라 한국 시각 00:00~09:00 에는 **어제**가 된다 (보고서 파일명… | `dayStamp` | 25 | 5 | 1 |
 | `regions.js` | 지역(region) 목록 — 웹 단일 소스(v2.575 IMP-10). ⚠ 값은 서버 `server/src/util/regions.js` 와 **글자 그대로 같아야 한다**(웹은 서버 소스를 import 할 수 없어 복사가 불가피하다). `web/src/regions.`… | `REGIONS` `default` | 5 | 2 | 2 |
@@ -242,7 +242,7 @@
 | 모듈 | 하는 일 | 사용처 | 다른 영역 | 테스트 |
 |---|---|---|---|---|
 | `server/src/config.js` | (머리 주석 없음) | 514 | 88 | 186 |
-| `server/src/store.js` | (머리 주석 없음) | 210 | 44 | 352 |
+| `server/src/store.js` | (머리 주석 없음) | 210 | 44 | 353 |
 | `server/src/collector/registry.js` | Collector registry — the list of remote collector agents (one per datacenter) the central portal pulls power from. Stored in CONFIG_DIR/collectors.jso… | 83 | 32 | 55 |
 | `server/src/security/secretVault.js` | 설정 파일 자격증명(비밀번호·SSH 키·토큰)의 저장 방식(평문/암호화) 중앙 모듈(v2.296). | 41 | 29 | 36 |
 | `server/src/mock/demo/flags.js` | 데모(DATA_SOURCE=mock) 모드 공용 판정(v2.708). | 85 | 26 | 3 |
@@ -279,7 +279,7 @@
 | `server/src/dscfg/collect.js` | 데이터스토어 운영 속성 갱신(v2.700 — A17). 인벤토리 수집 한 주기 안에서 오래된 DS 부터 상한만큼. 캐시는 vmcfg 처럼 인메모리이고 DS 전용이다(다른 캐시의 prune 이 지우지 않게). 실패는 격리한다. | 7 | 7 | 2 |
 | `server/src/auth/scope.js` | 사용자 데이터 범위(scope) 해석 — "이 사용자가 볼 수 있는 vCenter"를 계산한다. scope = { vcenters:[id...], regions:[name...] }. 둘 다 비면 제한 없음(전체). 명시 vCenter + 지정 리전에 속한 모든 vCe… | 107 | 6 | 9 |
 | `server/src/svcmon/store.js` | 성능점검 대상/폴더 저장소 — `CONFIG_DIR/svcmon.json` 전용 파일(포탈 코어와 분리). | 21 | 6 | 26 |
-| `server/src/logs/db.js` | vCenter 이벤트 로그 장기 보관 DB. vCenter는 이벤트를 단기간만 보관하므로, 포탈이 주기적으로 수집해 여기 누적한다. Node 내장 SQLite(--experimental-sqlite) 우선, 없으면 NDJSON 폴백. 중복은 (vcenterId, key… | 17 | 6 | 48 |
+| `server/src/logs/db.js` | vCenter 이벤트 로그 장기 보관 DB. vCenter는 이벤트를 단기간만 보관하므로, 포탈이 주기적으로 수집해 여기 누적한다. Node 내장 SQLite(--experimental-sqlite) 우선, 없으면 NDJSON 폴백. 중복은 (vcenterId, key… | 17 | 6 | 49 |
 | `server/src/partfault/types.js` | 물리 파트 장애의 **공용 계약**(순수, v2.547). | 16 | 6 | 10 |
 | `server/src/bmstor/registry.js` | 베어메탈 스토리지 서버 목록 + 설정(v2.340). CONFIG_DIR/bm-storage.json (0600, 원자적 쓰기, 손상 보존, v2.296 비밀 봉인) — 수집 서버/배포 대상 레지스트리와 동일 계약. | 15 | 6 | 34 |
 | `server/src/sanswitch/registry.js` | SAN 스위치 등록부(v2.410). | 15 | 6 | 49 |
