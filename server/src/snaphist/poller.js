@@ -29,8 +29,15 @@ let running = false;
 let lastTry = { day: null, at: 0 };
 let lastResult = null;
 let lastPruneAt = Date.now();   // 기동 첫 틱에 정리하지 않는다
+// 138회차: 마지막 틱(기록하지 않은 틱 포함) — 포탈 상태(health/services.js pollerCheck)는 lastRun · intervalMs 로 ‘폴러가 도는가’ 를 본다.
+//   예전에는 lastResult(하루 1번 기록) 하나라 기록 30분 뒤부터 다음 기록까지 ‘주기의 2배를 넘겼습니다’(거짓 주의)였다.
+let lastTick = null;   // { at, ok, reason }
 
-export function snapHistPollerStatus() { return { running, lastResult, recordHour: recordHour(), retentionDays: retentionDays() }; }
+export function snapHistPollerStatus() {
+  const bad = lastTick && !lastTick.ok;   // DB 사용 불가 · 기록 실패 · 예외 — 틱은 돌아도 정상이 아니다
+  return { running, lastRun: lastTick ? { at: lastTick.at } : null, intervalMs: TICK_MS, ...(bad ? { warn: true, warnText: String(lastTick.reason || '기록 실패').slice(0, 200) } : {}),
+    lastResult, recordHour: recordHour(), retentionDays: retentionDays() };
+}
 
 /** 기록이 필요한 vCenter — 등록된 것 중 오늘 'ok' 가 아닌 것. 순수(시험용). */
 export function pendingVcenters(snap, okSet) {
@@ -44,8 +51,14 @@ export function readableNow(snap, ids) {
   return ids.filter((id) => !unread.has(id) && byId.get(id)?.status !== 'pending' && byId.get(id)?.status !== 'disabled');
 }
 
-/** 한 번 실행(폴러 · 시험 공용). force 면 기록 시각 · 다시 시도 간격을 보지 않는다. */
-export async function runSnapHistOnce({ now = Date.now(), force = false, trigger = 'tick' } = {}) {
+/** 한 번 실행(폴러 · 시험 공용). force 면 기록 시각 · 다시 시도 간격을 보지 않는다. 틱 시각 · 성패를 lastTick 에 남긴다(겹친 호출은 남기지 않는다). */
+export async function runSnapHistOnce(opts = {}) {
+  let r = null;
+  try { r = await runInner(opts); return r; } finally {
+    if (!r?.skipped) lastTick = { at: opts.now ?? Date.now(), ok: !!r && r.ok !== false, reason: r ? r.reason || null : '예외' };
+  }
+}
+async function runInner({ now = Date.now(), force = false, trigger = 'tick' } = {}) {
   if (running) return { ok: false, skipped: true, reason: '이미 기록 중입니다.' };
   running = true;
   try {

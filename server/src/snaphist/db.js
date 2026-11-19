@@ -5,7 +5,8 @@
  * 표(틀은 vmtrack/db.js 와 같다 — 슬롯 기록 · 바뀐 것만 · 현재 집합):
  *   snap_vcday(day, vcenter_id, status, vms, snaps, gb, gb_unknown, age_unknown, over, ts) — vCenter 하나의 그날 합계.
  *       status 'ok' 가 아니면(점검중 · 수집 실패 · 낡음 · 첫 수집 중 · REST 폴백 'no-snap') 합계는 NULL — **‘0’ 이 아니라 ‘빠진 날’** 이다.
- *       'partial' = 개수를 못 읽은 VM 이 있었다(count_unknown) — 합계 · 행은 넣지만 추이에는 넣지 않는다(부분 합 금지). 같은 날 다시 시도한다.
+ *       'partial' = 개수를 못 읽은 VM 이 있었다(count_unknown) — 다른 못 읽은 사유와 같이 **사유만** 남긴다(합계 NULL · 행 · 항목 갱신 없음 — commitDay 의
+ *       status !== 'ok' 분기. 138회차 정정: 예전 머리말은 ‘합계 · 행은 넣는다’ 였다). 추이에는 넣지 않고(부분 합 금지) 같은 날 다시 시도한다.
  *   snap_day(day, vcenter_id, vm_id, name, count, gb, oldest_ts, power, judged, over, ts) — 그날 스냅샷이 있던 VM 한 대.
  *   snap_item(vcenter_id, vm_id, skey, name, vm_name, create_ts, mem, quiesced, first_seen, last_seen, gone_at, gone_reason) — 스냅샷 하나의 생애.
  *       gone_at = ‘없어진 것을 처음 본 시각’ — 실제로 지운 시각은 last_seen 과 gone_at 사이다(하루 한 번 기록이라). gone_reason 'snap' | 'vm'(VM 이 없어짐).

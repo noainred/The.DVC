@@ -152,9 +152,16 @@ export function summaryOf(items) {
   };
 }
 
-/** 법인 카드 — 서버 corps 순서가 아니라 기준 넘긴 수 많은 순. 스냅샷 VM 이 없는 법인도 카드로 남긴다(0대 — 수집은 됐다). */
+/**
+ * 지금 값을 못 읽은 vCenter(서버 view.vcReadIssue 가 준 unread) — 값이 낡은 것(stale)은 ‘값이 낡음’ 으로 따로 말하므로 뺀다.
+ * 138회차: 이 vCenter 들은 items 에 없다 — ‘0대 · 스냅샷 없음’ 이 아니라 ‘못 읽음’ 이다(못 읽은 값은 0 이 아니다).
+ */
+export const unreadVcs = (vcs) => (vcs || []).filter((v) => v && v.unread && !v.stale);
+
+/** 법인 카드 — 서버 corps 순서가 아니라 기준 넘긴 수 많은 순. 스냅샷 VM 이 없는 법인도 카드로 남긴다(0대 — 수집은 됐다 · 못 읽은 vCenter 는 unread 로 센다). */
 export function corpCards(items, corps) {
-  const byCorp = new Map((corps || []).map((c) => [c.id, { id: c.id, name: c.name, stale: (c.vcenters || []).some((v) => v.stale), items: [] }]));
+  const byCorp = new Map((corps || []).map((c) => [c.id, { id: c.id, name: c.name, stale: (c.vcenters || []).some((v) => v.stale),
+    unread: unreadVcs(c.vcenters).length, vcN: (c.vcenters || []).length, items: [] }]));
   for (const x of items) {
     if (!byCorp.has(x.corpId)) byCorp.set(x.corpId, { id: x.corpId, name: x.corpName, stale: false, items: [] });
     byCorp.get(x.corpId).items.push(x);
@@ -162,8 +169,17 @@ export function corpCards(items, corps) {
   return [...byCorp.values()].map((c) => {
     const over = c.items.filter((x) => x.sig?.age === true);
     const judged = c.items.filter((x) => x.judged !== false).map((x) => numOrNull(x.days)).filter((d) => d != null);
-    return { ...c, n: c.items.length, over: over.length, gb: gbSum(c.items), overGb: gbSum(over), oldest: judged.length ? Math.max(...judged) : null };
+    return { ...c, n: c.items.length, over: over.length, gb: gbSum(c.items), overGb: gbSum(over), oldest: judged.length ? Math.max(...judged) : null,
+      blind: !c.items.length && c.unread > 0 && c.unread === c.vcN };   // 이 법인의 vCenter 를 하나도 못 읽었다 — 수 · 크기를 말하지 않는다
   }).sort((a, b) => b.over - a.over || b.gb.gb - a.gb.gb || String(a.name).localeCompare(String(b.name)));
+}
+
+/** 법인 카드 아래 줄 — 못 읽은 법인을 ‘스냅샷 없음’ 으로 적지 않는다(138회차). */
+export function corpFootText(c) {
+  const parts = [c.oldest != null ? `가장 오래된 것 ${daysText(c.oldest)}` : c.n ? '판정한 스냅샷 없음' : c.blind ? null : '스냅샷 없음'];
+  if (c.stale) parts.push('값이 낡음');
+  if (c.unread) parts.push(`지금 값을 못 읽은 vCenter ${c.unread}곳`);
+  return parts.filter(Boolean).join(' · ');
 }
 
 /** 로그 눈금 위치(%) — 1 ~ max. */

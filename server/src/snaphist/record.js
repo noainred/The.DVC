@@ -11,7 +11,8 @@
  *   · 스냅샷 하나의 열쇠 = **생성 시각**(VM 안에서 유일 — 이름을 바꿔도 같은 스냅샷이다. 반증 4). 생성 시각을 모르면(이름 목록만) `|이름` —
  *     db 가 이름이 같은 열린 항목과 양방향으로 맞춘다(반증 5 · 6).
  *   · 반증 1(재현): REST 폴백 수집(collectSource 'rest')은 스냅샷 개수를 받지 않는다 — 그날은 'no-snap' 사유로 빠진 날이다.
- *     SOAP 수집에서도 개수를 못 읽은 VM 이 있으면 status 'partial' — 행은 넣되(아는 것은 안다) 그날 추이에는 넣지 않는다(부분 합 금지).
+ *     엣지가 REST 로 받은 위임 vCenter(collectSource 'site' + collectMethod 'rest')도 같다(138회차 — 사유 판정은 view.vcReadIssue 하나).
+ *     SOAP 수집에서도 개수를 못 읽은 VM 이 있으면 status 'partial' — db 는 그날 사유만 남기고(행 · 항목 없음 — 138회차 정정) 추이에 넣지 않는다(부분 합 금지).
  *   · 반증 8: 백업 도구(Veeam)가 백업할 때마다 만들고 지우는 임시 스냅샷(soapParse.VEEAM_SNAP_NAME)은 항목으로 만들지 않는다 —
  *     매일 ‘정리된 스냅샷’ 으로 쌓인다. 개수 · 크기 합에는 그대로 든다(그 시각에 실제로 있던 것).
  *   · 반증 9: 지난 일수 · 기준 넘김은 판정 함수(hygieneFindings)와 같은 값(snapshotOldestTs)만 쓴다 — 줄기 시각으로 보충하지 않는다.
@@ -19,7 +20,7 @@
 import { numOrNull } from '../util/numOrNull.js';
 import { hygieneFindings } from '../vmhygiene/analyze.js';
 import { unreadVcenterReasons } from '../metrics/unreadVcenters.js';
-import { snapGbOf, treeOf } from './view.js';
+import { snapGbOf, treeOf, vcReadIssue } from './view.js';
 import { VEEAM_SNAP_NAME } from '../vcenter/soapParse.js';
 
 const NAME_MAX = 80;
@@ -45,10 +46,9 @@ export const isBackupTemp = (name) => typeof name === 'string' && name.trim().to
  */
 export function vcDayRecord(snap, vcId, { now, hygiene, unread }) {
   const vc = (snap?.vcenters || []).find((x) => x && String(x.id) === vcId) || null;
-  const reason = unread.get(vcId) || (!vc ? 'unreachable' : vc.status === 'pending' ? 'pending' : vc.status === 'disabled' ? 'disabled' : null);
-  const empty = { vcenterId: vcId, status: reason || 'ok', rows: [], items: [], vmIds: new Set(), knownVms: new Set(), sum: null };
-  if (reason) return empty;
-  if (vc.collectSource === 'rest') return { ...empty, status: 'no-snap' };
+  // 사유 판정은 view.vcReadIssue 하나(138회차 — 화면 법인 카드 · 7일 변화와 같은 판정. 엣지가 REST 로 받은 위임 vCenter(collectMethod)도 'no-snap')
+  const reason = vcReadIssue(vc, vcId, unread);
+  if (reason) return { vcenterId: vcId, status: reason, rows: [], items: [], vmIds: new Set(), knownVms: new Set(), sum: null };
   const rows = []; const items = []; const vmIds = new Set(); const knownVms = new Set();
   const sum = { vms: 0, snaps: 0, gb: 0, gbUnknown: 0, ageUnknown: 0, over: 0, countUnknown: 0 };
   for (const v of snap?.vms || []) {

@@ -21,7 +21,7 @@ import { vcHash } from '../../vcd/vcdRoute.js';
 import {
   BANDS, BAND_COLOR, BAND_FG, bandLabels, VIEWS, signalDefs, matchKey, sortItems, gbSum, groupItems, GROUPS, bandGradient, summaryOf, corpCards,
   logPos, gbText, daysText, dateText, requestText, CSV_HEAD, csvRow, parseSnapHash, buildSnapHash,
-  changeMap, changeKey, clearedSince, seriesValues, lineGeom, goneRows, goneSummary, GROW_GB,
+  changeMap, changeKey, clearedSince, seriesValues, lineGeom, goneRows, goneSummary, GROW_GB, corpFootText,
 } from './snapText.js';
 import './snapshots.css';
 
@@ -125,6 +125,7 @@ export default function SnapshotTool({ scope = '', initial = null, initialHist =
       .some((s) => s && String(s).toLowerCase().includes(ql))), sort.key, sort.dir, change), [scoped, view, band, ql, sort, change]);
   const sum = summaryOf(scoped);
   const cards = useMemo(() => corpCards(items, data?.corps), [items, data]);
+  const unreadN = cards.filter((c) => !corp || c.id === corp).reduce((a, c) => a + (c.unread || 0), 0);   // 지금 값을 못 읽은 vCenter — 요약 수에 없다(138회차)
   const groups = useMemo(() => groupItems(shown, group, labels), [shown, group, labels]);
   const selItems = items.filter((x) => sel[`${x.vcenterId}\n${x.id}`]);
   const allOn = shown.length > 0 && shown.every((x) => sel[`${x.vcenterId}\n${x.id}`]);
@@ -211,7 +212,7 @@ export default function SnapshotTool({ scope = '', initial = null, initialHist =
 
       <div className="snp-kpis" aria-label="요약">
         <div className="snp-kp"><span className="l">스냅샷이 있는 VM</span><span className="v">{sum.vms.toLocaleString('en-US')}</span>
-          <span className="s">{corp ? `${corpName} 법인` : '전체 법인'} · 판정하지 않는 VM {sum.skip}대 포함{sum.stale ? ` · 값이 낡은 vCenter 의 ${sum.stale}대는 뺐습니다` : ''}</span></div>
+          <span className="s">{corp ? `${corpName} 법인` : '전체 법인'} · 판정하지 않는 VM {sum.skip}대 포함{sum.stale ? ` · 값이 낡은 vCenter 의 ${sum.stale}대는 뺐습니다` : ''}{unreadN ? ` · 지금 값을 못 읽은 vCenter ${unreadN}곳은 빠졌습니다` : ''}</span></div>
         <div className="snp-kp"><span className="l">사내 기준{numOrNull(th.snapAgeDays) != null ? `(${th.snapAgeDays}일)` : ''}을 넘긴 VM</span><span className="v" style={{ color: sum.over ? '#fbbf24' : '#86efac' }}>{sum.over.toLocaleString('en-US')}</span>
           <span className="s">72시간(권고) 넘김 {sum.h72}대{sum.ageUnknown ? ` · 생성일 못 읽음 ${sum.ageUnknown}대는 따로` : ''}</span></div>
         <div className="snp-kp"><span className="l">스냅샷 크기</span><span className="v" style={{ color: '#67e8f9' }}>{gbText(sum.gb)}</span>
@@ -229,12 +230,12 @@ export default function SnapshotTool({ scope = '', initial = null, initialHist =
       <div className="snp-cards" role="group" aria-label="법인별 요약">
         {cards.map((c) => (
           <button key={c.id} type="button" className={`snp-cc${corp === c.id ? ' on' : ''}`} aria-pressed={corp === c.id} onClick={() => { setCorp(corp === c.id ? '' : c.id); setOpen(''); }}
-            title={`${c.name} — 스냅샷이 있는 VM ${c.n}대(기준 넘김 ${c.over}대) · ${gbText(c.gb.gb)} — 누르면 이 법인만 봅니다`}>
-            <span className="cn"><span>{c.name}</span><em className={c.over ? '' : 'none'}>{c.over ? `넘김 ${c.over}` : '넘김 없음'}</em></span>
-            <span className="tx">{c.n}대 · {gbText(c.gb.gb)}{c.over ? ` · 정리하면 ${gbText(c.overGb.gb)}` : ''}</span>
+            title={c.blind ? `${c.name} — 이 법인의 vCenter 값을 지금 못 읽었습니다` : `${c.name} — 스냅샷이 있는 VM ${c.n}대(기준 넘김 ${c.over}대) · ${gbText(c.gb.gb)} — 누르면 이 법인만 봅니다`}>
+            <span className="cn"><span>{c.name}</span><em className={c.over ? '' : 'none'}>{c.over ? `넘김 ${c.over}` : c.blind ? '못 읽음' : '넘김 없음'}</em></span>
+            <span className="tx">{c.blind ? '—' : <>{c.n}대 · {gbText(c.gb.gb)}{c.over ? ` · 정리하면 ${gbText(c.overGb.gb)}` : ''}</>}</span>
             <span className="snp-gbar" style={{ background: bandGradient(c.items) }} aria-hidden="true" />
             {hist?.byCorp?.[c.id] && <Spark values={seriesValues(hist.byCorp[c.id], 'gb')} label={`${c.name} 스냅샷 크기 ${tp}일 추이`} />}
-            <span className="tx">{c.oldest != null ? `가장 오래된 것 ${daysText(c.oldest)}` : c.n ? '판정한 스냅샷 없음' : '스냅샷 없음'}{c.stale ? ' · 값이 낡음' : ''}</span>
+            <span className="tx">{corpFootText(c)}</span>
           </button>
         ))}
       </div>

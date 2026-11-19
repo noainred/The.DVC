@@ -13,6 +13,31 @@
  */
 import { numOrNull } from '../util/numOrNull.js';
 import { hygieneFindings } from '../vmhygiene/analyze.js';
+import { unreadVcenterReasons } from '../metrics/unreadVcenters.js';
+
+/**
+ * vCenter 의 스냅샷 값을 **지금** 읽을 수 없는 사유 — 판정은 이것 하나(이력 기록 record.js · 법인 카드 corps[].vcenters[].unread · 7일 변화 라우트가 같이 쓴다).
+ * unreadVcenterReasons(점검중 · 수집 실패 · 낡은 위임) → 등록부에만 있음 → 첫 수집 중(pending) · 비활성 → REST 폴백(개수를 받지 않는다 — 위임 vCenter 는 collectMethod).
+ * 138회차: 이 판정 없이 7일 변화가 ‘보존 창이 지난 unreachable · 기동 직후 pending · REST’ vCenter 의 7일 전 VM 을 전부 ‘스냅샷을 다 지운 VM’ 으로 셌고,
+ *   법인 카드는 그 vCenter 를 ‘스냅샷 없음’ 으로 적었다(못 읽은 것을 0 으로).
+ * @returns {null|'maintenance'|'unreachable'|'stale'|'pending'|'disabled'|'no-snap'}
+ */
+export function vcReadIssue(vc, vcId, unread) {
+  const u = unread.get(vcId);
+  if (u) return u;
+  if (!vc) return 'unreachable';
+  if (vc.status === 'pending') return 'pending';
+  if (vc.status === 'disabled') return 'disabled';
+  if (vc.collectSource === 'rest' || vc.collectMethod === 'rest') return 'no-snap';
+  return null;
+}
+
+/** ids 중 스냅샷 값을 지금 읽을 수 있는 vCenter(vcReadIssue 가 null). */
+export function readableVcenterIds(snap, ids) {
+  const unread = unreadVcenterReasons(snap);
+  const byId = new Map((snap?.vcenters || []).filter((vc) => vc && vc.id != null).map((vc) => [String(vc.id), vc]));
+  return new Set([...ids].filter((id) => !vcReadIssue(byId.get(id), id, unread)));
+}
 
 export const AGE_EDGES_DAYS = Object.freeze([30, 90]);   // 나이 구간 경계 — inventory/vmInsight.js SNAP_AGE_EDGES_DAYS 와 같은 값(시험이 대조)
 export const ADVISE_HOURS = 72;                          // VMware 권고(참고선) — tools/diskTrend.js DEFAULT_POLICY.snapshotMaxHours 와 같은 값(시험이 대조)
@@ -173,10 +198,12 @@ export function snapshotToolView(snap, { allowed = null, pick = null, hygiene = 
   }
 
   const corps = new Map();
+  const unread = unreadVcenterReasons(snap);
   for (const vc of vcs) {
     const c = corpOf(String(vc.id));
     if (!corps.has(c.corpId)) corps.set(c.corpId, { id: c.corpId, name: c.corpName, vcenters: [] });
-    corps.get(c.corpId).vcenters.push({ id: String(vc.id), name: String(vc.name || vc.id), stale: vc.stale === true, status: vc.status || null });
+    corps.get(c.corpId).vcenters.push({ id: String(vc.id), name: String(vc.name || vc.id), stale: vc.stale === true, status: vc.status || null,
+      unread: vcReadIssue(vc, String(vc.id), unread) });
   }
   const sum = (xs) => Math.round(xs.reduce((a, x) => a + (x.snapGB ?? 0), 0) * 10) / 10;
   return {

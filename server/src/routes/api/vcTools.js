@@ -9,7 +9,7 @@ import { listDatacenters, datacenterOfVcenter } from '../../datacenter/store.js'
 import { vcListUnread, vcListItems, LIST_UNREAD_TEXT } from '../../corelicense/analyze.js'; // v2.742(VC-06): 확장 목록을 읽었는가 — 판정 한 벌
 import { isAdminReq } from '../../auth/addressMask.js';
 import { vmToolsDistribution, TOOLS_IDS_MAX } from '../../inventory/vmToolsDist.js';
-import { snapshotToolView } from '../../snaphist/view.js';
+import { snapshotToolView, readableVcenterIds } from '../../snaphist/view.js';
 import { historyStatus, historySeries, goneList, vmHistory, dayAgo, clampDays } from '../../snaphist/history.js';
 import { snapHistGeneration } from '../../snaphist/db.js';
 import { loadVmHygieneSettings } from '../../vmhygiene/settings.js';
@@ -185,7 +185,8 @@ api.get('/tools/snapshots/history', requirePerm('tools'), (req, res) => memoJson
   const [series, gone, ago] = await Promise.all([
     historySeries({ vcIds, days, now, corpOf: snapCorpOf() }),
     goneList({ vcIds, sinceTs: now - days * 86_400_000 }),
-    dayAgo({ vcIds, n: 7, now }),
+    // 138회차: 7일 변화는 **지금 값을 읽은** vCenter 만(view.vcReadIssue — 못 읽은 vCenter 의 7일 전 VM 을 ‘다 지운 VM’ 으로 세지 않는다)
+    dayAgo({ vcIds: readableVcenterIds(snap, vcIds), n: 7, now }),
   ]);
   return { ok: true, status, ...(series || {}), gone: gone?.items || [], goneMore: !!gone?.more, ago7: ago };
 }, { extraKey: `${scopeKey(req.user, store.get())}|${vcenterPickKey(req.query, store.get())}|g${snapHistGeneration()}`, ttlMs: 60_000 }));
