@@ -103,7 +103,7 @@
 | `dirusage/` | 5 | 1,149 | `dirusage/scheduler.js` (3) | dirusage/scheduler.js — 폴더 사용량 스캔 주기 실행 + 메일 발송 (v2.454). |
 | `diskbad/` | 17 | 3,276 | `diskbad/jobs.js` (3) | diskbad/jobs.js — **중앙**의 점검 작업(전체 · 법인 · 서버 1대)과 6시간 자동 점검(v3.8.0). |
 | `dscfg/` | 4 | 408 | `dscfg/collect.js` (7) | 데이터스토어 운영 속성 갱신(v2.700 — A17). 인벤토리 수집 한 주기 안에서 오래된 DS 부터 상한만큼. |
-| `edgelog/` | 3 | 503 | `edgelog/spec.js` (6) | edgelog/spec.js — 엣지 포탈의 **진행상태**를 어디서 읽는지 적은 표(순수 데이터, v2.549). |
+| `edgelog/` | 3 | 504 | `edgelog/spec.js` (6) | edgelog/spec.js — 엣지 포탈의 **진행상태**를 어디서 읽는지 적은 표(순수 데이터, v2.549). |
 | `fieldcheck/` | 1 | 151 | `fieldcheck/judge.js` (1) | fieldcheck/judge.js — 법인별 실환경 확인(v2.938 · 사용자 요청 '개선 포인트 8번은 법인별로 적용'). |
 | `focusmon/` | 37 | 8,715 | `focusmon/service.js` (6) | focusmon/service.js — 이 노드의 집중 모니터링을 묶는다(v2.976): 키 · 중앙 직접 수집기 · 1초/10초 틱 · 수집 시작/끝 · 엣지 깨우기. |
 | `gpu/` | 18 | 3,607 | `gpu/settings.js` (10) | GPU 게스트 수집 설정 — 어떤 법인(vCenter)의 패스쓰루 GPU VM을 게스트 OS 계정으로 |
@@ -115,7 +115,7 @@
 | `hostaccess/` | 4 | 657 | `hostaccess/service.js` (2) | hostaccess/service.js — 호스트 접근 제어 실행 계층(v2.485): 상태 조회 · 계획 · 적용(런타임) · 확정 · 되돌림. |
 | `hostcfg/` | 6 | 1,148 | `hostcfg/parse.js` (4) | 호스트 구성·보안(v2.699 — A1 보안 하드닝 · A9 구성 드리프트 · A11 재부팅 필요·빌드 불일치 · A12 호스트 인증서 만료). |
 | `idrac/` | 41 | 9,043 | `idrac/registry.js` (29) | iDRAC registry — the managed list of Dell servers whose power draw we collect |
-| `insights/` | 28 | 11,000 | `insights/analysisServers.js` (16) | 서버 분석 공용 — iDRAC 등록부(중앙) + 위임 법인의 원격 인벤토리 병합·법인 귀속·필터(v2.579 에 |
+| `insights/` | 28 | 11,001 | `insights/analysisServers.js` (16) | 서버 분석 공용 — iDRAC 등록부(중앙) + 위임 법인의 원격 인벤토리 병합·법인 귀속·필터(v2.579 에 |
 | `intro/` | 5 | 1,967 | `intro/support.js` (0) | GENERATED from dc-runtime/src/*.ts — do not edit. Rebuild with `cd dc-runtime && bun run build`. |
 | `inventory/` | 13 | 1,935 | `inventory/osKind.js` (3) | VM 게스트 OS 문자열 → 'windows' \| 'linux' \| 'other' \| null (v2.834 — Bareos 백업 대상 OS 구분). |
 | `ipam/` | 49 | 9,283 | `ipam/ledger.js` (11) | IPAM ledger builder — turns a snapshot into a per-center IP record list. |
@@ -152,7 +152,7 @@
 | `serverinfo/` | 4 | 463 | `serverinfo/service.js` (1) | serverinfo/service.js — 기능 ‘서버 정보’(설계 docs/design/server-access §4.1 안 C — 별도 기능 · 공통 코어를 불러 쓴다 · §4.5 · D3). |
 | `servicemap/` | 4 | 1,075 | `servicemap/store.js` (4) | servicemap/store.js — 서비스 인벤토리 저장소(v2.887, docs/design/service-map/README.md 시안 A 3차 + 4차 검토). |
 | `settingsStatus/` | 2 | 288 | `settingsStatus/sources.js` (3) | 설정 메뉴 상태 배지 — 사실 수집(v2.916). 판정은 grade.js 하나. |
-| `snaphist/` | 5 | 785 | `snaphist/db.js` (1) | snaphist/db.js — VM 별 스냅샷 이력 DB(v3.26.0 — 사용자 ‘VM 별 스냅샷 이력 DB 추가’ · 설계 docs/design/snapshots §5). |
+| `snaphist/` | 5 | 788 | `snaphist/db.js` (1) | snaphist/db.js — VM 별 스냅샷 이력 DB(v3.26.0 — 사용자 ‘VM 별 스냅샷 이력 DB 추가’ · 설계 docs/design/snapshots §5). |
 | `sshaccess/` | 10 | 2,057 | `sshaccess/outcome.js` (3) | sshaccess/outcome.js — 접속 결과를 **본 곳**(폴러 · 연결 시험)이 부르는 하나(v3.24 서버 접속 — 설계 docs/design/server-access §4.4). |
 | `storage/` | 66 | 15,021 | `storage/registry.js` (21) | storage/registry.js — 스토리지 장비 등록부(v2.302). |
 | `storpath/` | 4 | 391 | `storpath/cache.js` (2) | ESXi 경로 카운터 캐시(v2.935 C-①) — vCenter 별 · 호스트 moref 별 최근 표본 요약(storpath/parse.js summarizeHostPaths). 인메모리다. |
@@ -180,7 +180,7 @@
 | `winrm/` | 3 | 518 | `winrm/client.js` (2) | winrm/client.js — WinRM HTTPS(5986) + NTLMv2 로 PowerShell 하나를 돌리고 출력을 받는다(서버 접속 3단계 · 설계 docs/design/server-access ④). |
 | `xferspeed/` | 7 | 1,994 | `xferspeed/schedule.js` (5) | xferspeed/schedule.js — 전송 속도 측정의 **실행 일정**(순수 — 파일·타이머 없음, v2.735). |
 
-디렉터리 103개 · 파일 1518개 · 351,086줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
+디렉터리 103개 · 파일 1518개 · 351,091줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
 <!-- arch-doc:modules:end -->
 
 ### 3-3. 라우트 그룹 → 게이트

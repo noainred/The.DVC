@@ -5,6 +5,7 @@
  * (판정 코어는 하나 — 루트 CLAUDE.md). 못 읽은 값(null)은 합에 넣지 않고 따로 센다 · 정렬에서는 늘 뒤로.
  */
 import { numOrNull } from '../../../numOrNull.js';
+import { unitText } from '../../unitText.js';
 
 export const BANDS = Object.freeze(['d90', 'd30', 'd7', 'new', 'skip', 'unk']);
 export const BAND_COLOR = Object.freeze({ new: '#4b7bb8', d7: '#f59e0b', d30: '#f0865a', d90: '#ef4444', skip: '#64748b', unk: '#475569' });
@@ -30,10 +31,10 @@ export function signalDefs(th) {
   const a = numOrNull(th?.snapAgeDays);
   return [
     ['old', `사내 기준(${a != null ? `${a}일` : '설정 없음'})을 넘김`, '‘VM 구성 점검’ · ‘오래된 스냅샷’ 카드와 같은 판정', '#fbbf24'],
-    ['h72', `VMware 권고(${th?.adviseHours ?? 72}시간)를 넘김`, '참고선 — 판정은 사내 기준입니다', '#fde68a'],
-    ['count', `한 VM 에 ${th?.snapCount ?? '—'}개 넘음`, '줄기가 길수록 디스크 입출력이 느려집니다', '#fdba74'],
-    ['size', `${th?.snapSizeGB ?? '—'} GB 넘음`, '크기 기준', '#93c5fd'],
-    ['ds', `데이터스토어 사용 ${th?.dsHighPct ?? 85}% 이상`, '스냅샷이 커지면 그 데이터스토어가 찹니다', '#fca5a5'],
+    ['h72', `VMware 권고(${unitText(th?.adviseHours ?? 72, '시간')})를 넘김`, '참고선 — 판정은 사내 기준입니다', '#fde68a'],
+    ['count', `한 VM 에 ${unitText(th?.snapCount, '개')} 넘음`, '줄기가 길수록 디스크 입출력이 느려집니다', '#fdba74'],
+    ['size', `${unitText(th?.snapSizeGB, ' GB')} 넘음`, '크기 기준', '#93c5fd'],
+    ['ds', `데이터스토어 사용 ${unitText(th?.dsHighPct ?? 85, '%')} 이상`, '스냅샷이 커지면 그 데이터스토어가 찹니다', '#fca5a5'],
     ['cons', '디스크 통합 필요', 'vCenter 가 ‘통합 필요’ 로 표시한 VM', '#fca5a5'],
     ['backup', '백업 도구가 남긴 임시 스냅샷', '백업이 끝났는데 남아 있을 수 있습니다', '#d8b4fe'],
     ['mem', '메모리까지 담은 스냅샷', '켜진 채로 찍어 파일이 메모리 크기만큼 더 큽니다', '#d8b4fe'],

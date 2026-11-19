@@ -19,6 +19,7 @@ import { config } from '../config.js';
 import { openSqlite, withOpenCleanup, createLockRetry } from '../util/sqliteOpen.js';
 import { chunkedDelete } from '../util/chunkedPrune.js';
 import { addMissingColumns } from '../vmtrack/db.js';
+import { envPositive } from '../util/envNumber.js';
 import { isBareKey } from './record.js';
 
 const lockRetry = createLockRetry();
@@ -26,8 +27,8 @@ const DB_PATH = process.env.SNAPHIST_DB_PATH || path.join(config.dbDir || config
 const DAY = 86_400_000;
 export const RETENTION_DAYS_DEFAULT = 400;
 export function retentionDays() {
-  const n = Number(process.env.SNAPHIST_RETENTION_DAYS);
-  return Number.isFinite(n) && n >= 30 ? Math.min(3650, Math.trunc(n)) : RETENTION_DAYS_DEFAULT;
+  const n = envPositive(process.env.SNAPHIST_RETENTION_DAYS, RETENTION_DAYS_DEFAULT, { max: 3650 });
+  return Math.max(30, n);   // 30일 아래는 7일 변화 · 30일 추이가 비므로 30일로 올린다
 }
 
 let impl = null;

@@ -14,13 +14,15 @@ import { loadVmHygieneSettings } from '../vmhygiene/settings.js';
 import { unreadVcenterReasons } from '../metrics/unreadVcenters.js';
 import { dayRecord, dayKeyOf } from './record.js';
 import { commitDay, okVcentersOfDay, pruneSnapHist, getSnapHistDb, retentionDays } from './db.js';
+import { envPositive } from '../util/envNumber.js';
 
 const TICK_MS = 60_000;
 export const RETRY_MS = 10 * 60_000;
 const PRUNE_EVERY_MS = 12 * 3_600_000;
 export function recordHour() {
-  const n = Number(process.env.SNAPHIST_HOUR);
-  return Number.isInteger(n) && n >= 0 && n <= 23 ? n : 3;
+  // 0시는 '0' 이 양수가 아니라 envPositive 로 읽지 못한다 — 1~23 만 받고, 자정 기록은 24 로 적는다(24 → 0)
+  const n = envPositive(process.env.SNAPHIST_HOUR, 3, { max: 24 });
+  return n === 24 ? 0 : n;
 }
 
 let running = false;

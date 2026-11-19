@@ -35,7 +35,7 @@
 | `numOrNull.js` | `numOrNull` — '읽지 못한 수치' 를 0 으로 둔갑시키지 않는 단일 판정 (v2.561). | `numOrNull` `default` | 304 | 66 | 4 |
 | `atomicWrite.js` | 원자적 파일 쓰기 — 임시파일에 기록 후 rename으로 교체한다. writeFileSync는 기록 도중 크래시/정전 시 파일을 truncate/부분기록 상태로 남겨, 다음 로드에서 JSON 파싱 실패 → 빈 값 반환 → 다음 저장이 손상본을 덮어쓰며 데이터가 영구 유… | `atomicWriteFileSync` `classifyLoadReason` `loadReasonWhere` `summarizeLoadReason` `safeLoadText` `corruptBackupPath` 외 2 | 258 | 73 | 12 |
 | `dayKey.js` | 날짜 경계 코어 — 하나다(v2.582 ARCH-2). | `resolveDayOffsetMin` `toMs` `dayKey` `todayStamp` `dayIndex` `dayStartMs` 외 9 | 136 | 35 | 38 |
-| `envNumber.js` | 환경변수의 '양수' 설정값(상한 · 개수 · 시한 · 지연)을 읽는다(v3.17.6 · 2차 공통 기능 점검 5회차). | `envPositive` `envNonNegative` `ENV_INT_MAX` `TCP_PORT_MAX` `ENV_DEFAULT_MAX` `envPort` 외 1 | 128 | 36 | 4 |
+| `envNumber.js` | 환경변수의 '양수' 설정값(상한 · 개수 · 시한 · 지연)을 읽는다(v3.17.6 · 2차 공통 기능 점검 5회차). | `envPositive` `envNonNegative` `ENV_INT_MAX` `TCP_PORT_MAX` `ENV_DEFAULT_MAX` `envPort` 외 1 | 130 | 37 | 4 |
 | `capStr.js` | 외부 문자열을 **상주 구조**(Map 키·보관 레코드)에 넣을 때의 길이 상한(v2.606 감사 TIM2606-02). | `flatStr` `capStr` `capTrim` | 108 | 24 | 2 |
 | `jsonFileRead.js` | 설정 · 저장소 JSON 파일 **읽기 판정**(순수 단계 — 상태 등록부 없음). `util/jsonFileLoad.js` 에서 떼어 냈다. | `_setJsonFileLoadClockForTest` `nowMs` `inRetryWindow` `readJsonFile` `makeJsonFileReader` `READ_RETRY_MS` | 108 | 47 | 30 |
 | `resilientFetch.js` | 크로스-WAN(중앙↔수집서버/에이전트) 호출용 견고한 fetch. | `loadWanCa` `wanTlsConnectOptions` `wanTlsStatus` `dispatcherFor` `abortableSleep` `headersWithoutSecrets` 외 11 | 78 | 24 | 15 |
@@ -321,8 +321,8 @@
 
 | 모듈 | 하는 일 | 사용처 | 다른 영역 | 테스트 |
 |---|---|---|---|---|
+| `web/src/views/unitText.js` | 값 + 단위 표기 — **값이 없으면 단위를 붙이지 않는다**(v2.575 BUG-20). | 59 | 9 | 3 |
 | `web/src/views/changeResult.js` | v2.731(점검 1회차 A5-01): 변경 요청 응답 판정 — 순수 모듈(화면·테스트가 같이 쓴다). | 58 | 4 | 7 |
-| `web/src/views/unitText.js` | 값 + 단위 표기 — **값이 없으면 단위를 붙이지 않는다**(v2.575 BUG-20). | 58 | 9 | 3 |
 | `web/src/views/tools/relTime.js` | 상대시각 문구 — **공용 코어** (v2.574 IMP-03). | 49 | 4 | 2 |
 | `web/src/views/settingsUnread.js` | 112회차(설정 화면 스윕 — 106회차 R3 · R4 와 같은 꼴): '서버가 설정 파일을 읽지 못한 동안의 조회' 를 화면이 다루는 공용 판정(순수 — 화면 · vitest 가 같이 쓴다). | 34 | 3 | 5 |
 | `web/src/views/tools/toneVar.js` | toneVar — 판정 톤(`ok`/`warn`/`bad`, 또는 진단 어휘 `green`/`amber`/`red`) → CSS 색 변수. **공용 코어** (v2.613 DEPS2613-11). 예전에는 `bmUsageText`·`edgeLogText`·`partFa`… | 32 | 1 | 1 |
