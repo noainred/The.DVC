@@ -14,6 +14,7 @@
  */
 
 /** 검색어 → 소문자 토큰 배열. 공백(연속 포함)으로 분리, 빈 토큰 제거. "NTP WA" → ['ntp','wa'] */
+import { numOrNull } from '../numOrNull.js';   // v3.28.1
 export function parseTokens(q) {
   return String(q || '').toLowerCase().split(/\s+/).filter(Boolean);
 }
@@ -57,18 +58,25 @@ export function notesSnippet(notes, token, { before = 12, after = 40 } = {}) {
  * - memGB: memMB 합 → GB(정수 반올림)
  * - diskUsedGB: storageGB 합(vSphere committed = 실제 사용 중 디스크)
  * - diskProvGB: storageGB+uncommittedGB 합(프로비저닝 = thin 미기록분 포함 할당)
- * 필드 결측(수집 실패 VM)은 0 으로 취급 — NaN 이 합계 전체를 오염시키지 않게.
+ * 디스크 필드 결측(수집 실패 VM)은 0 으로 취급 — NaN 이 합계 전체를 오염시키지 않게.
+ * v3.28.1: vCPU · 메모리는 못 읽은 VM(null · '' — numOrNull)을 0 으로 더하지 않고 vcpuUnknown · memUnknown 으로 센다.
+ *   일치 VM 을 하나도 못 읽었으면 그 합은 null('—'). (디스크의 같은 꼴은 이번에 바꾸지 않았다 — docs/rules/web.md v3.28.1 남긴 것.)
  */
 export function sumVmResources(vms) {
-  let vcpu = 0, memMB = 0, used = 0, prov = 0;
+  let vcpu = 0, memMB = 0, used = 0, prov = 0, n = 0, vcpuUnknown = 0, memUnknown = 0;
   for (const v of vms || []) {
-    vcpu += Number(v.cpuCount) || 0;
-    memMB += Number(v.memMB) || 0;
+    n += 1;
+    const c = numOrNull(v.cpuCount); if (c == null) vcpuUnknown += 1; else vcpu += c;
+    const m = numOrNull(v.memMB); if (m == null) memUnknown += 1; else memMB += m;
     const u = Number(v.storageGB) || 0;
     used += u;
     prov += u + (Number(v.uncommittedGB) || 0);
   }
-  return { vcpu, memGB: Math.round(memMB / 1024), diskUsedGB: used, diskProvGB: prov };
+  return {
+    vcpu: n > 0 && vcpuUnknown === n ? null : vcpu,
+    memGB: n > 0 && memUnknown === n ? null : Math.round(memMB / 1024),
+    vcpuUnknown, memUnknown, diskUsedGB: used, diskProvGB: prov,
+  };
 }
 
 /** GB → 사람이 읽는 단위(1TB 이상이면 TB 소수1). VCenterDetail 의 tb() 와 동일 규칙. */

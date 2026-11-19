@@ -3,6 +3,7 @@ import { usePolling, can } from '../api.js';
 import { DataTable, UsageCell, StateBadge, Loading, ErrorBox, EntityDetail } from '../components/ui.jsx';
 import { unitText } from './unitText.js';
 import { numOrNull } from '../numOrNull.js';
+import { allocText, allocKpiSub } from './summaryAllocText.js';   // v3.28.1: 할당 합 — null(하나도 못 읽음)이면 '—' · 못 읽은 VM 수
 import { topOmittedNote } from './topOmittedText.js'; // v2.632 WEB2632-07
 
 function SumCard({ label, value, meta, accent }) {
@@ -184,8 +185,8 @@ export default function Explore() {
         {vmResult?.totals && (
           <div className="kpis" style={{ marginBottom: 12 }}>
             <SumCard label="검색된 VM" value={vmResult.totals.count.toLocaleString()} meta={`구동중 ${vmResult.totals.poweredOn.toLocaleString()}`} />
-            <SumCard label="vCPU 합계" value={vmResult.totals.vcpu.toLocaleString()} meta="할당 vCPU" accent="var(--accent)" />
-            <SumCard label="RAM 합계" value={`${vmResult.totals.ramGB.toLocaleString()} GB`} meta={`≈ ${(vmResult.totals.ramGB / 1024).toFixed(1)} TB`} accent="var(--purple)" />
+            <SumCard label="vCPU 합계" value={allocText(vmResult.totals.vcpu)} meta={['할당 vCPU', allocKpiSub(vmResult.totals.vcpu, vmResult.totals.vcpuUnknown, 'vcpu')].filter(Boolean).join(' · ')} accent="var(--accent)" />
+            <SumCard label="RAM 합계" value={allocText(vmResult.totals.ramGB, 0, ' GB')} meta={[vmResult.totals.ramGB == null ? '' : `≈ ${(vmResult.totals.ramGB / 1024).toFixed(1)} TB`, allocKpiSub(vmResult.totals.ramGB, vmResult.totals.ramUnknown, 'ram')].filter(Boolean).join(' · ')} accent="var(--purple)" />
             <SumCard label="디스크 합계" value={`${vmResult.totals.diskTB.toLocaleString()} TB`} meta={`${vmResult.totals.diskGB.toLocaleString()} GB${vmResult.totals.storageUnknown ? ` · 용량 미상 ${vmResult.totals.storageUnknown}대 제외` : ''}`} accent="var(--accent-2)" />
             <SumCard label="평균 CPU 사용률" value={unitText(vmResult.totals.avgCpuUsagePct, '%')} meta="구동중 VM 기준" />
             <SumCard label="평균 메모리 사용률" value={unitText(vmResult.totals.avgMemUsagePct, '%')} meta="구동중 VM 기준" />

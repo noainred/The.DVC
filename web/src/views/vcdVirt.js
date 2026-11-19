@@ -5,20 +5,27 @@
 // 호출부가 POWERED_OFF 를 제외한 목록을 넘기고, 그러면 CPU·MEM 가상화율도 켜진 VM 기준으로 다시
 // 계산된다(v2.334 — 사용자 요구). 이 모듈은 전원 상태를 보지 않으므로 필터 정책이 한 곳에만 남는다.
 import { hostCapacityKnown } from '../hostCapacity.js';   // 54회차 F5: 용량 판정은 서버와 같은 한 벌
+import { numOrNull } from '../numOrNull.js';   // v3.28.1: 못 읽은 vCPU · 메모리는 0 이 아니다
 
 /**
  * 호스트명 -> 할당 vCPU 합계 / 할당 메모리(MB) 합계.
- * VM 은 vm.host(호스트명)로 호스트에 매핑된다. cpuCount/memMB 가 없거나 숫자가 아니면 0으로 본다.
+ * VM 은 vm.host(호스트명)로 호스트에 매핑된다.
+ * v3.28.1: cpuCount/memMB 를 못 읽은 VM(null · '' · 수 아님 — numOrNull)은 0 으로 더하지 않고 vcpuUnk · vmemUnk(호스트명 -> VM 수)로 센다.
+ *   예전에는 0 으로 더해 가상화율이 표지 없이 낮게 나왔다(서버 vcenter/vmSums.js 와 같은 규칙 — 합은 읽은 VM 만 = 최소값).
  */
 export function allocByHost(vms) {
   const vcpu = new Map();
   const vmem = new Map();
+  const vcpuUnk = new Map();
+  const vmemUnk = new Map();
   for (const v of vms || []) {
     const k = v.host || '';
-    vcpu.set(k, (vcpu.get(k) || 0) + (Number(v.cpuCount) || 0));
-    vmem.set(k, (vmem.get(k) || 0) + (Number(v.memMB) || 0));
+    const c = numOrNull(v.cpuCount);
+    const m = numOrNull(v.memMB);
+    if (c == null) vcpuUnk.set(k, (vcpuUnk.get(k) || 0) + 1); else vcpu.set(k, (vcpu.get(k) || 0) + c);
+    if (m == null) vmemUnk.set(k, (vmemUnk.get(k) || 0) + 1); else vmem.set(k, (vmem.get(k) || 0) + m);
   }
-  return { vcpu, vmem };
+  return { vcpu, vmem, vcpuUnk, vmemUnk };
 }
 
 /** 호스트명 -> VM 대수. 'Off VM 포함' 해제 시 켜진 VM 만 세기 위해 호출부가 필터된 목록을 넘긴다. */
@@ -40,9 +47,11 @@ export function countByHost(vms) {
  *                      전자는 'Off VM 포함' 해제 시(켜진 VM 만), 후자는 체크 시 사용한다 —
  *                      /vms 응답 상한에 걸릴 수 있는 대형 vCenter 에서도 전체 수는 서버 값이 정확하다.
  */
-export function virtSum(hosts, vcpu, vmem, vmCount) {
-  let alloc = 0, cores = 0, vmc = 0, memAlloc = 0, memPhys = 0, capUnknown = 0;
+export function virtSum(hosts, vcpu, vmem, vmCount, unk = null) {
+  let alloc = 0, cores = 0, vmc = 0, memAlloc = 0, memPhys = 0, capUnknown = 0, vcpuUnknown = 0, vmemUnknown = 0;
   for (const h of hosts || []) {
+    // v3.28.1: unk = allocByHost 의 { vcpuUnk, vmemUnk } — 못 읽어 alloc · memAlloc 에서 뺀 VM 수(있으면 비율은 최소값 '≥').
+    if (unk) { vcpuUnknown += unk.vcpuUnk?.get(h.name) || 0; vmemUnknown += unk.vmemUnk?.get(h.name) || 0; }
     alloc += (vcpu && vcpu.get(h.name)) || 0;
     vmc += vmCount ? vmCount.get(h.name) || 0 : Number(h.vmCount) || 0;
     memAlloc += (vmem && vmem.get(h.name)) || 0;
@@ -51,7 +60,7 @@ export function virtSum(hosts, vcpu, vmem, vmCount) {
     //   예전에는 여기만 두 칸이라 같은 호스트를 서버 요약 · 알림은 '미상' 으로, 이 트리는 '읽음' 으로 판정했다).
     if (hostCapacityKnown(h)) { cores += h.cpuCores; memPhys += h.memTotalMB; } else capUnknown += 1;
   }
-  return { alloc, cores: capUnknown ? null : cores, vmc, memAlloc, memPhys: capUnknown ? null : memPhys, capUnknown };
+  return { alloc, cores: capUnknown ? null : cores, vmc, memAlloc, memPhys: capUnknown ? null : memPhys, capUnknown, vcpuUnknown, vmemUnknown };
 }
 
 /**

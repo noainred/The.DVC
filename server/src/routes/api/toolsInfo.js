@@ -79,7 +79,8 @@ api.get('/tools/guest-os/vms', requirePerm('tools'), (req, res) => {
   const items = vms.map((v) => ({
     name: v.name, vcenterId: v.vcenterId, cluster: v.cluster || '', host: v.host || '',
     guestOS: v.guestOS || '', powerState: v.powerState,
-    cpu: v.cpuCount || 0, memGB: Math.round((v.memMB || 0) / 1024), diskGB: numOrNull(v.storageGB),   // v2.727(C-01): 못 읽은 용량은 null(화면 '—')
+    // v3.28.1: vCPU · 메모리도 못 읽으면 null(화면 '—' · CSV 빈칸) — 예전 `v.cpuCount || 0` 은 '0 vCPU · 0 GB' VM 으로 보였다.
+    cpu: numOrNull(v.cpuCount), memGB: numOrNull(v.memMB) == null ? null : Math.round(numOrNull(v.memMB) / 1024), diskGB: numOrNull(v.storageGB),   // v2.727(C-01): 못 읽은 용량은 null(화면 '—')
     ip: (v.ipAddresses?.length ? v.ipAddresses : (v.ipAddress ? [v.ipAddress] : [])).join(' '),
   })).sort((a, b) => (a.vcenterId === b.vcenterId
     ? String(a.name || '').localeCompare(String(b.name || ''))

@@ -42,6 +42,7 @@ import { capacityForecastSummaryByVc } from '../../dscfg/summary.js'; // v3.22.0
 import { dsGrowthFor } from '../../tools/dsGrowth.js'; // v2.672 운영 장애: 용량 예측 증가율 — 롤업 전용·스냅샷 무관 캐시·시간 기준 양보
 import { lowerTerm } from '../../search/deepSearch.js'; // v2.629 AUTHZ2629-01: 검색어 1회 소문자화 + 길이 상한(한 벌)
 import { numOrNull } from '../../util/numOrNull.js'; // v2.578: 요청 기간 등 '읽지 못한 수치' 를 0 으로 둔갑시키지 않는다
+import { newVmSum, vmSumAdd, vmAllocOf } from '../../vcenter/vmSums.js'; // v3.28.1: 클러스터 VM 할당 합 — 못 읽은 vCPU · 메모리는 0 으로 더하지 않고 센다
 import { normGroupQuery, filterVmsByGroup, inventoryGroups, hasGroup } from './groupFilter.js'; // v2.491: 클러스터·폴더 하위 범위
 import { clusterIndex } from '../../clustercfg/analyze.js'; // v2.744(감사 VC-02): 클러스터 묶음 키 한 벌(ref 우선)
 import { ownsClusterKey } from '../../gpu/clusterKeyScope.js'; // v2.769(점검 R4-D5-4): 클러스터 키 소유 vCenter = 최장 프리픽스
@@ -106,7 +107,7 @@ api.get('/tools/capacity', requirePerm('tools'), (req, res) => memoJson(req, res
   const key = (x) => cidx.keyOf(x) ?? `${x.vcenterId}|${x.cluster || 'standalone'}`;
   for (const h of hosts) {
     const k = key(h);
-    const c = byCluster.get(k) || { vcenterId: h.vcenterId, cluster: h.cluster || 'standalone', ...cidx.meta(cidx.keyOf(h)), hosts: 0, excluded: 0, capUnknown: 0, cores: 0, cpuTotalMhz: 0, cpuUsedMhz: 0, cpuTR: 0, memTotalGB: 0, memUsedGB: 0, memTR: 0, vcpuOn: 0, vcpuAll: 0, ramOnGB: 0, vmsOn: 0, vms: 0 };
+    const c = byCluster.get(k) || { vcenterId: h.vcenterId, cluster: h.cluster || 'standalone', ...cidx.meta(cidx.keyOf(h)), hosts: 0, excluded: 0, capUnknown: 0, cores: 0, cpuTotalMhz: 0, cpuUsedMhz: 0, cpuTR: 0, memTotalGB: 0, memUsedGB: 0, memTR: 0, vmOn: newVmSum(), vmAll: newVmSum(), vmsOn: 0, vms: 0 };
     c.hosts++;
     // v2.733(점검 3회차 C2-06): 용량(코어·CPU·메모리 총량)을 못 읽은 호스트(REST 폴백 — store.hostCapacityKnown)는 용량 합에 0 으로
     //   넣지 않고 센다(capacityUnknown). 예전에는 그 법인이 코어 0 · vCPU:코어 0 · RAM 오버커밋 0% 로 보였다.
@@ -126,25 +127,36 @@ api.get('/tools/capacity', requirePerm('tools'), (req, res) => memoJson(req, res
     const k = key(v);
     const c = byCluster.get(k); if (!c) continue;
     c.vms++; const on = v.powerState === 'POWERED_ON';
-    c.vcpuAll += v.cpuCount || 0;
-    if (on) { c.vcpuOn += v.cpuCount || 0; c.ramOnGB += (v.memMB || 0) / 1024; c.vmsOn++; }
+    // v3.28.1: 못 읽은 cpuCount · memMB 는 0 으로 더하지 않는다 — 합은 읽은 VM 만(최소값), 못 읽은 수는 vmOn · vmAll 의 unknown.
+    vmSumAdd(c.vmAll, v);
+    if (on) { vmSumAdd(c.vmOn, v); c.vmsOn++; }
   }
+  // 전체 합(구동 VM) — 합계 줄의 할당 합 · 못 읽은 수(클러스터 행의 합과 같은 집합)
+  const allOn = newVmSum();
+  for (const c of byCluster.values()) { for (const k of ['n', 'on', 'vcpu', 'memMB', 'vcpuUnknown', 'memUnknown']) allOn[k] += c.vmOn[k]; }
   // v2.733(C2-06): 용량을 못 읽은 호스트가 섞인 클러스터의 총량·비율·여유는 **부분 합**이다 — VM 할당은 그 호스트들의 몫까지 들어 있어
   //   분모만 빠진 비율은 틀린 값이다. 그 칸은 null('—')이고 capacityUnknown 으로 밝힌다(전부 못 읽었으면 코어·메모리 총량도 null).
   const clusters = [...byCluster.values()].map((c) => {
     const capOk = c.capUnknown === 0;
     const allUnknown = c.capUnknown === c.hosts;
+    // v3.28.1: 구동 VM 의 할당 합 — VM 이 있는데 하나도 못 읽었으면 null(vmAllocOf). 일부만 못 읽었으면 읽은 값의 합(최소값)이라
+    //   비율(vcpuPerCore · ramOvercommitPct)도 최소값이고 화면이 vcpuUnknown · ramUnknown 으로 '≥' 를 붙인다. 여유(ramHeadroomGB)는
+    //   부분 합으로 내면 실제보다 **크게**(좋게) 나오므로 메모리를 못 읽은 VM 이 있으면 null 이다.
+    const alOn = vmAllocOf(c.vmOn);
+    const alAll = vmAllocOf(c.vmAll);
+    const ramOnGB = alOn.memMB == null ? null : alOn.memMB / 1024;
     return {
       vcenterId: c.vcenterId, cluster: c.cluster, clusterRef: c.clusterRef, vcDatacenter: c.vcDatacenter, sameName: c.sameName, hosts: c.hosts, vms: c.vms, vmsOn: c.vmsOn,
       cores: allUnknown ? null : c.cores, memTotalGB: allUnknown ? null : Math.round(c.memTotalGB),
-      vcpuAllocated: c.vcpuOn, vcpuTotal: c.vcpuAll, ramAllocatedGB: Math.round(c.ramOnGB),
-      vcpuPerCore: !capOk ? null : c.cores ? r1(c.vcpuOn / c.cores) : 0,
-      ramOvercommitPct: !capOk ? null : c.memTotalGB ? Math.round((c.ramOnGB / c.memTotalGB) * 100) : 0,
+      vcpuAllocated: alOn.vcpu, vcpuTotal: alAll.vcpu, ramAllocatedGB: ramOnGB == null ? null : Math.round(ramOnGB),
+      vcpuUnknown: c.vmOn.vcpuUnknown, ramUnknown: c.vmOn.memUnknown, vcpuTotalUnknown: c.vmAll.vcpuUnknown,   // v3.28.1: 못 읽어 합에서 뺀 VM 수
+      vcpuPerCore: !capOk || alOn.vcpu == null ? null : c.cores ? r1(alOn.vcpu / c.cores) : 0,
+      ramOvercommitPct: !capOk || ramOnGB == null ? null : c.memTotalGB ? Math.round((ramOnGB / c.memTotalGB) * 100) : 0,
       cpuUsedPct: c.cpuTR ? Math.round((c.cpuUsedMhz / c.cpuTR) * 100) : null,
       memUsedPct: c.memTR ? Math.round((c.memUsedGB / c.memTR) * 100) : null,
       hostsUsageExcluded: c.excluded,
       capacityUnknown: c.capUnknown,
-      ramHeadroomGB: capOk ? Math.round(c.memTotalGB - c.ramOnGB) : null,
+      ramHeadroomGB: capOk && ramOnGB != null && c.vmOn.memUnknown === 0 ? Math.round(c.memTotalGB - ramOnGB) : null,
     };
   }).sort((a, b) => (b.ramOvercommitPct ?? -1) - (a.ramOvercommitPct ?? -1)); // null(모름)은 뒤로
   const sum = (f) => clusters.reduce((a, x) => a + (f(x) || 0), 0);
@@ -152,6 +164,12 @@ api.get('/tools/capacity', requirePerm('tools'), (req, res) => memoJson(req, res
   //   뺀 호스트 수를 capacityUnknown 으로 함께 싣는다 — 전부 못 읽었으면 null(0 코어라는 거짓 금지).
   const known = clusters.filter((c) => c.capacityUnknown === 0);
   const sumK = (f) => known.reduce((a, x) => a + (f(x) || 0), 0);
+  // v3.28.1: 합계 비율 · 여유는 분자를 읽은 클러스터끼리만(분자 · 분모가 같은 집합) — 할당을 하나도 못 읽은 클러스터는 양쪽에서 뺀다.
+  //   일부만 못 읽은 클러스터가 섞이면 합계 비율도 최소값(vcpuPerCoreMin). 여유는 메모리를 다 읽은 클러스터만이고 뺀 클러스터 수를 싣는다.
+  const knownV = known.filter((c) => c.vcpuAllocated != null);
+  const sumV = (f) => knownV.reduce((a, x) => a + (f(x) || 0), 0);
+  const headroomRows = clusters.filter((c) => c.ramHeadroomGB != null);
+  const alTot = vmAllocOf(allOn);
   const capacityUnknown = sum((c) => c.capacityUnknown);
   const hostsTotal = sum((c) => c.hosts);
   const allCapUnknown = hostsTotal > 0 && capacityUnknown === hostsTotal;
@@ -161,9 +179,13 @@ api.get('/tools/capacity', requirePerm('tools'), (req, res) => memoJson(req, res
     totals: {
       clusters: clusters.length, hosts: hostsTotal, hostsUsageExcluded: sum((c) => c.hostsUsageExcluded),
       capacityUnknown, cores: allCapUnknown ? null : sum((c) => c.cores),
-      memTotalGB: allCapUnknown ? null : sum((c) => c.memTotalGB), vcpuAllocated: sum((c) => c.vcpuAllocated), ramAllocatedGB: sum((c) => c.ramAllocatedGB),
-      vcpuPerCore: sumK((c) => c.cores) ? r1(sumK((c) => c.vcpuAllocated) / sumK((c) => c.cores)) : (capacityUnknown ? null : 0),
-      ramHeadroomGB: known.length || !capacityUnknown ? sumK((c) => c.ramHeadroomGB) : null,
+      memTotalGB: allCapUnknown ? null : sum((c) => c.memTotalGB),
+      vcpuAllocated: alTot.vcpu, ramAllocatedGB: alTot.memMB == null ? null : Math.round(alTot.memMB / 1024),
+      vcpuUnknown: allOn.vcpuUnknown, ramUnknown: allOn.memUnknown,   // v3.28.1: 구동 VM 중 못 읽어 합에서 뺀 수
+      vcpuPerCore: sumV((c) => c.cores) ? r1(sumV((c) => c.vcpuAllocated) / sumV((c) => c.cores)) : (capacityUnknown || knownV.length < known.length ? null : 0),
+      vcpuPerCoreMin: knownV.some((c) => c.vcpuUnknown > 0),          // v3.28.1: 합계 비율이 최소값인가(화면 '≥')
+      ramHeadroomGB: headroomRows.length || !clusters.length ? headroomRows.reduce((a, c) => a + c.ramHeadroomGB, 0) : null,
+      ramHeadroomExcluded: clusters.length - headroomRows.length,     // v3.28.1: 용량 또는 VM 메모리를 못 읽어 여유 합에서 뺀 클러스터 수
     },
   };
 }, { extraKey: scopeKey(req.user, store.get()) }));
@@ -204,23 +226,27 @@ function overAllocatedReport(scoped, vms, { top = 50 } = {}) {
   // v2.631(감사 AX2-02): 사용률을 읽지 못한 VM(REST 폴백 vCenter·엣지 정제로 null)은 0% 가 아니다 — 그 지표의
   //   합산·후보 판정에서 빼고 개수를 밝힌다. 예전 `Number(x) || 0` 은 그 VM 을 메모리 과할당 1순위(할당 전량 유휴)로 만들었다.
   const usageUnknown = { cpu: 0, mem: 0 };
+  const allocUnknown = { cpu: 0, mem: 0 };   // v3.28.1: 할당(vCPU · 메모리)을 못 읽어 그 지표에서 뺀 구동 VM 수
   // v3.21.0(VM 분석 화면 요약): 같은 누계를 vCenter 별로도 쌓는다 — 요약이 법인별 할당 · 사용 · 미사용을 다시 계산하지 않게(판정 한 벌).
   //   wasteReport 가 요약을 만들 때만 쓰고 지운다(응답에 실리지 않음 — Map 은 JSON 으로 {} 가 된다).
   const perVc = new Map();
-  const pv = (id) => { let e = perVc.get(id); if (!e) { e = { poweredOn: 0, cpuAllocMhz: 0, cpuUsedMhz: 0, memAllocMB: 0, memUsedMB: 0, usageUnknownCpu: 0, usageUnknownMem: 0, excludedNoHostMhz: 0 }; perVc.set(id, e); } return e; };
+  const pv = (id) => { let e = perVc.get(id); if (!e) { e = { poweredOn: 0, cpuAllocMhz: 0, cpuUsedMhz: 0, memAllocMB: 0, memUsedMB: 0, usageUnknownCpu: 0, usageUnknownMem: 0, excludedNoHostMhz: 0, allocUnknownCpu: 0, allocUnknownMem: 0 }; perVc.set(id, e); } return e; };
   const items = [];
   for (const v of on) {
     const e = pv(v.vcenterId);
     e.poweredOn += 1;
-    const vcpu = Number(v.cpuCount) || 0;
-    const memMB = Number(v.memMB) || 0;
+    // v3.28.1: 할당(vCPU · 메모리)을 못 읽은 VM 은 0 이 아니라 모름 — 그 지표의 합산 · 후보에서 빼고 allocUnknown 으로 센다(사용률 미상과 같은 규칙).
+    const vcpu = numOrNull(v.cpuCount);
+    const memMB = numOrNull(v.memMB);
+    if (vcpu == null) { allocUnknown.cpu += 1; e.allocUnknownCpu += 1; }
+    if (memMB == null) { allocUnknown.mem += 1; e.allocUnknownMem += 1; }
     const cpuPct = numOrNull(v.cpuUsagePct);
     const memPct = numOrNull(v.memUsagePct);
     if (cpuPct == null) { usageUnknown.cpu += 1; e.usageUnknownCpu += 1; }
     if (memPct == null) { usageUnknown.mem += 1; e.usageUnknownMem += 1; }
     const mhzPerCore = hostMhz.get(`${v.vcenterId}|${v.host}`);
     // 메모리는 호스트 정보 없이도 계산 가능(MB 단위 그대로).
-    const mUsed = memPct == null ? null : memMB * (memPct / 100);
+    const mUsed = memPct == null || memMB == null ? null : memMB * (memPct / 100);
     if (mUsed != null) { memAllocMB += memMB; memUsedMB += mUsed; e.memAllocMB += memMB; e.memUsedMB += mUsed; }
     let cAlloc = null; let cUsed = null;
     if (mhzPerCore && vcpu > 0) {
@@ -230,7 +256,7 @@ function overAllocatedReport(scoped, vms, { top = 50 } = {}) {
         cpuAllocMhz += cAlloc; cpuUsedMhz += cUsed;
         e.cpuAllocMhz += cAlloc; e.cpuUsedMhz += cUsed;
       }
-    } else if (vcpu > 0) {
+    } else if (vcpu != null && vcpu > 0) {
       excludedNoHostMhz += 1; // 호스트 MHz 미상 — clock 합계에서 제외(추정 금지)
       e.excludedNoHostMhz += 1;
     }
@@ -241,11 +267,11 @@ function overAllocatedReport(scoped, vms, { top = 50 } = {}) {
       cpuAllocMhz: cAlloc == null ? null : Math.round(cAlloc),
       cpuUsedMhz: cUsed == null ? null : Math.round(cUsed),
       cpuIdleMhz: cUsed == null ? null : Math.round(cAlloc - cUsed),
-      memAllocGB: r1(memMB / 1024),
+      memAllocGB: memMB == null ? null : r1(memMB / 1024),
       memUsedGB: mUsed == null ? null : r1(mUsed / 1024), memIdleGB: mUsed == null ? null : r1((memMB - mUsed) / 1024),
       // 절감 가능(%) = 미사용 비율. 100 - 사용률 과 같지만 의미를 명시적으로 둔다. 사용률을 모르면 null.
       cpuSavingPct: cUsed == null ? null : Math.max(0, 100 - Math.round(cpuPct)),
-      memSavingPct: memMB > 0 && memPct != null ? Math.max(0, 100 - Math.round(memPct)) : null,
+      memSavingPct: memMB != null && memMB > 0 && memPct != null ? Math.max(0, 100 - Math.round(memPct)) : null,
     });
   }
   // 후보: 사용률이 낮아 줄일 여지가 큰 VM(임계는 화면에서 조정 가능하도록 값도 함께 반환).
@@ -263,6 +289,7 @@ function overAllocatedReport(scoped, vms, { top = 50 } = {}) {
     poweredOnVms: on.length,
     excludedNoHostMhz,     // 호스트 코어 MHz 를 몰라 clock 집계에서 빠진 VM 수(투명성)
     usageUnknown,          // v2.631(AX2-02): 사용률을 읽지 못해 합산·후보에서 뺀 구동 VM 수 { cpu, mem }
+    allocUnknown,          // v3.28.1: 할당(vCPU · 메모리)을 읽지 못해 합산·후보에서 뺀 구동 VM 수 { cpu, mem }
     cpu: {
       allocGHz: r1(cpuAllocMhz / 1000), usedGHz: r1(cpuUsedMhz / 1000), idleGHz: r1((cpuAllocMhz - cpuUsedMhz) / 1000),
       usedPct: pctOf(cpuUsedMhz, cpuAllocMhz), savingPct: cpuAllocMhz > 0 ? Math.max(0, 100 - pctOf(cpuUsedMhz, cpuAllocMhz)) : null,
@@ -355,14 +382,14 @@ function wasteSummary(scoped, vms) {
   const vcName = new Map((scoped.vcenters || []).map((v) => [v.id, v.name || v.id]));
   const rows = [...ids].map((id) => {
     const b = byVc.get(id) || { vms: 0, poweredOff: 0, poweredOffGB: 0, poweredOffStorageUnknown: 0, snapshots: 0, snapshotGB: 0, noTools: 0, thinReclaimGB: 0, thinUncommittedUnknown: 0, cpuCandidates: 0, memCandidates: 0 };
-    const a = w.perVcAlloc.get(id) || { poweredOn: 0, cpuAllocMhz: 0, cpuUsedMhz: 0, memAllocMB: 0, memUsedMB: 0, usageUnknownCpu: 0, usageUnknownMem: 0, excludedNoHostMhz: 0 };
+    const a = w.perVcAlloc.get(id) || { poweredOn: 0, cpuAllocMhz: 0, cpuUsedMhz: 0, memAllocMB: 0, memUsedMB: 0, usageUnknownCpu: 0, usageUnknownMem: 0, excludedNoHostMhz: 0, allocUnknownCpu: 0, allocUnknownMem: 0 };
     const o = offAlloc.get(id) || { offVcpu: 0, offMemGB: 0, offAllocUnknown: 0, offWithSnapshots: 0 };
     return {
       vcenterId: id, name: vcName.get(id) || id, vms: b.vms, poweredOnVms: a.poweredOn,
       // 할당 · 사용은 원값(MHz · MB, 소수 첫째 자리) — 화면이 고른 법인을 더한 뒤 GHz · GB 로 바꾼다(반올림한 값을 더하면 합이 어긋난다).
       cpu: { allocMhz: r1(a.cpuAllocMhz), usedMhz: r1(a.cpuUsedMhz), idleMhz: r1(a.cpuAllocMhz - a.cpuUsedMhz), candidates: b.cpuCandidates },
       mem: { allocMB: r1(a.memAllocMB), usedMB: r1(a.memUsedMB), idleMB: r1(a.memAllocMB - a.memUsedMB), candidates: b.memCandidates },
-      usageUnknown: { cpu: a.usageUnknownCpu, mem: a.usageUnknownMem }, excludedNoHostMhz: a.excludedNoHostMhz,
+      usageUnknown: { cpu: a.usageUnknownCpu, mem: a.usageUnknownMem }, allocUnknown: { cpu: a.allocUnknownCpu, mem: a.allocUnknownMem }, excludedNoHostMhz: a.excludedNoHostMhz,   // v3.28.1 allocUnknown
       poweredOff: b.poweredOff, poweredOffGB: b.poweredOffGB, poweredOffStorageUnknown: b.poweredOffStorageUnknown,
       offVcpu: o.offVcpu, offMemGB: r1(o.offMemGB), offAllocUnknown: o.offAllocUnknown, offWithSnapshots: o.offWithSnapshots,
       snapshots: b.snapshots, snapshotGB: b.snapshotGB, noTools: b.noTools,

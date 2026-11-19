@@ -67,7 +67,7 @@ function FolderNode({ node, t, setT, open, toggleOpen, hostNameById, filter }) {
             return (
               <label key={vm.id} className="flex gap" style={{ alignItems: 'center', fontSize: 12, marginLeft: 26, padding: '1px 0', cursor: 'pointer', opacity: vm.on ? 1 : 0.55 }} title={vm.on ? '' : '전원 꺼짐 — 실시간 표본이 없어 수집되지 않습니다(켜지면 자동 포함)'}>
                 <input type="checkbox" checked={on || covered} disabled={covered} onChange={() => flip('vms', vm.id)} /> 🧊 {vm.name}
-                <span className="muted" style={{ fontSize: 11 }}>{vm.vcpu}vCPU · {Math.round(vm.memMB / 1024)}GB{vm.on ? '' : ' · OFF'}</span>
+                <span className="muted" style={{ fontSize: 11 }}>{vm.vcpu == null ? '—' : vm.vcpu}vCPU · {vm.memMB == null ? '—' : `${Math.round(vm.memMB / 1024)}GB`}{vm.on ? '' : ' · OFF'}</span>
               </label>
             );
           })}

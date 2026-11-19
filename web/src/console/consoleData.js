@@ -198,9 +198,9 @@ export function capacityAdvice(clusters) {
   const hot = rows.find((c) => c.load >= CRIT_PCT);
   if (hot) out.push({ level: 2, title: `${hot.name} (${hot.vcenterId}) 사용률 ${hot.load}% — 증설 검토`, meta: `CPU ${fmtPct(hot.cpuUsedPct)} · MEM ${fmtPct(hot.memUsedPct)} · 호스트 ${hot.hosts} · 규칙: 사용률 ≥ ${CRIT_PCT}%` });
   const over = rows.filter((c) => num(c.ramOvercommitPct) >= 100).sort((a, b) => b.ramOvercommitPct - a.ramOvercommitPct)[0];
-  if (over) out.push({ level: 1, title: `${over.name} (${over.vcenterId}) RAM 오버커밋 ${over.ramOvercommitPct}%`, meta: `구동 VM 할당 ${fmtInt(over.ramAllocatedGB)} / 물리 ${fmtInt(over.memTotalGB)} GB · 규칙: 오버커밋 ≥ 100%` });
+  if (over) out.push({ level: 1, title: `${over.name} (${over.vcenterId}) RAM 오버커밋 ${num(over.ramUnknown) > 0 ? '≥ ' : ''}${over.ramOvercommitPct}%`, meta: `구동 VM 할당 ${fmtInt(over.ramAllocatedGB)} / 물리 ${fmtInt(over.memTotalGB)} GB${num(over.ramUnknown) > 0 ? ` · 메모리 미상 VM ${fmtInt(over.ramUnknown)}대 제외(최소값)` : ''} · 규칙: 오버커밋 ≥ 100%` });   // v3.28.1
   const room = [...rows].filter((c) => c.hosts >= 3 && c.load != null).sort((a, b) => a.load - b.load)[0];
-  if (room) out.push({ level: 0, title: `${room.name} (${room.vcenterId}) 부하 ${room.load}% — 신규 배치 우선`, meta: `호스트 ${room.hosts} · RAM 여유 ${fmtInt(room.ramHeadroomGB)} GB · 규칙: 호스트 ≥ 3 중 부하 최저` });
+  if (room) out.push({ level: 0, title: `${room.name} (${room.vcenterId}) 부하 ${room.load}% — 신규 배치 우선`, meta: `호스트 ${room.hosts} · RAM 여유 ${num(room.ramHeadroomGB) == null ? '—' : `${fmtInt(room.ramHeadroomGB)} GB`} · 규칙: 호스트 ≥ 3 중 부하 최저` });   // v3.28.1: 여유를 모르면 단위 없이 '—'
   return out;
 }
 

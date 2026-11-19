@@ -11,6 +11,7 @@ import { parseTokens, entityMatches, notesSnippet, sumVmResources, fmtGb } from 
 import { allocByHost, countByHost, virtSum as virtSumOf, ratioLevel } from './vcdVirt.js';
 // '전체 현황' 평면 표/CSV — 트리를 펼치지 않고 모든 클러스터·호스트를 한 번에(v2.335).
 import { buildOverviewRows, overviewCsv, OVERVIEW_COLUMNS, clusterAvgPct, hostUsagePct } from './vcdOverview.js';
+import { allocText } from './summaryAllocText.js';   // v3.28.1: 할당 합 — 못 읽은 VM 수
 import { STable } from '../components/STable.jsx';
 // v2.499: '비교하기' → 가로 vCenter × 세로 클러스터/스토리지 매트릭스(사용자 요구). 예전 2개 비교 표를 대체한다.
 import CompareMatrix from './CompareMatrix.jsx';
@@ -424,7 +425,8 @@ export default function VCenterDetail({ site, onBack, siblings = null, onOpen = 
   // 호스트별 할당 vCPU·메모리(MB) 합계. CPU 가상화율=할당 vCPU÷물리코어, MEM 가상화율=할당 VM RAM÷물리 RAM.
   // VM은 host=호스트명으로 매핑. 합산 대상은 visibleVms — 'Off VM 포함' 해제 시 꺼진 VM 의 할당이
   // 빠져 가상화율도 함께 내려간다(v2.334). 산술은 vcdVirt.js 순수 함수(vitest 단위테스트 대상).
-  const { vcpu: vcpuByHost, vmem: vmemByHost } = useMemo(() => allocByHost(visibleVms), [visibleVms]);
+  const allocMaps = useMemo(() => allocByHost(visibleVms), [visibleVms]);   // v3.28.1: 못 읽은 VM 수(vcpuUnk · vmemUnk)도 함께
+  const { vcpu: vcpuByHost, vmem: vmemByHost } = allocMaps;
   // VM 수 집계(v2.336): 'Off VM 포함' 해제 시 켜진 VM 만 센다(헤더·트리·현황 표·CSV 공통).
   // 체크 시(null)는 호스트가 보고한 vmCount(서버 집계)를 쓴다 — /vms 응답 상한(limit)과 무관하게
   // 전체 수가 정확한 소스이기 때문. 해제 시엔 클라이언트가 받은 목록으로 셀 수밖에 없다.
@@ -434,7 +436,7 @@ export default function VCenterDetail({ site, onBack, siblings = null, onOpen = 
   );
   const hostVmCount = useCallback((h) => (vmCountByHost ? vmCountByHost.get(h.name) || 0 : h.vmCount), [vmCountByHost]);
   // 호스트 묶음(클러스터·DC)의 할당 vCPU·물리 코어 + 할당 메모리·물리 메모리(MB) 합계.
-  const virtSum = (list) => virtSumOf(list, vcpuByHost, vmemByHost, vmCountByHost);
+  const virtSum = (list) => virtSumOf(list, vcpuByHost, vmemByHost, vmCountByHost, allocMaps);
   // '전체 현황' 행 — 표를 열었을 때만 만든다(수천 VM × 20초 폴링에서 불필요한 재계산 방지).
   // CSV 는 클릭 시 같은 함수로 다시 만들어, 표를 열지 않아도 전체 행을 받을 수 있게 한다.
   const overviewRows = useMemo(
@@ -766,8 +768,9 @@ export default function VCenterDetail({ site, onBack, siblings = null, onOpen = 
           {query && matches.length > 0 && (
             <div className="card" style={{ margin: '0 0 10px', padding: '8px 14px', fontSize: 12.5, display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
               <b style={{ fontSize: 12 }}>Σ 일치 {matches.length} VM 자원 합계</b>
-              <span className="muted">vCPU <b style={{ color: 'var(--text)' }}>{matchSum.vcpu.toLocaleString()}</b></span>
-              <span className="muted">메모리 <b style={{ color: 'var(--text)' }}>{fmtGb(matchSum.memGB)}</b></span>
+              {/* v3.28.1: vCPU · 메모리를 못 읽은 VM 은 합에서 빠졌다 — 그 수를 밝히고, 하나도 못 읽었으면 '—'(0 이 아니다). */}
+              <span className="muted">vCPU <b style={{ color: 'var(--text)' }}>{allocText(matchSum.vcpu, matchSum.vcpuUnknown)}</b></span>
+              <span className="muted">메모리 <b style={{ color: 'var(--text)' }}>{matchSum.memGB == null ? '—' : fmtGb(matchSum.memGB)}</b>{matchSum.memUnknown > 0 ? ` · 미상 ${matchSum.memUnknown}` : ''}</span>
               <span className="muted" title="사용 = vSphere committed(실제 기록된 디스크) · 할당 = committed+uncommitted(씬 프로비저닝 미기록분 포함)">
                 디스크 사용 <b style={{ color: 'var(--text)' }}>{fmtGb(matchSum.diskUsedGB)}</b> / 할당 <b style={{ color: 'var(--text)' }}>{fmtGb(matchSum.diskProvGB)}</b>
               </span>
@@ -809,7 +812,7 @@ export default function VCenterDetail({ site, onBack, siblings = null, onOpen = 
                 <Leaf key={vm.id} icon="🧊" onClick={() => setVmDrawer(vm)} onObj={() => openObj('vm', vm.id)}
                   label={<Highlight text={vm.name} tokens={tokens} />} badge={<><StateBadge state={vm.powerState} /><VeeamTag vm={vm} veeam={veeamMap} on={veeamOn} ev={veeamEv} onOpen={setVeeamVm} /><PortalTag vm={vm} map={portalMap} onOpen={setPortalVm} /></>}
                   sub={<>
-                    {`🧩 ${vm.cluster || '—'} · 🖥️ ${vm.host || '—'} · 📁 ${vm.folder || 'vm'} · ${vm.cpuCount || 0}vCPU · ${Math.round((vm.memMB || 0) / 1024)}GB · 💾 ${vm.storageGB == null ? '—' : fmtGb(vm.storageGB)}`}
+                    {`🧩 ${vm.cluster || '—'} · 🖥️ ${vm.host || '—'} · 📁 ${vm.folder || 'vm'} · ${vm.cpuCount == null || vm.cpuCount === '' ? '—' : vm.cpuCount}vCPU · ${vm.memMB == null || vm.memMB === '' ? '—' : `${Math.round(vm.memMB / 1024)}`}GB · 💾 ${vm.storageGB == null ? '—' : fmtGb(vm.storageGB)}`}
                     {/* 메모로만 걸린 결과 — 어떤 메모 문구에 걸렸는지 스니펫으로 표시(하이라이트 포함) */}
                     <VmUsageCell {...usageProps(vm)} />
                     {viaNotes && <span style={{ color: 'var(--amber)' }}> · 📝 <Highlight text={notesSnippet(vm.notes, token)} tokens={tokens} /></span>}
@@ -826,7 +829,7 @@ export default function VCenterDetail({ site, onBack, siblings = null, onOpen = 
         {view === 'hosts' && !query && !overview && hostsOk && (() => { const dc = virtSum(hosts); return (
           <Node label={`🗄️ ${site.name}`} defaultOpen
             sub={<UsageBars lead={<span className="muted">{hosts.length} 호스트 · VM {dc.vmc}</span>} cpu={m.cpuUsagePct} mem={m.memUsagePct}
-              tail={<span style={{ display: 'inline-flex', gap: 10, alignItems: 'center' }}><VirtBadge alloc={dc.alloc} base={dc.cores} kind="cpu" /><VirtBadge alloc={dc.memAlloc} base={dc.memPhys} kind="mem" /></span>} />}>
+              tail={<span style={{ display: 'inline-flex', gap: 10, alignItems: 'center' }}><VirtBadge alloc={dc.alloc} base={dc.cores} kind="cpu" unknown={dc.vcpuUnknown} /><VirtBadge alloc={dc.memAlloc} base={dc.memPhys} kind="mem" unknown={dc.vmemUnknown} /></span>} />}>
             {clusters.map(([cl, chosts]) => {
               // v2.605(WEB2605-03): 끊긴·무응답 호스트의 0% 를 평균에 넣지 않는다(서버 usageReadable 과 같은 기준).
               const avgCpu = clusterAvgPct(chosts, 'cpuUsagePct');
@@ -835,11 +838,11 @@ export default function VCenterDetail({ site, onBack, siblings = null, onOpen = 
               return (
               <Tree key={cl} k={`cl:${cl}`} open={open} toggle={toggle} icon="🧩" label={cl}
                 sub={<UsageBars lead={<span className="muted">{chosts.length} 호스트 · VM {cv.vmc}</span>} cpu={avgCpu} mem={avgMem}
-                  tail={<span style={{ display: 'inline-flex', gap: 10, alignItems: 'center' }}><VirtBadge alloc={cv.alloc} base={cv.cores} kind="cpu" /><VirtBadge alloc={cv.memAlloc} base={cv.memPhys} kind="mem" /></span>} />}>
+                  tail={<span style={{ display: 'inline-flex', gap: 10, alignItems: 'center' }}><VirtBadge alloc={cv.alloc} base={cv.cores} kind="cpu" unknown={cv.vcpuUnknown} /><VirtBadge alloc={cv.memAlloc} base={cv.memPhys} kind="mem" unknown={cv.vmemUnknown} /></span>} />}>
                 {chosts.map((h) => (
                   <Tree key={h.id} k={`h:${h.id}`} open={open} toggle={toggle} icon="🖥️" action={<ObjBtn onClick={() => openObj('host', h.id)} />}
                     label={<span className="vcd-link" {...pressable((e) => { e.stopPropagation(); setHostDrawer(h); })} title="이 호스트 서랍(Enter)">{h.name}</span>}
-                    sub={<UsageBars lead={<StateBadge state={h.connectionState} />} cpu={hostUsagePct(h, 'cpuUsagePct')} mem={hostUsagePct(h, 'memUsagePct')} tail={<span className="muted" style={{ fontSize: 12, display: 'inline-flex', gap: 10, alignItems: 'center' }}><span>VM {hostVmCount(h)}</span><VirtBadge alloc={vcpuByHost.get(h.name) || 0} base={h.cpuCores} kind="cpu" /><VirtBadge alloc={vmemByHost.get(h.name) || 0} base={h.memTotalMB} kind="mem" /></span>} />}>
+                    sub={<UsageBars lead={<StateBadge state={h.connectionState} />} cpu={hostUsagePct(h, 'cpuUsagePct')} mem={hostUsagePct(h, 'memUsagePct')} tail={<span className="muted" style={{ fontSize: 12, display: 'inline-flex', gap: 10, alignItems: 'center' }}><span>VM {hostVmCount(h)}</span><VirtBadge alloc={vcpuByHost.get(h.name) || 0} base={h.cpuCores} kind="cpu" unknown={allocMaps.vcpuUnk.get(h.name) || 0} /><VirtBadge alloc={vmemByHost.get(h.name) || 0} base={h.memTotalMB} kind="mem" unknown={allocMaps.vmemUnk.get(h.name) || 0} /></span>} />}>
                     {(vmsByHost.get(h.name) || []).map((vm) => (
                       <Leaf key={vm.id} icon="🧊" onClick={() => setVmDrawer(vm)} onObj={() => openObj('vm', vm.id)}
                         label={vm.name} badge={<><StateBadge state={vm.powerState} /><VeeamTag vm={vm} veeam={veeamMap} on={veeamOn} ev={veeamEv} onOpen={setVeeamVm} /><PortalTag vm={vm} map={portalMap} onOpen={setPortalVm} /></>}
@@ -1070,7 +1073,8 @@ function OverviewTable({ rows }) {
 
 // 가상화율 배지 — CPU(할당 vCPU:물리코어)·MEM(할당 VM RAM:물리 RAM) 공용. 과커밋 수준에 따라 색상.
 // base/alloc 이 없으면 미표시. kind='cpu'|'mem'. 메모리는 MB 로 받아 툴팁에서 GB 로 표기(비율은 동일).
-function VirtBadge({ alloc, base, kind = 'cpu' }) {
+function VirtBadge({ alloc, base, kind = 'cpu', unknown = 0 }) {
+  // v3.28.1: 할당을 하나도 못 읽었으면 alloc 0 이라 배지를 그리지 않는다(0:1 이 아니다). 일부만 못 읽었으면 '≥'(최소값).
   if (!base || !alloc) return null;
   const isMem = kind === 'mem';
   const r = alloc / base;
@@ -1078,12 +1082,14 @@ function VirtBadge({ alloc, base, kind = 'cpu' }) {
   const color = ratioColor(r, isMem);
   const txt = (Math.round(r * 10) / 10).toFixed(1);
   const label = isMem ? 'MEM 가상화' : 'CPU 가상화';
-  const title = isMem
+  const min = unknown > 0 ? '≥ ' : '';
+  const tail = unknown > 0 ? ` · ${isMem ? '메모리' : 'vCPU'} 를 못 읽은 VM ${unknown}대 제외(최소값)` : '';
+  const title = (isMem
     ? `메모리 가상화율 = 할당 VM RAM ${Math.round(alloc / 1024).toLocaleString()}GB ÷ 물리 RAM ${Math.round(base / 1024).toLocaleString()}GB = ${txt}:1 (1.0 초과 = 오버커밋)`
-    : `CPU 가상화율 = 할당 vCPU ${alloc.toLocaleString()} ÷ 물리 코어 ${base.toLocaleString()} = ${txt}:1`;
+    : `CPU 가상화율 = 할당 vCPU ${alloc.toLocaleString()} ÷ 물리 코어 ${base.toLocaleString()} = ${txt}:1`) + tail;
   return (
     <span className="muted" style={{ fontSize: 12 }} title={title}>
-      {label} <b style={{ color, fontVariantNumeric: 'tabular-nums' }}>{txt}:1</b>
+      {label} <b style={{ color, fontVariantNumeric: 'tabular-nums' }}>{min}{txt}:1</b>
     </span>
   );
 }

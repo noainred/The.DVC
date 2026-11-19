@@ -72,11 +72,13 @@ const toGb = (mb) => (mb == null ? null : Math.round((Number(mb) || 0) / 1024));
  * 켜진 VM 만 세기 위한 경로(v2.336). 주지 않으면 호스트가 보고한 h.vmCount(전체, 서버 집계).
  */
 export function buildOverviewRows({ site = {}, hosts = [], vms = [], metrics = {}, vmCountByHost = null } = {}) {
-  const { vcpu, vmem } = allocByHost(vms);
+  const maps = allocByHost(vms);   // v3.28.1: 못 읽은 VM 수(vcpuUnk · vmemUnk)도 — 할당은 읽은 VM 만의 합
+  const { vcpu, vmem } = maps;
+  const hostUnk = (h) => ({ vcpuUnknown: maps.vcpuUnk.get(h.name) || 0, memUnknown: maps.vmemUnk.get(h.name) || 0 });
   const vcName = site.name || site.id || '';
   const rows = [];
 
-  const dc = virtSum(hosts, vcpu, vmem, vmCountByHost);
+  const dc = virtSum(hosts, vcpu, vmem, vmCountByHost, maps);
   rows.push({
     level: 'vCenter', vcenter: vcName, cluster: '', host: '', state: '',
     hostCount: hosts.length, vmCount: dc.vmc,
@@ -84,11 +86,12 @@ export function buildOverviewRows({ site = {}, hosts = [], vms = [], metrics = {
     cpuRatio: ratioText(dc.alloc, dc.cores), vcpuAlloc: dc.alloc, cpuCores: dc.cores,
     cpuThreads: sumBy(hosts, (h) => h.cpuThreads),
     memRatio: ratioText(dc.memAlloc, dc.memPhys), memAllocGB: toGb(dc.memAlloc), memPhysGB: toGb(dc.memPhys),
+    vcpuUnknown: dc.vcpuUnknown, memUnknown: dc.vmemUnknown,
     version: '', vendor: '', model: '', ...powerSum(hosts), tempC: null,
   });
 
   for (const [cl, chosts] of groupClusters(hosts)) {
-    const cv = virtSum(chosts, vcpu, vmem, vmCountByHost);
+    const cv = virtSum(chosts, vcpu, vmem, vmCountByHost, maps);
     rows.push({
       level: '클러스터', vcenter: vcName, cluster: cl, host: '', state: '',
       hostCount: chosts.length, vmCount: cv.vmc,
@@ -96,6 +99,7 @@ export function buildOverviewRows({ site = {}, hosts = [], vms = [], metrics = {
       cpuRatio: ratioText(cv.alloc, cv.cores), vcpuAlloc: cv.alloc, cpuCores: cv.cores,
       cpuThreads: sumBy(chosts, (h) => h.cpuThreads),
       memRatio: ratioText(cv.memAlloc, cv.memPhys), memAllocGB: toGb(cv.memAlloc), memPhysGB: toGb(cv.memPhys),
+      vcpuUnknown: cv.vcpuUnknown, memUnknown: cv.vmemUnknown,
       version: '', vendor: '', model: '', ...powerSum(chosts), tempC: null,
     });
     for (const h of [...chosts].sort((a, b) => String(a.name).localeCompare(String(b.name)))) {
@@ -108,6 +112,7 @@ export function buildOverviewRows({ site = {}, hosts = [], vms = [], metrics = {
         cpuRatio: ratioText(alloc, h.cpuCores), vcpuAlloc: alloc, cpuCores: typeof h.cpuCores === 'number' && Number.isFinite(h.cpuCores) ? h.cpuCores : null,   // 55회차 #5: 모르는 코어는 0 이 아니다
         cpuThreads: typeof h.cpuThreads === 'number' && Number.isFinite(h.cpuThreads) && h.cpuThreads > 0 ? h.cpuThreads : null,   // 반증 K3: 모르는 스레드는 0 이 아니다
         memRatio: ratioText(memAlloc, h.memTotalMB), memAllocGB: toGb(memAlloc), memPhysGB: toGb(typeof h.memTotalMB === 'number' && Number.isFinite(h.memTotalMB) ? h.memTotalMB : null),
+        ...hostUnk(h),
         version: h.version || '', vendor: h.vendor || '', model: h.model || '',
         powerW: num(h.powerWatts), powerHosts: null, tempC: num(h.tempC),
       });
@@ -134,6 +139,9 @@ export const OVERVIEW_COLUMNS = [
   { key: 'memRatio', label: 'MEM가상화율', num: true },
   { key: 'memAllocGB', label: '할당RAM(GB)', num: true },
   { key: 'memPhysGB', label: '물리RAM(GB)', num: true },
+  // v3.28.1: 할당 vCPU · RAM 은 크기를 읽은 VM 만의 합이다 — 못 읽어 뺀 VM 수(0 이 아니면 위 가상화율 · 할당은 최소값).
+  { key: 'vcpuUnknown', label: '할당vCPU미상VM', num: true },
+  { key: 'memUnknown', label: '할당RAM미상VM', num: true },
   { key: 'version', label: 'ESXi버전' },
   { key: 'vendor', label: '제조사' },
   { key: 'model', label: '모델' },

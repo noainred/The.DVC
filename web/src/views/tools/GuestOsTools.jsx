@@ -11,6 +11,7 @@ import { STable } from '../../components/STable.jsx';
 import { dayStamp } from '../../dayStamp.js';
 import BoldText from '../../components/boldText.jsx';
 import { guestAuthLines } from '../authSkipText.js'; // v2.591(감사 F2): 게스트 계정 인증 실패 정지·차단기
+import { allocText } from '../summaryAllocText.js';   // v3.28.1: 할당 vCPU — 못 읽은 VM 은 0 이 아니라 '미상 N'(하나도 못 읽었으면 '—')
 import { saveBlob } from '../../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나(즉시 revoke · 문서 밖 click 금지)
 import { unreadMarkOf, unreadKind, saveLockedByUnread, shouldReseed } from '../settingsUnread.js';   // 112회차: 못 읽은 동안의 기본값 폼으로 저장하지 않는다
 import { SettingsUnreadBanner } from '../SettingsUnreadBanner.jsx';
@@ -41,14 +42,14 @@ export function GuestOs({ scope }) {
     { key: 'os', label: 'Guest OS (종류·버전)', render: (r) => <b>{r.os}</b> },
     { key: 'family', label: '계열', render: (r) => <span className="badge gray">{r.family}</span> },
     { key: 'total', label: 'VM 수', align: 'right', render: (r) => countCell(r, r.os, { os: r.os }) },
-    { key: 'vcpu', label: '할당 vCPU', align: 'right', render: (r) => <span className="tabular">{num(r.vcpu)}</span> },
+    { key: 'vcpu', label: '할당 vCPU', align: 'right', render: (r) => <span className="tabular">{allocText(r.vcpu, r.vcpuUnknown)}</span> },
     { key: 'on', label: 'On', align: 'right', render: (r) => <span className="badge green">{r.on}</span> },
     { key: 'off', label: 'Off', align: 'right', render: (r) => <span className="badge gray">{r.off}</span> },
   ];
   const famCols = [
     { key: 'family', label: 'OS 계열', render: (r) => <b>{r.family}</b> },
     { key: 'total', label: 'VM 수', align: 'right', render: (r) => countCell(r, r.family, { family: r.family }) },
-    { key: 'vcpu', label: '할당 vCPU', align: 'right', render: (r) => <span className="tabular">{num(r.vcpu)}</span> },
+    { key: 'vcpu', label: '할당 vCPU', align: 'right', render: (r) => <span className="tabular">{allocText(r.vcpu, r.vcpuUnknown)}</span> },
     { key: 'on', label: 'On', align: 'right', render: (r) => <span className="badge green">{r.on}</span> },
   ];
   const rows = view === 'vcenter'
@@ -58,7 +59,7 @@ export function GuestOs({ scope }) {
     <>
       <div className="kpis" style={{ marginBottom: 14 }}>
         <Card label="총 VM" value={data.total.toLocaleString()} meta={scope ? '선택 법인' : '전체 법인'} />
-        <Card label="총 할당 vCPU" value={num(data.totalVcpu)} meta="Guest 합계" />
+        <Card label="총 할당 vCPU" value={allocText(data.totalVcpu)} meta={data.vcpuUnknown > 0 ? `Guest 합계 · vCPU 미상 VM ${num(data.vcpuUnknown)}대 제외` : 'Guest 합계'} />
         <Card label="OS 종류(버전 포함)" value={data.distinctOs} />
         <Card label="OS 계열" value={data.families.length} meta={data.families.slice(0, 3).map((f) => f.family).join(' · ')} />
       </div>
@@ -94,7 +95,7 @@ export function GuestOs({ scope }) {
                   <tr style={{ cursor: 'pointer' }} onClick={() => setOpenVc(openVc === vc.id ? null : vc.id)}>
                     <td><b>{openVc === vc.id ? '▾ ' : '▸ '}{vc.name}</b>{vc.region ? <span className="muted" style={{ fontSize: 11 }}> · {vc.region}</span> : ''}</td>
                     <td style={{ textAlign: 'right' }} className="tabular">{num(vc.total)}</td>
-                    <td style={{ textAlign: 'right' }} className="tabular">{num(vc.vcpu)}</td>
+                    <td style={{ textAlign: 'right' }} className="tabular">{allocText(vc.vcpu, vc.vcpuUnknown)}</td>
                     <td style={{ textAlign: 'right' }} className="muted">{(vc.os || []).length}</td>
                   </tr>
                   {openVc === vc.id && (
@@ -109,7 +110,7 @@ export function GuestOs({ scope }) {
                               <td style={{ textAlign: 'right' }} className="tabular">
                                 <button className="cell-link" title="대상 VM 보기 / CSV" onClick={(e) => { e.stopPropagation(); setVmList({ label: `${vc.name} · ${o.os}`, q: { vcenterId: vc.id, os: o.os } }); }}>{num(o.count)}</button>
                               </td>
-                              <td style={{ textAlign: 'right' }} className="tabular">{num(o.vcpu)}</td>
+                              <td style={{ textAlign: 'right' }} className="tabular">{allocText(o.vcpu, o.vcpuUnknown)}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -143,7 +144,7 @@ export function GuestOsVmsModal({ label, params, onClose }) {
   const exportCsv = () => {
     const head = ['vm', 'vcenter', 'cluster', 'host', 'cpu', 'memory_gb', 'disk_gb', 'ip', 'power'];
     const lines = [head.join(',')];
-    for (const r of items) lines.push([r.name, r.vcenterId, r.cluster, r.host, r.cpu, r.memGB, r.diskGB ?? '', r.ip, r.powerState === 'POWERED_ON' ? 'On' : 'Off'].map(esc).join(','));   // v2.727(C-01): 못 읽은 용량은 빈 칸
+    for (const r of items) lines.push([r.name, r.vcenterId, r.cluster, r.host, r.cpu ?? '', r.memGB ?? '', r.diskGB ?? '', r.ip, r.powerState === 'POWERED_ON' ? 'On' : 'Off'].map(esc).join(','));   // v2.727(C-01): 못 읽은 용량은 빈 칸
     const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
     saveBlob(blob, `guestos-${String(label).replace(/[^a-zA-Z0-9._-]+/g, '_')}-${dayStamp()}.csv`);
   };
@@ -152,8 +153,9 @@ export function GuestOsVmsModal({ label, params, onClose }) {
     { key: 'vcenterId', label: 'vCenter', render: (r) => <span className="muted">{r.vcenterId}</span> },
     { key: 'cluster', label: '클러스터', render: (r) => <span style={{ fontSize: 12 }}>{r.cluster || '—'}</span> },
     { key: 'host', label: '호스트', render: (r) => <span className="muted" style={{ fontSize: 12 }}>{r.host || '—'}</span> },
-    { key: 'cpu', label: 'CPU', align: 'right', render: (r) => `${r.cpu}` },
-    { key: 'memGB', label: 'MEM(GB)', align: 'right' },
+    // v3.28.1: 못 읽은 vCPU · 메모리는 서버가 null 로 준다 — '0' · 'null' 이 아니라 '—'(CSV 는 빈 칸).
+    { key: 'cpu', label: 'CPU', align: 'right', render: (r) => (r.cpu == null ? <span className="muted" title="vCPU 수를 읽지 못했습니다(0 이 아닙니다)">—</span> : `${r.cpu}`) },
+    { key: 'memGB', label: 'MEM(GB)', align: 'right', render: (r) => (r.memGB == null ? <span className="muted" title="메모리 크기를 읽지 못했습니다(0 GB 가 아닙니다)">—</span> : r.memGB) },
     { key: 'diskGB', label: 'DISK(GB)', align: 'right', render: (r) => (r.diskGB == null ? <span className="muted" title="디스크 용량을 읽지 못했습니다(0 GB 가 아닙니다)">—</span> : r.diskGB) },   // v2.727(C-01)
     { key: 'ip', label: 'IP', render: (r) => <span style={{ fontSize: 12 }}>{r.ip || '—'}</span> },
     { key: 'powerState', label: '전원', render: (r) => (r.powerState === 'POWERED_ON' ? <span className="badge green">On</span> : <span className="badge gray">Off</span>) },

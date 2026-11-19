@@ -31,6 +31,7 @@ import { mockLocalReport } from '../../vmseries/mock.js';
 import { memoJson, scopeKey } from './shared.js';
 import { pushAll } from '../../util/pushAll.js';
 import { isAdminDetailUser } from '../../auth/demoGuest.js';
+import { numOrNull } from '../../util/numOrNull.js';   // v3.28.1: 범위 트리의 vCPU · 메모리 — 못 읽으면 null(화면 '—')
 /**
  * v2.595(감사 AUTHZ-2595-02): push 상태도 범위로 거른다 — status 만 거르고 push.last 로 범위 밖 vCenter id·오류 문구·
  * centralUrl 이 나갔다(v2.574 SEC-07 과 같은 우회). 범위 계정은 자기 범위 vCenter 의 마지막 보고만, centralUrl·오류 원문은 admin 만.
@@ -245,7 +246,7 @@ api.get('/tools/vmseries/scope-data', requirePerm('tools'), (req, res) => {
   const vcId = String(req.query.vcenterId || '');
   if (!vcId || !inUserScope(req.user, snap, vcId) || !(snap.vcenters || []).some((v) => v.id === vcId)) return res.status(404).json({ ok: false, reason: 'not found' });
   const hosts = (snap.hosts || []).filter((h) => h.vcenterId === vcId).map((h) => ({ id: h.id, name: h.name, cluster: h.cluster || 'standalone', state: h.connectionState }));
-  const vms = (snap.vms || []).filter((v) => v.vcenterId === vcId && !v.template).map((v) => ({ id: v.id, name: v.name, folder: normFolder(v.folder), host: v.host, cluster: v.cluster || '', on: v.powerState === 'POWERED_ON', vcpu: v.cpuCount || 0, memMB: v.memMB || 0 }));
+  const vms = (snap.vms || []).filter((v) => v.vcenterId === vcId && !v.template).map((v) => ({ id: v.id, name: v.name, folder: normFolder(v.folder), host: v.host, cluster: v.cluster || '', on: v.powerState === 'POWERED_ON', vcpu: numOrNull(v.cpuCount), memMB: numOrNull(v.memMB) }));
   const clusters = [...new Set(hosts.map((h) => h.cluster))].sort();
   res.json({ vcenterId: vcId, clusters, hosts, vms });
 });

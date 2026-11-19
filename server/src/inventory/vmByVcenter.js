@@ -14,27 +14,28 @@
 import { corpIdentityOf, corpUnknownOf } from '../vcenter/hostCorp.js';
 import { usageAvg } from './vmTotals.js';
 import { signalCounts } from './vmSignals.js';
+import { vmSumsOf, vmAllocOf } from '../vcenter/vmSums.js';   // v3.28.1: vCPU · 메모리 합의 판정 코어
 
 function statsOf(list, ctx) {
   const on = list.filter((v) => v.powerState === 'POWERED_ON');
   const cpu = usageAvg(on, (v) => v.cpuUsagePct);
   const mem = usageAvg(on, (v) => v.memUsagePct);
-  let vcpu = 0; let memMB = 0; let gpu = 0;
-  for (const v of list) {
-    vcpu += Number.isFinite(v.cpuCount) ? v.cpuCount : 0;
-    memMB += Number.isFinite(v.memMB) ? v.memMB : 0;
-    if (v.gpu) gpu += 1;
-  }
+  // v3.28.1: 못 읽은 cpuCount · memMB 는 0 으로 더하지 않는다(코어 vmSums — 받은 목록 그대로 · 템플릿 포함). 하나도 못 읽었으면 null.
+  const alloc = vmSumsOf(list, { includeTemplates: true });
+  const al = vmAllocOf(alloc);
+  let gpu = 0;
+  for (const v of list) if (v.gpu) gpu += 1;
   return {
     vms: list.length, on: on.length, off: list.length - on.length,
-    vcpu, ramGB: Math.round(memMB / 1024),
+    vcpu: al.vcpu, ramGB: al.memMB == null ? null : Math.round(al.memMB / 1024),
+    vcpuUnknown: alloc.vcpuUnknown, ramUnknown: alloc.memUnknown,   // v3.28.1: 못 읽어 합에서 뺀 VM 수
     avgCpuPct: cpu.value, avgMemPct: mem.value,
     // 사용률을 못 읽은 구동 VM 수는 signals.usageUnknown(CPU·메모리 중 하나라도 — 신호와 같은 판정)으로 싣는다.
     gpu, signals: signalCounts(list, ctx),
   };
 }
 
-const NULL_STATS = Object.freeze({ vms: null, on: null, off: null, vcpu: null, ramGB: null, avgCpuPct: null, avgMemPct: null, gpu: null, signals: null });
+const NULL_STATS = Object.freeze({ vms: null, on: null, off: null, vcpu: null, ramGB: null, vcpuUnknown: null, ramUnknown: null, avgCpuPct: null, avgMemPct: null, gpu: null, signals: null });
 
 /**
  * @param {{ vcenters: object[], vms: object[], ctx: object, dropEmpty?: boolean }} p

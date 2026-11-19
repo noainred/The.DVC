@@ -17,6 +17,7 @@ import { currentHash, goHash, vcHash } from './vcd/vcdRoute.js';
 //   '전체 VM' 타일은 '조치 필요' 신호 분해 타일로(전체 수는 허브 엔티티 탭에), VM 이름 = 개체 보기(드로어는 '빠른 확인'), 호스트 이름 = 호스트 탭을 그 호스트로.
 import Select from '../components/Select.jsx';
 import { signalSegments } from './platform/platformText.js';
+import { allocText } from './summaryAllocText.js';   // v3.28.1: 할당 합 — 못 읽은 VM 은 0 이 아니라 '미상 N'(하나도 못 읽었으면 '—')
 import './vms/vmHub.css';
 
 const VmsByCorp = React.lazy(() => import('./vms/VmsByCorp.jsx'));
@@ -256,13 +257,13 @@ function VmsList({ filters, onOpen, onVisible, onHub, selectedId, onGoHost = nul
               <div className="lb"><span>평균 CPU 사용량</span><small>구동중 VM 기준</small></div>
               <div className="val" style={{ color: TONE_COLOR[usageTone(t.avgCpuUsagePct)] === 'var(--text-faint)' ? undefined : 'var(--accent)' }}>{unitText(t.avgCpuUsagePct, '%')}</div>
               <div className="vmh-bar" aria-hidden="true"><i style={{ width: `${barW(t.avgCpuUsagePct)}%`, background: TONE_COLOR[usageTone(t.avgCpuUsagePct)] }} /></div>
-              <div className="sub"><span>할당 vCPU {fmt(t.vcpu)}</span>{t.usageUnknown?.cpu > 0 && <span>사용률 미수집 {fmt(t.usageUnknown?.cpu)}대 제외</span>}</div>
+              <div className="sub"><span>할당 vCPU {allocText(t.vcpu, t.vcpuUnknown)}</span>{t.usageUnknown?.cpu > 0 && <span>사용률 미수집 {fmt(t.usageUnknown?.cpu)}대 제외</span>}</div>
             </div>
             <div className="vmh-tile">
               <div className="lb"><span>평균 메모리 사용률</span><small>구동중 VM 기준</small></div>
               <div className="val" style={{ color: TONE_COLOR[usageTone(t.avgMemUsagePct)] === 'var(--text-faint)' ? undefined : 'var(--purple)' }}>{unitText(t.avgMemUsagePct, '%')}</div>
               <div className="vmh-bar" aria-hidden="true"><i style={{ width: `${barW(t.avgMemUsagePct)}%`, background: TONE_COLOR[usageTone(t.avgMemUsagePct)] === 'var(--accent)' ? 'var(--purple)' : TONE_COLOR[usageTone(t.avgMemUsagePct)] }} /></div>
-              <div className="sub"><span>할당 {fmt(t.ramGB)} GB ≈ {(t.ramGB / 1024).toFixed(1)} TB</span>{t.usageUnknown?.mem > 0 && <span>사용률 미수집 {fmt(t.usageUnknown?.mem)}대 제외</span>}</div>
+              <div className="sub"><span>할당 {allocText(t.ramGB, t.ramUnknown, ' GB')}{t.ramGB == null ? '' : ` ≈ ${(t.ramGB / 1024).toFixed(1)} TB`}</span>{t.usageUnknown?.mem > 0 && <span>사용률 미수집 {fmt(t.usageUnknown?.mem)}대 제외</span>}</div>
             </div>
             <div className="vmh-tile">
               <div className="lb"><span>평균 디스크 사용률</span><small>프로비저닝 대비</small></div>

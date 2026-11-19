@@ -463,8 +463,24 @@
     ⓓ 화면 글자는 `web/src/views/summaryAllocText.js` 하나 — 칸은 `allocCell`(null → '—' · 일부 → 값 + '미상 N' — 같은 표의 디스크 · 스토리지 열과 같은 표기) · 비율은 `minMark`('≥ ' — 비율이 없으면 붙이지 않는다) + 기존 `ratioLabel` ·
     비율이 없는 이유는 `ratioKpiSub` · `ratioBadgeTitle`(용량 미상 호스트 → 할당을 하나도 못 읽음 → 물리 미수집 순 — '물리 자원 미수집' 으로 단정하지 않는다) · OS 표 합계 행 `osAllocTotals` · 기여도 표 안내는 `corpContribution` 의 `vcpuUnknown` · `ramUnknown`.
     `Summary.jsx` 의 `fmt()` 는 null 을 0 으로 찍는다(`(n ?? 0)`) — 못 읽을 수 있는 값에 쓰지 말 것(`fmtOr` · `allocCell`). 오버커밋 막대(`OverBar`)도 할당이 null 이면 '—'.
-    ⓔ 남긴 것(같은 꼴 · 범위 밖 — 영향은 확인하지 않았다): `alerts.js`(클러스터 vCPU · RAM 합 `v.cpuCount || 0`) · `routes/api/toolsCapacity.js`(`vcpuAll` · `vcpuOn` · `ramOnGB`) · `inventory/vmTotals.js` · `inventory/vmByVcenter.js`(`Number.isFinite(…) ? … : 0`) ·
-    `routes/api/toolsInfo.js`(`cpu` · `memGB`) · `routes/api/toolsAnalytics.js`(`vcpu`). 그리고 v3.19.1 의 ③ 은 그대로다(① 은 v3.19.2 가 고쳤다).
+    ⓔ ~~남긴 것(같은 꼴 · 범위 밖): `alerts.js` · `toolsCapacity.js` · `vmTotals.js` · `vmByVcenter.js` · `toolsInfo.js` · `toolsAnalytics.js`~~ → **v3.28.1 에 고쳤다**(바로 아래 항목 — 조사해 보니 서버 10곳 + 웹 3곳이었다).
+    그리고 v3.19.1 의 ③ 은 그대로다(① 은 v3.19.2 가 고쳤다).
+  · **v3.28.1 — VM 할당 합(vCPU · 메모리)의 '못 읽은 값' 판정을 남은 곳 전부에**(사용자 요청 2026-11-19 · 회귀 `server/test/vmAllocSweep3281.test.js` · `web/src/views/vmAllocSweep3281.test.js` — 수정 전 판본에서 서버 12건 모두 실패).
+    ⓐ **근본 원인(정정 · 보충)**: SOAP 수집기 `vcenter/soapClient.js` 의 `num()`(`v == null || v === '' ? 0 : Number(v) || 0`)이 VM 의 `summary.config.numCpu` · `memorySizeMB` 를 읽는다 —
+    주 수집 경로(엣지 포함)에서는 못 읽은 vCPU · 메모리가 **스냅샷에 이미 0** 으로 들어간다(`storageGB` 만 v2.719 부터 `gbOrNull`). 그래서 v3.19.1 · v3.20.1 · 이번 수정의 null 처리는
+    **지금은 REST 폴백 vCenter 에서만** 실제로 작동한다. 수집기를 null 로 바꾸는 것은 `cpuCount` · `memMB` 를 읽는 서버 38 · 웹 25개 파일을 따라가야 하는 데이터 계약 변경이라 **다음 작업으로 남겼다**(사용자 선택).
+    ⓑ 고친 곳(규칙은 vcenter/vmSums.js 와 같다 — 합은 읽은 VM 만 + 못 읽은 수 · 그 묶음을 하나도 못 읽었으면 null · 0 은 읽은 값): 서버 `alerts.js`(클러스터 오버커밋 경보) · `routes/api/toolsCapacity.js`
+    (`/tools/capacity` 클러스터 · 합계 + 과할당 리포트 `allocUnknown`) · `inventory/vmTotals.js` · `inventory/vmByVcenter.js` · `routes/api/toolsInfo.js`(`/tools/guest-os/vms` 행) · `routes/api/toolsAnalytics.js`(라이트사이징 행 · `reclaimUnknown`) ·
+    `inventory/guestOsAgg.js` · `metrics/sampler.js`(추이 적재 `vmAllocUnknown` — lastRun · `samplerWithheldOf` · 웹 안내까지) · `vmseries/scope.js` · `routes/api/vmSeries.js` + 웹 판정 사본 `vcdVirt.js allocByHost`(`vcpuUnk` · `vmemUnk`) · `vcdSearch.js` · `vcd/TuningTabs.jsx`.
+    ⓒ **경보 판정**(사용자 선택): `alerts.js overcommitVerdict` 하나 — 읽은 합(최소값)으로 이미 임계 이상이면 발생(제목 `≥` · 본문 '미상 VM N대 제외(최소값)'), 미달인데 못 읽은 VM 이 있으면 **보류**
+    (`held` — 같은 절의 용량 미상 호스트와 같은 HELD_MAX_MS 시한), 미달이고 다 읽었으면 정상. 예전에는 0 으로 더해 경보가 안 나거나 발생 중이던 경보가 거짓 '해소' 로 나갔다.
+    ⓓ 여유(`ramHeadroomGB`)는 부분 합으로 내면 실제보다 **크게**(좋게) 나온다 — 메모리를 못 읽은 구동 VM 이 있는 클러스터는 null 이고 합계에서 빼며 `ramHeadroomExcluded` 로 센다. 합계 비율은
+    할당을 읽은 클러스터끼리만(분자 · 분모 같은 집합)이고 부분 합이 섞이면 `vcpuPerCoreMin`(화면 '≥').
+    ⓔ 화면 글자는 `summaryAllocText.js` 의 `allocText`(한 줄 — null '—' · '미상 N') · `allocCell` · `minMark` · `allocNullTitle` 을 쓴다(요약 화면용 이름이지만 VM 할당 합 공용이다).
+    `fmt()`·`num()` 처럼 `(n || 0)` · `(n ?? 0)` 로 그리는 서식 함수에 할당 합을 넘기지 말 것. 탐색(`Explore.jsx`)은 `totals.vcpu.toLocaleString()` 이라 null 이면 화면이 죽었다.
+    vCenter 개요 표 · CSV 에 '할당vCPU미상VM' · '할당RAM미상VM' 열을 더했다(가상화율 열은 수로 남겨 정렬 · CSV 를 지킨다 — 트리 배지는 '≥').
+    ⓕ 남긴 것: ① 위 ⓐ SOAP 수집기 ② `vcdSearch.js sumVmResources` 의 디스크 합(`Number(v.storageGB) || 0` — 같은 함수지만 이번 범위는 vCPU · 메모리) ③ `contention/analyze.js` · `migration/analyze.js` 등 행 단위로
+    `v.cpuCount ?? null` 을 싣는 곳은 이미 맞다(확인함).
   · 표는 `STable`(법인 열 sticky · `data-sort` 로 null 뒤로). 패널은 콘텐츠가 넓을 때(창 1600px 이상)만 표 옆, 그보다 좁으면 표 아래로 내려가고 행을 고르면 그 패널로 스크롤한다.
     펼친 클러스터의 호스트 표는 `limit` 8 + '호스트 N대 모두 보기 — 호스트별 보기로'(그 클러스터 focus 로 내려간다).
 - ⚠⚠ **v2.708 — 드롭다운은 공용 `Select`·`DataList` 하나다(자동 정렬)**(`web/src/components/`{Select.jsx,DataList.jsx,selectSort.js}, 사용자 요청 "모든 드랍박스 메뉴를 소팅되서 보이게 하고 앞으로 만들면 소팅"):

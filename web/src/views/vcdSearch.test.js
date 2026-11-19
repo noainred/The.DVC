@@ -51,14 +51,18 @@ describe('sumVmResources — 일치 VM 자원 총합', () => {
       { cpuCount: 4, memMB: 8192, storageGB: 100, uncommittedGB: 50 },  // thin
       { cpuCount: 8, memMB: 16384, storageGB: 200, uncommittedGB: 0 },  // thick
     ];
-    expect(sumVmResources(vms)).toEqual({ vcpu: 12, memGB: 24, diskUsedGB: 300, diskProvGB: 350 });
+    expect(sumVmResources(vms)).toEqual({ vcpu: 12, memGB: 24, vcpuUnknown: 0, memUnknown: 0, diskUsedGB: 300, diskProvGB: 350 });
   });
-  it('결측 필드(수집 실패 VM)는 0 취급 — NaN 오염 방지', () => {
+  // v3.28.1: vCPU · 메모리 결측은 0 이 아니라 따로 센다(합은 읽은 VM 만 · 하나도 못 읽었으면 null). 디스크는 예전대로(이번 범위 밖).
+  it('결측 필드(수집 실패 VM) — vCPU · 메모리는 따로 세고 NaN 오염이 없다', () => {
     const r = sumVmResources([{ name: 'broken' }, { cpuCount: 2, memMB: 4096, storageGB: 40 }]);
-    expect(r).toEqual({ vcpu: 2, memGB: 4, diskUsedGB: 40, diskProvGB: 40 });
+    expect(r).toEqual({ vcpu: 2, memGB: 4, vcpuUnknown: 1, memUnknown: 1, diskUsedGB: 40, diskProvGB: 40 });
+    const blank = sumVmResources([{ cpuCount: '', memMB: '  ' }, { cpuCount: null, memMB: null }]);
+    expect([blank.vcpu, blank.memGB, blank.vcpuUnknown, blank.memUnknown]).toEqual([null, null, 2, 2]);   // 전부 못 읽음 → null
+    expect(sumVmResources([{ cpuCount: 0, memMB: 0 }]).vcpu).toBe(0);   // 0 은 읽은 값
   });
   it('빈 배열/undefined 안전', () => {
-    expect(sumVmResources([])).toEqual({ vcpu: 0, memGB: 0, diskUsedGB: 0, diskProvGB: 0 });
+    expect(sumVmResources([])).toEqual({ vcpu: 0, memGB: 0, vcpuUnknown: 0, memUnknown: 0, diskUsedGB: 0, diskProvGB: 0 });
     expect(sumVmResources(undefined).vcpu).toBe(0);
   });
 });

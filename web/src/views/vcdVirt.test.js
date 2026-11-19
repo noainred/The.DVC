@@ -35,12 +35,23 @@ describe('allocByHost', () => {
     expect(vcpu.get('esx2')).toBe(2);         // esx2 는 변화 없음
   });
 
-  it('host 미지정·비숫자·빈 입력을 0/빈 맵으로 흘린다', () => {
-    const { vcpu, vmem } = allocByHost([{ cpuCount: '3', memMB: null }, { host: 'esx9' }]);
+  // v3.28.1: 못 읽은 값(null · '' · 없음)은 0 으로 더하지 않고 vcpuUnk · vmemUnk 로 센다(서버 vmSums 와 같은 규칙).
+  it('host 미지정·숫자 문자열·못 읽은 값', () => {
+    const { vcpu, vmem, vcpuUnk, vmemUnk } = allocByHost([{ cpuCount: '3', memMB: null }, { host: 'esx9' }, { host: 'esx9', cpuCount: '', memMB: 1024 }]);
     expect(vcpu.get('')).toBe(3);             // host 없으면 '' 키, 숫자 문자열은 변환
-    expect(vmem.get('')).toBe(0);             // null → 0
-    expect(vcpu.get('esx9')).toBe(0);
+    expect(vmem.get('')).toBeUndefined();     // null 은 더하지 않는다(0 이 아니다)
+    expect(vmemUnk.get('')).toBe(1);
+    expect(vcpu.get('esx9')).toBeUndefined(); // 둘 다 못 읽음
+    expect(vcpuUnk.get('esx9')).toBe(2);
+    expect(vmem.get('esx9')).toBe(1024);
+    expect(vmemUnk.get('esx9')).toBe(1);
     expect(allocByHost(undefined).vcpu.size).toBe(0);
+  });
+  it('virtSum 이 못 읽은 VM 수를 호스트 묶음으로 합한다(넘기면)', () => {
+    const maps = allocByHost([{ host: 'a', cpuCount: 4, memMB: 1024 }, { host: 'a', cpuCount: null, memMB: 2048 }, { host: 'b', cpuCount: '', memMB: '' }]);
+    const s = virtSum([{ name: 'a', cpuCores: 8, cpuTotalMhz: 16000, memTotalMB: 8192 }, { name: 'b', cpuCores: 8, cpuTotalMhz: 16000, memTotalMB: 8192 }], maps.vcpu, maps.vmem, undefined, maps);
+    expect([s.alloc, s.memAlloc, s.vcpuUnknown, s.vmemUnknown]).toEqual([4, 3072, 2, 1]);
+    expect(virtSum([{ name: 'a' }], maps.vcpu, maps.vmem).vcpuUnknown).toBe(0);   // 맵을 넘기지 않으면 0(예전 호출)
   });
 });
 
@@ -86,7 +97,7 @@ describe('virtSum — 클러스터·DC 합계', () => {
 
   it('맵이 없거나 VM 없는 호스트도 0으로 안전하게 합산', () => {
     const s = virtSum([{ name: 'lonely', cpuCores: 4, cpuTotalMhz: 8000, memTotalMB: 4096 }], undefined, undefined);
-    expect(s).toEqual({ alloc: 0, cores: 4, vmc: 0, memAlloc: 0, memPhys: 4096, capUnknown: 0 });
+    expect(s).toEqual({ alloc: 0, cores: 4, vmc: 0, memAlloc: 0, memPhys: 4096, capUnknown: 0, vcpuUnknown: 0, vmemUnknown: 0 });
     expect(virtSum(undefined, new Map(), new Map()).cores).toBe(0);
   });
   it('54회차: 용량을 못 읽은 호스트가 있으면 분모(코어 · 물리 메모리)는 null — 부분 합으로 비율을 부풀리지 않는다', () => {
