@@ -47,11 +47,13 @@ test('vmtrackSeries — 범위 [\'KR,Seoul\'] 이 먼저 채운 기억을 범위
   assert.equal(B2, B);
 });
 
-test('scopeKeyOf 는 JSON 서명 · series 와 changeLog 기억 둘 다 이 서명을 쓴다(소스)', () => {
+test('scopeKeyOf 는 공용 범위 서명(util/scopeSig.js) · series 와 changeLog 기억 둘 다 이 서명을 쓴다(소스)', () => {
   const s = stripComments(fs.readFileSync(path.join(SRC, 'vmtrack/service.js'), 'utf8'));
   const def = s.match(/const scopeKeyOf = \(scopeIds\) => ([^\n]+)/);
   assert.ok(def, 'scopeKeyOf 정의');
-  assert.match(def[1], /JSON\.stringify\(\[\.\.\.scopeIds\]\.map\(String\)\.sort\(\)\)/);
+  // v3.23.2: 규칙은 util/scopeSig.js 하나(판정 코어 하나 — 사본을 두지 않는다)
+  assert.match(def[1], /^scopeSig\(scopeIds\)/);
+  assert.match(s, /import \{ scopeSig \} from '\.\.\/util\/scopeSig\.js'/);
   assert.doesNotMatch(def[1], /\.join\(/);
   assert.match(s, /_seriesMemo\(gen, `[^`]*\$\{scopeKeyOf\(scopeIds\)\}`/);
   assert.match(s, /_changeLogMemo\(gen, `[^`]*\$\{scopeKeyOf\(scopeIds\)\}`/);

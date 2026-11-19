@@ -16,6 +16,7 @@ import { netNameFields } from './hostNames.js'; // v2.991: 호스트명 칸(관�
 import { netMacFields } from './macVendor.js'; // v2.999: 제조사 · MAC 칸(ARP > NetBIOS)
 import { dnsFwdFields } from './dnsConfirm.js'; // v3.2.0: 역DNS 이름의 정방향 확인(DNS 정합성)
 import { conflictRev, conflictSuspectOf } from './conflictState.js'; // v3.1.0: 충돌 의심(알림 엔진 평가가 판정)
+import { scopeSig } from '../util/scopeSig.js';
 
 // buildIpamRows 결과 메모이즈 — 같은 스냅샷·스코프·설정/주석/스캔/override/정책 리비전이면 재계산하지 않는다.
 // (API·서브넷대장·xlsx·CSV·syncLedger가 같은 입력으로 여러 번 호출 → 중복 계산 제거)
@@ -56,8 +57,8 @@ export function ipamRevKey() { return `s${settingsRev()}|a${annotationsRev()}|n$
 //   vCenter 를 고른 조회(vcenterId)는 그 vCenter 의 DataCenter 할당도 넣는다(그 할당이 어떤 스캔 행이 보이는지를 정한다).
 const _dcKey = (snap, vcenterId, allowed) => (allowed ? '' : `|d${currentScanDatacenters(snap?.vcenters).sig}${vcenterId ? `@${datacenterOfVcenter(vcenterId)}` : ''}`);
 // v2.639(감사 S6): 리비전 조각은 ipamRevKey() 하나 — 예전에는 같은 `s|a|n|o|p` 를 여기서 다시 적었다(축을 더할 때 한쪽만 늘면 라우트 memo 와
-//   원장 캐시가 다른 것을 본다). 키 문자열 값은 그대로다(perf2619·ipamScope 가 이 키를 본다).
-const _ipamKey = (snap, vcenterId, allowed = null) => `${snap?.generatedAt || ''}|${vcenterId || ''}|sc${allowed ? [...allowed].sort().join(',') : 'all'}|${ipamRevKey()}${_dcKey(snap, vcenterId, allowed)}`;
+//   원장 캐시가 다른 것을 본다). 범위 조각은 util/scopeSig.js(v3.23.2 — 예전 join(',') · 'all' 은 쉼표 · 'all' id 로 충돌).
+const _ipamKey = (snap, vcenterId, allowed = null) => `${snap?.generatedAt || ''}|${vcenterId || ''}|sc${scopeSig(allowed)}|${ipamRevKey()}${_dcKey(snap, vcenterId, allowed)}`;
 
 // 자동 발견 출처(discovery)를 사용자 친화 reconcile 상태로 매핑.
 // vcenter=vCenter만 인식 · scan=스캔만 발견(수동) · both=양쪽 · manual=운영자 등록(자동발견 없음)
@@ -750,7 +751,7 @@ export function listSubnets(snap, vcenterId, allowed = null, opts = {}) {
   vcenterId = vcenterId || '';
   const now = Number.isFinite(opts?.now) ? opts.now : Date.now();
   const head = opts?.inputSig ? `i${opts.inputSig}` : `g${snap?.generatedAt || ''}`;
-  const ck = `${head}|${vcenterId}|sc${allowed ? [...allowed].sort().join(',') : 'all'}|${ipamRevKey()}${_dcKey(snap, vcenterId, allowed)}`;
+  const ck = `${head}|${vcenterId}|sc${scopeSig(allowed)}|${ipamRevKey()}${_dcKey(snap, vcenterId, allowed)}`;
   const hit = _subnetMemo.get(ck);
   if (hit && now - hit.at < SUBNET_MEMO_MAX_AGE_MS && now >= hit.at) return hit.list.map((s) => ({ ...s }));
   const list = subnetsFromRows(buildIpamRows(snap, vcenterId, allowed).rows, vcenterId);

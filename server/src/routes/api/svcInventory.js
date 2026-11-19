@@ -46,6 +46,7 @@ import { mergeLatestRows, rowsByAgentKeyOf, makeCapOf, clampEdgeTs } from './cor
 import { peekMain as bmfPeekMain, peekAssign as bmfPeekAssign, storeRev as bmfStoreRev, storeLoadError as bmfStoreError } from '../../bmfolders/store.js';
 import { placeMember as bmfPlaceMember, sortRules as bmfSortRules, aliasGuardOf as bmfAliasGuardOf } from '../../bmfolders/build.js';
 import { lowSameLen, TAG_MASK_MIN } from '../../util/ruleName.js';
+import { scopeSig } from '../../util/scopeSig.js';
 
 const toolsPerm = requirePerm('tools');
 const csvPerm = requirePerm('data.csv');
@@ -460,7 +461,7 @@ const writerOk = (user) => ['admin', 'operator'].includes(user?.role) && !isDemo
 function writeKeyOf(user, snap) {
   if (!writerOk(user)) return 'none';
   const w = writeScopedVcenterIds(user, snap);
-  return w ? [...w].sort().join(',') : 'all';
+  return scopeSig(w);
 }
 // 등록 해제된 vCenter(스냅샷에 없음)는 쓰기 연산이 전부 404 라 버튼을 열지 않는다(5차 반증 R2 — 예전에는 writable:true 로 버튼이 열렸다).
 const inSnap = (snap, vc) => (snap?.vcenters || []).some((v) => t(v.id) === t(vc));
@@ -543,7 +544,7 @@ async function inventoryFor(req, snap) {
   const allowed = scopedVcenterIds(req.user, snap);
   const admin = isAdminDetailUser(req.user);
   const known = knownCorpsOf(snap);
-  const key = [snap?.generatedAt || 0, st.rev, st.bmRev, g.at, _inputRev, known ? [...known].sort().join(',') : '-', allowed ? [...allowed].sort().join(',') : '*', admin ? 'a' : 'u'].join('|');
+  const key = [snap?.generatedAt || 0, st.rev, st.bmRev, g.at, _inputRev, known ? `k${scopeSig(known)}` : '-', scopeSig(allowed), admin ? 'a' : 'u'].join('|');
   const now = Date.now();
   const hit = _invMemo.get(key);
   if (hit && now - hit.at < INV_MEMO_MS) { _invStats.hits += 1; return { st, g, inv: hit.inv, members: hit.members, allowed, admin }; }

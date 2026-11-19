@@ -172,7 +172,8 @@ test('④ 해석 — 공백 · 빈 값 · 중복 · 길이 · 개수 상한 · �
   // 캐시 키 — 정규화(중복 제거 · 정렬) · 고르지 않음('-')과 빈 목록('v')은 다르다
   assert.equal(S.vcenterPickKey({ vcenterIds: 'b,a,b' }, snap4), S.vcenterPickKey({ vcenterIds: 'a,b' }, snap4));
   assert.equal(S.vcenterPickKey({}, snap4), '-');
-  assert.equal(S.vcenterPickKey({ vcenterIds: ',' }, snap4), 'v');
+  assert.equal(S.vcenterPickKey({ vcenterIds: ',' }, snap4), 'vs:[]');   // v3.23.2: 빈 목록도 공용 범위 서명(util/scopeSig.js) — '-'(고르지 않음)와 다르다
+  assert.notEqual(S.vcenterPickKey({ vcenterIds: ',' }, snap4), '-');
   assert.notEqual(S.vcenterPickKey({ vcenterIds: 'a' }, snap4), S.vcenterPickKey({ vcenterIds: 'a,b' }, snap4));
   // scopeSlice — 글자(예전 그대로) · Set(고른 법인 — 빈 Set 은 0건) · 범위가 먼저
   const snapS = { vcenters: REGS, hosts: HOSTS, vms: VMS, datastores: [], alarms: [] };

@@ -15,6 +15,7 @@
  */
 import { inUserWriteScope, writeScopedVcenterIds, isFullReadWriteScope } from '../../auth/scope.js';
 import { isDemoGuest, demoGuestDenial } from '../../auth/demoGuest.js';
+import { scopeSig } from '../../util/scopeSig.js';
 
 const OP = Object.freeze(['admin', 'operator']);
 const ADMIN = Object.freeze(['admin']);
@@ -79,7 +80,7 @@ export const writableVc = (req, snap, vc, { requireCorp = false } = {}) => (requ
 
 /** memoJson 열쇠 조각 — 역할 · 데모 · 쓰기 범위(표지가 응답에 실리면 이 셋이 다른 계정끼리 캐시를 나누지 않게). */
 export function gateKey(req, snap) {
-  let w = 'all';
-  try { const ws = writeScopedVcenterIds(req?.user, snap); w = ws ? [...ws].sort().join(',') : 'all'; } catch { w = 'err'; }
+  let w;
+  try { w = scopeSig(writeScopedVcenterIds(req?.user, snap)); } catch { w = 'err'; }
   return `r${String(req?.user?.role || '')}${isDemoGuest(req?.user) ? 'd' : ''}|w${w}`;
 }
