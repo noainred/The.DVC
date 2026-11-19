@@ -1,5 +1,5 @@
 /**
- * routes/api/sshAccess.js — 설정 › 보안 › **SSH 공용 접속** API(v3.9.0 · 설계 docs/design/ssh-access · 본체 `sshaccess/service.js`).
+ * routes/api/sshAccess.js — 설정 › 보안 › **서버 접속(SSH · Windows)** API(v3.9.0 SSH 공용 접속 · v3.24 계층 지정 · 공통 계정 — 설계 docs/design/ssh-access · server-access · 본체 `sshaccess/service.js`).
  *
  * 권한(server/CLAUDE.md '7b SSH 키 저장소' 와 같은 등급 — 이 화면은 저장된 비밀을 다룬다):
  *  · 조회 · 서버에 들어 있는 키 읽기 · 연결 시험 · 지금 점검 = 관리자 + **설정 소유자 등급**(소유자 ∧ 전체 범위 — `requireSettingsOwner`).
@@ -130,6 +130,91 @@ export function registerSshAccess(api) {
     const b = bodyOf(req);
     const r = SVC.discardInbox({ relPath: typeof b.relPath === 'string' ? b.relPath.slice(0, 400) : '', sha: t(b.sha, 80), by: who(req) });
     audit(req, 'ssh-access.inbox.discard', t(b.relPath, 128), { ok: !!r.ok, code: r.code });
+    send(res, r);
+  });
+
+  /* ── v3.24 서버 접속 — 계층 지정(법인 › OS 종류 › 서버) · 공통 계정(설계 docs/design/server-access) ─────────
+   * 전부 저장 비밀(공통 계정)을 서버에 묶거나 그 비밀을 바꾸는 쓰기다 — 관리자 → 설정 소유자 등급 → 본인 OTP(마지막). 감사에는 이름 · id · code 만(비밀 없음).
+   * 새 비밀번호를 받는 계정 저장은 저장 방식 검사를 OTP 앞에 둔다(평문 정책 409 가 1회 비밀번호를 먼저 쓰지 않게 — 키와 같은 규칙 B-5).
+   */
+  /**
+   * v3.24 반증 F9: 판정 거절(없는 계정 · OS 불일치 · 확인 대상 고르기 · 이름 중복 · 도메인 꼴 …)은 **OTP 앞에서** 낸다(6회차 A2 — 1회 비밀번호를 먼저 쓰지 않게).
+   *   서비스를 dryRun 으로 한 번 돌려(로그인 · 쓰기 없음) 거절이면 그대로 돌려주고, 통과면 OTP 뒤에서 같은 판정을 다시 한다(그 사이 바뀌었을 수 있다).
+   */
+  const judgeFirst = (fn) => async (req, res, next) => {
+    try { const r = await fn(bodyOf(req), req); if (r && r.ok === false) return send(res, r); return next(); } catch (e) { return next(e); }
+  };
+  const assignArgs = (b) => ({ corp: t(b.corp, 128), level: t(b.level, 16), accountId: t(b.accountId, 32), auth: b.auth === 'password' ? 'password' : '', verifyServerId: t(b.verifyServerId, 64) });
+  const inheritArgs = (b) => ({
+    ids: Array.isArray(b.ids) ? b.ids.slice(0, 1000).map((x) => t(x, 64)) : [],
+    expectAddrs: b.expectAddrs && typeof b.expectAddrs === 'object' && !Array.isArray(b.expectAddrs) ? Object.fromEntries(Object.entries(b.expectAddrs).slice(0, 1000).map(([k, v]) => [t(k, 64), typeof v === 'string' ? t(v, 400) : ''])) : {},
+    expectKeys: b.expectKeys && typeof b.expectKeys === 'object' && !Array.isArray(b.expectKeys) ? Object.fromEntries(Object.entries(b.expectKeys).slice(0, 1000).map(([k, v]) => [t(k, 64), typeof v === 'string' ? t(v, 600) : ''])) : {},
+    clearOwn: b.clearOwn === true, verifyServerId: t(b.verifyServerId, 64),
+  });
+  api.put('/settings/ssh-access/assign', adminOnly, requireSettingsOwner, judgeFirst((b) => SVC.setAssignment({ ...assignArgs(b), dryRun: true })), reauth, async (req, res) => {
+    const b = bodyOf(req);
+    const r = await SVC.setAssignment({ ...assignArgs(b), by: who(req) });
+    audit(req, 'ssh-access.assign', `${t(b.corp, 80)}/${t(b.level, 16)}`, { accountId: t(b.accountId, 32) || 'clear', auth: b.auth === 'password' ? 'password' : 'key-first', ok: !!r.ok, code: r.code, affected: r.affected, verified: r.verified?.ok });
+    send(res, r);
+  });
+  api.post('/settings/ssh-access/servers/inherit', adminOnly, requireSettingsOwner, judgeFirst((b) => SVC.approveInherit({ ...inheritArgs(b), dryRun: true })), reauth, async (req, res) => {
+    const b = bodyOf(req);
+    const a = inheritArgs(b);
+    const ids = a.ids;
+    const r = await SVC.approveInherit({ ...a, by: who(req) });
+    audit(req, b.clearOwn === true ? 'ssh-access.server.inherit-reset' : 'ssh-access.server.inherit', `${ids.length}대`, { ok: !!r.ok, code: r.code, approved: r.approved, failed: r.failed?.length, verified: r.verified?.ok });
+    send(res, r);
+  });
+  api.delete('/settings/ssh-access/servers/:id/inherit', ...ownerWrite, (req, res) => {
+    const b = bodyOf(req);
+    const r = SVC.revokeInherit({ serverId: t(req.params.id, 64), expectAddr: typeof b.expectAddr === 'string' ? t(b.expectAddr, 400) : (typeof req.query.expectAddr === 'string' ? t(req.query.expectAddr, 400) : null), by: who(req) });
+    audit(req, 'ssh-access.server.inherit-revoke', req.params.id, { ok: !!r.ok, code: r.code });
+    send(res, r);
+  });
+  api.post('/settings/ssh-access/servers/:id/account', ...ownerWrite, async (req, res) => {
+    const b = bodyOf(req);
+    const r = await SVC.chooseServerAccount({ serverId: t(req.params.id, 64), accountId: t(b.accountId, 32), expectAddr: typeof b.expectAddr === 'string' ? t(b.expectAddr, 400) : null, by: who(req) });
+    audit(req, 'ssh-access.server.account', req.params.id, { accountId: t(b.accountId, 32), ok: !!r.ok, code: r.code, test: r.test?.kind, reverted: r.reverted, revertFailed: r.revertError ? true : undefined });
+    send(res, r);
+  });
+  // 서버 OS 종류(여러 대 한 번에) — os: 'linux' | 'windows' | ''(미지정) | 'detected'(수집이 알아낸 값 — 비어 있는 서버만). OS 가 바뀌면 그 서버의 물려받기 승인은 효력을 잃는다.
+  api.post('/settings/ssh-access/servers/os', ...ownerWrite, (req, res) => {
+    const b = bodyOf(req);
+    const ids = Array.isArray(b.ids) ? b.ids.slice(0, 1000).map((x) => t(x, 64)) : [];
+    const r = SVC.setServersOs({ ids, os: t(b.os, 16) });
+    audit(req, 'ssh-access.server.os', `${ids.length}대`, { os: t(b.os, 16) || 'none', ok: !!r.ok, code: r.code, changed: r.changed, inheritLost: r.inheritLost });
+    send(res, r);
+  });
+  /** 새 비밀번호가 있으면 저장 방식 검사 → OTP(키와 같은 순서). 없으면 그냥 OTP. */
+  const pwVaultFirst = (req, res, next) => {
+    const pw = bodyOf(req).password;
+    if (typeof pw === 'string' && pw !== '' && pw !== '********') { const v = SVC.keyVaultIssue(); if (v) return send(res, v.code === 'keys-need-encryption' ? { ...v, code: 'passwords-need-encryption', reason: '법인 공통 비밀번호는 자격증명 저장 방식이 ‘암호화’ 일 때만 받습니다 — 설정 › 보안 › 자격증명 저장 방식에서 암호화로 바꾼 뒤 다시 저장하세요.' } : v); }
+    return next();
+  };
+  const accountInput = (b) => ({
+    ...(b.id ? { id: t(b.id, 32) } : {}), name: b.name, kind: 'os', corp: b.corp, username: b.username,
+    ...(b.os !== undefined ? { os: t(b.os, 16) } : {}), ...(b.logon !== undefined ? { logon: t(b.logon, 8) } : {}), ...(b.domain !== undefined ? { domain: t(b.domain, 253) } : {}),
+    ...(b.keyRef !== undefined ? { keyRef: t(b.keyRef, 32) } : {}), ...(typeof b.password === 'string' ? { password: b.password } : {}), ...(b.clearPassword === true ? { clearPassword: true } : {}),
+    ...(b.features !== undefined ? { features: featuresOf(b.features) } : {}), ...(b.rotateBy !== undefined ? { rotateBy: b.rotateBy === null || b.rotateBy === '' ? null : t(b.rotateBy, 16) } : {}),
+  });
+  api.post('/settings/ssh-access/accounts', adminOnly, requireSettingsOwner, pwVaultFirst,
+    judgeFirst((b) => { const { otp, ...rest } = b; void otp; return SVC.saveAccountChecked({ input: accountInput(rest), verifyServerId: t(rest.verifyServerId, 64), dryRun: true }); }), reauth, async (req, res) => {
+    const { otp, ...b } = bodyOf(req); void otp;
+    const r = await SVC.saveAccountChecked({ input: accountInput(b), verifyServerId: t(b.verifyServerId, 64), by: who(req) });
+    audit(req, b.id ? 'ssh-access.account.update' : 'ssh-access.account.add', t(b.name, 64), r.ok
+      ? { ok: true, os: r.account.os || '', logon: r.account.logon || '', corp: r.account.corp, secretChanged: typeof b.password === 'string' && b.password !== '' && b.password !== '********', verified: r.verified?.ok, dropped: r.droppedSecrets || [] }
+      : { ok: false, code: r.code });
+    send(res, r);
+  });
+  api.post('/settings/ssh-access/accounts/:id/verify', ...ownerWrite, async (req, res) => {
+    const b = bodyOf(req);
+    const r = await SVC.verifyAccount({ accountId: t(req.params.id, 32), serverId: t(b.serverId, 64), by: who(req) });
+    audit(req, 'ssh-access.account.verify', req.params.id, { ok: !!r.ok, code: r.code, kind: r.kind, resumed: r.resumed });
+    send(res, r);
+  });
+  api.delete('/settings/ssh-access/accounts/:id/stop', ...ownerWrite, (req, res) => {
+    const r = SVC.resumeAccount({ accountId: t(req.params.id, 32), by: who(req) });
+    audit(req, 'ssh-access.account.resume', req.params.id, { ok: !!r.ok, code: r.code });
     send(res, r);
   });
 

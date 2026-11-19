@@ -3,7 +3,11 @@
  *
  * 파일 `CONFIG_DIR/ssh-access-state.json`(0600 · 원자적 쓰기 · 로드 손상 preserveCorrupt — 비밀 없음):
  *   { stops:  { [법인(vCenter id)]: { at, by, reason, serverIds:[…], addrs:[…] } }   — 긴급 조치 ‘이 법인 키 사용 중지’
- *     events: [ { at, kind, corp, target, by, detail } ] }                          — 키 보안 사건(최근 MAX_EVENTS — 중요한 사건은 나중에 버린다)
+ *     events: [ { at, kind, corp, target, by, detail } ],                         — 키 보안 사건(최근 MAX_EVENTS — 중요한 사건은 나중에 버린다)
+ *     (v3.24 서버 접속 — 설계 docs/design/server-access §4.6)
+ *     assign: { [법인]: { all?: A, linux?: A, windows?: A } }  A = { account(공통 계정 id), auth(''=키 우선 | 'password'), at, by }
+ *                                                                                 — 계층 지정(법인 › OS 종류). 비밀은 없다(계정 id 만)
+ *     accountStops: { [공통 계정 id]: { at, server, feature, version } } }          — 계정 단위 정지(로그인 거부 한 번 — 그 비밀번호 판 동안)
  * 서버에서 읽은 authorized_keys 지문은 판정에 쓰지 않으므로 따로 둔다(`installed.js` — 그 파일이 깨져도 키 접속을 멈추지 않는다).
  *
  * 불변조건(sshaccess/CLAUDE.md):
@@ -13,7 +17,8 @@
  *    사람이 파일을 고쳤으면 재시작 없이 `reloadSshAccessState()`(설정 소유자 + OTP 라우트)로 다시 읽는다.
  *  · 사용 중지는 법인 칸(vCenter id)만 보지 않는다 — 중지할 때 그 법인 서버의 id · 접속처(host:port|계정)를 함께 적어 둔다.
  *    법인 칸은 OTP 없이 고칠 수 있는 칸이라, 칸을 비우면 빠져나가는 길이었다(점검 A-4).
- *  · 백업 복원에서 뺀다(`backup/stagedRestore.js RESTORE_EXCLUDE`).
+ *  · 백업 복원에서 뺀다(`backup/stagedRestore.js RESTORE_EXCLUDE`) — 계층 지정은 ‘저장 비밀을 서버에 묶는’ 값이라 OTP 없는 복원으로 되살리지 않는다.
+ *  · v3.24: 계층 지정 · 계정 단위 정지도 이 파일이다 — 못 읽으면 물려받는 서버는 접속하지 않고(state-unreadable) 공통 계정 비밀번호 접속도 멈춘다(정지 기록을 모른다).
  *  · 쓰기는 동기(load → 사본 → 원자적 쓰기 → 성공한 뒤 캐시 교체).
  */
 import fs from 'node:fs';
@@ -30,7 +35,12 @@ const MAX_STOPS = 500;
 const MAX_STOP_SERVERS = 2000;
 const READ_RETRY_MS = 30_000;
 /** 밀려나지 않게 지키는 사건 — 사용 중지 · 재개 · 바꿔치기(감사 로그에 없는 것도 있다). */
-export const CRITICAL_EVENTS = Object.freeze(['corp-stop', 'corp-resume', 'key-tampered', 'key-changed-outside', 'key-added-outside', 'state-reloaded', 'keystore-reloaded', 'account-changed-outside']);
+export const CRITICAL_EVENTS = Object.freeze(['corp-stop', 'corp-resume', 'key-tampered', 'key-changed-outside', 'key-added-outside', 'state-reloaded', 'keystore-reloaded', 'account-changed-outside',
+  'assign-set', 'assign-clear', 'account-stopped', 'account-resumed']);
+/** v3.24 계층 지정 단계 — all = 법인(모든 OS) · linux / windows = 법인 › OS 종류. */
+export const ASSIGN_LEVELS = Object.freeze(['all', 'linux', 'windows']);
+const ACC_ID_RE = /^a_[0-9a-f]{12}$/;
+const MAX_ACCOUNT_STOPS = 500;
 
 const t = (v, max = 256) => (typeof v === 'string' ? v : v == null ? '' : String(v)).slice(0, max).trim();
 const num = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Math.round(Number(v)) : 0);
@@ -62,7 +72,33 @@ function norm(j) {
   const events = (j.events || []).filter(isObj).slice(-MAX_EVENTS).map((e) => ({
     at: num(e.at), kind: t(e.kind, 40), corp: t(e.corp, 128), target: t(e.target, 128), by: t(e.by, 64), detail: t(e.detail, 300),
   }));
-  return { stops, events };
+  // v3.24 계층 지정 — 모양이 틀리면 손상(조용히 비우면 지정이 사라진 게 아니라 ‘모름’ 인데 다른 단계로 넘어가 엉뚱한 계정을 쓰게 된다).
+  if (j.assign !== undefined && !isObj(j.assign)) throw new ShapeError('assign 이 객체가 아닙니다');
+  const assign = Object.create(null);
+  const aents = Object.entries(j.assign || {});
+  if (aents.length > MAX_STOPS) throw new ShapeError(`assign 이 ${MAX_STOPS}개를 넘습니다`);
+  for (const [corp, v] of aents) {
+    const c = t(corp, 128);
+    if (!c) continue;
+    if (!isObj(v)) throw new ShapeError(`assign.${c.slice(0, 40)} 가 객체가 아닙니다`);
+    const row = Object.create(null);
+    for (const [lv, a] of Object.entries(v)) {
+      if (!ASSIGN_LEVELS.includes(lv)) throw new ShapeError(`assign.${c.slice(0, 40)}.${String(lv).slice(0, 20)} 는 모르는 단계입니다`);
+      if (!isObj(a) || !ACC_ID_RE.test(String(a.account || ''))) throw new ShapeError(`assign.${c.slice(0, 40)}.${lv} 의 계정이 올바르지 않습니다`);
+      row[lv] = { account: String(a.account), auth: a.auth === 'password' ? 'password' : '', at: num(a.at), by: t(a.by, 64) };
+    }
+    if (Object.keys(row).length) assign[c] = row;
+  }
+  if (j.accountStops !== undefined && !isObj(j.accountStops)) throw new ShapeError('accountStops 가 객체가 아닙니다');
+  const accountStops = Object.create(null);
+  const sents = Object.entries(j.accountStops || {});
+  if (sents.length > MAX_ACCOUNT_STOPS) throw new ShapeError(`accountStops 가 ${MAX_ACCOUNT_STOPS}개를 넘습니다`);
+  for (const [id, v] of sents) {
+    if (!ACC_ID_RE.test(id)) throw new ShapeError('accountStops 의 계정 id 가 올바르지 않습니다');
+    if (!isObj(v)) throw new ShapeError(`accountStops.${id} 가 객체가 아닙니다`);
+    accountStops[id] = { at: num(v.at), server: t(v.server, 128), feature: t(v.feature, 32), version: t(v.version, 20) };
+  }
+  return { stops, events, assign, accountStops };
 }
 
 function load() {
@@ -111,7 +147,12 @@ function unreadable() {
   return e ? { ok: false, code: 'state-unreadable', status: 503, reason: `SSH 공용 접속 상태 파일(${STATE_FILE_NAME})을 읽지 못해 바꾸지 않았습니다 — 손상 보존본(${STATE_FILE_NAME}.corrupt.*)을 확인해 고친 뒤 ‘상태 파일 다시 읽기’ 를 누르세요.` } : null;
 }
 // 프로토타입 없는 객체로 — 'toString' 같은 이름을 중지 기록으로 읽지 않게(반증 D7).
-function draft() { const d = load(); return { stops: Object.assign(Object.create(null), d.stops), events: d.events.slice() }; }
+function draft() {
+  const d = load();
+  const assign = Object.create(null);
+  for (const [c, row] of Object.entries(d.assign)) assign[c] = Object.assign(Object.create(null), row);
+  return { stops: Object.assign(Object.create(null), d.stops), events: d.events.slice(), assign, accountStops: Object.assign(Object.create(null), d.accountStops) };
+}
 function commit(next) {
   let normed;
   try { normed = norm(next); } catch (e) { return { ok: false, code: 'bad-state', status: 500, reason: String(e?.message || e).slice(0, 120) }; }
@@ -193,3 +234,94 @@ export function addEvents(list = [], { now = Date.now() } = {}) {
 }
 export function addEvent(ev = {}, opts = {}) { return addEvents([ev], opts); }
 export function listEvents({ limit = 100 } = {}) { const d = load(); return d ? d.events.slice(-Math.max(1, Math.min(MAX_EVENTS, limit))).reverse() : []; }
+
+/* ── v3.24 계층 지정(법인 › OS 종류) — 설계 docs/design/server-access §4.6 ─────────────────── */
+
+/**
+ * 그 단계의 지정. 못 읽으면 { unreadable } — 호출부(refs.resolveOsAuth)는 ‘지정 없음’ 으로 넘기지 않고 접속을 멈춘다.
+ * @returns {null | {unreadable:true} | {account:string, auth:''|'password', at:number, by:string}}
+ */
+export function assignFor(corp, level) {
+  const d = load();
+  if (!d || loadErr.get()) return { unreadable: true };
+  const c = t(corp, 128);
+  if (!c || !ASSIGN_LEVELS.includes(level) || !Object.hasOwn(d.assign, c)) return null;
+  const row = d.assign[c];
+  return Object.hasOwn(row, level) ? { ...row[level] } : null;
+}
+/** 화면용 — 전부. 못 읽으면 null(모름). */
+export function listAssign() {
+  const d = load();
+  if (!d || loadErr.get()) return null;
+  const out = [];
+  for (const [corp, row] of Object.entries(d.assign)) for (const lv of ASSIGN_LEVELS) if (Object.hasOwn(row, lv)) out.push({ corp, level: lv, ...row[lv] });
+  return out;
+}
+/** 이 공통 계정을 가리키는 지정 수(계정 삭제 · 바꾸기 판정). 못 읽으면 null(모름 — 삭제를 막는다). */
+export function assignRefs(accountId) {
+  const all = listAssign();
+  return all ? all.filter((a) => a.account === t(accountId, 32)) : null;
+}
+/**
+ * 지정 쓰기(설정 소유자 등급 + 본인 OTP 라우트 뒤 — 부르는 곳은 sshaccess/service.js 하나). a = null 이면 지운다.
+ * 계정 · 법인 · OS 가 맞는지는 호출부(service)가 키 저장소를 보고 판정한다 — 이 파일은 키 저장소를 모른다.
+ */
+export function setAssign(corp, level, a, { by = '', now = Date.now() } = {}) {
+  const u = unreadable(); if (u) return u;
+  const c = t(corp, 128);
+  if (!c) return { ok: false, code: 'bad-corp', reason: '법인을 고르세요.' };
+  if (!ASSIGN_LEVELS.includes(level)) return { ok: false, code: 'bad-level', reason: '단계는 법인 · Linux · Windows 중 하나입니다.' };
+  const d = draft();
+  const row = Object.hasOwn(d.assign, c) ? d.assign[c] : Object.create(null);
+  if (a) {
+    if (!ACC_ID_RE.test(String(a.account || ''))) return { ok: false, code: 'bad-account', reason: '공통 계정을 고르세요.' };
+    if (!Object.hasOwn(d.assign, c) && Object.keys(d.assign).length >= MAX_STOPS) return { ok: false, code: 'too-many', reason: '계층 지정이 너무 많습니다.' };
+    row[level] = { account: String(a.account), auth: a.auth === 'password' ? 'password' : '', at: now, by: t(by, 64) };
+    d.assign[c] = row;
+  } else {
+    if (!Object.hasOwn(row, level)) return { ok: false, code: 'not-set', status: 404, reason: '그 단계에는 지정이 없습니다.' };
+    delete row[level];
+    if (Object.keys(row).length) d.assign[c] = row; else delete d.assign[c];
+  }
+  pushEvents(d, [{ kind: a ? 'assign-set' : 'assign-clear', corp: c, target: level, by, detail: a ? `${a.account}${a.auth === 'password' ? ' · 비밀번호 고정' : ''}` : '' }], now);
+  return commit(d);
+}
+
+/* ── v3.24 계정 단위 정지(로그인 거부 한 번) ─────────────────────────────── */
+
+/**
+ * 그 계정이 정지돼 있는가. 정지는 **그 비밀번호 판(version)** 에만 걸린다 — 비밀번호를 새로 넣으면(판이 바뀜) 풀린 것으로 본다.
+ * 못 읽으면 { unreadable }(호출부는 접속하지 않는다).
+ */
+export function accountStopFor(accountId, version = null) {
+  const d = load();
+  if (!d || loadErr.get()) return { unreadable: true };
+  const id = t(accountId, 32);
+  if (!Object.hasOwn(d.accountStops, id)) return null;
+  const s = d.accountStops[id];
+  if (version != null && s.version !== String(version)) return null;
+  return { ...s };
+}
+export function listAccountStops() { const d = load(); return d && !loadErr.get() ? Object.entries(d.accountStops).map(([account, v]) => ({ account, ...v })) : null; }
+/** 로그인 거부를 본 곳(폴러 · 연결 시험)이 부른다. 같은 판으로 이미 정지돼 있으면 다시 쓰지 않는다(주기마다 파일을 쓰지 않게). */
+export function setAccountStop(accountId, { server = '', feature = '', version = '', accountName = '', now = Date.now() } = {}) {
+  const u = unreadable(); if (u) return u;
+  const id = t(accountId, 32);
+  if (!ACC_ID_RE.test(id)) return { ok: false, code: 'bad-account' };
+  const d = draft();
+  if (Object.hasOwn(d.accountStops, id) && d.accountStops[id].version === String(version)) return { ok: true, already: true };
+  if (!Object.hasOwn(d.accountStops, id) && Object.keys(d.accountStops).length >= MAX_ACCOUNT_STOPS) return { ok: false, code: 'too-many' };
+  d.accountStops[id] = { at: now, server: t(server, 128), feature: t(feature, 32), version: t(version, 20) };
+  pushEvents(d, [{ kind: 'account-stopped', target: t(accountName, 64) || id, detail: `${t(server, 80)} 에서 로그인 거부 · ${t(feature, 32)}` }], now);
+  return commit(d);
+}
+/** 풀기(한 대로 다시 확인 성공 · 사람이 풂 · 비밀번호를 바꿈). 없으면 할 일 없음. */
+export function clearAccountStop(accountId, { by = '', accountName = '', why = '', now = Date.now() } = {}) {
+  const u = unreadable(); if (u) return u;
+  const id = t(accountId, 32);
+  const d = draft();
+  if (!Object.hasOwn(d.accountStops, id)) return { ok: true, already: true };
+  delete d.accountStops[id];
+  pushEvents(d, [{ kind: 'account-resumed', target: t(accountName, 64) || id, by, detail: t(why, 120) }], now);
+  return commit(d);
+}

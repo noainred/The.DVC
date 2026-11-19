@@ -53,7 +53,7 @@ export const dirLabel = (dir) => (dir == null ? DASH : dir === '' ? '기본 경�
 /** 설치 계정 상태(서버 CRED_STATES + 화면 전용 'edge-unknown'). */
 export const CRED_TEXT = Object.freeze({
   ok: { tone: 'ok', label: '설치할 수 있음', hint: '' },
-  feature: { tone: 'warn', label: '못 함 — 키에 ‘설치’ 가 꺼짐', hint: '그 키의 ‘쓸 수 있는 기능’ 에서 ‘디스크 점검 프로그램 설치(root)’ 를 켜면 됩니다(설정 › 보안 › SSH 공용 접속 — 엣지 서버는 그 엣지 포탈에서).' },
+  feature: { tone: 'warn', label: '못 함 — 키에 ‘설치’ 가 꺼짐', hint: '그 키의 ‘쓸 수 있는 기능’ 에서 ‘디스크 점검 프로그램 설치(root)’ 를 켜면 됩니다(설정 › 보안 › 서버 접속(SSH · Windows) — 엣지 서버는 그 엣지 포탈에서).' },
   noentry: { tone: 'warn', label: '못 함 — 설치 계정 없음', hint: 'SSH 공용 접속에 이 서버(같은 주소 · 포트)도, 이 법인의 공통 계정도 없습니다.' },
   ambig: { tone: 'warn', label: '고르면 됨 — 공통 계정이 여럿', hint: '‘설치’ 를 켠 이 법인의 공통 계정이 둘 이상입니다 — 줄에서 계정을 고르세요.' },
   dup: { tone: 'warn', label: '못 함 — 같은 주소 서버가 둘', hint: 'SSH 공용 접속에 같은 주소 · 포트로 등록된 서버가 둘 이상이라 어느 자격인지 모릅니다.' },

@@ -19,7 +19,10 @@ export const RETAIN_MS = 90 * 24 * 3600_000;
 export const MAX_ROWS = 20_000;
 export const MAX_RECENT = 500;
 const FLUSH_MS = 30_000;
-const FP_RE = /^SHA256:[A-Za-z0-9+/]{43}$/;
+// v3.24(서버 접속): 공통 계정 비밀번호 접속도 같은 기록에 쌓는다 — 지문 칸에 `ACCT:<계정 id>`(비밀 아님 · 화면이 ‘공통 계정’ 으로 보인다).
+const FP_RE = /^(?:SHA256:[A-Za-z0-9+/]{43}|ACCT:a_[0-9a-f]{12})$/;
+/** 공통 계정 사용 기록의 지문 칸(sshaccess/outcome.js · 화면이 같은 글자). */
+export const accountUseFingerprint = (accountId) => `ACCT:${String(accountId || '')}`;
 
 const t = (v, max = 128) => (typeof v === 'string' ? v : v == null ? '' : String(v)).slice(0, max).trim();
 const num = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Math.round(Number(v)) : 0);
