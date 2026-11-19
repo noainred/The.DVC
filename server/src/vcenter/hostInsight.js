@@ -121,8 +121,9 @@ async function scanHosts(list, { readable, capKnown, byHostVm, yielder, topN, ch
     // 재부팅 '모름' = 판정하지 못한 호스트만(v3.22.x 수정 — 예전에는 boot 가 없는 호스트를 전부 셌다):
     //   analyzeReboots 는 기간(bootDays) 안에 부팅한 호스트만 행을 만든다 — boot 가 null 이면 대부분 '기간 안 재부팅 없음'(정상, 0).
     //   모름 = 이벤트를 받지 못함(kind 'no-events' · readCut 포함) + bootTime 을 못 읽음 + 끊김(analyzeReboots 가 건너뛴다) + 점검 줄 자체 없음.
-    if (reboots != null && rebootsUnreadable) rebootsUnread += 1;   // 139회차 R2: 로그 DB 를 못 읽었다 — 판정하지 못한 호스트(0 이 아니다)
-    else if (reboots != null) {
+    //   139회차 R2 · 144회차 F2: 로그 DB 를 못 읽었으면 라우트가 rebootsUnreadOf(이벤트 없는 판정 — 기간 안 부팅은 'no-events')를 넘긴다 —
+    //   모름은 같은 규칙으로 센다(예전: 호스트 전부를 모름으로 세 기간 밖 부팅까지 모름이었다). 예기치 않은 재부팅 수는 아래에서 null.
+    if (reboots != null) {
       const boot = ck?.boot;
       if (boot?.kind === 'unexpected') reboots += 1;
       else if (boot?.kind === 'no-events') rebootsUnread += 1;

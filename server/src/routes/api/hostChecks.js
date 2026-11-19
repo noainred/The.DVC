@@ -52,6 +52,20 @@ export async function rebootsOf(snap, hosts, vcIds, now) {
   return out;
 }
 
+/**
+ * 144회차 F1 · F2(재현): 로그 DB 를 못 읽었을 때(rebootsOf 예외)의 호스트별 판정 — 이벤트 없이 같은 analyzeReboots(같은 조각)로.
+ *   기간 안에 부팅한 연결 호스트는 'no-events'(판정 불가), 기간 밖 부팅은 bootTime 만으로 아는 '기간 안 재부팅 없음'(행 없음 — 정상과 같다).
+ *   예전(빈 Map): 기간 안 부팅도 행이 없어 /hosts/checks 화면(bootCell)이 5일 전 부팅 호스트를 '30일 내 없음' 으로 그렸고,
+ *   /hosts/insight 는 반대로 기간 밖 부팅까지 '모름' 으로 셌다. 두 라우트가 이것 하나를 쓴다.
+ */
+export function rebootsUnreadOf(hosts, now) {
+  const out = new Map();
+  for (let i = 0; i < hosts.length; i += REBOOT_CHUNK) {
+    for (const x of analyzeReboots(hosts.slice(i, i + REBOOT_CHUNK), [], { now, days: BOOT_DAYS }).rows) out.set(x.id, x);
+  }
+  return out;
+}
+
 export function registerHostChecks(api) {
   api.get('/hosts/checks', invHosts, (req, res) => {
     const access = accessOf(req);
@@ -62,7 +76,8 @@ export function registerHostChecks(api) {
       if (req.query.state) hosts = hosts.filter((h) => h.connectionState === req.query.state);
       const vcIds = [...new Set(hosts.map((h) => h.vcenterId))];
       let reboots = null;
-      if (access.hygiene) { try { reboots = await rebootsOf(snap, hosts, vcIds, now); } catch { reboots = new Map(); } }
+      let rebootsUnreadable = false;   // 144회차 F1: 로그 DB 를 못 읽었다 — 기간 안 부팅은 판정 불가로(빈 Map 이면 '재부팅 없음' 으로 그려졌다)
+      if (access.hygiene) { try { reboots = await rebootsOf(snap, hosts, vcIds, now); } catch { reboots = rebootsUnreadOf(hosts, now); rebootsUnreadable = true; } }
       let idracFor = null;
       if (access.hw) { try { idracFor = makeIdracFor({ registry: listRegistry(), remote: allRemoteServers() }); } catch { idracFor = null; } }
       const veeamByVc = new Map();
@@ -73,7 +88,7 @@ export function registerHostChecks(api) {
         veeamByVc.set(vc.id, r);
       }
       const r = hostChecksOf(hosts, { access, idracFor, reboots, veeamOf: (id) => veeamByVc.get(id) || null, vmsByHost: vmsByHostOf(snap.vms), now });
-      return { ok: true, ...r, bootDays: BOOT_DAYS, at: now, initial: snap.initial === true, hosts: hosts.length };
+      return { ok: true, ...r, bootDays: BOOT_DAYS, at: now, initial: snap.initial === true, hosts: hosts.length, ...(rebootsUnreadable ? { rebootsUnreadable: true } : {}) };
     }, { ttlMs: 60_000, extraKey: `${scopeKey(req.user, store.get())}|${vcenterPickKey(req.query, store.get())}|${accessKey}` });
   });
 
