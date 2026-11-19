@@ -151,7 +151,7 @@ const LEGACY_ALGOS = (() => {
 })();
 const NO_MATCH = /no matching (key exchange|host key|cipher|MAC|compression)|Handshake failed/i;
 
-function connect({ host, port = 22, username, password, privateKey, passphrase, readyTimeout = SSH_READY_TIMEOUT_MS, signal, trace = null, verbose = false, _legacy = false }) {
+function connect({ host, port = 22, username, password, privateKey, passphrase, readyTimeout = SSH_READY_TIMEOUT_MS, signal, trace = null, verbose = false, _legacy = false, singlePasswordAttempt = false }) {
   const say = (msg, level) => { try { trace?.(msg, level); } catch { /* */ } };
   return new Promise((resolve, reject) => {
     if (signal?.aborted) return reject(new Error('SSH 접속 취소(타임아웃)'));
@@ -178,7 +178,7 @@ function connect({ host, port = 22, username, password, privateKey, passphrase, 
       if (LEGACY_FALLBACK && LEGACY_ALGOS && !_legacy && NO_MATCH.test(e.message || '')) {
         say('알고리즘 협상 실패 → 구형 알고리즘(diffie-hellman-group1-sha1/ssh-dss/aes-cbc 등)까지 열어 1회 재시도합니다.', 'warn');
         try { conn.end(); } catch { /* */ }
-        connect({ host, port, username, password, privateKey, passphrase, readyTimeout, signal, trace, verbose, _legacy: true }).then(resolve, reject);
+        connect({ host, port, username, password, privateKey, passphrase, readyTimeout, signal, trace, verbose, _legacy: true, singlePasswordAttempt }).then(resolve, reject);
         return;
       }
       reject(e);
@@ -210,7 +210,22 @@ function connect({ host, port = 22, username, password, privateKey, passphrase, 
       if (r.ok && r.reason !== 'approved') say(`SSH 호스트키 ${r.algo} ${r.fp} — ${r.reason === 'observed-new' ? '처음 관찰(미승인 · 관찰 모드)' : '관찰 키(미승인 · 관찰 모드)'}`, 'warn');
     });
     if (privateKey) { auth.privateKey = privateKey; if (passphrase) auth.passphrase = passphrase; }
-    else { auth.password = password; auth.tryKeyboard = true; }
+    else {
+      auth.password = password; auth.tryKeyboard = true;
+      // v3.25(서버 접속 반증 F1 — 재현): ssh2 의 기본 처리기는 서버가 허용한 방식을 보지 않고 password 가 거부되면 **같은 비밀번호로 keyboard-interactive 를
+      //   한 번 더** 보낸다 — 로그인 한 번에 틀린 비밀번호가 두 번 닿아 계정 잠금 횟수가 두 배가 된다(SSSD/AD 처럼 k-i 를 켠 서버).
+      //   `singlePasswordAttempt` 면 password 한 번만 — 서버가 password 방식을 **아예 받지 않을 때만**(그 시도는 비밀번호 확인까지 가지 않는다) k-i 로 간다.
+      //   계정 단위 정지를 쓰는 경로(서버 접속 코어 · 한 대 확인 · 연결 시험 · 베어메탈 사용률 · 스토리지 수집)가 켠다. 다른 장비 수집기는 예전 그대로.
+      if (singlePasswordAttempt) {
+        let tried = 0;
+        auth.authHandler = (left) => {
+          tried += 1;
+          if (tried === 1) return 'password';
+          if (tried === 2 && Array.isArray(left) && !left.includes('password') && left.includes('keyboard-interactive')) return 'keyboard-interactive';
+          return false;
+        };
+      }
+    }
     if (_legacy) auth.algorithms = LEGACY_ALGOS;
     // '자세히'(ssh -vvv 상당): ssh2 의 debug 콜백은 소켓 연결·ident 교환·KEXINIT·인증 방식 시도·채널 열기까지
     // 프로토콜 단계마다 한 줄씩 남긴다. 비밀번호는 찍히지 않는다(ssh2 가 로그에 넣지 않음).
@@ -234,14 +249,18 @@ function exec(conn, command, rawTimeoutMs = SSH_EXEC_TIMEOUT_MS, opts = {}) {
       let stdout = '', stderr = '', done = false, bytes = 0;
       const finish = (fn, arg) => { if (done) return; done = true; clearTimeout(timer); fn(arg); };
       const kill = () => { try { stream.close?.(); } catch { /* */ } try { stream.destroy?.(); } catch { /* */ } };
+      // v3.25(서버 접속 반증 F6): `partial: true` 면 시한 · 출력 상한에서 던지지 않고 **받은 만큼** 돌려준다(timedOut · truncated 표지) —
+      //   구획 표지로 나눈 읽기 묶음이 끝까지 오지 못해도 온 칸은 쓴다(끝 표지가 없으면 호출부가 ‘잘림’ 으로 본다). 기본은 예전 그대로(던진다).
       const timer = setTimeout(() => {
         kill();
+        if (opts.partial) return finish(resolve, { command, code: null, stdout, stderr, timedOut: true });
         finish(reject, new Error(`SSH exec 타임아웃(${Math.round(timeoutMs / 1000)}s): ${command}`));
       }, timeoutMs);
       timer.unref?.();
       const onChunk = (which) => (d) => {
         bytes += d.length;
-        if (bytes > EXEC_MAX_OUTPUT) { kill(); return finish(reject, new Error(`SSH exec 출력 상한(${Math.round(EXEC_MAX_OUTPUT / 1024)}KB) 초과: ${command}`)); }
+        const cap = opts.partial && Number(opts.maxBytes) > 0 ? Math.min(Number(opts.maxBytes), EXEC_MAX_OUTPUT) : EXEC_MAX_OUTPUT;
+        if (bytes > cap) { kill(); if (opts.partial) return finish(resolve, { command, code: null, stdout, stderr, truncated: true }); return finish(reject, new Error(`SSH exec 출력 상한(${Math.round(cap / 1024)}KB) 초과: ${command}`)); }
         if (which === 'out') stdout += d.toString(); else stderr += d.toString();
       };
       stream.on('data', onChunk('out'));

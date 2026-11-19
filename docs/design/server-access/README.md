@@ -174,3 +174,67 @@
 **변이 검증**: 반증 수정분 16건 + 1단계 18건, 의미 있는 변이 33건 모두 시험에 걸렸다(`resolveOsAuth` 의 승인 검사는 효력 계정 판정과 두 겹이라 그 하나만 바꾸면 통과 — 실제 판정 지점 두 곳(효력 계정 · 폴러 해석)을 다시 변이해 각각 5건 실패로 확인).
 `serverAccess324.test.js` 12건(⑨ 법인 묶임 · 승인 지움 · 복원 병합 ⑩ 가짜 sshd 5대 → 틀린 비밀번호 1회 · 탐침 순서 ⑪ 계정별 확인 · 옛 화면 거절 · 연결 시험 정지 · OTP 앞 거절).
 
+### 8.3 2단계(v3.25 — 2026-11-19) — 별도 기능 ‘서버 정보’ + 코어 `readServer`
+
+| 설계 | 구현 | 위치 |
+|---|---|---|
+| 코어 창구(§4.2 ③~⑧) | `readServer(serverId, { feature, plan })` — 자격 해석(서버 단독 → 법인 › OS 종류 → 법인 · 판정 전부) → 계정 탐침 → 로그인 한 번 → 명령 하나(시한 · 출력 상한) → 결과 기록(사용 기록 · 거부면 계정 정지). 비밀 · 원문을 돌려주지 않는다 | `server/src/sshaccess/readServer.js` |
+| 읽기 묶음(§4.5 · ⑦ · D3) | Linux: os-release · uname · hostname · DMI(권한 없으면 그 칸만 ‘못 읽음 · 권한’) · lscpu · meminfo · lsblk(-d -b -P) · df -T. Windows(OpenSSH + PowerShell): CIM(OS · 시스템 · BIOS · CPU · 디스크 · 볼륨) + Get-PhysicalDisk 를 JSON 한 줄로 — `-EncodedCommand` 한 줄이 cmd 한도 안 | `server/src/serverinfo/profiles.js` |
+| sudo(D5) | 쓰지 않는다 — DMI 시리얼 · LVM · 디스크 상태(SMART)처럼 root 가 필요한 칸은 ‘못 읽음 · 권한’ | 같은 파일 |
+| 기능 · 화면 | 특수 기능 ‘서버 정보’(`#/tools/server-info` · 관리자 + 전체 범위) — 서버 표(계정이 오는 곳 · 마지막 읽음 · 요약) · 고른 서버 읽기(한 번에 50대 · 동시 4대) · 자세히(기본 구성 · 디스크 · 파일시스템). **누를 때만 읽는다**(주기 수집 없음) | `serverinfo/service.js` · `routes/api/serverInfo.js` · `web/src/views/tools/ServerInfoTool.jsx` |
+| 허용 기능 | `server-info` — 기능 목록이 있는 키 · 공통 계정은 이 기능을 켜야 쓴다(예전 키 · 계정 null 은 그대로) | `keyStore.KEY_FEATURES` · `service.FEATURE_CATALOG` |
+
+**설계와 다르게 한 것 · 남긴 것**
+- 네트워크(인터페이스 · 주소 · 속도)는 D3 기본값대로 넣지 않았다(다음).
+- 주기 수집 · 보관 기간은 정하지 않았다 — 마지막 읽은 값 한 줄만 둔다(`server-info.json` — 원문 없음 · 실패해도 마지막 성공 값은 `lastOk`).
+- 엣지가 수집하는 서버는 중앙에서 읽지 않는다 — 그 엣지 포탈의 같은 화면에서 읽는다(중앙으로 결과를 모으는 길은 아직 없다).
+- **Windows 출력 형식은 실제 Windows 서버로 확인하지 못했다**(이 환경에 없음 — 형식은 PowerShell `ConvertTo-Json` 문서를 따랐다). 첫 실서버 연결 때 Windows 행의 각 칸을 확인할 것.
+
+**반증 검토(1인 · 2026-11-19)** — 결함 17건(보통 7 · 낮음 10) · 1단계 장치(승인 키 · 계정 탐침 · 결과 기록)를 우회하는 길은 없었다. 고친 것:
+
+| # | 내용 | 고친 것 |
+|---|---|---|
+| F1 | 로그인 한 번에 틀린 비밀번호가 **두 번** 닿았다(ssh2 기본 처리기가 password 거부 뒤 같은 비밀번호로 keyboard-interactive — SSSD/AD 서버) | `sshExec` `singlePasswordAttempt`(password 한 번 — 서버가 password 방식을 아예 받지 않을 때만 k-i). 계정 정지를 쓰는 접속 경로 5곳이 켠다 |
+| F2 | 같은 계정명 · 비밀번호를 서버마다 단독으로 넣은 N대를 일괄로 읽으면 N번 거부 | 일괄 문(`makeCredGate` — 비밀번호 해시 열쇠 · 탐침 하나 · 거부면 나머지 `same-cred-rejected`) |
+| F3 · F4 | 일괄 둘이 겹쳐 동시 세션 8 · 응답 없는 서버가 섞이면 요청이 수 분(웹 시한 초과) | 일괄은 하나씩(429) · 시작만 하고 202 · 화면이 도는 동안만 4초마다 조회 |
+| F5 · F14 | `hostname -f` · lsblk 탐침 · Windows 조회에 안쪽 시한이 없었다 · Windows 세션 예산 = 장비 시한 | 전부 `timeout` · `-OperationTimeoutSec` · 로그인 + 명령 < 장비 시한(시험이 맨몸 호출 · 산수를 잡는다) |
+| F6 | 명령 시한 · 출력 상한에 걸리면 받은 구획까지 버리고 ‘접속 실패’ | `exec(..., { partial: true })` — 받은 칸 · `exec-timeout` · 탐침은 성공 |
+| F7 · F8 · F9 · F13 | 시한에 죽은 df · lsblk · 거부된 CIM 이 ‘0개 · 읽음’ · 남은 칸 없으면 0% · ‘__proto__’ 열거값이 화면을 깸 · 숫자 열거값 그대로 | 못 읽음(null + 이유) · 사용률 null · Map · 열거값 글 |
+| F10 | 실패 행의 지난 값이 표시 없이 · 일부만 읽은 값은 안 보임 | ‘지난 값 · ’ · ‘일부만 · ’ 를 앞에 · 자세히의 안내 |
+| F11 | 보관 파일 일시 읽기 오류가 재시작까지 굳음 | 30초 뒤 다시 읽고 그동안의 결과를 얹는다 |
+| F12 · F15 · F16 · F17 | 닿지 않는 데모 분기 · 정지 사유 문구 · 꺼진 서버도 읽음 · 시험의 최상위 await 순서 | 분기 삭제 · 사유별 문구 · `disabled` 거절 · 순서 정정 |
+
+**남긴 것**: F4 의 근본(연결 실패도 탐침 하나씩 넘긴다 — 응답 없는 서버가 많으면 일괄이 길다)은 백그라운드 진행으로 화면이 막히지 않게만 했다. 다른 장비 수집기(SAN 스위치 · 스토리지 등)의 k-i 재시도는 그대로다(k-i 만 받는 장비 호환 — 바꾸려면 장비별 확인 필요).
+
+**검증**: `server/test/serverInfo325.test.js` 7건(⑦ 반증 수정분 — k-i 겸용 가짜 sshd 에서 틀린 비밀번호 1회 · 같은 비밀번호 4대 → 1회 · 429 · 멈추는 명령 → 받은 칸 · 꺼진 서버 시도 0 · 보관 파일 회복) · 웹 `serverInfoText.test.js` 5건 · 초판 6건(명령 상수 · 안쪽 시한 산수 · cmd 한도 · 해석(권한 · 잘림 · 표지 위조 · 0 이 아님) · 가짜 sshd 로 코어(계정 없으면 시도 0 · 허용 기능 밖 계정 시도 0 · 거부 한 번 → 계정 정지 → 시도 더 없음) · 실제 라우터(범위 관리자 · viewer 403 · 응답 · 감사에 비밀 없음) · 보관 파일 손상 보존).
+
+### 8.4 3단계(v3.25 — 2단계와 한 릴리스 · 2026-11-19) — WinRM HTTPS + NTLMv2
+
+| 설계 | 구현 | 위치 |
+|---|---|---|
+| NTLMv2(④) | MD4(RFC 1320 — 이 Node 의 OpenSSL 3 에 md4 가 없다) · NTOWFv2 · NTLMv2 응답 · **MIC**(세션 기본 키 — 키 교환 없음) · **채널 바인딩**(tls-server-end-point — 서버 인증서 해시). LM · NTLMv1 · 봉인(5985)은 하지 않는다 | `server/src/winrm/ntlm.js` |
+| WS-Management | cmd 셸 Create → Command(PowerShell 프로그램 + 인자 · cmd 셸 건너뜀) → Receive(Done 까지 · 시한 Fault 는 다시 받기) → Signal · Delete. 응답은 앵커 · 길이 상한 정규식으로 필요한 칸만 | `winrm/wsman.js` |
+| 전송 | HTTPS 5986 · 연결 하나(NTLM 은 연결 단위) · 인증서는 장비 신뢰 판정(`deviceTlsConnect` 하위 시스템 `winrm` · env `WINRM_TLS_VERIFY`) — **판정 전에는 아무 바이트도 보내지 않는다** · TLS 세션을 이어 쓰지 않는다(채널 바인딩에 연결마다 인증서가 필요 — 실측) · DNS 리바인딩 차단 · 시한이면 연결째 끊는다(실측: 연결 중 시한이 10.5초로 밀리던 것을 고침) · 거부면 다시 시도하지 않는다 | `winrm/client.js` |
+| 어디에 정하나(D11) | **Windows 단계 지정**에 접속 방식(SSH · WinRM)과 포트 — 상태 파일 `assign.<법인>.windows.via/port`. 물려받은 서버만 WinRM(따로 정한 서버는 SSH) · WinRM 은 비밀번호만(`winrm-needs-password`) | `sshaccess/state.js` · `refs.effectiveAccountOf` · 화면 ‘계정 계층’ |
+| 코어 · 확인 | `readServer` 가 WinRM 으로도 같은 탐침 · 결과 기록 · 계정 정지 · 지정 저장 · 승인 · 새 비밀번호 · 한 대로 다시 확인의 **먼저 확인도 WinRM 으로** | `sshaccess/readServer.js` · `service.loginOnce` |
+
+**실제 Windows 서버로는 확인하지 못했다**(이 환경에 없음). 계산은 MS-NLMP 4.2.4 예시 값으로, 전체 흐름은 **서버 쪽 검증을 직접 구현한 가짜 WinRM 서버**(NTProofStr · MIC · 채널 바인딩을 비밀번호로 다시 계산해 대조)로 시험했다 —
+첫 실서버 연결 때 확인할 것: ① AD 계정 표기(DOMAIN\\user · UPN) ② 로컬 계정(도메인 빈 값) ③ 확장 보호(EPA) 켠 서버 ④ HealthStatus · BusType 열거값 ⑤ 출력 인코딩(UTF-8).
+WinRM 은 명령 시한에 받은 칸을 돌려주지 않는다(전부 아니면 실패 — SSH 와 다름).
+
+**반증 검토(1인 · 2026-11-19)** — 결함 10건(중간~높음 2 · 중간 2 · 낮음 6) · 1 · 2단계 장치를 우회하는 길은 없었다. 고친 것:
+
+| # | 내용 | 고친 것 |
+|---|---|---|
+| F1 | undici `connections: 1` 은 **다시 연결**을 막지 않는다 — 인증 뒤 끊기면 다음 요청이 인증 없이 새 연결로 가 401 → ‘로그인 거부’ → 계정 정지(재현) | 두 번째 연결은 바이트를 보내기 전에 거절(`connection-split`) · 401 이 거부인 것은 AUTHENTICATE 를 실은 요청뿐(그 뒤는 `session-lost`) |
+| F2 | 채널 바인딩 해시가 **늘 SHA-256**(Node 의 X509Certificate 에 서명 알고리즘 칸이 없다) — SHA-384 서명 인증서면 맞는 비밀번호가 거부 → 계정 정지(해시는 재현 · 실서버 거동은 MS 문서 근거 추정) | DER 에서 서명 알고리즘 OID 를 직접 읽어 RFC 5929 4.1 대로 · 모르는 알고리즘(Ed25519 · PSS)은 AUTHENTICATE 를 보내지 않는다 · 시험은 crypto 로 따로 계산해 대조(순환 검증 아님) |
+| F3 | WinRM 지정의 ‘비밀번호 고정’ 이 SSH 기능(사용률 · 스토리지 · 연결 시험)에도 번졌다 | 고정은 **WinRM 으로 붙는 호출**에만(`resolveOsAuth({ winrm: true })`) |
+| F4 | 키 + 비밀번호 계정을 WinRM 으로 확인하면 키를 골라 늘 실패 | WinRM 확인은 비밀번호로 해석 |
+| F5 · F6 | 응답 상한 4MB(읽기에 0.2~0.5초) · 시한 Fault 무한 반복 · Done 없이 1000회 뒤 ‘성공’ | 응답 상한 640KB · 다시 받기 상한 · Done 이 없으면 실패 |
+| F9 · F10 | 등록부 원본의 via 칸을 믿음 · URL 을 글자로 만들어 ‘@’ 가 접속처를 바꿈(비밀 유출은 아님) | 접속 방식은 계층 지정에서만 · 접속처 글자 검사 |
+| LM | LM 칸을 비워 보냄(규격은 Z(24) 를 SHOULD) | 시각이 있으면 Z(24) · 없으면 LMv2 |
+
+**남긴 것**: F7 — 핸드셰이크 중 시한이면 호출은 바로 끝나지만 그 소켓은 연결 시한(약 10초)에 닫힌다(비밀은 나가지 않는다). F8 — 시한 · 연결 갈림으로 Delete 를 못 보내면 원격 셸이 서버의 유휴 시한까지 남을 수 있다(MaxShellsPerUser).
+
+**검증**: `server/test/winrm326.test.js` 8건(반증 수정분 ③-b · ⑦ 보강 포함) · 3단계 의미 있는 변이 전부 시험에 걸림(구조로 막은 F9 · 이름만 바꾸는 것은 참고) · 초판 7건(MD4 · NTLMv2 벡터 · 성공(연결 하나 · 셸 정리) · 틀린 비밀번호 한 번 · 미승인 인증서는 인증 머리 0 · 시한 · 출력 상한 · Receive 시한 Fault · 응답 읽기 선형 · 코어 연결: 지정 저장 확인 · 읽기 · 거부 → 계정 정지 → 다음 0 · 키 전용 계정 요청 0 · 미승인 인증서).
+

@@ -39,6 +39,8 @@ export const CRITICAL_EVENTS = Object.freeze(['corp-stop', 'corp-resume', 'key-t
   'assign-set', 'assign-clear', 'account-stopped', 'account-resumed']);
 /** v3.24 계층 지정 단계 — all = 법인(모든 OS) · linux / windows = 법인 › OS 종류. */
 export const ASSIGN_LEVELS = Object.freeze(['all', 'linux', 'windows']);
+/** v3.26(3단계 · 설계 D11): 접속 방식 · 포트는 Windows 단계에만(WinRM 일 때만 남긴다 — SSH 는 기본이라 칸을 두지 않는다). */
+const viaOf = (level, a) => (level === 'windows' && a?.via === 'winrm' ? { via: 'winrm', ...(Number.isInteger(a.port) ? { port: a.port } : {}) } : {});
 const ACC_ID_RE = /^a_[0-9a-f]{12}$/;
 const MAX_ACCOUNT_STOPS = 500;
 
@@ -85,7 +87,9 @@ function norm(j) {
     for (const [lv, a] of Object.entries(v)) {
       if (!ASSIGN_LEVELS.includes(lv)) throw new ShapeError(`assign.${c.slice(0, 40)}.${String(lv).slice(0, 20)} 는 모르는 단계입니다`);
       if (!isObj(a) || !ACC_ID_RE.test(String(a.account || ''))) throw new ShapeError(`assign.${c.slice(0, 40)}.${lv} 의 계정이 올바르지 않습니다`);
-      row[lv] = { account: String(a.account), auth: a.auth === 'password' ? 'password' : '', at: num(a.at), by: t(a.by, 64) };
+      if (a.via !== undefined && !['ssh', 'winrm'].includes(a.via)) throw new ShapeError(`assign.${c.slice(0, 40)}.${lv} 의 접속 방식이 올바르지 않습니다`);
+      if (a.port !== undefined && a.port !== null && !(Number.isInteger(a.port) && a.port >= 1 && a.port <= 65535)) throw new ShapeError(`assign.${c.slice(0, 40)}.${lv} 의 포트가 올바르지 않습니다`);
+      row[lv] = { account: String(a.account), auth: a.auth === 'password' ? 'password' : '', at: num(a.at), by: t(a.by, 64), ...viaOf(lv, a) };
     }
     if (Object.keys(row).length) assign[c] = row;
   }
@@ -276,14 +280,16 @@ export function setAssign(corp, level, a, { by = '', now = Date.now() } = {}) {
   if (a) {
     if (!ACC_ID_RE.test(String(a.account || ''))) return { ok: false, code: 'bad-account', reason: '공통 계정을 고르세요.' };
     if (!Object.hasOwn(d.assign, c) && Object.keys(d.assign).length >= MAX_STOPS) return { ok: false, code: 'too-many', reason: '계층 지정이 너무 많습니다.' };
-    row[level] = { account: String(a.account), auth: a.auth === 'password' ? 'password' : '', at: now, by: t(by, 64) };
+    if (a.via !== undefined && a.via !== '' && !['ssh', 'winrm'].includes(a.via)) return { ok: false, code: 'bad-via', reason: '접속 방식은 SSH · WinRM 중 하나입니다.' };
+    if (a.port != null && a.port !== '' && !(Number.isInteger(Number(a.port)) && Number(a.port) >= 1 && Number(a.port) <= 65535)) return { ok: false, code: 'bad-port', reason: '포트는 1~65535 입니다.' };
+    row[level] = { account: String(a.account), auth: a.auth === 'password' ? 'password' : '', at: now, by: t(by, 64), ...viaOf(level, { via: a.via, port: a.port === '' || a.port == null ? null : Number(a.port) }) };
     d.assign[c] = row;
   } else {
     if (!Object.hasOwn(row, level)) return { ok: false, code: 'not-set', status: 404, reason: '그 단계에는 지정이 없습니다.' };
     delete row[level];
     if (Object.keys(row).length) d.assign[c] = row; else delete d.assign[c];
   }
-  pushEvents(d, [{ kind: a ? 'assign-set' : 'assign-clear', corp: c, target: level, by, detail: a ? `${a.account}${a.auth === 'password' ? ' · 비밀번호 고정' : ''}` : '' }], now);
+  pushEvents(d, [{ kind: a ? 'assign-set' : 'assign-clear', corp: c, target: level, by, detail: a ? `${a.account}${a.auth === 'password' ? ' · 비밀번호 고정' : ''}${level === 'windows' && a.via === 'winrm' ? ` · WinRM${a.port ? `:${a.port}` : ''}` : ''}` : '' }], now);
   return commit(d);
 }
 

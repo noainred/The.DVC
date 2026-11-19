@@ -493,6 +493,7 @@ const ALLOW = {
   'ipam/changeLog.js': ['split', '107회차 — 공용 읽기 · 읽기 단계 분리(그동안의 변화는 기록되지 않음)'],
   'ipam/rangePolicies.js': ['split', '107회차 — 공용 읽기 · 읽기 단계 분리(읽히면 리비전을 올림)'],
   'ipam/settings.js': ['split', '107회차 — 공용 읽기 · 읽기 단계 분리(읽히면 리비전을 올림)'],
+  'serverinfo/store.js': ['own', 'v3.25 서버 정보 보관 — 읽기 단계 따로(없음 = 빈 값 · 읽기 오류 = 표지만 · 원본 그대로 · 쓰지 않음) · parse 실패만 보존(수집 사본)'],
   'ipam/vcRangeMigrate.js': ['own', '105회차 A2 — 읽기 단계 따로(읽기 오류는 표지만 · 원본 그대로 · 이전 · 수동 옮김 · 지움은 건너뜀/409) · parse 실패만 보존(119회차 재확인 — left 0)'],
   'issues/inbox.js': ['split', '107회차 — 공용 읽기 · 읽기 단계 분리(그동안의 알림은 쌓지 않음 — dropped)'],
   'linkcheck/settings.js': ['split', '105회차 — 공용 판정 · 읽기 단계 분리'],

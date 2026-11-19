@@ -351,7 +351,7 @@ export async function collectOsUsage(osHost = {}, { signal, budgetMs = SESSION_B
       host, port: Number(osHost.port) || 22,
       username: String(osHost.username || 'root'),
       password: osHost.password || '', privateKey: osHost.privateKey || undefined, passphrase: osHost.passphrase || undefined,
-      readyTimeout: READY_TIMEOUT_MS, signal,
+      readyTimeout: READY_TIMEOUT_MS, signal, singlePasswordAttempt: true,   // v3.25 반증 F1: 비밀번호는 한 번만(k-i 재시도 없음 — 계정 잠금 횟수)
     }, async ({ exec }) => {
       // 예산 시계는 **SSH 연결이 끝난 시점**부터 센다(READY 는 withSsh 가 이미 소비했다).
       // v2.613 RUNTIME2613-05: 예산은 호출자(폴러)가 장비 시한과 묶어 준 값(`budgetMs`)이 먼저다 — 기본은 이 모듈의 상수.

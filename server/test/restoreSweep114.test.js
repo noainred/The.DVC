@@ -127,7 +127,8 @@ const ASIS = {
     'agent-results.json', 'central-agent-cvp.json', 'central-agent-sanswitch.json', 'central-agent-sanswitch-perf.json', 'central-agent-storage.json', 'central-fleet.json', 'central-pdu.json',
     'central-unsupported-servers.json', 'idrac-inventory.json', 'idrac-sensor-cache.json', 'os-inventory.json', 'sanswitch-latest.json', 'storage-latest.json', 'veeam-em-latest.json',
     'veeam-em-vms.json', 'veeam-latest.json', 'veeam-vc-accounts.json', 'veeam-portal-vms.json', 'bareos-policy.json', 'storage-nodeload-ring.json', 'storage-inspect-ring.json',
-    'ipam-scan-agents.json', 'ipam-changes.json', 'maintenance-stats.json', 'focusmon-keys.json', 'active-sessions.json'],
+    'ipam-scan-agents.json', 'ipam-changes.json', 'maintenance-stats.json', 'focusmon-keys.json', 'active-sessions.json',
+    'server-info.json'],   // v3.25 서버 정보 — 마지막 읽은 값(누르면 다시 읽는다 · 비밀 없음)
   '엣지가 받은 중앙 사본 — 다음 pull 이 덮는다': ['bareos-edge-directors.json', 'bm-folders-central.json', 'bmusage-central.json', 'isidu-edge-targets.json', 'maintenance-windows-deployed.json'],
   '작업 로그 · 이력 · 사용 집계 — 표시용(판정 · 실행에 쓰지 않는다)': [
     'bmusage-activity.json', 'curuser-activity.json', 'horizon-session-activity.json', 'sanswitch-activity.json', 'sanswitch-perf-activity.json', 'storage-activity.json', 'capture-history.json',

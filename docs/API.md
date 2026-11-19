@@ -22,11 +22,11 @@
 
 | 항목 | 값 |
 |---|---|
-| 엔드포인트 | **1580개** |
+| 엔드포인트 | **1582개** |
 | 마운트 그룹 | 14개 |
-| 라우트 파일 | 158개 |
-| GET | 822개 |
-| POST | 509개 |
+| 라우트 파일 | 159개 |
+| GET | 823개 |
+| POST | 510개 |
 | PUT | 160개 |
 | PATCH | 3개 |
 | DELETE | 86개 |
@@ -45,7 +45,7 @@
 | [`/api/ping`](#apiping) | 16 | 네트워크 Ping 모니터링(조회=인증, 대상 관리=관리자). |
 | [`/metrics`](#metrics) | 1 | Prometheus/OTel 익스포터(선택 토큰). |
 | [`/api/v1`](#apiv1) | 12 | **외부 포탈용 공개 조회 API**(v2.562). 전용 API 키(`X-Api-Key`)로 인증하고 조회 전용이다. 상세는 [API-PUBLIC.md](API-PUBLIC.md). |
-| [`/api`](#api) | 936 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
+| [`/api`](#api) | 938 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
 | [`/dl`](#dl) | 2 | 중앙 업그레이드 소스(`versions.json` + 번들). **공개**다. |
 
 ---
@@ -913,11 +913,11 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/search/inventory` | — | [server/src/routes/api/invSearch.js:53](../server/src/routes/api/invSearch.js#L53) |
 | POST | `/search/nl` | — | [server/src/routes/api/searchNotes.js:15](../server/src/routes/api/searchNotes.js#L15) |
 | GET | `/settings/ssh-access` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:44](../server/src/routes/api/sshAccess.js#L44) |
-| POST | `/settings/ssh-access/accounts` | 역할 `admin` · `requireSettingsOwner` · `pwVaultFirst` · `judgeFirst` · `reauth` | [server/src/routes/api/sshAccess.js:200](../server/src/routes/api/sshAccess.js#L200) |
-| DELETE | `/settings/ssh-access/accounts/:id/stop` | 역할 `admin` · `requireSettingsOwner` · `reauth` | [server/src/routes/api/sshAccess.js:215](../server/src/routes/api/sshAccess.js#L215) |
-| POST | `/settings/ssh-access/accounts/:id/verify` | 역할 `admin` · `requireSettingsOwner` · `reauth` | [server/src/routes/api/sshAccess.js:209](../server/src/routes/api/sshAccess.js#L209) |
-| PUT | `/settings/ssh-access/assign` | 역할 `admin` · `requireSettingsOwner` · `judgeFirst` · `reauth` | [server/src/routes/api/sshAccess.js:154](../server/src/routes/api/sshAccess.js#L154) |
-| GET | `/settings/ssh-access/changes` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:225](../server/src/routes/api/sshAccess.js#L225) |
+| POST | `/settings/ssh-access/accounts` | 역할 `admin` · `requireSettingsOwner` · `pwVaultFirst` · `judgeFirst` · `reauth` | [server/src/routes/api/sshAccess.js:201](../server/src/routes/api/sshAccess.js#L201) |
+| DELETE | `/settings/ssh-access/accounts/:id/stop` | 역할 `admin` · `requireSettingsOwner` · `reauth` | [server/src/routes/api/sshAccess.js:216](../server/src/routes/api/sshAccess.js#L216) |
+| POST | `/settings/ssh-access/accounts/:id/verify` | 역할 `admin` · `requireSettingsOwner` · `reauth` | [server/src/routes/api/sshAccess.js:210](../server/src/routes/api/sshAccess.js#L210) |
+| PUT | `/settings/ssh-access/assign` | 역할 `admin` · `requireSettingsOwner` · `judgeFirst` · `reauth` | [server/src/routes/api/sshAccess.js:155](../server/src/routes/api/sshAccess.js#L155) |
+| GET | `/settings/ssh-access/changes` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:226](../server/src/routes/api/sshAccess.js#L226) |
 | DELETE | `/settings/ssh-access/corps/:corp/stop` | 역할 `admin` · `requireSettingsOwner` · `reauth` | [server/src/routes/api/sshAccess.js:115](../server/src/routes/api/sshAccess.js#L115) |
 | POST | `/settings/ssh-access/corps/:corp/stop` | 역할 `admin` · `requireSettingsOwner` · `reauth` | [server/src/routes/api/sshAccess.js:109](../server/src/routes/api/sshAccess.js#L109) |
 | POST | `/settings/ssh-access/inbox/approve` | 역할 `admin` · `requireSettingsOwner` · `vaultFirst` · `reauth` | [server/src/routes/api/sshAccess.js:122](../server/src/routes/api/sshAccess.js#L122) |
@@ -927,15 +927,15 @@ Prometheus/OTel 익스포터(선택 토큰).
 | POST | `/settings/ssh-access/reload-keystore` | 역할 `admin` · `requireSettingsOwner` · `reauth` | [server/src/routes/api/sshAccess.js:59](../server/src/routes/api/sshAccess.js#L59) |
 | POST | `/settings/ssh-access/reload-state` | 역할 `admin` · `requireSettingsOwner` · `reauth` | [server/src/routes/api/sshAccess.js:54](../server/src/routes/api/sshAccess.js#L54) |
 | POST | `/settings/ssh-access/scan` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:49](../server/src/routes/api/sshAccess.js#L49) |
-| POST | `/settings/ssh-access/servers/:id/account` | 역할 `admin` · `requireSettingsOwner` · `reauth` | [server/src/routes/api/sshAccess.js:174](../server/src/routes/api/sshAccess.js#L174) |
+| POST | `/settings/ssh-access/servers/:id/account` | 역할 `admin` · `requireSettingsOwner` · `reauth` | [server/src/routes/api/sshAccess.js:175](../server/src/routes/api/sshAccess.js#L175) |
 | GET | `/settings/ssh-access/servers/:id/candidates` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:90](../server/src/routes/api/sshAccess.js#L90) |
-| DELETE | `/settings/ssh-access/servers/:id/inherit` | 역할 `admin` · `requireSettingsOwner` · `reauth` | [server/src/routes/api/sshAccess.js:168](../server/src/routes/api/sshAccess.js#L168) |
+| DELETE | `/settings/ssh-access/servers/:id/inherit` | 역할 `admin` · `requireSettingsOwner` · `reauth` | [server/src/routes/api/sshAccess.js:169](../server/src/routes/api/sshAccess.js#L169) |
 | POST | `/settings/ssh-access/servers/:id/installed-keys` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:94](../server/src/routes/api/sshAccess.js#L94) |
 | POST | `/settings/ssh-access/servers/:id/key` | 역할 `admin` · `requireSettingsOwner` · `reauth` | [server/src/routes/api/sshAccess.js:83](../server/src/routes/api/sshAccess.js#L83) |
 | POST | `/settings/ssh-access/servers/:id/test` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:102](../server/src/routes/api/sshAccess.js#L102) |
-| POST | `/settings/ssh-access/servers/inherit` | 역할 `admin` · `requireSettingsOwner` · `judgeFirst` · `reauth` | [server/src/routes/api/sshAccess.js:160](../server/src/routes/api/sshAccess.js#L160) |
-| POST | `/settings/ssh-access/servers/os` | 역할 `admin` · `requireSettingsOwner` · `reauth` | [server/src/routes/api/sshAccess.js:181](../server/src/routes/api/sshAccess.js#L181) |
-| GET | `/settings/ssh-access/usage` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:222](../server/src/routes/api/sshAccess.js#L222) |
+| POST | `/settings/ssh-access/servers/inherit` | 역할 `admin` · `requireSettingsOwner` · `judgeFirst` · `reauth` | [server/src/routes/api/sshAccess.js:161](../server/src/routes/api/sshAccess.js#L161) |
+| POST | `/settings/ssh-access/servers/os` | 역할 `admin` · `requireSettingsOwner` · `reauth` | [server/src/routes/api/sshAccess.js:182](../server/src/routes/api/sshAccess.js#L182) |
+| GET | `/settings/ssh-access/usage` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:223](../server/src/routes/api/sshAccess.js#L223) |
 | GET | `/summary` | — | [server/src/routes/api/inventory.js:167](../server/src/routes/api/inventory.js#L167) |
 | POST | `/tool-usage` | — | [server/src/routes/api/inventory.js:721](../server/src/routes/api/inventory.js#L721) |
 | GET | `/tool-usage/top` | — | [server/src/routes/api/inventory.js:717](../server/src/routes/api/inventory.js#L717) |
@@ -1526,6 +1526,8 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/secret-scan` | 역할 `admin` · `fleetOnly` | [server/src/routes/api/toolsInfo.js:40](../server/src/routes/api/toolsInfo.js#L40) |
 | GET | `/tools/serial-lookup` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/serialLookup.js:73](../server/src/routes/api/serialLookup.js#L73) |
 | GET | `/tools/serial-lookup/export.csv` | 권한 `data.csv`, `tools` · `fullScopeOnly` | [server/src/routes/api/serialLookup.js:102](../server/src/routes/api/serialLookup.js#L102) |
+| GET | `/tools/server-info` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/serverInfo.js:21](../server/src/routes/api/serverInfo.js#L21) |
+| POST | `/tools/server-info/read` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/serverInfo.js:25](../server/src/routes/api/serverInfo.js#L25) |
 | GET | `/tools/service-check` | 권한 `tools` | [server/src/routes/api/checksLogs.js:223](../server/src/routes/api/checksLogs.js#L223) |
 | POST | `/tools/service-check/settings-files/confirm` | 역할 `admin` · `settingsFleetOnly` | [server/src/routes/api/checksLogs.js:239](../server/src/routes/api/checksLogs.js#L239) |
 | GET | `/tools/snapshots` | 권한 `tools` | [server/src/routes/api/vcTools.js:147](../server/src/routes/api/vcTools.js#L147) |
@@ -1752,7 +1754,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 
 | 이름 | 붙은 라우트 | 뜻 |
 |---|---:|---|
-| `fullScopeOnly` | 336 | **전체 범위 계정만**. vCenter 범위를 지정한 계정은 403 — 그 자원에 법인 축이 없어 교집합할 수 없기 때문이다(빈 목록을 주면 '장비 0대' 라는 거짓이 된다). |
+| `fullScopeOnly` | 338 | **전체 범위 계정만**. vCenter 범위를 지정한 계정은 403 — 그 자원에 법인 축이 없어 교집합할 수 없기 때문이다(빈 목록을 주면 '장비 0대' 라는 거짓이 된다). |
 | `fleetOnly` | 212 | **전체 범위 계정만**(v2.607 AUTHZ2607-04·07 — 중앙 IPAM 스캔·중앙 인벤토리·감사 로그처럼 전 법인에 걸친 데이터·동작). 범위 제한 계정은 403. |
 | `requireSettingsOwner` | 86 | **설정 소유 계정**(`settings-owners.txt`·`SETTINGS_OWNERS`·중앙 배포 admin). admin 이라도 소유자가 아니면 403. 그리고 **소유자이면서 전체 범위(vCenter 제한 없음) 계정만** 통과한다 — 범위가 지정된 소유자는 403(v2.744 AUTHZ-02). 백업 아카이브·중앙 토큰 배달 등 **비밀을 다루는 경로**에 붙는다. |
 | `requireCentral` | 70 | **central 게이트**(v2.613 DEPS2613-09) — 공유 `CENTRAL_TOKEN`·엣지별 개별 토큰이 하나도 설정돼 있지 않으면 404, 토큰이 맞지 않으면 403. 51개 `/api/central/*` 라우트가 같은 미들웨어를 쓴다(예전의 인라인 2줄 게이트 쌍을 하나로). |
