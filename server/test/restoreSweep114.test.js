@@ -114,7 +114,7 @@ const ASIS = {
     'runtime.json', 'san-storage-map.json', 'san-storage-notify.json', 'san-storage-report.json', 'sanswitch-err-baseline.json', 'sanswitch-perf-settings.json', 'service-map.json',
     'storage-growth-settings.json', 'storage-inspect.json', 'storage-intervals.json', 'storage-perf-check.json', 'storage-usage-mail.json', 'svcmon-alert.json', 'svcmon-log.json',
     'svcmon-templates.json', 'svcmon.json', 'tag-policy.json', 'tool-categories.json', 'ui.json', 'upgrade.json', 'usage-settings.json', 'user-menus.json', 'vcenter-logs.json',
-    'vcenter-order.json', 'veeam-em-map.json', 'vm-clone-corp.json', 'vm-clone-nfsds.json', 'vm-dns-policy.json', 'vm-export-prefs.json', 'vm-hygiene.json', 'vm-list-prefs.json', 'vmperf.json',
+    'vcenter-order.json', 'veeam-em-map.json', 'vm-clone-corp.json', 'vm-clone-nfsds.json', 'vm-dns-policy.json', 'vm-export-prefs.json', 'vm-hygiene.json', 'vm-snapshot-holds.json', 'vm-list-prefs.json', 'vmperf.json',
     'vmseries.json', 'wiki-templates.json', 'xfer-speed-settings.json', 'focusmon-sessions.json'],
   '등록부 · 자격증명 — 접속처와 비밀이 같은 판본으로 함께 돌아온다(복원의 목적 · 등록 · 수정이 본인 OTP 가 아니다)': [
     'vcenters.json', 'nsx.json', 'collectors.json', 'agent-deploy-targets.json', 'horizon.json', 'idrac.json', 'gpu-guest.json', 'gpu-physical.json', 'cvp-servers.json', 'pdu-devices.json',
