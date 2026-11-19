@@ -110,3 +110,25 @@ export function osAllocTotals(rows) {
   if (list.length > 0 && ramRead === 0) out.ramGB = null;
   return out;
 }
+
+/**
+ * v3.28.1 — 한 줄 글자판(타일 부제 · 카드 · 표 칸 · CSV 가 아닌 화면 글자). allocCell 과 같은 규칙:
+ *   null(하나도 못 읽음) → '—'(단위 없음), 못 읽은 VM 이 있으면 ' · 미상 N' 을 붙인다(값은 읽은 VM 만의 합 = 최소값).
+ *   VM 할당 합(vCPU · 메모리)을 그리는 화면이 모두 이 함수 · allocCell 을 쓴다(서버 판정 코어 vcenter/vmSums.js 의 결과를 0 으로 되돌리지 않게).
+ * @param {unknown} value  합(수) 또는 null
+ * @param {unknown} unknown 못 읽은 VM 수
+ * @param {string} [unit]  값 뒤 단위(예: ' GB') — 값이 없으면 붙이지 않는다
+ */
+export function allocText(value, unknown, unit = '') {
+  const v = n(value);
+  const u = n(unknown) > 0 ? n(unknown) : 0;
+  const mark = u > 0 ? ` · 미상 ${fmt(u)}` : '';
+  return v == null ? `—${mark}` : `${fmt(v)}${unit}${mark}`;
+}
+
+/** v3.28.1 — 비율 칸이 '—' 인 이유(할당을 하나도 못 읽음)의 툴팁. 해당 없으면 ''. */
+export function allocNullTitle(value, unknown, kind = 'vcpu') {
+  const u = n(unknown) > 0 ? n(unknown) : 0;
+  if (u > 0 && n(value) == null) return `VM ${fmt(u)}대의 ${wordOf(kind).obj} 하나도 읽지 못해 비율을 내지 않았습니다(할당 0 이 아닙니다).`;
+  return '';
+}

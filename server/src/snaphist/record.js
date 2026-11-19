@@ -80,7 +80,7 @@ export function vcDayRecord(snap, vcId, { now, hygiene, unread }) {
     const gb = snapGbOf(v);
     const oldestTs = numOrNull(v.snapshotOldestTs);
     const f = hygiene ? hygieneFindings(v, hygiene, now) : null;
-    const judged = !!hygiene && v.template !== true && !f?.excepted;
+    const judged = !!hygiene && v.template !== true && !f?.excepted && !f?.held;
     const over = !!f && f.findings.some((x) => x.code === 'snap-age');
     rows.push({ vmId, name: String(v.name || vmId).slice(0, VM_NAME_MAX), count: cnt, gb, oldestTs: oldestTs != null && oldestTs > 0 ? oldestTs : null,
       power: v.powerState === 'POWERED_ON' ? 'on' : v.powerState ? 'off' : null, judged, over });
