@@ -69,3 +69,27 @@ export function analyzeReboots(hosts, events, { now = Date.now(), days = 30, vcN
   rows.sort((a, b) => order[a.kind] - order[b.kind] || b.bootTime - a.bootTime);
   return { days, since, counts, bootUnknown, readCut, noEventsNotCollected, rows: rows.slice(0, 500), omitted: Math.max(0, rows.length - 500) };
 }
+
+/**
+ * 호스트별 재부팅 판정 Map(id → 행) — **화면 목록 상한(500행) 없이**(새 코드 점검 139 · 144회차 + 메인).
+ *   analyzeReboots 의 rows 는 화면 목록용이라 500행에서 잘린다 — 그 rows 로 호스트마다 판정을 찾으면 잘린 호스트가 boot=null('기간 안 재부팅 없음')이 됐다.
+ *   판정은 호스트마다 독립이라(이벤트는 그 호스트 것만 · readFrom · coverage 는 전역 값 그대로) 상한보다 작은 조각으로 나눠 부르고 합친다.
+ *   조각마다 그 호스트들의 이벤트만 넘긴다(전량 재훑기 없음 — O(호스트 + 이벤트)). 이벤트 열쇠는 analyzeReboots 와 같다(vcenterId + entity ↔ vcenterId + name).
+ *   로그 DB 를 못 읽었으면 events 를 [] 로 넘긴다 — 기간 안 부팅은 'no-events'(판정 불가) · 기간 밖 부팅은 행 없음(재부팅 없음과 같다).
+ *   쓰는 곳: routes/api/hostChecks.js(rebootsOf · rebootsUnreadOf — /hosts/checks · /hosts/insight) · routes/api/hostExport.js(호스트 엑셀).
+ *   ⚠ 이 파일은 import 가 없다(시험 rebut144 이 상한만 뺀 사본을 data: URL 로 불러 대조한다) — 넣지 말 것.
+ */
+export const REBOOT_CHUNK = 250;
+export function rebootVerdictsByHost(hosts, events, opts = {}) {
+  const list = Array.isArray(hosts) ? hosts : [];
+  const evBy = new Map();
+  for (const e of events || []) { const k = `${e.vcenterId}\u0000${e.entity}`; let a = evBy.get(k); if (!a) { a = []; evBy.set(k, a); } a.push(e); }
+  const out = new Map();
+  for (let i = 0; i < list.length; i += REBOOT_CHUNK) {
+    const part = list.slice(i, i + REBOOT_CHUNK);
+    const keys = new Set(part.map((h) => `${h.vcenterId}\u0000${h.name}`));
+    const evs = [...keys].flatMap((k) => evBy.get(k) || []);
+    for (const x of analyzeReboots(part, evs, opts).rows) out.set(x.id, x);
+  }
+  return out;
+}

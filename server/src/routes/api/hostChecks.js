@@ -11,7 +11,7 @@ import { isAdminDetailUser } from '../../auth/demoGuest.js';
 import { store } from '../../store.js';
 import { memoJson, applyFilters, scopeKey, vcenterPickKey } from './shared.js';
 import { accessOf, makeIdracFor, BOOT_DAYS } from './hostExport.js';
-import { analyzeReboots } from '../../hostcfg/reboots.js';
+import { rebootVerdictsByHost } from '../../hostcfg/reboots.js';   // 호스트별 판정(화면 상한 없이 — 139 · 144회차 · 엑셀과 한 벌)
 import { HOSTOPS_TYPES } from '../../vmchanges/eventDetail.js';
 import { eventLastTsOf } from '../../vmchanges/analyze.js';   // 71회차: 마지막 이벤트 시각(지금 + 여유 이하 MAX — 69회차 F2 한 벌)
 import { getLogsDb } from '../../logs/db.js';
@@ -24,7 +24,6 @@ import { hostChecksOf, vmsByHostOf } from '../../vcenter/hostChecks.js';
 const invHosts = requirePerm('inv.hosts');
 const READ_MAX = 20_000;   // 재부팅 근거 이벤트 읽기 상한(hostHygiene.js /reboots 와 같다)
 
-const REBOOT_CHUNK = 250;   // analyzeReboots 의 행 상한(500)보다 작게 — 조각 하나가 잘리지 않는다
 /** 범위 안 vCenter 의 재부팅 판정(hostHygiene.js /reboots 와 같은 입력). v3.22.0 /hosts/insight 도 이 함수를 부른다(한 벌). */
 export async function rebootsOf(snap, hosts, vcIds, now) {
   const db = await getLogsDb();
@@ -39,17 +38,7 @@ export async function rebootsOf(snap, hosts, vcIds, now) {
   // 139회차 R1(재현): analyzeReboots 는 행을 **화면 목록 상한(500)** 에서 자른다 — 이 Map 은 호스트마다 판정을 찾으므로 잘린 호스트가 boot=null
   //   ('기간 안 재부팅 없음')이 됐다(658대 · 월 패치 주기면 30일 안 부팅이 500대를 넘는다). 판정은 호스트마다 독립이라(이벤트는 그 호스트 것만 · readFrom ·
   //   coverage 는 전역 값 그대로) 상한보다 작은 조각으로 나눠 부르고 합친다. 조각마다 그 호스트들의 이벤트만 넘긴다(전량 재훑기 없음 — O(호스트 + 이벤트)).
-  const evBy = new Map();
-  for (const e of events) { const k = `${e.vcenterId}\u0000${e.entity}`; let a = evBy.get(k); if (!a) { a = []; evBy.set(k, a); } a.push(e); }
-  const out = new Map();
-  for (let i = 0; i < hosts.length; i += REBOOT_CHUNK) {
-    const part = hosts.slice(i, i + REBOOT_CHUNK);
-    const keys = new Set(part.map((h) => `${h.vcenterId}\u0000${h.name}`));
-    const evs = [...keys].flatMap((k) => evBy.get(k) || []);
-    const r = analyzeReboots(part, evs, { now, days: BOOT_DAYS, vcName, coverageOf: (id) => cov.get(id) || null, readFrom });
-    for (const x of r.rows) out.set(x.id, x);
-  }
-  return out;
+  return rebootVerdictsByHost(hosts, events, { now, days: BOOT_DAYS, vcName, coverageOf: (id) => cov.get(id) || null, readFrom });
 }
 
 /**
@@ -59,11 +48,7 @@ export async function rebootsOf(snap, hosts, vcIds, now) {
  *   /hosts/insight 는 반대로 기간 밖 부팅까지 '모름' 으로 셌다. 두 라우트가 이것 하나를 쓴다.
  */
 export function rebootsUnreadOf(hosts, now) {
-  const out = new Map();
-  for (let i = 0; i < hosts.length; i += REBOOT_CHUNK) {
-    for (const x of analyzeReboots(hosts.slice(i, i + REBOOT_CHUNK), [], { now, days: BOOT_DAYS }).rows) out.set(x.id, x);
-  }
-  return out;
+  return rebootVerdictsByHost(hosts, [], { now, days: BOOT_DAYS });
 }
 
 export function registerHostChecks(api) {
