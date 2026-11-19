@@ -3,7 +3,9 @@
  *
  * 파일 `CONFIG_DIR/ssh-keys.json`(0600 · 원자적 쓰기 · 로드 손상 preserveCorrupt · secretVault 봉인 — `security/secretVault.js SECRET_FILES` 등록):
  *   { keys: [ { id, name, algo, sshType, bits, fingerprint, publicKey, privateKey(봉인), passphrase(봉인), createdBy, createdAt, rotateAt, status, retiredAt } ],
- *     accounts: [ { id, name, kind:'os'|'idrac', corp(vCenter id · ''=전 법인), username, keyRef(os), password(봉인), createdBy, createdAt, updatedAt } ] }
+ *     accounts: [ { id, name, kind:'os'|'idrac', corp(vCenter id · ''=전 법인), username, keyRef(os), password(봉인), createdBy, createdAt, updatedAt,
+ *                   (v3.24 서버 접속 — 설계 docs/design/server-access) os:''|'linux'|'windows' · logon:'local'|'ad'(windows) · domain(ad) · features(허용 기능 · null=전부) ·
+ *                   rotateBy(교체 예정일 ms) · pwSetAt(비밀번호를 넣은 시각) · verifiedAt · verifiedOn(한 대 먼저 확인 — 서버 이름) } ] }
  *
  * 불변조건(server/CLAUDE.md '7b SSH 키 저장소'):
  *  · 화면 · API · 내보내기 · 백업 · 엣지 설정 push 에는 **지문 · 공개키만**(publicKeyView/publicAccountView) — 원본은 `keyMaterial()` 하나로만 나간다(접속 직전).
@@ -35,6 +37,33 @@ export const NAME_RE = /^[A-Za-z0-9가-힣][A-Za-z0-9가-힣._-]{0,63}$/;
 /** CSV 에서 다른 뜻으로 쓰는 낱말 — 키 · 계정 이름으로 쓰지 않는다. */
 export const RESERVED_NAMES = Object.freeze(['password', 'none', 'individual', '개별', '비밀번호', 'auto']);
 const USERNAME_BAD = /[\s'"`;|&<>$\\]/;
+/**
+ * v3.24(서버 접속 공용 모듈 — 설계 docs/design/server-access §4.3 · §4.6): OS 공통 계정의 OS 와 Windows 로그인 종류.
+ *  · os: '' = 예전 계정(Linux 로 본다 — 지금까지 OS 공통 계정은 전부 Linux SSH 였다) · 'linux' · 'windows'.
+ *  · logon(windows 만): 'local'(그 서버의 로컬 계정) · 'ad'(도메인 계정 — 서버가 도메인 컨트롤러에 넘겨 확인한다. 포탈은 도메인 컨트롤러에 붙지 않는다).
+ *  · domain(ad 만): 점이 있으면 UPN(user@corp.example), 없으면 NetBIOS(CORP\\user) 로 로그인 이름을 만든다(loginNameOf 하나).
+ */
+export const ACCOUNT_OS = Object.freeze(['linux', 'windows']);
+export const WIN_LOGON = Object.freeze(['local', 'ad']);
+const DOMAIN_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,62})(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,62}))*$/;
+/** 계정의 OS 계열 — 예전 계정('')은 Linux(판정 하나 — refs · 화면 · 계층 지정이 같은 함수). */
+export const accountFamily = (a) => (a && a.os === 'windows' ? 'windows' : 'linux');
+/**
+ * 서버에 보내는 로그인 이름(판정 하나 — resolveOsAuth · 한 대 확인 · 화면). Linux · Windows 로컬 = 계정명 그대로,
+ * Windows AD = 도메인에 점이 있으면 `user@domain`(UPN), 없으면 `DOMAIN\\user`(NetBIOS). 도메인이 비면 계정명 그대로(저장 검사가 막는다).
+ */
+export function loginNameOf(a) {
+  const u = t(a?.username, 128);
+  if (!a || a.kind !== 'os' || a.os !== 'windows' || a.logon !== 'ad') return u;
+  const d = t(a.domain, 253);
+  if (!d) return u;
+  return d.includes('.') ? `${u}@${d}` : `${d.toUpperCase()}\\${u}`;
+}
+/** 비밀번호 나이(일) — 넣은 시각을 모르면 null('—'). 0 으로 지어내지 않는다. */
+export function passwordAgeDays(a, now = Date.now()) {
+  const at = Number(a?.pwSetAt);
+  return Number.isFinite(at) && at > 0 && a?.password ? Math.max(0, Math.floor((now - at) / 86_400_000)) : null;
+}
 /**
  * v3.9.0(SSH 공용 접속 — 설계 docs/design/ssh-access §9): 키 **폴더**(법인 › 공통 / 서버별 › 서버)와 **허용 기능**.
  *  · `folderCorp`(vCenter id — 법인) · `folderServer`(OS 등록부 서버 이름) — 빈 값 = 미분류(예전 키 — 어느 서버든 쓸 수 있다, 키 점검이 경고).
@@ -107,6 +136,22 @@ function normAccount(a) {
     updatedAt: Number(a.updatedAt) > 0 ? Number(a.updatedAt) : 0,
     // iDRAC 공통 계정은 적용 때 비밀번호가 iDRAC 항목에 **복사**된다 — 그 항목 id 를 남겨 사용처로 센다(7b 반증 F15).
     copies: a.kind === 'idrac' && Array.isArray(a.copies) ? [...new Set(a.copies.map((x) => t(x, 128)).filter(Boolean))].slice(0, 5000) : [],
+    ...accountExtras(a),
+  };
+}
+/** v3.24 칸(os 계정만) — 모르는 값은 버린다(예전 계정은 빈 값 = Linux · 허용 기능 null = 전부). */
+function accountExtras(a) {
+  if (a.kind === 'idrac') return { os: '', logon: '', domain: '', features: null, rotateBy: null, pwSetAt: null, verifiedAt: null, verifiedOn: '' };
+  const os = ACCOUNT_OS.includes(a.os) ? a.os : '';
+  const logon = os === 'windows' && WIN_LOGON.includes(a.logon) ? a.logon : (os === 'windows' ? 'local' : '');
+  const dom = t(a.domain, 253);
+  return {
+    os, logon, domain: logon === 'ad' && DOMAIN_RE.test(dom) ? dom : '',
+    features: normFeatures(a.features),
+    rotateBy: Number(a.rotateBy) > 0 ? Number(a.rotateBy) : null,
+    pwSetAt: Number(a.pwSetAt) > 0 ? Number(a.pwSetAt) : null,
+    verifiedAt: Number(a.verifiedAt) > 0 ? Number(a.verifiedAt) : null,
+    verifiedOn: t(a.verifiedOn, 128),
   };
 }
 
@@ -176,7 +221,7 @@ function commit(next) {
     return { ok: false, code: 'store-changed-outside', status: 409,
       reason: outside < 0
         ? `SSH 키 저장소 파일을 다시 읽지 못해(${String(dd.reason || '').slice(0, 60)}) 포탈 밖 변경 여부를 모릅니다 — 바꾸지 않았습니다.`
-        : `SSH 키 저장소 파일이 포탈 밖에서 바뀌어(${outside}곳) 바꾸지 않았습니다 — 설정 › 보안 › SSH 공용 접속 › 키 보안에서 확인한 뒤 ‘키 저장소 다시 읽기’ 를 누르세요.` };
+        : `SSH 키 저장소 파일이 포탈 밖에서 바뀌어(${outside}곳) 바꾸지 않았습니다 — 설정 › 보안 › 서버 접속(SSH · Windows) › 키 보안에서 확인한 뒤 ‘키 저장소 다시 읽기’ 를 누르세요.` };
   }
   try {
     fs.mkdirSync(path.dirname(FILE), { recursive: true });
@@ -207,11 +252,18 @@ export function publicKeyView(k, { usage = null, now = Date.now() } = {}) {
     servers: u ? u.servers : null, accountsUsing: u ? u.accounts : null,
   };
 }
-export function publicAccountView(a, { usage = null } = {}) {
+export function publicAccountView(a, { usage = null, now = Date.now() } = {}) {
   return {
     id: a.id, name: a.name, kind: a.kind, corp: a.corp, username: a.username, keyRef: a.keyRef,
     hasPassword: !!a.password, createdBy: a.createdBy, createdAt: a.createdAt || null, updatedAt: a.updatedAt || null,
     servers: usage && typeof usage === 'object' ? usage.servers : null,
+    // v3.24(서버 접속): OS · Windows 로그인 종류 · 로그인 이름 · 허용 기능 · 비밀번호 나이 · 교체 예정일 · 한 대 확인(비밀 없음)
+    ...(a.kind === 'os' ? {
+      os: a.os || '', family: accountFamily(a), logon: a.logon || '', domain: a.domain || '', loginName: loginNameOf(a),
+      features: Array.isArray(a.features) ? [...a.features] : null,
+      rotateBy: a.rotateBy || null, rotateDue: !!(a.rotateBy && a.password && a.rotateBy <= now),
+      pwSetAt: a.pwSetAt || null, pwAgeDays: passwordAgeDays(a, now), verifiedAt: a.verifiedAt || null, verifiedOn: a.verifiedOn || '',
+    } : {}),
     ...(a.kind === 'idrac' ? { copyMode: true } : {}),   // iDRAC 은 복사 방식 — 비밀번호를 바꾸면 사본(쓰는 서버)마다 다시 적용해야 한다
   };
 }
@@ -315,10 +367,12 @@ export function diskDrift() {
   // 공통 계정 — 계정명 · 법인 · 기본 키 · 비밀번호가 포탈이 쓴 것과 다르면 그 계정으로 접속하지 않는다.
   const diskAccs = filterObjectElements(disk.accounts).list.map(normAccount).filter(Boolean);
   const accById = new Map(diskAccs.map((a) => [a.id, a]));
-  const asig = (a) => JSON.stringify([a.name, a.kind, a.corp, a.username, a.keyRef, a.password]);
+  // v3.24: OS · 로그인 종류 · 도메인 · 허용 기능도 본다(밖에서 Windows AD 계정의 도메인만 바꿔 다른 도메인으로 비밀번호를 보내지 않게).
+  const asig = (a) => JSON.stringify([a.name, a.kind, a.corp, a.username, a.keyRef, a.password, a.os, a.logon, a.domain, a.features]);
   for (const a of d.accounts) {
     const da = accById.get(a.id);
-    if (!da || asig(da) !== asig(a)) { out.accountsChanged.push(a.id); _tamperedAcc.add(a.id); }
+    // 메모리 쪽도 같은 정규화로(v3.24 — 저장 직후 메모리 객체는 칸이 덜 채워질 수 있다: iDRAC 계정의 os '' ↔ 없음을 ‘바뀜’ 으로 읽지 않게).
+    if (!da || asig(da) !== asig(normAccount(a))) { out.accountsChanged.push(a.id); _tamperedAcc.add(a.id); }
   }
   const memAcc = new Set(d.accounts.map((a) => a.id));
   for (const da of diskAccs) if (!memAcc.has(da.id)) out.accountsChanged.push(da.id);
@@ -515,7 +569,18 @@ export function saveAccount(body = {}, { by = '', now = Date.now(), dryRun = fal
   if (USERNAME_BAD.test(username)) return { ok: false, code: 'bad-username', reason: '계정명에 쓸 수 없는 글자가 있습니다.' };
   const corp = t(body.corp ?? existing?.corp, 128);
   if (d.accounts.some((a) => a.id !== id && a.kind === kind && lc(a.name) === name.toLowerCase())) return { ok: false, code: 'dup-name', reason: `같은 이름의 ${kind === 'idrac' ? 'iDRAC' : 'OS'} 공통 계정이 있습니다(‘${name}’).` };
-  const moved = !!existing && (existing.kind !== kind || lc(existing.corp) !== lc(corp) || lc(existing.username) !== lc(username));
+  // v3.24(서버 접속): OS · Windows 로그인 종류 · 도메인. 요청이 칸을 주지 않으면 기존 값(예전 계정은 '' = Linux).
+  const os = kind === 'os' ? (body.os !== undefined ? t(body.os, 16) : (existing?.os || '')) : '';
+  if (os && !ACCOUNT_OS.includes(os)) return { ok: false, code: 'bad-os', reason: 'OS 는 Linux · Windows 중 하나입니다.' };
+  const logon = os === 'windows' ? (body.logon !== undefined ? t(body.logon, 8) : (existing?.logon || 'local')) : '';
+  if (os === 'windows' && !WIN_LOGON.includes(logon)) return { ok: false, code: 'bad-logon', reason: 'Windows 로그인 종류는 로컬 · AD 중 하나입니다.' };
+  const domain = logon === 'ad' ? t(body.domain !== undefined ? body.domain : existing?.domain, 253) : '';
+  if (logon === 'ad' && !DOMAIN_RE.test(domain)) return { ok: false, code: 'bad-domain', reason: 'AD 계정에는 도메인이 필요합니다(예: corp.example 또는 CORP — 영문 · 숫자 · 하이픈 · 점만).' };
+  if (os === 'windows' && /[@]/.test(username)) return { ok: false, code: 'bad-username', reason: 'Windows 계정명에는 @ 를 넣지 않습니다 — AD 계정은 도메인 칸에 도메인을 넣으세요.' };
+  // 접속처가 없는 계정이라 '주소 이동' 대신 — 법인 · 종류 · 계정명 · OS 계열 · 로그인 종류 · 도메인이 바뀌면 저장 비밀 · 기본 키를 승계하지 않는다
+  //   (v3.24: 다른 도메인 · 다른 OS 로 같은 비밀번호가 가지 않게).
+  const moved = !!existing && (existing.kind !== kind || lc(existing.corp) !== lc(corp) || lc(existing.username) !== lc(username)
+    || (kind === 'os' && (accountFamily(existing) !== (os === 'windows' ? 'windows' : 'linux') || (existing.logon || '') !== logon || lc(existing.domain) !== lc(domain))));
   const dropped = [];
   // 기본 키 참조도 비밀 참조다 — 법인 · 종류 · 계정명이 바뀌면 요청이 다시 고르지 않는 한 잇지 않는다.
   let keyRef = kind === 'os' ? t(body.keyRef !== undefined ? body.keyRef : (moved ? '' : existing?.keyRef), 32) : '';
@@ -530,6 +595,16 @@ export function saveAccount(body = {}, { by = '', now = Date.now(), dryRun = fal
   if (!existing && d.accounts.length >= MAX_ACCOUNTS) return { ok: false, code: 'too-many', reason: `공통 계정은 ${MAX_ACCOUNTS}개까지입니다.` };
   const provided = body.password !== undefined && body.password !== null && body.password !== '' && body.password !== '********';
   if (provided && String(body.password).length > 1024) return { ok: false, code: 'bad-password', reason: '비밀번호가 너무 깁니다.' };
+  // v3.24(서버 접속 D6 — 사용자 결정 '기본값'): OS 공통 계정의 **새 비밀번호**는 저장 방식이 암호화일 때만 받는다(로그인 키와 같은 조건 — keyVaultIssue 하나).
+  //   법인 공통 비밀번호 하나가 새면 그 법인 서버 전체가 열린다. 기존 비밀번호를 그대로 두는 저장(이름 · 허용 기능만 고침)은 막지 않는다.
+  //   iDRAC 공통 계정은 복사 방식(사본이 iDRAC 등록부에 그 등록부의 정책으로 저장된다)이라 이 조건 밖이다.
+  if (provided && kind === 'os') { const v = keyVaultIssue(); if (v) return v.code === 'keys-need-encryption'
+    ? { ...v, code: 'passwords-need-encryption', reason: '법인 공통 비밀번호는 자격증명 저장 방식이 ‘암호화’ 일 때만 받습니다 — 설정 › 보안 › 자격증명 저장 방식에서 암호화로 바꾼 뒤 다시 저장하세요(평문 방식에서는 비밀번호가 디스크에 그대로 남습니다).' }
+    : v; }
+  // 허용 기능 — 칸을 주지 않으면 기존 값(새 계정은 null = 모든 기능 · 예전 화면 · CSV 온보딩이 만든 계정이 수집에 쓰이던 그대로). 서버 접속 화면은 목록을 직접 보낸다.
+  const features = kind === 'os' ? (body.features !== undefined ? normFeatures(body.features) : (existing && Array.isArray(existing.features) ? [...existing.features] : null)) : null;
+  const rotateBy = kind === 'os' ? (body.rotateBy !== undefined ? dateMs(body.rotateBy) : (existing?.rotateBy ?? null)) : null;
+  if (Number.isNaN(rotateBy)) return { ok: false, code: 'bad-date', reason: '교체 예정일은 YYYY-MM-DD 형식입니다.' };
   let password = provided ? String(body.password) : (existing && !moved ? existing.password : '');
   if (existing && moved && !provided && existing.password) dropped.push('password');
   if (body.clearPassword === true) password = '';
@@ -537,12 +612,20 @@ export function saveAccount(body = {}, { by = '', now = Date.now(), dryRun = fal
   if (kind === 'os' && !keyRef && !password) return { ok: false, code: 'need-secret', reason: 'OS 공통 계정에는 기본 키 또는 비밀번호가 필요합니다(키 인증 권장).' };
   const acc = existing || { id: `a_${crypto.randomBytes(6).toString('hex')}`, createdBy: t(by, 64), createdAt: now, copies: [] };
   const copiesStale = existing && kind === 'idrac' && (password !== existing.password || lc(username) !== lc(existing.username)) ? (existing.copies || []).length : 0;
+  // 비밀번호를 **넣었으면**(같은 값이어도) 새 판이다 — AD 잠금을 푼 뒤 같은 비밀번호를 다시 넣어 계정 단위 정지를 푸는 길(판 = pwSetAt).
+  const pwChanged = (provided && kind === 'os') || password !== (existing?.password || '');
   Object.assign(acc, { name, kind, corp, username, keyRef, password, updatedAt: now });
   if (kind !== 'idrac') acc.copies = [];
+  if (kind === 'os') {
+    // 비밀번호가 바뀌면 나이 · 한 대 확인 기록을 새로 센다(확인은 호출부가 저장 뒤 markAccountVerified 로 — 확인하지 않은 비밀번호를 ‘확인됨’ 으로 두지 않게).
+    Object.assign(acc, { os, logon, domain, features, rotateBy: rotateBy || null,
+      pwSetAt: password ? (pwChanged ? now : (existing?.pwSetAt || null)) : null,
+      verifiedAt: pwChanged || moved ? null : (existing?.verifiedAt || null), verifiedOn: pwChanged || moved ? '' : (existing?.verifiedOn || '') });
+  }
   if (!existing) d.accounts.push(acc);
   // 6회차 A2: dryRun — 위 검사(B-4 포함)를 **같은 코드로** 다 돌리고 쓰지 않는다. 라우트가 본인 OTP(reauth) **앞에서** 불러 거절이 OTP 를 소모하지 않게 하고,
   //   저장 뒤 모양(kind · corp · keyRef — 비밀 없음)으로 그 계정을 쓰는 서버를 본다(refs.accountUseIssue).
-  if (dryRun) return { ok: true, dryRun: true, next: { id: acc.id, kind, corp, keyRef } };
+  if (dryRun) return { ok: true, dryRun: true, next: { id: acc.id, kind, corp, keyRef, os, logon, domain, features } };
   const c = commit(d); if (!c.ok) return c;
   return { ok: true, account: publicAccountView(acc), ...(dropped.length ? { droppedSecrets: dropped } : {}), ...(copiesStale ? { copiesStale } : {}) };
 }
@@ -554,6 +637,30 @@ export function _removeAccount(id) {
   const before = d.accounts.length;
   d.accounts = d.accounts.filter((x) => x.id !== t(id, 32));
   if (d.accounts.length === before) return { ok: false, code: 'not-found', status: 404, reason: '공통 계정을 찾을 수 없습니다.' };
+  const c = commit(d); if (!c.ok) return c;
+  return { ok: true };
+}
+
+/**
+ * 계정 비밀번호의 **판** — 비밀번호를 넣은 시각(pwSetAt). 계정 단위 정지 · 한 대 확인 기록이 ‘그때와 같은 비밀번호인가’ 를 이것으로 본다.
+ *   해시를 남기지 않는다(상태 파일에 비밀번호에서 만든 값이 있으면 약한 비밀번호는 밖에서 맞혀 볼 수 있다). 비밀번호가 없으면 ''.
+ *   v3.24 이전에 넣은 비밀번호는 시각을 모른다('0') — 새로 넣으면 판이 바뀐다.
+ */
+export function accountSecretVersion(a) {
+  if (!a || !a.password) return '';
+  return String(Number(a.pwSetAt) > 0 ? Number(a.pwSetAt) : 0);
+}
+/**
+ * v3.24(서버 접속 ⑥ ‘한 대 먼저 확인’): 저장된 비밀번호로 서버 한 대에 로그인이 됐다는 기록. 확인한 비밀번호의 판(accountSecretVersion)을 받아
+ *   그 사이 비밀번호가 바뀌었으면 기록하지 않는다(다른 비밀번호를 ‘확인됨’ 으로 두지 않게).
+ */
+export function markAccountVerified(id, { serverName = '', secretVersion = '', now = Date.now() } = {}) {
+  const u = unreadable(); if (u) return u;
+  const d = draft();
+  const a = d.accounts.find((x) => x.id === t(id, 32));
+  if (!a || a.kind !== 'os') return { ok: false, code: 'not-found', status: 404, reason: '공통 계정을 찾을 수 없습니다.' };
+  if (!secretVersion || secretVersion !== accountSecretVersion(a)) return { ok: false, code: 'changed', status: 409, reason: '그 사이 이 계정의 비밀번호가 바뀌어 확인 기록을 남기지 않았습니다.' };
+  a.verifiedAt = now; a.verifiedOn = t(serverName, 128);
   const c = commit(d); if (!c.ok) return c;
   return { ok: true };
 }

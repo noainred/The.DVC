@@ -34,7 +34,7 @@ const FILE = path.join(config.configDir, 'guest-scans.json');
  */
 function backupCorrupt(err) {
   try {
-    const bak = corruptBackupPath(FILE);   // v3.23.2: 같은 밀리초 보존본을 덮어쓰지 않게
+    const bak = corruptBackupPath(FILE);   // v3.24.1: 같은 밀리초 보존본을 덮어쓰지 않게
     fs.renameSync(FILE, bak);
     // v2.744(최종 수정분 검토 RV2744F-LOAD-01): 사유는 요약(safeLoadText) — V8 JSON.parse 오류 원문은 파일 조각(게스트 비밀번호 앞부분)을 싣는다.
     console.warn(`[gscan] ${FILE} 읽기/파싱 실패(${safeLoadText(err) || '사유 미상'}) — ${bak}로 보존하고 빈 목록으로 시작합니다.`);

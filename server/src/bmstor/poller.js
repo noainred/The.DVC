@@ -13,10 +13,11 @@
  */
 
 import { listBmServersRaw, getBmSettings } from './registry.js';
-import { withResolvedAuth, authCredOf } from '../bmusage/onboard/refs.js'; // 7b: 키 · 공통 계정 참조 해석 · 인증 정지 자격 지문(판정 하나)
-import { noteKeyUse } from '../sshaccess/usage.js';   // v3.9.0: 키 사용 기록(화면용 — 판정에 쓰지 않는다)
+import { withResolvedAuth, authCredOf, AUTH_ERROR } from '../bmusage/onboard/refs.js'; // 7b: 키 · 공통 계정 참조 해석 · 인증 정지 자격 지문(판정 하나)
+import { gateAccountLogin } from '../sshaccess/accountGate.js';   // v3.24 반증 F2: 같은 공통 계정 비밀번호는 탐침 하나의 결과를 본 뒤에
+import { noteCredOutcome } from '../sshaccess/outcome.js';   // v3.9.0 키 사용 기록 · v3.24 공통 계정 사용 기록 + 계정 단위 정지(로그인 거부)
 import { isAuthFailureText } from '../util/authGuard.js';
-import { collectMany } from './collect.js';
+import { collectMany, collectServer } from './collect.js';
 import { enqueueBmstorJob, setBmstorExpireHandler } from './jobs.js';
 import { findCollectorForAgent } from '../central/idracScanPush.js';
 import { resilientFetch } from '../util/resilientFetch.js';
@@ -225,6 +226,16 @@ async function collectViaEdge(agent, servers) {
   }
 }
 
+/**
+ * v3.24 반증 F2: 중앙 직접 수집 한 대 — 공통 계정 비밀번호 접속이면 계정 탐침(sshaccess/accountGate)을 지난다.
+ *   거부 판정은 접속 단계 표지(authFailed — collect.js 가 isSshAuthError 로 세운다)만 · 보내지 않은 결과는 authErrorCode(사용 기록 · 인증 정지에 들지 않는다).
+ */
+const gatedCollect = (s) => gateAccountLogin(s, () => collectServer(s), {
+  feature: 'bm-storage',
+  rejected: (r) => r?.authFailed === true,
+  stopped: (code) => ({ ok: false, mounts: [], error: AUTH_ERROR[code] || AUTH_ERROR['account-stopped'], authErrorCode: code }),
+});
+
 /** 전체 1회 수집. 진행 중이면 { skipped: true } — 폴러/수동 API 가 같은 가드를 쓴다. */
 /*  v2.720(감사 R1-03·B2-01): `demoOnly` — 데모 계정의 수동 수집은 데모 서버(mock-)만 합성한다. 사람이 등록한 서버(중앙 SSH·엣지 잡·
  *   엣지 PUSH)는 건드리지 않고 뺀 대수를 skippedNonDemo 로 밝힌다. */
@@ -280,7 +291,7 @@ export async function bmCollectNow(trigger = 'manual', { demoOnly = false } = {}
       latest.set(s.id, { ...(prev || { mounts: [] }), ok: false, mounts: [], error: 'SSH 키 · 공통 계정 인증 서버는 엣지 위임 잡으로 보내지 않습니다(키는 법인 밖으로 나가지 않음) — 이 서버를 그 엣지 포탈에 등록하세요.', at: Date.now(), agent: s.agent || '' });
     }
     const [centralResults, ...edgeResults] = await Promise.all([
-      (async () => [...demoBmResults(demoServers), ...(central.length ? await collectMany(central) : [])])(),
+      (async () => [...demoBmResults(demoServers), ...(central.length ? await collectMany(central, { collect: gatedCollect }) : [])])(),
       ...[...pushByAgent.entries()].map(([agent, list]) => collectViaEdge(agent, list)),
     ]);
     const at = Date.now();
@@ -293,9 +304,9 @@ export async function bmCollectNow(trigger = 'manual', { demoOnly = false } = {}
       latest.set(r.id, row);
       // v3.9.0: 중앙이 키로 접속한 결과만 적는다(엣지 PUSH 결과는 엣지 키 — 엣지가 자기 기록에 적는다).
       // 자격 해석이 막아 접속하지 않은 키는 적지 않는다(반증 D3 — 접속 0회를 ‘실패한 사용’ 으로 쌓지 않게).
-      if (srv?.keyFingerprint && !srv.authErrorCode && !String(srv.agent || '').trim()) {
-        noteKeyUse({ fingerprint: srv.keyFingerprint, keyName: srv.keyName, server: srv.name || srv.host, corp: srv.vcenterId, feature: 'bm-storage',
-          ok: !!r.ok, code: r.ok ? 'ok' : (isAuthFailureText(r.error || '') ? 'auth-rejected' : 'fail'), trigger });
+      // v3.24: 공통 계정 비밀번호 접속도 기록 · 로그인 거부면 계정 단위 정지(sshaccess/outcome.js 하나).
+      if ((srv?.keyFingerprint || srv?.credAccountId) && !srv.authErrorCode && !r.authErrorCode && !String(srv.agent || '').trim()) {
+        noteCredOutcome(srv, { ok: !!r.ok, rejected: r.authFailed === true, feature: 'bm-storage', trigger });
       }
       ioEntries.push({ id: r.id, result: row, name: srv?.name || srv?.host || '' });
       if (r.ok) ok++; else errors++;

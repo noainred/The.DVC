@@ -25,11 +25,12 @@ import { safeLoadText } from '../util/atomicWrite.js'; // v2.744(최종 검토 F
 import { config } from '../config.js';
 import { store } from '../store.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
-import { withDeadline } from '../proxy/sshExec.js';
+import { withDeadline, isSshAuthError } from '../proxy/sshExec.js';
 import { createAuthGuard, isAuthFailureText, authStopText } from '../util/authGuard.js';
 import { loadBmUsageSettings, bmUsageEnabled, enterpriseActive, onBmUsageSettingsChange, STORE_DEFAULTS, effectiveRawDays, SNAPSHOT_KEEP_DAYS, bmUsageLocalLoadError, RETENTION_MAX } from './settings.js';
-import { withResolvedAuth, authCredOf } from './onboard/refs.js'; // 7b: OS 등록 항목의 키 · 공통 계정 참조 → 접속 자격
-import { noteKeyUse } from '../sshaccess/usage.js';   // v3.9.0: 키 사용 기록(화면용 — 판정에 쓰지 않는다)
+import { withResolvedAuth, authCredOf, AUTH_ERROR } from './onboard/refs.js'; // 7b: OS 등록 항목의 키 · 공통 계정 참조 → 접속 자격
+import { gateAccountLogin } from '../sshaccess/accountGate.js';   // v3.24 반증 F2: 같은 공통 계정 비밀번호는 탐침 하나의 결과를 본 뒤에
+import { noteCredOutcome } from '../sshaccess/outcome.js';   // v3.9.0 키 사용 기록 · v3.24 공통 계정 사용 기록 + 계정 단위 정지(로그인 거부)
 import { resolveTargets } from './targets.js';
 import { enterpriseEligible } from './license.js';
 import { collectEnterpriseUsage, SESSION_BUDGET_MS as ENT_BUDGET_MS } from './collectors/idracEnterprise.js';
@@ -540,6 +541,11 @@ function mainIdracStop(target) {
 export function recordOsAuthOutcome(target, { ok = false, errorText = '' } = {}) {
   const dev = authDev(target || {});
   if (!dev) return null;
+  // v3.24 반증 F7: 집중 모니터링 · 진단 스냅샷의 로그인 거부도 공통 계정 단위 정지에(접속 단계 판정만 — 성공 · 다른 실패는 기록하지 않는다 · 매 분 사용 기록을 쌓지 않게).
+  const oh = target?.osHost;
+  if (!ok && oh?.credAccountId && !oh.authErrorCode && isSshAuthError({ message: String(errorText || '') })) {
+    noteCredOutcome({ ...oh, name: oh.name || target.name || oh.host, vcenterId: oh.vcenterId || target.vcenterId }, { ok: false, rejected: true, feature: 'bm-usage', trigger: 'manual' });
+  }
   if (ok) { guard.clearAuthStop(dev.id); return null; }
   if (isAuthFailureText(errorText)) return guard.markAuthStopped(dev.id, dev, String(errorText || '인증 실패').slice(0, 200));
   return null;
@@ -688,18 +694,23 @@ async function collectOne(target, { trigger = 'auto', intervalMs = null, prevRun
   let osMs = null;
   const osT0 = Date.now();
   jobs.push((target.paths.includes('os') && !stopped)
-    ? withDeadline(DEVICE_TIMEOUT_MS, (signal) => collectOsUsage(target.osHost, { signal, budgetMs: OS_BUDGET.effective, ...osStoreOpts(storeOf(), peakPlan), ...(logExtra ? { extraCommands: [logExtra] } : {}), top }), 'OS 수집 시한 초과')
-      .catch((e) => ({ ok: false, error: String(e?.message || e).slice(0, 300) }))
+    // v3.24 반증 F2: 공통 계정 비밀번호 접속은 계정 탐침을 지난다 — 대기는 장비 시한 밖(시한은 탐침 뒤 run 안에서 연다).
+    ? gateAccountLogin(target.osHost, () => withDeadline(DEVICE_TIMEOUT_MS, (signal) => collectOsUsage(target.osHost, { signal, budgetMs: OS_BUDGET.effective, ...osStoreOpts(storeOf(), peakPlan), ...(logExtra ? { extraCommands: [logExtra] } : {}), top }), 'OS 수집 시한 초과')
+      .catch((e) => ({ ok: false, error: String(e?.message || e).slice(0, 300) })), {
+      feature: 'bm-usage',
+      rejected: (r) => !!r && r.ok === false && !r.authErrorCode && isSshAuthError({ message: String(r.error || '') }),
+      stopped: (code) => ({ ok: false, error: AUTH_ERROR[code] || AUTH_ERROR['account-stopped'], authErrorCode: code }),
+    })
       // 1회차 점검 D6: 자격 해석이 막아(authErrorCode — 키 사용 중지 · 폴더 · 기능 · 퇴역 · 바꿔치기) 또는 주소가 없어 **접속하지 않은** 결과는 소요에 넣지 않는다
       //   (예전: 0~1ms 로 들어가 p50 을 끌어내렸다 — 법인 키 사용 중지면 한 법인 전체). 정지 · 경로 없음과 같은 원칙(bmPerfStage6Health ②).
       .then((r) => { osMs = (r?.authErrorCode || r?.notConnected) ? null : Date.now() - osT0; return r; })
     : Promise.resolve(stopped ? { ok: false, error: authStopText(stopped, `인증 실패로 주기 수집이 정지됐습니다(${stopped.attempts}회 시도). 비밀번호를 고치면 자동 재개합니다.`), authStopped: stopped } : null));
   const [idrac, os] = await Promise.all(jobs);
   // 자격 해석이 막아 접속하지 않은 키(사용 중지 · 폴더 · 기능 · 바꿔치기)는 ‘사용’ 이 아니다 — 주기마다 실패로 쌓지 않는다(반증 D3).
-  if (os && target.osHost?.keyFingerprint && !target.osHost.authErrorCode && !os.authErrorCode) {
+  //   v3.24: 공통 계정 비밀번호 접속도 기록하고, 로그인 거부면 그 계정을 쓰는 서버 전부를 멈춘다(계정 단위 정지 — sshaccess/outcome.js 하나).
+  if (os && (target.osHost?.keyFingerprint || target.osHost?.credAccountId) && !target.osHost.authErrorCode && !os.authErrorCode) {
     const oh = target.osHost;
-    noteKeyUse({ fingerprint: oh.keyFingerprint, keyName: oh.keyName, server: oh.name || target.name || oh.host, corp: oh.vcenterId || target.vcenterId, feature: 'bm-usage',
-      ok: !!os.ok, code: os.ok ? 'ok' : (os.authStopped ? 'auth-stopped' : (/auth|인증|permission denied/i.test(String(os.error || '')) ? 'auth-rejected' : 'fail')), trigger });
+    noteCredOutcome({ ...oh, name: oh.name || target.name || oh.host, vcenterId: oh.vcenterId || target.vcenterId }, { ok: !!os.ok, rejected: !os.ok && isSshAuthError({ message: String(os.error || '') }), authStopped: !!os.authStopped, feature: 'bm-usage', trigger });
   }
   /*
    * 이 서버의 표본 시각. Linux 는 명령 1회 왕복이라 '출력을 받은 시각' 과 여기의 차이는 수십 ms 이고
