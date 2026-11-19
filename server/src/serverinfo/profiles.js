@@ -146,7 +146,11 @@ export const WIN_COMMAND = `powershell -NoLogo -NoProfile -NonInteractive -Execu
 /** cmd.exe 명령 줄 한도(8,191자) — 이 명령은 그 안이어야 한다(시험). */
 export const CMD_LINE_MAX = 8191;
 
-const arr = (v) => (Array.isArray(v) ? v : v && typeof v === 'object' ? [v] : []);
+// Windows PowerShell 5.1 의 ConvertTo-Json 은 [psobject] 로 감싼 배열을 {"value":[...],"Count":n} 으로 낸다(감싼 값의 ETS 속성을 ‘value’ 옆에 붙이는 동작 ·
+//   System.Array 의 Count). 그 꼴이면 같은 배열로 푼다 — 풀지 않으면 객체 하나로 보아 소켓 1 · ‘Disk ?’ 같은 틀린 값이 된다(136 E1 · 142회차 결정 · 실기 미확인이라 방어로만 · rebut142 ③).
+//   꼴이 정확히 두 칸이고 Count 가 길이와 같을 때만(장비 값 하나가 우연히 value 칸을 가진 것과 가르기).
+const psWrapped = (v) => v && typeof v === 'object' && !Array.isArray(v) && Array.isArray(v.value) && Object.keys(v).length === 2 && v.Count === v.value.length;
+const arr = (v) => (Array.isArray(v) ? v : psWrapped(v) ? v.value : v && typeof v === 'object' ? [v] : []);
 // 열거값 → 글(MSFT_PhysicalDisk). Map 이라 장비가 보낸 ‘__proto__’ 같은 값이 객체를 꺼내지 않는다(반증 F9).
 const MEDIA = new Map([[3, 'HDD'], [4, 'SSD'], [5, 'SCM'], ['3', 'HDD'], ['4', 'SSD'], ['5', 'SCM'], ['HDD', 'HDD'], ['SSD', 'SSD'], ['SCM', 'SCM']]);
 const HEALTH = new Map([[0, 'Healthy'], [1, 'Warning'], [2, 'Unhealthy'], [5, 'Unknown']]);
