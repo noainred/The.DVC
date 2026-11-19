@@ -8,7 +8,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { analyzeLoginFails } from './loginFails.js';
 import { enqueueNotify as notify } from '../alerts.js'; // v2.742(감사 TIMING-01): 결과를 기다리지 않는 발송은 alerts.js 대기열로 — 동시 발송이 메일 인증 정지 가드를 우회하지 않게 한 번에 하나씩 보낸다.
-import { atomicWriteFileSync, safeLoadText } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, safeLoadText, corruptBackupPath } from '../util/atomicWrite.js';
 import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 107회차: 읽기 오류 ≠ 손상(공용 읽기 — 30초 간격 재읽기)
 import { numOrNull } from '../util/numOrNull.js';
 import { isMockMode } from '../mock/demo/flags.js';
@@ -23,7 +23,7 @@ const DEFAULTS = { enabled: true, intervalMin: 15, days: 7, threshold: 5, window
  */
 function backupCorrupt(err) {
   try {
-    const bak = `${FILE}.corrupt.${Date.now()}`;
+    const bak = corruptBackupPath(FILE);   // v3.23.2: 같은 밀리초 보존본을 덮어쓰지 않게
     fs.renameSync(FILE, bak);
     // v2.744(최종 수정분 검토 RV2744F-LOAD-01): 사유는 요약(safeLoadText) — V8 JSON.parse 오류 원문은 파일 조각을 싣는다(콘솔 → /admin/logs·엣지 로그).
     console.warn(`[loginmon] ${FILE} 읽기/파싱 실패(${safeLoadText(err) || '사유 미상'}) — ${bak}로 보존하고 기본 설정으로 시작합니다.`);

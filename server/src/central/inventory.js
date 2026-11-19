@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config, clampIntervalMs } from '../config.js';
 import { isMockVcenter } from '../mock/generator.js';
-import { atomicWriteFileSync, safeLoadText } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, safeLoadText, corruptBackupPath } from '../util/atomicWrite.js';
 import { registerExitFlush } from '../util/exitFlush.js';
 import { capStr } from '../util/capStr.js';
 import { readJsonFile, READ_RETRY_MS } from '../util/jsonFileLoad.js'; // 87회차 ⓐ: 읽기 오류 ≠ 손상(공용 읽기 판정)
@@ -42,7 +42,7 @@ let readBlocked = false; let readRetryAt = 0;
     // 인벤토리가 비었던 원인을 사후에 알 수 없다. <file>.corrupt.<ts>로 옮기고 경고만 남긴다
     // (빈 캐시로 기동은 계속 — 다음 push가 오면 자동 복구되는 캐시이므로 기동 실패로 만들지 않는다).
     try {
-      const bak = `${FILE}.corrupt.${Date.now()}`;
+      const bak = corruptBackupPath(FILE);   // v3.23.2: 같은 밀리초 보존본을 덮어쓰지 않게
       fs.renameSync(FILE, bak);
       // v2.744(최종 수정분 검토 RV2744F-LOAD-01): 사유는 요약(safeLoadText) — V8 JSON.parse 오류 원문은 파일 조각을 싣는다(콘솔 → /admin/logs·엣지 로그).
       console.warn(`[central] ${FILE} 파싱 실패(${safeLoadText(r.error) || '사유 미상'}) — ${bak}로 보존하고 빈 인벤토리로 시작합니다.`);

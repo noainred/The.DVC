@@ -145,11 +145,25 @@ export function safeLoadText(reason, max = 200) {
  *   찍어 그 조각이 엣지 로그로 중앙에 당겨졌다. '파싱 실패' 문구와 파일 이름·보존본 이름은 그대로다(로그 분석 규칙·테스트가 그 문구를 본다).
  * @returns 보존에 성공하면 백업 경로, 아니면 null.
  */
+/**
+ * v3.23.2: 손상 보존본 이름 `<file>.corrupt.<ms>` — 같은 밀리초에 이미 있으면 다음 숫자로 비켜 간다(형식은 숫자 그대로).
+ *   예전에는 `Date.now()` 만 붙여, 같은 밀리초에 두 번 보존하면 renameSync 가 **앞 보존본을 덮어썼다**(빠른 CI 러너에서 재현 —
+ *   rebut105a A4 '새 손상본도 옮긴다 1 !== 2' 로 v3.23.2 첫 게시 실행이 멈췄다 — 그 판에 함께 싣는다). 동기 코드라 확인 ~ rename 사이에 끼어드는 쓰기는 없다.
+ */
+export function corruptBackupPath(file, now = Date.now()) {
+  let ts = Math.floor(Number(now)) || 0;
+  for (let i = 0; i < 1000; i += 1, ts += 1) {
+    const p = `${file}.corrupt.${ts}`;
+    try { fs.lstatSync(p); } catch (e) { if (e?.code === 'ENOENT') return p; }
+  }
+  return `${file}.corrupt.${ts}`;
+}
+
 const _preserveFailLogged = new Set();   // 옮기기 실패를 이미 콘솔에 남긴 파일(125회차 F5 — 파일마다 한 번)
 export function preserveCorrupt(file, reason = '') {
   try {
     if (!fs.existsSync(file)) return null;
-    const bak = `${file}.corrupt.${Date.now()}`;
+    const bak = corruptBackupPath(file);
     fs.renameSync(file, bak);
     const why = summarizeLoadReason(reason);
     console.error(`[atomicWrite] ${path.basename(file)} 파싱 실패${why ? `(${why})` : ''} — 손상본을 ${path.basename(bak)}로 보존하고 빈 값으로 시작합니다. 자동 재저장이 덮어쓰기 전 수동 복구하세요.`);
