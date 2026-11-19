@@ -463,9 +463,9 @@
     ⓓ 화면 글자는 `web/src/views/summaryAllocText.js` 하나 — 칸은 `allocCell`(null → '—' · 일부 → 값 + '미상 N' — 같은 표의 디스크 · 스토리지 열과 같은 표기) · 비율은 `minMark`('≥ ' — 비율이 없으면 붙이지 않는다) + 기존 `ratioLabel` ·
     비율이 없는 이유는 `ratioKpiSub` · `ratioBadgeTitle`(용량 미상 호스트 → 할당을 하나도 못 읽음 → 물리 미수집 순 — '물리 자원 미수집' 으로 단정하지 않는다) · OS 표 합계 행 `osAllocTotals` · 기여도 표 안내는 `corpContribution` 의 `vcpuUnknown` · `ramUnknown`.
     `Summary.jsx` 의 `fmt()` 는 null 을 0 으로 찍는다(`(n ?? 0)`) — 못 읽을 수 있는 값에 쓰지 말 것(`fmtOr` · `allocCell`). 오버커밋 막대(`OverBar`)도 할당이 null 이면 '—'.
-    ⓔ ~~남긴 것(같은 꼴 · 범위 밖): `alerts.js` · `toolsCapacity.js` · `vmTotals.js` · `vmByVcenter.js` · `toolsInfo.js` · `toolsAnalytics.js`~~ → **v3.28.1 에 고쳤다**(바로 아래 항목 — 조사해 보니 서버 10곳 + 웹 3곳이었다).
+    ⓔ ~~남긴 것(같은 꼴 · 범위 밖): `alerts.js` · `toolsCapacity.js` · `vmTotals.js` · `vmByVcenter.js` · `toolsInfo.js` · `toolsAnalytics.js`~~ → **v3.29.1 에 고쳤다**(바로 아래 항목 — 조사해 보니 서버 10곳 + 웹 3곳이었다).
     그리고 v3.19.1 의 ③ 은 그대로다(① 은 v3.19.2 가 고쳤다).
-  · **v3.28.1 — VM 할당 합(vCPU · 메모리)의 '못 읽은 값' 판정을 남은 곳 전부에**(사용자 요청 2026-11-19 · 회귀 `server/test/vmAllocSweep3281.test.js` · `web/src/views/vmAllocSweep3281.test.js` — 수정 전 판본에서 서버 12건 모두 실패).
+  · **v3.29.1(코드 · 테스트 표지는 v3.28.1 — main 이 v3.29.0 을 먼저 내 번호만 올렸다) — VM 할당 합(vCPU · 메모리)의 '못 읽은 값' 판정을 남은 곳 전부에**(사용자 요청 2026-11-19 · 회귀 `server/test/vmAllocSweep3281.test.js` · `web/src/views/vmAllocSweep3281.test.js` — 수정 전 판본에서 서버 12건 모두 실패).
     ⓐ **근본 원인(정정 · 보충)**: SOAP 수집기 `vcenter/soapClient.js` 의 `num()`(`v == null || v === '' ? 0 : Number(v) || 0`)이 VM 의 `summary.config.numCpu` · `memorySizeMB` 를 읽는다 —
     주 수집 경로(엣지 포함)에서는 못 읽은 vCPU · 메모리가 **스냅샷에 이미 0** 으로 들어간다(`storageGB` 만 v2.719 부터 `gbOrNull`). 그래서 v3.19.1 · v3.20.1 · 이번 수정의 null 처리는
     **지금은 REST 폴백 vCenter 에서만** 실제로 작동한다. 수집기를 null 로 바꾸는 것은 `cpuCount` · `memMB` 를 읽는 서버 38 · 웹 25개 파일을 따라가야 하는 데이터 계약 변경이라 **다음 작업으로 남겼다**(사용자 선택).

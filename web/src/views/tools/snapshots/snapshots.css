@@ -146,6 +146,11 @@
 .snp-hist .hl { font-weight: 700; color: var(--text-dim); }
 .snp-hist .ev { grid-column: 1 / -1; color: var(--text-dim); line-height: 1.55; }
 @media (max-width: 720px) { .snp-hist { grid-template-columns: minmax(0, 1fr); } }
+.snp-hold { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 8px; padding: 8px 10px; border: 1px dashed var(--border); border-radius: 8px; font-size: 12.5px; }
+.snp-hold label { display: inline-flex; align-items: center; gap: 6px; color: var(--text-dim); min-width: 0; }
+.snp-hold label.grow { flex: 1 1 260px; }
+.snp-hold select, .snp-hold input { background: var(--panel-deep); border: 1px solid var(--border); border-radius: 6px; color: var(--text); padding: 5px 8px; font: inherit; min-width: 0; }
+.snp-hold input { flex: 1 1 auto; }
 .snp-sum { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-size: 12px; color: var(--text-dim); }
 
 @media (max-width: 1200px) {

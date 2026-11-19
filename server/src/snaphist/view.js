@@ -141,10 +141,10 @@ export function snapshotToolView(snap, { allowed = null, pick = null, hygiene = 
     const days = oldestTs != null && oldestTs > 0 ? Math.max(0, Math.floor((now - oldestTs) / DAY)) : null;
     const hours = oldestTs != null && oldestTs > 0 ? Math.max(0, Math.floor((now - oldestTs) / 3_600_000)) : null;
     const gb = snapGbOf(v);
-    const f = hygiene ? hygieneFindings(v, hygiene, now) : { findings: [], excepted: null };
+    const f = hygiene ? hygieneFindings(v, hygiene, now) : { findings: [], excepted: null, held: null };
     const codes = new Set(f.findings.map((x) => x.code));
     const template = v.template === true;
-    const judged = !!hygiene && !template && !f.excepted;
+    const judged = !!hygiene && !template && !f.excepted && !f.held;
     const ds = dsWorstOf(v, dsIndex);
     const cons = v.cfg && typeof v.cfg === 'object' && typeof v.cfg.consolidationNeeded === 'boolean' ? v.cfg.consolidationNeeded : null;
     const names = Array.isArray(v.snapshotNames) ? v.snapshotNames.filter((s) => typeof s === 'string').slice(0, TREE_MAX).map((s) => s.slice(0, TEXT.name)) : [];
@@ -156,7 +156,8 @@ export function snapshotToolView(snap, { allowed = null, pick = null, hygiene = 
       oldestTs, days, hours,
       oldestName: oldest?.name ?? (names[0] || null), oldestDesc: oldest?.desc ?? null,
       names, tree, depth: chainDepth(tree), treeCut: tree != null && cnt > tree.length,
-      judged, skip: template ? 'template' : f.excepted ? 'exception' : !hygiene ? 'no-settings' : null, exceptedBy: f.excepted || null,
+      judged, skip: template ? 'template' : f.excepted ? 'exception' : f.held ? 'hold' : !hygiene ? 'no-settings' : null, exceptedBy: f.excepted || null,
+      hold: f.held ? { until: f.held.until, reason: f.held.reason } : null,   // 건 계정(by)은 보류 목록 라우트가 관리자 판본에만 싣는다
       band: bandOf(days, judged, ageDays),
       sig: {
         age: codes.has('snap-age'), count: codes.has('snap-count'), size: codes.has('snap-size'),
