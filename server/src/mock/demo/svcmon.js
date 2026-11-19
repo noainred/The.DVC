@@ -9,7 +9,8 @@
  *    사람이 등록한 대상은 mock 모드에서도 예전처럼 실제로 점검한다.
  *  · 대상 이름·주소는 메인 스냅샷(vCenter·ESXi 호스트·VM)에서 결정적으로 만든다.
  */
-import { isMockMode, demoHash } from './flags.js';
+import { isMockMode, demoHash, demoIp } from './flags.js';
+import { BM_ONLY_SITES } from '../generator.js';
 
 export const SVCMON_DEMO_BATCH = 'mock-demo';
 
@@ -49,7 +50,8 @@ const T = (name, type, extra = {}) => ({ name, type, intervalSec: 60, ...extra }
 
 /** 스냅샷에서 데모 대상 목록(순수). */
 export function demoSvcmonTargets(snapshot) {
-  const vcs = (snapshot?.vcenters || []).slice(0, 8);
+  // v2.915: 시연 규모 — vCenter 20곳 전부(예전 앞 8곳) + vCenter 없는 데이터센터 10곳의 베어메탈 서비스.
+  const vcs = (snapshot?.vcenters || []).slice(0, 40);
   const hosts = snapshot?.hosts || [];
   const vms = (snapshot?.vms || []).filter((v) => v.powerState === 'POWERED_ON' && v.ipAddress && !v.template);
   const out = [];
@@ -64,6 +66,19 @@ export function demoSvcmonTargets(snapshot) {
         kind: 'infra', path: `vCenter\\${folder}\\ESXi`, name: h.name, host: h.name,
         tests: [T('ping', 'ping'), T('SSH 22', 'tcp', { port: 22 }), T('vpxa 902', 'tcp', { port: 902 })],
       });
+    }
+  }
+  if (vcs.length) {
+    for (const site of BM_ONLY_SITES) {
+      const mes = /MES/.test(site.role);
+      out.push({
+        kind: 'infra', path: `데이터센터\\${site.city}`, name: `bm-${site.slug}-${mes ? 'mesdb01' : site.role.startsWith('AI') ? 'login01' : 'bkp01'}`, host: demoIp(`svc|${site.slug}`, 10),
+        tests: [T('ping', 'ping'), T('SSH 22', 'tcp', { port: 22 }), T('iDRAC 443', 'tcp', { port: 443 })],
+      });
+      if (mes) {
+        out.push({ kind: 'service', path: `서비스\\${site.slug}`, name: `mes-${site.slug}`, host: demoIp(`mes|${site.slug}`, 10),
+          tests: [T('HTTP', 'http', { url: `http://${demoIp(`mes|${site.slug}`, 10)}/mes/health`, warnMs: 500 }), T('DB 1521', 'tcp', { port: 1521 })] });
+      }
     }
   }
   const SVC = [
@@ -110,8 +125,16 @@ export async function ensureSvcmonDemo() {
   if (!snap?.vms?.length) return { skipped: 'no-snapshot' };     // 다음 틱에 다시
   _tried = true;
   const { listTargets, bulkAddTargets } = await import('../../svcmon/store.js');
-  if (listTargets().length) return { skipped: 'not-empty' };    // 실데이터·사람이 등록한 것이 있으면 시드 안 함
-  const r = bulkAddTargets(demoSvcmonTargets(snap), { atomic: false, batch: SVCMON_DEMO_BATCH });
+  const cur = listTargets();
+  let want = demoSvcmonTargets(snap);
+  if (cur.length) {
+    // v2.915: v2.914 이전 규모(앞 8곳)로 시드된 데모 설치본 — 전부 데모 대상이고 지금 목록의 절반 미만이면 없는 대상만 보충.
+    if (!cur.every(isSvcmonDemoBatch) || cur.length >= Math.ceil(want.length / 2)) return { skipped: 'not-empty' };   // 실데이터·사람이 등록한 것이 있으면 시드 안 함
+    const have = new Set(cur.map((t) => `${t.path || ''}|${t.name || ''}`));
+    want = want.filter((t) => !have.has(`${t.path}|${t.name}`));
+    if (!want.length) return { skipped: 'not-empty' };
+  }
+  const r = bulkAddTargets(want, { atomic: false, batch: SVCMON_DEMO_BATCH });
   if (r.added) console.log(`[mock] Monitoring(svcmon) 데모 대상 ${r.added}개 · 점검 ${r.newTests}개 등록${r.errors?.length ? ` · 오류 ${r.errors.length}` : ''}`);
   return r;
 }

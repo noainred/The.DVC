@@ -55,6 +55,36 @@ const SPECS = [
   { k: 'xio-sel-01', type: 'xtremio', name: 'XIO-SEL-01', vc: 'vc-ap-northeast', method: 'api', nodes: 4, tb: 80, pct: 66, grow: 0.05, power: 'read' },
   { k: 'vplex-sel-01', type: 'vplex', name: 'VPLEX-SEL-01', vc: 'vc-ap-northeast', method: 'api', nodes: 4, tb: 0 },
   { k: 'mn-fra-01', type: 'metronode', name: 'MN-FRA-01', vc: 'vc-eu-central', method: 'api', nodes: 2, tb: 0 },
+  // v2.915 시연 규모 — 새 vCenter 사이트 9곳
+  { k: 'unity-pus-01', type: 'unity480', name: 'UNITY-PUS-01', vc: 'vc-kr-south', method: 'api', nodes: 2, tb: 140, pct: 57, grow: 0.06, power: 'read' },
+  { k: 'pst-pus-01', type: 'powerstore', name: 'PST-PUS-01', vc: 'vc-kr-south', method: 'api', nodes: 2, tb: 110, pct: 44, grow: 0.08, power: 'read' },
+  { k: 'pmax-tyo-01', type: 'powermax', name: 'PMAX-TYO-01', vc: 'vc-jp-east', method: 'api', nodes: 4, tb: 560, pct: 66, grow: 0.05, power: 'read' },
+  { k: 'ps-tyo-01', type: 'isilon', name: 'PS-TYO-01', vc: 'vc-jp-east', method: 'api', nodes: 5, tb: 850, pct: 61, grow: 0.07, power: 'read' },
+  { k: 'unity-han-01', type: 'unity480', name: 'UNITY-HAN-01', vc: 'vc-vn-north', method: 'ssh', nodes: 2, tb: 95, pct: 72, grow: 0.11, power: 'read' },
+  { k: 'pst-syd-01', type: 'powerstore', name: 'PST-SYD-01', vc: 'vc-au-east', method: 'api', nodes: 2, tb: 80, pct: 39, grow: 0.04, power: 'read' },
+  { k: 'pmax-szx-01', type: 'powermax', name: 'PMAX-SZX-01', vc: 'vc-cn-south', method: 'api', nodes: 4, tb: 700, pct: 79, grow: 0.09, power: 'read' },
+  { k: 'ps-szx-01', type: 'isilon', name: 'PS-SZX-01', vc: 'vc-cn-south', method: 'ssh', nodes: 6, tb: 1300, pct: 83, grow: 0.13, badNodes: 1, power: 'read' },
+  // 바르샤바 — 고RTT(800ms+) 회선에서 최근 몇 시간 수집 실패
+  { k: 'unity-waw-01', type: 'unity480', name: 'UNITY-WAW-01', vc: 'vc-pl-central', method: 'api', nodes: 2, tb: 120, pct: 64, grow: 0.07, fail: 4, power: 'read' },
+  { k: 'pst-lhr-01', type: 'powerstore', name: 'PST-LHR-01', vc: 'vc-uk-south', method: 'api', nodes: 4, tb: 150, pct: 52, grow: 0.06, power: 'read' },
+  { k: 'pmax-dfw-01', type: 'powermax', name: 'PMAX-DFW-01', vc: 'vc-us-central', method: 'api', nodes: 4, tb: 620, pct: 60, grow: 0.05, power: 'read' },
+  { k: 'xio-dfw-01', type: 'xtremio', name: 'XIO-DFW-01', vc: 'vc-us-central', method: 'api', nodes: 2, tb: 60, pct: 70, grow: 0.04, power: 'read' },
+  { k: 'unity-mty-01', type: 'unity480', name: 'UNITY-MTY-01', vc: 'vc-mx-north', method: 'ssh', nodes: 2, tb: 90, pct: 68, grow: 0.1, power: 'read' },
+  // v2.915 — vCenter 없는 데이터센터 10곳(dc: 법인 id 직접 — mock/generator.js BM_ONLY_SITES)
+  { k: 'unity-usn-01', type: 'unity480', name: 'UNITY-USN-01', dc: 'dc-ulsan', method: 'ssh', nodes: 2, tb: 160, pct: 59, grow: 0.08, power: 'read' },
+  { k: 'ps-usn-01', type: 'isilon', name: 'PS-USN-01', dc: 'dc-ulsan', method: 'api', nodes: 4, tb: 700, pct: 66, grow: 0.1, power: 'read' },
+  { k: 'ps-djn-01', type: 'isilon', name: 'PS-DJN-01', dc: 'dc-daejeon', method: 'api', nodes: 10, tb: 3600, pct: 72, grow: 0.18, power: 'read' },
+  { k: 'pst-djn-01', type: 'powerstore', name: 'PST-DJN-01', dc: 'dc-daejeon', method: 'api', nodes: 4, tb: 200, pct: 55, grow: 0.12, power: 'read' },
+  { k: 'unity-gmi-01', type: 'unity480', name: 'UNITY-GMI-01', dc: 'dc-gumi', method: 'ssh', nodes: 2, tb: 110, pct: 61, grow: 0.07, power: 'read' },
+  { k: 'pst-maa-01', type: 'powerstore', name: 'PST-MAA-01', dc: 'dc-chennai', method: 'api', nodes: 2, tb: 90, pct: 58, grow: 0.09, power: 'read' },
+  { k: 'unity-bkk-01', type: 'unity480', name: 'UNITY-BKK-01', dc: 'dc-bangkok', method: 'api', nodes: 2, tb: 70, pct: 47, grow: 0.05, power: 'read' },
+  { k: 'unity-ckg-01', type: 'unity480', name: 'UNITY-CKG-01', dc: 'dc-chongqing', method: 'ssh', nodes: 2, tb: 120, pct: 76, grow: 0.12, power: 'read' },
+  { k: 'pst-wro-01', type: 'powerstore', name: 'PST-WRO-01', dc: 'dc-wroclaw', method: 'api', nodes: 2, tb: 100, pct: 63, grow: 0.08, power: 'read' },
+  { k: 'pmax-bud-01', type: 'powermax', name: 'PMAX-BUD-01', dc: 'dc-budapest', method: 'api', nodes: 4, tb: 480, pct: 41, grow: 0.03, power: 'read' },
+  { k: 'ps-bud-01', type: 'isilon', name: 'PS-BUD-01', dc: 'dc-budapest', method: 'ssh', nodes: 4, tb: 900, pct: 52, grow: 0.05, power: 'no-field' },
+  { k: 'pmax-atl-01', type: 'powermax', name: 'PMAX-ATL-01', dc: 'dc-atlanta', method: 'api', nodes: 4, tb: 650, pct: 45, grow: 0.04, power: 'read' },
+  { k: 'vplex-atl-01', type: 'vplex', name: 'VPLEX-ATL-01', dc: 'dc-atlanta', method: 'api', nodes: 4, tb: 0 },
+  { k: 'ps-yyz-01', type: 'isilon', name: 'PS-YYZ-01', dc: 'dc-toronto', method: 'api', nodes: 8, tb: 2400, pct: 69, grow: 0.15, power: 'read' },
 ];
 const SPEC_BY_ID = new Map(SPECS.map((s) => [`${DEMO_PREFIX}st-${s.k}`, s]));
 function fallbackSpec(dev) {
@@ -72,7 +102,7 @@ export function demoStorageDevices(dcOf = (v) => v) {
   return SPECS.map((s) => ({
     id: `${DEMO_PREFIX}st-${s.k}`, type: s.type, name: s.name,
     host: demoIp(`storage:${s.k}`), username: s.type === 'isilon' ? 'root' : 'admin', password: 'mock',
-    agent: '', datacenterId: dcOf(s.vc) || s.vc, collectMethod: s.method, enabled: true,
+    agent: '', datacenterId: s.dc || dcOf(s.vc) || s.vc, collectMethod: s.method, enabled: true,
     note: '데모(mock) 장비 — 실제 장비가 아닙니다',
   }));
 }
@@ -236,6 +266,20 @@ const BM_SPECS = [
   { k: 'ai-02', name: 'ai-train-02', groups: ['AI'], mounts: ['/', '/datasets'], tb: [1, 80], pct: [31, 57], grow: 0.18 },
   { k: 'log-01', name: 'log-archive-01', groups: ['로그'], mounts: ['/', '/var/log/archive'], tb: [0.3, 24], pct: [40, 69], grow: 0.09 },
   { k: 'old-01', name: 'legacy-nfs-01', groups: ['로그'], mounts: ['/', '/export'], tb: [0.2, 10], pct: [60, 91], grow: 0.02, enabled: false },
+  // v2.915 시연 규모 — vCenter 없는 데이터센터 10곳의 베어메탈(이름은 iDRAC 데모 베어메탈과 같다 — mock/demo/idrac.js demoBareMetalSpecs)
+  { k: 'usn-mesdb', name: 'bm-ulsan-mesdb01', groups: ['MES', '울산'], mounts: ['/', '/u01', '/u02'], tb: [0.3, 6, 12], pct: [44, 61, 74], grow: 0.07 },
+  { k: 'usn-bkp', name: 'bm-ulsan-bkp01', groups: ['백업', '울산'], mounts: ['/', '/backup'], tb: [0.4, 96], pct: [31, 78], grow: 0.14 },
+  { k: 'djn-hpc', name: 'bm-daejeon-hpc01', groups: ['HPC', '대전'], mounts: ['/', '/scratch', '/home'], tb: [0.5, 30, 8], pct: [36, 82, 57], grow: 0.16 },
+  { k: 'djn-stor', name: 'bm-daejeon-stor01', groups: ['AI', '대전'], mounts: ['/', '/datasets', '/checkpoints'], tb: [0.5, 180, 90], pct: [29, 71, 64], grow: 0.22 },
+  { k: 'gmi-mesdb', name: 'bm-gumi-mesdb01', groups: ['MES', '구미'], mounts: ['/', '/u01'], tb: [0.3, 8], pct: [48, 69], grow: 0.06 },
+  { k: 'maa-mesdb', name: 'bm-chennai-mesdb01', groups: ['MES', '첸나이'], mounts: ['/', '/u01'], tb: [0.3, 6], pct: [52, 83], grow: 0.09 },
+  { k: 'bkk-wmsdb', name: 'bm-bangkok-wmsdb01', groups: ['물류', '방콕'], mounts: ['/', '/u01', '/archive'], tb: [0.3, 4, 10], pct: [41, 57, 66], grow: 0.05 },
+  { k: 'ckg-mesdb', name: 'bm-chongqing-mesdb01', groups: ['MES', '충칭'], mounts: ['/', '/u01'], tb: [0.3, 8], pct: [57, 88], grow: 0.11 },
+  { k: 'wro-mesdb', name: 'bm-wroclaw-mesdb01', groups: ['MES', '브로츠와프'], mounts: ['/', '/u01'], tb: [0.3, 6], pct: [46, 63], grow: 0.07 },
+  { k: 'bud-bkp', name: 'bm-budapest-bkp01', groups: ['백업', 'DR', '부다페스트'], mounts: ['/', '/backup'], tb: [0.4, 140], pct: [34, 71], grow: 0.12 },
+  { k: 'atl-bkp', name: 'bm-atlanta-bkp01', groups: ['백업', 'DR', '애틀랜타'], mounts: ['/', '/backup'], tb: [0.4, 160], pct: [33, 67], grow: 0.1 },
+  { k: 'yyz-hpc', name: 'bm-toronto-hpc01', groups: ['HPC', '토론토'], mounts: ['/', '/scratch'], tb: [0.5, 40], pct: [38, 76], grow: 0.15 },
+  { k: 'yyz-stor', name: 'bm-toronto-stor01', groups: ['AI', '토론토'], mounts: ['/', '/datasets'], tb: [0.5, 120], pct: [27, 58], grow: 0.19 },
 ];
 const BM_BY_ID = new Map(BM_SPECS.map((s) => [`${DEMO_PREFIX}bm-${s.k}`, s]));
 
@@ -454,11 +498,13 @@ export async function ensureStorageDemo({ now = Date.now() } = {}) {
     try {
       const reg = await import('../../storage/registry.js');
       out.storageSeed = reg.seedDevicesIfEmpty(demoStorageDevices(dcOf));
+      // v2.915: v2.914 이전 규모로 시드된 데모 설치본 — 데모 장비뿐이면 빠진 장비만 보충(백필은 아래가 이력 없는 장비만 한다).
+      if (out.storageSeed?.reason === 'not-empty') out.storageTopUp = reg.topUpDemoDevices(demoStorageDevices(dcOf));
       out.storageRelinked = await relinkDemoDatacenters(reg, dcOf);
       // 방금 시드한 데모 장비는 v2.534 이후 기준(실제 기록량)으로만 쌓인다 — 그 1회 마이그레이션(VMAX/PowerMax 이력 삭제)의
       //   대상이 아니다. 표지만 세운다(장비별 '기준 변경' 기록은 남기지 않는다 — 빈 id 목록). 안 세우면 다음 기동에
       //   마이그레이션이 데모 이력을 지우고 증가량 화면에 '기준 변경' 배지를 띄운다(재기동 실측으로 확인).
-      if (out.storageSeed?.seeded > 0) {
+      if (out.storageSeed?.seeded > 0 || out.storageTopUp?.added > 0) {
         try {
           const { MIGRATION_ID } = await import('../../storage/capacityBasisMigration.js');
           const db = await import('../../storage/db.js');
@@ -470,15 +516,16 @@ export async function ensureStorageDemo({ now = Date.now() } = {}) {
     try {
       const bm = await import('../../bmstor/registry.js');
       out.bmSeed = bm.seedBmServersIfEmpty(demoBmServers());
+      if (out.bmSeed?.reason === 'not-empty') out.bmTopUp = bm.topUpDemoBmServers(demoBmServers());
       out.bmBackfill = await backfillBm(now);
     } catch (e) { out.bmError = e.message; }
     try { out.vmtrackBackfill = await backfillVmtrack(now); } catch (e) { out.vmtrackError = e.message; }
     // vmtrack 은 스냅샷이 아직 없으면 다음 호출에서 다시 시도한다(나머지는 등록부·DB 기준 멱등).
     _done = out.vmtrackBackfill?.reason !== 'no-snapshot';
     _last = out;
-    const seeded = (out.storageSeed?.seeded || 0) + (out.bmSeed?.seeded || 0);
+    const seeded = (out.storageSeed?.seeded || 0) + (out.bmSeed?.seeded || 0) + (out.storageTopUp?.added || 0) + (out.bmTopUp?.added || 0);
     if (seeded || out.storageBackfill?.points || out.bmBackfill?.slots || out.vmtrackBackfill?.slots) {
-      console.log(`[mock] 스토리지 데모 시드: 장비 ${out.storageSeed?.seeded || 0} · 베어메탈 ${out.bmSeed?.seeded || 0} · 용량 이력 ${out.storageBackfill?.points || 0}점 · 베어메탈 이력 ${out.bmBackfill?.slots || 0}슬롯 · DS 추이 ${out.vmtrackBackfill?.slots || 0}슬롯`);
+      console.log(`[mock] 스토리지 데모 시드: 장비 ${(out.storageSeed?.seeded || 0) + (out.storageTopUp?.added || 0)} · 베어메탈 ${(out.bmSeed?.seeded || 0) + (out.bmTopUp?.added || 0)} · 용량 이력 ${out.storageBackfill?.points || 0}점 · 베어메탈 이력 ${out.bmBackfill?.slots || 0}슬롯 · DS 추이 ${out.vmtrackBackfill?.slots || 0}슬롯`);
     }
     return out;
   })().finally(() => { _inflight = null; });

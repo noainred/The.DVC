@@ -213,4 +213,20 @@ export function seedDemoDevices(list = []) {
   return add.length;
 }
 
+/**
+ * v2.915: 데모 보충 — 등록부가 **데모(mock-san-) 장비뿐**일 때 없는 id 만 덧붙인다(시연 규모로 늘어난 vCenter 의 스위치).
+ * 사람이 등록한 장비가 하나라도 있으면 0. mock/demo/sanswitch.js 만 부른다. 덧붙인 id 목록을 돌려준다.
+ */
+export function topUpDemoDevices(list = []) {
+  const db = load();
+  if (loadErr.get() || db.devices.some((d) => !String(d.id || '').startsWith('mock-san-'))) return [];
+  const have = new Set(db.devices.map((d) => String(d.id)));
+  const add = (Array.isArray(list) ? list : []).filter((d) => d && typeof d === 'object' && String(d.id || '').startsWith('mock-san-') && !have.has(String(d.id)))
+    .slice(0, Math.max(0, MAX_DEVICES - db.devices.length));
+  if (!add.length) return [];
+  pushAll(db.devices, add.map((d) => ({ ...d })));
+  persist();
+  return add.map((d) => String(d.id));
+}
+
 export function _resetForTest() { _db = null; loadErr.clear(); }

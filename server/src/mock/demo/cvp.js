@@ -35,11 +35,11 @@ const ROLES = {
 };
 const EOS_MAIN = ['4.31.2F', '4.31.2F', '4.30.4M'];
 
-/** 데모 CVP 서버 목록(등록부 모양). 법인 수에 맞춰 2~3대. */
+/** 데모 CVP 서버 목록(등록부 모양). 법인 5곳마다 1대 · 2~6대(v2.915 — 시연 규모 30곳이면 6대. 예전 상한 3대). */
 export function demoCvpServers(corps) {
   const list = (Array.isArray(corps) ? corps : []).filter(Boolean);
   if (!list.length) return [];
-  const n = Math.min(3, Math.max(2, list.length));
+  const n = Math.min(6, Math.max(2, Math.min(list.length, Math.ceil(list.length / 5))));
   const out = [];
   for (let i = 0; i < n; i++) {
     const c = list[(i * Math.max(1, Math.floor(list.length / n))) % list.length];
@@ -263,7 +263,7 @@ export function ensureCvpDemo() {
 
 async function seedInner() {
   const reg = await import('../../cvp/registry.js');
-  if (reg.listServers().length) { _seeded = true; return { seeded: false, reason: 'registry-not-empty' }; }
+  if (reg.listServers().length) return topUpInner(reg);
   const { store } = await import('../../store.js');
   const snap = store.get();
   // 메인 mock 스냅샷이 생긴 뒤에만 시드한다(테스트처럼 스냅샷 없이 폴러만 부르는 경우에는 시드하지 않는다).
@@ -281,6 +281,29 @@ async function seedInner() {
   console.log(`[mock] CVP 데모 시드: CVP ${servers.length}대 · 스위치 ${nDev}대 + 이력 ${JSON.stringify(hist)}`);
   _seeded = true;
   return { seeded: true, servers: servers.length, switches: nDev, history: hist };
+}
+
+/**
+ * v2.915: 보충 — 등록부가 데모 CVP 뿐이고 지금 규모(법인 수 기준)보다 적으면(v2.914 이전 시드 — 3대) 없는 데모 CVP 만 덧붙이고 그것만 백필한다.
+ */
+async function topUpInner(reg) {
+  const cur = reg.listServers();
+  if (cur.some((x) => !isDemoId(x?.id))) { _seeded = true; return { seeded: false, reason: 'registry-not-empty' }; }
+  const { store } = await import('../../store.js');
+  const snap = store.get();
+  if (!Array.isArray(snap?.vcenters) || !snap.vcenters.length) return { seeded: false, reason: 'snapshot-not-ready' };
+  const corps = await demoCorps(snap);
+  if (!corps.length) return { seeded: false, reason: 'snapshot-not-ready' };
+  const want = demoCvpServers(corps);
+  if (cur.length >= want.length) { _seeded = true; return { seeded: false, reason: 'registry-not-empty' }; }
+  const r = reg.topUpDemoServers(want);
+  if (!r.ok || !r.count) { _seeded = true; return { seeded: false, reason: r.reason || 'nothing-to-add' }; }
+  const added = want.filter((x) => r.added.includes(String(x.id)));
+  const hist = await backfillCvp(added).catch((e) => ({ error: e.message }));
+  const nDev = added.reduce((a, x) => a + demoSwitchSpecs(x).length, 0);
+  console.log(`[mock] CVP 데모 보충: CVP ${added.length}대 · 스위치 ${nDev}대 + 이력 ${JSON.stringify(hist)}`);
+  _seeded = true;
+  return { seeded: true, servers: added.length, switches: nDev, history: hist, topUp: true };
 }
 
 /** 포트 처리량 백필 시각(오래된 것부터): 7일 전 ~ 48시간 전 2시간, 최근 48시간 30분. */

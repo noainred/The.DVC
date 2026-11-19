@@ -218,4 +218,20 @@ export function seedDemoServers(list) {
   return { ok: true, count: db.servers.length };
 }
 
+/**
+ * v2.915: 데모 보충 — 등록부가 **데모(mock-) 서버뿐**일 때 없는 id 만 덧붙인다(시연 규모로 늘어난 CVP). mock/demo/cvp.js 만 부른다.
+ */
+export function topUpDemoServers(list) {
+  if (!Array.isArray(list) || !list.length) return { ok: false, reason: '보충할 CVP 서버가 없습니다.' };
+  const db = load();
+  if (loadErr.get()) return { ok: false, reason: '등록부를 읽지 못했습니다(손상 보존본이 있습니다).' };
+  if (db.servers.some((x) => !String(x.id || '').startsWith('mock-'))) return { ok: false, reason: '사람이 등록한 CVP 가 있습니다.' };
+  const have = new Set(db.servers.map((x) => String(x.id)));
+  const add = list.filter((x) => String(x.id || '').startsWith('mock-') && !have.has(String(x.id))).slice(0, Math.max(0, MAX_SERVERS - db.servers.length));
+  if (!add.length) return { ok: true, count: 0, added: [] };
+  db.servers = [...db.servers, ...add.map((x) => ({ ...x, id: String(x.id), createdAt: x.createdAt || Date.now(), updatedAt: Date.now() }))];
+  persist();
+  return { ok: true, count: add.length, added: add.map((x) => String(x.id)) };
+}
+
 export function _resetForTest() { _db = null; loadErr.clear(); }

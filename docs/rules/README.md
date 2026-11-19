@@ -20,7 +20,7 @@
 | [isilon.md](isilon.md) | 7 | 아이실론 디렉터리 사용량·메일 | server/src/isidu/ · web/src/views/tools/Isidu*·isidu* |
 | [ipam.md](ipam.md) | 11 | IP 관리(IPMS·대역·스캔·원장·VM DNS) | server/src/{ipam,vmdns}/ · web/src/views/tools/Ipam*·Ipms*·IpScan*·VmDns* |
 | [horizon-curuser.md](horizon-curuser.md) | 6 | Horizon 세션·앱 사용·현재 사용자(Windows) | server/src/{horizon,curuser}/ · web/src/views/tools/Horizon*·CurrentUsers* |
-| [demo.md](demo.md) | 6 | 데모(mock) 모드·데모 계정 | server/src/mock/ · auth/demoGuest.js |
+| [demo.md](demo.md) | 7 | 데모(mock) 모드·데모 계정 | server/src/mock/ · auth/demoGuest.js |
 | [audits.md](audits.md) | 82 | 회차별 점검(감사) 기록 v2.583~v2.785 | 같은 영역을 다시 점검할 때 — 확정분·남긴 것·작업 방식 교훈 |
 | [server-security-history.md](server-security-history.md) | 20절 | 서버 보안 감사 조치 기록 | 서버 인증·권한·SSRF·비밀·엣지 수신 코드를 고칠 때 |
 

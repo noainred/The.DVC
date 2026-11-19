@@ -106,9 +106,11 @@ test('★ MOCK_SCALE — 기본값 1 은 기존 수치를 바꾸지 않는다', 
   assert.match(s, /MOCK_SCALE === 1 \? BASE_SITES/, '기본값에서 사본을 만들면 데모·CI 의 vCenter 수가 바뀐다');
   delete process.env.MOCK_SCALE;
   const m = await import(`${path.join(SRC, 'mock/generator.js')}?v=${Date.now()}`);
-  assert.equal(m.mockVcenterIdentities().filter((v) => /^vc-/.test(v.id)).length >= 11, true);
+  assert.equal(m.mockVcenterIdentities().filter((v) => /^vc-/.test(v.id)).length >= 20, true);
   const snap = m.generateSnapshot();
-  assert.equal(snap.vcenters.length, 11, `기본 MOCK_SCALE 에서 vCenter 수가 바뀌었다(${snap.vcenters.length})`);
+  // v2.915: 기본 데모가 시연 규모가 됐다(사용자 요청 — vCenter 20 · ESXi 650 · VM 약 6,000).
+  assert.equal(snap.vcenters.length, 20, `기본 MOCK_SCALE 에서 vCenter 수가 바뀌었다(${snap.vcenters.length})`);
+  assert.equal(snap.hosts.length, 650, `ESXi 호스트 ${snap.hosts.length}대`);
   // 사본도 mock 으로 인식돼야 한다 — 아니면 엣지 push 봉인(v2.257)·빈 인벤토리 판정(v2.560)이 갈린다.
   assert.equal(m.isMockVcenter(snap.vcenters[0]), true);
 });

@@ -6,6 +6,7 @@
 
 ## 목차
 
+- v2.915 — 기본 데모가 시연 규모(데이터센터 30 · vCenter 20 · ESXi 650 · 베어메탈 550 · VM 약 6,000)다 · 이미 시드된 설치본은 '데모 장비뿐일 때만' 보충
 - (원래 5533행) v2.715 — SAN 사용량: 목업 데모 장비는 수식 값 · 1분 넘는 조회는 조회 엔진만 재시작
 - (원래 5541행) v2.716 — mock 모드 내장 데모 계정은 '설정 뺀 조회 전부 + 안전한 실행만'. 판정은 `server/src/auth/demoGuest.js` 하나
 - (원래 5548행) v2.716 데모 데이터 보완 1회차
@@ -15,6 +16,21 @@
 
 ## 본문
 
+- ⚠⚠ **v2.915 — 기본 데모가 시연 규모다: 데이터센터(법인) 30곳 = vCenter 20곳 + vCenter 없는 10곳 · ESXi 650 · 베어메탈 550(물리 서버 1,200) · VM 약 6,000**
+  (사용자 요청 "30개 데이터 · 물리 서버 1,200대 중 650대 가상화 · 나머지 베어메탈 · 스토리지·네트워크·모니터링 전부" · 선택 '기본 데모를 교체' · 'DC 30 · vCenter 20' · 'VM 약 6,000'.
+  회귀 `server/test/demoScale2915.test.js`):
+  · 사이트 표는 `mock/generator.js` 하나 — `BASE_SITES`(vCenter 20, `hosts` 합 650 · `bm` 합 310) + `BM_ONLY_SITES`(vCenter 없는 법인 10, `bm` 합 240).
+    앞 11개 vCenter 의 id·이름·도시는 v2.914 까지와 같다(스토리지 사양·데모 엣지·이미 시드된 설치본이 그 id 에 묶여 있다). **호스트 수를 17의 배수로 두지 말 것**
+    (VM 배치 `v % hosts` × 템플릿 `idx % 17` — 첫 호스트 VM 이 전부 템플릿이 되어 GPU VM 0대 호스트가 생긴다. 도쿄 34대에서 gpuTable2653 ⑨ 가 잡았다).
+  · 베어메탈 550대는 `mock/demo/idrac.js demoBareMetalSpecs` — 역할 순환(법인 종류별: 일반·공장 MES·AI/HPC·DR·물류)으로 Dell 모델을 고른다. v2.708 의 id(`db01`·앞 4곳 `gpu01`·앞 2곳 귀속 없는 `app01`)는 그대로다.
+    vCenter 없는 법인의 서버는 `vcenterId` 없이 `datacenterId: dc-<slug>` — 법인별 서버 수량은 '법인 · vCenter 미지정' 행으로, 베어메탈 사용률은 '법인 귀속 없음'(데모의 includeUnassigned)으로 잡힌다(사용률의 법인 축은 vCenter 다).
+  · 데모 법인(`pdu.js demoCorps`)은 vCenter 없는 법인 10곳을 mock 모드에서 늘 보장한다(지운 법인은 `ensureDatacenter` 삭제 표시가 막는다) · 예전 상한 12곳 → 60 · 법인 코드는 `withCodes` 로 고유(예전 Dubai·Dublin 둘 다 DUB).
+    CVP 는 법인 5곳마다 1대(2~6) · 스토리지 44대(30곳 전부) · Isilon 디렉터리 사용량 대상 6 · Monitoring 대상은 vCenter 전부 + vCenter 없는 법인 · SAN 스위치는 vCenter 마다(약 160대).
+  · ⚠ **보충(top-up)**: 시드는 예전처럼 '비어 있을 때' 가 기본이고, **등록부가 데모(`mock-`) 항목뿐이고 지금 규모의 절반 미만일 때만** 없는 id 를 덧붙인다(iDRAC ESXi·베어메탈 · 스토리지 · bmstor · PDU(법인 기준) · CVP · SAN · svcmon · isidu).
+    v2.914 이전 규모로 시드된 데모 설치본이 업그레이드만으로 시연 규모가 되게 하려는 것이다. 사람이 등록한 항목이 하나라도 있으면 아무것도 하지 않는다. 등록부 저장은 한 번에 묶는다(iDRAC `addServer` 를 550번 부르면 매번 전체 파일을 다시 쓴다).
+  · 첫 기동 비용(실측, 이 컨테이너): 백필이 약 3분 돈다 · 그동안 이벤트 루프 최대 약 1.5초 멈춤(예전 규모 0 — 4.2초였던 것을 iDRAC 전력 5천 표본 묶음·추이 매 시점 양보·센서 12시점 양보로 줄였다) ·
+    데이터 폴더 약 1.3GB(예전 400MB, metrics DB 약 560MB). 서버 800대 넘으면 iDRAC 추이 백필의 최근 24시간은 15분 간격(5분이면 250만 행). 재기동은 1초 넘는 멈춤 0 · `/api/summary`·`/api/overview` 약 10~20ms.
+  · 생성기 핫패스: VM 마다 `hosts.find` 하던 호스트 찾기와 데이터스토어마다 전 VM 을 훑던 마운트 역산을 색인으로 바꿨다(같은 출력 — 대조 확인). 스냅샷 1회 약 100~150ms.
 - ⚠⚠ **v2.715 — SAN 사용량: 목업 데모 장비는 수식 값 · 1분 넘는 조회는 조회 엔진만 재시작**(`sanswitch/demoPerfSynth.js` + `perfDb.js heavyQuery` 감시 +
   웹 `SanSwitchV2Parts.jsx` 대기 안내, 사용자 지시 "mock 모드 SAN 모니터링이 멈춘다 · 랜덤 숫자로 채우기 · 1분 넘으면 재시작해 전체 서비스 복원". 회귀 `server/test/sanDemoPerf2715.test.js`·`stall2713.test.js` — 변이 검증):
   · 수식 경로는 **mock 모드 + 장비 전부 `mock-san-`** 일 때만이다(`isDemoPerfQuery`). 사람이 등록한 장비가 하나라도 섞이면 예전처럼 DB 를 읽는다. 응답 모양은 실제 집계와

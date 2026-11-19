@@ -77,7 +77,9 @@ test('① 서비스태그 — 7자 · 500개 고유(seed.js 초판의 충돌 재
 
 test('① 베어메탈 사양·사용률 행 — 결정적, ESXi 이름과 겹치지 않고, OS 경로 전용 값은 비운다', () => {
   const specs = bm.demoBareMetalSpecs(SNAP);
-  assert.ok(specs.length >= 10 && specs.length <= 20, `${specs.length}대`);
+  // v2.915: 사이트 표에 없는 vCenter 는 12대씩 + vCenter 없는 데모 법인 10곳 240대(시연 규모 — 기본 사이트 표면 550대, demoScale2915 가 고정).
+  assert.equal(specs.length, 6 * 12 + 240, `${specs.length}대`);
+  assert.equal(new Set(specs.map((s) => s.id)).size, specs.length, 'id 고유');
   assert.ok(specs.every((s) => s.id.startsWith('mock-bmsrv-') && !/^esxi/.test(s.name)));
   assert.ok(specs.some((s) => !s.vcenterId), '법인 귀속 없는 서버도 있다');
   assert.ok(specs.some((s) => s.gpus.length), 'GPU 서버');
