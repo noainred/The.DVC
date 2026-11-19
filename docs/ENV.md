@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **756개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **759개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-11-19)
@@ -55,7 +55,7 @@
 | `WAN_TLS_CA_FILE` | `''` | ✅ | util/resilientFetch.js |
 | `WAN_TLS_INSECURE` | `기본 적용('true' 로 끄기)` | ✅ | util/resilientFetch.js |
 
-## 공통 (236)
+## 공통 (239)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -222,6 +222,9 @@
 | `SHUTDOWN_GRACE_MS` | `8000` |  | index.js |
 | `SHUTDOWN_HARD_MS` | `1500` |  | index.js |
 | `SITE_INVENTORY_STALE_MS` | `300000` |  | store.js |
+| `SNAPHIST_DB_PATH` |  |  | snaphist/db.js |
+| `SNAPHIST_HOUR` | `3` |  | snaphist/poller.js |
+| `SNAPHIST_RETENTION_DAYS` |  |  | snaphist/db.js |
 | `STALL_WATCH` | `기본 아님('0' 일 때만 적용)` |  | perf/stallWatch.js |
 | `STALL_WATCH_HEAP_WARN_PCT` | `85` |  | perf/stallWatch.js |
 | `STALL_WATCH_MS` | `10000` |  | perf/stallWatch.js |
@@ -945,4 +948,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 756
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 759

@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-11-19T01:22:24.969Z",
-  "count": 128,
+  "generatedAt": "2026-11-19T21:29:53.693Z",
+  "count": 129,
   "tools": [
     {
       "k": "service-hub",
@@ -324,6 +324,14 @@
     },
     {
       "k": "server-info",
+      "adminOnly": true,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
+      "k": "server-cmd",
       "adminOnly": true,
       "perm": null,
       "external": null,

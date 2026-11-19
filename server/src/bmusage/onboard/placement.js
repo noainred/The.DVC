@@ -13,6 +13,21 @@ const t = (v) => String(v ?? '').trim();
 /** 허용 기능 목록과 무관하게 언제나 되는 쓰임 — 사람이 누르는 연결 시험(uname 한 줄). 그 밖의 호출은 기능 id 를 밝혀야 한다(빈 값 = 모르는 기능 — 목록이 있는 키는 거절). */
 export const ALWAYS_ALLOWED_FEATURES = Object.freeze(['conn-test']);
 /**
+ * v3.30 서버 명령 실행(설계 docs/design/server-cmd D8): **직접 켠 키 · 계정만** 쓰는 기능 — 기능 목록이 없는(예전) 키 · 계정은 이 기능에 쓰지 않는다.
+ *   원문 출력이 화면에 나오는 기능이라, 다른 기능을 위해 등록한 예전 키 · 계정이 저절로 쓰이지 않게(서버 단독 비밀번호는 기능 목록이 없어 이 판정 밖이다).
+ */
+export const EXPLICIT_FEATURES = Object.freeze(['server-cmd']);
+/**
+ * 허용 기능 판정 하나(키 · 공통 계정이 같은 함수 — keyPlacementIssue · refs.resolveOsAuth). true 면 막는다.
+ *   목록이 있으면 그 기능이 있어야 하고, 목록이 없으면(예전 항목) 직접 켜야 하는 기능만 막는다.
+ */
+export function featureBlocked(features, feature = '') {
+  const f = t(feature);
+  if (ALWAYS_ALLOWED_FEATURES.includes(f)) return false;
+  if (!Array.isArray(features)) return EXPLICIT_FEATURES.includes(f);
+  return !features.includes(f);
+}
+/**
  * 키를 이 서버 · 이 기능에 써도 되는가(판정 하나 — 폴러 · 연결 시험 · SSH 공용 접속 화면의 키 고르기 · 쓰기 때 점검이 같은 함수).
  * @param {{folderCorp?:string, folderServer?:string, features?:string[]|null}} key
  * @param {{vcenterId?:string, name?:string}} server
@@ -24,13 +39,13 @@ export function keyPlacementIssue(key = {}, server = {}, feature = '') {
     if (t(server.vcenterId) !== kc) return 'key-folder';
     if (ks && ks.toLowerCase() !== t(server.name).toLowerCase()) return 'key-folder';
   }
-  if (Array.isArray(key.features) && !ALWAYS_ALLOWED_FEATURES.includes(feature) && !key.features.includes(feature)) return 'key-feature';
+  if (featureBlocked(key.features, feature)) return 'key-feature';
   return null;
 }
 
 /** OS 계정 등록 항목을 쓰는 주기 수집 기능(bmusage/poller · bmstor/poller 의 withResolvedAuth feature). 이름은 SSH 공용 접속 FEATURE_CATALOG 와 같다(시험이 대조). */
 export const COLLECT_FEATURES = Object.freeze(['bm-usage', 'bm-storage']);
-export const FEATURE_LABEL = Object.freeze({ 'bm-usage': '베어메탈 사용률', 'bm-storage': '베어메탈 스토리지', 'disk-audit-install': '디스크 점검 프로그램 설치(root)', 'focus-mon-prep': '집중 모니터링 접속 준비(root)', 'server-info': '서버 정보' });
+export const FEATURE_LABEL = Object.freeze({ 'bm-usage': '베어메탈 사용률', 'bm-storage': '베어메탈 스토리지', 'disk-audit-install': '디스크 점검 프로그램 설치(root)', 'focus-mon-prep': '집중 모니터링 접속 준비(root)', 'server-info': '서버 정보', 'server-cmd': '서버 명령 실행' });
 export const featureLabels = (ids = []) => ids.map((f) => FEATURE_LABEL[f] || f).join(' · ');
 
 /** 판정에 필요한 칸만(비밀 없음). */

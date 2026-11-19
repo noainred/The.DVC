@@ -39,7 +39,7 @@ export const CRITICAL_EVENTS = Object.freeze(['corp-stop', 'corp-resume', 'key-t
   'assign-set', 'assign-clear', 'account-stopped', 'account-resumed']);
 /** v3.24 계층 지정 단계 — all = 법인(모든 OS) · linux / windows = 법인 › OS 종류. */
 export const ASSIGN_LEVELS = Object.freeze(['all', 'linux', 'windows']);
-/** v3.26(3단계 · 설계 D11): 접속 방식 · 포트는 Windows 단계에만(WinRM 일 때만 남긴다 — SSH 는 기본이라 칸을 두지 않는다). */
+/** v3.25(3단계 · 설계 D11): 접속 방식 · 포트는 Windows 단계에만(WinRM 일 때만 남긴다 — SSH 는 기본이라 칸을 두지 않는다). */
 const viaOf = (level, a) => (level === 'windows' && a?.via === 'winrm' ? { via: 'winrm', ...(Number.isInteger(a.port) ? { port: a.port } : {}) } : {});
 const ACC_ID_RE = /^a_[0-9a-f]{12}$/;
 const MAX_ACCOUNT_STOPS = 500;
