@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>서버 명령 실행 — 정해 주실 것</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./sc.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#60a5fa}a:hover{color:#93c5fd}
+</style>
+</helmet>
+<div class="pg" style="min-height: 2100px; padding: 28px 32px 44px; display: flex; flex-direction: column; gap: 18px">
+
+  <div style="display: flex; flex-direction: column; gap: 6px; max-width: 1100px">
+    <div class="crumb">서버 명령 실행 · 결정</div>
+    <h1>정해 주실 것 14가지 — 기본값은 제가 권하는 쪽입니다</h1>
+    <p class="soft" style="font-size: 14px">기본값 그대로면 ‘기본값으로’ 한마디로 구현을 시작합니다. 바꿀 항목은 번호로 알려 주세요 — 예: ‘D4 포함, 나머지 기본값’.</p>
+  </div>
+
+  <div class="sec">
+    <div class="tw">
+      <table class="t" style="min-width: 1280px">
+        <thead>
+          <tr><th>번호</th><th>정할 것</th><th class="rec">기본값(권장)</th><th>다른 선택</th><th>기본값을 고른 이유 · 바꾸면 달라지는 것</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="k">D1</td><td class="k">배치</td><td class="rec">별도 특수 기능 — 접속 코어를 불러 쓴다</td><td>서버 정보에 탭으로 · 원격 명령 에이전트에 합침</td><td>계정마다 허용 기능을 따로 켤 수 있고, 서버 정보의 ‘원문은 저장하지 않는다’ 는 규칙과 섞이지 않음(①)</td></tr>
+          <tr><td class="k">D2</td><td class="k">프리셋 범위</td><td class="rec">읽기 전용만 — 22개(②)</td><td>서비스 재시작 같은 상태 변경도 포함</td><td>상태 변경은 대상 서버의 sudo 설정, 설정 소유자 등급 + 본인 OTP, ‘운영 작업’ 소속이 함께 필요 — 별도 단계로 다룸</td></tr>
+          <tr><td class="k">D3</td><td class="k">프리셋을 더하는 방법</td><td class="rec">코드에 고정 — 릴리스로 추가</td><td>설정 소유자가 화면에서 추가</td><td>화면에서 더하게 하면 그 사람에게는 자유 명령과 같아짐. 필요한 명령은 알려 주시면 목록에 넣음</td></tr>
+          <tr><td class="k">D4</td><td class="k">다른 주소로 가는 탐침<br><span class="dim" style="font-weight: 400">ping · 포트 확인</span></td><td class="rec">1차에서 뺌</td><td>넣음(대상 주소를 값으로 받음)</td><td>등록된 모든 서버가 내부망 탐색의 발판이 됨. 넣는다면 대상 제한 규칙과 함께 다음 단계로</td></tr>
+          <tr><td class="k">D5</td><td class="k">로그 조회<br><span class="dim" style="font-weight: 400">서비스 로그 · 최근 경고 · 오류</span></td><td class="rec">넣음 — 줄 수 상한(100줄 · 50줄)</td><td>뺌</td><td>장애 확인에 자주 쓰는 명령. 대신 로그에 찍힌 내용은 그대로 보임(비밀이 찍혀 있으면 그것도)</td></tr>
+          <tr><td class="k">D6</td><td class="k">출력 보관</td><td class="rec">메모리에만 · 마지막 실행 한 건 · 30분 뒤 지움</td><td>디스크에 이력을 남김(예: 7일)</td><td>출력에 무엇이 실릴지 장담할 수 없어 남기지 않는 쪽. 이력을 남기려면 보관 기간 · 암호화 · 백업 포함 여부를 함께 정해야 함</td></tr>
+          <tr><td class="k">D7</td><td class="k">실행 권한</td><td class="rec">관리자 + 전체 범위 · 실행마다 OTP 는 묻지 않음</td><td>설정 소유자 등급 + 본인 OTP</td><td>읽기 전용 프리셋만이라 서버 정보와 같은 등급으로. OTP 를 걸면 확인 한 번마다 코드를 넣어야 함</td></tr>
+          <tr><td class="k">D8</td><td class="k">어느 계정으로 쓸 수 있나</td><td class="rec">‘서버 명령’ 을 직접 켠 계정 · 키만</td><td>서버 정보를 켠 계정이면 함께 허용</td><td>원문 출력이 나오는 기능이라 계정마다 따로 허락하게 함(켜는 것은 지금 설정 규칙대로 설정 소유자 등급 + 본인 OTP). 처음 한 번 켜는 수고가 있음</td></tr>
+          <tr><td class="k">D9</td><td class="k">Windows</td><td class="rec">Linux 와 함께 넣고 ‘시험’ 표시</td><td>Linux 먼저 — Windows 는 실제 서버 확인 뒤</td><td>실제 Windows 서버로 확인하지 못했음. 표시를 달고 열어 두면 첫 실행이 곧 확인이 됨</td></tr>
+          <tr><td class="k">D10</td><td class="k">엣지 법인의 서버</td><td class="rec">그 엣지 포탈의 같은 화면에서 실행 — 중앙은 붙지 않음</td><td>중앙이 엣지에 작업을 보내 대신 실행</td><td>지금 규칙(비밀은 법인 밖으로 나가지 않는다) 그대로. 대신 실행은 엣지 수신 계약을 새로 만들어야 함 — 다음 단계 후보</td></tr>
+          <tr><td class="k">D11</td><td class="k">값을 받는 프리셋</td><td class="rec">이름 · 경로 두 종류 — 프리셋 5개</td><td>값 없는 프리셋만(17개)</td><td>서비스 상태 · 서비스 로그가 빠지면 쓸모가 크게 줄어듦. 값은 여섯 겹으로 막음(①)</td></tr>
+          <tr><td class="k">D12</td><td class="k">한 번에 대수 · 동시 실행</td><td class="rec">50대 · 동시 4대 · 포탈 전체에 일괄 하나</td><td>다른 값</td><td>서버 정보가 쓰는 값 그대로 — 새 숫자를 만들지 않음</td></tr>
+          <tr><td class="k">D13</td><td class="k">화면 이름 · 자리</td><td class="rec">‘서버 명령 실행’ · 특수 기능 › 서버(서버 정보 옆) · 도구 키 <span class="mono">server-cmd</span></td><td>다른 이름</td><td>도구 키는 권한 파일의 값이라 한 번 정하면 바꾸지 않음 — 이름은 지금 정하는 것이 좋음</td></tr>
+          <tr><td class="k">D14</td><td class="k">검증 수준</td><td class="rec">표준 + 변이 검증 + 반증 1인</td><td>표준만 · 전체 검증</td><td>자격증명과 명령 조립을 건드리므로 ‘위험한 수정’ 에 해당</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start">
+
+    <div class="sec">
+      <h2>구현 단계(안) — 한 릴리스로</h2>
+      <div class="tw">
+        <table class="t">
+          <thead>
+            <tr><th>순서</th><th>하는 일</th><th>확인</th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="k">1</td><td>코어가 명령의 끝 코드를 함께 돌려주게 · 일괄 틀을 공용으로 뽑기</td><td>서버 정보 시험이 그대로 통과</td></tr>
+            <tr><td class="k">2</td><td>프리셋 목록 · 값 검사 · 명령 만들기(순수 모듈) · 출력 다듬기 · 메모리 보관</td><td>값 검사 변이 · 시한 산수 · 목록 전체에 금지 명령이 없는지 스윕</td></tr>
+            <tr><td class="k">3</td><td>라우트 · 허용 기능 등록 · 도구 목록 · 감사 기록</td><td>권한 · 범위 · 감사에 출력이 실리지 않는지</td></tr>
+            <tr><td class="k">4</td><td>화면(③)</td><td>Chromium 1440 · 400 직접 확인</td></tr>
+            <tr><td class="k">5</td><td>반증 1인 → 고침 → 전량 검증 → 릴리스</td><td>자동 업그레이드 목록의 최신 버전 확인</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="dim">예상 2~3시간(추정 — 반증에서 나오는 결함 수와 CI · 릴리스 대기에 따라 달라집니다). 같은 커밋에서 앞 단계 주석에 남은 버전 표기(v3.26 → v3.25) 14곳도 고칩니다.</p>
+    </div>
+
+    <div class="sec">
+      <h2>확인하지 못한 것 · 한계</h2>
+      <div class="card">
+        <ul class="ul">
+          <li><i style="background: #fcd34d"></i><span>Windows 프리셋은 실제 서버 출력을 보지 못했습니다(이 환경에 Windows 서버가 없음)</span></li>
+          <li><i style="background: #fcd34d"></i><span>Linux 의 권한(로그 읽기 등)은 배포판 · 설정마다 달라 돌려 봐야 압니다 — 못 읽으면 서버가 낸 문구가 그대로 보입니다</span></li>
+          <li><i style="background: #fcd34d"></i><span>WinRM 은 시한에 걸리면 받은 만큼을 돌려주지 못합니다(전부 아니면 실패 — 지금 한계)</span></li>
+          <li><i style="background: #fcd34d"></i><span>sudo 를 쓰지 않으므로 root 가 필요한 정보는 볼 수 없습니다</span></li>
+          <li><i style="background: #fcd34d"></i><span>출력 속 비밀을 자동으로 가리지 못합니다 — 목록에서 그런 명령을 빼는 것으로 대신합니다</span></li>
+          <li><i style="background: #fcd34d"></i><span>이 아트보드들은 브라우저로 그려 확인하지 않았습니다(높이는 넉넉히 잡았습니다)</span></li>
+        </ul>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="sec">
+    <h2>다음 단계 후보(이번에 하지 않는 것)</h2>
+    <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px">
+      <div class="card" style="display: flex; flex-direction: column; gap: 6px">
+        <h3>상태를 바꾸는 프리셋</h3>
+        <p class="soft">서비스 재시작 등. 대상 서버의 sudo 규칙, 설정 소유자 등급 + 본인 OTP, ‘운영 작업’ 소속, 한 번에 한 대 같은 안전 장치를 함께 설계합니다.</p>
+      </div>
+      <div class="card" style="display: flex; flex-direction: column; gap: 6px">
+        <h3>탐침 · 엣지 대신 실행</h3>
+        <p class="soft">서버에서 다른 주소로 가는 확인(대상 제한 규칙과 함께)과, 중앙이 엣지에 작업을 보내 그 법인 안에서 돌리고 요약만 받는 길입니다.</p>
+      </div>
+      <div class="card" style="display: flex; flex-direction: column; gap: 6px">
+        <h3>보기 편의</h3>
+        <p class="soft">같은 출력끼리 묶어 보기(다른 서버만 눈에 띄게), 출력 이력(보관 규칙을 정한 뒤), 자주 쓰는 프리셋 고정입니다.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="note"><b>컨펌해 주시면</b> — 구현은 Opus 로 바꿔 진행하고, 끝나면 릴리스를 게시한 뒤 자동 업그레이드 목록의 최신 버전까지 확인해 보고합니다.</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2100}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>
