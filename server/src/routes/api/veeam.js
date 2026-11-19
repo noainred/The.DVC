@@ -73,6 +73,7 @@ import { currentLicenses } from '../../veeam/licenseWatch.js';
 import { licenseHistory, repoHistory } from '../../veeam/historyDb.js';
 import { demoEmViews, demoLicenses, demoSessionDetail, DEMO_EM_IDS } from '../../mock/demo/veeamEm.js';
 import { emSourcesForVcenter, emLinkedVcenter, emSourcesRev } from '../../veeam/em/sources.js';   // v2.795 EM 을 vCenter 화면의 Veeam 출처로(VM 단위)   // v2.784 백업 표시(중요도·백업 필요·메모)
+import { scopeSig } from '../../util/scopeSig.js';
 
 /** 실패 사유의 일반 문구(관리자가 아닌 계정용) — 원문에는 Veeam 주소·포트가 들어간다(전송 오류·리다이렉트·TLS 문구). v2.751 검토 #7. */
 function genericError(r) {
@@ -1209,7 +1210,7 @@ function staleVcOutOfScope(req, snap, vc) {
 function writeKeyOf(req, snap) {
   if (!['admin', 'operator'].includes(req.user?.role) || isDemoGuest(req.user)) return 'none';
   const w = writeScopedVcenterIds(req.user, snap);
-  return w ? [...w].sort().join(',') : 'all';
+  return scopeSig(w);
 }
 
 /** v2.784: 이 계정이 이 vCenter 의 백업 표시를 바꿀 수 있는가 — 화면이 편집 칸을 여는 값(서버 PUT 판정과 같은 조건). */

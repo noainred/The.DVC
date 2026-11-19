@@ -8,6 +8,9 @@
  *         keyRef(SSH 키 저장소 키 id — 7b) · credRef(법인 공통 계정 id — 7b) · vcenterId(법인 — 7b 온보딩) ·
  *         collectVia('edge'|'central'|'auto' — 7b 온보딩이 기록 · 경계 판정은 agent 그대로) · viaChangedAt · note · onboardAt }
  *   ⚠ 7b: keyRef · credRef 는 **비밀 참조**다 — 접속처(host · port · 계정)가 바뀌면 요청이 다시 고르지 않는 한 승계하지 않는다(secretCarry 와 같은 판정).
+ *   v3.24(서버 접속 — 설계 docs/design/server-access §4.6): os('linux'|'windows'|'' — 계층 지정의 OS 종류) · inherit({ key, at, by } — 계층 지정을 물려받아도 된다는
+ *   **승인** · 설정 소유자 등급 + 본인 OTP 를 지난 `setBmServerInherit` 만 세운다). 승인은 그때의 주소 · 포트 · OS(`inheritKeyOf`)에 묶인다 — 셋 중 하나라도 바뀌면
+ *   어느 쓰기 경로로 바뀌었든 승인이 저절로 효력을 잃는다(`inheritActive` — 저장 비밀을 OTP 없이 새 주소 · 다른 OS 로 보내지 않게). 엣지가 수집하는 서버(agent)는 물려받지 않는다.
  * 설정: { intervalMinutes } — 사용자가 정하는 수집 주기(기본 10분, 1~1440 클램프).
  */
 
@@ -111,7 +114,27 @@ export function bmServerInputIssue(body = {}) {
   if (body.credRef !== undefined && body.credRef !== '' && !REF_RE.acc.test(String(body.credRef))) return '공통 계정 참조가 올바르지 않습니다.';
   if (body.collectVia !== undefined && body.collectVia !== '' && !COLLECT_VIA.includes(String(body.collectVia))) return '수집 경로는 edge · central · auto 중 하나입니다.';
   if (body.note !== undefined && String(body.note).length > 500) return '메모는 500자까지입니다.';
+  if (body.os !== undefined && body.os !== '' && !SERVER_OS.includes(String(body.os))) return 'OS 는 linux · windows 중 하나입니다.';
   return null;
+}
+
+/** v3.24: 서버 OS 종류(계층 지정 단계). 빈 값 = 미지정. */
+export const SERVER_OS = Object.freeze(['linux', 'windows']);
+/**
+ * 계층 지정 승인이 묶이는 값 — 주소 · 포트 · OS · **법인**(판정 하나 — 등록부 · refs · 화면). 계정은 물려받는 쪽이 정하므로 넣지 않는다.
+ *   v3.24 반증 F1(재현): 법인이 빠져 있어 승인 뒤 법인 칸만 바꾸면(OTP 없는 서버 저장) **다른 법인의 공통 계정 비밀번호**가 그 서버로 갔다.
+ */
+export function inheritKeyOf(s = {}) {
+  return `${String(s.host ?? '').trim().toLowerCase()}:${Number(s.port) || 22}|${SERVER_OS.includes(s.os) ? s.os : ''}|${String(s.vcenterId ?? '').trim()}`;
+}
+/** 이 서버가 지금 계층 지정을 물려받아도 되는가 — 승인이 있고, 승인 때의 주소 · 포트 · OS · 법인과 같고, 엣지 위임 서버가 아니다. */
+export function inheritActive(s = {}) {
+  const ih = s && typeof s.inherit === 'object' && s.inherit ? s.inherit : null;
+  return !!ih && typeof ih.key === 'string' && ih.key === inheritKeyOf(s) && !String(s.agent || '').trim();
+}
+/** 서버가 자기 자격(키 · 공통 계정 · 비밀번호)을 갖고 있는가 — 있으면 ‘따로 정함’ 이고 계층 지정을 보지 않는다. */
+export function hasOwnCred(s = {}) {
+  return !!(String(s.keyRef || '').trim() || String(s.credRef || '').trim() || (typeof s.password === 'string' && s.password !== ''));
 }
 
 /** 7b: 참조 id 꼴(키 저장소 `k_` · 공통 계정 `a_` + 12 hex). */
@@ -204,12 +227,17 @@ function applyServerInput(data, body = {}, { now = Date.now() } = {}) {
   // 7b: 인증 방식 고정 — 'password' 면 공통 계정에 기본 키가 있어도 비밀번호로(onboard/refs.js resolveOsAuth). 빈 값 = 키 우선(기본).
   if (body.osAuth !== undefined && !(bindRefused && !bind.moved)) { if (body.osAuth === 'password') server.osAuth = 'password'; else delete server.osAuth; }
   if (body.onboardAt !== undefined && Number(body.onboardAt) > 0) server.onboardAt = Number(body.onboardAt);
+  // v3.24: OS 종류 — 칸을 주면 그 값(빈 값 = 미지정), 안 주면 기존 유지. 바뀌면 계층 지정 승인은 저절로 효력을 잃는다(inheritActive — 승인 칸은 요청이 세울 수 없다).
+  if (body.os !== undefined) { const v = SERVER_OS.includes(String(body.os)) ? String(body.os) : ''; if (v) server.os = v; else delete server.os; }
   // v2.993(OS 주소 제안 — 설계 bm-folders §13 ②): '주소만' 표지 — 새 항목에서 요청이 true 를 줄 때만 세운다(계정 · 비밀번호 없이 주소만 기록).
   //   이 표지가 있는 동안 사용률 수집 색인(bmusage/targets.js indexOsHosts)이 이 항목을 쓰지 않는다(계정 없는 SSH 시도 · 엣지 위임 이탈 방지).
   //   계정이 생기면(비밀번호 · 키 · 공통 계정 참조) 표지를 지운다 — 그때부터 보통 항목. false 를 주면 지운다.
   if (!existing && body.addrOnly === true) server.addrOnly = true;
   else if (body.addrOnly === false) delete server.addrOnly;
-  if (server.addrOnly && (server.password || server.keyRef || server.credRef)) delete server.addrOnly;
+  if (server.addrOnly && (server.password || server.keyRef || server.credRef || inheritActive(server))) delete server.addrOnly;
+  // v3.24 반증 F5(재현): 자기 자격이 생기면 계층 승인을 지운다 — 남겨 두면 위 단계 지정이 바뀌는 동안(이 서버는 ‘따로 정함’ 이라 확인 대상에서 빠진다)
+  //   묻혀 있다가 OTP 없는 ‘떼기’ 한 번으로 새 지정의 비밀번호를 물려받았다. 다시 물려받으려면 소유자 + OTP 승인.
+  if (hasOwnCred(server)) delete server.inherit;
   if (!existing) data.servers.push(server);
   return { ok: true, server: redact(server), created: !existing, ...(droppedSecrets.length ? { droppedSecrets } : {}), ...(bindRefused ? { bindRefused: true } : {}) };
 }
@@ -275,13 +303,14 @@ export function setBmServerKeyRef(id, keyRef, { expectAddr = null } = {}) {
   if (expectAddr != null && addr !== String(expectAddr)) return { ok: false, code: 'moved', status: 409, reason: '서버 주소 · 포트 · 계정이 바뀌었습니다 — 화면을 다시 읽으세요.' };
   const k = String(keyRef || '').trim();
   if (k && !REF_RE.key.test(k)) return { ok: false, code: 'bad-ref', reason: 'SSH 키 참조가 올바르지 않습니다.' };
-  const previous = { keyRef: String(s.keyRef || ''), osAuth: s.osAuth === 'password' ? 'password' : '', addrOnly: s.addrOnly === true, addr };
-  const had = { keyRef: s.keyRef, osAuth: s.osAuth, addrOnly: s.addrOnly };
+  const previous = { keyRef: String(s.keyRef || ''), osAuth: s.osAuth === 'password' ? 'password' : '', addrOnly: s.addrOnly === true, addr, inherit: s.inherit ? { ...s.inherit } : null };
+  const had = { keyRef: s.keyRef, osAuth: s.osAuth, addrOnly: s.addrOnly, inherit: s.inherit };
   if (k) s.keyRef = k; else delete s.keyRef;
   delete s.osAuth;
   if (s.addrOnly && (s.password || s.keyRef || s.credRef)) delete s.addrOnly;
+  if (hasOwnCred(s)) delete s.inherit;   // v3.24 반증 F5: 자기 자격이 생기면 계층 승인을 지운다(되돌리기는 previous.inherit)
   try { persist(); } catch (e) {
-    for (const f of ['keyRef', 'osAuth', 'addrOnly']) { if (had[f] === undefined) delete s[f]; else s[f] = had[f]; }
+    for (const f of ['keyRef', 'osAuth', 'addrOnly', 'inherit']) { if (had[f] === undefined) delete s[f]; else s[f] = had[f]; }
     return { ok: false, code: e?.code === 'SECRETS_POLICY_UNAVAILABLE' ? 'SECRETS_POLICY_UNAVAILABLE' : 'write-failed', status: 503, reason: `OS 계정 등록부를 쓰지 못했습니다(${String(e?.code || e?.message || e).slice(0, 60)}).` };
   }
   return { ok: true, previous };
@@ -296,15 +325,130 @@ export function restoreBmServerKeyRef(id, previous = {}) {
   const s = data.servers.find((x) => x.id === String(id || ''));
   if (!s) return { ok: false, code: 'not-found', status: 404, reason: '서버가 그 사이 지워졌습니다.' };
   if (addrKey(s.host, s.port, s.username) !== String(previous.addr || '')) return { ok: false, code: 'moved', status: 409, reason: '그 사이 서버 주소 · 포트 · 계정이 바뀌어 되돌리지 않았습니다(옛 키를 새 주소에 묶지 않음) — 서버 설정을 확인하세요.' };
-  const had = { keyRef: s.keyRef, osAuth: s.osAuth, addrOnly: s.addrOnly };
+  const had = { keyRef: s.keyRef, osAuth: s.osAuth, addrOnly: s.addrOnly, inherit: s.inherit };
   if (previous.keyRef) s.keyRef = previous.keyRef; else delete s.keyRef;
   if (previous.osAuth === 'password') s.osAuth = 'password'; else delete s.osAuth;
   if (previous.addrOnly) s.addrOnly = true; else delete s.addrOnly;
+  if (previous.inherit) s.inherit = { ...previous.inherit };   // 그 사이 OS · 법인이 바뀌었으면 승인 키가 달라 저절로 효력이 없다(inheritActive)
   try { persist(); } catch (e) {
-    for (const f of ['keyRef', 'osAuth', 'addrOnly']) { if (had[f] === undefined) delete s[f]; else s[f] = had[f]; }
+    for (const f of ['keyRef', 'osAuth', 'addrOnly', 'inherit']) { if (had[f] === undefined) delete s[f]; else s[f] = had[f]; }
     return { ok: false, code: 'write-failed', status: 503, reason: `되돌리지 못했습니다(${String(e?.code || e?.message || e).slice(0, 60)}).` };
   }
   return { ok: true };
+}
+
+/**
+ * v3.24 계층 지정 — 이 서버가 법인 › OS 종류의 지정을 물려받도록 **승인**(on) · 승인 거두기(off).
+ *  · ⚠ 저장 비밀(공통 계정)을 주소에 묶는 쓰기다 — 부르는 곳은 `sshaccess/service.js` 하나(설정 소유자 등급 + 본인 OTP 라우트 뒤 · 소스 스윕).
+ *  · `expectAddr` = 화면이 본 접속처(bindRule.addrKey) — 다르면 409(낡은 화면의 승인을 바뀐 주소에 묶지 않게 — setBmServerKeyRef 와 같은 규칙).
+ *  · clearOwn: ‘물려받기로 되돌리기’ — 서버 자기 자격 참조(키 · 공통 계정 · 비밀번호 고정)를 떼고 승인한다. 서버 비밀번호도 지운다(남아 있으면 ‘따로 정함’ 으로 남는다).
+ *  · 엣지가 수집하는 서버는 물려받지 않는다(그 엣지가 자기 계정 · 키로 접속한다).
+ * @returns {{ok:true, previous:object} | {ok:false, code:string, status?:number, reason:string}}  previous 는 비밀을 담지 않는다(되돌리기는 메모리의 previousSecret 로)
+ */
+export function setBmServerInherit(id, { on = true, clearOwn = false, expectAddr = null, expectKey = null, by = '', now = Date.now() } = {}) {
+  const data = load();
+  if (loadErr.get()) return { ok: false, code: 'registry-unreadable', status: 503, reason: 'OS 계정 등록부를 읽지 못해 바꾸지 않았습니다.' };
+  const s = data.servers.find((x) => x.id === String(id || ''));
+  if (!s) return { ok: false, code: 'not-found', status: 404, reason: '서버를 찾을 수 없습니다.' };
+  if (String(s.agent || '').trim()) return { ok: false, code: 'edge-delegated', status: 409, reason: '엣지가 수집하는 서버입니다 — 계정은 그 엣지 포탈에서 정합니다(비밀은 법인 밖으로 나가지 않습니다).' };
+  const addr = addrKey(s.host, s.port, s.username);
+  if (expectAddr != null && addr !== String(expectAddr)) return { ok: false, code: 'moved', status: 409, reason: '서버 주소 · 포트 · 계정이 바뀌었습니다 — 화면을 다시 읽으세요.' };
+  // v3.24 반증 F8: 승인은 화면이 본 승인 키(주소 · 포트 · OS · 법인)와 같을 때만 — 본 뒤 OS · 법인이 바뀌면 소유자가 본 것과 다른 단계를 승인하게 된다.
+  if (on && expectKey != null && inheritKeyOf(s) !== String(expectKey)) return { ok: false, code: 'moved', status: 409, reason: '서버의 OS 종류 · 법인이 바뀌었습니다 — 화면을 다시 읽으세요.' };
+  const FIELDS = ['inherit', 'keyRef', 'credRef', 'osAuth', 'addrOnly', 'password'];
+  const had = Object.fromEntries(FIELDS.map((f) => [f, s[f] === undefined ? undefined : structuredClone(s[f])]));
+  if (on) {
+    if (!clearOwn && hasOwnCred(s)) return { ok: false, code: 'has-own', status: 409, reason: '이 서버는 따로 정한 계정이 있습니다 — ‘물려받기로 되돌리기’ 로 그 계정을 떼면서 승인하세요.' };
+    if (clearOwn) { delete s.keyRef; delete s.credRef; delete s.osAuth; s.password = ''; }
+    s.inherit = { key: inheritKeyOf(s), at: now, by: String(by || '').slice(0, 64) };
+    delete s.addrOnly;
+  } else {
+    delete s.inherit;
+  }
+  try { persist(); } catch (e) {
+    for (const f of FIELDS) { if (had[f] === undefined) delete s[f]; else s[f] = had[f]; }
+    return { ok: false, code: e?.code === 'SECRETS_POLICY_UNAVAILABLE' ? 'SECRETS_POLICY_UNAVAILABLE' : 'write-failed', status: 503, reason: `OS 계정 등록부를 쓰지 못했습니다(${String(e?.code || e?.message || e).slice(0, 60)}).` };
+  }
+  return { ok: true, previous: { addr, inherit: had.inherit ? { ...had.inherit } : null, keyRef: had.keyRef || '', credRef: had.credRef || '', osAuth: had.osAuth || '', addrOnly: had.addrOnly === true, hadPassword: !!had.password } };
+}
+
+/**
+ * v3.24 ‘따로 정하기 — 다른 공통 계정’: **같은 주소**에서 이 서버가 쓸 공통 계정만 바꾼다(키 고르기 `setBmServerKeyRef` 와 같은 꼴).
+ *   서버에 고정한 키 · 비밀번호 고정 · 계층 승인은 뗀다(고른 계정이 그대로 쓰이게). 서버 비밀번호는 건드리지 않는다(공통 계정이 비밀을 가진다 — saveAccount 가 강제).
+ *  · ⚠ 비밀을 주소에 묶는 쓰기 — 부르는 곳은 sshaccess/service.js 하나(설정 소유자 등급 + OTP 라우트 뒤). 접속 확인에 실패하면 서비스가 restoreBmServerCredRef 로 되돌린다.
+ */
+export function setBmServerCredRef(id, credRef, { expectAddr = null } = {}) {
+  const data = load();
+  if (loadErr.get()) return { ok: false, code: 'registry-unreadable', status: 503, reason: 'OS 계정 등록부를 읽지 못해 바꾸지 않았습니다.' };
+  const s = data.servers.find((x) => x.id === String(id || ''));
+  if (!s) return { ok: false, code: 'not-found', status: 404, reason: '서버를 찾을 수 없습니다.' };
+  if (String(s.agent || '').trim()) return { ok: false, code: 'edge-delegated', status: 409, reason: '엣지가 수집하는 서버입니다 — 계정은 그 엣지 포탈에서 정합니다.' };
+  const addr = addrKey(s.host, s.port, s.username);
+  if (expectAddr != null && addr !== String(expectAddr)) return { ok: false, code: 'moved', status: 409, reason: '서버 주소 · 포트 · 계정이 바뀌었습니다 — 화면을 다시 읽으세요.' };
+  const c = String(credRef || '').trim();
+  if (!REF_RE.acc.test(c)) return { ok: false, code: 'bad-ref', reason: '공통 계정 참조가 올바르지 않습니다.' };
+  const FIELDS = ['credRef', 'keyRef', 'osAuth', 'inherit', 'addrOnly'];
+  const had = Object.fromEntries(FIELDS.map((f) => [f, s[f] === undefined ? undefined : structuredClone(s[f])]));
+  s.credRef = c; delete s.keyRef; delete s.osAuth; delete s.inherit; delete s.addrOnly;
+  try { persist(); } catch (e) {
+    for (const f of FIELDS) { if (had[f] === undefined) delete s[f]; else s[f] = had[f]; }
+    return { ok: false, code: 'write-failed', status: 503, reason: `OS 계정 등록부를 쓰지 못했습니다(${String(e?.code || e?.message || e).slice(0, 60)}).` };
+  }
+  return { ok: true, previous: { addr, credRef: had.credRef || '', keyRef: had.keyRef || '', osAuth: had.osAuth || '', inherit: had.inherit ? { ...had.inherit } : null, addrOnly: had.addrOnly === true } };
+}
+/** 되돌리기(setBmServerCredRef · setBmServerInherit 의 previous). 그 사이 접속처가 바뀌었으면 되돌리지 않는다(restoreBmServerKeyRef 와 같은 규칙). */
+export function restoreBmServerAccess(id, previous = {}) {
+  const data = load();
+  if (loadErr.get()) return { ok: false, code: 'registry-unreadable', status: 503, reason: 'OS 계정 등록부를 읽지 못해 되돌리지 못했습니다.' };
+  const s = data.servers.find((x) => x.id === String(id || ''));
+  if (!s) return { ok: false, code: 'not-found', status: 404, reason: '서버가 그 사이 지워졌습니다.' };
+  if (addrKey(s.host, s.port, s.username) !== String(previous.addr || '')) return { ok: false, code: 'moved', status: 409, reason: '그 사이 서버 주소 · 포트 · 계정이 바뀌어 되돌리지 않았습니다 — 서버 설정을 확인하세요.' };
+  const FIELDS = ['credRef', 'keyRef', 'osAuth', 'inherit', 'addrOnly'];
+  const had = Object.fromEntries(FIELDS.map((f) => [f, s[f] === undefined ? undefined : structuredClone(s[f])]));
+  for (const f of ['credRef', 'keyRef', 'osAuth']) { if (previous[f]) s[f] = previous[f]; else delete s[f]; }
+  if (previous.inherit) s.inherit = { ...previous.inherit }; else delete s.inherit;
+  if (previous.addrOnly) s.addrOnly = true; else delete s.addrOnly;
+  try { persist(); } catch (e) {
+    for (const f of FIELDS) { if (had[f] === undefined) delete s[f]; else s[f] = had[f]; }
+    return { ok: false, code: 'write-failed', status: 503, reason: `되돌리지 못했습니다(${String(e?.code || e?.message || e).slice(0, 60)}).` };
+  }
+  return { ok: true };
+}
+
+/** v3.24 OS 종류 쓰기(같은 주소 — OS 만). OS 가 바뀌면 계층 승인은 저절로 효력을 잃는다(inheritActive). */
+export function setBmServerOs(id, os) {
+  const data = load();
+  if (loadErr.get()) return { ok: false, code: 'registry-unreadable', status: 503, reason: 'OS 계정 등록부를 읽지 못해 바꾸지 않았습니다.' };
+  const s = data.servers.find((x) => x.id === String(id || ''));
+  if (!s) return { ok: false, code: 'not-found', status: 404, reason: '서버를 찾을 수 없습니다.' };
+  const v = String(os || '');
+  if (v && !SERVER_OS.includes(v)) return { ok: false, code: 'bad-os', reason: 'OS 는 linux · windows 중 하나입니다.' };
+  const had = s.os;
+  if (v) s.os = v; else delete s.os;
+  if (had === s.os) return { ok: true, changed: false };
+  try { persist(); } catch (e) {
+    if (had === undefined) delete s.os; else s.os = had;
+    return { ok: false, code: 'write-failed', status: 503, reason: `OS 계정 등록부를 쓰지 못했습니다(${String(e?.code || e?.message || e).slice(0, 60)}).` };
+  }
+  return { ok: true, changed: true };
+}
+
+/** v3.24 OS 종류 여러 대(제안 일괄 적용) — 한 번 쓰기. map: id → 'linux' | 'windows'. 모르는 id · 값은 건너뛴다. */
+export function setBmServersOs(map = {}) {
+  const data = load();
+  if (loadErr.get()) return { ok: false, code: 'registry-unreadable', status: 503, reason: 'OS 계정 등록부를 읽지 못해 바꾸지 않았습니다.' };
+  const had = new Map();
+  for (const s of data.servers) {
+    const v = Object.hasOwn(map, s.id) ? String(map[s.id] || '') : null;
+    if (v == null || !SERVER_OS.includes(v) || s.os === v) continue;
+    had.set(s.id, s.os); s.os = v;
+  }
+  if (!had.size) return { ok: true, changed: 0 };
+  try { persist(); } catch (e) {
+    for (const s of data.servers) if (had.has(s.id)) { const h = had.get(s.id); if (h === undefined) delete s.os; else s.os = h; }
+    return { ok: false, code: 'write-failed', status: 503, reason: `OS 계정 등록부를 쓰지 못했습니다(${String(e?.code || e?.message || e).slice(0, 60)}).` };
+  }
+  return { ok: true, changed: had.size };
 }
 
 export function removeBmServer(id) {

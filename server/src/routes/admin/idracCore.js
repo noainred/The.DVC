@@ -23,6 +23,7 @@ import { listDatacenters, getDatacenterAssign } from '../../datacenter/store.js'
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { adminOnly, hostVcByTag, hostNameByTag, hostNicsByTag, withMappedVc, remoteServersResolved, analysisServersWithRemote, invForServer, fullScopeOnlyWith } from './shared.js';
 import { scanSiteIndex, withScanDatacenter } from '../../insights/analysisServers.js'; // v2.969: 상태 보드도 Agent 스캔 대역 법인
+import { scopeSig } from '../../util/scopeSig.js';
 // v2.611 AUTHZ2611: 전 법인 등록부·동작은 전체 범위 계정만(v2.607 fleetWideOnly 의 형제 등록부).
 const fleetOnly = fullScopeOnlyWith('iDRAC 등록·연결 테스트·즉시 수집·전력 설정은 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꾸거나 실행할 수 있습니다.');
 
@@ -629,7 +630,7 @@ adminRouter.get('/idrac/parts-inventory', adminOnly, async (req, res) => {
     if (cat && !isPartCat(cat)) return res.status(400).json({ ok: false, reason: `알 수 없는 카테고리: ${cat}` });
     // v2.629(AUTHZ2629-03): 범위 계정은 귀속 서버만 — 캐시 키에 범위를 넣는다(없으면 먼저 연 사람의 판본이 나간다).
     const sc = idracScopeOf(req);
-    const key = `parts|${sc ? [...sc.allowed].sort().join(',') : 'all'}|${req.originalUrl}`;
+    const key = `parts|${scopeSig(sc ? sc.allowed : null)}|${req.originalUrl}`;
     const payload = await snapMemo('idrac-parts', key, 15_000, () => {
       const r = scopeIdracServers(req, analysisServersWithRemote(req));
       const out = partBuckets(r.servers, invForServer, { cat, q: String(req.query.q || '') });

@@ -1,5 +1,5 @@
 /**
- * SshAccessSettings.jsx — 설정 › 보안 › SSH 공용 접속(v3.9.0 · 설계 docs/design/ssh-access · 시안 Ssh · SshKeys · SshPick · SshUse · SshSec).
+ * SshAccessSettings.jsx — 설정 › 보안 › 서버 접속(SSH · Windows)(v3.9.0 SSH 공용 접속 · v3.24 계정 계층 · 공통 계정 — 설계 docs/design/ssh-access · server-access).
  *
  * 7b SSH 키 저장소(키 + 법인 공통 계정)와 OS 계정 등록부(서버) 위에 얹은 화면이다 — 새 저장소가 아니다.
  *  · 탭: 법인 · 서버 / 키 폴더 / 쓰는 기능 / 키 보안. 판정(이 서버에 쓸 수 있는 키 · 키 점검 등급)은 서버가 한다 — 화면은 그린다.
@@ -21,16 +21,12 @@ import {
   shortFp, dateTime, ageDays, featuresText, folderTree, keysInFolder, inboxInFolder, sortedCheck, suggestKeyName, serverStatus, auditTime, COLLECT_FEATURES,
 } from './sshAccessText.js';
 import './sshAccess.css';
+import { errText, must, Chip, Otp, FeaturePicker, featuresChosen } from './sshAccessParts.jsx';   // v3.24: 서버 접속 계층 화면과 함께 쓰는 조각
+import { HierTab, AccountsTab } from './ServerAccessHier.jsx';   // v3.24: 계정 계층(법인 › OS 종류 › 서버) · 공통 계정
 import { copyText as copyToClipboard } from '../util/copyText.js';   // v3.10.6: HTTP 포탈에서도 복사(Clipboard API → execCommand 폴백 · 실패는 false)
 import { backdropClose } from '../components/backdropClose.js'; // 96회차(95회차 남긴 것 ①): 창 안에서 끌다 배경에서 떼면 닫히던 것 — 누름 · 뗌 모두 배경일 때만
 
-const errText = (e) => e?.body?.reason || e?.message || String(e);
-/** 쓰기 응답 — ok:false(400 · 409 를 던지지 않는 api.js 경로)를 오류로 바꾼다. */
-function must(r) {
-  if (r && r.ok === false) { const e = new Error(r.reason || r.code || '실패했습니다'); e.body = r; throw e; }
-  return r;
-}
-const TABS = [['servers', '법인 · 서버'], ['folders', '키 폴더'], ['features', '쓰는 기능'], ['security', '키 보안']];
+const TABS = [['hier', '계정 계층'], ['accounts', '공통 계정'], ['servers', '법인 · 서버(키)'], ['folders', '키 폴더'], ['features', '쓰는 기능'], ['security', '키 보안']];
 
 function useLoad(path) {
   const [st, setSt] = useState({ loading: true, resp: null, err: null });
@@ -46,31 +42,9 @@ function useLoad(path) {
   useEffect(() => { load(); }, [path]);   // eslint-disable-line react-hooks/exhaustive-deps -- load 는 path 만 본다(gen 으로 늦은 응답 버림)
   return [st, load];
 }
-const Chip = ({ tone = 'muted', children, title }) => <span className="ssa-chip" style={{ color: toneVar(tone), borderColor: 'currentColor' }} title={title}>{children}</span>;
-const Otp = ({ value, onChange }) => (
-  <label className="ssa-otp">본인 OTP <input className="input" inputMode="numeric" value={value} onChange={(e) => onChange(e.target.value)} maxLength={8} autoComplete="one-time-code" /></label>
-);
-/**
- * 쓸 수 있는 기능 고르기 — 렌더 밖 컴포넌트(안에서 정의하면 누를 때마다 다시 마운트돼 포커스를 잃는다 · E-L1).
- * allowAll: ‘제한 없음(예전 방식)’ 칸을 보인다(값 null). 예전 키를 편집 폼에서 저장만 해도 기능이 비는 사고를 막는다(E-H3).
- */
-function FeaturePicker({ catalog, value, onChange, allowAll = false }) {
-  const all = value == null;
-  const list = Array.isArray(value) ? value : [];
-  return (
-    <div className="ssa-feats" role="group" aria-label="쓸 수 있는 기능">
-      {allowAll && <label><input type="checkbox" checked={all} onChange={() => onChange(all ? [] : null)} /> 제한 없음(예전 방식 — 모든 기능)</label>}
-      {(catalog || []).map((f) => (
-        <label key={f.id}><input type="checkbox" disabled={all} checked={all || list.includes(f.id)} onChange={() => onChange(list.includes(f.id) ? list.filter((x) => x !== f.id) : [...list, f.id])} /> {f.label}{f.ready === false ? ' (다음 단계)' : ''}</label>
-      ))}
-    </div>
-  );
-}
-const featuresChosen = (v) => v == null || (Array.isArray(v) && v.length > 0);
-
 export default function SshAccessSettings() {
   const [st, load] = useLoad('/settings/ssh-access');
-  const [tab, setTab] = useState('servers');
+  const [tab, setTab] = useState('hier');
   const [msg, setMsg] = useState({ text: '', tone: 'muted' });
   const v = st.resp;
   const say = (text, tone = 'muted') => setMsg({ text, tone });
@@ -78,15 +52,21 @@ export default function SshAccessSettings() {
   if (st.err && !v) return <div className="ssa"><ErrorBox error={st.err} /></div>;
   if (!v) return <div className="ssa"><p className="ssa-note">읽는 중…</p></div>;
   const keyCount = (v.keys || []).filter((k) => k.status === 'active').length;
-  const srvKey = (v.servers || []).filter((s) => s.keyMode === 'pinned' || s.keyMode === 'corp-default').length;
-  const srvPw = (v.servers || []).filter((s) => s.keyMode === 'password').length;
+  // v3.24: 서버 수 · 출처(물려받음 · 따로 정함 · 승인 대기 · 미설정) — 서버가 판정한 source 그대로 센다(엣지 위임 서버는 그 엣지가 정한다 — 따로 센다).
+  const allSrv = v.servers || [];
+  const central = allSrv.filter((s) => !s.agent);
+  const nInherit = central.filter((s) => s.source === 'os' || s.source === 'corp').length;
+  const nOwn = central.filter((s) => s.source === 'own').length;
+  const nPending = central.filter((s) => s.source === 'none' && s.pending).length;
+  const nNone = central.filter((s) => s.source === 'none' && !s.pending).length;
+  const nStopped = (v.accounts || []).filter((a) => a.stop?.current).length;
   const sum = v.check?.summary || {};
   const checkTone = sum.bad ? 'bad' : sum.warn ? 'warn' : sum.unknown ? 'muted' : 'ok';
   return (
     <div className="ssa">
       <div className="ssa-head">
         <div className="ssa-title">
-          <p className="ssa-note"><BoldText text={'Linux 서버에 붙는 SSH 계정 · 키를 법인마다 한 곳에서 정합니다. **법인 공통 계정**(기본 키)을 그 법인 서버가 함께 쓰고, 다른 키가 필요한 서버만 키를 **이름으로 고정**합니다. 지금 이 접속을 쓰는 기능은 베어메탈 사용률 · 베어메탈 스토리지입니다.'} /></p>
+          <p className="ssa-note"><BoldText text={'서버(Linux · Windows)에 붙는 계정을 **법인 › OS 종류 › 서버** 순으로 정합니다. 위 단계에 한 번 정하면 아래 서버가 **물려받고**, 서버에서 따로 정하면 그 서버만 다르게 씁니다. 비밀번호 · 개인키는 계정 쪽에만 있고 다시 보여 주지 않습니다. 지금 이 접속을 쓰는 기능은 베어메탈 사용률 · 베어메탈 스토리지입니다.'} /></p>
         </div>
         <div className="ssa-acts"><button className="btn btn-sm" type="button" onClick={load} disabled={st.loading}>{st.loading ? '읽는 중…' : '다시 읽기'}</button></div>
       </div>
@@ -104,16 +84,19 @@ export default function SshAccessSettings() {
         </p>
       )}
       <div className="ssa-kpis">
-        <div className="ssa-kpi"><span className="ssa-sub">법인 · OS 등록 서버</span><b>{(v.corps || []).length}곳 · {v.registryUnreadable ? '—' : `${(v.servers || []).length}대`}</b></div>
-        <div className="ssa-kpi"><span className="ssa-sub">키로 접속하는 서버</span><b style={{ color: srvKey ? toneVar('ok') : undefined }}>{v.registryUnreadable ? '—' : `${srvKey}대`}</b></div>
-        <div className="ssa-kpi"><span className="ssa-sub">비밀번호로 접속하는 서버</span><b style={{ color: srvPw ? toneVar('warn') : undefined }}>{v.registryUnreadable ? '—' : `${srvPw}대`}</b></div>
-        <div className="ssa-kpi"><span className="ssa-sub">활성 키</span><b>{v.storeUnreadable ? '—' : `${keyCount}개`}</b></div>
+        <div className="ssa-kpi"><span className="ssa-sub">법인 · 서버</span><b>{(v.corps || []).length}곳 · {v.registryUnreadable ? '—' : `${allSrv.length}대`}</b>{allSrv.length !== central.length && <span className="ssa-sub">엣지가 정하는 서버 {allSrv.length - central.length}대 포함</span>}</div>
+        <div className="ssa-kpi"><span className="ssa-sub">물려받는 서버</span><b style={{ color: nInherit ? toneVar('ok') : undefined }}>{v.registryUnreadable ? '—' : `${nInherit}대`}</b></div>
+        <div className="ssa-kpi"><span className="ssa-sub">따로 정한 서버</span><b>{v.registryUnreadable ? '—' : `${nOwn}대`}</b></div>
+        <div className="ssa-kpi"><span className="ssa-sub">승인 대기 · 미설정</span><b style={{ color: nPending || nNone ? toneVar('warn') : undefined }}>{v.registryUnreadable ? '—' : `${nPending}대 · ${nNone}대`}</b></div>
+        <div className="ssa-kpi"><span className="ssa-sub">공통 계정 정지 · 활성 키</span><b style={{ color: nStopped ? toneVar('bad') : undefined }}>{v.storeUnreadable ? '—' : `${nStopped}개 · ${keyCount}개`}</b></div>
         <div className="ssa-kpi"><span className="ssa-sub">키 점검</span><b style={{ color: toneVar(checkTone) }}>위험 {sum.bad || 0} · 확인 {sum.warn || 0}{sum.unknown ? ` · 모름 ${sum.unknown}` : ''}</b></div>
       </div>
-      <div className="ssa-tabs" role="tablist" aria-label="SSH 공용 접속 보기">
+      <div className="ssa-tabs" role="tablist" aria-label="서버 접속 보기">
         {TABS.map(([k, label]) => <button key={k} type="button" role="tab" aria-selected={tab === k} className={`ssa-tab${tab === k ? ' on' : ''}`} onClick={() => setTab(k)}>{label}</button>)}
       </div>
       {msg.text && <p className="ssa-note" role="status" style={{ color: toneVar(msg.tone) }}>{msg.text}</p>}
+      {tab === 'hier' && <HierTab v={v} corpName={corpName} reload={load} say={say} />}
+      {tab === 'accounts' && <AccountsTab v={v} corpName={corpName} reload={load} say={say} />}
       {tab === 'servers' && <ServersTab v={v} corpName={corpName} reload={load} say={say} />}
       {tab === 'folders' && <FoldersTab v={v} corpName={corpName} reload={load} say={say} />}
       {tab === 'features' && <FeaturesTab v={v} />}
@@ -132,7 +115,8 @@ function ServersTab({ v, corpName, reload, say }) {
   const [corp, setCorp] = useState(() => corpIds.find((id) => (v.servers || []).some((s) => (s.vcenterId || '') === id)) ?? corpIds[0] ?? '');
   const [pick, setPick] = useState(null);
   const [busy, setBusy] = useState(() => new Set());
-  const servers = (v.servers || []).filter((s) => (s.vcenterId || '') === corp);
+  // v3.24: 응답에 ‘주소만’ 등록(계정 없음)도 실린다(계정 계층 탭용) — 이 탭(키 고르기)은 예전처럼 계정이 있는 서버만.
+  const servers = (v.servers || []).filter((s) => (s.vcenterId || '') === corp && !s.addrOnly);
   const accounts = (v.accounts || []).filter((a) => (a.corp || '') === corp || !a.corp);
   const edges = (v.edgeRows || []).filter((r) => (r.corp || '') === corp);
   const stop0 = (v.corps || []).find((c) => c.id === corp)?.stop;
@@ -154,7 +138,7 @@ function ServersTab({ v, corpName, reload, say }) {
         <label className="ssa-corp-pick">법인 <Select sort={false} className="select select-sm" value={corp} onChange={(e) => setCorp(e.target.value)}>
           {corpIds.map((id) => {
             const c = (v.corps || []).find((x) => x.id === id);
-            const n = (v.servers || []).filter((s) => (s.vcenterId || '') === id).length;
+            const n = (v.servers || []).filter((s) => (s.vcenterId || '') === id && !s.addrOnly).length;
             return <option key={id || '_none'} value={id}>{corpName(id)}{c?.dc ? ` (${c.dc})` : ''} — 서버 {n}대{c?.stop?.unreadable ? ' · 상태 모름' : c?.stop ? ' · 키 사용 중지' : ''}</option>;
           })}
         </Select></label>
@@ -174,7 +158,7 @@ function ServersTab({ v, corpName, reload, say }) {
             ))}</tbody>
           </STable>
         ) : <p className="ssa-note">{corp ? '이 법인의 공통 계정이 없습니다.' : '미귀속 서버에는 법인 공통 계정이 없습니다.'}</p>}
-        <p className="ssa-note">공통 계정 추가 · 수정은 지금처럼 베어메탈 사용률 › 서버 등록 › 법인 공통 계정에서 합니다(같은 저장소).</p>
+        <p className="ssa-note">공통 계정 추가 · 수정은 ‘공통 계정’ 탭에서 합니다(베어메탈 사용률 › 서버 등록 › 법인 공통 계정과 같은 저장소).</p>
       </section>
       <section className="ssa-sec">
         <h4>{corpName(corp)} — 서버 {servers.length}대</h4>

@@ -31,3 +31,26 @@
   라우트는 자격 원본(`resolveOsAuth` · `keyMaterial` · `listKeysRaw` · 등록부 원본 · `KS.`)을 만지지 않는다(소스 스윕).
 - **사용 기록(`ssh-key-usage.json`)은 화면용** — 메모리에 모으고 30초 뒤 한 번 쓴다(매 접속 동기 쓰기 금지 · 종료 때 `flushKeyUsage`) · 판정에 쓰지 않는다 · 90일 · 묶음 열쇠에 법인 포함 · 마지막 사용은 전체 묶음에서.
 - **보안 사건**은 모아 한 번에 쓴다(`ST.addEvents` — 받는 곳 새 파일은 사건 하나) · 넘치면 덜 중요한 것부터 버린다(`CRITICAL_EVENTS` — 사용 중지 · 바꿔치기 · 다시 읽기는 남긴다).
+
+## v3.24 서버 접속 1단계 — 계층 지정 · Windows 공통 계정 · 비밀번호 특별 관리(설계 `docs/design/server-access` §4.4 · §4.6)
+
+회귀: `server/test/serverAccess324.test.js`(실제 등록부 · 상태 파일 · 가짜 sshd 비밀번호 시도 수 · 실제 라우터 · 변이 — 반증 수정분 ⑨~⑪ 포함) · 웹 `web/src/views/serverAccessText.test.js`.
+
+- **효력 계정은 `refs.effectiveAccountOf` 하나**(resolveOsAuth · 화면 · 법인 사용 중지 · 승인 전 확인이 같은 함수): 서버 자기 자격(credRef · keyRef · 비밀번호 — `registry.hasOwnCred`)이 있으면 ‘따로 정함’ ·
+  없으면 **승인된**(`registry.inheritActive`) 서버만 법인 › OS 종류 → 법인 순 가장 가까운 지정. OS 미지정 서버는 OS 단계를 건너뛴다 · **법인 단계 계정은 OS 계열이 같은 서버에만**(예전 계정 · 미지정 서버 = Linux).
+- **승인(`inherit.key`)은 주소 · 포트 · OS · 법인(`registry.inheritKeyOf`)에 묶인다** — 어느 쓰기 경로로든 넷 중 하나가 바뀌면 효력을 잃는다(요청 본문은 승인 칸을 세울 수 없다 — applyServerInput 이 모르는 칸).
+  법인을 빼면 OTP 없는 서버 저장으로 다른 법인 계정 비밀번호가 간다(반증 F1 — 재현). **자기 자격이 생기는 쓰기(서버 저장 · 키 고르기)는 승인을 지운다**(남기면 OTP 없는 ‘떼기’ 로 되산다 — F5).
+  승인 쓰기는 화면이 본 `inheritKey` 를 돌려받아 대조한다(F8).
+  세우는 곳은 `setBmServerInherit` 하나 · 부르는 곳은 `service.js` 하나(설정 소유자 등급 + OTP 라우트 뒤 — 소스 스윕). **엣지 위임 서버(agent)는 물려받지 않는다**(승인도 거절 · 판정에서도 제외 — 위임 잡에 해석된 비밀번호가 실리지 않게).
+- **계층 지정은 상태 파일(`ssh-access-state.json` `assign`)** — 비밀 없이 계정 id 만 · 모양이 틀리면 손상 · 못 읽으면 물려받는 서버와 공통 계정 비밀번호 접속을 멈춘다(`account-state-unreadable`) · 복원 제외(OTP 없는 복원으로 지정을 되살리지 않는다).
+  계정 삭제 · 종류 · OS · 법인 바꾸기는 지정과 어긋나면 거절(`refs.deleteAccountIfUnused` · `accountUseIssue` — 상태 파일을 못 읽으면 모름 = 거절).
+- **공통 계정 비밀번호에도** 법인 사용 중지(`account-corp-stopped`) · 허용 기능(`account-feature` — null = 예전 계정 전부) · 서버 OS ↔ 계정 OS(`account-os` — 서버 OS 를 정한 경우만)를 건다.
+- **계정 단위 정지**(`accountStops`): 로그인 거부를 본 곳은 `outcome.noteCredOutcome` 하나 — 거부 판정은 **호출부의 접속 단계 표지**(`rejected`)만(문구 판정 금지 — df 의 ‘Permission denied’ 가 계정을 멈췄다 · 반증 F3).
+  연결 실패 · 인증 정지 중 결과로는 멈추지 않는다 · 자격 해석이 막은 결과는 기록하지도 않는다. 연결 시험 본체(`connTest.testSavedOs`) · 서버 키 읽기 · 집중 모니터링 결과 기록도 이 함수를 부른다(F7).
+  **한 주기 안에서도 듣는다**: 공통 계정 비밀번호 접속은 `accountGate.gateAccountLogin` 을 지난다(같은 계정 · 판은 탐침 하나의 결과를 본 뒤 — 거부면 나머지를 보내지 않음 · 두 폴러 모두 · 대기는 장비 시한 밖 — 반증 F2 재현: 5대 → 5회).
+  정지는 **그 비밀번호 판**(`keyStore.accountSecretVersion` = pwSetAt — 해시를 남기지 않는다)에만 걸린다: 비밀번호를 넣으면(같은 값이어도) 풀린다. 정지를 넘는 해석(`ignoreAccountStop`)은 ‘한 대로 다시 확인’ 하나(소스 스윕).
+- **새 OS 공통 비밀번호는 암호화 정책에서만**(`saveAccount` — `passwords-need-encryption` 409 · 라우트는 OTP 앞에서 `pwVaultFirst`). iDRAC 공통 계정은 복사 방식이라 이 조건 밖.
+- **한 대 먼저 확인**: 지정 저장 · 승인 · 새 비밀번호 저장은 그 계정을 지금 쓰게 되는 서버가 있으면 **그중 한 대로 한 번 로그인**한 뒤에만 쓴다(`loginOnce` — 저장 주소 · 자동 재시도 없음 · 실패면 쓰지 않음).
+  승인은 **계정마다 한 대씩**(F6). 옛 7b 계정 화면은 계층 지정 계정의 새 비밀번호를 받지 않는다(`refs.legacyAccountWriteIssue` — F7). 판정 거절은 OTP 앞(`judgeFirst` = 서비스 dryRun — F9).
+  확인 대상이 없으면 409 `need-verify` + candidates(화면이 대상을 지어내지 않는다). 확인 기록(`verifiedAt · verifiedOn`)은 그 비밀번호 판일 때만 남긴다.
+- AD 로그인 이름은 `keyStore.loginNameOf` 하나(도메인에 점 → `user@domain` · 없으면 `DOMAIN\user`) · 도메인 · OS · 로그인 종류가 바뀌면 저장 비밀을 잇지 않는다 · 포탈 밖 도메인 변경도 `account-tampered`(diskDrift 서명).

@@ -97,7 +97,11 @@ describe('SSH 공용 접속 화면 — 규약', () => {
     expect(src).toMatch(/const r = must\(await fn\(\)\)/);
   });
   it('기능 고르기는 렌더 밖 컴포넌트 · 예전 키는 ‘제한 없음’ 을 보존 · 0개는 저장 단추를 막는다', () => {
-    expect(src).toMatch(/^function FeaturePicker\(/m);
+    // v3.24: 두 화면(SshAccessSettings · ServerAccessHier)이 함께 쓰려고 sshAccessParts.jsx 로 옮겼다 — 여전히 모듈 최상위(렌더 밖) 컴포넌트다.
+    const parts = fs.readFileSync(path.join(HERE, 'sshAccessParts.jsx'), 'utf8');
+    expect(parts).toMatch(/^export function FeaturePicker\(/m);
+    expect(src).toMatch(/import \{[^}]*FeaturePicker[^}]*\} from '\.\/sshAccessParts\.jsx'/);
+    expect(src).not.toMatch(/^\s+(?:const|function) FeaturePicker\b/m);
     expect(src).toMatch(/features: k\.features == null \? null : \[\.\.\.k\.features\]/);
     expect(src).toMatch(/allowAll=\{edit\.key\.features == null\}/);
     expect((src.match(/!featuresChosen\(/g) || []).length).toBeGreaterThanOrEqual(6);
@@ -108,6 +112,7 @@ describe('SSH 공용 접속 화면 — 규약', () => {
   });
   it('설정 메뉴에 등록 — 보안 묶음 · 키 ssh-access', () => {
     const st = fs.readFileSync(path.join(HERE, 'Settings.jsx'), 'utf8');
-    expect(st).toMatch(/\{ k: 'ssh-access', label: 'SSH 공용 접속', C: SshAccessSettings, group: 'security'/);
+    // v3.24(서버 접속 D7 — 사용자 결정 ‘기본값’): 이름만 ‘서버 접속(SSH · Windows)’ 으로 — 설정 키 ssh-access · 묶음은 그대로.
+    expect(st).toMatch(/\{ k: 'ssh-access', label: '서버 접속\(SSH · Windows\)', C: SshAccessSettings, group: 'security'/);
   });
 });

@@ -141,7 +141,8 @@ export function registerBmOnboard(api, deps = {}) {
   const accountWriteIssue = (input) => {
     const dry = KS.saveAccount(accountInputOf(input), { dryRun: true });
     if (!dry.ok) return dry;
-    return REFS.accountUseIssue(input.id ? KS.accountById(t(input.id, 32)) : null, dry.next);
+    const before = input.id ? KS.accountById(t(input.id, 32)) : null;
+    return REFS.legacyAccountWriteIssue(before, input) || REFS.accountUseIssue(before, dry.next);   // v3.24 반증 F7: 계층 지정 계정의 새 비밀번호는 새 화면에서
   };
   const accountFirst = (req, res, next) => { const { otp, ...input } = bodyOf(req); void otp; const w = accountWriteIssue(input); if (w) return send(res, w); return next(); };
   api.post('/tools/bm-usage/accounts', adminOnly, toolsPerm, requireSettingsOwner, accountFirst, reauth, (req, res) => {
@@ -351,7 +352,7 @@ export function registerBmOnboard(api, deps = {}) {
     if (!s0 || (vc ? !inUserScope(req.user, snap, vc) : scoped)) return res.status(404).json({ ok: false, reason: '서버를 찾을 수 없습니다.' });
     // v2.954(점검 A-1): 귀속 없는 서버(vc 없음)의 시험 접속(저장된 비밀 사용)은 조회 ∧ 쓰기 전체 범위만.
     if (vc ? !inUserWriteScope(req.user, snap, vc) : !isFullReadWriteScope(req.user, snap)) return res.status(403).json({ ok: false, error: 'forbidden', reason: '이 법인에 쓰기 권한이 없습니다(조회 전용).' });
-    const r = await (deps.testOs || testSavedOs)(s0);
+    const r = await (deps.testOs || testSavedOs)(s0, { by: who(req) });
     logAudit({ user: who(req), action: 'bm-usage.onboard.test', target: s0.name || id, ip: req.ip || '', detail: JSON.stringify({ ok: !!r.ok, kind: r.kind, auth: r.authKind }).slice(0, 200) });
     res.json(r);
   });

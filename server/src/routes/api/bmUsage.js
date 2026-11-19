@@ -48,6 +48,7 @@ import { buildPerfEntry, PERF_COL_META, compactPerfEntry } from '../../bmusage/p
 import { hwFactsReader } from '../../bmusage/hwFacts.js';
 import { freshMsFor } from '../../bmusage/useJudge.js';
 import { PERF_DEFAULTS } from '../../bmusage/settings.js';
+import { scopeSig } from '../../util/scopeSig.js';
 
 const toolsPerm = requirePerm('tools');
 const writeRole = requireRole('admin', 'operator');
@@ -1127,7 +1128,7 @@ const opsKey = async (req) => {
   const [{ fleetRev }, O] = await Promise.all([import('../../insights/fleetRev.js'), import('../../bmusage/tuning/overrides.js')]);
   let at = 0; try { at = O.loadTuningOverrides().at || 0; } catch { at = -1; }
   // 반증 W4: 응답에 writable(쓰기 범위)이 실린다 — 조회 범위가 같고 쓰기 범위만 다른 두 계정이 캐시를 나누지 않게 쓰기 범위 서명도 키에.
-  let w = 'all'; try { const ws = writeScopedVcenterIds(req.user, store.get()); w = ws ? [...ws].sort().join(',') : 'all'; } catch { w = 'err'; }
+  let w; try { w = scopeSig(writeScopedVcenterIds(req.user, store.get())); } catch { w = 'err'; }
   return `${trendKey(req)}|f${fleetRev()}|o${at}|w${w}`;
 };
 api.get('/tools/bm-usage/perf/:key/tuning', toolsPerm, async (req, res) => memoJson(req, res, 'bm-tuning', (snap) => bmTuningView(req, snap), { extraKey: await opsKey(req) }));
