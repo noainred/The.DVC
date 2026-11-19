@@ -5,7 +5,7 @@
 
 - 생성: `node scripts/common-doc.mjs` · 최신 여부: `node scripts/common-doc.mjs --check`
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다. 설명을 고치려면 그 모듈의 **머리 주석 첫 단락**을 고친다.
-- 훑은 소스 4482개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
+- 훑은 소스 4483개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
 
 ## 읽는 법 · 한계
 
@@ -248,26 +248,26 @@
 | `server/src/mock/demo/flags.js` | 데모(DATA_SOURCE=mock) 모드 공용 판정(v2.708). | 85 | 26 | 3 |
 | `server/src/alerts.js` | Alerting — evaluates threshold/condition rules against the current snapshot on an interval and pushes notifications to Slack(incoming webhook) and/or… | 31 | 23 | 38 |
 | `server/src/proxy/sshExec.js` | Small SSH helper built on ssh2: connect, run commands, and upload files via SFTP. Shared by the proxy auto-deploy and the agent auto-deploy features.… | 50 | 17 | 31 |
-| `server/src/datacenter/store.js` | DataCenter(법인) 레지스트리 — vCenter의 '상위 개념'. | 47 | 16 | 15 |
+| `server/src/datacenter/store.js` | DataCenter(법인) 레지스트리 — vCenter의 '상위 개념'. | 47 | 16 | 16 |
 | `server/src/vcenter/soapParse.js` | 순수(사이드이펙트 없음) SOAP 응답 파서 — worker_threads 워커에서도 재사용하기 위해 soapClient.js에서 분리했다. 여기에는 config/DB/네트워크 등 부수효과 있는 import를 절대 추가하지 말 것(워커가 로드할 때 부수효과가 워커 스레… | 28 | 16 | 19 |
 | `server/src/vcenter/registry.js` | vCenter registry — read/write the managed list of vCenters in config/vcenters.json (the same file the live collector polls), with validation, password… | 31 | 15 | 13 |
 | `server/src/mail/service.js` | 포탈 공용 메일 발송 진입점 (v2.454). | 18 | 14 | 20 |
 | `server/src/agent/envTimeout.js` | 호환 재수출(v2.613 DEPS2613-01) — 본체는 `util/envTimeout.js` 로 옮겼다. config.js 가 agent/ 를 import 하는 방향(설정 leaf → 엣지 워커 디렉터리)이 잠재 순환의 씨앗이었고, agent/ 밖 18개 파일이 이… | 33 | 13 | 2 |
 | `server/src/mail/settings.js` | 포탈 공용 메일(SMTP) 설정 (`mail.json`, v2.454). | 23 | 13 | 24 |
 | `server/src/vcenter/restClient.js` | (머리 주석 없음) | 19 | 13 | 30 |
-| `server/src/idrac/registry.js` | iDRAC registry — the managed list of Dell servers whose power draw we collect over Redfish. Stored in CONFIG_DIR/idrac.json (gitignored, 0600, holds c… | 35 | 12 | 61 |
+| `server/src/idrac/registry.js` | iDRAC registry — the managed list of Dell servers whose power draw we collect over Redfish. Stored in CONFIG_DIR/idrac.json (gitignored, 0600, holds c… | 35 | 12 | 62 |
 | `server/src/mock/demo/edge.js` | 데모(DATA_SOURCE=mock) 엣지(수집 서버) 그룹(v2.708). | 23 | 12 | 2 |
 | `server/src/audit.js` | Audit log — records security/operational actions (who did what, when) so the portal's write operations (VM 생성, 원격접속, 설정 변경 등)이 추적된다. Appended to CONFI… | 134 | 11 | 47 |
 | `server/src/security/tlsTrust.js` | 장비 TLS 상대 인증(2026-10-09 검토 S-02) — 자격증명을 보내는 HTTPS 연결이 **정말 그 장비인지** 확인한다. | 15 | 11 | 7 |
 | `server/src/auth/auth.js` | (머리 주석 없음) | 147 | 10 | 67 |
 | `server/src/runtime-settings.js` | Runtime-adjustable settings that can be changed from the portal UI (and persisted), overriding the env defaults. Currently: the data source (mock \| li… | 19 | 10 | 28 |
 | `server/src/metrics/unreadVcenters.js` | '지금 값' 으로 쓰지 않는 vCenter 와 그 사유(순수 leaf — import 0). | 17 | 10 | 6 |
-| `server/src/storage/registry.js` | 스토리지 장비 등록부(v2.302). | 28 | 9 | 43 |
+| `server/src/storage/registry.js` | 스토리지 장비 등록부(v2.302). | 28 | 9 | 44 |
 | `server/src/gpu/settings.js` | GPU 게스트 수집 설정 — 어떤 법인(vCenter)의 패스쓰루 GPU VM을 게스트 OS 계정으로 모니터링할지, 폴링 주기/동시성/타임아웃, 그리고 vCenter별 게스트 OS 자격증명을 보관한다. config/gpu-guest.json (gitignore, 060… | 13 | 9 | 15 |
 | `server/src/perf/monitor.js` | 서버 성능 측정기(v2.498). 요청 지연·이벤트 루프 정체·진행 중 요청을 **상시 O(1)** 로 계측하고, 임계를 넘은 것만 남긴다. 설정 › 서버 성능 측정 화면(/api/admin/perf)이 이 값을 읽는다. | 13 | 9 | 4 |
 | `server/src/idrac/invCache.js` | Cache of the latest hardware/firmware inventory collected per iDRAC server. Inventory is mostly static, so it is refreshed on a slow cadence and persi… | 25 | 8 | 9 |
 | `server/src/vcenter/soapClient.js` | vim25 SOAP collector — gathers REAL host/VM/datastore metrics that the vSphere REST list endpoints do not expose (CPU/memory capacity & live usage, da… | 17 | 8 | 48 |
-| `server/src/mock/generator.js` | Deterministic-ish mock data generator that simulates a large, globally distributed VMware estate. It produces the same normalized shape as the live vC… | 12 | 8 | 16 |
+| `server/src/mock/generator.js` | Deterministic-ish mock data generator that simulates a large, globally distributed VMware estate. It produces the same normalized shape as the live vC… | 14 | 8 | 17 |
 | `server/src/mock/demo/users.js` | 데모(DATA_SOURCE=mock) 합성 데이터: '사용자·게스트' 묶음(v2.708). | 11 | 8 | 1 |
 | `server/src/auth/demoGuest.js` | 데모(mock) 모드의 내장 데모 계정 접근 규칙(v2.716). | 68 | 7 | 16 |
 | `server/src/collector/state.js` | In-memory state for distributed collection on the CENTRAL portal: the merged host→power map pulled from remote collector agents, plus per-collector st… | 22 | 7 | 33 |
@@ -281,8 +281,8 @@
 | `server/src/svcmon/store.js` | 성능점검 대상/폴더 저장소 — `CONFIG_DIR/svcmon.json` 전용 파일(포탈 코어와 분리). | 21 | 6 | 26 |
 | `server/src/logs/db.js` | vCenter 이벤트 로그 장기 보관 DB. vCenter는 이벤트를 단기간만 보관하므로, 포탈이 주기적으로 수집해 여기 누적한다. Node 내장 SQLite(--experimental-sqlite) 우선, 없으면 NDJSON 폴백. 중복은 (vcenterId, key… | 17 | 6 | 47 |
 | `server/src/partfault/types.js` | 물리 파트 장애의 **공용 계약**(순수, v2.547). | 16 | 6 | 10 |
-| `server/src/bmstor/registry.js` | 베어메탈 스토리지 서버 목록 + 설정(v2.340). CONFIG_DIR/bm-storage.json (0600, 원자적 쓰기, 손상 보존, v2.296 비밀 봉인) — 수집 서버/배포 대상 레지스트리와 동일 계약. | 15 | 6 | 31 |
-| `server/src/sanswitch/registry.js` | SAN 스위치 등록부(v2.410). | 15 | 6 | 48 |
+| `server/src/bmstor/registry.js` | 베어메탈 스토리지 서버 목록 + 설정(v2.340). CONFIG_DIR/bm-storage.json (0600, 원자적 쓰기, 손상 보존, v2.296 비밀 봉인) — 수집 서버/배포 대상 레지스트리와 동일 계약. | 15 | 6 | 32 |
+| `server/src/sanswitch/registry.js` | SAN 스위치 등록부(v2.410). | 15 | 6 | 49 |
 | `server/src/storage/store.js` | 이 노드가 수집한 최신 스냅샷 보관(v2.302). deviceId → NormalizedSnapshot. 재시작 후에도 마지막 뷰가 비지 않게 파일로 영속 (자격증명 없음 — 정규화 스냅샷만. 그래도 계정 목록이 있어 0600 + gitignore). 시계열(용량 추… | 15 | 6 | 15 |
 | `server/src/central/edgeRecord.js` | 엣지가 push 한 **장비 스냅샷 원소**의 수신 정리와, 그 보관 파일의 쓰기(v2.599). | 14 | 6 | 9 |
 | `server/src/upgrade/signature.js` | 업그레이드 번들 배포자 서명 검증의 **런타임 판정 하나**(검토 S-10, v2.730). | 13 | 6 | 12 |
