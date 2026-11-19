@@ -18,14 +18,17 @@ import * as KS from '../bmusage/onboard/keyStore.js';
 import * as REFS from '../bmusage/onboard/refs.js';
 import { addrKey } from '../bmusage/onboard/bindRule.js';
 import { RSA_MIN_BITS } from '../bmusage/onboard/keyParse.js';
-import { listBmServersRaw, registryLoadError as bmRegistryLoadError, setBmServerKeyRef, restoreBmServerKeyRef } from '../bmstor/registry.js';
+import { listBmServersRaw, registryLoadError as bmRegistryLoadError, setBmServerKeyRef, restoreBmServerKeyRef,
+  setBmServerInherit, setBmServerCredRef, restoreBmServerAccess, setBmServerOs, setBmServersOs, inheritActive, inheritKeyOf, hasOwnCred, SERVER_OS } from '../bmstor/registry.js';
 import { loadSecretsPolicy } from '../security/secretVault.js';
 import * as ST from './state.js';
 import * as INS from './installed.js';
 import * as INB from './inbox.js';
-import { noteKeyUse, keyUsageView, flushKeyUsage, lastUseByFingerprint, keyUsageLoadFailed } from './usage.js';
+import { keyUsageView, flushKeyUsage, lastUseByFingerprint, keyUsageLoadFailed, accountUseFingerprint } from './usage.js';
+import { noteCredOutcome } from './outcome.js';
 import { buildKeyCheck, checkKeyDrift } from './check.js';
 import { READ_COMMAND, parseReadOutput } from './authorizedKeys.js';
+import { osKindOf } from '../bmusage/collectors/osSsh.js';   // v3.24: 수집이 알아낸 OS(메모리) — OS 종류 제안에만(저절로 바꾸지 않는다)
 
 const t = (v, max = 256) => (typeof v === 'string' ? v : v == null ? '' : String(v)).slice(0, max).trim();
 const lc = (v) => t(v).toLowerCase();
@@ -55,33 +58,50 @@ export async function corpList() {
   return (snap?.vcenters || []).filter((v) => v && v.id).map((v) => ({ id: String(v.id), name: String(v.name || v.id), dc: dcName.get(String(dcOf(v.id))) || '' }));
 }
 
-/** 서버의 효력 키 id(서버 keyRef → 공통 계정 기본 키, 비밀번호 고정이면 없음). */
+/**
+ * 서버의 효력 공통 계정 — 자기 credRef 또는 (v3.24) 계층 지정을 물려받은 계정(refs.effectiveAccountOf 하나). 비밀번호 고정 표지도 함께.
+ * @returns {{acc:object|null, ea:object, pwPinned:boolean}}
+ */
+function effAccount(s, accById) {
+  const ea = REFS.effectiveAccountOf(s);
+  const inh = ea.source === 'os' || ea.source === 'corp';
+  const acc = ea.accountId && (ea.source === 'own' || inh) ? (accById.get(ea.accountId) || null) : null;
+  return { acc, ea, pwPinned: s.osAuth === 'password' || (inh && ea.auth === 'password') };
+}
+/** 서버의 효력 키 id(서버 keyRef → 공통 계정(자기 · 물려받음) 기본 키, 비밀번호 고정이면 없음). */
 function effectiveKeyId(s, accById) {
   if (s.osAuth === 'password') return '';
   if (t(s.keyRef)) return t(s.keyRef);
-  const a = t(s.credRef) ? accById.get(t(s.credRef)) : null;
-  return a && a.kind === 'os' ? t(a.keyRef) : '';
+  const { acc, pwPinned } = effAccount(s, accById);
+  if (pwPinned) return '';
+  return acc && acc.kind === 'os' ? t(acc.keyRef) : '';
 }
-/** 접속 계정 — resolveOsAuth 와 같은 규칙(공통 계정이 있으면 그 계정, 없으면 서버 칸 · root). */
-const usernameOf = (s, acc) => (acc ? acc.username : (t(s.username) || 'root'));
+/** 접속 계정 — resolveOsAuth 와 같은 규칙(공통 계정이 있으면 그 계정의 로그인 이름, 없으면 서버 칸 · root). */
+const usernameOf = (s, acc) => (acc ? KS.loginNameOf(acc) : (t(s.username) || 'root'));
 /** 등록부 setBmServerKeyRef 의 expectAddr 와 같은 글자(서버 칸 username 기준 — 등록부가 그렇게 비교한다). */
 const regAddrOf = (s) => addrKey(s.host, s.port, s.username);
 
 function publicServer(s, { accById, keyById }) {
   const effKey = effectiveKeyId(s, accById);
   const key = effKey ? keyById.get(effKey) : null;
-  const acc = t(s.credRef) ? accById.get(t(s.credRef)) : null;
+  const { acc, ea } = effAccount(s, accById);
   const inst = INS.installedOf(s.id);
   const placement = key ? REFS.keyPlacementIssue(key, s, 'conn-test') : null;
   return {
     id: s.id, name: s.name || s.host, host: s.host, port: Number(s.port) || 22, vcenterId: t(s.vcenterId), agent: t(s.agent), enabled: s.enabled !== false,
-    username: usernameOf(s, acc), accountName: acc ? acc.name : '', accountMissing: !!t(s.credRef) && !acc,
+    username: usernameOf(s, acc), accountName: acc ? acc.name : '', accountMissing: !!ea.accountId && (ea.source === 'own' || ea.source === 'os' || ea.source === 'corp') && !acc,
     keyMode: t(s.keyRef) ? 'pinned' : (effKey ? 'corp-default' : (s.osAuth === 'password' || s.password || (acc && acc.password) ? 'password' : 'none')),
+    // v3.24 계층: os(서버 OS 종류) · source(own 따로 정함 · os/corp 물려받음 · none) · inherit(승인 상태) · pending(지정은 있는데 승인 없음/주소 바뀜) · mismatch(법인 단계 계정 OS 다름)
+    os: SERVER_OS.includes(s.os) ? s.os : '', source: ea.source, level: ea.level || '', pending: !!ea.pending, mismatch: !!ea.mismatch,
+    inheritApproved: inheritActive(s), inheritStale: !!s.inherit && !inheritActive(s) && !t(s.agent), inheritAt: s.inherit?.at || null, inheritBy: s.inherit ? t(s.inherit.by, 64) : '',
+    ownCred: hasOwnCred(s), accountId: acc ? acc.id : '', loginName: acc ? KS.loginNameOf(acc) : '',
+    detectedOs: detectedOsOf(s),
     keyId: effKey || '', keyName: key ? key.name : '', keyFingerprint: key ? key.fingerprint : '', keyMissing: !!effKey && !key,
     keyStatus: key ? key.status : '', keyFeatures: key ? (Array.isArray(key.features) ? [...key.features] : null) : null, placementIssue: placement || '',
     hasPassword: !!s.password, passwordPinned: s.osAuth === 'password',
     // 화면이 키 고르기 때 그대로 돌려보낸다(낡은 화면에서 고른 키를 바뀐 접속처에 묶지 않게 — 점검 A-8).
     addr: regAddrOf(s),
+    inheritKey: inheritKeyOf(s),   // v3.24 반증 F8: 승인 때 화면이 돌려보낸다(주소 · 포트 · OS · 법인 — 본 뒤 바뀌었으면 409)
     installed: inst ? { at: inst.at, by: inst.by, present: !inst.error, error: inst.error || '', count: inst.keys.length,
       hasKey: !!(key && inst.keys.some((k) => k.fingerprint === key.fingerprint)), stale: inst.host !== s.host || inst.port !== (Number(s.port) || 22) } : null,
   };
@@ -105,9 +125,10 @@ export async function buildView({ now = Date.now() } = {}) {
   try { policyMode = loadSecretsPolicy()?.mode || ''; } catch { policyMode = ''; }
   const inbox = await INB.scanInbox({ corps, servers: servers.map((s) => ({ id: s.id, name: s.name || s.host, vcenterId: t(s.vcenterId) })) });
   const corpName = (id) => corps.find((c) => c.id === id)?.name || id || '전 법인';
-  const pubServers = servers.filter((s) => !s.addrOnly).map((s) => ({ ...publicServer(s, { accById, keyById }), inboxPath: t(s.vcenterId) ? INB.inboxPathOf(s.vcenterId, s.name || s.host) : '' }));
+  // v3.24: ‘주소만’ 등록(계정 없음)도 싣는다 — 계층 지정을 물려받을 첫 후보다(표지 addrOnly · 기존 서버 표는 화면이 거른다).
+  const pubServers = servers.map((s) => ({ ...publicServer(s, { accById, keyById }), ...(s.addrOnly ? { addrOnly: true } : {}), inboxPath: t(s.vcenterId) ? INB.inboxPathOf(s.vcenterId, s.name || s.host) : '' }));
   // 키 점검 ‘서버’ 칸 — 키를 쓰는데 폴더 · 기능 규칙 때문에 주기 수집이 막힌 서버, 법인이 없어 폴더 키를 못 쓰는 서버(엣지 위임 서버는 그 엣지가 본다).
-  const keyed = pubServers.filter((s) => s.keyId && !s.agent);
+  const keyed = pubServers.filter((s) => s.keyId && !s.agent && !s.addrOnly);
   const serverSummary = regErr ? null : {
     blocked: keyed.filter((s) => s.placementIssue || (Array.isArray(s.keyFeatures) && !COLLECT.some((f) => s.keyFeatures.includes(f)))).map((s) => s.name),
     noCorp: keyed.filter((s) => !s.vcenterId).map((s) => s.name),
@@ -121,7 +142,11 @@ export async function buildView({ now = Date.now() } = {}) {
     storeUnreadable: !!storeErr, registryUnreadable: !!regErr, stateUnreadable: !!ST.stateLoadError(),
     usageLoadFailed: keyUsageLoadFailed(), installedLoadFailed: INS.installedLoadFailed(),
     corps: corps.map((c) => ({ ...c, inboxPath: INB.inboxPathOf(c.id), stop: ST.stopFor(c.id) })),
-    accounts: accRaw.filter((a) => a.kind === 'os').map((a) => KS.publicAccountView(a, { usage: usage.account(a.id) })),
+    accounts: accRaw.filter((a) => a.kind === 'os').map((a) => ({ ...KS.publicAccountView(a, { usage: usage.account(a.id), now }),
+      lastUse: lastUse.get(accountUseFingerprint(a.id)) || null, stop: accountStopView(a) })),
+    // v3.24 계층 지정(법인 › OS 종류) — 못 읽으면 null(모름 — 화면이 ‘상태 파일을 읽지 못함’ 으로 말한다)
+    assign: ST.listAssign(),
+    assignLevels: ST.ASSIGN_LEVELS,
     keys: keysRaw.map((k) => ({ ...KS.publicKeyView(k, { usage: usage.key(k.id), now }), lastUse: lastUse.get(k.fingerprint) || null,
       inboxPath: k.folderCorp ? INB.inboxPathOf(k.folderCorp, k.folderServer) : '' })),
     usageKnown: usage.known,
@@ -176,10 +201,8 @@ export async function chooseServerKey({ serverId, keyId, expectAddr = null, by =
 /** 저장된 항목으로 한 번 연결 시험(7b connTest 와 같은 본체) + 키 사용 기록. */
 async function testServer(s, { by = '' } = {}) {
   const { testSavedOs } = await import('../bmusage/onboard/connTest.js');
-  const r = await testSavedOs(s);
-  const a = REFS.resolveOsAuth(s, { feature: 'conn-test' });
-  if (a.ok && a.keyFingerprint) noteKeyUse({ fingerprint: a.keyFingerprint, keyName: a.keyName, server: s.name || s.host, corp: s.vcenterId, feature: 'conn-test', ok: !!r.ok, code: r.ok ? 'ok' : r.kind, trigger: 'manual', by });
-  return r;
+  // 키 · 공통 계정 사용 기록 + 로그인 거부면 계정 단위 정지는 testSavedOs 안에서 한 번(반증 F7 — 온보딩 연결 시험도 같은 본체).
+  return testSavedOs(s, { by });
 }
 
 /**
@@ -243,6 +266,12 @@ export async function readInstalledKeys({ serverId, oncePassword = '', by = '' }
   }
   const { withSsh } = await import('../proxy/sshExec.js');
   const { isAuthFailureText, isPeerRejectText } = await import('../util/authGuard.js');
+  // 저장 자격으로 읽었으면 키 · 공통 계정 사용 기록 + 로그인 거부면 계정 단위 정지(반증 F7 — outcome 하나). 1회 비밀번호(저장 안 함)는 기록하지 않는다.
+  const noteStoredUse = (ok, kind) => {
+    if (!auth.keyFingerprint && !auth.accountId) return;
+    noteCredOutcome({ ...s, keyFingerprint: auth.keyFingerprint, keyName: auth.keyName, credAccountId: auth.accountId, credAccountName: auth.accountName, ...(auth.secretVersion != null ? { credVersion: auth.secretVersion } : {}) },
+      { ok, rejected: !ok && kind === 'auth-rejected', code: kind, feature: 'conn-test', trigger: 'manual', by });
+  };
   let rec;
   try {
     const out = await withSsh({ host: String(s.host), port: Number(s.port) || 22, username: auth.username, password: auth.password || '', privateKey: auth.privateKey, passphrase: auth.passphrase, readyTimeout: 15_000 },
@@ -255,10 +284,10 @@ export async function readInstalledKeys({ serverId, oncePassword = '', by = '' }
     const kind = isPeerRejectText(msg) ? 'hostkey' : isAuthFailureText(msg) ? 'auth-rejected' : 'connect';
     const reason = kind === 'hostkey' ? '호스트키를 신뢰하지 않아 끊었습니다 — 설정 › 보안 › 장비 신뢰에서 지문을 확인 · 승인하세요.'
       : kind === 'auth-rejected' ? '인증이 거부됐습니다(다시 시도하지 않습니다 — 계정 잠금 방지).' : `접속하지 못했습니다(${msg.replace(/\s+/g, ' ').slice(0, 100)})`;
-    if (auth.keyFingerprint) noteKeyUse({ fingerprint: auth.keyFingerprint, keyName: auth.keyName, server: s.name || s.host, corp: s.vcenterId, feature: 'conn-test', ok: false, code: kind, trigger: 'manual', by });
+    noteStoredUse(false, kind);
     return { ok: false, code: kind, status: 502, reason };
   }
-  if (auth.keyFingerprint) noteKeyUse({ fingerprint: auth.keyFingerprint, keyName: auth.keyName, server: s.name || s.host, corp: s.vcenterId, feature: 'conn-test', ok: true, code: 'ok', trigger: 'manual', by });
+  noteStoredUse(true, 'ok');
   const saved = INS.noteInstalled(s.id, { ...rec, by: t(by, 64) });
   const byFp = new Map(KS.listKeysRaw().map((k) => [k.fingerprint, k]));
   return {
@@ -383,7 +412,7 @@ export function stopCorp(corp, { by = '', reason = '' } = {}) {
   const accById = new Map(KS.keyStoreLoadError() ? [] : KS.listAccountsRaw().map((a) => [a.id, a]));
   const regErr = bmRegistryLoadError();
   const corpServers = regErr ? [] : listBmServersRaw().filter((s) => t(s.vcenterId) === c);
-  const servers = corpServers.map((s) => ({ id: s.id, addr: addrKey(s.host, s.port, usernameOf(s, t(s.credRef) ? accById.get(t(s.credRef)) : null)) }));
+  const servers = corpServers.map((s) => ({ id: s.id, addr: addrKey(s.host, s.port, usernameOf(s, effAccount(s, accById).acc)) }));
   const r = ST.setCorpStop(c, { by, reason, servers });
   // 엣지가 수집하는 서버는 그 엣지의 키로 접속한다 — 이 노드의 중지는 거기에 닿지 않는다(사실대로 따로 센다).
   const edgeServers = corpServers.filter((s) => t(s.agent)).length;
@@ -477,3 +506,295 @@ export function startSshAccessScheduler({ firstDelayMs = 90_000 } = {}) {
   _timer = first;
 }
 export function _resetSshAccessServiceForTest() { if (_timer) { clearTimeout(_timer); clearInterval(_timer); } _timer = null; _seenInbox = null; _seenDrift = null; _running = false; }
+
+/* ── v3.24 서버 접속 — 계층 지정(법인 › OS 종류 › 서버) · 공통 계정 · 한 대 먼저 확인(설계 docs/design/server-access §4.4 · §4.6) ── */
+
+/** 수집이 알아낸 OS(메모리 — 제안용). 모르면 ''. */
+function detectedOsOf(s) { const k = osKindOf(s?.host); return k === 'linux' || k === 'windows' ? k : ''; }
+/** 계정 단위 정지 — 화면용(current = 지금 비밀번호 판의 정지인가 · 아니면 비밀번호를 바꿔 이미 풀린 기록). */
+function accountStopView(a) {
+  const st = ST.accountStopFor(a.id);
+  if (!st) return null;
+  if (st.unreadable) return { unreadable: true };
+  return { at: st.at, server: st.server, feature: st.feature, current: st.version === KS.accountSecretVersion(a) };
+}
+const LEVEL_TEXT = Object.freeze({ all: '법인', linux: 'Linux', windows: 'Windows' });
+const storesIssue = (what) => {
+  if (KS.keyStoreLoadError()) return { ok: false, code: 'registry-unreadable', status: 503, reason: `SSH 키 저장소를 읽지 못해 ${what}` };
+  if (bmRegistryLoadError()) return { ok: false, code: 'registry-unreadable', status: 503, reason: `OS 계정 등록부를 읽지 못해 ${what}` };
+  if (ST.stateLoadError()) return { ok: false, code: 'state-unreadable', status: 503, reason: `서버 접속 상태 파일을 읽지 못해 ${what}` };
+  return null;
+};
+
+/**
+ * 공통 계정 하나로 저장된 서버 주소에 **한 번** 로그인해 본다(한 대 먼저 확인 · 한 대로 다시 확인). 자동 재시도 없음(계정 잠금 방지).
+ * 주소는 등록부 저장값 — 요청 주소를 받지 않는다(v2.480). 자격은 resolveOsAuth 하나로(법인 사용 중지 · 바꿔치기 · 폴더 · OS 계열을 같은 판정으로 본다).
+ * @param {object} s  등록부 원본 서버
+ * @param {{accountId:string, auth?:''|'password', ignoreAccountStop?:boolean, candidate?:{username:string, password:string}|null}} o
+ *        candidate — 아직 저장하지 않은 비밀번호로 확인(공통 계정 저장 전). 그때는 키를 쓰지 않는다.
+ */
+async function loginOnce(s, { accountId = '', auth = '', ignoreAccountStop = false, candidate = null } = {}) {
+  let a;
+  if (candidate) {
+    // 법인 사용 중지는 저장 전 확인에도 본다(멈춰 둔 법인에 새 비밀번호를 보내지 않게).
+    const si = ST.stopMatch({ corps: [t(s.vcenterId)].filter(Boolean), serverId: t(s.id), addr: '', serverCorp: t(s.vcenterId) });
+    if (si?.unreadable) return { ok: false, kind: 'state-unreadable', reason: REFS.AUTH_ERROR['account-state-unreadable'] };
+    if (si) return { ok: false, kind: 'corp-stopped', reason: REFS.AUTH_ERROR['account-corp-stopped'] };
+    a = { ok: true, username: candidate.username, password: candidate.password, authKind: 'password' };
+  } else {
+    a = REFS.resolveOsAuth({ ...s, keyRef: '', credRef: accountId, osAuth: auth === 'password' ? 'password' : '', inherit: undefined, password: '' }, { feature: 'conn-test', ignoreAccountStop });
+    if (!a.ok) return { ok: false, kind: a.code, reason: a.error };
+    if (a.authKind === 'none') return { ok: false, kind: 'no-secret', reason: '이 공통 계정에는 키 · 비밀번호가 없습니다.' };
+  }
+  const { withSsh } = await import('../proxy/sshExec.js');
+  const { isAuthFailureText, isPeerRejectText } = await import('../util/authGuard.js');
+  const t0 = Date.now();
+  try {
+    // ‘echo ok’ — Linux 셸 · Windows cmd · PowerShell 어디서나 같은 출력(uname 은 Windows 에 없다).
+    await withSsh({ host: String(s.host), port: Number(s.port) || 22, username: a.username, password: a.password || '', privateKey: a.privateKey, passphrase: a.passphrase, readyTimeout: 15_000 },
+      async ({ exec }) => exec('echo ok', 10_000));
+    return { ok: true, kind: 'ok', authKind: a.authKind, ms: Date.now() - t0, secretVersion: a.secretVersion ?? null, keyFingerprint: a.keyFingerprint || '' };
+  } catch (e) {
+    const msg = String(e?.message || e);
+    // 실패에도 비밀번호 판 · 키 지문을 싣는다 — 로그인 거부면 호출부가 계정 단위 정지를 건다(outcome.js).
+    const meta = { secretVersion: a.secretVersion ?? null, keyFingerprint: a.keyFingerprint || '' };
+    if (isPeerRejectText(msg)) return { ok: false, kind: 'hostkey', reason: '호스트키를 신뢰하지 않아 끊었습니다 — 설정 › 보안 › 장비 신뢰에서 지문을 확인 · 승인하세요.', ...meta };
+    if (isAuthFailureText(msg)) return { ok: false, kind: 'auth-rejected', reason: '로그인이 거부됐습니다(다시 시도하지 않습니다 — 계정 잠금 방지).', ...meta };
+    return { ok: false, kind: 'connect', reason: `접속하지 못했습니다(${msg.replace(/\s+/g, ' ').slice(0, 100)})`, ...meta };
+  }
+}
+
+/** 지정 뒤 이 서버가 쓸 단계(시뮬레이션 — 화면의 ‘닿는 서버’ 와 같은 규칙: OS 단계 → 법인 단계(OS 계열이 같을 때)). */
+function levelAfter(s, corp, assignAfter, accById) {
+  if (t(s.vcenterId) !== corp || t(s.agent) || hasOwnCred(s)) return '';
+  if ((s.os === 'linux' || s.os === 'windows') && assignAfter[s.os]) return s.os;
+  const all = assignAfter.all;
+  if (!all) return '';
+  const a = accById.get(all.account);
+  return a && KS.accountFamily(a) === (s.os === 'windows' ? 'windows' : 'linux') ? 'all' : '';
+}
+
+/**
+ * 계층 지정 쓰기(설정 소유자 등급 + 본인 OTP 라우트 뒤). accountId 빈 값 = 지우기.
+ *  · 계정: OS 공통 계정 · 바꿔치기 아님 · 법인이 같거나 전 법인 · OS 단계면 OS 계열이 같다.
+ *  · 이 지정을 지금 물려받게 되는 승인된 서버가 있으면 **그중 한 대(verifyServerId)로 먼저 로그인**해 본다 — 실패하면 저장하지 않는다.
+ * @returns {Promise<object>} { ok, affected, verified? }
+ */
+export async function setAssignment({ corp, level, accountId = '', auth = '', verifyServerId = '', by = '', dryRun = false } = {}) {
+  const si = storesIssue('바꾸지 않았습니다'); if (si) return si;
+  const c = t(corp, 128);
+  if (!(await corpList()).some((x) => x.id === c)) return { ok: false, code: 'bad-corp', status: 404, reason: '그런 법인(vCenter)이 없습니다.' };
+  if (!ST.ASSIGN_LEVELS.includes(level)) return { ok: false, code: 'bad-level', reason: '단계는 법인 · Linux · Windows 중 하나입니다.' };
+  const aid = t(accountId, 32);
+  const accById = new Map(KS.listAccountsRaw().map((a) => [a.id, a]));
+  let acc = null;
+  if (aid) {
+    acc = accById.get(aid);
+    if (!acc || acc.kind !== 'os') return { ok: false, code: 'account-missing', status: 404, reason: 'OS 공통 계정을 찾을 수 없습니다.' };
+    if (KS.isAccountTampered(acc.id)) return { ok: false, code: 'account-tampered', status: 409, reason: REFS.AUTH_ERROR['account-tampered'] };
+    if (acc.corp && acc.corp !== c) return { ok: false, code: 'account-other-corp', status: 409, reason: '다른 법인의 공통 계정은 이 법인에 지정할 수 없습니다(전 법인 공용 계정 또는 이 법인 계정만).' };
+    if (level !== 'all' && KS.accountFamily(acc) !== level) return { ok: false, code: 'account-os', status: 409, reason: `${LEVEL_TEXT[level]} 단계에는 ${LEVEL_TEXT[level]} 계정만 지정할 수 있습니다.` };
+    if (!acc.password && !acc.keyRef) return { ok: false, code: 'no-secret', status: 409, reason: '키도 비밀번호도 없는 계정입니다.' };
+  }
+  const now = {};
+  for (const lv of ST.ASSIGN_LEVELS) { const x = ST.assignFor(c, lv); if (x && !x.unreadable) now[lv] = x; }
+  const after = { ...now };
+  if (acc) after[level] = { account: acc.id, auth: auth === 'password' ? 'password' : '' }; else delete after[level];
+  const servers = listBmServersRaw();
+  // 지금 물려받는(승인된) 서버 중 이 단계로 오가는 서버 — 바뀌는 서버
+  const affected = servers.filter((s) => inheritActive(s) && (levelAfter(s, c, now, accById) === level || levelAfter(s, c, after, accById) === level));
+  const willUse = affected.filter((s) => levelAfter(s, c, after, accById) === level);
+  let verified = null;
+  if (acc && willUse.length) {
+    const target = willUse.find((s) => s.id === t(verifyServerId, 64));
+    if (!target) return { ok: false, code: 'need-verify', status: 409, reason: `이 지정을 지금 물려받는 서버 ${willUse.length}대 중 한 대를 골라 먼저 로그인해 보세요(저장 전 확인).`, candidates: willUse.slice(0, 50).map((s) => ({ id: s.id, name: s.name || s.host })) };
+    if (dryRun) return { ok: true, dry: true };
+    const r = await loginOnce(target, { accountId: acc.id, auth });
+    noteCredOutcome({ ...target, credAccountId: acc.id, credAccountName: acc.name, ...(r.secretVersion != null ? { credVersion: r.secretVersion } : {}), keyFingerprint: r.keyFingerprint || '' },
+      { ok: !!r.ok, rejected: !r.ok && r.kind === 'auth-rejected', code: r.kind, feature: 'conn-test', trigger: 'manual', by });
+    if (!r.ok) return { ok: false, code: 'verify-failed', status: 409, reason: `${target.name || target.host} 에서 확인하지 못해 지정을 저장하지 않았습니다 — ${r.reason || r.kind}`, verified: { server: target.name || target.host, ok: false, kind: r.kind } };
+    verified = { server: target.name || target.host, ok: true, kind: r.kind };
+    if (r.secretVersion) { KS.markAccountVerified(acc.id, { serverName: target.name || target.host, secretVersion: r.secretVersion }); ST.clearAccountStop(acc.id, { by, accountName: acc.name, why: '계층 지정 저장 전 확인 성공' }); }
+  }
+  if (dryRun) return { ok: true, dry: true };
+  const w = ST.setAssign(c, level, acc ? { account: acc.id, auth } : null, { by });
+  if (!w.ok) return w;
+  return { ok: true, affected: affected.length, willUse: willUse.length, ...(verified ? { verified } : {}) };
+}
+
+/**
+ * 물려받기 승인(서버 여러 대) — 설정 소유자 등급 + 본인 OTP 라우트 뒤. clearOwn = ‘물려받기로 되돌리기’(서버 자기 자격을 떼면서).
+ *  · 화면이 본 접속처(expectAddrs[id])를 서버마다 돌려받는다(낡은 화면 — setBmServerKeyRef 와 같은 규칙).
+ *  · 화면이 본 승인 키(expectKeys[id] — 주소 · 포트 · OS · 법인)도 돌려받는다(반증 F8 — 본 뒤 OS · 법인이 바뀌면 다른 단계를 승인하게 된다).
+ *  · 승인으로 지금 계정을 쓰게 되는 서버가 있으면 **계정(+ 로그인 방식)마다 한 대씩 먼저 로그인**해 본다(verifyServerId 가 그 묶음에 있으면 그 서버) —
+ *    하나라도 실패하면 아무것도 승인하지 않는다(반증 F6 — Linux · Windows 를 함께 고르면 둘째 계정이 확인 없이 승인됐다). 계정이 4개를 넘으면 나눠 승인하게 한다.
+ */
+const APPROVE_MAX_ACCOUNTS = 4;
+export async function approveInherit({ ids = [], expectAddrs = {}, expectKeys = {}, clearOwn = false, verifyServerId = '', by = '', dryRun = false } = {}) {
+  const si = storesIssue('승인하지 않았습니다'); if (si) return si;
+  const list = [...new Set((Array.isArray(ids) ? ids : []).map((x) => t(x, 64)).filter(Boolean))].slice(0, 1000);
+  if (!list.length) return { ok: false, code: 'no-servers', reason: '서버를 고르세요.' };
+  const byId = new Map(listBmServersRaw().map((s) => [s.id, s]));
+  const accById = new Map(KS.listAccountsRaw().map((a) => [a.id, a]));
+  const targets = [];
+  for (const id of list) {
+    const s = byId.get(id);
+    if (!s) return { ok: false, code: 'not-found', status: 404, reason: '서버를 찾을 수 없습니다(그 사이 지워짐).' };
+    if (t(s.agent)) return { ok: false, code: 'edge-delegated', status: 409, reason: `${s.name || s.host} 는 엣지가 수집하는 서버입니다 — 그 엣지 포탈에서 정합니다.` };
+    const ea = typeof expectAddrs === 'object' && expectAddrs ? expectAddrs[id] : null;
+    if (typeof ea !== 'string' || ea !== regAddrOf(s)) return { ok: false, code: 'moved', status: 409, reason: `${s.name || s.host} 의 주소 · 포트 · 계정이 화면과 다릅니다 — 화면을 다시 읽으세요.` };
+    const ek = typeof expectKeys === 'object' && expectKeys ? expectKeys[id] : null;
+    if (typeof ek !== 'string' || ek !== inheritKeyOf(s)) return { ok: false, code: 'moved', status: 409, reason: `${s.name || s.host} 의 OS 종류 · 법인이 화면과 다릅니다 — 화면을 다시 읽으세요.` };
+    if (!clearOwn && hasOwnCred(s)) return { ok: false, code: 'has-own', status: 409, reason: `${s.name || s.host} 는 따로 정한 계정이 있습니다 — ‘물려받기로 되돌리기’ 로 승인하세요.` };
+    // 승인 뒤 쓸 계정(시뮬레이션 — 승인 칸만 세운 사본으로 같은 판정)
+    const sim = { ...s, keyRef: clearOwn ? '' : s.keyRef, credRef: clearOwn ? '' : s.credRef, osAuth: clearOwn ? '' : s.osAuth, password: clearOwn ? '' : s.password, inherit: { key: inheritKeyOf(s) } };
+    const ef = REFS.effectiveAccountOf(sim);
+    targets.push({ s, ef });
+  }
+  const using = targets.filter((x) => x.ef.source === 'os' || x.ef.source === 'corp');
+  const groups = new Map();   // `${계정}|${로그인 방식}` → 그 계정을 쓰게 되는 서버들
+  for (const x of using) { const k = `${x.ef.accountId}|${x.ef.auth || ''}`; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(x); }
+  if (groups.size > APPROVE_MAX_ACCOUNTS) return { ok: false, code: 'too-many-accounts', status: 409, reason: `고른 서버들이 쓰게 될 공통 계정이 ${groups.size}개입니다 — ${APPROVE_MAX_ACCOUNTS}개 이하로 나눠 승인하세요(계정마다 한 대씩 먼저 확인합니다).` };
+  if (dryRun) return { ok: true, dry: true };
+  const verifiedAll = [];
+  for (const xs of groups.values()) {
+    const pick = xs.find((x) => x.s.id === t(verifyServerId, 64)) || xs[0];
+    const acc = accById.get(pick.ef.accountId);
+    if (!acc) return { ok: false, code: 'account-missing', status: 409, reason: REFS.AUTH_ERROR['account-missing'] };
+    const r = await loginOnce(pick.s, { accountId: acc.id, auth: pick.ef.auth });
+    noteCredOutcome({ ...pick.s, credAccountId: acc.id, credAccountName: acc.name, ...(r.secretVersion != null ? { credVersion: r.secretVersion } : {}), keyFingerprint: r.keyFingerprint || '' },
+      { ok: !!r.ok, rejected: !r.ok && r.kind === 'auth-rejected', code: r.kind, feature: 'conn-test', trigger: 'manual', by });
+    if (!r.ok) return { ok: false, code: 'verify-failed', status: 409, reason: `${pick.s.name || pick.s.host}(${acc.name}) 에서 확인하지 못해 아무것도 승인하지 않았습니다 — ${r.reason || r.kind}`, verified: { server: pick.s.name || pick.s.host, account: acc.name, ok: false, kind: r.kind }, verifiedAll };
+    verifiedAll.push({ server: pick.s.name || pick.s.host, account: acc.name, ok: true, kind: r.kind });
+  }
+  const verified = verifiedAll.length ? { ...verifiedAll[0], server: verifiedAll.map((v) => v.server).join(' · ') } : null;
+  const done = []; const failed = [];
+  for (const { s } of targets) {
+    const w = setBmServerInherit(s.id, { on: true, clearOwn: !!clearOwn, expectAddr: regAddrOf(s), expectKey: inheritKeyOf(s), by });
+    if (w.ok) done.push(s.id); else failed.push({ id: s.id, name: s.name || s.host, code: w.code, reason: w.reason });
+  }
+  return { ok: failed.length === 0, approved: done.length, ...(failed.length ? { code: 'partial', status: 409, reason: `${failed.length}대는 승인하지 못했습니다.`, failed } : {}), ...(verified ? { verified, verifiedAll } : {}), using: using.length };
+}
+
+/** 승인 거두기(서버 하나) — 그 서버는 계층 지정을 쓰지 않는다(따로 정한 계정이 없으면 ‘미설정’). */
+export function revokeInherit({ serverId, expectAddr = null, by = '' } = {}) {
+  if (bmRegistryLoadError()) return { ok: false, code: 'registry-unreadable', status: 503, reason: 'OS 계정 등록부를 읽지 못했습니다.' };
+  const s = listBmServersRaw().find((x) => x.id === t(serverId, 64));
+  if (!s) return { ok: false, code: 'not-found', status: 404, reason: '서버를 찾을 수 없습니다.' };
+  if (typeof expectAddr !== 'string' || !expectAddr) return { ok: false, code: 'need-addr', status: 400, reason: '화면에서 본 서버 접속처가 없습니다 — 화면을 다시 읽으세요.' };
+  const w = setBmServerInherit(s.id, { on: false, expectAddr, by });
+  return w.ok ? { ok: true } : w;
+}
+
+/** ‘따로 정하기 — 다른 공통 계정’(chooseServerKey 와 같은 꼴): 같은 주소에 계정만 바꾸고 한 번 접속해 본 뒤 실패하면 되돌린다. */
+export async function chooseServerAccount({ serverId, accountId, expectAddr = null, by = '' } = {}) {
+  const si = storesIssue('바꾸지 않았습니다'); if (si) return si;
+  const s = listBmServersRaw().find((x) => x.id === t(serverId, 64));
+  if (!s) return { ok: false, code: 'not-found', status: 404, reason: '서버를 찾을 수 없습니다.' };
+  if (t(s.agent)) return { ok: false, code: 'edge-delegated', status: 409, reason: '엣지가 수집하는 서버입니다 — 계정은 그 엣지 포탈에서 고릅니다.' };
+  if (typeof expectAddr !== 'string' || !expectAddr) return { ok: false, code: 'need-addr', status: 400, reason: '화면에서 본 서버 접속처가 없습니다 — 화면을 다시 읽은 뒤 고르세요.' };
+  const acc = KS.accountById(t(accountId, 32));
+  if (!acc || acc.kind !== 'os') return { ok: false, code: 'account-missing', status: 404, reason: 'OS 공통 계정을 찾을 수 없습니다.' };
+  if (KS.isAccountTampered(acc.id)) return { ok: false, code: 'account-tampered', status: 409, reason: REFS.AUTH_ERROR['account-tampered'] };
+  if (acc.corp && t(s.vcenterId) && acc.corp !== t(s.vcenterId)) return { ok: false, code: 'account-other-corp', status: 409, reason: '다른 법인의 공통 계정입니다.' };
+  if ((s.os === 'linux' || s.os === 'windows') && KS.accountFamily(acc) !== s.os) return { ok: false, code: 'account-os', status: 409, reason: REFS.AUTH_ERROR['account-os'] };
+  const w = setBmServerCredRef(s.id, acc.id, { expectAddr });
+  if (!w.ok) return w;
+  const after = listBmServersRaw().find((x) => x.id === s.id);
+  const test = after ? await testServer(after, { by }) : { ok: false, kind: 'gone', reason: '서버가 그 사이 지워졌습니다.' };
+  if (test.ok) return { ok: true, test };
+  const back = restoreBmServerAccess(s.id, w.previous);
+  return back.ok
+    ? { ok: false, code: 'test-failed', status: 409, reason: `고른 계정으로 접속하지 못해 이전 설정으로 되돌렸습니다 — ${test.reason || test.kind}`, test, reverted: true }
+    : { ok: false, code: 'test-failed', status: 409, reason: `고른 계정으로 접속하지 못했고 이전 설정으로 되돌리지도 못했습니다 — ${test.reason || test.kind}`, test, reverted: false, revertError: back.reason };
+}
+
+/**
+ * 서버 OS 종류(여러 대 · 한 번 쓰기). os = 'linux' | 'windows' | ''(미지정) | 'detected'(수집이 알아낸 OS — OS 종류가 비어 있는 서버만 · 저절로 바꾸지 않는다).
+ * OS 가 바뀌면 그 서버의 물려받기 승인은 효력을 잃는다(registry.inheritActive — 다시 승인해야 한다 · 응답 inheritLost 가 대수를 말한다).
+ */
+export function setServersOs({ ids = [], os = '' } = {}) {
+  if (bmRegistryLoadError()) return { ok: false, code: 'registry-unreadable', status: 503, reason: 'OS 계정 등록부를 읽지 못했습니다.' };
+  const want = new Set((Array.isArray(ids) ? ids : []).map((x) => t(x, 64)).filter(Boolean));
+  if (!want.size) return { ok: false, code: 'no-servers', reason: '서버를 고르세요.' };
+  const v = t(os, 16);
+  if (v && v !== 'detected' && !SERVER_OS.includes(v)) return { ok: false, code: 'bad-os', reason: 'OS 는 Linux · Windows · 미지정 중 하나입니다.' };
+  const list = listBmServersRaw().filter((s) => want.has(s.id));
+  const map = {}; const clear = [];
+  for (const s of list) {
+    if (v === 'detected') { if (!s.os) { const d = detectedOsOf(s); if (d) map[s.id] = d; } }
+    else if (v) { if (s.os !== v) map[s.id] = v; }
+    else if (s.os) clear.push(s.id);
+  }
+  const lost = list.filter((s) => inheritActive(s) && (Object.hasOwn(map, s.id) || clear.includes(s.id))).length;
+  let changed = 0;
+  if (Object.keys(map).length) { const w = setBmServersOs(map); if (!w.ok) return w; changed += w.changed; }
+  for (const id of clear) { const w = setBmServerOs(id, ''); if (!w.ok) return { ...w, partial: { changed } }; if (w.changed) changed += 1; }
+  return { ok: true, changed, skipped: list.length - changed, inheritLost: lost };
+}
+
+/**
+ * 공통 계정 저장(서버 접속 화면 — 설정 소유자 등급 + 본인 OTP 뒤). 새 비밀번호를 넣고 그 계정을 쓰는 서버가 있으면
+ * **그중 한 대(verifyServerId)로 저장 전에 로그인해 본다**(저장하지 않은 비밀번호로 — 실패하면 저장하지 않는다 · 다시 시도하지 않는다).
+ * 판정(이름 · OS · 도메인 · 암호화 정책 · 쓰는 서버 · 계층 지정 충돌)은 keyStore.saveAccount(dryRun) · refs.accountUseIssue 그대로.
+ */
+export async function saveAccountChecked({ input = {}, verifyServerId = '', by = '', dryRun = false } = {}) {
+  const si = storesIssue('저장하지 않았습니다'); if (si) return si;
+  const dry = KS.saveAccount(input, { dryRun: true });
+  if (!dry.ok) return dry;
+  if (dry.next.kind !== 'os') return { ok: false, code: 'account-kind', reason: '서버 접속 화면은 OS 공통 계정만 다룹니다(iDRAC 계정은 베어메탈 사용률 › 계정에서).' };
+  const before = input.id ? KS.accountById(t(input.id, 32)) : null;
+  const use = REFS.accountUseIssue(before, dry.next);
+  if (use) return use;
+  const pw = input.password;
+  const provided = typeof pw === 'string' && pw !== '' && pw !== '********';
+  let verified = null;
+  if (provided && before) {
+    const servers = listBmServersRaw().filter((s) => !t(s.agent) && REFS.effectiveAccountOf(s).accountId === before.id && (REFS.effectiveAccountOf(s).source === 'own' || inheritActive(s)));
+    if (servers.length) {
+      const target = servers.find((s) => s.id === t(verifyServerId, 64));
+      if (!target) return { ok: false, code: 'need-verify', status: 409, reason: `이 계정을 쓰는 서버 ${servers.length}대 중 한 대를 골라 새 비밀번호로 먼저 로그인해 보세요(저장 전 확인).`, candidates: servers.slice(0, 50).map((s) => ({ id: s.id, name: s.name || s.host })) };
+      if (dryRun) return { ok: true, dry: true };
+      const probe = { ...before, ...dry.next, username: t(input.username ?? before.username, 128), os: dry.next.os, logon: dry.next.logon, domain: dry.next.domain, kind: 'os' };
+      const r = await loginOnce(target, { candidate: { username: KS.loginNameOf(probe), password: pw } });
+      if (!r.ok) return { ok: false, code: 'verify-failed', status: 409, reason: `${target.name || target.host} 에서 새 비밀번호로 로그인하지 못해 저장하지 않았습니다 — ${r.reason || r.kind}`, verified: { server: target.name || target.host, ok: false, kind: r.kind } };
+      verified = { server: target.name || target.host, ok: true };
+    }
+  }
+  if (dryRun) return { ok: true, dry: true };
+  const r = KS.saveAccount(input, { by });
+  if (!r.ok) return r;
+  if (verified) {
+    const saved = KS.accountById(r.account.id);
+    KS.markAccountVerified(r.account.id, { serverName: verified.server, secretVersion: KS.accountSecretVersion(saved) });
+    ST.clearAccountStop(r.account.id, { by, accountName: r.account.name, why: '새 비밀번호 저장 전 확인 성공' });
+  }
+  return { ...r, ...(verified ? { verified } : {}) };
+}
+
+/** ‘한 대로 다시 확인’ — 그 계정을 쓰는 서버 한 대로 지금 저장된 자격으로 한 번 로그인. 성공하면 계정 단위 정지를 풀고 확인 기록을 남긴다. */
+export async function verifyAccount({ accountId, serverId, by = '' } = {}) {
+  const si = storesIssue('확인하지 않았습니다'); if (si) return si;
+  const acc = KS.accountById(t(accountId, 32));
+  if (!acc || acc.kind !== 'os') return { ok: false, code: 'account-missing', status: 404, reason: 'OS 공통 계정을 찾을 수 없습니다.' };
+  const s = listBmServersRaw().find((x) => x.id === t(serverId, 64));
+  if (!s) return { ok: false, code: 'not-found', status: 404, reason: '서버를 찾을 수 없습니다.' };
+  if (t(s.agent)) return { ok: false, code: 'edge-delegated', status: 409, reason: '엣지가 수집하는 서버입니다.' };
+  const ea = REFS.effectiveAccountOf(s);
+  const uses = ea.accountId === acc.id && (ea.source === 'own' || ea.source === 'os' || ea.source === 'corp');
+  if (!uses) return { ok: false, code: 'not-using', status: 409, reason: '이 서버는 이 계정을 쓰지 않습니다 — 이 계정을 쓰는 서버로 확인하세요.' };
+  const r = await loginOnce(s, { accountId: acc.id, auth: ea.auth || (s.osAuth === 'password' ? 'password' : ''), ignoreAccountStop: true });
+  noteCredOutcome({ ...s, credAccountId: acc.id, credAccountName: acc.name, ...(r.secretVersion != null ? { credVersion: r.secretVersion } : {}), keyFingerprint: r.keyFingerprint || '' },
+    { ok: !!r.ok, rejected: !r.ok && r.kind === 'auth-rejected', code: r.kind, feature: 'conn-test', trigger: 'manual', by });
+  if (!r.ok) return { ok: false, code: 'verify-failed', status: 409, reason: r.reason || r.kind, kind: r.kind };
+  if (r.secretVersion) KS.markAccountVerified(acc.id, { serverName: s.name || s.host, secretVersion: r.secretVersion });
+  const c = ST.clearAccountStop(acc.id, { by, accountName: acc.name, why: `${s.name || s.host} 에서 다시 확인 성공` });
+  return { ok: true, server: s.name || s.host, resumed: !c.already };
+}
+
+/** 계정 단위 정지를 사람이 푼다(비밀번호를 고치지 않고 — 서버 쪽 잠금을 푼 뒤 등). */
+export function resumeAccount({ accountId, by = '' } = {}) {
+  const acc = KS.accountById(t(accountId, 32));
+  if (!acc) return { ok: false, code: 'account-missing', status: 404, reason: '공통 계정을 찾을 수 없습니다.' };
+  return ST.clearAccountStop(acc.id, { by, accountName: acc.name, why: '사람이 풂' });
+}

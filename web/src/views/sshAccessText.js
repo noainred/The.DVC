@@ -57,12 +57,17 @@ export const EVENT_TEXT = Object.freeze({
   'account-changed-outside': '공통 계정이 포탈 밖에서 바뀜',
   'state-reloaded': '상태 파일 다시 읽음',
   'keystore-reloaded': '키 저장소 다시 읽음(포탈 밖 변경 받아들임)',
+  // v3.24 서버 접속 — 계층 지정 · 계정 단위 정지
+  'assign-set': '계층 지정 바꿈',
+  'assign-clear': '계층 지정 지움',
+  'account-stopped': '공통 계정 정지(로그인 거부)',
+  'account-resumed': '공통 계정 정지 풀림',
 });
 
 /** 사용 기록 결과 code → 글자. */
 export const USE_CODE_TEXT = Object.freeze({
   ok: '성공', 'auth-rejected': '로그인 실패', 'auth-stopped': '인증 정지 중', fail: '실패', hostkey: '호스트키 미신뢰', connect: '접속 실패',
-  'auth-unresolved': '자격 해석 실패', 'no-secret': '인증 수단 없음', gone: '서버 지워짐',
+  'auth-unresolved': '자격 해석 실패', 'no-secret': '인증 수단 없음', gone: '서버 지워짐', 'corp-stopped': '법인 사용 중지 중', 'state-unreadable': '상태 파일 모름',
 });
 export const UNUSUAL_TEXT = Object.freeze({ 'new-server': '처음 쓰인 서버', 'new-feature': '처음 쓰인 기능' });
 

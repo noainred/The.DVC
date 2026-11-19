@@ -146,14 +146,14 @@ export async function collectServer(server) {
 }
 
 /** 소규모 동시성 풀 — 서버 수십 대를 한꺼번에 SSH 하지 않게 제한(기본 4). */
-export async function collectMany(servers, { concurrency = envPositive(process.env.BMSTOR_CONCURRENCY, 4) } = {}) {
+export async function collectMany(servers, { concurrency = envPositive(process.env.BMSTOR_CONCURRENCY, 4), collect = collectServer } = {}) {
   const list = [...servers];
   const results = new Array(list.length);
   let idx = 0;
   const worker = async () => {
     while (idx < list.length) {
       const i = idx++;
-      results[i] = { id: list[i].id, ...(await collectServer(list[i])) };
+      results[i] = { id: list[i].id, ...(await collect(list[i])) };   // v3.24: 폴러가 계정 탐침(sshaccess/accountGate)으로 감싼 함수를 넘긴다
     }
   };
   await Promise.all(Array.from({ length: Math.max(1, Math.min(concurrency, list.length)) }, worker));

@@ -143,7 +143,7 @@ const ASIS = {
  *   여기서 빼려면 reconcileForApply · RESTORE_EXCLUDE 에 넣고 표를 옮긴다(조용히 '그대로' 로 옮기지 말 것).
  */
 const OPEN = {
-  'bm-storage.json': '저장 비밀(SSH 키 · 공통 계정)을 주소에 묶는 쓰기는 소유자 등급 + 본인 OTP(bindRule) — 복원이 푼 묶음 · 옛 주소의 묶음을 되살린다',
+  'bm-storage.json': '저장 비밀(SSH 키 · 공통 계정)을 주소에 묶는 쓰기는 소유자 등급 + 본인 OTP(bindRule) — 복원이 푼 묶음 · 옛 주소의 묶음 · 거둔 계층 승인(inherit — v3.24, 승인 키가 주소 · 포트 · OS · 법인과 같을 때만 효력)을 되살린다',
   'bm-onboard-edge.json': '엣지 배포 목록의 묶음 승인(bindOk) — 위와 같은 종류',
   'veeam-backup-run.json': '백업 실행 설정 저장은 본인 OTP 재인증 — 잡 접두 · 저장소 지정이 옛 값으로',
   'focusmon-audit-settings.json': '디스크 점검 도구 설치 경로 저장은 소유자 + 본인 OTP 재인증 — 옛 경로로',
