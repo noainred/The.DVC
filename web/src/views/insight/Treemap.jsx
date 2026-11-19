@@ -133,7 +133,8 @@ export default function Treemap({ layout, heightPx, tileView, selected = null, o
   }
   const drawCols = packed ? packed.cols : cols;
   const og = packed ? packed.groups.find((g) => g.id === openGroup) || null : null;
-  const ogMembers = og ? (valOf ? orderMembers(og.members, valOf) : og.members) : [];
+  // dbg3231 2회차: 목록 순서도 묶음 칸 대표 값(worstMember)과 같은 순위 — 지금 값 → 오래된 값 → 모름(오래된 높은 값이 맨 위에 오지 않게).
+  const ogMembers = og ? (valOf ? orderMembers(og.members, valOf, (m) => tileView(m).stale === true) : og.members) : [];
   const pos = (t) => ({ left: `${t.left}%`, top: `${t.top}%`, width: `${t.width}%`, height: `${t.height}%` });
   return (
     <>
@@ -157,13 +158,16 @@ export default function Treemap({ layout, heightPx, tileView, selected = null, o
             <tbody>
               {ogMembers.map((m) => {
                 const v = tileView(m); const pid = pidOf(m); const on = hasSel && selected.has(pid);
+                // dbg3231 2회차: 오래된 값은 목록에서도 보이게 — 견본 빗금 + 값 칸 ‘(오래됨)’(예전에는 툴팁에만 있어 지금 값과 똑같이 보였다).
+                //   견본 색은 backgroundColor 로(단축형 background 는 빗금 background-image 를 지운다).
+                const sw = <i className={v.stale ? 'stale' : undefined} style={{ backgroundColor: v.bg }} />;
                 return (
                   <tr key={m.id}>
                     <td data-sort={v.title}>{onToggle
-                      ? <button type="button" className={`ins-grpn${on ? ' on' : ''}`} aria-pressed={on} title={v.tip} onClick={() => onToggle(pid)}><i style={{ background: v.bg }} />{v.title}</button>
-                      : <span className="ins-grpn"><i style={{ background: v.bg }} />{v.title}</span>}</td>
+                      ? <button type="button" className={`ins-grpn${on ? ' on' : ''}`} aria-pressed={on} title={v.tip} onClick={() => onToggle(pid)}>{sw}{v.title}</button>
+                      : <span className="ins-grpn">{sw}{v.title}</span>}</td>
                     {whereOf && <td>{whereOf(m)}</td>}
-                    <td data-sort={valOf ? (numOrNull(valOf(m)) ?? '—') : m.size}>{v.line}</td>
+                    <td data-sort={valOf ? (numOrNull(valOf(m)) ?? '—') : m.size}>{v.line}{v.stale ? <span className="ins-grpst"> (오래됨)</span> : null}</td>
                     <td data-sort={v.mark ? 1 : 0}>{v.mark ? <em className="ins-mk">{v.mark}</em> : ''}</td>
                   </tr>
                 );

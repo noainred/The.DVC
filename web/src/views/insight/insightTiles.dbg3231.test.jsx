@@ -75,7 +75,7 @@ describe('② 그 밖 N개 목록 — 값 높은 순 · 값 열은 채움 값으
   });
   it('Treemap 목록은 orderMembers(valOf) 순 · 값 열 data-sort = 채움 값(모름 ‘—’) · 두 화면이 valOf 를 넘긴다', () => {
     const tm = read('Treemap.jsx');
-    expect(tm).toMatch(/valOf \? orderMembers\(og\.members, valOf\) : og\.members/);
+    expect(tm).toMatch(/valOf \? orderMembers\(og\.members, valOf, \(m\) => tileView\(m\)\.stale === true\) : og\.members/);   // 2회차: 오래됨 순위(지금 → 오래됨 → 모름)
     expect(tm).toMatch(/\{ogMembers\.map\(\(m\) =>/);
     expect(tm).toMatch(/data-sort=\{valOf \? \(numOrNull\(valOf\(m\)\) \?\? '—'\) : m\.size\}/);
     expect(read('../vms/VmInsight.jsx')).toMatch(/valOf=\{\(t\) => fill\.val\(t\.row\)\}/);
@@ -90,7 +90,7 @@ describe('③ 자동 높이 = 실제 배치의 가장 긴 작은 열', () => {
       const n = maxTilesPacked(L, W);
       const H = autoMapHeight(n);
       const real = longestPackedCol(packLayout(L, { widthPx: W, heightPx: H, group: false }));
-      expect(real).toBe(n);                                   // 그 높이에서 실제 가장 긴 열 = 쓴 칸 수
+      expect(real).toBeLessThanOrEqual(n);                    // 그린 높이에서 실제 가장 긴 열 ≤ 쓴 칸 수(3회차 — 같지 않을 수 있다)
       expect(autoMapHeight(real)).toBeLessThanOrEqual(H);     // 가장 긴 열 × 64 가 그 높이에 들어간다
     }
     expect(maxTilesPacked(L, 726)).toBeGreaterThan(8);
@@ -140,20 +140,76 @@ describe('⑤ 묶음 칸 — 오래됨 · 모름', () => {
     const a = { size: 5, row: { stale: true, v: 97 } }; const b = { size: 6, row: { v: 40 } }; const c = { size: 9, row: { v: null } };
     expect(worstMember([a, b, c], (m) => m.row.v, st)).toEqual({ member: b, value: 40 });
     expect(worstMember([c, a], (m) => m.row.v, st)).toEqual({ member: a, value: 97 });
-    expect(worstMember([c], (m) => m.row.v, st)).toEqual({ member: c, value: null });
+    expect(worstMember([c], (m) => m.row.v, st)).toEqual({ member: null, value: null });   // 3회차: 모두 모름이면 대표 없음
     expect(worstMember([a, b], (m) => m.row.v)).toEqual({ member: a, value: 97 });   // staleOf 없으면 예전 그대로
   });
   it('두 화면 groupView — 오래되지 않은 값 먼저 · 오래됨 N · 모름 N · stale 플래그 · 묶음 칸 빗금(class · backgroundColor)', () => {
     for (const f of ['../vms/VmInsight.jsx', '../hosts/HostInsight.jsx']) {
       const s = read(f);
       expect(s).toMatch(/worstMember\(members, \(m\) => fill\.val\(m\.(row|cell)\), isStale\)/);
-      expect(s).toMatch(/오래됨 \$\{staleN\}/);
-      expect(s).toMatch(/모름 \$\{unknownN\}/);
+      // 4회차: 오래됨 N · 모름 N 문구는 공용 groupCountsText(tilePack.js — insightRegroup.dbg3231 이 문구를 고정)로 옮겼다
+      expect(s).toMatch(/const staleN = members\.filter\(isStale\)\.length/);
+      expect(s).toMatch(/groupCountsText\(staleN, unknownN, repStale\)/);
       expect(s).toMatch(/stale: repStale \|\| \(members\.length > 0 && staleN === members\.length\)/);
     }
     const tm = read('Treemap.jsx');
     expect(tm).toMatch(/ins-tl grp t-\$\{t\.tier\}[^`]*\$\{v\.stale \? ' stale' : ''\}`/);
     expect(tm).not.toMatch(/style=\{\{ \.\.\.pos, background: v\.bg/);   // 인라인 background 단축형은 .stale 빗금(background-image)을 지운다
     expect((tm.match(/style=\{\{ \.\.\.pos, backgroundColor: v\.bg, color: v\.ink \}\}/g) || []).length).toBe(2);
+  });
+});
+
+// 3회차(dbg3231) — ⑥ 자동 높이: 돌려준 수 n 으로 **그린 높이** autoMapHeight(n) 에서의 실제 가장 긴 열이 n 이하여야 한다
+//   (예전에는 후보 높이 h 에서 센 n 을 돌려줘 지도는 그보다 낮은 autoMapHeight(n) 으로 그려졌고, 열 수 고르기가 높이에 따라 바뀌어 가장 긴 열이 n 보다 길었다).
+//   ⑦ 묶음 칸 구성원 값이 모두 모름이면 tip 이 ‘색은 가장 높은 값(이름)’ 으로 모름 구성원을 색의 근거로 지목했다.
+const rnd = (seed) => { let s = seed; return () => { s = (s * 1103515245 + 12345) % 2147483648; return s / 2147483648; }; };
+const randGroups = (seed) => {
+  const r = rnd(seed); const ng = 1 + Math.floor(r() * 5); const groups = [];
+  for (let g = 0; g < ng; g++) {
+    const n = 1 + Math.floor(r() * 40);
+    groups.push({ key: `g${g}`, label: `R${g}`, items: Array.from({ length: n }, (_, i) => ({ id: `g${g}-${i}`, label: `Cluster-${g}-${i}${'x'.repeat(Math.floor(r() * 10))}`, size: 1 + Math.floor(r() ** 3 * 60) })) });
+  }
+  return groups;
+};
+
+describe('⑥ 자동 높이 — 그린 높이에서의 가장 긴 열 ≤ 돌려준 수', () => {
+  it('재현 배치(seed 5 · 726px) — 예전 15(→ 960px, 그 높이에서 19칸)가 아니라 그린 높이에서 맞는 수', () => {
+    const L = treemapLayout(randGroups(5));
+    const n = maxTilesPacked(L, 726);
+    const H = autoMapHeight(n);
+    const real = longestPackedCol(packLayout(L, { widthPx: 726, heightPx: H, group: false }));
+    expect(real).toBeLessThanOrEqual(n);
+    expect(autoMapHeight(real)).toBeLessThanOrEqual(H);
+  });
+  it('무작위 배치 · 폭 여러 개 — 언제나 그린 높이 기준으로 맞는다', () => {
+    let checked = 0;
+    for (let seed = 1; seed <= 120; seed++) {
+      const L = treemapLayout(randGroups(seed));
+      for (const W of [600, 726, 900, 1122, 1376]) {
+        const n = maxTilesPacked(L, W);
+        const H = autoMapHeight(n);
+        const real = longestPackedCol(packLayout(L, { widthPx: W, heightPx: H, group: false }));
+        expect(real, `seed ${seed} · W ${W}`).toBeLessThanOrEqual(n);
+        expect(autoMapHeight(real), `seed ${seed} · W ${W}`).toBeLessThanOrEqual(H);
+        checked++;
+      }
+    }
+    expect(checked).toBe(600);
+  });
+});
+
+describe('⑦ 묶음 칸 — 구성원 값이 모두 모름', () => {
+  it('worstMember — 값 있는 구성원이 없으면 대표 없음(null · \'\' · undefined 모두 모름)', () => {
+    const ms = [{ label: 'A', size: 5, v: null }, { label: 'B', size: 3, v: '' }, { label: 'C', size: 2, v: undefined }];
+    expect(worstMember(ms, (m) => m.v, () => false)).toEqual({ member: null, value: null });
+    expect(worstMember(ms, (m) => m.v)).toEqual({ member: null, value: null });
+  });
+  it('두 화면 tip — 대표가 있을 때만 ‘색은 가장 높은 값(이름)’ · 없으면 ‘색 = 값 모름’', () => {
+    for (const [f, nm] of [['../vms/VmInsight.jsx', 'corpName\\(member\\.row\\)'], ['../hosts/HostInsight.jsx', 'member\\.label']]) {
+      const s = read(f);
+      expect(s).toMatch(new RegExp(`\\$\\{member \\? \`색은 가장 높은 값\\(\\$\\{${nm}\\}`));
+      expect(s).toMatch(/: '색 = 값 모름\(값이 있는 구성원 없음\)'\}/);
+      expect(s).not.toMatch(/색은 가장 높은 값\(\$\{member \? /);
+    }
   });
 });

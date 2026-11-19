@@ -115,7 +115,7 @@ describe('③ C · 작은 칸 묶기', () => {
   it('worstMember — 가장 높은 값(모름은 뒤로)', () => {
     const ms = [{ id: 'a', size: 5, v: 40 }, { id: 'b', size: 3, v: null }, { id: 'c', size: 2, v: 91 }];
     expect(worstMember(ms, (m) => m.v)).toEqual({ member: ms[2], value: 91 });
-    expect(worstMember([{ id: 'x', size: 1, v: null }], (m) => m.v)).toEqual({ member: { id: 'x', size: 1, v: null }, value: null });
+    expect(worstMember([{ id: 'x', size: 1, v: null }], (m) => m.v)).toEqual({ member: null, value: null });   // dbg3231 3회차: 모두 모름이면 대표 없음
     expect(worstMember([], (m) => m.v).member).toBe(null);
   });
 });

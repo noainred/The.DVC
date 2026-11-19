@@ -17,7 +17,7 @@ import { vcHash } from '../vcd/vcdRoute.js';
 import { pickRows, toolIdsOf, fmtN, fmtU, gbText, shareText, barPct } from '../insight/insightCore.js';
 import { treemapLayout, maxTilesInCol, fillStep } from '../insight/treemap.js';
 import { mapHeightOf, autoMapHeight } from '../insight/insightPrefs.js';
-import { maxTilesPacked, worstMember } from '../insight/tilePack.js'; // v3.23.0 지도 칸 글자(설계 docs/design/insight-tiles)
+import { maxTilesPacked, worstMember, groupCountsText } from '../insight/tilePack.js'; // v3.23.0 지도 칸 글자(설계 docs/design/insight-tiles)
 import { useFolded } from '../insight/useInsight.js';
 import Treemap from '../insight/Treemap.jsx';
 import { useMapPrefs, MapSizeSeg, MapSizeBox } from '../insight/MapSize.jsx';
@@ -115,12 +115,11 @@ export default function HostInsight({ filters = {}, scopeIds = null, scopeRegion
     const staleN = members.filter(isStale).length;
     const unknownN = members.filter((m) => numOrNull(fill.val(m.cell)) == null).length;
     const repStale = !!member && isStale(member) && value != null;
-    const counts = [staleN ? `오래됨 ${staleN}` : '', unknownN ? `모름 ${unknownN}` : ''].filter(Boolean).join(' · ');
     return {
       title: g.label, line: `가장 높은 ${fill.short} ${fill.key === 'n1mem' ? n1PctText(value) : pct0(value)}${repStale ? '(오래됨)' : ''} · 합 ${size.text(g.size)}`, bg: col.bg, ink: col.ink,
       stale: repStale || (members.length > 0 && staleN === members.length),
       mark: failN ? `못 버팀 ${failN}` : null,
-      tip: `${g.label} — 칸이 너무 작아 한 칸으로 묶은 클러스터(${members.map((m) => m.label).join(' · ')}) · 색은 가장 높은 값(${member ? member.label : '—'}${repStale ? ' — 값이 오래됨' : ''})${counts ? ` · ${counts}(색에 넣지 않음)` : ''}${failN ? ` · 못 버티는 클러스터 ${failN}개` : ''} · 누르면 아래에 목록이 열립니다`,
+      tip: `${g.label} — 칸이 너무 작아 한 칸으로 묶은 클러스터(${members.map((m) => m.label).join(' · ')}) · ${member ? `색은 가장 높은 값(${member.label}${repStale ? ' — 값이 오래됨' : ''})` : '색 = 값 모름(값이 있는 구성원 없음)'}${groupCountsText(staleN, unknownN, repStale)}${failN ? ` · 못 버티는 클러스터 ${failN}개` : ''} · 누르면 아래에 목록이 열립니다`,
     };
   };
   const scale = hostScale(fill);
