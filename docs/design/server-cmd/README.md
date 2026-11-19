@@ -1,6 +1,6 @@
 # 설계: 서버 명령 실행(프리셋) — 배치 · 프리셋 목록 · 화면
 
-작성 2026-11-20 (main 266a350dc 기준) · 상태 **시안 — 컨펌 대기** · 시안 캔버스: https://claude.ai/artifact/6gbaVaxfowasvsPgo8HaU8
+작성 2026-11-20 (main 266a350dc 기준) · 상태 **컨펌 2026-11-20 ‘기본값으로 수행’(D1~D14 기본값) — 구현 v3.30(§8)** · 시안 캔버스: https://claude.ai/artifact/6gbaVaxfowasvsPgo8HaU8
 (아트보드 4장 — 이 폴더의 `*.dc.html` · `sc.css` 가 같은 내용의 레퍼런스. 화면 시안(③)의 법인 · 서버 · 주소(192.0.2.x 문서용 대역) · 출력 · 날짜는 그림용 가상값이다.
 색 · 글자는 `web/src/styles.css` `:root` 토큰 그대로이고 조각은 서버 접속 시안(`docs/design/server-access/sa.css`)과 같다. 계정의 ‘Design System’ 아티팩트는 앞 시안들의 기록(README 없는 빈 시스템)을 따라 쓰지 않았다 — 이번에 다시 열어 보지는 않았다.
 아트보드를 브라우저로 렌더해 확인하지는 않았다 — 태그 닫힘 · 화살표 marker id 중복 · 금지 문자(백틱 · `text-transform`) · 이중 중괄호만 스크립트로 검사했고, 아트보드 높이는 추정해 넉넉히 잡았다.)
@@ -20,7 +20,7 @@
 |---|---|---|
 | 서버 한 대에 로그인해 명령 하나를 돌리는 코어 | 있음 — 계정 해석 → 탐침 → 로그인 한 번 → 명령 하나(시한 · 출력 상한 · 받은 만큼) → 결과 기록 | `server/src/sshaccess/readServer.js` `readServer(serverId, { feature, plan, … })` |
 | 명령을 정하는 곳 | 기능이 넘긴 **고정 문자열**(`plan.linux.command` · `plan.windows.command` · `winrm`) — 코어는 글자를 이어 붙이지 않는다 | 같은 파일 머리말 · `:79~:101` |
-| 코어가 돌려주는 것 | `{ ok, code, reason, os, via, auth, stdout, stderr, ms }` — **명령의 끝 코드는 없다**(SSH 실행 자체는 `code` 를 돌려준다) | `readServer.js` 머리말 · `server/src/proxy/sshExec.js:270` |
+| 코어가 돌려주는 것 | `{ ok, code, reason, os, via, auth, ms, exit, stdout, stderr }` — **끝 코드도 `exit` 칸으로 돌려준다**(SSH · WinRM 모두). **정정(2026-11-20 구현 착수 때)**: 시안 단계에서 머리말 주석(`exit` 가 빠져 있다)만 보고 ‘끝 코드는 없다’ 고 적었다 — 본문(`readServer.js` 끝 부분)은 이미 돌려준다. 머리말도 고쳤다 | `readServer.js` 머리말 · 끝 부분 `base` |
 | 시한 | 로그인 15초 + 명령 시한 < 서버 한 대 60초(시험이 산수를 고정) · 시한 · 상한에 걸리면 받은 만큼(`partial`) | `readServer.js:29~30` · `sshExec.js:252~263` |
 | 터미널 | 없음 — 코어가 쓰는 `exec` 는 pty 를 청하지 않는다(ssh2 기본 = 없음) → sudo 비밀번호 입력은 못 한다 | `sshExec.js:246`(앞 답변이 든 `:288` 은 스트림용 `execStream` 의 `pty: false` — 줄 번호 정정) |
 | 엣지가 수집하는 서버 | 중앙은 붙지 않는다(`edge-delegated`) | `readServer.js:76` |
@@ -78,7 +78,7 @@
 - 보관: **메모리에만 · 마지막 실행 한 건 · 30분 뒤 지움**(D6) — 파일 · 백업 · 엣지 push 에 싣지 않는다.
 - 감사: 누가 · 프리셋 · 값 · 대상 · 서버별 결과 코드. **출력은 싣지 않는다.**
 - 출력 속 비밀을 자동으로 가리지는 못한다 — 목록에서 그런 명령을 빼는 것으로 대신한다.
-- 끝 코드가 0 이 아니어도 실패가 아니다(출력과 끝 코드를 그대로) — 코어가 끝 코드를 돌려주게 한 칸 넓힌다.
+- 끝 코드가 0 이 아니어도 실패가 아니다(출력과 끝 코드를 그대로) — 코어가 이미 돌려주는 `exit` 를 그대로 쓴다(§2 정정).
 
 ### 4.5 권한 · 계정
 
@@ -88,7 +88,7 @@
 
 ## 5. 구현 단계(안) — 한 릴리스
 
-1. 코어: 끝 코드 돌려주기 · 일괄 틀(50대 · 동시 4대 · 일괄 하나 · 202 · 일괄 문)을 `serverinfo/service.js` 에서 공용으로 뽑기 — 서버 정보 시험이 그대로 통과해야 한다.
+1. 코어: ~~끝 코드 돌려주기~~(이미 있다 — §2 정정) · 일괄 틀(50대 · 동시 4대 · 일괄 하나 · 202 · 일괄 문)을 `serverinfo/service.js` 에서 공용으로 뽑기 — 서버 정보 시험이 그대로 통과해야 한다.
 2. `server/src/servercmd/`(안): `presets.js`(순수 — 목록 · 값 검사 · 명령 만들기) · `service.js`(일괄 · 다듬기 · 메모리 보관) · `CLAUDE.md`. 시험: 값 검사 변이 · 시한 산수 · 목록 전체에 금지 명령(sudo · 쓰기 · 인자 노출)이 없는지 스윕.
 3. 라우트 `routes/api/serverCmd.js` · 허용 기능 등록 · `auth/toolAccess.js` · `toolcats/catalog.js` · 감사.
 4. 화면 `web/src/views/tools/ServerCmdTool.jsx`(STable · 숫자는 API 값) — Chromium 1440 · 400.

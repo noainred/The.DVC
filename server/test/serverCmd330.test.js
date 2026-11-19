@@ -123,6 +123,9 @@ test('② 값 검사 — 주입 시도는 모두 거절(접속 전) · 통과한
   const badPath = ['var/log', '/var/../etc', '/..', '/a/../../b', '/a b', "/a'b", '/a;b', '/$(id)', `/${'a'.repeat(200)}`, '/a\nb', '/*'];
   for (const v of badPath) assert.equal(P.checkRequest('du-top', { path: v }).ok, false, JSON.stringify(v));
   assert.equal(P.checkRequest('du-top', { path: '/var/log' }).ok, true);
+  // 길이는 정규식보다 먼저(긴 입력에 정규식을 돌리지 않는다 · 사유도 길이로)
+  assert.equal(P.checkRequest('svc-state', { unit: 'a'.repeat(81) }).reason, '서비스 이름: 80자까지입니다.');
+  assert.equal(P.checkRequest('du-top', { path: `/${'a'.repeat(5000)}` }).reason, '폴더 경로: 200자까지입니다.');
   assert.equal(P.checkRequest('du-top', { path: '/a/..b/c' }).ok, true, '.. 조각이 아닌 이름은 통과');
   // 모르는 값 이름 · 빠진 값 · 모르는 프리셋
   assert.equal(P.checkRequest('uptime', { command: 'id' }).code, 'bad-param');
@@ -176,6 +179,13 @@ test('④ 허용 기능 — 서버 명령은 직접 켠 키 · 계정만(목록 
   assert.deepEqual(SA.FEATURE_CATALOG.map((f) => f.id), [...KS.KEY_FEATURES]);
   assert.equal(PL.FEATURE_LABEL['server-cmd'], '서버 명령 실행');
   assert.equal(KS.normFeatures(['server-cmd', 'nope']).join(), 'server-cmd');
+});
+
+test('④-2 설정 화면 기능 목록 — 직접 켜야 하는 기능을 서버가 표시한다(화면의 ‘예전 방식’ 문구가 그것을 뺀다)', async () => {
+  const v = await SA.buildView();
+  const f = v.features.find((x) => x.id === 'server-cmd');
+  assert.equal(f.explicit, true);
+  assert.equal(v.features.filter((x) => x.explicit).map((x) => x.id).join(), PL.EXPLICIT_FEATURES.join());
 });
 
 test('⑤ 코어로 실행 — 보낸 명령은 계획 그대로 · 끝 코드 · 다듬은 출력 · 계정 판정(직접 켠 계정만 · 접속 0회) · OS 에 없는 프리셋 · 엣지 · 값 오류는 접속 전', async () => {
@@ -254,6 +264,11 @@ test('⑥ 일괄 · 보관 — 진행 중 429 · 시한이면 받은 만큼 · �
   SVC._resetServerCmdForTest({ finishedAgoMs: SVC.RESULT_TTL_MS });
   assert.equal(SVC.buildView().last, null); assert.deepEqual(SVC.outputs().rows, []);
   assert.equal(SVC.outputs(own.id).ok, true, '출력이 없으면 빈 목록(지운 뒤)');
+  // 일괄 문 — 같은 계정명 · 틀린 비밀번호로 등록한 3대를 한 번에 돌려도 틀린 비밀번호는 한 번만 닿는다(계정 잠금 방지)
+  const dup = [1, 2, 3].map((i) => srv({ name: `dup-${i}`, vcenterId: 'vcA', os: 'linux', username: 'dupu', password: 'Dup-Wrong-1' }));
+  const dr = await SVC.runMany({ preset: 'uptime', params: {}, ids: dup.map((x) => x.id) }, { by: 'own' });
+  assert.equal(SSHD.st.seen.filter((x) => x === 'Dup-Wrong-1').length, 1, `탐침 하나 — ${JSON.stringify(dr.results?.map((x) => x.code))}`);
+  assert.deepEqual(dr.results.map((x) => x.code).sort(), ['auth-rejected', 'same-cred-rejected', 'same-cred-rejected']);
   assert.equal((await SVC.runMany({ preset: 'uptime', params: {}, ids: Array.from({ length: SVC.RUN_BATCH_MAX + 1 }, (_, i) => `x${i}`) })).code, 'too-many');
   assert.equal((await SVC.runMany({ preset: 'uptime', params: {}, ids: [] })).code, 'no-servers');
   assert.equal((await SVC.runMany({ preset: 'uptime', params: {}, ids: ['nope'] })).code, 'not-found');

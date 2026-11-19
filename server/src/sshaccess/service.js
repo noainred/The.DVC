@@ -157,7 +157,8 @@ export async function buildView({ now = Date.now() } = {}) {
     usageKnown: usage.known,
     servers: pubServers,
     edgeRows,
-    features: FEATURE_CATALOG,
+    // v3.30: explicit — 기능 목록이 없는 예전 키 · 계정이 쓰지 못하는 기능(직접 켜야 — placement.EXPLICIT_FEATURES 하나 · 화면이 ‘예전 방식’ 문구에서 뺀다)
+    features: FEATURE_CATALOG.map((f) => ({ ...f, explicit: REFS.EXPLICIT_FEATURES.includes(f.id) })),
     inbox: { dir: inbox.dir, exists: inbox.exists, items: inbox.items, unknownFolders: inbox.unknownFolders, unknownTotal: inbox.unknownTotal, truncated: inbox.truncated, rootIsLink: inbox.rootIsLink },
     check: buildKeyCheck({ now, policyMode, inbox, drift, servers: serverSummary, corpName }),
     stops: ST.listStops(),

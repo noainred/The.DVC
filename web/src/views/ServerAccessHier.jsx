@@ -344,7 +344,7 @@ export function AccountsTab({ v, corpName, reload, say }) {
                 <td data-sort={a.corp || ''}>{a.corp ? corpName(a.corp) : <span className="ssa-sub">전 법인</span>}</td>
                 <td data-sort={a.pwAgeDays ?? ''}>{a.keyRef ? `키 ${(v.keys || []).find((k) => k.id === a.keyRef)?.name || '(없음)'}` : (a.hasPassword ? '비밀번호' : '—')}
                   {(a.hasPassword || a.pwSetAt) && <div className="ssa-sub" style={{ color: a.rotateDue ? toneVar('warn') : undefined }}>{passwordAgeText(a)}</div>}</td>
-                <td data-sort={a.features == null ? '' : a.features.length}>{a.features == null ? <span className="ssa-sub">제한 없음(예전 방식)</span> : featuresText(a.features, v.features)}</td>
+                <td data-sort={a.features == null ? '' : a.features.length}>{a.features == null ? <span className="ssa-sub">{featuresText(null, v.features)}</span> : featuresText(a.features, v.features)}</td>
                 <td data-sort={n}>{n}대{a.verifiedAt ? <div className="ssa-sub">확인 {a.verifiedOn} · {dateTime(a.verifiedAt)}</div> : <div className="ssa-sub">{a.hasPassword ? '확인 안 함' : ''}</div>}</td>
                 <td data-nosort>
                   <div className="ssa-acts sah-stack">

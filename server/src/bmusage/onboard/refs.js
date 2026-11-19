@@ -273,7 +273,7 @@ export function effectiveAccountOf(server = {}) {
  * 키 배치 판정(keyPlacementIssue · ALWAYS_ALLOWED_FEATURES)은 순수 모듈 placement.js 로 옮겼다(4회차 점검 D1 — 온보딩 분석이 같은 함수를 직접 부른다).
  *   여기서 그대로 다시 내보낸다 — 기존 호출부(REFS.keyPlacementIssue · sshaccess)는 바뀌지 않는다. 판정은 여전히 하나다.
  */
-export { ALWAYS_ALLOWED_FEATURES, keyPlacementIssue } from './placement.js';
+export { ALWAYS_ALLOWED_FEATURES, EXPLICIT_FEATURES, keyPlacementIssue } from './placement.js';
 import { featureBlocked } from './placement.js';
 /**
  * 법인 사용 중지 판정 — 서버 법인 · 공통 계정 법인 · 키 폴더 법인 중 하나라도 멈췄거나, 중지할 때 적어 둔 서버(id · 접속처)이면.
