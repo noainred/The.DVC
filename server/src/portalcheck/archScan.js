@@ -138,6 +138,8 @@ export const ROUTE_GATE_ALLOW = Object.freeze({
   'POST /api/tools/vmseries/run': 'denyScopedRun + inUserScope(v2.605)',
   'DELETE /api/tools/vmseries/data': '핸들러에서 범위 계정 403(requiredOwner)',
   'POST /api/tools/curuser/collect': 'denyScopedRun — 범위 계정 403(v2.605 AUTHZ2605-02)',
+  // v3.28.0 스냅샷 보류(VM 하나 · 기한 있는 예외) — 핸들러 안: 그 VM 이 조회 범위 밖이면 404 → inUserWriteScope 무조건 403 · 감사(server/test/snapHold3280 ⑤)
+  'PUT /api/tools/snapshots/holds': 'inUserScope(404) → inUserWriteScope 무조건(403) — VM 하나 단위 · v3.28.0',
   'PUT /api/tools/curuser/settings': 'mergeScoped — 범위 밖 키 보존 병합(v2.605)',
   'POST /api/tools/horizon-sessions/collect': 'denyScoped — 범위 계정 403(v2.605 AUTHZ2605-02)',
   'PUT /api/tools/horizon-sessions/settings': 'denyScoped — 범위 계정 403(v2.605 AUTHZ2605-02)',

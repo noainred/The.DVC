@@ -1,6 +1,10 @@
 // vCenter 목록 + 중복IP/솔루션/VMtools/스냅샷 도구 — api.js(구 2,445줄) 분할(v2.283.0). 본문은 원본 그대로, 등록 순서는 api.js 호출 순서가 보존한다.
-import { scopedVcenterIds, inUserScope } from '../../auth/scope.js';
-import { requirePerm } from '../../auth/auth.js'; // v2.479(감사 S-4)
+import { scopedVcenterIds, inUserScope, inUserWriteScope } from '../../auth/scope.js';
+import { requirePerm, requireRole } from '../../auth/auth.js'; // v2.479(감사 S-4)
+import { isAdminDetailUser } from '../../auth/demoGuest.js';
+import { logAudit } from '../../audit.js';
+import { loadHolds, setHold, HOLD_DAYS_MAX, holdsGeneration } from '../../vmhygiene/holds.js';
+import { snapshotCreators } from '../../snaphist/creators.js';
 import { store } from '../../store.js';
 import { sortByOrder } from '../../vcenter/order.js';
 import { nsxStore } from '../../nsx/store.js';
@@ -161,7 +165,7 @@ api.get('/tools/snapshots', requirePerm('tools'), (req, res) => memoJson(req, re
       allowed: scopedVcenterIds(req.user, snap), pick: vcenterPickOf(req.query, snap), hygiene, now: Date.now(),
       dcOf: (id) => datacenterOfVcenter(id), dcNames,
     });
-  }, { extraKey: `${scopeKey(req.user, store.get())}|${vcenterPickKey(req.query, store.get())}`, ttlMs: 20_000 }));
+  }, { extraKey: `${scopeKey(req.user, store.get())}|${vcenterPickKey(req.query, store.get())}|h${holdsGeneration()}`, ttlMs: 20_000 }));   // 보류를 바꾸면 곧바로 다시 계산
 
 // v3.26.0 스냅샷 이력(snaphist — 하루 1번 기록). 범위 → 고른 법인 순으로 vCenter 를 고른 뒤 그 vCenter 의 기록만 읽는다.
 //   부분 합은 추이에 넣지 않는다(빠진 vCenter 가 있는 날은 null + missing — snaphist/history.js aggregateDays).
@@ -189,6 +193,42 @@ api.get('/tools/snapshots/history', requirePerm('tools'), (req, res) => memoJson
   ]);
   return { ok: true, status, ...(series || {}), gone: gone?.items || [], goneMore: !!gone?.more, ago7: ago };
 }, { extraKey: `${scopeKey(req.user, store.get())}|${vcenterPickKey(req.query, store.get())}|g${snapHistGeneration()}`, ttlMs: 60_000 }));
+
+// v3.28.0 만든 계정 — 스냅샷 이벤트 DB(31일). 계정 이름은 관리자 판본(isAdminDetailUser)에만 — 그 밖에는 수만 싣고 userMasked(vcInfo 작업 사용자와 같은 규칙).
+api.get('/tools/snapshots/creators', requirePerm('tools'), (req, res) => memoJson(req, res, 'tools-snapshots-creators', async (snap) => {
+  const allowed = scopedVcenterIds(req.user, snap);
+  const pick = vcenterPickOf(req.query, snap);
+  const vcIds = new Set((snap.vcenters || []).map((v) => String(v.id)).filter((id) => (!allowed || allowed.has(id)) && (!pick || pick.has(id))));
+  const r = await snapshotCreators({ snap, vcIds });
+  const admin = isAdminDetailUser(req.user);
+  const byVm = {};
+  for (const [k, c] of Object.entries(r.byVm)) byVm[k] = { user: admin ? c.user : null, ts: c.ts };
+  return { ok: true, byVm, vcenters: r.vcenters, ambiguous: r.ambiguous, ...(admin ? {} : { userMasked: Object.keys(byVm).length > 0 }), windowDays: 31 };
+}, { extraKey: `${scopeKey(req.user, store.get())}|${vcenterPickKey(req.query, store.get())}|${isAdminDetailUser(req.user) ? 'a' : 'u'}`, ttlMs: 300_000 }));
+
+// v3.28.0 스냅샷 보류(기한 있는 예외 — vmhygiene/holds.js). 조회는 범위 안 보류만 · 건 계정은 관리자 판본만.
+//   쓰기는 관리자(requireRole) · 조회 범위 밖 vCenter 는 404 → 쓰기 범위 밖은 403(server/CLAUDE.md writeVcenters 규약) · 감사 기록.
+api.get('/tools/snapshots/holds', requirePerm('tools'), (req, res) => {
+  const snap = store.get();
+  const allowed = scopedVcenterIds(req.user, snap);
+  const admin = isAdminDetailUser(req.user);
+  const r = loadHolds();
+  const holds = r.holds.filter((h) => !allowed || allowed.has(h.vcenterId)).map((h) => ({ ...h, by: admin ? h.by : null }));
+  res.json({ ok: true, holds, unreadable: r.unreadable, daysMax: HOLD_DAYS_MAX });
+});
+api.put('/tools/snapshots/holds', requireRole('admin'), requirePerm('tools'), (req, res) => {
+  const snap = store.get();
+  const b = req.body && typeof req.body === 'object' ? req.body : {};
+  const vcenterId = typeof b.vcenterId === 'string' ? b.vcenterId : '';
+  const vmId = typeof b.vmId === 'string' ? b.vmId : '';
+  const vm = vcenterId && vmId ? (snap.vms || []).find((v) => String(v.vcenterId) === vcenterId && String(v.id) === vmId) : null;
+  if (!vm || !inUserScope(req.user, snap, vcenterId)) return res.status(404).json({ ok: false, reason: '찾을 수 없습니다.' });
+  if (!inUserWriteScope(req.user, snap, vcenterId)) return res.status(403).json({ ok: false, reason: '이 vCenter 는 쓰기 범위 밖입니다.' });
+  const r = setHold({ vcenterId, vmId, vmName: vm.name || '', days: b.days, reason: typeof b.reason === 'string' ? b.reason : '' }, req.user?.username);
+  if (!r.ok) return res.status(r.status).json({ ok: false, reason: r.reason });
+  logAudit({ user: req.user?.username, action: 'snapshot.hold', target: `${vcenterId}/${vm.name || vmId}`, detail: r.hold ? `${b.days}일 보류 — ${r.hold.reason}` : '보류 풀기', ip: req.ip });
+  res.json({ ok: true, hold: r.hold });
+});
 
 api.get('/tools/snapshots/history/vm', requirePerm('tools'), async (req, res) => {
   const snap = store.get();

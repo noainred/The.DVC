@@ -5,12 +5,15 @@
  *   주소에 보기 · 고른 법인을 싣는다(‘오래된 스냅샷’ 카드의 ‘모두 보기’ 가 `#/tools/snapshots/old/<vCenter id>` 로 연다).
  * 2단계(v3.27.0): VM 별 스냅샷 이력 DB 로 — 추이(크기 · VM 수 · 기준 넘긴 VM 수 × 7 · 30 · 90일) · 법인 카드 30일 그림 · 7일 변화 열과 신호 ·
  *   지난 7일 숫자 · 줄 펼침의 VM 이력 · ‘정리된 것’ 탭. 빠진 날(그 vCenter 를 못 읽은 날)은 선을 끊는다 — 0 으로 잇지 않는다.
+ * 3단계(v3.28.0): 만든 계정(스냅샷 이벤트 31일 — 계정 이름은 관리자 판본만) · 묶어 보기 ‘만든 계정’ · 보류(관리자 — 기한 1~90일 · 사유 필수,
+ *   판정은 서버 hygieneFindings 하나라 카드 · VM 구성 점검 · 알림에도 같이 빠진다).
  * 판정은 서버(snaphist/view.js — hygieneFindings) · 화면은 거르고 묶고 세기만(snapText.js). 보기 전용 — 지우기 · 되돌리기 단추는 두지 않는다.
  * 무거운 집계라 15초 폴링하지 않는다 — 들어올 때 한 번 + ‘다시 받기’(루트 CLAUDE.md 프론트 규칙). 늦게 온 이전 응답은 버린다.
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { fetchJson, canCsv, toolAllowed } from '../../../api.js';
+import { fetchJson, putJson, canCsv, toolAllowed, hasRole } from '../../../api.js';
 import { Loading, ErrorBox } from '../../../components/ui.jsx';
+import Select from '../../../components/Select.jsx';
 import { STable } from '../../../components/STable.jsx';
 import { numOrNull } from '../../../numOrNull.js';
 import { csvCell } from '../../../util/csv.js';
@@ -26,7 +29,8 @@ import {
 import './snapshots.css';
 
 const KIND = (n) => (n.mem ? '메모리까지 담음' : n.quiesced ? '파일 시스템을 멈추고 찍음' : '디스크만');
-const SKIP_TEXT = { template: '템플릿', exception: '예외', 'no-settings': '설정 없음' };
+const SKIP_TEXT = { template: '템플릿', exception: '예외', hold: '보류', 'no-settings': '설정 없음' };
+const CREATOR_NOTE = { site: '위임 법인 — 이벤트가 법인 엣지에 있어 모름', 'no-db': '이벤트 DB 를 쓸 수 없어 모름', truncated: '이벤트가 많아 일부만 읽음' };
 
 /** 작은 꺾은선 — 빠진 날은 선이 끊기고 빗금으로 보인다. */
 function Spark({ values, cls = '', label, color = '#3b82f6' }) {
@@ -50,7 +54,7 @@ function exportCsv(rows) {
   saveBlob(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }), `snapshots-${dayStamp()}.csv`);
 }
 
-export default function SnapshotTool({ scope = '', initial = null, initialHist = null }) {   // initial* = 시험용(서버 렌더 — 효과가 돌지 않는다)
+export default function SnapshotTool({ scope = '', initial = null, initialHist = null, initialCreators = null }) {   // initial* = 시험용(서버 렌더 — 효과가 돌지 않는다)
   const init = useMemo(() => parseSnapHash(typeof window === 'undefined' ? '' : window.location.hash), []);
   const [view, setView] = useState(init.view || 'all');
   const [vcPick, setVcPick] = useState(init.vcIds);
@@ -71,6 +75,8 @@ export default function SnapshotTool({ scope = '', initial = null, initialHist =
   const [tm, setTm] = useState('gb');
   const [tp, setTp] = useState(30);
   const [vmHist, setVmHist] = useState({});
+  const [creators, setCreators] = useState(initialCreators);
+  const [holdForm, setHoldForm] = useState(null);   // { key, days, reason, busy, error }
   const seq = useRef(0);
   const hseq = useRef(0);
 
@@ -92,6 +98,13 @@ export default function SnapshotTool({ scope = '', initial = null, initialHist =
       .catch(() => { if (my === hseq.current) setHist({ ok: false }); });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pkey, tick, tp]);
+  // 만든 계정 — 들어올 때 한 번(서버가 5분 담아 둔다). 실패해도 화면은 그대로(‘모름’).
+  useEffect(() => {
+    let live = true;
+    fetchJson('/tools/snapshots/creators', params).then((d) => live && setCreators(d)).catch(() => live && setCreators({ ok: false }));
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pkey, tick]);
   // 줄 펼침의 VM 이력 — 펼칠 때 한 번(같은 VM 은 다시 받지 않는다)
   useEffect(() => {
     if (!open || vmHist[open]) return;
@@ -125,7 +138,8 @@ export default function SnapshotTool({ scope = '', initial = null, initialHist =
       .some((s) => s && String(s).toLowerCase().includes(ql))), sort.key, sort.dir, change), [scoped, view, band, ql, sort, change]);
   const sum = summaryOf(scoped);
   const cards = useMemo(() => corpCards(items, data?.corps), [items, data]);
-  const groups = useMemo(() => groupItems(shown, group, labels), [shown, group, labels]);
+  const whoOf = useMemo(() => (x) => creators?.byVm?.[`${x.vcenterId}\n${x.id}`]?.user || null, [creators]);
+  const groups = useMemo(() => groupItems(shown, group, labels, whoOf), [shown, group, labels, whoOf]);
   const selItems = items.filter((x) => sel[`${x.vcenterId}\n${x.id}`]);
   const allOn = shown.length > 0 && shown.every((x) => sel[`${x.vcenterId}\n${x.id}`]);
 
@@ -160,6 +174,7 @@ export default function SnapshotTool({ scope = '', initial = null, initialHist =
   const offPlot = scoped.length - plotted.length;
   const status = hist?.status;
   const canHyg = toolAllowed('vm-hygiene');
+  const isAdmin = hasRole('admin');
   const staleVc = new Set((data?.corps || []).flatMap((c) => (c.vcenters || []).filter((v) => v.stale).map((v) => v.id)));
   const cleared = clearedSince(corp ? items.filter((x) => x.corpId === corp) : items, ago7 && corp ? { ...ago7, rows: ago7.rows.filter((r) => scopedVc.has(String(r.vcenterId))) } : ago7, staleVc);
   const newN = scoped.filter((x) => change.get(changeKey(x))?.kind === 'new').length;
@@ -330,7 +345,7 @@ export default function SnapshotTool({ scope = '', initial = null, initialHist =
         <div className="snp-flt">
           <span className="lb">묶어 보기</span>
           <span className="snp-seg" role="group" aria-label="묶어 보기">
-            {GROUPS.filter(([k]) => k !== 'who').map(([k, label]) => (
+            {GROUPS.filter(([k]) => k !== 'who' || (creators?.ok && !creators.userMasked)).map(([k, label]) => (
               <button key={k} type="button" className={group === k ? 'on' : ''} aria-pressed={group === k} onClick={() => { setGroup(k); setClosed({}); if (req.startsWith('g:')) setReq(''); }}>{label}</button>
             ))}
           </span>
@@ -345,7 +360,7 @@ export default function SnapshotTool({ scope = '', initial = null, initialHist =
               {canCsv() && <button type="button" className="snp-btn sm" onClick={() => exportCsv(selItems)}>고른 것만 CSV</button>}
               <button type="button" className="snp-btn sm" onClick={() => { setSel({}); if (req === 'sel') setReq(''); }}>선택 풀기</button>
             </div>
-            {req === 'sel' && <ReqBox text={requestText('고른 VM', selItems, th, { onlyOver: false })} onCopied={flash} />}
+            {req === 'sel' && <ReqBox text={requestText('고른 VM', selItems, th, { onlyOver: false, whoOf })} onCopied={flash} />}
           </>
         )}
         <STable className="snp-tbl" minWidth={1180}>
@@ -379,7 +394,7 @@ export default function SnapshotTool({ scope = '', initial = null, initialHist =
                     {o.length > 0 && <button type="button" className="snp-btn sm" onClick={() => setReq(reqOn ? '' : `g:${g.key}`)}>{reqOn ? '정리 요청 닫기' : '정리 요청 보기'}</button>}
                   </td></tr>,
                 );
-                if (reqOn) rows.push(<tr key={`r:${g.key}`} className="foot"><td colSpan={cols}><ReqBox text={requestText(g.label, g.items, th)} onCopied={flash} /></td></tr>);
+                if (reqOn) rows.push(<tr key={`r:${g.key}`} className="foot"><td colSpan={cols}><ReqBox text={requestText(g.label, g.items, th, { whoOf })} onCopied={flash} /></td></tr>);
                 if (isClosed) return rows;
               }
               for (const x of g.items) {
@@ -394,7 +409,9 @@ export default function SnapshotTool({ scope = '', initial = null, initialHist =
                     <td data-sort={x.name}><button type="button" className="snp-vm" aria-expanded={isOpen} onClick={() => setOpen(isOpen ? '' : k)} title={`${x.name} — 누르면 스냅샷 ${x.snapshotCount}개가 펼쳐집니다`}>
                       <b><i className="snp-cv">{isOpen ? '▾' : '▸'}</i>{x.name}</b><span className="snp-sub">{group === 'corp' ? '' : `${x.corpName} · `}{x.cluster || '클러스터 없음'} · {x.host || '호스트 모름'}</span></button></td>
                     <td><span className="snp-sub" style={{ color: 'var(--text)', fontSize: 12.5 }}>{x.oldestName || '—'}</span>
-                      <span className="snp-sub">{numOrNull(x.oldestTs) != null ? `${dateText(x.oldestTs)} 만듦` : '생성일 못 읽음'}{x.oldestDesc ? ` · ${x.oldestDesc}` : ' · 설명 없음'}</span></td>
+                      <span className="snp-sub">{numOrNull(x.oldestTs) != null ? `${dateText(x.oldestTs)} 만듦` : '생성일 못 읽음'}{x.oldestDesc ? ` · ${x.oldestDesc}` : ' · 설명 없음'}</span>
+                      {creators?.ok && <span className="snp-sub" title="이 VM 에 최근 31일 안에 스냅샷을 만든 계정(백업 도구 계정 제외) — 가장 오래된 스냅샷을 만든 계정이 아닐 수 있습니다">
+                        {creatorText(creators, x)}</span>}</td>
                     <td><span className="snp-bar"><span className="snp-track"><i style={{ width: `${w(x.days, maxD)}%`, background: BAND_COLOR[x.band] }} /></span><b style={{ color: BAND_FG[x.band] }}>{daysText(x.days)}</b></span></td>
                     <td className="r snp-mono" style={{ color: s.count ? '#fdba74' : undefined }}>{x.snapshotCount}</td>
                     <td><span className="snp-bar"><span className="snp-track"><i style={{ width: `${w(x.snapGB, maxG)}%`, background: '#3b82f6' }} /></span><b>{gbText(x.snapGB)}</b></span></td>
@@ -412,7 +429,7 @@ export default function SnapshotTool({ scope = '', initial = null, initialHist =
                       {s.backup && <em className="snp-tg p" title="백업 도구가 남긴 임시 스냅샷">백업</em>}
                       {s.mem && <em className="snp-tg p" title="메모리까지 담은 스냅샷이 있음">메모리</em>}
                       {chg?.kind === 'grew' && chg.gb >= GROW_GB && <em className="snp-tg r" title={`지난 7일 사이 ${gbText(chg.gb)} 커짐(스냅샷 이력)`}>커짐</em>}
-                      {x.skip && <em className="snp-tg x" title={x.exceptedBy ? `예외 목록 ‘${x.exceptedBy}’` : undefined}>{SKIP_TEXT[x.skip]}</em>}
+                      {x.skip && <em className="snp-tg x" title={x.hold ? `보류 — ${x.hold.reason}` : x.exceptedBy ? `예외 목록 ‘${x.exceptedBy}’` : undefined}>{SKIP_TEXT[x.skip]}{x.hold ? ` ~${dateText(x.hold.until).slice(5)}` : ''}</em>}
                       {notes.length > 0 && <span>{notes.join(' · ')}</span>}
                     </span></td>
                   </tr>,
@@ -443,7 +460,13 @@ export default function SnapshotTool({ scope = '', initial = null, initialHist =
                       {x.depth != null && <span>줄기 깊이 {x.depth}(권고 2~{th.adviseChain ?? 3})</span>}
                       <span className="snp-note">크기는 VM 한 대의 합계입니다 — 스냅샷 하나하나의 크기는 수집하지 않습니다.</span>
                       {x.vcenterId && x.id && <a href={vcHash(x.vcenterId, { type: 'vm', id: x.id })}>VM 상세 열기 →</a>}
-                    </span></td></tr>,
+                      {isAdmin && x.skip !== 'template' && x.skip !== 'exception' && (
+                        <button type="button" className="snp-btn sm" onClick={() => setHoldForm(holdForm?.key === k ? null : { key: k, vcenterId: x.vcenterId, vmId: x.id, days: x.hold ? 0 : 30, reason: '' })}>
+                          {x.hold ? '보류 바꾸기 · 풀기…' : '보류…'}</button>
+                      )}
+                    </span>
+                    {holdForm?.key === k && <HoldForm form={holdForm} setForm={setHoldForm} held={!!x.hold} onDone={(m) => { setHoldForm(null); flash(m); setTick((t) => t + 1); }} />}
+                    </td></tr>,
                   );
                 }
               }
@@ -524,5 +547,37 @@ function GoneList({ rows, sum, more, ageDays, tp }) {
         {more ? ' · 목록이 길어 앞부분만 보입니다' : ''}
       </span></div>
     </>
+  );
+}
+
+/** 만든 계정 칸 글자 — 계정 이름은 관리자 판본만(그 밖에는 ‘숨김’), 위임 법인은 모름. */
+export function creatorText(c, x) {
+  const st = c.vcenters?.[x.vcenterId];
+  if (st && CREATOR_NOTE[st] && st !== 'truncated') return `만든 계정 — ${CREATOR_NOTE[st]}`;
+  const hit = c.byVm?.[`${x.vcenterId}\n${x.id}`];
+  if (!hit) return '만든 계정 — 31일 안 기록 없음';
+  return `최근 만든 계정 ${hit.user || '(관리자만 볼 수 있습니다)'} · ${dateText(hit.ts)}${st === 'truncated' ? ' · 일부만 읽음' : ''}`;
+}
+
+/** 보류(관리자) — 기한 1~90일 · 사유 필수 · 0 일 = 풀기. 판정은 서버 hygieneFindings 하나라 카드 · VM 구성 점검 · 알림에도 같이 빠진다. */
+function HoldForm({ form, setForm, held, onDone }) {
+  const save = () => {
+    setForm({ ...form, busy: true, error: '' });
+    putJson('/tools/snapshots/holds', { vcenterId: form.vcenterId, vmId: form.vmId, days: Number(form.days), reason: form.reason })
+      .then(() => onDone(Number(form.days) ? `${form.days}일 보류했습니다 — 그동안 이 VM 의 스냅샷은 판정하지 않습니다(카드 · VM 구성 점검 · 알림 포함).` : '보류를 풀었습니다.'))
+      .catch((e) => setForm({ ...form, busy: false, error: e.message }));
+  };
+  return (
+    <div className="snp-hold" role="group" aria-label="스냅샷 보류">
+      <label>기간 <Select sort={false} value={form.days} onChange={(e) => setForm({ ...form, days: e.target.value })} disabled={form.busy}>
+        {held && <option value={0}>보류 풀기</option>}
+        {[7, 14, 30, 60, 90].map((d) => <option key={d} value={d}>{d}일</option>)}
+      </Select></label>
+      {Number(form.days) > 0 && <label className="grow">사유 <input type="text" maxLength={200} value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} placeholder="예: DB 이관 끝날 때까지(11월 말)" disabled={form.busy} /></label>}
+      <button type="button" className="snp-btn sm" onClick={save} disabled={form.busy || (Number(form.days) > 0 && !form.reason.trim())}>{form.busy ? '저장 중…' : Number(form.days) ? '보류' : '풀기'}</button>
+      <button type="button" className="snp-btn sm" onClick={() => setForm(null)} disabled={form.busy}>닫기</button>
+      <span className="snp-note">관리자만 · 기한이 지나면 자동으로 다시 판정합니다 · 감사 기록에 남습니다.</span>
+      {form.error && <span className="snp-note warn">저장하지 못했습니다 — {form.error}</span>}
+    </div>
   );
 }
