@@ -191,7 +191,7 @@
     `ipInWriteScope`: 소유 vCenter∩allowed, 미귀속은 claimed 필수)에 scope 를 건다. **새 조회/집계/쓰기
     라우트를 추가하면 반드시 같은 패턴**(요청 필터보다 먼저 scope 교집합)을 적용하고, **memoJson 캐시
     라우트는 `extraKey: scopeKey(...)` 필수**(빠지면 무제한 계정 결과가 범위 계정에 캐시로 샌다 —
-    `/summary`·`/overview` 실제 사례). **vCenter 귀속 없는 데이터(스캔 발견물·미귀속 override·byVcenter
+    `/summary`·`/overview` 실제 사례). 범위 조각은 `util/scopeSig.js` 하나 — 글자 join · 'all' 표식 금지(쉼표 · 'all' id 충돌 — v3.23.2). **vCenter 귀속 없는 데이터(스캔 발견물·미귀속 override·byVcenter
     요약)는 범위 계정에 노출하지 않는다.** 단, 외부 프로그램이 공유하는 `ipam.db` 원장 자체(`syncLedger`)는
     무스코프 유지(외부 리더가 절단본을 받으면 안 됨 — 라우트에서만 scope 주입).
   - ✅ **수정됨(v2.313 보안 감사)**: 아래 조회 갭 2건을 `scopedVcenterIds` 교집합(요청 필터보다 먼저) + `requirePerm` 로 닫음.

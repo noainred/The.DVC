@@ -7,6 +7,7 @@
 import { diffVcenter, diffDatastores, totalsOf, slotKey, slotStartMs, inventoryUnreadReason, skipCategoryOf } from './diff.js';
 import { commitSnapshot, loadRoster, rosterKnownEmpty, loadDsRoster, readSeries, readChanges, readDsChanges, rosterVcenters, dropRoster, vmtrackMeta, vmtrackStatus, readDsSeries, listDsRoster, dsSeriesWindow, dsSeriesCarry, dsSeriesBoundary, dsSeriesGeneration, vmtrackGeneration, snapsBoundary, dsChangesBoundary, slotsSince, readDsChangesOfSlot, parseSkipDetail } from './db.js';
 import { createYielder } from '../util/timeSlice.js';
+import { scopeSig } from '../util/scopeSig.js';
 
 /**
  * 스냅샷 1회 — 현재 store 스냅샷 기준.
@@ -164,7 +165,7 @@ function createGenMemo(max) {
 }
 // 범위 서명 — **단사여야 한다**(dbg3231 2회차: 예전 `join(',')` 은 등록부가 허용하는 쉼표 id 로 충돌해 ['KR,Seoul'] 과 ['KR','Seoul'] 이
 //   같은 기억을 받았다 — 범위 밖 vCenter 의 합계 · id 가 범위 계정에 나갔다). routes/api/shared.js scopeKey 와 같은 꼴: 's:' + JSON(정렬 배열) · 무제한 '*'.
-const scopeKeyOf = (scopeIds) => (scopeIds ? `s:${JSON.stringify([...scopeIds].map(String).sort())}` : '*');
+const scopeKeyOf = (scopeIds) => scopeSig(scopeIds);   // v3.23.2: 규칙은 util/scopeSig.js 하나
 const _seriesMemo = createGenMemo(6);
 const _changeLogMemo = createGenMemo(6);   // v2.744(감사 DB-01): 스토리지 변경 이력 — 시각별
 /** 테스트용 — 기억 크기·비우기. */

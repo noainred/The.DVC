@@ -31,6 +31,7 @@ import { diskBadMailInfo } from '../../diskbad/notify.js';
 import { diskBadEdgeStatus } from '../../diskbad/edge.js';
 import { config } from '../../config.js';
 import { isAdminDetailUser } from '../../auth/demoGuest.js';
+import { scopeSig } from '../../util/scopeSig.js';
 
 const toolsPerm = requirePerm('tools');
 const writeRole = requireRole('admin', 'operator');
@@ -176,7 +177,7 @@ export function registerDiskBad(api) {
     const status = await diskBadDbStatus();
     const picked = corpId ? servers.filter((s) => s.corp?.id === corpId) : servers;
     const allowed = scopedVcenterIds(req.user, store.get());
-    const key = `${allowed ? [...allowed].sort().join(',') : '*'}|${corpId}`;
+    const key = `${scopeSig(allowed)}|${corpId}`;
     const gen = diskBadGeneration();
     let fleet = memoGet(key, gen);
     if (fleet === undefined) {

@@ -19,6 +19,7 @@ import { aggregatePhysical } from '../../idrac/physicalCapacity.js'; // v2.486: 
 import { serversByCorp } from '../../idrac/serverByCorp.js';          // v2.526: 법인(vCenter)별 물리 서버 수
 import { numOrNull } from '../../util/numOrNull.js'; // v2.675: /health 의 사용률은 못 읽으면 null
 import { runtimeForHealth } from '../../util/runtimeCheck.js'; // 검토 I-06: Node 런타임 계약·통신 자가 점검
+import { scopeSig } from '../../util/scopeSig.js';
 
 // v2.626: `allPhysicalServers`·`corpAttribution` 은 `idrac/corpAttribution.js` 로 옮겼다 — 법인별 서버 사용량·
 //   베어메탈 사용률이 **같은 귀속 입력**을 쓰게(개요만 DataCenter 규칙을 알던 것이 '물리 서버 없음' 의 원인이었다).
@@ -94,7 +95,7 @@ function physicalCapacity(servers = null) {
 // 버린다(v2.580 TUNE-B '세대 키 캐시는 옛 세대를 버린다').
 const _healthScoped = new Map();
 function healthScopedGlobal(snap, allowed) {
-  const key = `${snap.generatedAt}|${[...allowed].sort().join(',')}`;
+  const key = `${snap.generatedAt}|${scopeSig(allowed)}`;
   const hit = _healthScoped.get(key);
   if (hit) return hit;
   for (const k of _healthScoped.keys()) if (!k.startsWith(`${snap.generatedAt}|`)) _healthScoped.delete(k);

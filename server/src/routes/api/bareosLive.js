@@ -22,6 +22,7 @@ import { isFinalStatus } from '../../bareos/names.js';
 import { numOrNull } from '../../util/numOrNull.js';
 import { memoJson, scopeKey } from './shared.js';
 import { relayLimits } from '../../bareos/edgeOps.js';
+import { scopeSig } from '../../util/scopeSig.js';
 
 const adminOnly = requireRole('admin');
 /** 느림 판정 — 지난 성공 평균의 이 비율 이하 · 시작하고 이만큼 지난 뒤(막 시작한 잡은 스냅샷 준비로 느리다). */
@@ -203,7 +204,7 @@ export function corpView(site, settings, digests, { now = Date.now(), vms = new 
 
 /** v2.867 쓰기 범위 열쇠(법인별 writable 이 사람마다 다르다 — 캐시로 다른 계정의 값을 받지 않게). */
 function writeKey(user, snap) {
-  try { const w = writeScopedVcenterIds(user, snap); return w ? [...w].sort().join(',') : 'all'; } catch { return 'err'; }
+  try { return scopeSig(writeScopedVcenterIds(user, snap)); } catch { return 'err'; }
 }
 
 /**
