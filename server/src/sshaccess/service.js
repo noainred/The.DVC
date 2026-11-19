@@ -46,6 +46,8 @@ export const FEATURE_CATALOG = Object.freeze([
   Object.freeze({ id: 'focus-mon-prep', label: '집중 모니터링 접속 준비(root)', tool: 'focus-mon', ready: true, note: '서버 집중 모니터링 › 대상 · 키의 접속 자동 준비 — 수집 계정을 만들고 공개키를 넣습니다 · 이 기능을 직접 켠 키만 · 비밀번호 없는 sudo 또는 root 계정이어야 합니다' }),
   // v3.25 — 특수 기능 ‘서버 정보’(서버 접속 2단계): 기본 구성 + 디스크를 누를 때만 읽기 전용으로(sudo 없음). 기능 목록이 있는 키 · 계정은 이 기능을 켜야 쓴다.
   Object.freeze({ id: 'server-info', label: '서버 정보', tool: 'server-info', ready: true, note: 'OS · 하드웨어 · CPU · 메모리 · 디스크 · 파일시스템을 누를 때만 읽기 전용 명령으로(sudo 없음 — 권한이 필요한 칸은 ‘못 읽음 · 권한’)' }),
+  // v3.30 — 특수 기능 ‘서버 명령 실행’: 정해 둔 확인 명령(프리셋)을 누를 때만 · 출력이 화면에 나온다 · **직접 켠 계정 · 키만**(목록 없는 예전 항목은 쓰지 않는다).
+  Object.freeze({ id: 'server-cmd', label: '서버 명령 실행', tool: 'server-cmd', ready: true, note: '정해 둔 확인 명령(가동 시간 · 디스크 · 프로세스 · 네트워크 · 서비스 상태 · 로그)을 누를 때만 · 읽기 전용 · sudo 없음 · 출력이 화면에 보인다 — 직접 켠 계정 · 키만 쓴다' }),
 ]);
 
 /** 이 노드가 아는 법인(vCenter) — id · 이름 · DataCenter 이름. */
@@ -95,7 +97,7 @@ function publicServer(s, { accById, keyById }) {
     keyMode: t(s.keyRef) ? 'pinned' : (effKey ? 'corp-default' : (s.osAuth === 'password' || s.password || (acc && acc.password) ? 'password' : 'none')),
     // v3.24 계층: os(서버 OS 종류) · source(own 따로 정함 · os/corp 물려받음 · none) · inherit(승인 상태) · pending(지정은 있는데 승인 없음/주소 바뀜) · mismatch(법인 단계 계정 OS 다름)
     os: SERVER_OS.includes(s.os) ? s.os : '', source: ea.source, level: ea.level || '', pending: !!ea.pending, mismatch: !!ea.mismatch,
-    via: ea.via === 'winrm' ? 'winrm' : 'ssh', viaPort: ea.via === 'winrm' ? (ea.port || null) : null,   // v3.26 — 물려받은 Windows 단계 지정의 접속 방식
+    via: ea.via === 'winrm' ? 'winrm' : 'ssh', viaPort: ea.via === 'winrm' ? (ea.port || null) : null,   // v3.25(3단계) — 물려받은 Windows 단계 지정의 접속 방식
     inheritApproved: inheritActive(s), inheritStale: !!s.inherit && !inheritActive(s) && !t(s.agent), inheritAt: s.inherit?.at || null, inheritBy: s.inherit ? t(s.inherit.by, 64) : '',
     ownCred: hasOwnCred(s), accountId: acc ? acc.id : '', loginName: acc ? KS.loginNameOf(acc) : '',
     detectedOs: detectedOsOf(s),
@@ -545,13 +547,13 @@ async function loginOnce(s, { accountId = '', auth = '', ignoreAccountStop = fal
     if (si) return { ok: false, kind: 'corp-stopped', reason: REFS.AUTH_ERROR['account-corp-stopped'] };
     a = { ok: true, username: candidate.username, password: candidate.password, authKind: 'password' };
   } else {
-    // v3.26 반증 F4: WinRM 으로 확인하면 비밀번호로 해석한다(키 + 비밀번호 계정에서 키를 고르면 WinRM 확인이 늘 실패했다)
+    // v3.25 3단계 반증 F4: WinRM 으로 확인하면 비밀번호로 해석한다(키 + 비밀번호 계정에서 키를 고르면 WinRM 확인이 늘 실패했다)
     a = REFS.resolveOsAuth({ ...s, keyRef: '', credRef: accountId, osAuth: auth === 'password' || via === 'winrm' ? 'password' : '', inherit: undefined, password: '' }, { feature: 'conn-test', ignoreAccountStop });
     if (!a.ok) return { ok: false, kind: a.code, reason: a.error };
     if (a.authKind === 'none') return { ok: false, kind: 'no-secret', reason: '이 공통 계정에는 키 · 비밀번호가 없습니다.' };
   }
   const t0 = Date.now();
-  // v3.26: Windows 단계 지정이 WinRM 이면 같은 확인을 WinRM HTTPS + NTLM 으로(비밀번호만 · 다시 시도 없음 · 인증서는 장비 신뢰 판정)
+  // v3.25(3단계): Windows 단계 지정이 WinRM 이면 같은 확인을 WinRM HTTPS + NTLM 으로(비밀번호만 · 다시 시도 없음 · 인증서는 장비 신뢰 판정)
   if (via === 'winrm' && s.os === 'windows') {
     const meta = { secretVersion: a.secretVersion ?? null, keyFingerprint: '' };
     if (!a.password) return { ok: false, kind: 'winrm-needs-password', reason: REFS.AUTH_ERROR['winrm-needs-password'], ...meta };
@@ -779,7 +781,7 @@ export async function saveAccountChecked({ input = {}, verifyServerId = '', by =
       if (!target) return { ok: false, code: 'need-verify', status: 409, reason: `이 계정을 쓰는 서버 ${servers.length}대 중 한 대를 골라 새 비밀번호로 먼저 로그인해 보세요(저장 전 확인).`, candidates: servers.slice(0, 50).map((s) => ({ id: s.id, name: s.name || s.host })) };
       if (dryRun) return { ok: true, dry: true };
       const probe = { ...before, ...dry.next, username: t(input.username ?? before.username, 128), os: dry.next.os, logon: dry.next.logon, domain: dry.next.domain, kind: 'os' };
-      const tef = REFS.effectiveAccountOf(target);   // v3.26: 그 서버가 WinRM 으로 붙으면 새 비밀번호 확인도 WinRM 으로
+      const tef = REFS.effectiveAccountOf(target);   // v3.25(3단계): 그 서버가 WinRM 으로 붙으면 새 비밀번호 확인도 WinRM 으로
       const r = await loginOnce(target, { candidate: { username: KS.loginNameOf(probe), password: pw }, via: tef.via || '', port: tef.port || null });
       if (!r.ok) return { ok: false, code: 'verify-failed', status: 409, reason: `${target.name || target.host} 에서 새 비밀번호로 로그인하지 못해 저장하지 않았습니다 — ${r.reason || r.kind}`, verified: { server: target.name || target.host, ok: false, kind: r.kind } };
       verified = { server: target.name || target.host, ok: true };

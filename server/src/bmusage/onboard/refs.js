@@ -265,7 +265,7 @@ export function effectiveAccountOf(server = {}) {
   }
   if (!hit) return { source: 'none', ...(mismatch ? { mismatch: true } : {}) };
   if (!active) return { source: 'none', pending: true, level: hit.level, accountId: hit.account };
-  // v3.26(3단계): Windows 단계 지정은 접속 방식(WinRM HTTPS)과 포트를 함께 가질 수 있다(설계 D11 — OS 종류 단계에). 없으면 SSH.
+  // v3.25(3단계): Windows 단계 지정은 접속 방식(WinRM HTTPS)과 포트를 함께 가질 수 있다(설계 D11 — OS 종류 단계에). 없으면 SSH.
   const via = hit.level === 'windows' && hit.via === 'winrm' ? { via: 'winrm', port: Number.isInteger(hit.port) ? hit.port : null } : {};
   return { source: hit.level === 'all' ? 'corp' : 'os', level: hit.level, accountId: hit.account, auth: hit.auth || '', ...via };
 }
@@ -274,7 +274,7 @@ export function effectiveAccountOf(server = {}) {
  *   여기서 그대로 다시 내보낸다 — 기존 호출부(REFS.keyPlacementIssue · sshaccess)는 바뀌지 않는다. 판정은 여전히 하나다.
  */
 export { ALWAYS_ALLOWED_FEATURES, keyPlacementIssue } from './placement.js';
-import { ALWAYS_ALLOWED_FEATURES as ALWAYS_ALLOWED_FEATURES_LOCAL } from './placement.js';
+import { featureBlocked } from './placement.js';
 /**
  * 법인 사용 중지 판정 — 서버 법인 · 공통 계정 법인 · 키 폴더 법인 중 하나라도 멈췄거나, 중지할 때 적어 둔 서버(id · 접속처)이면.
  * 법인 칸만 보면 OTP 없이 칸을 비워 빠져나갈 수 있었다(점검 A-4). 상태 파일을 못 읽으면 멈춘 것으로 본다.
@@ -311,7 +311,7 @@ function integrityOk(m, parsed) {
  *          | {ok:false, code:string, error:string}}
  */
 export function resolveOsAuth(server = {}, { feature = '', ignoreAccountStop = false, winrm = false } = {}) {
-  // winrm — 호출부가 **WinRM 으로 붙을 때만** true(서버 정보 코어 · 먼저 확인). SSH 기능(사용률 · 스토리지 · 연결 시험 …)은 지정에 WinRM 이 있어도 예전 그대로 키 우선이다(v3.26 반증 F3).
+  // winrm — 호출부가 **WinRM 으로 붙을 때만** true(서버 정보 코어 · 먼저 확인). SSH 기능(사용률 · 스토리지 · 연결 시험 …)은 지정에 WinRM 이 있어도 예전 그대로 키 우선이다(v3.25 3단계 반증 F3).
   // ignoreAccountStop — ‘한 대로 다시 확인’(sshaccess/service.verifyAccount) 하나만: 계정 단위 정지를 푸는 확인 한 번은 정지를 넘어야 한다(사람이 누름 · 한 번 · 자동 재시도 없음).
   const keyRef = t(server.keyRef);
   let credRef = t(server.credRef);
@@ -334,13 +334,14 @@ export function resolveOsAuth(server = {}, { feature = '', ignoreAccountStop = f
     if ((server.os === 'linux' || server.os === 'windows') && KS.accountFamily(acc) !== server.os) return { ok: false, code: 'account-os', error: AUTH_ERROR['account-os'] };
     // 계층 지정은 다른 법인 계정을 물려받지 않는다(지정 쓰기도 막는다 — 여기는 그 뒤 계정 법인을 바꾼 경우).
     if (inherited && !accountCorpOk(acc.corp, server.vcenterId)) return { ok: false, code: 'account-other-corp', error: AUTH_ERROR['account-other-corp'] };
-    if (Array.isArray(acc.features) && !ALWAYS_ALLOWED_FEATURES_LOCAL.includes(feature) && !acc.features.includes(t(feature))) return { ok: false, code: 'account-feature', error: AUTH_ERROR['account-feature'] };
+    // v3.30: 판정은 placement.featureBlocked 하나(키와 같은 함수) — 목록이 없는 예전 계정은 ‘직접 켜야 하는 기능’(서버 명령)에만 막힌다.
+    if (featureBlocked(acc.features, feature)) return { ok: false, code: 'account-feature', error: AUTH_ERROR['account-feature'] };
   }
   // 7b 반증 F19: 공통 계정을 쓰면 접속 계정명도 **공통 계정 쪽**(서버 칸은 '개별' 일 때만) — 서버 칸 기본값 root 로 공통 비밀번호를 보내지 않게.
   //   v3.24: Windows AD 계정은 도메인을 붙인 로그인 이름(keyStore.loginNameOf 하나).
   const username = (acc ? KS.loginNameOf(acc) : '') || t(server.username) || 'root';
   // osAuth 'password' = 비밀번호 고정(공통 계정에 기본 키가 있어도 — CSV os_key ‘password’). v3.24: 물려받은 지정의 auth 'password' 도 같다.
-  // v3.26: WinRM 은 비밀번호(NTLM)만 — 기본 키가 있어도 비밀번호로(키가 없으면 붙지 않는다).
+  // v3.25(3단계): WinRM 은 비밀번호(NTLM)만 — 기본 키가 있어도 비밀번호로(키가 없으면 붙지 않는다).
   const viaWinrm = winrm === true && inherited?.via === 'winrm' && server.os === 'windows';
   const pwPinned = server.osAuth === 'password' || inherited?.auth === 'password' || viaWinrm;
   const useKey = pwPinned ? '' : (keyRef || (acc && acc.keyRef) || '');
@@ -421,7 +422,7 @@ export function withResolvedAuth(list = [], { feature = '', winrm = false } = {}
     const a = resolveOsAuth(s, { feature, winrm });
     // v3.24: 공통 계정 출처(계정 id · 이름 · 비밀번호 판)를 싣는다 — 수집 결과를 본 곳이 계정 사용 기록 · 계정 단위 정지에 쓴다(sshaccess/outcome.js). 비밀은 아니다.
     const accOut = { ...(a.accountId ? { credAccountId: a.accountId, credAccountName: a.accountName || '', credSource: a.source || '', ...(a.secretVersion != null ? { credVersion: a.secretVersion } : {}) } : (a.source ? { credSource: a.source } : {})),
-      ...(a.via ? { via: a.via, viaPort: a.viaPort || null } : {}) };   // v3.26: 접속 방식(비밀 아님)
+      ...(a.via ? { via: a.via, viaPort: a.viaPort || null } : {}) };   // v3.25(3단계): 접속 방식(비밀 아님)
     if (!a.ok) return { ...s, password: '', authError: a.error, authErrorCode: a.code, ...accOut, ...(a.keyFingerprint ? { keyFingerprint: a.keyFingerprint } : {}) };
     return { ...s, username: a.username, password: a.password, ...accOut, ...(a.privateKey ? { privateKey: a.privateKey, passphrase: a.passphrase, keyFingerprint: a.keyFingerprint, keyName: a.keyName } : {}) };
   });

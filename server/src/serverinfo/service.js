@@ -11,19 +11,20 @@
  */
 import { listBmServersRaw, registryLoadError } from '../bmstor/registry.js';
 import { effectiveAccountOf } from '../bmusage/onboard/refs.js';
-import { readServer, makeCredGate } from '../sshaccess/readServer.js';
+import { readServer } from '../sshaccess/readServer.js';
+import { createServerBatch } from '../sshaccess/batch.js';   // v3.30 — 일괄 틀은 서버 명령 실행과 같이 쓴다
 import { SERVER_INFO_PLAN, parseFor } from './profiles.js';
 import * as SI from './store.js';
 import { isMockMode, isDemoId } from '../mock/demo/storage.js';
 import { demoServerInfo } from './demo.js';
-import { poolRun } from '../util/pool.js';   // 동시성 풀은 공용 하나(arch2579)
 
 export const FEATURE = 'server-info';
 export const READ_BATCH_MAX = 50;
 export const READ_CONCURRENCY = 4;
 const t = (v, n = 256) => String(v ?? '').trim().slice(0, n);
-/** 지금 도는 일괄(하나) — { startedAt, by, total, done, ids:Set } · 없으면 null. */
-let job = null;
+/** 일괄(하나씩 · 시작만 하고 돌려준다 · 일괄 문) — 틀은 sshaccess/batch.js 하나. */
+const BATCH = createServerBatch({ max: READ_BATCH_MAX, concurrency: READ_CONCURRENCY, text: {
+  busy: '다른 읽기가 진행 중입니다', tooMany: `한 번에 ${READ_BATCH_MAX}대까지 읽습니다.`, registry: 'OS 계정 등록부(bm-storage.json)를 읽지 못해 읽지 않았습니다.' } });
 
 /** 화면 한 번에 필요한 것(비밀 없음). */
 export function buildView() {
@@ -36,13 +37,13 @@ export function buildView() {
     const r = SI.getResult(s.id);
     return {
       id: s.id, name: s.name || s.host, host: s.host, port: Number(s.port) || 22, corp: t(s.vcenterId, 128), os: s.os === 'windows' ? 'windows' : (s.os === 'linux' ? 'linux' : ''),
-      agent: t(s.agent, 64), enabled: s.enabled !== false, demo: isDemoId(s.id), reading: !!job?.ids.has(s.id),
+      agent: t(s.agent, 64), enabled: s.enabled !== false, demo: isDemoId(s.id), reading: BATCH.has(s.id),
       account: { source: ef.source, pending: !!ef.pending, unreadable: !!ef.unreadable },
       result: r || null,
     };
   });
   return { ok: true, servers: rows, limits: { batch: READ_BATCH_MAX, concurrency: READ_CONCURRENCY }, storeError: SI.storeLoadError() || '',
-    job: job ? { startedAt: job.startedAt, by: job.by, total: job.total, done: job.done } : null };
+    job: BATCH.view() };
 }
 
 /** 한 대 읽고 보관한다(결과 행을 돌려준다 — 비밀 · 원문 없음). */
@@ -77,28 +78,10 @@ async function readOne(s, { by, credGate }) {
  * @returns {{ok:true, started:true, total:number, done:Promise<object>} | {ok:false, code, status, reason}}
  */
 export function startRead(ids = [], { by = '' } = {}) {
-  const regErr = registryLoadError();
-  if (regErr) return { ok: false, code: 'registry-unreadable', status: 503, reason: 'OS 계정 등록부(bm-storage.json)를 읽지 못해 읽지 않았습니다.' };
-  const want = [...new Set((Array.isArray(ids) ? ids : []).map((x) => t(x, 64)).filter(Boolean))];
-  if (!want.length) return { ok: false, code: 'no-servers', status: 400, reason: '서버를 고르세요.' };
-  if (want.length > READ_BATCH_MAX) return { ok: false, code: 'too-many', status: 400, reason: `한 번에 ${READ_BATCH_MAX}대까지 읽습니다.` };
-  if (job) return { ok: false, code: 'busy', status: 429, reason: `다른 읽기가 진행 중입니다(${job.done}/${job.total}대) — 끝난 뒤 다시 누르세요.` };
-  const byId = new Map(listBmServersRaw().map((s) => [s.id, s]));
-  const list = want.map((id) => byId.get(id)).filter(Boolean);
-  if (list.length !== want.length) return { ok: false, code: 'not-found', status: 404, reason: '서버를 찾을 수 없습니다(그 사이 지워짐) — 화면을 다시 읽으세요.' };
-  const cur = { startedAt: Date.now(), by: t(by, 64), total: list.length, done: 0, ids: new Set(list.map((s) => s.id)) };
-  job = cur;
-  const credGate = makeCredGate();
-  const results = new Array(list.length);
-  const done = poolRun(list, READ_CONCURRENCY, async (s, k) => {
-    let r;
-    try { r = await readOne(s, { by, credGate }); } catch (e) { r = { ok: false, code: 'error', reason: String(e?.message || e).slice(0, 200) }; }
-    results[k] = { id: s.id, name: s.name || s.host, ok: !!r.ok, code: r.code, reason: r.reason || '' };
-    cur.done += 1;
-  }).then(() => ({ ok: true, results, read: results.filter((x) => x?.ok).length, failed: results.filter((x) => x && !x.ok).length }))
-    .catch((e) => ({ ok: false, code: 'error', reason: String(e?.message || e).slice(0, 200) }))
-    .finally(() => { if (job === cur) job = null; });
-  return { ok: true, started: true, total: list.length, done };
+  const r = BATCH.start(ids, (s, { credGate }) => readOne(s, { by, credGate }), { by });
+  if (!r.ok) return r;
+  // 결과 칸 이름은 예전 그대로(read — 라우트 감사 · 시험)
+  return { ...r, done: r.done.then((d) => (d.ok ? { ok: true, results: d.results, read: d.okCount, failed: d.failed } : d)) };
 }
 /** 시험 · 내부용 — 끝날 때까지 기다린 결과. */
 export async function readMany(ids = [], { by = '' } = {}) {
