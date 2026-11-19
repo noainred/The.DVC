@@ -263,7 +263,7 @@ function VmsList({ filters, onOpen, onVisible, onHub, selectedId, onGoHost = nul
               <div className="lb"><span>평균 메모리 사용률</span><small>구동중 VM 기준</small></div>
               <div className="val" style={{ color: TONE_COLOR[usageTone(t.avgMemUsagePct)] === 'var(--text-faint)' ? undefined : 'var(--purple)' }}>{unitText(t.avgMemUsagePct, '%')}</div>
               <div className="vmh-bar" aria-hidden="true"><i style={{ width: `${barW(t.avgMemUsagePct)}%`, background: TONE_COLOR[usageTone(t.avgMemUsagePct)] === 'var(--accent)' ? 'var(--purple)' : TONE_COLOR[usageTone(t.avgMemUsagePct)] }} /></div>
-              <div className="sub"><span>할당 {allocText(t.ramGB, t.ramUnknown, ' GB')}{t.ramGB == null ? '' : ` ≈ ${(t.ramGB / 1024).toFixed(1)} TB`}</span>{t.usageUnknown?.mem > 0 && <span>사용률 미수집 {fmt(t.usageUnknown?.mem)}대 제외</span>}</div>
+              <div className="sub"><span>할당 {allocText(t.ramGB, 0, ' GB')}{t.ramGB == null ? '' : ` ≈ ${(t.ramGB / 1024).toFixed(1)} TB`}{t.ramUnknown > 0 ? ` · 미상 ${fmt(t.ramUnknown)}` : ''}</span>{t.usageUnknown?.mem > 0 && <span>사용률 미수집 {fmt(t.usageUnknown?.mem)}대 제외</span>}</div>
             </div>
             <div className="vmh-tile">
               <div className="lb"><span>평균 디스크 사용률</span><small>프로비저닝 대비</small></div>
