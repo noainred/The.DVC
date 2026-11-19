@@ -214,7 +214,8 @@ function applyServerInput(data, body = {}, { now = Date.now() } = {}) {
   else if (typeof server.datacenterId !== 'string') server.datacenterId = '';
   server.mounts = mounts;
   server.enabled = body.enabled !== false;
-  // 빈/마스킹 비밀번호는 기존 유지(편집 시 재입력 강요 안 함) — 신규인데 비었으면 빈 값 저장(무비번 SSH 허용 안 하는 서버는 수집 실패로 표시됨).
+  // 빈/마스킹 비밀번호는 기존 유지(편집 시 재입력 강요 안 함) — 신규인데 비었으면 빈 값 저장.
+  //   146회차(141 결정 D2): 비밀번호도 키도 없는 서버는 접속하지 않는다(‘무비번 SSH’ 시도 없음 — refs.withResolvedAuth no-cred · 수집 함수 · 엣지 위임 잡에서 뺌).
   if (body.password !== undefined && body.password !== '' && body.password !== '********') server.password = String(body.password);
   else if (!existing || hostChanged) {                    // 신규 또는 접속처 변경 → 빈 값(재입력 필요)
     if (existing && server.password) droppedSecrets.push('password');

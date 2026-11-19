@@ -12,6 +12,9 @@ import { withSsh, isSshAuthError } from '../proxy/sshExec.js';
 import { reqTimeoutMs } from '../agent/envTimeout.js';
 import { ioSampleSec, ioSampleCommand, ioResultFromExec } from './diskstats.js'; // v2.915: 디스크 I/O 표본(설계 bm-san-compare §4.1)
 
+/** 146회차: 접속 자격이 없어 붙지 않은 결과 문구(엣지에서도 같은 판 — refs 를 들이지 않는다: 등록부 ↔ 이 모듈 순환 import 를 만들지 않게). */
+export const NO_CRED_TEXT = '이 서버에 접속 자격(키 · 비밀번호)이 없어 접속하지 않았습니다(빈 비밀번호로 시도하지 않습니다) — 서버 등록에서 비밀번호를 넣거나 키 · 공통 계정을 정하세요.';
+
 /** 마운트 경로 검증 — 절대경로 + 안전 문자만(공백/따옴표/셸 메타문자 거부 = 명령 주입 방어). */
 export const MOUNT_RE = /^\/[A-Za-z0-9._\/-]*$/;
 
@@ -109,13 +112,17 @@ export function parseDfOutput(stdout, requestedMounts, stderr = '') {
 /**
  * 서버 1대 수집 — SSH 접속 → df 실행 → 파싱. 실패해도 throw 하지 않고 {ok:false, error}.
  * @param {{host,port,username,password,mounts:string[]}} server
+ * @param {{onLogin?:() => void}} [o]  onLogin — 로그인에 성공한 직후 한 번(146회차 — 계정 탐침이 명령 시간까지 기다리지 않게 · sshaccess/accountGate)
  * @returns {Promise<{ok:boolean, mounts:Array, missing?:string[], error?:string}>}
  */
-export async function collectServer(server) {
+export async function collectServer(server, { onLogin } = {}) {
   const { mounts, errors } = sanitizeMounts(server.mounts);
   if (!mounts.length) return { ok: false, mounts: [], error: errors[0] || '측정할 마운트 포인트가 없습니다.' };
   // 7b: 키 · 공통 계정 참조를 해석하지 못했으면 접속하지 않는다(bmusage/onboard/refs.js withResolvedAuth — 빈 비밀번호로 시도해 계정을 잠그지 않게).
   if (server.authError) return { ok: false, mounts: [], error: String(server.authError).slice(0, 300) };
+  // 146회차(141 결정 D2): 비밀번호도 키도 없으면 접속하지 않는다 — 엣지 위임 잡(agent/bmstorWorker) · 중앙 PUSH(/api/collector/bmstor-collect)가 받은 서버도
+  //   이 함수로 붙는다(옛 중앙이 빈 비밀번호를 실어 보내도 root + 빈 비밀번호로 로그인하지 않는다). 중앙 경로는 refs.withResolvedAuth 가 먼저 막는다.
+  if (!server.privateKey && !(typeof server.password === 'string' && server.password)) return { ok: false, mounts: [], error: NO_CRED_TEXT, authErrorCode: 'no-cred' };
   try {
     const r = await withSsh({
       host: server.host, port: Number(server.port) || 22,
@@ -124,6 +131,7 @@ export async function collectServer(server) {
       readyTimeout: reqTimeoutMs(process.env.BMSTOR_SSH_TIMEOUT_MS, 15_000),   // v2.605 TIM2605-04: [1초, 10분]
       singlePasswordAttempt: true,   // v3.25 반증 F1: 비밀번호는 한 번만(k-i 재시도 없음 — 계정 잠금 횟수)
     }, async ({ exec }) => {
+      try { onLogin?.(); } catch { /* 탐침 알림 실패는 수집을 막지 않는다 */ }
       const out = await exec(`df -P -k -- ${mounts.join(' ')}`);
       // v2.915: 같은 세션에서 디스크 I/O 표본(상수 명령 · 입력 없음). df 가 요청 마운트를 하나도 못 찾았으면 I/O 는 시도하지 않는다.
       //   시한 = 표본 간격 + 20초(명령 자체는 cat 넷 · sleep 하나). 0 이면 끔(df 만 — 예전 동작).

@@ -10,14 +10,29 @@
  *   · 탐침이 로그인 거부면 그 자리에서 계정 단위 정지를 걸고(state.setAccountStop — outcome 과 같은 기록) 기다리던 접속은 **보내지 않는다**.
  *   · 탐침이 거부도 성공도 아니면(연결 실패 · 시한) 기다리던 접속 중 다음 하나가 새 탐침이 된다(한꺼번에 풀어 N번 보내지 않게).
  *   · 접속 직전에 정지를 다시 본다(주기 시작 때 해석한 뒤 다른 경로 — 한 대로 다시 확인 · 다른 폴러 — 가 건 정지).
+ *   · 146회차(141 결정 D1 — 권장안): 성공했던 판은 **유효 시간**(OK_TTL_MS — 그 판의 탐침이 로그인에 성공한 뒤 2분) 동안만 기다리지 않는다.
+ *     예전에는 한 번 성공한 판이면 끝까지 탐침을 건너뛰어, AD 에서 비밀번호가 바뀐 직후 이미 떠난 동시 접속 수만큼 틀린 비밀번호가 갔다
+ *     (재현 — 동시 8 → 8회 · bm-usage 32 + bm-storage 4 → 첫 주기 최대 약 36회). 지나면 다음 접속이 다시 탐침이고 나머지는 그 **로그인** 결과를 기다린다
+ *     (run 이 받는 authed() — 호출부가 로그인 직후 부르면 그때 풀어 준다: 대기 = 계정당 로그인 1회 · 명령 시간까지 기다리지 않는다).
+ *     유효 시간은 **탐침의 성공으로만** 새로 연다(성공했던 판의 접속 성공으로 늘리면 쉬지 않고 수집하는 동안 다시 탐침할 때가 오지 않는다) ·
+ *     시계가 뒤로 가면(나이 < 0) 지난 것으로 본다(탐침 하나 — 닫히는 쪽). 서버 수만큼 차례로 보내는 상한은 쓰지 않는다(공통 계정 200대 · 800ms RTT 면 주기를 넘는다).
+ *   · 성공했던 판의 다시 탐침이 연달아 OTHER_MAX 번 판정을 못 내면(연결 실패 · 시한 — 서버가 꺼졌거나 망 장애) 그 판을 한 유효 시간 동안 예전처럼 믿는다(거부는 듣는다) —
+ *     망 장애 때 한 계정의 서버 수만큼 차례로 기다리며 동시 수집 칸을 묶지 않게. 처음 판(성공한 적 없음)은 예전처럼 하나씩 끝까지.
  * 키 로그인(credVersion 없음)은 이 문을 지나지 않는다(키 거부는 계정 잠금 횟수에 들지 않는 것이 보통이고, 정지도 비밀번호 판에만 건다).
  * 판정(rejected)은 호출부가 **접속 단계 판정**으로 넘긴다(bm-storage `authFailed` · bm-usage `isSshAuthError` — 명령 출력의 'Permission denied' 로 멈추지 않게 · 반증 F3).
  * 상태는 메모리뿐이다(재시작하면 첫 주기에 다시 탐침 — 그것으로 충분하다). 대기는 장비 시한 **밖**에서 한다(호출부가 run 안에서 시한을 연다).
  */
 import { accountStopFor, setAccountStop } from './state.js';
 
-const okVersion = new Map();   // accountId → 성공한 비밀번호 판(문자열)
+const okVersion = new Map();   // accountId → { v: 성공한 비밀번호 판(문자열), at: 그 판의 탐침이 로그인에 성공한 시각 }
 const inflight = new Map();    // `${id}|${ver}` → Promise<'ok' | 'rejected' | 'other'>
+const otherRounds = new Map(); // `${id}|${ver}` → 성공했던 판의 다시 탐침이 연달아 판정을 못 낸 수(146회차)
+/** 146회차: 성공했던 판을 기다리지 않는 유효 시간 · 다시 탐침이 판정을 못 내도 되는 연속 횟수. */
+export const OK_TTL_MS = 120_000;
+export const OTHER_MAX = 3;
+const NOOP = () => {};
+/** 성공했던 판이 아직 유효한가 — 나이가 음수(시계가 뒤로 감)면 지난 것으로 본다. */
+const okFresh = (o, v, now) => !!o && o.v === v && now - o.at >= 0 && now - o.at < OK_TTL_MS;
 // 정지 기록을 쓰지 못했을 때(디스크 오류)만 쓰는 메모리 정지 — 1시간. 쓰기가 성공하면 상태 파일이 진실이다(정지 풀기는 그쪽에서).
 const memStop = new Map();     // `${id}|${ver}` → 거부를 본 시각
 const MEM_STOP_MS = 3_600_000;
@@ -27,19 +42,20 @@ export const GATE_STOPPED = Object.freeze({ code: 'account-stopped' });
 
 /**
  * @param {object} srv  withResolvedAuth 결과(credAccountId · credVersion · credAccountName · name · host)
- * @param {() => Promise<object>} run  실제 접속(시한 포함) — 결과 객체를 돌려준다(던지면 'other' 로 본다)
+ * @param {(authed:() => void) => Promise<object>} run  실제 접속(시한 포함) — 결과 객체를 돌려준다(던지면 'other' 로 본다).
+ *   authed — 로그인에 성공한 직후 부르면 탐침의 판정을 그때 낸다(146회차 — 기다리던 접속이 명령 시간까지 기다리지 않게 · 부르지 않으면 run 이 끝날 때).
  * @param {{ feature:string, rejected:(r:object)=>boolean, stopped:(code:string)=>object }} o
  *   stopped — 보내지 않았을 때 돌려줄 결과를 만든다(호출부 모양 — bm-storage `{ok:false, mounts:[] …}` · bm-usage `{ok:false …}`)
  */
 export async function gateAccountLogin(srv, run, { feature = '', rejected, stopped } = {}) {
   const id = String(srv?.credAccountId || '');
   const ver = srv?.credVersion;
-  if (!id || ver == null) return run();
+  if (!id || ver == null) return run(NOOP);
   const v = String(ver);
   const key = `${id}|${v}`;
   // 거부를 본 자리에서 정지(탐침 · 성공했던 판의 접속 모두 — 같은 기록 · 쓰기 실패면 메모리 정지)
   const noteRejected = () => {
-    if (okVersion.get(id) === v) okVersion.delete(id);
+    if (okVersion.get(id)?.v === v) okVersion.delete(id);
     const w = setAccountStop(id, { server: String(srv.name || srv.host || '').slice(0, 128), feature, version: v, accountName: String(srv.credAccountName || '') });
     if (!w?.ok) memStop.set(key, Date.now());
   };
@@ -49,10 +65,12 @@ export async function gateAccountLogin(srv, run, { feature = '', rejected, stopp
     if (st) return stopped('account-stopped');
     const ms = memStop.get(key);
     if (ms != null && Date.now() - ms < MEM_STOP_MS) return stopped('account-stopped');
-    if (okVersion.get(id) === v) {
+    const prevOk = okVersion.get(id);
+    if (okFresh(prevOk, v, Date.now())) {
       // 137회차(재현): 성공했던 판은 기다리지 않지만 **거부는 듣는다** — AD 에서 비밀번호가 바뀌면(포탈 판은 그대로) 성공 기록 때문에 탐침을 건너뛰어
       //   한 주기에 서버 수만큼(두 폴러면 2배) 틀린 비밀번호를 보냈다(정지는 주기가 끝난 뒤 outcome 에서야 걸렸다). 지금 동시에 떠난 접속만 더 간다.
-      const r = await run();
+      //   146회차: 그것도 유효 시간 안에서만(머리말) — 지나면 아래 탐침으로 간다.
+      const r = await run(NOOP);
       if (!r?.ok && rejected?.(r)) noteRejected();
       return r;
     }
@@ -60,25 +78,35 @@ export async function gateAccountLogin(srv, run, { feature = '', rejected, stopp
     if (p) { await p; continue; }   // 탐침 결과를 보고 다시 판단(거부면 위에서 정지 · 실패면 다음 하나가 탐침)
     // 이 접속이 탐침이다 — 동기 구간에서 자리를 잡는다(다음 대기자가 같은 틱에 두 번째 탐침이 되지 않게).
     let done;
-    inflight.set(key, new Promise((r) => { done = r; }));
-    let verdict = 'other';
-    try {
-      const r = await run();
-      verdict = r?.ok ? 'ok' : (rejected?.(r) ? 'rejected' : 'other');
-      return r;
-    } finally {
-      if (verdict === 'ok') okVersion.set(id, v);
-      else if (verdict === 'rejected') {
-        okVersion.delete(id);
-        const w = setAccountStop(id, { server: String(srv.name || srv.host || '').slice(0, 128), feature, version: v, accountName: String(srv.credAccountName || '') });
-        if (!w?.ok) memStop.set(key, Date.now());
+    const mine = new Promise((r) => { done = r; });
+    inflight.set(key, mine);
+    const hadOk = !!prevOk && prevOk.v === v;   // 성공했던 판의 다시 탐침(146회차)
+    let settled = false;
+    // 판정은 한 번만 — 로그인 직후(authed) 또는 run 이 끝날 때. 자리도 그때 한 번 비운다(먼저 풀린 뒤 새 탐침이 잡은 자리를 run 끝에 지우지 않게).
+    const settle = (verdict) => {
+      if (settled) return;
+      settled = true;
+      if (verdict === 'ok') { okVersion.set(id, { v, at: Date.now() }); otherRounds.delete(key); }
+      else if (verdict === 'rejected') { otherRounds.delete(key); noteRejected(); }
+      else if (hadOk) {
+        const n = (otherRounds.get(key) || 0) + 1;
+        if (n >= OTHER_MAX) { otherRounds.delete(key); okVersion.set(id, { v, at: Date.now() }); } else otherRounds.set(key, n);
       }
       inflight.delete(key);
       done(verdict);
+    };
+    let verdict = 'other';
+    try {
+      const r = await run(() => settle('ok'));
+      verdict = r?.ok ? 'ok' : (rejected?.(r) ? 'rejected' : 'other');
+      if (settled && verdict === 'rejected') noteRejected();   // 로그인 뒤의 거부 판정(있어서는 안 된다) — 성공했던 판의 거부와 같이 멈춘다
+      return r;
+    } finally {
+      settle(verdict);
     }
   }
   return stopped('account-stopped');
 }
 
 /** 시험용. */
-export function _resetAccountGateForTest() { okVersion.clear(); inflight.clear(); memStop.clear(); }
+export function _resetAccountGateForTest() { okVersion.clear(); inflight.clear(); memStop.clear(); otherRounds.clear(); }

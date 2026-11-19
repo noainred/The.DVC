@@ -84,15 +84,15 @@ test('① 승인이 효력을 잃은 서버(승인 뒤 OS · 법인 · 주소가
   assert.equal(BM.setBmServerInherit(s2.id, { on: true }).ok, true);
   save(s2, { os: 'linux', vcenterId: 'vcB' });
   assert.equal(resolved(s2).authErrorCode, 'inherit-stale');
-  // 엣지 위임 서버(agent)는 그 엣지가 정한다 — 중앙 해석은 예전 그대로(같은 객체)
+  // 엣지 위임 서버(agent)는 inherit-stale 이 아니다(엣지는 물려받지 않는다) — 146회차(결정 D2): 비밀번호도 키도 없으면 ‘자격 없음’(예전에는 같은 객체 → 엣지가 root + 빈 비밀번호)
   const s3 = srv({ name: 'rb1c', vcenterId: 'vcA', os: 'linux', addrOnly: true });
   assert.equal(BM.setBmServerInherit(s3.id, { on: true }).ok, true);
   save(s3, { os: 'linux', vcenterId: 'vcA', agent: 'edge1' });
   const raw3 = byId(s3.id);
-  assert.equal(REFS.withResolvedAuth([raw3], { feature: 'bm-storage' })[0], raw3);
-  // 예전 항목(승인 없음)은 그대로 — 해석하지 않고 같은 객체
+  assert.equal(REFS.withResolvedAuth([raw3], { feature: 'bm-storage' })[0].authErrorCode, 'no-cred');
+  // 예전 항목(승인 없음) — 146회차(결정 D2): 키 · 비밀번호가 없으면 ‘자격 없음’(예전에는 같은 객체 → root + 빈 비밀번호)
   const legacy = srv({ name: 'rb1-legacy', vcenterId: 'vcA' });
-  assert.equal(REFS.withResolvedAuth([legacy], { feature: 'bm-storage' })[0], legacy);
+  assert.equal(REFS.withResolvedAuth([legacy], { feature: 'bm-storage' })[0].authErrorCode, 'no-cred');
   // 자기 비밀번호가 생기면(따로 정함) 승인은 지워지고 그 비밀번호로
   const own = save(s2, { password: 'Own-1' });
   assert.equal(own.inherit, undefined);

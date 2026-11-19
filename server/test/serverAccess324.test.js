@@ -145,10 +145,10 @@ test('② 계층 해석 — 승인 전 물려받지 않음 · OS 단계가 이�
   const w1 = srv({ name: 'w1', vcenterId: 'vcA', os: 'windows', username: 'root', addrOnly: true });
   const l1 = srv({ name: 'l1', vcenterId: 'vcA', os: 'linux', addrOnly: true });
   const n1 = srv({ name: 'n1', vcenterId: 'vcA', addrOnly: true });
-  // 승인 전 — 지정은 있지만 물려받지 않는다(pending) · 해석은 none · 폴러용 해석은 그대로 둔다
+  // 승인 전 — 지정은 있지만 물려받지 않는다(pending) · 해석은 none · 폴러용 해석은 ‘자격 없음’(146회차 결정 D2 — 예전에는 그대로 둬 root + 빈 비밀번호로 붙었다)
   assert.deepEqual(REFS.effectiveAccountOf(w1), { source: 'none', pending: true, level: 'windows', accountId: ad.id });
   assert.equal(REFS.resolveOsAuth(w1, { feature: 'bm-usage' }).authKind, 'none');
-  assert.equal(REFS.withResolvedAuth([w1], { feature: 'bm-usage' })[0], w1);
+  assert.equal(REFS.withResolvedAuth([w1], { feature: 'bm-usage' })[0].authErrorCode, 'no-cred');
   // 승인(등록부 — 서비스만 부른다) → OS 단계(windows) · 로그인 이름 · 비밀번호
   for (const s of [w1, l1, n1]) assert.equal(BM.setBmServerInherit(s.id, { on: true, expectAddr: addrOf(s), by: 'own' }).ok, true);
   const rw = REFS.resolveOsAuth(byName('w1'), { feature: 'bm-usage' });
@@ -450,9 +450,9 @@ test('⑩ 반증 F2 — 같은 공통 계정을 물려받는 서버 5대가 한 
   assert.ok(ST.accountStopFor(z.id, KS.accountSecretVersion(z)));
   // 두 폴러 모두 이 문을 지난다(bm-usage 는 장비 시한 밖에서 기다린다 — 시한은 탐침 뒤 run 안에서 연다)
   const src = (f) => fs.readFileSync(path.join(SRC, f), 'utf8');
-  assert.match(src('bmusage/poller.js'), /gateAccountLogin\(target\.osHost, \(\) => withDeadline\(DEVICE_TIMEOUT_MS/);
+  assert.match(src('bmusage/poller.js'), /gateAccountLogin\(target\.osHost, \(authed\) => withDeadline\(DEVICE_TIMEOUT_MS/);   // 146회차: 로그인 직후 탐침 판정(authed)
   assert.match(src('bmstor/poller.js'), /collectMany\(central, \{ collect: gatedCollect \}\)/);
-  assert.match(src('bmstor/poller.js'), /const gatedCollect = \(s\) => gateAccountLogin\(s, \(\) => collectServer\(s\)/);
+  assert.match(src('bmstor/poller.js'), /const gatedCollect = \(s\) => gateAccountLogin\(s, \(authed\) => collectServer\(s, \{ onLogin: authed \}\)/);
   // 키 로그인(판 없음)은 문을 지나지 않는다
   let nk = 0; await Promise.all(Array.from({ length: 3 }, () => G.gateAccountLogin({ credAccountId: z.id, name: 'k' }, async () => { nk += 1; return { ok: false, error: 'auth' }; }, opts)));
   assert.equal(nk, 3);

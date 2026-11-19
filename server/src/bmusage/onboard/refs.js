@@ -234,6 +234,11 @@ export const AUTH_ERROR = Object.freeze({
   // 141회차: 물려받기 승인이 효력을 잃은(승인 뒤 주소 · 포트 · OS · 법인이 바뀐) 서버 — 예전 무자격 항목처럼 root + 빈 비밀번호로 붙지 않는다.
   'inherit-stale': '물려받기 승인 뒤 이 서버의 주소 · 포트 · OS · 법인이 바뀌어 계층 지정을 물려받지 않습니다 — 접속하지 않았습니다(빈 비밀번호로 시도하지 않습니다). 설정 › 보안 › 서버 접속에서 다시 승인하거나 이 서버의 계정을 정하세요.',
 });
+/**
+ * 146회차(141 결정 D2): 키 · 비밀번호도 물려받기 승인도 없는 **예전 항목**의 ‘자격 없음’ 문구(code 는 'no-cred' 그대로 — 사유 · 화면 code 표가 같다).
+ *   서버 정보 읽기의 예전 문구(‘따로 정함 · 물려받기 승인 모두 없음’)와 같은 뜻에 ‘접속하지 않았다’ 를 붙였다.
+ */
+export const NO_CRED_LEGACY_ERROR = '이 서버에 정한 계정이 없습니다(따로 정함 · 물려받기 승인 모두 없음 — 키 · 비밀번호 없음) — 접속하지 않았습니다(빈 비밀번호로 시도하지 않습니다). 설정 › 보안 › 서버 접속에서 정하세요.';
 
 /**
  * v3.24 — 서버의 **효력 공통 계정**이 어디서 오는가(판정 하나 — resolveOsAuth · 서버 접속 화면 · 법인 사용 중지가 같은 함수).
@@ -425,6 +430,10 @@ export function withResolvedAuth(list = [], { feature = '', winrm = false } = {}
       // 141회차(재현): 승인이 효력을 잃은 서버(승인 뒤 주소 · 포트 · OS · 법인이 바뀜 — 화면 ‘승인 대기(…바뀜) · 다시 승인하세요’)는 예전 무자격 항목이 아니다 —
       //   137 A1(지정 없는 승인)과 같은 이유로 root + 빈 비밀번호로 붙지 않는다. 엣지 위임 서버는 그 엣지가 정한다(예전 그대로).
       if (!hasOwnCred(s) && s.inherit && !t(s.agent)) return { ...s, password: '', authError: AUTH_ERROR['inherit-stale'], authErrorCode: 'inherit-stale' };
+      // 146회차(141 결정 D2 — 사용자 ‘권장안대로’): 키 · 비밀번호가 없는 예전 항목(승인 없음 · 엣지 위임 포함)은 **접속하지 않는다** —
+      //   예전에는 그대로 돌려줘 bm-storage · bm-usage(엣지 위임은 엣지가 잡을 받아)가 root + 빈 비밀번호로 매 주기 로그인했다(기존 설계 ‘무비번 SSH’).
+      //   화면 ‘미설정 — 접속하지 않습니다’ 가 이제 사실이다. code 는 137 A1 과 같은 no-cred(사용 기록 · 인증 정지에 들지 않음 · 결측 사유 cred-config).
+      if (!hasOwnCred(s)) return { ...s, password: '', authError: NO_CRED_LEGACY_ERROR, authErrorCode: 'no-cred' };
       return s;
     }
     const a = resolveOsAuth(s, { feature, winrm });

@@ -695,7 +695,7 @@ async function collectOne(target, { trigger = 'auto', intervalMs = null, prevRun
   const osT0 = Date.now();
   jobs.push((target.paths.includes('os') && !stopped)
     // v3.24 반증 F2: 공통 계정 비밀번호 접속은 계정 탐침을 지난다 — 대기는 장비 시한 밖(시한은 탐침 뒤 run 안에서 연다).
-    ? gateAccountLogin(target.osHost, () => withDeadline(DEVICE_TIMEOUT_MS, (signal) => collectOsUsage(target.osHost, { signal, budgetMs: OS_BUDGET.effective, ...osStoreOpts(storeOf(), peakPlan), ...(logExtra ? { extraCommands: [logExtra] } : {}), top }), 'OS 수집 시한 초과')
+    ? gateAccountLogin(target.osHost, (authed) => withDeadline(DEVICE_TIMEOUT_MS, (signal) => collectOsUsage(target.osHost, { signal, budgetMs: OS_BUDGET.effective, ...osStoreOpts(storeOf(), peakPlan), ...(logExtra ? { extraCommands: [logExtra] } : {}), top, onLogin: authed }), 'OS 수집 시한 초과')
       .catch((e) => ({ ok: false, error: String(e?.message || e).slice(0, 300) })), {
       feature: 'bm-usage',
       rejected: (r) => !!r && r.ok === false && !r.authErrorCode && isSshAuthError({ message: String(r.error || '') }),

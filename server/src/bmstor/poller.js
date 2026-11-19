@@ -230,7 +230,9 @@ async function collectViaEdge(agent, servers) {
  * v3.24 반증 F2: 중앙 직접 수집 한 대 — 공통 계정 비밀번호 접속이면 계정 탐침(sshaccess/accountGate)을 지난다.
  *   거부 판정은 접속 단계 표지(authFailed — collect.js 가 isSshAuthError 로 세운다)만 · 보내지 않은 결과는 authErrorCode(사용 기록 · 인증 정지에 들지 않는다).
  */
-const gatedCollect = (s) => gateAccountLogin(s, () => collectServer(s), {
+/** 146회차(141 결정 D2): 접속 자격(비밀번호 · 키)이 없는 엣지 위임 서버 — 엣지에 보내지 않은 사유(엣지는 물려받지 않는다 · 키 · 공통 계정은 엣지 잡에 싣지 않는다). */
+export const NO_CRED_EDGE_ERROR = '이 엣지 위임 서버에는 접속 자격(비밀번호)이 없어 엣지에 보내지 않았습니다(빈 비밀번호로 시도하지 않습니다) — 베어메탈 스토리지 서버 등록에서 비밀번호를 넣거나, 그 엣지 포탈에 이 서버를 등록해 그 엣지의 키 · 계정으로 읽게 하세요.';
+const gatedCollect = (s) => gateAccountLogin(s, (authed) => collectServer(s, { onLogin: authed }), {   // 146회차: 로그인 직후 탐침 판정(대기 = 로그인 1회)
   feature: 'bm-storage',
   rejected: (r) => r?.authFailed === true,
   stopped: (code) => ({ ok: false, mounts: [], error: AUTH_ERROR[code] || AUTH_ERROR['account-stopped'], authErrorCode: code }),
@@ -272,10 +274,12 @@ export async function bmCollectNow(trigger = 'manual', { demoOnly = false } = {}
     // 7b: 키 · 공통 계정으로 인증하는 서버는 엣지 잡 · 엣지 PUSH 에 싣지 않는다 — 개인키를 법인 밖(중앙 → 엣지)으로 보내지 않고,
     //   빈 비밀번호로 엣지가 시도해 계정을 잠그지 않게. 그 서버는 사유를 남긴다(엣지 포탈에 등록하면 엣지가 자기 키로 읽는다).
     const keyDelegated = [];
+    const noCredDelegated = [];   // 146회차(141 결정 D2): 비밀번호도 키도 없는 엣지 위임 서버 — 잡에 싣지 않는다(엣지가 root + 빈 비밀번호로 붙지 않게)
     for (const s of realServers) {
       const a = String(s.agent || '').trim();
       if (!a) continue;
       if (String(s.keyRef || '').trim() || String(s.credRef || '').trim()) { keyDelegated.push(s); continue; }
+      if (s.authErrorCode) { noCredDelegated.push(s); continue; }
       const map = s.dispatch === 'push' ? pushByAgent : pollByAgent; // 기본 poll(엣지 표준 경로)
       if (!map.has(a)) map.set(a, []);
       map.get(a).push(s);
@@ -289,6 +293,10 @@ export async function bmCollectNow(trigger = 'manual', { demoOnly = false } = {}
     for (const s of keyDelegated) {
       const prev = latest.get(s.id);
       latest.set(s.id, { ...(prev || { mounts: [] }), ok: false, mounts: [], error: 'SSH 키 · 공통 계정 인증 서버는 엣지 위임 잡으로 보내지 않습니다(키는 법인 밖으로 나가지 않음) — 이 서버를 그 엣지 포탈에 등록하세요.', at: Date.now(), agent: s.agent || '' });
+    }
+    for (const s of noCredDelegated) {
+      const prev = latest.get(s.id);
+      latest.set(s.id, { ...(prev || { mounts: [] }), ok: false, mounts: [], error: NO_CRED_EDGE_ERROR, authErrorCode: String(s.authErrorCode), at: Date.now(), agent: s.agent || '' });
     }
     const [centralResults, ...edgeResults] = await Promise.all([
       (async () => [...demoBmResults(demoServers), ...(central.length ? await collectMany(central, { collect: gatedCollect }) : [])])(),

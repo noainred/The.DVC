@@ -92,11 +92,13 @@ export async function readServer(serverId, { feature, plan = {}, deadlineMs = RE
   if (srv.authErrorCode && srv.authErrorCode !== 'no-cred') return { ok: false, code: 'cred', credCode: srv.authErrorCode, reason: String(srv.authError || '').slice(0, 300), os, auth };
   // 141회차(137 남긴 것 P3): 해석이 ‘자격 없음’(no-cred — 승인은 있는데 물려받을 지정이 없음 · 비밀번호 고정인데 계정에 비밀번호가 없음)이면 그 사유를 말한다
   //   (‘승인 모두 없음’ 은 승인된 서버에 틀린 말이었다). code 는 예전 그대로 not-configured(화면 code 표).
-  if (!srv.privateKey && !srv.password) return { ok: false, code: 'not-configured', os, auth, reason: srv.authErrorCode === 'no-cred' ? AUTH_ERROR['no-cred'] : '이 서버에 정한 계정이 없습니다(따로 정함 · 물려받기 승인 모두 없음) — 설정 › 보안 › 서버 접속에서 정하세요.' };
+  //   146회차(141 결정 D2): 예전 항목(승인 · 자격 모두 없음)도 해석이 no-cred 로 막는다 — 문구는 해석이 단 것(예전 항목은 ‘승인 모두 없음’ 그대로).
+  if (!srv.privateKey && !srv.password) return { ok: false, code: 'not-configured', os, auth, reason: srv.authErrorCode === 'no-cred' ? String(srv.authError || AUTH_ERROR['no-cred']).slice(0, 300) : '이 서버에 정한 계정이 없습니다(따로 정함 · 물려받기 승인 모두 없음) — 설정 › 보안 › 서버 접속에서 정하세요.' };
   // 시한은 탐침 대기 밖에서 연다(run 안) — 호출부 signal(일괄 취소)과 합친다. 시한이 오면 세션째 끊는다(withSsh signal).
-  const run = () => withDeadline(deadlineMs, (sig) => withSsh({ host: String(srv.host), port: Number(srv.port) || 22, username: srv.username || 'root', password: srv.password || '',
+  //   146회차: authed — 계정 탐침(accountGate)이면 로그인 직후 판정을 낸다(기다리던 접속이 명령 시간까지 기다리지 않게 · 다른 문은 넘기지 않는다).
+  const run = (authed) => withDeadline(deadlineMs, (sig) => withSsh({ host: String(srv.host), port: Number(srv.port) || 22, username: srv.username || 'root', password: srv.password || '',
     privateKey: srv.privateKey, passphrase: srv.passphrase, readyTimeout: READ_LOGIN_TIMEOUT_MS, singlePasswordAttempt: true, signal: signal ? AbortSignal.any([sig, signal]) : sig },
-  async ({ exec }) => ({ out: await exec(step.command, step.timeoutMs, { partial: true, maxBytes: step.maxBytes }) }))
+  async ({ exec }) => { try { authed?.(); } catch { /* */ } return { out: await exec(step.command, step.timeoutMs, { partial: true, maxBytes: step.maxBytes }) }; })
     // 로그인에 성공하면 명령이 시한 · 상한에 걸려도 ok(탐침 판정 — 비밀번호는 맞았다)
     .then((x) => ({ ok: true, out: x.out }))
     .catch((e) => ({ ok: false, error: String(e?.message || e), hostkey: isSshHostKeyError(e), authFailed: isSshAuthError(e), timeout: sig.aborted || !!signal?.aborted })), '서버 읽기 시한 초과')
