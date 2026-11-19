@@ -516,7 +516,10 @@ export async function mockIdracDemoTick(snapshot, { now = Date.now() } = {}) {
     }
   }
   let refreshed = 0;
+  let n = 0;
   for (const { server, profile } of list) {
+    // v3.26.0: 시연 규모(1,200대)에서는 인벤토리가 30분마다 한꺼번에 낡아 한 틱에 전부 다시 만든다 — 100대마다 양보(이벤트 루프를 길게 잡지 않게).
+    if (++n % 100 === 0) await yieldNow();
     const r = demoSensorReadingAt(profile, now);
     pushSensorSample(server.id, { t: now, cpuUsagePct: r.cpuUsagePct, temps: r.temps, fans: r.fans });
     setThermalDetail(server.id, demoThermalDetail(r), now);
@@ -532,12 +535,50 @@ export async function mockIdracDemoTick(snapshot, { now = Date.now() } = {}) {
   setSensorPollCycle({ durationMs: 1_000, intervalMs: 60_000, at: now });
   if (refreshed) { try { const { onSnapshotRefreshed } = await import('../../partfault/hooks.js'); onSnapshotRefreshed('idrac'); } catch { /* */ } }
   // 장기 이력 백필(기동 1회 · 이미 있으면 건너뜀). 기다리지 않는다 — 폴 틱을 붙잡지 않게.
-  if (!_metricsBackfill) _metricsBackfill = backfillTrendMetrics(list, { now }).catch((e) => { console.warn(`[mock] iDRAC 추이 백필 실패: ${e?.message || e}`); });
+  // v3.26.0: 추이(법인 전산실 온도 포함)는 **데모 법인 할당이 끝난 뒤에** — 먼저 돌면 그룹 키가 법인 대신 vCenter id 로 적재돼
+  //   전산실 온도 표에 'vc-cn-east' 같은 행이 법인 행과 섞였다(시연 규모 첫 기동에서 화면으로 확인). 아직이면 다음 틱에 다시 본다.
+  if (!_metricsBackfill && await demoCorpsAssigned(snapshot)) {
+    await linkDemoServerDatacenters();
+    _metricsBackfill = backfillTrendMetrics(await demoServers(snapshot), { now }).catch((e) => { console.warn(`[mock] iDRAC 추이 백필 실패: ${e?.message || e}`); });
+  }
   if (!_powerBackfill) _powerBackfill = backfillPower(list, { now }).catch((e) => { console.warn(`[mock] iDRAC 전력 백필 실패: ${e?.message || e}`); });
   return { servers: list.length, inventoryRefreshed: refreshed, demo: true };
 }
 
 const yieldNow = () => new Promise((r) => setImmediate(r));
+
+let _dcLinked = false;
+/**
+ * v3.26.0: 데모 iDRAC 서버(`mock-` 만)에 법인(DataCenter)을 채운다 — vCenter 로 등록된 데모 서버(ESXi · vCenter 법인 베어메탈)는 법인이 비어 있어
+ * 전산실 온도(roomTemp — 그룹 키 = 법인 → vCenter)가 'vc-cn-east' 같은 vCenter id 행을 'Ulsan 법인' 같은 법인 행과 섞어 보였다(시연 규모 화면 확인).
+ * 실장비는 스캔 등록이 법인을 직접 갖는다. 그 vCenter 의 법인 할당(datacenters.json)을 그대로 쓰고, 이미 법인이 있거나 사람이 등록한 서버는 건드리지 않는다.
+ * 저장은 한 번에 묶는다(id·법인만 넘기면 importServers 가 나머지를 저장값에서 이어받는다 — 비밀번호 포함).
+ */
+export async function linkDemoServerDatacenters() {
+  if (_dcLinked) return { skipped: 'done' };
+  _dcLinked = true;
+  const [{ loadRegistry, importServers }, { datacenterOfVcenter }] = await Promise.all([import('../../idrac/registry.js'), import('../../datacenter/store.js')]);
+  const fix = [];
+  for (const s of loadRegistry()) {
+    if (!String(s?.id || '').startsWith('mock-') || String(s.datacenterId || '').trim() || !String(s.vcenterId || '').trim()) continue;
+    const dc = datacenterOfVcenter(s.vcenterId);
+    if (dc) fix.push({ id: s.id, datacenterId: dc });
+  }
+  if (!fix.length) return { linked: 0 };
+  const r = importServers(fix, 'merge');
+  if (r?.ok) console.log(`[mock] 데모 iDRAC 서버 법인 연결: ${r.updated}대`);
+  return { linked: r?.ok ? r.updated : 0 };
+}
+
+/** 스냅샷의 vCenter 가 전부 데모 법인에 할당됐는가(pdu.js assignDemoCorps 가 한다). 못 읽으면 거짓 — 다음 틱에 다시. */
+async function demoCorpsAssigned(snapshot) {
+  const vcs = (snapshot?.vcenters || []).map((v) => v.id).filter(Boolean);
+  if (!vcs.length) return false;
+  try {
+    const { datacenterOfVcenter } = await import('../../datacenter/store.js');
+    return vcs.every((vc) => datacenterOfVcenter(vc));
+  } catch { return false; }
+}
 
 /** 백필 시각 목록 — 최근 24시간은 5분, 그 앞 13일은 1시간(시간당 롤업이 채워지게). 오름차순. */
 export function backfillTimes(now = Date.now(), { recentStepMs = 5 * MIN, days = 14 } = {}) {
@@ -648,7 +689,7 @@ export function demoWatts(p, load) {
 }
 
 export function _resetBareMetalSeedForTest() { _specCache = new Map(); _seedDone = false; _tagRepaired = false; }
-export function _resetIdracDemoForTest() { _unsupDone = false; _scanLogDone = false; _sensorBackfilled = false; _metricsBackfill = null; _powerBackfill = null; _invVersion.clear(); }
+export function _resetIdracDemoForTest() { _dcLinked = false; _unsupDone = false; _scanLogDone = false; _sensorBackfilled = false; _metricsBackfill = null; _powerBackfill = null; _invVersion.clear(); }
 
 let _unsupDone = false;
 /**

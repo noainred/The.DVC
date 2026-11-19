@@ -78,8 +78,10 @@ test('② 베어메탈 550대 — 고유하고 ESXi 와 겹치지 않으며 v2.7
   assert.deepEqual(idracDemo.demoBareMetalSpecs(SNAP), specs, '결정적');
 });
 
-test('③ 물리 서버 합 = ESXi 650 + 베어메탈 550 = 1,200대', () => {
+test('③ 물리 서버 합 = ESXi 650 + 베어메탈 550 = 1,200대 — ESXi 도 전부 Dell 이라 iDRAC 등록이 1,200대', () => {
   assert.equal(SNAP.hosts.length + idracDemo.demoBareMetalSpecs(SNAP).length, 1_200);
+  // Overview '물리 서버' 카드는 iDRAC 등록 서버를 센다 — 비-Dell ESXi 가 섞이면 1,200 이 아니게 된다(처음 화면 788).
+  assert.ok(SNAP.hosts.every((h) => /dell/i.test(h.vendor)), 'ESXi 호스트는 전부 Dell');
 });
 
 test('④ 법인 30곳 전부에 스토리지 · 법인 코드 고유 · CVP 6대 · Monitoring 이 전 사이트를 덮는다', () => {
@@ -157,4 +159,26 @@ test('⑤ iDRAC 베어메탈 보충 — v2.914 이전 규모(17대)면 빠진 �
   bm._resetBareMetalDemoForTest();
   assert.equal((await bm.ensureBareMetalSeed(SNAP)).skipped, 'real-entries');
   assert.equal(reg.loadRegistry().length, 1);
+});
+
+test('⑥ 데모 iDRAC 서버 법인 연결 — vCenter 의 법인 할당을 채우고, 이미 법인이 있거나 사람이 등록한 서버는 건드리지 않는다', async () => {
+  const reg = await import('../src/idrac/registry.js');
+  const dcs = await import('../src/datacenter/store.js');
+  reg.deleteServers({ all: true });
+  const base = { username: 'root', password: 'mock', hostNames: [] };
+  reg.importServers([
+    { ...base, id: 'mock-idrac-vc-us-east-esxi-a', name: 'esxi-a', host: '10.2.0.1', vcenterId: 'vc-us-east' },
+    { ...base, id: 'mock-bmsrv-dc-ulsan-mes01', name: 'bm-ulsan-mes01', host: '10.2.0.2', datacenterId: 'dc-ulsan' },
+    { ...base, id: 'real-esxi', name: 'real-esxi', host: '10.2.0.3', vcenterId: 'vc-us-east' },
+  ], 'merge');
+  dcs.ensureDatacenter({ id: 'dc-ashburn', name: 'Ashburn 법인' });
+  dcs.setVcenterDatacenterMany([{ vcenterId: 'vc-us-east', datacenterId: 'dc-ashburn' }]);
+  const r = await idracDemo.linkDemoServerDatacenters();
+  assert.equal(r.linked, 1);
+  const by = new Map(reg.loadRegistry().map((x) => [x.id, x]));
+  assert.equal(by.get('mock-idrac-vc-us-east-esxi-a').datacenterId, 'dc-ashburn');
+  assert.ok(by.get('mock-idrac-vc-us-east-esxi-a').password, '비밀번호를 이어받는다');
+  assert.equal(by.get('mock-bmsrv-dc-ulsan-mes01').datacenterId, 'dc-ulsan', '이미 있는 법인은 그대로');
+  assert.equal(by.get('real-esxi').datacenterId, '', '사람이 등록한 서버는 건드리지 않는다');
+  assert.equal((await idracDemo.linkDemoServerDatacenters()).skipped, 'done', '한 번만');
 });

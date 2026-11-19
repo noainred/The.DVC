@@ -139,15 +139,17 @@ const GUEST_OS = [
 const APP_ROLES = ['web', 'app', 'db', 'cache', 'mq', 'lb', 'k8s-node', 'monitor', 'backup', 'dns'];
 const ESXI_VERSIONS = ['8.0.3', '8.0.2', '8.0.1', '7.0.3', '7.0.2', '6.7.0'];
 // Host hardware vendor/model mix.
+// v3.26.0(시연 규모): ESXi 호스트는 전부 Dell 이다 — 포탈의 서버 기능(전력·온도·부품 장애·전산실 온도·'물리 서버' 카드)은 iDRAC 등록 서버를 센다.
+//   예전 섞음(Dell 3/8)이면 ESXi 650대 중 238대만 iDRAC 에 잡혀 Overview '물리 서버' 가 1,200 이 아니라 788 이었다. 비-Dell 장비는 '미지원 서버' 데모(idrac.js)가 따로 보인다.
 const HW = [
   { vendor: 'Dell Inc.', model: 'PowerEdge R760' },
   { vendor: 'Dell Inc.', model: 'PowerEdge R750' },
   { vendor: 'Dell Inc.', model: 'PowerEdge R740' },
-  { vendor: 'HPE', model: 'ProLiant DL380 Gen11' },
-  { vendor: 'HPE', model: 'ProLiant DL360 Gen10' },
-  { vendor: 'Lenovo', model: 'ThinkSystem SR650 V3' },
-  { vendor: 'Cisco Systems Inc', model: 'UCSC-C240-M6' },
-  { vendor: 'Supermicro', model: 'SYS-220U-TNR' },
+  { vendor: 'Dell Inc.', model: 'PowerEdge R660' },
+  { vendor: 'Dell Inc.', model: 'PowerEdge R650' },
+  { vendor: 'Dell Inc.', model: 'PowerEdge R7625' },
+  { vendor: 'Dell Inc.', model: 'PowerEdge R6625' },
+  { vendor: 'Dell Inc.', model: 'PowerEdge MX760c' },
 ];
 /* v2.556: CPU 모델 믹스(데모) — 코어 수와 어울리는 실제 제품명을 쓴다. 이 값은 mock 이며
    실장비 값은 vCenter `summary.hardware.cpuModel` 에서 온다. */
