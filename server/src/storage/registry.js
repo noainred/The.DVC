@@ -239,6 +239,29 @@ export function seedDevicesIfEmpty(list) {
   const db = load();
   if (loadErr.get()) return { seeded: 0, skipped: 0, reason: 'registry-unreadable' };
   if (db.devices.length) return { seeded: 0, skipped: 0, reason: 'not-empty' };
+  const skipped = pushDemoDevices(db, list);
+  const seeded = db.devices.length;
+  if (seeded) persist();
+  return { seeded, skipped };
+}
+
+/**
+ * v3.26.0: 데모 보충 — 등록부가 **데모(mock-) 장비뿐**일 때 없는 id 만 덧붙인다(v2.914 이전 규모로 시드된 데모 설치본이 시연 규모로 늘게).
+ * 사람이 등록한 장비가 하나라도 있으면 아무것도 하지 않는다. mock/demo/storage.js 만 부른다.
+ */
+export function topUpDemoDevices(list) {
+  const db = load();
+  if (loadErr.get()) return { added: 0, reason: 'registry-unreadable' };
+  if (db.devices.some((d) => !String(d.id || '').startsWith('mock-'))) return { added: 0, reason: 'real-entries' };
+  const have = new Set(db.devices.map((d) => String(d.id)));
+  const before = db.devices.length;
+  pushDemoDevices(db, (Array.isArray(list) ? list : []).filter((d) => d && !have.has(String(d.id))));
+  const added = db.devices.length - before;
+  if (added) persist();
+  return { added };
+}
+
+function pushDemoDevices(db, list) {
   let skipped = 0;
   for (const d of Array.isArray(list) ? list : []) {
     if (!d || typeof d !== 'object' || !String(d.id || '').startsWith('mock-') || deviceInputIssue(d)) { skipped += 1; continue; }
@@ -250,9 +273,7 @@ export function seedDevicesIfEmpty(list) {
       enabled: d.enabled !== false, note: String(d.note || '').slice(0, 200),
     });
   }
-  const seeded = db.devices.length;
-  if (seeded) persist();
-  return { seeded, skipped };
+  return skipped;
 }
 
 export function _resetForTest() { _db = null; loadErr.clear(); }

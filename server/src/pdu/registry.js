@@ -191,4 +191,20 @@ export function seedDemoDevices(list) {
   return { ok: true, count: list.length };
 }
 
+/**
+ * v3.26.0: 데모 보충 — 등록부가 **데모(mock-) 장비뿐**일 때 없는 id 만 덧붙인다(시연 규모로 늘어난 법인의 PDU).
+ * 사람이 등록한 장비가 하나라도 있으면 아무것도 하지 않는다(mock/demo/pdu.js 만 부른다).
+ */
+export function topUpDemoDevices(list) {
+  if (!Array.isArray(list) || !list.length) return { ok: false, reason: '보충할 장비가 없습니다.' };
+  if (loadErr.get()) return { ok: false, reason: '등록부를 읽지 못했습니다(손상 보존본이 있습니다).' };
+  const cur = load().devices;
+  if (cur.some((d) => !String(d.id || '').startsWith('mock-'))) return { ok: false, reason: '사람이 등록한 장비가 있습니다.' };
+  const have = new Set(cur.map((d) => String(d.id)));
+  const add = list.filter((d) => String(d.id || '').startsWith('mock-') && !have.has(String(d.id)));
+  if (!add.length) return { ok: true, count: 0 };
+  save([...cur, ...add.map((d) => ({ ...normalize(d), id: String(d.id) }))]);
+  return { ok: true, count: add.length };
+}
+
 export function _resetForTest() { _cache = null; loadErr.clear(); }

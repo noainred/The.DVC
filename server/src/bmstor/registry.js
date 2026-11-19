@@ -470,6 +470,25 @@ export function seedBmServersIfEmpty(list) {
   const data = load();
   if (loadErr.get()) return { seeded: 0, skipped: 0, reason: 'registry-unreadable' };
   if (data.servers.length) return { seeded: 0, skipped: 0, reason: 'not-empty' };
+  const skipped = pushDemoBm(data, list);
+  if (data.servers.length) persist();
+  return { seeded: data.servers.length, skipped };
+}
+
+/** v3.26.0: 데모 보충 — 등록부가 데모(mock-) 서버뿐일 때 없는 id 만 덧붙인다(mock/demo/storage.js 만 부른다). */
+export function topUpDemoBmServers(list) {
+  const data = load();
+  if (loadErr.get()) return { added: 0, reason: 'registry-unreadable' };
+  if (data.servers.some((b) => !String(b.id || '').startsWith('mock-'))) return { added: 0, reason: 'real-entries' };
+  const have = new Set(data.servers.map((b) => String(b.id)));
+  const before = data.servers.length;
+  pushDemoBm(data, (Array.isArray(list) ? list : []).filter((b) => b && !have.has(String(b.id))));
+  const added = data.servers.length - before;
+  if (added) persist();
+  return { added };
+}
+
+function pushDemoBm(data, list) {
   let skipped = 0;
   for (const b of Array.isArray(list) ? list : []) {
     if (!b || typeof b !== 'object' || !String(b.id || '').startsWith('mock-') || bmServerInputIssue(b)) { skipped += 1; continue; }
@@ -481,6 +500,5 @@ export function seedBmServersIfEmpty(list) {
       enabled: b.enabled !== false, password: String(b.password || ''),
     });
   }
-  if (data.servers.length) persist();
-  return { seeded: data.servers.length, skipped };
+  return skipped;
 }
