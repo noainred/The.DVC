@@ -29,7 +29,7 @@ import { vmSumsOf, vmAllocOf } from './vmSums.js';
 import { hostsSection } from '../inventory/platformSummary.js';
 import { usageBinOf, VM_DIST_BIN_PCT } from '../inventory/vmDist.js';
 import { N1_LIMIT_PCT } from '../clustercfg/n1.js';
-import { pushTop } from '../inventory/vmInsight.js';   // 법인마다 상위 N 삽입 — VM 분석과 한 벌
+import { pushTop, notCurrentOf } from '../inventory/vmInsight.js';   // 법인마다 상위 N 삽입 · 지금 값이 아닌 법인 줄 표지(139회차 R3) — VM 분석과 한 벌
 
 export const HOST_INSIGHT_TOP_N = 5;
 export const HOST_HIST_BIN_PCT = 10;
@@ -74,7 +74,7 @@ function rankedOf(map, max) {
 }
 
 /** 호스트 묶음의 분석 칸(법인 줄의 hostCorp 밖 값) — 호스트를 한 번 훑는다. */
-async function scanHosts(list, { readable, capKnown, byHostVm, yielder, topN, checks }) {
+async function scanHosts(list, { readable, capKnown, byHostVm, yielder, topN, checks, rebootsUnreadable = false }) {
   const cpuHist = new Array(HOST_HIST_BINS).fill(0); const memHist = new Array(HOST_HIST_BINS).fill(0);
   const usageUnknown = { cpu: 0, mem: 0 }; const histOut = { cpu: 0, mem: 0 }; const over90 = { cpu: 0, mem: 0 };
   let cpuSum = 0; let cpuN = 0; let memSum = 0; let memN = 0;
@@ -121,7 +121,8 @@ async function scanHosts(list, { readable, capKnown, byHostVm, yielder, topN, ch
     // 재부팅 '모름' = 판정하지 못한 호스트만(v3.22.x 수정 — 예전에는 boot 가 없는 호스트를 전부 셌다):
     //   analyzeReboots 는 기간(bootDays) 안에 부팅한 호스트만 행을 만든다 — boot 가 null 이면 대부분 '기간 안 재부팅 없음'(정상, 0).
     //   모름 = 이벤트를 받지 못함(kind 'no-events' · readCut 포함) + bootTime 을 못 읽음 + 끊김(analyzeReboots 가 건너뛴다) + 점검 줄 자체 없음.
-    if (reboots != null) {
+    if (reboots != null && rebootsUnreadable) rebootsUnread += 1;   // 139회차 R2: 로그 DB 를 못 읽었다 — 판정하지 못한 호스트(0 이 아니다)
+    else if (reboots != null) {
       const boot = ck?.boot;
       if (boot?.kind === 'unexpected') reboots += 1;
       else if (boot?.kind === 'no-events') rebootsUnread += 1;
@@ -146,7 +147,7 @@ async function scanHosts(list, { readable, capKnown, byHostVm, yielder, topN, ch
       cpuAvgSum: round1(cpuSum), cpuN, memAvgSum: round1(memSum), memN,
       vmsPerHost,
       ...(hw ? { hw } : {}),
-      ...(reboots != null ? { reboots30d: reboots, rebootsUnread } : {}),
+      ...(reboots != null ? { reboots30d: rebootsUnreadable ? null : reboots, rebootsUnread } : {}),
     },
     cpuTop,
   };
@@ -196,7 +197,7 @@ const NULL_ROW_KEYS = Object.freeze([
  * @param {() => Promise<boolean>} [p.yielder]
  * @returns {Promise<{ rows: object[], clusters: object[], top: object[], thresholds: object, access: object }>}
  */
-export async function hostInsightOf({ vcenters = [], hosts = [], vms = [], readable, capKnown, access = {}, checks = null, unlisted = true, bootDays = null, yielder = null, topN = HOST_INSIGHT_TOP_N, now = Date.now() } = {}) {
+export async function hostInsightOf({ vcenters = [], hosts = [], vms = [], readable, capKnown, access = {}, checks = null, rebootsUnreadable = false, unlisted = true, bootDays = null, yielder = null, topN = HOST_INSIGHT_TOP_N, now = Date.now() } = {}) {
   const cfgOk = access?.cluster === true;
   const listed = new Set();
   const vcs = [];
@@ -212,20 +213,21 @@ export async function hostInsightOf({ vcenters = [], hosts = [], vms = [], reada
   const hostById = new Map(hl.map((h) => [h.id, h]));
   const vcById = new Map(vcs.map((v) => [v.id, v]));
   const capMB = (list) => list.reduce((s, h) => s + (capKnown(h) ? h.memTotalMB : 0), 0);
+  const notCurrent = notCurrentOf(vcs);
 
   const rows = []; const clusters = []; const top = [];
   for (const corp of corpOut.corps) {
     const list = byVcHosts.get(corp.id) || [];
     const isUnlisted = unlistedIds.has(corp.id);
-    const identity = isUnlisted ? { ...corpIdentityOf({ id: corp.id }), unlisted: true } : corpIdentityOf(vcById.get(corp.id));
     const unknown = corp.hosts == null;   // hostCorp 가 '개수 모름'(corpUnknownOf)으로 둔 법인
+    const identity = isUnlisted ? { ...corpIdentityOf({ id: corp.id }), unlisted: true } : { ...corpIdentityOf(vcById.get(corp.id)), ...notCurrent(corp.id, unknown) };
     if (unknown) {
       rows.push({ ...identity, unknown: true, ...Object.fromEntries(NULL_ROW_KEYS.map((k) => [k, null])) });
       top.push({ id: corp.id, cpuTop: [], n1Fail: [] });
       continue;
     }
     const hs = hostsSection(list, readable);
-    const { stats, cpuTop } = await scanHosts(list, { readable, capKnown, byHostVm, yielder, topN, checks });
+    const { stats, cpuTop } = await scanHosts(list, { readable, capKnown, byHostVm, yielder, topN, checks, rebootsUnreadable });
     const vmSum = vmSumsOf(list.flatMap((h) => byHostVm.get(`${h.vcenterId}\t${h.name}`) || []));
     const alloc = vmAllocOf(vmSum);
     const cfg = corp.cfg || null;
@@ -254,7 +256,7 @@ export async function hostInsightOf({ vcenters = [], hosts = [], vms = [], reada
           drsManual: corp.clusters.filter((c) => c.drs === 'manual').length, drsWeak: cfg.drsWeak, withFindings: cfg.withFindings }
         : { total: corp.clusterCount },
       ...(stats.hw ? { hw: stats.hw } : {}),
-      ...(stats.reboots30d != null ? { reboots30d: stats.reboots30d, rebootsUnread: stats.rebootsUnread } : {}),
+      ...(stats.rebootsUnread != null ? { reboots30d: stats.reboots30d, rebootsUnread: stats.rebootsUnread } : {}),   // 키 유무 = 권한(못 읽음이면 reboots30d 만 null)
     });
     for (const c of corp.clusters) {
       const memList = (c.hostIds || []).map((id) => hostById.get(id)).filter(Boolean);
@@ -285,5 +287,6 @@ export async function hostInsightOf({ vcenters = [], hosts = [], vms = [], reada
   return {
     rows, clusters, top, thresholds: hostInsightThresholds({ bootDays }),
     access: { cluster: cfgOk, hw: !!checks?.access?.hw, hygiene: !!checks?.access?.hygiene },
+    ...(rebootsUnreadable && checks?.access?.hygiene ? { rebootsUnreadable: true } : {}),   // 139회차 R2: 재부팅 근거(로그 DB)를 읽지 못했다
   };
 }
