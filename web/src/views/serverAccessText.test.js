@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { accountKindText, buildHierTree, nodeAccount, serverSourceText, accountStopText, passwordAgeText, assignableAccounts, serversOfNode, loginNamePreview, assignOf } from './serverAccessText.js';
+import { accountKindText, buildHierTree, nodeAccount, serverSourceText, accountStopText, passwordAgeText, assignableAccounts, serversOfNode, loginNamePreview, assignOf, rotateByInput } from './serverAccessText.js';
 
 const accounts = [
   { id: 'a_000000000001', name: 'kr-linux', corp: 'vcA', os: 'linux', family: 'linux' },
@@ -99,5 +99,10 @@ describe('서버 접속 — 계정 계층 · 공통 계정 화면 규약(소스)
   it('공용 조각을 쓴다(두 벌 금지) — must · Chip · Otp · FeaturePicker 는 sshAccessParts.jsx', () => {
     expect(src).toMatch(/from '\.\/sshAccessParts\.jsx'/);
     expect(src).not.toMatch(/^function must\(|^const Chip =|^const Otp =|^function FeaturePicker\(/m);
+  });
+
+  it('교체 예정일 입력값 — 서버가 UTC 자정으로 저장한 날짜를 같은 달력 날짜로(시간대와 무관) · 못 읽으면 빈 값', () => {
+    expect(rotateByInput(Date.parse('2026-11-10T00:00:00Z'))).toBe('2026-11-10');
+    expect(rotateByInput(null)).toBe(''); expect(rotateByInput('x')).toBe(''); expect(rotateByInput(0)).toBe('');
   });
 });

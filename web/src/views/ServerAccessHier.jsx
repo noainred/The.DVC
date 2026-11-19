@@ -16,7 +16,7 @@ import { errText, must, Chip, Otp, FeaturePicker } from './sshAccessParts.jsx';
 import { KEY_MODE_TEXT, dateTime, featuresText } from './sshAccessText.js';
 import {
   LEVEL_LABEL, OS_LABEL, accountKindText, buildHierTree, nodeAccount, serverSourceText, accountStopText, passwordAgeText,
-  assignableAccounts, serversOfNode, loginNamePreview, familyOf,
+  assignableAccounts, serversOfNode, loginNamePreview, familyOf, rotateByInput,
 } from './serverAccessText.js';
 
 const AUTH_TEXT = Object.freeze({ '': '키 우선(키가 없으면 비밀번호)', password: '비밀번호 고정' });
@@ -309,7 +309,7 @@ export function AccountsTab({ v, corpName, reload, say }) {
     say(`${a.name} — 계정 정지를 풀었습니다(다음 수집부터 이 계정으로 접속합니다).`, 'ok'); reload();
   });
   const edit = (a) => setForm({ ...blankAcc, id: a.id, name: a.name, corp: a.corp || '', os: a.os === 'windows' ? 'windows' : 'linux', logon: a.logon || 'local', domain: a.domain || '',
-    username: a.username, keyRef: a.keyRef || '', rotateBy: a.rotateBy ? new Date(a.rotateBy).toISOString().slice(0, 10) : '', features: a.features ?? null, hadPassword: !!a.hasPassword });
+    username: a.username, keyRef: a.keyRef || '', rotateBy: rotateByInput(a.rotateBy), features: a.features ?? null, hadPassword: !!a.hasPassword });
   const usersOfForm = form?.id ? usersOf({ id: form.id }) : [];
   return (
     <div className="ssa-main">

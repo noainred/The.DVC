@@ -121,3 +121,15 @@ export function loginNamePreview({ os = '', logon = '', domain = '', username = 
   if (os !== 'windows' || logon !== 'ad' || !d) return u;
   return d.includes('.') ? `${u}@${d}` : `${d.toUpperCase()}\\${u}`;
 }
+
+/**
+ * 교체 예정일(ms) → 입력 칸 값 'YYYY-MM-DD'. 서버는 날짜만 받아 **UTC 자정**으로 저장한다(keyStore dateMs) — 그래서 같은 달력 날짜로
+ * 되돌리려면 UTC 날짜로 읽는다(로컬 날짜로 읽으면 UTC 보다 늦은 시간대에서 하루 앞당겨져 다시 저장된다). 못 읽으면 ''.
+ */
+export function rotateByInput(ms) {
+  const n = Number(ms);
+  if (!Number.isFinite(n) || n <= 0) return '';
+  const d = new Date(n);
+  const p = (x) => String(x).padStart(2, '0');
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`;
+}
