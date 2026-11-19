@@ -22,6 +22,7 @@ import { Agent as UndiciAgent } from 'undici';
 import { ssrfLookup } from './util/ssrfLookup.js';
 import { clampSetting } from './util/clampSetting.js'; // v2.607 TIM2607-03
 import { numOrNull } from './util/numOrNull.js';   // v2.506: DNS 리바인딩(TOCTOU) 차단
+import { newVmSum, vmSumAdd } from './vcenter/vmSums.js';   // v3.28.1: 오버커밋 경보의 VM 할당 합 — 못 읽은 vCPU · 메모리는 0 으로 더하지 않고 센다
 import { sendPortalMail } from './mail/service.js'; // 공용 메일 발송(v2.454)
 import { headerSafeText } from './util/smtp.js'; // v2.743(INJPKG-03): 메일 제목 제어문자 정리(buildMime 과 같은 판정)
 import { registerExitFlush } from './util/exitFlush.js';
@@ -243,6 +244,24 @@ export function vcStaleAlertDue(receivedAt, { now = Date.now(), startedAt = proc
   return now - basis > staleMs;
 }
 
+/**
+ * v3.28.1 — 클러스터 오버커밋 경보 판정(순수). value 는 **읽은 VM 만의 할당 합**으로 낸 값이라 최소값이다.
+ *   · 최소값으로 이미 임계 이상 → 'fire'(못 읽은 VM 을 더해도 내려가지 않는다 — 참인 경보)
+ *   · 임계 미만인데 못 읽은 VM 이 있다 → 'held'(모름 — 새로 내지도 '해소' 하지도 않는다. 같은 절의 용량 미상 호스트 규칙과 같은 보류 · HELD_MAX_MS 시한)
+ *   · 임계 미만이고 다 읽었다 → 'ok'
+ * 예전에는 못 읽은 VM 을 0 으로 더해 할당이 작게 잡혀 경보가 안 나거나 발생 중이던 경보가 거짓 '해소' 로 나갔다.
+ * @returns {'fire'|'held'|'ok'}
+ */
+export function overcommitVerdict(value, threshold, unknown) {
+  if (Number(value) >= Number(threshold)) return 'fire';
+  return (numOrNull(unknown) || 0) > 0 ? 'held' : 'ok';
+}
+/** 경보 본문 꼬리 — 못 읽은 VM 이 있으면 최소값임을 밝힌다. */
+function partialNote(unknown, what) {
+  const n = numOrNull(unknown) || 0;
+  return n > 0 ? ` · ${what} 미상 VM ${n}대 제외(최소값)` : '';
+}
+
 /** Evaluate rules against a snapshot → array of { key, severity, title, detail }. */
 export function evaluate(snap, cfg = loadAlertConfig()) {
   const out = [];
@@ -397,7 +416,7 @@ export function evaluate(snap, cfg = loadAlertConfig()) {
     const byC = new Map();
     for (const h of snap.hosts || []) {
       const k = `${h.vcenterId} ${h.cluster || 'standalone'}`;
-      const c = byC.get(k) || { name: h.cluster || 'standalone', vc: h.vcenterId, cores: 0, memGB: 0, vcpu: 0, ramGB: 0, capUnknown: 0 };
+      const c = byC.get(k) || { name: h.cluster || 'standalone', vc: h.vcenterId, cores: 0, memGB: 0, vm: newVmSum(), capUnknown: 0 };
       // 2차 공통 기능 점검 9회차: 못 읽은 용량(연결 끊긴 호스트 · REST 폴백)을 0 으로 더하면 분모만 줄어 그 클러스터 VM 들의 할당은 그대로라
       //   **오버커밋을 부풀린 거짓 알림**이 났다(CLAUDE.md '부분 합은 정상에도 장애에도 넣지 않는다'). 판정은 용량 도구(routes/api/toolsCapacity.js ·
       //   v2.733 C2-06)와 같은 store.hostCapacityKnown 하나 — 못 읽은 호스트가 하나라도 있으면 그 클러스터의 오버커밋 판정은 건너뛴다.
@@ -407,7 +426,8 @@ export function evaluate(snap, cfg = loadAlertConfig()) {
     for (const v of snap.vms || []) {
       if (v.powerState !== 'POWERED_ON' || v.template) continue;
       const k = `${v.vcenterId} ${v.cluster || 'standalone'}`;
-      const c = byC.get(k); if (c) { c.vcpu += v.cpuCount || 0; c.ramGB += (v.memMB || 0) / 1024; }
+      // v3.28.1: 못 읽은 cpuCount · memMB(null · '')를 0 으로 더하지 않는다 — 합은 읽은 VM 만(= 최소값)이고 못 읽은 수는 c.vm.vcpuUnknown · memUnknown.
+      const c = byC.get(k); if (c) vmSumAdd(c.vm, v);
     }
     // 126회차(재현): 지금 값을 읽지 못한 vCenter(점검중 · 수집 실패 · 낡은 위임 · 첫 수집 중 · 비활성 — unreadVc)의 클러스터는 판정하지 않는다.
     //   예전에는 ① 그 vCenter 의 마지막 인벤토리로 오버커밋을 새로 내고 쿨다운마다 재발송했고(alarm/host/ds 와 달리 stale 도 거르지 않았다)
@@ -434,13 +454,22 @@ export function evaluate(snap, cfg = loadAlertConfig()) {
         if (R.ramOvercommitPct?.enabled) held.add(`ramoc:${c.vc}:${c.name}`);
         if (R.vcpuPerCore?.enabled) held.add(`vcpuoc:${c.vc}:${c.name}`);
       }
+      // v3.28.1: 할당 합은 읽은 VM 만의 합(최소값)이다 — 판정은 overcommitVerdict 하나(최소값으로 이미 임계 이상 → 발생 · 미달인데 못 읽은 VM 이 있으면 모름 → 보류).
       if (R.ramOvercommitPct?.enabled && c.memGB > 0 && !c.capUnknown) {
-        const pct = Math.round((c.ramGB / c.memGB) * 100);
-        if (pct >= (Number(R.ramOvercommitPct.threshold) || 120)) out.push({ key: `ramoc:${c.vc}:${c.name}`, severity: 'warning', title: `RAM 오버커밋 ${pct}%: ${c.name}`, detail: `${c.vc} · 할당 ${Math.round(c.ramGB)}/${Math.round(c.memGB)}GB` });
+        const key = `ramoc:${c.vc}:${c.name}`;
+        const th = Number(R.ramOvercommitPct.threshold) || 120;
+        const pct = Math.round(((c.vm.memMB / 1024) / c.memGB) * 100);
+        const vd = overcommitVerdict(pct, th, c.vm.memUnknown);
+        if (vd === 'fire') out.push({ key, severity: 'warning', title: `RAM 오버커밋 ${c.vm.memUnknown ? '≥ ' : ''}${pct}%: ${c.name}`, detail: `${c.vc} · 할당 ${Math.round(c.vm.memMB / 1024)}/${Math.round(c.memGB)}GB${partialNote(c.vm.memUnknown, '메모리')}` });
+        else if (vd === 'held') held.add(key);
       }
       if (R.vcpuPerCore?.enabled && c.cores > 0 && !c.capUnknown) {
-        const ratio = Number((c.vcpu / c.cores).toFixed(1));
-        if (ratio >= (Number(R.vcpuPerCore.threshold) || 5)) out.push({ key: `vcpuoc:${c.vc}:${c.name}`, severity: 'warning', title: `vCPU:코어 ${ratio}:1: ${c.name}`, detail: `${c.vc} · vCPU ${c.vcpu}/코어 ${c.cores}` });
+        const key = `vcpuoc:${c.vc}:${c.name}`;
+        const th = Number(R.vcpuPerCore.threshold) || 5;
+        const ratio = Number((c.vm.vcpu / c.cores).toFixed(1));
+        const vd = overcommitVerdict(ratio, th, c.vm.vcpuUnknown);
+        if (vd === 'fire') out.push({ key, severity: 'warning', title: `vCPU:코어 ${c.vm.vcpuUnknown ? '≥ ' : ''}${ratio}:1: ${c.name}`, detail: `${c.vc} · vCPU ${c.vm.vcpu}/코어 ${c.cores}${partialNote(c.vm.vcpuUnknown, 'vCPU')}` });
+        else if (vd === 'held') held.add(key);
       }
     }
   }

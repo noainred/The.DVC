@@ -177,6 +177,8 @@ function oracleMatchVms(snap, q, user) {
   }
   return { vms: out, gpuCounts };
 }
+/** v3.28.1 오라클 — VM 이 있는데 그 칸을 하나도 못 읽었으면 null, 아니면 읽은 값의 합. */
+const allReadOr = (vms, k, sum) => (vms.length > 0 && vms.every((v) => numOrNull(v[k]) == null) ? null : sum);
 function oracleVms(snap, q, user, pins) {
   const paged = isPagedRequest(q);
   const matched = oracleMatchVms(snap, q, user);
@@ -198,8 +200,11 @@ function oracleVms(snap, q, user, pins) {
     count: vms.length,
     poweredOn: on.length,
     poweredOff: vms.length - on.length,
-    vcpu: sm((v) => v.cpuCount),
-    ramGB: Math.round(sm((v) => v.memMB) / 1024),
+    // v3.28.1: 못 읽은 cpuCount · memMB 는 0 으로 더하지 않고 센다 — 전부 못 읽었으면 null(오라클은 vmSums.js 를 import 하지 않고 따로 계산한다).
+    vcpu: allReadOr(vms, 'cpuCount', sm((v) => v.cpuCount)),
+    ramGB: allReadOr(vms, 'memMB', Math.round(sm((v) => v.memMB) / 1024)),
+    vcpuUnknown: vms.filter((v) => numOrNull(v.cpuCount) == null).length,
+    ramUnknown: vms.filter((v) => numOrNull(v.memMB) == null).length,
     diskGB: sm((v) => v.storageGB),
     diskTB: Math.round(sm((v) => v.storageGB) / 1024 * 10) / 10,
     avgCpuUsagePct: cpuAvg.value,

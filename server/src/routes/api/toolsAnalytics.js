@@ -43,12 +43,13 @@ api.get('/tools/insights', requirePerm('tools'), (req, res) => memoJson(req, res
   const vms = scoped.vms;
   const alarms = scoped.alarms || [];
   const on = vms.filter((v) => v.powerState === 'POWERED_ON');
-  const gb = (mb) => Math.round((mb || 0) / 1024);
+  // v3.28.1: 못 읽은 vCPU · 메모리는 null('—') — 예전 `|| 0` 은 '0 vCPU · 0 GB' 행이 되고 회수 가능 합을 표지 없이 줄였다.
+  const gb = (mb) => { const n = numOrNull(mb); return n == null ? null : Math.round(n / 1024); };
 
   // ② 라이트사이징
-  const slim = (v) => ({ name: v.name, vcenterId: v.vcenterId, host: v.host || '', cpuPct: v.cpuUsagePct ?? null, memPct: v.memUsagePct ?? null, vcpu: v.cpuCount || 0, ramGB: gb(v.memMB) });
+  const slim = (v) => ({ name: v.name, vcenterId: v.vcenterId, host: v.host || '', cpuPct: v.cpuUsagePct ?? null, memPct: v.memUsagePct ?? null, vcpu: numOrNull(v.cpuCount), ramGB: gb(v.memMB) });
   const idle = on.filter((v) => (v.cpuUsagePct ?? 100) < 5 && (v.memUsagePct ?? 100) < 20).map(slim);
-  const oversized = on.filter((v) => (v.cpuCount || 0) >= 4 && (v.cpuUsagePct ?? 100) < 10 && !((v.cpuUsagePct ?? 100) < 5 && (v.memUsagePct ?? 100) < 20)).map(slim);
+  const oversized = on.filter((v) => (numOrNull(v.cpuCount) ?? 0) >= 4 && (v.cpuUsagePct ?? 100) < 10 && !((v.cpuUsagePct ?? 100) < 5 && (v.memUsagePct ?? 100) < 20)).map(slim);
   const oversizeExcess = (v) => {
     const sz = suggestSize(v.vcpu || 0, v.ramGB || 0, v.cpuPct, v.memPct);
     return { vcpu: Math.max(0, (v.vcpu || 0) - sz.suggestedVcpu), ramGB: Math.max(0, (v.ramGB || 0) - sz.suggestedRamGB) };
@@ -61,6 +62,8 @@ api.get('/tools/insights', requirePerm('tools'), (req, res) => memoJson(req, res
     //   리포트와 뜻이 달랐다). 이 화면의 사용률은 **순간값**이다 — reclaimBasis 로 밝힌다.
     reclaimableVcpu: idle.reduce((a, v) => a + (v.vcpu || 0), 0) + oversized.reduce((a, v) => a + oversizeExcess(v).vcpu, 0),
     reclaimableRamGB: idle.reduce((a, v) => a + (v.ramGB || 0), 0) + oversized.reduce((a, v) => a + oversizeExcess(v).ramGB, 0),
+    // v3.28.1: 위 두 합은 크기(vCPU · 메모리)를 읽은 VM 만이다 — 유휴 · 과대 후보 중 크기를 못 읽어 뺀 VM 수(최소값임을 밝힌다).
+    reclaimUnknown: { vcpu: idle.filter((v) => v.vcpu == null).length, ramGB: [...idle, ...oversized].filter((v) => v.ramGB == null).length },
     reclaimBasis: 'instant',
     idle: idle.slice(0, 200), oversized: oversized.slice(0, 200), undersized: undersized.slice(0, 200),
   };

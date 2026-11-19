@@ -42,8 +42,12 @@ export function toolsKpiMeta(summary) {
 export function reclaimBasisNote(rs) {
   const ram = rs?.reclaimableRamGB;
   const ramText = typeof ram === 'number' && Number.isFinite(ram) ? `${ram} GB RAM` : 'RAM —';
-  if (rs?.reclaimBasis === 'instant') return `${ramText} · 순간 사용률 기준(기간 통계는 라이트사이징 리포트)`;
-  return ramText;
+  // v3.28.1: 크기(vCPU · 메모리)를 못 읽은 후보는 회수 합에서 빠졌다 — 그 수를 밝힌다(합은 최소값).
+  const ru = rs?.reclaimUnknown;
+  const unk = Math.max(Number(ru?.vcpu) || 0, Number(ru?.ramGB) || 0);
+  const tail = unk > 0 ? ` · 크기 미상 VM ${unk}대 제외(최소값)` : '';
+  if (rs?.reclaimBasis === 'instant') return `${ramText} · 순간 사용률 기준(기간 통계는 라이트사이징 리포트)${tail}`;
+  return `${ramText}${tail}`;
 }
 
 /**

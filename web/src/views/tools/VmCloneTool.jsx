@@ -507,7 +507,7 @@ function JobForm({ d, form: initial, onCancel, onSaved }) {
                         {filtered.map((v) => (
                           <div key={v.id} className="vcd-link" style={{ padding: '4px 6px', cursor: 'pointer', fontSize: 12.5 }}
                             onClick={() => { setForm({ ...form, vmId: v.id, vmName: v.name }); setQ(v.name); }}>
-                            {v.name} <span className="muted">· {v.host || '—'} · {v.cpuCount}vCPU/{Math.round((v.memMB || 0) / 1024)}GB · {unitText(v.storageGB, 'GB')}</span>
+                            {v.name} <span className="muted">· {v.host || '—'} · {v.cpuCount ?? '—'}vCPU/{v.memMB == null ? '—' : Math.round(v.memMB / 1024)}GB · {unitText(v.storageGB, 'GB')}</span>
                           </div>
                         ))}
                         {!filtered.length && <div className="muted" style={{ fontSize: 12, padding: 6 }}>일치 VM 없음</div>}
