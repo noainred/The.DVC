@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>랙 실장도 — 배치 계획</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+button,select,input{font:inherit;color:inherit}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.dim{color:#8b9bb4}
+.tb{display:flex;align-items:center;gap:12px;height:44px;padding:0 16px;background:#0f1626;border-bottom:1px solid #1f2a40}
+.logo{display:inline-flex;align-items:center;gap:8px;font-weight:700;white-space:nowrap}
+.logo .v{width:26px;height:26px;border-radius:7px;background:#3b82f6;display:inline-flex;align-items:center;justify-content:center;font-weight:800;color:#04101f}
+.btn{height:32px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#141b2d;font-weight:600;font-size:12px;cursor:pointer;white-space:nowrap}
+.btn.pri{background:#3b82f6;border-color:#3b82f6;color:#04101f}
+.panel{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0}
+.pl{display:flex;flex-direction:column;gap:4px;padding:10px 14px;border-top:1px solid #1f2a40;text-align:left;background:transparent;border-left:0;border-right:0;border-bottom:0;width:100%;box-sizing:border-box;cursor:pointer}
+.pl.on{background:rgba(59,130,246,.14);box-shadow:inset 3px 0 0 #3b82f6}
+.st{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap;box-sizing:border-box}
+.steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12px}
+.steps span.s{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:999px;border:1px solid #243049;color:#8b9bb4;white-space:nowrap}
+.steps span.s.done{border-color:#22c55e;color:#bbf7d0}
+.steps span.s.now{border-color:#3b82f6;background:rgba(59,130,246,.2);color:#ffffff;font-weight:700}
+.rack{flex:1 1 240px;min-width:0;max-width:320px}
+.rk-b{display:flex;gap:4px;border:2px solid #3a4866;border-radius:6px;background:#0a0e17;padding:4px}
+.us{flex:0 0 18px;display:flex;flex-direction:column}
+.us span{height:16px;line-height:16px;font-size:9px;color:#5d6b85;text-align:right;font-family:"JetBrains Mono",monospace}
+.slots{position:relative;flex:1;min-width:0;height:672px;background:repeating-linear-gradient(to bottom,#0f1626 0 15px,#1f2a40 15px 16px)}
+.dev{position:absolute;left:1px;right:1px;box-sizing:border-box;border-radius:3px;display:flex;align-items:center;gap:6px;padding:0 6px;font-size:10px;line-height:1;overflow:hidden;white-space:nowrap}
+.dev .nm{font-family:"JetBrains Mono",monospace;font-weight:500;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1}
+.dev .vl{font-weight:700;flex:0 0 auto}
+.ck{display:flex;gap:10px;align-items:flex-start;padding:9px 14px;border-top:1px solid #1f2a40;font-size:12px;line-height:1.5}
+.ck .m{flex:0 0 46px;font-weight:800;font-size:11px;white-space:nowrap}
+.ok{color:#bbf7d0}.wn{color:#fde68a}.na{color:#8b9bb4}
+.wk{display:flex;gap:8px;padding:7px 14px;border-top:1px solid #1f2a40;font-size:12px}
+.wk .n{flex:0 0 18px;color:#8b9bb4;font-family:"JetBrains Mono",monospace}
+</style>
+</helmet>
+<div style="min-height:1010px;background:#0a0e17;box-sizing:border-box">
+  <div class="tb">
+    <span class="logo"><span class="v">D</span>THE DAVINCI</span>
+    <span class="dim">특수 기능 › 하드웨어 › 랙 실장도 ›</span><strong>배치 계획</strong>
+    <span class="dim" style="margin-left:auto;font-size:12px">jhpark</span>
+  </div>
+
+  <div style="padding:14px 16px;display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start">
+    <div class="panel" style="flex:1 1 250px;max-width:320px">
+      <div style="display:flex;align-items:center;gap:8px;padding:10px 14px"><strong>배치 계획</strong><span class="dim">KR-SEL</span><button type="button" class="btn" style="margin-left:auto">+ 새 계획</button></div>
+      <button type="button" class="pl on"><span style="display:flex;gap:8px;align-items:center"><span class="mono dim">PLN-0012</span><span class="st" style="background:rgba(59,130,246,.2);border:1px solid #3b82f6;color:#dbeafe">검토 중</span></span><strong>가상화 서버 4대 증설</strong><span class="dim" style="font-size:11.5px">A-06 · 추가 4 · 입고 예정 12-02 · jhpark</span></button>
+      <button type="button" class="pl"><span style="display:flex;gap:8px;align-items:center"><span class="mono dim">PLN-0011</span><span class="st" style="background:rgba(34,197,94,.14);border:1px solid #22c55e;color:#bbf7d0">승인됨 · 작업 대기</span></span><strong>srv-esx-014 이설</strong><span class="dim" style="font-size:11.5px">A-02 → A-03 · 이동 1 · kimsj</span></button>
+      <button type="button" class="pl"><span style="display:flex;gap:8px;align-items:center"><span class="mono dim">PLN-0010</span><span class="st" style="background:rgba(245,158,11,.14);border:1px solid #f59e0b;color:#fde68a">반려 · 전력 부족</span></span><strong>GPU 서버 1대 추가</strong><span class="dim" style="font-size:11.5px">A-03 · 추가 1 · jhpark</span></button>
+      <button type="button" class="pl"><span style="display:flex;gap:8px;align-items:center"><span class="mono dim">PLN-0009</span><span class="st" style="border:1px solid #3a4866;color:#aebbd0">반영 완료 11-15</span></span><strong>스토리지 선반 추가</strong><span class="dim" style="font-size:11.5px">A-04 · 추가 1 · kimsj</span></button>
+      <div style="padding:10px 14px;border-top:1px solid #1f2a40;font-size:11.5px;color:#8b9bb4;line-height:1.5">계획은 실제 실장도를 바꾸지 않습니다. ‘실장도에 반영’ 을 눌러야 원장에 들어갑니다. 계획이 잡은 자리는 실장도에 ‘예약’ 으로 보여, 다른 사람이 같은 자리에 놓지 못합니다.</div>
+    </div>
+
+    <div class="panel" style="flex:999 1 520px">
+      <div style="padding:12px 14px;display:flex;flex-direction:column;gap:10px;border-bottom:1px solid #1f2a40">
+        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center"><span class="mono dim">PLN-0012</span><strong style="font-size:15px">가상화 서버 4대 증설</strong><span class="dim">KR-SEL › 전산실 A › A 줄 › A-06</span></div>
+        <div class="steps"><span class="s done">작성</span><span class="dim">›</span><span class="s now">검토</span><span class="dim">›</span><span class="s">승인</span><span class="dim">›</span><span class="s">현장 작업</span><span class="dim">›</span><span class="s">실장도에 반영</span></div>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:18px;padding:12px 14px;justify-content:center">
+        <sc-for list="{{racks}}" as="r" hint-placeholder-count="2">
+          <div class="rack">
+            <div style="display:flex;align-items:baseline;gap:8px;padding:0 2px 6px"><strong class="mono" style="font-size:14px">A-06</strong><span style="font-weight:700;color:{{r.tc}}">{{r.title}}</span><span class="dim" style="margin-left:auto;font-size:11px">{{r.use}}</span></div>
+            <div class="rk-b" style="border-color:{{r.bc}}">
+              <div class="us"><sc-for list="{{us}}" as="u" hint-placeholder-count="42"><span>{{u}}</span></sc-for></div>
+              <div class="slots">
+                <sc-for list="{{r.devs}}" as="d" hint-placeholder-count="4">
+                  <div class="dev" style="bottom:{{d.b}}px;height:{{d.h}}px;background:{{d.bg}};border:{{d.bd}};color:{{d.fg}}"><span class="nm">{{d.name}}</span><span class="vl">{{d.val}}</span></div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:14px;padding:8px 14px;border-top:1px solid #1f2a40;font-size:11.5px;color:#aebbd0">
+        <span>초록 점선 = 이 계획이 추가하는 장비(예약)</span><span>파랑 = 지금 있는 장비</span>
+        <span style="margin-left:auto">여러 랙에 걸친 계획은 바뀌는 랙만 나란히 보여 줍니다</span>
+      </div>
+    </div>
+
+    <div style="flex:1 1 300px;max-width:400px;min-width:0;display:flex;flex-direction:column;gap:12px">
+      <div class="panel">
+        <div style="display:flex;align-items:center;gap:8px;padding:10px 14px"><strong>자동 점검</strong><span class="dim" style="font-size:11.5px">계획을 고칠 때마다 다시 계산</span></div>
+        <div class="ck"><span class="m ok">통과</span><span><strong>자리</strong> — U5–12 비어 있음 · 다른 계획의 예약과 겹치지 않음</span></div>
+        <div class="ck"><span class="m ok">통과</span><span><strong>실장율</strong> — 7% → 26% (3/42U → 11/42U)</span></div>
+        <div class="ck"><span class="m ok">통과</span><span><strong>전력</strong> — 정격 +3,000 W · 운전 +2,240 W(장비 모델 표). 랙 운전 합 0.4 → 2.6 kW · 액티브 PDU 정격의 37%</span></div>
+        <div class="ck"><span class="m ok">통과</span><span><strong>PDU 이중화</strong> — 액티브가 꺼져도 스탠바이 1대가 2.6 kW 를 감당(정격의 37%)</span></div>
+        <div class="ck"><span class="m wn">확인</span><span><strong>서비스 태그</strong> — 4대 모두 입고 전이라 비어 있음. 반영할 때 입력해야 등록 서버와 이어집니다</span></div>
+        <div class="ck"><span class="m na">판정 안 함</span><span><strong>무게</strong> — +132 kg. 이 랙의 무게 한도가 입력돼 있지 않아 넘는지 판단하지 않습니다</span></div>
+        <div class="ck"><span class="m na">판정 안 함</span><span><strong>흡기 온도</strong> — 이 랙에 온도를 읽은 장비가 1대뿐이라 여유를 판단하지 않습니다</span></div>
+      </div>
+
+      <div class="panel">
+        <div style="display:flex;align-items:center;gap:8px;padding:10px 14px"><strong>현장 작업 목록</strong><span class="dim">4건</span><button type="button" class="btn" style="margin-left:auto">작업 지시서 인쇄</button></div>
+        <div class="wk"><span class="n">1</span><span>A-06 U5–6 에 <span class="mono">R750</span> 실장 → 가상화서버 #21</span></div>
+        <div class="wk"><span class="n">2</span><span>A-06 U7–8 에 <span class="mono">R750</span> 실장 → 가상화서버 #22</span></div>
+        <div class="wk"><span class="n">3</span><span>A-06 U9–10 에 <span class="mono">R750</span> 실장 → 가상화서버 #23</span></div>
+        <div class="wk"><span class="n">4</span><span>A-06 U11–12 에 <span class="mono">R750</span> 실장 → 가상화서버 #24</span></div>
+      </div>
+
+      <div class="panel" style="padding:12px 14px;display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;flex-wrap:wrap;gap:8px"><button type="button" class="btn pri">승인</button><button type="button" class="btn">반려</button><button type="button" class="btn">계획 고치기</button></div>
+        <span class="dim" style="font-size:11.5px">승인 뒤 현장 작업이 끝나면 ‘실장도에 반영’ 이 열립니다. 반영하는 순간의 실장도가 계획을 만들 때와 달라졌으면 점검을 다시 하고, 겹치면 반영하지 않습니다.</span>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1010}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const U = 16;
+    const cur = [[42, 1, '패치패널 A06-1', '1U', 'etc'], [3, 2, 'srv-esx-021', '2U', 'sv']];
+    const add = [5, 7, 9, 11].map((u, i) => [u, 2, '가상화서버 #' + (21 + i) + ' · R750', '예약', 'new']);
+    const C = { sv: ['rgba(59,130,246,.24)', '1px solid #3b82f6', '#dbeafe'], etc: ['#1a2236', '1px solid #3a4866', '#aebbd0'], new: ['rgba(34,197,94,.16)', '2px dashed #22c55e', '#bbf7d0'] };
+    const mk = (list) => list.map(([u, size, name, val, k]) => ({ name, val, b: (u - 1) * U, h: size * U - 1, bg: C[k][0], bd: C[k][1], fg: C[k][2] }));
+    return {
+      us: Array.from({ length: 42 }, (_, i) => 42 - i),
+      racks: [
+        { title: '지금', tc: '#aebbd0', bc: '#3a4866', use: '3 / 42U · 7%', devs: mk(cur) },
+        { title: '계획 반영 뒤', tc: '#bbf7d0', bc: '#22c55e', use: '11 / 42U · 26%', devs: mk(cur.concat(add)) },
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>
