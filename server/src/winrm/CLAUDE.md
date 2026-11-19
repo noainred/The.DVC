@@ -2,7 +2,7 @@
 
 설계 `docs/design/server-access/README.md` §8.4. 계정 · 비밀 판정은 `server/src/sshaccess/CLAUDE.md`, 코어는 `server/src/serverinfo/CLAUDE.md`.
 
-## v3.26 서버 접속 3단계 — WinRM HTTPS + NTLMv2(설계 §8.4)
+## v3.25 서버 접속 3단계 — WinRM HTTPS + NTLMv2(설계 §8.4)
 
 회귀: `server/test/winrm326.test.js`(MS-NLMP 벡터 · 서버 쪽 검증을 구현한 가짜 WinRM 서버 · 코어 연결).
 

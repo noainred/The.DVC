@@ -152,7 +152,7 @@ export function certSignatureOid(der) {
 }
 /**
  * RFC 5929 4.1 — 서명이 해시 하나를 쓰고 그것이 MD5 · SHA-1 이 아니면 그 해시, MD5 · SHA-1 이면 SHA-256. 그 밖(Ed25519 · RSASSA-PSS 등 · 모르는 OID)은 null —
- *   호출부는 AUTHENTICATE 를 보내지 않는다(틀린 바인딩으로 보내면 맞는 비밀번호가 거부돼 계정 정지가 걸린다 · v3.26 반증 F2: Node 의 X509Certificate 에 서명 알고리즘 칸이 없어 늘 SHA-256 이었다).
+ *   호출부는 AUTHENTICATE 를 보내지 않는다(틀린 바인딩으로 보내면 맞는 비밀번호가 거부돼 계정 정지가 걸린다 · v3.25 3단계 반증 F2: Node 의 X509Certificate 에 서명 알고리즘 칸이 없어 늘 SHA-256 이었다).
  */
 const SIG_HASH = new Map([
   ['1.2.840.113549.1.1.4', 'sha256'], ['1.2.840.113549.1.1.5', 'sha256'], ['1.2.840.113549.1.1.14', 'sha224'], ['1.2.840.113549.1.1.11', 'sha256'], ['1.2.840.113549.1.1.12', 'sha384'], ['1.2.840.113549.1.1.13', 'sha512'],
@@ -207,7 +207,7 @@ export function authenticateMessage({ user, domain, password, workstation = '', 
   pairs.push({ id: AV.EOL, value: Buffer.alloc(0) });
   const { ntResponse, sessionBaseKey } = ntlmv2Response({ ntHash: ntowfv2(user, domain, password), serverChallenge: ch.challenge, clientChallenge: cc, timestamp: ts, targetInfo: avPairsBuffer(pairs) });
   const flags = (NEGOTIATE_FLAGS & ch.flags) >>> 0;
-  // LM 칸(MS-NLMP 3.3.2): 서버가 시각(MsvAvTimestamp)을 줬으면 Z(24) · 아니면 LMv2(HMAC(NTOWFv2, 서버 챌린지 + 클라이언트 챌린지) + 클라이언트 챌린지) — v3.26 반증(빈 칸은 규격 밖)
+  // LM 칸(MS-NLMP 3.3.2): 서버가 시각(MsvAvTimestamp)을 줬으면 Z(24) · 아니면 LMv2(HMAC(NTOWFv2, 서버 챌린지 + 클라이언트 챌린지) + 클라이언트 챌린지) — v3.25 3단계 반증(빈 칸은 규격 밖)
   const lm = withMic ? Buffer.alloc(24) : Buffer.concat([hmacMd5(ntowfv2(user, domain, password), ch.challenge, cc), cc]);
   const payload = { lm, nt: ntResponse, dom: utf16(domain), user: utf16(user), ws: utf16(workstation), key: Buffer.alloc(0) };
   const HEAD = 88;   // 서명 8 · 종류 4 · 칸 6×8 · 플래그 4 · 버전 8 · MIC 16

@@ -17,7 +17,7 @@ import { deviceTlsConnect, unwrapTlsPeer } from '../security/tlsTrust.js';
 import { withSsrfLookup } from '../util/ssrfLookup.js';   // DNS 리바인딩 차단(다른 장비 클라이언트와 같은 연결 옵션)
 
 export const WINRM_PORT = 5986;
-// 응답 하나의 상한 — 청한 MaxEnvelopeSize(512KB · wsman.envelope)보다 조금 크게(v3.26 반증 F5: 4MB 응답 하나를 읽는 데 0.2~0.5초 — 이벤트 루프)
+// 응답 하나의 상한 — 청한 MaxEnvelopeSize(512KB · wsman.envelope)보다 조금 크게(v3.25 3단계 반증 F5: 4MB 응답 하나를 읽는 데 0.2~0.5초 — 이벤트 루프)
 const MAX_RESPONSE = 640 * 1024;
 /** Receive 시한 Fault(아직 출력 없음)를 다시 받는 횟수 상한 · Receive 전체 횟수 상한 — 넘치면 실패(성공으로 돌려주지 않는다 · F5 · F6). */
 const MAX_RECEIVE_TIMEOUTS = 60;
@@ -78,7 +78,7 @@ export async function winrmRun({ host, port = WINRM_PORT, username, domain = '',
   if (!HOST_RE.test(String(host)) || String(host).length > 253) throw new WinrmError('bad-host', 'WinRM 접속처 글자가 올바르지 않습니다.');
   const t0 = Date.now();
   // 연결 하나만(NTLM 연결 단위 인증) · 판정을 통과한 소켓의 인증서를 채널 바인딩에 쓴다.
-  //   v3.26 반증 F1(재현): undici `connections: 1` 은 끊긴 뒤 **다시 연결하는 것**을 막지 않는다 — 인증 뒤 끊기면 다음 요청이 인증 없이 새 연결로 가 401 을 받아
+  //   v3.25 3단계 반증 F1(재현): undici `connections: 1` 은 끊긴 뒤 **다시 연결하는 것**을 막지 않는다 — 인증 뒤 끊기면 다음 요청이 인증 없이 새 연결로 가 401 을 받아
   //   ‘로그인 거부’ → 계정 정지가 됐고, CHALLENGE 뒤 끊기면 AUTHENTICATE 가 다른 연결로 갔다. 두 번째 연결은 바이트를 보내기 전에 거절한다(guardedConnect).
   const st = { connects: 0, certDer: null };
   const agent = new Agent({ connections: 1, pipelining: 1, keepAliveTimeout: 30_000, bodyTimeout: timeoutMs, headersTimeout: Math.min(timeoutMs, 60_000),

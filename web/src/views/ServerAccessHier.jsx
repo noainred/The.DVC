@@ -66,7 +66,7 @@ export function HierTab({ v, corpName, reload, say }) {
   const pickNode = (id) => { setSel(id); setPicked(new Set()); setEdit(null); setOwn(null); setVerifyCands(null); };
 
   const saveAssign = (clear) => run('assign', async (code) => {
-    // v3.26: Windows 단계는 접속 방식(SSH · WinRM HTTPS)과 WinRM 포트를 함께 저장한다(설계 D11)
+    // v3.25(3단계): Windows 단계는 접속 방식(SSH · WinRM HTTPS)과 WinRM 포트를 함께 저장한다(설계 D11)
     const winrm = !clear && level === 'windows' && edit?.via === 'winrm';
     const body = { corp: node.corp, level, accountId: clear ? '' : (edit?.accountId || ''), auth: clear ? '' : (edit?.auth || ''), verifyServerId: verifyId, otp: code,
       ...(winrm ? { via: 'winrm', port: Number(edit.port) || 5986 } : {}) };

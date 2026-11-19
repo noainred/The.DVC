@@ -55,7 +55,7 @@
   확인 대상이 없으면 409 `need-verify` + candidates(화면이 대상을 지어내지 않는다). 확인 기록(`verifiedAt · verifiedOn`)은 그 비밀번호 판일 때만 남긴다.
 - AD 로그인 이름은 `keyStore.loginNameOf` 하나(도메인에 점 → `user@domain` · 없으면 `DOMAIN\user`) · 도메인 · OS · 로그인 종류가 바뀌면 저장 비밀을 잇지 않는다 · 포탈 밖 도메인 변경도 `account-tampered`(diskDrift 서명).
 
-## v3.25 · v3.26 서버 접속 2 · 3단계 — 옮긴 곳(이 파일 크기 상한 15KB)
+## v3.25 서버 접속 2 · 3단계 — 옮긴 곳(이 파일 크기 상한 15KB)
 
 - 코어 `readServer` · 기능 ‘서버 정보’ 불변조건은 `server/src/serverinfo/CLAUDE.md`, WinRM HTTPS + NTLMv2 는 `server/src/winrm/CLAUDE.md`. **서버에 붙어 명령을 돌리는 새 기능은 `readServer` 하나를 부른다**
   (자격 해석 → 탐침 → 로그인 한 번(비밀번호 한 번 — `singlePasswordAttempt`) → 명령 하나 → 결과 기록 — 이 폴더의 판정을 우회하지 않는다).

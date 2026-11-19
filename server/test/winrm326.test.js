@@ -1,5 +1,5 @@
 /**
- * v3.26 서버 접속 3단계 — WinRM HTTPS(5986) + NTLMv2(설계 docs/design/server-access ④ · D2).
+ * v3.25 서버 접속 3단계(2단계와 한 릴리스) — WinRM HTTPS(5986) + NTLMv2(설계 docs/design/server-access ④ · D2).
  * ⚠ 실제 Windows 서버로는 확인하지 못했다 — 이 시험은 MS-NLMP 예시 값(4.2.4)과, 같은 규격으로 **서버 쪽 검증을 직접 구현한** 가짜 WinRM 서버로 한다
  *   (NTProofStr · MIC · 채널 바인딩을 서버가 다시 계산해 대조한다 — 클라이언트 계산이 틀리면 거부된다).
  * 고정: 인증서 판정 전에는 아무 바이트도 보내지 않음 · 연결 하나 · 거부면 다시 시도하지 않음 · 출력 상한 · 시한 · 응답 읽기의 선형 시간.
