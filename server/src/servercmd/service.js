@@ -10,7 +10,7 @@
  */
 import { listBmServersRaw, registryLoadError } from '../bmstor/registry.js';
 import { effectiveAccountOf } from '../bmusage/onboard/refs.js';
-import { readServer } from '../sshaccess/readServer.js';
+import { readServer, READ_DEADLINE_MS } from '../sshaccess/readServer.js';
 import { createServerBatch } from '../sshaccess/batch.js';
 import { isMockMode, isDemoId } from '../mock/demo/storage.js';
 import * as P from './presets.js';
@@ -40,7 +40,7 @@ function lastView() {
   dropIfOld();
   if (!last) return null;
   const rows = [...last.rows.values()].map(({ out, err, ...r }) => r);
-  return { preset: last.preset, label: last.label, params: { ...last.params }, by: last.by, startedAt: last.startedAt, finishedAt: last.finishedAt || null, total: last.total,
+  return { runKey: last.key, preset: last.preset, label: last.label, params: { ...last.params }, by: last.by, startedAt: last.startedAt, finishedAt: last.finishedAt || null, total: last.total,
     expiresAt: last.finishedAt ? last.finishedAt + RESULT_TTL_MS : null, rows };
 }
 
@@ -56,30 +56,51 @@ export function buildView() {
     };
   });
   return { ok: true, servers, presets: P.catalog(), groups: P.GROUPS,
-    limits: { batch: RUN_BATCH_MAX, concurrency: RUN_CONCURRENCY, ttlMin: Math.round(RESULT_TTL_MS / 60000), maxLines: P.MAX_LINES, maxBytes: P.MAX_BYTES },
+    limits: { batch: RUN_BATCH_MAX, concurrency: RUN_CONCURRENCY, ttlMin: Math.round(RESULT_TTL_MS / 60000), maxLines: P.MAX_LINES, maxBytes: P.MAX_BYTES,
+      winrmS: Math.round((READ_DEADLINE_MS - 2000) / 1000) },   // WinRM 은 스크립트 안 시한이 없어 서버 한 대 시한(readServer runWinrm)까지 기다린다
     job: BATCH.view(), last: lastView() };
 }
 
-/** 마지막 실행의 출력(한 대 또는 전부) — 화면 ‘펼치기’ · ‘전체 복사’. */
-export function outputs(id = '') {
+/**
+ * 마지막 실행의 출력(한 대 또는 전부) — 화면 ‘펼치기’ · ‘전체 복사’.
+ * runKey — 화면이 본 실행(반증 F2: 그 사이 다른 관리자가 새로 실행하면 지난 표 아래에 새 실행의 출력이 붙었다). 다르면 409 · 지워졌으면 404(빈 200 이 아니다).
+ */
+export function outputs(id = '', runKey = '') {
   dropIfOld();
-  if (!last) return { ok: true, rows: [] };
-  const want = t(id, 64);
+  const want = t(id, 64); const rk = t(runKey, 64);
+  if (!last) return (want || rk) ? { ok: false, code: 'gone', status: 404, reason: '그 실행의 출력은 지워졌습니다(끝나고 30분 · 재시작) — 다시 실행하세요.' } : { ok: true, rows: [] };
+  if (rk && rk !== last.key) return { ok: false, code: 'run-changed', status: 409, reason: '그 사이 새 실행이 있어 그 출력은 지워졌습니다 — 화면을 다시 읽으세요.' };
   const rows = [...last.rows.values()].filter((r) => !want || r.id === want).map((r) => ({ id: r.id, name: r.name, code: r.code, exit: r.exit, out: r.out || '', err: r.err || '', cut: !!r.cut }));
-  if (want && !rows.length) return { ok: false, code: 'not-found', status: 404, reason: '그 서버의 출력이 없습니다(지워졌거나 실행하지 않음).' };
-  return { ok: true, preset: last.preset, rows };
+  if (want && !rows.length) return { ok: false, code: 'not-found', status: 404, reason: '그 서버의 출력이 없습니다(실행하지 않았거나 아직 끝나지 않음).' };
+  return { ok: true, runKey: last.key, preset: last.preset, label: last.label, rows };
+}
+/** 첫 줄 — 빈 줄은 건너뛴다(PowerShell 표는 빈 줄로 시작한다 — 반증 F7). */
+function firstLine(...texts) {
+  for (const x of texts) for (const l of String(x || '').split('\n', 50)) if (l.trim()) return l.slice(0, FIRST_LINE_MAX);
+  return '';
 }
 
-/** 코어 결과 → 보관 행(비밀 없음 · 출력은 다듬어서). */
-function rowOf(s, r, at) {
+/**
+ * 코어 결과 → 보관 행(비밀 없음 · 출력은 다듬어서).
+ * Linux 끝 코드는 문장마다의 표지(presets.rcOf — 반증 F3)에서: 표지가 문장 수와 맞지 않으면 모름(null — 셸의 끝 코드는 표지를 쓴 printf 의 것이다) ·
+ * 어느 문장이 timeout 에 끊겼으면(124) 받은 만큼(partial — ‘시한’). Windows 는 스크립트가 정한 끝 코드(presets.windowsScript).
+ */
+function rowOf(s, r, at, { stmts = 1, timeoutS = 0 } = {}) {
   const base = { id: s.id, name: s.name || s.host, at, os: r.os || '', via: r.via || '', auth: r.auth || null, ms: r.ms ?? null };
   if (!r.ok && !r.partial) return { ...base, ok: false, ran: false, code: r.code || 'error', credCode: r.credCode || '', reason: t(r.reason, 300), exit: null, first: '', lines: 0, out: '', err: '', cut: false };
   const o = P.cleanOutput(r.stdout);
-  const e = P.cleanOutput(r.stderr, { maxLines: 40 });
-  const first = (o.text.split('\n', 1)[0] || e.text.split('\n', 1)[0] || '').slice(0, FIRST_LINE_MAX);
+  let exit = Number.isInteger(r.exit) ? r.exit : null;
+  let errRaw = r.stderr;
+  let partial = !!r.partial; let code = r.code || 'ok'; let reason = r.partial ? t(r.reason, 300) : '';
+  if (r.os !== 'windows') {
+    const rc = P.rcOf(r.stderr, stmts);
+    errRaw = rc.stderr;
+    exit = rc.known ? rc.exit : null;
+    if (rc.timedOut && !partial) { partial = true; code = 'exec-timeout'; reason = `명령이 시한(${timeoutS}초)에 걸려 끊겼습니다 — 받은 만큼만 보입니다.`; }
+  }
+  const e = P.cleanOutput(errRaw, { maxLines: 40 });
   // 로그인하고 명령을 돌렸다(ran) — 끝 코드가 0 이 아니어도 실패로 치지 않는다(출력과 끝 코드를 그대로). 시한 · 상한이면 받은 만큼(partial).
-  return { ...base, ok: !!r.ok, ran: true, partial: !!r.partial, code: r.code || 'ok', reason: r.partial ? t(r.reason, 300) : '', exit: Number.isInteger(r.exit) ? r.exit : null,
-    first, lines: o.lines, out: o.text, err: e.text, cut: o.cut || r.code === 'exec-truncated' };
+  return { ...base, ok: !partial, ran: true, partial, code, reason, exit, first: firstLine(o.text, e.text), lines: o.lines, out: o.text, err: e.text, cut: o.cut || code === 'exec-truncated' };
 }
 
 /** 데모 서버 합성 출력(가상값 — 실제로 붙지 않는다). */
@@ -100,11 +121,11 @@ export function startRun({ preset, params, ids } = {}, { by = '' } = {}) {
   const p = c.preset;
   const plan = P.planOf(p, c.params);
   // 이번 실행의 보관 칸 — 일괄이 시작되면 last 로 건다(일꾼은 이 칸에만 쓴다: 더 새 실행이 시작되면 이 칸은 버려진다)
-  const run = { seq: seq + 1, preset: p.id, label: p.label, params: { ...c.params }, by: t(by, 64), startedAt: Date.now(), finishedAt: 0, total: 0, rows: new Map() };
+  const run = { seq: seq + 1, key: `${seq + 1}-${Date.now().toString(36)}`, preset: p.id, label: p.label, params: { ...c.params }, by: t(by, 64), startedAt: Date.now(), finishedAt: 0, total: 0, rows: new Map() };
   const r = BATCH.start(ids, async (s, { credGate }) => {
     const at = Date.now();
     const row = isMockMode() && isDemoId(s.id) ? demoRow(s, p, at)
-      : rowOf(s, await readServer(s.id, { feature: FEATURE, plan, by, trigger: 'manual', credGate }), at);
+      : rowOf(s, await readServer(s.id, { feature: FEATURE, plan, by, trigger: 'manual', credGate }), at, { stmts: p.linux ? P.linuxStatements(p, c.params) : 1, timeoutS: p.linux?.timeoutS || 0 });
     run.rows.set(s.id, row);
     return { ok: row.ok, code: row.code, reason: row.reason };
   }, { by, meta: { preset: p.id, label: p.label } });
@@ -121,7 +142,9 @@ export function startRun({ preset, params, ids } = {}, { by = '' } = {}) {
     }
     if (!d.ok) return d;
     const rows = [...run.rows.values()];
-    return { ok: true, results: d.results, ran: rows.filter((x) => x.ran).length, failed: d.failed, nonZero: rows.filter((x) => x.ran && x.exit != null && x.exit !== 0).length };
+    // 합은 화면과 같은 나눔(실행됨 · 시한/잘림 · 실행 못 함 — 겹치지 않게 · 반증 F13)
+    return { ok: true, results: d.results, ran: rows.filter((x) => x.ran && !x.partial).length, partial: rows.filter((x) => x.ran && x.partial).length,
+      failed: rows.filter((x) => !x.ran).length, nonZero: rows.filter((x) => x.ran && x.exit != null && x.exit !== 0).length };
   });
   return { ok: true, started: true, total: r.total, preset: p.id, done };
 }

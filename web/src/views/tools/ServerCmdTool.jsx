@@ -11,7 +11,8 @@ import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import { fmtAgo, fmtTime } from '../../util/fmt.js';
 import { copyText } from '../../util/copyText.js';
-import { CODE_TEXT, CRED_TEXT, codeTone, pickIssue, sourceText, osText, paramsText, resultText, msText, resultCounts, copyAllText } from './serverCmdText.js';
+import { numOrNull } from '../../numOrNull.js';
+import { CODE_TEXT, CRED_TEXT, codeTone, pickIssue, sourceText, osText, paramsText, resultText, msText, resultCounts, copyAllText, outHead } from './serverCmdText.js';
 import { Chip } from '../sshAccessParts.jsx';   // 서버 접속 화면과 같은 칩(같은 CSS)
 import { toneVar } from './toneVar.js';
 import '../sshAccess.css';
@@ -30,33 +31,51 @@ export default function ServerCmdTool() {
   const [q, setQ] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
+  const [outMsg, setOutMsg] = useState(null);   // 결과 칸 안내(펼치기 · 복사) — 실행 안내와 따로(Chromium 확인: 복사 안내가 서버 고르기 칸에 나왔다)
   const [outs, setOuts] = useState(() => new Map());   // 서버 id → 출력(마지막 실행 — 펼친 것만 받아 둔다)
   const [open, setOpen] = useState(() => new Set());
+  const [loadErr, setLoadErr] = useState(null);   // 화면을 한 번 본 뒤의 다시 읽기 실패 — 화면을 지우지 않고 알린다(반증 F10)
+  const [tick, setTick] = useState(0);             // 다시 읽기가 끝날 때마다(성공 · 실패) — 진행 중 폴링이 실패 뒤에도 이어지게
   const pvSeq = useRef(0);
-  const load = useCallback(async () => { try { setV(await fetchJson('/tools/server-cmd')); setErr(null); } catch (e) { setErr(e); } }, []);
+  const loadSeq = useRef(0);
+  const hasView = useRef(false);
+  // 늦게 온 이전 응답은 버린다(반증 F10 — 루트 CLAUDE.md ‘늦게 온 이전 응답은 버린다’)
+  const load = useCallback(async () => {
+    const my = ++loadSeq.current;
+    try {
+      const r = await fetchJson('/tools/server-cmd');
+      if (my !== loadSeq.current) return;
+      hasView.current = true; setV(r); setErr(null); setLoadErr(null);
+    } catch (e) {
+      if (my !== loadSeq.current) return;
+      if (hasView.current) setLoadErr(String(e?.message || e)); else setErr(e);
+    } finally { if (my === loadSeq.current) setTick((x) => x + 1); }
+  }, []);
   useEffect(() => { load(); }, [load]);
-  // 실행은 서버가 백그라운드로 돈다(202) — 도는 동안만 3초마다 다시 읽는다(끝나면 멈춘다 · 상시 폴링 없음)
+  // 실행은 서버가 백그라운드로 돈다(202) — 도는 동안만 3초마다 다시 읽는다(끝나면 멈춘다 · 상시 폴링 없음 · 실패해도 이어진다)
   const running = !!v?.job;
-  useEffect(() => { if (!running) return undefined; const id = setTimeout(load, 3000); return () => clearTimeout(id); }, [running, v, load]);
+  useEffect(() => { if (!running) return undefined; const id = setTimeout(load, 3000); return () => clearTimeout(id); }, [running, tick, load]);
   const presets = useMemo(() => v?.presets || [], [v]);
   const groups = useMemo(() => v?.groups || [], [v]);
   const curGroup = group || groups[0] || '';
   const preset = presets.find((p) => p.id === presetId) || null;
   // 미리 보기 — 서버가 만든 명령 그대로(값 검사를 지난 것만). 늦게 온 이전 응답은 버린다.
+  //   프리셋 id · 값이 바뀔 때만 묻는다(반증 F10 — 프리셋 객체에 묶여 진행 중 폴링마다 다시 물었다) · 미리 보기는 그 열쇠에 묶는다(바꾼 직후 옛 미리 보기로 실행 단추가 열리지 않게).
+  const pvKey = presetId ? `${presetId}|${JSON.stringify(params)}` : '';
   useEffect(() => {
-    if (!preset) { setPreview(null); return undefined; }
+    if (!pvKey) { setPreview(null); return undefined; }
     const my = ++pvSeq.current;
     const id = setTimeout(async () => {
       try {
-        const r = await fetchJson('/tools/server-cmd/preview', { preset: preset.id, ...params }, undefined, { retries: 0 });
-        if (my === pvSeq.current) setPreview({ ok: true, linux: r.linux, windows: r.windows });
-      } catch (e) { if (my === pvSeq.current) setPreview({ ok: false, reason: String(e?.message || e) }); }
+        const r = await fetchJson('/tools/server-cmd/preview', { preset: presetId, ...params }, undefined, { retries: 0 });
+        if (my === pvSeq.current) setPreview(r?.ok ? { key: pvKey, ok: true, linux: r.linux, windows: r.windows } : { key: pvKey, ok: false, reason: r?.reason || '값을 확인하세요.' });
+      } catch (e) { if (my === pvSeq.current) setPreview({ key: pvKey, ok: false, reason: String(e?.message || e) }); }
     }, 250);
     return () => clearTimeout(id);
-  }, [preset, params]);
-  // 새 실행이 보이면 받아 둔 출력 · 펼침을 비운다(마지막 실행 한 건만)
-  const lastKey = v?.last ? `${v.last.preset}|${v.last.startedAt}` : '';
-  useEffect(() => { setOuts(new Map()); setOpen(new Set()); }, [lastKey]);
+  }, [pvKey]);   // eslint-disable-line react-hooks/exhaustive-deps -- pvKey 가 presetId · params 를 담는다
+  // 새 실행이 보이면 받아 둔 출력 · 펼침을 비운다(마지막 실행 한 건만 — 서버가 준 실행 열쇠)
+  const lastKey = v?.last?.runKey || '';
+  useEffect(() => { setOuts(new Map()); setOpen(new Set()); setOutMsg(null); }, [lastKey]);
   const servers = useMemo(() => v?.servers || [], [v]);
   const corps = useMemo(() => [...new Set(servers.map((s) => s.corp).filter(Boolean))].sort(), [servers]);
   const shown = useMemo(() => {
@@ -69,10 +88,11 @@ export default function ServerCmdTool() {
   const counts = useMemo(() => resultCounts(lastRows), [lastRows]);
   if (err) return <ErrorBox error={err} />;
   if (!v) return <Loading />;
-  const max = v.limits?.batch || 50;
+  const max = numOrNull(v.limits?.batch);   // 숫자는 API 값(화면에 박지 않는다 — 반증 F10)
   const pickedIds = [...picked].filter((id) => servers.some((s) => s.id === id && !pickIssue(s, preset)));
-  const paramsOk = !!preset && !!preview?.ok;
-  const pickPreset = (id) => { setPresetId(id); setParams({}); setMsg(null); };
+  const shownPv = preview && preview.key === pvKey ? preview : null;   // 지금 프리셋 · 값의 미리 보기만
+  const paramsOk = !!preset && !!shownPv?.ok;
+  const pickPreset = (id) => { setPresetId(id); setParams({}); setPreview(null); setMsg(null); };
   const toggle = (id) => setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const run = async () => {
     if (!preset || !pickedIds.length) return;
@@ -84,25 +104,29 @@ export default function ServerCmdTool() {
     } catch (e) { setMsg({ tone: 'bad', text: String(e?.message || e) }); }
     setBusy(false); load();
   };
+  // 출력은 화면이 본 실행(runKey)의 것만 — 그 사이 새 실행이 있으면 서버가 409 · 지워졌으면 404(반증 F2) → 안내하고 화면을 다시 읽는다
   const fetchOut = async (id = '') => {
-    const r = await fetchJson('/tools/server-cmd/output', id ? { id } : {});
-    setOuts((m) => { const n = new Map(m); for (const x of r.rows || []) n.set(x.id, x); return n; });
-    return r.rows || [];
+    try {
+      const r = await fetchJson('/tools/server-cmd/output', { ...(id ? { id } : {}), run: v.last?.runKey || '' }, undefined, { retries: 0 });
+      setOuts((m) => { const n = new Map(m); for (const x of r.rows || []) n.set(x.id, x); return n; });
+      return { rows: r.rows || [], label: r.label || v.last?.label || '' };
+    } catch (e) { load(); throw e; }
   };
   const toggleOpen = async (id) => {
     if (open.has(id)) { setOpen((s) => { const n = new Set(s); n.delete(id); return n; }); return; }
-    try { if (!outs.has(id)) await fetchOut(id); setOpen((s) => new Set(s).add(id)); } catch (e) { setMsg({ tone: 'bad', text: String(e?.message || e) }); }
+    try { if (!outs.has(id)) await fetchOut(id); setOpen((s) => new Set(s).add(id)); } catch (e) { setOutMsg({ tone: 'bad', text: String(e?.message || e) }); }
   };
   const openAll = async () => {
-    try { const rows = await fetchOut(); setOpen(new Set(rows.map((x) => x.id))); } catch (e) { setMsg({ tone: 'bad', text: String(e?.message || e) }); }
+    try { const { rows } = await fetchOut(); setOpen(new Set(rows.map((x) => x.id))); } catch (e) { setOutMsg({ tone: 'bad', text: String(e?.message || e) }); }
   };
-  const copyOne = async (o) => { const ok = await copyText(o.out || ''); setMsg({ tone: ok ? 'ok' : 'bad', text: ok ? `${o.name} 출력을 복사했습니다.` : '복사하지 못했습니다(브라우저가 막음).' }); };
+  const copyOne = async (o) => { const ok = await copyText(o.out || ''); setOutMsg({ tone: ok ? 'ok' : 'bad', text: ok ? `${o.name} 출력을 복사했습니다.` : '복사하지 못했습니다(브라우저가 막음).' }); };
   const copyAll = async () => {
     try {
-      const rows = await fetchOut();
-      const ok = await copyText(copyAllText(v.last?.label || '', rows));
-      setMsg({ tone: ok ? 'ok' : 'bad', text: ok ? `${rows.length}대 출력을 복사했습니다.` : '복사하지 못했습니다(브라우저가 막음).' });
-    } catch (e) { setMsg({ tone: 'bad', text: String(e?.message || e) }); }
+      const { rows, label } = await fetchOut();   // 머리줄은 응답의 실행 이름(화면이 들고 있던 이름이 아니다 — 반증 F2)
+      if (!rows.length) { setOutMsg({ tone: 'warn', text: '복사할 출력이 없습니다.' }); return; }
+      const ok = await copyText(copyAllText(label, rows));
+      setOutMsg({ tone: ok ? 'ok' : 'bad', text: ok ? `${rows.length}대 출력을 복사했습니다.` : '복사하지 못했습니다(브라우저가 막음).' });
+    } catch (e) { setOutMsg({ tone: 'bad', text: String(e?.message || e) }); }
   };
   const last = v.last;
   const lastPreset = last ? presets.find((p) => p.id === last.preset) : null;
@@ -112,7 +136,7 @@ export default function ServerCmdTool() {
       <div className="ssa-head">
         <div className="ssa-title">
           <h3>서버 명령 실행</h3>
-          <p className="ssa-note">등록된 서버에 <b>정해 둔 확인 명령</b>을 누를 때만 돌리고 출력을 봅니다. 읽기 전용 · sudo 를 쓰지 않음 · 명령 글자를 직접 넣는 칸은 없습니다. 출력은 저장하지 않고 포탈 메모리에 마지막 실행 한 건만 {v.limits?.ttlMin ?? '—'}분 둡니다. 계정은 설정 › 보안 › 서버 접속(SSH · Windows)에서 정하고, 계정 · 키마다 ‘서버 명령 실행’ 을 직접 켜야 씁니다.</p>
+          <p className="ssa-note">등록된 서버에 <b>정해 둔 확인 명령</b>을 누를 때만 돌리고 출력을 봅니다. 읽기 전용 · sudo 를 쓰지 않음 · 명령 글자를 직접 넣는 칸은 없습니다. 출력은 저장하지 않고 포탈 메모리에 마지막 실행 한 건만 {v.limits?.ttlMin ?? '—'}분 둡니다. 계정은 설정 › 보안 › 서버 접속(SSH · Windows)에서 정합니다 — 공통 계정 · 키는 ‘쓸 수 있는 기능’ 에서 ‘서버 명령 실행’ 을 직접 켜야 쓰고, 서버에 따로 정한 비밀번호는 기능 목록이 없어 그대로 씁니다.</p>
         </div>
         <button className="btn btn-sm" type="button" onClick={load}>다시 읽기(화면)</button>
       </div>
@@ -141,7 +165,7 @@ export default function ServerCmdTool() {
               {preset.params.map((d) => (
                 <div className="scm-field" key={d.name}>
                   <label htmlFor={`scm-p-${d.name}`}>{d.label}</label>
-                  <input id={`scm-p-${d.name}`} type="text" maxLength={d.max} value={params[d.name] || ''} autoComplete="off" spellCheck={false}
+                  <input id={`scm-p-${d.name}`} className="input" type="text" maxLength={d.max} value={params[d.name] || ''} autoComplete="off" spellCheck={false}
                     onChange={(e) => setParams((x) => ({ ...x, [d.name]: e.target.value }))} />
                   <span className="ssa-sub">{d.hint}</span>
                 </div>
@@ -149,15 +173,16 @@ export default function ServerCmdTool() {
               {preset.note && <p className="ssa-note">{preset.note}</p>}
               <div className="scm-field">
                 <span className="ssa-sub">실행될 명령 — 서버가 만든 것을 그대로 보여 줍니다</span>
-                {preview && !preview.ok && <span className="ssa-sub" style={{ color: toneVar('warn') }}>{preview.reason}</span>}
-                {preview?.ok && preview.linux && <><span className="ssa-sub">Linux</span><pre className="scm-pre cmd">{preview.linux}</pre></>}
-                {preview?.ok && preview.windows && <><span className="ssa-sub">Windows <Chip tone="warn" title="실제 Windows 서버 출력으로 확인하지 못했습니다">시험</Chip> — PowerShell(Base64 로 바꿔 넘김)</span><pre className="scm-pre cmd">{preview.windows}</pre></>}
+                {!shownPv && <span className="ssa-sub">명령을 만드는 중…</span>}
+                {shownPv && !shownPv.ok && <span className="ssa-sub" style={{ color: toneVar('warn') }}>{shownPv.reason}</span>}
+                {shownPv?.ok && shownPv.linux && <><span className="ssa-sub">Linux</span><pre className="scm-pre cmd">{shownPv.linux}</pre></>}
+                {shownPv?.ok && shownPv.windows && <><span className="ssa-sub">Windows <Chip tone="warn" title="실제 Windows 서버 출력으로 확인하지 못했습니다">시험</Chip> — PowerShell(Base64 로 바꿔 넘김)</span><pre className="scm-pre cmd">{shownPv.windows}</pre></>}
               </div>
               <div className="ssa-acts">
                 <Chip tone="ok">읽기 전용</Chip>
-                {preset.timeoutS.linux != null && <Chip>Linux 시한 {preset.timeoutS.linux}초</Chip>}
-                {preset.timeoutS.windows != null && <Chip>Windows 시한 {preset.timeoutS.windows}초</Chip>}
-                <Chip>출력 상한 {Math.round((v.limits?.maxBytes || 0) / 1024)}KB</Chip>
+                {preset.timeoutS.linux != null && <Chip title="문장마다 timeout">Linux 시한 {preset.timeoutS.linux}초</Chip>}
+                {preset.timeoutS.windows != null && <Chip title="SSH 로 붙을 때 — WinRM 은 서버 한 대 시한까지 기다립니다">Windows 시한 {preset.timeoutS.windows}초{numOrNull(v.limits?.winrmS) != null ? ` · WinRM ${v.limits.winrmS}초` : ''}</Chip>}
+                {numOrNull(v.limits?.maxBytes) != null && <Chip>출력 상한 {Math.round(v.limits.maxBytes / 1024)}KB</Chip>}
               </div>
             </>
           )}
@@ -169,20 +194,20 @@ export default function ServerCmdTool() {
           <div className="scm-filters">
             <div className="scm-field">
               <label htmlFor="scm-corp">법인</label>
-              <Select id="scm-corp" value={corp} onChange={(e) => setCorp(e.target.value)}>
+              <Select id="scm-corp" className="select" value={corp} onChange={(e) => setCorp(e.target.value)}>
                 <option value="">전체</option>
                 {corps.map((c) => <option key={c} value={c}>{c}</option>)}
               </Select>
             </div>
             <div className="scm-field">
               <label htmlFor="scm-os">OS 종류</label>
-              <Select id="scm-os" value={osF} sort={false} onChange={(e) => setOsF(e.target.value)}>
+              <Select id="scm-os" className="select" value={osF} sort={false} onChange={(e) => setOsF(e.target.value)}>
                 <option value="">전체</option><option value="linux">Linux</option><option value="windows">Windows</option><option value="none">미지정</option>
               </Select>
             </div>
             <div className="scm-field grow">
               <label htmlFor="scm-q">찾기</label>
-              <input id="scm-q" type="search" placeholder="서버 이름 · 주소" value={q} onChange={(e) => setQ(e.target.value)} />
+              <input id="scm-q" className="input" type="search" placeholder="서버 이름 · 주소" value={q} onChange={(e) => setQ(e.target.value)} />
             </div>
             <button className="btn btn-sm" type="button" disabled={!pickable.length} onClick={() => setPicked(new Set(pickable.map((s) => s.id)))}>고를 수 있는 서버 모두 선택({pickable.length})</button>
             <button className="btn btn-sm" type="button" disabled={!picked.size} onClick={() => setPicked(new Set())}>선택 지우기</button>
@@ -209,12 +234,13 @@ export default function ServerCmdTool() {
             </tbody>
           </STable>
           <div className="ssa-acts" style={{ justifyContent: 'space-between' }}>
-            <span className="ssa-sub">선택 <b>{pickedIds.length}</b>대 · 한 번에 최대 {max}대 · 동시에 {v.limits?.concurrency ?? '—'}대씩</span>
-            <button className="btn btn-sm primary" type="button" disabled={busy || running || !paramsOk || !pickedIds.length || pickedIds.length > max} onClick={run}>
+            <span className="ssa-sub">선택 <b>{pickedIds.length}</b>대 · 한 번에 최대 {max ?? '—'}대 · 동시에 {v.limits?.concurrency ?? '—'}대씩</span>
+            <button className="btn btn-sm primary" type="button" disabled={busy || running || !paramsOk || !pickedIds.length || max == null || pickedIds.length > max} onClick={run}>
               {running ? `실행 중 ${v.job.done}/${v.job.total}대…` : `선택한 ${pickedIds.length}대에 실행`}
             </button>
           </div>
-          {pickedIds.length > max && <span className="ssa-sub" style={{ color: toneVar('warn') }}>한 번에 {max}대까지입니다.</span>}
+          {max != null && pickedIds.length > max && <span className="ssa-sub" style={{ color: toneVar('warn') }}>한 번에 {max}대까지입니다.</span>}
+          {loadErr && <span className="ssa-sub" style={{ color: toneVar('warn') }}>화면을 다시 읽지 못했습니다({loadErr}) — 잠시 뒤 다시 읽습니다.</span>}
           {running && v.job.by && <span className="ssa-sub">{v.job.by} 님이 {v.job.meta?.label || '프리셋'} 실행 중 — 끝난 뒤 다시 누를 수 있습니다.</span>}
           {msg && <span className="ssa-sub" style={{ color: toneVar(msg.tone) }}>{msg.text}</span>}
         </section>
@@ -241,6 +267,7 @@ export default function ServerCmdTool() {
                 <button className="btn btn-sm" type="button" disabled={!lastRows.some((r) => r.ran)} onClick={copyAll}>전체 복사</button>
               </div>
             </div>
+            {outMsg && <span className="ssa-sub" style={{ color: toneVar(outMsg.tone) }}>{outMsg.text}</span>}
             <STable minWidth={860} className="ssa-t scm-t" limit={300}>
               <thead><tr><th>서버</th><th>결과</th><th>출력 첫 줄 · 사유</th><th>줄 수</th><th>걸린 시간</th><th data-nosort><span className="ssa-sub">보기</span></th></tr></thead>
               <tbody>
@@ -266,7 +293,7 @@ export default function ServerCmdTool() {
               return (
                 <div className="scm-out" key={r.id}>
                   <div className="ssa-acts" style={{ justifyContent: 'space-between' }}>
-                    <span className="ssa-sub"><b style={{ color: 'var(--text)' }}>{r.name}</b> · {r.via === 'winrm' ? 'WinRM' : 'SSH'} · {r.auth?.kind === 'key' ? '키' : '비밀번호'}{r.auth?.account ? ` · ${r.auth.account}` : ''} · {osText(r.os)} · {resultText(r)}{o.cut ? ' · 잘림' : ''}</span>
+                    <span className="ssa-sub"><b style={{ color: 'var(--text)' }}>{r.name}</b> · {outHead(r)}{o.cut ? ' · 잘림' : ''}</span>
                     <div className="ssa-acts">
                       <button className="btn btn-sm" type="button" onClick={() => copyOne(o)}>복사</button>
                       <button className="btn btn-sm" type="button" onClick={() => toggleOpen(r.id)}>접기</button>

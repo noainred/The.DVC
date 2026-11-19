@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { CODE_TEXT, codeTone, pickIssue, sourceText, osOf, paramsText, resultText, msText, resultCounts, copyAllText } from './serverCmdText.js';
+import { CODE_TEXT, codeTone, pickIssue, sourceText, osOf, paramsText, resultText, msText, resultCounts, copyAllText, outHead } from './serverCmdText.js';
 
 const srv = (o = {}) => ({ id: 's1', name: 'kr-db-01', host: '192.0.2.11', port: 22, corp: 'vcA', os: 'linux', agent: '', enabled: true, account: { source: 'os' }, ...o });
 const LIN = { id: 'df-inode', os: ['linux'], params: [] };
@@ -40,5 +40,9 @@ describe('서버 명령 실행 — 표시 도우미', () => {
     expect(sourceText(srv({ account: { source: 'own' } }))).toBe('따로 정함');
     const t = copyAllText('서비스 상태', [{ name: 'a', exit: 0, out: 'x' }, { name: 'b', exit: null, out: '', err: 'denied', cut: true }]);
     expect(t).toBe('### a — 서비스 상태 · 끝 코드 0\nx\n\n### b — 서비스 상태 · 잘림\n(출력 없음)\n--- 오류 출력\ndenied');
+    // 펼친 출력 머리줄 — 데모 · 계정 정보 없는 행은 로그인 방식을 지어내지 않는다
+    expect(outHead({ demo: true, os: 'linux', code: 'ok', exit: 0, auth: null })).toBe('데모 서버(접속하지 않음) · Linux · 실행됨 · 끝 코드 0');
+    expect(outHead({ via: 'winrm', os: 'windows', code: 'ok', exit: 1, auth: { kind: 'password', account: 'kr-win' } })).toBe('WinRM · 비밀번호 · kr-win · Windows · 실행됨 · 끝 코드 1');
+    expect(outHead({ via: 'ssh', os: 'linux', code: 'ok', exit: 0, auth: null })).toBe('SSH · Linux · 실행됨 · 끝 코드 0');
   });
 });

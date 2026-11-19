@@ -87,3 +87,17 @@ export function resultCounts(rows = []) {
 export function copyAllText(label, rows = []) {
   return rows.map((r) => [`### ${r.name} — ${label}${numOrNull(r.exit) != null ? ` · 끝 코드 ${r.exit}` : ''}${r.cut ? ' · 잘림' : ''}`, r.out || '(출력 없음)', ...(r.err ? ['--- 오류 출력', r.err] : [])].join('\n')).join('\n\n');
 }
+
+/** 펼친 출력의 머리줄 — 데모 · 계정 정보가 없는 행은 접속 방식 · 로그인 방식을 지어내지 않는다(Chromium 확인: 데모 행이 ‘SSH · 비밀번호’ 로 보였다). */
+export function outHead(r) {
+  if (!r) return '—';
+  const parts = [];
+  if (r.demo) parts.push('데모 서버(접속하지 않음)');
+  else {
+    parts.push(r.via === 'winrm' ? 'WinRM' : 'SSH');
+    if (r.auth?.kind) parts.push(r.auth.kind === 'key' ? '키' : '비밀번호');
+    if (r.auth?.account) parts.push(r.auth.account);
+  }
+  parts.push(osText(r.os), resultText(r));
+  return parts.join(' · ');
+}

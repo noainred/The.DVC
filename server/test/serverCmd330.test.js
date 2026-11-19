@@ -36,7 +36,7 @@ store.snapshot = { ...store.get(), vcenters: [{ id: 'vcA', name: 'KR-SEL' }] };
 /* ── 가짜 sshd — 비밀번호 로그인 · 명령마다 정한 출력 · 보낸 명령 · 시도 수 ── */
 async function fakeSshd() {
   const { privateKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048, privateKeyEncoding: { type: 'pkcs1', format: 'pem' }, publicKeyEncoding: { type: 'spki', format: 'pem' } });
-  const st = { passwords: {}, seen: [], cmds: [], hang: false };
+  const st = { passwords: {}, seen: [], cmds: [], hang: false, rc: null, rcRaw: null };
   const srv = new ssh2.Server({ hostKeys: [privateKey] }, (client) => {
     client.on('authentication', (ctx) => {
       if (ctx.method === 'password') { st.seen.push(ctx.password); if (st.passwords[ctx.username] === ctx.password) return ctx.accept(); }
@@ -47,9 +47,12 @@ async function fakeSshd() {
       s.on('exec', (acc, _rej, info) => {
         st.cmds.push(info.command); const stream = acc();
         if (st.hang) { stream.write('partial line\n'); return; }   // 끝내지 않는다
-        if (info.command.includes('pgrep')) { stream.exit(1); stream.end(); return; }   // 찾지 못함 — 끝 코드 1 · 출력 없음
-        if (info.command.includes('systemctl show')) { stream.write('Id=chronyd.service\r\n\x1b[31mActiveState=active\x1b[0m\r\nSubState=running\x07\n'); stream.stderr.write('warn: x\n'); stream.exit(0); stream.end(); return; }
-        stream.write('ok\n'); stream.exit(0); stream.end();
+        // 끝 코드 표지 흉내 — 셸을 돌리지 않으므로 문장 수(명령 속 표지 printf 수)만큼 표지를 쓴다(st.rc: 문장별 끝 코드 · 없으면 0)
+        const n = (info.command.match(/#DVC-RC=/g) || []).length;
+        const marks = (codes) => Array.from({ length: n }, (_, i) => `\n#DVC-RC=${codes[i] ?? 0}\n`).join('');
+        if (info.command.includes('pgrep')) { stream.stderr.write(marks([1])); stream.exit(0); stream.end(); return; }   // 찾지 못함 — pgrep 끝 코드 1 · 출력 없음(셸 끝 코드는 printf 의 0)
+        if (info.command.includes('systemctl show')) { stream.write('Id=chronyd.service\r\n\x1b[31mActiveState=active\x1b[0m\r\nSubState=running\x07\n'); stream.stderr.write(`warn: x\n${marks([0])}`); stream.exit(0); stream.end(); return; }
+        stream.write('ok\n'); stream.stderr.write(st.rcRaw ?? marks(st.rc || [])); stream.exit(0); stream.end();
       });
     }));
     client.on('error', () => {});
@@ -84,21 +87,27 @@ test('① 프리셋 목록 전체 — 읽기 전용 · sudo 없음 · 인자 · 
     const plan = P.planOf(p, c.params);
     if (p.linux) {
       const cmd = plan.linux.command;
-      for (const re of FORBID_LINUX) assert.equal(re.test(cmd.replace(/2>&1/g, '')), false, `${p.id} Linux 금지 ${re}: ${cmd}`);
+      // 허용한 방향 바꾸기는 둘뿐 — du 의 2>/dev/null(권한 오류가 출력 상한을 채우지 않게) · 끝 코드 표지의 >&2
+      const bare = cmd.replace(/ 2>\/dev\/null/g, '').replace(/ >&2/g, '');
+      for (const re of FORBID_LINUX) assert.equal(re.test(bare), false, `${p.id} Linux 금지 ${re}: ${cmd}`);
       // 파일 내용을 읽는 것은 정해진 파일 하나(값이 아니다)
-      for (const m of cmd.matchAll(/\b(cat|head|tail|less|more)\s+(\S+)/g)) assert.ok(m[1] === 'head' ? /^-\d+$/.test(m[2]) : m[2] === '/etc/resolv.conf', `${p.id}: ${m[0]}`);
-      // 문장마다 timeout · 파이프 뒤는 거르는 프로그램(sort · head)만
-      const parts = cmd.split('; ');
-      assert.equal(parts[0], 'export LC_ALL=C');
-      for (const s of parts.slice(1)) {
-        assert.match(s, new RegExp(`^timeout ${p.linux.timeoutS} [a-z]`), `${p.id}: ${s}`);
-        assert.ok(PROGRAMS.has(s.split(' ')[2]), `${p.id} 허용 목록 밖 프로그램: ${s.split(' ')[2]}`);
-        if (s.split(' ')[2] === 'systemctl') assert.match(s, /^timeout \d+ systemctl (--failed|show) /, `${p.id}: systemctl 은 읽기(--failed · show)만`);
-        for (const f of s.split(' | ').slice(1)) assert.match(f, /^(sort -rh|head -\d+)$/, `${p.id} 파이프: ${f}`);
+      for (const m of cmd.matchAll(/\b(cat|head|tail|less|more)\s+([^\s;]+)/g)) assert.ok(m[1] === 'head' ? /^-\d+$/.test(m[2]) : m[2] === '/etc/resolv.conf', `${p.id}: ${m[0]}`);
+      // 문장마다 timeout · 첫 프로그램은 허용 목록 · 파이프 뒤는 거르는 프로그램(sort · head)만 · 문장마다 끝 코드 표지 하나
+      const steps = p.linux.steps(c.params);
+      const parts = steps;
+      assert.ok(cmd.startsWith('export LC_ALL=C; '));
+      for (const st of steps) {
+        const [first, ...pipe] = st.split(' | ');
+        assert.ok(cmd.includes(`timeout ${p.linux.timeoutS} ${first}`), `${p.id}: ${first}`);
+        assert.ok(PROGRAMS.has(first.split(' ')[0]), `${p.id} 허용 목록 밖 프로그램: ${first.split(' ')[0]}`);
+        if (first.startsWith('systemctl')) assert.match(first, /^systemctl (--failed|show) /, `${p.id}: systemctl 은 읽기(--failed · show)만`);
+        for (const f of pipe) assert.match(f, /^(sort -rh|head -\d+)$/, `${p.id} 파이프: ${f}`);
       }
+      assert.equal(cmd.split(P.RC_MARK).length - 1, steps.length, `${p.id}: 끝 코드 표지는 문장마다 하나`);
+      assert.equal(P.linuxStatements(p, c.params), steps.length);
       // 로그인 + 명령 < 서버 한 대 시한(세션 예산 < 장비 시한)
       assert.ok(RS.READ_LOGIN_TIMEOUT_MS + plan.linux.timeoutMs < RS.READ_DEADLINE_MS, `${p.id}: ${plan.linux.timeoutMs}`);
-      assert.ok(plan.linux.timeoutMs >= (p.linux.timeoutS * parts.slice(1).length + P.LINUX_SLACK_S) * 1000, `${p.id} 안쪽 시한 합 + 여유 ≤ exec 시한`);
+      assert.ok(plan.linux.timeoutMs >= (p.linux.timeoutS * parts.length + P.LINUX_SLACK_S) * 1000, `${p.id} 안쪽 시한 합 + 여유 ≤ exec 시한`);
       assert.equal(plan.linux.maxBytes, P.MAX_BYTES);
     }
     if (p.windows) {
@@ -133,12 +142,20 @@ test('② 값 검사 — 주입 시도는 모두 거절(접속 전) · 통과한
   assert.equal(P.checkRequest('nope', {}).code, 'bad-preset');
   assert.equal(P.checkRequest('__proto__', {}).code, 'bad-preset');
   assert.equal(P.checkRequest('constructor', {}).code, 'bad-preset');
+  // 반증 F1: 본문 JSON 의 __proto__ 칸 · 바뀐 프로토타입 — 값 이름 검사를 비켜 가지 못한다(프로토타입에서 값을 읽지 않는다)
+  assert.equal(P.checkRequest('du-top', JSON.parse('{"__proto__":{"path":"/etc"}}')).code, 'bad-param');
+  assert.equal(P.checkRequest('du-top', Object.create({ path: '/etc' })).code, 'bad-param');
+  const np = Object.create(null); np.path = '/var/log';
+  assert.equal(P.checkRequest('du-top', np).ok, true, '프로토타입 없는 객체는 받는다(라우트가 만드는 모양)');
+  // 반증 F8: autofs /net 자리(보는 것만으로 마운트)
+  for (const v of ['/net', '/net/10.0.0.5', '/net/host/export']) assert.equal(P.checkRequest('du-top', { path: v }).ok, false, v);
+  assert.equal(P.checkRequest('du-top', { path: '/network' }).ok, true);
   // 통과한 값은 명령에 꼭 한 번 · 작은따옴표 · -- 뒤(journalctl 은 -u 값)
   const one = (id, params) => P.planOf(P.presetById(id), P.checkRequest(id, params).params).linux.command;
-  assert.match(one('svc-state', { unit: 'chronyd.service' }), / -- 'chronyd\.service'$/);
-  assert.match(one('pgrep', { name: 'java' }), /pgrep -l -- 'java'$/);
-  assert.match(one('du-top', { path: '/var/log' }), /du -xh --max-depth=1 -- '\/var\/log' \| sort -rh \| head -20$/);
-  assert.match(one('svc-log', { unit: 'sshd' }), /journalctl --no-pager -n 100 -u 'sshd'$/);
+  assert.match(one('svc-state', { unit: 'chronyd.service' }), / -- 'chronyd\.service'; printf /);
+  assert.match(one('pgrep', { name: 'java' }), /pgrep -l -- 'java'; printf /);
+  assert.match(one('du-top', { path: '/var/log' }), /\{ timeout 20 du -xh --max-depth=1 -- '\/var\/log' 2>\/dev\/null; printf .+ >&2; \} \| sort -rh \| head -20$/);
+  assert.match(one('svc-log', { unit: 'sshd' }), /journalctl --no-pager -n 100 -u 'sshd'; printf /);
   // 미리 보기는 실행될 글 그대로
   const pv = P.previewOf('svc-state', { unit: 'chronyd' });
   assert.equal(pv.linux, one('svc-state', { unit: 'chronyd' }));
@@ -150,6 +167,11 @@ test('③ 출력 다듬기 — 터미널 제어 순서 · 제어문자 · CR 을
   assert.equal(P.cleanOutput('x\x1b]8;;http://e\x1b\\link\x1b]8;;\x1b\\y').text, 'xlinky');
   assert.equal(P.cleanOutput('a\u009bb\x00c\x7fd').text, 'abcd');
   assert.equal(P.cleanOutput(null).text, '');
+  // 반증 F6: 끝나지 않은 OSC 는 줄바꿈에서 멈춘다 · ESC ( B 의 B 를 남기지 않는다 · ESC 뒤 줄바꿈은 그대로 · 양방향 제어 글자는 버린다
+  assert.equal(P.cleanOutput('a\x1b]0;never-ends\nline2\nline3').text, 'a\nline2\nline3');
+  assert.equal(P.cleanOutput('Active\x1b(B: yes').text, 'Active: yes');
+  assert.equal(P.cleanOutput('x\x1b\ny').text, 'x\ny');
+  assert.equal(P.cleanOutput('ab\u202Edc\u2066e').text, 'abdce');
   const many = Array.from({ length: 50 }, (_, i) => `L${i}`).join('\n');
   const c = P.cleanOutput(many, { maxLines: 10 });
   assert.equal(c.lines, 10); assert.equal(c.cut, true);
@@ -159,6 +181,17 @@ test('③ 출력 다듬기 — 터미널 제어 순서 · 제어문자 · CR 을
   time(2000);
   const a = time(8000); const b = time(32000);
   assert.ok(b / a < 10, `선형이어야 — ${a} → ${b} (${(b / a).toFixed(1)}배)`);
+});
+
+test('③-2 끝 코드 표지 — 문장 수와 같을 때만 믿는다 · 124 는 시한 · 141(뒤 head 가 닫음)은 0 · 흉내 낸 표지로 수가 어긋나면 모름', () => {
+  assert.deepEqual(P.rcOf('du: cannot read\n\n#DVC-RC=1\n', 1), { known: true, codes: [1], exit: 1, timedOut: false, stderr: 'du: cannot read' });
+  assert.equal(P.rcOf('\n#DVC-RC=0\n\n#DVC-RC=124\n', 2).timedOut, true);
+  assert.equal(P.rcOf('\n#DVC-RC=0\n\n#DVC-RC=124\n', 2).exit, 124);
+  assert.equal(P.rcOf('\n#DVC-RC=141\n', 1).exit, 0);
+  assert.equal(P.rcOf('', 1).known, false);
+  assert.equal(P.rcOf('#DVC-RC=0\n\n#DVC-RC=0\n', 1).known, false, '프로그램이 흉내 낸 표지 — 수가 어긋나면 모름');
+  assert.equal(P.rcOf('x#DVC-RC=0\n', 1).known, false, '줄 머리가 아니면 표지가 아니다');
+  assert.equal(P.rcOf('\n#DVC-RC=0000\n', 1).known, false);
 });
 
 test('④ 허용 기능 — 서버 명령은 직접 켠 키 · 계정만(목록 없는 예전 항목은 막힘) · 다른 기능은 예전 그대로', () => {
@@ -207,6 +240,16 @@ test('⑤ 코어로 실행 — 보낸 명령은 계획 그대로 · 끝 코드 �
   const row2 = SVC.buildView().last.rows[0];
   assert.equal(row2.ok, true); assert.equal(row2.exit, 1); assert.equal(row2.lines, 0);
   assert.equal(SVC.buildView().last.preset, 'pgrep', '마지막 한 건만 — 앞 실행은 지웠다');
+  // 반증 F3: 문장이 timeout 에 끊기면(124) 셸 끝 코드가 0 이어도 ‘시한 — 받은 만큼’ · 표지가 없으면 끝 코드 모름(null — 셸의 0 을 믿지 않는다)
+  SSHD.st.rc = [124];
+  await SVC.runMany({ preset: 'df', params: {}, ids: [own.id] }, { by: 'own' });
+  let tr = SVC.buildView().last.rows[0];
+  assert.equal(tr.code, 'exec-timeout'); assert.equal(tr.partial, true); assert.equal(tr.ran, true); assert.match(tr.reason, /시한\(10초\)/);
+  SSHD.st.rc = null; SSHD.st.rcRaw = '\n#DVC-RC=0\n\n#DVC-RC=0\n';   // 문장은 하나인데 표지 둘(흉내) → 모름
+  await SVC.runMany({ preset: 'df', params: {}, ids: [own.id] }, { by: 'own' });
+  tr = SVC.buildView().last.rows[0];
+  assert.equal(tr.code, 'ok'); assert.equal(tr.exit, null);
+  SSHD.st.rc = null; SSHD.st.rcRaw = null;
   // 값 오류 · 모르는 프리셋 — 접속하지 않는다
   const n0 = SSHD.st.seen.length;
   assert.equal(SVC.startRun({ preset: 'svc-state', params: { unit: 'a;id' }, ids: [own.id] }).status, 400);
@@ -254,7 +297,7 @@ test('⑥ 일괄 · 보관 — 진행 중 429 · 시한이면 받은 만큼 · �
   assert.equal(SVC.buildView().job.meta.preset, 'uptime');
   const d = await j1.done;
   SSHD.st.hang = false;
-  assert.equal(d.failed, 1);
+  assert.equal(d.partial, 1); assert.equal(d.failed, 0); assert.equal(d.ran, 0, '실행됨 · 시한 · 실행 못 함은 겹치지 않는다');
   const row = SVC.buildView().last.rows[0];
   assert.equal(row.code, 'exec-timeout'); assert.equal(row.ran, true); assert.equal(row.partial, true); assert.equal(row.first, 'partial line');
   assert.equal(SVC.buildView().job, null);
@@ -263,7 +306,9 @@ test('⑥ 일괄 · 보관 — 진행 중 429 · 시한이면 받은 만큼 · �
   assert.ok(SVC.buildView().last);
   SVC._resetServerCmdForTest({ finishedAgoMs: SVC.RESULT_TTL_MS });
   assert.equal(SVC.buildView().last, null); assert.deepEqual(SVC.outputs().rows, []);
-  assert.equal(SVC.outputs(own.id).ok, true, '출력이 없으면 빈 목록(지운 뒤)');
+  // 반증 F2: 지운 뒤 한 대를 지정한 조회는 404(빈 200 이 아니다 — 화면이 ‘펼침’ 만 바뀌고 아무것도 안 보였다)
+  const gone = SVC.outputs(own.id);
+  assert.equal(gone.ok, false); assert.equal(gone.status, 404); assert.equal(gone.code, 'gone');
   // 일괄 문 — 같은 계정명 · 틀린 비밀번호로 등록한 3대를 한 번에 돌려도 틀린 비밀번호는 한 번만 닿는다(계정 잠금 방지)
   const dup = [1, 2, 3].map((i) => srv({ name: `dup-${i}`, vcenterId: 'vcA', os: 'linux', username: 'dupu', password: 'Dup-Wrong-1' }));
   const dr = await SVC.runMany({ preset: 'uptime', params: {}, ids: dup.map((x) => x.id) }, { by: 'own' });
@@ -294,8 +339,11 @@ test('⑦ 라우트 — 관리자 + 전체 범위만 · 프리셋 · 값 · id �
   assert.equal(g.s, 200); assert.equal(g.j.presets.length, 22); assert.ok(g.j.servers.some((s) => s.name === 'own'));
   for (const secret of ['Own-1', 'Svc-1', 'Win-1']) assert.equal(g.txt.includes(secret), false);
   const pv = await call('own', 'GET', '/tools/server-cmd/preview?preset=svc-state&unit=chronyd');
-  assert.equal(pv.s, 200); assert.match(pv.j.linux, /-- 'chronyd'$/);
-  assert.equal((await call('own', 'GET', '/tools/server-cmd/preview?preset=svc-state&unit=a%3Bid')).s, 400);
+  assert.equal(pv.s, 200); assert.match(pv.j.linux, /-- 'chronyd'; printf /);
+  // 값 검사 결과는 답(200 + ok:false · 사유 — 화면이 칠 때마다 묻는다 · 콘솔 오류를 만들지 않게) · 명령 글자는 싣지 않는다
+  const bad = await call('own', 'GET', '/tools/server-cmd/preview?preset=svc-state&unit=a%3Bid');
+  assert.equal(bad.s, 200); assert.equal(bad.j.ok, false); assert.equal(bad.j.code, 'bad-param'); assert.equal(bad.j.linux, undefined);
+  assert.equal((await call('own', 'GET', '/tools/server-cmd/preview?preset=nope')).j.code, 'bad-preset');
   const own = g.j.servers.find((s) => s.name === 'own');
   SSHD.st.passwords.root = 'Own-1';
   // 명령 글자 칸 · 모르는 값은 받지 않는다(400 — 접속 전)
@@ -313,6 +361,17 @@ test('⑦ 라우트 — 관리자 + 전체 범위만 · 프리셋 · 값 · id �
   const o = await call('own', 'GET', `/tools/server-cmd/output?id=${encodeURIComponent(own.id)}`);
   assert.equal(o.s, 200); assert.match(o.j.rows[0].out, /ActiveState=active/);
   assert.equal((await call('own', 'GET', '/tools/server-cmd/output?id=nope')).s, 404);
+  // 반증 F2: 화면이 본 실행(runKey)과 다르면 409 — 지난 표 아래에 다른 실행의 출력을 붙이지 않는다
+  const rk = g2.j.last.runKey;
+  assert.ok(rk);
+  assert.equal((await call('own', 'GET', `/tools/server-cmd/output?id=${encodeURIComponent(own.id)}&run=${encodeURIComponent(rk)}`)).s, 200);
+  assert.equal((await call('own', 'GET', `/tools/server-cmd/output?run=old-1`)).s, 409);
+  // 반증 F1: 본문 원문의 params.__proto__ — 프로토타입을 바꿔 값 이름 검사를 비켜 가지 못한다(400 · 접속 0)
+  const n1 = SSHD.st.cmds.length;
+  const raw = await fetch(`http://127.0.0.1:${hs.address().port}/api/tools/server-cmd/run`, { method: 'POST', headers: { 'x-u': 'own', 'content-type': 'application/json' },
+    body: `{"preset":"du-top","params":{"__proto__":{"path":"/etc"}},"ids":[${JSON.stringify(own.id)}]}` });
+  assert.equal(raw.status, 400, await raw.text());
+  assert.equal(SSHD.st.cmds.length, n1, '접속하지 않았다');
   await new Promise((r) => setTimeout(r, 100));
   const auditTxt = fs.readdirSync(DIR).filter((f) => f.startsWith('audit')).map((f) => { try { return fs.readFileSync(path.join(DIR, f), 'utf8'); } catch { return ''; } }).join('\n');
   assert.match(auditTxt, /server-cmd\.run/); assert.match(auditTxt, /unit=chronyd/); assert.match(auditTxt, /server-cmd\.run\.done/);

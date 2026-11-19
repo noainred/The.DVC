@@ -67,16 +67,16 @@ const LIST = [
   { id: 'df-inode', group: '디스크', label: 'inode 사용량', linux: L(() => ['df -iP']) },
   { id: 'net-mounts', group: '디스크', label: '네트워크 마운트', linux: L(() => ['findmnt -t nfs,nfs4,cifs']), note: '없으면 끝 코드 1(실패가 아님)' },
   { id: 'du-top', group: '디스크', label: '폴더 사용량', params: [{ name: 'path', kind: 'path', label: '폴더 경로' }],
-    linux: L((p) => [`du -xh --max-depth=1 -- ${q(p.path)} | sort -rh | head -20`], 20), note: '계정이 읽을 수 없는 하위 폴더는 빠짐' },
+    linux: L((p) => [`du -xh --max-depth=1 -- ${q(p.path)} 2>/dev/null | sort -rh | head -20`], 20), note: '계정이 읽을 수 없는 하위 폴더는 빠짐(그때 끝 코드 1) · 큰 순 20개' },
   { id: 'ls', group: '디스크', label: '디렉터리 목록', params: [{ name: 'path', kind: 'path', label: '폴더 경로' }],
-    linux: L((p) => [`ls -la -- ${q(p.path)} | head -200`]), note: '이름 · 크기 · 시각만 — 파일 내용은 읽지 않음' },
+    linux: L((p) => [`ls -la -- ${q(p.path)}`]), note: '이름 · 크기 · 시각만 — 파일 내용은 읽지 않음 · 길면 줄 상한에서 잘림' },
   // ── 프로세스(이름만 — 인자 · 환경을 싣지 않는다: 인자에 비밀번호가 실린 경우가 있다 · server/CLAUDE.md 8b ‘comm 만’)
   { id: 'ps-cpu', group: '프로세스', label: 'CPU 상위 프로세스', linux: L(() => ['ps -eo pid,user,pcpu,pmem,etime,comm --sort=-pcpu | head -16']),
     windows: W(() => 'Get-Process | Sort-Object CPU -Descending | Select-Object -First 15 Name, Id, CPU, WorkingSet64'), note: '이름만 — 인자는 싣지 않음' },
   { id: 'ps-mem', group: '프로세스', label: '메모리 상위 프로세스', linux: L(() => ['ps -eo pid,user,pcpu,pmem,etime,comm --sort=-pmem | head -16']),
     windows: W(() => 'Get-Process | Sort-Object WorkingSet64 -Descending | Select-Object -First 15 Name, Id, CPU, WorkingSet64'), note: '이름만 — 인자는 싣지 않음' },
   { id: 'pgrep', group: '프로세스', label: '프로세스 찾기', params: [{ name: 'name', kind: 'name', label: '프로세스 이름' }],
-    linux: L((p) => [`pgrep -l -- ${q(p.name)}`]), windows: W((p) => `Get-Process -Name ${psq(p.name)} | Select-Object Name, Id, CPU`), note: '없으면 끝 코드 1(실패가 아님)' },
+    linux: L((p) => [`pgrep -l -- ${q(p.name)}`]), windows: W((p) => `Get-Process -Name ${psq(p.name)} | Select-Object Name, Id, CPU`), note: '없으면 끝 코드 1(실패가 아님) · Linux 는 이름의 일부로 찾음(정규식 — 프로세스 이름은 15자까지만 보임)' },
   // ── 네트워크(이 서버 자신의 설정만 — 다른 주소로 가는 탐침은 넣지 않는다 · D4)
   { id: 'ip-addr', group: '네트워크', label: 'IP 주소', linux: L(() => ['ip -br addr']),
     windows: W(() => 'Get-NetIPAddress | Select-Object InterfaceAlias, IPAddress, PrefixLength') },
@@ -93,11 +93,11 @@ const LIST = [
     linux: L((p) => [`systemctl show --no-pager -p Id,LoadState,ActiveState,SubState,UnitFileState,ActiveEnterTimestamp,MainPID,NRestarts,Result -- ${q(p.unit)}`]),
     windows: W((p) => `Get-Service -Name ${psq(p.unit)} | Select-Object Name, Status, StartType`) },
   { id: 'svc-log', group: '서비스 · 로그', label: '서비스 로그', params: [{ name: 'unit', kind: 'name', label: '서비스 이름' }],
-    linux: L((p) => [`journalctl --no-pager -n 100 -u ${q(p.unit)}`], 20), note: '로그 읽기 권한이 없으면 비어 있음 · 로그에 찍힌 내용은 그대로 보임(D5)' },
+    linux: L((p) => [`journalctl --no-pager -n 100 -u ${q(p.unit)}`], 20), note: '로그 읽기 권한이 없으면 비어 있음 · 로그에 찍힌 내용(명령 인자 · 잘못 친 비밀번호 등)은 그대로 보임(D5)' },
   { id: 'log-warn', group: '서비스 · 로그', label: '최근 경고 · 오류', linux: L(() => ['journalctl --no-pager -p warning -n 50'], 20),
-    windows: W(() => "Get-WinEvent -FilterHashtable @{LogName='System'; Level=1,2,3} -MaxEvents 50 | Select-Object TimeCreated, Id, LevelDisplayName, ProviderName", 20), note: '권한이 필요할 수 있음(D5)' },
+    windows: W(() => "Get-WinEvent -FilterHashtable @{LogName='System'; Level=1,2,3} -MaxEvents 50 | Select-Object TimeCreated, Id, LevelDisplayName, ProviderName", 20), note: '권한이 필요할 수 있음 · 로그에 찍힌 내용(sudo 실패의 명령 인자 등)은 그대로 보임(D5)' },
   // ── 접속
-  { id: 'who', group: '접속', label: '접속 세션', linux: L(() => ['who']), windows: W(() => 'quser', 10, false), note: 'Windows 는 접속한 사람이 없으면 끝 코드 1' },
+  { id: 'who', group: '접속', label: '접속 세션', linux: L(() => ['who']), windows: W(() => 'quser', 10, false), note: 'Windows 는 접속한 사람이 없으면 오류 문구가 나올 수 있음' },
   { id: 'last-reboot', group: '접속', label: '최근 재부팅', linux: L(() => ['last -x reboot -n 5']),
     windows: W(() => "Get-WinEvent -FilterHashtable @{LogName='System'; Id=6005,6006,1074} -MaxEvents 10 | Select-Object TimeCreated, Id, ProviderName") },
   { id: 'last-login', group: '접속', label: '최근 로그인', linux: L(() => ['last -n 20']), note: '계정 이름 · 접속한 주소가 보임' },
@@ -114,6 +114,9 @@ export function checkParam(kind, v) {
   if (v.length > k.max) return { ok: false, reason: `${k.max}자까지입니다.` };
   if (!k.re.test(v)) return { ok: false, reason: `쓸 수 없는 글자가 있습니다(${k.hint}).` };
   if (kind === 'path' && v.split('/').some((seg) => seg === '..')) return { ok: false, reason: '경로에 .. 조각을 쓸 수 없습니다.' };
+  // autofs ‘-hosts’ 지도(/net/<주소>)는 경로를 보는 것만으로 대상 서버가 그 주소에 NFS 마운트를 건다(상태 변경 · 다른 주소로 가는 탐침 — D2 · D4 · 반증 F8).
+  //   다른 자동 마운트 자리(서버마다 다른 지도)는 알 수 없다 — 문서의 한계.
+  if (kind === 'path' && (v === '/net' || v.startsWith('/net/'))) return { ok: false, reason: '자동 마운트 자리(/net)는 쓸 수 없습니다(보는 것만으로 마운트가 일어납니다).' };
   return { ok: true, value: v };
 }
 
@@ -127,9 +130,10 @@ export function checkRequest(presetId, params) {
   const src = params && typeof params === 'object' && !Array.isArray(params) ? params : {};
   const names = new Set(p.params.map((x) => x.name));
   for (const k of Object.keys(src)) if (!names.has(k)) return { ok: false, code: 'bad-param', reason: `이 프리셋은 ‘${String(k).slice(0, 32)}’ 값을 받지 않습니다.` };
+  if (Object.getPrototypeOf(src) !== Object.prototype && Object.getPrototypeOf(src) !== null) return { ok: false, code: 'bad-param', reason: '값 모양이 틀렸습니다.' };   // 바뀐 프로토타입(반증 F1)
   const out = Object.create(null);
   for (const d of p.params) {
-    const c = checkParam(d.kind, src[d.name]);
+    const c = checkParam(d.kind, Object.hasOwn(src, d.name) ? src[d.name] : undefined);   // 자기 칸만(프로토타입에서 읽지 않는다 — 반증 F1)
     if (!c.ok) return { ok: false, code: 'bad-param', reason: `${d.label}: ${c.reason}` };
     out[d.name] = c.value;
   }
@@ -140,16 +144,48 @@ export function checkRequest(presetId, params) {
 export const psEncode = (script) => Buffer.from(script, 'utf16le').toString('base64');
 const PS_ARGS = Object.freeze(['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand']);
 
-/** Linux 한 줄(문장마다 timeout · LC_ALL=C). */
+/**
+ * 문장마다 끝 코드 표지(반증 F3 — 파이프의 끝 코드는 마지막 프로그램(head)의 것이라 앞 프로그램이 실패 · 시한에 잘려도 0 이었다).
+ * 각 문장의 첫 프로그램(timeout 으로 감싼 것)이 끝나면 stderr 에 `\n#DVC-RC=<끝 코드>` 를 쓴다(앞 줄에 붙지 않게 줄바꿈 먼저 · printf — sh 마다 같은 동작).
+ * 표지가 문장 수와 꼭 같을 때만 믿는다(`rcOf`) — 프로그램이 같은 글자를 흉내 내도 수가 어긋나면 ‘모름’.
+ */
+export const RC_MARK = '#DVC-RC=';
+const RC_PRINT = `printf '\\n${RC_MARK}%s\\n' "$?" >&2`;
+/** Linux 한 줄(문장마다 timeout · LC_ALL=C · 끝 코드 표지). 파이프 뒤는 거르는 프로그램(sort · head)만. */
 export function linuxCommand(p, params) {
   const steps = p.linux.steps(params);
-  return ['export LC_ALL=C', ...steps.map((s) => `timeout ${p.linux.timeoutS} ${s}`)].join('; ');
+  return ['export LC_ALL=C', ...steps.map((s) => {
+    const [first, ...pipe] = s.split(' | ');
+    const body = `timeout ${p.linux.timeoutS} ${first}`;
+    return pipe.length ? `{ ${body}; ${RC_PRINT}; } | ${pipe.join(' | ')}` : `${body}; ${RC_PRINT}`;
+  })].join('; ');
+}
+/** 문장 수(끝 코드 표지 수). */
+export const linuxStatements = (p, params) => p.linux.steps(params).length;
+/**
+ * stderr → 끝 코드 표지 · 표지를 뺀 stderr. 124 = timeout 이 끊음(시한) · 141 = 뒤의 head 가 먼저 닫음(SIGPIPE — 일부러 앞부분만 보는 것 · 실패가 아님).
+ * @returns {{known:boolean, codes:number[], exit:number|null, timedOut:boolean, stderr:string}}
+ */
+export function rcOf(stderr, n) {
+  const lines = String(stderr || '').split('\n');
+  const codes = []; const rest = [];
+  for (const l of lines) {
+    const m = l.length <= 16 && l.startsWith(RC_MARK) ? /^#DVC-RC=(\d{1,3})$/.exec(l) : null;
+    if (m) codes.push(Number(m[1])); else rest.push(l);
+  }
+  const text = rest.filter((l, i, a) => l !== '' || (i > 0 && i < a.length - 1 && a[i - 1] !== '')).join('\n').trim();
+  if (codes.length !== n) return { known: false, codes, exit: null, timedOut: false, stderr: text };
+  const norm = codes.map((c) => (c === 141 ? 0 : c));
+  return { known: true, codes, exit: norm.find((c) => c !== 0) ?? 0, timedOut: codes.includes(124), stderr: text };
 }
 /** Windows 스크립트(사람이 보는 글 — 화면 미리 보기도 이것). */
 export function windowsScript(p, params) {
   const body = p.windows.ps(params);
   const tail = p.windows.table ? ' | Format-Table -AutoSize | Out-String -Width 220' : ' | Out-String -Width 220';
-  return ["$ProgressPreference='SilentlyContinue'", "$ErrorActionPreference='Continue'", `${body}${tail}`].join('\n');
+  // 끝 코드(반증 F7): PowerShell CLI 의 끝 코드는 마지막 문장($?)의 0/1 이라 Out-String 뒤에는 늘 0 이었다 —
+  //   바깥 프로그램의 $LASTEXITCODE → 이 스크립트에서 생긴 오류 수 → 0 순으로 직접 정한다. 출력은 UTF-8(SSH 경로 — WinRM 은 코드 페이지 65001). 실제 Windows 미확인(시험).
+  return ["$ProgressPreference='SilentlyContinue'", "$ErrorActionPreference='Continue'", 'try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }', '$e0 = $Error.Count',
+    `${body}${tail}`, 'if ($LASTEXITCODE) { exit $LASTEXITCODE } elseif ($Error.Count -gt $e0) { exit 1 } else { exit 0 }'].join('\n');
 }
 
 /**
@@ -181,7 +217,8 @@ export function catalog() {
     id: p.id, group: p.group, label: p.label, note: p.note || '',
     params: p.params.map((x) => ({ name: x.name, kind: x.kind, label: x.label, hint: PARAM_KINDS[x.kind].hint, max: PARAM_KINDS[x.kind].max })),
     os: [p.linux ? 'linux' : null, p.windows ? 'windows' : null].filter(Boolean),
-    timeoutS: { linux: p.linux ? p.linux.timeoutS : null, windows: p.windows ? p.windows.timeoutS : null },
+    // 화면 표시: Linux 는 문장마다(timeout) · Windows 는 SSH exec 시한(스크립트 안에는 시한이 없다 — WinRM 은 서버 한 대 시한 · 서비스 limits.winrmS)
+    timeoutS: { linux: p.linux ? p.linux.timeoutS : null, windows: p.windows ? p.windows.timeoutS + WIN_SLACK_S : null },
   }));
 }
 
@@ -190,6 +227,7 @@ export function catalog() {
  * 화면은 글자로만 그린다(HTML 로 해석하지 않는다) — 여기는 터미널 제어 순서만 걷어 낸다.
  * @returns {{text:string, lines:number, cut:boolean}}
  */
+const BIDI = new Set([0x061c, 0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069]);
 export function cleanOutput(raw, { maxLines = MAX_LINES, maxLineChars = MAX_LINE_CHARS } = {}) {
   const s = typeof raw === 'string' ? raw.slice(0, MAX_BYTES * 2) : '';
   let out = ''; let line = 0; let lineLen = 0; let cut = s.length < (typeof raw === 'string' ? raw.length : 0);
@@ -197,10 +235,19 @@ export function cleanOutput(raw, { maxLines = MAX_LINES, maxLineChars = MAX_LINE
     const c = s.charCodeAt(i);
     if (c === 0x1b) {
       const n = s.charCodeAt(i + 1);
-      if (n === 0x5b) { let j = i + 2; while (j < s.length && j < i + 66 && !(s.charCodeAt(j) >= 0x40 && s.charCodeAt(j) <= 0x7e)) j += 1; i = j; continue; }   // CSI … 끝 글자
-      if (n === 0x5d) { let j = i + 2; while (j < s.length && j < i + 260 && s.charCodeAt(j) !== 0x07 && !(s.charCodeAt(j) === 0x1b && s.charCodeAt(j + 1) === 0x5c)) j += 1; i = s.charCodeAt(j) === 0x1b ? j + 1 : j; continue; }   // OSC … BEL 또는 ESC \
-      i += 1; continue;
+      if (n === 0x0a || n === 0x0d || Number.isNaN(n)) continue;   // ESC 만 버린다(뒤 줄바꿈은 그대로 — 반증 F6)
+      if (n === 0x5b) { let j = i + 2; while (j < s.length && j < i + 66 && s.charCodeAt(j) !== 0x0a && !(s.charCodeAt(j) >= 0x40 && s.charCodeAt(j) <= 0x7e)) j += 1; i = s.charCodeAt(j) === 0x0a ? j - 1 : j; continue; }   // CSI … 끝 글자
+      if (n === 0x5d) {   // OSC … BEL 또는 ESC \ — 끝나지 않으면 줄바꿈에서 멈춘다(뒤 줄을 삼키지 않게 — F6)
+        let j = i + 2;
+        while (j < s.length && j < i + 260 && s.charCodeAt(j) !== 0x07 && s.charCodeAt(j) !== 0x0a && !(s.charCodeAt(j) === 0x1b && s.charCodeAt(j + 1) === 0x5c)) j += 1;
+        i = s.charCodeAt(j) === 0x1b ? j + 1 : s.charCodeAt(j) === 0x0a ? j - 1 : j; continue;
+      }
+      // 두 글자 · 중간 글자(0x20~0x2F) + 끝 글자 꼴(ESC ( B 등 — F6)
+      let j = i + 1;
+      while (j < s.length && j < i + 5 && s.charCodeAt(j) >= 0x20 && s.charCodeAt(j) <= 0x2f) j += 1;
+      i = j < s.length && s.charCodeAt(j) >= 0x30 && s.charCodeAt(j) <= 0x7e ? j : j - 1; continue;
     }
+    if (BIDI.has(c)) continue;   // 양방향 제어 글자(글자 순서를 뒤집어 보이게 한다 — F6)
     if (c === 0x0a) {
       line += 1;
       if (line >= maxLines) { if (i < s.length - 1) cut = true; break; }
