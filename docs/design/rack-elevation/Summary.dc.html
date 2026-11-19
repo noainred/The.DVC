@@ -28,7 +28,7 @@ button,select,input{font:inherit;color:inherit}
 .panel{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0}
 .at{display:flex;flex-wrap:wrap;gap:8px;padding:0 14px 12px}
 .ch{display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:2px 10px;border-radius:8px;font-size:12px;box-sizing:border-box;text-decoration:none}
-.g{display:grid;grid-template-columns:170px 50px 190px 60px 60px 60px 50px 50px 64px 210px 76px 190px minmax(150px,1fr);align-items:center;font-size:12px}
+.g{display:grid;grid-template-columns:230px 50px 190px 60px 60px 60px 50px 50px 64px 210px 76px 190px minmax(150px,1fr);align-items:center;font-size:12px}
 .g.hd{background:#0f1626;border-bottom:1px solid #243049}
 .g.hd button{height:34px;padding:0 10px;border:0;background:transparent;color:#aebbd0;font-weight:700;font-size:12px;cursor:pointer;text-align:left;white-space:nowrap}
 .g.hd button.r{text-align:right}
@@ -49,24 +49,24 @@ button,select,input{font:inherit;color:inherit}
   <div style="padding:14px 16px;display:flex;flex-direction:column;gap:12px">
     <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px">
       <strong style="font-size:16px">데이터센터 요약</strong>
-      <span class="dim">14곳 · 데이터센터를 누르면 그곳의 실장도로 갑니다</span>
+      <span class="dim">법인 12곳 · 데이터센터 14곳(한 법인에 데이터센터가 둘 이상일 수 있음) · 데이터센터를 누르면 그곳의 실장도로 갑니다</span>
       <label for="sq" style="position:absolute;left:-9999px">데이터센터 찾기</label>
       <input id="sq" class="sel" placeholder="데이터센터 찾기" style="margin-left:auto;flex:0 1 200px">
       <button type="button" class="btn">내보내기</button>
     </div>
 
     <div class="tiles">
-      <div class="tile"><div class="k">데이터센터</div><div class="n">14</div><div class="s">실장도 등록 {{t.reg}}곳 · 미등록 {{t.none}}곳</div></div>
+      <div class="tile"><div class="k">데이터센터</div><div class="n">14</div><div class="s">법인 12곳 · 실장도 등록 {{t.reg}}곳</div></div>
       <div class="tile"><div class="k">랙</div><div class="n">{{t.racks}}</div><div class="s">세로 PDU {{t.pdu}}개</div></div>
       <div class="tile"><div class="k">실장율</div><div class="n">{{t.usePct}}</div><div class="s">{{t.useU}}</div></div>
       <div class="tile"><div class="k">배치된 장비</div><div class="n">{{t.devs}}</div><div class="s">미배치 {{t.unp}} · 위치 불일치 {{t.mis}}</div></div>
       <div class="tile"><div class="k">장애 · 경고</div><div class="n"><span style="color:#fca5a5">{{t.crit}}</span> <span class="s">·</span> <span style="color:#fcd34d">{{t.warn}}</span></div><div class="s">못 읽음 {{t.unk}}대는 따로 셈</div></div>
       <div class="tile"><div class="k">소비전력(측정)</div><div class="n">{{t.kw}}</div><div class="s">{{t.kwNote}}</div></div>
-      <div class="tile"><div class="k">PDU 절체</div><div class="n" style="color:#fca5a5">{{t.fo}}</div><div class="s">PDU 못 읽음 {{t.pUnk}}개</div></div>
+      <div class="tile"><div class="k">꺼진 PDU</div><div class="n" style="color:#fca5a5">{{t.fo}}</div><div class="s">PDU 못 읽음 {{t.pUnk}}개</div></div>
     </div>
 
     <div class="panel">
-      <div style="display:flex;align-items:center;gap:8px;padding:10px 14px"><strong>먼저 볼 곳</strong><span class="dim" style="font-size:12px">장애 · PDU 절체 · 흡기 32°C 이상 · 실장율 90% 이상 · 수집 끊김</span></div>
+      <div style="display:flex;align-items:center;gap:8px;padding:10px 14px"><strong>먼저 볼 곳</strong><span class="dim" style="font-size:12px">장애 · 꺼진 PDU · 흡기 32°C 이상 · 실장율 90% 이상 · 수집 끊김</span></div>
       <div class="at">
         <sc-for list="{{alerts}}" as="a" hint-placeholder-count="6"><a href="#" class="ch" style="background:{{a.bg}};border:1px solid {{a.bd}};color:{{a.fg}}"><strong class="mono">{{a.id}}</strong>{{a.text}}</a></sc-for>
       </div>
@@ -74,13 +74,13 @@ button,select,input{font:inherit;color:inherit}
 
     <div class="panel">
       <div style="overflow-x:auto">
-        <div style="min-width:1240px">
+        <div style="min-width:1300px">
           <div class="g hd">
             <sc-for list="{{cols}}" as="c" hint-placeholder-count="13"><button type="button" class="{{c.cls}}" onClick="{{c.sort}}">{{c.label}}{{c.arrow}}</button></sc-for>
           </div>
           <sc-for list="{{rows}}" as="r" hint-placeholder-count="14">
             <div class="g tr" style="opacity:{{r.op}}">
-              <span><a href="#" class="mono" style="font-weight:700">{{r.id}}</a> <span class="dim">{{r.name}}</span></span>
+              <span><a href="#" class="mono" style="font-weight:700">{{r.id}}</a> <span class="dim">{{r.name}} · {{r.corp}}</span></span>
               <span class="r">{{r.racks}}</span>
               <span><span class="mono" style="color:{{r.useC}}">{{r.useT}}</span><span class="bar"><i style="width:{{r.useW}}%;background:{{r.useB}}"></i></span></span>
               <span class="r">{{r.devs}}</span>
@@ -129,6 +129,7 @@ class Component extends DCLogic {
       ['MX-MEX', '멕시코시티', 10, 251, 97, 0, 0, 0, 0, 0, 33.8, 57, 30, 36, 0, 0, 'ok'],
       ['BR-SAO', '상파울루', 0, 0, 0, 23, 0, null, null, null, null, null, null, 0, null, null, 'none'],
     ];
+    const CORP = { KR: '한국 법인', JP: '일본 법인', CN: '중국 법인', SG: '싱가포르 법인', VN: '베트남 법인', IN: '인도 법인', PL: '폴란드 법인', DE: '독일 법인', UK: '영국 법인', US: '미국 법인', MX: '멕시코 법인', BR: '브라질 법인' };
     const F = ['id', 'name', 'racks', 'used', 'devs', 'unp', 'mis', 'crit', 'warn', 'unk', 'kw', 'rated', 'tmax', 'pdu', 'fo', 'pUnk', 'state'];
     const data = RAW.map((a) => { const o = {}; F.forEach((f, i) => { o[f] = a[i]; }); o.totU = o.racks * 42; o.use = o.totU ? o.used / o.totU : null; return o; });
     const n = (v) => (v == null ? '—' : v.toLocaleString('en-US'));
@@ -154,7 +155,7 @@ class Component extends DCLogic {
       if (d.state === 'none') push(d, GRY, '실장도 미등록 · 등록 장비 ' + d.unp + '대가 미배치');
       if (d.state !== 'ok') return;
       if (d.crit) push(d, RED, '장애 ' + d.crit + '대');
-      if (d.fo) push(d, RED, 'PDU 절체 ' + d.fo + '건');
+      if (d.fo) push(d, RED, '꺼진 PDU ' + d.fo + '대');
       if (d.tmax >= 32) push(d, AMB, '흡기 최고 ' + d.tmax + '°C');
       if (d.use >= 0.9) push(d, AMB, '실장율 ' + Math.round(d.use * 100) + '% — 빈 자리 ' + (d.totU - d.used) + 'U');
     });
@@ -170,7 +171,7 @@ class Component extends DCLogic {
       const usePct = d.use == null ? null : Math.round(d.use * 100);
       const kwPct = d.kw == null || !d.rated ? null : Math.round((d.kw / d.rated) * 100);
       return {
-        id: d.id, name: d.name, op: stale ? 0.55 : 1,
+        id: d.id, name: d.name, corp: CORP[d.id.slice(0, 2)] || '—', op: stale ? 0.55 : 1,
         racks: none ? '—' : n(d.racks),
         useT: usePct == null ? '—' : usePct + '% · ' + n(d.used) + '/' + n(d.totU) + 'U', useW: usePct || 0,
         useB: usePct >= 90 ? '#f59e0b' : '#3b82f6', useC: usePct >= 90 ? '#fde68a' : '#e6edf6',
@@ -182,11 +183,11 @@ class Component extends DCLogic {
         unk: n(d.unk),
         kwT: d.kw == null ? '—' : d.kw.toFixed(1) + ' kW · 정격의 ' + kwPct + '%', kwW: kwPct || 0, kwB: kwPct >= 80 ? '#ef4444' : '#2dd4bf',
         tT: d.tmax == null ? '—' : d.tmax + '°C', tC: d.tmax >= 32 ? '#fca5a5' : '#e6edf6',
-        pdu: none ? '—' : d.pdu + '개', fo: d.fo ? '절체 ' + d.fo : '', pUnk: d.pUnk ? '못 읽음 ' + d.pUnk : '',
+        pdu: none ? '—' : d.pdu + '개', fo: d.fo ? '꺼짐 ' + d.fo : '', pUnk: d.pUnk ? '못 읽음 ' + d.pUnk : '',
         st: none ? '실장도 없음 · 가져오기' : stale ? '끊김 · 11-16 22:10 값' : '14:28', stC: none ? '#93c5fd' : stale ? '#fde68a' : '#8b9bb4',
       };
     });
-    const cols = [['id', '데이터센터'], ['racks', '랙', 1], ['use', '실장율'], ['devs', '장비', 1], ['unp', '미배치', 1], ['mis', '불일치', 1], ['crit', '장애', 1], ['warn', '경고', 1], ['unk', '못 읽음', 1],
+    const cols = [['id', '데이터센터 · 법인'], ['racks', '랙', 1], ['use', '실장율'], ['devs', '장비', 1], ['unp', '미배치', 1], ['mis', '불일치', 1], ['crit', '장애', 1], ['warn', '경고', 1], ['unk', '못 읽음', 1],
       ['kw', '소비전력(측정)'], ['tmax', '흡기 최고', 1], ['pdu', '세로 PDU'], ['state', '수집']].map(([k, label, r]) => ({
       label, cls: r ? 'r' : '', arrow: k === key ? (dir > 0 ? ' ▲' : ' ▼') : '',
       sort: () => this.setState({ key: k, dir: k === key ? -dir : (k === 'id' ? 1 : -1) }),

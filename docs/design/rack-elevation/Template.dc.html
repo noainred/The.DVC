@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>랙 실장도 — 새 엑셀 양식 맞추기</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+button,select,input{font:inherit;color:inherit}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.dim{color:#8b9bb4}
+.sel{height:30px;padding:0 8px;border-radius:8px;border:1px solid #243049;background:#0f1626;min-width:0;box-sizing:border-box}
+.btn{height:34px;padding:0 14px;border-radius:8px;border:1px solid #243049;background:#141b2d;font-weight:600;font-size:12px;cursor:pointer;white-space:nowrap}
+.btn.pri{background:#3b82f6;border-color:#3b82f6;color:#04101f}
+.panel{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0}
+.n{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;font-weight:800;font-size:11px;flex:0 0 auto;color:#04101f}
+.sr{display:grid;grid-template-columns:30px 44px minmax(0,1fr) 74px 74px 74px;font-size:11.5px}
+.sr>span{height:22px;line-height:22px;padding:0 6px;border-right:1px solid #243049;border-bottom:1px solid #1f2a40;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-sizing:border-box}
+.sr>span.rn{background:#0f1626;color:#5d6b85;text-align:center;font-family:"JetBrains Mono",monospace;font-size:10px;padding:0}
+.sr>span.num{text-align:right;font-family:"JetBrains Mono",monospace}
+.st{display:flex;gap:10px;align-items:flex-start;padding:10px 14px;border-top:1px solid #1f2a40;font-size:12px;line-height:1.5}
+.st .b{min-width:0;flex:1;display:flex;flex-direction:column;gap:4px}
+.ex{font-family:"JetBrains Mono",monospace;font-size:11px;border:1px dashed #3a4866;border-radius:6px;padding:4px 6px;color:#c3cee0;overflow-wrap:anywhere}
+.chip{display:inline-flex;align-items:center;height:24px;padding:0 10px;border-radius:999px;border:1px solid #243049;background:#0f1626;font-size:11.5px;white-space:nowrap}
+</style>
+</helmet>
+<div style="min-height:1060px;background:#0a0e17;box-sizing:border-box;padding:16px;display:flex;flex-direction:column;gap:12px">
+  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px">
+    <strong style="font-size:16px">새 엑셀 양식 맞추기</strong>
+    <span class="dim">저장된 양식 중 맞는 것이 없을 때 한 번만 합니다 · 시트에서 칸을 눌러 알려 주면 그 양식을 기억합니다</span>
+    <span style="margin-left:auto;display:flex;flex-wrap:wrap;gap:6px;align-items:center"><span class="dim" style="font-size:12px">저장된 양식</span><span class="chip">서버 랙 양식</span><span class="chip">네트워크 랙 양식</span><span class="chip" style="border-color:#3b82f6;color:#dbeafe">(새) 스토리지 랙 양식</span></span>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start">
+    <div class="panel" style="flex:999 1 560px">
+      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 14px;border-bottom:1px solid #1f2a40;font-size:12px">
+        <strong class="mono">KR-SEL_스토리지랙.xlsx</strong><span class="dim">시트 ‘S열’ · 이 브라우저 안에서만 읽는 중 — 서버로 올리지 않습니다</span>
+        <span class="dim" style="margin-left:auto">색 = 내가 알려 준 영역 · 다시 누르면 고칩니다</span>
+      </div>
+      <div style="overflow-x:auto;padding:12px">
+        <div style="min-width:560px;border:1px solid #243049;border-bottom:0">
+          <div class="sr" style="background:#0f1626;color:#5d6b85"><span class="rn"></span><span class="rn">A</span><span class="rn">B</span><span class="rn">C</span><span class="rn">D</span><span class="rn">E</span></div>
+          <sc-for list="{{rows}}" as="r" hint-placeholder-count="28">
+            <div class="sr">
+              <span class="rn">{{r.n}}</span>
+              <span class="num" style="background:{{r.ua}}">{{r.u}}</span>
+              <span style="background:{{r.ba}};font-weight:{{r.bw}};text-align:{{r.bt}};outline:{{r.bo}};outline-offset:-2px">{{r.b}}</span>
+              <span class="num" style="background:{{r.ca}}">{{r.c}}</span>
+              <span class="num" style="background:{{r.da}}">{{r.d}}</span>
+              <span class="num" style="background:{{r.ea}}">{{r.e}}</span>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:14px;padding:8px 14px;border-top:1px solid #1f2a40;font-size:11.5px;color:#aebbd0">
+        <span><span class="n" style="background:#c084fc">1</span> 랙 제목</span><span><span class="n" style="background:#60a5fa">2</span> U 열</span><span><span class="n" style="background:#4ade80">3</span> 장비 열</span><span><span class="n" style="background:#fbbf24">4</span> 값 열</span><span><span class="n" style="background:#94a3b8">5</span> 합계 줄</span>
+        <span class="dim" style="margin-left:auto">가운데 줄은 줄여서 보여 줍니다(…)</span>
+      </div>
+    </div>
+
+    <div class="panel" style="flex:1 1 380px;max-width:520px">
+      <div style="padding:10px 14px;font-weight:700">알려 준 것 · 읽은 결과</div>
+      <div class="st"><span class="n" style="background:#c084fc">1</span><div class="b"><strong>랙 제목 — 칸 B1</strong><span>‘S38 DVC STORAGE(ISILON)’ → 랙 이름 <span class="mono">S38</span> · 용도 DVC STORAGE(ISILON)</span><span class="dim">첫 낱말을 랙 이름으로 · 한 시트에 랙 블록이 오른쪽으로 3개 반복됨(같은 모양 — 자동으로 찾음)</span></div></div>
+      <div class="st"><span class="n" style="background:#60a5fa">2</span><div class="b"><strong>U 열 — A열</strong><span>40 … 1 → 랙 높이 40U · 아래가 1</span><span class="dim">랙 종류 ‘스토리지 랙 40U’ 로 만듭니다. 파일의 실장율 분모(42)와 다릅니다 — 가져오기를 막지 않고 알립니다</span></div></div>
+      <div class="st"><span class="n" style="background:#4ade80">3</span><div class="b"><strong>장비 열 — B열</strong><span>병합된 칸 하나 = 장비 1대 · 차지한 줄 수 = 높이(U)</span>
+        <span class="ex">Dell S5232F #2 / 7QX2KM3</span><span>→ 모델 Dell S5232F · 번호 2 · 서비스 태그 7QX2KM3</span>
+        <span class="ex">데이터 저장 스토리지 ⏎ Isilon F900 #4 / 4ZT8RB3</span><span>→ 표시 이름 · 모델 Isilon F900 · 번호 4 · 시리얼 1개</span>
+        <span class="ex">데이터 저장 스토리지 ⏎ Isilon H700 #1-4 ⏎ 시리얼 / 시리얼 ⏎ 시리얼 / 시리얼</span><span>→ 섀시 1대(4U) · 노드 4대 · 시리얼 4개</span>
+        <span class="dim">칸을 ‘/’ 와 줄바꿈으로 나눈 뒤 모양으로 가릅니다. 가르지 못한 조각은 추측하지 않고 ‘확인 필요’ 로 올립니다</span></div></div>
+      <div class="st"><span class="n" style="background:#fbbf24">4</span><div class="b"><strong>값 열 — 머리글로 찾음</strong>
+        <span style="display:flex;flex-wrap:wrap;gap:6px;align-items:center"><span class="mono">무게</span><span class="dim">→</span><select class="sel" aria-label="무게 열"><option>무게(kg)</option></select></span>
+        <span style="display:flex;flex-wrap:wrap;gap:6px;align-items:center"><span class="mono">전력량</span><span class="dim">→</span><select class="sel" aria-label="전력량 열"><option>운전 전력(W)</option><option>정격 전력(W)</option></select><span class="dim">합계 줄의 ‘운전’ 칸과 합이 같아 운전으로 골랐습니다</span></span>
+        <span style="display:flex;flex-wrap:wrap;gap:6px;align-items:center"><span class="mono">발열량</span><span class="dim">→</span><select class="sel" aria-label="발열량 열"><option>가져오지 않음</option></select><span class="dim">전력 × 3.412 로 계산되는 값</span></span></div></div>
+      <div class="st"><span class="n" style="background:#94a3b8">5</span><div class="b"><strong>합계 줄 — ‘Rack 자체 무게’ 부터</strong><span>가져오지 않고 다시 계산해 파일 값과 나란히 보여 줍니다. ‘이중화 고려 PDU 개수’ 만 세로 PDU 수로 씁니다</span></div></div>
+      <div style="padding:12px 14px;border-top:1px solid #1f2a40;display:flex;flex-direction:column;gap:8px">
+        <label for="tn" class="dim" style="font-size:11px;font-weight:600">양식 이름</label>
+        <input id="tn" class="sel" value="스토리지 랙 양식" style="height:34px">
+        <span class="dim" style="font-size:11.5px">다음부터 머리글이 ‘U · Rack · 무게 · 전력량 · 발열량’ 인 시트는 이 양식으로 자동 선택됩니다. 양식은 칸 위치가 아니라 머리글 글자와 모양으로 기억합니다 — 랙 높이가 달라도 같은 양식입니다.</span>
+        <div style="display:flex;flex-wrap:wrap;gap:8px"><button type="button" class="btn">취소</button><a href="Import.dc.html" class="btn pri" style="display:inline-flex;align-items:center;text-decoration:none">양식 저장하고 미리 보기</a></div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1060}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const P = 'rgba(192,132,252,.22)', B = 'rgba(96,165,250,.16)', G = 'rgba(74,222,128,.12)', Y = 'rgba(251,191,36,.12)', S = 'rgba(148,163,184,.14)', N = 'transparent';
+    const rows = [];
+    let n = 1;
+    const push = (o) => rows.push({ n: n++, u: '', b: '', c: '', d: '', e: '', ua: N, ba: N, ca: N, da: N, ea: N, bw: 400, bt: 'left', bo: 'none', ...o });
+    push({ b: 'S38 DVC STORAGE(ISILON)', ba: P, bw: 800, bt: 'center', bo: '2px solid #c084fc' });
+    push({});
+    push({ u: 'U', b: 'Rack #1', c: '무게', d: '전력량', e: '발열량', ua: B, ba: G, ca: Y, da: Y, ea: Y, bw: 700, bt: 'center' });
+    const D = {
+      39: ['Dell S5232F #2 / 7QX2KM3', '9.8', '635', '2,167', 1], 37: ['Dell S5232F #1 / 7QX2KL3', '9.8', '635', '2,167', 1], 35: ['Dell N3248TE-ON #1 / 5HW9TD3', '7.0', '212', '723', 1],
+      28: ['데이터 저장 스토리지', '28.0', '859', '2,931', 1], 27: ['Isilon F900 #4 / 4ZT8RB3'],
+      25: ['데이터 저장 스토리지', '28.0', '859', '2,931', 1], 24: ['Isilon F900 #3 / 4ZT8RC3'],
+      5: ['데이터 저장 스토리지', '118.0', '1,528', '5,213', 1], 4: ['Isilon H700 #1-4'], 3: ['시리얼 / 시리얼'], 2: ['시리얼 / 시리얼'],
+    };
+    const row = (u) => {
+      const d = D[u] || [];
+      push({ u: String(u), b: d[0] || '', c: d[1] || '', d: d[2] || '', e: d[3] || '', ua: B, ba: d[0] ? G : N, ca: Y, da: Y, ea: Y, bw: d[4] ? 700 : 400, bt: 'center' });
+    };
+    for (let u = 40; u >= 23; u -= 1) row(u);
+    push({ u: '…', b: '…', bt: 'center', ua: B });
+    for (let u = 5; u >= 1; u -= 1) row(u);
+    push({ b: 'Rack 자체 무게(PDU포함)', c: '144.00', ua: S, ba: S, ca: S, da: S, ea: S, bt: 'center', bo: '1px dashed #94a3b8' });
+    push({ b: '실장율(N/42)', c: '45%', ua: S, ba: S, ca: S, da: S, ea: S, bt: 'center' });
+    push({ b: '전력량 합계(운전전력량)', c: 'Watt', d: '9,502', ua: S, ba: S, ca: S, da: S, ea: S, bt: 'center' });
+    push({ b: '이중화 고려 PDU 개수', d: '4', ua: S, ba: S, ca: S, da: S, ea: S, bt: 'center' });
+    return { rows };
+  }
+}
+</script>
+</body>
+</html>

@@ -131,14 +131,15 @@ button,select,input{font:inherit;color:inherit}
           <dl class="dl" style="margin:0">
             <dt><label for="p-n">이름</label></dt><dd><input id="p-n" class="sel mono" value="B-04"></dd>
             <dt><label for="p-r">용도</label></dt><dd><input id="p-r" class="sel" value="스토리지"></dd>
-            <dt><label for="p-h">높이(U)</label></dt><dd><input id="p-h" class="sel mono" value="42"></dd>
+            <dt><label for="p-t">랙 종류</label></dt><dd><select id="p-t" class="sel"><option>스토리지 랙 · 40U · 600×1200</option><option>서버 랙 · 42U · 600×1200</option><option>네트워크 랙 · 45U · 800×1200</option><option>+ 랙 종류 추가</option></select></dd>
+            <dt>높이(U)</dt><dd class="mono">40 <span class="dim" style="font-family:inherit">(랙 종류에서)</span></dd>
             <dt>전면 방향</dt><dd><div class="seg"><button type="button" class="on" aria-label="위">↑</button><button type="button" aria-label="아래">↓</button><button type="button" aria-label="왼쪽">←</button><button type="button" aria-label="오른쪽">→</button></div></dd>
-            <dt><label for="p-a">액티브 PDU</label></dt><dd><input id="p-a" class="sel mono" value="2"></dd>
-            <dt><label for="p-s">스탠바이 PDU</label></dt><dd><input id="p-s" class="sel mono" value="2"></dd>
+            <dt><label for="p-a">PDU A 계통</label></dt><dd><input id="p-a" class="sel mono" value="2"></dd>
+            <dt><label for="p-s">PDU B 계통</label></dt><dd><input id="p-s" class="sel mono" value="2"></dd>
             <dt>위치</dt><dd class="mono">가로 7칸 · 세로 7칸</dd>
           </dl>
           <div style="display:flex;flex-wrap:wrap;gap:8px"><button type="button" class="btn">실장도 열기</button><button type="button" class="btn">평면도에서 빼기</button></div>
-          <span class="dim" style="font-size:11.5px">‘빼기’ 는 평면도 위치만 지웁니다. 랙과 그 안의 장비 배치는 남습니다. 랙 삭제는 장비가 없는 랙만 됩니다.</span>
+          <span class="dim" style="font-size:11.5px">랙 종류가 높이 · 바닥 크기(평면도의 칸 수)를 정합니다. ‘빼기’ 는 평면도 위치만 지웁니다. 랙과 그 안의 장비 배치는 남습니다. 랙 삭제는 장비가 없는 랙만 됩니다.</span>
         </div>
 
         <div class="panel">

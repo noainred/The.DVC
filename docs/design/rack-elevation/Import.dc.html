@@ -62,13 +62,18 @@ td.n{text-align:right;font-family:"JetBrains Mono",monospace}
             <span class="mono">KR-SEL_전산실A_실장도.xlsx</span>
             <span class="dim" style="font-size:12px">시트 ‘A열’ · 랙 블록 3개 인식 · 여기에 끌어다 놓거나 파일 선택</span>
           </div>
-          <span class="dim" style="font-size:12px">랙 모양으로 그린 실장도를 그대로 읽습니다. 열을 맞추거나 양식을 바꿀 필요가 없습니다.</span>
+          <span class="dim" style="font-size:12px">랙 모양으로 그린 실장도를 그대로 읽습니다. <strong style="color:#e6edf6">파일은 이 브라우저 안에서만 읽고 포탈 서버로 올리지 않습니다</strong> — 서버에는 읽어 낸 값(랙 · 위치 · 장비 글자 · 전력 · 무게)만 갑니다.</span>
           <div style="display:flex;flex-wrap:wrap;gap:8px"><button type="button" class="btn">다른 파일</button><button type="button" class="btn">다른 시트</button></div>
         </div>
       </div>
 
       <div class="panel">
         <div class="h"><span class="step">2</span>읽은 방법<span class="dim" style="font-weight:500;font-size:12px;margin-left:auto">파일에 적힌 것 → 포탈 항목</span></div>
+        <div style="margin:0 14px 10px;padding:10px;border:1px solid #22c55e;background:rgba(34,197,94,.10);border-radius:8px;font-size:12px;display:flex;flex-direction:column;gap:6px">
+          <span><strong>맞는 양식을 찾았습니다</strong> — 서버 랙 양식(무게 · 운전전력량 · 정격전력량)</span>
+          <span class="dim">저장된 양식 3개 중 머리글이 모두 맞는 것. 양식이 여러 종류여도 한 번 맞춰 두면 다음부터 자동으로 고릅니다.</span>
+          <div style="display:flex;flex-wrap:wrap;gap:8px"><button type="button" class="btn">다른 양식으로</button><a href="Template.dc.html" class="btn" style="display:inline-flex;align-items:center;text-decoration:none;color:#e6edf6">새 양식 맞추기</a></div>
+        </div>
         <div class="rule"><span class="s">A4 DVC SERVER(ESX2)</span><span class="dim">→</span><span>랙 이름 A4 · 용도 DVC SERVER(ESX2)</span></div>
         <div class="rule"><span class="s">U 열 42 … 1</span><span class="dim">→</span><span>랙 높이 42U · 아래가 1</span></div>
         <div class="rule"><span class="s">장비 칸이 차지한 줄 수</span><span class="dim">→</span><span>높이(U) · 시작 U 는 가장 아래 줄</span></div>
