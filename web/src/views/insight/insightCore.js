@@ -29,6 +29,26 @@ export function pickRows(rows, ids) {
 }
 
 /**
+ * 범위 안내의 ‘오래됨 N곳’ 한 문장(VM · Hypervisor 분석 공용 — 148회차 144 D1). 숫자 정책은 그대로 — 오래된 줄은 사유와 상관없이 합에 넣지 않는다(pickRows).
+ *  · 사유는 서버 응답 줄의 notCurrent(139회차 R3 — inventory/vmInsight notCurrentOf = metrics/unreadVcenters unreadVcenterReasons)로 가른다.
+ *  · 'maintenance' 만 ‘점검중’ 으로 따로 적는다. 그 밖('stale' · 'unreachable' · 없음 · 모르는 값)은 줄의 stale 이 말하는 ‘값 늦음’ 만 —
+ *    원인을 더 단정하지 않는다. 점검중이 없으면 예전 문장 그대로.
+ * @param {object[]} staleRows  pickRows().stale
+ * @param {(r:object)=>string} nameOf  법인 이름
+ * @returns {string} 오래된 줄이 없으면 ''
+ */
+export function staleScopeText(staleRows, nameOf) {
+  const list = (Array.isArray(staleRows) ? staleRows : []).filter((r) => r && typeof r === 'object');
+  if (!list.length) return '';
+  const names = (rs) => rs.map(nameOf).join(' · ');
+  const maint = list.filter((r) => r.notCurrent === 'maintenance');
+  const late = list.filter((r) => r.notCurrent !== 'maintenance');
+  if (!maint.length) return `오래됨 ${list.length}곳(${names(late)}) — 값이 늦어 합에 넣지 않았습니다.`;
+  const parts = [`점검중 ${maint.length}곳(${names(maint)})`, ...(late.length ? [`값 늦음 ${late.length}곳(${names(late)})`] : [])];
+  return `오래됨 ${list.length}곳 — ${parts.join(' · ')} — 지금 값이 아니라 합에 넣지 않았습니다.`;
+}
+
+/**
  * 도구 칸 · 도구 패널이 더할 법인 id — 본체 합(pickRows used)과 **같은 법인 집합**(dbg3221 2회차: 오래됨 법인이 ‘확인할 것’ 의 도구 칸 · 패널 합에만 섞였다).
  *  · 응답이 아직 없으면 ids 그대로(이전 규칙).
  *  · 응답은 왔는데(loaded) 고른 법인 줄이 0개면 null(dbg3221 7회차: 법인 0곳 리전에서 ids=[] 가 도구 쪽 ‘전부’ 로 읽혀

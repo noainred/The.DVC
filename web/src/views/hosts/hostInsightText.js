@@ -11,7 +11,7 @@
 import { numOrNull } from '../../numOrNull.js';
 import { hashSegments } from '../../hooks/hashTab.js';
 import { addVal, sumKeys, avgOf, mergeTopN, shareOf, shareText, fmtN, fmtU, gbText, round1 } from '../insight/insightCore.js';
-import { tileColors, scaleLegend, RAMP, CRIT_BG, NONE_BG } from '../insight/treemap.js';
+import { tileColors, scaleLegend, critWord, RAMP, CRIT_BG, NONE_BG } from '../insight/treemap.js';
 import { hostAvgMemGB as toolHostAvgMemGB, hostsEq } from '../vms/insight-tools/toolSumText.js';   // S2 환산 판정 한 벌(VM 분석 · 과할당과 같은 함수)
 
 // ── 보기 줄 · 주소 ──
@@ -211,8 +211,9 @@ export function checkItems(s, access = {}, th = {}) {
 
 // ── 가상화 호스트 현황(클러스터 지도) ──
 /**
- * 색 기준 — 파랑 3단(사용률 경계 중 경고 경계 아래) + 경고 경계 이상만 빨강(S6). 경계는 응답 thresholds(usageEdges · overloadPct · n1LimitPct).
+ * 색 기준 — 파랑 3단(사용률 경계 중 경고 경계 아래) + 경고 경계를 넘은(초과) 값만 빨강(S6). 경계는 응답 thresholds(usageEdges · overloadPct · n1LimitPct).
  * ‘한 대 빠진 뒤 메모리’ 는 클러스터 구성 권한이 있을 때만(없으면 서버가 그 칸을 싣지 않는다) — 처음 색(확정 기본값).
+ * 148회차(145 K1): 경계 종류는 ‘초과’(critOp 'gt') — 서버 과부하 · over90(> overloadPct) · N+1 버팀(≤ n1LimitPct)과 같은 말. VM 지도는 ‘이상’ 그대로.
  */
 export function fillDefs(th = {}, access = {}) {
   const over = numOrNull(th?.overloadPct);
@@ -220,11 +221,11 @@ export function fillDefs(th = {}, access = {}) {
   const edges = (Array.isArray(th?.usageEdges) ? th.usageEdges : []).map(numOrNull).filter((x) => x != null);
   const stepsBelow = (crit) => edges.filter((e) => crit == null || e < crit);
   const defs = [];
-  if (access?.cluster) defs.push({ key: 'n1mem', label: '한 대 빠진 뒤 메모리', short: '빠진 뒤', steps: stepsBelow(n1), crit: n1, val: (c) => numOrNull(c?.n1Mem) });
+  if (access?.cluster) defs.push({ key: 'n1mem', label: '한 대 빠진 뒤 메모리', short: '빠진 뒤', steps: stepsBelow(n1), crit: n1, critOp: 'gt', val: (c) => numOrNull(c?.n1Mem) });
   defs.push(
-    { key: 'max', label: '가장 바쁜 호스트 CPU', short: '최고', steps: stepsBelow(over), crit: over, val: (c) => numOrNull(c?.busiestCpu) },
-    { key: 'cpu', label: '평균 CPU', short: 'CPU', steps: stepsBelow(over), crit: over, val: (c) => numOrNull(c?.cpuAvg) },
-    { key: 'mem', label: '평균 메모리', short: '메모리', steps: stepsBelow(over), crit: over, val: (c) => numOrNull(c?.memAvg) },
+    { key: 'max', label: '가장 바쁜 호스트 CPU', short: '최고', steps: stepsBelow(over), crit: over, critOp: 'gt', val: (c) => numOrNull(c?.busiestCpu) },
+    { key: 'cpu', label: '평균 CPU', short: 'CPU', steps: stepsBelow(over), crit: over, critOp: 'gt', val: (c) => numOrNull(c?.cpuAvg) },
+    { key: 'mem', label: '평균 메모리', short: '메모리', steps: stepsBelow(over), crit: over, critOp: 'gt', val: (c) => numOrNull(c?.memAvg) },
   );
   return defs;
 }
@@ -243,7 +244,7 @@ export function hostTileColors(st) {
 /** 눈금 범례 — [{ text, bg }] + 경고 + 값 모름. */
 export function hostScale(fill) {
   const out = scaleLegend(fill?.steps || [], { crit: fill?.crit ?? null }).map((text, i) => ({ text, bg: RAMP[Math.min(RAMP.length - 1, i + HOST_RAMP_OFFSET)] }));
-  if (fill?.crit != null) out.push({ text: `${fill.crit}% 이상(경고)`, bg: CRIT_BG });
+  if (fill?.crit != null) out.push({ text: `${fill.crit}% ${critWord(fill)}(경고)`, bg: CRIT_BG });
   out.push({ text: '값 모름', bg: NONE_BG });
   return out;
 }

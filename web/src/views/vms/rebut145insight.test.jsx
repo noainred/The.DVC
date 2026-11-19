@@ -46,7 +46,7 @@ describe('145회차 — VM 분석: 점검중 법인(139회차 stale:true + notCu
     expect(r.notCurrent).toBe('maintenance');
   });
   it('합에서 빼고 ‘오래됨 1곳’ 으로 따로', () => {
-    expect(render()).toMatch(/오래됨 1곳\(법인-vm\) — 값이 늦어 합에 넣지 않았습니다/);
+    expect(render()).toMatch(/오래됨 1곳 — 점검중 1곳\(법인-vm\) — 지금 값이 아니라 합에 넣지 않았습니다/);   // 148회차(144 D1): 점검중은 사유를 가른다
   });
   it('지도 안내의 ‘지금 90% 이상인 법인’ 에 옛 값(95%대)을 세지 않는다 — 따로 밝힌다', () => {
     const t = render();

@@ -12,7 +12,7 @@ import { useNarrowScreen } from '../../components/useNarrowScreen.js';
 import { numOrNull } from '../../numOrNull.js';
 import { scopeIdsOf, normScopeIds, toggleScopeId } from '../platform/platformText.js';
 import { vcHash } from '../vcd/vcdRoute.js';
-import { pickRows, toolIdsOf, fmtN, fmtU, gbText, shareText, barPct } from '../insight/insightCore.js';
+import { pickRows, toolIdsOf, staleScopeText, fmtN, fmtU, gbText, shareText, barPct } from '../insight/insightCore.js';
 import { treemapLayout, maxTilesInCol, fillStep, tileColors, scaleLegend, RAMP, CRIT_BG, NONE_BG } from '../insight/treemap.js';
 import { mapHeightOf, autoMapHeight } from '../insight/insightPrefs.js';
 import { maxTilesPacked, worstMember, groupCountsText } from '../insight/tilePack.js'; // v3.23.0 지도 칸 글자(설계 docs/design/insight-tiles)
@@ -166,7 +166,7 @@ export default function VmInsight({ mode = 'insight', filters = {}, scopeIds = n
   // ── 범위 안내(고른 법인 · 오래됨 · 모름) ──
   const scopeNote = [
     ids.length ? `법인 ${ids.length}곳을 골랐습니다 — 아래 수는 그 법인들의 합입니다.` : '',
-    picked.stale.length ? `오래됨 ${picked.stale.length}곳(${picked.stale.map(corpName).join(' · ')}) — 값이 늦어 합에 넣지 않았습니다.` : '',
+    staleScopeText(picked.stale, corpName),
     picked.unknown.length ? `값 모름 ${picked.unknown.length}곳(${picked.unknown.map(corpName).join(' · ')}) — 아직 수집하지 못해 합에 넣지 않았습니다.` : '',
     data.initial ? '첫 수집이 끝나지 않았습니다 — 수가 아직 모자랄 수 있습니다.' : '',
   ].filter(Boolean).join(' ');
