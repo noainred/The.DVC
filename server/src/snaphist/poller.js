@@ -34,8 +34,11 @@ let lastPruneAt = Date.now();   // 기동 첫 틱에 정리하지 않는다
 let lastTick = null;   // { at, ok, reason }
 
 export function snapHistPollerStatus() {
-  const bad = lastTick && !lastTick.ok;   // DB 사용 불가 · 기록 실패 · 예외 — 틱은 돌아도 정상이 아니다
-  return { running, lastRun: lastTick ? { at: lastTick.at } : null, intervalMs: TICK_MS, ...(bad ? { warn: true, warnText: String(lastTick.reason || '기록 실패').slice(0, 200) } : {}),
+  // DB 사용 불가 · 예외(이 틱) 또는 **마지막 기록 시도(lastResult)의 실패** — 틱은 돌아도 정상이 아니다.
+  // 143회차(재현): 틱만 보면 실패한 기록 뒤 다시 시도를 기다리는 틱(10분 중 9분 · 'waiting')이 ok 로 덮어 디스크 가득처럼 매번 실패해도 대부분 ‘정상’ 이었다.
+  //   lastResult 는 다음 기록 시도가 성공해야 바뀐다.
+  const why = lastTick && !lastTick.ok ? String(lastTick.reason || '기록 실패') : lastResult && lastResult.ok === false ? `기록 실패: ${String(lastResult.reason || '')}` : null;
+  return { running, lastRun: lastTick ? { at: lastTick.at } : null, intervalMs: TICK_MS, ...(why ? { warn: true, warnText: why.slice(0, 200) } : {}),
     lastResult, recordHour: recordHour(), retentionDays: retentionDays() };
 }
 

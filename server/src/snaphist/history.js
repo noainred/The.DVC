@@ -24,10 +24,19 @@ export function clampDays(v, def = 30) {
   return Number.isFinite(n) && n >= 1 ? Math.min(DAYS_MAX, n) : def;
 }
 
+/**
+ * n일 전 날 열쇠 — 달력으로 센다(그날 정오). 143회차(재현 TZ=Europe/Warsaw): 예전 `now - n×24h` 는 서머타임이 바뀐 주에 자정 근처(1시간)에서
+ * 하루를 빼거나(봄) 같은 날을 두 번 넣었고(가을), ‘7일 전’ 이 6 · 8일 전이 됐다(이 폴러는 엣지에서도 돈다 — 엣지 서버가 서머타임 지역 시각이면 해당).
+ */
+export function dayKeyAgo(now, n) {
+  const d = new Date(now);
+  return dayKeyOf(new Date(d.getFullYear(), d.getMonth(), d.getDate() - n, 12).getTime());
+}
+
 /** 기간의 날 열쇠 목록(오래된 날부터, 오늘 포함). */
 export function dayKeys(now, days) {
   const out = [];
-  for (let i = days - 1; i >= 0; i -= 1) out.push(dayKeyOf(now - i * DAY));
+  for (let i = days - 1; i >= 0; i -= 1) out.push(dayKeyAgo(now, i));
   return out;
 }
 
@@ -84,14 +93,19 @@ export async function historySeries({ vcIds, days, now = Date.now(), corpOf }) {
   for (const id of vcIds) { const d = st.firstDay.get(id)?.d; if (d) firstOk.set(id, d); }
   const groups = new Map();
   for (const id of vcIds) { const c = corpOf(id).corpId; if (!groups.has(c)) groups.set(c, new Set()); groups.get(c).add(id); }
+  // 143회차(E1): 행을 vCenter 별로 한 번 묶는다 — 법인마다 · vCenter 마다 전체 행을 다시 훑으면 O(vCenter × 행)이었다(30곳 · 400일 약 110ms 동기).
+  //   aggregateDays 는 묶음 밖 행을 버리고 (날, vCenter) 가 유일하므로 그 묶음의 행만 넘겨도 결과가 같다(시험이 예전 계산과 대조).
+  const rowsByVc = new Map();
+  for (const r of rows) { if (!vcIds.has(r.vcenter_id)) continue; if (!rowsByVc.has(r.vcenter_id)) rowsByVc.set(r.vcenter_id, []); rowsByVc.get(r.vcenter_id).push(r); }
+  const rowsOf = (ids) => { const out = []; for (const id of ids) for (const r of rowsByVc.get(id) || []) out.push(r); return out; };
   const byCorp = {};
-  for (const [c, ids] of groups) byCorp[c] = aggregateDays(keys, rows, ids, firstOk);
+  for (const [c, ids] of groups) byCorp[c] = aggregateDays(keys, rowsOf(ids), ids, firstOk);
   // 빠진 날 — vCenter 별(그 기간 안에서 기록을 시작한 뒤 'ok' 가 아닌 날)
   const gaps = [];
   for (const id of vcIds) {
     const f = firstOk.get(id);
     if (!f) continue;
-    const ok = new Set(rows.filter((r) => r.vcenter_id === id && (r.status === 'ok' || r.status === 'maintenance' || r.status === 'disabled')).map((r) => r.day));
+    const ok = new Set((rowsByVc.get(id) || []).filter((r) => r.status === 'ok' || r.status === 'maintenance' || r.status === 'disabled').map((r) => r.day));
     const miss = keys.filter((d) => d >= f && !ok.has(d) && d !== keys[keys.length - 1]);   // 오늘은 아직 기록 전일 수 있어 세지 않는다
     if (miss.length) gaps.push({ vcenterId: id, days: miss.length, last: miss[miss.length - 1] });
   }
@@ -142,7 +156,7 @@ export async function vmHistory({ vcenterId, vmId, days, now = Date.now() }) {
 export async function dayAgo({ vcIds, n = 7, now = Date.now() }) {
   const st = await snapHistStmts();
   if (!st) return null;
-  const day = dayKeyOf(now - n * DAY);
+  const day = dayKeyAgo(now, n);
   const okVc = new Set(st.dayStatuses.all(day).filter((r) => r.status === 'ok' && vcIds.has(r.vcenter_id)).map((r) => r.vcenter_id));
   const rows = st.dayRows.all(day).filter((r) => okVc.has(r.vcenter_id)).map((r) => ({ vcenterId: r.vcenter_id, vmId: r.vm_id, count: r.count, gb: r.gb }));
   return { day, okVcenters: [...okVc], rows };

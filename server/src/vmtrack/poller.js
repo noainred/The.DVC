@@ -22,7 +22,15 @@ const PRUNE_EVERY_MS = 12 * 3_600_000; // 하루 2회 정도면 충분(행이 �
 export const PENDING_WAIT_MS = 30 * 60_000;   // 첫 수집 대기 상한(v2.594)
 let waiting = null;   // { at, slot, pending } — 첫 수집 대기로 이번 슬롯 기록을 미룬 사실
 
-export function vmtrackPollerStatus() { return { running, lastResult, waiting }; }
+// 143회차(재현): 상태가 lastResult(슬롯 기록 — 하루 2번) 하나라 포탈 상태(health/services.js pollerCheck)가 기록 30분 뒤부터 다음 슬롯까지
+//   ‘주기의 2배를 넘겼습니다’, 재시작 뒤 슬롯이 이미 채워져 있으면 ‘한 번도 돌지 않았습니다’ 였다(틱은 매분 돈다 — snaphist 138회차 N138-4 와 같은 꼴).
+//   틱마다(재진입으로 건너뛴 틱 제외) 시각 · 성패를 남기고 lastRun · intervalMs · 실패(warn)를 싣는다. lastResult 는 그대로(화면 ‘최근 스냅샷’).
+let lastTick = null;   // { at, ok, reason }
+export function vmtrackPollerStatus() {
+  const bad = lastTick && !lastTick.ok;
+  return { running, lastResult, waiting, lastRun: lastTick ? { at: lastTick.at } : null, intervalMs: TICK_MS,
+    ...(bad ? { warn: true, warnText: String(lastTick.reason || '스냅샷 실패').slice(0, 200) } : {}) };
+}
 
 /** 스냅샷 1회 실행(수동/자동 공용). 진행 중이면 skipped. */
 export async function runVmtrackNow(trigger = 'manual') {
@@ -40,12 +48,13 @@ export async function runVmtrackNow(trigger = 'manual') {
   }
 }
 
-export function startVmtrackPoller() {
-  setInterval(async () => {
+/** 60초 틱 한 번(폴러 · 시험 공용). 재진입이면 아무것도 남기지 않는다. */
+export async function vmtrackTick() {
     if (running) return; // 재진입 가드
+    let fail = null;
     try {
       const db = await getDb();
-      if (!db) return; // DB 불가 — 기능 비활성(상태 API 가 사유를 노출)
+      if (!db) { fail = 'vmtrack DB 사용 불가'; return; } // DB 불가 — 기능 비활성(상태 API 가 사유를 노출)
       const cur = slotKey(new Date());
       const last = await lastSnapshotSlot();
       if (last === cur) {
@@ -66,10 +75,17 @@ export function startVmtrackPoller() {
         if (Date.now() - first < PENDING_WAIT_MS) { waiting = { at: Date.now(), firstSeenAt: first, slot: cur, pending }; return; }
       }
       waiting = null;
-      await runVmtrackNow('slot');
+      const r = await runVmtrackNow('slot');
+      if (r && r.ok === false && !r.skipped) fail = r.reason || '스냅샷 실패';
       if (Date.now() - lastPruneAt > PRUNE_EVERY_MS) { lastPruneAt = Date.now(); pruneVmtrack().catch(() => {}); }
     } catch (e) {
+      fail = e?.message || '예외';
       console.error('[vmtrack] 스냅샷 실패:', e.message);
+    } finally {
+      lastTick = { at: Date.now(), ok: !fail, reason: fail };
     }
-  }, TICK_MS).unref?.();
+}
+
+export function startVmtrackPoller() {
+  setInterval(vmtrackTick, TICK_MS).unref?.();
 }

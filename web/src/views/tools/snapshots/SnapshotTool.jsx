@@ -21,7 +21,7 @@ import { vcHash } from '../../vcd/vcdRoute.js';
 import {
   BANDS, BAND_COLOR, BAND_FG, bandLabels, VIEWS, signalDefs, matchKey, sortItems, gbSum, groupItems, GROUPS, bandGradient, summaryOf, corpCards,
   logPos, gbText, daysText, dateText, requestText, CSV_HEAD, csvRow, parseSnapHash, buildSnapHash,
-  changeMap, changeKey, clearedSince, seriesValues, lineGeom, goneRows, goneSummary, GROW_GB, corpFootText,
+  changeMap, changeKey, clearedSince, seriesValues, lineGeom, goneRows, goneSummary, GROW_GB, corpFootText, unreadSumText, trendOf,
 } from './snapText.js';
 import './snapshots.css';
 
@@ -125,7 +125,6 @@ export default function SnapshotTool({ scope = '', initial = null, initialHist =
       .some((s) => s && String(s).toLowerCase().includes(ql))), sort.key, sort.dir, change), [scoped, view, band, ql, sort, change]);
   const sum = summaryOf(scoped);
   const cards = useMemo(() => corpCards(items, data?.corps), [items, data]);
-  const unreadN = cards.filter((c) => !corp || c.id === corp).reduce((a, c) => a + (c.unread || 0), 0);   // 지금 값을 못 읽은 vCenter — 요약 수에 없다(138회차)
   const groups = useMemo(() => groupItems(shown, group, labels), [shown, group, labels]);
   const selItems = items.filter((x) => sel[`${x.vcenterId}\n${x.id}`]);
   const allOn = shown.length > 0 && shown.every((x) => sel[`${x.vcenterId}\n${x.id}`]);
@@ -168,10 +167,10 @@ export default function SnapshotTool({ scope = '', initial = null, initialHist =
   const gRows = goneRows(hist?.gone, (id) => vcCorp.get(String(id)) || id, numOrNull(th.snapAgeDays))
     .filter((r) => !corp || (data?.corps || []).find((c) => c.id === corp)?.vcenters?.some((v) => v.id === r.vcenterId));
   const gSum = goneSummary(gRows);
-  const tVals = seriesValues(hist?.series, tm);
-  const tFirst = tVals.find((v) => v != null); const tLast = [...tVals].reverse().find((v) => v != null);
+  const trend = trendOf(hist, corp, tm);   // 그림 · 설명이 같은 줄(143회차)
+  const tFirst = trend.first; const tLast = trend.last;
   const tText = (v) => (v == null ? '—' : tm === 'gb' ? gbText(v) : `${Math.round(v).toLocaleString('en-US')}대`);
-  const missingDays = (hist?.series || []).filter((p) => p.missing > 0).length;
+  const missingDays = trend.missingDays;
 
   return (
     <div className="snp">
@@ -212,7 +211,7 @@ export default function SnapshotTool({ scope = '', initial = null, initialHist =
 
       <div className="snp-kpis" aria-label="요약">
         <div className="snp-kp"><span className="l">스냅샷이 있는 VM</span><span className="v">{sum.vms.toLocaleString('en-US')}</span>
-          <span className="s">{corp ? `${corpName} 법인` : '전체 법인'} · 판정하지 않는 VM {sum.skip}대 포함{sum.stale ? ` · 값이 낡은 vCenter 의 ${sum.stale}대는 뺐습니다` : ''}{unreadN ? ` · 지금 값을 못 읽은 vCenter ${unreadN}곳은 빠졌습니다` : ''}</span></div>
+          <span className="s">{corp ? `${corpName} 법인` : '전체 법인'} · 판정하지 않는 VM {sum.skip}대 포함{sum.stale ? ` · 값이 낡은 vCenter 의 ${sum.stale}대는 뺐습니다` : ''}{unreadSumText(cards, corp)}</span></div>
         <div className="snp-kp"><span className="l">사내 기준{numOrNull(th.snapAgeDays) != null ? `(${th.snapAgeDays}일)` : ''}을 넘긴 VM</span><span className="v" style={{ color: sum.over ? '#fbbf24' : '#86efac' }}>{sum.over.toLocaleString('en-US')}</span>
           <span className="s">72시간(권고) 넘김 {sum.h72}대{sum.ageUnknown ? ` · 생성일 못 읽음 ${sum.ageUnknown}대는 따로` : ''}</span></div>
         <div className="snp-kp"><span className="l">스냅샷 크기</span><span className="v" style={{ color: '#67e8f9' }}>{gbText(sum.gb)}</span>
@@ -230,7 +229,7 @@ export default function SnapshotTool({ scope = '', initial = null, initialHist =
       <div className="snp-cards" role="group" aria-label="법인별 요약">
         {cards.map((c) => (
           <button key={c.id} type="button" className={`snp-cc${corp === c.id ? ' on' : ''}`} aria-pressed={corp === c.id} onClick={() => { setCorp(corp === c.id ? '' : c.id); setOpen(''); }}
-            title={c.blind ? `${c.name} — 이 법인의 vCenter 값을 지금 못 읽었습니다` : `${c.name} — 스냅샷이 있는 VM ${c.n}대(기준 넘김 ${c.over}대) · ${gbText(c.gb.gb)} — 누르면 이 법인만 봅니다`}>
+            title={c.blind ? `${c.name} — 이 법인의 vCenter 값을 지금 못 읽었습니다` : `${c.name} — 스냅샷이 있는 VM ${c.n}대(기준 넘김 ${c.over}대) · ${gbText(c.gb.gb)}${c.unread ? ` · 지금 값을 못 읽은 vCenter ${c.unread}곳` : ''} — 누르면 이 법인만 봅니다`}>
             <span className="cn"><span>{c.name}</span><em className={c.over ? '' : 'none'}>{c.over ? `넘김 ${c.over}` : c.blind ? '못 읽음' : '넘김 없음'}</em></span>
             <span className="tx">{c.blind ? '—' : <>{c.n}대 · {gbText(c.gb.gb)}{c.over ? ` · 정리하면 ${gbText(c.overGb.gb)}` : ''}</>}</span>
             <span className="snp-gbar" style={{ background: bandGradient(c.items) }} aria-hidden="true" />
@@ -288,9 +287,9 @@ export default function SnapshotTool({ scope = '', initial = null, initialHist =
                 <span className="snp-seg" role="group" aria-label="무엇을 볼지">{TREND_METRICS.map(([k, label]) => <button key={k} type="button" className={tm === k ? 'on' : ''} aria-pressed={tm === k} onClick={() => setTm(k)}>{label}</button>)}</span>
                 <span className="snp-seg" role="group" aria-label="기간">{TREND_PERIODS.map((d) => <button key={d} type="button" className={tp === d ? 'on' : ''} aria-pressed={tp === d} onClick={() => setTp(d)}>{d}일</button>)}</span>
               </div>
-              <Spark cls="w" values={corp && hist?.byCorp?.[corp] ? seriesValues(hist.byCorp[corp], tm) : tVals} label={`${TREND_METRICS.find((m) => m[0] === tm)[1]} ${tp}일 추이`} />
-              <div className="snp-tcap"><span>{tFirst == null ? '아직 기록이 없습니다' : `${tp}일 중 처음 ${tText(tFirst)} → 마지막 ${tText(tLast)}`}</span>
-                <span>{missingDays ? `빠진 날 ${missingDays}일(선이 끊김)` : ''}</span></div>
+              <Spark cls="w" values={trend.values} label={`${TREND_METRICS.find((m) => m[0] === tm)[1]} ${tp}일 추이`} />
+              <div className="snp-tcap"><span>{tFirst == null ? (missingDays ? '기록한 날마다 값을 못 읽은 vCenter 가 있어 합을 그리지 않았습니다' : trend.excludedOnlyDays ? '점검중 · 비활성 vCenter 뿐이라 합을 그리지 않았습니다' : '아직 기록이 없습니다') : `${tp}일 중 처음 ${tText(tFirst)} → 마지막 ${tText(tLast)}`}</span>
+                <span>{[missingDays ? `빠진 날 ${missingDays}일(선이 끊김)` : '', trend.excludedDays ? `점검중 · 비활성 vCenter 를 빼고 더한 날 ${trend.excludedDays}일` : ''].filter(Boolean).join(' · ')}</span></div>
             </>
           )}
           <div className="snp-ph"><h3>신호</h3><span className="hint">누르면 그 신호가 있는 VM 만 봅니다</span></div>

@@ -161,7 +161,7 @@ export const unreadVcs = (vcs) => (vcs || []).filter((v) => v && v.unread && !v.
 /** 법인 카드 — 서버 corps 순서가 아니라 기준 넘긴 수 많은 순. 스냅샷 VM 이 없는 법인도 카드로 남긴다(0대 — 수집은 됐다 · 못 읽은 vCenter 는 unread 로 센다). */
 export function corpCards(items, corps) {
   const byCorp = new Map((corps || []).map((c) => [c.id, { id: c.id, name: c.name, stale: (c.vcenters || []).some((v) => v.stale),
-    unread: unreadVcs(c.vcenters).length, vcN: (c.vcenters || []).length, items: [] }]));
+    unread: unreadVcs(c.vcenters).length, unreadIds: unreadVcs(c.vcenters).map((v) => String(v.id)), vcN: (c.vcenters || []).length, items: [] }]));
   for (const x of items) {
     if (!byCorp.has(x.corpId)) byCorp.set(x.corpId, { id: x.corpId, name: x.corpName, stale: false, items: [] });
     byCorp.get(x.corpId).items.push(x);
@@ -169,16 +169,33 @@ export function corpCards(items, corps) {
   return [...byCorp.values()].map((c) => {
     const over = c.items.filter((x) => x.sig?.age === true);
     const judged = c.items.filter((x) => x.judged !== false).map((x) => numOrNull(x.days)).filter((d) => d != null);
+    const has = new Set(c.items.map((x) => String(x.vcenterId)));
     return { ...c, n: c.items.length, over: over.length, gb: gbSum(c.items), overGb: gbSum(over), oldest: judged.length ? Math.max(...judged) : null,
+      unreadHeld: (c.unreadIds || []).filter((id) => has.has(id)).length,   // 못 읽었지만 직전 값(점검중 캐시 — stale 없이 서빙)으로 목록에 든 vCenter(143회차)
       blind: !c.items.length && c.unread > 0 && c.unread === c.vcN };   // 이 법인의 vCenter 를 하나도 못 읽었다 — 수 · 크기를 말하지 않는다
   }).sort((a, b) => b.over - a.over || b.gb.gb - a.gb.gb || String(a.name).localeCompare(String(b.name)));
 }
 
-/** 법인 카드 아래 줄 — 못 읽은 법인을 ‘스냅샷 없음’ 으로 적지 않는다(138회차). */
+/**
+ * 요약 아래 줄의 ‘지금 값을 못 읽은 vCenter’ — 목록에 VM 이 하나도 없는 것만 ‘빠졌습니다’ 이고, 직전 값으로 목록 · 수에 든 것(점검중 — store.js 가
+ * 캐시를 stale 표시 없이 서빙한다)은 따로 말한다. 143회차(재현): 138회차 문구가 점검중 vCenter 의 VM 을 수에 넣은 채 ‘빠졌습니다’ 라고 적었다.
+ */
+export function unreadSumText(cards, corp = '') {
+  const cs = (cards || []).filter((c) => !corp || c.id === corp);
+  const held = cs.reduce((a, c) => a + (c.unreadHeld || 0), 0);
+  const out = cs.reduce((a, c) => a + (c.unread || 0), 0) - held;
+  if (out > 0 && held > 0) return ` · 지금 값을 못 읽은 vCenter ${out + held}곳(${out}곳은 빠졌고 ${held}곳은 직전 값으로 셌습니다)`;
+  return `${out > 0 ? ` · 지금 값을 못 읽은 vCenter ${out}곳은 빠졌습니다` : ''}${held > 0 ? ` · 지금 값을 못 읽은 vCenter ${held}곳은 직전 값으로 셌습니다` : ''}`;
+}
+
+/**
+ * 법인 카드 아래 줄 — 못 읽은 법인을 ‘스냅샷 없음’ 으로 적지 않는다(138회차).
+ * 143회차(Chromium 1440 · 400): 이 줄은 한 줄 말줄임이라 뒤에 붙인 ‘지금 값을 못 읽은 vCenter N곳’ 이 잘려 보이지 않았다 — 앞에 둔다(카드 title 에도 싣는다).
+ */
 export function corpFootText(c) {
-  const parts = [c.oldest != null ? `가장 오래된 것 ${daysText(c.oldest)}` : c.n ? '판정한 스냅샷 없음' : c.blind ? null : '스냅샷 없음'];
+  const parts = [c.unread ? `지금 값을 못 읽은 vCenter ${c.unread}곳` : null,
+    c.oldest != null ? `가장 오래된 것 ${daysText(c.oldest)}` : c.n ? '판정한 스냅샷 없음' : c.blind ? null : '스냅샷 없음'];
   if (c.stale) parts.push('값이 낡음');
-  if (c.unread) parts.push(`지금 값을 못 읽은 vCenter ${c.unread}곳`);
   return parts.filter(Boolean).join(' · ');
 }
 
@@ -288,6 +305,21 @@ export function clearedSince(items, ago7, staleVcIds = new Set()) {
 
 /** 추이 한 줄의 값 — metric 'gb' | 'vms' | 'over'. 빠진 날은 null(선이 끊긴다). */
 export const seriesValues = (series, metric) => (series || []).map((p) => (p ? numOrNull(p[metric]) : null));
+
+/**
+ * 추이 그림과 그 아래 설명의 재료 — 법인을 고르면 그 법인의 줄(byCorp — 없으면 전체 줄) **하나**로 그림 · 처음 · 마지막 · 빠진 날 · 뺀 날을 센다.
+ * 143회차(재현): 그림은 법인 줄인데 처음 → 마지막 · 빠진 날은 전체 범위 줄에서 셌다. 서버가 따로 싣는 excluded(점검중 · 비활성으로 그날 묶음에서 뺀
+ * vCenter — history.aggregateDays)는 화면이 말하지 않아 그 vCenter 가 빠진 부분 합이 설명 없이 이어졌다.
+ */
+export function trendOf(hist, corp, metric) {
+  const series = (corp && hist?.byCorp?.[corp]) || hist?.series || [];
+  const values = seriesValues(series, metric);
+  const first = values.find((v) => v != null) ?? null;
+  const last = [...values].reverse().find((v) => v != null) ?? null;
+  return { values, first, last, missingDays: series.filter((p) => p && p.missing > 0).length,
+    excludedDays: series.filter((p) => p && numOrNull(p.vms) != null && p.excluded > 0).length,   // 값이 있는 날만(뺀 vCenter 하나뿐이면 그날은 null — 더한 것이 없다)
+    excludedOnlyDays: series.filter((p) => p && numOrNull(p.vms) == null && !(p.missing > 0) && p.excluded > 0).length };   // 뺀 vCenter 뿐이라 합이 없는 날
+}
 
 /**
  * SVG 꺾은선 조각 — null 은 선을 끊는다(빠진 날을 0 으로 잇지 않는다). 값은 0 ~ 최대값을 높이 h 에 맞춘다.
