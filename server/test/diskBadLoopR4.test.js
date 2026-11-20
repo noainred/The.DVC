@@ -218,3 +218,54 @@ test('R5-2 · N1 · N2 — acceptPush 의 옮기기: 중앙 등록부에 있으�
   await push('10.5.5.3', 'T3');
   assert.ok((await D.loadServer('', '10.5.5.3')).server, '등록부를 못 읽으면 옮기지 않는다(R5-2)');
 });
+
+// ── 6회차 반증이 찾은 R5-1 수정의 결함(R6-1)과 빠진 시험(P3 · P4) — 4회차를 내기 전에 고쳤다 ─────────────
+test('R6-1 — 합칠 때 이 노드가 값을 못 읽은 디스크(지금도 꽂힘 · 같은 시리얼)의 옛 이력을 남긴다 · 교체된 디스크는 남기지 않는다', () => {
+  const D1 = { id: 'd1', serial: 'SN-1', realloc: 2, pending: 0, uncorrectable: 6, readAt: NOW - 5 * DAY, firstAt: NOW - 30 * DAY, changedAt: NOW - 6 * DAY, before: { realloc: 2, pending: 0, uncorrectable: 1 } };
+  const D2 = { id: 'd2', serial: 'SN-2', realloc: 0, pending: 0, uncorrectable: 0, readAt: NOW - 5 * DAY, firstAt: NOW - 30 * DAY, changedAt: null };
+  const D3 = { id: 'd3', serial: 'OLD-3', realloc: 9, pending: 0, uncorrectable: 0, readAt: NOW - 5 * DAY, firstAt: NOW - 30 * DAY, changedAt: null };
+  const old = { status: 'ok', drives: [D1, D2, D3] };
+  const inv = (m) => (id) => m[id] || '';
+  // A — 이 노드가 값을 하나도 못 읽음(권한 · 보고서 없음): 인벤토리 시리얼이 같은 디스크만 남는다(d3 는 교체됨).
+  const a = D.mergeKeptVals({ status: 'forbidden', drives: [] }, old, inv({ d1: 'SN-1', d2: 'SN-2', d3: 'NEW-3' }));
+  assert.deepEqual(a.drives.map((d) => d.id).sort(), ['d1', 'd2']);
+  assert.equal(a.drives.find((d) => d.id === 'd1').uncorrectable, 6, '복구 불가 수 · 늘어난 때가 남는다');
+  assert.equal(a.drives.find((d) => d.id === 'd1').changedAt, NOW - 6 * DAY);
+  // B — 보고서에 d1 이 빠짐: d2 는 이 노드 값, d1 은 옛 값으로 남는다.
+  const b = D.mergeKeptVals({ status: 'ok', drives: [{ ...D2, readAt: NOW, firstAt: NOW - DAY }] }, old, inv({ d1: 'SN-1', d2: 'SN-2' }));
+  assert.deepEqual(b.drives.map((d) => d.id).sort(), ['d1', 'd2']);
+  assert.equal(b.drives.find((d) => d.id === 'd2').firstAt, NOW - 30 * DAY);
+  // 인벤토리를 모르면(시리얼 없음) 남기지 않는다 — 노드를 넘는 합치기는 엄격하게.
+  assert.deepEqual(D.mergeKeptVals({ status: 'ok', drives: [] }, old, () => '').drives, []);
+  // 이 노드 시리얼을 모르면 이력을 잇지 않는다.
+  const c = D.mergeKeptVals({ status: 'ok', drives: [{ id: 'd1', serial: '', firstAt: NOW, changedAt: null }] }, old, () => '');
+  assert.deepEqual(c.drives, [{ id: 'd1', serial: '', firstAt: NOW, changedAt: null }]);
+});
+
+test('P4 · P3 — 이 노드가 본 늘어남은 옛 것으로 덮지 않음 · SEL 합집합은 가장 새 것부터 상한까지', () => {
+  const mine = { drives: [{ id: 'd1', serial: 'S', firstAt: NOW - DAY, changedAt: NOW - HOUR, before: { realloc: 5 } }] };
+  const old = { drives: [{ id: 'd1', serial: 'S', firstAt: NOW - 9 * DAY, changedAt: NOW - 8 * DAY, before: { realloc: 1 } }] };
+  const m = D.mergeKeptVals(mine, old, () => 'S');
+  assert.equal(m.drives[0].changedAt, NOW - HOUR);
+  assert.deepEqual(m.drives[0].before, { realloc: 5 });
+  assert.equal(m.drives[0].firstAt, NOW - 9 * DAY);
+  const evs = (n, from) => Array.from({ length: n }, (_, i) => ev(from - i * HOUR, 'removed'));
+  const s = D.mergeKeptSel({ status: 'ok', events: evs(150, NOW - 1000 * HOUR) }, { events: evs(150, NOW) });
+  assert.equal(s.events.length, D.SEL_KEEP_MAX);
+  assert.equal(s.events[0].created, NOW, '가장 새 것이 앞');
+  assert.equal(s.events.every((e, i, arr) => i === 0 || arr[i - 1].created >= e.created), true);
+  assert.equal(s.keptFrom, Math.min(...s.events.map((e) => e.created)));
+});
+
+test('R6-1 (적재 경로) — 엣지가 디스크 값을 못 읽은 상태에서 합쳐도, 지금도 꽂힌 디스크의 옛 값 · 늘어난 때가 남는다', async () => {
+  const id = '10.8.8.9';
+  await D.ingestServers('', [{ ...srv(id, [], NOW - 30 * DAY), vals: vals(1) }], { now: NOW - 30 * DAY });
+  await D.ingestServers('', [{ ...srv(id, [], NOW - 25 * DAY), vals: vals(4) }], { now: NOW - 25 * DAY });
+  const forbidden = { status: 'forbidden', telemetry: 'forbidden', metrics: '', reportAt: null, seen: [], drives: [] };
+  await D.ingestServers('edge-f', [{ ...srv(id, [], NOW - DAY), vals: forbidden }], { now: NOW - DAY, canMoveFrom: () => false });
+  await D.ingestServers('edge-f', [srv(id, [])], { now: NOW, canMoveFrom: (from) => from === '' });
+  const d = (await D.loadServer('edge-f', id)).server.vals.drives.find((x) => x.id === VID);
+  assert.ok(d, '값을 못 읽은 디스크의 옛 값이 남는다');
+  assert.equal(d.realloc, 4);
+  assert.equal(d.changedAt, NOW - 25 * DAY);
+});

@@ -219,7 +219,9 @@ export async function ingestServers(agent, servers, { now = Date.now(), yielder 
             // 5회차 반증 R5-1: 옛 행의 SEL 보관 항목(장비가 SEL 을 지워도 포탈이 남긴 디스크 빠짐 · 장착)과 디스크 값 이력(처음 본 때 · 늘어난 때 · 늘기 전 값)도
             //   합친다 — 옛 행을 지우면서 함께 사라졌다(되돌릴 수 없는 손실). 합친 것이 상한을 넘으면 이 노드 값을 둔다(fitJson — 글자로 자르지 않는다).
             const mSel = mergeKeptSel(parseObj(mine.sel_json), parseObj(old?.sel_json));
-            const mVals = mergeKeptVals(parseObj(mine.vals_json), parseObj(old?.vals_json));
+            // 6회차 반증 R6-1: 지금 꽂힌 디스크(이번 인벤토리 · 없으면 이 노드가 적어 둔 것)의 시리얼로 판정한다 — 이 노드가 값을 못 읽은 디스크의 옛 이력을 지우지 않게.
+            const invSerial = serialMapOf(Array.isArray(s.drives) ? s.drives : parseArr(mine.drives_json));
+            const mVals = mergeKeptVals(parseObj(mine.vals_json), parseObj(old?.vals_json), invSerial);
             const selJ = mSel ? fitJson(mSel, SEL_JSON_MAX, (o) => (o.events?.length > 1 ? (o.events = o.events.slice(0, Math.floor(o.events.length / 2)), true) : false)) : null;
             const valsJ = mVals ? fitJson(mVals, VALS_JSON_MAX, (o) => (o.seen?.length ? (o.seen = [], true) : false)) : null;
             h.st.serverSetPast.run(valsJ ?? mine.vals_json ?? null, selJ ?? mine.sel_json ?? null, a, s.id);
@@ -411,22 +413,34 @@ export function mergeKeptSel(mine, old) {
 }
 
 /**
- * 노드 합치기의 디스크 값 이력(순수 — 5회차 반증 R5-1). 이 노드의 디스크마다, 옛 노드에 **같은 Id · 같은 디스크**(시리얼이 다르면 다른 디스크 — 반증 F1)가 있으면
- * 처음 읽은 때는 더 이른 쪽, 이 노드가 늘어난 것을 못 봤으면 옛 노드가 본 때 · 늘기 전 값을 잇는다. 이 노드에 없는 디스크는 되살리지 않는다(지금 목록이 진실).
+ * 노드 합치기의 디스크 값 이력(순수 — 5회차 반증 R5-1 · 6회차 R6-1). 노드를 넘는 합치기라 **양쪽 시리얼이 모두 있고 같을 때만** 같은 디스크로 본다
+ * (Dell Drive Id 는 자리 이름 — 반증 F1. 시리얼을 모르면 다른 디스크의 이력이 붙을 수 있다).
+ *  · 이 노드의 디스크: 같은 디스크면 처음 읽은 때는 더 이른 쪽, 이 노드가 늘어난 것을 못 봤으면 옛 노드가 본 때 · 늘기 전 값을 잇는다(이 노드가 본 것은 덮지 않는다).
+ *  · 이 노드가 값을 **못 읽은** 디스크(권한 · 보고서 없음 · 보고서에 빠짐): 지금 인벤토리(`invSerial`)에 같은 Id · 같은 시리얼이 있으면 옛 값을 남긴다 —
+ *    평소 적재(mergeVals — 반증 F9)와 같다. readAt 이 옛 것이라 판정은 '지난 값' 으로 다룬다. 교체 · 제거된 디스크(시리얼이 다름 · Id 없음 · 모름)는 남기지 않는다.
+ * @param {(id:string)=>string} [invSerial] 지금 인벤토리의 Id → 시리얼(모르면 '')
  */
-export function mergeKeptVals(mine, old) {
+export function mergeKeptVals(mine, old, invSerial = () => '') {
   const od = old && Array.isArray(old.drives) ? old.drives : [];
   if (!mine) return old || null;
-  if (!od.length || !Array.isArray(mine.drives)) return mine;
+  if (!od.length) return mine;
+  const mineDrives = Array.isArray(mine.drives) ? mine.drives : [];
   const byId = new Map(od.filter((d) => d && d.id).map((d) => [d.id, d]));
-  const drives = mine.drives.map((d) => {
+  const same = (a, b) => !!(a && b && a.serial && b.serial && a.serial === b.serial);
+  const drives = mineDrives.map((d) => {
     const p = d && byId.get(d.id);
-    if (!p || (p.serial && d.serial && p.serial !== d.serial)) return d;
+    if (!same(p, d)) return d;
     const firsts = [d.firstAt, p.firstAt].filter(Number.isFinite);
     const out = { ...d, firstAt: firsts.length ? Math.min(...firsts) : (d.firstAt ?? null) };
     if (!Number.isFinite(d.changedAt) && Number.isFinite(p.changedAt)) { out.changedAt = p.changedAt; if (p.before) out.before = p.before; }
     return out;
   });
+  const have = new Set(mineDrives.map((d) => d?.id));
+  for (const p of od) {
+    if (!p || !p.id || have.has(p.id)) continue;
+    const sn = String(invSerial(p.id) || '').trim();
+    if (sn && p.serial && sn === p.serial) drives.push(p);
+  }
   return { ...mine, drives };
 }
 
