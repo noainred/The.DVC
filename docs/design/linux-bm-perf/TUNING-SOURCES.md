@@ -45,7 +45,7 @@ Rocky 공식 문서에는 범용 ‘성능 튜닝 가이드’ 가 없다(검색
 | 메모리 | `vm.swappiness` | 10 | 0~200 · 기본 60 · 익명/페이지캐시 회수 선호. 0 은 “increases the likelihood that the oom_killer function kills processes …”(RHEL 10). 10 은 RHEL 6 Oracle 예시·DB 벤더 관행 | H4 · H8 | ◐ / ○ |
 | 메모리 | THP `enabled` | madvise | “THP is enabled by default in Red Hat Enterprise Linux 9.” madvise 는 요청한 앱에만, “if the workload benefits significantly from THP, the performance decreases.” DB 끄기 권고는 벤더(MongoDB 등) | H3 | ◐ / ○ |
 | 메모리 | HugeTLB `HugePages_Total` | DB 공유 버퍼만큼 | 부팅 때 예약이 가장 확실 · `default_hugepagesz=1G hugepagesz=1G` · hugepagesz 뒤에 hugepages. Rocky: “16384 MB / 2 MB = 8192 hugepages” → `vm.nr_hugepages` | H3 · R1 | ◐ / ● → DB 설정 못 읽으면 확인 불가 |
-| 메모리 | `vm.min_free_kbytes` | 물리 메모리 1~2% 안 · 수백 MB 이하 | “A reasonable starting point is 1-2% of total physical memory, not exceeding a few hundred megabytes.” NUMA 존별 분배 → 너무 크면 한 노드 OOM. RHEL 9: 너무 낮으면 “system crashes and failure to service interrupts” | R1 · H4 | ● / ◐ |
+| 메모리 | `vm.min_free_kbytes` | 물리 메모리 2% 이하(‘수백 MB’ 는 수치가 모호해 판정하지 않는 참고 — 2026-11-20 결정 A5) | “A reasonable starting point is 1-2% of total physical memory, not exceeding a few hundred megabytes.” NUMA 존별 분배 → 너무 크면 한 노드 OOM. RHEL 9: 너무 낮으면 “system crashes and failure to service interrupts” | R1 · H4 | ● / ◐ |
 | 메모리 | `vm.dirty_ratio` / `dirty_background_ratio` | 기본 20 / 10 유지 | dirty_ratio “a percentage of total system memory … The default value is 20 percent.” background 기본 10 | H4 | ◐ |
 | 메모리 | khugepaged CPU | 보조 관찰 | 공식 튜닝 문장 없음 | — | ○ |
 | 스토리지 | NVMe scheduler | none(바꾸지 않음) | NVMe 기본 none · Red Hat 은 바꾸지 말 것 권고 · 고성능 SSD/CPU 바운드 → none(대안 kyber) | H2 | ◐ |

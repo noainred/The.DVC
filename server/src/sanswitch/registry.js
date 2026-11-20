@@ -38,7 +38,7 @@ let _db = null;
  */
 // v2.613 PERSIST2613-04 · DEPS2613-04: 손상 보존본 판정(corruptOnlyReason)·로드 오류 상태·원소 필터·법인 축 판정은 util/registryCore.js 하나다
 //   (등록부 5벌이 같은 12줄을 복사해 들고 있었고 이미 갈라져 있었다 — 원소 null 하나에 listDevices 가 매 호출 TypeError).
-const loadErr = makeLoadError();
+const loadErr = makeLoadError({ label: 'SAN 스위치 등록부', file: FILE });   // 결정(76~105 남긴 것 · 2026-11-20) A1: 서비스 점검 '장비 등록부 파일' 행(표시 전용)
 export function registryLoadError() { load(); return loadErr.get(); }
 
 // 결정(78 남긴 것 ①): parse 실패(형식 · 복호 포함 — 예전 try 블록과 같은 범위)만 손상이다.

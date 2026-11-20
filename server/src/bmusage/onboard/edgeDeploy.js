@@ -134,12 +134,18 @@ export function deployFor(agent, { verified = false } = {}) {
 
 /* 엣지별 마지막 인출(인메모리 — 중앙 재시작 직후엔 비어 있고 화면이 그 사실을 말한다). */
 const _pulls = new Map();
-export function recordOnboardPull(agent, { appliedSig = '', applied = null, version = '', now = Date.now() } = {}) {
+/**
+ * 결정(76~105 남긴 것 · 2026-11-20) A3: `stateUnread` — 엣지가 적용 상태 파일(bm-onboard-applied.json)을 **읽지 못했다**는 불리언 하나(엄격한 true 만 ·
+ *   사유 원문 · 오류 코드는 받지 않는다). 인출마다 기록을 통째로 바꾸므로 칸이 없거나 거짓인 다음 인출이 표지를 지운다(한 번 세운 표지가 남지 않는다).
+ *   판정(서명 · 제거 대기 정리)에는 쓰지 않는다 — 화면 문구만.
+ */
+export function recordOnboardPull(agent, { appliedSig = '', applied = null, version = '', stateUnread = false, now = Date.now() } = {}) {
   const a = lc(agent); if (!a) return;
   if (!_pulls.has(a) && _pulls.size >= 512) _pulls.delete(_pulls.keys().next().value);
   const n = (v) => (Number.isInteger(v) && v >= 0 && v <= 100000 ? v : null);
   _pulls.set(a, { at: now, appliedSig: String(appliedSig || '').slice(0, 64).replace(/[^0-9a-f]/g, ''), version: String(version || '').slice(0, 32),
-    applied: applied && typeof applied === 'object' ? { ok: n(applied.ok), rejected: n(applied.rejected), removed: n(applied.removed) } : null });
+    applied: applied && typeof applied === 'object' ? { ok: n(applied.ok), rejected: n(applied.rejected), removed: n(applied.removed) } : null,
+    stateUnread: stateUnread === true });
 }
 export function onboardPullOf(agent) { return _pulls.get(lc(agent)) || null; }
 

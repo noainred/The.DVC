@@ -21,6 +21,7 @@ import { numOrNull } from '../util/numOrNull.js';
 import { sanitizeHwSummary, mgmtHostOf } from '../idrac/hwSummary.js'; // v3.3.0 엣지 하드웨어 요약 · iDRAC 주소 정제(엣지 agent/fleetPush.js 와 짝)
 import { summarizeRegistryError, REGISTRY_ERROR_LABEL } from '../util/registryCore.js'; // v2.744(회귀 검토 GD-R1)
 import { envPositive } from '../util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
+import { logAudit } from '../audit.js';   // 결정(76~105 남긴 것 · 2026-11-20) A6: 읽기 오류 창을 합칠 때의 기록
 
 const FILE = path.join(config.configDir, 'central-fleet.json');
 const TTL_MS = envPositive(process.env.CENTRAL_FLEET_TTL_MS, 1_800_000); // 30분 무보고 시 만료 · 54회차: 식 기본값도 envPositive(음수면 바로 만료되던 것)
@@ -67,13 +68,38 @@ function fleetWritable() {
   if (inRetryWindow(Date.now(), readRetryAt, READ_RETRY_MS)) return false;
   const r = readJsonFile(FILE, { parse: parseFleetFile, preserve: false });
   if (r.kind === 'read-error') { readRetryAt = Date.now() + READ_RETRY_MS; return false; }
-  if (r.kind === 'ok') { let n = 0; for (const [a, e] of Object.entries(r.value)) if (!(a in cache)) { cache[a] = e; n += 1; } if (n) bumpFleetRev(); }
+  let n = 0; let superseded = 0;
+  if (r.kind === 'ok') { for (const [a, e] of Object.entries(r.value)) { if (!(a in cache)) { cache[a] = e; n += 1; } else superseded += 1; } if (n) bumpFleetRev(); }
   readBlocked = false; readRetryAt = 0;
-  console.warn(`[central-fleet] ${path.basename(FILE)} 다시 읽었습니다(읽기 오류 풀림 — 파일의 엣지분을 합쳤습니다)`);
+  noteFleetWindowMerge(r, n, superseded);   // 결정 A6: 감사 로그 · 콘솔 한 줄(창마다 한 번)
   return true;
 }
 /** 87회차 ⓐ: 테스트 · 진단 — 함대 파일을 읽지 못해 저장을 멈춘 상태인가. */
 export function fleetReadBlocked() { return readBlocked; }
+
+/*
+ * 결정(76~105 남긴 것 · 2026-11-20) A6(권장안 — 동작은 현행 유지 + 기록): 함대 파일 읽기 오류 창 동안 push 로 들어온 엣지분은 파일과 대조 전이다
+ *   (합칠 때 메모리 쪽이 이긴다 — 더 새 push). 함대에는 vCenter 소유 칸이 없고(엣지 이름이 키 — 개별 토큰은 자기 이름만 쓴다) 원소 귀속은 위임 인벤토리 소유
+ *   (central/inventory.js — 그 창의 TOFU 기록은 그쪽)로 가른다. 여기서는 창을 닫을 때 합친 결과(파일에서 되살린 엣지 · 창 동안 push 가 파일 값을 대신한 엣지 ·
+ *   그중 이름을 검증하지 못한 것)를 감사 로그 · 콘솔에 한 줄 남긴다 — 조용히 합치지 않는다.
+ */
+const WINDOW_TRACK_MAX = 1_000;
+const windowAgents = new Map();   // 창 동안 push 한 엣지 이름 → verified
+let windowOverflow = 0;
+function noteFleetWindowPush(agent, verified) {
+  if (!readBlocked) return;
+  if (windowAgents.has(agent) || windowAgents.size < WINDOW_TRACK_MAX) windowAgents.set(agent, !!verified || windowAgents.get(agent) === true);
+  else windowOverflow += 1;
+}
+function noteFleetWindowMerge(r, restored, superseded) {
+  const pushed = windowAgents.size + windowOverflow;
+  const unverified = [...windowAgents.values()].filter((v) => !v).length;
+  const head = r.kind === 'ok' ? '다시 읽었습니다(읽기 오류 풀림 — 파일의 엣지분을 합쳤습니다)' : `다시 읽었지만 ${r.kind === 'missing' ? '파일이 없어' : '파일이 손상돼'} 합치지 못했습니다(읽기 오류 풀림 — 지금 메모리 값을 씁니다)`;
+  const detail = `${head} — 창 동안 push 한 엣지 ${pushed}(그중 이름 미검증 ${unverified}) · 그 push 가 파일 값을 대신한 엣지 ${superseded} · 파일에서 되살린 엣지 ${restored}`;
+  console.warn(`[central-fleet] ${path.basename(FILE)} ${detail}`);
+  try { logAudit({ user: 'system', action: 'central-fleet.unread-window-merge', target: path.basename(FILE), detail }); } catch { /* 감사 실패가 저장을 막지 않게 */ }
+  windowAgents.clear(); windowOverflow = 0;
+}
 
 let writeTimer = null;
 let writing = false;   // 비동기 원자 쓰기 진행 중
@@ -205,6 +231,7 @@ export function setEdgeFleet(agent, baremetal, generatedAt, { verified = true, v
   //   길이 제한 없이 받아 수 MB 글자가 캐시 · central-fleet.json · 관리 화면 응답에 그대로 남았다(재현: 3MB 글자가 listEdgeFleet 에 그대로).
   const gen = typeof generatedAt === 'number' && Number.isFinite(generatedAt) ? generatedAt : (typeof generatedAt === 'string' ? (capTrim(generatedAt, 40) || null) : null);
   cache[a] = { at: Date.now(), generatedAt: gen, baremetal: list, sig, verified: !!verified, ...(omitted ? { omitted } : {}), ...(vcenterBlanked ? { vcenterBlanked } : {}), ...(part ? { partial: part } : {}) };
+  noteFleetWindowPush(a, verified);   // 결정 A6: 읽기 오류 창이면 기록(합칠 때 합계)
   if (!prev || prev.sig !== sig) bumpFleetRev(); // 내용이 바뀐 경우에만 캐시 무효화
   persistSoon();
   return { accepted: list.length, omitted, vcenterBlanked, ...(part ? { partial: part } : {}) };

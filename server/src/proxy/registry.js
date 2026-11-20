@@ -21,6 +21,7 @@ import { numOrNull } from '../util/numOrNull.js';
 import { envPort } from '../util/envNumber.js';   // 100회차(99회차 남긴 것): 포트 env 는 1~65535 정수만(−1 · 70000 · Infinity → 기본값 — 결정 57)
 import { normalizeGuacdFlags } from './guacdFlags.js';   // 48회차 F2
 import { parseJsonObject } from '../util/jsonObject.js'; // v3.17.2: 객체가 아닌 JSON(수 · 글자 · 배열)은 깨진 JSON 과 같이 — 손상 보존 경로로
+import { registerRegistryStatus } from '../util/registryCore.js';   // 결정(76~105 남긴 것 · 2026-11-20) A1: 서비스 점검 '장비 등록부 파일' 행(표시 전용)
 
 /**
  * v2.606(감사 WEB2606-04): 포트 칸 → 저장값. 1~65535 정수만 받고 **빈 값·숫자 아님·범위 밖은 이전 값 유지**다.
@@ -78,16 +79,18 @@ let cache = null;
  */
 const _reader = makeJsonFileReader(() => FILE, { parse: (t) => openSecretsDeep(parseJsonObject(t)), tag: 'remote' }); // v2.296 자격증명 복호 · v3.17.2 객체만
 let _readError = null;
+let _readErrorAt = null;   // 결정 A1: 이어지는 읽기 오류는 처음 시각을 유지한다(서비스 점검의 '언제부터')
 export const REGISTRY_READ_ERROR_TEXT = '원격 접속 설정 파일(remote-access.json)을 읽지 못했습니다(읽기 오류 — 손상이 아니라 원본은 그대로 둡니다). 권한 · 디스크를 확인하세요 — 그동안 원격 접속 설정 · 매핑 저장을 거절합니다.';
 
 function load() {
   if (cache) return cache;
   const r = _reader.read();
   if (r.kind === 'read-error') {
+    if (!_readError) _readErrorAt = Date.now();
     _readError = r.error;
     return buildCache({});   // 캐시하지 않는다 — 원본이 다시 읽히면 그 값으로(그동안 persist 는 거절)
   }
-  _readError = null;
+  _readError = null; _readErrorAt = null;
   cache = buildCache(r.kind === 'ok' ? r.value : {});   // missing · corrupt(보존본으로 옮겼다)는 빈 값 — 예전과 같다
   return cache;
 }
@@ -113,6 +116,21 @@ function persist() {
 export function getConfig() { return load(); }
 /** 79회차 반증: 읽기 오류 중인가(76 F5 — 그동안 load() 는 빈 설정을 준다). 화면 · 설정 상태가 빈 목록을 '없음' 으로 말하지 않게 표지로 쓴다. */
 export function registryReadError() { load(); return _readError ? { readError: true, reason: REGISTRY_READ_ERROR_TEXT } : null; }
+/*
+ * 결정(76~105 남긴 것 · 2026-11-20) A1: 서비스 점검의 '장비 등록부 파일' 행에 등록한다(표시 전용 — 확정 버튼 없음). 이 등록부는 makeLoadError 가 아니라
+ *   reader 의 읽기 상태(_readError)를 들고 있어 getter 로 잇는다. 읽기 오류가 선 동안만 load() 로 다시 판정한다(reader 가 30초 간격을 지킨다 —
+ *   조회가 디스크를 매번 보지 않는다). 오류가 없으면 load() 를 부르지 않는다(조회가 첫 로드 · 손상 보존을 일으키지 않게).
+ *   손상(보존본으로 옮김)은 이 모듈이 표지를 남기지 않는다 — 파일이 없고 보존본만 있으면 공용 목록(listRegistryLoadErrors)이 '보존본만 남음' 으로 싣는다.
+ */
+registerRegistryStatus({
+  label: '원격 접속 설정', file: FILE,
+  get: () => {
+    if (_readError) load();
+    if (!_readError) return null;
+    const code = String(_readError?.code || 'read-error').slice(0, 32);
+    return { at: _readErrorAt, readError: true, reason: `읽기 오류(${code}) — 손상이 아니라 원본은 그대로 둡니다` };
+  },
+});
 
 const REDACT = '********';
 

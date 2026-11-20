@@ -879,7 +879,7 @@
   - auto = 그 법인 엣지(`edgeCorps.edgeCorpsSource` — ‘중앙에서 켜기’ 와 같은 매핑)가 **지금 접속 중**(`agentLastContact` 15분 안)일 때만 edge · 엣지가 없으면 central ·
     **엣지가 있는데 끊겼거나 접속 기록을 모르면(중앙 재시작 직후) 판정 보류(거부)** — 엣지가 사라졌다고 central 로 정하지 않는다(원문이 법인 밖으로 나가는 결정은 사람이).
   - 인출 `GET /api/central/bm-onboard` 은 **개별 토큰으로 인증된 이름에만** 행을 준다(공유 토큰 `?agent=` 는 distribute:false) · 본문 판정은 `onboardBodyOk`
-    (배포 판정 칸 · 서명 꼴 — 봉투 `{ok, node}` 판정이 아니다) · 손상이면 지속형 503(`settingsUnreadable`) · 엣지는 결과(적용 · 거부 · 지운 수)와 적용 서명을 **다음 인출의 쿼리 숫자**로만 알린다.
+    (배포 판정 칸 · 서명 꼴 — 봉투 `{ok, node}` 판정이 아니다) · 손상이면 지속형 503(`settingsUnreadable`) · 엣지는 결과(적용 · 거부 · 지운 수)와 적용 서명을 **다음 인출의 쿼리 숫자**로만 알린다(결정 A3 · 2026-11-20: 적용 상태 파일 **읽기 오류**면 불리언 `unread=1` 하나를 더하고 결과 수는 뺀다 — 중앙은 검증된 이름 · 정확히 '1' 만 받아 인출마다 덮고 화면은 '대기' 대신 사유 · 회귀 `decide3G2`).
   - 엣지는 받은 행을 `edgeRowFromPlan` 으로 다시 자르고 **같은 분석(analyzeOnboardRows · isEdge)** 을 거친다(배포 경로 정규화 — v2.933 규약) — 자기 법인(로컬 corps)만 ·
     공통 계정 · 키는 **엣지 자기 저장소의 같은 이름** · 없으면 그 행 거부. 배포에서 빠진 서버는 **이 배포가 만든 항목만** 지운다(`bm-onboard-applied.json` · 손으로 둔 항목은 남는다).
   - 중앙의 bm-storage 항목 중 키 · 공통 계정 인증 서버는 **엣지 df 위임 잡 · 엣지 PUSH 에 싣지 않는다**(개인키를 중앙 → 엣지로 보내지 않는다 · 빈 비밀번호로 계정을 잠그지 않게).
@@ -979,6 +979,8 @@
   ⑤ `confirmSettingsDefault` 는 오류 중 **파일이 다시 있으면** 덮지 않는다(409 `file-present` — 되돌린 보존본) · `ownerOnly` 로 등록한 파일은 확정도 설정 소유자 등급(B-1 · B-2).
   ⑥ '중앙 → 엣지' 링크 id 는 `links.js centralEdgeLinkId` 하나(통신 지도도 같은 함수 — A-2) · 중계 점검 https 의 인증서 · 프로토콜 실패는 'cert' 단계(A-3) ·
      엣지 로그는 원문(상한 16KB)을 다 가린 뒤 2,000자로 자른다(먼저 자르면 경계에 걸친 비밀이 남는다 — A-1).
+  ⑦ 결정(76~105 남긴 것 A4 · 2026-11-20 '권장 사항으로 진행' — 현행 유지): 중계 점검 **수동 호스트**도 IPv6 ULA(fc00::/7)를 막는다 — 함대 SSRF 판정(`util/ssrfBlock.js` · `relaycheck/checks.js ipBlockReason`) 하나를
+     한 기능만 넓히지 않는다(수집 서버 등록부 · vCenter · relaytopo 와 같은 판정). ULA 를 쓰는 현장이 확인되면 전역 옵트인(env)을 다시 본다.
 - **전체 점검 4회차 V-9 — 엣지 시각은 시계 보정이 0 이어도 수신 시각으로 자른다**(`central/veeamEdge.js` poller.at · `veeam/parse.js` authStop.since · 회귀 `veeamFullAudit2` ⑦):
   보정 창 밖(차이 2분 미만 · 30일 초과)이면 결과 ts 만 미래를 잘랐고 두 값은 미래 시각 그대로 저장돼 진행 상태에 보였다. 새 엣지 시각 칸도 `shift`(보정 + `Math.min(now)`)를 지날 것.
   **남긴 것(4회차 V-8 — 추정)**: Veeam EM VM 기록(`veeam/em/vmStore.js keyOf`)은 '백업 서버 + VM 이름' 키라 같은 서버의 동명 VM 두 대(moref 다름)의 마지막 작업 · 복원 지점이 한 기록에 섞인다.

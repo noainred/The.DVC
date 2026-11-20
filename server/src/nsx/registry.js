@@ -30,7 +30,7 @@ import { REGIONS } from '../util/regions.js'; // v2.575 IMP-10 — 단일 소스
  *      쓰기(등록 · 수정 · 삭제)는 거절한다(`registry-unreadable`) · 30초 간격으로 다시 읽고, 읽히면 풀린다.
  *    - corrupt: 예전과 같다(보존본으로 옮기고 빈 목록 — 관리자 저장이 새 등록부를 만든다).
  */
-const loadErr = makeLoadError();
+const loadErr = makeLoadError({ label: 'NSX 등록부', file: FILE });   // 결정(76~105 남긴 것 · 2026-11-20) A1: 서비스 점검 '장비 등록부 파일' 행(표시 전용)
 const WHAT = 'NSX 등록부(nsx.json)';
 let _lastGood = null;   // 마지막으로 읽은 목록(복호된 값 — 호출부가 고치지 못하게 사본으로 들고 사본으로 준다)
 const parseDb = (text) => {

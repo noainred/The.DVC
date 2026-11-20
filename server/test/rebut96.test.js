@@ -227,7 +227,9 @@ test('94 남긴 것 ① 결정: Veeam 결과가 상한에서 잘렸으면(trunca
   assert.deepEqual(st.usableResult(st.getRecord('vbr-9')).truncated, ['restorePoints']);
   // 대조 · 계획 연결(소스 — 주석 제거)
   const { stripComments } = await import('./_stripComments.js');
-  assert.match(stripComments(src('server/src/routes/api/veeam.js')), /x\.result\?\.truncated/);
+  // 결정(76~105 남긴 것 · 2026-11-20) A9: 판정을 backupCounts.resultsTruncated 하나로 모았다(모니터링 수 veeamCount 와 같은 코어) — 대조 결과(br)를 그 함수로 본다.
+  assert.match(stripComments(src('server/src/routes/api/veeam.js')), /truncated = resultsTruncated\(br\)/);
+  assert.match(stripComments(src('server/src/veeam/backupCounts.js')), /x\?\.result\?\.truncated/);
   assert.match(stripComments(src('server/src/routes/api/backupRun.js')), /truncated: !!m\.truncated/);
   assert.match(stripComments(src('server/src/veeam/client.js')), /truncated/);
 });
