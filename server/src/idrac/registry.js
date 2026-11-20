@@ -27,6 +27,7 @@ import { clearSensorSeries } from './sensorStore.js';
 import { parseCsvRows } from '../util/csv.js';
 import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js'; // v2.503: 접속처 변경 시 저장 비밀 폐기(공용 판정)
 import { logAudit } from '../audit.js'; // v2.770(점검 R5-E4-01): 스캔 교체로 지운 등록을 감사 로그에 남긴다
+import { trimTrailingSlashes } from '../util/trimSlashes.js'; // 155회차: 끝 '/' 제거는 선형으로(정규식 /\/+$/ 는 O(n²))
 
 // 삭제된 서버의 파생 캐시 정리 — 안 하면 인벤토리(디스크 영속)와 센서 시계열(메모리, 서버당
 // 최대 1440샘플×64센서)이 프로세스 수명 내내 남아 서버 등록/삭제 반복 시 무한 증식한다.
@@ -162,6 +163,8 @@ export function matchKeys(entry) {
 }
 
 /** Validate + normalize an incoming server payload. Returns [entry, error]. */
+/** 155회차: 등록 · 연결 테스트가 받는 host 길이 상한(스킴 · 포트 · 경로 포함 — horizon · 수집 서버 URL 과 같은 2,048자). */
+export const HOST_MAX_LEN = 2048;
 function normalize(body, existing = null) {
   const e = existing ? { ...existing } : {};
   const id = String(body.id ?? e.id ?? '').trim();
@@ -176,9 +179,12 @@ function normalize(body, existing = null) {
   if (!host) return [null, type === 'ome' ? 'OME 주소(host)는 필수입니다.' : 'iDRAC 주소(host)는 필수입니다.'];
   if (!username) return [null, 'username은 필수입니다.'];
 
+  // 155회차(실측): 길이를 **정규식보다 먼저** 자른다 — 예전에는 상한이 없고 끝 '/' 를 /\/+$/ 로 지워, '/' 가 길게 이어진 host 한 줄(관리자 등록 · CSV 칸 · 본문 1MB)이
+  //   이벤트 루프를 막았다(4만 자 0.69초 · 8만 자 2.4초 — O(n²)) · 그 host 는 그대로 등록부에 저장됐다. 루트 규칙 ‘길이를 먼저 자르고 선형으로’.
+  if (host.length > HOST_MAX_LEN) return [null, `host 가 너무 깁니다(최대 ${HOST_MAX_LEN.toLocaleString('en-US')}자).`];
   // Accept a bare IP/hostname and normalize to https://host.
   if (!/^https?:\/\//.test(host)) host = `https://${host}`;
-  host = host.replace(/\/+$/, '');
+  host = trimTrailingSlashes(host);
   // v2.537(인증·인가 3차 감사): 루프백·링크로컬·우회표기 차단 — storage/sanswitch/pdu 등록부와 같은 규칙.
   // 이 등록부는 v2.536 까지 host 를 **검사 없이** 받았다(형식 정규화만). 폴러가 그 host 로 Redfish
   // 자격증명(Basic/Digest)을 보내므로 등록 = 접속이다. bulkAddByIps·registerScanned 도 importServers
@@ -550,8 +556,9 @@ export async function testServer(body) {
   }
   // normalize host the same way as save
   let host = String(entry.host).trim();
+  if (host.length > HOST_MAX_LEN) return { ok: false, reason: `host 가 너무 깁니다(최대 ${HOST_MAX_LEN.toLocaleString('en-US')}자).` };   // 155회차: 정규식보다 먼저(등록 normalize 와 같은 상한)
   if (!/^https?:\/\//.test(host)) host = `https://${host}`;
-  const normalized = { ...entry, host: host.replace(/\/+$/, '') };
+  const normalized = { ...entry, host: trimTrailingSlashes(host) };
   // 전체 점검 33회차 F1(재현): 등록(normalize)과 같은 SSRF 정적 가드 — 예전에는 연결 테스트만 루프백 · 링크로컬 · 우회 표기를 그대로 찔렀다
   //   (IP 리터럴은 dispatcher 의 ssrfLookup 을 타지 않는다). 저장 비밀을 물려받는 테스트는 host 가 저장값이라 등록 때 이미 지났다.
   { const ssrf = ssrfBlockReason(normalized.host); if (ssrf) return { ok: false, reason: `host 거부: ${ssrf}` }; }

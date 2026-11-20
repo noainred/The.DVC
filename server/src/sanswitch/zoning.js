@@ -89,6 +89,15 @@ export function splitMembers(text) {
 }
 
 /**
+ * 155회차(재현): 장비가 준 이름(cfg · zone · alias)은 일반 객체의 **자기 속성**으로만 읽고 쓴다.
+ *   예전에는 `bucket[name]` · `cfgs[activeCfg]` · `dz[n]` 이 Object.prototype 의 상속 값(‘constructor’ · ‘toString’ · ‘valueOf’ · ‘hasOwnProperty’ …)을
+ *   ‘이미 있는 목록’ 으로 읽어 `.push is not a function` · `is not iterable` 로 던졌다 — 그런 이름의 zone · alias 하나가 그 스위치의 수집 전체
+ *   (buildSnapshot — 포트 · 오류 · SFP 포함)를 매 주기 실패로 만든다. ‘__proto__’ 는 대입이 원형을 바꾸므로 defineProperty 로 자기 속성을 만든다.
+ */
+export const ownOf = (o, k) => (o != null && Object.hasOwn(o, k) ? o[k] : undefined);
+export const ownPut = (o, k, v) => { Object.defineProperty(o, k, { value: v, writable: true, enumerable: true, configurable: true }); return v; };
+
+/**
  * cfgshow 전문 파싱.
  * @returns {{
  *   sections: string[],                       // 본 섹션 이름(정직: 출력이 잘렸는지 알 수 있게)
@@ -131,7 +140,7 @@ export function parseCfgShow(text) {
       if (kind === 'cfg' && inEffective) { effective.cfg = name; cur = null; continue; }
       const bucket = bucketFor(kind === 'qloop' ? 'zone' : kind);
       if (!bucket) { cur = null; continue; }
-      if (!bucket[name]) bucket[name] = [];
+      if (!Object.hasOwn(bucket, name)) ownPut(bucket, name, []);   // 155회차: 상속 값(‘constructor’ …)을 있는 목록으로 읽지 않는다
       cur = { bucket, name };
       // `cfg: cfg1  ZONE_A;` 처럼 이름 뒤에 멤버가 붙어 오는 형식(실장비 확인).
       if (rest.trim()) bucket[name].push(...splitMembers(rest));
@@ -191,10 +200,11 @@ export function resolveZones(parsed, { activeCfg = '' } = {}) {
     };
   }
   const cfgs = parsed?.defined?.cfgs || {};
-  const pick = activeCfg && cfgs[activeCfg] ? activeCfg : Object.keys(cfgs)[0] || '';
-  const zoneNames = pick ? cfgs[pick] : Object.keys(parsed?.defined?.zones || {});
+  // 155회차: 이름 조회는 자기 속성만(위 ownOf) — 헤더의 활성 cfg 이름 · cfg 멤버(zone 이름)가 ‘constructor’ · ‘valueOf’ 여도 던지지 않는다.
+  const pick = activeCfg && Object.hasOwn(cfgs, activeCfg) ? activeCfg : Object.keys(cfgs)[0] || '';
+  const zoneNames = pick ? ownOf(cfgs, pick) : Object.keys(parsed?.defined?.zones || {});
   const dz = parsed?.defined?.zones || {};
-  const zones = (zoneNames || []).filter((n) => dz[n]).map((name) => ({ name, ...expand(dz[name]) }));
+  const zones = (Array.isArray(zoneNames) ? zoneNames : []).filter((n) => Object.hasOwn(dz, n)).map((name) => ({ name, ...expand(dz[name]) }));
   if (!zones.length) return { source: 'none', cfgName: pick, zones: [] };
   return { source: 'defined', cfgName: pick, zones };
 }

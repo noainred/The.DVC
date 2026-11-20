@@ -42,6 +42,8 @@ const ACCOUNT_MAX_LEN = 128;
 export const ROW_LIMIT = 20_000;
 
 const s = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+/** 155회차: 계정 이름(외부 값)을 키로 쓸 때는 자기 속성으로(‘__proto__’ 대입은 원형을 바꾼다). */
+const ownSet = (o, k, v) => { Object.defineProperty(o, k, { value: v, writable: true, enumerable: true, configurable: true }); };
 const isObj = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
 
 /** 이벤트 1건이 'VM 스냅샷 생성' 인가 — 실제 vCenter 는 TaskEvent('Task: Create virtual machine snapshot'), 데모는 VmSnapshotCreatedEvent. */
@@ -207,7 +209,7 @@ function accFrom(text) {
   if (isObj(raw?.learned)) {
     for (const [k, v] of Object.entries(raw.learned).slice(0, MAX_LEARNED)) {
       const a = s(k, ACCOUNT_MAX_LEN);
-      if (a && isObj(v) && Number.isFinite(v.t)) acc.learned[a] = { t: v.t, vms: (Array.isArray(v.vms) ? v.vms : []).filter((x) => typeof x === 'string').map((x) => x.slice(0, 256)).slice(0, 5) };
+      if (a && isObj(v) && Number.isFinite(v.t)) ownSet(acc.learned, a, { t: v.t, vms: (Array.isArray(v.vms) ? v.vms : []).filter((x) => typeof x === 'string').map((x) => x.slice(0, 256)).slice(0, 5) });
     }
   }
   if (isObj(raw?.forgotten)) {
@@ -310,8 +312,9 @@ export function rememberLearned(list, now = Date.now()) {
     const vm = s(it?.vm, 256);
     if (!k || !vm) continue;
     if (forgottenAt(a, k, now) != null) continue;   // v2.763(V4-I1): 관리자가 지운 계정 — 시한 동안 다시 배우지 않는다
-    const prev = a.learned[k];
-    if (!prev) { a.learned[k] = { t: now, vms: [vm] }; changed++; continue; }
+    // 155회차(재현): 자기 속성만 — 계정 이름이 ‘constructor’ · ‘toString’ 이면 상속 함수를 지난 기록으로 읽어 `prev.vms.includes` 가 던졌다(그 vCenter 스냅샷 요약 전체 실패).
+    const prev = Object.hasOwn(a.learned, k) ? a.learned[k] : null;
+    if (!prev) { ownSet(a.learned, k, { t: now, vms: [vm] }); changed++; continue; }
     const newVm = !prev.vms.includes(vm);
     if (!newVm && now - prev.t < 3_600_000) continue;
     prev.t = now;
@@ -336,7 +339,7 @@ export function forgetLearned(names, now = Date.now()) {
   let n = 0;
   for (const raw of Array.isArray(names) ? names.slice(0, MAX_LEARNED) : []) {
     const k = typeof raw === 'string' ? raw.trim() : '';
-    if (k && a.learned[k]) { delete a.learned[k]; a.forgotten[canonAcct(k)] = now; n++; }
+    if (k && Object.hasOwn(a.learned, k)) { delete a.learned[k]; a.forgotten[canonAcct(k)] = now; n++; }   // 155회차: 배운 적 없는 ‘constructor’ 를 지웠다고 세지 않는다
   }
   if (n) {
     // 시한이 지난 것은 지우고, 상한을 넘으면 오래된 것부터 버린다(파일이 끝없이 자라지 않게).
