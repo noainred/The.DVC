@@ -100,10 +100,13 @@ function mergeRows(ref) {
 /** .xlsx 첫 시트 → 표(행 = 칸 문자열 배열) + 병합 행 집합(시트 행 번호). */
 async function readXlsx(buf) {
   assertXlsxSizeOk(buf, XLSX_MAX_UNCOMPRESSED);
-  assertXlsxMergesOk(buf);   // 감사 M-4: exceljs 가 로드하며 병합을 칸 단위로 전개하기 전에 막는다(svcmon 가져오기와 같은 함수)
+  // 감사 M-4: exceljs 가 로드하며 병합을 칸 단위로 전개하기 전에 막는다(svcmon 가져오기와 같은 함수).
+  //   154회차 Z3(메인): 유효성 검사(드롭다운)는 이 가져오기가 읽지 않는다 — exceljs 에 그 노드를 읽지 않게 하고(아래 ignoreNodes — 범위를 칸마다 전개하지 않는다)
+  //   점검도 'ignored' 로 둔다(전체 열 드롭다운이 둘 이상 든 정상 양식 파일을 넓이 상한으로 거부하지 않게).
+  assertXlsxMergesOk(buf, { dataValidations: 'ignored' });
   const ExcelJS = (await import('exceljs')).default;
   const wb = new ExcelJS.Workbook();
-  try { await wb.xlsx.load(buf); } catch (e) { throw new Error(`XLSX 를 읽지 못했습니다(${String(e?.message || e).slice(0, 80)})`); }
+  try { await wb.xlsx.load(buf, { ignoreNodes: ['dataValidations'] }); } catch (e) { throw new Error(`XLSX 를 읽지 못했습니다(${String(e?.message || e).slice(0, 80)})`); }
   const ws = wb.worksheets[0];
   if (!ws) throw new Error('XLSX 에 시트가 없습니다.');
   const merges = [];
