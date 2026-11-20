@@ -15,7 +15,7 @@
  *  · 엣지는 2분마다 진행 보고를 보낸다(edge.js HEARTBEAT_MS) — 무응답 판정(45분)은 그 간격의 여러 배다(반증 #2 · 테스트가 산수 고정).
  */
 import { randomUUID } from 'node:crypto';
-import { ingestServers, getDiskBadMeta, setDiskBadMeta } from './db.js';
+import { ingestServers, getDiskBadMeta, setDiskBadMeta, diskBadDbStatus } from './db.js';
 import { scanServers, localServers } from './scan.js';
 import { loadDiskBadSettings } from './settings.js';
 import { notifyNewRecords } from './notify.js';
@@ -52,8 +52,16 @@ function trim() {
 export function sweepJobs(t = now()) {
   for (const j of jobs.values()) {
     for (const u of j.units) {
-      if (u.state === 'queued' && u.kind === 'edge' && t - j.at > CLAIM_TIMEOUT_MS) { u.state = 'not-started'; u.finishedAt = t; u.error = '엣지가 작업을 가져가지 않았습니다(엣지가 꺼져 있거나 이 기능이 없는 판일 수 있습니다).'; }
-      if (u.state === 'running' && u.kind === 'edge' && t - (u.updatedAt || u.claimedAt || j.at) > STALL_TIMEOUT_MS) { u.state = 'no-response'; u.finishedAt = t; u.error = '엣지가 진행을 보고하지 않습니다.'; }
+      // 시한은 **그 조각이 대기에 들어간 때**부터(반증 R13 — 다시 보내기가 작업 시작 시각을 바꿔 다른 조각의 시한까지 늘렸다).
+      if (u.state === 'queued' && u.kind === 'edge' && t - (u.queuedAt || j.at) > CLAIM_TIMEOUT_MS) {
+        u.state = 'not-started'; u.finishedAt = t; u.error = '엣지가 작업을 가져가지 않았습니다(엣지가 꺼져 있거나 이 기능이 없는 판일 수 있습니다).';
+        finishUnit(j, u);
+      }
+      if (u.state === 'running' && u.kind === 'edge' && t - (u.updatedAt || u.claimedAt || j.at) > STALL_TIMEOUT_MS) {
+        u.state = 'no-response'; u.finishedAt = t; u.error = '엣지가 진행을 보고하지 않습니다.';
+        // 그때까지 저장된 묶음의 새 기록은 메일로 보낸다(반증 R4 — 시한으로 닫으면 버려졌고, 이미 DB 에 있어 다음 점검에서도 새 기록이 아니었다).
+        finishUnit(j, u);
+      }
     }
     if (!j.finishedAt && !j.units.some((u) => active(u.state))) j.finishedAt = t;
   }
@@ -83,9 +91,10 @@ export function createJob({ scope, target = '', targetLabel = '', mode = 'increm
       agent: normAgent(u.agent), label: String(u.label || u.agent || '중앙 직결').slice(0, 128), kind: u.kind === 'local' ? 'local' : 'edge',
       serverIds: Array.isArray(u.serverIds) ? u.serverIds.map(String).slice(0, 5_000) : null,
       state: busy.has(normAgent(u.agent)) ? 'busy' : 'queued', total: Array.isArray(u.serverIds) ? u.serverIds.length : null,
-      done: 0, failed: 0, excluded: 0, newRecords: 0, claimedAt: null, updatedAt: null, finishedAt: null, error: '', stop: false, _new: [],
+      done: 0, failed: 0, excluded: 0, newRecords: 0, unsaved: 0, queuedAt: null, claimedAt: null, updatedAt: null, finishedAt: null, error: '', stop: false, _new: [],
     })),
   };
+  for (const u of job.units) u.queuedAt = job.at;
   jobs.set(job.id, job);
   trim();
   for (const u of job.units) if (u.kind === 'local' && u.state === 'queued') runLocal(job, u).catch(() => {});
@@ -138,6 +147,16 @@ function finishUnit(job, u) {
 export function claimForAgent(agent) {
   sweepJobs();
   const a = normAgent(agent);
+  // 엣지는 쉬고 있을 때만 작업을 가지러 온다(edge.js — 진행 중이면 묻지 않는다). 그런데 이 엣지의 조각이 아직 '읽는 중' 이면
+  //   엣지가 재시작했거나 마지막 보고를 잃은 것이다 — 45분 '응답 없음' 을 기다리며 그 법인 점검을 409 로 막지 않고 지금 닫는다(개선 I1).
+  for (const j of jobs.values()) {
+    for (const u of j.units) {
+      if (u.kind !== 'edge' || u.agent !== a || u.state !== 'running') continue;
+      u.state = 'failed'; u.finishedAt = now();
+      u.error = '엣지가 끝을 알리지 않은 채 다음 작업을 가지러 왔습니다(엣지 재시작으로 보입니다) — 저장된 묶음은 남고, 나머지 서버는 다음 점검에서 읽습니다.';
+      finishUnit(j, u);
+    }
+  }
   const list = [...jobs.values()].sort((x, y) => x.at - y.at);
   for (const j of list) {
     const u = j.units.find((x) => x.kind === 'edge' && x.agent === a && x.state === 'queued');
@@ -162,13 +181,23 @@ export async function acceptPush(agent, push) {
   const t = now();
   const r = await ingestServers(a, push.servers, { now: t });
   u.newRecords += r.newRecords.length; for (const x of r.newRecords) { if (u._new.length >= 2_000) break; u._new.push(x); }
-  if (!r.ok) { u.updatedAt = t; return { ok: false, stored: false, reason: r.reason || 'DB 저장 실패' }; }
   if (push.total != null) u.total = push.total;
   if (push.done != null) u.done = push.done; else u.done += push.servers.length;
   if (push.failed != null) u.failed = push.failed;
   if (push.excluded != null) u.excluded = push.excluded;
   u.updatedAt = t;
-  if (push.final) { u.state = u.stop ? 'stopped' : 'done'; u.finishedAt = t; finishUnit(j, u); }
+  // 반증 R5: 저장하지 못한 묶음은 세어 두고(중앙 직결 조각과 같이 'failed' 로 닫는다), **마지막 묶음은 저장 여부와 무관하게 닫는다** —
+  //   닫지 않으면 '읽는 중' 으로 남아 그 엣지가 45분 동안 바쁜 것으로 보였다.
+  if (!r.ok) {
+    u.unsaved += push.servers.length;
+    if (!u.error) u.error = String(r.reason || 'DB 저장 실패').slice(0, 200);
+  }
+  if (push.final) {
+    u.state = u.stop ? 'stopped' : (u.unsaved > 0 ? 'failed' : 'done'); u.finishedAt = t;
+    if (u.unsaved > 0) u.error = `서버 ${u.unsaved}대의 결과를 저장하지 못했습니다(${u.error || 'DB 저장 실패'}) — 다음 점검에서 다시 읽습니다.`.slice(0, 300);
+    finishUnit(j, u);
+  }
+  if (!r.ok) return { ok: false, stored: false, reason: r.reason || 'DB 저장 실패' };
   return { ok: true, stored: true, stop: u.stop === true, newRecords: r.newRecords.length };
 }
 
@@ -193,8 +222,9 @@ export function retryUnit(id, agent) {
   const u = j?.units.find((x) => x.agent === a);
   if (!u || active(u.state)) return null;
   if (busyAgents().has(a)) return { busy: true };
-  Object.assign(u, { state: 'queued', done: 0, failed: 0, excluded: 0, newRecords: 0, claimedAt: null, updatedAt: null, finishedAt: null, error: '', stop: false, _new: [] });
-  j.at = now(); j.finishedAt = null;
+  Object.assign(u, { state: 'queued', done: 0, failed: 0, excluded: 0, newRecords: 0, unsaved: 0, queuedAt: now(), claimedAt: null, updatedAt: null, finishedAt: null, error: '', stop: false, _new: [] });
+  // 작업 시작 시각(j.at)은 바꾸지 않는다(반증 R13 — 같은 작업의 다른 대기 조각의 시한과 화면의 시작 시각이 바뀌었다). 이 조각의 시한은 queuedAt 부터.
+  j.finishedAt = null;
   if (u.kind === 'local') runLocal(j, u).catch(() => {});
   return publicJob(j);
 }
@@ -245,6 +275,8 @@ export async function autoTick(t = now()) {
   const st = loadDiskBadSettings();
   if (!st.autoEnabled) return null;
   if (_bootAt != null && t - _bootAt < AUTO_BOOT_DELAY_MS) return null;
+  // 반증 R12: DB 를 열지 못하면 판정하지 않는다 — 마지막 실행 시각을 못 읽고 못 적어, 재시작마다 곧바로 전 법인 점검을 냈다(반증 #13 이 막으려던 것).
+  if (!(await diskBadDbStatus()).available) return null;
   if (!_autoLoaded) {
     const v = Number(await getDiskBadMeta(AUTO_META_KEY));
     if (Number.isFinite(v) && v > 0 && (_autoLast == null || v > _autoLast)) _autoLast = v;
@@ -252,8 +284,8 @@ export async function autoTick(t = now()) {
   }
   const every = st.intervalHours * 3_600_000;
   if (_autoLast && t - _autoLast < every) return null;
+  if (!(await setDiskBadMeta(AUTO_META_KEY, t))) return null;   // 적지 못했으면 시작하지 않는다(다음 틱에 다시 본다)
   _autoLast = t;
-  await setDiskBadMeta(AUTO_META_KEY, t);
   const units = await unitsForAll();
   const job = createJob({ scope: 'all', targetLabel: '전체', mode: 'incremental', by: 'auto', auto: true, units });
   console.log(`[diskbad] 자동 점검 시작 — 조각 ${units.length}개(${st.intervalHours}시간마다)`);
