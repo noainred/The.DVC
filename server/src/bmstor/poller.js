@@ -262,6 +262,9 @@ export async function bmCollectNow(trigger = 'manual', { demoOnly = false } = {}
     // 정지 사실을 남긴다 — 조용히 빼면 화면이 마지막 값을 지금 값처럼 보여준다.
     let authStopped = 0;
     const servers = trigger === 'manual' ? enabled : enabled.filter((s) => {
+      // 3회차 보안 R3S-1(재현): 공통 계정 비밀번호 서버는 **계정 단위 정지 하나**가 판정한다(accountGate · state.accountStops) — 서버별 정지를 더 보면
+      //   사람이 ‘한 대로 다시 확인’ · ‘정지 풀기’ 로 계정을 풀어도 탐침이었던 그 서버만 ‘비밀번호를 고치면 재개’ 로 계속 빠졌다(비밀번호는 맞다).
+      if (s.credAccountId && s.credVersion != null && !s.keyFingerprint) return true;
       const stop = authGuard.authStopFor(authCredOf(s));
       if (!stop) return true;
       authStopped++;

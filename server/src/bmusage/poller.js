@@ -673,7 +673,9 @@ async function collectOne(target, { trigger = 'auto', intervalMs = null, prevRun
   const dev = authDev(target);
   // ⚠ **수동 실행은 막지 않는다** — 사람이 1회 누르는 것은 잠금 위험이 없고, 비밀번호를 고친 뒤
   //   확인할 길을 없애면 안 된다(v2.528·v2.535 규약). 막는 것은 주기 수집뿐이다.
-  const stopped = (dev && trigger !== 'manual') ? guard.authStopFor(dev) : null;
+  // 3회차 보안 R3S-1: 공통 계정 비밀번호 서버는 계정 단위 정지 하나가 판정한다(서버별 정지가 남아 계정을 풀어도 그 서버만 빠지던 것)
+  const viaAccountPw = !!(target.osHost?.credAccountId && target.osHost?.credVersion != null && !target.osHost?.keyFingerprint);
+  const stopped = (dev && trigger !== 'manual' && !viaAccountPw) ? guard.authStopFor(dev) : null;
   if (stopped) _authStopped.set(target.key, stopped); else _authStopped.delete(target.key);
   const jobs = [];
   /*
