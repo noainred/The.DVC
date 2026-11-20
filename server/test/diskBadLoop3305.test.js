@@ -1,5 +1,5 @@
 /**
- * v3.30.4 디스크 배드 섹터 — 개선 · 버그 수정 반복 1회차(반증 1인 — R1 ~ R15 · 개선 I1 ~ I3).
+ * v3.30.5 디스크 배드 섹터 — 개선 · 버그 수정 반복 1회차(반증 1인 — R1 ~ R15 · 개선 I1 ~ I3).
  * 고정하는 것: 위치 못 읽은 기록은 건수로만 · 판정 기준 시각은 배드 섹터 기록 · 앞에서부터 읽다 멈춘 점검은 구간을 주장하지 않음 ·
  * 시한으로 닫은 조각도 메일 · 마지막 묶음은 저장 실패여도 닫음 · 교체된 자리의 새 디스크 흔적 · 다시 꽂은 같은 시리얼 ·
  * 로그 못 읽은 서버의 이상 디스크 · DB 를 못 열면 자동 점검 안 함 · 다시 보내기가 작업 시각을 안 바꿈 · 엣지가 다시 오면 남은 조각을 닫음 · 응답 범위.
@@ -12,7 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stripComments } from './_stripComments.js';
 
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'diskbadloop3304-'));
+const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'diskbadloop3305-'));
 process.env.CONFIG_DIR = TMP;
 process.env.DISKBAD_DB_PATH = path.join(TMP, 'disk-bad.db');
 process.env.AUTH_ENABLED = 'false';
