@@ -1252,6 +1252,8 @@ export function noteIssuedSession(payloadLike) {
  * 단일 세션 등록부의 키(157회차) — 로컬 계정은 ''(이름 그대로) · 그 밖(AD)은 표기 변형을 접은 키. 발급(로그인) · 검사(resolveTokenUser) · 로그아웃이 같은 함수를 쓴다.
  */
 export function activeSessionKeyOf(username, isLocal) { return isLocal ? '' : adAccountKey(username); }
+/** 162회차: 예전 판이 이름으로 등록한 기록이 지금 쓸 키 — 그 이름의 로컬 계정이 있으면 ''(로컬 세션의 기록 — AD 로그인이 걷지 않는다). setActiveSession 의 legacyKeyOf. */
+export function legacySessionKeyOf(name) { return activeSessionKeyOf(name, localNameTaken(name)); }
 
 /** 세션 정책 판정 — 일괄 무효 시각 → 개별 폐기 → 총 상한 → 서버측 유휴. */
 function sessionAlive(payload, token) {

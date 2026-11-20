@@ -142,10 +142,15 @@ test('N158-2 지표 샘플러 — 긴급중단 동안에는 얼어 있는 스냅
     const rowsStopped = S.vmAllocRows(snap0, { ...loadVmperfSettings(), enabled: true }, { unread: all });
     assert.equal(rowsStopped.size, 0, '긴급중단 판정을 받은 vmAllocRows 가 행을 만들었다');
     assert.ok(S.vmAllocRows(snap0, { ...loadVmperfSettings(), enabled: true }).size > 0, '판정을 주지 않으면 예전 그대로(대조군)');
-    // 긴급중단을 풀면 다음 샘플부터 다시 적재한다
+    // 긴급중단을 풀면 **다음 병합 뒤의** 샘플부터 다시 적재한다(162회차 — 푼 직후의 스냅샷은 아직 중단 전 값이다: 그것을 지금 값으로 적재하지 않는다)
     fs.writeFileSync(stopFile, JSON.stringify({ active: false, by: [], at: null }));
     ES._resetEmergencyStopForTest();
     assert.equal(ES.isStopped(), false);
+    await S._sampleOnceForTest();
+    assert.equal(S.metricsSamplerStatus().lastRun.hostsWithTemp, 0, '푼 직후(병합 전) 얼어 있는 값을 지금 값으로 적재했다');
+    assert.equal(points(), 0);
+    await new Promise((r) => setTimeout(r, 5));   // 병합 시각이 '마지막으로 긴급중단을 본 시각' 뒤가 되게
+    await store.refresh();
     await S._sampleOnceForTest();
     const lr2 = S.metricsSamplerStatus().lastRun;
     assert.ok(lr2.hostsWithTemp > 0, '긴급중단을 풀었는데도 적재하지 않는다');

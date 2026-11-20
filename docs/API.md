@@ -235,21 +235,21 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 |---|---|---|---|
 | GET | `/config` | 역할 `admin` | [server/src/routes/remote.js:192](../server/src/routes/remote.js#L192) |
 | PUT | `/config` | 역할 `admin` | [server/src/routes/remote.js:208](../server/src/routes/remote.js#L208) |
-| POST | `/deploy` | 역할 `admin` | [server/src/routes/remote.js:394](../server/src/routes/remote.js#L394) |
+| POST | `/deploy` | 역할 `admin` | [server/src/routes/remote.js:405](../server/src/routes/remote.js#L405) |
 | POST | `/deploy/test` | 역할 `admin` | [server/src/routes/remote.js:369](../server/src/routes/remote.js#L369) |
 | GET | `/mappings` | 권한 `remote.access` | [server/src/routes/remote.js:72](../server/src/routes/remote.js#L72) |
-| POST | `/mappings` | 역할 `admin` | [server/src/routes/remote.js:417](../server/src/routes/remote.js#L417) |
-| DELETE | `/mappings/:id` | 권한 `remote.access` | [server/src/routes/remote.js:533](../server/src/routes/remote.js#L533) |
-| POST | `/mappings/:id/apply` | 역할 `admin` | [server/src/routes/remote.js:522](../server/src/routes/remote.js#L522) |
+| POST | `/mappings` | 역할 `admin` | [server/src/routes/remote.js:428](../server/src/routes/remote.js#L428) |
+| DELETE | `/mappings/:id` | 권한 `remote.access` | [server/src/routes/remote.js:544](../server/src/routes/remote.js#L544) |
+| POST | `/mappings/:id/apply` | 역할 `admin` | [server/src/routes/remote.js:533](../server/src/routes/remote.js#L533) |
 | POST | `/probe` | 권한 `remote.access` | [server/src/routes/remote.js:125](../server/src/routes/remote.js#L125) |
 | GET | `/proxies` | 권한 `remote.access` | [server/src/routes/remote.js:159](../server/src/routes/remote.js#L159) |
 | POST | `/proxies` | 역할 `admin` | [server/src/routes/remote.js:284](../server/src/routes/remote.js#L284) |
 | DELETE | `/proxies/:id` | 역할 `admin` | [server/src/routes/remote.js:306](../server/src/routes/remote.js#L306) |
 | POST | `/proxies/:id/health` | 역할 `admin` | [server/src/routes/remote.js:325](../server/src/routes/remote.js#L325) |
 | GET | `/proxies/full` | 역할 `admin` | [server/src/routes/remote.js:217](../server/src/routes/remote.js#L217) |
-| POST | `/quick-connect` | 권한 `remote.access` | [server/src/routes/remote.js:468](../server/src/routes/remote.js#L468) |
+| POST | `/quick-connect` | 권한 `remote.access` | [server/src/routes/remote.js:479](../server/src/routes/remote.js#L479) |
 | POST | `/rdp-ticket` | 권한 `remote.access` | [server/src/routes/remote.js:40](../server/src/routes/remote.js#L40) |
-| GET | `/rdp/:id` | 권한 `remote.access` | [server/src/routes/remote.js:549](../server/src/routes/remote.js#L549) |
+| GET | `/rdp/:id` | 권한 `remote.access` | [server/src/routes/remote.js:560](../server/src/routes/remote.js#L560) |
 | GET | `/targets` | 권한 `remote.access` | [server/src/routes/remote.js:175](../server/src/routes/remote.js#L175) |
 | POST | `/test` | 역할 `admin` | [server/src/routes/remote.js:349](../server/src/routes/remote.js#L349) |
 | POST | `/ws-ticket` | 권한 `remote.access` | [server/src/routes/remote.js:63](../server/src/routes/remote.js#L63) |

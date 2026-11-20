@@ -132,7 +132,7 @@ export const RAW_BUCKET_FLOOR_MS = 15 * 60_000;
  * @returns {{range, days, spanMs, start, end, past, clamped, kind:'raw'|'bucket'|'daily', bucketMs:number}}
  */
 export function nodeLoadWindow({ range, end, now = Date.now(), sampleMs = HOUR } = {}) {
-  const key = NODE_LOAD_RANGES[range] ? range : '24h';
+  const key = Object.hasOwn(NODE_LOAD_RANGES, range) ? range : '24h';   // 162회차(158 N158-3 의 같은 꼴): 자기 키만 — ‘constructor’ · ‘__proto__’ 가 구간으로 통과해 창이 NaN 이 됐다
   const R = NODE_LOAD_RANGES[key];
   let e = numOrNull(end);
   let clamped = false;

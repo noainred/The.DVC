@@ -127,7 +127,7 @@ test('B1 adAccountKey — 소문자 · DOMAIN\\ 앞을 뗀다 · @도메인은 �
   // 도메인 미설정(위 auth.json)
   assert.equal(AD.adAccountKey('Kim'), 'ad:kim');
   assert.equal(AD.adAccountKey(' KIM '), 'ad:kim');
-  assert.equal(AD.adAccountKey('CORP\\Kim'), 'ad:kim');
+  assert.equal(AD.adAccountKey('CORP\\Kim'), 'ad:corp\\kim', '162회차: 도메인을 모르면 DOMAIN\\ 꼴도 그대로(다른 도메인의 같은 이름일 수 있다 — UPN 과 같은 규칙)');
   assert.equal(AD.adAccountKey('kim@corp.local'), 'ad:kim@corp.local', '도메인을 모르면 UPN 은 그대로(다른 도메인의 같은 이름일 수 있다)');
   assert.equal(AD.adAccountKey('KIM@Corp.Local'), 'ad:kim@corp.local');
   assert.notEqual(AD.adAccountKey('kim'), 'kim');
@@ -141,6 +141,7 @@ test('B1 adAccountKey — 소문자 · DOMAIN\\ 앞을 뗀다 · @도메인은 �
     assert.equal(AD.adAccountKey('kim@corp.local'), 'ad:kim');
     assert.equal(AD.adAccountKey('KIM@CORP.LOCAL'), 'ad:kim');
     assert.equal(AD.adAccountKey('CORP\\kim'), 'ad:kim');
+    assert.equal(AD.adAccountKey('OTHER\\kim'), 'ad:other\\kim', '162회차: 다른 도메인의 같은 이름은 접지 않는다');
     assert.equal(AD.adAccountKey('kim@other.example'), 'ad:kim@other.example');
     assert.equal(AD.adAccountKey('@corp.local'), 'ad:@corp.local', '이름이 빈 값은 접지 않는다');
   } finally {
@@ -327,10 +328,17 @@ test('B5 /remote/deploy/test — 요청의 haproxyConfigPath 가 저장된 SSH �
     assert.equal(cmds.length, n0, `명령이 나가면 안 된다: ${JSON.stringify(cmds.slice(n0))}`);
     assert.equal(conns, c0, '접속도 하지 않는다');
   }
-  // 정상 경로 · 빈 칸(= 기본 경로)은 예전 그대로(저장된 비밀로 시험)
-  const ok = await call('POST', '/deploy/test', { proxyId: 'default', deploy: { haproxyConfigPath: '/etc/haproxy/conf.d/portal_1.cfg' } });
+  // 162회차(이 회차의 추정 P3 를 닫음): 이 중계 서버 설정을 바꿀 수 없는 범위 계정은 저장 비밀로 **다른 경로**(유효한 글자여도)를 시험하지 못한다 — 임의 경로의 test -r 은 파일 존재 · 읽기 오라클이다
+  {
+    const n0 = cmds.length; const c0 = conns;
+    const other = await call('POST', '/deploy/test', { proxyId: 'default', deploy: { haproxyConfigPath: '/etc/haproxy/conf.d/portal_1.cfg' } });
+    assert.equal(other.body.ok, false, JSON.stringify(other.body)); assert.equal(other.body.method, 'carry-refused');
+    assert.equal(cmds.length, n0); assert.equal(conns, c0);
+  }
+  // 저장된 경로 · 빈 칸(= 기본 경로 — 저장값도 기본)은 예전 그대로(저장된 비밀로 시험)
+  const ok = await call('POST', '/deploy/test', { proxyId: 'default', deploy: { haproxyConfigPath: '/etc/haproxy/haproxy.cfg' } });
   assert.equal(ok.body.ok, true, JSON.stringify(ok.body)); assert.equal(ok.body.configReadable, true);
-  assert.equal(cmds[cmds.length - 1], 'test -r /etc/haproxy/conf.d/portal_1.cfg && echo OK || echo MISSING');
+  assert.equal(cmds[cmds.length - 1], 'test -r /etc/haproxy/haproxy.cfg && echo OK || echo MISSING');
   const empty = await call('POST', '/deploy/test', { proxyId: 'default', deploy: { haproxyConfigPath: '' } });
   assert.equal(empty.body.ok, true, JSON.stringify(empty.body));
   assert.equal(cmds[cmds.length - 1], 'test -r /etc/haproxy/haproxy.cfg && echo OK || echo MISSING');

@@ -131,6 +131,7 @@ let _timer = null;
  */
 export const PRUNE_EVERY_MS = 6 * 3_600_000;
 let _lastPruneAt = null;
+let _pruneSkipped = '';   // 162회차(159 L2 반증): 건너뛴 사실이 콘솔 한 줄뿐이었다 — 상태(xferSpeedStatus)에도 싣는다(설정이 읽히면 곧바로 내린다)
 function maybePrune(s, now) {
   if (_lastPruneAt == null) { _lastPruneAt = now; return; }
   if (now - _lastPruneAt < PRUNE_EVERY_MS) return;
@@ -139,8 +140,10 @@ function maybePrune(s, now) {
   //   보존일을 모르면 지우지 않는다 — 시각을 올리지 않아, 읽히거나(읽기 오류) 관리자가 저장한(손상) 다음 틱에 곧바로 정리한다.
   if (xferSettingsLoadError()) {
     if (_warnOnce('prune-unread', 'unread')) console.warn('[xferspeed] 설정 파일을 읽지 못한 상태라 보존 정리를 건너뜁니다 — 보존일을 모른 채 기본값으로 지우지 않습니다(설정이 읽히거나 저장되면 다시 정리합니다).');
+    _pruneSkipped = 'settings-unreadable';
     return;
   }
+  _pruneSkipped = '';
   _lastPruneAt = now;
   pruneXferSpeed({ sampleDays: s.sampleRetentionDays, dailyDays: s.dailyRetentionDays })
     .catch((e) => console.warn(`[xferspeed] 보존 정리 실패: ${String(e?.message || e).slice(0, 200)}`));
@@ -168,6 +171,7 @@ export function xferSpeedStatus(now = Date.now()) {
       return { id: x.id, next: x.enabled ? nextOccurrence(x, after) : null, last: rec };
     }),
     progress: _progress ? { ..._progress, current: [..._progress.current] } : null,
+    ...(_pruneSkipped && xferSettingsLoadError() ? { pruneSkipped: _pruneSkipped } : {}),
     last: _last,
   };
 }
@@ -385,4 +389,4 @@ export function startXferSpeedPoller() {
 }
 
 export function stopXferSpeedPoller() { _timer?.stop?.(); _timer = null; }
-export function _resetXferPollerForTest() { running = false; _last = null; _progress = null; _lastPruneAt = null; _demoBackfilled = false; _lastRunAt = null; _lastRunKnown = false; _spans.length = 0; _schedMem = null; _schedDirty = false; }
+export function _resetXferPollerForTest() { running = false; _last = null; _progress = null; _lastPruneAt = null; _pruneSkipped = ''; _demoBackfilled = false; _lastRunAt = null; _lastRunKnown = false; _spans.length = 0; _schedMem = null; _schedDirty = false; }

@@ -350,7 +350,7 @@ const TABLE = {
   'vcenter/vmExportXlsx.js': ['own', '130 R5 — 메타 invNotCurrent 를 요약 · 폴더 트리의 ‘기준’ 줄과 읽는 법 시트에 적는다(CSV 는 머리말이 없어 화면 타일이 말한다)'],
   'vmtrack/service.js': ['own', 'inventoryUnreadReason(v2.743) — 값이 남은 vCenter 는 변화 0 으로 diff, 빈 vCenter 는 건너뜀'],
 };
-const SHARED_RE = /\b(?:unreadVcenterReasons|unreadVcenterIds|notReadVcentersOf)\b/;
+const SHARED_RE = /\b(?:unreadVcenterReasons|unreadVcenterIds|notReadVcentersOf|samplingUnreadReasons)\b/;   // 162회차: samplingUnreadReasons = 공용 판정 + 긴급중단(metrics/sampler.js — /metrics 가 쓴다)
 const SNAP_RE = /\bstore\.get\(\)|\bstore\.snapshot\b|\bgetSnapshot\(|\bsnap(?:shot)?\??\.(?:hosts|datastores|vms|alarms)\b/;
 const FIELD_RE = /\b(?:cpuUsagePct|memUsagePct|cpuUsageMhz|memUsageMB|usagePct|freeGB|capacityGB|usedGB|powerWatts|tempC|gpuUtilPct|overallStatus)\b/;
 const SRC_DIR = fileURLToPath(new URL('../src/', import.meta.url));

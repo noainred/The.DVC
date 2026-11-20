@@ -247,16 +247,26 @@ export function saveAdConfig(partial) {
 /**
  * 같은 AD 계정의 표기 변형을 한 키로(157회차 — 재현). AD 로그인은 **입력한 이름 그대로** 세션 이름이 된다(authenticateAD) — bind 는 대소문자를 가리지 않고
  * `이름` · `이름@도메인` · `DOMAIN\이름` 을 다 받으므로, 이름을 키로 쓰는 판정(단일 세션 등록부)은 표기만 바꾸면 다른 계정으로 보였다.
- *   소문자 · `DOMAIN\` 앞을 뗀다 · `@도메인` 은 **설정한 도메인과 같을 때만** 뗀다(다른 도메인의 같은 이름은 다른 계정일 수 있다). `ad:` 접두 — 로컬 이름(`:` 을 쓸 수 없다)과 겹치지 않는다.
+ *   소문자 · `DOMAIN\` 앞과 `@도메인` 은 **설정한 도메인과 같을 때만** 뗀다(다른 도메인의 같은 이름은 다른 계정일 수 있다 — 162회차에 역슬래시 꼴도 같은 규칙으로). `ad:` 접두 — 로컬 이름(`:` 을 쓸 수 없다)과 겹치지 않는다.
  * 정책 상태 캐시(3초)에서 도메인을 읽는다 — 요청마다 파일을 읽지 않는다.
+ */
+/*
+ * 162회차(157 B1 반증 — 결정: 안전측): 예전 판은 `DOMAIN\` 를 **어느 도메인이든** 뗐다 — `CORP\kim` 과 `OTHER\kim` 이 같은 키라 서로의 세션을 끊었다(실행 확인).
+ *   `@도메인` 은 설정한 도메인일 때만 떼면서(다른 도메인의 같은 이름은 다른 계정일 수 있다) 역슬래시 꼴만 달랐다. 두 꼴에 같은 규칙을 쓴다:
+ *   도메인 부분이 **설정한 도메인**(전체 이름 또는 첫 마디 — 보통 NetBIOS 이름)일 때만 뗀다. 도메인을 설정하지 않았거나 다른 도메인이면 그대로 둔다(`ad:other\kim`).
+ *   한계(그대로): NetBIOS 이름이 도메인 첫 마디와 다른 구성 · 도메인 미설정 구성에서는 `NB\kim` 과 `kim` 이 다른 키다(157 이전과 같다 — 모르는 것을 같은 사람으로 접지 않는다).
  */
 export function adAccountKey(username) {
   const raw = String(username ?? '').trim().toLowerCase();
-  let s = raw.replace(/^[^\\]*\\/, '');
   let dom = '';
   try { dom = adPolicyState().domain || ''; } catch { dom = ''; }
+  const label = dom.split('.')[0];
+  const mine = (d) => !!dom && !!d && (d === dom || d === label);
+  let s = raw;
+  const bs = s.indexOf('\\');
+  if (bs > 0 && mine(s.slice(0, bs))) s = s.slice(bs + 1);
   const at = s.lastIndexOf('@');
-  if (at > 0 && dom && s.slice(at + 1) === dom) s = s.slice(0, at);
+  if (at > 0 && mine(s.slice(at + 1))) s = s.slice(0, at);
   return `ad:${s || raw}`;
 }
 

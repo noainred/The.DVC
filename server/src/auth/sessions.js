@@ -66,26 +66,36 @@ export function newSessionId() { return crypto.randomBytes(16).toString('hex'); 
  *   예전에는 세션 이름이 곧 키라, 같은 AD 계정을 `kim` · `KIM` · `CORP\kim` 으로 따로 로그인하면 서로를 끊지 못했다(단일 세션 강제 — ID 공유 금지 — 우회).
  *   `key` 를 준 기록은 실제 세션 이름을 `user` 에 둔다(폐기 이벤트 · 목록 표시). 업그레이드 전에 이름으로 등록된 AD 세션은 접은 키의 기록이 없을 때만 인정한다(전원 재로그인 방지).
  */
-export function setActiveSession(username, sid, { at = Date.now(), ip = '', key = '' } = {}) {
+/*
+ * 162회차(157 B1 반증 — 재현): 걷는 범위가 '대소문자만 다른 이름' 뿐이라, 업그레이드 전에 `kim` 으로 등록된 세션은 새 판의 `CORP\kim`(또는 `kim@도메인`) 로그인에 끊긴 뒤
+ *   (접은 키의 기록이 생겨 무효) 그 새 세션이 **로그아웃하면 되살아났다**(접은 키의 기록이 사라져 이름 기록으로 떨어진다 — isActiveSession).
+ *   호출부가 `legacyKeyOf`(예전 이름 → 그 이름이 지금 쓸 키 · 로컬 계정이면 '')를 주면 **접은 키가 같은 예전 이름 기록을 전부** 걷고, 걷은 세션마다 폐기를 알린다.
+ */
+export function setActiveSession(username, sid, { at = Date.now(), ip = '', key = '', legacyKeyOf = null } = {}) {
   const u = String(username || '');
   if (!u || !sid) return;
   const k = String(key || '') || u;
-  let prev = load().get(k);
+  const replaced = [];
+  { const prev = load().get(k); if (prev) replaced.push({ name: prev.user || u, sid: prev.sid }); }
   if (k !== u) {
-    // 예전 판이 이름 키로 등록한 이 계정의 기록(대소문자만 다른 표기 포함)을 걷는다 — 남기면 새 세션이 로그아웃한 뒤 예전 토큰이 되살아난다.
+    // 예전 판이 이름 키로 등록한 이 계정의 기록(대소문자만 다른 표기 · 접은 키가 같은 표기)을 걷는다 — 남기면 새 세션이 로그아웃한 뒤 예전 토큰이 되살아난다.
     //   접은 키의 기록(user 칸이 있다)은 건드리지 않는다. 같은 이름(대소문자 무시)의 로컬 계정이 있으면 AD 로그인 자체가 없다(authenticate — localNameTaken).
     const lu = u.toLowerCase();
     for (const [name, rec] of [...load().entries()]) {
-      if (name === k || rec.user || name.toLowerCase() !== lu) continue;
-      prev = prev || rec;
+      if (name === k || rec.user) continue;
+      let same = name.toLowerCase() === lu;
+      if (!same && typeof legacyKeyOf === 'function') { try { same = legacyKeyOf(name) === k; } catch { same = false; } }
+      if (!same) continue;
+      replaced.push({ name, sid: rec.sid });
       load().delete(name);
     }
   }
   load().set(k, { sid: String(sid), at, ip: String(ip || ''), ...(k !== u ? { user: u } : {}) });
   persist();
   // 2026-10-09 검토 S-04: 덮어쓴 이전 세션은 HTTP 에서 이미 무효다(isActiveSession). 열린 장기 연결(SSH·RDP WS)도 즉시 닫게 알린다.
-  if (prev && prev.sid && prev.sid !== String(sid)) {
-    try { notifySessionRevoked({ scope: 'session', username: prev.user || u, sid: prev.sid, reason: 'single-session-replaced' }); } catch { /* */ }
+  for (const r of replaced) {
+    if (!r.sid || r.sid === String(sid)) continue;
+    try { notifySessionRevoked({ scope: 'session', username: r.name, sid: r.sid, reason: 'single-session-replaced' }); } catch { /* */ }
   }
 }
 

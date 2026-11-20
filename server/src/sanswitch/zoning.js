@@ -499,12 +499,19 @@ export function compactZoning(parsed, resolved, { limits = ZONE_LIMITS } = {}) {
  *   zone 행의 `aliasOf` 가 늘 비었고, 수집해 둔 `zoning.aliases` 를 WWN 으로 되찾는 곳이 없었다: 조닝 그림 · 불량 포트 상대편의 라벨이 WWN 그대로였고
  *   스토리지 매핑의 ‘조닝 별칭’ 폴백(attribution.buildFabrics aliasOf)도 늘 비었다(시험 꾸밈은 정의 섹션만 있는 모양이라 드러나지 않았다).
  */
+/*
+ * 162회차(160 S1 반증 — 실행 확인): '먼저 나온 이름' 만으로 고르면 묶음 별칭(한 별칭에 WWN 여럿 — `all_esx: w1; w2`)이 앞에 있을 때 끝점마다 따로 있는 별칭(`esx01_hba0: w1`)을
+ *   덮어, 서로 다른 끝점이 같은 라벨로 보였다(순서만 바꾸면 답이 달라졌다). **WWN 수가 가장 적은 별칭**(그 끝점을 가장 좁게 가리키는 이름)이 이기고, 같으면 먼저 나온 이름.
+ */
 export function aliasByWwn(aliases) {
   const out = new Map();
   if (!aliases || typeof aliases !== 'object' || Array.isArray(aliases)) return out;
+  const width = new Map();   // WWN → 지금 고른 별칭의 WWN 수
   for (const [name, list] of Object.entries(aliases)) {
     if (!Array.isArray(list)) continue;
-    for (const raw of list) { const w = normWwn(raw); if (w && !out.has(w)) out.set(w, name); }
+    const ws = new Set();
+    for (const raw of list) { const w = normWwn(raw); if (w) ws.add(w); }
+    for (const w of ws) { if (!out.has(w) || ws.size < width.get(w)) { out.set(w, name); width.set(w, ws.size); } }
   }
   return out;
 }

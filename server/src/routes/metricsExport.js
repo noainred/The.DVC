@@ -7,7 +7,7 @@
 import { Router } from 'express';
 import { store, usageReadable } from '../store.js';
 import { numOrNull } from '../util/numOrNull.js';
-import { unreadVcenterReasons } from '../metrics/unreadVcenters.js';   // 122회차: '지금 값' 으로 쓰지 않는 vCenter(지표 샘플러와 같은 판정)
+import { samplingUnreadReasons } from '../metrics/sampler.js';   // 122회차: '지금 값' 으로 쓰지 않는 vCenter(지표 샘플러와 같은 판정) · 162회차: 긴급중단(과 푼 직후)까지 본 판정
 import { latestPowerByHostName } from '../idrac/service.js';
 import { getGuestGpuAllHosts } from '../gpu/store.js';
 import { tokenMatches } from '../util/secureCompare.js';
@@ -63,7 +63,9 @@ metricsExportRouter.get('/', async (req, res) => {
   //   용량은 **마지막으로 읽은 값**이다(store 가 수집 실패는 최대 LASTGOOD_HOLD_MS, 점검중 · 위임 push 끊김은 기한 없이 이어 서빙한다). 그대로 내보내면
   //   외부 감시가 그 평탄선을 지금 값으로 읽는다 — 위임 vCenter 는 상태가 connected 그대로라 vmware_vcenter_up 도 1 이었다(끊긴 줄 알 길이 없었다).
   //   이 포탈의 지표 샘플러(v2.620 SRV2620-03)와 같은 판정으로 그 시계열을 내지 않는다. 연결 상태 · VM 수(인벤토리)는 예전 그대로 낸다.
-  const unreadVc = unreadVcenterReasons(snap);
+  // 162회차(158 N158-2 의 같은 꼴 — 재현): 긴급중단 동안(과 푼 직후 다음 병합 전)에는 스냅샷이 통째로 얼어 있는데 vCenter 상태는 connected 그대로라 위 판정이 아무것도 거르지 않았다 —
+  //   호스트 사용률 · 데이터스토어 용량을 매 스크레이프마다 지금 값으로 냈다. 지표 샘플러와 같은 판정(samplingUnreadReasons — 긴급중단이면 전 vCenter)을 쓴다. 연결 상태 · VM 수는 예전 그대로.
+  const unreadVc = samplingUnreadReasons(snap);
   // 값이 없는 것과 0 은 다르다 — 결측은 시계열을 내지 않으므로(Prometheus 규약) 외부 경보는 absent() 로 함께 봐야 한다. HELP 에 적는다.
   const ABSENT = ' — 지금 값을 못 읽으면 이 시계열을 내지 않는다(0 이 아니다 · absent 로 감시)';
 

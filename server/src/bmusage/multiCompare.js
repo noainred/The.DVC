@@ -64,7 +64,7 @@ export const SPARK_MAX = 96;
 
 /** 비교 지표 목록 정규화(순수) — 화이트리스트만 · 묶음 이름이면 펼친다 · 상한 24. */
 export function parseCompareMetrics(v, { group = '' } = {}) {
-  const fromGroup = COMPARE_GROUPS[group] || null;
+  const fromGroup = Object.hasOwn(COMPARE_GROUPS, group) ? COMPARE_GROUPS[group] : null;   // 162회차(158 N158-3 의 같은 꼴): 자기 키만 — ‘constructor’ 는 함수라 전개에서 던졌다(500)
   const list = fromGroup ? [...fromGroup] : String(v || '').split(',').map((x) => x.trim()).filter(Boolean);
   const out = [...new Set(list.filter((c) => META.has(c)))].slice(0, 24);
   return out.length ? out : [...COMPARE_GROUPS.util6];
@@ -77,8 +77,8 @@ export function compareWindow({ range = '24h', from = null, to = null, now = Dat
     if (w.to - w.from > COMPARE_MAX_SPAN_MS) w.from = w.to - COMPARE_MAX_SPAN_MS;
     return { ...w, range: 'custom' };
   }
-  const span = COMPARE_RANGES[range] || COMPARE_RANGES['24h'];
-  return { from: now - span, to: now, range: COMPARE_RANGES[range] ? range : '24h' };
+  const key = Object.hasOwn(COMPARE_RANGES, range) ? range : '24h';   // 162회차: 자기 키만(상속 키는 창이 NaN)
+  return { from: now - COMPARE_RANGES[key], to: now, range: key };
 }
 
 /**
