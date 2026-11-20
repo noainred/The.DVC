@@ -77,6 +77,13 @@ test('D3 — 담당자 저장 보고: 버린 주소 · 통째로 뺀 법인 · �
   assert.deepEqual(rep.unknownCorps, ['서울법인']);
 });
 
+test('3회차 화면 확인 — 법인 이름으로 적은 담당자 키는 그 법인 id 로(이름이 둘 이상과 맞으면 그대로)', () => {
+  const corps = [{ id: 'vc-1', name: 'vcenter-ap-northeast-01' }, { id: 'vc-2', name: 'dup' }, { id: 'vc-3', name: 'dup' }];
+  const m = R.mapCorpKeys({ 'vcenter-ap-northeast-01': ['a@x.com'], dup: ['b@x.com'], 'vc-2': ['c@x.com'] }, corps);
+  assert.deepEqual(m.renamed, [{ from: 'vcenter-ap-northeast-01', to: 'vc-1' }]);
+  assert.deepEqual(Object.keys(m.corpTo).sort(), ['dup', 'vc-1', 'vc-2']);
+});
+
 test('D9 · I1 — 라우트 계약(이 서버를 읽는 조각만 점검 중 · 노드 바쁨 따로 · 법인 쓰기 가능 · 설정 수정 가능 · 기록 줄이기)', () => {
   const rt = code('routes/api/diskBad.js');
   assert.match(rt, /const running = units\.some\(\(u\) => !Array\.isArray\(u\.serverIds\) \|\| u\.serverIds\.map\(String\)\.includes\(String\(s\.id\)\)\);/);

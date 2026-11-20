@@ -125,6 +125,25 @@ export function corpToReport(sent, saved, knownIds) {
   return { droppedEmails, droppedCorps: droppedCorps.slice(0, 50), unknownCorps: unknownCorps.slice(0, 50) };
 }
 
+/**
+ * 법인 담당자 키를 id 로 맞춘다(순수 — 3회차 화면 확인). id 가 아닌 키가 법인 **이름** 하나와 정확히 맞으면 그 id 로 바꾼다(둘 이상과 맞으면 그대로 — 추측하지 않는다).
+ * @returns {{corpTo:object, renamed:Array<{from:string,to:string}>}}
+ */
+export function mapCorpKeys(corpTo, corps) {
+  const src = corpTo && typeof corpTo === 'object' && !Array.isArray(corpTo) ? corpTo : {};
+  const ids = new Set((corps || []).map((c) => String(c.id)));
+  const byName = new Map();
+  for (const c of corps || []) { const n = String(c.name || ''); if (!n) continue; byName.set(n, byName.has(n) ? null : String(c.id)); }
+  const out = {}; const renamed = [];
+  for (const [k, v] of Object.entries(src).slice(0, 500)) {
+    const key = String(k).trim();
+    const id = !ids.has(key) && byName.get(key) ? byName.get(key) : key;
+    if (id !== key) renamed.push({ from: key.slice(0, 128), to: id });
+    out[id] = out[id] ? [...(Array.isArray(out[id]) ? out[id] : [out[id]]), ...(Array.isArray(v) ? v : [v])] : v;
+  }
+  return { corpTo: out, renamed: renamed.slice(0, 50) };
+}
+
 function corpOptions(servers) {
   const m = new Map();
   for (const s of servers) {
@@ -333,12 +352,16 @@ export function registerDiskBad(api) {
     const b = req.body && typeof req.body === 'object' ? req.body : {};
     const patch = {};
     for (const k of ['autoEnabled', 'intervalHours', 'mailEnabled', 'corpTo']) if (k in b) patch[k] = b[k];
+    // 화면은 법인 **이름**을 보여 주는데 키는 id 다 — 이름을 적으면 메일이 가지 않았다(3회차 화면 확인). 이름이 법인 하나와 정확히 맞으면 그 id 로 바꾸고 알린다.
+    const corpList = 'corpTo' in patch ? corpOptions(physicalServersFor(req).servers) : [];
+    const mapped = 'corpTo' in patch ? mapCorpKeys(patch.corpTo, corpList) : null;
+    if (mapped) patch.corpTo = mapped.corpTo;
     { const no = diskBadWriteRefusal(); if (no) return res.status(503).json(no); }   // 107회차: 설정 파일 읽기 오류 중에는 저장하지 않는다(사유를 화면까지)
     let next;
     try { next = saveDiskBadSettings(patch); } catch (e) { return res.status(500).json({ ok: false, reason: `저장 실패: ${String(e?.message || e).slice(0, 200)}` }); }
     logAudit({ user: req.user?.username || '', action: '디스크 배드 섹터 설정 저장', target: 'disk-bad-settings', detail: `자동 ${next.autoEnabled ? `켜짐(${next.intervalHours}시간)` : '꺼짐'} · 메일 ${next.mailEnabled ? '켜짐' : '꺼짐'} · 법인 담당자 ${Object.keys(next.corpTo).length}곳`, ip: req.ip });
     // 반증 3회차 D3: 버린 주소 · 법인을 알린다 — 화면은 '저장했습니다' 인데 담당자 메일이 소리 없이 빠졌다.
-    const corpReport = 'corpTo' in patch ? corpToReport(patch.corpTo, next.corpTo, corpOptions(physicalServersFor(req).servers).map((c) => c.id)) : null;
+    const corpReport = mapped ? { ...corpToReport(patch.corpTo, next.corpTo, corpList.map((c) => c.id)), renamed: mapped.renamed } : null;
     res.json({ ok: true, settings: next, auto: autoInfo(), ...(corpReport ? { corpReport } : {}) });
   });
 }

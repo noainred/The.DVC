@@ -157,6 +157,7 @@ describe('diskBadText', () => {
 
   it('3회차(D3) — 담당자 저장 결과는 버린 줄 · 주소 · 법인을 밝힌다', () => {
     expect(corpSaveText(null, 0)).toBe('저장했습니다.');
+    expect(corpSaveText({ renamed: [{ from: 'vcenter-ap-northeast-01', to: 'vc-1' }] }, 0)).toBe('저장했습니다 — 법인 이름을 id 로 바꿔 저장: vcenter-ap-northeast-01 → vc-1.');
     const t = corpSaveText({ droppedEmails: 2, droppedCorps: ['vc-kr'], unknownCorps: ['서울법인'] }, 1);
     expect(t).toContain('1줄은 읽지 않았습니다'); expect(t).toContain('vc-kr'); expect(t).toContain('2개를 뺐습니다'); expect(t).toContain('서울법인');
   });
