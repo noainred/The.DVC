@@ -17,7 +17,7 @@
  */
 import crypto from 'node:crypto';
 import { withDeadline, isSshAuthError } from '../../proxy/sshExec.js';
-import { gateAccountLogin } from '../../sshaccess/accountGate.js';   // 점검 2회차 A1: 분마다 도는 세션도 같은 계정 탐침 문을 지난다
+import { gateAccountLogin, FOCUS_FRESH_MS } from '../../sshaccess/accountGate.js';   // 점검 2회차 A1: 분마다 도는 세션도 같은 계정 탐침 문을 지난다
 import { markLoggedIn, markPasswordSent } from '../../sshaccess/loginMark.js';
 import { config } from '../../config.js';
 import { osMissOf, idracMissOf } from '../missReason.js';
@@ -391,7 +391,7 @@ async function tick(sess, idx) {
       top: false,
       onPasswordSent: () => { pwSent = true; }, onLoggedIn: () => { logged = true; },
     }), '집중 수집 시한 초과').catch((e) => { const o = { ok: false, error: String(e?.message || e).slice(0, 300) }; return logged ? markLoggedIn(o) : pwSent ? markPasswordSent(o) : o; }), { priority: true, waitMs, onBusy: busy }); }, {
-      feature: 'bm-usage',
+      feature: 'bm-usage', freshMs: FOCUS_FRESH_MS,   // 3회차 R3-5: 분마다의 성공이 주기 수집의 빠른 길을 늘 열어 두지 않게(같은 분 세션끼리만)
       rejected: (r) => !!r && r.ok === false && !r.authErrorCode && !r.busy && isSshAuthError({ message: String(r.error || '') }),
       stopped: (code) => ({ ok: false, error: AUTH_ERROR[code] || AUTH_ERROR['account-stopped'], authErrorCode: code }),
     }) : null,

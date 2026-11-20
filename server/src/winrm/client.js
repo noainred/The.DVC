@@ -111,7 +111,9 @@ export async function winrmRun({ host, port = WINRM_PORT, username, domain = '',
     const r = await post(WS.envelope({ to: url, action, selector, body, options, timeoutS: Math.max(5, Math.floor(timeoutMs / 1000) - 2) }), auth);
     // 로그인 거부는 **AUTHENTICATE 를 실은 요청**의 401 만이다(F1) — 그 뒤의 401 은 세션을 잃은 것(로그인 거부로 계정을 멈추지 않는다)
     // 2회차 보안 H1(WinRM): AUTHENTICATE 를 실은 요청이 401 이 아닌 4xx · 5xx(원격 셸 꺼짐 · 셸 수 상한 Fault 등)면 비밀번호는 받아들여졌다 — 로그인 성공으로 친다.
-    if (auth && r.status >= 400 && r.status !== 401) loggedIn = true;
+    //   3회차 W3-2(재현 — 앞단 502/503 이 맨 앞이면 틀린 비밀번호 4회): **WS-Man SOAP Fault 일 때만**(WinRM 서비스가 인증 뒤 답한 것). 맨 4xx · 5xx(프록시 · 부하분산 · 게이트웨이)는
+    //   비밀번호를 검증했는지 모른다 — 로그인 성공으로 치지 않는다(판정 전 실패 = passwordSent 로 남는다).
+    if (auth && r.status >= 400 && r.status !== 401 && WS.faultReason(r.text)) loggedIn = true;
     if (r.status === 401 && auth) {
       // 점검 1회차 R1(추정 — 실제 Windows 미확인): 비밀번호는 맞고 WinRM 권한(Remote Management Users · 원격 UAC)이 없을 때도 이 자리에서 401 이 올 수 있다 —
       //   계정 잠금이 더 위험하므로 판정은 그대로(거부 · 정지)이고, 본문에 Fault 사유가 있으면 붙여 사람이 가를 수 있게 한다(faultWhy).
@@ -146,8 +148,8 @@ export async function winrmRun({ host, port = WINRM_PORT, username, domain = '',
     const created = await call(WS.ACTION.create, WS.createShellBody(), { options: WS.CREATE_OPTIONS }, `Negotiate ${message.toString('base64')}`);
     // 점검 1회차 R2: AUTHENTICATE 를 실은 요청이 401 이 아니면 비밀번호는 받아들여졌다 — 그 뒤의 실패(시한 · 상한 · Fault · 세션 잃음)는 afterLogin 을 단다.
     //   계정 탐침(accountGate)은 이것을 ‘성공’ 으로 본다(예전에는 ‘모름’ 이라 같은 계정 서버들을 하나씩 직렬로 돌렸다 — 3대 15초 · 50대면 약 50분).
-    loggedIn = true;
     const shellId = WS.parseShellId(created.text);
+    loggedIn = true;   // 3회차 W3-2: ShellId 를 받은 뒤에만(SOAP 아닌 200 — 앞단 장비 — 은 로그인 성공이 아니다)
     let commandId = '';
     try {
       const cmd = await call(WS.ACTION.command, WS.commandBody(command, args), { selector: shellId, options: WS.COMMAND_OPTIONS });
@@ -173,7 +175,8 @@ export async function winrmRun({ host, port = WINRM_PORT, username, domain = '',
     }
   } catch (e) {
     if (loggedIn && e && typeof e === 'object') { try { e.afterLogin = true; } catch { /* 고정된 객체 — 표시 없이 던진다 */ } }
-    else if (authSent && e && typeof e === 'object' && e.kind !== 'auth-rejected') { try { e.passwordSent = true; } catch { /* 표시 없이 던진다 */ } }
+    // 3회차 W3-1(재현): connection-split 은 두 번째 연결에 바이트 0 — AUTHENTICATE 가 나가지 않았다(undici 는 이미 쓴 POST 를 새 연결로 다시 보내지 않는다) — 송신 표시를 달지 않는다
+    else if (authSent && e && typeof e === 'object' && e.kind !== 'auth-rejected' && e.kind !== 'connection-split') { try { e.passwordSent = true; } catch { /* 표시 없이 던진다 */ } }
     throw e;
   } finally {
     clearTimeout(timer);

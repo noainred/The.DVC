@@ -79,7 +79,7 @@ function verifyAuth({ neg, chal, auth, accounts, certDer }) {
   return 'ok';
 }
 const b64 = (s) => Buffer.from(s).toString('base64');
-async function fakeWinrm({ cert = 'server-ok', accounts = { 'corp\\svc': 'Right-1' }, stdout = 'hello from windows\r\n', exitCode = 0, receiveTimeouts = 0, hugeOutput = 0, dropAfterCreate = false, neverDone = false, rejectAfterAuth = false } = {}) {
+async function fakeWinrm({ cert = 'server-ok', accounts = { 'corp\\svc': 'Right-1' }, stdout = 'hello from windows\r\n', exitCode = 0, receiveTimeouts = 0, hugeOutput = 0, dropAfterCreate = false, neverDone = false, rejectAfterAuth = false, closeAfterChallenge = false, gatewayOnAuth = 0, faultOnCreate = false } = {}) {
   const st = { conns: 0, auths: [], authHeaders: 0, requests: [], receiveTimeouts: 0 };
   const certDer = new crypto.X509Certificate(pem(`${cert}.crt`)).raw;
   const srv = https.createServer({ key: pem(`${cert}.key`), cert: pem(`${cert}.crt`) }, (req, res) => {
@@ -95,12 +95,16 @@ async function fakeWinrm({ cert = 'server-ok', accounts = { 'corp\\svc': 'Right-
         const m = Buffer.from(a[1], 'base64');
         if (m.readUInt32LE(8) === 1) {
           sock.neg = m; sock.chal = challengeMsg(crypto.randomBytes(8));
-          res.writeHead(401, { 'www-authenticate': `Negotiate ${sock.chal.toString('base64')}` }); return res.end();
+          res.writeHead(401, { 'www-authenticate': `Negotiate ${sock.chal.toString('base64')}`, ...(closeAfterChallenge ? { connection: 'close' } : {}) }); return res.end();
         }
+        // 3회차 W3-2: 비밀번호를 검증하지 않는 앞단(게이트웨이)이 AUTHENTICATE 요청에 맨 5xx 를 준다
+        if (gatewayOnAuth) { st.auths.push('not-verified'); res.writeHead(gatewayOnAuth, { 'content-type': 'text/html' }); return res.end('<html>Bad Gateway</html>'); }
         const v = verifyAuth({ neg: sock.neg, chal: sock.chal, auth: m, accounts, certDer });
         st.auths.push(v);
         if (v !== 'ok') { res.writeHead(401, { 'www-authenticate': 'Negotiate' }); return res.end(); }
         sock.ntlmOk = true;
+        // 3회차 W3-2: 인증 뒤 WinRM 서비스가 셸 만들기를 SOAP Fault 로 거절(원격 셸 꺼짐 등) — 비밀번호는 받아들여졌다
+        if (faultOnCreate) { res.statusCode = 500; res.setHeader('content-type', 'application/soap+xml;charset=UTF-8'); return res.end('<s:Envelope><s:Body><s:Fault><s:Reason><s:Text>The WS-Management service cannot process the request. Remote shell access is not allowed.</s:Text></s:Reason><s:Detail><f:WSManFault Code="2150858843"/></s:Detail></s:Fault></s:Body></s:Envelope>'); }
       }
       const action = /<a:Action[^>]{0,80}>([^<]{1,200})</.exec(body)?.[1] || '';
       if (rejectAfterAuth && action === WS.ACTION.command) { res.writeHead(401, { 'www-authenticate': 'Negotiate' }); return res.end(); }   // 같은 연결에서 세션을 잃음(서버 쪽 만료 흉내)
@@ -300,4 +304,24 @@ test('⑦ 코어 연결(3단계) — Windows 단계 지정이 WinRM 이면 readS
   // 지정 칸 검사 — WinRM 은 Windows 단계만 · 포트 범위
   assert.equal((await SVC.setAssignment({ corp: 'vcW', level: 'linux', accountId: a.account.id, via: 'winrm', by: 't', dryRun: true })).code, 'account-os');
   assert.equal(ST.setAssign('vcW', 'windows', { account: a.account.id, via: 'winrm', port: 70000 }, { by: 't' }).code, 'bad-port');
+});
+
+test('⑧ 3회차 W3-1 · W3-2 — 바이트 0 연결 갈림은 비밀번호 송신이 아니다 · 앞단 맨 5xx 는 로그인 성공이 아니다(송신 뒤 모름) · SOAP Fault 는 로그인 성공', async (t) => {
+  // W3-1: CHALLENGE 뒤 서버가 연결을 닫음 → AUTHENTICATE 는 새 연결에 0바이트로 막힌다 → passwordSent 아님
+  const A = await fakeWinrm({ closeAfterChallenge: true });
+  t.after(() => A.close());
+  await assert.rejects(C.winrmRun({ host: '127.0.0.1', port: A.port, username: 'svc', domain: 'CORP', password: 'Right-1', command: 'hostname' }),
+    (e) => e.kind === 'connection-split' && e.passwordSent !== true && e.afterLogin !== true);
+  assert.deepEqual(A.st.auths, [], '서버는 AUTHENTICATE 를 받지 않았다');
+  // W3-2: 앞단 502(검증 없음) — 로그인 성공으로 치지 않는다(빠른 길을 열지 않게) · 판정 전 송신(passwordSent)
+  const B = await fakeWinrm({ gatewayOnAuth: 502 });
+  t.after(() => B.close());
+  await assert.rejects(C.winrmRun({ host: '127.0.0.1', port: B.port, username: 'svc', domain: 'CORP', password: 'Wrong-1', command: 'hostname' }),
+    (e) => e.afterLogin !== true && e.passwordSent === true);
+  // 인증 뒤 SOAP Fault(원격 셸 꺼짐) — 비밀번호는 받아들여졌다(로그인 성공 · 탐침 직렬 풀기 방지)
+  const F = await fakeWinrm({ faultOnCreate: true });
+  t.after(() => F.close());
+  await assert.rejects(C.winrmRun({ host: '127.0.0.1', port: F.port, username: 'svc', domain: 'CORP', password: 'Right-1', command: 'hostname' }),
+    (e) => e.kind === 'fault' && e.afterLogin === true);
+  assert.deepEqual(F.st.auths, ['ok']);
 });

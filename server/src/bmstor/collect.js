@@ -7,7 +7,7 @@
  * df 는 없는 마운트가 섞여도 있는 것은 출력하고 exit≠0 — 있는 것은 살리고 없는 것만 오류 표기.
  */
 
-import { markLoggedIn, markPasswordSent } from '../sshaccess/loginMark.js';   // 점검 2회차 Q1(b) · B1
+import { markLoggedIn, markPasswordSent, wasLoggedIn } from '../sshaccess/loginMark.js';   // 점검 2회차 Q1(b) · B1
 import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { withSsh, isSshAuthError } from '../proxy/sshExec.js';
 import { reqTimeoutMs } from '../agent/envTimeout.js';
@@ -161,7 +161,8 @@ export async function collectMany(servers, { concurrency = envPositive(process.e
   const worker = async () => {
     while (idx < list.length) {
       const i = idx++;
-      results[i] = { id: list[i].id, ...(await collect(list[i])) };   // v3.24: 폴러가 계정 탐침(sshaccess/accountGate)으로 감싼 함수를 넘긴다
+      const out = await collect(list[i]);
+      results[i] = wasLoggedIn(out) ? markLoggedIn({ id: list[i].id, ...out }) : { id: list[i].id, ...out };   // 3회차 F4: 펼쳐도 로그인 표시를 잇는다   // v3.24: 폴러가 계정 탐침(sshaccess/accountGate)으로 감싼 함수를 넘긴다
     }
   };
   await Promise.all(Array.from({ length: Math.max(1, Math.min(concurrency, list.length)) }, worker));

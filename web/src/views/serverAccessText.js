@@ -89,6 +89,8 @@ export function accountStopText(stop) {
   if (!stop) return null;
   if (stop.unreadable) return { label: '정지 상태 모름', tone: 'bad' };
   if (!stop.current) return { label: '정지 기록(비밀번호 바꿔 풀림)', tone: 'muted' };
+  // 3회차 F2: 비밀번호를 보낸 뒤 판정을 시한 안에 받지 못함이 연달아 건 정지는 ‘거부’ 가 아니다(비밀번호가 맞을 수 있다 — DC 지연 등)
+  if (stop.cause === 'timeout') return { label: '로그인 판정 시한 연달음 — 정지 중', tone: 'bad', title: '비밀번호를 보낸 뒤 판정을 시한 안에 받지 못한 것이 연달아 계정 잠금 방지로 멈췄습니다 — 거부를 본 것은 아닙니다. 서버 · 도메인 컨트롤러 응답을 확인한 뒤 ‘한 대로 다시 확인’ 으로 푸세요.' };
   return { label: '로그인 거부 — 정지 중', tone: 'bad' };
 }
 

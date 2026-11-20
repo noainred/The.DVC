@@ -194,7 +194,8 @@ test('R2 · T4 코어가 로그인 뒤 실패에 loggedIn 을 싣는다(SSH 콜�
   const cl = fs.readFileSync(new URL('../src/winrm/client.js', import.meta.url), 'utf8');
   assert.ok(cl.lastIndexOf('loggedIn = true;') > cl.indexOf('const created = await call(WS.ACTION.create'), 'AUTHENTICATE 응답을 받은 뒤에만 로그인으로 친다');
   // 2회차(WinRM H1): AUTHENTICATE 를 실은 요청이 401 이 아닌 4xx · 5xx 여도 로그인 성공 — 그 판정은 call() 안(응답을 받은 뒤)에서만
-  assert.match(cl, /if \(auth && r\.status >= 400 && r\.status !== 401\) loggedIn = true;/);
+  // 3회차 W3-2: 그 판정은 WS-Man SOAP Fault 일 때만(앞단 장비의 맨 5xx 는 로그인 성공이 아니다)
+  assert.match(cl, /if \(auth && r\.status >= 400 && r\.status !== 401 && WS\.faultReason\(r\.text\)\) loggedIn = true;/);
 });
 
 test('S8 사용 기록 읽기 오류는 손상이 아니다 — 원본을 옮기지 않고 · 다시 읽기 전에는 쓰지 않고 · 다시 읽으면 합친다', async () => {

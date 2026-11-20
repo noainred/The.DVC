@@ -523,7 +523,7 @@ function accountStopView(a) {
   const st = ST.accountStopFor(a.id);
   if (!st) return null;
   if (st.unreadable) return { unreadable: true };
-  return { at: st.at, server: st.server, feature: st.feature, current: st.version === KS.accountSecretVersion(a) };
+  return { at: st.at, server: st.server, feature: st.feature, current: st.version === KS.accountSecretVersion(a), ...(st.cause === 'timeout' ? { cause: 'timeout' } : {}) };   // 3회차 F2: 정지 사유(거부 · 판정 시한)
 }
 const LEVEL_TEXT = Object.freeze({ all: '법인', linux: 'Linux', windows: 'Windows' });
 const storesIssue = (what) => {

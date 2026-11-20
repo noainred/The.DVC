@@ -16,7 +16,7 @@ export const codeTone = (code) => (code === 'ok' ? 'ok' : ['exec-timeout', 'exec
 export const CRED_TEXT = Object.freeze({
   'account-feature': '이 계정은 ‘서버 명령 실행’ 에 쓰지 않음 — 설정 › 보안 › 서버 접속에서 계정의 쓸 수 있는 기능에 켭니다',
   'key-feature': '이 키는 ‘서버 명령 실행’ 에 쓰지 않음 — 설정 › 보안 › 서버 접속에서 키의 쓸 수 있는 기능에 켭니다',
-  'account-stopped': '계정 정지(앞선 로그인 거부)', 'account-corp-stopped': '법인 사용 중지', 'winrm-needs-password': 'WinRM 은 비밀번호 계정만',
+  'account-stopped': '계정 정지(앞선 로그인 거부 · 판정 시한)', 'account-corp-stopped': '법인 사용 중지', 'winrm-needs-password': 'WinRM 은 비밀번호 계정만',
   // 점검 2회차 — 계정 탐침 문 · 서버 단독 비밀번호 정지(비밀번호를 보내지 않았다)
   'account-probe-unreached': '같은 계정 서버가 연달아 접속 안 됨 — 이번엔 보내지 않음', 'account-login-unknown': '같은 계정 로그인 판정 모름 — 이번엔 보내지 않음',
   'server-auth-stopped': '이 서버 비밀번호 정지(앞선 로그인 거부)',
@@ -90,7 +90,7 @@ export function resultCounts(rows = []) {
 
 /** 전체 복사 글 — 서버마다 머리줄 + 출력(값이 없으면 ‘(출력 없음)’). */
 export function copyAllText(label, rows = []) {
-  return rows.filter((r) => r && r.ran !== false).map((r) => [`### ${r.name} — ${label}${numOrNull(r.exit) != null ? ` · 끝 코드 ${r.exit}` : (r.ran && r.code === 'ok' ? ' · 끝 코드 모름' : '')}${r.cut ? ' · 잘림' : ''}`, r.out || '(출력 없음)', ...(r.err ? ['--- 오류 출력', r.err] : [])].join('\n')).join('\n\n');
+  return rows.filter((r) => r && r.ran !== false).map((r) => [`### ${r.name} — ${label}${numOrNull(r.exit) != null ? ` · 끝 코드 ${r.exit}` : (r.ran && r.code === 'ok' ? ' · 끝 코드 모름' : '')}${r.code === 'exec-timeout' ? ' · 시한(일부만)' : ''}${r.cut ? ' · 잘림' : ''}`, r.out || '(출력 없음)', ...(r.err ? ['--- 오류 출력', r.err] : [])].join('\n')).join('\n\n');
 }
 
 /** 펼친 출력의 머리줄 — 데모 · 계정 정보가 없는 행은 접속 방식 · 로그인 방식을 지어내지 않는다(Chromium 확인: 데모 행이 ‘SSH · 비밀번호’ 로 보였다). */

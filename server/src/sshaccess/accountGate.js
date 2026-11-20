@@ -20,7 +20,7 @@
 import { accountStopFor, setAccountStop, accountResumeEpoch } from './state.js';
 import { wasLoggedIn, wasPasswordSent } from './loginMark.js';
 
-const okVersion = new Map();   // accountId → { v: 성공한 비밀번호 판(문자열), at: 마지막 성공 시각 }
+const okVersion = new Map();   // accountId → { v: 성공한 비밀번호 판(문자열), at: 마지막 성공 시각, until: 빠른 길이 열려 있는 끝 }
 /** 빠른 길(탐침 없이 동시에)을 여는 마지막 성공의 신선도 — 한 주기 안의 성공은 서로 이어 주고, 주기 사이(분 단위)는 넘지 않게. */
 export const OK_FRESH_MS = 60_000;
 let clock = () => Date.now();
@@ -44,18 +44,32 @@ const SERVER_OK_KEEP_MS = 24 * 3_600_000;
 const SERVER_MISS_KEEP_MS = 3_600_000;
 const serverSeen = new Map();  // `${accountId}|${서버}` → { ok: 마지막 성공 시각, miss: 마지막 ‘모름’ 시각 }
 const SERVER_SEEN_MAX = 20_000;
-const missRun = new Map();     // `${id}|${ver}` → { n, at }
+// 3회차 W3-3(재현): ‘모름’ 연속은 **통로(ssh · winrm)별로** 센다 — WinRM 으로 정한 Windows 서버를 SSH 폴러가 두드려(연결 거부) 생긴 연속이 같은 계정의 WinRM 읽기를 막았다.
+//   닿느냐는 통로마다 다르다(비밀번호가 맞느냐는 같다 — 거부 · 정지 · 송신 뒤 모름은 계정 판 하나로 그대로 센다).
+const missRun = new Map();     // `${id}|${ver}|${통로}` → { n, at }
 /*
  * 2회차 보안 B1: 비밀번호를 보냈는데 판정을 받지 못한 결과(‘sent’ — 로그인 시한 · 끊김)는 ‘모름’ 이 아니다 — 서버는 거부로 셌을 수 있다.
  *   예전에는 다음 대기자가 새 탐침이 되어 같은 계정 서버마다 한 번씩 보냈고, 정지도 걸리지 않아 주기마다 되풀이했다(재현 4대 → 4회 · 다음 주기 8회).
- *   ① ‘sent’ 면 남은 대기자와 PROBE_MISS_HOLD_MS 동안 오는 접속은 보내지 않는다(`account-login-unknown`) ② SENT_STOP_AFTER 번 연달으면(성공 · 거부 없이 —
- *   SENT_RUN_KEEP_MS 안) 계정 단위 정지를 건다(cause 'timeout' — 화면이 ‘로그인 판정을 시한 안에 받지 못함’ 으로 밝힌다 · 사람이 ‘한 대로 다시 확인’ 으로 푼다).
- *   시한 안에 끝나지 않는 로그인은 어차피 수집이 되지 않으니 멈춰도 잃는 것이 없다.
+ * 3회차 F1 · R3-1 · R3-2(재현 — 2회차 판은 ‘sent’ 한 번에 120초 보류해, 아픈 서버 한 대가 목록 앞에 있으면 같은 계정의 정상 서버 전부가 매 주기 빠지고 3주기면 정지 ·
+ *   빠른 길의 동시 ‘sent’ 3대로도 곧바로 정지했다): 한 대의 ‘sent’ 는 **그 서버의 느림일 수 있다** —
+ *   ① 탐침의 ‘sent’ 는 그 서버를 순위 2 로 내리고 다음 대기자(최근에 붙은 서버부터)가 탐침이 된다 ② **탐침이 연달아 SENT_CHAIN_MAX 번** ‘sent’ 면(서로 다른 서버 —
+ *   계정 문제일 가능성) 남은 대기자와 PROBE_MISS_HOLD_MS 동안 오는 접속은 보내지 않는다(`account-login-unknown`) ③ 그런 보류가 성공 · 거부 없이
+ *   SENT_STOP_AFTER 번 연달으면(사람이 정지를 풀면 새로 센다) 계정 단위 정지(cause 'timeout' — 화면이 ‘판정 시한 연달음’ 으로 밝힌다) ④ 빠른 길의 ‘sent’ 는 그 서버만(‘other’ 와 같이).
  */
+export const SENT_CHAIN_MAX = 2;
 export const SENT_STOP_AFTER = 3;
 const SENT_RUN_KEEP_MS = 3 * 3_600_000;
-const sentRun = new Map();     // `${id}|${ver}` → { n, at }
-const sentHold = new Map();    // `${id}|${ver}` → 시각
+const sentChain = new Map();   // `${id}|${ver}` → { n, at } — 탐침의 연속 ‘sent’(한 보류 창 안)
+const sentRun = new Map();     // `${id}|${ver}` → { n, at, epoch } — 연속 보류 수(주기를 넘어)
+const sentHold = new Map();    // `${id}|${ver}` → { at, epoch }
+/*
+ * 3회차 N1 ②(재현 — 1분 집중 모니터링을 느린 서버 한 대에 걸면 5분 만에 계정 정지): 같은 서버의 ‘sent’ 연속은 **그 서버만** 쉰다 —
+ *   SERVER_SENT_MAX 번 연달으면(그 서버 성공 없이) 그 서버는 SERVER_SENT_HOLD_MS 동안 보내지 않는다(틀린 비밀번호 + 느린 거부가 한 서버로 잠금을 채우지 않게 ·
+ *   다른 서버는 그대로). 계정 단위 보류 · 정지는 서로 다른 서버의 연속 ‘sent’(SENT_CHAIN_MAX)만.
+ */
+export const SERVER_SENT_MAX = 3;
+export const SERVER_SENT_HOLD_MS = 30 * 60_000;
+const serverSent = new Map();  // `${id}|${서버}` → { n, at }
 const waitingRank = new Map(); // `${id}|${ver}` → [순위0 대기 수, 순위1, 순위2]
 
 /** 정지로 보내지 않은 결과의 꼴 — 자격 해석이 막은 결과와 같다(authErrorCode — 사용 기록 · 인증 정지 판정에 들지 않는다). */
@@ -105,12 +119,18 @@ function addWaiting(key, rank, d) {
  * @param {{ feature:string, rejected:(r:object)=>boolean, stopped:(code:string)=>object }} o
  *   stopped — 보내지 않았을 때 돌려줄 결과를 만든다(호출부 모양 — bm-storage `{ok:false, mounts:[] …}` · bm-usage `{ok:false …}`)
  */
-export async function gateAccountLogin(srv, run, { feature = '', rejected, stopped } = {}) {
+/*
+ * 3회차 R3-5(재현 — 집중 모니터링 세션의 분마다 성공이 빠른 길을 늘 열어, 비밀번호가 바뀐 직후 bm-usage 주기가 탐침 없이 20회): 성공이 여는 빠른 길의 길이를
+ *   호출부가 정한다(`freshMs` — 기본 OK_FRESH_MS). 집중 모니터링은 짧게(FOCUS_FRESH_MS — 같은 분에 함께 도는 세션끼리만 잇는다).
+ */
+export const FOCUS_FRESH_MS = 10_000;
+export async function gateAccountLogin(srv, run, { feature = '', rejected, stopped, channel = 'ssh', freshMs = OK_FRESH_MS } = {}) {
   const id = String(srv?.credAccountId || '');
   const ver = srv?.credVersion;
   if (!id || ver == null) return run();
   const v = String(ver);
   const key = `${id}|${v}`;
+  const mkey = `${key}|${channel === 'winrm' ? 'winrm' : 'ssh'}`;
   const sid = serverIdOf(srv);
   const rank = rankOf(id, sid);
   let waiting = false;
@@ -123,7 +143,7 @@ export async function gateAccountLogin(srv, run, { feature = '', rejected, stopp
       const ok = okVersion.get(id);
       const p = inflight.get(key);
       const age = ok ? clock() - ok.at : -1;
-      if (!p && ok && ok.v === v && age >= 0 && age < OK_FRESH_MS) {
+      if (!p && ok && ok.v === v && age >= 0 && clock() < ok.until) {
         // 빠른 길 — 기다리지 않지만 결과는 본다(거부면 그 자리에서 정지 — 뒤에 오는 접속은 위의 정지 검사에서 막힌다)
         if (waiting) { addWaiting(key, rank, -1); waiting = false; }
         let verdict = 'other';
@@ -131,10 +151,14 @@ export async function gateAccountLogin(srv, run, { feature = '', rejected, stopp
           const r = await run();
           verdict = verdictOf(r, rejected);
           return r;
-        } finally { settle(srv, id, v, key, verdict, feature); noteServer(id, sid, verdict); if (verdict !== 'other' && verdict !== 'skip') missRun.delete(key); }
+        } finally {
+          noteServerSent(id, sid, verdict);
+          const fv = verdict === 'sent' ? 'other' : verdict;   // 3회차 F1 · R3-2: 빠른 길(방금 같은 판으로 성공)의 ‘sent’ 는 그 서버의 느림 — 계정 보류 · 정지에 넣지 않는다
+          settle(srv, id, v, key, fv, feature, freshMs); noteServer(id, sid, fv); if (fv !== 'other' && fv !== 'skip') missRun.delete(mkey);
+        }
       }
-      if (sentHeld(key)) return stopped('account-login-unknown');
-      if (missHeld(key)) return stopped('account-probe-unreached');
+      if (sentHeld(key, id) || serverSentHeld(id, sid)) return stopped('account-login-unknown');
+      if (missHeld(mkey)) return stopped('account-probe-unreached');
       if (p) {   // 탐침 결과를 보고 다시 판단(거부면 위에서 정지 · 실패면 다음 하나가 탐침)
         if (!waiting) { addWaiting(key, rank, +1); waiting = true; }
         await p; continue;
@@ -151,9 +175,10 @@ export async function gateAccountLogin(srv, run, { feature = '', rejected, stopp
         verdict = verdictOf(r, rejected);
         return r;
       } finally {
-        settle(srv, id, v, key, verdict, feature);
-        noteServer(id, sid, verdict);
-        if (verdict === 'other') { const m = missRun.get(key); missRun.set(key, { n: (m && clock() - m.at >= 0 && clock() - m.at < PROBE_MISS_HOLD_MS ? m.n : 0) + 1, at: clock() }); } else if (verdict !== 'skip') missRun.delete(key);
+        noteServerSent(id, sid, verdict);
+        settle(srv, id, v, key, verdict, feature, freshMs, sid);
+        noteServer(id, sid, verdict === 'sent' ? 'other' : verdict);   // 3회차 R3-1: ‘sent’ 서버도 순위를 내린다(다음 탐침은 최근에 붙은 서버부터)
+        if (verdict === 'other') { const m = missRun.get(mkey); missRun.set(mkey, { n: (m && clock() - m.at >= 0 && clock() - m.at < PROBE_MISS_HOLD_MS ? m.n : 0) + 1, at: clock() }); } else if (verdict !== 'skip') missRun.delete(mkey);
         inflight.delete(key);
         done(verdict);
       }
@@ -173,36 +198,67 @@ function verdictOf(r, rejected) {
   if (rejected?.(r)) return 'rejected';
   return wasPasswordSent(r) ? 'sent' : 'other';
 }
-function sentHeld(key) {
-  const at = sentHold.get(key);
-  if (at == null) return false;
-  const age = clock() - at;
-  if (age >= 0 && age < PROBE_MISS_HOLD_MS) return true;
+function sentHeld(key, id) {
+  const h = sentHold.get(key);
+  if (h == null) return false;
+  const age = clock() - h.at;
+  if (age >= 0 && age < PROBE_MISS_HOLD_MS && h.epoch === accountResumeEpoch(id)) return true;   // 3회차 L1: 사람이 풀면 보류도 풀린다
   sentHold.delete(key);
   return false;
 }
+function serverSentHeld(id, sid) {
+  const m = serverSent.get(`${id}|${sid}`);
+  if (!m || m.n < SERVER_SENT_MAX) return false;
+  const age = clock() - m.at;
+  if (age >= 0 && age < SERVER_SENT_HOLD_MS) return true;
+  serverSent.delete(`${id}|${sid}`);
+  return false;
+}
+function noteServerSent(id, sid, verdict) {
+  const k = `${id}|${sid}`;
+  if (verdict === 'ok' || verdict === 'rejected') { serverSent.delete(k); return; }
+  if (verdict !== 'sent') return;
+  const m = serverSent.get(k);
+  serverSent.set(k, { n: (m ? m.n : 0) + 1, at: clock() });
+  if (serverSent.size > SERVER_SEEN_MAX) serverSent.delete(serverSent.keys().next().value);
+}
 
 /** 결과 기록 하나(탐침 · 빠른 길 공통): 성공이면 신선도를 새로 · 거부면 빠른 길을 닫고 계정 단위 정지(못 쓰면 메모리 정지). */
-function settle(srv, id, v, key, verdict, feature) {
-  if (verdict === 'ok') { okVersion.set(id, { v, at: clock() }); sentRun.delete(key); sentHold.delete(key); return; }
+function settle(srv, id, v, key, verdict, feature, freshMs = OK_FRESH_MS, sid = '') {
+  if (verdict === 'ok') {
+    const now = clock(); const prev = okVersion.get(id);
+    const until = Math.max(now + Math.max(0, Number(freshMs) || 0), prev && prev.v === v && prev.at <= now ? prev.until : 0);
+    okVersion.set(id, { v, at: now, until });
+    sentRun.delete(key); sentHold.delete(key); sentChain.delete(key);
+    return;
+  }
   if (verdict === 'sent') {
     okVersion.delete(id);
-    sentHold.set(key, clock());
+    const c = sentChain.get(key);
+    const live = c && clock() - c.at >= 0 && clock() - c.at < PROBE_MISS_HOLD_MS;
+    const servers = new Set(live ? c.servers : []); servers.add(String(sid));   // 서로 다른 서버만 센다(같은 서버의 되풀이는 그 서버의 느림 — noteServerSent)
+    sentChain.set(key, { servers: [...servers].slice(-8), at: clock() });
+    if (servers.size < SENT_CHAIN_MAX) return;   // 한 대 — 다음 대기자가 탐침(그 서버의 느림일 수 있다)
+    sentChain.delete(key);
+    sentHold.set(key, { at: clock(), epoch: accountResumeEpoch(id) });
     const m = sentRun.get(key);
-    const n = (m && clock() - m.at >= 0 && clock() - m.at < SENT_RUN_KEEP_MS ? m.n : 0) + 1;
-    sentRun.set(key, { n, at: clock() });
+    const ep = accountResumeEpoch(id);   // 사람이 정지를 풀면(‘한 대로 다시 확인’ · ‘정지 풀기’) 새로 센다
+    const n = (m && m.epoch === ep && clock() - m.at >= 0 && clock() - m.at < SENT_RUN_KEEP_MS ? m.n : 0) + 1;
+    sentRun.set(key, { n, at: clock(), epoch: ep });
     if (n >= SENT_STOP_AFTER) stopAccount(srv, id, v, key, feature, 'timeout');
     return;
   }
   if (verdict !== 'rejected') return;
-  okVersion.delete(id); sentRun.delete(key);
+  okVersion.delete(id); sentRun.delete(key); sentChain.delete(key);
   stopAccount(srv, id, v, key, feature, '');
 }
 function stopAccount(srv, id, v, key, feature, cause) {
-  if (memStopActive(key, id) || accountStopFor(id, v)) return;   // 동시에 나간 접속의 거부가 겹쳐도 정지는 한 번(만료된 메모리 정지는 다시 건다 — H1)
+  const st = accountStopFor(id, v);
+  // 3회차 L2(재현): 상태 파일을 못 읽는 순간({ unreadable })은 ‘이미 정지’ 가 아니다 — 쓰기도 실패하니 메모리 정지를 건다(다시 읽히면 같은 틀린 비밀번호가 한 번 더 갔다)
+  if (memStopActive(key, id) || (st && !st.unreadable)) return;   // 동시에 나간 접속의 거부가 겹쳐도 정지는 한 번(만료된 메모리 정지는 다시 건다 — H1)
   const w = setAccountStop(id, { server: String(srv.name || srv.host || '').slice(0, 128), feature, version: v, accountName: String(srv.credAccountName || ''), cause });
   if (!w?.ok) memStop.set(key, { at: clock(), epoch: accountResumeEpoch(id) });
 }
 
 /** 시험용. */
-export function _resetAccountGateForTest({ now = null } = {}) { okVersion.clear(); inflight.clear(); memStop.clear(); serverSeen.clear(); missRun.clear(); waitingRank.clear(); sentRun.clear(); sentHold.clear(); clock = typeof now === 'function' ? now : () => Date.now(); }
+export function _resetAccountGateForTest({ now = null } = {}) { okVersion.clear(); inflight.clear(); memStop.clear(); serverSeen.clear(); missRun.clear(); waitingRank.clear(); sentRun.clear(); sentHold.clear(); sentChain.clear(); serverSent.clear(); clock = typeof now === 'function' ? now : () => Date.now(); }

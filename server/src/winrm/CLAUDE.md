@@ -23,3 +23,4 @@
 - Stream 여는 태그 정규식은 공백 하나(`\s(…)`) — `\s+` 와 `[^>]{0,300}` 겹침이 640KB 응답에 416ms(비율 시험).
 - 2회차: AUTHENTICATE 를 실은 요청이 401 이 아닌 4xx · 5xx 여도 로그인 성공(`afterLogin` — 원격 셸 꺼짐 Fault 등) · AUTHENTICATE 를 보낸 뒤 판정 전 실패는 `passwordSent` · stderr 상한은 호출부 값(`stderrMax`).
   남긴 것(낮음): 시한이면 원격 셸 · 프로세스가 남을 수 있다(Receive 시한 = 전체 시한 − 2초 → 두 번째 Receive 중 끊김 · Signal/Delete 0) · NTLM Workstation 칸 비움 · MsvAvTargetName 없음 · 3xx 응답.
+- 3회차: 비401 4xx · 5xx 는 **WS-Man SOAP Fault 일 때만** 로그인 성공(앞단 장비의 맨 5xx 는 아님 — 빠른 길이 열렸다) · ShellId 를 받은 뒤에만 `loggedIn` · `connection-split`(0바이트)은 `passwordSent` 아님.

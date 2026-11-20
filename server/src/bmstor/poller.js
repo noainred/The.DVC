@@ -15,7 +15,8 @@
 import { listBmServersRaw, getBmSettings } from './registry.js';
 import { withResolvedAuth, authCredOf, AUTH_ERROR } from '../bmusage/onboard/refs.js'; // 7b: 키 · 공통 계정 참조 해석 · 인증 정지 자격 지문(판정 하나)
 import { gateAccountLogin } from '../sshaccess/accountGate.js';   // v3.24 반증 F2: 같은 공통 계정 비밀번호는 탐침 하나의 결과를 본 뒤에
-import { noteCredOutcome } from '../sshaccess/outcome.js';   // v3.9.0 키 사용 기록 · v3.24 공통 계정 사용 기록 + 계정 단위 정지(로그인 거부)
+import { noteCredOutcome } from '../sshaccess/outcome.js';
+import { wasLoggedIn } from '../sshaccess/loginMark.js';   // 3회차 F4   // v3.9.0 키 사용 기록 · v3.24 공통 계정 사용 기록 + 계정 단위 정지(로그인 거부)
 import { isAuthFailureText } from '../util/authGuard.js';
 import { collectMany, collectServer } from './collect.js';
 import { enqueueBmstorJob, setBmstorExpireHandler } from './jobs.js';
@@ -47,9 +48,10 @@ const stopView = authStopView;   // 127회차: 사본 대신 공용(못 읽음 �
 const isAuthResult = (r) => !!(r && r.ok === false && (r.authFailed === true || isSshAuthError({ message: r.error || '' })));
 
 /** 결과 1건을 반영하며 정지 기록을 갱신한다(성공이면 해제, 자격증명 거부면 정지). */
-function noteAuth(srv, r) {
+function noteAuth(srv, r, { logged = false } = {}) {
   if (!srv) return r;
-  if (r?.ok) { authGuard.clearAuthStop(srv.id); return r; }
+  // 3회차 F4(재현): 로그인은 됐는데 df 가 실패한 결과(Windows · 마운트 없음)도 자격은 맞다 — 정지를 푼다(코어 readServer 와 같은 기준)
+  if (r?.ok || logged) { authGuard.clearAuthStop(srv.id); return r; }
   if (isAuthResult(r)) {
     const rec = authGuard.markAuthStopped(srv.id, srv, r.error || 'SSH 인증 실패');
     console.warn(`[bmstor] ${srv.name || srv.host}: 인증 실패로 주기 수집 정지(${rec.attempts}회) — 비밀번호를 고치면 자동 재개합니다`);
@@ -309,7 +311,7 @@ export async function bmCollectNow(trigger = 'manual', { demoOnly = false } = {}
     const ioEntries = [];
     for (const r of [...centralResults, ...edgeResults.flat()]) {
       const srv = srvById.get(r.id);
-      const row = noteAuth(srv ? authCredOf(srv) : srv, { ...r, at, agent: srv?.agent || '' });
+      const row = noteAuth(srv ? authCredOf(srv) : srv, { ...r, at, agent: srv?.agent || '' }, { logged: wasLoggedIn(r) });
       latest.set(r.id, row);
       // v3.9.0: 중앙이 키로 접속한 결과만 적는다(엣지 PUSH 결과는 엣지 키 — 엣지가 자기 기록에 적는다).
       // 자격 해석이 막아 접속하지 않은 키는 적지 않는다(반증 D3 — 접속 0회를 ‘실패한 사용’ 으로 쌓지 않게).

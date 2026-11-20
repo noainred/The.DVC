@@ -104,14 +104,15 @@ test('B1 비밀번호를 보낸 뒤 판정을 받지 못한 탐침 — 남은 �
   const run = () => new Promise((r) => { log.n += 1; setTimeout(() => r(LM.markPasswordSent({ ok: false, error: 'Timed out while waiting for handshake' })), 5); });
   for (let cyc = 1; cyc <= G.SENT_STOP_AFTER; cyc += 1) {
     await Promise.all(Array.from({ length: 4 }, (_, i) => G.gateAccountLogin(srv(A, `s${i}`), run, opts(log))));
-    assert.equal(log.n, cyc, `주기마다 하나만(예전에는 대기자마다 하나씩 — 재현 4대 → 4회) · 주기 ${cyc}`);
+    // 3회차: 한 대의 ‘sent’ 는 그 서버의 느림일 수 있어 다음 서버가 탐침 — 서로 다른 서버가 SENT_CHAIN_MAX 번 연달아야 계정 보류(예전 2회차 이전: 대기자마다)
+    assert.equal(log.n, cyc * G.SENT_CHAIN_MAX, `주기마다 ${G.SENT_CHAIN_MAX}번까지만 · 주기 ${cyc}`);
     now += 5 * 60_000;
   }
   const st = ST.accountStopFor(A, 'v1');
   assert.ok(st && st.cause === 'timeout', `세 번 연달으면 계정 정지 · ${JSON.stringify(st)}`);
   assert.ok(log.stopped.includes('account-login-unknown'));
   await G.gateAccountLogin(srv(A, 's0'), run, opts(log));
-  assert.equal(log.n, G.SENT_STOP_AFTER, '정지 뒤에는 보내지 않는다');
+  assert.equal(log.n, G.SENT_STOP_AFTER * G.SENT_CHAIN_MAX, '정지 뒤에는 보내지 않는다');
   // 성공 한 번이면 연속 수를 지운다
   G._resetAccountGateForTest({ now: clock });
   const B = `a_${hex(0xc02)}`;

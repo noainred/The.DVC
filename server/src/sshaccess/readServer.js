@@ -22,6 +22,7 @@ import { withDeadline } from '../util/deadline.js';
 import { gateAccountLogin } from './accountGate.js';
 import { winrmRun, WINRM_PORT } from '../winrm/client.js';   // v3.25(3단계) — Windows 단계 지정이 WinRM 일 때
 import { noteCredOutcome } from './outcome.js';
+import { authStopText } from '../util/authGuard.js';
 /*
  * 점검 2회차 C1(재현 — 폴러 1회 정지 뒤 서버 명령 3번 → 틀린 비밀번호 +3): 서버 단독 비밀번호(공통 계정 · 키 아님)는 일괄 문(한 일괄 동안)만 지났다 —
  *   설계 §4.2 ④ ‘서버 정지’ 검사가 없어 누를 때마다 같은 틀린 비밀번호가 나갔다. 이제 같은 등록부 서버의 **스토리지 수집 인증 정지**(bmstor-auth-stops — 하나)를
@@ -128,10 +129,11 @@ export async function readServer(serverId, { feature, plan = {}, deadlineMs = RE
   const BG = ownPw ? await bmstorGuard() : null;
   if (ownPw) {
     const stop = BG?.bmstorAuthStopFor?.(srv) || null;
-    if (stop) return { ok: false, code: 'cred', credCode: 'server-auth-stopped', os, auth, reason: `이 서버의 비밀번호는 앞서 로그인이 거부돼 멈춰 있습니다(${stop.attempts || 1}회 · 계정 잠금 방지 — 보내지 않았습니다). 비밀번호를 고치거나(서버 쪽을 되돌렸다면) 베어메탈 스토리지에서 ‘지금 수집’ 이 성공하면 풀립니다.` };
+    // 3회차 F5: 정지 기록 파일을 못 읽는 동안의 정지는 그 사유 그대로(authStopText — 소비처가 ‘거부’ 문장을 지어내지 않는다 · 127회차 규칙)
+    if (stop) return { ok: false, code: 'cred', credCode: 'server-auth-stopped', os, auth, reason: authStopText(stop, (x) => `이 서버의 비밀번호는 앞서 로그인이 거부돼 멈춰 있습니다(${Number(x.attempts) > 0 ? `${x.attempts}회 · ` : ''}계정 잠금 방지 — 보내지 않았습니다). 비밀번호를 고치거나(서버 쪽을 되돌렸다면) 베어메탈 스토리지에서 ‘지금 수집’ 이 성공하면 풀립니다.`) };
   }
   const gated = viaAccount
-    ? () => gateAccountLogin(srv, doRun, { feature, rejected: (x) => x?.authFailed === true, stopped: (code) => ({ ok: false, gated: code }) })
+    ? () => gateAccountLogin(srv, doRun, { feature, channel: viaWinrm ? 'winrm' : 'ssh', rejected: (x) => x?.authFailed === true, stopped: (code) => ({ ok: false, gated: code }) })
     : (!srv.privateKey && typeof credGate === 'function' ? () => credGate(credKey(srv), doRun) : doRun);
   const r = await gated();
   if (r.gated) return { ok: false, code: 'cred', credCode: r.gated, os, auth, reason: AUTH_ERROR[r.gated] || AUTH_ERROR['account-stopped'] };

@@ -13,6 +13,11 @@ export function osMissOf(os) {
   // v3.9.0(점검 B-8): 접속 전에 자격 해석이 막았다(키 사용 중지 · 폴더 · 허용 기능 · 퇴역 · 바꿔치기 · 저장소 못 읽음) — 접속 오류(ssh-error)가 아니라 ‘설정 때문에 시도 안 함’.
   // 재확인 N4: 집중 모니터링 분마다 다시 해석이 등록 꺼짐 · 엣지 지정으로 막은 것은 그 사유 그대로(대상 해석과 같은 code — 키 · 계정 설정이 아니다).
   if (os.authErrorCode === 'os-disabled' || os.authErrorCode === 'os-edge') return os.authErrorCode;
+  // 3회차 F3: 계정 탐침 문이 보내지 않은 것은 키 · 계정 설정 문제가 아니다 — 계정 정지는 인증 정지(서버별 정지와 같은 깃발 · 알림) ·
+  //   망 끊김 추정 건너뜀은 접속 불가 · 송신 뒤 판정 모름 보류는 시한(예전: 셋 다 cred-config ‘키 설정 확인’ — 원인이 망인데 키를 보라고 했다)
+  if (os.authErrorCode === 'account-stopped') return 'auth-stopped';
+  if (os.authErrorCode === 'account-probe-unreached') return 'unreachable';
+  if (os.authErrorCode === 'account-login-unknown') return 'timeout';
   if (os.authErrorCode) return 'cred-config';
   const e = String(os.error || '');
   if (os.busy) return 'pool-busy';
