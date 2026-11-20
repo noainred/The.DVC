@@ -97,6 +97,7 @@ export const TOOLS = [
   { k: 'dupip', icon: '🔁', label: '중복 IP 찾기', desc: '둘 이상 VM이 같은 IPv4를 쓰는 경우' },
   { k: 'vmtools', icon: '🧩', label: 'VMware Tools 버전', desc: '버전별 집계 + 업그레이드' },
   { k: 'snapshots', icon: '📸', label: '스냅샷 있는 VM', desc: 'vCenter/용량/개수별 정렬' },
+  { k: 'periodic-report', icon: '🗓️', label: '정기 점검 보고', aka: ['정기 보고', '정기 점검', '주간 보고', '월간 보고', '분기 보고', '일일 보고', '점검 보고서'], desc: '일일 · 주간 · 월간 · 분기 — 인프라 · 서비스 · 설비 53개 항목을 이미 저장된 수집 결과로 점검해 보고서를 만들고(정상 · 주의 · 이상 · 확인 불가) 메일 · 알림 채널 · 공지로 보냅니다. 보관함 · 법인별 현황 · 조치 필요 · HTML(PDF 저장) · XLSX · 범위 계정은 자기 법인만' },
   { k: 'daily-health', icon: '📋', label: '일일 헬스체크 리포트', desc: 'vCheck 스타일 아침 점검 — 스냅샷·용량·Tools·연결·인증서 요약 + 매일 지정 시각 웹훅 자동 발송' },
   { k: 'snapshot-age', icon: '⏳', label: '스냅샷 나이 감시', desc: '생성일 기준 오래된 스냅샷 탐지 · 나이/크기 필터 · CSV' },
   { k: 'storage-paths', icon: '🧷', label: '데이터스토어·경로 점검', desc: '데이터스토어 운영(일부 호스트 미마운트·유지보수 모드·씬 오버할당·VMFS 5 이하·SIOC·VM 수) + 호스트별 스토리지 경로(죽은 경로·단일 경로 공유 LUN·경로 정책 분포) + vSAN(분할 의심·디스크 문제·사용률) · CSV', aka: ['multipath', '멀티패스', 'dead path', '죽은 경로', 'PSP', 'SIOC', 'VMFS', '오버할당', 'overcommit', 'vSAN', 'datastore health', '데이터스토어 점검', 'SDRS'] },

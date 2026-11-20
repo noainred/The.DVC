@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>정기 점검 보고 — 점검 항목 · 주기 배치</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#93c5fd;text-decoration:none}a:hover{color:#bfdbfe}
+.tb{display:flex;align-items:center;gap:14px;height:44px;padding:0 16px;background:#0f1626;border-bottom:1px solid #243049}
+.logo{display:inline-flex;align-items:center;gap:8px;font-weight:800;font-size:14px}
+.logo .v{width:26px;height:26px;border-radius:7px;background:#3b82f6;display:inline-flex;align-items:center;justify-content:center;font-size:13px;color:#fff}
+.ver{font-size:11px;font-weight:700;color:#5eead4;border:1px solid #2dd4bf;border-radius:6px;padding:1px 6px}
+.sb{width:236px;flex:none;background:#0f1626;border-right:1px solid #243049;padding:12px 10px;display:flex;flex-direction:column;gap:2px}
+.sb a{display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:8px;color:#e6edf6;font-weight:600;font-size:13px}
+.sb a.sub{padding:6px 12px 6px 30px;color:#8b9bb4;font-weight:500;font-size:12.5px}
+.sb a.on{background:#1a2236;color:#22d3ee}
+.sb a.grp.on{background:transparent;color:#e6edf6;box-shadow:inset 3px 0 0 #22d3ee}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.btn{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.seg{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden}
+.seg button{height:30px;padding:0 12px;border:0;border-left:1px solid #243049;background:transparent;color:#8b9bb4;font:inherit;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap}
+.seg button:first-child{border-left:0}
+.seg button.on{background:#1a2236;color:#e6edf6}
+.input{height:30px;border:1px solid #243049;border-radius:8px;background:#0a0e17;color:#e6edf6;font:inherit;font-size:12.5px;padding:0 10px;box-sizing:border-box;display:inline-flex;align-items:center;gap:6px}
+.tabs{display:flex;gap:4px;border-bottom:1px solid #243049}
+.tabs a{padding:10px 14px;font-weight:700;font-size:13px;color:#8b9bb4;border-bottom:2px solid transparent;margin-bottom:-1px}
+.tabs a.on{color:#e6edf6;border-bottom-color:#22d3ee}
+.tabs a .n{margin-left:6px;font-size:11px;color:#8b9bb4;font-weight:600}
+.band{display:flex;gap:10px;align-items:flex-start;padding:10px 14px;border-radius:10px;background:rgba(37,99,235,.08);border:1px solid rgba(59,130,246,.3);font-size:12.5px;color:#c7d2e3}
+.band svg{flex:none;margin-top:1px}
+table{border-collapse:collapse;width:100%;font-size:12px}
+th{text-align:left;font-weight:700;color:#8b9bb4;font-size:11.5px;padding:8px 8px;background:#0f1626;border-bottom:1px solid #243049;white-space:nowrap;cursor:pointer}
+th .c{margin-left:4px;color:#5d6b85;font-size:10px}
+th.sorted{color:#e6edf6}th.sorted .c{color:#22d3ee}
+th.p,td.p{text-align:center;width:44px}
+td{padding:6px 8px;border-bottom:1px solid #1f2a40;vertical-align:middle}
+td.k{font-family:"JetBrains Mono",monospace;font-size:11.5px;color:#c7d2e3;white-space:nowrap}
+tr.g td{background:#0f1626;font-weight:800;font-size:12.5px;padding:8px 8px;border-bottom:1px solid #243049}
+.sw{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:8px;vertical-align:-1px}
+.dot{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:6px;font-family:"JetBrains Mono",monospace;font-size:12px;font-weight:700}
+.dot.on{background:rgba(34,211,238,.16);color:#22d3ee;border:1px solid rgba(34,211,238,.45)}
+.dot.off{color:#5d6b85}
+.src{display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 7px;border-radius:6px;font-size:11px;font-weight:700;border:1px solid #243049;background:#0f1626;color:#c7d2e3;white-space:nowrap}
+.src.edge{color:#5eead4;border-color:rgba(45,212,191,.45)}
+.src.off{color:#f59e0b;border-color:rgba(245,158,11,.4)}
+.src.part{color:#9aa4b2}
+.tg{display:inline-flex;align-items:center;width:34px;height:18px;border-radius:999px;background:#22c55e;position:relative}
+.tg::after{content:"";position:absolute;right:2px;top:2px;width:14px;height:14px;border-radius:50%;background:#fff}
+.tg.off{background:#243049}.tg.off::after{right:auto;left:2px}
+.muted{color:#8b9bb4}
+.cnt{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:8px;background:#141b2d;border:1px solid #243049;font-size:12px;font-weight:700}
+.cnt b{font-family:"JetBrains Mono",monospace;color:#22d3ee}
+</style>
+</helmet>
+<div style="display:flex;flex-direction:column;min-height:2240px">
+  <div class="tb">
+    <span class="logo"><span class="v">D</span>THE DVC <span class="ver">v2.915</span></span>
+    <span style="margin-left:auto;color:#8b9bb4;font-size:12px">admin · 전체 범위</span>
+  </div>
+  <div style="display:flex;flex-wrap:wrap;flex:1">
+    <nav class="sb" aria-label="주 메뉴">
+      <a href="#dash">대시보드</a><a href="#ov">Overview</a><a href="#vc">vCenter</a><a href="#vms">가상화 서버</a><a href="#stor">스토리지</a><a href="#net">네트워크</a>
+      <a href="#tools" class="grp on">특수 기능</a>
+      <a href="#tools-report" class="sub">리포트 · 점검</a>
+      <a href="Main.dc.html" class="sub on" aria-current="page">정기 점검 보고</a>
+      <a href="#ins">인사이트</a><a href="#ipam">IP관리</a><a href="#set">설정</a>
+    </nav>
+    <main style="flex:999 1 560px;min-width:0;padding:18px 22px 28px;display:flex;flex-direction:column;gap:14px">
+      <div>
+        <div class="muted" style="font-size:12px">특수 기능 › 리포트 · 점검 › 정기 점검 보고</div>
+        <h1 style="margin:4px 0 2px;font-size:22px;font-weight:800">점검 항목 · 주기 배치</h1>
+        <div class="muted">어떤 항목을 어느 보고서(일일 · 주간 · 월간 · 분기)에 싣는지 정합니다. 기본 배치는 아래와 같고, 전체 범위 관리자가 바꿀 수 있습니다.</div>
+      </div>
+      <div class="tabs" role="tablist">
+        <a href="Main.dc.html" role="tab">보관함<span class="n">97</span></a>
+        <a href="Catalog.dc.html" class="on" role="tab" aria-selected="true">점검 항목<span class="n">54</span></a>
+        <a href="Schedule.dc.html" role="tab">일정 · 전달</a>
+      </div>
+      <div class="band" role="note">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#93c5fd" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+        <div>주기 열은 <b>그 항목이 어느 보고서에 실리는가</b>이지 수집 주기가 아닙니다 — 수집은 기존 폴러 · 엣지가 지금 주기대로 하고, 보고서는 그 결과를 읽습니다. 판정 기준은 <b>각 기능이 이미 쓰는 판정 함수와 임계값</b> 그대로이며 여기서 새 임계값을 만들지 않습니다(판정 코어 하나). 원천이 꺼져 있거나(opt-in) 엣지가 보고하지 않은 법인은 그 항목을 <b>확인 불가</b>로 싣습니다.</div>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <div class="seg" role="group" aria-label="축"><button type="button" class="on">전체</button><button type="button">인프라</button><button type="button">서비스</button><button type="button">설비</button></div>
+        <div class="seg" role="group" aria-label="주기"><button type="button" class="on">전체</button><button type="button">일일</button><button type="button">주간</button><button type="button">월간</button><button type="button">분기</button></div>
+        <label class="input" style="gap:8px"><span class="muted">원천 상태</span><select style="background:transparent;border:0;color:#e6edf6;font:inherit"><option>전체</option><option>꺼짐(opt-in)만</option><option>엣지 push 만</option></select></label>
+        <span class="cnt">일일 <b>22</b></span><span class="cnt">주간 <b>42</b></span><span class="cnt">월간 <b>47</b></span><span class="cnt">분기 <b>18</b></span>
+        <span style="margin-left:auto;display:flex;gap:8px"><button class="btn" type="button">기본 배치로 되돌리기</button><button class="btn primary" type="button">저장</button></span>
+      </div>
+
+      <div class="card" style="overflow:hidden">
+        <div style="overflow-x:auto">
+        <table>
+          <thead><tr>
+            <th class="sorted">항목 <span class="c">▲</span></th><th>원천 (도구 · 모듈) <span class="c">⇅</span></th><th>판정 기준 (기존 함수 그대로) <span class="c">⇅</span></th>
+            <th class="p">일일</th><th class="p">주간</th><th class="p">월간</th><th class="p">분기</th><th>원천 상태 <span class="c">⇅</span></th><th style="text-align:center">켜기</th>
+          </tr></thead>
+          <tbody>
+            <tr class="g"><td colspan="9"><span class="sw" style="background:#3b82f6"></span>인프라 — vCenter · 스토리지 · 네트워크 (25)</td></tr>
+            <tr><td>vCenter 도달성</td><td class="k">daily-health · reports/healthReport</td><td class="muted">unreachable 는 이상 · pending · stale · 점검중은 확인 불가</td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td><span class="src">중앙 스냅샷</span> <span class="src edge">엣지 push</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>호스트 연결 · 상태</td><td class="k">daily-health · store usageReadable</td><td class="muted">DISCONNECTED · NOT_RESPONDING · 유지보수 모드</td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td><span class="src">중앙 스냅샷</span> <span class="src edge">엣지 push</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>데이터스토어 사용률</td><td class="k">daily-health · healthReport datastores</td><td class="muted">85% 주의 · 95% 이상(일일 리포트 설정값) · 못 읽음은 따로</td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td><span class="src">중앙 스냅샷</span> <span class="src edge">엣지 push</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>오래된 스냅샷</td><td class="k">snapshot-age · healthReport snapshots</td><td class="muted">생성 3일 초과(설정값) · 개수 · 크기</td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot off">–</span></td><td><span class="src">중앙 스냅샷</span> <span class="src edge">엣지 push</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>vCenter 알람(트리거됨)</td><td class="k">daily-health · healthReport alarms</td><td class="muted">빨강 이상 · 노랑 주의 · 알람 못 읽은 vCenter 는 확인 불가</td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot off">–</span></td><td><span class="src">중앙 스냅샷</span> <span class="src edge">엣지 push</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>VMware Tools 상태</td><td class="k">vmtools · healthReport tools</td><td class="muted">미설치 · 오래됨 · 미수집 VM 수는 따로</td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot off">–</span></td><td><span class="src">중앙 스냅샷</span> <span class="src edge">엣지 push</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>고아 VM · 좀비 리소스</td><td class="k">zombie-vms · reports/zombies</td><td class="muted">고아 · 장기 꺼짐 · 회수 가능 용량</td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot off">–</span></td><td><span class="src">중앙 스냅샷</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>ESXi 호스트 구성 점검</td><td class="k">host-hygiene · hostcfg/analyze</td><td class="muted">코드별 심각도 · 못 읽은 vCenter 는 notRead</td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot off">–</span></td><td><span class="src">중앙 캐시(메모리)</span> <span class="src edge">엣지 push</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>VM 구성 점검</td><td class="k">vm-hygiene · vmhygiene/analyze</td><td class="muted">발견 코드별 심각도(스냅샷 나이 · 개수 · 크기는 주의)</td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot off">–</span></td><td><span class="src">중앙 캐시(메모리)</span> <span class="src edge">엣지 push</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>클러스터 HA · DRS · N+1</td><td class="k">cluster-check · clustercfg/analyze · n1</td><td class="muted">HA 꺼짐 · 승인 제어 · N+1 여유 부족</td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td><span class="src">중앙 스냅샷</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>데이터스토어 경로 · vSAN</td><td class="k">storage-paths · dscfg/analyze</td><td class="muted">다중경로 단일화 · vSAN 상태</td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot off">–</span></td><td><span class="src">중앙 스냅샷</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>CPU 경합 · 디스크 지연</td><td class="k">contention · contention/analyze</td><td class="muted">Ready · 지연 임계 · 오래된 표본은 stale</td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot off">–</span></td><td><span class="src">중앙 캐시(메모리)</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>VM 수량 추이(증감)</td><td class="k">vm-track · vmtrack (00 · 12시 슬롯)</td><td class="muted">기간 증감 · 전원 전환 — 판정 없음(정보)</td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td><span class="src">SQLite 1095일</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>스토리지 어레이 사용률 · 장애</td><td class="k">storage-mon · storage/store 스냅샷</td><td class="muted">unresolved alerts · unhealthy nodes · 용량 — 장비 health 문자열</td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot off">–</span></td><td><span class="src">중앙 직접</span> <span class="src edge">엣지 push</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>스토리지 증가량 · 소진 예상</td><td class="k">storage-growth · storage/growth · usageInsights</td><td class="muted">80% 주의 · 90% 이상 · 8주 전망 · 7일 미수집은 stale</td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td><span class="src">capacity_daily 5년</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>SAN 스위치 포트 오류 · 광량</td><td class="k">san-switch · sanswitch/healthCheck checkPorts</td><td class="muted">기준선 이후 신규 오류 · RX -9 주의 / -12 dBm 이상 · 기준선 없음은 표시</td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot off">–</span></td><td><span class="src edge">엣지 push</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>SAN 스위치 월간 점검(4단계)</td><td class="k">san-switch · healthCheck summarizeAll</td><td class="muted">하드웨어 · 환경 · 포트 · 에러 · 로그 — 장비 센서 상태 기준 · 확인 못 함은 unknown</td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot off">–</span></td><td><span class="src edge">엣지 push</span> <span class="src part">기록은 호출 때만</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>CVP 장비 상태 · 장애 · GBIC</td><td class="k">cvp · cvp/overview deviceHealth · faults · optics</td><td class="muted">ok · warn · bad · unknown(never · stale · not-streaming)</td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot off">–</span></td><td><span class="src edge">엣지 push</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>중복 IP · IP 원장 단서</td><td class="k">dupip · ipam · ipam/insights</td><td class="muted">중복 · 미귀속 · 대역 포화</td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot off">–</span></td><td><span class="src">ipam.db</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>VM DNS 불일치</td><td class="k">vm-dns · vmdns/analyze</td><td class="muted">정방향 · 역방향 불일치 · notCollected 는 따로</td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot off">–</span></td><td><span class="src">dns_latest</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>용량 고갈 예측(ETA)</td><td class="k">capacity-forecast · toolsCapacity</td><td class="muted">선형회귀 ETA · 90일 안은 주의 · 30일 안은 이상(기존 화면 구간)</td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td><span class="src">metrics 롤업</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>버전 · 패치 준수</td><td class="k">compliance-report · reports/compliance</td><td class="muted">ESXi EOL · Tools · HW 버전 · 패치 수준</td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td><span class="src">중앙 스냅샷</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>라이선스 만료</td><td class="k">license-expiry · toolsInfo · veeam/licenseWatch</td><td class="muted">만료 · 30일 · 90일 단계 · 못 읽은 vCenter 는 unread</td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td><span class="src">중앙 직접</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>인증서 만료(vCenter · NSX TLS)</td><td class="k">cert-expiry · security/certMonitor</td><td class="muted">만료 · 30일 이내 이상 · 90일 이내 주의 · unknown</td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td><span class="src">중앙 캐시(메모리)</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>코어 라이선스 산정</td><td class="k">core-license · corelicense/analyze</td><td class="muted">코어 수 · 구독 대비 — 못 읽은 vCenter 는 따로</td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot on">●</span></td><td><span class="src">중앙 스냅샷</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+
+            <tr class="g"><td colspan="9"><span class="sw" style="background:#d97706"></span>서비스 — 운영 서비스 · 백업 · 포탈 · 엣지 (17)</td></tr>
+            <tr><td>서비스 모니터 상태</td><td class="k">svcmon-config · svcmon/status testState</td><td class="muted">ok · warn · bad · stale · pending — 가동률(%)은 2단계(이력 표 없음)</td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot off">–</span></td><td><span class="src">중앙 메모리</span> <span class="src edge">엣지 push</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>Veeam 백업 판정</td><td class="k">backup-summary · veeam/backupStatus</td><td class="muted">RPO 1 · 3 · 7일 · 실패 · veeamStale 은 확인 불가</td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot off">–</span></td><td><span class="src edge">엣지 push</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>Bareos 법인별 요약 · 사전 점검</td><td class="k">bareos-summary · bareos/digest · health judgeCorp</td><td class="muted">24시간 성공 · 경고 · 실패 · 실행 없음 · 사전 점검 정상/경고/불가 · Director 못 읽음은 '모름'</td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot off">–</span></td><td><span class="src edge">엣지 대행</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>미보호 VM(백업 공백)</td><td class="k">unprotected-vms · reports/unprotected</td><td class="muted">백업 이벤트 없는 VM — <b style="color:#f59e0b">직접 수집 vCenter 만</b>(엣지 법인은 not-collected)</td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot off">–</span></td><td><span class="src part">이벤트 DB — 직접 수집만</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>백업 안 된 VM(찾기 조건)</td><td class="k">backup-summary · /stale</td><td class="muted">관리자가 정한 조건(backup-stale 메일과 같은 조건)</td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot off">–</span></td><td><span class="src edge">엣지 push</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>VM 복제(백업식) RPO</td><td class="k">vm-clone · vmclone/rpo</td><td class="muted">마지막 성공이 기대 주기 2배 + 1시간 초과</td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot off">–</span></td><td><span class="src">vm-clone.json</span> <span class="src edge">위임 보고</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>중앙 ↔ 엣지 통신 점검</td><td class="k">link-check · linkcheck (link_latest · link_daily)</td><td class="muted">DNS → TCP → TLS → HTTP → 인증 — 실패 단계 · 기본 꺼짐이면 확인 불가</td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot off">–</span></td><td><span class="src off">꺼짐(기본) — 켜면 중앙 측정</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>엣지 보고 신선도</td><td class="k">portal-check · store SITE_STALE · agentContact</td><td class="muted">마지막 push 가 기준(5분)보다 오래됨 · 수집 서버 미접촉</td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot off">–</span></td><td><span class="src">중앙 메모리</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>법인 간 전송 속도</td><td class="k">xfer-speed · xferspeed/analyze</td><td class="muted">기간 통계 · 임계 · staleMs</td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td><span class="src">xfer_daily 5년</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>HAProxy 경로 점검</td><td class="k">relaycheck · relaycheck/poller</td><td class="muted">failStreak 전이 — <b style="color:#f59e0b">메모리뿐</b>(회차 시점 상태만)</td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot off">–</span></td><td><span class="src">중앙 메모리</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>포탈 점검(토큰 · 아키텍처 · 인벤토리)</td><td class="k">portal-check · portalcheck/tokenScan</td><td class="muted">ok · fault · warn · unknown · 엣지 자기보고 stale</td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot off">–</span></td><td><span class="src">중앙 직접</span> <span class="src edge">엣지 자기보고</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>포탈 내부 서비스 · 폴러</td><td class="k">설정 › 로그 › 진단 · health/services getServiceCheck</td><td class="muted">ok · warn · down · off · unknown</td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot off">–</span></td><td><span class="src">중앙 직접</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>포탈 DB 크기 · 보관</td><td class="k">portaldb · insights/dbHealth</td><td class="muted">파일 크기 · 증가 · 보관 기간 · 무결성</td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td><span class="src">중앙 직접</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>로그인 실패 분석</td><td class="k">login-fails · security/loginFails</td><td class="muted">vCenter 이벤트 — <b style="color:#f59e0b">직접 수집 vCenter 만</b></td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot off">–</span></td><td><span class="src part">이벤트 DB — 직접 수집만</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>평문 자격증명 · 자가 점검</td><td class="k">secret-scan · security/secretScan · selfCheck</td><td class="muted">발견 수 · 자가 점검 실패 항목</td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td><span class="src">중앙 직접</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>Horizon 세션 · 앱 사용</td><td class="k">Horizon · horizon/appUsageReport</td><td class="muted">세션 수 · 앱 사용 — 판정 없음(정보) · fresh/stale</td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot off">–</span></td><td><span class="src">hz_usage_daily 400일</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>포탈 서버 리소스 적정성</td><td class="k">capacity-advisor · capacity/evaluate</td><td class="muted">중앙 · 엣지 서버 실측 권고</td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td><span class="src">중앙 직접</span> <span class="src edge">엣지 push</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+
+            <tr class="g"><td colspan="9"><span class="sw" style="background:#0891b2"></span>설비 — 물리 서버 · 전력 · 온도 · GPU · 파일 (12)</td></tr>
+            <tr><td>서버 파트 장애(열린 장애 · 전이)</td><td class="k">part-faults · partfault part_state · transition</td><td class="muted">열린 장애 수 · 기간 중 전이 · '확인 불가' 는 정상에도 장애에도 안 넣음</td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot off">–</span></td><td><span class="src off">꺼짐(기본) — 법인 opt-in</span> <span class="src edge">엣지 push</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>서버 흡기 온도 · 전산실 온도</td><td class="k">esxitemp · roomtemp · idrac/roomTemp inletStatus</td><td class="muted">ASHRAE 구간(cold · ok · warn · hot) · 표본 stale 사유</td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot off">–</span></td><td><span class="src">중앙 폴러</span> <span class="src edge">수집기 pull</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>소비 전력(법인 · 모델 · 추이)</td><td class="k">power-total · powermap · power/total</td><td class="muted">합계 · 기간 비교 — 판정 없음(정보) · unread 서버 수</td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td><span class="src">power_hourly 90일</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>PDU 상태(임계)</td><td class="k">pdu · pdu/thresholds evaluateSnapshot</td><td class="muted">warning · critical · 엣지 stale</td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot off">–</span></td><td><span class="src edge">엣지 push</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>베어메탈 사용률</td><td class="k">bm-usage · bmusage/alertRules</td><td class="muted">CPU · 메모리 · 디스크 임계(기본 꺼짐)</td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot off">–</span></td><td><span class="src off">꺼짐(기본) — 법인 opt-in</span></td><td style="text-align:center"><span class="tg off" role="img" aria-label="꺼짐"></span></td></tr>
+            <tr><td>베어메탈 스토리지</td><td class="k">bm-storage · bmstor/history</td><td class="muted">df 합산 · 12시간 슬롯 — 판정 없음(정보)</td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot off">–</span></td><td><span class="src edge">엣지 잡 위임</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>GPU 할당 · 활동 · 온도</td><td class="k">gpu · gpu-alloc · gpu/activity</td><td class="muted">유휴 GPU · 할당율 · 게스트 미수집 사유</td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td><span class="src">metrics 1830일</span> <span class="src edge">게스트 push</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>스토리지 어레이 전력</td><td class="k">storage-mon · storage/power</td><td class="muted">장비 전력 합계 — 판정 없음(정보)</td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot off">–</span></td><td><span class="src">중앙 직접</span> <span class="src edge">엣지 push</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>아이실론 디렉터리 사용량</td><td class="k">isilon-dirusage · isidu/digestRules statusOfRow</td><td class="muted">ok · ok-partial · stale · failed · never · auth-stopped</td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot off">–</span></td><td><span class="src edge">엣지 push</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>게스트 파티션 사용률</td><td class="k">guest-partition · guestpart</td><td class="muted">임계 초과 게스트 · 95% 즉시 · 수집 실패는 따로</td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot off">–</span></td><td><span class="src edge">엣지 push</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>폴더 사용량 Top-N</td><td class="k">dir-usage · dirusage/report</td><td class="muted">상위 폴더 — 판정 없음(정보)</td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot off">–</span></td><td><span class="src edge">엣지 RMA 잡</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+            <tr><td>서버 인벤토리 변동(통합 · 시리얼)</td><td class="k">fleet · insights/fleetInventory</td><td class="muted">추가 · 제거 · 미등록 — 판정 없음(정보)</td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot off">–</span></td><td class="p"><span class="dot on">●</span></td><td class="p"><span class="dot on">●</span></td><td><span class="src">중앙 직접</span> <span class="src edge">엣지 push</span></td><td style="text-align:center"><span class="tg" role="img" aria-label="켜짐"></span></td></tr>
+          </tbody>
+        </table>
+        </div>
+        <div style="display:flex;gap:16px;flex-wrap:wrap;padding:10px 14px;border-top:1px solid #1f2a40;font-size:12px;color:#8b9bb4">
+          <span><span class="src">중앙 직접</span> 중앙 폴러가 수집 · 저장</span>
+          <span><span class="src edge">엣지 push</span> 법인 엣지가 올린 결과를 읽음(엣지에 새 작업을 보내지 않음)</span>
+          <span><span class="src off">꺼짐</span> 기능이 opt-in 이라 켠 법인만 — 나머지는 확인 불가</span>
+          <span><span class="src part">직접 수집만</span> vCenter 이벤트 DB 에는 직접 수집분만 있음 — 엣지 법인은 확인 불가(2단계: 엣지 요약 push)</span>
+          <span>'판정 없음(정보)' 항목은 수치 · 추이만 싣고 종합 판정에 넣지 않습니다.</span>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2240}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

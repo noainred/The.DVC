@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>정기 점검 보고 — 월간 보고서 열람</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#93c5fd;text-decoration:none}a:hover{color:#bfdbfe}
+.tb{display:flex;align-items:center;gap:14px;height:44px;padding:0 16px;background:#0f1626;border-bottom:1px solid #243049}
+.logo{display:inline-flex;align-items:center;gap:8px;font-weight:800;font-size:14px}
+.logo .v{width:26px;height:26px;border-radius:7px;background:#3b82f6;display:inline-flex;align-items:center;justify-content:center;font-size:13px;color:#fff}
+.ver{font-size:11px;font-weight:700;color:#5eead4;border:1px solid #2dd4bf;border-radius:6px;padding:1px 6px}
+.sb{width:236px;flex:none;background:#0f1626;border-right:1px solid #243049;padding:12px 10px;display:flex;flex-direction:column;gap:2px}
+.sb a{display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:8px;color:#e6edf6;font-weight:600;font-size:13px}
+.sb a.sub{padding:6px 12px 6px 30px;color:#8b9bb4;font-weight:500;font-size:12.5px}
+.sb a.on{background:#1a2236;color:#22d3ee}
+.sb a.grp.on{background:transparent;color:#e6edf6;box-shadow:inset 3px 0 0 #22d3ee}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.btn{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.muted{color:#8b9bb4}
+.mono{font-family:"JetBrains Mono",monospace;font-size:12px}
+.st{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:999px;font-size:11.5px;font-weight:700;border:1px solid transparent;white-space:nowrap}
+.st .g{font-family:"JetBrains Mono",monospace;font-size:11px}
+.st.ok{color:#22c55e;background:rgba(34,197,94,.12);border-color:rgba(34,197,94,.35)}
+.st.warn{color:#f59e0b;background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.4)}
+.st.crit{color:#f87171;background:rgba(239,68,68,.14);border-color:rgba(239,68,68,.45)}
+.st.unk{color:#9aa4b2;background:rgba(139,155,180,.14);border-color:rgba(139,155,180,.4)}
+.st.info{color:#93c5fd;background:rgba(59,130,246,.12);border-color:rgba(59,130,246,.4)}
+.st.big{height:30px;font-size:14px;padding:0 12px}
+.cell{display:inline-flex;align-items:center;justify-content:center;gap:4px;min-width:64px;height:24px;padding:0 8px;border-radius:6px;font-size:11.5px;font-weight:700;border:1px solid transparent}
+.cell.ok{color:#22c55e;background:rgba(34,197,94,.10);border-color:rgba(34,197,94,.3)}
+.cell.warn{color:#f59e0b;background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.4)}
+.cell.crit{color:#f87171;background:rgba(239,68,68,.16);border-color:rgba(239,68,68,.5)}
+.cell.unk{color:#9aa4b2;background:rgba(139,155,180,.12);border-color:rgba(139,155,180,.4)}
+table{border-collapse:collapse;width:100%;font-size:12.5px}
+th{text-align:left;font-weight:700;color:#8b9bb4;font-size:11.5px;padding:8px 10px;background:#0f1626;border-bottom:1px solid #243049;white-space:nowrap;cursor:pointer}
+th .c{margin-left:4px;color:#5d6b85;font-size:10px}
+td{padding:7px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle}
+td.num{text-align:right;font-family:"JetBrains Mono",monospace;font-size:12px;white-space:nowrap}
+.sec{display:flex;flex-direction:column}
+.sec .h{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid #1f2a40}
+.sec .h h2{margin:0;font-size:15px;font-weight:800}
+.sw{display:inline-block;width:10px;height:10px;border-radius:3px}
+.toc{display:flex;gap:6px;flex-wrap:wrap}
+.toc a{display:inline-flex;align-items:center;height:26px;padding:0 10px;border-radius:999px;background:#141b2d;border:1px solid #243049;color:#c7d2e3;font-size:12px;font-weight:600}
+.axis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.axis .a{padding:12px 14px;display:flex;flex-direction:column;gap:8px}
+.axis .t{display:flex;align-items:center;gap:8px;font-weight:800;font-size:13.5px}
+.cnts{display:flex;gap:6px;flex-wrap:wrap}
+.cnts .n{display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 8px;border-radius:6px;font-size:12px;font-weight:700;border:1px solid #243049;background:#0f1626}
+.cnts .n b{font-family:"JetBrains Mono",monospace}
+.delta{font-size:11.5px;color:#8b9bb4}
+.delta b{color:#e6edf6;font-family:"JetBrains Mono",monospace}
+.meta{display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px;color:#8b9bb4}
+.meta b{color:#e6edf6;font-weight:600}
+.pri{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:6px;font-family:"JetBrains Mono",monospace;font-size:11.5px;font-weight:700;background:#0f1626;border:1px solid #243049}
+.note{font-size:12px;color:#8b9bb4;padding:10px 14px;border-top:1px solid #1f2a40}
+.bar{display:inline-block;height:8px;border-radius:4px;background:#243049;position:relative;vertical-align:middle;width:120px}
+.bar i{position:absolute;left:0;top:0;bottom:0;border-radius:4px;background:#3b82f6}
+</style>
+</helmet>
+<div style="display:flex;flex-direction:column;min-height:2760px">
+  <div class="tb">
+    <span class="logo"><span class="v">D</span>THE DVC <span class="ver">v2.915</span></span>
+    <span style="margin-left:auto;color:#8b9bb4;font-size:12px">admin · 전체 범위</span>
+  </div>
+  <div style="display:flex;flex-wrap:wrap;flex:1">
+    <nav class="sb" aria-label="주 메뉴">
+      <a href="#dash">대시보드</a><a href="#ov">Overview</a><a href="#vc">vCenter</a><a href="#vms">가상화 서버</a><a href="#stor">스토리지</a><a href="#net">네트워크</a>
+      <a href="#tools" class="grp on">특수 기능</a>
+      <a href="#tools-report" class="sub">리포트 · 점검</a>
+      <a href="Main.dc.html" class="sub on" aria-current="page">정기 점검 보고</a>
+      <a href="#ins">인사이트</a><a href="#ipam">IP관리</a><a href="#set">설정</a>
+    </nav>
+    <main style="flex:999 1 560px;min-width:0;padding:18px 22px 28px;display:flex;flex-direction:column;gap:14px">
+      <div class="muted" style="font-size:12px"><a href="Main.dc.html">정기 점검 보고</a> › <a href="Main.dc.html">보관함</a> › <span class="mono">M-2026-10</span> · <span class="mono">#/tools/periodic-report/r/M-2026-10</span></div>
+      <div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap">
+        <div style="min-width:0;flex:1 1 480px">
+          <h1 style="margin:0 0 6px;font-size:22px;font-weight:800;display:flex;align-items:center;gap:10px;flex-wrap:wrap">월간 점검 보고서 — 2026년 10월 <span class="st warn big"><span class="g">!</span>종합 주의</span></h1>
+          <div class="meta"><span>기간 <b>10-01 ~ 10-31</b></span><span>생성 <b>11-01 09:00:41</b> (예약 · 41초)</span><span>데이터 기준 <b>11-01 08:55</b></span><span>법인 <b>28 / 28</b></span><span>항목 <b>47</b></span><span>직전 회차 <b>M-2026-09</b></span></div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn" type="button">◀ 9월 보고서</button>
+          <button class="btn" type="button">직전 회차와 비교</button>
+          <button class="btn" type="button">XLSX</button>
+          <button class="btn" type="button">PDF 저장</button>
+          <button class="btn" type="button">메일 다시 보내기</button>
+          <button class="btn" type="button">게시판에 올리기</button>
+        </div>
+      </div>
+      <div class="toc" aria-label="목차"><a href="#s1">1 종합</a><a href="#s2">2 조치 필요 6</a><a href="#s3">3 법인별 현황</a><a href="#s4">4 인프라 22</a><a href="#s5">5 서비스 13</a><a href="#s6">6 설비 12</a><a href="#s7">7 확인하지 못한 것 6</a><a href="#s8">8 부록 · 데이터 기준</a></div>
+
+      <section class="card sec" id="s1">
+        <div class="h"><h2>1. 종합</h2><span class="muted" style="font-size:12px">판정 4종 — 확인 불가는 정상에 넣지 않습니다 · ‘판정 없음(정보)’ 항목은 수에 들어가지 않습니다</span></div>
+        <div style="padding:12px 14px;display:flex;flex-direction:column;gap:12px">
+          <div class="cnts" style="gap:10px">
+            <span class="n" style="height:30px;font-size:13px"><span class="st ok"><span class="g">✓</span>정상</span><b>36</b><span class="delta">9월 34 · <b>+2</b></span></span>
+            <span class="n" style="height:30px;font-size:13px"><span class="st warn"><span class="g">!</span>주의</span><b>7</b><span class="delta">9월 9 · <b>−2</b></span></span>
+            <span class="n" style="height:30px;font-size:13px"><span class="st crit"><span class="g">×</span>이상</span><b>1</b><span class="delta">9월 0 · <b>+1</b></span></span>
+            <span class="n" style="height:30px;font-size:13px"><span class="st unk"><span class="g">?</span>확인 불가</span><b>3</b><span class="delta">9월 4 · <b>−1</b></span></span>
+            <span class="n" style="height:30px;font-size:13px"><span class="st info"><span class="g">i</span>정보</span><b>9</b><span class="delta">추이 · 수량만</span></span>
+            <span class="n" style="height:30px;font-size:13px;margin-left:auto">조치 필요 <b style="color:#f59e0b">6</b> <span class="delta">법인 5곳</span></span>
+          </div>
+          <div class="axis">
+            <div class="card a"><div class="t"><span class="sw" style="background:#3b82f6"></span>인프라 <span class="muted" style="font-weight:600;font-size:12px">22 항목 · vCenter · 스토리지 · 네트워크</span><span class="st crit" style="margin-left:auto"><span class="g">×</span>이상 1</span></div>
+              <div class="cnts"><span class="n">정상 <b>17</b></span><span class="n" style="color:#f59e0b">주의 <b>3</b></span><span class="n" style="color:#f87171">이상 <b>1</b></span><span class="n" style="color:#9aa4b2">불가 <b>1</b></span></div>
+              <div class="muted" style="font-size:12px">이상 — CN2 데이터스토어 96% · 주의 — 인증서(PL1) · 스토리지 증가량(KR1) · 오래된 스냅샷(DE1)</div></div>
+            <div class="card a"><div class="t"><span class="sw" style="background:#d97706"></span>서비스 <span class="muted" style="font-weight:600;font-size:12px">13 항목 · 백업 · 엣지 · 포탈</span><span class="st warn" style="margin-left:auto"><span class="g">!</span>주의 2</span></div>
+              <div class="cnts"><span class="n">정상 <b>10</b></span><span class="n" style="color:#f59e0b">주의 <b>2</b></span><span class="n">이상 <b>0</b></span><span class="n" style="color:#9aa4b2">불가 <b>1</b></span></div>
+              <div class="muted" style="font-size:12px">주의 — Veeam RPO 7일 초과(JP1 3대) · 엣지 보고 신선도(PL1 10-29 이후) · 불가 — 통신 점검 꺼짐</div></div>
+            <div class="card a"><div class="t"><span class="sw" style="background:#0891b2"></span>설비 <span class="muted" style="font-weight:600;font-size:12px">12 항목 · 서버 · 전력 · 온도 · GPU</span><span class="st warn" style="margin-left:auto"><span class="g">!</span>주의 2</span></div>
+              <div class="cnts"><span class="n">정상 <b>9</b></span><span class="n" style="color:#f59e0b">주의 <b>2</b></span><span class="n">이상 <b>0</b></span><span class="n" style="color:#9aa4b2">불가 <b>1</b></span></div>
+              <div class="muted" style="font-size:12px">주의 — 서버 흡기 온도(US-E) · 게스트 파티션(TH1 2대) · 불가 — 베어메탈 사용률 opt-in 없음</div></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card sec" id="s2">
+        <div class="h"><h2>2. 조치 필요</h2><span class="muted" style="font-size:12px">이상 → 주의 순 · 같은 항목은 법인별로 한 줄 · 바로가기는 그 기능의 화면</span></div>
+        <div style="overflow-x:auto"><table>
+          <thead><tr><th>우선</th><th>판정</th><th>법인</th><th>축</th><th>항목</th><th>근거(값 · 시각)</th><th>9월</th><th>바로가기</th></tr></thead>
+          <tbody>
+            <tr><td><span class="pri">1</span></td><td><span class="st crit"><span class="g">×</span>이상</span></td><td>CN2</td><td><span class="sw" style="background:#3b82f6"></span> 인프라</td><td>데이터스토어 사용률</td><td>ds-cn2-prod-03 <b>96.2%</b> (95% 이상 기준) · 10-19 부터 · 여유 1.1 TB</td><td><span class="st warn"><span class="g">!</span>91%</span></td><td><a href="#vc">vCenter › 데이터스토어</a></td></tr>
+            <tr><td><span class="pri">2</span></td><td><span class="st warn"><span class="g">!</span>주의</span></td><td>JP1</td><td><span class="sw" style="background:#d97706"></span> 서비스</td><td>Veeam 백업 판정</td><td>RPO 7일 초과 VM <b>3대</b> (jp-erp-02 · jp-db-11 · jp-file-01) · 마지막 성공 10-22</td><td><span class="st ok"><span class="g">✓</span>0대</span></td><td><a href="#bk">Backup 현황 › Summary</a></td></tr>
+            <tr><td><span class="pri">3</span></td><td><span class="st warn"><span class="g">!</span>주의</span></td><td>KR1</td><td><span class="sw" style="background:#3b82f6"></span> 인프라</td><td>스토리지 증가량 · 소진 예상</td><td>PowerStore KR1-PS01 <b>83%</b> · 주 +0.9%p · 8주 뒤 90% 전망</td><td><span class="st ok"><span class="g">✓</span>79%</span></td><td><a href="#sg">스토리지 증가량</a></td></tr>
+            <tr><td><span class="pri">4</span></td><td><span class="st warn"><span class="g">!</span>주의</span></td><td>PL1</td><td><span class="sw" style="background:#3b82f6"></span> 인프라</td><td>인증서 만료</td><td>vc-pl1 TLS 만료 <b>2027-01-15</b> (D-75 · 90일 이내)</td><td><span class="st ok"><span class="g">✓</span>D-106</span></td><td><a href="#ce">인증서 만료 감시</a></td></tr>
+            <tr><td><span class="pri">5</span></td><td><span class="st warn"><span class="g">!</span>주의</span></td><td>US-E</td><td><span class="sw" style="background:#0891b2"></span> 설비</td><td>서버 흡기 온도</td><td>esx-use-04 흡기 <b>31.5 °C</b> (ASHRAE 주의 구간) · 10월 중 6일</td><td><span class="st warn"><span class="g">!</span>4일</span></td><td><a href="#tp">서버 온도</a></td></tr>
+            <tr><td><span class="pri">6</span></td><td><span class="st warn"><span class="g">!</span>주의</span></td><td>DE1</td><td><span class="sw" style="background:#3b82f6"></span> 인프라</td><td>오래된 스냅샷</td><td>3일 넘은 스냅샷 <b>7개</b> · 4.2 TB · 가장 오래된 것 10-02</td><td><span class="st warn"><span class="g">!</span>5개</span></td><td><a href="#sn">스냅샷 나이 감시</a></td></tr>
+          </tbody></table></div>
+        <div class="note">주의 항목 중 법인이 여럿인 것(게스트 파티션 TH1 2대 · 엣지 보고 신선도 PL1)은 4~6절의 상세에 있습니다. ‘9월’ 열은 직전 회차의 같은 항목 · 같은 법인 값이고, 직전 회차가 없으면 ‘—’ 입니다.</div>
+      </section>
+
+      <section class="card sec" id="s3">
+        <div class="h"><h2>3. 법인별 현황</h2><span class="muted" style="font-size:12px">법인 = vCenter = Bareos 한 단위 · 칸은 그 축에서 가장 나쁜 판정 · 괄호는 항목 수</span></div>
+        <div style="overflow-x:auto"><table>
+          <thead><tr><th>법인 <span class="c">▲</span></th><th>vCenter</th><th>인프라</th><th>서비스</th><th>설비</th><th>종합</th><th style="text-align:right">확인 불가</th><th style="text-align:right">조치</th><th>데이터 기준</th><th>수집 방식</th></tr></thead>
+          <tbody>
+            <tr><td><b>KR1</b> 본사</td><td class="mono">vc-kr1</td><td><span class="cell warn">! 주의 (1)</span></td><td><span class="cell ok">✓ 정상</span></td><td><span class="cell ok">✓ 정상</span></td><td><span class="st warn"><span class="g">!</span>주의</span></td><td class="num">0</td><td class="num">1</td><td class="mono muted">08:55</td><td>중앙 직접</td></tr>
+            <tr><td><b>KR2</b></td><td class="mono">vc-kr2</td><td><span class="cell ok">✓ 정상</span></td><td><span class="cell ok">✓ 정상</span></td><td><span class="cell ok">✓ 정상</span></td><td><span class="st ok"><span class="g">✓</span>정상</span></td><td class="num">0</td><td class="num">0</td><td class="mono muted">08:55</td><td>중앙 직접</td></tr>
+            <tr><td><b>JP1</b></td><td class="mono">vc-jp1</td><td><span class="cell ok">✓ 정상</span></td><td><span class="cell warn">! 주의 (1)</span></td><td><span class="cell ok">✓ 정상</span></td><td><span class="st warn"><span class="g">!</span>주의</span></td><td class="num">1</td><td class="num">1</td><td class="mono muted">08:52</td><td>엣지 push</td></tr>
+            <tr><td><b>CN2</b></td><td class="mono">vc-cn2</td><td><span class="cell crit">× 이상 (1)</span></td><td><span class="cell ok">✓ 정상</span></td><td><span class="cell ok">✓ 정상</span></td><td><span class="st crit"><span class="g">×</span>이상</span></td><td class="num">1</td><td class="num">1</td><td class="mono muted">08:50</td><td>엣지 push</td></tr>
+            <tr><td><b>DE1</b></td><td class="mono">vc-de1</td><td><span class="cell warn">! 주의 (1)</span></td><td><span class="cell ok">✓ 정상</span></td><td><span class="cell ok">✓ 정상</span></td><td><span class="st warn"><span class="g">!</span>주의</span></td><td class="num">1</td><td class="num">1</td><td class="mono muted">08:54</td><td>엣지 push</td></tr>
+            <tr><td><b>PL1</b></td><td class="mono">vc-pl1</td><td><span class="cell warn">! 주의 (1)</span></td><td><span class="cell warn">! 주의 (1)</span></td><td><span class="cell unk">? 불가 (2)</span></td><td><span class="st warn"><span class="g">!</span>주의</span></td><td class="num">3</td><td class="num">1</td><td class="mono muted" style="color:#f59e0b">10-29 14:10</td><td>엣지 push · <span style="color:#f59e0b">3일 전</span></td></tr>
+            <tr><td><b>US-E</b></td><td class="mono">vc-use</td><td><span class="cell ok">✓ 정상</span></td><td><span class="cell ok">✓ 정상</span></td><td><span class="cell warn">! 주의 (1)</span></td><td><span class="st warn"><span class="g">!</span>주의</span></td><td class="num">1</td><td class="num">1</td><td class="mono muted">08:41</td><td>엣지 push</td></tr>
+            <tr><td><b>US-W</b></td><td class="mono">vc-usw</td><td><span class="cell ok">✓ 정상</span></td><td><span class="cell ok">✓ 정상</span></td><td><span class="cell ok">✓ 정상</span></td><td><span class="st ok"><span class="g">✓</span>정상</span></td><td class="num">1</td><td class="num">0</td><td class="mono muted">08:43</td><td>엣지 push</td></tr>
+            <tr><td><b>TH1</b></td><td class="mono">vc-th1</td><td><span class="cell ok">✓ 정상</span></td><td><span class="cell ok">✓ 정상</span></td><td><span class="cell warn">! 주의 (1)</span></td><td><span class="st warn"><span class="g">!</span>주의</span></td><td class="num">1</td><td class="num">0</td><td class="mono muted">08:53</td><td>엣지 push</td></tr>
+            <tr><td><b>VN1</b></td><td class="mono">vc-vn1</td><td><span class="cell unk">? 불가 (1)</span></td><td><span class="cell ok">✓ 정상</span></td><td><span class="cell ok">✓ 정상</span></td><td><span class="st ok"><span class="g">✓</span>정상</span></td><td class="num">2</td><td class="num">0</td><td class="mono muted">08:51</td><td>엣지 push</td></tr>
+            <tr><td><b>IN1</b></td><td class="mono">vc-in1</td><td><span class="cell ok">✓ 정상</span></td><td><span class="cell ok">✓ 정상</span></td><td><span class="cell ok">✓ 정상</span></td><td><span class="st ok"><span class="g">✓</span>정상</span></td><td class="num">1</td><td class="num">0</td><td class="mono muted">08:49</td><td>엣지 push</td></tr>
+            <tr><td><b>MX1</b></td><td class="mono">vc-mx1</td><td><span class="cell ok">✓ 정상</span></td><td><span class="cell ok">✓ 정상</span></td><td><span class="cell ok">✓ 정상</span></td><td><span class="st ok"><span class="g">✓</span>정상</span></td><td class="num">1</td><td class="num">0</td><td class="mono muted">08:40</td><td>엣지 push</td></tr>
+            <tr><td colspan="10" style="text-align:center;color:#8b9bb4;padding:9px">… 16곳 더 (정상 15 · 주의 1) — 화면에서는 28행 전부 보이고 제목 클릭으로 정렬합니다</td></tr>
+          </tbody></table></div>
+        <div class="note">‘확인 불가’ 열은 그 법인에서 확인하지 못한 항목 수(엣지 법인은 이벤트 기반 항목 1~2개가 늘 여기에 들어갑니다 — 7절). 범위 계정은 자기 법인 행만 봅니다.</div>
+      </section>
+
+      <section class="card sec" id="s4">
+        <div class="h"><span class="sw" style="background:#3b82f6"></span><h2>4. 인프라</h2><span class="muted" style="font-size:12px">22 항목 — 아래는 판정이 있는 항목 먼저 · 정보 항목은 뒤에</span></div>
+        <div style="overflow-x:auto"><table>
+          <thead><tr><th>항목</th><th>판정</th><th>근거(기준 시각 값)</th><th>대상</th><th>법인 분포</th><th>9월</th><th>원천 · 바로가기</th></tr></thead>
+          <tbody>
+            <tr><td>데이터스토어 사용률</td><td><span class="st crit"><span class="g">×</span>이상</span></td><td>95% 이상 1 · 85% 이상 4 · 못 읽음 2(VN1)</td><td>DS 412 / 414</td><td>이상 CN2 · 주의 KR1 · JP1 · DE1</td><td><span class="st warn"><span class="g">!</span></span></td><td class="mono"><a href="#dh">daily-health</a></td></tr>
+            <tr><td>인증서 만료</td><td><span class="st warn"><span class="g">!</span>주의</span></td><td>90일 이내 1(PL1 D-75) · 30일 이내 0 · 만료 0</td><td>vCenter 28 · NSX 6</td><td>주의 PL1</td><td><span class="st ok"><span class="g">✓</span></span></td><td class="mono"><a href="#ce">cert-expiry</a></td></tr>
+            <tr><td>스토리지 증가량 · 소진 예상</td><td><span class="st warn"><span class="g">!</span>주의</span></td><td>80% 이상 3 · 8주 안 90% 도달 전망 1(KR1-PS01) · 7일 미수집 0</td><td>어레이 41</td><td>주의 KR1 · SG1 · TW1</td><td><span class="st ok"><span class="g">✓</span></span></td><td class="mono"><a href="#sg">storage-growth</a></td></tr>
+            <tr><td>오래된 스냅샷</td><td><span class="st warn"><span class="g">!</span>주의</span></td><td>3일 초과 23개 · 합계 9.8 TB · 가장 오래된 10-02(DE1)</td><td>VM 5,850</td><td>DE1 7 · KR1 6 · 그 밖 10</td><td><span class="st warn"><span class="g">!</span></span></td><td class="mono"><a href="#sn">snapshot-age</a></td></tr>
+            <tr><td>vCenter 도달성</td><td><span class="st ok"><span class="g">✓</span>정상</span></td><td>unreachable 0 · 점검중 0 · 10월 중 끊김 2회(CN1 10-07 11분 · PL1 10-29~)</td><td>vCenter 28</td><td>전 법인</td><td><span class="st ok"><span class="g">✓</span></span></td><td class="mono"><a href="#dh">daily-health</a></td></tr>
+            <tr><td>호스트 연결 · 상태</td><td><span class="st ok"><span class="g">✓</span>정상</span></td><td>disconnected 0 · not responding 0 · 유지보수 2(계획)</td><td>호스트 658</td><td>전 법인</td><td><span class="st ok"><span class="g">✓</span></span></td><td class="mono"><a href="#dh">daily-health</a></td></tr>
+            <tr><td>클러스터 HA · DRS · N+1</td><td><span class="st ok"><span class="g">✓</span>정상</span></td><td>HA 꺼짐 0 · N+1 부족 0 · 승인 제어 꺼짐 1(테스트 클러스터 · 제외 등록)</td><td>클러스터 71</td><td>전 법인</td><td><span class="st ok"><span class="g">✓</span></span></td><td class="mono"><a href="#cc">cluster-check</a></td></tr>
+            <tr><td>SAN 스위치 월간 점검(4단계)</td><td><span class="st ok"><span class="g">✓</span>정상</span></td><td>정상 52 · 주의 0 · 이상 0 · <b style="color:#9aa4b2">확인 불가 4(PL1 2대 — 엣지 미보고 · 명령 없음 2)</b></td><td>스위치 56</td><td>불가 PL1</td><td><span class="st ok"><span class="g">✓</span></span></td><td class="mono"><a href="#ss">san-switch</a></td></tr>
+            <tr><td>CVP 장비 상태 · 장애 · GBIC</td><td><span class="st ok"><span class="g">✓</span>정상</span></td><td>bad 0 · warn 0 · 10월 장애 전이 3(모두 닫힘) · GBIC 광량 경고 0</td><td>장비 184</td><td>전 법인</td><td><span class="st ok"><span class="g">✓</span></span></td><td class="mono"><a href="#cv">cvp</a></td></tr>
+            <tr><td>라이선스 만료</td><td><span class="st ok"><span class="g">✓</span>정상</span></td><td>90일 이내 0 · <b style="color:#9aa4b2">못 읽은 vCenter 1(VN1 — 권한)</b></td><td>키 212</td><td>불가 VN1</td><td><span class="st ok"><span class="g">✓</span></span></td><td class="mono"><a href="#le">license-expiry</a></td></tr>
+            <tr><td colspan="7" style="color:#8b9bb4;padding:9px 10px">… 정상 9 항목(VMware Tools · 고아 VM · 호스트 구성 · VM 구성 · DS 경로 · 중복 IP · VM DNS · 버전 준수 · 용량 고갈 예측) · 정보 3(VM 수량 추이 +84 · 어레이 사용률 · 코어 라이선스는 분기) — 화면에서는 전부 펼쳐 보입니다</td></tr>
+          </tbody></table></div>
+      </section>
+
+      <section class="card sec" id="s5">
+        <div class="h"><span class="sw" style="background:#d97706"></span><h2>5. 서비스</h2><span class="muted" style="font-size:12px">13 항목</span></div>
+        <div style="overflow-x:auto"><table>
+          <thead><tr><th>항목</th><th>판정</th><th>근거(기준 시각 값)</th><th>대상</th><th>법인 분포</th><th>9월</th><th>원천 · 바로가기</th></tr></thead>
+          <tbody>
+            <tr><td>Veeam 백업 판정</td><td><span class="st warn"><span class="g">!</span>주의</span></td><td>RPO 7일 초과 3 · 3일 초과 11 · 실패 잡 2 · veeamStale 법인 0</td><td>VM 4,120</td><td>주의 JP1 · 3일 초과 KR1 · TH1</td><td><span class="st ok"><span class="g">✓</span></span></td><td class="mono"><a href="#bk">backup-summary</a></td></tr>
+            <tr><td>엣지 보고 신선도</td><td><span class="st warn"><span class="g">!</span>주의</span></td><td>마지막 push 5분 초과 1(PL1 — 10-29 14:10 이후 없음)</td><td>엣지 26</td><td>주의 PL1</td><td><span class="st ok"><span class="g">✓</span></span></td><td class="mono"><a href="#pc">portal-check</a></td></tr>
+            <tr><td>Bareos 법인별 요약 · 사전 점검</td><td><span class="st ok"><span class="g">✓</span>정상</span></td><td>10월 실패 잡 4(모두 재실행 성공) · 사전 점검 불가 0 · Director 못 읽음 0</td><td>Director 28</td><td>전 법인</td><td><span class="st warn"><span class="g">!</span></span></td><td class="mono"><a href="#br">bareos-summary</a></td></tr>
+            <tr><td>서비스 모니터 상태</td><td><span class="st ok"><span class="g">✓</span>정상</span></td><td>bad 0 · warn 1(응답 지연 · KR1 sso) · stale 0 — 가동률(%)은 2단계</td><td>점검 312</td><td>warn KR1</td><td><span class="st ok"><span class="g">✓</span></span></td><td class="mono"><a href="#sm">svcmon</a></td></tr>
+            <tr><td>미보호 VM(백업 공백)</td><td><span class="st ok"><span class="g">✓</span>정상</span></td><td>직접 수집 7곳: 0대 · <b style="color:#9aa4b2">엣지 법인 21곳은 확인 불가(이벤트가 엣지에)</b></td><td>VM 1,290 / 5,850</td><td>불가 21곳</td><td><span class="st ok"><span class="g">✓</span></span></td><td class="mono"><a href="#up">unprotected-vms</a></td></tr>
+            <tr><td>중앙 ↔ 엣지 통신 점검</td><td><span class="st unk"><span class="g">?</span>확인 불가</span></td><td>기능이 꺼져 있음(기본) — 설정 › 통신 점검에서 켜면 다음 회차부터</td><td>—</td><td>—</td><td><span class="st unk"><span class="g">?</span></span></td><td class="mono"><a href="#lc">link-check</a></td></tr>
+            <tr><td colspan="7" style="color:#8b9bb4;padding:9px 10px">… 정상 7 항목(포탈 점검 · 포탈 DB · 로그인 실패(직접 수집 7곳) · 자격증명 · 포탈 서버 적정성 · 전송 속도 · 법인 간 전송) · 정보 1(Horizon 세션)</td></tr>
+          </tbody></table></div>
+      </section>
+
+      <section class="card sec" id="s6">
+        <div class="h"><span class="sw" style="background:#0891b2"></span><h2>6. 설비</h2><span class="muted" style="font-size:12px">12 항목</span></div>
+        <div style="overflow-x:auto"><table>
+          <thead><tr><th>항목</th><th>판정</th><th>근거(기준 시각 값)</th><th>대상</th><th>법인 분포</th><th>9월</th><th>원천 · 바로가기</th></tr></thead>
+          <tbody>
+            <tr><td>서버 흡기 온도 · 전산실 온도</td><td><span class="st warn"><span class="g">!</span>주의</span></td><td>주의 구간 1(US-E esx-use-04 31.5 °C · 6일) · hot 0 · 표본 stale 3</td><td>서버 611</td><td>주의 US-E</td><td><span class="st warn"><span class="g">!</span></span></td><td class="mono"><a href="#tp">esxitemp · roomtemp</a></td></tr>
+            <tr><td>게스트 파티션 사용률</td><td><span class="st warn"><span class="g">!</span>주의</span></td><td>임계 초과 2(TH1 th-file-01 D: 93% · th-db-02 /var 91%) · 95% 이상 0 · 수집 실패 14</td><td>게스트 3,980</td><td>주의 TH1</td><td><span class="st ok"><span class="g">✓</span></span></td><td class="mono"><a href="#gp">guest-partition</a></td></tr>
+            <tr><td>서버 파트 장애</td><td><span class="st ok"><span class="g">✓</span>정상</span></td><td>열린 장애 0 · 10월 전이 2(열림→닫힘) · 확인 불가 파트 9</td><td>서버 611(opt-in 법인 19)</td><td>opt-in 아님 9곳은 불가</td><td><span class="st ok"><span class="g">✓</span></span></td><td class="mono"><a href="#pf">part-faults</a></td></tr>
+            <tr><td>PDU 상태(임계)</td><td><span class="st ok"><span class="g">✓</span>정상</span></td><td>critical 0 · warning 0 · stale 1(PL1)</td><td>PDU 112</td><td>stale PL1</td><td><span class="st ok"><span class="g">✓</span></span></td><td class="mono"><a href="#pd">pdu</a></td></tr>
+            <tr><td>베어메탈 사용률</td><td><span class="st unk"><span class="g">?</span>확인 불가</span></td><td>법인 opt-in 없음(기본 꺼짐) — 설정 › 수집 › 베어메탈 사용률</td><td>—</td><td>—</td><td><span class="st unk"><span class="g">?</span></span></td><td class="mono"><a href="#bu">bm-usage</a></td></tr>
+            <tr><td>소비 전력(정보)</td><td><span class="st info"><span class="g">i</span>정보</span></td><td>10월 합계 <b>412 MWh</b> · 9월 대비 +1.8% · 못 읽은 서버 23 <span class="bar"><i style="width:68%"></i></span></td><td>서버 588 / 611</td><td>상위 KR1 · US-E · DE1</td><td>405 MWh</td><td class="mono"><a href="#pw">power-total</a></td></tr>
+            <tr><td colspan="7" style="color:#8b9bb4;padding:9px 10px">… 정상 5 항목(GPU 할당 · 아이실론 디렉터리 · 어레이 전력 · 베어메탈 스토리지 · 서버 인벤토리 변동 +3 −1) · 정보 1(폴더 사용량 Top-N)</td></tr>
+          </tbody></table></div>
+      </section>
+
+      <section class="card sec" id="s7">
+        <div class="h"><h2>7. 확인하지 못한 것</h2><span class="muted" style="font-size:12px">정상으로도 이상으로도 세지 않은 것 — 사유와 확인하는 방법</span></div>
+        <div style="overflow-x:auto"><table>
+          <thead><tr><th>항목</th><th>범위</th><th>사유</th><th>확인하려면</th></tr></thead>
+          <tbody>
+            <tr><td>중앙 ↔ 엣지 통신 점검</td><td>전 법인</td><td>기능이 꺼져 있음(기본값)</td><td>설정 › 통신 점검 켜기 → 다음 회차부터 실림</td></tr>
+            <tr><td>베어메탈 사용률</td><td>전 법인</td><td>법인 opt-in 없음</td><td>설정 › 수집 › 베어메탈 사용률에서 법인 켜기</td></tr>
+            <tr><td>SAN 월간 점검 · PDU · 파트 장애</td><td>PL1</td><td>엣지 push 가 10-29 14:10 이후 없음(기준 시각 대비 3일)</td><td>특수 기능 › 엣지 로그 · 통신 점검(PL1) — 복구되면 다음 회차에 자동 반영</td></tr>
+            <tr><td>미보호 VM · 로그인 실패</td><td>엣지 법인 21곳</td><td>vCenter 이벤트 DB 에는 직접 수집분만 있음(엣지 법인 이벤트는 엣지에 보관)</td><td>2단계 — 엣지가 자기 법인 요약을 push(컨펌 항목 ⑤) · 지금은 연합 조회로 수동 확인</td></tr>
+            <tr><td>라이선스 만료</td><td>VN1</td><td>vCenter 라이선스 못 읽음(계정 권한)</td><td>vCenter 계정에 라이선스 읽기 권한 부여</td></tr>
+            <tr><td>데이터스토어 사용률</td><td>VN1 DS 2</td><td>용량 값 못 읽음(dsUsageUnknown)</td><td>vCenter › 데이터스토어에서 확인</td></tr>
+          </tbody></table></div>
+      </section>
+
+      <section class="card sec" id="s8">
+        <div class="h"><h2>8. 부록 — 데이터 기준 · 생성 기록</h2></div>
+        <div style="overflow-x:auto"><table>
+          <thead><tr><th>원천</th><th>마지막 수집(기준 시각 대비)</th><th>수집 방식</th><th>보관 · 읽은 것</th></tr></thead>
+          <tbody>
+            <tr><td>vCenter 인벤토리 스냅샷</td><td class="mono">08:55 (0분)</td><td>중앙 폴러 7 · 엣지 push 21</td><td>메모리 + central-inventory.json — 지금 상태</td></tr>
+            <tr><td>VM 수량 · DS 추이</td><td class="mono">11-01 00:00 슬롯</td><td>vmtrack 00 · 12시</td><td>SQLite 1095일 — 10월 62슬롯</td></tr>
+            <tr><td>스토리지 어레이 용량</td><td class="mono">08:41 (14분)</td><td>중앙 직접 9 · 엣지 push 32</td><td>capacity_daily 5년 — 10월 31일치</td></tr>
+            <tr><td>SAN 스위치 스냅샷</td><td class="mono">PL1 10-29 14:10 · 나머지 08:30</td><td>엣지 push</td><td>스냅샷 + san-health.db(회차가 기록)</td></tr>
+            <tr><td>Veeam · Bareos</td><td class="mono">08:50 (5분) · 08:30 다이제스트</td><td>엣지 push · 엣지 대행</td><td>veeam-latest.json · bareos-jobs.json</td></tr>
+            <tr><td>전력 · 온도 · PDU</td><td class="mono">08:00 시간 롤업</td><td>중앙 폴러 · 수집기 pull · 엣지 push</td><td>power_hourly 90일 · roomtemp 1830일 · pdu 400일</td></tr>
+            <tr><td>인증서 · 라이선스</td><td class="mono">08:00 (55분)</td><td>중앙 직접</td><td>메모리 캐시 — 지금 상태</td></tr>
+            <tr><td>vCenter 이벤트</td><td class="mono">08:54 (1분)</td><td>직접 수집 7곳만</td><td>vcenter-logs.db 365일</td></tr>
+          </tbody></table></div>
+        <div class="note">생성 — 11-01 09:00:00 예약 실행 · 조립 41초(항목 47 · 법인 28 · 행 1,316) · XLSX 1.9 MB · 메일 5통 09:00:52 · Slack 09:00:53 · 게시판 공지 #2041 · 이 회차 ID <span class="mono">M-2026-10</span>. 이 보고서는 새로 수집하지 않았습니다 — 위 원천의 저장값만 읽었습니다.</div>
+      </section>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2760}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

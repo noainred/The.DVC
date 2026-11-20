@@ -415,6 +415,7 @@ const ALLOW = {
   'storage/growthSettings.js': ['split', '103회차 — 공용 판정 · 읽기 단계 분리'],
   'svcmon/store.js': ['split', '103회차 — 공용 판정 · 읽기 단계 분리'],
   'central/agentGpuGuestConfig.js': ['split', '103회차 — 공용 판정 · 읽기 단계 분리'],
+  'periodic/service.js': ['split', 'v3.32 정기 점검 보고 — 설정 · 상태 둘 다 공용 판정(makeJsonFileReader)으로 읽기 단계를 가르고, 형식 오류일 때만 손상 보존'],
   'ping/store.js': ['split', '103회차 — 공용 판정 · 읽기 단계 분리'],
   'rma/schedules.js': ['split', '103회차 — 공용 판정 · 읽기 단계 분리'],
   'vmclone/corpMounts.js': ['split', '103회차 — 공용 판정 · 읽기 단계 분리'],

@@ -8,6 +8,7 @@ import { badgeOf, filterByGrade, groupTone, isSearchHotkey, pushRecent, readKeyL
 import { useHashTab } from '../hooks/useHashTab.js';
 const VCenterAdmin = lazy(() => import('./VCenterAdmin.jsx'));
 const DatacenterAdmin = lazy(() => import('./DatacenterAdmin.jsx'));
+const PeriodicSchedule = lazy(() => import('./tools/periodicReport/ScheduleStandalone.jsx'));   // v3.32 정기 점검 보고 › 일정 · 전달(도구와 같은 화면)
 import VCenterConnTest from './VCenterConnTest.jsx';
 import NsxAdmin from './NsxAdmin.jsx';
 import IdracAdmin from './IdracAdmin.jsx';
@@ -124,6 +125,8 @@ const SUB = [
   // --- 알림·메일 ---
   { k: 'alerts', label: '알림', C: Alerts2, group: 'notify', desc: '임계 규칙과 알림 채널(Slack · Teams · 메일 · 웹훅)을 정하고 테스트 발송합니다. 일일 리포트 시각도 여기서.' },
   { k: 'mail', label: '메일 발송', C: MailSettings, group: 'notify', desc: '포탈 모든 기능이 함께 쓰는 SMTP 설정 — 기능별 켜기/끄기와 수신자도 정합니다.' },
+  // v3.32(사용자 요청 '일일/주간/월간/분기 정기 점검 보고 자동' · 설계 docs/design/periodic-report): 특수 기능 › 정기 점검 보고 의 일정 · 전달과 같은 화면.
+  { k: 'periodic-report', label: '정기 점검 보고', C: PeriodicSchedule, group: 'notify', desc: '일일 · 주간 · 월간 · 분기 점검 보고서의 시각 · 받는 사람 · 알림 채널 · 공지 · 보관 기간을 정합니다.' },
   { k: 'ai-search', label: 'AI 검색', C: LlmSettings, group: 'notify', desc: '자연어 검색에 쓸 LLM(로컬 Ollama 또는 외부 API)을 정하고, 에어갭 환경에 Ollama 를 배포합니다.' },
   // --- 로그 ---
   { k: 'vclogs', label: 'vCenter 로그 보관', C: VcenterLogs, group: 'log', desc: 'vCenter 이벤트를 주기적으로 모아 오래 보관합니다 — 최소 심각도 · 보존 기간 · 주기.' },
@@ -153,7 +156,7 @@ const GROUPS = {
   edge: { label: '엣지·원격', desc: '원격 수집 서버(엣지) · Edge 노드 설치 · 브라우저 SSH/RDP 중계.' },
   usercontrol: { label: '사용자', desc: '계정 · 역할 · 2FA · AD 연동 · 엣지 사용자 배포 · 기능 사용 현황.' },
   security: { label: '보안', desc: '세션 · 자격증명 · 연동 키 · 이상동작 · 호스트 접근 · 장비 신뢰 · 서버 접속(SSH · Windows) · 자가진단.' },
-  notify: { label: '알림·메일', desc: '알림 규칙 · 공용 메일(SMTP) · AI 검색 연동.' },
+  notify: { label: '알림·메일', desc: '알림 규칙 · 공용 메일(SMTP) · 정기 점검 보고 · AI 검색 연동.' },
   log: { label: '로그', desc: '보관 · 진단 · 성능 · 로그 분석 · 감사 · 로그인 기록.' },
   system: { label: '시스템', desc: '특수 기능 카테고리 · 업그레이드 · 버전 정보.' },
 };
