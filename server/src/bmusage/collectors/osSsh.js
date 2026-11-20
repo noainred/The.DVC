@@ -19,8 +19,9 @@
  * ⚠ 마운트 경로는 `bmstor/collect.js sanitizeMounts` 를 **반드시** 통과한 것만 명령에 넣는다
  *   (명령 주입 방어 — 그 함수가 단일 소스다).
  */
+import { markLoggedIn, markPasswordSent } from '../../sshaccess/loginMark.js';   // 점검 2회차 Q1(b) · B1
 import { withSsh, EXEC_MAX_OUTPUT } from '../../proxy/sshExec.js';
-import { sanitizeMounts, parseDfOutput, NO_CRED_TEXT } from '../../bmstor/collect.js';   // 146회차: 자격 없음 문구(같은 판)
+import { sanitizeMounts, parseDfOutput } from '../../bmstor/collect.js';
 import {
   splitSections, parseProcStat, parseMemInfo, parseDiskstats, parseNetDev, parseNetInfo, parseFcHosts, parseClkTck,
   readSection, parseProcStatFull, parseLoadavg, parsePsi, parseVmstat, parseSnmpTcp, parseBlkq, parseSysctl, parseHugePages, parseIrq, parseDfInodes,
@@ -334,28 +335,29 @@ export const EXEC_ERROR_TEXT = Object.freeze({
 /**
  * 한 서버에서 수집한다. **자격증명은 반환값에 담지 않는다.**
  * @param {object} osHost  `bmstor` 등록 항목(host·port·username·password·mounts)
- * @param {{signal?:AbortSignal, onLogin?:() => void}} opt  onLogin — 로그인에 성공한 직후 한 번(146회차 — 계정 탐침 sshaccess/accountGate 가 명령 시간까지 기다리지 않게)
+ * @param {{signal?:AbortSignal}} opt
  */
-export async function collectOsUsage(osHost = {}, { signal, budgetMs = SESSION_BUDGET_MS, onLogin, partitionIo = false, blkqMax = MAX_BLKQ, peakWindowS = 0, sampler = false, samplerSha = '', peakCycle = null, extraCommands = [], top = false } = {}) {
+export async function collectOsUsage(osHost = {}, { signal, budgetMs = SESSION_BUDGET_MS, partitionIo = false, blkqMax = MAX_BLKQ, peakWindowS = 0, sampler = false, samplerSha = '', peakCycle = null, extraCommands = [], top = false, onPasswordSent = null, onLoggedIn = null } = {}) {
   const host = String(osHost.host || '').trim();
   if (!host) return { ok: false, error: 'OS host 가 없습니다.', notConnected: true };   // 1회차 점검 D6: 접속하지 않음(SSH 소요에 넣지 않는다)
   // 7b: 키 · 공통 계정 참조를 해석하지 못했으면(키 삭제 · 봉인 해제 실패 · 저장소 손상) 접속하지 않는다 — 빈 비밀번호로 시도해
   //   인증 실패 · 계정 잠금을 부르지 않게(onboard/refs.js withResolvedAuth 가 단다).
   if (osHost.authError) return { ok: false, error: String(osHost.authError).slice(0, 300), authErrorCode: String(osHost.authErrorCode || '') };
-  // 146회차(141 결정 D2): 비밀번호도 키도 없으면 접속하지 않는다(root + 빈 비밀번호 금지 — 해석을 거치지 않은 대상 · 엣지 자기 등록부도 같다). 사유는 cred-config(missReason).
-  if (!osHost.privateKey && !(typeof osHost.password === 'string' && osHost.password)) return { ok: false, error: NO_CRED_TEXT, authErrorCode: 'no-cred' };
   const { mounts } = sanitizeMounts(osHost.mounts);
   const hostKey = host.toLowerCase();
   const known = _osKind.get(hostKey) || '';
 
+  // 점검 2회차 Q1(b) · B1: 로그인 뒤 실패는 markLoggedIn(계정 탐침이 성공으로 본다) · 비밀번호를 보낸 뒤 판정 모름은 markPasswordSent(호출부 onPasswordSent 도 알린다)
+  let logged = false; let pwSent = false;
   try {
-    return await withSsh({
+    const r = await withSsh({
       host, port: Number(osHost.port) || 22,
       username: String(osHost.username || 'root'),
       password: osHost.password || '', privateKey: osHost.privateKey || undefined, passphrase: osHost.passphrase || undefined,
       readyTimeout: READY_TIMEOUT_MS, signal, singlePasswordAttempt: true,   // v3.25 반증 F1: 비밀번호는 한 번만(k-i 재시도 없음 — 계정 잠금 횟수)
+      onPasswordSent: () => { pwSent = true; try { onPasswordSent?.(); } catch { /* */ } },
     }, async ({ exec }) => {
-      try { onLogin?.(); } catch { /* 146회차: 계정 탐침 알림(로그인 직후) — 실패해도 수집은 그대로 */ }
+      logged = true; try { onLoggedIn?.(); } catch { /* */ }
       // 예산 시계는 **SSH 연결이 끝난 시점**부터 센다(READY 는 withSsh 가 이미 소비했다).
       // v2.613 RUNTIME2613-05: 예산은 호출자(폴러)가 장비 시한과 묶어 준 값(`budgetMs`)이 먼저다 — 기본은 이 모듈의 상수.
       const endsAt = Date.now() + Math.max(MIN_SLICE_MS, budgetMs - READY_TIMEOUT_MS);
@@ -470,7 +472,10 @@ export async function collectOsUsage(osHost = {}, { signal, budgetMs = SESSION_B
         budgetSkipped: !!budgetSkipped,
       };
     });
+    return r && r.ok === false ? markLoggedIn(r) : r;
   } catch (e) {
-    return { ok: false, error: String(e?.message || e).slice(0, 300) };
+    const out = { ok: false, error: String(e?.message || e).slice(0, 300) };
+    if (logged) return markLoggedIn(out);
+    return pwSent ? markPasswordSent(out) : out;
   }
 }

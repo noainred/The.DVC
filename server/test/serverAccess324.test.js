@@ -148,7 +148,8 @@ test('② 계층 해석 — 승인 전 물려받지 않음 · OS 단계가 이�
   // 승인 전 — 지정은 있지만 물려받지 않는다(pending) · 해석은 none · 폴러용 해석은 ‘자격 없음’(146회차 결정 D2 — 예전에는 그대로 둬 root + 빈 비밀번호로 붙었다)
   assert.deepEqual(REFS.effectiveAccountOf(w1), { source: 'none', pending: true, level: 'windows', accountId: ad.id });
   assert.equal(REFS.resolveOsAuth(w1, { feature: 'bm-usage' }).authKind, 'none');
-  assert.equal(REFS.withResolvedAuth([w1], { feature: 'bm-usage' })[0].authErrorCode, 'no-cred');
+  // 점검 2회차 X-1: 승인 전 주소만 등록 서버도 폴러가 root + 빈 비밀번호로 붙지 않게 막는다(예전에는 그대로 — bm-storage 가 붙었다 · 재현)
+  assert.equal(REFS.withResolvedAuth([w1], { feature: 'bm-usage' })[0].authErrorCode, 'not-configured');
   // 승인(등록부 — 서비스만 부른다) → OS 단계(windows) · 로그인 이름 · 비밀번호
   for (const s of [w1, l1, n1]) assert.equal(BM.setBmServerInherit(s.id, { on: true, expectAddr: addrOf(s), by: 'own' }).ok, true);
   const rw = REFS.resolveOsAuth(byName('w1'), { feature: 'bm-usage' });
@@ -160,7 +161,10 @@ test('② 계층 해석 — 승인 전 물려받지 않음 · OS 단계가 이�
   // 법인 단계가 Windows 계정이면 Linux · 미지정 서버에는 닿지 않는다(mismatch)
   assert.equal(ST.setAssign('vcA', 'all', { account: ad.id }, { by: 'own' }).ok, true);
   assert.equal(REFS.effectiveAccountOf(byName('l1')).mismatch, true);
-  assert.equal(REFS.resolveOsAuth(byName('n1'), { feature: 'bm-usage' }).authKind, 'none', 'Windows 비밀번호를 OS 미지정 서버로 보내지 않는다');
+  // 점검 1회차 T3: 승인됐지만 물려받을 계정이 없으면 붙지 않는다(예전에는 ok · authKind 'none' — 폴러가 root + 빈 비밀번호로 로그인했다)
+  const nr = REFS.resolveOsAuth(byName('n1'), { feature: 'bm-usage' });
+  assert.equal(nr.ok, false, 'Windows 비밀번호를 OS 미지정 서버로 보내지 않는다 · 빈 비밀번호로도 붙지 않는다'); assert.equal(nr.code, 'no-account');
+  assert.equal(REFS.withResolvedAuth([byName('n1')], { feature: 'bm-usage' })[0].authErrorCode, 'no-account', '폴러는 authError 로 거른다');
   assert.equal(ST.setAssign('vcA', 'all', { account: lin.id }, { by: 'own' }).ok, true);
   // 주소가 바뀌면(승인 칸은 요청이 세울 수 없다 · 다른 쓰기 경로) 승인이 저절로 풀린다
   const l1s = byName('l1');
@@ -450,9 +454,12 @@ test('⑩ 반증 F2 — 같은 공통 계정을 물려받는 서버 5대가 한 
   assert.ok(ST.accountStopFor(z.id, KS.accountSecretVersion(z)));
   // 두 폴러 모두 이 문을 지난다(bm-usage 는 장비 시한 밖에서 기다린다 — 시한은 탐침 뒤 run 안에서 연다)
   const src = (f) => fs.readFileSync(path.join(SRC, f), 'utf8');
-  assert.match(src('bmusage/poller.js'), /gateAccountLogin\(target\.osHost, \(authed\) => withDeadline\(DEVICE_TIMEOUT_MS/);   // 146회차: 로그인 직후 탐침 판정(authed)
+  assert.match(src('bmusage/poller.js'), /gateAccountLogin\(target\.osHost, \(\) => \{ let pwSent = false; let logged = false; return withDeadline\(DEVICE_TIMEOUT_MS/);
+  // 점검 2회차 A1: 집중 모니터링도 같은 문을 지난다
+  assert.match(src('bmusage/focus/run.js'), /sess\.hasOs \? gateAccountLogin\(osHostNow, /);
   assert.match(src('bmstor/poller.js'), /collectMany\(central, \{ collect: gatedCollect \}\)/);
-  assert.match(src('bmstor/poller.js'), /const gatedCollect = \(s\) => gateAccountLogin\(s, \(authed\) => collectServer\(s, \{ onLogin: authed \}\)/);
+  // 4회차 R4S-3: 수집은 장비 시한 안에서(탐침 대기는 시한 밖 — gateAccountLogin 의 run 안에서 연다)
+  assert.match(src('bmstor/poller.js'), /const gatedCollect = \(s\) => gateAccountLogin\(s, \(\) => \{[\s\S]{0,400}?withDeadline\(collectDeadlineMs\(\), \(signal\) => collectServer\(s, \{ signal,/);
   // 키 로그인(판 없음)은 문을 지나지 않는다
   let nk = 0; await Promise.all(Array.from({ length: 3 }, () => G.gateAccountLogin({ credAccountId: z.id, name: 'k' }, async () => { nk += 1; return { ok: false, error: 'auth' }; }, opts)));
   assert.equal(nk, 3);

@@ -348,6 +348,8 @@ const TABLE = {
   'store.js': ['shared', '롤업 · 전력 적재(vcSkip)'],
   'vcenter/vmExport.js': ['shared', '130 R5 — inventoryNotCurrent: 상태 invAt(읽은 시각 · 모르면 null) · invNotCurrent · 내보내기 메타'],
   'vcenter/vmExportXlsx.js': ['own', '130 R5 — 메타 invNotCurrent 를 요약 · 폴더 트리의 ‘기준’ 줄과 읽는 법 시트에 적는다(CSV 는 머리말이 없어 화면 타일이 말한다)'],
+  'periodic/readers/vsphere.js': ['own', 'v3.32 정기 점검 보고 — 법인 행의 판정은 원본 도구 그대로(computeHealthReport 는 낡은 위임 · 점검중 · 첫 수집 중을 확인 불가로) · 원본에 행이 없는 vCenter 는 readers/common.js vcUnreadReason(공용 unreadVcenterReasons + 첫 수집 중)으로 확인 불가'],
+  'periodic/readers/facility.js': ['shared', 'v3.32 정기 점검 보고 전력(정보) — store.js 와 같은 vcSkip(unreadVcenterReasons + usageReadable)으로 멈춘 vCenter 추정 전력을 빼고 뺀 대수를 적는다'],
   'vmtrack/service.js': ['own', 'inventoryUnreadReason(v2.743) — 값이 남은 vCenter 는 변화 0 으로 diff, 빈 vCenter 는 건너뜀'],
 };
 const SHARED_RE = /\b(?:unreadVcenterReasons|unreadVcenterIds|notReadVcentersOf|samplingUnreadReasons)\b/;   // 162회차: samplingUnreadReasons = 공용 판정 + 긴급중단(metrics/sampler.js — /metrics 가 쓴다)

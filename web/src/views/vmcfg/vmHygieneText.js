@@ -137,6 +137,8 @@ export function settingsPatch(form) {
     if (Number.isFinite(n)) out[k] = n;
   }
   if (typeof form?.exceptionsText === 'string') out.exceptions = form.exceptionsText.split('\n').map((s) => s.trim()).filter(Boolean);
+  // v3.30.4: 가린 판본(creatorExcludeText 가 없음)은 보내지 않는다 — 빈 목록이 저장값을 지우지 않게(서버도 버린다)
+  if (typeof form?.creatorExcludeText === 'string') out.creatorExclude = form.creatorExcludeText.split('\n').map((s) => s.trim()).filter(Boolean);
   if (form?.notify) out.notify = { enabled: !!form.notify.enabled, hour: Number(form.notify.hour) };
   return out;
 }

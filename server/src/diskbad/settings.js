@@ -20,6 +20,21 @@ export const DEFAULTS = Object.freeze({ autoEnabled: false, intervalHours: 6, ma
 const EMAIL_RE = /^[^\s@<>()",;]{1,64}@[A-Za-z0-9.-]{1,190}$/;
 const MAX_CORPS = 200;
 const MAX_TO = 20;
+export const CORP_MAX = MAX_CORPS;
+export const CORP_TO_MAX = MAX_TO;
+
+/**
+ * 담당자 값 하나 → 저장할 주소 목록과 빠진 사유별 수(정규화와 저장 보고가 **같은 판정**을 쓴다 — 4회차 반증 F8: 보고가 중복 · 상한으로
+ * 빠진 올바른 주소를 '메일 주소로 읽지 못한 값' 이라 말했다). 배열 원소도 쉼표 · 공백으로 나눈다(메일 주소에는 그 글자가 없다 —
+ * 법인 이름 키를 id 로 합칠 때 'a,b' 글자가 원소 하나로 들어가 통째로 빠지던 것도 이것으로 막는다).
+ * @returns {{list:string[], invalid:number, dup:number, over:number}}
+ */
+export function corpEmailsOf(v) {
+  const raw = (Array.isArray(v) ? v : [v]).slice(0, 500).flatMap((x) => String(x ?? '').slice(0, 4_000).split(/[\s,;]+/)).map((s) => s.trim()).filter(Boolean);
+  const ok = raw.filter((s) => EMAIL_RE.test(s));
+  const uniq = [...new Set(ok)];
+  return { list: uniq.slice(0, MAX_TO), invalid: raw.length - ok.length, dup: ok.length - uniq.length, over: Math.max(0, uniq.length - MAX_TO) };
+}
 
 let _mem = null;
 let _loadError = null;
@@ -33,9 +48,8 @@ export function normalizeSettings(raw = {}) {
   for (const [k, v] of Object.entries(src).slice(0, MAX_CORPS)) {
     const id = String(k).trim().slice(0, 128);
     if (!id) continue;
-    const list = (Array.isArray(v) ? v : String(v ?? '').split(/[\s,;]+/)).map((s) => String(s).trim()).filter((s) => EMAIL_RE.test(s));
-    const uniq = [...new Set(list)].slice(0, MAX_TO);
-    if (uniq.length) corpTo[id] = uniq;
+    const { list } = corpEmailsOf(v);
+    if (list.length) corpTo[id] = list;
   }
   return {
     autoEnabled: r.autoEnabled === true,

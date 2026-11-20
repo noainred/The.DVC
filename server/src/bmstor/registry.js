@@ -385,6 +385,41 @@ export function setBmServerInherit(id, { on = true, clearOwn = false, expectAddr
 }
 
 /**
+ * 점검 2회차 Q2(재현 — 1,000대 등록부 중 666대 승인에 이벤트 루프 최대 1.7초(평문) · 3.6초(암호화)): 승인 여러 대를 **한 번 쓰기**로.
+ *  · 서버마다 setBmServerInherit 와 같은 판정(엣지 · 접속처 · 승인 키 · 자기 자격)을 하고, 통과한 것만 메모리에 세운 뒤 persist 한 번.
+ *  · 쓰기에 실패하면 이번에 바꾼 서버를 모두 되돌린다(일부만 남지 않는다).
+ * @param {Array<{id:string, expectAddr:string, expectKey:string}>} items
+ * @returns {{ok:boolean, done:string[], failed:Array<{id,code,reason}>, code?, status?, reason?}}
+ */
+export function setBmServersInherit(items = [], { clearOwn = false, by = '', now = Date.now() } = {}) {
+  const data = load();
+  if (loadErr.get()) return { ok: false, code: 'registry-unreadable', status: 503, reason: 'OS 계정 등록부를 읽지 못해 바꾸지 않았습니다.', done: [], failed: [] };
+  const FIELDS = ['inherit', 'keyRef', 'credRef', 'osAuth', 'addrOnly', 'password'];
+  const byId = new Map(data.servers.map((x) => [x.id, x]));
+  const undo = []; const done = []; const failed = [];
+  for (const it of Array.isArray(items) ? items : []) {
+    const s = byId.get(String(it?.id || ''));
+    const fail = (code, reason) => failed.push({ id: String(it?.id || ''), code, reason });
+    if (!s) { fail('not-found', '서버를 찾을 수 없습니다.'); continue; }
+    if (String(s.agent || '').trim()) { fail('edge-delegated', '엣지가 수집하는 서버입니다.'); continue; }
+    if (it.expectAddr == null || addrKey(s.host, s.port, s.username) !== String(it.expectAddr)) { fail('moved', '서버 주소 · 포트 · 계정이 바뀌었습니다 — 화면을 다시 읽으세요.'); continue; }
+    if (it.expectKey == null || inheritKeyOf(s) !== String(it.expectKey)) { fail('moved', '서버의 OS 종류 · 법인이 바뀌었습니다 — 화면을 다시 읽으세요.'); continue; }
+    if (!clearOwn && hasOwnCred(s)) { fail('has-own', '이 서버는 따로 정한 계정이 있습니다.'); continue; }
+    undo.push([s, Object.fromEntries(FIELDS.map((f) => [f, s[f] === undefined ? undefined : structuredClone(s[f])]))]);
+    if (clearOwn) { delete s.keyRef; delete s.credRef; delete s.osAuth; s.password = ''; }
+    s.inherit = { key: inheritKeyOf(s), at: now, by: String(by || '').slice(0, 64) };
+    delete s.addrOnly;
+    done.push(s.id);
+  }
+  if (!done.length) return { ok: failed.length === 0, done, failed };
+  try { persist(); } catch (e) {
+    for (const [s, had] of undo) for (const f of FIELDS) { if (had[f] === undefined) delete s[f]; else s[f] = had[f]; }
+    return { ok: false, code: e?.code === 'SECRETS_POLICY_UNAVAILABLE' ? 'SECRETS_POLICY_UNAVAILABLE' : 'write-failed', status: 503, reason: `OS 계정 등록부를 쓰지 못했습니다(${String(e?.code || e?.message || e).slice(0, 60)}).`, done: [], failed };
+  }
+  return { ok: failed.length === 0, done, failed };
+}
+
+/**
  * v3.24 ‘따로 정하기 — 다른 공통 계정’: **같은 주소**에서 이 서버가 쓸 공통 계정만 바꾼다(키 고르기 `setBmServerKeyRef` 와 같은 꼴).
  *   서버에 고정한 키 · 비밀번호 고정 · 계층 승인은 뗀다(고른 계정이 그대로 쓰이게). 서버 비밀번호는 건드리지 않는다(공통 계정이 비밀을 가진다 — saveAccount 가 강제).
  *  · ⚠ 비밀을 주소에 묶는 쓰기 — 부르는 곳은 sshaccess/service.js 하나(설정 소유자 등급 + OTP 라우트 뒤). 접속 확인에 실패하면 서비스가 restoreBmServerCredRef 로 되돌린다.
@@ -448,17 +483,21 @@ export function setBmServerOs(id, os) {
   return { ok: true, changed: true };
 }
 
-/** v3.24 OS 종류 여러 대(제안 일괄 적용) — 한 번 쓰기. map: id → 'linux' | 'windows'. 모르는 id · 값은 건너뛴다. */
+/**
+ * v3.24 OS 종류 여러 대(제안 일괄 적용) — 한 번 쓰기. map: id → 'linux' | 'windows' | ''(미지정으로). 모르는 id · 값은 건너뛴다.
+ * 점검 2회차 Q2(재현 — 666대에 이벤트 루프 1.7~3.6초): ‘미지정으로’ 도 여기서 한 번에(예전에는 서버마다 등록부 전체를 다시 썼다).
+ */
 export function setBmServersOs(map = {}) {
   const data = load();
   if (loadErr.get()) return { ok: false, code: 'registry-unreadable', status: 503, reason: 'OS 계정 등록부를 읽지 못해 바꾸지 않았습니다.' };
   const had = new Map();
   for (const s of data.servers) {
-    const v = Object.hasOwn(map, s.id) ? String(map[s.id] || '') : null;
-    if (v == null || !SERVER_OS.includes(v) || s.os === v) continue;
+    const v = Object.hasOwn(map, s.id) ? String(map[s.id] ?? '') : null;
+    if (v == null || (v !== '' && !SERVER_OS.includes(v)) || (s.os || '') === v) continue;
     const wasActive = inheritActive(s);
-    had.set(s.id, { os: s.os, inherit: s.inherit }); s.os = v;
-    settleInherit(s, wasActive);   // 141회차: OS 를 바꾸면 승인은 죽는다
+    had.set(s.id, { os: s.os, inherit: s.inherit });
+    if (v) s.os = v; else delete s.os;
+    settleInherit(s, wasActive);   // 141회차: OS 를 바꾸면(미지정으로 포함) 승인은 죽는다
   }
   if (!had.size) return { ok: true, changed: 0 };
   try { persist(); } catch (e) {

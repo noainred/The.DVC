@@ -85,8 +85,9 @@ test('③ parseWindows — PowerShell 5.1 의 {"value":[...],"Count":n} 꼴도 �
   assert.equal(failed.fs, null); assert.deepEqual(failed.failed, ['vol']);
   // 감싼 빈 디스크 목록은 읽기 실패(Linux 와 같은 규칙)
   assert.equal(P.parseWindows(`##WINJSON\n${JSON.stringify({ ...ps51, disk: wrap([]) })}`).disks, null);
-  // 꼴이 정확하지 않으면 풀지 않는다(Count 불일치 · 다른 칸이 더 있음) — CPU 로 읽히지 않는다(코어 못 읽음)
-  for (const odd of [{ value: plain.cpu, Count: 3 }, { value: plain.cpu, Count: 2, Name: 'x' }]) {
+  // 꼴이 정확하지 않으면 풀지 않는다(다른 칸이 더 있음) — CPU 로 읽히지 않는다(코어 못 읽음).
+  //   main 병합: 판정은 main 의 isPsWrapped(value 배열 + Count 가 수 · 다른 칸 없음 — 점검 1회차 U4) 하나다. Count 가 길이와 다른 꼴은 main 판이 푼다(시험에서 뺐다).
+  for (const odd of [{ value: plain.cpu, Count: 2, Name: 'x' }]) {
     const p = P.parseWindows(`##WINJSON\n${JSON.stringify({ ...plain, cpu: odd })}`);
     assert.equal(p.base.cpuCores.value, null, JSON.stringify(odd).slice(0, 60));
   }

@@ -6,6 +6,7 @@
  */
 import { numOrNull } from '../util/numOrNull.js';
 import { REASON } from './scan.js';
+import { MIN_VALID_TIME } from './classify.js';
 
 export const PUSH_PROTOCOL = 1;
 export const SERVERS_MAX = 2_000;     // 한 묶음 서버 상한(엣지는 25대씩 보낸다)
@@ -13,7 +14,7 @@ export const RECORDS_MAX = 5_000;
 export const DRIVES_MAX = 64;
 const REASONS = new Set(Object.values(REASON).filter(Boolean));
 const ORDERS = new Set(['desc', 'asc', 'unknown']);
-const STOPS = new Set(['', 'budget', 'max', 'skip', 'short', 'empty']);
+const STOPS = new Set(['', 'budget', 'max', 'skip', 'short', 'empty', 'error']);
 const PATHS = new Set(['std', 'legacy']);
 export const TOP_MAX = 8;
 export const PROBE_MAX_BYTES = 16_000;
@@ -25,7 +26,7 @@ const b = (v) => (v === true ? true : (v === false ? false : null));
 /** 시각: 수로 읽고, 미래(수신 시각 + 5분 초과)는 수신 시각으로 자른다. 2000년 이전은 버린다. */
 export function clampTime(v, now) {
   const n = numOrNull(v);
-  if (n == null || n < 946_684_800_000) return null;
+  if (n == null || n < MIN_VALID_TIME) return null;
   return Math.min(n, now + 300_000);
 }
 
@@ -38,6 +39,8 @@ function cleanLog(L, now) {
     total: total != null && total >= 0 ? Math.floor(total) : null,
     read: read != null && read >= 0 ? Math.floor(read) : null,
     undated: Math.max(0, Math.floor(numOrNull(L.undated) ?? 0)),
+    // 시각을 못 읽은 저장 계열 기록 수(R2-5 — 판정에 넣지 못한 기록을 화면이 따로 밝힌다). 옛 판 엣지는 보내지 않는다(null — 모름).
+    undatedStorage: cnt(L.undatedStorage),
     newestId: s(L.newestId, 64), newestCreated: clampTime(L.newestCreated, now),
     oldestRead: clampTime(L.oldestRead, now), cursorCreated: clampTime(L.cursorCreated, now),
     reachedEnd: L.reachedEnd === true, foundCursor: L.foundCursor === true, cursorUsed: L.cursorUsed === true,

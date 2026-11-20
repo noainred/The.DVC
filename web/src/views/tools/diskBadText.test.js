@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { fmtDate, spanText, rateText, pctText, clsTone, verdictTone, serverBand, unitProgress, scopeLabel, noteOf, clsOfCode, num, diagInfo, shortLogNote, READ_STOP_LABEL, scanSent, sourceRows, sourceTone, traceTone, valCell, pastCoverageText } from './diskBadText.js';
+import { serverRowBadge, serverBandFor, edgeLastText, corpSaveText, mailInfoText, fmtDate, spanText, rateText, pctText, clsTone, verdictTone, serverBand, unitProgress, scopeLabel, noteOf, clsOfCode, num, diagInfo, shortLogNote, READ_STOP_LABEL, scanSent, sourceRows, sourceTone, traceTone, valCell, pastCoverageText } from './diskBadText.js';
 
 const HOUR = 3_600_000; const DAY = 24 * HOUR;
 const NOW = Math.floor(Date.now() / HOUR) * HOUR;
@@ -128,4 +128,54 @@ describe('diskBadText', () => {
     expect(c.vals).toBe('디스크 값 — 읽음 3대 · 장비에 없음 5대 · 못 읽음 1대 · 아직 읽지 않음 2대 (값을 읽은 디스크 24개 · 값 모름 40개)');
     expect(c.sel).toBe('시스템 이벤트 로그 — 읽음 10대 · 아직 읽지 않음 1대 (디스크 항목 4건)');
   });
+
+  it('1회차(R1 · R6 · R7) — 띠의 구간 끝은 마지막으로 읽은 때 · 실패한 마지막 점검을 밝힘 · 본 기간은 끊김 없이 본 구간 · 위치 못 읽은 기록은 건수로', () => {
+    const cov = { continuousSince: NOW - 60 * DAY, lastOkAt: NOW - 30 * DAY, lastScanAt: NOW - HOUR, lastStatus: 'timeout', lastStatusLabel: '시한 초과', logSpan: { ms: 90 * DAY }, shortLogDays: 30,
+      diag: { oldest: NOW - 70 * DAY, newest: NOW - 59 * DAY } };
+    const b = serverBand({ status: 'clean', coverage: cov, counts: {} }, NOW);
+    expect(b.lines.join(' ')).toContain('(30일)');
+    expect(b.lines.join(' ')).toContain('에 읽은 결과입니다 — 마지막 점검');
+    expect(b.lines.join(' ')).toContain('시한 초과');
+    const rows = sourceRows(cov);
+    expect(rows[0].range).toContain('(30일)');
+    expect(rows[0].note).toContain('시한 초과');
+    expect(sourceRows({ lastOkAt: NOW, diag: { oldest: NOW - 37 * DAY, newest: NOW } })[0].range).toContain('37일');
+    const r = serverBand({ status: 'records', coverage: { continuousSince: NOW - 10 * DAY, lastOkAt: NOW }, counts: { records: 3, slots: 0, unplaced: 3, inUse: 0, replaced: 0, unknown: 0 } }, NOW);
+    expect(r.title).toContain('위치를 못 읽은 기록 3건 포함');
+  });
+
+  it('2회차(R2-4 · R2-5 · I-1) — 오류로 멈춘 읽기 · 시각 못 읽은 저장 기록 · 마지막 메일 결과', () => {
+    expect(READ_STOP_LABEL.error).toContain('429');
+    const d = diagInfo({ at: NOW, read: 10, pages: 1, ms: 100, undated: 3, undatedStorage: 2 });
+    expect(d.lines.join(' ')).toContain('시각을 못 읽은 항목 3건 — 그중 디스크 · 가상 디스크 기록 2건');
+    expect(diagInfo({ at: NOW, read: 10, pages: 1, ms: 100, undated: 0 }).lines.join(' ')).not.toContain('시각을 못 읽은');
+    expect(mailInfoText(null)).toBe(null);
+    expect(mailInfoText({ at: NOW, skipped: 'off' }).text).toContain('꺼짐');
+    const m = mailInfoText({ at: NOW, results: [{ ok: true }, { ok: false, reason: 'SMTP 연결 실패' }] });
+    expect(m.ok).toBe(false); expect(m.text).toContain('1/2통 보냄'); expect(m.text).toContain('SMTP 연결 실패');
+  });
+
+  it('3회차(D3) — 담당자 저장 결과는 버린 줄 · 주소 · 법인을 밝힌다', () => {
+    expect(corpSaveText(null, 0)).toBe('저장했습니다.');
+    // 4회차 반증 F8 — 빠진 이유를 나눠 말하고 상한 값은 서버가 준 것으로
+    expect(corpSaveText({ droppedEmails: 0, dupEmails: 1, overEmails: 2, toMax: 20, overCorpsTotal: 1, overCorps: ['vc-z'], corpMax: 200 }, 0))
+      .toBe('저장했습니다 — 겹친 주소 1개는 하나로 남겼습니다 · 법인당 20개를 넘는 주소 2개는 저장하지 않았습니다 · 법인 200곳을 넘는 1곳은 저장하지 않았습니다(vc-z).');
+    // 4회차 반증 F9 — 서버 탭 배지는 띠와 같은 기준
+    expect(serverRowBadge({ status: 'clean', statusLabel: '남은 로그에 기록 없음', traces: 1, traceUnrec: 1 })).toEqual({ tone: 'red', label: '남은 로그에 기록 없음', note: '디스크 값 흔적 1개(복구 불가 1)' });
+    expect(serverRowBadge({ status: 'clean', statusLabel: 'x', traces: 2, traceUnrec: 0 }).tone).toBe('amber');
+    expect(serverRowBadge({ status: 'clean', statusLabel: 'x', traces: null })).toEqual({ tone: 'green', label: 'x', note: '' });
+    expect(serverRowBadge({ status: 'records', statusLabel: 'r', traces: 3 }).note).toBe('');
+    // 4회차 반증 F6 — 결과가 없는 엣지 포탈은 '점검을 누르면' 이라고 하지 않는다
+    expect(serverBandFor(null, 'edge').title).toMatch(/중앙 포탈에서/);
+    expect(serverBandFor(null, 'central').title).toMatch(/조회하지 않았습니다/);
+    // 4회차 반증 F2 — 엣지 상태의 값은 last 아래에 있다
+    expect(edgeLastText({ configured: true, busy: false, last: { at: Date.UTC(2026, 10, 20, 3), ok: false, error: '중앙 응답 HTTP 502' } })).toMatch(/^마지막 작업: \d{4}-\d{2}-\d{2} .* · 중앙 응답 HTTP 502$/);
+    expect(edgeLastText({ configured: true, busy: false, last: null })).toBe('마지막 작업: —');
+    expect(edgeLastText({ configured: true, busy: false, last: { at: Date.UTC(2026, 10, 20, 3), ok: true, idle: true } })).toMatch(/ · 대기 중$/);
+    expect(edgeLastText({ configured: false, last: null })).toBe('마지막 작업: — · 중앙 주소 · 토큰이 설정되지 않았습니다');
+    expect(corpSaveText({ renamed: [{ from: 'vcenter-ap-northeast-01', to: 'vc-1' }] }, 0)).toBe('저장했습니다 — 법인 이름을 id 로 바꿔 저장: vcenter-ap-northeast-01 → vc-1.');
+    const t = corpSaveText({ droppedEmails: 2, droppedCorps: ['vc-kr'], unknownCorps: ['서울법인'] }, 1);
+    expect(t).toContain('1줄은 읽지 않았습니다'); expect(t).toContain('vc-kr'); expect(t).toContain('2개를 뺐습니다'); expect(t).toContain('서울법인');
+  });
 });
+

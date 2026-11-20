@@ -546,3 +546,9 @@
   - **보류 = 기한 있는 예외**(`vmhygiene/holds.js` · `vm-snapshot-holds.json`): 1~90일 · 사유 필수 · 0 = 풀기. 판정은 `hygieneFindings` 하나(`holdOf` — 기한은 판정 시각으로 다시 본다) — `loadVmHygieneSettings` 가 **열거되지 않는 속성 `holds`**(Map)로 붙여 카드 · VM 구성 점검 · 알림 · 스냅샷 화면 · 이력 기록이 같은 판정을 본다. 이 속성을 열거되게 바꾸면 설정 저장 파일 · 설정 응답 · rev 에 보류가 섞인다(시험 ②가 막는다). 못 읽은 보류 파일 위에는 저장하지 않는다(503).
   - 쓰기 `PUT /tools/snapshots/holds` = 관리자(`requireRole('admin')`) · 조회 범위 밖 404 → 쓰기 범위 밖 403 · 감사 `snapshot.hold`. 조회는 범위 안 보류만 · 건 계정(by)은 관리자 판본만. 화면 응답(`/tools/snapshots`)에는 by 를 싣지 않고 캐시 열쇠에 보류 세대(`holdsGeneration`)를 넣는다.
   - **만든 계정**(`snaphist/creators.js`): 스냅샷 이벤트 DB(31일)에서 VM **이름**으로 잇는 VM 단위 ‘최근 생성 계정’ — 같은 이름 VM 은 잇지 않음 · 백업 도구 계정 제외 · 엣지 위임(site) vCenter 는 'site'(모름) · 상한까지 읽으면 'truncated'. 계정 이름은 관리자 판본만(`user:null` + `userMasked` — vcInfo 작업 사용자와 같은 규칙) · 캐시 열쇠에 관리자 여부.
+- **v3.30.4 — ‘만든 계정에서 뺄 백업 계정’(`vm-hygiene.json` `creatorExclude`)**(사용자 ‘나머지 작업 모두 진행’ · 고른 방식 ‘관리자 목록 추가’). 회귀 `server/test/snapCreatorExclude3304.test.js` · 웹 `snapshots/snapCreatorExclude3304.test.jsx`.
+  - 왜 사람이 적나: Bareos 플러그인 vCenter 계정은 Bareos FD 의 INI 에만 있다(`bareos/autoSetup.js fdIniText` — 포탈은 vcuser 를 저장하지 않는다) · Rubrik · Commvault 는 포탈이 모른다.
+  - **Veeam 계정 목록(`veeam/snapEvents.js`)에 섞지 않는다** — 거기 넣으면 Veeam 스냅샷 판정(임시 스냅샷 · 학습)이 바뀐다. 이 목록은 ‘만든 계정’ 표시에서만 빼고 스냅샷 판정은 그대로다.
+  - 맞춤은 Veeam 계정과 같은 규칙(`creators.js listedMatcher` → `makeVeeamAccountMatcher` 의 'account' 만 — 'veeam' 이름 규칙은 끼지 않는다). 뺀 이벤트 수 `listed` · 적은 개수 `excludeCount` 를 응답에 싣고 화면이 밝힌다.
+  - 계정 이름이라 **관리자 판본(`isAdminDetailUser`)이 아니면 개수만**(`vmHygiene.js creatorMasked` — 분석 · 설정 조회 · 저장 응답 세 곳이 `settingsFor` 하나) · 저장(관리자 · 전 법인)에서도 관리자 판본이 아니면 이 칸을 버린다(가린 빈 목록이 저장값을 지우지 않게 — 웹 `settingsPatch` 도 가린 판본은 보내지 않는다).
+  - 만든 계정 응답은 5분 캐시 — 열쇠에 설정 판본(`|s${rev}`)을 넣어 목록을 바꾸면 바로 갈린다.

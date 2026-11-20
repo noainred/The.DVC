@@ -93,6 +93,7 @@ export const TOOL_PATH_KEYS = Object.freeze({
   'service-check': 'davinci-svc',    // DavinciChecks.jsx ServiceCheck 전용
   'vmware-config': 'vmware-backup',  // DavinciChecks.jsx VmwareConfigBackup 전용
   pdu: 'pdu',
+  rack: 'rack',                      // 랙 실장도(RackTool.jsx 전용 — 세그먼트 = 키 · 설계 docs/design/rack-elevation)
   relaycheck: 'relaycheck',
   relaytopo: 'relaytopo',
   rightsize: 'rightsizing',
@@ -101,6 +102,7 @@ export const TOOL_PATH_KEYS = Object.freeze({
   'san-flow': 'san-flow',            // v2.935(C-②) SAN 플로우 모니터(SanFlowTool.jsx 전용 — 세그먼트 = 키)
   'san-storage': 'san-storage',      // v2.948 SAN 스토리지 성능(SanStorageTool.jsx 전용 — 세그먼트 = 키 · 설계 docs/design/san-storage-perf)
   'ps-inspect': 'ps-inspect',        // v2.965 PowerScale 장비 점검(PsInspectTool.jsx 전용 — 세그먼트 = 키 · 설계 docs/design/powerscale-inspection)
+  'periodic-report': 'periodic-report', // v3.32 정기 점검 보고(PeriodicReport.jsx 전용 — 세그먼트 = 키 · 설계 docs/design/periodic-report)
   'secret-scan': 'secret-scan',
   'serial-lookup': 'serial-lookup',
   snapshots: 'snapshots',

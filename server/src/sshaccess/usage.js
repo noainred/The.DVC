@@ -33,6 +33,8 @@ let recent = null;    // []
 let timer = null;
 let dirty = false;
 let loadFailed = false;
+let readErrAt = 0;    // 점검 1회차 S8: 읽기 오류(EMFILE 등) 시각 — 손상이 아니다: 원본을 옮기지 않고 · 다시 읽기 전에는 쓰지 않는다(쓰면 90일 기록을 덮는다)
+const READ_RETRY_MS = 30_000;
 
 // 법인까지 열쇠에 넣는다 — 다른 법인의 같은 이름 서버는 다른 서버다(점검 C-9).
 const srvKey = (server, corp) => `${server.toLowerCase()}\u0002${String(corp || '').toLowerCase()}`;
@@ -63,9 +65,29 @@ function load() {
     recent = (Array.isArray(j?.recent) ? j.recent : []).filter((e) => e && typeof e === 'object').slice(-MAX_RECENT).map(normEvent).filter(Boolean);
     rebuildIndex();
   } catch (e) {
+    rows = new Map(); recent = []; byFp = new Map(); loadFailed = true;
+    // 읽기 오류(시스템 코드) — 원본 그대로 · 쓰지 않고 나중에 다시 읽어 합친다(flushKeyUsage)
+    if (!(e instanceof SyntaxError) && typeof e?.code === 'string') { readErrAt = Date.now() || 1; return; }
     // 손상 — 보존하고 빈 기록으로 간다(이 기록은 판정에 쓰지 않는다 — 접속을 막을 이유가 없다). 화면이 ‘기록 손상’ 을 말한다.
-    preserveCorrupt(FILE(), e?.message); loadFailed = true; rows = new Map(); recent = []; byFp = new Map();
+    preserveCorrupt(FILE(), e?.message);
   }
+}
+/** 읽기 오류 뒤 다시 읽어 메모리에 쌓인 것과 합친다 — 같은 열쇠는 수를 더하고 시각은 넓힌다. 그래도 못 읽으면 false(쓰지 않는다). */
+function rereadAndMerge() {
+  const mem = rows; const memRecent = recent;
+  rows = null; readErrAt = 0;
+  load();
+  if (readErrAt) { rows = mem; recent = memRecent; rebuildIndex(); return false; }
+  for (const [k, m] of mem) {
+    const d = rows.get(k);
+    if (!d) { rows.set(k, m); continue; }
+    rows.set(k, { ...d, keyName: m.keyName || d.keyName, firstAt: Math.min(d.firstAt || m.firstAt, m.firstAt || d.firstAt), lastAt: Math.max(d.lastAt, m.lastAt),
+      count: d.count + m.count, okCount: d.okCount + m.okCount, failCount: d.failCount + m.failCount,
+      lastOk: m.lastAt >= d.lastAt ? m.lastOk : d.lastOk, lastCode: m.lastAt >= d.lastAt ? m.lastCode : d.lastCode });
+  }
+  recent = [...recent, ...memRecent].sort((a, b) => a.at - b.at).slice(-MAX_RECENT);
+  rebuildIndex();
+  return true;
 }
 function normEvent(e) {
   const fp = t(e.fingerprint, 80);
@@ -84,6 +106,10 @@ function schedule() {
 /** 파일로 쓴다(테스트 · 종료 직전 · 타이머). 실패하면 다음 기회에 다시(메모리는 그대로). */
 export function flushKeyUsage({ now = Date.now() } = {}) {
   if (!rows || !dirty) return { ok: true, skipped: true };
+  if (readErrAt) {
+    if (now - readErrAt < READ_RETRY_MS && now >= readErrAt) { schedule(); return { ok: false, skipped: true, reason: 'read-error' }; }
+    if (!rereadAndMerge()) { schedule(); return { ok: false, skipped: true, reason: 'read-error' }; }
+  }
   const cut = now - RETAIN_MS;
   for (const [k, r] of rows) if (r.lastAt && r.lastAt < cut) rows.delete(k);
   if (rows.size > MAX_ROWS) {
@@ -154,4 +180,4 @@ export function keyUsageView({ fingerprint = '', limit = 200 } = {}) {
   return { rows: list.slice(0, Math.max(1, Math.min(2000, limit * 5))), totalRows: list.length, recent: ev, retainDays: RETAIN_MS / 86_400_000, loadFailed };
 }
 
-export function _resetKeyUsageForTest() { if (timer) clearTimeout(timer); timer = null; rows = null; recent = null; byFp = null; dirty = false; loadFailed = false; }
+export function _resetKeyUsageForTest() { if (timer) clearTimeout(timer); timer = null; rows = null; recent = null; byFp = null; dirty = false; loadFailed = false; readErrAt = 0; }

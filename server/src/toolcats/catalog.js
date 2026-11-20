@@ -45,7 +45,7 @@ export const PRESET = Object.freeze([
   {
     id: 'server', label: '서버', icon: '🖥️',
     tools: ['fleet', 'hardware', 'serveranalysis', 'idrac-trend', 'serial-lookup', 'esxi', 'host-hygiene', 'esxitemp', 'roomtemp',
-      'powermap', 'pdu', 'gpu', 'gpu-alloc', 'hba', 'nic-speed', 'nic-models', 'rma', 'bm-storage', 'part-faults', 'disk-bad',
+      'powermap', 'pdu', 'rack', 'gpu', 'gpu-alloc', 'hba', 'nic-speed', 'nic-models', 'rma', 'bm-storage', 'part-faults', 'disk-bad',
       'bm-usage', 'focus-mon', 'corp-usage', 'power-total', 'svc-inventory', 'bm-folders', 'server-info', 'server-cmd'],
   },
   {
@@ -75,7 +75,7 @@ export const PRESET = Object.freeze([
   },
   {
     id: 'report', label: '리포트·점검', icon: '📋',
-    tools: ['daily-health', 'insights', 'insights-hub', 'svc-inventory', 'compliance-report', 'change-history', 'unprotected-vms',
+    tools: ['periodic-report', 'daily-health', 'insights', 'insights-hub', 'svc-inventory', 'compliance-report', 'change-history', 'unprotected-vms',
       'alert-channels', 'davinci-svc', 'svcmon-config', 'vmware-backup', 'backup-summary', 'backup-detail', 'backup-em', 'bareos-summary', 'bareos-detail', 'dir-usage', 'capacity',
       'portal-check'],
   },

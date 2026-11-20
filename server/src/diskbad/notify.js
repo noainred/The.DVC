@@ -13,13 +13,17 @@ import { load as loadMail } from '../mail/settings.js';
 import { resolveRecipients } from '../mail/kinds.js';
 import { loadDiskBadSettings } from './settings.js';
 import { ID_TABLE, COUNTED, classOf, labelOfKey } from './classify.js';
+import { localStamp, DAY_OFFSET_MIN, DEFAULT_DAY_OFFSET_MIN } from '../util/dayKey.js';
 
 export const MAIL_KIND = 'disk-bad';
 const PER_MAIL_MAX = 200;
 let _last = null;
 
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const fmt = (ms) => { const d = new Date(ms); const p = (n) => String(n).padStart(2, '0'); return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())} UTC`; };
+// 받는 사람(한국 운영)이 바로 읽게 포탈 시각(기본 KST)을 먼저, 법인 담당자를 위해 UTC 를 함께 적는다(I-2).
+//   포탈 시각은 공용 util/dayKey.js 하나로(시간대 리터럴을 모듈마다 두지 않는다 — C-03 스윕).
+const ymdhm = (d) => { const p = (n) => String(n).padStart(2, '0'); return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`; };
+const fmt = (ms) => `${localStamp(ms)}${DAY_OFFSET_MIN === DEFAULT_DAY_OFFSET_MIN ? ' KST' : ''} (${ymdhm(new Date(ms))} UTC)`;
 
 /** 메일에 넣을 기록만(세는 분류). */
 export function mailable(records) {
@@ -76,7 +80,8 @@ export async function notifyNewRecords(records, { corpOf = () => null, job = nul
     const m = buildMail(g.corp, g.records);
     // 받는 사람을 명시하면 종류별 참조가 빠지므로(mail/kinds.js) 합친 목록을 준다. 둘 다 없으면 공용 경로가 '받는 사람 없음' 으로 기록한다.
     // eslint-disable-next-line no-await-in-loop
-    const r = await sendPortalMail({ kind: MAIL_KIND, subject: m.subject, html: m.html, text: m.text, ...(to.length ? { to } : {}) });
+    //   반증 2회차 R2-2: 받는 사람을 명시하면 공용 경로가 종류별 참조(cc)를 빼므로 참조도 함께 넘긴다(예전에는 이 메일 종류의 참조가 한 번도 받지 못했다).
+    const r = await sendPortalMail({ kind: MAIL_KIND, subject: m.subject, html: m.html, text: m.text, ...(to.length ? { to, cc: base.ok && Array.isArray(base.cc) ? base.cc : [] } : {}) });
     results.push({ corp: g.corp.id, records: g.records.length, ok: !!r?.ok, reason: r?.reason || '' });
   }
   _last = { at: Date.now(), job: job?.id || null, results };

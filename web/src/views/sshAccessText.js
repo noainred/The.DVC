@@ -60,7 +60,7 @@ export const EVENT_TEXT = Object.freeze({
   // v3.24 서버 접속 — 계층 지정 · 계정 단위 정지
   'assign-set': '계층 지정 바꿈',
   'assign-clear': '계층 지정 지움',
-  'account-stopped': '공통 계정 정지(로그인 거부)',
+  'account-stopped': '공통 계정 정지(로그인 거부 · 판정 시한)',
   'account-resumed': '공통 계정 정지 풀림',
 });
 

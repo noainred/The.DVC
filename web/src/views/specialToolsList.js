@@ -44,6 +44,8 @@ export const TOOLS = [
   // v3.8.0 — iDRAC Lifecycle 로그의 디스크 배드 섹터 계열 기록(PDR46·47·63·64·54·59·57). 조회는 tools 권한 + 범위 계정은 자기 법인만(adminOnly 아님 — 서버 집행과 같다).
   { k: 'disk-bad', icon: '💽', label: '디스크 배드 섹터 분석', desc: '전 법인 서버의 iDRAC Lifecycle 로그에서 디스크 배드 섹터 기록(복구 불가 · PDR54 · PDR59 · PDR57)을 찾아 그 디스크를 아직 쓰는지(시리얼 · 로그 근거와 함께), 국가 · 법인별 · 모델별 빈도 · 월별 추이를 본다 · 전체 / 법인별 / 서버 1대 점검 · 6시간 자동 점검(새 로그만) · 새 기록 메일 · 판정마다 판단 근거와 Dell 문서 출처', aka: ['bad sector', '배드 섹터', '배드섹터', 'PDR46', 'PDR54', 'lifecycle log', 'LC 로그', '디스크 이력', 'media error'] },
   { k: 'serial-lookup', icon: '🔎', label: '시리얼 조회', desc: '등록·수집된 모든 장비의 시리얼을 한 번에 검색 — 서버(iDRAC) 섀시와 부품(PSU·디스크·메모리·NIC) · OME 장비 · ESXi 호스트 · 스토리지 어레이 · SAN 스위치(섀시·PSU·SFP) · 엣지 베어메탈 · 대소문자와 :·- 무시 부분 일치 · CSV 내보내기', adminOnly: true },
+  // 랙 실장도(설계 docs/design/rack-elevation) — 법인 › 데이터센터 › 전산실 › 랙의 U 단위 배치 원장(중앙). 조회는 tools + 법인 범위(adminOnly 아님 — 서버 집행과 같다) · 편집은 관리자만(서버 집행).
+  { k: 'rack', icon: '🗄️', label: '랙 실장도', desc: '데이터센터 › 전산실 › 랙의 U 단위 장비 배치(전면 · 후면) · 서버는 서비스 태그로 iDRAC 정보와 연결(상태 · 부품 · 관리 주소) · 미배치 서버 · 랙 종류(40 · 42 · 45 · 48U) · 관리자 끌어 놓기 편집(겹침 · 범위 검사 · 동시 편집 충돌 감지 · 변경 이력) · 엑셀 실장도 내보내기' },
   { k: 'pdu', icon: '🔌', label: 'PDU 정보', desc: 'APC Rack PDU 2G(rpdu2g) — 전력(kW·누적 kWh·피상·역률) · 뱅크/상별 전류 · 온도·습도. 데이지체인 PDU 대수와 환경 센서 개수를 자동 탐지 · 엣지 현지 수집→중앙 집계 · 수집 주기 중앙 배포 · CSV 일괄 등록/수정 · 전용 시계열 DB', adminOnly: true },
   { k: 'san-switch', icon: '🔗', label: 'SAN 스위치 모니터링', desc: 'Brocade(Fabric OS) FC 스위치·디렉터 전 모델 — 포트별 상태·속도·연결 장비·에러 카운터·SFP 광레벨(Tx/Rx dBm) · 포트 용량(라이선스/사용중/여유, POD 미라이선스 제외) · SSH CLI 또는 REST(FOS 8.2.1+) · 엣지 현지 수집→중앙 집계 · 법인별 필터', adminOnly: true },
   // v2.608 — Arista CloudVision(CVP) 에 등록된 네트워크 스위치를 읽는다(엣지 위임 또는 중앙 직접). adminOnly 아님 — 조회는 tools + 전체 범위.
@@ -56,7 +58,7 @@ export const TOOLS = [
   { k: 'credentials', icon: '🔑', label: '통합 계정 관리', desc: 'RMA 가 엣지 망 안의 서버에 SSH 로 점검·명령을 실행할 때 쓰는 계정을 한 곳에서 관리 — ID/비밀번호 또는 SSH 개인키(+패스프레이즈) 선택 · 봉인 저장(secretVault) · 비밀 값 무반환(지문만) · 법인/대상 호스트 사용 범위 · 변경 시 OTP 재인증 · 사용 감사 · 브로커 1회 전달(엣지 메모리에서만 사용)', adminOnly: true },
   { k: 'rma', icon: '🖥️', label: '원격 명령 실행 (RMA)', desc: '엣지 서버의 별도 프로세스(vmware-portal-rma@인스턴스)가 중앙을 롱폴해 프리셋 명령(서비스 상태/로그/재시작·df·free·ping·traceroute·포트 확인 등)을 실행하고 결과 회신 · 법인당 다중 인스턴스(한 서버 여러 프로세스/여러 서버) · 분배 방식 Active-Active/부하 분산/Active-Backup 선택 · 법인별 서명 비밀번호 · SSH 원격 배포 · 감사로그', adminOnly: true },
   { k: 'server-info', icon: '🧾', label: '서버 정보', desc: '등록된 서버(Linux · Windows)의 OS · 제조사 · 모델 · CPU · 메모리 · 디스크 · 파일시스템을 누를 때만 읽기 전용으로 읽기 — 계정은 설정 › 보안 › 서버 접속(SSH · Windows)이 정한다 · sudo 없음(권한이 필요한 칸은 ‘못 읽음 · 권한’)', adminOnly: true },
-  { k: 'server-cmd', icon: '⌨️', label: '서버 명령 실행', desc: '등록된 서버(Linux · Windows)에 정해 둔 확인 명령(가동 시간 · 디스크 · 프로세스 · 네트워크 · 서비스 상태 · 로그 등 22개)을 누를 때만 돌리고 출력을 보기 — 읽기 전용 · sudo 없음 · 명령 글자를 넣는 칸 없음 · 출력은 저장하지 않음 · 공통 계정 · 키는 ‘서버 명령 실행’ 을 직접 켜야 씀(서버에 따로 정한 비밀번호는 그대로)', adminOnly: true },
+  { k: 'server-cmd', icon: '⌨️', label: '서버 명령 실행', desc: '등록된 서버(Linux · Windows)에 정해 둔 확인 명령(가동 시간 · 디스크 · 프로세스 · 네트워크 · 서비스 상태 · 로그 등 — 목록은 화면이 서버에서 받는다)을 누를 때만 돌리고 출력을 보기 — 읽기 전용 · sudo 없음 · 명령 글자를 넣는 칸 없음 · 출력은 저장하지 않음 · 공통 계정 · 키는 ‘서버 명령 실행’ 을 직접 켜야 씀(서버에 따로 정한 비밀번호는 그대로)', adminOnly: true },
   { k: 'bm-storage', icon: '💽', label: '베어메탈 스토리지', desc: '서버 SSH(df)로 로컬 디스크 마운트 포인트 용량 수집 · 서버/그룹/전체 합산(총·사용·가용) · 사용자 지정 주기 · 엣지 위임(중앙→엣지 PUSH) · SAN 비교(VMAX·PowerMax 용량 사용률·전송 속도 · 법인별 · 장비별 평균/피크 차트) · 비교 세트(SAN 어레이·베어메탈 서버·그룹·법인 합계를 2~4개 섞어 전송 속도·IOPS·응답 시간·바쁨·용량 비교 · 기준 대비 배율)', adminOnly: true },
   { k: 'vm-track', icon: '📈', label: 'VM 수량 추이', desc: 'vCenter별 매일 00시·12시 VM 수 스냅샷(전용 DB) · 전체·단위 vCenter 추이 차트 · 증감 클릭 시 생성·삭제 VM 과 클러스터·호스트·데이터스토어 확인' },
   { k: 'storage-track', icon: '💾', label: '스토리지 사용량 추이', desc: 'vCenter 데이터스토어 용량·사용량·사용률 매일 00시·12시 추이(VM 수량 추이와 같은 스냅샷) · vCenter별 현재/증감 표 · 데이터스토어별 개별 추이(선택 차트 + 기간 증감 상위) · 일평균 증가량과 가용 소진 예상(선형 추정) · 증감 클릭 시 변화 데이터스토어 상세' },
@@ -97,6 +99,7 @@ export const TOOLS = [
   { k: 'dupip', icon: '🔁', label: '중복 IP 찾기', desc: '둘 이상 VM이 같은 IPv4를 쓰는 경우' },
   { k: 'vmtools', icon: '🧩', label: 'VMware Tools 버전', desc: '버전별 집계 + 업그레이드' },
   { k: 'snapshots', icon: '📸', label: '스냅샷 있는 VM', desc: 'vCenter/용량/개수별 정렬' },
+  { k: 'periodic-report', icon: '🗓️', label: '정기 점검 보고', aka: ['정기 보고', '정기 점검', '주간 보고', '월간 보고', '분기 보고', '일일 보고', '점검 보고서'], desc: '일일 · 주간 · 월간 · 분기 — 인프라 · 서비스 · 설비 53개 항목을 이미 저장된 수집 결과로 점검해 보고서를 만들고(정상 · 주의 · 이상 · 확인 불가) 메일 · 알림 채널 · 공지로 보냅니다. 보관함 · 법인별 현황 · 조치 필요 · HTML(PDF 저장) · XLSX · 범위 계정은 자기 법인만' },
   { k: 'daily-health', icon: '📋', label: '일일 헬스체크 리포트', desc: 'vCheck 스타일 아침 점검 — 스냅샷·용량·Tools·연결·인증서 요약 + 매일 지정 시각 웹훅 자동 발송' },
   { k: 'snapshot-age', icon: '⏳', label: '스냅샷 나이 감시', desc: '생성일 기준 오래된 스냅샷 탐지 · 나이/크기 필터 · CSV' },
   { k: 'storage-paths', icon: '🧷', label: '데이터스토어·경로 점검', desc: '데이터스토어 운영(일부 호스트 미마운트·유지보수 모드·씬 오버할당·VMFS 5 이하·SIOC·VM 수) + 호스트별 스토리지 경로(죽은 경로·단일 경로 공유 LUN·경로 정책 분포) + vSAN(분할 의심·디스크 문제·사용률) · CSV', aka: ['multipath', '멀티패스', 'dead path', '죽은 경로', 'PSP', 'SIOC', 'VMFS', '오버할당', 'overcommit', 'vSAN', 'datastore health', '데이터스토어 점검', 'SDRS'] },

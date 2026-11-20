@@ -82,6 +82,8 @@ test('① 명령은 상수 — 서버 이름 · 키 · 주소 · 사유 · 실�
     assert.equal(r.code, 'ok');
     assert.equal(ssh.seen[0].cmd, CMD.SNAPSHOT_COMMAND, '상수 명령');
     for (const s of ['reboot', 'rm -rf', 'nc x', 'sudo', v.reason]) assert.ok(!ssh.seen[0].cmd.includes(s), `명령에 ${s} 없음`);
+    // 점검 1회차 S3: 비밀번호는 한 번만(k-i 재시도 없음 — 계정 잠금 횟수)
+    assert.equal(ssh.seen[0].creds.singlePasswordAttempt, true);
   }
 });
 

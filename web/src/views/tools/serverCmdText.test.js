@@ -44,5 +44,12 @@ describe('서버 명령 실행 — 표시 도우미', () => {
     expect(outHead({ demo: true, os: 'linux', code: 'ok', exit: 0, auth: null })).toBe('데모 서버(접속하지 않음) · Linux · 실행됨 · 끝 코드 0');
     expect(outHead({ via: 'winrm', os: 'windows', code: 'ok', exit: 1, auth: { kind: 'password', account: 'kr-win' } })).toBe('WinRM · 비밀번호 · kr-win · Windows · 실행됨 · 끝 코드 1');
     expect(outHead({ via: 'ssh', os: 'linux', code: 'ok', exit: 0, auth: null })).toBe('SSH · Linux · 실행됨 · 끝 코드 0');
+    // 점검 1회차 W2: 접속 방식이 비거나 인증 종류를 모르면 지어내지 않는다 · 실행 못 한 서버는 전체 복사에서 뺀다
+    expect(outHead({ via: '', os: 'linux', code: 'connect', exit: null, auth: { kind: 'none' } })).toBe('Linux · 접속 실패');
+    expect(copyAllText('x', [{ name: 'a', ran: true, code: 'ok', exit: 0, out: 'o' }, { name: 'b', ran: false, code: 'connect', exit: null, out: '' }])).toBe('### a — x · 끝 코드 0\no');
+    // 점검 1회차 U1: 실행은 됐는데 끝 코드를 못 읽었으면 ‘모름’ 을 밝힌다(시한 · 실패 행은 그대로)
+    expect(resultText({ code: 'ok', ran: true, exit: null })).toBe('실행됨 · 끝 코드 모름');
+    expect(resultText({ code: 'exec-timeout', ran: true, partial: true, exit: null })).toBe(`${CODE_TEXT['exec-timeout']}`);
+    expect(copyAllText('x', [{ name: 'a', ran: true, code: 'ok', exit: null, out: 'o' }])).toBe('### a — x · 끝 코드 모름\no');
   });
 });

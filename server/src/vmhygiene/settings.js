@@ -2,9 +2,11 @@
  * vmhygiene/settings.js — VM 구성 점검·스냅샷 정책 설정(`vm-hygiene.json`, v2.698). 사람이 정하는 **설정** 파일이다
  * (백업 '설정 변경' 감시 대상 · 비밀 없음). 손상이면 보존하고 기본값으로 시작한다(조용한 빈값 금지 — v2.580 규약).
  *
- * 모양: { snapAgeDays, snapCount, snapSizeGB, uptimeDays, exceptions:[문자열], notify:{ enabled, hour } }
+ * 모양: { snapAgeDays, snapCount, snapSizeGB, uptimeDays, exceptions:[문자열], creatorExclude:[계정], notify:{ enabled, hour } }
  *  · 숫자 칸의 빈 값·글자는 **미지정**(이전 값 유지) — `Number('')===0` 이 '0일 넘은 스냅샷 = 전부' 가 되지 않게(v2.583 규약).
  *  · exceptions: VM 이름·메모에 이 글자가 들어 있으면 스냅샷 정책 판정에서 뺀다(뺀 개수는 화면이 밝힌다). 대소문자 무시.
+ *  · creatorExclude(v3.30.4): ‘스냅샷’ 화면 ‘만든 계정’ 에서 뺄 백업 · 자동화 계정(Bareos · Rubrik · Commvault 등 — 포탈이 그 계정을 알 길이 없어 사람이 적는다).
+ *    판정 대상이 아니라 표시에서만 뺀다(Veeam 계정 목록과 따로 — 거기 섞으면 Veeam 스냅샷 판정이 바뀐다). 계정 이름이라 응답은 관리자 판본에만 원문.
  *  · notify: 하루 한 번(한국 시각 hour 시 이후 첫 확인) 스냅샷 정책 위반 요약을 알림 채널로 보낸다. 기본 꺼짐.
  */
 import path from 'node:path';
@@ -17,10 +19,12 @@ import { activeHoldMap, onHoldsChange, holdsUnreadable } from './holds.js';
 
 export const SETTINGS_FILE_NAME = 'vm-hygiene.json';
 const FILE = () => path.join(config.configDir, 'vm-hygiene.json');
-export const DEFAULTS = Object.freeze({ snapAgeDays: 7, snapCount: 3, snapSizeGB: 100, uptimeDays: 365, exceptions: [], notify: { enabled: false, hour: 9 } });
+export const DEFAULTS = Object.freeze({ snapAgeDays: 7, snapCount: 3, snapSizeGB: 100, uptimeDays: 365, exceptions: [], creatorExclude: [], notify: { enabled: false, hour: 9 } });
 export const RANGES = Object.freeze({ snapAgeDays: [1, 3650], snapCount: [1, 100], snapSizeGB: [1, 100_000], uptimeDays: [7, 3650] });
 export const EXCEPTIONS_MAX = 200;
 const EXC_LEN_MAX = 64;
+export const CREATOR_EXCLUDE_MAX = 50;
+const ACCT_LEN_MAX = 128;
 
 let cache = null;
 const isObj = (x) => !!x && typeof x === 'object' && !Array.isArray(x);
@@ -45,12 +49,27 @@ function normExceptions(list) {
   return out;
 }
 
+/** 백업 계정 목록 — 글자만 · 앞뒤 공백 제거 · 제어 문자 · 128자 초과는 버림 · 대소문자 무시 중복 제거 · 50개 상한. 배열이 아니면 null(바꾸지 않음). */
+function normAccounts(list) {
+  if (!Array.isArray(list)) return null;
+  const out = [];
+  for (const raw of list) {
+    if (typeof raw !== 'string') continue;
+    const t = raw.trim();
+    if (!t || t.length > ACCT_LEN_MAX || /[\x00-\x1f\x7f]/.test(t)) continue;   // eslint-disable-line no-control-regex
+    if (!out.some((x) => x.toLowerCase() === t.toLowerCase())) out.push(t);
+    if (out.length >= CREATOR_EXCLUDE_MAX) break;
+  }
+  return out;
+}
+
 /** 패치 적용(순수) — 모르는 키는 버리고, 빈 숫자 칸은 이전 값. */
 export function applyPatch(cur, body = {}) {
   const b = isObj(body) ? body : {};
   const next = { ...cur, notify: { ...cur.notify } };
   for (const k of Object.keys(RANGES)) if (Object.hasOwn(b, k)) next[k] = clampNum(b[k], k, cur[k]);
   if (Object.hasOwn(b, 'exceptions')) { const e = normExceptions(b.exceptions); if (e) next.exceptions = e; }
+  if (Object.hasOwn(b, 'creatorExclude')) { const a = normAccounts(b.creatorExclude); if (a) next.creatorExclude = a; }
   if (isObj(b.notify)) {
     if (typeof b.notify.enabled === 'boolean') next.notify.enabled = b.notify.enabled;
     if (Object.hasOwn(b.notify, 'hour')) {

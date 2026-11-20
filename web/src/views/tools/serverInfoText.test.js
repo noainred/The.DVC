@@ -46,3 +46,23 @@ describe('서버 정보 — 표시 도우미', () => {
     expect(osText('')).toBe('미지정(Linux 로 읽음)');
   });
 });
+
+describe('결과 코드 문구 — 점검 1회차 W6', () => {
+  it('코어 결과 코드(server/src/sshaccess/readServer.js READ_CODES) 전부에 문구가 있다', () => {
+    for (const c of ['ok', 'not-found', 'registry-unreadable', 'edge-delegated', 'disabled', 'not-configured', 'cred', 'auth-rejected', 'same-cred-rejected',
+      'hostkey', 'tls', 'timeout', 'exec-timeout', 'exec-truncated', 'connect', 'no-plan']) expect(CODE_TEXT[c], c).toBeTruthy();
+  });
+});
+
+describe('서버 정보 화면 규약(소스) — 점검 1회차 W4', async () => {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const src = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'ServerInfoTool.jsx'), 'utf8');
+  it('늦게 온 이전 응답은 버린다 · 한 번 본 뒤 실패는 화면을 지우지 않는다 · 진행 중 폴링은 실패 뒤에도 이어진다', () => {
+    expect(src).toMatch(/const my = \+\+loadSeq\.current/);
+    expect(src).toMatch(/if \(hasView\.current\) setLoadErr\(/);
+    expect(src).toMatch(/\[running, tick, load\]/);
+    expect(src).not.toMatch(/\[running, v, load\]/);
+  });
+});

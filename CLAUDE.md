@@ -20,9 +20,10 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
 ## 운영 환경 (성능 설계 시 반드시 고려)
 
 - vCenter: **현재 28개 vCenter(~658 호스트·~5,850 VM), 향후 30+까지 확장 예정**. 글로벌 분산.
-- **법인 1 : 서비스 N · 서비스 1 = vCenter 1 + Bareos 1**(2026-11-13 사용자 정정 '기억해' — 10-30 의 '법인 · vCenter · Bareos 1:1:1' 을 대체): 한 법인(DataCenter)에
-  서비스가 둘 이상일 수 있고 서비스마다 vCenter 1개 · Bareos 1대 → **법인 하나에 vCenter · Bareos 가 여럿**. A 서비스의 Bareos 는 A 서비스의 vCenter 만 백업한다(다른 서비스 · 법인 Bareos 로 섞지 않는다).
-  코드 · 주석의 '1:1:1' · '법인 = vCenter' 는 옛 가정이다 — 법인 묶음 = DataCenter, 백업 실행 단위 = 서비스(vCenter↔Director). 코드 정리 범위는 사용자 결정을 따른다.
+- **법인 1 : 데이터센터 N · 데이터센터 1 : 서비스 N · 서비스 1 = vCenter 1 + Bareos 1**(2026-11-13 정정 '기억해' + 2026-11-20 '규칙을 변경해줘' — 10-30 의 '1:1:1' 을 대체):
+  법인에 데이터센터가 2곳 이상, 데이터센터에 서비스가 여럿 → **데이터센터 하나에 vCenter · 백업이 여럿**. A 서비스의 Bareos 는 A 서비스의 vCenter 만 백업한다(다른 서비스 · 법인 Bareos 로 섞지 않는다).
+  코드 · 주석의 '1:1:1' · '법인 = vCenter' 는 옛 가정이다 — 코드의 `DataCenter`(`datacenter/store.js`)는 **법인 묶음**이고 물리 데이터센터는 랙 실장도 원장(`server/src/rack/`)이 따로 갖는다.
+  백업 실행 단위 = 서비스(vCenter↔Director). 코드 정리 범위는 사용자 결정을 따른다.
 - **백업은 법인 로컬, 통합 로그·현황은 중앙**(2026-11-01 사용자 '기억해줘'): A 법인 안에 vCenter·Veeam B&R·Bareos 가 함께 있다 — 백업 실행·조회·복원·
   설정(SSH)·보관 정리는 **그 법인 쪽(법인 엣지 → 로컬 Director·B&R)** 에서 돌고, 중앙은 결과·로그를 모아 통합해 보여 준다. 설계할 때 Director·B&R 호출이
   VM 수만큼 WAN(800ms+)을 왕복하게 만들지 말 것 — 작업 하나를 법인 쪽에 보내 로컬에서 묶어 돌리고 요약만 올린다(Bareos `ops.js` 작업 표·엣지 대행 v2.824 ·
@@ -65,7 +66,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
 ## 영역별 규칙 문서 — 그 영역을 고치기 전에 해당 파일을 읽을 것
 
 목록·목차는 `docs/rules/README.md`. 서버 모듈별 불변조건은 그 폴더의 CLAUDE.md 에도 있다(자동 로드):
-`server/src/{relaytopo,agent,rma,security,sanswitch,hostaccess,veeam/run,bareos,bareos/install,bareos/manage,servicemap,svcmon,ping,focusmon,bmfolders,sshaccess,serverinfo,winrm,servercmd}/CLAUDE.md`.
+`server/src/{relaytopo,agent,rma,security,sanswitch,hostaccess,veeam/run,bareos,bareos/install,bareos/manage,servicemap,svcmon,ping,focusmon,bmfolders,sshaccess,serverinfo,winrm,servercmd,rack}/CLAUDE.md`.
 
 | 파일 | 다루는 것 · 언제 읽나 |
 |---|---|
@@ -83,7 +84,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
 | `docs/rules/isilon.md` (7항목) | 아이실론 디렉터리 사용량·메일 — server/src/isidu/ · web/src/views/tools/Isidu*·isidu* |
 | `docs/rules/ipam.md` (20항목) | IP 관리(IPMS·대역·스캔·원장·VM DNS) — server/src/{ipam,vmdns}/ · web/src/views/tools/Ipam*·Ipms*·IpScan*·VmDns* |
 | `docs/rules/horizon-curuser.md` (6항목) | Horizon 세션·앱 사용·현재 사용자(Windows) — server/src/{horizon,curuser}/ · web/src/views/tools/Horizon*·CurrentUsers* |
-| `docs/rules/demo.md` (7항목) | 데모(mock) 모드·데모 계정 — server/src/mock/ · auth/demoGuest.js |
+| `docs/rules/demo.md` (8항목) | 데모(mock) 모드·데모 계정 — server/src/mock/ · auth/demoGuest.js |
 | `docs/rules/audits.md` (82항목) | 회차별 점검(감사) 기록 v2.583~v3.30.3(전체 점검 1~135회차 · 새 코드 점검 136~145회차 · 결정 반영 146~151회차 · 전체 소스 점검(Fable) 152~162회차 포함 — 1MB · 통째로 읽지 말고 `grep -n` 으로 해당 절만) — 같은 영역을 다시 점검할 때 — 확정분·남긴 것·작업 방식 교훈 |
 | `docs/rules/focusmon.md` (14항목) | 서버 집중 모니터링 상세 기록(v2.976 반증 · v2.978 CSV · 일괄 시험 · 다시 연결 · v2.979 구간 평균 · v2.981 프로세스 세부 · v2.982 서버 그룹 · v2.983 수집 부하 · v2.992 카드 아래 줄 · v3.11.0 디스크 점검(배드 섹터 프로그램 · sudo 예외 · 묶어 보기) · v3.12.0 더할 지표) — server/src/focusmon/ · central/focusMonEdge.js · agent/focusMonWorker.js |
 | `docs/rules/server-security-history.md` | 서버 보안 감사 조치 기록(2026-09-12 ~ 10-16 — SSRF lookup·큰 본문 게이트·비밀 가림·인증 정지·암호문 재사용·세션·장비 신뢰·관리자 판본) |

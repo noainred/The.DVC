@@ -5,6 +5,7 @@
  *  ③ 공통 계정 새 비밀번호의 저장 전 확인은 **계정 법인**의 사용 중지(긴급 조치)도 본다(접속 때 판정과 같게).
  *  ④ 서버 정보 읽기의 ‘계정 없음’ 문구 — 승인은 있는데 물려받을 지정이 없는 서버에 ‘승인 모두 없음’ 이라 말하지 않는다.
  */
+// main 병합(v3.31~v3.34 '서버 접속 점검 1~4회차'): ① · ④ 는 main 이 같은 결함을 다른 코드(not-configured · no-account)와 문구로 고쳐 걷었다(main 의 시험이 고정) — ② D3 · ③ B3 만 남긴다.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -61,44 +62,6 @@ const byId = (id) => BM.listBmServersRaw().find((x) => x.id === id);
 const save = (s, patch) => { const r = BM.saveBmServer({ id: s.id, name: s.name, host: s.host, port: s.port, mounts: ['/'], ...patch }); assert.equal(r.ok, true, r.reason); return byId(s.id); };
 const resolved = (s) => REFS.withResolvedAuth([byId(s.id)], { feature: 'bm-storage' })[0];
 
-test('① 승인이 효력을 잃은 서버(승인 뒤 OS · 법인 · 주소가 바뀜)는 root + 빈 비밀번호로 붙지 않는다 — 엣지 위임 서버 · 예전 항목은 그대로', async () => {
-  const acc = KS.saveAccount({ name: 'rb1-lin', kind: 'os', corp: 'vcA', os: 'linux', username: 'svc1', password: 'Rb1-pw' }).account;
-  assert.equal(ST.setAssign('vcA', 'linux', { account: acc.id, auth: '' }).ok, true);
-  const s = srv({ name: 'rb1', vcenterId: 'vcA', os: 'linux', addrOnly: true });
-  assert.equal(BM.setBmServerInherit(s.id, { on: true }).ok, true);
-  assert.equal(resolved(s).password, 'Rb1-pw', '승인되면 물려받는다');
-  // OS 를 바꾸면 승인은 효력을 잃는다 — 예전에는 그 뒤 매 주기 root + 빈 비밀번호로 로그인했다(137 A1 은 효력 있는 승인만 막았다)
-  save(s, { os: 'windows' });
-  assert.equal(BM.inheritActive(byId(s.id)), false);
-  const r = resolved(s);
-  assert.equal(r.authErrorCode, 'inherit-stale');
-  assert.equal(r.password, '');
-  const n0 = SSHD.st.seen.length;
-  const c = await collectServer(r);
-  assert.equal(c.ok, false); assert.match(c.error, /빈 비밀번호로 시도하지 않습니다/);
-  assert.equal(SSHD.st.seen.length, n0, '접속 시도 0회');
-  const rr = await RS.readServer(s.id, { feature: 'server-info', plan: { windows: { command: 'hostname', timeoutMs: 5_000 }, linux: { command: 'echo ok', timeoutMs: 5_000 } } });
-  assert.equal(rr.ok, false); assert.equal(SSHD.st.seen.length, n0, '서버 정보도 붙지 않는다');
-  // 법인 · 주소를 바꿔 효력을 잃은 경우도 같다
-  const s2 = srv({ name: 'rb1b', vcenterId: 'vcA', os: 'linux', addrOnly: true });
-  assert.equal(BM.setBmServerInherit(s2.id, { on: true }).ok, true);
-  save(s2, { os: 'linux', vcenterId: 'vcB' });
-  assert.equal(resolved(s2).authErrorCode, 'inherit-stale');
-  // 엣지 위임 서버(agent)는 inherit-stale 이 아니다(엣지는 물려받지 않는다) — 146회차(결정 D2): 비밀번호도 키도 없으면 ‘자격 없음’(예전에는 같은 객체 → 엣지가 root + 빈 비밀번호)
-  const s3 = srv({ name: 'rb1c', vcenterId: 'vcA', os: 'linux', addrOnly: true });
-  assert.equal(BM.setBmServerInherit(s3.id, { on: true }).ok, true);
-  save(s3, { os: 'linux', vcenterId: 'vcA', agent: 'edge1' });
-  const raw3 = byId(s3.id);
-  assert.equal(REFS.withResolvedAuth([raw3], { feature: 'bm-storage' })[0].authErrorCode, 'no-cred');
-  // 예전 항목(승인 없음) — 146회차(결정 D2): 키 · 비밀번호가 없으면 ‘자격 없음’(예전에는 같은 객체 → root + 빈 비밀번호)
-  const legacy = srv({ name: 'rb1-legacy', vcenterId: 'vcA' });
-  assert.equal(REFS.withResolvedAuth([legacy], { feature: 'bm-storage' })[0].authErrorCode, 'no-cred');
-  // 자기 비밀번호가 생기면(따로 정함) 승인은 지워지고 그 비밀번호로
-  const own = save(s2, { password: 'Own-1' });
-  assert.equal(own.inherit, undefined);
-  assert.equal(resolved(s2).password, 'Own-1');
-  ST.setAssign('vcA', 'linux', null);
-});
 
 test('② 잠든 승인은 OTP 없는 되돌리기로 되살지 않는다 — 잠든 동안 확인 없이 저장된 지정의 비밀번호가 가지 않는다 · 다시 승인하면 산다', async () => {
   const A = KS.saveAccount({ name: 'rb2-a', kind: 'os', corp: 'vcA', os: 'linux', username: 'svc-a', password: 'A-pw' }).account;
@@ -114,7 +77,7 @@ test('② 잠든 승인은 OTP 없는 되돌리기로 되살지 않는다 — �
   assert.equal(BM.inheritActive(byId(s.id)), false, '되돌려도 승인은 살아나지 않는다');
   assert.ok(byId(s.id).inherit, '표지는 남는다(화면 ‘승인 대기(…바뀜)’)');
   const r = resolved(s);
-  assert.notEqual(r.password, 'B-pw'); assert.equal(r.authErrorCode, 'inherit-stale');
+  assert.notEqual(r.password, 'B-pw'); assert.equal(r.authErrorCode, 'not-configured');
   const n0 = SSHD.st.seen.length;
   await collectServer(r);
   assert.equal(SSHD.st.seen.length, n0, 'B 의 비밀번호도 빈 비밀번호도 보내지 않는다');
@@ -197,18 +160,3 @@ test('③ 공통 계정 새 비밀번호의 저장 전 확인 — 계정 법인�
   SSHD.st.password = null;
 });
 
-test('④ 서버 정보 읽기 — 승인은 있는데 물려받을 지정이 없는 서버에 ‘승인 모두 없음’ 이라 말하지 않는다(code 는 not-configured 그대로)', async () => {
-  ST.setAssign('vcA', 'linux', null);   // 앞 시험이 남긴 지정과 무관하게
-  const s = srv({ name: 'rb4', vcenterId: 'vcA', os: 'linux', addrOnly: true });
-  assert.equal(BM.setBmServerInherit(s.id, { on: true }).ok, true);
-  const n0 = SSHD.st.seen.length;
-  const rr = await RS.readServer(s.id, { feature: 'server-info', plan: { linux: { command: 'echo ok', timeoutMs: 5_000 } } });
-  assert.equal(rr.code, 'not-configured');
-  assert.doesNotMatch(rr.reason, /승인 모두 없음/);
-  assert.equal(rr.reason, REFS.AUTH_ERROR['no-cred']);
-  assert.equal(SSHD.st.seen.length, n0);
-  // 승인도 자격도 없는 예전 항목은 예전 문구
-  const legacy = srv({ name: 'rb4-legacy', vcenterId: 'vcA', os: 'linux' });
-  const rl = await RS.readServer(legacy.id, { feature: 'server-info', plan: { linux: { command: 'echo ok', timeoutMs: 5_000 } } });
-  assert.equal(rl.code, 'not-configured'); assert.match(rl.reason, /승인 모두 없음/);
-});

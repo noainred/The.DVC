@@ -151,7 +151,11 @@ const LEGACY_ALGOS = (() => {
 })();
 const NO_MATCH = /no matching (key exchange|host key|cipher|MAC|compression)|Handshake failed/i;
 
-function connect({ host, port = 22, username, password, privateKey, passphrase, readyTimeout = SSH_READY_TIMEOUT_MS, signal, trace = null, verbose = false, _legacy = false, singlePasswordAttempt = false }) {
+function connect({ host, port = 22, username, password, privateKey, passphrase, readyTimeout = SSH_READY_TIMEOUT_MS, signal, trace = null, verbose = false, _legacy = false, singlePasswordAttempt = false, onPasswordSent = null }) {
+  // 2회차 보안 B1: 비밀번호(또는 k-i 답)를 **실제로 보냈는가** — 보낸 뒤 시한 · 끊김이면 판정은 서버 쪽에서 끝났을 수 있다(계정 잠금 횟수에 든다).
+  //   호출부(계정 탐침)가 ‘연결 실패(비밀번호 안 감)’ 와 가르게 알린다. 오류를 바꾸지 않는다(호출부 콜백 한 번).
+  let pwSentNoted = false;
+  const notePwSent = () => { if (pwSentNoted) return; pwSentNoted = true; try { onPasswordSent?.(); } catch { /* 알림 실패는 접속을 바꾸지 않는다 */ } };
   const say = (msg, level) => { try { trace?.(msg, level); } catch { /* */ } };
   return new Promise((resolve, reject) => {
     if (signal?.aborted) return reject(new Error('SSH 접속 취소(타임아웃)'));
@@ -178,7 +182,7 @@ function connect({ host, port = 22, username, password, privateKey, passphrase, 
       if (LEGACY_FALLBACK && LEGACY_ALGOS && !_legacy && NO_MATCH.test(e.message || '')) {
         say('알고리즘 협상 실패 → 구형 알고리즘(diffie-hellman-group1-sha1/ssh-dss/aes-cbc 등)까지 열어 1회 재시도합니다.', 'warn');
         try { conn.end(); } catch { /* */ }
-        connect({ host, port, username, password, privateKey, passphrase, readyTimeout, signal, trace, verbose, _legacy: true, singlePasswordAttempt }).then(resolve, reject);
+        connect({ host, port, username, password, privateKey, passphrase, readyTimeout, signal, trace, verbose, _legacy: true, singlePasswordAttempt, onPasswordSent }).then(resolve, reject);
         return;
       }
       reject(e);
@@ -201,6 +205,7 @@ function connect({ host, port = 22, username, password, privateKey, passphrase, 
     // 같은 비밀번호로 모든 프롬프트에 응답한다.
     conn.on('keyboard-interactive', (name, instr, lang, prompts, finish) => {
       say(`keyboard-interactive 프롬프트 ${prompts.length}개 — 같은 비밀번호로 응답`, 'debug');
+      if (password && prompts.length) notePwSent();
       finish(prompts.map(() => password || ''));
     });
     const auth = { host, port, username, readyTimeout, keepaliveInterval: 15000 };
@@ -220,7 +225,7 @@ function connect({ host, port = 22, username, password, privateKey, passphrase, 
         let tried = 0;
         auth.authHandler = (left) => {
           tried += 1;
-          if (tried === 1) return 'password';
+          if (tried === 1) { if (password) notePwSent(); return 'password'; }
           if (tried === 2 && Array.isArray(left) && !left.includes('password') && left.includes('keyboard-interactive')) return 'keyboard-interactive';
           return false;
         };
@@ -247,9 +252,6 @@ function exec(conn, command, rawTimeoutMs = SSH_EXEC_TIMEOUT_MS, opts = {}) {
     conn.exec(command, (err, stream) => {
       if (err) return reject(err);
       let stdout = '', stderr = '', done = false, bytes = 0;
-      // 152회차(재현): 청크마다 toString() 하면 여러 바이트 글자(한글 파일 이름 · 로그 글)가 청크 경계에 걸릴 때 깨진다(U+FFFD — 서버 명령 실행은 이 출력을 사람에게 보인다).
-      //   execStream 과 같이 StringDecoder 로 잇는다(끝까지 오지 않은 조각은 채널이 닫힐 때만 낸다 — 시한 · 상한으로 끊긴 결과에는 붙이지 않는다).
-      const decOut = new StringDecoder('utf8'); const decErr = new StringDecoder('utf8');
       const finish = (fn, arg) => { if (done) return; done = true; clearTimeout(timer); fn(arg); };
       const kill = () => { try { stream.close?.(); } catch { /* */ } try { stream.destroy?.(); } catch { /* */ } };
       // v3.25(서버 접속 반증 F6): `partial: true` 면 시한 · 출력 상한에서 던지지 않고 **받은 만큼** 돌려준다(timedOut · truncated 표지) —
@@ -260,17 +262,29 @@ function exec(conn, command, rawTimeoutMs = SSH_EXEC_TIMEOUT_MS, opts = {}) {
         finish(reject, new Error(`SSH exec 타임아웃(${Math.round(timeoutMs / 1000)}s): ${command}`));
       }, timeoutMs);
       timer.unref?.();
+      // 점검 1회차(2026-11-20) U8: 덩어리마다 toString 하면 덩어리 경계에 걸린 UTF-8 글자(한글 3바이트)가 깨졌다 — 흐름마다 StringDecoder 로 잇는다.
+      const dec = { out: new StringDecoder('utf8'), err: new StringDecoder('utf8') };
       const onChunk = (which) => (d) => {
-        bytes += d.length;
         const cap = opts.partial && Number(opts.maxBytes) > 0 ? Math.min(Number(opts.maxBytes), EXEC_MAX_OUTPUT) : EXEC_MAX_OUTPUT;
-        if (bytes > cap) { kill(); if (opts.partial) return finish(resolve, { command, code: null, stdout, stderr, truncated: true }); return finish(reject, new Error(`SSH exec 출력 상한(${Math.round(cap / 1024)}KB) 초과: ${command}`)); }
-        if (which === 'out') stdout += decOut.write(d); else stderr += decErr.write(d);
+        if (bytes + d.length > cap) {
+          kill();
+          if (opts.partial) {
+            // U7: 상한에 걸린 마지막 덩어리도 상한까지는 싣는다(예전에는 통째로 버려 64KB 상한에 45,056자만 남았다)
+            const room = cap - bytes;
+            if (room > 0) { const part = dec[which].write(d.subarray(0, room)); if (which === 'out') stdout += part; else stderr += part; }
+            bytes = cap;
+            return finish(resolve, { command, code: null, stdout, stderr, truncated: true });
+          }
+          return finish(reject, new Error(`SSH exec 출력 상한(${Math.round(cap / 1024)}KB) 초과: ${command}`));
+        }
+        bytes += d.length;
+        if (which === 'out') stdout += dec.out.write(d); else stderr += dec.err.write(d);
       };
       stream.on('data', onChunk('out'));
       stream.stderr.on('data', onChunk('err'));
       stream.on('error', (e) => finish(reject, e));          // 채널/연결 오류로도 반드시 결말 짓는다
       stream.stderr.on('error', () => { /* stderr 스트림 오류는 비치명 — 무시 */ });
-      stream.on('close', (code) => { if (!done) { stdout += decOut.end(); stderr += decErr.end(); } finish(resolve, { command, code, stdout, stderr }); });
+      stream.on('close', (code) => { if (!done) { stdout += dec.out.end(); stderr += dec.err.end(); } finish(resolve, { command, code, stdout, stderr }); });
     });
   });
 }

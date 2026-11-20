@@ -130,7 +130,7 @@ export async function scanOne(s, { mode = 'incremental', manual = false, invOf =
     const r = await withDeadline(timeout, (signal) => readLclog(s, { cursor, signal, budgetMs: Math.max(30_000, timeout - 60_000), maxEntries: MAX_ENTRIES(), now }), 'Lifecycle 로그 읽기 시한 초과');
     authGuard.clearAuthStop(s.id);
     const log = {
-      order: r.order, total: r.total, read: r.read, undated: r.undated, newestId: r.newest?.entryId || '', newestCreated: r.newest?.created ?? null,
+      order: r.order, total: r.total, read: r.read, undated: r.undated, undatedStorage: r.undatedStorage, newestId: r.newest?.entryId || '', newestCreated: r.newest?.created ?? null,
       oldestRead: r.oldestRead, reachedEnd: r.reachedEnd, foundCursor: r.foundCursor, cursorUsed: r.cursorUsed, stopped: r.stopped,
       cursorCreated: cursor?.created ?? null,
       // 무엇을 읽었는가(진단 — 판정에 쓰지 않는다): 쪽 수 · 걸린 시간 · 기록 ID 구성 · 첫 쪽 크기 · 다음 쪽 링크 · 경로.
@@ -187,11 +187,17 @@ export async function scanServers(servers, { mode = 'incremental', manual = fals
     const batch = buf; buf = [];
     if (!batch.length && !final) return flushing;
     flushing = flushing.then(async () => {
-      let stored = false;
-      try { stored = (await onChunk(batch, { ...stat, final })) !== false; } catch { stored = false; }
+      // onChunk 답: true · undefined = 저장됨, false = 못 함, {stored:false, storedIds} = 묶음 가운데 일부만 저장됨(4회차 I5 — 수만 서버 단위로 센다).
+      let ans = false;
+      try { ans = await onChunk(batch, { ...stat, final }); } catch { ans = false; }
+      const part = ans && typeof ans === 'object' ? ans : null;
+      const stored = part ? part.stored === true : ans !== false;
       const m = {};
       for (const r of batch) { if (pending.has(r)) { if (stored) m[r.id] = pending.get(r); pending.delete(r); } }
-      if (stored) { if (Object.keys(m).length) saveCursors(m); } else stat.unsaved += batch.length;
+      if (stored) { if (Object.keys(m).length) saveCursors(m); } else {
+        const ok = part && Array.isArray(part.storedIds) ? new Set(part.storedIds.map(String)) : null;
+        stat.unsaved += ok ? batch.filter((x) => !ok.has(String(x?.id))).length : batch.length;
+      }
     });
     return flushing;
   };

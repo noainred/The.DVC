@@ -15,9 +15,11 @@
 import { listBmServersRaw, getBmSettings } from './registry.js';
 import { withResolvedAuth, authCredOf, AUTH_ERROR } from '../bmusage/onboard/refs.js'; // 7b: 키 · 공통 계정 참조 해석 · 인증 정지 자격 지문(판정 하나)
 import { gateAccountLogin } from '../sshaccess/accountGate.js';   // v3.24 반증 F2: 같은 공통 계정 비밀번호는 탐침 하나의 결과를 본 뒤에
-import { noteCredOutcome } from '../sshaccess/outcome.js';   // v3.9.0 키 사용 기록 · v3.24 공통 계정 사용 기록 + 계정 단위 정지(로그인 거부)
+import { noteCredOutcome } from '../sshaccess/outcome.js';
+import { wasLoggedIn, markLoggedIn, markPasswordSent } from '../sshaccess/loginMark.js';   // 3회차 F4 · 4회차 R4S-3   // v3.9.0 키 사용 기록 · v3.24 공통 계정 사용 기록 + 계정 단위 정지(로그인 거부)
 import { isAuthFailureText } from '../util/authGuard.js';
-import { collectMany, collectServer } from './collect.js';
+import { collectMany, collectServer, collectDeadlineMs } from './collect.js';
+import { withDeadline } from '../util/deadline.js';   // 4회차 R4S-3: 중앙 수집 장비 시한
 import { enqueueBmstorJob, setBmstorExpireHandler } from './jobs.js';
 import { findCollectorForAgent } from '../central/idracScanPush.js';
 import { resilientFetch } from '../util/resilientFetch.js';
@@ -47,9 +49,10 @@ const stopView = authStopView;   // 127회차: 사본 대신 공용(못 읽음 �
 const isAuthResult = (r) => !!(r && r.ok === false && (r.authFailed === true || isSshAuthError({ message: r.error || '' })));
 
 /** 결과 1건을 반영하며 정지 기록을 갱신한다(성공이면 해제, 자격증명 거부면 정지). */
-function noteAuth(srv, r) {
+function noteAuth(srv, r, { logged = false } = {}) {
   if (!srv) return r;
-  if (r?.ok) { authGuard.clearAuthStop(srv.id); return r; }
+  // 3회차 F4(재현): 로그인은 됐는데 df 가 실패한 결과(Windows · 마운트 없음)도 자격은 맞다 — 정지를 푼다(코어 readServer 와 같은 기준)
+  if (r?.ok || logged) { authGuard.clearAuthStop(srv.id); return r; }
   if (isAuthResult(r)) {
     const rec = authGuard.markAuthStopped(srv.id, srv, r.error || 'SSH 인증 실패');
     console.warn(`[bmstor] ${srv.name || srv.host}: 인증 실패로 주기 수집 정지(${rec.attempts}회) — 비밀번호를 고치면 자동 재개합니다`);
@@ -81,6 +84,15 @@ let lastRunAt = 0;
 let lastRunSummary = null;
 
 export function getBmLatest() { return latest; }
+/** 점검 2회차 C1: 이 서버(서버 단독 비밀번호)의 스토리지 수집 인증 정지 기록 — 코어 readServer 가 접속 전에 본다(같은 틀린 비밀번호를 사람 실행마다 보내지 않게). 없으면 null. */
+export function bmstorAuthStopFor(server) { try { return authGuard.authStopFor(authCredOf(server)); } catch { return null; } }
+/** 점검 2회차 C1: 코어 readServer(사람 실행)가 본 서버 단독 비밀번호 결과를 같은 기록에 — 성공이면 해제 · 접속 단계 거부면 정지(폴러가 다음 주기에 같은 비밀번호를 보내지 않게). */
+export function bmstorNoteManualAuth(server, { ok = false, rejected = false, feature = '' } = {}) {
+  try {
+    if (ok) { authGuard.clearAuthStop(server.id); return; }
+    if (rejected) authGuard.markAuthStopped(server.id, authCredOf(server), `SSH 인증 실패(${String(feature || '사람 실행').slice(0, 32)})`);
+  } catch { /* 기록 실패는 결과를 바꾸지 않는다 */ }
+}
 export function bmPollerStatus() { return { running, lastRunAt, lastRunSummary, intervalMinutes: getBmSettings().intervalMinutes, ioSampleSec: ioSampleSec() }; }
 
 /**
@@ -230,9 +242,12 @@ async function collectViaEdge(agent, servers) {
  * v3.24 반증 F2: 중앙 직접 수집 한 대 — 공통 계정 비밀번호 접속이면 계정 탐침(sshaccess/accountGate)을 지난다.
  *   거부 판정은 접속 단계 표지(authFailed — collect.js 가 isSshAuthError 로 세운다)만 · 보내지 않은 결과는 authErrorCode(사용 기록 · 인증 정지에 들지 않는다).
  */
-/** 146회차(141 결정 D2): 접속 자격(비밀번호 · 키)이 없는 엣지 위임 서버 — 엣지에 보내지 않은 사유(엣지는 물려받지 않는다 · 키 · 공통 계정은 엣지 잡에 싣지 않는다). */
-export const NO_CRED_EDGE_ERROR = '이 엣지 위임 서버에는 접속 자격(비밀번호)이 없어 엣지에 보내지 않았습니다(빈 비밀번호로 시도하지 않습니다) — 베어메탈 스토리지 서버 등록에서 비밀번호를 넣거나, 그 엣지 포탈에 이 서버를 등록해 그 엣지의 키 · 계정으로 읽게 하세요.';
-const gatedCollect = (s) => gateAccountLogin(s, (authed) => collectServer(s, { onLogin: authed }), {   // 146회차: 로그인 직후 탐침 판정(대기 = 로그인 1회)
+const gatedCollect = (s) => gateAccountLogin(s, () => {
+  // 4회차 R4S-3: 장비 시한 안에서(탐침 대기는 시한 밖 — run 안에서 연다) · 시한이면 로그인 · 송신 표시를 잇는다(탐침 판정)
+  let logged = false; let pwSent = false;
+  return withDeadline(collectDeadlineMs(), (signal) => collectServer(s, { signal, onLoggedIn: () => { logged = true; }, onPasswordSent: () => { pwSent = true; } }), '스토리지 수집 시한 초과')
+    .catch((e) => { const o = { ok: false, mounts: [], error: String(e?.message || e).slice(0, 300) }; return logged ? markLoggedIn(o) : pwSent ? markPasswordSent(o) : o; });
+}, {
   feature: 'bm-storage',
   rejected: (r) => r?.authFailed === true,
   stopped: (code) => ({ ok: false, mounts: [], error: AUTH_ERROR[code] || AUTH_ERROR['account-stopped'], authErrorCode: code }),
@@ -253,6 +268,9 @@ export async function bmCollectNow(trigger = 'manual', { demoOnly = false } = {}
     // 정지 사실을 남긴다 — 조용히 빼면 화면이 마지막 값을 지금 값처럼 보여준다.
     let authStopped = 0;
     const servers = trigger === 'manual' ? enabled : enabled.filter((s) => {
+      // 3회차 보안 R3S-1(재현): 공통 계정 비밀번호 서버는 **계정 단위 정지 하나**가 판정한다(accountGate · state.accountStops) — 서버별 정지를 더 보면
+      //   사람이 ‘한 대로 다시 확인’ · ‘정지 풀기’ 로 계정을 풀어도 탐침이었던 그 서버만 ‘비밀번호를 고치면 재개’ 로 계속 빠졌다(비밀번호는 맞다).
+      if (s.credAccountId && s.credVersion != null && !s.keyFingerprint) return true;
       const stop = authGuard.authStopFor(authCredOf(s));
       if (!stop) return true;
       authStopped++;
@@ -274,12 +292,10 @@ export async function bmCollectNow(trigger = 'manual', { demoOnly = false } = {}
     // 7b: 키 · 공통 계정으로 인증하는 서버는 엣지 잡 · 엣지 PUSH 에 싣지 않는다 — 개인키를 법인 밖(중앙 → 엣지)으로 보내지 않고,
     //   빈 비밀번호로 엣지가 시도해 계정을 잠그지 않게. 그 서버는 사유를 남긴다(엣지 포탈에 등록하면 엣지가 자기 키로 읽는다).
     const keyDelegated = [];
-    const noCredDelegated = [];   // 146회차(141 결정 D2): 비밀번호도 키도 없는 엣지 위임 서버 — 잡에 싣지 않는다(엣지가 root + 빈 비밀번호로 붙지 않게)
     for (const s of realServers) {
       const a = String(s.agent || '').trim();
       if (!a) continue;
       if (String(s.keyRef || '').trim() || String(s.credRef || '').trim()) { keyDelegated.push(s); continue; }
-      if (s.authErrorCode) { noCredDelegated.push(s); continue; }
       const map = s.dispatch === 'push' ? pushByAgent : pollByAgent; // 기본 poll(엣지 표준 경로)
       if (!map.has(a)) map.set(a, []);
       map.get(a).push(s);
@@ -294,10 +310,6 @@ export async function bmCollectNow(trigger = 'manual', { demoOnly = false } = {}
       const prev = latest.get(s.id);
       latest.set(s.id, { ...(prev || { mounts: [] }), ok: false, mounts: [], error: 'SSH 키 · 공통 계정 인증 서버는 엣지 위임 잡으로 보내지 않습니다(키는 법인 밖으로 나가지 않음) — 이 서버를 그 엣지 포탈에 등록하세요.', at: Date.now(), agent: s.agent || '' });
     }
-    for (const s of noCredDelegated) {
-      const prev = latest.get(s.id);
-      latest.set(s.id, { ...(prev || { mounts: [] }), ok: false, mounts: [], error: NO_CRED_EDGE_ERROR, authErrorCode: String(s.authErrorCode), at: Date.now(), agent: s.agent || '' });
-    }
     const [centralResults, ...edgeResults] = await Promise.all([
       (async () => [...demoBmResults(demoServers), ...(central.length ? await collectMany(central, { collect: gatedCollect }) : [])])(),
       ...[...pushByAgent.entries()].map(([agent, list]) => collectViaEdge(agent, list)),
@@ -308,7 +320,7 @@ export async function bmCollectNow(trigger = 'manual', { demoOnly = false } = {}
     const ioEntries = [];
     for (const r of [...centralResults, ...edgeResults.flat()]) {
       const srv = srvById.get(r.id);
-      const row = noteAuth(srv ? authCredOf(srv) : srv, { ...r, at, agent: srv?.agent || '' });
+      const row = noteAuth(srv ? authCredOf(srv) : srv, { ...r, at, agent: srv?.agent || '' }, { logged: wasLoggedIn(r) });
       latest.set(r.id, row);
       // v3.9.0: 중앙이 키로 접속한 결과만 적는다(엣지 PUSH 결과는 엣지 키 — 엣지가 자기 기록에 적는다).
       // 자격 해석이 막아 접속하지 않은 키는 적지 않는다(반증 D3 — 접속 0회를 ‘실패한 사용’ 으로 쌓지 않게).

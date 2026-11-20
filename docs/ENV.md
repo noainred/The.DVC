@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **759개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **760개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-11-20)
@@ -55,7 +55,7 @@
 | `WAN_TLS_CA_FILE` | `''` | ✅ | util/resilientFetch.js |
 | `WAN_TLS_INSECURE` | `기본 적용('true' 로 끄기)` | ✅ | util/resilientFetch.js |
 
-## 공통 (239)
+## 공통 (240)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -214,6 +214,7 @@
 | `PORTALCHECK_BUDGET_MS` | `90000` |  | portalcheck/tokenProbe.js |
 | `PORTALCHECK_CONCURRENCY` | `4` |  | portalcheck/tokenProbe.js |
 | `PORTALCHECK_TIMEOUT_MS` | `8000` |  | portalcheck/tokenProbe.js |
+| `RACK_DB` |  |  | rack/db.js |
 | `SERVER_HEADERS_TIMEOUT_MS` | `90000` |  | index.js |
 | `SERVER_KEEPALIVE_MS` | `75000` |  | index.js |
 | `SERVER_REQUEST_TIMEOUT_MS` | `600000` |  | index.js |
@@ -332,7 +333,7 @@
 | `BACKUP_STARTUP_DELAY_MS` | `600000` |  | backup/settings.js |
 | `CONFIG_DIR` |  | ✅ | backup/stagedRestore.js, config.js 외 2 |
 
-## 베어메탈 스토리지 (13)
+## 베어메탈 스토리지 (14)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -349,6 +350,7 @@
 | `BMSTOR_IO_SAMPLE_SEC` |  |  | bmstor/diskstats.js |
 | `BMSTOR_PUSH_TIMEOUT_MS` | `180000` |  | bmstor/poller.js |
 | `BMSTOR_SSH_TIMEOUT_MS` | `15000` |  | bmstor/collect.js |
+| `SSH_EXEC_TIMEOUT_MS` | `60000` |  | bmstor/collect.js, proxy/sshExec.js |
 
 ## 보안 (17)
 
@@ -578,7 +580,7 @@
 | `RMA_TEST_CONCURRENCY` | `4` | ✅ | rma/agent.js |
 | `RMA_TEST_HISTORY_DAYS` | `90` |  | rma/testResults.js |
 
-## 원격 접속(프록시) (31)
+## 원격 접속(프록시) (30)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -607,7 +609,6 @@
 | `REMOTE_WS_MAX_QUEUE_BYTES` | `8388608` |  | proxy/sshGateway.js |
 | `REMOTE_WS_STALL_MS` | `60000` |  | proxy/sshGateway.js |
 | `SSH_EXEC_MAX_OUTPUT` | `4194304` |  | proxy/sshExec.js |
-| `SSH_EXEC_TIMEOUT_MS` | `60000` |  | proxy/sshExec.js |
 | `SSH_LEGACY_FALLBACK` | `기본 적용('0' 로 끄기)` | ✅ | proxy/sshExec.js |
 | `SSH_PAGER_MAX_PAGES` | `400` |  | proxy/sshExec.js |
 | `SSH_PTY_COLS` | `1000` |  | proxy/sshExec.js |
@@ -948,4 +949,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 759
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 760

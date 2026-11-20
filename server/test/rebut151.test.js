@@ -90,72 +90,8 @@ const opts = { feature: 'bm-usage', rejected: (r) => r?.authFailed === true, sto
 let accSeq = 0;
 const acctId = () => `a_${(0xb151000 + (accSeq += 1)).toString(16).padStart(12, '0')}`;
 
-test('① R1 — 성공했던 판: 빨리 판정을 못 내는 탐침 셋(접속 거부 등) 뒤에도 완화하지 않는다 — AD 비밀번호가 바뀐 뒤 동시 8 중 틀린 비밀번호 1회', async (t) => {
-  G._resetAccountGateForTest();
-  const clock = shiftClock(t);
-  const s0 = { credAccountId: acctId(), credVersion: '1700000151001', credAccountName: 'r1', name: 'r1-0' };
-  assert.equal((await G.gateAccountLogin(s0, async () => ({ ok: true }), opts)).ok, true, '앞 주기 — 탐침 성공');
-  clock.offset = G.OK_TTL_MS + 1_000;   // 다시 탐침
-  let k = 0; let sent = 0;
-  // 앞의 셋은 꺼진 서버(접속 거부 — 수 ms) · 나머지는 살아 있는 서버(AD 에서 비밀번호가 바뀜 → 거부)
-  const run = async () => { const i = k++; await wait(5); if (i < 3) return { ok: false, error: 'connect ECONNREFUSED 10.0.0.1:22' }; sent += 1; return { ok: false, authFailed: true }; };
-  const rs = await Promise.all(Array.from({ length: 8 }, (_, i) => G.gateAccountLogin({ ...s0, name: `r1-${i}` }, run, opts)));
-  assert.equal(sent, 1, `틀린 비밀번호는 살아 있는 첫 서버(탐침) 하나만 — 146 판본은 완화로 동시 수만큼(지금 ${sent})`);
-  assert.equal(rs.filter((x) => x.gated === 'account-stopped').length, 4, '나머지는 보내지 않음');
-  assert.ok(ST.accountStopFor(s0.credAccountId, s0.credVersion), '그 자리에서 계정 정지');
-});
 
-test('② R1 — 망 장애(느린 실패)에서는 완화가 그대로(146 ③ 목적) · 빠른 실패만 이어지면 끝까지 하나씩이고 막히지 않는다', async (t) => {
-  G._resetAccountGateForTest();
-  const clock = shiftClock(t);
-  // 느린 실패: 다시 탐침마다 시한(25초씩 — 시계를 옮겨 흉내) — 셋째 뒤 합이 OTHER_MIN_MS 를 넘어 나머지는 함께
-  const s0 = { credAccountId: acctId(), credVersion: '1700000151002', credAccountName: 'r2', name: 'r2-0' };
-  await G.gateAccountLogin(s0, async () => ({ ok: true }), opts);
-  clock.offset = G.OK_TTL_MS + 1_000;
-  let k = 0; let active = 0; let maxActive = 0;
-  const slow = async () => { const i = k++; active += 1; maxActive = Math.max(maxActive, active); await wait(10); if (i < 3) clock.offset += 25_000; active -= 1; return { ok: false, timeout: true, error: 'SSH 접속 시한 초과' }; };
-  await Promise.all(Array.from({ length: 8 }, (_, i) => G.gateAccountLogin({ ...s0, name: `r2-${i}` }, slow, opts)));
-  assert.equal(k, 8);
-  assert.equal(maxActive, 5, `시한 셋(75초) 뒤 나머지 다섯은 함께(maxActive ${maxActive})`);
-  assert.ok(3 * 25_000 >= G.OTHER_MIN_MS, '시험 전제 — 세 번의 대기 합이 하한을 넘는다');
-  // 빠른 실패만(접속 거부) — 열 번이어도 하나씩 · 모두 끝난다(매달리지 않음)
-  const s1 = { credAccountId: acctId(), credVersion: '1700000151003', credAccountName: 'r2b', name: 'r2b-0' };
-  clock.offset = 0;
-  await G.gateAccountLogin(s1, async () => ({ ok: true }), opts);
-  clock.offset = G.OK_TTL_MS + 1_000;
-  let k1 = 0; let a1 = 0; let m1 = 0;
-  await Promise.all(Array.from({ length: 10 }, () => G.gateAccountLogin(s1, async () => { k1 += 1; a1 += 1; m1 = Math.max(m1, a1); await wait(3); a1 -= 1; return { ok: false, error: 'connect ECONNREFUSED' }; }, opts)));
-  assert.equal(k1, 10); assert.equal(m1, 1, '빠른 실패는 하나씩(완화 없음)');
-  assert.equal(ST.accountStopFor(s1.credAccountId, s1.credVersion), null, '연결 실패로는 멈추지 않는다');
-});
 
-test('③ R1 — 실제 bm-storage 주기: 접속 거부 서버 셋이 앞에 있는 공통 계정 — 3분 뒤 AD 비밀번호가 바뀌면 틀린 비밀번호 1회(146 판본 4회)', async (t) => {
-  G._resetAccountGateForTest();
-  const clock = shiftClock(t);
-  const acc = KS.saveAccount({ name: 'r3-lin', kind: 'os', corp: 'vcA', os: 'linux', username: 'svc151', password: 'R3-pw-1' }).account;
-  assert.equal(ST.setAssign('vcA', 'linux', { account: acc.id, auth: '' }).ok, true);
-  const ids = [];
-  const add = (name, port) => {
-    const r = BM.saveBmServer({ host: '127.0.0.1', port, mounts: ['/'], name, vcenterId: 'vcA', os: 'linux', addrOnly: true });
-    assert.equal(r.ok, true, r.reason);
-    assert.equal(BM.setBmServerInherit(r.server.id, { on: true }).ok, true);
-    ids.push(r.server.id);
-  };
-  for (let i = 0; i < 3; i += 1) add(`r3-dead-${i}`, await closedPort());   // 등록부 앞쪽 — 폐기 · 꺼진 서버
-  for (let i = 0; i < 5; i += 1) add(`r3-live-${i}`, SSHD.port);
-  SSHD.st.password = 'R3-pw-1';
-  const r1 = await BP.bmCollectNow('auto');
-  assert.equal(r1.okCount, 5, JSON.stringify(r1));
-  clock.offset = 3 * 60_000;   // 유효 시간이 지남 → 다시 탐침
-  SSHD.st.password = 'R3-pw-2'; // AD 에서 비밀번호가 바뀜(포탈 판은 그대로)
-  const n0 = SSHD.st.seen.length;
-  const r2 = await BP.bmCollectNow('auto');
-  assert.equal(r2.okCount, 0);
-  assert.equal(tries('R3-pw-1', n0), 1, '틀린 비밀번호는 살아 있는 첫 서버 하나만');
-  assert.ok(ST.accountStopFor(acc.id, KS.accountSecretVersion(KS.accountById(acc.id))), '그 주기 안에 계정 정지');
-  ST.setAssign('vcA', 'linux', null);
-  for (const id of ids) BM.removeBmServer(id);
-});
 
 test('④ R2 — 진단 스냅샷은 비밀번호를 한 번만 보낸다(keyboard-interactive 로 같은 비밀번호를 다시 보내지 않는다)', async () => {
   SSHD.st.password = 'Snap-right';

@@ -64,12 +64,26 @@ export function clsOfCode(code, refs) {
  * 서버 상세의 판정 띠. 못 읽음 · 일부만 읽음은 판정하지 않는다 — '기록 없음' 은 '발생한 적 없음' 이 아니다.
  * @returns {{tone:string, title:string, lines:string[]}}
  */
+/**
+ * 서버 창 띠(노드까지 보고 — 4회차 반증 F6). 엣지 포탈은 결과를 중앙에서 본다 — 결과가 없는 엣지에서 '점검을 누르면 읽어 옵니다' 라고 한 뒤
+ * 누르면 409 였다. 엣지에도 결과가 있으면(중앙 직결이던 옛 판) 그대로 보인다.
+ */
+export function serverBandFor(view, node, now = Date.now()) {
+  if (!view && node === 'edge') return { tone: 'neutral', title: '이 노드에는 결과가 없습니다 — 결과는 중앙 포탈에서 봅니다', lines: ['엣지 포탈은 중앙이 보낸 점검을 법인 안에서 읽어 올리는 일만 합니다. 이 서버의 배드 섹터 이력 · 판정은 중앙 포탈의 같은 화면에서 보세요.'] };
+  return serverBand(view, now);
+}
+
 export function serverBand(view, now = Date.now()) {
   if (!view) return { tone: 'neutral', title: '아직 조회하지 않았습니다', lines: ['Lifecycle 로그 전체를 읽는 작업이라 탭을 열 때 자동으로 돌지 않습니다. 점검을 누르면 이 서버를 맡은 노드(법인 엣지 또는 중앙)가 읽어 옵니다.'] };
   const cov = view.coverage || {};
   // 구간은 **끊김 없이 본 구간**(continuousSince)으로 말한다 — '지금까지 본 가장 오래된 시각'(coveredFrom)은 사이에 못 본 틈이 있어도 내려간다(반증 3.8.2 #1).
   const from = cov.continuousSince;
-  const span = Number.isFinite(from) ? `${fmtDate(from)} ~ ${fmtDate(now)} (${spanText(from, now)})` : '구간 모름';
+  // 끝은 **마지막으로 읽은 때**(반증 R6 — 오늘로 쓰면 한 달 전에 읽은 결과도 '오늘까지 봤다' 가 됐다).
+  const end = Number.isFinite(cov.lastOkAt) ? cov.lastOkAt : now;
+  const span = Number.isFinite(from) ? `${fmtDate(from)} ~ ${fmtDate(end)} (${spanText(from, end)})` : '구간 모름';
+  // 마지막 점검이 실패했으면 아래 판정은 지난번에 읽은 결과다 — 그렇다고 밝힌다.
+  const staleLine = cov.lastStatus && cov.lastStatus !== 'ok' && Number.isFinite(cov.lastOkAt)
+    ? [`아래는 ${fmtDateTime(cov.lastOkAt)} 에 읽은 결과입니다 — 마지막 점검(${fmtDateTime(cov.lastScanAt)})은 ${cov.lastStatusLabel || '읽기 실패'}.`] : [];
   // 과거 기록 읽기 1단계: 로그 기록이 없는 디스크의 누적 값에 흔적이 있으면 띠가 말한다(날짜는 모른다 — 서버 verdict.js traceOf).
   const traces = Number.isFinite(view.counts?.traces) ? view.counts.traces : 0;
   const traceLine = traces > 0 ? [`로그 기록이 없는 디스크 ${traces}개의 누적 값에 흔적(재할당 · 보류 · 복구 불가)이 있습니다 — 값은 누적이라 언제 생겼는지 모릅니다. 아래 ‘디스크 값’ 표를 보세요.`] : [];
@@ -80,17 +94,18 @@ export function serverBand(view, now = Date.now()) {
   }
   if (view.status === 'records') {
     const c = view.counts || {};
-    return { tone: 'bad', title: `배드 섹터 기록이 있습니다 — ${c.records}건 · 디스크 자리 ${c.slots}곳`, lines: [
-      `아직 사용 중 ${c.inUse} · 교체됨 ${c.replaced} · 판단 불가 ${c.unknown}`, `끊김 없이 본 구간 ${span}`, ...traceLine] };
+    // 위치를 못 읽은 기록은 건수로만 밝힌다(반증 R1 — 자리 단위 '판단 불가' 에 섞였다).
+    return { tone: 'bad', title: `배드 섹터 기록이 있습니다 — ${c.records}건 · 디스크 자리 ${c.slots}곳${c.unplaced ? `(위치를 못 읽은 기록 ${c.unplaced}건 포함)` : ''}`, lines: [
+      `아직 사용 중 ${c.inUse} · 교체됨 ${c.replaced} · 판단 불가 ${c.unknown}`, `끊김 없이 본 구간 ${span}`, ...staleLine, ...traceLine] };
   }
-  if (view.status === 'unwatched') return { tone: unrecTrace ? 'bad' : 'warn', title: '이 방법으로는 볼 수 없는 서버입니다', lines: ['디스크가 RAID 로 묶여 있지 않아(HBA · 패스스루) Patrol Read 가 돌지 않습니다 — ‘기록 없음’ 이 아닙니다.', ...traceLine] };
+  if (view.status === 'unwatched') return { tone: unrecTrace ? 'bad' : 'warn', title: '이 방법으로는 볼 수 없는 서버입니다', lines: ['디스크가 RAID 로 묶여 있지 않아(HBA · 패스스루) Patrol Read 가 돌지 않습니다 — ‘기록 없음’ 이 아닙니다.', ...staleLine, ...traceLine] };
   if (view.status === 'partial') {
     const why = READ_STOP_LABEL[cov.readStop] || '';
-    return { tone: unrecTrace ? 'bad' : 'warn', title: '일부만 읽었습니다 — 읽은 구간에는 기록이 없습니다', lines: [`읽은 구간 ${span}. 다음 점검에서 처음부터 다시 읽습니다.`, ...(why ? [why] : []), ...traceLine] };
+    return { tone: unrecTrace ? 'bad' : 'warn', title: '일부만 읽었습니다 — 읽은 구간에는 기록이 없습니다', lines: [`읽은 구간 ${span}. 다음 점검에서 처음부터 다시 읽습니다.`, ...(why ? [why] : []), ...staleLine, ...traceLine] };
   }
   if (traces > 0) {
     return { tone: unrecTrace ? 'bad' : 'warn', title: `남은 로그에는 기록이 없지만, 디스크 값에 흔적이 있는 디스크가 ${traces}개 있습니다`, lines: [...traceLine,
-      `끊김 없이 본 구간 ${span} — 로그의 ‘기록 없음’ 은 이 구간에서만의 말입니다.`] };
+      `끊김 없이 본 구간 ${span} — 로그의 ‘기록 없음’ 은 이 구간에서만의 말입니다.`, ...staleLine] };
   }
   // v3.8.2: iDRAC 가 이 경로로 주는 것은 활성 로그로 보인다(Dell 안내서 검색 요약 + 실제 서버 1대) — 그 이전 기록이 '없다' 가 아니라 '여기서는 안 보인다' 이다.
   //   '며칠치뿐' 은 **활성 로그가 담은 기간**(서버 summary.logSpanOf — 시간이 지나도 늘지 않는다)으로 말하고, 기준 일수는 서버가 준 값을 쓴다(전 법인 경고와 같은 값).
@@ -98,7 +113,7 @@ export function serverBand(view, now = Date.now()) {
   const limitDays = Number.isFinite(cov.shortLogDays) ? cov.shortLogDays : 30;
   const short = Number.isFinite(spanMs) && spanMs < limitDays * 86_400_000;
   return { tone: short ? 'warn' : 'neutral', title: short ? `기록은 없지만, iDRAC 가 보여 주는 로그가 ${spanText(0, spanMs)}치뿐입니다` : '남아 있는 로그에는 배드 섹터 기록이 없습니다',
-    lines: [`끊김 없이 본 구간 ${span} · 그 이전 기록은 iDRAC 가 보여 주는 로그에 없어 확인하지 못했습니다(보관 로그로 넘어갔을 수 있고, 이 기능은 아직 보관 로그를 읽지 않습니다). ‘발생한 적 없음’ 이 아니라 ‘이 구간에 기록 없음’ 입니다.`] };
+    lines: [`끊김 없이 본 구간 ${span} · 그 이전 기록은 iDRAC 가 보여 주는 로그에 없어 확인하지 못했습니다(보관 로그로 넘어갔을 수 있고, 이 기능은 아직 보관 로그를 읽지 않습니다). ‘발생한 적 없음’ 이 아니라 ‘이 구간에 기록 없음’ 입니다.`, ...staleLine] };
 }
 
 /** 끝까지 못 읽은 이유(서버 db.js read_stop). 모르는 값은 말하지 않는다. */
@@ -109,6 +124,7 @@ export const READ_STOP_LABEL = Object.freeze({
   capped: '배드 섹터 계열 기록이 한 번에 5,000건을 넘어 가장 새 것만 남겼습니다 — 그보다 오래된 구간은 본 것으로 치지 않습니다.',
   short: 'iDRAC 가 알려 준 건수보다 먼저 빈 쪽을 줘서 도중에 멈췄습니다 — 그 아래 구간은 읽지 못했습니다.',
   empty: 'iDRAC 가 로그 항목을 하나도 주지 않았습니다 — 로그가 비었거나 이 장비의 응답 모양이 달라 읽지 못한 것입니다.',
+  error: 'iDRAC 가 도중에 오류(바쁨 429 · 내부 오류 5xx)로 답해 멈췄습니다 — 그 아래 구간은 읽지 못했습니다. 다음 점검에서 다시 읽습니다.',
 });
 
 /**
@@ -124,6 +140,8 @@ export function diagInfo(diag) {
   if (Number.isFinite(diag.oldest)) lines.push(`읽은 로그의 범위: ${fmtDateTime(diag.oldest)} ~ ${fmtDateTime(diag.newest)} (${spanText(diag.oldest, Number.isFinite(diag.newest) ? diag.newest : diag.at)})${diag.oldestCode ? ` · 가장 오래된 항목 ${diag.oldestCode}` : ''}`);
   const top = Array.isArray(diag.top) ? diag.top.filter((x) => x && x.code) : [];
   if (top.length) lines.push(`많이 나온 기록 ID: ${top.map((x) => `${x.code} ${n(x.n)}`).join(' · ')}${Number.isFinite(diag.distinct) && diag.distinct > top.length ? ` · 그 밖 ${n(diag.distinct - top.length)}종` : ''}`);
+  // 시각을 못 읽은 항목(2000년 전 · 형식 오류)은 순서 · 구간 · 판정에 쓰지 않는다 — 저장 계열이 있으면 그 수를 밝힌다(못 읽음은 따로 센다).
+  if (Number.isFinite(diag.undated) && diag.undated > 0) lines.push(`시각을 못 읽은 항목 ${n(diag.undated)}건${Number.isFinite(diag.undatedStorage) && diag.undatedStorage > 0 ? ` — 그중 디스크 · 가상 디스크 기록 ${n(diag.undatedStorage)}건은 날짜를 몰라 판정에 넣지 못했습니다` : ''}`);
   let warn = '';
   if (Number.isFinite(diag.loginShare) && diag.loginShare >= 0.5) {
     warn = `읽은 로그의 ${Math.floor(diag.loginShare * 100)}% 이상이 로그인 계열로 보이는 기록(${(diag.loginCodes || []).join(' · ')})${diag.repeatCode ? `과 그 반복 표시(${diag.repeatCode})` : ''}입니다 — 위 ‘많이 나온 기록 ID’ 로 직접 확인할 수 있습니다. 이런 기록이 로그를 채우면 그 이전의 디스크 기록은 보관 로그로 넘어갔을 수 있습니다.`;
@@ -180,8 +198,10 @@ export const valCell = (v) => (Number.isFinite(v) ? v.toLocaleString('ko-KR') : 
 export function sourceRows(cov) {
   if (!cov) return [];
   const d = cov.diag || null;
-  const lcFrom = Number.isFinite(d?.oldest) ? d.oldest : cov.continuousSince;
-  const lcTo = Number.isFinite(d?.newest) ? d.newest : cov.lastOkAt;
+  // 본 기간 = 끊김 없이 본 구간 ~ 마지막으로 읽은 때(반증 R7 — 읽기 진단의 범위는 '처음부터 읽은 점검' 때 것이라 이어 읽기가 쌓여도 첫 점검 날짜에 멈췄다).
+  //   그 값이 없을 때만 읽기 진단의 범위를 쓴다.
+  const lcFrom = Number.isFinite(cov.continuousSince) ? cov.continuousSince : (Number.isFinite(d?.oldest) ? d.oldest : null);
+  const lcTo = Number.isFinite(cov.continuousSince) && Number.isFinite(cov.lastOkAt) ? cov.lastOkAt : (Number.isFinite(d?.newest) ? d.newest : cov.lastOkAt);
   const rangeOf = (a, b) => (Number.isFinite(a) && Number.isFinite(b) ? `${fmtDate(a)} ~ ${fmtDate(b)} (${spanText(a, b)})` : '—');
   const s = cov.sel || {};
   const v = cov.vals || {};
@@ -192,7 +212,8 @@ export function sourceRows(cov) {
   return [
     { key: 'lclog', name: '활성 Lifecycle 로그', what: '배드 섹터 계열 기록', range: rangeOf(lcFrom, lcTo), rangeSort: Number.isFinite(lcFrom) ? lcFrom : null,
       count: Number.isFinite(cov.logTotal) ? `${num(cov.logTotal)}건` : '—', status: cov.lastOkAt ? 'ok' : 'error', statusLabel: cov.lastOkAt ? '읽음' : (cov.lastStatusLabel || '읽기 실패'),
-      at: cov.lastOkAt ?? null, note: '' },
+      at: cov.lastOkAt ?? null,
+      note: cov.lastStatus && cov.lastStatus !== 'ok' && Number.isFinite(cov.lastOkAt) ? `마지막 점검(${fmtDateTime(cov.lastScanAt)})은 ${cov.lastStatusLabel || '읽기 실패'} — ${fmtDateTime(cov.lastOkAt)} 에 읽은 것을 보입니다.` : '' },
     { key: 'sel', name: '시스템 이벤트 로그(SEL)', what: '디스크 탈거 · 장착 · 고장 시각', range: rangeOf(s.range?.oldest, s.range?.newest), rangeSort: Number.isFinite(s.range?.oldest) ? s.range.oldest : null,
       count: Number.isFinite(s.read) ? `${num(s.read)}건 · 디스크 항목 ${num(s.events)}건` : '—', status: s.status || 'never', statusLabel: s.label || '아직 읽지 않음', at: s.at ?? null,
       note: [selKept, stale(s)].filter(Boolean).join(' ') },
@@ -227,6 +248,67 @@ export function pastCoverageText(T) {
 /** 시스템 이벤트 로그 항목 종류(서버 sel.js SEL_KINDS). */
 export const SEL_KIND_LABEL = Object.freeze({ removed: '빠짐', installed: '장착', fault: '고장', predictive: '고장 예측', other: '그 밖' });
 export function selKindTone(k) { return k === 'fault' ? 'red' : k === 'predictive' ? 'blue' : k === 'removed' ? 'amber' : 'gray'; }
+
+/**
+ * 마지막 새 기록 메일(서버 notify.js diskBadMailInfo — 관리자 응답에만 온다). 없으면 null.
+ * @returns {{ok:boolean, text:string}|null}
+ */
+export function mailInfoText(m) {
+  if (!m || typeof m !== 'object' || !Number.isFinite(m.at)) return null;
+  if (m.skipped === 'off') return { ok: true, text: `새 기록 메일 꺼짐 — 마지막 판단 ${fmtDateTime(m.at)}` };
+  if (m.skipped === 'demo') return { ok: true, text: `데모 모드라 메일을 보내지 않았습니다(${fmtDateTime(m.at)})` };
+  const res = Array.isArray(m.results) ? m.results : [];
+  const ok = res.filter((x) => x && x.ok).length;
+  const bad = res.filter((x) => x && !x.ok);
+  return { ok: !bad.length, text: `마지막 새 기록 메일 ${fmtDateTime(m.at)} — ${ok}/${res.length}통 보냄${bad.length ? ` · 못 보낸 이유: ${[...new Set(bad.map((x) => x.reason || '알 수 없음'))].join(' · ').slice(0, 200)}` : ''}` };
+}
+
+/**
+ * 법인 담당자 저장 결과 문구(반증 3회차 D3). 서버 보고(corpReport)와 화면이 못 읽은 줄 수를 합쳐 말한다 — 버린 것이 없으면 '저장했습니다.'
+ */
+/**
+ * 엣지 포탈 띠의 '마지막 작업' 한 줄(4회차 반증 F2). 서버 `diskBadEdgeStatus()` 는 {configured, agent, busy, last:{at, ok, idle, error}} —
+ * 값은 `last` 아래에 있다(전에는 edge.at 을 읽어 늘 '—' 였고 오류를 보이지 못했다).
+ */
+export function edgeLastText(edge) {
+  const last = edge && typeof edge === 'object' ? edge.last : null;
+  const at = last && Number.isFinite(last.at) ? fmtDateTime(last.at) : '—';
+  const tail = last?.error ? ` · ${String(last.error).slice(0, 160)}` : (edge?.busy ? ' · 읽는 중' : (last?.idle ? ' · 대기 중' : ''));
+  const off = edge && edge.configured === false ? ' · 중앙 주소 · 토큰이 설정되지 않았습니다' : '';
+  return `마지막 작업: ${at}${tail}${off}`;
+}
+
+/**
+ * 서버 탭 행의 판정 배지(4회차 반증 F9 — 행은 초록 '기록 없음' 인데 서버 창 띠는 빨강 '디스크 값에 흔적' 이었다). 띠와 같은 기준:
+ * 로그 기록이 없고 흔적이 있으면 주황, 그 가운데 복구 불가 흔적이 있으면 빨강.
+ * @returns {{tone:string, label:string, note:string}}
+ */
+export function serverRowBadge(s) {
+  const st = s?.status;
+  const base = st === 'records' ? 'red' : st === 'unread' ? 'gray' : st === 'clean' ? 'green' : 'amber';
+  const traces = Number.isFinite(s?.traces) ? s.traces : 0;
+  const unrec = Number.isFinite(s?.traceUnrec) ? s.traceUnrec : 0;
+  if (traces > 0 && st !== 'records') {
+    const tone = unrec > 0 ? 'red' : (base === 'green' ? 'amber' : base);
+    return { tone, label: s?.statusLabel || st || '', note: `디스크 값 흔적 ${traces}개${unrec > 0 ? `(복구 불가 ${unrec})` : ''}` };
+  }
+  return { tone: base, label: s?.statusLabel || st || '', note: '' };
+}
+
+export function corpSaveText(rep, badLines = 0) {
+  const parts = [];
+  if (badLines > 0) parts.push(`‘id=메일’ 꼴이 아닌 ${badLines}줄은 읽지 않았습니다`);
+  // 법인 이름으로 적은 키는 서버가 그 법인 id 로 바꿔 저장했다(3회차 화면 확인 — 이름을 적으면 메일이 가지 않았다).
+  if (rep && Array.isArray(rep.renamed) && rep.renamed.length) parts.push(`법인 이름을 id 로 바꿔 저장: ${rep.renamed.slice(0, 5).map((r) => `${r.from} → ${r.to}`).join(', ')}${rep.renamed.length > 5 ? ` 외 ${rep.renamed.length - 5}건` : ''}`);
+  if (rep && Array.isArray(rep.droppedCorps) && rep.droppedCorps.length) parts.push(`올바른 메일이 없어 뺀 법인: ${rep.droppedCorps.slice(0, 5).join(', ')}${rep.droppedCorps.length > 5 ? ` 외 ${rep.droppedCorps.length - 5}곳` : ''}`);
+  if (rep && Number.isFinite(rep.droppedEmails) && rep.droppedEmails > 0) parts.push(`메일 주소로 읽지 못한 값 ${rep.droppedEmails}개를 뺐습니다`);
+  // 4회차 반증 F8: 중복 · 상한으로 빠진 **올바른** 주소 · 법인을 따로 말한다(상한 값은 서버가 준다 — 화면에 박지 않는다).
+  if (rep && Number.isFinite(rep.dupEmails) && rep.dupEmails > 0) parts.push(`겹친 주소 ${rep.dupEmails}개는 하나로 남겼습니다`);
+  if (rep && Number.isFinite(rep.overEmails) && rep.overEmails > 0) parts.push(`법인당 ${Number.isFinite(rep.toMax) ? `${rep.toMax}개` : '상한'}를 넘는 주소 ${rep.overEmails}개는 저장하지 않았습니다`);
+  if (rep && Number.isFinite(rep.overCorpsTotal) && rep.overCorpsTotal > 0) parts.push(`법인 ${Number.isFinite(rep.corpMax) ? `${rep.corpMax}곳` : '상한'}을 넘는 ${rep.overCorpsTotal}곳은 저장하지 않았습니다${Array.isArray(rep.overCorps) && rep.overCorps.length ? `(${rep.overCorps.slice(0, 3).join(', ')}${rep.overCorpsTotal > 3 ? ' …' : ''})` : ''}`);
+  if (rep && Array.isArray(rep.unknownCorps) && rep.unknownCorps.length) parts.push(`지금 법인(vCenter id) 목록에 없는 키: ${rep.unknownCorps.slice(0, 5).join(', ')} — 이 담당자에게는 메일이 가지 않습니다`);
+  return parts.length ? `저장했습니다 — ${parts.join(' · ')}.` : '저장했습니다.';
+}
 
 export const JOB_STATE_LABEL = Object.freeze({
   queued: '엣지 대기', running: '읽는 중', done: '끝남', failed: '실패', 'not-started': '시작 못 함', 'no-response': '응답 없음', stopped: '중단됨', busy: '다른 점검 진행 중',

@@ -14,6 +14,7 @@
  */
 import { COUNTED, CLS, labelOfKey, matchDrive, driveSlotOf, slotKeyOf } from './classify.js';
 import { redfishPartState } from '../partfault/classify.js';
+import { dayKey } from '../util/dayKey.js';
 import { PART_STATE, PART_STATE_LABEL } from '../partfault/types.js';
 
 /**
@@ -38,12 +39,8 @@ export const VERDICT_LABEL = Object.freeze({ inUse: '아직 사용 중', replace
 export const CONFIDENCE = Object.freeze({ confirmed: 'confirmed', estimated: 'estimated', none: 'none' });
 export const CONFIDENCE_LABEL = Object.freeze({ confirmed: '확정', estimated: '추정', none: '판단 안 함' });
 
-const fmt = (ms) => {
-  if (!Number.isFinite(ms)) return '—';
-  const d = new Date(ms);
-  const p = (n) => String(n).padStart(2, '0');
-  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`;
-};
+// 근거 문장의 날짜는 **포탈 시각**(기본 KST — util/dayKey.js 하나)으로 — UTC 로 적어 같은 행의 날짜 칸(브라우저 시각)과 하루 어긋났다(반증 3회차 D5).
+const fmt = (ms) => (Number.isFinite(ms) ? dayKey(ms) || '—' : '—');
 
 /**
  * 한 자리의 판정.
@@ -61,7 +58,11 @@ export function judgeSlot({ slotKey, records = [], drive = null, serials = [], c
   const evidence = [];
   const out = (verdict, confidence, caveat) => ({ slotKey, label: labelOfKey(slotKey), verdict, confidence, evidence, caveat });
   if (!counted.length) return out(VERDICT.unknown, CONFIDENCE.none, '배드 섹터 기록이 없는 자리입니다.');
-  const first = counted[0]; const last = counted[counted.length - 1];
+  // 판정 기준 시각은 **배드 섹터 기록**으로 잡는다(반증 R2 — 교체 뒤 새 디스크의 고장 예측(PDR16)이 '마지막 기록' 이 되어 옛 디스크의 기록까지
+  //   '아직 사용 중' 으로 뒤집었다). 배드 섹터 기록이 없고 고장 예측만 있을 때만 그것으로 잡는다.
+  const bad = counted.filter((r) => COUNTED.has(r.cls));
+  const basis = bad.length ? bad : counted;
+  const first = basis[0]; const last = basis[basis.length - 1];
   const ids = [...new Set(counted.map((r) => r.code))].join(' · ');
   evidence.push({ text: `기록 ${counted.length}건(${ids}) — ${fmtTime(first.created)} ~ ${fmtTime(last.created)}`, src: 'iDRAC Lifecycle 로그' });
 
@@ -75,10 +76,13 @@ export function judgeSlot({ slotKey, records = [], drive = null, serials = [], c
   const cur = serial ? hist.find((h) => h.serial === serial) : null;
   const seenTo = (h) => (Number.isFinite(h.lastSeen) ? h.lastSeen : h.firstSeen);
   const removals = recs.filter((r) => r.cls === CLS.removed && r.created > last.created);
+  // 반증 R9: 시리얼 이력은 (자리, 시리얼)마다 처음 · 마지막 본 때만 남는다 — 같은 디스크를 뺐다가 다시 꽂으면 그 사이 공백이 사라진다.
+  //   기록 시각에 **다른 시리얼을 실제로 보고 있었다면** 지금 시리얼로 확정하지 않는다(아래 ② 가 판정한다).
+  const otherAtLast = serial ? hist.find((h) => h.serial !== serial && h.firstSeen <= last.created && seenTo(h) >= last.created) : null;
 
   // ① 시리얼로 확정 — 기록 시각에 이미 지금 시리얼을 봤다. 확정은 **마지막으로 본 때까지**다(반증 #17):
   //    그 뒤에 이 자리의 빠짐 기록이 있으면 그 사이에 바꿨을 수 있다 — 판단 불가.
-  if (cur && cur.firstSeen <= last.created) {
+  if (cur && cur.firstSeen <= last.created && !otherAtLast) {
     const pulled = removals.filter((r) => r.created > seenTo(cur));
     if (pulled.length) {
       evidence.push({ text: `이 자리의 시리얼은 ${fmtTime(cur.firstSeen)} ~ ${fmtTime(seenTo(cur))} 에 ${serial} 였습니다`, src: '포탈이 점검 때마다 적어 둔 시리얼 이력' });
@@ -86,7 +90,7 @@ export function judgeSlot({ slotKey, records = [], drive = null, serials = [], c
       return out(VERDICT.unknown, CONFIDENCE.none, '마지막으로 시리얼을 본 뒤에 디스크가 빠졌습니다. 다음 점검의 디스크 목록으로 가립니다.');
     }
     evidence.push({ text: `이 자리의 시리얼은 ${fmtTime(cur.firstSeen)} 부터 ${fmtTime(seenTo(cur))}(마지막 점검)까지 ${serial} 로 같습니다`, src: '포탈이 점검 때마다 적어 둔 시리얼 이력' });
-    const before = counted.filter((r) => r.created < cur.firstSeen).length;
+    const before = basis.filter((r) => r.created < cur.firstSeen).length;
     return out(VERDICT.inUse, CONFIDENCE.confirmed,
       before ? `${fmtTime(cur.firstSeen)} 이전 기록 ${before}건은 시리얼 이력이 없던 때라 이 디스크의 것인지 확정하지 못합니다.` : '');
   }
@@ -159,7 +163,8 @@ export function judgeServer({ records = [], drives = null, serialRows = [], cove
     const drive = driveKnown ? matchDrive(slotKey, drives) : null;
     const v = judgeSlot({ slotKey, records: recs, drive, serials: serialsBySlot.get(slotKey) || [], continuousSince: coverage?.continuousSince ?? null, driveKnown });
     const dv = drive ? valsFor(drive, valsBy, valsTry) : null;
-    if (dv && hasCounterVal(dv)) v.evidence.push({ text: `지금 디스크가 적어 둔 누적 값 — ${valsText(dv)}(언제 생겼는지는 말해 주지 않습니다${dv.stale ? ` · ${fmt(dv.readAt)} 에 읽은 지난 값` : ''})`, src: VALS_SRC_LABEL[dv.src] || '디스크 값' });
+    // 디스크 값 근거는 **판정의 마지막 근거 앞**에 넣는다 — 전 법인 표의 '근거' 칸이 근거의 마지막 줄을 보여 주는데, 뒤에 붙이면 판정 이유 대신 이 줄이 보였다(2회차 화면 확인).
+    if (dv && hasCounterVal(dv)) v.evidence.splice(Math.max(1, v.evidence.length - 1), 0, { text: `지금 디스크가 적어 둔 누적 값 — ${valsText(dv)}(언제 생겼는지는 말해 주지 않습니다${dv.stale ? ` · ${fmt(dv.readAt)} 에 읽은 지난 값` : ''})`, src: VALS_SRC_LABEL[dv.src] || '디스크 값' });
     const byCode = {};
     for (const r of counted) byCode[r.code] = (byCode[r.code] || 0) + 1;
     const unrecoverable = counted.filter((r) => r.cls === CLS.unrecoverable).length;
@@ -172,13 +177,15 @@ export function judgeServer({ records = [], drives = null, serialRows = [], cove
   }
   slots.sort((a, b) => b.last - a.last);
   const badSlots = slots.filter((s) => s.total > 0);
+  // 반증 R1: 위치를 못 읽은 기록(unplaced)은 **건수**로만 센다 — 자리 단위 칸(판단 불가)에 섞지 않는다.
+  const unplacedCounted = unplaced.filter((r) => COUNTED.has(r.cls)).length;
   const counts = {
-    records: badSlots.reduce((a, s) => a + s.total, 0),
+    records: badSlots.reduce((a, s) => a + s.total, 0) + unplacedCounted, unplaced: unplacedCounted,
     traces: null, valsDisks: null, valsUnknown: null,
     slots: badSlots.length,
     inUse: badSlots.filter((s) => s.verdict === VERDICT.inUse).length,
     replaced: badSlots.filter((s) => s.verdict === VERDICT.replaced).length,
-    unknown: badSlots.filter((s) => s.verdict === VERDICT.unknown).length + unplaced.filter((r) => COUNTED.has(r.cls)).length,
+    unknown: badSlots.filter((s) => s.verdict === VERDICT.unknown).length,
     unrecoverable: badSlots.reduce((a, s) => a + s.unrecoverable, 0),
     predictive: slots.reduce((a, s) => a + s.predictive, 0),
   };
@@ -198,7 +205,8 @@ export function judgeServer({ records = [], drives = null, serialRows = [], cove
     counts.alerting = alerting.length;
   } else counts.alerting = null;
   // 디스크 값(과거 기록 읽기 1단계) — 지금 꽂힌 디스크마다 값과 '흔적' 판정. 로그 기록이 있는 자리는 그 판정을 그대로 두고 값만 붙인다.
-  const diskVals = buildDiskVals({ drives: driveKnown ? drives : null, valsBy, valsTry, recSlots: new Set(badSlots.map((s) => s.slotKey)) });
+  // 반증 R8: '교체됨' 자리의 지금 디스크는 그 기록의 디스크가 아니다 — 그 디스크의 값은 따로 판정한다(흔적이면 흔적으로 센다).
+  const diskVals = buildDiskVals({ drives: driveKnown ? drives : null, valsBy, valsTry, recSlots: new Set(badSlots.filter((s) => s.verdict !== VERDICT.replaced).map((s) => s.slotKey)) });
   if (diskVals) {
     // '값을 읽음' 은 재할당 · 보류 · 복구 불가 가운데 하나라도 읽은 디스크(반증 F10 — 가동 시간만은 아니다).
     counts.valsDisks = diskVals.filter((d) => d.valsRead).length;

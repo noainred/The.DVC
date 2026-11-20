@@ -331,7 +331,8 @@ test('#6 끝 다음 쪽이 오류(400)여도 읽은 것을 버리지 않는다 �
   assert.equal(r.read, 170); assert.equal(r.reachedEnd, true); assert.equal(r.entries.length, 1);
   const mid = async (e, p) => { if (skipOf(p) === 100) throw Object.assign(new Error('x'), { status: 500 }); return pager(all, { count: 'page' })(e, p); };
   const m = await L.readLclog({}, { getJson: mid });
-  assert.equal(m.stopped, 'short'); assert.equal(m.reachedEnd, false); assert.equal(m.read, 100);
+  // 2회차 R2-4: 5xx · 429 로 멈춘 것은 '빈 쪽(short)' 이 아니라 '오류(error)' 로 따로 밝힌다(화면 문구가 사실과 맞게).
+  assert.equal(m.stopped, 'error'); assert.equal(m.reachedEnd, false); assert.equal(m.read, 100);
   const auth = async (e, p) => { if (skipOf(p) === 50) throw Object.assign(new Error('x'), { status: 401, authFailed: true }); return pager(all)(e, p); };
   await assert.rejects(L.readLclog({}, { getJson: auth }), (e) => e.status === 401);
   // 건수를 모르는데 Members 없는 답 — 더 있다고 했으면 short.

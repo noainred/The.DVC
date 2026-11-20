@@ -11,6 +11,7 @@
  *  · CSV: `requirePerm('data.csv')`(v2.643) + tools + 범위. 감사 로그.
  * 화면은 폴링하지 않는다(마운트 1회 + 새로고침).
  */
+import { setPeriodicProvider, SYSTEM_REQ } from '../../periodic/providers.js';   // v3.32 정기 점검 보고 공급자
 import { requireRole, requirePerm } from '../../auth/auth.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { logAudit } from '../../audit.js';
@@ -125,6 +126,8 @@ async function recentChanges(allowed, vcenterId, vcName) {
 }
 
 export function registerVmDns(api) {
+  // v3.32 정기 점검 보고 — VM DNS 판정은 화면과 같은 색인 · 분석 하나(시스템 계정 = 전체 범위)를 리더가 공급자로 부른다. 최근 변경은 싣지 않는다(보고서는 판정 수만).
+  setPeriodicProvider('vm-dns', () => { const snap = store.get(); const inp = withIndex(SYSTEM_REQ, snap, ''); return analyzeVmDns({ ...inp, changes: { available: false, recent: [] }, probeState: probeStateFor(inp.allowed) }); });
   api.get('/tools/vm-dns', toolsPerm, async (req, res) => {
     const snap = store.get();
     const vcenterId = qStr(req.query.vcenterId, 128);

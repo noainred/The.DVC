@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **334개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **338개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-11-20)
@@ -223,6 +223,9 @@
 | `peer-trust.json` | 설정 | 장비 SSH 호스트키·TLS 인증서 지문 신뢰 저장소(검토 S-01·S-02) | ✅ | ✅ | ✅ | security/peerTrust.js |
 | `perf-hangs.ndjson` | 로그(NDJSON) | hang(이벤트 루프 정체·화면 장기 로딩) 이벤트를 `perf-hangs.ndjson` 에 남긴다(v2.498). | ✅ |  | ✅ | perf/hangLog.js |
 | `perf-monitor.json` | 설정 | 서버 성능 측정 설정(`perf-monitor.json`, v2.498, 사용자 요청 "설정에 서버 성능 | ✅ | ✅ | ✅ | perf/settings.js |
+| `periodic-report-state.json` | 설정 | 정기 점검 보고의 설정 · 상태 · 틱 · 회차 생성 · 전달 · 재시도 · 미리보기(설계 docs/design/periodic-report §4.4 · §4.5). | ✅ | ✅ | ✅ | periodic/service.js |
+| `periodic-report.json` | 설정 | 정기 점검 보고의 설정 · 상태 · 틱 · 회차 생성 · 전달 · 재시도 · 미리보기(설계 docs/design/periodic-report §4.4 · §4.5). | ✅ | ✅ | ✅ | periodic/service.js |
+| `periodic.db` | DB | 정기 점검 보고 보관 DB. 파일: `<dbDir>/periodic.db`(설계 §4.4). |  |  | ✅ | periodic/db.js |
 | `permissions.json` | 설정 | 역할별 권한 매트릭스 + 도구별 접근 거부 | ✅ | ✅ | ✅ | auth/permissions.js |
 | `ping-monitor.db` | DB | 핑 모니터 응답시간·손실 시계열 |  |  |  | config.js |
 | `ping-settings.json` | 설정 | Ping 모니터 측정 설정(v2.964 · 사용자 요청 "화면에서 주기 설정할 수 있게 · ping 은 중단없이 계속 ping"). | ✅ | ✅ | ✅ | ping/settings.js |
@@ -232,6 +235,7 @@
 | `power-settings.json` | 설정 | 전력 집계 표시 설정 — CONFIG_DIR/power-settings.json. | ✅ | ✅ | ✅ | idrac/powerSettings.js |
 | `provision-runs.json` | 설정 | VM provisioning job engine. Holds deployment jobs in memory and runs them |  |  |  | provision/jobs.js |
 | `provision-saved.json` | 설정 | Saved VM-provisioning jobs — every created job's spec is persisted so it can | ✅ | ✅ | ✅ | provision/saved.js |
+| `rack.db` | DB | 랙 실장도 **원장**(중앙 한 곳 · 2026-11-20 사용자 결정 '원장 위치는 중앙에 한곳'). |  |  | ✅ | rack/db.js |
 | `relay-topology.json` | 설정 | 중계(HAProxy) 토폴로지 정의 | ✅ |  | ✅ | relaytopo/store.js |
 | `relaycheck-settings.json` | 설정 | HAProxy 경로 점검 설정(v2.429, 사용자 요구 '특수기능에 haproxy 설정을 주기적으로 점검해서 알람으로 알려주고 | ✅ | ✅ | ✅ | relaycheck/settings.js |
 | `release-notes.json` | 설정 | Release notes: a built-in changelog (server/src/release-notes.json, shipped | ✅ | ✅ | ✅ | release-notes.js |

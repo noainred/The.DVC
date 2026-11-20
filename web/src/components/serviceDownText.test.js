@@ -112,5 +112,8 @@ describe('30회차 A — 파일을 못 읽음(…Unreadable) 503 은 일시 미�
     expect(serviceDownKind('x', { status: 502, body: { error: 'settingsUnreadable' } })).toBe('gateway');
     expect(serviceDownKind('x', { status: 503, body: { reason: 'busy' } })).toBe('gateway');
     expect(serviceDownKind('x', { status: 503 })).toBe('gateway');
+    // 점검 1회차 W5: kebab 표지(서버 접속 · 서버 정보 · 명령 실행)도 같다
+    for (const code of ['registry-unreadable', 'state-unreadable', 'account-state-unreadable', 'usage-unknown']) expect(serviceDownKind('x', { status: 503, body: { ok: false, code, reason: '…읽지 못했습니다' } })).toBeNull();
+    expect(serviceDownKind('x', { status: 503, body: { code: 'unreadable-x' } })).toBe('gateway');
   });
 });

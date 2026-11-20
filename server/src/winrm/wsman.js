@@ -97,7 +97,8 @@ export function parseCommandId(xml) {
  */
 export function parseReceive(xml) {
   const out = { stdout: [], stderr: [], done: false, exitCode: null };
-  // 이름 뒤 공백은 한 글자(`\s`)만 — `\s+` 는 뒤의 `[^>]{0,300}` 와 겹쳐 공백 k 개마다 300번 되돌아갔다(136회차: 공백 640KB 응답 하나 0.38초 · Receive 마다 반복)
+  // 점검 1회차 R3 · 136회차: `\s+` 와 `[^>]{0,300}` 가 공백을 둘 다 먹어 닫는 태그 없는 큰 응답에서 갈라 보기가 곱으로 늘었다(640KB 에 416ms · 재현) — 공백 하나만 앞에서 본다.
+  //   142회차: 태그 안은 `[^<>]`(‘<’ 를 받으면 시작점이 조밀한 응답에서 다시 느려진다 — 640KB 28~134ms).
   const re = /<(?:[A-Za-z0-9_]+:)?Stream\s([^<>]{0,300})>([A-Za-z0-9+/=\s]{0,1048576})<\/(?:[A-Za-z0-9_]+:)?Stream>/g;
   let m;
   while ((m = re.exec(xml))) {

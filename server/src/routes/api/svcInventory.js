@@ -47,6 +47,7 @@ import { peekMain as bmfPeekMain, peekAssign as bmfPeekAssign, storeRev as bmfSt
 import { placeMember as bmfPlaceMember, sortRules as bmfSortRules, aliasGuardOf as bmfAliasGuardOf } from '../../bmfolders/build.js';
 import { lowSameLen, TAG_MASK_MIN } from '../../util/ruleName.js';
 import { scopeSig } from '../../util/scopeSig.js';
+import { ensureSvcInvDemo } from '../../mock/demo/svcinv.js';   // v3.31.0 데모(mock 전용 · 빈 저장소에만)
 
 const toolsPerm = requirePerm('tools');
 const csvPerm = requirePerm('data.csv');
@@ -491,6 +492,8 @@ const fleetAdmin = (user, snap) => {
 // ───────── 응답 조립 ─────────
 // 읽기 경로는 동결 참조(복사 없음 — 5차 검토 R5: 요청마다 고정 5만 건 깊은 복사 114ms). 쓰기는 mutate* 만.
 function loadState() {
+  // v3.31.0: 데모(mock) 모드 · 비어 있는 저장소에만 한 번 데모 트리 · 규칙 · 고정을 넣는다(키 규칙은 이 파일의 vmKeyOf 를 넘긴다 — 복제 금지).
+  try { ensureSvcInvDemo(store.get?.(), { vmKeyOf }); } catch (e) { console.warn(`[mock] 서비스 인벤토리 데모 실패: ${e?.message || e}`); }
   return { map: peekMap(), pins: peekPins(), rev: storeRev(), err: storeLoadError(), bmRev: bmfRevSafe() };
 }
 /** 물리서버 폴더 저장소 세대(v2.987 — 물리서버 폴더 규칙이 그 배치를 읽는다. 판정 memo · 응답 캐시 열쇠에 넣는다). 손상이면 'x'. */

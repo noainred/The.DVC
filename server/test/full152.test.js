@@ -81,11 +81,12 @@ test('A1 값 검사 — 자동 마운트 자리(/net)는 달리 써도 거절(�
     }
     assert.equal(P.previewOf('ls', { path: v }).linux, undefined, `미리 보기에도 명령이 없다 ${v}`);
   }
-  // 사유는 그 자리를 말한다(글자 종류 사유가 아니다)
-  assert.match(P.checkParam('path', '//net/10.0.0.5').reason, /자동 마운트/);
-  assert.match(P.checkParam('path', '/proc/self/root/net/x').reason, /root · cwd/);
+  // main 병합(v3.31 점검 1 · 2회차가 같은 우회를 다른 방식으로 막았다 — 빈 조각(//) · . 조각은 그 자체로 거절 · /proc 아래는 통째로 거절): 사유 문구는 main 의 것
+  assert.match(P.checkParam('path', '/net/10.0.0.5').reason, /자동 마운트/);
+  assert.equal(P.checkParam('path', '//net/10.0.0.5').ok, false);
+  assert.match(P.checkParam('path', '/proc/self/root/net/x').reason, /\/proc/);
   // 보통 경로 · 비슷한 이름은 그대로 통과(값은 넣은 글자 그대로 — 다듬지 않는다)
-  for (const v of ['/', '/network', '/var/net', '/var//log', '/var/./log', '/netapp', '/proc', '/proc/1', '/proc/self/status', '/proc/sys/net', '/home/root', '/srv/cwd', '/rootfs/proc/root']) {
+  for (const v of ['/', '/network', '/var/net', '/netapp', '/home/root', '/srv/cwd', '/rootfs/proc/root']) {
     const c = P.checkRequest('ls', { path: v });
     assert.equal(c.ok, true, v); assert.equal(c.params.path, v);
   }

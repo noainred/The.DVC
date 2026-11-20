@@ -53,6 +53,7 @@ const CorpUsage = React.lazy(() => import('./tools/CorpUsage.jsx'));
 const SvcInventory = React.lazy(() => import('./tools/SvcInventory.jsx')); // v2.887 서비스 인벤토리
 const BmFolders = React.lazy(() => import('./tools/BmFolders.jsx')); // v2.984 물리서버 폴더
 const PowerTotal = React.lazy(() => import('./tools/PowerTotal.jsx')); // v2.664 전체 소비 전력
+const RackTool = React.lazy(() => import('./tools/RackTool.jsx')); // 랙 실장도(설계 docs/design/rack-elevation)
 const IdracTrend = React.lazy(() => import('./tools/IdracTrendTool.jsx')); // iDRAC 통합 추이(v2.660)     // 법인별 서버 사용량(v2.625)
 const LinkCheck = React.lazy(() => import('./tools/LinkCheck.jsx'));     // 통신 점검(중앙↔엣지·vCenter, v2.552)
 const PortalCheck = React.lazy(() => import('./tools/PortalCheck.jsx')); // 포탈 점검 › 토큰 점검(v2.560)
@@ -69,6 +70,7 @@ const SanSwitchTool = React.lazy(() => import('./tools/SanSwitchTool.jsx'));
 const SanFlowTool = React.lazy(() => import('./tools/SanFlowTool.jsx'));   // v2.935(C-②) Flow Vision 플로우 모니터
 const SanStorageTool = React.lazy(() => import('./tools/SanStorageTool.jsx'));   // v2.948 SAN 스토리지 성능(독립 도구)
 const PsInspectTool = React.lazy(() => import('./tools/PsInspectTool.jsx'));     // v2.965 PowerScale 장비 점검(독립 도구)
+const PeriodicReport = React.lazy(() => import('./tools/PeriodicReport.jsx'));   // v3.32 정기 점검 보고(일일 · 주간 · 월간 · 분기)
 const CvpTool = React.lazy(() => import('./tools/CvpTool.jsx'));         // Arista CloudVision(v2.608)
 const VmHygieneTool = React.lazy(() => import('./tools/VmHygieneTool.jsx')); // VM 구성 점검(v2.698)
 const HostHygieneTool = React.lazy(() => import('./tools/HostHygieneTool.jsx')); // ESXi 호스트 구성 점검(v2.699)
@@ -643,6 +645,7 @@ function ToolPanel({ tool, onBack, isAdmin, defaultScope = '', cfg = null }) {
       {tool === 'svc-inventory' && <SvcInventory />}
       {tool === 'bm-folders' && <BmFolders />}
       {tool === 'power-total' && <PowerTotal />}
+      {tool === 'rack' && <RackTool />}
       {tool === 'idrac-trend' && <IdracTrend />}
       {tool === 'link-check' && <LinkCheck />}
       {tool === 'portal-check' && <PortalCheck />}
@@ -659,6 +662,7 @@ function ToolPanel({ tool, onBack, isAdmin, defaultScope = '', cfg = null }) {
       {tool === 'san-flow' && <SanFlowTool />}
       {tool === 'san-storage' && <SanStorageTool />}
       {tool === 'ps-inspect' && <PsInspectTool />}
+      {tool === 'periodic-report' && <PeriodicReport />}
       {tool === 'cvp' && <CvpTool />}
       {tool === 'pdu' && <PduTool />}
       {tool === 'rma' && <RemoteCommand />}

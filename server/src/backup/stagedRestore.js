@@ -95,7 +95,7 @@ export const RESTORE_KEEP_CURRENT = new Map([
     'san-storage-report-state.json', 'storage-usage-mail-state.json', 'veeam-license-alert-state.json', 'vm-backup-mail-state.json', 'vm-hygiene-state.json',
   ].map((n) => [n, KEEP_LEDGER]),
   // 예약 실행 회차 · 실행 기록(작업 원장)
-  ...['bareos-rehearsal-state.json', 'storage-inspect-state.json', 'xfer-speed-schedule-state.json', 'ipscan-agent-state.json',
+  ...['bareos-rehearsal-state.json', 'storage-inspect-state.json', 'xfer-speed-schedule-state.json', 'ipscan-agent-state.json', 'periodic-report-state.json',
     'bareos-install-jobs.json', 'provision-runs.json', 'veeam-backup-runs.json', 'storage-inspect-runs.json', 'ipam-scan-runs.json', 'focusmon-audit.json',
     'upgrade-status.json', 'upgrade-kept-bundles.json', 'upgrade-signature-log.json', 'edge-token-apply-log.json',
   ].map((n) => [n, KEEP_RUN]),
