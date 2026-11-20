@@ -13,15 +13,17 @@ import { load as loadMail } from '../mail/settings.js';
 import { resolveRecipients } from '../mail/kinds.js';
 import { loadDiskBadSettings } from './settings.js';
 import { ID_TABLE, COUNTED, classOf, labelOfKey } from './classify.js';
+import { localStamp, DAY_OFFSET_MIN, DEFAULT_DAY_OFFSET_MIN } from '../util/dayKey.js';
 
 export const MAIL_KIND = 'disk-bad';
 const PER_MAIL_MAX = 200;
 let _last = null;
 
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-// 받는 사람(한국 운영)이 바로 읽게 KST 를 먼저, 법인 담당자를 위해 UTC 를 함께 적는다(I-2).
+// 받는 사람(한국 운영)이 바로 읽게 포탈 시각(기본 KST)을 먼저, 법인 담당자를 위해 UTC 를 함께 적는다(I-2).
+//   포탈 시각은 공용 util/dayKey.js 하나로(시간대 리터럴을 모듈마다 두지 않는다 — C-03 스윕).
 const ymdhm = (d) => { const p = (n) => String(n).padStart(2, '0'); return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`; };
-const fmt = (ms) => `${ymdhm(new Date(ms + 9 * 3_600_000))} KST (${ymdhm(new Date(ms))} UTC)`;
+const fmt = (ms) => `${localStamp(ms)}${DAY_OFFSET_MIN === DEFAULT_DAY_OFFSET_MIN ? ' KST' : ''} (${ymdhm(new Date(ms))} UTC)`;
 
 /** 메일에 넣을 기록만(세는 분류). */
 export function mailable(records) {
