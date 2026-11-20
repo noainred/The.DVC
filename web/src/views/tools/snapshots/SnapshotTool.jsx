@@ -371,7 +371,7 @@ export default function SnapshotTool({ scope = '', initial = null, initialHist =
             {req === 'sel' && <ReqBox text={requestText('고른 VM', selItems, th, { onlyOver: false, whoOf })} onCopied={flash} />}
           </>
         )}
-        <STable className="snp-tbl" minWidth={1180}>
+        <STable className="snp-tbl" minWidth={1120}>
           <thead>
             <tr>
               <th className="nos"><button type="button" className={`snp-ck${allOn ? ' on' : ''}`} aria-pressed={allOn} aria-label="보이는 VM 모두 고르기"

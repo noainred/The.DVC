@@ -54,7 +54,9 @@ test('① directorOf — 벤더별 이름 규칙 · 평평한 이름 · 별칭 �
   // 길이 상한(200자) 뒤는 입력이 100배 길어도 일이 늘지 않아야 한다 — 절대 시간이 아니라 비율로(CPU 에 따라 깨지는 상한 금지 · v2.611 규약)
   const long = D.directorOf('X'.repeat(20_000)); assert.equal(long.group, null);
   const bench = (len, n = 200) => { const inp = 'X'.repeat(len); const t0 = process.hrtime.bigint(); for (let i = 0; i < n; i++) D.directorOf(inp); return Number(process.hrtime.bigint() - t0); };
-  bench(200, 50); const short = bench(200); const huge = bench(20_000);
+  // 두 길이를 번갈아 5번 재고 각자의 최솟값을 비교한다 — 한 번씩만 재면 다른 시험과 함께 도는 동안(6병렬 실측 1회 실패 · 단독 3/3 통과) 한쪽 표본만 느려져 비가 튄다.
+  bench(200, 50); let short = Infinity; let huge = Infinity;
+  for (let k = 0; k < 5; k += 1) { short = Math.min(short, bench(200)); huge = Math.min(huge, bench(20_000)); }
   assert.ok(huge < short * 20 + 2_000_000, `2만 자가 200자의 ${(huge / Math.max(short, 1)).toFixed(1)}배 — 길이 상한이 풀렸다`);
   // 수동 재정의가 이긴다
   assert.deepEqual(D.applyDirectorOverride(D.directorOf('HITACHI HUS VM CL1-A'), { group: 'CL1', note: 'ctl1' }), { vendor: 'other', group: 'CL1', port: '', confidence: 'manual', note: 'ctl1' });
