@@ -157,8 +157,11 @@ test('CEN2604-03: 엣지 bm-usage 보관분은 아는 필드·타입만 담는�
   assert.deepEqual(s.targets[0].license.names, ['a']);
   assert.deepEqual(s.targets[0].missing, ['no-os-cred']);
   assert.equal(s.rows[0].cpu_pct, 12.5);
-  assert.equal(s.rows[0].mem_pct, 'oops'.slice(0, 512)); // 글자는 글자로(원시값) — 숫자로 둔갑시키지 않는다
-  assert.equal(typeof s.rows[0].extra.deep, 'undefined'); // 두 단계 이상 중첩은 버린다
+  // 다음 작업 ⑤(2026-11-19): 행은 아는 열 표(bmusage/publicFields.js LATEST_ROW_SPEC)로 받는다 — 수치 열의 글자는 수로 좁히고 못 읽으면 null(0 으로 둔갑시키지 않는다 ·
+  //   예전 ‘글자는 글자로’ 는 원시값 그대로 두던 계약이었다) · 모르는 열(extra)은 버리고 센다(sanitizeUnknown).
+  assert.equal(s.rows[0].mem_pct, null);
+  assert.equal(s.rows[0].extra, undefined);
+  assert.equal(s.sanitizeUnknown, 1);
   assert.deepEqual(s.counts, { targets: 1, byReason: { 'no-idrac': 2 } });
   assert.equal(s.authStops[0].reason, '');
   assert.deepEqual(s.settings.corps, ['vc1']);

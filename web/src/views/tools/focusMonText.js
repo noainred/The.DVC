@@ -735,6 +735,7 @@ export const WAKE_TEXT = Object.freeze({
   'no-url': { label: 'URL 없음', tone: 'crit', hint: '수집 서버 등록에 URL 이 없습니다.' },
   http: { label: 'HTTP 오류', tone: 'warn' },
   'bad-body': { label: '응답 형식 다름', tone: 'warn', hint: '엣지가 아닌 서버에 닿았을 수 있습니다.' },
+  'too-large': { label: '응답 상한 초과', tone: 'warn', hint: '엣지 응답이 중앙 수신 상한(EDGE_RESPONSE_MAX_BYTES)을 넘었습니다 — 형식 오류가 아니라 크기 문제입니다.' },   // 다음 작업 ⑤(c)
   error: { label: '오류', tone: 'warn' },
 });
 export const WAKE_KEYS = Object.freeze(Object.keys(WAKE_TEXT));

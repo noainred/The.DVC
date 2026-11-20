@@ -270,6 +270,17 @@ export function demoTuningFacts(key, t, cores = 32) {
   };
 }
 /**
+ * 데모 대상 키 → 시나리오(키 정렬 순위 % 9 — 0 은 iDRAC 만). 성능 열 겹침(demoPerfLatestRows)과 표시 경로(demoDisplayTargets — 다음 작업 ④)가
+ *   **이 함수 하나**를 쓴다(화면마다 시나리오가 갈리지 않게). 변경 · 집중 시드(seedDemoOps)는 같은 규칙(정렬 순위 % 9 ≠ 0)을 따로 쓴다(1회 시드 — 이번에 바꾸지 않았다).
+ */
+export function demoScenarioMap(targets = []) {
+  const keys = [...new Set((targets || []).filter(isDemoBmTarget).map((tg) => String(tg.key || '')))].sort();
+  return new Map(keys.map((k, i) => [k, DEMO_PERF_SCENARIOS[i % DEMO_PERF_SCENARIOS.length]]));
+}
+/** 그 시나리오가 OS 열(os_at · 성능 열)을 겹치는가 — demoPerfOverlay 의 첫 줄과 같은 조건. */
+export const demoScenarioShowsOs = (scenario) => DEMO_PERF_SCENARIOS.includes(scenario) && scenario !== 'idrac-only';
+
+/**
  * 최신값 행 → 데모 대상이면 성능 열을 겹친 사본(조회 응답 전용 — DB 에 쓰지 않는다). mock 이 아니면 입력 그대로.
  * 다섯 지표 열(cpu_pct·mem_pct·disk_busy_pct·disk_used_pct·net_pct·hba_*)은 바꾸지 않는다.
  */
@@ -278,14 +289,33 @@ export function demoPerfLatestRows(rows = [], targets = []) {
   const demoTg = (targets || []).filter(isDemoBmTarget);
   if (!demoTg.length) return rows;
   const byKey = new Map(demoTg.map((tg) => [String(tg.key || ''), tg]));
-  const rank = new Map([...byKey.keys()].sort().map((k, i) => [k, i]));
+  const scOf = demoScenarioMap(demoTg);
   return rows.map((r) => {
     const k = String(r?.key ?? '');
     const tg = byKey.get(k);
     if (!tg || r?.ts == null) return r;
-    const sc = DEMO_PERF_SCENARIOS[rank.get(k) % DEMO_PERF_SCENARIOS.length];
-    const o = demoPerfOverlay(tg, r.ts, sc, r);
+    const o = demoPerfOverlay(tg, r.ts, scOf.get(k), r);
     return { ...r, ...o, src: o.src || r.src };
+  });
+}
+
+/**
+ * 다음 작업 ④(2026-11-19 · 10회차 L1 · 9회차 J1): 데모 **표시 경로** 한 규칙 — 성능 열 겹침이 OS 열을 싣는 시나리오(8종)의 데모 대상에
+ *   표지를 싣는다: `demoOs: true` · `pathsShown`(등록 경로 + 'os') · `missingShown`(OS 쪽 누락 사유를 뺀 것 — 그 대상은 iDRAC 경로가 있어 누락은 OS 사유뿐이다 → []).
+ *   KPI(counts — targets.pathCountsOf) · 장비 종류 칩 · 사용률 표 · CSV(웹은 이 값을 그대로 읽는다) · 스냅샷 표지(snapshot/run.js 'demo-target')가 이 표지를 읽는다.
+ *   ⚠⚠ **대상 paths · osHost 는 바꾸지 않는다** — paths 에 os 를 넣으면 스냅샷 · 집중이 데모 대상에 SSH 를 시도한다(데모 대상에는 절대 SSH 하지 않는다).
+ *   ⚠ mock 이 아니면 입력 그대로(실운영 대상에는 이 칸들이 생기지 않는다 — 시험이 고정). 이미 OS 경로가 있는 대상 · iDRAC 만 시나리오는 그대로.
+ *   예전 9회차 J1 은 KPI(counts)만 겹쳐 어긋남을 칩 · 표 · CSV · 스냅샷으로 옮겼을 뿐이라 10회차에 되돌렸다 — 이번에는 모든 표시가 같은 표지를 읽는다.
+ */
+export function demoDisplayTargets(targets = []) {
+  if (!isMockMode() || !Array.isArray(targets) || !targets.length) return targets;
+  const scOf = demoScenarioMap(targets);
+  if (!scOf.size) return targets;
+  return targets.map((tg) => {
+    if (!isDemoBmTarget(tg) || !demoScenarioShowsOs(scOf.get(String(tg.key || '')))) return tg;
+    const paths = Array.isArray(tg.paths) ? tg.paths : [];
+    if (paths.includes('os') || !paths.includes('idrac')) return tg;
+    return { ...tg, demoOs: true, pathsShown: [...paths, 'os'], missingShown: [] };
   });
 }
 

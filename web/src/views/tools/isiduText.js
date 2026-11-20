@@ -405,6 +405,7 @@ export const EDGE_CALL_TEXT = Object.freeze({
   'old-version': '엣지가 2.736 이전 버전입니다 — 엣지를 업그레이드해야 바로 실행·원격 연결 시험이 됩니다.',
   http: '엣지가 오류로 답했습니다.',
   'bad-body': '엣지 응답 형식이 다릅니다(엣지 포탈이 아닌 서버에 닿았을 수 있습니다).',
+  'too-large': '엣지 응답이 메인의 수신 상한(EDGE_RESPONSE_MAX_BYTES)을 넘어 읽기를 멈췄습니다 — 형식 오류가 아니라 크기 문제입니다.',   // 다음 작업 ⑤(c)
   'edge-pull': '엣지가 메인의 설정을 받지 못했습니다 — 엣지 → 메인 통신(CENTRAL_URL·CENTRAL_TOKEN)을 확인하세요.',
   'demo-edge': '데모 엣지입니다 — 데모 모드는 실제 엣지에 접속하지 않습니다(데모 대상은 메인에서만 조사됩니다).',
 });
