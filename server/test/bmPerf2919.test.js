@@ -317,7 +317,8 @@ test('⑦ 중앙 정제 화이트리스트 — 모르는 필드 제거 · 문자
   });
   assert.equal(snap.rows[0].runq_per_core, 1.5, '새 열의 문자열 수치는 수로');
   assert.equal(snap.rows[0].psi_io_full10, null, '빈 값은 null(0 이 아니다)');
-  assert.equal(snap.rows[0].cpu_pct, 'oops', '기존 열 계약(원시값 그대로 — CEN2604-03)은 바꾸지 않는다');
+  // 다음 작업 ⑤(2026-11-19): 기존 열도 아는 열 표(bmusage/publicFields.js LATEST_ROW_SPEC)로 — 수치 열의 글자는 수로 좁히고 못 읽으면 null(예전 원시값 계약 → 바꿈 · 근거는 루트 CLAUDE.md ‘문자열 수치는 수로’).
+  assert.equal(snap.rows[0].cpu_pct, null, '못 읽은 수치는 null(0 도 글자도 아니다)');
   assert.ok(!('detail_json' in snap.rows[0]) && !('tuning_json' in snap.rows[0]), 'JSON 문자열 열은 받지 않는다(perf 객체로 온다)');
   const p = snap.perf[0];
   assert.equal(snap.perf.length, 1); assert.ok(snap.sanitizeDropped >= 1, '버린 원소 수를 밝힌다');

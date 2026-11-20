@@ -129,6 +129,13 @@ const INSTR_STATE = Object.freeze({
   unverified: { label: DIST_STATE.unverified.label, tone: DIST_STATE.unverified.tone, why: DIST_STATE.unverified.why },
 });
 
+/*
+ * 결정 반영 재확인 N1(2026-11-19 사용자): 배포 켜기 · 끄기 · 제외 · 중앙 켜기 · 해제는 엣지 보존 기간을 바꿔 이력을 지울 수 있어 설정 소유자 등급만.
+ *   판정은 서버(GET distribution.canEdit — PUT 게이트와 같은 판정)가 하고 웹은 그 값을 읽는다. 표지가 없는 구버전 응답은 예전처럼 연다(서버가 다시 막는다).
+ */
+export const DIST_OWNER_NOTE = '배포 켜기 · 끄기 · 제외 · 중앙에서 켜기는 엣지의 보존 기간을 바꿔 엣지 이력을 지울 수 있어 **설정 소유 계정만** 바꿀 수 있습니다 — 이 계정은 현황만 봅니다.';
+export const distCanEdit = (dist) => !!dist && dist.canEdit !== false;
+
 /**
  * 엣지 보관분 한 줄의 '중앙에서 켜기' 판단(순수).
  * @param {object} edgeRow  /tools/bm-usage/edges 의 행(enabledOnEdge · snapAt · nodeRole …)

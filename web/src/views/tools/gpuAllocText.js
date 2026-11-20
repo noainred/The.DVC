@@ -50,6 +50,9 @@ export function totalsNote(t) {
   return { note: notes.join(' · '), tone };
 }
 
+/** 결정(76~105 남긴 것 · 2026-11-20) A7: MIG 기반 프로파일 GPU 의 슬롯 · 비고 글자 — 서버 allocTree MIG_SLOTS_TEXT · MIG_NOTE_TEXT 와 같은 말(서버 시험이 대조). */
+export const MIG_SLOTS_TEXT = '슬롯 계산 안 함(MIG)';
+export const MIG_NOTE_TEXT = 'MIG 기반 프로파일 — 한 장에 올릴 수 있는 수가 MIG 구성에 달려 있어 남은 슬롯을 계산하지 않음';
 /** GPU 한 장 → 프로파일·슬롯 글자와 비고(서버 gpuNoteText 와 같은 말). */
 export function gpuTexts(g) {
   if (g.mode === 'vsga') return { prof: 'vSGA', note: 'vSGA — 할당형 아님(합계 제외)', tone: '' };
@@ -57,9 +60,10 @@ export function gpuTexts(g) {
   if (g.mode === 'passthrough') return g.vms.length ? { prof: '패스스루 · 1장 할당', note: '한 장 통째 할당', tone: '' } : { prof: '패스스루 · 미할당', note: '1장 예비 — VM 에 연결 가능', tone: 'free' };
   if (!g.vms.length) return { prof: '비어 있음', note: '모든 프로파일 가능', tone: 'free' };
   const s = g.slots || {};
-  const prof = s.profile ? `${s.profile} · ${s.used}/${s.total ?? '?'} 슬롯` : '여러 프로파일';
+  const prof = s.mig ? `${s.profile} · ${s.used}대 · ${MIG_SLOTS_TEXT}` : s.profile ? `${s.profile} · ${s.used}/${s.total ?? '?'} 슬롯` : '여러 프로파일';
   if (g.allocGB == null) return { prof, note: '프로파일 해석 불가 VM 포함 — 할당·예비 모름', tone: 'warn' };
   if (s.mixed) return { prof, note: '혼합 크기 — 슬롯 계산 안 함', tone: '' };
+  if (s.mig) return { prof, note: MIG_NOTE_TEXT, tone: '' };   // 결정 A7
   if (s.free > 0) return { prof, note: `같은 프로파일 ${s.free}대 더 가능`, tone: 'free' };
   if (s.free === 0) return { prof, note: '슬롯 모두 사용', tone: '' };
   return { prof, note: '', tone: '' };
@@ -343,10 +347,19 @@ export function profileGB(profile) {
   const n = Number(m[1]);
   return Number.isFinite(n) ? (n === 0 ? 0.5 : n) : null;
 }
-/** 프로파일의 GPU 계열(nvidia_l4-12q → l4 · grid_a100-3-40c → a100)과 MIG 여부(가운데 슬라이스 숫자가 있으면). 형식 밖이면 null. */
+/**
+ * 결정(76~105 남긴 것 · 2026-11-20) A7: MIG 기반 프로파일인가(…-<슬라이스>-<GB><시리즈>) — 서버 gpu/vgpuProfile.js vgpuProfileIsMig 와 같은 규칙
+ *   (시험이 같은 입력으로 대조). 서버 allocTree 는 MIG 꼴이면 슬롯 수를 null(slots.mig) 로 둔다.
+ */
+export function profileIsMig(profile) {
+  const s = String(profile ?? '').trim();
+  if (!s || s.length > 128) return false;
+  return /-\d{1,2}-\d{1,3}[a-z]{1,2}\d?$/i.test(s);
+}
+/** 프로파일의 GPU 계열(nvidia_l4-12q → l4 · grid_a100-3-40c → a100)과 MIG 여부(profileIsMig — 판정 하나). 형식 밖이면 null. */
 export function profileFamily(profile) {
-  const m = /^[a-z0-9]+_([a-z0-9]+)-(?:(\d{1,2})-)?\d{1,3}[a-z]{1,2}$/i.exec(String(profile ?? '').trim());
-  return m ? { family: m[1].toLowerCase(), mig: m[2] != null } : null;
+  const m = /^[a-z0-9]+_([a-z0-9]+)-(?:\d{1,2}-)?\d{1,3}[a-z]{1,2}$/i.exec(String(profile ?? '').trim());
+  return m ? { family: m[1].toLowerCase(), mig: profileIsMig(profile) } : null;
 }
 /** GPU 모델 이름이 그 계열인가 — 낱말 단위(L4 가 L40S 에 맞지 않게). 'NVIDIA A100 80GB PCIe' · 'GA102GL [A40]' 모두 낱말로 자른다. */
 export const modelHasFamily = (model, family) => !!family && String(model || '').toLowerCase().split(/[^a-z0-9]+/).includes(family);
@@ -365,12 +378,13 @@ export function profileOptions(tree, vcSel = null) {
  *   뺀다: 끊긴 호스트 · 유지보수 모드 호스트(v2.951 — 수집기가 connectionState 'MAINTENANCE' 로 싣는다 · 그 호스트엔 VM 을 켤 수 없다) ·
  *   배치 정보 없는 GPU(모름) · 혼합 크기 · 다른 프로파일 GPU · 패스스루 · vSGA · 용량 모름.
  *   MIG 프로파일은 빈 GPU 의 장 수가 MIG 구성에 달려 있어 '추정' 으로 표시한다.
- * @returns {{ per: number|null, mig: boolean, family: string|null, rows: object[], same: number, empty: number, skipped: object }}
+ *   결정 A7(2026-11-20): MIG 기반 프로파일 GPU 는 서버가 남은 슬롯을 null(slots.mig)로 둔다 — skipped.migSlots 로 세고, 같은 프로파일 수(same)는 null(모름).
+ * @returns {{ per: number|null, mig: boolean, family: string|null, rows: object[], same: (number|null), empty: number, skipped: object }}
  */
 export function placementCandidates(tree, profile, vcSel = null) {
   const per = profileGB(profile);
   const fam = profileFamily(profile);
-  const out = { per, mig: !!fam?.mig, family: fam?.family || null, rows: [], same: 0, empty: 0, skipped: { down: 0, maint: 0, noPlacement: 0, mixed: 0, otherProfile: 0, capUnknown: 0, small: 0 } };
+  const out = { per, mig: !!fam?.mig, family: fam?.family || null, rows: [], same: 0, empty: 0, skipped: { down: 0, maint: 0, noPlacement: 0, mixed: 0, otherProfile: 0, capUnknown: 0, small: 0, migSlots: 0 } };
   if (per == null || !fam) return out;
   for (const vc of pickVcenters(tree, vcSel)) for (const dc of vc.datacenters) for (const cl of dc.clusters) for (const h of cl.hosts) {
     const down = h.connectionState === 'DISCONNECTED' || h.connectionState === 'NOT_RESPONDING';
@@ -380,6 +394,8 @@ export function placementCandidates(tree, profile, vcSel = null) {
       if (g.mode !== 'vgpu') continue;
       const base = { id: `${h.id || h.name}|${g.idx}`, vc: vc.id, vcName: vc.name, cluster: cl.name, host: h.name, gpu: g.idx, model: g.model };
       if (g.vms.length && g.slots?.profile === profile) {
+        // 결정 A7: MIG 기반 프로파일 GPU 는 서버가 남은 슬롯을 계산하지 않는다(null) — 조용히 빼지 않고 센다('남은 슬롯 모름(MIG)').
+        if (g.slots.mig) { out.skipped.migSlots += 1; continue; }
         if (!(g.slots.free > 0)) continue;
         if (down || maint) { skipHost(); continue; }
         out.rows.push({ ...base, kind: 'same', fit: g.slots.free, now: `${profile} · ${g.slots.used}/${g.slots.total} 슬롯`, note: '같은 프로파일 GPU 의 남은 슬롯' });
@@ -397,6 +413,8 @@ export function placementCandidates(tree, profile, vcSel = null) {
       out.empty += fit;
     }
   }
+  // 결정 A7: 같은 프로파일 GPU 가 있는데 MIG 라 남은 슬롯을 모르면 '0대' 가 아니라 모름(null — 화면 '—').
+  if (out.skipped.migSlots > 0 && out.same === 0) out.same = null;
   out.rows.sort((a, b) => (a.kind === b.kind ? (a.kind === 'same' ? a.fit - b.fit : b.fit - a.fit) || a.host.localeCompare(b.host) : a.kind === 'same' ? -1 : 1));
   return out;
 }

@@ -59,3 +59,4 @@
 
 - 코어 `readServer` · 기능 ‘서버 정보’ 불변조건은 `server/src/serverinfo/CLAUDE.md`, WinRM HTTPS + NTLMv2 는 `server/src/winrm/CLAUDE.md`. **서버에 붙어 명령을 돌리는 새 기능은 `readServer` 하나를 부른다**
   (자격 해석 → 탐침 → 로그인 한 번(비밀번호 한 번 — `singlePasswordAttempt`) → 명령 하나 → 결과 기록 — 이 폴더의 판정을 우회하지 않는다).
+- v3.30 서버 명령 실행(`server/src/servercmd/CLAUDE.md`): 여러 대 일괄 틀은 `batch.js` 하나 · 허용 기능 판정은 `placement.featureBlocked` 하나(키 · 공통 계정 — `EXPLICIT_FEATURES` 는 직접 켠 것만).

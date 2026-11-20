@@ -279,7 +279,9 @@ export function registerBmOnboard(api, deps = {}) {
       // v2.954(점검 A-4): 범위 계정에는 키 · 공통 계정 **이름**을 주지 않는다(있는지만) — /ssh-keys · /accounts 가 범위 계정에 가린 이름이 이 길로 나갔다(L-7 우회).
       return { agent: s.agent, pending: scoped ? undefined : s.pending, rows: rows.map((r) => ({ name: r.name, corp: r.corp, idracHost: !!r.idracHost, osHost: !!r.osHost,
         osKey: scoped ? !!r.osKey : r.osKey, osCred: scoped ? !!r.osCred : r.osCred, idracCred: scoped ? !!r.idracCred : r.idracCred, enabled: r.enabled })),
-        total: scoped ? rows.length : s.rows, at: s.at, sig: s.sig, pulledAt: pull?.at || null, appliedSig: pull?.appliedSig || '', applied: pull?.applied || null, inSync: pull ? pull.appliedSig === s.sig : null };
+        total: scoped ? rows.length : s.rows, at: s.at, sig: s.sig, pulledAt: pull?.at || null, appliedSig: pull?.appliedSig || '', applied: pull?.applied || null, inSync: pull ? pull.appliedSig === s.sig : null,
+        // 결정(76~105 남긴 것 · 2026-11-20) A3: 마지막 인출에서 엣지가 적용 상태 파일을 읽지 못했다고 알렸나(불리언만 · 인출 기록이 없으면 false — 화면은 '모름')
+        stateUnread: pull?.stateUnread === true };
     }).filter((a) => a.rows.length || !scoped);
     let minEdgeVersion = '';
     try { minEdgeVersion = (await import('../../central/featureMinEdgeVersion.js')).stage7bMinEdgeVersion(); } catch { minEdgeVersion = ''; }

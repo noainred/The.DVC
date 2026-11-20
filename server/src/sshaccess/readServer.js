@@ -10,9 +10,9 @@
  *   자격이 없으면 붙지 않는다(빈 비밀번호로 시도해 계정을 잠그지 않게).
  * 시한: 로그인(readyTimeout) + 명령(plan.timeoutMs) < 장비 시한(deadlineMs) — 시험이 산수를 고정한다. 명령 시한 · 출력 상한에 걸리면 던지지 않고 받은 만큼 돌려준다
  *   (`code: 'exec-timeout' | 'exec-truncated'` + stdout — 기능이 끝 표지로 잘림을 판정한다 · 로그인은 성공이므로 탐침은 ok — 반증 F6).
- * 전송: SSH(Windows 는 OpenSSH Server + PowerShell) 또는 **WinRM HTTPS + NTLMv2**(v3.26 — Windows 단계 지정이 WinRM 일 때 · 비밀번호만 · 인증서는 장비 신뢰 판정 ·
+ * 전송: SSH(Windows 는 OpenSSH Server + PowerShell) 또는 **WinRM HTTPS + NTLMv2**(v3.25 3단계 — Windows 단계 지정이 WinRM 일 때 · 비밀번호만 · 인증서는 장비 신뢰 판정 ·
  *   같은 탐침 · 같은 결과 기록). WinRM 은 명령 시한에 받은 칸을 돌려주지 않는다(전부 아니면 실패 — 한계). 실제 Windows 서버로는 확인하지 못했다(설계 §8.4).
- * 돌려주는 것: 비밀 없음 — `{ ok, code, reason, os, via, auth:{kind, account, source}, stdout, stderr, ms }`(stdout 은 기능이 해석한다 · 화면 · 저장에 원문을 싣지 않는다).
+ * 돌려주는 것: 비밀 없음 — `{ ok, code, reason, os, via, auth:{kind, account, source}, stdout, stderr, ms, exit }`(exit = 명령의 끝 코드 · 모르면 null)(stdout 은 기능이 해석한다 · 화면 · 저장에 원문을 싣지 않는다).
  */
 import crypto from 'node:crypto';
 import { listBmServersRaw, registryLoadError } from '../bmstor/registry.js';
@@ -20,7 +20,7 @@ import { withResolvedAuth, effectiveAccountOf, AUTH_ERROR } from '../bmusage/onb
 import { withSsh, isSshAuthError, isSshHostKeyError } from '../proxy/sshExec.js';
 import { withDeadline } from '../util/deadline.js';
 import { gateAccountLogin } from './accountGate.js';
-import { winrmRun, WINRM_PORT } from '../winrm/client.js';   // v3.26(3단계) — Windows 단계 지정이 WinRM 일 때
+import { winrmRun, WINRM_PORT } from '../winrm/client.js';   // v3.25(3단계) — Windows 단계 지정이 WinRM 일 때
 import { noteCredOutcome } from './outcome.js';
 
 const t = (v, n = 256) => String(v ?? '').trim().slice(0, n);
@@ -78,7 +78,7 @@ export async function readServer(serverId, { feature, plan = {}, deadlineMs = RE
   const os = raw.os === 'windows' ? 'windows' : 'linux';
   const step = plan[os];
   if (!step || typeof step.command !== 'string' || !step.command) return { ok: false, code: 'no-plan', os, reason: `이 기능은 ${os === 'windows' ? 'Windows' : 'Linux'} 읽기 묶음이 없습니다.` };
-  // 접속 방식은 **계층 지정에서만** 정한다(effectiveAccountOf — 등록부 원본의 via 칸은 보지 않는다 · v3.26 반증 F9). 물려받은 Windows 단계 지정이 WinRM 일 때만.
+  // 접속 방식은 **계층 지정에서만** 정한다(effectiveAccountOf — 등록부 원본의 via 칸은 보지 않는다 · v3.25 3단계 반증 F9). 물려받은 Windows 단계 지정이 WinRM 일 때만.
   const ef = effectiveAccountOf(raw);
   const viaWinrm = os === 'windows' && (ef.source === 'os') && ef.via === 'winrm';
   const [srv] = withResolvedAuth([raw], { feature, winrm: viaWinrm });
@@ -93,7 +93,7 @@ export async function readServer(serverId, { feature, plan = {}, deadlineMs = RE
     .then((x) => ({ ok: true, out: x.out }))
     .catch((e) => ({ ok: false, error: String(e?.message || e), hostkey: isSshHostKeyError(e), authFailed: isSshAuthError(e), timeout: sig.aborted || !!signal?.aborted })), '서버 읽기 시한 초과')
     .catch((e) => ({ ok: false, error: String(e?.message || e), timeout: true }));
-  // v3.26: Windows 단계 지정이 WinRM 이면 WinRM HTTPS + NTLM 으로(비밀번호만 — resolveOsAuth(winrm) 가 키를 쓰지 않게 이미 막았다)
+  // v3.25(3단계): Windows 단계 지정이 WinRM 이면 WinRM HTTPS + NTLM 으로(비밀번호만 — resolveOsAuth(winrm) 가 키를 쓰지 않게 이미 막았다)
   if (viaWinrm && (!step.winrm || !srv.password)) return { ok: false, code: 'no-plan', os, auth, reason: 'WinRM 으로 읽을 묶음이나 비밀번호가 없습니다.' };
   const runWinrm = () => withDeadline(deadlineMs, async (sig) => {
     const { username, domain } = ntlmNameOf(srv.username);

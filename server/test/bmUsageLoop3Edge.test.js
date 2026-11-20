@@ -141,6 +141,8 @@ test('① 창 진행 중 인출 — 지금 억제 + history · 엣지 ⑤ = 중�
   assert.deepEqual(e.capEx, c.capEx, '용량 예측 날 제외'); assert.equal(e.idleEx, c.idleEx, '저활용 날 제외');
   assert.equal(e.excl, c.excl, '베이스라인 제외 구간'); assert.deepEqual(e.exclIds, c.exclIds);
   assert.deepEqual(e.cover, c.cover, '제외 구간');
+  // 결정 반영(2026-11-19 ②): 지난 구간은 만든 시각부터 — W4(시작 T0 − 30분 · 만든 시각 T0)는 엣지 · 중앙 모두 T0 부터(배포본도 at 을 들고 간다 · 예전 T0 − 30분)
+  for (const cv of [e.cover, c.cover]) assert.equal(cv.find((x) => x.ids.includes(ids.W4))?.from, T0, JSON.stringify(cv));
   assert.deepEqual(e.exclIds, [ids.W1, ids.W2, ids.W3, ids.W4].sort());
   assert.equal(e.r.history, 3, 'history = 끝남 · 지움 · 만료');
   assert.deepEqual(e.items, [ids.W4], '지금 억제용은 진행 중 창만');

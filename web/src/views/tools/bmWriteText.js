@@ -15,6 +15,8 @@ export const WRITE_WHY_TEXT = Object.freeze({
   'full-scope': '조회 · 쓰기 모두 전체 범위(vCenter 제한 없는) 계정만 할 수 있습니다 — 전 법인에 닿는 동작입니다',
   'read-only': '이 법인은 조회 전용입니다(쓰기 범위 밖)',
   'no-os-path': '이 서버에는 OS 계정(SSH 등록)이 없습니다 — 스냅샷은 OS 경로가 있는 서버만',   // 10회차 L2
+  'auth-unresolved': '이 서버 OS 계정의 키 · 공통 계정 참조를 해석하지 못해 접속하지 않습니다 — 키 · 공통 계정 등록을 확인하세요',   // 다음 작업 ⑥
+  'demo-target': '데모 대상입니다 — 화면의 OS 값은 데모 합성이라 스냅샷은 실행하지 않습니다(데모에서 합성하지 않음)',   // 다음 작업 ④
 });
 
 /** 버튼을 열어도 되나 — 서버 표지가 ok 일 때만(없으면 닫는다). */
@@ -72,3 +74,15 @@ export function corpsSavePatch({ corps = {}, vcenters = [], id, on, fullRw = fal
 }
 /** 쓰기 범위 밖 법인 칸의 마우스 설명(재확인 R1 — 서버 vcenters[].writable). */
 export const CORP_READ_ONLY_TITLE = '조회 전용 법인(쓰기 범위 밖) — 수집을 켜고 끌 수 없습니다';
+
+/**
+ * 결정 반영(2026-11-19 ③): 보존 기간(원시 · 롤업)을 **줄이는** 저장은 설정 소유자 등급만이다(서버 설정 PUT 403 code ‘retention-owner’ — 아무것도 저장하지 않는다).
+ *   등급은 /auth/me settingsOwnerTier(서버가 requireSettingsOwner 를 그대로 불러 만든 값 — 판정 사본이 아니다) · 인증 꺼짐(Anonymous)은 소유자.
+ *   전역 값을 저장할 수 있는 카드(canGlobal — 서버 actions.settingsGlobal)에서만 말한다(그 밖은 카드 전체가 읽기 전용 안내다) · 소유자에게는 ''.
+ *   ‘줄이려 하는가’ 는 여기서 비교하지 않는다 — 서버가 저장된 값 · 정규화로 판정한다. 칸 옆 표지로 저장 전에 알린다.
+ */
+export const RETENTION_OWNER_NOTE = '보존 기간 줄이기는 설정 소유자만 할 수 있습니다 — 줄이면 그만큼 이력이 지워집니다(되돌릴 수 없음). 늘리기는 저장됩니다.';
+export function retentionOwnerNote(user, canGlobal) {
+  if (!canGlobal) return '';
+  return user?.settingsOwnerTier === true || user?.name === 'Anonymous' ? '' : RETENTION_OWNER_NOTE;
+}

@@ -5,6 +5,7 @@
  */
 import React from 'react';
 import { toneVar } from './tools/toneVar.js';
+import { legacyPickText } from './sshAccessText.js';
 
 export const errText = (e) => e?.body?.reason || e?.message || String(e);
 /** 쓰기 응답 — ok:false(400 · 409 를 던지지 않는 api.js 경로)를 오류로 바꾼다. */
@@ -24,9 +25,10 @@ export function FeaturePicker({ catalog, value, onChange, allowAll = false }) {
   const list = Array.isArray(value) ? value : [];
   return (
     <div className="ssa-feats" role="group" aria-label="쓸 수 있는 기능">
-      {allowAll && <label><input type="checkbox" checked={all} onChange={() => onChange(all ? [] : null)} /> 제한 없음(예전 방식 — 모든 기능)</label>}
+      {allowAll && <label><input type="checkbox" checked={all} onChange={() => onChange(all ? [] : null)} /> {legacyPickText(catalog)}</label>}
       {(catalog || []).map((f) => (
-        <label key={f.id}><input type="checkbox" disabled={all} checked={all || list.includes(f.id)} onChange={() => onChange(list.includes(f.id) ? list.filter((x) => x !== f.id) : [...list, f.id])} /> {f.label}{f.ready === false ? ' (다음 단계)' : ''}</label>
+        // v3.30: 예전 방식(제한 없음)이어도 ‘직접 켜야’ 하는 기능(explicit)은 쓰이지 않는다 — 체크를 비워 보인다(제한 없음을 풀고 켠다)
+        <label key={f.id}><input type="checkbox" disabled={all} checked={all ? !f.explicit : list.includes(f.id)} onChange={() => onChange(list.includes(f.id) ? list.filter((x) => x !== f.id) : [...list, f.id])} /> {f.label}{f.ready === false ? ' (다음 단계)' : ''}{f.explicit ? ' (직접 켜야 씀)' : ''}</label>
       ))}
     </div>
   );

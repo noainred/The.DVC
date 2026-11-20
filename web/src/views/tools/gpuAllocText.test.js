@@ -179,7 +179,7 @@ describe('v2.939 GPU 할당율 개선(웹)', async () => {
     expect(r.per).toBe(24); expect(r.family).toBe('a40');
     expect(r.rows.map((x) => [x.host, x.gpu, x.kind, x.fit])).toEqual([['esx1', 0, 'same', 1], ['esx1', 1, 'empty', 2]]);
     expect([r.same, r.empty]).toEqual([1, 2]);
-    expect(r.skipped).toEqual({ down: 1, maint: 0, noPlacement: 1, mixed: 0, otherProfile: 1, capUnknown: 0, small: 0 });
+    expect(r.skipped).toEqual({ down: 1, maint: 0, noPlacement: 1, mixed: 0, otherProfile: 1, capUnknown: 0, small: 0, migSlots: 0 });   // 결정 A7(2026-11-20): MIG 남은 슬롯 모름 칸
     expect(M.placementCandidates(placeTree(), 'nonsense').rows).toEqual([]);
     expect(M.modelHasFamily('NVIDIA L40S', 'l4')).toBe(false);
     expect(M.modelHasFamily('GA102GL [A40]', 'a40')).toBe(true);

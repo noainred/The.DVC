@@ -7,6 +7,7 @@ import { fetchJson } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { corpMark } from '../hostCorpText.js';
+import { allocText } from '../summaryAllocText.js';   // v3.28.1: 할당 합 — 못 읽은 VM 수 '미상 N'
 import { fmtN, pctText, usageTone, TONE_COLOR, TONE_TEXT, corpVmsSort, corpCollectText, signalText } from './vmHubText.js';
 import { numOrNull } from '../../numOrNull.js';
 
@@ -118,7 +119,7 @@ export default function VmsByCorp({ filters, onPick }) {
                       <span className="vmh-l2">{known ? `구동 ${fmtN(c.on)} · 정지 ${fmtN(c.off)} · ${share}%` : '모름'}</span>
                     </td>
                     <td className="tabular" style={{ textAlign: 'right' }} data-sort={numOrNull(c.vcpu) ?? ''}>
-                      {fmtN(c.vcpu)}<span className="vmh-l2">{numOrNull(c.ramGB) == null ? '—' : `${fmtN(c.ramGB)} GB`}</span>
+                      {allocText(c.vcpu, c.vcpuUnknown)}<span className="vmh-l2">{allocText(c.ramGB, c.ramUnknown, ' GB')}</span>
                     </td>
                     <td data-sort={numOrNull(c.avgCpuPct) ?? ''}><Usage v={c.avgCpuPct} /></td>
                     <td data-sort={numOrNull(c.avgMemPct) ?? ''}><Usage v={c.avgMemPct} /></td>
@@ -133,7 +134,7 @@ export default function VmsByCorp({ filters, onPick }) {
               <tr data-pin="bottom" style={{ fontWeight: 700 }}>
                 <td>합계 · {fmtN(t.corps)} 법인</td>
                 <td className="tabular" style={{ textAlign: 'right' }}>{fmtN(t.vms)}<span className="vmh-l2">구동 {fmtN(t.on)} · 정지 {fmtN(t.off)}</span></td>
-                <td className="tabular" style={{ textAlign: 'right' }}>{fmtN(t.vcpu)}<span className="vmh-l2">{fmtN(t.ramGB)} GB</span></td>
+                <td className="tabular" style={{ textAlign: 'right' }}>{allocText(t.vcpu, t.vcpuUnknown)}<span className="vmh-l2">{allocText(t.ramGB, t.ramUnknown, ' GB')}</span></td>
                 <td><Usage v={t.avgCpuPct} /></td><td><Usage v={t.avgMemPct} /></td>
                 <td className="tabular" style={{ textAlign: 'right' }}>{fmtN(t.gpu)}</td>
                 <td className="tabular" style={{ textAlign: 'right' }}>{fmtN(t.signals?.overload)}</td>

@@ -23,7 +23,7 @@ const RE_HOST = /^[A-Za-z0-9][A-Za-z0-9._-]{0,253}$/;
 const RE_NAME = /^[^<>"']{1,64}$/;
 
 let _db = null;
-const loadErr = makeLoadError();
+const loadErr = makeLoadError({ label: 'Veeam Enterprise Manager 등록부', file: FILE });   // 결정(76~105 남긴 것 · 2026-11-20) A1: 서비스 점검 '장비 등록부 파일' 행(표시 전용)
 export function emRegistryLoadError() { load(); return loadErr.get(); }
 
 // 결정(78 남긴 것 ①): parse 실패(형식 · 복호 포함 — 예전 try 블록과 같은 범위)만 손상이다.

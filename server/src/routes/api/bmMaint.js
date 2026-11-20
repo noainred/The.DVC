@@ -265,7 +265,8 @@ export async function bmMaintOccurrences(req, snap, deps = {}) {
   const items = [];
   for (const w of MJ.windows) {
     if (!ids.has(w.id) || !maintVisible(w, allowed)) continue;
-    for (const o of J.effectiveOccurrences(w, from, to, { history: true })) items.push({ id: w.id, name: w.name, start: o.start, end: o.end, scopes: Object.keys(w.scopes || {}), ...(o.cut ? { cut: true } : {}), ...(o.deleted ? { deleted: true } : {}) });
+    // 결정 반영(2026-11-19 ②): 만든 시각 전 발생은 없고 걸친 발생은 만든 시각부터(born — judge.effectiveOccurrences history)
+    for (const o of J.effectiveOccurrences(w, from, to, { history: true })) items.push({ id: w.id, name: w.name, start: o.start, end: o.end, scopes: Object.keys(w.scopes || {}), ...(o.cut ? { cut: true } : {}), ...(o.deleted ? { deleted: true } : {}), ...(o.born ? { born: true } : {}) });
     if (items.length >= 1_000) break;
   }
   items.sort((a, b) => a.start - b.start);

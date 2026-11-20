@@ -82,6 +82,8 @@ import { stallWatchStatus } from '../perf/stallWatch.js';
 import { scanJournalStatus } from '../util/scanJournal.js';   // v2.737: 재시작으로 중단된 스캔 기록·재개
 import { bigJsonStats } from '../util/bigJsonGate.js';
 import { listSettingsLoadErrors, recheckSettingsFiles } from '../util/settingsLoadError.js';
+import { listRegistryLoadErrors, registryStatusCount } from '../util/registryCore.js';   // 결정(76~105 남긴 것 · 2026-11-20) A1: 장비 등록부 파일 행(표시 전용)
+import { READ_RETRY_MS } from '../util/jsonFileRead.js';
 import { bulletinHealth } from '../bulletin/store.js'; // 2026-10-09 검토 I-05
 import { runtimeServiceRow } from '../util/runtimeCheck.js'; // 2026-10-09 검토 I-06
 import { authGuardHealthRow } from '../util/authGuard.js'; // 127회차: 인증 정지 기록 파일을 못 읽는 도구(전 가드 한 행)
@@ -163,6 +165,28 @@ const atOf = (x) => (typeof x === 'number' && Number.isFinite(x) ? x : (x && typ
 const wrap = (key, label, fn) => { try { return { key, label, ...fn() }; } catch (e) { return { key, label, status: 'warn', detail: `점검 오류: ${e.message}`, at: Date.now() }; } };
 
 const finite = (v) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null);
+/**
+ * 결정(76~105 남긴 것 · 2026-11-20) A1(권장안): 서비스 점검의 '장비 등록부 파일' 한 행 — **표시 전용**(확정 버튼 · 확정 경로 없음).
+ *   'settings-files' 의 [기본값으로 확정] 과 섞지 않는다: 등록부를 지금 값(빈 목록)으로 확정하면 보존본에만 남은 장비 · 자격증명이 사라진다.
+ *   `files` 의 사유는 요약이다(util/registryCore.js listRegistryLoadErrors — 원문 조각 없음). 범위 계정 응답에서는 `files` 가 빠진다(routes/api/checksLogs.js · 130회차 D-c).
+ * @param {{file:string, label:string, at:(number|null), code:string, reason:string}[]} errs  listRegistryLoadErrors() — 테스트 주입
+ * @param {number} total  등록한 등록부 수
+ */
+export function registryFilesRow(errs = [], total = 0, now = Date.now()) {
+  const list = Array.isArray(errs) ? errs : [];
+  if (!list.length) return { status: 'ok', detail: `장비 등록부 파일 읽기 정상(${total}개 확인)`, at: now };
+  const names = list.slice(0, 6).map((e) => `${e.label}(${e.file}${e.reason ? ` · ${e.reason}` : ''})`).join(', ');   // 사유는 요약(관리자가 아니면 분류 문구만)
+  const secs = Math.round(READ_RETRY_MS / 1000);
+  const ats = list.map((e) => e.at).filter((v) => typeof v === 'number' && Number.isFinite(v));
+  return {
+    status: 'warn',
+    detail: `읽지 못한 장비 등록부 ${list.length}개(${names}${list.length > 6 ? ` 외 ${list.length - 6}개` : ''}) — 그 도구의 수집 · 엣지 배포가 멈추거나 저장이 거절됩니다. `
+      + `읽기 오류는 원본을 그대로 두고 그 등록부를 쓸 때 ${secs}초 간격으로 다시 읽습니다(파일 권한 · 소유자 · 디스크 확인 — 읽히면 재시작 없이 풀립니다). `
+      + '손상은 원본을 보존본(.corrupt.*)으로 옮겼습니다 — 보존본을 되돌리거나 그 등록 화면에서 장비를 다시 등록해 저장하세요(빈 등록부를 저장하면 보존본에만 남은 장비 · 자격증명은 따라오지 않습니다). 이 행은 표시 전용입니다.',
+    at: ats.length ? Math.min(...ats) : now,
+    files: list,
+  };
+}
 /**
  * 서비스 점검의 '자격증명 암호화 키' 한 행(135회차 결정 D-d). 사유 문장은 secretVault 가 만든 것 그대로다(경로 · 키 값 없음 — 'CONFIG_DIR/secrets-key' 라는 이름과 오류 코드뿐).
  * @param {string|null} [why] secretsKeyMissing() — 테스트 주입
@@ -380,6 +404,10 @@ export function getServiceCheck(opts = {}) {
       detail: `읽지 못한 설정 파일 ${errs.length}개(${names}${errs.length > 6 ? ` 외 ${errs.length - 6}개` : ''}) — 해당 설정 pull 은 503 으로 답하고 엣지는 직전 설정을 유지합니다. 손상 보존본을 복구하거나, 그 설정 화면에서 다시 저장하거나, 관리자가 이 행의 [기본값으로 확정] 으로 지금 기본값을 저장하세요(그 기본값이 전 엣지에 배포됩니다).`,
       at: Math.min(...errs.map((e) => e.at || Date.now())), files: errs };
   }));
+
+  // 결정(76~105 남긴 것 · 2026-11-20) A1(권장안): 장비 등록부(PDU · 스토리지 · SAN · CVP · iDRAC · vCenter · NSX · Veeam · Bareos 원장 · 수집 서버 · 엣지 개별 토큰 · 원격 접속 설정 등)의
+  //   읽기 오류 · 손상 · 보존본만 남음 — 예전에는 그 도구 화면의 배너뿐이었다. 'settings-files' 와 다른 행이다(표시 전용 — 위 registryFilesRow 머리말).
+  checks.push(wrap('registry-files', '장비 등록부 파일', () => registryFilesRow(listRegistryLoadErrors({ admin: !!opts.isAdmin }), registryStatusCount())));
 
   // 127회차(124회차 결정 D-A · 남긴 것): 인증 정지 기록 파일(<도구>-auth-stops.json)을 못 읽는 도구 — 예전에는 콘솔 한 줄뿐이었다(unreadable() 소비처 0곳).
   //   그동안은 자격 지문마다 한 대상으로 먼저 확인하며 수집한다(util/authGuard.js 머리말). 가드마다 한 줄이 아니라 한 행 — 파일 이름은 기본 이름만.
