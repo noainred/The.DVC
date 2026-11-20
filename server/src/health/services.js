@@ -229,6 +229,10 @@ export function pollerEnabled(st) {
  */
 export function pollerCheck(st, { now = Date.now(), uptimeMs = process.uptime() * 1000 } = {}) {
   if (!pollerEnabled(st)) return { status: 'off', detail: '비활성(설정에서 꺼짐)', at: now };
+  // 164회차(결정 6): 마지막 시도가 긴급중단으로 멈췄으면(상태 · lastRun · lastResult 의 emergencyStop) 장애(주의)도 정상(활성)도 아니다 — 의도한 정지라고 말한다.
+  if (st && [st, st.lastRun, st.lastResult].some((x) => x && typeof x === 'object' && x.emergencyStop === true)) {
+    return { status: 'off', detail: '긴급중단으로 멈춤 — 의도한 정지입니다(2인 승인으로 해제하면 다음 주기 · 다음 수집 뒤 다시 돕니다)', at: pollerLastAt(st) ?? now };
+  }
   const running = !!(st && (st.running || st.busy || st.refreshing));
   const last = pollerLastAt(st);
   const iv = pollerIntervalMs(st);

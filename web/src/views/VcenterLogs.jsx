@@ -34,6 +34,8 @@ export function vcLogRunText(lastRun, fmt = (ts) => new Date(ts).toLocaleString(
   if (!lastRun) return '아직 수집 안 함';
   // 96회차 R1(92회차 F3 덜 고침): 설정 파일을 못 읽어 건너뛴 주기도 skipped 다 — '수집 꺼짐' 이 아니다(관리자는 끄지 않았다 · 저장도 거절된다).
   if (lastRun.settingsUnreadable) return `최근 확인 ${fmt(lastRun.at)} · 설정 파일을 읽지 못해 수집 · 정리를 건너뜀`;
+  // 164회차(결정 6): 긴급중단으로 건너뛴 주기도 skipped 다 — '수집 꺼짐' 이 아니다(의도한 전역 정지).
+  if (lastRun.emergencyStop) return `최근 확인 ${fmt(lastRun.at)} · 긴급중단 중이라 수집하지 않음`;
   if (lastRun.skipped) return `최근 확인 ${fmt(lastRun.at)} · 수집 꺼짐`;
   const n = lastRun.collected;
   return `최근 수집 ${fmt(lastRun.at)} · ${Number.isFinite(n) ? `${n.toLocaleString()}건` : '—'}`;
@@ -61,6 +63,7 @@ export function vcLogCollectText(r, fmt = (ts) => new Date(ts).toLocaleString('k
   if (r.busy) return `이전 수집이 아직 진행 중입니다${Number.isFinite(r.runningSince) ? `(${fmt(r.runningSince)} 시작)` : ''} — 이번 요청으로 새로 수집하지 않았습니다. 끝나면 상태 줄이 바뀝니다.`;
   // 96회차 R1: 설정 파일 읽기 오류로 건너뜀 — '켜고 저장하세요' 는 틀린 조치다(저장은 거절된다).
   if (r.settingsUnreadable) return '로그 보관 설정 파일을 읽지 못해 수집하지 않았습니다 — 저장 위치 · 보관 기간을 모릅니다(원본은 그대로 · 30초마다 다시 읽음). 파일 권한 · 소유자 · 디스크를 확인하세요.';
+  if (r.emergencyStop) return '긴급중단 중이라 수집하지 않았습니다 — 2인 승인으로 해제하면 다음 주기에 다시 수집합니다(그동안의 이벤트는 커서가 따라잡습니다).';
   if (r.skipped) return '로그 수집이 꺼져 있어 수집하지 않았습니다 — 위에서 켜고 정책을 저장하세요.';
   const len = (v) => (Array.isArray(v) ? v.length : 0);
   const n = r.collected;

@@ -8,6 +8,7 @@
  */
 import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { store } from '../store.js';
+import { isStopped } from '../security/emergencyStop.js';
 import { load as loadSettings, settingsLoadError, RETENTION_MAX_DAYS } from './settings.js';
 import { collectAndStore, pruneOrphanGuestDisk } from './service.js';
 import { prune, getDb, lastCollectTs } from './db.js';
@@ -35,7 +36,8 @@ function emitRunDone(result) {
   for (const fn of runListeners) setImmediate(() => { Promise.resolve().then(() => fn(result)).catch((e) => console.warn(`[guestdisk] 수집 완료 알림 처리 실패: ${String(e?.message || e).slice(0, 200)}`)); });
 }
 
-export function guestDiskPollerStatus() { return { running, lastResult, lastRunTs, ...(isMockMode() ? { demo: true, enabledEffective: true } : {}) }; }
+let stoppedAt = 0;   // 164회차: 마지막 실행 시도가 긴급중단으로 멈춘 시각(다음 실제 수집이 지운다)
+export function guestDiskPollerStatus() { return { running, lastResult, lastRunTs, ...(stoppedAt ? { emergencyStop: true, emergencyStopAt: stoppedAt } : {}), ...(isMockMode() ? { demo: true, enabledEffective: true } : {}) }; }
 
 // v2.743(VC-02): 등록부에서 지운 vCenter 의 최신 행 정리 결과(지웠거나 판정할 수 없어 건너뛴 사실). ⚠ 폴러 상태(guestDiskPollerStatus)에 싣지
 //   않는다 — 그 객체는 범위 계정에도 scopePollerStatus 를 거쳐 나가는데 이 값은 전 함대의 삭제된 vCenter id 다(v2.550.3 '상태 객체에 집계를
@@ -65,6 +67,9 @@ async function pool(items, n, fn) {
 /** 전체 vCenter 수집 1회(수동/자동 공용). 진행 중이면 skipped. */
 export async function runGuestDiskNow(trigger = 'manual') {
   if (running) return { ok: false, skipped: true, reason: '이미 수집이 진행 중입니다.' };
+  // 164회차(결정 6): 긴급중단(2인 승인) 동안은 vCenter 로 나가지 않는다 — store.refresh 와 같은 판정(isStopped) · 수동도 같다(주 폴러의 '지금 수집' 도 멈춘다)
+  if (isStopped()) { stoppedAt = Date.now(); return { ok: false, emergencyStop: true, reason: '긴급중단 중이라 수집하지 않았습니다 — 2인 승인으로 해제하면 다음 주기에 다시 수집합니다.' }; }
+  stoppedAt = 0;
   running = true;
   const started = Date.now();
   try {

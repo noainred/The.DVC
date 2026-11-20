@@ -21,6 +21,7 @@
  * 실패 목록을 그대로 내보내고, 화면의 커버리지가 그 구멍을 '스파이크 0' 이 아니라 '미측정' 으로 그린다.
  */
 import { store } from '../store.js';
+import { isStopped } from '../security/emergencyStop.js';
 import { config, loadVcenterConfig } from '../config.js';
 import { isMockVcenter } from '../mock/generator.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
@@ -57,11 +58,12 @@ let lastPrune = null;      // { at, reason, days, files, deleted, errors, ms }
 let lastResult = null;   // { at, trigger, vcenters, vms, hosts, samples, moments, spikeRows, errors, skipped, ms, paused }
 let lastRunTs = 0;
 let timer = null;
+let stoppedAt = 0;        // 164회차: 마지막 실행 시도가 긴급중단으로 멈춘 시각(다음 실제 수집이 지운다)
 
 export function vmSeriesPollerStatus() {
   const s = loadVmSeriesSettings();
   return { running, lastResult, lastRunTs, intervalMs: s.intervalMin * 60_000, enabled: demoOn(s.enabled), ...(isMockMode() ? { demo: true } : {}), concurrency: CONCURRENCY, minFreeBytes: MIN_FREE_BYTES,
-    lastPrune, pruning: !!pruneFlight, pruneEveryMs: PRUNE_EVERY_MS };
+    lastPrune, pruning: !!pruneFlight, pruneEveryMs: PRUNE_EVERY_MS, ...(stoppedAt ? { emergencyStop: true, emergencyStopAt: stoppedAt } : {}) };
 }
 
 /**
@@ -196,6 +198,9 @@ async function runDemoVmSeries(snap, settings, trigger, started) {
 
 export async function runVmSeriesNow(trigger = 'manual') {
   if (running) return { ok: false, skipped: true, reason: '이미 수집이 진행 중입니다.' };
+  // 164회차(결정 6): 긴급중단(2인 승인) 동안은 vCenter 로 나가지 않는다 — store.refresh 와 같은 판정(isStopped) · 수동도 같다(주 폴러의 '지금 수집' 도 멈춘다)
+  if (isStopped()) { stoppedAt = Date.now(); return { ok: false, emergencyStop: true, reason: '긴급중단 중이라 수집하지 않았습니다 — 2인 승인으로 해제하면 다음 주기에 다시 수집합니다.' }; }
+  stoppedAt = 0;
   running = true;
   const started = Date.now();
   try {
