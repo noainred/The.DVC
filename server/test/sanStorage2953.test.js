@@ -86,7 +86,11 @@ test('② 알림 저장소 — 설정 · 전이 · 묶음 · 손상 보존', () 
   NS._resetNotifyForTest(); NS.loadNotifySettings();
   assert.ok(NS.notifyLoadError(), '손상이면 오류를 밝힌다'); assert.match(NS.saveNotifySettings({ enabled: false }).issue || '', /읽지 못해/);
   assert.ok(fs.readdirSync(tmp).some((f) => f.startsWith('san-storage-notify.json.corrupt.')), '손상본 보존');
-  fs.rmSync(path.join(tmp, 'san-storage-notify.json'), { force: true }); NS._resetNotifyForTest();
+  fs.rmSync(path.join(tmp, 'san-storage-notify.json'), { force: true });
+  // 58회차 F5: 보존본만 남은 동안은 재시작 뒤에도 못 읽음 — 이 시험 뒤의 정상 경로를 위해 보존본까지 치운다(운영자 정리와 같다).
+  NS._resetNotifyForTest(); assert.ok(NS.notifyLoadError(), '58회차 F5: 재시작 뒤에도 보존본만 남아 있으면 여전히 못 읽음');
+  for (const f of fs.readdirSync(tmp)) if (f.startsWith('san-storage-notify.json.corrupt.')) fs.rmSync(path.join(tmp, f), { force: true });
+  NS._resetNotifyForTest();
 });
 
 test('③ 월간 보고서(순수) — 설정 · 회차 · 틱 · 모델 · HTML · 메일 조각', () => {

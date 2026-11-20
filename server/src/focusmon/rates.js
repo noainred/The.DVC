@@ -195,13 +195,58 @@ export function computeSample(prev, cur, ctx = {}) {
   const phys = dsk.filter((d) => d.k === 'disk');
   const total = phys.length ? aggregateIostat(phys) : null;
 
+  // v3.12.0(⑬ 더할 지표): 초당 값 = 누적 차이 ÷ dt(카운터가 줄면 — 재부팅 · 넘침 — null) · 지금 값은 그대로 · 못 읽은 칸은 null(0 아님)
+  const ps = (a, b) => { const x = okDt ? delta(a, b) : null; return x == null ? null : r2(x / dt); };
+  const st0 = prev?.stat || {}; const st1 = cur?.stat || {};
+  const sched = st1.ctxt != null || st1.forks != null || st1.intr != null ? { cs: ps(st0.ctxt, st1.ctxt), in: ps(st0.intr, st1.intr), fk: ps(st0.forks, st1.forks) } : null;
+  const v0 = prev?.vm; const v1 = cur?.vm;
+  const vmp = v1 ? { si: ps(v0?.swpin, v1.swpin), so: ps(v0?.swpout, v1.swpout), mf: ps(v0?.majflt, v1.majflt), sc: ps(v0?.scan, v1.scan), sl: ps(v0?.steal, v1.steal) } : null;
+  const n0 = prev?.snmp; const n1 = cur?.snmp; const k1 = cur?.sock;
+  let tcp = null;
+  if (n1 || k1) {
+    const dOut = okDt ? delta(n0?.outSegs, n1?.outSegs) : null; const dRt = okDt ? delta(n0?.retrans, n1?.retrans) : null;
+    // 재전송률 = 구간 안 재전송 ÷ 보낸 세그먼트 — 보낸 것이 없으면 비율이 없다(null)
+    tcp = { rt: dOut != null && dRt != null && dOut > 0 ? r2(Math.min(100, (100 * dRt) / dOut)) : null, lo: ps(n0?.lof, n1?.lof), ld: ps(n0?.ldrop, n1?.ldrop), es: n1?.estab ?? null, tw: k1?.tw ?? null, iu: k1?.inuse ?? null };
+  }
+
   return {
     dt: okDt ? dt : null,
+    up: Number.isFinite(cur?.up) ? cur.up : null, // v3.13.0 ⑭ 가동 시간(초) — 줄면 재부팅 사건(store)
     cpu: cpuAll ? { ...cpuAll, cores } : null,
     load: cur?.load?.load || null, run: cur?.stat?.running ?? null, blk: cur?.stat?.blocked ?? null, thr: cur?.load?.threads ?? null,
     mem, net, dsk, dtot: total, nPhys: phys.length,
+    // v3.12.0: 프로세스 상태(D · 좀비 — 프로세스 구획은 5초마다라 수집기가 마지막 값을 넘긴다) · 파일시스템(60초마다 — 마지막 확인을 넘긴다 · at 이 그 시각)
+    sched, vmp, tcp, ...(ctx.pst ? { pst: ctx.pst } : {}), ...(ctx.fs ? { fs: ctx.fs } : {}),
     ...(cur?.truncated?.length ? { truncated: cur.truncated } : {}),
   };
+}
+
+/** 이어진 D 상태 목록 상한(화면 '지금 D 상태 프로세스'). */
+export const D_LIST_MAX = 8;
+/**
+ * 프로세스 구획 → D(디스크 대기에서 멈춤) · 좀비 수 + 지금 D 인 프로세스(이어진 시간). dSince 는 수집기가 들고 있는 (pid:시작 tick → 처음 본 uptime) 지도 —
+ * 이번에 D 가 아니면 지운다. 상태 칸이 없는 옛 줄(6칸)뿐이면 null(모름 — 0 이 아니다).
+ */
+export function procStates(list, up, dSince) {
+  if (!Array.isArray(list) || !list.some((p) => p.state != null)) return null;
+  let D = 0; let Z = 0; const seen = new Set(); const pd = [];
+  for (const p of list) {
+    if (p.state === 'Z') Z += 1;
+    if (p.state !== 'D') continue;
+    D += 1;
+    const k = `${p.pid}:${p.start}`; seen.add(k);
+    if (!dSince.has(k)) dSince.set(k, up);
+    pd.push({ pid: p.pid, c: p.comm, s: up != null && dSince.get(k) != null ? Math.max(0, Math.round(up - dSince.get(k))) : null });
+  }
+  for (const k of [...dSince.keys()]) if (!seen.has(k)) dSince.delete(k);
+  pd.sort((a, b) => (b.s ?? -1) - (a.s ?? -1));
+  return { D, Z, pd: pd.slice(0, D_LIST_MAX) };
+}
+/** 파일시스템 가장 높은 사용률(%) — 응답 없음이거나 줄이 없으면 null. */
+export function fsMaxOf(fs) {
+  if (!fs || !Array.isArray(fs.rows) || !fs.rows.length) return null;
+  let mx = null; for (const r of fs.rows) if (r.pct != null && (mx == null || r.pct > mx)) mx = r.pct;
+  return mx;
 }
 
 /**
@@ -220,7 +265,7 @@ export function computeSample(prev, cur, ctx = {}) {
  * 반증 F10: 새 칸 가운데 null 은 싣지 않는다(DB 묶음 크기 — 읽는 쪽은 모두 `?? null`).
  */
 const NEW_KEYS = Object.freeze(['us', 'sy', 'pp', 'pc', 'sv', 'ns', 'ni', 'st', 'vsz', 'mf', 'io', 'rb', 'wb', 'sk']);
-export function topProcs(prevList, curList, { dt, tck, page, ncpu, up, users, units, io, prevIo, dacct = null, usersUp = null, unitsUp = null } = {}) {
+export function topProcs(prevList, curList, { dt, tck, page, ncpu, up, users, units, io, prevIo, dacct = null, usersUp = null, unitsUp = null, withAll = false } = {}) {
   if (!Array.isArray(prevList) || !Array.isArray(curList) || !(dt > 0) || !(tck > 0)) return null;
   const before = new Map(prevList.map((p) => [p.pid, p]));
   const rows = [];
@@ -266,7 +311,80 @@ export function topProcs(prevList, curList, { dt, tck, page, ncpu, up, users, un
     for (const k of NEW_KEYS) if (row[k] == null) delete row[k];
     return row;
   });
-  return { n: curList.length, top: out, da: dacct === true ? true : dacct === false ? false : null };
+  const apps = appGroups(curList, rows, { tck, dt, page: pg, users, units, io, prevIo, usersUp, unitsUp, withAll });
+  return { n: curList.length, top: out, da: dacct === true ? true : dacct === false ? false : null, ...(apps ? { apps } : {}) };
+}
+
+/* ── 앱 단위 묶음(v3.14.0 ⑮ — 시안 Apps · 사용자 "기본값대로 모두 구현해줘") ──────────────
+ * 이미 받는 PROC(모든 프로세스) · UNIT(서비스) · PS(계정) · IO 로 묶는다 — 원격 명령 추가 없음.
+ *  · 서비스(sv): `.service` 는 그 이름 · `session-N.scope` 는 '사용자 세션' · 다른 `.scope` 는 그 이름 · 서비스가 없으면 커널 스레드(부모 pid 2 · kthreadd) 또는 '서비스 없음'.
+ *    서비스 지도를 아직 못 받았으면(UNIT 은 30초마다) 서비스 묶음은 null(모름 — 모두 '서비스 없음' 으로 지어내지 않는다).
+ *  · 프로그램 이름(cm): comm 의 숫자 덩어리를 * 로(ora_p001 · ora_p007 → ora_p* — 프로세스 탭 '이름별 묶음' 과 같은 규칙 `appNameOf`).
+ *  · 합: 프로세스 수 · 스레드 · CPU(코어 1개 = 100% · 두 표본에 다 있던 프로세스만) · RSS(MB — 공유 메모리를 여러 번 센다) ·
+ *    디스크 읽기 · 쓰기(MB/s — /proc/<pid>/io 를 읽은 프로세스만 · 다 읽었으면 io 'all' · 일부면 'part' · 못 읽었으면 값 null).
+ *  · 기준마다 CPU 순 상위 `APP_TOP`(20).
+ *  · `all`(v3.16.0 ⑯ 반증 H1): 서비스 이름 → 프로세스 수 전부(상한 APP_ALL_MAX · 수집기가 약 20초마다만 싣는다 — 메모리) — 필수 앱 알림이 상위 20 밖의
+ *    조용한 서비스 · 죽은 서비스(목록에 없음 = 0)를 가른다. 서비스 지도가 없으면 싣지 않는다(모름). DB 에는 남기지 않는다(알림 판정 전용).
+ */
+export const APP_TOP = 20;
+export const APP_KERNEL = '커널 스레드';
+export const APP_SESSION = '사용자 세션';
+export const APP_NOSVC = '서비스 없음';
+export const appNameOf = (c) => String(c || '').replace(/\d+/g, '*').slice(0, 64);
+/** 서비스 기준 열쇠(판정 코어 — query 의 펼침 목록도 이것을 쓴다). unit: 서비스 이름 | null · ppid · pid. */
+export function appServiceKey(unit, ppid, pid) {
+  if (unit) return /^session-[A-Za-z0-9._-]+\.scope$/.test(unit) ? APP_SESSION : unit;
+  if (pid === 2 || ppid === 2) return APP_KERNEL;
+  return APP_NOSVC;
+}
+/** 서비스마다 프로세스 수(상위 20 과 따로 — 반증 H1: 필수 앱 규칙은 조용한 서비스도 세어야 한다). 이름이 서비스인 것만 · 상한. */
+export const APP_ALL_MAX = 400;
+export function appGroups(curList, rows, { tck, dt, page = 4096, users, units, io, prevIo, usersUp = null, unitsUp = null, withAll = false } = {}) {
+  if (!Array.isArray(curList) || !curList.length || !(tck > 0) || !(dt > 0)) return null;
+  const cpu = new Map(); for (const r of rows || []) cpu.set(r.p.pid, r.cpu);
+  const after = (mapUp, p) => mapUp != null && p.start != null && p.start / tck > mapUp;
+  const haveUnits = units && typeof units.size === 'number' && units.size > 0;
+  const acc = { sv: new Map(), cm: new Map() };
+  for (const p of curList) {
+    const unit = haveUnits && !after(unitsUp, p) ? (units.get(p.pid) || null) : null;
+    const user = after(usersUp, p) ? null : (users?.get?.(p.pid) || null);
+    const i1 = io?.get?.(p.pid); const i0 = prevIo?.get?.(p.pid);
+    const rd = i1 && i0 ? delta(i0.r, i1.r) : null; const wr = i1 && i0 ? delta(i0.w, i1.w) : null;
+    const keys = [['cm', appNameOf(p.comm)]];
+    if (haveUnits) keys.push(['sv', appServiceKey(unit, p.ppid, p.pid)]);
+    for (const [mode, k] of keys) {
+      let g = acc[mode].get(k);
+      if (!g) { g = { k, n: 0, th: 0, cpu: 0, rss: 0, rb: 0, wb: 0, ion: 0, users: new Map() }; acc[mode].set(k, g); }
+      g.n += 1; g.th += p.thr ?? 0; g.cpu += cpu.get(p.pid) ?? 0; g.rss += p.rss ?? 0;
+      if (rd != null && wr != null) { g.rb += rd; g.wb += wr; g.ion += 1; }
+      if (user) g.users.set(user, (g.users.get(user) || 0) + 1);
+    }
+  }
+  const fin = (m) => [...m.values()].sort((a, b) => b.cpu - a.cpu || b.rss - a.rss || a.k.localeCompare(b.k)).slice(0, APP_TOP).map((g) => {
+    const top = [...g.users.entries()].sort((a, b) => b[1] - a[1])[0];
+    const row = { k: g.k, n: g.n, th: g.th, cpu: r1(g.cpu), rss: r1((g.rss * page) / 1048576),
+      rb: g.ion ? r2(g.rb / dt / 1048576) : null, wb: g.ion ? r2(g.wb / dt / 1048576) : null, io: g.ion === 0 ? 'none' : g.ion === g.n ? 'all' : 'part',
+      u: top ? top[0] : null, un: g.users.size };
+    if (row.rb == null) { delete row.rb; delete row.wb; }
+    if (!row.u) delete row.u;
+    return row;
+  });
+  let all = null;
+  let allCut = false;
+  if (withAll && haveUnits) {
+    all = {};
+    let k = 0;
+    // 전체 점검 29회차 F6(재현): 상한에서 자를 때 표시가 없어, 잘려 빠진 살아 있는 서비스를 알림이 '0개(죽음)' 로 읽었다 — 잘렸으면 allCut
+    // 30회차 E(재현): 컨테이너 scope 가 400개를 넘는 서버는 표본마다 allCut 이라 필수 앱(대개 .service)이 죽어도 영원히 '보류' 였다 —
+    //   **.service 를 먼저** 싣고, 잘린 것이 .service 가 아닌 단위뿐이면 allCut 은 'nonsvc'(알림은 .service 이름의 부재를 0 으로 읽는다).
+    const groups = [...acc.sv.values()].filter((g) => g.k !== APP_KERNEL && g.k !== APP_SESSION && g.k !== APP_NOSVC);
+    const ordered = [...groups.filter((g) => g.k.endsWith('.service')), ...groups.filter((g) => !g.k.endsWith('.service'))];
+    for (const g of ordered) {
+      if (k >= APP_ALL_MAX) { allCut = g.k.endsWith('.service') ? true : (allCut === true ? true : 'nonsvc'); continue; }
+      all[g.k] = g.n; k += 1;
+    }
+  }
+  return { sv: haveUnits ? fin(acc.sv) : null, cm: fin(acc.cm), ...(all ? { all, ...(allCut ? { allCut } : {}) } : {}) };
 }
 
 /** 개요 카드 요약(서버 1대 · 표본 1개) — 화면 · 비교 · 정렬이 같은 값을 쓴다. */
@@ -290,6 +408,10 @@ export function summaryOf(s) {
     iow: s.cpu?.iow ?? null, stl: s.cpu?.stl ?? null,
     load1: Array.isArray(s.load) ? (s.load[0] ?? null) : null, cores: Array.isArray(s.cpu?.cores) && s.cpu.cores.length ? s.cpu.cores.length : null,
     swU: s.mem?.swU ?? null, swT: s.mem?.swT ?? null,
+    // v3.12.0(⑬ ⑤ '비교 · 카드 줄에도'): 파일시스템 최대 % · TCP 재전송 % · D 상태 수 · 실행 대기/코어 · 스왑 입출력(페이지/s 합)
+    fsMax: fsMaxOf(s.fs), tcpRt: s.tcp?.rt ?? null, procD: s.pst?.D ?? null,
+    rq: s.run != null && Array.isArray(s.cpu?.cores) && s.cpu.cores.length ? r2(s.run / s.cpu.cores.length) : null,
+    swIo: s.vmp && s.vmp.si != null && s.vmp.so != null ? r2(s.vmp.si + s.vmp.so) : null,
     stuck: (s.dsk || []).some((d) => d.stuck && d.k === 'disk'),
   };
 }

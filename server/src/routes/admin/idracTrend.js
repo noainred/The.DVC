@@ -45,6 +45,7 @@ import { acquireExport } from '../../util/exportBusy.js';
 import { snapMemo, sendCached } from '../../util/snapCache.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { addLineCharts, sheetRef, colLetter } from '../../util/xlsxChart.js';
+import { scopeSig } from '../../util/scopeSig.js';
 
 const csvPerm = requirePerm('data.csv');
 const hiddenByScope = (req, s) => { const sc = idracScopeOf(req); return !!sc && !idracInScope(sc, s); };
@@ -662,7 +663,7 @@ export function registerIdracTrend(adminRouter) {
     const tf = typeFilterOf(req.query);
     const cond = [hours, String(req.query.corp ?? '*'), String(req.query.site ?? '*'), tf.gpu, tf.kind].map((x) => encodeURIComponent(String(x).slice(0, 200))).join('|');
     const role = `${req.user?.role || ''}${req.user?.superAdmin ? '+sa' : ''}`;
-    const key = `${snap.generatedAt}|idrac-trend-table|${cond}|${allowed ? [...allowed].sort().join(',') : 'all'}|${role}`;
+    const key = `${snap.generatedAt}|idrac-trend-table|${cond}|${scopeSig(allowed)}|${role}`;
     try {
       const payload = await snapMemo('idrac-trend-table', key, TABLE_MEMO_MS, () => trendTablePayload(req, hours));
       sendCached(req, res, key, payload);

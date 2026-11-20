@@ -5,6 +5,7 @@
  *  ③ 실제 라우트 /platform/summary — 범위(다른 법인 이름도 없다 · 요청 필터로 넓힐 수 없다) · 권한(inv.hosts · inv.vms 없으면 그 칸 null) · region 으로 좁히기
  *  ④ 메뉴(topMenu · sideMenu) — 항목 하나가 세 탭을 맡고 옛 저장 항목(tab:hosts · tab:vms)은 별칭으로 이어진다 · '다시 넣기' 후보가 아니다
  *     (v2.994: 항목 둘 — Virtual Machine(VM) = vms · vcenters · Hypervisor = hosts. 별칭은 tab:vcenters → tab:vms 하나)
+ *     (v3.19.0: 이름 Virtual Machine · 처음 탭 vcenters — 별칭은 tab:vms → tab:vcenters 하나. 옛 · 새 저장 형식 둘 다 같은 항목)
  */
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -146,7 +147,10 @@ test('③ 실제 라우트 /platform/summary — 범위 · 권한 칸 · region 
   assert.deepEqual(j.byVc.map((x) => x.id), [VA]);
   assert.equal(JSON.stringify(j).includes('vc-out'), false);
   ({ j } = await get('?vcenterId=' + OUT));
-  assert.deepEqual(j.byVc, [], '범위 밖 vcenterId 는 비어 있다');
+  // v3.20.0(허브 복수 법인): byVc 는 고른 법인과 무관하게 범위 안 전체 줄(칩 숫자 유지) · totals 는 고른 법인의 합 — 범위 밖만 고르면 0건
+  assert.deepEqual(j.byVc.map((x) => x.id), [VA], '범위 밖 vcenterId 로 넓힐 수 없다 — 줄은 범위 안 것만');
+  assert.equal(JSON.stringify(j).includes('vc-out'), false);
+  assert.equal(j.totals.vcenters.total, 0, '범위 밖 vcenterId 의 합은 0건(전체가 아니다)');
   // inv.vms 없는 역할 — VM 칸은 null(호스트 칸은 있다) · 캐시가 역할 사이에 섞이지 않는다(같은 URL)
   user = { username: 'op', role: 'operator' };
   ({ j } = await get());
@@ -163,7 +167,8 @@ test('③ 실제 라우트 /platform/summary — 범위 · 권한 칸 · region 
   assert.equal(j.totals.vms.total, 3, '관리자로 돌아오면 전체 — 캐시 키에 권한이 있다');
 });
 
-test('④ 메뉴 — v2.994 두 항목(Virtual Machine(VM) = vms · vcenters / Hypervisor = hosts)이 세 탭을 나눠 맡는다 · 옛 저장 항목은 별칭 · 실제 항목으로 잇는다', () => {
+test('④ 메뉴 — v2.994 두 항목(Virtual Machine = vcenters · vms / Hypervisor = hosts)이 세 탭을 나눠 맡는다 · 옛 저장 항목은 별칭 · 실제 항목으로 잇는다', () => {
+  // v3.19.0(사용자 요청 2026-11-18): 이름 'Virtual Machine(VM)' → 'Virtual Machine' · 처음 여는 탭 vms → vcenters(vCenter 카드 화면).
   // v2.994(사용자 요청 2026-11-13 · 설계 docs/design/server-menu-rename): 이름 '가상화 플랫폼' → 'Virtual Machine(VM)' · 호스트 탭은 새 항목 'Hypervisor'.
   //   허브 제목은 PT.platformMenuLabel(tab) 이 MENU_GROUPS 라벨에서 읽는다(옛 상수 PLATFORM_MENU_LABEL 은 없앴다).
   const server = TM.MENU_GROUPS.find((g) => g.id === 'server');
@@ -173,8 +178,9 @@ test('④ 메뉴 — v2.994 두 항목(Virtual Machine(VM) = vms · vcenters / H
   assert.equal(PT.platformMenuLabel('vms'), virt.label);
   assert.equal(PT.platformMenuLabel('vcenters'), virt.label);
   assert.equal(PT.platformMenuLabel('hosts'), hv.label);
-  assert.deepEqual([virt.label, hv.label], ['Virtual Machine(VM)', 'Hypervisor']);
-  assert.deepEqual(TM.tabsOf(virt), ['vms', 'vcenters']);
+  assert.deepEqual([virt.label, hv.label], ['Virtual Machine', 'Hypervisor']);
+  assert.deepEqual(TM.tabsOf(virt), ['vcenters', 'vms']);
+  assert.equal(TM.hashOf(virt), '#/vcenters');
   assert.deepEqual(TM.tabsOf(hv), ['hosts']);
   assert.deepEqual([...TM.tabsOf(virt), ...TM.tabsOf(hv)].sort(), [...PT.PLATFORM_TAB_KEYS].sort());
   assert.deepEqual([...virt.also, ...hv.also], [...PT.PLATFORM_TOOL_KEYS]);
@@ -183,7 +189,7 @@ test('④ 메뉴 — v2.994 두 항목(Virtual Machine(VM) = vms · vcenters / H
   assert.deepEqual(TM.locate('hosts', '#/hosts'), { group: 'server', child: 'hv' });
   assert.deepEqual(TM.locate('tools', '#/tools/host-hygiene'), { group: 'server', child: 'hv' });
   assert.deepEqual(TM.locate('tools', '#/tools/vcversion'), { group: 'server', child: 'virt' });
-  // 권한: inv.vms 만 있으면 VM 탭으로 · dashboard 만이면 vCenter 탭으로(entryTab) · 셋 다 없으면 두 항목 모두 빠진다
+  // 권한: inv.vms 만 있으면(dashboard 없음) VM 탭으로(entryTab) · dashboard 가 있으면 vCenter 탭으로 · 셋 다 없으면 두 항목 모두 빠진다
   let m = TM.visibleMenu({ tabOk: (t) => t === 'vms', toolOk: () => false });
   let it = m.find((g) => g.id === 'server').children.find((c) => c.id === 'virt');
   assert.equal(TM.hashOf(it), '#/vms');
@@ -205,5 +211,11 @@ test('④ 메뉴 — v2.994 두 항목(Virtual Machine(VM) = vms · vcenters / H
   assert.equal(r2.unknown, 0);
   assert.deepEqual(r2.groups[0].children.map((c) => c.id), ['virt']);
   assert.equal(SM.missingDefaults(r2.groups).some((d) => d.key === 'tab:hosts'), true);
-  assert.deepEqual([...SM.itemAliases().entries()], [['tab:vcenters', 'tab:vms']]);
+  assert.deepEqual([...SM.itemAliases().entries()], [['tab:vms', 'tab:vcenters']]);   // v3.19.0 방향(v2.994~v3.18 은 tab:vcenters → tab:vms)
+  // v3.19.0: v2.994~v3.18 저장 형식(tab:vms)과 새 형식(tab:vcenters) 둘 다 같은 항목 · 다시 저장하면 새 형식
+  for (const tab of ['vms', 'vcenters']) {
+    const r3 = SM.resolveMenu({ mine: { v: 1, groups: [{ id: 'server', children: [{ tab }] }] }, catalog: [] });
+    assert.equal(r3.unknown, 0, tab);
+    assert.deepEqual(r3.groups[0].children.map((c) => [c.id, c.label, c.tab]), [['virt', 'Virtual Machine', 'vcenters']], tab);
+  }
 });

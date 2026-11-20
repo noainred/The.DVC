@@ -20,6 +20,7 @@ import { collectDeviceNow, forgetDevices } from '../pdu/poller.js';
 import { pushPduNow, pduPushStatus } from '../pdu/push.js';
 import { runtimeIntervals, applyCentralIntervals, startAdaptiveTimer } from '../pdu/intervals.js';
 import { applyCentralThresholds } from '../pdu/thresholds.js';
+import { readJsonCapped, EDGE_RESPONSE_MAX_BYTES } from '../util/readCapped.js'; // 87회차 ⓓ(85 E3 — 권장안): 중앙 응답은 상한 읽기(형제 pull 과 같게 — 상한 없는 res.json() 금지)
 
 const configPullMs = () => runtimeIntervals().configPullMs;
 let _timer = null;
@@ -125,7 +126,7 @@ async function _pull() {
       return { ok: false, kind: c.kind, reason: c.reason };
     }
     if (!res.ok) throw new Error(`pdu-config <- ${res.status}`);
-    const body = await res.json();
+    const body = await readJsonCapped(res, EDGE_RESPONSE_MAX_BYTES, '중앙 응답');
 
     // 주기를 장비 목록보다 먼저 적용한다. 중앙이 값을 안 주면 빈 객체 → 엣지가 자기 env 로
     // 되돌아간다('중앙 미설정 = 로컬 유지' 계약). 이 호출이 타이머 재무장까지 트리거한다.

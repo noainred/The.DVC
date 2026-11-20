@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';   // v2.741(LEFT-13): NDJSON 폴백 재기록은 tmp → rename
 import path from 'node:path';
 import { config } from '../config.js';
-import { loadLogSettings } from './settings.js';
+import { loadLogSettings, logSettingsUnknown } from './settings.js';
 import { openSqlite, retryOnLock } from '../util/sqliteOpen.js';
 import { chunkedDelete, nextAdaptiveChunk, PRUNE_CHUNK_ROWS } from '../util/chunkedPrune.js';
 import { TRACKED_TYPES, TRACKED_SQL, OPS_TYPES, OPS_SQL } from '../vmchanges/eventDetail.js'; // v2.702(A7·A8): 이동·구성 변경·권한 이벤트 상세
@@ -852,9 +852,23 @@ function initJson() {
   function rewrite() { try { atomicWriteFileSync(file, rows.map((r) => JSON.stringify(r)).join('\n') + '\n', { mode: 0o600 }); } catch (e) { console.warn(`[vclogs] NDJSON 폴백 재기록 실패(메모리는 정리됨 — 다음 정리 때 다시 씁니다): ${e.message}`); } }
 }
 
+/*
+ * 96회차 R1(92회차 F3 의 덜 고침 — 재현): 로그 보관 설정 파일을 못 읽는 동안(logSettingsUnknown) 저장 위치를 모른다 — 폴러는 건너뛰지만
+ *   다른 읽기 소비처(상태 · 조회 · 재부팅 · VM 변경 · Veeam 스냅샷 요약 …)가 부른 getLogsDb 는 **기본 위치**(CONFIG_DIR) DB 를 열어 캐시했고,
+ *   설정이 다시 읽혀(저장 위치를 따로 지정한 현장) 폴러가 돌아와도 그 캐시된 기본 위치 DB 에 이어 썼다(관리자가 고른 디스크가 아닌 곳 · 이력이 둘로 갈림 ·
+ *   재시작이나 경로 저장 전까지). 이제 '모름' 동안 연 핸들을 표시해 두고, 설정이 읽히면 경로를 대조해 다르면 닫고 지정 위치로 다시 연다.
+ */
+let _openedUnknown = false;
 export async function getLogsDb() {
+  if (_openedUnknown && !logSettingsUnknown()) {
+    if (impl && impl.path && impl.path !== dbPath()) resetLogsDb();   // 저장 위치가 다르다 — 지정 위치로 다시 연다
+    _openedUnknown = false;
+  }
   if (impl) return impl;
-  if (!ready) ready = retryOnLock(initSqlite, { tag: 'vclogs' }).catch((err) => { console.warn(`[vclogs] node:sqlite 불가(${err.code || err.message}); NDJSON 폴백.`); return initJson(); });
+  if (!ready) {
+    _openedUnknown = logSettingsUnknown();
+    ready = retryOnLock(initSqlite, { tag: 'vclogs' }).catch((err) => { console.warn(`[vclogs] node:sqlite 불가(${err.code || err.message}); NDJSON 폴백.`); return initJson(); });
+  }
   impl = await ready;
   return impl;
 }

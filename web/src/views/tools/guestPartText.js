@@ -149,3 +149,20 @@ export function vmPartNote(d, now = Date.now()) {
   }
   return { empty: '', stale: '' };
 }
+
+/**
+ * 결정(56~75 남긴 것) 68 D1: 게스트 머리 줄의 오른쪽 값 — 판정 단위 'vm' 이면 VM 합계, 'part' 면 가장 높은 파티션.
+ *   'vm' 에서 값 모름 파티션이 있는 VM 은 서버가 합계를 만들지 않는다(pct null — 부분 합으로 판정하지 않는다) — '합계 —' 대신 그 사실을 말한다.
+ */
+export function vmSumText(v, mode) {
+  if (mode !== 'vm') return `최고 ${pctText(v?.maxPct)}`;
+  const n = numOrNull(v?.unknownParts);
+  if (n != null && n > 0) return `값 모름 ${n}개 — 판정 안 함`;
+  return `합계 ${pctText(v?.pct)}`;
+}
+
+/** 68 D1: KPI '확인 불가' 아래 줄에 붙일 'vm' 단위 판정 보류 수(파티션 단위 · 0 · 모름이면 ''). */
+export function unknownVmsText(kpi, mode) {
+  const n = mode === 'vm' ? numOrNull(kpi?.unknownVms) : null;
+  return n != null && n > 0 ? ` · 값 모름으로 판정 안 한 게스트 ${n.toLocaleString('ko-KR')}` : '';
+}

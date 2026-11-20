@@ -28,6 +28,11 @@ export function redactKeyStoreText(text) {
   return { text: JSON.stringify({ keys: strip(j?.keys), accounts: strip(j?.accounts) }, null, 2), redacted: n };
 }
 
+/** v3.24: 공통 계정의 OS 계열 · 로그인 종류(keyStore.accountFamily 와 같은 규칙 — 이 파일은 무의존 leaf 라 다시 적는다). */
+const accFamily = (a) => (a?.os === 'windows' ? 'windows' : 'linux');
+const accLogon = (a) => (accFamily(a) === 'windows' ? (a?.logon === 'ad' ? 'ad' : 'local') : '');
+const ACCOUNT_CURRENT_FIELDS = Object.freeze(['features', 'pwSetAt', 'verifiedAt', 'verifiedOn', 'rotateBy']);
+
 /**
  * 복원 병합 — 번들의 가린 칸은 **지금 파일의 같은 키(지문) · 같은 계정(id)** 값으로 되살린다. 되살릴 수 없는 키는 빼고, 비밀번호를 되살릴 수 없는 계정은 비밀번호 없이 남긴다.
  * 7b 반증 F13(결정): 번들에는 개인키가 없으므로 복원이 키를 **다시 만들 수 없다** → 지금 파일에만 있는 키 · 계정(백업 뒤 등록분)은 **지우지 않고 그대로 둔다**(합집합).
@@ -75,11 +80,16 @@ export function mergeRedactedKeyStore(bundleText, currentText) {
   for (const a of (Array.isArray(b?.accounts) ? b.accounts : [])) {
     if (!a || typeof a !== 'object') continue;
     const o = { ...a };
+    const c = curAccById.get(String(o.id || ''));
     if (o.password === REDACTED_SECRET) {
-      const c = curAccById.get(String(o.id || ''));
-      const same = c && String(c.kind || '') === String(o.kind || '') && lc(c.corp) === lc(o.corp) && lc(c.username) === lc(o.username);
+      // v3.24 반증 F4(재현): OS 계열 · 로그인 종류 · 도메인도 같아야 지금 비밀번호를 붙인다 — 다르면 새 비밀번호가 옛 도메인 · 다른 OS 로 간다(saveAccount 의 '바뀌면 잇지 않음' 과 같은 규칙).
+      const same = c && String(c.kind || '') === String(o.kind || '') && lc(c.corp) === lc(o.corp) && lc(c.username) === lc(o.username)
+        && accFamily(c) === accFamily(o) && accLogon(c) === accLogon(o) && lc(c.domain) === lc(o.domain);
       if (same && typeof c.password === 'string' && c.password) { o.password = c.password; restored += 1; } else { o.password = ''; dropped.push(`account:${String(o.name || o.id || '').slice(0, 64)}`); }
     }
+    // v3.24 반증 F4: 지금 계정이 있으면 허용 기능 · 비밀번호 판(pwSetAt — 계정 단위 정지가 이 판에 걸린다) · 확인 기록 · 교체 예정일은 지금 값이다
+    //   (키가 지금의 폴더 · 기능 · 상태를 쓰는 것과 같은 규칙 — OTP 없는 복원이 좁혀 둔 기능을 넓히거나 정지를 풀지 않게).
+    if (c) for (const f of ACCOUNT_CURRENT_FIELDS) { if (Object.hasOwn(c, f)) o[f] = c[f]; else delete o[f]; }
     if (o.keyRef && !keys.some((k) => k.id === o.keyRef)) o.keyRef = '';
     accounts.push(o);
   }

@@ -29,7 +29,7 @@ export function Badge({ b }) { return b ? <span className={`fm-badge ${b.tone ||
 export function copyText(t) { return copyToClipboard(t); }
 
 /* ── CSV 대량 등록 ─────────────────────────────────────────────────────────── */
-export function CsvPanel({ main, busy, run, onClose }) {
+export function CsvPanel({ main, busy, run, onClose }) {   // 29회차 F8: 내려받기 실패는 run 이 메시지로 알린다(.catch(() => {}) 로 삼키지 않는다)
   const lim = main.csv || { maxRows: main.limits.maxTargets, maxBytes: 200_000 };
   const [text, setText] = useState('');
   const [plan, setPlan] = useState(null);
@@ -60,6 +60,7 @@ export function CsvPanel({ main, busy, run, onClose }) {
     if (!autoTest || !r.ids?.length) return { ok: true, reason: head };
     try {
       const b = await postJson('/tools/focus-mon/targets/test-bulk', { ids: r.ids });
+      if (b?.ok === false || !b?.job) return { ok: false, reason: `${head} 연결 시험은 시작하지 못했습니다(${b?.reason || '사유 미상'}).` };   // 128회차: 409 본문에는 job 이 없다
       return { ok: true, reason: `${head} 넣은 ${b.job.total}대의 연결 시험을 시작했습니다 — 진행은 위 띠에 나옵니다.` };
     } catch (e) { return { ok: false, reason: `${head} 연결 시험은 시작하지 못했습니다(${e?.body?.reason || e?.message}).` }; }
   });
@@ -71,8 +72,8 @@ export function CsvPanel({ main, busy, run, onClose }) {
       <div className="fm-row fm-between">
         <span className="fm-row">
           <label className="fm-btn fm-file">파일 고르기<input type="file" accept=".csv,.tsv,.txt,text/csv,text/plain" onChange={onFile} /></label>
-          <button type="button" className="fm-btn" disabled={!canCsv()} title={canCsv() ? '' : CSV_DENIED_NOTE} onClick={() => downloadFile('/tools/focus-mon/targets/export.csv?template=1').catch(() => {})}>빈 양식 받기</button>
-          <button type="button" className="fm-btn" disabled={!canCsv()} title={canCsv() ? '' : CSV_DENIED_NOTE} onClick={() => downloadFile('/tools/focus-mon/targets/export.csv').catch(() => {})}>지금 등록부 내보내기</button>
+          <button type="button" className="fm-btn" disabled={!canCsv()} title={canCsv() ? '' : CSV_DENIED_NOTE} onClick={() => run('양식 받기', () => downloadFile('/tools/focus-mon/targets/export.csv?template=1'))}>빈 양식 받기</button>
+          <button type="button" className="fm-btn" disabled={!canCsv()} title={canCsv() ? '' : CSV_DENIED_NOTE} onClick={() => run('등록부 내보내기', () => downloadFile('/tools/focus-mon/targets/export.csv'))}>지금 등록부 내보내기</button>
         </span>
         <span className="fm-dim">최대 {lim.maxRows}줄 · 쉼표 또는 탭 · 따옴표 칸 가능 · 머리글이 있으면 열 순서 무관</span>
       </div>

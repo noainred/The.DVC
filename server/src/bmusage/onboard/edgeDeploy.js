@@ -12,8 +12,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../../util/atomicWrite.js';
 import { makeLoadError } from '../../util/registryCore.js';
+import { makeJsonFileReader } from '../../util/jsonFileLoad.js';
+import { parseJsonObject } from '../../util/jsonObject.js';
 import { edgeRowFromPlan } from './importAnalyze.js';
 
 export const EDGE_FILE_NAME = 'bm-onboard-edge.json';
@@ -26,32 +28,48 @@ let cache = null;
 const loadErr = makeLoadError();
 export function edgeDeployLoadError() { load(); return loadErr.get(); }
 
+/** 파일 글 → { agents }(형식 검사 포함 — 던지면 손상: jsonFileLoad 가 보존본으로 옮긴다). */
+function parseEdgeFile(text) {
+  const j = parseJsonObject(text);
+  const agents = Object.create(null);
+  const src = j && typeof j.agents === 'object' && j.agents && !Array.isArray(j.agents) ? j.agents : {};
+  for (const [a, v] of Object.entries(src)) {
+    const k = lc(a);
+    if (!k || k.length > 64 || !v || typeof v !== 'object') continue;
+    const rows = (Array.isArray(v.rows) ? v.rows : []).filter((r) => r && typeof r === 'object' && !Array.isArray(r)).slice(0, MAX_EDGE_ROWS).map((r) => edgeRowFromPlan({
+      name: r.name, vc: r.corp, tag: r.serviceTag, idracHost: r.idracHost, idracCred: r.idracCred, osHost: r.osHost, osPort: r.osPort, osCred: r.osCred, osUser: r.osUser, osKey: r.osKey,
+      mounts: r.mounts, enabled: r.enabled, note: r.note, cls: r.cls, apps: r.apps, role: r.role, bindOk: r.bindOk,
+    }, k)).filter((r) => r.name);
+    // 반증 F14: 배포에서 뺐지만 엣지가 아직 반영(적용 서명 확인)하지 않은 행 — 그 동안 같은 서버의 central 등록을 막는다.
+    const pending = (Array.isArray(v.pending) ? v.pending : []).filter((x) => x && typeof x === 'object' && x.name).slice(0, MAX_EDGE_ROWS)
+      .map((x) => ({ name: String(x.name).slice(0, 128), corp: String(x.corp || '').slice(0, 128), at: Number(x.at) > 0 ? Number(x.at) : 0 }));
+    agents[k] = { rows, pending, at: Number(v.at) > 0 ? Number(v.at) : 0, by: String(v.by || '').slice(0, 64) };
+  }
+  return { agents };
+}
+/**
+ * 77회차 F2(재현): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 예전에는 catch 하나로 받아 원본을 `.corrupt.*` 로 옮겼고(보존본만 남아 재시작 뒤에도 503),
+ *   권한을 바로잡아도 사람이 되돌리기 전까지 배포 목록이 비어 엣지 적용이 멈췄다. 판정은 공용 util/jsonFileLoad.js — 읽기 오류면 원본 그대로 · 쓰기 거절(loadErr) ·
+ *   30초 간격으로 다시 읽어 읽히면 스스로 풀린다.
+ */
+const _reader = makeJsonFileReader(() => FILE, { tag: 'bm-onboard-edge', parse: parseEdgeFile });
+let _readPending = false;
 function load() {
-  if (cache) return cache;
-  try {
-    if (fs.existsSync(FILE)) {
-      const j = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-      const agents = Object.create(null);
-      const src = j && typeof j.agents === 'object' && j.agents && !Array.isArray(j.agents) ? j.agents : {};
-      for (const [a, v] of Object.entries(src)) {
-        const k = lc(a);
-        if (!k || k.length > 64 || !v || typeof v !== 'object') continue;
-        const rows = (Array.isArray(v.rows) ? v.rows : []).filter((r) => r && typeof r === 'object' && !Array.isArray(r)).slice(0, MAX_EDGE_ROWS).map((r) => edgeRowFromPlan({
-          name: r.name, vc: r.corp, tag: r.serviceTag, idracHost: r.idracHost, idracCred: r.idracCred, osHost: r.osHost, osPort: r.osPort, osCred: r.osCred, osUser: r.osUser, osKey: r.osKey,
-          mounts: r.mounts, enabled: r.enabled, note: r.note, cls: r.cls, apps: r.apps, role: r.role, bindOk: r.bindOk,
-        }, k)).filter((r) => r.name);
-        // 반증 F14: 배포에서 뺐지만 엣지가 아직 반영(적용 서명 확인)하지 않은 행 — 그 동안 같은 서버의 central 등록을 막는다.
-        const pending = (Array.isArray(v.pending) ? v.pending : []).filter((x) => x && typeof x === 'object' && x.name).slice(0, MAX_EDGE_ROWS)
-          .map((x) => ({ name: String(x.name).slice(0, 128), corp: String(x.corp || '').slice(0, 128), at: Number(x.at) > 0 ? Number(x.at) : 0 }));
-        agents[k] = { rows, pending, at: Number(v.at) > 0 ? Number(v.at) : 0, by: String(v.by || '').slice(0, 64) };
-      }
-      cache = { agents };
-    }
-  } catch (e) { preserveCorrupt(FILE, e?.message); loadErr.set(e); cache = null; }
+  if (cache && !_readPending) return cache;
+  const r = _reader.read();
+  if (r.kind === 'read-error') {
+    if (!_readPending || !loadErr.get()) { const e = loadErr.set(`읽기 오류(${String(r.error?.code || 'read-error').slice(0, 32)}) — 손상이 아니라 원본은 그대로 둡니다`); e.readError = true; }
+    _readPending = true;
+    cache = { agents: Object.create(null) };
+    return cache;
+  }
+  if (_readPending) { _readPending = false; loadErr.clear(); }
+  cache = r.kind === 'ok' ? r.value : null;
+  if (r.kind === 'corrupt') loadErr.set(r.error);
   if (!cache) { loadErr.checkCorruptOnly(FILE); cache = { agents: Object.create(null) }; }
   return cache;
 }
-export function _resetEdgeDeployForTest() { cache = null; loadErr.clear(); }
+export function _resetEdgeDeployForTest() { cache = null; loadErr.clear(); _reader.reset(); _readPending = false; }
 
 /** 한 엣지의 배포 행(사본). */
 export function edgeRowsFor(agent) { const v = load().agents[lc(agent)]; return v ? v.rows.map((r) => ({ ...r })) : []; }
@@ -116,12 +134,18 @@ export function deployFor(agent, { verified = false } = {}) {
 
 /* 엣지별 마지막 인출(인메모리 — 중앙 재시작 직후엔 비어 있고 화면이 그 사실을 말한다). */
 const _pulls = new Map();
-export function recordOnboardPull(agent, { appliedSig = '', applied = null, version = '', now = Date.now() } = {}) {
+/**
+ * 결정(76~105 남긴 것 · 2026-11-20) A3: `stateUnread` — 엣지가 적용 상태 파일(bm-onboard-applied.json)을 **읽지 못했다**는 불리언 하나(엄격한 true 만 ·
+ *   사유 원문 · 오류 코드는 받지 않는다). 인출마다 기록을 통째로 바꾸므로 칸이 없거나 거짓인 다음 인출이 표지를 지운다(한 번 세운 표지가 남지 않는다).
+ *   판정(서명 · 제거 대기 정리)에는 쓰지 않는다 — 화면 문구만.
+ */
+export function recordOnboardPull(agent, { appliedSig = '', applied = null, version = '', stateUnread = false, now = Date.now() } = {}) {
   const a = lc(agent); if (!a) return;
   if (!_pulls.has(a) && _pulls.size >= 512) _pulls.delete(_pulls.keys().next().value);
   const n = (v) => (Number.isInteger(v) && v >= 0 && v <= 100000 ? v : null);
   _pulls.set(a, { at: now, appliedSig: String(appliedSig || '').slice(0, 64).replace(/[^0-9a-f]/g, ''), version: String(version || '').slice(0, 32),
-    applied: applied && typeof applied === 'object' ? { ok: n(applied.ok), rejected: n(applied.rejected), removed: n(applied.removed) } : null });
+    applied: applied && typeof applied === 'object' ? { ok: n(applied.ok), rejected: n(applied.rejected), removed: n(applied.removed) } : null,
+    stateUnread: stateUnread === true });
 }
 export function onboardPullOf(agent) { return _pulls.get(lc(agent)) || null; }
 

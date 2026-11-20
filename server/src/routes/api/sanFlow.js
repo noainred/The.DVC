@@ -7,13 +7,14 @@ import { fullReadWriteScopeOnlyWith } from '../admin/shared.js';
 import { reauth } from './reauth.js';
 import { maskErrText } from './cvp.js';
 import { store } from '../../store.js';
-import { listDevices as listSanDevices, getDeviceWithSecret } from '../../sanswitch/registry.js';
+import { listDevices as listSanDevices, getDeviceWithSecret, registryLoadError as sanRegistryLoadError } from '../../sanswitch/registry.js';
+import { registryMark } from '../settingsUnreadMark.js';   // 133회차: SAN 스위치 등록부를 못 읽은 동안의 빈 목록은 '등록 없음' 이 아니다(128회차 F3 의 형제 화면)
 import { localSnapshots as sanLocalSnaps } from '../../sanswitch/store.js';
-import { edgeSanSwitchSnapshots } from '../../central/sanSwitchEdge.js';
+import { edgeSanSwitchSnapshots, edgeSanSwitchSnapshotFor } from '../../central/sanSwitchEdge.js';
 import { edgeVersionOf } from '../../central/idracScanPush.js';
 import { buildFabrics, attributeHost, fabricVisionOf } from '../../sanswitch/attribution.js';
 import { normWwn } from '../../sanswitch/zoning.js';
-import { flowNameFor, flowLimitOf, buildFlowCommands, FLOW_NAME_RE, PORT_RE, WWN_RE, MONITOR_PER_PORT } from '../../sanswitch/flowCmd.js';
+import { flowNameFor, flowLimitOf, buildFlowCommands, vfPrefixOf, FLOW_NAME_RE, PORT_RE, WWN_RE, MONITOR_PER_PORT } from '../../sanswitch/flowCmd.js';
 import { startFlowJob, getFlowJob, recentFlowJobs, listFlows, flowChecks, startFlowShowTimer, lastShowCycle, forgetFlow, SHOW_EVERY_MS, EDGE_DEADLINE_MS } from '../../sanswitch/flowJobs.js';
 import { isMockMode } from '../../mock/demo/flags.js';
 import { ensureSanSwitchDemo } from '../../sanswitch/poller.js';
@@ -112,7 +113,7 @@ async function planCreate(b) {
 
 /** 엣지 위임 스위치의 인증 정지 — 엣지가 스냅샷 extra.authStopped 로 올린다(그 엣지의 정지 기록 · 반증 H-2). */
 export function edgeAuthStopOf(deviceId) {
-  try { return edgeSanSwitchSnapshots().find((s) => s?.deviceId === deviceId)?.extra?.authStopped || null; } catch { return null; }
+  try { return edgeSanSwitchSnapshotFor(deviceId)?.extra?.authStopped || null; } catch { return null; }   // 58회차 F1: 가장 늦은 수집 사본(옛 엣지의 낡은 정지 기록 금지)
 }
 
 /**
@@ -171,7 +172,7 @@ export function registerSanFlow(api) {
         esxiBps: esxiBpsOf(t), esxiAt: t ? (sp.at ?? null) : null };
     });
     res.set('Cache-Control', 'no-store').json({ ok: true, devices, flows: out, jobs: recentFlowJobs(10).map((j) => maskJob(j, mask)), showEveryMs: SHOW_EVERY_MS,
-      edgeDeadlineMs: EDGE_DEADLINE_MS, showCycle: lastShowCycle() });
+      edgeDeadlineMs: EDGE_DEADLINE_MS, showCycle: lastShowCycle(), ...registryMark(sanRegistryLoadError()) });   // 133회차: 등록부 표지
   });
 
   /** 만들기 폼 ① — 이 스위치에 HBA 가 로그인한 호스트(스냅샷 포트의 연결 WWN 기준 · 최대 300). */
@@ -228,7 +229,8 @@ export function registerSanFlow(api) {
     if (p.status) return res.status(p.status).json({ ok: false, reason: p.reason });
     const built = buildFlowCommands('create', p.flows);
     if (built.issue) return res.status(400).json({ ok: false, reason: built.issue });
-    res.set('Cache-Control', 'no-store').json({ ok: true, flows: p.flows.map(flowOut), cmds: built.cmds, limit: p.limit, known: p.known, onPort: p.onPort, perPort: MONITOR_PER_PORT, ingrport: p.ingr });
+    res.set('Cache-Control', 'no-store').json({ ok: true, flows: p.flows.map(flowOut), cmds: built.cmds.map((c) => `${vfPrefixOf(p.dev)}${c}`),   // 58회차 F2: 실제로 보낼 글자(VF 접두 포함)
+      limit: p.limit, known: p.known, onPort: p.onPort, perPort: MONITOR_PER_PORT, ingrport: p.ingr });
   });
 
   /** 만들기 — 호스트 HBA 하나 · 그 zone 안 타깃 1~8개 → 타깃마다 모니터 플로우 하나. OTP 재인증. */

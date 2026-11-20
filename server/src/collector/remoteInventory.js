@@ -13,6 +13,7 @@
  * In-memory only (rebuilt on next pull, ≤ pull interval). O(N) per collector.
  */
 
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { edgeId, isPlainObj } from '../central/edgeRecord.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { expandCompact, compactSensor } from '../idrac/sensorDetail.js'; // v2.659 센서 상세
@@ -29,7 +30,7 @@ const byCollector = new Map(); // collectorId -> { at, datacenter, servers: [...
  * 규칙: 글자 필드는 글자(또는 유한 숫자)만 — 객체·배열·함수는 **null**(지어낸 글자를 넣지 않는다), 숫자 필드는
  * numOrNull(못 읽은 값을 0 으로 만들지 않는다), 인벤토리는 엣지 `compactInv` 와 같은 모양만 받는다.
  */
-export const REMOTE_SERVERS_MAX = Math.max(100, Number(process.env.COLLECTOR_REMOTE_SERVERS_MAX) || 20_000);
+export const REMOTE_SERVERS_MAX = Math.max(100, envPositive(process.env.COLLECTOR_REMOTE_SERVERS_MAX, 20_000));
 const STR_MAX = 256;
 const ARR_MAX = 256;
 
@@ -302,7 +303,7 @@ export function sanitizeAuthDeny(d) {
  *   내보내므로 servers 와 같은 상한(REMOTE_SERVERS_MAX)이 기본이다. 예전에는 상한이 응답 바이트(64MB)뿐이라 약 29바이트 원소 200만 개가
  *   지나갔고 puller 의 원소별 setRemoteHost·db.latest + insertMany 한 트랜잭션이 이벤트 루프를 동기로 멈췄다(10만 건 약 1초 · 100만 건 8초 재현).
  */
-export const REMOTE_BYHOST_MAX = Math.max(100, Number(process.env.COLLECTOR_REMOTE_BYHOST_MAX) || REMOTE_SERVERS_MAX);
+export const REMOTE_BYHOST_MAX = Math.max(100, envPositive(process.env.COLLECTOR_REMOTE_BYHOST_MAX, REMOTE_SERVERS_MAX));
 
 export function sanitizeEdgeExport(data) {
   const d = isPlainObj(data) ? data : {};

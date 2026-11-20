@@ -18,18 +18,19 @@
  *  - 어떤 실패도 다른 DB 점검을 막지 않는다(파일별 격리).
  */
 
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import fs from 'node:fs';
 import path from 'node:path';
 
 // COUNT(*) 를 수행할 파일 크기 상한 — 초과 시 rowCount 는 null 이고 skipped 이유를 남긴다.
-const COUNT_MAX_BYTES = Number(process.env.DB_HEALTH_COUNT_MAX_BYTES) || 512 * 1024 * 1024;
+const COUNT_MAX_BYTES = envPositive(process.env.DB_HEALTH_COUNT_MAX_BYTES, 512 * 1024 * 1024);
 // full(integrity_check) 는 전 페이지를 동기로 읽어 **파일 크기에 비례해 이벤트 루프를 정지**시킨다
 // (node:sqlite 는 동기 API — GB 급 DB 면 수 초 이상 전체 API·폴러가 멈춘다). 상한 초과 시
 // quick_check 로 강등하고 그 사실을 skipped 로 알린다(추정치를 지어내지 않는다).
-const FULL_MAX_BYTES = Number(process.env.DB_HEALTH_FULL_MAX_BYTES) || 256 * 1024 * 1024;
+const FULL_MAX_BYTES = envPositive(process.env.DB_HEALTH_FULL_MAX_BYTES, 256 * 1024 * 1024);
 // v2.590 P7: quick_check 도 전 페이지를 읽는다(SQLite 문서: O(N)). 실측 423MB 에 657ms — 운영 DB(수십 GB)면 수십 초
 // 이벤트 루프 정지다. 상한 초과면 **생략하고 그 사실을 밝힌다**(ok 를 지어내지 않는다 — integrity.ok = null).
-const QUICK_MAX_BYTES = Number(process.env.DB_HEALTH_QUICK_MAX_BYTES) || 512 * 1024 * 1024;
+const QUICK_MAX_BYTES = envPositive(process.env.DB_HEALTH_QUICK_MAX_BYTES, 512 * 1024 * 1024);
 
 /** 이 저장소 규약: ipam.db 는 외부 프로그램이 직접 읽어 WAL 금지, 나머지 시계열 DB 는 WAL 권장. */
 const EXPECT_WAL = (file) => !/^ipam\.db$/i.test(file);

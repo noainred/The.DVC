@@ -6,9 +6,12 @@
  *  · 평균은 값이 있는 VM 만(v2.629 WEB2629-01) — 못 읽은 VM 을 0 으로 세면 평균이 거짓으로 내려간다. 대상이 0 이면 null('—'). 뺀 수는 missing.
  *  · diskGB·diskTB 는 읽은 VM 만(sm 이 null 을 0 으로 접는다) — 뺀 수를 storageUnknown 으로 밝힌다(v2.727 C-01).
  *  · 평균 디스크 사용률은 committed·uncommitted 를 **둘 다** 읽은 VM 만.
+ *  · vcpu·ramGB 는 읽은 VM 만(v3.28.1 — 판정 코어 vcenter/vmSums.js · 템플릿 포함: 받은 목록 그대로) — 뺀 수를 vcpuUnknown·ramUnknown 으로,
+ *    VM 이 있는데 하나도 못 읽었으면 null(0 이 아니다).
  *  · ⚠ 합의 순서를 바꾸지 말 것 — 부동소수 합은 순서에 따라 비트가 달라진다(정렬 뒤 합계를 예전과 같게).
  */
 import { numOrNull } from '../util/numOrNull.js';
+import { vmSumsOf, vmAllocOf } from '../vcenter/vmSums.js';   // v3.28.1: vCPU · 메모리 합의 판정 코어
 
 /** 값이 있는 것만의 평균(소수 한 자리) + 뺀 개수. */
 export function usageAvg(arr, fn) {
@@ -24,12 +27,16 @@ export function vmTotals(vms, gpuCounts) {
   const cpuAvg = usageAvg(on, (v) => v.cpuUsagePct);
   const memAvg = usageAvg(on, (v) => v.memUsagePct);
   const avg = (arr, fn) => usageAvg(arr, fn).value;
+  const alloc = vmSumsOf(vms, { includeTemplates: true });   // v3.28.1
+  const al = vmAllocOf(alloc);
   return {
     count: vms.length,
     poweredOn: on.length,
     poweredOff: vms.length - on.length,
-    vcpu: sm((v) => v.cpuCount),
-    ramGB: Math.round(sm((v) => v.memMB) / 1024),
+    vcpu: al.vcpu,
+    ramGB: al.memMB == null ? null : Math.round(al.memMB / 1024),
+    vcpuUnknown: alloc.vcpuUnknown,   // v3.28.1: vCPU 를 못 읽어 vcpu 에서 뺀 VM 수
+    ramUnknown: alloc.memUnknown,     // v3.28.1: 메모리를 못 읽어 ramGB 에서 뺀 VM 수
     diskGB: sm((v) => v.storageGB),
     diskTB: Math.round(sm((v) => v.storageGB) / 1024 * 10) / 10,
     avgCpuUsagePct: cpuAvg.value,

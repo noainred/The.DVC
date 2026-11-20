@@ -21,7 +21,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { openSqlite, createLockRetry } from '../util/sqliteOpen.js';
 import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';
-import { loadPerfSettings } from './perfSettings.js';
+import { loadPerfSettings, perfSettingsLoadError, LIMITS as PERF_LIMITS } from './perfSettings.js';
 import { isMockMode } from '../mock/demo/flags.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { isDemoPerfQuery, demoStorageMultiAsync, demoStorageOne, demoPortSeries } from './demoPerfSynth.js';   // v2.715 목업: 수식으로 만든다
@@ -33,7 +33,10 @@ const lockRetry = createLockRetry();
 const DAY = 86_400_000;
 // v2.728(SAN 2차): 15분 집계 표 보관 일수 — 24시간·3일 같은 짧은 구간만 이 표를 쓴다(그보다 길면 1시간 표). 빈 값·범위 밖은 31일.
 const R15_DAYS = (() => { const n = numOrNull(process.env.SANSW_PERF_ROLLUP_15M_DAYS ?? 31); return n != null && n >= 2 && n <= 400 ? Math.round(n) : 31; })();
-const rollupDays = () => { try { const n = Number(loadPerfSettings()?.rollupRetentionDays); return Number.isFinite(n) && n > 0 ? n : 730; } catch { return 730; } };
+const rollupDays = () => {
+  try { if (perfSettingsLoadError()) return PERF_LIMITS.rollupRetentionDays.max; } catch { return PERF_LIMITS.rollupRetentionDays.max; }   // 27회차 D-4: 손상 중 상한
+  try { const n = Number(loadPerfSettings()?.rollupRetentionDays); return Number.isFinite(n) && n > 0 ? n : 730; } catch { return 730; }
+};
 
 const FILE = () => path.join(config.dbDir || config.configDir, 'sanswitch-perf.db');
 const PRUNE_EVERY = 20;      // N회 저장마다 1회만 prune
@@ -303,13 +306,27 @@ const _pruneFlight = createPruneFlight();   // util/chunkedPrune.js — 같은 �
 function holdDb(db) { db.users = (db.users || 0) + 1; return () => { db.users -= 1; if (db.retired && db.users <= 0) closeDb(db); }; }
 function closeDb(db) { if (db.closed) return; db.closed = true; try { db.conn?.close?.(); } catch { /* 닫기 실패는 무시 — 새로 연다 */ } }
 function retireDb(db) { if (!db || db === 'unavailable') return; db.retired = true; if (!(db.users > 0)) closeDb(db); }
+/*
+ * 전체 점검 24회차 #4(재현): 설정 파일이 손상되면 1시간 집계는 기본 730일 · 원본은 기본 90일로 정리돼(v2.632 는 중앙 수신 경로의 원본만 보류했다)
+ *   관리자가 3650일로 둔 이력이 되돌릴 수 없게 지워졌다. 못 읽은 동안은 **모든 진입점의 정리를 보류**한다(스토리지 23회차 S-3 과 같은 판단).
+ */
+let _holdWarned = false;
+function pruneHeld() {
+  let e = null;
+  try { e = perfSettingsLoadError(); } catch { e = { reason: '판정 실패' }; }
+  if (!e) { _holdWarned = false; return null; }
+  if (!_holdWarned) { _holdWarned = true; console.warn(`[sanswitch-perf] 설정 파일을 읽지 못해 보존 정리를 설정 상한(최대 보관)으로만 합니다(기본값으로 지우지 않음) — ${String(e.reason || '').slice(0, 160)}`); }
+  return e;
+}
 function pruneOld(db, retentionDays) {
-  const days = Math.max(1, Number(retentionDays) || 90);
+  // 27회차 반증 D-4: 보류(무한 증가) 대신 못 읽은 동안은 **설정 상한(LIMITS.max)** 으로 정리 — 관리자가 둘 수 있었던 어떤 값보다 오래된 것만
+  const held = !!pruneHeld();
+  const days = held ? PERF_LIMITS.retentionDays.max : Math.max(1, Number(retentionDays) || 90);
   return _pruneFlight.run(days, async () => {
     if (db.retired || db.closed) db = await open();
     if (!db) throw new Error('DB 를 열 수 없습니다');
     const release = holdDb(db);
-    try { return await pruneOldInner(db, days); } finally { release(); }
+    try { const r = await pruneOldInner(db, days); return held ? { ...r, held: true } : r; } finally { release(); }
   });
 }
 async function pruneOldInner(db, days) {
@@ -356,7 +373,7 @@ export async function pruneNow(retentionDays) {
   if (!db) return { deleted: 0, unavailable: true };
   try {
     const r = await pruneOld(db, retentionDays);
-    return { deleted: r.deleted, done: r.done, metaDeleted: r.metaDeleted, rollupDeleted: r.rollupDeleted ?? 0 };
+    return { deleted: r.deleted, done: r.done, metaDeleted: r.metaDeleted, rollupDeleted: r.rollupDeleted ?? 0, ...(r.held ? { held: true } : {}) };
   } catch (e) { console.warn(`[sanswitch-perf] prune 실패: ${e.message}`); return { deleted: 0, error: e.message }; }
 }
 

@@ -10,7 +10,7 @@
  */
 import { createCollector, testTarget, focusAuthGuard, authIdOf } from './collector.js';
 import { normInterval, normProcEvery } from './script.js';
-import { demoSample, demoProcs, demoHello, demoLoad, isDemoTarget } from './mock.js';
+import { demoSample, demoProcs, demoHello, demoLoad, isDemoTarget, demoKmsg } from './mock.js';
 import { TOPO_EVERY_S } from './script.js';
 
 export const MAX_STREAMS = Math.max(1, Math.min(200, Number(process.env.FOCUSMON_MAX_STREAMS) || 40));
@@ -19,10 +19,12 @@ export const RETRY_MIN_MS = 60_000;
 const sameEndpoint = (a, b) => a.host === b.host && Number(a.port) === Number(b.port) && a.username === b.username;
 
 function createDemoCollector(t, { interval, procEvery, sink }) {
+  let lastKm = 0;
   let iv = normInterval(interval); let pe = normProcEvery(procEvery); let timer = null; let ptimer = null; let ltimer = null; let st = { state: 'connecting', since: Date.now(), lastSampleAt: null, error: '', hello: demoHello(t.id), osVerified: true, interval: iv };
   const tick = () => {
     const ts = Date.now();
     const s = demoSample(t.id, ts, iv);
+    if (s && ts - (lastKm || 0) >= 60_000) { const k = demoKmsg(t.id, ts); if (k) s.km = k; lastKm = ts; } // v3.16.0 ⑯ C2 데모 커널 메시지(60초마다)
     if (s) { sink.sample(t.id, ts, s, st.hello); st = { ...st, state: 'ok', lastSampleAt: ts }; sink.status(t.id, { ...st }); }
   };
   const ptick = () => { const ts = Date.now(); const p = demoProcs(t.id, ts); if (p) sink.procs(t.id, ts, p); };
@@ -75,17 +77,29 @@ export function createRunner({ keys, sink, connect } = {}) {
       if (normInterval(d.interval) !== x.interval) { x.col.setInterval(d.interval); x.interval = normInterval(d.interval); }
       if (normProcEvery(d.procEvery) !== x.procEvery) { x.col.setProcEvery?.(d.procEvery); x.procEvery = normProcEvery(d.procEvery); }
     }
+    const wasLimited = new Map(limited);
     limited.clear();
     for (const [id, d] of want) {
       if (live.has(id)) continue;
       if (live.size >= MAX_STREAMS) {
-        limited.set(id, { state: 'limit', since: Date.now(), error: `이 노드의 동시 수집 상한(${MAX_STREAMS}대)을 넘어 시작하지 않았습니다.`, interval: normInterval(d.interval) });
+        const prev = wasLimited.get(id);
+        const st = prev || { state: 'limit', since: Date.now(), error: `이 노드의 동시 수집 상한(${MAX_STREAMS}대)을 넘어 시작하지 않았습니다.`, interval: normInterval(d.interval) };
+        limited.set(id, st);
+        // 전체 점검 29회차 F4(재현): limited 에만 넣고 sink 로 내보내지 않아 화면 · 엣지 본문에 'limit' 이 닿지 않았다(머리말 '조용히 빼지 않는다' 위반).
+        //   새로 막힌 대상만 한 번 알린다(틱마다 다시 쓰지 않게).
+        if (!prev) { try { sink?.status?.(id, { ...st }); } catch { /* 상태 전달 실패가 조정을 멈추지 않게 */ } }
         continue;
       }
       const t = { id, host: d.host, port: Number(d.port) || 22, username: d.username, demo: !!d.demo };
       const col = make(t, d.interval, d.procEvery);
       live.set(id, { col, t, interval: normInterval(d.interval), procEvery: normProcEvery(d.procEvery) });
       col.start();
+    }
+    // 30회차 D(재현): 상한으로 막혀 있다가 수집에서 빠진 대상은 'limit' 이 그대로 남아 카드가 '노드 상한' 이었다 — 멈춤으로 알린다
+    //   (상한에서 풀려 시작한 대상은 수집기가 스스로 상태를 알린다).
+    for (const [id, st] of wasLimited) {
+      if (want.has(id)) continue;
+      try { sink?.status?.(id, { state: 'stopped', since: Date.now(), error: '', interval: st.interval }); } catch { /* */ }
     }
     return { running: live.size, limited: limited.size };
   }
@@ -108,7 +122,7 @@ export function createRunner({ keys, sink, connect } = {}) {
       if ((lastRetry.get(id) || 0) + RETRY_MIN_MS > now) return { ok: false, code: 'too-soon', reason: '같은 대상은 60초에 한 번만 다시 연결합니다.' };
       lastRetry.set(id, now);
       if (!x) {
-        if (target) { focusAuthGuard.clearAuthStop(authIdOf(target)); return { ok: true, running: false }; } // 수집 중이 아니면 정지만 푼다(다음 시험 · 시작이 한 번 시도)
+        if (target) { focusAuthGuard.clearAuthStop(authIdOf(target), { verified: false }); return { ok: true, running: false }; } // 수집 중이 아니면 정지만 푼다(다음 시험 · 시작이 한 번 시도)
         return { ok: false, code: 'not-running', reason: '지금 수집 중인 대상이 아닙니다.' };
       }
       x.col.retry();

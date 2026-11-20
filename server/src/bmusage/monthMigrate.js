@@ -13,10 +13,12 @@
  *   청크(기본 2,000행)마다 시간 기준 양보(createYielder). 진행 상태(커서·단계·센 수)는 청크마다 메인 파일 bm_meta 에 남는다 —
  *   프로세스가 중간에 죽어도 다음 기동이 그 커서부터 잇는다(원시는 IGNORE, 롤업은 파일별 커서라 두 번 더하지 않는다).
  * ── 실패 ─────────────────────────────────────────────────────────────────────
- *   어느 단계든 실패하면 phase='failed'(failedPhase·error·attempts). 그동안 읽기는 **예전 표**가 그 구간의 원본이다(db.readRule) — 이것은
+ *   어느 단계든 실패하면 phase='failed'(failedPhase·error·attempts). 그동안 읽기는 **예전 표**가 그 구간의 원본이다(db.readRule — 단 삭제 단계 실패는
+ *   대조를 통과한 뒤라 시간 단위 파일이 원본이다 · 81회차 F1) — 이것은
  *   historyRollup 의 ‘원본 폴백’(롤업 대신 원시를 읽는 것)과 다른 일이고 정상 경로다. 한 시간 뒤 다시 시도하고(최대 3회) 그 뒤에는 멈춰 상태로 밝힌다.
  *   대조 실패면 커서를 0 으로 돌려 처음부터 다시 옮긴다(IGNORE · 커서라 중복은 생기지 않는다).
  */
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { mainDbForMigration, readMeta, writeMeta, MIGRATE_KEY } from './db.js';
 import * as month from './monthStore.js';
 import { createYielder } from '../util/timeSlice.js';
@@ -25,7 +27,7 @@ import { loadBmUsageSettings, effectiveRawDays, STORE_DEFAULTS } from './setting
 import { dayKey } from '../util/dayKey.js';
 
 // v2.922(반증 D11): 2,000행 청크가 한 번에 최대 92ms 멈췄다(1,000대 실측 — v2.693 기준 50ms 초과) → 500.
-export const MIGRATE_CHUNK_ROWS = Math.max(100, Number(process.env.BMUSAGE_MIGRATE_CHUNK_ROWS) || 500);
+export const MIGRATE_CHUNK_ROWS = Math.max(100, envPositive(process.env.BMUSAGE_MIGRATE_CHUNK_ROWS, 500));
 export const MIGRATE_RETRY_MS = 60 * 60_000;
 export const MIGRATE_MAX_ATTEMPTS = 3;
 /** v2.922(반증 D6): 시도를 다 쓴 뒤에도 영구 정지하지 않는다 — 이만큼 지나면 횟수를 0 으로 돌리고 다시 시도한다(재시작해도 0 부터). */
@@ -185,7 +187,10 @@ async function runInner({ chunkRows = MIGRATE_CHUNK_ROWS, sliceMs = 15, stopAfte
     const failedPhase = e?.phase || st.phase;
     st = { ...st, phase: 'failed', failedPhase, failedAt: Date.now(), attempts: (st.attempts || 0) + 1, error: String(e?.message || e).slice(0, 300) };
     try { save(); } catch { /* 상태 저장도 실패하면 콘솔만 */ }
-    console.error(`[bmusage-db] 시간 단위 파일 마이그레이션 실패(${failedPhase}) — 예전 표를 계속 읽습니다(아무것도 지우지 않았습니다): ${st.error}`);
+    // 81회차 F1: 삭제 단계 실패는 대조를 통과한 뒤라 읽기는 시간 단위 파일이고 예전 표는 일부 지워졌다 — 문구가 사실과 맞게.
+    console.error(failedPhase === 'delete'
+      ? `[bmusage-db] 시간 단위 파일 마이그레이션 실패(delete) — 대조는 통과했고 읽기는 시간 단위 파일입니다 · 예전 표의 남은 행은 다음 시도가 지웁니다: ${st.error}`
+      : `[bmusage-db] 시간 단위 파일 마이그레이션 실패(${failedPhase}) — 예전 표를 계속 읽습니다(아무것도 지우지 않았습니다): ${st.error}`);
     _last = { at: Date.now(), ms: Date.now() - t0, ok: false, phase: 'failed', failedPhase, error: st.error };
     return { ok: false, phase: 'failed', failedPhase, error: st.error };
   }

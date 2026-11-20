@@ -31,9 +31,24 @@ export const COLUMN_STATE_TEXT = Object.freeze({
   // 다음 점검 ①: 같은 키의 서버가 범위 안 여러 법인에 있고 법인 없이 담았다(예전 판이 저장한 목록 · 세트 · 링크) — 아래 후보 법인 중 하나를 고른다.
   ambiguous: { label: '법인 고르기', tone: 'warn', note: '같은 식별 키의 서버가 여러 법인에 있습니다 — 아래에서 법인을 고르세요' },
 });
-export function columnStateView(state, { minEdgeVersion = null } = {}) {
+/** 점검 반복 2회차 E6: ‘법인 간 허용’ 토글이 없는 계정(서버 crossAllowed 아님 — 범위 계정)의 다른 법인 안내 — 보이지 않는 버튼을 가리키지 않는다. */
+export const OTHER_CORP_SCOPED_NOTE = '같은 법인끼리만 비교합니다 — 법인 간 비교는 전체 범위(vCenter 제한 없는) 계정만 쓸 수 있습니다';
+export function columnStateView(state, { minEdgeVersion = null, crossAllowed = true } = {}) {
   const v = COLUMN_STATE_TEXT[state] || { label: String(state || '—'), tone: 'idle', note: '' };
+  if (state === 'other-corp' && crossAllowed !== true) return { ...v, note: OTHER_CORP_SCOPED_NOTE };
   return state === 'old-version' && minEdgeVersion ? { ...v, note: `${v.note}(엣지 v${minEdgeVersion} 이상 필요)` } : v;
+}
+/**
+ * 점검 반복 2회차 E2⑥: 동시 집중을 막는 이유 — 서버 표지(actions.focus — 데모 · 역할)가 닫혔으면 그 이유, 아니면 고른 열 중 쓰기 범위 밖(writable 이 true 가 아님)이 있으면
+ *   ‘조회 전용 법인 서버’ 한 줄(서버 bmCompareFocus 는 하나라도 밖이면 아무것도 시작하지 않는다). 시작할 수 있으면 ''.
+ * @param {{ok:boolean, why?:string}|null} gate  actions.focus
+ * @param {Array<{writable?:boolean}>} live      값이 있는 열(집중 대상)
+ * @param {string} why  gate 의 이유 문구(bmWriteText.gateWhy)
+ */
+export function focusBlockText(gate, live = [], why = '') {
+  if (gate?.ok !== true) return why || '지금은 시작할 수 없습니다(권한을 확인하지 못했습니다)';
+  const ro = (live || []).filter((c) => c?.writable !== true).length;
+  return ro ? `고른 서버 중 ${ro}대가 조회 전용 법인(쓰기 범위 밖)이라 시작할 수 없습니다 — 그 서버를 빼면 됩니다` : '';
 }
 /** 하드웨어(iDRAC) 지표 — 지금 값만(계열 없음). */
 const HW_INFO = Object.freeze({

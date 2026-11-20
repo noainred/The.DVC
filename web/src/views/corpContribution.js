@@ -71,7 +71,10 @@ export function corpContribution(s) {
   }
   // v2.632(WEB2632-01): 행의 storageTotalTB 는 사용량을 읽은 DS 만이다 — 뺀 DS 수를 합해 표가 그 사실을 말하게 한다.
   const dsUnknown = rows.reduce((t, r) => t + (r.statusLabel && !r.carried ? 0 : (n(r.datastoresUsageUnknown) || 0)), 0);
-  return { rows, total, excluded, carried, missing, dsUnknown };
+  // v3.19.2: 행의 vcpuAllocated · ramAllocatedGB 는 읽은 VM 만의 합이다(서버 vmSums 코어) — 못 읽어 뺀 VM 수를 합해 표가 그 사실을 말하게 한다.
+  //   VM 을 하나도 못 읽은 vCenter 는 그 칸이 null 이라 합계에서 빠지고(missing), 그 VM 수도 여기에 들어 있다.
+  const unk = (k) => rows.reduce((t, r) => t + (r.statusLabel && !r.carried ? 0 : ((n(r[k]) || 0) > 0 ? n(r[k]) : 0)), 0);
+  return { rows, total, excluded, carried, missing, dsUnknown, vcpuUnknown: unk('vcpuUnknown'), ramUnknown: unk('ramUnknown') };
 }
 
 /** v2.632(WEB2632-01): 기여도 표 스토리지 셀의 짧은 표지 — 사용량 미상 DS 가 있으면 '미상 N'. 없으면 ''. */
@@ -89,6 +92,9 @@ export function contribNote(c) {
   const pwMissing = (Number(c?.missing?.powerKw) || 0) - (Number(c?.excluded) || 0);
   if (pwMissing > 0) parts.push(`전력 열은 전력을 보고하는 호스트가 없는 ${pwMissing}곳을 합계에서 뺐습니다`);
   if (c?.dsUnknown > 0) parts.push(`스토리지 열은 사용량을 읽은 데이터스토어만 합했습니다(사용량 미상 ${c.dsUnknown}개 제외)`);
+  // v3.19.2: vCPU · RAM 할당 열 — 못 읽은 VM 은 0 으로 더하지 않았다(읽은 VM 만의 합 = 최소값).
+  const allocBits = [c?.vcpuUnknown > 0 ? `vCPU 미상 ${c.vcpuUnknown}대` : '', c?.ramUnknown > 0 ? `메모리 미상 ${c.ramUnknown}대` : ''].filter(Boolean);
+  if (allocBits.length) parts.push(`할당 열(vCPU · RAM)은 값을 읽은 VM 만 합했습니다(${allocBits.join(' · ')} 제외)`);
   return parts.join(' · ');
 }
 /** 합계 행 라벨. */

@@ -18,12 +18,19 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+test.after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
 const ROOT = path.resolve(SRC, '..');
 const J = (p) => JSON.stringify(path.join(SRC, p));
 
-const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'dvc-2606a-'));
+const CFG = tmpDir('dvc-2606a-');
 Object.assign(process.env, {
   CONFIG_DIR: CFG, CENTRAL_TOKEN: 'shared-2606a', DATA_SOURCE: 'live', AUTH_ENABLED: 'true',
   IPAM_WRITE_WORKER: '0', SSRF_ALLOW_LOOPBACK: 'true',
@@ -42,7 +49,7 @@ const H = { 'Content-Type': 'application/json', 'X-Central-Token': 'shared-2606a
 
 /** 자식 프로세스(별도 CONFIG_DIR · 선택적 --expose-gc)에서 스크립트를 돌리고 '@@' 줄의 JSON 을 돌려준다. */
 function runChild(script, { gc = false, env = {} } = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'a2606a-'));
+  const dir = tmpDir('a2606a-');
   const r = spawnSync(process.execPath, [...(gc ? ['--expose-gc'] : []), '--input-type=module', '-e', script], {
     env: { ...process.env, CONFIG_DIR: dir, DATA_SOURCE: 'mock', AUTH_ENABLED: 'false', ...env },
     encoding: 'utf8', cwd: ROOT, timeout: 180_000,

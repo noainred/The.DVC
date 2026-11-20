@@ -17,7 +17,6 @@
  * **ack 로 적용 결과를 회신**해야 `active` 로 전이한다(그전엔 `pending`).
  */
 
-import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
@@ -25,6 +24,7 @@ import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { logAudit } from '../audit.js';
 import { capStr } from '../util/capStr.js';
 import { makeSettingsLoadError } from '../util/settingsLoadError.js';
+import { makeJsonFileReader, READ_RETRY_MS } from '../util/jsonFileRead.js';   // 103회차 F2: 읽기 오류 ≠ 손상
 
 const FILE = () => path.join(config.configDir, 'central-svcmon-assign.json');
 
@@ -57,10 +57,23 @@ const _loadErr = makeSettingsLoadError(() => FILE(), { label: '성능점검 엣�
 /** 배정 파일을 못 읽었으면 { at, reason }, 읽었으면 null. */
 export function svcmonAssignLoadError() { load(); return _loadErr.get(); }
 
+/*
+ * 103회차 F2(재현 — EISDIR): 예전 catch 하나는 **읽기 오류**도 손상으로 보고 온전한 원본(전 엣지 배정)을 `.corrupt.*` 로 옮긴 뒤 빈 배정을 캐시했다 —
+ *   관리자가 엣지 하나를 배정하면 그 한 건만 든 파일이 되어(관리자 저장이 로드 오류를 해제) 다른 엣지는 assigned:false 를 받아 중앙 배포 점검을 전부 지웠다.
+ *   이제 읽기 오류는 원본을 두고 · 캐시하지 않고(30초 간격 재읽기 — util/jsonFileRead.js) · 표지(readError)를 세운다(설정 pull 503 은 그대로) ·
+ *   관리자 저장도 409 로 거절한다(원본이 그 자리에 있어 rename 이 보존본도 없이 덮는다). parse · 형식 실패는 예전과 같다.
+ */
+const _reader = makeJsonFileReader(FILE, { parse: (t) => t, preserve: false, tag: 'svcmon-assign' });
 function load() {
   if (cache) return cache;
+  const rr = _reader.read();
+  if (rr.kind === 'read-error') {
+    if (!rr.deferred || !_loadErr.get()?.readError) _loadErr.readError(rr.error, { retryMs: READ_RETRY_MS });
+    return { v: 1, agents: Object.create(null) };   // 캐시하지 않는다 — save() 가 거절한다
+  }
   try {
-    const parsed = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
+    if (rr.kind === 'missing') { const e = new Error('ENOENT'); e.code = 'ENOENT'; throw e; }
+    const parsed = JSON.parse(rr.value);
     const agents = parsed && typeof parsed.agents === 'object' && !Array.isArray(parsed.agents)
       ? parsed.agents : null;
     if (!agents) throw new Error('agents 가 객체가 아닙니다(형식 불일치)');
@@ -77,6 +90,11 @@ function load() {
 
 /** @param {{admin?:boolean}} [o] 관리자 저장이면 로드 오류를 해제한다. 로드 오류 중 비관리 저장은 쓰지 않는다. */
 function save({ admin = false } = {}) {
+  // 103회차 F2: 읽기 오류 중에는 관리자 저장도 받지 않는다(라우트 409) — 지금 메모리는 캐시하지 않은 빈 배정이다.
+  if (_loadErr.get()?.readError) {
+    if (!admin) return false;
+    throw Object.assign(new Error(`엣지 배정 파일(${path.basename(FILE())})을 읽지 못한 상태라 저장하지 않았습니다 — 읽기 오류이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 저장이 다시 열립니다).`), { status: 409, code: 'settings-unreadable', readError: true });
+  }
   if (!admin && _loadErr.get()) return false;
   atomicWriteFileSync(FILE(), JSON.stringify(cache));
   if (admin) _loadErr.ok();
@@ -309,4 +327,4 @@ export function ackAssignment(agent, { sig, applied = {}, removed = 0, errors = 
   return { ok: true, state: a.state, exact };
 }
 
-export function _resetAssignCache() { cache = null; _loadErr.ok(); _confirmed.clear(); }
+export function _resetAssignCache() { cache = null; _loadErr.ok(); _confirmed.clear(); _reader.reset(); }

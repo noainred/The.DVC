@@ -16,7 +16,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 94회차 F2: 읽기 오류 ≠ 손상
 import { getSnapDb, backfillSnap, rememberVeeamUsers, setSnapUserPicker } from './snapDb.js';
 import { createYielder } from '../util/timeSlice.js';
 
@@ -195,28 +196,41 @@ export function summarizeVeeamSnapEvents(vms, rows, { accounts = [], since = 0 }
 const FILE = () => path.join(config.configDir, 'veeam-vc-accounts.json');
 let _acc = null;
 let _loadError = '';
+let _readErr = false;
+const emptyAcc = () => ({ manual: [], learned: {}, pulled: [], forgotten: {} });
+/** 파일 글 → 계정 저장 모양(JSON 파싱이 던지면 손상 — 예전 try 블록과 같은 범위). */
+function accFrom(text) {
+  const raw = JSON.parse(text);
+  const acc = emptyAcc();
+  acc.manual = cleanAccountList(raw?.manual).list;
+  acc.pulled = cleanAccountList(raw?.pulled, MAX_PULLED).list;
+  if (isObj(raw?.learned)) {
+    for (const [k, v] of Object.entries(raw.learned).slice(0, MAX_LEARNED)) {
+      const a = s(k, ACCOUNT_MAX_LEN);
+      if (a && isObj(v) && Number.isFinite(v.t)) acc.learned[a] = { t: v.t, vms: (Array.isArray(v.vms) ? v.vms : []).filter((x) => typeof x === 'string').map((x) => x.slice(0, 256)).slice(0, 5) };
+    }
+  }
+  if (isObj(raw?.forgotten)) {
+    for (const [k, t] of Object.entries(raw.forgotten).slice(0, MAX_FORGOTTEN)) {
+      const a = canonAcct(k);
+      if (a && typeof t === 'number' && Number.isFinite(t) && t > 0) acc.forgotten[a] = t;
+    }
+  }
+  return acc;
+}
+/*
+ * 94회차 F2(재현): 예전에는 ENOENT 가 아닌 오류를 전부 손상으로 보고 원본을 `.corrupt.*` 로 옮겼다 — 읽기 오류(EACCES · EIO · EISDIR)여도.
+ *   재시작하면 '파일 없음' 이라 중앙이 빈 계정 목록을 pull 로 내려보내 엣지 사본까지 지웠다(Veeam 스냅샷 가림이 풀림).
+ *   이제 읽기 오류는 원본을 두고 · 캐시하지 않고(30초 간격 재읽기) · 저장하지 않는다(persist 가 던진다 — 학습 반영은 건너뜀). 손상은 예전과 같다.
+ */
+const _accReader = makeJsonFileReader(() => FILE(), { parse: accFrom, tag: 'veeam-accounts' });
 function loadAcc() {
   if (_acc) return _acc;
-  _acc = { manual: [], learned: {}, pulled: [], forgotten: {} };
-  try {
-    const raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
-    _acc.manual = cleanAccountList(raw?.manual).list;
-    _acc.pulled = cleanAccountList(raw?.pulled, MAX_PULLED).list;
-    if (isObj(raw?.learned)) {
-      for (const [k, v] of Object.entries(raw.learned).slice(0, MAX_LEARNED)) {
-        const a = s(k, ACCOUNT_MAX_LEN);
-        if (a && isObj(v) && Number.isFinite(v.t)) _acc.learned[a] = { t: v.t, vms: (Array.isArray(v.vms) ? v.vms : []).filter((x) => typeof x === 'string').map((x) => x.slice(0, 256)).slice(0, 5) };
-      }
-    }
-    if (isObj(raw?.forgotten)) {
-      for (const [k, t] of Object.entries(raw.forgotten).slice(0, MAX_FORGOTTEN)) {
-        const a = canonAcct(k);
-        if (a && typeof t === 'number' && Number.isFinite(t) && t > 0) _acc.forgotten[a] = t;
-      }
-    }
-  } catch (e) {
-    if (e?.code !== 'ENOENT') { _loadError = '파일을 읽지 못했습니다'; try { preserveCorrupt(FILE()); } catch { /* */ } }
-  }
+  const r = _accReader.read();
+  if (r.kind === 'read-error') { _readErr = true; _loadError = '파일을 읽지 못했습니다(읽기 오류 — 원본은 그대로 있습니다)'; return emptyAcc(); }   // 캐시하지 않는다
+  if (_readErr) { _readErr = false; _loadError = ''; }
+  if (r.kind === 'ok') _acc = r.value;
+  else { _acc = emptyAcc(); if (r.kind === 'corrupt') _loadError = '파일을 읽지 못했습니다'; }   // 손상은 reader 가 보존본으로 옮겼다(예전과 같다)
   return _acc;
 }
 /** 계정 파일을 이 프로세스에서 읽지 못했는가(그러면 중앙은 pull 에 계정을 싣지 않는다 — 빈 목록을 내려보내면 엣지 사본이 지워진다, 검토 #4). */
@@ -226,7 +240,11 @@ function corruptKept() {
   try { return fs.readdirSync(config.configDir).some((f) => f.startsWith('veeam-vc-accounts.json.corrupt.')); } catch { return false; }
 }
 const activeLearned = (a, now) => Object.entries(a.learned).filter(([, v]) => now - v.t <= LEARNED_TTL_MS && v.vms.length >= LEARN_MIN_VMS);
-function persist() { atomicWriteFileSync(FILE(), JSON.stringify(_acc, null, 2)); }
+function persist() {
+  // 94회차 F2: 읽기 오류 중(캐시 없음)에는 원본을 덮지 않는다 — 임시 빈 값 위의 변경을 쓰면 사람이 적은 계정이 사라진다
+  if (!_acc) throw Object.assign(new Error('Veeam 계정 파일을 읽지 못한 상태라 저장하지 않았습니다(읽기 오류 — 원본은 그대로 있습니다)'), { code: 'accounts-unreadable' });
+  atomicWriteFileSync(FILE(), JSON.stringify(_acc, null, 2));
+}
 
 /** 사람이 준 계정 목록 정리 — 문자열만·트림·길이·중복·상한(기본 사람이 적는 상한 32 · 중앙에서 받은 목록은 MAX_PULLED). 버린 수를 돌려준다. */
 export function cleanAccountList(raw, max = MAX_ACCOUNTS) {
@@ -262,7 +280,9 @@ export function accountView(now = Date.now()) {
 }
 export function saveManualAccounts(raw) {
   const r = cleanAccountList(raw);
-  loadAcc().manual = r.list; persist();
+  const a = loadAcc(); const prev = a.manual;
+  a.manual = r.list;
+  try { persist(); } catch (e) { a.manual = prev; throw e; }   // 94회차 F1(형제): 쓰기 실패면 메모리를 되돌린다(화면이 '저장 실패' 뒤에 새 값을 보이지 않게)
   return r;
 }
 /** 엣지: 중앙 pull 로 받은 계정(사람이 적은 것 + 중앙이 배운 것). 바뀌었을 때만 쓴다. 반환: 바뀌었는가. */
@@ -272,7 +292,9 @@ export function applyPulledAccountsEx(raw) {
   const { list: r, dropped } = cleanAccountList(raw, MAX_PULLED);
   const a = loadAcc();
   if (JSON.stringify(a.pulled) === JSON.stringify(r)) return { changed: false, dropped };
-  a.pulled = r; persist();
+  const prev = a.pulled;
+  a.pulled = r;
+  try { persist(); } catch (e) { a.pulled = prev; throw e; }   // 94회차 F1(형제): 실패한 적용을 메모리에 남기면 다음 pull 이 'same' 으로 보고 끝내 쓰지 않았다
   return { changed: true, dropped };
 }
 /**
@@ -298,7 +320,7 @@ export function rememberLearned(list, now = Date.now()) {
   }
   const keys = Object.keys(a.learned);
   if (keys.length > MAX_LEARNED) for (const k of keys.sort((x, y) => a.learned[x].t - a.learned[y].t).slice(0, keys.length - MAX_LEARNED)) delete a.learned[k];
-  if (changed) persist();
+  if (changed) { try { persist(); } catch (e) { if (e?.code !== 'accounts-unreadable') throw e; return 0; } }   // 94회차 F2: 읽기 오류 중에는 학습을 건너뛴다(요약은 계속)
   return changed;
 }
 /** v2.763(V4-I1): 지운 시각이 시한 안인가 — 시계가 되돌려져 미래가 된 시각도 시한만큼만(영구 거부가 되지 않게). */
@@ -466,7 +488,7 @@ export async function restoreEdgeSnap() {
   return n;
 }
 export function edgeSnapFor(vcenterId) { return _edge.get(String(vcenterId)) || null; }
-export function _resetForTest() { _acc = null; _loadError = ''; _edge.clear(); }
+export function _resetForTest() { _acc = null; _loadError = ''; _readErr = false; _accReader.reset(); _edge.clear(); }
 
 /* ── 엣지: push 에 실을 요약(이 엣지가 직접 이벤트를 모으는 vCenter 만) ───────────────────────────────── */
 

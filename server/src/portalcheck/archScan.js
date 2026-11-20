@@ -138,6 +138,8 @@ export const ROUTE_GATE_ALLOW = Object.freeze({
   'POST /api/tools/vmseries/run': 'denyScopedRun + inUserScope(v2.605)',
   'DELETE /api/tools/vmseries/data': '핸들러에서 범위 계정 403(requiredOwner)',
   'POST /api/tools/curuser/collect': 'denyScopedRun — 범위 계정 403(v2.605 AUTHZ2605-02)',
+  // v3.28.0 스냅샷 보류(VM 하나 · 기한 있는 예외) — 핸들러 안: 그 VM 이 조회 범위 밖이면 404 → inUserWriteScope 무조건 403 · 감사(server/test/snapHold3280 ⑤)
+  'PUT /api/tools/snapshots/holds': 'inUserScope(404) → inUserWriteScope 무조건(403) — VM 하나 단위 · v3.28.0',
   'PUT /api/tools/curuser/settings': 'mergeScoped — 범위 밖 키 보존 병합(v2.605)',
   'POST /api/tools/horizon-sessions/collect': 'denyScoped — 범위 계정 403(v2.605 AUTHZ2605-02)',
   'PUT /api/tools/horizon-sessions/settings': 'denyScoped — 범위 계정 403(v2.605 AUTHZ2605-02)',
@@ -235,6 +237,7 @@ export const KNOWN_CONFIG_FILES = Object.freeze({
   'portal.env': '설치 스크립트가 만드는 env 파일(config.js 가 읽는다)',
   'secrets-policy.json': '자격증명 저장 방식(평문/암호화) 정책(security/secretVault.js — 비밀 없음, 소유자 + OTP 로만 바꾼다)',
   'secrets-policy.trusted.json': '자격증명 저장 방식 정책의 신뢰 사본(security/secretVault.js — 정책 파일 손상·유실 시 복구용, S-07 2026-10-09)',
+  'security-session.trusted.json': '세션 보안 설정의 신뢰 사본(security/securitySettings.js — 본 파일 손상·읽기 오류·유실 시 복구용, 98회차 · S-07 과 같은 모양)',
   'peer-trust.json': '장비 지문 신뢰(SSH 호스트키·TLS 인증서 승인 · 정책 enforce/observe — security/peerTrust.js, S-01·S-02 2026-10-09)',
   'release-signing-keys.conf': '릴리스 서명 신뢰 공개키(호스트 관리자가 직접 두는 파일 — 비밀 없음, 0600/0640 · upgrade/signature.js, S-10 2026-10-09)',
   'tls-ca-bundle.pem': '사설 CA 번들(PEM, 비밀 아님 — 관리자가 직접 둔다 · security/tlsTrust.js, S-02 2026-10-09)',

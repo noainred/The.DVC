@@ -136,7 +136,8 @@ export function judgeUse({ row = {}, detail = null, hw = null, coverage = 'none'
       ], { path: osPerf || (idPath && !!hw) }),
     },
     hw: {
-      U: cell([{ key: 'power_cap_pct', label: '전력 cap 대비', value: hw?.power?.capPct ?? null, unit: '%', code: grade(hw?.power?.capPct, T.powerCapWarnPct, T.powerCapBadPct) }], { path: idPath && !!hw }),
+      // 점검 반복 2회차 E3: PowerCap 이 꺼진 장비(인벤토리는 읽었고 상한 0 · 빈 값 — hwFacts invCapState unset)는 ‘해당 없음’(none) — 못 읽음(missing)이 아니다.
+      U: cell([{ key: 'power_cap_pct', label: '전력 cap 대비', value: hw?.power?.capPct ?? null, unit: '%', code: grade(hw?.power?.capPct, T.powerCapWarnPct, T.powerCapBadPct), absent: hw?.power?.capState === 'unset' }], { path: idPath && !!hw }),
       S: cell([
         { key: 'inlet_c', label: '흡기 온도', value: hw?.inletC ?? null, unit: '℃', code: grade(hw?.inletC, T.inletWarnC, T.inletBadC) },
         { key: 'throttle', label: '스로틀', value: null, code: null },   // 이 저장소가 받지 않는 값 — missing(정직 기록)
@@ -184,7 +185,8 @@ export function judgeUse({ row = {}, detail = null, hw = null, coverage = 'none'
    *   병목·포화·오류·주의는 읽은 칸에서 실제로 나온 것이라 그대로 두고, 판정 한 줄에 ‘읽은 칸 j/a’ 를 늘 붙인다.
    */
   const judged = counts.ok + counts.warn + counts.bad;
-  const applicable = RESOURCES.length * 3 - counts.nopath;
+  // 점검 반복 2회차 E3: ‘해당 없음’(none — PSI 없는 커널 · PowerCap 꺼진 장비)은 읽을 칸이 아니다 — 분모에서 뺀다(예전에는 상한이 꺼진 서버가 영구히 ‘읽은 칸 n−1/n’).
+  const applicable = RESOURCES.length * 3 - counts.nopath - counts.none;
   if (rowStale && (verdict === 'ok' || verdict === 'unknown')) { verdict = 'stale'; focus = null; }
   else if (verdict === 'ok' && applicable > 0 && (judged / applicable) * 100 < T.minJudgedPct) { verdict = 'partial'; focus = null; }
   const bottleneckCount = RESOURCES.filter((r) => perRes[r] === 'bottleneck').length;

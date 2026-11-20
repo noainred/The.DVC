@@ -399,3 +399,12 @@
   · 보고서 PDF 는 기존 벡터 인프라(`reportExport.saveDocAsPdf`)만 — 새 라이브러리 금지 · 파일명 ASCII · 임베드 글꼴 밖 글자(✕) 금지(`PDF_MARK`). 메일 첨부는 HTML(서버 생성기 없음 — 바뀌면 이 줄을 고친다).
   · 데모 포트 사용량은 **표본을 쌓지 않고 `demoPerfSynth.js` 가 조회 때 수식으로 만든다**(v2.715) — 데모 값을 바꾸려면 그쪽이다(`sanDemoPortBps` 는 실시간 샘플러 경로일 뿐 · v2.955 가 한 번 헛짚음). 이상치 창 `demoAnomalyFactor` 는 `Date.now()` 기준 최근 24시간(수식 데모의 유일한 예외 · 기준선 표시용) — 다른 데모 값에 퍼뜨리지 말 것.
   · 메일 첨부 `contentType` 은 매개변수 없이(`'text/html'`) — `util/smtp.js` 가 text/* 에 charset 을 붙이고 `'; charset='` 이 든 값은 거부한다. v2.953 보고서 발송이 이 때문에 항상 실패했다 → **발송 경로는 가짜 SMTP 로 끝까지 보낸다**(`sanStorage2955` ⑤).
+
+- **전체 점검 24회차(`sanFullAudit24`)**: ① 대량 가져오기 연결 테스트도 저장 비밀번호는 `sanAccessMoved` 가 같을 때만(재현: 가짜 SSH 서버가 root/22222 로 저장 비밀번호를 받음) ·
+  버린 비밀번호는 응답 `droppedSecrets` · 감사에 ② host 중복 검사는 수정에도 · trim + 소문자(대량 경로와 같은 비교) · 메모리를 바꾸기 전에
+  ③ 등록부 저장 · 삭제 · pull 반영은 **쓰기 성공 뒤에** 메모리 교체(키 없음 · 잠금으로 실패하면 폴러 · 엣지 배포가 저장 안 된 값을 쓰던 것)
+  ④ 포트 사용량 설정을 못 읽으면 **모든 진입점에서** ~~보존 정리 보류~~ → **27회차 정정: 설정 상한(`LIMITS.retentionDays.max` · `rollupRetentionDays.max`)으로만 정리**(`perfDb pruneHeld` 는 이제 '상한 정리' 표지 — 전면 보류는 디스크가 끝없이 찼다) ·
+    확정은 두 보존을 최대값으로 쓴다 · PUT · 즉시 정리 409 · GET `loadError` · 27회차 D-6: 수정의 host 중복 검사는 **host 를 바꿀 때만**(24회차 전 대소문자 중복 두 대가 잠기던 것) · 메시지에 상대 스위치 이름
+  ⑤ 사용률 못 읽음은 '—'(UsageCell 에 `?? 0` 금지) · flow 목록 정규식 선형 · 중앙 사용량 수신의 빈 글자는 0 이 아님 · parseCounter 못 읽음 null.
+  **남긴 것**: #6 분류 재정의 뒤 SAN 스토리지 성능 합계(kindResolver) ↔ 트래픽 카드(endpointKind) 불일치 + 'directorMap 재정의는 표시에만' 문서 불일치(어느 쪽으로 맞출지 결정 필요) ·
+  #10 엣지 사용량 상태 시각 절단 · 동기 쓰기 · #12 host · vfId 변경 시 처리량 기준값(rates._prev) 미폐기 · #13 회선 포화 분모(공칭 nG · 송수신 합) 단위 검토.

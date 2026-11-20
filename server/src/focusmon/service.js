@@ -11,11 +11,18 @@ import { getDataSource } from '../runtime-settings.js';
 import * as store from './store.js';
 import * as db from './db.js';
 import { createRunner } from './runner.js';
-import { listTargets, getTarget, getSettings } from './registry.js';
+import { listTargets, getTarget, getSettings, registryLoadError } from './registry.js';
 import { createNodeSampler } from './load.js';
 import { DEMO_TARGETS, isDemoTarget } from './mock.js';
 import { recordTick, flushOnExit, recorderStatus } from './recorder.js';
 import { every } from '../util/longTimer.js';
+import { startAuditService } from './audit/service.js';
+import { tuneTick, procEveryFor } from './tune.js'; // v3.16.0 ⑯ C3 수집 부하 자동 조절
+import { alertCycle } from './alerts.js'; // v3.16.0 ⑯ C1 지속 시간 조건 알림
+import { maintStateForTarget } from './maintMatch.js'; // v3.16.0 ⑯ 반증 H2 — 법인(DataCenter) → vCenter 들로 정비 창 판정
+import { corpResolver } from './audit/corp.js';
+import { getDatacenterAssign } from '../datacenter/store.js';
+import { startRollup, stopRollup } from './rollup.js'; // v3.13.0 ⑭ 요약 표 백필 · 1시간 요약 // v3.11.0 디스크 점검 — 중앙 실행기 키 · 재시작 전 작업 정리
 
 export const focusKeys = createSshKeyStore({
   name: 'focusmon_key', envVar: 'FOCUSMON_SSH_KEY', comment: 'dvc-focusmon', tag: '[focusmon]',
@@ -56,10 +63,41 @@ export function tick1(now = Date.now()) {
   // v2.980: 읽을 때 겹침을 정리한 계속 수집(v2.979 전에 만든 것) — 실행 기록의 대상 · 끝을 고쳐 쓴다
   for (const s of store.drainLoadFixes()) db.writeRun({ id: s.id, started: s.startedAt, ended: s.ended, by: s.by, mode: s.mode, interval: s.interval, targets: s.targets }).catch(() => {});
   for (const s of store.expireSessions(now)) db.writeRun({ id: s.id, started: s.startedAt, ended: now, by: s.by, mode: s.mode, interval: s.interval, targets: s.targets }).catch(() => {});
-  const procEvery = getSettings().procEvery; // v2.983 프로세스 표본 주기(설정 — 모든 대상 공통)
-  runner.reconcile(store.desiredFor('', resolveForRun, now).map((d) => ({ ...d, procEvery })));
+  const procEvery = getSettings().procEvery; // v2.983 프로세스 표본 주기(설정) · v3.16.0 ⑯ C3 — 자동 조절이 켜져 있으면 서버마다(tune.procEveryFor)
+  runner.reconcile(store.desiredFor('', resolveForRun, now).map((d) => ({ ...d, procEvery: procEveryFor(d.id, procEvery) })));
   store.closeMinutes(now, store.activeTargetIds());
 }
+
+/**
+ * 1분 틱(v3.16.0 ⑯ — 중앙만: 엣지 서버의 표본 · 수집 부하도 중앙에 모인다). ① 수집 부하 자동 조절(C3 — 계속 수집 서버) ② 지속 시간 조건 알림(C1).
+ * 엣지(CENTRAL_URL 이 있는 노드)는 하지 않는다 — 엣지 서버의 주기는 중앙의 동기화 응답(procEvery)으로 내려간다.
+ */
+export async function minuteTick(now = Date.now(), { send = null, maintJudge = null } = {}) {
+  if (String(process.env.CENTRAL_URL || '').trim()) return { skipped: 'edge' };
+  // 전체 점검 30회차 C(재현): 등록부를 못 읽으면 대상 목록이 비어 알림 주기가 발생 중 상태를 지웠다(해제 알림도 없이 — 복구 뒤 같은 알림이 다시 나감).
+  //   규칙 파일 손상과 같이 이 주기를 건너뛴다(판정 · 조절 모두 — 대상이 없다는 뜻이 아니다).
+  if (registryLoadError()) return { skipped: 'registry-unreadable' };
+  const settings = getSettings();
+  const recordIds = new Set(store.listSessions(now).filter((x) => x.mode === 'record').flatMap((x) => x.targets));
+  const targets = allTargets().filter((t) => recordIds.has(t.id));
+  for (const c of tuneTick({ targets, loadOf: store.loadOf, settings, now })) {
+    store.queueEvent(c.id, 'tune', `수집 조절 — 프로세스 표본 ${c.from}초 → ${c.to}초(${c.why})`.slice(0, 300), now, { scope: 'server' });
+  }
+  // 정비 창(베어메탈 사용률의 정비 창 — 같은 법인 · 같은 IP 의 서버를 덮는 창이 '알림' 을 켰으면 억제) · 판정기를 못 만들면 억제하지 않는다(알림이 나가는 쪽)
+  //   반증 H2: 등록부 법인은 DataCenter id · 정비 창은 vCenter id — 법인의 vCenter 들로 풀어 묻는다(maintMatch.js).
+  const J = maintJudge ? await maintJudge(now).catch(() => null) : null;
+  let maintState = null;
+  if (J) {
+    let cr = null; let assign = {};
+    try { cr = corpResolver(); } catch { cr = null; }
+    try { assign = getDatacenterAssign(); } catch { assign = {}; }
+    maintState = (t) => { try { return maintStateForTarget(J, t, cr?.of(t)?.id || null, assign, now); } catch { return null; } };
+  }
+  return alertCycle({ store, targets: allTargets(), recordIds, send, maintState, mock: isMockMode(), now });
+}
+let sendImpl = null; let maintImpl = null;
+/** 발송 · 정비 창 판정 주입(central/focusMonEdge.js 가 등록 — 이 모듈이 alerts.js · bmusage 를 직접 import 하지 않게). */
+export function setAlertDeps({ send = null, maintJudge = null } = {}) { sendImpl = send; maintImpl = maintJudge; }
 
 /** 수집 시작 — 대상 확인은 라우트, 상한 · 방식 검사는 store. 시작 기록(fm_run) · 엣지 깨우기. */
 export function startCollection({ targets, interval, mode, by }) {
@@ -99,12 +137,23 @@ export function removeFromCollection(id, targetId) {
  * 예전 엣지는 다음 동기화에서 손을 뗀다 — 깨우지 않으면 쉬는 주기만큼 늦다).
  */
 export function targetEndpointChanged(before, after) {
-  if (!after?.id) return;
+  targetsEndpointChanged([[before, after]]);
+}
+/**
+ * 여러 대가 한꺼번에 바뀐 경우(29회차 F3 — CSV 갱신 · 노드 옮기기): 틱 한 번 → 대상마다 상태 지움 → **엣지마다 한 번** 깨운다
+ *   (대상마다 targetEndpointChanged 를 부르면 50대 옮기기가 같은 엣지에 깨우기 100번이었다).
+ * @param {Array<[object|null, object|null]>} pairs [예전, 지금]
+ */
+export function targetsEndpointChanged(pairs = []) {
+  const list = (Array.isArray(pairs) ? pairs : []).filter((p) => Array.isArray(p) && p[1]?.id);
+  if (!list.length) return;
   tick1();
-  store.forgetTargetState(after.id);
-  const agents = new Set([before?.agent, after.agent].map((a) => String(a || '')).filter(Boolean).map((a) => a.toLowerCase()));
-  const names = [...agents].map((k) => [before?.agent, after.agent].find((a) => String(a || '').toLowerCase() === k));
-  for (const a of names) wakeImpl?.(a);
+  const wake = new Map();   // 소문자 → 저장된 글자
+  for (const [before, after] of list) {
+    store.forgetTargetState(after.id);
+    for (const a of [before?.agent, after.agent]) { const s = String(a || ''); if (s && !wake.has(s.toLowerCase())) wake.set(s.toLowerCase(), s); }
+  }
+  for (const a of wake.values()) wakeImpl?.(a);
 }
 
 export function stopCollection(id, why = 'stopped') {
@@ -142,10 +191,13 @@ export function nodeTick(now = Date.now()) {
 
 export function startFocusMon() {
   if (timers.length) return;
+  try { startRollup({ paused: () => !!recorderStatus().paused }); } catch (e) { console.warn(`[focusmon] 요약 표 시작 실패: ${String(e?.message || e).slice(0, 160)}`); } // v3.13.0 ⑭
+  try { startAuditService({ keys: focusKeys, spaceLow: () => { const r = recorderStatus(); return !!(r.paused && r.pauseReason === 'disk-low'); } }); } catch (e) { console.warn(`[focusmon] 디스크 점검 시작 실패: ${String(e?.message || e).slice(0, 160)}`); }
   timers = [
     every(() => { try { tick1(); } catch (e) { console.warn(`[focusmon] 틱 실패: ${String(e?.message || e).slice(0, 160)}`); } }, 1_000),
     every(() => { recordTick().catch((e) => console.warn(`[focusmon] 기록 실패: ${String(e?.message || e).slice(0, 160)}`)); }, 10_000),
     every(() => { try { nodeTick(); } catch (e) { console.warn(`[focusmon] 노드 부하 표본 실패: ${String(e?.message || e).slice(0, 160)}`); } }, 30_000),
+    every(() => { minuteTick(Date.now(), { send: sendImpl, maintJudge: maintImpl }).catch((e) => console.warn(`[focusmon] 알림 · 자동 조절 실패: ${String(e?.message || e).slice(0, 160)}`)); }, 60_000), // v3.16.0 ⑯
   ];
   try { nodeTick(); } catch { /* 첫 창의 기준점 */ }
   // 계속 수집 정의가 남아 있으면(재시작) 곧바로 이어 받는다 — 첫 틱이 desiredFor 로 읽는다.
@@ -154,6 +206,7 @@ export function startFocusMon() {
 }
 
 export function stopFocusMon() {
+  try { stopRollup(); } catch { /* */ }
   for (const t of timers) { try { t.clear(); } catch { /* */ } }
   timers = [];
   try { nodeSampler?.stop(); } catch { /* */ }

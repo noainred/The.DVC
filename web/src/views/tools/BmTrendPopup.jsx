@@ -24,22 +24,20 @@ import {
   baselineText, whenText, trendMaxBack, trendCsv, trendCsvName, seriesKey, seriesLabel, toggleDevices,
 } from './bmTrendText.js';
 import './bmTrend.css';
+import { saveBlob } from '../../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나
+import { backdropClose } from '../../components/backdropClose.js'; // 96회차(95회차 남긴 것 ①): 창 안에서 끌다 배경에서 떼면 닫히던 것 — 누름 · 뗌 모두 배경일 때만
 
 function downloadText(text, name) {
   if (typeof document === 'undefined' || typeof URL === 'undefined' || typeof Blob === 'undefined') return;
   const blob = new Blob([text], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = name;
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  saveBlob(blob, name);
 }
 
 /**
  * @param {{itemKey:string, name?:string, init:{kind,metric,dev,rangeK,show,sel}, devices?:object, keepDays?:object|null, anchor?:number,
  *   initWin?:{from:number,to:number}|null, peakWindowS?:number|null, onClose:()=>void, onSel?:(sel)=>void, narrowOverride?:boolean}} p
  */
-export default function BmTrendPopup({ itemKey, vc = '', name = '', init = {}, devices = {}, keepDays = null, anchor = null, initWin = null, peakWindowS = null, onClose, onSel, narrowOverride = null }) {
+export default function BmTrendPopup({ itemKey, vc = '', name = '', init = {}, devices = {}, keepDays = null, anchor = null, initWin = null, peakWindowS = null, peakWindowCapS = null, onClose, onSel, narrowOverride = null }) {
   // ⚠ 훅은 전부 조기 return 위.
   const [spec, setSpec] = useState(() => ({ kind: init.kind || 'server', metric: init.metric || 'cpu_pct', dev: init.dev || '' }));
   const [rangeK, setRangeK] = useState(() => trendRangeOf(init.rangeK).k);
@@ -121,10 +119,10 @@ export default function BmTrendPopup({ itemKey, vc = '', name = '', init = {}, d
   const pctX = (ms) => ((ms - win.from) / (win.to - win.from)) * 100;
   const yTicks = [0, 0.25, 0.5, 0.75, 1].map((r) => ({ r, v: yMax * r }));
   const title = `${spec.dev ? `${spec.dev} · ` : ''}${info.label} — ${show === 'avg' ? '평균' : show === 'peak' ? '피크' : '평균 · 피크'}`;
-  const srcText = peakSrcText(d?.peakSrc || [], peakWindowS);
+  const srcText = peakSrcText(d?.peakSrc || [], peakWindowS, peakWindowCapS);
 
   return (
-    <div className="bmt-pop-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="bmt-pop-overlay" {...backdropClose(() => onClose())}>
       <EscClose onClose={onClose} />
       <div className={`bmt-pop${isFull ? ' full' : ''}`} role="dialog" aria-modal="true" aria-label={`${title} 확대`}>
         {/* ── 머리 ── */}

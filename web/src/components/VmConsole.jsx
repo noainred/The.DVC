@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { fetchJson, can } from '../api.js';
 import EscClose from './EscClose.jsx';
+import { backdropClose } from './backdropClose.js'; // 95회차
 import { copyText as copyToClipboard } from '../util/copyText.js';   // v3.10.6: HTTP 포탈에서도 복사(Clipboard API → execCommand 폴백 · 실패는 false)
 
 /**
@@ -35,7 +36,7 @@ function VmConsoleModal({ vmId, vmName, onClose }) {
   const { loading, data, error } = state;
 
   return (
-    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="modal-overlay" {...backdropClose(onClose)}>
       <EscClose onClose={onClose} />
       <div className="modal card" style={{ maxWidth: 460 }}>
         <div className="flex between" style={{ marginBottom: 14 }}>

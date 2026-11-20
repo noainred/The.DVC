@@ -23,11 +23,18 @@ import {
   procDescOf, PROC_STATE_TEXT, procKey, procCoverText, procIoNote, procWaitNote, procThreadNote, PROC_NET_NOTE, PROC_ARGS_NOTE, mbsText, mbText,
   GROUP_NONE, groupLabel, groupSections, groupChips, filterByGroup, groupChipOn, groupSummary, groupStartPlan, groupStartText, groupSuggestions, suggestionText,
   CARD_LINE_ITEMS, CARD_LINE_MAX, normCardLine, toggleCardLine, cardLineCells,
+  fsLevel, fillText, kbText, fsHeadText, EXT_CARDS, extNow, extTone, extSub, reclaimText, winText, isLongWin,
 } from './focusMonText.js';
+import { pollMsFor, rawOnlyText, axisTime, parseLinkSeg, CMP_TEXT } from './focusMonHistoryText.js'; // v3.13.0 ⑭ 긴 구간
+import { CpuHistoryLayers, CmpSeg, EventsCard, ChangesCard, LinkCopy } from './FocusMonHistory.jsx';
+import { AppsView } from './FocusMonApps.jsx'; // v3.14.0 ⑮ 앱 단위 묶음
+import { AlertsTab } from './FocusMonAlerts.jsx'; // v3.16.0 ⑯ 알림 · OOM · 자동 조절
 import { niceMax, yScale, yTicks, linePath, areaPath, stackedAreas, spreadLabels, heatColor, cellShade, seriesMax, indexAtFrac, valueAtFrac, timeAtIndex, xAtIndex, tipRows } from './focusMonChart.js';
 import { Seg, Badge, copyText, CsvPanel, NodeCard, InstallCard } from './FocusMonBulk.jsx';
 import { usePoll } from './focusMonPoll.js';
 import { LoadTab } from './FocusMonLoad.jsx';
+import { AuditTab } from './FocusMonAudit.jsx'; // v3.11.0 디스크 점검(배드 섹터 점검 프로그램)
+import { PrepPanel } from './FocusMonPrep.jsx'; // v3.18.0 접속 자동 준비(수집 계정 · 공개키)
 import './focusMon.css';
 
 const BASE = ['tools', 'focus-mon'];
@@ -40,10 +47,13 @@ const lsSet = (k, v) => { try { ls()?.setItem(k, JSON.stringify(v)); } catch { /
 
 /* ── 주소 ─────────────────────────────────────────────────────────────────── */
 function readRoute() {
-  const s = hashSegments(typeof window === 'undefined' ? '' : window.location.hash);
-  if (s[0] !== BASE[0] || s[1] !== BASE[1]) return { tab: 'overview', server: '' };
-  if (s[2] === 'server' && s[3]) return { tab: 'server', server: decodeURIComponent(s[3]) };
-  return { tab: TABS.some((t) => t.key === s[2]) ? s[2] : 'overview', server: '' };
+  const all = hashSegments(typeof window === 'undefined' ? '' : window.location.hash);
+  // v3.13.0(⑭ 링크): 끝의 ‘@’ 칸은 구간 · 겹쳐 보기(focusMonHistoryText.linkSeg) — 탭 · 서버 판별에서 뺀다
+  const link = all.find((x) => x.startsWith('@')) || '';
+  const s = all.filter((x) => !x.startsWith('@'));
+  if (s[0] !== BASE[0] || s[1] !== BASE[1]) return { tab: 'overview', server: '', link };
+  if (s[2] === 'server' && s[3]) return { tab: 'server', server: decodeURIComponent(s[3]), link };
+  return { tab: TABS.some((t) => t.key === s[2]) ? s[2] : 'overview', server: '', link };
 }
 function useRoute() {
   const [r, setR] = useState(readRoute);
@@ -124,13 +134,29 @@ function Spark({ vals, color = RX_COLOR, max = 100, h = 24, area = true, hover =
 }
 
 /* ── 시간 띠 ──────────────────────────────────────────────────────────────── */
-function useTimeBar(windows) {
-  const [win, setWinRaw] = useState(() => { const w = lsGet('fm.win', 5); return [1, 5, 10, 30].includes(w) ? w : 5; });
+const LONG_DEFAULT = [60, 360, 1440, 10080, 43200];
+function useTimeBar(windows, longWindows, link) {
+  const [win, setWinRaw] = useState(() => { const w = lsGet('fm.win', 5); return [1, 5, 10, 30, ...LONG_DEFAULT].includes(w) ? w : 5; });
   const [end, setEnd] = useState(null);
   const [day, setDay] = useState(''); // '' = 최근 24시간, 'YYYY-MM-DD' = 그 날
+  const [cmp, setCmp] = useState(''); // v3.13.0 ⑭ 겹쳐 보기('' | '1d' | '7d') — 기억하지 않는다(링크로만 이어진다)
   const setWin = (w) => { setWinRaw(w); lsSet('fm.win', w); };
   const ws = Array.isArray(windows) && windows.length ? windows : [1, 5, 10, 30];
-  return { win: ws.includes(win) ? win : ws[0], end, setEnd, setWin, day, setDay, windows: ws };
+  const lws = Array.isArray(longWindows) ? longWindows : [];
+  // 링크(해시 끝 ‘@’ 칸)로 들어오면 그 구간 · 끝 시각 · 겹쳐 보기를 한 번 적용한다(응답의 구간 목록이 온 뒤 — 모르는 값은 버린다)
+  const applied = useRef('');
+  useEffect(() => {
+    // 응답(구간 목록)이 오기 전에는 읽지 않는다 — 기본 목록으로 먼저 읽으면 긴 구간 값을 '모르는 값' 으로 버리고 다시 읽지 않았다(2026-11-15 화면 확인)
+    if (!link || applied.current === link || !Array.isArray(windows) || !Array.isArray(longWindows)) return;
+    applied.current = link;
+    const p = parseLinkSeg(link, [...ws, ...lws]);
+    if (p.win != null) setWinRaw(p.win);
+    setEnd(p.end != null && p.end < Date.now() - 2_000 ? p.end : null);
+    setCmp(p.cmp || '');
+  }, [link, ws.join(), lws.join()]); // eslint-disable-line react-hooks/exhaustive-deps
+  const all = [...ws, ...lws];
+  const w = all.includes(win) ? win : ws[0];
+  return { win: w, long: isLongWin(w), end, setEnd, setWin, day, setDay, windows: ws, longWindows: lws, cmp, setCmp };
 }
 function dayRange(day, now) {
   if (!day) return { from: now - 86_400_000, to: now };
@@ -140,7 +166,7 @@ function dayRange(day, now) {
 }
 const ymd = (ts) => { const d = new Date(ts); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 
-function TimeBar({ tb, now, coverage, oldestMinute }) {
+function TimeBar({ tb, now, coverage, oldestMinute, route }) {
   const W = tb.win * 60_000;
   const { from: dFrom, to: dTo } = dayRange(tb.day, now);
   const steps = Math.max(1, Math.floor((dTo - dFrom) / W));
@@ -158,13 +184,17 @@ function TimeBar({ tb, now, coverage, oldestMinute }) {
   const [drag, setDrag] = useState(null);
   const cov = (coverage?.ranges || []).map(([a, b]) => [a * 60_000, (b + 1) * 60_000]);
   const minDate = oldest ? ymd(oldest) : ymd(now - 30 * 86_400_000);
-  const caption = windowCaption({ past: !latest, from: endNow - W, to: endNow, win: tb.win });
+  // 서버 상세의 1시간은 원본(요약은 6시간부터 — 반증 F14: 캡션이 '1분 요약' 이라고 했다)
+  const caption = windowCaption({ past: !latest, from: endNow - W, to: endNow, win: tb.win, raw: route?.tab === 'server' && tb.win <= 60 });
+  // v3.13.0(⑭) 긴 구간 — 24시간부터는 하루 슬라이더가 한두 칸이라 숨긴다(이전 · 다음 · 날짜로 이동은 그대로)
+  const slider = tb.win < 1440;
   return (
     <div className="fm-card fm-tbar">
       <span className="fm-dim">구간</span>
-      <Seg label="차트 구간" value={tb.win} options={tb.windows.map((w) => [w, `${w}분`])} onChange={(w) => tb.setWin(w)} />
-      <button type="button" className="fm-btn" disabled={!canPrev} onClick={() => move(-W)}>◀ 이전 {tb.win}분</button>
-      <span className="fm-slider">
+      <Seg label="차트 구간" value={tb.windows.includes(tb.win) ? tb.win : null} options={tb.windows.map((w) => [w, winText(w)])} onChange={(w) => tb.setWin(w)} />
+      {tb.longWindows.length ? <><span className="fm-dim">긴 구간</span><Seg label="긴 구간" value={tb.longWindows.includes(tb.win) ? tb.win : null} options={tb.longWindows.map((w) => [w, winText(w)])} onChange={(w) => tb.setWin(w)} /></> : null}
+      <button type="button" className="fm-btn" disabled={!canPrev} onClick={() => move(-W)}>◀ 이전 {winText(tb.win)}</button>
+      {slider ? <span className="fm-slider">
         <input type="range" min={0} max={steps} value={drag ?? idx} aria-label="구간 이동 — 오른쪽 끝이 최신"
           onChange={(e) => setDrag(Number(e.target.value))}
           onMouseUp={() => { if (drag != null) { const t = dFrom + drag * W; setDrag(null); if (t >= now - 2_000) { tb.setEnd(null); } else tb.setEnd(t); } }}
@@ -177,12 +207,13 @@ function TimeBar({ tb, now, coverage, oldestMinute }) {
             return w > 0 ? <rect key={i} x={x} y="0" width={Math.max(1, w)} height="6" fill={RX_COLOR} /> : null;
           })}
         </svg>
-      </span>
-      <button type="button" className="fm-btn" disabled={latest} onClick={() => move(W)}>다음 {tb.win}분 ▶</button>
+      </span> : null}
+      <button type="button" className="fm-btn" disabled={latest} onClick={() => move(W)}>다음 {winText(tb.win)} ▶</button>
       <button type="button" className={`fm-btn ${latest ? 'on' : ''}`} onClick={() => { tb.setEnd(null); tb.setDay(''); }}>최신</button>
       <label className="fm-dim" htmlFor="fm-day">날짜로 이동</label>
       <input id="fm-day" type="date" className="fm-date" value={tb.day || ymd(now)} min={minDate} max={ymd(now)}
         onChange={(e) => { const v = e.target.value; if (!v || v === ymd(now)) { tb.setDay(''); tb.setEnd(null); return; } tb.setDay(v); const r = dayRange(v, now); tb.setEnd(r.to - 1); }} />
+      {route ? <LinkCopy route={route} tb={tb} /> : null}
       <span className="fm-cap">{caption}</span>
     </div>
   );
@@ -237,7 +268,7 @@ function Overview({ main, ids, tb, now, onOpen }) {
   const setLine = (v) => { const x = normCardLine(v); setLineRaw(x); lsSet('fm.ov.line', x); };
   const params = useMemo(() => ({ view: 'overview', targets: ids.join(','), win: tb.win, end: tb.end ?? '' }), [ids, tb.win, tb.end]);
   const ivMs = Math.max(1, Math.min(...(main.sessions.map((s) => s.interval)), 10) || 2) * 1000;
-  const q = usePoll('/tools/focus-mon/data', params, tb.end == null ? ivMs : 0, ids.length > 0);
+  const q = usePoll('/tools/focus-mon/data', params, pollMsFor(tb.win, tb.end, ivMs), ids.length > 0);
   const tById = useMemo(() => new Map(main.targets.map((t) => [t.id, t])), [main.targets]);
   const rows = (q.data?.targets || []).map((x) => ({ ...x, t: tById.get(x.id) })).filter((x) => x.t);
   const live = rows.filter((x) => x.sum && x.t.status?.state === 'ok');
@@ -295,8 +326,9 @@ function Overview({ main, ids, tb, now, onOpen }) {
           {hasGroups ? <><span className="fm-dim">나눠 보기</span><Seg label="나눠 보기" value={split} onChange={(v) => { setSplit(v); lsSet('fm.ov.split', v); }} options={[['flat', '한 판'], ['group', '그룹별로']]} /></> : null}
           <CardLinePicker value={line} onChange={setLine} />
         </div>
-        <span className="fm-dim">세로축 0~100% 공통 · 숫자는 구간 끝의 값</span>
+        <span className="fm-dim">세로축 0~100% 공통 · 숫자는 구간 끝의 값{q.data?.long ? ` · 추이는 ${q.data.long.src === 'm' ? '1분' : '1시간'} 요약 평균` : ''}</span>
       </div>
+      {q.data?.long?.building ? <div className="fm-ban">이미 쌓인 기록의 요약을 만드는 중입니다 — 그동안 긴 구간의 앞쪽이 비어 보일 수 있습니다(조금씩 쉬어 가며 만듭니다).</div> : null}
       <div className="fm-grid">
         {split === 'group' && hasGroups ? groupSections(shown.map((x) => ({ ...x.t, _row: x })), main.groups?.list).flatMap((sec) => {
           // v2.982 그룹별로 나눠 보기 — 그룹 머리(대수 · 평균 CPU · 가장 바쁜 서버) 뒤에 그 그룹 카드(정렬 · 노드 거르기는 그대로)
@@ -325,9 +357,10 @@ function Compare({ main, ids, tb, now, onOpen }) {
   const [hf, setHf] = useState(null);
   const pinTouched = useRef(false);
   const [log, setLog] = useState(false);
-  const scopeParam = metric === 'disk' ? (scope === 'all' ? 'all' : scope === 'mount' ? `mount:${scopeText}` : `dev:${scopeText}`) : metric === 'net' ? (scope === 'if' && scopeText ? `if:${scopeText}` : 'top') : 'all';
+  const [dlErr, setDlErr] = useState('');   // 전체 점검 29회차 F8: 내려받기 실패(내보내기 동시 1건 거절 · DB 오류)를 삼키지 않는다
+  const scopeParam = metric === 'disk' ? (scope === 'all' ? 'all' : scope === 'mount' ? `mount:${scopeText}` : `dev:${scopeText}`) : metric === 'net' ? (scope === 'if' && scopeText ? `if:${scopeText}` : 'top') : metric === 'fs' ? (scope === 'mount' && scopeText ? `mount:${scopeText}` : 'all') : 'all';
   const params = useMemo(() => ({ view: 'compare', targets: ids.join(','), win: tb.win, end: tb.end ?? '', metric, item: it, scope: scopeParam }), [ids, tb.win, tb.end, metric, it, scopeParam]);
-  const q = usePoll('/tools/focus-mon/data', params, tb.end == null ? 2_000 : 0, ids.length > 0);
+  const q = usePoll('/tools/focus-mon/data', params, pollMsFor(tb.win, tb.end, 2_000), ids.length > 0);
   const tById = useMemo(() => new Map(main.targets.map((t) => [t.id, t])), [main.targets]);
   const rows = (q.data?.targets || []).filter((x) => tById.has(x.id));
   const pinned = pins.filter((p) => rows.some((r) => r.id === p)).slice(0, 4);
@@ -363,11 +396,11 @@ function Compare({ main, ids, tb, now, onOpen }) {
             {mdef.items.map(([k, t]) => <button key={k} type="button" className={it === k ? 'on' : ''} onClick={() => { setItem(k); lsSet('fm.cmp.item', k); }}>{itemLabel(k, t)}{metric === 'disk' ? <span className="fm-io">{({ rrqm: 'rrqm/s', wrqm: 'wrqm/s', r: 'r/s', w: 'w/s', rMB: 'rMB/s', wMB: 'wMB/s', rqsz: 'avgrq-sz', qu: 'avgqu-sz', await: 'await', rAwait: 'r_await', wAwait: 'w_await', svctm: 'svctm', util: '%util' })[k]}</span> : null}</button>)}
           </div>
         </div>
-        {metric === 'disk' || metric === 'net' ? (
+        {metric === 'disk' || metric === 'net' || metric === 'fs' ? (
           <div className="fm-row"><span className="fm-lbl">범위</span>
-            <Seg label="범위" value={scope} onChange={setScope} options={metric === 'disk' ? [['all', '전체 디스크'], ['mount', '같은 마운트 지점'], ['dev', '장치 지정']] : [['all', '대표(본딩 · 물리)'], ['if', '인터페이스 지정']]} />
+            <Seg label="범위" value={scope} onChange={setScope} options={metric === 'disk' ? [['all', '전체 디스크'], ['mount', '같은 마운트 지점'], ['dev', '장치 지정']] : metric === 'fs' ? [['all', '가장 높은 마운트'], ['mount', '마운트 지정']] : [['all', '대표(본딩 · 물리)'], ['if', '인터페이스 지정']]} />
             {scope !== 'all' ? <input className="fm-input" value={scopeText} onChange={(e) => setScopeText(e.target.value.slice(0, 200))} placeholder={scope === 'mount' ? '/oradata' : scope === 'dev' ? 'sdb' : 'bond0'} aria-label="범위 값" /> : null}
-            <span className="fm-dim">{metric === 'disk' ? '전체 디스크 = 서버마다 물리 디스크의 요청 수로 가중한 평균(사용률은 최고값)' : '대표 = 본딩(없으면 본딩에 묶이지 않은 물리) 수신 · 송신 합'}</span>
+            <span className="fm-dim">{metric === 'disk' ? '전체 디스크 = 서버마다 물리 디스크의 요청 수로 가중한 평균(사용률은 최고값)' : metric === 'fs' ? '가장 높은 마운트 = 서버마다 로컬 파일시스템 중 가장 높은 사용률(inode 는 마운트를 지정하세요) · 60초마다 확인' : '대표 = 본딩(없으면 본딩에 묶이지 않은 물리) 수신 · 송신 합'}</span>
           </div>
         ) : null}
         <div className="fm-row"><span className="fm-lbl">고정</span>
@@ -379,18 +412,19 @@ function Compare({ main, ids, tb, now, onOpen }) {
       <div className="fm-split">
         <div className="fm-card fm-chart-card">
           <div className="fm-row fm-between">
-            <h3 className="fm-h3">{mdef.label} {metric === 'disk' ? IOSTAT_LABEL[it] : (mdef.items.find(([k]) => k === it)?.[1] || '')} — 최근 {tb.win}분</h3>
+            <h3 className="fm-h3">{mdef.label} {metric === 'disk' ? IOSTAT_LABEL[it] : (mdef.items.find(([k]) => k === it)?.[1] || '')} — 최근 {winText(tb.win)}</h3>
             <div className="fm-row">
               <span className="fm-dim">{unit ? `단위 ${unit}` : ''}</span>
               {!pct ? <Seg label="눈금" value={log ? 'log' : 'lin'} onChange={(v) => setLog(v === 'log')} options={[['lin', '선형'], ['log', '로그']]} /> : null}
-              {canCsv() ? <button type="button" className="fm-btn" onClick={() => downloadFile(csvHref).catch(() => {})}>CSV</button> : <span className="fm-dim" title={CSV_DENIED_NOTE}>CSV 권한 없음</span>}
+              {canCsv() ? <button type="button" className="fm-btn" onClick={() => { setDlErr(''); downloadFile(csvHref).catch((e) => setDlErr(e?.body?.reason || e?.message || '내려받기에 실패했습니다.')); }}>CSV</button> : <span className="fm-dim" title={CSV_DENIED_NOTE}>CSV 권한 없음</span>}
+              {dlErr ? <span className="fm-dim" role="alert">{dlErr}</span> : null}
             </div>
           </div>
           <div className="fm-chart-wrap fm-chart-box">
             <svg viewBox="0 0 900 360" role="img" aria-label={`서버 ${rows.length}대의 ${mdef.label} 추이 — 고정한 서버는 색 선, 나머지는 회색 선`} className="fm-chart">
               {ticks.map((v) => <g key={v}><line x1={X0} x2={X1} y1={y(v)} y2={y(v)} stroke="var(--fm-grid)" /><text x={X0 - 6} y={y(v) + 4} className="fm-axis" textAnchor="end">{v >= 1000 ? `${Math.round(v / 1000)}K` : Math.round(v * 100) / 100}</text></g>)}
-              <text x={X0} y={352} className="fm-axis">{clockText(q.data?.from)}</text>
-              <text x={X1} y={352} className="fm-axis" textAnchor="end">{tb.end == null ? '지금' : clockText(q.data?.to)}</text>
+              <text x={X0} y={352} className="fm-axis">{axisTime(q.data?.from, tb.win)}</text>
+              <text x={X1} y={352} className="fm-axis" textAnchor="end">{tb.end == null ? '지금' : axisTime(q.data?.to, tb.win)}</text>
               {rows.filter((r) => !pinColor.has(r.id)).map((r) => <path key={r.id} d={linePath(r.avg, { x0: X0, x1: X1, y })} fill="none" stroke={REST_COLOR} strokeWidth="1" />)}
               {rows.filter((r) => pinColor.has(r.id)).map((r) => (
                 <g key={r.id}>
@@ -432,6 +466,7 @@ function Compare({ main, ids, tb, now, onOpen }) {
           ))}
         </div>
       </div>
+      <ChangesCard ids={ids} tb={tb} tById={tById} onOpen={onOpen} retentionDays={main.settings?.retentionDays} />
     </>
   );
 }
@@ -446,6 +481,7 @@ function IostatCompare({ main, ids, tb, onOpen }) {
   const [col, setCol] = useState('wAwait');
   const [pins, setPins] = useState([]);
   const [hf, setHf] = useState(null);
+  const [dlErr, setDlErr] = useState('');   // 29회차 F8
   const cols = main.iostat?.cols || [];
   const params = useMemo(() => ({ view: 'iostat', targets: ids.join(','), win: tb.win, end: tb.end ?? '', at, scope, col, pins: pins.join(',') }), [ids, tb.win, tb.end, at, scope, col, pins]);
   const q = usePoll('/tools/focus-mon/data', params, tb.end == null ? 2_000 : 0, ids.length > 0);
@@ -490,7 +526,8 @@ function IostatCompare({ main, ids, tb, onOpen }) {
       <div className="fm-card fm-flush">
         <div className="fm-row fm-between fm-pad"><h3 className="fm-h3">고른 서버 {rows.length}대의 iostat — {at === 'avg' ? '구간 평균' : '구간 끝 순간'}</h3>
           <div className="fm-row"><span className="fm-dim">칸이 짙을수록 그 열에서 큰 값 · 열 제목을 누르면 정렬 · 줄 앞 네모를 누르면 아래 차트에 올림(4줄까지)</span>
-            {canCsv() ? <button type="button" className="fm-btn" onClick={() => downloadFile(`/tools/focus-mon/export.csv?${new URLSearchParams({ kind: 'iostat', targets: ids.join(','), win: String(tb.win), end: tb.end ? String(tb.end) : '', at, scope }).toString()}`).catch(() => {})}>CSV</button> : null}</div>
+            {canCsv() ? <button type="button" className="fm-btn" onClick={() => { setDlErr(''); downloadFile(`/tools/focus-mon/export.csv?${new URLSearchParams({ kind: 'iostat', targets: ids.join(','), win: String(tb.win), end: tb.end ? String(tb.end) : '', at, scope }).toString()}`).catch((e) => setDlErr(e?.body?.reason || e?.message || '내려받기에 실패했습니다.')); }}>CSV</button> : <span className="fm-dim" title={CSV_DENIED_NOTE}>CSV 권한 없음</span>}
+            {dlErr ? <span className="fm-dim" role="alert">{dlErr}</span> : null}</div>
         </div>
         {arrange === 'mix' ? (
           <STable className="fm-table fm-io" minWidth={1060}>
@@ -548,16 +585,19 @@ function ServerDetail({ main, id, tb, now, onBack }) {
   const [hCpu, setHCpu] = useState(null); const [hMem, setHMem] = useState(null); const [hT, setHT] = useState(null); const [hL, setHL] = useState(null);
   const [openProc, setOpenProc] = useState(null); // v2.981 펼친 프로세스 { k(procKey), p } — 표에서 빠져도 세부 정보는 계속 본다
   const t = main.targets.find((x) => x.id === id);
-  const params = useMemo(() => ({ view: 'server', targets: id, win: tb.win, end: tb.end ?? '', at, dev }), [id, tb.win, tb.end, at, dev]);
-  const q = usePoll('/tools/focus-mon/data', params, tb.end == null ? 2_000 : 0, !!t);
+  // v3.13.0(⑭): 긴 구간에는 '구간 평균' 이 없다(요약만 남는다 — 단추를 숨기고 끝 순간으로) · 겹쳐 보기 cmp
+  const atEff = tb.long ? 'end' : at;
+  const params = useMemo(() => ({ view: 'server', targets: id, win: tb.win, end: tb.end ?? '', at: atEff, dev, cmp: tb.cmp || '' }), [id, tb.win, tb.end, atEff, dev, tb.cmp]);
+  const q = usePoll('/tools/focus-mon/data', params, pollMsFor(tb.win, tb.end, 2_000), !!t);
   // 프로세스 상위 5 도 같은 값(구간 끝 순간 | N분 평균)을 따른다 — 예전에는 늘 끝 순간이라 평균을 고른 화면 안에서 이 카드만 달랐다(v2.979 반증 6).
-  const pq = usePoll('/tools/focus-mon/procs', useMemo(() => ({ targets: id, win: tb.win, end: tb.end ?? '', at }), [id, tb.win, tb.end, at]), tb.end == null ? 5_000 : 0, !!t);
+  //   긴 구간에는 묻지 않는다(프로세스는 원본 구간에만 — 서버는 긴 구간을 받지 않고 5분으로 되돌린다)
+  const pq = usePoll('/tools/focus-mon/procs', useMemo(() => ({ targets: id, win: tb.win, end: tb.end ?? '', at: atEff }), [id, tb.win, tb.end, atEff]), tb.end == null ? 5_000 : 0, !!t && !tb.long);
   if (!t) return <div className="fm-card fm-empty">없는 서버입니다. <button type="button" className="fm-btn" onClick={onBack}>개요로</button></div>;
   const d = q.data;
   const tab = d?.table;
   // 지금 보는 값 — 응답이 실제로 덮는 시간으로 말한다(수집이 끝났거나 구간 일부만 있으면 그대로 밝힌다 · v2.979 반증 2).
   const ivSec = Number(t?.status?.interval) > 0 ? Number(t.status.interval) : (main.limits?.defaultInterval || 2);
-  const atText = atCaption(at, { win: tb.win, past: tb.end != null, lastAt: d?.lastAt ?? null, coverMs: d?.coverMs ?? null, now, staleMs: ivSec * 3_000 + 2_000 });
+  const atText = atCaption(atEff, { win: tb.win, past: tb.end != null, lastAt: d?.lastAt ?? null, coverMs: d?.coverMs ?? null, now, staleMs: ivSec * 3_000 + 2_000 });
   const settings = main.settings;
   const hello = d?.hello || t.status?.hello;
   const X0 = 34; const X1 = 632;
@@ -599,7 +639,8 @@ function ServerDetail({ main, id, tb, now, onBack }) {
           <div className="fm-mono fm-dim fm-brk">{t.host} · {t.agent ? `엣지 ${t.agent}` : '중앙'}{hello ? ` · ${hello.release || hello.kernel}${hello.ncpu ? ` · ${hello.ncpu}코어` : ''}` : ''}{hello && hello.rhelMajor && !hello.rhelMajor.startsWith('7.') ? ' · RHEL 7 이 아님(검증 안 된 OS)' : ''}{mem?.total ? ` · ${bytesText(mem.total)}` : ''}</div>
         </div>
         <div className="fm-row">
-          <Seg label="표의 값" value={at} onChange={setAt} options={atOptions(tb.win)} />
+          <CmpSeg value={tb.cmp} onChange={tb.setCmp} />
+          {!tb.long ? <Seg label="표의 값" value={at} onChange={setAt} options={atOptions(tb.win)} /> : null}
           <button type="button" className="fm-btn" onClick={onBack}>개요로</button>
         </div>
       </div>
@@ -607,6 +648,7 @@ function ServerDetail({ main, id, tb, now, onBack }) {
       {!d ? <Loading /> : (
         <>
           {d.n === 0 ? <div className="fm-ban">이 구간에는 기록이 없습니다 — 수집하지 않은 시간입니다. 0 으로 그리지 않고 비워 둡니다.</div> : null}
+          {d.long?.building ? <div className="fm-ban">이미 쌓인 기록의 요약을 만드는 중입니다 — 그동안 긴 구간의 앞쪽이 비어 보일 수 있습니다.</div> : null}
           <div className="fm-two">
             <div className="fm-card">
               <div className="fm-row fm-between"><div className="fm-col"><h3 className="fm-h3">CPU{hello?.ncpu ? ` — ${hello.ncpu}코어` : ''} <span className="fm-dim fm-at">· {atText}</span></h3><span className="fm-big">{tab?.cpu ? Math.round(tab.cpu.pct) : DASH}{tab?.cpu ? <small>%</small> : null}</span></div>
@@ -615,13 +657,17 @@ function ServerDetail({ main, id, tb, now, onBack }) {
               <svg viewBox="0 0 640 214" role="img" aria-label="CPU 사용률 구성 추이 — 사용자 · 시스템 · I/O 대기 · steal 을 쌓은 면" className="fm-chart">
                 {[0, 25, 50, 75, 100].map((v) => <g key={v}><line x1={X0} x2={X1} y1={yc(v)} y2={yc(v)} stroke="var(--fm-grid)" /><text x={X0 - 6} y={yc(v) + 4} className="fm-axis" textAnchor="end">{v}</text></g>)}
                 {layers.map((p, i) => <path key={i} d={p} fill={LC[i]} fillOpacity="0.32" stroke={LC[i]} strokeWidth="1" />)}
-                <text x={X0} y={209} className="fm-axis">{clockText(d.from)}</text><text x={X1} y={209} className="fm-axis" textAnchor="end">{tb.end == null ? '지금' : clockText(d.to)}</text>
+                <CpuHistoryLayers d={d} x0={X0} x1={X1} y={yc} top={10} bottom={190} showBand={tb.long} />
+                <text x={X0} y={209} className="fm-axis">{axisTime(d.from, tb.win)}</text><text x={X1} y={209} className="fm-axis" textAnchor="end">{tb.end == null ? '지금' : axisTime(d.to, tb.win)}</text>
                 <HoverMarks f={hCpu} plot={cpuPlot} y={yc} series={[{ key: 'tot', vals: cpuTot, color: RX_COLOR }]} />
                 <HoverRect plot={cpuPlot} onFrac={setHCpu} />
               </svg>
               <HoverTip f={hCpu} vbw={640} plot={cpuPlot} time={hoverTime(hCpu, [cpuTot], d.from, d.to)}
-                rows={[['사용자', d.charts.cpu.usr, LC[0]], ['시스템', d.charts.cpu.sys, LC[1]], ['I/O 대기', d.charts.cpu.iow, LC[2]], ['steal', d.charts.cpu.stl, LC[3]], ['합', cpuTot, null]].map(([l, v, c]) => ({ key: l, label: l, color: c, value: pctText(valueAtFrac(v, hCpu), 1) }))} />
+                rows={[['사용자', d.charts.cpu.usr, LC[0]], ['시스템', d.charts.cpu.sys, LC[1]], ['I/O 대기', d.charts.cpu.iow, LC[2]], ['steal', d.charts.cpu.stl, LC[3]], ['합', cpuTot, null],
+                  ...(tb.long && d.charts.band ? [['칸 안 최저', d.charts.band.min, null], ['칸 안 최고', d.charts.band.max, null]] : []),
+                  ...(d.overlay?.cpu ? [[CMP_TEXT[d.overlay.cmp], d.overlay.cpu, null]] : [])].map(([l, v, c]) => ({ key: l, label: l, color: c, value: pctText(valueAtFrac(v, hCpu), 1) }))} />
               </div>
+              {tb.long || d.overlay ? <div className="fm-row">{tb.long ? <span className="fm-lg"><i style={{ background: '#93c5fd', opacity: 0.5 }} />띠 = 칸 안 최저 ~ 최고(CPU 사용률)</span> : null}{d.overlay ? <span className="fm-lg"><i style={{ background: '#e2e8f0' }} />점선 = {CMP_TEXT[d.overlay.cmp]}(그때 수집하지 않은 칸은 비움)</span> : null}</div> : null}
               <div className="fm-row fm-between"><span className="fm-lg">부하 평균 <b>{(tab?.load || []).map((v) => numText(v, 1)).join(' · ')}</b> <span className="fm-dim">(1 · 5 · 15분)</span></span></div>
               {tab?.cpu?.cores?.length ? (
                 <div className="fm-col"><span className="fm-dim">코어별 사용률(cpu0 ~ cpu{tab.cpu.cores.length - 1}) · 어두움 0% → 밝음 100%</span>
@@ -643,6 +689,7 @@ function ServerDetail({ main, id, tb, now, onBack }) {
                 {[0, 50, 100].map((v) => <g key={v}><line x1={X0} x2={X1} y1={ym(v)} y2={ym(v)} stroke="var(--fm-grid)" /><text x={X0 - 6} y={ym(v) + 4} className="fm-axis" textAnchor="end">{v}</text></g>)}
                 <path d={areaPath(d.charts.mem, { x0: X0, x1: X1, y: ym, base: 126 })} fill={RX_COLOR} fillOpacity="0.12" />
                 <path d={linePath(d.charts.mem, { x0: X0, x1: X1, y: ym })} fill="none" stroke={RX_COLOR} strokeWidth="2" />
+                {d.overlay?.mem ? <path d={linePath(d.overlay.mem, { x0: X0, x1: X1, y: ym })} fill="none" stroke="#e2e8f0" strokeOpacity="0.75" strokeWidth="1.5" strokeDasharray="5 4" /> : null}
                 <HoverMarks f={hMem} plot={memPlot} y={ym} series={[{ key: 'mem', vals: d.charts.mem, color: RX_COLOR }]} />
                 <HoverRect plot={memPlot} onFrac={setHMem} />
               </svg>
@@ -651,10 +698,11 @@ function ServerDetail({ main, id, tb, now, onBack }) {
               <div className="fm-row fm-between"><span className="fm-lg">스왑 <b>{bytesText(mem?.swU)}</b> / {bytesText(mem?.swT)}</span><span className="fm-lg">Dirty <b>{bytesText(mem?.dirty)}</b> · Slab <b>{bytesText(mem?.slab)}</b></span></div>
             </div>
           </div>
+          <EventsCard id={id} t={t} d={d} main={main} onChanged={q.reload} />
           <div className="fm-card fm-flush">
             <div className="fm-row fm-between fm-pad"><h3 className="fm-h3">네트워크 — 본딩 {nets.filter((x) => x.k === 'bond').length}개 · 물리 인터페이스 {nets.filter((x) => x.k === 'phys').length}개 <span className="fm-dim fm-at">· {atText}</span></h3>
               <div className="fm-row"><span className="fm-lg"><i style={{ background: RX_COLOR }} />수신</span><span className="fm-lg"><i style={{ background: TX_COLOR }} />송신</span>
-                <Seg label="네트워크 표의 값" value={at} onChange={setAt} options={atOptions(tb.win)} />
+                {!tb.long ? <Seg label="네트워크 표의 값" value={at} onChange={setAt} options={atOptions(tb.win)} /> : null}
                 <Seg label="인터페이스 범위" value={netAll ? 'all' : 'bp'} onChange={(v) => setNetAll(v === 'all')} options={[['bp', '본딩 · 물리'], ['all', '전체(VLAN · 가상 포함)']]} /></div></div>
             <STable className="fm-table" minWidth={1040}>
               <thead><tr><th>인터페이스</th><th>구성</th><th className="fm-r">속도</th><th>사용률</th><th className="fm-r">수신</th><th className="fm-r">송신</th><th className="fm-r">오류 · 드롭</th><th data-nosort>최근 추이</th></tr></thead>
@@ -671,12 +719,12 @@ function ServerDetail({ main, id, tb, now, onBack }) {
                 </tr>
               ))}</tbody>
             </STable>
-            <div className="fm-note fm-pad">사용률 = 수신 · 송신 중 큰 쪽 ÷ 링크 속도. 본딩 속도는 802.3ad · balance 계열은 올라온 구성원 합, active-backup 은 쓰는 구성원 하나입니다. 링크 속도를 못 읽은 인터페이스는 사용률을 ‘—’ 로 두고 수신 · 송신량만 보여 줍니다. ‘{tb.win}분 평균’ 은 시간 띠에서 고른 구간({tb.windows.join(' · ')}분 중 하나)의 시간 평균입니다(표본마다 덮는 시간으로 가중 — 수집 주기가 바뀐 구간도 치우치지 않습니다). 수신 · 송신은 평균, 사용률은 순간마다의 사용률(큰 쪽 ÷ 링크 속도)을 평균한 값이라 평균 수신 · 송신으로 다시 나눈 값과 다를 수 있고, 오류 · 드롭은 그 구간의 합입니다.</div>
+            <div className="fm-note fm-pad">사용률 = 수신 · 송신 중 큰 쪽 ÷ 링크 속도. 본딩 속도는 802.3ad · balance 계열은 올라온 구성원 합, active-backup 은 쓰는 구성원 하나입니다. 링크 속도를 못 읽은 인터페이스는 사용률을 ‘—’ 로 두고 수신 · 송신량만 보여 줍니다. {tb.long ? '긴 구간에는 구간 평균이 없어 표는 구간 끝 순간의 값입니다(요약 표에는 표의 원본이 없습니다). ' : <>‘{tb.win}분 평균’ 은 시간 띠에서 고른 구간({tb.windows.join(' · ')}분 중 하나)의 시간 평균입니다(표본마다 덮는 시간으로 가중 — 수집 주기가 바뀐 구간도 치우치지 않습니다). 수신 · 송신은 평균, 사용률은 순간마다의 사용률(큰 쪽 ÷ 링크 속도)을 평균한 값이라 평균 수신 · 송신으로 다시 나눈 값과 다를 수 있고, 오류 · 드롭은 그 구간의 합입니다.</>}</div>
           </div>
           <div className="fm-card fm-flush">
             <div className="fm-row fm-between fm-pad"><h3 className="fm-h3">디스크 — 물리 {dsks.filter((x) => x.k === 'disk').length}개 · 파티션 {dsks.filter((x) => x.k === 'part').length}개 · LVM 볼륨 {dsks.filter((x) => x.k === 'lvm').length}개 <span className="fm-dim fm-at">· {atText}</span></h3>
               <div className="fm-row"><span className="fm-dim">장치 이름을 누르면 아래 차트가 그 장치로 바뀝니다</span>
-                <Seg label="디스크 표의 값" value={at} onChange={setAt} options={atOptions(tb.win)} />
+                {!tb.long ? <Seg label="디스크 표의 값" value={at} onChange={setAt} options={atOptions(tb.win)} /> : null}
                 <Seg label="디스크 범위" value={tree} onChange={setTree} options={[['tree', '트리'], ['phys', '물리 디스크만'], ['parts', '파티션 · 볼륨만']]} />
                 <Seg label="표의 열" value={cols} onChange={(v) => { setCols(v); lsSet('fm.dsk.cols', v); }} options={[['summary', '요약 열'], ['iostat', 'iostat 전체 열']]} /></div></div>
             <STable className="fm-table fm-io" minWidth={cols === 'iostat' ? 1100 : 1000}>
@@ -710,11 +758,13 @@ function ServerDetail({ main, id, tb, now, onBack }) {
                     <HoverTip f={hL} vbw={640} plot={devPlot} time={hoverTime(hL, [devC.rAwait, devC.wAwait], d.from, d.to)} rows={[{ key: 'r', label: '읽기 지연', color: RX_COLOR, value: msText(valueAtFrac(devC.rAwait, hL)) }, { key: 'w', label: '쓰기 지연', color: TX_COLOR, value: msText(valueAtFrac(devC.wAwait, hL)) }]} /></div></div>
               </div>
             ) : null}
-            <div className="fm-note fm-pad">열 이름과 계산식은 iostat -x -m 과 같습니다(같은 /proc/diskstats 누적값의 차이). 요약 열은 13개 가운데 8개이고 ‘iostat 전체 열’ 을 누르면 병합 · 요청 크기 · 합친 지연 · 서비스 시간이 나옵니다. ‘전체 디스크’ 는 물리 디스크만 더합니다(파티션 · LVM 은 같은 입출력을 다시 보는 것). ‘{tb.win}분 평균’ 은 시간 띠에서 고른 구간({tb.windows.join(' · ')}분 중 하나)을 다시 계산한 값입니다 — 표본마다 덮는 시간으로 가중해 횟수 · 처리량 · 대기열 · 사용률은 시간 평균, 지연은 요청 수(초당 횟수 × 시간)로 가중합니다(끝난 요청이 없으면 ‘—’).</div>
+            <div className="fm-note fm-pad">열 이름과 계산식은 iostat -x -m 과 같습니다(같은 /proc/diskstats 누적값의 차이). 요약 열은 13개 가운데 8개이고 ‘iostat 전체 열’ 을 누르면 병합 · 요청 크기 · 합친 지연 · 서비스 시간이 나옵니다. ‘전체 디스크’ 는 물리 디스크만 더합니다(파티션 · LVM 은 같은 입출력을 다시 보는 것). {tb.long ? '긴 구간에는 구간 평균이 없어 표는 구간 끝 순간의 값입니다(요약 표에는 표의 원본이 없습니다). ' : <>‘{tb.win}분 평균’ 은 시간 띠에서 고른 구간({tb.windows.join(' · ')}분 중 하나)을 다시 계산한 값입니다 — 표본마다 덮는 시간으로 가중해 횟수 · 처리량 · 대기열 · 사용률은 시간 평균, 지연은 요청 수(초당 횟수 × 시간)로 가중합니다(끝난 요청이 없으면 ‘—’).</>}</div>
           </div>
+          <ExtCards d={d} settings={settings} now={now} cores={hello?.ncpu || tab?.cpu?.cores?.length || null} atText={atText} tb={tb} />
           <div className="fm-card fm-flush">
             <div className="fm-row fm-between fm-pad"><h3 className="fm-h3">CPU 를 많이 쓰는 프로세스 — 상위 5 <span className="fm-dim fm-at">· {atText}</span></h3><a href={`#/${BASE.join('/')}/procs`}>상위 30개 전부 보기</a></div>
-            <div className="fm-tblbox">
+            {tb.long ? <div className="fm-note fm-pad">{rawOnlyText('프로세스 목록', tb.windows)}</div> : null}
+            <div className="fm-tblbox" hidden={tb.long}>
             <STable className="fm-table" minWidth={560}>
               <thead><tr><th>PID</th><th>사용자</th><th>CPU(1코어 = 100%)</th><th>명령</th></tr></thead>
               <tbody>{top5.map((p) => {
@@ -739,6 +789,78 @@ function ServerDetail({ main, id, tb, now, onBack }) {
           </div>
         </>
       )}
+    </>
+  );
+}
+
+/* ── 더할 지표(v3.12.0 ⑬ — 시안 Metrics · 사용자 '기본값대로 모두 구현해줘') ─────────────────────────────── */
+/** 작은 칸 하나 — 이름 · 지금 값 · 추이 · 아래 줄(최고 — 시각). */
+function ExtTile({ k, label, unit, fmt, d, cores, tb }) {
+  const v = extNow(d.table, k);
+  const e = d.charts?.ext?.[k];
+  const tone = extTone(k, v);
+  return (
+    <div className="fm-xk">
+      <span className="l">{label}</span>
+      <span><span className={`v fm-num ${tone ? `fm-t-${tone}` : ''}`}>{fmt(v)}</span>{v != null && unit ? <span className="u">{unit}</span> : null}{k === 'l.run' && cores && v != null ? <span className="u"> / {cores}코어</span> : null}</span>
+      <Spark vals={e?.vals} color={tone === 'warn' ? '#f59e0b' : RX_COLOR} max={niceMax(seriesMax([e?.vals]) ?? 1)} area={false} h={26} hover={{ from: d.from, to: d.to, label, fmt }} />
+      <span className="l">{extSub(k, d.charts?.ext, { cores, clock: (t) => clockText(t) })}</span>
+    </div>
+  );
+}
+function ExtCards({ d, settings, now, cores, atText, tb }) {
+  const fs = d.fs;
+  const rows = (fs?.rows || []).slice().sort((a, b) => (a.m === '/' ? -1 : b.m === '/' ? 1 : a.m.localeCompare(b.m)));
+  const pd = d.table?.pst?.pd || [];
+  const hasExt = !!(d.table?.tcp || d.table?.sched || d.table?.vmp || d.table?.pst);
+  return (
+    <>
+      <div className="fm-card fm-flush">
+        <div className="fm-row fm-between fm-pad"><h3 className="fm-h3">파일시스템 — 사용률 · inode</h3><span className={fs?.rc === 137 ? 'fm-badge crit' : 'fm-dim'}>{fsHeadText(fs, now)}</span></div>
+        {rows.length ? (
+          <STable className="fm-table" minWidth={900}>
+            <thead><tr><th>마운트</th><th>종류</th><th>장치</th><th className="fm-r">크기</th><th>사용률</th><th className="fm-r">inode</th><th>가득 찰 때까지</th></tr></thead>
+            <tbody>{rows.map((r) => {
+              const lv = fsLevel(r.pct, settings); const il = fsLevel(r.ipct, settings); const f = fillText(d.fill, r.m);
+              return (
+                <tr key={r.m}>
+                  <td className="fm-mono" style={{ fontWeight: 600 }}>{r.m}</td>
+                  <td className="fm-dim">{r.t}</td>
+                  <td className="fm-mono fm-dim fm-ell" title={r.d}>{r.d}</td>
+                  <td className="fm-r fm-num" data-sort={r.kb ?? null}>{kbText(r.kb)}</td>
+                  <td data-sort={r.pct ?? null}><span className="fm-meter"><span className="t"><span className={`f ${lv === 'ok' ? '' : lv || ''}`} style={{ width: `${Math.min(100, r.pct ?? 0)}%` }} /></span><span className="fm-num">{pctText(r.pct, 1)}</span></span></td>
+                  <td className={`fm-r fm-num ${il === 'crit' ? 'fm-t-crit' : il === 'warn' ? 'fm-t-warn' : ''}`} data-sort={r.ipct ?? null}>{r.ipct == null ? (r.t === 'xfs' ? `${DASH} (xfs)` : DASH) : pctText(r.ipct, 0)}</td>
+                  <td data-sort={d.fill?.rows?.[r.m]?.days ?? null}><span className={f.tone === 'off' ? 'fm-dim' : `fm-badge ${f.tone}`} title={f.title || undefined}>{f.text}</span></td>
+                </tr>
+              );
+            })}</tbody>
+          </STable>
+        ) : <div className="fm-pad fm-dim">{fs?.rc === 137 ? '시한 안에 df 가 끝나지 않아 이번 확인에는 값이 없습니다.' : '로컬 파일시스템 값을 아직 받지 못했습니다 — 이 서버의 수집이 이 판(3.12.0) 이전이거나 df 를 읽지 못했습니다.'}</div>}
+        <div className="fm-note fm-pad">사용률은 일반 계정 기준 df 값입니다(root 예약분은 ‘쓸 수 있는 양’ 에서 빠집니다). xfs 의 inode 는 필요할 때 늘어나 비율이 큰 뜻이 없어 ‘—’ 로 둡니다. ‘가득 찰 때까지’ 는 계속 수집 서버에서 지난 하루 추세로 낸 추정이고, 기록이 6시간보다 짧으면 ‘—’ 입니다. 판정 문턱은 주의 {settings?.warnPct ?? 80}% · 위험 {settings?.critPct ?? 90}%(설정의 사용률 문턱)입니다. 이 표는 구간 안 마지막 확인 값입니다.</div>
+      </div>
+      {hasExt ? (
+        <div className="fm-three">
+          <div className="fm-card">
+            <div className="fm-row fm-between"><h3 className="fm-h3">TCP · 소켓 <span className="fm-dim fm-at">· {atText}</span></h3></div>
+            <div className="fm-xkp">{EXT_CARDS.tcp.map(([k, l, u, f]) => <ExtTile key={k} k={k} label={l} unit={u} fmt={f} d={d} cores={cores} tb={tb} />)}</div>
+            <span className="fm-note">재전송률 = 재전송 세그먼트 ÷ 보낸 세그먼트(표본 사이 차이). 리슨 큐 넘침은 accept 가 밀려 연결을 버린 횟수입니다 — 0 이 아니면 앱이 연결을 제때 받지 못하고 있다는 뜻입니다. 값은 서버 전체(네트워크 네임스페이스 하나)이며 컨테이너 안 소켓은 보이지 않습니다.</span>
+          </div>
+          <div className="fm-card">
+            <div className="fm-row fm-between"><h3 className="fm-h3">CPU 스케줄링 · 프로세스 상태 <span className="fm-dim fm-at">· {atText}</span></h3></div>
+            <div className="fm-xkp">{EXT_CARDS.sched.map(([k, l, u, f]) => <ExtTile key={k} k={k} label={l} unit={u} fmt={f} d={d} cores={cores} tb={tb} />)}</div>
+            {pd.length ? (
+              <div className="fm-dl"><span className="fm-dim">지금 D 상태(디스크 대기에서 멈춘) 프로세스</span><span className="fm-dim">이어진 시간</span>
+                {pd.map((x) => <React.Fragment key={x.pid}><span className="fm-mono">{x.c} <span className="fm-dim">(pid {x.pid})</span></span><span className="fm-num">{x.s == null ? DASH : `${x.s}초째`}</span></React.Fragment>)}</div>
+            ) : null}
+            <span className="fm-note">좀비 · D 상태는 이미 받는 프로세스 줄에서 셉니다(프로세스 표본 주기마다). 실행 대기가 코어 수를 오래 넘으면 CPU 가 모자란 것이고, D 상태가 이어지면 디스크 · NFS 를 봐야 합니다.</span>
+          </div>
+          <div className="fm-card">
+            <div className="fm-row fm-between"><h3 className="fm-h3">메모리 압박 <span className="fm-dim fm-at">· {atText}</span></h3></div>
+            <div className="fm-xkp">{EXT_CARDS.vmp.map(([k, l, u, f]) => <ExtTile key={k} k={k} label={l} unit={u} fmt={f} d={d} cores={cores} tb={tb} />)}</div>
+            <span className="fm-note">RHEL 7 에는 압박 지표(PSI)가 없어 스왑 입출력 · major fault · 페이지 회수로 대신합니다. 스왑 사용량(지금 있는 값)보다 스왑 입출력이 실제로 느려지는 원인입니다. 페이지 회수 성공 비율 {reclaimText(d.table?.vmp)}.</span>
+          </div>
+        </div>
+      ) : <div className="fm-card fm-dim">TCP · 스케줄링 · 메모리 압박 값이 이 구간에 없습니다 — 이 서버의 수집이 이 판(3.12.0) 이전에 시작됐거나 값을 읽지 못했습니다.</div>}
     </>
   );
 }
@@ -892,13 +1014,15 @@ function ProcDetail({ id, p, tb, server, onClose }) {
 
 /* ── 프로세스 ─────────────────────────────────────────────────────────────── */
 function Procs({ main, ids, tb, onOpen }) {
-  const [mode, setMode] = useState('all');
+  // v3.14.0(⑮ 컨펌 ②): 기본은 지금처럼 상위 30 · ‘앱 단위’ 는 단추 — 고른 보기는 브라우저가 기억한다
+  const [mode, setModeRaw] = useState(() => { const v = lsGet('fm.procs.view', 'all'); return ['all', 'per', 'group', 'apps'].includes(v) ? v : 'all'; });
+  const setMode = (v) => { setModeRaw(v); lsSet('fm.procs.view', v); };
   const [at, setAt] = useState('end');
   const [basis, setBasis] = useState('core');
   const [find, setFind] = useState('');
   const [open, setOpen] = useState(null); // v2.981 펼친 프로세스 { k(procKey), id, p } — 목록에서 빠져도(찾기 · 상위 밖) 세부 정보는 계속 본다
   const params = useMemo(() => ({ targets: ids.join(','), win: tb.win, end: tb.end ?? '', at }), [ids, tb.win, tb.end, at]);
-  const q = usePoll('/tools/focus-mon/procs', params, tb.end == null ? 5_000 : 0, ids.length > 0);
+  const q = usePoll('/tools/focus-mon/procs', params, tb.end == null ? 5_000 : 0, ids.length > 0 && mode !== 'apps');
   const tById = useMemo(() => new Map(main.targets.map((t) => [t.id, t])), [main.targets]);
   const f = find.trim().toLowerCase();
   const ok = (p) => !f || String(p.c).toLowerCase().includes(f) || String(p.u || '').toLowerCase().includes(f) || String(p.pid).includes(f);
@@ -932,14 +1056,15 @@ function Procs({ main, ids, tb, onOpen }) {
     <>
       <div className="fm-row fm-between">
         <div className="fm-row">
-          <span className="fm-lbl">보기</span><Seg label="보기" value={mode} onChange={setMode} options={[['all', `통합 상위 30`], ['per', '서버별 상위 30'], ['group', '이름별 묶음']]} />
-          <span className="fm-lbl">CPU 기준</span><Seg label="CPU 기준" value={basis} onChange={setBasis} options={[['core', '1코어 = 100%'], ['server', '서버 전체 대비']]} />
+          <span className="fm-lbl">보기</span><Seg label="보기" value={mode} onChange={setMode} options={[['all', `통합 상위 30`], ['per', '서버별 상위 30'], ['group', '이름별 묶음'], ['apps', '앱 단위']]} />
+          {mode !== 'apps' ? <><span className="fm-lbl">CPU 기준</span><Seg label="CPU 기준" value={basis} onChange={setBasis} options={[['core', '1코어 = 100%'], ['server', '서버 전체 대비']]} /></> : null}
           <span className="fm-lbl">시점</span><Seg label="시점" value={at} onChange={setAt} options={[['end', '구간 끝 순간'], ['avg', '구간 평균']]} />
         </div>
-        <div className="fm-row"><label className="fm-lbl" htmlFor="fm-pq">찾기</label><input id="fm-pq" className="fm-input" value={find} onChange={(e) => setFind(e.target.value.slice(0, 64))} placeholder="명령 · 사용자 · PID" /></div>
+        <div className="fm-row"><label className="fm-lbl" htmlFor="fm-pq">찾기</label><input id="fm-pq" className="fm-input" value={find} onChange={(e) => setFind(e.target.value.slice(0, 64))} placeholder={mode === 'apps' ? '묶음 · 계정' : '명령 · 사용자 · PID'} /></div>
       </div>
-      {q.error && !d ? <ErrorBox error={q.error} /> : null}
-      {!d ? <Loading /> : mode === 'group' ? (
+      {mode === 'apps' ? <AppsView ids={ids} tb={tb} tById={tById} onOpen={onOpen} at={at} find={find} /> : null}
+      {mode === 'apps' ? null : q.error && !d ? <ErrorBox error={q.error} /> : null}
+      {mode === 'apps' ? null : !d ? <Loading /> : mode === 'group' ? (
         <div className="fm-card fm-flush">
           <div className="fm-pad fm-row fm-between"><h3 className="fm-h3">이름별 묶음 — {ids.length}대 합</h3><span className="fm-dim">이름 = comm · 숫자 덩어리는 * 로 묶음(ora_p001 · ora_p007 → ora_p*)</span></div>
           <STable className="fm-table" minWidth={620}>
@@ -959,7 +1084,7 @@ function Procs({ main, ids, tb, onOpen }) {
           <div className="fm-tblbox"><STable className="fm-table" minWidth={900}>{head}<tbody>{rowsAll.map((p, i) => prow(p, i, p.id))}</tbody></STable></div>
         </div>
       )}
-      {open && d && mode !== 'group' && !(mode === 'per' ? d.per.some((x) => x.top.filter(ok).some((p) => procKey(x.id, p) === open.k)) : rowsAll.some((p) => procKey(p.id, p) === open.k)) ? (
+      {open && d && mode !== 'group' && mode !== 'apps' && !(mode === 'per' ? d.per.some((x) => x.top.filter(ok).some((p) => procKey(x.id, p) === open.k)) : rowsAll.some((p) => procKey(p.id, p) === open.k)) ? (
         <div className="fm-card"><div className="fm-note">펼친 프로세스({tById.get(open.id)?.name} · PID {open.p.pid} · {open.p.c})는 지금 표에 없습니다(찾기 · 상위 30 밖) — 세부 정보는 계속 보여 줍니다.</div>
           <ProcDetail id={open.id} p={open.p} tb={tb} server={tById.get(open.id)?.name} onClose={() => setOpen(null)} /></div>
       ) : null}
@@ -1025,7 +1150,7 @@ function Targets({ main, reload, picked, setPicked, onWatch, msg, setMsg }) {
     const f = edit?.form; if (!f) return;
     // 포트는 글자 그대로 보낸다 — 화면에서 22 로 바꾸면 틀린 값이 조용히 22 가 된다(서버가 1~65535 를 검사해 알린다)
     run('edit', async () => {
-      const r = await putJson(`/tools/focus-mon/targets/${encodeURIComponent(t.id)}`, { name: f.name.trim(), host: f.host.trim(), port: String(f.port).trim(), username: f.username.trim(), agent: f.agent, group: f.group || '' });
+      const r = await putJson(`/tools/focus-mon/targets/${encodeURIComponent(t.id)}`, { name: f.name.trim(), host: f.host.trim(), port: String(f.port).trim(), username: f.username.trim(), agent: f.agent, group: f.group || '', ...((f.corp || '') !== (t.corp || '') ? { corp: f.corp || '' } : {}) });
       if (r?.ok === false) return r;
       setEdit(null);
       return { ok: true, reason: editResultText(r, t.name) };
@@ -1033,6 +1158,7 @@ function Targets({ main, reload, picked, setPicked, onWatch, msg, setMsg }) {
   };
   const bulkTest = (ids, what) => run('bulk', async () => {
     const r = await postJson('/tools/focus-mon/targets/test-bulk', { ids });
+    if (r?.ok === false || !r?.job) return { ok: false, reason: r?.reason || '연결 시험을 시작하지 못했습니다.' };   // 128회차: 409 본문에는 job 이 없다(사유가 TypeError 문구에 묻혔다)
     return { ok: true, reason: `${what} ${r.job.total}대의 연결 시험을 시작했습니다${r.job.skipped ? `(10초 안에 시험한 ${r.job.skipped}대는 건너뜀)` : ''} — 진행은 위 띠 · 결과는 키 로그인 칸에 나옵니다.` };
   });
   // v2.982 서버 그룹 — 옮기기 · 만들기 · 이름 바꾸기 · 지우기 · 자동 묶기 제안 적용(모두 응답의 ok 를 본다)
@@ -1083,7 +1209,7 @@ function Targets({ main, reload, picked, setPicked, onWatch, msg, setMsg }) {
     if (ed) {
       const f = ed.form;
       const set = (k) => (e) => setEdit({ ...ed, form: { ...f, [k]: e.target.value.slice(0, 64) } });
-      const ch = editChanges(t, f);
+      const ch = editChanges(t, f, { corpName: (id) => (main.corps || []).find((c) => c.id === id)?.name || id });
       const notes = editNotes(t, f, { inSession: sIdx.has(t.id) });
       const canSave = !busy && ch.changes.length > 0 && !!f.name.trim() && !!f.host.trim();
       const key = (e) => { if (e.key === 'Escape') setEdit(null); else if (e.key === 'Enter' && canSave) saveEdit(t); };
@@ -1105,6 +1231,11 @@ function Targets({ main, reload, picked, setPicked, onWatch, msg, setMsg }) {
                 <option value="">{GROUP_NONE}</option>
                 {ownGroups.map((g) => <option key={g.name} value={g.name}>{g.name}</option>)}
                 {f.group && !ownGroups.some((g) => g.name === f.group) ? <option value={f.group}>{f.group}</option> : null}
+              </Select></label>
+              <label className="fm-fld" title="디스크 점검 '법인별로 보기' 에 씁니다 — 비우면 담당 엣지의 법인을 따릅니다"><span>법인</span><Select sort={false} className="fm-input" value={f.corp || ''} onChange={(e) => setEdit({ ...ed, form: { ...f, corp: e.target.value } })}>
+                <option value="">지정 안 함(담당 엣지의 법인)</option>
+                {(main.corps || []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                {f.corp && !(main.corps || []).some((c) => c.id === f.corp) ? <option value={f.corp}>{f.corp}(목록에 없는 법인)</option> : null}
               </Select></label>
               <span className="fm-row fm-nowrap">
                 <button type="button" className="fm-btn pri" disabled={!canSave} onClick={() => saveEdit(t)}>저장</button>
@@ -1146,13 +1277,14 @@ function Targets({ main, reload, picked, setPicked, onWatch, msg, setMsg }) {
   return (
     <>
       <div className="fm-card fm-steps">
-        <div><b>1</b><span>서버를 맡은 노드(중앙 또는 엣지)의 <strong>공개키</strong>를 대상 서버 계정의 authorized_keys 에 넣습니다.</span></div>
+        <div><b>1</b><span>서버를 맡은 노드(중앙 또는 엣지)의 <strong>공개키</strong>를 대상 서버 계정의 authorized_keys 에 넣습니다 — 손으로, 또는 등록한 뒤 아래 <strong>접속 자동 준비</strong>로.</span></div>
         <div><b>2</b><span>서버를 <strong>IP 로 등록</strong>합니다 — 포트 · 계정 · 담당 노드. 비밀번호는 받지 않습니다.</span></div>
         <div><b>3</b><span><strong>연결 시험</strong>으로 키 로그인과 OS 를 확인합니다(리눅스 · RHEL 7.8 기준).</span></div>
         <div><b>4</b><span>최대 <strong>{L.maxPerSession}대</strong>를 골라 시작합니다. 수집한 값은 DB 에 남아 시간 띠로 다시 볼 수 있습니다.</span></div>
       </div>
       {msg ? <div className={`fm-ban ${msg.tone === 'bad' ? 'w' : ''}`}>{msg.text}</div> : null}
       {bulk ? <div className={`fm-ban ${bulk.tone === 'warn' ? 'w' : ''}`} role="status">{bulk.text}</div> : null}
+      <PrepPanel setMsg={setMsg} onDone={reload} />
       <div className="fm-two wide">
         <div className="fm-card fm-flush">
           <div className="fm-row fm-between fm-pad"><h3 className="fm-h3">모니터링 대상 서버 — {main.targets.length}대 등록</h3>
@@ -1182,6 +1314,7 @@ function Targets({ main, reload, picked, setPicked, onWatch, msg, setMsg }) {
               ))}
               <label className="fm-fld"><span>담당 노드</span><Select sort={false} className="fm-input" value={form.agent} onChange={(e) => setForm({ ...form, agent: e.target.value })}><option value="">중앙</option>{main.nodes.filter((x) => x.kind === 'edge').map((x) => <option key={x.agent} value={x.agent}>엣지 {x.agent}</option>)}</Select></label>
               <label className="fm-fld fm-fld-g"><span>그룹</span><Select sort={false} className="fm-input" value={form.group || ''} onChange={(e) => setForm({ ...form, group: e.target.value })}><option value="">{GROUP_NONE}</option>{ownGroups.map((g) => <option key={g.name} value={g.name}>{g.name}</option>)}</Select></label>
+              {(main.corps || []).length ? <label className="fm-fld fm-fld-g" title="디스크 점검 '법인별로 보기' 에 씁니다 — 비우면 담당 엣지의 법인을 따릅니다"><span>법인</span><Select sort={false} className="fm-input" value={form.corp || ''} onChange={(e) => setForm({ ...form, corp: e.target.value })}><option value="">지정 안 함</option>{main.corps.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</Select></label> : null}
               <button type="button" className="fm-btn pri" disabled={!!busy || !form.host || !form.name} onClick={() => run('add', async () => { const r = await postJson('/tools/focus-mon/targets', { ...form, port: Number(form.port) || 22 }); if (r?.ok) setForm({ ...form, name: '', host: '' }); return r?.ok ? { ok: true, reason: `${r.target.name} 을(를) 등록했습니다.` } : r; })}>추가</button>
             </div>
             {csv ? <CsvPanel main={main} busy={busy} run={run} onClose={() => setCsv(false)} /> : null}
@@ -1313,7 +1446,7 @@ export default function FocusMonTool() {
   const [route, go] = useRoute();
   const mainQ = usePoll('/tools/focus-mon', null, 5_000, true);
   const main = mainQ.data;
-  const tb = useTimeBar(main?.limits?.windows);
+  const tb = useTimeBar(main?.limits?.windows, main?.limits?.longWindows, route.link);
   const [now, setNow] = useState(Date.now());
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
   const [viewIds, setViewIdsRaw] = useState(() => lsGet('fm.view', []));
@@ -1338,8 +1471,10 @@ export default function FocusMonTool() {
   const viewTargets = useMemo(() => { const m = new Map((main?.targets || []).map((t) => [t.id, t])); return ids.map((id) => m.get(id)).filter(Boolean); }, [ids, main?.targets]);
   const viewChips = useMemo(() => groupChips(viewTargets, main?.groups?.list), [viewTargets, main?.groups?.list]);
   const shownIds = useMemo(() => filterByGroup(viewTargets, vgroup).map((t) => t.id), [viewTargets, vgroup]);
-  const covParams = useMemo(() => ({ targets: shownIds.join(','), to: tb.day ? dayRange(tb.day, Date.now()).to : '' }), [shownIds, tb.day]);
-  const cov = usePoll('/tools/focus-mon/coverage', covParams, 60_000, shownIds.length > 0 && route.tab !== 'targets');
+  // 서버 상세는 그 서버의 기록 시간(v3.13.0 — 링크로 들어와 수집 중인 서버가 없어도 시간 띠가 그 서버를 말한다)
+  const covIds = route.tab === 'server' && route.server ? route.server : shownIds.join(',');
+  const covParams = useMemo(() => ({ targets: covIds, to: tb.day ? dayRange(tb.day, Date.now()).to : '' }), [covIds, tb.day]);
+  const cov = usePoll('/tools/focus-mon/coverage', covParams, 60_000, covIds.length > 0 && route.tab !== 'targets');
   useEffect(() => { if (!picked.length && main?.targets?.length) setPicked(ids.length ? ids.slice() : []); }, [main?.targets?.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (mainQ.error && !main) return <ErrorBox error={mainQ.error} />;
@@ -1389,7 +1524,7 @@ export default function FocusMonTool() {
           ))}
         </div>
       ) : null}
-      {!active && lastEnded && route.tab !== 'targets' ? <div className="fm-ban">수집이 끝났습니다({ENDED_TEXT[lastEnded.why] || lastEnded.why}). 수집한 값은 DB 에 {main.settings.retentionDays}일 남아 시간 띠로 다시 볼 수 있습니다.</div> : null}
+      {!active && lastEnded && route.tab !== 'targets' && route.tab !== 'audit' && route.tab !== 'alerts' ? <div className="fm-ban">수집이 끝났습니다({ENDED_TEXT[lastEnded.why] || lastEnded.why}). 수집한 값은 DB 에 {main.settings.retentionDays}일 남아 시간 띠로 다시 볼 수 있습니다.</div> : null}
       {active?.mode === 'watch' && active.remainMs != null && active.remainMs < 2 * 60_000 ? <div className="fm-ban">남은 시간 {remainText(active.remainMs)} — 그 뒤 수집이 스스로 멈춥니다.</div> : null}
       {['overview', 'compare', 'procs'].includes(route.tab) && viewChips.length > 2 ? (
         <div className="fm-row" role="group" aria-label="그룹으로 거르기"><span className="fm-lbl">그룹</span>
@@ -1397,17 +1532,19 @@ export default function FocusMonTool() {
           <span className="fm-dim">보고 있는 서버 {ids.length}대 가운데 · 그룹은 ‘대상 · 키’ 탭에서 정합니다</span>
         </div>
       ) : null}
-      {route.tab === 'load' || (route.tab !== 'targets' && ids.length) ? <TimeBar tb={tb} now={now} coverage={route.tab === 'load' ? null : cov.data} oldestMinute={main.db.oldestMinute} /> : null}
-      {route.tab === 'load' ? <LoadTab main={main} tb={tb} /> : null}
+      {route.tab === 'load' || route.tab === 'server' || (route.tab !== 'targets' && route.tab !== 'audit' && route.tab !== 'alerts' && ids.length) ? <TimeBar tb={tb} now={now} coverage={route.tab === 'load' ? null : cov.data} oldestMinute={main.db.oldestMinute} route={route} /> : null}
+      {route.tab === 'load' ? (tb.long ? <div className="fm-card fm-empty">{rawOnlyText('수집 부하', tb.windows)}</div> : <LoadTab main={main} tb={tb} />) : null}
+      {route.tab === 'audit' ? <AuditTab setMsg={setMsg} /> : null}
+      {route.tab === 'alerts' ? <AlertsTab main={main} setMsg={setMsg} reloadMain={mainQ.reload} /> : null}
       {route.tab === 'overview' ? <Overview main={main} ids={shownIds} tb={tb} now={now} onOpen={onOpen} /> : null}
       {route.tab === 'compare' ? (
         <>
           <div className="fm-row"><span className="fm-lbl">보기</span><Seg label="비교 보기" value={cmpMode} onChange={(v) => { setCmpMode(v); lsSet('fm.cmp.mode', v); }} options={[['metric', '지표 비교'], ['iostat', 'iostat 비교']]} /><span className="fm-dim">{cmpMode === 'metric' ? '지표 하나를 고른 서버 전부에서 봅니다' : '고른 서버의 iostat -x -m 을 같은 시각 · 같은 열로 맞춰 한 표에 놓습니다'}</span></div>
-          {!shownIds.length ? <div className="fm-card fm-empty">볼 서버가 없습니다 — ‘대상 · 키’ 탭에서 고르세요.</div> : cmpMode === 'metric' ? <Compare main={main} ids={shownIds} tb={tb} now={now} onOpen={onOpen} /> : <IostatCompare main={main} ids={shownIds} tb={tb} onOpen={onOpen} />}
+          {!shownIds.length ? <div className="fm-card fm-empty">볼 서버가 없습니다 — ‘대상 · 키’ 탭에서 고르세요.</div> : cmpMode === 'metric' ? <Compare main={main} ids={shownIds} tb={tb} now={now} onOpen={onOpen} /> : tb.long ? <div className="fm-card fm-empty">{rawOnlyText('iostat 비교', tb.windows)}</div> : <IostatCompare main={main} ids={shownIds} tb={tb} onOpen={onOpen} />}
         </>
       ) : null}
       {route.tab === 'server' ? <ServerDetail main={main} id={route.server} tb={tb} now={now} onBack={() => go('overview')} /> : null}
-      {route.tab === 'procs' ? (shownIds.length ? <Procs main={main} ids={shownIds} tb={tb} onOpen={onOpen} /> : <div className="fm-card fm-empty">볼 서버가 없습니다 — ‘대상 · 키’ 탭에서 고르세요.</div>) : null}
+      {route.tab === 'procs' ? (shownIds.length ? (tb.long ? <div className="fm-card fm-empty">{rawOnlyText('프로세스 목록', tb.windows)}</div> : <Procs main={main} ids={shownIds} tb={tb} onOpen={onOpen} />) : <div className="fm-card fm-empty">볼 서버가 없습니다 — ‘대상 · 키’ 탭에서 고르세요.</div>) : null}
       {route.tab === 'targets' ? <Targets main={main} reload={mainQ.reload} picked={picked} setPicked={setPicked} onWatch={onWatch} msg={msg} setMsg={setMsg} /> : null}
       {msg && route.tab !== 'targets' ? <div className={`fm-ban ${msg.tone === 'bad' ? 'w' : ''}`}>{msg.text}</div> : null}
     </div>

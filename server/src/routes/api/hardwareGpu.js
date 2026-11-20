@@ -4,6 +4,7 @@ import { scopedVcenterIds, inUserScope } from '../../auth/scope.js';
 import { csvCell } from '../../util/csv.js';
 import { store } from '../../store.js';
 import { config, loadVcenterConfig } from '../../config.js';
+import { envPositive } from '../../util/envNumber.js';
 import { getMetricsDb } from '../../metrics/db.js';
 import { sendMaybeZip } from '../../util/zip.js';
 import { getGuestGpuVms } from '../../gpu/store.js';
@@ -263,7 +264,7 @@ async function gpuSeriesExportCsvStream(req, res) {
   const meta = typeof db.metaRange === 'function' ? db.metaRange('gpu_util') : db.meta('gpu_util');
   const until = Date.now();
   const since = range === 'days' ? until - days * 86_400_000 : (meta.firstTs ?? 0);
-  const MAX_ROWS = Math.max(1000, Number(process.env.GPU_EXPORT_MAX_ROWS) || 300_000);
+  const MAX_ROWS = Math.max(1000, envPositive(process.env.GPU_EXPORT_MAX_ROWS, 300_000));   // 102회차: Infinity → 기본값
   const CHUNK = 50_000;
   const normPct = (v) => { const n = Number(v); if (!Number.isFinite(n)) return 0; const p = n > 100 ? n / 100 : n; return Math.max(0, Math.min(100, Math.round(p))); };
   const esc = csvCell; // v2.743(INJPKG-05): 공용 칸 이스케이프(수식 가드 + 단독 CR 도 따옴표) — 손으로 쓴 사본은 CR 을 빠뜨렸다
@@ -340,7 +341,7 @@ async function gpuSeriesExportJsonStream(req, res) {
   const meta = typeof db.metaRange === 'function' ? db.metaRange('gpu_util') : db.meta('gpu_util');
   const until = Date.now();
   const since = range === 'days' ? until - days * 86_400_000 : (meta.firstTs ?? 0);
-  const MAX_ROWS = Math.max(1000, Number(process.env.GPU_EXPORT_MAX_ROWS) || 300_000);
+  const MAX_ROWS = Math.max(1000, envPositive(process.env.GPU_EXPORT_MAX_ROWS, 300_000));   // 102회차: Infinity → 기본값
   const CHUNK = 50_000;
   // gpu_util은 %(0~100). 과거 일부 샘플이 vSphere 1/100% 단위로 ×100 저장된 경우가 있어 100 초과면 ÷100.
   const normPct = (v) => { const n = Number(v); if (!Number.isFinite(n)) return 0; const p = n > 100 ? n / 100 : n; return Math.max(0, Math.min(100, Math.round(p))); };

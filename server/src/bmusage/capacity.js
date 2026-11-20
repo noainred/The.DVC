@@ -24,7 +24,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileLoad.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { dayKey, DAY_MS, DAY_OFFSET_MIN } from '../util/dayKey.js';
 import { createYielder } from '../util/timeSlice.js';
@@ -281,18 +282,25 @@ export async function computeServer({ agent = '', target, now = Date.now(), cfg 
 }
 
 /** 저장(원자 쓰기) · 읽기(손상 보존 — 못 읽으면 null + unreadable). */
-export function saveCapacity(obj) { atomicWriteFileSync(FILE(), JSON.stringify(obj), { mode: 0o600 }); _cache = null; }
+export function saveCapacity(obj) { atomicWriteFileSync(FILE(), JSON.stringify(obj), { mode: 0o600 }); _cache = null; _reader.reset(); }
 let _cache = null;
+const parseCapacity = (text) => {
+  const o = JSON.parse(text);
+  if (!o || typeof o !== 'object' || Array.isArray(o) || !Array.isArray(o.rows)) throw new Error('형식이 다릅니다');
+  return o;
+};
+// 81회차 F3(재현 — idle.js F2 와 같은 꼴): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 공용 로더가 원본을 옮기지 않고 캐시하지 않는다(readError 표지).
+const _reader = makeJsonFileReader(FILE, { parse: parseCapacity, tag: 'bmusage-capacity' });
 export function loadCapacity() {
   let st = null;
   try { st = fs.statSync(FILE()); } catch { return null; }
   if (_cache && _cache.m === st.mtimeMs && _cache.s === st.size) return _cache.data;
-  try {
-    const o = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
-    if (!o || typeof o !== 'object' || !Array.isArray(o.rows)) throw new Error('형식이 다릅니다');
-    _cache = { m: st.mtimeMs, s: st.size, data: o };
-    return o;
-  } catch (e) { preserveCorrupt(FILE(), String(e?.message || e)); _cache = null; return { unreadable: true, rows: [], at: 0 }; }
+  const r = _reader.read();
+  if (r.kind === 'ok') { _cache = { m: st.mtimeMs, s: st.size, data: r.value }; return r.value; }
+  _cache = null;
+  if (r.kind === 'missing') return null;
+  if (r.kind === 'read-error') return { unreadable: true, readError: true, rows: [], at: 0 };
+  return { unreadable: true, rows: [], at: 0 };   // 손상 — 보존본으로 옮겼다(다음 계산이 새로 만든다)
 }
 
 /**
@@ -331,6 +339,8 @@ export async function recomputeCapacity({ targets = null, now = Date.now(), forc
     const t0 = Date.now();
     try {
       const cur = loadCapacity();
+      // 81회차 F3: 읽기 오류 동안에는 다시 계산(수동 포함)이 읽지 못한 원본을 덮지 않는다(손상 보존본이 없는 경우다).
+      if (cur?.readError) return { ok: false, skipped: 'read-error', error: '용량 예측 결과 파일을 읽지 못했습니다(읽기 오류 — 손상이 아니라 원본은 그대로 둡니다 · 읽힐 때까지 다시 계산하지 않습니다).' };
       if (!force && !dueForRecompute(cur, now)) return { ok: true, skipped: 'not-due' };
       const agent = config.agent?.name || '';
       // 대상은 호출부(폴러 틱 · 라우트)가 준다 — 없으면 폴러가 등록한 공급자(runtime.localTargets).
@@ -368,4 +378,4 @@ export async function recomputeCapacity({ targets = null, now = Date.now(), forc
   return _running;
 }
 export function capacityRunning() { return !!_running; }
-export function _resetCapacityForTest() { _cache = null; _running = null; try { fs.unlinkSync(FILE()); } catch { /* */ } }
+export function _resetCapacityForTest() { _cache = null; _running = null; _reader.reset(); try { fs.unlinkSync(FILE()); } catch { /* */ } }

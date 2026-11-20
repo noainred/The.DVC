@@ -24,11 +24,20 @@ import path from 'node:path';
 import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'bmedgeon2927-'));
+const DIR = tmpDir('bmedgeon2927-');
 Object.assign(process.env, {
   CONFIG_DIR: DIR, SSRF_ALLOW_LOOPBACK: 'true', CENTRAL_TOKEN: 'ctok-2927', AUTH_ENABLED: 'true', AUTH_SECRET: 'q'.repeat(48),
   OTP_ROLE_ENFORCE: 'false', DATA_SOURCE: 'mock',
+  // 재확인 N1(2026-11-19 사용자): 배포 · 중앙 켜기는 설정 소유자 등급 — 이 파일의 전체 범위 관리자(adm)를 소유자로 둔다(비소유자 403 표는 bmUsageDecideGa N1)
+  SETTINGS_OWNERS: 'adm',
 });
 delete process.env.BMUSAGE_ENABLED;
 delete process.env.CENTRAL_URL;

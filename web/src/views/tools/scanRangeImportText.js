@@ -102,6 +102,7 @@ export function migrationRow(it) {
 /** 이전 안내를 보여 줄지 — 이전 기록이 있고(항목 1개 이상) 아직 '다시 보지 않기' 를 안 눌렀거나, 남은 대역이 있으면. */
 export function migrationVisible(m) {
   if (!m) return false;
+  if (m.remainingLoadError) return true;   // 결정(56~75 남긴 것) 62: 남은 대역 파일을 못 읽으면 빈 목록이 '다 옮김' 이 아니다 — 안내를 숨기지 않는다
   if ((m.remaining || []).length) return true;
   const st = m.state;
   return !!(st && (st.items || []).length && !st.dismissedAt);

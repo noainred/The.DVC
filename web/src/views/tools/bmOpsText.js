@@ -42,6 +42,7 @@ export const TUNING_REASON_TEXT = Object.freeze({
   policyNotRead: '켜져 있지만 허용 구성인지(정책 · 방화벽 규칙)는 읽지 않습니다.',
   notExplicit: '명시 설정이 없습니다 — 배포판 기본값은 확인하지 않았습니다.',
   systemMount: '시스템 마운트라 판정에서 뺐습니다(데이터 볼륨을 구분하지 못함 — 추정).',
+  noSched: '이 장치(LVM · 소프트웨어 RAID 같은 논리 장치)는 고를 수 있는 스케줄러가 없습니다 — 아래 물리 디스크의 스케줄러를 봅니다.',
 });
 /** 근거 등급(서버 GRADES). */
 export const GRADE_TEXT = Object.freeze({
@@ -225,7 +226,19 @@ export const SNAP_CODE_TEXT = Object.freeze({
   timeout: { tone: 'bad', short: '시한 초과', text: '시한 안에 끝나지 않아 세션을 끊었습니다.' },
   'not-linux': { tone: 'idle', short: '리눅스 아님', text: '리눅스 셸 출력이 아닙니다(Windows 이거나 명령이 제한된 계정) — 스냅샷은 리눅스만 지원합니다.' },
   edge: { tone: 'bad', short: '엣지 불통', text: '엣지에 닿지 못했습니다 — 엣지가 꺼졌거나 이 기능 이전 판일 수 있습니다.' },
+  // 다음 작업 ⑥ ④(2026-11-19): 실행 전 거절(SSH 0회) — 표지(actions.run why)와 같은 판정(서버 snapshot/run.js snapshotOsPathIssue).
+  'auth-unresolved': { tone: 'warn', short: '계정 참조 미해석', text: '이 서버 OS 계정의 키 · 공통 계정 참조를 해석하지 못해 접속하지 않았습니다(주기 수집과 같은 판정) — 아래 사유를 보세요.' },
+  'demo-target': { tone: 'idle', short: '데모 대상', text: '데모 대상입니다 — 화면의 OS 값은 데모 합성이라 실제 SSH 경로가 없어 스냅샷을 실행하지 않습니다.' },
 });
+/**
+ * 다음 작업 ⑥(b): 엣지 대행 서버의 실행 칸 판정 근거 — 중앙이 마지막으로 가져온 엣지 봉투(서버 GET pathBasis · 시각은 API 값). 이 노드 서버면 ''.
+ *   엣지에서 OS 계정을 등록 · 수정했으면 다시 가져오기 전까지 칸이 예전 상태로 보인다(실행은 엣지가 다시 판정한다).
+ */
+export function snapPathBasisNote(pb) {
+  if (!pb || pb.via !== 'edge') return '';
+  const at = Number(pb.at) > 0 ? `${shortStamp(pb.at)} 가져옴` : '가져온 시각 모름';
+  return `실행 칸은 엣지 보관분(${at}) 기준입니다 — 엣지에서 OS 계정을 바꿨다면 베어메탈 사용률 엣지 표의 ‘지금 가져오기’ 뒤에 맞습니다(실행은 엣지가 다시 판정합니다).`;
+}
 /**
  * 실행 칸을 열지(반증 W4) — 'ok' | 'role'(operator 미만) | 'scope'(쓰기 범위 밖 — 서버 GET 의 writable:false). 서버가 다시 검사한다(403) — 이것은 버튼을 잠그는 표시일 뿐.
  * writable 이 아직 없으면(목록 응답 전) 잠그지 않는다 — 판단 재료가 없을 때 막지 않는다(서버가 막는다).

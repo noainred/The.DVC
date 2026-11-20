@@ -7,6 +7,7 @@
  * df 는 없는 마운트가 섞여도 있는 것은 출력하고 exit≠0 — 있는 것은 살리고 없는 것만 오류 표기.
  */
 
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { withSsh, isSshAuthError } from '../proxy/sshExec.js';
 import { reqTimeoutMs } from '../agent/envTimeout.js';
 import { ioSampleSec, ioSampleCommand, ioResultFromExec } from './diskstats.js'; // v2.915: 디스크 I/O 표본(설계 bm-san-compare §4.1)
@@ -121,6 +122,7 @@ export async function collectServer(server) {
       username: server.username || 'root', password: server.password || '',
       privateKey: server.privateKey || undefined, passphrase: server.passphrase || undefined,
       readyTimeout: reqTimeoutMs(process.env.BMSTOR_SSH_TIMEOUT_MS, 15_000),   // v2.605 TIM2605-04: [1초, 10분]
+      singlePasswordAttempt: true,   // v3.25 반증 F1: 비밀번호는 한 번만(k-i 재시도 없음 — 계정 잠금 횟수)
     }, async ({ exec }) => {
       const out = await exec(`df -P -k -- ${mounts.join(' ')}`);
       // v2.915: 같은 세션에서 디스크 I/O 표본(상수 명령 · 입력 없음). df 가 요청 마운트를 하나도 못 찾았으면 I/O 는 시도하지 않는다.
@@ -145,14 +147,14 @@ export async function collectServer(server) {
 }
 
 /** 소규모 동시성 풀 — 서버 수십 대를 한꺼번에 SSH 하지 않게 제한(기본 4). */
-export async function collectMany(servers, { concurrency = Number(process.env.BMSTOR_CONCURRENCY) || 4 } = {}) {
+export async function collectMany(servers, { concurrency = envPositive(process.env.BMSTOR_CONCURRENCY, 4), collect = collectServer } = {}) {
   const list = [...servers];
   const results = new Array(list.length);
   let idx = 0;
   const worker = async () => {
     while (idx < list.length) {
       const i = idx++;
-      results[i] = { id: list[i].id, ...(await collectServer(list[i])) };
+      results[i] = { id: list[i].id, ...(await collect(list[i])) };   // v3.24: 폴러가 계정 탐침(sshaccess/accountGate)으로 감싼 함수를 넘긴다
     }
   };
   await Promise.all(Array.from({ length: Math.max(1, Math.min(concurrency, list.length)) }, worker));

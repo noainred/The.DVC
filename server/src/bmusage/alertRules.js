@@ -109,7 +109,10 @@ export function stepAlert(prev, value, cfg = {}, now = Date.now()) {
     if (lastOver != null && now > lastOver && now - lastOver <= gapMs) overMs += now - lastOver;
     const peak = Math.max(n(p?.peak) ?? 0, v);
     const sustained = overMs;
-    const st = { since, lastOverAt: now, overMs, peak, notifiedAt: n(p?.notifiedAt) ?? null };
+    // 5회차 재확인 R1: 발송 실패 재시도 수(retries — notify.applyAlertOutcome)는 notifiedAt 과 함께 들고 간다 — 매 주기 상태를 새로 만들며 버리면
+    //   재시도가 늘 첫 단계(5분)라 채널이 계속 실패할 때 두 번에서 멈추지 않고 10분마다 영원히 다시 보냈다(알림 엔진 applyOutcome 과 같은 규칙: 받으면 지운다).
+    const retries = n(p?.retries);
+    const st = { since, lastOverAt: now, overMs, peak, notifiedAt: n(p?.notifiedAt) ?? null, ...(retries > 0 ? { retries } : {}) };
     if (sustained < sustainMs) return { state: st, fire: null, reason: 'sustaining', sustainedMin: Math.round(sustained / 60_000) };
     const last = n(st.notifiedAt);
     if (last != null && now - last < repeatMs) return { state: st, fire: null, reason: 'suppressed', sustainedMin: Math.round(sustained / 60_000) };

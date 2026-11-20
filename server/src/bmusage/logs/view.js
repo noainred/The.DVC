@@ -14,6 +14,7 @@ import { LOG_SECTIONS, FIRST_SINCE_MIN, FIRST_FILE_LINES, FIRST_FILE_BYTES, LINE
 import { logServerQuery, logFleetQuery } from './store.js';
 import { HOUR, FRESH_MS, maskStoredTmpl } from './classify.js';
 import { createYielder } from '../../util/timeSlice.js';
+import { nodePairIdOf } from '../maint/judge.js';
 
 export const RANGES = Object.freeze({ '1h': 1, '24h': 24, '7d': 168 });
 export const CORR_MS = 5 * 60_000;
@@ -238,10 +239,13 @@ export function commonCauseCandidates(rows = [], { windowMs = COMMON_WINDOW_MS, 
   const out = [];
   for (const [ruleId, list] of byRule) {
     list.sort((a, b) => b.last - a.last);
-    // 가장 최근 발생 기준 창 안의 서버들(서버당 한 번)
+    // 가장 최근 발생 기준 창 안의 서버들(서버당 한 번).
+    //   4회차 점검 D3: 서버 식별은 (법인, 키) 쌍(귀속 없음은 |키@노드 — maint/judge.js nodePairIdOf · resolvePerfTarget 과 같은 규칙). 입력은 이 노드 + 엣지 보관분을
+    //   합친 목록이라 노드 사이의 같은 키(IP 키 — 사설 대역을 겹쳐 쓰는 법인)가 서로 다른 서버일 수 있다 — 키 하나로 세면 한 대로 접혀 후보가 사라졌다.
+    //   같은 서버가 두 노드에 잠시 함께 보이는 경우(담당 이동)는 같은 쌍이라 여전히 한 번이다.
     const head = list[0].last;
     const inWin = []; const seen = new Set();
-    for (const x of list) { if (head - x.last > windowMs) break; if (seen.has(x.key)) continue; seen.add(x.key); inWin.push(x); }
+    for (const x of list) { if (head - x.last > windowMs) break; const id = nodePairIdOf(x, x.agent); if (seen.has(id)) continue; seen.add(id); inWin.push(x); }
     if (inWin.length >= minServers) out.push({ ruleId, cls: inWin[0].cls, severity: inWin[0].severity, servers: inWin.slice(0, 50), count: inWin.length, from: inWin.at(-1).last, to: head });
   }
   return out.sort((a, b) => sevRank(b.severity) - sevRank(a.severity) || b.count - a.count);

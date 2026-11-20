@@ -13,8 +13,9 @@ import { config, clampIntervalMs } from '../config.js';
 import { clampSetting } from '../util/clampSetting.js';
 import { DEFAULT_PORTS, isIpv4 } from './scan.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
-import { getOverrides } from './overrides.js';
-import { getPolicies, isCoveredByAnyPolicy, findPolicy, specToRange } from './rangePolicies.js';
+import { makeJsonFileReader, READ_RETRY_MS } from '../util/jsonFileRead.js';   // 103회차 F19: 읽기 오류 ≠ 손상(스캔 설정)
+import { getOverrides, overridesLoadError } from './overrides.js';
+import { getPolicies, isCoveredByAnyPolicy, findPolicy, specToRange, rangePoliciesWriteRefusal } from './rangePolicies.js';
 import { registerExitFlush } from '../util/exitFlush.js'; // v2.582 ARCH-4: 디바운스 저장은 종료 시 동기 flush 를 등록한다
 import { ipToNum, canonIp } from '../util/ipv4.js';
 import { numOrNull } from '../util/numOrNull.js';
@@ -26,6 +27,7 @@ import { NAME_METHODS, NAME_MISS_MAX, displayName, nameMismatch } from './hostNa
 import { macInfo, entryMac } from './macVendor.js'; // v2.999: MAC → 제조사 · 종류(IP 상세 창) · 표시 MAC(ARP > NetBIOS)
 import { confirmHoursOf, DNS_CONFIRM_HOURS_MIN, DNS_CONFIRM_HOURS_MAX, DNS_FWD_STATES, DNS_OTHER_MAX } from './dnsConfirm.js'; // v3.2.0: DNS 정합성
 import { cleanQuiet } from './scanQuiet.js'; // v3.7.0: 주기 스캔 쉬는 시간
+import { admitAgent, EDGE_MAX_AGENTS } from '../central/edgeRecord.js'; // 결정(56~75 남긴 것) 60: 에이전트별 보고 기록 상한(cvp-data 와 같은 판정)
 
 const MAX_MERGE = 20_000; // 한 보고당 병합 상한(악의/오작동 에이전트의 대량 주입 방지)
 // v2.603(감사 CEN2603-02): **전체** 상한. MAX_MERGE 는 한 호출에만 걸려, 배정 범위가 없는 토큰이 보고를 반복하면 results·history 가
@@ -44,6 +46,11 @@ const _ipNum = ipToNum;
 // 루프 안에서 매번 override 맵/정책 목록을 다시 읽지 않도록 컨텍스트를 캡처하고,
 // 활성 정책이 하나도 없으면 findPolicy 자체를 건너뛴다(대다수 환경에서 O(N)로 동작).
 function managedChecker() {
+  // 25회차 F-4 ③: override 파일을 못 읽었으면 '관리 IP' 를 알 수 없다 — 모두 관리로 본다(관리 IP 의 스캔 결과 · 1년 이력이 정리되지 않게)
+  if (overridesLoadError()) return () => true;
+  // 115회차(107 반증 — 재현): 대역 정책 파일도 같다 — 읽기 오류 동안 getPolicies 는 빈 목록이라(107: 캐시하지 않음) 정책으로만 관리하는 IP 가
+  //   '미관리' 로 판정돼 스캔 결과(보존 기간) · 1년 이력이 정리됐다. 못 읽은 정책은 '정책 없음' 이 아니다 — 모두 관리로 본다(다시 읽히면 예전 판정).
+  if (rangePoliciesWriteRefusal()) return () => true;
   const ovMap = getOverrides();
   const hasPolicies = getPolicies().some((p) => p.enabled !== false);
   // ⚠ 회귀 방지(v2.287, 확정 버그 #11): 여기서 findPolicy(ip, '') 를 쓰면 claimedVcenterId 가
@@ -299,10 +306,21 @@ const _cfgLoadErr = makeSettingsLoadError(() => CFG, { label: 'IP 스캔 배정'
 /** 스캔 설정 파일을 못 읽었으면 { at, reason }, 읽었으면 null. */
 export function scanSettingsLoadError() { loadAll(); return _cfgLoadErr.get(); }
 
+/*
+ * 103회차 F19(재현 — EISDIR): 예전 catch 하나는 스캔 설정의 **읽기 오류**도 손상으로 보고 원본(에이전트별 대역 · 포트 · 쉬는 시간)을 `.corrupt.*` 로 옮겨,
+ *   다음 저장(에이전트 하나)이 그 한 건만 든 파일을 썼다 — 다른 엣지의 배정이 사라져 다음 pull 에 assigned:false 로 스캔이 멈췄다.
+ *   읽기 단계는 공용 읽기(30초 간격 재읽기): 읽기 오류는 원본을 두고 · 캐시하지 않고 · 표지(readError — 배정 pull 503 은 그대로)를 세우고 · saveAll 이 409 로 거절한다.
+ *   ⚠ 결과 · 이력(readJson)은 남겼다 — 그 값은 기동 때 한 번 읽어 디바운스 저장이 쓰므로, 읽기 오류에 원본을 두면 다음 저장이 보존본도 없이 덮는다(보류 장치가 필요 — 남긴 것).
+ */
+const _cfgReader = makeJsonFileReader(() => CFG, { parse: (t) => t, preserve: false, tag: 'ipam-scan' });
+let _cfgReadErr = false;
 function readCfg() {
-  if (!fs.existsSync(CFG)) { _cfgLoadErr.missing(); return {}; }
+  const rr = _cfgReader.read();
+  if (rr.kind === 'read-error') { _cfgReadErr = true; _cfgLoadErr.readError(rr.error, { retryMs: READ_RETRY_MS }); return {}; }
+  _cfgReadErr = false;
+  if (rr.kind === 'missing') { _cfgLoadErr.missing(); return {}; }
   try {
-    const j = JSON.parse(fs.readFileSync(CFG, 'utf8'));
+    const j = JSON.parse(rr.value);
     if (!j || typeof j !== 'object' || Array.isArray(j)) throw new Error('객체가 아닌 JSON 값');
     _cfgLoadErr.ok();
     return j;
@@ -334,11 +352,13 @@ function loadAll() {
   const all = (!p.agents && (p.ranges || p.enabled !== undefined))
     ? { agents: { [LOCAL]: normalizeCfg(p) } }
     : { agents: p.agents && typeof p.agents === 'object' ? p.agents : {} };
-  if (tok) { _cfgCache = all; _cfgTok = tok; } else { _cfgCache = null; _cfgTok = ''; }
+  if (tok && !_cfgReadErr) { _cfgCache = all; _cfgTok = tok; } else { _cfgCache = null; _cfgTok = ''; }   // 103회차 F19: 읽기 오류의 빈 설정은 캐시하지 않는다
   return all;
 }
 
 function saveAll(all) {
+  // 103회차 F19: 읽기 오류 중에는 쓰지 않는다 — all 은 캐시하지 않은 빈 설정에서 만든 것이다(라우트 409).
+  if (_cfgLoadErr.get()?.readError) throw Object.assign(new Error(`IP 스캔 설정 파일(${path.basename(CFG)})을 읽지 못한 상태라 저장하지 않았습니다 — 읽기 오류이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽습니다).`), { status: 409, code: 'settings-unreadable', readError: true });
   fs.mkdirSync(path.dirname(CFG), { recursive: true });
   atomicWriteFileSync(CFG, JSON.stringify(all, null, 2));
   _cfgLoadErr.ok();
@@ -355,8 +375,21 @@ export function loadScanSettings(agent = LOCAL) {
 }
 
 /** 에이전트별 설정 저장(부분 업데이트). */
+/*
+ * 전체 점검 25회차 F-3(재현): 배정 파일 손상 중 한 에이전트 저장 · 삭제가 {agents:{그 하나}} 를 쓰고 표지를 풀어, 다른 엣지가
+ *   /api/central/ip-scan-assignment 에서 200 assigned:false 를 받고 스캔이 조용히 멈췄다(18회차 B-3 iDRAC 배정과 같은 유형).
+ *   손상 중에는 쓰지 않는다 — 해제는 서비스 점검 '기본값으로 확정' 또는 보존본 복구.
+ */
+function scanCfgWriteRefusal() {
+  const e = _cfgLoadErr.get();
+  if (!e) return null;
+  const err = new Error(`IP 스캔 배정 파일(ipam-scan.json)을 읽지 못한 상태라 저장하지 않았습니다 — 지금 한 에이전트를 저장하면 다른 에이전트의 배정이 빠져 스캔이 멈춥니다. 서비스 점검에서 기본값으로 확정하거나 손상 보존본을 되돌리고 재시작하세요.`);
+  err.code = 'settings-unreadable'; err.status = 409;
+  return err;
+}
 export function saveScanSettings(agent, partial = {}) {
   const all = loadAll();
+  { const r = scanCfgWriteRefusal(); if (r) throw r; }
   // v2.604 RECENT2604-01: 대소문자만 다른 기존 키가 있으면 그 키를 갱신한다(같은 엣지의 설정이 두 벌로 갈라지지 않게).
   const key = agentKeyOf(all.agents, agent) ?? agent;
   const cur = normalizeCfg(all.agents[key] || {});
@@ -393,6 +426,7 @@ export function saveScanSettings(agent, partial = {}) {
  */
 export function deleteScanAgent(agent) {
   const all = loadAll();
+  { const r = scanCfgWriteRefusal(); if (r) throw r; }   // 25회차 F-3
   const key = agentKeyOf(all.agents, agent);
   const ranges = key != null ? normalizeCfg(all.agents[key] || {}).ranges : [];
   let removedSettings = false;
@@ -1211,6 +1245,37 @@ export function scanInfo() {
 let reports = readJson(REP, {}) || {};
 registerStore(REP, () => reports);
 
+/*
+ * 결정(56~75 남긴 것) 60: 보고 기록(reports)은 이름마다 항목이 생기고 상한이 없었다 — 공유(중앙) 토큰의 `/ip-scan-result` 는 본문의 agent 이름을
+ *   그대로 쓰므로(개별 토큰은 배정 범위로 막힌다) 이름만 바꿔 보내면 항목이 끝없이 늘었다. 스캔 설정에 등록된 에이전트와 이 포탈(LOCAL)은
+ *   언제나 받는다. 그 밖의 이름은 cvp-data 와 같은 판정(central/edgeRecord.js admitAgent — 자리가 없으면 가장 오래 조용한 이름을 내리고,
+ *   모두 최근이면 새 이름을 받지 않는다)이고, 넘친 사실은 콘솔 · agentReportsCapStatus() 에 남긴다(조용히 버리지 않는다).
+ */
+export const AGENT_REPORTS_MAX = EDGE_MAX_AGENTS;
+const _reportsCap = { refused: 0, evicted: 0, lastAt: null, lastName: '', lastAction: '' };
+export function agentReportsCapStatus() { return { max: AGENT_REPORTS_MAX, ..._reportsCap }; }
+const reportAt = (r) => Math.max(numOrNull(r?.at) ?? 0, numOrNull(r?.incomplete?.at) ?? 0);
+/** 이 이름의 보고 항목을 새로 둘 수 있는가(이미 있으면 언제나 참). 반환 { ok, evicted? }. */
+function admitReport(name, now = Date.now()) {
+  if (name === LOCAL || Object.prototype.hasOwnProperty.call(reports, name)) return { ok: true };
+  const lo = (k) => String(k).trim().toLowerCase();
+  let configured;
+  try { configured = new Set(Object.keys(loadAll().agents || {}).map(lo)); } catch { configured = new Set(); }
+  if (configured.has(lo(name))) return { ok: true };
+  // 상한은 설정에 없는 이름끼리만 센다 — 등록된 엣지 · LOCAL 의 기록은 내리지 않는다(끊김 알림이 기록을 잃지 않게).
+  const view = new Map(Object.entries(reports).filter(([k]) => k !== LOCAL && !configured.has(lo(k))));
+  const adm = admitAgent(view, name, { atOf: reportAt, now, maxAgents: AGENT_REPORTS_MAX });
+  if (adm.evicted) {
+    delete reports[adm.evicted];
+    Object.assign(_reportsCap, { evicted: _reportsCap.evicted + 1, lastAt: now, lastName: capStr(adm.evicted, 64), lastAction: 'evicted' });
+    console.warn(`[ipam] 스캔 보고 기록 상한(${AGENT_REPORTS_MAX}) — 오래 조용한 '${capStr(adm.evicted, 64)}' 기록을 내리고 '${capStr(name, 64)}' 를 받았습니다`);
+  } else if (!adm.ok) {
+    Object.assign(_reportsCap, { refused: _reportsCap.refused + 1, lastAt: now, lastName: capStr(name, 64), lastAction: 'refused' });
+    console.warn(`[ipam] 스캔 보고 기록 상한(${AGENT_REPORTS_MAX}) — 새 이름 '${capStr(name, 64)}' 의 보고 기록을 남기지 않았습니다(설정에 없는 이름이 모두 최근 보고)`);
+  }
+  return adm;
+}
+
 /**
  * v2.991: 스캔 한 번의 호스트명 확인 요약 { tried:{dns,mdns,netbios}, found:{…}, named, alive } — 엣지 본문에서도 오므로 수치만 좁힌다.
  *   못 읽은 칸은 null(0 이 아니다). 객체가 아니면 null = '방식 보고 없음'(이전 버전 엣지).
@@ -1246,6 +1311,9 @@ export function cleanMacStats(v) {
 
 export function recordAgentReport(agent, { scanned = 0, alive = 0, durationMs = null, nameStats = null } = {}) {
   const name = agent || LOCAL;
+  if (name === '__proto__') return { ok: false };   // 25회차 F-10: 형제 recordAgentIncomplete 와 같은 가드(평범한 객체 맵의 프로토타입을 바꾸지 않게)
+  const adm = admitReport(name);   // 결정 60: 이름별 항목 상한 — 넘치면 기록하지 않는다(사실은 남긴다)
+  if (!adm.ok) return { ok: false, refused: true };
   // v2.601 CEN2601-01: 엣지 본문의 수치를 그대로 저장하지 않는다(객체·문자열이 화면·이력으로 새지 않게).
   scanned = numOrNull(scanned); alive = numOrNull(alive); durationMs = numOrNull(durationMs);
   const ns = cleanNameStats(nameStats);
@@ -1255,6 +1323,7 @@ export function recordAgentReport(agent, { scanned = 0, alive = 0, durationMs = 
   const added = markBaseline(name);
   if (added.length) emitScanChanges({ agent: name, ts: Date.now(), changes: added.map((spec) => ({ type: 'baseline', spec })) });
   recordRun({ agent: name, scanned, alive, durationMs, nameStats: ns }); // 완료된 스캔 이력에 추가
+  return { ok: true, ...(adm.evicted ? { evicted: adm.evicted } : {}) };
 }
 
 /**
@@ -1266,6 +1335,7 @@ export function recordAgentReport(agent, { scanned = 0, alive = 0, durationMs = 
 export function recordAgentIncomplete(agent, { code = 'error', reason = '', durationMs = null, partial = null, done = null, total = null, at = null } = {}) {
   const name = String(agent || LOCAL);
   if (name === '__proto__') return null; // 평범한 객체 맵 — 프로토타입을 바꾸지 않게
+  if (!admitReport(name).ok) return null;   // 결정 60: 이름별 항목 상한(recordAgentReport 와 같은 판정)
   const prev = Object.prototype.hasOwnProperty.call(reports, name) && reports[name] && typeof reports[name] === 'object' ? reports[name] : null;
   const prevInc = prev?.incomplete && typeof prev.incomplete === 'object' ? prev.incomplete : null;
   const t = numOrNull(at) ?? Date.now();

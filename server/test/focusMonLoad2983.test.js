@@ -17,7 +17,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'focusmonload2983-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const DIR = tmpDir('focusmonload2983-');
 process.env.CONFIG_DIR = DIR;
 process.env.DATA_SOURCE = 'mock';
 process.env.CENTRAL_TOKEN = 'ctok-load-2983';
@@ -87,9 +94,17 @@ test('① 원격 명령 — 12개 상수 · 목록 밖 값은 기본 · ##SELF �
   assert.ok(!/\b(cat|awk|grep|cut|head|sed|ps|date)\b|\$\((?!\()|`/.test(fn), `묶음 tick 은 내장 명령만(명령 치환 · 외부 명령 없음 — 산술 $(( )) 은 내장): ${fn}`);
   assert.match(fn, /<\/proc\/\$\$\/stat/, '자기 stat 만 읽는다');
   assert.equal(lines.filter((l) => /ck; C[BCP]=\$\(\(C[BCP] \+ CK - L\)\); L=\$CK/.test(l)).length, 3, '묶음 셋(기본 · 구성 · 프로세스) 뒤에 한 번씩');
-  // 묶음 위치: 기본은 DISK 바로 뒤 · 구성은 UNIT 바로 뒤 · 프로세스는 IO 바로 뒤(파서 SECTION_GROUP 과 같은 경계)
+  // 묶음 위치: 기본은 기본 구획의 끝(v3.12.0 ⑬ 부터 DISK 뒤 VM · SNMP · SOCK · 60초 FS · FSI 까지 — 그 if 블록을 닫는 fi 바로 뒤) ·
+  //   구성은 UNIT 바로 뒤 · 프로세스는 IO 바로 뒤(파서 SECTION_GROUP 과 같은 경계)
   const at = (re) => lines.findIndex((l) => re.test(l));
-  assert.equal(at(/ck; CB=/), at(/echo '##DISK'/) + 1);
+  // v3.16.0 ⑯: 60초 블록 안에 FSI 뒤 커널 메시지(KMSG) 세 줄이 더 있다 — 묶음 줄은 그 블록을 닫는 fi 바로 뒤
+  const fiAfter = lines.findIndex((l, i) => i > at(/echo '##FSI'/) && l.trim() === 'fi');
+  assert.ok(fiAfter > at(/echo '##KMSG'/) && at(/echo '##KMSG'/) > at(/echo '##FSI'/), 'KMSG 는 같은 60초 블록 안');
+  assert.equal(at(/ck; CB=/), fiAfter + 1);
+  for (const sec of ['DISK', 'VM', 'SNMP', 'SOCK', 'FS', 'FSI']) {
+    assert.ok(at(new RegExp(`echo '##${sec}'`)) < at(/ck; CB=/), `${sec} 는 기본 묶음 안`);
+    assert.equal(P.SECTION_GROUP[sec], 'base', `파서도 ${sec} 를 기본 묶음으로`);
+  }
   assert.equal(at(/ck; CC=/), at(/echo '##UNIT'/) + 1);
   assert.equal(at(/ck; CP=/), at(/echo '##IO'/) + 1);
   const selfAt = at(/echo '##SELF'/);

@@ -49,6 +49,48 @@ function gapText(gapMs, limMs) {
 }
 
 /**
+ * 1회차 점검 D1 — **직전 누적 표본이 같은 장비 · 같은 부팅의 것인가**(순수).
+ *   _prev 는 대상 키 하나로 들고 다닌다(poller) — 같은 키의 OS 등록 주소가 다른 장비로 바뀌면 이전 장비의 누적 카운터와 새 장비의 누적 카운터를
+ *   차분해 가짜 값(재현: 디스크 busy 100% · 네트워크 8.7 GB/s)을 원시 · 롤업 · 판정에 넣었다. 리셋 판정(rates.js)은 ‘음수 델타’ 뿐이라 더 큰 누적값은 거르지 못한다.
+ *   식별은 **주 명령 출력에 이미 있는 값만**(새 SSH 호출 없음): 접속처(등록 host:port) · /proc/stat btime(##STAT) · uname 호스트 이름(##HOST).
+ *   ⚠ btime 은 커널 · 시계 보정에 따라 몇 초 흔들릴 수 있어(추정 — 실장비 미확인) 허용 폭을 둔다. 잘못 갈리면 한 주기 첫 표본(값 없음)일 뿐이고 틀린 값은 아니다.
+ *   직전 표본에 식별이 없으면(업그레이드 직후 · 예전 상태) 예전처럼 다룬다 — 모름을 ‘다른 장비’ 로 단정하지 않는다.
+ */
+export const BOOT_SKEW_S = 30;
+export function osDeviceOf(target, os) {
+  if (!os || !os.ok || os.osKind !== 'linux') return null;
+  const h = String(target?.osHost?.host ?? '').trim().toLowerCase().slice(0, 256);
+  return { ep: h ? `${h}:${Number(target?.osHost?.port) || 22}` : '', boot: n(os.counters?.btime), hn: String(os.hostname ?? '').trim().toLowerCase().slice(0, 253) };
+}
+/**
+ * 바뀐 까닭 code('' = 같은 장비 · 모름) — 'endpoint'(접속처) · 'boot-time'(부팅 시각 btime) · 'hostname'(호스트 이름).
+ *   재확인 N3: btime 은 재부팅뿐 아니라 시계 ‘단계’ 보정에서도 움직인다(커널이 지금 시각 − 가동 시간으로 낸다 — 일반 지식) — 재부팅이라 단정하지 않는다.
+ */
+export function osDeviceChange(prevDev, cur) {
+  if (!prevDev || typeof prevDev !== 'object' || !cur) return '';
+  if (prevDev.ep && cur.ep && prevDev.ep !== cur.ep) return 'endpoint';
+  const pb = n(prevDev.boot);
+  if (pb != null && cur.boot != null && Math.abs(cur.boot - pb) > BOOT_SKEW_S) return 'boot-time';
+  if (prevDev.hn && cur.hn && prevDev.hn !== cur.hn) return 'hostname';
+  return '';
+}
+/** iDRAC 쪽 — 등록 id · 주소(텔레메트리 NIC · FC 누적 바이트도 장비마다다). */
+export function idracDeviceOf(target) {
+  const i = target?.idrac;
+  if (!i || typeof i !== 'object') return null;
+  return { reg: String(i.regId ?? '').trim(), host: String(i.host ?? '').trim().toLowerCase().slice(0, 256) };
+}
+export function idracDeviceChanged(prevDev, cur) {
+  if (!prevDev || typeof prevDev !== 'object' || !cur) return false;
+  return String(prevDev.reg ?? '') !== cur.reg || String(prevDev.host ?? '') !== cur.host;
+}
+const OS_CHANGE_NOTE = Object.freeze({
+  endpoint: '직전 표본과 OS 접속처(등록 주소 · 포트)가 달라 다른 장비의 누적 카운터와 차분하지 않았습니다 — CPU·디스크·네트워크·HBA 사용률은 다음 주기부터 나옵니다(첫 표본으로 다룹니다).',
+  'boot-time': '직전 표본 뒤 부팅 시각(btime)이 바뀌어(재부팅 또는 시계 보정) 누적 카운터를 차분하지 않았습니다 — CPU·디스크·네트워크·HBA 사용률은 다음 주기부터 나옵니다.',
+  hostname: '직전 표본과 서버 호스트 이름이 달라(같은 주소에 다른 장비가 응답했을 수 있습니다) 누적 카운터를 차분하지 않았습니다 — CPU·디스크·네트워크·HBA 사용률은 다음 주기부터 나옵니다.',
+});
+
+/**
  * 한 서버의 한 주기.
  * @param {object} p
  * @param {object} p.target      `targets.resolveTargets()` 의 항목
@@ -93,6 +135,11 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
 
   // ── OS 경로 ────────────────────────────────────────────────────────────────
   const osOk = !!(os && os.ok);
+  // 1회차 점검 D1: 직전 누적 표본과 같은 장비인가(OS · iDRAC 따로).
+  const osDev = osDeviceOf(target, os);
+  const osChange = osDeviceChange(prev?.osDev, osDev);
+  const idracDev = idracDeviceOf(target);
+  const idracChange = idracDeviceChanged(prev?.idracDev, idracDev);
   const winShape = osOk && os.osKind === 'windows';
   if (winShape) {
     if (n(os.cpuPct) != null) { out.cpu_pct = n(os.cpuPct); srcOf.cpu = 'os'; }
@@ -114,11 +161,13 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
     if ((os.hbas || []).length && hp == null) notes.push('Windows 에서 HBA 사용률 카운터를 읽지 못했습니다(드라이버가 제공하지 않을 수 있습니다).');
   } else if (osOk && os.osKind === 'linux') {
     const c = os.counters || {};
-    const pc = prev?.counters || null;
-    const pAt = n(prev?.at);
+    // 1회차 점검 D1: 직전 표본이 다른 장비 · 다른 부팅이면 그 누적값과 차분하지 않는다(첫 표본 — 0 이 아니라 null).
+    const pc = osChange ? null : (prev?.counters || null);
+    const pAt = osChange ? null : n(prev?.at);
     // CPU — jiffies 누적의 차이. v2.731 A2-04: 표본 간격도 넘긴다(디스크·네트워크와 같은 경계 — 긴 공백의 평균을 이번 주기 값으로 쓰지 않는다).
     const cpu = cpuPctFromJiffies(pc?.cpu, c.cpu, pAt, now, lim);
     if (cpu != null) { out.cpu_pct = cpu; srcOf.cpu = 'os'; }
+    else if (osChange) notes.push(OS_CHANGE_NOTE[osChange]);
     else if (pc == null) notes.push('첫 수집이라 CPU·디스크·네트워크·HBA 사용률은 다음 주기부터 나옵니다(누적 카운터의 차이가 필요합니다).');
     if (pc != null && !spanOk(pAt, now, lim)) {
       // 조용히 비우지 않는다 — 왜 이번 주기 누적 카운터 값이 없는지 말한다(다음 주기부터 이 표본이 새 기준이다).
@@ -192,7 +241,7 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
     // ⚠ 화면 상세용이고 **DB 에는 넣지 않는다** — 폴러가 적재 직전에 뗀다(v2.550.3).
     out._perIf = perIf; out._perFc = perFc;
     // v2.919 리눅스 성능 1단계 — 새 열·장치별·튜닝(같은 간격 한계 lim · 같은 표본 시각).
-    perfOut = buildPerf({ os, pc, pAt, now, lim, prevStreak: prev?.streak || null });
+    perfOut = buildPerf({ os, pc, pAt, now, lim, prevStreak: osChange ? null : (prev?.streak || null) });
     Object.assign(out, perfOut.cols);
     for (const x of perfOut.notes) notes.push(x);
     // v2.922 피크 — A 안(같은 세션 1초 창) · B 안(샘플러 — 해시가 검증된 파일만) · C(PSI 는 열에 이미 있다 — 출처 표기만).
@@ -240,7 +289,9 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
      *   다를 수 있으므로 `srcOf` 로 어느 쪽을 썼는지 밝힌다.
      * ⚠ 첫 주기는 `null` 이다(누적 차이가 없다) — 0 으로 채우지 않는다.
      */
-    const pIdrac = prev?.idrac || null;
+    // 1회차 점검 D1: iDRAC 등록(id · 주소)이 바뀌었으면 이전 장비의 NIC · FC 누적과 차분하지 않는다.
+    const pIdrac = idracChange ? null : (prev?.idrac || null);
+    if (idracChange && prev?.idrac) notes.push('직전 표본과 iDRAC 등록(id · 주소)이 달라 다른 장비의 NIC·FC 누적 카운터와 차분하지 않았습니다 — iDRAC 네트워크·HBA 값은 다음 주기부터 나옵니다.');
     /*
      * v2.598(감사 IDRAC-2598-03): 누적 카운터의 **분모는 리포트 표본 시각(`at`)의 차이**다. 폴러 시계(prev.at→now)로
      *   나누면, iDRAC 이 리포트를 아직 갱신하지 않아 **같은 카운터를 두 번 읽은 주기**가 0 B/s·0% 가 된다 —
@@ -254,7 +305,7 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
         if (ca <= pa) { idracStale += 1; return null; }
         return [pa, ca];
       }
-      return [pAtOf(prev), now];
+      return [idracChange ? null : pAtOf(prev), now];
     };
     const idracRow = (p, x) => {
       const sp = idracSpan(p, x);
@@ -383,7 +434,9 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
       entSshTried: ent?.sshTried || [],
       entRaw: ent?.raw || '',
       entMs: ent?.ms ?? null,
-      firstSample: !!(osOk && os.osKind === 'linux' && !prev),
+      firstSample: !!(osOk && os.osKind === 'linux' && (!prev || osChange)),
+      // 1회차 점검 D1: 첫 표본으로 다룬 까닭(접속처 · 재부팅 · 호스트 이름) — 없으면 ''.
+      osDeviceChange: osChange,
     },
     /*
      * 다음 주기용 — 누적값만 들고 간다(비밀·원문은 담지 않는다).
@@ -397,7 +450,8 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
         ? { nics: idrac.nics || [], fcs: idrac.fcs || [] } : null;
       if (!osCounters && !idracCounters) return null;
       // v2.919: 오류·드롭 '연속 증가 주기 수'(반복 → bad 판정의 근거) — 누적 카운터와 같은 수명(인메모리).
-      return { at: now, counters: osCounters, idrac: idracCounters, ...(perfOut ? { streak: perfOut.streak } : {}) };
+      // 1회차 점검 D1: 장비 식별을 함께 든다(다음 주기가 같은 장비 · 같은 부팅인지 본다 — 비밀 · 원문 없음).
+      return { at: now, counters: osCounters, idrac: idracCounters, ...(osCounters && osDev ? { osDev } : {}), ...(idracCounters && idracDev ? { idracDev } : {}), ...(perfOut ? { streak: perfOut.streak } : {}) };
     })(),
   };
 }

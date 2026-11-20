@@ -5,6 +5,7 @@
  * ⚠ 문구에 백틱 금지(BoldText 는 ‘**’ 만 해석) — 값 인용은 ‘ ’.
  */
 import { numOrNull } from '../../numOrNull.js';
+import { toCsv } from '../../util/csv.js'; // 점검 반복 8회차 I1 — 공용 수식 가드(앞 탭 · CR 포함) · 사본 금지
 
 export const CLASS_ORDER = Object.freeze(['fault', 'perf', 'sec', 'issue']);
 /** 분류 색은 :root 토큰만(새 hex 없음). */
@@ -177,11 +178,10 @@ export function corrHeadText(windowMs) {
 }
 
 /** 패턴 표 CSV(보이는 값 그대로 — 표본은 가린 것). */
-const csvCell = (v) => { const s = String(v ?? ''); const g = /^[=+\-@]/.test(s) ? `'${s}` : s; return /[",\r\n]/.test(g) ? `"${g.replace(/"/g, '""')}"` : g; };
 export function patternCsv(resp = {}) {
   const rows = [['class', 'severity', 'count', 'first', 'last', 'source', 'unit', 'signature', 'rule', 'sample']];
   for (const p of resp.patterns || []) rows.push([p.cls, p.severity, p.count ?? '', p.first ? new Date(p.first).toISOString() : '', p.last ? new Date(p.last).toISOString() : '', p.src, p.unit, p.tmpl, p.ruleId, p.samples?.at?.(-1)?.text ?? '']);
-  return `${rows.map((r) => r.map(csvCell).join(',')).join('\r\n')}\r\n`;
+  return `${toCsv(rows)}\r\n`;   // 8회차 I1: 예전 자체 사본은 앞 탭 · CR 가드가 없었다(journald 식별자 ‘탭 + =…’ 가 unit 칸에 그대로)
 }
 
 /** 주기 · 바이트(API 값만 — 값이 없으면 ‘—’). */

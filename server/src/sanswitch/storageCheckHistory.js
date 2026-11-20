@@ -15,10 +15,11 @@ import { openSqlite, withOpenCleanup, createLockRetry } from '../util/sqliteOpen
 import { pageArgs } from '../util/pageArgs.js';
 import { compareRuns } from './healthHistory.js';
 import { CHECK_ITEMS } from './storagePerfCheck.js';
+import { envPositive, ENV_INT_MAX } from '../util/envNumber.js'; // 결정(56~75 남긴 것) 57 · 58: 시한 · 개수 env 의 Infinity · 2^31 초과 · 음수는 기본값(예전 `Math.max(하한, Number(env) || 기본)` 은 Infinity · 3e9 를 통과시켜 setTimeout 이 1ms 로 바꿨다 · 개수는 무제한)
 
 const DB_PATH = () => process.env.SANSTORAGE_CHECK_DB_PATH || path.join(config.dbDir || config.configDir, 'san-storage-check.db');
 /** 어레이당 보관 건수 — '최근 10회 비교' 를 늘 채우고 여유(기본 48 — 변화 없으면 1시간 1건이라 이틀치). */
-export const MAX_RUNS = Math.max(10, Number(process.env.SANSTORAGE_CHECK_MAX_RUNS) || 48);
+export const MAX_RUNS = Math.max(10, envPositive(process.env.SANSTORAGE_CHECK_MAX_RUNS, 48, { max: ENV_INT_MAX }));
 /** 바뀐 것이 없을 때 다시 적기까지의 최소 간격. */
 export const MIN_GAP_MS = 60 * 60_000;
 const LABELS = Object.fromEntries(CHECK_ITEMS.map((i) => [i.k, i.label]));

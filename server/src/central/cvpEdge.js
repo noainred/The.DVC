@@ -122,8 +122,16 @@ function load() {
 
 setCvpCollectBaseResolver((id) => {
   // v2.631 A6-2631-01: 기준선은 **엣지 시계 원본**(edgeCollectedAt) — ack 와 같은 시계여야 한다(v2.630 A4-02 의 CVP 판).
-  for (const rec of load().values()) for (const s of rec?.servers || []) if (s?.cvpId === String(id)) return numOrNull(s.edgeCollectedAt ?? s.collectedAt);
-  return null;
+  // 59회차(SAN · 스토리지 R2 와 같은 꼴): 여러 엣지가 같은 CVP 사본을 들고 있으면(위임을 옮김) **수집 시각(수신 시각으로 자른 값)이 가장 늦은 사본** —
+  //   첫 일치는 옛 엣지의 낡은 시각을 기준선으로 잡아 새 엣지의 같은 스냅샷 재전송을 '지금 수집' 완료로 지웠다.
+  let hit = null;
+  for (const rec of load().values()) {
+    for (const s of rec?.servers || []) {
+      if (s?.cvpId !== String(id)) continue;
+      if (!hit || (numOrNull(s.collectedAt) ?? 0) > (numOrNull(hit.collectedAt) ?? 0)) hit = s;
+    }
+  }
+  return hit ? numOrNull(hit.edgeCollectedAt ?? hit.collectedAt) : null;
 });
 
 const s = (v, n) => capStr(v, n);
@@ -170,7 +178,8 @@ export function cleanSamples(v, now = Date.now()) {
 
 /** CVP 상태 1건 정제(아는 필드만). */
 export function cleanStatus(x, now = Date.now()) {
-  const auth = isPlainObj(x.authStopped) ? { since: numOrNull(x.authStopped.since), at: numOrNull(x.authStopped.at), attempts: numOrNull(x.authStopped.attempts), reason: s(x.authStopped.reason, 300) } : null;
+  // 25회차 F-9: 인증 정지 시각도 수신 시각으로 자른다(같은 함수의 다른 시각처럼 tsClamp — 4회차 V-9 Veeam 과 같은 유형)
+  const auth = isPlainObj(x.authStopped) ? { since: tsClamp(x.authStopped.since, now), at: tsClamp(x.authStopped.at, now), attempts: numOrNull(x.authStopped.attempts), reason: s(x.authStopped.reason, 300) } : null;
   const seen = {};
   if (isPlainObj(x.seenFields)) for (const [k, v] of Object.entries(x.seenFields).slice(0, 32)) if (KINDS.has(k) && Array.isArray(v)) seen[k] = v.filter((y) => typeof y === 'string').slice(0, 40).map((y) => s(y, 64));
   const samples = cleanSamples(x.samples, now);

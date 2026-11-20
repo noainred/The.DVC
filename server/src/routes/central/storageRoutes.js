@@ -7,6 +7,7 @@
  */
 import { numOrNull } from '../../util/numOrNull.js';
 import { capTrim } from '../../util/capStr.js';
+import { edgeId } from '../../central/edgeRecord.js';   // 전체 점검 14회차(C-1): 거절 판정은 저장 키와 같은 정규화로
 // central.js 의 공용 판정 — 등록 때 인자로 받는다(import 하면 central.js ↔ 이 파일 순환이 생긴다 — archScan IMPORT_CYCLE_MAX)
 let edgeNameKnown, edgeNameRegistered, intervalsPartOrUnreadable, receiveRegistryUnreadable, registryUnreadable, requireCentral, settingsUnreadable, strAgent;
 
@@ -51,9 +52,12 @@ export async function onlyDelegated(list, idOf, registryPath) {
   const reg = await import(new URL(registryPath, new URL('../central.js', import.meta.url)).href);
   const direct = new Set(reg.listDevices().filter((d) => d && d.id != null && !String(d.agent || '').trim()).map((d) => String(d.id)));
   if (!direct.size) return { list, denied: 0 };
+  // 전체 점검 14회차(C-1 — 재현): 받은 글자 그대로 비교하면 ' unity-1 ' · '\t' 꼬리 · {deviceId:'', id:'unity-1'} 로 비켜 갔다(저장은 edgeId 로 공백을 떼
+  //   중앙 직접 장비 키에 적재 — v2.607 CEN2607-03 시나리오). idOf 는 값 하나 또는 후보 배열(저장이 쓰는 순서) — 후보 중 하나라도 직접 장비면 거절.
   const kept = list.filter((d) => {
-    const id = d && typeof d === 'object' ? idOf(d) : null;
-    return !((typeof id === 'string' || typeof id === 'number') && direct.has(String(id)));
+    if (!d || typeof d !== 'object') return true;   // 객체가 아니면 저장 단계가 뺀다
+    const raw = idOf(d);
+    return !(Array.isArray(raw) ? raw : [raw]).some((v) => { const id = edgeId(v); return !!id && direct.has(id); });
   });
   return { list: kept, denied: list.length - kept.length };
 }
@@ -251,13 +255,16 @@ export function registerStorageRoutes(centralRouter, deps) {
   // 7b단계 서버 등록 배포 — 수집 경로 ‘edge’ 로 등록한 서버 목록(비밀 없음 — 공통 계정 · 키는 이름만). 엣지가 주기적으로 GET.
   //   **개별 토큰으로 인증된 이름에만** 행을 준다(공유 토큰의 ?agent= 는 남의 법인 서버 목록을 받아 갈 수 있다 — v2.589 규약).
   //   `?applied=<서명>&ok=&rej=&rm=` 은 엣지가 지금 적용한 판과 결과 수(숫자만) — 화면이 '반영됨 / 대기' 를 가른다(인메모리 기록).
+  //   결정(76~105 남긴 것 · 2026-11-20) A3: `&unread=1` 은 엣지가 적용 상태 파일을 읽지 못했다는 불리언 하나 — 정확히 '1' 만 참(배열 · 다른 글자 · 없음 = 거짓 → 표지 지움) ·
+  //   개별 토큰으로 검증된 이름에만 기록(공유 토큰 ?agent= 로 남의 엣지에 표지를 세우지 못한다) · 시각은 중앙 수신 시각(recordOnboardPull now).
   centralRouter.get('/bm-onboard', requireCentral(), async (req, res) => {
     const verified = req.centralAuth?.mode === 'agent';
     const agent = verified ? String(req.centralAuth.agent || '').trim() : String(req.query.agent || '').trim();
     const ED = await import('../../bmusage/onboard/edgeDeploy.js');
     const num = (v) => { const n = Number(v); return Number.isInteger(n) && n >= 0 && n <= 100000 ? n : null; };
     if (verified) {
-      ED.recordOnboardPull(agent, { appliedSig: String(req.query.applied || ''), version: String(req.get('x-agent-version') || ''), applied: { ok: num(req.query.ok), rejected: num(req.query.rej), removed: num(req.query.rm) } });
+      ED.recordOnboardPull(agent, { appliedSig: String(req.query.applied || ''), version: String(req.get('x-agent-version') || ''), applied: { ok: num(req.query.ok), rejected: num(req.query.rej), removed: num(req.query.rm) },
+        stateUnread: req.query.unread === '1' });
       try { ED.settlePending(agent, String(req.query.applied || '').slice(0, 64)); } catch { /* 정리 실패는 다음 인출에 다시 */ }   // 7b 반증 F14
     }
     if (settingsUnreadable(res, ED.edgeDeployLoadError, '서버 등록 배포(bm-onboard-edge.json)')) return;   // 엣지는 지난 등록을 그대로 둔다
@@ -266,7 +273,8 @@ export function registerStorageRoutes(centralRouter, deps) {
     res.json({ ok: true, ...out });
   });
 
-  // 8a단계 정비 창 배포 — 그 엣지 법인의 진행 중 · 예정 창(태그 창은 그 엣지 대상의 키로 펼친다 · bmusage/maint/deploy.js). 엣지가 주기적으로 GET.
+  // 8a단계 정비 창 배포 — 그 엣지 법인의 진행 중 · 예정 창(태그 창은 그 엣지 대상의 키로 펼친다 · bmusage/maint/deploy.js) + 지난 구간용 history(끝남 · 지움 · 만료 —
+  //   점검 반복 3회차 D2 · 엣지는 억제에 쓰지 않는다). 엣지가 주기적으로 GET.
   //   **개별 토큰으로 인증된 이름에만** 준다(공유 토큰의 ?agent= 는 남의 법인 정비 일정을 받아 갈 수 있다 · 억제 범위를 남에게 씌울 수 없다).
   //   중앙 창 파일을 못 읽으면 503(빈 목록을 보내 엣지 억제를 지우지 않는다 — 엣지는 받은 지 24시간까지 지난 배포본을 쓴다).
   //   `?applied=<서명>` 은 엣지가 지금 쓰는 판(숫자 · 서명만 — 화면 ‘반영됨 / 대기’).
@@ -320,7 +328,7 @@ export function registerStorageRoutes(centralRouter, deps) {
     const now = Date.now();
     devices = devices.map((d) => stampEdgeCollectedAt(d, now)); // v2.630 A4-02: 원본 엣지 시각은 edgeCollectedAt 으로 따로
     {
-      const r = await onlyDelegated(devices, (d) => d.deviceId ?? d.id, '../storage/registry.js'); // v2.607 CEN2607-03
+      const r = await onlyDelegated(devices, (d) => [d.deviceId, d.id], '../storage/registry.js'); // v2.607 CEN2607-03 · 14회차 C-1(저장의 deviceId || id 후보 둘 다)
       devices = r.list; notOwned += r.denied;
       if (r.denied) console.warn(`[central] storage-data: ${String(agent).slice(0, 64)} 중앙 직접 수집 장비 ${r.denied}건 거절`);
     }

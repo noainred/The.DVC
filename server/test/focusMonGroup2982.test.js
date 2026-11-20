@@ -12,7 +12,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'focusmongroup2982-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const DIR = tmpDir('focusmongroup2982-');
 process.env.CONFIG_DIR = DIR;
 process.env.DATA_SOURCE = 'mock';
 process.env.FOCUSMON_SSH_KEY = '';
@@ -113,7 +120,7 @@ test('② CSV — 그룹 열이 있으면 바꾸고 · 없으면 그대로 · �
   assert.equal(ap.ok, true);
   assert.deepEqual(registry.listGroups().map((g) => [g.name, g.n]), [['WAS', 1], ['DB', 1]]);
   const ex = registry.exportRows();
-  assert.deepEqual(ex[0], ['이름', 'IP', '포트', '계정', '담당 노드', '그룹']);
+  assert.deepEqual(ex[0], ['이름', 'IP', '포트', '계정', '담당 노드', '그룹', '법인'], 'v3.11.0 법인 열이 끝에 붙었다(없으면 가져오기가 그대로 둔다)');
   assert.ok(ex.some((r) => r[0] === 'new-01' && r[5] === 'DB'));
   assert.ok(ex.some((r) => r[0] === 'new-02' && r[5] === ''));
   assert.equal(registry.csvTemplateRows()[0][5], '그룹');

@@ -33,26 +33,33 @@ function baseWatts(name, model = '') {
   return m + (hash(name) % 140); // 모델 기준 + 서버별 고정 편차
 }
 
-// mock Dell 호스트를 iDRAC로 1회 등록(비어 있을 때만). 전력 이력 백필은 demo/idrac.js.
+// mock Dell 호스트를 iDRAC로 1회 등록. 전력 이력 백필은 demo/idrac.js.
+// v3.26.0: 비어 있을 때 + **mock 항목뿐이고 ESXi 데모 등록이 그 규모의 절반 미만일 때 빠진 호스트만 보충**(v2.914 이전 규모 186 호스트로
+//   시드된 데모 설치본이 650 호스트 규모로 늘게 — 사람이 등록한 서버가 하나라도 있으면 건드리지 않는다). 저장은 한 번에 묶는다.
 async function ensureIdracSeed(snapshot) {
   if (idracSeeded) return;
   idracSeeded = true;
-  const { loadRegistry, addServer } = await import('../idrac/registry.js');
-  if (loadRegistry().length) return;                  // 실데이터 있으면 시드 안 함
+  const { loadRegistry, importServers } = await import('../idrac/registry.js');
+  const reg = loadRegistry();
+  if (reg.some((s) => !String(s.id).startsWith('mock-'))) return;   // 실데이터 있으면 시드 안 함
   const hosts = (snapshot?.hosts || []).filter((h) => /dell/i.test(h.vendor || ''));
   if (!hosts.length) { idracSeeded = false; return; } // 스냅샷 아직이면 다음 틱 재시도
-  let n = 0;
+  const have = new Set(reg.filter((s) => String(s.id).startsWith('mock-idrac-')).map((s) => String(s.id)));
+  if (have.size >= Math.ceil(hosts.length / 2)) return;
+  const add = [];
   for (const h of hosts) {
     const id = `mock-idrac-${h.vcenterId}-${h.name}`;
+    if (have.has(id)) continue;
     // 사설 대역의 합성 iDRAC 주소(실제 폴은 mock 분기로 안 함).
     const ip = `10.${hash(h.vcenterId) % 250}.${hash(h.name) % 250}.${(hash(h.name) >> 4) % 254 + 1}`;
-    addServer({ id, name: h.name, host: ip, username: 'root', password: 'mock', vcenterId: h.vcenterId,
+    add.push({ id, name: h.name, host: ip, username: 'root', password: 'mock', vcenterId: h.vcenterId,
       // v2.708: 예전 `MOCK${해시 앞 6자리}` 는 70대가 11개 태그를 공유해 전력·인벤토리가 11대로 합쳐졌다 — 고유 태그로.
       serviceTag: mockServiceTag(`${h.vcenterId}|${h.name}`), hostNames: [h.name] });
-    n++;
   }
+  const r = add.length ? importServers(add, 'merge') : null;
+  const n = r?.ok ? r.added : 0;
   // v2.708: 전력 이력 백필(14일 — 최근 24시간 10분)은 demo/idrac.js backfillPower 가 서버마다 한다(곡선이 '지금' 값과 이어지게).
-  if (n) console.log(`[mock] iDRAC 전력 데모 시드: ${n}대`);
+  if (n) console.log(`[mock] iDRAC 전력 데모 시드: ${n}대${have.size ? `(기존 ${have.size}대에 보충)` : ''}`);
 }
 
 /**

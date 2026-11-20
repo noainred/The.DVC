@@ -4,7 +4,8 @@
  * ⚠ 조회는 열 때 1회 + ‘다시 읽기’(폴링 없음) · 쓰기는 운영자 이상 + 그 법인 쓰기 범위(서버가 다시 막는다 — 404 → 403) · 주소는 관리자 판본만(서버가 비관리자에게 싣지 않는다).
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { fetchJson, postJson, delJson, hasRole } from '../../api.js';
+import { fetchJson, postJson, delJson } from '../../api.js';
+import { gateOk, gateShown, gateWhy } from './bmWriteText.js'; // 점검 반복 2회차 재확인 R4
 import { ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
@@ -53,8 +54,10 @@ export function KeyOverlapTable({ rows = [], canWrite = false, busy = '', onDeci
 }
 
 export default function BmKeyOverlaps() {
-  const canWrite = hasRole('admin', 'operator');
   const [st, setSt] = useState({ resp: null, err: null, loading: false });
+  // 점검 반복 2회차 재확인 R4: 결정 · 되돌리기는 서버 표지(actions.decide · clear — 데모 · 역할)로만(행 writable = 법인 쓰기 범위 — 그대로) — 역할만 보면 데모 계정에 열리고 누르면 403 이었다.
+  const dg = st.resp?.actions?.decide;
+  const canWrite = gateOk(dg) && gateOk(st.resp?.actions?.clear);
   const [busy, setBusy] = useState('');
   const [msg, setMsg] = useState(null);
   const [q, setQ] = useState('');
@@ -115,6 +118,7 @@ export default function BmKeyOverlaps() {
           </div>
           {msg && <p className="bmo-note" role="status" style={{ color: toneVar(msg.tone) }}>{msg.text}</p>}
           {st.resp.addressHidden && <p className="bmo-note">주소(iDRAC · OS)는 관리자에게만 보입니다 — 이름 · 서비스태그 · 겹친 상대로 고르세요.</p>}
+          {!canWrite && gateShown(dg) && gateWhy(dg) && <p className="bmo-note">수집에 추가 · 제외 유지 · 되돌리기 — {gateWhy(dg)}.</p>}
           <KeyOverlapTable rows={view.rows} canWrite={canWrite} busy={busy} onDecide={decide} onClear={clear} showAddr={!st.resp.addressHidden} />
           {view.pages > 1 && (
             <div className="bmob-pager" aria-label="쪽 이동" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>

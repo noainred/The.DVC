@@ -34,6 +34,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 97회차 F6: 읽기 오류 ≠ 손상
 import { capStr } from '../util/capStr.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { registerExitFlush } from '../util/exitFlush.js';
@@ -307,14 +308,30 @@ function writer() {
 
 const jsonBytes = (v) => Buffer.byteLength(JSON.stringify(v), 'utf8');
 
+/*
+ * 97회차 F6(재현 — EISDIR): 예전 catch 하나는 **읽기 오류**(EACCES · EIO · EISDIR)도 손상으로 보고 온전한 원본(전 이슈)을 `.corrupt.*` 로 옮긴 뒤
+ *   빈 목록을 캐시했다 — 표지 없이 이슈가 0건이 되고, 다음 등록 한 번이 그 한 건만 든 issues.json 을 썼다(나머지는 보존본에만 · 번호도 1부터).
+ *   읽기 단계는 공용 읽기(util/jsonFileRead.js — 읽기 오류면 30초 간격으로만 디스크를 다시 본다): 읽기 오류는 원본을 두고 · 캐시하지 않고(빈 목록을 돌려준다) ·
+ *   commit(모든 쓰기의 길목)이 409 로 거절한다. parse · 형식 실패는 아래 catch(예전과 같다 — 보존본 + 빈 목록).
+ */
+const _reader = makeJsonFileReader(issuesFile, { parse: (t) => t, preserve: false, tag: 'issues' });
+let _readErr = null;   // { at, code } — 마지막 읽기가 읽기 오류
+/** 97회차 F6: issues.json 읽기 오류(원본은 그대로)면 `{ at, code }`, 아니면 null. */
+export function issuesReadError() { load(); return _readErr ? { ..._readErr } : null; }
 function load() {
   if (cache) return cache;
   writer();
   const file = issuesFile();
+  const rr = _reader.read();
+  if (rr.kind === 'read-error') {
+    if (!_readErr) _readErr = { at: Date.now(), code: String(rr.error?.code || 'read-error').slice(0, 32) };
+    return { issues: [], nextSeq: 1, sizes: new Map(), bytes: 0 };   // 캐시하지 않는다 — 쓰기는 commit 이 거절한다
+  }
+  _readErr = null;
   let issues = []; let nextSeq = 1;
   try {
-    if (fs.existsSync(file)) {
-      const j = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (rr.kind === 'ok') {
+      const j = JSON.parse(rr.value);
       if (!j || typeof j !== 'object' || !Array.isArray(j.issues)) throw new Error('issues 배열이 없습니다');
       issues = j.issues.filter((x) => x && typeof x === 'object' && typeof x.id === 'string' && typeof x.key === 'string');
       const n = numOrNull(j.nextSeq);
@@ -335,6 +352,8 @@ function load() {
 /** 캐시를 바꾸고 쓰기를 예약한다. changed = 바뀐 이슈(크기 재계산) · removedId = 지운 이슈 id. */
 function commit(issues, { changed = null, removedId = null, nextSeq = null } = {}) {
   const c = load();
+  // 97회차 F6: 읽기 오류 중에는 어떤 쓰기도 받지 않는다 — 빈 목록 위의 변경이 원본(전 이슈)을 덮지 않게(라우트 409).
+  if (_readErr) throw Object.assign(new Error(`이슈 파일(issues.json)을 읽지 못한 상태라 저장하지 않았습니다 — 읽기 오류(${_readErr.code})이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽습니다).`), { status: 409, code: 'settings-unreadable' });
   c.issues = issues;
   if (nextSeq != null) c.nextSeq = nextSeq;
   if (removedId) { c.bytes -= c.sizes.get(removedId) || 0; c.sizes.delete(removedId); }
@@ -483,7 +502,7 @@ export function _resetIssuesCache() {
     for (const x of w.waiters) { clearTimeout(x.t); x.resolve(persistOfWriter(w, x.seq)); }
     w.waiters = [];
   }
-  cache = null; w = null;
+  cache = null; w = null; _readErr = null; _reader.reset();
 }
 
 /** 지금까지 받은 마지막 변경 순번(라우트가 쓰기 직후 부른다 — 쓰기는 동기라 사이에 다른 변경이 끼지 않는다). */
@@ -508,7 +527,7 @@ export function issuesPersist({ admin = false, now = Date.now() } = {}) {
   if (!w) return { state: 'saved', loaded: false, unsavedSince: null, retrying: false, retryExhausted: false };
   const p = persistOfWriter(w, w.seq);
   const retrying = !!w.retryTimer;
-  const out = { state: p.state, loaded: true, unsavedSince: p.state === 'saved' ? null : w.unsavedSince, retrying, retryExhausted: p.state === 'failed' && !retrying && w.failCount > RETRY.max, writing: w.writing };
+  const out = { state: p.state, loaded: true, unsavedSince: p.state === 'saved' ? null : w.unsavedSince, retrying, retryExhausted: p.state === 'failed' && !retrying && w.failCount > RETRY.max, writing: w.writing, ...(_readErr ? { readError: true } : {}) };   // 97회차 F6: 읽기 오류(원본 그대로 — 쓰기 거절 중)
   if (!admin) return out;
   return {
     ...out, unsaved: Math.max(0, w.seq - w.savedSeq), lastSavedAt: w.lastWriteAt,

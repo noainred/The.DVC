@@ -65,7 +65,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
 ## 영역별 규칙 문서 — 그 영역을 고치기 전에 해당 파일을 읽을 것
 
 목록·목차는 `docs/rules/README.md`. 서버 모듈별 불변조건은 그 폴더의 CLAUDE.md 에도 있다(자동 로드):
-`server/src/{relaytopo,agent,rma,security,sanswitch,hostaccess,veeam/run,bareos,bareos/install,bareos/manage,servicemap,svcmon,ping,focusmon,bmfolders,sshaccess}/CLAUDE.md`.
+`server/src/{relaytopo,agent,rma,security,sanswitch,hostaccess,veeam/run,bareos,bareos/install,bareos/manage,servicemap,svcmon,ping,focusmon,bmfolders,sshaccess,serverinfo,winrm,servercmd}/CLAUDE.md`.
 
 | 파일 | 다루는 것 · 언제 읽나 |
 |---|---|
@@ -83,9 +83,9 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
 | `docs/rules/isilon.md` (7항목) | 아이실론 디렉터리 사용량·메일 — server/src/isidu/ · web/src/views/tools/Isidu*·isidu* |
 | `docs/rules/ipam.md` (20항목) | IP 관리(IPMS·대역·스캔·원장·VM DNS) — server/src/{ipam,vmdns}/ · web/src/views/tools/Ipam*·Ipms*·IpScan*·VmDns* |
 | `docs/rules/horizon-curuser.md` (6항목) | Horizon 세션·앱 사용·현재 사용자(Windows) — server/src/{horizon,curuser}/ · web/src/views/tools/Horizon*·CurrentUsers* |
-| `docs/rules/demo.md` (6항목) | 데모(mock) 모드·데모 계정 — server/src/mock/ · auth/demoGuest.js |
-| `docs/rules/audits.md` (82항목) | 회차별 점검(감사) 기록 v2.583~v2.785 — 같은 영역을 다시 점검할 때 — 확정분·남긴 것·작업 방식 교훈 |
-| `docs/rules/focusmon.md` (7항목) | 서버 집중 모니터링 상세 기록(v2.976 반증 · v2.978 CSV · 일괄 시험 · 다시 연결 · v2.979 구간 평균 · v2.981 프로세스 세부 · v2.982 서버 그룹 · v2.983 수집 부하 · v2.992 카드 아래 줄) — server/src/focusmon/ · central/focusMonEdge.js · agent/focusMonWorker.js |
+| `docs/rules/demo.md` (7항목) | 데모(mock) 모드·데모 계정 — server/src/mock/ · auth/demoGuest.js |
+| `docs/rules/audits.md` (82항목) | 회차별 점검(감사) 기록 v2.583~v3.18.13(전체 점검 1~135회차 포함 — 1MB · 통째로 읽지 말고 `grep -n` 으로 해당 절만) — 같은 영역을 다시 점검할 때 — 확정분·남긴 것·작업 방식 교훈 |
+| `docs/rules/focusmon.md` (13항목) | 서버 집중 모니터링 상세 기록(v2.976 반증 · v2.978 CSV · 일괄 시험 · 다시 연결 · v2.979 구간 평균 · v2.981 프로세스 세부 · v2.982 서버 그룹 · v2.983 수집 부하 · v2.992 카드 아래 줄 · v3.11.0 디스크 점검(배드 섹터 프로그램 · sudo 예외 · 묶어 보기) · v3.12.0 더할 지표) — server/src/focusmon/ · central/focusMonEdge.js · agent/focusMonWorker.js |
 | `docs/rules/server-security-history.md` | 서버 보안 감사 조치 기록(2026-09-12 ~ 10-16 — SSRF lookup·큰 본문 게이트·비밀 가림·인증 정지·암호문 재사용·세션·장비 신뢰·관리자 판본) |
 
 ## 보안 불변조건 (회귀 방지 — 유지할 것)
@@ -146,6 +146,8 @@ pyportal/ 아래 파일을 만질 때 자동 로드된다. 되돌리면 안 되�
   **틀린 것을 찾으면 보고하고 과감하게 고친다**(2026-11-01 사용자 '기억해줘' — "틀린 것은 괜찮지만, 숨기거나 왜곡하는 것은 나쁘다"): 내가 앞서 말한 수치·판단·
   보고가 틀렸으면 다음 응답에서 먼저 '정정' 으로 밝히고(무엇이·왜·근거) 코드·문서도 고친다. 틀린 것을 조용히 덮어쓰거나 작게 말하지 않는다.
 - **항상 한글로 응답**: 모든 답변/설명 메시지는 한국어로 작성한다.
+- **표시하는 글은 한글 또는 영어(한글)**(2026-11-18 사용자 지시 — "그래야 나도 실력이 증진"): 답변뿐 아니라 도구 실행 설명(Bash description) · 진행 메시지 · 표의 글자도
+  한글로 쓴다. 영어 용어를 써야 하면 `drawer(드로어)` 처럼 뜻을 괄호로 붙인다(코드 식별자 · 파일 경로 · 명령은 그대로).
 - **존댓말로 응답**(2026-10-01 사용자 지시 "존대말로 해줄래? 기억해줘"): 모든 답변은 합니다체(존댓말)로 쓴다.
   반말·평서체('~다', '~했다')로 사용자에게 말하지 않는다. 코드 주석·문서·커밋 메시지는 기존 문체를 따른다.
 - **새 작업 요청 시 작업 현황 표 표시**: 새로운 작업(명령) 요청을 받으면 응답 맨 앞에 "작업 현황" 표를 보여준다.

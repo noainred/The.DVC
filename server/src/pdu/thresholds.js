@@ -19,8 +19,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
-import { makeSettingsLoadError } from '../util/settingsLoadError.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { makeJsonFileLoader, readJsonFile } from '../util/jsonFileLoad.js';   // 78회차 F6: 읽기 오류 ≠ 손상(결정 G2 공용 로더)
 import { numOrNull } from '../util/numOrNull.js';
 
 const FILE = path.join(config.configDir, 'pdu-thresholds.json');
@@ -66,25 +66,30 @@ export const THRESHOLD_SPEC = [
  *   ⚠ **알림 채널 설정(설정 › 알림 채널)은 배포하지 않는다** — 엣지는 자기 알림 설정으로 보낸다. 엣지에 채널이 없으면
  *     위임 PDU 경보는 여전히 아무 데도 가지 않는다(남은 일 — 채널 주소를 28곳에 퍼뜨릴지는 사람이 정할 문제).
  */
-const _loadErr = makeSettingsLoadError(() => FILE, { label: 'PDU 임계치', confirm: () => saveThresholds({}) });
+/*
+ * 78회차 F6: 예전에는 '읽기 → parse' 를 catch 하나로 받아 **읽기 오류**(EACCES · EIO · EISDIR)도 손상으로 보고 온전한 원본을 `.corrupt` 로 옮긴 뒤
+ *   기본값으로 돌았고, 다음 저장이 그 기본값 위에 썼다(57 · 58 · … 74 회차와 같은 꼴 — 결정 G2). 판정은 공용 로더(util/jsonFileLoad.js) 하나다:
+ *   손상만 보존본으로 옮기고(예전과 같다), 읽기 오류는 원본을 두고 30초마다 다시 읽으며 그동안 저장을 409 로 거절한다.
+ *   손상 상태의 관리자 저장이 오류를 푸는 예전 규약(엣지 배포 'thresholdsUnreadable' 해제)은 그대로다 — 원본은 이미 보존본에 있다.
+ */
+// 78회차: 예전 판정 그대로 — `null` 도 손상이다(공용 parseJsonObject 는 null 을 {} 로 읽는다 · v2.601 TIM2601-03 이 null 파일을 손상 보존으로 고정).
+const parseStrictObject = (t) => { const v = JSON.parse(t); if (!v || typeof v !== 'object' || Array.isArray(v)) throw new SyntaxError('객체가 아닌 JSON 값'); return v; };
+const _file = makeJsonFileLoader(() => FILE, { label: 'PDU 임계치', confirm: () => saveThresholds({}), parse: parseStrictObject, tag: 'pdu-thresholds' });
 let _central = null;   // 엣지가 중앙에서 받은 임계치(메모리 · 알려진 키만)
 
 /** 파일에 저장된 값(+ 기본값). 중앙 배포분은 섞지 않는다. */
 function loadFileThresholds() {
-  if (!fs.existsSync(FILE)) { _loadErr.missing(); return { ...DEFAULTS }; }
-  try {
-    const p = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-    if (!p || typeof p !== 'object' || Array.isArray(p)) throw new Error('객체가 아닌 JSON 값');
-    const out = { ...DEFAULTS };
-    for (const k of Object.keys(DEFAULTS)) {
-      if (!(k in p)) continue;
-      if (k === 'enabled') { out.enabled = p.enabled !== false; continue; }
-      // 빈 문자열/null = '감시 안 함'. 0 은 유효한 임계치일 수 있으므로 구분해 남긴다.
-      out[k] = (p[k] === '' || p[k] == null) ? null : (Number.isFinite(Number(p[k])) ? Number(p[k]) : DEFAULTS[k]);
-    }
-    _loadErr.ok();
-    return out;
-  } catch (e) { _loadErr.corrupt(e); preserveCorrupt(FILE, e.message); return { ...DEFAULTS }; }
+  const r = _file.load();   // missing · read-error · corrupt(보존본으로 옮김) · ok — 객체가 아닌 JSON(null 포함)은 손상(parseStrictObject)
+  if (r.kind !== 'ok') return { ...DEFAULTS };
+  const p = r.value;
+  const out = { ...DEFAULTS };
+  for (const k of Object.keys(DEFAULTS)) {
+    if (!(k in p)) continue;
+    if (k === 'enabled') { out.enabled = p.enabled !== false; continue; }
+    // 빈 문자열/null = '감시 안 함'. 0 은 유효한 임계치일 수 있으므로 구분해 남긴다.
+    out[k] = (p[k] === '' || p[k] == null) ? null : (Number.isFinite(Number(p[k])) ? Number(p[k]) : DEFAULTS[k]);
+  }
+  return out;
 }
 
 /** 실효 임계치 — 중앙 지정값(엣지 · 받았을 때만) > 파일 > 기본값. */
@@ -95,7 +100,13 @@ export function loadThresholds() {
 }
 
 /** 중앙 임계치 파일을 못 읽었으면 { at, reason }, 아니면 null(pdu-config 가 thresholds 대신 thresholdsUnreadable 을 싣는다). */
-export function pduThresholdsLoadError() { loadFileThresholds(); return _loadErr.get(); }
+export function pduThresholdsLoadError() { loadFileThresholds(); return _file.loadError(); }
+/**
+ * 133회차(128회차 추정 E2 — 재현): 임계치 파일 **읽기 오류** 중의 쓰기 거절(없으면 null — 손상은 저장이 푸는 규약이라 거절이 아니다).
+ *   조회(GET /tools/pdu)가 이 거절로 표지(`thresholdsLoadError`)를 싣는다 — 임계치 창은 늘 전 키를 보내므로, 못 읽은 동안의 기본값으로 채운 창을
+ *   다시 읽힌 뒤 저장하면 저장돼 있던 임계치가 기본값으로 덮이고 그 전 키가 `_assigned`(엣지 배포)에 올랐다. 화면이 그 창의 저장을 잠근다.
+ */
+export function pduThresholdsWriteRefusal() { loadFileThresholds(); return _file.loadError()?.readError ? _file.refusal('PDU 임계치') : null; }
 
 /*
  * v2.770(점검 R5-E1-1): **관리자가 실제로 바꾼 키만** 엣지에 내려보낸다. v2.769 는 기본값을 채운 전체 객체(loadFileThresholds)를 보내,
@@ -116,8 +127,10 @@ function loadAssignedKeys() { return readAssigned().keys; }
 /** `_assigned` 표지 읽기 — marked: 파일에 표지(배열)가 있는가. 파일이 없거나 못 읽으면 { keys: [], marked: false }. */
 function readAssigned() {
   try {
-    if (!fs.existsSync(FILE)) return { keys: [], marked: false };
-    const p = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+    // 78회차 F6: 보조 읽기라 보존하지 않는다(preserve:false — 손상 판정 · 보존은 loadFileThresholds 의 공용 로더 하나가 한다).
+    const r = readJsonFile(FILE, { preserve: false, parse: parseStrictObject });
+    if (r.kind !== 'ok') return { keys: [], marked: false };
+    const p = r.value;
     const marked = !!(p && typeof p === 'object' && !Array.isArray(p) && Array.isArray(p[ASSIGNED_KEY]));
     const a = marked ? p[ASSIGNED_KEY] : [];
     return { keys: DEPLOYABLE.filter((k) => a.includes(k)), marked };
@@ -131,7 +144,7 @@ function readAssigned() {
 export function thresholdsForEdge() {
   if (!fs.existsSync(FILE)) return {};
   const v = loadFileThresholds();
-  if (_loadErr.get()) return null;
+  if (_file.loadError()) return null;
   const out = {};
   for (const k of loadAssignedKeys()) out[k] = v[k];
   return out;
@@ -169,6 +182,11 @@ export function centralThresholdsApplied() { return _central ? { ..._central } :
 export function saveThresholds(partial = {}) {
   // 저장은 파일 값 기준이다 — 엣지에서 저장해도 중앙 배포분을 파일로 굳히지 않는다.
   const cur = loadFileThresholds();
+  // 78회차 F6: 읽기 오류면 원본이 디스크에 그대로 있다 — 기본값(cur) 위에 쓰면 그 원본을 덮는다. 손상(원본은 보존본)은 예전처럼 저장이 푼다.
+  if (_file.loadError()?.readError) {
+    const no = _file.refusal('PDU 임계치');
+    throw Object.assign(new Error(no?.reason || 'PDU 임계치 파일을 읽지 못해 저장하지 않았습니다.'), { status: 409, code: 'settings-unreadable' });
+  }
   const next = { ...cur };
   for (const k of Object.keys(DEFAULTS)) {
     if (!(k in partial)) continue;
@@ -189,7 +207,7 @@ export function saveThresholds(partial = {}) {
   }
   const assignedList = DEPLOYABLE.filter((k) => assigned.has(k));
   atomicWriteFileSync(FILE, JSON.stringify({ ...next, [ASSIGNED_KEY]: assignedList }, null, 2), { mode: 0o600 });
-  _loadErr.ok();
+  _file.saved();
   return next;
 }
 

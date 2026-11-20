@@ -14,35 +14,33 @@
  * v2.613(CONTRACT2613-01 · EDGE2613-02): 사다리(등록부 → fetch → 401/403 → 404 → http → bad-body)는 `central/edgePull.js
  *   pullFromEdge` **하나**다 — 여기는 시한 env·저장(`putEdgeBmUsage`)·정제만 갖는다. kind 문자열·응답 모양은 그대로.
  */
+import { envPositive, ENV_INT_MAX } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { pullFromEdge } from './edgePull.js'; // v2.613 CONTRACT2613-01·EDGE2613-02: 당김 사다리는 하나(등록부 → fetch → 상태코드 → 본문)
 import { strOf } from '../util/coercionTrap.js'; // v2.604 CEN2604-03: 엣지 본문의 글자 필드는 타입부터 좁힌다
 import { numOrNull } from '../util/numOrNull.js';
 import { capStr } from '../util/capStr.js';
 import { sanitizePerfFields } from './bmPerfSanitize.js'; // v2.919: 리눅스 성능 항목 화이트리스트
-import { PERF_COL_NAMES, PEAK_SQL_COLS, PEAK_SRC, SRC_CM_RE } from '../bmusage/perfCols.js'; // v2.993: SRC_CM_RE 지표별 출처 두 글자 꼴
+import { PEAK_SRC, SRC_CM_RE } from '../bmusage/perfCols.js'; // v2.993: SRC_CM_RE 지표별 출처 두 글자 꼴 · 열 목록은 publicFields.js LATEST_ROW_SPEC(⑤)
 import { clampEdgeTs } from '../util/clampEdgeTs.js'; // v2.932(점검 A1-06): 피크 시각도 수신 시각으로 자른다
-/**
- * v2.919 — 행의 **새** 수치 열(리눅스 성능 열 + 두 경로 읽은 시각)은 수로 좁힌다('1.5' → 1.5 · 못 읽으면 null).
- * ⚠ 기존 9개 열은 예전 계약(원시값 그대로 — audit2604a CEN2604-03 이 고정)을 바꾸지 않는다.
- */
-const ROW_NUM_COLS = Object.freeze([...PERF_COL_NAMES, 'os_at', 'idrac_at']);
+import { peakWindowSOf, MIN_INTERVAL_MS, MAX_INTERVAL_MS } from '../bmusage/settings.js'; // 점검 반복 2회차 재확인 R3: 피크 창 길이 — 설정 범위의 정수만(상한은 설정 한 곳)
+import { PUBLIC_TARGET_SPEC, LATEST_ROW_SPEC } from '../bmusage/publicFields.js'; // 다음 작업 ⑤(2026-11-19): 대상 · 행은 아는 필드만(엣지 export 와 같은 표)
+import { SNAPSHOT_CODES } from '../bmusage/snapshot/command.js'; // 다음 작업 ⑥: 엣지 스냅샷 code 는 실행 표 하나(auth-unresolved · demo-target 포함)
+// 전체 점검 33회차 F6(재현): 엣지가 보고한 수집 주기는 엣지 설정과 같은 범위로 자른다 — 상한이 없으면 법인 사용량의 신선도 창(3 × 주기)이
+//   수백 년이 되어 멈춘 엣지의 며칠 전 행이 '지금 값' 으로 합계에 들어갔다.
+const clampInterval = (v) => { const n = numOrNull(v); return n == null ? null : Math.min(Math.max(n, MIN_INTERVAL_MS), MAX_INTERVAL_MS); };
 /*
- * v2.932(점검 A1-06 · E1-07): v2.922 가 최신값 행에 피크 열(<열>_peak · _peak_at)과 메타(peak_src · peak_window_s · peak_n · dev_over)를 더해
- *   행이 65칸이 됐는데, 행도 대상과 같은 shallow(FIELD_MAX 64)를 거쳐 마지막 열 dev_over 가 **조용히** 빠졌다(sanitizeDropped 에도 안 셈).
- *   행은 열 이름이 정해져 있으므로(bmusage/db.js PERF_TABLE_COLS.usage_latest) 상한을 행 전용으로 넉넉히 두고, 넘쳐 뺀 칸은 센다.
- *   피크 값 · 창 · 개수 · dev_over 는 수로(문자열 수치 → 수 · 못 읽으면 null), *_peak_at 은 수신 시각으로 자르고(원본은 peakAtRaw),
- *   peak_src 는 아는 값만(PEAK_SRC + 'mixed'). 열 목록과 실제 표의 대조는 시험(sweep2932Bm)이 PRAGMA 로 고정한다.
+ * 최신값 행 정제의 역사: v2.919 새 수치 열만 수로(기존 9개 열은 원시값) · v2.932(점검 A1-06 · E1-07) 피크 열이 더해져 65칸이 되자 shallow(64)에서
+ *   마지막 열 dev_over 가 조용히 빠졌다 → 행 전용 상한. 다음 작업 ⑤(2026-11-19 · 10회차 의심 2 · 3): 칸 수 상한 대신 **아는 열 표**(bmusage/publicFields.js
+ *   LATEST_ROW_SPEC — usage_latest 와 같은지 시험이 PRAGMA 로 대조)로 받는다 — 모든 수치 열은 수로(문자열 수치 → 수 · 못 읽으면 null — 0 이 아니다),
+ *   엣지 시각(ts · os_at · idrac_at · *_peak_at)은 수신 시각으로 자르고 원본은 따로(atRaw · peakAtRaw), peak_src · src_cm 은 아는 꼴만.
  */
-const ROW_FIELD_MAX = 192;
-const PEAK_NUM_COLS = Object.freeze([...PEAK_SQL_COLS.map(([c]) => c).filter((c) => !c.endsWith('_peak_at')), 'peak_window_s', 'peak_n', 'dev_over']);
-const PEAK_AT_COLS = Object.freeze(PEAK_SQL_COLS.map(([c]) => c).filter((c) => c.endsWith('_peak_at')));
 const PEAK_SRC_SET = new Set([...PEAK_SRC, 'mixed']);
 
 /** 이 엔드포인트를 내주기 시작한 최소 엣지 버전 — 그 아래는 경로가 없다. */
 export const MIN_EDGE_VERSION = '2.554.0';
-const TIMEOUT_MS = Math.max(5_000, Number(process.env.BMUSAGE_PULL_TIMEOUT_MS) || 20_000);
+const TIMEOUT_MS = Math.max(5_000, envPositive(process.env.BMUSAGE_PULL_TIMEOUT_MS, 20_000, { max: ENV_INT_MAX }));
 /** 보관분이 이보다 오래되면 화면이 '낡았다' 고 말한다(값을 지우지는 않는다). */
-export const STALE_MS = Math.max(60_000, Number(process.env.BMUSAGE_PULL_STALE_MS) || 30 * 60_000);
+export const STALE_MS = Math.max(60_000, envPositive(process.env.BMUSAGE_PULL_STALE_MS, 30 * 60_000));
 
 const t = (v) => String(v ?? '').trim();
 /** agent(소문자) → { at, ok, ms, snap|null, kind, reason } */
@@ -78,8 +76,10 @@ export function putEdgeBmUsage(agent, rec) {
  * 봉투 모양은 `bmusage/edgePull.js buildBmUsageEnvelope` 가 정한다. 그 필드만, 그 타입만 담는다.
  *  · 글자 필드는 strOf(객체·배열이면 '') · 수치는 numOrNull(못 읽으면 null — 0 으로 두지 않는다).
  *  · targets·rows·authStops 는 **원소가 객체일 때만**, 상한(엣지 봉투 상한 MAX_LIMIT 2,000)까지. 뺀 개수는 `sanitizeDropped`.
- *  · 대상 원소의 나머지 필드는 얕은 복사(원시값·원시값 배열·한 단계 객체)만 — 대상 모양은 버전마다 필드가 늘어서
- *    이름 목록으로 묶으면 새 필드가 조용히 사라진다. 대신 **깊이·개수·길이**를 묶는다.
+ *  · 대상 · 행은 **아는 필드 표**(bmusage/publicFields.js — 엣지 export 와 같은 표)로 받는다(다음 작업 ⑤ 2026-11-19). 예전에는 얕은 복사(원시값 ·
+ *    원시값 배열 · 한 단계 객체 · 칸 수 상한)라 가짜 엣지가 대상에 실은 ‘password’ · osHost 객체가 관리자 응답에 그대로 실렸다(10회차 의심 3 재현).
+ *    ‘이름 목록으로 묶으면 새 필드가 조용히 사라진다’ 는 예전 걱정은 시험(bmUsageNextGb — export 필드 ⟺ 표 대조)이 막는다. 모르는 칸은 버리고 수만 센다(sanitizeUnknown).
+ *    없는 칸은 없는 채로 둔다(구버전 엣지 — 지어내지 않는다). status 는 예전 얕은 복사 그대로다.
  */
 const SNAP_LIST_MAX = 2_000;
 const FIELD_MAX = 64;
@@ -106,11 +106,48 @@ function shallow(o, depth = 0, { max = FIELD_MAX, over = null } = {}) {
   }
   return out;
 }
+const PATH_SET = new Set(['idrac', 'os']);
+const LIST_MAX = 32;
+/** 글자 배열(원소 상한 · 글자만 · 길이 상한 — 평탄화). */
+function strListOf(v) {
+  if (!Array.isArray(v)) return [];
+  const out = [];
+  for (const x of v.slice(0, LIST_MAX)) if (typeof x === 'string') out.push(capStr(x, 64));
+  return out;
+}
+/** 꼴 하나(bmusage/publicFields.js 머리말) — 객체 꼴은 한 단계씩(깊이 2 까지). 모르는 꼴은 undefined(칸을 싣지 않는다). */
+function fieldOf(v, kind, depth) {
+  if (kind && typeof kind === 'object') return isObj(v) && depth < 2 ? bySpec(v, kind, null, depth + 1) : null;
+  switch (kind) {
+    case 'str': return capStr(v, 256);
+    case 'strOrNull': return v == null ? null : capStr(v, 256);   // null(그 경로가 없다)과 ''(가렸다)을 가른다
+    case 'num': return numOrNull(v);
+    case 'bool': return v === true;
+    case 'boolOrNull': return v === true ? true : v === false ? false : null;
+    case 'strList': return strListOf(v);
+    case 'pathList': return Array.isArray(v) ? [...new Set(v.filter((x) => PATH_SET.has(x)))] : [];
+    default: return undefined;
+  }
+}
+/** 표(spec)에 있는 칸만 · 그 꼴로. 없는 칸은 없는 채로 · 모르는 칸은 버리고 unknown.n 에 센다. */
+function bySpec(o, spec, unknown, depth = 0) {
+  const out = {};
+  for (const k of Object.keys(o)) {
+    if (BAD_KEYS.has(k)) continue;
+    if (!Object.hasOwn(spec, k)) { if (unknown) unknown.n += 1; continue; }
+    const c = fieldOf(o[k], spec[k], depth);
+    if (c !== undefined) out[k] = c;
+  }
+  return out;
+}
 function objList(v, fn) {
   const arr = Array.isArray(v) ? v : [];
   const kept = arr.slice(0, SNAP_LIST_MAX).filter(isObj).map(fn);
   return { list: kept, dropped: arr.length - kept.length };
 }
+// 35회차 R7(재현): 개수는 0 이상 정수 · 상한(1e9) — 예전에는 음수 · 1e300 이 그대로 들어가 한 엣지의 음수가 다른 엣지의 잘림 수를 지웠다
+//   (법인 사용량 edgeTruncated 합이 0). partFaultEdge.js cnt 와 같은 규칙.
+const cnt = (v) => { const n = numOrNull(v); return n != null && n >= 0 ? Math.min(Math.round(n), 1e9) : null; };
 function numMap(v) {
   if (!isObj(v)) return {};
   const out = {};
@@ -118,7 +155,7 @@ function numMap(v) {
     if (BAD_KEYS.has(k)) continue;
     const x = v[k];
     if (isObj(x)) out[k] = numMap(x); // counts.byReason 처럼 한 단계 중첩
-    else { const n = numOrNull(x); if (n != null) out[k] = n; }
+    else { const n = cnt(x); if (n != null) out[k] = n; }   // 이 맵은 개수(counts · skippedCounts)만 담는다
   }
   return out;
 }
@@ -126,35 +163,37 @@ export function sanitizeBmUsageSnap(snap, { receivedAt = Date.now() } = {}) {
   if (!isObj(snap)) return null;
   const node = isObj(snap.node) ? snap.node : {};
   const st = isObj(snap.settings) ? snap.settings : null;
-  const targets = objList(snap.targets, (x) => ({ ...shallow(x), key: strOf(x.key, 256), name: strOf(x.name, 256), vcenterId: strOf(x.vcenterId, 128) }));
-  // v2.919: 행의 JSON 문자열 열(detail_json·tuning_json)은 받지 않는다 — 같은 내용은 perf 에 객체로 오고 그쪽을 화이트리스트로 정제한다.
-  //   새 지표 열(성능 열 · 시각)은 **수로** 좁힌다(문자열 수치 '1.5' → 1.5 · 못 읽으면 null — 0 으로 두지 않는다).
-  const rowOver = { n: 0 };
+  const unknown = { n: 0 };   // ⑤: 표에 없는 칸 수(대상 · 행) — 버리고 센다(가짜 엣지 · 이 중앙보다 새 판 엣지)
+  const targets = objList(snap.targets, (x) => ({ ...bySpec(x, PUBLIC_TARGET_SPEC, unknown), key: strOf(x.key, 256), name: strOf(x.name, 256), vcenterId: strOf(x.vcenterId, 128) }));
+  // v2.919: 행의 JSON 문자열 열(detail_json·tuning_json)은 받지 않는다 — 같은 내용은 perf 에 객체로 오고 그쪽을 화이트리스트로 정제한다(LATEST_ROW_SPEC 에 없다 — 세지 않는다).
   const rows = objList(snap.rows, (r) => {
-    const { detail_json: _d, tuning_json: _t, ...rest } = shallow(r, 0, { max: ROW_FIELD_MAX, over: rowOver });
-    for (const c of ROW_NUM_COLS) if (Object.hasOwn(rest, c)) rest[c] = numOrNull(r[c]);
-    for (const c of PEAK_NUM_COLS) if (Object.hasOwn(rest, c)) rest[c] = numOrNull(r[c]);
-    let raw = null;
-    for (const c of PEAK_AT_COLS) {
-      if (!Object.hasOwn(rest, c)) continue;
-      const v = numOrNull(r[c]); const cut = clampEdgeTs(v, receivedAt);
-      if (v != null && cut !== v) (raw ||= {})[c] = v;
-      rest[c] = cut;
+    const out = {};
+    let peakRaw = null; let atRaw = null;
+    for (const c of Object.keys(r)) {
+      if (BAD_KEYS.has(c) || c === 'detail_json' || c === 'tuning_json') continue;
+      const kind = Object.hasOwn(LATEST_ROW_SPEC, c) ? LATEST_ROW_SPEC[c] : null;
+      if (!kind) { unknown.n += 1; continue; }
+      if (kind === 'ts' || kind === 'peakAt') {
+        // ⑤(a) · v2.932(A1-06): 엣지 시각은 수신 시각으로 자르고 원본은 따로(루트 CLAUDE.md ‘엣지 시각은 수신 시각으로 자르고 원본은 따로’).
+        const v = numOrNull(r[c]); const cut = clampEdgeTs(v, receivedAt);
+        if (v != null && cut !== v) { if (kind === 'ts') (atRaw ||= {})[c] = v; else (peakRaw ||= {})[c] = v; }
+        out[c] = cut;
+      } else if (kind === 'peakSrc') out[c] = PEAK_SRC_SET.has(r[c]) ? r[c] : null;
+      // v2.993(출처 색): 지표별 출처 두 글자 — 꼴(o · i · e · -)만 받는다(그 밖은 null = 모름 · 화면은 행 출처로 돌아간다).
+      else if (kind === 'srcCm') out[c] = typeof r[c] === 'string' && SRC_CM_RE.test(r[c]) ? r[c] : null;
+      else out[c] = fieldOf(r[c], kind, 0);
     }
-    if (Object.hasOwn(rest, 'peak_src')) rest.peak_src = PEAK_SRC_SET.has(rest.peak_src) ? rest.peak_src : null;
-    // v2.993(출처 색): 지표별 출처 두 글자 — 꼴(o · i · e · -)만 받는다(그 밖은 null = 모름 · 화면은 행 출처로 돌아간다).
-    if (Object.hasOwn(rest, 'src_cm')) rest.src_cm = typeof rest.src_cm === 'string' && SRC_CM_RE.test(rest.src_cm) ? rest.src_cm : null;
-    return { ...rest, ...(raw ? { peakAtRaw: raw } : {}), key: strOf(r.key, 256), name: strOf(r.name, 256) };
+    return { ...out, ...(peakRaw ? { peakAtRaw: peakRaw } : {}), ...(atRaw ? { atRaw } : {}), key: strOf(r.key, 256), name: strOf(r.name, 256) };
   });
   const pf = sanitizePerfFields(snap, receivedAt);   // v2.919(D3): 엣지 시각은 수신 시각으로 자른다
   const stops = objList(snap.authStops, (a) => ({ key: strOf(a.key, 256), path: strOf(a.path, 32), attempts: numOrNull(a.attempts), since: numOrNull(a.since), reason: strOf(a.reason, 300) }));
-  const dropped = targets.dropped + rows.dropped + stops.dropped + pf.dropped + rowOver.n;   // v2.932(A1-06): 행 칸 상한으로 뺀 칸도 센다
+  const dropped = targets.dropped + rows.dropped + stops.dropped + pf.dropped;   // 원소 수(⑤ 뒤로 행 칸 상한은 없다 — 아는 열 표)
   return {
     node: { agent: strOf(node.agent, 128), version: strOf(node.version, 32), role: strOf(node.role, 16), datacenter: strOf(node.datacenter, 128) },
     at: numOrNull(snap.at),
     enabled: snap.enabled === true,
     settings: st ? {
-      intervalMs: numOrNull(st.intervalMs), osSsh: st.osSsh === true, idracTelemetry: st.idracTelemetry === true,
+      intervalMs: clampInterval(st.intervalMs), osSsh: st.osSsh === true, idracTelemetry: st.idracTelemetry === true,
       idracFullTelemetry: st.idracFullTelemetry === true, includeUnassigned: st.includeUnassigned === true,
       includeVirtualization: st.includeVirtualization === true,
       corps: (Array.isArray(st.corps) ? st.corps : []).slice(0, 1_000).map((c) => strOf(c, 128)).filter(Boolean),
@@ -162,7 +201,7 @@ export function sanitizeBmUsageSnap(snap, { receivedAt = Date.now() } = {}) {
       enterpriseMode: strOf(st.enterpriseMode, 32), enterpriseActive: st.enterpriseActive === true,
     } : null,
     targets: targets.list,
-    truncated: numOrNull(snap.truncated) ?? 0,
+    truncated: cnt(snap.truncated) ?? 0,   // 35회차 R7
     rows: rows.list,
     counts: numMap(snap.counts),
     skippedCounts: numMap(snap.skippedCounts),
@@ -170,6 +209,7 @@ export function sanitizeBmUsageSnap(snap, { receivedAt = Date.now() } = {}) {
     status: isObj(snap.status) ? shallow(snap.status) : null,
     ...pf.fields,
     ...(dropped ? { sanitizeDropped: dropped } : {}),
+    ...(unknown.n ? { sanitizeUnknown: unknown.n } : {}),
   };
 }
 
@@ -190,7 +230,12 @@ export function _resetForTest() { _store.clear(); }
  * 한 엣지에서 당긴다. **저장까지** 하고 결과를 돌려준다.
  * @returns {{ok:boolean, kind?:string, reason?:string, ms:number, rec?:object}}
  */
-export async function pullBmUsage(agent, { limit = 0 } = {}) {
+/**
+ * 엣지 봉투 당김 대상 상한(점검 반복 5회차 D1) — 사람 인출(라우트 ‘지금 가져오기’)과 정비 창 배포의 자동 인출이 **같은 값**. 엣지 쪽 상한(bmusage/edgePull.MAX_LIMIT)과
+ *   같은 수다(시험이 대조). 예전 자동 인출은 limit 없이 당겨 엣지 기본(DEFAULT_LIMIT 400)에서 잘렸다 — 1,000대 엣지면 보관분 400대 · 태그 창 펼침 400대.
+ */
+export const EDGE_PULL_LIMIT = 2_000;
+export async function pullBmUsage(agent, { limit = EDGE_PULL_LIMIT } = {}) {
   const qs = Number(limit) > 0 ? `?limit=${Math.round(Number(limit))}` : '';
   const r = await pullFromEdge(agent, `/api/collector/bm-usage${qs}`, {
     timeoutMs: TIMEOUT_MS, retries: 1, minVersion: MIN_EDGE_VERSION, what: '사용률을 읽을', label: '엣지 사용률 응답',
@@ -231,7 +276,7 @@ export function sanitizeTrendBody(b) {
     from: numOrNull(b.from), to: numOrNull(b.to), res: RES_SET.has(b.res) ? b.res : null, resReason: strOf(b.resReason, 32), stepMs: numOrNull(b.stepMs),
     points, gaps, baseline: bl,
     peakSrc: (Array.isArray(b.peakSrc) ? b.peakSrc : []).slice(0, 8).map((x) => strOf(x, 16)).filter(Boolean),
-    ...(numOrNull(b.truncated) ? { truncated: numOrNull(b.truncated) } : {}),
+    ...(cnt(b.truncated) ? { truncated: cnt(b.truncated) } : {}),   // 35회차 R7
     ...(b.truncatedRows === true ? { truncatedRows: true } : {}),
     ...(Array.isArray(b.missingPeriods) ? { missingPeriods: b.missingPeriods.slice(0, 16).filter(isObj).map((m) => ({ period: strOf(m.period, 16), reason: strOf(m.reason, 200) })) } : {}),
     ...(numOrNull(b.filesCapped) ? { filesCapped: numOrNull(b.filesCapped) } : {}),
@@ -248,7 +293,7 @@ export function sanitizeDevicesBody(b) {
     if (a.length > DEV_MAX) cut += a.length - DEV_MAX;
     return a.slice(0, DEV_MAX).filter(isObj).map((d) => ({ dev: strOf(d.dev, 256), ord: numOrNull(d.ord), color: numOrNull(d.color), firstTs: numOrNull(d.firstTs), lastTs: numOrNull(d.lastTs), ...(d.info ? { info: strOf(d.info, 32) } : {}) })).filter((d) => d.dev);
   };
-  return { ok: b.ok === true, devices: { disk: list('disk'), nic: list('nic'), mount: list('mount') }, over: numOrNull(b.over), peakSrc: b.peakSrc == null ? null : strOf(b.peakSrc, 16), peakWindowS: numOrNull(b.peakWindowS), ...(cut ? { sanitizeTruncated: cut } : {}) };
+  return { ok: b.ok === true, devices: { disk: list('disk'), nic: list('nic'), mount: list('mount') }, over: numOrNull(b.over), peakSrc: b.peakSrc == null ? null : strOf(b.peakSrc, 16), peakWindowS: peakWindowSOf(b.peakWindowS), peakWindowCapS: peakWindowSOf(b.peakWindowCapS), ...(cut ? { sanitizeTruncated: cut } : {}) };   // 점검 반복 2회차 I2 · 재확인 R3: 행 값 · 엣지 설정 상한 — 설정 범위의 정수만(구버전 엣지 · 범위 밖은 null)
 }
 export function sanitizeNicsBody(b) {
   if (!isObj(b)) return null;
@@ -325,7 +370,8 @@ export function sanitizeSnapshotResult(r) {
     ...(isObj(r.authStoppedBefore) ? { authStoppedBefore: { since: numOrNull(r.authStoppedBefore.since), attempts: numOrNull(r.authStoppedBefore.attempts) } } : {}),
   };
 }
-const SNAP_CODE_SET = new Set(['ok', 'bad-reason', 'not-found', 'no-os-path', 'busy', 'daily-cap', 'store-unavailable', 'ssh-error', 'auth', 'host-key', 'timeout', 'not-linux']);
+// 다음 작업 ⑥: 실행 code 표 하나(snapshot/command.js SNAPSHOT_CODES) — 예전 사본에는 auth-unresolved 가 없어 엣지의 ‘키 · 공통 계정 참조 해석 실패’ 가 중앙에서 ssh-error 로 바뀌었다.
+const SNAP_CODE_SET = new Set(SNAPSHOT_CODES.filter((c) => c !== 'forbidden' && c !== 'edge'));
 const snapMeta = (s) => ({ id: strOf(s.id, 40), key: strOf(s.key, 256), at: numOrNull(s.at), by: strOf(s.by, 64), reason: strOf(s.reason, 300), ok: s.ok === true,
   code: SNAP_CODE_SET.has(s.code) ? s.code : 'ssh-error', ms: numOrNull(s.ms) });
 export function sanitizeSnapshotBody(b) {

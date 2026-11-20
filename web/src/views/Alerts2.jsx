@@ -4,6 +4,8 @@ import { Loading, ErrorBox } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
 import { blankOr } from './blankOr.js';
 import { alertsLockReason, channelUrlField, withoutHiddenUrls } from './alertChannelUrlText.js'; // v2.732(그룹 i3): 범위 계정 URL 가림·저장 잠금
+import { unreadMarkOf, saveLockedByUnread } from './settingsUnread.js';   // 112회차: 못 읽은 동안의 기본값 폼(웹훅 주소 없음)으로 저장하지 않는다
+import { SettingsUnreadBanner } from './SettingsUnreadBanner.jsx';
 
 const RULE_LABEL = {
   criticalAlarms: '위험(critical) 알람 발생',
@@ -70,7 +72,11 @@ export default function Alerts2({ initialData = null } = {}) {
   // v2.732(그룹 i3): 범위 계정은 웹훅 URL 이 가려져 오고(B3-03) 저장·테스트 발송이 403 이다 — 버튼을 잠그고 사유를 미리 말한다.
   //   저장 본문에서는 가린 채널의 url 을 뺀다(빈 값을 보내면 서버가 주소를 지운다 — 심층 방어).
   const lock = alertsLockReason(c, d);
-  const save = async () => { if (lock) return; const r = await putJson('/admin/alerts', toBody(withoutHiddenUrls(c))).catch((e) => ({ error: e.message })); if (r.config) { await load(); flash(true, '저장했습니다.'); } else flash(false, r.reason || r.error || '저장 실패'); };
+  // 112회차: 서버가 알림 설정 파일을 못 읽은 동안 config 는 기본값(채널 꺼짐 · 웹훅 주소 없음)이다 — 그 폼의 저장이 다시 읽힌 뒤 웹훅 주소 · 임계를 덮었다.
+  //   읽기 오류 동안 저장을 잠근다(서버도 409). ‘다시 확인’ 이 설정을 통째로 다시 받는다.
+  const unread = unreadMarkOf(d);
+  const saveLocked = saveLockedByUnread(unread);
+  const save = async () => { if (lock || saveLocked) return; const r = await putJson('/admin/alerts', toBody(withoutHiddenUrls(c))).catch((e) => ({ error: e.message })); if (r.config) { await load(); flash(true, '저장했습니다.'); } else flash(false, r.reason || r.error || '저장 실패'); };
   const test = async () => { if (lock) return; const r = await postJson('/admin/alerts/test', {}).catch((e) => ({ ok: false, results: [e.message] })); flash(r.ok, `테스트 발송: ${(r.results || []).join(', ') || '활성 채널 없음'}`); };
   const slackUrl = channelUrlField(c.channels.slack, 'https://hooks.slack.com/services/...');
   const hookUrl = channelUrlField(c.channels.webhook, 'https://your-endpoint/alerts');
@@ -78,6 +84,7 @@ export default function Alerts2({ initialData = null } = {}) {
   return (
     <>
       <div className="section-title" style={{ margin: '6px 0' }}>알림 / 임계치</div>
+      <SettingsUnreadBanner le={unread} what="알림 설정" save="저장" onRecheck={load} />
       {msg && <div style={{ marginBottom: 10, padding: '9px 12px', borderRadius: 8, fontSize: 13, background: msg.ok ? 'rgba(34,197,94,.12)' : 'rgba(239,68,68,.12)', color: msg.ok ? '#4ade80' : '#f87171' }}>{msg.t}</div>}
       {lock && <div className="banner" data-alert-lock="" style={{ marginBottom: 10, whiteSpace: 'normal' }}>{lock} 이 계정에는 웹훅 주소를 보이지 않습니다 — ‘설정됨(가림)’ 은 주소가 저장돼 있다는 뜻입니다.</div>}
 
@@ -95,7 +102,7 @@ export default function Alerts2({ initialData = null } = {}) {
           그 화면에서 <b>메일 발송 사용</b>과 <b>'알림' 종류</b>가 함께 켜져 있어야 실제로 나갑니다.
         </div>
         <div className="flex gap" style={{ marginTop: 10 }}>
-          <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={save} disabled={!!lock} title={lock || undefined}>저장</button>
+          <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={save} disabled={!!lock || saveLocked} title={lock || undefined}>저장</button>
           <button className="logout-btn" style={{ padding: '8px 14px' }} onClick={test} disabled={!!lock} title={lock || undefined}>테스트 발송</button>
         </div>
       </div>
@@ -117,7 +124,7 @@ export default function Alerts2({ initialData = null } = {}) {
         <div className="flex gap wrap" style={{ marginTop: 10, alignItems: 'flex-end' }}>
           <label style={{ fontSize: 12 }}>재통지 쿨다운(분)<input className="input" type="number" style={{ maxWidth: 110 }} value={c.cooldownMin} onChange={(e) => setD({ ...d, config: { ...c, cooldownMin: e.target.value } })} /></label>
           <label style={{ fontSize: 12 }}>평가 주기(초)<input className="input" type="number" style={{ maxWidth: 110 }} value={c.intervalSec} onChange={(e) => setD({ ...d, config: { ...c, intervalSec: e.target.value } })} /></label>
-          <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={save} disabled={!!lock} title={lock || undefined}>저장</button>
+          <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={save} disabled={!!lock || saveLocked} title={lock || undefined}>저장</button>
           <span className="muted" style={{ fontSize: 11 }}>저장하면 바로 적용됩니다(재시작 불필요). 빈 칸은 이전 값을 유지합니다.</span>
         </div>
       </div>
@@ -153,7 +160,7 @@ export default function Alerts2({ initialData = null } = {}) {
             onChange={(e) => setD({ ...d, config: { ...c, __quietText: e.target.value } })} placeholder="예: edge-site-b, edge-site-c" aria-label="알리지 않을 에이전트" />
         </label>
         <div className="flex gap wrap" style={{ marginTop: 10, alignItems: 'center' }}>
-          <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={save} disabled={!!lock} title={lock || undefined}>저장</button>
+          <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={save} disabled={!!lock || saveLocked} title={lock || undefined}>저장</button>
           <span className="muted" style={{ fontSize: 11 }}>충돌 의심 · 중복 IP · 대역 가득 참 · 스캔 보고 끊김은 상태형이라 위의 재통지 쿨다운 · 평가 주기를 따릅니다. MAC 변경 · 새 미등록 IP · 예약 사용 시작 · 호스트명 변경은 한 번 일어난 사건이라 현재 발생 중에 남지 않고 최근 통지와 IP 변화 페이지에 남습니다.</span>
         </div>
       </div>

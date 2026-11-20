@@ -5,7 +5,11 @@
  *   · 서버 창도 **그 법인일 때만**(반증 F1 — 키만 겹친다고 보내지 않는다: IP 키는 법인끼리 겹친다 · 서버 대상은 (법인, 키) 쌍) ·
  *     태그 창은 중앙이 **그 엣지 대상 중 그 법인 · 그 태그(수동 용도 태그)를 가진 서버 키로 펼친다**
  *     (엣지에는 중앙 태그가 없다 — 판정 코어는 같은 함수 maint/judge.js 이고 엣지 입력은 펼친 keys).
- *   · 진행 중 · 예정 창만(끝난 · 만료 · 지운 창은 보내지 않는다 — 엣지가 억제할 일이 없다). 이력(edits)은 싣지 않는다.
+ *   · 지금 억제용 `windows` = 진행 중 · 예정 창만. 이력(edits)은 싣지 않는다.
+ *   · ⚠ 점검 반복 3회차 D2: 끝남 · 지움(묘비) · 만료 창은 **`history`**(지난 구간 전용 — 봉투 표지 historyVer)로 함께 보낸다 — 중앙이 지난 구간 계산에 쓰는 것과
+ *     같은 집합(store.keptPast — 90일 안). 엣지는 history 를 지금 판정(억제)에 쓰지 않고 ⑤ 분모 제외 · 음영에만 쓴다(judge.activeOccurrence 가 뺀다).
+ *     예전에는 끝난 일회 창이 다음 배포본에서 빠져 엣지 서버의 용량 · 저활용 · 베이스라인 제외가 소급해 사라졌다. 서명(sig)은 지금 억제용 windows 만으로
+ *     (배포 현황 ‘반영됨’ = 억제 판이 같다 · 구버전 엣지는 history 를 모르고 무시한다 — maintBodyOk 는 windows · sig 만 본다). 상한 = store.DEPLOY_HISTORY_MAX · BYTES_MAX(넘치면 최근 것부터).
  *   · 공유 토큰(`?agent=` 를 댈 수 있다)에는 주지 않는다(distribute:false — 엣지는 지난 배포본을 TTL 까지만 쓴다).
  *   · 중앙 창 파일을 못 읽으면 라우트가 503(빈 목록을 보내 엣지 억제를 지우지 않는다 · 엣지는 TTL 까지 지난 배포본).
  * 엣지 쪽은 agent/bmMaintPull.js → store.saveDeployed(같은 normalizeWindow 로 다시 자름).
@@ -19,25 +23,36 @@
  *   (배포 현황이 엣지 28곳마다 전 창을 다시 세지 않는다).
  */
 import crypto from 'node:crypto';
-import { listWindows, DEPLOY_TTL_MS } from './store.js';
+import { listWindows, DEPLOY_TTL_MS, keptPast, capHistory, historyRecency } from './store.js';
 import { windowStatus } from './judge.js';
 import { tagsReader } from './runtime.js';
 import { createYielder } from '../../util/timeSlice.js';
 
 const t = (v) => String(v ?? '').trim();
-const SEND_FIELDS = ['id', 'name', 'reason', 'target', 'vcenterId', 'tz', 'schedule', 'scopes', 'rev', 'by', 'at', 'approvedBy', 'confirmedAt', 'endedAt', 'endedBy', 'endedOccStart'];
+// deleted 는 history(묘비 — 지운 시각까지가 지난 구간)에만 있다(지금 억제용 windows 에는 지운 창이 없다).
+const SEND_FIELDS = ['id', 'name', 'reason', 'target', 'vcenterId', 'tz', 'schedule', 'scopes', 'rev', 'by', 'at', 'approvedBy', 'confirmedAt', 'endedAt', 'endedBy', 'endedOccStart', 'deleted'];
+/** 배포 history 표지(인출 응답 historyVer) — 엣지가 history 를 아는 판인지 중앙이 따로 볼 필요는 없다(구버전 엣지는 필드를 무시한다 · 예전과 같다). */
+export const HISTORY_VER = 1;
 export const sigOf = (list) => crypto.createHash('md5').update(JSON.stringify(list)).digest('hex');
 
-/** 보낼 수 있는 창(진행 중 · 예정 — 이 노드의 창 · 지우지 않음) — 요청마다 한 번(시간 기준 양보). */
-export async function liveWindows(windows = [], now = Date.now(), { yieldFn = createYielder(15) } = {}) {
-  const out = [];
+/**
+ * 이 노드의 창을 지금 억제용(live — 진행 중 · 예정)과 지난 구간용(history — 끝남 · 만료 · 지움 묘비 · store.keptPast 90일 안)으로 가른다 —
+ *   요청마다 한 번(창 상태는 창마다 한 번 · 시간 기준 양보 — F6). 중앙 배포본(origin central)은 다시 보내지 않는다.
+ */
+export async function splitWindows(windows = [], now = Date.now(), { yieldFn = createYielder(15) } = {}) {
+  const live = []; const history = [];
   for (const w of windows || []) {
-    if (!w || w.deleted || w.origin === 'central') continue;
+    if (!w || w.origin === 'central') continue;
+    if (w.deleted) { if (keptPast(w, now)) history.push(w); continue; }
     const st = windowStatus(w, now).status;
-    if (st === 'active' || st === 'scheduled') out.push(w);
+    if (st === 'active' || st === 'scheduled') live.push(w); else if (keptPast(w, now)) history.push(w);
     await yieldFn();
   }
-  return out;
+  return { live, history };
+}
+/** 보낼 수 있는 창(진행 중 · 예정 — 이 노드의 창 · 지우지 않음) — splitWindows 의 live. */
+export async function liveWindows(windows = [], now = Date.now(), o = {}) {
+  return (await splitWindows(windows, now, o)).live;
 }
 
 /**
@@ -69,14 +84,18 @@ export function recordMaintPull(agent, { appliedSig = '', version = '', n = null
 async function edgeContext(agent) {
   const corps = new Set();
   try { const { edgeCorpsSource } = await import('../edgeCorps.js'); for (const c of edgeCorpsSource()(agent) || []) corps.add(String(c)); } catch { /* 매핑을 모르면 봉투 법인만 */ }
-  let edgeTargets = []; let targetsKnown = false;
+  let edgeTargets = []; let targetsKnown = false; let truncated = 0;
   try {
     const rec = (await import('../../central/bmUsageEdgePull.js')).getEdgeBmUsage(agent);
     targetsKnown = !!rec?.snap && Array.isArray(rec.snap.targets);
     edgeTargets = (rec?.snap?.targets || []).map((x) => ({ key: t(x.key), serviceTag: t(x.serviceTag), vcenterId: t(x.vcenterId) }));
     for (const x of edgeTargets) if (x.vcenterId) corps.add(x.vcenterId);
+    // 5회차 D1: 보관분이 엣지 상한에서 잘렸는가(그 수 — 태그 창 펼침은 받은 대상만 · 화면에 밝힌다). keysUnknown 으로 바꾸지 않는다:
+    //   자동 인출도 사람 인출과 같은 상한(EDGE_PULL_LIMIT)이라 잘림은 엣지 대상이 그 상한을 넘을 때만이고, 다시 당겨도 같다 — 직전 배포본 keys 를
+    //   이어 써도(그것도 잘린 판) 나아지지 않고 빠진 서버를 계속 쥘 수 있다. 받지 못한 서버는 억제하지 않는다(모르는 대상은 억제가 아니다 — 알림이 나가는 쪽).
+    truncated = Math.max(0, Number(rec?.snap?.truncated) || 0);
   } catch { edgeTargets = []; targetsKnown = false; }
-  return { corps, edgeTargets, targetsKnown };
+  return { corps, edgeTargets, targetsKnown, truncated };
 }
 
 /** v2.954(점검 D-1): 대상을 모르는데 그 엣지 법인에 살아 있는 태그 창이 있는가(순수) — 있으면 빈 keys 로 펼치게 된다. */
@@ -87,7 +106,8 @@ export function tagWindowsBlind({ live = [], corps = new Set(), targetsKnown = f
 /** 대상을 모를 때 그 엣지 봉투 자동 인출 — 엣지별 간격(같은 엣지를 인출 주기마다 다시 당기지 않게). */
 export const AUTO_PULL_GAP_MS = 10 * 60_000;
 const _autoPullAt = new Map();   // agent(소문자) → 마지막 자동 인출 시각
-let _autoPull = async (agent) => (await import('../../central/bmUsageEdgePull.js')).pullBmUsage(agent);
+// 5회차 D1: 사람 인출과 같은 상한(EDGE_PULL_LIMIT) — 예전에는 limit 없이 당겨 엣지 기본 400대에서 잘렸다(태그 창 펼침도 400대)
+let _autoPull = async (agent) => { const E = await import('../../central/bmUsageEdgePull.js'); return E.pullBmUsage(agent, { limit: E.EDGE_PULL_LIMIT }); };
 export function _setAutoPullForTest(fn) { _autoPull = fn; _autoPullAt.clear(); }
 function autoPullTargets(agent, now) {
   const k = t(agent).toLowerCase(); if (!k) return false;
@@ -107,12 +127,14 @@ export async function deployFor(agent, { verified = false, now = Date.now() } = 
   const windows = listWindows();
   const { corps, edgeTargets, targetsKnown } = await edgeContext(agent);
   const tagsOf = await tagsReader();
-  const live = await liveWindows(windows, now);
+  const { live, history: past } = await splitWindows(windows, now);
   // v2.954(점검 D-1 → 반증 재수정): 대상을 모르면 보류하지 않고 keysUnknown(엣지가 직전 keys 를 이어 쓴다)으로 보내며 봉투를 자동 인출한다
   const blind = tagWindowsBlind({ live, corps, targetsKnown });
   if (blind) autoPullTargets(agent, now);
   const list = windowsForEdge({ live, corps, edgeTargets, tagsOf, targetsKnown });
-  return { distribute: true, sig: sigOf(list), windows: list, ...(blind ? { targetsUnknown: true } : {}) };
+  // 3회차 D2: 지난 구간용 — 같은 법인 · 같은 태그 펼침(windowsForEdge 하나) · 최근 것부터 상한(개수 · 크기 — 지금 억제 창의 본문 자리를 빼앗지 않게)
+  const h = capHistory(windowsForEdge({ live: past, corps, edgeTargets, tagsOf, targetsKnown }).sort((a, b) => historyRecency(b) - historyRecency(a)));
+  return { distribute: true, sig: sigOf(list), windows: list, historyVer: HISTORY_VER, history: h.list, ...(h.dropped ? { historyDropped: h.dropped } : {}), ...(blind ? { targetsUnknown: true } : {}) };
 }
 
 /**
@@ -133,11 +155,11 @@ export async function deployStatusView(edges = [], now = Date.now()) {
     const rec = edges.find((r) => t(r.agent).toLowerCase() === k);
     const env = rec?.snap?.maint || null;
     const maintVer = Number.isInteger(rec?.snap?.maintVer) ? rec.snap.maintVer : null;
-    let expectSig = null; let blind = false;
-    if (live) { const ctx = await edgeContext(rec?.agent || k); expectSig = sigOf(windowsForEdge({ live, ...ctx, tagsOf })); blind = tagWindowsBlind({ live, ...ctx }); }
+    let expectSig = null; let blind = false; let truncated = 0;
+    if (live) { const ctx = await edgeContext(rec?.agent || k); expectSig = sigOf(windowsForEdge({ live, ...ctx, tagsOf })); blind = tagWindowsBlind({ live, ...ctx }); truncated = ctx.truncated; }
     // v2.954(점검 D-1): 대상을 모르면(중앙 재시작 뒤 · 첫 인출 전) 기대 판을 빈 keys 로 계산하게 된다 — ‘반영됨’ 으로 보이지 않게 따로 말한다
     const status = rec && maintVer == null ? 'old' : blind ? 'targets-unknown' : !p ? 'never' : (expectSig && p.appliedSig === expectSig ? 'applied' : 'pending');
-    rows.push({ agent: rec?.agent || k, status, lastPullAt: p?.at ?? null, version: p?.version || '',
+    rows.push({ agent: rec?.agent || k, status, lastPullAt: p?.at ?? null, version: p?.version || '', ...(truncated ? { targetsTruncated: truncated } : {}),
       envelope: env ? { deployedAt: env.deployed?.at ?? null, n: env.deployed?.n ?? null, stale: env.deployed?.stale ?? null, unreadable: !!env.deployed?.unreadable, leak: env.leak?.n ?? null } : null, maintVer });
   }
   return { edges: rows, now, ...(windows ? {} : { unreadable: true }) };

@@ -8,7 +8,7 @@
  *  DB2599-02    horizon sessionDb 첫 open 잠금 오류를 래치하지 않는다
  *  LO2599-01    숫자 설정 빈 칸은 기본값이 아니라 이전 값 유지(SAN 사용량·현재 사용자·Horizon 세션)
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -18,9 +18,16 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { stripComments } from './_stripComments.js';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(HERE, '..', 'src');
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2599e-'));
+const TMP = tmpDir('audit2599e-');
 process.env.CONFIG_DIR = TMP;
 process.env.AUTH_ENABLED = 'false';
 process.env.HZSESS_DB_PATH = path.join(TMP, 'hz-sessions.db');
@@ -316,7 +323,7 @@ const LOCK_CASES = {
 test('DB2599-02 후속 — 폴링 경로 DB 8종: 첫 open 잠금을 래치하지 않는다', async () => {
   const { spawn } = await import('node:child_process');
   const run = (name, c) => new Promise((resolve) => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), `lock2599-${name}-`));
+    const dir = tmpDir(`lock2599-${name}-`);
     const file = path.join(dir, c.file);
     const env = { ...process.env, CONFIG_DIR: dir, ...(c.env ? { [c.env]: file } : {}), CURUSER_DB_PATH: path.join(dir, 'curuser.db'), PARTFAULT_DB_PATH: path.join(dir, 'part-faults.db'), PDU_DB: path.join(dir, 'pdu.db') };
     const code = `
@@ -353,7 +360,7 @@ test('DB2599-02 후속 — NDJSON·인메모리 폴백 모듈 4종은 잠금에 
     logs: { f: 'vcenter-logs.db', env: null, code: "(await (await import('./src/logs/db.js')).getLogsDb()).kind" },
   };
   const run = (name, c) => new Promise((resolve) => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), `lock2599-${name}-`));
+    const dir = tmpDir(`lock2599-${name}-`);
     const file = path.join(dir, c.f);
     const env = { ...process.env, CONFIG_DIR: dir, ...(c.env ? { [c.env]: file } : {}) };
     const code = `

@@ -147,6 +147,7 @@ import { startBmstorPoller } from './bmstor/poller.js';           // 베어메�
 import { startBmstorHistory } from './bmstor/historySampler.js';  // 〃 디스크 사용량 12시간 이력(v2.635) — 별도 DB, 장비 접속 없음
 import { startBmstorWorker } from './agent/bmstorWorker.js';       // 〃 폴링 위임 워커(엣지, v2.341)
 import { startVmtrackPoller } from './vmtrack/poller.js';          // VM 수량 추이 00/12시 스냅샷(v2.345)
+import { startSnapHistPoller } from './snaphist/poller.js';       // VM 별 스냅샷 이력 하루 1번(v3.26.0)
 import { startVmHygieneNotifier } from './vmhygiene/notifier.js'; // VM 구성 점검 스냅샷 정책 일일 알림(v2.698, 기본 꺼짐)
 import { startVmDnsHistory } from './vmdns/poller.js';              // VM DNS 서버 설정 변경 이력(v2.696) — 스냅샷만 읽는다
 import { startGuestDiskPoller } from './guestdisk/poller.js';       // 게스트 디스크 회수 리포트(v2.459)
@@ -196,6 +197,7 @@ import { startLinkCheckWorker } from './agent/linkCheckWorker.js'; // 엣지가 
 import { startPowerOffPoller } from './tools/powerOffPoller.js';     // 전원 꺼짐 점검(v2.484)
 import { resumeHostAccessPending } from './hostaccess/service.js';  // 호스트 접근 제어 확정 대기 복구(v2.485)
 import { startSshAccessScheduler } from './sshaccess/service.js';
+import { envPositive } from './util/envNumber.js';   // 55회차: 양수 env 는 하나로
 import { flushKeyUsage } from './sshaccess/usage.js';  // 종료 직전 키 사용 기록 쓰기(30초 묶음이 남긴 것 — 점검 D-5)  // v3.9.0 SSH 공용 접속 — 키 바꿔치기 감시 · 받는 곳 새 파일 · 사용 기록 쓰기(10분)
 import { resumeInstallJobs, reserveInstallResumeLocks } from './bareos/install/job.js';  // v2.844 Bareos 완전 설치 — 진행 중이던 작업 이어 읽기(러너는 엣지 노드 안에서 계속 돈다)
 import { startStoragePush } from './storage/push.js';            // 엣지→중앙 스냅샷 push(v2.302)
@@ -297,7 +299,8 @@ app.use(cors(CORS_ORIGINS.length ? { origin: CORS_ORIGINS } : { origin: false })
 // 응답 gzip 압축(큰 JSON만, 비동기) + 레이트 리밋(폭주/DoS 방어). 헬스/정적/메트릭은 제외.
 app.use(compression());
 app.use(rateLimit({ skip: (req) => {
-  const p = req.path || '';
+  // 48회차 F3(재현): express 라우팅은 대소문자를 가리지 않는다 — '/API/...' 가 제한을 건너뛰고 같은 라우트에 닿았다(v2.506 toolGate 와 같은 갈래).
+  const p = String(req.path || '').toLowerCase();
   return p === '/api/health' || p === '/metrics' || p === '/dl' || p.startsWith('/dl/')
     || !p.startsWith('/api'); // 정적 자산/SPA는 제한 제외
 } }));
@@ -656,6 +659,7 @@ const stagger = [
   startBmstorWorker, // 〃 폴링 위임 워커(v2.341) — CENTRAL_URL 미설정이면 자기기동 안 함
   () => startGpuAllocHistory(() => store.get()), // GPU 할당율 일 단위 이력(v2.939) — 기동 2분 뒤 첫 회 · 1시간 · 재진입 가드 · vCenter 왕복 0
   startVmtrackPoller, // VM 수량 추이(v2.345) — 60초 틱, 슬롯(00/12시) 미기록 시에만 수집 + 재진입 가드
+  startSnapHistPoller, // VM 별 스냅샷 이력(v3.26.0) — 60초 틱, 하루 1번(기본 3시 뒤) 미기록 vCenter 만 · 재진입 가드 · vCenter 왕복 없음
   startVmHygieneNotifier, // VM 스냅샷 정책 일일 알림(v2.698) — 10분마다 확인, 설정이 켜졌을 때만 하루 1회
   startVmDnsHistory, // VM DNS 변경 이력(v2.696) — 적응형 타이머(기본 10분) + 재진입 가드, 스냅샷만 비교(vCenter 왕복 0)
   startDirUsageScheduler, // 폴더 사용량 Top-N 리포트(v2.454) — 60초 틱 + 재진입 가드, 설정 꺼짐이면 결과 수거만
@@ -723,9 +727,10 @@ function wireListener(server, port) {
   //   재연결 churn/죽은 소켓 재사용을 유발 → 75s로 상향.
   // - headersTimeout는 keepAliveTimeout보다 커야 함(Node 권장). requestTimeout은 느린 대용량
   //   업로드가 중간에 끊기지 않도록 넉넉히(0=무제한 대신 명시적 큰 값).
-  server.keepAliveTimeout = Number(process.env.SERVER_KEEPALIVE_MS) || 75_000;
-  server.headersTimeout = Number(process.env.SERVER_HEADERS_TIMEOUT_MS) || 90_000;
-  server.requestTimeout = Number(process.env.SERVER_REQUEST_TIMEOUT_MS) || 600_000;
+  // 55회차 #10: 음수를 주면 헤더 · 요청 시한 검사가 꺼졌다(slowloris 방어) — 양수만(envPositive)
+  server.keepAliveTimeout = envPositive(process.env.SERVER_KEEPALIVE_MS, 75_000);
+  server.headersTimeout = envPositive(process.env.SERVER_HEADERS_TIMEOUT_MS, 90_000);
+  server.requestTimeout = envPositive(process.env.SERVER_REQUEST_TIMEOUT_MS, 600_000);
 
   // listen 오류(포트 충돌/특권포트 등)를 명확히 안내. 특권포트(<1024) EACCES가 흔한 원인.
   server.on('error', (err) => {

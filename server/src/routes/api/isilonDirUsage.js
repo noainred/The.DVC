@@ -49,7 +49,9 @@ import { isMockMode } from '../../mock/demo/flags.js';
 import { ensureIsiduDemo } from '../../mock/demo/isidu.js';
 import { isiduMailReady, sendLatestNow } from '../../isidu/notify.js';
 import { targetMailOf, MAIL_LIST_MAX, FAIL_ALERT_MIN_MS, isEmail } from '../../isidu/mailRules.js';
-import { load as loadMailCfg } from '../../mail/settings.js';
+import { load as loadMailCfg, maskedMailList } from '../../mail/settings.js';
+import { store } from '../../store.js';
+import { isFullReadWriteScope } from '../../auth/scope.js';   // 반증 후속 ①
 import { DAY_OFFSET_MIN } from '../../util/dayKey.js';
 import { normalizeBulkPatch, applyBulk, removeTargets, bulkIdsOf, settingsRev, BULK_KEYS, NOT_APPLIED_CODES } from '../../isidu/bulk.js';
 import { targetRows, dcList } from '../../isidu/rows.js';   // v2.742: 목록 행 조립은 종합 메일과 같이 쓴다
@@ -198,6 +200,9 @@ api.get('/tools/isilon-dirusage/export.csv', adminOnly, fullScopeOnly, csvPerm, 
       row.d7 ? row.d7.bytes : '', row.d7 ? (row.d7.withinRes ? 'Y' : 'N') : '', row.d30 ? row.d30.bytes : '', status]));
   }
   for (const row of r.removed7) lines.push(csvLine(['', row.name, row.bytes, row.res, '', '', '', '', '사라짐(7일 전 크기)']));
+  // 36회차 F5: 폴더 상한으로 잘린 스캔이면 파일만 받은 사람도 알게(잘린 CSV 에 표지 — 32회차와 같은 규칙).
+  // 38회차 R6: 기준 조사만 잘린 경우도 밝힌다(그때는 이 목록은 전체지만 신규 · 사라짐 판정이 없다 — 파일만 받은 사람이 '변화 없음' 으로 읽지 않게).
+  if (r.scan?.truncated || r.compareLimited) lines.push(csvLine([`(${r.scan?.truncated ? '폴더 상한으로 일부만 저장된 조사 — 목록이 전체가 아닙니다' : '7일 전 조사가 폴더 상한으로 잘렸습니다'}${r.compareLimited ? ' · 신규 · 사라짐은 판정하지 않았습니다' : ''})`]));
   const stamp = fileStamp();
   const safe = String(tg.label || tg.id).replace(/[^\w.-]+/g, '_').slice(0, 40) || 'target';
   logAudit({ user: req.user?.username, action: 'isidu.export', target: tg.id, detail: `rows=${r.rows.length} removed=${r.removed7.length}`, ip: req.ip });
@@ -352,19 +357,21 @@ api.post('/tools/isilon-dirusage/mail-now', adminOnly, fullScopeOnly, requireSup
  *  · 조회는 설정 + 상태(다음 회차 3번 · 최근 기록 — 주소 없이 개수만) + 받는 사람 수(통합 관리자 · 추가 · 겹침).
  *  · 저장은 종합 메일 설정만 바꾼다(대상 목록 저장이 이 값을 지우지 않고, 이 저장도 대상 목록을 건드리지 않는다).
  */
-function digestView() {
+function digestView(req = null) {
   const s = loadSettings();
   // 통합 관리자(메일 설정의 기본 받는 사람) — 화면이 저장 전 입력으로 받는 사람 수(겹침 포함)를 세는 데 쓴다. 이 라우트는 슈퍼 관리자 전용이고
   // 같은 주소는 설정 › 메일 발송에서도 보인다. 상태(status)·기록에는 여전히 주소를 싣지 않는다.
   let adminTo = [];
   try { adminTo = (loadMailCfg().defaultTo || []).filter(isEmail).slice(0, MAIL_LIST_MAX); } catch { adminTo = []; }
+  // 반증 후속 ①: 쓰기 범위가 제한된 슈퍼 관리자(조회 전체)에게는 주소 대신 개수(GET /admin/mail 과 같은 기준).
+  const m = maskedMailList(adminTo, isFullReadWriteScope(req?.user, store.get()));
   return {
-    ok: true, digest: s.mail?.digest || null, status: isiduDigestStatus(), loadError: isiduSettingsLoadError(), adminTo,
+    ok: true, digest: s.mail?.digest || null, status: isiduDigestStatus(), loadError: isiduSettingsLoadError(), adminTo: m.list, ...(m.masked ? { adminToCount: m.count, adminToMasked: true } : {}),
     mailReady: isiduMailReady(), topNChoices: DIGEST_TOPN_CHOICES, ranges: DIGEST_RANGES, graceMin: Math.round(DIGEST_GRACE_MS / 60_000),
     surge: { minBytes: SURGE_MIN_BYTES, minRatio: SURGE_MIN_RATIO }, listMax: MAIL_LIST_MAX, offsetMin: DAY_OFFSET_MIN,
   };
 }
-api.get('/tools/isilon-dirusage/digest', adminOnly, fullScopeOnly, requireSuperAdmin, (_req, res) => { res.json(digestView()); });
+api.get('/tools/isilon-dirusage/digest', adminOnly, fullScopeOnly, requireSuperAdmin, (req, res) => { res.json(digestView(req)); });
 
 api.put('/tools/isilon-dirusage/digest', adminOnly, fullScopeOnly, requireSuperAdmin, (req, res) => {
   if (isiduSettingsLoadError()) return res.status(409).json({ ok: false, reason: '저장된 설정 파일을 읽지 못했습니다 — 서비스 점검 화면에서 기본값으로 확정하거나 손상 보존본을 복구한 뒤 저장하세요.' });
@@ -372,7 +379,7 @@ api.put('/tools/isilon-dirusage/digest', adminOnly, fullScopeOnly, requireSuperA
   if (!r.ok) return res.status(r.unreadable ? 409 : 400).json({ ok: false, reason: r.error, field: r.field || null });
   const d = r.digest;
   logAudit({ user: req.user?.username, action: 'isidu.digest', target: 'isidu-settings.json', detail: `enabled=${d.enabled} days=${d.days.join('')} time=${d.time} admin=${d.includeAdmin} extra=${d.to.length} topN=${d.topN} corpTopM=${d.corpTopM} watch=${d.includeWatch} targets=${d.includeTargets} skipIfNoNew=${d.skipIfNoNew}`, ip: req.ip });
-  res.json(digestView());
+  res.json(digestView(req));
 });
 
 /** 지금 한 번 보내기 — 저장된 설정·받는 사람으로 보낸다('새 조사 없으면 생략' 은 보지 않는다). 실패는 409(본문이 사유 — 재시도로 두 번 보내지 않게). */

@@ -9,6 +9,7 @@
  *  · 지문 공식은 호스트키 지문과 같은 하나(`proxy/sshExec.js sshHostKeyFingerprint` — OpenSSH `ssh-keygen -lf` 표기).
  *  · 반환값에 **개인키 · passphrase 를 싣지 않는다**(호출부가 원문을 따로 들고 봉인한다).
  */
+import { sshKdfRoundsIssue } from '../../util/sshKeyKdf.js';   // 21회차 L-6
 import ssh2 from 'ssh2';
 import { sshHostKeyFingerprint } from '../../proxy/sshExec.js';
 
@@ -81,6 +82,7 @@ export function parsePrivateKey(text, passphrase = '') {
     return /^\s*(ssh-(ed25519|rsa|dss)|ecdsa-sha2-)/.test(raw) ? no('public-only') : no('unsupported-format');
   }
   if ((raw.match(/-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/g) || []).length > 1) return no('multi-key');
+  if (sshKdfRoundsIssue(raw)) return no('unsupported-format');   // 21회차 L-6: KDF 반복 상한 — parseKey(동기 bcrypt) 전에
   let parsed;
   try { parsed = ssh2.utils.parseKey(raw, pass || undefined); } catch (e) { parsed = e instanceof Error ? e : new Error(String(e)); }
   if (parsed instanceof Error) {

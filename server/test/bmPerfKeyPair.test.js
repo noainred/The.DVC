@@ -370,7 +370,10 @@ test('⑤ 소스 스윕 — 라우트의 대상 해석은 resolvePerfTarget 하�
   // 정의 — 범위를 세기 전에 거르고 · 첫 일치에서 멈추지 않는다(엣지 루프 안 return 금지) · 식별은 targetIdOf(귀속 없음은 노드까지 — 반증 F4)
   const u = stripComments(files['bmUsage.js']);
   const body = u.slice(u.indexOf('async function resolvePerfTarget('), u.indexOf('export { resolvePerfTarget'));
-  assert.match(body, /targetIdOf\(x\)/);
+  // 4회차 D3: 쌍 식별은 maint/judge.js nodePairIdOf 하나(로그 공통 원인 후보와 같은 함수) — 그 정의가 targetIdOf(x) + 귀속 없음 `|키@노드` 다.
+  assert.match(body, /nodePairIdOf/);
+  const J = stripComments(fs.readFileSync(path.join(SRC, 'bmusage', 'maint', 'judge.js'), 'utf8'));
+  assert.match(J, /export const nodePairIdOf = \(x, agent = ''\) => \(t\(x\?\.vcenterId\) \? targetIdOf\(x\) : `\|\$\{t\(x\?\.key\)\}@\$\{t\(agent\)\}`\);/);
   assert.ok(!/for \(const x of hits\(rec\.snap\.targets\)\)[\s\S]*?return \{ via/.test(body.slice(0, body.indexOf('if (!byId.size)'))), '엣지 루프 안에서 첫 일치를 돌려주지 않는다');
   assert.match(body, /allowed\.has\(v\)/);
 });

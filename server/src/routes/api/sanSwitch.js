@@ -6,6 +6,7 @@
  *    노출하지 않는다('vCenter 귀속 없는 데이터는 범위 계정에 노출 금지' — server/CLAUDE.md).
  *  - 변경(등록/수정/삭제/테스트/수집): adminOnly + 감사로그.
  */
+import { envPositive } from '../../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { scopeDbStatus } from '../../auth/scopeStatus.js';
 import crypto from 'node:crypto';
 import { snapMemo, sendCached } from '../../util/snapCache.js';   // v2.731(A6-05): 목록 응답 기억 — 내용 지문 키
@@ -14,20 +15,21 @@ import { isAdminReq, maskDeviceAddress, maskSnapAddress, maskActivityEvents, mas
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { SAN_SWITCH_TYPES, collectMethodsFor } from '../../sanswitch/types.js';
-import { listDevices, saveDevice, deleteDevice, deviceInputIssue, getDeviceWithSecret, normalizeDeviceInput, sanAccessMoved } from '../../sanswitch/registry.js';
+import { listDevices, saveDevice, deleteDevice, deviceInputIssue, getDeviceWithSecret, normalizeDeviceInput, sanAccessMoved, registryWriteRefusal, registryLoadError } from '../../sanswitch/registry.js';
+import { registryMark } from '../settingsUnreadMark.js';   // 128회차: 등록부를 못 읽은 동안의 빈 목록은 '등록 없음' 이 아니다
 import { localSnapshots, getSnapshot, dropSnapshot } from '../../sanswitch/store.js';
 import { collectDeviceNow, sanSwitchPollerStatus, pollSanSwitchOnce, testDeviceConnection, ensureSanSwitchDemo } from '../../sanswitch/poller.js';
 import { isMockMode, demoOn } from '../../mock/demo/flags.js';   // v2.708 데모(mock)
 import { sanDemoStatus } from '../../mock/demo/sanswitch.js';
 import { startTestRun, getTestRun } from '../../sanswitch/testRuns.js';
-import { edgeSanSwitchSnapshots, ORPHAN_TTL_MS } from '../../central/sanSwitchEdge.js';
+import { edgeSanSwitchSnapshots, edgeSanSwitchSnapshotFor, ORPHAN_TTL_MS } from '../../central/sanSwitchEdge.js'; // 58회차 F1: 단건은 가장 늦은 수집 사본
 import { listActivity as listSwActivity } from '../../sanswitch/activityLog.js';
 // v2.511: 조닝 그림 — 순수 분석(스위치 왕복 없음).
 import { zonesFromCompact, buildZoneGraph, buildZoneMatrix, zoneFindings, zoneSummary, portZoneDetail, classifyEndpoints } from '../../sanswitch/zoning.js';
 import { listDatacenters } from '../../datacenter/store.js';
 import { knownAgentNames } from '../../central/knownAgents.js';
 import { requestCollect, hasPendingRequest, requestPerfCollect, hasPendingPerfRequest, recentCollectDrops } from '../../sanswitch/collectRequests.js';
-import { loadPerfSettings, savePerfSettings, LIMITS as PERF_LIMITS } from '../../sanswitch/perfSettings.js';
+import { loadPerfSettings, savePerfSettings, perfSettingsLoadError, LIMITS as PERF_LIMITS } from '../../sanswitch/perfSettings.js';
 import { pollPerfOnce, sanSwitchPerfStatus } from '../../sanswitch/perfPoller.js';
 import { listActivity as listPerfActivity, latestEventByDevice as latestPerfEventByDevice } from '../../sanswitch/perfActivityLog.js';
 import { perfEmptyDiag } from '../../sanswitch/perfDiag.js';
@@ -41,7 +43,7 @@ import { portSeries, storageSeries, storageSeriesMulti, arraySerialOf, endpointK
 import * as pu from '../../sanswitch/portUsage.js';   // v2.748 포트 사용량 화면(순수 조립)
 import { csvLine, CSV_BOM } from '../../util/csv.js';
 import * as swBulk from '../../sanswitch/bulk.js';
-import { enrichAdvice, selectRows } from '../../util/bulkImport.js';
+import { enrichAdvice, selectRows, fillBlankFromSaved } from '../../util/bulkImport.js';
 import { startBulkTest, publicRun, passedLines } from '../../util/bulkRun.js';
 import { fullScopeOnlyWith, fullReadWriteScopeOnlyWith } from '../admin/shared.js';
 import { isDemoGuest, DEMO_ONLY_REASON } from '../../auth/demoGuest.js'; // v2.720(감사 R1-03·B2-01·R1-06)
@@ -208,7 +210,8 @@ api.get('/tools/sanswitch', toolsPerm, fullScopeOnly, async (req, res) => {
   const demo = isMockMode() ? sanDemoStatus() : undefined;
   // v2.731(A6-05): 같은 내용이면 같은 응답 객체를 돌려준다(직렬화·gzip·ETag 를 다시 하지 않는다 — util/compress.js 정체성 기억).
   //   키는 입력 전부의 지문 + 역할(가림 판본이 다르다). 이 라우트는 전체 범위 전용(fullScopeOnly)이라 범위 축은 없다.
-  const key = sanListKeyOf({ local, edge, devices: regDevs, pending, extras: [pollerSt, drops, datacenters, agents, demo], admin });
+  const regMark = registryMark(registryLoadError());   // 128회차: 등록부 읽기 오류 · 손상 표지(응답 기억의 키에도 넣는다 — 풀리면 곧바로 내린다)
+  const key = sanListKeyOf({ local, edge, devices: regDevs, pending, extras: [pollerSt, drops, datacenters, agents, demo, regMark], admin });
   try {
     const payload = await snapMemo('sanswitch-list', key, SAN_LIST_MEMO_MS, () => {
       const byId = new Map();
@@ -238,6 +241,7 @@ api.get('/tools/sanswitch', toolsPerm, fullScopeOnly, async (req, res) => {
         // v2.591: 엣지가 가져갔지만 새 수집 결과가 오지 않아 재인출 뒤 폐기한 '지금 수집' 요청 — 화면이 말한다(조용한 소실 금지).
         collectDrops: recentCollectDrops(),
         ...(isMockMode() ? { demo } : {}),
+        ...regMark,
       };
     });
     sendCached(req, res, key, payload);
@@ -254,7 +258,7 @@ api.get('/tools/sanswitch', toolsPerm, fullScopeOnly, async (req, res) => {
  */
 api.get('/tools/sanswitch/devices/:id/ports', toolsPerm, fullScopeOnly, (req, res) => {
   const local = getSnapshot(req.params.id);
-  const edge = edgeSanSwitchSnapshots().find((s) => s.deviceId === req.params.id);
+  const edge = edgeSanSwitchSnapshotFor(req.params.id);
   const snap = (!local || (edge && (edge.collectedAt || 0) > (local.collectedAt || 0))) ? edge : local;
   if (!snap) return res.status(404).json({ ok: false, reason: '수집된 스냅샷이 없습니다.' });
   // 장비 일반 정보(v2.411, 사용자 요구 '장비 일반 정보 표시')를 함께 내려준다 — 예전에는
@@ -292,7 +296,7 @@ api.get('/tools/sanswitch/devices/:id/ports', toolsPerm, fullScopeOnly, (req, re
  */
 api.get('/tools/sanswitch/devices/:id/zoning', toolsPerm, fullScopeOnly, (req, res) => {
   const local = getSnapshot(req.params.id);
-  const edge = edgeSanSwitchSnapshots().find((s) => s.deviceId === req.params.id);
+  const edge = edgeSanSwitchSnapshotFor(req.params.id);
   const snap = (!local || (edge && (edge.collectedAt || 0) > (local.collectedAt || 0))) ? edge : local;
   if (!snap) return res.status(404).json({ ok: false, reason: '수집된 스냅샷이 없습니다.' });
   const z = snap.zoning || null;
@@ -349,10 +353,12 @@ api.post('/tools/sanswitch/devices', adminOnly, fullScopeOnly, fullRwOnly, (req,
     const saved = saveDevice(req.body || {});
     logAudit({ user: req.user?.username, action: 'SAN 스위치 등록/수정', target: `${saved.name}(${saved.host})`, detail: `${saved.type}/${saved.collectMethod}${saved.agent ? ` 엣지 ${saved.agent}` : ' 중앙 직접'}` });
     res.json({ ok: true, device: saved });
-  } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
+  } catch (e) { res.status(e?.status === 409 ? 409 : 400).json({ ok: false, reason: e.message, ...(e?.readError ? { code: e.code, readError: true } : {}) }); }   // 결정(78 남긴 것 ①): 등록부 읽기 오류는 409
 });
 
 api.delete('/tools/sanswitch/devices/:id', adminOnly, fullScopeOnly, fullRwOnly, (req, res) => {
+  const refused = registryWriteRefusal();   // 결정(78 남긴 것 ①): 읽기 오류 중에는 409(읽지 못한 빈 목록으로 '없음' 을 답하지 않는다)
+  if (refused) return res.status(409).json(refused);
   const dev = listDevices().find((d) => d.id === req.params.id);
   const ok = deleteDevice(req.params.id);
   if (ok) {
@@ -435,11 +441,16 @@ api.get('/tools/sanswitch/perf/settings', adminOnly, fullScopeOnly, async (_req,
   // ⚠ `status` 는 **이 노드(중앙 직접 수집)** 의 폴러 상태다 — 위임 장비는 여기 안 들어온다.
   //   v2.516 까지 화면이 이것을 '전체 상태' 처럼 보여줘서, 엣지가 꺼졌거나 실패해도 알 수 없었다.
   //   `edges` 가 엣지들이 보고한 상태이고, 화면은 둘을 **나눠서** 표시해야 한다(v2.517).
+  const le = perfSettingsLoadError();   // 24회차 #4: 손상이면 밝힌다(화면의 값은 저장된 설정이 아니라 기본값이다)
   res.json({ ok: true, settings: loadPerfSettings(), limits: PERF_LIMITS,
-    status: sanSwitchPerfStatus(), edges: listEdgePerfStatus(), db: await perfDbStats() });
+    status: sanSwitchPerfStatus(), edges: listEdgePerfStatus(), db: await perfDbStats(), ...(le ? { loadError: { reason: String(le.reason || '').slice(0, 200), readError: le.readError === true } } : {}) });   // 112회차: readError — 화면이 읽기 오류(다시 읽히면 풀림)와 손상(확정 · 복구)을 가른다
 });
+const PERF_UNREADABLE = '포트 사용량 설정 파일을 읽지 못한 상태라 받지 않습니다 — 지금 저장 · 정리하면 기본값(보관 90일)으로 이력이 지워질 수 있습니다. 서비스 점검에서 기본값으로 확정하거나 손상 보존본을 되돌리고 재시작하세요.';
+// 105회차 A5: 읽기 오류(원본 그대로)는 조치가 다르다 — 확정 불가 · 재시작 불필요(권한 · 디스크를 고치면 30초 안에 풀린다).
+const perfUnreadable = (le) => (le?.readError ? { ok: false, code: 'settings-unreadable', readError: true, reason: `포트 사용량 설정 파일을 읽지 못한 상태라 받지 않습니다 — 읽기 오류이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 저장이 다시 열립니다).` } : { ok: false, code: 'settings-unreadable', reason: PERF_UNREADABLE });
 
 api.put('/tools/sanswitch/perf/settings', adminOnly, fullScopeOnly, fullRwOnly, async (req, res) => {
+  if (perfSettingsLoadError()) return res.status(409).json(perfUnreadable(perfSettingsLoadError()));   // 24회차 #4 · 105회차 A5(읽기 오류 사유)
   try {
     const before = loadPerfSettings();
     const saved = savePerfSettings(req.body || {});
@@ -455,6 +466,7 @@ api.put('/tools/sanswitch/perf/settings', adminOnly, fullScopeOnly, fullRwOnly, 
  * 않고 현재 retentionDays 기준으로 DELETE 1회 — ts 단독 인덱스를 타므로 풀스캔이 아니다.
  */
 api.post('/tools/sanswitch/perf/prune', adminOnly, fullScopeOnly, fullRwOnly, async (req, res) => {
+  if (perfSettingsLoadError()) return res.status(409).json(perfUnreadable(perfSettingsLoadError()));   // 24회차 #4 · 105회차 A5(읽기 오류 사유)
   try {
     const st = loadPerfSettings();
     const r = await pruneNow(st.retentionDays);
@@ -519,13 +531,13 @@ api.post('/tools/sanswitch/perf/collect', adminOnly, fullScopeOnly, fullRwOnly, 
  */
 function snapshotFor(id) {
   const local = getSnapshot(id);
-  const edge = edgeSanSwitchSnapshots().find((s) => s.deviceId === id);
+  const edge = edgeSanSwitchSnapshotFor(id);
   return (!local || (edge && (edge.collectedAt || 0) > (local.collectedAt || 0))) ? edge : local;
 }
 
 /** 장비 1대 점검. 기준선이 있으면 '당월 신규 에러' 까지 판정한다. */
 /** 불량 포트 상세의 상한 — 넘으면 개수를 밝힌다(조용한 상한 금지). */
-const PROBLEM_PORT_MAX = Math.max(5, Number(process.env.SANSW_PROBLEM_PORT_MAX) || 40);
+const PROBLEM_PORT_MAX = Math.max(5, envPositive(process.env.SANSW_PROBLEM_PORT_MAX, 40));
 
 /**
  * 점검이 지목한 포트에 대해서만 조닝 상대를 붙인다(v2.521).
@@ -1134,15 +1146,25 @@ const swDcName = () => {
 };
 
 /** 입력 본문 → 파싱 결과 + 형식 구분. `text` 가 있으면 자유텍스트, 아니면 CSV. */
+/** 결정(78 남긴 것 ③): 행 필드 ← 저장 스위치(비밀 없음). 수정 행의 빈 칸만 이것으로 채운다(sanswitch/bulk.js KEEP_ON_BLANK). */
+const SW_FROM_SAVED = {
+  name: (d) => d.name || '', username: (d) => d.username || '', collectMethod: (d) => String(d.collectMethod || '').toLowerCase(),
+  sshPort: (d) => (d.sshPort == null ? '' : String(d.sshPort)), httpsPort: (d) => (d.httpsPort == null ? '' : String(d.httpsPort)),
+  vfId: (d) => (d.vfId == null ? '' : String(d.vfId)), datacenter: (d) => d.datacenterId || '', agent: (d) => d.agent || '',
+  enabled: (d) => d.enabled !== false, note: (d) => d.note || '',
+};
 function swParseBody(body = {}) {
   const raw = String(body.text ?? body.csv ?? '');
   const format = body.format === 'text' || (body.text != null && body.csv == null) ? 'text' : 'csv';
-  if (format === 'text') {
-    const r = swBulk.parseDevicesText(raw, { defaults: body.defaults || {} });
-    return { ...r, format, raw };
+  const r = format === 'text'
+    ? { ...swBulk.parseDevicesText(raw, { defaults: body.defaults || {} }), format, raw }
+    : (() => { const c = swBulk.parseDevicesCsv(raw); return { ...c, warnings: [], headerUsed: null, order: c.order || swBulk.COLUMNS, format, raw }; })();
+  // 결정(78 남긴 것 ③): 수정 행(같은 host)의 빈 칸은 저장값 유지 — 드라이런 · 연결 테스트 · 저장이 모두 이 채운 행을 본다(드라이런 통과 = 저장 성공).
+  if (Array.isArray(r.rows) && r.rows.length) {
+    const byHost = new Map(listDevices().map((d) => [String(d.host).toLowerCase(), d]));
+    r.rows = fillBlankFromSaved(r.rows, (row) => byHost.get(String(row.host || '').toLowerCase()), SW_FROM_SAVED);
   }
-  const r = swBulk.parseDevicesCsv(raw);
-  return { ...r, warnings: [], headerUsed: null, order: r.order || swBulk.COLUMNS, format, raw };
+  return r;
 }
 
 api.get('/tools/sanswitch/devices/export.csv', csvPerm, adminOnly, fullScopeOnly, (req, res) => {
@@ -1182,6 +1204,8 @@ api.get('/tools/sanswitch/devices/sample.txt', csvPerm, adminOnly, fullScopeOnly
  * ⚠ 자동 재시도 없음(잘못된 비밀번호 반복 = 계정 잠금). bulkRun 이 강제한다.
  */
 api.post('/tools/sanswitch/devices/import/test', csvPerm, adminOnly, fullScopeOnly, fullRwOnly, (req, res) => {
+  const refused = registryWriteRefusal();   // 결정(78 남긴 것 ①): 읽지 못한 빈 목록과 대조하지 않는다(저장 비밀번호 판정도 못 한다)
+  if (refused) return res.status(409).json(refused);
   const p = swParseBody(req.body || {});
   if (p.error) return res.status(400).json({ ok: false, reason: p.error });
   const resolveDc = swDcResolver();
@@ -1208,6 +1232,9 @@ api.post('/tools/sanswitch/devices/import/test', csvPerm, adminOnly, fullScopeOn
         const saved = existing.get(String(row.host).toLowerCase());
         const full = saved ? getDeviceWithSecret(saved.id) : null;
         if (!full?.password) return { ok: false, reason: '비밀번호가 없습니다 — 신규 등록이면 마지막 열에 비밀번호를 적으세요.' };
+        // 전체 점검 24회차 #1(재현): 단건 테스트 · 저장과 같은 판정(sanAccessMoved — host · 계정 · 포트 · 수집 방식) — 예전에는 host 만 같으면
+        //   계정 · 포트가 바뀐 행에도 저장 비밀번호를 보냈다(가짜 SSH 서버가 root/22222 로 'SAVED-SECRET' 을 받음).
+        if (sanAccessMoved(full, input)) return { ok: false, reason: '계정 · 포트 · 수집 방식이 저장된 값과 달라 저장 비밀번호로 시험하지 않습니다 — 비밀번호 칸을 채우세요.' };
         input.password = full.password;
       }
       try {
@@ -1237,6 +1264,8 @@ api.get('/tools/sanswitch/devices/import/test/:id', csvPerm, adminOnly, fullScop
  * 걸러낸 행은 버리지 않고 `skipped` 로 사유와 함께 돌려준다.
  */
 api.post('/tools/sanswitch/devices/import', csvPerm, adminOnly, fullScopeOnly, fullRwOnly, (req, res) => {
+  const refused = registryWriteRefusal();   // 결정(78 남긴 것 ①): 읽기 오류 중에는 409 — 빈 목록과 대조하면 전부 '추가' 로 보인다(드라이런 포함)
+  if (refused) return res.status(409).json(refused);
   const p = swParseBody(req.body || {});
   if (p.error) return res.status(400).json({ ok: false, reason: p.error });
 
@@ -1271,18 +1300,21 @@ api.post('/tools/sanswitch/devices/import', csvPerm, adminOnly, fullScopeOnly, f
     requireTested: tested,
   });
 
-  let added = 0; let updated = 0; const failed = [];
+  let added = 0; let updated = 0; const failed = []; const droppedSecrets = [];
   for (const row of picked) {
     const prev = existing.get(String(row.host).toLowerCase());
     const input = swBulk.toSaveInput(row, resolveDc);
     if (prev) input.id = prev.id;
     if (!row._hasPassword) delete input.password;     // 비우면 기존 유지(saveDevice 규칙)
-    try { saveDevice(input); if (prev) updated++; else added++; }
-    catch (e) { failed.push({ line: row._line, name: row.name || row.host, reason: e.message }); }
+    try {
+      const r = saveDevice(input); if (prev) updated++; else added++;
+      // 24회차 #2: 접속처가 바뀌어 저장 비밀번호를 버린 줄을 밝힌다(다음 주기에 빈 비밀번호로 인증 실패 → 인증 정지로 이어진다)
+      if (Array.isArray(r?.droppedSecrets) && r.droppedSecrets.length) droppedSecrets.push({ line: row._line, name: row.name || row.host, fields: r.droppedSecrets });
+    } catch (e) { failed.push({ line: row._line, name: row.name || row.host, reason: e.message }); }
   }
   logAudit({ user: req.user?.username, action: `SAN 스위치 대량 가져오기(${p.format === 'text' ? '자유텍스트' : 'CSV'})`,
-    detail: `추가 ${added}·수정 ${updated}·실패 ${failed.length}·제외 ${skipped.length}${tested ? ' (연결 통과분만)' : ''}` });
-  res.json({ ok: true, added, updated, failed, skipped, total: p.rows.length, format: p.format });
+    detail: `추가 ${added}·수정 ${updated}·실패 ${failed.length}·제외 ${skipped.length}${droppedSecrets.length ? `·비밀번호 버림 ${droppedSecrets.length}` : ''}${tested ? ' (연결 통과분만)' : ''}` });
+  res.json({ ok: true, added, updated, failed, skipped, total: p.rows.length, format: p.format, ...(droppedSecrets.length ? { droppedSecrets } : {}) });
 });
 
 }

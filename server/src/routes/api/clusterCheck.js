@@ -9,7 +9,7 @@ import { requirePerm } from '../../auth/auth.js';
 import { logAudit } from '../../audit.js';
 import { store } from '../../store.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
-import { memoJson, scopeSlice, scopeKey } from './shared.js';
+import { memoJson, scopeSlice, scopeKey, SCOPE_KEY_ALL } from './shared.js';
 import { capStr } from '../../util/capStr.js';
 import { isAdminDetailUser } from '../../auth/demoGuest.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
@@ -37,7 +37,7 @@ export function registerClusterCheck(api) {
     const r = run(snap, req);
     // v2.744(감사 AUTHZ-01): 판정은 isAdminDetailUser — 데모 계정(요청 문맥 admin + demoGuest)은 operator 와 같은 판본이고, memo 키도 역할 문자열이 아니라
     //   판정 결과(a/u)로 만든다(역할 문자열이면 데모와 진짜 관리자가 같은 캐시 칸을 써 한쪽 판본이 다른 쪽에 나간다).
-    const full = isAdminDetailUser(req.user) && scopeKey(req.user, snap) === 'all';
+    const full = isAdminDetailUser(req.user) && scopeKey(req.user, snap) === SCOPE_KEY_ALL;
     return {
       ...r, codes: CLUSTER_CFG_CODES, initial: snap.initial === true, generatedAt: snap.generatedAt || null,
       scan: { enabled: config.clusterCfgScan, refreshMs: config.clusterCfgRefreshMs, perCycle: config.clusterCfgPerCycle },

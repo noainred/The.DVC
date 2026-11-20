@@ -59,7 +59,9 @@ describe('엣지 서버 PowerCap — 상태 이유', () => {
     expect(html).toContain('엣지 위임 서버 3대의 PowerCap 은 확인할 수 없습니다'); expect(html).toContain('(엣지 v2.950.0 이상)');
     expect(html).toContain('— 엣지 버전 낮음(v2.950.0 이상)'); expect(html).toContain('걸림(500 W · 99%)');
     expect((html.match(/>— 엣지 버전 낮음/g) || []).length).toBe(1, 'old-version 행 하나만');
-    expect(html).toMatch(/title="엣지가 읽은 지 2시간 넘음">—</);   // stale 행 — 칸은 ‘—’ · 이유는 마우스 설명(버전 이유 없음)
+    // stale 행 — 칸은 ‘—’ · 이유는 마우스 설명(버전 이유 없음). 6회차 Y: stale 은 이 노드 · 엣지 사본 · 봉투 공통(서버 capStateAt 하나) — ‘엣지가’ 를 붙이지 않는다
+    expect(html).toMatch(/title="읽은 지 2시간 넘음\(지금 사실이 아님\)">—</);
+    expect(PT.capTitle({ capW: null, capState: 'unread' })).not.toMatch(/2시간/);   // 낡음은 stale 로만(못 읽음 문구에 섞지 않는다)
     expect(html).not.toMatch(/\*\*|`/);
     expect(renderToStaticMarkup(h(PowerFleetView, { resp: { ...resp, capOldEdge: undefined, capMinEdgeVersion: undefined, hot: [] } }))).not.toContain('확인할 수 없습니다');
   });

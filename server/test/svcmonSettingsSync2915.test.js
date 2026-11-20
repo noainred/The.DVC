@@ -13,8 +13,15 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'svcmonSync2915-'));
+const TMP = tmpDir('svcmonSync2915-');
 process.env.CONFIG_DIR = TMP;
 process.env.AUTH_ENABLED = 'true';
 
@@ -49,8 +56,10 @@ test('checksFor — 종류별 무인증 점검: identity HTTP 는 200 고정 · 
   const nsx = SYNC.checksFor(cat('set:nsx', 'n1')).find((c) => c.type === 'http');
   assert.equal(nsx.expectStatus, undefined, '무인증이라 401/403 이 정상 — 기대 코드를 비워 500 미만을 정상으로');
   const edge = SYNC.checksFor(cat('set:collector', 'e1', { port: 8443 })).find((c) => c.type === 'http');
-  assert.equal(edge.url, 'https://e1.corp.example:8443/api/health', '엣지는 토큰 없는 공개 상태 경로');
-  assert.equal(edge.keyword, 'status');
+  // ⚠ v3.18.14 정정(결함 D1 — 재현): v2.915 의 '/api/health = 토큰 없는 공개 상태 경로' 전제가 틀렸다(`/api` 인증 라우터 아래 — 인증 포탈에서 401).
+  //   무인증 공개 경로로 바꿨다 — 실제로 인증 없이 200 인지는 svcmonSettingsSyncFix31814 가 라우터로 확인한다.
+  assert.equal(edge.url, 'https://e1.corp.example:8443/api/auth/config', '엣지는 토큰 없는 공개 경로');
+  assert.equal(edge.keyword, 'authEnabled');
   assert.deepEqual(SYNC.checksFor(cat('set:sanswitch-ssh', 's1', { port: 2222 })).map((c) => [c.type, c.port]), [['ssh', 2222]]);
   assert.deepEqual(SYNC.checksFor(cat('set:pdu', 'p1', { port: 22 })).map((c) => c.type), ['ssh'], 'PDU 는 SSH 수집 경로');
   assert.deepEqual(SYNC.checksFor(cat('set:smtp', 'm', { port: 25 })).map((c) => c.type), ['smtp']);

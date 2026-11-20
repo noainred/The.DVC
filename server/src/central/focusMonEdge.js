@@ -15,16 +15,22 @@ import { pullFromEdge } from './edgePull.js';
 import { featureMinEdgeVersion } from './featureMinEdgeVersion.js';
 import * as store from '../focusmon/store.js';
 import { listTargets, registryLoadError, getSettings } from '../focusmon/registry.js';
-import { setWakeImpl } from '../focusmon/service.js';
-import { IOSTAT_COLS, TOP_N } from '../focusmon/rates.js';
+import { setWakeImpl, setAlertDeps } from '../focusmon/service.js';
+import { procEveryFor } from '../focusmon/tune.js'; // v3.16.0 ⑯ C3 — 엣지 서버의 프로세스 표본 주기도 중앙의 자동 조절을 따른다
+import { enqueueNotify, noteEventSent, deliveryOutcome } from '../alerts.js'; // v3.16.0 ⑯ C1 — 포탈의 기존 알람 · 메일 채널(대기열 — 한 번에 하나씩)
+import { IOSTAT_COLS, TOP_N, APP_TOP, APP_KERNEL, APP_SESSION, APP_NOSVC, APP_ALL_MAX } from '../focusmon/rates.js';
+import { okMount, BOOT_ID_RE } from '../focusmon/parse.js'; // v3.12.0 ⑬ 파일시스템 마운트 이름 규칙(수집 파서와 같은 함수)
+import { FS_ROWS_MAX } from '../focusmon/codec.js';
 import { INTERVALS, PROC_EVERY_CHOICES } from '../focusmon/script.js';
+import { cleanHello, LOGIN_KINDS } from '../focusmon/hello.js';
+import { handleEdgeAudit } from '../focusmon/audit/service.js'; // v3.11.0 디스크 점검 — 작업 배달 · 원문 결과 받기(중앙이 다시 해석)
 
 export const VALID_MS = 30_000;
 export const MAX_SAMPLES = 6000;
 export const MAX_PER_TARGET = 300;
 const BACKLOG_MS = 10 * 60_000;
 const STATES = new Set(['connecting', 'ok', 'stale', 'auth', 'hostkey', 'unreachable', 'no-key', 'unsupported-os', 'limit', 'stopped', 'error']);
-const TEST_KINDS = new Set(['ok', 'os-unverified', 'no-key', 'auth', 'auth-stopped', 'hostkey', 'timeout', 'unreachable', 'unsupported-os', 'bad-output']);
+const TEST_KINDS = new Set(LOGIN_KINDS);
 const NAME_RE = /^[^\s:/]{1,32}$/;
 const DEV_RE = /^[A-Za-z0-9_.!:+-]{1,64}$/;
 const isObj = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
@@ -33,16 +39,7 @@ const arr = (v, max) => (Array.isArray(v) ? v.slice(0, max) : []);
 const enumOr = (v, set, def) => (typeof v === 'string' && set.has(v) ? v : def);
 const nameOr = (v, re = NAME_RE) => (typeof v === 'string' && re.test(v) ? v : null);
 
-export function cleanHello(h) {
-  if (!isObj(h)) return null;
-  return {
-    kernel: strOf(h.kernel, 120), isLinux: h.isLinux === true, release: strOf(h.release, 120),
-    rhelMajor: typeof h.rhelMajor === 'string' && /^\d{1,2}\.\d{1,2}$/.test(h.rhelMajor) ? h.rhelMajor : null,
-    tck: n(h.tck), page: n(h.page), ncpu: n(h.ncpu), hidepid: h.hidepid === true ? true : h.hidepid === false ? false : null,
-    dacct: h.dacct === true ? true : h.dacct === false ? false : null, // v2.981 지연 집계(디스크 대기)
-    hostname: strOf(h.hostname, 64).replace(/[^A-Za-z0-9._-]/g, ''),
-  };
-}
+export { cleanHello }; // v3.18.0: 정제 코어는 focusmon/hello.js 하나(접속 준비 결과도 같이 쓴다)
 
 /** 표본 하나 정제(rates.computeSample 모양만 통과). */
 export function cleanSample(s) {
@@ -60,9 +57,27 @@ export function cleanSample(s) {
     v: IOSTAT_COLS.map((_, i) => n(Array.isArray(d.v) ? d.v[i] : null)), fl: n(d.fl), ...(d.stuck === true ? { stuck: true } : {}),
   })).filter((d) => d.n);
   const dtot = Array.isArray(s.dtot) ? IOSTAT_COLS.map((_, i) => n(s.dtot[i])) : null;
+  // v3.12.0(⑬ 더할 지표) — 아는 칸만 · 0 이상 · 상한(음수 · 글자 · 무한은 null) · 마운트는 parse.okMount · 프로세스 이름은 COMM 규칙
+  const pos = (v, max) => { const x = n(v); return x == null || x < 0 || x > max ? null : x; };
+  const int = (v, max) => { const x = pos(v, max); return x != null && Number.isInteger(x) ? x : null; };
+  const sched = isObj(s.sched) ? { cs: pos(s.sched.cs, 1e9), in: pos(s.sched.in, 1e9), fk: pos(s.sched.fk, 1e7) } : null;
+  const vmp = isObj(s.vmp) ? Object.fromEntries(['si', 'so', 'mf', 'sc', 'sl'].map((k) => [k, pos(s.vmp[k], 1e10)])) : null;
+  const tcp = isObj(s.tcp) ? { rt: pos(s.tcp.rt, 100), lo: pos(s.tcp.lo, 1e7), ld: pos(s.tcp.ld, 1e7), es: int(s.tcp.es, 1e8), tw: int(s.tcp.tw, 1e8), iu: int(s.tcp.iu, 1e8) } : null;
+  const pst = isObj(s.pst) ? {
+    D: int(s.pst.D, 1e6), Z: int(s.pst.Z, 1e6),
+    pd: arr(s.pst.pd, 8).filter(isObj).map((x) => ({ pid: int(x.pid, 4_194_304), c: typeof x.c === 'string' && /^[A-Za-z0-9._:@+-]{1,64}$/.test(x.c) ? x.c : null, s: int(x.s, 1e9) })).filter((x) => x.pid != null && x.c),
+  } : null;
+  const fs = isObj(s.fs) ? {
+    rc: int(s.fs.rc, 255), irc: int(s.fs.irc, 255), age: int(s.fs.age, 3600),
+    rows: arr(s.fs.rows, FS_ROWS_MAX).filter(isObj).map((r) => ({
+      m: okMount(r.m) ? r.m : null, t: typeof r.t === 'string' && /^([a-z0-9._-]{1,24}|\?)$/.test(r.t) ? r.t : '?', d: typeof r.d === 'string' && /^([A-Za-z0-9._:/@+=-]{1,128}|\?)$/.test(r.d) ? r.d : '?',
+      kb: pos(r.kb, 1e15), pct: pos(r.pct, 100), ipct: pos(r.ipct, 100),
+    })).filter((r, i, a) => r.m && a.findIndex((y) => y.m === r.m) === i),
+  } : null;
   return {
-    dt: n(s.dt), cpu, mem, net, dsk, dtot, nPhys: n(s.nPhys),
+    dt: n(s.dt), up: pos(s.up, 1e10), cpu, mem, net, dsk, dtot, nPhys: n(s.nPhys),
     load: Array.isArray(s.load) ? [n(s.load[0]), n(s.load[1]), n(s.load[2])] : null, run: n(s.run), blk: n(s.blk), thr: n(s.thr),
+    sched, vmp, tcp, ...(pst ? { pst } : {}), ...(fs ? { fs } : {}), ...(isObj(s.km) ? { km: cleanKm(s.km) } : {}),
   };
 }
 
@@ -97,14 +112,73 @@ export function cleanProcs(p) {
       ...procExtra(x), // v2.981 프로세스 세부 정보 — 아는 칸만 · 형식 · 범위 · 옛 엣지는 없음(읽는 쪽 null)
     })).filter((x) => x.pid != null),
     da: p.da === true ? true : p.da === false ? false : null,
+    ...(isObj(p.apps) ? { apps: cleanApps(p.apps) } : {}),
   };
 }
 
-function cleanStatus(st, now) {
+/* v3.16.0(⑯ C2) 커널 메시지 증분 — 아는 칸만 · 시각은 글자(부팅 뒤 초 · 소수 6자리) · 이름은 COMM · 20개 · 원문 칸은 없다. */
+const KTS_RE = /^\d{1,10}(\.\d{1,6})?$/;
+function cleanKm(k) {
+  const ts = (v) => (typeof v === 'string' && KTS_RE.test(v) ? v : null);
+  const rc = Number.isInteger(k.rc) && k.rc >= 0 && k.rc <= 255 ? k.rc : null;
+  const boot = (() => { const x = n(k.boot); return x != null && x > 0 && x < 1e10 ? Math.round(x) : null; })();
+  const oom = (Array.isArray(k.oom) ? k.oom.slice(0, 20) : []).filter(isObj).map((o) => ({ s: ts(o.s), c: typeof o.c === 'string' && COMM_RE.test(o.c) && !o.c.includes('*') ? o.c : null })).filter((o) => o.s && o.c);
+  const en = Number.isInteger(k.en) && k.en >= 0 && k.en <= 1e9 ? k.en : null;
+  const on = Number.isInteger(k.on) && k.on > 20 && k.on <= 1e9 ? k.on : null;
+  return { rc, boot, oom, en, es: ts(k.es), last: ts(k.last), on, f: k.f === true, bid: typeof k.bid === 'string' && BOOT_ID_RE.test(k.bid) ? k.bid : null };
+}
+/**
+ * 반증 M4 · M7: 커널 메시지는 대상마다 **표본 시각으로 50초에 한 번**만 받는다(정상 엣지는 60초에 한 번 싣는다 — 위조한 km 으로
+ *   동기화마다 사건 수만 개를 만들어 기록 대기열에서 다른 서버의 분 묶음을 밀어내지 못하게) · 켜진 시각은 **중앙이 다시 계산**한다
+ *   (옮긴 표본 시각 − 표본 가동 시간 — 엣지 시계를 믿지 않는다: 시계가 앞선 엣지의 최근 OOM 이 '미래' 로 버려졌다).
+ */
+export const KM_MIN_GAP_MS = 50_000;
+export const KM_FIRST_GAP_MS = 5_000; // 첫 확인(f — 다시 연결한 새 세션)은 앞 확인 직후에도 온다(보는 화면을 열고 닫으면 주기가 바뀌어 다시 연결) — 짧은 간격만
+const kmSeen = new Map(); // targetId → 마지막으로 받은 km 의 표본 시각(중앙 시각)
+export function _resetKmGateForTest() { kmSeen.clear(); }
+export function gateKm(id, ts, s) {
+  if (!s.km) return true;
+  const prev = kmSeen.get(id);
+  const ok = s.up != null && (prev == null || ts - prev >= (s.km.f ? KM_FIRST_GAP_MS : KM_MIN_GAP_MS));
+  if (!ok) { delete s.km; return false; }
+  kmSeen.set(id, ts);
+  if (kmSeen.size > 5000) kmSeen.delete(kmSeen.keys().next().value);
+  s.km = { ...s.km, boot: Math.round(ts / 1000 - s.up) };
+  return true;
+}
+
+/* v3.14.0(⑮) 앱 단위 묶음 — 아는 칸만 · 기준마다 APP_TOP · 이름은 서비스 · 프로그램 이름 규칙(또는 정해진 세 이름) · 수는 0 이상 · 상한. */
+const APP_UNIT_RE = /^(?!.*\.\.)[A-Za-z0-9@_:-][A-Za-z0-9@._:-]{0,95}\.(service|scope)$/;
+const APP_FIXED = new Set([APP_KERNEL, APP_SESSION, APP_NOSVC]);
+function cleanApps(a) {
+  const pos = (v, max) => { const x = n(v); return x == null || x < 0 || x > max ? null : x; };
+  const one = (x, keyOk) => {
+    if (!isObj(x) || typeof x.k !== 'string' || !keyOk(x.k)) return null;
+    const io = ['all', 'part', 'none'].includes(x.io) ? x.io : 'none';
+    const row = { k: x.k, n: pos(x.n, 1e6), th: pos(x.th, 1e7), cpu: pos(x.cpu, 1e6), rss: pos(x.rss, 1e9), io, un: pos(x.un, 1e5) };
+    if (io !== 'none') { row.rb = pos(x.rb, 1e6); row.wb = pos(x.wb, 1e6); }
+    if (typeof x.u === 'string' && /^[A-Za-z0-9._@+-]{1,32}$/.test(x.u)) row.u = x.u;
+    return row.n == null ? null : row;
+  };
+  const list = (v, keyOk) => (Array.isArray(v) ? v.slice(0, APP_TOP).map((x) => one(x, keyOk)).filter(Boolean) : null);
+  // v3.16.0 ⑯ 반증 H1: 서비스마다 프로세스 수(all) — 서비스 이름만 · 정수 · 상한 개수(필수 앱 알림 판정)
+  let all = null;
+  let allCut = a.allCut === true ? true : a.allCut === 'nonsvc' ? 'nonsvc' : false;   // 29회차 F6 · 30회차 E: 엣지가 잘랐다는 표시(아는 값만) — 여기서 상한 · 거른 칸이 있으면 true
+  if (isObj(a.all)) {
+    all = Object.create(null); let c = 0;
+    for (const [k, v] of Object.entries(a.all)) { if (c >= APP_ALL_MAX) { allCut = true; break; } if (!APP_UNIT_RE.test(k)) { allCut = true; continue; } const x = n(v); if (x == null || !Number.isInteger(x) || x < 0 || x > 1e6) { allCut = true; continue; } all[k] = x; c += 1; }
+  }
+  return { sv: list(a.sv, (k) => APP_FIXED.has(k) || APP_UNIT_RE.test(k)), cm: list(a.cm, (k) => COMM_RE.test(k)) || [], ...(all ? { all, ...(allCut ? { allCut: true } : {}) } : {}) };
+}
+
+function cleanStatus(st, now, sentAt = null) {
   if (!isObj(st)) return null;
   return {
     state: enumOr(st.state, STATES, 'error'), error: strOf(st.error, 240),
-    lastSampleAt: (() => { const v = n(st.lastSampleAt); return v == null ? null : Math.min(v, now); })(),
+    // 29회차 F2(재현): 표본 시각처럼 '보낸 시각 − 표본 시각' 으로 옮긴다 — 위쪽만 자르면 시계가 20초 늦은 엣지의 모든 서버가 '지연'(상태 나이 21초),
+    //   시계가 앞선 엣지는 10분 전 상태도 지연이 아니었다.
+    //   30회차 F(재현): 보낸 시각이 상태 시각보다 앞서면(sentAt 0 등 — 비정상) 나이를 믿을 수 없다 — 예전처럼 위쪽만 자른다('방금' 을 지어내지 않게).
+    lastSampleAt: (() => { const v = n(st.lastSampleAt); if (v == null) return null; return sentAt != null && sentAt >= v ? edgeTimeToCentral(v, sentAt, now) : Math.min(v, now); })(),
     interval: INTERVALS.includes(n(st.interval)) ? n(st.interval) : null,
     osVerified: st.osVerified === true ? true : st.osVerified === false ? false : null,
     hello: cleanHello(st.hello),
@@ -213,6 +287,7 @@ export function handleEdgeSync(agent, body, now = Date.now()) {
     if (c > MAX_PER_TARGET) { got.bad += 1; continue; }
     const ts = toCentral(x.t); const s = cleanSample(x.s);
     if (ts == null || !s) { got.bad += 1; continue; }
+    if (!gateKm(x.id, ts, s)) got.kmDropped = (got.kmDropped || 0) + 1;
     if (store.ingestSample(x.id, ts, s, cleanHello(x.hello), now)) got.samples += 1;
   }
   for (const id of perTarget.keys()) store.flushReopened(id); // 늦은 표본은 분마다 한 번만 다시 쓴다
@@ -227,7 +302,7 @@ export function handleEdgeSync(agent, body, now = Date.now()) {
   if (isObj(b.status)) {
     for (const [id, st] of Object.entries(b.status).slice(0, 200)) {
       if (!mine.has(id)) { got.foreign += 1; continue; }
-      const c = cleanStatus(st, now);
+      const c = cleanStatus(st, now, sentAt);   // 보낸 시각이 없거나 상태 시각보다 앞서면(옛 · 비정상 엣지) 예전처럼 위쪽만 자른다(나이 0 으로 '방금' 을 지어내지 않게)
       if (c) store.setStatus(id, { ...c, via: 'edge' }, now);
     }
   }
@@ -251,15 +326,18 @@ export function handleEdgeSync(agent, body, now = Date.now()) {
   if (node && mine.size > 0 && node.sessions > 0) store.setNodeLoad(key, node, now);
   store.noteEdgeSync(agent, { version: typeof b.version === 'string' && /^\d{1,4}\.\d{1,4}\.\d{1,6}$/.test(b.version) ? b.version : '', key: cleanKey(b.key), diag }, now);
 
+  // v3.11.0 디스크 점검 — 그 엣지가 맡은 대상의 작업만 · 결과는 원문으로 받아 중앙이 해석한다(audit/service cleanEdgeResult · analyzeRun)
+  const audit = handleEdgeAudit(key, mine, b.audit, now);
   const desired = store.desiredFor(key, (id) => mine.get(id) || null, now);
   const tests = store.pendingTestsFor(key, now, { busy: diag ? diag.testsBusy : null }).filter((id) => mine.has(id)).map((id) => { const t = mine.get(id); return { id, host: t.host, port: t.port, username: t.username }; });
   return {
     ok: true, now, validUntil: now + VALID_MS,
-    targets: desired.map((d) => ({ id: d.id, host: d.host, port: d.port, username: d.username, interval: d.interval, procEvery: getSettings().procEvery })), // v2.983 procEvery — 프로세스 표본 주기(중앙 설정)
+    targets: desired.map((d) => ({ id: d.id, host: d.host, port: d.port, username: d.username, interval: d.interval, procEvery: procEveryFor(d.id, getSettings().procEvery) })), // v2.983 procEvery — 프로세스 표본 주기(중앙 설정 · v3.16.0 자동 조절)
     // retries(id) 는 옛 판 엣지용 · retryTargets(v2.978)는 접속 정보까지 — 수집 중이 아닌 대상(시험만 한 서버)의 인증 정지도 엣지가 풀 수 있게.
     //   예전에는 엣지가 수집 목록에서만 대상을 찾아, 시험만 한 서버의 '다시 연결' 이 아무것도 풀지 못했다(사용자 보고 2026-11-12 — 키를 넣어도 '거부로 멈춤').
     ...(() => { const ids = store.takeEdgeRetries(key, now).filter((id) => mine.has(id)); return { retries: ids, retryTargets: ids.map((id) => { const t = mine.get(id); return { id, host: t.host, port: t.port, username: t.username }; }) }; })(),
     tests,
+    ...(audit.jobs.length || audit.ack.length || audit.cancel.length || audit.known ? { audit } : {}),
     ensureKey: mine.size > 0,
     // v2.978 시작 지연 줄이기: 맡은 서버가 있는 엣지는 쉬는 동안에도 이 주기로 조회한다(깨우기가 닿지 않는 중계 엣지 — 예전 30초 고정).
     // 맡은 서버가 없으면 싣지 않는다(엣지 기본 30초). 옛 판 엣지는 이 칸을 모르고 30초를 쓴다.
@@ -292,3 +370,6 @@ export async function wakeEdge(agent, { by = 'auto', pull = pullFromEdge } = {})
   return out;
 }
 setWakeImpl((agent) => { wakeEdge(agent).catch(() => {}); });
+// v3.16.0 ⑯ C1 — 알림 발송(기존 채널 대기열) · 정비 창 판정기(베어메탈 사용률의 정비 창 — 처음 쓸 때 불러온다)
+// 반증 L6: 발송 결과를 포탈 '최근 통지' 에 남기고(같은 엔진 밖 발송인 ipam/changeNotify 와 같은 길) 판정(delivered · failed · skipped)을 돌려준다 — failed 면 다음 주기에 다시
+setAlertDeps({ send: async (a) => { let res = []; try { res = await enqueueNotify(a); } catch (e) { res = [`queue:err ${String(e?.message || e).slice(0, 120)}`]; } try { noteEventSent(a, res); } catch { /* 최근 통지는 보조 */ } return deliveryOutcome(res); }, maintJudge: async (now) => (await import('../bmusage/maint/runtime.js')).maintJudge({ now }) });

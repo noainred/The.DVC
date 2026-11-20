@@ -183,7 +183,8 @@ function hwOf(h, rcv) {
   if (!isObj(h)) return null;
   return {
     read: bool(h.read),
-    power: isObj(h.power) ? { ...numKeys(h.power, ['watts', 'capWatts', 'capPct']), at: clampEdgeTs(h.power.at, rcv) } : null,
+    // 점검 반복 2회차 E3: capState(상한 상태 — set · unset · unread) — 아는 값만(구버전 엣지는 없음 → null).
+    power: isObj(h.power) ? { ...numKeys(h.power, ['watts', 'capWatts', 'capPct']), at: clampEdgeTs(h.power.at, rcv), capState: oneOf(h.power.capState, ['set', 'unset', 'unread'], null) } : null,
     inletC: num(h.inletC), sensorAt: clampEdgeTs(h.sensorAt, rcv), cpuPct: num(h.cpuPct), inventoryAt: clampEdgeTs(h.inventoryAt, rcv), inventoryStale: bool(h.inventoryStale),
     dimmBad: strList(h.dimmBad, 16, 64), dimmWarn: strList(h.dimmWarn, 16, 64), diskPredicted: strList(h.diskPredicted, 16, 64),
     selCritical: num(h.selCritical), faultCount: num(h.faultCount),

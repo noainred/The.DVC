@@ -10,9 +10,10 @@ import path from 'node:path';
 import { config } from './config.js';
 import { atomicWriteFileSync } from './util/atomicWrite.js';
 import { clientIp } from './util/rateLimit.js'; // v2.479(감사 코어 B-4): XFF 는 TRUST_PROXY 일 때만
+import { envPositive } from './util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
 
 const FILE = path.join(config.configDir, 'audit.ndjson');
-const MAX = Number(process.env.AUDIT_MAX) || 20000;
+const MAX = envPositive(process.env.AUDIT_MAX, 20000);
 
 // Human labels for the auto-logged admin/remote write routes (method + path).
 function describe(method, urlPath) {

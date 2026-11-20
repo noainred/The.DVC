@@ -21,7 +21,6 @@
  *   createdBy, createdAt, updatedBy, updatedAt,
  * }
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
@@ -50,9 +49,13 @@ const fail = (code, msg) => Object.assign(new Error(msg), { code });
 
 function load() {
   if (_db) return _db;
+  // 97회차 F4: 읽기 단계는 등록부 공용 읽기(util/registryCore.js read)다 — 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니라 원본을 옮기지 않고 ·
+  //   캐시하지 않고(30초 간격 재읽기) · 오류(readError)를 세워 쓰기를 거절한다(persist 의 assertWritable). parse · 형식 실패만 아래 catch(예전과 같다 — 보존본).
+  const rr = _loadErr.read(FILE(), (t) => t);
+  if (rr.kind === 'read-error') return { groups: [] };
   try {
-    if (fs.existsSync(FILE())) {
-      const p = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
+    if (rr.kind === 'ok') {
+      const p = JSON.parse(rr.value);
       if (!p || typeof p !== 'object' || Array.isArray(p)) throw new Error('형식 오류');
       _db = { groups: (Array.isArray(p.groups) ? p.groups : []).filter((g) => g && typeof g === 'object' && typeof g.id === 'string' && Array.isArray(g.vmIds)) };
       _loadErr.clear();
@@ -77,6 +80,7 @@ export const _groupsWritesForTest = () => _writes;
 function persist() {
   _writes += 1;
   const db = load();
+  _loadErr.assertWritable('백업 그룹 원장(bareos-groups.json)'); // 97회차 F4: 마지막 방어선 — 읽기 오류 중에는 원본을 덮지 않는다(던진다 — status 409)
   atomicWriteFileSync(FILE(), JSON.stringify({ version: 1, groups: db.groups }), { mode: 0o600 });
   _rev += 1;
 }

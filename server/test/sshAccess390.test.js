@@ -644,8 +644,10 @@ test('⑰ 반증 2차 — 예약 복원은 적용 시점 파일과 다시 합친
   assert.equal(REFS.resolveOsAuth({ id: 'q1', name: 'q', host: '10.0.0.66', vcenterId: 'vcA', credRef: acc.id }, { feature: 'conn-test' }).ok, true);
   // 폴러 두 곳 — 자격 해석이 막은 결과는 사용 기록에 적지 않는다
   const src = (f) => fs.readFileSync(path.join(HERE, '../src', f), 'utf8');
-  assert.match(src('bmusage/poller.js'), /target\.osHost\?\.keyFingerprint && !target\.osHost\.authErrorCode && !os\.authErrorCode/);
-  assert.match(src('bmstor/poller.js'), /srv\?\.keyFingerprint && !srv\.authErrorCode && /);
+  //   v3.24: 공통 계정 비밀번호 접속(credAccountId)도 같은 조건으로 기록한다 — 막힌 결과(authErrorCode)를 거르는 조건은 그대로(outcome.js 도 다시 거른다).
+  assert.match(src('bmusage/poller.js'), /\(target\.osHost\?\.keyFingerprint \|\| target\.osHost\?\.credAccountId\) && !target\.osHost\.authErrorCode && !os\.authErrorCode/);
+  assert.match(src('bmstor/poller.js'), /\(srv\?\.keyFingerprint \|\| srv\?\.credAccountId\) && !srv\.authErrorCode && /);
+  assert.match(src('sshaccess/outcome.js'), /if \(!srv \|\| typeof srv !== 'object' \|\| srv\.authErrorCode\) return \{ recorded: false \};/);
   // 키 고르기 — 바꿔치기 표지가 있는 키는 접속 시험 전에 거절
   const s = BM.listBmServersRaw().find((x) => x.name === 'bm-a1');
   const addr = (await SVC.buildView()).servers.find((x) => x.id === s.id).addr;

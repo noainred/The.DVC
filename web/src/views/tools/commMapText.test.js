@@ -1,7 +1,7 @@
 /** 통신 지도 문구 회귀 — ‘기록 없음’ 을 정상으로 칠하지 않는다 · 첫 조회는 입자 없음 · null 은 0 이 아니다. */
 import { describe, it, expect } from 'vitest';
 import {
-  STATE_LABEL, STATE_COLOR, REASON_TEXT, RES_STATE_LABEL, RES_STATE_COLOR, bytesText, spanText, headerNote, activityOf, edgeSummary, resourceSummary, LEGEND_NOTES, pullAtRow,
+  STATE_LABEL, STATE_COLOR, REASON_TEXT, RES_STATE_LABEL, RES_STATE_COLOR, bytesText, spanText, headerNote, oneWayNoRecordCount, activityOf, edgeSummary, resourceSummary, LEGEND_NOTES, pullAtRow,
 } from './commMapText.js';
 
 const NOW = 1_800_000_000_000;
@@ -38,6 +38,24 @@ describe('commMapText', () => {
     expect(fail.tone).toBe('red'); expect(fail.text).toMatch(/\*\*장애 2곳\*\*/); expect(fail.text).toMatch(/미배정|담당 엣지를 알 수 없는 자원 2개/);
     const ok = headerNote({ at: NOW - 5000, counts: { edges: 2, byState: { ok: 2 } } }, NOW);
     expect(ok.tone).toBe('green'); expect(ok.text).toMatch(/모두 pull·push 가 정상/);
+  });
+  it('결정(56~75) 63 ③ — 정상 중 한 방향 기록 없음(info)은 따로 센다 · 판정(색)은 그대로', () => {
+    const edges = [
+      { id: 'a', state: 'ok', reasons: [] },
+      { id: 'b', state: 'ok', reasons: ['push-none'] },
+      { id: 'c', state: 'ok', reasons: ['pull-none', 'mock'] },
+      { id: 'd', state: 'ok', reasons: ['mock'] },
+      { id: 'e', state: 'disabled', reasons: ['disabled', 'push-none'] },
+    ];
+    expect(oneWayNoRecordCount(edges)).toBe(2);
+    expect(oneWayNoRecordCount(null)).toBe(0);
+    const h = headerNote({ at: NOW - 5000, edges, counts: { edges: 5, byState: { ok: 4, disabled: 1 } } }, NOW);
+    expect(h.tone).toBe('green');
+    expect(h.text).toMatch(/정상 2곳 · 한 방향 기록 없음 2곳/);
+    expect(h.text).not.toMatch(/모두 pull·push 가 정상/);
+    expect(h.text).not.toMatch(/`/);
+    // 한 방향 기록 없음이 없으면 예전 문구 그대로
+    expect(headerNote({ at: NOW, edges: [{ id: 'a', state: 'ok', reasons: [] }], counts: { edges: 1, byState: { ok: 1 } } }, NOW).text).toMatch(/모두 pull·push 가 정상/);
   });
   it('activityOf — 첫 조회는 전부 false, pull.at 변화·pushes 증가만 true', () => {
     const cur = { edges: [{ id: 'a', pull: { at: 10 }, push: { pushes: 5 } }, { id: 'b', pull: { at: 10 }, push: { pushes: 5 } }] };

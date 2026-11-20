@@ -18,6 +18,7 @@ import {
   GROUP_LABEL, ROLE_LABEL, pctText, coresText, memText, coverageText, srcText, isPartial,
   filterCorps, groupCounts, noticesOf, footnotes, csvOf, usageTone, toneVar,
 } from './corpUsageText.js';
+import { saveBlob } from '../../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나
 
 const NOTICE_COLOR = { bad: 'var(--red)', warn: 'var(--amber)', info: 'var(--text-dim)' };
 
@@ -85,9 +86,7 @@ export default function CorpUsage({ scope = '' } = {}) {
     try {
       const name = `corp-usage-${dayStamp()}${group !== 'all' || effScope ? '-filtered' : ''}.csv`;
       const blob = new Blob([`﻿${csvOf(rows)}`], { type: 'text/csv;charset=utf-8' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob); a.download = name; a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      saveBlob(blob, name);
       setMsg(`법인 ${rows.length}곳을 CSV 로 내보냈습니다(${name}).`);
     } catch (e) { setMsg(`내보내기 실패: ${e?.message || e}`); }
   }

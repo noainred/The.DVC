@@ -28,6 +28,10 @@
 
 /* 탭 줄 — 아래 선은 안쪽 그림자(열린 탭 밑줄이 덮는다) · 세로 스크롤바를 만들지 않는다(VeeamHeader v2.825.1 과 같은 이유) */
 .vmh-tabs { display: flex; align-items: stretch; gap: 2px; box-shadow: inset 0 -1px 0 var(--border); overflow-x: auto; overflow-y: hidden; min-width: 0; margin-bottom: 2px; }
+/* 탭 줄 + 오른쪽 조건(HubTabs right) — 조건은 스크롤되는 탭 줄 밖 형제. 한 줄에 들어가면 탭 옆(탭 줄이 남는 폭을 채운다), 넘치면 아래 줄 오른쪽(dbg3221 2회차) */
+.vmh-tabbar { display: flex; flex-wrap: wrap; align-items: center; row-gap: 6px; min-width: 0; margin-bottom: 2px; }
+.vmh-tabbar > .vmh-tabs { flex: 1 1 auto; max-width: 100%; margin-bottom: 0; }
+.vmh-tabbar > .ph-right { flex: 0 1 auto; min-width: 0; max-width: 100%; flex-wrap: wrap; row-gap: 4px; }
 .vmh-tab { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 14px; white-space: nowrap; text-decoration: none;
   font-size: 14px; font-weight: 600; color: var(--text-dim); border-bottom: 3px solid transparent; }
 .vmh-tab:hover { color: var(--text); }

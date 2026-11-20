@@ -10,13 +10,15 @@
  *   · 응답 캐시(memoJson)는 변경 이벤트 · 띠 · 비교만 — 키에 범위 서명 + 역할 + 마지막 수집 시각 + 규칙 저장 시각. 집중은 진행 중 값이라 캐시하지 않는다.
  */
 import { requireRole, requirePerm } from '../../auth/auth.js';
-import { scopedVcenterIds, inUserWriteScope } from '../../auth/scope.js';
+import { scopedVcenterIds, inUserWriteScope, isFullReadWriteScope } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { requireSettingsOwner, fullScopeOnlyWith } from '../admin/shared.js';
 import { addressMatcher, isAdminReq, maskedIdToken } from '../../auth/addressMask.js';
 import { currentTargets, bmUsageStatus } from '../../bmusage/poller.js';
 import { memoJson, scopeKey } from './shared.js';
+import { bmGate } from './bmWriteGate.js';
+import { scrubProcDeep } from './bmProcScrub.js'; // 10회차 K1 — 집중 표본 · 기간 비교의 프로세스 행 // 점검 반복 8회차 F2 — 집중 시작 표지(데모 · 역할)
 import { strOf } from '../../util/coercionTrap.js';
 import { config } from '../../config.js';
 import { resolvePerfTarget, perfTargetFail, perfVcOf, failParts, bmAddressHosts, maskBmList, applyScope } from './bmUsage.js';
@@ -29,6 +31,7 @@ const fullScopeOnly = fullScopeOnlyWith('알림 규칙 시험 실행은 이 노�
 const t = (v) => strOf(v, 4096).trim();
 const IPV4_RE = /\b\d{1,3}(?:\.\d{1,3}){3}\b/g;
 const scrubIp = (v) => (typeof v === 'string' ? v.replace(IPV4_RE, (ip) => maskedIdToken(ip)) : v);
+const PROC_FNS = { scrub: scrubIp, tok: (v) => maskedIdToken(v) };
 
 export function depsOf(deps = {}) {
   return {
@@ -56,8 +59,9 @@ async function resolve(req, snap, D) {
   return { found, key, isAdmin, allowed };
 }
 /** 세션 · 표본의 비관리자 가림 — 실행자 · 사유 IPv4. */
-function scrubFocus(body, isAdmin) {
-  if (isAdmin || !body || typeof body !== 'object') return body;
+function scrubFocus(body0, isAdmin) {
+  if (isAdmin || !body0 || typeof body0 !== 'object') return body0;
+  const body = scrubProcDeep(body0, PROC_FNS);   // 10회차 K1: 표본의 cpuTop · ioTop 이름 안 주소(스냅샷과 같은 함수)
   const s1 = (s) => (s && typeof s === 'object' ? (({ by: _b, ...x }) => ({ ...x, reason: scrubIp(x.reason) }))(s) : s);
   return { ...body, ...(Array.isArray(body.sessions) ? { sessions: body.sessions.map(s1) } : {}), ...(body.session ? { session: s1(body.session) } : {}), ...(body.reason ? { reason: scrubIp(body.reason) } : {}),
     ...(Array.isArray(body.changes) ? { changes: body.changes.map((e) => ({ ...e, before: scrubIp(e.before), after: scrubIp(e.after) })) } : {}) };
@@ -84,7 +88,7 @@ export async function bmFocusRead(req, snap, deps = {}) {
   } else res = await (await D.pull()).pullEdgeFocus(found.agent, { key: found.realKey, id });
   const plan = await focusPlan(D);
   const writable = inUserWriteScope(req.user, snap, t(found.target.vcenterId));
-  const body = scrubFocus({ ...res, key, via: found.via, ...(found.via === 'edge' ? { agent: found.agent } : {}), writable, plan, pathsOs: (found.target.paths || []).includes('os'), pathsIdrac: (found.target.paths || []).includes('idrac') }, isAdmin);
+  const body = scrubFocus({ ...res, key, via: found.via, ...(found.via === 'edge' ? { agent: found.agent } : {}), writable, actions: { start: bmGate(req, 'focusStart', { snap }) }, plan, pathsOs: (found.target.paths || []).includes('os'), pathsIdrac: (found.target.paths || []).includes('idrac') }, isAdmin);
   const st = res?.ok ? 200 : await focusStatusOf(res?.code || 'edge');
   return st === 200 ? body : { __status: st, ...body };
 }
@@ -154,6 +158,8 @@ export async function bmFocusFleet(req, snap, deps = {}) {
   if (!isAdmin) {
     const hosts = await D.bmAddressHosts(tg);
     list = maskBmList(list, addressMatcher(hosts));
+    // 10회차 재확인 K1b: 함대 목록의 ‘원인 후보’ 프로세스 이름(candidate) 안 IPv4 — maskBmList 는 등록부 호스트만 가린다
+    list = list.map((s) => (typeof s.candidate === 'string' ? { ...s, candidate: scrubIp(s.candidate) } : s));
   }
   const running = list.filter((s) => s.status === 'running').length;
   const queued = list.filter((s) => s.status === 'queued').length;
@@ -179,6 +185,7 @@ export async function bmPerfOpsRead(req, snap, mode, deps = {}) {
     if (Array.isArray(out.events)) out.events = out.events.map(scrubEv);
     if (Array.isArray(out.changes)) out.changes = out.changes.map(scrubEv);
     if (Array.isArray(out.tuning)) out.tuning = out.tuning.map(scrubEv);
+    if (out.procs && Array.isArray(out.procs.rows)) out.procs = { ...out.procs, rows: out.procs.rows.map((r) => (r && typeof r.name === 'string' ? { ...r, name: scrubIp(r.name) } : r)) };   // 10회차 K1
     out.addressHidden = true;
   }
   return out;
@@ -222,7 +229,11 @@ export async function bmRulesRead(req, snap, deps = {}) {
     sent: sentShown, ...(edgeDropped && isAdmin ? { edgeSentDropped: edgeDropped } : {}),
     // 정직 기록 — 이 노드 전용 설정(엣지 배포는 다음 판) · 유지보수 창 억제 원천 없음.
     scope: config.agent?.centralUrl ? 'edge-local' : 'central-local', maintenanceSource: 'none',
-    readOnly: !isAdmin || !!allowed, ...(isAdmin ? {} : { addressHidden: true }),
+    // 7회차 관찰 ①(6회차 A1 뒤): 쓰기(PUT 규칙 · POST 시험 실행)는 공용 게이트가 조회 ∧ 쓰기 전체 범위로 본다 — 표지도 같은 판정(isFullReadWriteScope).
+    //   예전에는 조회 범위만 봐서 쓰기가 일부인 관리자 · 소유자에게 '시험 실행' 버튼이 열리고 누르면 403 이었다.
+    readOnly: !isAdmin || !!allowed || !isFullReadWriteScope(req.user, snap), ...(isAdmin ? {} : { addressHidden: true }),
+    // 7회차 재확인 R1: 법인 예외를 조회 범위로 걸렀는가(화면 괄호 ‘자기 법인 예외만’ 의 근거 — readOnly 는 이제 쓰기 범위도 보므로 그것으로 가르면 전 법인을 받는 계정에 틀린 말이 붙었다).
+    scoped: !!allowed,
   };
 }
 async function rulesWrite(req, res) {
@@ -234,6 +245,8 @@ async function rulesWrite(req, res) {
     res.json({ ok: true, rules: { ...out.value, power: { ...(out.value.power || {}), racksText: R.racksToText(out.value.power?.racks || []) } } });
   } catch (e) {
     if (e?.status === 400) return res.status(400).json({ ok: false, field: e.field || null, reason: String(e.message || e).slice(0, 300) });
+    // 82회차 F3: 규칙 파일 읽기 오류 중 저장 거절(원본을 덮지 않게).
+    if (e?.status === 409) return res.status(409).json({ ok: false, code: e.code || 'settings-unreadable', reason: String(e.message || e).slice(0, 300) });
     res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) });
   }
 }

@@ -10,6 +10,7 @@ import { setFwdNamesProvider } from '../../ipam/scanNames.js';
 import { corpsOfFactory } from '../../ipam/scanDatacenterSource.js'; // v2.996: 판정을 도메인으로 옮겼다(라우트 간 import 순환 방지)
 import { buildOsSuggest, applyPlan, fwdNamesFor, agentKey } from '../../bmfolders/osSuggest.js';
 import { indexOsHosts, pickOsEntry } from '../../bmusage/targets.js';
+import { readRemoteCollectorIndex } from '../../insights/fleetInventory.js'; // 점검 반복 1회차: 원격 수집 서버 출처 서버의 엣지 칸(osSuggest.suggestAgentOf)
 import { listBmServersRaw, registryLoadError, applyBmServerBatch } from '../../bmstor/registry.js';
 import { bindOfWrite } from '../../bmusage/onboard/bindRule.js';
 import { logAudit } from '../../audit.js';
@@ -38,6 +39,7 @@ export async function currentOsSuggest(D = {}) {
   return buildOsSuggest({
     members, scanRows: Object.values((D.getScanResults || getScanResults)() || {}),
     osIndex: indexOsHosts(raw, { includeAddrOnly: true }), pickOsEntry, corpsOf: D.corpsOf !== undefined ? D.corpsOf : corpsOfFactory(snap),
+    remoteCollectors: (D.remoteCollectors || readRemoteCollectorIndex)(),
   });
 }
 

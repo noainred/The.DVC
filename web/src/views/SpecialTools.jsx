@@ -63,6 +63,8 @@ const IsilonDirUsageTool = React.lazy(() => import('./tools/IsilonDirUsageTool.j
 const DataFlow = React.lazy(() => import('./tools/DataFlow.jsx'));       // 데이터 흐름 지도(포탈 사이 전 경로, v2.587)
 const DeviceFlow = React.lazy(() => import('./tools/DeviceFlow.jsx'));   // 3단 지도(장비 → 엣지 → 메인, v2.588)
 const BmStorageTool = React.lazy(() => import('./tools/BmStorageTool.jsx'));
+const ServerInfoTool = React.lazy(() => import('./tools/ServerInfoTool.jsx'));   // v3.25 서버 정보(서버 접속 2단계)
+const ServerCmdTool = React.lazy(() => import('./tools/ServerCmdTool.jsx'));     // v3.30 서버 명령 실행(프리셋)
 const SanSwitchTool = React.lazy(() => import('./tools/SanSwitchTool.jsx'));
 const SanFlowTool = React.lazy(() => import('./tools/SanFlowTool.jsx'));   // v2.935(C-②) Flow Vision 플로우 모니터
 const SanStorageTool = React.lazy(() => import('./tools/SanStorageTool.jsx'));   // v2.948 SAN 스토리지 성능(독립 도구)
@@ -140,7 +142,7 @@ const GuestOs = React.lazy(() => import('./tools/GuestOsTools.jsx').then((m) => 
 const RealOs = React.lazy(() => import('./tools/GuestOsTools.jsx').then((m) => ({ default: m.RealOs })));
 const PowerMap = React.lazy(() => import('./tools/PowerMap.jsx').then((m) => ({ default: m.PowerMap })));
 const DupIp = React.lazy(() => import('./tools/VmInfoTools.jsx').then((m) => ({ default: m.DupIp })));
-const Snapshots = React.lazy(() => import('./tools/VmInfoTools.jsx').then((m) => ({ default: m.Snapshots })));
+const Snapshots = React.lazy(() => import('./tools/snapshots/SnapshotTool.jsx'));   // v3.26.0 새 화면(시안 docs/design/snapshots)
 const VmTools = React.lazy(() => import('./tools/VmInfoTools.jsx').then((m) => ({ default: m.VmTools })));
 const DatastoreUsage = React.lazy(() => import('./tools/DatastoreUsage.jsx').then((m) => ({ default: m.DatastoreUsage })));
 const LicenseExpiry = React.lazy(() => import('./tools/LicenseTools.jsx').then((m) => ({ default: m.LicenseExpiry })));
@@ -224,11 +226,13 @@ export default function SpecialTools({ defaultScope = '' } = {}) {
     fetchJson('/admin/tool-categories')
       .then((r) => {
         if (!alive) return;
-        const ok = !!(r && r.settings && typeof r.settings === 'object');
+        // 112회차: 서버가 분류 설정 파일을 못 읽은 동안의 조회(기본값 + loadError)는 '읽지 못함' 으로 본다 — 그 기본값으로 이름 · 단계 편집기를 열어 저장하면 기존 설정이 지워진다.
+        const unreadLe = r && r.loadError && r.loadError.readError === true ? r.loadError : null;
+        const ok = !!(r && r.settings && typeof r.settings === 'object') && !unreadLe;
         setCats(ok ? r.settings : null);
         setCatMeta({ limits: r?.limits || {}, defaultStages: r?.defaultStages || [] });
         setCatsState(ok ? 'ok' : 'error');
-        setCatsErr(ok ? '' : (r?.reason || '설정 응답에 settings 가 없습니다'));
+        setCatsErr(ok ? '' : ((unreadLe && unreadLe.reason) || r?.reason || '설정 응답에 settings 가 없습니다'));
       })
       .catch((e) => {
         // 카테고리는 편의 기능이다 — 못 읽어도 화면은 동작해야 한다. 단 편집기는 열지 않는다(D-01).
@@ -649,6 +653,8 @@ function ToolPanel({ tool, onBack, isAdmin, defaultScope = '', cfg = null }) {
       {tool === 'data-flow' && <DataFlow />}
       {tool === 'device-flow' && <DeviceFlow />}
       {tool === 'bm-storage' && <BmStorageTool />}
+      {tool === 'server-info' && <ServerInfoTool />}
+      {tool === 'server-cmd' && <ServerCmdTool />}
       {tool === 'san-switch' && <SanSwitchTool />}
       {tool === 'san-flow' && <SanFlowTool />}
       {tool === 'san-storage' && <SanStorageTool />}

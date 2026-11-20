@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react';
-import { usePolling, fetchJson, postJson, getToken, setToken, setUnauthorizedHandler, fetchAuthConfig, fetchMe, broadcastLogout, LOGOUT_BROADCAST_KEY, setCurrentUser, toolAllowed, can, getCurrentUser } from './api.js';
+import { usePolling, fetchJson, postJson, getToken, setToken, setUnauthorizedHandler, fetchAuthConfig, fetchMe, broadcastLogout, LOGOUT_BROADCAST_KEY, TOKEN_KEY, setCurrentUser, toolAllowed, can, getCurrentUser } from './api.js';
+import { accountKeyOf, noteAccount, tokenChangeAction } from './accountReset.js'; // 전체 점검 129회차 A2 · A4 — 로그아웃 · 계정 전환 때 이전 계정의 창 상태를 비운다
 import { SearchBox, Modal, StateBadge, Loading, ErrorBox } from './components/ui.jsx';
 import { RemoteConsoleWindow } from './remote/RemoteConsoleWindow.jsx';
 import Login from './views/Login.jsx';
@@ -39,7 +40,7 @@ const SvcMonitor = lazy(() => import('./views/SvcMonitor.jsx'));
 import { movedTabHash, legacyShellHash, LEGACY_SHELL_KEY, hashSegments } from './hooks/hashTab.js';
 // v2.915 '서버 › 가상화 플랫폼' 허브(설계 docs/design/virt-platform-menu 시안 A · 컨펌 2026-11-07): vcenters · hosts · vms 세 탭 위에 한 셸 — 탭 id · 해시는 그대로.
 import PlatformHub from './views/platform/PlatformHub.jsx';
-import { isPlatformTab, PLATFORM_TAB_KEYS, SCOPE_SEARCH_PLACEHOLDER, SCOPE_NOTE } from './views/platform/platformText.js';
+import { isPlatformTab, PLATFORM_TAB_KEYS, SCOPE_SEARCH_PLACEHOLDER, SCOPE_NOTE, scopeVcOptions, scopeVcPatch, scopeRegionOptions, regionText, normScopeIds, singleScopeId, toggleScopeId, idsInRegion, hubScopeQuery, hubScopePatch, multiPickText, MULTI_PICK_VALUE } from './views/platform/platformText.js';
 // v2.725 상단 메뉴 재구성(시안 A '2단 탭') — 대메뉴·하위 메뉴·현재 위치 판정은 views/topMenu.js 하나가 소유한다.
 import { visibleMenu, locate, entryOf, hashOf, menuTabOf } from './views/topMenu.js';
 import { lockReasonOf } from './views/toolVisibility.js';
@@ -112,8 +113,10 @@ import { runtimeBanner } from './views/runtimeBannerText.js'; // 2026-10-09 검�
 import { takeSearch, onSearchHandoff } from './hooks/searchHandoff.js'; // v2.909 ⌘K 통합 장비 검색 — 검색어 인계(메모리)
 const INV_FILTER_TABS = ['vms', 'hosts', 'datastores', 'vcenters'];   // v2.915: vCenter 탭도 공용 범위 바의 검색 칸을 쓴다(허브 세 탭 공용)
 // v2.915 가상화 플랫폼 허브 — 세 탭이 범위(리전 · vCenter · 검색어)를 한 칸으로 공유한다. 탭 고유 조건은 그 탭 칸에 남는다.
+//   v3.20.0(바로가기 복수 선택): 허브 칸의 법인은 **목록 vcenterIds**(배열 · 메모리만)로 든다 — 허브 칸에는 vcenterId 를 저장하지 않는다(patchFilter 가 hubScopePatch 로 바꾼다).
+//   허브 밖 탭은 지금처럼 탭마다 vcenterId 하나 — 이 목록은 PLATFORM_SCOPE_KEY 칸에만 산다(허브 범위가 다른 탭 · 도구로 새지 않는다).
 const PLATFORM_SCOPE_KEY = 'platform';
-const SHARED_FILTER_KEYS = ['region', 'vcenterId', 'q'];
+const SHARED_FILTER_KEYS = ['region', 'vcenterId', 'vcenterIds', 'q'];
 const pickKeys = (o, keys) => Object.fromEntries(keys.filter((k) => k in o).map((k) => [k, o[k]]));
 const readOvMode = () => { try { return normMode(window.localStorage.getItem(MODE_KEY)); } catch { return null; } };
 const writeOvMode = (m) => { try { window.localStorage.setItem(MODE_KEY, m); } catch { /* 저장 실패는 기능을 막지 않는다 */ } };
@@ -219,15 +222,36 @@ export default function App() {
   // 로그아웃(S-05): 서버에 이 세션의 폐기를 먼저 알린다(복사해 둔 토큰도 무효가 된다). 실패해도 화면 로그아웃은 그대로 진행한다.
   const logout = () => { serverLogout(getToken()); setToken(null); broadcastLogout(); setUser(null); };
 
+  // 전체 점검 129회차 A2: 로그아웃 · 계정 전환이면 이전 계정이 이 창에 남긴 것(원격 콘솔 세션 — 대상 서버 비밀번호를 든다)을 비운다.
+  //   모듈 변수는 Portal 이 언마운트돼도 남는다 — 같은 창에서 다음 사람이 로그인하면 이전 사람의 콘솔 탭 · 비밀번호(Dup)가 그대로였다.
+  useEffect(() => { if (user !== 'loading') noteAccount(accountKeyOf(user)); }, [user]);
+
   // 크로스탭 로그아웃 — 한 탭에서 로그아웃하면 다른 탭도 즉시 세션 종료(sessionStorage 토큰
   // 탭 포함). 이전에는 리스너가 없어 복제 탭이 무기한 인증 상태로 남았다.
+  const userRef = useRef(user);
+  userRef.current = user;
   useEffect(() => {
+    let seq = 0;
     const onStorage = (e) => {
       // 다른 탭의 로그아웃 — 이 탭이 따로 들고 있던 토큰(sessionStorage)도 서버에서 폐기한다(같은 토큰이면 이미 폐기돼 401 — 무해).
-      if (e.key === LOGOUT_BROADCAST_KEY) { serverLogout(getToken()); setToken(null); setUser(null); }
+      if (e.key === LOGOUT_BROADCAST_KEY) { serverLogout(getToken()); setToken(null); setUser(null); seq += 1; return; }
+      // 전체 점검 129회차 A4: 다른 탭이 토큰을 바꿨다(로그인 · 연장). 이 탭은 저장소 토큰을 그때그때 읽으므로 요청은 이미 새 토큰으로 나간다 —
+      //   새 토큰의 주인이 지금 화면의 계정과 다르면 화면(이름 · 역할 · 메뉴 · 버튼 게이팅)을 그 계정으로 바꾼다(Portal 은 key 로 새로 마운트).
+      //   예전에는 로그아웃 방송 없이 계정이 바뀌면(세션 만료 401 뒤 다른 계정 로그인 · ‘이 탭만’ 로그인 탭 옆에서 유지 로그인) 이전 계정 화면이
+      //   새 계정의 토큰으로 계속 돌았다. 못 읽었거나 같은 계정이면 그대로 둔다(무효 토큰이면 다음 요청의 401 이 로그아웃시킨다).
+      if (e.key === TOKEN_KEY && e.newValue && e.newValue !== e.oldValue) {
+        const cur = userRef.current;
+        if (!cur || cur === 'loading' || !getToken()) return;
+        const my = ++seq;
+        fetchMe().then((me) => {
+          if (my !== seq || tokenChangeAction(userRef.current, me) !== 'switch') return;   // 그사이 또 바뀌었으면 마지막 것만
+          noteAccount(accountKeyOf(me));
+          setLoginNotice(''); setUser(me);
+        }).catch(() => { /* 못 읽음 — 판정하지 않는다 */ });
+      }
     };
     window.addEventListener('storage', onStorage);
-    return () => window.removeEventListener('storage', onStorage);
+    return () => { seq += 1; window.removeEventListener('storage', onStorage); };
   }, []);
 
   // 전역 권한 접근자(api.can/toolAllowed)에 현재 사용자를 반영 — 버튼/도구 게이팅이 참조한다.
@@ -240,7 +264,9 @@ export default function App() {
     // 세션이면 hang 기록에도 남는다(토큰이 없으면 보고하지 않는다).
     return <div className="login-screen"><Loading label="포탈 시작" /></div>;
   }
-  if (!user) return <Login onSuccess={(u) => { setLoginNotice(''); setUser(u); }} notice={loginNotice} setup={authCfg} />;
+  // 로그인은 setUser **전에** 계정을 알린다(다른 탭 전환 경로와 같다). 아래 [user] 효과에 맡기면 Portal 과 그 안의 화면(VM 분석 등)이 같은 커밋에
+  //   마운트돼 자식 효과가 먼저 구독 · 요청한 뒤에 비우기가 돌아, 새 계정의 첫 구독이 지워진 칸에 묶인 채 남았다(dbg3221). 효과는 같은 열쇠라 비우지 않는다.
+  if (!user) return <Login onSuccess={(u) => { noteAccount(accountKeyOf(u)); setLoginNotice(''); setUser(u); }} notice={loginNotice} setup={authCfg} />;
   // 고권한 계정이 OTP 미등록 상태로 로그인 → 등록을 마칠 때까지 이 화면에 고정(서버도 API 차단).
   if (user.mustEnrollOtp) {
     return <ForceOtpEnroll user={user} onExit={(completed) => {
@@ -255,7 +281,7 @@ export default function App() {
         <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} onClick={() => window.location.reload()}>새로고침</button>
       </div></div>
     }>
-      <Portal user={user} onLogout={logout} />
+      <Portal key={accountKeyOf(user) || 'anon'} user={user} onLogout={logout} />
       {/* 접속 공지 팝업(v2.722) — 로그인 뒤에만(무인증 면을 늘리지 않는다). 기본 화면·콘솔 모두 위에 뜬다. */}
       <Suspense fallback={null}><NoticePopup username={user.username || ''} /></Suspense>
       {/* 세션 수명 만료 경고·연장(v2.428) — 유휴 로그아웃과는 별개 축이다.
@@ -309,6 +335,8 @@ function Portal({ user, onLogout }) {
   const [tabFilters, setTabFilters] = useState({}); // { [tabId]: { region, vcenterId, q } }
   const [menuFilter, setMenuFilter] = useState({}); // { [tabId]: value }
   // v2.915 허브 교차 링크 — 호스트 표의 VM 수 → VM 탭을 그 호스트로(서버 /vms?host) · VM 표의 호스트 → 호스트 탭을 그 이름으로(화면 거르기).
+  // v3.19.0: 허브 바로가기 찾기 글자 — 메모리만(저장하지 않는다) · 범위 바의 공용 검색 q 와 별개. 칩(PlatformHub)과 vCenter 카드(VCenters)를 좁힌다.
+  const [chipQuery, setChipQuery] = useState('');
   const [vmHost, setVmHost] = useState('');
   const [hostFocusName, setHostFocusName] = useState('');
   const [showNotes, setShowNotes] = useState(false);
@@ -329,21 +357,25 @@ function Portal({ user, onLogout }) {
   const scopeKeyOf = (t) => (isPlatformTab(t) ? PLATFORM_SCOPE_KEY : t);
   const cur = { ...(tabFilters[tab] || {}), ...pickKeys(tabFilters[scopeKeyOf(tab)] || {}, SHARED_FILTER_KEYS) };
   const region = cur.region || '';
-  const vcenterId = cur.vcenterId || '';
+  // v3.20.0: 고른 법인 목록 — 허브 탭은 칸의 vcenterIds, 그 밖 탭은 자기 vcenterId 하나(0 · 1곳 목록). vcenterId 는 정확히 1곳일 때만 그 id(범위 바 선택 칸 · 옛 값을 읽는 곳).
+  const vcenterIds = isPlatformTab(tab) ? normScopeIds(cur.vcenterIds) : normScopeIds(cur.vcenterId ? [cur.vcenterId] : []);
+  const vcenterId = isPlatformTab(tab) ? singleScopeId(vcenterIds) : (cur.vcenterId || '');
+  const vcenterIdsKey = JSON.stringify(vcenterIds);   // 메모 의존성 — 배열 그대로 싣는다(쉼표로 잇고 다시 나누면 쉼표가 든 id 가 둘로 갈린다)
   const q = cur.q || '';
   const qNotes = !!cur.qNotes; // 메모 포함 검색 (기본 꺼짐)
   const qIpms = !!cur.qIpms;   // IPMS(IP 스캔) 자료 포함 — IP 검색 시 해당 대역 스캔 IP도 표시
   const patchFilter = (patch, t = tab) => setTabFilters((m) => {
     const sk = scopeKeyOf(t);
-    const shared = pickKeys(patch, SHARED_FILTER_KEYS);
+    // v3.20.0: 허브 칸에는 목록만 — 옛 단일 patch({ vcenterId })는 한 곳 목록으로(카드 · VM 표 · 선택 칸 · ⌘K 인계 · 필터 초기화가 그대로 산다).
+    const shared = sk === PLATFORM_SCOPE_KEY ? hubScopePatch(pickKeys(patch, SHARED_FILTER_KEYS)) : pickKeys(patch, SHARED_FILTER_KEYS);
     const own = Object.fromEntries(Object.entries(patch).filter(([k]) => !SHARED_FILTER_KEYS.includes(k)));
     const n = { ...m };
     if (Object.keys(shared).length) n[sk] = { ...(n[sk] || {}), ...shared };
     if (Object.keys(own).length) n[t] = { ...(n[t] || {}), ...own };
     return n;
   });
-  const setRegion = (v) => patchFilter({ region: v, vcenterId: '' });
-  const setVcenterId = (v) => patchFilter({ vcenterId: v });
+  // v3.20.0: 허브 탭은 리전을 바꾸면 그 리전 밖 선택만 푼다(scopeVcPatch 와 같은 규칙 — idsInRegion). 그 밖 탭은 지금처럼 vCenter 를 비운다.
+  const setRegion = (v) => patchFilter(isPlatformTab(tab) ? { region: v, vcenterIds: idsInRegion(vcenterIds, vcenters, v) } : { region: v, vcenterId: '' });
   const setQ = (v) => patchFilter({ q: v });
   const setQNotes = (v) => patchFilter({ qNotes: v });
   const setQIpms = (v) => patchFilter({ qIpms: v });
@@ -532,7 +564,7 @@ function Portal({ user, onLogout }) {
       return;
     }
     // v2.994(설계 docs/design/server-menu-rename): 탭 여러 개를 맡는 항목도 '마지막으로 본 탭' 이 아니라 그 항목의 처음 허용 탭(visibleMenu 의 entryTab)으로 —
-    //   Virtual Machine(VM) → VM 탭(inv.vms 가 없으면 vCenter 탭) · Hypervisor → 호스트 탭. vCenter 탭으로 가면 드릴다운을 닫는 재클릭 신호는 그대로다.
+    //   Virtual Machine → vCenter 카드 탭(v3.19.0 — dashboard 권한이 없으면 VM 탭) · Hypervisor → 호스트 탭. vCenter 탭으로 가면 드릴다운을 닫는 재클릭 신호는 그대로다.
     const dest = menuTabOf(item);
     if (!dest) return;
     if (dest === 'vcenters') setPlatformResetSeq((n) => n + 1);
@@ -545,24 +577,19 @@ function Portal({ user, onLogout }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, user]);
 
+  // v3.20.0: 범위 쿼리 조각은 platformText.hubScopeQuery 하나(1곳 vcenterId · 2곳 이상 vcenterIds · 0곳이면 region) — Hosts · HostsCorp · Vms(목록 · 법인별 · 조치 필요) · /platform/summary 가 이 값을 그대로 싣는다.
+  //   의존성에 목록 키(vcenterIdsKey — JSON)를 둬 목록이 바뀌면 새 객체 → usePolling · fetchJson 쪽 키(JSON)가 바뀌어 새로 부르고 옛 응답은 버린다.
   const filters = useMemo(() => {
-    const f = {};
-    if (vcenterId) f.vcenterId = vcenterId;
-    else if (region) f.region = region;
+    const f = { ...hubScopeQuery({ vcenterIds: JSON.parse(vcenterIdsKey), region }) };
     if (q) { f.q = q; if (qNotes) f.notes = '1'; if (qIpms) f.qIpms = '1'; }
     const mf = MENU_FILTERS[tab];
     if (mf && menuFilter[tab]) f[mf.key] = menuFilter[tab];
     if (tab === 'vms' && vmHost) f.host = vmHost;   // v2.915 호스트 표에서 넘어온 '그 호스트의 VM'
     return f;
-  }, [vcenterId, region, q, qNotes, qIpms, tab, menuFilter, vmHost]);
+  }, [vcenterIdsKey, region, q, qNotes, qIpms, tab, menuFilter, vmHost]);
 
   // Scope (region/vCenter) without the free-text query, used by Summary.
-  const scope = useMemo(() => {
-    const s = {};
-    if (vcenterId) s.vcenterId = vcenterId;
-    else if (region) s.region = region;
-    return s;
-  }, [vcenterId, region]);
+  const scope = useMemo(() => hubScopeQuery({ vcenterIds: JSON.parse(vcenterIdsKey), region }), [vcenterIdsKey, region]);
 
 
   // 상단 필터바(리전·vCenter·이름 검색)를 쓰지 않는 탭 — 화면이 자체 필터를 갖거나 필터 대상이
@@ -602,15 +629,18 @@ function Portal({ user, onLogout }) {
   );
   const filterBar = (showFilters && (
           <div className="filters">
-            <Select className="select" value={region} onChange={(e) => { setRegion(e.target.value); setVcenterId(''); }}>
+            <Select className="select" value={region} onChange={(e) => setRegion(e.target.value)}>
               <option value="">전체 리전</option>
               {/* scope.regions 가 지정된 사용자는 허용 리전만 선택 가능(데이터도 서버에서 동일 제한). */}
-              {((user.scope?.regions?.length) ? REGIONS.filter((r) => user.scope.regions.includes(r)) : REGIONS)
-                .map((r) => <option key={r} value={r}>{r}</option>)}
+              {/* v3.13.6: 정해진 4리전 + 등록 데이터에만 있는 리전('Unknown' 등) — 그런 vCenter 도 리전으로 거른다(도구의 리전 선택과 같은 범위) */}
+              {scopeRegionOptions(REGIONS, vcenters, user.scope?.regions).map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
             </Select>
-            <Select className="select" value={vcenterId} onChange={(e) => setVcenterId(e.target.value)}>
-              <option value="">전체 vCenter</option>
-              {(vcenters || []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+            {/* v3.13.0: 리전을 골랐으면 그 리전 vCenter 만 · 리전 밖 vCenter 를 고르면(다른 경로의 값) 리전을 비운다 — 허브 카드와 본문이 엇갈리지 않게 */}
+            {/* v3.20.0: 허브에서 법인을 2곳 이상 골랐으면 ‘법인 N곳 선택’(고를 수 없는 option) — 칸에서 한 곳을 고르면 목록이 그 한 곳으로, ‘전체’ 는 전부 해제 */}
+            <Select className="select" value={multiPickText(vcenterIds) ? MULTI_PICK_VALUE : vcenterId} onChange={(e) => { if (e.target.value !== MULTI_PICK_VALUE) patchFilter(scopeVcPatch(vcenters, region, e.target.value)); }}>
+              <option value="">{region ? `${regionText(region)} 전체` : '전체 vCenter'}</option>
+              {multiPickText(vcenterIds) && <option value={MULTI_PICK_VALUE} disabled>{multiPickText(vcenterIds)}</option>}
+              {scopeVcOptions(vcenters, region, vcenterId).map((v) => <option key={v.id} value={v.id}>{v.outside ? `${v.name} (리전 밖)` : v.name}</option>)}
             </Select>
             {/* v2.915: 허브 세 탭은 공용 바가 똑같다(범위 · 검색 · 안내) — 탭 고유 조건(상태 · 전원 · 메모 · IPMS)은 그 탭의 탭 줄 오른쪽으로 내렸다 */}
             {MENU_FILTERS[tab] && !platformOn && (
@@ -633,7 +663,7 @@ function Portal({ user, onLogout }) {
               </label>
             )}
             {platformOn && <span className="muted ph-scope-note" style={{ fontSize: 11.5 }}>{SCOPE_NOTE}</span>}
-            {(region || vcenterId || q || menuFilter[tab] || (tab === 'vms' && vmHost) || (tab === 'hosts' && hostFocusName)) && (
+            {(region || vcenterIds.length > 0 || q || menuFilter[tab] || (tab === 'vms' && vmHost) || (tab === 'hosts' && hostFocusName)) && (
               <button className="tab" onClick={() => { patchFilter({ region: '', vcenterId: '', q: '', qNotes: false, qIpms: false }); setMenuFilter((m) => ({ ...m, [tab]: '' })); setVmHost(''); setHostFocusName(''); }}>필터 초기화</button>
             )}
           </div>
@@ -658,12 +688,14 @@ function Portal({ user, onLogout }) {
             : <Overview onSelectSite={selectSite} onGotoTab={setTab} modeToggle={ovToggle} />)}
           {tab === 'summary' && <Summary scope={scope} onGotoTab={setTab} />}
           {/* v2.915: vCenter 탭은 허브 범위(리전 · vCenter · 검색)로 카드를 거르고, 카드의 호스트 · VM 수는 그 법인 범위로 탭을 바꾼다(죽은 prop 이던 onSelectSite 를 실제로 쓴다) */}
-          {tab === 'vcenters' && <VCenters onSelectSite={selectSite} onGoVms={(id) => goVms(id)} resetSignal={platformResetSeq} scope={{ region, vcenterId, q }} summary={platformSummary} />}
+          {tab === 'vcenters' && <VCenters onSelectSite={selectSite} onGoVms={(id) => goVms(id)} resetSignal={platformResetSeq} scope={{ region, vcenterIds, q }} chipQuery={chipQuery} onChipQuery={setChipQuery} />}
           {tab === 'svcmon' && <SvcMonitor />}
           {tab === 'ipam' && <Ipam />}
-          {tab === 'hosts' && <Hosts filters={filters} cond={platformCond} nameFocus={hostFocusName} onNameFocus={setHostFocusName} onGoVms={(host) => goVms('', host)} />}
+          {tab === 'hosts' && <Hosts filters={filters} cond={platformCond} nameFocus={hostFocusName} onNameFocus={setHostFocusName} onGoVms={(host) => goVms('', host)}
+            scopeIds={vcenterIds} scopeRegion={region} onScopeIds={(ids) => patchFilter({ vcenterIds: ids })} />}{/* v3.22.0: Hypervisor 분석의 지도 칸 · 지역 줄도 바로가기 선택을 켜고 끈다(VM 쪽과 같은 연결) */}
           {/* v2.909: 법인별 탭에서 법인을 고르면 이 탭(vms)의 vCenter 필터를 바꾼다(현황 탭으로 돌아간다) · v2.915: 호스트 칩 · 호스트 이름 → 호스트 탭 */}
-          {tab === 'vms' && <Vms filters={filters} onPickVcenter={(id) => patchFilter({ vcenterId: id, region: '' }, 'vms')} cond={platformCond} host={vmHost} onHost={setVmHost} onGoHost={goHostsByName} />}
+          {tab === 'vms' && <Vms filters={filters} onPickVcenter={(id) => patchFilter({ vcenterId: id, region: '' }, 'vms')} cond={platformCond} host={vmHost} onHost={setVmHost} onGoHost={goHostsByName}
+            scopeIds={vcenterIds} scopeRegion={region} onScopeIds={(ids) => patchFilter({ vcenterIds: ids })} />}{/* v3.21.0: 분석 보기의 지도 칸 · 지역 줄이 바로가기 선택(허브 칸 vcenterIds)을 켜고 끈다 */}
           {tab === 'datastores' && <Datastores filters={filters} />}
           {tab === 'networks' && <Networks filters={filters} />}
           {tab === 'alarms' && <Alarms filters={filters} />}
@@ -859,7 +891,7 @@ function Portal({ user, onLogout }) {
           {platformOn && (
             <PlatformHub tab={tab} tabs={PLATFORM_TAB_KEYS.filter((t) => isAllowed(t))} summary={platformSummary}
               onTab={(t) => { if (t === 'vcenters') setPlatformResetSeq((n) => n + 1); setTab(t); }}
-              vcenters={vcenters} vcenterId={vcenterId} region={region} onPickVcenter={(id) => patchFilter({ vcenterId: id })} />
+              vcenters={vcenters} vcenterIds={vcenterIds} region={region} onToggleVcenter={(id) => patchFilter({ vcenterIds: toggleScopeId(vcenterIds, id) })} onClearVcenters={() => patchFilter({ vcenterIds: [] })} chipQuery={chipQuery} onChipQuery={setChipQuery} />
           )}
 
           {tabBody}

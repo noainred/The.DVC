@@ -15,6 +15,7 @@ import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atom
 import { registerStateFile } from '../util/stateFiles.js';
 import { dayIndex } from '../util/dayKey.js';
 import { linregSlope } from '../util/linreg.js';
+import { envPositive } from '../util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
 
 const CONFIG_DIR = config.configDir;
 // 옮긴 DB 저장 경로(null = configDir 사용). db-location.json → config.dbDir (v2.379).
@@ -88,6 +89,7 @@ const PURPOSES = {
   // ── v2.376~377 신규 ────────────────────────────────────────────────
   'vmperf.json': 'VM 성능 트래킹 설정(보존기간·대상 vCenter)',
   'vm-track.db': 'VM 수량·데이터스토어 사용량 추이(하루 2회 슬롯 스냅샷 + 변경분)',
+  'snap-history.db': 'VM 별 스냅샷 이력(하루 1번 — 스냅샷이 있는 VM · 스냅샷 하나의 생김/없어짐) 400일 — 특수 기능 › 스냅샷 있는 VM(v3.26.0)',
   'capacity.db': '포탈 서버 자신의 리소스(CPU·메모리·디스크·네트워크) 샘플 — 리소스 적정성 진단용',
   'veeam-snap.db': 'Veeam 스냅샷 이벤트(생성·제거만 · 최근 31일) — vCenter 카드 백업 수량·VM 화면 Veeam 백업 시도를 바로 계산',
   'veeam-history.db': 'Veeam 일 단위 이력(라이선스 사용·만료 · 저장소 용량) 400일 — EM 탭 추이·소진 예측(v2.788)',
@@ -124,6 +126,9 @@ const PURPOSES = {
   'focusmon-sessions.json': '서버 집중 모니터링 계속 수집 정의(상태 — 재시작 뒤 이어서 수집할 서버 · 주기, v2.976)',
   'focusmon-keys.json': '서버 집중 모니터링 엣지 공개키 기록(상태 — 엣지가 올린 공개키 · 지문 · 마지막 동기화 시각, v2.976)',
   'focusmon-auth-stops.json': '서버 집중 모니터링 키 로그인 거부 정지 기록(상태 — 거부된 서버는 사람이 다시 연결을 누를 때까지 접속하지 않는다, v2.976)',
+  'focusmon-audit.json': '서버 집중 모니터링 디스크 점검 작업 · 서버별 준비 상태 · 마지막 연결 오류(상태 — 결과 본문은 focusmon DB, v3.11.0)',
+  'focusmon-alert-rules.json': '서버 집중 모니터링 알림 규칙(지표 · 문턱 · 지속 · 대상 · 심각도 — 비밀 없음, v3.16.0)',
+  'focusmon-alert-state.json': '서버 집중 모니터링 알림 판정 상태(규칙 × 서버의 발생 · 보류 · 정상 — 재시작 뒤 알림 폭주를 막는 캐시, v3.16.0)',
   'isidu.db': '아이실론 디렉터리 사용량 이력 — 조사(du)마다 사용자 폴더 전체 크기 + 대상별 최신(v2.736)',
   'isidu-settings.json': '아이실론 디렉터리 사용량 조사 대상(아이실론·경로·주기·실행 노드·보존일 — 비밀 없음, v2.736)',
   'isidu-edge-targets.json': '엣지가 받은 아이실론 디렉터리 사용량 대상 사본(상태 — 원본은 중앙, v2.736)',
@@ -231,6 +236,12 @@ const DETAILS = {
     writer: 'vmtrack 폴러(하루 2회 슬롯 00시·12시 + 수동 스냅샷)',
     retention: 'prune 용 ts 인덱스 유지 — 슬롯 기반이라 증가가 완만',
     note: '전량 로스터를 매 슬롯 적재하지 않고 변경분만 저장한다(5,850 VM·1,100 DS 규모에서 연 수백만 행을 피하기 위함).',
+  },
+  'snap-history.db': {
+    keeps: 'vCenter 별 그날 합계(snap_vcday — 못 읽은 날은 사유만) · 그날 스냅샷이 있던 VM(snap_day) · 스냅샷 하나의 생애(snap_item — 처음 본 날 · 마지막으로 본 날 · 없어진 날).',
+    writer: '스냅샷 이력 폴러(하루 1번 — 기본 3시 뒤, 못 읽은 vCenter 는 같은 날 다시 시도) · vCenter 왕복 없음',
+    retention: '400일(SNAPHIST_RETENTION_DAYS, 30~3650) · 청크 정리',
+    note: '스냅샷이 있는 VM 만 넣는다(전체 VM 을 매일 넣지 않는다). 못 읽은 vCenter 의 날은 0 이 아니라 빠진 날로 남는다. 이 파일이 없으면 추이 · 7일 변화 · 정리된 것만 비고 스냅샷 화면은 그대로다.',
   },
   'veeam-history.db': {
     keeps: 'B&R 서버별 라이선스 사용·만료 하루 한 점(license_daily) · Enterprise Manager 저장소별 용량·여유 하루 한 점(repo_daily).',
@@ -458,7 +469,7 @@ export function recordDbSizeSample(now = Date.now(), { persist = true } = {}) {
  *  - 감소 추세(prune 직후 등)면 예측은 현재 크기로 둔다(shrinking:true). 크게 줄어든 지점(80% 미만) 앞의 일 표본은 쓰지 않는다.
  *  - confidence: 관측 구간 길이로 low/medium/high.
  */
-const MIN_FORECAST_SPAN_MS = Number(process.env.PORTAL_DB_MIN_FORECAST_MS) || 3_600_000; // 1시간
+const MIN_FORECAST_SPAN_MS = envPositive(process.env.PORTAL_DB_MIN_FORECAST_MS, 3_600_000); // 1시간
 
 function forecastFrom(nowBytes, perDayBytes, spanMs) {
   if (!(spanMs >= MIN_FORECAST_SPAN_MS) || !Number.isFinite(perDayBytes)) {

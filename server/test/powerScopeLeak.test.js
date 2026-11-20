@@ -4,6 +4,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+test.after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 // 확정 버그 회귀 방지(2026-08-30) — 전력 집계의 scope 누수.
 //
 // 배경: allMeasuredPower() 는 `hosts` 인자와 무관하게 loadRegistry()/OME/원격의 **전 등록
@@ -13,7 +20,7 @@ import path from 'node:path';
 // 전사 총량을 범위 계정에 노출. server/CLAUDE.md '귀속 없는 데이터는 범위 계정 미노출' 위반.
 //
 // 라우트는 범위 제한 계정에 keepMappedMeasured 를 **설정과 무관하게 강제**해 이를 막는다.
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'power-scope-'));
+const tmp = tmpDir('power-scope-');
 process.env.CONFIG_DIR = tmp;
 
 const { keepMappedMeasured } = await import('../src/idrac/attribution.js');

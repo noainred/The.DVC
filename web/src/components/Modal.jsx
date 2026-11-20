@@ -5,6 +5,7 @@
 // 남은 소비자의 모듈 평가 시점 참조에서 TDZ 크래시 위험 — 검증자 지적).
 import React from 'react';
 import EscClose from './EscClose.jsx';
+import { backdropClose } from './backdropClose.js'; // 95회차: 창 안에서 끌다 배경에서 떼면 닫히던 것 — 누름 · 뗌 모두 배경일 때만
 
 /** Simple centered modal. Click the backdrop, press ESC, or 닫기 to close.
  *  bodyScroll=false: 본문 자체는 스크롤하지 않고 flex 컬럼이 된다 — 내부에 자기 스크롤을 갖는
@@ -23,9 +24,10 @@ export function Modal({ title, onClose, children, width = 560, resizable = false
     ? { width, maxWidth: FIT_W, height: 'min(70vh, 560px)', maxHeight: FIT_H, minWidth: `min(${Number(minWidth) || 0}px, ${FIT_W})`, minHeight: `min(${Number(minHeight) || 0}px, ${FIT_H})`, resize: 'both' }
     : { maxWidth: width, maxHeight: '88vh' };
   return (
-    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="modal-overlay" {...backdropClose(onClose)}>
       <EscClose onClose={onClose} />
-      <div className="modal card" style={{ ...resizeStyle, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      {/* 95회차: 보조기기용 대화상자 표지 — 제목이 글자면 이름으로 싣는다 */}
+      <div className="modal card" role="dialog" aria-modal="true" aria-label={typeof title === 'string' ? title : undefined} style={{ ...resizeStyle, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <div className="flex between" style={{ marginBottom: 12, flex: '0 0 auto', gap: 10 }}>
           <b style={{ fontSize: 15, minWidth: 0 }}>{title}</b>
           {/* v2.736: 긴 제목이 좁은 화면에서 버튼을 눌러 '닫/기' 두 줄로 쪼개지 않게 — 버튼은 줄어들지 않는다 */}

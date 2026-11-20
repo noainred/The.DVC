@@ -66,7 +66,7 @@ before(async () => {
   AGENT_TOKEN_G = issueAgentToken('edgeG').token;
   AGENT_TOKEN_S = issueAgentToken('edgeS').token;
 });
-after(() => { srv?.close(); });
+after(() => { srv?.close(); fs.rmSync(CFG, { recursive: true, force: true }); }); // v3.18.8: 임시 설정 폴더도 지운다
 
 const post = (p, body, { token = TOKEN, headers = {} } = {}) => fetch(`${base}${p}`, {
   method: 'POST',
@@ -174,9 +174,16 @@ test('CEN2603-03 — 원장 행이 14만이어도 buildIpamRows 가 RangeError �
     try { const r = buildIpamRows({ hosts: [], vms: [], vcenters: [], datastores: [], networks: [], generatedAt: 'g1' }); console.log('ROWS=' + r.rows.length); }
     catch (e) { console.log('ERR=' + e.constructor.name + ':' + e.message); }
     process.exit(0);`;
-  const out = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
-    env: { ...process.env, CONFIG_DIR: cfg, IPAM_SCAN_RESULTS_MAX: '300000' }, encoding: 'utf8', timeout: 60_000,
-  });
+  let out;
+  try {
+    out = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+      env: { ...process.env, CONFIG_DIR: cfg, IPAM_SCAN_RESULTS_MAX: '300000' }, encoding: 'utf8', timeout: 60_000,
+    });
+  } finally {
+    // v3.18.8: 이 폴더(약 42MB — 14만 행 원장)를 지우지 않아 전량 실행마다 /tmp 에 쌓였다(컨테이너에서 1,636개 · 8.7GB 실측 — 디스크 여유가 5% 아래로
+    //   내려가 focusmon 기록기가 '여유 부족' 으로 멈추고 focusMonHistory3130 이 실패했다).
+    fs.rmSync(cfg, { recursive: true, force: true });
+  }
   assert.match(out.stdout, /ROWS=140000/, `${out.stdout}\n${out.stderr}`);
 });
 

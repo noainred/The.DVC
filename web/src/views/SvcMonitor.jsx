@@ -10,7 +10,7 @@ import BulkTab from './svcmon/BulkTab.jsx';           // 통합 등록 마법사
 import EscClose from '../components/EscClose.jsx';
 // v2.295 분리 모듈(1차 모듈화 감사 확정 #1·#5): 상수 카탈로그 · 트리/집계 순수 함수 · 점검 마법사.
 import { STATUS, METHOD, statusOf, methodText } from './svcmon/constants.js';
-import { buildTree, statsOf, matchNode, summarize } from './svcmon/tree.js';
+import { buildTree, statsOf, matchNode, summarize, avgReplyMs } from './svcmon/tree.js';
 import { TestWizard } from './svcmon/TestWizard.jsx';
 import { blankOr } from './blankOr.js';
 import { edgeCardKind, edgeCardWarn, edgeCardMeta, edgeNoReportTotal } from './svcmon/edgeCardText.js';
@@ -292,10 +292,7 @@ export default function SvcMonitor() {
   }).filter((g) => g.tests.length > 0);   // 결과 0인 대상은 그룹 헤더도 숨김(README)
 
   const shown = groups.reduce((a, g) => a + g.tests.length, 0);
-  const avgMs = (() => {
-    const v = groups.flatMap((g) => g.tests.map((x) => x.result?.ms).filter((n) => n != null));
-    return v.length ? Math.round(v.reduce((a, b) => a + b, 0) / v.length) : 0;
-  })();
+  const avgMs = avgReplyMs(groups.flatMap((g) => g.tests.map((x) => x.result?.ms)));   // 26회차 F11: 표본이 없으면 null('—')
   // v2.928: 대상을 고르면 내부 id(g-4c30c45c) 대신 '경로\이름' 을 보인다(예전에는 sel 문자열을 그대로 붙였다).
   const selPath = (() => {
     if (!sel) return 'Root';
@@ -315,11 +312,11 @@ export default function SvcMonitor() {
     try {
       if (modal.kind === 'target') {
         const body = { ...form, kind: mode };
-        if (modal.edit) requireChanged(await putJson(`/svcmon/targets/${modal.edit}`, body)); else await postJson('/svcmon/targets', body);
+        if (modal.edit) requireChanged(await putJson(`/svcmon/targets/${modal.edit}`, body)); else requireChanged(await postJson('/svcmon/targets', body));   // 105회차 A8: 409(감시 대상 파일 읽기 오류)는 본문으로 온다
       } else {
         const body = { ...form, port: form.port || undefined, intervalSec: Number(form.intervalSec) || 60 };
         if (modal.edit) requireChanged(await putJson(`/svcmon/targets/${modal.targetId}/tests/${modal.edit}`, body));
-        else await postJson(`/svcmon/targets/${modal.targetId}/tests`, body);
+        else requireChanged(await postJson(`/svcmon/targets/${modal.targetId}/tests`, body));
       }
       setModal(null); refresh();
     } catch (e) { setErr(e.message || String(e)); } finally { setBusy(false); }
@@ -368,7 +365,7 @@ export default function SvcMonitor() {
     const n = (name || '').trim();
     if (!n) return;
     try {
-      await postJson('/svcmon/folders', { kind: mode, path: folderPath ? `${folderPath}\\${n}` : n });
+      requireChanged(await postJson('/svcmon/folders', { kind: mode, path: folderPath ? `${folderPath}\\${n}` : n }));   // 128회차: 409(저장소 읽기 오류) 본문을 삼키지 않는다
       setExpanded((e) => ({ ...e, [folderPath]: true }));
       refresh();
     } catch (e) { window.alert(e.message); }
@@ -461,7 +458,7 @@ export default function SvcMonitor() {
     if (refPath === dragPath) return;
     const destParent = parentOf(refPath);
     if (parentOf(dragPath) !== destParent) {
-      await postJson('/svcmon/folders/move', { kind: mode, path: dragPath, newParent: destParent });
+      requireChanged(await postJson('/svcmon/folders/move', { kind: mode, path: dragPath, newParent: destParent }));   // 128회차
       refresh();
       return;
     }
@@ -480,7 +477,7 @@ export default function SvcMonitor() {
     try {
       if (item.type === 'folder') {
         if (zone === 'inside') {
-          await postJson('/svcmon/folders/move', { kind: mode, path: item.path, newParent: id });   // id='' → 최상위
+          requireChanged(await postJson('/svcmon/folders/move', { kind: mode, path: item.path, newParent: id }));   // id='' → 최상위 · 128회차: 409 본문을 삼키지 않는다
           if (id) setExpanded((ex) => ({ ...ex, [id]: true }));
           refresh();
         } else {
@@ -827,7 +824,7 @@ export default function SvcMonitor() {
 
           <div className="pc-footer">
             <span>SHOWN {shown} / {summary.total}</span>
-            <span>AVG REPLY {avgMs} ms</span>
+            <span>AVG REPLY {avgMs == null ? '—' : `${avgMs} ms`}</span>
             {/* 다중 노드에서는 전역 sweep 시각이 의미가 없다 — 이 포탈 로컬 실행 기준임을 명시 */}
             <span>LOCAL SWEEP {data?.lastSweep ? new Date(data.lastSweep).toLocaleTimeString('ko-KR', { hour12: false }) : '—'}</span>
             <span className="pc-live">● LIVE POLLING</span>
@@ -916,6 +913,8 @@ export default function SvcMonitor() {
         <div className="pc-overlay" onClick={() => setLogCfg(null)}>
           <div className="pc-modal" style={{ width: 'min(600px, 94vw)' }} onClick={(e) => e.stopPropagation()}>
             <div className="pc-modal-head"><b>⚙ 점검 로그 설정 (CSV)</b><button className="pc-x" onClick={() => setLogCfg(null)}>✕</button></div>
+            {/* 전체 점검 30회차 H: 설정 파일을 못 읽는 동안 아래 값은 기본값이고 CSV 기록은 멈춰 있다 — 그 사실을 이 모달에서도 말하고 저장을 잠근다 */}
+            {logCfg.settingsUnreadable ? <div className="svc-warn" style={{ margin: '8px 0' }}>로그 보관 설정 파일을 읽지 못해 지금 CSV 기록이 멈춰 있습니다(점검 · 알림은 계속). 아래 값은 저장된 값이 아니라 기본값입니다 — 설정 › 서비스 점검에서 확정하거나 손상 보존본을 되돌린 뒤 재시작하세요.</div> : null}
             <div className="pc-form">
               <div className="pc-lrow"><span>로그 기록</span>
                 <div className="pc-seg">
@@ -944,7 +943,7 @@ export default function SvcMonitor() {
                 CSV 는 UTF-8 BOM 이라 엑셀에서 바로 열립니다.</div>
               <div className="pc-logfiles">
                 <div>저장 위치: <b>{logCfg.dir}</b></div>
-                <div>파일 {logCfg.fileCount}개 · 합계 {(logCfg.totalBytes / 1048576).toFixed(1)} MB
+                <div>{logCfg.filesUnreadable ? '파일 목록을 읽지 못했습니다(권한 · 입출력 오류)' : `파일 ${logCfg.fileCount}개 · 합계 ${(logCfg.totalBytes / 1048576).toFixed(1)} MB`}
                   {logCfg.stats && <> · 기록 {logCfg.stats.written?.toLocaleString?.() || 0}행
                     {logCfg.stats.dropped ? ` · 폐기 ${logCfg.stats.dropped}행` : ''}
                     {logCfg.stats.buffered ? ` · 대기 ${logCfg.stats.buffered}행` : ''}</>}</div>
@@ -960,7 +959,7 @@ export default function SvcMonitor() {
               </div>
               <div className="pc-modal-actions">
                 <button className="pc-btn" onClick={() => setLogCfg(null)}>닫기</button>
-                <button className="pc-btn accent" disabled={busy} onClick={saveLogSettings}>{busy ? '저장 중…' : '저장'}</button>
+                <button className="pc-btn accent" disabled={busy || !!logCfg.settingsUnreadable} onClick={saveLogSettings}>{busy ? '저장 중…' : '저장'}</button>
               </div>
             </div>
           </div>
@@ -1034,7 +1033,7 @@ export default function SvcMonitor() {
                   {isAdminFull && (
                     <button type="button" className="pc-btn" onClick={async () => {
                       if (!window.confirm(`'${detail.target.name}' 의 설정 연동을 해제할까요? 대상·점검은 그대로 남고 수동 대상이 됩니다.`)) return;
-                      try { await postJson(`/svcmon/settings-sync/detach/${detail.target.id}`, {}); setDetail(null); refresh(); } catch (e) { window.alert(e.message); }
+                      try { requireChanged(await postJson(`/svcmon/settings-sync/detach/${detail.target.id}`, {})); setDetail(null); refresh(); } catch (e) { window.alert(e.message); }
                     }}>연동 해제(수동 대상으로)</button>
                   )}
                 </div>

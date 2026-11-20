@@ -13,6 +13,17 @@ export const STATE_TEXT = Object.freeze({
 });
 export const VIA_TEXT = Object.freeze({ dns: '역방향 DNS', mdns: 'mDNS', netbios: 'NetBIOS', fwd: '정방향 DNS' });
 
+/**
+ * 점검 반복 1회차 — 원격 수집 서버(엣지)가 맡은 서버인데 그 수집 서버를 등록부에서 확인하지 못했다(서버 suggestAgentOf agentUnknown).
+ *   등록하면 엣지 칸이 비어 ‘중앙 직접’ 등록이 된다 — 사람이 켜기 전에 알 수 있게 상태 칸에 **짧은 한 줄**(긴 조치는 마우스를 올리면 — 표 폭을 넓히지 않게). 그 밖은 ''.
+ */
+export const AGENT_UNKNOWN_TEXT = Object.freeze({
+  unread: '어느 엣지인지 모름(수집 서버 등록부 못 읽음)',
+  'not-found': '어느 엣지인지 모름(등록부에 그 수집 서버 없음)',
+});
+export const AGENT_UNKNOWN_HINT = '등록하면 엣지 칸이 비어 중앙 직접으로 들어갑니다 — 켜기 전에 베어메탈 스토리지에서 엣지를 지정하세요.';
+export const agentNoteOf = (r) => (r && Object.hasOwn(AGENT_UNKNOWN_TEXT, r.agentUnknown) ? AGENT_UNKNOWN_TEXT[r.agentUnknown] : '');
+
 /** 거르기 — '못 찾음' 은 이름 없음 · SSH 닫힘을 함께 묶는다(제안이 나오지 않은 행). */
 export function suggestRowsOf(rows, filter) {
   const list = Array.isArray(rows) ? rows : [];

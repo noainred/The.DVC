@@ -17,6 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { fileMissing } from '../util/fileMissing.js';   // 134회차: '정말 없는가'(ENOENT 만 — existsSync 는 stat 실패도 false)
 import { makeSettingsLoadError } from '../util/settingsLoadError.js';
 import { clampSetting } from '../util/clampSetting.js'; // v2.613 DEPS2613-12 · RUNTIME2613-08: 숫자 설정 정규화는 하나(빈 칸 = 미지정)
 import crypto from 'node:crypto';
@@ -150,6 +151,17 @@ const STORE_LIMITS = Object.freeze({
   rawDays: [7, 365, false], hourlyDays: [30, 730, false], devRawDays: [1, 60, false], devHourlyDays: [7, 365, false],
   deviceMax: [1, 256, false], blkqMax: [1, 1_024, false], peakWindowS: [0, 30, false], peakCycleRatio: [0.3, 0.95, true], portTolPct: [0.5, 100, true],
 });
+/**
+ * 점검 반복 2회차 재확인 R3: 피크 창 길이(초) 값 하나를 **설정이 허용하는 범위의 정수**로 — 그 밖이면 null(지어내지 않는다 · 상한은 STORE_LIMITS 하나).
+ *   엣지 장치 응답의 행 값(peakWindowS) · 설정 상한(peakWindowCapS)을 중앙이 정제할 때 쓴다(central/bmUsageEdgePull.js sanitizeDevicesBody).
+ *   수 또는 10진 숫자 글자만 받는다 — ‘1e9’ · ‘0x10’ · 30.5 · 음수 · 불리언 · 배열은 null(엣지가 보낸 것은 정제한다 — 루트 규약 ‘문자열 수치는 수로’ 는 10진 표기만).
+ */
+export function peakWindowSOf(v) {
+  const [min, max] = STORE_LIMITS.peakWindowS;
+  const x = typeof v === 'number' ? v : (typeof v === 'string' && /^\d{1,6}$/.test(v.trim()) ? Number(v.trim()) : NaN);
+  return Number.isInteger(x) && x >= min && x <= max ? x : null;
+}
+
 /** 저장 구조 설정 정규화(순수) — 모르는 키는 버리고, 빈 칸은 기본값(clampSetting 규약). sha256 은 64자리 16진수만(아니면 ''). */
 export function normalizeStoreSettings(raw = {}) {
   const src = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
@@ -163,6 +175,17 @@ export function normalizeStoreSettings(raw = {}) {
   out.peakSamplerSha256 = /^[0-9a-f]{64}$/.test(sha) ? sha : '';
   return out;
 }
+/** 원시 · 일 롤업 보존(일) 범위 — normalizeSettings 와 보존 상한(RETENTION_MAX)이 같은 표를 쓴다. */
+const RAW_RETENTION_RANGE = Object.freeze([7, 365]);
+const DAILY_RETENTION_RANGE = Object.freeze([30, 365 * 10]);
+/**
+ * 83회차(82회차 F2 반증): 설정이 허용하는 **가장 긴 보존**(일) — 설정 파일을 못 읽은 동안 보존 정리가 이 값으로만 지운다
+ *   (관리자가 둘 수 있는 어떤 값보다 길어 되돌릴 수 없는 삭제가 없고, 정리를 통째로 멈춰 원시 5분 파일이 무상한으로 자라지도 않는다).
+ */
+export const RETENTION_MAX = Object.freeze({
+  raw: Math.min(RAW_RETENTION_RANGE[1], STORE_LIMITS.rawDays[1]), legacyRaw: RAW_RETENTION_RANGE[1], d1: DAILY_RETENTION_RANGE[1],
+  h1: STORE_LIMITS.hourlyDays[1], dev: STORE_LIMITS.devRawDays[1], dev1h: STORE_LIMITS.devHourlyDays[1],
+});
 /** 실효 원시 보존(일) — 월 파일 5분 원시. 기존 키(rawRetentionDays)를 더 짧게 둔 현장은 그 값을 따른다(늘리지 않는다). */
 export function effectiveRawDays(s = {}) {
   const a = Number(s?.store?.rawDays) || STORE_DEFAULTS.rawDays;
@@ -223,8 +246,8 @@ export function normalizePerfThresholds(raw = {}) {
 }
 
 /** 하한·상한은 서버가 강제한다(화면 입력을 믿지 않는다). */
-const MIN_INTERVAL_MS = 60_000;
-const MAX_INTERVAL_MS = 6 * 3_600_000;
+export const MIN_INTERVAL_MS = 60_000;
+export const MAX_INTERVAL_MS = 6 * 3_600_000;   // 전체 점검 33회차 F6: 중앙의 엣지 보고 정제도 이 범위로 자른다(복제 금지)
 
 let _cache = null;
 let _cacheAt = 0;
@@ -232,12 +255,29 @@ const CACHE_MS = 3_000;
 
 // v2.631(EDGE2631-01): 중앙에서는 이 파일이 **배포 원본**이다. 손상이면 기본값(꺼짐·빈 법인)으로 떨어지는데, 그 기본값을
 //   배포 라우트가 200 으로 내려보내면 전 엣지의 수집이 꺼진다 — 로드 오류를 기억해 /api/central/bmusage-config 가 503 으로 답한다.
-const _localErr = makeSettingsLoadError(FILE, { label: '베어메탈 사용률 설정', confirm: () => saveBmUsageSettings({}) });
-const _distErr = makeSettingsLoadError(DIST_FILE, { label: '베어메탈 사용률 배포(전체 배포 · 제외 · 중앙 켜기 — 기본값으로 확정하면 모두 비워집니다)', confirm: ({ by } = {}) => saveDistribution({}, by || '') });
+// 결정 반영(2026-11-19 ③): 확정은 보존을 기본값으로 다시 쓴다(못 읽은 지금 값보다 줄 수 있다 — 거부 쪽) → 서비스 점검 확정도 설정 소유자 등급(ownerOnly · checksLogs).
+const _localErr = makeSettingsLoadError(FILE, { label: '베어메탈 사용률 설정', confirm: () => saveBmUsageSettings({}, { confirmLoadError: true }), ownerOnly: true });   // 83회차: 서비스 점검 '기본값으로 확정' = 명시 확정
+const _distErr = makeSettingsLoadError(DIST_FILE, { label: '베어메탈 사용률 배포(전체 배포 · 제외 · 중앙 켜기 — 기본값으로 확정하면 모두 비워집니다)', confirm: ({ by } = {}) => saveDistribution({}, by || ''), ownerOnly: true });   // 재확인 N1: 확정은 배포를 모두 끈다(= 엣지 보존을 로컬 값으로) — 배포 라우트와 같은 소유자 등급
+// 전체 점검 34회차 F4(재현): 읽기 오류(EACCES · EISDIR 등 — e.code 가 있다)는 손상이 아니다 — 원본을 옮기지 않고 readError 로 기억하며,
+//   그동안 그 파일의 저장은 거절한다(저장하면 원자적 쓰기가 읽지 못한 원본을 기본값 + 패치로 덮는다). 20회차 F4(svcmon · 권한 파일)와 같은 규약.
+const UNREADABLE_SAVE = '베어메탈 사용률 설정 파일을 읽지 못한 상태(권한 · 소유자)라 저장하지 않았습니다 — 파일 권한을 고치고 재시작하세요(지금 저장하면 원본이 기본값으로 덮입니다).';
+function unreadableError() { const e = new Error(UNREADABLE_SAVE); e.code = 'settings-unreadable'; e.status = 409; return e; }
+/*
+ * 83회차(82회차 결정 — 권장안): 손상 · 손상 보존본만 남은 동안의 저장은 **기본값 위에 이번 패치**를 써서 전역 필드(보존 · 주기 · Enterprise 동의 · 기준값)를
+ *   기본값으로 되돌리고 손상 표지를 지운다(보존 정리 멈춤 — 82회차 F2 — 도 그 저장으로 풀린다). 예전에는 범위 관리자의 법인 칸 저장(전역 필드는 버린다)도
+ *   그 경로를 탔다 → 명시 확정(서비스 점검 '기본값으로 확정' · 전체 범위 관리자의 confirmDefaults)일 때만 쓴다. 그 밖은 409.
+ */
+const CORRUPT_SAVE = '베어메탈 사용률 설정 파일이 손상돼(손상 보존본으로 옮김) 지금 저장하면 보존 · 주기 · Enterprise 동의 같은 전역 값이 기본값으로 다시 써집니다 — 저장하지 않았습니다. 손상 보존본을 되돌리거나, 전체 범위 관리자가 서비스 점검에서 기본값으로 확정한 뒤 저장하세요.';
+function corruptSaveError() { const e = new Error(CORRUPT_SAVE); e.code = 'settings-unreadable'; e.status = 409; e.corrupt = true; return e; }
+function readText(file, err) {
+  try { return fs.readFileSync(file, 'utf8'); } catch (e) { err.readError(e); return null; }
+}
 function readFile() {
-  if (!fs.existsSync(FILE())) { _localErr.missing(); return {}; }
+  if (fileMissing(FILE())) { _localErr.missing(); return {}; }   // 134회차: 없음은 ENOENT 뿐 — stat 실패(폴더 수준 EACCES · EIO · ESTALE)는 아래 읽기가 읽기 오류로 가른다
+  const text = readText(FILE(), _localErr);
+  if (text == null) return {};
   try {
-    const raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
+    const raw = JSON.parse(text);
     if (!raw || typeof raw !== 'object') throw new Error('객체가 아닌 JSON 값');
     _localErr.ok();
     return raw;
@@ -256,6 +296,13 @@ export function bmUsageSettingsLoadError() {
   if (l) return { at: l.at, reason: `사용률 설정(bmusage-settings.json): ${l.reason}` };
   return null;
 }
+
+/**
+ * 82회차 F2: 이 노드 **로컬** 설정 파일(bmusage-settings.json)의 로드 오류(손상 · 손상 보존본만 남음 · 읽기 오류) — 없으면 null.
+ *   보존 정리(poller.pruneTick)가 본다: 못 읽은 동안의 값은 기본값(원시 90일 · 일 5년 · 시간 365일 …)이라, 관리자가 더 길게 둔 보존을 그 기본값으로 지우면 되돌릴 수 없다.
+ *   배포 파일(bmusage-distribute.json — 중앙)의 오류는 보존 기간과 무관해 여기 넣지 않는다(bmUsageSettingsLoadError 와 다른 점).
+ */
+export function bmUsageLocalLoadError() { readFile(); return _localErr.get(); }
 
 /** 정규화(순수) — 테스트가 하한·상한을 고정한다. */
 export function normalizeSettings(raw = {}) {
@@ -287,8 +334,8 @@ export function normalizeSettings(raw = {}) {
     alertPct: clampSetting(raw.alertPct, { min: 50, max: 100, def: DEFAULTS.alertPct }),
     alertSustainMin: clampSetting(raw.alertSustainMin, { min: 0, max: 240, def: DEFAULTS.alertSustainMin }),
     alertRepeatHours: clampSetting(raw.alertRepeatHours, { min: 1, max: 168, def: DEFAULTS.alertRepeatHours }),
-    rawRetentionDays: clampSetting(raw.rawRetentionDays, { min: 7, max: 365, def: DEFAULTS.rawRetentionDays }),
-    dailyRetentionDays: clampSetting(raw.dailyRetentionDays, { min: 30, max: 365 * 10, def: DEFAULTS.dailyRetentionDays }),
+    rawRetentionDays: clampSetting(raw.rawRetentionDays, { min: RAW_RETENTION_RANGE[0], max: RAW_RETENTION_RANGE[1], def: DEFAULTS.rawRetentionDays }),
+    dailyRetentionDays: clampSetting(raw.dailyRetentionDays, { min: DAILY_RETENTION_RANGE[0], max: DAILY_RETENTION_RANGE[1], def: DEFAULTS.dailyRetentionDays }),
     osSsh: raw.osSsh === undefined ? DEFAULTS.osSsh : !!raw.osSsh,
     idracTelemetry: raw.idracTelemetry === undefined ? DEFAULTS.idracTelemetry : !!raw.idracTelemetry,
     perf: normalizePerfThresholds(raw.perf),   // v2.919
@@ -328,7 +375,7 @@ function readCentralCopy() {
   try {
     const j = JSON.parse(fs.readFileSync(CENTRAL_COPY_FILE(), 'utf8'));
     _copy = j && typeof j === 'object' && j.settings && typeof j.settings === 'object' ? j : null;
-  } catch (e) { if (fs.existsSync(CENTRAL_COPY_FILE())) preserveCorrupt(CENTRAL_COPY_FILE(), e.message); _copy = null; }
+  } catch (e) { if (!e?.code && fs.existsSync(CENTRAL_COPY_FILE())) preserveCorrupt(CENTRAL_COPY_FILE(), e.message); _copy = null; }   // 34회차 F4: 읽기 오류(e.code)는 옮기지 않는다 — 중앙 사본이라 다음 인출이 다시 쓴다
   return _copy;
 }
 
@@ -373,9 +420,11 @@ export function bmUsageCentralState() {
 
 /** 중앙: 배포 설정(켬/끔 + 제외 엣지). 손상이면 보존 후 **꺼짐**(켜진 척하지 않는다). */
 export function loadDistribution() {
-  if (!fs.existsSync(DIST_FILE())) { _distErr.missing(); return normalizeDistribution({}); }
+  if (fileMissing(DIST_FILE())) { _distErr.missing(); return normalizeDistribution({}); }   // 134회차: 없음은 ENOENT 뿐 — stat 실패(폴더 수준 EACCES · EIO · ESTALE)는 아래 읽기가 읽기 오류로 가른다(배포 '꺼짐' 을 200 으로 내려보내지 않게)
+  const text = readText(DIST_FILE(), _distErr);   // 34회차 F4
+  if (text == null) return normalizeDistribution({});
   try {
-    const j = JSON.parse(fs.readFileSync(DIST_FILE(), 'utf8'));
+    const j = JSON.parse(text);
     if (!j || typeof j !== 'object' || Array.isArray(j)) throw new Error('객체가 아닌 JSON 값');
     _distErr.ok();
     return normalizeDistribution(j);
@@ -433,6 +482,7 @@ export function normalizeDistribution(raw = {}) {
   return out;
 }
 function writeDistribution(next) {
+  if (_distErr.get()?.readError) throw unreadableError();   // 34회차 F4
   fs.mkdirSync(path.dirname(DIST_FILE()), { recursive: true });
   atomicWriteFileSync(DIST_FILE(), JSON.stringify(next, null, 2), { mode: 0o600 });
   _distErr.ok();
@@ -480,6 +530,7 @@ export function setPerEdge(agent, on, by = '', { corps = null } = {}) {
   const a = lowerAgent(agent);
   if (!a) return { ok: false, code: 'bad-name', reason: '엣지 이름이 필요합니다.' };
   const cur = loadDistribution();
+  if (_distErr.get()?.readError) return { ok: false, code: 'settings-unreadable', reason: UNREADABLE_SAVE };   // 34회차 F4
   const prev = perEdgeOf(cur, a);
   let ids = null;
   if (on === true) {
@@ -672,7 +723,11 @@ function notifyChange() { for (const cb of _listeners) { try { cb(); } catch { /
  * 저장은 **로컬 파일**에 한다. v2.627: 이 엣지가 중앙 배포를 받는 중이면 배포 키는 저장하지 않고 `ignoredCentralManaged` 로
  * 돌려준다(화면이 '중앙이 정한 값이라 무시했다' 를 말한다 — 저장해도 다음 계산에서 중앙 값이 이기므로 조용히 버리면 거짓이다).
  */
-export function saveBmUsageSettings(body = {}) {
+export function saveBmUsageSettings(body = {}, { confirmLoadError = false } = {}) {
+  readFile();
+  const le = _localErr.get();
+  if (le?.readError) throw unreadableError();   // 34회차 F4
+  if (le && confirmLoadError !== true) throw corruptSaveError();   // 83회차(82 결정): 손상 중 저장은 명시 확정일 때만
   const { patch } = dropUnspecifiedNumbers(body);
   const ignoredCentralManaged = [];
   if (readCentralCopy()) for (const k of DISTRIBUTED_KEYS) if (Object.hasOwn(patch, k)) { delete patch[k]; ignoredCentralManaged.push(k); }
@@ -697,6 +752,32 @@ export function saveBmUsageSettings(body = {}) {
   const out = { ...next };
   Object.defineProperty(out, 'ignoredCentralManaged', { value: ignoredCentralManaged, enumerable: false });
   return out;
+}
+
+/**
+ * 결정 반영(2026-11-19 ③ 사용자): 보존 기간을 **줄이는** 저장은 설정 소유자 등급만(routes/api/bmUsage.js 설정 PUT — 아니면 403 · 아무것도 저장하지 않는다).
+ *   이 함수는 그 판정의 입력이다 — 이 패치를 지금 저장하면 어느 보존 칸이 **저장된 값보다** 줄어드는가. saveBmUsageSettings 와 같은 꼴로 계산한다
+ *   (빈 값 · 0 은 미지정으로 버림 · 중앙 배포 사본이 있으면 배포 키는 저장하지 않음 · store 는 키 단위로 겹침 · 정규화 · 범위 자름).
+ *   보존 칸: rawRetentionDays · dailyRetentionDays(결정 본문) + store 의 rawDays · hourlyDays · devRawDays · devHourlyDays(같은 PUT 으로 바뀌는 보존 —
+ *   원시 실효 보존은 min(store.rawDays, rawRetentionDays) 라 store.rawDays 를 줄이는 것은 같은 값을 다른 칸으로 줄이는 것이다).
+ *   ⚠ 못 읽었으면(손상 · 읽기 오류) 지금 값을 모르므로 **확정 저장(confirmLoadError)은 줄어듦으로 본다**(거부 쪽 — ['unknown']). 확정이 아니면 저장이 어차피 409 다.
+ * @returns {{ shrink: string[], unknown: boolean }}
+ */
+export const RETENTION_FIELDS = Object.freeze(['rawRetentionDays', 'dailyRetentionDays']);
+export const STORE_RETENTION_FIELDS = Object.freeze(['rawDays', 'hourlyDays', 'devRawDays', 'devHourlyDays']);
+export function retentionShrink(body = {}, { confirmLoadError = false } = {}) {
+  const raw = readFile();
+  if (_localErr.get()) return { shrink: confirmLoadError === true ? ['unknown'] : [], unknown: true };
+  const { patch } = dropUnspecifiedNumbers(body);
+  if (readCentralCopy()) for (const k of DISTRIBUTED_KEYS) delete patch[k];
+  const prev = normalizeSettings(raw);
+  const st = patch.store && typeof patch.store === 'object' && !Array.isArray(patch.store) ? { ...prev.store, ...patch.store } : prev.store;
+  const pick = Object.fromEntries(RETENTION_FIELDS.filter((k) => Object.hasOwn(patch, k)).map((k) => [k, patch[k]]));
+  const next = normalizeSettings({ ...prev, ...pick, store: st });
+  const shrink = [];
+  for (const k of RETENTION_FIELDS) if (next[k] < prev[k]) shrink.push(k);
+  for (const k of STORE_RETENTION_FIELDS) if (next.store[k] < prev.store[k]) shrink.push(`store.${k}`);
+  return { shrink, unknown: false };
 }
 
 /** env 로 강제 끄기(현장 탈출구). `BMUSAGE_ENABLED=false` 면 설정과 무관하게 꺼진다. */

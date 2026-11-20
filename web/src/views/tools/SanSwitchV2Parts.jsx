@@ -13,12 +13,12 @@ const LVL_COLOR = { bad: 'var(--red)', warn: 'var(--amber)', ok: 'var(--green)',
 const levelColor = (pct) => LVL_COLOR[capacityLevel(pct)] || 'var(--text-dim)';
 
 /** 포트 용량 — aggregate(shown) 값을 그대로 쓴다(서버 판정 규칙 불변). */
-export function CapacityCard({ agg, scopeLabel }) {
+export function CapacityCard({ agg, scopeLabel, registryUnread = false }) {
   const lic = agg.licensed || 0;
   const w = (n) => (lic > 0 ? `${Math.max(0, Math.min(100, (n / lic) * 100))}%` : '0%');
   const usedW = w(agg.online); const disW = w(Math.min(agg.disabled, Math.max(0, lic - agg.online)));
   const side = [
-    { lab: '스위치', val: agg.switches, meta: switchesMeta(agg), color: agg.failed ? 'var(--red)' : undefined },
+    { lab: '스위치', val: agg.switches, meta: switchesMeta(agg, { unread: registryUnread }), color: agg.failed ? 'var(--red)' : undefined },
     { lab: '물리 포트', val: agg.total.toLocaleString(), meta: `라이선스 ${lic.toLocaleString()}` },
     { lab: '여유 포트', val: agg.free.toLocaleString(), meta: '라이선스 − 사용 중(증설 가능분)',
       color: capacityLevel(agg.usedPct) === 'bad' ? 'var(--red)' : capacityLevel(agg.usedPct) === 'warn' ? 'var(--amber)' : undefined },

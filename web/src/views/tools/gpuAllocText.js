@@ -37,6 +37,8 @@ export function totalsNote(t) {
   if (spare != null && spare < 0) { notes.push('할당이 용량을 넘음 — 확인 필요'); tone = 'warn'; } else if (pct != null && pct >= 90) { notes.push('포화'); tone = 'warn'; }
   if (t.allocUnknown) { notes.push(`할당 모르는 VM ${t.allocUnknown}`); tone = 'warn'; }
   if (t.capUnknown) { notes.push(`용량 모르는 GPU ${t.capUnknown}`); tone = 'warn'; }
+  // 42회차 R2: GPU 를 못 읽은 끊긴 호스트(GPU VM 이 있는) — 합계는 부분이고 그 시각 일 이력에 쓰지 않았다
+  if (numOrNull(t.hostsDown) > 0) { notes.push(`GPU 를 못 읽은 끊긴 호스트 ${t.hostsDown}대 — 합계는 부분`); tone = 'warn'; }
   if (t.noPlacement) notes.push(`배치 정보 없는 GPU ${t.noPlacement}`);
   if (t.offUnknown) notes.push(`꺼진 VM 용량 모름 ${t.offUnknown}대`);   // v2.870 감사 A4-01: 꺼진 VM 합에서 빠진 수(엑셀 totalsCells 와 같은 말)
   if (t.unplaced) notes.push(`미배치 VM ${t.unplaced}`);
@@ -48,6 +50,9 @@ export function totalsNote(t) {
   return { note: notes.join(' · '), tone };
 }
 
+/** 결정(76~105 남긴 것 · 2026-11-20) A7: MIG 기반 프로파일 GPU 의 슬롯 · 비고 글자 — 서버 allocTree MIG_SLOTS_TEXT · MIG_NOTE_TEXT 와 같은 말(서버 시험이 대조). */
+export const MIG_SLOTS_TEXT = '슬롯 계산 안 함(MIG)';
+export const MIG_NOTE_TEXT = 'MIG 기반 프로파일 — 한 장에 올릴 수 있는 수가 MIG 구성에 달려 있어 남은 슬롯을 계산하지 않음';
 /** GPU 한 장 → 프로파일·슬롯 글자와 비고(서버 gpuNoteText 와 같은 말). */
 export function gpuTexts(g) {
   if (g.mode === 'vsga') return { prof: 'vSGA', note: 'vSGA — 할당형 아님(합계 제외)', tone: '' };
@@ -55,9 +60,10 @@ export function gpuTexts(g) {
   if (g.mode === 'passthrough') return g.vms.length ? { prof: '패스스루 · 1장 할당', note: '한 장 통째 할당', tone: '' } : { prof: '패스스루 · 미할당', note: '1장 예비 — VM 에 연결 가능', tone: 'free' };
   if (!g.vms.length) return { prof: '비어 있음', note: '모든 프로파일 가능', tone: 'free' };
   const s = g.slots || {};
-  const prof = s.profile ? `${s.profile} · ${s.used}/${s.total ?? '?'} 슬롯` : '여러 프로파일';
+  const prof = s.mig ? `${s.profile} · ${s.used}대 · ${MIG_SLOTS_TEXT}` : s.profile ? `${s.profile} · ${s.used}/${s.total ?? '?'} 슬롯` : '여러 프로파일';
   if (g.allocGB == null) return { prof, note: '프로파일 해석 불가 VM 포함 — 할당·예비 모름', tone: 'warn' };
   if (s.mixed) return { prof, note: '혼합 크기 — 슬롯 계산 안 함', tone: '' };
+  if (s.mig) return { prof, note: MIG_NOTE_TEXT, tone: '' };   // 결정 A7
   if (s.free > 0) return { prof, note: `같은 프로파일 ${s.free}대 더 가능`, tone: 'free' };
   if (s.free === 0) return { prof, note: '슬롯 모두 사용', tone: '' };
   return { prof, note: '', tone: '' };
@@ -106,17 +112,51 @@ export function pickVcenters(tree, vcSel) {
 
 const TOT_KEYS = ['hosts', 'gpus', 'vsga', 'capGB', 'capUnknown', 'allocGB', 'allocUnknown', 'offGB', 'offUnknown', 'vmsOn', 'vmsOff', 'unplaced', 'freeGpus', 'noPlacement'];
 const r1 = (n) => Math.round(n * 10) / 10;
+/** 44회차 R6: 고른(없으면 전체) 법인 칩 가운데 GPU 호스트 수를 모르는 것 — 끊긴 호스트(hostsDown)는 hostsDownByVc 로 따로 센다. */
+export function unknownChipsOf(chips, vcSel) {
+  const pick = vcSel && vcSel.size ? (chips || []).filter((c) => vcSel.has(c.id)) : (chips || []);
+  return pick.filter((c) => c?.unknown && c.unknown !== 'hostsDown');
+}
+const unknownReasonText = (list) => [...new Set(list.map((c) => CORP_UNKNOWN_TEXT[c.unknown] || '모름'))].join(' · ');
 /**
- * v2.853: 고른 법인들의 합계 — 서버 합계(allocTree.js finishTotals)와 같은 규칙: 용량·할당 중 모르는 것이 섞이면 예비·할당률은 null
- * (부분 합을 예비로 보이지 않는다). 하나도 안 고르면 서버 전체 합계를 그대로 쓴다.
+ * v2.853: 고른 법인들의 합계 — 용량·할당 중 모르는 것이 섞이면 예비·할당률은 null(부분 합을 예비로 보이지 않는다). 하나도 안 고르면 서버 전체 합계를 그대로 쓴다.
+ * 44회차 R7(정정): '서버 합계와 같은 규칙' 이지만 값은 다를 수 있다 — 서버는 반올림 전 합을 반올림하고, 여기서는 이미 반올림한 법인 합계를 더한다(0.1 GB 안팎 차이).
+ * 44회차 R6: chips 를 주면 GPU 호스트 수를 모르는 법인(수집 전 · 접속 불가 · 수집 꺼짐 · 점검 중 · 상한)을 corpsUnknown 으로 센다 —
+ *   고른 법인에 있으면 예비 · 할당률을 내지 않는다. 전체(선택 없음)는 서버 합계(엑셀 KPI 와 같은 값)를 그대로 두고 개수만 밝힌다(합계가 하나도 없으면 비운다).
  */
-export function sumTotals(tree, vcSel) {
-  if (!vcSel || !vcSel.size) return tree?.totals || null;
+export function sumTotals(tree, vcSel, { chips = null } = {}) {
+  const corpsUnknown = chips ? unknownChipsOf(chips, vcSel).length : 0;
+  if (!vcSel || !vcSel.size) {
+    const T = tree?.totals || null;
+    if (!T || !corpsUnknown) return T;
+    const none = !(tree?.vcenters || []).length;
+    return { ...T, corpsUnknown, ...(none ? { spareGB: null, allocPct: null } : {}) };
+  }
   const t = Object.fromEntries(TOT_KEYS.map((k) => [k, 0]));
   for (const vc of pickVcenters(tree, vcSel)) for (const k of TOT_KEYS) t[k] += numOrNull(vc.totals?.[k]) || 0;
-  const known = t.capUnknown === 0 && t.allocUnknown === 0;
-  return { ...t, capGB: r1(t.capGB), allocGB: r1(t.allocGB), offGB: r1(t.offGB),
+  // 43회차 R2: 고른 법인의 끊긴 GPU 호스트(계층 노드가 없는 법인 포함 — hostsDownByVc) — 있으면 용량이 부분이라 예비 · 할당률을 내지 않는다(서버 합계와 같은 규칙)
+  let hostsDown = 0;
+  for (const id of vcSel) hostsDown += numOrNull(tree?.hostsDownByVc?.[id]) || 0;
+  const known = t.capUnknown === 0 && t.allocUnknown === 0 && hostsDown === 0 && corpsUnknown === 0;
+  // 45회차 F3: 고른 법인에 계층 노드가 하나도 없고 모르는 법인(끊긴 호스트 · 모름 칩)뿐이면 용량 · 할당 · 수량도 0 이 아니라 모름
+  if (!pickVcenters(tree, vcSel).length && (hostsDown || corpsUnknown)) {
+    return { ...t, ...(hostsDown ? { hostsDown } : {}), ...(corpsUnknown ? { corpsUnknown } : {}), hosts: null, gpus: null, freeGpus: null, capGB: null, allocGB: null, offGB: null, spareGB: null, allocPct: null };
+  }
+  return { ...t, ...(hostsDown ? { hostsDown } : {}), ...(corpsUnknown ? { corpsUnknown } : {}), capGB: r1(t.capGB), allocGB: r1(t.allocGB), offGB: r1(t.offGB),
     spareGB: known ? r1(t.capGB - t.allocGB) : null, allocPct: known && t.capGB > 0 ? Math.round((t.allocGB / t.capGB) * 100) : null };
+}
+/**
+ * 43회차 R2: 계층이 비거나 고른 법인에 행이 없을 때의 문구 — 끊긴 GPU 호스트가 있으면 '없음' 이 아니라 '못 읽음'.
+ * 44회차 R6: chips 를 주면 칩의 '모름' 사유(수집 전 · 접속 불가 · 수집 꺼짐 · 점검 중 · 상한)도 같은 판정으로 — 칩은 '—' 인데 문구만 '없습니다' 이던 어긋남.
+ */
+export function allocEmptyText(tree, vcSel, { query = '', chips = null } = {}) {
+  const ids = vcSel && vcSel.size ? [...vcSel] : Object.keys(tree?.hostsDownByVc || {});
+  const down = ids.reduce((a, id) => a + (numOrNull(tree?.hostsDownByVc?.[id]) || 0), 0);
+  if (query) return `‘${query}’ 에 맞는 법인·호스트·VM 이 없습니다`;
+  if (down) return `GPU VM 이 있는 호스트 ${down}대가 끊겨 GPU 를 읽지 못했습니다 — GPU 호스트가 없다는 뜻이 아닙니다`;
+  const unk = chips ? unknownChipsOf(chips, vcSel) : [];
+  if (unk.length) return `법인 ${unk.length}곳의 GPU 호스트 수를 모릅니다(${unknownReasonText(unk)}) — GPU 호스트가 없다는 뜻이 아닙니다`;
+  return vcSel && vcSel.size ? '고른 법인에 GPU 가 설치된 호스트가 없습니다' : 'GPU 가 설치된 호스트가 없습니다';
 }
 
 /**
@@ -131,14 +171,15 @@ export function sumTotals(tree, vcSel) {
  * @returns {''|'pending'|'unreachable'|'disabled'|'maintenance'|'truncated'}
  */
 export const CORP_INV_EMPTY = Object.freeze(['pending', 'unreachable', 'disabled', 'maintenance']);
-export function corpUnknownOf(meta, hasNode, truncated = 0) {
+export function corpUnknownOf(meta, hasNode, truncated = 0, hostsDown = 0) {
   if (hasNode) return '';
   const st = typeof meta?.status === 'string' ? meta.status : '';
   if (!meta?.stale && CORP_INV_EMPTY.includes(st)) return st;
+  if (Number(hostsDown) > 0) return 'hostsDown';   // 42회차 R2: 서버와 같은 판정(GPU VM 이 있는 끊긴 호스트뿐 — 0대가 아니라 모름)
   return truncated > 0 ? 'truncated' : '';
 }
 export const CORP_UNKNOWN_TEXT = Object.freeze({
-  pending: '수집 전', unreachable: '접속 불가', disabled: '수집 꺼짐', maintenance: '점검 중', truncated: '상한으로 잘림',
+  pending: '수집 전', unreachable: '접속 불가', disabled: '수집 꺼짐', maintenance: '점검 중', truncated: '상한으로 잘림', hostsDown: 'GPU 호스트 끊김',
 });
 
 /** 칩 글자(제목 · 개수) — 모르면 0 이 아니라 '—'(v2.871 A4-02). */
@@ -154,7 +195,7 @@ export function corpChips(tree, vcs) {
   const truncated = Number(tree?.truncated) || 0;
   return list.map((x) => {
     const node = byId.get(x.id);
-    const unknown = corpUnknownOf(x.site, !!node, truncated);
+    const unknown = corpUnknownOf(x.site, !!node, truncated, tree?.hostsDownByVc?.[x.id]);
     // 모르면 hosts·gpus 는 null(0 이 아니다 — 소비처는 corpChipText 로 글자를 만든다)
     return { ...x, unknown, hosts: unknown ? null : node?.totals?.hosts || 0, gpus: unknown ? null : node?.totals?.gpus || 0 };
   }).sort((a, b) => a.id.localeCompare(b.id));
@@ -301,15 +342,24 @@ export function allocExportQuery({ scope = '', vcSel = null, depth = 'vm', sheet
 export function profileGB(profile) {
   const s = String(profile ?? '').trim();
   if (!s || s.length > 128) return null;
-  const m = /-(\d{1,3})([a-z]{1,2})$/i.exec(s);
+  const m = /-(\d{1,3})([a-z]{1,2})\d?$/i.exec(s);   // 41회차 F7: 서버와 같은 규칙(B 시리즈 …-2b4)
   if (!m) return null;
   const n = Number(m[1]);
   return Number.isFinite(n) ? (n === 0 ? 0.5 : n) : null;
 }
-/** 프로파일의 GPU 계열(nvidia_l4-12q → l4 · grid_a100-3-40c → a100)과 MIG 여부(가운데 슬라이스 숫자가 있으면). 형식 밖이면 null. */
+/**
+ * 결정(76~105 남긴 것 · 2026-11-20) A7: MIG 기반 프로파일인가(…-<슬라이스>-<GB><시리즈>) — 서버 gpu/vgpuProfile.js vgpuProfileIsMig 와 같은 규칙
+ *   (시험이 같은 입력으로 대조). 서버 allocTree 는 MIG 꼴이면 슬롯 수를 null(slots.mig) 로 둔다.
+ */
+export function profileIsMig(profile) {
+  const s = String(profile ?? '').trim();
+  if (!s || s.length > 128) return false;
+  return /-\d{1,2}-\d{1,3}[a-z]{1,2}\d?$/i.test(s);
+}
+/** 프로파일의 GPU 계열(nvidia_l4-12q → l4 · grid_a100-3-40c → a100)과 MIG 여부(profileIsMig — 판정 하나). 형식 밖이면 null. */
 export function profileFamily(profile) {
-  const m = /^[a-z0-9]+_([a-z0-9]+)-(?:(\d{1,2})-)?\d{1,3}[a-z]{1,2}$/i.exec(String(profile ?? '').trim());
-  return m ? { family: m[1].toLowerCase(), mig: m[2] != null } : null;
+  const m = /^[a-z0-9]+_([a-z0-9]+)-(?:\d{1,2}-)?\d{1,3}[a-z]{1,2}$/i.exec(String(profile ?? '').trim());
+  return m ? { family: m[1].toLowerCase(), mig: profileIsMig(profile) } : null;
 }
 /** GPU 모델 이름이 그 계열인가 — 낱말 단위(L4 가 L40S 에 맞지 않게). 'NVIDIA A100 80GB PCIe' · 'GA102GL [A40]' 모두 낱말로 자른다. */
 export const modelHasFamily = (model, family) => !!family && String(model || '').toLowerCase().split(/[^a-z0-9]+/).includes(family);
@@ -328,12 +378,13 @@ export function profileOptions(tree, vcSel = null) {
  *   뺀다: 끊긴 호스트 · 유지보수 모드 호스트(v2.951 — 수집기가 connectionState 'MAINTENANCE' 로 싣는다 · 그 호스트엔 VM 을 켤 수 없다) ·
  *   배치 정보 없는 GPU(모름) · 혼합 크기 · 다른 프로파일 GPU · 패스스루 · vSGA · 용량 모름.
  *   MIG 프로파일은 빈 GPU 의 장 수가 MIG 구성에 달려 있어 '추정' 으로 표시한다.
- * @returns {{ per: number|null, mig: boolean, family: string|null, rows: object[], same: number, empty: number, skipped: object }}
+ *   결정 A7(2026-11-20): MIG 기반 프로파일 GPU 는 서버가 남은 슬롯을 null(slots.mig)로 둔다 — skipped.migSlots 로 세고, 같은 프로파일 수(same)는 null(모름).
+ * @returns {{ per: number|null, mig: boolean, family: string|null, rows: object[], same: (number|null), empty: number, skipped: object }}
  */
 export function placementCandidates(tree, profile, vcSel = null) {
   const per = profileGB(profile);
   const fam = profileFamily(profile);
-  const out = { per, mig: !!fam?.mig, family: fam?.family || null, rows: [], same: 0, empty: 0, skipped: { down: 0, maint: 0, noPlacement: 0, mixed: 0, otherProfile: 0, capUnknown: 0, small: 0 } };
+  const out = { per, mig: !!fam?.mig, family: fam?.family || null, rows: [], same: 0, empty: 0, skipped: { down: 0, maint: 0, noPlacement: 0, mixed: 0, otherProfile: 0, capUnknown: 0, small: 0, migSlots: 0 } };
   if (per == null || !fam) return out;
   for (const vc of pickVcenters(tree, vcSel)) for (const dc of vc.datacenters) for (const cl of dc.clusters) for (const h of cl.hosts) {
     const down = h.connectionState === 'DISCONNECTED' || h.connectionState === 'NOT_RESPONDING';
@@ -343,6 +394,8 @@ export function placementCandidates(tree, profile, vcSel = null) {
       if (g.mode !== 'vgpu') continue;
       const base = { id: `${h.id || h.name}|${g.idx}`, vc: vc.id, vcName: vc.name, cluster: cl.name, host: h.name, gpu: g.idx, model: g.model };
       if (g.vms.length && g.slots?.profile === profile) {
+        // 결정 A7: MIG 기반 프로파일 GPU 는 서버가 남은 슬롯을 계산하지 않는다(null) — 조용히 빼지 않고 센다('남은 슬롯 모름(MIG)').
+        if (g.slots.mig) { out.skipped.migSlots += 1; continue; }
         if (!(g.slots.free > 0)) continue;
         if (down || maint) { skipHost(); continue; }
         out.rows.push({ ...base, kind: 'same', fit: g.slots.free, now: `${profile} · ${g.slots.used}/${g.slots.total} 슬롯`, note: '같은 프로파일 GPU 의 남은 슬롯' });
@@ -360,6 +413,8 @@ export function placementCandidates(tree, profile, vcSel = null) {
       out.empty += fit;
     }
   }
+  // 결정 A7: 같은 프로파일 GPU 가 있는데 MIG 라 남은 슬롯을 모르면 '0대' 가 아니라 모름(null — 화면 '—').
+  if (out.skipped.migSlots > 0 && out.same === 0) out.same = null;
   out.rows.sort((a, b) => (a.kind === b.kind ? (a.kind === 'same' ? a.fit - b.fit : b.fit - a.fit) || a.host.localeCompare(b.host) : a.kind === 'same' ? -1 : 1));
   return out;
 }

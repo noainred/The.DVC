@@ -29,6 +29,7 @@
 - v2.906 — 분산 포트그룹 팀 구성 · LACP · VLAN(`vcinfo` dvpg — 6시간 · 이미 받은 포트그룹 moref 만 · Enhanced LACP 의 LAG)
 - v2.935 — ESXi 경로 카운터(`storpath/` — storagePath 그룹 · 한 시간마다 5분 표본 · 비율만 실측)
 - v3.2.1(코드·테스트 표지는 v3.0.1) — vim25 데이터 객체는 스키마 원소 순서로 보낸다(NIC connectable — `vcenter/connectInfo.js` 하나 · 장치 edit 은 읽은 본문 그대로 + connectable 만 교체)
+- 54회차 F4 · F5 — VM 사양 변경 · SOAP 호스트 용량의 못 읽음은 null(0 아님) · 현재 값을 모르면 변경을 막는다 · 용량 판정 서버 ↔ 웹 한 벌
 - (원래 5751행) v2.701 — 클러스터 HA·DRS 점검(A6) + 호스트 네트워크(A10). 클러스터 구성은 클러스터 전용 캐시(`clustercfg/`)이고 vcenter.clusterCfg
 
 ## 본문
@@ -156,6 +157,20 @@
   · `/vms/by-vcenter`: 법인 목록은 **범위가 먼저**(요청 vcenterId·region 으로 넓힐 수 없다 · 범위 밖 법인 이름도 싣지 않는다) · 평균은 구동 VM · 미수집 제외(`vmTotals.usageAvg` — /vms 와 한 벌) ·
     합계 줄 평균은 법인 평균의 평균이 아니다 · 모르는 법인(첫 수집 중·연결 실패·인증 정지이며 VM 0)은 null · 목록 밖 vCenter 의 VM 은 `unlisted` 줄 · memoJson + `scopeKey` + 설정 rev.
   · `/vms` totals 계산은 `inventory/vmTotals.js` 로 **글자 그대로** 옮겼다(vmDist2746 ④ 바이트 대조 통과) — 합의 순서를 바꾸지 말 것(부동소수).
+  · **v3.21.0 `/vms/insight`(VM 탭 '분석' 보기 · 설계 `docs/design/vm-insight` · 집계 `inventory/vmInsight.js` · 회귀 `server/test/vmInsight3210.test.js`)**: **판정을 새로 하지 않는다** —
+    조치 필요 · 신호 = `vmSignalsOf` · 사용률 칸 = `usageBinOf` 를 10% 로 접은 것(90%↑ = 과부하 칸) · 평균 = `usageAvg` 규칙 · 스냅샷 지난 일수 = `hygieneFindings` snap-age 사실 ·
+    OS 계열 = `osKind` · Tools = `toolsRead` + `TOOLS_NEED_UPGRADE` · 모르는 법인 = `corpUnknownOf`(수 전부 null). **법인(vCenter)마다 한 줄**을 주고 **화면이 고른 줄을 더한다**
+    (바로가기 복수 선택에 서버 왕복 없음 — 그래서 `vcenterId` · `vcenterIds` 를 받지 않는다 · 범위가 먼저 · `region` 만). 줄의 값은 더할 수 있는 모양이다: 평균은 `{ sum, n }` ·
+    분포는 칸별 수 · OS 종류는 법인마다 50종까지(상위 8 만 주면 여러 법인 합의 상위 8 이 틀린다 — 접기는 화면) · 상위 목록은 법인마다 N(합집합의 상위 N 은 법인별 상위 N 의 합집합 안).
+    기준값(스냅샷 기준 일수 · 구간 경계 · 크기 칸 · N)은 `thresholds` 로 싣는다(화면에 박지 않는다). 법인별 합 = `/vms` totals · signalCounts(테스트가 대조). memoJson + `scopeKey` + 설정 rev · VM 사이 `createYielder`.
+  · **v3.22.0 `/hosts/insight`(Hypervisor 탭 '분석' 보기 · 설계 `docs/design/host-insight` · 라우트 `routes/api/hostInsight.js` · 집계 `vcenter/hostInsight.js` · 회귀 `server/test/hostInsight3220.test.js`)**:
+    `/vms/insight` 와 같은 꼴(법인마다 한 줄 · 화면이 고른 줄을 더한다 · `vcenterId` · `vcenterIds` 받지 않음 · 범위가 먼저 · `region` 만). **판정을 새로 하지 않는다** —
+    법인 · 클러스터 줄(상태 · 용량 · 여유 · HA · 수용 제어 · DRS · N+1) = `/hosts/corp` 의 `hostCorpOf` 를 같은 입력으로 · 확인 대상 · 과부하(CPU > 90) · 끊김 · 못 읽음 = `platformSummary.hostsSection` ·
+    하드웨어 · 예기치 않은 재부팅 = `/hosts/checks` 의 `hostChecksOf` + `rebootsOf`(권한 `accessOf` 그대로 — 없는 묶음은 **키가 없다**, 0 이 아니다) · 사용률 칸 = `usageBinOf` 10% 접기 ·
+    VM 할당 · 호스트당 VM 수 = `vmSumsOf`(템플릿 제외). 클러스터 칸(`clusters[]`)은 hostCorp 클러스터 줄 + 법인마다 '독립 호스트' 한 줄(`hostStats` — N+1 판정 없음 null).
+    모델 · 버전 · 제조사는 법인마다 상한까지(접기는 화면) · 평균 `{ value(hostCorp 값), sum, n }`. 못 읽음(usageUnknown) · 용량 모름(capUnknown) · 여유 제외(headroom.excluded) · 설정 미수집(cfgUnknown)은 따로 센다 ·
+    개수 모르는 법인은 `unknown:true` + 수 전부 null. 캐시 = memoJson + `scopeKey` + 권한 판본(`accessOf` 결과 c/h/a — 역할 글자 아님) · 60초(재부팅이 로그 DB 를 읽는다) · 호스트 사이 `createYielder`.
+    ⚠ 이 라우트는 `/hosts/:id` 보다 먼저 등록한다. 법인별 합 = `/hosts/corp` 법인 줄 · `/hosts` 합계 · `/hosts/checks` 수(테스트가 실제 라우터로 대조).
   · 웹: 탭 `#/vms/<list|corp|attention>`(첫 조각 vms — 탭 id 그대로) + 도구 6개 링크(`#/tools/<k>` — 도구 키 그대로 · 권한 없으면 숨김 · 그 도구 화면 위에도 같은 줄 · `topMenu vm.also` 로 메뉴 위치 유지).
     법인별·조치 필요는 **15초 폴링 금지**(열 때 1회 + 다시 읽기 · 늦은 응답 버림). KPI 8장 → 타일 5장(값은 그대로 `unitText` — v2.629 고정 테스트 · vCore 는 vCPU 와 같은 값이라 한 줄).
   · VM 클릭 = 오른쪽 드로어(`VmDrawer` — 720 미만 전체 시트). **예전 모달 기능을 빠짐없이**: 버튼 6 · KV 17 · 섹션 6(`EntityDetail.jsx` 에서 꺼내 재사용 — 복제 금지).
@@ -511,3 +526,23 @@
   - 사용자가 바꾸지 않은 `allowGuestControl` 은 읽은 값을 지킨다. 본문(`deviceInner`)과 `backingXml` 은 열거 불가 — GET `/vm/:id/hardware` 응답에 DVS connectionCookie 를 싣지 않는다.
   - 새 vim25 쓰기(deviceChange · RelocateSpec 등)를 손으로 조립할 때는 govmomi `vim25/types` 필드 순서(= WSDL sequence)와 대조하는 테스트를 둘 것. 회귀 `server/test/nicConnectInfo301.test.js`(변이 9/9 · 반증 1인).
   - 남긴 것(반증 판독 — 실환경 미확인): 프로비저닝 RelocateSpec 의 스토리지 정책이 `<profile><profile …><profileName>` 모양이다(스키마는 배열 원소 하나 + 필수 `profileId`) — 정책을 입력한 클론은 거부될 것으로 본다.
+- **v3.10.15 `/tools/vm-track` `vcenterList[].region`**: 화면의 리전 선택용(스냅샷 `location.region` 그대로 · 없으면 빈 글자). `?region=` 의 교집합 규약(v2.958)은 그대로.
+- **54회차 F4 · F5 — 못 읽은 하드웨어 수치는 null(0 아님)**(2026-11-16 · 회귀 `server/test/leftoverC56.test.js` · web `components/vmReconfigText.test.js`):
+  ① VM 사양 변경 `provision/reconfig.js parseHardware` 는 못 읽은(빈 값 · 수 아님 · 0 이하) vCPU · 코어/소켓 · 메모리 · 디스크 용량을 **null** 로 싣고, `buildReconfigSpec` 은
+  현재 값을 모르는 항목의 변경을 **막는다**(fail-closed — 라우트 400 · ReconfigVM_Task 를 보내지 않는다). '증설만' 검사의 기준을 0 으로 두지 말 것 — 어떤 값이든 '증설' 이 된다
+  (전원 OFF VM 은 vCenter 가 vCPU · RAM 감소를 받아들인다). 웹 창의 판정은 `components/vmReconfigText.js` 하나('—' · 입력 잠금 · 계획에 싣지 않음).
+  ② SOAP 호스트 용량(`vcenter/soapClient.js hostCapacityOf`)도 못 읽음 · 0 이하는 null · 총량을 모르면 사용률 null. 용량 판정은 서버 `store.hostCapacityKnown` ↔ 웹 `web/src/hostCapacity.js`
+  (세 칸 — 코어 · 총 MHz · 메모리)가 같은 입력에 같은 답이다(웹 `vcdVirt.virtSum` 도 이것 — 예전 두 칸). ⚠ 실 vCenter 가 끊긴 호스트 · 값 없는 VM 에 무엇을 주는지는 확인하지 못했다
+  (가짜 vCenter 의 '속성 없음 · 0' 만 고정). 예전 판 엣지는 못 읽은 용량을 0 으로 올린다 — 엣지가 업그레이드돼야 위임 vCenter 에도 반영된다.
+- **v3.26.0 — 스냅샷 화면 · VM 별 스냅샷 이력 DB(`server/src/snaphist/` · 웹 `views/tools/snapshots/`)**(사용자 ‘기본값대로 구현해’ · 세 단계 중 1단계 · 표준 + 이력 DB 반증 1회 — 확정 9건 수정. 설계 `docs/design/snapshots`). 회귀 `server/test/snapHist3260.test.js` · 웹 `snapshots/snapTool3260.test.jsx`.
+  - **판정은 `vmhygiene/analyze.js hygieneFindings` 하나**(‘오래된 스냅샷’ 카드 · ‘VM 구성 점검’ 과 같다) — 화면(snapText)은 서버가 준 `sig` · `band` 로 거르고 묶기만 한다. 지난 일수도 판정과 같은 `snapshotOldestTs` 만(줄기 시각으로 보충하면 band 와 sig.age 가 갈린다 — 반증 9).
+  - 스냅샷이 있는데 크기 0 이면 못 읽은 것(`view.snapGbOf` — layoutEx 가 없으면 수집기가 0 을 남긴다). 데이터스토어는 `vm.dev.disks[].datastore`(같은 vCenter 안 이름) 중 가장 찬 것.
+  - 이력 기록: 하루 1번(`SNAPHIST_HOUR` 기본 3시 뒤) · 스냅샷이 있는 VM 만 · 한 트랜잭션 · 같은 날 'ok' 는 덮지 않는다. **못 읽은 vCenter(unreadVcenters · pending · disabled) · REST 폴백(`collectSource:'rest'` — 개수가 없다)은 행 없이 사유만**(‘0개’ 로 적지 않는다 — 반증 1) · 개수를 못 읽은 VM 이 있으면 'partial'(추이에 넣지 않는다).
+  - ‘없어진 스냅샷’ 은 그 VM 의 집합을 **알 때만**(개수 0 · 줄기/이름이 개수만큼) · VM 이 인벤토리에서 사라지면 사유 'vm'. 열쇠는 생성 시각(이름 변경은 같은 스냅샷 — 반증 4), 모르면 '|이름' 이고 양방향으로 하나씩 짝짓는다(`db.matchItems` — 반증 5 · 6). 백업 도구 임시 스냅샷(`soapParse.VEEAM_SNAP_NAME`)은 항목으로 만들지 않는다(반증 8).
+  - 추이(`history.aggregateDays`): 기록 시작 = 그 vCenter 의 첫 행(상태 무관 — 반증 2) · 빠진 vCenter 가 있는 날은 null + missing(부분 합 금지) · 점검중 · 비활성은 묶음에서 뺀다(excluded — 한 곳이 오래 점검중이면 전 함대가 비던 함정, 반증 3) · 크기를 못 읽은 VM 이 있는 날의 크기 합은 null. 없어진 목록은 읽기 창을 다 쓰면 `goneMore`(반증 7).
+  - 라우트 `/tools/snapshots`(+`/history` · `/history/vm`): 범위 → 고른 법인 순 · memoJson 열쇠에 `scopeKey` + `vcenterPickKey`(+ 이력 세대) · VM 단건은 범위 밖 404. 카드의 ‘모두 보기’ 는 `#/tools/snapshots/old/<vCenter id>`(본체 합과 같은 집합 toolIds — `snapText.buildSnapHash`).
+- **v3.27.0 — 스냅샷 화면 2단계(이력 화면)**: 추이 · 법인 카드 그림 · 7일 변화 · VM 이력 · ‘정리된 것’ 탭은 서버 `snaphist/history.js` 결과만 그린다(화면에 두 번째 판정 없음). **빠진 날(null)은 선을 끊는다**(`snapText.lineGeom` — 0 으로 잇지 않는다) · 7일 전 그 vCenter 를 'ok' 로 기록하지 않았으면 7일 변화는 ‘—’(모름) · 값이 낡은 vCenter 는 ‘스냅샷을 다 지운 VM’ 에서 뺀다 · 정리 실적에서 사유 'vm'(VM 삭제)은 뺀다 · 스냅샷 하나하나의 크기는 수집하지 않아 ‘정리된 것’ 에 회수 크기를 적지 않는다. 회귀 웹 `snapshots/snapHist3270.test.jsx`.
+- **v3.28.0 — 스냅샷 화면 3단계(만든 계정 · 보류)**. 회귀 `server/test/snapHold3280.test.js` · 웹 `snapshots/snapHold3280.test.jsx`.
+  - **보류 = 기한 있는 예외**(`vmhygiene/holds.js` · `vm-snapshot-holds.json`): 1~90일 · 사유 필수 · 0 = 풀기. 판정은 `hygieneFindings` 하나(`holdOf` — 기한은 판정 시각으로 다시 본다) — `loadVmHygieneSettings` 가 **열거되지 않는 속성 `holds`**(Map)로 붙여 카드 · VM 구성 점검 · 알림 · 스냅샷 화면 · 이력 기록이 같은 판정을 본다. 이 속성을 열거되게 바꾸면 설정 저장 파일 · 설정 응답 · rev 에 보류가 섞인다(시험 ②가 막는다). 못 읽은 보류 파일 위에는 저장하지 않는다(503).
+  - 쓰기 `PUT /tools/snapshots/holds` = 관리자(`requireRole('admin')`) · 조회 범위 밖 404 → 쓰기 범위 밖 403 · 감사 `snapshot.hold`. 조회는 범위 안 보류만 · 건 계정(by)은 관리자 판본만. 화면 응답(`/tools/snapshots`)에는 by 를 싣지 않고 캐시 열쇠에 보류 세대(`holdsGeneration`)를 넣는다.
+  - **만든 계정**(`snaphist/creators.js`): 스냅샷 이벤트 DB(31일)에서 VM **이름**으로 잇는 VM 단위 ‘최근 생성 계정’ — 같은 이름 VM 은 잇지 않음 · 백업 도구 계정 제외 · 엣지 위임(site) vCenter 는 'site'(모름) · 상한까지 읽으면 'truncated'. 계정 이름은 관리자 판본만(`user:null` + `userMasked` — vcInfo 작업 사용자와 같은 규칙) · 캐시 열쇠에 관리자 여부.

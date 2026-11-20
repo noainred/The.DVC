@@ -70,6 +70,8 @@ export function sampleNotes(resp) {
   }
   if (s.same) out.push(`이 주기는 상위 집합 · 값이 ${whenText(s.baseTs)} 표본과 같아(CPU ±5%p · RSS · I/O ±5%) 그 표본의 행을 보여 줍니다(저장은 머리 1행).`);
   if (num(s.ioPerm)) out.push(`I/O 를 읽지 못한 프로세스 ${s.ioPerm}개 — /proc/<pid>/io 는 같은 사용자 또는 CAP_SYS_PTRACE 가 필요합니다(‘권한’ 칸 · 0 으로 적지 않습니다).`);
+  // 83회차(80회차 E2): 권한이 아닌 이유로 I/O 를 내지 못한 후보(둘째 읽기가 시한에 끊김 · 첫 읽기 뒤에 시작 · 카운터가 되돌아감) — 권한 문구와 가른다.
+  if (num(s.ioUnknown)) out.push(`I/O 값을 내지 못한 후보 ${s.ioUnknown}개 — 권한 문제가 아니라 읽기가 시한에 끊겼거나 첫 읽기 뒤에 시작한 프로세스입니다(0 으로 적지 않습니다).`);
   return out;
 }
 /** 바닥 줄(순수) — 나머지 합계(전 프로세스 합 − 보인 상위 · 0 아래로 내리지 않는다) · 프로세스 수 · R · D. */

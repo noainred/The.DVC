@@ -183,13 +183,19 @@ export const PEAK_SRC_TEXT = Object.freeze({
   psi: 'PSI 10초 평균(C 보조 — 피크 값이 아님)',
   none: '피크 없음',
 });
-export function peakSrcText(srcs = [], windowS = null) {
+/**
+ * 피크 출처 글자. 점검 반복 2회차 I2: ‘줄었다’ 는 설정 상한(capS — 응답 peakWindowCapS · 그 노드 설정 peakWindowS)과 견준다 —
+ *   예전에는 기본값 10 과 견줘 설정 5 를 ‘줄임’ 으로 · 20 을 12 로 줄인 것은 말하지 않았다. 상한을 모르면(구버전 엣지) 줄었는지 말하지 않는다.
+ *   원인(주기 예산 · 세션 예산 · 표본 부족)은 행 노트가 말한다 — 여기서는 단정하지 않는다.
+ */
+export function peakSrcText(srcs = [], windowS = null, capS = null) {
   const list = [...new Set((Array.isArray(srcs) ? srcs : [srcs]).map(t).filter(Boolean))];
   const w = n(windowS);
+  const cap = n(capS);
   const one = (s) => {
     if (s === 'window10') {
-      if (w === 0) return '1초 창 꺼짐(주기 예산으로 0초) — 피크 없음 · PSI 보조만';
-      if (w != null) return `${w}초 창(A 안 — 같은 SSH 세션 1초 간격${w < 10 ? ' · 주기 예산으로 줄임' : ''})`;
+      if (w === 0) return cap === 0 ? '1초 창 꺼짐(설정 0초) — 피크 없음 · PSI 보조만' : `1초 창 꺼짐(이번 주기 0초${cap != null ? ` · 설정 ${cap}초` : ''} — 이유는 행 노트) — 피크 없음 · PSI 보조만`;
+      if (w != null) return `${w}초 창(A 안 — 같은 SSH 세션 1초 간격${cap != null && w < cap ? ` · 설정 ${cap}초에서 줄어듦` : ''})`;
       return PEAK_SRC_TEXT.window10;
     }
     return PEAK_SRC_TEXT[s] || `출처 ‘${s}’`;

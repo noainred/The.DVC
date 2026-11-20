@@ -17,6 +17,7 @@
  * ⚠ 원문(`raw` — quser 출력 전체)은 **push 하지 않는다**. 진단용이고 중앙에서 다시 파싱할 일이
  *   없으며, 그대로 올리면 전송량이 수십 배가 된다(400대 × 최대 8KB).
  */
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import zlib from 'node:zlib';
 import { promisify } from 'node:util';
 import { config } from '../config.js';
@@ -27,7 +28,7 @@ import { agentHeaders, withAgentQuery, agentHostnameHeader } from './agentNameCa
 
 const gzipAsync = promisify(zlib.gzip);
 const PUSH_GZIP = process.env.AGENT_PUSH_GZIP !== 'false';
-const CHUNK_BYTES = Math.max(100_000, Number(process.env.AGENT_CURUSER_CHUNK_BYTES) || 700_000);
+const CHUNK_BYTES = Math.max(100_000, envPositive(process.env.AGENT_CURUSER_CHUNK_BYTES, 700_000));
 const CHUNK_MAX_RECORDS = 300;
 
 let last = null;    // { at, chunks, records, bytes, gzBytes, ms, error }

@@ -121,7 +121,7 @@ test('L-R2: CSV export 가 guardCell(수식 인젝션 방어)을 적용', () => 
 
 test('M-R2: RDP 게이트웨이가 자격증명을 티켓에서만 읽고 쿼리 폴백을 제거', () => {
   const src = read('../src/proxy/guacdTunnel.js');
-  assert.match(src, /const tk = consumeRdpTicket\(params\.get\('ticket'\)\)/);
+  assert.match(src, /const tk = consumeRdpTicket\(params\.get\('ticket'\), \{ user: user\?\.username \|\| '' \}\)/);   // 전체 점검 19회차 A-11: 발급자 대조
   assert.match(src, /if \(!tk\)/); // 티켓 없으면 거부(fail-closed)
   // cred 는 tk 에서만 — params.get(k) 쿼리 폴백이 없어야 한다.
   assert.ok(!/params\.get\(k\)/.test(src), '쿼리스트링 자격증명 폴백(params.get(k)) 제거');

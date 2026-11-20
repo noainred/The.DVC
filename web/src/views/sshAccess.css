@@ -65,3 +65,22 @@
 /* 키 표 — 기능 칸은 줄바꿈 허용(1440 에서 동작 열이 보이게) */
 .ssa-keys td:nth-child(3) { white-space: normal; min-width: 120px; }
 .ssa-keys td:first-child { white-space: normal; min-width: 170px; }
+/* v3.24 계정 계층(법인 › OS 종류 › 서버) · 공통 계정 — 같은 규칙(min-width:0 · flex-wrap · 400px 은 표 안 스크롤) */
+.sah-tree { flex: 1 1 240px; max-width: 280px; align-content: start; }
+@media (max-width: 720px) { .sah-tree { max-width: none; } }
+.sah-leaf { cursor: default; }
+.sah-legend { margin: 0; padding: 8px 10px; line-height: 1.5; }
+.sah-dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 12px; margin: 0; font-size: 12.5px; min-width: 0; }
+.sah-dl dt { color: var(--text-dim); }
+.sah-dl dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+/* 일괄 줄은 플렉스 줄바꿈(그리드 칸에 버튼이 세로로 쌓이지 않게) · 안내문은 한 줄 전체 */
+.ssa-form.sah-bar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; }
+.sah-bar > .ssa-otp, .sah-bar > .sah-inline { flex: 0 1 220px; }
+.sah-bar > p { flex: 1 1 100%; }
+/* 표 안 동작 버튼은 세로로(열 폭을 줄여 1440px 에서 동작 열이 가려지지 않게) */
+.sah-stack { flex-direction: column; align-items: stretch; }
+.sah-inline { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; min-width: 0; font-size: 12px; color: var(--text-dim); }
+.sah-accform .sah-wide { grid-column: 1 / -1; }
+/* 계층 · 공통 계정 표 — 전역 'tbody td nowrap' 을 풀어 긴 기능 목록 · 로그인 이름이 칸 안에서 줄바꿈되게(1440px 에서 동작 열이 래퍼 밖으로 밀리지 않게) */
+.sah-t tbody td { white-space: normal; }
+.sah-t tbody td code { overflow-wrap: anywhere; }

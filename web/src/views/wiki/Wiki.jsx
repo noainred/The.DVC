@@ -23,6 +23,7 @@ import {
   draftKey, loadDraft, saveDraft, clearDraft, countTiles, numText, noticeUntilText, quickHref, quickLinksToText, textToQuickLinks, versionLine,
   diffSummary, DIFF_MARK, WHERE_TEXT, searchSummary, spaceName, dateText, timeText, STALE_DAYS, slashQuery, filterSlash, applySlash, oncallToText, textToOncall, oncallRange,
 } from './wikiText.js';
+import { saveBlob } from '../../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나
 
 function useLatest() {
   const ref = useRef(null);
@@ -543,7 +544,7 @@ function PageView({ id, space, meta, pages, onWritten }) {
         <div className="wiki-actions">
           {writable && <button className="btn primary" onClick={() => go({ space, id: page.id, view: 'edit' })}>편집</button>}
           <button className="btn" onClick={() => go({ space, id: page.id, view: 'history' })}>이력 ({page.versions.length})</button>
-          <button className="btn" title="본문(마크다운)을 파일로 받습니다 — 매크로는 글자 그대로" onClick={() => { const b = new Blob([`# ${page.title}\n\n${page.body}`], { type: 'text/markdown;charset=utf-8' }); const u = URL.createObjectURL(b); const a = document.createElement('a'); a.href = u; a.download = exportMarkdownName(page); document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 1000); }}>.md 받기</button>
+          <button className="btn" title="본문(마크다운)을 파일로 받습니다 — 매크로는 글자 그대로" onClick={() => { const b = new Blob([`# ${page.title}\n\n${page.body}`], { type: 'text/markdown;charset=utf-8' }); saveBlob(b, exportMarkdownName(page)); }}>.md 받기</button>
           <button className="btn" title="지금 보이는 문서(매크로 값 포함 — 이 시각 기준)를 인쇄 · PDF 로 저장합니다" onClick={() => printDocument(mainRef.current, page.title, `${spaceName(meta.spaces, space)} · v${page.version} · ${timeText(Date.now())} 기준`)}>인쇄 · PDF</button>
           {canComment && <button className="btn" disabled={busy} onClick={() => act(() => postJson(`/wiki/pages/${page.id}/watch`, { on: !page.watching }))}>{page.watching ? '지켜보기 끄기' : '지켜보기'} · {page.watchers.length}</button>}
           {writable && <button className="btn" onClick={() => go({ space, view: 'new', params: { parent: page.id } })}>+ 하위 문서</button>}

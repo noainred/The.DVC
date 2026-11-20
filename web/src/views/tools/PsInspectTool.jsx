@@ -103,7 +103,8 @@ export default function PsInspectTool() {
       </div>
       {ov.err && <div className="psi-banner amber">새로 불러오지 못했습니다(전에 받은 값을 보여 줍니다): {String(ov.err?.message || ov.err)}</div>}
       {run.msg && <div className={`psi-banner${run.msg.ok ? '' : ' amber'}`}>{run.msg.text}</div>}
-      {ov.data.settingsUnreadable && <div className="psi-banner amber">점검 설정 파일을 읽지 못해 기본값(매주 월요일 09:00)으로 돌고 있습니다.</div>}
+      {/* 결정(56~75 남긴 것) 57: 설정을 못 읽은 동안은 주간 점검을 기본값(켜짐)으로 돌리지 않고 보류한다(서버 inspectTick 'unreadable') — 예전 문구는 '기본값으로 돌고 있습니다' 였다 */}
+      {ov.data.settingsUnreadable && <div className="psi-banner amber">점검 설정 파일을 읽지 못해 주간 점검 · 보고서 메일을 멈췄습니다(사용자가 꺼 둔 점검을 기본값으로 켜지 않게). {sch?.loadError?.readError ? '읽기 오류라 원본은 그대로 있고, 다시 읽히면 풀립니다.' : '서비스 점검에서 기본값으로 확정하거나 손상 보존본을 되돌리세요.'} 그동안 설정 저장은 거절합니다.</div>}
       {ov.data.store?.loadError && <div className="psi-banner amber">점검 이력 파일을 읽지 못해 빈 이력으로 시작했습니다(원본은 .corrupt 로 보존): {ov.data.store.loadError}</div>}
       {(ov.data.drops || []).length > 0 && <div className="psi-banner amber">엣지가 받아 가지 않았거나 결과를 올리지 않아 버린 점검 요청 {ov.data.drops.length}건이 있습니다 — 그 엣지의 상태를 확인하세요.</div>}
       {showSettings && <InspectSettings schedule={sch} corps={corpList} isAdmin={isAdmin} unreadable={ov.data.settingsUnreadable} onSaved={() => ov.reload()} />}

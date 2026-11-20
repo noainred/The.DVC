@@ -8,8 +8,12 @@
  *     영영 열린 채 남는다. 창 안에서 막은 초과는 notifiedAt 을 되돌렸으므로 해제 발화가 생기지 않는다. 해제는 억제 계수에도 넣지 않는다.
  *   · 창이 끝난 뒤 첫 ‘초과’ 발화에 앞 상태의 `maint` 가 있으면 **그때 1회** 보내고 afterMaint 표지(제목 ‘창 안부터 초과’).
  *   · 발화가 없는 주기에도 `maint` 를 들고 간다(stepAlert 가 상태를 새로 만들어 표지를 잃지 않게). 추적이 끝나면(정상 복귀 · 끊김) 표지도 사라진다.
+ */
+import { scopeOccOf } from './judge.js';   // 순수 — 판정 코어(fs 없음)
+
+/**
  * @param {{ prev:object, next:object, fires:Array, stateOf:(key:string)=>object|null, now:number }} p
- * @returns {{ send:Array, held:number, heldNew:number, after:number, applied:Array<{key,until,since,ids}> }}
+ * @returns {{ send:Array, held:number, heldNew:number, after:number, applied:Array<{key,until,occ,ids}> }}
  */
 export function holdThresholdFires({ prev = {}, next = {}, fires = [], stateOf = () => null, now = Date.now() } = {}) {
   const send = []; let held = 0; let heldNew = 0; let after = 0; const applied = []; const counted = [];
@@ -23,8 +27,8 @@ export function holdThresholdFires({ prev = {}, next = {}, fires = [], stateOf =
     if (ms?.scopes?.alerts) {
       const hit = (ms.windows || []).filter((w) => (w.scopes || []).includes('alerts'));
       const ids = hit.map((w) => w.id).sort();
-      const starts = hit.map((w) => Number(w.start)).filter(Number.isFinite);
-      applied.push({ key: f.key, until: ms.until.alerts, since: starts.length ? Math.min(...starts) : null, ids });
+      // 점검 기록은 창마다 그 창 발생의 시작 · 끝(judge.scopeOccOf 하나 — 3회차 D3: 시작 최소 · 끝 최대를 섞으면 겹친 창이 거짓 over-cap)
+      applied.push({ key: f.key, until: ms.until.alerts, occ: scopeOccOf(ms, 'alerts'), ids });
       held += 1;
       if (next[id]) next[id] = { ...next[id], notifiedAt: prev?.[id]?.notifiedAt ?? null, maint: { ids, until: ms.until.alerts, since: pm?.since ?? now } };
       if (!(pm && JSON.stringify(pm.ids || []) === JSON.stringify(ids))) { heldNew += 1; counted.push(ids); }

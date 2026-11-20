@@ -139,13 +139,15 @@ export function buildDataFlow(p = {}) {
   const byOriginAll = new Map(); // base 가 없는 행(구버전 기록 형식)용 — origin 이 같은 수집 서버 전부
   for (const c of p.collectors || []) {
     const id = t(c?.id || c?.name); if (!id) continue;
-    alias.set(norm(id), id); if (t(c?.name)) alias.set(norm(c.name), id);
+    alias.set(norm(id), id);
     const origin = originOf(c?.url);
     const base = baseOf(c?.url);
     if (base) { if (!byBase.has(base)) byBase.set(base, []); byBase.get(base).push(id); }
     if (origin) { if (!byOriginAll.has(origin)) byOriginAll.set(origin, []); byOriginAll.get(origin).push(id); }
     edges.set(id, { id, name: t(c?.name) || id, registered: true, enabled: c?.enabled !== false, origin, unverifiedOnly: false });
   }
+  // 63회차 F5: 표시 이름은 id 를 다 넣은 뒤에, 비어 있는 칸에만 — 다른 엣지의 표시 이름이 이 엣지 id 를 덮지 않게(통신 지도 aliasMap 과 같은 규칙).
+  for (const c of p.collectors || []) { const id = t(c?.id || c?.name); const n = norm(c?.name); if (id && n && !alias.has(n)) alias.set(n, id); }
   for (const ids of byBase.values()) {
     if (ids.length < 2) continue;
     for (const id of ids) edges.get(id).sharedUrlWith = ids.filter((x) => x !== id);

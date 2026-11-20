@@ -192,8 +192,12 @@ export async function logServerQuery({ agent = '', key, from, to, secTop = 15 } 
   const ag = String(agent); const k = String(key); const f = Math.round(Number(from)); const t = Math.round(Number(to));
   const hourRows = db.prepare('SELECT hour, sig, cls, count FROM log_hour WHERE agent=? AND key=? AND hour>=? AND hour<=? ORDER BY hour').all(ag, k, f, t);
   const metas = new Map(db.prepare('SELECT sig, cls, severity, rule_id, src, unit, tmpl, count, first, last, samples_json FROM log_pattern WHERE agent=? AND key=?').all(ag, k).map((r) => [r.sig, r]));
-  const secRows = db.prepare('SELECT kind, item, SUM(count) c FROM log_sec WHERE agent=? AND key=? AND hour>=? AND hour<=? GROUP BY kind, item ORDER BY c DESC LIMIT 400').all(ag, k, f, t);
   const totals = Object.fromEntries(db.prepare('SELECT kind, SUM(count) c FROM log_sec WHERE agent=? AND key=? AND hour>=? AND hour<=? GROUP BY kind').all(ag, k, f, t).map((r) => [r.kind, Number(r.c) || 0]));
+  // ⚠ 점검 반복 8회차 F1: 상위 목록은 **종류마다** 뽑는다 — 예전 한 문장(GROUP BY kind, item · LIMIT 400)은 많은 종류(스캐너의 fail_user 481행)가 400행을 다 채워
+  //   sudo · 계정 변경 실행자 목록이 비었다(합은 4 · 1 인데 화면 '4 · —'). 종류 수만큼(지금 8가지 이하) PK 앞부분으로 좁힌 조회 · 집계 함수 하나(perf-db).
+  const secTopStmt = db.prepare('SELECT item, SUM(count) c FROM log_sec WHERE agent=? AND key=? AND hour>=? AND hour<=? AND kind=? GROUP BY item ORDER BY c DESC LIMIT ?');
+  const secRows = [];
+  for (const kind of Object.keys(totals).slice(0, 32)) for (const r of secTopStmt.all(ag, k, f, t, kind, Math.max(1, Math.min(100, Math.round(Number(secTop)) || 15)))) secRows.push({ kind, item: r.item, c: r.c });
   const cur = db.prepare('SELECT at, status_json, bad_json FROM log_cursor WHERE agent=? AND key=?').get(ag, k) || null;
   const st = parse(cur?.status_json);
   const sec = {};

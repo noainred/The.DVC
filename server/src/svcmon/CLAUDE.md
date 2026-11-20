@@ -12,6 +12,8 @@
   재동기화는 `tpl:'settings'` + `tplKey` 로 **test.id 를 승계**한다(연속 횟수·만기 리셋 금지). 사람이 더한 점검은 건드리지 않는다.
 - **배정 동기화는 byAgent 배정이거나 배정이 없는 엣지만** — 경로 기준 배정을 byAgent 로 바꾸면 그 엣지의 경로 대상이 통째로 빠진다(파괴적). 건너뜀으로 보고한다.
 - **자동 등록 기본 끔** · 켜도 한 번도 연동된 적 없는 키(`known`)만 · 언제나 중지 상태 · 배정 동기화 없음. 감지(5분)는 카탈로그 **읽기만** · 엣지 노드(CENTRAL_URL)는 돌지 않고 라우트는 409.
+  v3.18.14(회귀 `svcmonSettingsSyncFix31814`): 자동 등록 종류를 **늘리는** 저장은 곧바로 한 번 감지(`requestDetect` — 응답 `detectQueued`) · 자동 등록이 대상을 더한 감지는 **등록 뒤 카탈로그**로 감지값을 남긴다(개요 '감시 범위' 가 5분 동안 0 이던 것) ·
+  엣지 포탈 HTTP 점검은 **무인증 공개 경로**(`COLLECTOR_PROBE_PATH` — `/api/health` 는 `/api` 인증 라우터 아래라 인증 포탈에서 늘 401 이었다). 옛 정의(`isLegacyCheck` — 그 경로 하나만, URL 일반 비교 금지)가 남은 연동 대상은 '변경'(`defChanged`) → 적용이 경로 · 표지 · 기대 코드만 고친다(id 승계).
 - **배너의 '새 항목' 은 기준점(첫 감지 · 마지막 확인) 이후 생긴 것만**(`driftSummary` — Chromium 실측: 미등록 258건을 '설정이 바뀌었습니다' 로 띄웠다). 미등록 전체는 `unregistered`.
 - **상태 파일** `svcmon-settings-sync.json`(옵션 · known · seen · 일별 요약)은 감지가 쓰므로 `backup/service.js CHANGE_WATCH_EXCLUDE`(번들에는 들어간다). `svcmon-alert.json` 은 `alertSettings.js` 하나만 쓴다
   (`transitions.js` 는 파일을 쓰지 않는다 — ARCH-4·MIXED_STATE 스윕).
@@ -47,3 +49,7 @@
   엣지 메타 `k`(infra|service)는 **아는 값만**(그 밖 = 빈 값 · `metaSig` 판 `m2:`) · 빈 값(옛 엣지)은 v2.960 과 같게 — 억제는 어느 구분이든 · 시험은 거르지 않음 · 개요는 경로 · 이름 조인. 수신 계약은 넓히기만 할 것.
   '법인 폴더로 정리'(`planRepath` · `executeRepath`)는 **설정 연동이 놓은 자리에 그대로 있는 대상만**(`row.repath` — 지금 법인을 알 때(corpKey) · 법인 등록부를 읽었을 때만) · 계획 때 지금 경로를 다시 대조 · 옮길 폴더의 (구분 · 경로 · 이름) 충돌이면 건너뜀 · 경로 기준 배정 엣지가 옮기기 전/뒤를 덮으면 건너뜀 · 배정 파일 못 읽으면 건너뜀 · id 승계. 출처의 법인은 '놓인 자리' 라 주소 변경 적용이 덮지 않는다.
   '지금 한 번 점검'(`runOnceTest`)은 실행 역할일 때만 · 결과는 응답으로만(폴러 결과 · 전이 · 알림 금지) · 동시 상한. 데모 엣지 배정 후보는 mock 에서만(데모 엣지 대상의 시험은 이 포탈이 대신 — 보고하지 않는다).
+- **전체 점검 26회차(`svcmonFullAudit26`)**: `batch` 는 **서버만 발급**(`cleanTarget` 은 `opts.batch` 또는 승계 — 엣지 롤백만 `trustedBatch`) · 단건 추가 · 수정도 (구분 · 경로 · 이름 소문자) 중복 검사(수정은 키를 바꿀 때만) ·
+  비-HTTP 접속은 `lookup: ssrfLookup`, **dgram 은 `dgramLookup`**(bind 주소 0.0.0.0 도 lookup 으로 풀린다 — ssrfLookup 그대로면 UDP · NTP 전부 실패) · 엣지 caps · poller · log 는 아는 필드만(`cleanEdge*`) ·
+  로그 보관 · 알림 설정 손상은 서비스 점검 등재, 손상 중 로그 정리는 설정 상한(파일 3650개)으로만 · **CSV 기록은 멈춤**(위치 · 총량을 모른다 — 28회차 N-3) · 저장 409 · 확정은 보관 최대 + 총량 무제한(N-1).
+  점검 lookup 은 `checkLookup(점검 시한)`(공용 3초 시한은 느린 DNS 를 포트 장애로 오진 — N-5) · `[ssrf]` 경고는 이름마다 10분에 한 줄(N-6).

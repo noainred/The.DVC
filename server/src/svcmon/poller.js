@@ -15,17 +15,20 @@
  * - CSV 적재는 배치 라이터에 push 만 한다(동기 I/O 없음).
  */
 
-import { config, clampIntervalMs } from '../config.js';
+import { config } from '../config.js';
 import { listTargets, storeRevision } from './store.js';
 import { runBatch, poolStats } from './pool.js';
+import { tickMsFromEnv, maxPerTickFromEnv } from './capacity.js';
+import { envPositive } from '../util/envNumber.js';
 import { appendResult, logStats } from './csvlog.js';
 import { ensureSvcmonDemo, splitSvcmonDue, demoSvcmonResult } from '../mock/demo/svcmon.js'; // v2.716: 데모 대상은 접속하지 않는다
 
-const envNum = (k, d) => { const n = Number(process.env[k]); return Number.isFinite(n) ? n : d; };
+// 102회차: 빈 값(`KEY=`) · 0 · 음수는 기본값(예전엔 `Number('') === 0` 이라 SVCMON_MAX_PER_TICK= 한 줄이 틱 상한을 100 으로 · 예열 상한을 1분으로 줄였다).
+const envNum = (k, d) => envPositive(process.env[k], d);
 import { noteResult, forgetAlertedWhere } from './transitions.js'; // v2.915 Monitoring 개요 · 실패 알림
 // v2.628(감사 EDGE2628-05): 상한이 없어 2^31-1ms 를 넘는 값이 setInterval 1ms 루프가 됐다 — config.js 관문으로 [1초, MAX_TIMER_MS].
-const TICK_MS = clampIntervalMs(envNum('SVCMON_TICK_MS', 5000), 5000, 1000);
-const MAX_PER_TICK = Math.max(100, envNum('SVCMON_MAX_PER_TICK', 4000));
+const TICK_MS = tickMsFromEnv();          // 102회차: capacity.js 의 천장 계산과 같은 함수(예전엔 두 곳이 따로 읽었다)
+const MAX_PER_TICK = maxPerTickFromEnv();
 const ENABLED = process.env.SVCMON_ENABLED !== 'false';   // 킬스위치(독립 운영 요구사항)
 /**
  * 이 인스턴스가 점검을 **직접 실행**하는가. `SVCMON_ROLE=central` 이면 실행하지 않는다 —

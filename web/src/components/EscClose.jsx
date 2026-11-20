@@ -22,6 +22,8 @@ export default function EscClose({ onClose }) {
     stack.push(token);
     const onKey = (e) => {
       if (e.key !== 'Escape') return;
+      // v3.17.3: 한글 조합 중의 ESC 는 조합 취소다 — 모달을 닫아 입력하던 글을 잃게 하지 않는다(keyCode 229 = IME 처리 중).
+      if (e.isComposing || e.keyCode === 229) return;
       if (stack[stack.length - 1] !== token) return; // 최상단 모달이 아니면 무시
       e.stopPropagation();
       onCloseRef.current?.();

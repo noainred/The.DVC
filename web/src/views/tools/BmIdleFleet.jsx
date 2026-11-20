@@ -4,17 +4,18 @@
  * ⚠ 조회는 보기를 고를 때 1회 + ‘다시 읽기’(폴링 없음). 검토 상태 저장 뒤 다시 읽는다.
  */
 import React, { useMemo, useState } from 'react';
-import { postJson, hasRole } from '../../api.js';
+import { postJson } from '../../api.js';
 import Select from '../../components/Select.jsx';
 import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { toneVar } from './toneVar.js';
 import { unitText } from '../unitText.js';
 import { OpsError, useOpsLoad } from './BmTuningTab.jsx';
-import { STATUS_TEXT, REVIEW_OPTIONS, REVIEW_TEXT, cpuPairText, powerText, actText, statusText, droppedText, reviewText, idleCards, candPowerText, monthText, sourceText, ruleRows, IDLE_HONEST } from './bmIdleText.js';
+import { idleRowId, reviewLockedText, STATUS_TEXT, REVIEW_OPTIONS, REVIEW_TEXT, cpuPairText, powerText, actText, statusText, droppedText, reviewText, idleCards, candPowerText, monthText, sourceText, ruleRows, IDLE_HONEST } from './bmIdleText.js';
 import './bmOps.css';
 import './bmMaint.css';
 import { refOf } from './bmPerfUrl.js'; // 다음 점검 ①: 비교로 보내는 서버 = ‘법인|키’ 쌍
+import { gateOk, gateShown, gateTitle, gateWhy } from './bmWriteText.js'; // 점검 반복 2회차 E2③④ — 서버 쓰기 표지
 
 function ReviewEditor({ row, onDone }) {
   const [st, setSt] = useState(row.review?.status && row.review.status !== 'clear' ? row.review.status : 'review');
@@ -41,7 +42,10 @@ function ReviewEditor({ row, onDone }) {
   );
 }
 
-export function IdleFleetView({ resp, onOpen, onCompare, onReload, loading = false, canWrite = false, canRecompute = false }) {
+export function IdleFleetView({ resp, onOpen, onCompare, onReload, loading = false }) {
+  // 점검 반복 2회차 E2③④: 서버 표지(actions — 라우트와 같은 판정) · 행 writable(그 법인 쓰기 범위). 표지가 없으면 닫는다.
+  const rg = resp?.actions?.recompute;
+  const vg = resp?.actions?.review;
   const [corp, setCorp] = useState('');
   const [st, setSt] = useState('');
   const [q, setQ] = useState('');
@@ -85,7 +89,7 @@ export function IdleFleetView({ resp, onOpen, onCompare, onReload, loading = fal
           <input className="input bmc-q" value={q} onChange={(e) => setQ(e.target.value)} placeholder="서버" aria-label="서버 검색" />
           <button className="btn btn-sm" onClick={onReload} disabled={loading}>{loading ? '읽는 중…' : '다시 읽기'}</button>
           <button className="btn btn-sm" disabled={sel.size < 2} onClick={() => onCompare?.([...sel])}>비교로 보내기({sel.size}/5)</button>
-          {canRecompute && <button className="btn btn-sm" onClick={recompute} disabled={re?.busy}>{re?.busy ? '계산 중…' : '이 노드 다시 계산'}</button>}
+          {gateShown(rg) && <button className="btn btn-sm" onClick={recompute} disabled={re?.busy || !gateOk(rg)} title={gateTitle(rg, '이 노드 다시 계산')}>{re?.busy ? '계산 중…' : '이 노드 다시 계산'}</button>}
           <span className="bmo-sub">{rows.length} / {all.length}대</span>
           {re && !re.busy && <span className="bmo-sub" style={{ color: toneVar(re.ok ? 'ok' : 'bad') }}>{re.text}</span>}
         </div>
@@ -93,7 +97,7 @@ export function IdleFleetView({ resp, onOpen, onCompare, onReload, loading = fal
           <thead><tr><th data-nosort="1">선택</th><th>서버</th><th>법인</th><th className="right">점수</th><th>상태</th><th className="right">CPU 평균/최대</th><th className="right">메모리</th><th className="right">디스크</th><th className="right">네트</th><th className="right">전력 W</th><th style={{ minWidth: 90 }}>활동</th><th style={{ minWidth: 120 }}>검토</th></tr></thead>
           <tbody>
             {rows.map((r) => (
-              <React.Fragment key={`${r.node}|${r.vcenterId}|${r.key}`}>
+              <React.Fragment key={idleRowId(r)}>
                 <tr>
                   <td data-nosort="1"><input type="checkbox" checked={sel.has(refOf(r.key, r.vcenterId))} onChange={() => toggle(refOf(r.key, r.vcenterId))} aria-label={`${r.name} 선택`} /></td>
                   <td data-sort={r.name} style={{ whiteSpace: 'nowrap' }}><span className="bmp-link" role="button" tabIndex={0} onClick={() => onOpen?.(r.key, r.vcenterId)} onKeyDown={(e) => { if (e.key === 'Enter') onOpen?.(r.key, r.vcenterId); }}>{r.name}</span>{droppedText(r) && <div className="bmo-sub">{droppedText(r)}</div>}</td>
@@ -108,16 +112,18 @@ export function IdleFleetView({ resp, onOpen, onCompare, onReload, loading = fal
                   <td className="bmo-wrap" data-sort={actText(r.metrics)}>{actText(r.metrics)}</td>
                   <td className="bmo-wrap" data-sort={reviewText(r.review)}>
                     {reviewText(r.review)}{r.review?.reason && <div className="bmo-sub">{r.review.reason}</div>}
-                    {canWrite && editing !== r.key && <div><button type="button" className="btn btn-sm" onClick={() => setEditing(r.key)}>검토 상태…</button></div>}
+                    {gateOk(vg) && r.writable === true && editing !== idleRowId(r) && <div><button type="button" className="btn btn-sm" onClick={() => setEditing(idleRowId(r))}>검토 상태…</button></div>}
+                    {gateOk(vg) && r.writable === false && <div className="bmo-sub" title={r.vcenterId ? gateWhy({ ok: false, why: 'read-only' }) : undefined}>{reviewLockedText(r)}</div>}
                   </td>
                 </tr>
-                {editing === r.key && <tr><td colSpan={12}><ReviewEditor row={r} onDone={(ok) => { setEditing(''); if (ok) onReload?.(); }} /></td></tr>}
+                {editing === idleRowId(r) && <tr><td colSpan={12}><ReviewEditor row={r} onDone={(ok) => { setEditing(''); if (ok) onReload?.(); }} /></td></tr>}
               </React.Fragment>
             ))}
           </tbody>
         </STable>
         {!rows.length && <p className="bmo-note">표시할 서버가 없습니다(하루 1회 계산 · 보는 범위 안 서버만).</p>}
         <p className="bmo-note">행 선택 → ‘비교로 보내기’(2~5대) · 검토 상태는 운영 주석으로 저장됩니다(누가 · 언제 · 사유 · 감사) · 서버 이름을 누르면 상세.</p>
+        {gateShown(vg) && !gateOk(vg) && <p className="bmo-note">검토 상태 바꾸기 — {gateWhy(vg)}.</p>}
       </section>
       <section className="bmo-card">
         <h5 className="bmo-h">점수 규칙 — 0~100(설정값 · 노드마다)</h5>
@@ -138,7 +144,7 @@ export default function BmIdleFleet({ onOpen, onCompare }) {
     <div className="card" style={{ minWidth: 0 }}>
       <OpsError err={st.err} />
       {!st.resp && !st.err && <p className="bmo-note">저활용 서버를 불러오는 중…</p>}
-      {st.resp && <IdleFleetView resp={st.resp} onOpen={onOpen} onCompare={onCompare} onReload={st.reload} loading={st.loading} canWrite={hasRole('admin', 'operator')} canRecompute={hasRole('admin', 'operator')} />}
+      {st.resp && <IdleFleetView resp={st.resp} onOpen={onOpen} onCompare={onCompare} onReload={st.reload} loading={st.loading} />}
     </div>
   );
 }

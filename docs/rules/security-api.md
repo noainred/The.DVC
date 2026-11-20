@@ -8,6 +8,8 @@
 
 - (원래 1289행) express 4 는 async 핸들러의 throw 를 잡지 않는다 — 라우터를 `wrapAsyncRouter` 로 감싼다
 - (원래 1313행) 범위(scope)는 '형제 라우트가 하고 있는가' 로 점검한다 — 한 파일에서 하나만 빠지면 실수다
+  - ⚠ v3.21.0: 도구 요약 모드(`?summary=1`)는 기존 라우트 안에서 같은 게이트(tools · toolGate · 범위)를 지난 뒤 — 새 경로를 만들지 않는다
+  - ⚠ v3.23.2: 범위 서명(캐시 열쇠의 조회 · 쓰기 범위 · 고른 법인 조각)은 `util/scopeSig.js` 하나 — 글자 join · 'all' 표식 금지
 - (원래 1360행) STARTTLS 는 '광고하지 않으면 평문으로 내려간다' 가 기본값이었다
 - (원래 1366행) `new Agent(` 스윕은 'Agent 를 안 쓰는 경로' 를 못 본다
 - (원래 1371행) `resilientFetch` 는 리다이렉트를 직접 따라가며 출처가 바뀌면 비밀 헤더를 뗀다
@@ -34,6 +36,7 @@
 - (8a단계 추가) 리눅스 성능 8a단계 정비 창 · 용량 예측 — 조회 밖 404 → 쓰기 밖 403(한 함수) · 법인/태그/12h 초과는 소유자 등급 · 고치기는 전후 모두 · 줄이는 동작은 쓰기 범위 · 배포는 개별 토큰만
 - (8b단계 추가) 리눅스 성능 8b단계 Top-N · 저활용 · 전력 API — 범위 먼저(합하기 전) · 단건 404 · 검토 쓰기 404 → 403 · 프로세스 사용자는 관리자 판본만 원문 · 인자 · 환경은 수집 단계에서 없음
 - (v2.976) 집중 모니터링 — admin + 전체 범위 · 키 로그인만 · 인증 거부 자동 재시도 금지 · 프로세스 comm 만 · 원격 명령 상수
+- (베어메탈 사용률 점검 6회차 A1 추가) 공용 게이트 fullScopeOnlyWith · requireSettingsOwner — 안전 메서드(GET · HEAD · OPTIONS)는 조회 범위만 · 그 밖은 조회 ∧ 쓰기 전체(isFullReadWriteScope) · 사유 따로 · 던지면 거부 · 읽기성 POST 예외 1 · 소유자 GET 도 조회 ∧ 쓰기 전체(2026-11-19 결정)
 
 ## 본문
 
@@ -84,6 +87,17 @@
   - ⚠ **공개 API 선언(`publicapi/allowlist.js`)과 내부 라우트의 `fullScopeOnly` 를 대조할 것**:
     `/faults/parts` 는 `requiresFullScope` 가 빠져 **같은 데이터가 세션 경로에서는 403 인데 키
     경로로는 전량** 나갔다. 그 플래그는 손으로 붙이는 것이라 전 카탈로그에서 2곳뿐이었다.
+  - ⚠ **도구 요약 모드는 기존 라우트 안에서 같은 게이트로**(v3.21.0 — VM 분석 화면 · `routes/api/toolSummary.js`):
+    분석 화면이 쓰는 도구 요약은 새 경로가 아니라 기존 도구 라우트의 `?summary=1` 이다(guest-partition · waste · waste/off-since ·
+    contention · vm-hygiene · vm-track · vm-lifecycle · v3.22.0 Hypervisor 분석: host-hygiene · storage-paths · capacity-forecast(집행 키 'forecast') — 회귀 `test/hostInsight3220.test.js`). 새 경로면 `requirePerm('tools')` · toolGate 도구별 거부 · 범위 교집합을 다시 걸어야 하고
+    빠뜨리기 쉽다 — 분기는 **범위를 계산한 뒤** 두고, 요약은 법인별 줄 + 법인별 상위 N · 판정은 도구 그대로 · 화면 목록 상한에 잘린 행으로 세지 않는다.
+    memoJson 열쇠는 URL 이라 `summary=1` 이 원본과 다른 칸을 쓴다(범위 서명은 같은 extraKey). 회귀 `test/vmInsightTools3210.test.js`(실제 api 라우터 — 권한 · 도구 거부 · 범위 · 합 대조).
+  - ⚠ **범위 서명은 `util/scopeSig.js scopeSig` 하나 — 글자 join 금지**(v3.23.1 dbg3231 → v3.23.2 전수): 등록부는 vCenter id 에 쉼표 · 'all' · '*' 를 허용한다.
+    예전 `[...allowed].sort().join(',')` · 무제한 'all'/'*' 는 ['KR,Seoul'] 과 ['KR','Seoul'], scope ['all'] · ['*'] 과 무제한을 같은 열쇠로 만들어 memoJson · 모듈 자체 기억을
+    다른 범위의 계정과 함께 썼다(재현 — 범위 계정이 범위 밖 법인의 호스트 수 · 서버 · 서브넷 · 쓰기 가능 표지를 받았다). 규칙: 무제한 = `SCOPE_SIG_ALL`('*') · 범위 = 's:' + JSON(정렬 배열) ·
+    무제한 판정은 표식과 비교('all' 글자 비교 금지) · 쓰기 범위 열쇠도 같은 함수(`scopeSig(writeScopedVcenterIds(...))` — 'none' · 'err' 는 그 밖의 표지).
+    `shared.js scopeKey` · `vcenterPickKey` · `vmtrack scopeKeyOf` 는 이 함수의 포장이다. 회귀 `test/scopeSig3232.test.js`(실제 핸들러 — 쓰기 범위 7경로 ETag · 조회 범위 5경로 응답 ·
+    IPAM 서브넷 기억 · 소스 스윕: 범위를 다루는 파일의 `.sort().join(` 은 범위가 아닌 예외 목록만).
 
 - ⚠ **STARTTLS 는 '광고하지 않으면 평문으로 내려간다' 가 기본값이었다**(`util/smtp.js`, v2.574 SEC-10):
   조건이 `… && ehloCaps(ehlo).has('STARTTLS')` 하나라, 서버가 그 한 줄을 광고하지 않으면
@@ -545,6 +559,52 @@
      (중앙 적용이 묶음 행에만 싣고, 묶음 칸 — 주소 · 이름 — 이 그대로인 갱신만 앞 승인을 잇는다). 엣지 쪽 기존 항목을 중앙이 모르므로 '잇는'(os_cred 빈칸 + os_key) 배포 행은
      늘 묶음으로 본다 · 다른 엣지로 옮기는 행은 그 엣지에겐 새 묶음. 회귀 `bmOnboard7bReview` ⑩(h18 — 비소유자 · 범위 관리자 · 가짜 sshd 수신 0) ⑪(h20 — choke point ·
      일괄 · 온보딩 · 엣지) ⑫(스윕) · 변이 R1~R10. 키 회전(`replaceBmServerKeyRefs` — 같은 주소의 키 교체, 소유자 + OTP 라우트)은 choke point 를 지나지 않는다(주소 불변).
+     (베어메탈 사용률 점검 4회차 D1) **키 배치 판정도 쓰기 때 같은 하나**: 키 폴더(법인 · 서버) 밖 키를 서버에 묶는 쓰기는 거부한다 — 온보딩 분석(중앙 · 엣지 적용 공통 — 행 `key-folder`) ·
+     `bmBindCheck`(409 — 소유자 · OTP 게이트 **전**이라 OTP 를 소모하지 않는다) · 회전(B-4 `placementConflicts`). 판정은 `onboard/placement.js keyPlacementIssue`(refs 가 다시 내보낸다 — 접속 때 resolveOsAuth 와 같은 함수) ·
+     효력 키는 적용 본문 그대로의 참조(`bindOfWrite` cred · key → 공통 계정 기본 키 · 비밀번호 고정이면 없음). 허용 기능 제한은 경고만(분석 행 · 회전 결과 — 메인 결정). 거부 문구에 키 폴더 값 · 키 이름을 싣지 않는다.
+     (6회차 A2) **공통 계정 저장도 쓰는 서버를 끊기 전에 거절** — 판정은 본인 OTP **앞**(`saveAccount dryRun` = 같은 검사 · `refs.accountUseIssue` — 키 폴더 · 계정 법인 · 종류 ·
+     새로 어긋나는 서버만 · 대수만 · 등록부 못 읽음 503)과 저장 직전 한 번 더. 계정 법인 ↔ 서버 법인은 `placement.accountCorpOk` 하나(온보딩 분석 cred-other-corp · bm-storage 저장 · 계정 저장).
+
+- ⚠⚠ **공용 게이트 — 쓰기 메서드는 조회 ∧ 쓰기 전체 범위(베어메탈 사용률 점검 6회차 A1 · `routes/admin/shared.js`)**
+  - 문제(재현 — 기준판 04fad6d1): `fullScopeOnlyWith`(게이트 인스턴스 85곳 · 라우트 568개 — 6회차 점검 정적 집계)와 `requireSettingsOwner` 가 **조회 범위만** 봐서, 조회는 무제한이고 쓰기만 일부 법인으로 줄인 계정
+    (scope = { vcenters: [], writeVcenters: [vcA] } — 사용자 관리에서 만들 수 있다)이 전 법인 공용 쓰기를 했다 — 관리자 wadm `PUT /api/insights/fleet/assign {vcenterId: vcB}` 200 · fleet-assign.json 에 씀 ·
+    `PUT /tools/bm-storage/settings` 200 · 소유자 wown `PUT /tools/bm-usage/perf-rules` · `PUT /admin/backup/settings` 200. 형제 `fullReadWriteScopeOnlyWith`(v2.935)는 이미 조회 ∧ 쓰기를 봤다.
+  - 고침(메인 결정): 두 게이트 모두 **안전 메서드(GET · HEAD · OPTIONS)는 예전 그대로**(조회 범위만 — 조회 무제한 계정의 함대 조회를 막지 않는다) · **그 밖의 메서드는 게이트 한 곳에서 `isFullReadWriteScope`**
+    (`writeScopeDenial` — 라우트를 하나씩 바꾸다 빠뜨리지 않게) · 쓰기 범위 때문에 막으면 사유를 따로(`WRITE_SCOPE_PARTIAL_REASON` · 소유자는 `SETTINGS_OWNER_WRITE_SCOPE_REASON` · `writeScope: 'partial'`) —
+    조회 범위 사유('전체 범위 계정만 조회')는 이 계정에 틀린 설명이라서. 판정이 던지면 거부(isFullReadWriteScope 의 기본값 false). 게이트 태그(kind)는 그대로라 아키텍처 점검이 여전히 전체 범위로 센다.
+  - **읽기성 POST 예외는 최소 — 지금 하나**: `POST /tools/cvp/parse-preview`(본문만 파싱 · 왕복 0 · 저장 0 · 저장 비밀 0 · 뒤따르는 쓰기 없이 혼자 쓰이는 진단 — `fullScopeOnlyWith(reason, { readPost: true })`).
+    예외로 두지 않은 것(판독): `rma/tests/validate` · `credentials/inspect-key` · `focus-mon/targets/import/preview` · `bm-usage/perf-rules/dry-run` · 메일 미리보기 — 저장 직전 검증 · 미리보기라 그 저장이 어차피 막힌다
+    (`san-flow/preview` 가 v2.935 부터 같은 판정으로 막혀 있는 것과 같다). 연결 시험 · probe · run · pull(api · admin · insights 라우터에서 이름이 시험 · 미리보기 · 실행성인 비안전 메서드 77개 중 나머지 — 이름 기준 판독)은 저장 비밀로 접속하거나 동작을 시키므로 막는 것이 맞다.
+  - **등급 질의는 쓰기 범위를 보지 않는다**: `settingsOwnerGradeDenial`(소유자 ∧ 조회 전체 — v2.744 그대로)을 라우트 게이트와 `bmOnboard.isOwnerTier`(법인마다 쓰기 범위를 따로 보는 라우트 안의 승인 등급 —
+    8a 정비 창 · 7b 온보딩 묶음 행)가 같이 쓴다. 쓰기 vcA 소유자의 vcA 법인 창은 그대로 200(bmMaint8aRoute). `/auth/me settingsOwnerTier` 는 쓰기 메서드로 묻는다(그 버튼의 저장이 403 이면 잠근다).
+  - **재확인(반증) 뒤 — 실행성 GET 도 쓰기와 같게**: 안전 메서드 통과는 '읽기' 라서, GET 이지만 **실행**인 라우트는 이 규칙의 빈칸이었다 —
+    `routes/admin/idracScan.js` 실시간 iDRAC 로그인(`gpu-probe` · `inventory?refresh=1` · `sensors?live=1` — 저장된 BMC 계정으로 장비에 접속)은 조회 범위만 봐서
+    쓰기 vcA 관리자가 vcB 서버에 실시간 로그인했다(재현 200) → `liveFleetOnly = fullReadWriteScopeOnlyWith` · `denyLive` = `isFullReadWriteScope`(캐시 조회는 그대로).
+    새 GET 라우트가 장비에 접속하거나 상태를 바꾸면 안전 메서드 통과에 기대지 말고 `fullReadWriteScopeOnlyWith` 를 직접 건다(Bareos `?refresh=1` 은 콘솔 조회 — 읽기).
+  - **결정 — 조회도 막음(2026-11-19 사용자 · 권장안)**: `requireSettingsOwner` 는 **모든 메서드**(GET · HEAD 포함)에서 `isFullReadWriteScope`(던지면 거부)다 — 안전 메서드 예외(`writeScopeDenial`)를 쓰지 않는다.
+    소유자 등급 GET 은 전 법인 공용 비밀 · 설정(백업 상태 · 내려받기 · 보기 · 비밀 정책 · 세션 보안 · 공유 중앙 토큰 · host-access · 사용 현황 · SSH 접근 · bm-storage 인증 선택지 · 설정 상태 배지)과
+    처리기 안에서 부르는 **비밀 포함 내보내기**(`?secrets=1` · `?tokens=1` · `?passwords=1` — iDRAC 스캔 대역 · 엣지 배포 대상 · 수집 서버 · CVP · 스토리지 장비 · PDU · bm-storage)를 준다.
+    쓰기 범위가 일부 법인인 소유자는 이제 그 GET 에서 403(`SETTINGS_OWNER_WRITE_SCOPE_REASON` — 문구를 '조회 · 변경' 으로 고쳤다 · `writeScope: 'partial'` · `requiredOwner` 없음).
+    비밀이 없는 같은 내보내기는 그대로(조회 범위 게이트만). 등급 질의(`settingsOwnerGradeDenial` — `isOwnerTier`: 8a 정비 창 · 7b 묶음 행)는 바꾸지 않았다.
+    `/auth/me settingsOwnerTier` 는 그 GET 의 실제 판정과 같다(메서드와 무관). 화면: 설정 메뉴(`isSettingsOwner`)는 그대로 보이고, 소유자 화면을 열면 `ErrorBox` 가 권한 안내(범위)로 그린다.
+    회귀 `server/test/bmUsageDecideGa.test.js` ①(실제 라우터의 소유자 GET 전수 — 게이트 태그로 찾아 새 라우트도 자동 포함 · 안쪽 호출 8 · HEAD · /auth/me 대조) · 정정 `bmUsageLoop6x` A1 ①(backup/status wown 200 → 403).
+  - 바뀌는 흐름(정직 기록): 쓰기 범위가 지정된 관리자 · 소유자는 전 법인 공용 쓰기 · 시험 · 실행 라우트에서 403 을 받는다(버튼은 지금처럼 역할로 열리고, 서버 사유가 화면에 그대로 보인다 — 통합 서버 인벤토리 · bm-storage 주기 저장 확인).
+  - ⚠ **남은 빈칸 — 전체 점검 2회차 V-1(2026-11-15 · 재현)**: 6회차는 공용 **게이트**(팩토리)만 고쳤고, 라우트 안 인라인 검사(`if (scopedVcenterIds(req.user, store.get())) 403`)와
+    실행 헬퍼 `denyScopedRun`(14개 라우트)은 조회 범위만 봤다 — 쓰기 vcA 관리자가 vCenter 로그 보관 설정(저장 경로 · 주기) · 로그인 실패 감시 설정 · 역할 권한 저장/초기화 ·
+    OS 스캔 설정 · 중계 서버 설정을 바꾸고, 전 법인 수동 수집 · 인증서 재확인을 돌리고, vCenter **새 항목** 연결 시험(등록과 같은 전 법인 동작)을 했다.
+    → 판정 하나 `auth/scopeMerge.js denyFleetWrite(req, res, reason)`(조회 ∧ 쓰기 전체 · 던지면 거부 · 쓰기 범위 사유는 `WRITE_SCOPE_PARTIAL_REASON` — 문구는 `auth/scope.js` 하나로 옮겼다) ·
+    `denyScopedRun` 은 그것을 부른다. 회귀 `veeamFullAudit2` ①(라우트 9개 · 소스 스윕). 남은 같은 모양 판독: `routes/` 의 나머지 `scopedVcenterIds(...)` 403 은 전부 GET(조회)이다.
+    회귀 `server/test/bmUsageLoop6x.test.js` A1 ①② · 정정 `bareosRestoreBulkRoutes2861` ⑤(사유가 공용 쓰기 범위 사유로 먼저 나온다).
+  - ⚠⚠ **2회차 수정의 반증(R-1~R-4) → 전체 점검 7회차 전수(2026-11-15 · 재현)**: 쓰기 메서드인데 조회 범위만 보던 경로가 더 있었다 —
+    ① **사용자 관리(권한 상승)**: `users.js scopeWithinActor` 첫 줄이 '조회 무제한이면 true' 라 쓰기 vcA 관리자가 자기 scope 를 null(조회 · 쓰기 무제한)로 바꾸고 전체 범위 관리자를 만들 · 고칠 수 있었다
+    → `isFullReadWriteScope` 가 아니면 대상의 조회 ⊆ 요청자 조회 · 대상의 쓰기 ⊆ 요청자 쓰기(`subset` 은 바깥 null 을 먼저 본다) · 보이는 계정은 403 · 조회 범위 계정은 404 그대로.
+    ② `vcenters.js denyVcOutOfScope` 의 `if (!read) return false` 가 쓰기 검사 앞 → 조회 밖 404 → 쓰기 밖 403(저장 항목 시험도 · test-all 은 쓰기 범위 안만).
+    ③ Ping 대상 쓰기(`scopedWriteDenied` → 404 | 403) · 일괄(`denyScopedBulk` — 조회 ∧ 쓰기 전체) · 중계 서버 저장/삭제/시험/상태 확인/배포(`proxyWriteScope` · `proxyActionDenied`) ·
+    데이터 삭제 2곳 · OS 스캔 실행 · **설정 저장 8곳의 병합 · 전역 필드 보존은 `scopeMerge.writeMergeScope`(쓰기 범위)** — 응답 가림은 조회 범위로 둔다(보이는 것).
+    성능 트래킹 설정은 쓰기 제한 관리자의 저장이 대상에서 뺀 다른 법인의 DB 파일까지 지웠다. 회귀 `scopeWriteFullAudit7`(라우트 · 계정 셋).
+    **새 쓰기 라우트 점검법**: 핸들러가 `scopedVcenterIds` 만 보면 의심 — `writeScopedVcenterIds` · `inUserWriteScope` · `isFullReadWriteScope` · `denyFleetWrite` · `writeMergeScope` 중 하나가 있어야 한다(읽기성 POST 는 예외 — 판독 기록).
+    **남긴 것(사용자 결정)**: 원격 접속(`/remote/probe` · `quick-connect` · `mappings`)은 대상 호스트를 **조회** 범위 인벤토리로만 본다 — VM 콘솔(`/vms/:id/console`)은 쓰기 범위(조작 능력)인데
+    원격 SSH/RDP 는 v2.320(쓰기 범위 v2.369 이전) 판정 그대로다. 같은 기준으로 바꿀지는 정책 결정이라 이번에 바꾸지 않았다.
 
 - ⚠⚠ **리눅스 성능 8a단계 정비 창 · 용량 예측 API — 억제를 늘리는 쓰기는 등급 게이트, 줄이는 쓰기는 쓰기 범위, 판정은 서버 하나**
   (`routes/api/bmMaint.js` · `routes/api/bmCapacity.js` · `routes/central.js GET /bm-maint` · 회귀 `bmMaint8aRoute` · `bmMaint8aEdge` · `bmCapacity8aRoute`):
@@ -558,6 +618,12 @@
     `resolvePerfTarget` · 판정 · 배포도 법인을 본다 — 범위 계정 A 의 창이 같은 IP 키인 법인 B 서버를 억제하던 범위 우회 차단) ·
     **12시간 소유자 규칙은 같은 서버를 덮는 창들(소유자 창 · 법인 · 태그 창 포함 — 살아 있는 창 전부)의 합**(F5 · 재확인 G1 · G2 — `store.coverNeedsOwner`: 어느 24시간에서든 12시간 초과 ·
     비소유자의 만들기 · 덮임이 바뀌는 고치기(대상 · 시간대 · 일정 · 범위) · 재확인에 적용 · 이름 · 사유만 고치기는 억제를 늘리지 않아 예외 · 소유자 자신의 저장은 그대로 허용 ·
+    ⚠ 정정(점검 반복 3회차 D1 — 회귀 `bmUsageLoop3` D1): 위 ‘이름 · 사유만 고치기는 억제를 늘리지 않아 예외’ 는 예전에 **틀렸다** — `store.editWindow` 가 고치기마다 confirmedAt 을 지금으로 잡아
+    이름만 고쳐도 반복 창의 92일 시한이 다시 잡혔고(범위 운영자가 만료된 12h 창 둘의 이름만 PUT → 200 → 24시간 상시 억제 336/336 칸 · 소유자 창의 만료도 연장), 그 경로는 합 규칙을 거치지 않았다.
+    이제 **재확인(시한 연장)은 재확인 라우트 하나**다 — 고치기는 confirmedAt 을 바꾸지 않는다(만료된 창은 고쳐도 만료 그대로 · 합 규칙 후보도 저장될 confirmedAt 그대로) ·
+    목록의 `canConfirm` 은 재확인 라우트와 **같은 판정**(`bmMaint.ownerNeed` — 창 하나 규칙 + 합 규칙 · 입력 = 이 노드의 창 + 신선한 배포본)이고 합 규칙에 막히면 `confirmOwner: 'combined'`(화면 한 줄 안내) ·
+    ⚠ 3회차 재확인 R2(회귀 `bmUsageLoop3` R2): 합 규칙의 24시간 창 시작 후보에 **후보 발생마다 (시작 − 24시간 + 1ms) · (끝 − 1ms)** 를 더했다 — 합친 구간 끝점만 보던 예전 판은 소유자 창으로 상시 덮인 서버에서
+    운영자의 ‘수요일 00:00 12h’ · ‘수요일 12:00 12h’ 를 200 으로 통과시켰다(지금 403 · 정확 경로와 빠른 경로가 같은 `windowOver`). R1: 목록 · 쓰기의 합 규칙은 `ownerNeed`(async · 단계 사이 양보 · 목록은 한 요청 메모)로 같은 판정 그대로.
     `approvedBy` 는 **기록일 뿐 합 판정에 쓰지 않는다** — 운영자 혼자 12h 창 두 개 + 재확인, 또는 소유자 12h 창 옆에 12h 를 붙여 ② 보류를 상시 · 무기한으로 만들던 경로 차단 ·
     소유자가 운영자 창 이름만 고쳐 approvedBy 가 붙어도 합에서 빠지지 않는다). **rev 없는 고치기 · 끝내기 · 재확인 · 지우기는 409 rev-required**(마지막 쓰기 승리 금지).
   - 동시 쓰기: 저장소 직렬 큐 + 창마다 rev(없거나 다르면 409) · 손상이면 503 · 쓰기 거부. 감사 `bm-perf.maintenance`(op create/edit/end/confirm/delete · 대상 종류 · 법인 · 수 · 일정 꼴 · 범위 · 사유 앞 120자) · `bm-perf.capacity.recompute`.
@@ -620,3 +686,48 @@
   - 등록부에 비밀 없음(IP · 포트 · 계정 · 담당 노드). 접속은 노드가 만든 키(`util/sshKeyStore.js` — 아이실론 키와 같은 공장)만 · 응답에는 공개키 · 지문만.
   - 인증 거부는 `util/authGuard.js` 로 멈추고 사람이 ‘다시 연결’ 할 때 한 번 시도(60초에 한 번) · 대상 주소는 엄격한 IPv4 + SSRF 정적 가드 · 등록부를 못 읽으면 503.
   - 원격 명령은 미리 만든 상수(주기별) · 프로세스는 comm 만(cmdline · environ 0) · 프로세스 사용자 이름은 `isAdminDetailUser` 만 원문.
+
+- **전체 점검 19회차 — 인증 · 세션 · 로그인**(`test/securityFullAudit19.test.js` · 2026-11-15):
+  - **A-1 진행 중 인증 묶음**(`routes/auth.js`): 잠금은 인증 전 · 실패는 인증 뒤에 세므로 AD bind 를 기다리는 동안 같은 계정 · 출발지 동시 요청이 모두 DC 까지 갔다
+    (재현: 동시 200 → bind 200회). 진행 중 인증 **계정당 1 · 출발지당 8** — 넘치면 429(실패로 세지 않음). 로컬 인증은 동기라 걸리지 않는다.
+  - **A-2 본인 OTP 재등록**: 이미 등록된 계정은 begin 에 `currentCode`(verifyUserOtp — 1회용 · 잠금, 빈 값은 실패로 안 셈) → 10분 안 confirm. 등록 전 세션(처음 등록)은 그대로.
+    폰 분실 복구는 관리자 대리 등록(`/admin/users/:u/totp/*`) · `otp-enroll.sh`. 웹 본인 경로 화면(ForceOtpEnroll)은 처음 등록 전용이라 바뀌지 않는다.
+  - **A-3 권한 파일 fail-closed**(`auth/permissions.js`): 손상 · 읽기 오류 · 재시작 뒤 보존본만 → operator · viewer 대시보드만 · 재정의 없음 · admin 끌 수 있는 키 끔(super_admin 은 늘 허용).
+    서비스 점검 목록 + 권한 화면 저장 또는 '기본값으로 확정' 으로 풀림. **security-session.json 손상(약해짐)은 사용자 결정 대기** — 강한 쪽(otp_only 등)으로 닫으면
+    전원 OTP 강제 등록이 되어 운영 영향이 크다(audits.md 19회차).
+  - **A-4 users.json 읽기 오류 fail-closed**(`auth/auth.js loadUsers`): 원본 유지 · 계정 생성 금지 · `persistUsers` 거절 · 초기 비밀번호 안내 금지 · `usersReadError()`.
+    형태가 다른 파일(users 배열 아님 · 빈 목록)은 시드 전에 보존한다.
+  - **A-5** 로그인 성공은 그 계정의 실패 수만큼만 출발지 카운터에서 뺀다(자기 계정 성공을 끼워 출발지 한도를 비우던 것) · **A-11** RDP 티켓은 발급자만 소비(다른 사람 시도는 티켓을 지우지 않음) ·
+    **A-12** `addressMask` IPv6 리터럴 정규식은 길이(64) 먼저.
+  - **남긴 것(결정 · 설계 필요)**: A-6 AD 세션 sub 정규화(kim · KIM · UPN · DOMAIN\kim 이 다른 세션 — 단일 세션 우회) · A-7 AD URL SSRF(ldap 스킴 · ULA 내부 DC 를 막지 않는 규칙 필요) ·
+    A-8 로그인 성공 상한 · 폐기 기록 상한 넘침 처리 · A-9 소유자 목록의 로컬 계정 없는 이름을 같은 이름 AD 세션이 차지 · A-10 AD 켜짐 시 로컬 이름 응답 시간 차.
+  - **20회차 반증(`securityFullAudit20`)**: F1 관리자 라우트 자기 대상(`/admin/users/:me/totp/*` · `password` POST/DELETE)도 현재 OTP(10분 안 확인은 재사용 —
+    임시 비밀번호 재시도 때 같은 코드 재사용 방지에 걸리지 않게) · 화면 `UserAdmin.jsx withCurrentOtp` 가 코드를 받아 한 번 다시 보낸다 ·
+    F2 등록 강제가 아닌 미등록 세션의 본인 OTP 등록 거부(대리 등록만) · F3 읽기 오류 중 `localNameTaken` 은 늘 참(AD 금지) · F9 계정 생성 · 중앙 배포 적용 거부 ·
+    F4 `settingsLoadError.readError` — 읽기 오류는 '옮겼습니다' 라 하지 않고 확정 불가 · F5 권한 파일 오류 중 부분 저장(역할 행 · 사용자 재정의) 거절(초기화는 손상일 때만) ·
+    F6 진행 중 묶음 키는 도메인 앞뒤를 뗀 이름 · F7 로그인 429 는 서버 문구(프록시 뒤 TRUST_PROXY 없으면 동시 AD 로그인 8건 상한) ·
+    F8 확정 게이트: 베어메탈 SLO · 알림 규칙 · 튜닝 = 설정 소유자 · 아이실론 설정 = super_admin.
+
+- **전체 점검 21회차 — 자격증명 · 비밀 보관(`securityFullAudit21`)**:
+  - **M-1 키 없음 · 복호 실패 저장**(`security/secretVault.js`): 봉인된 값이 있으면 **키를 새로 만들지 않는다**(SECRETS_KEY_MISSING — 키 파일 읽기 오류도 같다, 임시 메모리 키 금지).
+    복호에 실패한 비밀 칸의 원래 암호문은 문맥(경로 + 접속 식별 필드 — 표시 이름 제외)별로 기억해 다음 저장에서 '' 대신 그대로 쓴다 — env 를 되돌리면 복호된다.
+    접속처(host · username · url)가 바뀐 항목은 되돌리지 않는다(secretCarry 규약).
+  - **M-2 복호 오라클**: `openSecretsDeep` 는 비밀 칸(SECRET_FIELDS · extraFields)만 연다 — 이름 · 메모 칸에 넣은 남의 암호문을 목록이 평문으로 보여 주던 것.
+    **남긴 것**: 비밀 칸 → 비밀 칸 이식(같은 노드 키 암호문 + 그 칸 쓰기 권한 — 문맥을 묶는 enc$2$ 형식이 필요).
+  - **L-1 · L-3** 계정 · 게스트 조사 저장은 쓰기가 성공한 뒤에만 메모리를 바꾼다 · **L-2** 게스트 조사 계정 · vCenter 가 바뀌면 비밀번호 승계 안 함 ·
+    **L-4 · L-8** 평문 점검 프리뷰(따옴표 값 통째로 · 따옴표 없는 값 줄 끝까지 · 매치 위치 숫자 붙던 것 · 줄 4KB · 반복 상한) · **L-5** 파싱 오류는 safeLoadText 요약 ·
+    **L-6** SSH 개인키 KDF 반복(rounds) 상한 128 — parseKey(동기 bcrypt) 전에 `util/sshKeyKdf.js` · **L-7** 자가진단 완화 스위치 3개 추가 · 레벨 1 알고리즘 표기.
+  - **남긴 것(낮음)**: L-9 peerTrust 상한 정리가 관찰 지문을 밀어냄(2만 항목 — 현재 규모 도달 어려움) · 통합 계정 연결 테스트 재인증 · '*' 계정 경고(설계 권고).
+  - **22회차 반증(21 · 20회차 수정)**: M-1 의 '복호 실패 암호문 되돌리기' 는 엉뚱한 항목에 옛 비밀을 붙였다(위치 문맥 · 파일 이름 없음 · 접속처 변경 · 사람이 지운 칸 · 쉼표 이름) —
+    **키를 쓸 수 없는 동안 비밀 파일 저장을 거절**(어느 모드든 · `secretsKeyMissing()`)로 바꿨다. 키를 정말 잃었으면 `SECRETS_KEY_LOST=true` 로 재시작(새 키 · 옛 암호문은 저장 때 지워짐) ·
+    봉인 흔적은 JSON 문자열 값 모양으로만(이름 속 'enc$1$' 글자 오판 — D-9). 본인 OTP 판정은 경로 인자 앞뒤 공백을 지운 이름(D-1) · 확인 기억은 **계정 · 세션 · 동작** 단위 + 성공하면 소비(D-10) ·
+    권한 파일 손상은 GET `/admin/permissions` 의 `loadError` 와 화면 표지 · 복구 안내 정정(D-11) · 저장 함수가 던지는 사유를 라우트가 그대로(D-12).
+
+- **RDP 게이트웨이는 guacd 핸드셰이크(ready) 전 브라우저 프레임을 버린다**(전체 점검 48회차 F1 — `proxy/guacdTunnel.js`): 그 전 프레임을 guacd 로 쓰면 브라우저가 첫 `select` · `connect` 를 바꿔
+  매핑 대상 · 범위 · 프로토콜을 건너뛴다. 세션 연장(`dvc-token`)만 서버가 소비한다. 쿼리의 화면 크기는 `rdpDim`(정수 · 범위로 자름).
+  Guacamole 명령 파서의 길이 칸은 **숫자 1~10자리만**(49회차 F49-1 — 음수 길이로 무한 루프 · 이벤트 루프 정지). 동기 무한 루프 회귀 시험은 자식 프로세스 + 시한으로. 회귀 `test/rvH_remoteSession.test.js` 48회차 · `fullAudit48`.
+- **guacd 연결 방식은 프록시 설정 `guacd.tls` · `guacd.verifyRdpCert`**(48회차 F2 사용자 결정 — 2026-11-17 '권장 사항으로 진행' · `proxy/guacdFlags.js` 판정 · `guacdTransport.js` 소켓):
+  `tls` 면 포탈 → guacd 를 TLS 로 열고 **인증서 검증을 끄지 않는다**(WAN_TLS_INSECURE 와 무관 — connect 명령에 RDP 비밀번호가 실린다 · 사설 CA 는 WAN_TLS_CA_FILE) · 첫 `select` 는 `secureConnect` 뒤 ·
+  `verifyRdpCert` 면 `ignore-cert=false`. 기본은 둘 다 꺼짐(예전 동작 — 켜면 기존 환경이 붙지 않을 수 있다). guacd 가 루프백이 아닌데 TLS 가 꺼져 있으면 설정 화면이 경고한다
+  (웹 `proxyGuacdText.js` — 서버와 같은 판정 · `leftoverA56` 이 대조). 불리언 칸은 true/'true' 만 켬. 회귀 `rvH_remoteSession` '48회차 F2'(변이 4/4).
+- **경로 기반 skip · 게이트는 소문자로 판정**(48회차 F3 — 전역 레이트리밋): express 라우팅은 대소문자를 가리지 않는다(v2.506 toolGate 와 같은 갈래).

@@ -9,7 +9,8 @@
  *   · PowerCap — 인벤토리 powerCap.limitWatts(이 노드 iDRAC 서버 · 2시간 넘은 인벤토리는 쓰지 않는다). ‘걸림’ = 지금 W ≥ 상한 × capHitPct%(기본 98%).
  *     ⚠ 정정(다음 점검 ③ · 2026-11-08): 8b 판은 엣지 위임 서버의 상한을 ‘—’(엣지 인벤토리 축약에 없음)로 두었다 — 이제 엣지 봉투 powerCaps(서버별 limitWatts · 켜짐 · 읽은 시각 —
  *     bmusage/edgePull.js envelopePowerCaps · 중앙 정제 central/bmPowerCapSanitize.js)를 대상의 edgeCap 으로 받아 쓴다. 상태 capState 로 이유를 가른다:
- *     set(값 있음) · unset(상한 꺼짐 — 0 · 빈 값) · unread(인벤토리 없음 · 낡음 · PowerLimit 미보고) · stale(엣지가 읽은 시각이 2시간 넘음) · old-version(봉투에 표지 없음 — 그때만 ‘엣지 버전 낮음’).
+ *     set(값 있음) · unset(상한 꺼짐 — 0 · 빈 값) · unread(인벤토리 없음 · PowerLimit 미보고) · stale(읽은 시각이 2시간 넘음 · 없음) · old-version(봉투에 표지 없음 — 그때만 ‘엣지 버전 낮음’).
+ *     ⚠ 6회차 Y: ‘2시간’ 판정은 이 노드 인벤토리 · 엣지 사본 인벤토리 · 봉투 상한 모두 hwFacts capStateAt 하나(예전: 이 노드 낡음 = unread · 엣지 사본 = 3일 전도 set · 봉투 = stale).
  *   · 흡기 · 최대 온도 — 서버 분석 › 법인별 온도와 같은 원천(로컬 sensorStore 최신 · 엣지 export s.sensors · roomTemp 분류 · 신선도). **지금 값만** —
  *     흡기 시계열은 IDRAC_TEMP_SERIES_DETAIL=true(옵트인 · 기본 꺼짐)일 때만 metrics DB 에 있어 이 화면은 시계열을 그리지 않는다(지어내지 않는다).
  *   · 팬 경고 — 파트 장애(⑦)의 열린 팬 장애 수(재판정하지 않는다) · 센서 표본이 없거나 낡았으면 ‘못 읽음’(정상으로 세지 않는다 — 파트 장애 F1 규칙).
@@ -23,7 +24,7 @@ import { targetIdOf } from './maint/judge.js';
 import { periodKeyOf, periodRange } from './monthStore.js';
 import { dayKey, DAY_MS } from '../util/dayKey.js';
 import { DEFAULTS as RULE_DEFAULTS } from './perfRules.js';
-import { INV_FRESH_MS } from './powerSources.js';
+import { invCapState, capStateAt } from './hwFacts.js';   // 점검 반복 2회차 E3 — 상한 상태 판정 하나 · 6회차 Y — 신선도 판정 하나(capStateAt)
 
 const n = numOrNull;
 const HOUR = 3_600_000;
@@ -75,8 +76,15 @@ function addTo(g, s) {
 /** 그룹 마감(순수) — 피크는 측정 서버가 다 모인 시간(n = 최대)만. */
 function finishGroup(g, { capKw = null, rackLowPct = 10 } = {}) {
   const hrs = [...g.hours.entries()].sort((a, b) => a[0] - b[0]);
-  const full = hrs.length ? Math.max(...hrs.map(([, e]) => e.n)) : 0;
-  const complete = hrs.filter(([, e]) => e.n === full);
+  // 전체 점검 34회차 F2(재현): '다 모인 시간' 의 기준은 24h 행이 있는 서버 수(avg24N) — 예전에는 시간별 n 의 최댓값이라, 어느 시간도 전원이
+  //   모이지 않으면(한 서버는 앞 12h · 다른 서버는 뒤 12h) 부분 합이 피크가 되고 partialHours 는 0 이었다.
+  // 37회차 R7(반증): 다 모인 시간이 없을 때 피크를 null 로 비우면 600대 중 1대만 들고 나도 그룹 피크가 사라진다 — 가장 많이 모인 시간의 피크를
+  //   **부분 합 표지(peakPartial · peakServers/avg24Servers)와 함께** 싣는다(화면이 'n/m대 기준 부분 합' 이라고 말한다 — 조용히 전체처럼 쓰지 않는다).
+  const full = g.avg24N;
+  let complete = hrs.filter(([, e]) => e.n >= full);
+  let peakN = full; let peakPartial = false;
+  if (!complete.length && hrs.length) { peakN = Math.max(...hrs.map(([, e]) => e.n)); complete = hrs.filter(([, e]) => e.n === peakN); peakPartial = true; }
+  const partialHours = hrs.filter(([, e]) => e.n < full).length;
   const pk = complete.reduce((a, [t, e]) => (a == null || e.w > a.w ? { t, w: e.w } : a), null);
   const nowKw = g.measured ? r2(g.nowW / 1000) : null;
   /*
@@ -89,8 +97,8 @@ function finishGroup(g, { capKw = null, rackLowPct = 10 } = {}) {
   const margin = capKw != null && g.measured && !partial ? r1(((capKw * 1000 - g.nowW) / (capKw * 1000)) * 100) : null;
   return {
     servers: g.servers, measured: g.measured, unmeasured: g.unmeasured, unmeasuredN: g.servers - g.measured,
-    nowW: g.measured ? Math.round(g.nowW) : null, nowKw, avg24Kw: g.avg24N ? r2(g.avg24W / 1000) : null, avg24Servers: g.avg24N, peak24Kw: pk ? r2(pk.w / 1000) : null, peak24At: pk ? pk.t : null, peakServers: full,
-    partialHours: hrs.length - complete.length, kwh24: g.kwh24N ? r1(g.kwh24) : null, kwhMonth: g.monthN ? r1(g.kwhMonth) : null, monthServers: g.monthN, monthPartial: g.monthPartial,
+    nowW: g.measured ? Math.round(g.nowW) : null, nowKw, avg24Kw: g.avg24N ? r2(g.avg24W / 1000) : null, avg24Servers: g.avg24N, peak24Kw: pk ? r2(pk.w / 1000) : null, peak24At: pk ? pk.t : null, peakServers: pk ? peakN : 0, peakPartial,
+    partialHours, kwh24: g.kwh24N ? r1(g.kwh24) : null, kwhMonth: g.monthN ? r1(g.kwhMonth) : null, monthServers: g.monthN, monthPartial: g.monthPartial,
     capKw, marginPct: margin, low: margin != null ? margin < rackLowPct : null, marginPartial: capKw != null && partial,
     inletAvg: g.inletN ? r1(g.inletSum / g.inletN) : null, inletMax: g.inletMax, maxC: g.maxC, inletServers: g.inletN,
     fanWarn: g.fanWarn, fanUnread: g.fanUnread, capSet: g.capSet, capHit: g.capHit, notTarget: g.notTarget || 0,
@@ -300,21 +308,19 @@ export async function gatherPower({ targets = [], deps, now = Date.now(), withWe
     let capW = null; let capState = 'unread'; let capAt = null;
     if (tg.via === 'edge') {
       const ec = tg.edgeCap && typeof tg.edgeCap === 'object' ? tg.edgeCap : { state: 'unread' };
-      capState = CAP_STATES.includes(ec.state) ? ec.state : 'unread';
       capAt = n(ec.at);
-      if (capState === 'set') {
-        const lw = n(ec.limitWatts);
-        if (lw == null || lw <= 0) capState = 'unread';
-        else if (capAt == null || now - capAt > INV_FRESH_MS) capState = 'stale';   // 엣지가 읽은 시각이 2시간 넘으면 ‘지금 사실’ 이 아니다(로컬과 같은 기준)
-        else capW = lw;
+      if (ec.state === 'old-version') capState = 'old-version';
+      else {
+        // 6회차 Y: 엣지가 읽은 상한도 같은 신선도 판정(capStateAt — set · unset 둘 다 2시간 · 예전에는 set 만 보고 unset 은 3일 전 것도 unset)
+        const c = capStateAt({ state: ec.state, limitWatts: ec.limitWatts }, ec.at, now);
+        capState = c.state; capW = c.limitWatts; if (c.state === 'unread') capAt = null;
       }
     } else {
+      // 점검 반복 2회차 E3: 상한 상태 판정은 hwFacts invCapState 하나(하드웨어 U 와 같은 함수) · 6회차 Y: 신선도도 capStateAt 하나(이 노드 · 엣지 사본 인벤토리 같이 —
+      //   예전 powerSources 가 이 노드 것만 2시간을 보고 엣지 사본(a.remote)은 3일 전 상한도 set 으로 넘겨 걸림 판정 · 알림에 썼다).
       const inv = D.inventoryOf(a, regId);
-      if (inv && inv.powerCap && typeof inv.powerCap === 'object') {
-        const lw = n(inv.powerCap.limitWatts);
-        capAt = n(inv.collectedAt);
-        if (lw != null && lw > 0) { capW = lw; capState = 'set'; } else capState = 'unset';
-      }
+      const c = capStateAt(invCapState(inv), inv?.collectedAt, now);
+      capState = c.state; capW = c.limitWatts; capAt = c.at;
     }
     const latest = a ? (a.remote ? a.sensors : D.sensorLatest(t(a.id))) : (regId ? D.sensorLatest(regId) : null);
     const tp = tempsOf(latest, { now, maxAgeMs: maxAgeOf(latest, !!a?.remote), classify });

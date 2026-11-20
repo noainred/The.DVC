@@ -31,7 +31,7 @@ import { dayKey } from '../util/dayKey.js';
 import { RULE_IDS, BASELINE_METRICS } from './perfRules.js';
 import { VERDICT_LABEL } from './useJudge.js';
 import { MAX_SEND } from './notify.js';
-import { countSuppression, noteApplied, maintJudge, sinceOf } from './maint/runtime.js'; // 8a단계 ① 정비 창 판정기 · 억제 계수 · 점검
+import { countSuppression, noteApplied, maintJudge, sinceOf, scopeOccOf } from './maint/runtime.js'; // 8a단계 ① 정비 창 판정기 · 억제 계수 · 점검
 import { targetIdOf } from './maint/judge.js';
 import { isPowerRule, POWER_RULE_KIND, powerCondition, powerObs, powerAlertOf } from './powerAlerts.js';
 
@@ -485,7 +485,7 @@ async function dispatch(fires, { rules, st, now, D, targetsByKey = new Map(), cy
     const prevMaint = f.prevState?.maint || null;
     if (ms?.scopes?.alerts) {
       const ids = (ms.windows || []).filter((w) => (w.scopes || []).includes('alerts')).map((w) => w.id).sort();
-      noteApplied('alerts', f.key, ms.until.alerts, ids, now, { since: ms.since?.alerts ?? sinceOf(ms, 'alerts') });
+      noteApplied('alerts', f.key, ms.until.alerts, ids, now, { occ: scopeOccOf(ms, 'alerts') });   // 창마다 그 창 발생의 시작 · 끝(3회차 D3 — 랙은 교집합 창들 각각)
       if (sk) {
         // 상태를 ‘보내지 않음’ 으로 되돌리고 창 · 시한을 단다(지속 streak 은 그대로 — 창 뒤 첫 주기에 조건이 참이면 그때 1회).
         const cur = st.rules?.[sk];

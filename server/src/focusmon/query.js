@@ -11,10 +11,14 @@ import * as store from './store.js';
 import * as db from './db.js';
 import { decodeBlock, decodeProcBlock } from './codec.js';
 import { IOSTAT_COLS, summaryOf, aggregateIostat, timeAverageIostat, TOP_N } from './rates.js';
+import { okMount } from './parse.js';
+import { isDemoTarget, demoFill } from './mock.js'; // v3.12.0 ⑬ 비교의 마운트 범위 — 수집 파서와 같은 규칙
 import { createYielder } from '../util/timeSlice.js';
 import { pushAll } from '../util/pushAll.js';
 
 export const WINDOWS = Object.freeze([1, 5, 10, 30]);
+/** v3.13.0(⑭ 컨펌 ①) 긴 구간(분) — 1시간 · 6시간 · 24시간 · 7일 · 30일. 데이터 · 비교 · 서버 상세만 받는다(프로세스 · iostat 비교 · 수집 부하는 원본 구간만). */
+export const LONG_WINDOWS = Object.freeze([60, 360, 1440, 10080, 43200]);
 export const MAX_POINTS = 150;
 export const OVERVIEW_POINTS = 90;
 const LRU_MAX = 600;
@@ -23,14 +27,14 @@ const lru = new Map();
 const isNum = (x) => typeof x === 'number' && Number.isFinite(x);
 const r2 = (v) => (v == null ? null : Math.round(v * 100) / 100);
 
-/** 구간 정규화. end 가 지금에 가까우면(2초 안) 최근 구간으로 본다. */
-export function normWindow({ win, end } = {}, now = Date.now()) {
-  const w = WINDOWS.includes(Number(win)) ? Number(win) : 5;
+/** 구간 정규화. end 가 지금에 가까우면(2초 안) 최근 구간으로 본다. long 이면 긴 구간도 받는다(아니면 목록 밖 = 5분). */
+export function normWindow({ win, end } = {}, now = Date.now(), { long = false } = {}) {
+  const w = WINDOWS.includes(Number(win)) || (long && LONG_WINDOWS.includes(Number(win))) ? Number(win) : 5;
   let e = end == null || end === '' ? null : Number(end);
   if (e != null && (!Number.isFinite(e) || e > now - 2_000)) e = null;
   if (e != null && e < now - 120 * 86_400_000) e = now - 120 * 86_400_000;
   const to = e ?? now;
-  return { win: w, end: e, from: to - w * 60_000, to, past: e != null };
+  return { win: w, end: e, from: to - w * 60_000, to, past: e != null, long: LONG_WINDOWS.includes(w) };
 }
 
 /** 묶음 읽기 도우미 — 열린 묶음(배열)과 닫힌 묶음(Float32 · NaN = null)을 같은 모양으로 읽는다. */
@@ -107,16 +111,17 @@ export function sampleSpacing(pos) {
 export function bucketize(pos, key, from, to, points, { fixed = false } = {}) {
   const n = fixed ? Math.max(1, points) : pointsFor(pos, from, to, points);
   const step = (to - from) / n;
-  const sum = new Float64Array(n); const cnt = new Uint16Array(n); const mx = new Array(n).fill(null);
+  const sum = new Float64Array(n); const cnt = new Uint16Array(n); const mx = new Array(n).fill(null); const mn = new Array(n).fill(null);
   for (const [b, i, t] of pos) {
     const v = val(b, key, i);
     if (v == null) continue;
     const k = Math.min(n - 1, Math.max(0, Math.floor((t - from) / step)));
     sum[k] += v; cnt[k] += 1;
     if (mx[k] == null || v > mx[k]) mx[k] = v;
+    if (mn[k] == null || v < mn[k]) mn[k] = v;
   }
   const avg = new Array(n); for (let k = 0; k < n; k++) avg[k] = cnt[k] ? r2(sum[k] / cnt[k]) : null;
-  return { avg, max: mx.map(r2) };
+  return { avg, max: mx.map(r2), min: mn.map(r2) };
 }
 
 /** 한 서버의 칸 수 — 칸 폭이 표본 간격의 1.5배 이상이 되게(bucketize 규칙). 간격을 모르면 points. */
@@ -153,7 +158,16 @@ export function sampleAt(b, i) {
     return { n, ...m, v, fl, ...(stuck ? { stuck: true } : {}) };
   });
   const dtot = b.cols.has('t.util') ? IOSTAT_COLS.map((c) => g(`t.${c}`)) : null;
-  return { ts: b.ts[i], cpu, mem, net, dsk, dtot, load: [g('l.1'), g('l.5'), g('l.15')], run: g('l.run'), blk: g('l.blk') };
+  // v3.12.0(⑬): 열이 아예 없으면(옛 묶음 · 그 서버가 못 읽음) null — 칸마다 못 읽은 값도 null(0 아님)
+  const grp = (pre, keys) => (keys.some((k) => b.cols.has(`${pre}.${k}`)) ? Object.fromEntries(keys.map((k) => [k, g(`${pre}.${k}`)])) : null);
+  const sched = grp('k', ['cs', 'in', 'fk']); const vmp = grp('v', ['si', 'so', 'mf', 'sc', 'sl']); const tcp = grp('p', ['rt', 'lo', 'ld', 'es', 'tw', 'iu']);
+  const pst = g('q.D') == null && g('q.Z') == null ? null : { D: g('q.D'), Z: g('q.Z'), pd: Array.isArray(meta.pd) ? meta.pd : [] };
+  const fsMeta = meta.fs || {};
+  const fs = g('f.rc') == null && g('f.age') == null ? null : {
+    rc: g('f.rc'), age: g('f.age'),
+    rows: Object.entries(fsMeta).map(([m, x]) => ({ m, t: x.t, d: x.d, kb: x.kb, pct: g(`f.${m}.p`), ipct: g(`f.${m}.i`) })).filter((r) => r.pct != null || r.ipct != null),
+  };
+  return { ts: b.ts[i], cpu, mem, net, dsk, dtot, load: [g('l.1'), g('l.5'), g('l.15')], run: g('l.run'), blk: g('l.blk'), sched, vmp, tcp, pst, fs };
 }
 
 function lastPos(pos) { return pos.length ? pos[pos.length - 1] : null; }
@@ -195,6 +209,12 @@ function averageSample(pos) {
   const phys = out.dsk.filter((d) => d.k === 'disk');
   out.dtot = phys.length ? aggregateIostat(phys) : null;
   out.load = [mean('l.1'), mean('l.5'), mean('l.15')];
+  // v3.12.0(⑬): 초당 값 · 지금 값 모두 시간 평균(파일시스템 · D 목록은 끝 순간 — 평균에 뜻이 없다)
+  if (last.sched) out.sched = { cs: mean('k.cs'), in: mean('k.in'), fk: mean('k.fk') };
+  if (last.vmp) out.vmp = { si: mean('v.si'), so: mean('v.so'), mf: mean('v.mf'), sc: mean('v.sc'), sl: mean('v.sl') };
+  if (last.tcp) out.tcp = { rt: mean('p.rt'), lo: mean('p.lo'), ld: mean('p.ld'), es: mean('p.es'), tw: mean('p.tw'), iu: mean('p.iu') };
+  if (last.pst) out.pst = { ...last.pst, D: mean('q.D'), Z: mean('q.Z') };
+  out.run = mean('l.run');
   return out;
 }
 
@@ -225,6 +245,16 @@ export async function overview(ids, w) {
 export function seriesKeyFor(metric, item, scope, meta) {
   if (metric === 'cpu') return ['pct', 'usr', 'sys', 'iow', 'stl'].includes(item) ? `c.${item}` : 'c.pct';
   if (metric === 'mem') return item === 'swU' ? 'm.swU' : 'm.pct';
+  // v3.12.0(⑬ ⑤ '비교 탭에도'): 파일시스템(가장 높은 % 또는 마운트 하나) · TCP · 스케줄링 · 프로세스 상태 · 메모리 압박
+  if (metric === 'fs') {
+    const mm = /^mount:(\/[^\0]{0,199})$/.exec(String(scope || ''));
+    const col = item === 'ipct' ? 'i' : 'p';
+    if (mm && okMount(mm[1])) return `f.${mm[1]}.${col}`;
+    return col === 'p' ? 's.fs' : null;
+  }
+  if (metric === 'tcp') return ['rt', 'lo', 'ld', 'es', 'tw', 'iu'].includes(item) ? `p.${item}` : 'p.rt';
+  if (metric === 'sched') return item === 'run' ? 'l.run' : item === 'D' || item === 'Z' ? `q.${item}` : ['cs', 'in', 'fk'].includes(item) ? `k.${item}` : 'k.cs';
+  if (metric === 'vmp') return ['si', 'so', 'mf', 'sc', 'sl'].includes(item) ? `v.${item}` : 'v.si';
   if (metric === 'net') {
     const it = ['rx', 'tx', 'u', 'er', 'dr'].includes(item) ? item : 'u';
     const m = /^if:(.{1,32})$/.exec(String(scope || ''));
@@ -271,7 +301,7 @@ export async function compare(ids, w, { metric = 'cpu', item = 'pct', scope = 'a
 }
 
 /** 서버 상세 — 차트 · 표(끝 순간 또는 구간 평균) · 고른 장치의 처리량 · 지연. */
-export async function serverDetail(id, w, { at = 'end', dev = '' } = {}) {
+export async function serverDetail(id, w, { at = 'end', dev = '', cmp = '' } = {}) {
   const { blocks, partial } = await blocksFor(id, w.from, w.to);
   const pos = positions(blocks, w.from, w.to);
   const lp = lastPos(pos);
@@ -291,7 +321,99 @@ export async function serverDetail(id, w, { at = 'end', dev = '' } = {}) {
     pick = best?.n || null;
   }
   const devChart = pick ? { n: pick, rMB: chart(`d.${pick}.rMB`), wMB: chart(`d.${pick}.wMB`), rAwait: chart(`d.${pick}.rAwait`), wAwait: chart(`d.${pick}.wAwait`) } : null;
-  return { id, n: pos.length, firstAt: pos.length ? pos[0][2] : null, lastAt: lp ? lp[2] : null, coverMs: table?.coverMs ?? null, at, table, summary: summarize(table), charts, dev: devChart, points: P, sparkPoints: SP, partial, hello: store.helloOf(id) };
+  // v3.12.0(⑬): 더할 지표의 작은 추이 + 구간 최고(값 · 시각) — 카드 아래 '최고 21 — 13:58'
+  const ext = {};
+  for (const key of EXT_KEYS) {
+    let mx = null; let mxAt = null;
+    for (const [b, i, t] of pos) { const v = val(b, key, i); if (v != null && (mx == null || v > mx)) { mx = v; mxAt = t; } }
+    ext[key] = { vals: chart(key, SP), max: mx == null ? null : r2(mx), maxAt: mxAt };
+  }
+  // 파일시스템 표는 구간 안 마지막 확인(끝 순간 표본에 없을 수 있다 — 60초마다)
+  let fsLast = null;
+  for (let k = pos.length - 1; k >= 0 && !fsLast; k--) { const [b, i, t] = pos[k]; if (val(b, 'f.rc', i) != null || val(b, 'f.age', i) != null) { const sm = sampleAt(b, i); fsLast = sm.fs ? { ...sm.fs, at: t - (sm.fs.age ?? 0) * 1000 } : null; } }
+  // v3.13.0(⑭): CPU 사용률 띠(칸 안 최저 ~ 최고) · 겹쳐 보기(하루 · 이레 앞 같은 칸 수 — 그때 수집 안 한 칸은 null)
+  const cpuB = bucketize(pos, 'c.pct', w.from, w.to, P);
+  charts.band = { min: cpuB.min, max: cpuB.max, avg: cpuB.avg };
+  let overlay = null;
+  const shift = cmp === '1d' ? 86_400_000 : cmp === '7d' ? 7 * 86_400_000 : 0;
+  if (shift) {
+    const sh = await blocksFor(id, w.from - shift, w.to - shift);
+    const sp = positions(sh.blocks, w.from - shift, w.to - shift);
+    // 그때 표본이 더 성길 수 있다(계속 수집은 보는 화면이 없으면 10초) — 그때 표본에 맞는 칸 수로 묶은 뒤 지금 칸 수로 늘인다(반증 F6:
+    //   지금 칸 수에 고정하면 10초 표본이 2초 칸에 하나 걸러 들어가 점선이 그려지지 않았다)
+    const n = cpuB.avg.length;
+    const m = Math.max(1, Math.min(n, pointsFor(sp, w.from - shift, w.to - shift, n)));
+    const stretch = (arr) => (m === n ? arr : Array.from({ length: n }, (_, k) => arr[Math.min(m - 1, Math.floor((k * m) / n))]));
+    overlay = { cmp, cpu: stretch(bucketize(sp, 'c.pct', w.from - shift, w.to - shift, m, { fixed: true }).avg), mem: stretch(bucketize(sp, 'm.pct', w.from - shift, w.to - shift, m, { fixed: true }).avg) };
+  }
+  return {
+    id, n: pos.length, firstAt: pos.length ? pos[0][2] : null, lastAt: lp ? lp[2] : null, coverMs: table?.coverMs ?? null, at, table, summary: summarize(table), charts: { ...charts, ext }, dev: devChart, points: P, sparkPoints: SP, partial, hello: store.helloOf(id),
+    fs: fsLast, fill: await fillEstimate(id, { rows: fsLast?.rows || [] }), overlay,
+  };
+}
+
+/** 서버 상세 작은 추이 열(v3.12.0 ⑬) — 스케줄링 · 실행 대기 · 프로세스 상태 · TCP · 메모리 압박. */
+export const EXT_KEYS = Object.freeze(['k.cs', 'k.in', 'k.fk', 'l.run', 'q.D', 'q.Z', 'p.rt', 'p.lo', 'p.es', 'p.tw', 'v.si', 'v.so', 'v.mf', 'v.sc']);
+
+/* ── 가득 찰 때까지(v3.12.0 ⑬ 컨펌 ③ — 계속 수집 서버만 · 기록 6시간 미만 '—') ─────────────────────────── */
+export const FILL_SPAN_MIN_H = 6;
+export const FILL_LOOK_H = 24;
+export const FILL_STEP_MIN = 10;
+export const FILL_CACHE_MS = 10 * 60_000;
+const fillCache = new Map(); // id → { at, out }
+/**
+ * 마운트마다 지난 24시간 사용률의 직선 추세(최소 제곱)로 100% 까지 남은 시간을 낸다 — 추정이다(원인 · 미래를 단정하지 않는다).
+ * 10분에 한 묶음만 읽는다(DB 에서 minute % 10 = 0 — 하루 144묶음) · 결과는 서버마다 10분 캐시. 계속 수집이 아니면 { state: 'not-record' }.
+ * @returns {{ state:'ok'|'short'|'not-record'|'no-db', spanH:number|null, rows:{[mount]:{days:number|null, trend:'up'|'flat'|'down', perDay:number}} }}
+ */
+export async function fillEstimate(id, { rows = [], now = Date.now() } = {}) {
+  if (isDemoTarget(id)) return demoFill(id); // 데모(목) 대상 — 하루 기록이 없다
+  const sess = store.sessionOfTarget(id);
+  if (!sess || sess.mode !== 'record') return { state: 'not-record', spanH: null, rows: {} };
+  const c = fillCache.get(id);
+  if (c && now - c.at < FILL_CACHE_MS) return c.out;
+  const toMin = Math.floor(now / 60_000); const fromMin = toMin - FILL_LOOK_H * 60;
+  const dbRows = await db.readMetricEvery(id, fromMin, toMin, FILL_STEP_MIN);
+  if (dbRows == null) return { state: 'no-db', spanH: null, rows: {} };
+  const y = createYielder(15);
+  const pts = new Map(); // mount → [[hour, pct]]
+  let first = null; let last = null;
+  for (const r of dbRows) {
+    const b = decodeBlock(r.data);
+    if (!b) continue;
+    const keys = [...b.cols.keys()].filter((k) => k.startsWith('f.') && k.endsWith('.p'));
+    for (const k of keys) {
+      const arr = b.cols.get(k); let v = null; let t = null;
+      for (let i = arr.length - 1; i >= 0; i--) if (arr[i] != null) { v = arr[i]; t = b.ts[i]; break; }
+      if (v == null) continue;
+      const m = k.slice(2, -2);
+      if (!pts.has(m)) pts.set(m, []);
+      pts.get(m).push([t / 3_600_000, v]);
+      first = first == null ? t : Math.min(first, t); last = last == null ? t : Math.max(last, t);
+    }
+    await y();
+  }
+  const spanH = first != null && last != null ? (last - first) / 3_600_000 : 0;
+  const out = { state: spanH >= FILL_SPAN_MIN_H ? 'ok' : 'short', spanH: Math.round(spanH * 10) / 10, rows: {} };
+  if (out.state === 'ok') {
+    const want = new Set(rows.map((r) => r.m));
+    for (const [m, p] of pts) {
+      if (want.size && !want.has(m)) continue;
+      if (p.length < 6 || (p[p.length - 1][0] - p[0][0]) < FILL_SPAN_MIN_H) continue;
+      const nn = p.length; const mx = p.reduce((a, q) => a + q[0], 0) / nn; const my = p.reduce((a, q) => a + q[1], 0) / nn;
+      let sxy = 0; let sxx = 0; for (const [xv, yv] of p) { sxy += (xv - mx) * (yv - my); sxx += (xv - mx) ** 2; }
+      const slope = sxx > 0 ? sxy / sxx : 0; // %/시간
+      const cur = rows.find((r) => r.m === m)?.pct ?? p[p.length - 1][1];
+      const perDay = Math.round(slope * 24 * 100) / 100;
+      // 하루 0.05%p 미만으로 오르면 '늘지 않음'(측정 잡음 · 반올림) — 그 위만 남은 날을 낸다(1년 넘으면 null)
+      if (perDay < 0.05) { out.rows[m] = { days: null, trend: perDay <= -0.05 ? 'down' : 'flat', perDay }; continue; }
+      const days = (100 - cur) / (slope * 24);
+      out.rows[m] = { days: days > 365 ? null : Math.max(0, Math.round(days * 10) / 10), trend: 'up', perDay, over: days > 365 };
+    }
+  }
+  fillCache.set(id, { at: now, out });
+  if (fillCache.size > 200) fillCache.delete(fillCache.keys().next().value);
+  return out;
 }
 
 /** iostat 비교 — 고른 서버들의 장치 줄(13칸) + 차트에 올린 줄(최대 4) 추이. */
@@ -331,7 +453,7 @@ export async function iostatCompare(ids, w, { at = 'end', scope = 'phys', col = 
 /** 이름 묶음 열쇠 — 숫자 덩어리를 `*` 로(ora_p001_ORCL · ora_p007_ORCL → ora_p*_ORCL). */
 export const groupNameOf = (c) => String(c || '').replace(/\d+/g, '*').slice(0, 64);
 
-async function procSnaps(id, from, to) {
+export async function procSnaps(id, from, to) {
   const fromMin = Math.floor(from / 60_000); const toMin = Math.floor(to / 60_000);
   const mem = store.memProcs(id);
   const memMins = [...mem.keys()];
@@ -477,5 +599,5 @@ export async function coverage(ids, from, to) {
   return { from, to, ranges: toRanges(all), dbOk, oldestMinute: oldest };
 }
 
-export function _resetForTest() { lru.clear(); }
+export function _resetForTest() { lru.clear(); fillCache.clear(); }
 export { isNum as _isNum };

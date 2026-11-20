@@ -120,6 +120,7 @@ export const STATUS_SPEC = Object.freeze([
   { key: 'collect.horizon', label: 'Horizon 세션 수집', group: 'collect', mod: '../horizon/sessionPoller.js', fn: 'hzSessionPollerStatus' },
   { key: 'collect.vmseries', label: '스파이크 수집', group: 'collect', mod: '../vmseries/poller.js', fn: 'vmSeriesPollerStatus' },
   { key: 'collect.vmtrack', label: '추이 트래킹', group: 'collect', mod: '../vmtrack/poller.js', fn: 'vmtrackPollerStatus' },
+  { key: 'collect.snapHist', label: '스냅샷 이력 기록', group: 'collect', mod: '../snaphist/poller.js', fn: 'snapHistPollerStatus' }, // v3.26.0: 스냅샷만 읽는다(왕복 0) · 하루 1번
   { key: 'collect.vmHygiene', label: 'VM 스냅샷 정책 알림', group: 'collect', mod: '../vmhygiene/notifier.js', fn: 'vmHygieneNotifierStatus' }, // v2.698: 스냅샷만 읽는다
   { key: 'collect.vmDns', label: 'VM DNS 변경 이력', group: 'collect', mod: '../vmdns/poller.js', fn: 'vmDnsHistoryStatus' }, // v2.696: 스냅샷만 읽는다(왕복 0)
   { key: 'collect.guestDisk', label: '게스트 디스크 수집', group: 'collect', mod: '../guestdisk/poller.js', fn: 'guestDiskPollerStatus' },
@@ -179,6 +180,9 @@ export const STATUS_SPEC = Object.freeze([
    */
   { key: 'service.mail', label: '메일 발송(알림)', group: 'service', mod: '../mail/service.js', fn: 'mailStatus' },
   { key: 'service.runtime', label: 'Node 런타임 호환성', group: 'service', mod: '../util/runtimeCheck.js', fn: 'runtimeStatus' }, // 2026-10-09 검토 I-06
+  // 127회차: 인증 정지 기록 파일을 못 읽는 도구 — 수집은 법인 엣지가 하므로 중앙이 엣지의 이 상태를 볼 수 있어야 한다(값: 파일 기본 이름 · 오류 코드 · 지문 수 — 비밀 · 대상 id 없음).
+  //   util/authGuard.js 는 store.js 등이 부팅에 import 한다(캐시 적중 — 새 타이머 없음).
+  { key: 'service.authStops', label: '인증 정지 기록 파일', group: 'service', mod: '../util/authGuard.js', fn: 'authGuardFilesStatus' },
   // v2.871: 이슈 알림 — 묶음 발송 수·실패·주소 없는 사람 수·대기 인원(계정명·주소 없음). 엣지 포탈도 자기 이슈 알림을 보낸다.
   { key: 'service.issueNotify', label: '이슈 알림(메일·팀 채팅)', group: 'service', mod: '../issues/notify.js', fn: 'issueNotifyStatus' },
   // v2.908: 이슈 자동화 규칙(위키 체크 · 상위 검토 · P0 채팅 실행 수 · 실패) · 다른 알람/백업 실패 → 이슈 자동 등록(만든 수 · 상한 · 실패). 계정명 · 주소 없음.

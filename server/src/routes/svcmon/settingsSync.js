@@ -11,7 +11,7 @@
  */
 
 import { logAudit } from '../../audit.js';
-import { listTargets, storeRevision, planBulkTargets } from '../../svcmon/store.js';
+import { listTargets, storeRevision, planBulkTargets, svcmonStoreWriteRefusal } from '../../svcmon/store.js';
 import {
   readCatalog, planApply, previewOf, executePlan, detachTarget, getOptions, setOptions, kindMeta, driftRing, dailySummary, syncEvents,
   lastDetection, syncAvailableHere, ackDrift, MAX_ROWS, MAX_APPLY, GONE_ACTIONS, EXCLUDED_KINDS, SYNC_ROOT, detectTiming,
@@ -26,11 +26,15 @@ import { store as _storeForScope } from '../../store.js';
 import { recordBatch } from '../../svcmon/batches.js';
 import { buildDashAsync } from '../../svcmon/dash.js';
 import { recentTransitions, hourlySeries, getAlertSettings, saveAlertSettings, alertStats, transitionsSince, alertBatchInfo, HOURS_KEEP } from '../../svcmon/transitions.js';
+import { alertSettingsLoadError } from '../../svcmon/alertSettings.js';   // 28회차 P-3
 import { getResults, executesHere, pollerRole } from '../../svcmon/poller.js';
 import { edgeSummary, edgeState, listAgentNames, MAX_ROWS_PER_AGENT } from '../../central/svcmonEdge.js';
 import { listAssignments } from '../../central/svcmonAssign.js';
 import { syncByAgentAssignments } from '../../central/svcmonAssignSync.js';
 import { canEdit, fullScopeOnly, adminOnly } from './shared.js';
+// 105회차 A6(103 F1 덜 고침): 감시 대상 파일 읽기 오류 동안 설정 연동 적용 · 정리 · 해제는 store.save() 가 409 를 던졌지만 이 라우트는 잡지 않아
+//   전역 오류 처리기의 사유 없는 500 이 됐다(형제 tree · transfer · generate 는 사전 검사). 같은 사전 검사로 사유를 화면까지 싣는다.
+const storeUnreadable = (res) => { const r = svcmonStoreWriteRefusal(); if (!r) return false; res.status(409).json({ ok: false, error: r.reason, code: r.code, readError: true }); return true; };
 
 const t = (v) => String(v ?? '').trim();
 
@@ -140,6 +144,7 @@ svcmonRouter.post('/settings-sync/preview', adminOnly, fullScopeOnly, async (req
 /** 적용 — 추가(전부 성공 또는 전부 취소) · 주소 반영 · 사라짐 처리 · (선택) 담당 엣지 배정 동기화. */
 svcmonRouter.post('/settings-sync/apply', adminOnly, fullScopeOnly, async (req, res) => {
   if (!syncAvailableHere()) return edgeOnly(res);
+  if (storeUnreadable(res)) return;   // 105회차 A6
   const r = await planFrom(req.body || {});
   if (r.error) return res.status(400).json({ ok: false, error: r.error });
   const user = req.user?.username || '';
@@ -163,6 +168,7 @@ svcmonRouter.post('/settings-sync/apply', adminOnly, fullScopeOnly, async (req, 
  */
 svcmonRouter.post('/settings-sync/repath', adminOnly, fullScopeOnly, async (req, res) => {
   if (!syncAvailableHere()) return edgeOnly(res);
+  if (storeUnreadable(res)) return;   // 105회차 A6
   const keys = Array.isArray(req.body?.keys) ? req.body.keys.map(t).filter(Boolean) : [];
   if (!keys.length) return res.status(400).json({ ok: false, error: '옮길 항목을 고르세요.' });
   if (keys.length > MAX_APPLY) return res.status(400).json({ ok: false, error: `한 번에 ${MAX_APPLY}건까지 옮길 수 있습니다(요청 ${keys.length}건).` });
@@ -186,7 +192,10 @@ svcmonRouter.put('/settings-sync/options', adminOnly, fullScopeOnly, (req, res) 
   const before = getOptions();
   const next = setOptions(req.body || {});
   logAudit({ user: req.user?.username, action: 'svcmon.settings-sync.options', detail: `자동 등록 ${before.autoKinds.join(',') || '없음'} → ${next.autoKinds.join(',') || '없음'}` });
-  res.status(next.saved ? 200 : 500).json({ ok: next.saved, options: { autoKinds: next.autoKinds } });
+  // v3.18.14(결함 D3): 새 종류를 켜면 다음 감지(최대 감지 주기)까지 아무 일도 없어 '안 된다' 로 보였다 — 저장 직후 한 번 감지한다(2초 묶음 · 감지 타이머가 도는 중앙에서만).
+  const added = next.autoKinds.filter((k) => !before.autoKinds.includes(k));
+  const detectQueued = !!(next.saved && added.length && requestDetect());
+  res.status(next.saved ? 200 : 500).json({ ok: next.saved, options: { autoKinds: next.autoKinds }, detectQueued });
 });
 
 /** 배너 '확인' — 지금까지 설정에 새로 생긴 항목을 본 것으로 둔다(미등록 상태는 설정 연동 탭에 그대로 남는다). */
@@ -198,6 +207,7 @@ svcmonRouter.post('/settings-sync/ack', adminOnly, fullScopeOnly, (req, res) => 
 
 /** 연동 해제 — 대상은 남기고 출처만 지운다(수동 대상으로 전환). */
 svcmonRouter.post('/settings-sync/detach/:id', adminOnly, fullScopeOnly, (req, res) => {
+  if (storeUnreadable(res)) return;   // 105회차 A6
   const r = detachTarget(String(req.params.id || ''));
   if (!r) return res.status(404).json({ ok: false, error: '대상을 찾을 수 없습니다.' });
   if (r.changed) logAudit({ user: req.user?.username, action: 'svcmon.settings-sync.detach', target: r.target?.id, detail: r.target?.name || '' });
@@ -226,7 +236,9 @@ svcmonRouter.get('/overview', async (req, res) => {
 /* ── 실패 알림 설정 ── */
 svcmonRouter.get('/alert-settings', canEdit, (req, res) => {
   // v2.932(점검 D1-08): 요약 묶음 창·기준 건수를 싣는다 — 화면이 '20초 안에 6건' 을 박지 않게(+1 해석은 서버 alertBatchInfo 한 곳).
-  res.json({ ok: true, settings: getAlertSettings(), stats: alertStats(), batch: alertBatchInfo() });
+  // 28회차 P-3: 설정 파일을 못 읽었으면 그 사실을 싣는다(화면이 기본값을 저장값처럼 보이지 않게)
+  const le = alertSettingsLoadError();
+  res.json({ ok: true, settings: getAlertSettings(), stats: alertStats(), batch: alertBatchInfo(), ...(le ? { loadError: { at: le.at, reason: le.reason } } : {}) });
 });
 svcmonRouter.put('/alert-settings', adminOnly, fullScopeOnly, (req, res) => {
   try {

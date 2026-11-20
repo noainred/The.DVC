@@ -10,13 +10,20 @@
  *  ⑤ seriesOf 점에 bytes·latMs(지연)가 실린다 — 못 읽은 값은 null.
  * 기준 시각은 정시에서 떨어뜨려 고정한다(CLAUDE.md v2.517 — Date.now() 를 경계 근처에 두지 않는다).
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
@@ -39,7 +46,7 @@ test('⑤ seriesOf — 점에 bytes·latMs(못 읽으면 null)', async () => {
 });
 
 test('①~④ 실제 api 라우터 — end 창·잘라내기·일 요약 경계·oldest', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'xferwin2735_3-'));
+  const dir = tmpDir('xferwin2735_3-');
   fs.writeFileSync(path.join(dir, 'collectors.json'), JSON.stringify({ collectors: [{ id: 'Edge-Seoul', name: 'Edge Seoul', url: 'https://10.20.0.5:4000', token: 't', enabled: true }] }));
   const script = `
     const HOUR = 3600000, DAY = 24 * HOUR;

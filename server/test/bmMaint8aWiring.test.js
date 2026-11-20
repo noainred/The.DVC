@@ -102,9 +102,10 @@ test('① 임계 초과 알림(v2.551 notify) — 같은 규약(창 안 보내�
   const N = await import('../src/bmusage/notify.js');
   N._resetAlertStateForTest();
   const out = await N.runBmUsageAlerts([{ key: 'TAGA1', name: 'bm-a1', vcenterId: 'vcA', cpu_pct: 99 }], { alertEnabled: true, alertPct: 90, alertSustainMin: 0, alertRepeatHours: 6, intervalMs: 300_000 });
-  assert.equal(out.sent, 0); assert.equal(out.maint.held, 1);
+  // 정정(점검 반복 5회차 D2 · D3): 발송은 대기열 — 주기 결과는 넣은 수(queued)만이고 ‘sent’ 를 세지 않는다(받은 결과는 alertStateInfo().delivery)
+  assert.equal(out.queued, 0); assert.equal(out.maint.held, 1);
   const out2 = await N.runBmUsageAlerts([{ key: 'OTHER', name: 'bm-b', vcenterId: 'vcA', cpu_pct: 99 }], { alertEnabled: true, alertPct: 90, alertSustainMin: 0, alertRepeatHours: 6, intervalMs: 300_000 });
-  assert.equal(out2.sent, 1, '창 밖 서버는 보낸다');
+  assert.equal(out2.queued, 1, '창 밖 서버는 보낸다(대기열에 넣는다)');
 });
 
 test('② 파트 장애 전이 보류 — 닫지도 바꾸지도 열지도 않는다 · 창 뒤 첫 주기 평소 판정 · 서비스 태그 대응', async () => {

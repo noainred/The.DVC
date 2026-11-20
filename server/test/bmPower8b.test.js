@@ -106,7 +106,8 @@ test('③ 원천 모으기 — 매칭 · 사유 · 24h · 월 누적(값은 ③-
   const classify = (n) => (/inlet/i.test(n) ? 'inlet' : /cpu/i.test(n) ? 'cpu' : 'other');
   const deps = { measured: async () => measured, analysisServers: async () => analysis, powerDb: async () => idb,
     fanFaults: async () => [{ kind: 'fan', deviceId: 'r1', deviceKey: 'T1' }],
-    inventoryOf: (a, regId) => (regId === 'r1' ? { powerCap: { limitWatts: 500 } } : null), sensorLatest: (id) => (id === 'r1' ? { t: NOW - 3 * 3_600_000, temps: { 'Inlet Temp': 22 } } : null),
+    // 6회차 Y: inventoryOf 는 원본 — 2시간 신선도는 집계(hwFacts capStateAt)가 collectedAt 으로 본다(예전 이 주입은 이미 거른 값이라 시각이 없었다)
+    inventoryOf: (a, regId) => (regId === 'r1' ? { powerCap: { limitWatts: 500 }, collectedAt: NOW - 60_000 } : null), sensorLatest: (id) => (id === 'r1' ? { t: NOW - 3 * 3_600_000, temps: { 'Inlet Temp': 22 } } : null),
     temps: { classify, maxAgeOf: () => 15 * 60_000 }, yielder: async () => {} };
   const targets = [
     { key: 'K1', name: 'bm-1', vcenterId: 'vcA', serviceTag: 'T1', idrac: { regId: 'r1' }, paths: ['idrac'] },

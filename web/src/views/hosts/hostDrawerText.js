@@ -11,7 +11,7 @@
 import { numOrNull } from '../../numOrNull.js';
 import { hostUsagePct } from '../vcdOverview.js';
 import { CPU_ATTENTION_PCT } from '../hostTriage.js';
-import { reasonBadges, CHECK_CHIPS, HW_TEXT, uptimeDays, nicLinkDownOf, deadPathsOf, lunsOf, ratioText } from '../hostChecksText.js';
+import { reasonBadges, CHECK_CHIPS, HW_TEXT, uptimeDays, nicLinkDownOf, deadPathsOf, lunsOf, ratioText, vmAllocCells } from '../hostChecksText.js';
 import { HOST_CFG_TEXT, findingDetail, REBOOT_KIND } from '../hostcfg/hostCfgText.js';
 
 const DOWN = new Set(['DISCONNECTED', 'NOT_RESPONDING']);
@@ -109,13 +109,13 @@ export function checksGap(st, hostId) {
  * 타일 4칸의 글자 — 값(v)이 null 이면 '—' · 단위 없음. 끊긴 호스트는 사용률이 null(hostUsagePct).
  * @param c  /hosts/checks 의 byId[host.id] — 없으면 VM 타일의 켜짐 · 할당 줄(subs)을 비운다(지어내지 않는다).
  */
-const vcpuPartial = (vm) => (numOrNull(vm?.vcpuUnknown) ?? 0) > 0;
 export function hostTiles(host, c = null) {
   const cores = numOrNull(host?.cpuCores);
   const u = ghz(host?.cpuUsageMhz); const t = ghz(host?.cpuTotalMhz);
   const mu = gbNum(host?.memUsageMB); const mt = gbNum(host?.memTotalMB);
   const down = hostDown(host);
   const vm = c?.vm || null;
+  const va = vmAllocCells(vm, host);
   const watts = numOrNull(host?.powerWatts);
   const hasW = watts != null && watts > 0;
   const tc = numOrNull(host?.tempC); const tm = numOrNull(host?.tempMaxC);
@@ -127,9 +127,12 @@ export function hostTiles(host, c = null) {
       n: numOrNull(host?.vmCount),
       // v2.977(전체 점검 — 재현): vCPU 를 못 읽은 VM(vcpuUnknown)이 있으면 할당 합 · 코어 대비는 **부분 합**이다 — '이상' 과 못 읽은 수를 붙인다
       //   (같은 값을 그리는 HostDetail '· 못 읽은 VM N' · Hosts 표 '+?' 와 맞춘다. 예전 드로어만 표지 없이 'vCPU 8 할당 · 코어 대비 2.0 : 1' 이었다).
+      // v3.19.2: 글자는 hostChecksText.vmAllocCells(표 · 상세와 같이 쓴다). VM 을 **전부** 못 읽었으면 서버가 vcpu 를 null 로 준다 — 'vCPU 할당 —'(단위 · '이상' 없음) +
+      //   'VM N대 모두 못 읽음'. 예전에는 원래 합 0 을 그대로 그려 'vCPU 0 할당 이상 · 코어 대비 0.0 : 1 이상' 이었다.
       subs: vm ? [`켜짐 ${fmt(vm.on)} · 꺼짐 ${fmt(Math.max(0, vm.n - vm.on))}`, vm.templates ? `템플릿 ${fmt(vm.templates)}` : null,
-        `vCPU ${fmt(vm.vcpu)} 할당${vcpuPartial(vm) ? ' 이상' : ''}`, `코어 대비 ${ratioText(vm.vcpu, cores)}${vcpuPartial(vm) && cores ? ' 이상' : ''}`,
-        vcpuPartial(vm) ? `vCPU 못 읽은 VM ${fmt(vm.vcpuUnknown)}` : null].filter(Boolean) : [],
+        va.vcpu.all ? 'vCPU 할당 —' : `vCPU ${va.vcpu.text} 할당${va.vcpu.partial ? ' 이상' : ''}`,
+        `코어 대비 ${va.ratio.text}${va.ratio.partial ? ' 이상' : ''}`,
+        va.vcpu.all ? va.vcpu.note : va.vcpu.partial ? `vCPU ${va.vcpu.note}` : null].filter(Boolean) : [],
     },
     power: {
       watts: hasW ? watts : null,

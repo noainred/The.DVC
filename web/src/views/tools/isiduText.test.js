@@ -211,6 +211,9 @@ describe('지금 수집 · 표 문구', () => {
   it('표 아래 범위', () => {
     expect(usersFootNote({ state: 'ok', total: 1284, offset: 0 }, 200)).toMatch(/1,284개 중 1–200 · 나머지 1,084개/);
     expect(usersFootNote({ state: 'ok', total: 0, offset: 0 }, 0)).toMatch(/없습니다/);
+    // 38회차 R6: 잘린 조사라 신규 · 사라짐을 판정하지 않았으면 '없음' 이 아니라 그 사실
+    expect(usersFootNote({ state: 'ok', total: 0, offset: 0, filter: 'new', compareLimited: true }, 0)).toMatch(/판정하지 않았습니다/);
+    expect(usersFootNote({ state: 'ok', total: 0, offset: 0, filter: 'grow', compareLimited: true }, 0)).toMatch(/조건에 맞는 폴더가 없습니다/);
   });
 });
 

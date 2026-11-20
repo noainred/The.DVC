@@ -18,7 +18,8 @@ import { capStr } from '../../util/capStr.js';
 import { isAdminDetailUser } from '../../auth/demoGuest.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { fileStamp } from '../../util/dayKey.js';
-import { analyzeVmHygiene, ALL_CODES } from '../../vmhygiene/analyze.js';
+import { analyzeVmHygiene, ALL_CODES, hygieneSummaryByVc } from '../../vmhygiene/analyze.js';
+import { isSummaryQuery, SUMMARY_TOP_N } from './toolSummary.js';   // v3.21.0 VM 분석 화면 요약 — 같은 라우트 · 같은 게이트 안에서
 import { loadVmHygieneSettings, saveVmHygieneSettings } from '../../vmhygiene/settings.js';
 import { vmHygieneNotifyOnce, vmHygieneNotifierStatus } from '../../vmhygiene/notifier.js';
 import { notReadVcentersOf, notReadPartialOf, notReadCsvLines } from '../../corelicense/analyze.js'; // v2.744(감사 후속 FC): 읽지 못한 vCenter 판정 한 벌(VC-03 과 같은 함수)
@@ -32,7 +33,8 @@ const qStr = (v, n) => (typeof v === 'string' ? capStr(v.trim(), n) : '');
 function run(snap, req) {
   const scoped = scopeSlice(snap, req.user, qStr(req.query.vcenterId, 128) || undefined);
   const vcName = new Map((scoped.vcenters || []).map((v) => [v.id, v.name || v.id]));
-  const r = analyzeVmHygiene(scoped.vms, loadVmHygieneSettings(), {
+  const hs = loadVmHygieneSettings();
+  const r = analyzeVmHygiene(scoped.vms, hs, {
     vcName,
     code: qStr(req.query.code, 32) || undefined,
     sev: qStr(req.query.sev, 8) || undefined,
@@ -44,16 +46,41 @@ function run(snap, req) {
   const notReadVcenters = notReadVcentersOf(scoped);
   r.notReadVcenters = notReadVcenters;
   r.partial = notReadPartialOf(notReadVcenters);
+  // 71회차(69회차 F4 반증): 설정 파일을 읽지 못했으면(unreadable) 판정은 기본값(예외 없음 · 기본 기준)으로 한 것이다 — 응답에 밝혀 화면이
+  //   기본 기준의 '정상' 을 설정한 기준의 정상으로 말하지 않게 한다(r.settings 는 기준 다섯 칸만 싣는다).
+  r.settingsUnreadable = hs.unreadable === true;
   return r;
+}
+
+/** 범위 계정용 설정 판본 — 예외 원문 대신 개수만 · updatedBy 없음(v2.721 B2-02 · 32회차 F2 — 설정 GET 과 본 응답이 같은 모양). */
+export function maskedSettings(s) {
+  const n = Array.isArray(s?.exceptions) ? s.exceptions.length : 0;
+  return { ...s, exceptions: [], exceptionsCount: n, exceptionsHidden: true, updatedBy: null };
 }
 
 export function registerVmHygiene(api) {
   api.get('/tools/vm-hygiene', toolsPerm, (req, res) => memoJson(req, res, 'vm-hygiene', (snap) => {
+    // v3.21.0: ?summary=1 — 법인별 줄 + 법인별 상위 N(VM 분석 화면). 게이트(tools · toolGate 'vm-hygiene')와 범위(scopeSlice)는 그대로 ·
+    //   화면 조건(code · sev · q)은 보지 않는다 · 설정 예외 원문 · 알림 상태는 싣지 않는다(기준 네 칸만). memo 열쇠는 URL 이라 원본과 다른 칸이다.
+    if (isSummaryQuery(req.query)) {
+      const scoped = scopeSlice(snap, req.user, qStr(req.query.vcenterId, 128) || undefined);
+      const vcName = new Map((scoped.vcenters || []).map((v) => [v.id, v.name || v.id]));
+      const hs = loadVmHygieneSettings();
+      const r = analyzeVmHygiene(scoped.vms, hs, { vcName });
+      const notReadVcenters = notReadVcentersOf(scoped);
+      return { summary: true, tool: 'vm-hygiene', topN: SUMMARY_TOP_N, codes: ALL_CODES, coverage: r.coverage,
+        thresholds: { snapAgeDays: hs.snapAgeDays, snapCount: hs.snapCount, snapSizeGB: hs.snapSizeGB, uptimeDays: hs.uptimeDays },
+        rows: hygieneSummaryByVc(r, SUMMARY_TOP_N), notReadVcenters, partial: notReadPartialOf(notReadVcenters), settingsUnreadable: hs.unreadable === true,
+        initial: snap.initial === true, generatedAt: snap.generatedAt || null };
+    }
     const r = run(snap, req);
     // v2.744(감사 AUTHZ-01): 판정은 isAdminDetailUser — 데모 계정(요청 문맥 admin + demoGuest)은 operator 와 같은 판본이고, memo 키도 역할 문자열이 아니라
     //   판정 결과(a/u)로 만든다(역할 문자열이면 데모와 진짜 관리자가 같은 캐시 칸을 써 한쪽 판본이 다른 쪽에 나간다).
     const isAdmin = isAdminDetailUser(req.user);
-    return { ...r, initial: snap.initial === true, generatedAt: snap.generatedAt || null, notify: isAdmin ? vmHygieneNotifierStatus() : null };
+    // 전체 점검 32회차 F2(재현): 본 응답의 settings.exceptions 도 범위 계정에는 가린다 — v2.721 B2-02 는 /settings 경로만 가려
+    //   같은 원문(다른 법인 VM 이름 · 메모 조각)이 이 경로로 나갔다. 두 경로가 maskedSettings 하나를 쓴다.
+    const settings = scopedVcenterIds(req.user, snap) ? maskedSettings(r.settings) : r.settings;
+    return { ...r, settings, initial: snap.initial === true, generatedAt: snap.generatedAt || null, notify: isAdmin ? vmHygieneNotifierStatus() : null };
   }, { extraKey: `${scopeKey(req.user, store.get())}|${loadVmHygieneSettings().rev}|${isAdminDetailUser(req.user) ? 'a' : 'u'}` }));
 
   api.get('/tools/vm-hygiene/settings', toolsPerm, (req, res) => {
@@ -61,8 +88,7 @@ export function registerVmHygiene(api) {
     // v2.721(감사 B2-02): exceptions 는 전 법인 공통 자유 입력(다른 법인 VM 이름·메모 조각)이고 updatedBy 는 계정명이다 —
     // 범위 계정에는 개수만(exceptionsHidden) · updatedBy null. 저장은 어차피 전체 범위 전용이다. 전체 범위 응답은 그대로.
     if (scopedVcenterIds(req.user, store.get())) {
-      const n = Array.isArray(s.exceptions) ? s.exceptions.length : 0;
-      return res.json({ ok: true, settings: { ...s, exceptions: [], exceptionsCount: n, exceptionsHidden: true, updatedBy: null }, codes: ALL_CODES });
+      return res.json({ ok: true, settings: maskedSettings(s), codes: ALL_CODES });
     }
     res.json({ ok: true, settings: s, codes: ALL_CODES });
   });
@@ -95,6 +121,8 @@ export function registerVmHygiene(api) {
     // v2.744(회귀 검토 GF-R2 형제): 읽지 못한 것과 비활성을 나눠 한글 사유로 적는다 — 판정·문구는 corelicense/analyze.js notReadCsvLines 한 벌.
     // v2.744(최종 검토 RV-3·RX-CSV-01): 이 파일은 판정 목록이라 합계가 없다 — mode 'judge'(화면 notReadJudgeNote 와 같은 뜻 · 같은 명사).
     for (const t of notReadCsvLines(r.notReadVcenters, { mode: 'judge', noun: 'VM' })) lines.push(csvLine([t]));
+    // 69회차 I1: 상한으로 잘렸으면 파일에도 밝힌다(헤더 X-Omitted-Rows 만으로는 파일만 받은 사람이 모른다 — 32회차 F4 형제와 같은 모양).
+    if (r.omitted) lines.push(csvLine([`(상한으로 ${r.omitted}행 생략 — 전체 ${r.matched}대)`]));
     logAudit({ user: req.user?.username, action: 'vm-hygiene.csv', target: 'vm-hygiene', detail: `${r.rows.length} rows${r.omitted ? ` (+${r.omitted} omitted)` : ''}`, ip: req.ip });
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="vm-hygiene-${fileStamp()}.csv"`);

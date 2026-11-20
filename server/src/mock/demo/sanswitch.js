@@ -570,10 +570,19 @@ export function ensureSanDemo(deps = {}) {
     const { snapshot, registry, putSnapshot, recordActivity, buildSnapshot, importSamples, recordRun, checkDevice, checkPorts, dcOf = (id) => id,
       retentionDays = 90, yieldFn = () => new Promise((r) => setImmediate(r)), now = Date.now() } = deps;
     if (!(snapshot?.vcenters || []).length) return { waiting: true };
-    if (registry.listDevices().length) { _seedDone = { seeded: 0, reason: 'registry-not-empty' }; return _seedDone; }
     const layouts = [...sanDemoLayouts(snapshot).values()];
-    const devices = sanDemoDevices(layouts, { dcOf, now });
-    const n = registry.seedDemoDevices(devices);
+    let devices = sanDemoDevices(layouts, { dcOf, now });
+    let n = 0;
+    if (registry.listDevices().length) {
+      // v3.26.0: v2.914 이전 규모로 시드된 데모 설치본 — 데모 장비뿐이면 새 vCenter 의 스위치만 보충하고 그 장비만 아래 과정을 거친다.
+      const added = typeof registry.topUpDemoDevices === 'function' ? registry.topUpDemoDevices(devices) : [];
+      if (!added.length) { _seedDone = { seeded: 0, reason: 'registry-not-empty' }; return _seedDone; }
+      const set = new Set(added);
+      devices = devices.filter((d) => set.has(d.id));
+      n = devices.length;
+    } else {
+      n = registry.seedDemoDevices(devices);
+    }
     if (!n) { _seedDone = { seeded: 0, reason: 'registry-not-empty' }; return _seedDone; }
     for (const d of devices) {
       const snap = buildSanDemoSnapshot(d, sanDemoLayouts(snapshot).get(d.id), buildSnapshot, now);

@@ -4,14 +4,17 @@
 // 수집 주체: 중앙 직접(기본) 또는 글로벌 엣지 위임(중앙→엣지 PUSH — 수집 서버(원격) URL 필요).
 import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson, putJson, delJson, canCsv, getCurrentUser } from '../../api.js';
-import { canManageKeys, authChoiceOf, authBodyOf, HOSTKEY_OBSERVE_NOTE } from './bmOnboardText.js'; // 7b: 인증(키 · 공통 계정) 드롭다운 — 설정 소유자 등급만
+import { unreadMarkOf, registryEmptyText } from '../settingsUnread.js';   // 128회차: 등록부를 못 읽은 동안의 빈 목록을 ‘등록 없음’ 으로 보이지 않는다
+import { RegistryUnreadBanner } from '../SettingsUnreadBanner.jsx';
+import { requireChanged } from '../changeResult.js';   // 112회차: delJson 은 409 · 400 을 던지지 않고 본문을 준다 — 거절(등록부 읽기 오류 · 사용 중)을 삭제 성공으로 읽지 않는다
+import { canManageKeys, authChoiceOf, authBodyOf, HOSTKEY_OBSERVE_NOTE, authChoicesView, authChoicesNote } from './bmOnboardText.js'; // 7b: 인증(키 · 공통 계정) 드롭다운 — 설정 소유자 등급만
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import EscClose from '../../components/EscClose.jsx';
 import { CsvExportModal, CsvImportModal } from '../../components/CsvBulkModals.jsx'; // CSV 일괄 관리(v2.341)
 import { fmtAgo } from '../../util/fmt.js';
 import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
-import { authStopSummary } from './storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
+import { authStopSummary, authStopSummaryUnreadOnly, authStopShort, isUnreadStop } from './storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
 import { droppedSecretNote } from '../droppedSecretText.js';
 import { missingChoice } from '../idrac/scanRangeFormText.js'; // v2.630 WEB2630-03: 목록에 없는 저장값을 그대로 보인다
 import BmStorHistoryPanel from './BmStorHistoryPanel.jsx'; // v2.635: 디스크 사용량 12시간 이력 차트(v2.688: 세 보기)
@@ -23,6 +26,7 @@ import Select from '../../components/Select.jsx';
 import { useHashTab } from '../../hooks/useHashTab.js'; // v2.915: 하위 탭(현황 · SAN 비교) — 주소 #/tools/bm-storage/compare
 import BmSanCompare from './BmSanCompare.jsx';          // v2.915: SAN 비교 탭(시안 docs/design/bm-san-compare)
 import BmCompareSet from './BmCompareSet.jsx';          // v2.962: 비교 세트 탭 — SAN · 베어메탈 서버 · 그룹 · 법인 합계를 2~4개 섞어 비교
+import { backdropClose } from '../../components/backdropClose.js'; // 96회차(95회차 남긴 것 ①): 창 안에서 끌다 배경에서 떼면 닫히던 것 — 누름 · 뗌 모두 배경일 때만
 
 // 바이트 → 사람이 읽는 용량(TB/GB). 합산값이 크므로 TB 우선.
 const fmtBytes = (b) => {
@@ -49,15 +53,19 @@ export default function BmStorageTool() {
   const [error, setError] = useState(null);
   const [form, setForm] = useState(null); // 서버 추가/수정 폼 | null
   const owner = canManageKeys(getCurrentUser(), true);
-  const [authOpts, setAuthOpts] = useState({ keys: [], accounts: [] });
+  const [authOpts, setAuthOpts] = useState(() => authChoicesView({ ok: true }));
+  // 6회차 B4: 이 서버에 쓸 수 있는 키 · 공통 계정만(서버 판정 — 저장과 같은 함수). 서버별 폴더 키는 이름으로 맞추므로 이름 · 주소가 바뀌면 다시 묻는다(짧게 기다렸다가 ·
+  //   늦게 온 이전 응답은 버린다). 상시 폴링 없음.
+  const authSeq = useRef(0);
+  const authQ = owner && form ? `id=${encodeURIComponent(form.id || '')}&name=${encodeURIComponent(form.name || '')}&host=${encodeURIComponent(form.host || '')}` : '';
   useEffect(() => {
-    if (!owner || !form) return;
-    let alive = true;
-    Promise.all([fetchJson('/tools/bm-usage/ssh-keys').catch(() => null), fetchJson('/tools/bm-usage/accounts').catch(() => null)]).then(([k, a]) => {
-      if (alive) setAuthOpts({ keys: (k?.keys || []).filter((x) => x.status === 'active'), accounts: (a?.accounts || []).filter((x) => x.kind === 'os') });
-    });
-    return () => { alive = false; };
-  }, [owner, !!form]);   // eslint-disable-line react-hooks/exhaustive-deps -- 폼을 열 때 한 번
+    if (!authQ) { setAuthOpts(authChoicesView({ ok: true })); return undefined; }   // 폼을 닫으면 비운다(다음 서버에 앞 서버의 목록이 잠시 보이지 않게)
+    const my = ++authSeq.current;
+    const tm = setTimeout(() => {
+      fetchJson(`/tools/bm-storage/auth-choices?${authQ}`).then((r) => r, () => null).then((r) => { if (my === authSeq.current) setAuthOpts(authChoicesView(r)); });
+    }, 300);
+    return () => clearTimeout(tm);
+  }, [authQ]);
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
   const [ivEdit, setIvEdit] = useState(null); // 주기 편집값(분) | null
@@ -109,7 +117,7 @@ export default function BmStorageTool() {
   };
   const del = async (s) => {
     if (!window.confirm(`'${s.name}' (${s.host}) 서버를 목록에서 삭제할까요?`)) return;
-    try { await delJson(`/tools/bm-storage/servers/${encodeURIComponent(s.id)}`); refresh(); }
+    try { requireChanged(await delJson(`/tools/bm-storage/servers/${encodeURIComponent(s.id)}`)); refresh(); }
     catch (e) { setMsg(e.message); }
   };
   const collectNow = async () => {
@@ -216,11 +224,12 @@ export default function BmStorageTool() {
           onClose={() => setCsvModal(null)} onDone={() => { setCsvModal(null); refresh(); }} />
       )}
       {msg && <div className="muted" style={{ fontSize: 12.5, marginBottom: 8, color: '#93c5fd' }}>{msg}</div>}
+      <RegistryUnreadBanner le={unreadMarkOf(data)} what="베어메탈 스토리지 서버 등록부" />
       {error && <div className="muted" style={{ fontSize: 12, marginBottom: 8, color: 'var(--amber)' }}>⚠ 일시 조회 오류: {String(error?.message || error)}</div>}
 
       {/* v2.590(감사 F2): 인증 실패로 **주기 수집을 멈춘** 서버 — 조용히 멈추지 않는다(authGuard 규칙 1). */}
       {authNote && (
-        <div className="card" style={{ padding: 10, marginBottom: 12, fontSize: 13, borderColor: 'var(--red)' }}>
+        <div className="card" data-auth-stop-summary style={{ padding: 10, marginBottom: 12, fontSize: 13, borderColor: authStopSummaryUnreadOnly(servers.filter((s) => s.authStopped)) ? 'var(--amber)' : 'var(--red)' }}>
           <BoldText text={authNote} />
           <span className="muted"> 위의 지금 수집 버튼은 정지와 무관하게 1회 시도하고, 성공하면 정지가 풀립니다.</span>
         </div>
@@ -344,7 +353,7 @@ export default function BmStorageTool() {
           </div>
         </div>
         {servers.length === 0
-          ? <div className="muted" style={{ fontSize: 13 }}>등록된 서버가 없습니다. '+ 서버 추가'로 SSH 접속 정보와 측정할 마운트 포인트를 등록하세요.</div>
+          ? <div className="muted" style={{ fontSize: 13 }}>{registryEmptyText(unreadMarkOf(data), '서버 등록부') || "등록된 서버가 없습니다. '+ 서버 추가'로 SSH 접속 정보와 측정할 마운트 포인트를 등록하세요."}</div>
           : <STable minWidth={1100}>
               <thead><tr><th>서버</th><th>그룹</th><th>수집 주체</th><th style={{ textAlign: 'right' }}>마운트</th><th style={{ textAlign: 'right' }}>총 용량</th><th style={{ textAlign: 'right' }}>사용량</th><th style={{ textAlign: 'right' }}>사용 가능</th><th>사용률</th><th>최근 수집</th><th data-nosort>작업</th></tr></thead>
               <tbody>
@@ -368,7 +377,7 @@ export default function BmStorageTool() {
                       <td style={{ textAlign: 'right' }} data-sort={s.ok ? s.usedBytes : ''}>{s.ok ? fmtBytes(s.usedBytes) : '—'}</td>
                       <td style={{ textAlign: 'right', fontWeight: 600 }} data-sort={s.ok ? s.availBytes : ''}>{s.ok ? fmtBytes(s.availBytes) : '—'}</td>
                       <td data-sort={p ?? ''}>{s.ok ? pctCell(s.usedPct)
-                        : s.authStopped ? <span className="badge red" style={{ fontSize: 11 }} title={s.error || ''}>인증 실패 정지{s.authStopped.attempts != null ? ` · ${s.authStopped.attempts}회` : ''}</span>
+                        : s.authStopped ? <span className="badge red" style={{ fontSize: 11 }} title={s.error || ''}>{authStopShort(s.authStopped)}{s.authStopped.attempts != null && !isUnreadStop(s.authStopped) ? ` · ${s.authStopped.attempts}회` : ''}</span>
                         : s.error ? <span style={{ color: 'var(--red)', fontSize: 11.5 }} title={s.error}>⚠ {s.error.slice(0, 40)}{s.error.length > 40 ? '…' : ''}</span>
                           : <span className="muted" style={{ fontSize: 12 }}>수집 대기</span>}</td>
                       <td className="muted" style={{ fontSize: 11.5 }} data-sort={s.at || ''}>{s.at ? fmtAgo(s.at) : '—'}</td>
@@ -388,7 +397,7 @@ export default function BmStorageTool() {
 
       {/* 서버 추가/수정 — 컬럼 형식 접속 정보 + 마운트 포인트 목록(줄바꿈 구분) */}
       {form && (
-        <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget && !busy) setForm(null); }}>
+        <div className="modal-overlay" {...backdropClose(() => setForm(null), { disabled: busy })}>
           <EscClose onClose={() => { if (!busy) setForm(null); }} />
           <div className="modal card" style={{ maxWidth: 620 }}>
             <h3 style={{ marginTop: 0 }}>{form.id ? `서버 수정 — ${form.name || form.host}` : '서버 추가'}</h3>
@@ -405,9 +414,10 @@ export default function BmStorageTool() {
                 <label>인증(SSH 키 · 공통 계정) <span className="muted" style={{ fontSize: 11 }}>(설정 소유자 — 묶음을 바꾸면 본인 OTP)</span>
                   <Select sort={false} className="input" value={form.auth || ''} onChange={(e) => setForm({ ...form, auth: e.target.value })}>
                     <option value="">개별 비밀번호(위 칸)</option>
-                    {authOpts.keys.map((k) => <option key={k.id} value={`key:${k.id}`}>키 · {k.name} ({k.algo})</option>)}
-                    {authOpts.accounts.map((a) => <option key={a.id} value={`acc:${a.id}`}>공통 계정 · {a.name} ({a.username})</option>)}
+                    {authOpts.keys.map((k) => <option key={k.id} value={`key:${k.id}`}>키 · {k.name} ({k.algo}){k.fit ? '' : ' — 지금 설정(이 서버와 맞지 않음)'}</option>)}
+                    {authOpts.accounts.map((a) => <option key={a.id} value={`acc:${a.id}`}>공통 계정 · {a.name} ({a.username}){a.fit ? '' : ' — 지금 설정(이 서버와 맞지 않음)'}</option>)}
                   </Select>
+                  {authChoicesNote(authOpts) && <span className="muted" style={{ display: 'block', fontSize: 11, marginTop: 4, whiteSpace: 'normal' }}>{authChoicesNote(authOpts)}</span>}
                 </label>
               )}
               {owner && (form.auth || '') !== authChoiceOf(cfgOf(form.id)) && (form.auth || '') && (

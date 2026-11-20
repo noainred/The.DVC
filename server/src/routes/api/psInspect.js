@@ -116,7 +116,7 @@ export function registerPsInspect(api) {
 
   api.put('/tools/ps-inspect/settings', adminOnly, fullRwOnly, (req, res) => {
     const r = saveSettings(req.body || {}, { by: req.user?.username || '' });
-    if (r.issue) return res.status(400).json({ ok: false, reason: r.issue });
+    if (r.issue) return res.status(r.code === 'settings-unreadable' ? 409 : 400).json({ ok: false, reason: r.issue, ...(r.code ? { code: r.code } : {}) });   // 결정(56~75 남긴 것) 57: 파일을 못 읽은 동안은 409
     const s = r.settings;
     logAudit({ user: req.user?.username, action: 'PowerScale 장비 점검 설정 변경', target: 'storage-inspect.json',
       detail: `점검 ${s.enabled ? '켬' : '끔'} · 요일 ${s.weekday} ${s.time} · 메일 ${s.mailEnabled ? `켬(+${s.mailDelayMin}분)` : '끔'} · 받는 사람 ${s.to.length} · 법인판 ${Object.keys(s.corpTo).length}` });

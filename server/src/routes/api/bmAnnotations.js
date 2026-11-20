@@ -18,6 +18,7 @@ import { isAdminReq, maskedIdToken } from '../../auth/addressMask.js';
 import { currentTargets } from '../../bmusage/poller.js';
 import { strOf } from '../../util/coercionTrap.js';
 import { resolvePerfTarget, perfTargetFail, perfPairsOf, bmAddressHosts, perfAddressMatcher } from './bmUsage.js';
+import { bmGate } from './bmWriteGate.js';
 
 const toolsPerm = requirePerm('tools');
 const writeRole = requireRole('admin', 'operator');
@@ -106,7 +107,14 @@ export async function bmAnnotationsRead(req, snap, deps = {}) {
       canEdit: !a.deleted && (isAdmin || own) && annotWritable(a, req.user, snap),
     };
   });
-  return { ok: true, annotations: out, ...(truncated ? { truncated: true } : {}), kinds: A.ANNOT_KINDS, textMax: A.TEXT_MAX, ...(isAdmin ? {} : { addressHidden: true }) };
+  // 점검 반복 2회차 E2⑤: ‘주석 추가’ 표지 — 쓰기 라우트(writeTarget)와 같은 판정: 데모 · 역할 → 고른 서버 전부 그 법인 쓰기 범위(하나라도 밖이면 403 이다).
+  //   서버를 고르지 않았거나 찾지 못했으면(범위 밖 · 없음 — 존재 은닉) 쓸 대상이 없다(why 없음 — 화면은 아무 말도 하지 않는다).
+  let create = bmGate(req, 'annotCreate', { snap });
+  if (create.ok) {
+    if (!asked.length) create = { ok: false };
+    else { const bad = asked.map((x) => bmGate(req, 'annotCreate', { snap, vcenterId: x.vc })).find((g) => !g.ok); if (bad) create = bad; }
+  }
+  return { ok: true, annotations: out, ...(truncated ? { truncated: true } : {}), kinds: A.ANNOT_KINDS, textMax: A.TEXT_MAX, ...(isAdmin ? {} : { addressHidden: true }), actions: { create } };
 }
 
 /** 대상 해석(쓰기) — 서버 키들 또는 법인 하나. 조회 밖 404 → 쓰기 범위 밖 403(조건 없이). */

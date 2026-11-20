@@ -11,7 +11,7 @@
  */
 import { config } from '../../config.js';
 import { numOrNull } from '../../util/numOrNull.js';
-import { logCommand, OUTPUT_MAX, LINE_CAP_DEFAULT } from './command.js';
+import { logCommand, OUTPUT_MAX, LINE_CAP_DEFAULT, LOG_INNER_MARGIN_MS } from './command.js';
 import { parseLogOutput } from './parse.js';
 import { classifyItems, HOUR, BURST_DEFAULTS } from './classify.js';
 import { logCursorsAll, logWriteBatch, logPrune } from './store.js';
@@ -47,7 +47,9 @@ export function logExtraFor(target, ctx) {
   if (!ctx?.on || !ctx.cursors || !target?.key) return null;
   const prev = ctx.cursors.get(target.key);
   const pos = prev && !prev.corrupt ? prev.state?.pos || {} : {};
-  return { name: 'logs', cmd: logCommand(pos, { lineCap: ctx.cfg.lineCap }), timeoutMs: LOG_EXEC_TIMEOUT_MS, maxBytes: OUTPUT_MAX + 64 * 1024 };
+  // 37회차 R1(반증 — 재현): 시작 최소 시간 = 안 timeout 최악 합(시한 − 여유) — 그보다 적게 남았으면 osSsh 가 시작하지 않고 '예산' 사유로 건너뛴다
+  //   (시작하면 시한에 잘려 출력 0바이트 · 커서 제자리 · 주기 집계가 '실패' 로 세었다).
+  return { name: 'logs', cmd: logCommand(pos, { lineCap: ctx.cfg.lineCap }), timeoutMs: LOG_EXEC_TIMEOUT_MS, minMs: LOG_EXEC_TIMEOUT_MS - LOG_INNER_MARGIN_MS, maxBytes: OUTPUT_MAX + 64 * 1024 };
 }
 
 /** 한 서버의 출력 → 쓰기 항목(순수에 가깝다 — 분류만 비동기). */

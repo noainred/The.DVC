@@ -50,11 +50,22 @@ export function profileViewFor({ tuning = null, detail = null, entry = null, row
  * @param {Array<{key,name,vcenterId,agent,tuning,detail,entry,row,manual,overridesFor}>} items  보이는 서버(범위 · 가림은 라우트가 이미 적용)
  */
 export function fleetProfileView(items = [], { overridesFor = null } = {}) {
+  const acc = fleetAccumulator({ overridesFor });
+  for (const it of items) acc.add(it);
+  return acc.result();
+}
+/** 같은 계산(같은 누적기) — 서버 사이 시간 기준 양보(점검 반복 5회차 D5: /profiles 함대 1,000대가 한 덩어리였다). 결과는 fleetProfileView 와 같다. */
+export async function fleetProfileViewAsync(items = [], { overridesFor = null, yieldFn = null } = {}) {
+  const acc = fleetAccumulator({ overridesFor });
+  for (const it of items) { acc.add(it); if (yieldFn) await yieldFn(); }
+  return acc.result();
+}
+function fleetAccumulator({ overridesFor = null } = {}) {
   const cells = new Map();   // osKey → { label, osProfile, byApp:{ appId|'none': {servers, status:{…}} } }
   const servers = [];
   const tuningCounts = Object.fromEntries(TUNING_ITEMS.map((x) => [x.id, { advise: 0, ok: 0, info: 0, unknown: 0 }]));
   let noFacts = 0;
-  for (const it of items) {
+  const add = (it) => {
     if (!it.tuning) noFacts += 1;
     const pv = profileView({ tuning: it.tuning, detail: it.detail, entry: it.entry, row: it.row, manual: it.manual });
     const det = pv.detection;
@@ -76,15 +87,16 @@ export function fleetProfileView(items = [], { overridesFor = null } = {}) {
       tuning: tv.counts,
       checkCounts: pv.profiles.reduce((acc, p) => { for (const ch of p.checks) acc[ch.status] = (acc[ch.status] || 0) + 1; return acc; }, {}),
     });
-  }
-  return {
+  };
+  const result = () => ({
     columns: [...APP_IDS, 'none'],
     rows: [...cells.values()].sort((a, b) => (b.osProfile ? 1 : 0) - (a.osProfile ? 1 : 0) || a.label.localeCompare(b.label)),
     servers, noFacts,
     tuningItems: TUNING_ITEMS.map((x) => ({ id: x.id, cat: x.cat, title: x.title, grade: x.grade, sources: x.sources, counts: tuningCounts[x.id] })),
     catalog: catalogView(), planned: PLANNED_PROFILES,
     categories: CATEGORIES, sources: [...TUNING_SOURCES, ...PROFILE_SOURCES], sourcesCheckedAt: SOURCES_CHECKED_AT,
-  };
+  });
+  return { add, result };
 }
 
 /** 계약 표(웹이 code 를 문장으로 바꿀 때 대조하는 열거 — 응답에 싣는다). */

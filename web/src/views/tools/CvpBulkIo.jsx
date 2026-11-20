@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { downloadFile, canCsv, CSV_DENIED_NOTE } from '../../api.js';
 import BoldText from '../../components/boldText.jsx';
+import { CVP_BLANK_NOTE } from './bulkBlankText.js';   // 결정(76~105 남긴 것) A2: 빈 칸 = 비움 계약 안내
 import BulkDeviceIo from './BulkDeviceIo.jsx';
 import {
   CVP_BULK_BASE, CVP_BULK_RESOURCE, cvpExportUrl, SECRET_EXPORT_WARNING, PLAIN_EXPORT_NOTE, IMPORT_NOTE, exportErrorText,
@@ -57,7 +58,7 @@ export default function CvpBulkIo({ onDone }) {
         </div>
       )}
       {open && (
-        <BulkDeviceIo base={CVP_BULK_BASE} resource={CVP_BULK_RESOURCE} unitLabel="CVP" typeCol={null}
+        <BulkDeviceIo base={CVP_BULK_BASE} resource={CVP_BULK_RESOURCE} unitLabel="CVP" typeCol={null} blankNote={CVP_BLANK_NOTE}
           title="CVP 서버 대량 등록 — CSV · 자유텍스트" keyLabel="id 또는 주소+담당 엣지"
           onClose={() => setOpen(false)}
           onDone={() => { setOpen(false); onDone?.(); }} />

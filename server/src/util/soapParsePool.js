@@ -16,15 +16,18 @@
 import os from 'node:os';
 import { Worker } from 'node:worker_threads';
 import { parseObjectContent } from '../vcenter/soapParse.js';
+import { envNonNegative, ENV_INT_MAX } from './envNumber.js';
 
 // 이 크기(문자) 미만 XML은 워커로 넘기지 않고 인라인 파싱(오프로딩 오버헤드 회피).
-const MIN_OFFLOAD_CHARS = Number(process.env.SOAP_PARSE_MIN_CHARS || 262_144); // 256KB
+// 102회차 F4: 예전 `Number(env || 기본값)` 은 숫자 아님 → NaN(`길이 < NaN` 이 거짓이라 작은 XML 까지 전부 워커로), Infinity → 큰 XML 도 인라인
+//   (메인 루프 블로킹 — 끄는 키는 SOAP_PARSE_WORKERS=0 이다)이었다. '0' = 항상 오프로드는 의미라 지킨다(envNonNegative) · 그 밖은 기본값.
+const MIN_OFFLOAD_CHARS = envNonNegative(process.env.SOAP_PARSE_MIN_CHARS, 262_144, { max: ENV_INT_MAX }); // 256KB
 // 워커 수(0이면 오프로딩 완전 비활성 → 항상 인라인).
-const WORKER_COUNT = (() => {
-  const env = process.env.SOAP_PARSE_WORKERS;
-  if (env != null && env !== '') return Math.max(0, Number(env) || 0);
-  return Math.max(1, Math.min(4, (os.cpus()?.length || 2) - 1));
-})();
+// 102회차 F5(재현): 예전 `Math.max(0, Number(env) || 0)` 은 상한이 없어 SOAP_PARSE_WORKERS=Infinity 면 ensurePool 의 `i < WORKER_COUNT` 가
+//   끝나지 않아 **첫 큰 SOAP 응답에서 메인 스레드가 워커를 끝없이 만들며 멈췄다**(4초 뒤 강제 종료 — 정상 6 은 7ms), 1e4 면 스레드 1만 개 ·
+//   2.5 면 3개였다. 숫자 아님 · 음수 · 공백도 0(오프로딩 꺼짐)으로 읽었다. 이제 '0' = 끔(의미)만 0 이고, 정수 1~SOAP_PARSE_WORKERS_MAX 밖은 기본값.
+export const SOAP_PARSE_WORKERS_MAX = 64;
+const WORKER_COUNT = envNonNegative(process.env.SOAP_PARSE_WORKERS, Math.max(1, Math.min(4, (os.cpus()?.length || 2) - 1)), { max: SOAP_PARSE_WORKERS_MAX });
 
 const encoder = new TextEncoder();
 let pool = null; // { workers:[{w, busy}], queue:[], pending:Map, seq } | null(비활성/실패)

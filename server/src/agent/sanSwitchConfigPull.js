@@ -19,6 +19,7 @@ import { pushSanSwitchNow } from '../sanswitch/push.js';
 import { pollPerfOnce } from '../sanswitch/perfPoller.js';
 import { pushPerfNow } from '../sanswitch/perfPush.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
+import { readJsonCapped, EDGE_RESPONSE_MAX_BYTES } from '../util/readCapped.js'; // 87회차 ⓓ(85 E3 — 권장안): 중앙 응답은 상한 읽기(형제 pull 과 같게 — 상한 없는 res.json() 금지)
 const _log404 = createChangeLogger({ windowMs: 10 * 60_000 }); // v2.600 EDGE2600-06
 
 export const configPullMs = () => clampIntervalMs(Number(process.env.SANSW_CONFIG_PULL_MS) || 5 * 60_000, 5 * 60_000, 60_000); // v2.600 EDGE2600-05: 상태 보고 주기도 실제(상한 적용) 값
@@ -152,7 +153,7 @@ async function _pull() {
       return { ok: false, reason: c.reason, kind: c.kind };
     }
     if (!res.ok) throw new Error(`sanswitch-config <- ${res.status}`);
-    const body = await res.json();
+    const body = await readJsonCapped(res, EDGE_RESPONSE_MAX_BYTES, '중앙 응답');
     const devices = body?.devices || [];
     const sig = crypto.createHash('sha1').update(JSON.stringify(devices)).digest('hex');
     let applied = false;

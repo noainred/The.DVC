@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import { fetchJson, postJson } from '../../api.js';
+import { requireChanged } from '../changeResult.js';   // 27회차 반증 D-2: 409(설정 파일 손상 중 거절)를 성공으로 보이지 않게
 import { Loading, ErrorBox, Modal } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
@@ -114,8 +115,8 @@ export default function StorageGrowthTool() {
       <div className="card" style={{ padding: '18px 20px', borderLeft: '4px solid var(--accent)' }}>
         <div className="flex gap wrap" style={{ alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
           <div style={{ minWidth: 0 }}>
-            <div className="muted" style={{ fontSize: 11.5, letterSpacing: 1.2, textTransform: 'uppercase', fontWeight: 700 }}>
-              Storage Growth Report
+            <div className="muted" style={{ fontSize: 11.5, letterSpacing: 1.2, fontWeight: 700 }}>
+              STORAGE GROWTH REPORT
             </div>
             <h2 style={{ margin: '4px 0 0', fontSize: 23, fontWeight: 800, letterSpacing: -0.3 }}>스토리지 증가량 보고서</h2>
             <div className="muted" style={{ fontSize: 12.5, marginTop: 6, whiteSpace: 'normal', lineHeight: 1.65 }}>
@@ -596,7 +597,7 @@ function RetentionModal({ onClose, onSaved }) {
   const save = async () => {
     setBusy(true); setMsg(null);
     try {
-      const r = await postJson('/tools/storage-growth/settings', { ...form, prune });
+      const r = requireChanged(await postJson('/tools/storage-growth/settings', { ...form, prune }));
       setMsg((r.issues || []).length ? `저장했습니다 — ${r.issues.join(' ')}` : `저장했습니다.${r.pruned ? ' 보존 기간을 넘은 이력을 정리했습니다.' : ''}`);
       onSaved?.();
     } catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(false); }

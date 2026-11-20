@@ -756,7 +756,7 @@ tbody tr:last-child td { border-bottom: none; }
    기존 다크 테마 토큰만 재사용(--panel·--border·--text·--text-dim·--accent·--amber·--red). */
 .collector-diag-section-title {
   font-size: 12px; font-weight: 700; margin: 14px 0 6px; color: var(--text-dim);
-  text-transform: uppercase; letter-spacing: .4px;
+  letter-spacing: .4px;   /* 96회차: text-transform uppercase 제거(루트 규칙 — 문구가 대소문자를 정한다 · 지금 제목은 전부 한글) */
 }
 .collector-diag-section-title:first-of-type { margin-top: 0; }
 .collector-diag-banner {
@@ -848,18 +848,7 @@ tbody tr:last-child td { border-bottom: none; }
 .qn-btn.on:hover { background: rgba(59,130,246,.36); }
 .qn-btn.on.down { opacity: 1; }   /* 선택된 칩은 흐리게 하지 않는다(선택이 더 중요한 정보) */
 
-/* 카드 반짝 하이라이트 */
-@keyframes vcFlash {
-  0%   { box-shadow: 0 0 0 0 rgba(96,165,250,0); border-color: var(--border); }
-  15%  { box-shadow: 0 0 0 4px rgba(96,165,250,.55), 0 0 26px 6px rgba(96,165,250,.45); border-color: var(--accent); }
-  55%  { box-shadow: 0 0 0 3px rgba(96,165,250,.30), 0 0 18px 4px rgba(96,165,250,.25); border-color: var(--accent); }
-  100% { box-shadow: 0 0 0 0 rgba(96,165,250,0); border-color: var(--border); }
-}
-/* 바로가기 클릭 시 대상 카드 반짝임 — 눈에 확실히 들어오도록 지속시간 2배(1.5s→3s). */
-.vc-card.flash { animation: vcFlash 3s ease-out; border-color: var(--accent); }
-
-/* 테두리 없는 그룹 블록(스토리지 모니터링 '법인별' 등)용 바로가기 대상 — .vc-card.flash 는
-   자체 테두리·그림자가 있는 카드 전제라 밋밋한 컨테이너에서는 거의 보이지 않는다. 여기서는
+/* 테두리 없는 그룹 블록(스토리지 모니터링 '법인별' 등)용 바로가기 대상 — vCenter 카드용 반짝은 v3.19.0 에 지웠다. 여기서는
    outline + 배경 틴트로 표시한다. scroll-margin-top 은 sticky .topbar(약 63px) 아래로
    대상이 들어가지 않도록 하는 여유값. */
 .qn-anchor { border-radius: 12px; scroll-margin-top: 84px; }
@@ -957,9 +946,9 @@ tbody tr:last-child td { border-bottom: none; }
 }
 /* 콘솔 헤더가 '글로벌 현황' 섹션 라벨을 겸하므로, 그 아래 첫 섹션 타이틀(지도 위)만 위 여백 축소 */
 .ov .kpis + .section-title { margin-top: 18px; }
-.ov-console-label { font-family: var(--mono); font-size: 12px; letter-spacing: .26em; color: var(--text-dim); text-transform: uppercase; }
+.ov-console-label { font-family: var(--mono); font-size: 12px; letter-spacing: .26em; color: var(--text-dim); }
 .ov-console-label b { color: var(--mint); margin-right: 10px; font-weight: 400; }
-.ov-console-status { font-family: var(--mono); font-size: 11px; letter-spacing: .16em; color: var(--text-faint); display: flex; align-items: center; gap: 8px; text-transform: uppercase; }
+.ov-console-status { font-family: var(--mono); font-size: 11px; letter-spacing: .16em; color: var(--text-faint); display: flex; align-items: center; gap: 8px; }
 .ov-console-status i { width: 7px; height: 7px; border-radius: 50%; background: var(--mint); box-shadow: 0 0 8px var(--mint-dim); animation: ovPulse 2.4s ease-in-out infinite; }
 .ov-console-status b { color: var(--text); font-weight: 700; font-variant-numeric: tabular-nums; }
 @keyframes ovPulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
@@ -3650,6 +3639,8 @@ table.bmf-t mark { background: rgba(250, 204, 21, .28); color: #fef08a; border-r
 @media (max-width: 640px) {
   .bmp-seg { width: 100%; }
   .bmp-seg button { flex: 1 1 0; min-height: 44px; white-space: normal; line-height: 1.25; padding: 4px 6px; }
+  /* 점검 반복 2회차 E5: 함대 보기 탭(10개)도 상세 탭(bmOps.css .bmp-seg-tabs)과 같은 규칙 — 한 줄 4개 줄바꿈(한 줄에 몰면 탭마다 한 글자씩 세로로 쌓였다) · 낱말 안에서 끊지 않는다(‘매트릭/스’). */
+  .bmp-seg.bmp-seg-top button { flex: 1 1 calc(25% - 1px); border-left: 0; border-top: 1px solid var(--border); word-break: keep-all; }
   .bmp-touch { min-height: 44px; }
   .bmp-top-item { grid-template-columns: minmax(0, 1fr); }
   .bmp-kv { grid-template-columns: minmax(0, 1fr); }
@@ -3791,3 +3782,14 @@ table.bmu-util tbody td { padding: 9px 10px; }
 .ipam-rep-grid { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 10px 14px; align-items: start; }
 .ipam-rep-grid > label.muted { padding-top: 6px; font-size: 12.5px; }
 @media (max-width: 640px) { .ipam-rep-grid { grid-template-columns: minmax(0, 1fr); gap: 4px; } .ipam-rep-grid > label.muted { padding-top: 8px; } }
+
+/* v3.13.2 정렬 열 머리(STable · DataTable — th[aria-sort])의 키보드 포커스 — 마우스 클릭엔 안 보인다 */
+th[aria-sort]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* v3.13.3 vCenter 상세 트리(노드 · 잎 · 호스트 이름)의 키보드 포커스 */
+.vcd-node[role="button"]:focus-visible, .vcd-link[role="button"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 6px; }
+
+/* v3.13.5 정렬하지 않는 열 머리(data-nosort)는 손가락 커서를 쓰지 않는다 — 전역 'thead th { cursor:pointer }' 가 누를 수 없는 머리도 눌리는 것처럼 보였다 */
+thead th[data-nosort] { cursor: default; }
+/* v3.13.5 누르는 배지(필터 칩 — pressable)의 키보드 포커스 */
+.badge[role="button"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

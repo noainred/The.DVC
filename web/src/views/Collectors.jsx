@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 // 진단 모달이 같은 기준을 써야 '배지는 뜨는데 모달은 다른 원인을 말한다' 가 되지 않는다.
 import { agoText } from './tools/relTime.js'; // v2.618 ARCH-5
 import { fetchJson, postJson, putJson, delJson, downloadFile, canCsv } from '../api.js';
+import { requireChanged } from './changeResult.js';   // 112회차: delJson 은 409 · 400 을 던지지 않고 본문을 준다 — 거절(등록부 읽기 오류 · 사용 중)을 삭제 성공으로 읽지 않는다
 import { droppedSecretNote } from './droppedSecretText.js';
 import { readFailText, agentTokSummary, fileUnreadableText } from './readFailText.js'; // v2.733(C5-02): 조회 실패를 'push 없음'·'0개 발급' 으로 그리지 않는다
 import { Loading, ErrorBox } from '../components/ui.jsx';
@@ -22,6 +23,7 @@ import { copyText as copyToClipboard } from '../util/copyText.js';   // v3.10.6:
 import { upgradeCell, autoPushLine } from './collectorUpgradeText.js'; // v2.775 업그레이드 결과 이유·시각
 import { autoOptionText, matchNote, matchSortText, selectValue, conflictChoices, assignFailText, saveText as dcSaveText } from './collectors/collectorDcText.js'; // v2.972: 수집 서버 ↔ 법인 매칭
 import { edgeSyncLine, syncRunText } from './upgradeEdgeSyncText.js'; // v2.865: 엣지 자동 업그레이드 한 줄 + '구버전 엣지 밀어 넣기'
+import { backdropClose } from '../components/backdropClose.js'; // 96회차(95회차 남긴 것 ①): 창 안에서 끌다 배경에서 떼면 닫히던 것 — 누름 · 뗌 모두 배경일 때만
 
 // S-09: 새 기본값은 https:// — 평문 http:// 는 사유를 적은 예외로만 등록된다.
 const EMPTY = { id: '', name: '', datacenter: '', url: 'https://', token: '', enabled: true, allowInsecureHttp: false, insecureHttpReason: '' };
@@ -99,7 +101,7 @@ export default function Collectors() {
   };
   const revokeTok = async (agent) => {
     if (!window.confirm(`'${agent}' 개별 토큰을 회수할까요? 그 엣지는 공유 CENTRAL_TOKEN으로만 접속할 수 있게 됩니다.`)) return;
-    try { await delJson(`/admin/central/agent-tokens/${encodeURIComponent(agent)}`); await loadAgentTok(); }
+    try { requireChanged(await delJson(`/admin/central/agent-tokens/${encodeURIComponent(agent)}`)); await loadAgentTok(); }
     catch (e) { setBanner({ ok: false, text: e.message }); }
   };
   const resetIngest = async () => {
@@ -234,7 +236,7 @@ export default function Collectors() {
 
   const remove = async (c) => {
     if (!window.confirm(`'${c.name}' (${c.id}) 수집 서버를 삭제할까요?`)) return;
-    try { await delJson(`/admin/collectors/${encodeURIComponent(c.id)}`); await load(); }
+    try { requireChanged(await delJson(`/admin/collectors/${encodeURIComponent(c.id)}`)); await load(); }
     catch (e) { setError(e.message); }
   };
 
@@ -263,7 +265,7 @@ export default function Collectors() {
     if (!ids.length) { setBanner({ ok: false, text: '오류 상태인 수집 서버가 없습니다.' }); return; }
     if (!window.confirm(`오류 상태 수집 서버 ${ids.length}대를 일괄 삭제할까요?\n${ids.join(', ')}`)) return;
     setBusy(true);
-    try { let n = 0; for (const id of ids) { try { await delJson(`/admin/collectors/${encodeURIComponent(id)}`); n++; } catch { /* */ } } await load(); setBanner({ ok: true, text: `오류 수집 서버 ${n}대 삭제 완료` }); }
+    try { let n = 0; for (const id of ids) { try { requireChanged(await delJson(`/admin/collectors/${encodeURIComponent(id)}`)); n++; } catch { /* 거절(409 등록부 읽기 오류) · 실패는 세지 않는다 */ } } await load(); setBanner({ ok: true, text: `오류 수집 서버 ${n}대 삭제 완료` }); }
     catch (e) { setError(e.message); }
     finally { setBusy(false); }
   };
@@ -553,7 +555,7 @@ export default function Collectors() {
                     <div className="muted" style={{ fontSize: 11 }} title="최근 동기화">동기화 {s?.at ? new Date(s.at).toLocaleTimeString('ko-KR') : '—'}</div>
                     {/* v2.775: 실패 이유·시각·자동 여부까지(예전에는 '업그레이드 실패' 만) */}
                     {upgradeCell(s?.upgrade) && (() => { const u = upgradeCell(s.upgrade); return (
-                      <div style={{ fontSize: 11, color: u.tone === 'ok' ? 'var(--green)' : 'var(--red)', whiteSpace: 'normal', overflowWrap: 'anywhere', maxWidth: 320 }}>
+                      <div style={{ fontSize: 11, color: u.tone === 'ok' ? 'var(--green)' : u.tone === 'warn' ? 'var(--amber)' : 'var(--red)', whiteSpace: 'normal', overflowWrap: 'anywhere', maxWidth: 320 }}>
                         {u.text}{u.reason && <div className="muted" style={{ fontSize: 11 }}>{u.reason}</div>}
                       </div>); })()}
                   </td>
@@ -572,7 +574,7 @@ export default function Collectors() {
       </div>
 
       {form && (
-        <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) close(); }}>
+        <div className="modal-overlay" {...backdropClose(() => close())}>
           <EscClose onClose={close} />
           <div className="modal card">
             <div className="flex between" style={{ marginBottom: 12 }}>
@@ -657,7 +659,7 @@ export default function Collectors() {
       )}
 
       {pwForm && (
-        <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget && !pwBusy) setPwForm(null); }}>
+        <div className="modal-overlay" {...backdropClose(() => setPwForm(null), { disabled: pwBusy })}>
           <EscClose onClose={() => { if (!pwBusy) setPwForm(null); }} />
           <div className="modal card" style={{ maxWidth: 640 }}>
             <div className="flex between" style={{ marginBottom: 12 }}>
@@ -750,7 +752,7 @@ function DiagModal({ entry, onClose, onEdit }) {
   const { collector: c, cards } = entry;
   const openTokenCheck = () => { onClose(); window.location.hash = '#/tools/portal-check'; };
   return (
-    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="modal-overlay" {...backdropClose(() => onClose())}>
       <EscClose onClose={onClose} />
       <div className="modal card" style={{ maxWidth: 860 }}>
         <div className="flex between" style={{ marginBottom: 12 }}>
@@ -1015,7 +1017,7 @@ function CollectorsCsvExportModal({ onClose }) {
     finally { setBusy(false); }
   };
   return (
-    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="modal-overlay" {...backdropClose(() => onClose())}>
       <EscClose onClose={onClose} />
       <div className="modal card" style={{ maxWidth: 520 }}>
         <h3 style={{ marginTop: 0 }}>수집 서버 CSV 내보내기</h3>
@@ -1084,7 +1086,7 @@ function CollectorsCsvImportModal({ onClose, onDone }) {
   const verified = check && checkedText === text && checkedKey === curKey; // 검증 후 내용·예외가 바뀌면 재검증 요구
   const actLabel = { add: '추가', overwrite: '덮어쓰기', error: '오류' };
   return (
-    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }}>
+    <div className="modal-overlay" {...backdropClose(() => onClose(), { disabled: busy })}>
       <EscClose onClose={() => { if (!busy) onClose(); }} />
       <div className="modal card" style={{ maxWidth: 780 }}>
         <h3 style={{ marginTop: 0 }}>수집 서버 CSV 가져오기</h3>

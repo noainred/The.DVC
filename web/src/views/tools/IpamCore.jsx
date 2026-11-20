@@ -34,6 +34,7 @@ import { hasMacAlert } from './ipamChangeText.js'; // v3.1.0 '충돌 · MAC 변�
 import { dnsSummary, dnsSummaryParts, hasDnsMismatch, DNS_FWD } from './ipamDnsText.js'; // v3.2.0 DNS 정합성 — 요약 · 칩 'DNS 불일치'
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
+import { loadErrorText } from '../loadErrorText.js'; // 결정(56~75 남긴 것) 62
 
 
 // 한 번에 그리는 IPAM 목록 행 상한(v2.596) — 정렬은 전체 기준, 그리기만 자른다.
@@ -514,6 +515,9 @@ function Ipam({ scope, onScope }) {
               <button className="logout-btn" style={{ padding: '6px 12px' }} onClick={() => setView('csv')} title="대장 CSV 내보내기 · IP 관리상태 CSV 가져오기">CSV</button>
             </span>
           </div>
+          {/* 결정(56~75 남긴 것) 62: 예약 · 메모 파일을 못 읽은 동안 대장의 그 칸이 비어 보이는 이유(서버 manageLoadError) */}
+          {data.manageLoadError?.overrides && <div className="banner" style={{ marginBottom: 6 }}>⚠ {loadErrorText('IP 관리 예약 · 담당(ipam-overrides.json)', data.manageLoadError.overrides, '그동안 대장의 관리상태 · 예약 칸이 비어 보입니다.')}</div>}
+          {data.manageLoadError?.annotations && <div className="banner" style={{ marginBottom: 6 }}>⚠ {loadErrorText('IP 관리 메모 · 태그(ipam-annotations.json)', data.manageLoadError.annotations, '그동안 대장의 메모 · 태그 칸이 비어 보입니다.')}</div>}
           <div className="flex gap wrap" style={{ alignItems: 'center', columnGap: 12 }}>
             <ResultCount total={data.rows.length} shown={rows.length} label="IP" filtered={!!term || !!reconFilter || !!rowFilter} />
             {recon.names.total > 0 && (

@@ -19,6 +19,8 @@ import zlib from 'node:zlib';
 import { IOSTAT_COLS, summaryOf } from './rates.js';
 
 export const CODEC_VERSION = 1;
+/** 묶음에 싣는 파일시스템 줄 상한(마운트마다 열 두 개 — 열 상한 MAX_KEYS 안). */
+export const FS_ROWS_MAX = 64;
 const SCALE = 100;
 const MAX_KEYS = 4096;
 const MAX_N = 120; // 분당 표본 상한 — 정상은 주기 1초여도 60개. 엣지가 같은 분에 표본을 수천 개 보내 메모리를 붙잡지 못하게(2026-11-11 반증 1번)
@@ -32,7 +34,7 @@ export function flattenSample(s) {
   // 요약 열(s.*)과 전체 디스크(t.*)를 **먼저** 넣는다 — 열 상한(MAX_KEYS)에 닿으면 뒤에 넣은 장치별 열부터 버려진다.
   //   예전에는 맨 뒤에 넣어 코어 64 · 디스크 300 서버에서 s.cpu 가 빠져 개요 · 비교가 그 서버만 '—' 였다(2026-11-11 반증 8번).
   const sum = summaryOf(s);
-  if (sum) { put('s.cpu', sum.cpu); put('s.mem', sum.mem); put('s.net', sum.net); put('s.disk', sum.disk); put('s.wa', sum.wAwait); put('s.ra', sum.rAwait); }
+  if (sum) { put('s.cpu', sum.cpu); put('s.mem', sum.mem); put('s.net', sum.net); put('s.disk', sum.disk); put('s.wa', sum.wAwait); put('s.ra', sum.rAwait); put('s.fs', sum.fsMax); }
   let rx = null; let tx = null;
   for (const x of s?.net || []) {
     if (x.k === 'virt' || x.m) continue;
@@ -47,8 +49,18 @@ export function flattenSample(s) {
   }
   if (Array.isArray(s?.load)) { put('l.1', s.load[0]); put('l.5', s.load[1]); put('l.15', s.load[2]); }
   put('l.run', s?.run); put('l.blk', s?.blk);
+  // v3.12.0(⑬ 더할 지표 — 컨펌 ④ '같은 1분 묶음에 열 추가'): 스케줄링 k.* · 메모리 압박 v.* · TCP p.* · 프로세스 상태 q.* · 파일시스템 f.*
+  if (s?.sched) for (const k of ['cs', 'in', 'fk']) put(`k.${k}`, s.sched[k]);
+  if (s?.vmp) for (const k of ['si', 'so', 'mf', 'sc', 'sl']) put(`v.${k}`, s.vmp[k]);
+  if (s?.tcp) for (const k of ['rt', 'lo', 'ld', 'es', 'tw', 'iu']) put(`p.${k}`, s.tcp[k]);
+  if (s?.pst) { put('q.D', s.pst.D); put('q.Z', s.pst.Z); }
   if (s?.mem) for (const k of ['pct', 'total', 'used', 'avail', 'bc', 'free', 'swT', 'swU', 'dirty', 'slab']) put(`m.${k}`, s.mem[k]);
-  const meta = { net: Object.create(null), dsk: Object.create(null) }; // 이름은 원격에서 온다 — 프로토타입 없는 객체
+  const meta = { net: Object.create(null), dsk: Object.create(null), fs: Object.create(null) }; // 이름은 원격에서 온다 — 프로토타입 없는 객체
+  if (s?.fs && Array.isArray(s.fs.rows)) {
+    put('f.rc', s.fs.rc); put('f.age', s.fs.age);
+    for (const r of s.fs.rows.slice(0, FS_ROWS_MAX)) { put(`f.${r.m}.p`, r.pct); put(`f.${r.m}.i`, r.ipct); meta.fs[r.m] = { t: r.t, d: r.d, kb: r.kb }; }
+  }
+  if (Array.isArray(s?.pst?.pd)) meta.pd = s.pst.pd.slice(0, 8).map((x) => ({ pid: x.pid, c: x.c, s: x.s ?? null }));
   for (const x of s?.net || []) {
     for (const k of ['rx', 'tx', 'u', 'er', 'dr']) put(`n.${x.n}.${k}`, x[k]);
     meta.net[x.n] = { k: x.k, sp: x.sp, st: x.st, m: x.m, md: x.md, mem: x.mem, act: x.act };
@@ -59,6 +71,17 @@ export function flattenSample(s) {
     meta.dsk[d.n] = { dn: d.dn, k: d.k, p: d.p, mp: d.mp, sz: d.sz };
   }
   return { row, meta };
+}
+
+/**
+ * 묶음 메타 합치기 — 이름표(net · dsk)는 마지막 표본의 것, 파일시스템 이름(fs)은 묶음 안에서 본 것을 모두(60초마다라 묶음의 마지막 표본에 없을 수 있다 · v3.12.0),
+ * D 목록(pd)은 그 표본이 프로세스 상태를 실었을 때만 바꾼다.
+ */
+function mergeMeta(prev, meta) {
+  if (!prev) return meta;
+  const fs = Object.create(null);
+  for (const src of [prev.fs, meta.fs]) if (src) for (const [k, v] of Object.entries(src)) fs[k] = v;
+  return { ...meta, fs, pd: meta.pd !== undefined ? meta.pd : prev.pd };
 }
 
 /** 새 묶음. */
@@ -75,7 +98,7 @@ export function appendToBlock(block, ts, row, meta) {
         if (!block.cols.has(k)) { if (block.cols.size >= MAX_KEYS) continue; block.cols.set(k, new Array(block.ts.length).fill(null)); }
         block.cols.get(k)[idx] = v;
       }
-      if (meta) block.meta = meta;
+      if (meta) block.meta = mergeMeta(block.meta, meta);
       return true;
     }
     block.ts.splice(idx, 0, ts);
@@ -88,7 +111,7 @@ export function appendToBlock(block, ts, row, meta) {
     if (!block.cols.has(k)) { if (block.cols.size >= MAX_KEYS) continue; block.cols.set(k, new Array(block.ts.length).fill(null)); }
     block.cols.get(k)[idx] = v;
   }
-  if (meta) block.meta = meta;
+  if (meta) block.meta = mergeMeta(block.meta, meta);
   return true;
 }
 

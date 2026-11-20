@@ -5,7 +5,7 @@
  */
 
 import { runScan, SCAN_DEADLINE_CODE } from './scanRunner.js';
-import { loadScanSettings, mergeScanResults, pruneScanResults, recordAgentReport, recordAgentIncomplete, sweepReleases, listScanAgents, releaseHoldStatus, getAgentReports, cleanNameStats, LOCAL } from './scanStore.js';
+import { loadScanSettings, mergeScanResults, pruneScanResults, recordAgentReport, recordAgentIncomplete, sweepReleases, listScanAgents, releaseHoldStatus, getAgentReports, cleanNameStats, LOCAL, scanSettingsLoadError } from './scanStore.js';
 import { enabledVcRanges } from './rangeStore.js';
 import { recordScanLog } from './scanLog.js';
 import { scheduleVcRangeMigration } from './vcRangeMigrate.js';
@@ -97,7 +97,7 @@ async function runScanOnce({ manual = false, resumeOf = null } = {}) {
     // 중앙 직접 스캔이 끝난 직후의 해제 마킹은 '중앙(LOCAL)이 소유한 IP'에만 적용한다.
     // (원격 사이트 에이전트가 보고한 IP를 중앙 스캔 결과로 오탐 down하지 않게 — 전역 staleness는 releaseTimer가 담당)
     sweepReleases(releaseIdleMs(), { agent: LOCAL });
-    pruneScanResults(s.retentionDays);
+    if (!scanSettingsLoadError()) pruneScanResults(s.retentionDays);   // 25회차 E-1: 배정 파일을 못 읽으면 기본 보존(30일)으로 지우지 않는다
     lastRun = { at: Date.now(), durationMs: Date.now() - started, scanned, alive: alive.length, manual, ...(nameStats ? { nameStats: cleanNameStats(nameStats) } : {}) };
     recordScanLog({ event: 'finish', trigger, ranges: ranges.length, scanned, alive: alive.length, durationMs: lastRun.durationMs, message: nameStatsLogText(lastRun.nameStats) });
     return { ok: true, ...lastRun };

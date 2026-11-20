@@ -75,6 +75,12 @@ export default function LogSettingsTab({ isAdmin }) {
     <div className="flex col gap">
       {err && <ErrorBox message={err} />}
       {done && <div className="svc-ok">{done}</div>}
+      {cfg.settingsUnreadable && (
+        // 26회차 F1: 설정 파일을 못 읽은 동안은 기본값이 보이므로 저장을 잠근다(서버도 409). 정리는 설정 상한으로만 돈다.
+        <div className="svc-warn">
+          로그 보관 설정 파일을 읽지 못해 기록 위치 · 보관 기준을 모릅니다. 그동안 CSV 기록을 멈추고(점검 · 알림은 계속) 옛 로그는 설정 상한까지만 지우며, 저장은 잠깁니다 — 설정 › 서비스 점검에서 확정하거나(보관 최대 · 총량 무제한 · 기록 위치는 기본 — 확정 뒤 원래 위치 · 보관 값을 다시 저장하세요) 손상 보존본을 되돌린 뒤 재시작하세요.
+        </div>
+      )}
 
       <div className="card" style={{ padding: 14 }}>
         <b>기록</b>
@@ -112,7 +118,8 @@ export default function LogSettingsTab({ isAdmin }) {
           </label>
         </div>
         <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
-          현재 사용 중: <code>{cfg.dir}</code> · 파일 {cfg.fileCount}개 · 합계 {(cfg.totalBytes / 1048576).toFixed(1)} MB
+          {/* 61회차 F2: 로그 폴더를 읽지 못하면 '0개 · 0.0 MB' 가 아니라 못 읽음(서버 filesUnreadable) */}
+          현재 사용 중: <code>{cfg.dir}</code> · {cfg.filesUnreadable ? '파일 목록을 읽지 못했습니다(권한 · 입출력 오류)' : `파일 ${cfg.fileCount}개 · 합계 ${(cfg.totalBytes / 1048576).toFixed(1)} MB`}
         </div>
         <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
           저장 시 그 경로에 실제 쓰기 시험을 합니다 — 통과하지 못하면 저장되지 않습니다(오타
@@ -159,7 +166,7 @@ export default function LogSettingsTab({ isAdmin }) {
       </div>
 
       <div className="flex gap">
-        <button className="login-btn" disabled={!canEdit || busy === 'save'} onClick={save}>
+        <button className="login-btn" disabled={!canEdit || busy === 'save' || !!cfg.settingsUnreadable} onClick={save}>
           {busy === 'save' ? '저장 중…' : '저장'}
         </button>
         <button className="tab" disabled={!isAdmin || busy === 'prune'} onClick={prune}

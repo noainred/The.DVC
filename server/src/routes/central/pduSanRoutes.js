@@ -5,12 +5,16 @@
  *   **글자 그대로** 옮겼다. 등록은 central.js 가 원래 자리에서 `registerPduSanRoutes(centralRouter)` 로 부른다 — 라우트 순서 · 미들웨어 · 응답이 같다
  *   (회귀 `test/centralSplit2954.test.js` 가 등록 순서 · 개수 · 순환 없음을 고정한다 — 분할 때 라우트 본문은 원문 비교로 0 차이). 공용 판정(requireCentral · 503 응답 등)은 central.js 의 것을 그대로 쓴다.
  */
+import { envPositive } from '../../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
+import { numOrNull } from '../../util/numOrNull.js';   // 24회차 #9
 import { logAudit } from '../../audit.js';
 import { REJECT_KIND } from '../../central/ingestReject.js';
 import { getJob as getRmaJob, jobAgentOf as rmaJobAgentOf, noteHeartbeat as noteRmaHeartbeat, onlineInstances as rmaOnlineInstances, setJobResult as setRmaJobResult, takeJobsWait as takeRmaJobsWait } from '../../rma/jobs.js';
 import { assignForInstance as rmaAssign, rmaSchedulesLoadError, scheduleFor as rmaScheduleFor } from '../../rma/schedules.js';
-import { accessFor as rmaAccessFor, ipAllowed as rmaIpAllowed, remoteFor as rmaRemoteFor } from '../../rma/settings.js';
+import { accessFor as rmaAccessFor, ipAllowed as rmaIpAllowed, remoteFor as rmaRemoteFor, rmaSettingsWriteRefusal } from '../../rma/settings.js';
 import { ingestResult as rmaIngestResult } from '../../rma/testResults.js';
+import { rmaPasswordFor } from '../../rma/agentSecrets.js';
+import { signScheduleTests, scheduleSignKey } from '../../rma/signing.js';   // 결정(56~75 남긴 것) 64 F7: 점검 스케줄 script · ssh 항목 서명
 import { brokerFetch as credentialBrokerFetch } from '../../security/credentialStore.js';
 // central.js 의 공용 판정 — 등록 때 인자로 받는다(import 하면 central.js ↔ 이 파일 순환이 생긴다 — archScan IMPORT_CYCLE_MAX)
 let intervalsPartOrUnreadable, loadWhy, persistent503, receiveRegistryUnreadable, registryUnreadable, requireCentral, settingsUnreadable, settingsUnreadableLog, strAgent;
@@ -24,7 +28,7 @@ import { edgeDropSummary, onlyDelegated, stampEdgeCollectedAt, withNotOwned } fr
 const credRate = new Map();
 
  // agentLower → { winStart, n }
-const CRED_RATE_PER_MIN = Math.max(10, Number(process.env.RMA_CRED_RATE_PER_MIN) || 120);
+const CRED_RATE_PER_MIN = Math.max(10, envPositive(process.env.RMA_CRED_RATE_PER_MIN, 120));
 
 /** central.js 가 원래 자리에서 부른다(등록 순서 유지). */
 export function registerPduSanRoutes(centralRouter, deps) {
@@ -149,7 +153,7 @@ export function registerPduSanRoutes(centralRouter, deps) {
     const metaIn = Array.isArray(req.body?.meta) ? req.body.meta.slice(0, 20_000) : [];
     // v2.602: 장비 id·수치는 글자·숫자만 받는다 — 객체면 String()/Number() 가 던졌다(async 핸들러 500).
     const idOf = (v) => (typeof v === 'string' || (typeof v === 'number' && Number.isFinite(v)) ? String(v) : '');
-    const nOf = (v) => (typeof v === 'number' || typeof v === 'string' ? Number(v) : NaN);
+    const nOf = (v) => (typeof v === 'number' || typeof v === 'string' ? (numOrNull(v) ?? NaN) : NaN);   // 24회차 #9: Number('')===0 — 빈 글자를 '포트 0 · 0 B/s' 로 적재하던 것
     const rows = rowsIn.filter((r) => Array.isArray(r) && owned.has(idOf(r[0]))).map((r) => ({ d: idOf(r[0]), ts: Math.min(nOf(r[1]) || now, now), p: nOf(r[2]), b: nOf(r[3]) }));
     const meta = metaIn.filter((m) => Array.isArray(m) && owned.has(idOf(m[0]))).map((m) => ({ d: idOf(m[0]), p: nOf(m[1]), ts: Math.min(nOf(m[2]) || now, now), name: m[3], wwn: m[4], speed: m[5], type: m[6] }));
     const dropped = rowsIn.length - rows.length;
@@ -224,6 +228,18 @@ export function registerPduSanRoutes(centralRouter, deps) {
    * Body: { agent, instance, info:{hostname,version,os,pid,uptimeSec,priority,allowCustom,signed,busy}, wait }
    * instance = 같은 법인의 여러 RMA 프로세스 구별자(분배는 rma/jobs.js). 형식 검증 후 그대로 키로 쓴다.
    */
+  /** 64회차 F3: RMA 접속 허용 IP — rma-poll · rma-credential · rma-result 가 같은 판정 하나(거부면 403 을 보내고 true). */
+  const rmaSourceDenied = (req, res, agent, what) => {
+    // 107회차 D2(재현): 접속 허용 설정 파일(rma-settings.json)을 못 읽는 동안 accessFor 는 빈 목록을 준다 — 빈 목록은 '전부 허용' 이라
+    //   목록으로 막아 둔 법인의 출처 제한이 그동안 풀렸다(rma-credential 은 평문 계정을 내준다). 못 읽은 것은 '제한 없음' 이 아니다 —
+    //   판정하지 않고 503(엣지는 백오프 · 작업 큐는 중앙에 남는다 — 아래 스케줄 못 읽음과 같은 규약). 파일이 없는 것(= 제한 없음)은 그대로 통과한다.
+    if (settingsUnreadable(res, () => { const no = rmaSettingsWriteRefusal(); return no ? { at: Date.now(), reason: no.reason } : null; }, 'RMA 분배 · 접속 허용')) return true;
+    const ip = String(req.socket?.remoteAddress || '').replace(/^::ffff:/, '');
+    if (rmaIpAllowed(ip, rmaAccessFor(agent).allowedIps)) return false;
+    console.warn(`[central] ${what}: ${agent} 허용되지 않은 출처 IP ${ip} 거부`);
+    res.status(403).json({ ok: false, reason: `이 법인의 RMA 접속 허용 IP 목록에 없는 출처(${ip})입니다 — 설정 › 원격 명령 › 접속 허용 IP 를 확인하세요.` });
+    return true;
+  };
   centralRouter.post('/rma-poll', requireCentral(), async (req, res) => {
     res.locals.perfExpectSlow = true; // v2.498: 롱폴(최대 55초 대기)은 정상이다 — '느린 요청' 목록을 이걸로 채우지 않는다
     if (req.centralAuth.mode !== 'agent') {
@@ -233,11 +249,7 @@ export function registerPduSanRoutes(centralRouter, deps) {
     const b = req.body || {};
     const ip = String(req.socket?.remoteAddress || '').replace(/^::ffff:/, '');
     // 접속 허용 IP(v2.418, HostMonitor 'Accept connections from…' 대응) — 법인별 목록이 있으면 그 밖의 출처는 거부.
-    const access = rmaAccessFor(agent);
-    if (!rmaIpAllowed(ip, access.allowedIps)) {
-      console.warn(`[central] rma-poll: ${agent} 허용되지 않은 출처 IP ${ip} 거부`);
-      return res.status(403).json({ ok: false, reason: `이 법인의 RMA 접속 허용 IP 목록에 없는 출처(${ip})입니다 — 설정 › 원격 명령 › 접속 허용 IP 를 확인하세요.` });
-    }
+    if (rmaSourceDenied(req, res, agent, 'rma-poll')) return;
     const instance = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(String(b.instance || '')) ? String(b.instance) : 'default';
     // v2.606(감사 RECENT2606-06): 인스턴스 수 상한으로 거절되면 **작업을 배달하지 않고 사유를 돌려준다**. 예전에는 반환값을
     //   버려 거절된 인스턴스가 온라인 목록·스케줄 배정에는 없으면서 롱폴 작업만 받았고, 엣지는 왜인지 알 길이 없었다.
@@ -276,8 +288,17 @@ export function registerPduSanRoutes(centralRouter, deps) {
     // 결정적이라, 인스턴스가 늘거나 줄면 다음 폴에서 다시 내려간다(버전은 같아도 배정이 달라질 수 있어
     // 배정 서명(assignKey)을 함께 비교).
     const assign = rmaAssign(sch, instance, rmaOnlineInstances(agent));
-    const assignKey = `${sch.version}:${assign.tests.map((t) => t.id).join(',')}`;
-    if (String(b.assignKey || '') !== assignKey || Number(b.scheduleVersion) !== sch.version) out.schedule = { version: sch.version, assignKey, tests: assign.tests };
+    /*
+     * 결정(56~75 남긴 것) 64 F7: script · ssh 항목에 법인 RMA 비밀번호 HMAC 을 붙인다(signing.js signScheduleTests — 사본에만, 저장본은 그대로).
+     *   비밀번호 지문을 assignKey 에 넣는다 — 비밀번호를 등록 · 변경 · 해제하면 스케줄이 다시 내려가 엣지가 새 서명으로 다시 판정한다
+     *   (버전만 보면 비밀번호를 고친 뒤에도 엣지가 '서명 없음' 판정을 계속 들고 있다). 비밀번호가 없으면 assignKey 는 예전 모양 그대로다.
+     *   비밀번호를 못 읽으면(파일 손상) 서명하지 않는다 — 비밀번호가 있는 엣지는 그 두 점검을 unknown 으로 남긴다(닫힌 쪽).
+     */
+    let schSecret = '';
+    try { schSecret = rmaPasswordFor(agent); } catch { schSecret = ''; }
+    const signKey = scheduleSignKey(schSecret);
+    const assignKey = `${sch.version}:${assign.tests.map((t) => t.id).join(',')}${signKey ? `:k${signKey}` : ''}`;
+    if (String(b.assignKey || '') !== assignKey || Number(b.scheduleVersion) !== sch.version) out.schedule = { version: sch.version, assignKey, tests: signScheduleTests(schSecret, agent, assign.tests, Date.now(), instance) };   // 반증 G1a: 인스턴스도 서명 대상
     const remote = rmaRemoteFor(agent);
     if (remote.longpollMs || remote.testConcurrency || remote.disabledTests.length) out.config = remote;
     res.json(out);
@@ -286,6 +307,9 @@ export function registerPduSanRoutes(centralRouter, deps) {
   centralRouter.post('/rma-credential', requireCentral(), (req, res) => {
     if (req.centralAuth.mode !== 'agent') return res.status(403).json({ ok: false, reason: '계정 브로커는 엣지별 개별 토큰만 허용합니다.' });
     const agent = req.centralAuth.agent;
+    // 64회차 F3(재현): 법인 'RMA 접속 허용 IP' 는 rma-poll 만 보고 있었다 — 토큰을 가진 쪽이 목록 밖에서 이 브로커로 **평문 계정**을 받아 갔다.
+    //   부르는 곳은 RMA 프로세스(rma/agent.js resolveCreds) 하나라 폴과 같은 출처다. 같은 판정을 건다.
+    if (rmaSourceDenied(req, res, agent, 'rma-credential')) return;
     const b = req.body || {};
     const id = String(b.credentialId || ''), host = String(b.host || '').trim();
     if (!/^cred_[A-Za-z0-9_]{1,64}$/.test(id) || !/^[A-Za-z0-9][A-Za-z0-9.:-]{0,253}$/.test(host)) return res.status(400).json({ ok: false, reason: 'credentialId/host 형식 오류' });
@@ -305,6 +329,7 @@ export function registerPduSanRoutes(centralRouter, deps) {
   // Body: { reqId, result }
   centralRouter.post('/rma-result', requireCentral({ notFound: { ok: false } }), (req, res) => {
     if (req.centralAuth.mode !== 'agent') return res.status(403).json({ ok: false, reason: '원격 명령(RMA)은 엣지별 개별 토큰만 허용합니다.' });
+    if (rmaSourceDenied(req, res, req.centralAuth.agent, 'rma-result')) return; // 64회차 F3: 결과 위조도 같은 출처 경계
     const b = req.body || {};
     if (!b.reqId) return res.status(400).json({ ok: false, reason: 'reqId가 필요합니다.' });
     const owner = rmaJobAgentOf(String(b.reqId));

@@ -16,6 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../../util/atomicWrite.js';
+import { readJsonFile } from '../../util/jsonFileLoad.js';
 import { registerStateFile } from '../../util/stateFiles.js';
 import { edgeRowFromPlan } from './importAnalyze.js';
 import { analyzeOnboardRows } from './importAnalyze.js';
@@ -26,10 +27,23 @@ registerStateFile(APPLIED_FILE_NAME);
 const FILE = path.join(config.configDir, 'bm-onboard-applied.json');   // = APPLIED_FILE_NAME
 const lc = (v) => String(v ?? '').trim().toLowerCase();
 
+/**
+ * 77회차 F3(재현): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 예전에는 catch 하나로 받아 원본(‘만든 항목’ 목록)을 `.corrupt.*` 로 옮기고 그 자리에 lost 파일을 써서,
+ *   권한을 바로잡아도 만든 항목 목록을 잃고 7일 lost 보류에 들어갔다. 이제 읽기 오류면 **옮기지도 쓰지도 않고** readError 를 돌려준다 — 적용은 이번 판을 건너뛰고(원본 위에
+ *   빈 created 를 쓰지 않게) · 인출 쿼리는 빈 서명(중앙 제거 대기 유지 — 안전한 쪽) · 다음 인출에 다시 읽는다. 손상(parse 실패)은 예전과 같다(보존 + lost 기록).
+ */
+let _readErrWarned = false;
 export function readAppliedState() {
+  const rr = readJsonFile(FILE);
+  if (rr.kind === 'missing') return { ok: true, state: { sig: '', appliedSig: '', lost: false, created: {} } };
+  if (rr.kind === 'read-error') {
+    if (!_readErrWarned) { _readErrWarned = true; console.warn(`[bm-onboard] ${APPLIED_FILE_NAME} 읽기 오류(${String(rr.error?.code || 'read-error').slice(0, 32)}) — 손상이 아니라 원본은 그대로 둡니다 · 읽힐 때까지 배포 적용을 건너뜁니다`); }
+    return { ok: false, readError: true, state: { sig: '', appliedSig: '', lost: true, created: {} } };
+  }
+  _readErrWarned = false;
   try {
-    if (!fs.existsSync(FILE)) return { ok: true, state: { sig: '', appliedSig: '', lost: false, created: {} } };
-    const j = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+    if (rr.kind === 'corrupt') throw rr.error;   // 원본은 readJsonFile 이 보존본으로 옮겼다 — 아래 catch 가 lost 를 남긴다(예전과 같다)
+    const j = rr.value;
     const created = j && typeof j.created === 'object' && j.created && !Array.isArray(j.created) ? j.created : {};
     const appliedSig = String(j?.sig || '').slice(0, 64);
     // 반증(v2.954): lost 보류에도 시한 — LOST_HOLD_MS 를 넘기면 풀고 콘솔에 밝힌다(중앙 제거 대기가 영원히 묶이지 않게 · 루트 CLAUDE.md '보류에는 시한')
@@ -42,7 +56,8 @@ export function readAppliedState() {
     // sig = 중앙에 보고할 서명(lost 면 빈 값 — D-3 ②) · appliedSig = 이 엣지가 실제로 적용한 판(같은 판 건너뛰기용)
     return { ok: true, state: { sig: lost ? '' : appliedSig, appliedSig, lost, ...(lost ? { lostSince } : {}), created, at: Number(j?.at) || 0, result: j?.result || null } };
   } catch (e) {
-    preserveCorrupt(FILE, e?.message);
+    // 손상은 readJsonFile 이 이미 옮겼다. 읽은 값을 다루다 던진 경우(예상 밖)만 여기서 옮긴다 — 아래 lost 기록이 원본을 덮지 않게.
+    if (rr.kind !== 'corrupt') preserveCorrupt(FILE, e?.message);
     // 반증(v2.954 — 재현): 손상본을 옆으로 치운 뒤 다음 읽기가 '파일 없음 = 신규 설치' 로 lost 를 잃었다(인출 워커가 쿼리용으로 먼저 읽는다).
     //   lost 표지를 그 자리에서 파일로 남긴다(쓰기 실패면 이번 결과만 lost — 다음 주기에 다시 시도).
     try { writeAppliedState({ sig: '', lost: true, lostSince: Date.now(), at: Date.now(), created: {}, result: null, lastError: '적용 상태 파일 손상' }); } catch { /* 이번 판만 */ }
@@ -112,6 +127,8 @@ const lostReason = (names) => `적용 상태 파일(${APPLIED_FILE_NAME})을 잃
 export async function applyEdgeDeployment(rows = [], { sig = '', D = null, corps = [], myCorps = [], now = Date.now(), currentTargets = null, pending = null } = {}) {
   const Dx = D || await defaultOnboardDeps();
   const prev = readAppliedState();
+  // 77회차 F3: 상태 파일 읽기 오류 — 이번 판은 적용하지 않는다(적용하면 끝에 빈 created 로 원본을 덮는다). 서명도 남기지 않는다.
+  if (prev.readError) return { ok: false, applied: 0, rejected: 0, removed: 0, readError: true, reason: `적용 상태 파일(${APPLIED_FILE_NAME})을 읽지 못해(읽기 오류 — 원본은 그대로 있습니다) 이번 배포를 적용하지 않았습니다 — 파일 권한 · 소유자 · 디스크를 확인하세요(다음 인출에 다시 읽습니다)` };
   if (prev.ok && prev.state.appliedSig === sig && sig) {
     if (!prev.state.lost) return { ok: true, skipped: true, applied: 0, rejected: 0, removed: 0 };
     // D-3 ②: 같은 판 — 다시 적용하지 않고 잃은 항목 확인만(풀리면 다음 인출부터 서명을 보고한다)

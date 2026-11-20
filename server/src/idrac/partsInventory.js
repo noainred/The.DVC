@@ -49,6 +49,12 @@ export const PART_CATS = [
 ];
 
 const CAT_BY_KEY = new Map(PART_CATS.map((c) => [c.cat, c]));
+/** 47회차 #7: 파트 → redfish 컬렉션 키(collections.<키>='failed' 면 못 읽음 — hwSummary.readInvArr 와 같은 표식). NIC 은 표식이 없다. */
+const COLL_KEY = Object.freeze({ cpu: 'cpus', gpu: 'gpus', dimm: 'memoryDimms', disk: 'disks', controller: 'storageControllers', psu: 'psus', pcie: 'pcie', fan: 'fans' });
+export function failedPartCats(inv, cats) {
+  const c = inv && inv.collections && typeof inv.collections === 'object' ? inv.collections : null;
+  return c ? cats.filter((k) => COLL_KEY[k] && c[COLL_KEY[k]] === 'failed') : [];
+}
 export const isPartCat = (cat) => CAT_BY_KEY.has(String(cat || ''));
 
 /** 한 서버 inv 에서 카테고리의 유닛 목록. cat 미지정이면 전 카테고리(각 유닛에 cat 부여). */
@@ -72,12 +78,18 @@ export function partBuckets(servers, invFor, { cat = '', q = '' } = {}) {
   const needle = t(q).toLowerCase();
   const buckets = new Map(); // key -> bucket
   const missing = [];
+  const unread = [];   // 47회차 #7: 인벤토리는 있지만 그 파트 컬렉션을 못 읽은 서버(GPU 찾기 gpuUnread 와 같은 판정)
+  const cats = cat ? [cat] : PART_CATS.map((d) => d.cat);
   let collected = 0;
   for (const s of servers) {
     const inv = invFor(s);
     if (!inv) { missing.push({ id: s.id, name: s.name }); continue; }
+    const failed = failedPartCats(inv, cats);
+    if (failed.length) unread.push({ id: s.id, name: s.name, cats: failed });
+    if (cat && failed.length) continue;   // 고른 파트를 못 읽었으면 '수집 · 0개' 로 세지 않는다
     collected++;
     for (const u of partsOfInv(inv, cat)) {
+      if (failed.includes(u.cat)) continue;
       if (needle && !`${u.label} ${u.detail}`.toLowerCase().includes(needle)) continue;
       const key = `${u.cat}|${u.label}`;
       let b = buckets.get(key);
@@ -91,7 +103,7 @@ export function partBuckets(servers, invFor, { cat = '', q = '' } = {}) {
     buckets: [...buckets.values()]
       .map(({ servers: sv, ...b }) => ({ ...b, serverCount: sv.size }))
       .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)),
-    collected, total: servers.length, missing,
+    collected, total: servers.length, missing, unread,
   };
 }
 

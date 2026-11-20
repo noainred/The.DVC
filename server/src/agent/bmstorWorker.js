@@ -12,6 +12,7 @@ import { collectMany } from '../bmstor/collect.js';
 import { agentHeaders, withAgentQuery } from './agentNameCarry.js'; // v2.629 A6-01: 원문 이름 헤더는 한글 이름에서 fetch 가 던진다
 import zlib from 'node:zlib';
 import { promisify } from 'node:util';
+import { readJsonCapped, EDGE_RESPONSE_MAX_BYTES } from '../util/readCapped.js'; // 87회차 ⓓ(85 E3 — 권장안): 중앙 응답은 상한 읽기(형제 pull 과 같게 — 상한 없는 res.json() 금지)
 
 const gzipAsync = promisify(zlib.gzip);
 
@@ -48,7 +49,7 @@ function headers(extra = {}) {
 const _logChange = createChangeLogger({ windowMs: 10 * 60_000 });
 async function httpFail(stage, r) {
   let reason = '';
-  try { const b = await r.json(); reason = String(b?.reason || b?.error || '').slice(0, 200); } catch { /* 본문 없음 */ }
+  try { const b = await readJsonCapped(r, 64 * 1024, '중앙 오류 응답'); reason = String(b?.reason || b?.error || '').slice(0, 200); } catch { /* 본문 없음 */ }
   const msg = `${stage} HTTP ${r.status}${reason ? ` — ${reason}` : ''}`;
   _last = { at: Date.now(), ok: false, error: msg, status: r.status };
   if (_logChange(stage, msg)) console.warn(`[bmstor-agent] ${msg}`);
@@ -66,7 +67,7 @@ async function postResult(url, body, timeoutMs) {
   if (r.ok) {
     // v2.622(감사 EDGE-03): 200 이어도 stale 이면 중앙이 결과를 **반영하지 않았다** — 예전에는 r.ok 만 봐서 '수집 완료' 와 ok:true 가
     //   남았는데 중앙 화면은 '회신하지 않았다' 였다. 재전송 중복(duplicate)은 앞서 반영됐으므로 실패가 아니다.
-    let b = null; try { b = await r.json(); } catch { /* 본문 없음 */ }
+    let b = null; try { b = await readJsonCapped(r, 64 * 1024, '중앙 오류 응답'); } catch { /* 본문 없음 */ }
     if (b && b.stale === true && b.duplicate !== true) {
       const msg = `결과 회신은 도착했지만 중앙이 반영하지 않음(stale${b.superseded ? ' — 더 새 수집 결과가 이미 반영됨' : ' — 중앙이 이 잡을 기한 초과로 종결함'})${b.reason ? ` — ${String(b.reason).slice(0, 200)}` : ''}`;
       if (_logChange('회신', msg)) console.warn(`[bmstor-agent] ${msg}`);
@@ -76,7 +77,7 @@ async function postResult(url, body, timeoutMs) {
     return null;
   }
   let reason = '';
-  try { const b = await r.json(); reason = String(b?.reason || b?.error || '').slice(0, 200); } catch { /* 본문 없음 */ }
+  try { const b = await readJsonCapped(r, 64 * 1024, '중앙 오류 응답'); reason = String(b?.reason || b?.error || '').slice(0, 200); } catch { /* 본문 없음 */ }
   const msg = `결과 회신 HTTP ${r.status}${reason ? ` — ${reason}` : ''}`;
   if (_logChange('회신', msg)) console.warn(`[bmstor-agent] ${msg}`);
   return msg;
@@ -89,7 +90,7 @@ export async function runBmstorWorkerOnce() {
     const url = `${config.agent.centralUrl}/api/central/bmstor-jobs?agent=${encodeURIComponent(config.agent.name)}`;
     const r = await resilientFetch(url, { headers: headers(), timeoutMs: 15_000, retries: 2 });
     if (!r.ok) return await httpFail('인출', r);
-    const { jobs } = await r.json();
+    const { jobs } = await readJsonCapped(r, EDGE_RESPONSE_MAX_BYTES, '중앙 응답');
     if (!jobs || !jobs.length) { _last = { at: Date.now(), ok: true, jobs: 0 }; return null; } // v2.600 EDGE2600-07: 성공 인출(0건)도 상태 갱신 — 끈적한 오류 방지
     let postErr = null;
     for (const job of jobs) {
@@ -119,7 +120,7 @@ export async function runBmstorWorkerOnce() {
   } catch (e) {
     const msg = String(e?.message || e).slice(0, 300);
     _last = { at: Date.now(), ok: false, error: msg };
-    console.warn('[bmstor-agent] 실패: ' + msg);
+    if (_logChange('실패', msg)) console.warn('[bmstor-agent] 실패: ' + msg);   // 85회차 F3: 같은 사유는 10분에 한 줄(10초 폴 — 저널 폭주 방지)
     return null;
   }
   finally { busy = false; }

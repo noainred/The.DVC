@@ -8,6 +8,7 @@ import {
 } from './featureUsageText.js';
 import { TOOL_SEGS as TRACKER_SEGS } from '../usageTracker.js';
 import { TOOL_SEGS } from './featureUsageText.js';
+import { PLATFORM_TABS } from './platform/platformText.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ctx = { settingsMeta: [{ k: 'audit', label: '감사 로그', groupLabel: '로그' }, { k: 'feature-usage', label: '기능 사용 현황', groupLabel: '사용자' }, { k: 'isilon-dirusage', label: '아이실론', groupLabel: '수집', superOnly: true }] };
@@ -16,15 +17,20 @@ describe('keyMeta', () => {
   it('탭 · 도구 · 설정 · 콘솔의 이름과 메뉴 위치', () => {
     // v2.915: 세 탭이 '서버 › 가상화 플랫폼' 한 항목 — 추적 키(tab:vms · tab:hosts)는 그대로이고 이름은 '항목 › 탭'
     // v2.994: 'Virtual Machine(VM)'(vms 처음 · vcenters) · 'Hypervisor'(hosts) 두 항목 — 추적 키는 그대로
-    expect(keyMeta('tab:vms', ctx)).toMatchObject({ label: 'Virtual Machine(VM)', where: '서버 › Virtual Machine(VM)', bucket: 'server', inMenu: true, kindLabel: '탭' });
+    // v3.19.0: 이름 'Virtual Machine' · 처음 탭 vcenters(항목 그 자체) · vms 는 '항목 › 탭'(탭 이름은 platformText.PLATFORM_TABS 에서 읽는다)
+    //   탭 이름이 항목 이름과 같으면 탭의 작은 이름(sub)을 쓴다 — 'Virtual Machine › Virtual Machine' 이 아니라 'Virtual Machine › VM'
+    const vmTab = PLATFORM_TABS.find((t) => t.k === 'vms').sub;
+    expect(vmTab).toBe('VM');
+    expect(keyMeta('tab:vcenters', ctx)).toMatchObject({ label: 'Virtual Machine', where: '서버 › Virtual Machine', bucket: 'server', inMenu: true, kindLabel: '탭' });
     expect(keyMeta('tab:hosts', ctx)).toMatchObject({ label: 'Hypervisor', where: '서버 › Hypervisor', bucket: 'server', inMenu: true });
-    expect(keyMeta('tab:vcenters', ctx)).toMatchObject({ label: 'Virtual Machine(VM) › vCenter', where: '서버 › Virtual Machine(VM) › vCenter', bucket: 'server', inMenu: true });
+    expect(keyMeta('tab:vms', ctx)).toMatchObject({ label: `Virtual Machine › ${vmTab}`, where: `서버 › Virtual Machine › ${vmTab}`, bucket: 'server', inMenu: true });
     expect(keyMeta('tab:overview', ctx)).toMatchObject({ label: 'Overview', bucket: 'home' });
     expect(keyMeta('tool:storage-mon', ctx)).toMatchObject({ label: '스토리지 현황', where: '스토리지 › 스토리지 현황', bucket: 'storage', inMenu: true, adminOnly: true });
-    expect(keyMeta('tool:vmfinder', ctx)).toMatchObject({ where: '서버 › Virtual Machine(VM) 화면 위 탭', bucket: 'server', cardOnly: false });
+    expect(keyMeta('tool:vmfinder', ctx)).toMatchObject({ where: '서버 › Virtual Machine 화면 위 탭', bucket: 'server', cardOnly: false });
     expect(keyMeta('tool:host-hygiene', ctx)).toMatchObject({ where: '서버 › Hypervisor 화면 위 탭', bucket: 'server', cardOnly: false });
-    expect(keyMeta('tool:serveranalysis/baremetal', ctx)).toMatchObject({ label: 'Physical Server · Baremetal', where: '서버 › Physical Server · Baremetal' });
-    expect(keyMeta('tool:serveranalysis', ctx)).toMatchObject({ label: 'Physical Server', where: '자원관리 › Physical Server' });
+    // v3.19.0: 서버 › Physical Server(Baremetal 조각) · 자원관리 › Physical Server(전체) — 두 행의 이름이 겹치지 않는다
+    expect(keyMeta('tool:serveranalysis/baremetal', ctx)).toMatchObject({ label: 'Physical Server', where: '서버 › Physical Server' });
+    expect(keyMeta('tool:serveranalysis', ctx)).toMatchObject({ label: 'Physical Server(전체)', where: '자원관리 › Physical Server(전체)' });
     const card = keyMeta('tool:login-fails', ctx);
     expect(card).toMatchObject({ where: '특수 기능 카드', bucket: 'tools', cardOnly: true, inMenu: false, auth: '관리자 전용' });
     expect(keyMeta('settings:audit', ctx)).toMatchObject({ label: '감사 로그', where: '설정 › 로그 › 감사 로그', kindLabel: '설정', auth: '설정 소유자' });

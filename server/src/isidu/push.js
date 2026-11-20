@@ -10,6 +10,7 @@
  *   기다리는 대상(`runHeld`)을 싣는다 — 중앙은 그 요청을 결과 시한(최대 약 10시간)까지 기다리지 않고 사유와 함께 정리한다.
  *   중앙이 2xx 로 받았을 때만 지운다(실패·503 이면 다음 push 에 다시 싣는다). 구버전 중앙은 이 필드를 모른다(예전처럼 시한으로 정리한다).
  */
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
@@ -31,7 +32,7 @@ import * as db from './db.js';
 const gzipAsync = promisify(zlib.gzip);
 registerStateFile('isidu-push.json');
 const CURSOR_FILE = () => path.join(config.configDir, 'isidu-push.json');   // ⚠ 리터럴 형태 유지 — scripts/config-doc.mjs 가 이 모양으로 찾는다
-const ROWS_PER_POST = Math.max(5_000, Number(process.env.ISIDU_PUSH_ROWS) || 60_000);
+const ROWS_PER_POST = Math.max(5_000, envPositive(process.env.ISIDU_PUSH_ROWS, 60_000));
 const MAX_ROUNDS = 10;
 export const pushMs = () => clampIntervalMs(Number(process.env.ISIDU_PUSH_MS) || 600000, 600000, 60_000);
 const failLog = createChangeLogger({ windowMs: 10 * 60_000 });

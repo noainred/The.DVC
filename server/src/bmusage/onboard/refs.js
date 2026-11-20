@@ -6,16 +6,20 @@
  *    → 바뀐 서버 목록을 돌려준다(화면이 '전 서버 재시험' 을 권한다 — 자동 재시험 · 자동 재시도 없음).
  *  · 접속 자격 해석 `resolveOsAuth` — 폴러 · 연결 시험이 같은 하나를 쓴다(판정 코어 하나).
  *    순서: 서버 keyRef → 공통 계정(credRef)의 기본 키 → 공통 계정 비밀번호 → 서버 비밀번호. 키 참조가 있는데 키가 없으면 **비밀번호로 몰래 넘어가지 않고** 오류다.
+ *    v3.24(서버 접속 — 설계 docs/design/server-access §4.6): 서버에 자기 자격이 **없고** 계층 지정 승인이 살아 있으면(registry.inheritActive)
+ *    법인 › OS 종류 → 법인 순으로 가장 가까운 지정의 공통 계정을 쓴다(effectiveAccountOf 하나). 그 계정에도 법인 사용 중지 · 계정 단위 정지 · 허용 기능 · OS 계열을 본다.
  */
+import { sshKdfRoundsIssue } from '../../util/sshKeyKdf.js';   // 21회차 L-6
 import crypto from 'node:crypto';
 import ssh2 from 'ssh2';
-import { listBmServersRaw, registryLoadError, bmServerRefCounts, replaceBmServerKeyRefs } from '../../bmstor/registry.js';
+import { listBmServersRaw, registryLoadError, bmServerRefCounts, replaceBmServerKeyRefs, inheritActive, hasOwnCred } from '../../bmstor/registry.js';
 import { loadRegistry as loadIdracRegistry, registryLoadError as idracLoadError } from '../../idrac/registry.js';
 import * as KS from './keyStore.js';
-import { stopMatch } from '../../sshaccess/state.js';   // v3.9.0: 긴급 조치 ‘이 법인 키 사용 중지’(상태 파일 — 못 읽으면 키 접속을 멈춘다)
+import { stopMatch, assignFor, accountStopFor, assignRefs } from '../../sshaccess/state.js';   // v3.9.0: 긴급 조치 ‘이 법인 키 사용 중지’(상태 파일 — 못 읽으면 키 접속을 멈춘다) · v3.24: 계층 지정 · 계정 단위 정지
 import { addrKey } from './bindRule.js';
 import { parsePrivateKey } from './keyParse.js';
 import { sshHostKeyFingerprint } from '../../proxy/sshExec.js';
+import { keyPlacementIssue, lostFeatures, featureLabels, keyShape, keyWriteIssue, accountCorpOk } from './placement.js';
 
 const t = (v) => String(v ?? '').trim();
 
@@ -62,7 +66,10 @@ export function listAccountsView({ visible = null, scoped = false } = {}) {
 }
 
 /** 키 삭제 — 쓰는 서버 · 계정이 0 일 때만. 사용처를 모르면 거절. */
+// 79회차 반증(재현): 저장소를 못 읽은 동안(빈 캐시) 회전 · 삭제가 '키를 찾을 수 없습니다'(404)로 답했다 — 본인 OTP 를 쓰고 틀린 조치를 안내했다. 못 읽음을 먼저 본다.
+const storeUnreadable = (what) => (KS.keyStoreLoadError() ? { ok: false, code: 'registry-unreadable', status: 503, reason: KS.keyStoreUnreadableReason(undefined, what) } : null);
 export function deleteKeyIfUnused(id) {
+  const u0 = storeUnreadable('지우지 않았습니다'); if (u0) return u0;
   const k = KS.keyById(id);
   if (!k) return { ok: false, code: 'not-found', status: 404, reason: '키를 찾을 수 없습니다.' };
   const u = refUsage().key(k.id);
@@ -72,10 +79,17 @@ export function deleteKeyIfUnused(id) {
 }
 
 export function deleteAccountIfUnused(id) {
+  const u0 = storeUnreadable('지우지 않았습니다'); if (u0) return u0;
   const a = KS.accountById(id);
   if (!a) return { ok: false, code: 'not-found', status: 404, reason: '공통 계정을 찾을 수 없습니다.' };
   const u = refUsage().account(a.id);
   if (u.servers == null) return { ok: false, code: 'usage-unknown', status: 503, reason: '등록부를 읽지 못해 이 계정을 쓰는 서버 수를 모릅니다 — 삭제하지 않았습니다.' };
+  // v3.24: 계층 지정이 가리키는 계정은 지우지 않는다(지우면 물려받는 서버 전부가 account-missing 으로 끊긴다). 상태 파일을 못 읽으면 모름 — 지우지 않는다.
+  if (a.kind === 'os') {
+    const ar = assignRefs(a.id);
+    if (ar == null) return { ok: false, code: 'usage-unknown', status: 503, reason: '서버 접속 상태 파일을 읽지 못해 이 계정을 가리키는 계층 지정을 모릅니다 — 삭제하지 않았습니다.' };
+    if (ar.length) return { ok: false, code: 'in-use', status: 409, reason: `계층 지정 ${ar.length}곳(법인 · OS 종류)이 이 계정을 가리켜 지울 수 없습니다 — 그 지정을 먼저 바꾸세요.` };
+  }
   if (u.servers > 0) return { ok: false, code: 'in-use', status: 409, reason: a.kind === 'idrac' ? `iDRAC ${u.servers}대에 이 계정 비밀번호 사본이 있어 지울 수 없습니다 — 그 항목의 계정을 바꾼 뒤 지우세요.` : `이 계정을 쓰는 서버 ${u.servers}대가 있어 지울 수 없습니다.` };
   return KS._removeAccount(a.id);
 }
@@ -83,9 +97,10 @@ export function deleteAccountIfUnused(id) {
 /**
  * 키 회전(참조 교체). 둘 다 있어야 하고 새 키는 활성이어야 한다. 순서: 서버 참조 → 계정 기본 키 → 옛 키 퇴역
  * (중간에 멈춰도 가리키는 키는 늘 존재한다 — 옛 키는 마지막에야 퇴역).
- * @returns {{ok:true, servers:string[], accounts:number} | {ok:false, ...}}
+ * @returns {{ok:true, servers:string[], accounts:number, warnings?:{code:'key-feature', features:string[], text:string}[]} | {ok:false, ...}}
  */
 export function rotateKey(fromId, toId, { now = Date.now() } = {}) {
+  const u0 = storeUnreadable('회전하지 않았습니다'); if (u0) return u0;
   const from = KS.keyById(fromId); const to = KS.keyById(toId);
   if (!from || !to) return { ok: false, code: 'not-found', status: 404, reason: '옛 키 또는 새 키를 찾을 수 없습니다.' };
   if (from.id === to.id) return { ok: false, code: 'same-key', reason: '같은 키로는 회전할 수 없습니다.' };
@@ -102,7 +117,11 @@ export function rotateKey(fromId, toId, { now = Date.now() } = {}) {
   if (!r2.ok) return { ...r2, partial: { servers: r1.ids } };
   const r3 = KS.markKeyRetired(from.id, { now });
   if (!r3.ok) return { ...r3, partial: { servers: r1.ids, accounts: r2.changed } };
-  return { ok: true, servers: r1.ids, accounts: r2.changed || 0 };
+  // 4회차 점검 D1(메인 결정): 옛 키로 되던 수집 기능이 새 키의 ‘쓸 수 있는 기능’ 에 없으면 **경고**(기능 제한은 의도일 수 있다 — 회전은 막지 않는다).
+  //   연결 시험(conn-test)은 허용 기능을 보지 않아 화면이 권하는 ‘전 서버 재시험’ 이 통과한다 — 그 차이를 결과가 말한다. 판정은 placement.lostFeatures(= keyPlacementIssue).
+  const lost = (r1.ids.length || r2.changed) ? lostFeatures(from, to) : [];
+  const warnings = lost.length ? [{ code: 'key-feature', features: lost, text: `새 키의 ‘쓸 수 있는 기능’ 에 ${featureLabels(lost)} 이(가) 없어 그 수집은 회전 뒤 이 키로 접속하지 않습니다(연결 시험은 이 제한을 보지 않아 통과합니다) — 의도한 제한이 아니면 설정 › 보안 › 서버 접속(SSH · Windows) › 키 폴더에서 새 키의 기능을 넓히세요.` }] : [];
+  return { ok: true, servers: r1.ids, accounts: r2.changed || 0, ...(warnings.length ? { warnings } : {}) };
 }
 
 /**
@@ -123,6 +142,69 @@ export function placementConflicts(key, { serversUsing = () => false, accountsUs
   return out;
 }
 
+/**
+ * 6회차 점검 A2: 공통 계정 저장(법인 · 기본 키 · 종류)이 **그 계정을 쓰는 서버(credRef)** 를 끊는가 — 쓰기 전 판정(라우트가 본인 OTP 앞에서 · 저장 직전에 한 번 더).
+ *   예전에는 키 폴더 = 새 계정 법인이면 저장됐고(B-4), 그 계정을 쓰는 옛 법인 서버는 다음 주기부터 key-folder 로 접속하지 않았다
+ *   (비밀번호만 쓰는 계정이면 옛 법인 서버가 다른 법인 계정 비밀번호로 접속했다 — 온보딩 분석은 cred-other-corp 로 거부하는 조합).
+ *   서버마다(서버 키가 있거나 비밀번호 고정이면 계정 키를 쓰지 않는다 — resolveOsAuth 순서):
+ *     ① 효력 키 폴더 — placement.keyWriteIssue(= keyPlacementIssue) 로 저장 전 · 뒤를 보고 **새로 어긋나는** 서버만 센다(이미 어긋나 있던 서버는 이 쓰기가 만든 문제가 아니다).
+ *     ② 계정 법인 ↔ 서버 법인 — placement.accountCorpOk(온보딩 분석 cred-other-corp 와 같은 함수) · 같은 규칙으로 새로 어긋나는 서버만.
+ *     ③ 종류 — OS 계정을 iDRAC 계정으로 바꾸면 쓰는 서버 전부가 account-kind 로 접속하지 않는다.
+ *   등록부를 못 읽으면 모름 — 503(저장하지 않는다). 거부 문구에는 서버 · 키 이름을 싣지 않고 대수만.
+ * @param {object|null} before  저장 전 계정 원본(새 계정이면 null — 쓰는 서버가 없다)
+ * @param {{kind:string, corp:string, keyRef:string}} after  저장 뒤 모양(keyStore.saveAccount dryRun 의 next)
+ * @returns {null | {ok:false, code:string, status:number, reason:string, servers?:object}}
+ */
+/**
+ * v3.24 반증 F7: 옛 7b 계정 화면(POST /tools/bm-usage/accounts)으로 **계층 지정에 쓰이는 계정**의 비밀번호를 바꾸면 ‘한 대 먼저 확인’ 없이 판이 바뀌고
+ *   계정 단위 정지도 풀린다(판에 걸린 정지) — 그런 계정의 새 비밀번호는 새 화면(설정 › 보안 › 서버 접속 › 공통 계정 — saveAccountChecked)에서만 받는다.
+ *   상태 파일을 못 읽으면 모름 = 거절. 비밀번호를 바꾸지 않는 저장(이름 · 키 등)은 예전 그대로.
+ */
+export function legacyAccountWriteIssue(before, input = {}) {
+  if (!before) return null;
+  const pw = typeof input.password === 'string' && input.password !== '' && input.password !== '********';
+  if (!pw) return null;
+  const refs = assignRefs(before.id);
+  if (refs === null) return { ok: false, code: 'usage-unknown', status: 503, reason: '서버 접속 상태 파일을 읽지 못해 이 계정이 계층 지정에 쓰이는지 모릅니다 — 비밀번호를 바꾸지 않았습니다.' };
+  if (refs.length) return { ok: false, code: 'use-server-access', status: 409, reason: '이 공통 계정은 계층 지정(법인 › OS 종류)에 쓰이고 있습니다 — 새 비밀번호는 설정 › 보안 › 서버 접속 › 공통 계정에서 저장하세요(그 계정을 쓰는 서버 한 대로 먼저 확인합니다).' };
+  return null;
+}
+
+export function accountUseIssue(before, after = {}) {
+  if (!before || !before.id) return null;
+  // v3.24: 계층 지정이 이 계정을 가리키면 — 종류 · OS 계열 · 법인을 바꿔 지정이 어긋나게 하지 않는다(물려받는 서버가 한꺼번에 끊기거나 다른 OS 로 비밀번호가 간다).
+  if (before.kind === 'os') {
+    const ar = assignRefs(before.id);
+    if (ar == null) return { ok: false, code: 'usage-unknown', status: 503, reason: '서버 접속 상태 파일을 읽지 못해 이 계정을 가리키는 계층 지정을 모릅니다 — 저장하지 않았습니다.' };
+    const fam = after.os === 'windows' ? 'windows' : 'linux';
+    const bad = ar.filter((x) => after.kind !== 'os' || ((x.level === 'linux' || x.level === 'windows') && x.level !== fam)
+      || (x.level === 'all' && KS.accountFamily(before) !== fam) || !accountCorpOk(after.corp, x.corp));
+    if (bad.length) return { ok: false, code: 'assign-conflict', status: 409, reason: `계층 지정 ${bad.length}곳이 이 계정을 가리키는데 이 저장으로 종류 · OS · 법인이 어긋납니다 — 그 지정을 먼저 바꾸세요.` };
+  }
+  let servers;
+  try { if (registryLoadError()) throw new Error('unread'); servers = listBmServersRaw(); }
+  catch { return { ok: false, code: 'registry-unreadable', status: 503, reason: 'OS 계정 등록부를 읽지 못해 이 계정을 쓰는 서버를 모릅니다 — 저장하지 않았습니다.' }; }
+  const using = servers.filter((s) => t(s.credRef) === before.id);
+  if (!using.length) return null;
+  const keyOf = (acc) => (acc && acc.kind === 'os' && t(acc.keyRef) ? keyShape(KS.keyById(acc.keyRef)) : null);
+  const kBefore = keyOf(before); const kAfter = keyOf(after);
+  const n = { kind: 0, keyFolder: 0, otherCorp: 0 };
+  for (const s of using) {
+    if (before.kind === 'os' && after.kind !== 'os') { n.kind += 1; continue; }
+    const server = { vcenterId: t(s.vcenterId), name: t(s.name) };
+    if (!accountCorpOk(after.corp, server.vcenterId) && accountCorpOk(before.corp, server.vcenterId)) n.otherCorp += 1;
+    if (t(s.keyRef) || s.osAuth === 'password') continue;   // 계정 키를 쓰지 않는 서버
+    if (keyWriteIssue(kAfter, server).folder && !keyWriteIssue(kBefore, server).folder) n.keyFolder += 1;
+  }
+  const parts = [];
+  if (n.kind) parts.push(`${n.kind}대가 OS 계정이 아니게 되어 접속하지 못합니다`);
+  if (n.keyFolder) parts.push(`${n.keyFolder}대가 바꾼 기본 키의 폴더(법인 · 서버) 밖이 됩니다`);
+  if (n.otherCorp) parts.push(`${n.otherCorp}대가 다른 법인의 계정을 쓰게 됩니다`);
+  if (!parts.length) return null;
+  const code = n.kind ? 'account-kind' : (n.keyFolder ? 'key-folder' : 'cred-other-corp');
+  return { ok: false, code, status: 409, reason: `이 계정을 쓰는 서버 중 ${parts.join(' · ')} — 저장하지 않았습니다. 그 서버들의 계정을 먼저 바꾸거나(서버 등록 · SSH 공용 접속) 같은 법인의 새 계정을 만드세요.`, servers: n };
+}
+
 /** 접속 자격 해석 오류 문구(화면 · 수집 오류 · 연결 시험 공용). */
 export const AUTH_ERROR = Object.freeze({
   'key-missing': 'SSH 키 참조가 가리키는 키가 키 저장소에 없습니다(삭제됨) — 서버 설정에서 키를 다시 고르세요.',
@@ -133,30 +215,66 @@ export const AUTH_ERROR = Object.freeze({
   'account-kind': '공통 계정 참조가 OS 계정이 아닙니다.',
   'store-unreadable': 'SSH 키 저장소(ssh-keys.json)를 읽지 못해 키로 접속하지 않았습니다.',
   // v3.9.0 SSH 공용 접속(설계 docs/design/ssh-access §8 · §9)
-  'account-tampered': '공통 계정(계정명 · 법인 · 기본 키 · 비밀번호)이 포탈 밖에서 바뀌었습니다 — 이 계정으로는 접속하지 않습니다. 설정 › 보안 › SSH 공용 접속 › 키 보안을 확인하세요.',
-  'key-tampered': 'SSH 키 원문의 지문이 등록 때와 다릅니다(바꿔치기 의심) — 이 키로는 접속하지 않습니다. 설정 › 보안 › SSH 공용 접속 › 키 보안을 확인하고 키를 새로 등록하세요.',
-  'key-folder': 'SSH 키가 다른 법인 · 다른 서버의 폴더에 있어 이 서버에는 쓰지 않습니다 — 설정 › 보안 › SSH 공용 접속에서 이 서버의 폴더에 있는 키를 고르세요.',
-  'key-feature': '이 SSH 키는 이 기능에 허용되지 않았습니다 — 설정 › 보안 › SSH 공용 접속 › 키 폴더에서 키의 ‘쓸 수 있는 기능’ 을 확인하세요.',
-  'corp-stopped': '이 법인의 SSH 키 사용이 중지됐습니다(긴급 조치) — 설정 › 보안 › SSH 공용 접속에서 재개하기 전에는 키로 접속하지 않습니다.',
+  'account-tampered': '공통 계정(계정명 · 법인 · 기본 키 · 비밀번호)이 포탈 밖에서 바뀌었습니다 — 이 계정으로는 접속하지 않습니다. 설정 › 보안 › 서버 접속(SSH · Windows) › 키 보안을 확인하세요.',
+  'key-tampered': 'SSH 키 원문의 지문이 등록 때와 다릅니다(바꿔치기 의심) — 이 키로는 접속하지 않습니다. 설정 › 보안 › 서버 접속(SSH · Windows) › 키 보안을 확인하고 키를 새로 등록하세요.',
+  'key-folder': 'SSH 키가 다른 법인 · 다른 서버의 폴더에 있어 이 서버에는 쓰지 않습니다 — 설정 › 보안 › 서버 접속(SSH · Windows)에서 이 서버의 폴더에 있는 키를 고르세요.',
+  'key-feature': '이 SSH 키는 이 기능에 허용되지 않았습니다 — 설정 › 보안 › 서버 접속(SSH · Windows) › 키 폴더에서 키의 ‘쓸 수 있는 기능’ 을 확인하세요.',
+  'corp-stopped': '이 법인의 SSH 키 사용이 중지됐습니다(긴급 조치) — 설정 › 보안 › 서버 접속(SSH · Windows)에서 재개하기 전에는 키로 접속하지 않습니다.',
   'state-unreadable': 'SSH 공용 접속 상태 파일(ssh-access-state.json)을 읽지 못해 키로 접속하지 않았습니다 — 사용 중지 기록을 모르는 채 키를 쓰지 않습니다.',
+  // v3.24 서버 접속(설계 docs/design/server-access) — 공통 계정 · 계층 지정
+  'account-state-unreadable': '서버 접속 상태 파일(ssh-access-state.json)을 읽지 못해 공통 계정으로 접속하지 않았습니다 — 계층 지정 · 정지 기록을 모르는 채 저장된 비밀번호를 보내지 않습니다.',
+  'winrm-needs-password': 'WinRM 으로 붙는 Windows 단계 계정에 비밀번호가 없습니다(WinRM 은 비밀번호 로그인만 — 키로는 붙지 않습니다) — 설정 › 보안 › 서버 접속 › 공통 계정에서 비밀번호를 넣으세요.',
+  'account-stopped': '이 공통 계정은 로그인 거부로 정지됐습니다(계정 잠금 방지 — 이 계정을 쓰는 서버 전부) — 설정 › 보안 › 서버 접속에서 비밀번호를 고치거나 ‘한 대로 다시 확인’ 을 하세요.',
+  'account-corp-stopped': '이 법인의 저장 계정 · 키 사용이 중지됐습니다(긴급 조치) — 설정 › 보안 › 서버 접속에서 재개하기 전에는 공통 계정으로 접속하지 않습니다.',
+  'account-feature': '이 공통 계정은 이 기능에 허용되지 않았습니다 — 설정 › 보안 › 서버 접속에서 계정의 ‘쓸 수 있는 기능’ 을 확인하세요.',
+  'account-os': '공통 계정의 OS(Linux · Windows)가 서버의 OS 와 다릅니다 — 다른 OS 의 비밀번호를 보내지 않습니다. 서버의 OS 종류나 계정을 확인하세요.',
+  'account-other-corp': '다른 법인의 공통 계정입니다 — 계층 지정으로는 다른 법인 계정을 물려받지 않습니다.',
 });
-/** 허용 기능 목록과 무관하게 언제나 되는 쓰임 — 사람이 누르는 연결 시험(uname 한 줄). 그 밖의 호출은 기능 id 를 밝혀야 한다(빈 값 = 모르는 기능 — 목록이 있는 키는 거절). */
-export const ALWAYS_ALLOWED_FEATURES = Object.freeze(['conn-test']);
+
 /**
- * 키를 이 서버 · 이 기능에 써도 되는가(판정 하나 — 폴러 · 연결 시험 · SSH 공용 접속 화면의 키 고르기가 같은 함수).
- * @param {{folderCorp?:string, folderServer?:string, features?:string[]|null}} key
- * @param {{vcenterId?:string, name?:string}} server
- * @returns {null | 'key-folder' | 'key-feature'}
+ * v3.24 — 서버의 **효력 공통 계정**이 어디서 오는가(판정 하나 — resolveOsAuth · 서버 접속 화면 · 법인 사용 중지가 같은 함수).
+ *  · own — 서버에 자기 자격(공통 계정 credRef · 키 keyRef · 비밀번호)이 있다(‘따로 정함’ — 계층 지정을 보지 않는다). accountId 는 credRef(있으면).
+ *  · os / corp — 승인된 서버가 법인 › OS 종류(os) 또는 법인(corp) 지정을 물려받는다. OS 미지정 서버는 OS 종류 단계를 건너뛴다.
+ *    법인 단계 계정은 OS 계열이 같은 서버에만 닿는다(예전 계정 · 미지정 서버는 Linux 로 본다 — Windows 계정을 Linux 서버로 보내지 않게).
+ *  · none — 없음. pending = 지정은 있는데 승인이 없거나 승인 뒤 주소 · 포트 · OS 가 바뀜(물려받지 않는다). mismatch = 법인 단계 계정의 OS 계열이 다르다.
+ *  · 상태 파일을 못 읽으면 unreadable(승인된 서버만 — 호출부가 접속을 멈춘다).
+ * @returns {{source:'own'|'os'|'corp'|'none', accountId?:string, level?:string, auth?:string, pending?:boolean, mismatch?:boolean, unreadable?:boolean}}
  */
-export function keyPlacementIssue(key = {}, server = {}, feature = '') {
-  const kc = t(key.folderCorp); const ks = t(key.folderServer);
-  if (kc) {
-    if (t(server.vcenterId) !== kc) return 'key-folder';
-    if (ks && ks.toLowerCase() !== t(server.name).toLowerCase()) return 'key-folder';
+export function effectiveAccountOf(server = {}) {
+  if (t(server.credRef)) return { source: 'own', accountId: t(server.credRef) };
+  if (hasOwnCred(server)) return { source: 'own' };
+  const corp = t(server.vcenterId);
+  if (!corp || t(server.agent)) return { source: 'none' };
+  const active = inheritActive(server);
+  const fam = server.os === 'windows' ? 'windows' : 'linux';
+  let hit = null;
+  if (server.os === 'linux' || server.os === 'windows') {
+    const x = assignFor(corp, server.os);
+    if (x?.unreadable) return active ? { source: 'none', unreadable: true } : { source: 'none' };
+    if (x) hit = { ...x, level: server.os };
   }
-  if (Array.isArray(key.features) && !ALWAYS_ALLOWED_FEATURES.includes(feature) && !key.features.includes(feature)) return 'key-feature';
-  return null;
+  let mismatch = false;
+  if (!hit) {
+    const x = assignFor(corp, 'all');
+    if (x?.unreadable) return active ? { source: 'none', unreadable: true } : { source: 'none' };
+    if (x) {
+      const a = KS.accountById(x.account);
+      if (a && a.kind === 'os' && KS.accountFamily(a) !== fam) mismatch = true;
+      else hit = { ...x, level: 'all' };
+    }
+  }
+  if (!hit) return { source: 'none', ...(mismatch ? { mismatch: true } : {}) };
+  if (!active) return { source: 'none', pending: true, level: hit.level, accountId: hit.account };
+  // v3.25(3단계): Windows 단계 지정은 접속 방식(WinRM HTTPS)과 포트를 함께 가질 수 있다(설계 D11 — OS 종류 단계에). 없으면 SSH.
+  const via = hit.level === 'windows' && hit.via === 'winrm' ? { via: 'winrm', port: Number.isInteger(hit.port) ? hit.port : null } : {};
+  return { source: hit.level === 'all' ? 'corp' : 'os', level: hit.level, accountId: hit.account, auth: hit.auth || '', ...via };
 }
+/*
+ * 키 배치 판정(keyPlacementIssue · ALWAYS_ALLOWED_FEATURES)은 순수 모듈 placement.js 로 옮겼다(4회차 점검 D1 — 온보딩 분석이 같은 함수를 직접 부른다).
+ *   여기서 그대로 다시 내보낸다 — 기존 호출부(REFS.keyPlacementIssue · sshaccess)는 바뀌지 않는다. 판정은 여전히 하나다.
+ */
+export { ALWAYS_ALLOWED_FEATURES, EXPLICIT_FEATURES, keyPlacementIssue } from './placement.js';
+import { featureBlocked } from './placement.js';
 /**
  * 법인 사용 중지 판정 — 서버 법인 · 공통 계정 법인 · 키 폴더 법인 중 하나라도 멈췄거나, 중지할 때 적어 둔 서버(id · 접속처)이면.
  * 법인 칸만 보면 OTP 없이 칸을 비워 빠져나갈 수 있었다(점검 A-4). 상태 파일을 못 읽으면 멈춘 것으로 본다.
@@ -192,9 +310,18 @@ function integrityOk(m, parsed) {
  * @returns {{ok:true, username:string, password:string, privateKey?:string, passphrase?:string, authKind:'key'|'password'|'none', keyFingerprint?:string, keyName?:string}
  *          | {ok:false, code:string, error:string}}
  */
-export function resolveOsAuth(server = {}, { feature = '' } = {}) {
+export function resolveOsAuth(server = {}, { feature = '', ignoreAccountStop = false, winrm = false } = {}) {
+  // winrm — 호출부가 **WinRM 으로 붙을 때만** true(서버 정보 코어 · 먼저 확인). SSH 기능(사용률 · 스토리지 · 연결 시험 …)은 지정에 WinRM 이 있어도 예전 그대로 키 우선이다(v3.25 3단계 반증 F3).
+  // ignoreAccountStop — ‘한 대로 다시 확인’(sshaccess/service.verifyAccount) 하나만: 계정 단위 정지를 푸는 확인 한 번은 정지를 넘어야 한다(사람이 누름 · 한 번 · 자동 재시도 없음).
   const keyRef = t(server.keyRef);
-  const credRef = t(server.credRef);
+  let credRef = t(server.credRef);
+  // v3.24: 자기 자격이 없는 승인된 서버 — 계층 지정의 공통 계정(effectiveAccountOf 하나).
+  let inherited = null;
+  if (!keyRef && !credRef && !hasOwnCred(server) && inheritActive(server)) {
+    const ea = effectiveAccountOf(server);
+    if (ea.unreadable) return { ok: false, code: 'account-state-unreadable', error: AUTH_ERROR['account-state-unreadable'] };
+    if (ea.source === 'os' || ea.source === 'corp') { credRef = ea.accountId; inherited = ea; }
+  }
   const needStore = !!(keyRef || credRef);
   if (needStore && KS.keyStoreLoadError()) return { ok: false, code: 'store-unreadable', error: AUTH_ERROR['store-unreadable'] };
   let acc = null;
@@ -203,11 +330,24 @@ export function resolveOsAuth(server = {}, { feature = '' } = {}) {
     if (!acc) return { ok: false, code: 'account-missing', error: AUTH_ERROR['account-missing'] };
     if (acc.kind !== 'os') return { ok: false, code: 'account-kind', error: AUTH_ERROR['account-kind'] };
     if (KS.isAccountTampered(acc.id)) return { ok: false, code: 'account-tampered', error: AUTH_ERROR['account-tampered'] };
+    // v3.24: 서버 OS 를 정해 둔 경우 계정 OS 계열이 같아야 한다(예전 서버 · 계정은 칸이 비어 이 판정 밖 — 지금 쓰는 서버를 멈추지 않는다).
+    if ((server.os === 'linux' || server.os === 'windows') && KS.accountFamily(acc) !== server.os) return { ok: false, code: 'account-os', error: AUTH_ERROR['account-os'] };
+    // 계층 지정은 다른 법인 계정을 물려받지 않는다(지정 쓰기도 막는다 — 여기는 그 뒤 계정 법인을 바꾼 경우).
+    if (inherited && !accountCorpOk(acc.corp, server.vcenterId)) return { ok: false, code: 'account-other-corp', error: AUTH_ERROR['account-other-corp'] };
+    // v3.30: 판정은 placement.featureBlocked 하나(키와 같은 함수) — 목록이 없는 예전 계정은 ‘직접 켜야 하는 기능’(서버 명령)에만 막힌다.
+    if (featureBlocked(acc.features, feature)) return { ok: false, code: 'account-feature', error: AUTH_ERROR['account-feature'] };
   }
   // 7b 반증 F19: 공통 계정을 쓰면 접속 계정명도 **공통 계정 쪽**(서버 칸은 '개별' 일 때만) — 서버 칸 기본값 root 로 공통 비밀번호를 보내지 않게.
-  const username = (acc ? acc.username : '') || t(server.username) || 'root';
-  // osAuth 'password' = 비밀번호 고정(공통 계정에 기본 키가 있어도 — CSV os_key ‘password’).
-  const useKey = server.osAuth === 'password' ? '' : (keyRef || (acc && acc.keyRef) || '');
+  //   v3.24: Windows AD 계정은 도메인을 붙인 로그인 이름(keyStore.loginNameOf 하나).
+  const username = (acc ? KS.loginNameOf(acc) : '') || t(server.username) || 'root';
+  // osAuth 'password' = 비밀번호 고정(공통 계정에 기본 키가 있어도 — CSV os_key ‘password’). v3.24: 물려받은 지정의 auth 'password' 도 같다.
+  // v3.25(3단계): WinRM 은 비밀번호(NTLM)만 — 기본 키가 있어도 비밀번호로(키가 없으면 붙지 않는다).
+  const viaWinrm = winrm === true && inherited?.via === 'winrm' && server.os === 'windows';
+  const pwPinned = server.osAuth === 'password' || inherited?.auth === 'password' || viaWinrm;
+  const useKey = pwPinned ? '' : (keyRef || (acc && acc.keyRef) || '');
+  const accMeta = { ...(acc ? { accountId: acc.id, accountName: acc.name, source: inherited ? inherited.source : 'own' } : (inherited ? {} : { source: 'own' })),
+    ...(viaWinrm ? { via: 'winrm', viaPort: inherited.port || null } : {}) };
+  if (viaWinrm && !(acc && acc.password)) return { ok: false, code: 'winrm-needs-password', error: AUTH_ERROR['winrm-needs-password'], ...accMeta };
   if (useKey) {
     const m = KS.keyMaterial(useKey);
     if (!m.ok) return { ok: false, code: m.code, error: AUTH_ERROR[m.code] || AUTH_ERROR['key-missing'] };
@@ -223,9 +363,21 @@ export function resolveOsAuth(server = {}, { feature = '' } = {}) {
     if (!pk) return { ok: false, code: 'key-parse', error: AUTH_ERROR['key-parse'] };
     if (!integrityOk(m, m.passphrase ? pk : null)) return { ok: false, code: 'key-tampered', error: AUTH_ERROR['key-tampered'], keyFingerprint: m.fingerprint };
     // 키 인증일 때 비밀번호는 보내지 않는다(인증 방식을 하나로 — 키가 거부되면 비밀번호로 몰래 넘어가지 않는다).
-    return { ok: true, username, password: '', privateKey: pk, passphrase: m.passphrase && typeof pk === 'string' ? m.passphrase : '', authKind: 'key', keyFingerprint: m.fingerprint, keyName: m.name, keyId: m.id };
+    return { ok: true, username, password: '', privateKey: pk, passphrase: m.passphrase && typeof pk === 'string' ? m.passphrase : '', authKind: 'key', keyFingerprint: m.fingerprint, keyName: m.name, keyId: m.id, ...accMeta };
   }
-  if (acc && acc.password) return { ok: true, username, password: acc.password, authKind: 'password' };
+  if (acc && acc.password) {
+    // v3.24: 공통 계정 비밀번호에도 법인 사용 중지(긴급 조치)와 계정 단위 정지(로그인 거부 한 번 — 그 비밀번호 판 동안)를 건다.
+    //   상태 파일을 못 읽으면 정지 기록을 모른다 — 저장된 공통 비밀번호를 보내지 않는다(fail-closed · 키와 같은 규칙).
+    const si = stopIssue([server.vcenterId, acc.corp], server, username);
+    if (si === 'state-unreadable') return { ok: false, code: 'account-state-unreadable', error: AUTH_ERROR['account-state-unreadable'], ...accMeta };
+    if (si) return { ok: false, code: 'account-corp-stopped', error: AUTH_ERROR['account-corp-stopped'], ...accMeta };
+    const version = KS.accountSecretVersion(acc);
+    const st = ignoreAccountStop ? null : accountStopFor(acc.id, version);
+    if (st?.unreadable) return { ok: false, code: 'account-state-unreadable', error: AUTH_ERROR['account-state-unreadable'], ...accMeta };
+    if (st) return { ok: false, code: 'account-stopped', error: AUTH_ERROR['account-stopped'], ...accMeta, stoppedAt: st.at, stoppedOn: st.server };
+    return { ok: true, username, password: acc.password, authKind: 'password', ...accMeta, secretVersion: version };
+  }
+  if (inherited) return { ok: true, username, password: '', authKind: 'none', ...accMeta };
   const pw = typeof server.password === 'string' ? server.password : '';
   return { ok: true, username, password: pw, authKind: pw ? 'password' : 'none' };
 }
@@ -241,6 +393,7 @@ function parsedKeyFor(m) {
   const hit = _parsed.get(k);
   if (hit) { _parsed.delete(k); _parsed.set(k, hit); return hit; }
   let p;
+  if (sshKdfRoundsIssue(m.privateKey)) return null;   // 21회차 L-6: KDF 반복 상한
   try { _parseCount += 1; p = ssh2.utils.parseKey(m.privateKey, m.passphrase); } catch { p = null; }
   if (!p || p instanceof Error) return null;
   if (Array.isArray(p)) p = p[0];
@@ -261,13 +414,17 @@ export function authCredOf(s = {}) {
  * 폴러용 — OS 등록부 원본에 해석한 자격을 덧씌운다(원본 객체는 바꾸지 않는다). 해석 실패 항목은 authError 를 달아
  * 수집이 접속하지 않고 그 사유로 실패하게 한다(빈 비밀번호로 시도해 인증 실패 · 계정 잠금을 부르지 않게).
  */
-export function withResolvedAuth(list = [], { feature = '' } = {}) {
+export function withResolvedAuth(list = [], { feature = '', winrm = false } = {}) {
   return (Array.isArray(list) ? list : []).map((s) => {
     if (!s || typeof s !== 'object') return s;
-    if (!t(s.keyRef) && !t(s.credRef)) return s;   // 예전 항목(비밀번호) — 그대로
-    const a = resolveOsAuth(s, { feature });
-    if (!a.ok) return { ...s, password: '', authError: a.error, authErrorCode: a.code, ...(a.keyFingerprint ? { keyFingerprint: a.keyFingerprint } : {}) };
-    return { ...s, username: a.username, password: a.password, ...(a.privateKey ? { privateKey: a.privateKey, passphrase: a.passphrase, keyFingerprint: a.keyFingerprint, keyName: a.keyName } : {}) };
+    // 예전 항목(서버 비밀번호) — 그대로. v3.24: 자기 자격이 없는 승인된 서버(계층 지정을 물려받음)는 해석한다.
+    if (!t(s.keyRef) && !t(s.credRef) && (hasOwnCred(s) || !inheritActive(s))) return s;
+    const a = resolveOsAuth(s, { feature, winrm });
+    // v3.24: 공통 계정 출처(계정 id · 이름 · 비밀번호 판)를 싣는다 — 수집 결과를 본 곳이 계정 사용 기록 · 계정 단위 정지에 쓴다(sshaccess/outcome.js). 비밀은 아니다.
+    const accOut = { ...(a.accountId ? { credAccountId: a.accountId, credAccountName: a.accountName || '', credSource: a.source || '', ...(a.secretVersion != null ? { credVersion: a.secretVersion } : {}) } : (a.source ? { credSource: a.source } : {})),
+      ...(a.via ? { via: a.via, viaPort: a.viaPort || null } : {}) };   // v3.25(3단계): 접속 방식(비밀 아님)
+    if (!a.ok) return { ...s, password: '', authError: a.error, authErrorCode: a.code, ...accOut, ...(a.keyFingerprint ? { keyFingerprint: a.keyFingerprint } : {}) };
+    return { ...s, username: a.username, password: a.password, ...accOut, ...(a.privateKey ? { privateKey: a.privateKey, passphrase: a.passphrase, keyFingerprint: a.keyFingerprint, keyName: a.keyName } : {}) };
   });
 }
 

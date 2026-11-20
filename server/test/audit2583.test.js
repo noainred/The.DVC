@@ -403,7 +403,9 @@ test('카탈로그 N3 — iDRAC 스캔 대역 저장이 디스크에 못 쓰면 
     process.stdout.write(JSON.stringify({ ok: r.ok, reason: r.reason || '' }));`], { env: { ...process.env, CONFIG_DIR: cfg }, stdio: ['ignore', 'pipe', 'ignore'] }).toString();
   const o = JSON.parse(out);
   assert.equal(o.ok, false, '디스크 쓰기 실패인데 ok:true 면 재시작 후 사라진 설정을 저장됐다고 말한다');
-  assert.match(o.reason, /저장 실패/);
+  // 93회차 F3: 이 경로(CONFIG_DIR 가 일반 파일 아래)는 이제 **읽기**에서 먼저 ENOTDIR(읽기 오류)이라 쓰기 전에 409 로 거절한다 —
+  //   '성공이라 말하지 않는다' 는 그대로(어느 쪽이든 ok:false + 사유). 읽기 오류 판정은 idracPartAudit93 F3 이 고정한다.
+  assert.match(o.reason, /저장 실패|읽지 못한 상태라 저장하지 않았습니다/);
   fs.rmSync(base, { recursive: true, force: true });
 });
 

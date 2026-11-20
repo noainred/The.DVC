@@ -15,7 +15,7 @@
  *
  * 기준 시각: 시계 판정이 없는 곳은 정시 −30분(CLAUDE.md v2.517). 미래·현재 시각 판정은 실제 시계를 쓴다(insertSamples 가 Date.now() 로 자른다).
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -25,10 +25,17 @@ import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { isDeepStrictEqual } from 'node:util';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
 const WEB = path.resolve(HERE, '../../web/src');
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2740c-'));
+const TMP = tmpDir('audit2740c-');
 process.env.CONFIG_DIR = TMP;
 process.env.DATA_SOURCE = 'live';
 process.env.PARTFAULT_DB_PATH = path.join(TMP, 'part-faults.db');
@@ -474,7 +481,7 @@ test('E-01·E-02·E-04 조각 읽기 = 한 문장 판(전체는 순서까지, �
 /* ─────────────────────────── 실제 api 라우터(자식 프로세스) ─────────────────────────── */
 
 test('E-01·E-02·E-04·D-04·B-12·D-06 실제 api 라우터 — CSV 409·바이트 동일 · 메인/히트맵 기억 · 범위 400 · 못 읽음 503 · 파트 장애 DB 불가에도 kind', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2740c-api-'));
+  const dir = tmpDir('audit2740c-api-');
   const pfDir = path.join(dir, 'pf-as-dir');
   fs.mkdirSync(pfDir);   // DB 경로가 디렉터리 — 파트 장애 DB 를 열 수 없다(initError)
   fs.writeFileSync(path.join(dir, 'collectors.json'), JSON.stringify({ collectors: [

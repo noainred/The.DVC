@@ -21,8 +21,10 @@ describe('R6-F3-2 요약 화면 오버커밋 — 용량 미상 호스트', () =>
   it('Summary.jsx 가 hostsCapacityUnknown 을 읽어 사유를 부제로 말한다', () => {
     expect(src).toMatch(/al\?\.hostsCapacityUnknown/);
     expect(src).toMatch(/용량을 못 읽은 호스트 \$\{capUnknown\.toLocaleString\(\)\}대/);
-    expect(src).toMatch(/sub=\{cr == null && capUnknown \? capUnknownSub : k\.sub\}/);
-    expect(src).toMatch(/sub=\{mr == null && capUnknown \? capUnknownSub : k\.sub\}/);
+    // v3.19.2: 부제는 summaryAllocText.ratioKpiSub 가 고른다 — 비율이 null 이고 용량 미상 호스트가 있으면 그 사유(capSub)가 먼저다
+    //   (순서는 summaryAllocText.test.js 가 고정). 화면은 capUnknown 이 있을 때만 capSub 를 넘긴다.
+    expect(src).toMatch(/sub=\{ratioKpiSub\(cr, k, \{[^}]*capSub: capUnknown \? capUnknownSub : null \}\)\}/);
+    expect(src).toMatch(/sub=\{ratioKpiSub\(mr, k, \{[^}]*capSub: capUnknown \? capUnknownSub : null \}\)\}/);
   });
   it('RAM KPI 부제가 null 비율을 퍼센트로 찍지 않는다', () => {
     expect(src).toMatch(/al\.ramOvercommitPct == null \?/);

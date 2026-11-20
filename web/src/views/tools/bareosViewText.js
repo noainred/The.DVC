@@ -82,7 +82,9 @@ export function corpAttention(c) {
 }
 /** 법인 줄의 칸 — unknown(결과 모름) · attn(확인 필요) · ok(정상). 세 칸은 겹치지 않는다(칩 수의 합 = 전체). */
 export function corpBucket(row) {
-  if (!row?.director || ['auth', 'error', 'unset'].includes(row.director.state)) return 'unknown';
+  // 55회차 #1(53 N1 회귀): '결과 모름' 은 판정 코어의 resultsKnown 으로(잘렸지만 읽은 행이 있는 법인은 state 'error' 여도 결과를 안다 — 서버 합계와 같게)
+  if (!row?.director) return 'unknown';
+  if (row.director.resultsKnown === false || (row.director.resultsKnown == null && ['auth', 'error', 'unset'].includes(row.director.state))) return 'unknown';
   const a = corpAttention(row.counts);
   return a.n === null ? 'unknown' : a.n > 0 ? 'attn' : 'ok';
 }
@@ -121,9 +123,16 @@ export const DETAIL_FILTERS = [
  */
 export const DETAIL_FILTERS_MAIN = Object.freeze(['all', 'attn', 'run', 'bad', 'missing', 'old']);
 export const DETAIL_FILTERS_MORE = Object.freeze(['job', 'never', 'off', 'mismatch', 'gone']);
+/**
+ * 101회차 F3: 이 행의 마지막 결과를 아는가 — 법인 결과를 모르거나(resultsKnown=false) 잘린 조회(partial)의 진행 중 VM 이면 모름.
+ *   필터 · 수(rowMatches · 서버 corpCounts)와 CSV(bareosViews '결과(모름 — 마지막으로 읽은 값)')가 이미 이 판정이다 — 행의 결과 칩 · 오래됨 표시도 같게(예전에는 빨간 '실패' · 'N일+' 그대로).
+ */
+export const rowResultKnown = (r, { resultsKnown = true, partial = false } = {}) => resultsKnown !== false && !(partial && !!r?.b?.run);
 /** 행이 보기 필터에 드는가. resultsKnown=false 면 결과 기준 필터(run·bad·old·never)에 넣지 않는다(모름). */
-export function rowMatches(r, f, { rpoDays = 1, now = Date.now(), resultsKnown = true } = {}) {
+export function rowMatches(r, f, { rpoDays = 1, now = Date.now(), resultsKnown = true, partial = false } = {}) {
   const k = bareosClass(r?.b, { rpoDays, now });
+  // 55회차 #9: 잘린 조회(서버 director.partial)면 진행 중인 실행이 있는 VM 의 결과는 모름 — 진행 중(run)에는 들지만 결과 기준(bad·old·never·확인 필요)에는 넣지 않는다(서버 corpCounts 와 같게)
+  if (partial && k.run && ['attn', 'bad', 'old', 'never'].includes(f)) return f === 'attn' ? k.missing : false;
   if (f === 'job') return k.job;
   if (f === 'missing') return k.missing;
   if (f === 'off') return k.off;
@@ -156,14 +165,14 @@ const nat = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
  * 폴더 트리(법인별 현황) — 보기·검색에 드는 행만 담고, 폴더마다 그 아래 전체 행의 집계(잡·성공·경고·실패·진행·미등록)를 단다.
  *   인벤토리에 없는 잡(gone)은 원장의 등록 때 위치로 놓인다.
  */
-export function buildBareosTree(rows, { filter = 'all', q = '', rpoDays = 1, now = Date.now(), resultsKnown = true } = {}) {
+export function buildBareosTree(rows, { filter = 'all', q = '', rpoDays = 1, now = Date.now(), resultsKnown = true, partial = false } = {}) {
   const mk = (key, name) => ({ key, name, children: new Map(), rows: [], agg: { n: 0, job: 0, ok: 0, warn: 0, fail: 0, cancel: 0, run: 0, missing: 0, gb: 0 }, hit: 0 });
   const root = mk('', '');
   const needle = String(q || '').trim().toLowerCase();
   for (const r of Array.isArray(rows) ? rows : []) {
     const parts = folderParts(r.folder);
     const k = bareosClass(r.b, { rpoDays, now });
-    const show = rowMatches(r, filter, { rpoDays, now, resultsKnown }) && (!needle || String(r.name || '').toLowerCase().includes(needle) || parts.join('/').toLowerCase().includes(needle));
+    const show = rowMatches(r, filter, { rpoDays, now, resultsKnown, partial }) && (!needle || String(r.name || '').toLowerCase().includes(needle) || parts.join('/').toLowerCase().includes(needle));
     let node = root; const path = [root];
     for (const p of parts) {
       const key = node.key ? `${node.key}/${p}` : p;
@@ -173,7 +182,9 @@ export function buildBareosTree(rows, { filter = 'all', q = '', rpoDays = 1, now
     }
     for (const n of path) {
       n.agg.n++; if (k.job) n.agg.job++; if (k.missing) n.agg.missing++;
-      if (k.ok) n.agg.ok++; if (k.warn) n.agg.warn++; if (k.fail) n.agg.fail++; if (k.cancel) n.agg.cancel++; if (k.run) n.agg.run++;
+      // 101회차 F3: 잘린 조회(partial)의 진행 중 VM 은 결과 칸(성공 · 경고 · 실패 · 취소)에 세지 않는다(서버 corpCounts · 그룹 memberResults 와 같게 — 폴더 줄 '실패 n' 이 KPI 와 달랐다)
+      if (!(partial && k.run)) { if (k.ok) n.agg.ok++; if (k.warn) n.agg.warn++; if (k.fail) n.agg.fail++; if (k.cancel) n.agg.cancel++; }
+      if (k.run) n.agg.run++;
       if (isFin(r.gb)) n.agg.gb += r.gb;
       if (show) n.hit++;
     }

@@ -10,6 +10,7 @@
 // 수출원이라 기능 커밋마다 최다 소비 공유 파일이 diff 에 걸렸다 — 다중 세션 병합 충돌 표면 축소.
 import React, { useState, useEffect } from 'react';
 import { cpuModelCell } from './cpuModelText.js'; // v2.556: CPU 모델명 문구(순수·vitest 고정)
+import { numOrNull } from '../numOrNull.js'; // 2차 공통 기능 점검 7회차: 못 읽은 값은 0 이 아니다
 import { hostUsagePct } from '../views/vcdOverview.js'; // v2.606 WEB2606-02: 끊긴 호스트 사용률은 '—'
 // v2.447(감사 T11): 차트를 쓰는 모듈(HostPowerPanel · HostGpuPanel)은 lazy 여야 한다 — 이 파일은 components/ui.jsx 가 재수출해
 // **앱 entry 그래프에 정적으로 붙어 있어서**, 정적으로 끌면 recharts(vendor-charts 496KB)가 로그인 화면에서까지 modulepreload 된다(실측).
@@ -48,7 +49,8 @@ export function DRow({ label, children, full = false, nowrap = false }) {
   );
 }
 
-const gb = (mb) => `${Math.round((mb || 0) / 1024).toLocaleString()} GB`;
+// 2차 공통 기능 점검 7회차: `(mb || 0)` 이라 못 읽은 메모리(연결 끊긴 호스트 · 수집 전)가 '메모리 0 GB' 로 보였다 — 못 읽은 값은 '—'(numOrNull).
+const gb = (mb) => { const n = numOrNull(mb); return n == null ? '—' : `${Math.round(n / 1024).toLocaleString()} GB`; };
 // v2.622(감사 WEB-02): 사용량을 못 읽은 DS(usedGB·freeGB null)는 'null GB' 가 아니라 '—'.
 export const tb = (g) => {
   if (g == null || g === '' || !Number.isFinite(Number(g))) return '—';
@@ -564,7 +566,7 @@ export function HostBasicRows({ item, onShowVms }) {
           <button type="button" title="이 호스트의 VM 목록 보기" onClick={onShowVms}
             style={{ fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', padding: '3px 10px', borderRadius: 999,
               color: '#7dd3fc', background: 'rgba(56,189,248,.12)', border: '1px solid rgba(56,189,248,.45)', lineHeight: 1.4 }}>
-            🖥️ VM {item.vmCount ?? 0}대 보기 ›
+            🖥️ {numOrNull(item.vmCount) == null ? 'VM 목록 보기' : `VM ${item.vmCount}대 보기`} ›
           </button>
         </span>
       </DRow>
@@ -577,7 +579,7 @@ export function HostBasicRows({ item, onShowVms }) {
           (summary.hardware.otherIdentifyingInfo). 서버 교체·A/S·자산 대조용. 없으면 '—'. */}
       <DRow label="서비스 태그">{item.serviceTag ? <b style={{ letterSpacing: 0.5 }}>{item.serviceTag}</b> : '—'}</DRow>
       <DRow label="ESXi 버전">{item.version ? `${item.version}${item.build ? ` (build ${item.build})` : ''}` : '—'}</DRow>
-      <DRow label="CPU">{item.cpuCores}코어{item.cpuThreads ? ` / ${item.cpuThreads}스레드` : ''}{item.cpuTotalMhz ? ` · ${(item.cpuTotalMhz / 1000).toFixed(1)}GHz` : ''}</DRow>
+      <DRow label="CPU">{numOrNull(item.cpuCores) == null ? '—' : `${item.cpuCores}코어`}{item.cpuThreads ? ` / ${item.cpuThreads}스레드` : ''}{item.cpuTotalMhz ? ` · ${(item.cpuTotalMhz / 1000).toFixed(1)}GHz` : ''}</DRow>
       {/* v2.556(사용자 요청): CPU 모델명. 원문이 40자 안팎이라 2열 칸에 넣으면 옆 칸을
           밀어내므로 **한 줄 전체**를 쓴다. 다듬은 값 옆에 원문을 툴팁으로 남기고(정리가
           다른 벤더에서 빗나갈 수 있다), 값이 없으면 '—' + 이유를 말한다. */}
@@ -589,8 +591,8 @@ export function HostBasicRows({ item, onShowVms }) {
       <DRow label="메모리 사용률"><UsageCell pct={hostUsagePct(item, 'memUsagePct')} /></DRow>
       {item.powerWatts > 0 && <DRow label="소비전력" full nowrap>{(item.powerWatts / 1000).toFixed(2)} kW ({item.powerWatts} W){item.powerSource === 'idrac' ? ' · iDRAC' : (item.idracBacked ? ' · vCenter 추정' : '')}</DRow>}
       {item.idracBacked && item.powerWattsIdrac > 0 && <DRow label="iDRAC 실측" full nowrap>{(item.powerWattsIdrac / 1000).toFixed(2)} kW ({item.powerWattsIdrac} W) <span className="muted" style={{ fontSize: 11 }}>· iDRAC 서버 등록 메뉴 집계</span></DRow>}
-      <DRow label="VM 수">{item.vmCount}</DRow>
-      <DRow label="HBA / GPU">{(item.hbas?.length || 0)}개 / {(item.gpus?.length || 0)}개</DRow>
+      <DRow label="VM 수">{numOrNull(item.vmCount) ?? '—'}</DRow>
+      <DRow label="HBA / GPU">{Array.isArray(item.hbas) ? `${item.hbas.length}개` : '—'} / {Array.isArray(item.gpus) ? `${item.gpus.length}개` : '—'}</DRow>
     </>
   );
 }

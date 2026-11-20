@@ -13,14 +13,21 @@
  *  ⑨ 반증 1인 확정분(재현 → 고침): F1 포탈이 없는 서버 · root 아님 · 멈춘 포탈의 남은 portal.env · 엣지가 보고한 hostname 과 다름 /
  *     F2 SSH 동안 그 vCenter 의 엣지가 바뀜 / F3 같은 대상을 쓴 다른 법인의 오래된 작업 / F4 저장 실패면 메모리 값도 되돌림
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bi2879-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const tmp = tmpDir('bi2879-');
 process.env.CONFIG_DIR = tmp;
 process.env.AUTH_ENABLED = 'false';
 process.env.DATA_SOURCE = 'live';   // 라우트 ⑦ 은 실제 경로(데모 아님) — 데모 ⑧ 은 demo.js 를 직접 부른다

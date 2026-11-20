@@ -6,6 +6,7 @@ import { DEVTYPE_LABEL, MGMT } from './ipamShared.jsx';
 import { reservedDayOf, reservedFieldForSave } from './ipamReserveText.js';
 import Select from '../../components/Select.jsx';
 import { splitBulkIps, bulkInvalidText, invalidOfResponse } from './ipamBulkText.js';
+import { loadErrorText } from '../loadErrorText.js'; // 결정(56~75 남긴 것) 62
 
 /** Per-IP user memo + tags editor (separate from vCenter notes). */
 export function MemoEditor({ init, onClose, onSaved }) {
@@ -85,6 +86,8 @@ export function OverrideEditor({ row, vcenters = [], onClose, onSaved, tzOffsetM
     let alive = true;
     fetchJson(`/tools/ipam/ip/${encodeURIComponent(row.ip)}`).then((r) => {
       if (!alive) return;
+      // 결정(56~75 남긴 것) 62: 예약 파일을 못 읽었으면 '저장값 없음' 이 아니다 — 사유를 보인다(저장은 서버가 409 로 거절)
+      if (r.loadError) setLoadWarn(loadErrorText('IP 관리 예약 · 담당(ipam-overrides.json)', r.loadError, '그동안 저장값이 비어 보입니다.'));
       const o = r.override; if (!o) { setMacLoaded(false); return; }
       setMacLoaded(o.macAlertOff === true); setMacAlertOff((cur) => (cur === false ? o.macAlertOff === true : cur));
       setStatus(keep('status', o.status || '')); setOwner(keep('owner', o.owner || '')); setLabel(keep('label', o.label || ''));

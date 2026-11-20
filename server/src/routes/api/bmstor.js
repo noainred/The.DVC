@@ -2,7 +2,8 @@
 // 서버/그룹/전체 합산(총·사용·가용)을 보여준다. 전부 adminOnly(SSH 자격증명·호스트 구성).
 import { requireRole } from '../../auth/auth.js';
 import { logAudit } from '../../audit.js';
-import { listBmServers, listBmServersRaw, saveBmServer, removeBmServer, getBmSettings, saveBmSettings, bmServerInputIssue } from '../../bmstor/registry.js';
+import { listBmServers, listBmServersRaw, saveBmServer, removeBmServer, getBmSettings, saveBmSettings, bmServerInputIssue, registryWriteRefusal, registryLoadError } from '../../bmstor/registry.js';
+import { registryMark } from '../settingsUnreadMark.js';   // 128회차: 등록부를 못 읽은 동안의 빈 목록은 '등록 없음' 이 아니다
 import { getBmLatest, bmCollectNow, bmPollerStatus } from '../../bmstor/poller.js';
 import { isDemoGuest } from '../../auth/demoGuest.js'; // v2.720(감사 R1-03)
 import { aggregate } from '../../bmstor/agg.js';
@@ -86,7 +87,42 @@ export async function bmBindCheck(body = {}) {
     else { const a = KS.accountById(v); if (!a) return { error: '공통 계정이 없습니다.', code: 'account-missing' }; if (a.kind !== 'os') return { error: 'OS 공통 계정만 고를 수 있습니다.', code: 'account-kind' }; }
   }
   // 7b r3(R-N1): 묶음 판정은 등록부 choke point 와 **같은 함수 · 같은 입력**(bindRule.bindOfWrite) — 두 벌을 두지 않는다.
-  return { binds: bindOfWrite(ex, body).binds };
+  const bind = bindOfWrite(ex, body);
+  const pi = await bmPlacementIssue(body, ex, bind);
+  if (pi) return pi;
+  return { binds: bind.binds };
+}
+
+/**
+ * 저장 뒤 인증(효력 키 · 공통 계정)을 이 서버에 써도 되는가 — bmBindCheck(저장)와 키 · 계정 고르기 목록(GET auth-choices — 6회차 B4)이 **같은 함수**를 쓴다.
+ *   4회차 점검 D1: 저장 뒤 효력 키(bind.key · bind.cred = 등록부가 저장할 참조)가 이 서버의 폴더(법인 · 서버) 밖이면 **쓰기 전에 거절**한다 —
+ *   저장하면 수집이 매 주기 key-folder 로 접속하지 않는다(B-4). 판정은 placement.keyWriteIssue(= keyPlacementIssue · 온보딩 분석 · 회전과 같은 함수).
+ *   법인 · 이름은 등록부 저장 규칙 그대로(applyServerInput: vcenterId 는 주면 그 값 · 안 주면 기존 · name 은 빈 값이면 주소). 키 · 법인 · 이름이 그대로면 판정하지 않는다.
+ *   허용 기능 제한은 여기서 막지 않는다(이 화면은 스토리지 전용 키를 일부러 고를 수 있다 — 수집 건강 · 서버 상세가 key-feature 를 말한다).
+ *   6회차 A2: 공통 계정의 법인 ≠ 서버 법인(둘 다 있을 때)도 거절한다 — 온보딩 분석 cred-other-corp · 계정 저장(refs.accountUseIssue)과 같은 함수(placement.accountCorpOk).
+ *   계정 · 법인이 그대로인(이미 어긋나 있던) 저장은 판정하지 않는다.
+ * @returns {Promise<null | {error:string, code:string, status:number}>}
+ */
+export async function bmPlacementIssue(body = {}, ex = null, bind = null) {
+  const KS = await import('../../bmusage/onboard/keyStore.js');
+  const { bindOfWrite, entryTokens } = await import('../../bmusage/onboard/bindRule.js');
+  const PL = await import('../../bmusage/onboard/placement.js');
+  const b = bind || bindOfWrite(ex, body);
+  const look = { keyById: KS.keyById, accountById: KS.accountById };
+  const osAuthAfter = body.osAuth !== undefined ? (body.osAuth === 'password' ? 'password' : '') : (ex?.osAuth === 'password' ? 'password' : '');
+  const after = PL.effectiveKeyOf({ key: b.key, cred: b.cred, osAuth: osAuthAfter }, look);
+  const before = ex ? { keyId: PL.effectiveKeyOf(entryTokens(ex), look)?.id || '', vcenterId: ex.vcenterId, name: ex.name } : null;
+  const server = { vcenterId: body.vcenterId !== undefined ? String(body.vcenterId || '').trim().slice(0, 128) : String(ex?.vcenterId || ''), name: String(body.name || '').trim() || String(body.host || '').trim() };
+  if (PL.keyWriteIssue(after, server, before).folder) {
+    // 4회차 재확인 I1: 이 화면의 '법인' 칸은 데이터센터라 vcenterId 를 보내지 못한다 — 법인(vCenter) 귀속이 없는 서버에는 어느 법인 폴더 키도 맞지 않으니
+    //   '이 법인 폴더 키를 고르세요' 대신 갈 길(전역 키 · 서버 등록에서 법인 지정)을 말한다. 키 이름 · 폴더는 싣지 않는다(존재 은닉).
+    if (!server.vcenterId) return { error: '이 서버에는 법인(vCenter) 귀속이 없어 법인 · 서버 폴더에 있는 SSH 키(직접 고른 키 또는 공통 계정의 기본 키)를 쓸 수 없습니다 — 전역 키를 고르거나, 서버 등록(CSV)에서 법인을 지정한 뒤 고르세요.', code: 'key-folder', status: 409 };
+    return { error: 'SSH 키(직접 고른 키 또는 공통 계정의 기본 키)가 다른 법인 · 다른 서버의 폴더에 있어 이 서버에는 쓸 수 없습니다 — 이 서버 법인(또는 이 서버)의 폴더에 있는 키를 고르세요(설정 › 보안 › 서버 접속(SSH · Windows)).', code: 'key-folder', status: 409 };
+  }
+  const acc = b.cred ? KS.accountById(b.cred) : null;
+  const unchanged = !!ex && String(ex.credRef || '') === b.cred && String(ex.vcenterId || '') === server.vcenterId;
+  if (acc && !unchanged && !PL.accountCorpOk(acc.corp, server.vcenterId)) return { error: '다른 법인의 공통 계정입니다 — 이 서버 법인의 공통 계정을 고르세요(전 법인 공용 계정은 어느 법인에나 쓸 수 있습니다).', code: 'cred-other-corp', status: 409 };
+  return null;
 }
 
 export function registerBmStorage(api) {
@@ -106,6 +142,7 @@ export function registerBmStorage(api) {
       settings: getBmSettings(), status: bmPollerStatus(),
       agents: listCollectors().map((c) => c.id), // 위임 가능한 엣지(수집 서버) 이름 목록
       datacenters: (() => { try { return listDatacenters().map((d) => ({ id: d.id, name: d.name || d.id })); } catch { return []; } })(),   // v2.915: 폼 '법인' 선택
+      ...registryMark(registryLoadError()),   // 128회차: 못 읽은 동안의 서버 목록 · 수집 주기는 저장된 값이 아니다
     });
   });
 
@@ -526,20 +563,47 @@ export function registerBmStorage(api) {
     const r = saveBmServer(bind.binds ? { ...rest, bindApproved: true } : rest);
     if (r.ok && bind.binds) logAudit({ user: req.user?.username, action: '베어메탈 서버 인증 참조 묶음', target: r.server?.host || '', detail: JSON.stringify({ keyRef: rest.keyRef || '', credRef: rest.credRef || '', osAuth: rest.osAuth || '' }).slice(0, 200), ip: req.ip || '' });
     if (r.ok) logAudit({ user: req.user?.username, action: '베어메탈 스토리지 서버 저장', target: r.server?.host || '', detail: `mounts ${(r.server?.mounts || []).length}개${r.server?.agent ? ` · 엣지 ${r.server.agent}` : ''}`, ip: req.ip || '' });
-    res.status(r.ok ? 200 : 400).json(r);
+    res.status(r.ok ? 200 : (r.status || 400)).json(r);   // 결정(78 남긴 것 ①): 등록부 읽기 오류는 409
+  });
+
+  /*
+   * 6회차 B4: 서버 폼의 인증 드롭다운 — **이 서버에 쓸 수 있는 키 · 공통 계정만** 고르게 한다(예전: 활성 키 전부 → 법인 폴더 키를 고르면 저장이 409 · OTP 칸이 비었다).
+   *   판정은 저장과 같은 bmPlacementIssue(서버가 판정 — 웹 사본 없음 · SSH 공용 접속의 서버별 키 후보와 같은 keyPlacementIssue). 폼과 같은 입력(id · name · host —
+   *   법인 vcenterId 는 이 폼이 보내지 않으므로 기존 항목 값)으로 고른 것마다 본다. 고를 수 없는 것도 issue 와 함께 싣는다(지금 쓰는 것은 current — 화면이 남긴다).
+   *   설정 소유자 등급만(드롭다운이 소유자에게만 보인다 · 키 이름은 /tools/bm-usage/ssh-keys 와 같은 범위).
+   */
+  api.get('/tools/bm-storage/auth-choices', adminOnly, fullScopeOnly, requireSettingsOwner, async (req, res) => {
+    const KS = await import('../../bmusage/onboard/keyStore.js');
+    if (KS.keyStoreLoadError()) return res.status(503).json({ ok: false, code: 'registry-unreadable', reason: 'SSH 키 저장소를 읽지 못했습니다.' });
+    const id = String(req.query.id || '').slice(0, 64);
+    const ex = id ? listBmServersRaw().find((x) => x.id === id) || null : null;
+    const base = { ...(ex ? { id: ex.id } : {}), name: String(req.query.name || '').slice(0, 128), host: String(req.query.host || '').slice(0, 256) };
+    const keys = []; const accounts = [];
+    for (const k of KS.listKeysRaw()) {
+      if (k.status !== 'active') continue;
+      const pi = await bmPlacementIssue({ ...base, keyRef: k.id, credRef: '' }, ex);
+      keys.push({ id: k.id, name: k.name, algo: k.algo, selectable: !pi, issue: pi?.code || '', current: !!ex && String(ex.keyRef || '') === k.id });
+    }
+    for (const a of KS.listAccountsRaw()) {
+      if (a.kind !== 'os') continue;
+      const pi = await bmPlacementIssue({ ...base, credRef: a.id, keyRef: '' }, ex);
+      accounts.push({ id: a.id, name: a.name, username: a.username, selectable: !pi, issue: pi?.code || '', current: !!ex && String(ex.credRef || '') === a.id && !ex.keyRef });
+    }
+    res.set('Cache-Control', 'no-store');
+    res.json({ ok: true, corpless: !String(ex?.vcenterId || ''), keys, accounts });
   });
 
   api.delete('/tools/bm-storage/servers/:id', adminOnly, fullScopeOnly, (req, res) => {
     const r = removeBmServer(req.params.id);
     if (r.ok) logAudit({ user: req.user?.username, action: '베어메탈 스토리지 서버 삭제', target: req.params.id, ip: req.ip || '' });
-    res.status(r.ok ? 200 : 404).json(r);
+    res.status(r.ok ? 200 : (r.status || 404)).json(r);   // 결정(78 남긴 것 ①): 등록부 읽기 오류는 409
   });
 
   // 수집 주기 저장(분) — 폴러가 30초 틱마다 설정을 다시 읽으므로 재기동 없이 반영된다.
   api.put('/tools/bm-storage/settings', adminOnly, fullScopeOnly, (req, res) => {
     const r = saveBmSettings(req.body || {});
     if (r.ok) logAudit({ user: req.user?.username, action: '베어메탈 스토리지 주기 변경', target: `${r.settings.intervalMinutes}분`, ip: req.ip || '' });
-    res.status(r.ok ? 200 : 400).json(r);
+    res.status(r.ok ? 200 : (r.status || 400)).json(r);   // 결정(78 남긴 것 ①): 등록부 읽기 오류는 409
   });
 
   /* ── 서버 CSV 일괄 관리(v2.341, 사용자 요구 — 다수 서버 등록). 수집 서버 CSV(v2.338)와 동일 골격:
@@ -566,6 +630,8 @@ export function registerBmStorage(api) {
   });
 
   api.post('/tools/bm-storage/import', csvPerm, adminOnly, fullScopeOnly, (req, res) => {
+    const refused = registryWriteRefusal();   // 결정(78 남긴 것 ①): 읽기 오류 중에는 409 — 빈 목록과 대조하면 전부 '추가' 로 보인다(드라이런 포함)
+    if (refused) return res.status(409).json(refused);
     const { rows, error } = parseBmServersCsv(String(req.body?.csv || ''));
     if (error) return res.status(400).json({ ok: false, reason: error });
     if (!rows.length) return res.status(400).json({ ok: false, reason: '가져올 데이터 행이 없습니다.' });

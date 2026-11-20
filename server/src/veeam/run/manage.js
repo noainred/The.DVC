@@ -61,7 +61,7 @@ async function pointsByName(c, name, notes) {
   for (const [variant, path] of [['objectRestorePoints', '/api/v1/objectRestorePoints'], ['restorePoints', '/api/v1/restorePoints']]) {
     try {
       const rows = await c.list(path, { max: POINTS_MAX, query: { nameFilter: name } });
-      return { variant, rows: rows.filter((x) => x && x.name === name), path, truncated: rows.length >= POINTS_MAX };
+      return { variant, rows: rows.filter((x) => x && x.name === name), path, truncated: rows.truncated === true || rows.length >= POINTS_MAX };
     } catch (e) {
       if (!shapeMiss(e)) throw e;
       notes.push(`${variant} 거절 — ${reasonOf(e).slice(0, 160)}`);
@@ -237,10 +237,16 @@ export async function opDeleteBackup(server, { jobName = '', vm = {}, deadlineAt
     let deleted = 0; let variant = '';
     try {
       // 2) 이 잡의 백업 → 이 VM(moref) 의 개체
-      const backups = (await c.list('/api/v1/backups', { max: 200, query: { jobIdFilter: pj.id } })).filter((b) => b && String(b.jobId || '') === pj.id);
+      const backupsAll = await c.list('/api/v1/backups', { max: 200, query: { jobIdFilter: pj.id } });
+      // 전체 점검 2회차(V-2): 목록을 다 읽지 못했으면 '지울 것이 없습니다(성공)' 로 답하지 않는다 — 이 VM 의 백업이 못 읽은 쪽에 있을 수 있다.
+      const partial = (excludedNote) => ({ ok: false, notSent: true, excluded, deleted, reason: `Veeam 목록을 끝까지 읽지 못해(${excludedNote}) 이 VM 의 백업을 다 찾았는지 확인할 수 없습니다 — 지우지 않았습니다${excluded ? '(잡에서는 뺐습니다)' : ''}.`, notes });
+      if (backupsAll.truncated) return partial('백업 목록');
+      const backups = backupsAll.filter((b) => b && String(b.jobId || '') === pj.id);
+      if (backups.length > LOOKUP_MAX) return partial(`이 잡의 백업 ${backups.length}개 중 ${LOOKUP_MAX}개까지만 봅니다`);
       const targets = [];
       for (const b of backups.slice(0, LOOKUP_MAX)) {
         const objs = await c.list(`/api/v1/backups/${encodeURIComponent(String(b.id))}/objects`, { max: 2000 });
+        if (objs.truncated) return partial('백업 개체 목록');
         const same = objs.filter((o) => o && o.name === ref.name);
         const mine = same.filter((o) => String(o.objectId || '') === ref.objectId);
         if (same.some((o) => !o.objectId)) return { ok: false, notSent: true, excluded, deleted, reason: `백업 개체에 moref 가 없어 이 VM 의 것인지 확인할 수 없습니다 — 지우지 않았습니다${excluded ? '(잡에서는 뺐습니다)' : ''}.`, notes };
@@ -260,7 +266,7 @@ export async function opDeleteBackup(server, { jobName = '', vm = {}, deadlineAt
             let pts = null;
             try { pts = await c.list(`/api/v1/backupObjects/${encodeURIComponent(t.objectId)}/restorePoints`, { max: 2000 }); }
             catch (e) { notes.push(`개체 범위 확인 실패 — ${reasonOf(e).slice(0, 120)}`); }
-            if (!pts || pts.some((p) => String(p?.backupId || '') !== t.backupId)) { notes.push(`${v} 건너뜀 — 그 개체가 이 포탈 백업 밖의 복원 지점도 가졌는지 확인하지 못했습니다.`); continue; }
+            if (!pts || pts.truncated || pts.some((p) => String(p?.backupId || '') !== t.backupId)) { notes.push(`${v} 건너뜀 — 그 개체가 이 포탈 백업 밖의 복원 지점도 가졌는지 확인하지 못했습니다.`); continue; }
           }
           try { await c.call('DELETE', path); deleted++; variant = v; done = true; break; }
           catch (e) {

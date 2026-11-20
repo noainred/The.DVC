@@ -13,7 +13,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { makeJsonFileLoader } from '../util/jsonFileLoad.js';   // 90회차 F3: 읽기 오류 ≠ 손상(결정 G2 공용 로더 — 36회차 '남긴 것')
 import { numOrNull } from '../util/numOrNull.js';
 import { clampSetting } from '../util/clampSetting.js'; // v2.613 DEPS2613-12 · RUNTIME2613-08: 숫자 설정 정규화는 하나(빈 칸 = 미지정)
 
@@ -76,22 +77,37 @@ export function normalize(input = {}) {
   };
 }
 
+/*
+ * 90회차 F3(재현 — 36회차 '남긴 것'): 예전 catch 하나는 **읽기 오류**(EACCES · EIO · EISDIR)도 손상으로 보고 온전한 원본을 `.corrupt` 로 옮긴 뒤
+ *   기본값(꺼짐 · 보존 180일 · 서버별 끔 설정 없음)을 **프로세스 수명 동안** 캐시했다 — 수집이 조용히 멈추고, 화면에서 저장하면 그 기본값 위에 썼다.
+ *   판정은 공용 로더 하나다: 손상만 보존본으로 옮기고(사유와 함께 · 서비스 점검에 등재), 읽기 오류는 원본을 두고 30초마다 다시 읽으며 그동안 저장을 409 로 거절한다.
+ *   도는 값은 예전처럼 기본값이다(꺼짐 — 손상 · 읽기 오류 동안 주기 수집을 하지 않는다). 손상 상태의 관리자 저장이 오류를 푸는 규약은 다른 설정과 같다.
+ */
+const _file = makeJsonFileLoader(() => FILE(), { label: 'Horizon 실시간 사용자 수집 설정(horizon-sessions.json) — 확정하면 기본값(수집 꺼짐)으로 저장됩니다', confirm: () => save({}), tag: 'horizon-sessions' });
+/** 설정 파일을 못 읽었으면 `{ reason, at, readError }`(요약 — 파일 조각 없음), 읽었으면 null. */
+export function horizonSessionSettingsLoadError() { load(); return _file.marker(); }
+
 export function load() {
-  if (_cache) return _cache;
-  let raw = {};
-  try { if (fs.existsSync(FILE())) raw = JSON.parse(fs.readFileSync(FILE(), 'utf8')); }
-  catch { preserveCorrupt(FILE()); raw = {}; }
-  _cache = normalize(raw);
+  if (_cache && !_file.recheckDue()) return _cache;   // 오류 중에는 캐시를 믿지 않고 간격마다 다시 판정(보존본을 되돌리면 재시작 없이 풀린다)
+  const r = _file.load();
+  _cache = normalize(r.kind === 'ok' ? r.value : {});
   return _cache;
 }
 
 export function save(next) {
-  const v = normalize(keepPrevBlankNumbers(next, load()));
+  const cur = load();
+  // 90회차 F3: 읽기 오류면 원본이 디스크에 그대로 있다 — 기본값 위에 쓰면 그 원본(켜짐 · 주기 · 서버별 끔)을 덮는다(라우트 409).
+  if (_file.loadError()?.readError) {
+    const no = _file.refusal('Horizon 실시간 사용자 수집 설정');
+    throw Object.assign(new Error(no?.reason || 'Horizon 실시간 사용자 수집 설정 파일을 읽지 못해 저장하지 않았습니다.'), { status: 409, code: 'settings-unreadable' });
+  }
+  const v = normalize(keepPrevBlankNumbers(next, cur));
   fs.mkdirSync(path.dirname(FILE()), { recursive: true });
   atomicWriteFileSync(FILE(), JSON.stringify(v, null, 2), { mode: 0o600 });
   _cache = v;
+  _file.saved();
   for (const cb of listeners) { try { cb(v); } catch { /* 구독자 오류가 저장을 막지 않게 */ } }
   return v;
 }
 
-export function _resetForTest() { _cache = null; }
+export function _resetForTest() { _cache = null; _file.saved(); }

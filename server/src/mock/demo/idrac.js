@@ -16,6 +16,7 @@ import { isMockMode, demoHash, demoRand, demoIp } from './flags.js';
 import { mockServiceTag } from '../seed.js';
 import { parseThermalTemp, parseThermalFan, parseRedfishSensor } from '../../idrac/sensorDetail.js';
 import { pushAll } from '../../util/pushAll.js';
+import { BM_ONLY_SITES, mockSiteBareMetal } from '../generator.js';
 
 const MIN = 60_000;
 const HOUR = 3_600_000;
@@ -303,30 +304,100 @@ const ROLES = [
 ];
 
 /**
- * 스냅샷의 vCenter 들에서 베어메탈 사양을 결정적으로 만든다 — vCenter 마다 DB 서버 1대 · 앞 4곳은 GPU 서버 1대 ·
- * 앞 2곳은 법인 귀속 없는 앱 서버 1대(11 vCenter 기준 17대).
- * @returns {Array<{id,name,vcenterId,homeVc,host,serviceTag,model,cpuModel,sockets,cores,memGB,gpus:string[],loadBase}>}
+ * v3.26.0 — 시연 규모(물리 서버 1,200대 중 베어메탈 550대)의 역할 사양. 이름의 역할 토큰이 다른 데모 판정에 쓰인다
+ * (베어메탈 사용률: 이름에 'db' → FC HBA · 'db|gpu' → 25GbE — `baremetal.js demoBmUsageRow`). 전부 Dell(iDRAC 데모가 받친다).
+ * gpus: null 이면 GPU 2~4장(서버 해시), 배열이면 그대로.
+ */
+const ROLE_SPECS = {
+  db: ROLES[0],
+  app: ROLES[1],
+  gpu: ROLES[2],
+  aigpu: { suffix: 'aigpu', model: 'PowerEdge XE9680', cpuModel: 'Intel(R) Xeon(R) Platinum 8480+ CPU @ 2.00GHz', sockets: 2, cores: 112, memGB: 2048, gpus: Array(8).fill('NVIDIA H100 80GB HBM3'), loadBase: 70 },
+  hpc: { suffix: 'hpc', model: 'PowerEdge C6620', cpuModel: 'Intel(R) Xeon(R) Platinum 8462Y+ CPU @ 2.80GHz', sockets: 2, cores: 64, memGB: 512, gpus: [], loadBase: 72 },
+  login: { suffix: 'login', model: 'PowerEdge R660', cpuModel: 'Intel(R) Xeon(R) Gold 6430 CPU @ 2.10GHz', sockets: 2, cores: 64, memGB: 512, gpus: [], loadBase: 18 },
+  stor: { suffix: 'stor', model: 'PowerEdge R760xd2', cpuModel: 'Intel(R) Xeon(R) Silver 4410Y CPU @ 2.00GHz', sockets: 2, cores: 24, memGB: 256, gpus: [], loadBase: 22 },
+  bkp: { suffix: 'bkp', model: 'PowerEdge R740xd2', cpuModel: 'Intel(R) Xeon(R) Silver 4214R CPU @ 2.40GHz', sockets: 2, cores: 24, memGB: 192, gpus: [], loadBase: 30 },
+  k8s: { suffix: 'k8s', model: 'PowerEdge R6625', cpuModel: 'AMD EPYC 9354 32-Core Processor', sockets: 2, cores: 64, memGB: 768, gpus: [], loadBase: 50 },
+  log: { suffix: 'log', model: 'PowerEdge R660', cpuModel: 'Intel(R) Xeon(R) Gold 5418Y CPU @ 2.00GHz', sockets: 2, cores: 48, memGB: 512, gpus: [], loadBase: 35 },
+  hanadb: { suffix: 'hanadb', model: 'PowerEdge R960', cpuModel: 'Intel(R) Xeon(R) Platinum 8460H CPU @ 2.20GHz', sockets: 4, cores: 160, memGB: 6144, gpus: [], loadBase: 40 },
+  web: { suffix: 'web', model: 'PowerEdge R650xs', cpuModel: 'Intel(R) Xeon(R) Silver 4310 CPU @ 2.10GHz', sockets: 2, cores: 24, memGB: 128, gpus: [], loadBase: 20 },
+  mesdb: { suffix: 'mesdb', model: 'PowerEdge R750', cpuModel: 'Intel(R) Xeon(R) Gold 6342 CPU @ 2.80GHz', sockets: 2, cores: 48, memGB: 768, gpus: [], loadBase: 48 },
+  mes: { suffix: 'mes', model: 'PowerEdge R650', cpuModel: 'Intel(R) Xeon(R) Silver 4314 CPU @ 2.40GHz', sockets: 2, cores: 32, memGB: 256, gpus: [], loadBase: 38 },
+  scada: { suffix: 'scada', model: 'PowerEdge R550', cpuModel: 'Intel(R) Xeon(R) Silver 4309Y CPU @ 2.80GHz', sockets: 2, cores: 16, memGB: 128, gpus: [], loadBase: 30 },
+  wmsdb: { suffix: 'wmsdb', model: 'PowerEdge R750', cpuModel: 'Intel(R) Xeon(R) Gold 5318Y CPU @ 2.10GHz', sockets: 2, cores: 48, memGB: 512, gpus: [], loadBase: 42 },
+  wms: { suffix: 'wms', model: 'PowerEdge R650', cpuModel: 'Intel(R) Xeon(R) Silver 4314 CPU @ 2.40GHz', sockets: 2, cores: 32, memGB: 256, gpus: [], loadBase: 34 },
+};
+/** 법인 종류별 역할 순환(첫 서버부터 차례로) — 대수가 많아도 비율이 이 순환을 따른다. */
+const ROLE_CYCLE = {
+  corp: ['db', 'app', 'k8s', 'bkp', 'db', 'log', 'k8s', 'web', 'hanadb', 'app', 'k8s', 'db', 'stor'],
+  '공장(MES)': ['mesdb', 'mes', 'scada', 'mes', 'bkp', 'mes', 'scada', 'db', 'app', 'mesdb'],
+  'AI/HPC 센터': ['aigpu', 'hpc', 'hpc', 'gpu', 'hpc', 'stor', 'aigpu', 'hpc', 'login', 'hpc', 'stor'],
+  'DR 사이트': ['db', 'bkp', 'app', 'stor', 'db', 'bkp', 'k8s'],
+  '물류 센터': ['wmsdb', 'wms', 'wms', 'bkp', 'app'],
+};
+/** 사이트 표에 대수가 없는 vCenter(MOCK_SCALE 사본 · 테스트의 가짜 vCenter)의 베어메탈 대수. */
+const BM_DEFAULT_PER_VC = 12;
+
+function bmSpec(id, name, role, i, extra) {
+  const r = ROLE_SPECS[role] || ROLE_SPECS.app;
+  const gpuModel = ['NVIDIA A100 80GB PCIe', 'NVIDIA L40S', 'NVIDIA H100 80GB'][demoHash(id) % 3];
+  return {
+    id, name, ...extra,
+    host: demoIp(`bm|${id}`, 10), serviceTag: mockServiceTag(id),
+    model: r.model, cpuModel: r.cpuModel, sockets: r.sockets, cores: r.cores, memGB: r.memGB,
+    gpus: r.gpus || Array.from({ length: 2 + (demoHash(id) % 3) }, () => gpuModel),
+    loadBase: r.loadBase + (demoHash(`lb|${id}`) % 20) - 10 + i,
+  };
+}
+
+/**
+ * 스냅샷의 vCenter 들 + vCenter 없는 데모 법인(generator `BM_ONLY_SITES`)에서 베어메탈 사양을 결정적으로 만든다.
+ *  · vCenter 법인: 사이트 표의 `bm` 대수(없으면 12). 첫 서버들은 v2.708 과 같은 id·이름·사양이다 — 모든 vCenter 의 `db01`,
+ *    앞 4곳의 `gpu01`, 앞 2곳의 법인 귀속 없는 `app01`(이미 시드된 데모 설치본이 그 id 로 남아 있다).
+ *  · vCenter 없는 법인: `vcenterId` 없이 `datacenterId: dc-<slug>`(pdu.js demoCorps 가 같은 id 로 DataCenter 를 만든다).
+ * 기본 사이트 표(20 vCenter)면 310 + 240 = **550대**(테스트가 고정).
+ * @returns {Array<{id,name,vcenterId,datacenterId,homeVc,host,serviceTag,model,cpuModel,sockets,cores,memGB,gpus:string[],loadBase}>}
  */
 export function demoBareMetalSpecs(snapshot) {
-  const vcs = (snapshot?.vcenters || []).map((v) => v.id).filter(Boolean).slice(0, 20);
+  const vcs = (snapshot?.vcenters || []).map((v) => v.id).filter(Boolean).slice(0, 60);
+  if (!vcs.length) return [];
   const out = [];
   vcs.forEach((vc, vi) => {
     const city = String(vc).replace(/^vc-/, '');
+    const legacy = [];
     ROLES.forEach((r, i) => {
       if (r.suffix === 'gpu' && vi >= 4) return;
       if (r.suffix === 'app' && vi >= 2) return;
-      const id = `${BM_PREFIX}${vc}-${r.suffix}01`;
-      const gpuModel = ['NVIDIA A100 80GB PCIe', 'NVIDIA L40S', 'NVIDIA H100 80GB'][demoHash(id) % 3];
-      out.push({
-        // app 서버는 법인(vCenter) 귀속 없이 둔다 — '법인 귀속 없음' 경로(사용률 수집의 귀속 없는 서버 포함·화면 사유)도 보이게.
-        id, name: `bm-${city}-${r.suffix}01`, vcenterId: r.suffix === 'app' ? '' : vc, homeVc: vc,
-        host: demoIp(`bm|${id}`, 10), serviceTag: mockServiceTag(id),
-        model: r.model, cpuModel: r.cpuModel, sockets: r.sockets, cores: r.cores, memGB: r.memGB,
-        gpus: r.gpus || Array.from({ length: 2 + (demoHash(id) % 3) }, () => gpuModel),
-        loadBase: r.loadBase + (demoHash(`lb|${id}`) % 20) - 10 + i,
-      });
+      legacy.push([r.suffix, i]);
     });
+    const total = Math.max(legacy.length, mockSiteBareMetal(vc) ?? BM_DEFAULT_PER_VC);
+    const seq = new Map();
+    const next = (role) => { const n = (seq.get(role) || 0) + 1; seq.set(role, n); return n; };
+    for (const [role, i] of legacy) {
+      next(role);
+      const id = `${BM_PREFIX}${vc}-${role}01`;
+      // app 서버는 법인(vCenter) 귀속 없이 둔다 — '법인 귀속 없음' 경로(사용률 수집의 귀속 없는 서버 포함·화면 사유)도 보이게.
+      out.push(bmSpec(id, `bm-${city}-${role}01`, role, i, { vcenterId: role === 'app' ? '' : vc, datacenterId: '', homeVc: vc }));
+    }
+    const cycle = ROLE_CYCLE.corp;
+    for (let k = 0, have = legacy.length; have < total; k++, have++) {
+      const role = cycle[k % cycle.length];
+      const n = next(role);
+      const tag = String(n).padStart(2, '0');
+      out.push(bmSpec(`${BM_PREFIX}${vc}-${role}${tag}`, `bm-${city}-${role}${tag}`, role, k % 3, { vcenterId: vc, datacenterId: '', homeVc: vc }));
+    }
   });
+  for (const site of BM_ONLY_SITES) {
+    const dc = `dc-${site.slug}`;
+    const cycle = ROLE_CYCLE[site.role] || ROLE_CYCLE.corp;
+    const seq = new Map();
+    for (let k = 0; k < site.bm; k++) {
+      const role = cycle[k % cycle.length];
+      const n = (seq.get(role) || 0) + 1; seq.set(role, n);
+      const tag = String(n).padStart(2, '0');
+      out.push(bmSpec(`${BM_PREFIX}${dc}-${role}${tag}`, `bm-${site.slug}-${role}${tag}`, role, k % 3, { vcenterId: '', datacenterId: dc, homeVc: '' }));
+    }
+  }
   return out;
 }
 
@@ -342,8 +413,10 @@ export function primeBareMetalSpecs(snapshot) {
 
 let _seedDone = false;
 /**
- * 베어메탈 시드 — mock 이고, 등록부가 mock 항목뿐이고, `mock-bmsrv-` 가 하나도 없을 때만 1회.
- * 사양 캐시는 매번 채운다(재시작 뒤에도 프로필이 같게).
+ * 베어메탈 시드 — mock 이고, 등록부가 mock 항목뿐일 때만. 사양 캐시는 매번 채운다(재시작 뒤에도 프로필이 같게).
+ * v3.26.0: 예전에는 `mock-bmsrv-` 가 하나라도 있으면 건너뛰었다 — 그러면 v2.914 이전 규모(17대)로 시드된 데모 설치본이
+ * 시연 규모(550대)로 늘지 않는다. 이제 **있는 것이 사양의 절반 미만일 때만 빠진 id 를 보충**한다(사람이 데모 서버 몇 대를
+ * 지운 것은 되살리지 않는다). 등록부 저장은 한 번에 묶는다(addServer 를 550번 부르면 매번 전체 파일을 다시 쓴다).
  */
 export async function ensureBareMetalSeed(snapshot) {
   if (!isMockMode()) return { skipped: 'not-mock' };
@@ -351,18 +424,18 @@ export async function ensureBareMetalSeed(snapshot) {
   if (!specs.length) return { skipped: 'no-snapshot' };
   primeBareMetalSpecs(snapshot);
   if (_seedDone) return { skipped: 'done' };
-  const { loadRegistry, addServer } = await import('../../idrac/registry.js');
+  const { loadRegistry, importServers } = await import('../../idrac/registry.js');
   const reg = loadRegistry();
   _seedDone = true;
   if (reg.some((s) => !String(s.id).startsWith('mock-'))) return { skipped: 'real-entries' };
-  if (reg.some((s) => String(s.id).startsWith(BM_PREFIX))) return { skipped: 'exists' };
-  let n = 0;
-  for (const s of specs) {
-    const r = addServer({ id: s.id, name: s.name, host: s.host, username: 'root', password: 'mock', vcenterId: s.vcenterId, serviceTag: s.serviceTag, hostNames: [s.name] });
-    if (r?.ok) n += 1;
-  }
+  const have = new Set(reg.filter((s) => String(s.id).startsWith(BM_PREFIX)).map((s) => String(s.id)));
+  if (have.size >= Math.ceil(specs.length / 2)) return { skipped: 'exists' };
+  const missing = specs.filter((s) => !have.has(s.id));
+  const r = importServers(missing.map((s) => ({ id: s.id, name: s.name, host: s.host, username: 'root', password: 'mock', vcenterId: s.vcenterId,
+    datacenterId: s.datacenterId || '', serviceTag: s.serviceTag, hostNames: [s.name] })), 'merge');
+  const n = r?.ok ? r.added : 0;
   // 전력 이력은 idrac.js backfillPower 가 서버마다(이력이 없는 서버만) 채운다.
-  if (n) console.log(`[mock] 베어메탈 데모 시드: iDRAC 등록 ${n}대(ESXi 아님)`);
+  if (n) console.log(`[mock] 베어메탈 데모 시드: iDRAC 등록 ${n}대(ESXi 아님${have.size ? ` — 기존 ${have.size}대에 보충` : ''})`);
   return { added: n };
 }
 
@@ -432,15 +505,21 @@ export async function mockIdracDemoTick(snapshot, { now = Date.now() } = {}) {
   if (!_sensorBackfilled) {
     _sensorBackfilled = true;
     // 24시간 · 5분 간격 — 서버 상세 센서 탭·스파크라인이 기동 직후부터 그려지게(실장비 폴러는 1분마다 쌓는다).
+    // v3.26.0: 시연 규모(789대 × 288시점 ≈ 23만 표본)에서 한 번에 돌면 기동 직후 이벤트 루프가 1초 넘게 멈췄다 — 시점 몇 개마다 양보.
+    let steps = 0;
     for (let t = now - DAY; t < now - 4 * MIN; t += 5 * MIN) {
       for (const { server, profile } of list) {
         const r = demoSensorReadingAt(profile, t);
         pushSensorSample(server.id, { t, cpuUsagePct: r.cpuUsagePct, temps: r.temps, fans: r.fans });
       }
+      if (++steps % 12 === 0) await yieldNow();
     }
   }
   let refreshed = 0;
+  let n = 0;
   for (const { server, profile } of list) {
+    // v3.26.0: 시연 규모(1,200대)에서는 인벤토리가 30분마다 한꺼번에 낡아 한 틱에 전부 다시 만든다 — 100대마다 양보(이벤트 루프를 길게 잡지 않게).
+    if (++n % 100 === 0) await yieldNow();
     const r = demoSensorReadingAt(profile, now);
     pushSensorSample(server.id, { t: now, cpuUsagePct: r.cpuUsagePct, temps: r.temps, fans: r.fans });
     setThermalDetail(server.id, demoThermalDetail(r), now);
@@ -456,12 +535,50 @@ export async function mockIdracDemoTick(snapshot, { now = Date.now() } = {}) {
   setSensorPollCycle({ durationMs: 1_000, intervalMs: 60_000, at: now });
   if (refreshed) { try { const { onSnapshotRefreshed } = await import('../../partfault/hooks.js'); onSnapshotRefreshed('idrac'); } catch { /* */ } }
   // 장기 이력 백필(기동 1회 · 이미 있으면 건너뜀). 기다리지 않는다 — 폴 틱을 붙잡지 않게.
-  if (!_metricsBackfill) _metricsBackfill = backfillTrendMetrics(list, { now }).catch((e) => { console.warn(`[mock] iDRAC 추이 백필 실패: ${e?.message || e}`); });
+  // v3.26.0: 추이(법인 전산실 온도 포함)는 **데모 법인 할당이 끝난 뒤에** — 먼저 돌면 그룹 키가 법인 대신 vCenter id 로 적재돼
+  //   전산실 온도 표에 'vc-cn-east' 같은 행이 법인 행과 섞였다(시연 규모 첫 기동에서 화면으로 확인). 아직이면 다음 틱에 다시 본다.
+  if (!_metricsBackfill && await demoCorpsAssigned(snapshot)) {
+    await linkDemoServerDatacenters();
+    _metricsBackfill = backfillTrendMetrics(await demoServers(snapshot), { now }).catch((e) => { console.warn(`[mock] iDRAC 추이 백필 실패: ${e?.message || e}`); });
+  }
   if (!_powerBackfill) _powerBackfill = backfillPower(list, { now }).catch((e) => { console.warn(`[mock] iDRAC 전력 백필 실패: ${e?.message || e}`); });
   return { servers: list.length, inventoryRefreshed: refreshed, demo: true };
 }
 
 const yieldNow = () => new Promise((r) => setImmediate(r));
+
+let _dcLinked = false;
+/**
+ * v3.26.0: 데모 iDRAC 서버(`mock-` 만)에 법인(DataCenter)을 채운다 — vCenter 로 등록된 데모 서버(ESXi · vCenter 법인 베어메탈)는 법인이 비어 있어
+ * 전산실 온도(roomTemp — 그룹 키 = 법인 → vCenter)가 'vc-cn-east' 같은 vCenter id 행을 'Ulsan 법인' 같은 법인 행과 섞어 보였다(시연 규모 화면 확인).
+ * 실장비는 스캔 등록이 법인을 직접 갖는다. 그 vCenter 의 법인 할당(datacenters.json)을 그대로 쓰고, 이미 법인이 있거나 사람이 등록한 서버는 건드리지 않는다.
+ * 저장은 한 번에 묶는다(id·법인만 넘기면 importServers 가 나머지를 저장값에서 이어받는다 — 비밀번호 포함).
+ */
+export async function linkDemoServerDatacenters() {
+  if (_dcLinked) return { skipped: 'done' };
+  _dcLinked = true;
+  const [{ loadRegistry, importServers }, { datacenterOfVcenter }] = await Promise.all([import('../../idrac/registry.js'), import('../../datacenter/store.js')]);
+  const fix = [];
+  for (const s of loadRegistry()) {
+    if (!String(s?.id || '').startsWith('mock-') || String(s.datacenterId || '').trim() || !String(s.vcenterId || '').trim()) continue;
+    const dc = datacenterOfVcenter(s.vcenterId);
+    if (dc) fix.push({ id: s.id, datacenterId: dc });
+  }
+  if (!fix.length) return { linked: 0 };
+  const r = importServers(fix, 'merge');
+  if (r?.ok) console.log(`[mock] 데모 iDRAC 서버 법인 연결: ${r.updated}대`);
+  return { linked: r?.ok ? r.updated : 0 };
+}
+
+/** 스냅샷의 vCenter 가 전부 데모 법인에 할당됐는가(pdu.js assignDemoCorps 가 한다). 못 읽으면 거짓 — 다음 틱에 다시. */
+async function demoCorpsAssigned(snapshot) {
+  const vcs = (snapshot?.vcenters || []).map((v) => v.id).filter(Boolean);
+  if (!vcs.length) return false;
+  try {
+    const { datacenterOfVcenter } = await import('../../datacenter/store.js');
+    return vcs.every((vc) => datacenterOfVcenter(vc));
+  } catch { return false; }
+}
 
 /** 백필 시각 목록 — 최근 24시간은 5분, 그 앞 13일은 1시간(시간당 롤업이 채워지게). 오름차순. */
 export function backfillTimes(now = Date.now(), { recentStepMs = 5 * MIN, days = 14 } = {}) {
@@ -494,7 +611,8 @@ export async function backfillTrendMetrics(list, { now = Date.now() } = {}) {
   const prof = new Map(list.map((x) => [String(x.server.id), x.profile]));
   const base = analysisServersWithRemote().filter((s) => prof.has(String(s.id)));
   let steps = 0; let rowsN = 0;
-  for (const t of backfillTimes(now)) {
+  // v3.26.0: 서버가 많으면(시연 규모 789대) 최근 24시간을 15분 간격으로 — 5분이면 14일 250만 행(약 630MB)이었다.
+  for (const t of backfillTimes(now, { recentStepMs: list.length > 300 ? 15 * MIN : 5 * MIN })) {
     const fake = base.map((s) => {
       const r = demoSensorReadingAt(prof.get(String(s.id)), t);
       const temps = Object.fromEntries(r.temps.map((x) => [x.name, x.celsius]));
@@ -518,7 +636,8 @@ export async function backfillTrendMetrics(list, { now = Date.now() } = {}) {
     push('', 'inlet', rep.totals?.inlet); push('', 'exhaust', rep.totals?.exhaust); push('', 'cpu', rep.totals?.cpu);
     if (rows.length) { db.insertMany(rows, t); rowsN += rows.length; }
     steps += 1;
-    if (steps % 4 === 0) await yieldNow();
+    // v3.26.0: 시점마다 수천 행 — 서버가 많으면 매 시점 양보(예전 4시점마다는 시연 규모에서 한 번에 1만 행 넘게 붙잡았다).
+    if (list.length > 300 || steps % 4 === 0) await yieldNow();
   }
   console.log(`[mock] iDRAC 추이 데모 백필: ${base.length}대 · ${steps}시점 · ${rowsN}행(14일)`);
   return { steps, rows: rowsN, servers: base.length };
@@ -535,13 +654,18 @@ export async function backfillPower(list, { now = Date.now() } = {}) {
     try { const st = db.hourlyStats ? db.hourlyStats(server.id, now - 14 * DAY, now - 2 * DAY) : []; return !(st && st.length >= 3); } catch { return true; }
   });
   if (!need.length) return { skipped: 'exists' };
-  const samples = [];
-  for (const t of backfillTimes(now, { recentStepMs: 10 * MIN })) {
-    for (const { server, profile } of need) samples.push({ serverId: server.id, watts: Math.round(demoWatts(profile, demoLoadAt(profile, t))), ts: t });
-  }
-  try { db.insertMany(samples); } catch (e) { return { error: String(e?.message || e) }; }
-  console.log(`[mock] iDRAC 전력 데모 백필: ${need.length}대 · ${samples.length}표본(14일)`);
-  return { samples: samples.length, servers: need.length };
+  // v3.26.0: 시점 묶음마다 적재하고 양보한다 — 시연 규모(789대 × 456시점 ≈ 36만 표본)를 한 트랜잭션으로 넣으면 기동 직후 수 초 멈췄다.
+  let total = 0; let batch = [];
+  const flush = () => { if (batch.length) { db.insertMany(batch); total += batch.length; batch = []; } };
+  try {
+    for (const t of backfillTimes(now, { recentStepMs: 10 * MIN })) {
+      for (const { server, profile } of need) batch.push({ serverId: server.id, watts: Math.round(demoWatts(profile, demoLoadAt(profile, t))), ts: t });
+      if (batch.length >= 5_000) { flush(); await yieldNow(); }
+    }
+    flush();
+  } catch (e) { return { error: String(e?.message || e) }; }
+  console.log(`[mock] iDRAC 전력 데모 백필: ${need.length}대 · ${total}표본(14일)`);
+  return { samples: total, servers: need.length };
 }
 
 /**
@@ -565,7 +689,7 @@ export function demoWatts(p, load) {
 }
 
 export function _resetBareMetalSeedForTest() { _specCache = new Map(); _seedDone = false; _tagRepaired = false; }
-export function _resetIdracDemoForTest() { _unsupDone = false; _scanLogDone = false; _sensorBackfilled = false; _metricsBackfill = null; _powerBackfill = null; _invVersion.clear(); }
+export function _resetIdracDemoForTest() { _dcLinked = false; _unsupDone = false; _scanLogDone = false; _sensorBackfilled = false; _metricsBackfill = null; _powerBackfill = null; _invVersion.clear(); }
 
 let _unsupDone = false;
 /**

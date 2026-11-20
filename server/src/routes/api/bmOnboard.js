@@ -10,7 +10,7 @@
  * 저장소를 못 읽으면 503(registryUnreadable) — 빈 목록을 내려보내지 않는다.
  */
 import { requireRole, requirePerm } from '../../auth/auth.js';
-import { requireSettingsOwner } from '../admin/shared.js';
+import { requireSettingsOwner, settingsOwnerGradeDenial } from '../admin/shared.js';
 import { reauth } from './reauth.js';
 import { logAudit } from '../../audit.js';
 import { store } from '../../store.js';
@@ -54,7 +54,8 @@ function send(res, r, okStatus = 200) {
 function unreadable503(res) {
   const e = KS.keyStoreLoadError();
   if (!e) return false;
-  res.status(503).json({ ok: false, code: 'registry-unreadable', registryUnreadable: true, reason: `SSH 키 저장소(${KS.KEY_FILE_NAME})를 읽지 못했습니다 — 손상 보존본(${KS.KEY_FILE_NAME}.corrupt.*)을 확인하세요.` });
+  // 77회차 F1: 읽기 오류(원본 그대로 · 30초마다 다시 읽음)와 손상(보존본)은 조치가 다르다 — 문구는 keyStore 의 판정 하나
+  res.status(503).json({ ok: false, code: 'registry-unreadable', registryUnreadable: true, ...(e.readError ? { readError: true } : {}), reason: KS.keyStoreUnreadableReason(e) });
   return true;
 }
 
@@ -66,7 +67,11 @@ export function runGate(mw, req) {
   });
 }
 /** 설정 소유자 등급(소유자 ∧ 전체 범위)인가 — requireSettingsOwner 와 같은 판정 하나(routes/auth.js settingsOwnerTier 와 같은 방식). */
-export async function isOwnerTier(req) { return (await runGate(requireSettingsOwner, req)).ok; }
+/**
+ * 설정 소유자 **등급** 질의(소유자 ∧ 조회 전체 범위) — 법인마다 쓰기 범위를 따로 보는 라우트 안의 승인 등급(8a 정비 창 · 7b 온보딩 묶음 행).
+ *   6회차 A1: 라우트 게이트 requireSettingsOwner 는 쓰기 메서드에 쓰기 범위 전체를 더했지만, 이 질의는 등급만 본다(shared.settingsOwnerGradeDenial — 같은 하나).
+ */
+export async function isOwnerTier(req) { return !settingsOwnerGradeDenial(req); }
 
 export function registerBmOnboard(api, deps = {}) {
   /* ── SSH 키 저장소 ─────────────────────────────────────────────── */
@@ -103,10 +108,10 @@ export function registerBmOnboard(api, deps = {}) {
     const b = bodyOf(req);
     const r = REFS.rotateKey(t(b.from, 32), t(b.to, 32));
     logAudit({ user: who(req), action: 'bm-usage.ssh-key.rotate', target: `${t(b.from, 32)}→${t(b.to, 32)}`, ip: req.ip || '',
-      detail: JSON.stringify(r.ok ? { servers: r.servers.length, accounts: r.accounts, ok: true } : { ok: false, code: r.code }).slice(0, 300) });
+      detail: JSON.stringify(r.ok ? { servers: r.servers.length, accounts: r.accounts, ok: true, ...(r.warnings ? { featureLoss: r.warnings.flatMap((w) => w.features || []) } : {}) } : { ok: false, code: r.code }).slice(0, 300) });
     if (!r.ok) return send(res, r);
-    // 화면이 '전 서버 재시험' 을 권한다 — 자동 재시험 · 재시도는 하지 않는다(계정 잠금).
-    res.json({ ok: true, servers: r.servers, accounts: r.accounts, retestAdvised: r.servers.length > 0 });
+    // 화면이 '전 서버 재시험' 을 권한다 — 자동 재시험 · 재시도는 하지 않는다(계정 잠금). 4회차 D1: 새 키로 막히는 수집 기능 경고(warnings)를 그대로 싣는다.
+    res.json({ ok: true, servers: r.servers, accounts: r.accounts, retestAdvised: r.servers.length > 0, ...(r.warnings ? { warnings: r.warnings } : {}) });
   });
 
   api.delete('/tools/bm-usage/ssh-keys/:id', ...keyAdmin, (req, res) => {
@@ -124,13 +129,27 @@ export function registerBmOnboard(api, deps = {}) {
     res.json({ ok: true, ...v });
   });
 
-  api.post('/tools/bm-usage/accounts', ...keyAdmin, (req, res) => {
+  /*
+   * 6회차 점검 A2: 계정 저장의 거절은 **본인 OTP(reauth) 앞에서** — 같은 검사를 dryRun 으로 돌리고(B-4 키 폴더 포함 · 예전에는 reauth 뒤라 거절이 OTP 를 소모했다)
+   *   그 계정을 쓰는 서버가 끊기는지(refs.accountUseIssue — 키 폴더 · 계정 법인 · 종류) 본다. 소유자 게이트 뒤라 소유자만 이 판정을 본다.
+   *   저장 직전(OTP 뒤)에 같은 판정을 한 번 더 한다(사이에 등록부가 바뀌었을 수 있다).
+   */
+  const accountInputOf = (input) => ({
+    id: input.id, name: input.name, kind: input.kind, corp: input.corp, username: input.username,
+    keyRef: input.keyRef, password: typeof input.password === 'string' ? input.password : undefined, clearPassword: input.clearPassword === true,
+  });
+  const accountWriteIssue = (input) => {
+    const dry = KS.saveAccount(accountInputOf(input), { dryRun: true });
+    if (!dry.ok) return dry;
+    const before = input.id ? KS.accountById(t(input.id, 32)) : null;
+    return REFS.legacyAccountWriteIssue(before, input) || REFS.accountUseIssue(before, dry.next);   // v3.24 반증 F7: 계층 지정 계정의 새 비밀번호는 새 화면에서
+  };
+  const accountFirst = (req, res, next) => { const { otp, ...input } = bodyOf(req); void otp; const w = accountWriteIssue(input); if (w) return send(res, w); return next(); };
+  api.post('/tools/bm-usage/accounts', adminOnly, toolsPerm, requireSettingsOwner, accountFirst, reauth, (req, res) => {
     const b = bodyOf(req);
     const { otp, ...input } = b; void otp;
-    const r = KS.saveAccount({
-      id: input.id, name: input.name, kind: input.kind, corp: input.corp, username: input.username,
-      keyRef: input.keyRef, password: typeof input.password === 'string' ? input.password : undefined, clearPassword: input.clearPassword === true,
-    }, { by: who(req) });
+    const w = accountWriteIssue(input);
+    const r = w || KS.saveAccount(accountInputOf(input), { by: who(req) });
     logAudit({ user: who(req), action: input.id ? 'bm-usage.account.update' : 'bm-usage.account.add', target: t(input.name, 64), ip: req.ip || '',
       detail: JSON.stringify(r.ok ? { kind: r.account.kind, corp: r.account.corp, keyRef: r.account.keyRef, secretChanged: typeof input.password === 'string' && input.password !== '' && input.password !== '********', dropped: r.droppedSecrets || [] } : { ok: false, code: r.code }).slice(0, 300) });
     send(res, r);
@@ -260,7 +279,9 @@ export function registerBmOnboard(api, deps = {}) {
       // v2.954(점검 A-4): 범위 계정에는 키 · 공통 계정 **이름**을 주지 않는다(있는지만) — /ssh-keys · /accounts 가 범위 계정에 가린 이름이 이 길로 나갔다(L-7 우회).
       return { agent: s.agent, pending: scoped ? undefined : s.pending, rows: rows.map((r) => ({ name: r.name, corp: r.corp, idracHost: !!r.idracHost, osHost: !!r.osHost,
         osKey: scoped ? !!r.osKey : r.osKey, osCred: scoped ? !!r.osCred : r.osCred, idracCred: scoped ? !!r.idracCred : r.idracCred, enabled: r.enabled })),
-        total: scoped ? rows.length : s.rows, at: s.at, sig: s.sig, pulledAt: pull?.at || null, appliedSig: pull?.appliedSig || '', applied: pull?.applied || null, inSync: pull ? pull.appliedSig === s.sig : null };
+        total: scoped ? rows.length : s.rows, at: s.at, sig: s.sig, pulledAt: pull?.at || null, appliedSig: pull?.appliedSig || '', applied: pull?.applied || null, inSync: pull ? pull.appliedSig === s.sig : null,
+        // 결정(76~105 남긴 것 · 2026-11-20) A3: 마지막 인출에서 엣지가 적용 상태 파일을 읽지 못했다고 알렸나(불리언만 · 인출 기록이 없으면 false — 화면은 '모름')
+        stateUnread: pull?.stateUnread === true };
     }).filter((a) => a.rows.length || !scoped);
     let minEdgeVersion = '';
     try { minEdgeVersion = (await import('../../central/featureMinEdgeVersion.js')).stage7bMinEdgeVersion(); } catch { minEdgeVersion = ''; }
@@ -333,7 +354,7 @@ export function registerBmOnboard(api, deps = {}) {
     if (!s0 || (vc ? !inUserScope(req.user, snap, vc) : scoped)) return res.status(404).json({ ok: false, reason: '서버를 찾을 수 없습니다.' });
     // v2.954(점검 A-1): 귀속 없는 서버(vc 없음)의 시험 접속(저장된 비밀 사용)은 조회 ∧ 쓰기 전체 범위만.
     if (vc ? !inUserWriteScope(req.user, snap, vc) : !isFullReadWriteScope(req.user, snap)) return res.status(403).json({ ok: false, error: 'forbidden', reason: '이 법인에 쓰기 권한이 없습니다(조회 전용).' });
-    const r = await (deps.testOs || testSavedOs)(s0);
+    const r = await (deps.testOs || testSavedOs)(s0, { by: who(req) });
     logAudit({ user: who(req), action: 'bm-usage.onboard.test', target: s0.name || id, ip: req.ip || '', detail: JSON.stringify({ ok: !!r.ok, kind: r.kind, auth: r.authKind }).slice(0, 200) });
     res.json(r);
   });

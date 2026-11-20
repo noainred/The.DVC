@@ -151,6 +151,10 @@ export function BmPerfDetailView({ itemKey, itemVc = '', onPickCorp = null, item
   const sameKey = resp && (resp.key === itemKey);
   const entry = sameKey ? resp.entry : null;
   const target = (sameKey && resp.target) || item?.target || {};
+  // 점검 반복 2회차 E8: 이 서버를 아는가(응답 또는 목록 항목) — 모르면(404 못 찾음 · 범위 밖 · 아직 못 읽음) 법인을 단정하지 않는다(‘귀속 없음’ 이 아니라 ‘—’ ·
+  //   없음과 범위 밖을 가르는 문구도 쓰지 않는다 — 존재 은닉). 찾지 못한 서버는 비교에 담지 않는다(담겨 있으면 빼기는 그대로 연다).
+  const known = !!((sameKey && resp.target) || item?.target);
+  const notFound = !!err && err.status === 404;
   const th = (sameKey && resp.perfThresholds) || item?.th || null;
   const name = target.name || item?.name || itemKey;
   // 404(없거나 범위 밖)·조회 실패 때는 목록 항목에서 온 상태 블록을 그리지 않는다(실패 사실과 섞이지 않게).
@@ -174,7 +178,8 @@ export function BmPerfDetailView({ itemKey, itemVc = '', onPickCorp = null, item
         {e && <VerdictBadge verdict={e.verdict} />}
         <span className="bmp-chip" style={{ color: e ? toneVar(cov.tone) : 'var(--muted)' }}>경로 {e ? cov.label : '—'}</span>
         <span style={{ flex: '1 1 auto' }} />
-        {onCompareToggle && <button className="btn btn-sm bmp-touch" aria-pressed={inCompare} onClick={onCompareToggle}>{inCompare ? '비교에서 빼기' : '비교에 추가'}</button>}
+        {onCompareToggle && <button className="btn btn-sm bmp-touch" aria-pressed={inCompare} onClick={onCompareToggle} disabled={!inCompare && notFound}
+          title={!inCompare && notFound ? '찾지 못한 서버는 비교에 담을 수 없습니다' : undefined}>{inCompare ? '비교에서 빼기' : '비교에 추가'}</button>}
         {share && sameKey && <BmShareButtons kind={`detail-${tab}`} state={share.state} node={share.node}
           context={() => ({ title: `${name} — ${tab}`, servers: [name], corps: [target.vcenterId || '귀속 없음'], from: share.state().from ?? null, to: share.state().to ?? resp?.entry?.ts ?? null, cursor: share.state().cursor ?? null,
             source: [e?.osAt ? `OS ${new Date(e.osAt).toLocaleTimeString('ko-KR', { hour12: false })}` : '', e?.idracAt ? `iDRAC ${new Date(e.idracAt).toLocaleTimeString('ko-KR', { hour12: false })}` : '', item?.agent ? `엣지 ${item.agent}` : ''].filter(Boolean).join(' · '), note: '수치는 5분 평균 · 피크' })} />}
@@ -184,7 +189,7 @@ export function BmPerfDetailView({ itemKey, itemVc = '', onPickCorp = null, item
       {/* 법인을 고르기 전에는 어느 서버의 머리도 그리지 않는다(한 법인 서버의 정보를 답처럼 보이지 않게 — 다음 점검 ①) */}
       {!amb && (
         <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.6, marginTop: 4 }}>
-          {[target.serviceTag && `서비스 태그 ‘${target.serviceTag}’`, target.vcenterId || '귀속 없음', target.model, item?.agent && `엣지 ${item.agent}`].filter(Boolean).join(' · ')}
+          {[target.serviceTag && `서비스 태그 ‘${target.serviceTag}’`, known ? (target.vcenterId || '귀속 없음') : '—', target.model, item?.agent && `엣지 ${item.agent}`].filter(Boolean).join(' · ')}
         </div>
       )}
       {e && (

@@ -15,11 +15,14 @@
  *  · 구성 구획(30초)은 마지막 값을 들고 다음 프레임에 쓴다. 프로세스 상위 30 은 PROC 구획 둘의 차이.
  */
 import { withSsh, isSshAuthError, isSshHostKeyError } from '../proxy/sshExec.js';
-import { createAuthGuard } from '../util/authGuard.js';
+import { createAuthGuard, isUnreadStop } from '../util/authGuard.js';
 import { scriptFor, normInterval, normProcEvery } from './script.js';
 import { loadWindow, nodeCounters } from './load.js';
 import { createFrameParser, frameToRaw, LINE_MAX } from './parse.js';
-import { computeSample, topProcs } from './rates.js';
+import { computeSample, topProcs, procStates } from './rates.js';
+/** 서비스별 프로세스 수(앱 묶음 all)를 싣는 간격 — 알림 판정의 '구간 덮음'(첫 표본 30초 · 틈 60초 안)을 넉넉히 맞춘다. */
+export const APP_ALL_EVERY_MS = 19_000;
+import { FS_EVERY_S } from './script.js';
 
 export const focusAuthGuard = createAuthGuard({ file: 'focusmon-auth-stops.json' });
 export const READY_TIMEOUT_MS = 15_000;
@@ -53,6 +56,10 @@ export function createCollector(target, { interval, procEvery, keys, onSample, o
   let stopped = false; let ctl = null; let timer = null; let fails = 0; let busy = false;
   let status = { state: 'connecting', since: now(), lastSampleAt: null, error: '', hello: null, osVerified: null, interval: iv };
   let sessionSamples = 0;
+  // v3.12.0(⑬): 마지막 프로세스 상태(D · 좀비 — 5초마다) · 마지막 파일시스템(60초마다)을 표본마다 싣는다(age 초 — 엣지 시각을 쓰지 않는다)
+  let lastPst = null; let lastPstAt = 0; let lastFs = null; let lastFsAt = 0; const dSince = new Map();
+  let lastAllAt = 0; // 앱 묶음의 서비스별 프로세스 수(all)를 마지막으로 실은 시각
+  let pendingKm = null; // v3.16.0 ⑯ C2 — 커널 메시지 증분은 다음 표본에 **한 번만** 싣는다(켜진 시각 = 받은 시각 − 가동 시간)
   let prevRaw = null; let prevAt = 0; let topo = {}; let blk = null; let users = new Map(); let prevProc = null; let prevProcUp = null; let hello = null;
   let units = new Map(); let prevIo = null; let usersUp = null; let unitsUp = null; // v2.981 서비스(30초) · 앞 입출력(프로세스 주기) · 맵을 읽은 uptime(반증 F6)
   // v2.983 수집 부하 — ##SELF 창(보통 30초): 앞 SELF 이후 받은 바이트(묶음별) · 프레임 · 구성 · 프로세스 횟수. 새 세션이면 비운다(셸이 바뀐다).
@@ -86,8 +93,15 @@ export function createCollector(target, { interval, procEvery, keys, onSample, o
     if (raw.ps) { users = raw.ps; usersUp = raw.up; }
     if (raw.unit) { units = raw.unit; unitsUp = raw.up; }
     const ts = now();
+    if (raw.proc) { lastPst = procStates(raw.proc, raw.up, dSince); lastPstAt = ts; }
+    if (raw.fs) { lastFs = raw.fs; lastFsAt = ts; }
+    if (raw.kmsg && raw.up != null) pendingKm = { ...raw.kmsg, boot: Math.round(ts / 1000 - raw.up) };
+    // 묵은 값은 싣지 않는다 — 프로세스 상태는 프로세스 표본 주기(최대 30초)의 2배, 파일시스템은 주기의 3배(df 가 시한에 걸려도 rc 로 온다 — 줄이 아예 없으면 모름)
+    const pst = lastPst && ts - lastPstAt <= 65_000 ? lastPst : null;
+    const fsNow = lastFs && ts - lastFsAt <= FS_EVERY_S * 3_000 ? { ...lastFs, age: Math.round((ts - lastFsAt) / 1000) } : null;
     if (prevRaw && ts - prevAt < 120_000) {
-      const s = computeSample(prevRaw, raw, { topo, blk });
+      const s = computeSample(prevRaw, raw, { topo, blk, pst, fs: fsNow });
+      if (pendingKm && s.dt != null) { s.km = pendingKm; pendingKm = null; }
       if (s.dt != null) {
         try { onSample?.(s, { ts, hello }); } catch { /* */ }
         status.lastSampleAt = ts;
@@ -98,7 +112,9 @@ export function createCollector(target, { interval, procEvery, keys, onSample, o
     }
     if (raw.proc) {
       if (prevProc && raw.up != null && prevProcUp != null) {
-        const tp = topProcs(prevProc, raw.proc, { dt: raw.up - prevProcUp, tck: hello?.tck, page: hello?.page, ncpu: hello?.ncpu, up: raw.up, users, units, io: raw.io, prevIo, dacct: hello?.dacct ?? null, usersUp, unitsUp });
+        const withAll = ts - lastAllAt >= APP_ALL_EVERY_MS; // v3.16.0 ⑯ 반증 H1 — 서비스마다 프로세스 수(필수 앱 알림)는 약 20초마다만
+        const tp = topProcs(prevProc, raw.proc, { dt: raw.up - prevProcUp, tck: hello?.tck, page: hello?.page, ncpu: hello?.ncpu, up: raw.up, users, units, io: raw.io, prevIo, dacct: hello?.dacct ?? null, usersUp, unitsUp, withAll });
+        if (tp?.apps?.all) lastAllAt = ts;
         if (tp) { try { onProcs?.(tp, { ts }); } catch { /* */ } }
       }
       prevProc = raw.proc; prevProcUp = raw.up; prevIo = raw.io || null;
@@ -127,6 +143,7 @@ export function createCollector(target, { interval, procEvery, keys, onSample, o
     let idleAbort = false;
     sessionSamples = 0;
     ldPrev = null; ldReset(); // 새 셸 — 앞 창과 잇지 않는다
+    lastPst = null; dSince.clear(); // D 상태가 이어진 시간은 새 셸에서 다시 센다(끊긴 동안을 이어진 것으로 말하지 않는다)
     const startedAt = now();
     const parser = createFrameParser({
       onHello: (h) => {
@@ -215,7 +232,7 @@ export function createCollector(target, { interval, procEvery, keys, onSample, o
     procEvery: () => pe,
     /** 사람이 ‘다시 연결’ — 인증 정지를 지우고 지금 다시 시도한다. */
     retry() {
-      focusAuthGuard.clearAuthStop(authIdOf(t));
+      focusAuthGuard.clearAuthStop(authIdOf(t), { verified: false });
       fails = 0;
       if (busy && ctl && !ctl.signal.aborted) ctl.abort(); else schedule(0);
     },
@@ -252,7 +269,8 @@ export async function testTarget(target, { keys, connect = withSsh, timeoutMs = 
   const dev = authDevOf(target, info.fingerprint);
   // 정지된 계정이면 시험도 하지 않는다(누를 때마다 로그인 1회 = 잠금 경로 — v2.929 반증 F11 과 같은 판단). ‘다시 연결’ 이 정지를 지운다.
   const stopRec = focusAuthGuard.peekAuthStop(dev);
-  if (stopRec) return { ok: false, kind: 'auth-stopped', error: `키 로그인 거부로 멈춰 있습니다(${stopRec.reason}) — 공개키를 넣은 뒤 ‘다시 연결’ 을 누르세요.`, ms: 0 };
+  // 127회차: 정지 기록 파일을 못 읽어 모르는 대상은 키 로그인이 거부된 것이 아니다 — 사람이 누른 시험은 한 번 시도한다(거부되면 아래에서 실제 정지로 기록)
+  if (stopRec && !isUnreadStop(stopRec)) return { ok: false, kind: 'auth-stopped', error: `키 로그인 거부로 멈춰 있습니다(${stopRec.reason}) — 공개키를 넣은 뒤 ‘다시 연결’ 을 누르세요.`, ms: 0 };
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), timeoutMs); timer.unref?.();
   let hello = null;

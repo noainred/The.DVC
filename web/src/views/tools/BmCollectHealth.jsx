@@ -12,6 +12,7 @@ import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { toneVar } from './toneVar.js';
 import { rttLine } from './bmOnboardText.js'; // 7b: 중앙 직접 수집 법인 RTT(서버 rttHigh 그대로)
+import { pullKindLabel } from './bmUsageText.js'; // 다음 작업 재확인: 당김 실패 kind 는 낱말로(원문 too-large 를 보이지 않게)
 import {
   nodeStateView, FLAG_TEXT, REASON_TEXT, REASON_STATE_TEXT, INFO_TEXT, PATH_TEXT, msText, pctText1, gbText, cycleText, concText, sshText, reasonsLine, daysSince,
   trendPaths, trendRangeText, COLLECT_HONEST, collectCsv, collectCsvName, unknownText, peakReasonText, NODE_ERROR_TEXT, famLine,
@@ -19,6 +20,7 @@ import {
 } from './bmCollectText.js';
 import { numOrNull } from '../../numOrNull.js';
 import './bmStage6.css';
+import { saveBlob } from '../../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나
 
 const n0 = (v) => { const x = numOrNull(v); return x != null && x > 0; };
 
@@ -130,7 +132,7 @@ export function CollectHealthView({ resp, now = Date.now() }) {
                 <div className="bmo-sub">{famLine(db)}</div>
                 <div className="bmo-sub">상한 {x.node.capBytes ? gbText(x.node.capBytes) : '없음'}{x.node.dbPct != null ? ` · ${pctText1(x.node.dbPct)}` : ''}</div>
                 <div className="bmo-sub">피크 창 {x.node.peakPlan?.windowS ?? '—'}초(상한 {x.node.peakPlan?.capS ?? '—'}){peakReasonText(x.node.peakPlan?.reason) ? ` · ${peakReasonText(x.node.peakPlan.reason)}` : ''}</div>
-                {x.via === 'edge' && <div className="bmo-sub">중앙 보관분 {x.snapAt ? daysSince(x.snapAt, now) : '—'}{x.lastAttempt ? ` · 마지막 당김 ${x.lastAttempt.ok ? '성공' : `실패(${x.lastAttempt.kind || '—'})`} ${msText(x.lastAttempt.ms)}` : ''}</div>}
+                {x.via === 'edge' && <div className="bmo-sub">중앙 보관분 {x.snapAt ? daysSince(x.snapAt, now) : '—'}{x.lastAttempt ? ` · 마지막 당김 ${x.lastAttempt.ok ? '성공' : `실패(${x.lastAttempt.kind ? pullKindLabel(x.lastAttempt.kind) : '—'})`} ${msText(x.lastAttempt.ms)}` : ''}</div>}
               </div>
             );
           })}
@@ -151,8 +153,7 @@ export default function BmCollectHealth() {
   useEffect(() => { load(); }, [load]);
   function exportCsv() {
     const blob = new Blob([`\uFEFF${collectCsv(st.resp)}`], { type: 'text/csv;charset=utf-8' });
-    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = collectCsvName(st.resp?.at); a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    saveBlob(blob, collectCsvName(st.resp?.at));
   }
   return (
     <div className="card" style={{ minWidth: 0 }} data-capture="bm-collect-health">

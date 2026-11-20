@@ -28,7 +28,7 @@ import { withSsh } from '../proxy/sshExec.js';
 import { withDeadline } from '../util/deadline.js';
 import { createChangeLogger } from '../util/logThrottle.js';
 import { CMD_TIMEOUT_MS } from './collectors/fosSsh.js';
-import { buildFlowCommands, flowOutputIssue, parseFlowShow, parseFlowList, OUT_MAX, FLOW_NAME_RE, FLOW_PREFIX } from './flowCmd.js';
+import { buildFlowCommands, flowOutputIssue, parseFlowShow, parseFlowList, OUT_MAX, FLOW_NAME_RE, FLOW_PREFIX, vfPrefixOf } from './flowCmd.js';
 import { sanAuthGuard, isSanAuthError, isDeviceCollecting } from './poller.js';
 import { isMockMode } from '../mock/demo/flags.js';
 import { isSanDemoId } from '../mock/demo/sanswitch.js';
@@ -144,13 +144,14 @@ export async function runFlowCommands(device, cmds, { onTrace = null } = {}) {
     return { ok: outputs.every((o) => o.ok), outputs, demo: true };
   }
   let inFlight = null; let loggedIn = false;
+  const pre = vfPrefixOf(device);   // 58회차 F2: VF 논리 스위치 컨텍스트(수집기와 같다) — 기록 · 결과 대조는 접두 없는 cmd 로
   try {
     await withDeadline(flowSessionMs(cmds.length), (signal) => withSsh({ host: device.host, port: Number(device.sshPort) || 22, username: device.username, password: device.password || '', signal, trace: onTrace, verbose: false }, async (sh) => {
       loggedIn = true;
       for (const cmd of cmds) {
-        onTrace?.(`실행: ${cmd}`);
+        onTrace?.(`실행: ${pre}${cmd}`);
         inFlight = cmd;
-        const r = await sh.exec(cmd, CMD_TIMEOUT_MS);
+        const r = await sh.exec(`${pre}${cmd}`, CMD_TIMEOUT_MS);
         inFlight = null;
         const out = `${String(r.stdout || '')}${r.stderr ? `\n${String(r.stderr)}` : ''}`.slice(0, OUT_MAX);
         const issue = flowOutputIssue(out);

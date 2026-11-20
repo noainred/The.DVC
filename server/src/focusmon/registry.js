@@ -16,12 +16,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { makeLoadError, filterObjectElements } from '../util/registryCore.js';
 import { strictIpv4Num } from '../util/ipv4.js';
 import { ipBlockReason } from '../util/ssrfBlock.js';
 import { parseCsvRows, unguardCell } from '../util/csv.js';
 import { normProcEvery } from './script.js';
+import { resolvePickedDc, matchDatacenterId } from '../collector/datacenterMatch.js'; // v3.11.0 법인(DataCenter) 고르기 규칙 하나(순수)
 
 const FILE = () => path.join(config.configDir, 'focusmon-targets.json');
 export const MAX_TARGETS = 500;
@@ -40,11 +41,13 @@ export const SETTING_RANGES = Object.freeze({
   edgeIdleSec: [5, 60, 10],
   // v2.983 수집 부하(시안 ⑪ 컨펌 ③ ④): 판정 문턱(코어 1개 기준 % — 가벼움 < 주의 ≤ 보통 < 큼) · 프로세스 표본 주기(초 — 5 · 15 · 30 중 하나, script.PROC_EVERY_CHOICES)
   loadWarnPct: [1, 50, 1], loadCritPct: [2, 100, 3], procEvery: [5, 30, 5],
+  // v3.16.0(⑯ C3 — 컨펌 ⑥ '기본 꺼짐'): 수집 부하 자동 조절(0 꺼짐 · 1 켜짐) — 문턱은 위 판정 문턱을 그대로 쓴다
+  autoTune: [0, 1, 0],
 });
 export const DEFAULT_SETTINGS = Object.freeze(Object.fromEntries(Object.entries(SETTING_RANGES).map(([k, v]) => [k, v[2]])));
 
 let cache = null;
-const loadErr = makeLoadError();
+const loadErr = makeLoadError({ label: '집중 모니터링 등록부', file: FILE });   // 결정(76~105 남긴 것 · 2026-11-20) A1: 서비스 점검 '장비 등록부 파일' 행(표시 전용)
 export function registryLoadError() { load(); return loadErr.get(); }
 
 const s = (v, max = 256) => (typeof v === 'string' ? v : v == null ? '' : String(v)).trim().slice(0, max);
@@ -55,7 +58,7 @@ function normTarget(t) {
   const port = Number(t.port);
   return {
     id, name: s(t.name, 64), host: s(t.host, 15), port: Number.isInteger(port) && port > 0 && port < 65536 ? port : 22,
-    username: s(t.username, 32), agent: s(t.agent, 128), enabled: t.enabled !== false, group: normGroup(t.group),
+    username: s(t.username, 32), agent: s(t.agent, 128), enabled: t.enabled !== false, group: normGroup(t.group), corp: s(t.corp, 64),
     createdAt: Number(t.createdAt) > 0 ? Number(t.createdAt) : 0, createdBy: s(t.createdBy, 64),
   };
 }
@@ -72,15 +75,18 @@ function normSettings(x = {}) {
   return out;
 }
 
+// 결정(78 남긴 것 ①): parse 실패(형식 · 정규화 포함 — 예전 try 블록과 같은 범위)만 손상이다.
+const parseDb = (text) => {
+  const j = JSON.parse(text);
+  const list = filterObjectElements(Array.isArray(j?.targets) ? j.targets : []).list.map(normTarget).filter(Boolean);
+  return { targets: list, settings: normSettings(j?.settings), groups: withUsedGroups(Array.isArray(j?.groups) ? j.groups : [], list) };
+};
 function load() {
-  if (cache) return cache;
-  try {
-    if (fs.existsSync(FILE())) {
-      const j = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
-      const list = filterObjectElements(Array.isArray(j?.targets) ? j.targets : []).list.map(normTarget).filter(Boolean);
-      cache = { targets: list, settings: normSettings(j?.settings), groups: withUsedGroups(Array.isArray(j?.groups) ? j.groups : [], list) };
-    }
-  } catch (e) { preserveCorrupt(FILE(), e?.message); loadErr.set(e); cache = null; }
+  if (cache && !loadErr.readPending()) return cache;
+  // 손상은 보존본으로 옮기고(사유 포함) 오류를 세운다(loadErr.read). 결정(78 남긴 것 ①): 읽기 오류(EACCES · EIO · EISDIR)는 원본을 그대로 두고 ·
+  //   이 빈 값을 캐시로 믿지 않고(30초마다 다시 읽음 — 읽히면 저절로 풀린다) · 쓰기는 아래 writeRefusal 이 예전처럼 거절한다.
+  const r = loadErr.read(FILE(), parseDb);
+  cache = r.kind === 'ok' ? r.value : null;
   if (!cache) { loadErr.checkCorruptOnly(FILE()); cache = { targets: [], settings: normSettings(), groups: [] }; }
   return cache;
 }
@@ -94,6 +100,7 @@ function withUsedGroups(list, targets) {
   return out;
 }
 function persist(next) {
+  loadErr.assertWritable('집중 모니터링 등록부(focusmon-targets.json)'); // 결정(78 남긴 것 ①): 마지막 방어선 — 읽기 오류 중에 원본을 덮지 않는다(던진다)
   next = { ...next, groups: withUsedGroups(next.groups || [], next.targets || []) };
   fs.mkdirSync(path.dirname(FILE()), { recursive: true });
   atomicWriteFileSync(FILE(), JSON.stringify(next, null, 2), { mode: 0o600 });
@@ -105,7 +112,10 @@ function persist(next) {
 function writeRefusal() {
   load();
   const e = loadErr.get();
-  return e ? { ok: false, code: 'registry-unreadable', reason: '집중 모니터링 등록부(focusmon-targets.json)를 읽지 못해 저장하지 않았습니다 — 손상 보존본을 확인하세요.' } : null;
+  if (!e) return null;
+  // 결정(78 남긴 것 ①): 읽기 오류는 조치가 다르다(손상 보존본이 없다 — 원본이 그 자리에 있다).
+  if (e.readError) { const { status: _s, ...ref } = loadErr.writeRefusal('집중 모니터링 등록부(focusmon-targets.json)'); void _s; return ref; }   // 상태 코드는 이 모듈의 라우트 규약(503)
+  return { ok: false, code: 'registry-unreadable', reason: '집중 모니터링 등록부(focusmon-targets.json)를 읽지 못해 저장하지 않았습니다 — 손상 보존본을 확인하세요.' };
 }
 
 export function listTargets() { return load().targets.map((t) => ({ ...t })); }
@@ -116,7 +126,7 @@ export function getSettings() { return { ...load().settings }; }
  * 입력 검사(순수에 가깝다 — 알려진 엣지 이름 목록을 받는다).
  * @returns {{ok:true, value:object} | {ok:false, code:string, field?:string, reason:string}}
  */
-export function checkTargetInput(body = {}, { agents = [] } = {}) {
+export function checkTargetInput(body = {}, { agents = [], corps = null } = {}) {
   const name = s(body.name, 64);
   const host = s(body.host, 64);
   const username = s(body.username, 64);
@@ -135,7 +145,15 @@ export function checkTargetInput(body = {}, { agents = [] } = {}) {
   // 그룹(v2.982): 없으면 '' · 글자 규칙만 본다(없는 이름이면 저장할 때 목록에 더한다 — 상한은 쓰는 쪽이 groupRefusal 로)
   const group = s(body.group, 64);
   if (group && !GROUP_RE.test(group)) return { ok: false, code: 'bad-group', field: 'group', reason: '그룹 이름은 글자 · 숫자 · 공백 · . _ - 로 1~32자입니다.' };
-  return { ok: true, value: { name, host, port, username, agent: canonAgent || '', enabled: body.enabled !== false, group } };
+  // 법인(v3.11.0 — 디스크 점검 '법인별로 보기'): '' = 지정 안 함(담당 엣지의 법인을 따른다) · 값은 포탈 법인(DataCenter) id 만.
+  //   corps(법인 목록)를 넘긴 호출만 검사한다 — 수정에서 법인 칸을 보내지 않으면 저장된 값을 그대로 둔다(지운 법인이라도 다른 칸 수정을 막지 않게).
+  const corpRaw = s(body.corp, 64);
+  let corp = corpRaw;
+  if (corpRaw && Array.isArray(corps)) {
+    corp = resolvePickedDc(corpRaw, corps);
+    if (!corp) return { ok: false, code: 'bad-corp', field: 'corp', reason: '법인은 포탈에 등록된 법인(설정 › 법인) 가운데에서만 고를 수 있습니다.' };
+  }
+  return { ok: true, value: { name, host, port, username, agent: canonAgent || '', enabled: body.enabled !== false, group, corp } };
 }
 
 const sameEndpoint = (a, b) => a.host === b.host && a.port === b.port && a.username === b.username && String(a.agent).toLowerCase() === String(b.agent).toLowerCase();
@@ -208,9 +226,9 @@ export function setTargetsGroup(ids = [], group = '') {
   return { ok: true, moved, same, missing, group: name };
 }
 
-export function addTarget(body, { agents = [], by = '' } = {}) {
+export function addTarget(body, { agents = [], by = '', corps = [] } = {}) {
   const w = writeRefusal(); if (w) return w;
-  const c = checkTargetInput(body, { agents });
+  const c = checkTargetInput(body, { agents, corps });
   if (!c.ok) return c;
   const cur = load();
   if (cur.targets.length >= MAX_TARGETS) return { ok: false, code: 'too-many', reason: `등록은 ${MAX_TARGETS}대까지입니다.` };
@@ -222,7 +240,7 @@ export function addTarget(body, { agents = [], by = '' } = {}) {
 }
 
 /** 등록 수정(v2.980)이 비교하는 칸 — 화면(web focusMonText.js EDIT_FIELDS)과 같은 목록 · 순서(테스트가 대조). */
-export const EDIT_FIELDS = Object.freeze(['name', 'host', 'port', 'username', 'agent', 'group']);
+export const EDIT_FIELDS = Object.freeze(['name', 'host', 'port', 'username', 'agent', 'group', 'corp']);
 /**
  * 바뀐 칸 — 감사 기록 · 응답용(순수). 담당 노드는 대소문자를 무시한다(sameEndpoint 와 같게 — 입력 검사가 아는 이름으로 맞춘다).
  * @returns {{k:string, from:string|number, to:string|number}[]}
@@ -242,12 +260,12 @@ export function targetChanges(before = {}, after = {}) {
  * moved = 접속처(주소 · 포트 · 계정 · 담당 노드)가 바뀜 → 라우트가 예전 접속처의 상태 · 시험 결과를 지우고 다시 맞춘다(service.targetEndpointChanged).
  * 인증 정지는 지우지 않는다 — 정지 기록이 접속처 + 키 지문 해시라 접속처가 바뀌면 저절로 맞지 않는다(v2.978 ④ 와 같은 규칙).
  */
-export function updateTarget(id, body, { agents = [] } = {}) {
+export function updateTarget(id, body, { agents = [], corps = [] } = {}) {
   const w = writeRefusal(); if (w) return w;
   const cur = load();
   const i = cur.targets.findIndex((t) => t.id === String(id));
   if (i < 0) return { ok: false, code: 'not-found', reason: '없는 대상입니다.' };
-  const c = checkTargetInput({ ...cur.targets[i], ...body }, { agents });
+  const c = checkTargetInput({ ...cur.targets[i], ...body }, { agents, corps: body && Object.prototype.hasOwnProperty.call(body, 'corp') ? corps : null });
   if (!c.ok) return c;
   if (cur.targets.some((t, j) => j !== i && sameEndpoint(t, c.value))) return { ok: false, code: 'duplicate', reason: '같은 노드 · 주소 · 포트 · 계정의 대상이 이미 있습니다.' };
   const gr = groupRefusal(cur, [c.value.group]); if (gr) return gr;
@@ -295,6 +313,7 @@ const HEAD_ALIASES = Object.freeze({
   username: ['계정', '계정명', '사용자', '사용자명', 'user', 'username', 'account', 'login', 'sshuser'],
   agent: ['담당', '담당노드', '담당엣지', '노드', '엣지', '엣지이름', 'agent', 'node', 'edge', 'collector'],
   group: ['그룹', '그룹명', '그룹이름', '분류', 'group', 'groupname'], // v2.982 — 머리글에 있을 때만 그룹을 바꾼다(없으면 그대로)
+  corp: ['법인', '법인명', '법인이름', '데이터센터', 'datacenter', 'dc', 'corp', 'corporation'], // v3.11.0 — 머리글에 있을 때만 법인을 바꾼다(id · 이름)
 });
 const headKey = (c) => String(c || '').toLowerCase().replace(/[\s_\-·.()]/g, '');
 const DEFAULT_COLS = Object.freeze(['name', 'host', 'port', 'username', 'agent']);
@@ -318,7 +337,7 @@ const keyOf = (host, port) => `${host}:${port}`;
  * 계획 — 아무것도 쓰지 않는다.
  * @returns {{ok:true, rows:object[], counts:object, header:boolean} | {ok:false, code, reason}}
  */
-export function planCsv(text, { agents = [] } = {}) {
+export function planCsv(text, { agents = [], corps = [] } = {}) {
   const raw = String(text ?? '');
   if (raw.length > CSV_MAX_BYTES) return { ok: false, code: 'too-big', reason: `CSV 는 ${Math.round(CSV_MAX_BYTES / 1000)}KB 까지 받습니다.` };
   let table;
@@ -341,9 +360,13 @@ export function planCsv(text, { agents = [] } = {}) {
     const cell = (k) => (col[k] == null ? '' : unguardCell(String(r[col[k]] ?? '')).trim());
     const agentRaw = cell('agent');
     const hasGroup = col.group != null;
-    const input = { name: cell('name'), host: cell('host'), port: cell('port') || 22, username: cell('username'), agent: /^(중앙|central)$/i.test(agentRaw) ? '' : agentRaw, group: hasGroup ? cell('group') : '' };
-    const c = checkTargetInput(input, { agents });
-    const shown = { name: input.name.slice(0, 64), host: input.host.slice(0, 64), port: String(input.port).slice(0, 8), username: input.username.slice(0, 32), agent: String(input.agent).slice(0, 128), group: String(input.group).slice(0, 64) };
+    const hasCorp = col.corp != null;
+    const corpCell = hasCorp ? cell('corp') : '';
+    // 법인 칸 — id 또는 이름(대소문자 무시 · matchDatacenterId 하나). 못 맞추면 그 줄은 오류(조용히 비우지 않는다).
+    const corpId = corpCell ? matchDatacenterId([corpCell], corps) : '';
+    const input = { name: cell('name'), host: cell('host'), port: cell('port') || 22, username: cell('username'), agent: /^(중앙|central)$/i.test(agentRaw) ? '' : agentRaw, group: hasGroup ? cell('group') : '', corp: corpId || corpCell };
+    const c = checkTargetInput(input, { agents, corps });
+    const shown = { name: input.name.slice(0, 64), host: input.host.slice(0, 64), port: String(input.port).slice(0, 8), username: input.username.slice(0, 32), agent: String(input.agent).slice(0, 128), group: String(input.group).slice(0, 64), corp: corpCell.slice(0, 64) };
     if (!c.ok) { rows.push({ line, action: 'error', code: c.code, field: c.field || null, reason: c.reason, input: shown }); return; }
     const v = { ...c.value, group: canonGroup(cur, c.value.group) };
     const k = keyOf(v.host, v.port);
@@ -354,9 +377,10 @@ export function planCsv(text, { agents = [] } = {}) {
     if (!hits.length) { rows.push({ line, action: 'add', value: v }); return; }
     const t = hits[0];
     if (!hasGroup) v.group = t.group || ''; // 그룹 열이 없으면 그대로(v2.982 — 예전 CSV 로 갱신해도 그룹이 지워지지 않게)
+    if (!hasCorp) v.corp = t.corp || '';   // 법인 열이 없으면 그대로(v3.11.0 — 같은 규칙)
     // 계정은 대소문자가 다른 계정이다(리눅스) — 노드 이름만 대소문자를 무시한다(checkTargetInput 이 정식 이름으로 바꿔 둔다).
-    const changes = ['name', 'username', 'agent', 'group'].filter((f) => (f === 'agent' ? String(t[f] || '').toLowerCase() !== String(v[f] || '').toLowerCase() : String(t[f] || '') !== String(v[f] || '')));
-    rows.push({ line, action: changes.length ? 'update' : 'same', id: t.id, value: v, before: { name: t.name, username: t.username, agent: t.agent, group: t.group || '' }, changes });
+    const changes = ['name', 'username', 'agent', 'group', 'corp'].filter((f) => (f === 'agent' ? String(t[f] || '').toLowerCase() !== String(v[f] || '').toLowerCase() : String(t[f] || '') !== String(v[f] || '')));
+    rows.push({ line, action: changes.length ? 'update' : 'same', id: t.id, value: v, before: { name: t.name, username: t.username, agent: t.agent, group: t.group || '', corp: t.corp || '' }, changes });
   });
   const counts = { add: 0, update: 0, same: 0, error: 0 };
   for (const r of rows) counts[r.action] += 1;
@@ -375,9 +399,9 @@ export function planCsv(text, { agents = [] } = {}) {
  * @param {{mode?:'valid'|'all', update?:boolean}} o  update=false 면 갱신 줄은 건너뛴다(추가만).
  * @returns {{ok:true, added:number, updated:number, skipped:number, errors:number, ids:string[], moved:string[]} | {ok:false,...}}
  */
-export function applyCsv(text, { agents = [], by = '', mode = 'valid', update = true } = {}) {
+export function applyCsv(text, { agents = [], by = '', mode = 'valid', update = true, corps = [] } = {}) {
   const w = writeRefusal(); if (w) return w;
-  const plan = planCsv(text, { agents });
+  const plan = planCsv(text, { agents, corps });
   if (!plan.ok) return plan;
   if (mode === 'all' && plan.counts.error) {
     const errors = plan.rows.filter((r) => r.action === 'error').slice(0, 50).map((r) => ({ line: r.line, code: r.code, reason: r.reason }));
@@ -395,7 +419,7 @@ export function applyCsv(text, { agents = [], by = '', mode = 'valid', update = 
     } else if (r.action === 'update' && update) {
       const i = targets.findIndex((t) => t.id === r.id);
       if (i < 0) continue;
-      const next = { ...targets[i], name: r.value.name, username: r.value.username, agent: r.value.agent, group: r.value.group || '' };
+      const next = { ...targets[i], name: r.value.name, username: r.value.username, agent: r.value.agent, group: r.value.group || '', corp: r.value.corp || '' };
       if (targets.some((t, j) => j !== i && sameEndpoint(t, next))) continue; // 다른 등록과 같은 접속처가 되면 바꾸지 않는다
       if (!sameEndpoint(targets[i], next)) moved.push(next.id);
       targets[i] = next; ids.push(next.id); updated += 1;
@@ -406,19 +430,22 @@ export function applyCsv(text, { agents = [], by = '', mode = 'valid', update = 
 }
 
 /** 예전 이름(v2.976 라우트 · 테스트) — '전부 아니면 넣지 않기' + 추가만. */
-export function importCsv(text, { agents = [], by = '' } = {}) {
-  const r = applyCsv(text, { agents, by, mode: 'all', update: false });
+export function importCsv(text, { agents = [], by = '', corps = [] } = {}) {
+  const r = applyCsv(text, { agents, by, mode: 'all', update: false, corps });
   return r.ok ? { ...r, ok: true } : r;
 }
 
-export const CSV_HEADER = Object.freeze(['이름', 'IP', '포트', '계정', '담당 노드', '그룹']);
-/** 대상 목록(기본: 등록부) → CSV 줄 배열(머리글 포함 — 다시 가져올 수 있는 모양 · v2.982 그룹 열). */
-export function exportRows(list = null) {
-  return [[...CSV_HEADER], ...(list || load().targets).map((t) => [t.name, t.host, t.port, t.username, t.agent || '중앙', t.group || ''])];
+export const CSV_HEADER = Object.freeze(['이름', 'IP', '포트', '계정', '담당 노드', '그룹', '법인']);
+/**
+ * 대상 목록(기본: 등록부) → CSV 줄 배열(머리글 포함 — 다시 가져올 수 있는 모양 · v2.982 그룹 열 · v3.11.0 법인 열).
+ * 법인 칸은 corpName(id) 이 주는 이름(다시 가져올 때 이름으로도 맞춘다) — 주지 않으면 id 그대로.
+ */
+export function exportRows(list = null, { corpName = (id) => id } = {}) {
+  return [[...CSV_HEADER], ...(list || load().targets).map((t) => [t.name, t.host, t.port, t.username, t.agent || '중앙', t.group || '', t.corp ? (corpName(t.corp) || t.corp) : ''])];
 }
 /** 빈 양식 — 머리글 + 예시 한 줄(문서용 주소 192.0.2.0/24 · RFC 5737 — 실제 서버가 아니다. SSRF 가드는 이 대역을 막지 않으므로 지우지 않고 넣으면 등록된다). */
 export function csvTemplateRows() {
-  return [[...CSV_HEADER], ['web-01', '192.0.2.11', 22, 'dvcmon', '중앙', 'WEB']];
+  return [[...CSV_HEADER], ['web-01', '192.0.2.11', 22, 'dvcmon', '중앙', 'WEB', '']];
 }
 
 /**

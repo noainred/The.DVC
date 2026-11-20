@@ -35,13 +35,16 @@ export function sanitizeIdleRow(r, targetKeys) {
     metrics: Object.fromEntries(MET_KEYS.map((k) => [k, N(m[k])])),
     ...(isObj(r.periodic) ? { periodic: { highDays: N(r.periodic.highDays), sameWeekday: r.periodic.sameWeekday === true } } : {}),
     ...(day(r.candSince) ? { candSince: day(r.candSince) } : {}), ...(day(r.candLeft) ? { candLeft: day(r.candLeft) } : {}),
+    // 83회차(81회차 결정): 기간 일부 못 읽음(못 연 1일 연 파일 수) — 양의 정수만 · 상한 100.
+    ...(Number.isInteger(N(r.unreadPeriods)) && N(r.unreadPeriods) > 0 ? { unreadPeriods: Math.min(100, N(r.unreadPeriods)) } : {}),
   };
 }
 
 /** 봉투 idle → 중앙 보관 모양(순수). */
 export function sanitizeIdleEnvelope(c, { targetKeys = new Set(), now = Date.now() } = {}) {
   if (!isObj(c)) return null;
-  if (c.unreadable === true) return { unreadable: true, rows: [], dropped: 0 };
+  // 83회차(81회차 결정): 엣지 상태 파일 읽기 오류 표지(불리언만) — 중앙 화면이 손상과 가른다.
+  if (c.unreadable === true) return { unreadable: true, ...(c.readError === true ? { readError: true } : {}), rows: [], dropped: 0 };
   const arr = Array.isArray(c.rows) ? c.rows : [];
   const rows = []; let dropped = 0;
   for (const r of arr.slice(0, 20_000)) { const x = sanitizeIdleRow(r, targetKeys); if (x) rows.push(x); else dropped += 1; }

@@ -486,7 +486,8 @@ test('재확인 R1 — 엣지 이름 정규화는 전 항목 id 일치 먼저 ·
   const A = remoteCollectorIndex({ list: [{ id: 'x1', name: 'gm1' }, { id: 'gm1', name: 'Warsaw' }], error: null });
   assert.deepEqual(CT.canonicalAgentRef(A, 'gm1'), { name: 'Warsaw', id: 'gm1' }, '인증 이름 = 등록 id — 앞 항목의 name 보다 id 일치가 먼저(예전: x1 의 name 으로 묶음)');
   assert.deepEqual(CT.canonicalAgentRef(A, 'x1'), { name: 'gm1', id: 'x1' });
-  assert.equal(CT.agentNameClash(A, 'gm1', 'x1'), false, 'clashA: 이름 gm1 은 목록 앞 x1 로 간다(findCollectorByName 과 같은 항목)');
+  // 결정(56~75 남긴 것) 66 ①: findCollectorByName 이 id 정확 일치 먼저로 바뀌었다 — 이름 gm1 은 목록 순서와 무관하게 id gm1(다른 수집 서버)로 간다(예전 기대: false — 목록 앞 x1)
+  assert.equal(CT.agentNameClash(A, 'gm1', 'x1'), true, 'clashA: 이름 gm1 은 id 가 gm1 인 다른 수집 서버로 간다(findCollectorByName 과 같은 항목)');
   assert.equal(CT.agentNameClash(A, 'Warsaw', 'gm1'), false);
   const B = remoteCollectorIndex({ list: [{ id: 'gm1', name: 'Warsaw' }, { id: 'x1', name: 'gm1' }], error: null });
   assert.equal(CT.agentNameClash(B, 'gm1', 'x1'), true, 'clashB: 이름 gm1 은 다른 수집 서버(gm1)로 간다');
@@ -515,7 +516,8 @@ test('재확인 R1 — 엣지 이름 정규화는 전 항목 id 일치 먼저 ·
   const call = await app();
   const REG = await import('../src/collector/registry.js');
   for (const [label, cols, clashExpected] of [
-    ['clashA', [{ id: 'x1', name: 'gm1', url: 'https://10.9.0.7:3443', enabled: true }, { id: 'gm1', name: 'Warsaw', url: 'https://10.9.0.1:3443', enabled: true }], false],
+    // 결정(56~75) 66 ①: 순서와 무관하게 id 일치 먼저 — clashA 도 겹침(예전 기대 false)
+    ['clashA', [{ id: 'x1', name: 'gm1', url: 'https://10.9.0.7:3443', enabled: true }, { id: 'gm1', name: 'Warsaw', url: 'https://10.9.0.1:3443', enabled: true }], true],
     ['clashB', [{ id: 'gm1', name: 'Warsaw', url: 'https://10.9.0.1:3443', enabled: true }, { id: 'x1', name: 'gm1', url: 'https://10.9.0.7:3443', enabled: true }], true],
   ]) {
     await scene({ collectors: cols, fleetAgent: 'gm1', collectorId: 'gm1', envelope: null, settings: { corps: { vcA: true, vcB: true } },
@@ -546,7 +548,8 @@ test('2차 재확인 — 같은 name 두 등록: 같은 URL(같은 엣지) → �
   assert.equal(CT.agentNameClash(noScheme, 'gm1', 'gm1'), false, '스킴 없는 주소의 기본은 https://(저장 규약)');
   const diff = remoteCollectorIndex({ list: [{ id: 'a', name: 'edge-pl', url: 'https://10.9.0.1:3443' }, { id: 'b', name: 'edge-pl', url: 'https://10.9.0.2:3443' }], error: null });
   assert.equal(CT.agentNameClash(diff, 'edge-pl', 'b'), true, '다른 URL — 다른 엣지(겹침)');
-  assert.equal(CT.agentNameClash(diff, 'edge-pl', 'a'), false, '이름이 가는 항목 자신은 겹침이 아니다');
+  // 결정(56~75) 66 ①: 표시 이름이 둘이면 이름으로는 정할 수 없다(findCollectorByName null) — 목록 앞 항목 a 자신도 그 이름으로는 닿지 않는다(예전 기대 false)
+  assert.equal(CT.agentNameClash(diff, 'edge-pl', 'a'), true, '겹친 이름은 어느 항목으로도 정해지지 않는다(URL 이 다르다)');
   const empty = remoteCollectorIndex({ list: [{ id: 'a', name: 'x', url: '' }, { id: 'b', name: 'x', url: '' }], error: null });
   assert.equal(CT.agentNameClash(empty, 'x', 'b'), true, 'URL 이 빈 항목은 같은 엣지라고 단정하지 않는다');
   const half = remoteCollectorIndex({ list: [{ id: 'a', name: 'x', url: 'https://10.9.0.1:3443' }, { id: 'b', name: 'x' }], error: null });
@@ -562,12 +565,15 @@ test('2차 재확인 — 같은 name 두 등록: 같은 URL(같은 엣지) → �
   assert.deepEqual(del.map((x) => [x.serviceTag, x.agent, !!x.agentClash]).sort(), [['RMT001', 'gm1', false], ['RMT002', 'gm1', false]]);
   let m = await call('adm', '/tools/bm-usage/onboard/missing');
   assert.deepEqual(['RMT001', 'RMT002'].map((k) => m.body.rows.find((r) => r.serviceTag === k)?.bucket), ['both', 'idrac'], '같은 엣지 — 보관분 커버리지를 그대로(예전 판 e4248dd4: unknown · edge-name-clash)');
-  // 다른 엣지 두 등록(dupDiff — URL 다름): 겹침 유지
+  // 다른 엣지 두 등록(dupDiff — URL 다름): 결정(56~75 남긴 것) 66 ①로 이름 gm1 은 **id 가 gm1 인 항목**(이 엣지)으로 간다 — 겹침 아님
+  //   (예전 기대: 목록 앞 gm1-old 로 가서 겹침 · edge-name-clash). 이름이 같은 다른 항목(gm1-old)이 있어도 id 일치가 먼저다.
   const dupDiff = [{ id: 'gm1-old', name: 'gm1', url: 'https://10.9.0.7:3443', enabled: true }, { id: 'gm1', name: 'gm1', url: 'https://10.9.0.1:3443', enabled: true }];
   await scene({ collectors: dupDiff, fleetAgent: 'gm1', collectorId: 'gm1', envelope: env });
   a = await call('adm', '/tools/bm-usage');
   del = a.body.skipped.filter((x) => x.reason === 'edge-delegated');
-  assert.deepEqual(del.map((x) => [x.serviceTag, !!x.agentClash]).sort(), [['RMT001', true], ['RMT002', true]], '이름 gm1 은 다른 엣지(gm1-old)로 간다');
+  assert.deepEqual(del.map((x) => [x.serviceTag, !!x.agentClash]).sort(), [['RMT001', false], ['RMT002', false]], '이름 gm1 은 id 가 gm1 인 이 엣지로 간다');
   m = await call('adm', '/tools/bm-usage/onboard/missing');
-  assert.deepEqual(['RMT001', 'RMT002'].map((k) => m.body.rows.find((r) => r.serviceTag === k)?.reason), ['edge-name-clash', 'edge-name-clash']);
+  assert.deepEqual(['RMT001', 'RMT002'].map((k) => m.body.rows.find((r) => r.serviceTag === k)?.bucket), ['both', 'idrac'], '이 엣지 보관분의 커버리지 그대로');
+  const REG2 = await import('../src/collector/registry.js');
+  assert.equal(REG2.findCollectorByName('gm1')?.id, 'gm1', '등록부 조회도 같은 항목(id 먼저)');
 });

@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  shortFp, dateTime, ageDays, featuresText, folderTree, keysInFolder, inboxInFolder, sortedCheck, suggestKeyName,
+  shortFp, dateTime, ageDays, featuresText, legacyPickText, folderTree, keysInFolder, inboxInFolder, sortedCheck, suggestKeyName,
   LEVEL_TEXT, LEVEL_TONE, KEY_MODE_TEXT, ISSUE_TEXT, serverStatus, auditTime,
 } from './sshAccessText.js';
 
@@ -30,6 +30,11 @@ describe('SSH 공용 접속 — 표시 도우미', () => {
   });
   it('허용 기능 — null 은 모든 기능(예전 방식) · [] 는 없음 · id 는 목록 이름으로', () => {
     expect(featuresText(null)).toBe('모든 기능(예전 방식)');
+    // v3.30: 서버가 ‘직접 켜야’ 로 표시한 기능은 예전 방식에서 빠진다고 밝힌다(서버 명령 실행)
+    const cat = [{ id: 'bm-usage', label: '베어메탈 사용률' }, { id: 'server-cmd', label: '서버 명령 실행', explicit: true }];
+    expect(featuresText(null, cat)).toBe('모든 기능(예전 방식 — 서버 명령 실행 제외)');
+    expect(legacyPickText(cat)).toBe('제한 없음(예전 방식 — 서버 명령 실행 제외)');
+    expect(legacyPickText([])).toBe('제한 없음(예전 방식 — 모든 기능)');
     expect(featuresText([])).toBe('없음');
     expect(featuresText(['bm-usage', 'x'], [{ id: 'bm-usage', label: '베어메탈 사용률' }])).toBe('베어메탈 사용률 · x');
   });
@@ -97,7 +102,11 @@ describe('SSH 공용 접속 화면 — 규약', () => {
     expect(src).toMatch(/const r = must\(await fn\(\)\)/);
   });
   it('기능 고르기는 렌더 밖 컴포넌트 · 예전 키는 ‘제한 없음’ 을 보존 · 0개는 저장 단추를 막는다', () => {
-    expect(src).toMatch(/^function FeaturePicker\(/m);
+    // v3.24: 두 화면(SshAccessSettings · ServerAccessHier)이 함께 쓰려고 sshAccessParts.jsx 로 옮겼다 — 여전히 모듈 최상위(렌더 밖) 컴포넌트다.
+    const parts = fs.readFileSync(path.join(HERE, 'sshAccessParts.jsx'), 'utf8');
+    expect(parts).toMatch(/^export function FeaturePicker\(/m);
+    expect(src).toMatch(/import \{[^}]*FeaturePicker[^}]*\} from '\.\/sshAccessParts\.jsx'/);
+    expect(src).not.toMatch(/^\s+(?:const|function) FeaturePicker\b/m);
     expect(src).toMatch(/features: k\.features == null \? null : \[\.\.\.k\.features\]/);
     expect(src).toMatch(/allowAll=\{edit\.key\.features == null\}/);
     expect((src.match(/!featuresChosen\(/g) || []).length).toBeGreaterThanOrEqual(6);
@@ -108,6 +117,7 @@ describe('SSH 공용 접속 화면 — 규약', () => {
   });
   it('설정 메뉴에 등록 — 보안 묶음 · 키 ssh-access', () => {
     const st = fs.readFileSync(path.join(HERE, 'Settings.jsx'), 'utf8');
-    expect(st).toMatch(/\{ k: 'ssh-access', label: 'SSH 공용 접속', C: SshAccessSettings, group: 'security'/);
+    // v3.24(서버 접속 D7 — 사용자 결정 ‘기본값’): 이름만 ‘서버 접속(SSH · Windows)’ 으로 — 설정 키 ssh-access · 묶음은 그대로.
+    expect(st).toMatch(/\{ k: 'ssh-access', label: '서버 접속\(SSH · Windows\)', C: SshAccessSettings, group: 'security'/);
   });
 });

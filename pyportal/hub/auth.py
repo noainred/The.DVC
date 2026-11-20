@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import base64
+from collections import deque
 import hashlib
 import hmac
 import json
@@ -24,7 +25,7 @@ import time
 from pathlib import Path
 
 from .config import config
-from .jsonfile import now_iso, read_json, write_json, write_text
+from .jsonfile import now_iso, preserve_corrupt, read_json, read_json_state, write_json, write_text
 
 PBKDF2_ROUNDS = 210_000
 ROLES = ("admin", "viewer")
@@ -35,13 +36,21 @@ class AuthError(Exception):
     """사용자에게 그대로 보여줄 수 있는 인증/검증 실패."""
 
 
+def _pw_bytes(password) -> bytes:
+    """비밀번호 → KDF 입력 바이트. 전체 점검 117회차 F1(재현): JSON 은 짝 없는 서로게이트("\\ud800")를 그대로 str 로 읽는데 strict UTF-8
+    인코딩은 그 글자에서 UnicodeEncodeError(ValueError)다 — 있는 · 사용 중인 계정만 verify_password 까지 가서 400(인코딩 오류 원문 · 실패 미집계 ·
+    해시 없음 2ms)을, 없는 · 중지 계정은 더미 해시가 예외를 삼켜 401 을 받아 **요청 한 번으로 계정이 열거**됐다(잠금 카운터도 오르지 않았다).
+    surrogatepass 로 인코딩해 세 경로(해시 · 검증 · 더미)가 같은 입력 · 같은 비용을 쓴다. 정상 문자열의 바이트는 예전과 같다(저장된 해시 호환)."""
+    return str(password or "").encode("utf-8", "surrogatepass")
+
+
 def hash_password(password: str) -> dict:
     if not isinstance(password, str) or len(password) < 8:
         raise AuthError("비밀번호는 8자 이상이어야 합니다.")
     if len(password) > 200:
         raise AuthError("비밀번호가 너무 깁니다(200자 이하).")
     salt = secrets.token_bytes(16)
-    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, PBKDF2_ROUNDS)
+    digest = hashlib.pbkdf2_hmac("sha256", _pw_bytes(password), salt, PBKDF2_ROUNDS)
     return {
         "algo": "pbkdf2_sha256",
         "rounds": PBKDF2_ROUNDS,
@@ -60,7 +69,7 @@ def _burn_password_work(password: str) -> None:
     못하게 한다(v2.500 감사 M1 — 실측 100배 차이였다). 결과는 쓰지 않는다.
     """
     try:
-        hashlib.pbkdf2_hmac("sha256", str(password or "").encode("utf-8"), _DUMMY_SALT, PBKDF2_ROUNDS)
+        hashlib.pbkdf2_hmac("sha256", _pw_bytes(password), _DUMMY_SALT, PBKDF2_ROUNDS)
     except Exception:
         pass
 
@@ -76,7 +85,7 @@ def verify_password(record, password: str) -> bool:
         return False
     if not salt or not expected:
         return False
-    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, rounds)
+    digest = hashlib.pbkdf2_hmac("sha256", _pw_bytes(password), salt, rounds)
     return hmac.compare_digest(digest, expected)
 
 
@@ -106,6 +115,7 @@ class UserStore:
         self._lock = threading.RLock()
         self._users = None
         self._mtime = None   # 파일 변경 감지(아래 _load) — 외부 프로세스의 수정을 재시작 없이 반영
+        self._unreadable = False   # 31회차 F3: 파일은 있는데 읽지 못함(권한) — 저장 · 부트스트랩을 막는다(fail-closed)
 
     # ---------- 로드/저장 ----------
 
@@ -118,12 +128,29 @@ class UserStore:
         except OSError:
             mtime = None
         if self._users is None or mtime != self._mtime:
-            raw = read_json(self._path, [], expect=list)
+            try:
+                raw = read_json(self._path, [], expect=list, strict_io=True, quiet=self._unreadable)
+            except OSError:
+                # 31회차 F3: 읽지 못함은 손상이 아니다 — 원본을 옮기지 않고, 직전 목록이 있으면 그대로 쓴다(mtime 은 두어 다음에 다시 읽는다).
+                #   처음부터 못 읽었으면 빈 목록 + 표지(저장 · 새 admin 생성 금지). 로그는 상태가 바뀔 때 한 번(35회차 R6 — 요청마다 찍혔다).
+                self._unreadable = True
+                if self._users is None:
+                    self._users = []
+                return self._users
             self._users = [u for u in (self._clean(entry) for entry in raw) if u]
             self._mtime = mtime
+            self._unreadable = False
         return self._users
 
+    def _refuse_if_unreadable(self):
+        """35회차 R6(재현): 못 읽음 상태의 쓰기는 **바꾸기 전에** 거절한다 — 예전에는 메모리 목록을 먼저 고친 뒤 저장에서 실패해, 400 을 주고도
+        새 비밀번호 · 중지 · 삭제가 메모리에서 효력을 가졌고 파일이 다시 읽히면 조용히 되돌아갔다."""
+        if self._unreadable:
+            raise AuthError(f"{self._path.name} 을(를) 읽지 못해 저장하지 않습니다 — 파일 소유자 · 권한을 확인하세요"
+                            "(서비스 계정이 읽을 수 있어야 합니다).")
+
     def _save(self):
+        self._refuse_if_unreadable()
         write_json(self._path, self._users)
         try:
             self._mtime = self._path.stat().st_mtime_ns
@@ -140,7 +167,7 @@ class UserStore:
         role = entry.get("role")
         try:
             version = int(entry.get("tokenVersion", 1))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):   # 117회차 F8: 1e999 · Infinity(float inf) 한 칸으로 계정 파일 전체를 못 읽지 않게
             version = 1
         return {
             "username": username,
@@ -165,6 +192,11 @@ class UserStore:
         with self._lock:
             users = self._load()
             if users:
+                return None
+            if self._unreadable:
+                # 31회차 F3: 파일이 있는데 읽지 못했다 — 계정이 없는 것이 아니다. 새 admin 을 만들면 기존 계정 전부를 덮는다.
+                print(f"[auth] {self._path.name} 을(를) 읽지 못해 초기 admin 을 만들지 않습니다 — 소유자 · 권한을 고친 뒤 재시작하세요.",
+                      flush=True)
                 return None
             password = generate_password()
             users.append({
@@ -225,23 +257,32 @@ class UserStore:
         name = str(username or "").strip()
         if not name or not isinstance(password, str) or not password:
             return None
+        # 56회차 F2(재현): PBKDF2(21만 회)는 잠금 **밖에서** 돌린다 — 예전에는 계정 저장소 잠금을 쥔 채 해시를 계산해, 로그인 시도가
+        #   겹치면 로그인한 모든 요청(세션 판정의 token_version · role_of 가 같은 잠금)이 시도 수 × 해시 시간만큼 줄을 섰다
+        #   (실측: 실패 로그인 8건 동시 → 세션 판정 0.23초, 해시가 느린 서버에서는 그 몇 배). 잠금 안에서는 계정 사본만 고른다.
         with self._lock:
-            for user in self._load():
-                if user["username"].lower() != name.lower():
-                    continue
-                if not user["enabled"] or not user["password"]:
-                    # v2.500(감사 M1): 중지·비번없는 계정도 **같은 비용**을 태운다. 아래 주석 참조.
-                    _burn_password_work(password)
-                    return None
-                if verify_password(user["password"], password):
-                    return {"username": user["username"], "role": user["role"],
-                            "tokenVersion": user["tokenVersion"]}
+            match = next((dict(u) for u in self._load() if u["username"].lower() == name.lower()), None)
+        if match is None:
+            # v2.500(감사 M1): 없는 계정은 PBKDF2 를 돌리지 않아 응답이 훨씬 빨랐다(로컬 실측:
+            # 존재 계정 오답 ~128ms vs 없는 계정 ~1.5ms, 약 100배). 문구는 같아도 **타이밍으로**
+            # 계정 열거가 됐다 — 이 함수의 문서화된 의도가 우회된 것이다. 더미 해시로 비용을 맞춘다.
+            _burn_password_work(password)
+            return None
+        if not match["enabled"] or not match["password"]:
+            # v2.500(감사 M1): 중지·비번없는 계정도 **같은 비용**을 태운다. 위 주석 참조.
+            _burn_password_work(password)
+            return None
+        if not verify_password(match["password"], password):
+            return None
+        # 59회차(56회차 F2 반증 — 재현): 해시를 잠금 밖으로 옮기면서 '사본을 고른 뒤 검증이 끝나기까지' 사이에 비밀번호 변경 · 중지 · 삭제가
+        #   끼어들 수 있게 됐다 — 옛 비밀번호가 '로그인 성공'(감사 login 성공 · 실패 카운터 초기화)을 받고, 역할 변경이 끼면 정상 로그인이
+        #   곧바로 죽은 세션(옛 tokenVersion)이 됐다. 잠금 안에서 지금 기록을 다시 보고 같은 비밀번호 기록 · 사용 중일 때만 **지금 값**으로 돌려준다.
+        with self._lock:
+            live = next((u for u in self._load() if u["username"] == match["username"]), None)
+            if not live or not live["enabled"] or live["password"] != match["password"]:
                 return None
-        # v2.500(감사 M1): 없는 계정은 PBKDF2 를 돌리지 않아 응답이 훨씬 빨랐다(로컬 실측:
-        # 존재 계정 오답 ~128ms vs 없는 계정 ~1.5ms, 약 100배). 문구는 같아도 **타이밍으로**
-        # 계정 열거가 됐다 — 이 함수의 문서화된 의도가 우회된 것이다. 더미 해시로 비용을 맞춘다.
-        _burn_password_work(password)
-        return None
+            return {"username": live["username"], "role": live["role"],
+                    "tokenVersion": live["tokenVersion"]}
 
     def token_version(self, username: str):
         """서명 토큰 검증용 현재 카운터. 계정이 없거나 중지면 None(=무효)."""
@@ -259,10 +300,25 @@ class UserStore:
                     return str(user["role"]) if user["enabled"] else None
         return None
 
+    def bump_all_token_versions(self) -> int:
+        """모든 계정의 토큰을 한 번에 무효화한다(저장 1회) — 결정(56~75 남긴 것): 로그아웃 폐기 목록을 못 읽어 fail-closed 할 때.
+        반환: 올린 계정 수. 못 읽음 상태면 AuthError, 저장 실패면 OSError(호출부가 메모리 컷오프로 대신한다)."""
+        with self._lock:
+            users = self._load()
+            self._refuse_if_unreadable()
+            if not users:
+                return 0
+            for user in users:
+                user["tokenVersion"] = int(user["tokenVersion"]) + 1
+                user["updatedAt"] = now_iso()
+            self._save()
+            return len(users)
+
     def bump_token_version(self, username: str) -> None:
         """그 계정으로 발급된 모든 토큰을 즉시 무효화한다."""
         with self._lock:
             users = self._load()
+            self._refuse_if_unreadable()   # 35회차 R6
             for user in users:
                 if user["username"] == username:
                     user["tokenVersion"] = int(user["tokenVersion"]) + 1
@@ -276,10 +332,17 @@ class UserStore:
         username = str(username or "").strip()
         if not username or len(username) > 64:
             raise AuthError("사용자명을 입력하세요(64자 이하).")
+        if username in (".", "..") or "/" in username:
+            # 35회차 R5: 브라우저가 URL 경로의 점 조각을 정규화해 이 이름의 계정은 화면에서 관리(중지 · 삭제 · 비밀번호)할 수 없다.
+            raise AuthError("사용자명으로 '.' · '..' 과 '/' 는 쓸 수 없습니다.")
+        if any(ord(ch) < 0x20 or ord(ch) == 0x7f for ch in username):
+            # 56회차 개선: 제어문자(개행 · ESC)는 받지 않는다 — 로그인 로그('[auth] 설정 로그인: <이름>')에 가짜 줄을 끼워 넣을 수 있다.
+            raise AuthError("사용자명에 제어문자(개행 · 탭 등)는 쓸 수 없습니다.")
         if role not in ROLES:
             raise AuthError("역할은 admin 또는 viewer 여야 합니다.")
         with self._lock:
             users = self._load()
+            self._refuse_if_unreadable()   # 35회차 R6
             if any(u["username"].lower() == username.lower() for u in users):
                 raise AuthError("이미 존재하는 사용자명입니다.")
             record = hash_password(password)
@@ -292,8 +355,12 @@ class UserStore:
             return self.public_list()
 
     def update(self, username: str, *, role=None, enabled=None):
+        if enabled is not None and not isinstance(enabled, bool):
+            # 56회차 F7(재현): bool("false") 는 True 다 — 자동화 · 스크립트가 문자열로 '중지' 를 보내면 계정이 오히려 켜졌다(중지 계정 재활성).
+            raise AuthError("enabled 는 true 또는 false 여야 합니다.")
         with self._lock:
             users = self._load()
+            self._refuse_if_unreadable()   # 35회차 R6
             target = None
             for user in users:
                 if user["username"] == username:
@@ -301,6 +368,11 @@ class UserStore:
                     break
             if not target:
                 raise AuthError("사용자를 찾을 수 없습니다.")
+            # 전체 점검 117회차 F5(재현): 마지막 admin 보호(_assert_admin_remains)는 **바꾸기 전에** 본다 — 예전에는 메모리 기록을 먼저 고친 뒤 거절해,
+            #   하나뿐인 admin 이 자기 역할을 viewer 로(또는 중지로) 보내면 응답은 400 '활성 admin … 있어야 합니다' 인데 메모리에서는 강등 · 세션 폐기가
+            #   효력을 가졌다(다시 로그인하면 viewer — 재기동 전까지 admin 0명). 그 상태에서 누가 자기 비밀번호를 바꾸면 그 목록이 파일에 굳었다
+            #   (35회차 R6 과 같은 꼴 — 거절한 변경이 메모리에 남음). 사본에 적용해 검사를 지난 뒤에만 원본에 옮긴다.
+            live, target = target, dict(target)
             if role is not None:
                 if role not in ROLES:
                     raise AuthError("역할은 admin 또는 viewer 여야 합니다.")
@@ -314,14 +386,16 @@ class UserStore:
                 if bool(enabled) is False and target["enabled"]:
                     target["tokenVersion"] = int(target["tokenVersion"]) + 1
                 target["enabled"] = bool(enabled)
-            self._assert_admin_remains(users)
+            self._assert_admin_remains([target if user is live else user for user in users])
             target["updatedAt"] = now_iso()
+            live.update(target)
             self._save()
             return self.public_list()
 
     def set_password(self, username: str, password: str):
         with self._lock:
             users = self._load()
+            self._refuse_if_unreadable()   # 35회차 R6
             target = next((u for u in users if u["username"] == username), None)
             if not target:
                 raise AuthError("사용자를 찾을 수 없습니다.")
@@ -345,6 +419,14 @@ class UserStore:
         """
         password = generate_password()
         existing = self.get(username)
+        if not existing:
+            # 31회차 F10(재현): 로그인은 대소문자를 무시하는데 복구는 정확 일치만 찾아, 'Admin2' 를 'admin2' 로 부르면
+            #   add 의 중복 검사(대소문자 무시)에 걸려 예외로 끝났다. 대소문자만 다른 기존 계정을 찾아 그 이름으로 초기화한다.
+            name = str(username or "").strip().lower()
+            with self._lock:
+                existing = next((u for u in self._load() if u["username"].lower() == name), None)
+            if existing:
+                username = existing["username"]
         if existing:
             self.set_password(username, password)      # tokenVersion 인상 포함
             if not existing.get("enabled", True):
@@ -357,6 +439,7 @@ class UserStore:
     def delete(self, username: str):
         with self._lock:
             users = self._load()
+            self._refuse_if_unreadable()   # 35회차 R6
             remaining = [u for u in users if u["username"] != username]
             if len(remaining) == len(users):
                 raise AuthError("사용자를 찾을 수 없습니다.")
@@ -365,6 +448,10 @@ class UserStore:
             self._assert_admin_remains(remaining)
             self._users = remaining
             self._save()
+            if username == BOOTSTRAP_USERNAME:
+                # 56회차 F4(재현): 초기 계정을 지우면 그 비밀번호가 적힌 파일도 지운다 — 예전에는 남아 화면이 '비밀번호를 변경하면 자동 삭제' 라고
+                #   계속 안내했지만 바꿀 계정이 없어 영영 지워지지 않았다(지운 계정의 평문 비밀번호가 데이터 폴더에 남음).
+                self.drop_initial_password_file()
             return self.public_list()
 
     @staticmethod
@@ -384,30 +471,46 @@ class SessionStore:
     무효화는 어떻게 하나(무상태의 약점 보완):
     - **계정 단위**: `users.json` 의 `tokenVersion` 을 올리면 그 계정 토큰이 전부 죽는다
       (비밀번호 변경·계정 중지·삭제 시 자동). 서명 안에 발급 시점 버전이 들어 있다.
-    - **개별 로그아웃**: 만료 전까지만 유지되는 메모리 폐기 목록에 담는다(재시작하면
-      사라지지만, 그때는 어차피 서명 검증이 아니라 tokenVersion 으로 통제된다).
+    - **개별 로그아웃**: 만료 전까지만 유지되는 폐기 목록에 담는다. 전체 점검 31회차 F5(재현): 예전에는 메모리에만 두어
+      재기동하면 로그아웃한 토큰이 TTL 안에서 다시 통과했다(옛 주석의 'tokenVersion 으로 통제' 는 사실이 아니었다 — 로그아웃은
+      tokenVersion 을 올리지 않는다). 이제 `session-revoked.json`(토큰 SHA-256 → 만료시각, 0600, 원자적 쓰기)에도 남긴다.
 
-    서명 키는 데이터 폴더에 0600 으로 보관한다 — 키가 새면 임의 계정 토큰을 위조할 수 있다.
+    결정(56~75 남긴 것 — fail-closed): 폐기 목록이 손상(파싱 · 형식 · 해석 못 하는 항목)이거나 읽기 오류면 어떤 토큰이 로그아웃했는지
+    모른다. 예전에는 손상 파일을 옮기고 빈 목록으로 돌아 로그아웃한 토큰이 만료까지 되살아났다. 이제 ① 원본을 보존(손상은 `.corrupt.*`,
+    읽기 오류는 그대로 — 옮기지도 덮어쓰지도 않는다) ② **그 시점 이전에 발급된 토큰을 모두 거부**(메모리 컷오프 + 전 계정 tokenVersion 인상 +
+    새 파일의 `_cutoff` 표지 — 재기동 뒤에도) ③ 빈 목록으로 시작 ④ 콘솔 · 감사 로그 · 설정 화면(revoked_load_error)에 사유를 남긴다.
+    폐기 목록에 쓸 수 없는 동안의 로그아웃(읽기 오류 · 저장 실패)은 그 계정 단위 폐기(tokenVersion 인상)로 접는다 — 메모리에만 남기면 재기동 뒤 되살아난다.
     """
 
     GLOBAL_FACTOR = 10          # 전역 임계값 = max_fails × 이 배수
+    FAIL_NAMES_MAX = 16         # 출발지당 따로 세는 계정 이름 수(117회차 F2) — 넘치면 한 칸(None)에 모은다(성공으로 지워지지 않는다)
+    CUTOFF_KEY = "_cutoff"      # 폐기 목록 파일의 fail-closed 표지(이 시각 이전 발급 토큰 거부) — 64자 토큰 해시 키와 겹치지 않는다
 
     def __init__(self, ttl_seconds: int, max_fails: int, lockout_seconds: int,
-                 secret_path=None, users=None):
+                 secret_path=None, users=None, revoked_path=None):
         self._ttl = ttl_seconds
         self._max_fails = max_fails
         self._lockout = lockout_seconds
         self._users = users
         self._secret = self._load_secret(secret_path)
-        self._revoked = {}       # token -> 만료시각(개별 로그아웃)
+        self._revoked_path = Path(revoked_path) if revoked_path else None
+        self._revoked_user = {}   # sha256(token) -> 계정(37회차 R5 — 상한을 넘치면 계정 단위 폐기로 접는다)
+        self._revoked = {}        # sha256(token) -> 만료시각(개별 로그아웃 — 31회차 F5: 파일에도)
+        self._global_cutoff = 0.0     # 이 시각 이전 발급(i <= cutoff) 토큰은 전부 거부 — fail-closed(결정 · 56~75 남긴 것)
+        self._revoked_error = None    # fail-closed 사유 {file, state, at, accountsReset} — 화면 · 감사용
+        self._revoked_writable = True  # 읽기 오류 · 보존 실패면 False — 원본을 덮어쓰지 않는다
+        self._load_revoked()
         self._user_revoked = {}  # username -> 이 시각 이전 발급 토큰 거부(계정 단위 폐기)
         # 마지막 발급시각 — time.time() 이 같은 마이크로초에 같은 값을 돌려주면 '폐기 직후
         # 재로그인' 토큰의 i 가 컷오프와 같아져(i <= cutoff) 튕긴다. 발급시각을 단조 증가로
         # 보정해 폐기(cutoff=마지막 발급시각 이상) / 재발급(i > cutoff)을 결정적으로 만든다.
-        self._last_issued = 0.0
-        self._fails = {}         # client -> [실패수, 잠금해제시각]
-        self._global_fails = 0
+        # fail-closed 컷오프보다도 크게 시작한다(시계가 뒤로 가도 새 로그인은 컷오프에 걸리지 않게).
+        self._last_issued = self._global_cutoff
+        self._fails = {}         # client -> [실패수, 잠금해제시각, 창 시작(첫 실패) 시각]
+        self._fail_names = {}    # client -> {계정 이름(소문자): 이 창의 실패수} — 117회차 F2: 성공은 그 계정의 실패만 지운다
+        self._global_fails = deque()   # 창 안 실패 시각들(31회차 F6 — 예전에는 성공 전까지 기간 없이 쌓였다)
         self._global_until = 0.0
+        self._pending = {}       # client -> 지금 인증(PBKDF2) 중인 시도 수 — 131회차: 잠금 검사와 실패 기록 사이에 들어온 동시 요청을 센다(begin_attempt)
         self._lock = threading.RLock()
 
     # ---------- 서명 키 ----------
@@ -419,13 +522,21 @@ class SessionStore:
             return secrets.token_bytes(32)
         path = Path(secret_path)
         try:
-            if path.exists():
-                raw = path.read_text(encoding="utf-8").strip()
-                if len(raw) >= 32:
-                    return bytes.fromhex(raw) if all(c in "0123456789abcdef" for c in raw) \
-                        else raw.encode("utf-8")
-        except (OSError, ValueError):
-            pass
+            raw = path.read_text(encoding="utf-8").strip()
+            if len(raw) >= 32:
+                return bytes.fromhex(raw) if all(c in "0123456789abcdef" for c in raw) \
+                    else raw.encode("utf-8")
+        except FileNotFoundError:
+            pass   # 첫 기동 — 아래에서 만든다
+        except ValueError:
+            pass   # 깨진 바이트 · 형식 — 예전처럼 새로 만든다
+        except OSError as exc:
+            # 134회차(재현): 키 파일이 **있는데 못 읽으면**(권한 · 입출력) 새 키로 덮지 않는다. 예전에는 읽기 오류도 '없음' 으로 보고
+            #   새 키를 써서, 일시 오류 한 번(또는 root 로 콘솔 복구를 돌려 파일만 root 소유가 된 뒤)에 원래 키를 잃었다 — 오류가 풀려도
+            #   그전 세션이 돌아오지 않는다. 이 프로세스만 임의 키로 돈다(전원 다시 로그인 — 닫는 쪽). 소유자 · 권한을 고치고 재시작하면 원래 키를 읽는다.
+            print(f"[auth] 세션 서명 키({path.name})를 읽지 못했습니다({exc.__class__.__name__}) — 원본을 덮지 않고 이 프로세스만 임의 키로 동작합니다"
+                  f"(재시작 시 로그아웃). 파일 소유자 · 권한을 확인하세요.", flush=True)
+            return secrets.token_bytes(32)
         secret = secrets.token_bytes(32)
         try:
             write_text(path, secret.hex() + "\n")
@@ -433,7 +544,179 @@ class SessionStore:
             print(f"[auth] 세션 서명 키 저장 실패({exc}) — 재시작 시 로그아웃됩니다.", flush=True)
         return secret
 
+    # ---------- 개별 로그아웃 폐기 목록(31회차 F5) ----------
+
+    @staticmethod
+    def _token_id(token) -> str:
+        return hashlib.sha256(str(token).encode("utf-8", "surrogateescape")).hexdigest()
+
+    @staticmethod
+    def _token_exp(token):
+        """서명된 토큰 본문의 만료 시각(e) — 못 읽으면 None."""
+        try:
+            encoded = str(token).rpartition(".")[0]
+            body = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)).decode("utf-8"))
+            exp = float(body.get("e", 0))
+            return exp if exp > 0 else None
+        except (ValueError, TypeError, AttributeError):
+            return None
+
+    def _load_revoked(self) -> None:
+        if not self._revoked_path:
+            return
+        # 결정(56~75 남긴 것): strict 읽기 — 읽기 오류(권한 · 입출력)는 손상과 구분하고, 손상 보존본만 남아 있어도(파일 없음) 손상이다.
+        raw, state = read_json_state(self._revoked_path, expect=dict)
+        now = time.time()
+        out, users, bad = {}, {}, 0
+        if state is None:
+            for key, val in raw.items():
+                if key == self.CUTOFF_KEY:
+                    try:
+                        self._global_cutoff = max(self._global_cutoff, float(val))
+                    except (TypeError, ValueError):
+                        bad += 1
+                    continue
+                # 값은 [만료, 계정](37회차 R5) — 옛 꼴(만료 숫자만)도 읽는다(계정 모름).
+                user = None
+                if isinstance(val, list) and val:
+                    user = val[1] if len(val) > 1 and isinstance(val[1], str) else None
+                    val = val[0]
+                try:
+                    exp = float(val)
+                except (TypeError, ValueError):
+                    bad += 1
+                    continue
+                if not (isinstance(key, str) and len(key) == 64):
+                    bad += 1
+                    continue
+                if exp >= now:
+                    out[key] = exp
+                    if user:
+                        users[key] = user
+            if bad:
+                # 해석 못 한 항목이 어떤 토큰을 폐기했는지 모른다 — 손상과 같이 원본을 보존하고 fail-closed.
+                print(f"[auth] {self._revoked_path.name} 에 해석할 수 없는 항목 {bad}개 — 손상으로 봅니다.", flush=True)
+                preserve_corrupt(self._revoked_path)
+                state = "corrupt"
+        if state == "unreadable" and self._resume_failclosed():
+            return
+        if state in ("corrupt", "unreadable"):
+            self._fail_closed(state)
+            return
+        self._drop_failclosed_marker()   # 다시 읽혔다 — 지난 읽기 오류 표지는 끝났다
+        self._revoked, self._revoked_user = out, users
+
+    # 반증(결정 G1b ① — 사용자 결정 '권장안대로'): 읽기 오류가 **계속되는** 동안 재기동마다 전 계정 tokenVersion 을 올려 전원이 끊겼다.
+    #   첫 fail-closed 뒤에는 로그아웃이 계정 단위 폐기로 접혀(못 쓰는 폐기 목록 대신 users.json) 다시 끊을 필요가 없다. 그 사실을 작은 표지
+    #   파일(`session-revoked.failclosed.json` — 컷오프 시각 + 못 읽은 파일의 크기 · mtime · inode)에 남기고, 재기동 때 **같은 파일 상태로**
+    #   여전히 못 읽으면 tokenVersion 을 다시 올리지 않고 그 컷오프만 메모리에 되살린다. 파일이 바뀌었거나 표지가 없거나(계정 인상이 실패했던 첫 끊음 포함)
+    #   그 사이 계정 단위 폐기가 실패했으면(표지를 지운다) 예전처럼 다시 끊는다.
+
+    def _failclosed_marker_path(self):
+        return self._revoked_path.with_suffix(".failclosed.json") if self._revoked_path else None
+
+    def _revoked_stat(self):
+        try:
+            st = self._revoked_path.stat()
+            return {"size": int(st.st_size), "mtimeNs": int(st.st_mtime_ns), "ino": int(st.st_ino)}
+        except (OSError, ValueError):
+            return None
+
+    def _resume_failclosed(self) -> bool:
+        marker_path = self._failclosed_marker_path()
+        if not marker_path:
+            return False
+        try:
+            marker = json.loads(marker_path.read_text(encoding="utf-8"))
+            cutoff = float(marker.get("cutoff"))
+        except (OSError, ValueError, TypeError, AttributeError):
+            return False
+        stat = self._revoked_stat()
+        if not stat or not (cutoff > 0) or cutoff != cutoff or cutoff == float("inf") \
+                or any(marker.get(k) != v for k, v in stat.items()):
+            return False
+        self._global_cutoff = max(self._global_cutoff, cutoff)
+        self._revoked, self._revoked_user = {}, {}
+        self._revoked_writable = False
+        reset = marker.get("accountsReset")
+        self._revoked_error = {"file": self._revoked_path.name, "state": "unreadable", "at": cutoff,
+                               "accountsReset": reset if isinstance(reset, int) else None, "resumed": True}
+        print(f"[auth] {self._revoked_path.name} 을(를) 여전히 읽지 못합니다(지난 fail-closed 와 같은 파일 상태) — 그때 이전에 발급된 세션 거부를"
+              " 이어 갑니다(계정 세션을 다시 끊지 않습니다). 권한을 고치고 다시 시작하세요.", flush=True)
+        return True
+
+    def _write_failclosed_marker(self, cutoff: float, reset) -> None:
+        marker_path, stat = self._failclosed_marker_path(), self._revoked_stat()
+        if not marker_path or not stat:
+            return
+        try:
+            write_json(marker_path, {"cutoff": cutoff, "accountsReset": reset, "at": now_iso(), **stat})
+        except OSError as exc:
+            print(f"[auth] fail-closed 표지 저장 실패({exc}) — 다음 기동도 읽지 못하면 다시 전원 세션을 끊습니다.", flush=True)
+
+    def _drop_failclosed_marker(self) -> bool:
+        marker_path = self._failclosed_marker_path()
+        if not marker_path:
+            return True
+        try:
+            marker_path.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            print(f"[auth] fail-closed 표지 삭제 실패({exc}).", flush=True)
+            return False
+        return True
+
+    def _fail_closed(self, state: str) -> None:
+        """폐기 목록을 믿을 수 없다 — 지금 이전에 발급된 토큰을 모두 거부하고 빈 목록으로 시작한다(원본은 보존)."""
+        cutoff = time.time()
+        self._global_cutoff = max(self._global_cutoff, cutoff)
+        self._revoked, self._revoked_user = {}, {}
+        name = self._revoked_path.name
+        # 읽기 오류면 원본을 그대로 둔다 — 덮어쓰지 않는다. 손상인데 보존(이동)에 실패해 원본이 그 자리에 있어도 덮어쓰지 않는다.
+        self._revoked_writable = state != "unreadable" and not self._revoked_path.exists()
+        print(f"[auth] {name} 을(를) " + ("읽지 못했습니다(권한 · 입출력 — 원본은 그대로 둡니다)" if state == "unreadable"
+                                         else "손상으로 보고 보존본(.corrupt.*)으로 옮겼습니다")
+              + " — 어떤 세션이 로그아웃했는지 알 수 없어 지금 이전에 발급된 세션을 모두 끊습니다(전원 다시 로그인).", flush=True)
+        reset = None
+        if self._users is not None:
+            try:
+                reset = self._users.bump_all_token_versions()   # 재기동 뒤에도 — 폐기 목록 파일과 무관하게 남는다
+            except (AuthError, OSError) as exc:
+                print(f"[auth] 계정 tokenVersion 인상 실패({exc}) — 이 프로세스의 메모리 컷오프로만 막습니다.", flush=True)
+        self._revoked_error = {"file": name, "state": state, "at": cutoff, "accountsReset": reset}
+        if state == "unreadable" and reset is not None:
+            self._write_failclosed_marker(cutoff, reset)   # 같은 파일 상태로 다시 못 읽으면 재기동 때 다시 끊지 않는다(반증 G1b ①)
+        elif state != "unreadable":
+            self._drop_failclosed_marker()
+        if self._revoked_writable:
+            self._save_revoked()   # 새 파일에 _cutoff 표지 — 재기동 뒤 '손상' 으로 다시 끊지 않고, 그 이전 토큰은 계속 거부
+
+    def revoked_load_error(self):
+        """fail-closed 사유(없으면 None) — 설정 화면 상태 · 감사 로그용(경로 없음 · 파일 이름만)."""
+        return dict(self._revoked_error) if self._revoked_error else None
+
+    def _save_revoked(self) -> bool:
+        """저장했으면 True. 쓸 수 없는 상태(읽기 오류) · 저장 실패면 False — 호출부가 계정 단위 폐기로 접는다."""
+        if not self._revoked_path:
+            return True
+        if not self._revoked_writable:
+            return False
+        data = {k: [exp, self._revoked_user.get(k, "")] for k, exp in self._revoked.items()}
+        if self._global_cutoff:
+            data[self.CUTOFF_KEY] = self._global_cutoff
+        try:
+            write_json(self._revoked_path, data)
+            return True
+        except OSError as exc:
+            print(f"[auth] 로그아웃 폐기 목록 저장 실패({exc}) — 그 계정 단위 폐기로 대신합니다.", flush=True)
+            return False
+
     # ---------- 잠금 ----------
+
+    def _fail_window(self) -> float:
+        """실패를 세는 창(31회차 F6) — 잠금 시간의 3배, 최소 15분. 이보다 오래된 실패는 세지 않는다."""
+        return max(self._lockout * 3, 900)
 
     def lock_remaining(self, client: str = "-") -> int:
         with self._lock:
@@ -442,28 +725,121 @@ class SessionStore:
             remaining = max(0, int(entry[1] - time.time())) if entry else 0
             return max(remaining, max(0, int(self._global_until - time.time())))
 
-    def note_failure(self, client: str = "-") -> None:
+    def begin_attempt(self, client: str = "-") -> int:
+        """전체 점검 131회차(124회차 R1 반증 — 재현): 잠금 검사는 인증(PBKDF2 약 0.1초) **앞**에 있고 실패는 인증 **뒤**에 기록된다 — 그 사이에 들어온 동시 요청은
+        전부 검사를 지났다(실측: 임계 8 · 한 출발지의 동시 오답 40건 → 33~38건이 평가됨 = 잠금 한 번에 임계의 4배 넘게 대입. 최악은 출발지당 연결 상한 48건 전부라
+        두 번(96건)이면 그 출발지 혼자 전역 임계 80 을 넘겨 모든 출발지를 잠근다 · 임계 3 이면 한 번(40건 ≥ 30)). 124회차 R1 은 '늦게 끝난 성공이 잠금을 푸는 것' 만 막았다.
+        잠금 검사와 함께 **진행 중인 시도를 예약**한다: 이 출발지의 (창 안 실패 수 + 진행 중인 시도 수)가 임계에 닿으면 더 받지 않는다 —
+        평가되는 오답은 잠금 한 번에 임계를 넘지 못한다. 받은 시도(0)는 호출부가 end_attempt 로 **반드시** 돌려준다(finally).
+        반환: 0 = 진행 · 양수 = 잠금이 남은 초 · -1 = 진행 중인 시도가 끝나야 한다(잠금은 아니다 — 실패로 세지 않는다)."""
         with self._lock:
-            entry = self._fails.setdefault(client, [0, 0.0])
-            entry[0] += 1
-            if entry[0] >= self._max_fails:
-                entry[1] = time.time() + self._lockout
-                entry[0] = 0
-            self._global_fails += 1
-            if self._global_fails >= self._max_fails * self.GLOBAL_FACTOR:
-                self._global_until = time.time() + self._lockout
-                self._global_fails = 0
+            remaining = self.lock_remaining(client)
+            if remaining > 0:
+                return remaining
+            now = time.time()
+            entry = self._fails.get(client)
+            fails = entry[0] if entry is not None and now - entry[2] <= self._fail_window() else 0
+            pending = self._pending.get(client, 0)
+            if fails + pending >= self._max_fails:
+                return -1
+            self._pending[client] = pending + 1
+            return 0
 
-    def note_success(self, client: str = "-") -> None:
+    def end_attempt(self, client: str = "-") -> None:
+        """begin_attempt 가 0 을 돌려준 시도를 끝낸다(성공 · 실패 · 예외 어느 쪽이든). 0 이 되면 항목을 지운다(출발지 수만큼 자라지 않게)."""
         with self._lock:
-            self._fails.pop(client, None)
-            self._global_fails = 0
+            left = self._pending.get(client, 0) - 1
+            if left > 0:
+                self._pending[client] = left
+            else:
+                self._pending.pop(client, None)
+
+    @staticmethod
+    def _fail_key(username) -> str:
+        return str(username or "").strip().lower()[:64]
+
+    def note_failure(self, client: str = "-", username=None) -> None:
+        with self._lock:
+            now = time.time()
+            window = self._fail_window()
+            entry = self._fails.setdefault(client, [0, 0.0, now])
+            # 31회차 F6(재현): 창이 지난 실패는 세지 않는다 — 예전에는 30일 전 7회 + 오타 1회로 잠겼다.
+            if entry[0] and now - entry[2] > window:
+                entry[0] = 0
+            if entry[0] == 0:
+                entry[2] = now
+                self._fail_names.pop(client, None)   # 새 창 — 계정별 집계도 새로
+            entry[0] += 1
+            names = self._fail_names.setdefault(client, {})
+            key = self._fail_key(username)
+            if key not in names and len(names) >= self.FAIL_NAMES_MAX:
+                key = None   # 이름을 바꿔 가며 틀리는 출발지 — 한 칸에 모은다(어떤 성공으로도 지워지지 않는다)
+            names[key] = names.get(key, 0) + 1
+            if entry[0] >= self._max_fails:
+                entry[1] = now + self._lockout
+                entry[0] = 0
+                self._fail_names.pop(client, None)
+            # 124회차 R2: 전역 창도 (시각, 계정 이름)으로 센다 — 성공이 그 계정의 실패만 뺄 수 있게(아래 note_success).
+            self._global_fails.append((now, self._fail_key(username)))
+            while self._global_fails and now - self._global_fails[0][0] > window:
+                self._global_fails.popleft()
+            if len(self._global_fails) >= self._max_fails * self.GLOBAL_FACTOR:
+                self._global_until = now + self._lockout
+                self._global_fails.clear()
+
+    def note_success(self, client: str = "-", username=None) -> None:
+        """전체 점검 117회차 F2(재현): 성공은 **그 계정의 실패만** 지운다. 예전에는 어느 계정이든 성공하면 그 출발지의 실패를 통째로 지워,
+        viewer 계정 하나로 'admin 오답 7회 → 자기 계정 로그인' 을 되풀이하면 잠금 없이 admin 비밀번호를 무한정 대입할 수 있었다
+        (오답 21회 · 잠금 0회). username 을 주지 않는 예전 호출은 그 출발지 전부를 지운다(계정을 모르는 호출부 — 지금 서버는 항상 준다).
+
+        전체 점검 124회차(117회차 반증 — 재현):
+          R1 **걸려 있는 잠금은 성공으로 풀리지 않는다** — 잠금 검사는 인증(PBKDF2 약 0.1초) 앞에 있어, 오답들과 함께 보낸 자기 계정 로그인이
+             잠금이 걸린 **뒤에** 끝나면 그 성공이 잠금 항목을 통째로 지웠다(오답 3회로 잠김 → 늦게 끝난 성공 1회 → 남은 잠금 299초가 0초).
+             F2 가 막으려던 '자기 계정 하나로 잠금 없이 대입' 이 동시 요청으로 그대로 됐다. 실패 수만 빼고 잠금 시각은 둔다.
+          R2 **전역 창도 그 계정의 실패만 뺀다** — 예전에는 어느 성공이든 전역 창을 통째로 비워, 출발지를 바꿔 가며 틀리는 사이에 유효 계정 하나가
+             주기적으로 로그인하면 전역 잠금이 영영 걸리지 않았다(실패 400회 · 임계 80 · 잠금 0회 — 평소의 정상 로그인도 같은 효과였다)."""
+        with self._lock:
+            now = time.time()
+            entry = self._fails.get(client)
+            if username is None:
+                if entry is not None and entry[1] > now:
+                    entry[0] = 0                       # 잠금은 남긴다(R1)
+                else:
+                    self._fails.pop(client, None)
+                self._fail_names.pop(client, None)
+                self._global_fails.clear()             # 계정을 모르는 예전 호출 — 예전 동작
+            else:
+                key = self._fail_key(username)
+                mine = (self._fail_names.get(client) or {}).pop(key, 0)
+                if entry is not None:
+                    entry[0] = max(0, entry[0] - mine)
+                    if entry[0] == 0:
+                        self._fail_names.pop(client, None)
+                        if entry[1] <= now:            # 걸려 있는 잠금은 남긴다(R1)
+                            self._fails.pop(client, None)
+                if any(item[1] == key for item in self._global_fails):
+                    self._global_fails = deque(item for item in self._global_fails if item[1] != key)
 
     def _purge_fails(self) -> None:
         now = time.time()
+        window = self._fail_window()
+        # 전체 점검 131회차(124회차 반증 — 재현): 벽시계가 뒤로 가면(NTP 보정 · RTC 가 로컬 시각이던 장비의 첫 동기화 = KST 면 9시간) 잠금 끝 · 창 시작이 그 차만큼
+        #   미래에 남는다 — 잠금 300초가 9시간 5분이 됐고(전역 잠금이면 모든 출발지), 그동안의 실패도 창에서 빠지지 않아 오타 한 번에 다시 잠겼다.
+        #   잠금 끝은 '지금 + 잠금 시간' 보다 멀 수 없다: 멀면 지금부터 잠금 시간만큼으로 다시 잡는다(풀지는 않는다 — 닫는 쪽 · 상한이 생긴다).
+        #   미래의 실패 시각 · 창 시작은 지금으로 당긴다(창 길이만큼만 남는다).
+        if self._global_until - now > self._lockout:
+            self._global_until = now + self._lockout
+        if any(item[0] > now for item in self._global_fails):
+            self._global_fails = deque((min(item[0], now), item[1]) for item in self._global_fails)
         for client, entry in list(self._fails.items()):
-            if entry[0] == 0 and entry[1] < now:
+            if entry[1] - now > self._lockout:
+                entry[1] = now + self._lockout
+            if entry[2] > now:
+                entry[2] = now
+            # 잠금이 끝났고 남은 실패가 없거나 창 밖이면 지운다(31회차 F6 — 1~7회 항목이 영구히 남아 메모리가 자랐다).
+            if entry[1] < now and (entry[0] == 0 or now - entry[2] > window):
                 self._fails.pop(client, None)
+                self._fail_names.pop(client, None)
 
     # ---------- 토큰 ----------
 
@@ -517,8 +893,10 @@ class SessionStore:
         username = str(body.get("u", ""))
         with self._lock:
             self._purge_revoked()
-            if token in self._revoked:
+            if self._token_id(token) in self._revoked:
                 return None
+            if self._global_cutoff and float(body.get("i", 0)) <= self._global_cutoff:
+                return None   # 결정(56~75 남긴 것): 폐기 목록을 못 믿게 된 시점 이전 발급 — fail-closed
             cutoff = self._user_revoked.get(username)
             if cutoff is not None and float(body.get("i", 0)) <= cutoff:
                 return None
@@ -543,12 +921,64 @@ class SessionStore:
             self._last_issued = issued
             return issued
 
+    REVOKED_MAX = 5000      # 35회차 R1: 폐기 목록 전체 상한
+    REVOKED_PER_USER = 200  # 37회차 R5: 계정당 상한 — 넘치면 그 계정 단위 폐기(tokenVersion 인상)로 접는다(39회차 R3: 50 은 정상 사용에서도 닿을 수 있어 올렸다)
+
     def destroy(self, token) -> None:
         if not token:
             return
+        # 35회차 R1(재현): 서명 · 만료가 유효한 토큰만 기록한다 — 예전에는 아무 문자열이나 받아(미인증 로그아웃 요청) 폐기 파일이 끝없이 자라고
+        #   요청마다 전체 파일을 세션 잠금 안에서 다시 써 정상 세션 판정이 수 초씩 밀렸다. 이미 무효인 토큰은 기록할 필요가 없다.
+        user = self.resolve(token)
+        if user is None:
+            return
+        uname = str(user.get("username", ""))
+        fold = set()
+        # 39회차 R3: 항목은 **그 토큰의 만료 시각**까지만 둔다(예전엔 로그아웃 시각 + TTL — 이미 만료됐을 토큰이 상한을 채웠다).
+        exp = self._token_exp(token) or (time.time() + self._ttl)
         with self._lock:
-            self._revoked[token] = time.time() + self._ttl
+            key = self._token_id(token)
+            self._revoked[key] = exp
+            self._revoked_user[key] = uname
             self._purge_revoked()
+            # 37회차 R5(반증 — 재현): 상한을 넘칠 때 남의 항목을 버리면 그 계정이 로그아웃한 토큰이 되살아났다(유효 계정 하나로 5,000번 로그인 ·
+            #   로그아웃). 버리는 대신 **그 계정 단위 폐기로 접는다** — 계정당 상한을 넘은 계정, 그리고 전체 상한을 넘으면 만료가 가까운 항목의 계정.
+            if sum(1 for u in self._revoked_user.values() if u == uname) > self.REVOKED_PER_USER:
+                fold.add(uname)
+            if len(self._revoked) > self.REVOKED_MAX:
+                for k, _exp in sorted(self._revoked.items(), key=lambda kv: kv[1])[: len(self._revoked) - self.REVOKED_MAX]:
+                    fold.add(self._revoked_user.get(k, ""))
+        folded = set()
+        for name in fold:
+            if not name:
+                continue
+            try:
+                self.destroy_user(name)   # tokenVersion 인상(재기동 뒤에도) + 메모리 컷오프 — 그 계정의 남은 세션도 끊긴다(남용일 때만)
+                folded.add(name)
+                print(f"[auth] 로그아웃 폐기 목록 상한을 넘어 계정 '{name}' 의 세션을 모두 끊었습니다(계정 단위 폐기).", flush=True)
+            except (AuthError, OSError):   # 결정(56~75 남긴 것): 계정 파일 저장 실패(OSError)도 같은 처리 — 예외로 끝나면 그 토큰이 저장되지 않는다
+                # 39회차 R4(반증 — 재현): users.json 을 못 읽는 동안은 계정 단위 폐기를 못 한다 — 그 계정의 항목은 지우지 않고 그대로 저장한다
+                #   (예전엔 예외로 로그아웃이 400 이 되고 그 토큰이 저장되지 않아 재기동 뒤 되살아났다).
+                pass
+        with self._lock:
+            for k in [k for k, u in self._revoked_user.items() if u in folded]:
+                self._revoked.pop(k, None)
+                self._revoked_user.pop(k, None)
+            if len(self._revoked) > self.REVOKED_MAX:   # 계정을 모르는 옛 항목만 남았을 때의 마지막 방어
+                for k, _exp in sorted(self._revoked.items(), key=lambda kv: kv[1])[: len(self._revoked) - self.REVOKED_MAX]:
+                    self._revoked.pop(k, None)
+                    self._revoked_user.pop(k, None)
+            saved = self._save_revoked()
+        if not saved and uname and uname not in folded:
+            # 결정(56~75 남긴 것): 폐기 목록에 남기지 못한 로그아웃(읽기 오류 상태 · 저장 실패)은 메모리에만 두면 재기동 뒤 그 토큰이 되살아난다 —
+            #   그 계정 단위 폐기(tokenVersion 인상 — users.json 에 남는다)로 접는다. 그 계정의 다른 세션도 끊긴다(fail-closed).
+            try:
+                self.destroy_user(uname)
+                print(f"[auth] 로그아웃 폐기 목록에 쓸 수 없어 계정 '{uname}' 의 세션을 모두 끊었습니다(계정 단위 폐기).", flush=True)
+            except (AuthError, OSError) as exc:
+                print(f"[auth] 계정 단위 폐기도 실패했습니다({exc}) — 이 프로세스에서만 막힙니다.", flush=True)
+                # 반증 G1b ①: 이 로그아웃은 어디에도 남지 않았다 — fail-closed 표지를 지워 다음 기동이 다시 전원 세션을 끊게 한다(이어 가기 금지).
+                self._drop_failclosed_marker()
 
     def destroy_user(self, username) -> None:
         """그 계정의 모든 토큰을 무효화한다.
@@ -571,6 +1001,7 @@ class SessionStore:
         for token, expires in list(self._revoked.items()):
             if expires < now:
                 self._revoked.pop(token, None)
+                self._revoked_user.pop(token, None)
         # 컷오프는 TTL 이 지나면 의미가 없다(그 이전 토큰은 어차피 만료).
         for username, cutoff in list(self._user_revoked.items()):
             if cutoff + self._ttl < now:

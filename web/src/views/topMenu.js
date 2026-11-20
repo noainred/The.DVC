@@ -14,7 +14,7 @@
  *    (순수 모듈 — 웹 테스트는 node 환경이다).
  */
 
-/** 물리 서버(v2.994 메뉴 이름 'Physical Server · Baremetal') = 서버 분석(Physical Server) › 구분 Baremetal(미가상화 물리) · 전체 법인. 주소의 셋째 조각이 이 값이면 그 모드다. */
+/** 물리 서버(v2.994 메뉴 이름 'Physical Server · Baremetal' · v3.19.0 'Physical Server') = 서버 분석(자원관리 › Physical Server(전체)) › 구분 Baremetal(미가상화 물리) · 전체 법인. 주소의 셋째 조각이 이 값이면 그 모드다. */
 export const BAREMETAL_SEG = 'baremetal';
 
 export const MENU_GROUPS = Object.freeze([
@@ -29,13 +29,18 @@ export const MENU_GROUPS = Object.freeze([
     //   'Virtual Machine(VM)'(virt · 처음 여는 탭 vms · 같은 항목이 vcenters 도 맡는다 · VM 6 + vCenter 6 도구) 과
     //   'Hypervisor'(hv · hosts 탭 · 호스트 4 도구). 탭 id · 해시 · 권한 id · 도구 키는 그대로다. 저장 메뉴 별칭은 이제 tab:vcenters → virt 하나이고
     //   옛 저장 메뉴의 tab:hosts 는 실제 항목 hv 로 풀린다(sidebar/sideMenu.js itemAliases).
-    { id: 'virt', label: 'Virtual Machine(VM)', tab: 'vms', tabs: ['vcenters'], also: [
+    // v3.19.0(사용자 요청 2026-11-18): 이름 'Virtual Machine(VM)' → 'Virtual Machine' · 처음 여는 탭 vms → vcenters(vCenter 카드 화면 #/vcenters).
+    //   tab · tabs 를 맞바꿨다 — 정체 키가 tab:vcenters 가 되고 tab:vms 가 별칭이다(v2.915~v2.993 의 방향으로 돌아감). 저장 메뉴의 tab:vms(v2.994~v3.18) ·
+    //   tab:vcenters(v2.942~v2.993) 둘 다 이 항목 하나로 풀린다(sideMenu.itemAliases 가 `tabs` 에서 만든다 — 테스트가 고정). vCenter 탭(perm dashboard)을
+    //   못 보는 계정은 visibleMenu 의 entryTab 이 vms 로 떨어진다. id · 탭 id · 도구 키 · also 는 그대로.
+    { id: 'virt', label: 'Virtual Machine', tab: 'vcenters', tabs: ['vms'], also: [
       'vmfinder', 'guestos', 'vmtools', 'vm-track', 'curuser', 'real-os',
       'vcversion', 'solutions', 'licenses', 'license-expiry', 'cert-expiry', 'change-history',
     ] },
     { id: 'hv', label: 'Hypervisor', tab: 'hosts', also: ['host-hygiene', 'esxi', 'hba', 'cluster-check'] },
     // v2.994: 이름 '물리 서버' → 'Physical Server · Baremetal'(자원관리 › Physical Server 의 구분 Baremetal 바로가기 — id · 도구 · 조각은 그대로)
-    { id: 'bm', label: 'Physical Server · Baremetal', tool: 'serveranalysis', seg: BAREMETAL_SEG },
+    // v3.19.0(사용자 요청 2026-11-18): 이름 → 'Physical Server'. 자원관리 sa 는 'Physical Server(전체)' 로 바꿔 같은 이름의 메뉴가 둘이 되지 않게 했다(테스트가 고정).
+    { id: 'bm', label: 'Physical Server', tool: 'serveranalysis', seg: BAREMETAL_SEG },
     // v2.787(사용자 요청 + 시안): Veeam 백업 현황 — 메뉴는 하나, 화면 위 Summary | Detail 탭으로 두 도구를 오간다.
     //   also: 이 항목이 함께 맡는 도구(Detail 화면에서도 이 메뉴가 켜진다 — locate). 도구 키는 그대로(권한 파일·북마크).
     { id: 'veeam', label: 'Backup', tool: 'backup-summary', also: ['backup-detail', 'backup-em', 'backup-run', 'bareos-backup', 'bareos-summary', 'bareos-detail'] },   // v2.788 EM 탭도 같은 항목 · v2.813 이름 'Veeam' → 'Backup'(사용자 요청 — id·도구 키는 그대로) · v2.822 Bareos 탭
@@ -65,7 +70,7 @@ export const MENU_GROUPS = Object.freeze([
   // v2.779 '백업' → v2.785 'Veeam 현황'(Summary · Detail) 대메뉴는 v2.787 에 '서버 › Veeam' 하나로 옮겼다(사용자 요청 — 탭은 화면 위).
   //   예전에 저장한 내 메뉴의 그룹 id 'backup' 은 sideMenu.js LEGACY_GROUP_LABELS 가 이름을 잇는다.
   { id: 'resource', label: '자원관리', children: [
-    { id: 'sa', label: 'Physical Server', tool: 'serveranalysis' },   // v2.994 이름 '서버 분석' → 'Physical Server'(사용자 요청 — id · 도구 키는 그대로)
+    { id: 'sa', label: 'Physical Server(전체)', tool: 'serveranalysis' },   // v2.994 이름 '서버 분석' → 'Physical Server' · v3.19.0 → 'Physical Server(전체)'(서버 › Physical Server(bm)와 겹치지 않게 — id · 도구 키는 그대로)
     { id: 'gpu', label: 'GPU 인벤토리', tool: 'gpu' },
     { id: 'power', label: '전력 분석', tool: 'powermap' },
   ] },
@@ -103,7 +108,7 @@ export function hashOf(item) {
 
 /**
  * v2.994: 탭 항목을 눌렀을 때 열 탭 — visibleMenu 가 고른 처음 허용 탭(entryTab), 없으면 그 항목의 처음 탭. 도구 항목은 null.
- * 'Virtual Machine(VM)' 은 VM 탭(inv.vms 가 없으면 vCenter 탭) · 'Hypervisor' 는 호스트 탭. 예전(v2.915~v2.993)의 '마지막으로 본 탭' 은 쓰지 않는다.
+ * 'Virtual Machine' 은 vCenter 탭(v3.19.0 — dashboard 권한이 없으면 VM 탭) · 'Hypervisor' 는 호스트 탭. 예전(v2.915~v2.993)의 '마지막으로 본 탭' 은 쓰지 않는다.
  */
 export function menuTabOf(item) {
   if (!item || item.tool) return null;

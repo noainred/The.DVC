@@ -14,38 +14,92 @@ import { config, clampIntervalMs } from '../config.js';
 import { bumpFleetRev } from '../insights/fleetRev.js';
 import { atomicWriteFileSync, safeLoadText } from '../util/atomicWrite.js'; // v2.582 ARCH-3: 상태 파일도 원자 쓰기(절단본 → 로드 실패 → 다음 저장이 빈 값으로 덮어쓰는 왕복 손상 차단)
 import { registerExitFlush } from '../util/exitFlush.js'; // v2.582 ARCH-4: 디바운스 저장은 종료 시 동기 flush 를 등록한다
-import { capStr } from '../util/capStr.js';
+import { readJsonFile, READ_RETRY_MS } from '../util/jsonFileLoad.js'; // 87회차 ⓐ: 읽기 오류 ≠ 손상(공용 읽기 판정)
+import { inRetryWindow } from '../util/jsonFileRead.js';   // 128회차: 재읽기 간격 판정은 공용(시계가 뒤로 가도 그 차만큼 굳지 않게)
+import { capStr, capTrim } from '../util/capStr.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { sanitizeHwSummary, mgmtHostOf } from '../idrac/hwSummary.js'; // v3.3.0 엣지 하드웨어 요약 · iDRAC 주소 정제(엣지 agent/fleetPush.js 와 짝)
 import { summarizeRegistryError, REGISTRY_ERROR_LABEL } from '../util/registryCore.js'; // v2.744(회귀 검토 GD-R1)
+import { envPositive } from '../util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
+import { logAudit } from '../audit.js';   // 결정(76~105 남긴 것 · 2026-11-20) A6: 읽기 오류 창을 합칠 때의 기록
 
 const FILE = path.join(config.configDir, 'central-fleet.json');
-const TTL_MS = Number(process.env.CENTRAL_FLEET_TTL_MS) || 30 * 60_000; // 30분 무보고 시 만료
-const MAX_AGENTS = Number(process.env.CENTRAL_FLEET_MAX_AGENTS) || 500; // 에이전트 수 상한(메모리 보호)
+const TTL_MS = envPositive(process.env.CENTRAL_FLEET_TTL_MS, 1_800_000); // 30분 무보고 시 만료 · 54회차: 식 기본값도 envPositive(음수면 바로 만료되던 것)
+const MAX_AGENTS = envPositive(process.env.CENTRAL_FLEET_MAX_AGENTS, 500); // 에이전트 수 상한(메모리 보호)
 // v2.601(감사 CEN2601-03): 원소 상한. 예전에는 에이전트당 50,000 × 500 에이전트를 받았고, 공유 토큰은 본문 agent 이름을
 //   마음대로 고를 수 있어 이름 40개 × 50,000 원소로 RSS 가 크게 불고 central-fleet.json 이 195MB 가 되어 **저장마다 약 1.8초**
 //   이벤트 루프가 멈췄다(JSON.stringify 전량). 현실적인 에이전트당 상한 + 전체 상한 + '검증되지 않은 이름' 별도 상한을 둔다.
 //   잘린 원소는 **개수로 밝힌다**(omitted — 조용한 상한 금지).
-const PER_AGENT_MAX = Number(process.env.CENTRAL_FLEET_MAX_PER_AGENT) || 5_000;
-const TOTAL_MAX = Number(process.env.CENTRAL_FLEET_MAX_TOTAL) || 20_000;
+const PER_AGENT_MAX = envPositive(process.env.CENTRAL_FLEET_MAX_PER_AGENT, 5_000);
+const TOTAL_MAX = envPositive(process.env.CENTRAL_FLEET_MAX_TOTAL, 20_000);
 // 검증되지 않은 이름(공유 토큰 + 중앙이 모르는 이름)은 이름 수·원소 수를 작게 묶는다 — 검증된 엣지의 몫을 밀어내지 못하게.
-const UNVERIFIED_MAX_AGENTS = Number(process.env.CENTRAL_FLEET_MAX_UNVERIFIED_AGENTS) || 20;
-const UNVERIFIED_TOTAL_MAX = Number(process.env.CENTRAL_FLEET_MAX_UNVERIFIED_TOTAL) || 5_000;
+const UNVERIFIED_MAX_AGENTS = envPositive(process.env.CENTRAL_FLEET_MAX_UNVERIFIED_AGENTS, 20);
+const UNVERIFIED_TOTAL_MAX = envPositive(process.env.CENTRAL_FLEET_MAX_UNVERIFIED_TOTAL, 5_000);
 const norm = (s) => String(s || '').trim().toLowerCase();
 
 // null-proto: 에이전트 이름이 '__proto__' 등이어도 프로토타입 오염 없이 일반 키로 저장.
 let cache = Object.create(null); // agent -> { at, generatedAt, baremetal: [...] }
-try {
-  if (fs.existsSync(FILE)) {
-    const p = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-    if (p && typeof p === 'object') cache = Object.assign(Object.create(null), p.fleet || {});
-    // v2.601 CEN2601-03: 상한 이전에 저장된 큰 파일도 에이전트당 상한으로 줄여 올린다(다음 저장이 다시 작아지게).
-    for (const [a, e] of Object.entries(cache)) {
-      if (!e || typeof e !== 'object' || !Array.isArray(e.baremetal)) { delete cache[a]; continue; }
-      if (e.baremetal.length > PER_AGENT_MAX) { e.omitted = (Number(e.omitted) || 0) + (e.baremetal.length - PER_AGENT_MAX); e.baremetal = e.baremetal.slice(0, PER_AGENT_MAX); }
-    }
+/** 파일 본문 → 캐시(상한 이전에 저장된 큰 파일도 줄여 올린다). 던지면 손상. */
+function parseFleetFile(text) {
+  const p = JSON.parse(text);
+  const out = p && typeof p === 'object' ? Object.assign(Object.create(null), p.fleet || {}) : Object.create(null);
+  // v2.601 CEN2601-03: 상한 이전에 저장된 큰 파일도 에이전트당 상한으로 줄여 올린다(다음 저장이 다시 작아지게).
+  for (const [a, e] of Object.entries(out)) {
+    if (!e || typeof e !== 'object' || !Array.isArray(e.baremetal)) { delete out[a]; continue; }
+    if (e.baremetal.length > PER_AGENT_MAX) { e.omitted = (Number(e.omitted) || 0) + (e.baremetal.length - PER_AGENT_MAX); e.baremetal = e.baremetal.slice(0, PER_AGENT_MAX); }
+    // 84회차 F1: 상한 이전에 저장된 긴 generatedAt 도 올릴 때 줄인다(다음 저장이 다시 작아지게)
+    if (typeof e.generatedAt === 'string' && e.generatedAt.length > 40) e.generatedAt = capTrim(e.generatedAt, 40) || null;
   }
-} catch (e) { cache = Object.create(null); console.warn(`[central-fleet] ${path.basename(FILE)} 를 읽지 못해 빈 캐시로 시작합니다(엣지의 다음 push 로 채워집니다): ${safeLoadText(e)}`); }
+  return out;
+}
+// 87회차 ⓐ(84회차 남긴 것 ② — 권장안): 공용 읽기 판정(util/jsonFileLoad.js). 예전 catch 하나는 **읽기 오류**(EACCES · EIO)도 '읽지 못해 빈 캐시' 로 보고
+//   다음 저장(5초 디바운스)이 온전한 원본을 그 사이 들어온 몇 엣지분으로 덮었다. 이제 읽기 오류면 원본을 두고 그동안 저장하지 않으며, 저장 시점에
+//   READ_RETRY_MS 간격으로 다시 읽어 읽히면 메모리에 없는 엣지분만 합친다(메모리 쪽이 더 새 push). 손상은 예전과 같다(빈 캐시 — 엣지의 다음 push 로 채워짐).
+let readBlocked = false; let readRetryAt = 0;
+{
+  const r = readJsonFile(FILE, { parse: parseFleetFile, preserve: false });
+  if (r.kind === 'ok') cache = r.value;
+  else if (r.kind === 'read-error') { readBlocked = true; readRetryAt = Date.now() + READ_RETRY_MS; console.warn(`[central-fleet] ${path.basename(FILE)} 읽기 오류(${(capStr(r.error?.code, 32) || 'read-error')}) — 손상이 아니라 원본은 그대로 둡니다 · 읽힐 때까지 저장하지 않습니다(그동안 빈 캐시 — 엣지의 다음 push 로 채워집니다).`); }
+  else if (r.kind === 'corrupt') console.warn(`[central-fleet] ${path.basename(FILE)} 를 읽지 못해 빈 캐시로 시작합니다(엣지의 다음 push 로 채워집니다): ${safeLoadText(r.error)}`);
+}
+/** 87회차 ⓐ: 저장해도 되는가 — 읽기 오류였으면 간격마다 다시 읽어 합친다. 아직 못 읽으면 false. */
+function fleetWritable() {
+  if (!readBlocked) return true;
+  if (inRetryWindow(Date.now(), readRetryAt, READ_RETRY_MS)) return false;
+  const r = readJsonFile(FILE, { parse: parseFleetFile, preserve: false });
+  if (r.kind === 'read-error') { readRetryAt = Date.now() + READ_RETRY_MS; return false; }
+  let n = 0; let superseded = 0;
+  if (r.kind === 'ok') { for (const [a, e] of Object.entries(r.value)) { if (!(a in cache)) { cache[a] = e; n += 1; } else superseded += 1; } if (n) bumpFleetRev(); }
+  readBlocked = false; readRetryAt = 0;
+  noteFleetWindowMerge(r, n, superseded);   // 결정 A6: 감사 로그 · 콘솔 한 줄(창마다 한 번)
+  return true;
+}
+/** 87회차 ⓐ: 테스트 · 진단 — 함대 파일을 읽지 못해 저장을 멈춘 상태인가. */
+export function fleetReadBlocked() { return readBlocked; }
+
+/*
+ * 결정(76~105 남긴 것 · 2026-11-20) A6(권장안 — 동작은 현행 유지 + 기록): 함대 파일 읽기 오류 창 동안 push 로 들어온 엣지분은 파일과 대조 전이다
+ *   (합칠 때 메모리 쪽이 이긴다 — 더 새 push). 함대에는 vCenter 소유 칸이 없고(엣지 이름이 키 — 개별 토큰은 자기 이름만 쓴다) 원소 귀속은 위임 인벤토리 소유
+ *   (central/inventory.js — 그 창의 TOFU 기록은 그쪽)로 가른다. 여기서는 창을 닫을 때 합친 결과(파일에서 되살린 엣지 · 창 동안 push 가 파일 값을 대신한 엣지 ·
+ *   그중 이름을 검증하지 못한 것)를 감사 로그 · 콘솔에 한 줄 남긴다 — 조용히 합치지 않는다.
+ */
+const WINDOW_TRACK_MAX = 1_000;
+const windowAgents = new Map();   // 창 동안 push 한 엣지 이름 → verified
+let windowOverflow = 0;
+function noteFleetWindowPush(agent, verified) {
+  if (!readBlocked) return;
+  if (windowAgents.has(agent) || windowAgents.size < WINDOW_TRACK_MAX) windowAgents.set(agent, !!verified || windowAgents.get(agent) === true);
+  else windowOverflow += 1;
+}
+function noteFleetWindowMerge(r, restored, superseded) {
+  const pushed = windowAgents.size + windowOverflow;
+  const unverified = [...windowAgents.values()].filter((v) => !v).length;
+  const head = r.kind === 'ok' ? '다시 읽었습니다(읽기 오류 풀림 — 파일의 엣지분을 합쳤습니다)' : `다시 읽었지만 ${r.kind === 'missing' ? '파일이 없어' : '파일이 손상돼'} 합치지 못했습니다(읽기 오류 풀림 — 지금 메모리 값을 씁니다)`;
+  const detail = `${head} — 창 동안 push 한 엣지 ${pushed}(그중 이름 미검증 ${unverified}) · 그 push 가 파일 값을 대신한 엣지 ${superseded} · 파일에서 되살린 엣지 ${restored}`;
+  console.warn(`[central-fleet] ${path.basename(FILE)} ${detail}`);
+  try { logAudit({ user: 'system', action: 'central-fleet.unread-window-merge', target: path.basename(FILE), detail }); } catch { /* 감사 실패가 저장을 막지 않게 */ }
+  windowAgents.clear(); windowOverflow = 0;
+}
 
 let writeTimer = null;
 let writing = false;   // 비동기 원자 쓰기 진행 중
@@ -58,6 +112,7 @@ function persistSoon() {
     // v2.591 L8: 대상 파일에 직접 비동기 쓰기였다(v2.582 ARCH-3 주석은 '원자 쓰기' 라 적었다) — 쓰는 중 종료되면 절단본이
     //   남아 재기동 시 JSON 무효 → 빈 함대로 시작했다(재현: 1MB 시점 exit). 임시 파일에 쓰고 rename 한다(루프를 막지 않게 비동기).
     if (writing) { persistSoon(); return; }
+    if (!fleetWritable()) { persistSoon(); return; }   // 87회차 ⓐ: 읽기 오류 중 — 원본을 덮지 않고 다음 주기에 다시 본다
     writing = true; dirty = false;
     const tmp = `${FILE}.tmp-${process.pid}`;
     (async () => {
@@ -75,6 +130,7 @@ function persistSoon() {
 // 종료(SIGTERM/SIGINT/exit) 시 디바운스 대기 중인 마지막 엣지 보고를 동기로 flush — 재시작 시 ~5초
 // 윈도우 유실 방지. 중앙 역할일 때만 핸들러 등록(테스트/엣지에서 부작용·중복 쓰기 방지).
 export function flushEdgeFleetNow() {
+  if (!fleetWritable()) return;   // 87회차 ⓐ: 읽기 오류 중에는 원본을 덮지 않는다(종료 flush 포함)
   if (writeTimer) { clearTimeout(writeTimer); writeTimer = null; }
   dirty = false;
   try { fs.mkdirSync(path.dirname(FILE), { recursive: true }); atomicWriteFileSync(FILE, JSON.stringify({ fleet: cache }), { mode: 0o600 }); } catch { /* best-effort */ }
@@ -171,7 +227,11 @@ export function setEdgeFleet(agent, baremetal, generatedAt, { verified = true, v
   const sig = hashList(list);
   const prev = cache[a];
   const part = sanitizeFleetPartial(partial);
-  cache[a] = { at: Date.now(), generatedAt: typeof generatedAt === 'string' || typeof generatedAt === 'number' ? generatedAt : null, baremetal: list, sig, verified: !!verified, ...(omitted ? { omitted } : {}), ...(vcenterBlanked ? { vcenterBlanked } : {}), ...(part ? { partial: part } : {}) };
+  // 84회차 F1: generatedAt 은 시각 표시로만 쓴다 — 유한수 또는 짧은 글자만(/inventory 14회차 C-3 · 17회차 R-1 과 같은 규칙). 예전에는 글자를
+  //   길이 제한 없이 받아 수 MB 글자가 캐시 · central-fleet.json · 관리 화면 응답에 그대로 남았다(재현: 3MB 글자가 listEdgeFleet 에 그대로).
+  const gen = typeof generatedAt === 'number' && Number.isFinite(generatedAt) ? generatedAt : (typeof generatedAt === 'string' ? (capTrim(generatedAt, 40) || null) : null);
+  cache[a] = { at: Date.now(), generatedAt: gen, baremetal: list, sig, verified: !!verified, ...(omitted ? { omitted } : {}), ...(vcenterBlanked ? { vcenterBlanked } : {}), ...(part ? { partial: part } : {}) };
+  noteFleetWindowPush(a, verified);   // 결정 A6: 읽기 오류 창이면 기록(합칠 때 합계)
   if (!prev || prev.sig !== sig) bumpFleetRev(); // 내용이 바뀐 경우에만 캐시 무효화
   persistSoon();
   return { accepted: list.length, omitted, vcenterBlanked, ...(part ? { partial: part } : {}) };

@@ -26,7 +26,7 @@ svcmonRouter.post('/folders', canEdit, fullScopeOnly, (req, res) => {
     const f = addFolder(req.body || {});
     logAudit({ user: req.user?.username, action: 'svcmon.folder.add', target: f.path, detail: f.kind });
     res.status(201).json({ folder: f, folders: listFolders() });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { res.status(e?.status === 409 ? 409 : 400).json({ error: e.message }); }
 });
 
 svcmonRouter.put('/folders/rename', canEdit, fullScopeOnly, (req, res) => {
@@ -34,7 +34,7 @@ svcmonRouter.put('/folders/rename', canEdit, fullScopeOnly, (req, res) => {
     const r = renameFolder(req.body || {});
     logAudit({ user: req.user?.username, action: 'svcmon.folder.rename', target: r.path });
     res.json({ ...r, folders: listFolders() });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { res.status(e?.status === 409 ? 409 : 400).json({ error: e.message }); }
 });
 
 svcmonRouter.post('/folders/move', canEdit, fullScopeOnly, (req, res) => {
@@ -42,17 +42,17 @@ svcmonRouter.post('/folders/move', canEdit, fullScopeOnly, (req, res) => {
     const r = moveFolder(req.body || {});
     logAudit({ user: req.user?.username, action: 'svcmon.folder.move', target: r.path, detail: `이동 ${r.moved}건 (from ${req.body?.path})` });
     res.json({ ...r, folders: listFolders() });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { res.status(e?.status === 409 ? 409 : 400).json({ error: e.message }); }
 });
 
 svcmonRouter.put('/reorder/targets', canEdit, fullScopeOnly, (req, res) => {
   try { res.json(reorderTargets(req.body || {})); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  catch (e) { res.status(e?.status === 409 ? 409 : 400).json({ error: e.message }); }
 });
 
 svcmonRouter.put('/reorder/folders', canEdit, fullScopeOnly, (req, res) => {
   try { res.json(reorderFolders(req.body || {})); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  catch (e) { res.status(e?.status === 409 ? 409 : 400).json({ error: e.message }); }
 });
 
 svcmonRouter.post('/folders/delete', canEdit, fullScopeOnly, (req, res) => {
@@ -67,7 +67,7 @@ svcmonRouter.post('/folders/delete', canEdit, fullScopeOnly, (req, res) => {
 
 svcmonRouter.put('/sort', canEdit, fullScopeOnly, (req, res) => {
   try { res.json({ sort: setSort(req.body || {}) }); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  catch (e) { res.status(e?.status === 409 ? 409 : 400).json({ error: e.message }); }
 });
 
 /* ── 대상/점검 ── */
@@ -76,7 +76,7 @@ svcmonRouter.post('/targets', canEdit, fullScopeOnly, (req, res) => {
     const t = addTarget(req.body || {});
     logAudit({ user: req.user?.username, action: 'svcmon.target.add', target: t.name, detail: t.host });
     res.status(201).json({ target: t });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { res.status(e?.status === 409 ? 409 : 400).json({ error: e.message }); }
 });
 
 svcmonRouter.post('/targets/bulk', canEdit, fullScopeOnly, (req, res) => {
@@ -95,7 +95,7 @@ svcmonRouter.post('/targets/bulk', canEdit, fullScopeOnly, (req, res) => {
       detail: `추가 ${r.added} · 건너뜀 ${r.skipped.length} · 점검 ${r.newTests} · 신규폴더 ${r.newFolders}`,
     });
     res.status(201).json(r);
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { res.status(e?.status === 409 ? 409 : 400).json({ error: e.message }); }
 });
 
 svcmonRouter.put('/targets/:id', canEdit, fullScopeOnly, (req, res) => {
@@ -105,7 +105,7 @@ svcmonRouter.put('/targets/:id', canEdit, fullScopeOnly, (req, res) => {
     if (req.body && (Object.prototype.hasOwnProperty.call(req.body, 'enabled') || Object.prototype.hasOwnProperty.call(req.body, 'host'))) cancelTrials([t.id]);
     logAudit({ user: req.user?.username, action: 'svcmon.target.update', target: t.name });
     res.json({ target: t });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { res.status(e?.status === 409 ? 409 : 400).json({ error: e.message }); }
 });
 
 svcmonRouter.delete('/targets/:id', canEdit, fullScopeOnly, (req, res) => {
@@ -121,7 +121,7 @@ svcmonRouter.post('/targets/:id/tests', canEdit, fullScopeOnly, (req, res) => {
     if (!t) return res.status(404).json({ error: '대상을 찾을 수 없습니다.' });
     logAudit({ user: req.user?.username, action: 'svcmon.test.add', target: t.name, detail: t.type });
     res.status(201).json({ test: t });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { res.status(e?.status === 409 ? 409 : 400).json({ error: e.message }); }
 });
 
 svcmonRouter.put('/targets/:id/tests/:testId', canEdit, fullScopeOnly, (req, res) => {
@@ -130,7 +130,7 @@ svcmonRouter.put('/targets/:id/tests/:testId', canEdit, fullScopeOnly, (req, res
     if (!t) return res.status(404).json({ error: '점검을 찾을 수 없습니다.' });
     logAudit({ user: req.user?.username, action: 'svcmon.test.update', target: t.name });
     res.json({ test: t });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { res.status(e?.status === 409 ? 409 : 400).json({ error: e.message }); }
 });
 
 svcmonRouter.delete('/targets/:id/tests/:testId', canEdit, fullScopeOnly, (req, res) => {

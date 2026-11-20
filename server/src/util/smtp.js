@@ -45,6 +45,12 @@ export function headerSafeText(v) {
 
 /** 아주 느슨한 주소 형식 검사 — 릴레이가 최종 판정하므로 여기서는 명백한 오류만 막는다. */
 const ADDR_RE = /^[^\s@<>,;]+@[^\s@<>,;]+\.[^\s@<>,;]+$/;
+/*
+ * 108회차 A5(재현): 주소 하나의 길이 상한 — ADDR_RE 의 도메인 쪽 `X+\.X+$` 는 X 가 '.' 도 받아, 끝이 맞지 않는 긴 입력
+ *   (`x@a.a.a.…@`)에서 점마다 되짚어 O(n²) 였다(4만 자 1.3초 · 16만 자 16초 동기 — 설정 저장 · 발송 경로의 이벤트 루프가 멈춘다).
+ *   길이를 먼저 본다(RFC 5321: 로컬 64 + '@' + 도메인 255 = 320 — 그보다 긴 주소는 릴레이도 받지 않는다).
+ */
+export const ADDR_MAX_LEN = 320;
 
 /** 주소 목록 정규화: 문자열/배열 → 중복 없는 배열. 형식이 틀린 항목은 이유와 함께 돌려준다. */
 export function normalizeAddresses(input) {
@@ -55,7 +61,7 @@ export function normalizeAddresses(input) {
   for (const s of raw) {
     const a = String(s || '').trim();
     if (!a) continue;
-    if (HEADER_UNSAFE.test(a) || !ADDR_RE.test(a)) { bad.push(a.slice(0, 80)); continue; }
+    if (a.length > ADDR_MAX_LEN || HEADER_UNSAFE.test(a) || !ADDR_RE.test(a)) { bad.push(a.slice(0, 80)); continue; }
     const k = a.toLowerCase();
     if (seen.has(k)) continue;
     seen.add(k);
@@ -334,7 +340,7 @@ export async function sendMail(cfg, msg, opts = {}) {
   const port = Number(cfg.port) || (cfg.secure ? 465 : 25);
   const timeoutMs = Math.max(1000, Number(cfg.timeoutMs) || 20_000);
   const from = String(cfg.from || '').trim();
-  if (!from || HEADER_UNSAFE.test(from) || !ADDR_RE.test(from)) throw new Error('보내는 사람(From) 주소가 올바르지 않습니다.');
+  if (!from || from.length > ADDR_MAX_LEN || HEADER_UNSAFE.test(from) || !ADDR_RE.test(from)) throw new Error('보내는 사람(From) 주소가 올바르지 않습니다.');
 
   const to = normalizeAddresses(msg.to);
   const cc = normalizeAddresses(msg.cc || []);

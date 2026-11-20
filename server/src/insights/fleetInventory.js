@@ -471,6 +471,16 @@ export function remoteCollectorIndex(col) {
 }
 
 /**
+ * 점검 반복 1회차(메인 결정 — OS 주소 제안의 엣지 칸): 수집 서버 등록부를 한 번 읽어 remoteCollectorIndex 로(못 읽으면 readable:false — 추측하지 않는다).
+ *   getFleetInventory 와 같은 읽기 · 같은 색인이다(이름 · id 만 — 토큰 · URL 은 색인의 urlById 정규화 값뿐).
+ */
+export function readRemoteCollectorIndex() {
+  let col = null;
+  try { col = readCollectorsOnce(); } catch { col = null; }
+  return remoteCollectorIndex(col);
+}
+
+/**
  * 유령 키 판정 입력 — { live:Set<소문자 키>, unreadable:[{source, id?, reason, registry?}] }.
  * @param {object} snap  store.get() 스냅샷
  * @param {{now?:number}} [o]

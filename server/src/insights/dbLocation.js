@@ -22,6 +22,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { parseJsonObject } from '../util/jsonObject.js'; // v3.17.2: 객체가 아닌 JSON(수 · 글자 · 배열)은 깨진 JSON 과 같이 — 손상 보존 경로로
 
 // config.js 가 이 모듈을 import 하면 순환 참조가 되므로, 설정 파일 위치는 env 로 직접 계산한다.
 const CONFIG_DIR = process.env.CONFIG_DIR || path.resolve(process.cwd(), 'config');
@@ -37,6 +38,7 @@ export const MIGRATABLE = [
   { file: 'veeam-history.db', label: 'Veeam 일 단위 이력(라이선스·저장소 용량 · 400일)' },
   { file: 'gpu-alloc.db', label: 'GPU 할당율 일 단위 이력(법인별 용량 · 할당 · 800일 — v2.939)' },
   { file: 'vm-track.db', label: 'VM 수량·스토리지 추이' },
+  { file: 'snap-history.db', label: 'VM 별 스냅샷 이력' },   // v3.26.0 snaphist/db.js
   { file: 'storage-history.db', label: '스토리지 장비 이력' },
   // ▼ v2.379 이후 추가된 DB — 등재가 누락돼 있었다(v2.451 수정).
   //   이 파일들은 config.dbDir 을 **이미 따르므로**(rma/historyDb.js·rma/testResults.js·
@@ -77,7 +79,7 @@ export const MIGRATABLE_DIRS = [
 ];
 
 const readFile = () => {
-  try { return JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}; } catch { return {}; }
+  try { return parseJsonObject(fs.readFileSync(FILE, 'utf8')); } catch { return {}; }
 };
 
 /** 현재 설정된 DB 디렉터리(미설정이면 null = CONFIG_DIR 사용). */

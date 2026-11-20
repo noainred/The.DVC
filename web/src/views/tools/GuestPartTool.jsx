@@ -6,7 +6,7 @@ import Select from '../../components/Select.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { VmLink } from '../../components/EntityDetail.jsx';   // v2.749.1 '정보' — 공용 VM 상세 창
 import {
-  levelOf, gbText, pctText, growthText, etaText, osLabel, timeText, overviewParams, collectNote,
+  levelOf, gbText, pctText, growthText, etaText, osLabel, timeText, overviewParams, collectNote, vmSumText, unknownVmsText,
 } from './guestPartText.js';
 
 /**
@@ -112,7 +112,7 @@ function Overview({ onOpenVc }) {
             <Kpi label="임계 초과 게스트" value={d.kpi.overVms.toLocaleString('ko-KR')} accent={d.kpi.overVms ? '#fbbf24' : undefined} meta={`파티션 보고 게스트 ${d.kpi.reported.toLocaleString('ko-KR')}대 중`} />
             <Kpi label={curMode === 'vm' ? '초과 VM 의 판정 파티션' : '초과 파티션'} value={d.kpi.overParts.toLocaleString('ko-KR')} meta={curMode === 'vm' ? 'VM 합계로 판정 — 큰 데이터 디스크가 작은 C: 를 가릴 수 있습니다' : '파티션 하나라도 넘으면 초과'} />
             <Kpi label={`${d.critPct}% 이상`} value={d.kpi.crit} accent={d.kpi.crit ? '#f87171' : undefined} meta={`30일 안에 가득 찰 추세 ${d.kpi.soon}개(목록 안)`} />
-            <Kpi label="확인 불가" value={d.kpi.notReported.toLocaleString('ko-KR')} meta={`전원 꺼짐 ${d.kpi.offNotReported} · 나머지는 Tools 미실행·미보고`} />
+            <Kpi label="확인 불가" value={d.kpi.notReported.toLocaleString('ko-KR')} meta={`전원 꺼짐 ${d.kpi.offNotReported} · 나머지는 Tools 미실행·미보고${unknownVmsText(d.kpi, d.mode)}`} />
           </div>
           {d.ignored.total > 0 && (
             <div className="muted" style={{ fontSize: 12.5, marginBottom: 10 }}>
@@ -237,7 +237,7 @@ function VcDetail({ vcId, onBack, onPick }) {
             <Kpi label="게스트" value={d.kpi.guests} meta={`파티션 보고 ${d.kpi.reported}대`} />
             <Kpi label="임계 초과 게스트" value={d.kpi.overVms} accent={d.kpi.overVms ? '#fbbf24' : undefined} meta={`초과 파티션 ${d.kpi.overParts}개`} />
             <Kpi label="95% 이상 파티션" value={d.kpi.crit} accent={d.kpi.crit ? '#f87171' : undefined} meta={`남은 용량 합 ${gbText(d.kpi.critFreeGB)}`} />
-            <Kpi label="확인 불가" value={d.kpi.notReported} meta={`전원 꺼짐 ${d.kpi.offNotReported} · 값 모름 파티션 ${d.kpi.unknownParts}`} />
+            <Kpi label="확인 불가" value={d.kpi.notReported} meta={`전원 꺼짐 ${d.kpi.offNotReported} · 값 모름 파티션 ${d.kpi.unknownParts}${unknownVmsText(d.kpi, d.mode)}`} />
           </div>
           <div className="flex gap" style={{ flexWrap: 'wrap', gap: 10, marginBottom: 12 }}>
             <div className="card" style={{ flex: '2 1 460px', minWidth: 0, padding: 12 }}>
@@ -304,7 +304,7 @@ function VcDetail({ vcId, onBack, onPick }) {
                       })}
                       {v.parts.length > 8 && <span className="muted" style={{ fontSize: 11.5 }}>외 {v.parts.length - 8}개</span>}
                     </button>
-                    <b style={{ color: L.color, minWidth: 90, textAlign: 'right', marginLeft: 'auto' }}>{d.mode === 'vm' ? `합계 ${pctText(v.pct)}` : `최고 ${pctText(v.maxPct)}`}</b>
+                    <b style={{ color: L.color, minWidth: 90, textAlign: 'right', marginLeft: 'auto' }}>{vmSumText(v, d.mode)}</b>
                   </div>
                   {isOpen && (
                     <div style={{ padding: '0 12px 12px 36px', minWidth: 0 }}>

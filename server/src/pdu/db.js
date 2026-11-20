@@ -12,6 +12,7 @@
  *  - 적재는 **한 트랜잭션**으로 묶는다(수백 행 개별 insert 는 fsync 폭증).
  */
 
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
@@ -25,7 +26,7 @@ const lockRetry = createLockRetry();
 // v2.451: 이 파일만 configDir 에 고정돼 있어, 경로를 옮겨도 PDU 이력은 계속 CONFIG_DIR 에 쌓였다
 // (기본 보존 400일이라 용량 압박 해소라는 원래 목적이 반쪽이 됐다).
 const FILE = process.env.PDU_DB || path.join(config.dbDir || config.configDir, 'pdu.db');
-const RETAIN_DAYS = Math.max(1, Number(process.env.PDU_RETAIN_DAYS) || 400); // 기본 400일(연 단위 추이)
+const RETAIN_DAYS = Math.max(1, envPositive(process.env.PDU_RETAIN_DAYS, 400)); // 기본 400일(연 단위 추이)
 const PRUNE_EVERY = 20; // 20회 적재마다 1회만 prune
 
 let _db = null;

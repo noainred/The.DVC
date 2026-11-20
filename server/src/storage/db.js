@@ -19,6 +19,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { openSqlite, isSqliteLockError, createLockRetry } from '../util/sqliteOpen.js'; // v2.613 PERSIST2613-03: open 코어는 하나
 import { numOrNull } from '../util/numOrNull.js';
+import { envPositive } from '../util/envNumber.js';   // 57회차 I3: 보존 일수 env 폴백 — 음수 · Infinity 를 통과시키지 않는다(파괴적 sink)
 import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';
 import { createYielder } from '../util/timeSlice.js';   // v2.743 DB-01: 합계 추이 조각 사이 양보(시간 기준)
 import { pushAll } from '../util/pushAll.js';
@@ -102,17 +103,30 @@ export function setKeepDays({ rawKeepDays, dailyKeepDays, nodeLoadRawKeepDays, n
   _keepDays = { raw: numOrNull(rawKeepDays), daily: numOrNull(dailyKeepDays), nodeRaw: numOrNull(nodeLoadRawKeepDays),
     nodeHourly: numOrNull(nodeLoadHourlyKeepDays), clientRaw: numOrNull(nodeClientRawKeepDays), clientHourly: numOrNull(nodeClientHourlyKeepDays), clientDaily: numOrNull(nodeClientDailyKeepDays) };
 }
+/*
+ * 전체 점검 23회차 S-3(재현): 보존 기간 설정 파일이 손상되면 기본값(원시 90일 · 일 요약 5년)으로 떨어져, 관리자가 400일 · 10년으로 둔 이력을
+ *   **다음 정리가 되돌릴 수 없게 지웠다**. 설정을 못 읽은 동안은 정리를 보류한다(growthSettings 가 세운다 — 보류에는 해제 경로가 있다: 확정 · 보존본 복구).
+ *   ⚠ 27회차 D-4: growthSettings 는 이제 보류 대신 **설정 상한 보존(setKeepDays(max))** 으로 정리한다(보류는 디스크가 끝없이 찼다) — 이 표지는 지금 세우는 곳이 없고
+ *   다른 호출부를 위한 장치로만 남았다.
+ */
+let _pruneHold = null;
+let _pruneHoldWarned = null;
+/** 보존 정리 보류(사유) — null 이면 해제. */
+export function setPruneHold(reason) { _pruneHold = reason ? String(reason).slice(0, 200) : null; if (!_pruneHold) _pruneHoldWarned = null; }
+export function pruneHold() { return _pruneHold; }
+// 57회차 I3: env 폴백은 envPositive — `Number(env) || 기본값` 은 -5 를 그대로 통과시켜 보존 −5일(= 정리가 미래 시각 이전 행을 전부 지움)이 됐다.
+//   applyGrowthSettings 가 기동 때 설정값을 넣으므로 보통은 닿지 않는 경로다(그 적용이 실패했을 때의 폴백).
 function keepDays() {
   return {
-    raw: _keepDays.raw ?? (Number(process.env.STORAGE_HISTORY_KEEP_DAYS) || RAW_KEEP_DAYS_DEF),
-    daily: _keepDays.daily ?? (Number(process.env.STORAGE_DAILY_KEEP_DAYS) || DAILY_KEEP_DAYS_DEF),
+    raw: _keepDays.raw ?? envPositive(process.env.STORAGE_HISTORY_KEEP_DAYS, RAW_KEEP_DAYS_DEF),
+    daily: _keepDays.daily ?? envPositive(process.env.STORAGE_DAILY_KEEP_DAYS, DAILY_KEEP_DAYS_DEF),
     // v2.926 노드 부하 원시 — 노드 × 주기라 용량 원시보다 크다(64 노드 · 1시간 = 하루 1,536행) → 기본을 짧게(30일).
-    nodeRaw: _keepDays.nodeRaw ?? (Number(process.env.STORAGE_NODELOAD_KEEP_DAYS) || NODE_LOAD_RAW_KEEP_DAYS_DEF),
+    nodeRaw: _keepDays.nodeRaw ?? envPositive(process.env.STORAGE_NODELOAD_KEEP_DAYS, NODE_LOAD_RAW_KEEP_DAYS_DEF),
     // v2.932 — 노드 시간 요약 · 클라이언트/프로토콜 원시·시간·일(설정 → env → 기본).
-    nodeHourly: _keepDays.nodeHourly ?? (Number(process.env.STORAGE_NODELOAD_HOURLY_KEEP_DAYS) || NODE_LOAD_HOURLY_KEEP_DAYS_DEF),
-    clientRaw: _keepDays.clientRaw ?? (Number(process.env.STORAGE_NODECLIENT_KEEP_DAYS) || NODE_CLIENT_RAW_KEEP_DAYS_DEF),
-    clientHourly: _keepDays.clientHourly ?? (Number(process.env.STORAGE_NODECLIENT_HOURLY_KEEP_DAYS) || NODE_CLIENT_HOURLY_KEEP_DAYS_DEF),
-    clientDaily: _keepDays.clientDaily ?? (Number(process.env.STORAGE_NODECLIENT_DAILY_KEEP_DAYS) || NODE_CLIENT_DAILY_KEEP_DAYS_DEF),
+    nodeHourly: _keepDays.nodeHourly ?? envPositive(process.env.STORAGE_NODELOAD_HOURLY_KEEP_DAYS, NODE_LOAD_HOURLY_KEEP_DAYS_DEF),
+    clientRaw: _keepDays.clientRaw ?? envPositive(process.env.STORAGE_NODECLIENT_KEEP_DAYS, NODE_CLIENT_RAW_KEEP_DAYS_DEF),
+    clientHourly: _keepDays.clientHourly ?? envPositive(process.env.STORAGE_NODECLIENT_HOURLY_KEEP_DAYS, NODE_CLIENT_HOURLY_KEEP_DAYS_DEF),
+    clientDaily: _keepDays.clientDaily ?? envPositive(process.env.STORAGE_NODECLIENT_DAILY_KEEP_DAYS, NODE_CLIENT_DAILY_KEEP_DAYS_DEF),
   };
 }
 
@@ -359,17 +373,21 @@ async function openInner() {
        *   그 하한은 NULLIF 로 **반드시 되돌려야** 한다 — 안 되돌리면 -1e308 이 값으로 저장된다.
        * ⚠ 실측(v2.574): 첫 관측이 null 일 때 예전 형태는 **0**, 새 형태는 **null** 이다.
        */
+      // 전체 점검 23회차 S-6(재현): 그날 마지막 관측의 '못 읽음'(null)이 앞선 유효값을 덮었다(used null → 증가량 no-latest-used 로 합계에서 빠짐).
+      //   사용량 · 매체 칸은 **그날 마지막 유효 관측**(새 관측이 null 이면 기존 값 유지). total 은 적재 조건(capacityPointEligible)이 양수를 보장한다.
+      //   27회차 반증 D-9: 용량(total · hdd_total · ssd_total)은 **짝이 되는 used 와 같은 관측일 때만** 바꾼다 — used 가 null 인 늦은 관측의 total 만
+      //   들어가 한 행에 다른 시점의 total 과 used 가 섞였다(09시 100T/90T → 18시 50T/null 이 50T/90T = 180%). 그날 used 가 아직 없으면 그대로 최신 total.
       upDaily: conn.prepare(`INSERT INTO capacity_daily
           (device_id, day, last_ts, total_bytes, used_bytes, hdd_total, hdd_used, ssd_total, ssd_used, max_used, samples)
         VALUES (?,?,?,?,?,?,?,?,?,?,1)
         ON CONFLICT(device_id, day) DO UPDATE SET
           last_ts     = CASE WHEN excluded.last_ts > capacity_daily.last_ts THEN excluded.last_ts     ELSE capacity_daily.last_ts     END,
-          total_bytes = CASE WHEN excluded.last_ts > capacity_daily.last_ts THEN excluded.total_bytes ELSE capacity_daily.total_bytes END,
-          used_bytes  = CASE WHEN excluded.last_ts > capacity_daily.last_ts THEN excluded.used_bytes  ELSE capacity_daily.used_bytes  END,
-          hdd_total   = CASE WHEN excluded.last_ts > capacity_daily.last_ts THEN excluded.hdd_total   ELSE capacity_daily.hdd_total   END,
-          hdd_used    = CASE WHEN excluded.last_ts > capacity_daily.last_ts THEN excluded.hdd_used    ELSE capacity_daily.hdd_used    END,
-          ssd_total   = CASE WHEN excluded.last_ts > capacity_daily.last_ts THEN excluded.ssd_total   ELSE capacity_daily.ssd_total   END,
-          ssd_used    = CASE WHEN excluded.last_ts > capacity_daily.last_ts THEN excluded.ssd_used    ELSE capacity_daily.ssd_used    END,
+          total_bytes = CASE WHEN excluded.last_ts > capacity_daily.last_ts AND (excluded.used_bytes IS NOT NULL OR capacity_daily.used_bytes IS NULL) THEN excluded.total_bytes ELSE capacity_daily.total_bytes END,
+          used_bytes  = CASE WHEN excluded.last_ts > capacity_daily.last_ts AND excluded.used_bytes IS NOT NULL THEN excluded.used_bytes  ELSE capacity_daily.used_bytes  END,
+          hdd_total   = CASE WHEN excluded.last_ts > capacity_daily.last_ts AND excluded.hdd_total IS NOT NULL AND (excluded.hdd_used IS NOT NULL OR capacity_daily.hdd_used IS NULL) THEN excluded.hdd_total   ELSE capacity_daily.hdd_total   END,
+          hdd_used    = CASE WHEN excluded.last_ts > capacity_daily.last_ts AND excluded.hdd_used IS NOT NULL THEN excluded.hdd_used    ELSE capacity_daily.hdd_used    END,
+          ssd_total   = CASE WHEN excluded.last_ts > capacity_daily.last_ts AND excluded.ssd_total IS NOT NULL AND (excluded.ssd_used IS NOT NULL OR capacity_daily.ssd_used IS NULL) THEN excluded.ssd_total   ELSE capacity_daily.ssd_total   END,
+          ssd_used    = CASE WHEN excluded.last_ts > capacity_daily.last_ts AND excluded.ssd_used IS NOT NULL THEN excluded.ssd_used    ELSE capacity_daily.ssd_used    END,
           -- v2.574 BUG-04 — COALESCE(..., 0) 은 '못 읽음' 을 '최대 사용량 0바이트' 로 바꾼다.
           -- v2.561 이 used_bytes 는 고쳤는데 여기만 남아 있었다. 근거·정답 형태는 이 함수의
           -- JSDoc 에 적었다(리터럴 안이라 여기에는 백틱을 쓸 수 없다 — v2.550.3 규약).
@@ -399,6 +417,7 @@ async function openInner() {
       prune2: conn.prepare('DELETE FROM capacity_history WHERE rowid IN (SELECT rowid FROM capacity_history WHERE ts < ? LIMIT ?)'),
       prune3: conn.prepare('DELETE FROM capacity_daily WHERE day < ?'),
       // v2.789 하위 항목 일 롤업 — capacity_daily 와 같은 upsert 규칙(더 늦은 관측만 갱신).
+      //   27회차 반증 D-9: total 도 짝이 되는 used 와 같은 관측일 때만(capacity_daily 와 같은 규칙).
       upRes: conn.prepare(`INSERT INTO resource_daily
           (device_id, rkey, day, last_ts, kind, name, pool, total_bytes, used_bytes, samples)
         VALUES (?,?,?,?,?,?,?,?,?,1)
@@ -406,8 +425,8 @@ async function openInner() {
           last_ts     = CASE WHEN excluded.last_ts > resource_daily.last_ts THEN excluded.last_ts     ELSE resource_daily.last_ts     END,
           name        = CASE WHEN excluded.last_ts > resource_daily.last_ts THEN excluded.name        ELSE resource_daily.name        END,
           pool        = CASE WHEN excluded.last_ts > resource_daily.last_ts THEN excluded.pool        ELSE resource_daily.pool        END,
-          total_bytes = CASE WHEN excluded.last_ts > resource_daily.last_ts THEN excluded.total_bytes ELSE resource_daily.total_bytes END,
-          used_bytes  = CASE WHEN excluded.last_ts > resource_daily.last_ts THEN excluded.used_bytes  ELSE resource_daily.used_bytes  END,
+          total_bytes = CASE WHEN excluded.last_ts > resource_daily.last_ts AND (excluded.used_bytes IS NOT NULL OR resource_daily.used_bytes IS NULL) THEN excluded.total_bytes ELSE resource_daily.total_bytes END,
+          used_bytes  = CASE WHEN excluded.last_ts > resource_daily.last_ts AND excluded.used_bytes IS NOT NULL THEN excluded.used_bytes  ELSE resource_daily.used_bytes  END,
           samples     = resource_daily.samples + 1`),
       // 조회는 **일 구간 조각**으로 읽는다(resourceDailyRange — 조각 사이 양보). day 인덱스를 탄다.
       selResRange: conn.prepare(`SELECT device_id, rkey, day, kind, name, pool, total_bytes, used_bytes
@@ -543,6 +562,10 @@ const _pruneFlight = createPruneFlight({ covers: (run, next) => ['cut', 'dayCut'
  * @returns {Promise<{apiHistory:number, capacityHistory:number, capacityDaily:number, done:boolean}>}
  */
 function runPrune(db) {
+  if (_pruneHold) {
+    if (_pruneHoldWarned !== _pruneHold) { _pruneHoldWarned = _pruneHold; console.warn(`[storage-db] 보존 정리를 보류합니다 — ${_pruneHold}`); }
+    return Promise.resolve(false);
+  }
   const { raw, daily, nodeRaw, nodeHourly, clientRaw, clientHourly, clientDaily } = keepDays();
   const now = Date.now();
   const key = { cut: now - raw * DAY_MS, dayCut: dayIndex(now) - daily, nodeCut: now - nodeRaw * DAY_MS,
@@ -1038,6 +1061,21 @@ export async function purgeZeroCapacityRows({ once = null, reason = '0 바이트
     throw e;
   }
   return { ran: true, devices, rows };
+}
+
+/**
+ * 1회 정리 마커(`migration:<id>`)의 값 — 없거나 못 읽으면 null. `resetCapacityHistory` · `purgeZeroCapacityRows` 의 `once` 마커는
+ *   **처음 한 번만** 쓰인다(이미 있으면 그대로 돌아간다) — 그래서 `at` 은 그 정리가 처음 돈 기동 시각이다.
+ */
+export async function migrationMarker(id) {
+  const db = await open();
+  if (!db) return null;
+  try {
+    const row = db.metaGet.get(`migration:${String(id || '')}`);
+    if (!row || row.v == null) return null;
+    const v = JSON.parse(row.v);
+    return v && typeof v === 'object' && !Array.isArray(v) ? v : null;
+  } catch { return null; }
 }
 
 export async function capacityResets() {

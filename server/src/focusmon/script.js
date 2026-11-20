@@ -41,6 +41,11 @@ export const PROC_EVERY_CHOICES = Object.freeze([5, 15, 30]);
 export const TOPO_EVERY_S = 30;
 /** 한 번 연 반복문의 수명(초) — 넘으면 스스로 끝나고 수집기가 다시 연다. */
 export const LOOP_LIFE_S = 6 * 3600;
+/** v3.12.0(⑬ 더할 지표 A1): 파일시스템 사용률 · inode 주기(초) · df 시한(초) — 시안 컨펌 기본값(60초 · 3초). */
+export const FS_EVERY_S = 60;
+export const DF_TIMEOUT_S = 3;
+/** df 에서 뺄 종류 — 메모리 · 읽기 전용 이미지 · 컨테이너 겹침(로컬 디스크가 아니다). 네트워크 파일시스템은 -l 이 뺀다(멈춘 NFS 가 반복문을 붙잡지 않게). */
+const DF_SKIP = '-x tmpfs -x devtmpfs -x squashfs -x overlay -x iso9660';
 
 /**
  * 프로세스 줄: `pid ticks threads starttime rssPages comm ppid utime stime nice vsizeBytes majflt blkioTicks state` — comm 은 안전한 글자만(그 밖은 `_` · 비면 `_`).
@@ -64,6 +69,20 @@ const PROC_AWK = 'awk \'function e(  s,p,q,o,c,n,f,a,sp){if(cf!~/^\\/proc\\/[0-9
 const UNIT_AWK = 'awk -F: \'{split($1,a,"/");p=a[3];if(p!~/^[0-9]+$/)next;x=substr($0,length($1)+length($2)+length($3)+4);n=split(x,b,"/");u="";'
   + 'for(i=1;i<=n;i++)if(b[i]~/\\.(service|scope)$/){u=b[i];break}if(u=="")next;gsub(/[^A-Za-z0-9@._:-]/,"_",u);print p,substr(u,1,96)}\'';
 /** 입출력 줄(v2.981): `pid readBytes writeBytes` — grep 이 읽을 수 있었던 /proc/<pid>/io 두 줄을 하나로. 읽기 · 쓰기 둘 다 있을 때만. */
+/**
+ * v3.16.0(⑯ C2) 커널 메시지 — `dmesg -x`(레벨 표시) 가운데 지난 확인(KL — 부팅 뒤 초) 뒤의 줄만 · **원문은 내보내지 않는다**:
+ *   `o <부팅 뒤 초> <프로그램 이름>`(OOM 으로 끝난 프로세스 — 이름은 안전한 글자만 · 20개까지) · `e <줄 수> <마지막 초>`(그 밖 err 이상 — OOM 줄 제외) · `last <초>`(다음 확인의 기준).
+ *   일반 계정은 kernel.dmesg_restrict = 0 일 때만 읽는다 — 막히면 dmesg 가 1 로 끝나 `rc 1`(화면 '권한 없음' · 'OOM 없음' 이 아니다).
+ *   반증 반영(v3.16.0): ① OOM 이 20개를 넘으면 **가장 최근 20개**와 `on <전체 수>`(예전에는 가장 오래된 20개만 내고 기준을 가장 새 줄로 옮겨 그 사이 OOM 을 잃었다)
+ *   ② 종료값은 `##RC <값>` 줄을 awk 에 함께 흘려 받는다(bash 의 PIPESTATUS 는 dash · zsh 에서 Bad substitution) ③ 첫 확인(KL = -1 — 새 세션)이면 `f`
+ *   (커널 오류 수는 버퍼 전체라 증분과 섞지 않는다) ④ OOM 판정 문구는 대소문자 무시 · memcg 의 'Kill process' 도 OOM 줄(커널 오류로 세지 않는다 — RHEL 7 문구는 소스 기준 · 실서버 원문 미확인).
+ *   부팅 식별은 `b <boot_id>`(커널이 만든 UUID — 켜진 시각 반올림은 받은 시각에 따라 흔들려 같은 OOM 이 두 사건이 됐다).
+ */
+//   시각은 **글자 그대로** 내보낸다(awk 의 숫자 출력은 6자리 — 400.123456 이 400.123 이 되어 다음 확인에서 같은 줄을 또 셌다 · 큰 가동 시간은 지수 표기).
+const KMSG_AWK = 'awk -v L="$KL" \'{if($0~/^##RC [0-9]+$/){rc=$2;next}if(!match($0,/\\[ *[0-9]+\\.[0-9]+\\]/))next;s=substr($0,RSTART+1,RLENGTH-2);gsub(/ /,"",s);ts=s+0;if(ts>last){last=ts;ls=s}if(ts<=L+0)next;'
+  + 'if(match($0,/Killed process [0-9]+ \\([^)]*\\)/)){x=substr($0,RSTART,RLENGTH);sub(/^[^(]*\\(/,"",x);sub(/\\)$/,"",x);gsub(/[^A-Za-z0-9._:@+-]/,"_",x);if(x=="")x="_";os[no%20]=s;oc[no%20]=substr(x,1,64);no++;next}'
+  + 'if($0~/[Oo][Uu][Tt] [Oo][Ff] [Mm][Ee][Mm][Oo][Rr][Yy]|[Oo][Oo][Mm]-[Kk]ill|oom_reaper|Kill process/)next;if($0~/^[a-z]+ *:(emerg|alert|crit|err) *:/){ne++;if(ts>lt){lt=ts;lts=s}}}'
+  + 'END{k=(no>20?no-20:0);for(i=k;i<no;i++)print "o",os[i%20],oc[i%20];if(no>20)print "on",no;print "e",ne+0,(lts==""?0:lts);if(ls!="")print "last",ls;if(L+0<0)print "f";if(rc!="")print "rc",rc}\'';
 const IO_AWK = 'awk \'{split($1,a,"/");p=a[3];if(p!~/^[0-9]+$/)next;if(index($1,"read_bytes"))r[p]=$2;else w[p]=$2}END{for(p in r)if(p in w)print p,r[p],w[p]}\'';
 
 /**
@@ -80,7 +99,7 @@ function build(I, PE = PROC_EVERY_S) {
   const maxN = Math.max(1, Math.floor(LOOP_LIFE_S / I));
   return [
     'LC_ALL=C; export LC_ALL',
-    `I=${I}; P=${PE}; TE=${topoEvery}; MAXN=${maxN}`,
+    `I=${I}; P=${PE}; TE=${topoEvery}; MAXN=${maxN}; FE=${FS_EVERY_S}`,
     "echo '##HELLO 1'",
     'echo "uname $(uname -srm 2>/dev/null)"',
     'echo "rel $(head -n 1 /etc/redhat-release 2>/dev/null)"',
@@ -95,14 +114,28 @@ function build(I, PE = PROC_EVERY_S) {
     "echo '##END'",
     CK_FN,
     'CK=0; CKBAD=; ck; L=$CK; CB=0; CC=0; CP=0',
-    'n=0',
+    'n=0; KL=-1',
     'while [ $n -lt $MAXN ]; do',
     '  echo "##T $(cut -d" " -f1 /proc/uptime) $(date +%s)"',
-    "  echo '##STAT'; grep -E '^(cpu[0-9]* |procs_running |procs_blocked )' /proc/stat 2>/dev/null | head -n 1101",
+    // v3.12.0(⑬ A3): ctxt · processes(fork 누적) · intr 첫 합계 칸 — intr 줄은 수천 칸이라 awk 가 앞 두 칸만 낸다(줄 상한 안)
+    "  echo '##STAT'; awk '/^(cpu[0-9]* |procs_running |procs_blocked |ctxt |processes )/{print;next} /^intr /{print $1,$2}' /proc/stat 2>/dev/null | head -n 1104",
     "  echo '##LOAD'; cat /proc/loadavg 2>/dev/null",
     "  echo '##MEM'; head -n 129 /proc/meminfo 2>/dev/null",
     "  echo '##NET'; head -n 259 /proc/net/dev 2>/dev/null",
     "  echo '##DISK'; head -n 1025 /proc/diskstats 2>/dev/null",
+    // v3.12.0(⑬ A4 · A2): 메모리 압박(스왑 입출력 · major fault · 페이지 회수 — RHEL 7 에는 PSI 가 없다) · TCP 카운터 · 소켓 수. 모두 일반 계정으로 읽힌다.
+    "  echo '##VM'; grep -E '^(pswpin|pswpout|pgmajfault|pgscan|pgsteal)' /proc/vmstat 2>/dev/null | head -n 64",
+    "  echo '##SNMP'; cat /proc/net/snmp /proc/net/netstat 2>/dev/null | grep -E '^(Tcp|TcpExt):' | head -n 8",
+    "  echo '##SOCK'; head -n 8 /proc/net/sockstat 2>/dev/null",
+    // v3.12.0(⑬ A1): 60초마다 로컬 파일시스템 사용률 · inode — df 는 시한(KILL)으로 감싸고 끝에 종료값 줄(rc 137 = 시한에 걸림 → 화면 '응답 없음')
+    '  if [ $(( (n * I) % FE )) -lt $I ]; then',
+    `    echo '##FS'; ( timeout -s KILL ${DF_TIMEOUT_S} df -P -l -T -k ${DF_SKIP} 2>/dev/null; echo "rc $?" ) | head -n 258`,
+    `    echo '##FSI'; ( timeout -s KILL ${DF_TIMEOUT_S} df -P -l -i ${DF_SKIP} 2>/dev/null; echo "rc $?" ) | head -n 258`,
+    // v3.16.0(⑯ C2): 같은 60초마다 커널 메시지 증분(시한 KILL · 원문 없음 · 막히면 rc 1) — KL 은 셸 변수로 다음 확인까지 이어진다
+    `    KO=$( { timeout -s KILL ${DF_TIMEOUT_S} dmesg -x 2>/dev/null; echo "##RC $?"; } | ${KMSG_AWK} )`,
+    "    echo '##KMSG'; printf '%s\\n' \"$KO\" | head -n 25; echo \"b $(tr -cd '0-9a-f-' </proc/sys/kernel/random/boot_id 2>/dev/null | cut -c1-36)\"",
+    "    KN=$(printf '%s\\n' \"$KO\" | awk '$1==\"last\"{print $2}' | tail -n 1); [ -n \"$KN\" ] && KL=$KN",
+    '  fi',
     ckAdd('CB', '  '),
     '  if [ $((n % TE)) -eq 0 ]; then',
     "    echo '##NETTOPO'",

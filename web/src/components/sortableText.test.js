@@ -86,3 +86,25 @@ describe('sortableText (v2.422 표 자동 정렬)', () => {
     expect(cellText(tr, 2)).toBe('C');
   });
 });
+
+// v3.17.3(2차 공통 기능 점검 2회차): DataTable 의 원값 비교 — 빈 값은 방향과 무관하게 뒤 · 숫자 인식 · NaN 은 빈 값.
+import { compareCellValues, isEmptyCellValue } from './sortableText.js';
+describe('compareCellValues(DataTable 원값 정렬)', () => {
+  const sortBy = (vals, dir = 'asc') => [...vals].sort((a, b) => {
+    const { empty, cmp } = compareCellValues(a, b);
+    if (empty != null) return empty;
+    return dir === 'asc' ? cmp : -cmp;
+  });
+  it('빈 값(null · undefined · 빈 글자 · — · NaN)은 오름 · 내림 모두 뒤', () => {
+    const vals = [3, '', null, 1, '—', Number.NaN, 2, undefined];
+    expect(sortBy(vals).slice(0, 3)).toEqual([1, 2, 3]);
+    expect(sortBy(vals, 'desc').slice(0, 3)).toEqual([3, 2, 1]);
+    expect(sortBy(vals).slice(3).every(isEmptyCellValue)).toBe(true);
+    expect(sortBy(vals, 'desc').slice(3).every(isEmptyCellValue)).toBe(true);
+  });
+  it('글자는 숫자를 인식한다(vc-2 < vc-10) · 0 은 값이다', () => {
+    expect(sortBy(['vc-10', 'vc-2', 'vc-1'])).toEqual(['vc-1', 'vc-2', 'vc-10']);
+    expect(isEmptyCellValue(0)).toBe(false);
+    expect(sortBy([0, -1, 5])).toEqual([-1, 0, 5]);
+  });
+});

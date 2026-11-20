@@ -116,6 +116,11 @@ export function resourceSummary(r, now = Date.now()) {
   return bits.join(' · ');
 }
 
+/** 결정(56~75 남긴 것) 63 ③: 상태가 정상(ok)인데 한 방향(pull 또는 push) 기록이 없는(info 사유) 엣지 수. */
+export function oneWayNoRecordCount(edges) {
+  return (Array.isArray(edges) ? edges : []).filter((e) => e && e.state === 'ok' && Array.isArray(e.reasons) && e.reasons.some((r) => r === 'pull-none' || r === 'push-none')).length;
+}
+
 /**
  * 상단 배너 — 화면이 '지금 무엇을 보고 있는가' 를 한 번만 말한다(패널마다 반복 금지, v2.509).
  * 우선순위: 수집 서버 0 → 전부 unknown(재시작 직후) → 장애 있음 → 주의 있음 → 정상.
@@ -134,7 +139,13 @@ export function headerNote(data, now = Date.now()) {
   if (live === 0 && by.unknown) text = `엣지 ${c.edges}곳 전부 ‘확인 불가’ 입니다 — 중앙이 재시작한 직후면 pull 기록은 한 주기(${spanText(data.hub?.pullIntervalMs)}) 안에 채워지고 push 기록은 각 엣지의 다음 push 에 채워집니다. 그 뒤에도 비어 있으면 등록 URL·토큰을 보세요.`;
   else if (by.fail) text = `엣지 ${c.edges}곳 중 ${bits.join(' · ')}. 장애 엣지의 법인은 중앙 화면이 **낡은 값**을 보여주고 있을 수 있습니다 — 노드를 눌러 어느 방향이 막혔는지 보세요.`;
   else if (by.warn || by.unknown) text = `엣지 ${c.edges}곳 중 ${bits.join(' · ')}. 노드를 누르면 사유와 조치가 나옵니다.`;
-  else text = `엣지 ${c.edges}곳 모두 pull·push 가 정상입니다(마지막 조회 ${ageText(data.at, now)}).`;
+  else {
+    // 결정(56~75 남긴 것) 63 ③: '정상' 엣지 중 한 방향 기록 없음(info — pull-none · push-none)은 정상과 따로 센다(판정은 그대로 — 이상 아님, 문구만).
+    const oneWay = oneWayNoRecordCount(data.edges);
+    text = oneWay
+      ? `엣지 ${c.edges}곳 — 정상 ${Math.max(0, (by.ok || 0) - oneWay)}곳 · 한 방향 기록 없음 ${oneWay}곳입니다(한 방향 기록 없음은 이상이 아닙니다 — 노드를 누르면 어느 방향인지 나옵니다 · 마지막 조회 ${ageText(data.at, now)}).`
+      : `엣지 ${c.edges}곳 모두 pull·push 가 정상입니다(마지막 조회 ${ageText(data.at, now)}).`;
+  }
   if (c.unassigned) text += ` 담당 엣지를 알 수 없는 자원 ${c.unassigned}개는 그래프에 붙이지 않고 아래 목록에 두었습니다.`;
   return { tone: by.fail ? 'red' : (by.warn || by.unknown) ? 'amber' : 'green', text };
 }

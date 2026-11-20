@@ -26,6 +26,7 @@
  */
 import React, { useMemo, useState } from 'react';
 import { headerSortable, sortChildren, nextSortState } from './sortableText.js';
+import { onPressKey } from './pressable.js';   // v3.13.2 정렬 머리 키보드(Enter/Space) — 역할(columnheader)은 그대로
 
 const ARROW = { asc: '▲', desc: '▼' };
 
@@ -89,8 +90,11 @@ export function STable({ sortable = true, limit = 0, minWidth = 0, wrap, childre
     return React.cloneElement(th, {
       key: th.key ?? `h${idx}`,
       onClick: (e) => { th.props.onClick?.(e); setSort((c) => nextSortState(c, myCol)); },
+      // v3.13.2(2차 루프 3회차): 마우스로만 정렬됐다 — Tab 으로 닿고 Enter/Space 로 같은 순서(오름 → 내림 → 해제). 포커스 테두리는 styles.css th[aria-sort]:focus-visible.
+      tabIndex: th.props.tabIndex ?? 0,
+      onKeyDown: (e) => { th.props.onKeyDown?.(e); if (!e.defaultPrevented) onPressKey(() => setSort((c) => nextSortState(c, myCol)))(e); },
       style: { cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap', ...(th.props.style || {}) },
-      title: th.props.title || '클릭하면 이 열로 정렬합니다(오름차순 → 내림차순 → 해제).',
+      title: th.props.title || '클릭하면 이 열로 정렬합니다(오름차순 → 내림차순 → 해제 · 키보드는 Enter · Space).',
       'aria-sort': active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none',
     }, th.props.children, <span aria-hidden="true" style={{ opacity: active ? 1 : 0.28, marginLeft: 3, fontSize: '0.85em' }}>{active ? ARROW[sort.dir] : '↕'}</span>);
   });

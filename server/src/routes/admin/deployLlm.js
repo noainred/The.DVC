@@ -1,13 +1,14 @@
 // 오프라인 패키지·에이전트 배포·LLM/Ollama·릴리스 노트 — admin.js(구 2,410줄) 분할(v2.285.0). 본문은 원본 그대로, 등록 순서는 admin.js 호출 순서가 보존한다.
 import { config } from '../../config.js';
 import { saveNote, deleteNote } from '../../release-notes.js';
-import { loadLlmConfig, llmUrlIssue, saveLlmConfig, normTimeoutMs } from '../../llm/config.js';
+import { loadLlmConfig, llmUrlIssue, saveLlmConfig, normTimeoutMs, llmConfigWriteRefusal } from '../../llm/config.js';
+import { unreadMark } from '../settingsUnreadMark.js';   // 112회차: 조회 응답의 읽기 오류 표지
 import { ollamaTest } from '../../llm/ollama.js';
-import { installOllama } from '../../llm/ollamaDeploy.js';
+import { installOllama, normOllamaPort, ollamaModelName } from '../../llm/ollamaDeploy.js';
 import { deployAgent, testTarget, installerInfo, checkAgentStatus, envPairs, envPairsIssue } from '../../agent/deploy.js';
 import { fetchRemoteVersions, listLocalPackages, downloadPackage } from '../../upgrade/fetchPackage.js';
-import { getPackageSettings, savePackageSettings } from '../../upgrade/packageSettings.js';
-import { listTargets, getTargetRaw, saveTarget, removeTarget, recordResult, findTargetByHost, listTargetsRaw } from '../../agent/deployRegistry.js';
+import { getPackageSettings, savePackageSettings, packageSettingsWriteRefusal, packageTokenDropped } from '../../upgrade/packageSettings.js';
+import { listTargets, getTargetRaw, saveTarget, removeTarget, recordResult, findTargetByHost, listTargetsRaw, deployTargetsLoadError } from '../../agent/deployRegistry.js';
 import { targetsToCsv, sampleCsv as deploySampleCsv, parseTargetsCsv, analyzeTargetsImport } from '../../agent/deployCsv.js';
 import { parseTargetsText, analyzeBulkDeploy, targetsToText, targetsToTextCsv, sampleText, sampleTextCsv, fillAutoTokens, COLUMN_PRESETS, DEFAULT_PRESET } from '../../agent/deployText.js';   // 대량 배포 텍스트/CSV(v2.432)
 import { startBulkDeploy, getRun, listRuns, cancelRun, activeRunId } from '../../agent/bulkDeploy.js';        // 대량 배포 실행기(v2.432)
@@ -36,6 +37,44 @@ const fleetOnly = fullScopeOnlyWith('엣지 배포·패키지·LLM 설정·릴�
 
 // 배포 성공 후의 수집 서버 자동 등록은 agent/autoRegister.js 로 이관(v2.432) — 단건·대량 배포가 같은 규칙을 쓴다.
 
+/**
+ * 116회차 F6: Ollama 원격 설치의 감사 문구(순수). 대상(계정@주소:SSH 포트) · 방식 · Ollama 포트 · 모델 · 포탈 반영 요청 여부 · 실패 사유만 —
+ * 비밀번호 · 개인키는 싣지 않는다. 오프라인 파일 경로는 칸으로 싣지 않는다 — 다만 122회차 정정: 검증이 거절한 경로는 **실패 사유 문구에 들어 있다**
+ * ('설치 파일을 찾을 수 없습니다: <요청자가 넣은 경로>' — 비밀이 아니고 무엇을 보내려 했는지의 기록이다). 줄바꿈 · 탭은 공백으로(감사 줄이 갈라지지 않게), 칸마다 길이 상한.
+ */
+export function ollamaDeployAuditDetail({ target = {}, mode, model, ollamaPort, applyToPortal, result } = {}) {
+  const s = (v, n = 80) => String(v ?? '').slice(0, n).replace(/[\r\n\t]/g, ' ');
+  const applied = applyToPortal === undefined ? true : !!applyToPortal;
+  return [
+    `대상 ${s(target?.username, 40) || '?'}@${s(target?.host, 120) || '?'}:${s(target?.port || 22, 6)}`,
+    `방식 ${mode === 'offline' ? '오프라인(파일 전송)' : '온라인'}`,
+    `Ollama 포트 ${normOllamaPort(ollamaPort) ?? '형식 오류'}`,
+    model ? `모델 ${ollamaModelName(model).slice(0, 60) || '(이름 형식 오류)'}` : '',
+    `포탈 LLM 설정 반영 ${applied ? '요청함' : '요청 안 함'}`,   // 요청값이다 — 실제 반영은 설치가 끝까지 성공했을 때만(installOllama)
+    result?.ok ? '' : `사유 ${s(result?.reason, 160)}`,
+  ].filter(Boolean).join(' · ');
+}
+
+/**
+ * 122회차(116 F6 의 형제 — 116 이 '같은 꼴 · 손대지 않음' 으로 남긴 것): 엣지 노드 배포의 감사 문구(순수). 대상(계정@주소:SSH 포트) · 엣지 이름 · 포탈 포트 ·
+ * 실패 사유만 — 비밀번호 · 개인키 · 토큰(CENTRAL_TOKEN · COLLECTOR_TOKEN)은 싣지 않는다. 줄바꿈 · 탭은 공백으로, 칸마다 길이 상한.
+ */
+export function agentDeployAuditDetail({ target = {}, portalPort, result } = {}) {
+  const s = (v, n = 80) => String(v ?? '').slice(0, n).replace(/[\r\n\t]/g, ' ');
+  return [
+    `대상 ${s(target?.username, 40) || '?'}@${s(target?.host, 120) || '?'}:${s(target?.port || 22, 6)}`,
+    target?.agentName ? `엣지 ${s(target.agentName, 60)}` : '',
+    `포탈 포트 ${s(Number(portalPort) || 4000, 6)}`,
+    result?.ok ? '' : `사유 ${s(result?.reason, 160)}`,
+  ].filter(Boolean).join(' · ');
+}
+/** 배포 결과를 감사에 남긴다 — 성공은 자동 감사 줄에 함께(두 줄을 만들지 않는다 — v2.913), 실패(4xx 라 자동 감사가 건너뛴다)는 따로 한 줄. */
+function auditAgentDeploy(req, res, target, portalPort, r) {
+  const detail = agentDeployAuditDetail({ target, portalPort, result: r });
+  if (r?.ok) { if (res.locals) res.locals.auditDetail = detail; }
+  else logAudit({ user: req.user?.username, action: '엣지 노드 배포 실패', target: String(target?.host ?? '').slice(0, 120), detail, ip: req.ip || '' });
+}
+
 export function registerDeployLlm(adminRouter) {
 
 // --- Package auto-download (upgrade/install packages → packages dir) ---
@@ -50,11 +89,18 @@ adminRouter.get('/packages', adminOnly, async (req, res) => {
   let remote = null;
   try { remote = await fetchRemoteVersions(base); }
   catch (e) { remote = { error: e.message }; }
-  res.json({ dir: s.dir, baseUrl: s.baseUrl, settings: s, local: listLocalPackages(), remote, ...(scoped && asked ? { baseUrlIgnored: true, baseUrlIgnoredReason: '즉석 저장소 주소는 전체 범위(vCenter 제한 없는) 계정만 쓸 수 있어 저장된 주소로 조회했습니다.' } : {}) });
+  res.json({ dir: s.dir, baseUrl: s.baseUrl, settings: s, local: listLocalPackages(), remote, ...unreadMark(packageSettingsWriteRefusal()), ...(scoped && asked ? { baseUrlIgnored: true, baseUrlIgnoredReason: '즉석 저장소 주소는 전체 범위(vCenter 제한 없는) 계정만 쓸 수 있어 저장된 주소로 조회했습니다.' } : {}) });
 });
 // Web-editable package source (repository URL / download dir / token).
 adminRouter.put('/packages/settings', adminOnly, fleetOnly, (req, res) => {
-  res.json({ ok: true, settings: savePackageSettings(req.body || {}) });
+  const unreadable = packageSettingsWriteRefusal();   // 103회차 F6: 읽기 오류 중 저장 거절 — 사유를 화면까지
+  if (unreadable) return res.status(409).json(unreadable);
+  // 133회차: 저장소 주소가 바뀌어 저장된 토큰을 버렸으면 그 사실을 응답에 싣는다(v2.607 droppedSecrets 규약 — routes/upgrade.js 와 같은 모양).
+  const dropped = packageTokenDropped(req.body || {});
+  res.json({
+    ok: true, settings: savePackageSettings(req.body || {}),
+    ...(dropped ? { droppedSecrets: ['token'], skipped: [{ field: 'token', reason: '패키지 저장소 주소가 바뀌어 저장된 토큰을 폐기했습니다 — 새 저장소에 쓸 토큰이 있으면 다시 등록하세요.' }] } : {}),
+  });
 });
 adminRouter.post('/packages/download', adminOnly, fleetOnly, async (req, res) => {
   try { const r = await downloadPackage(req.body || {}); res.status(r.ok ? 200 : 400).json(r); }
@@ -90,15 +136,22 @@ adminRouter.post('/agent-deploy', adminOnly, fleetOnly, async (req, res) => {
     const b = req.body || {};
     if (b.host) {
       const id = b.id || findTargetByHost(b.host, b.port, b.username)?.id;
-      saveTarget({ ...b, id });
-      r.targetSaved = true;
+      // 87회차(85 F1 반증 — 재현): 저장 결과를 본다. 예전에는 반환값을 버리고 늘 targetSaved:true 라, 등록부 읽기 오류(85 F1 — 저장 거절) ·
+      //   env 주입 거절 때도 '저장됨' 이었다. 거절 사유는 targetSaveReason 으로 싣는다(배포 결과에는 영향 없음 — 예전과 같다).
+      const sv = saveTarget({ ...b, id });
+      r.targetSaved = sv?.ok === true;
+      if (!r.targetSaved) r.targetSaveReason = String(sv?.reason || '배포 대상을 저장하지 못했습니다.').slice(0, 300);
     }
-  } catch { /* 저장 실패는 배포 결과에 영향 주지 않음 */ }
+  } catch (e) { r.targetSaved = false; r.targetSaveReason = String(e?.message || e).slice(0, 300); /* 저장 실패는 배포 결과에 영향 주지 않음 */ }
+  // 122회차(116 F6 의 형제): 요청자가 고른 서버에 root 로 설치 스크립트를 돌리고 portal.env(토큰)를 쓰는 경로인데 감사는 자동(2xx 만 · 대상 없음)뿐이었다 —
+  //   실패한 배포(패키지 전송 · install.sh 가 이미 돌았을 수 있다)는 기록이 없었다.
+  auditAgentDeploy(req, res, target, portalPort, r);
   res.status(r.ok ? 200 : 400).json(r);
 });
 
 // Saved targets + bulk deploy.
-adminRouter.get('/agent-deploy/targets', adminOnly, fleetOnly, (_req, res) => res.json({ targets: listTargets() }));
+// 87회차 ⓐ(85회차 결정 — 권장안): 등록부를 읽지 못했으면(읽기 오류 · 손상 · 보존본만 남음) 표지를 함께 싣는다 — 빈 targets 가 '저장된 대상 0개' 로 보이지 않게.
+adminRouter.get('/agent-deploy/targets', adminOnly, fleetOnly, (_req, res) => res.json({ targets: listTargets(), loadError: deployTargetsLoadError() }));
 
 /**
  * 대상 저장 — v2.434 부터 **저장만 해도 수집 서버로 자동 등록**한다(사용자 요구 '에이전트를 등록하면
@@ -216,6 +269,7 @@ adminRouter.post('/agent-deploy/targets/:id/deploy', adminOnly, fleetOnly, async
   const r = await deployAgent(t, { installerPath: t.installerPath, port: t.portalPort });
   if (r.ok) r.collector = autoRegisterCollector(t, t.portalPort); // 설치 성공 시 중앙에 수집 서버로 자동 등록
   recordResult(t.id, r);
+  auditAgentDeploy(req, res, t, t.portalPort, r);   // 122회차: 대상 · 실패도 감사에(위 단건 배포와 같은 규칙)
   res.status(r.ok ? 200 : 400).json(r);
 });
 
@@ -237,6 +291,9 @@ adminRouter.post('/agent-deploy/deploy-all', adminOnly, fleetOnly, async (_req, 
     recordResult(t.id, r);
     results.push({ id: t.id, host: t.host, agentName: t.agentName, ok: r.ok, active: r.active, reason: r.reason });
   }
+  // 122회차: 전체 배포는 언제나 200 이라 자동 감사 줄이 남는다 — 그 줄에 대상 수 · 실패한 주소(앞 10개)를 싣는다.
+  const failed = results.filter((r) => !r.ok);
+  if (res.locals) res.locals.auditDetail = `대상 ${results.length} · 성공 ${results.length - failed.length} · 실패 ${failed.length}${failed.length ? `(${failed.slice(0, 10).map((r) => String(r.host ?? '').slice(0, 60).replace(/[\r\n\t]/g, ' ')).join(', ')}${failed.length > 10 ? ' …' : ''})` : ''}`;
   res.json({ ok: true, deployed: results.filter((r) => r.ok).length, total: results.length, results });
 });
 
@@ -377,7 +434,11 @@ adminRouter.post('/agent-deploy/collector-sync/probe', adminOnly, fleetOnly, asy
     if (!t) { results.push({ id, ok: false, reason: '대상을 찾을 수 없습니다.' }); return; }
     const url = targetUrl(t);
     const col = cols.find((c) => String(c.url || '').replace(/\/+$/, '') === url) || cols.find((c) => c.id === collectorIdOf(t));
-    const central = await hit(url, col?.token, col?.id || id);
+    // 98회차(재현 — v2.480 S2 와 같은 꼴): 수집 서버(중앙) 토큰은 **그 수집 서버의 저장 URL 로만** 보낸다. 예전에는 URL 이 달라도 id(collectorDatacenter ·
+    //   agentName · host)로 짝지어 중앙 토큰을 배포 대상 주소(advertiseUrl · host — 관리자가 저장으로 바꿀 수 있다)로 보냈다 — 토큰 열람은 소유자 전용인데
+    //   관리자가 대상의 이름만 맞추고 주소를 자기 서버로 두면 그 수집 서버 토큰을 받아 낼 수 있었다. 대상 토큰은 예전처럼 대상 주소로(자기 것).
+    const colUrl = col ? String(col.url || '').trim().replace(/\/+$/, '') : '';
+    const central = colUrl ? await hit(colUrl, col.token, col.id || id) : { tried: false, ok: false, reason: col ? '수집 서버 URL 없음' : '토큰 없음' };
     const target = await hit(url, t.collectorToken, col?.id || id);
     let recommend = 'none'; let why = '';
     if (central.ok && !target.ok) { recommend = 'central-to-target'; why = '엣지가 중앙(수집 서버) 토큰을 받습니다 — 배포 대상 기록만 낡았습니다. 재배포 전에 맞춰 두세요.'; }
@@ -385,7 +446,7 @@ adminRouter.post('/agent-deploy/collector-sync/probe', adminOnly, fleetOnly, asy
     else if (central.ok && target.ok) { recommend = 'central-to-target'; why = '두 토큰이 모두 통합니다(엣지가 최근 교체 중이거나 값이 같음). 중앙 값 기준으로 통일하세요.'; }
     else { recommend = 'target-to-edge'; why = `어느 토큰도 통하지 않습니다(중앙: ${central.reason || '실패'} · 대상: ${target.reason || '실패'}). 엣지가 꺼져 있거나 주소가 틀렸을 수 있으니 먼저 확인하고, 맞다면 '대상 → 엣지' 로 밀어넣으세요.`; }
     results.push({
-      id, host: t.host, agentName: t.agentName || '', url, collectorId: col?.id || '',
+      id, host: t.host, agentName: t.agentName || '', url, collectorId: col?.id || '', ...(colUrl && colUrl !== url ? { centralUrl: colUrl } : {}),
       central: { tried: central.tried, ok: central.ok, reason: central.reason },
       target: { tried: target.tried, ok: target.ok, reason: target.reason },
       recommend, why, ok: true,
@@ -521,8 +582,9 @@ adminRouter.get('/agent-deploy/targets/sample.txt', csvPerm, adminOnly, fleetOnl
 });
 
 // --- Local LLM (Ollama) config for natural-language search ---
-adminRouter.get('/llm-config', adminOnly, (_req, res) => res.json({ config: loadLlmConfig() }));
+adminRouter.get('/llm-config', adminOnly, (_req, res) => res.json({ config: loadLlmConfig(), ...unreadMark(llmConfigWriteRefusal()) }));   // 112회차: 기동 뒤 한 번도 못 읽었으면 config 는 env 기본값 — 화면이 저장을 잠근다
 adminRouter.put('/llm-config', adminOnly, fleetOnly, (req, res) => {
+  { const no = llmConfigWriteRefusal(); if (no) return res.status(503).json(no); }   // 107회차: 설정 파일 읽기 오류 중에는 저장하지 않는다(사유를 화면까지)
   try { res.json({ ok: true, config: saveLlmConfig(req.body || {}) }); }
   catch (e) { res.status(e.status || 500).json({ ok: false, reason: e.message }); }
 });
@@ -548,6 +610,12 @@ adminRouter.post('/ollama-deploy', adminOnly, fleetOnly, requireSettingsOwner, a
   //   Ollama 가 들을 포트는 별도 키 `ollamaPort`(비우면 11434).
   const { mode, binaryPath, model, ollamaPort, applyToPortal, ...target } = req.body || {};
   const r = await installOllama(target, { mode, binaryPath, model, ollamaPort, applyToPortal });
+  // 116회차 F6: 요청자가 고른 서버에 root 로 명령을 실행하고(오프라인이면 이 서버의 파일을 보낸다) 포탈 LLM 주소를 바꾸는 경로인데,
+  //   자동 감사(auditMiddleware)는 2xx 만 · 대상 없이 남겼다 — **실패한 설치**(계정 생성 · 파일 전송 · 설치 스크립트가 이미 돌았을 수 있다)는
+  //   기록이 없었다. 대상 · 방식을 싣는다(비밀번호 · 개인키는 싣지 않는다 · 파일 경로는 실패 사유 문구에만 — 형제 '심층 검색 게스트 탐침' v2.689 B7 과 같은 판단).
+  const auditDetail = ollamaDeployAuditDetail({ target, mode, model, ollamaPort, applyToPortal, result: r });
+  if (r.ok) { if (res.locals) res.locals.auditDetail = auditDetail; }   // 성공은 자동 감사 줄에 함께(두 줄을 만들지 않는다 — v2.913)
+  else logAudit({ user: req.user?.username, action: 'Ollama 원격 설치 실패', target: String(target?.host ?? '').slice(0, 120), detail: auditDetail, ip: req.ip || '' });
   res.status(r.ok ? 200 : 400).json(r);
 });
 

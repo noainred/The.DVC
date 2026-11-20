@@ -93,6 +93,20 @@ export function slotLabel(slot, i) {
   return slot ? { no: String(i + 1), name: slot.name || `이름${i + 1}`, empty: false, cols: slot.cols?.length || 0 } : { no: String(i + 1), name: `이름${i + 1} — 비어 있음`, empty: true, cols: 0 };
 }
 /** 기본값 한 줄. */
+/**
+ * 113회차 메인: 저장값 · 매핑 파일을 못 읽었을 때의 안내(순수). 서버는 두 경우를 가른다 —
+ *   손상(JSON · 모양)은 원본을 보존본(.corrupt)으로 옮기고, **읽기 오류**(권한 · 디스크 — readError)는 원본을 그대로 둔다(보존본이 없다).
+ *   예전 화면은 둘 다 '손상 사본은 설정 폴더에 남았습니다' 라고 말했다 — 읽기 오류 때는 없는 파일을 찾게 했다.
+ * @param {{unreadable?:boolean, readError?:boolean}|null} o 서버 응답(저장값 · 매핑)
+ * @param {string} what 문장 머리(예: '저장값 파일을 읽지 못해 저장할 수 없습니다')
+ */
+export function unreadableNote(o, what) {
+  if (!o?.unreadable) return '';
+  return o.readError
+    ? `${what}(읽기 오류 — 원본은 그대로 있습니다. 파일 소유자 · 권한을 확인하세요. 다시 읽히면 풀립니다).`
+    : `${what}(손상 사본은 설정 폴더에 남았습니다).`;
+}
+
 export function defaultLine(prefs) {
   const d = prefs?.def;
   if (!d) return '기본값: 포탈 기본 조합 — ‘지금 설정을 기본값으로’ 를 누르면 다음부터 그 설정으로 시작합니다';

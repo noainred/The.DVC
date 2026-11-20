@@ -12,6 +12,7 @@
  * permissive undici dispatcher (independent of import order).
  */
 
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { Agent } from 'undici';
 import { classifyBmcVendor } from './vendorMatch.js'; // v2.495: 비-Dell BMC 판별(추가 HTTP 0회)
 import { constants as cryptoConstants } from 'node:crypto';
@@ -126,7 +127,7 @@ const AUTH_TTL_MS = 20 * 60_000;
 // 만료(기본 30분)까지 남아 iDRAC 세션 상한에 닿으면 로그인 실패가 된다(⚠ 상한 수치·이 현장 Basic 비활성 여부는 미확인).
 // 이제 ① **LRU**(조회 성공·갱신 때 뒤로 옮긴다) ② 상한은 등록 규모보다 넉넉히(`IDRAC_AUTH_CACHE_MAX`, 기본 4096)
 // ③ 세션 항목이 밀려나거나 새 토큰으로 바뀌면 **옛 세션을 DELETE** 한다(best-effort — 실패해도 idle 만료로 사라진다).
-const AUTH_CACHE_MAX = Math.max(64, Number(process.env.IDRAC_AUTH_CACHE_MAX) || 4096);
+const AUTH_CACHE_MAX = Math.max(64, envPositive(process.env.IDRAC_AUTH_CACHE_MAX, 4096));
 /** v2.593: 키별 진행 중인 세션 생성(single-flight). */
 const SESSION_INFLIGHT = new Map();
 const SESSION_PATH_RE = /^\/redfish\/v1\/SessionService\/Sessions\/[^/?#\s]+$/;
@@ -838,12 +839,16 @@ export async function fetchInventory(entry) {
   } catch { inv.collections.memoryDimms = 'failed'; /* memory optional */ }
 
   // --- 최근 하드웨어 이벤트(Critical/Warning) — SEL 또는 Dell LC 로그 ---
+  // 93회차 F1(81회차 남긴 것 P1): SEL · LC 로그를 둘 다 못 읽거나 매니저 id 가 없으면 `events` 는 빈 배열이지만
+  //   '이벤트 0건' 이 아니다 — `collections.events` 에 'ok'(로그 GET 하나라도 성공) | 'failed' 를 남긴다.
+  //   소비처(bmusage/hwFacts selCritical · 스냅샷)는 'failed' 면 null(못 읽음). 파트 장애 COLLECTION_KINDS 의 종류가 아니다.
   inv.events = [];
+  inv.collections.events = 'failed';
   try {
     if (mgrId) {
       let log = null;
       for (const p of [`${mgrId}/LogServices/Sel/Entries`, `${mgrId}/LogServices/Lclog/Entries`]) {
-        try { log = await G(p); if (log?.Members?.length) break; } catch { /* try next */ }
+        try { log = await G(p); inv.collections.events = 'ok'; if (log?.Members?.length) break; } catch { /* try next */ }
       }
       for (const e of (log?.Members || []).slice(-40).reverse()) {
         const sev = e.Severity || '';
@@ -1017,7 +1022,8 @@ export async function fetchInventory(entry) {
   try { inv.firmware = await fetchFirmwareInventory(entry); } catch { inv.firmware = []; }
 
   // Systems 는 실패했어도 Chassis(psus) 처럼 sysId 없이 도는 컬렉션이 응답했으면 장비는 닿은 것이다.
-  if (Object.values(inv.collections).includes('ok')) inv.reachable = true;
+  //   93회차 F1: `events`(매니저 로그)는 이 판정에 넣지 않는다 — 예전 판정(부품 컬렉션 · Systems)을 그대로 둔다.
+  if (Object.entries(inv.collections).some(([k, v]) => k !== 'events' && v === 'ok')) inv.reachable = true;
 
   return inv;
 }
@@ -1258,7 +1264,7 @@ export async function fetchSensors(entry) {
  * ⚠ 404 는 '이 장비에 Sensors 컬렉션이 없다'(구펌웨어·다른 벤더) — 실패가 아니라 `absent` 로 센다.
  * ⚠ 인증 거부는 삼키지 않고 던진다(계정 잠금 — v2.535 규약).
  */
-export const SENSOR_MEMBER_MAX = Math.max(20, Number(process.env.IDRAC_SENSOR_MEMBER_MAX) || 250);
+export const SENSOR_MEMBER_MAX = Math.max(20, envPositive(process.env.IDRAC_SENSOR_MEMBER_MAX, 250));
 export const SENSOR_COLLECT_BUDGET_MS = reqTimeoutMs(process.env.IDRAC_SENSOR_BUDGET_MS, 45_000, { min: 5_000, max: 300_000 }); // 2^31 초과·빈 값·음수 정규화(v2.605 TIM2605-04)
 export async function fetchSensorCollection(entry, { signal = null, now = Date.now } = {}) {
   const base = trimTrailingSlashes(String(entry.host || ''));
@@ -1336,8 +1342,8 @@ export async function fetchSensorCollection(entry, { signal = null, now = Date.n
  *   목록을 열거해 **이름 패턴이 맞는 것만** 읽으며, 장비가 가진 전체 목록(`seenReports`)과 실제로
  *   읽은 것(`usedReports`)을 응답에 실어 화면이 장비별로 밝힌다(사용자 선택).
  */
-const REPORT_TTL_MS = Math.max(60_000, Number(process.env.BMUSAGE_REPORT_TTL_MS) || 6 * 3_600_000);
-const MAX_REPORTS_PER_DEVICE = Math.max(1, Number(process.env.BMUSAGE_MAX_REPORTS) || 6);
+const REPORT_TTL_MS = Math.max(60_000, envPositive(process.env.BMUSAGE_REPORT_TTL_MS, 6 * 3_600_000));
+const MAX_REPORTS_PER_DEVICE = Math.max(1, envPositive(process.env.BMUSAGE_MAX_REPORTS, 6));
 const REPORT_FETCH_CONCURRENCY = 3;   // 한 장비에 동시 GET — iDRAC(BMC)은 약하므로 보수적으로
 /** hostKey → { ids: string[], at: number } */
 const _reportList = new Map();
@@ -1566,7 +1572,7 @@ export { USAGE_IDS };
  *   정상 상태는 **캐시된 URL 4개 이하의 GET** 뿐이다(동시 3). 탐색 결과를 캐시하지 않으면
  *   200대 × 3회가 매 주기에 더해져 주기를 넘긴다.
  */
-const SENSOR_TTL_MS = Math.max(60_000, Number(process.env.BMUSAGE_SENSOR_TTL_MS) || 6 * 3_600_000);
+const SENSOR_TTL_MS = Math.max(60_000, envPositive(process.env.BMUSAGE_SENSOR_TTL_MS, 6 * 3_600_000));
 /** 이름 패턴 → 우리 필드. `USAGE_IDS` 와 **같은 후보 문자열**을 쓴다(두 벌을 만들지 않는다). */
 const SENSOR_PATTERNS = Object.freeze([
   ['cpuPct', /cpu.*usage|usage.*cpu/i],

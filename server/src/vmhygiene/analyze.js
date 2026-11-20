@@ -33,14 +33,26 @@ function exceptedBy(vm, exceptions) {
   return exceptions.find((e) => hay.includes(String(e).toLowerCase())) || null;
 }
 
+/**
+ * v3.28.0 스냅샷 보류(vmhygiene/holds.js) — 설정 s 에 열거되지 않는 속성 holds(Map, 키 'vCenter id\nVM id')로 붙어 온다.
+ * 기한이 지나지 않은 보류만 판정에서 뺀다(기한은 여기서 지금 시각으로 다시 본다 — 캐시된 Map 이 기한을 넘겨도 빼지 않는다).
+ */
+export function holdOf(vm, s, now = Date.now()) {
+  const m = s && s.holds instanceof Map ? s.holds : null;
+  if (!m || !vm) return null;
+  const h = m.get(`${vm.vcenterId}\n${vm.id}`);
+  return h && Number(h.until) > now ? h : null;
+}
+
 /** VM 하나의 이 모듈 판정(B10 판정은 vmCfgFindings 가 따로). */
 export function hygieneFindings(vm, s, now = Date.now()) {
   const out = [];
   const add = (code, facts = {}) => out.push({ code, sev: HYGIENE_CODES[code], facts });
-  if (!vm || vm.template === true) return { findings: out, excepted: null };
+  if (!vm || vm.template === true) return { findings: out, excepted: null, held: null };
   const exc = exceptedBy(vm, s.exceptions);
+  const held = exc ? null : holdOf(vm, s, now);
   const cnt = Number.isFinite(vm.snapshotCount) ? vm.snapshotCount : 0;
-  if (!exc && cnt > 0) {
+  if (!exc && !held && cnt > 0) {
     const ageDays = Number.isFinite(vm.snapshotOldestTs) && vm.snapshotOldestTs > 0 ? Math.floor((now - vm.snapshotOldestTs) / DAY) : null;
     if (ageDays != null && ageDays >= s.snapAgeDays) add('snap-age', { days: ageDays, limit: s.snapAgeDays });
     if (cnt > s.snapCount) add('snap-count', { count: cnt, limit: s.snapCount });
@@ -66,7 +78,7 @@ export function hygieneFindings(vm, s, now = Date.now()) {
     const days = Math.floor((now - boot) / DAY);
     if (days >= s.uptimeDays) add('uptime-long', { days, limit: s.uptimeDays });
   }
-  return { findings: out, excepted: exc };
+  return { findings: out, excepted: exc, held };
 }
 
 /**
@@ -132,6 +144,32 @@ export function analyzeVmHygiene(vms, s, opt = {}) {
   //   응답(JSON)·펼침에 실리지 않게 열거하지 않는 속성으로 둔다.
   Object.defineProperty(out, 'allRows', { value: shown, enumerable: false });
   return out;
+}
+
+/**
+ * v3.21.0 VM 분석 화면 요약(`/tools/vm-hygiene?summary=1` — docs/design/vm-insight §10) — 법인(vCenter)별 줄 + 법인별 상위 N.
+ *   result = 거르기 없이 돌린 analyzeVmHygiene 결과. 법인 줄의 vms · withFindings · crit · warn · notCollected 는 도구의 vcenters 그대로이고,
+ *   byCode(문제 종류별 VM 수)는 도구의 byCode 와 같은 셈(판정마다 +1)을 화면 상한 전 전체(allRows)로 법인별로 낸다(잘린 rows 로 세지 않는다).
+ *   상위 N: question = 응답을 기다리며 멈춘 VM(question 판정) · worst = 도구 정렬(심각도 → 판정 수 → 이름)의 앞 N.
+ */
+export function hygieneSummaryByVc(result, topN = 5) {
+  const src = Array.isArray(result.allRows) ? result.allRows : result.rows;
+  const per = new Map();
+  for (const v of result.vcenters || []) {
+    const byCode = {};
+    for (const c of Object.keys(ALL_CODES)) byCode[c] = 0;
+    per.set(v.vcenterId, { vcenterId: v.vcenterId, name: v.name, vms: v.vms, withFindings: v.withFindings, crit: v.crit, warn: v.warn, notCollected: v.notCollected, byCode, top: { question: [], worst: [] } });
+  }
+  const pick = (r) => ({ id: r.id, name: r.name, host: r.host, cluster: r.cluster, powerState: r.powerState, worst: r.worst,
+    codes: r.findings.map((f) => f.code), ...(r.findings.find((f) => f.code === 'question') ? { question: r.findings.find((f) => f.code === 'question').facts || {} } : {}) });
+  for (const r of src) {   // src 는 도구 정렬(심각도 → 판정 수 → 이름) 그대로
+    const e = per.get(r.vcenterId);
+    if (!e) continue;
+    for (const f of r.findings) if (e.byCode[f.code] != null) e.byCode[f.code] += 1;
+    if (e.top.worst.length < topN) e.top.worst.push(pick(r));
+    if (e.top.question.length < topN && r.findings.some((f) => f.code === 'question')) e.top.question.push(pick(r));
+  }
+  return [...per.values()].sort((a, b) => String(a.vcenterId).localeCompare(String(b.vcenterId)));
 }
 
 /**

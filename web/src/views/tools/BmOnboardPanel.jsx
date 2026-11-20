@@ -16,7 +16,7 @@ import { downloadBlob } from './bmCapture.js';
 import { missingView, facetOptions, clampPageSize, readPageSize, writePageSize, nodeOf, corpOf, PAGE_SIZE_MIN, PAGE_SIZE_MAX } from './bmMissingView.js';
 import {
   ACTION_TEXT, ACTION_TONE, BUCKET_TEXT, BUCKET_ORDER, MISS_REASON_TEXT, KEY_STATUS_TEXT, ACCOUNT_KIND_TEXT,
-  numOr, summaryChips, applicable, edgeSyncText, edgeCredText, shortFp, ymd, bufToBase64, suggestCsv, rowNote, canManageKeys, HOSTKEY_OBSERVE_NOTE,
+  numOr, summaryChips, applicable, edgeSyncText, edgeCredText, shortFp, ymd, bufToBase64, suggestCsv, rowNote, canManageKeys, HOSTKEY_OBSERVE_NOTE, rotateResultText,
 } from './bmOnboardText.js';
 import './bmOps.css';
 import './bmOnboard.css';
@@ -69,7 +69,7 @@ function KeysSection({ manage, onChanged }) {
     try {
       const r = await postJson('/tools/bm-usage/ssh-keys/rotate', rot);
       if (r?.ok === false) { setMsg({ text: `회전하지 못했습니다 — ${r.reason || r.code}`, tone: 'bad' }); return; }
-      setMsg({ text: `회전했습니다 — 서버 ${r.servers.length}대 · 공통 계정 ${r.accounts}개가 새 키를 씁니다.${r.retestAdvised ? ' 서버마다 ‘연결 시험’ 을 다시 하세요(자동 재시험 없음).' : ''}`, tone: 'ok' });
+      setMsg(rotateResultText(r));   // 4회차 D1: 새 키로 막히는 수집 기능 경고(서버 판정)를 붙인다
       setRot({ from: '', to: '', otp: '' }); load(); onChanged?.();
     } catch (e) { setMsg({ text: `회전하지 못했습니다 — ${errText(e)}`, tone: 'bad' }); setRot((x) => ({ ...x, otp: '' })); }
     finally { setBusy(false); }

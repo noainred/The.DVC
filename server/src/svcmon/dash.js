@@ -95,7 +95,9 @@ export function createDashAcc({ targets = [] } = {}) {
     const item = { state, where, target: targetName, host, path, test, type, reply: t(reply).slice(0, 120), ms: m, streak: Number(streak) || 0, kind };
     if ((state === 'ok' || state === 'warn') && m != null && type !== 'cert' && type !== 'domain') pushTop(slow, item, TOP_SLOW, (a, b) => a.ms > b.ms);
     if (state === 'bad') pushTop(streaks, item, TOP_STREAK, (a, b) => a.streak > b.streak);
-    if (type === 'cert' || type === 'domain') {
+    // 61회차 F3(재현): 만료 임박 표는 **지금 결과**(ok · warn · bad)만 — 낡음(stale) · 무보고 엣지(unknown) 행의 옛 'D-n' 이 지금 남은 일수처럼
+    //   'CERT D-5' 로 실렸다(10일 전 측정이면 실제로는 만료됐을 수 있다). 그 행은 KPI 의 낡음 · 알 수 없음으로만 센다(느린 TOP · 연속 실패와 같은 규칙).
+    if ((type === 'cert' || type === 'domain') && (state === 'ok' || state === 'warn' || state === 'bad')) {
       const days = certDaysOf(item.reply);
       if (days != null && days <= CERT_WINDOW_DAYS) pushTop(certs, { ...item, days }, TOP_CERT, (a, b) => a.days < b.days);
     }

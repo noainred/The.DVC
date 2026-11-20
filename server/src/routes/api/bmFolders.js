@@ -41,6 +41,7 @@ import {
   storeLoadError, storeRev, peekMain, peekAssign, mutateMain, mutateAssign, flushStore, resetCorrupt,
   LIMITS, newRuleId, underPath, ancestorsOf, isMemberKey,
 } from '../../bmfolders/store.js';
+import { scopeSig } from '../../util/scopeSig.js';
 
 const toolsPerm = requirePerm('tools');
 const csvPerm = requirePerm('data.csv');
@@ -52,7 +53,7 @@ const writerOk = (user) => ['admin', 'operator'].includes(user?.role) && !isDemo
 function writeKeyOf(user, snap) {
   if (!writerOk(user)) return 'none';
   const w = writeScopedVcenterIds(user, snap);
-  return w ? [...w].sort().join(',') : 'all';
+  return scopeSig(w);
 }
 const inSnap = (snap, vc) => (snap?.vcenters || []).some((v) => t(v.id) === t(vc));
 const writableOf = (user, snap, vc) => writerOk(user) && inSnap(snap, vc) && inUserWriteScope(user, snap, vc);

@@ -35,6 +35,7 @@ import {
 import { SUBVIEWS, DEFAULT_SUBVIEW, viewOfSegs, hashOfView, overviewIndex, statusCounts, ovRetryDelay, runQueueNote } from './isiduOverviewText.js';
 import { CorpsView, StatusView, Top10View } from './IsiduViews.jsx';
 import { ISIDU_SETTINGS_HASH, ISIDU_SETTINGS_BULK_HASH, ISIDU_SETTINGS_PLACE } from './isiduSettingsLink.js';
+import { unreadFixText } from '../loadErrorText.js';   // 128회차: 읽기 오류면 보존본이 없다 — 사유별 조치 문구는 한 벌
 import './isidu.css';
 
 const BASE = ['tools', 'isilon-dirusage'];
@@ -291,7 +292,7 @@ export default function IsilonDirUsageTool() {
           {stopped ? <> <button type="button" className="isd-btn small" onClick={reload}>다시 읽기</button></> : null}
         </div>
       ) : null}
-      {data.settingsLoadError ? <div className="isd-banner red">설정 파일을 읽지 못했습니다 — 저장하면 기존 대상이 사라질 수 있어 저장을 막았습니다. 설정 › 서비스 점검에서 기본값으로 확정하거나 손상 보존본을 복구하세요. ({String(data.settingsLoadError)})</div> : null}
+      {data.settingsLoadError ? <div className="isd-banner red">설정 파일을 읽지 못했습니다 — 저장하면 기존 대상이 사라질 수 있어 저장을 막았습니다. {unreadFixText(data.settingsLoadError, { corrupt: '설정 › 서비스 점검에서 기본값으로 확정하거나 손상 보존본을 복구하세요.' })} ({String(data.settingsLoadError?.reason || '사유 미상')})</div> : null}
       {data.storageRegistryError ? <div className="isd-banner red">스토리지 등록부를 읽지 못해 장비 주소·담당 노드를 알 수 없습니다 — 설정 › 스토리지를 확인하세요.</div> : null}
       {runMsg ? (
         <div className={`isd-banner ${runMsg.tone}`} role="status">

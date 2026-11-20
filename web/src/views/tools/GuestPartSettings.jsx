@@ -4,6 +4,8 @@ import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import { DAY_LABELS, daysLabel, splitEmails, isWinPattern, isLnxPattern, timeText, historyLine, MAIL_STATE_TEXT } from './guestPartText.js';
+import { unreadMarkOf, saveLockedByUnread } from '../settingsUnread.js';   // 112회차: 못 읽은 동안의 기본값 폼으로 저장하지 않는다
+import { SettingsUnreadBanner } from '../SettingsUnreadBanner.jsx';
 
 /**
  * 설정 › 수집 서버 › 게스트 파티션 사용률(v2.749 — 시안 ③④). 탭 셋: 수집·판정 / 무시 규칙(Windows·Linux) / 메일.
@@ -110,7 +112,11 @@ export default function GuestPartSettings() {
     o[ks[ks.length - 1]] = value;
     return n;
   });
-  const ro = !full;
+  // 112회차: 서버가 설정 파일을 못 읽은 동안(읽기 오류) 폼은 기본값이다 — 다시 읽힌 뒤 그 폼의 저장(구획마다 전체 교체)이 저장된 임계 · 패턴 · 메일 받는 사람을 덮는다.
+  //   읽기 오류 동안은 읽기 전용으로 두고(저장 단추를 그리지 않는다 — 서버도 503), ‘다시 확인’ 이 설정을 다시 받아 폼을 채운다.
+  const unread = unreadMarkOf(cfg);
+  const saveLocked = saveLockedByUnread(unread);
+  const ro = !full || saveLocked;
 
   const saveJudge = async () => {
     setBusy(true); setMsg(''); setErr('');
@@ -181,8 +187,10 @@ export default function GuestPartSettings() {
     <div style={{ minWidth: 0 }}>
       <h2 style={{ margin: '0 0 4px', fontSize: 20 }}>게스트 파티션 사용률</h2>
       <div className="muted" style={{ fontSize: 12.5, marginBottom: 10 }}>할당 대비 사용률이 임계 이상인 게스트를 찾는 기준·무시 규칙·메일. 화면은 특수기능 › 스토리지 › <a href="#/tools/guest-partition">게스트 파티션 사용률</a>.</div>
-      {cfg.loadError && <div className="card" style={{ padding: 10, marginBottom: 10, borderColor: '#f87171', fontSize: 13 }}>{cfg.loadError}</div>}
-      {ro && <div className="card muted" style={{ padding: 10, marginBottom: 10, fontSize: 13 }}>{admin ? '범위가 지정된 계정은 전 법인 공용 설정을 바꿀 수 없습니다 — 읽기 전용입니다.' : '관리자만 바꿀 수 있습니다 — 읽기 전용입니다(메일 설정은 보이지 않습니다).'}</div>}
+      {unread
+        ? <SettingsUnreadBanner le={unread} what="게스트 파티션 사용률 설정" save="저장 · 메일 설정 저장" onRecheck={() => setReload((x) => x + 1)} busy={busy} />
+        : cfg.loadError && <div className="card" style={{ padding: 10, marginBottom: 10, borderColor: '#f87171', fontSize: 13 }}>{cfg.loadError}</div>}
+      {!full && <div className="card muted" style={{ padding: 10, marginBottom: 10, fontSize: 13 }}>{admin ? '범위가 지정된 계정은 전 법인 공용 설정을 바꿀 수 없습니다 — 읽기 전용입니다.' : '관리자만 바꿀 수 있습니다 — 읽기 전용입니다(메일 설정은 보이지 않습니다).'}</div>}
       <div className="flex gap" style={{ flexWrap: 'wrap', marginBottom: 10 }}>
         {[['judge', '수집·판정'], ['rules', '무시 규칙(Windows·Linux)'], ...(full ? [['mail', '메일 발송']] : [])].map(([k, l]) => (
           <button key={k} type="button" className={tab === k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '5px 14px' }} onClick={() => { setTab(k); setMsg(''); setErr(''); }}>{l}</button>
@@ -384,7 +392,7 @@ export default function GuestPartSettings() {
             )}
           </section>
           <div className="flex gap" style={{ flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
-            <button type="button" className="login-btn" style={{ padding: '6px 18px' }} disabled={busy} onClick={saveMail}>메일 설정 저장</button>
+            <button type="button" className="login-btn" style={{ padding: '6px 18px' }} disabled={busy || saveLocked} onClick={saveMail}>메일 설정 저장</button>
             <input className="input" value={testTo} onChange={(e) => setTestTo(e.target.value)} placeholder="테스트 받을 주소(5명까지)" aria-label="테스트 받을 주소" style={{ flex: '1 1 220px', maxWidth: 340 }} />
             <button type="button" className="tab" style={SEG} disabled={busy || !testTo.trim()} onClick={sendTest}>테스트 발송(통합 메일 내용)</button>
           </div>

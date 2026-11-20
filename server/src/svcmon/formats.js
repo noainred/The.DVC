@@ -7,6 +7,7 @@
  * excel.js 도 사용)를 재사용한다 — 에어갭 배포에도 이미 번들된 의존성이다.
  */
 
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import zlib from 'node:zlib';
 import { CSV_COLUMNS } from './testSchema.js';
 import { csvLine } from '../util/csv.js';
@@ -89,7 +90,7 @@ const XLSX_MAX_COLS = 200;
  * v2.630 SEC2630-01: 선언값만 보면 중앙 디렉터리를 거짓으로 쓴 파일(작은 크기를 선언)이 통과해 exceljs(jszip) 가 끝까지
  *   풀었다 — 이제 선언 검사 뒤에 zipInflatedSize 가 실제로 풀어 보며(예산 초과 즉시 중단) 누적 크기를 센다.
  */
-export const XLSX_MAX_UNCOMPRESSED = Number(process.env.SVCMON_XLSX_MAX_UNCOMPRESSED_BYTES) || 64 * 1024 * 1024;
+export const XLSX_MAX_UNCOMPRESSED = envPositive(process.env.SVCMON_XLSX_MAX_UNCOMPRESSED_BYTES, 64 * 1024 * 1024);
 export const XLSX_MAX_ENTRIES = 5_000;
 
 /**

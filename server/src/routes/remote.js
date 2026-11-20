@@ -7,18 +7,21 @@
 import { Router } from 'express';
 import { store } from '../store.js';
 import { requireRole, requirePerm } from '../auth/auth.js';
-import { scopedVcenterIds } from '../auth/scope.js';
-import { mergeScopedList } from '../auth/scopeMerge.js';   // v2.607 RECENT2607-03
+import { scopedVcenterIds, writeScopedVcenterIds } from '../auth/scope.js';
+import { mergeScopedList, denyFleetWrite } from '../auth/scopeMerge.js';   // v2.607 RECENT2607-03 · 전체 점검 2회차 V-1
 import {
   getConfig, getConfigSafe, saveConfig,
   listMappings, listMappingsForUser, getMapping, addMapping, removeMapping, setMappingStatus, touchMapping, mappingPortOf,
-  listProxies, listProxiesSafe, getProxyById, resolveProxy, saveProxy, removeProxy,
+  listProxies, listProxiesSafe, getProxyById, resolveProxy, saveProxy, removeProxy, mappingProxyOf, MAPPING_PROXY_GONE_TEXT, proxyInUseReason, registryReadError,
+  DEPLOY_ID_KEYS, DP_ID_KEYS, portOrPrev,
 } from '../proxy/registry.js';
+import { accessMoved } from '../util/secretCarry.js';   // 98회차: 연결 시험의 비밀 승계 판정 — 저장 경로와 같은 판정 하나
 import { testDataplane, applyMapping } from '../proxy/dataplane.js';
 import { previewConfig, testDeploy, deployToProxy } from '../proxy/deploy.js';
 import { provision, deprovision, markDeployed } from '../proxy/provision.js';
 import { withSsh } from '../proxy/sshExec.js';
 import { issueRdpTicket, rdpCredsIssue } from '../proxy/rdpTicket.js';
+import { issueWsTicket } from '../proxy/wsTicket.js';   // 132회차: WS 주소에 세션 토큰 대신 1회용 티켓
 import { ssrfBlockReasonResolved, ipBlockReason } from '../collector/registry.js';
 
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
@@ -41,7 +44,24 @@ remoteRouter.post('/rdp-ticket', requirePerm('remote.access'), (req, res) => {
   const bad = rdpCredsIssue(creds); // v2.632 AX3-03: 필드 길이 상한(자르지 않고 거부)
   if (bad) return res.status(400).json({ ok: false, reason: bad });
   const ticket = issueRdpTicket(creds, { owner: req.user?.username || '' });
-  res.json({ ok: true, ticket });
+  // 132회차: 같은 응답에 WS 티켓도 싣는다 — RDP 연결 쿼리의 `token=` 을 `wst=` 로 바꾼다(요청 한 번으로 끝난다).
+  res.json({ ok: true, ticket, wst: issueWsTicketFor(req) });
+});
+
+/**
+ * 원격 콘솔 WS 용 1회용 티켓(전체 점검 132회차 — proxy/wsTicket.js). 브라우저는 WebSocket 에 Authorization 머리말을 실을 수 없어
+ * 예전에는 세션 토큰을 주소 쿼리에 실었다(상위 프록시 액세스 로그 · 브라우저 기록에 남는다). 이제 **이 요청이 머리말로 실어 보낸 토큰**을
+ * 티켓에 묶고 주소에는 티켓 ID 만 싣는다. 게이트는 rdp-ticket 과 같다(마운트의 authMiddleware · requireEnrolled + remote.access) —
+ * 게이트웨이는 upgrade 에서 그 토큰으로 예전과 같은 판정을 다시 한다(티켓은 권한을 보관하지 않는다).
+ * 응답 · 감사 · 로그에 토큰을 싣지 않는다. 인증이 꺼진 포탈은 토큰 없이 발급한다(게이트웨이가 익명 역할로 판정).
+ */
+function issueWsTicketFor(req) {
+  const header = typeof req.headers?.authorization === 'string' ? req.headers.authorization : '';
+  const token = header.startsWith('Bearer ') ? header.slice(7) : null;   // authMiddleware 가 방금 검증한 그 토큰
+  return issueWsTicket({ token, owner: req.user?.username || '' });
+}
+remoteRouter.post('/ws-ticket', requirePerm('remote.access'), (req, res) => {
+  res.json({ ok: true, wst: issueWsTicketFor(req) });
 });
 
 // Connection info for a mapping resolves through the mapping's assigned proxy.
@@ -53,10 +73,14 @@ remoteRouter.get('/mappings', requirePerm('remote.access'), (req, res) => {
   // v2.606 AUTHZ2606-03: 범위 제한 admin 에게는 **범위 안 대상**의 매핑만(전체 범위 admin 은 예전처럼 전부).
   const all = listMappingsForUser(req.user);
   const mine = all.filter((m) => !scopedAdminMappingIssue(req.user, m));
+  const rre = registryReadError();   // 79회차: 읽기 오류 중의 빈 목록을 '등록된 대상 없음' 으로 보이지 않게
   res.json({
+    ...(rre ? { registryReadError: rre.reason } : {}),
     ...(mine.length !== all.length ? { omittedOutOfScope: all.length - mine.length, scoped: true } : {}),
     mappings: mine.map(({ error, ...m }) => {
-      const p = mappingProxy(m);
+      // 76회차 F3: 중계가 지워진 매핑에 기본 프록시 주소를 보이지 않는다 — 기본 프록시:같은 공개 포트는 다른 매핑의 대상이다(수동 접속이 그리로 간다).
+      const p = mappingProxyOf(m);
+      if (!p) return { ...m, proxyName: '', proxyHost: '', proxyGone: true, guacdConfigured: false };
       return { ...m, proxyName: p.name, proxyHost: p.proxyHost, guacdConfigured: !!p.guacd?.host };
     }),
   });
@@ -182,7 +206,7 @@ remoteRouter.get('/config', adminOnly, (req, res) => {
 });
 
 remoteRouter.put('/config', adminOnly, (req, res) => {
-  if (scopedVcenterIds(req.user, store.get())) return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '기본 중계 서버 설정은 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.' }); // v2.607 RECENT2607-03
+  if (denyFleetWrite(req, res, '기본 중계 서버 설정은 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.')) return; // v2.607 RECENT2607-03 · 전체 점검 2회차 V-1(조회 ∧ 쓰기 전체)
   // v2.537: saveConfig 가 proxyHost 차단(루프백·링크로컬)을 throw 로 알린다 — 500 으로 흘리면 사용자는
   // '서버 오류' 로만 보고 무엇을 고칠지 모른다. 400 + reason 으로 돌려준다.
   try { res.json({ ok: true, config: saveConfig(req.body || {}) }); }
@@ -246,14 +270,26 @@ function proxyHiddenFor(allowed, id) {
 }
 const PROXY_NOT_FOUND = '프록시를 찾을 수 없습니다.';
 const SHARED_PROXY_REASON = '이 중계 서버에는 범위 밖 법인의 vCenter 도 배정돼 있어 범위 제한 계정은 주소·포트·자동 구성·이름을 바꾸거나 삭제할 수 없습니다(다른 법인의 접속 경로입니다) — 자기 범위 vCenter 배정만 바꿀 수 있습니다.';
+/** 전체 점검 7회차(2회차 반증 R-3): 중계 서버 쓰기는 쓰기 범위로 판정(조회 범위와의 교집합 — 둘 다 무제한이면 null · 던지면 빈 범위). */
+function proxyWriteScope(req) {
+  try { return writeScopedVcenterIds(req.user, store.get()); } catch { return new Set(); }
+}
+const PROXY_WRITE_DENIED = '조회 전용 범위 — 이 중계 서버에 배정된 vCenter 는 수정 권한이 없습니다.';
+/** 중계 서버 동작(시험 · 상태 확인 · 배포 — 저장 비밀로 접속하거나 설정을 민다) 판정: 조회로 숨겨지면 404, 쓰기 범위의 vCenter 가 하나도 없으면 403, 아니면 0(전체 점검 7회차). */
+function proxyActionDenied(req, id) {
+  if (proxyHiddenFor(scopedVcenterIds(req.user, store.get()), id)) return 404;
+  return proxyHiddenFor(proxyWriteScope(req), id) ? 403 : 0;
+}
+const sendProxyDenied = (res, code, extra = {}) => (code === 404 ? res.status(404).json({ ok: false, reason: PROXY_NOT_FOUND, ...extra }) : res.status(403).json({ ok: false, error: 'forbidden', reason: PROXY_WRITE_DENIED, ...extra }));
 remoteRouter.post('/proxies', adminOnly, (req, res) => {
   const body = { ...(req.body || {}) };
-  const allowed = scopedVcenterIds(req.user, store.get());
+  const read = scopedVcenterIds(req.user, store.get());
+  const allowed = proxyWriteScope(req);   // 전체 점검 7회차: 쓰기 범위(조회만 보면 쓰기를 줄인 관리자가 범위 밖 법인의 중계 서버를 바꾸고 기본 중계 서버를 덮었다)
   let ignoredOutOfScope = 0;
   if (allowed) {
     if (String(body.id || '') === 'default') return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '기본 중계 서버는 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.' });
     const { prev, inScope, outScope } = proxyScopeOf(allowed, body.id);
-    if (prev && !inScope.length && outScope.length) return res.status(404).json({ ok: false, reason: '프록시를 찾을 수 없습니다.' });
+    if (prev && !inScope.length && outScope.length) return proxyHiddenFor(read, body.id) ? res.status(404).json({ ok: false, reason: '프록시를 찾을 수 없습니다.' }) : res.status(403).json({ ok: false, error: 'forbidden', reason: PROXY_WRITE_DENIED });
     if (prev && outScope.length) {
       const changed = sharedProxyChanges(prev, body);
       if (changed.length) return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: SHARED_PROXY_REASON, changedFields: changed });
@@ -264,24 +300,30 @@ remoteRouter.post('/proxies', adminOnly, (req, res) => {
     }
   }
   const r = saveProxy(body);
-  if (r.ok && allowed && r.proxy) r.proxy = { ...r.proxy, vcenterIds: (r.proxy.vcenterIds || []).filter((v) => allowed.has(String(v))) };
+  if (r.ok && read && r.proxy) r.proxy = { ...r.proxy, vcenterIds: (r.proxy.vcenterIds || []).filter((v) => read.has(String(v))) };   // 응답 가림은 조회 범위(보이는 것)
   res.status(r.ok ? 200 : 400).json({ ...r, ...(ignoredOutOfScope ? { ignoredOutOfScope } : {}) });
 });
 remoteRouter.delete('/proxies/:id', adminOnly, (req, res) => {
-  const allowed = scopedVcenterIds(req.user, store.get());
+  const allowed = proxyWriteScope(req);   // 전체 점검 7회차: 쓰기 범위 — 조회 밖 404 → 쓰기 밖 403
   if (allowed) {
     const { prev, inScope, outScope } = proxyScopeOf(allowed, req.params.id);
-    if (prev && !inScope.length && outScope.length) return res.status(404).json({ ok: false, reason: '프록시를 찾을 수 없습니다.' });
+    if (prev && !inScope.length && outScope.length) return proxyHiddenFor(scopedVcenterIds(req.user, store.get()), req.params.id) ? res.status(404).json({ ok: false, reason: '프록시를 찾을 수 없습니다.' }) : res.status(403).json({ ok: false, error: 'forbidden', reason: PROXY_WRITE_DENIED });
     if (prev && outScope.length) return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: SHARED_PROXY_REASON });
   }
   const r = removeProxy(req.params.id);
+  if (!r.ok && r.code === 'proxy-in-use') {
+    // 79회차: 그 중계를 쓰는 매핑이 있으면 409 — 이름은 이 요청자에게 보이는 매핑만(범위 제한 admin 은 범위 밖 매핑 이름을 받지 않는다 · 개수는 전체)
+    const ids = new Set((r.using || []).map((m) => m.id));
+    const visible = listMappingsForUser(req.user).filter((m) => ids.has(m.id) && !scopedAdminMappingIssue(req.user, m));
+    return res.status(409).json({ ok: false, code: 'proxy-in-use', inUse: r.inUse, mappings: visible.map((m) => ({ id: m.id, name: m.name })), reason: proxyInUseReason(visible.map((m) => m.name), r.inUse, { nsx: r.nsx }) });
+  }
   res.status(r.ok ? 200 : 400).json(r);
 });
 
 // Health check for one proxy — auto-selects Data Plane API or SSH deploy based
 // on what the proxy has enabled. Returns { ok, ms, reason, method }.
 remoteRouter.post('/proxies/:id/health', adminOnly, async (req, res) => {
-  if (proxyHiddenFor(scopedVcenterIds(req.user, store.get()), req.params.id)) return res.status(404).json({ ok: false, reason: PROXY_NOT_FOUND, method: 'none' }); // v2.621 SEC-01
+  { const d = proxyActionDenied(req, req.params.id); if (d) return sendProxyDenied(res, d, { method: 'none' }); }   // v2.621 SEC-01 · 전체 점검 7회차(쓰기 밖 403)
   const proxy = getProxyById(req.params.id);
   if (!proxy) return res.status(404).json({ ok: false, reason: '프록시를 찾을 수 없습니다.', method: 'none' });
   try {
@@ -305,12 +347,16 @@ remoteRouter.post('/proxies/:id/health', adminOnly, async (req, res) => {
 // url 만 공격자 호스트로 바꾸고 password:'********' 를 보내 저장된 Data Plane 비밀번호를 그 호스트로
 // 평문(Basic) 전송시킬 수 있다. 새 URL 을 시험하려면 비밀번호를 새로 입력해야 한다.
 remoteRouter.post('/test', adminOnly, async (req, res) => {
-  if (proxyHiddenFor(scopedVcenterIds(req.user, store.get()), (req.body || {}).proxyId)) return res.status(404).json({ ok: false, reason: PROXY_NOT_FOUND }); // v2.621 SEC-01
+  { const d = proxyActionDenied(req, (req.body || {}).proxyId); if (d) return sendProxyDenied(res, d); }   // v2.621 SEC-01 · 전체 점검 7회차(쓰기 밖 403)
   const proxy = getProxyById((req.body || {}).proxyId);
   const body = (req.body || {}).dataplane || {};
   const dp = { ...proxy.dataplane, ...body };
   const reuseSecret = body.password === REDACT || body.password === undefined;
   if (body.password === REDACT) dp.password = proxy.dataplane.password;
+  // 98회차: 저장 경로(DP_ID_KEYS — url · basePath · 계정)와 같은 판정 — 다른 계정명으로 저장 비밀번호를 Basic 전송하지 않는다(주소가 다르면 몰래 저장 주소로 바꿔 시험하지 않는다).
+  if (reuseSecret && proxy.dataplane.password && accessMoved(proxy.dataplane, body, DP_ID_KEYS)) {
+    return res.json({ ok: false, method: 'carry-refused', reason: '접속 주소나 계정이 저장값과 달라 저장된 비밀번호를 쓰지 않습니다 — 비밀번호를 입력해 주세요.' });
+  }
   if (reuseSecret) { dp.url = proxy.dataplane.url; dp.basePath = proxy.dataplane.basePath; }
   const block = await ssrfBlockReasonResolved(dp.url);
   if (block) return res.json({ ok: false, reason: `대상 주소가 차단되었습니다: ${block}`, method: 'blocked' });
@@ -321,7 +367,7 @@ remoteRouter.post('/test', adminOnly, async (req, res) => {
 // ⚠ 보안(H-2): 저장된 비밀번호/개인키를 재사용하면 접속 host/port 도 저장값으로 고정한다 —
 // dep.host 만 바꿔 저장된 root 비밀번호·SSH 개인키를 공격자 sshd 로 보내는 것을 막는다.
 remoteRouter.post('/deploy/test', adminOnly, async (req, res) => {
-  if (proxyHiddenFor(scopedVcenterIds(req.user, store.get()), (req.body || {}).proxyId)) return res.status(404).json({ ok: false, reason: PROXY_NOT_FOUND }); // v2.621 SEC-01
+  { const d = proxyActionDenied(req, (req.body || {}).proxyId); if (d) return sendProxyDenied(res, d); }   // v2.621 SEC-01 · 전체 점검 7회차(쓰기 밖 403)
   const proxy = getProxyById((req.body || {}).proxyId);
   const body = (req.body || {}).deploy || {};
   const dep = { ...proxy.deploy, ...body };
@@ -329,7 +375,16 @@ remoteRouter.post('/deploy/test', adminOnly, async (req, res) => {
   const reuseKey = body.privateKey === REDACT || body.privateKey === undefined;
   if (body.password === REDACT) dep.password = proxy.deploy.password;
   if (body.privateKey === REDACT) dep.privateKey = proxy.deploy.privateKey;
-  if ((reusePw && proxy.deploy.password) || (reuseKey && proxy.deploy.privateKey)) { dep.host = proxy.deploy.host; dep.port = proxy.deploy.port; }
+  if ((reusePw && proxy.deploy.password) || (reuseKey && proxy.deploy.privateKey)) {
+    // 98회차(재현): 저장 경로(proxy/registry.js — host · port · username 이 바뀌면 저장 비밀을 버린다)와 같은 판정. 예전에는 host · port 만 저장값으로 고정하고
+    //   username 은 요청값이라 **다른 계정명으로 저장된 root 비밀번호 · 개인키를 보냈고**, 주소가 다르면 몰래 저장 주소로 바꿔 시험해 입력한 주소의 결과처럼 보였다.
+    const prevPort = Number(proxy.deploy.port) || 22;
+    const probe = { ...body, port: portOrPrev(body.port, prevPort) };
+    if (accessMoved({ ...proxy.deploy, port: prevPort }, probe, DEPLOY_ID_KEYS)) {
+      return res.json({ ok: false, method: 'carry-refused', reason: '접속 주소 · 포트 · 계정이 저장값과 달라 저장된 비밀번호 · 개인키를 쓰지 않습니다 — 비밀번호(또는 개인키)를 입력해 주세요.' });
+    }
+    dep.host = proxy.deploy.host; dep.port = proxy.deploy.port;
+  }
   const block = ipBlockReason(dep.host);
   if (block) return res.json({ ok: false, reason: `대상 호스트가 차단되었습니다: ${block}`, method: 'blocked' });
   res.json(await testDeploy(dep));
@@ -340,8 +395,9 @@ remoteRouter.post('/deploy', adminOnly, async (req, res) => {
   const onlyId = (req.body || {}).proxyId;
   // v2.621(감사 SEC-01): 범위 admin 은 숨겨진 프록시(범위 밖 vCenter 만 배정)를 순회하지 않는다 — 지정했으면 404(존재 은닉),
   //   전체 배포면 건너뛰고 개수를 밝힌다(POST·DELETE /proxies 가 404 로 숨기는 것과 같은 기준).
-  const allowed = scopedVcenterIds(req.user, store.get());
-  if (onlyId && proxyHiddenFor(allowed, onlyId)) return res.status(404).json({ ok: false, reason: PROXY_NOT_FOUND });
+  // 전체 점검 7회차: 배포는 설정을 미는 동작 — 순회 · 지정 판정은 쓰기 범위(조회로 숨겨진 지정은 404 그대로)
+  const allowed = proxyWriteScope(req);
+  if (onlyId) { const d = proxyActionDenied(req, onlyId); if (d) return sendProxyDenied(res, d); }
   let omittedOutOfScope = 0;
   const results = [];
   for (const proxy of listProxies()) {
@@ -499,7 +555,10 @@ remoteRouter.get('/rdp/:id', requirePerm('remote.access'), (req, res) => {
     // v2.770(점검 R5-E5-1): (vcenterId, targetHost) 쌍 + 매핑의 중계 — WS mappingAccessIssue 와 같은 판정.
     if (mappingTargetScopeIssue(store.get(), scopedVcenterIds(req.user, store.get()), m, { proxyIdOf })) return res.status(404).end();
   }
-  const proxyHost = mappingProxy(m).proxyHost;
+  // 76회차 F3: 매핑의 중계가 지워졌으면 .rdp 를 만들지 않는다 — 기본 프록시 + 같은 공개 포트는 다른 매핑의 대상이다(게이트웨이와 같은 판정).
+  const via = mappingProxyOf(m);
+  if (!via) return res.status(409).json({ ok: false, reason: MAPPING_PROXY_GONE_TEXT });
+  const proxyHost = via.proxyHost;
   const host = proxyHost || m.targetHost;
   const port = proxyHost ? m.publicPort : m.targetPort;
   const rdp = [

@@ -22,11 +22,15 @@ import { csvCell } from '../../util/csv.js';
  */
 
 import { agoText as _ago, elapsedText as _elapsed } from './relTime.js';
+import { EDGE_PULL_FAIL_LABEL } from './tokenCheckText.js'; // 다음 작업 재확인 — 당김 실패 kind 낱말 하나(원문 kind 를 보이지 않게)
 import { numOrNull } from '../../numOrNull.js';
 import { toneVar } from './toneVar.js';
 const t = (v) => String(v ?? '').trim();
 /** ⚠ `v == null` 을 **먼저** 본다 — `Number(null)===0`·`Number('')===0` 이라 결측이 0 으로 둔갑한다. */
 const n = numOrNull;   // v2.576: 사본 금지 — 코어는 하나다(사본은 Number([])===0 을 막지 못했다)
+
+/** 엣지 당김 실패 kind → 짧은 낱말(공용 표 EDGE_PULL_FAIL_LABEL — 모르는 kind 는 그대로 · 없으면 ‘실패’). */
+export const pullKindLabel = (k) => EDGE_PULL_FAIL_LABEL[String(k || '')] || String(k || '') || '실패';
 
 /** 퍼센트 표시. 값이 없으면 단위를 붙이지 않는다(`— %` 는 0% 처럼 읽힌다 — v2.534 규약). */
 export function pctText(v) {
@@ -52,13 +56,32 @@ export function bpsText(v) {
  */
 export const ageText = (ts, now = Date.now()) => _ago(ts, now, { subMinute: 'seconds' });
 
-/** 임계 색 — 사용률 공통 기준(75/90, V4 규약과 같은 값). 값이 없으면 회색이다(빨강 아니다). */
-export function usageTone(v) {
+/**
+ * 임계 색 — 기본은 사용률 공통 기준(75/90, V4 규약과 같은 값 — 법인별 서버 사용량 CorpUsage 가 이 기본을 쓴다). 값이 없으면 회색이다(빨강 아니다).
+ * 점검 반복 2회차 E4: 베어메탈 화면은 `th`(서버 응답 perfThresholds 의 utilWarn · utilBad — bmUtilThresholds)를 넘긴다 —
+ *   같은 값이 USE 매트릭스(서버 판정 · 설정값)와 사용률 표(예전 75/90 고정)에서 다른 색이던 결함.
+ * @param {number|null} v
+ * @param {{warn?:number, bad?:number}|null} [th]  없거나 칸이 수가 아니면 기본값(75 · 90)
+ */
+export function usageTone(v, th = null) {
   const x = n(v);
   if (x == null) return 'idle';
-  if (x >= 90) return 'bad';
-  if (x >= 75) return 'warn';
+  const bad = n(th?.bad) ?? 90;
+  const warn = n(th?.warn) ?? 75;
+  if (x >= bad) return 'bad';
+  if (x >= warn) return 'warn';
   return 'ok';
+}
+/**
+ * 점검 반복 2회차 E4: 베어메탈 사용률 색 기준 — 주 조회 응답의 perfThresholds(이 노드 설정 utilWarn · utilBad · USE 판정과 같은 값),
+ *   없으면 perfDefaults. 둘 다 없으면 null(usageTone 기본값 — 지어내지 않는다).
+ */
+export function bmUtilThresholds(data) {
+  for (const src of [data?.perfThresholds, data?.perfDefaults]) {
+    const warn = n(src?.utilWarn); const bad = n(src?.utilBad);
+    if (warn != null && bad != null) return { warn, bad };
+  }
+  return null;
 }
 // v2.613 DEPS2613-11: 톤 → 색 변수는 공용 toneVar.js 하나다(예전 사본은 정의되지 않은 --ok/--warn/--bad 에 hex 폴백).
 export { toneVar };
@@ -97,7 +120,7 @@ export function emptyDiag(d = {}, { now = Date.now() } = {}) {
   if (!(d.targets || []).length) {
     const by = d.skippedCounts || {};
     const parts = [];
-    if (by['edge-delegated']) parts.push(`엣지가 수집하는 서버 **${by['edge-delegated']}대**(그 엣지 화면에서 보입니다)`);
+    if (by['edge-delegated']) parts.push(`엣지가 맡는 서버 **${by['edge-delegated']}대**(그 엣지 화면에서 보입니다 — OS 등록 엣지 지정 서버는 그 엣지에 OS 등록이 있어야 수집)`);   // 재확인 N1: 단정하지 않는다
     if (by['corp-off']) parts.push(`켜지 않은 법인 **${by['corp-off']}대**`);
     if (by.unassigned) parts.push(`법인 귀속이 없는 서버 **${by.unassigned}대**`);
     if (by['no-idrac']) parts.push(`iDRAC 등록이 없는 서버 **${by['no-idrac']}대**`);
@@ -106,6 +129,10 @@ export function emptyDiag(d = {}, { now = Date.now() } = {}) {
     if (by['os-ambiguous']) parts.push(`OS 등록을 하나로 못 정한 서버 **${by['os-ambiguous']}대**`);   // 2차 재확인 G3
     if (by['os-foreign']) parts.push(`OS 등록이 다른 법인 것인 서버 **${by['os-foreign']}대**`);
     if (by['remote-collector-unknown']) parts.push(`원격 수집 서버를 모르는 서버 **${by['remote-collector-unknown']}대**`);   // v2.961
+    // 1회차 점검 D3 · D4: 사람이 끈 등록 · 엣지 지정 OS 등록
+    if (by['idrac-disabled']) parts.push(`iDRAC 등록이 ‘사용 안 함’ 인 서버 **${by['idrac-disabled']}대**`);
+    if (by['os-disabled']) parts.push(`OS 등록이 ‘사용 안 함’ 인 서버 **${by['os-disabled']}대**`);
+    if (by['os-edge']) parts.push(`OS 등록이 엣지 수집으로 지정된 서버 **${by['os-edge']}대**`);
     return {
       kind: 'no-target', waiting: false,
       text: parts.length
@@ -147,6 +174,10 @@ export const MISSING_MARK = Object.freeze({
   'no-idrac-cred': 'iDRAC 계정 없음',
   'os-ambiguous': 'OS 등록 모호',      // 2차 재확인 G3 — 법인으로 하나를 못 정함
   'os-foreign': 'OS 등록 다른 법인',
+  // 1회차 점검 D3 · D4
+  'idrac-disabled': 'iDRAC 등록 꺼짐',
+  'os-disabled': 'OS 등록 꺼짐',
+  'os-edge': 'OS 등록 엣지 지정',
 });
 export function missingMark(list = []) {
   const parts = (list || []).map((k) => MISSING_MARK[k] || k);
@@ -159,13 +190,16 @@ export function missingMark(list = []) {
  */
 export function missingFootnotes(rows = []) {
   const kinds = new Set();
-  for (const r of rows) for (const k of (r.missing || [])) kinds.add(k);
+  for (const r of rows) for (const k of shownMissing(r)) kinds.add(k);
   const out = [];
   if (kinds.has('no-os-cred')) out.push('**OS 계정 없음** — 그 서버는 CPU·메모리만(iDRAC 텔레메트리) 읽습니다. 디스크·네트워크·HBA 를 보려면 설정 › 베어메탈 스토리지에 그 호스트를 등록하세요(같은 계정을 두 번 등록하지 않도록 그 등록부를 재사용합니다).');
   if (kinds.has('no-idrac')) out.push('**iDRAC 등록 없음** — 수동 태그로 베어메탈이 된 ESXi 호스트일 수 있습니다. OS 계정만 있으면 다섯 지표를 모두 읽습니다.');
   if (kinds.has('no-idrac-cred')) out.push('**iDRAC 계정 없음** — 설정 › iDRAC 등록에서 계정·비밀번호를 채우세요.');
   if (kinds.has('os-ambiguous')) out.push('**OS 등록 모호** — 같은 이름 · 주소의 OS 등록이 여럿(주소가 다름)이거나, ‘수집에 추가’ 한 서버에 법인이 지정되지 않은 등록뿐입니다. 어느 장비인지 몰라 OS 로 접속하지 않습니다 — 설정 › 베어메탈 스토리지에서 그 등록에 법인을 지정하세요.');
   if (kinds.has('os-foreign')) out.push('**OS 등록 다른 법인** — 이름 · 주소가 맞는 OS 등록이 다른 법인으로 지정돼 있어 쓰지 않습니다(다른 법인 서버의 주소 · 계정으로 접속하지 않게).');
+  if (kinds.has('idrac-disabled')) out.push('**iDRAC 등록 꺼짐** — 그 iDRAC 등록이 ‘사용 안 함’ 이라 그 계정으로 로그인하지 않습니다. 설정 › iDRAC 등록에서 켜면 다음 주기부터 읽습니다.');
+  if (kinds.has('os-disabled')) out.push('**OS 등록 꺼짐** — 그 OS 계정 등록이 ‘사용 안 함’ 이라 SSH 하지 않습니다. 설정 › 베어메탈 스토리지에서 켜면 다음 주기부터 디스크·네트워크·HBA 까지 읽습니다.');
+  if (kinds.has('os-edge')) out.push('**OS 등록 엣지 지정** — 그 OS 계정 등록은 엣지 지정이라 이 노드에서는 그 주소 · 계정으로 접속하지 않습니다. 그 엣지 포탈에 이 서버의 OS 등록이 있어야 디스크·네트워크·HBA 를 수집합니다.');
   return out;
 }
 
@@ -174,6 +208,7 @@ export const SKIP_LABEL = Object.freeze({
   'edge-delegated': '엣지 수집', 'corp-off': '법인 미선택', unassigned: '법인 귀속 없음', 'no-idrac': 'iDRAC 등록 없음', 'no-idrac-cred': 'iDRAC 계정 없음',
   'no-os-cred': 'OS 계정 없음', 'both-off': '두 경로 모두 꺼짐', 'key-conflict': '키 충돌', 'os-ambiguous': 'OS 등록 모호', 'os-foreign': 'OS 등록 다른 법인',
   'remote-collector-unknown': '수집 서버 모름',   // v2.961 — 원격 수집 서버가 맡은 서버인데 그 수집 서버를 등록부에서 못 찾음(못 읽음 · 삭제)
+  'idrac-disabled': 'iDRAC 등록 꺼짐', 'os-disabled': 'OS 등록 꺼짐', 'os-edge': 'OS 등록 엣지 지정',   // 1회차 점검 D3 · D4
 });
 /** 대상이 아닌 서버 — 사유마다 조치가 다르므로 **있는 사유만** 한 번씩 적는다. */
 export function skippedNotes(counts = {}, reasons = {}) {
@@ -202,11 +237,15 @@ export function edgeDelegatedByAgent(skipped = [], { stateOf = null } = {}) {
     const a = t(s.agent);
     const k = a.toLowerCase();
     const cur = by.get(k);
-    if (cur) { cur.count += 1; if (s.agentClash) cur.clash = true; } else by.set(k, { agent: a, count: 1, clash: !!s.agentClash });
+    // 재확인 N1: OS 등록 엣지 지정으로 넘긴 서버(delegatedBy 'os-registry')는 따로 센다 — 엣지가 그 계정을 갖지 않을 수 있다(칩 · 안내가 단정하지 않게).
+    const os = s.delegatedBy === 'os-registry' ? 1 : 0;
+    if (cur) { cur.count += 1; cur.osReg += os; if (s.agentClash) cur.clash = true; } else by.set(k, { agent: a, count: 1, osReg: os, clash: !!s.agentClash });
   }
   const out = [...by.values()].map((x) => {
     // 재확인 R1: 서버가 '이 이름은 다른 수집 서버의 id · 이름과 겹친다(agentClash)' 고 하면 엣지 표의 같은 이름 줄이 다른 수집 서버일 수 있다 — 그 줄의 상태를 붙이지 않는다.
     if (x.clash) return { ...x, state: { ...EDGE_NAME_CLASH_STATE } };
+    // 재확인 N1: OS 등록 엣지 지정으로만 넘긴 묶음에는 엣지 표 상태(테두리 색 · 툴팁 포함)를 붙이지 않는다 — ‘정상’ 초록이 ‘그 엣지가 수집 중’ 으로 읽힌다.
+    if (x.osReg && x.osReg >= x.count) return { ...x, state: null };
     let state = null;
     if (x.agent && typeof stateOf === 'function') { try { state = stateOf(x.agent) || null; } catch { state = null; } }
     return { ...x, state };
@@ -235,21 +274,28 @@ export function remoteUnknownNote(skipped = []) {
 /** v2.961 — 엣지별 한 칸의 문구(엣지 이름 · 대수 · 상태). 이름이 비면 '이름 모름'. 상태를 모르면 그 사실을 말한다(지어내지 않는다). */
 export function edgeDelegatedChip(x = {}) {
   const name = t(x.agent) ? `‘${t(x.agent)}’` : '이름 모름';
+  const cnt = Number(x.count) || 0; const os = Number(x.osReg) || 0;
+  // 재확인 N1: OS 등록 엣지 지정으로만 넘긴 묶음에 엣지 표 상태(‘정상’ 등)를 붙이면 그 엣지가 수집 중인 것처럼 읽힌다 — 붙이지 않고 확인할 것을 말한다.
+  if (os && os >= cnt) return `${name} ${cnt}대 · OS 등록 엣지 지정(그 엣지에 OS 등록 확인 필요)`;
   const st = x.state && t(x.state.label) ? t(x.state.label) : (t(x.agent) ? '엣지 보관분 표에 없음' : '');
-  return `${name} ${Number(x.count) || 0}대${st ? ` · ${st}` : ''}`;
+  return `${name} ${cnt}대${st ? ` · ${st}` : ''}${os ? ` · 그중 ${os}대는 OS 등록 엣지 지정(그 엣지에 OS 등록 확인 필요)` : ''}`;
 }
 
 /** v2.961 — 엣지별 묶음 아래 안내 한 줄(조치). 표에 없는 엣지가 있으면 그 이유 후보를 함께 말한다. */
 export function edgeDelegatedGuide(list = []) {
   if (!Array.isArray(list) || !list.length) return '';
   const clash = list.some((x) => x.clash);
-  const missing = list.some((x) => !t(x.agent) || !x.state);
+  const missing = list.some((x) => !t(x.agent) || (!x.state && !((Number(x.osReg) || 0) >= (Number(x.count) || 0))));   // OS 등록 지정만인 묶음은 일부러 상태를 비웠다(표에 없음이 아니다)
   const off = list.some((x) => x.state && x.state.state === 'off-edge');
+  // 재확인 N1: OS 등록 엣지 지정 서버만 있는 묶음이면 ‘그 엣지가 수집합니다’ 를 말하지 않는다(엣지가 그 계정을 갖지 않을 수 있다).
+  const osAny = list.some((x) => (Number(x.osReg) || 0) > 0);
+  const osAll = list.every((x) => (Number(x.osReg) || 0) >= (Number(x.count) || 0));
   return [
-    '이 서버들은 **그 엣지가 수집**합니다(계정이 엣지에만 있어 중앙은 접속하지 않습니다). 아래 ‘엣지 보관분’ 표에서 그 엣지의 상태를 확인하세요 — ',
-    off ? '**엣지에서 꺼짐**' : '‘엣지에서 꺼짐’',
-    ' 이면 그 줄의 ‘중앙에서 켜기’ 로 켭니다(버튼은 전체 범위 관리자에게만 보입니다).',
-    missing ? ' 표에 없는 엣지는 수집 서버 등록부에 그 이름이 없거나(엣지가 보고한 이름), 이 계정에 보이는 대상이 없는 엣지이거나, 엣지 표를 아직 불러오지 못한 경우입니다.' : '',
+    osAll ? '' : '이 서버들은 **그 엣지가 수집**합니다(계정이 엣지에만 있어 중앙은 접속하지 않습니다). 아래 ‘엣지 보관분’ 표에서 그 엣지의 상태를 확인하세요 — ',
+    osAll ? '' : (off ? '**엣지에서 꺼짐**' : '‘엣지에서 꺼짐’'),
+    osAll ? '' : ' 이면 그 줄의 ‘중앙에서 켜기’ 로 켭니다(버튼은 전체 범위 관리자에게만 보입니다).',
+    osAny ? `${osAll ? '' : ' '}**OS 등록 엣지 지정** 서버는 중앙 OS 계정 등록에 엣지가 지정돼 있어 중앙이 접속하지 않을 뿐입니다 — 그 엣지 포탈에 이 서버의 OS 등록이 있어야 수집합니다(엣지 보관분에 그 서버 값이 없으면 아무도 수집하지 않는 것입니다 · 중앙 등록은 디스크 용량 측정 위임용).` : '',
+    !osAll && missing ? ' 표에 없는 엣지는 수집 서버 등록부에 그 이름이 없거나(엣지가 보고한 이름), 이 계정에 보이는 대상이 없는 엣지이거나, 엣지 표를 아직 불러오지 못한 경우입니다.' : '',
     clash ? ' **이름이 겹친 엣지**는 엣지 표의 같은 이름 줄이 다른 수집 서버일 수 있어 상태를 붙이지 않았습니다 — 수집 서버 이름을 서로 다르게 바꾸세요.' : '',
   ].join('');
 }
@@ -501,7 +547,10 @@ export function retentionNote(settings = {}, db = {}) {
   if (raw == null || daily == null) return '';
   const years = Math.round((daily / 365) * 10) / 10;
   const rows = n(db.rawRows);
-  return `원시 표본은 **${raw}일**, 하루 단위 롤업은 **${years}년** 보관합니다(롤업은 평균과 **최대**를 함께 둡니다 — 평균만 두면 피크가 사라집니다).${rows != null ? ` 현재 원시 ${rows.toLocaleString()}행.` : ''}`;
+  // 42회차 R3: 못 연 파일이 있으면 행 수는 하한('최소') · 장치 1시간 롤업 누락은 따로 밝힌다(못 읽음을 숨기지 않는다).
+  const rowsText = rows != null ? ` 현재 원시 ${db.rawRowsPartial ? '최소 ' : ''}${rows.toLocaleString()}행${db.rawRowsPartial ? `(파일 ${n(db.rawUnread) ?? '일부'}개 못 읽음)` : ''}.` : '';
+  const devMiss = n(db.devRollupMissed?.rows);
+  return `원시 표본은 **${raw}일**, 하루 단위 롤업은 **${years}년** 보관합니다(롤업은 평균과 **최대**를 함께 둡니다 — 평균만 두면 피크가 사라집니다).${rowsText}${devMiss ? ` 장치 1시간 롤업에서 빠진 표본 ${devMiss.toLocaleString()}건(이 포탈이 시작된 뒤 롤업 파일 쓰기 실패 — 원시에는 있음).` : ''}`;   // 43회차 R5: 메모리 값이라 재시작하면 0 부터
 }
 
 /** 엣지 노드에서 본 화면 — 자기 것만 수집한다는 사실을 말한다. */
@@ -519,12 +568,20 @@ export function edgeNote(isEdge) {
  * 종류 축은 **수집 경로**다 — 'OS 계정이 있는 서버만 보기' 가 되어 실제로 쓸모가 있다.
  */
 export function facetRows(rows = []) {
-  return (rows || []).map((r) => ({
-    ...r,
-    datacenterId: t(r.vcenterId) || '',
-    type: (r.paths || []).includes('os') ? (((r.paths || []).length > 1) ? 'idrac+os' : 'os') : 'idrac',
-  }));
+  return (rows || []).map((r) => {
+    const p = shownPaths(r);
+    return { ...r, datacenterId: t(r.vcenterId) || '', type: p.includes('os') ? (p.length > 1 ? 'idrac+os' : 'os') : 'idrac' };
+  });
 }
+/**
+ * 다음 작업 ④(2026-11-19): 화면에 그리는 수집 경로 · 누락 — 서버가 표시 값(pathsShown · missingShown — 데모(mock) 대상의 합성 OS 표지)을 주면 그것을,
+ *   아니면 등록 값(paths · missing)을 그대로 쓴다. 판정이 아니다(서버 값을 고르기만 — 판정은 서버 mock/demo/baremetal.js demoDisplayTargets 하나).
+ *   KPI(서버 counts — 같은 표지로 센다) · 장비 종류 칩 · 사용률 표 · CSV · 각주가 이 둘을 읽는다.
+ */
+export const shownPaths = (r) => (Array.isArray(r?.pathsShown) ? r.pathsShown : (Array.isArray(r?.paths) ? r.paths : []));
+export const shownMissing = (r) => (Array.isArray(r?.missingShown) ? r.missingShown : (Array.isArray(r?.missing) ? r.missing : []));
+/** 경로 칸 글자(표 · CSV) — ‘OS’ · ‘iDRAC’ 를 sep 로 잇는다. */
+export const pathsText = (r, sep = '·') => shownPaths(r).map((p) => (p === 'os' ? 'OS' : 'iDRAC')).join(sep);
 export const PATH_LABEL = Object.freeze({ 'idrac+os': 'iDRAC·OS', os: 'OS 만', idrac: 'iDRAC 만' });
 export function pathTypeLabel(x) { return PATH_LABEL[t(x)] || t(x) || '미상'; }
 
@@ -549,17 +606,19 @@ export function topBusiest(rows = [], { metric = 'cpu_pct', limit = 5 } = {}) {
  * 법인별 집계. ⚠ **`null` 을 분모에 넣지 않는다** — 넣으면 '못 읽은 서버' 가 평균을 끌어내린다
  * (v2.550 DB 롤업과 같은 규칙). 읽은 대수(`n`)를 함께 내 화면이 '몇 대 기준' 인지 말할 수 있게 한다.
  */
-export function corpSummary(rows = [], { metric = 'cpu_pct' } = {}) {
+export function corpSummary(rows = [], { metric = 'cpu_pct', bad = 90 } = {}) {
+  // 점검 반복 2회차 E4: ‘초과’ 대수의 기준은 색과 같은 값(bmUtilThresholds().bad — 서버 utilBad) · 기본 90.
+  const lim = n(bad) ?? 90;
   const by = new Map();
   for (const r of rows || []) {
     const k = t(r.vcenterId) || '(귀속 없음)';
-    const cur = by.get(k) || { vcenterId: k, servers: 0, n: 0, sum: 0, max: null, over90: 0 };
+    const cur = by.get(k) || { vcenterId: k, servers: 0, n: 0, sum: 0, max: null, overBad: 0 };
     cur.servers += 1;
     const v = n(r[metric]);
     if (v != null) {
       cur.n += 1; cur.sum += v;
       if (cur.max == null || v > cur.max) cur.max = v;
-      if (v >= 90) cur.over90 += 1;
+      if (v >= lim) cur.overBad += 1;
     }
     by.set(k, cur);
   }
@@ -590,9 +649,9 @@ export function csvOf(rows = []) {
   const esc = (v) => (v == null ? '' : csvCell(v));
   const cell = (r, key) => {
     if (key === 'server') return t(r.name);
-    if (key === 'paths') return (r.paths || []).map((p) => (p === 'os' ? 'OS' : 'iDRAC')).join('+');
+    if (key === 'paths') return pathsText(r, '+');
     if (key === 'src') return t(r.src);
-    if (key === 'missing') return (r.missing || []).join('+');
+    if (key === 'missing') return shownMissing(r).join('+');
     if (key === 'collectedAt') {
       const ts = n(r.ts);
       if (ts == null) return '';
@@ -863,7 +922,7 @@ export function edgePullState(row = {}, { minEdgeVersion = '', staleMs = 30 * 60
       why: att.kind === 'old-version' ? `이 엣지에 해당 경로가 없습니다 — v${minEdgeVersion} 이상으로 업그레이드해야 합니다(다시 눌러도 같습니다).`
         : att.kind === 'auth' ? '수집 서버 토큰이 맞지 않습니다 — 중앙 등록값과 그 엣지의 설정을 대조하세요(다시 눌러도 같습니다).'
           : att.kind === 'disabled' ? '그 엣지에서 수집 서버 토큰이 설정돼 있지 않습니다.'
-            : `${t(att.kind) || '실패'}: ${t(att.reason)}`,
+            : `${pullKindLabel(att.kind)}: ${t(att.reason)}`,
     };
   }
   if (row.enabledOnEdge === false) {
@@ -885,7 +944,7 @@ export function edgePullState(row = {}, { minEdgeVersion = '', staleMs = 30 * 60
   }
   const old = now - at > staleMs;
   if (att && !att.ok) {
-    return { state: 'stale-failed', label: '마지막 시도 실패', tone: 'warn', why: `아래 값은 ${ageText(at, now)} 가져온 것이고, **가장 최근 시도는 실패**했습니다 — ${t(att.kind)}: ${t(att.reason)}` };
+    return { state: 'stale-failed', label: '마지막 시도 실패', tone: 'warn', why: `아래 값은 ${ageText(at, now)} 가져온 것이고, **가장 최근 시도는 실패**했습니다 — ${pullKindLabel(att.kind)}: ${t(att.reason)}` };
   }
   if (old) return { state: 'stale', label: '낡음', tone: 'warn', why: `${ageText(at, now)} 가져온 값입니다 — 지금 값을 보려면 다시 가져오세요.` };
   return { state: 'ok', label: '보관분 있음', tone: 'ok', why: `${ageText(at, now)} 가져온 값입니다.` };
@@ -973,5 +1032,43 @@ export function lastPruneNote(lp, now = Date.now()) {
   if (lp.skipped) return `마지막 정리 ${when}: 건너뜀${lp.reason === 'no-db' ? '(수집이 꺼져 있고 DB 파일이 없습니다)' : ''}`;
   const raw = n(lp.rawDeleted), daily = n(lp.dailyDeleted);
   const del = raw == null && daily == null ? '' : ` — 원시 ${raw == null ? '—' : raw.toLocaleString()}행 · 롤업 ${daily == null ? '—' : daily.toLocaleString()}행 삭제`;
-  return `마지막 정리 ${when}${del}${lp.done === false ? ' (다음 정리에서 이어서 지웁니다)' : ''}`;
+  // 82회차 F2: 보존 기간을 정하는 설정 파일을 못 읽은 동안 서버는 그 정리를 멈춘다(held) — ‘정리했다’ 로 읽히지 않게 무엇을 멈췄는지 말한다.
+  const HELD = { settings: '사용률 설정(원시 · 시간 · 일 · 장치 · 프로세스 상위)', 'perf-rules': '알림 규칙(집중 · 변경 이벤트 · 로그 · 프로세스 상위)' };
+  const held = Array.isArray(lp.held) ? lp.held.filter((x) => HELD[x]) : [];
+  // 83회차: 멈춤에 끝이 없으면 무상한 증가라 서버는 그동안 설정이 허용하는 가장 긴 보존으로만 지운다(heldMax) — 그 사실도 말한다.
+  const heldText = held.length ? ` — **보존 정리 멈춤**: ${held.map((x) => HELD[x]).join(' · ')} 파일을 읽지 못해 그 보존 기간으로는 지우지 않았습니다${lp.heldMax ? '(그동안은 설정이 허용하는 가장 긴 보존보다 오래된 것만 지웁니다)' : ''} — 서비스 점검에서 확정하거나 파일을 되돌리면 설정값으로 다시 정리합니다` : '';
+  return `마지막 정리 ${when}${del}${lp.done === false ? ' (다음 정리에서 이어서 지웁니다)' : ''}${heldText}`;
+}
+
+/**
+ * 점검 반복 5회차 D2 · D3 — 마지막 주기 알림 한 줄. 서버는 발송을 대기열에 넣고 주기를 기다리지 않는다(last.alerts.queued = 넣은 수) ·
+ *   보냄 · 실패 · 정책상 안 보냄 · 보내는 중 · 재시도 예약은 결과가 온 뒤 alertState.delivery 가 센다(받은 채널 기준 — 실패를 ‘발송’ 으로 세지 않는다).
+ *   옛 서버(queued 없음 · sent 만)는 예전 문구. 값이 없으면 말하지 않는다(null).
+ */
+export function alertCycleText(last = null, delivery = null) {
+  if (!last) return null;
+  const capped = Number(last.capped) > 0 ? ` (상한으로 ${last.capped}건 생략)` : '';
+  if (last.queued == null) return Number(last.sent) > 0 || Number(last.over) > 0 ? `알림 ${Number(last.sent) || 0}건 발송${capped}` : null;
+  if (!(Number(last.queued) > 0) && !(Number(last.over) > 0)) return null;
+  const d = delivery && typeof delivery === 'object' ? delivery : null;
+  const parts = [];
+  if (d) {
+    parts.push(`보냄 ${Number(d.sent) || 0}`);
+    if (Number(d.failed) > 0) parts.push(`실패 ${d.failed}${Number(d.retry) > 0 ? `(재시도 예약 ${d.retry})` : ''}`);
+    if (Number(d.skipped) > 0) parts.push(`안 보냄 ${d.skipped}(억제 · 채널 꺼짐 등)`);
+    if (Number(d.pending) > 0) parts.push(`보내는 중 ${d.pending}`);
+  }
+  return `알림 ${Number(last.queued) || 0}건${parts.length ? ` — ${parts.join(' · ')}` : ''}${capped}`;
+}
+/**
+ * 점검 반복 5회차 D1 — 엣지 보관분이 엣지 상한에서 잘렸는가(봉투 truncated — 서버가 범위 계정에는 수 대신 true 만 준다).
+ *   관리자 · 전체 범위: ‘n대 중 m대만 가져옴’ · 범위 계정: ‘일부만 가져옴’(다른 법인 대수를 말하지 않는다). 잘리지 않았으면 null.
+ */
+export function edgeTruncatedText(row = {}) {
+  const tr = row?.truncated;
+  if (tr === true) return '엣지 상한으로 일부만 가져옴';
+  const n = Number(tr);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const m = Array.isArray(row?.targets) ? row.targets.length : 0;
+  return `${(m + n).toLocaleString('ko-KR')}대 중 ${m.toLocaleString('ko-KR')}대만 가져옴(엣지 상한)`;
 }

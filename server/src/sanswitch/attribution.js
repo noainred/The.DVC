@@ -212,14 +212,18 @@ export function attributeHost(host, fabrics = [], { storageOf = null, portBytes 
       else {
         // v2.935(C-①) ① 실측 비율 — ESXi 경로 카운터(그 어댑터의 타깃 WWN 별 전송량). 경로가 없는 후보는 실측 0 이다(그 어댑터로 그 타깃에 간 I/O 가 없다).
         const ms = split === 'auto' ? measuredSharesOf(pathWeights, hba.name) : null;
+        // 결정(56~75 남긴 것) 68 P2: 표본이 빠진 경로(partial)가 있던 표본은 이 어댑터의 가중치에서 빠졌다(storpath/history.js) — 개수를 밝힌다.
+        const excludedPartial = split === 'auto' ? (Number(pathWeights?.excludedOf?.get?.(hba.name)) || 0) : 0;
+        if (excludedPartial && !ms) basis += ` · ESXi 경로 표본이 빠진 경로가 있어 실측 비율을 쓰지 않음(제외 ${excludedPartial}개)`;
         if (ms) {
           shares = [...cands.values()].map((c) => [c.idn.id, [...c.wwns].reduce((a, tw) => a + (ms.get(tw) || 0), 0)]);
           const tot = shares.reduce((a, [, v]) => a + v, 0);
           if (tot > 0) {
             shares = shares.map(([id, v]) => [id, v / tot]);
             conf = 'measured'; splitBy = 'measured';
-            splitInfo = { samples: pathWeights.samples ?? null, firstAt: pathWeights.firstAt ?? null, lastAt: pathWeights.lastAt ?? null, outside: Math.round((1 - tot) * 1000) / 1000 };
-            basis += ` · 후보 ${cands.size}개 — ESXi 경로 카운터 비율로 분배(표본 ${pathWeights.samples ?? '—'}개)`;
+            splitInfo = { samples: pathWeights.samples ?? null, firstAt: pathWeights.firstAt ?? null, lastAt: pathWeights.lastAt ?? null, outside: Math.round((1 - tot) * 1000) / 1000,
+              ...(excludedPartial ? { excludedPartial } : {}) };
+            basis += ` · 후보 ${cands.size}개 — ESXi 경로 카운터 비율로 분배(표본 ${pathWeights.samples ?? '—'}개${excludedPartial ? ` · 표본이 빠진 경로 ${excludedPartial}개 제외` : ''})`;
             if (tot < 0.999) basis += ` · 후보 밖 타깃 몫 ${Math.round((1 - tot) * 100)}% 제외`;
           } else shares = [];
         }

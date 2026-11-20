@@ -11,6 +11,7 @@
  * CLAUDE.md 폴러 규칙: 재진입 가드(수동 실행과 공유) + 동시 수집 제한 + 장비당 타임아웃 +
  * startAdaptiveTimer(주기를 상수로 굳히지 않는다 — 설정 변경이 재시작 없이 먹어야 한다).
  */
+import { envPositive, ENV_INT_MAX } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { withSsh, withDeadline } from '../proxy/sshExec.js';
 import { probeCommands } from './collectors/fosSsh.js';
 import { devicesForThisNode, getDeviceWithSecret } from './registry.js';
@@ -34,7 +35,7 @@ const CONCURRENCY = Math.max(1, Math.min(8, Number(process.env.SANSW_PERF_CONCUR
  * 경로 추측 후보(FOS_DIRS)는 없앴다 — 기본 수집기(v2.413)와 같이 PATH 조사(probeCommands) 결과로
  * 'portperfshow' 유무를 판단하고, 없으면 사유를 사실로 남긴다(부재 장비에서 6×캡처 시간 낭비 제거).
  */
-const DEVICE_TIMEOUT_MS = (captureMs) => Math.max(30_000, Number(process.env.SANSW_PERF_DEVICE_TIMEOUT_MS) || (60_000 + captureMs * 2 + 30_000));
+const DEVICE_TIMEOUT_MS = (captureMs) => Math.max(30_000, envPositive(process.env.SANSW_PERF_DEVICE_TIMEOUT_MS, (60_000 + captureMs * 2 + 30_000), { max: ENV_INT_MAX }));
 
 let _timer = null;
 let _busy = false;

@@ -197,3 +197,27 @@ describe('v2.977 전체 점검 — vCPU 를 못 읽은 VM 이 있으면 할당 �
     expect(full.some((s) => /이상|못 읽은/.test(s))).toBe(false);
   });
 });
+
+// v3.19.2 — VM 을 전부 못 읽은 호스트: 서버가 vcpu 를 null 로 준다(vmSums.js vmAllocOf). 예전에는 원래 합 0 이 와 'vCPU 0 할당 이상 · 코어 대비 0.0 : 1 이상' 이었다.
+describe('v3.19.2 드로어 VM 타일 — 전부 못 읽음 · 일부 못 읽음 · VM 없음', () => {
+  const host = { id: 'vc-a:host-1', cpuCores: 4, vmCount: 3, connectionState: 'connected', powerState: 'poweredOn' };
+  it('전부 못 읽음 — ‘vCPU 할당 —’(단위 · ‘이상’ 없음) + 못 읽은 수', async () => {
+    const { hostTiles } = await import('./hostDrawerText.js');
+    const subs = hostTiles(host, { vm: { n: 3, on: 2, templates: 0, vcpu: null, memMB: null, vcpuUnknown: 3, memUnknown: 3 } }).vm.subs;
+    expect(subs).toEqual(['켜짐 2 · 꺼짐 1', 'vCPU 할당 —', '코어 대비 —', 'VM 3대 모두 못 읽음']);
+    expect(subs.some((s) => /이상|vCPU 0|0\.0 : 1/.test(s))).toBe(false);
+  });
+  it('일부 못 읽음 — 예전 표기 그대로(‘이상’ + 못 읽은 VM 수)', async () => {
+    const { hostTiles } = await import('./hostDrawerText.js');
+    const subs = hostTiles(host, { vm: { n: 3, on: 2, templates: 1, vcpu: 8, memMB: 1024, vcpuUnknown: 2, memUnknown: 0 } }).vm.subs;
+    expect(subs).toEqual(['켜짐 2 · 꺼짐 1', '템플릿 1', 'vCPU 8 할당 이상', '코어 대비 2.0 : 1 이상', 'vCPU 못 읽은 VM 2']);
+    // 코어 수를 모르면 비율은 ‘—’ 이고 ‘이상’ 을 붙이지 않는다
+    const noCores = hostTiles({ ...host, cpuCores: null }, { vm: { n: 3, on: 2, templates: 0, vcpu: 8, memMB: 1024, vcpuUnknown: 2, memUnknown: 0 } }).vm.subs;
+    expect(noCores).toContain('코어 대비 —');
+  });
+  it('VM 없음 — 0 으로 적는다(모름이 아니다)', async () => {
+    const { hostTiles } = await import('./hostDrawerText.js');
+    const subs = hostTiles({ ...host, vmCount: 0 }, { vm: { n: 0, on: 0, templates: 0, vcpu: 0, memMB: 0, vcpuUnknown: 0, memUnknown: 0 } }).vm.subs;
+    expect(subs).toEqual(['켜짐 0 · 꺼짐 0', 'vCPU 0 할당', '코어 대비 0.0 : 1']);
+  });
+});

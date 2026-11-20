@@ -426,7 +426,8 @@ test('⑦ 중앙 이력 재구성(랙 · capacity 정정) · 최소 엣지 버�
     { id: 'a4', at: NOW, rule: 'rack', key: 'rack:vcA|\u0001bad', name: 'x', vcenterId: 'vcA', title: 't', channels: [], result: 'sent' },
     { id: 'a5', at: NOW, rule: 'nope', key: 'T1', name: 'x', vcenterId: 'vcA', title: 't', channels: [], result: 'sent' },
   ], NOW);
-  assert.deepEqual(sent.map((x) => x.rule), ['capacity', 'rack', 'inlet', 'rack', 'use'], '정정: capacity 가 ‘use’ 로 바뀌지 않는다(규칙 id 는 규칙 목록 하나)');
+  // 정정(점검 반복 3회차 I1): 모르는 규칙(a5 'nope')은 'unknown' — 예전 기대값 'use' 는 다른 규칙 알림을 ‘USE 판정 변화’ 로 보이게 하던 그 동작이었다(bmUsageLoop3 I1)
+  assert.deepEqual(sent.map((x) => x.rule), ['capacity', 'rack', 'inlet', 'rack', 'unknown'], '정정: capacity 가 ‘use’ 로 바뀌지 않는다(규칙 id 는 규칙 목록 하나) · 모르는 규칙은 unknown');
   const resolveVc = async (p) => ({ id: p.claimedVcenterId === 'vcA' ? 'vcA' : 'vcA', name: 'A' });   // 그 엣지 담당은 vcA 하나
   const c = await OP.centralizeEdgeSent('edge-a', { perfAlertSent: sent, targets: [{ key: 'T1', name: 'bm-t1', vcenterId: 'vcA', serviceTag: '' }] }, { resolveVc });
   const rack = c.list.find((x) => x.rule === 'rack');

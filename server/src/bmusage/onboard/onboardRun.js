@@ -15,7 +15,9 @@ import crypto from 'node:crypto';
 import { config } from '../../config.js';
 import { analyzeOnboardRows, analysisSig, edgeRowFromPlan, osWriteOf } from './importAnalyze.js';
 import { atomicWriteFileSync } from '../../util/atomicWrite.js';
+import { fileMissing } from '../../util/fileMissing.js';   // 134회차: '정말 없는가'(ENOENT 만 — existsSync 는 stat 실패도 false)
 import { parseOnboardFile } from './importParse.js';
+import { keyShape, effectiveKeyOf } from './placement.js';
 
 
 let _chain = Promise.resolve();
@@ -67,7 +69,10 @@ export function buildOnboardCtx({ D, corps = [], canView, canWrite, fullScope = 
     osRegistry: D.BM.listBmServers(),
     edgeRows: isEdge ? [] : D.ED.allEdgeRows(),
     accountByName: (kind, name) => pubAcc(D.KS.accountByName(kind, name)),
-    keyByName: (name) => { const k = D.KS.keyByName(name); return k ? { id: k.id, name: k.name, status: k.status } : null; },
+    // 4회차 점검 D1: 키 폴더(법인 · 서버) · 허용 기능도 넘긴다(비밀 없음) — 분석이 접속 때와 같은 판정(placement.keyPlacementIssue)을 쓰기 전에 건다.
+    keyByName: (name) => keyShape(D.KS.keyByName(name)),
+    /** 쓰기 뒤 효력 키(서버 키 → 공통 계정 기본 키 · 비밀번호 고정이면 없음) — 참조 id 토큰(bindRule)으로. */
+    effectiveKeyOf: (refs) => effectiveKeyOf(refs, { keyById: D.KS.keyById, accountById: D.KS.accountById }),
     osIssue: D.BM.bmServerInputIssue,
     idracIssue: D.IDR.idracInputIssue,
     sanitizeMounts: D.MNT.sanitizeMounts,
@@ -118,7 +123,7 @@ export function snapshotRegistries({ files = ['bm-storage.json', 'idrac.json', '
     const src = path.join(config.configDir, f);
     const dst = path.join(dir, f);
     // 감사 L-4 · Q5: 원자적 쓰기(반쪽 스냅샷 없음) · 0600. bm-storage · idrac 사본은 SECRET_FILES(onboard-prev/…)로 봉인 이전 · 평문 점검 대상.
-    if (fs.existsSync(src)) { atomicWriteFileSync(dst, fs.readFileSync(src), { mode: 0o600 }); saved.push(f); }
+    if (!fileMissing(src)) { atomicWriteFileSync(dst, fs.readFileSync(src), { mode: 0o600 }); saved.push(f); }   // 134회차: 확인하지 못한 원본(stat 실패)을 '그때 없던 파일' 로 보고 직전 스냅샷을 지우지 않는다 — 읽기가 던져 적용 전에 멈춘다
     else if (fs.existsSync(dst)) fs.rmSync(dst);   // 그때 없던 파일은 스냅샷에도 없다(되돌리면 없는 것이 맞다)
   }
   const metaFile = `${dir}${path.sep}meta.json`;

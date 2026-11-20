@@ -19,10 +19,28 @@ import { createAuthGuard, authStopView } from '../util/authGuard.js';
 import { poolSettled } from '../util/pool.js';
 import { createChangeLogger } from '../util/logThrottle.js';
 import { serversForThisNode, getServerWithSecret } from './registry.js';
-import { loadSettings, onSettingsChange } from './settings.js';
+import { loadSettings, onSettingsChange, cvpSettingsLoadError, LIMITS as CVP_LIMITS } from './settings.js';
 import { collectCvp, testCvp } from './client.js';
 import { portDelta, cpuPctFromCounters } from './parse.js';
 import * as db from './db.js';
+/*
+ * 전체 점검 25회차 F-2(재현): 설정 파일이 손상되면 loadSettings 가 기본값(원시 7일 · 일 롤업 730일)을 돌려주고, 폴러는 꺼진 분기에서도
+ *   매 틱 그 값으로 정리해 관리자가 90일 · 3650일로 둔 이력(중앙은 엣지가 보낸 행까지)을 지웠다. 못 읽은 동안은 정리를 보류한다
+ *   (스토리지 23회차 S-3 · SAN 24회차 #4 와 같은 판단 — 형제 pduSanRoutes 는 이미 상한으로 막았다).
+ */
+let _pruneHoldWarned = false;
+function prunePerSettings(settings) {
+  let le = null;
+  try { le = cvpSettingsLoadError(); } catch { le = { reason: '판정 실패' }; }
+  if (le) {
+    // 27회차 반증 D-4: 보류(무한 증가) 대신 설정 상한(최대 보존)으로 정리 — 관리자가 둘 수 있었던 어떤 값보다 오래된 것만
+    if (!_pruneHoldWarned) { _pruneHoldWarned = true; console.warn(`[cvp] 설정 파일을 읽지 못해 보존 정리를 설정 상한(최대 보존)으로만 합니다(기본값으로 지우지 않음) — ${String(le.reason || '').slice(0, 160)}`); }
+    db.maybePrune({ ...settings, rawRetentionDays: CVP_LIMITS.rawRetentionDays.max, dailyRetentionDays: CVP_LIMITS.dailyRetentionDays.max }).catch(() => {});
+    return;
+  }
+  _pruneHoldWarned = false;
+  db.maybePrune(settings).catch(() => {});
+}
 import { putStatus, getStatus, keepOnly } from './store.js';
 import { scheduleCvpFaultScan } from './faultScan.js'; // v2.640: 중앙 직접 수집 뒤 장애 전이 판정(디바운스)
 import { isMockMode } from '../mock/demo/flags.js';            // v2.708 데모(mock 전용)
@@ -301,7 +319,7 @@ export async function pollCvpOnce({ manual = false, only = null, demoOnly = fals
   if (!settings.enabled && !cvpDemoActive(serversForThisNode()) && !manual) {
     // v2.611(DB2611-05·RECENT2611-07): 보존 정리는 수집 켜짐과 무관하게 돈다 — 중앙은 꺼져 있어도 엣지 push 를 적재하고
     //   (CVP_SETTINGS_LOCAL=1 엣지·꺼진 상태의 수동 요청), 꺼진 뒤 남은 행도 보존일은 지켜야 한다(guestdisk/poller.js 와 같은 규약).
-    db.maybePrune(settings).catch(() => {});
+    prunePerSettings(settings);
     return { ok: false, skipped: true, reason: 'CVP 수집이 꺼져 있습니다(설정 › CVP 수집)' };
   }
   if (_busy) return { ok: false, busy: true, reason: '이전 수집 진행 중(겹침 방지)' };
@@ -333,7 +351,7 @@ export async function pollCvpOnce({ manual = false, only = null, demoOnly = fals
     const crashed = res.filter((x) => x.status === 'rejected');
     for (const c of crashed) console.warn(`[cvp] 수집 중 예외: ${c.reason?.message || c.reason}`);
     _last = { at: Date.now(), trigger, total: servers.length, collected: count('ok'), failed: count('failed') + crashed.length, authStopped: count('stopped'), durationMs: Date.now() - t0, ...(demoScope ? { demoOnly: true, skippedNonDemo } : {}) };
-    db.maybePrune(settings).catch(() => {}); // maybePrune 가 실패를 콘솔에 남긴다
+    prunePerSettings(settings); // maybePrune 가 실패를 콘솔에 남긴다
     if (config.agent.centralUrl && servers.length) {
       import('./push.js').then((m) => m.pushCvpNow()).catch((e) => console.warn(`[cvp] 수집 뒤 push 실패: ${e.message}`));
     }

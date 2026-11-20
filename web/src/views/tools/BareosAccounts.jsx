@@ -10,6 +10,7 @@ import {
   matrixCell, matrixTotals, mergeBulkRows, sameBulkJob, BULK_LABEL, bulkEligible, RESULT_TEXT, RESULT_CLS, bulkCounts, bulkSummaryText, passwordCsv, maskPw, pwPairIssue, nameIssue, profileOptions, DEFAULT_PROFILE, sshSourceText, noSshNeeded,
 } from './bareosCorpText.js';
 import { copyText as copyToClipboard } from '../../util/copyText.js';   // v3.10.6: HTTP 포탈에서도 복사(Clipboard API → execCommand 폴백 · 실패는 false)
+import { saveBlob } from '../../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나
 
 /**
  * 중앙 계정 통합(v2.845 · 설정 탭 — 전 법인 범위 관리자만). 사용자 요청: '중앙에서 bareos 백업 계정 통합관리'.
@@ -203,9 +204,7 @@ function BulkResult({ r, say, onClose, onRetry }) {
   const download = () => {
     const csv = passwordCsv(rows, r.account);
     if (!csv) return;
-    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
-    const a = document.createElement('a'); a.href = url; a.download = `bareos-webui-${r.account}-passwords.csv`; a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    saveBlob(new Blob([csv], { type: 'text/csv;charset=utf-8' }), `bareos-webui-${r.account}-passwords.csv`);
     setCsvDone(true);
   };
   const close = () => { setRows((xs) => xs.map((x) => ({ ...x, generatedPassword: undefined }))); onClose(); };

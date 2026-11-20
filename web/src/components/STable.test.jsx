@@ -14,6 +14,8 @@ describe('STable (v2.422)', () => {
     expect(html).toContain('cursor:pointer');
     expect(html).toContain('클릭하면 이 열로 정렬');
     expect(html).toContain('<td>a</td>');
+    expect((html.match(/tabindex="0"/g) || []).length).toBe(2);   // v3.13.2 정렬 머리는 Tab 으로 닿는다(역할은 columnheader 그대로 — role 없음)
+    expect(html).not.toContain('role="button"');
   });
   it('자체 정렬 표(onClick th / 컴포넌트 th)는 손대지 않는다', () => {
     const html = renderToStaticMarkup(table(h('tr', null, h('th', { onClick: () => {} }, '이름'), h('th', null, '값')), []));

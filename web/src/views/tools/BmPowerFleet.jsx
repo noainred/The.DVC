@@ -66,7 +66,7 @@ export function PowerFleetView({ resp, onOpen, onReload, loading = false }) {
             <tr key={c.vcenterId}>
               <td data-sort={c.vcenterId}>{c.vcenterId || '—'}</td><td className="right" data-sort={c.servers}>{c.servers}</td>
               <td className="right" data-sort={c.nowKw ?? ''}>{kwText(c.nowKw)}</td><td className="right" data-sort={c.avg24Kw ?? ''}>{kwText(c.avg24Kw)}</td>
-              <td className="right" data-sort={c.peak24Kw ?? ''} title={c.peak24At ? hourText(c.peak24At) : ''}>{kwText(c.peak24Kw)}</td>
+              <td className="right" data-sort={c.peak24Kw ?? ''} title={c.peak24At ? `${hourText(c.peak24At)}${c.peakPartial ? ` · ${c.peakServers}/${c.avg24Servers}대 기준 부분 합(측정 서버가 다 모인 시간이 없음)` : ''}` : ''}>{kwText(c.peak24Kw)}{c.peakPartial ? <span className="muted"> (부분)</span> : null}</td>
               <td className="right" data-sort={c.kwh24 ?? ''}>{kwhText(c.kwh24)}</td><td className="right" data-sort={c.kwhMonth ?? ''}>{kwhText(c.kwhMonth)}</td>
               <td className="bmo-wrap" data-sort={c.unmeasuredN}>{c.unmeasuredN ? unmeasuredText(c.unmeasured) : '—'}</td>
               <td className="right" data-sort={c.inletMax ?? ''}>{c.inletAvg == null ? '—' : `${c.inletAvg} / ${c.inletMax}`}</td>
@@ -82,7 +82,7 @@ export function PowerFleetView({ resp, onOpen, onReload, loading = false }) {
             <tr key={`${r.vcenterId}|${r.rack}`} className={rack === `${r.vcenterId}|${r.rack}` ? 'bmc-sel' : ''}>
               <td data-sort={r.unmapped ? 'zzz' : r.rack}><span className="bmp-link" role="button" tabIndex={0} onClick={() => openRack(r)} onKeyDown={(e) => { if (e.key === 'Enter') openRack(r); }}>{r.unmapped ? '미매핑' : r.rack}</span>{r.capKw != null ? <NoJudge x={r} /> : null}</td>
               <td data-sort={r.vcenterId}>{r.vcenterId || '—'}</td><td className="right" data-sort={r.servers}>{r.servers}{r.unmeasuredN ? <span className="bmo-sub"> (미측정 {r.unmeasuredN})</span> : null}</td>
-              <td className="right" data-sort={r.nowKw ?? ''}>{kwText(r.nowKw)}</td><td className="right" data-sort={r.avg24Kw ?? ''}>{kwText(r.avg24Kw)}</td><td className="right" data-sort={r.peak24Kw ?? ''}>{kwText(r.peak24Kw)}</td>
+              <td className="right" data-sort={r.nowKw ?? ''}>{kwText(r.nowKw)}</td><td className="right" data-sort={r.avg24Kw ?? ''}>{kwText(r.avg24Kw)}</td><td className="right" data-sort={r.peak24Kw ?? ''} title={r.peakPartial ? `${r.peakServers}/${r.avg24Servers}대 기준 부분 합(측정 서버가 다 모인 시간이 없음)` : undefined}>{kwText(r.peak24Kw)}{r.peakPartial ? <span className="muted"> (부분)</span> : null}</td>
               <td className="right" data-sort={r.capKw ?? ''}>{r.capKw == null ? (r.unmapped ? '—' : '미설정') : kwText(r.capKw)}</td>
               <td className="right" data-sort={r.marginPct ?? ''} style={{ color: toneVar(r.low === true ? 'bad' : 'idle') }} title={r.marginPartial ? '미측정 서버가 있어 부분 합으로 여유를 판정하지 않습니다' : undefined}>{marginText(r)}</td>
               <td className="right" data-sort={r.inletMax ?? ''}>{r.inletAvg == null ? '—' : `${r.inletAvg} / ${r.inletMax}`}</td>

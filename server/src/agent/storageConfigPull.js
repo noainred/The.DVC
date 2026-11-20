@@ -17,6 +17,7 @@ import { collectDeviceNow } from '../storage/poller.js';
 import { flushSnapshotsNow } from '../storage/store.js'; // v2.733(C4-03): 재수집 묶음 끝에 한 번 쓴다
 import { pushStorageNow } from '../storage/push.js';
 import { runtimeIntervals, applyCentralIntervals, startAdaptiveTimer } from '../storage/intervals.js';
+import { readJsonCapped, EDGE_RESPONSE_MAX_BYTES } from '../util/readCapped.js'; // 87회차 ⓓ(85 E3 — 권장안): 중앙 응답은 상한 읽기(형제 pull 과 같게 — 상한 없는 res.json() 금지)
 
 // v2.409: 주기는 중앙 배포값(storage/intervals.js)을 매번 조회 — 모듈 로드 시 상수로 굳히지 않는다.
 // ⚠ 이 pull 주기 자체도 중앙이 지정할 수 있다. 길게 잡아 두면 '주기를 줄이라'는 지시도 그만큼
@@ -130,7 +131,7 @@ async function _pullStorageConfigNow() {
       return { ok: false, kind: c.kind, reason: c.reason };
     }
     if (!res.ok) throw new Error(`storage-config <- ${res.status}`);
-    const body = await res.json();
+    const body = await readJsonCapped(res, EDGE_RESPONSE_MAX_BYTES, '중앙 응답');
     // 수집 주기 배포(v2.409) — 장비 목록보다 먼저 적용한다. 중앙이 값을 안 주면 빈 객체가 되어
     // 엣지가 자기 portal.env 값으로 되돌아간다('중앙 미설정 = 로컬 유지' 계약, intervals.js).
     // 이 호출이 타이머 재무장까지 트리거하므로, 새 주기는 다음 틱을 기다리지 않고 바로 먹는다.

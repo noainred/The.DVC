@@ -160,7 +160,8 @@ describe('배포 요약·현황', () => {
   });
   it('BmUsage.jsx — 버튼은 배포 현황(전체 범위 관리자 · 중앙)이 있을 때만 · 확인 상자를 거쳐 저장 · 화면 목록(corps)을 함께 보낸다', () => {
     const jsx = fs.readFileSync(path.join(HERE, 'BmUsage.jsx'), 'utf8');
-    expect(jsx).toMatch(/edgeOnView\(r, findDistRow\(data\?\.distribution, r\.agent\), \{ canManage: !!data\?\.distribution \}\)/);
+    // 재확인 N1(2026-11-19 사용자): 배포 현황이 있고 서버 표지 canEdit(설정 소유자 등급)일 때만 — distCanEdit 은 '현황 없음 → 닫음' 을 포함한다
+    expect(jsx).toMatch(/edgeOnView\(r, findDistRow\(data\?\.distribution, r\.agent\), \{ canManage: distCanEdit\(data\?\.distribution\) \}\)/);
     expect(jsx).toMatch(/putJson\('\/tools\/bm-usage\/distribute\/edge', \{ agent, on, \.\.\.\(on && Array\.isArray\(corps\) \? \{ corps \} : \{\}\) \}\)/);
     expect((jsx.match(/saveEdgeOn\(/g) || []).length).toBe(2);   // 정의 1 + 확인 상자의 저장 버튼 1 — 표 버튼이 바로 저장하지 않는다
     expect(jsx).toMatch(/onClick=\{\(\) => saveEdgeOn\(edgeAsk\.agent, edgeAsk\.on, \{ corps: dr\?\.corps, reconfirm: !!edgeAsk\.reconfirm \}\)\}/);

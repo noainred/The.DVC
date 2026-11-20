@@ -22,15 +22,18 @@ import { logAudit } from '../../audit.js';
 import { loadBmUsageSettings, saveBmUsageSettings, bmUsageEnabled, DEFAULTS, enterpriseActive, dropUnspecifiedNumbers, bmUsageCentralState, distributionStatus, saveDistribution, setPerEdge, exclusionConflicts, perEdgeSuperseded, perEdgeFor, normalizeCorpIds } from '../../bmusage/settings.js';
 import { edgeCorpsSource } from '../../bmusage/edgeCorps.js'; // v2.927 중앙에서 켜기 — 엣지별 법인 매핑
 import { listAgentTokens } from '../../central/agentTokens.js';
-import { fullScopeOnlyWith, requireSettingsOwner } from '../admin/shared.js';
+import { fullReadWriteScopeOnlyWith, requireSettingsOwner } from '../admin/shared.js';
+import { settingsOwnerGradeDenial } from '../admin/shared.js'; // 결정 반영(2026-11-19 ③) — 보존 줄이기는 설정 소유자 등급(isOwnerTier 와 같은 하나)
 import { knownAgentNames } from '../../central/knownAgents.js';
 import { unassignedCauses, CAUSE as UNASSIGNED_CAUSE } from '../../bmusage/attribution.js';
 import { TIER_LABEL } from '../../bmusage/license.js';
-import { publicTarget, maskTargetAddress, maskBmIdentity, NO_PATH_REASON } from '../../bmusage/targets.js';
+import { publicTarget, publicSkipped, maskTargetAddress, maskBmIdentity, NO_PATH_REASON, pathCountsOf } from '../../bmusage/targets.js';
 import { maskActivityEvents, maskPollerStatus, scrubHosts, addressMatcher, isAdminReq, scrubberFor, maskedIdToken, MASK_TOKEN_PREFIX } from '../../auth/addressMask.js';
-import { targetIdOf } from '../../bmusage/maint/judge.js'; // 다음 점검 ①: 서버 = (법인, 키) 쌍 — 정비 창 판정과 같은 식별 함수
+import { nodePairIdOf } from '../../bmusage/maint/judge.js'; // 다음 점검 ①: 서버 = (법인, 키) 쌍 — 정비 창 판정과 같은 식별 함수(targetIdOf · 귀속 없음은 노드까지 — 4회차 D3 로 하나로)
 import { currentTargets, pollBmUsageOnce, bmUsageStatus, authStopsFor, sourceErrorsView, usageDetailFor } from '../../bmusage/poller.js';
 import { isDemoGuest } from '../../auth/demoGuest.js'; // v2.720(감사 R1-03)
+import { bmGate, bmGates, writableVc } from './bmWriteGate.js';
+import { PROC_KEYS, scrubProcRow } from './bmProcScrub.js'; // 10회차 K1 // 점검 반복 2회차 E1 · E2 — 쓰기 버튼 표지
 import { latestUsage, usageHistory, usageDaily, dbStatus, METRICS } from '../../bmusage/db.js';
 import { bmUsageEvents, bmUsageLogInfo } from '../../bmusage/activityLog.js';
 import { scopeFilePaths } from '../../auth/scopeStatus.js';   // v2.598 AUTHZ-2598-04: log.file 절대 경로는 admin 만
@@ -40,17 +43,21 @@ import { fleetPartialsSummary } from '../../central/fleet.js'; // v2.607 LEFT260
 import { poolSettled } from '../../util/pool.js'; // v2.613 RUNTIME2613-03(a)
 import { reqTimeoutMs } from '../../agent/envTimeout.js';
 import { memoJson, scopeKey } from './shared.js'; // v2.919: 서버 1대 성능 상세(응답 캐시 + 범위 서명)
+import { createYielder } from '../../util/timeSlice.js'; // 점검 반복 5회차 D5 — 함대 루프 양보
 import { perfForRows, stripJsonCols } from '../../bmusage/edgePull.js'; // v2.919: 판정이 붙은 성능 항목(엣지 봉투와 같은 함수)
 import { buildPerfEntry, PERF_COL_META, compactPerfEntry } from '../../bmusage/perfView.js';
 import { hwFactsReader } from '../../bmusage/hwFacts.js';
 import { freshMsFor } from '../../bmusage/useJudge.js';
 import { PERF_DEFAULTS } from '../../bmusage/settings.js';
+import { retentionShrink } from '../../bmusage/settings.js'; // 결정 반영(2026-11-19 ③) — 이 저장이 보존 칸을 저장된 값보다 줄이는가
+import { scopeSig } from '../../util/scopeSig.js';
 
 const toolsPerm = requirePerm('tools');
 const writeRole = requireRole('admin', 'operator');
 const adminOnly = requireRole('admin');
 // v2.627: 엣지 배포는 28곳 전부의 수집 범위를 바꾼다 — 전 법인 공용 결정이라 전체 범위 관리자만.
-const fleetOnly = fullScopeOnlyWith('베어메탈 사용률 설정의 엣지 배포는 전체 범위(vCenter 제한 없는) 관리자만 바꿀 수 있습니다 — 모든 엣지의 수집 범위를 한 번에 정합니다.');
+// 점검 반복 2회차 재확인 R1: 조회 ∧ 쓰기 전체 범위(isFullReadWriteScope) — 조회만 보던 fullScopeOnlyWith 는 쓰기만 좁힌 관리자를 통과시켰다(v2.733 · v2.904 함정).
+const fleetOnly = fullReadWriteScopeOnlyWith('베어메탈 사용률 설정의 엣지 배포는 조회 · 쓰기 모두 전체 범위(vCenter 제한 없는) 관리자만 바꿀 수 있습니다 — 모든 엣지의 수집 범위를 한 번에 정합니다.');
 
 // v2.604(감사 CEN2604-03 2중 방어): 엣지 보관분 값이 객체면 String() 이 던져 이 라우트가 500 이었다 — 글자·수·불리언만.
 const t = (v) => strOf(v, 4096).trim();
@@ -316,7 +323,7 @@ export async function bmTrendView(req, snap, mode = 'history', deps = {}) {
   if (bad) return bad;
   if (found.via === 'local') {
     const agent = config.agent?.name || '';
-    const r = mode === 'devices' ? await D.devicesFor({ agent, key: found.realKey }) : await D.trendFor({ agent, key: found.realKey, q: req.query || {}, settings: loadBmUsageSettings() });
+    const r = mode === 'devices' ? await D.devicesFor({ agent, key: found.realKey, settings: loadBmUsageSettings() }) : await D.trendFor({ agent, key: found.realKey, q: req.query || {}, settings: loadBmUsageSettings() });
     return r && r.ok ? { ...r, key, via: 'local' } : r;
   }
   const r = await D.pullBmTrend(found.agent, mode, found.realKey, req.query || {});
@@ -446,7 +453,7 @@ async function resolvePerfTarget(req, D, { allowed, isAdmin, key, vcenterId = ''
     if (unPick != null) return !v && ag === unPick;
     return !vc || v === vc;
   };
-  const pairIdOf = (x, ag) => (t(x?.vcenterId) ? targetIdOf(x) : `|${t(x?.key)}@${ag}`);
+  const pairIdOf = nodePairIdOf;   // 4회차 D3: 로그 공통 원인 후보와 같은 하나(maint/judge.js)
   const byId = new Map();
   const tg = await D.currentTargets();
   const agent = config.agent?.name || '';
@@ -659,10 +666,12 @@ async function opsFleetItems(req, snap, D) {
   const items = [];
   const judge = await tagJudgeFor(D, tg); // 요청당 한 번(purposeFor 가 대상마다 만들던 것)
   const edgeRecs = await D.listEdgeBmUsage();
+  const y = createYielder(15);   // 점검 반복 5회차 D5: 서버 사이 시간 기준 양보(1,000대 함대가 한 덩어리였다 — 결과 같음)
   for (const x of local) {
     const row = byKey.get(t(x.key)) || null;
     items.push({ key: t(x.key), name: x.name || x.key, vcenterId: t(x.vcenterId), serviceTag: x.serviceTag || '', regId: x.idrac?.regId || '',
       row, ...(row ? O.factsOfRow(row) : { tuning: null, detail: null }), entry: entryByKey.get(t(x.key)) || null, manual: await purposeFor(D, x, x.key, judge) });
+    await y();
   }
   for (const rec of edgeRecs || []) {
     const sn = rec?.snap;
@@ -674,6 +683,7 @@ async function opsFleetItems(req, snap, D) {
       const entry = perfBy.get(k) || null;
       items.push({ key: k, name: x.name || k, vcenterId: t(x.vcenterId), agent: rec.agent, serviceTag: x.serviceTag || '', regId: '',
         row: rowBy.get(k) || null, tuning: entry?.tuning || null, detail: entry?.detail || null, entry, manual: await purposeFor(D, x, k, judge) });
+      await y();
     }
   }
   if (isAdmin) return { items, isAdmin, allowed };
@@ -692,7 +702,7 @@ export async function bmOpsFleetView(req, snap, deps = {}) {
   if (probe?.error) return { __status: 503, ok: false, code: 'settingsUnreadable', reason: probe.error.reason };
   const { items, isAdmin, allowed, masked } = await opsFleetItems(req, snap, D);
   const O = await import('../../bmusage/opsView.js');
-  const v = O.fleetProfileView(items.map((it) => ({ ...it, overridesFor })), { overridesFor });
+  const v = await O.fleetProfileViewAsync(items.map((it) => ({ ...it, overridesFor })), { overridesFor, yieldFn: createYielder(15) });   // 5회차 D5: 같은 누적기 · 서버 사이 양보
   let overrides = null;
   if (isAdmin) {
     const all = (await import('../../bmusage/tuning/overrides.js')).loadTuningOverrides();
@@ -722,6 +732,7 @@ function faultDeps(deps = {}) {
 }
 const IPV4_RE = /\b\d{1,3}(?:\.\d{1,3}){3}\b/g;
 const scrubIp = (v) => (typeof v === 'string' ? v.replace(IPV4_RE, (ip) => maskedIdToken(ip)) : v);
+const PROC_FNS = { scrub: scrubIp, tok: (v) => maskedIdToken(v) };   // 10회차 K1 — 프로세스 행 가림(bmProcScrub)
 
 /** GET /tools/bm-usage/perf/:key/faults?days= — 요약 5칸 · 발생 1건=1행 · 시간순(부품 전이 + SEL/LC). */
 export async function bmFaultsView(req, snap, deps = {}) {
@@ -785,10 +796,25 @@ export async function bmFaultsFleetView(req, snap, deps = {}) {
 
 /* ── 진단 스냅샷(원격 명령 실행 경로 — 규약은 bmusage/snapshot/run.js 머리말 · security-api.md v2.923) ─────────── */
 const _snapInflight = new Set();   // 중앙 → 엣지 대행 중복 전송 막기(같은 서버 동시 1건 — 엣지도 다시 막는다)
-function scrubSnapshot(res, isAdmin) {
+/**
+ * 10회차 L2: 스냅샷 실행 표지 = 데모 · 역할(bmGate) ∧ 경로(실행이 409 로 거절하는 판정 그대로) — 예전에는 경로를 보지 않아 iDRAC 만 서버에 실행 칸이 열리고 누르면 409.
+ *   다음 작업 ⑥ · ④: 경로 판정 = snapshot/run.js 의 함수 둘(이 노드 대상 snapshotOsPathIssue · 엣지 대행 대상 snapshotPublicPathIssue) — no-os-path · auth-unresolved · demo-target.
+ *   호출부(GET 보관분)가 둘을 넘긴다 — 여기는 판정 사본을 두지 않는다.
+ */
+export function snapRunGateOf(req, snap, target, osPathIssue, via = 'local', publicPathIssue = null) {   // 10회차 L2 · 다음 작업 ⑥ 시험이 직접 부른다
+  const g = bmGate(req, 'snapshotRun', { snap });
+  if (!g.ok) return g;
+  // 이 노드 대상은 실행과 같은 함수(osHost) · 엣지 대행 대상은 봉투의 공개 대상(osHost 를 싣지 않는다 — publicTarget)이라 그 표지(paths · osAuthUnresolved · demoOs)로.
+  //   판정 사본을 두지 않는다 — 엣지 판정 함수를 받지 못하면 판정하지 않는다(엣지가 실행 때 다시 거절한다).
+  const why = via === 'edge' ? (typeof publicPathIssue === 'function' ? publicPathIssue(target) : null) : osPathIssue(target);
+  return why ? { ok: false, why } : g;
+}
+export function scrubSnapshot(res, isAdmin) {   // 9회차 G1 시험이 직접 부른다
   if (isAdmin || !res || typeof res !== 'object') return res;
   const r = res.result && typeof res.result === 'object' ? res.result : null;
-  const scrubResult = (x) => (x ? { ...x, dmesg: (x.dmesg || []).map(scrubIp), ss: (x.ss || []).map(scrubIp), ...(x.error ? { error: scrubIp(x.error) } : {}),
+  // 점검 반복 9회차 G1 · 10회차 K1: 프로세스 사용자 이름은 관리자 판본만 원문(8b 규약 — Top-N 과 같은 토큰) · 이름(name — 파서가 만드는 칸) 안 주소도 가린다(bmProcScrub 하나).
+  const tops = (x) => Object.fromEntries(PROC_KEYS.filter((k) => Array.isArray(x[k])).map((k) => [k, x[k].map((p) => scrubProcRow(p, PROC_FNS))]));
+  const scrubResult = (x) => (x ? { ...x, ...tops(x), dmesg: (x.dmesg || []).map(scrubIp), ss: (x.ss || []).map(scrubIp), ...(x.error ? { error: scrubIp(x.error) } : {}),
     ...(x.idrac ? { idrac: { ...x.idrac, events: Array.isArray(x.idrac.events) ? x.idrac.events.map((e) => ({ ...e, message: scrubIp(e.message) })) : x.idrac.events } } : {}) } : x);
   const out = { ...res, ...(r ? { result: scrubResult(r) } : {}), ...(res.reason ? { reason: scrubIp(res.reason) } : {}) };
   if (Array.isArray(out.snapshots)) out.snapshots = out.snapshots.map(({ by: _b, ...x }) => ({ ...x, reason: scrubIp(x.reason) }));
@@ -853,7 +879,12 @@ export async function bmSnapshotRead(req, snap, deps = {}) {
     : await D.pullEdge(found.agent, { key: found.realKey, id });
   const code = res?.code || (res?.ok ? 'ok' : 'edge');
   // 반증 W4: 실행 칸을 잠글지 화면이 알 수 있게 — 쓰기 범위(조건 없이 · 실행 라우트와 같은 판정). 역할(operator 이상)은 화면이 따로 본다.
-  const body = scrubSnapshot({ ...res, key, via: found.via, ...(found.via === 'edge' ? { agent: found.agent } : {}), writable: inUserWriteScope(req.user, snap, t(found.target.vcenterId)) }, isAdmin);
+  // 8회차 F2: 데모 · 역할 표지(실행 라우트 앞의 authMiddleware denyDemoGuest · writeRole 과 같은 판정 — bmGate) — 예전에는 writable 만 실어 데모 계정에 실행 칸이 열리고 누르면 403.
+  // 다음 작업 ⑥(b): 엣지 대행 대상의 경로 표지는 중앙이 마지막으로 가져온 봉투(공개 대상)를 본다 — 그 시각(보관분 snapAt)을 싣는다(화면이 ‘엣지 보관분 기준’ 을 밝힌다).
+  const S = await import('../../bmusage/snapshot/run.js');
+  const pathBasis = found.via === 'edge' ? { via: 'edge', at: Number(found.rec?.snapAt) || null } : { via: 'local' };
+  const body = scrubSnapshot({ ...res, key, via: found.via, ...(found.via === 'edge' ? { agent: found.agent } : {}), writable: inUserWriteScope(req.user, snap, t(found.target.vcenterId)),
+    actions: { run: snapRunGateOf(req, snap, found.target, S.snapshotOsPathIssue, found.via, S.snapshotPublicPathIssue) }, pathBasis }, isAdmin);
   const st = code === 'ok' ? 200 : snapStatus(code);
   return st === 200 ? body : { __status: st, ...body };
 }
@@ -929,7 +960,7 @@ async function purposeWrite(req, res) {
         : '예전 태그는 이 노드의 저장소에 있고, 이 노드에 엣지가 맡은 서버(또는 엣지 보관분)가 있어 그 태그를 쓰는 서버를 다 알지 못하므로 지우지 않았습니다(보이지 않는 다른 법인 서버의 태그일 수 있습니다). 엣지에서는 정리할 수 없고, 엣지에 맡긴 서버가 있는 동안은 이 화면에서도 지울 수 없습니다.';
       return res.json({ ...r, keyScope: wk.source, legacyRemains: true, legacyWhy, legacyNote: head + tail });
     }
-    res.status(r.ok ? 200 : 400).json(r.ok ? { ...r, keyScope: wk.source } : r);
+    res.status(r.ok ? 200 : r.code === 'settings-unreadable' ? 409 : 400).json(r.ok ? { ...r, keyScope: wk.source } : r);   // 결정(56~75 남긴 것) 70 ①: fleet-tags 를 못 읽은 동안은 409
   } catch (e) { res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); }
 }
 /** PUT /tools/bm-usage/tuning/overrides — 역할 권장값 덮어쓰기(설정 소유자 = 전체 범위 · 감사). 판정 기준일 뿐 서버에 적용하지 않는다. */
@@ -939,7 +970,7 @@ function tuningOverrideWrite(req, res) {
     const r = O.saveTuningOverride({ scope: b.scope, role: b.role, itemId: b.itemId, value: b.value }, { by: req.user?.username || '' });
     logAudit({ user: req.user?.username, action: 'bm-usage.tuning.override', target: t(b.itemId), ip: req.ip || '',
       detail: JSON.stringify({ item: t(b.itemId), scope: t(b.scope) || 'all', role: t(b.role), prev: r.prev ?? null, next: r.next ?? null, cleared: !!r.cleared, ok: r.ok }).slice(0, 300) });
-    res.status(r.ok ? 200 : r.unreadable ? 503 : 400).json(r.unreadable ? { ...r, code: 'settingsUnreadable' } : r);
+    res.status(r.ok ? 200 : r.readError ? 409 : r.unreadable ? 503 : 400).json(r.readError ? { ...r, code: 'settings-unreadable' } : r.unreadable ? { ...r, code: 'settingsUnreadable' } : r);   // 105회차 A5: 읽기 오류(원본 그대로)는 409
   }).catch((e) => res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }));
 }
 /*
@@ -962,6 +993,21 @@ export const trendKey = (req) => `${scopeKey(req.user, store.get())}|${isAdminRe
 export const cvpBit = async (req) => { try { return (await import('../../auth/toolAccess.js')).issueFor(req.user, 'cvp') ? 'c0' : 'c1'; } catch { return 'c0'; } };
 export const portsKey = async (req) => `${trendKey(req)}|${await cvpBit(req)}`;
 
+/**
+ * 83회차(81회차 결정): 범위 계정용 저장소 상태 — 개수 없는 상태만(쓸 수 있는가 · 오류 · 일부 파일 못 읽음 표지 · 마이그레이션 단계). 순수.
+ *   행 수(rawRows · dailyRows · legacyRows) · 파일별 행 · 바이트 · 첫/마지막 시각 · 마이그레이션 센 수는 전 법인 합이라 뺀다(redacted 로 밝힌다).
+ */
+export function dbStateOnly(db) {
+  const d = db && typeof db === 'object' ? db : {};
+  const m = d.migration && typeof d.migration === 'object' ? d.migration : null;
+  return {
+    available: d.available === true, ...(typeof d.error === 'string' && d.error ? { error: d.error.slice(0, 200) } : {}),
+    ...(d.rawRowsPartial ? { rawRowsPartial: true } : {}), ...(d.dailyRowsPartial ? { dailyRowsPartial: true } : {}),
+    ...(typeof d.migrateError === 'string' && d.migrateError ? { migrateError: d.migrateError.slice(0, 200) } : {}),
+    migration: m ? { phase: m.phase ?? null, failedPhase: m.failedPhase ?? null } : null,
+    redacted: ['path', 'counts'],
+  };
+}
 export function registerBmUsage(api) {
 
 /** 주 조회 — 대상·최신값·설정·상태. 장비에 접속하지 않는다. */
@@ -981,7 +1027,7 @@ api.get('/tools/bm-usage', toolsPerm, async (req, res) => {
     const match = addressMatcher(hosts);
     const targets0 = applyScope(tg.targets.map(publicTarget), allowed);
     const targets = isAdmin ? targets0 : targets0.map((x) => maskTargetAddress(x, hosts, match));
-    const skipped0 = applyScope(tg.skipped, allowed);
+    const skipped0 = applyScope(tg.skipped, allowed).map(publicSkipped);   // 4회차 D2: 누락 점검 전용 칸(osRegId)은 싣지 않는다
     const skipped = isAdmin ? skipped0 : maskBmList(skipped0, match);
     /*
      * ⚠ **사유별 개수도 scope 를 타야 한다**(v2.550 자체 재검토에서 잡은 결함): 예전에는
@@ -996,9 +1042,7 @@ api.get('/tools/bm-usage', toolsPerm, async (req, res) => {
       ? { ...tg.counts, targets: targets.length, skipped: skipped.length, byReason: skippedCounts,
           keyConflicts: new Set(applyScope(tg.keyConflicts || [], allowed).map((x) => x.key)).size,   // 반증 F3: 전역 수 대신 보이는 줄의 고유 키
           keyOverlaps: applyScope(tg.keyOverlaps || [], allowed).length,
-          idrac: targets.filter((x) => (x.paths || []).includes('idrac')).length,
-          os: targets.filter((x) => (x.paths || []).includes('os')).length,
-          both: targets.filter((x) => (x.paths || []).length > 1).length }
+          ...pathCountsOf(targets) }   // 다음 작업 ④: 표시 경로(데모 표지)까지 같은 함수(bmusage/targets.js) — 칩 · 표 · CSV 와 같은 값
       : tg.counts;
     const keys = new Set(targets0.map((x) => x.key));
     // 최신값은 **대상 목록 안의 것만** 준다(법인을 끄거나 등록이 사라진 서버의 옛 값이 새어 나가지 않게).
@@ -1027,13 +1071,18 @@ api.get('/tools/bm-usage', toolsPerm, async (req, res) => {
       // 다음 점검 ①(2차): 식별 키가 겹쳐 수집하지 않는(또는 결정한) 서버 수 — 보이는 법인 것만(목록 · 결정은 /tools/bm-usage/key-overlaps).
       keyOverlaps: (() => { const l = applyScope(tg.keyOverlaps || [], allowed); return { total: l.length, pending: l.filter((o) => !o.decision).length, added: l.filter((o) => o.decision?.decision === 'add').length }; })(),
       metrics: METRICS, reasons: NO_PATH_REASON,
-      vcenters: applyScope(tg.vcenters.map((v) => ({ ...v, vcenterId: v.id })), allowed),
+      // 재확인 R1: 법인별 쓰기 표지 — 수집 설정의 법인 켜기/끄기는 쓰기 범위 법인만(화면이 조회 전용 법인 칸을 잠근다 · 라우트도 403).
+      vcenters: applyScope(tg.vcenters.map((v) => ({ ...v, vcenterId: v.id, writable: writableVc(req, store.get(), v.id) })), allowed),
       isEdge: tg.isEdge,
       // v2.627: 이 노드가 중앙 배포값을 쓰는가(엣지 화면 배너·입력 잠금) · 중앙의 배포 현황(전체 범위 admin 에게만 — 전 엣지 이름).
       central: bmUsageCentralState(),
-      distribution: isAdmin && !allowed && !tg.isEdge ? distStatusNow() : null,
+      // 재확인 R1: 배포 관리 표(쓰기 버튼 포함)는 조회 ∧ 쓰기 전체 범위 관리자만 — 저장 게이트(fleetOnly)와 같은 함수.
+      distribution: isAdmin && isFullReadWriteScope(req.user, store.get()) && !tg.isEdge ? distView(req) : null,
       // ⚠ DB 파일 경로는 admin 에게만(operator 는 tools 를 기본 보유 — '거부 기본값' 규칙).
-      db: isAdmin ? db : (({ path: _p, ...rest }) => ({ ...rest, redacted: ['path'] }))(db),
+      // 83회차(81회차 결정 — 권장안): 행 수 · 파일별 행 · 바이트 · 마이그레이션 센 수는 **전 법인 합**이라 범위 계정에는 싣지 않는다(함대 규모 추정 차단) —
+      //   전체 범위(조회 ∧ 쓰기 — isFullReadWriteScope) 계정만. 범위 계정은 개수 없는 상태(dbStateOnly)만.
+      db: !isFullReadWriteScope(req.user, store.get()) ? dbStateOnly(db)
+        : isAdmin ? db : (({ path: _p, ...rest }) => ({ ...rest, redacted: ['path'] }))(db),
       // v2.744(최종 검토 FB — RD-R1·RG2744-03): 등록부 로드 오류 사유(last.sourceErrors)의 위치(줄·칸)는 관리자에게만 — 그 밖의 계정은 분류 문구만.
       //   원문 조각은 폴러가 처음부터 싣지 않는다(registrySourceError). fleetPartials(아래)와 같은 규칙이다.
       status: scopeBmStatus(isAdmin ? bmUsageStatus({ detail: true }) : maskPollerStatus(stripAckBy(bmUsageStatus({ detail: false }), isAdmin), hosts), allowed),
@@ -1066,6 +1115,8 @@ api.get('/tools/bm-usage', toolsPerm, async (req, res) => {
        */
       perf, perfThresholds: perfSettings.perf, perfDefaults: PERF_DEFAULTS, perfCols: PERF_COL_META,
       ...(pf.perfError ? { perfError: pf.perfError } : {}),
+      // 점검 반복 2회차 E1 · E2: 쓰기 버튼 표지(수집 설정 · 지금 수집 · 엣지 인출) — 라우트 게이트와 같은 판정(bmWriteGate.js). 표시 게이팅 — 집행은 각 라우트.
+      actions: bmGates(req, ['settings', 'settingsGlobal', 'collect', 'edgePull'], { snap: store.get() }),
     });
   } catch (e) {
     res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) });
@@ -1086,7 +1137,7 @@ const opsKey = async (req) => {
   const [{ fleetRev }, O] = await Promise.all([import('../../insights/fleetRev.js'), import('../../bmusage/tuning/overrides.js')]);
   let at = 0; try { at = O.loadTuningOverrides().at || 0; } catch { at = -1; }
   // 반증 W4: 응답에 writable(쓰기 범위)이 실린다 — 조회 범위가 같고 쓰기 범위만 다른 두 계정이 캐시를 나누지 않게 쓰기 범위 서명도 키에.
-  let w = 'all'; try { const ws = writeScopedVcenterIds(req.user, store.get()); w = ws ? [...ws].sort().join(',') : 'all'; } catch { w = 'err'; }
+  let w; try { w = scopeSig(writeScopedVcenterIds(req.user, store.get())); } catch { w = 'err'; }
   return `${trendKey(req)}|f${fleetRev()}|o${at}|w${w}`;
 };
 api.get('/tools/bm-usage/perf/:key/tuning', toolsPerm, async (req, res) => memoJson(req, res, 'bm-tuning', (snap) => bmTuningView(req, snap), { extraKey: await opsKey(req) }));
@@ -1202,8 +1253,9 @@ api.get('/tools/bm-usage/history', toolsPerm, async (req, res) => {
 api.post('/tools/bm-usage/collect', writeRole, toolsPerm, async (req, res) => {
   // v2.583(감사 확정): 범위 계정이 **전 법인** 수동 수집(인증 정지도 무시)을 걸고 전 법인 counts 를 받았다 —
   //   형제 /edges/pull 처럼 전체 범위 계정만 허용한다(수집 대상을 범위로 나누는 경로가 폴러에 없다).
-  if (scopedVcenterIds(req.user, store.get())) {
-    return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '지금 수집은 전 법인 서버에 접속합니다 — 전체 범위(vCenter 제한 없는) 계정만 실행할 수 있습니다.' });
+  // 재확인 R1: 조회 ∧ 쓰기 전체 범위(isFullReadWriteScope — 표지 bmGate 와 같은 함수). 조회만 보면 쓰기만 좁힌 계정이 전 법인 수집을 걸었다.
+  if (!isFullReadWriteScope(req.user, store.get())) {
+    return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '지금 수집은 전 법인 서버에 접속합니다 — 조회 · 쓰기 모두 전체 범위(vCenter 제한 없는) 계정만 실행할 수 있습니다.' });
   }
   const r = await pollBmUsageOnce({ trigger: 'manual', demoOnly: isDemoGuest(req.user) }); // v2.720(감사 R1-03): 데모 계정은 데모 대상만
   logAudit({
@@ -1335,7 +1387,8 @@ api.get('/tools/bm-usage/edges', toolsPerm, async (req, res) => {
         targets, rows: snap ? (isAdmin ? (l) => l : (l) => maskBmList(l, em))((snap.rows || []).filter((r) => keys.has(t(r.key)))) : [],
         counts: snap && !allowed ? (snap.counts || {}) : null,
         skippedCounts: snap && !allowed ? (snap.skippedCounts || {}) : null,
-        truncated: snap?.truncated || 0,
+        // 5회차 D1: 잘린 대수는 엣지 전체(다른 법인 서버 포함)의 수 — 범위 계정에는 잘렸다는 사실(true)만(다른 법인 대수를 주지 않는다)
+        truncated: !allowed ? (snap?.truncated || 0) : (snap?.truncated ? true : 0),
         // v2.919: 엣지가 판정한 성능 항목 — 보이는 대상의 것만 · 목록에는 code 표만(근거·장치별은 /tools/bm-usage/perf/:key) · 기준값은 그 엣지 설정.
         perf: snap ? (isAdmin ? (l) => l : (l) => maskBmList(l, em))((snap.perf || []).filter((p) => keys.has(t(p.key))).map(compactPerf)) : [],
         perfThresholds: snap?.perfThresholds || null,
@@ -1373,13 +1426,13 @@ const _pulling = new Set();
  */
 api.post('/tools/bm-usage/edges/pull', writeRole, toolsPerm, async (req, res) => {
   // ⚠ 엣지 목록·보관분에는 다른 법인 서버가 섞여 있다 — 당기는 동작은 **전체 범위 계정만**.
-  if (scopedVcenterIds(req.user, store.get())) {
-    return res.status(403).json({ ok: false, requiredOwner: true, reason: '엣지 인출은 전체 범위 계정만 할 수 있습니다(엣지는 법인 축으로 나눌 수 없습니다).' });
+  if (!isFullReadWriteScope(req.user, store.get())) {   // 재확인 R1 — 조회 ∧ 쓰기 전체 범위
+    return res.status(403).json({ ok: false, requiredOwner: true, reason: '엣지 인출은 조회 · 쓰기 모두 전체 범위 계정만 할 수 있습니다(엣지는 법인 축으로 나눌 수 없습니다).' });
   }
   const agents = Array.isArray(req.body?.agents) ? req.body.agents.map(t).filter(Boolean).slice(0, 40) : [];
   if (!agents.length) return res.status(400).json({ ok: false, reason: '가져올 엣지 이름이 필요합니다.' });
   try {
-    const { pullBmUsage } = await import('../../central/bmUsageEdgePull.js');
+    const { pullBmUsage, EDGE_PULL_LIMIT } = await import('../../central/bmUsageEdgePull.js');
     const deadline = Date.now() + EDGE_PULL_BUDGET_MS;
     let budgetExceeded = 0;
     const settled = await poolSettled(agents, EDGE_PULL_CONCURRENCY, async (a) => {
@@ -1390,7 +1443,7 @@ api.post('/tools/bm-usage/edges/pull', writeRole, toolsPerm, async (req, res) =>
       }
       _pulling.add(a.toLowerCase());
       // v2.628(EDGE2628-01): limit 을 주지 않으면 엣지 기본(400대)에서 잘렸다 — ESXi 포함으로 대상이 늘었다. 기본을 상한(2,000)으로.
-      try { return { agent: a, ...(await pullBmUsage(a, { limit: Number(req.body?.limit) || 2_000 })) }; }
+      try { return { agent: a, ...(await pullBmUsage(a, { limit: Number(req.body?.limit) || EDGE_PULL_LIMIT })) }; }   // 5회차 D1: 자동 인출과 같은 상수
       finally { _pulling.delete(a.toLowerCase()); }
     });
     // 입력 순서 보존(poolSettled) — 예전 순차 for 와 같은 순서로 응답한다.
@@ -1411,6 +1464,21 @@ function safeKnownAgents() { try { return knownAgentNames(); } catch { return []
 function safeTokenAgents() { try { return new Set(listAgentTokens().map((x) => String(x.agent || '').trim().toLowerCase()).filter(Boolean)); } catch { return null; } }
 /** 배포 현황(전체 범위 admin · 중앙 전용 응답) — 행마다 그 엣지에 보낼 판의 서명으로 적용 여부를 가른다(v2.927). */
 function distStatusNow() { return distributionStatus(safeKnownAgents(), { edgeCorps: edgeCorpsSource(), tokenAgents: safeTokenAgents() }); }
+/*
+ * 결정 반영 재확인 N1(2026-11-19 사용자 '세 경로도 소유자 등급'): 엣지 배포 켜기 · 끄기 · 제외 · 중앙에서 켜기 · 해제는 엣지의 **실효 보존 기간**을
+ *   중앙 값 ↔ 엣지 로컬 값으로 바꾼다(엣지 bmUsageConfigPull 의 적용 · 해제 → 다음 정리 틱이 실효값으로 지운다 — 재확인 재현: 6행 중 3행 · 5행 삭제).
+ *   중앙은 엣지 로컬 보존을 모르므로 줄어드는지 미리 가를 수 없다 → '모르면 거부 쪽' 으로 ③ 과 같은 판정(settingsOwnerGradeDenial — isOwnerTier 와 같은 하나).
+ *   전체 범위(fleetOnly — 조회 ∧ 쓰기 전체)는 그대로 먼저 본다. 화면 표지는 GET distribution.canEdit(같은 판정 — 웹에 사본 없음).
+ */
+const DIST_OWNER_REASON = '엣지 배포 켜기 · 끄기 · 제외 · 중앙에서 켜기는 엣지의 보존 기간을 바꿔 엣지 이력을 지울 수 있어 설정 소유 계정만 바꿀 수 있습니다.';
+function distOwnerDenial(req) { try { return settingsOwnerGradeDenial(req); } catch { return { requiredOwner: true }; } }   // 판정이 던지면 거부
+function distOwnerOnly(req, res, next) {
+  const g = distOwnerDenial(req);
+  if (!g) return next();
+  return res.status(403).json({ ok: false, error: 'forbidden', code: 'distribute-owner', reason: DIST_OWNER_REASON, ...(g.requiredOwner ? { requiredOwner: true } : {}) });
+}
+/** 배포 현황 + 이 요청자가 바꿀 수 있는지(canEdit — 위 게이트와 같은 판정). */
+function distView(req) { return { ...distStatusNow(), canEdit: !distOwnerDenial(req) }; }
 
 /**
  * v2.627 엣지 배포(사용자 요청 "한번에 켜는 기능") — 켬/끔 + 엣지별 제외. 배포되는 값은 이 중앙의 설정 자체다(따로 두 벌을 두지 않는다).
@@ -1418,7 +1486,7 @@ function distStatusNow() { return distributionStatus(safeKnownAgents(), { edgeCo
  * v2.927: 중앙 켜기가 저장된 엣지를 제외로 바꾸는 저장은 409(반대 지시 — 하나를 먼저 푼다). 전체 배포를 켜서 중앙 켜기가 가려지면
  *   응답 `perEdgeSuperseded` 로 밝힌다(전체 배포가 우선 — settings.js 머리말).
  */
-api.put('/tools/bm-usage/distribute', adminOnly, fleetOnly, (req, res) => {
+api.put('/tools/bm-usage/distribute', adminOnly, fleetOnly, distOwnerOnly, (req, res) => {
   const b = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
   const patch = {};
   if (typeof b.enabled === 'boolean') patch.enabled = b.enabled;
@@ -1428,11 +1496,15 @@ api.put('/tools/bm-usage/distribute', adminOnly, fleetOnly, (req, res) => {
     return res.status(409).json({ ok: false, conflict: 'per-edge', agents: clash.slice(0, 20),
       reason: `중앙 켜기가 저장된 엣지(${clash.slice(0, 5).join(', ')}${clash.length > 5 ? ` 외 ${clash.length - 5}곳` : ''})는 제외할 수 없습니다 — '이 엣지는 로컬 설정' 과 '중앙이 켠다' 는 반대 지시입니다. 그 엣지의 중앙 켜기를 먼저 해제하세요.` });
   }
-  const next = saveDistribution(patch, String(req.user?.username || ''));
+  let next;
+  try { next = saveDistribution(patch, String(req.user?.username || '')); } catch (e) {   // 34회차 F4: 읽지 못한 배포 파일은 덮지 않는다
+    if (e?.code === 'settings-unreadable') return res.status(409).json({ ok: false, code: e.code, reason: e.message });
+    throw e;
+  }
   const superseded = perEdgeSuperseded(next);
   logAudit({ user: req.user?.username, action: 'bm-usage.distribute', ip: req.ip || '',
     detail: JSON.stringify({ enabled: next.enabled, excluded: Object.keys(next.excluded).length, ...(superseded.length ? { perEdgeSuperseded: superseded.length } : {}) }).slice(0, 300) });
-  res.json({ ok: true, distribution: distStatusNow(), ...(superseded.length ? { perEdgeSuperseded: superseded } : {}) });
+  res.json({ ok: true, distribution: distView(req), ...(superseded.length ? { perEdgeSuperseded: superseded } : {}) });
 });
 
 /**
@@ -1444,7 +1516,7 @@ api.put('/tools/bm-usage/distribute', adminOnly, fleetOnly, (req, res) => {
  *  · 해제: 저장된 중앙 켜기가 있으면 **등록부와 무관하게** 된다(반증 F1 — 토큰 폐기로 등록부에서 빠진 엣지도 지시를 지울 수 있어야 한다).
  *  · 엣지 노드에서는 거부(409 — 이 노드는 배포를 받는 쪽이다). 저장 즉시 바뀐 척하지 않는다 — 엣지는 다음 인출(기본 10분)에 받는다.
  */
-api.put('/tools/bm-usage/distribute/edge', adminOnly, fleetOnly, async (req, res) => {
+api.put('/tools/bm-usage/distribute/edge', adminOnly, fleetOnly, distOwnerOnly, async (req, res) => {
   try {
     if (config.agent?.centralUrl) return res.status(409).json({ ok: false, code: 'edge-node', reason: '이 노드는 엣지입니다 — 중앙에서 켜기는 중앙 포탈에서만 저장합니다.' });
     const b = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
@@ -1478,11 +1550,11 @@ api.put('/tools/bm-usage/distribute/edge', adminOnly, fleetOnly, async (req, res
     } else {
       r = setPerEdge(name, false, by);
     }
-    if (!r.ok) return res.status(r.conflict ? 409 : 400).json({ ok: false, ...(r.conflict ? { conflict: r.conflict } : { code: r.code }), reason: r.reason });
+    if (!r.ok) return res.status(r.conflict || r.code === 'settings-unreadable' ? 409 : 400).json({ ok: false, ...(r.conflict ? { conflict: r.conflict } : { code: r.code }), reason: r.reason });   // 37회차 R4: 같은 상태의 다른 저장과 같은 409
     const saved = r.distribution?.perEdge ? perEdgeFor(name, r.distribution) : null;
     logAudit({ user: req.user?.username, action: 'bm-usage.distribute.edge', target: name, ip: req.ip || '',
       detail: JSON.stringify({ agent: name, on: b.on, changed: r.changed, ...(saved ? { corps: saved.corps.slice(0, 8), corpsCount: saved.corps.length } : {}) }).slice(0, 300) });
-    res.json({ ok: true, agent: name, on: b.on, changed: r.changed, ...(saved ? { corps: saved.corps } : {}), distribution: distStatusNow(),
+    res.json({ ok: true, agent: name, on: b.on, changed: r.changed, ...(saved ? { corps: saved.corps } : {}), distribution: distView(req),
       // 엣지 인출 주기는 엣지 쪽 설정이다(AGENT_BMUSAGE_CONFIG_PULL_MS — 기본 10분). 중앙은 그 엣지의 실제 값을 모른다.
       nextPull: { defaultMs: 10 * 60_000, note: '엣지는 다음 인출(기본 10분 주기)에 받습니다 — 저장 즉시 바뀌지 않습니다.' } });
   } catch (e) {
@@ -1499,9 +1571,14 @@ api.put('/tools/bm-usage/settings', adminOnly, (req, res) => {
    *   (`normalizeSettings` 가 `enabled && ack` 로 못 박는다).
    */
   const prev = loadBmUsageSettings();
+  const snap = store.get();
+  // 점검 반복 2회차 재확인 R1: ‘전체 범위’ 는 조회 ∧ 쓰기(isFullReadWriteScope — 표지 bmGate settingsGlobal 과 같은 함수) · 법인 칸은 쓰기 범위(writeScopedVcenterIds).
+  //   예전에는 조회 범위만 봐 조회 무제한 + 쓰기 vcA 관리자가 vcB 수집을 끄고 원시 보존을 7일로 내렸다(다른 법인 이력 정리) — server/CLAUDE.md v2.733 · v2.904 함정.
+  const fullRw = isFullReadWriteScope(req.user, snap);
+  const writable = fullRw ? null : (writeScopedVcenterIds(req.user, snap) || new Set());
   // v2.607 AUTHZ2607-05: 범위 계정은 법인(corps) 키만 바꿀 수 있다 — 주기·보존일·임계·Enterprise 동의 같은 전역 필드는
-  //   전 법인 공용이라 버리고 응답에 밝힌다(예전에는 범위 admin 이 보존일을 하한으로 내려 다른 법인 이력을 지웠다).
-  const kg = keepScopedFields(req.body || {}, prev, scopedVcenterIds(req.user, store.get()), ['corps', 'corpsScoped']);
+  //   전 법인 공용이라 버리고 응답에 밝힌다(예전에는 범위 admin 이 보존일을 하한으로 내려 다른 법인 이력을 지웠다). 2회차 R1 부터 ‘범위 계정’ = 조회 ∧ 쓰기 전체 범위가 아닌 계정.
+  const kg = keepScopedFields(req.body || {}, prev, writable, ['corps', 'corpsScoped']);
   const body = kg.patch;
   if (body.enterpriseAck === true && !prev.enterpriseAck) {
     body.enterpriseAckAt = Date.now();
@@ -1509,13 +1586,52 @@ api.put('/tools/bm-usage/settings', adminOnly, (req, res) => {
   }
   // v2.605 AUTHZ2605-01: 범위 제한 admin 의 GET 은 corps 를 자기 범위로 거른다(scopeMainSettings) —
   //   그 값을 펼쳐 PUT 하면 다른 법인의 수집이 꺼졌다. 범위 밖 법인은 직전 값을 보존한다.
-  const allowed = scopedVcenterIds(req.user, store.get());
+  const allowed = scopedVcenterIds(req.user, snap);
   let ignoredOutOfScope = [];
-  if (allowed && body.corps !== undefined) {
-    const m = mergeScopedMap(prev.corps, body.corps, allowed); body.corps = m.merged; ignoredOutOfScope = m.ignored;
+  if (writable && body.corps !== undefined) {
+    const bc = body.corps && typeof body.corps === 'object' && !Array.isArray(body.corps) ? body.corps : {};
+    const before = prev.corps && typeof prev.corps === 'object' ? prev.corps : {};
+    /*
+     * 재확인 R1 — **조회는 되지만 쓰기 범위 밖인 법인의 값을 바꾸는 요청은 403**(아무것도 저장하지 않는다 — 한 요청 안의 쓰기 법인 변경도 함께 거절):
+     *   규약 ‘조회 밖 404 → 쓰기 밖 403’(server/CLAUDE.md v2.369 · v2.733) — 그 법인은 이미 보이므로 숨길 것이 없고, 조용히 무시하면 ‘저장했습니다’ 가 거짓이 된다.
+     *   같은 값을 되돌려 보낸 것은 쓰기가 아니다(화면은 보이는 법인 전부를 보낸다 — 쓰기 법인 하나만 바꿔도 거절되면 안 된다).
+     *   조회 밖 법인 키는 예전처럼 직전 값 보존 + 개수만 밝힌다(존재를 흘리지 않는다 — 404 쪽 규약).
+     */
+    const roChanged = Object.keys(bc).filter((id) => (!allowed || allowed.has(id)) && !writable.has(id) && !!bc[id] !== !!before[id]);
+    if (roChanged.length) {
+      return res.status(403).json({ ok: false, error: 'forbidden', code: 'read-only-corps', readOnly: roChanged.length,
+        reason: `조회만 되는 법인 ${roChanged.length}곳의 수집을 바꾸려 했습니다(쓰기 범위 밖) — 아무것도 저장하지 않았습니다.` });
+    }
+    const m = mergeScopedMap(prev.corps, body.corps, writable); body.corps = m.merged;
+    ignoredOutOfScope = m.ignored.filter((id) => allowed && !allowed.has(id));   // 조회 전용 법인을 같은 값으로 되돌려 보낸 것은 ‘무시’ 가 아니다
   }
   delete body.corpsScoped;
-  const next = saveBmUsageSettings(body);
+  // 83회차(82 결정): 설정 파일이 손상 · 보존본만 남은 동안의 저장은 **전체 범위 관리자 + 명시 확정(confirmDefaults)** 일 때만 — 범위 관리자의 법인 칸 저장이
+  //   전역 필드를 기본값으로 다시 쓰고 손상 표지를 지우던 경로를 막는다(그 밖은 409 — saveBmUsageSettings 가 판정).
+  const confirmLoadError = fullRw && req.body?.confirmDefaults === true;
+  delete body.confirmDefaults;
+  /*
+   * 결정 반영(2026-11-19 ③ 사용자): 보존 기간을 **저장된 값보다 줄이는** 저장은 설정 소유자 등급만(settingsOwnerGradeDenial — bmOnboard.isOwnerTier 와 같은 하나) —
+   *   줄이면 다음 보존 정리가 그만큼 이력을 지운다(되돌릴 수 없다). 늘리기 · 같은 값은 그대로(전체 범위 관리자). 판정 입력은 settings.retentionShrink
+   *   (저장과 같은 정규화 · 원시 · 롤업 + store 의 보존 칸). 설정을 못 읽은 동안의 확정 저장은 지금 값을 몰라 줄어듦으로 본다(거부 쪽).
+   *   범위 계정은 위 keepScopedFields 가 전역 값을 이미 버려 여기 걸리지 않는다. 403 이면 **아무것도 저장하지 않는다**(같은 요청의 법인 칸 · 다른 전역 값 포함).
+   *   화면 표지는 /auth/me settingsOwnerTier(requireSettingsOwner 를 그대로 부른 값 — 전역 값을 저장할 수 있는 계정에서는 이 판정과 같은 답).
+   */
+  const shrunk = retentionShrink(body, { confirmLoadError });
+  if (shrunk.shrink.length) {
+    const g = settingsOwnerGradeDenial(req);
+    if (g) {
+      return res.status(403).json({ ok: false, error: 'forbidden', code: 'retention-owner', fields: shrunk.shrink, ...(g.requiredOwner ? { requiredOwner: true } : {}),
+        reason: shrunk.unknown
+          ? '설정 파일을 읽지 못한 동안의 확정 저장은 보존 기간을 줄일 수 있어(지금 값을 모릅니다) 설정 소유 계정만 할 수 있습니다 — 아무것도 저장하지 않았습니다.'
+          : '보존 기간을 줄이는 저장은 설정 소유 계정만 할 수 있습니다 — 줄이면 다음 보존 정리가 그만큼 이력을 지웁니다(되돌릴 수 없음). 아무것도 저장하지 않았습니다(늘리기 · 다른 칸은 따로 저장하세요).' });
+    }
+  }
+  let next;
+  try { next = saveBmUsageSettings(body, { confirmLoadError }); } catch (e) {   // 34회차 F4: 읽지 못한 설정 파일은 덮지 않는다
+    if (e?.code === 'settings-unreadable') return res.status(409).json({ ok: false, code: e.code, reason: e.message, ...(e.corrupt ? { corrupt: true } : {}) });
+    throw e;
+  }
   logAudit({
     user: req.user?.username, action: 'bm-usage.settings', ip: req.ip || '',
     detail: JSON.stringify({

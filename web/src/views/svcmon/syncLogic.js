@@ -145,6 +145,18 @@ export function detectText(detect) {
   };
 }
 
+/**
+ * v3.18.14(결함 D3): '자동 등록 저장' 뒤 안내 — 저장 직후 감지가 돌면(서버 detectQueued) 곧 등록된다고, 아니면 다음 감지 때라고 말한다(주기는 서버 값).
+ * @param {{options?:{autoKinds?:string[]}, detectQueued?:boolean}} res PUT 응답 · @param {string} every detectText().every
+ */
+export function autoSavedText(res, every = '') {
+  const kinds = res?.options?.autoKinds || [];
+  if (!kinds.length) return '자동 등록을 껐습니다.';
+  const period = every ? `${every}마다` : '주기마다';
+  if (res?.detectQueued) return `자동 등록 설정을 저장했습니다 — 곧 한 번 감지해 새 항목을 중지 상태로 등록합니다(그 뒤로는 ${period} 감지).`;
+  return `자동 등록 설정을 저장했습니다 — 다음 감지(${period}) 때 새 항목을 중지 상태로 등록합니다.`;
+}
+
 /** 경과 시간 표기(서버가 준 ms). */
 export function fmtAge(ms) {
   if (ms == null || !Number.isFinite(Number(ms))) return '—';

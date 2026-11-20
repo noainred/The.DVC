@@ -3,7 +3,8 @@
  *
  * 사용률(CPU · 메모리)이 없는 칸의 사유 코드. 근거는 베어메탈 사용률 대상 해석(`bmusage/poller.js currentTargets` — 누락 점검과 같은 입력 · 같은 사유 코드)이다.
  *   off              — 이 노드의 베어메탈 사용률 수집이 꺼져 있다(엣지가 수집하는 서버는 그 엣지 설정이라 이 코드가 아니다)
- *   <NO_PATH 코드>     — 수집 대상에서 빠진 이유(corp-off · unassigned · no-idrac · no-idrac-cred · no-os-cred · both-off · os-ambiguous · os-foreign · key-conflict · remote-collector-unknown)
+ *   <NO_PATH 코드>     — 수집 대상에서 빠진 이유(corp-off · unassigned · no-idrac · no-idrac-cred · no-os-cred · both-off · os-ambiguous · os-foreign · key-conflict · remote-collector-unknown ·
+ *                        1회차 점검 D3 · D4: idrac-disabled · os-disabled · os-edge)
  *   edge-no-record   — 엣지가 수집하는 서버인데 중앙에 그 엣지 값이 없다(엣지 보관분 · 엣지 설정은 여기서 모른다)
  *   no-record        — 수집 대상인데 기록이 없다(등록 직후 · 주기 전 · 수집 실패 — 실패 원문은 서버별로 남기지 않는다: collectHealth 머리말)
  *   stale            — 마지막 값이 오래됐다(사용률 판정 stale — at 이 마지막 값 시각)
@@ -15,19 +16,31 @@
 const t = (v) => String(v ?? '').trim();
 
 export const WHY_CODES = Object.freeze(['off', 'corp-off', 'unassigned', 'no-idrac', 'no-idrac-cred', 'no-os-cred', 'both-off', 'os-ambiguous', 'os-foreign', 'key-conflict',
-  'remote-collector-unknown', 'edge-no-record', 'no-record', 'stale', 'powered-off', 'vc-unread', 'unknown']);
+  'idrac-disabled', 'os-disabled', 'os-edge', 'remote-collector-unknown', 'edge-no-record', 'no-record', 'stale', 'powered-off', 'vc-unread', 'unknown']);
 const SKIP_PASS = new Set(WHY_CODES);
 
-/** 대상 해석 결과 → 사유 색인(순수). currentTargets 실패면 null(사유 'unknown'). */
+/**
+ * 대상 해석 결과 → 사유 색인(순수). currentTargets 실패면 null(사유 'unknown').
+ *   1회차 점검 의심 2(재현 — 고침): 예전에는 키 하나로 색인해 **같은 키의 가상화 호스트(ESXi) 행**(공통 태그 ‘To Be Filled By O.E.M.’ 등 — 다른 법인)이
+ *   베어메탈 서버의 사유를 덮었다(재현: vcA 베어메탈 corp-off → vcB ESXi 의 no-idrac 로 보임). 이제 ① 가상화 호스트 행(role 'virt')은 넣지 않는다 — 구성원 사유는
+ *   베어메탈만 본다(usageWhyOf 는 esxi 를 먼저 거른다) ② (법인, 키) 쌍(maint/judge.js targetIdOf 와 같은 꼴)으로 먼저 찾고, 없을 때만 키로 찾는다
+ *   (법인 칸이 없는 행 — 남의 엣지 위임 · 귀속 없음 — 과 귀속이 갈린 행. 베어메탈 키는 분류가 노드 안에서 하나로 만든다 — classifyFleet dk).
+ */
 export function whyIndexOf(tg) {
   if (!tg || typeof tg !== 'object') return null;
-  const skipped = new Map();
+  const skipped = new Map(); const skippedByKey = new Map();
   for (const s of Array.isArray(tg.skipped) ? tg.skipped : []) {
-    const k = t(s?.key); if (!k) continue;
-    skipped.set(k, t(s.reason));
+    const k = t(s?.key); if (!k || s.role === 'virt') continue;
+    const pk = `${t(s.vcenterId)}|${k}`;
+    if (!skipped.has(pk)) skipped.set(pk, t(s.reason));
+    if (!skippedByKey.has(k)) skippedByKey.set(k, t(s.reason));
   }
-  const targets = new Set((Array.isArray(tg.targets) ? tg.targets : []).map((x) => t(x?.key)).filter(Boolean));
-  return { off: tg.settings?.enabled !== true, skipped, targets };
+  const targets = new Set(); const targetKeys = new Set();
+  for (const x of Array.isArray(tg.targets) ? tg.targets : []) {
+    const k = t(x?.key); if (!k || x.role === 'virt') continue;
+    targets.add(`${t(x.vcenterId)}|${k}`); targetKeys.add(k);
+  }
+  return { off: tg.settings?.enabled !== true, skipped, skippedByKey, targets, targetKeys };
 }
 
 /**
@@ -43,10 +56,12 @@ export function usageWhyOf(m, ix) {
   if (m?.kind === 'esxi') return { code: 'unknown' };   // ESXi 는 vCenter 값 — 베어메탈 대상 해석의 사유가 맞지 않는다
   if (!ix) return { code: 'unknown' };
   const k = t(m?.usageKey);
-  const sk = k ? ix.skipped.get(k) : undefined;
+  const pk = `${t(m?.corp)}|${k}`;
+  const pairHit = !!k && (ix.skipped.has(pk) || ix.targets.has(pk));   // 쌍으로 찾았으면 키 폴백을 보지 않는다(다른 법인 같은 키 행이 덮지 않게)
+  const sk = k ? (ix.skipped.get(pk) ?? (pairHit ? undefined : ix.skippedByKey?.get(k))) : undefined;
   if (sk === 'edge-delegated') return { code: 'edge-no-record' };
   if (sk && SKIP_PASS.has(sk)) return { code: sk };
-  if (k && ix.targets.has(k)) return { code: ix.off ? 'off' : 'no-record' };
+  if (k && (ix.targets.has(pk) || (!pairHit && ix.targetKeys?.has(k)))) return { code: ix.off ? 'off' : 'no-record' };
   if (ix.off) return { code: 'off' };
   return { code: 'unknown' };
 }

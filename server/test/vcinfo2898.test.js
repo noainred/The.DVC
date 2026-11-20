@@ -413,10 +413,11 @@ test('반증 중-1 — 중앙이 vcInfo 를 모르는 버전(또는 미상)이�
 
 test('반증 중-2 — 한 번도 읽지 못한 상태는 0건이 아니라 아직 읽지 않음(오류와 함께)', async () => {
   const { vcInfoBody } = await import('../src/routes/api/vcInfo.js');
-  const b = vcInfoBody('tasks', 'v', { at: null, items: [], error: 'NoPermission' }, { admin: true });
+  // 결정(56~75 남긴 것) 69 ③: 오류 원문은 전체 범위 관리자(rawErrors)만 — 이 시험은 원문 문장을 보므로 rawErrors 를 넘긴다(가린 판본은 decideG1a)
+  const b = vcInfoBody('tasks', 'v', { at: null, items: [], error: 'NoPermission' }, { admin: true, rawErrors: true });
   assert.equal(b.at, null);
   assert.match(b.notCollected, /아직 한 번도 읽지 못했습니다 — NoPermission/);
-  assert.match(vcInfoBody('vlcm', 'v', { at: null, error: 'REST 로그인 실패 — 권한 없음(401)' }).notCollected, /REST 로그인 실패/);
+  assert.match(vcInfoBody('vlcm', 'v', { at: null, error: 'REST 로그인 실패 — 권한 없음(401)' }, { rawErrors: true }).notCollected, /REST 로그인 실패/);
   assert.match(vcInfoBody('perms', 'v', { at: null, items: [], retryAt: 5 }).notCollected, /아직 읽지 않았습니다/);
   assert.equal(vcInfoBody('tasks', 'v', { at: 1, items: [] }).notCollected, undefined, '읽었는데 0건이면 0건이다');
   assert.deepEqual(vcInfoBody('tasks', 'v', null).limits, { max: P.VCINFO_LIMITS.tasks, keepMs: P.TASK_KEEP_MS }, '상한 · 보관 기간은 API 값으로');

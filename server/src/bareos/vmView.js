@@ -102,6 +102,12 @@ export function bareosClass(b, { rpoDays = 1, now = Date.now() } = {}) {
  */
 export const relayWaiting = (poll) => !!poll && poll.ok == null && (poll.relay === 'sent' || poll.relay === 'pending');
 
+/**
+ * 53회차 N1 · 104회차: 상태 조회가 시한에 잘렸어도(aborted) 읽은 행이 있는가 — 판정 하나(현황판 · Summary 의 directorState · 일일 요약 메일 digest.js).
+ *   poll = 폴러의 Director 결과({ ok, code, checked }).
+ */
+export const partialPoll = (poll) => !!poll && poll.ok === false && poll.code === 'aborted' && Number(poll.checked) > 0;
+
 export function directorState({ mapped, configured, authStopped, poll } = {}) {
   let state;
   if (!mapped || !configured) state = 'unset';
@@ -111,7 +117,12 @@ export function directorState({ mapped, configured, authStopped, poll } = {}) {
   else if (relayWaiting(poll)) state = 'relay';
   else if (poll.ok === true) state = 'ok';
   else state = 'pending';
-  return { state, resultsKnown: !['unset', 'auth', 'error'].includes(state) };
+  // 53회차 N1(재현): 상태 조회가 시한에 잘렸어도(aborted) 읽은 행은 원장에 반영됐다 — 고RTT 법인의 백업 창에서 늘 생기는 일이라
+  //   그때마다 결과를 '모름' 으로 빼면 현황판 · 통합 화면이 빨간 표지 · 합계 제외로 흔들렸다. 상태(state 'error')는 그대로 두어 잘림을 밝힌다.
+  const partialOk = state === 'error' && partialPoll(poll);
+  // 55회차 #9(사용자 '남은 작업 수행' — 2026-11-17): 잘린 조회는 진행 중 실행의 회전(work)을 다 읽지 못했다 — 그 법인에서 **진행 중인 실행이 있는 VM** 은
+  //   마지막으로 읽은 상태가 옛 값일 수 있어 결과(성공 · 실패 · 오래됨 · 없음)를 세지 않고 모름으로 센다(partial — corpCounts · priorityKind · 웹 rowMatches).
+  return { state, resultsKnown: partialOk || !['unset', 'auth', 'error'].includes(state), ...(partialOk ? { partial: true } : {}) };
 }
 
 /**
@@ -120,7 +131,7 @@ export function directorState({ mapped, configured, authStopped, poll } = {}) {
  *   resultsKnown=false(Director 조회 정지·실패·미설정) → 결과 기준 수(ok·warn·fail·never·old·run)는 null 이고 unknown = 잡 수.
  *   잡 수(jobs·on·off·gone)는 원장만 보면 알므로 늘 센다. 원장을 못 읽었으면(registryKnown=false) 잡 기준 수도 null.
  */
-export function corpCounts(rows, { marksKnown = true, resultsKnown = true, registryKnown = true, rpoDays = 1, now = Date.now() } = {}) {
+export function corpCounts(rows, { marksKnown = true, resultsKnown = true, registryKnown = true, rpoDays = 1, now = Date.now(), partial = false } = {}) {
   const c = { rows: 0, bareosMethod: 0, jobs: 0, on: 0, off: 0, gone: 0, missing: 0, mismatch: 0, ok: 0, warn: 0, fail: 0, cancel: 0, never: 0, old: 0, run: 0, unknown: 0, gb: 0, gbUnknown: 0 };
   for (const r of Array.isArray(rows) ? rows : []) {
     c.rows++;
@@ -128,6 +139,7 @@ export function corpCounts(rows, { marksKnown = true, resultsKnown = true, regis
     if (r.method === 'bareos') c.bareosMethod++;
     if (k.job) { c.jobs++; if (k.on) c.on++; else c.off++; if (k.gone) c.gone++; else if (r.method !== 'bareos') c.mismatch++; }   // 인벤토리에 없는 VM 은 방식을 정할 수 없어 불일치로 세지 않는다
     if (k.missing) c.missing++;
+    if (partial && k.run) { c.run++; c.unknown++; if (isFin(r.gb) && r.gb >= 0) c.gb += r.gb; else if (!r.gone) c.gbUnknown++; continue; }   // 55회차 #9: 잘린 조회 — 진행 중 VM 의 결과는 모름
     if (k.ok) c.ok++; if (k.warn) c.warn++; if (k.fail) c.fail++; if (k.cancel) c.cancel++; if (k.never && k.on) c.never++;   /* 버그 점검 S16: 웹 칩·우선 목록과 같은 판정(꺼진 잡은 '백업 없음' 으로 세지 않는다) */ if (k.old) c.old++; if (k.run) c.run++;
     if (isFin(r.gb) && r.gb >= 0) c.gb += r.gb; else if (!r.gone) c.gbUnknown++;
   }
@@ -153,8 +165,9 @@ export const PRIORITY_KINDS = Object.freeze(['fail', 'missing', 'old', 'never'])
 export const PRIORITY_MAX = 200;
 const CRIT_RANK = { high: 0, mid: 1, low: 2 };
 /** 행 하나가 들 우선 확인 종류(없으면 ''). 결과를 모르는 법인은 결과 기준 종류(fail·old·never)를 넣지 않는다. */
-export function priorityKind(r, { resultsKnown = true, marksKnown = true, rpoDays = 1, now = Date.now() } = {}) {
+export function priorityKind(r, { resultsKnown = true, marksKnown = true, rpoDays = 1, now = Date.now(), partial = false } = {}) {
   const k = bareosClass(r?.b, { rpoDays, now });
+  if (partial && k.run) resultsKnown = false;   // 55회차 #9: 잘린 조회의 진행 중 VM — 결과 기준 종류는 넣지 않는다
   if (resultsKnown && k.fail) return 'fail';
   if (marksKnown && k.missing) return 'missing';
   if (resultsKnown && k.old) return 'old';

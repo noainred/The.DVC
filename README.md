@@ -336,7 +336,7 @@ git 소스로 실행하면 `CONFIG_DIR` 기본값이 `server/config` 라 이 파
 `users`(+**`/:username/password`** POST=비번 설정·DELETE=로그인 차단, `/:username/totp/*`), **`permissions`**(GET/PUT + `/reset` — 역할×기능 권한 매트릭스·특수기능 도구별 거부목록), `vcenters`(+`/test`,`/import`,`/order`), `nsx/managers`, `idrac`(+`/scan`,`/bulk-add`,`/power-dashboard`, **`/nic-speed`**, **`/nic-models`**, **`/scan-log`**(주기/수동 스캔 실행 이력 — 통합/법인별)), `collectors`(+`/:id` vCenter 매핑, **`/:id/force-token`** 토큰 강제 동기화), **`central/agent-tokens`**(엣지별 개별 토큰 발급·회수), `central/ingest-stats`, `vm/:id/{hardware,reconfig}`(VM 사양 변경), `assignments`, `agent-deploy`, `metrics/settings`, `gpu-guest/{settings,vms,test,diag}` + **`gpu-guest/deploy/:agent`**(중앙→엣지 GPU 설정 배포), **`edge-users`**(+`-bulk` — 중앙→엣지 계정 배포), **`horizon`**(+`/test` — Horizon 서버 등록), `ipam/settings`, `ipam/scan/{settings,run,results}`, `alerts`(+`/test`), `audit`, `data-source`, `llm-config`, `packages`, `geocode`, `logs`, `backup/*`, `vclogs/*`, `net/{capture,pcap,history,monitors,agents,log-issues}`, `guest/add-user`, `deep-search/probe`, `security/session`, `emergency-stop`
 
 ### 원격접속 `/api/remote/*`
-`mappings`, `quick-connect`, `proxies`, `config`, `deploy`, `probe`, `targets`, `rdp/:id`, **`rdp-ticket`**(POST — RDP 자격증명 1회용 티켓 발급, admin/operator; 쿼리스트링에 비번 미노출)
+`mappings`, `quick-connect`, `proxies`, `config`, `deploy`, `probe`, `targets`, `rdp/:id`, **`rdp-ticket`**(POST — RDP 자격증명 1회용 티켓 발급, admin/operator; 쿼리스트링에 비번 미노출 · 응답에 WS 티켓 `wst` 포함), **`ws-ticket`**(POST — 원격 콘솔 WebSocket 용 1회용 티켓. WS 주소에는 세션 토큰 대신 이 티켓만 싣는다)
 
 ### 업그레이드 `/api/upgrade/*`
 `status`, `check`, `apply`, `restart`, `settings`, `bundle`

@@ -185,7 +185,7 @@ test('⑧ 일일 헬스체크 — 법인 GPU 할당률 절(90% 이상 경고 · 
   const r = computeHealthReport(snap, { now: Date.now() });
   const s = r.sections.find((x) => x.key === 'gpuAlloc');
   assert.equal(s.status, 'warn'); assert.equal(s.count, 1); assert.equal(s.items[0].usagePct, 100); assert.equal(s.unknown, 1);
-  assert.match(s.detail, /할당을 모르는 VM 이 섞인 법인 1곳/);
+  assert.match(s.detail, /할당 · 용량을 모르는 GPU · VM 이 섞인 법인 1곳/);   // 44회차 R4: 끊긴 호스트 법인과 사유를 나눴다
   assert.match(buildDailyReportText(r), /법인 GPU 할당률 90% 이상: 1건/);
   assert.equal(computeHealthReport({ vcenters: [], hosts: [], vms: [], datastores: [], alarms: [] }, { now: Date.now() }).sections.some((x) => x.key === 'gpuAlloc'), false);
 });

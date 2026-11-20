@@ -234,17 +234,19 @@ function runOne(t, trigger, manual, { resumeOf = null } = {}) {
   // 재개 대기 항목이 있으면(재시작 전에 돌던 조사) 그 작업을 잇는다 — 사람이 먼저 '지금 수집' 을 눌러도 같다.
   const prior = resumeOf || pendingResumeOf(KIND, t.id);
   const attach = prior?.meta?.jobId && (!prior.meta.jobHost || prior.meta.jobHost === t.host) ? String(prior.meta.jobId) : null;
+  // 41회차 F5(재현): 다시 붙는 작업의 시한 · 소요는 **장비 du 가 시작한 시각**부터 — 예전에는 재개 시각부터 새로 세어 시한 · 상한(180분)을 넘겨 돌았다.
+  const jobStartedAt = attach ? (Number(prior.meta.jobStartedAt) > 0 ? Number(prior.meta.jobStartedAt) : (Number(prior.since) > 0 ? Number(prior.since) : null)) : null;
   _queue.delete(t.id); // v2.742: 같은 대상의 대기 요청은 이 시작이 대신한다(기록은 scanStarted 가 같은 쓰기에서 지운다)
   scanStarted(KIND, t.id, {
     label: t.label || t.id, trigger, resumeOf: prior,
     ...(prior && !resumeOf ? { resumeNote: `${manual ? '수동 실행' : '주기 실행'}이 재시작 전 조사를 이어 받았습니다` } : {}),
-    meta: { manual: !!manual, ...(attach ? { jobId: attach, jobHost: t.host || '' } : {}) },
+    meta: { manual: !!manual, ...(attach ? { jobId: attach, jobHost: t.host || '', ...(jobStartedAt ? { jobStartedAt } : {}) } : {}) },
   });
   const promise = (async () => {
     try {
       const rec = await collectTarget(t, {
-        trigger, manual, attachJob: attach,
-        onJob: (job) => { try { scanProgress(KIND, t.id, { jobId: job.id, jobHost: t.host || '' }); } catch { /* 기록 실패는 조사를 막지 않는다 */ } },
+        trigger, manual, attachJob: attach, startedAt: jobStartedAt,
+        onJob: (job) => { try { scanProgress(KIND, t.id, { jobId: job.id, jobHost: t.host || '', jobStartedAt: Date.now() }); } catch { /* 기록 실패는 조사를 막지 않는다 */ } },
       });
       const saved = await db.insertScan(rec);
       if (!saved.ok) note('error', `${t.label || t.id}: 결과를 저장하지 못했습니다 — ${saved.error}`);

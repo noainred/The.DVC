@@ -24,7 +24,9 @@ export function missingCheck({ targets = [], skipped = [], entryByKey = new Map(
   const rows = [];
   // 반증 F4: OS 계정 등록부에만 있고 이 노드 함대(iDRAC · vCenter)에 없는 서버 — 성능 수집 대상이 아니다(bmstor 디스크 용량만). 대상 집합은 바꾸지 않고 '보이게' 만 한다.
   if (Array.isArray(osRegistry)) {
-    const usedIds = new Set(targets.map((x) => t(x.osHost?.id)).filter(Boolean));
+    // 4회차 점검 D2: 경로로 쓰는 등록(osHost.id)뿐 아니라 **대상 해석이 이 함대 서버에 고른 등록**(osRegId — 꺼짐 · 엣지 지정 · 위임 · 법인 꺼짐 · 경로 없음 갈래)도
+    //   ‘함대에 있음’ 이다(pickOsEntry 결과 그대로 — 새 대조 없음). 1회차 D3 · D4 뒤 그 등록이 경로에서 빠져, 이름이 함대와 다르면 여기 한 번 더 나왔다.
+    const usedIds = new Set([...targets.flatMap((x) => [t(x.osHost?.id), t(x.osRegId)]), ...skipped.map((x) => t(x.osRegId))].filter(Boolean));
     const names = new Set([...targets, ...skipped].map((x) => t(x.name).toLowerCase()).filter(Boolean));
     for (const e of osRegistry) {
       if (!e || usedIds.has(t(e.id)) || names.has(t(e.name).toLowerCase())) continue;

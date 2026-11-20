@@ -48,7 +48,7 @@ export function sanitizeMaintEnvelope(m, rcv = Date.now()) {
 /** 용량 예측(봉투 capacity) → 중앙 보관 모양(순수). targetKeys = 같은 봉투의 대상 키. */
 export function sanitizeCapacityEnvelope(c, { targetKeys = new Set(), now = Date.now() } = {}) {
   if (!isObj(c)) return null;
-  if (c.unreadable === true) return { unreadable: true, rows: [], dropped: 0 };
+  if (c.unreadable === true) return { unreadable: true, ...(c.readError === true ? { readError: true } : {}), rows: [], dropped: 0 };   // 83회차: 읽기 오류 표지(불리언만)
   const arr = Array.isArray(c.rows) ? c.rows : [];
   const rows = []; let dropped = 0;
   for (const r of arr.slice(0, 20_000)) {

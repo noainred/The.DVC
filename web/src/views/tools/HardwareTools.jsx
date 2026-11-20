@@ -25,6 +25,8 @@ import { effVcOf, dcOfServer, scopeMatchServer, matchServerQuery } from './barem
 import BaremetalBoard from './BaremetalBoard.jsx'; // v2.917 물리 서버 › 상태 보드
 import useSearchHandoff from '../../hooks/useSearchHandoff.js'; // v2.909 헤더 ⌘K 통합 장비 검색 — 검색어 인계
 import { useFocusHandoff } from '../../hooks/useSearchHandoff.js'; // v2.911 고른 장비 상세 열기
+import { saveBlob } from '../../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나(즉시 revoke · 문서 밖 click 금지)
+import { backdropClose } from '../../components/backdropClose.js'; // 96회차(95회차 남긴 것 ①): 창 안에서 끌다 배경에서 떼면 닫히던 것 — 누름 · 뗌 모두 배경일 때만
 
 /**
  * v2.622(감사 RECENT-04): 상세 모달 열기 — 행이 벤더를 모르면(온도·GPU·드릴다운) 먼저 'BMC' 로 열고 서버 목록을
@@ -138,7 +140,7 @@ function HwDrillModal({ dc, dim, keyVal, onClose, onServer }) {
   const { loading, data, error } = useTool('/admin/idrac/hardware-servers', { datacenterId: dc || '', dim, key: keyVal });
   const rows = data?.servers || [];
   return (
-    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="modal-overlay" {...backdropClose(() => onClose())}>
       <EscClose onClose={onClose} />
       <div className="modal card" style={{ maxWidth: 820, width: '92vw', maxHeight: '82vh', overflow: 'auto' }}>
         <div className="flex between" style={{ marginBottom: 10 }}>
@@ -214,7 +216,7 @@ function HardwareSummary() {
     <div>
       <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 12 }}>
         <div className="muted" style={{ fontSize: 13 }}>
-          대상 서버 <b style={{ color: 'var(--accent)' }}>{d.totalServers}</b>대 · 수집 <b>{d.collected}</b> · 미수집 <span className="badge amber">{d.missing}</span> · GPU 카드 <b>{d.totalGpuCards}</b>장
+          대상 서버 <b style={{ color: 'var(--accent)' }}>{d.totalServers}</b>대 · 수집 <b>{d.collected}</b> · 미수집 <span className="badge amber">{d.missing}</span> · GPU 카드 <b>{d.totalGpuCards}</b>장{d.gpuUnread > 0 && <span className="badge amber" style={{ marginLeft: 6 }} title="GPU 목록(Processors)을 못 읽은 서버 — GPU 카드 합계는 최소값입니다">GPU 목록 못 읽음 {d.gpuUnread}대</span>}
           <span style={{ marginLeft: 6 }}>— 항목을 클릭하면 그 서버만 볼 수 있습니다.</span>
         </div>
         <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }} title="법인(DataCenter) 기준. 스캔 등록분은 법인 직접, 그 외는 vCenter→법인 할당으로 해석.">
@@ -394,8 +396,7 @@ function ServerListBody({ corpName, model, servers, onRow }) {
     const lines = [head.join(',')];
     for (const s of rows) lines.push([s.name || s.id, s.model || model || '', serverCsvType(s), serverCsvVendor(s), String(s.host || '').replace(/^https?:\/\//, ''), s.serviceTag || '', s._vc || '', s.enabled === false ? '중지' : '수집'].map(esc).join(','));
     const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = `servers-${String(model || corpName).replace(/[^a-zA-Z0-9._-]+/g, '_')}-${dayStamp()}.csv`; a.click(); URL.revokeObjectURL(url);
+    saveBlob(blob, `servers-${String(model || corpName).replace(/[^a-zA-Z0-9._-]+/g, '_')}-${dayStamp()}.csv`);
   };
   return (
     <>
@@ -492,10 +493,7 @@ function PartsInventory({ vc, onServer }) {
     .sort((a, b) => (sortKey === 'label' ? a.label.localeCompare(b.label) : (b[sortKey] || 0) - (a[sortKey] || 0)));
   const exportCsv = () => {
     const csv = ['분류,파트,상세,수량,서버수', ...rows.map((b) => [b.catName, b.label, b.detail, b.count, b.serverCount].map(esc).join(','))].join('\n');
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv' }));
-    a.download = `hardware-parts-${dayStamp()}.csv`;
-    a.click(); URL.revokeObjectURL(a.href);
+    saveBlob(new Blob(['﻿' + csv], { type: 'text/csv' }), `hardware-parts-${dayStamp()}.csv`);
   };
   const th = (key, label) => (
     <th style={{ cursor: 'pointer', whiteSpace: 'nowrap' }} onClick={() => setSortKey(key)}>{label}{sortKey === key ? ' ▾' : ''}</th>
@@ -516,6 +514,7 @@ function PartsInventory({ vc, onServer }) {
       </div>
       <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
         대상 서버 <b>{data.total}</b>대 · 수집 {data.collected} · 미수집 {(data.missing || []).length}
+        {(data.unread || []).length > 0 && <span className="badge amber" style={{ marginLeft: 6 }} title={`인벤토리는 있지만 이 파트 목록을 못 읽은 서버 — 그 서버의 수량은 빠져 있습니다(0 이 아닙니다)\n${data.unread.slice(0, 50).map((x) => x.name).join(', ')}`}>파트 목록 못 읽음 {data.unread.length}대</span>}
         {(data.missing || []).length > 0 && <span title={(data.missing || []).slice(0, 30).map((m) => m.name).join(', ')}> (목록은 마우스 오버)</span>}
         {' '}— 파트 {rows.length}종 · 행을 클릭하면 장착 서버가 보입니다. 인벤토리는 30분 주기 수집이며 세대/라이선스에 따라 일부 항목이 비어 있을 수 있습니다.
       </div>
@@ -649,7 +648,7 @@ function ServerAnalysisView({ bm = false }) {
           <label className="flex gap" style={{ alignItems: 'center' }} title="2차: vCenter=가상화 장비만 · Baremetal=vCenter에 속하지 않는 물리 서버">
             <span className="muted">구분</span>
             <Select className="select" value={lvl2} onChange={(e) => setLvl2(e.target.value)} style={{ minWidth: 180 }} disabled={bm}
-              title={bm ? '서버 › Physical Server · Baremetal 메뉴는 Baremetal(미가상화 물리)로 고정입니다 — 다른 구분은 자원관리 › Physical Server 에서 고릅니다.' : undefined}>
+              title={bm ? '서버 › Physical Server 메뉴는 Baremetal(미가상화 물리)로 고정입니다 — 다른 구분은 자원관리 › Physical Server(전체) 에서 고릅니다.' : undefined}>
               <option value="">{vcErr ? '전체 (vCenter 목록을 읽지 못함)' : dc ? '전체 (법인 모든 장비)' : '전체'}</option>
               {dcVcs.length > 0 && (
                 <optgroup label="🖥 vCenter (가상화 장비만)">
@@ -663,7 +662,7 @@ function ServerAnalysisView({ bm = false }) {
       </div>
       {bm && (
         <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
-          Physical Server · Baremetal — Physical Server 의 구분 ‘Baremetal(미가상화 물리)’ 을 보여 줍니다. 법인을 고르지 않으면 전체 법인입니다. 하드웨어 집계 탭은 구분과 무관하게 전체 서버를 셉니다.
+          서버 › Physical Server — 자원관리 › Physical Server(전체) 의 구분 ‘Baremetal(미가상화 물리)’ 을 보여 줍니다. 법인을 고르지 않으면 전체 법인입니다. 하드웨어 집계 탭은 구분과 무관하게 전체 서버를 셉니다.
         </div>
       )}
       <DcErrNote err={dcErr} />
@@ -934,6 +933,7 @@ function ServerGpuFinder({ vc, onServer }) {
 GPU <b style={{ color: 'var(--accent)' }}>{d.totalGpus}</b>장 · <b>{d.models.length}</b>종 · iDRAC {d.collectedServers}/{d.totalServers}
           <span title="Overview 'GPU 카드' 와 같은 기준입니다 — iDRAC 인벤토리에 있는 카드만 셉니다(비활성 서버 제외).">{gpuFinderNote(d)}</span>
           {d.missing?.length > 0 && <span className="badge amber" style={{ marginLeft: 8 }} title={d.missing.map((x) => x.name).join(', ')}>미수집 {d.missing.length}대</span>}
+          {d.gpuUnread > 0 && <span className="badge amber" style={{ marginLeft: 8 }} title={`인벤토리는 읽었지만 GPU 목록(Processors)을 못 읽은 서버입니다 — 합계는 최소값입니다(GPU 가 없다는 뜻이 아닙니다).${(d.gpuUnreadServers || []).length ? `\n${d.gpuUnreadServers.map((x) => x.name).join(', ')}` : ''}`}>GPU 목록 못 읽음 {d.gpuUnread}대</span>}
         </div>
         <div className="flex gap" style={{ alignItems: 'center' }}>
           <SearchBox className="input" style={{ maxWidth: 260 }} placeholder="GPU 모델 / 서비스태그 검색" value={q} onChange={setQ} />

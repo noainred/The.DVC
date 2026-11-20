@@ -16,7 +16,7 @@ import { getCodexCheckReport, renderCodexCheckMarkdown, writeCodexCheckReport } 
 import { getMetricsDb } from '../../metrics/db.js';
 import { memtrackReport } from '../../system/memtrack.js';
 import { adminOnly, fullScopeOnlyWith } from './shared.js';
-import { scopedVcenterIds } from '../../auth/scope.js';
+import { scopedVcenterIds, isFullReadWriteScope } from '../../auth/scope.js';
 import { authzRole } from '../../auth/roles.js';
 // v2.611 AUTHZ2611: 전 법인 등록부·동작은 전체 범위 계정만(v2.607 fleetWideOnly 의 형제 등록부).
 const fleetOnly = fullScopeOnlyWith('서버 로그·포탈 DB 경로·보안 점검 기록은 전 법인에 걸친 서버 자기진단이라 전체 범위(vCenter 제한 없는) 계정만 쓸 수 있습니다.');
@@ -73,7 +73,8 @@ adminRouter.post('/emergency-stop', adminOnly, fleetOnly, (req, res) => {
     //   '관리자가 아닙니다' 로 거부했다(요청 문맥은 admin 으로 접히지만 getUser 는 저장값을 준다 — server/CLAUDE.md v2.643).
     if (approverRoleIssue(u)) return res.status(403).json({ ok: false, reason: `'${name}'는 관리자(admin)가 아닙니다.` });
     // v2.612 AUTHZ2612-08: 긴급중단은 전 수집을 멈춘다 — 승인자도 전체 범위 admin 이어야 한다(요청자는 fleetOnly 가 막는다).
-    if (scopedVcenterIds({ username: u.username, role: authzRole(u.role), scope: u.scope }, store.get())) return res.status(403).json({ ok: false, error: 'forbidden', reason: `'${name}'는 범위가 제한된 계정이라 긴급중단을 승인할 수 없습니다(전체 범위 관리자만).` });
+    // 전체 점검 7회차 반증 R-5: 승인자도 조회 ∧ 쓰기 전체(쓰기 범위를 줄인 관리자 OTP 로 2인 승인이 통과했다)
+    if (!isFullReadWriteScope({ username: u.username, role: authzRole(u.role), scope: u.scope }, store.get())) return res.status(403).json({ ok: false, error: 'forbidden', reason: `'${name}'는 범위가 제한된 계정이라 긴급중단을 승인할 수 없습니다(전체 범위 관리자만).` });
     const v = verifyUserOtp(name, a?.code);
     if (!v.ok) return res.status(403).json({ ok: false, reason: `'${name}' OTP 인증 실패 — ${v.reason}`, needEnroll: v.needEnroll });
   }

@@ -26,24 +26,28 @@ import { currentTargets, bmUsageStatus, authStopsFor, collectHealthNow } from '.
 import { COLLECT_HEALTH_VER, hourlyTrend } from './collectHealth.js';
 import { latestUsage } from './db.js';
 import { buildPerfEntry, PERF_COL_META, compactPerfEntry } from './perfView.js';
-import { hwFactsReader } from './hwFacts.js';
+import { hwFactsReader, invCapState } from './hwFacts.js';
 import { freshMsFor } from './useJudge.js';
 import { getInventory } from '../idrac/invCache.js';   // 다음 점검 ③ 서버별 PowerCap(인벤토리 캐시 — 장비 왕복 0)
+import { createYielder } from '../util/timeSlice.js'; // 점검 반복 5회차 D5 — 서버 사이 양보
 
 /**
  * v2.919(리눅스 성능 1단계): 봉투에 판정이 붙은 성능 항목(`perf`)을 싣는다 — **엣지가 판정하고 중앙은 그대로 전한다**.
  *   행(rows)에서는 JSON 문자열 열(detail_json·tuning_json)을 뗀다(중앙 정제가 글자 512자로 잘라 깨진 JSON 이 되므로 — 같은 내용은 perf 에 객체로).
  *   하드웨어 사실은 이 엣지가 이미 가진 iDRAC 데이터(hwFacts — 장비 왕복 0). 실패해도 봉투는 나간다(perf 만 비고 perfError 로 밝힌다).
  */
-export async function perfForRows(rows, targets, s, { full = true, now = Date.now() } = {}) {
+export async function perfForRows(rows, targets, s, { full = true, now = Date.now(), yieldFn = null } = {}) {
   let hwOf = () => null; let perfError = '';
   try { hwOf = await hwFactsReader({ agent: config.agent?.name || '', now, freshMs: freshMsFor(s.intervalMs) }); }
   catch (e) { perfError = `하드웨어 사실을 읽지 못했습니다: ${String(e?.message || e).slice(0, 160)}`; }
   const byKey = new Map((targets || []).map((x) => [t(x.key), x]));
   const perf = [];
+  // 점검 반복 5회차 D5: 서버 사이 시간 기준 양보 — 1,000대분 판정이 한 덩어리(요청 경로 · 봉투 생성 최장 정지 184~347ms)였다. 결과 · 순서는 같다.
+  const y = yieldFn || createYielder(15);
   for (const r of rows || []) {
     try { perf.push(buildPerfEntry({ row: r, hw: hwOf(byKey.get(t(r.key))) || null, th: s.perf, intervalMs: s.intervalMs, now, full })); }
     catch (e) { perfError = perfError || `판정 실패: ${String(e?.message || e).slice(0, 160)}`; }
+    await y();
   }
   return { perf, perfError };
 }
@@ -178,11 +182,11 @@ export function envelopePowerCaps(targets = [], keys = new Set(), { inventoryOf 
       const key = t(tg?.key); const regId = t(tg?.idrac?.regId);
       if (!key || !keys.has(key) || !regId) continue;
       let inv = null; try { inv = get(regId); } catch { inv = null; }
-      const pc = inv && typeof inv === 'object' ? inv.powerCap : null;
-      if (!pc || typeof pc !== 'object') continue;
-      const lw = Number(pc.limitWatts);
+      // 점검 반복 2회차 E3: 판정은 hwFacts invCapState 하나(하드웨어 U · 중앙 전력 보기와 같은 함수) — PowerLimit 미보고(unread)는 싣지 않는다.
+      const cs = invCapState(inv);
+      if (cs.state === 'unread') continue;
       const at = Number(inv.collectedAt);
-      list.push({ key, limitWatts: Number.isFinite(lw) && lw > 0 ? Math.round(lw) : null, enabled: Number.isFinite(lw) && lw > 0, at: Number.isFinite(at) && at > 0 ? at : null });
+      list.push({ key, limitWatts: cs.state === 'set' ? Math.round(cs.limitWatts) : null, enabled: cs.state === 'set', at: Number.isFinite(at) && at > 0 ? at : null });
     }
     out.powerCaps = list;
   } catch { /* 표지만 — 중앙은 값 없음으로 본다 */ }
@@ -192,13 +196,14 @@ export function envelopePowerCaps(targets = [], keys = new Set(), { inventoryOf 
 /** 8b단계 봉투 필드 — 표지(topVer · idleVer)는 계산 전에도 싣는다(중앙이 ‘값 없음’ 과 ‘구버전’ 을 가른다). 실패해도 봉투는 나간다. */
 export const TOP_VER = 1;
 export const IDLE_VER = 1;
-const IDLE_FIELDS = ['key', 'status', 'reason', 'score', 'days', 'excludedDays', 'grades', 'dropped', 'metrics', 'periodic', 'candSince', 'candLeft'];
+const IDLE_FIELDS = ['key', 'status', 'reason', 'score', 'days', 'excludedDays', 'grades', 'dropped', 'metrics', 'periodic', 'candSince', 'candLeft', 'unreadPeriods'];   // 83회차: 기간 일부 못 읽음(수)
 async function envelopeIdle(keys) {
   const out = { topVer: TOP_VER, idleVer: IDLE_VER };
   try {
     const I = (await import('./idle.js')).loadIdle();
     if (I) {
-      out.idle = I.unreadable ? { unreadable: true, rows: [] }
+      // 83회차(81회차 결정): 읽기 오류(readError — 원본 그대로)를 손상(보존본으로 옮김)과 갈라 싣는다 — 중앙 화면이 '손상본 보존' 이라 말하지 않게.
+      out.idle = I.unreadable ? { unreadable: true, ...(I.readError ? { readError: true } : {}), rows: [] }
         : { at: I.at, day: I.day, firstDay: I.firstDay || null, cfg: I.cfg, history: I.history || [], ...(I.truncated ? { truncated: 'rows-cap' } : {}),
           rows: (I.rows || []).filter((r) => keys.has(t(r.key))).map((r) => Object.fromEntries(IDLE_FIELDS.filter((k) => r[k] !== undefined && r[k] !== null).map((k) => [k, r[k]]))) };
     }
@@ -222,7 +227,7 @@ async function envelopeMaintCapacity(keys) {
   try {
     const C = (await import('./capacity.js')).loadCapacity();
     if (C) {
-      out.capacity = C.unreadable ? { unreadable: true, rows: [] }
+      out.capacity = C.unreadable ? { unreadable: true, ...(C.readError ? { readError: true } : {}), rows: [] }   // 83회차: 읽기 오류 ≠ 손상
         : { at: C.at, day: C.day, cfg: C.cfg, ...(C.truncated ? { truncated: 'rows-cap' } : {}), ...(C.cap ? { cap: C.cap } : {}),
           rows: (C.rows || []).filter((r) => keys.has(t(r.key))).map((r) => Object.fromEntries(CAP_FIELDS.filter((k) => r[k] !== undefined && r[k] !== null).map((k) => [k, r[k]]))) };
     }

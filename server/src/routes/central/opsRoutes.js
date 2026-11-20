@@ -17,6 +17,7 @@ import { setLogQueryResult, takeLogQueries, vcenterOfReq } from '../../central/l
 import { setPingResults, takePingJobs } from '../../central/pingJobs.js';
 import { listCollectors as listCollectorsForLinks, registryLoadError as collectorsRegistryLoadError } from '../../collector/registry.js';
 import { config, currentVersion, loadVcenterConfig } from '../../config.js';
+import { fileMissing } from '../../util/fileMissing.js';   // 134회차: '정말 없는가'(ENOENT 만 — existsSync 는 stat 실패도 false)
 import { instanceId } from '../../instanceId.js';
 import { ipToNum } from '../../ipam/ledger.js';
 import { specToRange } from '../../ipam/rangePolicies.js';
@@ -82,7 +83,7 @@ function vmCloneAgentOnly(req, res) {
 /** vCenter 등록부·위임 인벤토리 → 실행 위치. 등록부 파일이 있는데 읽지 못했으면 null(빈 목록으로 답하지 않는다). */
 async function vmCloneTargets() {
   const cfg = loadVcenterConfig();
-  if (!cfg.file && fs.existsSync(path.join(config.configDir, 'vcenters.json'))) return null;
+  if (!cfg.file && !fileMissing(path.join(config.configDir, 'vcenters.json'))) return null;   // 134회차: 확인하지 못한 것(stat 실패 — existsSync 는 false)도 '있는데 못 읽음' 이다
   const { execTargets } = await import('../../vmclone/dispatch.js');
   return execTargets(cfg.vcenters || [], listInventory(), { mock: isMockModeForVmClone() });
 }
@@ -156,9 +157,11 @@ export function registerOpsRoutes(centralRouter, deps) {
    */
   centralRouter.get('/veeam-run-ops', requireCentral(), async (req, res) => {
     if (req.centralAuth.mode !== 'agent') return res.status(403).json({ ok: false, reason: 'Veeam 백업 실행 대행은 엣지별 개별 토큰만 허용합니다 — 설정 › 엣지 토큰에서 이 엣지의 토큰을 발급하세요.' });
-    const { takeEdgeOps } = await import('../../veeam/run/edgeOps.js');
+    const { takeEdgeOps, TAKE_MAX: VTAKE } = await import('../../veeam/run/edgeOps.js');
     res.set('Cache-Control', 'no-store');
-    res.json({ ok: true, ops: takeEdgeOps(req.centralAuth.agent) });
+    // 52회차 F5: max = 엣지 워커의 빈 자리(bareos-ops 와 같은 규칙) — 없거나 틀리면 기본 상한
+    const max = /^[0-9]{1,2}$/.test(String(req.query.max ?? '')) ? Number(req.query.max) : VTAKE;
+    res.json({ ok: true, ops: takeEdgeOps(req.centralAuth.agent, max) });
   });
 
   // Body: { id, result }
@@ -288,7 +291,8 @@ export function registerOpsRoutes(centralRouter, deps) {
     // v2.600(CEN2600-02): 조회의 진짜 vCenter 가 direct 면 엣지 결과를 받지 않는다(중앙이 자기 로그 DB 로 답한다).
     //   ⚠ 미등록 id 는 거부하지 않는다 — 연합 조회의 원격 목록은 배정표에서 오고 중앙 등록부에 없을 수 있다(checksLogs.js).
     { const lqDeny = edgeVcWriteDenied(vcenterOfReq(b.reqId)); if (lqDeny) return res.status(403).json({ ok: false, reason: lqDeny }); }
-    setLogQueryResult(String(b.reqId), b);
+    // 전체 점검 14회차(C-5): 반영하지 못한(발급 안 함 · 만료) reqId 는 410 — 형제 idrac-scan-result · capture-result(v2.621 · v2.622)와 같게. 예전에는 늘 200 이라 엣지가 '보냄' 으로 셌다
+    if (!setLogQueryResult(String(b.reqId), b)) return res.status(410).json({ ok: false, reason: 'unknown-job' });
     res.json({ ok: true });
   });
 
@@ -308,7 +312,7 @@ export function registerOpsRoutes(centralRouter, deps) {
     if (applied.unknown) return res.status(410).json({ ok: false, error: 'unknown-job', reason: '중앙에 이 캡처 잡이 없습니다(만료되었거나 중앙이 재시작됨) — 결과는 반영·이력 기록되지 않았습니다.' });
     if (applied.duplicate) return res.json({ ok: true, duplicate: true });
     // v2.600(CEN2600-09): 엣지 워커가 결과에 싣는 A 호스트(잡 spec.host)를 이력의 hostA 로 — 글자만, 제어문자 제거, 255자.
-    const hostA = typeof b.result?.hostA === 'string' ? b.result.hostA.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 255) : '';
+    const hostA = typeof b.result?.hostA === 'string' ? capStr(b.result.hostA.slice(0, 1024).replace(/[\u0000-\u001f\u007f]/g, '').trim(), 255) : '';   // 87회차: 캡처 이력(최대 300건)에 상주 — capStr 로 평탄화(84 F2 의 형제 · 먼저 자르고 정규식)
     try { if (b.result?.ok) recordCapture(b.result, { source: 'manual', via: 'agent', ...(hostA ? { hostA } : {}) }); } catch { /* */ }
     res.json({ ok: true, ...(applied.late ? { late: true } : {}) });
   });
@@ -490,6 +494,7 @@ export function registerOpsRoutes(centralRouter, deps) {
       const out = await putEdgeLinkReport(req.centralAuth.agent, req.body || {});
       // v2.681(R2F-03): DB 를 못 쓰면 200 이 아니라 503(엣지가 '저장됨' 이라 적지 않게 — v2.611 규약).
       if (out?.dbUnavailable) return res.status(503).set(PERSISTENT_503_HEADERS).json(out); // v2.742(EDGE-03): 지속형 503 머리 — persistent503 과 같다(audit2681b 가 이 모양을 고정한다)
+      if (out?.registryUnreadable) return res.status(503).set(PERSISTENT_503_HEADERS).json(out); // 결정(56~75 남긴 것) 65 ①: 등록부를 못 읽어 배정을 판정할 수 없다 — 보류
       res.json(out);
     } catch (e) {
       res.status(400).json({ ok: false, reason: String(e?.message || e).slice(0, 300) });

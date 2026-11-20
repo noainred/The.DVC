@@ -21,10 +21,12 @@ export const VEEAM_SNAP_STALE_MS = 24 * 3_600_000;
 
 /**
  * Veeam 기준 — 그 vCenter 에 연결된 Veeam 서버 결과로 대조한 VM 수(작업 포함 또는 복원 지점 있음 = VM 화면 배지와 같은 기준).
- * @param {{ views: Array<{ok:(boolean|null), lastOkTs:(number|null), stale?:boolean}>, byVm: (object|null), vmTotal: number, otherVcenter?: number }} a
+ * @param {{ views: Array<{ok:(boolean|null), lastOkTs:(number|null), stale?:boolean}>, byVm: (object|null), vmTotal: number, otherVcenter?: number, truncated?: boolean }} a
  *   byVm = matchToVcenter 결과(쓸 수 있는 결과가 하나도 없으면 null) · otherVcenter = 같은 결과에서 다른 vCenter 로 적힌 VM 수(matchToVcenter)
+ *   truncated = 대조에 쓴 결과 중 수집 목록이 상한에서 잘린 것이 있다(resultsTruncated) — 결정(76~105 남긴 것 · 2026-11-20) A9:
+ *   잘린 쪽에 있던 보호 VM 은 대조에 없으므로 수는 하한이다 → partial + truncated 표지(숫자는 지우지 않는다 · 정상 규모 화면 변화 없음).
  */
-export function veeamCount({ views, byVm, vmTotal, otherVcenter = 0 }) {
+export function veeamCount({ views, byVm, vmTotal, otherVcenter = 0, truncated = false }) {
   const vs = Array.isArray(views) ? views : [];
   if (!byVm) {
     // v2.762(F3): 실패한 서버가 하나라도 있으면 '첫 수집 대기' 가 아니라 실패를 먼저 말한다(다른 서버가 아직 첫 수집 전이어도 — 그 수는 waiting 으로).
@@ -46,14 +48,24 @@ export function veeamCount({ views, byVm, vmTotal, otherVcenter = 0 }) {
   // v2.761(B2): 쓸 수 있는 결과가 한도(주기 × 2 + 여유)보다 오래된 서버 — 숫자는 숨기지 않고(백업 대상은 천천히 바뀐다) 부분으로 표시한다.
   const stale = vs.filter((v) => v.stale === true).length;
   const other = Number.isInteger(otherVcenter) && otherVcenter > 0 ? otherVcenter : 0;
+  const cut = truncated === true;
   return {
     src: 'veeam', n, vmTotal, running, pending, servers: vs.length,
-    // 한 서버라도 이번에 실패(마지막 성공 값)·아직 못 읽음·오래됨이면 '부분' — 숫자는 보여 주되 표지를 단다.
-    partial: failed + waiting + stale > 0, failed, failedNoLast, waiting, stale,
+    // 한 서버라도 이번에 실패(마지막 성공 값)·아직 못 읽음·오래됨이면 '부분' — 숫자는 보여 주되 표지를 단다. A9: 수집 목록이 잘렸어도 부분(목록 잘림).
+    partial: failed + waiting + stale > 0 || cut, failed, failedNoLast, waiting, stale, ...(cut ? { truncated: true } : {}),
     // v2.761(A5): 대조 0대인데 Veeam 이 다른 vCenter 이름으로 적은 VM 이 있으면 '0대' 가 아니라 이름 불일치 의심(n 은 그대로 둔다 — 정말 0대일 수도 있다).
     otherVcenter: other, ...(n === 0 && other > 0 ? { hostMismatch: true } : {}),
     basisTs: ok.length ? Math.min(...ok) : null,
   };
+}
+
+/**
+ * 결정(76~105 남긴 것 · 2026-11-20) A9: 대조에 쓴 Veeam 결과 중 하나라도 수집 목록(작업 · 백업 객체 · 복원 지점 · VM)이 상한에서 잘렸는가 —
+ *   판정 코어 하나(백업 실행 계획 routes/api/veeam.js veeamMatchFor 와 모니터링 수 veeamCount 가 같이 쓴다 · 96회차 표지 parse.js RESULT_TRUNCATED_KEYS).
+ * @param {Array<{result?:{truncated?:string[]}}>} results  resultsFor().results 꼴
+ */
+export function resultsTruncated(results) {
+  return Array.isArray(results) && results.some((x) => Array.isArray(x?.result?.truncated) && x.result.truncated.length > 0);
 }
 
 /**

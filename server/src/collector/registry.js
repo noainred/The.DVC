@@ -9,13 +9,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { ipBlockReason, ssrfBlockReason, ssrfBlockReasonResolved } from '../util/ssrfBlock.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { fileMissing } from '../util/fileMissing.js';   // 134회차: '정말 없는가'(ENOENT 만 — existsSync 는 stat 실패도 false)
 import { makeLoadError, corruptOnlyReason, autoWriteRefusal, summarizeRegistryError } from '../util/registryCore.js'; // v2.771(점검 R6-F4-2): 형제 등록부와 같은 '읽지 못함' 판정
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 import { bumpFleetRev } from '../insights/fleetRev.js';
 import { readJsonCapped } from '../util/readCapped.js'; // v2.604 CEN2604-01: 자기등록 검증 ping 응답 크기 상한
 import { resilientFetch } from '../util/resilientFetch.js'; // v2.613 DEPS2613-03: 동적 import 에서 정적으로(순환 없음)
 import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js'; // v2.503: url 변경 시 저장 토큰 폐기
+import { envPositive } from '../util/envNumber.js';   // 100회차(99회차 남긴 것): env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 // 2026-10-09 검토 S-09(그룹 J): 원격 URL 은 HTTPS 가 기본 — 평문 HTTP 는 승인된 예외만(판정은 transportPolicy.js 하나).
 import { withDefaultScheme, evaluateCollectorUrl, transportOf, recordRejectedHttpRegistration, clearRejectedHttpRegistration, INSECURE_HTTP_CODE } from './transportPolicy.js';
 import { resolvePickedDc } from './datacenterMatch.js'; // v2.985 반증 D2: 사용자 매칭 법인 id 고르기 규칙 하나(순수 · 의존 없음)
@@ -63,7 +65,7 @@ function dedupeByIdCase(list) {
  *   파일 없음 → registryLoadError() 가 '보존본만 남음' 이면 설정, 보존본도 없으면(첫 설치) 해제.
  *   ⚠ 파일이 없을 때의 보존본 판정(설정 폴더 목록)은 loadCollectors 에서 하지 않는다 — 요청·폴러마다 불리고 엣지 노드에는 파일이 없는 것이 정상이다.
  */
-const loadErr = makeLoadError();
+const loadErr = makeLoadError({ label: '수집 서버 등록부', file: FILE });   // 결정(76~105 남긴 것 · 2026-11-20) A1: 서비스 점검 '장비 등록부 파일' 행(표시 전용)
 /** DataCenter id 모양(datacenter/store.js ensureDatacenter 와 같은 규칙 — 소문자 · 64자) — 아니면 ''. */
 export function normDcId(v) {
   const s = String(v ?? '').trim().toLowerCase();
@@ -100,11 +102,12 @@ export function setCollectorDatacenterId(id, dcId, validIds = null) {
 }
 
 /** @returns {null|{at:number, reason:string}} 못 읽었으면 사유(원문 — 밖으로 낼 때는 summarizeRegistryError). */
-export function registryLoadError() {
-  loadCollectors();
-  let exists = false;
-  try { exists = fs.existsSync(FILE); } catch { exists = false; }
-  if (!exists) {
+export function registryLoadError({ skipLoad = false } = {}) {
+  // 결정 G2 · G3 반증 후속 ⑤: 바로 앞에서 loadCollectors() 를 부른 호출부는 skipLoad 로 다시 읽기(파일 읽기 + JSON + 토큰 복호)를 건너뛴다 — 상태는 그 읽기가 세웠다.
+  if (!skipLoad) loadCollectors();
+  // 134회차(재현): `fs.existsSync` 는 stat 실패(폴더 수준 EACCES · EIO · ESTALE)도 false 다 — 바로 앞의 loadCollectors() 가 세운 **읽기 오류 표지를 아래 clear() 가 지워**
+  //   '등록 0개 · 오류 없음' 이 됐다(자동 저장 거절 · clearStaleRemote 건너뜀 · 링크 설정 503 이 전부 풀린다). 정말 없을 때(ENOENT)만 판정한다.
+  if (fileMissing(FILE)) {
     // 첫 설치(파일·보존본 둘 다 없음)는 오류가 아니다 — 자기등록이 막히면 안 된다. 보존본만 남았으면 재시작 뒤에도 '못 읽음'.
     if (corruptOnlyReason(FILE)) loadErr.checkCorruptOnly(FILE); else loadErr.clear();
   }
@@ -118,23 +121,27 @@ export function registryLoadErrorSummary() {
   return { at: Number.isFinite(e.at) ? e.at : null, code: s?.code || null, text: s?.text || '사유 미상' };
 }
 
+// 97회차 F3: parse 단계(JSON.parse + 토큰 복호 — 예전 try 블록과 같은 범위)만 손상이다.
+const parseCollectors = (text) => {
+  const parsed = JSON.parse(text);
+  return openSecretsDeep(Array.isArray(parsed?.collectors) ? parsed.collectors : []); // v2.296 토큰 복호(메모리 평문)
+};
+const WHAT = '수집 서버 등록부(collectors.json)';
 export function loadCollectors() {
-  if (!fs.existsSync(FILE)) return [];
-  try {
-    const parsed = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-    const arr = openSecretsDeep(Array.isArray(parsed?.collectors) ? parsed.collectors : []); // v2.296 토큰 복호(메모리 평문)
-    loadErr.clear(); // v2.771(R6-F4-2): 정상으로 읽었다(사람이 보존본을 되돌린 경우 포함)
-    // 대소문자 중복을 로드 시 자동 정리(최초 1회 병합·영속화, 이후엔 중복이 없어 재저장 안 함).
-    const { list, changed } = dedupeByIdCase(arr);
-    if (changed) { try { save(list); } catch { /* best effort — 다음 로드에서 재시도 */ } }
-    return list;
-  } catch (e) {
-    // save() 주석대로 손상 시 다음 저장이 빈 목록으로 덮어써 전 수집서버·토큰이 유실된다 →
-    // 손상본을 .corrupt로 보존(자기등록으로 쓰기 빈도가 높아 노출 창이 큰 파일).
-    preserveCorrupt(FILE, e.message);
-    loadErr.set(e); // v2.771(R6-F4-2): 조용한 빈 목록 금지 — 자동 저장 거절·clearStaleRemote 건너뜀·링크 설정 503 의 근거
-    return [];
-  }
+  /*
+   * 97회차 F3(재현 — EISDIR): 예전 catch 하나는 **읽기 오류**(EACCES · EIO · EISDIR)도 손상으로 보고 온전한 원본(전 수집 서버 · 토큰)을 `.corrupt.*` 로
+   *   옮겼다 — 권한을 바로잡아도 원본은 보존본에만 남았고(재시작 뒤에도 '못 읽음'), 다음 관리자 저장이 빈 목록 위에 한 건만 든 파일을 썼다.
+   *   판정은 등록부 공용 읽기(util/registryCore.js read — 형제 등록부와 같다): 손상만 보존본으로 옮기고(예전과 같다), 읽기 오류는 원본을 두고
+   *   오류(readError)를 세운다 — 자동 저장 거절 · clearStaleRemote 건너뜀 · 링크 설정 503 은 예전 표지 그대로이고, 사람 저장도 save() 가 거절한다(409).
+   *   다시 읽기는 30초 간격(이 등록부는 요청 · 폴러마다 불린다 — 죽어 가는 디스크를 매번 두드리지 않게).
+   */
+  const r = loadErr.read(FILE, parseCollectors);
+  if (r.kind !== 'ok') return [];   // missing(보존본 판정은 registryLoadError) · corrupt(보존 + 오류) · read-error(원본 그대로 + 오류)
+  loadErr.clear(); // v2.771(R6-F4-2): 정상으로 읽었다(사람이 보존본을 되돌린 경우 포함)
+  // 대소문자 중복을 로드 시 자동 정리(최초 1회 병합·영속화, 이후엔 중복이 없어 재저장 안 함).
+  const { list, changed } = dedupeByIdCase(r.value);
+  if (changed) { try { save(list); } catch { /* best effort — 다음 로드에서 재시도 */ } }
+  return list;
 }
 
 /** v2.771(R6-F4-2): 사람이 아닌 경로(엣지 자기등록·배포 후 자동 등록·데모 시드)의 저장 거절. 읽을 수 있으면 null. */
@@ -143,6 +150,7 @@ function collectorsAutoWriteRefusal() {
 }
 
 function save(list) {
+  loadErr.assertWritable(WHAT); // 97회차 F3: 마지막 방어선 — 읽기 오류 중에는 어느 경로(관리자 저장 포함)도 원본을 덮지 않는다(던진다 — status 409)
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
   // 원자적 쓰기 — 크래시/정전 시 부분기록으로 collectors.json이 손상되면 loadCollectors가
   // []를 반환하고 다음 저장이 빈 목록으로 덮어써 전 수집서버·토큰이 영구 유실된다(자기등록으로
@@ -170,12 +178,27 @@ export function listCollectors() {
  * 둘 다 이 함수를 재수출한다. ⚠ 원본(`loadCollectors`, 토큰 포함)을 돌려준다 — `listCollectors()` 는 토큰을 가리므로
  * 그것으로 찾으면 엣지 호출이 X-Collector-Token 없이 나가 403 이 된다. 없으면 null. 등록부를 못 읽으면 loadCollectors 가
  * 돌려주는 대로(빈 목록 → null)다.
+ * 결정(56~75 남긴 것) 66 ①: 찾는 순서는 **전 항목 id 정확 일치 먼저**, 그다음 표시 이름(대소문자 무시)은 **유일할 때만**이다(둘 이상이면 null —
+ *   사유는 resolveCollectorByName). 예전에는 id · 이름을 한 번에 목록 순서로 찾아, 다른 항목의 표시 이름이 이 id 와 같고 그 항목이 앞에 있으면
+ *   토큰 점검 · 엣지 로그 인출 · 엣지 당기기가 **남의 엣지**에서 당겼다(재현). 같은 순서 규칙을 bmusage/targets.js agentNameClash 가 따른다.
  */
-export function findCollectorByName(agent) {
+export function resolveCollectorByName(agent) {
   const key = String(agent ?? '').trim().toLowerCase();
-  if (!key) return null;
+  if (!key) return { collector: null, issue: 'empty', reason: '수집 서버 이름이 비어 있습니다.' };
   const norm = (v) => String(v ?? '').trim().toLowerCase();
-  return loadCollectors().find((c) => norm(c.id) === key || norm(c.name) === key) || null;
+  const list = loadCollectors();
+  const byId = list.find((c) => norm(c.id) === key);
+  if (byId) return { collector: byId, issue: '', reason: '' };
+  const byName = list.filter((c) => norm(c.name) === key);
+  if (byName.length === 1) return { collector: byName[0], issue: '', reason: '' };
+  if (byName.length > 1) {
+    return { collector: null, issue: 'ambiguous', count: byName.length,
+      reason: `표시 이름 '${String(agent).trim().slice(0, 64)}' 인 수집 서버가 ${byName.length}개라 어느 엣지인지 정할 수 없습니다 — 등록 id 로 지정하거나 설정 › 엣지·원격 › 수집 서버(원격)에서 표시 이름을 겹치지 않게 바꾸세요.` };
+  }
+  return { collector: null, issue: 'not-found', reason: '수집 서버 등록부에 없는 이름입니다(설정 › 엣지·원격 › 수집 서버(원격)에서 등록하세요).' };
+}
+export function findCollectorByName(agent) {
+  return resolveCollectorByName(agent).collector;
 }
 
 // ── SSRF 가드 ────────────────────────────────────────────────────────────────
@@ -347,6 +370,7 @@ export function addCollector(body, { managed = false, transport = null } = {}) {
   //   읽지 못한 동안 저장하지 않는다 — 손상된 빈 목록 위에 한 항목만 저장하면 표지가 지워지고 나머지 등록은 보존본에만 남는다.
   if (!managed) { const refusal = collectorsAutoWriteRefusal(); if (refusal) return refusal; }
   const list = loadCollectors();
+  const unreadable = loadErr.writeRefusal(WHAT); if (unreadable) return unreadable;   // 97회차 F3: 읽기 오류 — 빈 목록 위에 한 건만 쓰지 않는다
   const [entry, err, , code] = normalize(body, null, transport);
   if (err) return rejectResult(err, code, body, transport);
   // 대소문자 무시 중복 방지 — 'GM1'이 있으면 'gm1' 추가를 막는다(같은 엣지 이중 등록 방지).
@@ -361,6 +385,7 @@ export function addCollector(body, { managed = false, transport = null } = {}) {
 
 export function updateCollector(id, body, { managed, transport = null } = {}) {
   const list = loadCollectors();
+  const unreadable = loadErr.writeRefusal(WHAT); if (unreadable) return unreadable;   // 97회차 F3: '없는 수집 서버' 보다 먼저
   const idx = list.findIndex((c) => c.id === id);
   if (idx === -1) return { ok: false, reason: `없는 수집 서버: ${id}` };
   const [entry, err, droppedSecrets, code] = normalize({ ...body, id }, list[idx], transport);
@@ -415,8 +440,8 @@ export function upsertCollectorFromAgent({ name, url, token, datacenter = '', un
 }
 
 /** 자기등록 개수 상한(v2.604 CEN2604-04) — 공유 토큰의 새 이름 생성에만 적용한다. */
-export const SELF_REG_MAX = Math.max(8, Number(process.env.CENTRAL_SELF_REGISTER_MAX) || 256);
-export const SELF_REG_UNVERIFIED_MAX = Math.max(1, Number(process.env.CENTRAL_SELF_REGISTER_UNVERIFIED_MAX) || 16);
+export const SELF_REG_MAX = Math.max(8, envPositive(process.env.CENTRAL_SELF_REGISTER_MAX, 256));
+export const SELF_REG_UNVERIFIED_MAX = Math.max(1, envPositive(process.env.CENTRAL_SELF_REGISTER_UNVERIFIED_MAX, 16));
 
 /**
  * 자기등록 검증 결과를 항목에 남긴다(v2.604 CEN2604-04). `selfRegUnverified` 가 있는 항목은 중앙이 '아는 엣지' 로 세지 않는다
@@ -436,6 +461,7 @@ function markSelfRegVerification(id, unverified) {
 
 export function removeCollector(id) {
   const list = loadCollectors();
+  const unreadable = loadErr.writeRefusal(WHAT); if (unreadable) return unreadable;   // 97회차 F3
   const next = list.filter((c) => c.id !== id);
   if (next.length === list.length) return { ok: false, reason: `없는 수집 서버: ${id}` };
   save(next);

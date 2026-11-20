@@ -11,6 +11,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
 import { numOrNull } from '../util/numOrNull.js';
+import { makeSettingsLoadError } from '../util/settingsLoadError.js';   // 58회차 F5
 import { sendPortalMail } from '../mail/service.js';
 import { load as loadMailCfg } from '../mail/settings.js';
 import { REPORT_DEFAULTS, REPORT_KIND, normalizeReportSettings, planMonthlyTick, monthLabelOf, monthlySlot, buildReportModel, renderReportHtml, reportMailParts } from './storagePerfReport.js';
@@ -25,30 +26,47 @@ const isEdge = () => !!(config.agent.centralUrl && config.agent.centralToken);
 const strMax = (v, n) => String(v ?? '').slice(0, n);
 
 /* ── 설정 ─────────────────────────────────────────────────────────────── */
-let _cfg = null; let _loadErr = null;
+let _cfg = null;
+// 58회차 F5(재현 — 알림 설정과 같은 모양): 재시작하면 손상 표지가 사라져 정기 발송이 조용히 꺼졌고(원본은 .corrupt 로 옮겨짐), 읽기 오류도 원본을 옮겼다.
+//   공용 makeSettingsLoadError — 손상 보존본만 있으면 재시작 뒤에도 못 읽음(발송 중지 · 저장 거절) · 서비스 점검 '기본값으로 확정'(발송 꺼짐).
+const _loadErr = makeSettingsLoadError(FILE, { label: 'SAN 스토리지 성능 월간 보고서 메일 설정 — 확정하면 정기 발송 꺼짐(기본값)으로 저장 · 화면에서 다시 켜세요', confirm: ({ by = '' } = {}) => writeReportSettings({ ...REPORT_DEFAULTS }, by) });
+const reportDefaults = () => ({ ...REPORT_DEFAULTS, updatedAt: null, updatedBy: '' });
 export function loadReportSettings() {
   if (_cfg) return _cfg;
-  try {
-    const raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
-    const r = normalizeReportSettings(raw, REPORT_DEFAULTS);
-    if (r.issue) throw new Error(r.issue);
-    _cfg = { ...r.settings, updatedAt: numOrNull(raw.updatedAt), updatedBy: strMax(raw.updatedBy, 64) }; _loadErr = null;
-  } catch (e) {
-    if (e?.code !== 'ENOENT') { preserveCorrupt(FILE(), e?.message); _loadErr = { at: Date.now(), reason: strMax(e?.message, 200) }; console.warn(`[san-storage-report] 설정 파일을 읽지 못했습니다(손상본 보존 · 정기 발송 중지): ${_loadErr.reason}`); }
-    _cfg = { ...REPORT_DEFAULTS, updatedAt: null, updatedBy: '' };
+  let raw;
+  try { raw = JSON.parse(fs.readFileSync(FILE(), 'utf8')); }
+  catch (e) {
+    if (e?.code === 'ENOENT') _loadErr.missing();
+    else if (e instanceof SyntaxError) { _loadErr.corrupt(e); preserveCorrupt(FILE(), e?.message); }
+    else _loadErr.readError(e);   // 권한 · 디렉터리 — 원본을 옮기지 않는다
+    if (_loadErr.get()) console.warn(`[san-storage-report] 설정 파일을 읽지 못했습니다(정기 발송 중지): ${_loadErr.get().reason}`);
+    _cfg = reportDefaults();
+    return _cfg;
   }
+  const r = raw && typeof raw === 'object' && !Array.isArray(raw) ? normalizeReportSettings(raw, REPORT_DEFAULTS) : { issue: '객체가 아닌 JSON 값' };
+  if (r.issue) {
+    _loadErr.corrupt(r.issue); preserveCorrupt(FILE(), r.issue);
+    console.warn(`[san-storage-report] 설정 파일을 읽지 못했습니다(손상본 보존 · 정기 발송 중지): ${_loadErr.get()?.reason || ''}`);
+    _cfg = reportDefaults();
+    return _cfg;
+  }
+  _cfg = { ...r.settings, updatedAt: numOrNull(raw.updatedAt), updatedBy: strMax(raw.updatedBy, 64) };
+  _loadErr.ok();
   return _cfg;
 }
-export const reportLoadError = () => { loadReportSettings(); return _loadErr; };
+export const reportLoadError = () => { loadReportSettings(); return _loadErr.get(); };
+function writeReportSettings(settings, by) {
+  const next = { ...settings, updatedAt: Date.now(), updatedBy: strMax(by, 64) };
+  atomicWriteFileSync(FILE(), JSON.stringify(next, null, 2), { mode: 0o600 });   // 쓰기 성공 뒤에만 메모리 · 오류 해제
+  _cfg = next; _loadErr.ok();
+  return next;
+}
 export function saveReportSettings(input, { by = '' } = {}) {
   loadReportSettings();
-  if (_loadErr) return { issue: '설정 파일을 읽지 못해 저장하지 않았습니다 — 손상본(san-storage-report.json.corrupt.*)을 확인하세요.' };
+  if (_loadErr.get()) return { issue: '설정 파일을 읽지 못해 저장하지 않았습니다 — 손상 보존본(san-storage-report.json.corrupt.*)을 되돌리고 재시작하거나, 서비스 점검에서 기본값(발송 꺼짐)으로 확정하세요.' };
   const r = normalizeReportSettings(input, _cfg);
   if (r.issue) return r;
-  const next = { ...r.settings, updatedAt: Date.now(), updatedBy: strMax(by, 64) };
-  atomicWriteFileSync(FILE(), JSON.stringify(next, null, 2), { mode: 0o600 });
-  _cfg = next;
-  return { settings: next };
+  return { settings: writeReportSettings(r.settings, by) };
 }
 
 /* ── 상태 ─────────────────────────────────────────────────────────────── */
@@ -133,7 +151,7 @@ export function startStoragePerfReport() {
 export function storagePerfReportStatus(now = Date.now()) {
   const cfg = loadReportSettings();
   const st = state();
-  return { settings: cfg, loadError: _loadErr, lastSlot: st.lastSlot, lastSentAt: st.lastSentAt, history: st.history, lastTick: _lastTick, edge: isEdge(),
+  return { settings: cfg, loadError: _loadErr.get(), lastSlot: st.lastSlot, lastSentAt: st.lastSentAt, history: st.history, lastTick: _lastTick, edge: isEdge(),
     nextSlot: cfg.enabled ? (() => { const prev = monthlySlot(cfg, now); const d = new Date(prev); const n = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate(), d.getUTCHours(), d.getUTCMinutes())); return n.getTime() > now ? n.getTime() : null; })() : null };
 }
-export function _resetReportForTest() { _cfg = null; _loadErr = null; _state = null; _timer = null; _busy = false; _lastTick = null; }
+export function _resetReportForTest() { _cfg = null; _loadErr.ok(); _state = null; _timer = null; _busy = false; _lastTick = null; }

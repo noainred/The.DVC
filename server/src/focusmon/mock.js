@@ -6,8 +6,11 @@
  * 데모 대상 id 는 `fm-d0…` 로 시작한다(등록부의 `fm-<16진>` 과 겹치지 않게 0 다음 글자를 d 로 고정 — 등록부 id 는 무작위 16진이라 우연히 겹칠 수 있어
  * isDemoTarget 은 목록 소속으로 판정한다).
  */
-import { IOSTAT_COLS, aggregateIostat, TOP_N } from './rates.js';
+import { IOSTAT_COLS, aggregateIostat, TOP_N, APP_TOP, appNameOf, appServiceKey } from './rates.js';
 import { loadWindow as _loadWindow } from './load.js';
+import { flattenSample, newBlock, appendToBlock } from './codec.js';
+import { summarizeBlock } from './summary.js';
+import { dayIndex, dayStartMs } from '../util/dayKey.js';
 
 const frac = (x) => x - Math.floor(x);
 const hash = (a, b) => frac(Math.sin(a * 127.1 + b * 311.7) * 43758.5453);
@@ -136,12 +139,99 @@ export function demoSample(id, ts, interval = 2) {
   const phys = dsk.filter((x) => x.k === 'disk');
   const dtot = aggregateIostat(phys);
   const usr = r2(cpu * 0.66); const sys = r2(cpu * 0.2); const iow = r2(Math.min(30, dskU * 0.15)); const stl = 0;
+  // v3.12.0(⑬ 더할 지표 — 시안 Metrics 와 같은 모양): 스케줄링 · 메모리 압박 · TCP · 프로세스 상태 · 파일시스템(60초 갱신 · 데모는 분마다 같은 값)
+  const busy = cpu / 100;
+  const sched = { cs: Math.round(ncores * (1200 + 2600 * busy) * (0.9 + 0.2 * hash(seed + 7, t))), in: Math.round(ncores * (700 + 900 * busy)), fk: r2(0.4 + 4 * busy * hash(seed + 8, t)) };
+  const swapIo = i === 0 && t % 120 > 90; // kr-db-01 은 가끔 스왑 입출력(시안의 주의 상태)
+  const vmp = { si: swapIo ? Math.round(120 + 160 * hash(seed, t)) : 0, so: swapIo ? Math.round(60 + 90 * hash(seed + 1, t)) : 0, mf: r2(2 + 40 * busy * hash(seed + 2, t)), sc: Math.round(memPct > 80 ? 9000 + 9000 * hash(seed + 3, t) : 0), sl: 0 };
+  vmp.sl = Math.round(vmp.sc * (0.6 + 0.2 * hash(seed + 4, t))); // 회수 성공은 스캔보다 적다
+  const rtHigh = i === 0 && t % 90 > 70;
+  const tcp = { rt: r2(rtHigh ? 0.6 + 0.4 * hash(seed + 5, t) : 0.05 + 0.1 * hash(seed + 6, t)), lo: rtHigh ? r2(0.2) : 0, ld: rtHigh ? r2(0.2) : 0, es: Math.round(200 + 1200 * busy), tw: Math.round(600 + 3300 * busy), iu: Math.round(260 + 1300 * busy) };
+  const D = i === 0 ? (t % 40 < 6 ? 2 : 0) : (i === 8 && t % 60 < 8 ? 1 : 0);
+  const pst = { D, Z: i === 13 ? 1 : 0, pd: D ? [{ pid: 1187, c: 'jbd2_dm-3-8', s: t % 40 }, { pid: 25109, c: 'ora_dbw0_ORCL', s: Math.max(0, (t % 40) - 2) }].slice(0, D) : [] };
+  const tm = Math.floor(ts / 60_000);
+  const grow = (base, perDay) => r2(Math.min(99.9, base + perDay * ((tm % 1440) / 1440)));
+  const fsRows = [
+    { m: '/', t: 'xfs', d: '/dev/mapper/rhel-root', kb: 52_403_200, pct: r2(30 + 10 * hash(seed, 1)), ipct: null },
+    { m: '/boot', t: 'xfs', d: '/dev/sda1', kb: 1_038_336, pct: 21.4, ipct: null },
+    { m: '/var', t: 'xfs', d: '/dev/mapper/rhel-var', kb: 104_806_400, pct: i === 0 ? grow(84, 1.6) : r2(40 + 20 * hash(seed, 2)), ipct: null },
+    { m: '/oradata', t: 'ext4', d: '/dev/mapper/oradata-data01', kb: 2_147_483_648, pct: i === 0 ? grow(97, 1.1) : r2(55 + 25 * hash(seed, 3)), ipct: r2(30 + 20 * hash(seed, 4)) },
+    { m: '/oraarch', t: 'ext4', d: '/dev/mapper/oraarch-arch01', kb: 524_288_000, pct: r2(35 + 15 * hash(seed, 5)), ipct: i === 0 ? 93 : r2(10 + 10 * hash(seed, 6)) },
+  ];
+  const fs = i === 8 && tm % 30 < 3 ? { rc: 137, irc: 137, age: Math.floor((ts / 1000) % 60), rows: [] } : { rc: 0, irc: 0, age: Math.floor((ts / 1000) % 60), rows: fsRows };
   return {
     dt: interval, cpu: { pct: r2(cpu), usr, sys, iow, stl, irq: r2(cpu * 0.02), cores },
     load: [r2((cpu / 100) * ncores * 1.1), r2((cpu / 100) * ncores), r2((cpu / 100) * ncores * 0.9)], run: Math.round((cpu / 100) * ncores), blk: Math.round(iow / 5), thr: 1200 + i * 10,
     mem: { pct: r2(memPct), total, used, avail: total - used, bc: total * 0.12, free: Math.max(0, total - used - total * 0.12), swT: 16 * 2 ** 30, swU: 0, dirty: 1.2 * 2 ** 30, slab: 6.4 * 2 ** 30, availSource: 'MemAvailable' },
     net, dsk, dtot, nPhys: phys.length,
+    sched, vmp, tcp, pst, fs,
   };
+}
+
+/**
+ * v3.13.0(⑭) 데모의 요약 행(긴 구간) — 실제 요약과 같은 모양(1분 또는 1시간 칸).
+ * 칸마다 데모 표본을 만들면 24시간(1,440칸)에 서버 하나 0.5초가 걸려(실측) 개요 20대가 이벤트 루프를 10초 막는다 —
+ * 그래서 **끝 시각의 데모 표본 셋으로 본(template)을 한 번 만들고** 칸마다 정해진 물결(사인 · 업무 시간 CPU 오름)로 크기만 바꾼다.
+ * 이틀 전 05:00~08:20(포탈 기준 시각)은 '수집하지 않은 시간' 으로 비운다(시안의 빗금 — 0 이 아니다).
+ */
+const PCT_KEY = /^(s\.|c\.|m\.pct$|f\..*\.p$|f\..*\.i$|n\..*\.u$|d\..*\.util$)/;
+const CPU_KEY = /^(s\.cpu$|c\.(pct|usr|sys)$|l\.(1|5|15|run)$|k\.cs$)/;
+export function demoSumRows(id, from, to, stepMs) {
+  if (!BY_ID.has(String(id))) return null;
+  const H = 3_600_000; const now = Date.now(); // 날짜 · 시각은 포탈 기준 날짜(util/dayKey — KST 상수를 박지 않는다 · C-03)
+  const tb = newBlock(Math.floor(to / 60_000));
+  for (const f of [0, 0.3, 0.6]) { const s = demoSample(id, to - f * 10_000); const { row, meta } = flattenSample(s); appendToBlock(tb, to - f * 10_000, row, meta); }
+  const tpl = summarizeBlock(tb);
+  if (!tpl) return [];
+  const K = tpl.keys.length;
+  const pct = tpl.keys.map((k) => PCT_KEY.test(k)); const cpu = tpl.keys.map((k) => CPU_KEY.test(k));
+  let h = 0; for (const ch of String(id)) h = (h * 31 + ch.charCodeAt(0)) % 997;
+  const r2 = (v) => Math.round(v * 100) / 100;
+  const today = dayIndex(now);
+  const out = [];
+  const start = Math.floor(from / stepMs) * stepMs;
+  for (let t = start; t <= to && out.length < 2000; t += stepMs) {
+    const di = dayIndex(t); const tod = t - dayStartMs(di);
+    if (today - di === 2 && tod >= 5 * H && tod < 8.34 * H) continue;
+    const work = tod > 9 * H && tod < 18 * H ? 1 : 0.55;
+    const w1 = 1 + 0.12 * Math.sin(t / 3.7e6 + h) + 0.06 * Math.sin(t / 9.1e5 + 2 * h);
+    const w2 = 1 + 0.08 * Math.sin(t / 5.3e6 + h / 3);
+    const a = new Array(K); const lo = new Array(K); const hi = new Array(K);
+    for (let i = 0; i < K; i++) {
+      const base = tpl.a[i];
+      let v = base * (cpu[i] ? work * w1 : w2);
+      const spread = cpu[i] ? 0.25 : 0.1;
+      let mn = v * (1 - spread); let mx = v * (1 + spread);
+      if (pct[i]) { v = Math.min(100, v); mn = Math.min(100, mn); mx = Math.min(100, mx); }
+      a[i] = r2(v); lo[i] = r2(mn); hi[i] = r2(mx);
+    }
+    out.push({ t, span: stepMs, s: { v: tpl.v, m: Math.floor(t / 60_000), t0: t, t1: t + stepMs - 1, keys: tpl.keys, n: tpl.n.map((c) => c * Math.max(1, Math.round(stepMs / 6_000))), a, lo, hi, meta: tpl.meta } });
+  }
+  return out;
+}
+
+/**
+ * v3.16.0(⑯ C2) 데모 커널 메시지 — 첫째 서버는 2시간 전 OOM(oracle) 하나 · 둘째는 읽기 막힘(rc 1 — '권한 없음') · 그 밖은 읽힘 · 없음.
+ * 켜진 시각은 3일 전으로 고정(10초 단위) — 같은 OOM 이 같은 열쇠로 와서 사건이 한 줄만 남는다.
+ */
+export function demoKmsg(id, ts) {
+  const i = BY_ID.get(String(id));
+  if (i == null) return null;
+  const boot = Math.floor((ts - 3 * 86_400_000) / 86_400_000) * 86_400; // 3일 전 0시(하루 동안 같은 값 — 실제 서버의 켜진 시각처럼 바뀌지 않는다)
+  if (i === 1) return { rc: 1, boot, oom: [], en: null, es: null, last: null };
+  const oomAt = Math.floor((ts - 2 * 3_600_000) / 3_600_000) * 3_600_000 + 4 * 60_000; // 2시간 전 정시 + 4분
+  const rel = ((oomAt / 1000) - boot).toFixed(6);
+  return i === 0 ? { rc: 0, boot, oom: [{ s: rel, c: 'oracle' }], en: 1, es: rel, last: rel } : { rc: 0, boot, oom: [], en: 0, es: null, last: null };
+}
+
+/** v3.12.0(⑬) 데모의 '가득 찰 때까지' — kr-db-01 은 /var · /oradata 가 차오르는 중(시안과 같은 값) · 나머지는 늘지 않음. */
+export function demoFill(id) {
+  const i = BY_ID.get(String(id));
+  if (i == null) return null;
+  const rows = i === 0
+    ? { '/var': { days: 9, trend: 'up', perDay: 1.6 }, '/oradata': { days: 2.6, trend: 'up', perDay: 1.1 }, '/': { days: null, trend: 'flat', perDay: 0 }, '/boot': { days: null, trend: 'flat', perDay: 0 }, '/oraarch': { days: null, trend: 'flat', perDay: 0.02 } }
+    : Object.fromEntries(['/', '/boot', '/var', '/oradata', '/oraarch'].map((m) => [m, { days: null, trend: 'flat', perDay: 0 }]));
+  return { state: 'ok', spanH: 24, rows };
 }
 
 // [이름, 사용자, CPU 기준, 스레드, 서비스(v2.981 — 데모 세부 정보), 디스크 대기 기준 %]
@@ -177,7 +267,25 @@ export function demoProcs(id, ts) {
   const same = new Map(); for (const r of rows) same.set(r.c, (same.get(r.c) || 0) + 1);
   for (const r of rows) r.ns = same.get(r.c) + (r.c.startsWith('ora_') ? 30 : 0); // 데모: 오라클 백그라운드 프로세스는 상위 밖에도 더 있다
   rows.sort((a, b) => b.cpu - a.cpu || a.pid - b.pid);
-  return { n: 420 + i * 13, top: rows.slice(0, TOP_N), da: true };
+  return { n: 420 + i * 13, top: rows.slice(0, TOP_N), da: true, apps: demoApps(rows, i) };
+}
+
+/** v3.14.0(⑮) 데모 앱 묶음 — 데모 프로세스 40개를 같은 열쇠(rates.appServiceKey · appNameOf)로 묶는다. 오라클 백그라운드 · 커널 스레드는 상위 밖에도 더 있다(프로세스 수만). */
+function demoApps(rows, i) {
+  const acc = { sv: new Map(), cm: new Map() };
+  for (const r of rows) {
+    for (const [mode, k] of [['sv', appServiceKey(r.sv || null, r.pp, r.pid)], ['cm', appNameOf(r.c)]]) {
+      const g = acc[mode].get(k) || { k, n: 0, th: 0, cpu: 0, rss: 0, rb: 0, wb: 0, ion: 0, users: new Set() };
+      g.n += 1; g.th += r.th; g.cpu += r.cpu; g.rss += r.rss; g.users.add(r.u);
+      if (r.rb != null) { g.rb += r.rb; g.wb += r.wb; g.ion += 1; }
+      acc[mode].set(k, g);
+    }
+  }
+  const extra = (k) => (/^ora_|dbora/.test(k) ? 30 : k === '커널 스레드' || /^kworker/.test(k) ? 60 + i : 0);
+  const fin = (m) => [...m.values()].map((g) => { const n = g.n + extra(g.k); const io = g.ion === 0 ? 'none' : g.ion === n ? 'all' : 'part';
+    return { k: g.k, n, th: g.th + extra(g.k), cpu: r2(g.cpu), rss: r2(g.rss), ...(io !== 'none' ? { rb: r2(g.rb), wb: r2(g.wb) } : {}), io, u: [...g.users][0], un: g.users.size }; })
+    .sort((a, b) => b.cpu - a.cpu || b.rss - a.rss).slice(0, APP_TOP);
+  return { sv: fin(acc.sv), cm: fin(acc.cm) };
 }
 
 /**

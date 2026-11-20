@@ -161,6 +161,12 @@ export const HOLD_REASON = Object.freeze({
  * 구분해 줄 수 없다).
  */
 export const PUSH_PROTOCOL = 2;
+/**
+ * 96회차 ⓐ(93회차 F5): 프로토콜 2 안의 **호환 확장 판** — 엣지가 장비마다 `serialLabels`(시리얼 키 파트의 키 꼬리 → 이름)를 싣는다.
+ *   중앙은 이 판의 보고에서만 그 파트를 keyKind 'serial' · 실제 이름으로 되살려 33회차 교체 규칙을 엣지 위임 서버에도 적용한다.
+ *   옛 판 엣지(표지 없음)는 예전 그대로(키 꼬리 → keyKind 'name' — 교체 뒤 옛 장애는 '누락' 보류). `v` 는 올리지 않는다(옛 중앙 호환).
+ */
+export const PART_IDENTS_VERSION = 1;
 
 /**
  * Redfish 인벤토리 컬렉션 이름 → 이 계약의 파트 종류(v2.548 F1). `redfish.js fetchInventory` 가
