@@ -1803,7 +1803,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 | `hwFullScopeOnly` | 3 | **전체 범위 계정만**(서버 하드웨어 정보 내보내기 — v2.967). GET /insights/fleet 과 같은 근거: 미귀속 베어메탈 하드웨어가 들어가 범위로 나눌 수 없다. |
 | `ownerIfAutoCentralToken` | 2 | 요청이 `autoCentralToken` 옵션을 쓸 때만 **설정 소유자**를 요구한다(평문 CENTRAL_TOKEN 을 원격 호스트에 기록하는 경로라 백업과 같은 등급). |
 | `requireOwnOtp` | 2 | **본인 OTP 재인증**(1회용·실패 잠금). 호스트 접근 제어 적용·확정처럼 되돌리기 어려운 동작에 붙는다. |
-| `distOwnerOnly` | 2 | ⚠ **이 생성기가 뜻을 모르는 이름입니다** — 소스를 열어 확인하고 `scripts/api-doc.mjs` 의 `GUARD_NOTE` 에 추가하세요. |
+| `distOwnerOnly` | 2 | **설정 소유 계정 등급**(재확인 N1 · 2026-11-19 사용자 결정 — 베어메탈 사용률 엣지 배포 켜기 · 끄기 · 제외 · 중앙에서 켜기 · 해제). 이 동작은 엣지의 실효 보존 기간을 중앙 값 ↔ 엣지 로컬 값으로 바꿔 엣지 이력을 지울 수 있고 중앙은 엣지 로컬 보존을 모르므로, 보존 줄이기와 같은 판정(`settingsOwnerGradeDenial`)으로 막는다(403 `distribute-owner` · 판정이 던지면 거부). 앞의 `fleetOnly`(조회 ∧ 쓰기 전체)는 그대로 먼저 본다. |
 | `togglePrecheck` | 2 | SAN 플로우 비활성화 · 다시 켜기의 **사전 확인**(v2.940 반증 L-4) — 스위치 · dvc_ 이름 · 포탈 기록 · 지금 상태 · 엣지 버전을 OTP 재인증 **전에** 본다(거부할 요청이 OTP 를 써 버리지 않게). 404 · 400 · 409. |
 | `vaultFirst` | 2 | **새 로그인 키 저장 방식 검사**(v3.9.0 SSH 공용 접속 — 키 등록 · 받는 곳 승인). 자격증명 저장 방식이 암호화가 아니면 409 `keys-need-encryption`, 정책을 못 읽으면 503 `SECRETS_POLICY_UNAVAILABLE` — **OTP(`reauth`) 앞에** 두어 거절될 요청이 1회 비밀번호를 쓰지 않게 한다. 판정은 `keyStore.keyVaultIssue` 하나(저장 함수도 다시 본다). |
 | `alertFullScope` | 2 | **전체 범위 계정만**(v2.838 Backup › Summary 백업 안 된 VM 일일 메일 저장 · 지금 보내기 — `fullScopeOnlyWith` 의 산물 · 전 법인 자료를 메일로 보낸다). 범위 제한 계정은 403 · 핸들러가 관리자 판본(데모 제외)을 한 번 더 본다. |
@@ -1821,8 +1821,6 @@ Prometheus/OTel 익스포터(선택 토큰).
 | `dangerRunGate` | 1 | 원격 명령 실행 중 **위험 동작일 때만** 소유자 등급 + 본인 OTP(`ownerOtpThen`) — 자유 명령 · 서비스 제어 · kill · 재부팅 · ssh-exec · tcp/udp-send · 본문 있는 http-request(판정 `commands.js presetDanger`). 읽기 프리셋은 admin + 전체 범위 그대로(v3.18.8). |
 | `pwVaultFirst` | 1 | **새 공통 비밀번호 저장 방식 검사**(v3.24 서버 접속 — 공통 계정 저장). 새 비밀번호가 있으면 자격증명 저장 방식이 암호화가 아닐 때 409 `passwords-need-encryption`, 정책을 못 읽으면 503 — **OTP(`reauth`) 앞에** 둔다(`vaultFirst` 와 같은 규칙 · 판정 `keyStore.keyVaultIssue`). |
 | `csvPermUnlessJson` | 1 | `csvPerm` 과 같되 **format=json(화면의 표·붙여넣기 등록)은 통과**(v2.643 — 성능점검 대상 등록 마법사). |
-
-> ⚠ 뜻을 모르는 게이트 **1개**: `distOwnerOnly` — 문서가 이 사실을 숨기지 않습니다.
 
 ---
 
