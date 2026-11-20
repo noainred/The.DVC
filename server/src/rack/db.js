@@ -48,7 +48,7 @@ async function openInner() {
     const { DatabaseSync } = await import('node:sqlite');
     fs.mkdirSync(path.dirname(FILE), { recursive: true });
     conn = openSqlite(new DatabaseSync(FILE));
-    try { chmodDbFiles(FILE); } catch { /* best effort */ }
+    try { fs.chmodSync(FILE, 0o600); chmodDbFiles(FILE); } catch { /* best effort */ }   // 0600(v2.503 S-5) — -wal/-shm 도 chmodDbFiles 가
     conn.exec(`
       CREATE TABLE IF NOT EXISTS rack_site (
         id TEXT PRIMARY KEY, corp_id TEXT NOT NULL, name TEXT NOT NULL, sort INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL

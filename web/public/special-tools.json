@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-11-19T21:29:53.693Z",
-  "count": 129,
+  "generatedAt": "2026-11-20T08:24:19.292Z",
+  "count": 130,
   "tools": [
     {
       "k": "service-hub",
@@ -245,6 +245,14 @@
     {
       "k": "serial-lookup",
       "adminOnly": true,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
+      "k": "rack",
+      "adminOnly": false,
       "perm": null,
       "external": null,
       "topTab": false,

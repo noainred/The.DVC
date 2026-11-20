@@ -31,6 +31,7 @@ import { partHealthRollup } from '../../idrac/invView.js';
 import { cleanText, cleanPlaceInput, cleanRackInput, intIn, rackTotals, serialKeyOf, LIMITS, KIND_LABEL } from '../../rack/layout.js';
 import * as R from '../../rack/db.js';
 import { acquireExport } from '../../util/exportBusy.js';
+import { todayStamp } from '../../util/dayKey.js';
 
 const toolsPerm = requirePerm('tools');
 const csvPerm = requirePerm('data.csv');
@@ -211,7 +212,7 @@ export async function buildRoomXlsx(view) {
   const thin = { style: 'thin', color: { argb: 'FF808080' } };
   const box = { top: thin, left: thin, bottom: thin, right: thin };
   const COLS = 5; const GAP = 1;
-  ws.getCell(1, 1).value = `${view.corp.name} › ${view.site.name} › ${view.room.name} — 랙 실장도(포탈 원장 · ${new Date().toISOString().slice(0, 10)})`;
+  ws.getCell(1, 1).value = `${view.corp.name} › ${view.site.name} › ${view.room.name} — 랙 실장도(포탈 원장 · ${todayStamp()})`;
   ws.getCell(1, 1).font = { bold: true, size: 12 };
   view.racks.forEach((rack, i) => {
     const c0 = 1 + i * (COLS + GAP);

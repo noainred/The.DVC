@@ -50,6 +50,7 @@ export const MIGRATABLE = [
   { file: 'rma-tests.db', label: '원격 명령(RMA) 점검 결과(v2.418)' },
   { file: 'dirusage.db', label: '폴더 사용량 리포트 이력(엣지 공유 폴더 Top-N)' },
   { file: 'pdu.db', label: 'PDU 전력·온습도 이력(v2.424)' },
+  { file: 'rack.db', label: '랙 실장도 원장(데이터센터 · 전산실 · 랙 · 배치 · 변경 이력)' },
   { file: 'guest-disk.db', label: '게스트 디스크 회수 리포트 추이(v2.459)' },
   { file: 'curuser.db', label: "'현재 사용자' 로그인 사용자 수 추이(v2.520)" },
   { file: 'san-health.db', label: 'SAN 스위치 점검 이력(최근 N회 비교, v2.522)' },
