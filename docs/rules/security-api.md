@@ -36,7 +36,7 @@
 - (8a단계 추가) 리눅스 성능 8a단계 정비 창 · 용량 예측 — 조회 밖 404 → 쓰기 밖 403(한 함수) · 법인/태그/12h 초과는 소유자 등급 · 고치기는 전후 모두 · 줄이는 동작은 쓰기 범위 · 배포는 개별 토큰만
 - (8b단계 추가) 리눅스 성능 8b단계 Top-N · 저활용 · 전력 API — 범위 먼저(합하기 전) · 단건 404 · 검토 쓰기 404 → 403 · 프로세스 사용자는 관리자 판본만 원문 · 인자 · 환경은 수집 단계에서 없음
 - (v2.976) 집중 모니터링 — admin + 전체 범위 · 키 로그인만 · 인증 거부 자동 재시도 금지 · 프로세스 comm 만 · 원격 명령 상수
-- (베어메탈 사용률 점검 6회차 A1 추가) 공용 게이트 fullScopeOnlyWith · requireSettingsOwner — 안전 메서드(GET · HEAD · OPTIONS)는 조회 범위만 · 그 밖은 조회 ∧ 쓰기 전체(isFullReadWriteScope) · 사유 따로 · 던지면 거부 · 읽기성 POST 예외 1 · 소유자 GET 은 결정 대기
+- (베어메탈 사용률 점검 6회차 A1 추가) 공용 게이트 fullScopeOnlyWith · requireSettingsOwner — 안전 메서드(GET · HEAD · OPTIONS)는 조회 범위만 · 그 밖은 조회 ∧ 쓰기 전체(isFullReadWriteScope) · 사유 따로 · 던지면 거부 · 읽기성 POST 예외 1 · 소유자 GET 도 조회 ∧ 쓰기 전체(2026-11-19 결정)
 
 ## 본문
 
@@ -581,7 +581,13 @@
     `routes/admin/idracScan.js` 실시간 iDRAC 로그인(`gpu-probe` · `inventory?refresh=1` · `sensors?live=1` — 저장된 BMC 계정으로 장비에 접속)은 조회 범위만 봐서
     쓰기 vcA 관리자가 vcB 서버에 실시간 로그인했다(재현 200) → `liveFleetOnly = fullReadWriteScopeOnlyWith` · `denyLive` = `isFullReadWriteScope`(캐시 조회는 그대로).
     새 GET 라우트가 장비에 접속하거나 상태를 바꾸면 안전 메서드 통과에 기대지 말고 `fullReadWriteScopeOnlyWith` 를 직접 건다(Bareos `?refresh=1` 은 콘솔 조회 — 읽기).
-  - **결정 대기(사용자)**: `requireSettingsOwner` 의 **GET**(백업 내려받기 · 상태 · 비밀 정책 조회 — 전 법인 공용 비밀이 든 조회)을 쓰기 범위가 지정된 소유자에게 줄지. 이번에는 바꾸지 않았다(바꾸면 그 소유자는 소유자 라우트의 GET 도 잃는다).
+  - **결정 — 조회도 막음(2026-11-19 사용자 · 권장안)**: `requireSettingsOwner` 는 **모든 메서드**(GET · HEAD 포함)에서 `isFullReadWriteScope`(던지면 거부)다 — 안전 메서드 예외(`writeScopeDenial`)를 쓰지 않는다.
+    소유자 등급 GET 은 전 법인 공용 비밀 · 설정(백업 상태 · 내려받기 · 보기 · 비밀 정책 · 세션 보안 · 공유 중앙 토큰 · host-access · 사용 현황 · SSH 접근 · bm-storage 인증 선택지 · 설정 상태 배지)과
+    처리기 안에서 부르는 **비밀 포함 내보내기**(`?secrets=1` · `?tokens=1` · `?passwords=1` — iDRAC 스캔 대역 · 엣지 배포 대상 · 수집 서버 · CVP · 스토리지 장비 · PDU · bm-storage)를 준다.
+    쓰기 범위가 일부 법인인 소유자는 이제 그 GET 에서 403(`SETTINGS_OWNER_WRITE_SCOPE_REASON` — 문구를 '조회 · 변경' 으로 고쳤다 · `writeScope: 'partial'` · `requiredOwner` 없음).
+    비밀이 없는 같은 내보내기는 그대로(조회 범위 게이트만). 등급 질의(`settingsOwnerGradeDenial` — `isOwnerTier`: 8a 정비 창 · 7b 묶음 행)는 바꾸지 않았다.
+    `/auth/me settingsOwnerTier` 는 그 GET 의 실제 판정과 같다(메서드와 무관). 화면: 설정 메뉴(`isSettingsOwner`)는 그대로 보이고, 소유자 화면을 열면 `ErrorBox` 가 권한 안내(범위)로 그린다.
+    회귀 `server/test/bmUsageDecideGa.test.js` ①(실제 라우터의 소유자 GET 전수 — 게이트 태그로 찾아 새 라우트도 자동 포함 · 안쪽 호출 8 · HEAD · /auth/me 대조) · 정정 `bmUsageLoop6x` A1 ①(backup/status wown 200 → 403).
   - 바뀌는 흐름(정직 기록): 쓰기 범위가 지정된 관리자 · 소유자는 전 법인 공용 쓰기 · 시험 · 실행 라우트에서 403 을 받는다(버튼은 지금처럼 역할로 열리고, 서버 사유가 화면에 그대로 보인다 — 통합 서버 인벤토리 · bm-storage 주기 저장 확인).
   - ⚠ **남은 빈칸 — 전체 점검 2회차 V-1(2026-11-15 · 재현)**: 6회차는 공용 **게이트**(팩토리)만 고쳤고, 라우트 안 인라인 검사(`if (scopedVcenterIds(req.user, store.get())) 403`)와
     실행 헬퍼 `denyScopedRun`(14개 라우트)은 조회 범위만 봤다 — 쓰기 vcA 관리자가 vCenter 로그 보관 설정(저장 경로 · 주기) · 로그인 실패 감시 설정 · 역할 권한 저장/초기화 ·

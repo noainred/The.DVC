@@ -392,6 +392,7 @@ const GUARD_NOTE = {
   judgeFirst: '**판정 거절을 OTP 앞에서**(v3.24 서버 접속 반증 F9 — 6회차 A2 와 같은 규칙): 서비스를 `dryRun` 으로 한 번 돌려(로그인 · 쓰기 없음) 없는 계정 · OS 불일치 · 도메인 꼴 · 확인 대상 고르기(need-verify) · 낡은 화면(moved) 같은 거절이면 그대로 돌려준다. 통과면 OTP 뒤에서 같은 판정을 다시 한다.',
   accountFirst: '**공통 계정 저장 사전 판정**(베어메탈 사용률 점검 6회차 A2 — OTP 앞): 키 저장소 검사(B-4) + 그 계정을 쓰는 서버가 새로 어긋나는지(바꾼 기본 키의 폴더 밖 · 다른 법인 계정 · 종류) — 대수만 싣는 409 · 등록부를 못 읽으면 503. OTP 를 소모하지 않는다.',
   fullScopeReadPost: '**전체 범위 계정만 — 읽기성 POST 예외**(베어메탈 사용률 점검 6회차 A1 · `fullScopeOnlyWith(…, { readPost: true })`): 본문만 파싱하는 진단이라 쓰기 메서드여도 조회 범위로만 본다(쓰기 범위 판정 없음). 지금 cvp parse-preview 하나.',
+  distOwnerOnly: '**설정 소유 계정 등급**(재확인 N1 · 2026-11-19 사용자 결정 — 베어메탈 사용률 엣지 배포 켜기 · 끄기 · 제외 · 중앙에서 켜기 · 해제). 이 동작은 엣지의 실효 보존 기간을 중앙 값 ↔ 엣지 로컬 값으로 바꿔 엣지 이력을 지울 수 있고 중앙은 엣지 로컬 보존을 모르므로, 보존 줄이기와 같은 판정(`settingsOwnerGradeDenial`)으로 막는다(403 `distribute-owner` · 판정이 던지면 거부). 앞의 `fleetOnly`(조회 ∧ 쓰기 전체)는 그대로 먼저 본다.',
   requireSettingsOwner: '**설정 소유 계정**(`settings-owners.txt`·`SETTINGS_OWNERS`·중앙 배포 admin). admin 이라도 소유자가 아니면 403. 그리고 **소유자이면서 전체 범위(vCenter 제한 없음) 계정만** 통과한다 — 범위가 지정된 소유자는 403(v2.744 AUTHZ-02). 백업 아카이브·중앙 토큰 배달 등 **비밀을 다루는 경로**에 붙는다.',
   ownerOtpThen: '**설정 소유자 등급 + 본인 OTP 재인증**(`requireSettingsOwner` 뒤 1회용 OTP). 원격 명령 비밀번호 설정 · 해제 · 원격 배포 · 원격 인스턴스 제거처럼 엣지에서 임의 실행 · 권한을 바꾸는 동작에 붙는다(v3.18.8).',
   dangerRunGate: '원격 명령 실행 중 **위험 동작일 때만** 소유자 등급 + 본인 OTP(`ownerOtpThen`) — 자유 명령 · 서비스 제어 · kill · 재부팅 · ssh-exec · tcp/udp-send · 본문 있는 http-request(판정 `commands.js presetDanger`). 읽기 프리셋은 admin + 전체 범위 그대로(v3.18.8).',

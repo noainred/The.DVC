@@ -36,6 +36,8 @@ const DIR = tmpDir('bmedgeon2927-');
 Object.assign(process.env, {
   CONFIG_DIR: DIR, SSRF_ALLOW_LOOPBACK: 'true', CENTRAL_TOKEN: 'ctok-2927', AUTH_ENABLED: 'true', AUTH_SECRET: 'q'.repeat(48),
   OTP_ROLE_ENFORCE: 'false', DATA_SOURCE: 'mock',
+  // 재확인 N1(2026-11-19 사용자): 배포 · 중앙 켜기는 설정 소유자 등급 — 이 파일의 전체 범위 관리자(adm)를 소유자로 둔다(비소유자 403 표는 bmUsageDecideGa N1)
+  SETTINGS_OWNERS: 'adm',
 });
 delete process.env.BMUSAGE_ENABLED;
 delete process.env.CENTRAL_URL;

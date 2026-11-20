@@ -11,12 +11,12 @@ import { alertStatus, saveAlertConfig, alertConfigWriteRefusal, testAlert, getAn
 import { createJob as createProvisionJob } from '../../provision/jobs.js';
 import { updateSaved, removeSaved, getSaved } from '../../provision/saved.js';
 import { store } from '../../store.js';
-import { inUserWriteScope, inUserScope, scopedVcenterIds } from '../../auth/scope.js';
+import { inUserWriteScope, inUserScope, scopedVcenterIds, isFullReadWriteScope } from '../../auth/scope.js';
 import { ssrfBlockReasonResolved } from '../../collector/registry.js';
 import { dailyReportStatus, saveDailyReportSettings, runDailyReportNow, dailyReportWriteRefusal } from '../../reports/dailyReport.js';
 import { unreadMark } from '../settingsUnreadMark.js';   // 112회차: 조회 응답의 읽기 오류 표지
 import { refreshCerts } from '../../security/certMonitor.js';
-import { adminOnly, requireSettingsOwner, fullScopeOnlyWith, SETTINGS_OWNER_FULL_SCOPE_REASON } from './shared.js';
+import { adminOnly, requireSettingsOwner, fullScopeOnlyWith, SETTINGS_OWNER_FULL_SCOPE_REASON, SETTINGS_OWNER_WRITE_SCOPE_REASON } from './shared.js';
 import { mergeScopedMap, filterScopedMap, denyScopedRun, denyFleetWrite, writeMergeScope } from '../../auth/scopeMerge.js'; // v2.606 AUTHZ2606-07
 import { todayStamp } from "../../util/dayKey.js";
 import { csvLine } from '../../util/csv.js'; // v2.741(WEB-02 후속): CSV 수식 가드 한 벌
@@ -88,7 +88,14 @@ export function scopedOwnerWarnings(owners) {
   for (const name of Array.isArray(owners) ? owners : []) {
     let rec = null;
     try { rec = getUser(String(name)); } catch { rec = null; }
-    if (rec && scopedVcenterIds(rec, snap)) out.push({ username: String(name), reason: SETTINGS_OWNER_FULL_SCOPE_REASON });
+    if (!rec) continue;
+    // 결정 반영 재확인 N2(2026-11-19): 소유자 GET · 쓰기는 이제 **쓰기 범위도 전체**여야 통과한다(requireSettingsOwner — isFullReadWriteScope).
+    //   예전에는 조회 범위만 봐서 쓰기 범위가 일부 법인인 소유자를 경고하지 않았다 → 'UI 목록에 그런 계정뿐이면 아무도 설정을 못 연다' 가 경고 없이 성립.
+    //   판정은 게이트와 같은 하나(isFullReadWriteScope) · 판정이 던지면 경고한다(거부 기본값과 같은 쪽).
+    let readScoped = true;
+    try { readScoped = !!scopedVcenterIds(rec, snap); } catch { readScoped = true; }
+    if (readScoped) out.push({ username: String(name), reason: SETTINGS_OWNER_FULL_SCOPE_REASON });
+    else if (!isFullReadWriteScope(rec, snap)) out.push({ username: String(name), reason: SETTINGS_OWNER_WRITE_SCOPE_REASON, writeScope: 'partial' });
   }
   return out;
 }

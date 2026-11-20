@@ -23,6 +23,7 @@ import { loadBmUsageSettings, saveBmUsageSettings, bmUsageEnabled, DEFAULTS, ent
 import { edgeCorpsSource } from '../../bmusage/edgeCorps.js'; // v2.927 중앙에서 켜기 — 엣지별 법인 매핑
 import { listAgentTokens } from '../../central/agentTokens.js';
 import { fullReadWriteScopeOnlyWith, requireSettingsOwner } from '../admin/shared.js';
+import { settingsOwnerGradeDenial } from '../admin/shared.js'; // 결정 반영(2026-11-19 ③) — 보존 줄이기는 설정 소유자 등급(isOwnerTier 와 같은 하나)
 import { knownAgentNames } from '../../central/knownAgents.js';
 import { unassignedCauses, CAUSE as UNASSIGNED_CAUSE } from '../../bmusage/attribution.js';
 import { TIER_LABEL } from '../../bmusage/license.js';
@@ -48,6 +49,7 @@ import { buildPerfEntry, PERF_COL_META, compactPerfEntry } from '../../bmusage/p
 import { hwFactsReader } from '../../bmusage/hwFacts.js';
 import { freshMsFor } from '../../bmusage/useJudge.js';
 import { PERF_DEFAULTS } from '../../bmusage/settings.js';
+import { retentionShrink } from '../../bmusage/settings.js'; // 결정 반영(2026-11-19 ③) — 이 저장이 보존 칸을 저장된 값보다 줄이는가
 import { scopeSig } from '../../util/scopeSig.js';
 
 const toolsPerm = requirePerm('tools');
@@ -1068,7 +1070,7 @@ api.get('/tools/bm-usage', toolsPerm, async (req, res) => {
       // v2.627: 이 노드가 중앙 배포값을 쓰는가(엣지 화면 배너·입력 잠금) · 중앙의 배포 현황(전체 범위 admin 에게만 — 전 엣지 이름).
       central: bmUsageCentralState(),
       // 재확인 R1: 배포 관리 표(쓰기 버튼 포함)는 조회 ∧ 쓰기 전체 범위 관리자만 — 저장 게이트(fleetOnly)와 같은 함수.
-      distribution: isAdmin && isFullReadWriteScope(req.user, store.get()) && !tg.isEdge ? distStatusNow() : null,
+      distribution: isAdmin && isFullReadWriteScope(req.user, store.get()) && !tg.isEdge ? distView(req) : null,
       // ⚠ DB 파일 경로는 admin 에게만(operator 는 tools 를 기본 보유 — '거부 기본값' 규칙).
       // 83회차(81회차 결정 — 권장안): 행 수 · 파일별 행 · 바이트 · 마이그레이션 센 수는 **전 법인 합**이라 범위 계정에는 싣지 않는다(함대 규모 추정 차단) —
       //   전체 범위(조회 ∧ 쓰기 — isFullReadWriteScope) 계정만. 범위 계정은 개수 없는 상태(dbStateOnly)만.
@@ -1455,6 +1457,21 @@ function safeKnownAgents() { try { return knownAgentNames(); } catch { return []
 function safeTokenAgents() { try { return new Set(listAgentTokens().map((x) => String(x.agent || '').trim().toLowerCase()).filter(Boolean)); } catch { return null; } }
 /** 배포 현황(전체 범위 admin · 중앙 전용 응답) — 행마다 그 엣지에 보낼 판의 서명으로 적용 여부를 가른다(v2.927). */
 function distStatusNow() { return distributionStatus(safeKnownAgents(), { edgeCorps: edgeCorpsSource(), tokenAgents: safeTokenAgents() }); }
+/*
+ * 결정 반영 재확인 N1(2026-11-19 사용자 '세 경로도 소유자 등급'): 엣지 배포 켜기 · 끄기 · 제외 · 중앙에서 켜기 · 해제는 엣지의 **실효 보존 기간**을
+ *   중앙 값 ↔ 엣지 로컬 값으로 바꾼다(엣지 bmUsageConfigPull 의 적용 · 해제 → 다음 정리 틱이 실효값으로 지운다 — 재확인 재현: 6행 중 3행 · 5행 삭제).
+ *   중앙은 엣지 로컬 보존을 모르므로 줄어드는지 미리 가를 수 없다 → '모르면 거부 쪽' 으로 ③ 과 같은 판정(settingsOwnerGradeDenial — isOwnerTier 와 같은 하나).
+ *   전체 범위(fleetOnly — 조회 ∧ 쓰기 전체)는 그대로 먼저 본다. 화면 표지는 GET distribution.canEdit(같은 판정 — 웹에 사본 없음).
+ */
+const DIST_OWNER_REASON = '엣지 배포 켜기 · 끄기 · 제외 · 중앙에서 켜기는 엣지의 보존 기간을 바꿔 엣지 이력을 지울 수 있어 설정 소유 계정만 바꿀 수 있습니다.';
+function distOwnerDenial(req) { try { return settingsOwnerGradeDenial(req); } catch { return { requiredOwner: true }; } }   // 판정이 던지면 거부
+function distOwnerOnly(req, res, next) {
+  const g = distOwnerDenial(req);
+  if (!g) return next();
+  return res.status(403).json({ ok: false, error: 'forbidden', code: 'distribute-owner', reason: DIST_OWNER_REASON, ...(g.requiredOwner ? { requiredOwner: true } : {}) });
+}
+/** 배포 현황 + 이 요청자가 바꿀 수 있는지(canEdit — 위 게이트와 같은 판정). */
+function distView(req) { return { ...distStatusNow(), canEdit: !distOwnerDenial(req) }; }
 
 /**
  * v2.627 엣지 배포(사용자 요청 "한번에 켜는 기능") — 켬/끔 + 엣지별 제외. 배포되는 값은 이 중앙의 설정 자체다(따로 두 벌을 두지 않는다).
@@ -1462,7 +1479,7 @@ function distStatusNow() { return distributionStatus(safeKnownAgents(), { edgeCo
  * v2.927: 중앙 켜기가 저장된 엣지를 제외로 바꾸는 저장은 409(반대 지시 — 하나를 먼저 푼다). 전체 배포를 켜서 중앙 켜기가 가려지면
  *   응답 `perEdgeSuperseded` 로 밝힌다(전체 배포가 우선 — settings.js 머리말).
  */
-api.put('/tools/bm-usage/distribute', adminOnly, fleetOnly, (req, res) => {
+api.put('/tools/bm-usage/distribute', adminOnly, fleetOnly, distOwnerOnly, (req, res) => {
   const b = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
   const patch = {};
   if (typeof b.enabled === 'boolean') patch.enabled = b.enabled;
@@ -1480,7 +1497,7 @@ api.put('/tools/bm-usage/distribute', adminOnly, fleetOnly, (req, res) => {
   const superseded = perEdgeSuperseded(next);
   logAudit({ user: req.user?.username, action: 'bm-usage.distribute', ip: req.ip || '',
     detail: JSON.stringify({ enabled: next.enabled, excluded: Object.keys(next.excluded).length, ...(superseded.length ? { perEdgeSuperseded: superseded.length } : {}) }).slice(0, 300) });
-  res.json({ ok: true, distribution: distStatusNow(), ...(superseded.length ? { perEdgeSuperseded: superseded } : {}) });
+  res.json({ ok: true, distribution: distView(req), ...(superseded.length ? { perEdgeSuperseded: superseded } : {}) });
 });
 
 /**
@@ -1492,7 +1509,7 @@ api.put('/tools/bm-usage/distribute', adminOnly, fleetOnly, (req, res) => {
  *  · 해제: 저장된 중앙 켜기가 있으면 **등록부와 무관하게** 된다(반증 F1 — 토큰 폐기로 등록부에서 빠진 엣지도 지시를 지울 수 있어야 한다).
  *  · 엣지 노드에서는 거부(409 — 이 노드는 배포를 받는 쪽이다). 저장 즉시 바뀐 척하지 않는다 — 엣지는 다음 인출(기본 10분)에 받는다.
  */
-api.put('/tools/bm-usage/distribute/edge', adminOnly, fleetOnly, async (req, res) => {
+api.put('/tools/bm-usage/distribute/edge', adminOnly, fleetOnly, distOwnerOnly, async (req, res) => {
   try {
     if (config.agent?.centralUrl) return res.status(409).json({ ok: false, code: 'edge-node', reason: '이 노드는 엣지입니다 — 중앙에서 켜기는 중앙 포탈에서만 저장합니다.' });
     const b = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
@@ -1530,7 +1547,7 @@ api.put('/tools/bm-usage/distribute/edge', adminOnly, fleetOnly, async (req, res
     const saved = r.distribution?.perEdge ? perEdgeFor(name, r.distribution) : null;
     logAudit({ user: req.user?.username, action: 'bm-usage.distribute.edge', target: name, ip: req.ip || '',
       detail: JSON.stringify({ agent: name, on: b.on, changed: r.changed, ...(saved ? { corps: saved.corps.slice(0, 8), corpsCount: saved.corps.length } : {}) }).slice(0, 300) });
-    res.json({ ok: true, agent: name, on: b.on, changed: r.changed, ...(saved ? { corps: saved.corps } : {}), distribution: distStatusNow(),
+    res.json({ ok: true, agent: name, on: b.on, changed: r.changed, ...(saved ? { corps: saved.corps } : {}), distribution: distView(req),
       // 엣지 인출 주기는 엣지 쪽 설정이다(AGENT_BMUSAGE_CONFIG_PULL_MS — 기본 10분). 중앙은 그 엣지의 실제 값을 모른다.
       nextPull: { defaultMs: 10 * 60_000, note: '엣지는 다음 인출(기본 10분 주기)에 받습니다 — 저장 즉시 바뀌지 않습니다.' } });
   } catch (e) {
@@ -1586,6 +1603,23 @@ api.put('/tools/bm-usage/settings', adminOnly, (req, res) => {
   //   전역 필드를 기본값으로 다시 쓰고 손상 표지를 지우던 경로를 막는다(그 밖은 409 — saveBmUsageSettings 가 판정).
   const confirmLoadError = fullRw && req.body?.confirmDefaults === true;
   delete body.confirmDefaults;
+  /*
+   * 결정 반영(2026-11-19 ③ 사용자): 보존 기간을 **저장된 값보다 줄이는** 저장은 설정 소유자 등급만(settingsOwnerGradeDenial — bmOnboard.isOwnerTier 와 같은 하나) —
+   *   줄이면 다음 보존 정리가 그만큼 이력을 지운다(되돌릴 수 없다). 늘리기 · 같은 값은 그대로(전체 범위 관리자). 판정 입력은 settings.retentionShrink
+   *   (저장과 같은 정규화 · 원시 · 롤업 + store 의 보존 칸). 설정을 못 읽은 동안의 확정 저장은 지금 값을 몰라 줄어듦으로 본다(거부 쪽).
+   *   범위 계정은 위 keepScopedFields 가 전역 값을 이미 버려 여기 걸리지 않는다. 403 이면 **아무것도 저장하지 않는다**(같은 요청의 법인 칸 · 다른 전역 값 포함).
+   *   화면 표지는 /auth/me settingsOwnerTier(requireSettingsOwner 를 그대로 부른 값 — 전역 값을 저장할 수 있는 계정에서는 이 판정과 같은 답).
+   */
+  const shrunk = retentionShrink(body, { confirmLoadError });
+  if (shrunk.shrink.length) {
+    const g = settingsOwnerGradeDenial(req);
+    if (g) {
+      return res.status(403).json({ ok: false, error: 'forbidden', code: 'retention-owner', fields: shrunk.shrink, ...(g.requiredOwner ? { requiredOwner: true } : {}),
+        reason: shrunk.unknown
+          ? '설정 파일을 읽지 못한 동안의 확정 저장은 보존 기간을 줄일 수 있어(지금 값을 모릅니다) 설정 소유 계정만 할 수 있습니다 — 아무것도 저장하지 않았습니다.'
+          : '보존 기간을 줄이는 저장은 설정 소유 계정만 할 수 있습니다 — 줄이면 다음 보존 정리가 그만큼 이력을 지웁니다(되돌릴 수 없음). 아무것도 저장하지 않았습니다(늘리기 · 다른 칸은 따로 저장하세요).' });
+    }
+  }
   let next;
   try { next = saveBmUsageSettings(body, { confirmLoadError }); } catch (e) {   // 34회차 F4: 읽지 못한 설정 파일은 덮지 않는다
     if (e?.code === 'settings-unreadable') return res.status(409).json({ ok: false, code: e.code, reason: e.message, ...(e.corrupt ? { corrupt: true } : {}) });

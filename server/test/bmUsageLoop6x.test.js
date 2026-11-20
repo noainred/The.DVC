@@ -3,6 +3,7 @@
  *   A1 공용 게이트(fullScopeOnlyWith · requireSettingsOwner)가 조회 범위만 봐 '조회 무제한 + 쓰기 일부' 계정이 전 법인 공용 쓰기를 했다
  *      (재현: wadm PUT /insights/fleet/assign vcB → 200 · 파일에 씀 · wown PUT perf-rules · backup/settings 200).
  *      메인 결정: 안전 메서드(GET · HEAD · OPTIONS)는 그대로 · 그 밖은 isFullReadWriteScope · 사유 따로 · 던지면 거부 · requireSettingsOwner 의 GET 은 그대로(결정 대기).
+ *      → 결정 반영(2026-11-19 ① 사용자): requireSettingsOwner 는 GET 도 조회 ∧ 쓰기 전체(아래 표의 backup/status 행 · 전수는 bmUsageDecideGa.test.js).
  *   A2 공통 계정의 법인 · 기본 키를 함께 바꾸면 그 계정을 쓰는 옛 법인 서버가 key-folder 로 끊겼다 · B-4 거절이 OTP 를 소모했다.
  *   B4 bm-storage 서버 폼의 키 드롭다운이 이 서버에 쓸 수 없는 키를 보였다(고르면 409).
  * 기준 시각: 실제 시각(TOTP 창) — OTP 는 창 끝 12초 안이면 다음 창까지 기다린다(bmOnboard7bKeys 와 같은 꼴).
@@ -95,7 +96,7 @@ test('A1 ① 공용 게이트 — 쓰기 메서드는 조회 ∧ 쓰기 전체 �
     ['PUT', '/tools/bm-storage/settings', { intervalMinutes: 30 }, { adm: 200, wadm: 403, sadm: 403, own: 200, wown: 403, sown: 403 }],
     ['GET', '/tools/bm-usage/perf-rules', null, { own: 200, wown: 200 }],
     ['PUT', '/tools/bm-usage/perf-rules', { rules: {} }, { adm: 403, wadm: 403, sadm: 403, own: 200, wown: 403, sown: 403 }],
-    ['GET', '/admin/backup/status', null, { adm: 403, own: 200, wown: 200, sown: 403 }],   // requireSettingsOwner 의 GET — 결정 대기(그대로)
+    ['GET', '/admin/backup/status', null, { adm: 403, own: 200, wown: 403, sown: 403 }],   // requireSettingsOwner 의 GET — 결정 반영(2026-11-19 ①): 쓰기 일부 소유자도 403(예전 200 · bmUsageDecideGa ①)
     ['PUT', '/admin/backup/settings', {}, { adm: 403, wadm: 403, own: 200, wown: 403, sown: 403 }],
     ['POST', '/tools/rma/tests/validate', { test: 'nope' }, { adm: 200, wadm: 403, sadm: 403 }],   // 저장 직전 검증 — 예외 아님
     ['POST', '/tools/cvp/parse-preview', { kind: 'nope', text: 'x' }, { adm: 400, wadm: 400, sadm: 403 }],   // 읽기성 POST 예외(본문만 파싱 — 400 = 게이트 통과 · 본문 검증)

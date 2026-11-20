@@ -18,6 +18,7 @@ export const adminOnly = requireRole('admin');
  *   (scope = { vcenters: [], writeVcenters: [vcA] })이 전 법인 공용 쓰기(서버 귀속 · 수집 설정 · 백업 설정 · 공용 비밀 …)를 그대로 했다.
  *   라우트 수백 개를 하나씩 fullReadWriteScopeOnlyWith 로 바꾸다 빠뜨리지 않게 게이트 한 곳에서 가른다.
  *   판정이 던지면 거부한다(isFullReadWriteScope 의 기본값 false). 쓰기 범위 때문에 막을 때는 사유를 따로 준다(조회 범위 사유는 이 계정에 틀린 설명).
+ *   ⚠ 결정 반영(2026-11-19 ①): requireSettingsOwner 는 안전 메서드 예외를 쓰지 않는다 — GET 도 조회 ∧ 쓰기 전체(아래 requireSettingsOwner).
  */
 export const SAFE_METHODS = Object.freeze(['GET', 'HEAD', 'OPTIONS']);
 export const isSafeMethod = (req) => SAFE_METHODS.includes(String(req?.method || '').toUpperCase());
@@ -86,7 +87,8 @@ export function fullReadWriteScopeOnlyWith(reason = '이 작업은 조회 · 쓰
 //   판정을 여기 두면 새 소유자 라우트도 자동으로 따른다(아키텍처 점검 archScan 도 이 게이트를 전체 범위로 센다).
 //   거부 응답은 fullScopeOnlyWith 와 같은 모양({ok,error,reason}) — requiredOwner 를 싣지 않는다(이미 소유자인 계정에
 //   '소유자 목록에 등록하라' 는 틀린 조치를 화면이 말하지 않게. 화면은 서버 사유와 함께 '범위' 안내로 그린다).
-export const SETTINGS_OWNER_WRITE_SCOPE_REASON = '설정 소유자 등급의 변경은 전 법인 공용이라 쓰기 범위도 전체(vCenter 제한 없는)인 계정만 할 수 있습니다 — 이 계정은 쓰기 범위가 일부 법인으로 제한되어 있습니다.';
+// 결정 반영(2026-11-19 ①): 조회(GET)도 같은 사유로 막으므로 '변경' 이 아니라 '조회 · 변경' 을 말한다.
+export const SETTINGS_OWNER_WRITE_SCOPE_REASON = '설정 소유자 등급(조회 · 변경)은 전 법인 공용이라 쓰기 범위도 전체(vCenter 제한 없는)인 계정만 쓸 수 있습니다 — 이 계정은 쓰기 범위가 일부 법인으로 제한되어 있습니다.';
 export const SETTINGS_OWNER_FULL_SCOPE_REASON = '설정 소유자 등급은 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 쓸 수 있습니다 — 이 계정은 소유자 목록에 있지만 범위가 지정되어 있습니다.';
 /**
  * 설정 소유자 **등급** 판정(소유자 ∧ 조회 전체 범위 — v2.744 그대로). 통과면 null, 아니면 403 응답 본문.
@@ -109,11 +111,11 @@ export function requireSettingsOwner(req, res, next) {
   const g = settingsOwnerGradeDenial(req);
   if (g) return res.status(403).json(g);
   if (!config.auth.enabled) return next();
-  // 6회차 A1: 쓰기 · 실행은 쓰기 범위도 전체여야 한다(fullScopeOnlyWith 와 같은 writeScopeDenial — 판정 isFullReadWriteScope 하나 · 던지면 거부).
-  //   ⚠ **GET(백업 내려받기 · 상태 · 비밀 정책 조회 등)은 이번에 바꾸지 않았다** — 쓰기 범위가 지정된 소유자에게 전 법인 공용 비밀이 든 조회를 줄지는
-  //   사용자 결정 대기(docs/rules/security-api.md 6회차 A1 '결정 대기'). 바꾸면 쓰기 범위 소유자는 소유자 라우트의 GET 도 잃는다.
-  const w = writeScopeDenial(req);
-  if (w) return res.status(403).json({ ...w, reason: SETTINGS_OWNER_WRITE_SCOPE_REASON });
+  // 6회차 A1 → 결정 반영(2026-11-19 ① 사용자 — '결정 대기' 해소): **모든 메서드**(GET · HEAD 포함)에서 쓰기 범위도 전체여야 한다
+  //   (판정 isFullReadWriteScope 하나 · 던지면 거부 — 기본값 false). 소유자 등급 GET(백업 상태 · 내려받기 · 보기 · 비밀 정책 · 세션 보안 · 공유 중앙 토큰 ·
+  //   host-access · 사용 현황 · SSH 접근 · 비밀 포함 CSV 내보내기 등)은 전 법인 공용 비밀 · 설정을 주므로 쓰기 범위가 일부 법인인 소유자에게 주지 않는다.
+  //   그래서 이 게이트는 안전 메서드 예외(writeScopeDenial)를 쓰지 않는다. 등급 질의(settingsOwnerGradeDenial — isOwnerTier)는 그대로다.
+  if (!isFullReadWriteScope(req.user, store.get())) return res.status(403).json({ ok: false, error: 'forbidden', reason: SETTINGS_OWNER_WRITE_SCOPE_REASON, writeScope: 'partial' });
   return next();
 }
 requireSettingsOwner.gate = Object.freeze({ kind: 'settingsOwner' }); // v2.614 아키텍처 점검 태그
