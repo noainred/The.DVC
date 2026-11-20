@@ -93,3 +93,13 @@ describe('v3.30.4 changedSplit · driftBannerText — 주소 변경과 점검 �
   });
   it('상태 이름이 정의 변경도 덮는다', () => { expect(SYNC_STATE_META.changed.label).toBe('주소 · 정의 변경'); });
 });
+
+describe('v3.30.4 hostSegments — 주소는 . · : 뒤에서만 끊는다', async () => {
+  const { hostSegments } = await import('./syncLogic.js');
+  it('조각', () => {
+    expect(hostSegments('edge-frankfurt.demo.invalid:4000')).toEqual(['edge-frankfurt.', 'demo.', 'invalid:', '4000']);
+    expect(hostSegments('10.40.1.10:443').join('')).toBe('10.40.1.10:443');
+    expect(hostSegments('')).toEqual([]);
+    expect(hostSegments(null)).toEqual([]);
+  });
+});

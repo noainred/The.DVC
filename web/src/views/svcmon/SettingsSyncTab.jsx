@@ -6,7 +6,7 @@ import { requireChanged } from '../changeResult.js';
 import { STable } from '../../components/STable.jsx';
 import './techView.css';
 import {
-  SYNC_STATE_META, SELECTABLE, FACETS, emptySelection, filterRows, facetCounts, chipValue, toggleFacet, sparkPoints, stackedBars, fmtMs, fmtAge, detectText, autoSavedText, changedSplit,
+  SYNC_STATE_META, SELECTABLE, FACETS, emptySelection, filterRows, facetCounts, chipValue, toggleFacet, sparkPoints, stackedBars, fmtMs, fmtAge, detectText, autoSavedText, changedSplit, hostSegments,
 } from './syncLogic.js';
 
 /**
@@ -23,6 +23,11 @@ import {
 const STATE_KEYS = ['new', 'changed', 'gone'];
 const FACET_TOP = 6;
 const ROW_LIMIT = 500;
+
+/** 주소 — '.' · ':' 뒤에서만 줄을 바꾼다(hostSegments · <wbr> — 복사한 주소는 그대로). */
+function Host({ text }) {
+  return <>{hostSegments(text).map((seg, i) => <React.Fragment key={i}>{i ? <wbr /> : null}{seg}</React.Fragment>)}</>;
+}
 
 function Spark({ values, color }) {
   const pts = sparkPoints(values);
@@ -345,15 +350,15 @@ export default function SettingsSyncTab({ canEdit = false, compact = false, onAp
                         <span className="tv-tag e" title={r.agentNote || ''}>{`edge:${r.agent || (r.agentDeclared ? `${r.agentDeclared}→중앙` : 'central')}`}</span>
                         {r.depth && <span className="tv-tag d">{`depth:${r.depth}`}</span>}
                       </td>
-                      <td className="mono" style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', minWidth: 120 }}>
+                      <td className="mono" style={{ whiteSpace: 'normal', overflowWrap: 'break-word', minWidth: 120 }}>
                         {r.state === 'changed' && !r.defChanged
-                          ? <><s style={{ color: 'var(--text-faint)' }}>{`${r.prevHost}${r.prevPort ? `:${r.prevPort}` : ''}`}</s>{` → ${r.host}${r.port ? `:${r.port}` : ''}`}</>
-                          : (r.host ? `${r.host}${r.port ? `:${r.port}` : ''}` : (r.address || '—'))}
+                          ? <><s style={{ color: 'var(--text-faint)' }}><Host text={`${r.prevHost}${r.prevPort ? `:${r.prevPort}` : ''}`} /></s>{' → '}<Host text={`${r.host}${r.port ? `:${r.port}` : ''}`} /></>
+                          : (r.host ? <Host text={`${r.host}${r.port ? `:${r.port}` : ''}`} /> : (r.address || '—'))}
                       </td>
                       <td style={{ whiteSpace: 'normal', minWidth: 110 }}>{(r.checks || []).map((x, i) => <span key={i} className="tv-chk">{x.type}{x.port ? `:${x.port}` : ''}</span>)}{!(r.checks || []).length && <span className="muted">—</span>}</td>
                       <td className="muted" style={{ fontSize: 11.5, whiteSpace: 'normal', minWidth: 160 }}>
                         {r.reason || (r.targetId ? `대상 ${r.targetName || r.targetId}${r.targetEnabled === false ? ' · 중지' : ''}` : '')}
-                        {r.agentNote && !r.reason ? r.agentNote : ''}
+                        {r.agentNote && !r.reason ? `${r.targetId ? ' · ' : ''}${r.agentNote}` : ''}
                         {r.repath ? <div className="mono" title={r.repath}>{`→ 법인 폴더: ${r.repath}`}</div> : null}
                       </td>
                     </tr>

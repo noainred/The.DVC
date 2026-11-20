@@ -180,6 +180,20 @@ export function driftBannerText(drift) {
   return { title: onlyDef ? '점검 정의를 갱신해야 할 대상이 있습니다' : '설정이 바뀌었습니다', parts };
 }
 
+/**
+ * v3.30.4(⑦ Chromium 판독): 주소를 줄바꿈할 자리 — '.' · ':' 뒤에서만 끊는다(글자 중간 끊김 'edge-frankfurt.demo.i / nvalid' 방지).
+ *   화면은 조각 사이에 <wbr> 를 넣는다(복사한 주소에 보이지 않는 글자가 섞이지 않게 — 문자열에 ZWSP 를 넣지 않는다).
+ */
+export function hostSegments(s) {
+  // 정규식 뒤보기((?<=…))는 쓰지 않는다 — 옛 Safari(16.4 미만)는 구문 오류로 이 묶음 전체를 읽지 못한다(웹 코드에 선례 없음).
+  const v = String(s ?? '');
+  const out = [];
+  let cur = '';
+  for (const ch of v) { cur += ch; if (ch === '.' || ch === ':') { out.push(cur); cur = ''; } }
+  if (cur) out.push(cur);
+  return out;
+}
+
 /** 경과 시간 표기(서버가 준 ms). */
 export function fmtAge(ms) {
   if (ms == null || !Number.isFinite(Number(ms))) return '—';
