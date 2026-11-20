@@ -358,10 +358,11 @@ test('R5 vCenter 관리 화면: 등록부 읽기 오류의 쓰기 거절(503)은
     assert.doesNotMatch(b, /catch \(e\) \{ setError\(e\.message\); \}/, name);
   }
   assert.match(ui, /\{actErr && <div className="banner warn" data-vc-act-err/);
-  // 전제: 화면 공용 판정은 503 본문의 reason · code 가 'Unreadable' 로 끝날 때만 서버 사유를 그대로 보인다 — 118회차 본문(code 'registry-unreadable')은 걸리지 않는다
+  // 전제: 화면 공용 판정은 503 본문의 reason · code · error 가 '못 읽음' 표지(‘Unreadable’ · ‘-unreadable’ 접미 · ‘usage-unknown’)일 때 서버 사유를 그대로 보인다 —
+  //   서버 접속 점검 1회차(2026-11-20) W5 부터 118회차 본문(code 'registry-unreadable')도 걸린다(‘업그레이드 중 · 5분 후 재시도’ 로 바꾸지 않는다). 이 화면은 그와 별개로 registryUnreadable 표지로 배너를 띄운다.
   const sd = stripComments(fs.readFileSync(path.join(WEB, 'components', 'serviceDownText.js'), 'utf8'));
-  assert.match(sd, /\[b\.reason, b\.code, b\.error\]\.some\(\(v\) => typeof v === 'string' && \/Unreadable\$\/\.test\(v\)\)/);   // 132~135회차 묶음: error 칸 추가(판정식 · 접미 규칙은 그대로)
-  assert.equal(/Unreadable$/.test('registry-unreadable'), false);
+  assert.match(sd, /\[b\.reason, b\.code, b\.error\]\.some\(\(v\) => typeof v === 'string' && \(\/\(\?:Unreadable\|-unreadable\)\$\/\.test\(v\) \|\| v === 'usage-unknown'\)\)/);   // 132~135회차 error 칸 · 서버 접속 점검 1회차 kebab 표지
+  assert.equal(/(?:Unreadable|-unreadable)$/.test('registry-unreadable'), true);
   const rt = stripComments(fs.readFileSync(path.join(SRC, 'routes', 'admin', 'vcenters.js'), 'utf8'));
   assert.match(rt, /res\.status\(503\)\.json\(\{ ok: false, code: 'registry-unreadable', registryUnreadable: true, readError: true,/, '화면이 보는 표지(registryUnreadable)');
 });
