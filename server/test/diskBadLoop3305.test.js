@@ -80,7 +80,7 @@ test('R4 · R5 · R12 · R14 — 소스 계약(시한으로 닫아도 메일 · 
   assert.equal((sweep.match(/finishUnit\(j, u\)/g) || []).length, 2, '시작 못 함 · 응답 없음 둘 다 finishUnit');
   const push = jb.slice(jb.indexOf('export async function acceptPush'), jb.indexOf('export function stopJob'));
   assert.ok(push.indexOf('if (push.final)') < push.indexOf("if (!r.ok) return { ok: false"), '마지막 묶음 닫기가 저장 실패 반환보다 먼저');
-  assert.match(push, /u\.unsaved = u\._unsavedIds\.size;/);   // 2회차 R2-6: 서버 id 로 센다(재시도로 두 번 세지 않게)
+  assert.match(push, /noteUnsaved\(u, push\.servers, r\.storedIds\);/);   // 2회차 R2-6: 서버 id 로 센다(재시도로 두 번 세지 않게) — 5회차에 noteUnsaved 로 뺐다(동작은 diskBadLoopR5 N3)
   const auto = jb.slice(jb.indexOf('export async function autoTick'), jb.indexOf('export function autoInfo'));
   assert.match(auto, /if \(!\(await diskBadDbStatus\(\)\)\.available\) return null;/);
   assert.match(auto, /if \(!\(await setDiskBadMeta\(AUTO_META_KEY, t\)\)\) return null;/);

@@ -57,7 +57,8 @@ async function postChunk(job, batch, stat, seq) {
   if (res.status === 413) throw Object.assign(new Error(`중앙이 본문 크기를 거부(413) — 서버 ${batch.length}대 · ${Math.round(json.length / 1024)}KB. 중앙 BIG_JSON 등록을 확인하세요.`), { status: 413 });
   let ack = null;
   try { ack = await res.json(); } catch { ack = null; }
-  if (!res.ok) throw Object.assign(new Error(`disk-bad <- ${res.status}${ack?.reason ? ` (${ack.reason})` : ''}`), { status: res.status });
+  // 저장 실패(503)에도 중앙이 저장한 서버를 알려 준다 — 그 수는 '저장 못 함' 에서 뺀다(5회차 I-b · 커서는 여전히 보내지 않는다).
+  if (!res.ok) throw Object.assign(new Error(`disk-bad <- ${res.status}${ack?.reason ? ` (${ack.reason})` : ''}`), { status: res.status, storedIds: Array.isArray(ack?.storedIds) ? ack.storedIds.slice(0, 500).map((x) => String(x).slice(0, 128)) : null });
   return ack || {};
 }
 
@@ -111,7 +112,7 @@ export async function runDiskBadEdgeOnce() {
             }
             sent += batch.length;
             return true;
-          } catch (e) { failures.push(String(e?.message || e).slice(0, 200)); return false; }
+          } catch (e) { failures.push(String(e?.message || e).slice(0, 200)); return Array.isArray(e?.storedIds) ? { stored: false, storedIds: e.storedIds } : false; }
         },
       });
     } finally { clearInterval(hb); }
