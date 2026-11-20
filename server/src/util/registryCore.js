@@ -11,7 +11,7 @@
  *   (`load/persist/secretCarry`)는 옮기지 않는다 — 비밀 승계(`accessMoved`)는 도구마다 접속 필드가 달라 한 벌로 묶으면
  *   회귀 위험이 이득보다 크다(verify-deps DEPS2613-04 판정). 각 등록부는 여기서 판정만 가져다 쓴다.
  *
- * ⚠ util/ 규약(arch2579): 도메인 모듈을 import 하지 않는다(fs·path + 같은 util/ 의 atomicWrite · jsonFileRead 만 — v2.744 리드 후속 RY · 결정 78 남긴 것 ①).
+ * ⚠ util/ 규약(arch2579): 도메인 모듈을 import 하지 않는다(fs·path + 같은 util/ 의 atomicWrite · jsonFileRead · fileMissing 만 — v2.744 리드 후속 RY · 결정 78 남긴 것 ① · 결정 A1).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -20,6 +20,7 @@ import { classifyLoadReason, loadReasonWhere } from './atomicWrite.js';
 // 결정(78 남긴 것 ①): 읽기 단계 실패(read-error)와 parse 실패(corrupt)를 가르는 판정은 공용 읽기 하나다(판정 사본 금지).
 //   jsonFileLoad 가 아니라 순수 단계(jsonFileRead)에서 가져온다 — jsonFileLoad → settingsLoadError → registryCore 라 바로 가져오면 import 순환이다.
 import { makeJsonFileReader, READ_RETRY_MS } from './jsonFileRead.js';
+import { fileMissing } from './fileMissing.js';   // 결정(76~105 남긴 것 · 2026-11-20) A1: 서비스 점검의 '보존본만 남음' 표시 판정(ENOENT 만 없음 — existsSync 금지 · 134회차)
 
 /**
  * v2.612 LEFT2612-01: 파일이 없는데 손상 보존본(<파일>.corrupt.<시각>)만 있으면 재시작 뒤에도 '못 읽음' 이다 — 빈 목록으로
@@ -37,9 +38,12 @@ export function corruptOnlyReason(file) {
 /**
  * 로드 오류 상태(`registryLoadError()` 의 원천). 설정 pull 라우트(routes/central.js)가 이 값을 보고 503 으로 답한다 —
  *   빈 목록을 ok:true 로 내려보내면 엣지가 장비 목록·스냅샷을 통째로 지운다. 저장이 성공하면 `clear()`.
+ * @param {{ label?:string, file?:(string|(() => string)) }} [opts]
+ *   결정(76~105 남긴 것 · 2026-11-20) A1: `label`(사람이 읽는 이름)을 주면 서비스 점검의 '장비 등록부 파일' 행(표시 전용)에 등록된다 —
+ *   `file` 은 등록부 파일 경로(글자 또는 호출 시점에 계산하는 함수 — 테스트가 CONFIG_DIR 를 바꿀 수 있다). label 이 없으면 등록하지 않는다(예전과 같다).
  * @returns {{ get:() => (null|{at:number, reason:string}), set:(reason:any) => object, clear:() => void, checkCorruptOnly:(file:string) => void }}
  */
-export function makeLoadError() {
+export function makeLoadError(opts = {}) {
   let err = null;
   // 결정(78 남긴 것 ①): 등록부 파일 읽기(read) 상태 — reader 는 처음 read() 때 그 파일로 만든다(테스트가 CONFIG_DIR 를 바꾸면 다시 만든다).
   let reader = null; let readerFile = ''; let curParse = JSON.parse;
@@ -119,8 +123,61 @@ export function makeLoadError() {
       if (why) api.set(why);
     },
   };
+  const label = typeof opts?.label === 'string' ? opts.label.trim().slice(0, 80) : '';
+  if (label) registerRegistryStatus({ label, file: opts.file, get: () => err });
   return api;
 }
+
+/*
+ * 결정(76~105 남긴 것 · 2026-11-20) A1(권장안): 장비 등록부의 '못 읽음'(읽기 오류 · 손상 · 보존본만 남음)을 **서비스 점검**에 — 예전에는 makeLoadError 가
+ *   이름 · 파일 없이 만들어져 그 사실이 그 도구 화면의 배너(와 일부 설정 상태)에만 있었다. 서비스 점검의 'settings-files' 행은 makeSettingsLoadError 로
+ *   등록한 설정 파일만 본다(util/settingsLoadError.js). 여기 등록한 것은 health/services.js 의 'registry-files' 행이 읽는다(**표시 전용**).
+ *   ⚠ 'settings-files' 의 [기본값으로 확정] 과 섞지 않는다 — 등록부를 '지금 값(빈 목록)으로 확정' 하면 보존본에만 남은 장비 · 자격증명이 사라진다.
+ *     그래서 여기에는 확정 함수가 없고, 확정 라우트(confirmSettingsDefault)는 이 목록의 파일을 모른다(unknown-file).
+ */
+const _registryFiles = [];
+
+/**
+ * 결정 A1: makeLoadError 를 쓰지 않는 등록부(읽기 상태를 따로 들고 있는 것 — 예 proxy/registry.js)가 같은 행에 등록한다.
+ * @param {{ label:string, file?:(string|(() => string)), get:() => (null|{at?:number, reason?:string, readError?:boolean, code?:string}) }} ent
+ *   `get` 은 상태만 돌려준다(던지면 그 줄을 건너뛴다). 파일을 다시 읽어야 한다면 그 모듈의 간격 규칙을 따를 것(조회는 15초마다 온다).
+ */
+export function registerRegistryStatus({ label, file, get } = {}) {
+  const l = typeof label === 'string' ? label.trim().slice(0, 80) : '';
+  if (!l || typeof get !== 'function') return;
+  _registryFiles.push({ label: l, file, get });
+}
+
+const registryFullPath = (file) => { try { return String((typeof file === 'function' ? file() : file) || ''); } catch { return ''; } };
+
+/**
+ * 결정 A1: 등록한 장비 등록부 중 지금 '못 읽음' 인 것(서비스 점검용 — 표시 전용). 모듈을 다시 로드하지 않고 상태를 세우지도 않는다.
+ *   파일이 **정말 없고**(ENOENT) 손상 보존본만 있으면(아직 로드되지 않은 등록부) 그 사실도 싣는다 — 표시만 하고 그 모듈의 표지는 건드리지 않는다
+ *   (표지는 그 모듈의 load 가 checkCorruptOnly 로 세운다 — 조회가 503 을 켜지 않게).
+ *   사유는 **요약**이다(summarizeRegistryError — 원문은 JSON.parse 오류 조각 = 자격증명 파일 내용 일부일 수 있다). `admin` 이면 위치까지(text), 아니면 분류 문구만(label).
+ * @param {{ admin?:boolean }} [o]
+ * @returns {{ file:string, label:string, at:(number|null), code:string, reason:string, sysCode?:string }[]}
+ */
+export function listRegistryLoadErrors({ admin = false } = {}) {
+  const out = [];
+  for (const ent of _registryFiles) {
+    const full = registryFullPath(ent.file);
+    let e = null;
+    try { e = ent.get(); } catch { e = null; }
+    if (!e && full) {
+      try { if (fileMissing(full)) { const why = corruptOnlyReason(full); if (why) e = { at: null, reason: why }; } } catch { /* 판정 실패는 싣지 않는다 */ }
+    }
+    if (!e || typeof e !== 'object') continue;
+    const sum = summarizeRegistryError(e) || summarizeRegistryError({ reason: '' });
+    out.push({
+      file: full ? path.basename(full) : '(경로 미상)', label: ent.label, at: Number.isFinite(e.at) ? e.at : null,
+      code: sum.code, reason: admin ? sum.text : sum.label, ...(sum.sysCode ? { sysCode: sum.sysCode } : {}),
+    });
+  }
+  return out;
+}
+/** 결정 A1: 등록한 장비 등록부 수(서비스 점검 '정상' 문구 · 테스트). */
+export function registryStatusCount() { return _registryFiles.length; }
 
 /**
  * v2.744(감사 EDGE-03): 등록부를 **읽지 못한 상태**에서 사람이 아닌 경로(엣지 현지 스캔·할당 스캐너·주기 스캔의 자동 등록)가 저장하려 할 때의 거절(순수).

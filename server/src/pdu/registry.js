@@ -30,7 +30,7 @@ let _cache = null;
  *   통째로 지운다. 다음 저장이 성공하면 풀린다(그때부터는 관리자가 다시 만든 목록이 진실이다).
  */
 // v2.613 PERSIST2613-04 · DEPS2613-04: 손상 보존본 판정(corruptOnlyReason)·로드 오류 상태·원소 필터·법인 축 판정은 util/registryCore.js 하나다.
-const loadErr = makeLoadError();
+const loadErr = makeLoadError({ label: 'PDU 등록부', file: FILE });   // 결정(76~105 남긴 것 · 2026-11-20) A1: 서비스 점검 '장비 등록부 파일' 행(표시 전용)
 export function registryLoadError() { load(); return loadErr.get(); }
 
 // 결정(78 남긴 것 ①): parse 실패(형식 · 복호 포함 — 예전 try 블록과 같은 범위)만 손상이다.
