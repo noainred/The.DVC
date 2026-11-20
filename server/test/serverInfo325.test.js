@@ -219,6 +219,16 @@ test('⑤ 서비스 — 한 번에 상한 · 보관(원문 없음 · 실패해�
   await SVC.readMany([own.id], { by: 'own' });
   const failed = SI.getResult(own.id);
   assert.equal(failed.ok, false); assert.equal(failed.code, 'auth-rejected'); assert.equal(failed.lastOk.base.os.value, 'Rocky Linux 9.4 (Blue Onyx)');
+  // 점검 2회차 C1: 거부를 본 서버 단독 비밀번호는 스토리지 수집 인증 정지에 적힌다 — 같은 비밀번호로 다시 누르면 보내지 않는다(예전: 누를 때마다 +1 · 재현)
+  const seen0 = SSHD.st.seen.length;
+  const again = await RS.readServer(own.id, { feature: 'server-info', plan: P.SERVER_INFO_PLAN });
+  assert.equal(again.code, 'cred'); assert.equal(again.credCode, 'server-auth-stopped'); assert.equal(SSHD.st.seen.length, seen0, '보내지 않았다');
+  const BP = await import('../src/bmstor/poller.js');
+  assert.ok(BP.bmstorAuthStopFor(own), '폴러도 같은 기록을 본다(다음 주기에 보내지 않는다)');
+  // 사람이 서버 쪽 비밀번호를 되돌리고 스토리지 ‘지금 수집’ 이 성공하면 풀린다(그 경로가 부르는 해제 — 여기서는 직접)
+  SSHD.st.passwords.root = 'Own-1';
+  BP.bmstorNoteManualAuth(own, { ok: true });
+  assert.equal(BP.bmstorAuthStopFor(own), null);
   assert.equal((await SVC.readMany(Array.from({ length: SVC.READ_BATCH_MAX + 1 }, (_, i) => `x${i}`))).code, 'too-many');
   // 손상 파일 — 보존(.corrupt.*) 후 빈 값(수집 사본이라 다시 읽으면 채워진다)
   fs.writeFileSync(path.join(DIR, SI.SERVER_INFO_FILE), '{broken');
@@ -310,4 +320,40 @@ test('⑦ 반증(review325) — 비밀번호는 한 번만(k-i 재시도 없음)
   fs.rmSync(FILE, { recursive: true, force: true }); fs.writeFileSync(FILE, JSON.stringify({ v: 1, servers: { 'zz-0': { ok: true, at: 0, code: 'ok' } } }));
   SI._resetServerInfoStoreForTest({ retryNow: true });
   assert.equal(SI.getResult('zz-0').at, 0, '다시 읽었다'); assert.equal(SI.getResult('zz-1').at, 1, '그동안의 결과를 얹었다'); assert.equal(SI.storeLoadError(), '');
+});
+
+test('⑧ 점검 1회차 U3 · U4 — 멀티패스 경로는 디스크 하나(경로 수) · zram 은 디스크가 아니다 · PS 5.1 의 {value, Count} 배열을 푼다', () => {
+  const disks = [
+    'NAME="sda" TYPE="disk" MODEL="가상 SSD" SERIAL="S1" WWN="0x5000c500a1b2c3d4" SIZE="480103981056" ROTA="0" TRAN="sas"',
+    'NAME="sdb" TYPE="disk" MODEL="가상 LUN" SERIAL="L1" WWN="0x600a0b8000000001" SIZE="1099511627776" ROTA="0" TRAN="fc"',
+    'NAME="sdc" TYPE="disk" MODEL="가상 LUN" SERIAL="L1" WWN="0x600a0b8000000001" SIZE="1099511627776" ROTA="0" TRAN="fc"',
+    'NAME="sdd" TYPE="disk" MODEL="가상 LUN" SERIAL="L1" WWN="0x600a0b8000000001" SIZE="1099511627776" ROTA="0" TRAN="fc"',
+    'NAME="vda" TYPE="disk" MODEL="" SERIAL="" WWN="" SIZE="107374182400" ROTA="1" TRAN=""',
+    'NAME="vdb" TYPE="disk" MODEL="" SERIAL="" WWN="" SIZE="107374182400" ROTA="1" TRAN=""',
+    'NAME="zram0" TYPE="disk" MODEL="" SERIAL="" WWN="" SIZE="8589934592" ROTA="0" TRAN=""',
+  ];
+  const out = LINUX_OUT.replace(/##DISKS\n[\s\S]*?##FS/, `##DISKS\n${disks.join('\n')}\n##FS`);
+  const p = P.parseLinux(out);
+  assert.deepEqual(p.disks.map((d) => [d.dev, d.paths]), [['/dev/sda', 1], ['/dev/sdb', 3], ['/dev/vda', 1], ['/dev/vdb', 1]], '경로 3개 LUN 은 하나 · 빈 WWN · 시리얼은 묶지 않음 · zram 뺌');
+  // 점검 2회차 F3: NVMe 다중 이름공간(같은 컨트롤러 시리얼 · uuid. 꼴 WWN 은 버려짐)은 묶지 않는다 · 시리얼이 같아도 크기가 다르면 다른 디스크
+  const nv = [
+    'NAME="nvme0n1" TYPE="disk" MODEL="가상 NV" SERIAL="NVS1" WWN="uuid.1111" SIZE="1000000000000" ROTA="0" TRAN="nvme"',
+    'NAME="nvme0n2" TYPE="disk" MODEL="가상 NV" SERIAL="NVS1" WWN="uuid.2222" SIZE="2000000000000" ROTA="0" TRAN="nvme"',
+    'NAME="nvme0n3" TYPE="disk" MODEL="가상 NV" SERIAL="NVS1" WWN="nvme.3333" SIZE="1000000000000" ROTA="0" TRAN="nvme"',
+    'NAME="sdx" TYPE="disk" MODEL="L" SERIAL="Q1" WWN="" SIZE="100" ROTA="0" TRAN="sas"',
+    'NAME="sdy" TYPE="disk" MODEL="L" SERIAL="Q1" WWN="" SIZE="200" ROTA="0" TRAN="sas"',
+  ];
+  const pn = P.parseLinux(LINUX_OUT.replace(/##DISKS\n[\s\S]*?##FS/, `##DISKS\n${nv.join('\n')}\n##FS`));
+  assert.deepEqual(pn.disks.map((d) => [d.dev, d.paths]), [['/dev/nvme0n1', 1], ['/dev/nvme0n2', 1], ['/dev/nvme0n3', 1], ['/dev/sdx', 1], ['/dev/sdy', 1]]);
+  // PS 5.1 꼴: 배열이 { value, Count } 로 감싸여 온다 — 2소켓 · 코어 합 · 디스크 둘
+  const j = { err: [], os: { caption: 'Microsoft Windows Server 2016', memKB: 1024 }, cs: { name: 'w', domain: 'WORKGROUP' }, bios: { serial: 'x' },
+    cpu: { value: [{ Name: 'C', NumberOfCores: 32, NumberOfLogicalProcessors: 64 }, { Name: 'C', NumberOfCores: 32, NumberOfLogicalProcessors: 64 }], Count: 2 },
+    disk: { value: [{ Index: 0, Model: 'A', Size: 1 }, { Index: 1, Model: 'B', Size: 2 }], Count: 2 }, pd: [], vol: { value: [{ DeviceID: 'C:', Size: 100, FreeSpace: 40 }], Count: 1 } };
+  const w = P.parseWindows(`##WINJSON\n${JSON.stringify(j)}\n`);
+  assert.equal(w.base.cpuSockets.value, 2, '소켓 둘');
+  assert.equal(w.base.cpuCores.value, 64, '코어 합');
+  assert.equal(w.disks.length, 2); assert.equal(w.fs.length, 1);
+  // 감싼 꼴이 아닌 객체(다른 칸이 있음)는 한 원소 그대로
+  const one = P.parseWindows(`##WINJSON\n${JSON.stringify({ ...j, disk: { Index: 0, Model: 'A', Size: 1, value: [], Count: 0 } })}\n`);
+  assert.equal(one.disks.length, 1);
 });

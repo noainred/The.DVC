@@ -7,6 +7,7 @@
  * df 는 없는 마운트가 섞여도 있는 것은 출력하고 exit≠0 — 있는 것은 살리고 없는 것만 오류 표기.
  */
 
+import { markLoggedIn, markPasswordSent, wasLoggedIn } from '../sshaccess/loginMark.js';   // 점검 2회차 Q1(b) · B1
 import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { withSsh, isSshAuthError } from '../proxy/sshExec.js';
 import { reqTimeoutMs } from '../agent/envTimeout.js';
@@ -111,11 +112,23 @@ export function parseDfOutput(stdout, requestedMounts, stderr = '') {
  * @param {{host,port,username,password,mounts:string[]}} server
  * @returns {Promise<{ok:boolean, mounts:Array, missing?:string[], error?:string}>}
  */
-export async function collectServer(server) {
+/**
+ * 4회차 상태 R4S-3(재현 — 탐침이 된 수집이 멈추면 같은 공통 계정의 다른 서버가 시한 없이 기다렸다): 중앙 수집 한 대의 **장비 시한**(세션을 실제로 끊는다 — withDeadline + signal).
+ *   로그인 시한 + df exec 시한 + I/O 표본(켜졌으면 표본 + 20초) + 여유 10초 — 세션이 쓸 수 있는 시간보다 크다(산수를 시험이 고정).
+ */
+export function collectDeadlineMs(env = process.env) {
+  const ready = reqTimeoutMs(env.BMSTOR_SSH_TIMEOUT_MS, 15_000);
+  const execMs = reqTimeoutMs(env.SSH_EXEC_TIMEOUT_MS, 60_000, { max: 1_800_000 });
+  const sec = ioSampleSec(env);
+  return ready + execMs + (sec > 0 ? (sec + 20) * 1000 : 0) + 10_000;
+}
+export async function collectServer(server, { signal, onLoggedIn = null, onPasswordSent = null } = {}) {
   const { mounts, errors } = sanitizeMounts(server.mounts);
   if (!mounts.length) return { ok: false, mounts: [], error: errors[0] || '측정할 마운트 포인트가 없습니다.' };
   // 7b: 키 · 공통 계정 참조를 해석하지 못했으면 접속하지 않는다(bmusage/onboard/refs.js withResolvedAuth — 빈 비밀번호로 시도해 계정을 잠그지 않게).
   if (server.authError) return { ok: false, mounts: [], error: String(server.authError).slice(0, 300) };
+  // 점검 2회차 Q1(b) · B1: 로그인 뒤 실패는 markLoggedIn(계정 탐침이 성공으로 본다 — 직렬 풀기 금지) · 비밀번호를 보낸 뒤 판정 모름은 markPasswordSent
+  let logged = false; let pwSent = false;
   try {
     const r = await withSsh({
       host: server.host, port: Number(server.port) || 22,
@@ -123,7 +136,10 @@ export async function collectServer(server) {
       privateKey: server.privateKey || undefined, passphrase: server.passphrase || undefined,
       readyTimeout: reqTimeoutMs(process.env.BMSTOR_SSH_TIMEOUT_MS, 15_000),   // v2.605 TIM2605-04: [1초, 10분]
       singlePasswordAttempt: true,   // v3.25 반증 F1: 비밀번호는 한 번만(k-i 재시도 없음 — 계정 잠금 횟수)
+      onPasswordSent: () => { pwSent = true; try { onPasswordSent?.(); } catch { /* */ } },
+      ...(signal ? { signal } : {}),
     }, async ({ exec }) => {
+      logged = true; try { onLoggedIn?.(); } catch { /* */ }
       const out = await exec(`df -P -k -- ${mounts.join(' ')}`);
       // v2.915: 같은 세션에서 디스크 I/O 표본(상수 명령 · 입력 없음). df 가 요청 마운트를 하나도 못 찾았으면 I/O 는 시도하지 않는다.
       //   시한 = 표본 간격 + 20초(명령 자체는 cat 넷 · sleep 하나). 0 이면 끔(df 만 — 예전 동작).
@@ -135,14 +151,16 @@ export async function collectServer(server) {
     const { mounts: rows, missing } = parseDfOutput(r.out.stdout, mounts, r.out.stderr);
     if (!rows.length) {
       const err = (r.out.stderr || '').trim().split('\n')[0] || 'df 출력에서 요청 마운트를 찾지 못했습니다.';
-      return { ok: false, mounts: [], missing, error: err };
+      return markLoggedIn({ ok: false, mounts: [], missing, error: err });
     }
     const ioPart = r.sec > 0 ? ioResultFromExec(r.io) : { io: null, ioError: 'I/O 표본 꺼짐(BMSTOR_IO_SAMPLE_SEC=0)' };
     return { ok: true, mounts: rows, missing, ...ioPart };
   } catch (e) {
     // v2.590(감사 F2): 자격증명 거부를 출처에서 못 박는다 — 폴러가 주기 수집을 멈출 수 있게. 엣지 폴링 위임은
     // 회신에서 이 플래그를 빼므로(agent/bmstorWorker.js 가 용량 필드만 싣는다) 폴러는 문구(ssh2 정식 문구)도 본다.
-    return { ok: false, mounts: [], error: e.message, ...(isSshAuthError(e) ? { authFailed: true } : {}) };
+    const out = { ok: false, mounts: [], error: e.message, ...(!logged && isSshAuthError(e) ? { authFailed: true } : {}) };
+    if (logged) return markLoggedIn(out);
+    return pwSent && !out.authFailed ? markPasswordSent(out) : out;
   }
 }
 
@@ -154,7 +172,8 @@ export async function collectMany(servers, { concurrency = envPositive(process.e
   const worker = async () => {
     while (idx < list.length) {
       const i = idx++;
-      results[i] = { id: list[i].id, ...(await collect(list[i])) };   // v3.24: 폴러가 계정 탐침(sshaccess/accountGate)으로 감싼 함수를 넘긴다
+      const out = await collect(list[i]);
+      results[i] = wasLoggedIn(out) ? markLoggedIn({ id: list[i].id, ...out }) : { id: list[i].id, ...out };   // 3회차 F4: 펼쳐도 로그인 표시를 잇는다   // v3.24: 폴러가 계정 탐침(sshaccess/accountGate)으로 감싼 함수를 넘긴다
     }
   };
   await Promise.all(Array.from({ length: Math.max(1, Math.min(concurrency, list.length)) }, worker));

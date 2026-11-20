@@ -332,7 +332,7 @@
 | `BACKUP_STARTUP_DELAY_MS` | `600000` |  | backup/settings.js |
 | `CONFIG_DIR` |  | ✅ | backup/stagedRestore.js, config.js 외 2 |
 
-## 베어메탈 스토리지 (13)
+## 베어메탈 스토리지 (14)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -349,6 +349,7 @@
 | `BMSTOR_IO_SAMPLE_SEC` |  |  | bmstor/diskstats.js |
 | `BMSTOR_PUSH_TIMEOUT_MS` | `180000` |  | bmstor/poller.js |
 | `BMSTOR_SSH_TIMEOUT_MS` | `15000` |  | bmstor/collect.js |
+| `SSH_EXEC_TIMEOUT_MS` | `60000` |  | bmstor/collect.js, proxy/sshExec.js |
 
 ## 보안 (17)
 
@@ -578,7 +579,7 @@
 | `RMA_TEST_CONCURRENCY` | `4` | ✅ | rma/agent.js |
 | `RMA_TEST_HISTORY_DAYS` | `90` |  | rma/testResults.js |
 
-## 원격 접속(프록시) (31)
+## 원격 접속(프록시) (30)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -607,7 +608,6 @@
 | `REMOTE_WS_MAX_QUEUE_BYTES` | `8388608` |  | proxy/sshGateway.js |
 | `REMOTE_WS_STALL_MS` | `60000` |  | proxy/sshGateway.js |
 | `SSH_EXEC_MAX_OUTPUT` | `4194304` |  | proxy/sshExec.js |
-| `SSH_EXEC_TIMEOUT_MS` | `60000` |  | proxy/sshExec.js |
 | `SSH_LEGACY_FALLBACK` | `기본 적용('0' 로 끄기)` | ✅ | proxy/sshExec.js |
 | `SSH_PAGER_MAX_PAGES` | `400` |  | proxy/sshExec.js |
 | `SSH_PTY_COLS` | `1000` |  | proxy/sshExec.js |
