@@ -29,6 +29,22 @@ let _missingWarnAt = 0;
 
 const headers = () => ({ 'Content-Type': 'application/json', 'X-Central-Token': config.agent.centralToken, ...agentHeaders(config.agent.name) });
 
+/**
+ * 413(중앙이 본문 크기를 거부)이면 묶음을 반으로 나눠 다시 보낸다(I-6 — 예전에는 25대 묶음을 통째로 버렸고 다음 점검에서도 같았다).
+ * 한 대도 받지 않으면 그 오류를 던진다. 마지막 표시(final)는 뒤쪽 반에만 싣는다. 답은 합친다(하나라도 저장 안 됨이면 저장 안 됨).
+ */
+async function postSplitWith(send, batch, st) {
+  try { return await send(batch, st); } catch (e) {
+    if (e?.status !== 413 || batch.length <= 1) throw e;
+    const mid = Math.ceil(batch.length / 2);
+    const a = await postSplitWith(send, batch.slice(0, mid), { ...st, final: false });
+    const b = await postSplitWith(send, batch.slice(mid), st);
+    return { ...b, stored: a.stored !== false && b.stored !== false, stop: !!(a.stop || b.stop), newRecords: (Number(a.newRecords) || 0) + (Number(b.newRecords) || 0),
+      reason: a.stored === false ? a.reason : b.reason };
+  }
+}
+export { postSplitWith as _postSplitWithForTest };
+
 async function postChunk(job, batch, stat, seq) {
   const payload = { v: PUSH_PROTOCOL, agent: config.agent.name, version: currentVersion(), jobId: job.id, seq, final: !!stat.final,
     total: stat.total, done: stat.done, failed: stat.failed, excluded: stat.excluded, servers: batch };
@@ -36,7 +52,8 @@ async function postChunk(job, batch, stat, seq) {
   const hdrs = headers();
   let body = json;
   try { body = await gzipAsync(json); hdrs['Content-Encoding'] = 'gzip'; } catch { body = json; }
-  const res = await resilientFetch(withAgentQuery(`${config.agent.centralUrl}/api/central/disk-bad`, config.agent.name), { method: 'POST', headers: hdrs, body, timeoutMs: 60_000, retries: 2 });
+  // 503 은 중앙의 DB 저장 실패다 — 같은 본문을 다시 보내도 같고, 중앙은 그 서버를 다시 셌다(R2-6). 다음 점검이 다시 읽는다.
+  const res = await resilientFetch(withAgentQuery(`${config.agent.centralUrl}/api/central/disk-bad`, config.agent.name), { method: 'POST', headers: hdrs, body, timeoutMs: 60_000, retries: 2, noRetryStatus: [503] });
   if (res.status === 413) throw Object.assign(new Error(`중앙이 본문 크기를 거부(413) — 서버 ${batch.length}대 · ${Math.round(json.length / 1024)}KB. 중앙 BIG_JSON 등록을 확인하세요.`), { status: 413 });
   let ack = null;
   try { ack = await res.json(); } catch { ack = null; }
@@ -50,7 +67,9 @@ export async function runDiskBadEdgeOnce() {
   _busy = true;
   const t0 = Date.now();
   try {
-    const r = await resilientFetch(withAgentQuery(`${config.agent.centralUrl}/api/central/disk-bad-job`, config.agent.name), { headers: headers(), timeoutMs: 15_000, retries: 1 });
+    // 가져오기는 다시 묻지 않는다(R2-7) — 중앙이 첫 요청으로 조각을 내준 뒤 응답만 늦으면, 재시도가 그 조각을 '끝을 알리지 않은 조각' 으로 보았다.
+    //   1분 뒤 다음 주기가 재시도 몫을 한다(중앙은 보고 없는 조각을 다시 내준다 — jobs.js claimForAgent).
+    const r = await resilientFetch(withAgentQuery(`${config.agent.centralUrl}/api/central/disk-bad-job`, config.agent.name), { headers: headers(), timeoutMs: 15_000, retries: 0 });
     if (r.status === 404) {
       if (Date.now() - _missingWarnAt > 3_600_000) { _missingWarnAt = Date.now(); console.log('[diskbad-edge] 중앙에 이 기능이 없습니다(구버전 중앙) — 중앙을 올리면 작업을 가져갑니다.'); }
       _last = { at: Date.now(), ok: true, idle: true, note: '중앙이 이 기능이 없는 판' };
@@ -65,6 +84,7 @@ export async function runDiskBadEdgeOnce() {
     if (!job || !job.id) { _last = { ...(_last || {}), at: Date.now(), ok: true, idle: true }; return null; }
     console.log(`[diskbad-edge] 작업 ${job.id.slice(0, 8)} 시작 — ${job.mode === 'full' ? '처음부터' : '새 로그만'}${Array.isArray(job.serverIds) ? ` · 서버 ${job.serverIds.length}대 지정` : ''}`);
     let seq = 0; let stop = false; let sent = 0; let newRecords = 0; const failures = [];
+    const postSplit = (batch, st) => postSplitWith((b, s2) => postChunk(job, b, s2, seq++), batch, st);
     let progress = { total: Array.isArray(job.serverIds) ? job.serverIds.length : null, done: 0, failed: 0, excluded: 0 };
     // 진행 보고(서버 0대) — 묶음이 25대마다라 첫 보고가 늦을 수 있다. 실패는 다음 간격에 다시 보낸다(기록만).
     const hb = setInterval(() => {
@@ -80,7 +100,7 @@ export async function runDiskBadEdgeOnce() {
         // 저장됐다는 답(stored !== false)을 받은 묶음만 true — scan.js 가 그 서버의 커서만 앞으로 보낸다(반증 #1).
         onChunk: async (batch, st) => {
           try {
-            const ack = await postChunk(job, batch, st, seq++);
+            const ack = await postSplit(batch, st);
             newRecords += Number(ack.newRecords) || 0;
             if (ack.stop) stop = true;
             if (ack.stored === false) {

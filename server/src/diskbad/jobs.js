@@ -91,7 +91,7 @@ export function createJob({ scope, target = '', targetLabel = '', mode = 'increm
       agent: normAgent(u.agent), label: String(u.label || u.agent || '중앙 직결').slice(0, 128), kind: u.kind === 'local' ? 'local' : 'edge',
       serverIds: Array.isArray(u.serverIds) ? u.serverIds.map(String).slice(0, 5_000) : null,
       state: busy.has(normAgent(u.agent)) ? 'busy' : 'queued', total: Array.isArray(u.serverIds) ? u.serverIds.length : null,
-      done: 0, failed: 0, excluded: 0, newRecords: 0, unsaved: 0, queuedAt: null, claimedAt: null, updatedAt: null, finishedAt: null, error: '', stop: false, _new: [],
+      done: 0, failed: 0, excluded: 0, newRecords: 0, unsaved: 0, reported: false, queuedAt: null, claimedAt: null, updatedAt: null, finishedAt: null, error: '', stop: false, _new: [],
     })),
   };
   for (const u of job.units) u.queuedAt = job.at;
@@ -152,6 +152,8 @@ export function claimForAgent(agent) {
   for (const j of jobs.values()) {
     for (const u of j.units) {
       if (u.kind !== 'edge' || u.agent !== a || u.state !== 'running') continue;
+      // 가져간 뒤 보고가 한 번도 없으면 — 엣지가 그 답을 받지 못한 것이다(가져오기 응답이 늦어 재시도 · 망 끊김 — R2-7). 닫지 않고 다시 내준다.
+      if (!u.reported) { u.claimedAt = now(); u.updatedAt = u.claimedAt; return { id: j.id, mode: j.mode, manual: j.manual, serverIds: u.serverIds }; }
       u.state = 'failed'; u.finishedAt = now();
       u.error = '엣지가 끝을 알리지 않은 채 다음 작업을 가지러 왔습니다(엣지 재시작으로 보입니다) — 저장된 묶음은 남고, 나머지 서버는 다음 점검에서 읽습니다.';
       finishUnit(j, u);
@@ -179,6 +181,7 @@ export async function acceptPush(agent, push) {
   // 닫힌 · 모르는 작업(중앙 재시작 포함)의 보고는 받지 않고 **멈추라고** 답한다 — 엣지는 그 서버들의 커서를 앞으로 보내지 않는다(반증 #1).
   if (!u || u.state !== 'running') return { ok: true, stored: false, stop: true, reason: '이 엣지가 가져간 작업이 아니거나 이미 닫힌 작업입니다(중앙 재시작 포함) — 보관하지 않았습니다.' };
   const t = now();
+  u.reported = true;   // 한 번이라도 보고했다 — 엣지가 이 조각을 받았다(claimForAgent 가 다시 내줄지 닫을지를 가른다)
   const r = await ingestServers(a, push.servers, { now: t });
   u.newRecords += r.newRecords.length; for (const x of r.newRecords) { if (u._new.length >= 2_000) break; u._new.push(x); }
   if (push.total != null) u.total = push.total;
@@ -189,7 +192,10 @@ export async function acceptPush(agent, push) {
   // 반증 R5: 저장하지 못한 묶음은 세어 두고(중앙 직결 조각과 같이 'failed' 로 닫는다), **마지막 묶음은 저장 여부와 무관하게 닫는다** —
   //   닫지 않으면 '읽는 중' 으로 남아 그 엣지가 45분 동안 바쁜 것으로 보였다.
   if (!r.ok) {
-    u.unsaved += push.servers.length;
+    // 서버 id 로 센다 — 503 이면 엣지가 같은 묶음을 다시 보내 같은 서버를 두 번 셀 수 있었다(R2-6).
+    if (!u._unsavedIds) u._unsavedIds = new Set();
+    for (const x of push.servers) if (x?.id && u._unsavedIds.size < 5_000) u._unsavedIds.add(x.id);
+    u.unsaved = u._unsavedIds.size;
     if (!u.error) u.error = String(r.reason || 'DB 저장 실패').slice(0, 200);
   }
   if (push.final) {
@@ -222,7 +228,7 @@ export function retryUnit(id, agent) {
   const u = j?.units.find((x) => x.agent === a);
   if (!u || active(u.state)) return null;
   if (busyAgents().has(a)) return { busy: true };
-  Object.assign(u, { state: 'queued', done: 0, failed: 0, excluded: 0, newRecords: 0, unsaved: 0, queuedAt: now(), claimedAt: null, updatedAt: null, finishedAt: null, error: '', stop: false, _new: [] });
+  Object.assign(u, { state: 'queued', done: 0, failed: 0, excluded: 0, newRecords: 0, unsaved: 0, reported: false, queuedAt: now(), claimedAt: null, updatedAt: null, finishedAt: null, error: '', stop: false, _new: [], _unsavedIds: null });
   // 작업 시작 시각(j.at)은 바꾸지 않는다(반증 R13 — 같은 작업의 다른 대기 조각의 시한과 화면의 시작 시각이 바뀌었다). 이 조각의 시한은 queuedAt 부터.
   j.finishedAt = null;
   if (u.kind === 'local') runLocal(j, u).catch(() => {});
@@ -230,7 +236,7 @@ export function retryUnit(id, agent) {
 }
 
 export function publicJob(j) {
-  const units = j.units.map(({ _new, ...u }) => u);
+  const units = j.units.map(({ _new, _unsavedIds, ...u }) => u);
   const sum = (k) => units.reduce((acc, u) => acc + (Number(u[k]) || 0), 0);
   const knownTotal = units.every((u) => u.total != null) ? sum('total') : null;
   return {

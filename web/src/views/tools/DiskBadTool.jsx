@@ -21,7 +21,7 @@ import { DiskBadServerPanel } from './DiskBadServerPanel.jsx';
 import { requireChanged } from '../changeResult.js';   // 112회차: 409(엣지 노드) 본문을 '저장했습니다' 로 읽지 않는다
 import { unreadMarkOf, unreadKind, saveLockedByUnread } from '../settingsUnread.js';   // 112회차: 못 읽은 동안의 기본값 폼으로 저장하지 않는다
 import { SettingsUnreadBanner } from '../SettingsUnreadBanner.jsx';
-import { fmtDate, fmtDateTime, rateText, pctText, num, clsTone, verdictTone, confidenceTone, noteOf, clsOfCode, JOB_STATE_LABEL, jobStateTone, unitProgress, scopeLabel, shortLogNote, spanText, scanSent, pastCoverageText, traceTone, valCell } from './diskBadText.js';
+import { fmtDate, fmtDateTime, rateText, pctText, num, clsTone, verdictTone, confidenceTone, noteOf, clsOfCode, JOB_STATE_LABEL, jobStateTone, unitProgress, scopeLabel, shortLogNote, spanText, scanSent, pastCoverageText, traceTone, valCell, mailInfoText } from './diskBadText.js';
 
 const TABS = [
   { k: 'summary', label: '요약' }, { k: 'disks', label: '디스크 목록' }, { k: 'corps', label: '국가 · 법인' },
@@ -452,6 +452,7 @@ function ScanPanel({ data, jobs, corp, canScan, reload, setJobs }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [st, setSt] = useState(data.settings || null);
+  const mailLine = mailInfoText(data.mail);
   const [corpToText, setCorpToText] = useState(() => Object.entries(data.settings?.corpTo || {}).map(([k, v]) => `${k}=${v.join(',')}`).join('\n'));
   const start = () => {
     setBusy(true); setMsg('');
@@ -532,6 +533,8 @@ function ScanPanel({ data, jobs, corp, canScan, reload, setJobs }) {
           <b style={{ fontSize: 14 }}>설정 <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>관리자 · 전체 범위</span></b>
           <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}><input type="checkbox" checked={st.autoEnabled} onChange={(e) => saveSettings({ autoEnabled: e.target.checked })} /> {st.intervalHours}시간마다 자동 점검(새 로그만) — 기본 꺼짐. 켜면 전 법인 iDRAC 에 Lifecycle 로그 읽기가 나갑니다(서버마다 첫 회는 전량).</label>
           <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}><input type="checkbox" checked={st.mailEnabled} onChange={(e) => saveSettings({ mailEnabled: e.target.checked })} /> 새 기록이 나오면 법인별 한 통 메일(받는 사람: 설정 › 메일 발송의 ‘디스크 배드 섹터 새 기록’ 수신자 + 아래 법인 담당자)</label>
+          {/* 서버가 이미 내려 주던 마지막 메일 결과를 보인다(개선 I-1 — 못 보낸 이유를 화면에서 알 길이 없었다). */}
+          {mailLine && <div className={mailLine.ok ? 'muted' : undefined} style={{ fontSize: 12, ...(mailLine.ok ? {} : { color: 'var(--red)', fontWeight: 600 }) }}>{mailLine.text}</div>}
           <label htmlFor="dbad-corpto" className="muted">법인 담당자 — 한 줄에 ‘vCenter id=메일,메일’</label>
           <textarea id="dbad-corpto" className="input" rows={4} value={corpToText} onChange={(e) => setCorpToText(e.target.value)} style={{ fontFamily: 'var(--mono)', fontSize: 12, width: '100%', boxSizing: 'border-box' }} placeholder={data.corps.slice(0, 2).map((c) => `${c.id}=it-admin@example.com`).join('\n')} />
           <div><button className="tab" style={{ flex: 'none' }} disabled={saveLocked} onClick={() => saveSettings({})}>담당자 저장</button></div>

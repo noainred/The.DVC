@@ -14,7 +14,7 @@
  */
 import { redfishGetCapped } from '../idrac/redfish.js';
 import { numOrNull } from '../util/numOrNull.js';
-import { slotKeyOf } from './classify.js';
+import { slotKeyOf, MIN_VALID_TIME } from './classify.js';
 
 export const SEL_PAGES_MAX = 40;        // 50건 × 40쪽 = 2,000건(SEL 은 작다 — 넘으면 일부만 읽음으로 남긴다)
 export const SEL_EVENTS_MAX = 100;      // 결과에 싣는 디스크 항목 수(가장 새 것부터)
@@ -42,14 +42,15 @@ export function selDriveEvent(e) {
   let kind = 'other';
   if (/\bremoved\b/i.test(message)) kind = 'removed';
   else if (/\b(?:installed|inserted)\b/i.test(message)) kind = 'installed';
-  else if (/\bpredictive\b/i.test(message)) kind = 'predictive';
+  else if (/\bpredict(?:ive|ed)\b/i.test(message)) kind = 'predictive';   // 'Failure predicted on …' 꼴도(I-4 — 'fault' 로 분류됐다)
   else if (/\bfault|\bfail/i.test(message)) kind = 'fault';
   const m = POS_RE.exec(message);
   const disk = m ? Number(m[1]) : null;
   const bp = m ? Number(m[2]) : null;
   const created = Date.parse(t(e.Created, 40));
   return {
-    created: Number.isFinite(created) ? created : null, kind, disk, bp,
+    // 2000년 전 시각은 못 읽은 시각(R2-5 — 1970 항목 하나가 '본 기간' 시작을 지웠다).
+    created: Number.isFinite(created) && created >= MIN_VALID_TIME ? created : null, kind, disk, bp,
     slotKey: m ? slotKeyOf({ disk, bp }) : '',
     messageId: t(e.MessageId, 64), message, severity: t(e.Severity, 16), sensor,
   };
@@ -87,7 +88,7 @@ export async function readSel(entry, { mgr, signal = null, getJson = redfishGetC
       for (const e of mem) {
         out.read += 1;
         const c = Date.parse(t(e?.Created, 40));
-        if (Number.isFinite(c)) {
+        if (Number.isFinite(c) && c >= MIN_VALID_TIME) {
           if (out.oldest == null || c < out.oldest) out.oldest = c;
           if (out.newest == null || c > out.newest) out.newest = c;
         }

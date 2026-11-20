@@ -80,7 +80,7 @@ test('R4 · R5 · R12 · R14 — 소스 계약(시한으로 닫아도 메일 · 
   assert.equal((sweep.match(/finishUnit\(j, u\)/g) || []).length, 2, '시작 못 함 · 응답 없음 둘 다 finishUnit');
   const push = jb.slice(jb.indexOf('export async function acceptPush'), jb.indexOf('export function stopJob'));
   assert.ok(push.indexOf('if (push.final)') < push.indexOf("if (!r.ok) return { ok: false"), '마지막 묶음 닫기가 저장 실패 반환보다 먼저');
-  assert.match(push, /u\.unsaved \+= push\.servers\.length/);
+  assert.match(push, /u\.unsaved = u\._unsavedIds\.size;/);   // 2회차 R2-6: 서버 id 로 센다(재시도로 두 번 세지 않게)
   const auto = jb.slice(jb.indexOf('export async function autoTick'), jb.indexOf('export function autoInfo'));
   assert.match(auto, /if \(!\(await diskBadDbStatus\(\)\)\.available\) return null;/);
   assert.match(auto, /if \(!\(await setDiskBadMeta\(AUTO_META_KEY, t\)\)\) return null;/);
@@ -114,7 +114,7 @@ test('R10 · I3 — 로그를 못 읽은 서버의 이상 디스크도 전 법�
   assert.equal(f.totals.staleServers, 1);
 });
 
-test('R13 · I1 — 다시 보내기는 작업 시각을 바꾸지 않음 · 엣지가 다시 가지러 오면 남은 조각을 닫음', () => {
+test('R13 · I1 — 다시 보내기는 작업 시각을 바꾸지 않음 · 엣지가 다시 가지러 오면 남은 조각을 닫음', async () => {
   J._resetJobsForTest();
   const job = J.createJob({ scope: 'all', units: [{ agent: 'edge-a', kind: 'edge', serverIds: null }, { agent: 'edge-b', kind: 'edge', serverIds: null }] });
   J.sweepJobs(job.at + J.CLAIM_TIMEOUT_MS + 60_000);
@@ -126,8 +126,12 @@ test('R13 · I1 — 다시 보내기는 작업 시각을 바꾸지 않음 · 엣
   g = J.getJob(job.id);
   assert.equal(g.units[0].state, 'queued', '다시 보낸 조각의 시한은 그때부터');
   // I1: 가져간 뒤(읽는 중) 끝을 알리지 않고 다시 가지러 오면 — 앞 조각을 닫고 기다리는 조각이 없으면 null.
+  //   2회차 R2-7: 보고가 한 번도 없으면 엣지가 답을 받지 못한 것이다 — 닫지 않고 다시 내준다.
   assert.ok(J.claimForAgent('edge-a'));
   assert.equal(J.getJob(job.id).units[0].state, 'running');
+  assert.equal(J.claimForAgent('edge-a')?.id, job.id, '보고 없는 조각은 다시 내준다');
+  assert.equal(J.getJob(job.id).units[0].state, 'running');
+  await J.acceptPush('edge-a', { jobId: job.id, servers: [], final: false });   // 진행 보고 한 번
   assert.equal(J.claimForAgent('edge-a'), null);
   const u = J.getJob(job.id).units[0];
   assert.equal(u.state, 'failed');

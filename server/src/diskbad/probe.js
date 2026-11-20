@@ -108,6 +108,7 @@ export async function probeIdrac(entry, { signal = null, getJson = redfishGetCap
   let sample = '';
   let lclogCount = null;
   let lclogPage = 0;
+  let lclogOrder = 'unknown';
   await step('lclog', async () => {
     const r = await firstOk([base, `${mgr}/Logs/Lclog`]);
     base = r.path;
@@ -130,6 +131,7 @@ export async function probeIdrac(entry, { signal = null, getJson = redfishGetCap
       via[k] = (via[k] || 0) + 1;
     }
     lclogPage = f.n;
+    lclogOrder = orderOf(f.rows);
     return {
       loginVia: Object.fromEntries(Object.entries(via).slice(0, 8)),
       path: base, pageLen: f.n, count: f.count, nextLink: f.next, order: orderOf(f.rows),
@@ -146,6 +148,8 @@ export async function probeIdrac(entry, { signal = null, getJson = redfishGetCap
       const f = pageFacts(await G(`${base}?$skip=${lclogCount - 1}`));
       const x = f.rows[f.rows.length - 1];
       if (!x) return { n: 0 };
+      // 오래된 것 먼저인 장비에서는 맨 끝이 **가장 새** 항목이다(I-5 — '가장 오래된' 으로 잘못 실었다). 방향을 그대로 밝힌다.
+      if (lclogOrder !== 'desc') return { n: f.n, order: lclogOrder, note: '이 장비는 최신 먼저가 아니라 맨 끝 항목이 가장 오래된 것이라고 말할 수 없습니다.', created: iso(x.created) };
       const code = codeOf(x.messageId);
       return { n: f.n, messageId: t(x.messageId, 64), created: iso(x.created), ...(/^LOG\d{1,6}$/.test(code) ? { message: t(x.message, 160) } : {}) };
     });
