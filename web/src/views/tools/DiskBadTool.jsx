@@ -77,7 +77,7 @@ export function DiskBadTool() {
   if (err && !data) return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
       <ErrorBox error={err} />
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'center' }}>
         <button className="tab" style={{ flex: 'none', padding: '4px 12px' }} onClick={() => load()}>다시 읽기</button>
         {corp && <button className="tab" style={{ flex: 'none', padding: '4px 12px' }} onClick={() => setCorp('')}>전체로</button>}
       </div>
