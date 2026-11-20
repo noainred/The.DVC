@@ -1,0 +1,14 @@
+# 랙 실장도(`server/src/rack/` · 라우트 `routes/api/rack.js` · 화면 `web/src/views/tools/RackTool.jsx`) 불변조건
+
+설계: `docs/design/rack-elevation/README.md`. 회귀: `test/rackLedger.test.js` · `test/rackRoutes.test.js` · `web/src/views/tools/rackView.test.js`.
+
+- **원장은 중앙 한 곳**(2026-11-20 사용자 결정). 사람이 정한 위치만 저장한다 — 상태 · 온도 · 전력 측정값은 넣지 않고 화면을 그릴 때 수집 모듈에서 잇는다.
+  계층은 법인(`datacenter/store.js` DataCenter = 법인 묶음) → 데이터센터(site · 물리) → 전산실 → 랙 → 배치. 법인 하나에 데이터센터가 여럿일 수 있다.
+- **편집은 관리자만**(사용자 결정) — `requireRole('admin')` + `isAdminDetailUser` + 그 법인의 할당 vCenter **전부** 쓰기 범위. 조회 밖 404 → 쓰기 밖 403.
+  할당 vCenter 가 없는 법인은 범위 계정에 보이지 않는다(귀속 없는 데이터 미노출). 랙 종류(전 법인 공용)는 `isFullReadWriteScope` 관리자만.
+- **서버는 서비스 태그로만 잇는다**(2026-11-19 사용자 결정). 비교 키는 `insights/serialKey.js normKey` 하나(시리얼 색인과 같은 함수 — 사본 금지).
+  서버 목록은 `scopeIdracServers` 로 먼저 자른다. 관리 주소는 관리자 판본만 · 시리얼은 관리자 또는 전체(조회) 범위 계정만 · 이력 작업자 계정명은 관리자만.
+- **전산실 단위 쓰기는 rev 대조**(다르면 409 `revConflict` — 조용히 덮어쓰지 않는다) + 한 트랜잭션에 이력까지. 아래 자료가 남은 상위(데이터센터 · 전산실 · 랙 · 쓰는 랙이 있는 종류)는 지우지 않는다.
+  랙 높이를 줄여 장비가 넘치면 거절한다. 옮기기는 같은 전산실 안에서만(다른 전산실 랙 id 는 404).
+- **못 읽은 값은 0 이 아니다**: 높이를 모르면 1U 로 가정하지 않는다(입력 필수) · 비운 전력 · 무게는 null 이고 합계는 '몇 대 중 몇 대' 와 함께.
+- 겹침 판정은 서버 `layout.js placementIssue` 가 진실 — 웹 `rackView.js` 는 끌어 놓는 동안 미리 보기만 하고, 두 판정은 `rackView.test.js` 가 같은 입력으로 대조한다.

@@ -44,6 +44,8 @@ export const TOOLS = [
   // v3.8.0 — iDRAC Lifecycle 로그의 디스크 배드 섹터 계열 기록(PDR46·47·63·64·54·59·57). 조회는 tools 권한 + 범위 계정은 자기 법인만(adminOnly 아님 — 서버 집행과 같다).
   { k: 'disk-bad', icon: '💽', label: '디스크 배드 섹터 분석', desc: '전 법인 서버의 iDRAC Lifecycle 로그에서 디스크 배드 섹터 기록(복구 불가 · PDR54 · PDR59 · PDR57)을 찾아 그 디스크를 아직 쓰는지(시리얼 · 로그 근거와 함께), 국가 · 법인별 · 모델별 빈도 · 월별 추이를 본다 · 전체 / 법인별 / 서버 1대 점검 · 6시간 자동 점검(새 로그만) · 새 기록 메일 · 판정마다 판단 근거와 Dell 문서 출처', aka: ['bad sector', '배드 섹터', '배드섹터', 'PDR46', 'PDR54', 'lifecycle log', 'LC 로그', '디스크 이력', 'media error'] },
   { k: 'serial-lookup', icon: '🔎', label: '시리얼 조회', desc: '등록·수집된 모든 장비의 시리얼을 한 번에 검색 — 서버(iDRAC) 섀시와 부품(PSU·디스크·메모리·NIC) · OME 장비 · ESXi 호스트 · 스토리지 어레이 · SAN 스위치(섀시·PSU·SFP) · 엣지 베어메탈 · 대소문자와 :·- 무시 부분 일치 · CSV 내보내기', adminOnly: true },
+  // 랙 실장도(설계 docs/design/rack-elevation) — 법인 › 데이터센터 › 전산실 › 랙의 U 단위 배치 원장(중앙). 조회는 tools + 법인 범위(adminOnly 아님 — 서버 집행과 같다) · 편집은 관리자만(서버 집행).
+  { k: 'rack', icon: '🗄️', label: '랙 실장도', desc: '데이터센터 › 전산실 › 랙의 U 단위 장비 배치(전면 · 후면) · 서버는 서비스 태그로 iDRAC 정보와 연결(상태 · 부품 · 관리 주소) · 미배치 서버 · 랙 종류(40 · 42 · 45 · 48U) · 관리자 끌어 놓기 편집(겹침 · 범위 검사 · 동시 편집 충돌 감지 · 변경 이력) · 엑셀 실장도 내보내기' },
   { k: 'pdu', icon: '🔌', label: 'PDU 정보', desc: 'APC Rack PDU 2G(rpdu2g) — 전력(kW·누적 kWh·피상·역률) · 뱅크/상별 전류 · 온도·습도. 데이지체인 PDU 대수와 환경 센서 개수를 자동 탐지 · 엣지 현지 수집→중앙 집계 · 수집 주기 중앙 배포 · CSV 일괄 등록/수정 · 전용 시계열 DB', adminOnly: true },
   { k: 'san-switch', icon: '🔗', label: 'SAN 스위치 모니터링', desc: 'Brocade(Fabric OS) FC 스위치·디렉터 전 모델 — 포트별 상태·속도·연결 장비·에러 카운터·SFP 광레벨(Tx/Rx dBm) · 포트 용량(라이선스/사용중/여유, POD 미라이선스 제외) · SSH CLI 또는 REST(FOS 8.2.1+) · 엣지 현지 수집→중앙 집계 · 법인별 필터', adminOnly: true },
   // v2.608 — Arista CloudVision(CVP) 에 등록된 네트워크 스위치를 읽는다(엣지 위임 또는 중앙 직접). adminOnly 아님 — 조회는 tools + 전체 범위.

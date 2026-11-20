@@ -45,7 +45,7 @@ export const PRESET = Object.freeze([
   {
     id: 'server', label: '서버', icon: '🖥️',
     tools: ['fleet', 'hardware', 'serveranalysis', 'idrac-trend', 'serial-lookup', 'esxi', 'host-hygiene', 'esxitemp', 'roomtemp',
-      'powermap', 'pdu', 'gpu', 'gpu-alloc', 'hba', 'nic-speed', 'nic-models', 'rma', 'bm-storage', 'part-faults', 'disk-bad',
+      'powermap', 'pdu', 'rack', 'gpu', 'gpu-alloc', 'hba', 'nic-speed', 'nic-models', 'rma', 'bm-storage', 'part-faults', 'disk-bad',
       'bm-usage', 'focus-mon', 'corp-usage', 'power-total', 'svc-inventory', 'bm-folders', 'server-info', 'server-cmd'],
   },
   {
