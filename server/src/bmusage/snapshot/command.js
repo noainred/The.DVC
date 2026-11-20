@@ -17,6 +17,8 @@
  */
 export const SNAPSHOT_CODE_STATUS = Object.freeze({
   ok: 200, 'bad-reason': 400, 'not-found': 404, forbidden: 403, 'no-os-path': 409, busy: 409, 'daily-cap': 429, 'store-unavailable': 503,
+  // 다음 작업 ④ ⑥: 데모 대상(표시 OS 는 합성) · 키 · 공통 계정 참조 미해석 — 실행 전에 거절(SSH 0회). auth-unresolved 는 예전에 이 표에 없어 200 ok:false 였다.
+  'demo-target': 409, 'auth-unresolved': 409,
   'ssh-error': 200, auth: 200, 'host-key': 200, timeout: 200, 'not-linux': 200, edge: 502,
 });
 export const SNAPSHOT_CODES = Object.freeze(Object.keys(SNAPSHOT_CODE_STATUS));

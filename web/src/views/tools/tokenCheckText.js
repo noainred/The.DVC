@@ -425,6 +425,7 @@ export function runSummary(resp) {
 export const EDGE_PULL_FAIL_LABEL = Object.freeze({
   auth: '토큰 거부', unreachable: '닿지 못함', timeout: '시한 초과', http: '예상 밖 응답',
   'bad-body': '형식 다름', disabled: '엣지에서 꺼짐', 'old-version': '구버전',
+  'too-large': '응답 상한 초과',   // 다음 작업 ⑤(c) — central/edgePull.js 크기 상한
 });
 
 /**

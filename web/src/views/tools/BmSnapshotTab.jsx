@@ -13,11 +13,11 @@ import { toneVar } from './toneVar.js';
 import { useOpsLoad, OpsError } from './BmTuningTab.jsx';
 import { perfPath } from './bmPerfUrl.js'; // 다음 점검 ①: 서버 = (법인, 키) 쌍 — 요청에 법인을 싣는다
 import { STATE_TEXT } from './bmPerfText.js';
-import { SNAP_CODE_TEXT, SNAP_STATE_TEXT, snapPermState, bpsText, kbText, snapResultNote, snapCodeShort, snapTrimNote, snapRunGate, SNAP_NOTE, SNAP_PS_NOTE, shortStamp } from './bmOpsText.js';
+import { SNAP_CODE_TEXT, SNAP_STATE_TEXT, snapPermState, bpsText, kbText, snapResultNote, snapCodeShort, snapTrimNote, snapRunGate, SNAP_NOTE, SNAP_PS_NOTE, shortStamp, snapPathBasisNote } from './bmOpsText.js';
 import { gateOk, gateWhy } from './bmWriteText.js'; // 점검 반복 8회차 F2 — 서버 표지(데모 · 역할)
 import './bmOps.css';
 
-const SNAP_REASON_CODES = Object.freeze(['ssh-error', 'auth', 'host-key', 'timeout', 'not-linux', 'edge', 'daily-cap', 'store-unavailable']);
+const SNAP_REASON_CODES = Object.freeze(['ssh-error', 'auth', 'host-key', 'timeout', 'not-linux', 'edge', 'daily-cap', 'store-unavailable', 'auth-unresolved']);   // auth-unresolved: 사유 = 해석 실패 내용(다음 작업 ⑥)
 
 function ProcTable({ rows = [], kind = 'cpu' }) {
   if (!rows.length) return <p className="bmo-note">—</p>;
@@ -177,6 +177,8 @@ export default function BmSnapshotTab({ itemKey, vc = '' }) {
           </div>
         ) : gate === 'role' ? <p className="bmo-note">{runG && !runG.ok && !String(runG.why || '').startsWith('role-') && gateWhy(runG) ? `실행 — ${gateWhy(runG)}` : '실행은 운영자(operator) 이상만 할 수 있습니다'} — 아래 보관분은 볼 수 있습니다.</p>
           : <p className="bmo-note">{SNAP_CODE_TEXT.forbidden.text} 아래 보관분은 볼 수 있습니다.</p>}
+        {/* 다음 작업 ⑥(b): 엣지 대행 서버 — 칸 판정은 마지막으로 가져온 엣지 봉투 기준(그 시각은 API 값). */}
+        {snapPathBasisNote(list.resp?.pathBasis) && <p className="bmo-note">{snapPathBasisNote(list.resp.pathBasis)}</p>}
         {run.err && <ErrorBox error={run.err} />}
       </section>
       {shown && <SnapshotResult snap={shown} />}

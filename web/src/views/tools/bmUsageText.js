@@ -22,11 +22,15 @@ import { csvCell } from '../../util/csv.js';
  */
 
 import { agoText as _ago, elapsedText as _elapsed } from './relTime.js';
+import { EDGE_PULL_FAIL_LABEL } from './tokenCheckText.js'; // 다음 작업 재확인 — 당김 실패 kind 낱말 하나(원문 kind 를 보이지 않게)
 import { numOrNull } from '../../numOrNull.js';
 import { toneVar } from './toneVar.js';
 const t = (v) => String(v ?? '').trim();
 /** ⚠ `v == null` 을 **먼저** 본다 — `Number(null)===0`·`Number('')===0` 이라 결측이 0 으로 둔갑한다. */
 const n = numOrNull;   // v2.576: 사본 금지 — 코어는 하나다(사본은 Number([])===0 을 막지 못했다)
+
+/** 엣지 당김 실패 kind → 짧은 낱말(공용 표 EDGE_PULL_FAIL_LABEL — 모르는 kind 는 그대로 · 없으면 ‘실패’). */
+export const pullKindLabel = (k) => EDGE_PULL_FAIL_LABEL[String(k || '')] || String(k || '') || '실패';
 
 /** 퍼센트 표시. 값이 없으면 단위를 붙이지 않는다(`— %` 는 0% 처럼 읽힌다 — v2.534 규약). */
 export function pctText(v) {
@@ -186,7 +190,7 @@ export function missingMark(list = []) {
  */
 export function missingFootnotes(rows = []) {
   const kinds = new Set();
-  for (const r of rows) for (const k of (r.missing || [])) kinds.add(k);
+  for (const r of rows) for (const k of shownMissing(r)) kinds.add(k);
   const out = [];
   if (kinds.has('no-os-cred')) out.push('**OS 계정 없음** — 그 서버는 CPU·메모리만(iDRAC 텔레메트리) 읽습니다. 디스크·네트워크·HBA 를 보려면 설정 › 베어메탈 스토리지에 그 호스트를 등록하세요(같은 계정을 두 번 등록하지 않도록 그 등록부를 재사용합니다).');
   if (kinds.has('no-idrac')) out.push('**iDRAC 등록 없음** — 수동 태그로 베어메탈이 된 ESXi 호스트일 수 있습니다. OS 계정만 있으면 다섯 지표를 모두 읽습니다.');
@@ -564,12 +568,20 @@ export function edgeNote(isEdge) {
  * 종류 축은 **수집 경로**다 — 'OS 계정이 있는 서버만 보기' 가 되어 실제로 쓸모가 있다.
  */
 export function facetRows(rows = []) {
-  return (rows || []).map((r) => ({
-    ...r,
-    datacenterId: t(r.vcenterId) || '',
-    type: (r.paths || []).includes('os') ? (((r.paths || []).length > 1) ? 'idrac+os' : 'os') : 'idrac',
-  }));
+  return (rows || []).map((r) => {
+    const p = shownPaths(r);
+    return { ...r, datacenterId: t(r.vcenterId) || '', type: p.includes('os') ? (p.length > 1 ? 'idrac+os' : 'os') : 'idrac' };
+  });
 }
+/**
+ * 다음 작업 ④(2026-11-19): 화면에 그리는 수집 경로 · 누락 — 서버가 표시 값(pathsShown · missingShown — 데모(mock) 대상의 합성 OS 표지)을 주면 그것을,
+ *   아니면 등록 값(paths · missing)을 그대로 쓴다. 판정이 아니다(서버 값을 고르기만 — 판정은 서버 mock/demo/baremetal.js demoDisplayTargets 하나).
+ *   KPI(서버 counts — 같은 표지로 센다) · 장비 종류 칩 · 사용률 표 · CSV · 각주가 이 둘을 읽는다.
+ */
+export const shownPaths = (r) => (Array.isArray(r?.pathsShown) ? r.pathsShown : (Array.isArray(r?.paths) ? r.paths : []));
+export const shownMissing = (r) => (Array.isArray(r?.missingShown) ? r.missingShown : (Array.isArray(r?.missing) ? r.missing : []));
+/** 경로 칸 글자(표 · CSV) — ‘OS’ · ‘iDRAC’ 를 sep 로 잇는다. */
+export const pathsText = (r, sep = '·') => shownPaths(r).map((p) => (p === 'os' ? 'OS' : 'iDRAC')).join(sep);
 export const PATH_LABEL = Object.freeze({ 'idrac+os': 'iDRAC·OS', os: 'OS 만', idrac: 'iDRAC 만' });
 export function pathTypeLabel(x) { return PATH_LABEL[t(x)] || t(x) || '미상'; }
 
@@ -637,9 +649,9 @@ export function csvOf(rows = []) {
   const esc = (v) => (v == null ? '' : csvCell(v));
   const cell = (r, key) => {
     if (key === 'server') return t(r.name);
-    if (key === 'paths') return (r.paths || []).map((p) => (p === 'os' ? 'OS' : 'iDRAC')).join('+');
+    if (key === 'paths') return pathsText(r, '+');
     if (key === 'src') return t(r.src);
-    if (key === 'missing') return (r.missing || []).join('+');
+    if (key === 'missing') return shownMissing(r).join('+');
     if (key === 'collectedAt') {
       const ts = n(r.ts);
       if (ts == null) return '';
@@ -910,7 +922,7 @@ export function edgePullState(row = {}, { minEdgeVersion = '', staleMs = 30 * 60
       why: att.kind === 'old-version' ? `이 엣지에 해당 경로가 없습니다 — v${minEdgeVersion} 이상으로 업그레이드해야 합니다(다시 눌러도 같습니다).`
         : att.kind === 'auth' ? '수집 서버 토큰이 맞지 않습니다 — 중앙 등록값과 그 엣지의 설정을 대조하세요(다시 눌러도 같습니다).'
           : att.kind === 'disabled' ? '그 엣지에서 수집 서버 토큰이 설정돼 있지 않습니다.'
-            : `${t(att.kind) || '실패'}: ${t(att.reason)}`,
+            : `${pullKindLabel(att.kind)}: ${t(att.reason)}`,
     };
   }
   if (row.enabledOnEdge === false) {
@@ -932,7 +944,7 @@ export function edgePullState(row = {}, { minEdgeVersion = '', staleMs = 30 * 60
   }
   const old = now - at > staleMs;
   if (att && !att.ok) {
-    return { state: 'stale-failed', label: '마지막 시도 실패', tone: 'warn', why: `아래 값은 ${ageText(at, now)} 가져온 것이고, **가장 최근 시도는 실패**했습니다 — ${t(att.kind)}: ${t(att.reason)}` };
+    return { state: 'stale-failed', label: '마지막 시도 실패', tone: 'warn', why: `아래 값은 ${ageText(at, now)} 가져온 것이고, **가장 최근 시도는 실패**했습니다 — ${pullKindLabel(att.kind)}: ${t(att.reason)}` };
   }
   if (old) return { state: 'stale', label: '낡음', tone: 'warn', why: `${ageText(at, now)} 가져온 값입니다 — 지금 값을 보려면 다시 가져오세요.` };
   return { state: 'ok', label: '보관분 있음', tone: 'ok', why: `${ageText(at, now)} 가져온 값입니다.` };
