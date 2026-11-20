@@ -64,7 +64,7 @@ const credKey = (srv) => crypto.createHash('sha256').update(`${t(srv.username ||
 
 /**
  * @param {string} serverId  bm-storage 등록부 id
- * @param {{feature:string, plan:{linux?:{command:string,timeoutMs:number,maxBytes?:number}, windows?:{command:string,timeoutMs:number,maxBytes?:number}}, deadlineMs?:number, signal?:AbortSignal,
+ * @param {{feature:string, plan:{linux?:{command:string,timeoutMs:number,maxBytes?:number,stderrMax?:number}, windows?:{command:string,timeoutMs:number,maxBytes?:number,stderrMax?:number}}, deadlineMs?:number, signal?:AbortSignal,
  *          by?:string, trigger?:string, credGate?:Function}} o
  *   plan — OS 마다 고정 명령 하나. 서버에 OS 를 정하지 않았으면 linux 로 읽는다(추측해서 두 OS 를 차례로 대 보지 않는다 — 계정 잠금).
  */
@@ -83,16 +83,22 @@ export async function readServer(serverId, { feature, plan = {}, deadlineMs = RE
   const viaWinrm = os === 'windows' && (ef.source === 'os') && ef.via === 'winrm';
   const [srv] = withResolvedAuth([raw], { feature, winrm: viaWinrm });
   const auth = { kind: srv.privateKey ? 'key' : 'password', account: t(srv.credAccountName || '', 64), source: t(srv.credSource || (srv.keyRef || srv.credRef ? 'own' : ''), 16) };
+  // 계정이 없는 경우(승인이 풀림 · 승인했지만 지정 없음 — 점검 1회차 T3)는 ‘계정 없음’ 으로 — 판정에 막힌 것과 따로 보인다
+  if (srv.authErrorCode === 'not-configured' || srv.authErrorCode === 'no-account') return { ok: false, code: 'not-configured', credCode: srv.authErrorCode, reason: String(srv.authError || '').slice(0, 300), os, auth };
   if (srv.authErrorCode) return { ok: false, code: 'cred', credCode: srv.authErrorCode, reason: String(srv.authError || '').slice(0, 300), os, auth };
   if (!srv.privateKey && !srv.password) return { ok: false, code: 'not-configured', os, auth, reason: '이 서버에 정한 계정이 없습니다(따로 정함 · 물려받기 승인 모두 없음) — 설정 › 보안 › 서버 접속에서 정하세요.' };
   // 시한은 탐침 대기 밖에서 연다(run 안) — 호출부 signal(일괄 취소)과 합친다. 시한이 오면 세션째 끊는다(withSsh signal).
-  const run = () => withDeadline(deadlineMs, (sig) => withSsh({ host: String(srv.host), port: Number(srv.port) || 22, username: srv.username || 'root', password: srv.password || '',
-    privateKey: srv.privateKey, passphrase: srv.passphrase, readyTimeout: READ_LOGIN_TIMEOUT_MS, singlePasswordAttempt: true, signal: signal ? AbortSignal.any([sig, signal]) : sig },
-  async ({ exec }) => ({ out: await exec(step.command, step.timeoutMs, { partial: true, maxBytes: step.maxBytes }) }))
-    // 로그인에 성공하면 명령이 시한 · 상한에 걸려도 ok(탐침 판정 — 비밀번호는 맞았다)
-    .then((x) => ({ ok: true, out: x.out }))
-    .catch((e) => ({ ok: false, error: String(e?.message || e), hostkey: isSshHostKeyError(e), authFailed: isSshAuthError(e), timeout: sig.aborted || !!signal?.aborted })), '서버 읽기 시한 초과')
-    .catch((e) => ({ ok: false, error: String(e?.message || e), timeout: true }));
+  // 점검 1회차 R2 · T4: 로그인 뒤의 실패(채널 · 연결 끊김 · 시한)는 loggedIn 을 단다 — 비밀번호는 받아들여졌으니 계정 탐침은 ‘성공’ 으로 본다(‘모름’ 이면 같은 계정 서버를 하나씩 직렬로 돌렸다).
+  const run = () => {
+    let logged = false;
+    return withDeadline(deadlineMs, (sig) => withSsh({ host: String(srv.host), port: Number(srv.port) || 22, username: srv.username || 'root', password: srv.password || '',
+      privateKey: srv.privateKey, passphrase: srv.passphrase, readyTimeout: READ_LOGIN_TIMEOUT_MS, singlePasswordAttempt: true, signal: signal ? AbortSignal.any([sig, signal]) : sig },
+    async ({ exec }) => { logged = true; return { out: await exec(step.command, step.timeoutMs, { partial: true, maxBytes: step.maxBytes }) }; })
+      // 로그인에 성공하면 명령이 시한 · 상한에 걸려도 ok(탐침 판정 — 비밀번호는 맞았다)
+      .then((x) => ({ ok: true, out: x.out }))
+      .catch((e) => ({ ok: false, error: String(e?.message || e), hostkey: isSshHostKeyError(e), authFailed: !logged && isSshAuthError(e), timeout: sig.aborted || !!signal?.aborted, loggedIn: logged })), '서버 읽기 시한 초과')
+      .catch((e) => ({ ok: false, error: String(e?.message || e), timeout: true, loggedIn: logged }));
+  };
   // v3.25(3단계): Windows 단계 지정이 WinRM 이면 WinRM HTTPS + NTLM 으로(비밀번호만 — resolveOsAuth(winrm) 가 키를 쓰지 않게 이미 막았다)
   if (viaWinrm && (!step.winrm || !srv.password)) return { ok: false, code: 'no-plan', os, auth, reason: 'WinRM 으로 읽을 묶음이나 비밀번호가 없습니다.' };
   const runWinrm = () => withDeadline(deadlineMs, async (sig) => {
@@ -103,7 +109,7 @@ export async function readServer(serverId, { feature, plan = {}, deadlineMs = RE
       return { ok: true, out: { code: out.exitCode, stdout: out.stdout, stderr: out.stderr } };
     } catch (e) {
       const k = e?.kind || '';
-      return { ok: false, error: String(e?.message || e), authFailed: k === 'auth-rejected', tls: k === 'tls-peer' || k === 'cbt', timeout: k === 'timeout' || sig.aborted, tooLarge: k === 'too-large' };
+      return { ok: false, error: String(e?.message || e), authFailed: k === 'auth-rejected', tls: k === 'tls-peer' || k === 'cbt', timeout: k === 'timeout' || sig.aborted, tooLarge: k === 'too-large', loggedIn: e?.afterLogin === true, faultWhy: typeof e?.faultWhy === 'string' ? e.faultWhy : '' };
     }
   }, '서버 읽기 시한 초과').catch((e) => ({ ok: false, error: String(e?.message || e), timeout: true }));
   const viaAccount = srv.credAccountId && srv.credVersion != null;
@@ -120,7 +126,7 @@ export async function readServer(serverId, { feature, plan = {}, deadlineMs = RE
   const via = viaWinrm ? 'winrm' : 'ssh';
   if (!r.ok) {
     const code = r.authFailed ? 'auth-rejected' : r.hostkey ? 'hostkey' : r.tls ? 'tls' : r.tooLarge ? 'exec-truncated' : r.timeout ? 'timeout' : 'connect';
-    const reason = code === 'auth-rejected' ? '로그인이 거부됐습니다(다시 시도하지 않습니다 — 계정 잠금 방지).'
+    const reason = code === 'auth-rejected' ? `로그인이 거부됐습니다(다시 시도하지 않습니다 — 계정 잠금 방지).${viaWinrm ? ` WinRM 은 비밀번호가 맞아도 권한(Administrators · Remote Management Users · 원격 UAC)이 없으면 같은 거부(401)를 줄 수 있습니다 — 권한을 확인한 뒤 ‘한 대로 다시 확인’ 으로 정지를 푸세요.${r.faultWhy ? ` 서버 사유: ‘${r.faultWhy}’.` : ''}` : ''}`
       : code === 'hostkey' ? '호스트키를 신뢰하지 않아 끊었습니다 — 설정 › 보안 › 장비 신뢰에서 지문을 확인 · 승인하세요.'
         : code === 'tls' ? 'WinRM 인증서를 신뢰하지 않아 끊었습니다(비밀번호를 보내지 않았습니다) — 설정 › 보안 › 장비 신뢰에서 지문을 확인 · 승인하세요.'
           : code === 'exec-truncated' ? '출력이 상한을 넘었습니다(WinRM 은 받은 칸을 돌려주지 않습니다).'
@@ -130,7 +136,7 @@ export async function readServer(serverId, { feature, plan = {}, deadlineMs = RE
   }
   const out = r.out || {};
   const exit = out.code;
-  const base = { os, via, auth, ms, exit: Number.isInteger(exit) ? exit : null, stdout: String(out.stdout || ''), stderr: String(out.stderr || '').slice(0, 2000) };
+  const base = { os, via, auth, ms, exit: Number.isInteger(exit) ? exit : null, stdout: String(out.stdout || ''), stderr: String(out.stderr || '').slice(0, Number(step.stderrMax) > 0 ? Number(step.stderrMax) : 2000) };
   if (out.timedOut) return { ok: false, code: 'exec-timeout', reason: `명령이 시한(${Math.round((step.timeoutMs || 0) / 1000)}초) 안에 끝나지 않았습니다 — 받은 칸만 씁니다.`, partial: true, ...base };
   if (out.truncated) return { ok: false, code: 'exec-truncated', reason: '출력이 상한을 넘어 잘랐습니다 — 받은 칸만 씁니다.', partial: true, ...base };
   return { ok: true, code: 'ok', ...base };

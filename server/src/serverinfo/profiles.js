@@ -60,7 +60,7 @@ const cell = (value, reason = '') => (value == null || value === '' ? { value: n
 /**
  * Linux 출력 → { base, disks, fs, truncated }.
  *  · base 칸마다 { value | missing + reason('permission' · 'absent' · 'unread') }
- *  · disks: [{ dev, model, serial, wwn, sizeBytes, media, tran }] — 못 읽으면 null(빈 배열이 아니다)
+ *  · disks: [{ dev, model, serial, wwn, sizeBytes, media, tran, paths }] — 못 읽으면 null(빈 배열이 아니다) · paths = 같은 WWN · 시리얼로 보인 경로 수(멀티패스)
  *  · fs: [{ mount, type, sizeKB, usedKB, availKB, usePct }] — 못 읽으면 null
  */
 export function parseLinux(text) {
@@ -95,9 +95,19 @@ export function parseLinux(text) {
   //   디스크가 하나도 없는 서버는 없다고 본다(블록 장치 0 은 읽기 실패) · df 는 머리줄(Filesystem)이 있어야 읽은 것이다.
   let disks = null;
   if (has('DISKS')) {
-    disks = parseDisks(lines('DISKS')).map((d) => ({
-      dev: d.dev, model: d.model, serial: d.sn || '', wwn: d.wwn || '', sizeBytes: numOrNull(d.size), media: d.media || '', tran: d.tran || '',
-    }));
+    // 점검 1회차 U3: 멀티패스는 같은 LUN 이 경로마다 sdX 로 따로 보여 디스크 수가 경로 수만큼 부풀었다 — WWN(없으면 시리얼)이 같은 행은 하나로 묶고 경로 수를 단다.
+    //   zram · ram(메모리 위 압축 스왑)은 디스크가 아니다(ROTA 0 이라 SSD 로 보였다). 비어 있는 WWN · 시리얼은 묶지 않는다(가상 디스크).
+    const seen = new Map();
+    disks = [];
+    for (const d of parseDisks(lines('DISKS'))) {
+      if (/^\/dev\/(?:zram|ram)\d/.test(d.dev)) continue;
+      const id = d.wwn ? `w:${d.wwn}` : (d.sn ? `s:${d.sn}` : '');
+      const prev = id ? seen.get(id) : null;
+      if (prev) { prev.paths += 1; continue; }
+      const row = { dev: d.dev, model: d.model, serial: d.sn || '', wwn: d.wwn || '', sizeBytes: numOrNull(d.size), media: d.media || '', tran: d.tran || '', paths: 1 };
+      if (id) seen.set(id, row);
+      disks.push(row);
+    }
   }
   let fs = null;
   const fsLines = lines('FS');
@@ -146,7 +156,11 @@ export const WIN_COMMAND = `powershell -NoLogo -NoProfile -NonInteractive -Execu
 /** cmd.exe 명령 줄 한도(8,191자) — 이 명령은 그 안이어야 한다(시험). */
 export const CMD_LINE_MAX = 8191;
 
-const arr = (v) => (Array.isArray(v) ? v : v && typeof v === 'object' ? [v] : []);
+// 점검 1회차 U4(방어 — 실제 Windows 미확인): PowerShell 5.1 의 ConvertTo-Json 은 확장 형식 데이터가 붙은 배열을 `{ "value": [...], "Count": N }` 로 낼 수 있다 —
+//   그대로 한 원소로 보면 2소켓이 ‘소켓 1 · 코어 모름’ 이 됐다. 그 꼴(value 배열 + Count 수 · 다른 칸 없음)만 푼다.
+const isPsWrapped = (v) => v && typeof v === 'object' && !Array.isArray(v) && Array.isArray(v.value) && typeof v.Count === 'number'
+  && Object.keys(v).every((k) => k === 'value' || k === 'Count');
+const arr = (v) => (Array.isArray(v) ? v : isPsWrapped(v) ? v.value : v && typeof v === 'object' ? [v] : []);
 // 열거값 → 글(MSFT_PhysicalDisk). Map 이라 장비가 보낸 ‘__proto__’ 같은 값이 객체를 꺼내지 않는다(반증 F9).
 const MEDIA = new Map([[3, 'HDD'], [4, 'SSD'], [5, 'SCM'], ['3', 'HDD'], ['4', 'SSD'], ['5', 'SCM'], ['HDD', 'HDD'], ['SSD', 'SSD'], ['SCM', 'SCM']]);
 const HEALTH = new Map([[0, 'Healthy'], [1, 'Warning'], [2, 'Unhealthy'], [5, 'Unknown']]);

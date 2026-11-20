@@ -48,7 +48,7 @@ function Detail({ s, onClose }) {
                 {src.disks.map((d) => (
                   <tr key={d.dev}>
                     <td><code>{d.dev}</code></td><td>{d.model || '—'}</td><td>{d.media || '—'}</td>
-                    <td className="right" data-sort={d.sizeBytes ?? ''}>{bytesText(d.sizeBytes)}</td><td>{d.tran || '—'}</td><td><code>{d.serial || '—'}</code></td>
+                    <td className="right" data-sort={d.sizeBytes ?? ''}>{bytesText(d.sizeBytes)}</td><td>{d.tran || '—'}{d.paths > 1 ? ` · 경로 ${d.paths}개` : ''}</td><td><code>{d.serial || '—'}</code></td>
                     {src.os === 'windows' && <td>{d.health || '—'}</td>}
                   </tr>
                 ))}
@@ -85,11 +85,27 @@ export default function ServerInfoTool() {
   const [open, setOpen] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
-  const load = useCallback(async () => { try { setV(await fetchJson('/tools/server-info')); setErr(null); } catch (e) { setErr(e); } }, []);
+  // 점검 1회차 W4(서버 명령 실행 화면과 같은 틀 — 반증 F10): 늦게 온 이전 응답은 버린다 · 화면을 한 번 본 뒤의 다시 읽기 실패는 화면을 지우지 않고 알린다 ·
+  //   진행 중 폴링은 실패 뒤에도 이어진다(예전에는 폴링 중 실패 1회로 화면 전체가 오류 상자로 바뀌고 폴링이 멈췄다).
+  const [loadErr, setLoadErr] = useState(null);
+  const [tick, setTick] = useState(0);
+  const loadSeq = useRef(0);
+  const hasView = useRef(false);
+  const load = useCallback(async () => {
+    const my = ++loadSeq.current;
+    try {
+      const r = await fetchJson('/tools/server-info');
+      if (my !== loadSeq.current) return;
+      hasView.current = true; setV(r); setErr(null); setLoadErr(null);
+    } catch (e) {
+      if (my !== loadSeq.current) return;
+      if (hasView.current) setLoadErr(String(e?.message || e)); else setErr(e);
+    } finally { if (my === loadSeq.current) setTick((x) => x + 1); }
+  }, []);
   useEffect(() => { load(); }, [load]);
-  // 일괄은 서버가 백그라운드로 돈다(202) — 도는 동안만 4초마다 다시 읽는다(끝나면 멈춘다 · 상시 폴링 없음)
+  // 일괄은 서버가 백그라운드로 돈다(202) — 도는 동안만 4초마다 다시 읽는다(끝나면 멈춘다 · 상시 폴링 없음 · 실패해도 이어진다)
   const running = !!v?.job;
-  useEffect(() => { if (!running) return undefined; const id = setTimeout(load, 4000); return () => clearTimeout(id); }, [running, v, load]);
+  useEffect(() => { if (!running) return undefined; const id = setTimeout(load, 4000); return () => clearTimeout(id); }, [running, tick, load]);
   const servers = useMemo(() => v?.servers || [], [v]);
   const readable = useMemo(() => servers.filter((s) => !s.agent && s.enabled), [servers]);
   const counts = useMemo(() => ({
@@ -120,6 +136,7 @@ export default function ServerInfoTool() {
         </div>
         <button className="btn btn-sm" type="button" onClick={load}>다시 읽기(화면)</button>
       </div>
+      {loadErr && <p className="ssa-note" style={{ color: toneVar('warn') }}>화면을 다시 읽지 못했습니다({loadErr}) — {running ? '잠시 뒤 다시 읽습니다' : '‘다시 읽기(화면)’ 를 누르세요'}. 아래는 마지막으로 읽은 내용입니다.</p>}
       <div className="ssa-acts">
         <Chip>서버 {counts.all}대</Chip><Chip tone="ok">읽음 {counts.ok}</Chip><Chip tone={counts.failed ? 'bad' : 'muted'}>실패 {counts.failed}</Chip><Chip>아직 안 읽음 {counts.never}</Chip>
         {v.storeError && <Chip tone="warn" title="보관 파일을 읽지 못해 지난 값이 비었습니다 — 다시 읽으면 채워집니다">보관 파일 {v.storeError}</Chip>}

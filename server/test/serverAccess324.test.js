@@ -160,7 +160,10 @@ test('② 계층 해석 — 승인 전 물려받지 않음 · OS 단계가 이�
   // 법인 단계가 Windows 계정이면 Linux · 미지정 서버에는 닿지 않는다(mismatch)
   assert.equal(ST.setAssign('vcA', 'all', { account: ad.id }, { by: 'own' }).ok, true);
   assert.equal(REFS.effectiveAccountOf(byName('l1')).mismatch, true);
-  assert.equal(REFS.resolveOsAuth(byName('n1'), { feature: 'bm-usage' }).authKind, 'none', 'Windows 비밀번호를 OS 미지정 서버로 보내지 않는다');
+  // 점검 1회차 T3: 승인됐지만 물려받을 계정이 없으면 붙지 않는다(예전에는 ok · authKind 'none' — 폴러가 root + 빈 비밀번호로 로그인했다)
+  const nr = REFS.resolveOsAuth(byName('n1'), { feature: 'bm-usage' });
+  assert.equal(nr.ok, false, 'Windows 비밀번호를 OS 미지정 서버로 보내지 않는다 · 빈 비밀번호로도 붙지 않는다'); assert.equal(nr.code, 'no-account');
+  assert.equal(REFS.withResolvedAuth([byName('n1')], { feature: 'bm-usage' })[0].authErrorCode, 'no-account', '폴러는 authError 로 거른다');
   assert.equal(ST.setAssign('vcA', 'all', { account: lin.id }, { by: 'own' }).ok, true);
   // 주소가 바뀌면(승인 칸은 요청이 세울 수 없다 · 다른 쓰기 경로) 승인이 저절로 풀린다
   const l1s = byName('l1');

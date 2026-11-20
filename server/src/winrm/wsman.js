@@ -94,7 +94,8 @@ export function parseCommandId(xml) {
  */
 export function parseReceive(xml) {
   const out = { stdout: [], stderr: [], done: false, exitCode: null };
-  const re = /<(?:[A-Za-z0-9_]+:)?Stream\s+([^>]{0,300})>([A-Za-z0-9+/=\s]{0,1048576})<\/(?:[A-Za-z0-9_]+:)?Stream>/g;
+  // 점검 1회차 R3: `\s+` 와 `[^>]{0,300}` 가 공백을 둘 다 먹어 닫는 태그 없는 큰 응답에서 갈라 보기가 곱으로 늘었다(640KB 에 416ms · 재현) — 공백 하나만 앞에서 본다.
+  const re = /<(?:[A-Za-z0-9_]+:)?Stream\s([^>]{0,300})>([A-Za-z0-9+/=\s]{0,1048576})<\/(?:[A-Za-z0-9_]+:)?Stream>/g;
   let m;
   while ((m = re.exec(xml))) {
     const name = /Name="(stdout|stderr)"/.exec(m[1]);

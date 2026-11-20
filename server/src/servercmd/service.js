@@ -70,7 +70,8 @@ export function outputs(id = '', runKey = '') {
   const want = t(id, 64); const rk = t(runKey, 64);
   if (!last) return (want || rk) ? { ok: false, code: 'gone', status: 404, reason: '그 실행의 출력은 지워졌습니다(끝나고 30분 · 재시작) — 다시 실행하세요.' } : { ok: true, rows: [] };
   if (rk && rk !== last.key) return { ok: false, code: 'run-changed', status: 409, reason: '그 사이 새 실행이 있어 그 출력은 지워졌습니다 — 화면을 다시 읽으세요.' };
-  const rows = [...last.rows.values()].filter((r) => !want || r.id === want).map((r) => ({ id: r.id, name: r.name, code: r.code, exit: r.exit, out: r.out || '', err: r.err || '', cut: !!r.cut }));
+  // 점검 1회차 W2: 실행하지 못한 서버(접속 실패 · 로그인 거부 · 정지)는 출력이 없다 — 전체 복사 · 모두 펼치기에 ‘(출력 없음)’ 으로 섞지 않는다.
+  const rows = [...last.rows.values()].filter((r) => r.ran && (!want || r.id === want)).map((r) => ({ id: r.id, name: r.name, code: r.code, exit: r.exit, out: r.out || '', err: r.err || '', cut: !!r.cut }));
   if (want && !rows.length) return { ok: false, code: 'not-found', status: 404, reason: '그 서버의 출력이 없습니다(실행하지 않았거나 아직 끝나지 않음).' };
   return { ok: true, runKey: last.key, preset: last.preset, label: last.label, rows };
 }

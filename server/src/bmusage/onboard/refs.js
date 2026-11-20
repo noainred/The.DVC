@@ -189,10 +189,13 @@ export function accountUseIssue(before, after = {}) {
   const keyOf = (acc) => (acc && acc.kind === 'os' && t(acc.keyRef) ? keyShape(KS.keyById(acc.keyRef)) : null);
   const kBefore = keyOf(before); const kAfter = keyOf(after);
   const n = { kind: 0, keyFolder: 0, otherCorp: 0 };
+  let osBad = 0;
   for (const s of using) {
     if (before.kind === 'os' && after.kind !== 'os') { n.kind += 1; continue; }
     const server = { vcenterId: t(s.vcenterId), name: t(s.name) };
     if (!accountCorpOk(after.corp, server.vcenterId) && accountCorpOk(before.corp, server.vcenterId)) n.otherCorp += 1;
+    // 점검 1회차 T5: 계정 OS 를 바꾸면 OS 를 정한 서버가 어긋난다(resolveOsAuth 가 account-os 로 막아 한꺼번에 끊긴다) — 지정과 같이 저장 전에 거절.
+    if (before.kind === 'os' && (s.os === 'linux' || s.os === 'windows') && KS.accountFamily(before) === s.os && KS.accountFamily({ ...before, ...after }) !== s.os) osBad += 1;
     if (t(s.keyRef) || s.osAuth === 'password') continue;   // 계정 키를 쓰지 않는 서버
     if (keyWriteIssue(kAfter, server).folder && !keyWriteIssue(kBefore, server).folder) n.keyFolder += 1;
   }
@@ -200,9 +203,10 @@ export function accountUseIssue(before, after = {}) {
   if (n.kind) parts.push(`${n.kind}대가 OS 계정이 아니게 되어 접속하지 못합니다`);
   if (n.keyFolder) parts.push(`${n.keyFolder}대가 바꾼 기본 키의 폴더(법인 · 서버) 밖이 됩니다`);
   if (n.otherCorp) parts.push(`${n.otherCorp}대가 다른 법인의 계정을 쓰게 됩니다`);
+  if (osBad) parts.push(`${osBad}대가 계정과 OS 가 달라져 접속하지 못합니다`);
   if (!parts.length) return null;
-  const code = n.kind ? 'account-kind' : (n.keyFolder ? 'key-folder' : 'cred-other-corp');
-  return { ok: false, code, status: 409, reason: `이 계정을 쓰는 서버 중 ${parts.join(' · ')} — 저장하지 않았습니다. 그 서버들의 계정을 먼저 바꾸거나(서버 등록 · SSH 공용 접속) 같은 법인의 새 계정을 만드세요.`, servers: n };
+  const code = n.kind ? 'account-kind' : (n.keyFolder ? 'key-folder' : n.otherCorp ? 'cred-other-corp' : 'account-os');
+  return { ok: false, code, status: 409, reason: `이 계정을 쓰는 서버 중 ${parts.join(' · ')} — 저장하지 않았습니다. 그 서버들의 계정을 먼저 바꾸거나(서버 등록 · SSH 공용 접속) 같은 법인의 새 계정을 만드세요.`, servers: osBad ? { ...n, os: osBad } : n };
 }
 
 /** 접속 자격 해석 오류 문구(화면 · 수집 오류 · 연결 시험 공용). */
@@ -229,6 +233,10 @@ export const AUTH_ERROR = Object.freeze({
   'account-feature': '이 공통 계정은 이 기능에 허용되지 않았습니다 — 설정 › 보안 › 서버 접속에서 계정의 ‘쓸 수 있는 기능’ 을 확인하세요.',
   'account-os': '공통 계정의 OS(Linux · Windows)가 서버의 OS 와 다릅니다 — 다른 OS 의 비밀번호를 보내지 않습니다. 서버의 OS 종류나 계정을 확인하세요.',
   'account-other-corp': '다른 법인의 공통 계정입니다 — 계층 지정으로는 다른 법인 계정을 물려받지 않습니다.',
+  // v3.31(점검 1회차 T3 — 재현): 승인됐지만 물려받을 계정이 없는 서버 · 비밀이 없는 계정 — 빈 비밀번호(root)로 붙지 않는다
+  'not-configured': '이 서버에 정한 계정이 없습니다(따로 정함 · 물려받기 승인 모두 없음 — 주소 · OS · 법인이 바뀌어 승인이 풀렸을 수 있음) — 붙지 않습니다. 설정 › 보안 › 서버 접속에서 정하세요.',
+  'no-account': '물려받기를 승인한 서버인데 그 법인 · OS 종류 단계에 지정된 공통 계정이 없습니다 — 붙지 않습니다. 설정 › 보안 › 서버 접속에서 지정하세요.',
+  'account-no-secret': '물려받은 공통 계정에 키 · 비밀번호가 없습니다 — 붙지 않습니다. 설정 › 보안 › 서버 접속에서 계정의 비밀번호나 키를 정하세요.',
 });
 
 /**
@@ -377,7 +385,10 @@ export function resolveOsAuth(server = {}, { feature = '', ignoreAccountStop = f
     if (st) return { ok: false, code: 'account-stopped', error: AUTH_ERROR['account-stopped'], ...accMeta, stoppedAt: st.at, stoppedOn: st.server };
     return { ok: true, username, password: acc.password, authKind: 'password', ...accMeta, secretVersion: version };
   }
-  if (inherited) return { ok: true, username, password: '', authKind: 'none', ...accMeta };
+  // v3.31(점검 1회차 T3 — 재현): 예전에는 ok:true · authKind 'none' 을 돌려줘 수집이 root + 빈 비밀번호로 로그인했다
+  //   (승인 때 addrOnly 를 지우므로 ‘계정 없이 붙지 않기’ 를 막던 targets 의 거름도 지난다). 자격이 없으면 붙지 않는다 — 호출부는 authError 로 거른다.
+  if (inherited) return { ok: false, code: 'account-no-secret', error: AUTH_ERROR['account-no-secret'], ...accMeta };
+  if (!keyRef && !credRef && !hasOwnCred(server) && inheritActive(server)) return { ok: false, code: 'no-account', error: AUTH_ERROR['no-account'] };
   const pw = typeof server.password === 'string' ? server.password : '';
   return { ok: true, username, password: pw, authKind: pw ? 'password' : 'none' };
 }
@@ -418,6 +429,12 @@ export function withResolvedAuth(list = [], { feature = '', winrm = false } = {}
   return (Array.isArray(list) ? list : []).map((s) => {
     if (!s || typeof s !== 'object') return s;
     // 예전 항목(서버 비밀번호) — 그대로. v3.24: 자기 자격이 없는 승인된 서버(계층 지정을 물려받음)는 해석한다.
+    // v3.31(점검 1회차 T3 — 재현): 자격이 하나도 없고 승인도 효력이 없는 서버(승인 거둠 · 주소 · OS · 법인이 바뀌어 승인이 풀림)는 붙지 않는다 —
+    //   승인 때 addrOnly 를 지워 targets 의 거름을 지나 root + 빈 비밀번호로 로그인했다. 주소만 등록(addrOnly)은 예전대로 targets 가 거르고(그대로 둠),
+    //   엣지 위임 서버는 그 엣지가 자기 자격으로 붙는다(중앙 판정 밖 — 그대로 둠).
+    if (!t(s.keyRef) && !t(s.credRef) && !hasOwnCred(s) && !inheritActive(s) && s.addrOnly !== true && !t(s.agent)) {
+      return { ...s, password: '', authError: AUTH_ERROR['not-configured'], authErrorCode: 'not-configured' };
+    }
     if (!t(s.keyRef) && !t(s.credRef) && (hasOwnCred(s) || !inheritActive(s))) return s;
     const a = resolveOsAuth(s, { feature, winrm });
     // v3.24: 공통 계정 출처(계정 id · 이름 · 비밀번호 판)를 싣는다 — 수집 결과를 본 곳이 계정 사용 기록 · 계정 단위 정지에 쓴다(sshaccess/outcome.js). 비밀은 아니다.

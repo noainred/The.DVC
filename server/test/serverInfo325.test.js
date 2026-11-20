@@ -311,3 +311,29 @@ test('⑦ 반증(review325) — 비밀번호는 한 번만(k-i 재시도 없음)
   SI._resetServerInfoStoreForTest({ retryNow: true });
   assert.equal(SI.getResult('zz-0').at, 0, '다시 읽었다'); assert.equal(SI.getResult('zz-1').at, 1, '그동안의 결과를 얹었다'); assert.equal(SI.storeLoadError(), '');
 });
+
+test('⑧ 점검 1회차 U3 · U4 — 멀티패스 경로는 디스크 하나(경로 수) · zram 은 디스크가 아니다 · PS 5.1 의 {value, Count} 배열을 푼다', () => {
+  const disks = [
+    'NAME="sda" TYPE="disk" MODEL="가상 SSD" SERIAL="S1" WWN="0x5000c500a1b2c3d4" SIZE="480103981056" ROTA="0" TRAN="sas"',
+    'NAME="sdb" TYPE="disk" MODEL="가상 LUN" SERIAL="L1" WWN="0x600a0b8000000001" SIZE="1099511627776" ROTA="0" TRAN="fc"',
+    'NAME="sdc" TYPE="disk" MODEL="가상 LUN" SERIAL="L1" WWN="0x600a0b8000000001" SIZE="1099511627776" ROTA="0" TRAN="fc"',
+    'NAME="sdd" TYPE="disk" MODEL="가상 LUN" SERIAL="L1" WWN="0x600a0b8000000001" SIZE="1099511627776" ROTA="0" TRAN="fc"',
+    'NAME="vda" TYPE="disk" MODEL="" SERIAL="" WWN="" SIZE="107374182400" ROTA="1" TRAN=""',
+    'NAME="vdb" TYPE="disk" MODEL="" SERIAL="" WWN="" SIZE="107374182400" ROTA="1" TRAN=""',
+    'NAME="zram0" TYPE="disk" MODEL="" SERIAL="" WWN="" SIZE="8589934592" ROTA="0" TRAN=""',
+  ];
+  const out = LINUX_OUT.replace(/##DISKS\n[\s\S]*?##FS/, `##DISKS\n${disks.join('\n')}\n##FS`);
+  const p = P.parseLinux(out);
+  assert.deepEqual(p.disks.map((d) => [d.dev, d.paths]), [['/dev/sda', 1], ['/dev/sdb', 3], ['/dev/vda', 1], ['/dev/vdb', 1]], '경로 3개 LUN 은 하나 · 빈 WWN · 시리얼은 묶지 않음 · zram 뺌');
+  // PS 5.1 꼴: 배열이 { value, Count } 로 감싸여 온다 — 2소켓 · 코어 합 · 디스크 둘
+  const j = { err: [], os: { caption: 'Microsoft Windows Server 2016', memKB: 1024 }, cs: { name: 'w', domain: 'WORKGROUP' }, bios: { serial: 'x' },
+    cpu: { value: [{ Name: 'C', NumberOfCores: 32, NumberOfLogicalProcessors: 64 }, { Name: 'C', NumberOfCores: 32, NumberOfLogicalProcessors: 64 }], Count: 2 },
+    disk: { value: [{ Index: 0, Model: 'A', Size: 1 }, { Index: 1, Model: 'B', Size: 2 }], Count: 2 }, pd: [], vol: { value: [{ DeviceID: 'C:', Size: 100, FreeSpace: 40 }], Count: 1 } };
+  const w = P.parseWindows(`##WINJSON\n${JSON.stringify(j)}\n`);
+  assert.equal(w.base.cpuSockets.value, 2, '소켓 둘');
+  assert.equal(w.base.cpuCores.value, 64, '코어 합');
+  assert.equal(w.disks.length, 2); assert.equal(w.fs.length, 1);
+  // 감싼 꼴이 아닌 객체(다른 칸이 있음)는 한 원소 그대로
+  const one = P.parseWindows(`##WINJSON\n${JSON.stringify({ ...j, disk: { Index: 0, Model: 'A', Size: 1, value: [], Count: 0 } })}\n`);
+  assert.equal(one.disks.length, 1);
+});

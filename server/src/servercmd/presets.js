@@ -29,7 +29,7 @@ export const GROUPS = Object.freeze(['시스템', '디스크', '프로세스', '
 /** 값 종류 — 이 둘뿐(D11). 길이를 먼저 보고 앵커가 있는 유한 반복 정규식 하나(외부 입력 — 루트 CLAUDE.md ‘정규식’). */
 export const PARAM_KINDS = Object.freeze({
   name: Object.freeze({ max: 80, re: /^[A-Za-z0-9][A-Za-z0-9@._-]{0,79}$/, hint: '영숫자로 시작 · 영숫자와 @ . _ - · 80자까지' }),
-  path: Object.freeze({ max: 200, re: /^\/[A-Za-z0-9._/-]{0,199}$/, hint: '/ 로 시작 · 영숫자와 . _ - / · 200자까지 · .. 조각 없음' }),
+  path: Object.freeze({ max: 200, re: /^\/[A-Za-z0-9._/-]{0,199}$/, hint: '/ 로 시작 · 영숫자와 . _ - / · 200자까지 · .. · . · 빈 조각 없음' }),
 });
 
 /** 작은따옴표로 감싼다 — 값 검사가 이미 따옴표를 막았지만 한 겹 더(들어 있으면 던진다 · 명령을 만들지 않는다). */
@@ -114,6 +114,8 @@ export function checkParam(kind, v) {
   if (v.length > k.max) return { ok: false, reason: `${k.max}자까지입니다.` };
   if (!k.re.test(v)) return { ok: false, reason: `쓸 수 없는 글자가 있습니다(${k.hint}).` };
   if (kind === 'path' && v.split('/').some((seg) => seg === '..')) return { ok: false, reason: '경로에 .. 조각을 쓸 수 없습니다.' };
+  // 점검 1회차 U2: `//net` · `/./net` 은 커널이 `/net` 으로 풀어 아래 거절을 비켜 갔다(재현) — 빈 조각(`//`) · `.` 조각을 거절해 글자 그대로가 곧 경로가 되게 한다.
+  if (kind === 'path' && (v.includes('//') || v.split('/').some((seg) => seg === '.'))) return { ok: false, reason: '경로에 빈 조각(//) · . 조각을 쓸 수 없습니다.' };
   // autofs ‘-hosts’ 지도(/net/<주소>)는 경로를 보는 것만으로 대상 서버가 그 주소에 NFS 마운트를 건다(상태 변경 · 다른 주소로 가는 탐침 — D2 · D4 · 반증 F8).
   //   다른 자동 마운트 자리(서버마다 다른 지도)는 알 수 없다 — 문서의 한계.
   if (kind === 'path' && (v === '/net' || v.startsWith('/net/'))) return { ok: false, reason: '자동 마운트 자리(/net)는 쓸 수 없습니다(보는 것만으로 마운트가 일어납니다).' };
@@ -194,10 +196,12 @@ export function windowsScript(p, params) {
  */
 export function planOf(p, params) {
   const plan = {};
-  if (p.linux) plan.linux = { command: linuxCommand(p, params), timeoutMs: (p.linux.timeoutS * p.linux.steps(params).length + LINUX_SLACK_S) * 1000, maxBytes: MAX_BYTES };
+  if (p.linux) plan.linux = { command: linuxCommand(p, params), timeoutMs: (p.linux.timeoutS * p.linux.steps(params).length + LINUX_SLACK_S) * 1000, maxBytes: MAX_BYTES,
+    // 점검 1회차 W3: 끝 코드 표지는 stderr 끝쪽에 온다 — 코어의 기본 2000자 자르기가 표지를 잘라 시한 · 끝 코드를 잃었다(재현: 경고 20줄 뒤 시한 → ‘실행됨’). 상한(MAX_BYTES)까지 받는다.
+    stderrMax: MAX_BYTES };
   if (p.windows) {
     const b64 = psEncode(windowsScript(p, params));
-    plan.windows = { command: `powershell ${PS_ARGS.join(' ')} ${b64}`, timeoutMs: (p.windows.timeoutS + WIN_SLACK_S) * 1000, maxBytes: MAX_BYTES,
+    plan.windows = { command: `powershell ${PS_ARGS.join(' ')} ${b64}`, timeoutMs: (p.windows.timeoutS + WIN_SLACK_S) * 1000, maxBytes: MAX_BYTES, stderrMax: MAX_BYTES,
       winrm: { command: 'powershell', args: [...PS_ARGS, b64] } };
   }
   return plan;

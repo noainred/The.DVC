@@ -24,7 +24,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
 import { makeLoadError } from '../util/registryCore.js';
 import { inRetryWindow } from '../util/jsonFileRead.js';   // 128회차: 재읽기 간격 판정은 공용(시계가 뒤로 가도 그 차만큼 잠기지 않게)
 
@@ -140,7 +140,7 @@ export function reloadSshAccessState({ by = '' } = {}) {
   cache = null; readFailAt = 0; readFailed = false; loadErr.clear();
   load();
   const e = loadErr.get();
-  if (e) return { ok: false, code: 'state-unreadable', status: 503, reason: `상태 파일을 아직 읽지 못합니다 — ${t(e.reason, 160)}` };
+  if (e) return { ok: false, code: 'state-unreadable', status: 503, reason: `상태 파일을 아직 읽지 못합니다 — ${safeLoadText(e.reason, 160)}` };   // 점검 1회차 S7: JSON.parse 원문(파일 조각)을 응답에 싣지 않는다(루트 CLAUDE.md ‘safeLoadText’)
   addEvent({ kind: 'state-reloaded', by });
   return { ok: true };
 }

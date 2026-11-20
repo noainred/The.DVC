@@ -12,7 +12,7 @@ import { STable } from '../components/STable.jsx';
 import Select from '../components/Select.jsx';
 import BoldText from '../components/boldText.jsx';
 import { toneVar } from './tools/toneVar.js';
-import { errText, must, Chip, Otp, FeaturePicker } from './sshAccessParts.jsx';
+import { errText, must, Chip, Otp, FeaturePicker, featuresChosen } from './sshAccessParts.jsx';
 import { KEY_MODE_TEXT, dateTime, featuresText } from './sshAccessText.js';
 import {
   LEVEL_LABEL, OS_LABEL, accountKindText, buildHierTree, nodeAccount, serverSourceText, accountStopText, passwordAgeText,
@@ -71,7 +71,7 @@ export function HierTab({ v, corpName, reload, say }) {
     const body = { corp: node.corp, level, accountId: clear ? '' : (edit?.accountId || ''), auth: clear ? '' : (edit?.auth || ''), verifyServerId: verifyId, otp: code,
       ...(winrm ? { via: 'winrm', port: Number(edit.port) || 5986 } : {}) };
     const r = must(await putJson('/settings/ssh-access/assign', body));
-    say(clear ? `${path} 단계의 지정을 지웠습니다 — 물려받던 서버 ${r.affected}대는 위 단계 또는 미설정으로 갑니다.`
+    say(clear ? `${path} 단계의 지정을 지웠습니다 — 물려받던 서버 ${r.affected}대는 위 단계 또는 미설정으로 갑니다${r.verified ? `(${r.verified.server} 에서 위 단계 계정 ${r.verified.account || ''} 먼저 확인함)` : ''}.`
       : `${path} 단계에 계정을 정했습니다 — 지금 물려받는 서버 ${r.willUse}대${r.verified ? ` · ${r.verified.server} 에서 먼저 확인함` : ''}.`, 'ok');
     setEdit(null); setVerifyCands(null); reload();
   });
@@ -160,6 +160,13 @@ export function HierTab({ v, corpName, reload, say }) {
               <div className="ssa-acts">
                 <button className="btn btn-sm" type="button" disabled={stateUnknown} onClick={() => setEdit({ accountId: na.state === 'set' ? curAcc?.id || '' : '', auth: na.state === 'set' ? na.assign?.auth || '' : '', via: na.state === 'set' ? na.assign?.via || '' : '', port: na.state === 'set' ? na.assign?.port || '' : '' })}>{na.state === 'set' ? '다른 계정으로 바꾸기' : '여기서 정하기'}</button>
                 {na.state === 'set' && <button className="btn btn-sm" type="button" disabled={!!busy} onClick={() => saveAssign(true)}>{busy === 'assign' ? '지우는 중…' : (node.kind === 'corp' ? '지우기' : '위에서 물려받기(지우기)')}</button>}
+                {na.state === 'set' && verifyCands && verifyCands.length > 0 && (
+                  // 점검 1회차 S2: 지우면 위 단계 계정으로 옮겨 가는 서버가 있으면 서버가 그중 한 대를 먼저 확인하게 한다(409 need-verify + candidates)
+                  <label className="ssa-field">먼저 확인할 서버 <Select sort={false} className="select select-sm" value={verifyId} onChange={(e) => setVerifyId(e.target.value)}>
+                    <option value="">고르세요</option>
+                    {verifyCands.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </Select></label>
+                )}
                 {na.state === 'set' && <Otp value={otp} onChange={setOtp} />}
               </div>
             ) : (
@@ -315,7 +322,7 @@ export function AccountsTab({ v, corpName, reload, say }) {
   });
   const verify = () => run('verify', async (code) => {
     const r = must(await postJson(`/settings/ssh-access/accounts/${encodeURIComponent(ver.account.id)}/verify`, { serverId: ver.serverId, otp: code }));
-    say(`${ver.account.name} — ${r.server} 에서 로그인됨${r.resumed ? ' · 계정 정지를 풀었습니다' : ''}.`, 'ok'); setVer(null); reload();
+    say(`${ver.account.name} — ${r.server} 에서 로그인됨${r.resumed ? ' · 계정 정지를 풀었습니다' : ''}.${r.keptStop ? ` ${r.reason}` : ''}`, r.keptStop ? 'warn' : 'ok'); setVer(null); reload();
   });
   const resume = (a) => run(`resume:${a.id}`, async (code) => {
     must(await delJson(`/settings/ssh-access/accounts/${encodeURIComponent(a.id)}/stop?otp=${encodeURIComponent(code)}`));
@@ -402,6 +409,8 @@ export function AccountsTab({ v, corpName, reload, say }) {
           <label className="ssa-field">{form.hadPassword ? '새 비밀번호(비우면 그대로)' : '비밀번호'} <input className="input" type="password" autoComplete="new-password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></label>
           <label className="ssa-field">교체 예정일(선택) <input className="input" type="date" value={form.rotateBy} onChange={(e) => setForm({ ...form, rotateBy: e.target.value })} /></label>
           <div className="sah-wide"><span className="ssa-sub">쓸 수 있는 기능</span><FeaturePicker catalog={v.features} value={form.features} onChange={(x) => setForm({ ...form, features: x })} allowAll={!!form.id} /></div>
+          {/* 점검 1회차 W1: 기능 0개로 저장하면 이 계정을 쓰는 서버의 수집이 경고 없이 멈췄다 — 키 폼과 같이 막는다(featuresChosen) */}
+          {!featuresChosen(form.features) && <p className="ssa-note sah-wide" style={{ color: toneVar('warn') }}>기능을 하나 이상 고르세요 — 없으면 이 계정으로 어느 기능도 접속하지 않습니다(쓰는 서버의 수집이 멈춥니다).</p>}
           {(form.cands || usersOfForm).length > 0 && form.password && (
             <label className="ssa-field">먼저 확인할 서버 <Select sort={false} className="select select-sm" value={form.verifyId || ''} onChange={(e) => setForm({ ...form, verifyId: e.target.value })}>
               <option value="">고르세요</option>
@@ -410,7 +419,7 @@ export function AccountsTab({ v, corpName, reload, say }) {
           )}
           <Otp value={otp} onChange={setOtp} />
           <div className="ssa-acts sah-wide">
-            <button className="btn btn-sm primary" type="button" disabled={!form.name.trim() || !form.username.trim() || !!busy} onClick={save}>{busy === 'save' ? '확인 · 저장 중…' : (form.password && usersOfForm.length ? '확인하고 저장' : '저장')}</button>
+            <button className="btn btn-sm primary" type="button" disabled={!form.name.trim() || !form.username.trim() || !featuresChosen(form.features) || !!busy} onClick={save}>{busy === 'save' ? '확인 · 저장 중…' : (form.password && usersOfForm.length ? '확인하고 저장' : '저장')}</button>
             <button className="btn btn-sm" type="button" onClick={() => setForm(null)}>취소</button>
           </div>
           <p className="ssa-note sah-wide">새 비밀번호를 넣고 이 계정을 쓰는 서버가 있으면 그중 한 대로 저장 전에 한 번 로그인해 봅니다 — 실패하면 저장하지 않습니다. 법인 · OS · 로그인 종류 · 도메인 · 계정명을 바꾸면 저장된 비밀번호 · 기본 키를 이어 쓰지 않습니다(새로 넣어야 합니다).</p>

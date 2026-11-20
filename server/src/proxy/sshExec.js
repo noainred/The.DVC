@@ -257,17 +257,29 @@ function exec(conn, command, rawTimeoutMs = SSH_EXEC_TIMEOUT_MS, opts = {}) {
         finish(reject, new Error(`SSH exec 타임아웃(${Math.round(timeoutMs / 1000)}s): ${command}`));
       }, timeoutMs);
       timer.unref?.();
+      // 점검 1회차(2026-11-20) U8: 덩어리마다 toString 하면 덩어리 경계에 걸린 UTF-8 글자(한글 3바이트)가 깨졌다 — 흐름마다 StringDecoder 로 잇는다.
+      const dec = { out: new StringDecoder('utf8'), err: new StringDecoder('utf8') };
       const onChunk = (which) => (d) => {
-        bytes += d.length;
         const cap = opts.partial && Number(opts.maxBytes) > 0 ? Math.min(Number(opts.maxBytes), EXEC_MAX_OUTPUT) : EXEC_MAX_OUTPUT;
-        if (bytes > cap) { kill(); if (opts.partial) return finish(resolve, { command, code: null, stdout, stderr, truncated: true }); return finish(reject, new Error(`SSH exec 출력 상한(${Math.round(cap / 1024)}KB) 초과: ${command}`)); }
-        if (which === 'out') stdout += d.toString(); else stderr += d.toString();
+        if (bytes + d.length > cap) {
+          kill();
+          if (opts.partial) {
+            // U7: 상한에 걸린 마지막 덩어리도 상한까지는 싣는다(예전에는 통째로 버려 64KB 상한에 45,056자만 남았다)
+            const room = cap - bytes;
+            if (room > 0) { const part = dec[which].write(d.subarray(0, room)); if (which === 'out') stdout += part; else stderr += part; }
+            bytes = cap;
+            return finish(resolve, { command, code: null, stdout, stderr, truncated: true });
+          }
+          return finish(reject, new Error(`SSH exec 출력 상한(${Math.round(cap / 1024)}KB) 초과: ${command}`));
+        }
+        bytes += d.length;
+        if (which === 'out') stdout += dec.out.write(d); else stderr += dec.err.write(d);
       };
       stream.on('data', onChunk('out'));
       stream.stderr.on('data', onChunk('err'));
       stream.on('error', (e) => finish(reject, e));          // 채널/연결 오류로도 반드시 결말 짓는다
       stream.stderr.on('error', () => { /* stderr 스트림 오류는 비치명 — 무시 */ });
-      stream.on('close', (code) => finish(resolve, { command, code, stdout, stderr }));
+      stream.on('close', (code) => { if (!done) { stdout += dec.out.end(); stderr += dec.err.end(); } finish(resolve, { command, code, stdout, stderr }); });
     });
   });
 }

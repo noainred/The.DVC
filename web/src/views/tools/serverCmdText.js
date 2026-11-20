@@ -61,7 +61,9 @@ export function resultText(r) {
   if (!r) return '—';
   const base = CODE_TEXT[r.code] || r.code || '—';
   const ex = numOrNull(r.exit);
-  return ex == null ? base : `${base} · 끝 코드 ${ex}`;
+  // 점검 1회차 U1: 실행은 됐는데 끝 코드를 못 읽었으면(표지 수가 어긋남 등) ‘모름’ 이라고 밝힌다 — ‘실행됨’ 만 보이면 성공으로 읽힌다.
+  if (ex == null) return r.ran && r.code === 'ok' ? `${base} · 끝 코드 모름` : base;
+  return `${base} · 끝 코드 ${ex}`;
 }
 
 /** 걸린 시간(초 한 자리) — 값이 없으면 ‘—’. */
@@ -85,7 +87,7 @@ export function resultCounts(rows = []) {
 
 /** 전체 복사 글 — 서버마다 머리줄 + 출력(값이 없으면 ‘(출력 없음)’). */
 export function copyAllText(label, rows = []) {
-  return rows.map((r) => [`### ${r.name} — ${label}${numOrNull(r.exit) != null ? ` · 끝 코드 ${r.exit}` : ''}${r.cut ? ' · 잘림' : ''}`, r.out || '(출력 없음)', ...(r.err ? ['--- 오류 출력', r.err] : [])].join('\n')).join('\n\n');
+  return rows.filter((r) => r && r.ran !== false).map((r) => [`### ${r.name} — ${label}${numOrNull(r.exit) != null ? ` · 끝 코드 ${r.exit}` : (r.ran && r.code === 'ok' ? ' · 끝 코드 모름' : '')}${r.cut ? ' · 잘림' : ''}`, r.out || '(출력 없음)', ...(r.err ? ['--- 오류 출력', r.err] : [])].join('\n')).join('\n\n');
 }
 
 /** 펼친 출력의 머리줄 — 데모 · 계정 정보가 없는 행은 접속 방식 · 로그인 방식을 지어내지 않는다(Chromium 확인: 데모 행이 ‘SSH · 비밀번호’ 로 보였다). */
@@ -94,8 +96,9 @@ export function outHead(r) {
   const parts = [];
   if (r.demo) parts.push('데모 서버(접속하지 않음)');
   else {
-    parts.push(r.via === 'winrm' ? 'WinRM' : 'SSH');
-    if (r.auth?.kind) parts.push(r.auth.kind === 'key' ? '키' : '비밀번호');
+    // 점검 1회차 W2: 값이 있을 때만 — 접속 방식이 비면 ‘SSH’ 로, 모르는 인증 종류를 ‘비밀번호’ 로 지어내지 않는다.
+    if (r.via === 'winrm' || r.via === 'ssh') parts.push(r.via === 'winrm' ? 'WinRM' : 'SSH');
+    if (r.auth?.kind === 'key' || r.auth?.kind === 'password') parts.push(r.auth.kind === 'key' ? '키' : '비밀번호');
     if (r.auth?.account) parts.push(r.auth.account);
   }
   parts.push(osText(r.os), resultText(r));

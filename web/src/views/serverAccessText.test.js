@@ -96,6 +96,10 @@ describe('서버 접속 — 계정 계층 · 공통 계정 화면 규약(소스)
     expect(src).not.toMatch(/<select\b/);
     expect(src).not.toMatch(/text-transform/);
   });
+  it('점검 1회차 W1 · S2 — 공통 계정 기능 0개는 저장 단추를 막는다(키 폼과 같이) · 지우기에도 확인할 서버를 고른다', () => {
+    expect(src).toMatch(/!featuresChosen\(form\.features\) \|\| !!busy\} onClick=\{save\}/);
+    expect(src).toMatch(/na\.state === 'set' && verifyCands && verifyCands\.length > 0/);
+  });
   it('공용 조각을 쓴다(두 벌 금지) — must · Chip · Otp · FeaturePicker 는 sshAccessParts.jsx', () => {
     expect(src).toMatch(/from '\.\/sshAccessParts\.jsx'/);
     expect(src).not.toMatch(/^function must\(|^const Chip =|^const Otp =|^function FeaturePicker\(/m);

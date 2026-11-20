@@ -146,7 +146,7 @@ test('② 성공 — CA 체인 인증서 · 연결 하나 · AD 계정(도메인
 test('③ 거부 — 틀린 비밀번호는 한 번만(다시 시도하지 않음) · kind auth-rejected', async (t) => {
   const W = await fakeWinrm();
   t.after(() => W.close());
-  await assert.rejects(C.winrmRun({ host: '127.0.0.1', port: W.port, username: 'svc', domain: 'CORP', password: 'Wrong-9', command: 'hostname' }), (e) => e.kind === 'auth-rejected');
+  await assert.rejects(C.winrmRun({ host: '127.0.0.1', port: W.port, username: 'svc', domain: 'CORP', password: 'Wrong-9', command: 'hostname' }), (e) => e.kind === 'auth-rejected' && e.afterLogin !== true);
   assert.deepEqual(W.st.auths, ['bad-proof']);
   assert.equal(W.st.requests.filter((x) => x.auth).length, 2, 'NEGOTIATE · AUTHENTICATE 각 한 번 — 재시도 없음');
 });
@@ -155,16 +155,16 @@ test('③-b 반증(review326) — 연결이 갈리면 로그인 거부가 아니
   // F1: 인증 뒤 서버가 연결을 끊으면 다음 요청은 새 연결 — 바이트를 보내기 전에 거절(인증 없는 요청이 401 을 받아 ‘거부’ 로 보이지 않게)
   const W = await fakeWinrm({ dropAfterCreate: true });
   t.after(() => W.close());
-  await assert.rejects(C.winrmRun({ host: '127.0.0.1', port: W.port, username: 'svc', domain: 'CORP', password: 'Right-1', command: 'hostname' }), (e) => e.kind === 'connection-split');
+  await assert.rejects(C.winrmRun({ host: '127.0.0.1', port: W.port, username: 'svc', domain: 'CORP', password: 'Right-1', command: 'hostname' }), (e) => e.kind === 'connection-split' && e.afterLogin === true);
   assert.deepEqual(W.st.auths, ['ok']); assert.equal(W.st.conns, 1, '두 번째 연결을 열지 않았다');
   // F1 둘째 겹: 같은 연결에서 인증 뒤에 받은 401 은 세션을 잃은 것 — 로그인 거부(계정 정지 대상)가 아니다
   const Wr = await fakeWinrm({ rejectAfterAuth: true });
   t.after(() => Wr.close());
-  await assert.rejects(C.winrmRun({ host: '127.0.0.1', port: Wr.port, username: 'svc', domain: 'CORP', password: 'Right-1', command: 'hostname' }), (e) => e.kind === 'session-lost');
+  await assert.rejects(C.winrmRun({ host: '127.0.0.1', port: Wr.port, username: 'svc', domain: 'CORP', password: 'Right-1', command: 'hostname' }), (e) => e.kind === 'session-lost' && e.afterLogin === true);   // 점검 1회차 R2: 로그인 뒤 실패는 afterLogin(계정 탐침은 성공으로 본다)
   // F6: Done 이 끝내 오지 않으면 성공이 아니다
   const W2 = await fakeWinrm({ neverDone: true });
   t.after(() => W2.close());
-  await assert.rejects(C.winrmRun({ host: '127.0.0.1', port: W2.port, username: 'svc', domain: 'CORP', password: 'Right-1', command: 'hostname' }), (e) => e.kind === 'timeout');
+  await assert.rejects(C.winrmRun({ host: '127.0.0.1', port: W2.port, username: 'svc', domain: 'CORP', password: 'Right-1', command: 'hostname' }), (e) => e.kind === 'timeout' && e.afterLogin === true);
   // F5: 응답 하나가 상한(640KB)을 넘으면 읽기를 그만둔다(출력 상한과 별개)
   const W3 = await fakeWinrm({ hugeOutput: 600_000 });
   t.after(() => W3.close());
@@ -216,6 +216,11 @@ test('⑥ 응답 읽기 — 큰 · 이상한 입력에도 선형(정규식 되�
   WS.faultReason(`<s:Fault>${'<s:Text>'.repeat(50_000)}`);
   const ms = Number(process.hrtime.bigint() - t0) / 1e6;
   assert.ok(ms < 500, `선형 — ${ms.toFixed(0)}ms`);
+  // 점검 1회차 R3: 여는 태그 안 공백이 많아도 같은 크기의 공백 하나짜리와 비슷해야 한다(비율 — 예전 \s+ 겹침은 약 35배 · 재현 416ms)
+  const timeOf = (x) => { let best = Infinity; for (let i = 0; i < 3; i += 1) { const a = process.hrtime.bigint(); WS.parseReceive(x); best = Math.min(best, Number(process.hrtime.bigint() - a) / 1e6); } return best; };
+  const one = timeOf(`<rsp:Stream ${'a'.repeat(299)}>${'A'.repeat(640_000)}`);
+  const many = timeOf(`<rsp:Stream${' '.repeat(300)}>${'A'.repeat(640_000)}`);
+  assert.ok(many < Math.max(one, 2) * 8, `공백 겹침 없음 — 공백 300 ${many.toFixed(1)}ms · 공백 1 ${one.toFixed(1)}ms`);
   assert.throws(() => WS.parseShellId('<rsp:ShellId>../../etc</rsp:ShellId>'));
   assert.equal(WS.parseShellId('<x:ShellId>11111111-2222-3333-4444-555555555555</x:ShellId>'), '11111111-2222-3333-4444-555555555555');
   assert.match(WS.faultReason('<s:Fault><s:Text>Access is denied.</s:Text><f:WSManFault Code="5"/></s:Fault>'), /Access is denied\. \(WSMan 5\)/);
@@ -247,7 +252,7 @@ test('⑦ 코어 연결(3단계) — Windows 단계 지정이 WinRM 이면 readS
   W.st.auths.length = 0;
   KS.saveAccount({ id: a.account.id, password: 'Ad-Old-0' }, { by: 't' });   // 포탈에 저장된 비밀번호가 틀린 상황
   const rej = await RS.readServer(s.id, { feature: 'server-info', plan: P.SERVER_INFO_PLAN });
-  assert.equal(rej.code, 'auth-rejected'); assert.deepEqual(W.st.auths, ['bad-proof']);
+  assert.equal(rej.code, 'auth-rejected'); assert.ok(rej.reason.includes('권한(Administrators · Remote Management Users · 원격 UAC)'), `점검 1회차 R1: WinRM 거부는 권한 가능성을 밝힌다 — ${rej.reason}`); assert.deepEqual(W.st.auths, ['bad-proof']);
   assert.ok(ST.accountStopFor(a.account.id, KS.accountSecretVersion(KS.accountById(a.account.id))));
   const again = await RS.readServer(s.id, { feature: 'server-info', plan: P.SERVER_INFO_PLAN });
   assert.equal(again.code, 'cred'); assert.equal(W.st.auths.length, 1, '정지된 계정은 보내지 않는다');
