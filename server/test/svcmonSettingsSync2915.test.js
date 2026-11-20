@@ -220,7 +220,7 @@ test('noteDetection — 새로 나타난 키만 이벤트 · 링버퍼 · 일별
   assert.match(ev.text, /새 항목 1 \(iDRAC b\)/);
   assert.match(ev.text, /사라짐 1/);
   assert.equal(SYNC.driftRing().length, 2);
-  assert.deepEqual(Object.keys(SYNC.driftSummary()).sort(), ['at', 'changed', 'gone', 'held', 'new', 'unregistered']);
+  assert.deepEqual(Object.keys(SYNC.driftSummary()).sort(), ['at', 'changed', 'defChanged', 'gone', 'held', 'new', 'unregistered']);
   assert.equal(SYNC.dailySummary().at(-1).new, 2);
   // 배너의 '새 항목' 은 미등록 전부가 아니라 기준점(첫 감지) 이후 생긴 것 — a 는 첫 감지 때 있었다(Chromium 실측 결함: 미등록 258건을 '변경' 으로 띄웠다)
   assert.equal(SYNC.driftSummary().unregistered, 2);
