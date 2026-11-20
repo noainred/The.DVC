@@ -36,6 +36,7 @@
 - (8b단계 추가) 리눅스 성능 8b단계 Top-N 대행 · 봉투 idle — bodyOk 명시 · comm · user 는 엣지 문자열(길이 → 제어문자) · hint 는 중앙이 다시 · 표지 topVer/idleVer · 최소 버전 8b 표지
 - (다음 점검 ②③ 추가) 봉투 powerCapVer/powerCaps(서버별 PowerCap) · 엣지 전력 알림 발송 기록(랙 키) — 정제 화이트리스트 · 랙 법인은 중앙이 · 버전 안내는 old-version 만
 - (v2.976) 집중 모니터링 엣지 대행 — 중앙이 깨우고(wake) 엣지가 2초마다 동기화 · 개별 토큰만 · 맡은 대상만 받음 · validUntil 30초 보류 시한
+- (다음 작업 2026-11-19 ⑤) 베어메탈 사용률 봉투 정제 — 대상 · 행은 아는 필드 표(엣지 export 와 같은 표 · export ⟺ 표 시험) · 행 시각은 수신 시각으로(원본 atRaw) · 수신 상한 초과는 kind too-large(공용 사다리)
 
 ## 본문
 
@@ -991,3 +992,15 @@
   재시작 없는 push · 지금 설치하는 push 는 보류를 지운다 · 자동 적용이 설치 중이면 그 틱은 건너뛴다. 응답 `{ ok, deferred, waitMs, reason }` — 중앙(`deferredOf` — 아는 필드만 · 12시간 상한)은
   `edgeSync` 의 `holdUntil` 로 그 동안 + settle 까지 다시 밀지 않고, 보류 성공은 '효과 없음' 으로 세지 않는다. 재시작 함수는 설치한 그 시점의 것을 쓴다(시험이 주입을 되돌린 뒤 진짜 재시작이 돌았다 — 작성 중 실측).
   회귀 `leftoverA56`(실제 수집기 라우트 + 중앙 push · 변이 5/5).
+- **다음 작업(2026-11-19) ⑤ — 베어메탈 사용률 엣지 봉투 정제 보강**(엣지 수신 계약 · 회귀 `server/test/bmUsageNextGb.test.js` — 실제 중앙 ↔ 가짜 엣지 HTTP 왕복 포함 · 상세 `docs/rules/idrac-server.md` 같은 날짜 절):
+  ① **아는 필드만**: `central/bmUsageEdgePull.js sanitizeBmUsageSnap` 의 대상 · 행은 `bmusage/publicFields.js`(PUBLIC_TARGET_SPEC — publicTarget 출력 · LATEST_ROW_SPEC — usage_latest 열)로만 받는다.
+     예전에는 v2.604 의 얕은 복사(칸 수 · 깊이 · 길이 상한)라 가짜 엣지가 대상에 실은 ‘password’ · osHost 객체가 관리자 응답에 그대로 실렸다(10회차 재현). 그때 걱정한 ‘이름 목록이면 새 필드가 조용히 사라진다’ 는
+     **시험이 막는다**: 실제 `resolveTargets` → `publicTarget` 출력 · `targets.push({…})` 리터럴 칸(소스) · 데모 표지 · HBA 근거(깊이 2)가 전부 표에 있어야 하고, PRAGMA usage_latest 열 = 행 표.
+     **대상에 칸을 더하면 publicFields.js 에도 넣는다.** 꼴: 글자(capStr) · 수(numOrNull — 문자열 수치 → 수 · 못 읽으면 null) · true 만 참 · 경로는 'idrac'·'os' 만 · null(경로 없음)과 ''(가림) 구분.
+     모르는 칸은 버리고 `sanitizeUnknown` 으로 센다(원소 수 sanitizeDropped 와 따로) · 없는 칸은 없는 채로(구버전 엣지 — 지어내지 않는다). status 는 예전 얕은 복사 그대로(범위 밖).
+  ② **엣지 시각**: 행 `ts` · `os_at` · `idrac_at` 도 수신 시각으로 자르고 원본은 `atRaw`(피크 시각 `peakAtRaw` 와 같은 규칙 · 자른 칸만). 법인 사용량 · 통합 인벤토리 · CPU 최신값은 snapAt 으로 한 번 더 자른다(멱등).
+  ③ **수신 상한 초과는 따로**: `util/readCapped.js` 가 상한 오류에 `code: 'too-large'` 를 달고, 공용 사다리(`central/edgePull.js pullFromEdge`)는 2xx 인데 본문이 상한(EDGE_RESPONSE_MAX_BYTES)을 넘으면
+     kind `too-large`(사유 = 상한 문장 + ‘형식 오류가 아니라 크기 상한’). 예전에는 bad-body ‘응답 형식이 다릅니다(엣지가 아닌 서버에 닿았을 수 있습니다)’ 였다. 상태 코드 판정(auth · 404 · http)이 먼저인 순서는 그대로 —
+     바뀌는 것은 예전 bad-body 였던 이 경우의 kind · 사유뿐이다. 이 사다리를 쓰는 화면 문구 맵 다섯(edgeLogText FETCH_KIND_TEXT · EmptyInvModal · focusMonText WAKE_TEXT · isiduText EDGE_CALL_TEXT · tokenCheckText)에 too-large 를 넣었다
+     (그 밖 호출부 — bmTop · bmCapacity · bmLogs · bmCompare · bmPerfOps · 스냅샷 대행 — 는 kind · reason 을 그대로 넘긴다 · kind 로 분기하는 서버 코드는 edgeLogPull 의 접두 규칙 · routes/api/{edgeLog,bmFolders,bmCompare,bmTop}.js · central/isiduRemote.js 이고(재확인 정정 — 처음엔 '접두 규칙뿐' 이라 적었다), 어느 곳도 too-large 를 따로 고르지 않아 bad-body 와 같은 갈래로 간다. 웹의 kind 원문 표시 두 곳(bmUsageText 마지막 시도 문구 · BmCollectHealth 마지막 시도 칸)은 공용 낱말 표 `EDGE_PULL_FAIL_LABEL` 로 바꿨다).
+  ④ 엣지 스냅샷 응답 정제의 code 표는 `bmusage/snapshot/command.js SNAPSHOT_CODES` 하나(예전 사본에 auth-unresolved 가 없어 엣지의 ‘참조 미해석’ 이 ssh-error 로 바뀌었다).

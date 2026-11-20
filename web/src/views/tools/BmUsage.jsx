@@ -34,6 +34,7 @@ import {
   pctText, bpsText, ageText, usageTone, bmUtilThresholds, toneVar, srcMark,
   emptyDiag, firstSampleNote, skippedNotes, detailNotes, retentionNote, edgeNote, missingMark, missingFootnotes, hbaBasisFootnote, authStopNote, keyConflictNote, sourceErrorsNote, lastPruneNote,
   facetRows, pathTypeLabel, topBusiest, corpSummary, csvOf, telemetryNote, hostsUnreadNote,
+  shownPaths, shownMissing, pathsText, // 다음 작업 ④ — 서버 표시 경로(데모 표지)
   // v2.554 — iDRAC 라이선스 인식 · Enterprise 대체 수집 · 귀속 원인 · 엣지 보관분
   licenseMark, licenseNote, enterpriseConsentNote, enterpriseStatusNote, entDetailNotes, usageDetailNote,
   unassignedNote, edgePullState, edgePullNote, edgeNoteRows, blurNumber, BLANK_KEPT_TEXT, esxiCollectNote,
@@ -627,12 +628,13 @@ export function BmUsage() {
                       {r.serviceTag && <div style={{ fontSize: 11, color: 'var(--muted)' }}>{r.serviceTag}</div>}
                     </td>
                     <td data-sort={r.vcenterId || ''}>{r.vcenterId || <span style={{ color: 'var(--muted)' }}>—</span>}</td>
-                    <td data-sort={(r.paths || []).join(',')}>
-                      <span style={{ fontSize: 12 }}>{(r.paths || []).map((p) => (p === 'os' ? 'OS' : 'iDRAC')).join('·') || '—'}</span>
-                      {r.src && r.src !== (r.paths || []).join('+') && <div style={{ fontSize: 11, color: 'var(--muted)' }}>값 출처 {srcMark(r.src)}</div>}
+                    {/* 다음 작업 ④: 경로 · 누락은 서버 표시 값(shownPaths · shownMissing — 데모 표지가 있으면 그것) — KPI · 칩 · CSV 와 같은 값. */}
+                    <td data-sort={shownPaths(r).join(',')}>
+                      <span style={{ fontSize: 12 }}>{pathsText(r) || '—'}</span>
+                      {r.src && r.src !== shownPaths(r).join('+') && <div style={{ fontSize: 11, color: 'var(--muted)' }}>값 출처 {srcMark(r.src)}</div>}
                       {/* ⚠ 전부 `—` 인 행이 **왜** 비었는지 행 자체가 말해야 한다 — 긴 설명은 표 아래 각주가 한 번만 한다. */}
-                      {!!(r.missing || []).length && (
-                        <div style={{ fontSize: 11, color: toneVar('warn') }}>{missingMark(r.missing)}</div>
+                      {!!shownMissing(r).length && (
+                        <div style={{ fontSize: 11, color: toneVar('warn') }}>{missingMark(shownMissing(r))}</div>
                       )}
                       {/* ⚠ 라이선스는 **짧은 표지**만(v2.509) — 설명은 서버를 눌러 상세에서. 미상이면 아무것도 쓰지 않는다. */}
                       {licenseMark(r.license) && (

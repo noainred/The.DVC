@@ -57,6 +57,7 @@
 - (점검 반복 9회차 추가) 진단 스냅샷의 프로세스 사용자 이름은 관리자 판본만 원문(Top-N 과 같은 토큰) · (데모 KPI 겹침은 10회차에서 되돌림)
 - (점검 반복 10회차 추가) 프로세스 행 가림 하나(bmProcScrub — 스냅샷 · 집중 표본 · 기간 비교 · 이름 칸 name) · 스냅샷 실행 표지에 OS 경로 판정
 - (결정 반영 2026-11-19 추가) 소유자 GET 도 조회 ∧ 쓰기 전체 · 정비 창 지난 구간은 만든 시각부터(묘비와 대칭) · 보존 줄이기는 설정 소유자 등급(늘리기 · 같음은 그대로 · 못 읽음은 거부 쪽) · 재확인: 엣지 배포 켜기/끄기 · 중앙 켜기 · 배포 파일 확정도 소유자 등급(N1) · 소유자 경고 = 게이트 판정(N2)
+- (다음 작업(2026-11-19) — 데모 표시 경로 · 엣지 봉투 정제 · 스냅샷 표지) 데모 표시 표지 하나(demoDisplayTargets — paths 는 그대로) · 봉투 대상 · 행은 아는 필드 표(publicFields.js — export ⟺ 표 시험) · 행 시각 자름 · 수신 상한 초과 too-large · 표지 auth-unresolved · demo-target · 엣지 근거 시각
 ## 본문
 
 - ⚠⚠ **물리 파트(부품) 장애 — v2.548 재설계. '확인 불가' 를 정상으로도 장애로도 세지 않고, 전이만 기록한다**
@@ -1952,13 +1953,14 @@
     한계: 등록부 호스트 이름 matcher 는 쓰지 않는다(IPv4 패턴만 — 같은 응답의 dmesg · ss 가림과 같은 수준).
   - **재확인 K1b**(낮음) 집중 모니터링 ‘원인 후보’(focus/summary.js — 표본 name 을 그대로 옮긴다: 단건 · 목록 summary.candidates · 함대 candidate)의 이름 안 IPv4 가 비관리자에게 원문 —
     `PROC_KEYS` 에 candidates 를 더하고(scrubProcDeep) 함대 목록 candidate(문자열)도 scrubIp. 재확인: scrubProcDeep 은 cpuTop · memTop · ioTop · candidates 배열 안만 바꾼다(세션 name 등 그대로) ·
-    엣지 paths 'os' ⟺ 엣지 실행 osHost 는 같은 조건(targets.js — osSsh ∧ osEntry) · 엣지 대행 표지는 마지막 인출 봉투 기준(다시 가져오기 전까지 · 남은 것) · osHost.authError 는 표지에 없음(남은 것).
+    엣지 paths 'os' ⟺ 엣지 실행 osHost 는 같은 조건(targets.js — osSsh ∧ osEntry) · 엣지 대행 표지는 마지막 인출 봉투 기준(다시 가져오기 전까지) · osHost.authError 는 표지에 없음
+    — **둘 다 다음 작업(2026-11-19) ⑥에서 고침**(아래 절: 표지 auth-unresolved · 엣지 근거 시각 한 줄 · 봉투 시점 기준이라는 사실 자체는 그대로).
   - **L2**(낮음 · 실운영 포함) OS 경로가 없는 서버에도 스냅샷 실행 칸이 열리고 누르면 409 no-os-path — 표지 = 데모 · 역할(bmGate) ∧ 실행과 같은 판정(`snapshotOsPathIssue` — 엣지 대행은 봉투 paths 'os') ·
     `WRITE_WHY` 에 'no-os-path'(웹 문구 1:1) · 웹은 역할이 아닌 이유를 한 줄로.
-  - **L1**(낮음 · 데모만) 9회차 J1 이 어긋남을 옮겼을 뿐 — 되돌렸다. 모든 표시(KPI · 칩 · 표 · CSV · 띠 · 상세 머리)를 맞추려면 데모 대상의 표시 경로를 한 규칙으로(예: 데모 합성 OS 경로 표지) 정해야 한다 — 다음 작업 후보.
+  - **L1**(낮음 · 데모만) 9회차 J1 이 어긋남을 옮겼을 뿐 — 되돌렸다. 모든 표시(KPI · 칩 · 표 · CSV · 띠 · 상세 머리)를 맞추려면 데모 대상의 표시 경로를 한 규칙으로(예: 데모 합성 OS 경로 표지) 정해야 한다 — **다음 작업(2026-11-19) ④에서 고침**(아래 절).
   - **의심 · 세지 않음**: 엣지 응답 16MB 초과 때 사유가 ‘응답 형식이 다릅니다’(공용 central/edgePull.js 가 상한 오류 문장을 버림 · 엣지가 8MB 로 줄여 기본값에서는 닿지 않음) ·
     봉투 행 시각(os_at · idrac_at · ts)을 수신 시각으로 자르지 않음(읽는 웹 없음) · 대상 · 행 정제가 아는 필드 목록이 아니라 칸 수 상한(가짜 엣지의 ‘password’ 칸이 관리자 응답에 — 화면에는 안 그림) ·
-    엣지 ↔ 법인 대조 없음(설계 범위) · 창이 없을 때 정비 창 문구. 다음 작업 후보로 남긴다.
+    엣지 ↔ 법인 대조 없음(설계 범위) · 창이 없을 때 정비 창 문구. — 앞의 셋은 **다음 작업(2026-11-19) ⑤에서 고침**(아래 절) · 엣지 ↔ 법인 대조 · 정비 창 문구는 남은 것(설계 범위).
 
 - ⚠⚠ **결정 반영(2026-11-19 · 사용자 결정 3건 — 모두 권장안 · 기준판 266a350dc) — 소유자 조회 · 정비 창 소급 · 보존 축소**
   (`routes/admin/shared.js requireSettingsOwner` · `routes/auth.js ownerFields`(주석) · `bmusage/maint/judge.js effectiveOccurrences` · `routes/api/bmMaint.js`(born 표지) ·
@@ -2000,3 +2002,21 @@
   - **재확인 S3(시험 빈 곳)**: `at` 키가 **없는**(undefined) 창이 지난 구간에서 사라지지 않음을 고정(예전 시험은 at: null 만 — `Number(null)=0` 이 같은 답이라 `Number(w.at)` 변이가 살았다).
   - **의심(세지 않음 — 다음 점검 후보)**: at 이 미래 시각이면(엣지 · 중앙 시계 차) 진행 중 발생의 앞부분이 지난 구간에서 빠진다(억제는 그대로 · NTP 정상이면 오차 크기뿐) ·
     업그레이드하면 기존 창의 지난 구간도 소급해 줄어든다(SLO · 용량 · 저활용 수치 · 베이스라인 — 의도된 결과) · 중앙 v3.29.1 과 새 엣지 공존 동안 두 쪽 지난 구간이 다를 수 있다.
+
+- ⚠⚠ **다음 작업(2026-11-19) — 데모 표시 경로 · 엣지 봉투 정제 · 스냅샷 표지**(그룹 B · 기준판 266a350dc — 사용자가 고른 다음 작업 ④⑤⑥ · 회귀 `server/test/bmUsageNextGb.test.js` · 웹 `bmNextGb.test.jsx`).
+  - **④ 데모 표시 경로 한 규칙**(데모만): 성능 겹침(`demoPerfLatestRows`)이 OS 열을 싣는 시나리오 8종의 데모 대상에 **서버 한 곳**(`mock/demo/baremetal.js demoDisplayTargets` — `poller.currentTargets` 의 mock 갈래)이
+    표지 `demoOs` · `pathsShown`(등록 경로 + 'os') · `missingShown`([] — 그 대상은 iDRAC 경로가 있어 누락은 OS 사유뿐)을 싣는다. 시나리오 순위는 `demoScenarioMap` 하나(겹침 · 표지 · 시드가 같은 표).
+    KPI(counts — `targets.pathCountsOf`: 표시 경로가 있으면 그것으로 센다 · 대상 해석 · 범위 계정 갈래 · 엣지 봉투 counts 가 같은 함수) · 장비 종류 칩 · 사용률 표 경로 칸 · CSV 수집경로 · 각주(웹 `shownPaths` · `shownMissing` — 서버 값을 고르기만)가
+    같은 값을 읽고, 신뢰 띠 · 상세 머리(행 os_at)와 맞는다. **대상 paths · osHost 는 바꾸지 않는다**(SSH 시도 0 — 시험이 고정). mock 이 아니면 입력 그대로(같은 배열 · 표지 0).
+    스냅샷은 **합성하지 않고 닫는다**: `snapshotOsPathIssue` 가 `demoOs` 대상에 'demo-target'(표지 · 실행 409 · 웹 문구 ‘데모 합성이라 스냅샷은 실행하지 않습니다’). 근거 — 데모 계정은 역할 표지(demo)로 먼저 닫히고,
+    합성 결과를 보관 DB · 하루 상한 경로에 넣는 데모 전용 길을 새로 만들 이유가 없다(집중처럼 분 표본을 합성하는 기능과 달리 스냅샷은 사람이 누르는 원격 명령이다).
+    **남은 것**: 데모 집중 모니터링은 iDRAC 만 시나리오(2대)도 OS 값을 합성한다(`focus/run.js` sess.demo → hasOs) — 표시 경로와 어긋나지만 이번 범위(KPI · 띠 · 칩 · 표 · CSV · 상세 머리 · 스냅샷 표지) 밖이라 두었다.
+    누락 점검(7b onboard/missing.js)은 내부 `missing` 을 그대로 본다(데모 표지는 응답 표시 전용).
+  - **⑤ 엣지 봉투 정제**(엣지 수신 계약 — `docs/rules/edge.md` 같은 날짜 절): (a) 행 `ts` · `os_at` · `idrac_at` 을 수신 시각으로 자르고 원본은 `atRaw`(피크 시각은 예전처럼 `peakAtRaw`) —
+    소비처(법인 사용량 · 통합 인벤토리 · CPU 최신값)는 snapAt 으로 한 번 더 자른다(멱등) · 행 os_at 을 읽는 중앙 화면은 없다(성능 항목의 osAt 은 bmPerfSanitize 가 이미 자름).
+    (b) 대상 · 행은 **아는 필드 표**(`bmusage/publicFields.js` PUBLIC_TARGET_SPEC · LATEST_ROW_SPEC)만 — 모든 수치 열은 수로(예전 기존 9열 ‘원시값 그대로’ 계약을 바꿈 · 시험 audit2604a · bmPerf2919 갱신) ·
+    모르는 칸은 버리고 `sanitizeUnknown` 으로 센다 · 없는 칸은 없는 채로(구버전 엣지). (c) 수신 상한 초과는 kind `too-large`(공용 사다리).
+  - **⑥ 스냅샷 실행 표지**: (a) `osHost.authError`(키 · 공통 계정 참조 미해석)를 표지 why `auth-unresolved` 로 — 실행과 같은 함수(`snapshotOsPathIssue`) · `SNAPSHOT_CODE_STATUS` 409(예전 표에 없어 200 ok:false 였고
+    웹은 ‘SSH 오류’ 문장에 사유를 숨겼다) · 결과 사유 줄을 보인다 · 중앙의 엣지 스냅샷 정제 code 표를 `SNAPSHOT_CODES` 하나로(예전 사본에 auth-unresolved 가 없어 ssh-error 로 바뀌었다).
+    엣지 대행 대상은 공개 대상 판정 `snapshotPublicPathIssue`(demoOs · paths · `osAuthUnresolved` — publicTarget 이 osHost.authError 로 만드는 참 · 거짓 · 사유 글은 싣지 않는다) — 시험이 `snapshotPublicPathIssue(publicTarget(x)) === snapshotOsPathIssue(x)` 를 대조.
+    게이트(`snapRunGateOf`)에는 판정 사본을 두지 않는다(라우트가 두 함수를 넘긴다). (b) 엣지 대행 GET 보관분에 `pathBasis { via:'edge', at: 보관분 snapAt }` — 화면이 ‘실행 칸은 엣지 보관분(시각) 기준 · 엣지에서 OS 계정을 바꿨다면 ‘지금 가져오기’ 뒤에 맞습니다’ 를 한 줄로.
