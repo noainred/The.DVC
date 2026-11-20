@@ -596,8 +596,8 @@ function ScanPanel({ data, jobs, corp, canScan, reload, setJobs, settingsMsg, se
       {st && (
         <div className="card" style={{ padding: 14, flex: '1 1 100%', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8, fontSize: 12.5 }}>
           <b style={{ fontSize: 14 }}>설정 <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>관리자 · 전체 범위</span></b>
-          <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}><input type="checkbox" checked={st.autoEnabled} disabled={!editable} onChange={(e) => saveSettings({ autoEnabled: e.target.checked })} /> {st.intervalHours}시간마다 자동 점검(새 로그만) — 기본 꺼짐. 켜면 전 법인 iDRAC 에 Lifecycle 로그 읽기가 나갑니다(서버마다 첫 회는 전량).</label>
-          <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}><input type="checkbox" checked={st.mailEnabled} disabled={!editable} onChange={(e) => saveSettings({ mailEnabled: e.target.checked })} /> 새 기록이 나오면 법인별 한 통 메일(받는 사람: 설정 › 메일 발송의 ‘디스크 배드 섹터 새 기록’ 수신자 + 아래 법인 담당자)</label>
+          <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}><input type="checkbox" checked={st.autoEnabled} disabled={!editable || saveLocked} onChange={(e) => saveSettings({ autoEnabled: e.target.checked })} /> {st.intervalHours}시간마다 자동 점검(새 로그만) — 기본 꺼짐. 켜면 전 법인 iDRAC 에 Lifecycle 로그 읽기가 나갑니다(서버마다 첫 회는 전량).</label>
+          <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}><input type="checkbox" checked={st.mailEnabled} disabled={!editable || saveLocked} onChange={(e) => saveSettings({ mailEnabled: e.target.checked })} /> 새 기록이 나오면 법인별 한 통 메일(받는 사람: 설정 › 메일 발송의 ‘디스크 배드 섹터 새 기록’ 수신자 + 아래 법인 담당자)</label>
           {/* 서버가 이미 내려 주던 마지막 메일 결과를 보인다(개선 I-1 — 못 보낸 이유를 화면에서 알 길이 없었다). */}
           {mailLine && <div className={mailLine.ok ? 'muted' : undefined} style={{ fontSize: 12, ...(mailLine.ok ? {} : { color: 'var(--red)', fontWeight: 600 }) }}>{mailLine.text}</div>}
           <label htmlFor="dbad-corpto" className="muted">법인 담당자 — 한 줄에 ‘vCenter id=메일,메일’</label>

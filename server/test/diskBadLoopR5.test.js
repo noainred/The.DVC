@@ -79,3 +79,35 @@ test('R5-4 — 읽은 서버가 없으면 디스크 목록 탭도 \'—\'', () =
   assert.match(tool, /<Disks [^>]*noneRead=\{noneRead\} \/>/);
   assert.match(tool, /const count = \(k\) => \(noneRead \? '—' :/);
 });
+
+// ── 6회차 반증(R6-2 · R6-3) ─────────────────────────────────────────────────────────────
+test('R6-3 — 413 으로 나눈 뒤 뒤쪽 반이 실패하면, 저장된 앞쪽 반을 오류의 storedIds 에 싣는다', async () => {
+  const E = await import('../src/diskbad/edge.js');
+  const batch = ['s1', 's2', 's3', 's4', 's5', 's6', 's7'].map((id) => ({ id }));
+  const send = async (b) => {
+    if (b.length > 4) throw Object.assign(new Error('413'), { status: 413 });
+    if (b[0].id === 's1') return { ok: true, stored: true, newRecords: 0 };
+    throw Object.assign(new Error('503'), { status: 503, storedIds: [] });
+  };
+  await assert.rejects(E._postSplitWithForTest(send, batch, { final: true }), (e) => {
+    assert.equal(e.status, 503);
+    assert.deepEqual(e.storedIds, ['s1', 's2', 's3', 's4']);
+    return true;
+  });
+  // 앞쪽 반이 실패하면 그대로 던진다(뒤쪽 반은 보내지 않는다 — 전부 저장 못 함).
+  const sendA = async (b) => { if (b.length > 4) throw Object.assign(new Error('413'), { status: 413 }); throw Object.assign(new Error('503'), { status: 503, storedIds: null }); };
+  await assert.rejects(E._postSplitWithForTest(sendA, batch, { final: true }), (e) => e.storedIds === null);
+  // 7회차 Q3: 앞쪽 반이 '보관하지 않음'(닫힌 작업 — stored:false) 이면 저장으로 세지 않는다.
+  const sendC = async (b) => {
+    if (b.length > 4) throw Object.assign(new Error('413'), { status: 413 });
+    if (b[0].id === 's1') return { ok: true, stored: false, stop: true };
+    throw Object.assign(new Error('503'), { status: 503, storedIds: ['s6'] });
+  };
+  await assert.rejects(E._postSplitWithForTest(sendC, batch, { final: true }), (e) => { assert.deepEqual(e.storedIds, ['s6']); return true; });
+});
+
+test('R6-2 — 설정 파일 읽기 오류 동안은 체크박스도 잠근다(잠긴 저장 문구가 풀린 뒤에도 남지 않게)', () => {
+  const tool = web('views/tools/DiskBadTool.jsx');
+  assert.match(tool, /checked=\{st\.autoEnabled\} disabled=\{!editable \|\| saveLocked\}/);
+  assert.match(tool, /checked=\{st\.mailEnabled\} disabled=\{!editable \|\| saveLocked\}/);
+});
