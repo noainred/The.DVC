@@ -31,7 +31,7 @@ import { loadBmUsageSettings, bmUsageEnabled, enterpriseActive, onBmUsageSetting
 import { withResolvedAuth, authCredOf, AUTH_ERROR } from './onboard/refs.js'; // 7b: OS 등록 항목의 키 · 공통 계정 참조 → 접속 자격
 import { gateAccountLogin } from '../sshaccess/accountGate.js';   // v3.24 반증 F2: 같은 공통 계정 비밀번호는 탐침 하나의 결과를 본 뒤에
 import { noteCredOutcome } from '../sshaccess/outcome.js';   // v3.9.0 키 사용 기록 · v3.24 공통 계정 사용 기록 + 계정 단위 정지(로그인 거부)
-import { resolveTargets } from './targets.js';
+import { resolveTargets, pathCountsOf } from './targets.js';
 import { enterpriseEligible } from './license.js';
 import { collectEnterpriseUsage, SESSION_BUDGET_MS as ENT_BUDGET_MS } from './collectors/idracEnterprise.js';
 import { buildUsage } from './usage.js';
@@ -439,7 +439,9 @@ export async function currentTargets() {
     const realT = realRes ? realRes.targets.filter((x) => !demoMod.isDemoBmTarget(x)) : [];
     const realKeys = new Set(realT.map((x) => x.key));
     const realNotEnabled = resolved.targets.filter((x) => !demoMod.isDemoBmTarget(x) && !realKeys.has(x.key)).length;
-    resolved = { ...resolved, targets: [...demoT, ...realT], demoScope: { demo: demoT.length, real: realT.length, realNotEnabled } };
+    // 다음 작업 ④: 데모 대상의 표시 경로 표지(demoOs · pathsShown — paths · osHost 는 그대로 · SSH 0)와 그 표지로 센 경로 대수(KPI = 칩 · 표 · CSV · 엣지 봉투 counts).
+    const shown = demoMod.demoDisplayTargets([...demoT, ...realT]);
+    resolved = { ...resolved, targets: shown, counts: { ...(resolved.counts || {}), ...pathCountsOf(shown) }, demoScope: { demo: demoT.length, real: realT.length, realNotEnabled } };
   }
   return {
     settings: s,

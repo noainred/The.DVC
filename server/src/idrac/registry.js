@@ -91,7 +91,7 @@ let _regCache = null; // { mtimeMs, size, servers }
  *   옮겨지므로 다음 pull·재시작 뒤에도 계속 0대였다 — 그래서 '원본 없이 보존본만 남은' 경우(corruptOnlyReason)도 못 읽은 것으로 본다.
  *   풀리는 때: 저장이 성공했을 때(saveRegistry) · 다시 나타난 파일을 정상으로 읽었을 때(사람이 보존본을 되돌린 경우).
  */
-const loadErr = makeLoadError();
+const loadErr = makeLoadError({ label: 'iDRAC 등록부', file: FILE });   // 결정(76~105 남긴 것 · 2026-11-20) A1: 서비스 점검 '장비 등록부 파일' 행(표시 전용)
 /** @returns {null|{at:number, reason:string}} 못 읽었으면 사유. 판정 비용: 파일이 있으면 loadRegistry 캐시, 없으면 설정 폴더 목록 1회. */
 export function registryLoadError() {
   loadRegistry();

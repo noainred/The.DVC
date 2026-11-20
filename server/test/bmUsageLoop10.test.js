@@ -45,13 +45,16 @@ test('L2 — 스냅샷 실행 표지: OS 경로가 없으면 no-os-path(실행�
   assert.equal(snapshotOsPathIssue({ key: 'K', osHost: { host: '10.0.0.5' } }), null);
   assert.deepEqual(snapRunGateOf(adm, null, { key: 'K', paths: ['idrac'] }, snapshotOsPathIssue), { ok: false, why: 'no-os-path' }, '재현 r10 L2 — 예전 ok(누르면 409)');
   assert.equal(snapRunGateOf(adm, null, { key: 'K', paths: ['os'], osHost: { host: 'h' } }, snapshotOsPathIssue).ok, true);
-  assert.deepEqual(snapRunGateOf(adm, null, { key: 'K', paths: ['idrac'] }, snapshotOsPathIssue, 'edge'), { ok: false, why: 'no-os-path' });
-  assert.equal(snapRunGateOf(adm, null, { key: 'K', paths: ['os', 'idrac'] }, snapshotOsPathIssue, 'edge').ok, true, '엣지 대행은 봉투 paths');
+  // 다음 작업 ⑥(2026-11-19): 엣지 대행 판정은 snapshot/run.js snapshotPublicPathIssue 하나(라우트가 넘긴다 — 게이트에 판정 사본을 두지 않는다).
+  const { snapshotPublicPathIssue } = await import('../src/bmusage/snapshot/run.js');
+  assert.deepEqual(snapRunGateOf(adm, null, { key: 'K', paths: ['idrac'] }, snapshotOsPathIssue, 'edge', snapshotPublicPathIssue), { ok: false, why: 'no-os-path' });
+  assert.equal(snapRunGateOf(adm, null, { key: 'K', paths: ['os', 'idrac'] }, snapshotOsPathIssue, 'edge', snapshotPublicPathIssue).ok, true, '엣지 대행은 봉투 paths');
   assert.deepEqual(snapRunGateOf(demo, null, { key: 'K', paths: ['idrac'] }, snapshotOsPathIssue), { ok: false, why: 'demo' }, '데모 · 역할이 먼저');
   // 실행 경로도 같은 함수
   const { stripComments } = await import('./_stripComments.js');
   const run = stripComments(fs.readFileSync(new URL('../src/bmusage/snapshot/run.js', import.meta.url), 'utf8'));
-  assert.match(run, /if \(snapshotOsPathIssue\(target\)\) return \{ ok: false, code: 'no-os-path'/);
+  // 다음 작업 ⑥: 실행은 같은 함수의 code 를 그대로 돌려준다(no-os-path · auth-unresolved · demo-target).
+  assert.match(run, /const pathIssue = snapshotOsPathIssue\(target\);\s*if \(pathIssue\) return \{ ok: false, code: pathIssue/);
 });
 
 test('K1b(10회차 재확인) — 집중 모니터링 원인 후보(summary.candidates · 함대 candidate)의 이름 안 주소도 가림(실제 summarizeFocus 출력)', async () => {

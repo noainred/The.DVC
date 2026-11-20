@@ -48,7 +48,7 @@
 - (점검 반복 2회차 추가) 베어메탈 사용률 화면 쓰기 버튼은 서버 표지(bmWriteGate — 라우트와 같은 판정)로만 · PowerCap 꺼짐 = 해당 없음(판정 하나 invCapState) · 사용률 색 = 설정값 · 피크 창 ‘줄임’ 은 설정 상한과
 - (점검 반복 3회차 추가) 정비 창 · 알림 — 재확인은 재확인 라우트 하나(고치기는 confirmedAt 그대로 · 버튼 = 같은 판정) · 끝남 · 지움 · 만료 창은 엣지에 history 로(지난 구간 전용 · 시한 없음 · 억제 안 함) · 창 끝 뒤 억제 점검은 창마다 · 모르는 규칙은 unknown
 - (v3.8.0 추가) 디스크 배드 섹터 이력(범위 A) — 엣지가 중앙 작업을 가져가 법인 안에서 Lifecycle 로그를 읽는다 · 분류는 ID · 근거 문서가 있는 ID 만 · 판정 코어 하나(verdict.js — 시리얼 = 확정 · 로그 연속성 = 추정 · 그 밖 판단 안 함) · 가져간 작업의 보고만 저장
-- (점검 반복 6회차 X 추가) 공용 게이트(fullScopeOnlyWith · requireSettingsOwner)는 쓰기 메서드에 쓰기 범위도 전체를 본다(조회 GET 은 그대로) · 공통 계정 저장은 그 계정을 쓰는 서버를 끊지 않는다(OTP 앞 판정) · bm-storage 폼은 쓸 수 있는 키만
+- (점검 반복 6회차 X 추가) 공용 게이트(fullScopeOnlyWith · requireSettingsOwner)는 쓰기 메서드에 쓰기 범위도 전체를 본다(조회 GET 은 그대로 — 소유자 GET 은 2026-11-19 결정으로 함께 막음) · 공통 계정 저장은 그 계정을 쓰는 서버를 끊지 않는다(OTP 앞 판정) · bm-storage 폼은 쓸 수 있는 키만
 - (점검 반복 6회차 Y 추가) 정비 창 합 규칙은 후보 수명 안의 시간대 전환 둘레까지 본다(dstAnchors — 빠른 길 · 정확 경로 같은 함수 · 독립 격자 대조) · PowerCap ‘2시간’ 은 판정 하나(hwFacts capStateAt — 이 노드 · 엣지 사본 · 봉투 같은 상태)
 - (점검 반복 4회차 추가) 7b 등록 · 키 — 키 폴더 밖은 쓰기 전에 거절(온보딩 분석 · bm-storage 저장 · 회전 — 판정 하나 onboard/placement.js keyPlacementIssue) · 허용 기능 제한은 경고 · 대상 해석이 고른 OS 등록은 누락 점검에서 ‘함대에 있음’ · 로그 공통 원인 후보는 (법인, 키) 쌍
 - (점검 반복 5회차 추가) 성능 · 폴러 — 정비 창 자동 인출은 사람 인출과 같은 상한 · 알림은 대기열(받은 결과로 · 실패 재시도) · 판정기 발생 한 번 · 요청 경로 양보 · 작업 로그 간격 묶음 쓰기
@@ -56,6 +56,8 @@
 - (점검 반복 8회차 추가) 로그 보안 상위 목록은 종류마다 · 서버 상세 실행(스냅샷 · 집중 시작)은 서버 표지(데모 · 역할) · 로그 패턴 CSV 는 공용 가드
 - (점검 반복 9회차 추가) 진단 스냅샷의 프로세스 사용자 이름은 관리자 판본만 원문(Top-N 과 같은 토큰) · (데모 KPI 겹침은 10회차에서 되돌림)
 - (점검 반복 10회차 추가) 프로세스 행 가림 하나(bmProcScrub — 스냅샷 · 집중 표본 · 기간 비교 · 이름 칸 name) · 스냅샷 실행 표지에 OS 경로 판정
+- (결정 반영 2026-11-19 추가) 소유자 GET 도 조회 ∧ 쓰기 전체 · 정비 창 지난 구간은 만든 시각부터(묘비와 대칭) · 보존 줄이기는 설정 소유자 등급(늘리기 · 같음은 그대로 · 못 읽음은 거부 쪽) · 재확인: 엣지 배포 켜기/끄기 · 중앙 켜기 · 배포 파일 확정도 소유자 등급(N1) · 소유자 경고 = 게이트 판정(N2)
+- (다음 작업(2026-11-19) — 데모 표시 경로 · 엣지 봉투 정제 · 스냅샷 표지) 데모 표시 표지 하나(demoDisplayTargets — paths 는 그대로) · 봉투 대상 · 행은 아는 필드 표(publicFields.js — export ⟺ 표 시험) · 행 시각 자름 · 수신 상한 초과 too-large · 표지 auth-unresolved · demo-target · 엣지 근거 시각
 ## 본문
 
 - ⚠⚠ **물리 파트(부품) 장애 — v2.548 재설계. '확인 불가' 를 정상으로도 장애로도 세지 않고, 전이만 기록한다**
@@ -1770,13 +1772,13 @@
     수집 설정 PUT: 전역 값(수집 켜기 · 주기 · 보존 · 경로 · Enterprise · 알림)은 조회 ∧ 쓰기 전체 범위만(그 밖 계정은 v2.607 처럼 버리고 ignoredGlobal) · 법인 칸은 `writeScopedVcenterIds` 로 병합 ·
     **조회는 되는데 쓰기 범위 밖인 법인의 값을 바꾸는 요청은 403 read-only-corps(아무것도 저장하지 않음)** — 규약 ‘조회 밖 404 → 쓰기 밖 403’(v2.369 · v2.733: 보이는 법인이라 숨길 것이 없고,
     조용히 무시하면 ‘저장했습니다’ 가 거짓) · 같은 값을 되돌려 보낸 것은 쓰기가 아니다(화면은 보이는 법인 전부를 보낸다) · 조회 밖 법인 키는 예전처럼 보존 + 개수만(존재 은닉).
-    주 조회 vcenters[].writable · actions.settingsGlobal 로 화면이 법인 칸 · 전역 칸을 따로 잠근다. 설정 소유자 등급(requireSettingsOwner)은 걸지 않았다 — 결정 대기(아래).
+    주 조회 vcenters[].writable · actions.settingsGlobal 로 화면이 법인 칸 · 전역 칸을 따로 잠근다. 설정 소유자 등급(requireSettingsOwner)은 걸지 않았다 — 보존 줄이기만 소유자 등급(아래 결정 · 2026-11-19).
     R2 저활용 응답 캐시 열쇠에 사용자(비관리자 — ‘본인 검토 사유는 원문’ 이 사용자마다 다르다). R3 엣지 장치 응답 peakWindowS · peakWindowCapS 는 `settings.peakWindowSOf`(설정 범위의 정수 · 10진 글자만 — ‘1e9’ · ‘0x10’ · 30.5 · 99999 → null).
     R4 정비 창(새 창 · 행 고치기/끝내기/재확인/지우기) · 키 겹침 결정/되돌리기도 bmGate 표지(데모 · 역할) — 데모 계정에 열려 있던 버튼.
     재확인 2: 화면의 법인 칸 저장 본문은 **쓰기 법인 키만**(`bmWriteText.corpsSavePatch` — 쓰기 법인 전부 · 전체 범위 관리자는 목록 밖 켜진 키도) — 보이는 법인 전부를 보내면
     폼을 연 뒤 다른 관리자가 조회 전용 법인 값을 바꿨을 때 낡은 값이 403 이 됐다(fail-closed — 저장값 손상은 없었다). 서버 병합 · 403 판정은 그대로.
-  - **결정 대기(사용자)**: 수집 설정(원시 · 롤업 보존 줄이기 = 전 법인 이력 정리 포함)을 설정 소유자 등급으로 올릴지 — 형제 판단이 갈린다(bm-storage 수집 설정은 admin + 전체 범위 ·
-    용량 증가량 보존 · 리눅스 성능 알림 규칙 · 목표선 · 튜닝 덮어쓰기는 소유자 등급). 올리면 범위 관리자의 자기 법인 켜기/끄기(v2.605)가 막히므로 전역 값만 소유자 등급으로 나누는 안이 후보.
+  - **결정(2026-11-19 사용자 · 권장안 — 예전 '결정 대기')**: 수집 설정 전체가 아니라 **보존을 줄이는 쓰기만** 설정 소유자 등급(늘리기 · 같은 값 · 법인 켜기/끄기는 그대로) —
+    아래 '결정 반영(2026-11-19)' 절 ③. (예전 기록: 형제 판단이 갈렸다 — bm-storage 수집 설정은 admin + 전체 범위 · 용량 증가량 보존 · 알림 규칙 · 목표선 · 튜닝 덮어쓰기는 소유자 등급.)
   - **남은 것(고치지 않음 — 의심 · 미재현)**: 데모에서 KPI ‘OS 경로 0’ ↔ 보드 · 누락 점검 ‘둘 다 15’ 어긋남(데모가 응답 단계에서 OS 성능 열을 겹친다 — 실장비에서는 생기지 않는다고 추정) ·
     수집 건강 저장 카드의 ‘피크 창 · 대상 없음’ 문구(iDRAC 만인 노드에서 오해 소지 — 데모에서만 봄).
 
@@ -1825,7 +1827,7 @@
     묘비 열쇠 = **min(유효 끝, 지운 시각)**(지난 구간에 남는 것은 지운 시각까지 — `effectiveOccurrences` history 와 같은 끝).
     **크기 단위**(의심 → 고침) history 상한을 JSON 글자 수로 재어, 한글 이름 · 사유가 가득한 history 는 1,000,000자 = 약 2.7MB 였다(엣지 인출 본문 상한 BODY_MAX 는 바이트 4MB — 지금 억제 창 자리를 먹는다) →
     `store.historySizeOf` = UTF-8 바이트(중앙이 보낼 때 · 엣지가 받을 때 · 다시 읽을 때 같은 함수).
-  - **결정 대기(설계 확인 — 메인이 사용자에게 묻는다 · 고치지 않음)**: 반복 창을 새로 만들면 지난 구간(⑤ 분모 제외 · 추이 음영 · 변경 묶음 · 용량 날 제외)이 **만들기 전 날짜까지 소급**된다
+  - **결정(2026-11-19 사용자 · 권장안 — 예전 '결정 대기' · 아래 '결정 반영(2026-11-19)' 절 ② 에서 고침 — 지난 구간은 만든 시각부터)**: 반복 창을 새로 만들면 지난 구간(⑤ 분모 제외 · 추이 음영 · 변경 묶음 · 용량 날 제외)이 **만들기 전 날짜까지 소급**됐다
     (발생 계산은 만든 시각을 보지 않는다 — 3회차 D2 재현에서 오늘 만든 매일 창이 지난 31일 전부를 덮음 · 기준판 5c6d87a6b 와 수정판이 같다). 지운 창은 묘비로 ‘소급 소거 금지’(그때 정비였던 사실은 그때의 일)인데
     만들기는 ‘소급 추가’ 라 비대칭이다 — 만든 시각(at) 앞의 발생을 지난 구간에서 뺄지(만들기 전에는 정비가 아니었다), 지금처럼 둘지(정비 일정은 그 전부터 있었을 수 있다)는 의도 확인이 필요하다.
   - **남은 것(근거와 함께 · 고치지 않음)**:
@@ -1951,10 +1953,70 @@
     한계: 등록부 호스트 이름 matcher 는 쓰지 않는다(IPv4 패턴만 — 같은 응답의 dmesg · ss 가림과 같은 수준).
   - **재확인 K1b**(낮음) 집중 모니터링 ‘원인 후보’(focus/summary.js — 표본 name 을 그대로 옮긴다: 단건 · 목록 summary.candidates · 함대 candidate)의 이름 안 IPv4 가 비관리자에게 원문 —
     `PROC_KEYS` 에 candidates 를 더하고(scrubProcDeep) 함대 목록 candidate(문자열)도 scrubIp. 재확인: scrubProcDeep 은 cpuTop · memTop · ioTop · candidates 배열 안만 바꾼다(세션 name 등 그대로) ·
-    엣지 paths 'os' ⟺ 엣지 실행 osHost 는 같은 조건(targets.js — osSsh ∧ osEntry) · 엣지 대행 표지는 마지막 인출 봉투 기준(다시 가져오기 전까지 · 남은 것) · osHost.authError 는 표지에 없음(남은 것).
+    엣지 paths 'os' ⟺ 엣지 실행 osHost 는 같은 조건(targets.js — osSsh ∧ osEntry) · 엣지 대행 표지는 마지막 인출 봉투 기준(다시 가져오기 전까지) · osHost.authError 는 표지에 없음
+    — **둘 다 다음 작업(2026-11-19) ⑥에서 고침**(아래 절: 표지 auth-unresolved · 엣지 근거 시각 한 줄 · 봉투 시점 기준이라는 사실 자체는 그대로).
   - **L2**(낮음 · 실운영 포함) OS 경로가 없는 서버에도 스냅샷 실행 칸이 열리고 누르면 409 no-os-path — 표지 = 데모 · 역할(bmGate) ∧ 실행과 같은 판정(`snapshotOsPathIssue` — 엣지 대행은 봉투 paths 'os') ·
     `WRITE_WHY` 에 'no-os-path'(웹 문구 1:1) · 웹은 역할이 아닌 이유를 한 줄로.
-  - **L1**(낮음 · 데모만) 9회차 J1 이 어긋남을 옮겼을 뿐 — 되돌렸다. 모든 표시(KPI · 칩 · 표 · CSV · 띠 · 상세 머리)를 맞추려면 데모 대상의 표시 경로를 한 규칙으로(예: 데모 합성 OS 경로 표지) 정해야 한다 — 다음 작업 후보.
+  - **L1**(낮음 · 데모만) 9회차 J1 이 어긋남을 옮겼을 뿐 — 되돌렸다. 모든 표시(KPI · 칩 · 표 · CSV · 띠 · 상세 머리)를 맞추려면 데모 대상의 표시 경로를 한 규칙으로(예: 데모 합성 OS 경로 표지) 정해야 한다 — **다음 작업(2026-11-19) ④에서 고침**(아래 절).
   - **의심 · 세지 않음**: 엣지 응답 16MB 초과 때 사유가 ‘응답 형식이 다릅니다’(공용 central/edgePull.js 가 상한 오류 문장을 버림 · 엣지가 8MB 로 줄여 기본값에서는 닿지 않음) ·
     봉투 행 시각(os_at · idrac_at · ts)을 수신 시각으로 자르지 않음(읽는 웹 없음) · 대상 · 행 정제가 아는 필드 목록이 아니라 칸 수 상한(가짜 엣지의 ‘password’ 칸이 관리자 응답에 — 화면에는 안 그림) ·
-    엣지 ↔ 법인 대조 없음(설계 범위) · 창이 없을 때 정비 창 문구. 다음 작업 후보로 남긴다.
+    엣지 ↔ 법인 대조 없음(설계 범위) · 창이 없을 때 정비 창 문구. — 앞의 셋은 **다음 작업(2026-11-19) ⑤에서 고침**(아래 절) · 엣지 ↔ 법인 대조 · 정비 창 문구는 남은 것(설계 범위).
+
+- ⚠⚠ **결정 반영(2026-11-19 · 사용자 결정 3건 — 모두 권장안 · 기준판 266a350dc) — 소유자 조회 · 정비 창 소급 · 보존 축소**
+  (`routes/admin/shared.js requireSettingsOwner` · `routes/auth.js ownerFields`(주석) · `bmusage/maint/judge.js effectiveOccurrences` · `routes/api/bmMaint.js`(born 표지) ·
+  `bmusage/settings.js retentionShrink` · `routes/api/bmUsage.js` 설정 PUT · 웹 `BmUsage.jsx` · `bmWriteText.js retentionOwnerNote`. 회귀 `server/test/bmUsageDecideGa.test.js` ·
+  웹 `bmDecideGa.test.js` · 정정 `bmUsageLoop6x` A1 ① · `bmUsageLoop2` R1 · `bmUsageLoop3Edge` ① · `audit2633` ② · `rebut83` · 변이 6건 모두 잡힘.)
+  - **① 소유자 GET 도 조회 ∧ 쓰기 전체(보안)**: `requireSettingsOwner` 는 모든 메서드에서 `isFullReadWriteScope`(던지면 거부) — 상세 `docs/rules/security-api.md` 6회차 A1 '결정'.
+    재현(기준판): 쓰기 vcA 소유자가 소유자 GET 17개(실제 라우터 전수 — 게이트 태그 kind 'settingsOwner')와 비밀 포함 내보내기 8개를 200 으로 받았다 → 403(`SETTINGS_OWNER_WRITE_SCOPE_REASON` — '조회 · 변경').
+    등급 질의(`isOwnerTier` — 8a 정비 창 · 7b 묶음 행)는 그대로 · `/auth/me settingsOwnerTier` = 그 GET 의 판정(계정 넷 대조).
+    화면: 설정 메뉴는 `isSettingsOwner` 라 그대로 보이고 소유자 화면을 열면 `ErrorBox` 권한 안내. 엣지 배포 화면(AgentDeploy · BulkDeploy)의 중앙 토큰 조회는 403 을 삼켜 '중앙 미설정' 으로
+    보인다 — 비소유자 관리자에게는 예전부터 같은 모양이었다(이 결정으로 쓰기 일부 소유자도 같아진다 · 고치지 않음 — 남은 것).
+  - **② 정비 창 지난 구간은 만든 시각부터**: `effectiveOccurrences(…, { history: true })`(coverIntervals — ⑤ 분모 제외 · 용량 · 저활용 · 베이스라인 · 음영 · 변경 묶음 ·
+    `/maintenance/occurrences`)가 **만든 시각(at) 전 발생은 빼고 걸친 발생은 그 시각부터**(born 표지) — 묘비의 '지운 시각까지' 와 대칭. 재현(기준판): 지금 만든 매일 창이 지난 31일 32구간을 덮었다 → 0.
+    만든 시각은 고치기에도 유지(`store.editWindow at: cur.at`) · 배포본도 싣는다(deploy SEND_FIELDS · normalizeWindow · bareWin) — 엣지 왕복 대조 `bmUsageLoop3Edge` ①(만든 시각에 걸친 W4 가 엣지 · 중앙 모두 T0 부터).
+    일회 창도 같은 규칙(시작이 지난 일회 창은 끝이 지금 뒤면 만들 수 있다 — 만든 시각부터만 지난 구간). 만든 시각을 모르면(형식 밖 · 옛 꼴 — numOrNull null) 자르지 않는다(예전 그대로).
+    **바꾸지 않은 것**: 지금 판정(activeOccurrence · maintStateFor — 만들자마자 진행 중인 발생의 억제는 예전처럼 그 발생 시작 기준) · 합 규칙(coverSteps — 미래 판정이라 history 를 쓰지 않는다) ·
+    창 상태의 last(목록 응답 — 화면은 정렬 열쇠로만 쓴다 · history 가 아니다) · history 열쇠(historyRecency — 끝 기준이라 시작을 자르는 것과 무관).
+  - **③ 보존 줄이기는 설정 소유자 등급**: 설정 PUT 이 `settings.retentionShrink`(저장과 같은 꼴 — 빈 값 · 0 은 미지정 · 중앙 배포 사본이 있으면 배포 키는 저장하지 않음 · store 키 단위 겹침 · 정규화)로
+    **저장된 값보다 줄어드는 보존 칸**을 찾고, 있으면 `settingsOwnerGradeDenial`(isOwnerTier 와 같은 하나)이 아니면 403 `retention-owner`(fields · requiredOwner — 아무것도 저장하지 않는다 · 같은 요청의 법인 칸 포함).
+    보존 칸 = rawRetentionDays · dailyRetentionDays + **store 의 rawDays · hourlyDays · devRawDays · devHourlyDays**(같은 PUT 으로 바뀌는 보존 — 원시 실효 보존은 min(store.rawDays, rawRetentionDays)라
+    store.rawDays 를 줄이는 것은 같은 값을 다른 칸으로 줄이는 것). 늘리기 · 같은 값은 그대로(전체 범위 관리자). 범위 계정은 전역 값을 이미 버린다(ignoredGlobal — 403 이 아니다).
+    **못 읽으면 거부 쪽**: 설정 파일 손상 중 확정 저장(confirmDefaults)은 지금 값을 몰라 줄어듦(['unknown'])으로 본다 · 서비스 점검 '기본값으로 확정' 도 소유자 등급(`_localErr` ownerOnly — checksLogs 확정 라우트).
+    재현(기준판): 비소유자 전체 범위 관리자가 원시 90 → 7 · 롤업 1825 → 30 · store.rawDays 30 → 7 을 200 으로 저장했다.
+    화면: 보존 칸 아래 표지 '보존 기간 줄이기는 설정 소유자만 …'(전역 값을 저장할 수 있는 비소유자에게만 · 중앙 배포 중이면 칸이 잠겨 말하지 않는다) — 표지는 /auth/me settingsOwnerTier
+    (requireSettingsOwner 를 그대로 부른 값 — 전역 값을 저장할 수 있는 계정에서는 이 판정과 같은 답 · 웹은 줄이는지 비교하지 않는다). 저장이 실패하면 숫자 칸을 저장된 값으로 되돌린다(예전에는 입력값이 남았다).
+    **다른 경로 전수**: 백업 복원(설정 소유자 등급 — 이미) · 알림 규칙의 Top-N · 집중 · 변경 · 로그 보관(perf-rules PUT — 이미 소유자 등급) · 스냅샷 보관(상수) ·
+    **엣지 배포 — 재확인 N1(중간 · 실측 삭제) → 결정(2026-11-19 사용자 '세 경로도 소유자 등급' · 권장안)**: 원시 · 롤업 보존은 배포 키(DISTRIBUTED_KEYS)라 중앙 설정 PUT 의 줄이기는
+    위 판정으로 막히지만, **배포를 켜고 끄는 동작**(`PUT /tools/bm-usage/distribute` 켜기 · 끄기 · 제외 · `/distribute/edge` 중앙 켜기 · 해제 · 배포 파일 기본값 확정)은 엣지의 실효 보존을
+    중앙 값 ↔ 엣지 로컬 값으로 바꾼다 — 엣지 `bmUsageConfigPull` 적용 · 해제 → 다음 정리 틱(`poller.js pruneTick` → usage_daily · usage_history 청크 DELETE · 월 파일 삭제).
+    재현(반증 재확인 — 실제 applyCentralBmUsage · clearCentralBmUsage · pruneTick): 엣지 로컬 3650일 · 6행에서 켜기(중앙 1825일) 3행 삭제 · 끄기(중앙 1825 → 로컬 400일) 5행 삭제.
+    **정정**: 처음 이 절은 '엣지 로컬이 더 길면 줄어든다' 한 방향만 적었다 — 끌 때 로컬이 더 **짧아도** 줄어든다. 중앙은 엣지 로컬 보존을 모른다(봉투에 없다) → '모르면 거부 쪽' 으로
+    세 경로 모두 설정 소유자 등급(③ 과 같은 판정 `settingsOwnerGradeDenial` — 라우트 `distOwnerOnly` 403 `distribute-owner` · 판정이 던지면 거부 · `_distErr` ownerOnly).
+    전체 범위 게이트(fleetOnly — 조회 ∧ 쓰기 전체)는 그대로 먼저 본다. 화면 표지는 GET `distribution.canEdit`(같은 판정) — 웹 `bmUsageDistText.distCanEdit` 가 배포 켜기 · 제외 · 다시 확인 · 해제 칸과
+    엣지 표의 중앙 켜기 버튼(edgeOnView canManage)을 닫고 비소유자에게 `DIST_OWNER_NOTE` 한 줄(표지가 없는 구버전 응답은 예전처럼 연다 — 서버가 다시 막는다).
+    대가(사용자 승인): 소유자가 아닌 전체 범위 관리자는 엣지 수집을 중앙에서 켤 수 없다(현황은 본다). 정정 시험: `bmUsageLoop2` R1(adm 배포 끄기 → 403) · `bmUsageEdgeOn2927`(adm 을 소유자로) ·
+    `audit2633` ②(배포 파일 확정 OWNER_ONLY) · 웹 `bmUsageEdgeOn2927`(canManage 소스). 변이 4건(두 라우트 게이트 · canEdit · ownerOnly) 모두 잡힘.
+  - **재확인 N2(낮음) — 세션 보안 소유자 경고 = 게이트 판정**: `opsSettings.scopedOwnerWarnings` 가 조회 범위만 봐서 **쓰기 범위가 일부인 소유자**를 경고하지 않았다(① 뒤 그 계정은 소유자 GET · 쓰기
+    모두 403 — UI 목록이 그런 계정뿐이면 '소유자는 있는데 아무도 설정을 못 연다' 가 경고 없이 성립). `isFullReadWriteScope` 하나로 판정 · 사유 `SETTINGS_OWNER_WRITE_SCOPE_REASON` · 던지면 경고.
+    회귀 `bmUsageDecideGa` ①(경고 ⟺ 소유자 GET 403 대조) · 변이 잡힘.
+  - **재확인 S3(시험 빈 곳)**: `at` 키가 **없는**(undefined) 창이 지난 구간에서 사라지지 않음을 고정(예전 시험은 at: null 만 — `Number(null)=0` 이 같은 답이라 `Number(w.at)` 변이가 살았다).
+  - **의심(세지 않음 — 다음 점검 후보)**: at 이 미래 시각이면(엣지 · 중앙 시계 차) 진행 중 발생의 앞부분이 지난 구간에서 빠진다(억제는 그대로 · NTP 정상이면 오차 크기뿐) ·
+    업그레이드하면 기존 창의 지난 구간도 소급해 줄어든다(SLO · 용량 · 저활용 수치 · 베이스라인 — 의도된 결과) · 중앙 v3.29.1 과 새 엣지 공존 동안 두 쪽 지난 구간이 다를 수 있다.
+
+- ⚠⚠ **다음 작업(2026-11-19) — 데모 표시 경로 · 엣지 봉투 정제 · 스냅샷 표지**(그룹 B · 기준판 266a350dc — 사용자가 고른 다음 작업 ④⑤⑥ · 회귀 `server/test/bmUsageNextGb.test.js` · 웹 `bmNextGb.test.jsx`).
+  - **④ 데모 표시 경로 한 규칙**(데모만): 성능 겹침(`demoPerfLatestRows`)이 OS 열을 싣는 시나리오 8종의 데모 대상에 **서버 한 곳**(`mock/demo/baremetal.js demoDisplayTargets` — `poller.currentTargets` 의 mock 갈래)이
+    표지 `demoOs` · `pathsShown`(등록 경로 + 'os') · `missingShown`([] — 그 대상은 iDRAC 경로가 있어 누락은 OS 사유뿐)을 싣는다. 시나리오 순위는 `demoScenarioMap` 하나(겹침 · 표지 · 시드가 같은 표).
+    KPI(counts — `targets.pathCountsOf`: 표시 경로가 있으면 그것으로 센다 · 대상 해석 · 범위 계정 갈래 · 엣지 봉투 counts 가 같은 함수) · 장비 종류 칩 · 사용률 표 경로 칸 · CSV 수집경로 · 각주(웹 `shownPaths` · `shownMissing` — 서버 값을 고르기만)가
+    같은 값을 읽고, 신뢰 띠 · 상세 머리(행 os_at)와 맞는다. **대상 paths · osHost 는 바꾸지 않는다**(SSH 시도 0 — 시험이 고정). mock 이 아니면 입력 그대로(같은 배열 · 표지 0).
+    스냅샷은 **합성하지 않고 닫는다**: `snapshotOsPathIssue` 가 `demoOs` 대상에 'demo-target'(표지 · 실행 409 · 웹 문구 ‘데모 합성이라 스냅샷은 실행하지 않습니다’). 근거 — 데모 계정은 역할 표지(demo)로 먼저 닫히고,
+    합성 결과를 보관 DB · 하루 상한 경로에 넣는 데모 전용 길을 새로 만들 이유가 없다(집중처럼 분 표본을 합성하는 기능과 달리 스냅샷은 사람이 누르는 원격 명령이다).
+    **남은 것**: 데모 집중 모니터링은 iDRAC 만 시나리오(2대)도 OS 값을 합성한다(`focus/run.js` sess.demo → hasOs) — 표시 경로와 어긋나지만 이번 범위(KPI · 띠 · 칩 · 표 · CSV · 상세 머리 · 스냅샷 표지) 밖이라 두었다.
+    누락 점검(7b onboard/missing.js)은 내부 `missing` 을 그대로 본다(데모 표지는 응답 표시 전용).
+  - **⑤ 엣지 봉투 정제**(엣지 수신 계약 — `docs/rules/edge.md` 같은 날짜 절): (a) 행 `ts` · `os_at` · `idrac_at` 을 수신 시각으로 자르고 원본은 `atRaw`(피크 시각은 예전처럼 `peakAtRaw`) —
+    소비처(법인 사용량 · 통합 인벤토리 · CPU 최신값)는 snapAt 으로 한 번 더 자른다(멱등) · 행 os_at 을 읽는 중앙 화면은 없다(성능 항목의 osAt 은 bmPerfSanitize 가 이미 자름).
+    (b) 대상 · 행은 **아는 필드 표**(`bmusage/publicFields.js` PUBLIC_TARGET_SPEC · LATEST_ROW_SPEC)만 — 모든 수치 열은 수로(예전 기존 9열 ‘원시값 그대로’ 계약을 바꿈 · 시험 audit2604a · bmPerf2919 갱신) ·
+    모르는 칸은 버리고 `sanitizeUnknown` 으로 센다 · 없는 칸은 없는 채로(구버전 엣지). (c) 수신 상한 초과는 kind `too-large`(공용 사다리).
+  - **⑥ 스냅샷 실행 표지**: (a) `osHost.authError`(키 · 공통 계정 참조 미해석)를 표지 why `auth-unresolved` 로 — 실행과 같은 함수(`snapshotOsPathIssue`) · `SNAPSHOT_CODE_STATUS` 409(예전 표에 없어 200 ok:false 였고
+    웹은 ‘SSH 오류’ 문장에 사유를 숨겼다) · 결과 사유 줄을 보인다 · 중앙의 엣지 스냅샷 정제 code 표를 `SNAPSHOT_CODES` 하나로(예전 사본에 auth-unresolved 가 없어 ssh-error 로 바뀌었다).
+    엣지 대행 대상은 공개 대상 판정 `snapshotPublicPathIssue`(demoOs · paths · `osAuthUnresolved` — publicTarget 이 osHost.authError 로 만드는 참 · 거짓 · 사유 글은 싣지 않는다) — 시험이 `snapshotPublicPathIssue(publicTarget(x)) === snapshotOsPathIssue(x)` 를 대조.
+    게이트(`snapRunGateOf`)에는 판정 사본을 두지 않는다(라우트가 두 함수를 넘긴다). (b) 엣지 대행 GET 보관분에 `pathBasis { via:'edge', at: 보관분 snapAt }` — 화면이 ‘실행 칸은 엣지 보관분(시각) 기준 · 엣지에서 OS 계정을 바꿨다면 ‘지금 가져오기’ 뒤에 맞습니다’ 를 한 줄로.

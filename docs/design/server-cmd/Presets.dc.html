@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>서버 명령 실행 — 프리셋 목록</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./sc.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#60a5fa}a:hover{color:#93c5fd}
+</style>
+</helmet>
+<div class="pg" style="min-height: 2700px; padding: 28px 32px 44px; display: flex; flex-direction: column; gap: 18px">
+
+  <div style="display: flex; flex-direction: column; gap: 6px; max-width: 1100px">
+    <div class="crumb">서버 명령 실행 · 프리셋</div>
+    <h1>프리셋 목록(안) — 1차에 넣을 명령 22개</h1>
+    <p class="soft" style="font-size: 14px">‘서버 정보’ 가 이미 읽는 것(OS · CPU · 메모리 구성 · 디스크 목록)은 빼고, <b>지금 상태를 묻는 명령</b>으로 골랐습니다. 전부 읽기 전용이고 일반 계정으로 돕니다.</p>
+  </div>
+
+  <div style="display: flex; flex-wrap: wrap; gap: 8px">
+    <span class="chip c-ok">읽기 전용</span>
+    <span class="chip c-ok">sudo 를 쓰지 않음</span>
+    <span class="chip c-ok">프로세스는 이름만(인자 · 환경 없음)</span>
+    <span class="chip c-ok">값은 이름과 경로 두 종류</span>
+    <span class="chip c-ok">명령마다 시한 · 출력 상한</span>
+    <span class="chip c-part">Windows 는 실제 서버로 확인 전(안)</span>
+  </div>
+
+  <div class="sec">
+    <h2>프리셋</h2>
+    <div class="tw">
+      <table class="t" style="min-width: 1320px">
+        <thead>
+          <tr><th>묶음</th><th>프리셋</th><th>Linux</th><th>Windows(PowerShell)</th><th>값</th><th>시한</th><th>메모</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="k" rowspan="3">시스템</td><td>가동 시간 · 부하</td><td class="mono">uptime</td><td class="mono">Get-CimInstance Win32_OperatingSystem | Select LastBootUpTime</td><td class="dim">—</td><td>10초</td><td class="dim"></td></tr>
+          <tr><td>시각 · 시간 동기</td><td class="mono">timedatectl; chronyc tracking</td><td class="mono">w32tm /query /status</td><td class="dim">—</td><td>10초</td><td>Windows 는 권한이 필요할 수 있음</td></tr>
+          <tr><td>메모리 사용</td><td class="mono">free -m</td><td class="mono">Get-CimInstance Win32_OperatingSystem | Select TotalVisibleMemorySize, FreePhysicalMemory</td><td class="dim">—</td><td>10초</td><td class="dim"></td></tr>
+
+          <tr><td class="k" rowspan="5">디스크</td><td>파일시스템 사용량</td><td class="mono">df -hP</td><td class="mono">Get-Volume</td><td class="dim">—</td><td>10초</td><td>멈춘 NFS 가 있으면 시한에 걸림(받은 만큼 보임)</td></tr>
+          <tr><td>inode 사용량</td><td class="mono">df -iP</td><td class="dim">없음</td><td class="dim">—</td><td>10초</td><td class="dim"></td></tr>
+          <tr><td>네트워크 마운트</td><td class="mono">findmnt -t nfs,nfs4,cifs</td><td class="dim">없음</td><td class="dim">—</td><td>10초</td><td class="dim"></td></tr>
+          <tr><td>폴더 사용량</td><td class="mono">du -xh --max-depth=1 -- '경로' | sort -rh | head -20</td><td class="dim">없음</td><td><span class="chip c-mut">경로</span></td><td>20초</td><td>계정이 읽을 수 없는 하위 폴더는 빠짐</td></tr>
+          <tr><td>디렉터리 목록</td><td class="mono">ls -la -- '경로' | head -200</td><td class="dim">없음</td><td><span class="chip c-mut">경로</span></td><td>10초</td><td>이름 · 크기 · 시각만 — 파일 내용은 읽지 않음</td></tr>
+
+          <tr><td class="k" rowspan="3">프로세스</td><td>CPU 상위 프로세스</td><td class="mono">ps -eo pid,user,pcpu,pmem,etime,comm --sort=-pcpu | head -16</td><td class="mono">Get-Process | Sort-Object CPU -Descending | Select -First 15 Name, Id, CPU, WorkingSet64</td><td class="dim">—</td><td>10초</td><td>이름만 — 인자는 싣지 않음</td></tr>
+          <tr><td>메모리 상위 프로세스</td><td class="mono">ps -eo pid,user,pcpu,pmem,etime,comm --sort=-pmem | head -16</td><td class="mono">Get-Process | Sort-Object WorkingSet64 -Descending | Select -First 15 Name, Id, CPU, WorkingSet64</td><td class="dim">—</td><td>10초</td><td class="dim"></td></tr>
+          <tr><td>프로세스 찾기</td><td class="mono">pgrep -l -- '이름'</td><td class="mono">Get-Process -Name '이름' | Select Name, Id, StartTime</td><td><span class="chip c-mut">이름</span></td><td>10초</td><td>없으면 끝 코드 1(실패가 아님)</td></tr>
+
+          <tr><td class="k" rowspan="4">네트워크</td><td>IP 주소</td><td class="mono">ip -br addr</td><td class="mono">Get-NetIPAddress | Select InterfaceAlias, IPAddress, PrefixLength</td><td class="dim">—</td><td>10초</td><td class="dim"></td></tr>
+          <tr><td>라우팅 표</td><td class="mono">ip route</td><td class="mono">Get-NetRoute -AddressFamily IPv4 | Select DestinationPrefix, NextHop, InterfaceAlias</td><td class="dim">—</td><td>10초</td><td class="dim"></td></tr>
+          <tr><td>리슨 포트</td><td class="mono">ss -tlnp</td><td class="mono">Get-NetTCPConnection -State Listen | Select LocalAddress, LocalPort, OwningProcess</td><td class="dim">—</td><td>10초</td><td>Linux 의 프로세스 이름은 그 계정 것만 보임</td></tr>
+          <tr><td>DNS 설정</td><td class="mono">cat /etc/resolv.conf</td><td class="mono">Get-DnsClientServerAddress -AddressFamily IPv4</td><td class="dim">—</td><td>10초</td><td>정해진 파일 하나(값으로 받는 경로가 아님)</td></tr>
+
+          <tr><td class="k" rowspan="4">서비스 · 로그</td><td>실패한 서비스</td><td class="mono">systemctl --failed --no-pager</td><td class="mono">Get-CimInstance Win32_Service -Filter "StartMode='Auto' AND State&lt;&gt;'Running'" | Select Name, State</td><td class="dim">—</td><td>10초</td><td>Windows 는 ‘자동 시작인데 멈춘 서비스’</td></tr>
+          <tr><td>서비스 상태</td><td class="mono">systemctl show -p Id,LoadState,ActiveState,SubState,UnitFileState,ActiveEnterTimestamp,MainPID,NRestarts,Result -- '이름'</td><td class="mono">Get-Service -Name '이름' | Select Name, Status, StartType</td><td><span class="chip c-mut">이름</span></td><td>10초</td><td>status 가 아니라 show — status 는 프로세스 인자까지 보여 줌</td></tr>
+          <tr><td>서비스 로그</td><td class="mono">journalctl -u '이름' -n 100 --no-pager</td><td class="dim">없음</td><td><span class="chip c-mut">이름</span></td><td>20초</td><td>로그 읽기 권한이 없으면 비어 있음 · 로그에 찍힌 내용은 그대로 보임(④ 의 D5)</td></tr>
+          <tr><td>최근 경고 · 오류</td><td class="mono">journalctl -p warning -n 50 --no-pager</td><td class="mono">Get-WinEvent -FilterHashtable @{LogName='System'; Level=1,2,3} -MaxEvents 50 | Select TimeCreated, Id, LevelDisplayName, ProviderName</td><td class="dim">—</td><td>20초</td><td>권한이 필요할 수 있음(④ 의 D5)</td></tr>
+
+          <tr><td class="k" rowspan="3">접속</td><td>접속 세션</td><td class="mono">who</td><td class="mono">quser</td><td class="dim">—</td><td>10초</td><td class="dim"></td></tr>
+          <tr><td>최근 재부팅</td><td class="mono">last -x reboot -n 5</td><td class="mono">Get-WinEvent -FilterHashtable @{LogName='System'; Id=6005,6006,1074} -MaxEvents 10 | Select TimeCreated, Id</td><td class="dim">—</td><td>10초</td><td class="dim"></td></tr>
+          <tr><td>최근 로그인</td><td class="mono">last -n 20</td><td class="dim">없음</td><td class="dim">—</td><td>10초</td><td>계정 이름 · 접속한 주소가 보임</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="dim">Linux 22개 · Windows 16개. 명령과 선택 항목은 안이며, 구현 때 실제 출력으로 확정합니다. 프리셋은 코드에 고정합니다 — 더하려면 릴리스로(④ 의 D3).</p>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start">
+
+    <div class="sec">
+      <h2>값 종류 — 두 가지뿐</h2>
+      <div class="tw">
+        <table class="t">
+          <thead>
+            <tr><th>종류</th><th>쓰는 프리셋</th><th>허용 글자</th><th>막히는 것</th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="k">이름</td><td>서비스 상태 · 서비스 로그 · 프로세스 찾기</td><td>영숫자로 시작 · 영숫자와 <span class="mono">@ . _ -</span> · 80자까지</td><td>공백 · 따옴표 · <span class="mono">/</span> · 와일드카드 · <span class="mono">-</span> 로 시작</td></tr>
+            <tr><td class="k">경로(Linux)</td><td>폴더 사용량 · 디렉터리 목록</td><td><span class="mono">/</span> 로 시작 · 영숫자와 <span class="mono">. _ - /</span> · 200자까지</td><td>공백 · 따옴표 · <span class="mono">..</span> 조각 · 와일드카드</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="dim">검사는 서버가 합니다(화면의 검사는 안내용). Windows 는 1차에 이름 값만 받습니다 — 경로의 공백 · 역슬래시 규칙은 실제 서버로 확인한 뒤에.</p>
+    </div>
+
+    <div class="sec">
+      <h2>넣지 않는 것(1차)</h2>
+      <div class="card">
+        <ul class="ul">
+          <li><i style="background: #fca5a5"></i><span><b>상태를 바꾸는 명령</b> — 서비스 시작 · 중지 · 재시작, 프로세스 종료, 재부팅(④ 의 D2)</span></li>
+          <li><i style="background: #fca5a5"></i><span><b>자유 명령</b> — 지금 있는 길(에이전트의 SSH 원격 실행 · 터미널)을 씁니다</span></li>
+          <li><i style="background: #fca5a5"></i><span><b>그 서버에서 다른 주소로 가는 탐침</b>(ping · 포트 확인 · HTTP) — 서버를 발판으로 한 내부망 탐색이 됩니다(④ 의 D4)</span></li>
+          <li><i style="background: #fca5a5"></i><span><b>값으로 받은 경로의 파일 내용 읽기</b>(cat · tail · grep) — 설정 파일의 비밀이 화면으로 나옵니다</span></li>
+          <li><i style="background: #fca5a5"></i><span><b>프로세스 인자 · 환경 변수</b>(ps aux · systemctl status) — 인자에 비밀번호가 실린 경우가 있습니다</span></li>
+          <li><i style="background: #fca5a5"></i><span><b>sudo</b> — root 가 필요한 항목은 서버가 낸 거절 문구가 그대로 보입니다</span></li>
+        </ul>
+      </div>
+    </div>
+
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start">
+
+    <div class="sec">
+      <h2>명령을 감싸는 틀 · 목록의 모양(안)</h2>
+      <pre class="code">// Linux — 프리셋 ‘서비스 상태’ · 값 chronyd
+LC_ALL=C timeout 10 systemctl show -p Id,LoadState,... -- 'chronyd'
+
+// Windows — 같은 프리셋(스크립트를 Base64 로 바꿔 넘긴다)
+powershell -NoProfile -NonInteractive -EncodedCommand (Base64)
+  Get-Service -Name 'chronyd' | Select Name, Status, StartType
+    | Format-Table -AutoSize | Out-String -Width 200
+
+// servercmd/presets.js — 순수 모듈(목록 · 값 검사 · 명령 만들기)
+{ id: 'svc-state', group: '서비스 · 로그', label: '서비스 상태',
+  params: [ { name: 'unit', kind: 'name', label: '서비스 이름' } ],
+  linux:   { make: (p) => 'systemctl show -p ... -- ' + q(p.unit),
+             timeoutS: 10 },
+  windows: { make: (p) => 'Get-Service -Name ' + psq(p.unit) + ' | ...',
+             timeoutS: 10 },
+  maxBytes: 65536 }
+
+// 화면이 보내는 것 — 명령 글자는 없다
+POST /api/tools/server-cmd/run
+  { preset: 'svc-state', params: { unit: 'chronyd' }, ids: [ ... ] }</pre>
+      <p class="dim">파일 · 함수 · 칸 이름은 안입니다. 시한의 합(로그인 15초 + 명령 시한)이 서버 한 대의 시한 60초보다 작다는 것을 시험이 고정합니다(지금 서버 정보와 같은 방식).</p>
+    </div>
+
+    <div class="sec">
+      <h2>출력 다루기</h2>
+      <div class="tw">
+        <table class="t">
+          <thead>
+            <tr><th>단계</th><th>하는 일</th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="k">받기</td><td>명령마다 출력 상한(기본 64KB) — 넘으면 끊고 ‘잘림’ 으로 표시</td></tr>
+            <tr><td class="k">다듬기</td><td>제어문자 · 색 코드를 지움(줄바꿈 · 탭만 남김) · 화면에는 서버당 2,000줄까지</td></tr>
+            <tr><td class="k">보관</td><td>포탈 메모리에 마지막 실행 한 건 · 30분 뒤 지움 · 재시작하면 사라짐 · 파일로 쓰지 않음(④ 의 D6)</td></tr>
+            <tr><td class="k">보여 주기</td><td>실행 권한이 있는 계정에만 · 서버별 첫 줄 요약 + 펼쳐 보기 · 복사</td></tr>
+            <tr><td class="k">기록</td><td>감사 로그에 누가 · 프리셋 · 값 · 대상 서버 · 서버별 결과 코드 — <b>출력은 싣지 않음</b></td></tr>
+            <tr><td class="k">가리지 못하는 것</td><td>출력 속 비밀을 자동으로 가리지는 못합니다 — 그래서 비밀이 나올 수 있는 명령을 목록에서 뺐습니다</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="note w"><b>확인하지 못한 것</b> — Windows 명령은 실제 Windows 서버에서 돌려 보지 못했습니다(이 환경에 없음). 구현 때 실제 출력으로 확정하고, 그 전까지 화면에 ‘시험’ 표시를 답니다(④ 의 D9). Linux 의 권한 메모(로그 읽기 · 리슨 포트의 프로세스 이름)도 배포판 설정에 따라 달라집니다.</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2700}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

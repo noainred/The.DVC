@@ -3,6 +3,7 @@
  * ⚠ 판정은 서버가 한다(분석 행의 action · code · reason · warnings · 누락 점검 bucket) — 여기는 표시 이름 · 숫자 꼴만. 서버 판정을 복제하지 않는다.
  */
 import { toCsv } from '../../util/csv.js';
+import { agoText } from './relTime.js';
 
 export const ACTION_TEXT = Object.freeze({ new: '신규', update: '갱신', unchanged: '변화 없음', reject: '거부' });
 export const ACTION_TONE = Object.freeze({ new: 'ok', update: 'info', unchanged: 'muted', reject: 'bad' });
@@ -52,9 +53,14 @@ export function summaryChips(s = {}) {
 /** 적용할 행이 있나(신규 · 갱신). */
 export const applicable = (summary) => (Number(summary?.new) || 0) + (Number(summary?.update) || 0) > 0;
 
-/** 엣지 배포 반영 상태 — 중앙 기록(인메모리)이 없으면 '모름'(재시작 직후). */
-export function edgeSyncText(a = {}) {
+/**
+ * 엣지 배포 반영 상태 — 중앙 기록(인메모리)이 없으면 '모름'(재시작 직후).
+ * 결정(76~105 남긴 것 · 2026-11-20) A3: 마지막 인출에서 엣지가 적용 상태 파일을 **읽지 못했다고 알렸으면**(서버 stateUnread 엄격한 true) '대기' 대신 그 사유 —
+ *   엣지는 읽힐 때까지 배포를 적용하지 않는다. 칸이 없거나 거짓(옛 엣지 · 읽히는 엣지)이면 예전 그대로. 마지막 인출 시각을 함께 보인다(인출이 멈춘 엣지의 옛 기록일 수 있다).
+ */
+export function edgeSyncText(a = {}, now = Date.now()) {
   if (!a.pulledAt) return { tone: 'muted', text: '모름 — 이 엣지가 중앙 재시작 뒤 아직 받으러 오지 않았습니다' };
+  if (a.stateUnread === true) return { tone: 'bad', text: `엣지가 적용 상태 파일을 읽지 못함(권한 · 디스크 확인) — 읽힐 때까지 배포를 적용하지 않습니다 · 마지막 인출 ${agoText(a.pulledAt, now)}` };
   if (a.inSync === true) return { tone: 'ok', text: '반영됨' };
   return { tone: 'warn', text: '대기 — 엣지가 다음 인출에서 반영합니다' };
 }

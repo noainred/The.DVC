@@ -4746,6 +4746,80 @@ high 0 · 반증 1(A3-01 — 경로 오독, 데모 계정은 READ_DENY 하위라
   147 · 149 — 법인 카드 범례 '빗금 = 빠진 날' 이 REST 만 있는 날 · 기록 시작 전 날도 그림(범례 낱말은 정책) · E147-1 설명의 '빠진 날' 은 기록 전 오늘도 세고 빠진 날 목록은 세지 않음. 148 — 히스토그램 90–100 칸(서버 칸 나누기) · 칸 툴팁은 사유를 말하지 않음.
 - **작업 방식 교훈**: ① 권장안을 그대로 옮겨도 '대기 = 로그인 1회' 같은 전제가 코드에서 성립하는지 실측해야 한다(146 — 기다리는 쪽이 명령 시간까지 기다렸다 → authed()).
   ② 서버 판정을 바꾸면 화면 문구가 단정하는 자리가 새로 생긴다 — 147 의 서버 판정은 맞았지만 같은 화면의 설명 세 줄이 틀렸다(149). ③ 진행 메시지 시각을 어림해 적는 실수가 이 묶음에서도 한 번 더 있었다(`[05:55]` — 대화에서 정정).
+## 남은 결정 권장안 구현 — 76~105회차가 남긴 것(2026-11-20 · 사용자 '결정 필요한 것은 권장 사항으로 진행해줘' · 표준 검증(위험 수정 변이 + 반증 1인) · A10 은 사용자 선택 '다음으로 미룸')
+
+- 진행: 76~105회차 기록의 '결정 필요' 를 전부 모아 현재 main(v3.30.0)과 대조(조사 에이전트 — 표 A 10건 · 이미 처리 · 현행 유지 62줄) → 파일 경계로 3그룹 병렬(G1 A1 · A6 / G2 A3 / G3 A5 · A7 · A9) + 메인 A2 · A4 · A8 → 반증 1인(A1 · A3 · A6 · A9).
+- 권장안 중 메인이 정한 것: A2 CVP · Veeam 대량 등록 '빈 칸 = 비움' 계약 유지 + 모달 안내 한 줄(CVP 는 agent 가 식별 열쇠) · A4 중계 점검 수동 호스트 ULA 차단 유지(함대 SSRF 판정 하나) ·
+  A6 위임 인벤토리 읽기 오류 창은 동작 유지 + 감사 로그(503 이면 위임 법인 화면이 통째로 빈다) · A7 MIG 슬롯 수는 지어내지 않음(근거 표 없음) · A8 물리 GPU IPv4 만 유지 · A10 pyportal 비유한 env 는 다음 pyportal 변경 때.
+- 그룹이 권장안에 더한 것: A3 읽기 오류 동안 엣지가 결과 수(못 읽은 값)를 싣지 않음 · A9 잘린 목록으로 대조에 없는 VM 을 '모름'(미백업 · needGap 밖 — 96 runStatusOf 와 같은 판단).
+
+### 남은 결정 메인 몫(A2 · A4 · A8 · A10) — 기록(2026-11-20)
+
+- A2(78 ③ · 결정 등록부 남김) CVP · Veeam · bmstor CSV 빈 칸 계약 통일 → **현행 유지 + 안내**: CVP · Veeam 은 '머리말에 없는 열 = 유지 · 칸이 있는데 비면 비움' 그대로(CVP 는 agent 가 식별 열쇠 — 주소+담당 엣지)
+  · 공용 모달 `BulkDeviceIo` 에 `blankNote` 한 줄(`web/src/views/tools/bulkBlankText.js` CVP_BLANK_NOTE · VEEAM_BLANK_NOTE — 선택지 칸 · vCenter 칸 예외 명시) · `cvpBulkText IMPORT_NOTE` 에 '칸이 비면 비움 — agent 를 비우면 중앙 직접' ·
+  bmstor 덮어쓰기 모델 그대로 · 회귀 web `bulkBlankText.test.js`(2) · `docs/rules/storage.md` 한 줄.
+- A4(79 남긴 것 · 78 F2) 중계 점검 수동 호스트 IPv6 ULA → **현행 유지**(함대 SSRF 판정 하나 · ULA 현장이 확인되면 전역 옵트인 재검토) — `docs/rules/edge.md` ⑦.
+- A8(95 ⑥ · 36 정책 ㉡) 물리 GPU 호스트명 등록 → **현행 유지**(IPv4 만 — 등록 · 수집 같은 판정) — `docs/rules/gpu.md`.
+- A10(102 남김) pyportal `_env_float` 비유한 → **다음으로 미룸**(사용자 선택 — 닫힌 범위라 위험 낮음 · pyportal 변경이 생길 때 함께).
+- 남긴 것: 설정형 makeLoadError 사용처 약 20곳(issues · usage · vcenter/order · bareos 설정 7 · idrac/scanRanges · focusmon · sshaccess · veeam/run · staleAlert · bmusage/onboard)은 서비스 점검 어느 행에도 없다(label 한 줄이면 실림 — 범위 결정) ·
+  서비스 점검이 요청마다 등록부 · 설정 파일 없음 판정에 설정 폴더를 동기 readdir(파일 1,000개 6.4ms · 5,000개 33ms 실측 — 한 호출에 한 번 읽기 제안) · VM 화면 배지(/veeam/badges)는 잘림 '모름' 개념 없음(예전부터) · MIG 이름 규칙은 공식 문서 미확인(추정).
+
+### 남은 결정 G1(A1 · A6) — 기록 초안(2026-11-20)
+
+- **A1 장비 등록부의 읽기 오류 · 손상이 서비스 점검에 없음 → 권장안 ② 구현**: `util/registryCore.js makeLoadError({ label, file })` 선택 인자(label 이 있을 때만 등록 — 없으면 예전과 같다) ·
+  `registerRegistryStatus`(reader 기반 등록부용 getter) · `listRegistryLoadErrors({ admin })`(표시 전용 — 상태를 세우지 않음 · 파일이 정말 없고(ENOENT — `fileMissing`) 보존본만 있으면 표시만 ·
+  사유는 `summarizeRegistryError` 요약 — 관리자 text / 그 밖 label · 파일은 기본 이름만) · 등록부 15곳 label 한 줄(pdu · storage · sanswitch · cvp · bmstor · focusmon · idrac · veeam ·
+  veeam/em · gpu/physicalRegistry · collector · vcenter · nsx · bareos/registry · central/agentTokens) + `proxy/registry.js` getter(읽기 오류가 선 동안만 load() 재판정 — reader 30초 간격 · 처음 시각 `_readErrorAt`) ·
+  `health/services.js` 새 행 'registry-files' '장비 등록부 파일'(`registryFilesRow` — warn · 이름 · 파일 · 요약 사유 · '표시 전용' · 확정 안내 없음). 'settings-files' 와 섞지 않았다(확정 함수 없음 · `confirmSettingsDefault` 는 unknown-file 404).
+  범위 계정 응답은 기존 라우트 가림(130회차 D-c — `files` 제거 · 문구 교체)이 그대로 덮는다. 설정형 makeLoadError(issues · usage · bareos 설정 등)는 settings-files 에 **없었다**(makeSettingsLoadError 미사용 — 확인) — 이번 행에도 넣지 않았다(장비 등록부 범위).
+  웹은 바꾸지 않았다(기존 카드 렌더러가 label · 상태 · detail 을 그린다 — 파일 목록 UI(SettingsFiles)는 'settings-files' 만). 테스트 `server/test/decide3G1.test.js` A1 ①~④ · 변이 8/8(격리 사본).
+  남은 것: 설정형 makeLoadError 사용처 약 20곳(issues/settings · issues/autoCreate · issues/alertIssues · usage/settings · vcenter/order · bareos 설정 7 · idrac/scanRanges · focusmon/audit/settings · focusmon/alerts ·
+  sshaccess/state · veeam/run/settings · veeam/staleAlert · bmusage/onboard 2)는 여전히 서비스 점검 어느 행에도 없다(같은 방식으로 label 한 줄이면 실린다 — 범위 결정 필요).
+- **A6 위임 인벤토리 · 함대 읽기 오류 창의 TOFU → 권장안 ① 구현(동작 현행 유지 + 기록)**: `central/inventory.js setInventory(…, { verified, ip })` — 창(readBlocked) 동안 소유가 빈 vCenter 를 push 가 잡으면
+  감사 로그 `central-inventory.owner-claim-unread`(주체 = 개별 토큰으로 인증된 이름 `edge:<이름>` · 공유 토큰은 `edge:(공유 토큰)` + 이름 주장은 detail · 창마다 건별 상한 64) · 콘솔 창마다 첫 건 한 줄 ·
+  다시 읽혀 합칠 때 `central-inventory.unread-window-merge`(system — 잡힌 소유 · 파일과 같음 · 파일에 없어 그대로 · 되돌린 소유 n(vc: from → to, 창 동안 관리자 지정 표시) · 되살린 vCenter) + 콘솔 한 줄 ·
+  `central/fleet.js` 합칠 때 `central-fleet.unread-window-merge`(창 동안 push 한 엣지 · 그중 미검증 · 파일 값을 대신한 엣지 · 되살린 엣지) + 콘솔 한 줄 · `routes/central.js /inventory` 가 `verified: centralAuth.mode === 'agent'` · ip 를 넘긴다.
+  테스트 decide3G1 A6 ①(실제 central 라우터 · 개별 토큰 · 공유 토큰 · 자식 프로세스 EACCES) · ② 창 밖 무기록 · 보존(held) 갈래 · 상한 · 변이 10/10(격리 사본).
+  관찰(범위 밖 · 코드 읽기 — 재현 안 함): 기동 때 읽기 오류였다가 다시 읽을 때 **손상**이면(`preserve:false`) 보존 없이 readBlocked 를 풀어 다음 저장이 그 파일을 덮는다(inventory · fleet — 캐시라 영향은 작음 · 이번에는 기록 문구만 '대조하지 못했습니다').
+
+### 결정(76~105 남긴 것 · 2026-11-20) G2 — A3
+
+- A3(77 F3 · 79 남긴 것 — 엣지 적용 상태 파일 읽기 오류 동안 중앙 화면이 '대기' 로만 보임) → **권장안 ② 구현**:
+  엣지 `agent/bmOnboardPull.js pullBmOnboardNow` 가 `readAppliedState().readError === true` 일 때만 쿼리에 `unread=1` 을 싣고 결과 수(ok · rej · rm — 못 읽은 값)는 뺀다(손상 · 파일 없음 · 정상은 칸 없음 — 예전 쿼리 그대로) ·
+  중앙 `routes/central/storageRoutes.js GET /bm-onboard` 은 개별 토큰 검증 이름에만 `stateUnread: req.query.unread === '1'`(정확히 '1' — 배열 · 다른 글자 · 없음 = 거짓) →
+  `bmusage/onboard/edgeDeploy.js recordOnboardPull` 이 엄격한 true 만 기록(인출마다 통째로 바꿔 다음 인출이 표지를 지움 · 시각은 중앙 수신 시각) ·
+  `routes/api/bmOnboard.js GET /tools/bm-usage/onboard/edge-rows` 가 엣지마다 `stateUnread`(불리언) · 웹 `bmOnboardText.js edgeSyncText` 가 '대기' 대신
+  '엣지가 적용 상태 파일을 읽지 못함(권한 · 디스크 확인) — 읽힐 때까지 배포를 적용하지 않습니다 · 마지막 인출 N분 전'(tone bad · 인출 기록 없으면 예전처럼 '모름').
+  동작 변화: 읽기 오류 엣지의 결과 수가 0 → '—'(못 읽은 값) · 화면 문구. 판정(서명 · 제거 대기 정리 · 시한)은 그대로(79 '시한은 둘 수 없다' 유지).
+  하위 호환: 옛 엣지(칸 없음) = 예전 '대기' · 중앙 라우터 스택은 모르는 쿼리 칸을 거절하지 않음(시험으로 확인 — 옛 중앙도 같은 스택이라 엣지 요청이 거부되지 않음).
+  회귀 `server/test/decide3G2.test.js`(4 — 엣지 자식 프로세스 실제 `pullBmOnboardNow` ↔ 실제 centralRouter 왕복 · 실제 진입 함수 쿼리 · 정제 · 기록) ·
+  `web/src/views/tools/bmOnboardDecide3.test.js`(3). 변이 12/12(격리 사본). 문서 `docs/rules/edge.md` 7b 인출 문장 한 줄 정정.
+  남은 것: 엣지가 인출을 멈추면 마지막 기록이 그대로 남는다(반영됨 · 대기와 같은 성질 — 화면은 표지 문구에 마지막 인출 시각을 붙여 옛 기록임을 알 수 있게 함) ·
+  손상(lost) 판의 결과 수 0 은 예전 그대로(이번 범위 밖 — 읽기 오류만 고침).
+
+### decide3 G3 (A5 · A7 · A9) 기록 초안 — 2026-11-20
+
+- A5(80 결정 필요) `mem.minFree` 권고 문구 → `server/src/bmusage/tuning/catalog.js` rec.text '물리 메모리 1~2% 안 · 수백 MB 이하' → '물리 메모리 2% 이하'(판정 maxPctMem 2% 그대로) · evidence 에 '‘수백 MB’ 는 수치가 모호해 판정하지 않는 참고' 한 줄 · 설계 근거표 `docs/design/linux-bm-perf/TUNING-SOURCES.md` 같은 칸 정정 · 시험 `decide3G3` A5 2건(문구 · maxPctMem 스윕 — 판정 비율을 말하고 MB/GB 절대 상한 금지). 동작 변화: 튜닝 탭 권고 칸 글자만(판정 동일). 남은 것: 없음.
+- A7(95 ⑥ · 35 F6) MIG 기반 vGPU 프로파일 슬롯 → 판정 `gpu/vgpuProfile.js vgpuProfileIsMig`(…-<슬라이스>-<GB><시리즈>, 128자 · vgpuProfileGB 와 같은 끝 규칙) + 웹 미러 `gpuAllocText.profileIsMig`(profileFamily.mig 도 이것 — 서버 시험이 같은 입력 대조) · `gpu/allocTree.js buildHostAlloc` MIG 꼴이면 slots `{ total:null, free:null, used, profile, mig:true }`(사용 장치 수 · 할당 · 예비 GB 는 그대로) · 문구 `MIG_SLOTS_TEXT '슬롯 계산 안 함(MIG)'` · `MIG_NOTE_TEXT`(서버 slotsText(CSV) · gpuProfText · gpuNoteText(엑셀) = 웹 gpuTexts) · 웹 배치 추천 `placementCandidates` 같은 프로파일 MIG GPU 를 `skipped.migSlots` 로 세고 `same` = null(화면 '—' + '슬롯 계산 안 함(MIG)') · `GpuAllocPlace.jsx` 건너뜀 문구 · `docs/rules/gpu.md` 슬롯 줄 정정. 모델별 MIG 슬라이스 수는 넣지 않았다(근거 표 없음). 동작 변화: MIG 프로파일 GPU 의 슬롯 칸 · 비고 · CSV 슬롯 열 · 배치 추천 '같은 프로파일 남은 슬롯'. 남은 것: 빈 GPU 배치 추천의 MIG 프로파일 장 수(용량 ÷ GB)는 기존 '추정(MIG 구성에 따라 다름)' 표기 그대로 · 'grid_a100-1-5cme' 같은 ME 꼴은 GB 해석 자체가 안 돼(기존) '프로파일 해석 불가'.
+- A9(94 ① → 96 남긴 것 ④) Veeam 목록 잘림 → 보호 VM 수 → 판정 `veeam/backupCounts.js resultsTruncated`(판정 코어 하나 — veeamMatchFor 도 이것으로) · `veeamCount({ truncated })` → `partial:true` + `truncated:true`(n 은 하한 그대로) · 호출부 `routes/api/veeam.js` /veeam/backup-counts · vcBackup(서머리 · 세부) · `veeam/backupStatus.js backupRow` 잘림이면 `veeamAbsentUnknown`(대조에 없는 VM = 모름 — 미백업 · needGap · 나눔에 넣지 않음) + `veeamTruncated`(+ 서버 미수집과 겹치면 `veeamAbsentServers`) · 웹 `veeamBadge.js backupCell` 툴팁 `VEEAM_TRUNCATED_LINE`('* 부분(목록 잘림) — …') · `backupViewText.veeamStateOf(s, truncated)` → '부분(목록 잘림)' · `absentUnknownText(r)`(세부 화면 안내 — 잘림 · 서버 사유 구분) · BackupDetailTool · BackupSummaryTool · attentionList 호출부. 추이: 이 수를 적재하는 이력 없음(grep — backupTotals · veeamCount 호출부는 라우트뿐). 동작 변화: 잘린 결과가 있을 때만(정상 규모 화면 변화 없음). 남은 것: VM 화면 배지(`/veeam/badges`)는 잘림 표지를 싣지 않는다(대조에 없는 VM 이 그 화면에서는 여전히 '없음') · EM 결과는 잘림 표지가 배열이 아니라 대상 밖 · 서머리 CSV 의 veeamState 열은 'partial' 그대로(잘림 구분 없음).
+- 바꾼 기존 시험: server `rebut96`(소스 계약 정규식 — veeamMatchFor 의 인라인 판정을 resultsTruncated 로 옮겨 위치 대조를 바꿈 · 의도 동일) · web `gpuAllocText.test.js`(placementCandidates skipped 객체에 migSlots:0 키 추가).
+- 시험: 새 `server/test/decide3G3.test.js` 9건 · 관련 서버 63파일 493건(1 실패 = rebut96 소스 계약 → 고친 뒤 통과) · 웹 vitest 19파일 264건 통과 · eslint 바꾼 웹 7파일 오류 0(BackupSummaryTool:72 경고 1 — 기존). 변이 10/10(격리 사본).
+
+### 결정(76~105 남긴 것 · 2026-11-20) 반증 1인 — G1(A1 · A6) · G2(A3) · G3(A9) 기록 초안
+
+- **확정 결함 R1(중 · 데이터 손실 — G1 관찰 확인)**: `central/inventory.js inventoryWritable` 이 기동 때 읽기 오류였다가 다시 읽을 때 **손상**이면 `preserve:false` 로 창을 풀어
+  다음 저장이 손상본(관리자 소유 지정 포함)을 **보존본 없이** 덮었다(재현 스크립트: `.corrupt.*` 0개 · 원본 소실 · 합친 기록은 '지금 메모리 소유를 그대로 둡니다' 뿐).
+  기동 때 손상(보존 후 빈 캐시)과 비대칭. → 다시 읽기를 `preserve:true` 로 · 보존 실패(`backup` 없음)는 읽기 오류처럼 계속 막음(저장 거절 · 간격마다 다시) ·
+  합친 결과 문구에 보존본 기본 이름. 함대(`central/fleet.js`)는 고치지 않음 — 기동 때 손상도 보존하지 않는 설계(순수 캐시 · TTL 30분)라 두 경로가 이미 같다(소스 시험이 둘을 고정).
+- A1(registry-files): 가림 — 응답 경로는 `/tools/service-check` 하나(범위 계정 files 제거 · 문구 교체 — 130 D-c) · 사유는 요약 · 파일은 기본 이름 — 결함 없음.
+  성능(관찰 · 낮음): `listRegistryLoadErrors` 는 요청마다 등록부 16개에 stat 1회 + 파일 없는 등록부마다 설정 폴더 readdir 1회(동기). 실측 호출당 0.5ms(폴더 100개) · 6.4ms(1,000개) · 33ms(5,000개).
+  기존 'settings-files' 행도 같은 꼴(existsSync + 보존본 readdir — 등록 수가 더 많다). 화면 15초 폴링 · 뷰어 수만큼. 제안: 두 행이 한 호출 안에서 폴더 목록을 한 번만 읽게(후속 — 메인 판단).
+- A6: 감사 로그 상한(창마다 64) · 창은 프로세스당 한 번(기동 때만 막힘) · 공유 토큰 주체 'edge:(공유 토큰)' · logAudit 는 안에서 삼킴 + try — push 를 깨지 않음 — 결함 없음.
+- A3: 옛 중앙 ↔ 새 엣지(결과 수 빠짐 → null '—') · 새 중앙 ↔ 옛 엣지(칸 없음 = 거짓) · 공유 토큰은 기록 자체 없음 · 인출마다 통째로 바꿔 표지가 남지 않음(인출이 멈춘 엣지는 마지막 기록 + 시각) · 읽기 오류 때 서명 '' 는 sigOf(32자) 와 맞지 않아 제거 대기를 풀지 않음 — 결함 없음.
+- A9: 모름을 받는 함수(vmBackupView · markCounts · priorityCandidates)의 라우트 호출부 6곳 전부 행 표지에서 absentKnown — 표시 집계 · 우선순위 · VM 칸 · CSV/엑셀 문구 · 합계 · 서머리 집계(addSiteVm 은 vmBackupView 행) 모두 모름 — 결함 없음.
+  남은 것(G3 보고와 같음): VM 화면 배지(`/veeam/badges`)는 잘림 · 첫 수집 전 서버 모두 '없음' 개념이 없다(기존부터 — A9 범위 밖).
+- 새 시험 `server/test/decide3Rebut.test.js`(3 — R1 자식 프로세스 2단계(EBUSY 보존 실패 → 막음 · 회복 → 보존 후 저장) · R1 소스 · R2 A9 소비처 사슬 + 호출부 대조).
+  변이 10/10(격리 사본 — 내 수정 3 + G1 · G2 · G3 가드 표본 7). 관련 기존 시험(인벤토리 참조 40파일 446건 · decide3G1/G2/G3) 통과.
 
 ## 88~105회차 — 회차 기록 원문(97~105회차 — 회차 초안을 통째로 붙인 것 · 2026-11-17 정리: 제목 단계만 내리고 내용은 그대로)
 

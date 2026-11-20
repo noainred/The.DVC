@@ -189,13 +189,14 @@ authRouter.post('/login', async (req, res) => {
  *    **실제로 통과하는가**(v2.744 AUTHZ-02: 소유자 + 전체 범위). 판정을 복제하지 않으려고 그 미들웨어를 그대로 불러 결과만 본다 —
  *    화면은 이 값으로 소유자 등급 화면·버튼을 잠근다(소유자이지만 범위 계정이면 isSettingsOwner true · settingsOwnerTier false).
  *    6회차 A1: 쓰기 판정으로 묻는다 — 조회는 무제한이고 쓰기 범위만 일부인 소유자도 false(쓰기 라우트가 403 이라 버튼을 잠그는 것이 맞다).
+ *    결정 반영(2026-11-19 ①): 게이트가 메서드와 무관하게 조회 ∧ 쓰기 전체를 보므로 이 값은 소유자 등급 GET 화면에도 같은 답이다.
  */
 function ownerFields(user) {
   const owners = (() => { try { return loadSessionSecurity().settingsOwners || []; } catch { return []; } })();
   const isSettingsOwner = !config.auth.enabled || owners.includes(user?.username); // username 만(위 주석 참고)
   let settingsOwnerTier = false;
   const sink = { status() { return sink; }, json() { return sink; } };
-  // 6회차 A1: 소유자 등급 버튼은 **쓰기**라 쓰기 메서드로 묻는다 — 쓰기 범위가 일부 법인인 소유자는 false(그 버튼의 저장이 403 이다 · 조회 GET 은 그대로 통과).
+  // 6회차 A1: 쓰기 메서드로 묻는다 — 쓰기 범위가 일부 법인인 소유자는 false(결정 반영 2026-11-19 ①: 소유자 등급 GET 도 403 이라 메서드와 무관하게 같은 답).
   try { requireSettingsOwner({ user, method: 'POST' }, sink, () => { settingsOwnerTier = true; }); } catch { settingsOwnerTier = false; }
   return { isSettingsOwner, settingsOwnerTier };
 }

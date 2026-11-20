@@ -1116,7 +1116,8 @@ centralRouter.post('/inventory', requireCentral(), (req, res) => {
   // 전체 점검 14회차(C-3): generatedAt 은 시각 표시로만 쓴다 — 수(ms) 또는 짧은 글자만(객체 · 배열 · 수 MB 글자가 캐시 · 디스크 · 응답으로 가던 것)
   const genIn = b.generatedAt;
   const genAt = typeof genIn === 'number' && Number.isFinite(genIn) ? genIn : (typeof genIn === 'string' ? (capTrim(genIn, 40) || null) : null); // 17회차 반증(R-1): slice 는 원문 전체를 붙잡는다 — 평탄화(capTrim)
-  const saved = setInventory(vcId, slice, agent, genAt) || {};
+  // 결정(76~105 남긴 것 · 2026-11-20) A6: 인벤토리 파일 읽기 오류 창에서 이 push 가 빈 소유를 잡으면 감사 로그 · 콘솔에 남긴다 — 주체 이름은 개별 토큰으로 인증된 것만(verified).
+  const saved = setInventory(vcId, slice, agent, genAt, { verified: req.centralAuth.mode === 'agent', ip: req.socket?.remoteAddress || '' }) || {};
   // v2.898(반증 하-5): 사이트 위임으로 등록된 vCenter 만 받는다(등록부에 없는 id 를 바꿔 가며 메모리를 늘리지 못하게) ·
   //   받은 것으로 통째로 바꾼다 — 엣지가 접속처를 바꿔 캐시를 비웠으면 옛 vCenter 의 권한 목록을 중앙이 계속 보이지 않게(없으면 지운다).
   //   v2.901(점검 E3): 키가 없으면(옛 엣지 · 중앙 버전을 확인하지 못한 엣지) 직전 값을 그대로 둔다 — {} 일 때만 지운다.

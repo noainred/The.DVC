@@ -87,6 +87,7 @@ import { registerRelayCheck } from './api/relaycheck.js';     // HAProxy 경로 
 import { registerRelayTopo } from './api/relaytopo.js';       // 중계 토폴로지·HAProxy 구성(v2.431)
 import { registerBmStorage } from './api/bmstor.js'; // 베어메탈 스토리지(SSH df 마운트 합산, v2.340)
 import { registerServerInfo } from './api/serverInfo.js'; // v3.25 서버 정보(서버 접속 2단계 — 기본 구성 + 디스크 · 누를 때만)
+import { registerServerCmd } from './api/serverCmd.js'; // v3.30 서버 명령 실행(프리셋 · 누를 때만 · 출력은 메모리 30분)
 import { registerCompareMatrix } from './api/compareMatrix.js';   // v2.499: 비교 매트릭스(가로 vCenter × 세로 클러스터/스토리지)
 import { registerPerfClient } from './api/perfClient.js'; // v2.498: 브라우저 장기 로딩(hang) 보고 수신
 import { registerVmTrack } from './api/vmtrack.js'; // VM 수량 추이(00/12시 스냅샷 + 증감 상세, v2.345)
@@ -228,6 +229,7 @@ registerRelayCheck(api);
 registerRelayTopo(api);
 registerBmStorage(api);
 registerServerInfo(api);
+registerServerCmd(api);
 registerVmTrack(api);
 registerVmHygiene(api);
 registerHostHygiene(api);

@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  shortFp, dateTime, ageDays, featuresText, folderTree, keysInFolder, inboxInFolder, sortedCheck, suggestKeyName,
+  shortFp, dateTime, ageDays, featuresText, legacyPickText, folderTree, keysInFolder, inboxInFolder, sortedCheck, suggestKeyName,
   LEVEL_TEXT, LEVEL_TONE, KEY_MODE_TEXT, ISSUE_TEXT, serverStatus, auditTime,
 } from './sshAccessText.js';
 
@@ -30,6 +30,11 @@ describe('SSH 공용 접속 — 표시 도우미', () => {
   });
   it('허용 기능 — null 은 모든 기능(예전 방식) · [] 는 없음 · id 는 목록 이름으로', () => {
     expect(featuresText(null)).toBe('모든 기능(예전 방식)');
+    // v3.30: 서버가 ‘직접 켜야’ 로 표시한 기능은 예전 방식에서 빠진다고 밝힌다(서버 명령 실행)
+    const cat = [{ id: 'bm-usage', label: '베어메탈 사용률' }, { id: 'server-cmd', label: '서버 명령 실행', explicit: true }];
+    expect(featuresText(null, cat)).toBe('모든 기능(예전 방식 — 서버 명령 실행 제외)');
+    expect(legacyPickText(cat)).toBe('제한 없음(예전 방식 — 서버 명령 실행 제외)');
+    expect(legacyPickText([])).toBe('제한 없음(예전 방식 — 모든 기능)');
     expect(featuresText([])).toBe('없음');
     expect(featuresText(['bm-usage', 'x'], [{ id: 'bm-usage', label: '베어메탈 사용률' }])).toBe('베어메탈 사용률 · x');
   });

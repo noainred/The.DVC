@@ -93,9 +93,22 @@ export function ageDays(ms, now = Date.now()) {
   return Math.max(0, Math.floor((now - n) / 86_400_000));
 }
 
-/** 허용 기능 → 글자. null = 모든 기능(예전 키), [] = 없음. */
+/**
+ * 예전 방식(기능 목록 없음 = null)의 글자 — 서버가 ‘직접 켜야’ 로 표시한 기능(catalog 의 explicit — v3.30 서버 명령 실행)은 빠진다고 밝힌다.
+ */
+export function legacyFeaturesText(catalog = []) {
+  const ex = explicitLabels(catalog);
+  return ex.length ? `모든 기능(예전 방식 — ${ex.join(' · ')} 제외)` : '모든 기능(예전 방식)';
+}
+const explicitLabels = (catalog) => (catalog || []).filter((f) => f && f.explicit).map((f) => f.label || f.id);
+/** 기능 고르기의 ‘제한 없음’ 칸 글자. */
+export function legacyPickText(catalog = []) {
+  const ex = explicitLabels(catalog);
+  return ex.length ? `제한 없음(예전 방식 — ${ex.join(' · ')} 제외)` : '제한 없음(예전 방식 — 모든 기능)';
+}
+/** 허용 기능 → 글자. null = 모든 기능(예전 키 — 직접 켜야 하는 기능은 빼고), [] = 없음. */
 export function featuresText(features, catalog = []) {
-  if (features == null) return '모든 기능(예전 방식)';
+  if (features == null) return legacyFeaturesText(catalog);
   if (!features.length) return '없음';
   const name = new Map((catalog || []).map((f) => [f.id, f.label]));
   return features.map((id) => name.get(id) || id).join(' · ');

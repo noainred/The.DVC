@@ -27,7 +27,7 @@ let cache = null;
  *   이제 판정은 공용 등록부 읽기(util/registryCore.js makeLoadError.read — bmstor · idrac 등록부와 같다): 손상 = 보존 + 표지(관리자 저장이 새 등록부를 만든다 — v2.612),
  *   읽기 오류 = 원본 유지 · 캐시하지 않음 · 쓰기 거절(409), 객체 원소만.
  */
-const loadErr = makeLoadError();
+const loadErr = makeLoadError({ label: '물리 GPU 서버 등록부', file: FILE });   // 결정(76~105 남긴 것 · 2026-11-20) A1: 서비스 점검 '장비 등록부 파일' 행(표시 전용)
 const WHAT = '물리 GPU 서버 등록부(gpu-physical.json)';
 const parsePhysical = (text) => {
   const j = JSON.parse(text);

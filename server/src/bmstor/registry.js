@@ -34,7 +34,7 @@ const DEFAULT_INTERVAL_MIN = 10;
 let cache = null;
 // v2.613 PERSIST2613-04: 로드 오류 상태·원소 필터는 util/registryCore.js 하나(다른 등록부 4벌과 같은 판정). 예전에는 원소 null 하나에
 //   아래 groups 변형이 던져 **파일 전체를 손상으로 보존하고 목록을 비웠다**(정상 서버까지 소실 — 스크래치 CONFIG_DIR 재현).
-const loadErr = makeLoadError();
+const loadErr = makeLoadError({ label: 'OS 계정 등록부', file: FILE });   // 결정(76~105 남긴 것 · 2026-11-20) A1: 서비스 점검 '장비 등록부 파일' 행(표시 전용)
 export function registryLoadError() { load(); return loadErr.get(); }
 
 // 결정(78 남긴 것 ①): parse 실패(형식 · 복호 · 마이그레이션 포함 — 예전 try 블록과 같은 범위)만 손상이다.

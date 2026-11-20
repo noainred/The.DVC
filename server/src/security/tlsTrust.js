@@ -352,7 +352,7 @@ const CTX_OR_VERIFY_KEYS = new Set([...CTX_KEYS, 'ca', 'rejectUnauthorized', 'ti
  * @param {string} [o.strictHint] 엄격 모드 거부 문구의 조치(env 가 아닌 화면 설정으로 엄격을 켜는 수집기 — CVP)
  */
 export function deviceTlsConnect({ subsystem, envKey = '', envRaw, mode, tls: tlsOpts = {}, label, strictHint, resume = true } = {}) {
-  // v3.26: resume:false — TLS 세션을 이어 쓰지 않는다(매번 전체 핸드셰이크). WinRM NTLM 채널 바인딩은 연결마다 서버 인증서가 필요한데 이어 쓴 세션은 인증서를 주지 않는다(실측).
+  // v3.25(3단계): resume:false — TLS 세션을 이어 쓰지 않는다(매번 전체 핸드셰이크). WinRM NTLM 채널 바인딩은 연결마다 서버 인증서가 필요한데 이어 쓴 세션은 인증서를 주지 않는다(실측).
   const info = tlsModeInfo(envRaw);
   const m = TLS_VERIFY_MODES.includes(mode) ? mode : info.mode;
   const sub = registerSubsystem(subsystem, { mode: m, envKey, envRaw: envKey ? info.raw : null, unknownEnv: envKey ? info.unknown : false, label, strictHint });
