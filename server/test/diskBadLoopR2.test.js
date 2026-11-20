@@ -123,3 +123,14 @@ test('R2-2 · R2-6 · R2-7 · I-3 · I-5 — 소스 계약(메일 참조 · 503 
   assert.match(code('diskbad/db.js'), /if \(\(out\.length & 15\) === 0\) await yielder\(\);/);
   assert.match(code('diskbad/probe.js'), /if \(lclogOrder !== 'desc'\) return \{ n: f\.n, order: lclogOrder/);
 });
+
+test('2회차 화면 확인 — 근거의 마지막 줄은 판정 이유(디스크 값 줄이 아님)', async () => {
+  const VD = await import('../src/diskbad/verdict.js');
+  const ID0 = 'Disk.Bay.0:Enclosure.Internal.0-1:RAID.Integrated.1-1';
+  const j = VD.judgeServer({ records: [{ created: NOW - 30 * DAY, code: 'PDR46', cls: 'unrecoverable', slotKey: 'bp1:d0' }],
+    drives: [{ id: ID0, name: 'Physical Disk 0:1:0', serial: 'S0', inVolume: true }], serialRows: [], coverage: { lastOkAt: NOW, continuousSince: NOW - 90 * DAY },
+    vals: { status: 'ok', tryAt: NOW, drives: [{ id: ID0, serial: 'S0', realloc: 3, pending: 0, uncorrectable: 0, readAt: NOW }] } });
+  const ev = j.slots[0].evidence;
+  assert.ok(ev.some((e) => /누적 값/.test(e.text)));
+  assert.doesNotMatch(ev[ev.length - 1].text, /누적 값/);
+});

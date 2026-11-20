@@ -149,7 +149,8 @@ function InUseTable({ list, refs, openServer, limit = 0 }) {
           <td style={{ whiteSpace: 'normal', minWidth: 140 }}>{s.country ? `${s.country} · ` : ''}{s.corpName}</td>
           <td data-sort={s.serverName}><button className="tab" style={{ flex: 'none', padding: '2px 8px', fontSize: 12 }} onClick={() => openServer(s)}>{s.serverName}</button><div className="muted" style={{ fontSize: 11.5, marginTop: 2 }}>{s.label}</div></td>
           <td>{s.drive ? <>{s.drive.model || '—'}<div className="muted" style={{ fontSize: 11.5, fontFamily: 'var(--mono)' }}>S/N {s.drive.serial || '—'}</div></> : <span className="muted">—</span>}</td>
-          <td data-sort={s.last}>{Object.entries(s.byCode).map(([c, n]) => <span key={c} className={`badge ${clsTone(clsOfCode(c, refs))}`} style={{ marginRight: 4 }} title={noteOf(c, refs)}>{c} {n}</span>)}<div className="muted" style={{ fontSize: 11.5, fontFamily: 'var(--mono)', marginTop: 2 }}>최근 {fmtDate(s.last)}</div></td>
+          {/* 기록 ID 배지가 여럿이면 줄을 바꾼다 — 한 줄로 늘어서 표가 1440px 카드보다 넓어져 '근거' 열이 상자 밖으로 밀렸다(2회차 화면 확인). */}
+          <td data-sort={s.last} style={{ whiteSpace: 'normal', minWidth: 170, maxWidth: 260 }}>{Object.entries(s.byCode).map(([c, n]) => <span key={c} className={`badge ${clsTone(clsOfCode(c, refs))}`} style={{ marginRight: 4, marginBottom: 2, display: 'inline-flex' }} title={noteOf(c, refs)}>{c} {n}</span>)}<div className="muted" style={{ fontSize: 11.5, fontFamily: 'var(--mono)', marginTop: 2 }}>최근 {fmtDate(s.last)}</div></td>
           <td data-sort={s.verdict}><span className={`badge ${verdictTone(s.verdict)}`}>{s.verdictLabel}</span> <span className={`badge ${confidenceTone(s.confidence)}`}>{s.confidenceLabel}</span></td>
           <td style={{ fontSize: 11.5, minWidth: 240, maxWidth: 360, whiteSpace: 'normal' }} className="muted">{s.evidence[s.evidence.length - 1]?.text || '—'}</td>
         </tr>

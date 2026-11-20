@@ -166,7 +166,8 @@ export function judgeServer({ records = [], drives = null, serialRows = [], cove
     const drive = driveKnown ? matchDrive(slotKey, drives) : null;
     const v = judgeSlot({ slotKey, records: recs, drive, serials: serialsBySlot.get(slotKey) || [], continuousSince: coverage?.continuousSince ?? null, driveKnown });
     const dv = drive ? valsFor(drive, valsBy, valsTry) : null;
-    if (dv && hasCounterVal(dv)) v.evidence.push({ text: `지금 디스크가 적어 둔 누적 값 — ${valsText(dv)}(언제 생겼는지는 말해 주지 않습니다${dv.stale ? ` · ${fmt(dv.readAt)} 에 읽은 지난 값` : ''})`, src: VALS_SRC_LABEL[dv.src] || '디스크 값' });
+    // 디스크 값 근거는 **판정의 마지막 근거 앞**에 넣는다 — 전 법인 표의 '근거' 칸이 근거의 마지막 줄을 보여 주는데, 뒤에 붙이면 판정 이유 대신 이 줄이 보였다(2회차 화면 확인).
+    if (dv && hasCounterVal(dv)) v.evidence.splice(Math.max(1, v.evidence.length - 1), 0, { text: `지금 디스크가 적어 둔 누적 값 — ${valsText(dv)}(언제 생겼는지는 말해 주지 않습니다${dv.stale ? ` · ${fmt(dv.readAt)} 에 읽은 지난 값` : ''})`, src: VALS_SRC_LABEL[dv.src] || '디스크 값' });
     const byCode = {};
     for (const r of counted) byCode[r.code] = (byCode[r.code] || 0) + 1;
     const unrecoverable = counted.filter((r) => r.cls === CLS.unrecoverable).length;
