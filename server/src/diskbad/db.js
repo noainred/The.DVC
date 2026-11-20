@@ -51,6 +51,7 @@ function migrate(db) {
       received_at INTEGER, baseline INTEGER,
       PRIMARY KEY(agent, server_id, entry_key));
     CREATE INDEX IF NOT EXISTS ix_dbr_record_created ON dbr_record(created);
+    CREATE INDEX IF NOT EXISTS ix_dbr_server_sid ON dbr_server(server_id);
     CREATE TABLE IF NOT EXISTS dbr_serial(
       agent TEXT NOT NULL, server_id TEXT NOT NULL, slot_key TEXT NOT NULL, serial TEXT NOT NULL,
       model TEXT, first_seen INTEGER, last_seen INTEGER,
@@ -80,6 +81,18 @@ function prepare(db) {
     moveServer: db.prepare('UPDATE dbr_server SET agent=? WHERE agent=? AND server_id=?'),
     moveRecords: db.prepare('UPDATE OR IGNORE dbr_record SET agent=? WHERE agent=? AND server_id=?'),
     moveSerials: db.prepare('UPDATE OR IGNORE dbr_serial SET agent=? WHERE agent=? AND server_id=?'),
+    // 4회차 반증 F4 — 이미 이 노드에 정상 행이 있을 때 옛 노드의 이력을 **합친다**(옮기기가 아니라). 겹치는 기록은 같은 항목이다(키 = 같은 iDRAC 의 항목 Id · 시각).
+    serialsOf: db.prepare('SELECT slot_key, serial, model, first_seen, last_seen FROM dbr_serial WHERE agent=? AND server_id=?'),
+    serialMerge: db.prepare(`INSERT INTO dbr_serial(agent, server_id, slot_key, serial, model, first_seen, last_seen) VALUES(?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(agent, server_id, slot_key, serial) DO UPDATE SET model=COALESCE(dbr_serial.model, excluded.model),
+        first_seen=MIN(COALESCE(dbr_serial.first_seen, excluded.first_seen), COALESCE(excluded.first_seen, dbr_serial.first_seen)),
+        last_seen=MAX(COALESCE(dbr_serial.last_seen, excluded.last_seen), COALESCE(excluded.last_seen, dbr_serial.last_seen))`),
+    // 처음 본 때 · 본 가장 오래된 때만 앞으로 당긴다(끊김 없이 본 구간은 이 노드 것 그대로 — 두 노드 사이 틈을 '봤다' 고 하지 않는다).
+    serverSetPast: db.prepare('UPDATE dbr_server SET vals_json=?, sel_json=? WHERE agent=? AND server_id=?'),
+    serverMergeSpan: db.prepare(`UPDATE dbr_server SET first_ok_at=MIN(COALESCE(first_ok_at, ?1), COALESCE(?1, first_ok_at)),
+        covered_from=MIN(COALESCE(covered_from, ?2), COALESCE(?2, covered_from)) WHERE agent=?3 AND server_id=?4`),
+    deleteRecordsOf: db.prepare('DELETE FROM dbr_record WHERE agent=? AND server_id=?'),
+    deleteSerialsOf: db.prepare('DELETE FROM dbr_serial WHERE agent=? AND server_id=?'),
     serverUpsert: db.prepare(`INSERT INTO dbr_server(agent, server_id, name, host, service_tag, first_ok_at, last_scan_at, last_ok_at, last_status, last_reason,
         log_order, log_total, log_oldest, covered_from, continuous_since, complete, read_last, synthesized, inv_at, drives_json, updated_at, newest_created, read_stop, read_diag, probe_json, probe_at,
         vals_json, sel_json)
@@ -186,13 +199,35 @@ export async function ingestServers(agent, servers, { now = Date.now(), yielder 
       //   반증 3회차 D1: 옮기는 것은 ① 이 점검이 **정상으로 읽었고**(실패 보고 한 줄로 남의 이력을 가져가지 않게) ② 호출자가 '원래 노드는 이제 그 서버를
       //   맡지 않는다' 고 판정할 때만이다(canMoveFrom — 모르면 옮기지 않는다). 두 노드가 함께 가진 동안 점검마다 이력이 오가던 것도 이것으로 막는다.
       //   이 노드의 행이 있어도 정상으로 읽은 적이 없으면(첫 보고가 실패) 빈 행이다 — 지우고 옮긴다. 옮겨 올 쪽은 정상으로 읽은 적이 있는 행만.
+      //   4회차 반증 F4: 이 노드에 이미 정상 행이 있어도(중앙 등록부에서 지우기 전에 엣지가 한 번 읽음) 옮길 수 있게 되면 **합친다** — 건너뛰면
+      //   옛 노드의 기록 · 시리얼이 영영 화면 밖에 남았다(활성 로그에서 밀려난 기록이라 다시 읽을 수도 없다). canMoveFrom 이 '옛 노드는 이제
+      //   그 서버를 맡지 않는다' 를 보장하므로 D1 이 막은 왕복은 생기지 않는다(합친 뒤 옛 행을 지운다).
       const mine = h.st.serverGet.get(a, s.id) || null;
-      if (s.ok && s.serviceTag && (!mine || mine.first_ok_at == null)) {
-        const others = h.st.serverOthers.all(s.id, String(s.serviceTag), a);
-        if (others.length === 1 && canMoveFrom(others[0].agent, s.id) === true) {
-          const from = others[0].agent;
-          if (mine) h.st.deleteServer.run(a, s.id);
-          h.st.moveServer.run(a, from, s.id); h.st.moveRecords.run(a, from, s.id); h.st.moveSerials.run(a, from, s.id);
+      if (s.ok && s.serviceTag) {
+        // 5회차 개선 I-a: 옮길 수 있는 후보만 골라 그것이 정확히 하나일 때(다른 엣지 행이 함께 있어도 '' 행 하나면 합친다).
+        const cands = h.st.serverOthers.all(s.id, String(s.serviceTag), a).filter((o) => canMoveFrom(o.agent, s.id) === true);
+        if (cands.length === 1) {
+          const from = cands[0].agent;
+          if (!mine || mine.first_ok_at == null) {
+            if (mine) h.st.deleteServer.run(a, s.id);
+            h.st.moveServer.run(a, from, s.id); h.st.moveRecords.run(a, from, s.id); h.st.moveSerials.run(a, from, s.id);
+          } else {
+            const old = h.st.serverGet.get(from, s.id);
+            h.st.moveRecords.run(a, from, s.id);
+            for (const x of h.st.serialsOf.all(from, s.id)) h.st.serialMerge.run(a, s.id, x.slot_key, x.serial, x.model, x.first_seen, x.last_seen);
+            h.st.serverMergeSpan.run(finite(old?.first_ok_at), finite(old?.covered_from), a, s.id);
+            // 5회차 반증 R5-1: 옛 행의 SEL 보관 항목(장비가 SEL 을 지워도 포탈이 남긴 디스크 빠짐 · 장착)과 디스크 값 이력(처음 본 때 · 늘어난 때 · 늘기 전 값)도
+            //   합친다 — 옛 행을 지우면서 함께 사라졌다(되돌릴 수 없는 손실). 합친 것이 상한을 넘으면 이 노드 값을 둔다(fitJson — 글자로 자르지 않는다).
+            const mSel = mergeKeptSel(parseObj(mine.sel_json), parseObj(old?.sel_json));
+            // 6회차 반증 R6-1: 지금 꽂힌 디스크(이번 인벤토리 · 없으면 이 노드가 적어 둔 것)의 시리얼로 판정한다 — 이 노드가 값을 못 읽은 디스크의 옛 이력을 지우지 않게.
+            const invSerial = serialMapOf(Array.isArray(s.drives) ? s.drives : parseArr(mine.drives_json));
+            const mVals = mergeKeptVals(parseObj(mine.vals_json), parseObj(old?.vals_json), invSerial);
+            const selJ = mSel ? fitJson(mSel, SEL_JSON_MAX, (o) => (o.events?.length > 1 ? (o.events = o.events.slice(0, Math.floor(o.events.length / 2)), true) : false)) : null;
+            const valsJ = mVals ? fitJson(mVals, VALS_JSON_MAX, (o) => (o.seen?.length ? (o.seen = [], true) : false)) : null;
+            h.st.serverSetPast.run(valsJ ?? mine.vals_json ?? null, selJ ?? mine.sel_json ?? null, a, s.id);
+          }
+          // 옮기지 못하고 남은 것(겹친 기록 · 시리얼)은 이 노드에 같은 것이 있다 — 옛 노드 행을 비운다.
+          h.st.deleteRecordsOf.run(from, s.id); h.st.deleteSerialsOf.run(from, s.id); h.st.deleteServer.run(from, s.id);
         }
       }
       const prev = h.st.serverGet.get(a, s.id) || null;
@@ -361,6 +396,70 @@ export const SEL_KEEP_MAX = 200;
  * SEL 디스크 항목 저장 모양(순수). iDRAC 가 SEL 을 지우거나 덮어써도 포탈이 본 항목은 남긴다(합집합 · 가장 새 것 200건).
  * `range` 는 이번에 읽은 SEL 이 담은 기간, `keptFrom` 은 포탈이 보관한 가장 오래된 항목 — 화면이 둘을 섞지 않는다.
  */
+/**
+ * 노드 합치기의 SEL 보관 항목(순수 — 5회차 반증 R5-1). 이 노드 것에 옛 노드 항목을 **합집합**으로(같은 키 = 장비가 준 원래 시각 · 종류 · 자리 · 문장,
+ * 가장 새 SEL_KEEP_MAX 건). 읽기 상태(read · total · range)는 이 노드 것을 둔다. 한쪽이 없으면 다른 쪽.
+ */
+export function mergeKeptSel(mine, old) {
+  const oe = old && Array.isArray(old.events) ? old.events : [];
+  if (!mine) return old || null;
+  if (!oe.length) return mine;
+  const seen = new Set(); const events = [];
+  for (const e of [...(Array.isArray(mine.events) ? mine.events : []), ...oe]) { const k = selKey(e); if (seen.has(k)) continue; seen.add(k); events.push(e); }
+  events.sort((x, y) => (y.created ?? -Infinity) - (x.created ?? -Infinity));
+  const kept = events.slice(0, SEL_KEEP_MAX);
+  const dated = kept.map((e) => e.created).filter(Number.isFinite);
+  return { ...mine, events: kept, keptFrom: dated.length ? Math.min(...dated) : null };
+}
+
+/**
+ * 노드 합치기의 디스크 값 이력(순수 — 5회차 반증 R5-1 · 6회차 R6-1). 노드를 넘는 합치기라 **양쪽 시리얼이 모두 있고 같을 때만** 같은 디스크로 본다
+ * (Dell Drive Id 는 자리 이름 — 반증 F1. 시리얼을 모르면 다른 디스크의 이력이 붙을 수 있다).
+ *  · 이 노드의 디스크: 같은 디스크면 처음 읽은 때는 더 이른 쪽, 이 노드가 늘어난 것을 못 봤으면 옛 노드가 본 때 · 늘기 전 값을 잇는다(이 노드가 본 것은 덮지 않는다).
+ *  · 이 노드가 값을 **못 읽은** 디스크(권한 · 보고서 없음 · 보고서에 빠짐): 지금 인벤토리(`invSerial`)에 같은 Id · 같은 시리얼이 있으면 옛 값을 남긴다 —
+ *    평소 적재(mergeVals — 반증 F9)와 같다. readAt 이 옛 것이라 판정은 '지난 값' 으로 다룬다. 교체 · 제거된 디스크(시리얼이 다름 · Id 없음 · 모름)는 남기지 않는다.
+ * @param {(id:string)=>string} [invSerial] 지금 인벤토리의 Id → 시리얼(모르면 '')
+ */
+export function mergeKeptVals(mine, old, invSerial = () => '') {
+  const od = old && Array.isArray(old.drives) ? old.drives : [];
+  if (!mine) return old || null;
+  if (!od.length) return mine;
+  const mineDrives = Array.isArray(mine.drives) ? mine.drives : [];
+  const byId = new Map(od.filter((d) => d && d.id).map((d) => [d.id, d]));
+  const same = (a, b) => !!(a && b && a.serial && b.serial && a.serial === b.serial);
+  // 7회차 반증 R7-1: 같은 디스크면 **누적 값을 가진 쪽 가운데 더 늦게 읽은 쪽**을 기준으로 삼는다 — 늘 이 노드 값을 기준으로 하면
+  //   (a) 이 노드가 가동 시간만 읽은 디스크의 재할당 · 보류 · 복구 불가가 사라졌고(평소 적재는 '가동 시간만 고친다'),
+  //   (b) 겹쳐 읽는 동안 옛 노드가 더 늦게 본 더 큰 값이 사라져 '값 = 늘기 전 값' 인 모순이 생겼다.
+  //   처음 읽은 때는 더 이른 쪽, 가동 시간은 이 노드 것(지금 점검) 우선, 늘어남(changedAt · before)은 기준 쪽 것이 없을 때만 다른 쪽 것.
+  const hasCounter = (x) => VAL_KEYS.some((k) => Number.isFinite(x?.[k]));
+  const drives = mineDrives.map((d) => {
+    const p = d && byId.get(d.id);
+    if (!same(p, d)) return d;
+    const pNewer = hasCounter(p) && (!hasCounter(d) || (Number.isFinite(p.readAt) ? p.readAt : -Infinity) > (Number.isFinite(d.readAt) ? d.readAt : -Infinity));
+    const base = pNewer ? p : d;
+    const other = pNewer ? d : p;
+    const firsts = [d.firstAt, p.firstAt].filter(Number.isFinite);
+    const { before: _b, ...rest } = base;
+    const out = { ...rest, id: d.id, serial: d.serial, firstAt: firsts.length ? Math.min(...firsts) : (base.firstAt ?? null),
+      powerOnHours: Number.isFinite(d.powerOnHours) ? d.powerOnHours : (p.powerOnHours ?? null) };
+    if (Number.isFinite(base.changedAt)) { if (base.before) out.before = base.before; }
+    else if (Number.isFinite(other.changedAt)) { out.changedAt = other.changedAt; if (other.before) out.before = other.before; }
+    return out;
+  });
+  const have = new Set(mineDrives.map((d) => d?.id));
+  for (const p of od) {
+    if (!p || !p.id || have.has(p.id)) continue;
+    const sn = String(invSerial(p.id) || '').trim();
+    if (sn && p.serial && sn === p.serial) drives.push(p);
+  }
+  // 이 노드가 값을 한 번도 못 읽었는데 옛 값을 남겼으면, 마지막으로 읽은 때도 옛 것으로(출처 표가 '지난 값' 이라고 밝히게 — 7회차 참고).
+  const usedOld = drives.length !== mineDrives.length || drives.some((x, i) => x !== mineDrives[i]);
+  if (usedOld && !Number.isFinite(mine.at) && Number.isFinite(old.at)) return { ...mine, drives, at: old.at, reportAt: old.reportAt ?? null };
+  return { ...mine, drives };
+}
+
+const selKey = (e) => `${Number.isFinite(e?.createdRaw) ? e.createdRaw : e?.created}|${e?.kind}|${e?.slotKey}|${String(e?.message || '').slice(0, 80)}`;
+
 export function mergeSel(prev, cur, now) {
   const base = { status: cur.status, tryAt: now };
   const prevEvents = prev && Array.isArray(prev.events) ? prev.events : [];
@@ -369,7 +468,7 @@ export function mergeSel(prev, cur, now) {
     return { ...base, at: null, read: null, total: null, stopped: '', range: null, kinds: {}, events: [], keptFrom: null };
   }
   // 키에는 장비가 준 원래 시각(createdRaw — 반증 F3: 자른 시각은 점검마다 달라져 같은 항목이 쌓였다).
-  const key = (e) => `${Number.isFinite(e.createdRaw) ? e.createdRaw : e.created}|${e.kind}|${e.slotKey}|${String(e.message || '').slice(0, 80)}`;
+  const key = selKey;
   const seen = new Set();
   const events = [];
   for (const e of [...(cur.events || []), ...prevEvents]) {

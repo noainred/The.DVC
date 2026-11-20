@@ -98,9 +98,10 @@ test('3회차 화면 확인 — 법인 이름으로 적은 담당자 키는 그 
 
 test('D9 · I1 — 라우트 계약(이 서버를 읽는 조각만 점검 중 · 노드 바쁨 따로 · 법인 쓰기 가능 · 설정 수정 가능 · 기록 줄이기)', () => {
   const rt = code('routes/api/diskBad.js');
-  assert.match(rt, /const running = units\.some\(\(u\) => !Array\.isArray\(u\.serverIds\) \|\| u\.serverIds\.map\(String\)\.includes\(String\(s\.id\)\)\);/);
+  // 4회차: 판정은 순수 함수로 뺐다(동작은 diskBadLoopR4 serverRunState · shapeServerView 시험이 고정한다).
+  assert.match(rt, /const \{ running, nodeBusy \} = serverRunState\(listJobs\(\)\.flatMap\(\(j\) => j\.units\), s\);/);
   assert.match(rt, /nodeBusy,/);
   assert.match(rt, /writable: !!c\.id && inUserWriteScope\(req\.user, store\.get\(\), c\.id\)/);
-  assert.match(rt, /settingsEditable: isFullReadWriteScope\(req\.user, store\.get\(\)\)/);
-  assert.match(rt, /const tr = trimRecordsForView\(v\.records\);/);
+  assert.match(rt, /settingsEditable: !isEdge\(\) && isFullReadWriteScope\(req\.user, store\.get\(\)\)/);
+  assert.match(rt, /const v = shapeServerView\(serverView\(d\.server, d\.records, d\.serials\), \{ admin: isAdminDetailUser\(req\.user\) \}\);/);
 });
