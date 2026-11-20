@@ -37,6 +37,7 @@ import { TEMP_SERIES_DETAIL } from '../../idrac/serverTempSeries.js'; // v2.556:
 import { vmperfHistory, vmperfMeta, vmperfDiskUsage, dropVmperfDb, dbFileName, VMPERF_METRICS, VMPERF_DISK_METRICS, VMPERF_VMDISK_METRICS } from '../../metrics/vmperfDb.js';
 import { loadVmperfSettings, saveVmperfSettings, vmperfSettingsRefusal, VMPERF_LIMITS } from '../../metrics/vmperfSettings.js';
 import { memoJson, hash, eachLimited, scopeSlice, scopeKey } from './shared.js';
+import { forecastItems } from '../../tools/capacityForecastItems.js';
 import { isSummaryQuery, groupByVc, SUMMARY_TOP_N } from './toolSummary.js'; // v3.21.0 VM 분석 화면 요약 — 같은 라우트 · 같은 게이트 안에서
 import { capacityForecastSummaryByVc } from '../../dscfg/summary.js'; // v3.22.0 Hypervisor 분석 화면 — 용량 예측 요약
 import { dsGrowthFor } from '../../tools/dsGrowth.js'; // v2.672 운영 장애: 용량 예측 증가율 — 롤업 전용·스냅샷 무관 캐시·시간 기준 양보
@@ -1928,23 +1929,8 @@ api.get('/tools/capacity-forecast', requirePerm('tools'), (req, res) => memoJson
   const mock = snap.source === 'mock';
   // 전 데이터스토어 한 벌로 센다(범위와 무관 — 범위는 바로 위 dss 에서 이미 골랐다). 첫 호출·첫 수집 직후에만 계산을 기다린다.
   const growth = await dsGrowthFor(all.map((d) => d.id));
-  const items = [];
-  for (const d of dss) {
-    const g = growth.byId.get(d.id) || null;
-    let slope = null; let synthesized = false; // GB/day
-    if (g && g.points >= 3) {
-      slope = g.slope;
-    } else if (mock) {
-      synthesized = true; slope = Math.max(0, (d.capacityGB * 0.0008) + (hash(d.id) % 5) * 0.2); // 합성 증가율
-    }
-    // v2.599 RECENT2599-03: 사용량을 못 읽은 DS(freeGB·usedGB 둘 다 null)를 '전량 여유' 로 계산하지 않는다 —
-    // 예전 `cap − (usedGB || 0)` 은 그 DS 의 소진일을 가장 늦은 쪽으로 밀어냈다. 여유를 모르면 소진일도 모른다.
-    const freeGB = d.freeGB != null ? d.freeGB
-      : d.usedGB != null && d.capacityGB > 0 ? Math.max(0, d.capacityGB - d.usedGB) : null;
-    const daysToFull = freeGB != null && slope && slope > 0.01 ? Math.round(freeGB / slope) : null;
-    items.push({ id: d.id, name: d.name, vcenterId: d.vcenterId, type: d.type, capacityGB: d.capacityGB, usedGB: d.usedGB, freeGB, usagePct: d.usagePct, growthGBperDay: slope == null ? null : Number(slope.toFixed(2)), daysToFull, synthesized, growthPoints: g?.points ?? 0, growthSince: g?.firstTs ?? null });
-  }
-  items.sort((a, b) => (a.daysToFull ?? Infinity) - (b.daysToFull ?? Infinity));
+  // v3.31: 항목 계산은 tools/capacityForecastItems.js 하나(정기 점검 보고 리더와 같은 계산 — 판정 코어 하나).
+  const items = forecastItems(dss, growth, { mock });
   const growthInfo = { source: 'rollup', windowDays: growth.windowDays, at: growth.at, stale: growth.stale, refreshing: growth.refreshing, error: growth.error };
   // v3.22.0: ?summary=1 — 법인별 줄 + 법인별 상위 N(Hypervisor 분석 화면 · dscfg/summary.js). 게이트(tools · toolGate 'capacity-forecast')와 범위(allowed)는 위 그대로 ·
   //   항목(소진 예상일 · 합성 여부)도 위에서 만든 것 그대로 센다. mock · synthesized 표시를 그대로 싣는다. memo 열쇠는 URL 이라 원본과 다른 칸이다.

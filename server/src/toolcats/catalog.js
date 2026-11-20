@@ -75,7 +75,7 @@ export const PRESET = Object.freeze([
   },
   {
     id: 'report', label: '리포트·점검', icon: '📋',
-    tools: ['daily-health', 'insights', 'insights-hub', 'svc-inventory', 'compliance-report', 'change-history', 'unprotected-vms',
+    tools: ['periodic-report', 'daily-health', 'insights', 'insights-hub', 'svc-inventory', 'compliance-report', 'change-history', 'unprotected-vms',
       'alert-channels', 'davinci-svc', 'svcmon-config', 'vmware-backup', 'backup-summary', 'backup-detail', 'backup-em', 'bareos-summary', 'bareos-detail', 'dir-usage', 'capacity',
       'portal-check'],
   },

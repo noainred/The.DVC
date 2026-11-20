@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-11-19T21:29:53.693Z",
-  "count": 129,
+  "generatedAt": "2026-11-20T08:24:25.284Z",
+  "count": 130,
   "tools": [
     {
       "k": "service-hub",
@@ -524,6 +524,14 @@
     },
     {
       "k": "snapshots",
+      "adminOnly": false,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
+      "k": "periodic-report",
       "adminOnly": false,
       "perm": null,
       "external": null,

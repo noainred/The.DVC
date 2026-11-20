@@ -1,6 +1,7 @@
 // Veeam 백업 VM 배지(v2.751) — vCenter › VM 및 폴더의 'Veeam 백업 VM 표시' 체크박스가 부른다.
 // 조회 전용·로그인 사용자(트리를 볼 수 있는 계정이면 배지도 본다 — 어떤 VM 이 백업 대상인지·작업 이름뿐, 계정 없음 · 오류 원문(주소)은 관리자만).
 // scope: id 를 직접 받는 단건 라우트라 범위 밖 vCenter 는 404(존재 은닉 — server/CLAUDE.md). 체크박스를 켰을 때만 60초 폴링한다.
+import { setPeriodicProvider, SYSTEM_REQ } from '../../periodic/providers.js';   // v3.31 정기 점검 보고 공급자
 import { store } from '../../store.js';
 import { scopedVcenterIds, writeScopedVcenterIds } from '../../auth/scope.js';
 import { serversForVcenter, registryLoadError, listServers } from '../../veeam/registry.js';
@@ -1273,6 +1274,8 @@ const EM_DETAIL_TTL_MS = 5 * 60_000;
 
 export function registerBackupStatus(api) {
   const toolsPerm = requirePerm('tools');
+  // v3.31 정기 점검 보고 — Veeam 판정은 Summary 계산 하나(시스템 계정 = 전체 범위 · 전원 전체 · 제외 목록 적용)를 리더가 공급자로 부른다(periodic/providers.js).
+  setPeriodicProvider('veeam-summary', () => summaryData(SYSTEM_REQ, store.get(), { power: 'all', excl: true }, ''));
   // v2.838 일일 메일 계산기 — 전 법인 · 시스템 계정(화면 찾기와 같은 staleData · 범위 옵션 = 전체 VM · 템플릿·vCLS 제외)
   setStaleProvider(async (q) => {
     // 전체 점검 9회차(V-21): 재시작 직후 골격 스냅샷(initial · VM 0대)으로 계산하면 '0대' 가 나온다 — 모름으로 돌려 메일이 그날 차례를 쓰지 않게(엣지 push 의 snapEvents 와 같은 판정)

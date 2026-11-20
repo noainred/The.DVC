@@ -102,8 +102,11 @@ test('SEC2606-02: patterns 는 최대 32개·64자, 버린 개수를 밝힌다',
 
 test('SEC2606-02: 라우트는 패턴을 computeUnprotected 상한으로 넘긴다(무상한 split 금지)', () => {
   const src = read('routes/api/reports.js');
-  const body = src.slice(src.indexOf("api.get('/tools/report/unprotected'"), src.indexOf("api.get('/tools/report/unprotected'") + 6000);   // v2.763: 라우트 머리(검색어 2개 병합)가 길어져 넉넉히
-  assert.ok(!/patterns\s*=\s*String\(req\.query\.patterns[^)]*\)\.split/.test(body), '라우트가 patterns 를 무상한으로 split 하면 안 된다');
+  // v3.31: 계산을 unprotectedData(req, snap, q) 로 뽑았다(라우트 · 정기 점검 보고 공급자가 같이 쓴다) — 같은 불변식을 그 함수에서 본다.
+  const at = src.indexOf('export async function unprotectedData');
+  assert.ok(at >= 0 && /unprotectedData\(req, snap, req\.query\)/.test(src), '라우트는 unprotectedData 를 쓴다');
+  const body = src.slice(at, at + 6000);
+  assert.ok(!/patterns\s*=\s*String\((req\.query|q)\.patterns[^)]*\)\.split/.test(body), '라우트가 patterns 를 무상한으로 split 하면 안 된다');
   assert.match(body, /computeUnprotected\(scoped\.vms, rows, \{ patterns,/);
 });
 

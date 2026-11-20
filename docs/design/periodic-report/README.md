@@ -1,6 +1,6 @@
 # 설계: 특수 기능 › 리포트 · 점검 › 정기 점검 보고(`#/tools/periodic-report`) — 일일 · 주간 · 월간 · 분기 자동 점검 보고
 
-작성 2026-11-07 (main v2.939.0 `7910e18` 병합 기준 · 브랜치 `claude/pensive-cori-6nqpf3`) · 상태 **시안 — 컨펌 대기(§5)** ·
+작성 2026-11-07 (main v2.939.0 `7910e18` 병합 기준 · 브랜치 `claude/pensive-cori-6nqpf3`) · 상태 **구현 — v3.31(§8)** · 컨펌 2026-11-20 '진행해'(§5 기본값 + 구현 때 갱신 두 가지 — §8 1 · 2) ·
 시안 캔버스: https://claude.ai/artifact/Q39QmkeATriGtawheikGha (아트보드 7장 — 이 폴더의 `*.dc.html` 이 같은 내용의 레퍼런스. HTML 프로토타입이지 복사 대상이 아니다.
 **모든 수치 · 법인 코드(KR1 · PL1 · CN2 …) · 날짜 · 상단 버전 배지는 그림용 가상값**이고 기능 이름 · 메뉴 경로 · 도구 키 · 모듈 · 함수 이름만 실제 포탈 것이다.
 색 · 글자는 `web/src/styles.css` `:root` 토큰 그대로. 축 3개의 범주 색은 feature-usage 시안에서 검증한 값(`#3b82f6 #d97706 #0891b2`)을 다시 썼고 dataviz 검증기를 어두운 패널(`#141b2d`) 위에서 통과했다(2026-11-07 실측).
@@ -143,4 +143,46 @@
 - 조사는 v2.914 체크아웃에서 했고 main v2.939.0(187 커밋 뒤)을 병합한 뒤 §2 의 함수 · 파일 · 줄을 다시 확인했다. 그 사이 `periodic-report` 류 기능은 추가되지 않았다(grep 0건).
 - 진행 메시지의 시각 중 **19:52 · 20:02 는 측정하지 않은 추정값**이었다(규칙 위반 — 실제 측정은 19:15 · 19:41 뿐). 보고에 정정으로 적었다.
 - 시안은 Chromium 으로 보지 않았다(규칙상 시안 단계는 캔버스 확인만 — 구현 때 1440/400 판독). 캔버스의 표 · 칩 배치는 브라우저에서 사용자가 보는 것이 최종이다.
-- 구현 기록(§7 본문)은 Opus 구현에서 채운다.
+- 구현 기록은 §8 이다.
+
+## 8. 구현 기록(v3.31 — Opus · 2026-11-20)
+
+컨펌: 2026-11-20 사용자 '진행해'. 직전 답변에서 '시안 갱신이 먼저 필요하다' 고 했는데 세션이 Opus 로 돌고 있었다 — 규칙(Opus 는 시안을 만들지 않는다)에 따라 **캔버스는 다시 그리지 않았고**, 갱신해야 할 결정 두 가지(§8 1 · 2)를 이 절에 적고 기본값으로 구현했다. 구현 시점 main v3.30.4 를 병합했고, 마무리 전에 v3.30.6 을 다시 병합했다.
+
+| 영역 | 파일 |
+|---|---|
+| 서버 | `server/src/periodic/{rules,catalog,assemble,render,db,service,providers}.js` · `periodic/readers/{common,vsphere,devices,services,facility,index}.js` · `routes/api/periodicReport.js` · `routes/api.js`(등록) · `index.js`(1분 틱 기동 — 중앙만) |
+| 기존 코드에서 뽑은 것(판정 코어 하나) | `tools/capacityForecastItems.js`(용량 고갈 예측 항목 — 라우트와 리더가 같이) · `routes/api/reports.js unprotectedData`(미보호 VM) · 공급자 등록 `veeam.js`(Backup Summary) · `reports.js`(미보호 VM) · `vmDns.js`(VM DNS) · `diskbad/jobs.js corpResolverNow`(메일과 같은 법인 판정) |
+| 등록 | `mail/kinds.js`(periodic-report) · `auth/toolAccess.js`(세그먼트 = 키) · `toolcats/catalog.js`(리포트·점검) · `insights/{dbLocation,portalDb,dbGuideData}.js`(periodic.db) · `docs/SETTINGS.md` 42번(뒤 번호 +1) · 생성 문서 5종 |
+| 웹 | `web/src/views/tools/PeriodicReport.jsx` · `periodicReport/{Archive,ReportView,CatalogTab,ScheduleTab,ScheduleStandalone,parts}.jsx` · `periodicReportText.js` · `periodicReport.css` · `specialToolsList.js` · `SpecialTools.jsx` · `Settings.jsx`(알림·메일 묶음) |
+| 테스트 | `server/test/periodicReport3310.test.js`(14) · `web/.../periodicReportText.test.js`(7) · 옮긴 계산을 따라간 스윕 3건(`audit2599e` · `audit2606g` · `bugfixes20260810`) · 등록부 · 분류표 5건(`settingsMenu2905` KEYS_ADDED · `usage/keys.js` SETTINGS_KEYS · `readErrorSweep97` ALLOW · `restoreSweep114` + `backup/stagedRestore.js` · `staleSnapshotSweep126` TABLE) |
+
+**시안 · 컨펌 기본값과 달라진 점(정직 기록)**
+1. **PDF — 서버 PDF 엔진 대신 자급형 HTML 첨부**(§5 ④ 갱신): 시안 뒤 main 에 생긴 SAN 스토리지 성능 월간 · PowerScale 주간 보고서가 같은 방식(브라우저에서 인쇄 › PDF)이다. 의존성 · 한글 폰트 번들 없이 같은 결과를 낸다.
+2. **새로 생긴 분야별 정기 보고 4종은 그대로 두고 판정 요약만 항목으로**(§5 ⑨ 갱신): SAN 스토리지 성능(san-storage-perf) · PowerScale 점검(ps-inspect) · 디스크 배드 섹터(disk-bad)를 항목으로 더했고, IP 관리 정기 보고는 기존 ‘IP 관리’ 항목이 같은 모델(`gatherReportModel`)을 읽는다.
+3. **항목 53개**(시안 54): 위 3개를 더하고 아래를 뺐다 — 이유를 남긴다.
+   · ‘백업 안 된 VM(찾기 조건)’ — Veeam 판정 항목의 RPO(7일 · 3일)와 같은 원천이고, 조건은 관리자가 메일 알림으로만 정한다(그 메일 ‘백업 안 된 VM’ 은 그대로 나간다).
+   · ‘포탈 점검(토큰 · 아키텍처)’ — 조립이 라우트 안이고 엣지 프로브 결과(메모리)에 기대어 회차 시점에 비어 있기 쉽다.
+   · ‘평문 자격증명 · 자가 점검’ — 비밀 스캔은 소스 트리 전체를 훑는 무거운 작업이고, 자가 점검은 사용자 목록을 읽을 때 기본 관리자를 만드는 부작용 경로가 있다.
+   · ‘스토리지 어레이 전력’ — ‘소비 전력’ 항목이 iDRAC 서버 전력만 싣는다(어레이 전력은 전체 소비 전력 도구에서).
+4. **XLSX 는 보관 파일이 아니라 내려받을 때 만든다**(data.csv 권한 · 동시 1건) — 회차 문서 하나에서 만들 수 있어 파일 보관 · 정리를 두지 않았다. 메일에는 HTML 보고서를 첨부한다.
+5. **공지는 회차마다 새로 올리지 않고 하나를 갱신**(7일 뒤 내림) — 공지 상한(noticeMax)을 자동 보고가 채우지 않게. 공지 글에는 **판정 · 법인 이름을 싣지 않는다** — 공지는 범위와 무관하게 모든 계정에 보여 범위 계정에 다른 법인 상태가 새기 때문이다(‘가림은 응답 경로 전부에’).
+6. **법인 담당자 받는 사람은 이 기능의 설정**(vCenter 별 — PowerScale · IP 관리 정기 보고와 같은 방식) — 게스트 파티션 메일 목록을 빌리지 않았다(기능 사이 결합).
+7. **알림 채널 기본 꺼짐** — 기존 일일 리포트(같은 판정 함수 · 같은 채널)와 겹쳐 아침에 두 번 받지 않게(§5 ③ ‘나란히’ 의 결과).
+8. **회차 ID 는 기간 기준** — 일일 `D-<그 날>`(만든 날이 아니라 보고한 날) · 주간 `W-<ISO 연도>-<주>` · 월간 `M-<연>-<월>` · 분기 `Q-<연>-<분기>` · 수동은 끝에 `-m<포탈 시각 HHMMSS>`.
+9. **첫 설치는 놓침을 줄줄이 적지 않는다** — 기록 · since 가 없으면(기본값 켜짐) 기동 시각 - 30분을 바닥으로 본다(기동 직후 유예 안 회차는 만든다).
+10. **대상이 없는 항목은 ‘정상’ 이 아니라 정보(해당 없음)** — 등록된 장비 · 잡 · 링크가 0이면 판정 수에 넣지 않는다.
+11. **확인 불가로 남는 것(1단계 한계)**: 미보호 VM · 로그인 실패는 이벤트를 모으지 않는 vCenter(엣지 법인)를 확인 불가로 · 베어메탈 사용률은 이 포탈이 직접 수집한 서버만(엣지 값은 엣지 파일 — 중앙이 보고서를 위해 엣지를 부르지 않는다) · 서비스 모니터 · 전송 속도는 법인 귀속이 없어 전체 항목 · 이력 표가 없는 원천(서비스 모니터 · 인증서 · HAProxy 경로)은 회차 시점 상태.
+12. **판정 기준 문구**를 실제 판정에 맞췄다 — 호스트 연결 끊김은 이상(일일 헬스체크 hosts 절), vCenter 알람은 위험(critical)만, 고아 VM 은 이상.
+13. **리더 시한 20초** — 던지거나 넘기면 그 항목만 확인 불가(사유 적음) · 회차는 계속.
+14. **범위 계정**: 목록 수는 회차 행렬로 다시 세고(문서를 읽지 않음), 보고서 · HTML · XLSX 는 자기 법인 행만, 법인 행이 없는 항목은 숨기고, 전달 기록은 주지 않는다 · 보이는 행이 하나도 없으면 404.
+15. **복원 분류**: 설정 `periodic-report.json` 은 ‘그대로’(사람이 고치는 값), 상태 `periodic-report-state.json` 은 ‘지금 것 유지’(실행 회차 — 되돌리면 마지막 회차 · 공지 id 가 옛 값으로 돌아간다).
+
+**검증 기록(2026-11-20)**
+- 전량 서버 테스트 1회차(수정 도중 코드)에서 실패 10건 — 전부 이 작업이 원인이었다: 옮긴 계산을 따라가지 않은 스윕 3건(용량 예측 1 · 미보호 VM 2) · 생성 문서 2종 낡음(3건) · 등록부 · 분류표 미등재 4건(`usage/keys.js` · `readErrorSweep97` · `restoreSweep114` · `staleSnapshotSweep126`). 고친 뒤 해당 11개 파일 143건 통과.
+- 스윕이 잡은 결함 2건(테스트 통과용 등재가 아니라 코드를 고쳤다):
+  · `readers/common.js vcUnreadReason` 이 ‘못 읽은 vCenter’ 판정을 따로 하나 더 두고 있었다 — 공용 `metrics/unreadVcenters.js` 를 부르게 바꿨다(첫 수집 중만 보고서 쪽에서 덧붙인다 — 공용 판정은 합계를 막지 않으려고 일부러 뺀다).
+  · ‘소비 전력’(정보) 항목이 `allMeasuredPower` 에 vcSkip 을 넘기지 않아, 점검중 · 수집 실패 · 보고가 오래된 vCenter 와 끊긴 호스트의 마지막 추정 전력이 합계에 들어갔다 — store.js 와 같은 `unreadVcenterReasons + usageReadable` 을 넘기고 뺀 대수를 근거에 적는다.
+- Chromium(목 서버 · 1440 / 400 · 메인이 스크린샷 직접 판독) — 페이지 오류 0 · 페이지 가로 넘침 0(400 에서 표는 감싼 틀 안 가로 스크롤). 판독에서 고친 것: 조치 필요 표 상한 30 + ‘전부 보기’ · 타일 판정 칩 늘어짐 · 법인 기준 시각(asOf) · 확인 불가 항목 근거 앞 ‘—’ · 화면에 박힌 숫자 4곳(미리보기 ‘10분’ · 첨부 ‘5MB’ · 인증서 확인 주기 · 카탈로그 ‘기본 N’ — 주기 · 상한은 API 값이 아니면 쓰지 않는다) · 라이선스 도구 이름 · 일정 이력 ‘사유’ 열 1440 넘침 · DB 크기 1MB 미만 ‘0.0 MB’ → KB.
+- 전량 verify(서버 + 웹 eslint · vitest · build) 최종 결과: 이 커밋 시점에 실행 중 — 결과는 다음 커밋에서 이 줄을 고쳐 적는다.
+
