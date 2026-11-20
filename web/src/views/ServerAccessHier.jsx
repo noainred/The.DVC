@@ -55,15 +55,17 @@ export function HierTab({ v, corpName, reload, say }) {
   const run = async (label, fn) => {
     if (!otpOk(otp)) { say('본인 OTP(6자리)를 넣으세요 — 바꾸는 동작마다 새 번호가 필요합니다.', 'warn'); return; }
     setBusy(label);
+    // 2회차 W2-4: need-verify 는 OTP 앞 판정(judgeFirst)이라 OTP 를 쓰지 않았다 — 칸을 비우지 않고 ‘고르세요’ 로(오류 색이 아니다)
+    let keepOtp = false;
     try { await fn(otp.trim()); } catch (e) {
       const body = e?.body || {};
-      if (body.code === 'need-verify' && Array.isArray(body.candidates)) { setVerifyCands(body.candidates); setVerifyId(body.candidates[0]?.id || ''); }
-      say(errText(e), 'bad');
-    } finally { setBusy(''); setOtp(''); }
+      if (body.code === 'need-verify' && Array.isArray(body.candidates)) { setVerifyCands(body.candidates); setVerifyId(body.candidates[0]?.id || ''); keepOtp = true; }
+      say(errText(e), keepOtp ? 'warn' : 'bad');
+    } finally { setBusy(''); if (!keepOtp) setOtp(''); }
   };
   const toggle = (id) => setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const toggleAll = () => setPicked((p) => (central.every((s) => p.has(s.id)) ? new Set() : new Set(central.map((s) => s.id))));
-  const pickNode = (id) => { setSel(id); setPicked(new Set()); setEdit(null); setOwn(null); setVerifyCands(null); };
+  const pickNode = (id) => { setSel(id); setPicked(new Set()); setEdit(null); setOwn(null); setVerifyCands(null); setVerifyId(''); };   // 2회차 L5: 고른 확인 서버가 다음 동작에 실려 가지 않게
 
   const saveAssign = (clear) => run('assign', async (code) => {
     // v3.25(3단계): Windows 단계는 접속 방식(SSH · WinRM HTTPS)과 WinRM 포트를 함께 저장한다(설계 D11)
@@ -73,7 +75,7 @@ export function HierTab({ v, corpName, reload, say }) {
     const r = must(await putJson('/settings/ssh-access/assign', body));
     say(clear ? `${path} 단계의 지정을 지웠습니다 — 물려받던 서버 ${r.affected}대는 위 단계 또는 미설정으로 갑니다${r.verified ? `(${r.verified.server} 에서 위 단계 계정 ${r.verified.account || ''} 먼저 확인함)` : ''}.`
       : `${path} 단계에 계정을 정했습니다 — 지금 물려받는 서버 ${r.willUse}대${r.verified ? ` · ${r.verified.server} 에서 먼저 확인함` : ''}.`, 'ok');
-    setEdit(null); setVerifyCands(null); reload();
+    setEdit(null); setVerifyCands(null); setVerifyId(''); reload();
   });
   const approve = (clearOwn) => run(clearOwn ? 'reset' : 'approve', async (code) => {
     const ids = pickedList.map((s) => s.id);
@@ -99,7 +101,10 @@ export function HierTab({ v, corpName, reload, say }) {
 
   const curAcc = na.account;
   const curStop = curAcc ? accountStopText(curAcc.stop) : null;
-  const verifyChoices = verifyCands || (level ? central.filter((s) => s.inheritApproved && !s.ownCred).map((s) => ({ id: s.id, name: s.name })) : []);
+  // 점검 2회차 W2-1(Chromium 재현): 확인 대상을 화면이 지어내지 않는다 — 지정 폼은 서버가 준 후보(409 need-verify)만, 승인 막대는 고른 서버만
+  //   (예전: 이미 승인된 서버가 목록에 나와 고른 값이 서버에서 버려지고 다른 서버로 확인했다).
+  const verifyChoices = verifyCands || [];
+  const approveChoices = verifyCands || pickedList.map((s) => ({ id: s.id, name: s.name }));
   return (
     <div className="ssa-main">
     <div className="ssa-split">
@@ -232,10 +237,10 @@ export function HierTab({ v, corpName, reload, say }) {
               </Select></label>
               <button className="btn btn-sm" type="button" disabled={!pickedList.length || !!busy} onClick={setOs}>{busy === 'os' ? '바꾸는 중…' : 'OS 종류 정하기'}</button>
             </div>
-            {verifyChoices.length > 0 && !edit && (
+            {approveChoices.length > 0 && !edit && (
               <label className="ssa-field sah-inline">먼저 확인할 서버 <Select sort={false} className="select select-sm" value={verifyId} onChange={(e) => setVerifyId(e.target.value)}>
                 <option value="">고른 서버의 첫 대</option>
-                {verifyChoices.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                {approveChoices.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
               </Select></label>
             )}
             <Otp value={otp} onChange={setOtp} />
@@ -306,11 +311,12 @@ export function AccountsTab({ v, corpName, reload, say }) {
   const run = async (label, fn) => {
     if (!otpOk(otp)) { say('본인 OTP(6자리)를 넣으세요 — 바꾸는 동작마다 새 번호가 필요합니다.', 'warn'); return; }
     setBusy(label);
+    let keepOtp = false;   // 2회차 W2-4: need-verify 는 OTP 앞 판정 — OTP 를 쓰지 않았다
     try { await fn(otp.trim()); } catch (e) {
       const body = e?.body || {};
-      if (body.code === 'need-verify' && Array.isArray(body.candidates) && form) setForm((f) => ({ ...f, cands: body.candidates, verifyId: body.candidates[0]?.id || '' }));
-      say(errText(e), 'bad');
-    } finally { setBusy(''); setOtp(''); }
+      if (body.code === 'need-verify' && Array.isArray(body.candidates) && form) { setForm((f) => ({ ...f, cands: body.candidates, verifyId: body.candidates[0]?.id || '' })); keepOtp = true; }
+      say(errText(e), keepOtp ? 'warn' : 'bad');
+    } finally { setBusy(''); if (!keepOtp) setOtp(''); }
   };
   const save = () => run('save', async (code) => {
     const f = form;

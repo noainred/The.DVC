@@ -7,7 +7,7 @@
  *     (v3.24 서버 접속 — 설계 docs/design/server-access §4.6)
  *     assign: { [법인]: { all?: A, linux?: A, windows?: A } }  A = { account(공통 계정 id), auth(''=키 우선 | 'password'), at, by }
  *                                                                                 — 계층 지정(법인 › OS 종류). 비밀은 없다(계정 id 만)
- *     accountStops: { [공통 계정 id]: { at, server, feature, version } } }          — 계정 단위 정지(로그인 거부 한 번 — 그 비밀번호 판 동안)
+ *     accountStops: { [공통 계정 id]: { at, server, feature, version, cause? } } }  — 계정 단위 정지(로그인 거부 한 번 · cause 'timeout' = 보낸 뒤 판정 모름 연달음 — 그 비밀번호 판 동안)
  * 서버에서 읽은 authorized_keys 지문은 판정에 쓰지 않으므로 따로 둔다(`installed.js` — 그 파일이 깨져도 키 접속을 멈추지 않는다).
  *
  * 불변조건(sshaccess/CLAUDE.md):
@@ -100,7 +100,7 @@ function norm(j) {
   for (const [id, v] of sents) {
     if (!ACC_ID_RE.test(id)) throw new ShapeError('accountStops 의 계정 id 가 올바르지 않습니다');
     if (!isObj(v)) throw new ShapeError(`accountStops.${id} 가 객체가 아닙니다`);
-    accountStops[id] = { at: num(v.at), server: t(v.server, 128), feature: t(v.feature, 32), version: t(v.version, 20) };
+    accountStops[id] = { at: num(v.at), server: t(v.server, 128), feature: t(v.feature, 32), version: t(v.version, 20), ...(v.cause === 'timeout' ? { cause: 'timeout' } : {}) };
   }
   return { stops, events, assign, accountStops };
 }
@@ -310,22 +310,31 @@ export function accountStopFor(accountId, version = null) {
 }
 export function listAccountStops() { const d = load(); return d && !loadErr.get() ? Object.entries(d.accountStops).map(([account, v]) => ({ account, ...v })) : null; }
 /** 로그인 거부를 본 곳(폴러 · 연결 시험)이 부른다. 같은 판으로 이미 정지돼 있으면 다시 쓰지 않는다(주기마다 파일을 쓰지 않게). */
-export function setAccountStop(accountId, { server = '', feature = '', version = '', accountName = '', now = Date.now() } = {}) {
+export function setAccountStop(accountId, { server = '', feature = '', version = '', accountName = '', cause = '', now = Date.now() } = {}) {
   const u = unreadable(); if (u) return u;
   const id = t(accountId, 32);
   if (!ACC_ID_RE.test(id)) return { ok: false, code: 'bad-account' };
   const d = draft();
   if (Object.hasOwn(d.accountStops, id) && d.accountStops[id].version === String(version)) return { ok: true, already: true };
   if (!Object.hasOwn(d.accountStops, id) && Object.keys(d.accountStops).length >= MAX_ACCOUNT_STOPS) return { ok: false, code: 'too-many' };
-  d.accountStops[id] = { at: now, server: t(server, 128), feature: t(feature, 32), version: t(version, 20) };
-  pushEvents(d, [{ kind: 'account-stopped', target: t(accountName, 64) || id, detail: `${t(server, 80)} 에서 로그인 거부 · ${t(feature, 32)}` }], now);
+  // 2회차 보안 B1: cause 'timeout' = 비밀번호를 보낸 뒤 판정을 받지 못함이 연달음(거부를 본 것이 아니다 — 화면 · 사건이 그렇게 말한다)
+  d.accountStops[id] = { at: now, server: t(server, 128), feature: t(feature, 32), version: t(version, 20), ...(cause === 'timeout' ? { cause: 'timeout' } : {}) };
+  pushEvents(d, [{ kind: 'account-stopped', target: t(accountName, 64) || id, detail: cause === 'timeout' ? `${t(server, 80)} 등에서 비밀번호를 보낸 뒤 판정을 시한 안에 받지 못함 연달아 · ${t(feature, 32)}` : `${t(server, 80)} 에서 로그인 거부 · ${t(feature, 32)}` }], now);
   return commit(d);
 }
-/** 풀기(한 대로 다시 확인 성공 · 사람이 풂 · 비밀번호를 바꿈). 없으면 할 일 없음. */
-export function clearAccountStop(accountId, { by = '', accountName = '', why = '', now = Date.now() } = {}) {
+// 2회차 상태 Q4: 사람이 정지를 풀면(또는 확인 성공) 계정 탐침의 메모리 정지(디스크 쓰기 실패 때만)도 풀리게 — 탐침 문이 이 수를 대조한다(순환 import 없이).
+const resumeEpoch = new Map();
+export function accountResumeEpoch(accountId) { return resumeEpoch.get(String(accountId || '')) || 0; }
+/**
+ * 풀기(한 대로 다시 확인 성공 · 사람이 풂 · 비밀번호를 바꿈). 없으면 할 일 없음.
+ * 2회차 상태 Q3: `version` 을 주면 **그 판의 정지일 때만** 지운다(새 비밀번호 확인 성공이 옛 판 정지를 지우면 주기 시작 때 옛 판으로 해석해 둔 서버가 틀린 비밀번호를 한 번 더 보냈다 — 재현).
+ */
+export function clearAccountStop(accountId, { by = '', accountName = '', why = '', version = null, now = Date.now() } = {}) {
   const u = unreadable(); if (u) return u;
   const id = t(accountId, 32);
   const d = draft();
+  if (version != null && Object.hasOwn(d.accountStops, id) && d.accountStops[id].version !== String(version)) return { ok: true, kept: true };
+  resumeEpoch.set(id, accountResumeEpoch(id) + 1);
   if (!Object.hasOwn(d.accountStops, id)) return { ok: true, already: true };
   delete d.accountStops[id];
   pushEvents(d, [{ kind: 'account-resumed', target: t(accountName, 64) || id, by, detail: t(why, 120) }], now);

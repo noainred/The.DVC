@@ -92,13 +92,20 @@ describe('서버 접속 — 계정 계층 · 공통 계정 화면 규약(소스)
   });
   it('비밀번호는 보내기만 — 응답에서 비밀번호를 그리지 않는다 · OTP 는 동작마다 비운다 · 날 select 금지', () => {
     expect(src).not.toMatch(/r\.account\.password|\ba\.password\b|resp\.password|stop\.password/);
-    expect(src).toMatch(/finally \{ setBusy\(''\); setOtp\(''\); \}/);
+    // 2회차 W2-4: OTP 는 동작마다 비운다 — need-verify(OTP 앞 판정 · OTP 를 쓰지 않음)만 남긴다
+    expect((src.match(/finally \{ setBusy\(''\); if \(!keepOtp\) setOtp\(''\); \}/g) || []).length).toBe(2);
+    expect((src.match(/keepOtp = true;/g) || []).length).toBe(2);
+    expect(src).not.toMatch(/keepOtp = true[^\n]*\n[^\n]*\n[^\n]*code !== 'need-verify'/);
     expect(src).not.toMatch(/<select\b/);
     expect(src).not.toMatch(/text-transform/);
   });
   it('점검 1회차 W1 · S2 — 공통 계정 기능 0개는 저장 단추를 막는다(키 폼과 같이) · 지우기에도 확인할 서버를 고른다', () => {
     expect(src).toMatch(/!featuresChosen\(form\.features\) \|\| !!busy\} onClick=\{save\}/);
     expect(src).toMatch(/na\.state === 'set' && verifyCands && verifyCands\.length > 0/);
+    // 2회차 W2-1: 확인 대상을 화면이 지어내지 않는다 — 지정 폼은 서버 후보만 · 승인 막대는 고른 서버만
+    expect(src).toMatch(/const verifyChoices = verifyCands \|\| \[\];/);
+    expect(src).toMatch(/const approveChoices = verifyCands \|\| pickedList\.map/);
+    expect(src).not.toMatch(/inheritApproved && !s\.ownCred\)\.map\(\(s\) => \(\{ id: s\.id, name: s\.name \}\)\)/);
   });
   it('공용 조각을 쓴다(두 벌 금지) — must · Chip · Otp · FeaturePicker 는 sshAccessParts.jsx', () => {
     expect(src).toMatch(/from '\.\/sshAccessParts\.jsx'/);

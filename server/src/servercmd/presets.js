@@ -65,14 +65,15 @@ const LIST = [
   { id: 'df', group: '디스크', label: '파일시스템 사용량', linux: L(() => ['df -hP']),
     windows: W(() => 'Get-Volume | Select-Object DriveLetter, FileSystemLabel, FileSystem, HealthStatus, Size, SizeRemaining'), note: '멈춘 NFS 가 있으면 시한에 걸림(받은 만큼 보임)' },
   { id: 'df-inode', group: '디스크', label: 'inode 사용량', linux: L(() => ['df -iP']) },
-  { id: 'net-mounts', group: '디스크', label: '네트워크 마운트', linux: L(() => ['findmnt -t nfs,nfs4,cifs']), note: '없으면 끝 코드 1(실패가 아님)' },
+  { id: 'net-mounts', group: '디스크', label: '네트워크 마운트', linux: L(() => ['findmnt -t nfs,nfs4,cifs']), note: 'NFS · CIFS 만(smb3 · ceph · fuse 는 빠짐) · 없으면 빈 출력' },   // 점검 2회차(낮음): util-linux 2.39 는 없어도 끝 코드 0
   { id: 'du-top', group: '디스크', label: '폴더 사용량', params: [{ name: 'path', kind: 'path', label: '폴더 경로' }],
-    linux: L((p) => [`du -xh --max-depth=1 -- ${q(p.path)} 2>/dev/null | sort -rh | head -20`], 20), note: '계정이 읽을 수 없는 하위 폴더는 빠짐(그때 끝 코드 1) · 큰 순 20개' },
+    linux: L((p) => [`du -xh --max-depth=1 -- ${q(p.path)} 2>/dev/null | sort -rh | head -20`], 20), note: '계정이 읽을 수 없는 하위 폴더는 실제보다 작게(4.0K 등) 보이고 합계도 작아짐 — 그때 끝 코드 1 · 큰 순 20개' },   // 점검 2회차 F2(재현): ‘빠짐’ 은 반대 안내였다
   { id: 'ls', group: '디스크', label: '디렉터리 목록', params: [{ name: 'path', kind: 'path', label: '폴더 경로' }],
-    linux: L((p) => [`ls -la -- ${q(p.path)}`]), note: '이름 · 크기 · 시각만 — 파일 내용은 읽지 않음 · 길면 줄 상한에서 잘림' },
+    linux: L((p) => [`ls -la -- ${q(p.path)}`]), note: '이름 · 크기 · 시각만 — 파일 내용은 읽지 않음 · 길면 출력 상한에서 잘림' },
   // ── 프로세스(이름만 — 인자 · 환경을 싣지 않는다: 인자에 비밀번호가 실린 경우가 있다 · server/CLAUDE.md 8b ‘comm 만’)
-  { id: 'ps-cpu', group: '프로세스', label: 'CPU 상위 프로세스', linux: L(() => ['ps -eo pid,user,pcpu,pmem,etime,comm --sort=-pcpu | head -16']),
-    windows: W(() => 'Get-Process | Sort-Object CPU -Descending | Select-Object -First 15 Name, Id, CPU, WorkingSet64'), note: '이름만 — 인자는 싣지 않음' },
+  // 점검 2회차 F1(재현): ps 의 %CPU 는 프로세스가 뜬 뒤의 평균 · Windows CPU 칸은 누적 CPU 초 — 지금 순간 값이 아니다(이름 · 메모가 그렇게 말한다).
+  { id: 'ps-cpu', group: '프로세스', label: 'CPU 상위 프로세스(누적 평균)', linux: L(() => ['ps -eo pid,user,pcpu,pmem,etime,comm --sort=-pcpu | head -16']),
+    windows: W(() => 'Get-Process | Sort-Object CPU -Descending | Select-Object -First 15 Name, Id, CPU, WorkingSet64'), note: '뜬 뒤 평균(Linux %CPU) · 누적 CPU 초(Windows) 순 — 지금 순간 사용률이 아님(오래 돈 프로세스가 지금 바빠도 아래에 있을 수 있음) · 이름만 — 인자는 싣지 않음' },
   { id: 'ps-mem', group: '프로세스', label: '메모리 상위 프로세스', linux: L(() => ['ps -eo pid,user,pcpu,pmem,etime,comm --sort=-pmem | head -16']),
     windows: W(() => 'Get-Process | Sort-Object WorkingSet64 -Descending | Select-Object -First 15 Name, Id, CPU, WorkingSet64'), note: '이름만 — 인자는 싣지 않음' },
   { id: 'pgrep', group: '프로세스', label: '프로세스 찾기', params: [{ name: 'name', kind: 'name', label: '프로세스 이름' }],
@@ -119,6 +120,9 @@ export function checkParam(kind, v) {
   // autofs ‘-hosts’ 지도(/net/<주소>)는 경로를 보는 것만으로 대상 서버가 그 주소에 NFS 마운트를 건다(상태 변경 · 다른 주소로 가는 탐침 — D2 · D4 · 반증 F8).
   //   다른 자동 마운트 자리(서버마다 다른 지도)는 알 수 없다 — 문서의 한계.
   if (kind === 'path' && (v === '/net' || v.startsWith('/net/'))) return { ok: false, reason: '자동 마운트 자리(/net)는 쓸 수 없습니다(보는 것만으로 마운트가 일어납니다).' };
+  // 점검 2회차 D1(재현): `/proc/self/root/net/<주소>` · `/proc/<pid>/root/…` 는 커널이 `/` 로 풀어 위 거절을 비켜 갔다 — /proc 아래는 통째로 거절(볼 것도 없다 · 크기 · 목록이 뜻 없음).
+  //   심링크가 /net 을 가리키는 경우는 글자로 알 수 없다(문서의 한계 — 다른 자동 마운트 자리와 같이).
+  if (kind === 'path' && (v === '/proc' || v.startsWith('/proc/'))) return { ok: false, reason: '/proc 아래는 쓸 수 없습니다(/proc/self/root 로 다른 경로를 가리킬 수 있습니다).' };
   return { ok: true, value: v };
 }
 

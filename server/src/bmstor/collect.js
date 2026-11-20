@@ -7,6 +7,7 @@
  * df 는 없는 마운트가 섞여도 있는 것은 출력하고 exit≠0 — 있는 것은 살리고 없는 것만 오류 표기.
  */
 
+import { markLoggedIn, markPasswordSent } from '../sshaccess/loginMark.js';   // 점검 2회차 Q1(b) · B1
 import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { withSsh, isSshAuthError } from '../proxy/sshExec.js';
 import { reqTimeoutMs } from '../agent/envTimeout.js';
@@ -116,6 +117,8 @@ export async function collectServer(server) {
   if (!mounts.length) return { ok: false, mounts: [], error: errors[0] || '측정할 마운트 포인트가 없습니다.' };
   // 7b: 키 · 공통 계정 참조를 해석하지 못했으면 접속하지 않는다(bmusage/onboard/refs.js withResolvedAuth — 빈 비밀번호로 시도해 계정을 잠그지 않게).
   if (server.authError) return { ok: false, mounts: [], error: String(server.authError).slice(0, 300) };
+  // 점검 2회차 Q1(b) · B1: 로그인 뒤 실패는 markLoggedIn(계정 탐침이 성공으로 본다 — 직렬 풀기 금지) · 비밀번호를 보낸 뒤 판정 모름은 markPasswordSent
+  let logged = false; let pwSent = false;
   try {
     const r = await withSsh({
       host: server.host, port: Number(server.port) || 22,
@@ -123,7 +126,9 @@ export async function collectServer(server) {
       privateKey: server.privateKey || undefined, passphrase: server.passphrase || undefined,
       readyTimeout: reqTimeoutMs(process.env.BMSTOR_SSH_TIMEOUT_MS, 15_000),   // v2.605 TIM2605-04: [1초, 10분]
       singlePasswordAttempt: true,   // v3.25 반증 F1: 비밀번호는 한 번만(k-i 재시도 없음 — 계정 잠금 횟수)
+      onPasswordSent: () => { pwSent = true; },
     }, async ({ exec }) => {
+      logged = true;
       const out = await exec(`df -P -k -- ${mounts.join(' ')}`);
       // v2.915: 같은 세션에서 디스크 I/O 표본(상수 명령 · 입력 없음). df 가 요청 마운트를 하나도 못 찾았으면 I/O 는 시도하지 않는다.
       //   시한 = 표본 간격 + 20초(명령 자체는 cat 넷 · sleep 하나). 0 이면 끔(df 만 — 예전 동작).
@@ -135,14 +140,16 @@ export async function collectServer(server) {
     const { mounts: rows, missing } = parseDfOutput(r.out.stdout, mounts, r.out.stderr);
     if (!rows.length) {
       const err = (r.out.stderr || '').trim().split('\n')[0] || 'df 출력에서 요청 마운트를 찾지 못했습니다.';
-      return { ok: false, mounts: [], missing, error: err };
+      return markLoggedIn({ ok: false, mounts: [], missing, error: err });
     }
     const ioPart = r.sec > 0 ? ioResultFromExec(r.io) : { io: null, ioError: 'I/O 표본 꺼짐(BMSTOR_IO_SAMPLE_SEC=0)' };
     return { ok: true, mounts: rows, missing, ...ioPart };
   } catch (e) {
     // v2.590(감사 F2): 자격증명 거부를 출처에서 못 박는다 — 폴러가 주기 수집을 멈출 수 있게. 엣지 폴링 위임은
     // 회신에서 이 플래그를 빼므로(agent/bmstorWorker.js 가 용량 필드만 싣는다) 폴러는 문구(ssh2 정식 문구)도 본다.
-    return { ok: false, mounts: [], error: e.message, ...(isSshAuthError(e) ? { authFailed: true } : {}) };
+    const out = { ok: false, mounts: [], error: e.message, ...(!logged && isSshAuthError(e) ? { authFailed: true } : {}) };
+    if (logged) return markLoggedIn(out);
+    return pwSent && !out.authFailed ? markPasswordSent(out) : out;
   }
 }
 

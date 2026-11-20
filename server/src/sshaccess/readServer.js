@@ -22,6 +22,12 @@ import { withDeadline } from '../util/deadline.js';
 import { gateAccountLogin } from './accountGate.js';
 import { winrmRun, WINRM_PORT } from '../winrm/client.js';   // v3.25(3단계) — Windows 단계 지정이 WinRM 일 때
 import { noteCredOutcome } from './outcome.js';
+/*
+ * 점검 2회차 C1(재현 — 폴러 1회 정지 뒤 서버 명령 3번 → 틀린 비밀번호 +3): 서버 단독 비밀번호(공통 계정 · 키 아님)는 일괄 문(한 일괄 동안)만 지났다 —
+ *   설계 §4.2 ④ ‘서버 정지’ 검사가 없어 누를 때마다 같은 틀린 비밀번호가 나갔다. 이제 같은 등록부 서버의 **스토리지 수집 인증 정지**(bmstor-auth-stops — 하나)를
+ *   접속 전에 보고, 이 코어가 본 거부 · 성공도 거기에 적는다(폴러와 같은 기록 — 비밀번호를 고치거나 ‘지금 수집’ 이 성공하면 풀린다).
+ */
+async function bmstorGuard() { try { return await import('../bmstor/poller.js'); } catch { return null; } }
 
 const t = (v, n = 256) => String(v ?? '').trim().slice(0, n);
 /** 로그인 시한(ssh2 readyTimeout) — 명령 시한과 더해 장비 시한보다 작아야 한다(시험). */
@@ -54,7 +60,8 @@ export function makeCredGate() {
       if (st.inflight) { await st.inflight; continue; }
       let done; st.inflight = new Promise((r) => { done = r; }); state.set(key, st);
       let v = null;
-      try { const r = await run(); v = r?.ok ? 'ok' : (r?.authFailed ? 'rejected' : null); return r; }
+      // 2회차 Q6 · B1: 로그인 뒤 실패(loggedIn)는 성공 · 비밀번호를 보낸 뒤 판정 모름(passwordSent)은 거부처럼 남은 서버에 보내지 않는다(계정 잠금 방지)
+      try { const r = await run(); v = r?.ok || r?.loggedIn === true ? 'ok' : (r?.authFailed || r?.passwordSent === true ? 'rejected' : null); return r; }
       finally { st.verdict = v; st.inflight = null; done(); }
     }
     return { ok: false, sameCredRejected: true };
@@ -89,15 +96,16 @@ export async function readServer(serverId, { feature, plan = {}, deadlineMs = RE
   if (!srv.privateKey && !srv.password) return { ok: false, code: 'not-configured', os, auth, reason: '이 서버에 정한 계정이 없습니다(따로 정함 · 물려받기 승인 모두 없음) — 설정 › 보안 › 서버 접속에서 정하세요.' };
   // 시한은 탐침 대기 밖에서 연다(run 안) — 호출부 signal(일괄 취소)과 합친다. 시한이 오면 세션째 끊는다(withSsh signal).
   // 점검 1회차 R2 · T4: 로그인 뒤의 실패(채널 · 연결 끊김 · 시한)는 loggedIn 을 단다 — 비밀번호는 받아들여졌으니 계정 탐침은 ‘성공’ 으로 본다(‘모름’ 이면 같은 계정 서버를 하나씩 직렬로 돌렸다).
+  //   2회차 보안 B1: 비밀번호를 보낸 뒤 판정을 받지 못한 실패는 passwordSent 를 단다(탐침 문 · 일괄 문이 남은 서버에 이어 보내지 않는다).
   const run = () => {
-    let logged = false;
+    let logged = false; let pwSent = false;
     return withDeadline(deadlineMs, (sig) => withSsh({ host: String(srv.host), port: Number(srv.port) || 22, username: srv.username || 'root', password: srv.password || '',
-      privateKey: srv.privateKey, passphrase: srv.passphrase, readyTimeout: READ_LOGIN_TIMEOUT_MS, singlePasswordAttempt: true, signal: signal ? AbortSignal.any([sig, signal]) : sig },
+      privateKey: srv.privateKey, passphrase: srv.passphrase, readyTimeout: READ_LOGIN_TIMEOUT_MS, singlePasswordAttempt: true, onPasswordSent: () => { pwSent = true; }, signal: signal ? AbortSignal.any([sig, signal]) : sig },
     async ({ exec }) => { logged = true; return { out: await exec(step.command, step.timeoutMs, { partial: true, maxBytes: step.maxBytes }) }; })
       // 로그인에 성공하면 명령이 시한 · 상한에 걸려도 ok(탐침 판정 — 비밀번호는 맞았다)
       .then((x) => ({ ok: true, out: x.out }))
-      .catch((e) => ({ ok: false, error: String(e?.message || e), hostkey: isSshHostKeyError(e), authFailed: !logged && isSshAuthError(e), timeout: sig.aborted || !!signal?.aborted, loggedIn: logged })), '서버 읽기 시한 초과')
-      .catch((e) => ({ ok: false, error: String(e?.message || e), timeout: true, loggedIn: logged }));
+      .catch((e) => ({ ok: false, error: String(e?.message || e), hostkey: isSshHostKeyError(e), authFailed: !logged && isSshAuthError(e), timeout: sig.aborted || !!signal?.aborted, loggedIn: logged, passwordSent: pwSent && !logged })), '서버 읽기 시한 초과')
+      .catch((e) => ({ ok: false, error: String(e?.message || e), timeout: true, loggedIn: logged, passwordSent: pwSent && !logged }));
   };
   // v3.25(3단계): Windows 단계 지정이 WinRM 이면 WinRM HTTPS + NTLM 으로(비밀번호만 — resolveOsAuth(winrm) 가 키를 쓰지 않게 이미 막았다)
   if (viaWinrm && (!step.winrm || !srv.password)) return { ok: false, code: 'no-plan', os, auth, reason: 'WinRM 으로 읽을 묶음이나 비밀번호가 없습니다.' };
@@ -105,24 +113,33 @@ export async function readServer(serverId, { feature, plan = {}, deadlineMs = RE
     const { username, domain } = ntlmNameOf(srv.username);
     try {
       const out = await winrmRun({ host: String(srv.host), port: Number(ef.port) || WINRM_PORT, username, domain, password: srv.password, command: step.winrm.command, args: [...step.winrm.args],
-        timeoutMs: Math.max(5_000, deadlineMs - 2_000), signal: signal ? AbortSignal.any([sig, signal]) : sig, maxBytes: step.maxBytes || 1024 * 1024 });
+        timeoutMs: Math.max(5_000, deadlineMs - 2_000), signal: signal ? AbortSignal.any([sig, signal]) : sig, maxBytes: step.maxBytes || 1024 * 1024, stderrMax: Number(step.stderrMax) > 0 ? Number(step.stderrMax) : 2000 });
       return { ok: true, out: { code: out.exitCode, stdout: out.stdout, stderr: out.stderr } };
     } catch (e) {
       const k = e?.kind || '';
-      return { ok: false, error: String(e?.message || e), authFailed: k === 'auth-rejected', tls: k === 'tls-peer' || k === 'cbt', timeout: k === 'timeout' || sig.aborted, tooLarge: k === 'too-large', loggedIn: e?.afterLogin === true, faultWhy: typeof e?.faultWhy === 'string' ? e.faultWhy : '' };
+      return { ok: false, error: String(e?.message || e), authFailed: k === 'auth-rejected', tls: k === 'tls-peer' || k === 'cbt', timeout: k === 'timeout' || sig.aborted, tooLarge: k === 'too-large', loggedIn: e?.afterLogin === true, passwordSent: e?.passwordSent === true, faultWhy: typeof e?.faultWhy === 'string' ? e.faultWhy : '' };
     }
   }, '서버 읽기 시한 초과').catch((e) => ({ ok: false, error: String(e?.message || e), timeout: true }));
   const viaAccount = srv.credAccountId && srv.credVersion != null;
-  const doRun = viaWinrm ? runWinrm : run;
+  // 2회차(기능 낮음 7): 걸린 시간은 접속을 시작한 때부터(계정 탐침 · 일괄 문 대기는 넣지 않는다)
+  let runAt = 0;
+  const doRun = () => { runAt = Date.now(); return (viaWinrm ? runWinrm : run)(); };
+  const ownPw = !viaAccount && !srv.privateKey && !srv.keyFingerprint && !!srv.password;
+  const BG = ownPw ? await bmstorGuard() : null;
+  if (ownPw) {
+    const stop = BG?.bmstorAuthStopFor?.(srv) || null;
+    if (stop) return { ok: false, code: 'cred', credCode: 'server-auth-stopped', os, auth, reason: `이 서버의 비밀번호는 앞서 로그인이 거부돼 멈춰 있습니다(${stop.attempts || 1}회 · 계정 잠금 방지 — 보내지 않았습니다). 비밀번호를 고치거나(서버 쪽을 되돌렸다면) 베어메탈 스토리지에서 ‘지금 수집’ 이 성공하면 풀립니다.` };
+  }
   const gated = viaAccount
     ? () => gateAccountLogin(srv, doRun, { feature, rejected: (x) => x?.authFailed === true, stopped: (code) => ({ ok: false, gated: code }) })
     : (!srv.privateKey && typeof credGate === 'function' ? () => credGate(credKey(srv), doRun) : doRun);
   const r = await gated();
   if (r.gated) return { ok: false, code: 'cred', credCode: r.gated, os, auth, reason: AUTH_ERROR[r.gated] || AUTH_ERROR['account-stopped'] };
-  if (r.sameCredRejected) return { ok: false, code: 'same-cred-rejected', os, auth, reason: '같은 계정명 · 비밀번호로 이번 일괄에서 먼저 읽은 서버가 로그인을 거부해 이 서버에는 보내지 않았습니다(계정 잠금 방지).' };
+  if (r.sameCredRejected) return { ok: false, code: 'same-cred-rejected', os, auth, reason: '같은 계정명 · 비밀번호로 이번 일괄에서 먼저 읽은 서버가 로그인을 거부했거나 판정을 시한 안에 받지 못해 이 서버에는 보내지 않았습니다(계정 잠금 방지).' };
+  if (ownPw && BG && !r.gated && !r.sameCredRejected) BG.bmstorNoteManualAuth?.(srv, { ok: !!r.ok || r.loggedIn === true, rejected: r.authFailed === true, feature });
   // 키 · 공통 계정 사용 기록 + 로그인 거부면 계정 단위 정지(outcome 하나 — 접속 단계 판정만)
   if (srv.keyFingerprint || srv.credAccountId) noteCredOutcome(srv, { ok: !!r.ok, rejected: r.authFailed === true, code: r.ok ? 'ok' : (r.timeout ? 'timeout' : 'fail'), feature, trigger, by });
-  const ms = Date.now() - t0;
+  const ms = Date.now() - (runAt || t0);
   const via = viaWinrm ? 'winrm' : 'ssh';
   if (!r.ok) {
     const code = r.authFailed ? 'auth-rejected' : r.hostkey ? 'hostkey' : r.tls ? 'tls' : r.tooLarge ? 'exec-truncated' : r.timeout ? 'timeout' : 'connect';
@@ -132,6 +149,8 @@ export async function readServer(serverId, { feature, plan = {}, deadlineMs = RE
           : code === 'exec-truncated' ? '출력이 상한을 넘었습니다(WinRM 은 받은 칸을 돌려주지 않습니다).'
         : code === 'timeout' ? `시한 안에 끝나지 않았습니다(${Math.round(deadlineMs / 1000)}초).`
           : `접속하지 못했습니다(${String(r.error || '').replace(/\s+/g, ' ').slice(0, 120)})`;
+    // 2회차 B1: 비밀번호를 보낸 뒤 판정을 받지 못했으면 밝힌다(거부였을 수 있다 — 같은 계정의 남은 서버에는 보내지 않는다 · 연달으면 계정 정지)
+    if (r.passwordSent && (code === 'timeout' || code === 'connect')) return { ok: false, code, reason: `${reason} 비밀번호를 보낸 뒤 로그인 판정을 받지 못했습니다(거부였을 수 있음 — 계정 잠금 방지로 같은 계정의 남은 서버에는 보내지 않습니다).`, os, via, auth, ms };
     return { ok: false, code, reason, os, via, auth, ms };
   }
   const out = r.out || {};

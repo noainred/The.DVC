@@ -153,6 +153,9 @@ test('② 값 검사 — 주입 시도는 모두 거절(접속 전) · 통과한
   // 점검 1회차 U2: 커널이 /net 으로 푸는 꼴(빈 조각 · . 조각)도 거절 · 끝의 / 하나와 이름 속 점은 그대로
   for (const v of ['//net', '//net/10.0.0.5', '/./net/h', '/var//log', '/var/./log', '/.']) assert.equal(P.checkRequest('du-top', { path: v }).ok, false, v);
   for (const v of ['/var/log/', '/etc/.hidden', '/a.b/c..d']) assert.equal(P.checkRequest('du-top', { path: v }).ok, true, v);
+  // 점검 2회차 D1: /proc/self/root · /proc/<pid>/root 로 /net 거절을 비켜 가지 못한다(/proc 통째로)
+  for (const v of ['/proc', '/proc/self/root/net/10.0.0.5', '/proc/thread-self/root/net/h', '/proc/1/root/net/x']) assert.equal(P.checkRequest('du-top', { path: v }).ok, false, v);
+  assert.equal(P.checkRequest('du-top', { path: '/process' }).ok, true);
   // 통과한 값은 명령에 꼭 한 번 · 작은따옴표 · -- 뒤(journalctl 은 -u 값)
   const one = (id, params) => P.planOf(P.presetById(id), P.checkRequest(id, params).params).linux.command;
   assert.match(one('svc-state', { unit: 'chronyd.service' }), / -- 'chronyd\.service'; printf /);
@@ -223,7 +226,8 @@ test('④-2 설정 화면 기능 목록 — 직접 켜야 하는 기능을 서�
   const v = await SA.buildView();
   const f = v.features.find((x) => x.id === 'server-cmd');
   assert.equal(f.explicit, true);
-  assert.equal(v.features.filter((x) => x.explicit).map((x) => x.id).join(), PL.EXPLICIT_FEATURES.join());
+  // 점검 2회차 W2-2: 키로만 · 직접 켠 키만 쓰는 설치 · 준비 기능(KEY_EXPLICIT_FEATURES)도 ‘직접 켜야’ 로 싣는다
+  assert.equal(v.features.filter((x) => x.explicit).map((x) => x.id).sort().join(), [...PL.EXPLICIT_FEATURES, ...PL.KEY_EXPLICIT_FEATURES].sort().join());
 });
 
 test('⑤ 코어로 실행 — 보낸 명령은 계획 그대로 · 끝 코드 · 다듬은 출력 · 계정 판정(직접 켠 계정만 · 접속 0회) · OS 에 없는 프리셋 · 엣지 · 값 오류는 접속 전', async () => {

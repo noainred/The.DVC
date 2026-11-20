@@ -21,3 +21,5 @@
 - **한계(추정 · 실제 Windows 미확인)**: 비밀번호가 맞고 WinRM 권한(Administrators · Remote Management Users · 원격 UAC)이 없어도 같은 401 이 올 수 있다 — 계정 잠금이 더 위험해 판정은 거부(정지) 그대로이고,
   안내 문구가 권한 가능성을 밝힌다(본문 Fault 사유가 있으면 `faultWhy` 로 덧붙임). 권한을 고친 뒤 ‘한 대로 다시 확인’ 으로 정지를 푼다.
 - Stream 여는 태그 정규식은 공백 하나(`\s(…)`) — `\s+` 와 `[^>]{0,300}` 겹침이 640KB 응답에 416ms(비율 시험).
+- 2회차: AUTHENTICATE 를 실은 요청이 401 이 아닌 4xx · 5xx 여도 로그인 성공(`afterLogin` — 원격 셸 꺼짐 Fault 등) · AUTHENTICATE 를 보낸 뒤 판정 전 실패는 `passwordSent` · stderr 상한은 호출부 값(`stderrMax`).
+  남긴 것(낮음): 시한이면 원격 셸 · 프로세스가 남을 수 있다(Receive 시한 = 전체 시한 − 2초 → 두 번째 Receive 중 끊김 · Signal/Delete 0) · NTLM Workstation 칸 비움 · MsvAvTargetName 없음 · 3xx 응답.

@@ -81,6 +81,15 @@ let lastRunAt = 0;
 let lastRunSummary = null;
 
 export function getBmLatest() { return latest; }
+/** 점검 2회차 C1: 이 서버(서버 단독 비밀번호)의 스토리지 수집 인증 정지 기록 — 코어 readServer 가 접속 전에 본다(같은 틀린 비밀번호를 사람 실행마다 보내지 않게). 없으면 null. */
+export function bmstorAuthStopFor(server) { try { return authGuard.authStopFor(authCredOf(server)); } catch { return null; } }
+/** 점검 2회차 C1: 코어 readServer(사람 실행)가 본 서버 단독 비밀번호 결과를 같은 기록에 — 성공이면 해제 · 접속 단계 거부면 정지(폴러가 다음 주기에 같은 비밀번호를 보내지 않게). */
+export function bmstorNoteManualAuth(server, { ok = false, rejected = false, feature = '' } = {}) {
+  try {
+    if (ok) { authGuard.clearAuthStop(server.id); return; }
+    if (rejected) authGuard.markAuthStopped(server.id, authCredOf(server), `SSH 인증 실패(${String(feature || '사람 실행').slice(0, 32)})`);
+  } catch { /* 기록 실패는 결과를 바꾸지 않는다 */ }
+}
 export function bmPollerStatus() { return { running, lastRunAt, lastRunSummary, intervalMinutes: getBmSettings().intervalMinutes, ioSampleSec: ioSampleSec() }; }
 
 /**

@@ -101,7 +101,9 @@ export function parseLinux(text) {
     disks = [];
     for (const d of parseDisks(lines('DISKS'))) {
       if (/^\/dev\/(?:zram|ram)\d/.test(d.dev)) continue;
-      const id = d.wwn ? `w:${d.wwn}` : (d.sn ? `s:${d.sn}` : '');
+      // 점검 2회차 F3(재현 합성): NVMe 시리얼은 컨트롤러 · 서브시스템 것이라 이름공간끼리 같다(uuid. · nvme. 꼴 WWN 은 normWwn 이 버린다) — NVMe 는 시리얼로 묶지 않는다
+      //   (NVMe 멀티패스는 커널이 장치 하나로 보인다). 시리얼 열쇠에는 크기도 넣는다(크기가 다른 디스크를 합치지 않게).
+      const id = d.wwn ? `w:${d.wwn}` : (d.sn && !/^\/dev\/nvme/.test(d.dev) ? `s:${d.sn}|${d.size}` : '');
       const prev = id ? seen.get(id) : null;
       if (prev) { prev.paths += 1; continue; }
       const row = { dev: d.dev, model: d.model, serial: d.sn || '', wwn: d.wwn || '', sizeBytes: numOrNull(d.size), media: d.media || '', tran: d.tran || '', paths: 1 };

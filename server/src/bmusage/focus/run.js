@@ -16,7 +16,9 @@
  *   · ‘원인 후보’ 는 상관이다(분마다 I/O · CPU 1위 프로세스가 몇 번 겹쳤나) — 인과를 단정하지 않는다(화면이 ‘후보’ 로만 말한다).
  */
 import crypto from 'node:crypto';
-import { withDeadline } from '../../proxy/sshExec.js';
+import { withDeadline, isSshAuthError } from '../../proxy/sshExec.js';
+import { gateAccountLogin } from '../../sshaccess/accountGate.js';   // 점검 2회차 A1: 분마다 도는 세션도 같은 계정 탐침 문을 지난다
+import { markLoggedIn, markPasswordSent } from '../../sshaccess/loginMark.js';
 import { config } from '../../config.js';
 import { osMissOf, idracMissOf } from '../missReason.js';
 import { numOrNull } from '../../util/numOrNull.js';
@@ -377,14 +379,22 @@ async function tick(sess, idx) {
   const waitMs = Math.max(5_000, Math.min(45_000, sess.intervalS * 1000 * 0.75));
   // 분마다 자격 다시 해석(점검 B-2) — 실패하면 authError 로 접속하지 않고 그 분은 결측(cred-config).
   const osHostNow = sess.hasOs ? await _D.refreshOsHost(tg.osHost).catch((e) => ({ ...tg.osHost, password: '', privateKey: undefined, passphrase: undefined, authError: `자격 해석 실패(${String(e?.message || e).slice(0, 80)})`, authErrorCode: 'auth-unresolved' })) : null;
+  const AUTH_ERROR = sess.hasOs ? (await import('../onboard/refs.js')).AUTH_ERROR : {};   // 정지 문구(모듈은 refreshOsHost0 이 이미 읽었다 — 캐시)
   const [os, idrac] = await Promise.all([
-    sess.hasOs ? withSlot(() => withDeadline(FOCUS_DEADLINE_MS, (signal) => _D.collectOs(osHostNow, {
+    // 점검 2회차 A1(재현 — 집중 세션 5개 · 비밀번호가 바뀐 뒤 같은 분에 틀린 비밀번호 5회): 공통 계정 비밀번호는 계정 탐침 문(accountGate)을 지난다 —
+    //   폴러 · 코어와 같은 판정(탐침 하나 · 거부면 그 자리에서 정지 · 로그인 뒤 실패는 성공 · 보낸 뒤 판정 모름은 남은 서버에 보내지 않음). 대기는 전역 슬롯 밖.
+    sess.hasOs ? gateAccountLogin(osHostNow, () => { let pwSent = false; let logged = false; return withSlot(() => withDeadline(FOCUS_DEADLINE_MS, (signal) => _D.collectOs(osHostNow, {
       signal, budgetMs: FOCUS_BUDGET_MS, partitionIo: !!st.partitionIo, blkqMax: st.blkqMax, peakWindowS: Math.min(FOCUS_PEAK_WINDOW_S, Number(st.peakWindowS ?? FOCUS_PEAK_WINDOW_S) || 0),
       // 83회차: 경량 스냅샷 안 시한 합(ps 2 · io 2+2 · 간격 2 · 이름 1 = 9초) + 여유 5초 ≤ 이 시한(산수 시험 bmTop8bBudget · rebut83) — ps 에도 시한을 붙여 12 → 15초.
       extraCommands: [{ name: 'snap', cmd: FOCUS_SNAPSHOT_COMMAND, timeoutMs: 15_000, maxBytes: 16 * 1024 }],
       // 8b 반증 F10: 집중 모니터링은 프로세스 Top-N exec 을 돌리지 않는다(자체 스냅샷 ps 상위가 있다 · top 값은 저장하지 않는다 — 매 분 top 대기 · /proc 읽기를 더하지 않게).
       top: false,
-    }), '집중 수집 시한 초과').catch((e) => ({ ok: false, error: String(e?.message || e).slice(0, 300) })), { priority: true, waitMs, onBusy: busy }) : null,
+      onPasswordSent: () => { pwSent = true; }, onLoggedIn: () => { logged = true; },
+    }), '집중 수집 시한 초과').catch((e) => { const o = { ok: false, error: String(e?.message || e).slice(0, 300) }; return logged ? markLoggedIn(o) : pwSent ? markPasswordSent(o) : o; }), { priority: true, waitMs, onBusy: busy }); }, {
+      feature: 'bm-usage',
+      rejected: (r) => !!r && r.ok === false && !r.authErrorCode && !r.busy && isSshAuthError({ message: String(r.error || '') }),
+      stopped: (code) => ({ ok: false, error: AUTH_ERROR[code] || AUTH_ERROR['account-stopped'], authErrorCode: code }),
+    }) : null,
     sess.hasIdrac ? (idrStop ? { ok: false, kind: 'auth-stopped' } : withSlot(() => _D.idracJob(tg.idrac, { full: false, allowList: false, timeoutMs: FOCUS_DEADLINE_MS }).catch((e) => ({ ok: false, error: String(e?.message || e).slice(0, 300) })), { priority: true, waitMs, onBusy: busy })) : null,
   ]);
   if (sess.stopped) return;

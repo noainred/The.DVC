@@ -229,6 +229,9 @@ export const AUTH_ERROR = Object.freeze({
   'account-state-unreadable': '서버 접속 상태 파일(ssh-access-state.json)을 읽지 못해 공통 계정으로 접속하지 않았습니다 — 계층 지정 · 정지 기록을 모르는 채 저장된 비밀번호를 보내지 않습니다.',
   'winrm-needs-password': 'WinRM 으로 붙는 Windows 단계 계정에 비밀번호가 없습니다(WinRM 은 비밀번호 로그인만 — 키로는 붙지 않습니다) — 설정 › 보안 › 서버 접속 › 공통 계정에서 비밀번호를 넣으세요.',
   'account-stopped': '이 공통 계정은 로그인 거부로 정지됐습니다(계정 잠금 방지 — 이 계정을 쓰는 서버 전부) — 설정 › 보안 › 서버 접속에서 비밀번호를 고치거나 ‘한 대로 다시 확인’ 을 하세요.',
+  // 2회차 M1 · B1(계정 탐침 문 — 비밀번호를 보내지 않았다 · 다음 주기에 다시 본다)
+  'account-probe-unreached': '같은 공통 계정을 쓰는 서버가 연달아 접속되지 않아(망 끊김 추정) 이번에는 이 서버에 붙지 않았습니다 — 비밀번호를 보내지 않았습니다. 다음 주기에 다시 봅니다.',
+  'account-login-unknown': '같은 공통 계정으로 방금 보낸 로그인이 시한 안에 판정되지 않아(거부였을 수 있음 — 계정 잠금 방지) 이번에는 이 서버에 보내지 않았습니다. 연달으면 계정을 멈춥니다.',
   'account-corp-stopped': '이 법인의 저장 계정 · 키 사용이 중지됐습니다(긴급 조치) — 설정 › 보안 › 서버 접속에서 재개하기 전에는 공통 계정으로 접속하지 않습니다.',
   'account-feature': '이 공통 계정은 이 기능에 허용되지 않았습니다 — 설정 › 보안 › 서버 접속에서 계정의 ‘쓸 수 있는 기능’ 을 확인하세요.',
   'account-os': '공통 계정의 OS(Linux · Windows)가 서버의 OS 와 다릅니다 — 다른 OS 의 비밀번호를 보내지 않습니다. 서버의 OS 종류나 계정을 확인하세요.',
@@ -281,7 +284,7 @@ export function effectiveAccountOf(server = {}) {
  * 키 배치 판정(keyPlacementIssue · ALWAYS_ALLOWED_FEATURES)은 순수 모듈 placement.js 로 옮겼다(4회차 점검 D1 — 온보딩 분석이 같은 함수를 직접 부른다).
  *   여기서 그대로 다시 내보낸다 — 기존 호출부(REFS.keyPlacementIssue · sshaccess)는 바뀌지 않는다. 판정은 여전히 하나다.
  */
-export { ALWAYS_ALLOWED_FEATURES, EXPLICIT_FEATURES, keyPlacementIssue } from './placement.js';
+export { ALWAYS_ALLOWED_FEATURES, EXPLICIT_FEATURES, KEY_EXPLICIT_FEATURES, keyPlacementIssue } from './placement.js';
 import { featureBlocked } from './placement.js';
 /**
  * 법인 사용 중지 판정 — 서버 법인 · 공통 계정 법인 · 키 폴더 법인 중 하나라도 멈췄거나, 중지할 때 적어 둔 서버(id · 접속처)이면.
@@ -430,9 +433,10 @@ export function withResolvedAuth(list = [], { feature = '', winrm = false } = {}
     if (!s || typeof s !== 'object') return s;
     // 예전 항목(서버 비밀번호) — 그대로. v3.24: 자기 자격이 없는 승인된 서버(계층 지정을 물려받음)는 해석한다.
     // v3.31(점검 1회차 T3 — 재현): 자격이 하나도 없고 승인도 효력이 없는 서버(승인 거둠 · 주소 · OS · 법인이 바뀌어 승인이 풀림)는 붙지 않는다 —
-    //   승인 때 addrOnly 를 지워 targets 의 거름을 지나 root + 빈 비밀번호로 로그인했다. 주소만 등록(addrOnly)은 예전대로 targets 가 거르고(그대로 둠),
-    //   엣지 위임 서버는 그 엣지가 자기 자격으로 붙는다(중앙 판정 밖 — 그대로 둠).
-    if (!t(s.keyRef) && !t(s.credRef) && !hasOwnCred(s) && !inheritActive(s) && s.addrOnly !== true && !t(s.agent)) {
+    //   승인 때 addrOnly 를 지워 targets 의 거름을 지나 root + 빈 비밀번호로 로그인했다. 엣지 위임 서버는 그 엣지가 자기 자격으로 붙는다(중앙 판정 밖 — 그대로 둠).
+    //   점검 2회차 X-1(재현 — 가짜 sshd 로그): 주소만 등록(addrOnly)을 거르는 것은 bm-usage targets 뿐이었다 — bm-storage 수집은 계정 없는 addrOnly 서버에
+    //   root + 빈 비밀번호로 붙었다(수동 수집은 누를 때마다). 이제 addrOnly 도 같이 막는다(자격이 없으면 붙지 않는다).
+    if (!t(s.keyRef) && !t(s.credRef) && !hasOwnCred(s) && !inheritActive(s) && !t(s.agent)) {
       return { ...s, password: '', authError: AUTH_ERROR['not-configured'], authErrorCode: 'not-configured' };
     }
     if (!t(s.keyRef) && !t(s.credRef) && (hasOwnCred(s) || !inheritActive(s))) return s;

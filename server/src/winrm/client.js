@@ -73,7 +73,7 @@ const negotiateOf = (headers) => {
  *   username · domain — NTLM 에는 계정명과 도메인을 따로 보낸다(로컬 계정은 도메인 '.' 이 아니라 빈 값 — 서버가 자기 이름으로 본다).
  * @returns {Promise<{stdout:string, stderr:string, exitCode:number|null, ms:number}>}
  */
-export async function winrmRun({ host, port = WINRM_PORT, username, domain = '', password, command, args = [], timeoutMs = 60_000, signal, maxBytes = 1024 * 1024 } = {}) {
+export async function winrmRun({ host, port = WINRM_PORT, username, domain = '', password, command, args = [], timeoutMs = 60_000, signal, maxBytes = 1024 * 1024, stderrMax = 4000 } = {}) {
   if (!host || !username || typeof password !== 'string' || !password) throw new WinrmError('no-secret', 'WinRM 접속에는 계정과 비밀번호가 필요합니다(키 로그인은 SSH 방식에서만 됩니다).');
   if (!HOST_RE.test(String(host)) || String(host).length > 253) throw new WinrmError('bad-host', 'WinRM 접속처 글자가 올바르지 않습니다.');
   const t0 = Date.now();
@@ -110,6 +110,8 @@ export async function winrmRun({ host, port = WINRM_PORT, username, domain = '',
   const call = async (action, body, { selector = '', options = '' } = {}, auth = '') => {
     const r = await post(WS.envelope({ to: url, action, selector, body, options, timeoutS: Math.max(5, Math.floor(timeoutMs / 1000) - 2) }), auth);
     // 로그인 거부는 **AUTHENTICATE 를 실은 요청**의 401 만이다(F1) — 그 뒤의 401 은 세션을 잃은 것(로그인 거부로 계정을 멈추지 않는다)
+    // 2회차 보안 H1(WinRM): AUTHENTICATE 를 실은 요청이 401 이 아닌 4xx · 5xx(원격 셸 꺼짐 · 셸 수 상한 Fault 등)면 비밀번호는 받아들여졌다 — 로그인 성공으로 친다.
+    if (auth && r.status >= 400 && r.status !== 401) loggedIn = true;
     if (r.status === 401 && auth) {
       // 점검 1회차 R1(추정 — 실제 Windows 미확인): 비밀번호는 맞고 WinRM 권한(Remote Management Users · 원격 UAC)이 없을 때도 이 자리에서 401 이 올 수 있다 —
       //   계정 잠금이 더 위험하므로 판정은 그대로(거부 · 정지)이고, 본문에 Fault 사유가 있으면 붙여 사람이 가를 수 있게 한다(faultWhy).
@@ -126,7 +128,7 @@ export async function winrmRun({ host, port = WINRM_PORT, username, domain = '',
     }
     return { text: r.text };
   };
-  let loggedIn = false;
+  let loggedIn = false; let authSent = false;
   try {
     // ② NEGOTIATE — 본문 없는 요청에 인증 머리만(대부분의 서버가 401 + CHALLENGE 로 답한다)
     const neg = NTLM.negotiateMessage();
@@ -139,7 +141,8 @@ export async function winrmRun({ host, port = WINRM_PORT, username, domain = '',
     let message;
     try { ({ message } = NTLM.authenticateMessage({ user: username, domain, password, negotiate: neg, challenge: ch, certDer: st.certDer })); }
     catch (e) { throw new WinrmError('cbt', String(e?.message || e).slice(0, 200)); }   // 채널 바인딩을 정할 수 없으면 AUTHENTICATE 를 보내지 않는다(F2)
-    // ③ AUTHENTICATE 와 함께 셸 만들기(같은 연결)
+    // ③ AUTHENTICATE 와 함께 셸 만들기(같은 연결) — 이 요청부터 비밀번호(NTLMv2 응답)가 나간다(2회차 B1: 판정 전 시한이면 passwordSent)
+    authSent = true;
     const created = await call(WS.ACTION.create, WS.createShellBody(), { options: WS.CREATE_OPTIONS }, `Negotiate ${message.toString('base64')}`);
     // 점검 1회차 R2: AUTHENTICATE 를 실은 요청이 401 이 아니면 비밀번호는 받아들여졌다 — 그 뒤의 실패(시한 · 상한 · Fault · 세션 잃음)는 afterLogin 을 단다.
     //   계정 탐침(accountGate)은 이것을 ‘성공’ 으로 본다(예전에는 ‘모름’ 이라 같은 계정 서버들을 하나씩 직렬로 돌렸다 — 3대 15초 · 50대면 약 50분).
@@ -160,7 +163,7 @@ export async function winrmRun({ host, port = WINRM_PORT, username, domain = '',
       }
       // 끝(Done)을 받지 못했으면 실패다 — 받은 만큼을 성공으로 돌려주지 않는다(F6 · ‘전부 아니면 실패’)
       if (!done) throw new WinrmError('timeout', 'WinRM 명령의 끝(Done)을 받지 못했습니다.');
-      return { stdout: Buffer.concat(out.stdout).toString('utf8'), stderr: Buffer.concat(out.stderr).toString('utf8').slice(0, 4000), exitCode, ms: Date.now() - t0 };
+      return { stdout: Buffer.concat(out.stdout).toString('utf8'), stderr: Buffer.concat(out.stderr).toString('utf8').slice(0, Number(stderrMax) > 0 ? Number(stderrMax) : 4000), exitCode, ms: Date.now() - t0 };   // 2회차(WinRM W2-4): 호출부 상한(코어 stderrMax)
     } finally {
       // 정리 — 실패해도 결과를 바꾸지 않는다(시한이 이미 지났으면 하지 않는다)
       if (!ac.signal.aborted) {
@@ -170,6 +173,7 @@ export async function winrmRun({ host, port = WINRM_PORT, username, domain = '',
     }
   } catch (e) {
     if (loggedIn && e && typeof e === 'object') { try { e.afterLogin = true; } catch { /* 고정된 객체 — 표시 없이 던진다 */ } }
+    else if (authSent && e && typeof e === 'object' && e.kind !== 'auth-rejected') { try { e.passwordSent = true; } catch { /* 표시 없이 던진다 */ } }
     throw e;
   } finally {
     clearTimeout(timer);

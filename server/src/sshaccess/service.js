@@ -19,7 +19,7 @@ import * as REFS from '../bmusage/onboard/refs.js';
 import { addrKey } from '../bmusage/onboard/bindRule.js';
 import { RSA_MIN_BITS } from '../bmusage/onboard/keyParse.js';
 import { listBmServersRaw, registryLoadError as bmRegistryLoadError, setBmServerKeyRef, restoreBmServerKeyRef,
-  setBmServerInherit, setBmServerCredRef, restoreBmServerAccess, setBmServerOs, setBmServersOs, inheritActive, inheritKeyOf, hasOwnCred, SERVER_OS } from '../bmstor/registry.js';
+  setBmServerInherit, setBmServersInherit, setBmServerCredRef, restoreBmServerAccess, setBmServersOs, inheritActive, inheritKeyOf, hasOwnCred, SERVER_OS } from '../bmstor/registry.js';
 import { loadSecretsPolicy } from '../security/secretVault.js';
 import * as ST from './state.js';
 import * as INS from './installed.js';
@@ -158,7 +158,8 @@ export async function buildView({ now = Date.now() } = {}) {
     servers: pubServers,
     edgeRows,
     // v3.30: explicit — 기능 목록이 없는 예전 키 · 계정이 쓰지 못하는 기능(직접 켜야 — placement.EXPLICIT_FEATURES 하나 · 화면이 ‘예전 방식’ 문구에서 뺀다)
-    features: FEATURE_CATALOG.map((f) => ({ ...f, explicit: REFS.EXPLICIT_FEATURES.includes(f.id) })),
+    // 점검 2회차 W2-2: 키로만 · 직접 켠 키만 쓰는 설치 · 준비 기능(placement.KEY_EXPLICIT_FEATURES)도 ‘직접 켜야’ 로 표시한다(판정은 installCred)
+    features: FEATURE_CATALOG.map((f) => ({ ...f, explicit: REFS.EXPLICIT_FEATURES.includes(f.id) || REFS.KEY_EXPLICIT_FEATURES.includes(f.id) })),
     inbox: { dir: inbox.dir, exists: inbox.exists, items: inbox.items, unknownFolders: inbox.unknownFolders, unknownTotal: inbox.unknownTotal, truncated: inbox.truncated, rootIsLink: inbox.rootIsLink },
     check: buildKeyCheck({ now, policyMode, inbox, drift, servers: serverSummary, corpName }),
     stops: ST.listStops(),
@@ -654,7 +655,7 @@ export async function setAssignment({ corp, level, accountId = '', auth = '', vi
       { ok: !!r.ok, rejected: !r.ok && r.kind === 'auth-rejected', code: r.kind, feature: 'conn-test', trigger: 'manual', by });
     if (!r.ok) return { ok: false, code: 'verify-failed', status: 409, reason: `${target.name || target.host} 에서 ${probe.moving ? `위 단계 계정(${pa.name})으로 ` : ''}확인하지 못해 지정을 ${probe.moving ? '지우지' : '저장하지'} 않았습니다 — ${r.reason || r.kind}`, verified: { server: target.name || target.host, ok: false, kind: r.kind } };
     verified = { server: target.name || target.host, ok: true, kind: r.kind, ...(probe.moving ? { account: pa.name } : {}) };
-    if (r.secretVersion) { KS.markAccountVerified(pa.id, { serverName: target.name || target.host, secretVersion: r.secretVersion }); ST.clearAccountStop(pa.id, { by, accountName: pa.name, why: '계층 지정 저장 전 확인 성공' }); }
+    if (r.secretVersion) { KS.markAccountVerified(pa.id, { serverName: target.name || target.host, secretVersion: r.secretVersion }); ST.clearAccountStop(pa.id, { by, accountName: pa.name, why: '계층 지정 저장 전 확인 성공', version: r.secretVersion }); }   // 2회차 Q3: 확인한 판의 정지만
   }
   if (dryRun) return { ok: true, dry: true };
   const w = ST.setAssign(c, level, acc ? { account: acc.id, auth, via: level === 'windows' && via === 'winrm' ? 'winrm' : '', port: level === 'windows' && via === 'winrm' ? port : null } : null, { by });
@@ -695,6 +696,11 @@ export async function approveInherit({ ids = [], expectAddrs = {}, expectKeys = 
   const groups = new Map();   // `${계정}|${로그인 방식}` → 그 계정을 쓰게 되는 서버들
   for (const x of using) { const k = `${x.ef.accountId}|${x.ef.auth || ''}|${x.ef.via || ''}|${x.ef.port || ''}`; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(x); }
   if (groups.size > APPROVE_MAX_ACCOUNTS) return { ok: false, code: 'too-many-accounts', status: 409, reason: `고른 서버들이 쓰게 될 공통 계정이 ${groups.size}개입니다 — ${APPROVE_MAX_ACCOUNTS}개 이하로 나눠 승인하세요(계정마다 한 대씩 먼저 확인합니다).` };
+  // 점검 2회차 W2-1(Chromium 재현): 고른 확인 서버가 승인으로 계정을 쓰게 되는 서버가 아니면 조용히 첫 대로 바꾸지 않는다 — 후보를 돌려준다(빈 값 = ‘고른 서버의 첫 대’)
+  const vid = t(verifyServerId, 64);
+  if (vid && using.length && !using.some((x) => x.s.id === vid)) {
+    return { ok: false, code: 'need-verify', status: 409, reason: `먼저 확인할 서버는 승인으로 공통 계정을 쓰게 되는 서버 ${using.length}대 중에서 고르세요(계정마다 한 대).`, candidates: using.slice(0, 50).map((x) => ({ id: x.s.id, name: x.s.name || x.s.host })) };
+  }
   if (dryRun) return { ok: true, dry: true };
   const verifiedAll = [];
   for (const xs of groups.values()) {
@@ -708,11 +714,11 @@ export async function approveInherit({ ids = [], expectAddrs = {}, expectKeys = 
     verifiedAll.push({ server: pick.s.name || pick.s.host, account: acc.name, ok: true, kind: r.kind });
   }
   const verified = verifiedAll.length ? { ...verifiedAll[0], server: verifiedAll.map((v) => v.server).join(' · ') } : null;
-  const done = []; const failed = [];
-  for (const { s } of targets) {
-    const w = setBmServerInherit(s.id, { on: true, clearOwn: !!clearOwn, expectAddr: regAddrOf(s), expectKey: inheritKeyOf(s), by });
-    if (w.ok) done.push(s.id); else failed.push({ id: s.id, name: s.name || s.host, code: w.code, reason: w.reason });
-  }
+  // 점검 2회차 Q2: 승인 여러 대는 등록부 한 번 쓰기(서버마다 persist 하면 666대에 이벤트 루프 1.7~3.6초 정지 — 재현)
+  const w = setBmServersInherit(targets.map(({ s }) => ({ id: s.id, expectAddr: regAddrOf(s), expectKey: inheritKeyOf(s) })), { clearOwn: !!clearOwn, by });
+  if (!w.done.length && w.code) return { ok: false, code: w.code, status: w.status || 503, reason: w.reason, ...(verified ? { verified, verifiedAll } : {}) };
+  const nameOf = new Map(targets.map(({ s }) => [s.id, s.name || s.host]));
+  const done = w.done; const failed = w.failed.map((f) => ({ ...f, name: nameOf.get(f.id) || f.id }));
   return { ok: failed.length === 0, approved: done.length, ...(failed.length ? { code: 'partial', status: 409, reason: `${failed.length}대는 승인하지 못했습니다.`, failed } : {}), ...(verified ? { verified, verifiedAll } : {}), using: using.length };
 }
 
@@ -768,8 +774,8 @@ export function setServersOs({ ids = [], os = '' } = {}) {
   }
   const lost = list.filter((s) => inheritActive(s) && (Object.hasOwn(map, s.id) || clear.includes(s.id))).length;
   let changed = 0;
+  for (const id of clear) map[id] = '';   // 점검 2회차 Q2: 미지정으로도 한 번 쓰기(서버마다 persist 하지 않는다)
   if (Object.keys(map).length) { const w = setBmServersOs(map); if (!w.ok) return w; changed += w.changed; }
-  for (const id of clear) { const w = setBmServerOs(id, ''); if (!w.ok) return { ...w, partial: { changed } }; if (w.changed) changed += 1; }
   return { ok: true, changed, skipped: list.length - changed, inheritLost: lost };
 }
 
@@ -812,7 +818,8 @@ export async function saveAccountChecked({ input = {}, verifyServerId = '', by =
   if (verified) {
     const saved = KS.accountById(r.account.id);
     KS.markAccountVerified(r.account.id, { serverName: verified.server, secretVersion: KS.accountSecretVersion(saved) });
-    ST.clearAccountStop(r.account.id, { by, accountName: r.account.name, why: '새 비밀번호 저장 전 확인 성공' });
+    // 2회차 Q3(재현): 옛 판의 정지는 지우지 않는다 — 주기 시작 때 옛 판으로 해석해 둔 서버가 틀린 비밀번호를 한 번 더 보냈다(정지는 판에 묶여 새 판에는 듣지 않는다 · 화면은 ‘바꿔서 풀림’ 으로 보인다)
+    ST.clearAccountStop(r.account.id, { by, accountName: r.account.name, why: '새 비밀번호 저장 전 확인 성공', version: KS.accountSecretVersion(saved) });
   }
   return { ...r, ...(verified ? { verified } : {}) };
 }

@@ -151,7 +151,11 @@ const LEGACY_ALGOS = (() => {
 })();
 const NO_MATCH = /no matching (key exchange|host key|cipher|MAC|compression)|Handshake failed/i;
 
-function connect({ host, port = 22, username, password, privateKey, passphrase, readyTimeout = SSH_READY_TIMEOUT_MS, signal, trace = null, verbose = false, _legacy = false, singlePasswordAttempt = false }) {
+function connect({ host, port = 22, username, password, privateKey, passphrase, readyTimeout = SSH_READY_TIMEOUT_MS, signal, trace = null, verbose = false, _legacy = false, singlePasswordAttempt = false, onPasswordSent = null }) {
+  // 2회차 보안 B1: 비밀번호(또는 k-i 답)를 **실제로 보냈는가** — 보낸 뒤 시한 · 끊김이면 판정은 서버 쪽에서 끝났을 수 있다(계정 잠금 횟수에 든다).
+  //   호출부(계정 탐침)가 ‘연결 실패(비밀번호 안 감)’ 와 가르게 알린다. 오류를 바꾸지 않는다(호출부 콜백 한 번).
+  let pwSentNoted = false;
+  const notePwSent = () => { if (pwSentNoted) return; pwSentNoted = true; try { onPasswordSent?.(); } catch { /* 알림 실패는 접속을 바꾸지 않는다 */ } };
   const say = (msg, level) => { try { trace?.(msg, level); } catch { /* */ } };
   return new Promise((resolve, reject) => {
     if (signal?.aborted) return reject(new Error('SSH 접속 취소(타임아웃)'));
@@ -178,7 +182,7 @@ function connect({ host, port = 22, username, password, privateKey, passphrase, 
       if (LEGACY_FALLBACK && LEGACY_ALGOS && !_legacy && NO_MATCH.test(e.message || '')) {
         say('알고리즘 협상 실패 → 구형 알고리즘(diffie-hellman-group1-sha1/ssh-dss/aes-cbc 등)까지 열어 1회 재시도합니다.', 'warn');
         try { conn.end(); } catch { /* */ }
-        connect({ host, port, username, password, privateKey, passphrase, readyTimeout, signal, trace, verbose, _legacy: true, singlePasswordAttempt }).then(resolve, reject);
+        connect({ host, port, username, password, privateKey, passphrase, readyTimeout, signal, trace, verbose, _legacy: true, singlePasswordAttempt, onPasswordSent }).then(resolve, reject);
         return;
       }
       reject(e);
@@ -201,6 +205,7 @@ function connect({ host, port = 22, username, password, privateKey, passphrase, 
     // 같은 비밀번호로 모든 프롬프트에 응답한다.
     conn.on('keyboard-interactive', (name, instr, lang, prompts, finish) => {
       say(`keyboard-interactive 프롬프트 ${prompts.length}개 — 같은 비밀번호로 응답`, 'debug');
+      if (password && prompts.length) notePwSent();
       finish(prompts.map(() => password || ''));
     });
     const auth = { host, port, username, readyTimeout, keepaliveInterval: 15000 };
@@ -220,7 +225,7 @@ function connect({ host, port = 22, username, password, privateKey, passphrase, 
         let tried = 0;
         auth.authHandler = (left) => {
           tried += 1;
-          if (tried === 1) return 'password';
+          if (tried === 1) { if (password) notePwSent(); return 'password'; }
           if (tried === 2 && Array.isArray(left) && !left.includes('password') && left.includes('keyboard-interactive')) return 'keyboard-interactive';
           return false;
         };
