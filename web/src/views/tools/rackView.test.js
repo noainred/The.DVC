@@ -80,4 +80,11 @@ describe('rackView — 화면 계산', () => {
     expect(V.matchPlace(p, 'zzz')).toBe(false);
     expect(V.matchPlace(p, '  ')).toBe(null);
   });
+
+  it('diffCountText: 0 인 항목은 빼고, 바뀐 것이 없으면 그렇게 말한다', () => {
+    expect(V.diffCountText({ placeAdd: 2, placeMove: 1, rackRemove: 1 })).toBe('랙 삭제 1 / 장비 추가 2 · 이동 1');
+    expect(V.diffCountText({ placeAdd: 0 })).toBe('바뀐 것 없음');
+    expect(V.diffCountText(null)).toBe('—');
+    expect(V.fieldsText(['label', 'opW', 'zzz'])).toBe('이름 · 운전 전력 · zzz');
+  });
 });

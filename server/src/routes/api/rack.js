@@ -30,6 +30,7 @@ import { hwSummaryOf, mgmtHostOf } from '../../idrac/hwSummary.js';
 import { partHealthRollup } from '../../idrac/invView.js';
 import { cleanText, cleanPlaceInput, cleanRackInput, intIn, rackTotals, serialKeyOf, LIMITS, KIND_LABEL } from '../../rack/layout.js';
 import * as R from '../../rack/db.js';
+import { VERSION_KEEP } from '../../rack/versions.js';
 import { acquireExport } from '../../util/exportBusy.js';
 import { todayStamp } from '../../util/dayKey.js';
 
@@ -322,6 +323,17 @@ async function runOp(req, res) {
         audit(req, `rack.${op}`, g.corpId, name || b.id);
         return res.json({ ok: true, ...r });
       }
+      case 'version.restore': {
+        const corpId = cleanText(b.corpId, 64);
+        const acc = accessOf(req);
+        if (!corpId || !canRead(acc, corpId)) return res.status(404).json({ ok: false, reason: '법인을 찾지 못했습니다.' });
+        if (!canWrite(acc, corpId)) return res.status(403).json({ ok: false, error: 'forbidden', reason: '이 법인의 랙 실장도를 고칠 권한이 없습니다(관리자 · 그 법인 쓰기 범위만).' });
+        const versionId = intRev(b.versionId); const expectLatestId = intRev(b.expectLatestId);
+        if (versionId == null) return res.status(400).json({ ok: false, reason: '판 번호가 올바르지 않습니다.' });
+        const r = await R.restoreVersion({ corpId, versionId, expectLatestId, user });
+        audit(req, 'rack.version.restore', corpId, `판 #${versionId} → 새 판 #${r.latestId}`);
+        return res.json({ ok: true, ...r });
+      }
       case 'type.add': case 'type.remove': {
         if (!isAdminDetailUser(req.user) || !isFullReadWriteScope(req.user, store.get())) {
           return res.status(403).json({ ok: false, error: 'forbidden', reason: '랙 종류는 전 법인 공용 목록이라 조회 · 쓰기 모두 전체 범위인 관리자만 바꿀 수 있습니다.' });
@@ -386,6 +398,28 @@ export function registerRack(api) {
         isAdmin: acc.isAdmin, kinds: KIND_LABEL, limits: LIMITS,
       });
     } catch (e) { sendErr(res, e); }
+  });
+  // 법인별 판(최근 30개) — 조회는 그 법인 조회 범위 · 작업자 계정명은 관리자 판본만(변경 이력과 같은 기준).
+  api.get('/tools/rack/versions', toolsPerm, async (req, res) => {
+    const corpId = cleanText(req.query?.corp, 64);
+    const acc = accessOf(req);
+    if (!corpId || !canRead(acc, corpId)) return res.status(404).json({ ok: false, reason: '법인을 찾지 못했습니다.' });
+    try {
+      const admin = isAdminDetailUser(req.user);
+      const versions = (await R.listVersions(corpId)).map((v) => ({ ...v, user: admin ? v.user : '' }));
+      return res.json({ ok: true, corpId, versions, latestId: versions[0]?.id ?? null, keep: VERSION_KEEP, canRestore: canWrite(acc, corpId) });
+    } catch (e) { return sendErr(res, e); }
+  });
+  api.get('/tools/rack/versions/:vid', toolsPerm, async (req, res) => {
+    const corpId = cleanText(req.query?.corp, 64);
+    const acc = accessOf(req);
+    if (!corpId || !canRead(acc, corpId) || !/^\d{1,12}$/.test(String(req.params.vid))) return res.status(404).json({ ok: false, reason: '판을 찾지 못했습니다.' });
+    try {
+      const d = await R.versionDetail(corpId, Number(req.params.vid));
+      if (!d) return res.status(404).json({ ok: false, reason: '판을 찾지 못했습니다.' });
+      if (!isAdminDetailUser(req.user)) d.version.user = '';
+      return res.json({ ok: true, ...d });
+    } catch (e) { return sendErr(res, e); }
   });
   api.get('/tools/rack/room/:id', toolsPerm, async (req, res) => {
     if (!isId(req.params.id)) return res.status(404).json({ ok: false, reason: '전산실을 찾지 못했습니다.' });
