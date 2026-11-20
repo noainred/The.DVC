@@ -75,6 +75,11 @@ function migrate(db) {
 function prepare(db) {
   return {
     serverGet: db.prepare('SELECT * FROM dbr_server WHERE agent=? AND server_id=?'),
+    serverOthers: db.prepare("SELECT agent FROM dbr_server WHERE server_id=? AND service_tag=? AND service_tag<>'' AND agent<>? AND first_ok_at IS NOT NULL"),
+    deleteServer: db.prepare('DELETE FROM dbr_server WHERE agent=? AND server_id=?'),
+    moveServer: db.prepare('UPDATE dbr_server SET agent=? WHERE agent=? AND server_id=?'),
+    moveRecords: db.prepare('UPDATE OR IGNORE dbr_record SET agent=? WHERE agent=? AND server_id=?'),
+    moveSerials: db.prepare('UPDATE OR IGNORE dbr_serial SET agent=? WHERE agent=? AND server_id=?'),
     serverUpsert: db.prepare(`INSERT INTO dbr_server(agent, server_id, name, host, service_tag, first_ok_at, last_scan_at, last_ok_at, last_status, last_reason,
         log_order, log_total, log_oldest, covered_from, continuous_since, complete, read_last, synthesized, inv_at, drives_json, updated_at, newest_created, read_stop, read_diag, probe_json, probe_at,
         vals_json, sel_json)
@@ -160,7 +165,7 @@ export const RECORDS_PER_SERVER_MAX = 20_000;
  * 일부만 읽은 뒤 더 깊이 읽어 과거 항목을 채워 넣는 것은 새 기록이 아니다).
  * @returns {Promise<{ok:boolean, reason?:string, servers:number, storedIds:string[], newRecords:Array, baselineServers:number}>}
  */
-export async function ingestServers(agent, servers, { now = Date.now(), yielder = createYielder(15) } = {}) {
+export async function ingestServers(agent, servers, { now = Date.now(), yielder = createYielder(15), canMoveFrom = () => false } = {}) {
   // 진행 보고(서버 0대)는 DB 를 건드리지 않는다 — 세대를 올리면 화면 캐시만 버려진다.
   if (!Array.isArray(servers) || !servers.length) return { ok: true, servers: 0, storedIds: [], newRecords: [], baselineServers: 0 };
   const h = await open();
@@ -176,6 +181,20 @@ export async function ingestServers(agent, servers, { now = Date.now(), yielder 
     let isBaseline = false;
     h.db.exec('BEGIN');
     try {
+      // 반증 2회차 R2-3: 그 서버를 맡은 노드가 바뀌면(엣지가 없던 법인에 엣지를 배포 · 중앙 직결 → 엣지) (노드, id) 행이 새로 생겨 지난 기록 ·
+      //   시리얼 이력 · 기준선이 화면에서 사라졌다. 이 노드에 행이 없고, **같은 id · 같은 서비스 태그**(비어 있지 않음)의 행이 다른 노드에 정확히 하나면 그 이력을 이 노드로 옮긴다.
+      //   반증 3회차 D1: 옮기는 것은 ① 이 점검이 **정상으로 읽었고**(실패 보고 한 줄로 남의 이력을 가져가지 않게) ② 호출자가 '원래 노드는 이제 그 서버를
+      //   맡지 않는다' 고 판정할 때만이다(canMoveFrom — 모르면 옮기지 않는다). 두 노드가 함께 가진 동안 점검마다 이력이 오가던 것도 이것으로 막는다.
+      //   이 노드의 행이 있어도 정상으로 읽은 적이 없으면(첫 보고가 실패) 빈 행이다 — 지우고 옮긴다. 옮겨 올 쪽은 정상으로 읽은 적이 있는 행만.
+      const mine = h.st.serverGet.get(a, s.id) || null;
+      if (s.ok && s.serviceTag && (!mine || mine.first_ok_at == null)) {
+        const others = h.st.serverOthers.all(s.id, String(s.serviceTag), a);
+        if (others.length === 1 && canMoveFrom(others[0].agent, s.id) === true) {
+          const from = others[0].agent;
+          if (mine) h.st.deleteServer.run(a, s.id);
+          h.st.moveServer.run(a, from, s.id); h.st.moveRecords.run(a, from, s.id); h.st.moveSerials.run(a, from, s.id);
+        }
+      }
       const prev = h.st.serverGet.get(a, s.id) || null;
       const baseline = !(prev && Number.isFinite(prev.first_ok_at));
       const drivesJson = Array.isArray(s.drives) ? JSON.stringify(s.drives) : (prev?.drives_json ?? null);
@@ -235,7 +254,8 @@ export async function ingestServers(agent, servers, { now = Date.now(), yielder 
         if (!s.log.foundCursor && Array.isArray(s.log.top)) {
           row.read_diag = JSON.stringify({ at: now, read: finite(s.log.read), total: finite(s.log.total), pages: finite(s.log.pages), ms: finite(s.log.ms),
             distinct: finite(s.log.distinct), firstLen: finite(s.log.firstLen), hasNext: s.log.hasNext ?? null, path: s.log.path || '', top: s.log.top,
-            oldest: finite(s.log.oldestRead), newest: finite(s.log.newestCreated), reachedEnd: s.log.reachedEnd === true, oldestCode: s.log.oldestCode || '' }).slice(0, 4_000);
+            oldest: finite(s.log.oldestRead), newest: finite(s.log.newestCreated), reachedEnd: s.log.reachedEnd === true, oldestCode: s.log.oldestCode || '',
+            undated: finite(s.log.undated), undatedStorage: finite(s.log.undatedStorage) });
         }
         const nc = forwardPartial ? null : finite(L.newestCreated);
         row.newest_created = nc != null && (prevNewest == null || nc > prevNewest) ? nc : prevNewest;
@@ -398,7 +418,8 @@ async function readAllRows(stmt, map, yielder) {
   for (const r of stmt.iterate()) {
     out.push(map(r));
     // eslint-disable-next-line no-await-in-loop
-    if ((out.length & 1023) === 0) await yielder();
+    // 16행마다 시간 기준 양보를 묻는다(I-3 — 1024행마다면 SEL · 디스크 값 JSON 을 가진 행 700개를 한 번에 풀어 185ms 를 막았다). 양보 자체는 15ms 가 지났을 때만.
+    if ((out.length & 15) === 0) await yielder();
   }
   return out;
 }

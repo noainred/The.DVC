@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { fmtDate, spanText, rateText, pctText, clsTone, verdictTone, serverBand, unitProgress, scopeLabel, noteOf, clsOfCode, num, diagInfo, shortLogNote, READ_STOP_LABEL, scanSent, sourceRows, sourceTone, traceTone, valCell, pastCoverageText } from './diskBadText.js';
+import { mailInfoText, fmtDate, spanText, rateText, pctText, clsTone, verdictTone, serverBand, unitProgress, scopeLabel, noteOf, clsOfCode, num, diagInfo, shortLogNote, READ_STOP_LABEL, scanSent, sourceRows, sourceTone, traceTone, valCell, pastCoverageText } from './diskBadText.js';
 
 const HOUR = 3_600_000; const DAY = 24 * HOUR;
 const NOW = Math.floor(Date.now() / HOUR) * HOUR;
@@ -142,6 +142,17 @@ describe('diskBadText', () => {
     expect(sourceRows({ lastOkAt: NOW, diag: { oldest: NOW - 37 * DAY, newest: NOW } })[0].range).toContain('37일');
     const r = serverBand({ status: 'records', coverage: { continuousSince: NOW - 10 * DAY, lastOkAt: NOW }, counts: { records: 3, slots: 0, unplaced: 3, inUse: 0, replaced: 0, unknown: 0 } }, NOW);
     expect(r.title).toContain('위치를 못 읽은 기록 3건 포함');
+  });
+
+  it('2회차(R2-4 · R2-5 · I-1) — 오류로 멈춘 읽기 · 시각 못 읽은 저장 기록 · 마지막 메일 결과', () => {
+    expect(READ_STOP_LABEL.error).toContain('429');
+    const d = diagInfo({ at: NOW, read: 10, pages: 1, ms: 100, undated: 3, undatedStorage: 2 });
+    expect(d.lines.join(' ')).toContain('시각을 못 읽은 항목 3건 — 그중 디스크 · 가상 디스크 기록 2건');
+    expect(diagInfo({ at: NOW, read: 10, pages: 1, ms: 100, undated: 0 }).lines.join(' ')).not.toContain('시각을 못 읽은');
+    expect(mailInfoText(null)).toBe(null);
+    expect(mailInfoText({ at: NOW, skipped: 'off' }).text).toContain('꺼짐');
+    const m = mailInfoText({ at: NOW, results: [{ ok: true }, { ok: false, reason: 'SMTP 연결 실패' }] });
+    expect(m.ok).toBe(false); expect(m.text).toContain('1/2통 보냄'); expect(m.text).toContain('SMTP 연결 실패');
   });
 });
 
