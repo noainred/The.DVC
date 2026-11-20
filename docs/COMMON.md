@@ -5,7 +5,7 @@
 
 - 생성: `node scripts/common-doc.mjs` · 최신 여부: `node scripts/common-doc.mjs --check`
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다. 설명을 고치려면 그 모듈의 **머리 주석 첫 단락**을 고친다.
-- 훑은 소스 4539개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
+- 훑은 소스 4541개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
 
 ## 읽는 법 · 한계
 
@@ -67,10 +67,10 @@
 | `ssrfBlock.js` | SSRF 차단 판정 — IP 리터럴·URL·DNS 해석 결과의 차단 대역 검사(v2.579 에 `collector/registry.js` 에서 분리). | `ipBlockReason` `ssrfBlockReason` `ssrfBlockReasonResolved` | 16 | 10 | 4 |
 | `exportBusy.js` | 무거운 내보내기의 **동시 실행 1건 가드** — 단일 소스(v2.575). | `exportLockMaxMs` `acquireExport` `_resetExportBusy` `exportBusyOf` | 15 | 1 | 14 |
 | `scopeSig.js` | 범위 서명 — vCenter id 집합(조회 범위 · 쓰기 범위 · 고른 법인 등)을 캐시 열쇠 조각으로 바꾸는 **유일한** 함수. **단사여야 한다**(서로 다른 집합 = 다른 글자). 등록부(vcenter/registry.js normalize)는 id 에 쉼표도… | `scopeSig` `SCOPE_SIG_ALL` | 15 | 4 | 1 |
+| `trimSlashes.js` | 끝 '/' 제거 — 선형(v2.611 LEFT2611-06 로 단일 소스화). | `trimTrailingSlashes` `COLLECTOR_URL_MAX` | 15 | 12 | 1 |
 | `asyncRoute.js` | `asyncRoute` / `wrapAsyncRouter` — express 4 에서 **async 핸들러의 throw 를 전역 에러 핸들러로 보낸다**. (v2.574, 2026-09-21 감사 BUG-01·BUG-02·BUG-03) | `asyncRoute` `wrapAsyncRouter` | 14 | 1 | 5 |
 | `errors.js` | Turn a thrown error (often a generic "fetch failed") into a human-readable reason plus a Korean hint about the likely cause, for vCenter connection di… | `describeError` | 14 | 9 | 4 |
 | `pageArgs.js` | 페이징 인자 정규화(v2.594, 감사 SEC-2594-01~03). | `pageArgs` | 14 | 5 | 1 |
-| `trimSlashes.js` | 끝 '/' 제거 — 선형(v2.611 LEFT2611-06 로 단일 소스화). | `trimTrailingSlashes` `COLLECTOR_URL_MAX` | 13 | 11 | 1 |
 | `clampEdgeTs.js` | 엣지가 보낸 시각을 **수신 시각으로 자른다**(루트 CLAUDE.md ‘엣지 시각은 수신 시각으로 자르고 원본은 따로’ · v2.682 R3S-01). 본체는 원래 `routes/api/corpUsage.js` 에 있었다 — v2.919 에 중앙 정제(central/… | `clampEdgeTs` | 12 | 3 | 1 |
 | `clampSetting.js` | 숫자 설정 정규화(v2.595, 감사 DEPS2595-01 — 재현). | `clampSetting` | 12 | 12 | 1 |
 | `rateLimit.js` | 경량 인메모리 레이트 리밋 — 외부 의존성 없이 폭주/DoS·버그 클라이언트를 막는다. 키별(기본 클라이언트 IP) 고정 윈도우 카운터. 정상 폴링(사용자당 분당 수십 요청)은 넉넉히 통과하되, 한 IP가 비정상적으로 많은 요청을 보내면 429 + Retry-After… | `clientIp` `rateLimit` `API_RATE_MAX` `API_RATE_WINDOW_MS` | 12 | 3 | 3 |
@@ -242,12 +242,12 @@
 | 모듈 | 하는 일 | 사용처 | 다른 영역 | 테스트 |
 |---|---|---|---|---|
 | `server/src/config.js` | (머리 주석 없음) | 515 | 88 | 186 |
-| `server/src/store.js` | (머리 주석 없음) | 210 | 44 | 362 |
+| `server/src/store.js` | (머리 주석 없음) | 210 | 44 | 363 |
 | `server/src/collector/registry.js` | Collector registry — the list of remote collector agents (one per datacenter) the central portal pulls power from. Stored in CONFIG_DIR/collectors.jso… | 83 | 32 | 57 |
-| `server/src/security/secretVault.js` | 설정 파일 자격증명(비밀번호·SSH 키·토큰)의 저장 방식(평문/암호화) 중앙 모듈(v2.296). | 41 | 29 | 40 |
+| `server/src/security/secretVault.js` | 설정 파일 자격증명(비밀번호·SSH 키·토큰)의 저장 방식(평문/암호화) 중앙 모듈(v2.296). | 41 | 29 | 41 |
 | `server/src/mock/demo/flags.js` | 데모(DATA_SOURCE=mock) 모드 공용 판정(v2.708). | 85 | 26 | 3 |
 | `server/src/alerts.js` | Alerting — evaluates threshold/condition rules against the current snapshot on an interval and pushes notifications to Slack(incoming webhook) and/or… | 31 | 23 | 39 |
-| `server/src/proxy/sshExec.js` | Small SSH helper built on ssh2: connect, run commands, and upload files via SFTP. Shared by the proxy auto-deploy and the agent auto-deploy features.… | 50 | 17 | 31 |
+| `server/src/proxy/sshExec.js` | Small SSH helper built on ssh2: connect, run commands, and upload files via SFTP. Shared by the proxy auto-deploy and the agent auto-deploy features.… | 50 | 17 | 32 |
 | `server/src/datacenter/store.js` | DataCenter(법인) 레지스트리 — vCenter의 '상위 개념'. | 47 | 16 | 16 |
 | `server/src/vcenter/soapParse.js` | 순수(사이드이펙트 없음) SOAP 응답 파서 — worker_threads 워커에서도 재사용하기 위해 soapClient.js에서 분리했다. 여기에는 config/DB/네트워크 등 부수효과 있는 import를 절대 추가하지 말 것(워커가 로드할 때 부수효과가 워커 스레… | 28 | 16 | 19 |
 | `server/src/vcenter/registry.js` | vCenter registry — read/write the managed list of vCenters in config/vcenters.json (the same file the live collector polls), with validation, password… | 31 | 15 | 14 |
@@ -255,7 +255,7 @@
 | `server/src/agent/envTimeout.js` | 호환 재수출(v2.613 DEPS2613-01) — 본체는 `util/envTimeout.js` 로 옮겼다. config.js 가 agent/ 를 import 하는 방향(설정 leaf → 엣지 워커 디렉터리)이 잠재 순환의 씨앗이었고, agent/ 밖 18개 파일이 이… | 33 | 13 | 2 |
 | `server/src/mail/settings.js` | 포탈 공용 메일(SMTP) 설정 (`mail.json`, v2.454). | 23 | 13 | 24 |
 | `server/src/vcenter/restClient.js` | (머리 주석 없음) | 19 | 13 | 30 |
-| `server/src/idrac/registry.js` | iDRAC registry — the managed list of Dell servers whose power draw we collect over Redfish. Stored in CONFIG_DIR/idrac.json (gitignored, 0600, holds c… | 35 | 12 | 63 |
+| `server/src/idrac/registry.js` | iDRAC registry — the managed list of Dell servers whose power draw we collect over Redfish. Stored in CONFIG_DIR/idrac.json (gitignored, 0600, holds c… | 35 | 12 | 64 |
 | `server/src/mock/demo/edge.js` | 데모(DATA_SOURCE=mock) 엣지(수집 서버) 그룹(v2.708). | 23 | 12 | 2 |
 | `server/src/audit.js` | Audit log — records security/operational actions (who did what, when) so the portal's write operations (VM 생성, 원격접속, 설정 변경 등)이 추적된다. Appended to CONFI… | 138 | 11 | 47 |
 | `server/src/security/tlsTrust.js` | 장비 TLS 상대 인증(2026-10-09 검토 S-02) — 자격증명을 보내는 HTTPS 연결이 **정말 그 장비인지** 확인한다. | 15 | 11 | 7 |
@@ -272,7 +272,7 @@
 | `server/src/auth/demoGuest.js` | 데모(mock) 모드의 내장 데모 계정 접근 규칙(v2.716). | 69 | 7 | 16 |
 | `server/src/collector/state.js` | In-memory state for distributed collection on the CENTRAL portal: the merged host→power map pulled from remote collector agents, plus per-collector st… | 22 | 7 | 33 |
 | `server/src/central/inventory.js` | 사이트 위임 수집 — 중앙(OC2) 측 인벤토리 캐시. | 20 | 7 | 26 |
-| `server/src/bmstor/registry.js` | 베어메탈 스토리지 서버 목록 + 설정(v2.340). CONFIG_DIR/bm-storage.json (0600, 원자적 쓰기, 손상 보존, v2.296 비밀 봉인) — 수집 서버/배포 대상 레지스트리와 동일 계약. | 17 | 7 | 39 |
+| `server/src/bmstor/registry.js` | 베어메탈 스토리지 서버 목록 + 설정(v2.340). CONFIG_DIR/bm-storage.json (0600, 원자적 쓰기, 손상 보존, v2.296 비밀 봉인) — 수집 서버/배포 대상 레지스트리와 동일 계약. | 17 | 7 | 40 |
 | `server/src/insights/analysisServers.js` | 서버 분석 공용 — iDRAC 등록부(중앙) + 위임 법인의 원격 인벤토리 병합·법인 귀속·필터(v2.579 에 `routes/admin/shared.js` 에서 분리, ARCH-04). | 17 | 7 | 6 |
 | `server/src/clustercfg/analyze.js` | 특수 기능 '클러스터 HA·DRS 점검'(도구 키 `cluster-check`, v2.701) 판정(순수). 입력은 스냅샷 vCenter 배열(vc.clusterCfg = clustercfg 캐시)과 호스트 배열. vCenter 왕복 0. | 12 | 7 | 7 |
 | `server/src/idrac/poller.js` | Portal-embedded iDRAC power poller. On an interval it reads current power from every enabled registered Dell server (Redfish) and appends a sample to… | 12 | 7 | 13 |
@@ -311,7 +311,7 @@
 | `server/src/upgrade/manager.js` | Orchestrates the auto-upgrade feature for the running portal: tracks the last check, runs the optional background watcher (local folder + remote sourc… | 9 | 5 | 22 |
 | `server/src/collector/datacenterMatch.js` | 수집기(에이전트)를 등록된 DataCenter(법인)에 매칭하는 순수 함수. collector.datacenter 라벨 / collector.id / collector.name 후보를 순서대로 보고, DataCenter의 id 또는 name과 대소문자 무시로 일치하면… | 8 | 5 | 3 |
 | `server/src/edgelog/spec.js` | 엣지 포탈의 **진행상태**를 어디서 읽는지 적은 표(순수 데이터, v2.549). | 7 | 5 | 19 |
-| `server/src/nsx/registry.js` | NSX Manager registry — read/write the managed list in CONFIG_DIR/nsx.json, with validation, password redaction, and a connectivity test. Edited throug… | 7 | 5 | 17 |
+| `server/src/nsx/registry.js` | NSX Manager registry — read/write the managed list in CONFIG_DIR/nsx.json, with validation, password redaction, and a connectivity test. Edited throug… | 7 | 5 | 18 |
 | `server/src/focusmon/service.js` | 이 노드의 집중 모니터링을 묶는다(v2.976): 키 · 중앙 직접 수집기 · 1초/10초 틱 · 수집 시작/끝 · 엣지 깨우기. | 6 | 5 | 16 |
 | `server/src/pdu/poller.js` | PDU 주기 수집. | 6 | 5 | 14 |
 | `server/src/security/peerTrust.js` | 장비 상대 신뢰 저장소(2026-10-09 검토 S-01 SSH 호스트키 · S-02 TLS 인증서) — '이 주소의 장비가 정말 그 장비인가'. | 6 | 5 | 18 |
