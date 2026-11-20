@@ -121,6 +121,13 @@ describe('서버 접속 — 계정 계층 · 공통 계정 화면 규약(소스)
     expect((src.match(/clearVerify\(\)/g) || []).length).toBeGreaterThanOrEqual(5);
     // 3회차 R3-W5: 공통 계정 폼의 확인 목록도 서버 후보만
     expect(src).not.toMatch(/form\.cands \|\| usersOfForm/);
+    // 4회차 R4-W3: 승인 막대에서 고르면 다른 흐름의 후보를 비운다 · R4-W4 정지 칩에 설명(title)
+    expect(src).toMatch(/if \(verifyFor !== 'approve'\) setVerifyCands\(null\);/);
+    expect(src).toMatch(/<Chip tone=\{curStop\.tone\} title=\{curStop\.title\}>/);
+    expect(src).toMatch(/<Chip tone=\{stp\.tone\} title=\{stp\.title\}>/);
+    // 4회차 R4-W2: 변경 기록의 계정 정지 · 풀기 사건은 서버 사유(detail)를 함께
+    const settings = fs.readFileSync(path.join(HERE, 'SshAccessSettings.jsx'), 'utf8');
+    expect(settings).toMatch(/e\.kind === 'account-stopped' \|\| e\.kind === 'account-resumed'\) && e\.detail/);
   });
   it('공용 조각을 쓴다(두 벌 금지) — must · Chip · Otp · FeaturePicker 는 sshAccessParts.jsx', () => {
     expect(src).toMatch(/from '\.\/sshAccessParts\.jsx'/);

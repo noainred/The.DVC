@@ -11,6 +11,7 @@ import { STable } from '../../components/STable.jsx';
 import { fmtAgo, fmtTime } from '../../util/fmt.js';
 import { cellText, bytesText, kbText, CODE_TEXT, codeTone, sourceText, summaryText, osText, shownOf } from './serverInfoText.js';
 import { Chip } from '../sshAccessParts.jsx';   // 서버 접속 화면과 같은 칩(같은 CSS)
+import { numOrNull } from '../../numOrNull.js';
 import { toneVar } from './toneVar.js';
 import '../sshAccess.css';
 
@@ -113,7 +114,7 @@ export default function ServerInfoTool() {
   }), [servers]);
   if (err) return <ErrorBox error={err} />;
   if (!v) return <Loading />;
-  const max = v.limits?.batch || 50;
+  const max = numOrNull(v.limits?.batch) ?? Infinity;   // 4회차 R4-W5: 숫자를 화면에 박지 않는다(없으면 서버가 too-many 로 거절)
   const read = async (ids) => {
     if (!ids.length) return;
     setBusy(true); setMsg(null);

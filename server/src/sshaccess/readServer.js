@@ -105,7 +105,7 @@ export async function readServer(serverId, { feature, plan = {}, deadlineMs = RE
     async ({ exec }) => { logged = true; return { out: await exec(step.command, step.timeoutMs, { partial: true, maxBytes: step.maxBytes }) }; })
       // 로그인에 성공하면 명령이 시한 · 상한에 걸려도 ok(탐침 판정 — 비밀번호는 맞았다)
       .then((x) => ({ ok: true, out: x.out }))
-      .catch((e) => ({ ok: false, error: String(e?.message || e), hostkey: isSshHostKeyError(e), authFailed: !logged && isSshAuthError(e), timeout: sig.aborted || !!signal?.aborted, loggedIn: logged, passwordSent: pwSent && !logged })), '서버 읽기 시한 초과')
+      .catch((e) => ({ ok: false, error: String(e?.message || e), hostkey: isSshHostKeyError(e), notConnected: isSshHostKeyError(e), authFailed: !logged && isSshAuthError(e), timeout: sig.aborted || !!signal?.aborted, loggedIn: logged, passwordSent: pwSent && !logged })), '서버 읽기 시한 초과')
       .catch((e) => ({ ok: false, error: String(e?.message || e), timeout: true, loggedIn: logged, passwordSent: pwSent && !logged }));
   };
   // v3.25(3단계): Windows 단계 지정이 WinRM 이면 WinRM HTTPS + NTLM 으로(비밀번호만 — resolveOsAuth(winrm) 가 키를 쓰지 않게 이미 막았다)
@@ -118,7 +118,7 @@ export async function readServer(serverId, { feature, plan = {}, deadlineMs = RE
       return { ok: true, out: { code: out.exitCode, stdout: out.stdout, stderr: out.stderr } };
     } catch (e) {
       const k = e?.kind || '';
-      return { ok: false, error: String(e?.message || e), authFailed: k === 'auth-rejected', tls: k === 'tls-peer' || k === 'cbt', timeout: k === 'timeout' || sig.aborted, tooLarge: k === 'too-large', loggedIn: e?.afterLogin === true, passwordSent: e?.passwordSent === true, faultWhy: typeof e?.faultWhy === 'string' ? e.faultWhy : '' };
+      return { ok: false, error: String(e?.message || e), authFailed: k === 'auth-rejected', tls: k === 'tls-peer' || k === 'cbt', timeout: k === 'timeout' || sig.aborted, tooLarge: k === 'too-large', loggedIn: e?.afterLogin === true, passwordSent: e?.passwordSent === true, notConnected: e?.preAuthConfig === true, faultWhy: typeof e?.faultWhy === 'string' ? e.faultWhy : '' };
     }
   }, '서버 읽기 시한 초과').catch((e) => ({ ok: false, error: String(e?.message || e), timeout: true }));
   const viaAccount = srv.credAccountId && srv.credVersion != null;
@@ -152,7 +152,7 @@ export async function readServer(serverId, { feature, plan = {}, deadlineMs = RE
         : code === 'timeout' ? `시한 안에 끝나지 않았습니다(${Math.round(deadlineMs / 1000)}초).`
           : `접속하지 못했습니다(${String(r.error || '').replace(/\s+/g, ' ').slice(0, 120)})`;
     // 2회차 B1: 비밀번호를 보낸 뒤 판정을 받지 못했으면 밝힌다(거부였을 수 있다 — 같은 계정의 남은 서버에는 보내지 않는다 · 연달으면 계정 정지)
-    if (r.passwordSent && (code === 'timeout' || code === 'connect')) return { ok: false, code, reason: `${reason} 비밀번호를 보낸 뒤 로그인 판정을 받지 못했습니다(거부였을 수 있음 — 계정 잠금 방지로 같은 계정의 남은 서버에는 보내지 않습니다).`, os, via, auth, ms };
+    if (r.passwordSent && (code === 'timeout' || code === 'connect')) return { ok: false, code, reason: `${reason} 비밀번호를 보낸 뒤 로그인 판정을 받지 못했습니다(거부였을 수 있음 — 이 서버는 잠시 쉬고, 같은 공통 계정에서 성공 없이 3번이면 계정을 멈춥니다 · 서버 단독 비밀번호면 이 일괄의 남은 서버에 보내지 않습니다).`, os, via, auth, ms };
     return { ok: false, code, reason, os, via, auth, ms };
   }
   const out = r.out || {};

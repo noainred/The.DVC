@@ -24,3 +24,5 @@
 - 2회차: AUTHENTICATE 를 실은 요청이 401 이 아닌 4xx · 5xx 여도 로그인 성공(`afterLogin` — 원격 셸 꺼짐 Fault 등) · AUTHENTICATE 를 보낸 뒤 판정 전 실패는 `passwordSent` · stderr 상한은 호출부 값(`stderrMax`).
   남긴 것(낮음): 시한이면 원격 셸 · 프로세스가 남을 수 있다(Receive 시한 = 전체 시한 − 2초 → 두 번째 Receive 중 끊김 · Signal/Delete 0) · NTLM Workstation 칸 비움 · MsvAvTargetName 없음 · 3xx 응답.
 - 3회차: 비401 4xx · 5xx 는 **WS-Man SOAP Fault 일 때만** 로그인 성공(앞단 장비의 맨 5xx 는 아님 — 빠른 길이 열렸다) · ShellId 를 받은 뒤에만 `loggedIn` · `connection-split`(0바이트)은 `passwordSent` 아님.
+- 4회차: 로그인 성공 판정의 Fault 는 **SOAP 1.2(WinRM) 봉투 · WSManFault** 일 때만(앞단의 SOAP 1.1 은 아님) · 인증 뒤 200 SOAP 1.2 는 ShellId 를 못 읽어도 로그인 성공 ·
+  AUTHENTICATE 전 설정 실패(인증서 · 채널 바인딩 · NTLM 꺼짐 Fault)는 `preAuthConfig` → 탐침 판정 밖(skip).

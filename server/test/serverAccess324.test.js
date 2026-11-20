@@ -453,7 +453,8 @@ test('⑩ 반증 F2 — 같은 공통 계정을 물려받는 서버 5대가 한 
   // 점검 2회차 A1: 집중 모니터링도 같은 문을 지난다
   assert.match(src('bmusage/focus/run.js'), /sess\.hasOs \? gateAccountLogin\(osHostNow, /);
   assert.match(src('bmstor/poller.js'), /collectMany\(central, \{ collect: gatedCollect \}\)/);
-  assert.match(src('bmstor/poller.js'), /const gatedCollect = \(s\) => gateAccountLogin\(s, \(\) => collectServer\(s\)/);
+  // 4회차 R4S-3: 수집은 장비 시한 안에서(탐침 대기는 시한 밖 — gateAccountLogin 의 run 안에서 연다)
+  assert.match(src('bmstor/poller.js'), /const gatedCollect = \(s\) => gateAccountLogin\(s, \(\) => \{[\s\S]{0,400}?withDeadline\(collectDeadlineMs\(\), \(signal\) => collectServer\(s, \{ signal,/);
   // 키 로그인(판 없음)은 문을 지나지 않는다
   let nk = 0; await Promise.all(Array.from({ length: 3 }, () => G.gateAccountLogin({ credAccountId: z.id, name: 'k' }, async () => { nk += 1; return { ok: false, error: 'auth' }; }, opts)));
   assert.equal(nk, 3);

@@ -156,7 +156,7 @@ export function HierTab({ v, corpName, reload, say }) {
 
         {level ? (
           <section className="ssa-sec">
-            <div className="ssa-acts"><h4>이 단계의 계정</h4>{!stateUnknown && <Chip tone={STATE_CHIP[na.state][1]}>{STATE_CHIP[na.state][0]}</Chip>}{curStop && <Chip tone={curStop.tone}>{curStop.label}</Chip>}</div>
+            <div className="ssa-acts"><h4>이 단계의 계정</h4>{!stateUnknown && <Chip tone={STATE_CHIP[na.state][1]}>{STATE_CHIP[na.state][0]}</Chip>}{curStop && <Chip tone={curStop.tone} title={curStop.title}>{curStop.label}</Chip>}</div>
             {curAcc ? (
               <dl className="sah-dl">
                 <dt>계정</dt><dd><b>{curAcc.name}</b> · {accountKindText(curAcc)} · <code>{curAcc.loginName || curAcc.username}</code>{na.state === 'inherit' && <span className="ssa-sub"> — 법인 단계에서 물려받음</span>}</dd>
@@ -243,7 +243,7 @@ export function HierTab({ v, corpName, reload, say }) {
               <button className="btn btn-sm" type="button" disabled={!pickedList.length || !!busy} onClick={setOs}>{busy === 'os' ? '바꾸는 중…' : 'OS 종류 정하기'}</button>
             </div>
             {approveChoices.length > 0 && !edit && (
-              <label className="ssa-field sah-inline">먼저 확인할 서버 <Select sort={false} className="select select-sm" value={vidFor('approve')} onChange={(e) => { setVerifyId(e.target.value); setVerifyFor('approve'); }}>
+              <label className="ssa-field sah-inline">먼저 확인할 서버 <Select sort={false} className="select select-sm" value={vidFor('approve')} onChange={(e) => { if (verifyFor !== 'approve') setVerifyCands(null); setVerifyId(e.target.value); setVerifyFor('approve'); }}>
                 <option value="">고른 서버의 첫 대</option>
                 {approveChoices.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
               </Select></label>
@@ -357,7 +357,7 @@ export function AccountsTab({ v, corpName, reload, say }) {
             const n = usersOf(a).length;
             return (
               <tr key={a.id}>
-                <td data-sort={a.name}><b>{a.name}</b>{stp && <div><Chip tone={stp.tone}>{stp.label}</Chip></div>}{stp && a.stop?.current && <div className="ssa-sub">{a.stop.server} · {dateTime(a.stop.at)}</div>}</td>
+                <td data-sort={a.name}><b>{a.name}</b>{stp && <div><Chip tone={stp.tone} title={stp.title}>{stp.label}</Chip></div>}{stp && a.stop?.current && <div className="ssa-sub">{a.stop.server} · {dateTime(a.stop.at)}</div>}</td>
                 <td data-sort={accountKindText(a)}>{accountKindText(a)}<div className="ssa-sub"><code>{a.loginName || a.username}</code></div></td>
                 <td data-sort={a.corp || ''}>{a.corp ? corpName(a.corp) : <span className="ssa-sub">전 법인</span>}</td>
                 <td data-sort={a.pwAgeDays ?? ''}>{a.keyRef ? `키 ${(v.keys || []).find((k) => k.id === a.keyRef)?.name || '(없음)'}` : (a.hasPassword ? '비밀번호' : '—')}

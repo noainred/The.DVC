@@ -112,7 +112,17 @@ export function parseDfOutput(stdout, requestedMounts, stderr = '') {
  * @param {{host,port,username,password,mounts:string[]}} server
  * @returns {Promise<{ok:boolean, mounts:Array, missing?:string[], error?:string}>}
  */
-export async function collectServer(server) {
+/**
+ * 4회차 상태 R4S-3(재현 — 탐침이 된 수집이 멈추면 같은 공통 계정의 다른 서버가 시한 없이 기다렸다): 중앙 수집 한 대의 **장비 시한**(세션을 실제로 끊는다 — withDeadline + signal).
+ *   로그인 시한 + df exec 시한 + I/O 표본(켜졌으면 표본 + 20초) + 여유 10초 — 세션이 쓸 수 있는 시간보다 크다(산수를 시험이 고정).
+ */
+export function collectDeadlineMs(env = process.env) {
+  const ready = reqTimeoutMs(env.BMSTOR_SSH_TIMEOUT_MS, 15_000);
+  const execMs = reqTimeoutMs(env.SSH_EXEC_TIMEOUT_MS, 60_000, { max: 1_800_000 });
+  const sec = ioSampleSec(env);
+  return ready + execMs + (sec > 0 ? (sec + 20) * 1000 : 0) + 10_000;
+}
+export async function collectServer(server, { signal, onLoggedIn = null, onPasswordSent = null } = {}) {
   const { mounts, errors } = sanitizeMounts(server.mounts);
   if (!mounts.length) return { ok: false, mounts: [], error: errors[0] || '측정할 마운트 포인트가 없습니다.' };
   // 7b: 키 · 공통 계정 참조를 해석하지 못했으면 접속하지 않는다(bmusage/onboard/refs.js withResolvedAuth — 빈 비밀번호로 시도해 계정을 잠그지 않게).
@@ -126,9 +136,10 @@ export async function collectServer(server) {
       privateKey: server.privateKey || undefined, passphrase: server.passphrase || undefined,
       readyTimeout: reqTimeoutMs(process.env.BMSTOR_SSH_TIMEOUT_MS, 15_000),   // v2.605 TIM2605-04: [1초, 10분]
       singlePasswordAttempt: true,   // v3.25 반증 F1: 비밀번호는 한 번만(k-i 재시도 없음 — 계정 잠금 횟수)
-      onPasswordSent: () => { pwSent = true; },
+      onPasswordSent: () => { pwSent = true; try { onPasswordSent?.(); } catch { /* */ } },
+      ...(signal ? { signal } : {}),
     }, async ({ exec }) => {
-      logged = true;
+      logged = true; try { onLoggedIn?.(); } catch { /* */ }
       const out = await exec(`df -P -k -- ${mounts.join(' ')}`);
       // v2.915: 같은 세션에서 디스크 I/O 표본(상수 명령 · 입력 없음). df 가 요청 마운트를 하나도 못 찾았으면 I/O 는 시도하지 않는다.
       //   시한 = 표본 간격 + 20초(명령 자체는 cat 넷 · sleep 하나). 0 이면 끔(df 만 — 예전 동작).

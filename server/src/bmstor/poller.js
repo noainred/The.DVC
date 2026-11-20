@@ -16,9 +16,10 @@ import { listBmServersRaw, getBmSettings } from './registry.js';
 import { withResolvedAuth, authCredOf, AUTH_ERROR } from '../bmusage/onboard/refs.js'; // 7b: 키 · 공통 계정 참조 해석 · 인증 정지 자격 지문(판정 하나)
 import { gateAccountLogin } from '../sshaccess/accountGate.js';   // v3.24 반증 F2: 같은 공통 계정 비밀번호는 탐침 하나의 결과를 본 뒤에
 import { noteCredOutcome } from '../sshaccess/outcome.js';
-import { wasLoggedIn } from '../sshaccess/loginMark.js';   // 3회차 F4   // v3.9.0 키 사용 기록 · v3.24 공통 계정 사용 기록 + 계정 단위 정지(로그인 거부)
+import { wasLoggedIn, markLoggedIn, markPasswordSent } from '../sshaccess/loginMark.js';   // 3회차 F4 · 4회차 R4S-3   // v3.9.0 키 사용 기록 · v3.24 공통 계정 사용 기록 + 계정 단위 정지(로그인 거부)
 import { isAuthFailureText } from '../util/authGuard.js';
-import { collectMany, collectServer } from './collect.js';
+import { collectMany, collectServer, collectDeadlineMs } from './collect.js';
+import { withDeadline } from '../util/deadline.js';   // 4회차 R4S-3: 중앙 수집 장비 시한
 import { enqueueBmstorJob, setBmstorExpireHandler } from './jobs.js';
 import { findCollectorForAgent } from '../central/idracScanPush.js';
 import { resilientFetch } from '../util/resilientFetch.js';
@@ -241,7 +242,12 @@ async function collectViaEdge(agent, servers) {
  * v3.24 반증 F2: 중앙 직접 수집 한 대 — 공통 계정 비밀번호 접속이면 계정 탐침(sshaccess/accountGate)을 지난다.
  *   거부 판정은 접속 단계 표지(authFailed — collect.js 가 isSshAuthError 로 세운다)만 · 보내지 않은 결과는 authErrorCode(사용 기록 · 인증 정지에 들지 않는다).
  */
-const gatedCollect = (s) => gateAccountLogin(s, () => collectServer(s), {
+const gatedCollect = (s) => gateAccountLogin(s, () => {
+  // 4회차 R4S-3: 장비 시한 안에서(탐침 대기는 시한 밖 — run 안에서 연다) · 시한이면 로그인 · 송신 표시를 잇는다(탐침 판정)
+  let logged = false; let pwSent = false;
+  return withDeadline(collectDeadlineMs(), (signal) => collectServer(s, { signal, onLoggedIn: () => { logged = true; }, onPasswordSent: () => { pwSent = true; } }), '스토리지 수집 시한 초과')
+    .catch((e) => { const o = { ok: false, mounts: [], error: String(e?.message || e).slice(0, 300) }; return logged ? markLoggedIn(o) : pwSent ? markPasswordSent(o) : o; });
+}, {
   feature: 'bm-storage',
   rejected: (r) => r?.authFailed === true,
   stopped: (code) => ({ ok: false, mounts: [], error: AUTH_ERROR[code] || AUTH_ERROR['account-stopped'], authErrorCode: code }),

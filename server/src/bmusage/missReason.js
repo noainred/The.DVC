@@ -16,8 +16,9 @@ export function osMissOf(os) {
   // 3회차 F3: 계정 탐침 문이 보내지 않은 것은 키 · 계정 설정 문제가 아니다 — 계정 정지는 인증 정지(서버별 정지와 같은 깃발 · 알림) ·
   //   망 끊김 추정 건너뜀은 접속 불가 · 송신 뒤 판정 모름 보류는 시한(예전: 셋 다 cred-config ‘키 설정 확인’ — 원인이 망인데 키를 보라고 했다)
   if (os.authErrorCode === 'account-stopped') return 'auth-stopped';
-  if (os.authErrorCode === 'account-probe-unreached') return 'unreachable';
-  if (os.authErrorCode === 'account-login-unknown') return 'timeout';
+  // 4회차 F4-1 · F4-2(재현): 3회차의 unreachable(‘iDRAC 미도달’ · ‘응답 없음’) · timeout(‘SSH 시한 초과 · 집중 모니터링 후보’)은 접속 0회 서버를 실패로 단정했다 —
+  //   탐침 문이 보내지 않은 것은 전용 code(gate-held — ‘같은 계정 탐침 문이 이번엔 보내지 않음’)
+  if (os.authErrorCode === 'account-probe-unreached' || os.authErrorCode === 'account-login-unknown') return 'gate-held';
   if (os.authErrorCode) return 'cred-config';
   const e = String(os.error || '');
   if (os.busy) return 'pool-busy';

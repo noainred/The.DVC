@@ -19,7 +19,7 @@ export const CRED_TEXT = Object.freeze({
   'account-stopped': '계정 정지(앞선 로그인 거부 · 판정 시한)', 'account-corp-stopped': '법인 사용 중지', 'winrm-needs-password': 'WinRM 은 비밀번호 계정만',
   // 점검 2회차 — 계정 탐침 문 · 서버 단독 비밀번호 정지(비밀번호를 보내지 않았다)
   'account-probe-unreached': '같은 계정 서버가 연달아 접속 안 됨 — 이번엔 보내지 않음', 'account-login-unknown': '같은 계정 로그인 판정 모름 — 이번엔 보내지 않음',
-  'server-auth-stopped': '이 서버 비밀번호 정지(앞선 로그인 거부)',
+  'server-auth-stopped': '이 서버 비밀번호 정지 — 사유는 칸에 마우스',
 });
 
 /** 서버의 OS 로 프리셋을 돌릴 수 있나(미지정 = Linux 로 붙는다 — 코어와 같은 규칙). */

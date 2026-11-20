@@ -61,7 +61,7 @@
   (자격 해석 → 탐침 → 로그인 한 번(비밀번호 한 번 — `singlePasswordAttempt`) → 명령 하나 → 결과 기록 — 이 폴더의 판정을 우회하지 않는다).
 - v3.30 서버 명령 실행(`server/src/servercmd/CLAUDE.md`): 여러 대 일괄 틀은 `batch.js` 하나 · 허용 기능 판정은 `placement.featureBlocked` 하나(키 · 공통 계정 — `EXPLICIT_FEATURES` 는 직접 켠 것만).
 
-## 점검 1~3회차(2026-11-20) — 상세 `docs/rules/audits.md` · 회귀 `serverAccessHunt{1,2,3}.test.js`
-- 탐침(`accountGate`): 빠른 길은 최근 성공만(`freshMs` — 집중 모니터링은 짧게) · 결과를 보고 거부면 정지 · `loggedIn` = 성공 · ‘모름’ 3연속(통로별)이면 이번엔 안 보냄 ·
-  `passwordSent` 는 서로 다른 서버 2연속일 때만 계정 보류(3번이면 정지 cause timeout) · 같은 서버 되풀이는 그 서버만 쉼 · 빠른 길의 sent 는 그 서버만 · 메모리 정지는 만료 · 풀기 · 못 읽음을 본다.
+## 점검 1~4회차(2026-11-20) — 상세 `docs/rules/audits.md` · 회귀 `serverAccessHunt{1,2,3,3b}.test.js`
+- 탐침(`accountGate`): 빠른 길은 최근 성공만(집중 모니터링 성공은 집중끼리만 — `okFocus`) · 결과를 보고 거부면 정지 · `loggedIn` = 성공 · ‘모름’ 3연속(통로별)이면 이번엔 안 보냄 ·
+  `passwordSent`(보낸 뒤 판정 모름): **성공 없이 3번이면 계정 정지**(cause timeout · 서버 · 주기 무관 · 성공 하나면 0) · 그 서버는 30분 쉼(빠른 길에서도) · 빠른 길의 sent 는 빠른 길을 닫고 창마다 한 번.
 - 키 로그인은 비밀번호 판 정지를 풀지 않는다 · 계정 없는 서버(addrOnly 포함)는 붙지 않는다 · 지정 지우기도 확인 · 정지 해제는 그 판만 · 서버 단독 비밀번호는 bmstor 인증 정지를 본다.

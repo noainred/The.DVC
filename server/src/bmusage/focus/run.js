@@ -44,7 +44,7 @@ export const FOCUS_COLS = Object.freeze(FOCUS_METRICS.map((m) => m.col));
 export const FOCUS_STATUS = Object.freeze(['queued', 'running', 'done', 'stopped', 'auth', 'interrupted', 'failed']);
 /** 결측 사유(웹 문구 1:1). */
 // 1회차 점검 D5(b): iDRAC 셋 · 재확인 N4: os-disabled · os-edge(분마다 다시 해석이 막은 등록 — 주기 수집은 그 등록을 대상에서 빼므로 수집 건강 열거에는 없다)
-export const FOCUS_MISS = Object.freeze(['timeout', 'auth', 'auth-stopped', 'ssh-error', 'host-key', 'not-linux', 'no-path', 'pool-busy', 'unreachable', 'no-telemetry', 'error', 'cred-config', 'forbidden', 'ids-unmatched', 'cert-untrusted', 'os-disabled', 'os-edge']);
+export const FOCUS_MISS = Object.freeze(['timeout', 'auth', 'auth-stopped', 'ssh-error', 'host-key', 'not-linux', 'no-path', 'pool-busy', 'unreachable', 'no-telemetry', 'error', 'cred-config', 'forbidden', 'ids-unmatched', 'cert-untrusted', 'os-disabled', 'os-edge', 'gate-held']);
 /** 결과 code → HTTP(라우트 · 엣지 대행 공용 — 스냅샷과 같은 규약: 업무 결과는 code 로). */
 export const FOCUS_CODE_STATUS = Object.freeze({
   ok: 200, queued: 200, 'bad-reason': 400, 'bad-request': 400, 'not-found': 404, forbidden: 403, 'no-path': 409, busy: 409, 'daily-cap': 429,

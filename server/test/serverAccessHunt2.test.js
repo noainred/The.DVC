@@ -97,29 +97,23 @@ test('M1 · Q1 탐침이 ‘모름’(연결 실패)이면 최근에 붙었던 �
   assert.equal(lc.n, 6); assert.equal(lc.stopped.length, 0, 'busy 는 건너뛰기를 부르지 않는다');
 });
 
-test('B1 비밀번호를 보낸 뒤 판정을 받지 못한 탐침 — 남은 대기자에게 보내지 않고 · 연달아 세 번이면 계정 정지(cause timeout) · 성공이면 지운다', async () => {
+test('B1 비밀번호를 보낸 뒤 판정을 받지 못한 탐침 — 그 서버는 쉬고 다음 서버가 탐침 · 성공 없이 3번이면 계정 정지(cause timeout) · 성공이면 지운다', async () => {
   G._resetAccountGateForTest({ now: clock });
   const A = `a_${hex(0xc01)}`;
   const log = { n: 0, stopped: [] };
   const run = () => new Promise((r) => { log.n += 1; setTimeout(() => r(LM.markPasswordSent({ ok: false, error: 'Timed out while waiting for handshake' })), 5); });
-  for (let cyc = 1; cyc <= G.SENT_STOP_AFTER; cyc += 1) {
-    await Promise.all(Array.from({ length: 4 }, (_, i) => G.gateAccountLogin(srv(A, `s${i}`), run, opts(log))));
-    // 3회차: 한 대의 ‘sent’ 는 그 서버의 느림일 수 있어 다음 서버가 탐침 — 서로 다른 서버가 SENT_CHAIN_MAX 번 연달아야 계정 보류(예전 2회차 이전: 대기자마다)
-    assert.equal(log.n, cyc * G.SENT_CHAIN_MAX, `주기마다 ${G.SENT_CHAIN_MAX}번까지만 · 주기 ${cyc}`);
-    now += 5 * 60_000;
-  }
-  const st = ST.accountStopFor(A, 'v1');
-  assert.ok(st && st.cause === 'timeout', `세 번 연달으면 계정 정지 · ${JSON.stringify(st)}`);
-  assert.ok(log.stopped.includes('account-login-unknown'));
-  await G.gateAccountLogin(srv(A, 's0'), run, opts(log));
-  assert.equal(log.n, G.SENT_STOP_AFTER * G.SENT_CHAIN_MAX, '정지 뒤에는 보내지 않는다');
-  // 성공 한 번이면 연속 수를 지운다
+  await Promise.all(Array.from({ length: 6 }, (_, i) => G.gateAccountLogin(srv(A, `s${i}`), run, opts(log))));
+  assert.equal(log.n, G.SENT_STOP_TOTAL, `성공 없이 ${G.SENT_STOP_TOTAL}번까지만(4회차 — 3회차 판은 6회 · 2회차 이전은 대기자마다)`);
+  assert.equal(ST.accountStopFor(A, 'v1')?.cause, 'timeout');
+  await G.gateAccountLogin(srv(A, 's5'), run, opts(log));
+  assert.equal(log.n, G.SENT_STOP_TOTAL, '정지 뒤에는 보내지 않는다');
+  // 성공 하나면 수를 지운다(서로 다른 서버 — 같은 서버는 쉼)
   G._resetAccountGateForTest({ now: clock });
   const B = `a_${hex(0xc02)}`;
   let k = 0;
   const run2 = () => Promise.resolve(++k === 2 ? { ok: true } : LM.markPasswordSent({ ok: false }));
-  for (let i = 0; i < 4; i += 1) { await G.gateAccountLogin(srv(B, 'z'), run2, opts({ n: 0, stopped: [] })); now += 5 * 60_000; }
-  assert.equal(ST.accountStopFor(B, 'v1'), null, '중간에 성공이 있으면 정지하지 않는다');
+  for (let i = 0; i < 4; i += 1) { await G.gateAccountLogin(srv(B, `z${i}`), run2, opts({ n: 0, stopped: [] })); now += 5 * 60_000; }
+  assert.equal(ST.accountStopFor(B, 'v1'), null, '중간에 성공이 있으면 정지하지 않는다(1 → 0 → 1 → 2)');
 });
 
 test('Q1(b) · B1 스토리지 수집 — 로그인 뒤 실패(df 마운트 없음)는 로그인 표시 · 판정 전 시한은 비밀번호 송신 표시 · 연결 거부는 표시 없음', async () => {

@@ -35,3 +35,5 @@
   비밀번호를 보낸 뒤 판정을 받지 못한 실패는 `passwordSent`(탐침 문 · 일괄 문이 남은 서버에 보내지 않는다) · 걸린 시간은 접속을 시작한 때부터(탐침 대기 제외).
 - 3회차: 서버 단독 비밀번호 정지는 로그인만 돼도(df 실패 · Windows) 스토리지 ‘지금 수집’ 이 푼다(`noteAuth` logged — 코어와 같은 기준) · 정지 문구는 `authStopText`(못 읽음 정지를 ‘거부’ 로 지어내지 않는다) ·
   탐침 문이 보내지 않은 bm-usage 결과는 결측 사유를 사실대로(`missReason` — 계정 정지 auth-stopped · 망 끊김 건너뜀 unreachable · 판정 모름 보류 timeout · 키 설정 cred-config 아님).
+- 4회차: 탐침 문이 보내지 않은 결과의 결측 사유는 전용 `gate-held`(HEALTH_REASON_CODES · FOCUS_MISS · 중앙 bmPerfOpsPull MISS · 웹 문구 표 넷을 같이) — ‘iDRAC 미도달’ · ‘SSH 시한 초과’ 로 단정하지 않는다 ·
+  스토리지 중앙 수집은 장비 시한 안에서(`collect.collectDeadlineMs` + signal — 탐침 대기는 시한 밖).

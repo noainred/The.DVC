@@ -79,7 +79,7 @@ function verifyAuth({ neg, chal, auth, accounts, certDer }) {
   return 'ok';
 }
 const b64 = (s) => Buffer.from(s).toString('base64');
-async function fakeWinrm({ cert = 'server-ok', accounts = { 'corp\\svc': 'Right-1' }, stdout = 'hello from windows\r\n', exitCode = 0, receiveTimeouts = 0, hugeOutput = 0, dropAfterCreate = false, neverDone = false, rejectAfterAuth = false, closeAfterChallenge = false, gatewayOnAuth = 0, faultOnCreate = false } = {}) {
+async function fakeWinrm({ cert = 'server-ok', accounts = { 'corp\\svc': 'Right-1' }, stdout = 'hello from windows\r\n', exitCode = 0, receiveTimeouts = 0, hugeOutput = 0, dropAfterCreate = false, neverDone = false, rejectAfterAuth = false, closeAfterChallenge = false, gatewayOnAuth = 0, faultOnCreate = false, gatewaySoap11 = false, createWeird = false } = {}) {
   const st = { conns: 0, auths: [], authHeaders: 0, requests: [], receiveTimeouts: 0 };
   const certDer = new crypto.X509Certificate(pem(`${cert}.crt`)).raw;
   const srv = https.createServer({ key: pem(`${cert}.key`), cert: pem(`${cert}.crt`) }, (req, res) => {
@@ -99,6 +99,8 @@ async function fakeWinrm({ cert = 'server-ok', accounts = { 'corp\\svc': 'Right-
         }
         // 3회차 W3-2: 비밀번호를 검증하지 않는 앞단(게이트웨이)이 AUTHENTICATE 요청에 맨 5xx 를 준다
         if (gatewayOnAuth) { st.auths.push('not-verified'); res.writeHead(gatewayOnAuth, { 'content-type': 'text/html' }); return res.end('<html>Bad Gateway</html>'); }
+        // 4회차 R4W-4: 검증하지 않는 앞단이 SOAP 1.1 Fault 로 503
+        if (gatewaySoap11) { st.auths.push('not-verified'); res.writeHead(503, { 'content-type': 'text/xml' }); return res.end('<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"><soap:Body><soap:Fault><faultcode>soap:Server</faultcode><faultstring>busy</faultstring></soap:Fault></soap:Body></soap:Envelope>'); }
         const v = verifyAuth({ neg: sock.neg, chal: sock.chal, auth: m, accounts, certDer });
         st.auths.push(v);
         if (v !== 'ok') { res.writeHead(401, { 'www-authenticate': 'Negotiate' }); return res.end(); }
@@ -109,6 +111,7 @@ async function fakeWinrm({ cert = 'server-ok', accounts = { 'corp\\svc': 'Right-
       const action = /<a:Action[^>]{0,80}>([^<]{1,200})</.exec(body)?.[1] || '';
       if (rejectAfterAuth && action === WS.ACTION.command) { res.writeHead(401, { 'www-authenticate': 'Negotiate' }); return res.end(); }   // 같은 연결에서 세션을 잃음(서버 쪽 만료 흉내)
       res.setHeader('content-type', 'application/soap+xml;charset=UTF-8');
+      if (action === WS.ACTION.create && createWeird) { res.end('<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body><x:Odd>no shell id here</x:Odd></s:Body></s:Envelope>'); return undefined; }   // 4회차 R4W-5
       if (action === WS.ACTION.create) { res.setHeader('connection', dropAfterCreate ? 'close' : 'keep-alive'); res.end('<s:Envelope><s:Body><rsp:Shell><rsp:ShellId>11111111-2222-3333-4444-555555555555</rsp:ShellId></rsp:Shell></s:Body></s:Envelope>'); return undefined; }
       if (action === WS.ACTION.command) return res.end('<s:Envelope><s:Body><rsp:CommandResponse><rsp:CommandId>AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE</rsp:CommandId></rsp:CommandResponse></s:Body></s:Envelope>');
       if (action === WS.ACTION.receive) {
@@ -191,7 +194,7 @@ test('③-b 반증(review326) — 연결이 갈리면 로그인 거부가 아니
 test('④ 상대 확인 — 승인하지 않은 자체서명 인증서는 TLS 단계에서 끊고 인증 머리를 하나도 보내지 않는다', async (t) => {
   const W = await fakeWinrm({ cert: 'self-a' });
   t.after(() => W.close());
-  await assert.rejects(C.winrmRun({ host: '127.0.0.1', port: W.port, username: 'svc', domain: 'CORP', password: 'Right-1', command: 'hostname' }), (e) => e.kind === 'tls-peer');
+  await assert.rejects(C.winrmRun({ host: '127.0.0.1', port: W.port, username: 'svc', domain: 'CORP', password: 'Right-1', command: 'hostname' }), (e) => e.kind === 'tls-peer' && e.preAuthConfig === true && e.passwordSent !== true);   // 4회차 R4W-3: 비밀번호 전 설정 실패(탐침 판정 밖)
   assert.equal(W.st.authHeaders, 0, '비밀번호에서 만든 값은 물론 NEGOTIATE 도 가지 않았다');
   assert.equal(W.st.requests.length, 0);
 });
@@ -324,4 +327,16 @@ test('⑧ 3회차 W3-1 · W3-2 — 바이트 0 연결 갈림은 비밀번호 송
   await assert.rejects(C.winrmRun({ host: '127.0.0.1', port: F.port, username: 'svc', domain: 'CORP', password: 'Right-1', command: 'hostname' }),
     (e) => e.kind === 'fault' && e.afterLogin === true);
   assert.deepEqual(F.st.auths, ['ok']);
+});
+
+test('⑨ 4회차 R4W-4 · R4W-5 — 앞단의 SOAP 1.1 Fault 는 로그인 성공이 아니다(송신 뒤 모름) · 인증 뒤 200 SOAP 1.2 인데 ShellId 를 못 읽으면 로그인 성공(파서 어긋남을 송신 뒤 모름으로 두지 않는다)', async (t) => {
+  const A = await fakeWinrm({ gatewaySoap11: true });
+  t.after(() => A.close());
+  await assert.rejects(C.winrmRun({ host: '127.0.0.1', port: A.port, username: 'svc', domain: 'CORP', password: 'Wrong-1', command: 'hostname' }),
+    (e) => e.afterLogin !== true && e.passwordSent === true);
+  const B = await fakeWinrm({ createWeird: true });
+  t.after(() => B.close());
+  await assert.rejects(C.winrmRun({ host: '127.0.0.1', port: B.port, username: 'svc', domain: 'CORP', password: 'Right-1', command: 'hostname' }),
+    (e) => e.afterLogin === true && e.passwordSent !== true);
+  assert.deepEqual(B.st.auths, ['ok']);
 });
