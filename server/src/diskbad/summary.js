@@ -15,6 +15,7 @@
 import { classOf, COUNTED, CLS, labelOfKey, refsTable, ID_TABLE, CLS_LABEL, loginShareOf, LOGIN_CODES, REPEAT_CODE } from './classify.js';
 import { judgeServer, VERDICT, VERDICT_LABEL, CONFIDENCE_LABEL, SERVER_STATUS_LABEL, TRACE, TRACE_LABEL, VALS_SRC_LABEL } from './verdict.js';
 import { REASON_LABEL } from './scan.js';
+import { dayKey, DAY_OFFSET_MIN } from '../util/dayKey.js';
 
 export const SHORT_LOG_DAYS = 30;
 const ALERTING_MAX = 300;
@@ -75,8 +76,9 @@ export function diagView(readDiag) {
 }
 
 const keyOf = (agent, id) => `${String(agent || '').toLowerCase()}|${id}`;
-const monthKey = (ms) => { const d = new Date(ms); return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`; };
-const monthEnd = (ym) => { const [y, m] = ym.split('-').map(Number); return Date.UTC(y, m, 1) - 1; };
+// 월은 **포탈 시각**(기본 KST)으로 가른다 — UTC 로 가르면 한국 시각 11-01 03:00 기록이 10월로 들어갔다(반증 3회차 D5). util/dayKey.js 하나.
+const monthKey = (ms) => dayKey(ms).slice(0, 7);
+const monthEnd = (ym) => { const [y, m] = ym.split('-').map(Number); return Date.UTC(y, m, 1) - DAY_OFFSET_MIN * 60_000 - 1; };
 
 /**
  * 서버 하나의 판정 묶음(서버 상세 화면과 집계가 같이 쓴다).
@@ -207,7 +209,7 @@ export function buildFleet({ servers = [], db = { servers: [], records: [], seri
       if (Array.isArray(v.alerting)) {
         if (v.alerting.length) tot.alertingServers += 1;
         tot.alertingDisks += v.alerting.length;
-        for (const a of v.alerting) if (alertingList.length < ALERTING_MAX) alertingList.push({ ...base, ...a });
+        for (const a of v.alerting) alertingList.push({ ...base, ...a });   // 상한은 정렬 뒤에(반증 3회차 D4 — '이상' 이 '주의' 300개에 밀려 잘렸다)
       } else tot.drivesUnknownServers += 1;
     }
     serverRows.push({ ...base, status: v.status, statusLabel: SERVER_STATUS_LABEL[v.status], counts: v.counts, lastScanAt: row?.lastScanAt ?? null,
@@ -256,12 +258,28 @@ export function buildFleet({ servers = [], db = { servers: [], records: [], seri
     totals: { ...tot, ratePer1000: tot.disks > 0 ? Math.round((tot.recordSlots / tot.disks) * 10_000) / 10 : null,
       shortLogDays: SHORT_LOG_DAYS, medianLogDays: median == null ? null : Math.round(median * 10) / 10 },
     byCorp, byModel, unknownModel, months: months_, inUse: inUseList, slots: slotList, servers: serverRows, unreadReasons: reasons,
-    alerting: alertingList.sort((a, b) => (a.level === b.level ? 0 : (a.level === 'fault' ? -1 : 1)) || Number(b.hasRecords) - Number(a.hasRecords)),
+    alerting: alertingList.sort((a, b) => (a.level === b.level ? 0 : (a.level === 'fault' ? -1 : 1)) || Number(b.hasRecords) - Number(a.hasRecords)).slice(0, ALERTING_MAX),
+    alertingTotal: alertingList.length,
     // 로그 기록은 없고 디스크 값에 흔적이 있는 디스크 — 복구 불가 먼저, 그다음 재할당 많은 순. **전부 정렬한 뒤** 상한(반증 F13).
     traces: traceList.sort((a, b) => (b.vals?.uncorrectable ?? -1) - (a.vals?.uncorrectable ?? -1) || (b.vals?.realloc ?? -1) - (a.vals?.realloc ?? -1)).slice(0, TRACES_MAX),
     tracesTotal: traceList.length,
     synthesized,
   };
+}
+
+/**
+ * 서버 창에 싣는 기록(반증 3회차 D9 — 2만 건을 통째로 실어 6.8MB · 143ms 였고 화면은 200건만 그렸다).
+ * 판정에 쓰는 분류(세는 것 · 고장 예측 · 빠짐)는 **전부**, 분류에 없는 기록은 가장 새 것 N건만. 판정은 이미 전부로 했다(serverView).
+ * @returns {{records:Array, total:number, trimmed:number}}
+ */
+export const OTHER_RECORDS_VIEW_MAX = 300;
+export function trimRecordsForView(records, otherMax = OTHER_RECORDS_VIEW_MAX) {
+  const list = Array.isArray(records) ? records : [];
+  const keep = []; const other = [];
+  for (const r of list) (r && r.cls && r.cls !== CLS.other ? keep : other).push(r);
+  other.sort((a, b) => (b.created ?? -Infinity) - (a.created ?? -Infinity));
+  const kept = [...keep, ...other.slice(0, otherMax)];
+  return { records: kept, total: list.length, trimmed: list.length - kept.length };
 }
 
 /** 화면이 문구를 복사하지 않게 서버가 내려주는 표(근거 화면 포함). */

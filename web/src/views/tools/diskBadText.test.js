@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mailInfoText, fmtDate, spanText, rateText, pctText, clsTone, verdictTone, serverBand, unitProgress, scopeLabel, noteOf, clsOfCode, num, diagInfo, shortLogNote, READ_STOP_LABEL, scanSent, sourceRows, sourceTone, traceTone, valCell, pastCoverageText } from './diskBadText.js';
+import { corpSaveText, mailInfoText, fmtDate, spanText, rateText, pctText, clsTone, verdictTone, serverBand, unitProgress, scopeLabel, noteOf, clsOfCode, num, diagInfo, shortLogNote, READ_STOP_LABEL, scanSent, sourceRows, sourceTone, traceTone, valCell, pastCoverageText } from './diskBadText.js';
 
 const HOUR = 3_600_000; const DAY = 24 * HOUR;
 const NOW = Math.floor(Date.now() / HOUR) * HOUR;
@@ -153,6 +153,12 @@ describe('diskBadText', () => {
     expect(mailInfoText({ at: NOW, skipped: 'off' }).text).toContain('꺼짐');
     const m = mailInfoText({ at: NOW, results: [{ ok: true }, { ok: false, reason: 'SMTP 연결 실패' }] });
     expect(m.ok).toBe(false); expect(m.text).toContain('1/2통 보냄'); expect(m.text).toContain('SMTP 연결 실패');
+  });
+
+  it('3회차(D3) — 담당자 저장 결과는 버린 줄 · 주소 · 법인을 밝힌다', () => {
+    expect(corpSaveText(null, 0)).toBe('저장했습니다.');
+    const t = corpSaveText({ droppedEmails: 2, droppedCorps: ['vc-kr'], unknownCorps: ['서울법인'] }, 1);
+    expect(t).toContain('1줄은 읽지 않았습니다'); expect(t).toContain('vc-kr'); expect(t).toContain('2개를 뺐습니다'); expect(t).toContain('서울법인');
   });
 });
 

@@ -24,7 +24,7 @@ import { hostVcByTag } from '../../insights/analysisServers.js';
 import { allPhysicalServers } from '../../idrac/corpAttribution.js';
 import { corpIdentityOf } from '../../vcenter/hostCorp.js';
 import { loadAll, loadServer, diskBadDbStatus, diskBadGeneration } from '../../diskbad/db.js';
-import { buildFleet, serverView, labelsPayload } from '../../diskbad/summary.js';
+import { buildFleet, serverView, labelsPayload, trimRecordsForView } from '../../diskbad/summary.js';
 import { createJob, listJobs, stopJob, retryUnit, unitsForAll, autoInfo, setCorpResolver, getJob, isAgentBusy } from '../../diskbad/jobs.js';
 import { loadDiskBadSettings, saveDiskBadSettings, diskBadSettingsLoadError, diskBadWriteRefusal } from '../../diskbad/settings.js';
 import { diskBadMailInfo } from '../../diskbad/notify.js';
@@ -105,6 +105,25 @@ function findServer(servers, id, agent) {
   return hits[0] || null;
 }
 const AMBIGUOUS = { ok: false, reason: '같은 id 의 서버가 여러 엣지에 있습니다 — agent 를 함께 보내세요.' };
+
+/**
+ * 법인 담당자 저장 보고(순수 — 반증 3회차 D3). 보낸 것과 저장된 것을 맞대 버린 주소 수 · 통째로 버린 법인 · 지금 법인 목록에 없는 키를 센다.
+ * @returns {{droppedEmails:number, droppedCorps:string[], unknownCorps:string[]}}
+ */
+export function corpToReport(sent, saved, knownIds) {
+  const src = sent && typeof sent === 'object' && !Array.isArray(sent) ? sent : {};
+  const known = new Set((knownIds || []).map(String));
+  let droppedEmails = 0; const droppedCorps = [];
+  for (const [k, v] of Object.entries(src).slice(0, 500)) {
+    const id = String(k).trim().slice(0, 128);
+    const n = (Array.isArray(v) ? v : String(v ?? '').split(/[\s,;]+/)).filter((x) => String(x).trim()).length;
+    const kept = Array.isArray(saved?.[id]) ? saved[id].length : 0;
+    if (!kept && id) droppedCorps.push(id);
+    droppedEmails += Math.max(0, n - kept);
+  }
+  const unknownCorps = Object.keys(saved || {}).filter((id) => !known.has(id));
+  return { droppedEmails, droppedCorps: droppedCorps.slice(0, 50), unknownCorps: unknownCorps.slice(0, 50) };
+}
 
 function corpOptions(servers) {
   const m = new Map();
@@ -187,11 +206,14 @@ export function registerDiskBad(api) {
     }
     const isAdmin = isAdminDetailUser(req.user) && !scoped;
     res.json({
-      ok: true, scoped, corp: corpId || null, corps: corpOptions(servers), fleet, labels: labelsPayload(),
+      // 개선 3회차 I1: 법인마다 이 계정이 점검할 수 있는가(쓰기 범위 — 법인 id 는 vCenter id) · 설정을 바꿀 수 있는가 — 화면이 버튼을 잠근다(누르면 403 이던 것).
+      ok: true, scoped, corp: corpId || null, corps: corpOptions(servers).map((c) => ({ ...c, writable: !!c.id && inUserWriteScope(req.user, store.get(), c.id) })), fleet, labels: labelsPayload(),
       db: { available: status.available, error: status.available ? '' : status.error, records: status.records },
       jobs: jobsFor(req).slice(0, 10), auto: autoInfo(),
       canScanAll: isFullReadWriteScope(req.user, store.get()) && ['admin', 'operator'].includes(req.user?.role),
-      ...(isAdmin ? { settings: loadDiskBadSettings(), settingsLoadError: diskBadSettingsLoadError(), mail: diskBadMailInfo() } : {}),
+      ...(isAdmin ? { settings: loadDiskBadSettings(), settingsLoadError: diskBadSettingsLoadError(), mail: diskBadMailInfo(),
+        // 이 블록은 이미 관리자 판본(isAdminDetailUser — 역할을 직접 비교하지 않는다) 안이다 — 설정 저장 게이트의 나머지(조회 · 쓰기 전체)만 본다.
+        settingsEditable: isFullReadWriteScope(req.user, store.get()) } : {}),
       node: config.agent.centralUrl ? { role: 'edge', edge: diskBadEdgeStatus() } : { role: 'central' },
     });
   });
@@ -209,13 +231,19 @@ export function registerDiskBad(api) {
     const d = await loadServer(s.agent, s.id);
     if (!d) return res.json({ ok: true, server: s, dbUnavailable: true, labels: labelsPayload() });
     const v = serverView(d.server, d.records, d.serials);
-    const running = listJobs().some((j) => j.units.some((u) => (u.agent === s.agent) && (u.state === 'queued' || u.state === 'running')));
+    // 반증 3회차 D9: 판정은 전부로 했고, 싣는 기록은 판정에 쓰는 분류 전부 + 그 밖 가장 새 것 N건(recordsTotal 로 전체 수를 밝힌다).
+    { const tr = trimRecordsForView(v.records); v.records = tr.records; v.recordsTotal = tr.total; v.recordsTrimmed = tr.trimmed; }
+    // '점검 중' 은 **이 서버를 읽는** 조각이 있을 때만(같은 노드의 다른 서버 작업까지 '점검 중' 이라 해 그동안 10초 폴링이 돌았다) · 노드가 바쁜 것은 따로.
+    const active = (u) => u.state === 'queued' || u.state === 'running';
+    const units = listJobs().flatMap((j) => j.units).filter((u) => u.agent === s.agent && active(u));
+    const running = units.some((u) => !Array.isArray(u.serverIds) || u.serverIds.map(String).includes(String(s.id)));
+    const nodeBusy = units.length > 0;
     // 장비 진단(그 장비가 무엇을 주는가 — 펌웨어 판 · 속성 이름 등)은 관리자 판본에만 싣는다.
     const probe = isAdminDetailUser(req.user) && d.server?.probe ? { probe: d.server.probe, probeAt: d.server.probeAt } : {};
     // 장비가 준 디스크 값 이름(메트릭 id)도 장비 진단과 같은 성격(속성 이름)이라 관리자 판본에만(반증 F15 — 같은 종류를 다르게 가리지 않는다).
     if (!isAdminDetailUser(req.user) && v.coverage?.vals) v.coverage.vals = { ...v.coverage.vals, seen: [] };
     // canProbe: 이 계정이 장비 진단을 볼 수 있는가 — 화면이 '아직 없다 · 받는 방법' 을 관리자에게만 안내한다.
-    res.json({ ok: true, server: s, view: v, scanned: !!d.server, running, labels: labelsPayload(), excluded: s.excluded, canProbe: isAdminDetailUser(req.user), ...probe });
+    res.json({ ok: true, server: s, view: v, scanned: !!d.server, running, nodeBusy, labels: labelsPayload(), excluded: s.excluded, canProbe: isAdminDetailUser(req.user), ...probe });
   });
 
   api.post('/tools/disk-bad/scan', writeRole, toolsPerm, async (req, res) => {
@@ -309,6 +337,8 @@ export function registerDiskBad(api) {
     let next;
     try { next = saveDiskBadSettings(patch); } catch (e) { return res.status(500).json({ ok: false, reason: `저장 실패: ${String(e?.message || e).slice(0, 200)}` }); }
     logAudit({ user: req.user?.username || '', action: '디스크 배드 섹터 설정 저장', target: 'disk-bad-settings', detail: `자동 ${next.autoEnabled ? `켜짐(${next.intervalHours}시간)` : '꺼짐'} · 메일 ${next.mailEnabled ? '켜짐' : '꺼짐'} · 법인 담당자 ${Object.keys(next.corpTo).length}곳`, ip: req.ip });
-    res.json({ ok: true, settings: next, auto: autoInfo() });
+    // 반증 3회차 D3: 버린 주소 · 법인을 알린다 — 화면은 '저장했습니다' 인데 담당자 메일이 소리 없이 빠졌다.
+    const corpReport = 'corpTo' in patch ? corpToReport(patch.corpTo, next.corpTo, corpOptions(physicalServersFor(req).servers).map((c) => c.id)) : null;
+    res.json({ ok: true, settings: next, auto: autoInfo(), ...(corpReport ? { corpReport } : {}) });
   });
 }

@@ -254,6 +254,18 @@ export function mailInfoText(m) {
   return { ok: !bad.length, text: `마지막 새 기록 메일 ${fmtDateTime(m.at)} — ${ok}/${res.length}통 보냄${bad.length ? ` · 못 보낸 이유: ${[...new Set(bad.map((x) => x.reason || '알 수 없음'))].join(' · ').slice(0, 200)}` : ''}` };
 }
 
+/**
+ * 법인 담당자 저장 결과 문구(반증 3회차 D3). 서버 보고(corpReport)와 화면이 못 읽은 줄 수를 합쳐 말한다 — 버린 것이 없으면 '저장했습니다.'
+ */
+export function corpSaveText(rep, badLines = 0) {
+  const parts = [];
+  if (badLines > 0) parts.push(`‘id=메일’ 꼴이 아닌 ${badLines}줄은 읽지 않았습니다`);
+  if (rep && Array.isArray(rep.droppedCorps) && rep.droppedCorps.length) parts.push(`올바른 메일이 없어 뺀 법인: ${rep.droppedCorps.slice(0, 5).join(', ')}${rep.droppedCorps.length > 5 ? ` 외 ${rep.droppedCorps.length - 5}곳` : ''}`);
+  if (rep && Number.isFinite(rep.droppedEmails) && rep.droppedEmails > 0) parts.push(`메일 주소로 읽지 못한 값 ${rep.droppedEmails}개를 뺐습니다`);
+  if (rep && Array.isArray(rep.unknownCorps) && rep.unknownCorps.length) parts.push(`지금 법인(vCenter id) 목록에 없는 키: ${rep.unknownCorps.slice(0, 5).join(', ')} — 이 담당자에게는 메일이 가지 않습니다`);
+  return parts.length ? `저장했습니다 — ${parts.join(' · ')}.` : '저장했습니다.';
+}
+
 export const JOB_STATE_LABEL = Object.freeze({
   queued: '엣지 대기', running: '읽는 중', done: '끝남', failed: '실패', 'not-started': '시작 못 함', 'no-response': '응답 없음', stopped: '중단됨', busy: '다른 점검 진행 중',
 });

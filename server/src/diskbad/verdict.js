@@ -14,6 +14,7 @@
  */
 import { COUNTED, CLS, labelOfKey, matchDrive, driveSlotOf, slotKeyOf } from './classify.js';
 import { redfishPartState } from '../partfault/classify.js';
+import { dayKey } from '../util/dayKey.js';
 import { PART_STATE, PART_STATE_LABEL } from '../partfault/types.js';
 
 /**
@@ -38,12 +39,8 @@ export const VERDICT_LABEL = Object.freeze({ inUse: '아직 사용 중', replace
 export const CONFIDENCE = Object.freeze({ confirmed: 'confirmed', estimated: 'estimated', none: 'none' });
 export const CONFIDENCE_LABEL = Object.freeze({ confirmed: '확정', estimated: '추정', none: '판단 안 함' });
 
-const fmt = (ms) => {
-  if (!Number.isFinite(ms)) return '—';
-  const d = new Date(ms);
-  const p = (n) => String(n).padStart(2, '0');
-  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`;
-};
+// 근거 문장의 날짜는 **포탈 시각**(기본 KST — util/dayKey.js 하나)으로 — UTC 로 적어 같은 행의 날짜 칸(브라우저 시각)과 하루 어긋났다(반증 3회차 D5).
+const fmt = (ms) => (Number.isFinite(ms) ? dayKey(ms) || '—' : '—');
 
 /**
  * 한 자리의 판정.
