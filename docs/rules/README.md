@@ -8,7 +8,7 @@
 |---|---:|---|---|
 | [perf-db.md](perf-db.md) | 25 | 성능·DB·폴러 규약 | 폴러·DB 모듈·캐시·대량 쓰기·응답 캐시를 새로 만들거나 고칠 때 |
 | [common.md](common.md) | 14 | 공통 코드·테스트·문서 규약(numOrNull·주석 제거·TDZ·생성기·의존 방향·릴리스 워크플로) | 테스트·스윕·문서 생성기·릴리스 워크플로를 만질 때 |
-| [security-api.md](security-api.md) | 20 | 보안·라우트·외부 API·감사 로그·라이선스 | server/src/routes/ · publicapi · auth · 압축 해제 · CSP |
+| [security-api.md](security-api.md) | 23 | 보안·라우트·외부 API·감사 로그·라이선스 | server/src/routes/ · publicapi · auth · 압축 해제 · CSP |
 | [web.md](web.md) | 53 | 웹 화면·메뉴·표·문구 규약 | web/src/ 전반(메뉴·사이드바·표·문구·드롭다운·게시판) |
 | [edge.md](edge.md) | 20 | 중앙↔엣지 통신·엣지 로그·통신 점검·토큰 점검·지도·전송 속도·스캔 재개 | server/src/{agent,central,collector,linkcheck,edgelog,portalcheck,commmap,dataflow,devflow,xferspeed}/ |
 | [storage.md](storage.md) | 38 | 스토리지 모니터링·증가량·Unity/PowerMax·전력·시리얼 | server/src/storage/ · web/src/views/tools/Storage* · bmstor |
@@ -22,7 +22,7 @@
 | [horizon-curuser.md](horizon-curuser.md) | 6 | Horizon 세션·앱 사용·현재 사용자(Windows) | server/src/{horizon,curuser}/ · web/src/views/tools/Horizon*·CurrentUsers* |
 | [demo.md](demo.md) | 7 | 데모(mock) 모드·데모 계정 | server/src/mock/ · auth/demoGuest.js |
 | [audits.md](audits.md) | 82 | 회차별 점검(감사) 기록 v2.583~v3.28.0(전체 점검 1~135회차 · 새 코드 점검 136~145회차 · 결정 반영 146~151회차 포함 — 1MB · `grep -n` 으로 해당 절만) | 같은 영역을 다시 점검할 때 — 확정분·남긴 것·작업 방식 교훈 |
-| [focusmon.md](focusmon.md) | 13 | 서버 집중 모니터링 — v2.976 반증 · v2.978 CSV 대량 등록 · 일괄 시험 · 다시 연결 · v2.979 구간 평균 · v2.981 프로세스 세부 · v2.982 서버 그룹 · v2.983 수집 부하 · v2.992 카드 아래 줄 원문 · v3.11.0 디스크 점검(배드 섹터 프로그램 · sudo 예외 · 묶어 보기) · v3.12.0 더할 지표 | server/src/focusmon/ · central/focusMonEdge.js · agent/focusMonWorker.js · web/src/views/tools/FocusMon* |
+| [focusmon.md](focusmon.md) | 14 | 서버 집중 모니터링 — v2.976 반증 · v2.978 CSV 대량 등록 · 일괄 시험 · 다시 연결 · v2.979 구간 평균 · v2.981 프로세스 세부 · v2.982 서버 그룹 · v2.983 수집 부하 · v2.992 카드 아래 줄 원문 · v3.11.0 디스크 점검(배드 섹터 프로그램 · sudo 예외 · 묶어 보기) · v3.12.0 더할 지표 | server/src/focusmon/ · central/focusMonEdge.js · agent/focusMonWorker.js · web/src/views/tools/FocusMon* |
 | [server-security-history.md](server-security-history.md) | 20절 | 서버 보안 감사 조치 기록 | 서버 인증·권한·SSRF·비밀·엣지 수신 코드를 고칠 때 |
 
 ## 남기는 방법
