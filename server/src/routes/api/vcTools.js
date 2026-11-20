@@ -199,12 +199,14 @@ api.get('/tools/snapshots/creators', requirePerm('tools'), (req, res) => memoJso
   const allowed = scopedVcenterIds(req.user, snap);
   const pick = vcenterPickOf(req.query, snap);
   const vcIds = new Set((snap.vcenters || []).map((v) => String(v.id)).filter((id) => (!allowed || allowed.has(id)) && (!pick || pick.has(id))));
-  const r = await snapshotCreators({ snap, vcIds });
+  let exclude = [];
+  try { exclude = loadVmHygieneSettings().creatorExclude || []; } catch { exclude = []; }
+  const r = await snapshotCreators({ snap, vcIds, exclude });
   const admin = isAdminDetailUser(req.user);
   const byVm = {};
   for (const [k, c] of Object.entries(r.byVm)) byVm[k] = { user: admin ? c.user : null, ts: c.ts };
-  return { ok: true, byVm, vcenters: r.vcenters, ambiguous: r.ambiguous, ...(admin ? {} : { userMasked: Object.keys(byVm).length > 0 }), windowDays: 31 };
-}, { extraKey: `${scopeKey(req.user, store.get())}|${vcenterPickKey(req.query, store.get())}|${isAdminDetailUser(req.user) ? 'a' : 'u'}`, ttlMs: 300_000 }));
+  return { ok: true, byVm, vcenters: r.vcenters, ambiguous: r.ambiguous, listed: r.listed, excludeCount: exclude.length, ...(admin ? {} : { userMasked: Object.keys(byVm).length > 0 }), windowDays: 31 };
+}, { extraKey: `${scopeKey(req.user, store.get())}|${vcenterPickKey(req.query, store.get())}|${isAdminDetailUser(req.user) ? 'a' : 'u'}|s${loadVmHygieneSettings().rev}`, ttlMs: 300_000 }));
 
 // v3.28.0 스냅샷 보류(기한 있는 예외 — vmhygiene/holds.js). 조회는 범위 안 보류만 · 건 계정은 관리자 판본만.
 //   쓰기는 관리자(requireRole) · 조회 범위 밖 vCenter 는 404 → 쓰기 범위 밖은 403(server/CLAUDE.md writeVcenters 규약) · 감사 기록.

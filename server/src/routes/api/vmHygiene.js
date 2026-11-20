@@ -55,8 +55,14 @@ function run(snap, req) {
 /** 범위 계정용 설정 판본 — 예외 원문 대신 개수만 · updatedBy 없음(v2.721 B2-02 · 32회차 F2 — 설정 GET 과 본 응답이 같은 모양). */
 export function maskedSettings(s) {
   const n = Array.isArray(s?.exceptions) ? s.exceptions.length : 0;
-  return { ...s, exceptions: [], exceptionsCount: n, exceptionsHidden: true, updatedBy: null };
+  return creatorMasked({ ...s, exceptions: [], exceptionsCount: n, exceptionsHidden: true, updatedBy: null });
 }
+/** v3.30.4: ‘만든 계정에서 뺄 백업 계정’ 은 계정 이름이다 — 관리자 판본(isAdminDetailUser)이 아니면 개수만(creators 라우트와 같은 규칙). */
+export function creatorMasked(s) {
+  const n = Array.isArray(s?.creatorExclude) ? s.creatorExclude.length : 0;
+  return { ...s, creatorExclude: [], creatorExcludeCount: n, creatorExcludeHidden: true };
+}
+const settingsFor = (user, snap, s) => (scopedVcenterIds(user, snap) ? maskedSettings(s) : (isAdminDetailUser(user) ? s : creatorMasked(s)));
 
 export function registerVmHygiene(api) {
   api.get('/tools/vm-hygiene', toolsPerm, (req, res) => memoJson(req, res, 'vm-hygiene', (snap) => {
@@ -79,7 +85,7 @@ export function registerVmHygiene(api) {
     const isAdmin = isAdminDetailUser(req.user);
     // 전체 점검 32회차 F2(재현): 본 응답의 settings.exceptions 도 범위 계정에는 가린다 — v2.721 B2-02 는 /settings 경로만 가려
     //   같은 원문(다른 법인 VM 이름 · 메모 조각)이 이 경로로 나갔다. 두 경로가 maskedSettings 하나를 쓴다.
-    const settings = scopedVcenterIds(req.user, snap) ? maskedSettings(r.settings) : r.settings;
+    const settings = settingsFor(req.user, snap, r.settings);
     return { ...r, settings, initial: snap.initial === true, generatedAt: snap.generatedAt || null, notify: isAdmin ? vmHygieneNotifierStatus() : null };
   }, { extraKey: `${scopeKey(req.user, store.get())}|${loadVmHygieneSettings().rev}|${isAdminDetailUser(req.user) ? 'a' : 'u'}` }));
 
@@ -87,18 +93,18 @@ export function registerVmHygiene(api) {
     const s = loadVmHygieneSettings();
     // v2.721(감사 B2-02): exceptions 는 전 법인 공통 자유 입력(다른 법인 VM 이름·메모 조각)이고 updatedBy 는 계정명이다 —
     // 범위 계정에는 개수만(exceptionsHidden) · updatedBy null. 저장은 어차피 전체 범위 전용이다. 전체 범위 응답은 그대로.
-    if (scopedVcenterIds(req.user, store.get())) {
-      return res.json({ ok: true, settings: maskedSettings(s), codes: ALL_CODES });
-    }
-    res.json({ ok: true, settings: s, codes: ALL_CODES });
+    res.json({ ok: true, settings: settingsFor(req.user, store.get(), s), codes: ALL_CODES });
   });
 
   api.put('/tools/vm-hygiene/settings', adminOnly, fleetOnly, (req, res) => {
     try {
       const before = loadVmHygieneSettings();
-      const s = saveVmHygieneSettings(req.body || {}, req.user?.username);
+      // v3.30.4: 백업 계정 목록을 못 보는 판본(데모 등)이 보낸 값은 버린다 — 가린 빈 목록이 저장값을 지우지 않게
+      const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? { ...req.body } : {};
+      if (!isAdminDetailUser(req.user)) delete body.creatorExclude;
+      const s = saveVmHygieneSettings(body, req.user?.username);
       logAudit({ user: req.user?.username, action: 'vm-hygiene.settings', target: 'vm-hygiene.json', detail: `rev ${before.rev} → ${s.rev}`, ip: req.ip });
-      res.json({ ok: true, settings: s });
+      res.json({ ok: true, settings: settingsFor(req.user, store.get(), s) });
     } catch (e) {
       res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) });
     }
