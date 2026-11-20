@@ -491,7 +491,7 @@ test('⑨ 호출부 분류표 — clearAuthStop 호출이 늘거나 줄면 성�
   // [전체 호출 수, 그중 verified:false 수]. 성공 신호 = 저장된 자격증명으로 로그인이 통한 직후. 정리 = 삭제 · 접속처 변경 · 낡은 기록 · 시도 없이 사람이 누른 해제.
   const TABLE = {
     'agent/bareosConfigPull.js': [1, 1], 'agent/veeamConfigPull.js': [2, 2], 'bareos/autoSetup.js': [2, 1], 'bareos/edgeSetup.js': [1, 1], 'bareos/service.js': [2, 0],
-    'bmstor/poller.js': [1, 0], 'bmusage/poller.js': [5, 0], 'cvp/poller.js': [3, 0], 'diskbad/scan.js': [1, 0], 'focusmon/audit/prep.js': [1, 1], 'focusmon/audit/runner.js': [1, 0],
+    'bmstor/poller.js': [2, 0], 'bmusage/poller.js': [5, 0], 'cvp/poller.js': [3, 0], 'diskbad/scan.js': [1, 0], 'focusmon/audit/prep.js': [1, 1], 'focusmon/audit/runner.js': [1, 0],
     'focusmon/collector.js': [3, 1], 'focusmon/runner.js': [1, 1], 'gpu/physicalPoller.js': [1, 0], 'gpu/poller.js': [1, 0], 'horizon/sessionPoller.js': [2, 1], 'idrac/poller.js': [2, 0],
     'idrac/scanAuth.js': [1, 0], 'inventory/osScanner.js': [2, 0], 'isidu/collect.js': [2, 0], 'mail/service.js': [1, 0], 'net/monitor.js': [3, 2], 'nsx/registry.js': [1, 0], 'nsx/store.js': [1, 0],
     'pdu/poller.js': [1, 0], 'routes/admin/gpuGuest.js': [2, 0], 'routes/admin/veeam.js': [4, 3], 'routes/admin/veeamEm.js': [3, 2], 'routes/api/bareosBackup.js': [2, 1],

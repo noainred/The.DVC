@@ -18,6 +18,12 @@ export const ALWAYS_ALLOWED_FEATURES = Object.freeze(['conn-test']);
  */
 export const EXPLICIT_FEATURES = Object.freeze(['server-cmd']);
 /**
+ * 점검 2회차 W2-2: **키로만 쓰는 · 직접 켠 키만** 기능(디스크 점검 설치 · 접속 자동 준비 — root 설치 · 준비). 판정은 `focusmon/audit/installCred.js`(키의 목록에 그 기능이 있어야 —
+ *   예전 키는 쓰지 않는다)이고, 이 목록은 그 기능 이름의 한 곳이다(installCred 가 가져다 쓴다 · 화면 카탈로그의 ‘직접 켜야’ 표시도 이것 — 예전에는 화면이 이 둘을
+ *   ‘예전 방식으로 쓰임’ 으로 보였다). featureBlocked 에 넣지 않는 것은 결정 대기(servercmd CLAUDE.md F12 — 합치면 ‘예전 계정 + 켠 키’ 설치가 막힌다).
+ */
+export const KEY_EXPLICIT_FEATURES = Object.freeze(['disk-audit-install', 'focus-mon-prep']);
+/**
  * 허용 기능 판정 하나(키 · 공통 계정이 같은 함수 — keyPlacementIssue · refs.resolveOsAuth). true 면 막는다.
  *   목록이 있으면 그 기능이 있어야 하고, 목록이 없으면(예전 항목) 직접 켜야 하는 기능만 막는다.
  */

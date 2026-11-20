@@ -278,7 +278,7 @@ export default function ServerCmdTool() {
                     <td data-sort={r.code}><Chip tone={codeTone(r.code)}>{resultText(r)}</Chip>{r.os === 'windows' && r.ran && <Chip tone="warn" title="실제 Windows 서버 출력으로 확인하지 못한 프리셋입니다">시험</Chip>}</td>
                     <td data-sort={r.first || r.reason}>
                       {r.ran ? <span className="scm-first">{r.first || <span className="ssa-sub">출력 없음</span>}</span>
-                        : <span className="ssa-sub">{r.code === 'cred' && CRED_TEXT[r.credCode] ? CRED_TEXT[r.credCode] : (r.reason || CODE_TEXT[r.code] || '—')}</span>}
+                        : <span className="ssa-sub" title={r.reason || undefined}>{r.code === 'cred' && CRED_TEXT[r.credCode] ? CRED_TEXT[r.credCode] : (r.reason || CODE_TEXT[r.code] || '—')}</span>}
                       {r.ran && r.partial && <div className="ssa-sub" style={{ color: toneVar('warn') }}>{r.reason}</div>}
                     </td>
                     <td data-sort={r.ran ? r.lines : ''}>{r.ran ? r.lines : '—'}{r.cut && <div><Chip tone="warn">잘림</Chip></div>}</td>
