@@ -979,6 +979,8 @@
   ⑤ `confirmSettingsDefault` 는 오류 중 **파일이 다시 있으면** 덮지 않는다(409 `file-present` — 되돌린 보존본) · `ownerOnly` 로 등록한 파일은 확정도 설정 소유자 등급(B-1 · B-2).
   ⑥ '중앙 → 엣지' 링크 id 는 `links.js centralEdgeLinkId` 하나(통신 지도도 같은 함수 — A-2) · 중계 점검 https 의 인증서 · 프로토콜 실패는 'cert' 단계(A-3) ·
      엣지 로그는 원문(상한 16KB)을 다 가린 뒤 2,000자로 자른다(먼저 자르면 경계에 걸친 비밀이 남는다 — A-1).
+  ⑦ 결정(76~105 남긴 것 A4 · 2026-11-20 '권장 사항으로 진행' — 현행 유지): 중계 점검 **수동 호스트**도 IPv6 ULA(fc00::/7)를 막는다 — 함대 SSRF 판정(`util/ssrfBlock.js` · `relaycheck/checks.js ipBlockReason`) 하나를
+     한 기능만 넓히지 않는다(수집 서버 등록부 · vCenter · relaytopo 와 같은 판정). ULA 를 쓰는 현장이 확인되면 전역 옵트인(env)을 다시 본다.
 - **전체 점검 4회차 V-9 — 엣지 시각은 시계 보정이 0 이어도 수신 시각으로 자른다**(`central/veeamEdge.js` poller.at · `veeam/parse.js` authStop.since · 회귀 `veeamFullAudit2` ⑦):
   보정 창 밖(차이 2분 미만 · 30일 초과)이면 결과 ts 만 미래를 잘랐고 두 값은 미래 시각 그대로 저장돼 진행 상태에 보였다. 새 엣지 시각 칸도 `shift`(보정 + `Math.min(now)`)를 지날 것.
   **남긴 것(4회차 V-8 — 추정)**: Veeam EM VM 기록(`veeam/em/vmStore.js keyOf`)은 '백업 서버 + VM 이름' 키라 같은 서버의 동명 VM 두 대(moref 다름)의 마지막 작업 · 복원 지점이 한 기록에 섞인다.
