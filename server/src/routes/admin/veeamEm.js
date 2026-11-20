@@ -15,6 +15,7 @@ import { getEmMap, setEmMap, emMapUnreadable, emMapReadError, dropEmMapFor, mapK
 import { mapBackupServers } from '../../veeam/em/view.js';
 import { listServers } from '../../veeam/registry.js';
 import { store } from '../../store.js';
+import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 
 const fleetWideOnly = fullScopeOnlyWith('Veeam Enterprise Manager 등록은 전 법인에 걸친 설정이라 전체 범위(vCenter 제한 없는) 계정만 볼 수 있습니다.');
 
@@ -111,7 +112,7 @@ export function registerVeeamEm(adminRouter) {
 
   // v2.788.1 매핑 저장 — 백업 서버 한 대: vCenter(법인) 목록 · B&R 등록(''=자동 · id · 'none'). 둘 다 비면 지운다.
   //   알려진 vCenter·등록된 B&R 만 받는다(모르는 값 400) · 매핑 파일을 못 읽었으면 503(빈 맵 위에 쓰지 않는다) · 감사 로그.
-  adminRouter.put('/veeam/em/map', adminOnly, fleetWideOnly, (req, res) => {
+  adminRouter.put('/veeam/em/map', adminOnly, fleetWideOnly, textFields('emId'), (req, res) => {
     const b = req.body || {};
     const em = getEmWithSecret(String(b.emId || ''));
     if (!em) return res.status(404).json({ ok: false, reason: 'Enterprise Manager 를 찾을 수 없습니다.' });

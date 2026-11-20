@@ -26,6 +26,7 @@ import { ssrfBlockReasonResolved, ipBlockReason } from '../collector/registry.js
 
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
 import { targetHostScopeIssue, resolveScopedTarget, mappingTargetScopeIssue } from '../proxy/targetHostScope.js'; // v2.579: 라우트와 게이트웨이가 같은 판정을 쓴다
+import { textFields, rejectNonText } from '../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 export const remoteRouter = Router();
 // v2.574 BUG-03: express 4 는 async 핸들러의 throw 를 잡지 않아 그 요청이 **응답 없이
 // 매달린다**(소켓 fd 가 잡힌다). 라우트를 등록하기 **전에** 감싸 전역 에러 핸들러로 보낸다.
@@ -122,7 +123,7 @@ export function scopedAdminMappingIssue(user, m) {
 }
 
 // 프록시에서 SSH로 ping/포트체크를 대행 — 내부망 도달성 탐침이므로 admin/operator만(감사 H3/H7).
-remoteRouter.post('/probe', requirePerm('remote.access'), async (req, res) => {
+remoteRouter.post('/probe', requirePerm('remote.access'), textFields('targetHost', 'vcenterId', 'targetPort'), async (req, res) => {
   const { vcenterId, targetHost } = req.body || {};
   const targetPort = Math.min(65535, Math.max(1, Number((req.body || {}).targetPort) || 22));
   if (!targetHost || !SAFE_HOST.test(targetHost)) return res.status(400).json({ ok: false, reason: '대상 호스트가 올바르지 않습니다.' });
@@ -283,6 +284,12 @@ function proxyActionDenied(req, id) {
 const sendProxyDenied = (res, code, extra = {}) => (code === 404 ? res.status(404).json({ ok: false, reason: PROXY_NOT_FOUND, ...extra }) : res.status(403).json({ ok: false, error: 'forbidden', reason: PROXY_WRITE_DENIED, ...extra }));
 remoteRouter.post('/proxies', adminOnly, (req, res) => {
   const body = { ...(req.body || {}) };
+  // 163회차: name · vcenterIds 를 모양 검사 없이 저장했다 — 객체 · 수 vcenterIds 가 저장되면 resolveProxy 의 includes 가 던져 **모든** 원격 접속(probe ·
+  //   quick-connect · mappings)이 500 이었다(전 사용자 · 그 중계를 지울 때까지). 저장 전에 거절한다.
+  if (rejectNonText(res, body, ['id', 'name', 'proxyHost'])) return undefined;
+  if (body.vcenterIds != null && (!Array.isArray(body.vcenterIds) || body.vcenterIds.some((v) => typeof v !== 'string'))) {
+    return res.status(400).json({ ok: false, reason: '‘vcenterIds’ 는 vCenter id(글자) 목록이어야 합니다.', field: 'vcenterIds', code: 'not-text' });
+  }
   const read = scopedVcenterIds(req.user, store.get());
   const allowed = proxyWriteScope(req);   // 전체 점검 7회차: 쓰기 범위(조회만 보면 쓰기를 줄인 관리자가 범위 밖 법인의 중계 서버를 바꾸고 기본 중계 서버를 덮었다)
   let ignoredOutOfScope = 0;
@@ -425,7 +432,7 @@ remoteRouter.post('/deploy', adminOnly, async (req, res) => {
 
 
 // Create a mapping, then provision it on HAProxy. (admin-created = persistent)
-remoteRouter.post('/mappings', adminOnly, async (req, res) => {
+remoteRouter.post('/mappings', adminOnly, textFields('targetHost', 'vcenterId', 'protocol', 'name', 'proxyId', 'targetPort'), async (req, res) => {
   {
     // v2.606 AUTHZ2606-03: 범위 제한 admin 은 quick-connect 와 같은 대상 범위(전체 범위 admin 은 예전 그대로).
     const allowed = scopedVcenterIds(req.user, store.get());
@@ -476,7 +483,7 @@ export function _resetProvisionRetryForTest() { _provisionAt.clear(); }
 // target+port+protocol, else create+provision one. 매핑 생성=프록시 경유 터널 개통이므로
 // admin/operator만(감사 H3/H7/H14 — viewer의 오픈릴레이/내부 피벗 차단; WS 게이트웨이 역할
 // 검사와 일관). targetHost 형식은 addMapping(SAFE_TARGET_HOST)이 최종 검증한다.
-remoteRouter.post('/quick-connect', requirePerm('remote.access'), async (req, res) => {
+remoteRouter.post('/quick-connect', requirePerm('remote.access'), textFields('targetHost', 'vcenterId', 'protocol', 'name', 'targetPort'), async (req, res) => {
   const { protocol = 'ssh', targetHost, vcenterId, name } = req.body || {};
   const proto = protocol === 'rdp' ? 'rdp' : 'ssh';
   // v2.770(점검 R5-E5-4): 포트는 정수 1~65535 만(빈 값 = 기본). 예전 'Number(x) || 기본' 은 70000·-1·1.5 를 매핑에 저장했다.

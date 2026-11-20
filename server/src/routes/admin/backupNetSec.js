@@ -32,6 +32,7 @@ import { analyzeNetIssues } from '../../security/netIssueStore.js';
 import path from 'node:path';
 import { dirPathIssue } from '../../util/dirPathGuard.js';
 import { adminOnly, requireSettingsOwner, fullScopeOnlyWith } from './shared.js';
+import { textFields, rejectNonText, nonTextField } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 
 // v2.675: 로그인 실패 분석 화면 조회 기억 시간(같은 조건 · 동시 요청 합류). '지금 분석' 이 비운다.
 export const LOGIN_FAILS_MEMO_MS = 60_000;
@@ -330,7 +331,20 @@ adminRouter.get('/net/monitors', adminOnly, fleetOnly, (_req, res) => {
   const no = monitorsWriteRefusal();
   res.json({ monitors: listMonitors(), ...(no ? { loadError: { readError: true, reason: no.reason } } : {}) });
 });
-adminRouter.put('/net/monitors', adminOnly, fleetOnly, (req, res) => res.json(saveMonitor(req.body || {})));
+// 163회차: 글자가 아닌 id 가 **저장된 뒤** 응답(redact)에서 던져 500 이었고, 그 뒤로 GET /net/monitors 가 늘 500 이었다(목록을 못 열어 지우지도 못한다).
+//   저장 전에 거절한다 — 위쪽 칸 · hostA/hostB 안의 접속 칸. hostA/hostB 자체는 객체여야 한다.
+adminRouter.put('/net/monitors', adminOnly, fleetOnly, (req, res) => {
+  const b = req.body || {};
+  if (rejectNonText(res, b, ['id', 'name', 'iface', 'peer', 'mode'])) return undefined;
+  for (const side of ['hostA', 'hostB']) {
+    const h = b[side];
+    if (h == null) continue;
+    if (typeof h !== 'object' || Array.isArray(h)) return res.status(400).json({ ok: false, reason: `‘${side}’ 값은 접속 정보(객체)여야 합니다.`, field: side, code: 'not-text' });
+    const k = nonTextField(h, ['host', 'port', 'username', 'password', 'privateKey']);
+    if (k) return res.status(400).json({ ok: false, reason: `‘${side}.${k}’ 값은 글자여야 합니다.`, field: `${side}.${k}`, code: 'not-text' });
+  }
+  return res.json(saveMonitor(b));
+});
 adminRouter.delete('/net/monitors/:id', adminOnly, fleetOnly, (req, res) => res.json({ ok: removeMonitor(req.params.id) }));
 adminRouter.post('/net/monitors/:id/run', adminOnly, fleetOnly, async (req, res) => { try { res.json(await runMonitorNow(req.params.id)); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); } });
 // 로그 자체 분석(장애/이슈 탐지).
@@ -351,7 +365,7 @@ adminRouter.get('/net/log-issues', adminOnly, async (req, res) => {
 // ───────────────────────── 게스트 계정 추가 ─────────────────────────
 // VMware Tools(게스트 작업)로 게스트 OS에 sudo 계정 추가. 관리자 전용 + 감사 로그.
 // Body: { vcenterId, vmIds[], username, password, sudo, nopasswd, guestUser, guestPass }
-adminRouter.post('/guest/add-user', adminOnly, async (req, res) => {
+adminRouter.post('/guest/add-user', adminOnly, textFields('vcenterId'), async (req, res) => {
   const b = req.body || {};
   // 게스트 OS 계정 추가는 VM 상태변경 — 쓰기 범위(writeVcenters, v2.369) 강제. 미설정=조회 범위.
   if (!inUserWriteScope(req.user, store.get(), String(b.vcenterId || ''))) {
@@ -439,7 +453,7 @@ adminRouter.get('/security/guest-scans', adminOnly, (req, res) => {
     .map((j) => ({ ...j, writable: !write || (!!j.vcenterId && write.has(String(j.vcenterId))) }));
   res.json({ jobs, scoped: !!read, writeScoped: !!write, omittedOutOfScope: all.length - jobs.length, readOnlyJobs: jobs.filter((j) => !j.writable).length });
 });
-adminRouter.put('/security/guest-scans', adminOnly, (req, res) => {
+adminRouter.put('/security/guest-scans', adminOnly, textFields('id', 'vcenterId'), (req, res) => {
   const b = req.body || {};
   const prev = b.id ? listGuestScans().find((j) => j.id === String(b.id)) : null;
   if (prev) {
@@ -448,6 +462,8 @@ adminRouter.put('/security/guest-scans', adminOnly, (req, res) => {
   }
   const code = guestScanAccess(req.user, b.vcenterId);
   if (code) return res.status(code).json({ ok: false, reason: code === 403 ? GUEST_SCAN_READONLY : 'vCenter 를 찾을 수 없습니다(범위 제한 계정은 자기 범위 vCenter 를 지정해야 합니다).' });
+  // 165회차(163 반증 — 재현): 옆 칸 name 이 객체면 saveGuestScan 의 String() 이 던져 500(사유 'Cannot convert object…')이었다 — 범위 판정(404 · 403) 뒤 · 저장 앞에서 400
+  if (rejectNonText(res, b, ['name'])) return undefined;
   // 22회차 반증 D-12: 저장이 던지면(21회차 L-3 — 잠금 · 키 없음 · 디스크) 사유를 그대로(500 'internal error' 로 사유가 사라지던 것)
   try { res.json(saveGuestScan(b)); } catch (e) { res.status(e?.status === 409 ? 409 : e?.code === 'SECRETS_KEY_MISSING' || e?.code === 'SECRETS_POLICY_UNAVAILABLE' ? 503 : 500).json({ ok: false, code: e?.code || null, reason: String(e?.message || e).slice(0, 300) }); }
 });

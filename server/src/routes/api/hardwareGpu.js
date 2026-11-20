@@ -29,6 +29,7 @@ import { allocHistoryRows, allocHistoryView, HISTORY_DAYS_MAX } from '../../gpu/
 import { renderGpuAllocWorkbook, allocCsvLines, allocExportOpts, allocFileName, corpSheetNames, CORP_SHEETS_MAX, ALLOC_DEPTHS, ALLOC_SHEET_KEYS, XLSX_MIME as ALLOC_XLSX_MIME } from '../../gpu/allocTreeXlsx.js';
 import { fileStamp, localStamp, DAY_OFFSET_MIN } from '../../util/dayKey.js';
 import { tzName } from '../../vcenter/vmExportCatalog.js';
+import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
 const csvPerm = requirePerm('data.csv');
 
@@ -635,7 +636,7 @@ api.get('/tools/gpu/export.json', csvPerm, requirePerm('tools'), (req, res) => g
 // VM IP Ping(위임) — 중앙은 VM 사설 IP에 직접 못 가므로, 그 vCenter 담당 에이전트가
 // ping을 대행한다. POST로 요청 큐잉 → 에이전트가 인출/실행/보고 → GET으로 녹/적 조회.
 // 중앙이 직접 수집하는 vCenter(에이전트 없음)는 중앙이 직접 ping해 즉시 결과를 채운다.
-api.post('/tools/ip-ping', requirePerm('tools'), async (req, res) => {
+api.post('/tools/ip-ping', requirePerm('tools'), textFields('vcenterId'), async (req, res) => {
   const vcenterId = String(req.body?.vcenterId || '').trim();
   let ips = Array.isArray(req.body?.ips) ? req.body.ips.map((s) => String(s).trim()).filter(Boolean).slice(0, 16) : [];
   if (!vcenterId || !ips.length) return res.status(400).json({ ok: false, reason: 'vcenterId·ips가 필요합니다.' });

@@ -329,7 +329,10 @@ export function mappingProxyOf(m) {
 
 /** Pick the proxy assigned to a vCenter (else the default proxy). */
 export function resolveProxy(vcenterId) {
-  const extra = load().proxies.find((p) => (p.vcenterIds || []).includes(vcenterId));
+  // 165회차(163 반증): 163 이전 판이 저장해 둔 배열이 아닌 vcenterIds(수 · 객체 · 불리언)는 includes 가 없어 던졌다 — 모든 probe · quick-connect · mappings 가 500.
+  //   저장은 163 이 막았고, 읽는 쪽은 includes 가 있는 모양(배열 · 예전에도 던지지 않던 글자)만 본다 — 그 밖은 배정 없음(목록의 normalizeProxy 와 같은 결과).
+  //   목록 · 삭제 · 다시 저장은 예전부터 normalizeProxy 를 거쳐 열려 있었다(복구 길은 있었다 — 그때까지 전 사용자 원격 접속이 500 이던 것만 없앤다).
+  const extra = load().proxies.find((p) => (Array.isArray(p.vcenterIds) || typeof p.vcenterIds === 'string') && p.vcenterIds.includes(vcenterId));
   return extra ? normalizeProxy(extra) : defaultProxy();
 }
 

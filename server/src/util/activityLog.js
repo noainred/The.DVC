@@ -72,9 +72,12 @@ export function createActivityLog({ fileName, max = 500, numFields = [], writeGa
     if (timer) { clearTimeout(timer); timer = null; }
     if (!buf) return;
     dirty = false;
-    lastWriteAt = performance.now();   // 5회차 재확인 R3: 간격은 단조 시계로 — 벽시계가 뒤로 가면 뒤 경계 타이머가 그 차만큼(예: 1시간) 늦어졌다
     try { atomicWriteFileSync(FILE, JSON.stringify(buf), { mode: 0o600 }); }
     catch { dirty = true; /* 영속 실패는 무시 — 인메모리 로그는 유지(다음 기록·조회에서 재시도) */ }
+    // 5회차 재확인 R3: 간격은 단조 시계로 — 벽시계가 뒤로 가면 뒤 경계 타이머가 그 차만큼(예: 1시간) 늦어졌다.
+    // v3.34.2(v3.34.1 릴리스 실행 실패의 원인 — 재현): 간격은 쓰기가 **끝난** 시각부터 잰다. 시작 시각으로 재면 쓰기(fsync 2회 + rename)가 간격보다
+    //   오래 걸릴 때 같은 묶음의 다음 기록이 ‘간격이 지났다’ 로 보고 곧바로 또 썼다 — 디스크가 느릴수록 기록마다 전량을 다시 쓰는 꼴(묶음 쓰기가 꺼진다).
+    lastWriteAt = performance.now();
   }
   function flush() { if (dirty) writeNow(); }
   registerExitFlush(`activity/${fileName}`, flush);

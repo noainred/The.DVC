@@ -32,6 +32,7 @@ import { diskBadEdgeStatus } from '../../diskbad/edge.js';
 import { config } from '../../config.js';
 import { isAdminDetailUser } from '../../auth/demoGuest.js';
 import { scopeSig } from '../../util/scopeSig.js';
+import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 
 const toolsPerm = requirePerm('tools');
 const writeRole = requireRole('admin', 'operator');
@@ -362,7 +363,7 @@ export function registerDiskBad(api) {
     res.json({ ok: true, job: r ? (jobsFor(req).find((x) => x.id === r.id) || null) : null });
   });
 
-  api.post('/tools/disk-bad/jobs/:id/retry', writeRole, toolsPerm, (req, res) => {
+  api.post('/tools/disk-bad/jobs/:id/retry', writeRole, toolsPerm, textFields('agent'), (req, res) => {
     if (isEdge()) return res.status(409).json(EDGE_NODE);
     const agent = String(req.body?.agent ?? '');
     if (!unitFor(req, res, agent)) return undefined;

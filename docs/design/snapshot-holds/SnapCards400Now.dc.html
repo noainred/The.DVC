@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>스냅샷 화면 — 400px 법인 카드(지금 · 2열)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+button{font:inherit}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.dim{color:#8b9bb4}
+.cc{background:#141b2d;border:1px solid #243049;border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:6px;min-width:0;text-align:left;color:#e6edf6;cursor:pointer}
+.cn{font-size:14px;font-weight:800;display:flex;justify-content:space-between;gap:8px;min-width:0}
+.cn span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cn em{font-style:normal;font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12.5px;color:#fbbf24;white-space:nowrap}
+.tx{font-size:12px;color:#c3cfe2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gbar{display:flex;height:10px;border-radius:5px;background:#0f1626;overflow:hidden}
+.spark{display:block;height:30px;border-radius:6px;background:repeating-linear-gradient(135deg,#0f1626 0 6px,#1b2740 6px 9px)}
+</style>
+</helmet>
+<div style="width: 400px; height: 710px; box-sizing: border-box; padding: 18px 23px; display: flex; flex-direction: column; gap: 12px">
+
+  <div>
+    <h2 style="margin: 0 0 4px; font-size: 15px; font-weight: 800">법인별</h2>
+    <div class="dim" style="font-size: 12px; line-height: 1.5">카드를 누르면 그 법인만 봅니다 · 막대 = 나이 구간 · 아래 그림 = 스냅샷 크기 30일 추이(빗금 = 빠진 날)</div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px">
+    <button type="button" class="cc">
+      <div class="cn"><span>Seoul 법인</span><em>넘김 87</em></div>
+      <div class="tx">96대 · 5.9 TB · 정리하면 5.5 TB</div>
+      <span class="gbar"><i style="width: 12%; background: #f59e0b"></i><i style="width: 34%; background: #fb923c"></i><i style="width: 46%; background: #ef4444"></i></span>
+      <span class="spark"></span>
+      <div class="tx">가장 오래된 것 175일</div>
+    </button>
+    <button type="button" class="cc">
+      <div class="cn"><span>Frankfurt 법인</span><em>넘김 73</em></div>
+      <div class="tx">80대 · 4.2 TB · 정리하면 4.0 TB</div>
+      <span class="gbar"><i style="width: 10%; background: #f59e0b"></i><i style="width: 38%; background: #fb923c"></i><i style="width: 44%; background: #ef4444"></i></span>
+      <span class="spark"></span>
+      <div class="tx">가장 오래된 것 175일</div>
+    </button>
+    <button type="button" class="cc">
+      <div class="cn"><span>Shanghai 법인</span><em>넘김 61</em></div>
+      <div class="tx">67대 · 3.7 TB · 정리하면 3.7 TB</div>
+      <span class="gbar"><i style="width: 14%; background: #f59e0b"></i><i style="width: 30%; background: #fb923c"></i><i style="width: 48%; background: #ef4444"></i></span>
+      <span class="spark"></span>
+      <div class="tx">가장 오래된 것 175일</div>
+    </button>
+    <button type="button" class="cc">
+      <div class="cn"><span>Dallas 법인</span><em>넘김 54</em></div>
+      <div class="tx">59대 · 2.7 TB · 정리하면 2.3 TB</div>
+      <span class="gbar"><i style="width: 16%; background: #f59e0b"></i><i style="width: 36%; background: #fb923c"></i><i style="width: 40%; background: #ef4444"></i></span>
+      <span class="spark"></span>
+      <div class="tx">가장 오래된 것 175일</div>
+    </button>
+    <button type="button" class="cc">
+      <div class="cn"><span>Shenzhen 법인</span><em>넘김 51</em></div>
+      <div class="tx">56대 · 3.3 TB · 정리하면 3.2 TB</div>
+      <span class="gbar"><i style="width: 9%; background: #f59e0b"></i><i style="width: 33%; background: #fb923c"></i><i style="width: 50%; background: #ef4444"></i></span>
+      <span class="spark"></span>
+      <div class="tx">가장 오래된 것 175일</div>
+    </button>
+    <button type="button" class="cc">
+      <div class="cn"><span>San Jose 법인</span><em>넘김 49</em></div>
+      <div class="tx">54대 · 3.4 TB · 정리하면 3.1 TB</div>
+      <span class="gbar"><i style="width: 11%; background: #f59e0b"></i><i style="width: 35%; background: #fb923c"></i><i style="width: 45%; background: #ef4444"></i></span>
+      <span class="spark"></span>
+      <div class="tx">지금 값을 못 읽은 vCenter 1곳 · 가장 오래된 것 175일</div>
+    </button>
+  </div>
+
+  <div style="border: 1px solid #7f1d1d; background: #2a1215; border-radius: 10px; padding: 10px 12px; color: #fecaca; font-size: 12.5px; line-height: 1.55">
+    지금 모습(v3.28.0 목 서버 400px 캡처와 같은 치수) — 카드 폭 약 171px · 글자 자리 약 143px 이라 법인 이름(‘Frankfurt …’) · 크기 줄(모든 카드에서 ‘… · 정리하…’) · 못 읽음 안내(‘지금 값을 못 읽은 vCen…’)가 말줄임으로 잘립니다. 휴대폰에서는 말풍선(title)도 뜨지 않습니다.
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":400,"height":710}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

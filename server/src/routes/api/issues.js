@@ -54,6 +54,7 @@ import { removeOwnerAfterPersist } from '../../attach/store.js';
 import { currentVersion } from '../../config.js';
 import { listNotes } from '../../release-notes.js';
 import { fileStamp } from '../../util/dayKey.js';
+import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 
 const writers = requireRole('admin', 'operator');
 const adminOnly = requireRole('admin');
@@ -301,7 +302,7 @@ export function registerIssues(api) {
     } catch (e) { fail(res, e, next); }
   });
   // 시험 실행 — 지난 N시간 파트 장애 이벤트에 (저장 전) 화면 값을 대 본다. 만들지 않는다(읽기). 화면 값이 형식 밖이면 400.
-  api.post('/issues/autocreate/simulate', adminOnly, issueSettingsFleetOnly, async (req, res, next) => {
+  api.post('/issues/autocreate/simulate', adminOnly, issueSettingsFleetOnly, textFields('hours'), async (req, res, next) => {
     if (!isAdmin(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 이슈 설정을 볼 수 없습니다' });
     try {
       const r = await simulatePartFault({ hours: req.body?.hours, cfgOverride: req.body?.settings || null });

@@ -75,6 +75,7 @@ import { licenseHistory, repoHistory } from '../../veeam/historyDb.js';
 import { demoEmViews, demoLicenses, demoSessionDetail, DEMO_EM_IDS } from '../../mock/demo/veeamEm.js';
 import { emSourcesForVcenter, emLinkedVcenter, emSourcesRev } from '../../veeam/em/sources.js';   // v2.795 EM 을 vCenter 화면의 Veeam 출처로(VM 단위)   // v2.784 백업 표시(중요도·백업 필요·메모)
 import { scopeSig } from '../../util/scopeSig.js';
+import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 
 /** 실패 사유의 일반 문구(관리자가 아닌 계정용) — 원문에는 Veeam 주소·포트가 들어간다(전송 오류·리다이렉트·TLS 문구). v2.751 검토 #7. */
 function genericError(r) {
@@ -392,7 +393,7 @@ export function registerVeeamBadges(api) {
     logAudit({ user: req.user?.username, action: 'vm-list.prefs', target: String(req.body?.slot ?? req.query?.slot ?? ''), detail: req.method === 'DELETE' ? '지움' : `저장 · ${(req.body?.value?.cols || []).length}개 항목${req.body?.alsoDefault ? ' · 기본값으로도' : ''}`, ip: req.ip });
     res.json({ ok: true, prefs: r.prefs });
   };
-  api.put('/veeam/vm-list/prefs', requirePerm('data.csv'), requireRole('admin', 'operator'), prefsWrite((req) => {
+  api.put('/veeam/vm-list/prefs', requirePerm('data.csv'), requireRole('admin', 'operator'), textFields('slot'), prefsWrite((req) => {
     const b = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
     return setPref(req.user?.username, b.slot === 'default' ? 'default' : Number(b.slot), b.value, { alsoDefault: b.alsoDefault === true });
   }));
@@ -1465,7 +1466,7 @@ export function registerBackupStatus(api) {
    *   도구 키 집행은 첫 마디 backup-detail(auth/toolAccess.js). 순서 = 역할(admin·operator) → 조회 범위 밖 404 → 쓰기 범위 밖 403
    *   (server/CLAUDE.md '조회 밖 404 → 쓰기 밖 403') → 모든 VM 이 그 vCenter 의 지금 인벤토리에 있어야(남의 vCenter VM id 로 쓰지 않게) → 감사.
    */
-  api.put('/tools/backup-detail/marks', toolsPerm, requireRole('admin', 'operator'), (req, res) => {
+  api.put('/tools/backup-detail/marks', toolsPerm, requireRole('admin', 'operator'), textFields('vcenterId'), (req, res) => {
     if (isDemoGuest(req.user)) return res.status(403).json({ ok: false, reason: '데모 계정은 바꿀 수 없습니다.' });
     const body = req.body && typeof req.body === 'object' ? req.body : {};
     const vcenterId = String(body.vcenterId || '').slice(0, 128);

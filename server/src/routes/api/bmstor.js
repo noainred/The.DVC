@@ -37,6 +37,7 @@ import { datacenterOfBmServer, parseDcQuery, NONE_DC } from '../../bmstor/corp.j
 import { parseTypes, latestSnapshotMap, sanArrayRows, attachThroughput, compareSummary, datacenterChips, stripHost, norm as normSerial, BLOCK_ARRAY_TYPES } from '../../bmstor/compare.js';
 import { RANGES, rangeKeyOf, bucketsOf, sourceFor, seriesFromRaw, seriesFromRollup, sumSeries, summarize, parseSeriesIds, metricOf } from '../../bmstor/ioSeries.js';
 import { ioRawRows, ioRollupRows, ioMeasuredServerIds, ioRank, bmIoDbStatus, ioRetention } from '../../bmstor/ioDb.js';
+import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 
 /** 등록 서버 + 법인(corp.datacenterOfBmServer — 폼 값 → 엣지의 법인 → ''). 비밀은 이미 가려져 있다(listBmServers). 엣지 조회는 등록부 코어 하나(findCollectorByName). */
 function serversWithCorp() {
@@ -544,7 +545,7 @@ export function registerBmStorage(api) {
   });
 
   // 서버 추가/수정 — body { id?, name, host, port, username, password?, agent, groups(최대 3개), mounts, enabled }
-  api.post('/tools/bm-storage/servers', adminOnly, fullScopeOnly, async (req, res) => {
+  api.post('/tools/bm-storage/servers', adminOnly, fullScopeOnly, textFields('id', 'name', 'host', 'username', 'vcenterId'), async (req, res) => {
     // 7b 메인 결정(감사 H-1 · 반증 F1 · Q4): SSH 키 · 공통 계정을 이 주소에 **묶는(바꾸는)** 저장은 그 비밀을 관리하는 등급과 같다 —
     //   설정 소유자 등급 + 본인 OTP(마지막). 존재 · 퇴역 · 종류도 여기서 본다(형식만 보던 것). 참조를 떼는 것(빈 값)은 묶음이 아니다.
     const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
@@ -629,7 +630,7 @@ export function registerBmStorage(api) {
     res.send(bmSampleCsv());
   });
 
-  api.post('/tools/bm-storage/import', csvPerm, adminOnly, fullScopeOnly, (req, res) => {
+  api.post('/tools/bm-storage/import', csvPerm, adminOnly, fullScopeOnly, textFields('csv'), (req, res) => {
     const refused = registryWriteRefusal();   // 결정(78 남긴 것 ①): 읽기 오류 중에는 409 — 빈 목록과 대조하면 전부 '추가' 로 보인다(드라이런 포함)
     if (refused) return res.status(409).json(refused);
     const { rows, error } = parseBmServersCsv(String(req.body?.csv || ''));

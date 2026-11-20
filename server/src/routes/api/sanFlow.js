@@ -22,6 +22,7 @@ import { demoSpath } from '../../mock/demo/storpath.js';
 import { numOrNull } from '../../util/numOrNull.js';
 import { rateOf, esxiBpsOf, flowRatesOf, staleMsOf } from '../../sanswitch/flowView.js';
 import { cmpVersion } from '../../util/cmpVersion.js';
+import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 
 const gate = [requirePerm('tools'), requireRole('admin'), fullReadWriteScopeOnlyWith('SAN 플로우 모니터(스위치 설정 변경)는 조회 · 쓰기 모두 전체 범위(vCenter 제한 없는) 관리자만 쓸 수 있습니다.')];
 /** 엣지가 flowNow 를 아는 첫 버전(반증 M-7 — 구버전 엣지는 작업을 모른 채 버린다). */
@@ -214,7 +215,7 @@ export function registerSanFlow(api) {
   const start = (req, dev, action, flows = []) => startFlowJob({ device: dev, action, flows, user: req.user?.username || '', canDelegate: (agent, act) => flowEdgeIssue(agent, undefined, act) });
 
   /** 계정 권한 점검 — `flow --show`(읽기만). 라이선스 · rbash 막힘 · 개수 · 기록 없는 dvc_ 플로우. OTP 없이(설정을 바꾸지 않는다). */
-  api.post('/tools/san-flow/check', ...gate, async (req, res) => {
+  api.post('/tools/san-flow/check', ...gate, textFields('deviceId'), async (req, res) => {
     const dev = getDeviceWithSecret(String(req.body?.deviceId || ''));
     if (!dev) return res.status(404).json({ ok: false, reason: '스위치를 찾을 수 없습니다.' });
     const r = start(req, dev, 'check');
@@ -247,7 +248,7 @@ export function registerSanFlow(api) {
    * 지우기 — 포탈이 만든(dvc_) 플로우만: 포탈 기록에 있는 것, 또는 권한 점검이 장비에서 찾았는데 기록이 없는 dvc_ 플로우(반증 M-2 — 재시작 · 시한으로
    *   기록을 놓친 것). OTP 재인증.
    */
-  api.post('/tools/san-flow/delete', ...gate, reauth, async (req, res) => {
+  api.post('/tools/san-flow/delete', ...gate, textFields('deviceId', 'name'), reauth, async (req, res) => {
     const dev = getDeviceWithSecret(String(req.body?.deviceId || ''));
     const name = String(req.body?.name || '');
     if (!dev) return res.status(404).json({ ok: false, reason: '스위치를 찾을 수 없습니다.' });
@@ -289,11 +290,11 @@ export function registerSanFlow(api) {
     res.locals.auditDetail = `SAN 플로우 ${action === 'deactivate' ? '비활성화' : '다시 켜기'} · ${dev.name || dev.id} · ${name}`;
     res.json({ ok: true, id: r.id, target: r.target });
   };
-  api.post('/tools/san-flow/deactivate', ...gate, togglePrecheck('deactivate'), reauth, (req, res) => toggleRun('deactivate', req, res));
-  api.post('/tools/san-flow/activate', ...gate, togglePrecheck('activate'), reauth, (req, res) => toggleRun('activate', req, res));
+  api.post('/tools/san-flow/deactivate', ...gate, textFields('deviceId', 'name'), togglePrecheck('deactivate'), reauth, (req, res) => toggleRun('deactivate', req, res));
+  api.post('/tools/san-flow/activate', ...gate, textFields('deviceId', 'name'), togglePrecheck('activate'), reauth, (req, res) => toggleRun('activate', req, res));
 
   /** 기록 정리 — 등록부에서 지운 스위치의 플로우 기록만(장비에 명령을 보내지 않는다 — 반증 L-11). OTP 재인증. */
-  api.post('/tools/san-flow/forget', ...gate, reauth, async (req, res) => {
+  api.post('/tools/san-flow/forget', ...gate, textFields('deviceId', 'name'), reauth, async (req, res) => {
     const deviceId = String(req.body?.deviceId || ''); const name = String(req.body?.name || '');
     if (getDeviceWithSecret(deviceId)) return res.status(409).json({ ok: false, reason: '스위치가 등록부에 있습니다 — 지우기로 장비에서 지우세요.' });
     if (!FLOW_NAME_RE.test(name) || !forgetFlow(deviceId, name, req.user?.username || '')) return res.status(404).json({ ok: false, reason: '정리할 기록이 없습니다.' });
@@ -302,7 +303,7 @@ export function registerSanFlow(api) {
   });
 
   /** 카운터 지금 읽기 — 그 스위치의 활성 · 결과 모름 포탈 플로우(주기와 같은 작업). */
-  api.post('/tools/san-flow/show', ...gate, async (req, res) => {
+  api.post('/tools/san-flow/show', ...gate, textFields('deviceId'), async (req, res) => {
     const dev = getDeviceWithSecret(String(req.body?.deviceId || ''));
     if (!dev) return res.status(404).json({ ok: false, reason: '스위치를 찾을 수 없습니다.' });
     const flows = listFlows().filter((f) => f.deviceId === dev.id && ['active', 'inactive', 'unknown', 'gone'].includes(f.state)).slice(0, 16);

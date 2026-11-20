@@ -15,6 +15,7 @@ import { runNow, schedulerStatus } from '../../dirusage/scheduler.js';
 import { renderReport, renderSubject } from '../../dirusage/report.js';
 import { comparableBase, compareScansJson } from '../../dirusage/scan.js';
 import { listRmaAgents } from '../../rma/jobs.js';
+import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 
 const adminOnly = requireRole('admin');
 // v2.611 AUTHZ2611-02: 포탈 호스트 동작은 전 법인 공용 — 범위 계정 403.
@@ -59,7 +60,7 @@ export function registerDirUsage(adminRouter) {
   });
 
   // 지금 스캔 — 폴러와 같은 재진입 가드를 공유한다(동시 실행 금지).
-  adminRouter.post('/dir-usage/run', adminOnly, fleetOnly, async (req, res) => {
+  adminRouter.post('/dir-usage/run', adminOnly, fleetOnly, textFields('targetId'), async (req, res) => {
     const targetId = String(req.body?.targetId || '');
     const r = await runNow(targetId);
     logAudit({ user: req.user?.username, action: '폴더 사용량 스캔 실행', target: targetId || '(전체)', detail: r.ok ? `${r.queued.length}건 요청` : r.reason, ip: req.ip });

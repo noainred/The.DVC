@@ -29,6 +29,7 @@ import { clientIp } from '../../util/rateLimit.js';
 import { adminOnly, fullScopeOnlyWith, requireSettingsOwner } from './shared.js';
 import { config } from '../../config.js';
 import { verifyUserOtp } from '../../auth/auth.js';
+import { nonTextField, rejectNonText } from '../../util/coercionTrap.js';
 
 const fleetOnly = fullScopeOnlyWith('장비 신뢰(SSH 호스트키·TLS 인증서)는 전 법인 장비에 공통이라 전체 범위(vCenter 제한 없는) 계정만 다룰 수 있습니다.');
 
@@ -37,6 +38,8 @@ const HOST_RE = /^[A-Za-z0-9._:%[\]-]{1,255}$/;
 
 /** 본문의 kind/host/port 를 검사한다. 문제면 { error } 를, 아니면 { kind, host, port } 를 돌려준다. */
 export function peerTarget(body = {}) {
+  const nt = nonTextField(body, ['kind', 'host', 'port']);   // 163회차: 객체는 String()/Number() 가 던져 500 이었다
+  if (nt) return { error: `‘${nt}’ 값은 글자여야 합니다.`, field: nt };
   const kind = String(body.kind ?? '').trim();
   if (!PEER_KINDS.includes(kind)) return { error: `종류(kind)는 ${PEER_KINDS.join('·')} 중 하나여야 합니다.`, field: 'kind' };
   const host = String(body.host ?? '').trim();
@@ -136,6 +139,7 @@ export function registerPeerTrust(adminRouter) {
 
   adminRouter.post('/security/peer-trust/approve-observed', adminOnly, fleetOnly, (req, res) => {
     const b = req.body || {};
+    if (rejectNonText(res, b, ['kind'])) return undefined;
     const kind = String(b.kind ?? '');
     if (!PEER_KINDS.includes(kind)) return res.status(400).json({ ok: false, reason: '종류(kind)가 올바르지 않습니다.', field: 'kind' });
     if (b.confirmVerified !== true) {
@@ -149,6 +153,7 @@ export function registerPeerTrust(adminRouter) {
 
   adminRouter.put('/security/peer-trust/policy', adminOnly, fleetOnly, requireSettingsOwner, (req, res) => {
     const b = req.body || {};
+    if (rejectNonText(res, b, ['kind', 'mode'])) return undefined;
     const kind = String(b.kind ?? '');
     const mode = String(b.mode ?? '');
     // 91회차(88회차 결정 ④ — 권장안): observe 로 바꾸는 것(약화 — 처음 보는 장비가 관찰로 통과)은 로그인 정책 약화(PUT /security/session)와 같은 등급 —

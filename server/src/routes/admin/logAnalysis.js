@@ -14,6 +14,7 @@ import { getLogs } from '../../logbuffer.js';
 import { analyzeLive, analyzeBuffer, analyzePaste, analyzeJournal, analyzeEdge, ruleCatalog, journalUnit, liveStatus } from '../../loganalysis/index.js';
 import { lastDataEdgeLog, edgeLogSummaries } from '../../central/edgeLogStore.js';
 import { logAudit } from '../../audit.js';
+import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 
 const PASTE_MAX_BYTES = 8 * 1048576;
 const fullScopeOnly = fullScopeOnlyWith('로그 분석은 전체 범위(vCenter 제한 없는) 계정만 볼 수 있습니다 — 전 법인의 호스트명·IP·VM 이름이 들어갑니다.');
@@ -43,7 +44,7 @@ export function registerLogAnalysis(adminRouter) {
   });
 
   /** POST /log-analysis/journal { hours } — 이 서버의 서비스 저널을 읽어 분석한다(재진입 가드). */
-  adminRouter.post('/log-analysis/journal', adminOnly, fullScopeOnly, async (req, res) => {
+  adminRouter.post('/log-analysis/journal', adminOnly, fullScopeOnly, textFields('hours'), async (req, res) => {
     const hours = Math.max(1, Math.min(168, Math.round(Number(req.body?.hours) || 24)));
     const report = await analyzeJournal(hours);
     logAudit({ user: req.user?.username, action: '로그 분석 — 서비스 저널 읽기', target: journalUnit(), detail: `${hours}시간 · ${report.coverage.lines}줄${report.coverage.ok === false ? ` · 실패(${report.coverage.reason})` : ''}`, ip: req.ip || '' });

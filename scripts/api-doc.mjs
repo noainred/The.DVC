@@ -356,6 +356,8 @@ const GUARD_NOTE = {
   prefsWrite: 'VM 목록 내보내기 내 저장값 쓰기(v2.798) — **데모 손님 403** · 저장 키는 인증된 계정 이름(본문 값 무시) · 손상 파일이면 503 · 감사 로그.',
   fleetWideOnly: '**전체 범위 계정만**(v2.607 AUTHZ2607-03 — vCenter 등록·데이터 소스 전환·표시 순서). 범위 제한 계정은 403.',
   ruleWrite: '집중 모니터링 알림 규칙 쓰기 처리기(v3.16.0 ⑯ — `ruleWrite(op)` 가 만드는 마지막 처리기 · 게이트가 아니다): 앞의 `adminOnly` · `fullRwOnly` · `demoBlockWrite` 를 지난 요청만 받고, 규칙 파일을 못 읽으면 **503** · 서버 하나 대상은 보이는 서버만(404) · 감사 로그.',
+  textFields: '본문 모양 검사(163회차 — `util/coercionTrap.js`): 이름을 준 칸이 객체 · 배열이면 **400**(code `not-text`) — `String()` · `Number()` · `.trim()` 이 던져 500 이던 자리. 권한 게이트가 아니다(빠진 값 · 글자 · 수 · 불리언은 그대로 통과).',
+  listOrText: '줄 목록 칸 모양 검사(163회차 — `util/coercionTrap.js`): 글자 또는 배열만 받고, 배열이 아닌 객체면 **400**(code `not-text`). 권한 게이트가 아니다.',
   demoBlockWrite: '**데모(손님) 계정 403**(v2.976 집중 모니터링 쓰기 — `isDemoGuest`). `noDemo` 와 같은 뜻 — 관리자 게이트 뒤에 붙는 쓰기 거절이고 권한을 넓히지 않는다.',
   noDemo: '**데모(손님) 계정 403**(7b 서버 등록 — `isDemoGuest`). 관리자 게이트 뒤에 붙는 쓰기 거절이고 권한을 넓히지 않는다.',
   csvPerm: "**CSV 가져오기/내보내기 권한**(`requirePerm('data.csv')` — v2.643). 관리자 이상만(super_admin 항상, admin 은 권한 설정에서 super_admin 이 끌 수 있다). operator·viewer 는 403.",

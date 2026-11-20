@@ -29,6 +29,7 @@ import { adminOnly, requireSettingsOwner, fullScopeOnlyWith } from './shared.js'
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { requirePerm as requireCsvPerm } from '../../auth/auth.js';
+import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
 const csvPerm = requireCsvPerm('data.csv');
 // v2.611 AUTHZ2611: 전 법인 등록부·동작은 전체 범위 계정만(v2.607 fleetWideOnly 의 형제 등록부).
@@ -124,7 +125,7 @@ adminRouter.post('/agent-deploy/test', adminOnly, fleetOnly, async (req, res) =>
   res.json(await testTarget(req.body || {}));
 });
 
-adminRouter.post('/agent-deploy', adminOnly, fleetOnly, async (req, res) => {
+adminRouter.post('/agent-deploy', adminOnly, fleetOnly, textFields('host', 'port', 'username', 'portalPort'), async (req, res) => {
   // SSH 포트(target.port)와 포탈 포트(portalPort)를 혼동하지 않도록 분리.
   // portalPort만 install.sh --port 로 전달(예전 버그: SSH 22가 포탈 포트로 들어가 EACCES).
   const { installerPath, portalPort, ...target } = req.body || {};
@@ -230,7 +231,7 @@ function markEnvIssues(rows, report, summary) {
   }
 }
 
-adminRouter.post('/agent-deploy/targets/import', csvPerm, adminOnly, fleetOnly, (req, res) => {
+adminRouter.post('/agent-deploy/targets/import', csvPerm, adminOnly, fleetOnly, textFields('csv'), (req, res) => {
   const { rows, error } = parseTargetsCsv(String(req.body?.csv || ''));
   if (error) return res.status(400).json({ ok: false, reason: error });
   if (!rows.length) return res.status(400).json({ ok: false, reason: '가져올 데이터 행이 없습니다.' });
@@ -604,7 +605,7 @@ adminRouter.post('/llm-test', adminOnly, fleetOnly, async (req, res) => {
 adminRouter.post('/ollama-deploy/test', adminOnly, fleetOnly, async (req, res) => res.json(await testTarget(req.body || {})));
 // v2.583(감사 확정): 서버의 로컬 파일을 요청자가 고른 호스트로 보내는 경로라 자격증명 CSV 내보내기와 같은
 //   등급(설정 소유자)으로 올린다 — 파일 검증(checkOllamaArchive)과 이중 방어.
-adminRouter.post('/ollama-deploy', adminOnly, fleetOnly, requireSettingsOwner, async (req, res) => {
+adminRouter.post('/ollama-deploy', adminOnly, fleetOnly, requireSettingsOwner, textFields('ollamaPort'), async (req, res) => {
   // v2.767(점검 R2-B4-2): 본문 `port` 는 **SSH 포트**다 — 형제 /ollama-deploy/test(testTarget(req.body))와 같은 뜻으로
   //   target 에 남긴다. 예전에는 여기서 빼 가 Ollama 포트로 써서 SSH 는 늘 22, 포탈 LLM 주소는 http://<host>:22 였다.
   //   Ollama 가 들을 포트는 별도 키 `ollamaPort`(비우면 11434).
