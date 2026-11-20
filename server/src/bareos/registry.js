@@ -60,7 +60,7 @@ export function trimRetired(list) {
 export const FINISHED_KEEP = 10;
 
 let _db = null;
-const _loadErr = makeLoadError();
+const _loadErr = makeLoadError({ label: 'Bareos 백업 대상 원장', file: FILE });   // 결정(76~105 남긴 것 · 2026-11-20) A1: 서비스 점검 '장비 등록부 파일' 행(표시 전용)
 
 function load() {
   if (_db) return _db;

@@ -40,7 +40,7 @@ import { REGIONS } from '../util/regions.js'; // v2.575 IMP-10 — 단일 소스
  *     파일을 직접 바꾼다. 마지막 목록은 **원문**(봉인본 그대로)으로 들고 읽기 오류 때만 다시 푼다(호출부와 객체를 나누지 않는다 · 평소 경로에 복제 비용 없음).
  *     그 원문은 config.js 한 곳에 둔다(noteVcenterConfigText — 수집 경로 loadVcenterConfig 와 같은 값. 두 벌이면 저장 직후에 서로 다른 목록을 준다).
  */
-const loadErr = makeLoadError();
+const loadErr = makeLoadError({ label: 'vCenter 등록부', file: FILE });   // 결정(76~105 남긴 것 · 2026-11-20) A1: 서비스 점검 '장비 등록부 파일' 행(표시 전용)
 const WHAT = 'vCenter 등록부(vcenters.json)';
 let _parsedText = null;
 const parseDb = (text) => {

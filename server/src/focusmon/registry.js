@@ -47,7 +47,7 @@ export const SETTING_RANGES = Object.freeze({
 export const DEFAULT_SETTINGS = Object.freeze(Object.fromEntries(Object.entries(SETTING_RANGES).map(([k, v]) => [k, v[2]])));
 
 let cache = null;
-const loadErr = makeLoadError();
+const loadErr = makeLoadError({ label: '집중 모니터링 등록부', file: FILE });   // 결정(76~105 남긴 것 · 2026-11-20) A1: 서비스 점검 '장비 등록부 파일' 행(표시 전용)
 export function registryLoadError() { load(); return loadErr.get(); }
 
 const s = (v, max = 256) => (typeof v === 'string' ? v : v == null ? '' : String(v)).trim().slice(0, max);

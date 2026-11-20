@@ -39,7 +39,7 @@ let cache = null; // [{ agent, hash(hex), createdAt, lastUsedAt, note }]
  *   이제 표지를 두고(관리 화면·getCentralAuthStats·central 게이트 503 이 읽는다), 표지가 선 동안은 캐시를 고정하지 않고 파일이
  *   다시 나타나면(사람이 보존본을 되돌림) 다시 읽는다. 첫 설치(파일·보존본 모두 없음)는 오류가 아니다. 해제는 정상 읽기·관리자 발급/회수 저장뿐.
  */
-const loadErr = makeLoadError();
+const loadErr = makeLoadError({ label: '엣지 개별 토큰', file: FILE });   // 결정(76~105 남긴 것 · 2026-11-20) A1: 서비스 점검 '장비 등록부 파일' 행(표시 전용)
 /*
  * 87회차 ⓐ(84회차 남긴 것 ② — 권장안): 공용 읽기 판정(util/jsonFileLoad.js)을 쓴다. 예전에는 `JSON.parse(readFileSync)` 하나의 catch 가
  *   **읽기 오류**(EACCES · EIO — 권한 · 소유자 · 디스크)도 손상으로 보고 온전한 토큰 파일을 `.corrupt.*` 로 옮겼다 — 권한을 고쳐도 원본은 보존본에만 남았고

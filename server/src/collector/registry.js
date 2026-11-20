@@ -65,7 +65,7 @@ function dedupeByIdCase(list) {
  *   파일 없음 → registryLoadError() 가 '보존본만 남음' 이면 설정, 보존본도 없으면(첫 설치) 해제.
  *   ⚠ 파일이 없을 때의 보존본 판정(설정 폴더 목록)은 loadCollectors 에서 하지 않는다 — 요청·폴러마다 불리고 엣지 노드에는 파일이 없는 것이 정상이다.
  */
-const loadErr = makeLoadError();
+const loadErr = makeLoadError({ label: '수집 서버 등록부', file: FILE });   // 결정(76~105 남긴 것 · 2026-11-20) A1: 서비스 점검 '장비 등록부 파일' 행(표시 전용)
 /** DataCenter id 모양(datacenter/store.js ensureDatacenter 와 같은 규칙 — 소문자 · 64자) — 아니면 ''. */
 export function normDcId(v) {
   const s = String(v ?? '').trim().toLowerCase();

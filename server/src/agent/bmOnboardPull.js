@@ -6,6 +6,9 @@
  *  · 중앙이 `distribute:false`(검증 안 된 이름 등)면 **아무것도 바꾸지 않는다**(지난 적용을 지우지 않는다 — 회선 장애 한 번이 등록을 지우지 않게).
  *  · 404(구버전 중앙)도 바꾸지 않는다. 본문 상한 8MB(5,000행) · 모양 검사 후 `edgeApply.applyEdgeDeployment` 가 같은 분석을 다시 거친다.
  *  · 결과(적용 · 거부 · 지운 수)와 적용한 서명은 **다음 인출의 쿼리**로 중앙에 알린다(숫자 · 서명만 — 이름 · 사유 원문은 이 엣지에만).
+ *    결정(76~105 남긴 것 · 2026-11-20) A3: 적용 상태 파일(bm-onboard-applied.json) **읽기 오류**면 불리언 한 칸 `unread=1` 을 싣고 결과 수(ok · rej · rm — 못 읽은 값)는 뺀다
+ *    (오류 코드 · 경로 · 사유 원문은 싣지 않는다 — 이 엣지 콘솔에만). 읽히는 동안은 칸을 싣지 않는다(중앙: 칸 없음 = 표지 지움 · 옛 중앙은 모르는 칸을 무시 ·
+ *    빠진 수는 옛 중앙도 null).
  *  · 0건이어도 상태를 남긴다(`_last` · 콘솔 · edgelog/spec.js 등재 — 무음 실패 금지).
  */
 import { config, clampIntervalMs, currentVersion } from '../config.js';
@@ -37,9 +40,13 @@ export async function pullBmOnboardNow({ fetchImpl = resilientFetch, apply = nul
   running = true;
   try {
     const EA = await import('../bmusage/onboard/edgeApply.js');
-    const st = EA.readAppliedState().state;
+    const rs = EA.readAppliedState();
+    const st = rs.state;
     const r0 = st.result || {};
-    const q = new URLSearchParams({ agent: config.agent.name, applied: st.sig || '', ok: String(Number(r0.applied) || 0), rej: String(Number(r0.rejected) || 0), rm: String(Number(r0.removed) || 0) });
+    const q = new URLSearchParams({ agent: config.agent.name, applied: st.sig || '' });
+    // 결정 A3 — 읽기 오류(손상 아님)만 표지. 그때 결과 수는 못 읽은 값이라(0 이 아니다) 싣지 않는다 — 중앙은 null(화면 '—'). 손상은 lost 로 남아 예전처럼 빈 서명('대기')
+    if (rs.readError === true) q.set('unread', '1');
+    else { q.set('ok', String(Number(r0.applied) || 0)); q.set('rej', String(Number(r0.rejected) || 0)); q.set('rm', String(Number(r0.removed) || 0)); }
     const res = await fetchImpl(`${config.agent.centralUrl}/api/central/bm-onboard?${q}`, {
       method: 'GET', timeoutMs: 30_000, retries: 1,
       headers: { ...agentHeaders(config.agent.name), 'X-Central-Token': config.agent.centralToken, 'X-Agent-Version': currentVersion() },

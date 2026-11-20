@@ -165,7 +165,7 @@ export default function BackupSummaryTool() {
             {(veeamAuth > 0 || em?.auth?.length > 0) && <Chip tone="bad" title="인증 실패로 주기 수집을 멈춘 서버(자동 재시도 없음 — 설정에서 계정을 고치세요)">인증 실패 {fmtNum(veeamAuth + (em?.auth?.length || 0))}{em?.auth?.length ? ` (${em.auth.slice(0, 2).join(' · ')})` : ''}</Chip>}
             {em?.lic && <Chip tone={em.lic.pct >= 90 ? 'warn' : 'muted'}>라이선스 {em.lic.pct}% 사용{em.lic.unknown ? ` (모름 ${em.lic.unknown}대 빼고)` : ''}</Chip>}
             {sum('veeamFailed') > 0 && <Chip tone="bad">읽기 실패 서버 {fmtNum(sum('veeamFailed'))}</Chip>}
-            {partial.length > 0 && <Chip tone="warn" title={partial.map((r) => `${r.name}(${veeamStateOf(r.veeamState).text})`).join(' · ')}>일부만 읽은 법인 {partial.length}</Chip>}
+            {partial.length > 0 && <Chip tone="warn" title={partial.map((r) => `${r.name}(${veeamStateOf(r.veeamState, r.veeamTruncated).text})`).join(' · ')}>일부만 읽은 법인 {partial.length}</Chip>}
           </div>
         </section>
         <section className="card" aria-label="Bareos" data-backup-sol="bareos" style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
