@@ -87,6 +87,8 @@ test('저장: 변경마다 판 하나 · 법인별로 따로 · 30개를 넘으�
   assert.equal(list.length, V.VERSION_KEEP);
   assert.equal(list[0].counts.places, 32);
   assert.equal(list.at(-1).counts.places, 3, '가장 오래 남은 판 = 장비 3대일 때(앞의 판은 지워짐)');
+  const db = await R.openRackDb();
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM rack_version WHERE corp_id = 'kr'").get().n, V.VERSION_KEEP, '표에서도 실제로 지운다(목록만 자르지 않는다)');
 });
 
 test('되돌리기: 고른 판의 모습으로 · rev 올림 · 새 판으로 남음 · 다른 법인 무손상 · 최신 판 대조', async () => {
@@ -170,6 +172,69 @@ test('라우트: 범위 밖 404 · 쓰기 밖 403 · 비관리자에게 계정�
   assert.equal(r.statusCode, 200); assert.ok(r.body.latestId > a.body.latestId);
   const stale = await call('POST /tools/rack/op', { user: ADMIN, body: { op: 'version.restore', corpId: 'kr', versionId: pick.id, expectLatestId: a.body.latestId } });
   assert.equal(stale.statusCode, 409); assert.equal(stale.body.code, 'versionConflict');
+});
+
+test('반증 L-2 · L-3: 지웠다 되살린 전산실은 옛 rev 를 다시 받지 않는다 · 되돌리기는 이력을 지우지 않는다', async () => {
+  const sid = (await R.addSite({ corpId: 'kr', name: 'KR-PUS', user: 'admin' })).id;
+  const rid = (await R.addRoom({ siteId: sid, name: '부산 1', user: 'admin' })).id;
+  let rev = 0;
+  for (let i = 0; i < 3; i += 1) rev = (await R.addRack({ roomId: rid, rev, user: 'admin', input: { name: `B${i}`, heightU: 42 } })).rev;
+  const withRoom = (await R.listVersions('kr'))[0];
+  const staleRev = rev;
+  await R.removeRack({ roomId: rid, rev, user: 'admin', id: (await R.getRoom(rid)).racks[0].id });
+  const logsBefore = (await R.getRoom(rid)).logs.length;
+  // 판에 없는 모습으로 되돌려 전산실을 없앤 뒤(이력은 남아야 한다), 다시 전산실이 있는 판으로
+  const noRoom = (await R.listVersions('kr')).find((v) => v.id < withRoom.id && v.action === 'site.add');
+  await R.restoreVersion({ corpId: 'kr', versionId: noRoom.id, expectLatestId: (await R.listVersions('kr'))[0].id, user: 'admin' });
+  assert.equal(await R.getRoom(rid), null);
+  const db = await R.openRackDb();
+  assert.ok(db.prepare('SELECT COUNT(*) AS n FROM rack_log WHERE room_id = ?').get(rid).n >= logsBefore, '되돌리기는 rack_log 를 지우지 않는다');
+  await R.restoreVersion({ corpId: 'kr', versionId: withRoom.id, expectLatestId: (await R.listVersions('kr'))[0].id, user: 'admin' });
+  const back = await R.getRoom(rid);
+  assert.ok(back.room.rev > staleRev + 1, `되살린 전산실 rev(${back.room.rev}) 는 지워지기 전 rev(${staleRev + 1}) 보다 커야 한다`);
+  await assert.rejects(R.addRack({ roomId: rid, rev: staleRev, user: 'x', input: { name: 'stale', heightU: 42 } }), (e) => e.extra.code === 'revConflict');
+  assert.ok(back.logs.some((l) => l.action === 'rack.add'), '되살린 전산실의 옛 이력이 다시 보인다');
+});
+
+test('반증 L-4: 판이 하나도 없는 법인은 첫 변경 전에 기준 판을 남긴다(열 때 실패했어도)', async () => {
+  const db = await R.openRackDb();
+  db.prepare("DELETE FROM rack_version WHERE corp_id = 'pl'").run();
+  const site = (await R.listTree(new Set(['pl']))).sites[0];
+  await R.renameSite({ id: site.id, name: 'PL-WAW2', user: 'admin' });
+  const l = await R.listVersions('pl');
+  assert.deepEqual(l.map((v) => v.action), ['site.rename', 'version.baseline']);
+  const d = await R.versionDetail('pl', l[0].id);
+  assert.equal(d.changes.counts.siteChange, 1, '기준 판 = 변경 전 모습');
+});
+
+test('반증 L-1 · M-1: 압축 해제 상한을 넘는 판은 읽지 못함 · 차이 결과는 사본(캐시 오염 없음)', async () => {
+  const db = await R.openRackDb();
+  const l = await R.listVersions('kr');
+  await R.versionDetail('kr', l[1].id);   // 첫 호출이 캐시를 채운다
+  const d1 = await R.versionDetail('kr', l[1].id);   // 캐시에서 온 값
+  d1.restore.items.length = 0; d1.version.user = 'tampered';
+  const d2 = await R.versionDetail('kr', l[1].id);
+  assert.notEqual(d2.version.user, 'tampered', '캐시된 결과를 호출자가 바꿔도 다음 응답은 그대로');
+  assert.equal(await R.versionDetail('pl', l[1].id), null, '다른 법인의 판 id 로는 차이를 볼 수 없다');
+  const bomb = zlib.gzipSync(Buffer.alloc(R.SNAP_MAX_BYTES + 1024, 0x20), { level: 9 });
+  db.prepare('UPDATE rack_version SET data = ? WHERE id = ?').run(bomb, l[2].id);
+  const warn = console.warn; const seen = []; console.warn = (m) => seen.push(String(m));
+  try { assert.equal((await R.versionDetail('kr', l[2].id)).readable, false); } finally { console.warn = warn; }
+  assert.ok(seen.some((m) => m.includes('판을 풀지 못했습니다')), '실패를 조용히 삼키지 않는다');
+});
+
+test('반증 L-2: 판에 전산실이 없는 되돌리기로 사라진 전산실도 rev 바닥값을 남긴다', async () => {
+  const sid = (await R.addSite({ corpId: 'pl', name: 'PL-KRK', user: 'admin' })).id;
+  const siteOnly = (await R.listVersions('pl'))[0];
+  const rid = (await R.addRoom({ siteId: sid, name: '크라쿠프', user: 'admin' })).id;
+  const db = await R.openRackDb();
+  db.prepare('UPDATE rack_room SET rev = 900000 WHERE id = ?').run(rid);   // 오래 편집된 전산실(전역 최댓값)
+  const withRoom = (await R.addRack({ roomId: rid, rev: 900000, user: 'admin', input: { name: 'K1', heightU: 42 } }));
+  const vRoom = (await R.listVersions('pl'))[0];
+  // 다른 법인 판들 정리 없이 pl 을 '데이터센터만' 판으로 → 전산실이 사라진다(이 되돌리기는 pl 전산실을 하나도 되살리지 않는 판이 아니므로 사이트만 판을 고른다)
+  await R.restoreVersion({ corpId: 'pl', versionId: siteOnly.id, expectLatestId: vRoom.id, user: 'admin' });
+  await R.restoreVersion({ corpId: 'pl', versionId: vRoom.id, expectLatestId: (await R.listVersions('pl'))[0].id, user: 'admin' });
+  assert.ok((await R.getRoom(rid)).room.rev > withRoom.rev, '사라졌던 전산실이 옛 rev 이하로 돌아오지 않는다');
 });
 
 test.after(() => R._closeForTest());

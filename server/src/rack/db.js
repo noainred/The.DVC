@@ -88,6 +88,7 @@ async function openInner() {
         action TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '', counts TEXT NOT NULL DEFAULT '{}', data BLOB NOT NULL
       );
       CREATE INDEX IF NOT EXISTS ix_rack_version_corp ON rack_version(corp_id, id);
+      CREATE TABLE IF NOT EXISTS rack_meta (k TEXT PRIMARY KEY, v INTEGER NOT NULL);
     `);
     // 판 기능 이전에 쌓인 원장 — 판이 하나도 없는 법인은 지금 모습을 '기준 판' 으로 남긴다(첫 변경 전 상태로 되돌릴 수 있게).
     try {
@@ -152,8 +153,36 @@ function corpRows(db, corpId) {
   return { sites, rooms, racks, places };
 }
 const packSnap = (snap) => zlib.gzipSync(Buffer.from(JSON.stringify(snap)), { level: 6 });
+/** 판 하나를 풀 때 허용하는 최대 크기(반증 L-1 — 압축 해제에는 예외 없이 maxOutputLength · docs/rules/security-api.md). 장비 50만 대 판도 이 안이다(추정). */
+export const SNAP_MAX_BYTES = 256 * 1024 * 1024;
 function unpackSnap(blob, corpId) {
-  try { return validateSnapshot(JSON.parse(zlib.gunzipSync(Buffer.from(blob)).toString('utf8')), corpId); } catch { return null; }
+  let raw;
+  try { raw = zlib.gunzipSync(Buffer.from(blob), { maxOutputLength: SNAP_MAX_BYTES }); } catch (e) {
+    console.warn(`[rack-db] 판을 풀지 못했습니다(${e?.code || '손상'}) — 법인 ${String(corpId).slice(0, 64)}`); return null;
+  }
+  let obj;
+  try { obj = JSON.parse(raw.toString('utf8')); } catch { console.warn(`[rack-db] 판 JSON 을 읽지 못했습니다 — 법인 ${String(corpId).slice(0, 64)}`); return null; }
+  const v = validateSnapshot(obj, corpId);
+  if (!v) console.warn(`[rack-db] 판 모양이 맞지 않습니다(형식 · 참조 · 크기) — 법인 ${String(corpId).slice(0, 64)}`);
+  return v;
+}
+
+/**
+ * 반증 L-4: 판이 하나도 없는 법인이면 **변경 전** 지금 모습을 기준 판으로 남긴다 — 열 때 만든 기준 판이 실패했어도 첫 변경 전에 다시 만든다.
+ * 쓰기 트랜잭션 안에서 변경보다 먼저 부른다(원장이 비어 있으면 남길 것이 없다).
+ */
+function ensureBaseline(db, corpId) {
+  if (!corpId) return;
+  if (db.prepare('SELECT id FROM rack_version WHERE corp_id = ? LIMIT 1').get(corpId)) return;
+  if (!db.prepare('SELECT id FROM rack_site WHERE corp_id = ? LIMIT 1').get(corpId)) return;
+  saveVersion(db, corpId, { user: 'system', action: 'version.baseline', detail: '판 기록 시작 시점의 원장' });
+}
+
+/** 반증 L-2: 전역 rev 바닥값 — 지워진 전산실의 rev 를 기억해 되살아난 전산실이 옛 rev 를 다시 받지 않게 한다. */
+const metaGet = (db, k) => db.prepare('SELECT v FROM rack_meta WHERE k = ?').get(k)?.v ?? 0;
+function bumpRevFloor(db, rev) {
+  const cur = metaGet(db, 'revFloor');
+  if (Number.isInteger(rev) && rev > cur) db.prepare('INSERT INTO rack_meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v').run('revFloor', rev);
 }
 
 /**
@@ -246,6 +275,7 @@ export async function placedSerialKeys(corpId) {
 export async function addSite({ corpId, name, user }) {
   const db = await need();
   return tx(db, () => {
+    ensureBaseline(db, corpId);
     const dup = db.prepare('SELECT id FROM rack_site WHERE corp_id = ? AND name = ?').get(corpId, name);
     if (dup) fail(409, '같은 이름의 데이터센터가 이 법인에 이미 있습니다.');
     const id = newId();
@@ -261,6 +291,7 @@ export async function renameSite({ id, name, user }) {
   return tx(db, () => {
     const s = siteRow(db.prepare('SELECT * FROM rack_site WHERE id = ?').get(id));
     if (!s) fail(404, '데이터센터를 찾지 못했습니다.');
+    ensureBaseline(db, s.corpId);
     const dup = db.prepare('SELECT id FROM rack_site WHERE corp_id = ? AND name = ? AND id <> ?').get(s.corpId, name, id);
     if (dup) fail(409, '같은 이름의 데이터센터가 이 법인에 이미 있습니다.');
     db.prepare('UPDATE rack_site SET name = ? WHERE id = ?').run(name, id);
@@ -275,6 +306,7 @@ export async function removeSite({ id, user }) {
   return tx(db, () => {
     const s = siteRow(db.prepare('SELECT * FROM rack_site WHERE id = ?').get(id));
     if (!s) fail(404, '데이터센터를 찾지 못했습니다.');
+    ensureBaseline(db, s.corpId);
     const n = db.prepare('SELECT COUNT(*) AS n FROM rack_room WHERE site_id = ?').get(id).n;
     if (n) fail(409, `전산실 ${n}곳이 남아 있어 지울 수 없습니다 — 전산실을 먼저 지우세요.`);
     db.prepare('DELETE FROM rack_site WHERE id = ?').run(id);
@@ -288,6 +320,7 @@ export async function addRoom({ siteId, name, user }) {
   return tx(db, () => {
     const s = siteRow(db.prepare('SELECT * FROM rack_site WHERE id = ?').get(siteId));
     if (!s) fail(404, '데이터센터를 찾지 못했습니다.');
+    ensureBaseline(db, s.corpId);
     if (db.prepare('SELECT id FROM rack_room WHERE site_id = ? AND name = ?').get(siteId, name)) fail(409, '같은 이름의 전산실이 이미 있습니다.');
     const id = newId();
     const sort = (db.prepare('SELECT MAX(sort) AS m FROM rack_room WHERE site_id = ?').get(siteId)?.m ?? -1) + 1;
@@ -304,6 +337,7 @@ export async function renameRoom({ id, name, user }) {
     if (!m) fail(404, '전산실을 찾지 못했습니다.');
     if (db.prepare('SELECT id FROM rack_room WHERE site_id = ? AND name = ? AND id <> ?').get(m.siteId, name, id)) fail(409, '같은 이름의 전산실이 이미 있습니다.');
     const s = siteRow(db.prepare('SELECT * FROM rack_site WHERE id = ?').get(m.siteId));
+    ensureBaseline(db, s?.corpId);
     db.prepare('UPDATE rack_room SET name = ? WHERE id = ?').run(name, id);
     log(db, { user, corpId: s?.corpId || '', roomId: id, action: 'room.rename', detail: `${m.name} → ${name}` });
     return { id };
@@ -318,6 +352,8 @@ export async function removeRoom({ id, user }) {
     const n = db.prepare('SELECT COUNT(*) AS n FROM rack_rack WHERE room_id = ?').get(id).n;
     if (n) fail(409, `랙 ${n}개가 남아 있어 지울 수 없습니다 — 랙을 먼저 지우세요.`);
     const s = siteRow(db.prepare('SELECT * FROM rack_site WHERE id = ?').get(m.siteId));
+    ensureBaseline(db, s?.corpId);
+    bumpRevFloor(db, m.rev);
     db.prepare('DELETE FROM rack_room WHERE id = ?').run(id);
     db.prepare('DELETE FROM rack_log WHERE room_id = ?').run(id);
     log(db, { user, corpId: s?.corpId || '', action: 'room.remove', detail: `${s?.name || ''} › ${m.name}` });
@@ -359,6 +395,7 @@ async function roomWrite(roomId, rev, user, fn) {
     if (!Number.isInteger(rev)) fail(400, '판 번호(rev)가 없습니다 — 화면을 새로 고친 뒤 다시 하세요.', { code: 'revRequired' });
     if (rev !== room.rev) fail(409, '다른 사람이 이 전산실을 먼저 바꿨습니다 — 최신 배치를 불러온 뒤 다시 하세요.', { code: 'revConflict', rev: room.rev });
     const site = siteRow(db.prepare('SELECT * FROM rack_site WHERE id = ?').get(room.siteId));
+    ensureBaseline(db, site?.corpId);
     const racksById = new Map(db.prepare('SELECT * FROM rack_rack WHERE room_id = ?').all(room.id).map((r) => [r.id, rackRow(r)]));
     const placesOf = (rackId) => db.prepare('SELECT * FROM rack_place WHERE rack_id = ?').all(rackId).map(placeRow);
     const out = fn({ db, room, corpId: site?.corpId || '', racksById, placesOf });
@@ -525,8 +562,18 @@ export async function listVersions(corpId) {
  * 판 하나의 차이 두 가지 — ① 이 판에서 바뀐 것(바로 앞 판 → 이 판) ② 되돌리면 바뀌는 것(지금 원장 → 이 판).
  * 판을 읽지 못하면(손상) readable:false. 없거나 다른 법인 판이면 null.
  */
+const DETAIL_CACHE = new Map();   // `${corp}\0${vid}\0${latestId}` → 결과(최근 40개) — 최신 판이 바뀌면 키가 달라져 자연히 버려진다
+const DETAIL_CACHE_MAX = 40;
 export async function versionDetail(corpId, versionId) {
   const db = await need();
+  const latest = db.prepare('SELECT id FROM rack_version WHERE corp_id = ? ORDER BY id DESC LIMIT 1').get(String(corpId))?.id ?? 0;
+  const key = `${corpId}\0${Number(versionId)}\0${latest}`;
+  if (DETAIL_CACHE.has(key)) return structuredClone(DETAIL_CACHE.get(key));
+  const out = versionDetailRaw(db, corpId, versionId);
+  if (out) { DETAIL_CACHE.set(key, out); while (DETAIL_CACHE.size > DETAIL_CACHE_MAX) DETAIL_CACHE.delete(DETAIL_CACHE.keys().next().value); }
+  return out ? structuredClone(out) : out;
+}
+function versionDetailRaw(db, corpId, versionId) {
   const v = db.prepare('SELECT id, ts, user, action, detail, data FROM rack_version WHERE id = ? AND corp_id = ?').get(Number(versionId), String(corpId));
   if (!v) return null;
   const snap = unpackSnap(v.data, corpId);
@@ -572,31 +619,31 @@ export async function restoreVersion({ corpId, versionId, expectLatestId, user }
     for (const [k, list] of [['site', snap.sites], ['room', snap.rooms], ['rack', snap.racks], ['place', snap.places]]) {
       for (const x of list) if (!mine[k].has(x.id) && exists[k].get(x.id)) fail(409, '판의 자료가 다른 법인 원장과 겹쳐 되돌릴 수 없습니다.', { code: 'versionIdClash' });
     }
-    const curRev = new Map(cur.rooms.map((r) => [r.id, r.rev]));
-    const nowSec = Math.floor(Date.now() / 1000);
-    // 지금 원장 지우기(이 법인 것만) — 판에 없는 전산실의 이력도 지운다(전산실 삭제와 같은 규칙).
-    const keepRooms = new Set(snap.rooms.map((r) => r.id));
-    for (const p of cur.places) db.prepare('DELETE FROM rack_place WHERE id = ?').run(p.id);
-    for (const r of cur.racks) db.prepare('DELETE FROM rack_rack WHERE id = ?').run(r.id);
-    for (const r of cur.rooms) { db.prepare('DELETE FROM rack_room WHERE id = ?').run(r.id); if (!keepRooms.has(r.id)) db.prepare('DELETE FROM rack_log WHERE room_id = ?').run(r.id); }
-    for (const s of cur.sites) db.prepare('DELETE FROM rack_site WHERE id = ?').run(s.id);
-    // 판 넣기
+    // 반증 L-2: 새 rev = (전역 바닥값 · 지금 전 전산실 rev 최댓값 · 이 법인 전산실 rev) 중 가장 큰 값 + 1 — 지워졌다 되살아난 전산실도 옛 rev 를 다시 받지 않는다.
+    for (const r of cur.rooms) bumpRevFloor(db, r.rev);
+    const maxNow = db.prepare('SELECT MAX(rev) AS m FROM rack_room').get()?.m ?? 0;
+    const newRev = Math.max(metaGet(db, 'revFloor'), maxNow) + 1;
+    // 지금 원장 지우기(이 법인 것만). 반증 L-3: 이력(rack_log)은 지우지 않는다 — 그 전산실이 다시 되돌려지면 이력도 함께 보인다(전산실마다 2,000건 상한은 그대로).
+    const del = { place: db.prepare('DELETE FROM rack_place WHERE id = ?'), rack: db.prepare('DELETE FROM rack_rack WHERE id = ?'), room: db.prepare('DELETE FROM rack_room WHERE id = ?'), site: db.prepare('DELETE FROM rack_site WHERE id = ?') };
+    for (const p of cur.places) del.place.run(p.id);
+    for (const r of cur.racks) del.rack.run(r.id);
+    for (const r of cur.rooms) del.room.run(r.id);
+    for (const s of cur.sites) del.site.run(s.id);
+    // 판 넣기(문장은 반복문 밖에서 한 번만 준비 — 반증 M-1)
     const now = Date.now();
     const typeOk = db.prepare('SELECT 1 AS x FROM rack_type WHERE id = ?');
-    for (const s of snap.sites) db.prepare('INSERT INTO rack_site (id,corp_id,name,sort,created_at) VALUES (?,?,?,?,?)').run(s.id, corpId, s.name, s.sort, now);
-    for (const r of snap.rooms) {
-      const rev = Math.max((curRev.get(r.id) ?? -1) + 1, nowSec);
-      db.prepare('INSERT INTO rack_room (id,site_id,name,sort,rev,updated_at) VALUES (?,?,?,?,?,?)').run(r.id, r.siteId, r.name, r.sort, rev, now);
-    }
-    for (const r of snap.racks) {
-      const typeId = r.typeId && typeOk.get(r.typeId) ? r.typeId : '';
-      db.prepare('INSERT INTO rack_rack (id,room_id,name,row_name,type_id,height_u,role,pdu_a,pdu_b,sort) VALUES (?,?,?,?,?,?,?,?,?,?)')
-        .run(r.id, r.roomId, r.name, r.row, typeId, r.heightU, r.role, r.pduA, r.pduB, r.sort);
-    }
+    const ins = {
+      site: db.prepare('INSERT INTO rack_site (id,corp_id,name,sort,created_at) VALUES (?,?,?,?,?)'),
+      room: db.prepare('INSERT INTO rack_room (id,site_id,name,sort,rev,updated_at) VALUES (?,?,?,?,?,?)'),
+      rack: db.prepare('INSERT INTO rack_rack (id,room_id,name,row_name,type_id,height_u,role,pdu_a,pdu_b,sort) VALUES (?,?,?,?,?,?,?,?,?,?)'),
+      place: db.prepare(`INSERT INTO rack_place (id,rack_id,face,u_start,u_size,kind,label,model,serial,serial_key,extra_serials,note,rated_w,op_w,weight_kg,updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
+    };
+    for (const s of snap.sites) ins.site.run(s.id, corpId, s.name, s.sort, now);
+    for (const r of snap.rooms) ins.room.run(r.id, r.siteId, r.name, r.sort, newRev, now);
+    for (const r of snap.racks) ins.rack.run(r.id, r.roomId, r.name, r.row, r.typeId && typeOk.get(r.typeId) ? r.typeId : '', r.heightU, r.role, r.pduA, r.pduB, r.sort);
     for (const p of snap.places) {
-      db.prepare(`INSERT INTO rack_place (id,rack_id,face,u_start,u_size,kind,label,model,serial,serial_key,extra_serials,note,rated_w,op_w,weight_kg,updated_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-        .run(p.id, p.rackId, p.face, p.uStart, p.uSize, p.kind, p.label, p.model, p.serial, serialKeyOf(p.serial), JSON.stringify(p.extraSerials), p.note, p.ratedW, p.opW, p.weightKg, now);
+      ins.place.run(p.id, p.rackId, p.face, p.uStart, p.uSize, p.kind, p.label, p.model, p.serial, serialKeyOf(p.serial), JSON.stringify(p.extraSerials), p.note, p.ratedW, p.opW, p.weightKg, now);
     }
     const detail = `판 #${v.id} 으로 되돌림`;
     for (const r of snap.rooms) log(db, { user, corpId, roomId: r.id, action: 'version.restore', detail, version: false });
