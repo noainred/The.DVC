@@ -120,6 +120,8 @@
 .snp-vm { border: 0; background: transparent; color: inherit; text-align: left; padding: 0; cursor: pointer; min-width: 0; max-width: 260px; font: inherit; }
 .snp-vm b { display: block; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .snp-sub { display: block; font-size: 11.5px; color: var(--text-dim); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 300px; }
+/* 161회차: ‘만든 계정’ 줄은 말줄임 대신 접는다 — 못 읽은 이유 · ‘일부만 읽음’ 이 잘려 보이지 않았다(폭 상한 300px 은 그대로) */
+.snp-sub.wrap { white-space: normal; word-break: keep-all; overflow-wrap: anywhere; }
 .snp-cv { display: inline-block; width: 12px; color: var(--text-dim); font-style: normal; }
 .snp-bar { display: grid; grid-template-columns: minmax(60px, 1fr) 70px; gap: 8px; align-items: center; min-width: 140px; }
 .snp-bar b { text-align: right; font-weight: 700; white-space: nowrap; font-family: var(--mono); }
@@ -154,8 +156,10 @@
 .snp-hold select, .snp-hold input { background: var(--panel-deep); border: 1px solid var(--border); border-radius: 6px; color: var(--text); padding: 5px 8px; font: inherit; min-width: 0; }
 .snp-hold input { flex: 1 1 auto; }
 /* 156회차: 보류 창은 표 상자(가로 스크롤 — 최소 폭 1180px) 안이라, 좁은 화면에서 기간 · 사유 칸과 저장 실패 사유가 화면 밖(스크롤 왼쪽)에 놓였다 —
-   창 폭을 화면에 맞추고 표를 옆으로 밀어도 왼쪽에 붙여 둔다(넓은 화면은 그대로 · 표 칸의 줄바꿈 금지를 풀어 안내 글이 접힌다). */
-@media (max-width: 720px) { .snp-hold { position: sticky; left: 0; max-width: calc(100vw - 84px); box-sizing: border-box; white-space: normal; } }
+   창 폭을 화면에 맞추고 표를 옆으로 밀어도 왼쪽에 붙여 둔다(넓은 화면은 그대로 · 표 칸의 줄바꿈 금지를 풀어 안내 글이 접힌다).
+   161회차(Chromium 400px — 표를 옆으로 밀지 않은 상태): 창은 고르기 칸(36px) + 칸 여백(8px) 뒤에서 시작한다 — 폭을 100vw - 84px 로 잡으면 그 44px 만큼
+   표 상자 오른쪽 밖으로 나가 사유 칸 31px · 저장 실패 사유의 줄 끝 12px 가 잘렸다(156 은 자동 스크롤로 밀린 뒤의 화면만 쟀다) → 그 44px 을 뺀다. */
+@media (max-width: 720px) { .snp-hold { position: sticky; left: 0; max-width: calc(100vw - 128px); box-sizing: border-box; white-space: normal; } }
 .snp-sum { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-size: 12px; color: var(--text-dim); }
 
 @media (max-width: 1200px) {

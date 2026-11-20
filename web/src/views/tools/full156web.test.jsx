@@ -195,7 +195,8 @@ describe('A6 서비스 워커 — 오래 다시 받지 않은 캐시(옛 판의 
   /** 서비스 워커를 가짜 환경에서 돌린다 — 캐시(Map) · fetch · 사건 등록. */
   function boot({ online = true } = {}) {
     const store = new Map();   // url → 응답(가짜)
-    const res = (date) => ({ ok: true, type: 'basic', headers: new Headers(date == null ? {} : { date: new Date(date).toUTCString() }), clone() { return this; } });
+    // 161회차(반증): 나이는 응답 Date 가 아니라 담은 때의 표시(x-sw-cached-at — 이 브라우저 시각)로 잰다 — 심는 항목에 그 표시를 함께 단다(표시 없는 항목 = 옛 판이 담은 것).
+    const res = (date) => ({ ok: true, type: 'basic', headers: new Headers(date == null ? {} : { date: new Date(date).toUTCString(), 'x-sw-cached-at': String(date) }), clone() { return this; } });
     const keyOf = (r) => (typeof r === 'string' ? new URL(r, 'https://portal.test').href : r.url);
     const cache = {
       keys: async () => [...store.keys()].map((url) => ({ url })),

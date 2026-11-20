@@ -418,7 +418,8 @@ export default function SnapshotTool({ scope = '', initial = null, initialHist =
                       <b><i className="snp-cv">{isOpen ? '▾' : '▸'}</i>{x.name}</b><span className="snp-sub">{group === 'corp' ? '' : `${x.corpName} · `}{x.cluster || '클러스터 없음'} · {x.host || '호스트 모름'}</span></button></td>
                     <td><span className="snp-sub" style={{ color: 'var(--text)', fontSize: 12.5 }}>{x.oldestName || '—'}</span>
                       <span className="snp-sub">{numOrNull(x.oldestTs) != null ? `${dateText(x.oldestTs)} 만듦` : '생성일 못 읽음'}{x.oldestDesc ? ` · ${x.oldestDesc}` : ' · 설명 없음'}</span>
-                      {creators?.ok && <span className="snp-sub" title="이 VM 에 최근 31일 안에 스냅샷을 만든 계정(백업 도구 계정 제외) — 가장 오래된 스냅샷을 만든 계정이 아닐 수 있습니다">
+                      {/* 161회차(Chromium 판독): 이 줄은 접는다 — 한 줄 말줄임(.snp-sub)이면 153회차가 붙인 ‘ · 일부만 읽음’ 이 ‘ · 일…’ 로, 긴 사유(…모름(비활성 · 점검중))가 중간에서 잘렸다 */}
+                      {creators?.ok && <span className="snp-sub wrap" title="이 VM 에 최근 31일 안에 스냅샷을 만든 계정(백업 도구 계정 제외) — 가장 오래된 스냅샷을 만든 계정이 아닐 수 있습니다">
                         {creatorText(creators, x)}</span>}</td>
                     <td><span className="snp-bar"><span className="snp-track"><i style={{ width: `${w(x.days, maxD)}%`, background: BAND_COLOR[x.band] }} /></span><b style={{ color: BAND_FG[x.band] }}>{daysText(x.days)}</b></span></td>
                     <td className="r snp-mono" style={{ color: s.count ? '#fdba74' : undefined }}>{x.snapshotCount}</td>
