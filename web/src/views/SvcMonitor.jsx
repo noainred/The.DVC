@@ -17,7 +17,7 @@ import { edgeCardKind, edgeCardWarn, edgeCardMeta, edgeNoReportTotal } from './s
 import Select from '../components/Select.jsx';
 import OverviewDash from './svcmon/OverviewDash.jsx';   // v2.915 개요(기술 뷰 — Datadog 대시보드 참고)
 import { isFullScopeAdmin, isFullScopeEditor } from './svcmon/svcmonAccess.js';
-import { periodText } from './svcmon/syncLogic.js';
+import { periodText, driftBannerText } from './svcmon/syncLogic.js';
 import { idsByFolder, folderCheck, toggleIds, selectionInfo } from './svcmon/easyRegister.js';   // v2.960 쉬운 등록 A(선택 모드 · 사용/중지)
 import TrialModal from './svcmon/TrialModal.jsx';
 import './svcmon/techView.css';
@@ -565,7 +565,7 @@ export default function SvcMonitor() {
   const driftEvery = periodText(drift?.intervalMs);   // v2.932(점검 D1-08): 감지 주기는 서버 값(없으면 숫자 없이)
   const driftBanner = isAdminFull && !driftHidden && driftN > 0 ? (
     <div className="tv-banner" role="status">
-      <span><b>설정이 바뀌었습니다</b>{` — 새 항목 ${drift.new || 0} · 주소 변경 ${drift.changed || 0} · 설정에서 사라짐 ${drift.gone || 0}`}
+      <span><b>{driftBannerText(drift).title}</b>{` — ${driftBannerText(drift).parts.join(' · ')}`}
         {drift.at ? ` · 마지막 확인 ${new Date(drift.at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false })}(${driftEvery ? `${driftEvery} 주기` : '주기 감지'} · 카탈로그 읽기만)` : ''}</span>
       <a className="pc-btn accent" style={{ marginLeft: 'auto', textDecoration: 'none' }} href="#/tools/svcmon-config/sync">설정 연동에서 검토</a>
       {(drift.new || 0) > 0 && <button type="button" className="pc-btn" title="지금까지 생긴 새 항목을 본 것으로 둡니다(미등록은 설정 연동 탭에 그대로 남습니다)" onClick={ackDrift}>새 항목 확인</button>}

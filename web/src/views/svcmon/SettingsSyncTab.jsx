@@ -6,7 +6,7 @@ import { requireChanged } from '../changeResult.js';
 import { STable } from '../../components/STable.jsx';
 import './techView.css';
 import {
-  SYNC_STATE_META, SELECTABLE, FACETS, emptySelection, filterRows, facetCounts, chipValue, toggleFacet, sparkPoints, stackedBars, fmtMs, fmtAge, detectText, autoSavedText,
+  SYNC_STATE_META, SELECTABLE, FACETS, emptySelection, filterRows, facetCounts, chipValue, toggleFacet, sparkPoints, stackedBars, fmtMs, fmtAge, detectText, autoSavedText, changedSplit, hostSegments,
 } from './syncLogic.js';
 
 /**
@@ -23,6 +23,11 @@ import {
 const STATE_KEYS = ['new', 'changed', 'gone'];
 const FACET_TOP = 6;
 const ROW_LIMIT = 500;
+
+/** 주소 — '.' · ':' 뒤에서만 줄을 바꾼다(hostSegments · <wbr> — 복사한 주소는 그대로). */
+function Host({ text }) {
+  return <>{hostSegments(text).map((seg, i) => <React.Fragment key={i}>{i ? <wbr /> : null}{seg}</React.Fragment>)}</>;
+}
 
 function Spark({ values, color }) {
   const pts = sparkPoints(values);
@@ -235,7 +240,8 @@ export default function SettingsSyncTab({ canEdit = false, compact = false, onAp
           <QV title="설정된 시스템" sub="catalog" value={present} note={`${(c.byKind || []).length}종 · 출처 오류 ${(data.sourceErrors || []).length}`} spark={daily.map((d) => d.total)} color="#3b82f6" />
           <QV title="등록됨" sub="linked" value={(c.linked || 0) + (c.changed || 0)} cls="tv-ok" note={c.coveragePct == null ? '커버리지 —' : `커버리지 ${c.coveragePct}%`} spark={daily.map((d) => d.linked)} color="#22c55e" />
           <QV title="미등록" sub="new" value={c.new || 0} note={topNew?.n ? `${topNew.label} ${topNew.n}` : '—'} spark={daily.map((d) => d.new)} color="#8b9bb4" />
-          <QV title="주소 변경" sub="host-changed" value={c.changed || 0} cls={c.changed ? 'tv-warn' : ''} note="설정과 대상 주소가 다름" spark={daily.map((d) => d.changed)} color="#f59e0b" />
+          <QV title="주소 변경" sub="host-changed" value={changedSplit(c).address} cls={c.changed ? 'tv-warn' : ''}
+            note={changedSplit(c).def ? `점검 정의 갱신 ${changedSplit(c).def} 따로` : '설정과 대상 주소가 다름'} spark={daily.map((d) => d.changed)} color="#f59e0b" />
           <QV title="설정에서 사라짐" sub="gone" value={c.gone || 0} cls={c.gone ? 'tv-bad' : ''} note={c.held ? `판정 보류 ${c.held}` : '대상은 남아 있음'} spark={daily.map((d) => d.gone)} color="#ef4444" />
           <QV title="카탈로그 읽기" sub="read" value={fmtMs(data.readMs)} cls="tv-blue" note={`설정 문제 ${c.problem || 0} · 제외 ${c.excluded || 0}`} />
         </div>
@@ -260,7 +266,7 @@ export default function SettingsSyncTab({ canEdit = false, compact = false, onAp
             <div className="tv-wh">{`미등록 · 변경 · 사라짐 추이 — ${detectEvery ? `${detectEvery} ` : '주기 '}감지`}<em>settingsDrift</em></div>
             <DriftChart ring={ring} detect={data.detect} />
             <div className="tv-legend">
-              <span><i style={{ background: '#3b82f6' }} />미등록</span><span><i style={{ background: '#f59e0b' }} />주소 변경</span><span><i style={{ background: '#ef4444' }} />사라짐</span>
+              <span><i style={{ background: '#3b82f6' }} />미등록</span><span><i style={{ background: '#f59e0b' }} />주소 · 정의 변경</span><span><i style={{ background: '#ef4444' }} />사라짐</span>
               <span style={{ marginLeft: 'auto' }}>감지 = 카탈로그 읽기만(네트워크 점검 아님) · 적용은 사람이</span>
             </div>
           </div>
@@ -323,7 +329,8 @@ export default function SettingsSyncTab({ canEdit = false, compact = false, onAp
           </div>
           {/* 목록은 상자 안에서 스크롤 — 수백 행이 페이지를 수만 px 로 늘리지 않게(Chromium 실측: 279행 = 13,190px). */}
           <div style={{ overflow: 'auto', maxHeight: compact ? 420 : 640 }}>
-            <STable className="tv-table" minWidth={900} limit={ROW_LIMIT}>
+            {/* v3.30.6(⑦): 1440 에서 표(최소 약 960px)가 상자(약 925px)보다 넓어 비고 칸 오른쪽이 잘렸다 — 주소 칸을 줄바꿈하고 최소 폭을 줄인다. */}
+            <STable className="tv-table" minWidth={840} limit={ROW_LIMIT}>
               <thead><tr>
                 <th data-nosort style={{ width: 30 }} />
                 <th style={{ width: 96 }}>STATE</th><th>NAME</th><th>TAGS</th><th>HOST:PORT</th><th>CHECKS</th><th>비고</th>
@@ -337,21 +344,21 @@ export default function SettingsSyncTab({ canEdit = false, compact = false, onAp
                       <td data-nosort>{can ? <input type="checkbox" aria-label={`${r.name} 선택`} checked={picked.has(r.key)} onChange={() => togglePick(r.key)} /> : null}</td>
                       <td data-sort={m.pill}><span className={`tv-pill ${m.cls}`}>{m.pill}</span></td>
                       <td style={{ fontWeight: 500, whiteSpace: 'normal', overflowWrap: 'anywhere', minWidth: 120 }} title={r.address || r.name}>{r.name}</td>
-                      <td style={{ whiteSpace: 'normal', minWidth: 200 }}>
+                      <td style={{ whiteSpace: 'normal', minWidth: 170 }}>
                         <span className="tv-tag k">{`kind:${r.kindLabel}`}</span>
                         <span className="tv-tag c">{`corp:${r.corp || '전역'}`}</span>
                         <span className="tv-tag e" title={r.agentNote || ''}>{`edge:${r.agent || (r.agentDeclared ? `${r.agentDeclared}→중앙` : 'central')}`}</span>
                         {r.depth && <span className="tv-tag d">{`depth:${r.depth}`}</span>}
                       </td>
-                      <td className="mono">
+                      <td className="mono" style={{ whiteSpace: 'normal', overflowWrap: 'break-word', minWidth: 120 }}>
                         {r.state === 'changed' && !r.defChanged
-                          ? <><s style={{ color: 'var(--text-faint)' }}>{`${r.prevHost}${r.prevPort ? `:${r.prevPort}` : ''}`}</s>{` → ${r.host}${r.port ? `:${r.port}` : ''}`}</>
-                          : (r.host ? `${r.host}${r.port ? `:${r.port}` : ''}` : (r.address || '—'))}
+                          ? <><s style={{ color: 'var(--text-faint)' }}><Host text={`${r.prevHost}${r.prevPort ? `:${r.prevPort}` : ''}`} /></s>{' → '}<Host text={`${r.host}${r.port ? `:${r.port}` : ''}`} /></>
+                          : (r.host ? <Host text={`${r.host}${r.port ? `:${r.port}` : ''}`} /> : (r.address || '—'))}
                       </td>
                       <td style={{ whiteSpace: 'normal', minWidth: 110 }}>{(r.checks || []).map((x, i) => <span key={i} className="tv-chk">{x.type}{x.port ? `:${x.port}` : ''}</span>)}{!(r.checks || []).length && <span className="muted">—</span>}</td>
                       <td className="muted" style={{ fontSize: 11.5, whiteSpace: 'normal', minWidth: 160 }}>
                         {r.reason || (r.targetId ? `대상 ${r.targetName || r.targetId}${r.targetEnabled === false ? ' · 중지' : ''}` : '')}
-                        {r.agentNote && !r.reason ? r.agentNote : ''}
+                        {r.agentNote && !r.reason ? `${r.targetId ? ' · ' : ''}${r.agentNote}` : ''}
                         {r.repath ? <div className="mono" title={r.repath}>{`→ 법인 폴더: ${r.repath}`}</div> : null}
                       </td>
                     </tr>
@@ -405,7 +412,7 @@ export default function SettingsSyncTab({ canEdit = false, compact = false, onAp
         <Modal title={`설정 연동 — 선택 ${picked.size}건`} onClose={() => { setModal(false); setPreview(null); }} width={1000}>
           <div className="tv-opts">
             <div className="muted" style={{ fontSize: 12 }}>
-              {`미등록 ${pickedRows.filter((r) => r.state === 'new').length} · 주소 변경 ${pickedRows.filter((r) => r.state === 'changed').length} · 사라짐 ${pickedRows.filter((r) => r.state === 'gone').length}`}
+              {`미등록 ${pickedRows.filter((r) => r.state === 'new').length} · 주소 변경 ${pickedRows.filter((r) => r.state === 'changed' && !r.defChanged).length}${pickedRows.some((r) => r.defChanged) ? ` · 점검 정의 갱신 ${pickedRows.filter((r) => r.defChanged).length}` : ''} · 사라짐 ${pickedRows.filter((r) => r.state === 'gone').length}`}
               {' — 추가는 전부 성공 또는 전부 취소, 주소 반영·사라짐 처리는 대상별로 결과를 보고합니다. 옵션을 바꾸면 미리보기를 다시 봐야 적용할 수 있습니다.'}
             </div>
             <label htmlFor="ss-enabled">등록 직후 상태
