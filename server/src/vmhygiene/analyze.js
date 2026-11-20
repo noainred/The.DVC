@@ -128,8 +128,10 @@ export function analyzeVmHygiene(vms, s, opt = {}) {
   // 거르기(화면 칩) — 개수(byCode)는 거르기 전 기준이다(고른 칩만 남으면 해제할 수 없다 — v2.645 규약).
   const q = typeof opt.q === 'string' ? opt.q.trim().toLowerCase() : '';
   let shown = rows;
-  if (opt.code && ALL_CODES[opt.code]) shown = shown.filter((r) => r.findings.some((f) => f.code === opt.code));
-  if (opt.sev && SEV_ORDER[opt.sev] != null) shown = shown.filter((r) => r.findings.some((f) => f.sev === opt.sev));
+  // 158회차(재현 — 153회차 N153-3 과 같은 꼴): 모르는 값은 거르지 않는 것이 이 함수의 뜻인데, 표를 상속 키(?code=constructor · ?sev=__proto__)로 열면
+  //   참이 되어 '맞는 VM 0대' 가 됐다(모르는 값 'nope' 는 전체). 자기 키만 본다.
+  if (opt.code && Object.hasOwn(ALL_CODES, opt.code)) shown = shown.filter((r) => r.findings.some((f) => f.code === opt.code));
+  if (opt.sev && Object.hasOwn(SEV_ORDER, opt.sev)) shown = shown.filter((r) => r.findings.some((f) => f.sev === opt.sev));
   if (q) shown = shown.filter((r) => `${r.name} ${r.host} ${r.cluster} ${r.vcenterName}`.toLowerCase().includes(q));
   shown.sort((a, b) => SEV_ORDER[a.worst] - SEV_ORDER[b.worst] || b.findings.length - a.findings.length || String(a.name).localeCompare(String(b.name)));
   const out = {

@@ -203,7 +203,8 @@ api.get('/tools/snapshots/creators', requirePerm('tools'), (req, res) => memoJso
   const vcIds = new Set((snap.vcenters || []).map((v) => String(v.id)).filter((id) => (!allowed || allowed.has(id)) && (!pick || pick.has(id))));
   const r = await snapshotCreators({ snap, vcIds });
   // 153회차: 'partial'(31일을 다 덮지 못함)이 있으면 백필을 시작한다 — 기다리지 않는다 · 진행 중이면 그것을 쓴다(기동 뒤에 등록한 vCenter 는 Veeam 화면을 열기 전까지 덮음이 없었다)
-  if (Object.values(r.vcenters).includes('partial')) kickSnapBackfill();
+  //   158회차: 백필이 메울 수 있는 틈이 있을 때만(needBackfill — 덮음 기록이 31일에 못 미침). 'partial' 에는 백필이 못 메우는 것(모은 지 31일이 안 된 vCenter)도 있다.
+  if (r.needBackfill) kickSnapBackfill();
   const admin = isAdminDetailUser(req.user);
   const byVm = {};
   for (const [k, c] of Object.entries(r.byVm)) byVm[k] = { user: admin ? c.user : null, ts: c.ts };

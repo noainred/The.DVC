@@ -77,6 +77,11 @@ export function dayBucketOffsetMs(offsetMin = DAY_OFFSET_MIN) {
   return Number.isFinite(off) && off % HOUR === 0 ? off : 0;
 }
 
+/**
+ * 158회차(재현 — 153회차 N153-3 과 같은 꼴): 요청 값으로 여는 고정 표는 **자기 키만**. `PRESETS['constructor']` 는 상속된 함수라 참이어서
+ *   기간이 기본(24h)으로 떨어지지 않고 start 가 NaN(응답 null · 점 0개 · 파일 이름 'constructor')이 됐다. 모르는 값은 undefined.
+ */
+const presetMs = (range) => (typeof range === 'string' && Object.hasOwn(PRESETS, range) ? PRESETS[range] : undefined);
 /** 요청 → { start, end, bucketMs, offsetMs, custom } | { error } (순수). 끝은 버킷 경계로 올린 배타 경계. */
 export function parseWindow(q, { now = Date.now(), retentionDays = 365, offsetMin = DAY_OFFSET_MIN } = {}) {
   let start, end = now, custom = false;
@@ -89,7 +94,7 @@ export function parseWindow(q, { now = Date.now(), retentionDays = 365, offsetMi
     if (end - start < HOUR) return { error: '기간은 최소 1시간입니다.' };
     if (end > now + MIN) return { error: '종료 시각이 현재 이후입니다.' };
   } else {
-    const span = PRESETS[q?.range] || DAY;
+    const span = presetMs(q?.range) || DAY;
     start = end - span;
   }
   const floor = now - retentionDays * DAY;
@@ -506,7 +511,7 @@ export function parseExportStyles(q) {
   const out = {};
   for (const part of String(q || '').slice(0, 400).split(',')) {
     const [k, dash, width, dot] = part.split(':');
-    if (!EXPORT_COLS[k] || !['solid', 'dash', 'dot', 'dashdot'].includes(dash)) continue;
+    if (!Object.hasOwn(EXPORT_COLS, k) || !['solid', 'dash', 'dot', 'dashdot'].includes(dash)) continue;   // 158회차: 자기 키만
     const w = Number(width);
     out[k] = { dash, width: Number.isInteger(w) && w >= 1 && w <= 4 ? w : 2, marker: dot === '1' };
   }
@@ -530,7 +535,7 @@ export function uniqueSheetName(base, used) {
 }
 function periodLabel(req, win) {
   if (win.custom) return `${localStamp(win.start)} ~ ${localStamp(win.end)}`;
-  return PRESETS[req.query.range] ? String(req.query.range) : '24h';
+  return presetMs(req.query.range) ? String(req.query.range) : '24h';
 }
 
 /** CSV·엑셀 공통 — 기간·대상·항목·파일 이름. 오류면 응답을 보내고 null. */
@@ -548,12 +553,12 @@ function exportJob(req, res, ext, gpuKeys) {
   }
   if (req.query.scope === 'dc') { const tf = typeFilterOf(req.query); targets = targets.filter((s) => matchType(s, tf)); }
   if (!targets.length) { res.status(404).json(NOT_FOUND); return null; }
-  const cols = String(req.query.cols || 'cpuPct,cpuTemp,gpuTemp,inletTemp,exhaustTemp,powerW,hostCpuPct,hostGpuPct,hostGpuMemPct').split(',').filter((c) => EXPORT_COLS[c]);
+  const cols = String(req.query.cols || 'cpuPct,cpuTemp,gpuTemp,inletTemp,exhaustTemp,powerW,hostCpuPct,hostGpuPct,hostGpuMemPct').split(',').filter((c) => Object.hasOwn(EXPORT_COLS, c));   // 158회차: 자기 키만 — 'constructor' 가 열로 들어가 머리글이 함수 원문이었다
   if (!cols.length) { res.status(400).json({ ok: false, reason: '내보낼 항목이 없습니다.' }); return null; }
   const max = ext === 'xlsx' ? XLSX_SERVER_MAX : SERVER_EXPORT_MAX;
   const omitted = Math.max(0, targets.length - max);
   const label = String(req.query.scope === 'dc' ? `${targets[0].corpName}-${targets[0].site}` : targets[0].name).replace(/[^\w.\-가-힣]+/g, '_').slice(0, 60);
-  const period = win.custom ? `${fileStamp(win.start).slice(0, 8)}-${fileStamp(win.end).slice(0, 8)}` : (PRESETS[req.query.range] ? req.query.range : '24h');
+  const period = win.custom ? `${fileStamp(win.start).slice(0, 8)}-${fileStamp(win.end).slice(0, 8)}` : (presetMs(req.query.range) ? req.query.range : '24h');
   const stamp = fileStamp();
   return { win, cols, omitted, targets: targets.slice(0, max),
     names: { full: `idrac-trend_${label}_${period}_${stamp}`, ascii: `idrac-trend_${period}_${stamp}` } };
