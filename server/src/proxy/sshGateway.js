@@ -636,7 +636,9 @@ function handleConnection(ws, user, opts = {}) {
         closeAll(1011, 'connect failed');
       });
       ssh.on('close', () => closeAll(1000, 'ssh closed'));
-      ssh.connect({
+      // 157회차(재현): ssh2 connect 는 설정이 틀리면 **곧바로 던진다**(username 이 글자가 아니거나 빠지면 'Invalid username') — 이 처리기 밖으로 나가
+      //   '[fatal] uncaughtException' 거짓 장애 로그가 남고, WS 는 사유 없이 열린 채 세션 수만 차지했다(유휴 시한까지). 사유를 말하고 닫는다(49회차 F49-2 와 같은 꼴).
+      try { ssh.connect({
         host, port, username: msg.username, password: msg.password,
         tryKeyboard: true, debug: onDebug,
         // 고RTT(800ms+) + 프록시 경유 + keyboard-interactive 인증의 다중 왕복을 고려해 상향(20s→60s).
@@ -645,7 +647,10 @@ function handleConnection(ws, user, opts = {}) {
           hk = r;
           if (r.ok && r.reason !== 'approved') vsend('hk', `서버 키 ${r.algo} ${r.fp} — 아직 승인되지 않은 키입니다(관찰 모드라 연결합니다). 관리자가 설정에서 지문을 확인·승인하세요.`);
         }),
-      });
+      }); } catch (e) {
+        send({ type: 'status', text: `연결 실패: ${String(e?.message || e).slice(0, 200)} — 아이디를 확인하세요.` });
+        return closeAll(1011, 'connect failed');
+      }
     } else if (msg.type === 'data' && stream) {
       // 49회차 F49-2: data 는 글자만 — 숫자 · 객체면 stream.write 가 처리기 밖으로 던져 '[fatal] uncaughtException' 거짓 장애 로그를 남겼다
       if (typeof msg.data !== 'string') return;

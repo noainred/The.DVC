@@ -179,7 +179,7 @@ export function adPolicyState() {
   const now = Date.now();
   if (_ps && _psAt && now - _psAt < 3000) return _ps;
   const ad = loadAdConfig();
-  _ps = { enabled: !!(ad.enabled && ad.url), epoch: adEpochOf(ad), counter: ad.policyEpoch || 0, maxSessionHours: ad.maxSessionHours };
+  _ps = { enabled: !!(ad.enabled && ad.url), epoch: adEpochOf(ad), counter: ad.policyEpoch || 0, maxSessionHours: ad.maxSessionHours, domain: String(ad.domain || '').trim().toLowerCase() };
   _psAt = now;
   return _ps;
 }
@@ -242,6 +242,22 @@ export function saveAdConfig(partial) {
     try { notifySessionRevoked({ scope: 'source', source: 'ad', reason }); } catch { /* 구독자 오류는 저장을 막지 않는다 */ }
   }
   return next;
+}
+
+/**
+ * 같은 AD 계정의 표기 변형을 한 키로(157회차 — 재현). AD 로그인은 **입력한 이름 그대로** 세션 이름이 된다(authenticateAD) — bind 는 대소문자를 가리지 않고
+ * `이름` · `이름@도메인` · `DOMAIN\이름` 을 다 받으므로, 이름을 키로 쓰는 판정(단일 세션 등록부)은 표기만 바꾸면 다른 계정으로 보였다.
+ *   소문자 · `DOMAIN\` 앞을 뗀다 · `@도메인` 은 **설정한 도메인과 같을 때만** 뗀다(다른 도메인의 같은 이름은 다른 계정일 수 있다). `ad:` 접두 — 로컬 이름(`:` 을 쓸 수 없다)과 겹치지 않는다.
+ * 정책 상태 캐시(3초)에서 도메인을 읽는다 — 요청마다 파일을 읽지 않는다.
+ */
+export function adAccountKey(username) {
+  const raw = String(username ?? '').trim().toLowerCase();
+  let s = raw.replace(/^[^\\]*\\/, '');
+  let dom = '';
+  try { dom = adPolicyState().domain || ''; } catch { dom = ''; }
+  const at = s.lastIndexOf('@');
+  if (at > 0 && dom && s.slice(at + 1) === dom) s = s.slice(0, at);
+  return `ad:${s || raw}`;
 }
 
 function upnFor(username, ad) {

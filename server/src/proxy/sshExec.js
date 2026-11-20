@@ -593,6 +593,9 @@ export function execAnswered(conn, command, {
     conn.exec(command, { pty: pty === true ? WIDE_PTY : pty }, (err, stream) => {
       if (err) return reject(err);
       let stdout = ''; let stderr = ''; let done = false; let bytes = 0; let total = 0; let truncated = false;
+      // 157회차(152 결정 D3 — 재현): exec 와 같은 꼴 — 청크마다 toString() 이면 여러 바이트 글자(스토리지 CLI 가 내는 LUN · 파일시스템 이름 · 설명 칸의 한글)가 청크 경계에서 깨진다.
+      //   StringDecoder 로 잇는다(프롬프트는 ASCII 라 꼬리 판정은 그대로 · 끝까지 오지 않은 조각은 채널이 닫힐 때만 낸다 — 시한 · 중단 결과에는 붙이지 않는다).
+      const decOut = new StringDecoder('utf8'); const decErr = new StringDecoder('utf8');
       const answers = {};
       for (const [k] of active) answers[k] = 0;
       const out = (extra) => ({ command, stdout: clean(stdout), stderr, pages: answers.pager || 0, answers, truncated, ...extra });
@@ -609,7 +612,7 @@ export function execAnswered(conn, command, {
       stream.on('data', (d) => {
         bytes += d.length;
         if (bytes > EXEC_MAX_OUTPUT) { kill(); return finish(reject, new Error(`SSH exec 출력 상한(${Math.round(EXEC_MAX_OUTPUT / 1024)}KB) 초과: ${command}`)); }
-        stdout += d.toString();
+        stdout += decOut.write(d);
         // 꼬리에서만 프롬프트를 본다 — 본문에 같은 문구가 있어도 오응답하지 않게.
         // ⚠ 그리고 **마지막 응답 이후 새로 온 부분**만 본다(위 머리말 — 우리 응답의 에코로 다시 매치하지 않게).
         const tail = stdout.slice(Math.max(answeredUpTo, stdout.length - 400)).replace(ANSI_RE, '');
@@ -643,11 +646,11 @@ export function execAnswered(conn, command, {
       stream.stderr.on('data', (d) => {
         bytes += d.length;
         if (bytes > EXEC_MAX_OUTPUT) { kill(); return finish(reject, new Error(`SSH exec 출력 상한(${Math.round(EXEC_MAX_OUTPUT / 1024)}KB) 초과: ${command}`)); }
-        stderr += d.toString();
+        stderr += decErr.write(d);
       });
       stream.on('error', (e) => finish(reject, e));
       stream.stderr.on('error', () => { /* 비치명 */ });
-      stream.on('close', (code) => finish(resolve, out({ code })));
+      stream.on('close', (code) => { if (!done) { stdout += decOut.end(); stderr += decErr.end(); } finish(resolve, out({ code })); });
     });
   });
 }

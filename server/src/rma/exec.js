@@ -51,10 +51,11 @@ export function tcpSend(host, port, data = '', timeoutMs = 10_000) {
   return new Promise((resolve) => {
     const sock = net.connect({ host, port: Number(port) });
     let out = ''; let done = false;
+    const dec = new StringDecoder('utf8');   // 157회차(재현): TCP 조각 경계에 걸린 여러 바이트 글자(한글 응답)가 조각마다 toString() 에서 깨졌다 — runCommand 와 같이 잇는다
     const fin = (ok, reason) => { if (done) return; done = true; try { sock.destroy(); } catch { /* */ } resolve({ ok, exitCode: ok ? 0 : 1, stdout: out, stderr: ok ? '' : `${reason}\n`, durationMs: Date.now() - t0, timedOut: false, truncated: false }); };
     sock.setTimeout(Math.max(500, timeoutMs));
     sock.once('connect', () => { if (data) sock.write(data.replace(/\\n/g, '\n').replace(/\\r/g, '\r')); setTimeout(() => fin(true), 2000).unref?.(); });
-    sock.on('data', (b) => { out += b.toString('utf8'); if (out.length > 4096) { out = out.slice(0, 4096); fin(true); } });
+    sock.on('data', (b) => { out += dec.write(b); if (out.length > 4096) { out = out.slice(0, 4096); fin(true); } });
     sock.once('end', () => fin(true));
     sock.once('timeout', () => fin(!!out, 'timeout')); sock.once('error', (e) => fin(false, e?.code || e?.message));
   });

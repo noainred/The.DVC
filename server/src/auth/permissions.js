@@ -433,6 +433,8 @@ export function setUserTools(username, { mode = 'off', tools = [], by = '' } = {
   { const refused = permissionsWriteRefusal(); if (refused) return { ok: false, status: refused.status, code: refused.body.code, reason: refused.body.reason }; }   // 20회차 F5
   const name = String(username || '').trim();
   if (!USERNAME_RE.test(name)) return { ok: false, reason: '사용자명 형식이 올바르지 않습니다.' };
+  // 157회차(재현): `users['__proto__'] = e` 는 칸을 만들지 않고 프로토타입을 바꾼다 — 저장되지 않는데 ok · entry 를 돌려줘 '제한을 걸었다' 로 보였다(실제 판정은 역할 기본값). 거절한다.
+  if (name === '__proto__') return { ok: false, reason: '이 이름의 계정에는 사용자별 제한을 저장할 수 없습니다(__proto__ — 계정 이름을 바꿔 다시 만드세요).' };
   if (!USER_TOOL_MODES.includes(String(mode))) return { ok: false, reason: `mode 는 ${USER_TOOL_MODES.join('/')} 중 하나여야 합니다.` };
   const cur = loadMatrix();
   const users = { ...(cur.users || {}) };

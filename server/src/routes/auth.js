@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { config } from '../config.js';
-import { authenticate, signToken, verifyToken, authMiddleware, requireEnrolled, requireRole, getUser, beginTotpEnroll, confirmTotpEnroll, setupState, adShadowBlockOf, loginTokenExpSec, extendTokenExpSec, revokeTokenSession, touchSessionActivity, noteIssuedSession, resolveTokenUser } from '../auth/auth.js';
+import { authenticate, signToken, verifyToken, authMiddleware, requireEnrolled, requireRole, getUser, beginTotpEnroll, confirmTotpEnroll, setupState, adShadowBlockOf, loginTokenExpSec, extendTokenExpSec, revokeTokenSession, touchSessionActivity, noteIssuedSession, resolveTokenUser, activeSessionKeyOf } from '../auth/auth.js';
 import { otpEnrolled, requireCurrentOtp, selfRebindVerified, clearSelfRebind } from '../auth/otpRebind.js';   // 19회차 A-2 · 20회차 F1 — 판정 하나
 import { roleToolsDenied, effectiveToolAccess, userPermissions } from '../auth/permissions.js';
 import { loadAdConfig, saveAdConfig, testAd, adTransportStatus } from '../auth/ad.js';
@@ -148,7 +148,7 @@ authRouter.post('/login', async (req, res) => {
   const exp = loginTokenExpSec({ isAd });
   const claims = { sub: user.username, role: user.role, name: user.name, ...(local ? { src: 'local', tv: local.tokenVersion || 0 } : {}), ...(isAd ? { src: 'ad', ep: user.adEpoch } : {}), sid };
   const token = signToken(claims, { exp });
-  if (single) setActiveSession(user.username, sid, { at: Date.now(), ip });
+  if (single) setActiveSession(user.username, sid, { at: Date.now(), ip, key: activeSessionKeyOf(user.username, !!local) });   // 157회차: AD 는 표기 변형을 접은 키(kim · KIM · CORP\\kim 이 한 자리)
   noteIssuedSession({ sub: user.username, sid, exp });
   logAudit({ user: user.username, action: '로그인', detail: `${user.role}${single ? ' · 단일세션' : ''}${user.mustEnrollOtp ? ' · OTP 등록 필요(등록 전용 세션)' : ''}`, ip, xff });
   // 로그인 기록(감사 로그는 줄 수 상한으로 잘려 기간 집계에 못 쓴다 — security/loginHistory.js 머리말). 기록 실패가 로그인을 막지 않는다.
@@ -319,7 +319,7 @@ authRouter.post('/logout', authMiddleware, (req, res) => {
   const raw = (req.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
   const r = revokeTokenSession(raw, { reason: 'logout' });
   if (!r.ok) return res.status(401).json({ ok: false, reason: '토큰이 유효하지 않습니다.' });
-  if (r.sid) clearActiveSessionIf(r.username, r.sid);
+  if (r.sid) clearActiveSessionIf(r.username, r.sid, { key: activeSessionKeyOf(r.username, r.source === 'local') });
   logAudit({ user: req.user?.username, action: '로그아웃', detail: r.kind === 'session' ? '세션 폐기' : '토큰 폐기(구버전 토큰)', ip: clientIp(req) });
   res.json({ ok: true, revoked: r.kind });
 });
