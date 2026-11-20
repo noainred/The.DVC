@@ -366,7 +366,7 @@ function VersionsModal({ corpId, corpName, onClose, onRestored }) {
     <Modal title={`판 기록 — ${corpName}`} onClose={onClose} width={980}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>
-          변경이 저장될 때마다 이 법인의 랙 실장도 전체(데이터센터 · 전산실 · 랙 · 장비 배치)를 한 판으로 남깁니다. 법인마다 최근 {list?.keep ?? '—'}개만 남고 더 오래된 판은 지워집니다.
+          변경이 저장될 때마다 이 법인의 랙 실장도 전체(데이터센터 · 전산실 · 랙 · 장비 배치)를 한 판으로 남깁니다. 법인마다 {list?.keep != null ? `최근 ${list.keep}개만` : '정해진 개수의 최근 판만'} 남고 더 오래된 판은 지워집니다.
         </span>
         {err ? <ErrorBox error={err} /> : !list ? <Loading label="판 기록" /> : (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-start' }}>
