@@ -349,6 +349,7 @@ export default function SnapshotTool({ scope = '', initial = null, initialHist =
               <button key={k} type="button" className={group === k ? 'on' : ''} aria-pressed={group === k} onClick={() => { setGroup(k); setClosed({}); if (req.startsWith('g:')) setReq(''); }}>{label}</button>
             ))}
           </span>
+          {group === 'who' && creators?.ok && <span className="muted snp-note">{creatorExcludeNote(creators)}</span>}
           {pills.length > 0 && <span className="lb">지금 건 조건</span>}
           {pills.map((p) => <button key={p.k} type="button" className="snp-pill" onClick={p.clear} title="이 조건 풀기">{p.label} ✕</button>)}
         </div>
@@ -557,6 +558,17 @@ export function creatorText(c, x) {
   const hit = c.byVm?.[`${x.vcenterId}\n${x.id}`];
   if (!hit) return '만든 계정 — 31일 안 기록 없음';
   return `최근 만든 계정 ${hit.user || '(관리자만 볼 수 있습니다)'} · ${dateText(hit.ts)}${st === 'truncated' ? ' · 일부만 읽음' : ''}`;
+}
+
+/**
+ * v3.30.4: ‘만든 계정’ 에서 뺀 백업 계정 안내. Veeam 계정은 언제나 빼고, 다른 백업 제품(Bareos · Rubrik · Commvault 등) 계정은
+ * 관리자가 ‘VM 구성 점검’ 설정에 적은 것만 뺀다 — 포탈이 그 계정을 알 길이 없다. 숫자는 서버가 준 값(listed · excludeCount)만.
+ */
+export function creatorExcludeNote(c) {
+  const n = Number.isFinite(c?.excludeCount) ? c.excludeCount : 0;
+  const hit = Number.isFinite(c?.listed) ? c.listed : 0;
+  if (!n) return 'Veeam 계정은 뺐습니다 · 다른 백업 제품 계정은 ‘VM 구성 점검’ 설정의 ‘만든 계정에서 뺄 백업 계정’ 에 적으면 뺍니다';
+  return `Veeam 계정과 적어 둔 백업 계정 ${n}개를 뺐습니다(이벤트 ${hit.toLocaleString()}건)`;
 }
 
 /** 보류(관리자) — 기한 1~90일 · 사유 필수 · 0 일 = 풀기. 판정은 서버 hygieneFindings 하나라 카드 · VM 구성 점검 · 알림에도 같이 빠진다. */

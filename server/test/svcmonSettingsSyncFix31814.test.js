@@ -86,7 +86,7 @@ test('D1 — 이미 등록된 옛 정의 대상은 \'변경\' · 적용하면 �
   assert.equal(SYNC.classifyCatalog({ targets: [x] }, STORE.listTargets(), {}).rows.find((r) => r.key === x.id).state, 'linked', '고친 뒤 다시 분류하면 연동');
 });
 
-test('v3.30.4 — 집계 · 배너가 점검 정의 갱신을 주소 변경과 따로 싣는다(defChanged)', () => {
+test('v3.30.6 — 집계 · 배너가 점검 정의 갱신을 주소 변경과 따로 싣는다(defChanged)', () => {
   const x = cat('set:collector', 'e9', { host: '10.30.9.5', port: 4000 });
   const y = cat('set:collector', 'e8', { host: '10.30.9.6', port: 4000 });
   const mk = (xx, url, host) => ({ id: `t-${xx.ref}`, kind: 'infra', path: 'P', name: xx.ref, host, enabled: true,

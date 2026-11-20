@@ -1199,11 +1199,11 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/device-flow` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/deviceFlow.js:30](../server/src/routes/api/deviceFlow.js#L30) |
 | GET | `/tools/disk-bad` | 권한 `tools` | [server/src/routes/api/diskBad.js:173](../server/src/routes/api/diskBad.js#L173) |
 | GET | `/tools/disk-bad/jobs` | 권한 `tools` | [server/src/routes/api/diskBad.js:200](../server/src/routes/api/diskBad.js#L200) |
-| POST | `/tools/disk-bad/jobs/:id/retry` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/diskBad.js:291](../server/src/routes/api/diskBad.js#L291) |
+| POST | `/tools/disk-bad/jobs/:id/retry` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/diskBad.js:292](../server/src/routes/api/diskBad.js#L292) |
 | POST | `/tools/disk-bad/jobs/:id/stop` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/diskBad.js:279](../server/src/routes/api/diskBad.js#L279) |
 | POST | `/tools/disk-bad/scan` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/diskBad.js:221](../server/src/routes/api/diskBad.js#L221) |
 | GET | `/tools/disk-bad/server/:id` | 권한 `tools` | [server/src/routes/api/diskBad.js:204](../server/src/routes/api/diskBad.js#L204) |
-| PUT | `/tools/disk-bad/settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/diskBad.js:302](../server/src/routes/api/diskBad.js#L302) |
+| PUT | `/tools/disk-bad/settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/diskBad.js:303](../server/src/routes/api/diskBad.js#L303) |
 | GET | `/tools/duplicate-ips` | 권한 `tools` | [server/src/routes/api/vcTools.js:35](../server/src/routes/api/vcTools.js#L35) |
 | GET | `/tools/edge-log` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/edgeLog.js:110](../server/src/routes/api/edgeLog.js#L110) |
 | GET | `/tools/edge-log-local` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/edgeLog.js:122](../server/src/routes/api/edgeLog.js#L122) |
@@ -1537,9 +1537,9 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/snapshots` | 권한 `tools` | [server/src/routes/api/vcTools.js:159](../server/src/routes/api/vcTools.js#L159) |
 | GET | `/tools/snapshots/creators` | 권한 `tools` | [server/src/routes/api/vcTools.js:198](../server/src/routes/api/vcTools.js#L198) |
 | GET | `/tools/snapshots/history` | 권한 `tools` | [server/src/routes/api/vcTools.js:181](../server/src/routes/api/vcTools.js#L181) |
-| GET | `/tools/snapshots/history/vm` | 권한 `tools` | [server/src/routes/api/vcTools.js:233](../server/src/routes/api/vcTools.js#L233) |
-| GET | `/tools/snapshots/holds` | 권한 `tools` | [server/src/routes/api/vcTools.js:211](../server/src/routes/api/vcTools.js#L211) |
-| PUT | `/tools/snapshots/holds` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/vcTools.js:219](../server/src/routes/api/vcTools.js#L219) |
+| GET | `/tools/snapshots/history/vm` | 권한 `tools` | [server/src/routes/api/vcTools.js:235](../server/src/routes/api/vcTools.js#L235) |
+| GET | `/tools/snapshots/holds` | 권한 `tools` | [server/src/routes/api/vcTools.js:213](../server/src/routes/api/vcTools.js#L213) |
+| PUT | `/tools/snapshots/holds` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/vcTools.js:221](../server/src/routes/api/vcTools.js#L221) |
 | GET | `/tools/solutions` | 권한 `tools` | [server/src/routes/api/vcTools.js:71](../server/src/routes/api/vcTools.js#L71) |
 | GET | `/tools/storage` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:85](../server/src/routes/api/storageMon.js#L85) |
 | GET | `/tools/storage-growth` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:793](../server/src/routes/api/storageMon.js#L793) |
@@ -1624,11 +1624,11 @@ Prometheus/OTel 익스포터(선택 토큰).
 | PUT | `/tools/vm-export/prefs` | 역할 `admin/operator` · 권한 `data.csv`, `tools` · `prefsWrite` | [server/src/routes/api/vmExport.js:186](../server/src/routes/api/vmExport.js#L186) |
 | POST | `/tools/vm-export/preview` | 권한 `data.csv`, `tools` | [server/src/routes/api/vmExport.js:126](../server/src/routes/api/vmExport.js#L126) |
 | POST | `/tools/vm-finder` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1406](../server/src/routes/api/toolsCapacity.js#L1406) |
-| GET | `/tools/vm-hygiene` | 권한 `tools` | [server/src/routes/api/vmHygiene.js:62](../server/src/routes/api/vmHygiene.js#L62) |
-| GET | `/tools/vm-hygiene.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/vmHygiene.js:113](../server/src/routes/api/vmHygiene.js#L113) |
-| POST | `/tools/vm-hygiene/notify-now` | 역할 `admin` · `fleetOnly` | [server/src/routes/api/vmHygiene.js:107](../server/src/routes/api/vmHygiene.js#L107) |
-| GET | `/tools/vm-hygiene/settings` | 권한 `tools` | [server/src/routes/api/vmHygiene.js:86](../server/src/routes/api/vmHygiene.js#L86) |
-| PUT | `/tools/vm-hygiene/settings` | 역할 `admin` · `fleetOnly` | [server/src/routes/api/vmHygiene.js:96](../server/src/routes/api/vmHygiene.js#L96) |
+| GET | `/tools/vm-hygiene` | 권한 `tools` | [server/src/routes/api/vmHygiene.js:68](../server/src/routes/api/vmHygiene.js#L68) |
+| GET | `/tools/vm-hygiene.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/vmHygiene.js:119](../server/src/routes/api/vmHygiene.js#L119) |
+| POST | `/tools/vm-hygiene/notify-now` | 역할 `admin` · `fleetOnly` | [server/src/routes/api/vmHygiene.js:113](../server/src/routes/api/vmHygiene.js#L113) |
+| GET | `/tools/vm-hygiene/settings` | 권한 `tools` | [server/src/routes/api/vmHygiene.js:92](../server/src/routes/api/vmHygiene.js#L92) |
+| PUT | `/tools/vm-hygiene/settings` | 역할 `admin` · `fleetOnly` | [server/src/routes/api/vmHygiene.js:99](../server/src/routes/api/vmHygiene.js#L99) |
 | GET | `/tools/vm-lifecycle` | 권한 `tools` | [server/src/routes/api/vmLifecycle.js:79](../server/src/routes/api/vmLifecycle.js#L79) |
 | GET | `/tools/vm-lifecycle.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/vmLifecycle.js:103](../server/src/routes/api/vmLifecycle.js#L103) |
 | GET | `/tools/vm-tags` | 권한 `tools` | [server/src/routes/api/vmTags.js:75](../server/src/routes/api/vmTags.js#L75) |

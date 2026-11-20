@@ -78,7 +78,7 @@ describe('v3.18.14 autoSavedText — 자동 등록 저장 뒤 안내(결함 D3)'
   });
 });
 
-describe('v3.30.4 changedSplit · driftBannerText — 주소 변경과 점검 정의 갱신을 따로 센다', async () => {
+describe('v3.30.6 changedSplit · driftBannerText — 주소 변경과 점검 정의 갱신을 따로 센다', async () => {
   const { changedSplit, driftBannerText, SYNC_STATE_META } = await import('./syncLogic.js');
   it('나누기 · 옛 서버(defChanged 없음) · 이상값', () => {
     expect(changedSplit({ changed: 7, defChanged: 5 })).toEqual({ address: 2, def: 5 });
@@ -94,7 +94,7 @@ describe('v3.30.4 changedSplit · driftBannerText — 주소 변경과 점검 �
   it('상태 이름이 정의 변경도 덮는다', () => { expect(SYNC_STATE_META.changed.label).toBe('주소 · 정의 변경'); });
 });
 
-describe('v3.30.4 hostSegments — 주소는 . · : 뒤에서만 끊는다', async () => {
+describe('v3.30.6 hostSegments — 주소는 . · : 뒤에서만 끊는다', async () => {
   const { hostSegments } = await import('./syncLogic.js');
   it('조각', () => {
     expect(hostSegments('edge-frankfurt.demo.invalid:4000')).toEqual(['edge-frankfurt.', 'demo.', 'invalid:', '4000']);

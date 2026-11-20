@@ -101,7 +101,7 @@
 | `dataflow/` | 1 | 307 | `dataflow/build.js` (3) | dataflow/build.js — '데이터 흐름 지도' 의 판정(v2.587, 순수 함수). |
 | `devflow/` | 1 | 204 | `devflow/build.js` (1) | devflow/build.js — 특수기능 '3단 지도(장비 → 엣지 → 메인)' 조립기(v2.588, 순수). |
 | `dirusage/` | 5 | 1,149 | `dirusage/scheduler.js` (3) | dirusage/scheduler.js — 폴더 사용량 스캔 주기 실행 + 메일 발송 (v2.454). |
-| `diskbad/` | 17 | 3,276 | `diskbad/jobs.js` (3) | diskbad/jobs.js — **중앙**의 점검 작업(전체 · 법인 · 서버 1대)과 6시간 자동 점검(v3.8.0). |
+| `diskbad/` | 17 | 3,327 | `diskbad/jobs.js` (3) | diskbad/jobs.js — **중앙**의 점검 작업(전체 · 법인 · 서버 1대)과 6시간 자동 점검(v3.8.0). |
 | `dscfg/` | 4 | 408 | `dscfg/collect.js` (7) | 데이터스토어 운영 속성 갱신(v2.700 — A17). 인벤토리 수집 한 주기 안에서 오래된 DS 부터 상한만큼. |
 | `edgelog/` | 3 | 504 | `edgelog/spec.js` (6) | edgelog/spec.js — 엣지 포탈의 **진행상태**를 어디서 읽는지 적은 표(순수 데이터, v2.549). |
 | `fieldcheck/` | 1 | 151 | `fieldcheck/judge.js` (1) | fieldcheck/judge.js — 법인별 실환경 확인(v2.938 · 사용자 요청 '개선 포인트 8번은 법인별로 적용'). |
@@ -145,7 +145,7 @@
 | `relaytopo/` | 4 | 757 | `relaytopo/store.js` (4) | relaytopo/store.js — 중계 토폴로지(Main – Edge DVC – IRS) 저장(v2.431, 사용자 요구 '첨부한 표처럼 Main-Edge1-Edge2 구조의 |
 | `reports/` | 8 | 1,050 | `reports/compliance.js` (5) | 버전/패치 준수 리포트 — VMware Tools 상태·VM 하드웨어 버전·ESXi 버전 분포를 스냅샷만으로 |
 | `rma/` | 14 | 2,911 | `rma/jobs.js` (8) | RMA 원격 명령 잡 큐(중앙, 인메모리) — claim→ack 2단계 확인응답(captureJobs.js 패턴 이식) |
-| `routes/` | 175 | 54,494 | `routes/capacity.js` (1) | Capacity Advisor API — 포탈/엣지 호스트 리소스 실측·평가·권고 조회. |
+| `routes/` | 175 | 54,503 | `routes/capacity.js` (1) | Capacity Advisor API — 포탈/엣지 호스트 리소스 실측·평가·권고 조회. |
 | `sanswitch/` | 51 | 11,636 | `sanswitch/registry.js` (11) | sanswitch/registry.js — SAN 스위치 등록부(v2.410). |
 | `search/` | 4 | 944 | `search/deepSearch.js` (3) | 심층 검색 — 다조건으로 VM을 검색한다. 1차는 스냅샷 기반(즉시): 게이트웨이·IP/서브넷·OS·전원· |
 | `security/` | 20 | 5,221 | `security/secretVault.js` (37) | secretVault.js — 설정 파일 자격증명(비밀번호·SSH 키·토큰)의 저장 방식(평문/암호화) 중앙 모듈(v2.296). |
@@ -153,7 +153,7 @@
 | `serverinfo/` | 4 | 446 | `serverinfo/service.js` (1) | serverinfo/service.js — 기능 ‘서버 정보’(설계 docs/design/server-access §4.1 안 C — 별도 기능 · 공통 코어를 불러 쓴다 · §4.5 · D3). |
 | `servicemap/` | 4 | 1,075 | `servicemap/store.js` (4) | servicemap/store.js — 서비스 인벤토리 저장소(v2.887, docs/design/service-map/README.md 시안 A 3차 + 4차 검토). |
 | `settingsStatus/` | 2 | 288 | `settingsStatus/sources.js` (3) | 설정 메뉴 상태 배지 — 사실 수집(v2.916). 판정은 grade.js 하나. |
-| `snaphist/` | 6 | 858 | `snaphist/poller.js` (2) | snaphist/poller.js — VM 별 스냅샷 이력 기록 폴러(v3.26.0 · 설계 docs/design/snapshots §5 · §8 ⑧ 기본값 ‘하루 1번(새벽)’). |
+| `snaphist/` | 6 | 873 | `snaphist/poller.js` (2) | snaphist/poller.js — VM 별 스냅샷 이력 기록 폴러(v3.26.0 · 설계 docs/design/snapshots §5 · §8 ⑧ 기본값 ‘하루 1번(새벽)’). |
 | `sshaccess/` | 11 | 2,120 | `sshaccess/outcome.js` (3) | sshaccess/outcome.js — 접속 결과를 **본 곳**(폴러 · 연결 시험)이 부르는 하나(v3.24 서버 접속 — 설계 docs/design/server-access §4.4). |
 | `storage/` | 66 | 15,042 | `storage/registry.js` (21) | storage/registry.js — 스토리지 장비 등록부(v2.302). |
 | `storpath/` | 4 | 391 | `storpath/cache.js` (2) | ESXi 경로 카운터 캐시(v2.935 C-①) — vCenter 별 · 호스트 moref 별 최근 표본 요약(storpath/parse.js summarizeHostPaths). 인메모리다. |
@@ -173,7 +173,7 @@
 | `vmchanges/` | 2 | 337 | `vmchanges/eventDetail.js` (10) | VM 이동 이력(A7)·구성 변경(A8) — 이벤트 본문에서 화면이 쓰는 몇 필드만 뽑는다(v2.702, 순수). |
 | `vmclone/` | 15 | 3,447 | `vmclone/store.js` (6) | vmclone/store.js — VM 복제(백업식) 잡 저장소(v2.299). |
 | `vmdns/` | 5 | 1,318 | `vmdns/poller.js` (3) | vmdns/poller.js — VM DNS 서버 설정 **변경 이력** 적재(v2.696). 10분마다 인벤토리 스냅샷만 읽는다 — vCenter·게스트 왕복 0. |
-| `vmhygiene/` | 4 | 495 | `vmhygiene/analyze.js` (5) | vmhygiene/analyze.js — 특수 기능 'VM 구성 점검'(도구 키 `vm-hygiene`, v2.698) 판정(순수). |
+| `vmhygiene/` | 4 | 514 | `vmhygiene/analyze.js` (5) | vmhygiene/analyze.js — 특수 기능 'VM 구성 점검'(도구 키 `vm-hygiene`, v2.698) 판정(순수). |
 | `vmlife/` | 1 | 88 | `vmlife/analyze.js` (1) | vmlife/analyze.js — 특수 기능 'VM 생성·삭제 이력'(도구 키 `vm-lifecycle`, v2.706 — C5) 판정(순수). |
 | `vmseries/` | 9 | 1,388 | `vmseries/settings.js` (4) | vmseries/settings.js — 실시간 스파이크 수집 설정(v2.510). env 기본값 + CONFIG_DIR/vmseries.json 오버레이. |
 | `vmtrack/` | 5 | 1,857 | `vmtrack/db.js` (5) | vmtrack/db.js — VM 수량 추이 전용 시계열 DB(v2.345, 사용자 요구: "별도의 DB 를 만들어서 트래킹"). |
@@ -181,7 +181,7 @@
 | `winrm/` | 3 | 518 | `winrm/client.js` (2) | winrm/client.js — WinRM HTTPS(5986) + NTLMv2 로 PowerShell 하나를 돌리고 출력을 받는다(서버 접속 3단계 · 설계 docs/design/server-access ④). |
 | `xferspeed/` | 7 | 1,994 | `xferspeed/schedule.js` (5) | xferspeed/schedule.js — 전송 속도 측정의 **실행 일정**(순수 — 파일·타이머 없음, v2.735). |
 
-디렉터리 104개 · 파일 1525개 · 352,922줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
+디렉터리 104개 · 파일 1525개 · 353,016줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
 <!-- arch-doc:modules:end -->
 
 ### 3-3. 라우트 그룹 → 게이트

@@ -329,7 +329,7 @@ export default function SettingsSyncTab({ canEdit = false, compact = false, onAp
           </div>
           {/* 목록은 상자 안에서 스크롤 — 수백 행이 페이지를 수만 px 로 늘리지 않게(Chromium 실측: 279행 = 13,190px). */}
           <div style={{ overflow: 'auto', maxHeight: compact ? 420 : 640 }}>
-            {/* v3.30.4(⑦): 1440 에서 표(최소 약 960px)가 상자(약 925px)보다 넓어 비고 칸 오른쪽이 잘렸다 — 주소 칸을 줄바꿈하고 최소 폭을 줄인다. */}
+            {/* v3.30.6(⑦): 1440 에서 표(최소 약 960px)가 상자(약 925px)보다 넓어 비고 칸 오른쪽이 잘렸다 — 주소 칸을 줄바꿈하고 최소 폭을 줄인다. */}
             <STable className="tv-table" minWidth={840} limit={ROW_LIMIT}>
               <thead><tr>
                 <th data-nosort style={{ width: 30 }} />

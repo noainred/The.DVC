@@ -63,10 +63,17 @@ test('② T-2 — 같은 표시 이름의 수집 서버 둘: 토큰 · URL 은 �
 
 test('③ T-3 — 엣지 로그 가림 정규식은 선형 · 먼저 자른다', async () => {
   const { redactLogLine } = await import('../src/edgelog/redact.js');
-  const line = 'X-'.repeat(4096);
-  const t0 = performance.now(); redactLogLine(line); const ms = performance.now() - t0;
-  const base = 'ab'.repeat(4096); const t1 = performance.now(); redactLogLine(base); const ms0 = performance.now() - t1;
-  assert.ok(ms < Math.max(5, ms0 * 20), `X- 반복 줄 ${ms.toFixed(2)}ms(기준 ${ms0.toFixed(2)}ms)`);
+  // v3.30.4(오탐 수정): 예전 판은 'X-' 줄을 **데우기 없이 한 번** 재고 다른 글자('ab') 줄 한 번과 견주었고 절대 하한이 5ms 였다 —
+  //   릴리스 러너(v3.28.0 실행 44499360922 첫 시도)에서 5.27ms(기준 0.11ms)로 실패, 같은 커밋 PR CI · 재실행은 통과(러너 흔들림으로 추정).
+  //   ReDoS 회귀는 비율로(docs/rules/common.md): 같은 'X-' 줄을 8배 크기로 · 데운 뒤 작은 쪽 · 큰 쪽 번갈아 5회 각각 최솟값 · 기준 24배(선형 약 8 · 제곱 약 64).
+  const mk = (n) => 'X-'.repeat(n);
+  const run = (s) => { const t0 = process.hrtime.bigint(); for (let i = 0; i < 10; i += 1) redactLogLine(s); return Number(process.hrtime.bigint() - t0); };
+  const small = mk(1_024); const big = mk(8_192);
+  run(small); run(big);   // 데우기
+  let a = Infinity; let b = Infinity;
+  for (let k = 0; k < 5; k += 1) { a = Math.min(a, run(small)); b = Math.min(b, run(big)); }
+  const r = b / Math.max(1, a);
+  assert.ok(r < 24, `X- 반복 줄 8배 크기에 비율 ${r.toFixed(2)}(작은 쪽 ${(a / 1e6).toFixed(2)}ms · 큰 쪽 ${(b / 1e6).toFixed(2)}ms)`);
   assert.equal(redactLogLine('X-Collector-Token: abc'), 'X-Collector-Token: ********'.replace('********', redactLogLine('X-Collector-Token: abc').split(': ')[1]));
   assert.ok(!redactLogLine('X-Collector-Token: SECRETVALUE').includes('SECRETVALUE'), '가림은 그대로');
   const c = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '../src/edgelog/collect.js'), 'utf8');

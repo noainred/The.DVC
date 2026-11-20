@@ -33,7 +33,8 @@ function PolicyPanel({ settings, notify, canWrite, onSaved }) {
     if (!settings) return;
     setForm({
       snapAgeDays: String(settings.snapAgeDays), snapCount: String(settings.snapCount), snapSizeGB: String(settings.snapSizeGB), uptimeDays: String(settings.uptimeDays),
-      exceptionsText: (settings.exceptions || []).join('\n'), notify: { enabled: !!settings.notify?.enabled, hour: settings.notify?.hour ?? 9 },
+      exceptionsText: (settings.exceptions || []).join('\n'),
+      ...(settings.creatorExcludeHidden ? {} : { creatorExcludeText: (settings.creatorExclude || []).join('\n') }), notify: { enabled: !!settings.notify?.enabled, hour: settings.notify?.hour ?? 9 },
     });
   }, [settings]);
   if (!settings || !form) return null;
@@ -71,6 +72,12 @@ function PolicyPanel({ settings, notify, canWrite, onSaved }) {
         <span className="muted">스냅샷 정책 예외 — VM 이름이나 메모에 이 글자가 들어 있으면 스냅샷 정책 판정에서 뺍니다(한 줄에 하나, 대소문자 무시)</span>
         {settings.exceptionsHidden && <span className="muted">예외 {Number(settings.exceptionsCount || 0).toLocaleString()}개 — 다른 법인 VM 이름이 들어 있을 수 있어 범위 계정에는 내용을 보이지 않습니다</span>}
         <textarea className="input" rows={3} disabled={!canWrite || settings.exceptionsHidden} value={form.exceptionsText} onChange={(e) => setForm({ ...form, exceptionsText: e.target.value })} style={{ minWidth: 0, fontFamily: 'var(--mono)' }} />
+      </label>
+      <label style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 10, fontSize: 12 }}>
+        <span className="muted">만든 계정에서 뺄 백업 계정 — ‘스냅샷’ 화면 ‘만든 계정’ 에서 뺍니다(Bareos · Rubrik · Commvault 등 · 한 줄에 하나 · 최대 50개). 도메인을 적으면 그 도메인만, 안 적으면 어느 도메인의 같은 이름이든 뺍니다. Veeam 계정은 따로 뺍니다 · 스냅샷 판정은 바뀌지 않습니다</span>
+        {settings.creatorExcludeHidden
+          ? <span className="muted">적어 둔 계정 {Number(settings.creatorExcludeCount || 0).toLocaleString()}개 — 계정 이름이라 관리자 판본에만 보입니다</span>
+          : <textarea className="input" rows={2} disabled={!canWrite} value={form.creatorExcludeText ?? ''} onChange={(e) => setForm({ ...form, creatorExcludeText: e.target.value })} placeholder={'예: VSPHERE.LOCAL\\bareos-backup'} style={{ minWidth: 0, fontFamily: 'var(--mono)' }} />}
       </label>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', marginTop: 10, fontSize: 13 }}>
         <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>

@@ -9,7 +9,7 @@ import { numOrNull } from '../../numOrNull.js';
 export const SYNC_STATE_META = Object.freeze({
   new: { label: '미등록', pill: 'NEW', cls: 'new' },
   linked: { label: '등록됨', pill: 'LINKED', cls: 'ok' },
-  changed: { label: '주소 · 정의 변경', pill: 'CHANGED', cls: 'chg' },   // v3.30.4: 점검 정의 갱신(defChanged)도 이 상태다 — 이름이 '주소 변경' 뿐이면 사유를 오해했다
+  changed: { label: '주소 · 정의 변경', pill: 'CHANGED', cls: 'chg' },   // v3.30.6: 점검 정의 갱신(defChanged)도 이 상태다 — 이름이 '주소 변경' 뿐이면 사유를 오해했다
   gone: { label: '설정에서 사라짐', pill: 'GONE', cls: 'gone' },
   held: { label: '판정 보류', pill: 'HELD', cls: 'ex' },
   problem: { label: '설정 문제', pill: 'PROBLEM', cls: 'prob' },
@@ -158,7 +158,7 @@ export function autoSavedText(res, every = '') {
 }
 
 /**
- * v3.30.4: '변경' 을 주소 변경과 점검 정의 갱신으로 가른다(서버 counts.defChanged · settingsDrift.defChanged — 없으면 0, 옛 서버는 전부 주소 변경).
+ * v3.30.6: '변경' 을 주소 변경과 점검 정의 갱신으로 가른다(서버 counts.defChanged · settingsDrift.defChanged — 없으면 0, 옛 서버는 전부 주소 변경).
  * @param {{changed?:number, defChanged?:number}} c
  * @returns {{address:number, def:number}}
  */
@@ -168,7 +168,7 @@ export function changedSplit(c) {
   return { address: all - def, def };
 }
 
-/** v3.30.4: Monitoring 화면의 설정 연동 배너 문구 — 0 인 항목은 싣지 않는다(점검 정의 갱신만 있으면 제목도 그 일로). */
+/** v3.30.6: Monitoring 화면의 설정 연동 배너 문구 — 0 인 항목은 싣지 않는다(점검 정의 갱신만 있으면 제목도 그 일로). */
 export function driftBannerText(drift) {
   const { address, def } = changedSplit(drift);
   const parts = [];
@@ -181,7 +181,7 @@ export function driftBannerText(drift) {
 }
 
 /**
- * v3.30.4(⑦ Chromium 판독): 주소를 줄바꿈할 자리 — '.' · ':' 뒤에서만 끊는다(글자 중간 끊김 'edge-frankfurt.demo.i / nvalid' 방지).
+ * v3.30.6(⑦ Chromium 판독): 주소를 줄바꿈할 자리 — '.' · ':' 뒤에서만 끊는다(글자 중간 끊김 'edge-frankfurt.demo.i / nvalid' 방지).
  *   화면은 조각 사이에 <wbr> 를 넣는다(복사한 주소에 보이지 않는 글자가 섞이지 않게 — 문자열에 ZWSP 를 넣지 않는다).
  */
 export function hostSegments(s) {
