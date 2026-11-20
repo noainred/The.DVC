@@ -93,6 +93,7 @@ export const TOOL_PATH_KEYS = Object.freeze({
   'service-check': 'davinci-svc',    // DavinciChecks.jsx ServiceCheck 전용
   'vmware-config': 'vmware-backup',  // DavinciChecks.jsx VmwareConfigBackup 전용
   pdu: 'pdu',
+  rack: 'rack',                      // 랙 실장도(RackTool.jsx 전용 — 세그먼트 = 키 · 설계 docs/design/rack-elevation)
   relaycheck: 'relaycheck',
   relaytopo: 'relaytopo',
   rightsize: 'rightsizing',

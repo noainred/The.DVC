@@ -49,7 +49,8 @@ let _cache = null; // { at, rows }
  * WWN 을 `10:00:00:05` 로 적힌 대로만 찾게 하면, 사람이 자산대장에서 복사한
  * `1000000517` 이나 대시 표기가 안 걸린다. 표시용 원문은 그대로 두고 **검색 키만** 정규화한다.
  */
-export const normKey = (v) => String(v ?? '').toLowerCase().replace(/[\s:_.-]/g, '');
+import { normKey } from './serialKey.js';
+export { normKey };
 
 /** 한 행 만들기. serial 이 비면 null 을 돌려 호출부가 건너뛴다(빈 시리얼 행을 만들지 않는다). */
 function row(kind, serial, fields) {

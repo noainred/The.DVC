@@ -53,6 +53,7 @@ const CorpUsage = React.lazy(() => import('./tools/CorpUsage.jsx'));
 const SvcInventory = React.lazy(() => import('./tools/SvcInventory.jsx')); // v2.887 서비스 인벤토리
 const BmFolders = React.lazy(() => import('./tools/BmFolders.jsx')); // v2.984 물리서버 폴더
 const PowerTotal = React.lazy(() => import('./tools/PowerTotal.jsx')); // v2.664 전체 소비 전력
+const RackTool = React.lazy(() => import('./tools/RackTool.jsx')); // 랙 실장도(설계 docs/design/rack-elevation)
 const IdracTrend = React.lazy(() => import('./tools/IdracTrendTool.jsx')); // iDRAC 통합 추이(v2.660)     // 법인별 서버 사용량(v2.625)
 const LinkCheck = React.lazy(() => import('./tools/LinkCheck.jsx'));     // 통신 점검(중앙↔엣지·vCenter, v2.552)
 const PortalCheck = React.lazy(() => import('./tools/PortalCheck.jsx')); // 포탈 점검 › 토큰 점검(v2.560)
@@ -644,6 +645,7 @@ function ToolPanel({ tool, onBack, isAdmin, defaultScope = '', cfg = null }) {
       {tool === 'svc-inventory' && <SvcInventory />}
       {tool === 'bm-folders' && <BmFolders />}
       {tool === 'power-total' && <PowerTotal />}
+      {tool === 'rack' && <RackTool />}
       {tool === 'idrac-trend' && <IdracTrend />}
       {tool === 'link-check' && <LinkCheck />}
       {tool === 'portal-check' && <PortalCheck />}

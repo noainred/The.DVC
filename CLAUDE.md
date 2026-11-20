@@ -20,9 +20,10 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
 ## 운영 환경 (성능 설계 시 반드시 고려)
 
 - vCenter: **현재 28개 vCenter(~658 호스트·~5,850 VM), 향후 30+까지 확장 예정**. 글로벌 분산.
-- **법인 1 : 서비스 N · 서비스 1 = vCenter 1 + Bareos 1**(2026-11-13 사용자 정정 '기억해' — 10-30 의 '법인 · vCenter · Bareos 1:1:1' 을 대체): 한 법인(DataCenter)에
-  서비스가 둘 이상일 수 있고 서비스마다 vCenter 1개 · Bareos 1대 → **법인 하나에 vCenter · Bareos 가 여럿**. A 서비스의 Bareos 는 A 서비스의 vCenter 만 백업한다(다른 서비스 · 법인 Bareos 로 섞지 않는다).
-  코드 · 주석의 '1:1:1' · '법인 = vCenter' 는 옛 가정이다 — 법인 묶음 = DataCenter, 백업 실행 단위 = 서비스(vCenter↔Director). 코드 정리 범위는 사용자 결정을 따른다.
+- **법인 1 : 데이터센터 N · 데이터센터 1 : 서비스 N · 서비스 1 = vCenter 1 + Bareos 1**(2026-11-13 정정 '기억해' + 2026-11-20 '규칙을 변경해줘' — 10-30 의 '1:1:1' 을 대체):
+  법인에 데이터센터가 2곳 이상, 데이터센터에 서비스가 여럿 → **데이터센터 하나에 vCenter · 백업이 여럿**. A 서비스의 Bareos 는 A 서비스의 vCenter 만 백업한다(다른 서비스 · 법인 Bareos 로 섞지 않는다).
+  코드 · 주석의 '1:1:1' · '법인 = vCenter' 는 옛 가정이다 — 코드의 `DataCenter`(`datacenter/store.js`)는 **법인 묶음**이고 물리 데이터센터는 랙 실장도 원장(`server/src/rack/`)이 따로 갖는다.
+  백업 실행 단위 = 서비스(vCenter↔Director). 코드 정리 범위는 사용자 결정을 따른다.
 - **백업은 법인 로컬, 통합 로그·현황은 중앙**(2026-11-01 사용자 '기억해줘'): A 법인 안에 vCenter·Veeam B&R·Bareos 가 함께 있다 — 백업 실행·조회·복원·
   설정(SSH)·보관 정리는 **그 법인 쪽(법인 엣지 → 로컬 Director·B&R)** 에서 돌고, 중앙은 결과·로그를 모아 통합해 보여 준다. 설계할 때 Director·B&R 호출이
   VM 수만큼 WAN(800ms+)을 왕복하게 만들지 말 것 — 작업 하나를 법인 쪽에 보내 로컬에서 묶어 돌리고 요약만 올린다(Bareos `ops.js` 작업 표·엣지 대행 v2.824 ·
@@ -65,7 +66,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
 ## 영역별 규칙 문서 — 그 영역을 고치기 전에 해당 파일을 읽을 것
 
 목록·목차는 `docs/rules/README.md`. 서버 모듈별 불변조건은 그 폴더의 CLAUDE.md 에도 있다(자동 로드):
-`server/src/{relaytopo,agent,rma,security,sanswitch,hostaccess,veeam/run,bareos,bareos/install,bareos/manage,servicemap,svcmon,ping,focusmon,bmfolders,sshaccess,serverinfo,winrm,servercmd}/CLAUDE.md`.
+`server/src/{relaytopo,agent,rma,security,sanswitch,hostaccess,veeam/run,bareos,bareos/install,bareos/manage,servicemap,svcmon,ping,focusmon,bmfolders,sshaccess,serverinfo,winrm,servercmd,rack}/CLAUDE.md`.
 
 | 파일 | 다루는 것 · 언제 읽나 |
 |---|---|

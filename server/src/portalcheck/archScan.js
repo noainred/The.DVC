@@ -60,6 +60,8 @@ export const IMPORT_CYCLE_MAX = 4;
  * 런타임판). 핸들러 안 판정을 새로 만들면 사유와 함께 여기 적을 것.
  */
 export const ROUTE_GATE_ALLOW = Object.freeze({
+  // routes/api/rack.js — 랙 실장도 편집: 법인 범위 판정은 핸들러 안(gate — 대상 id 로 법인을 찾아 조회 밖 404 → 관리자 ∧ 법인 할당 vCenter 전부 쓰기 범위 아니면 403) · 랙 종류는 isFullReadWriteScope
+  'POST /api/tools/rack/op': 'runOp — gate(조회 밖 404 → 쓰기 밖 403, 법인 = 할당 vCenter 전부) · type.* 는 isFullReadWriteScope 관리자만 · requireRole(admin) + isAdminDetailUser',
   // routes/api/bmUsage.js — v2.922 베어메탈 NIC ↔ CVP 포트 수동 매핑: 범위 판정은 핸들러 안(조회 밖 404 · 쓰기 범위 밖 403 · 다른 법인 CVP 403)
   'PUT /api/tools/bm-usage/port-map': 'portMapWrite — resolvePerfTarget(조회 범위 404) → inUserWriteScope 무조건(403) → isFullReadWriteScope 아니면 법인 CVP 일치(403) · v2.922 반증 D1',
   'DELETE /api/tools/bm-usage/port-map': 'portMapWrite(remove) — 조회 범위 404 → inUserWriteScope 무조건 403 · v2.922 반증 D1',
