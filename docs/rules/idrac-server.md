@@ -1718,6 +1718,9 @@
     엣지 서버 창은 '다시 점검을 눌러' 장비 진단 안내를 보이지 않음(R5-3) · 읽은 서버 0대면 디스크 목록 탭도 '—'(R5-4) · 설정 저장 문구 상태는 부모가 든다(점검 칸 key 가 바뀌어도 남음 · R5-5) ·
     저장 실패 답에 저장된 서버(`storedIds`)를 실어 엣지도 서버 단위로 셈(I-b) · 보고한 조각을 중단한 뒤 엣지가 재시작하면 '중단됨'(I-c) · 셈은 `jobs.js noteUnsaved` 하나(N3).
     웹 JSX 는 화면 렌더 시험 도구가 없어 엣지 조기 반환 · 점검 버튼 · 문구 자리를 소스 계약으로 고정(N11 ~ N13). 회귀 `server/test/diskBadLoopR5.test.js`(변이 4개 확인).
+  - **VER_R6 — 개선 · 버그 수정 반복 6회차**(반증 1인 — 결함 2 · 개선 1 · 변이 9 중 2 생존. 4회차 코드의 결함 R6-1 과 빠진 시험 P3 · P4 는 4회차에서 고침 — 나머지 반영):
+    설정 파일 읽기 오류 동안은 체크박스도 잠금(잠긴 저장 문구가 부모 상태라 풀린 뒤에도 남았다 · R6-2) · 413 으로 나눈 뒤 뒤쪽 반이 실패하면 저장된 앞쪽 반을 오류의 `storedIds` 에 싣는다
+    (`edge.js postSplitWith` — 엣지가 앞쪽 반까지 '저장 못 함' 으로 셌다 · 커서는 그대로 보내지 않음 · R6-3). 회귀 `server/test/diskBadLoopR5.test.js` R6-2 · R6-3.
   - 남은 것(설계 §16 · §18 범위 B · C · §22): 보관 로그 내보내기(§22 2단계 — 장비에 보내는 요청형 동작) · 세션 재사용(3단계) · 지금 쓰이는 곳(OS · vCenter) · 교체 우선순위 · 조치 추적 · vSAN 상태 · 설정 점검. 디스크 값은 v3.10.1 에 텔레메트리 · DriveMetrics 로 읽는다(실장비 대조 전). 실장비 대조는 3.8.2 의 장비 진단으로 받는다(§14.1 명령 대신) — 그 답으로 분류표 · 읽는 방법을 고친다.
   - 회귀 `server/test/diskBad380.test.js` · `server/test/diskBadReview380.test.js` · `server/test/diskBadField382.test.js` · `server/test/diskBadField383.test.js` · `server/test/diskBadPast3101.test.js` · 웹 `diskBadText.test.js`.
 
