@@ -87,7 +87,7 @@
     `placement:false` — GPU 단위 할당·예비 null, VM 은 '배치 정보 없음' 묶음(GPU 에 지어내 배치하지 않는다). 호스트 할당은 배치와 무관하게 VM 구성에서.
   - **엣지 수신**: 세 필드는 `routes/central.js sanitizeHostGpus`·`sanitizeVmGpuField` 가 형식(moref·PCI 주소)·상한으로 좁힌다. gpus 가 배열이 아니면 [] ·
     새 필드가 형식 밖이면 키를 지운다(= 배치 정보 없음). 예전에는 gpus·gpu 를 통째로 받았다(그 밖 필드는 여전히 그대로 — 별건).
-  - 슬롯은 한 GPU 의 프로파일이 하나일 때만(같은 GPU 에는 같은 프로파일 — NVIDIA 일반 규칙, 혼합 크기 모드면 계산하지 않는다). CSV 슬롯 글자는
+  - 슬롯은 한 GPU 의 프로파일이 하나일 때만(같은 GPU 에는 같은 프로파일 — NVIDIA 일반 규칙, 혼합 크기 모드면 계산하지 않는다 · MIG 기반 프로파일(`vgpuProfileIsMig` — `…-<슬라이스>-<GB><계열>`)도 전체 · 남은 슬롯 null + '슬롯 계산 안 함(MIG)' — 2026-11-20 결정 A7 · 모델별 MIG 표 근거 없음). CSV 슬롯 글자는
     '사용 N / 전체 M'(엑셀이 '4/4' 를 날짜로 바꾼다). 엑셀은 조건부 서식 없이 글자 막대(█░) · 개요 + 폭 한 장 인쇄라 `xlsxSheetPrOrder.js` 를 불러온다.
   - 웹 표는 STable 래퍼 + **형제끼리만 정렬**(전체 정렬은 계층을 깬다 — th onClick 이 있어 STable 자체 정렬은 꺼진다).
   - **v2.853 법인 칩**(사용자 요청 — vCenter 화면 '⚡ 바로가기' 와 같은 모양으로 법인 선택): `vc-quicknav`·`qn-btn`(`.on` = 선택) 그대로 ·

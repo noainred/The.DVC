@@ -12,7 +12,7 @@ import { fetchJson, downloadFile, canCsv, putJson, hasRole, toolAllowed } from '
 import { saveHandoff } from './backupRunText.js';   // v2.818 고른 VM 을 '백업 실행' 탭으로 넘긴다
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import Select from '../../components/Select.jsx';
-import { fmtNum, pctOf, veeamStateOf, filterCounts, buildTree, flattenTree, initialOpen, veeamCell, shortTs, vmClass, loadOpts, saveOpts, scopeQuery, scopeNote, runningCell, CRIT, critOf, MEMO_MAX, marksLine, marksNotice, filterCountText, detailLoadKey, toggleAllVisible, invertVisible, visibleVmIds, folderVmIdMap, folderCheckState, filterLabel, methodOf, bareosCell, methodKeyOf, METHOD_KEYS_MAP, fmtGb, NOT_VEEAM_GAP,
+import { fmtNum, pctOf, veeamStateOf, absentUnknownText, filterCounts, buildTree, flattenTree, initialOpen, veeamCell, shortTs, vmClass, loadOpts, saveOpts, scopeQuery, scopeNote, runningCell, CRIT, critOf, MEMO_MAX, marksLine, marksNotice, filterCountText, detailLoadKey, toggleAllVisible, invertVisible, visibleVmIds, folderVmIdMap, folderCheckState, filterLabel, methodOf, bareosCell, methodKeyOf, METHOD_KEYS_MAP, fmtGb, NOT_VEEAM_GAP,
   POLICIES, CHIP_GROUPS, rpoCell, mismatchCell, lastOkText, nextText, nextOf, errText, policyGbTotals, folderRpoPct, saveBareosGroupHandoff } from './backupViewText.js';
 import StaleFinder from './BackupStaleFinder.jsx';   // v2.835 백업 안 된 VM 찾기
 import { CritIcon, NeedIcon, NEED_COLOR, MethodBadge } from './BackupMarkIcons.jsx';
@@ -206,7 +206,7 @@ export default function BackupDetailTool({ scope }) {
   //   예전에는 조회가 실패하면 선택 상자까지 사라져(그 vCenter id 는 저장돼 다시 들어와도 같은 곳) 다른 vCenter 로 옮길 수 없었다.
 
   const r = data?.row || {};
-  const vs = veeamStateOf(r.veeamState);
+  const vs = veeamStateOf(r.veeamState, r.veeamTruncated);
 
   return (
     <div data-backup-detail="" style={{ display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0, '--bk-head': `${headH}px`, '--bk-bulk': `${bulkH ? bulkH + 8 : 0}px` }}>
@@ -280,7 +280,8 @@ export default function BackupDetailTool({ scope }) {
           )}
           {marksNotice(data) && <div style={{ flexBasis: '100%', fontSize: 12, color: marksNotice(data).tone === 'bad' ? '#fca5a5' : '#fcd34d' }}>{marksNotice(data).text}</div>}
           {/* v2.782(점검 K4 B-B3): 이 vCenter 의 Veeam 서버 중 첫 수집 전·한 번도 읽지 못한 서버가 있으면 맞지 않은 VM 은 '없음' 이 아니라 '모름' — 이유를 밝힌다. */}
-          {r.veeam != null && r.veeamAbsentUnknown && <div style={{ flexBasis: '100%', fontSize: 12, color: '#fcd34d' }}>이 vCenter 를 맡은 Veeam 서버 중 아직 첫 수집 전이거나 한 번도 읽지 못한 서버가 있어, 백업 목록에 없는 VM 의 Veeam 칸은 ‘없음’ 이 아니라 ‘모름’ 입니다 — 그 서버를 읽으면 바로잡힙니다.</div>}
+          {/* 결정(2026-11-20) A9: 수집 목록 잘림도 같은 '모름' — 사유 문구는 absentUnknownText 하나(시험) */}
+          {absentUnknownText(r) && <div style={{ flexBasis: '100%', fontSize: 12, color: '#fcd34d' }}>{absentUnknownText(r)}</div>}
           {veeamUnknown && <div style={{ flexBasis: '100%', fontSize: 12, color: '#fcd34d' }}>Veeam 쪽을 읽지 못해({vs.text}) 실제 백업의 Veeam 칸·정책≠실제·RPO 는 ‘모름’ 입니다 — 설정 › Veeam 백업 서버에서 상태를 확인하세요.</div>}
           {bareosUnknown && <div style={{ flexBasis: '100%', fontSize: 12, color: '#fcd34d' }}>{data.bareosDirFail ? 'Bareos Director 조회가 실패(또는 인증 정지)해 원장의 결과가 옛 값일 수 있습니다 — 실제 백업의 Bareos 칸·정책≠실제·RPO 는 ‘모름’ 입니다(0 이 아님). Bareos › 진행 · 이력에서 Director 상태를 확인하세요.' : 'Bareos 원장을 읽지 못해 실제 백업의 Bareos 칸·정책≠실제·RPO 는 ‘모름’ 입니다(0 이 아님) — Bareos › 설정에서 원장 상태를 확인하세요.'}</div>}
           {Array.isArray(data.aliasHosts) && data.aliasHosts.length > 0 && <div className="muted" style={{ flexBasis: '100%', fontSize: 12 }}>Veeam 이 이 vCenter 를 {data.aliasHosts.map((h) => `‘${h}’`).join(', ')} 로 적었습니다 — VM 의 moref·이름이 맞아 같은 vCenter 로 맞췄습니다.</div>}

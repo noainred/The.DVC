@@ -24,7 +24,20 @@ export const VEEAM_STATE = {
   'registry-unreadable': { text: '등록부 확인 불가', tone: 'bad' },
   'no-inventory': { text: 'VM 목록 수집 전', tone: 'muted' },
 };
-export const veeamStateOf = (s) => VEEAM_STATE[s] || { text: '모름', tone: 'muted' };
+/** 결정(76~105 남긴 것 · 2026-11-20) A9: 수집 목록이 잘린 결과로 센 행(서버 backupRow veeamTruncated)은 '일부 서버만' 이 아니라 '부분(목록 잘림)'. */
+export const VEEAM_TRUNCATED = Object.freeze({ text: '부분(목록 잘림)', tone: 'warn' });
+export const veeamStateOf = (s, truncated = false) => (s === 'partial' && truncated === true ? VEEAM_TRUNCATED : VEEAM_STATE[s] || { text: '모름', tone: 'muted' });
+/**
+ * 대조에 없는 VM 의 Veeam 칸이 '모름' 인 이유(서버 backupRow veeamAbsentUnknown) — 아니면 ''.
+ *   v2.782(점검 K4 B-B3): 첫 수집 전 · 한 번도 읽지 못한 서버 · 결정 A9: 수집 목록 잘림(veeamTruncated). 둘 다면 두 사유를 함께 말한다.
+ */
+export function absentUnknownText(r) {
+  if (!r || r.veeam == null || !r.veeamAbsentUnknown) return '';
+  const cut = r.veeamTruncated === true;
+  const servers = !cut || r.veeamAbsentServers === true;
+  if (cut && !servers) return 'Veeam 수집 목록이 상한에서 잘려(부분 — 목록 잘림) 일부만 읽었습니다 — 백업 목록에 없는 VM 의 Veeam 칸은 ‘없음’ 이 아니라 ‘모름’ 입니다(잘린 쪽에 있을 수 있습니다).';
+  return `이 vCenter 를 맡은 Veeam 서버 중 아직 첫 수집 전이거나 한 번도 읽지 못한 서버가 있어${cut ? '(그리고 수집 목록이 상한에서 잘려)' : ''}, 백업 목록에 없는 VM 의 Veeam 칸은 ‘없음’ 이 아니라 ‘모름’ 입니다 — 그 서버를 읽으면 바로잡힙니다.`;
+}
 
 /** 스냅샷 기준을 못 낸 사유(서버 snapReason) → 짧은 이름. */
 export const SNAP_REASON = {
@@ -73,7 +86,7 @@ export function attentionList(rows, n = 6) {
   const out = [];
   for (const r of list) {
     if (!r) continue;
-    const vs = veeamStateOf(r.veeamState);
+    const vs = veeamStateOf(r.veeamState, r.veeamTruncated);
     const vBad = !!r.veeamState && r.veeamState !== 'ok' && r.veeamState !== 'unlinked';
     if (vBad) out.push({ id: r.id, rowId: r.id, tone: vs.tone === 'bad' ? 'bad' : 'warn', title: `${r.name} — Veeam ${vs.text}`, text: r.snap != null ? `스냅샷 기준 ${fmtNum(r.snap)}대는 보입니다` : '스냅샷 기준도 모릅니다' });
     else {

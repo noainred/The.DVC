@@ -165,8 +165,10 @@ export const TUNING_ITEMS = Object.freeze([
   },
   {
     id: 'mem.minFree', cat: 3, title: 'vm.min_free_kbytes', reads: '/proc/sys/vm/min_free_kbytes · /proc/meminfo MemTotal', section: 'sysctl', fact: SYS('vm.min_free_kbytes'), valueKind: 'num',
-    rec: { all: { kind: 'maxPctMem', pct: 2, text: '물리 메모리 1~2% 안 · 수백 MB 이하' } },
-    evidence: '“A reasonable starting point is 1-2% of total physical memory, not exceeding a few hundred megabytes.” NUMA 에서는 노드별 존에 나뉘어 적용되므로 너무 크면 한 노드만 워터마크를 못 채워 OOM. RHEL 9: 너무 낮으면 회수가 안 돼 “system crashes and failure to service interrupts”.',
+    // 결정(76~105 남긴 것 · 2026-11-20) A5: 권고 문구는 판정(물리 메모리 2% 이하)만 말한다 — 문서의 ‘a few hundred megabytes’ 는 수치가 모호해
+    //   판정하지 않으므로 권고처럼 보이지 않게 근거(evidence)에 ‘참고’ 로만 둔다(상한을 지어내지 않는다).
+    rec: { all: { kind: 'maxPctMem', pct: 2, text: '물리 메모리 2% 이하' } },
+    evidence: '“A reasonable starting point is 1-2% of total physical memory, not exceeding a few hundred megabytes.” — 판정은 물리 메모리 2% 이하만 본다(‘수백 MB’ 는 수치가 모호해 판정하지 않는 참고). NUMA 에서는 노드별 존에 나뉘어 적용되므로 너무 크면 한 노드만 워터마크를 못 채워 OOM. RHEL 9: 너무 낮으면 회수가 안 돼 “system crashes and failure to service interrupts”.',
     sources: ['R1', 'H4'], grade: '● / ◐',
   },
   {

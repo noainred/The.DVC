@@ -20,7 +20,7 @@ import { getSnapDb } from '../../veeam/snapDb.js';
 import { kickSnapBackfill } from '../../veeam/snapWarm.js';
 import { logPollerRanOnce } from '../../logs/poller.js';
 import { snapEventsOkAt, snapCollectorReason } from '../../veeam/snapCollector.js';   // v2.765: 로그 폴러 ok 시각과 Veeam 계정 전용 수집기 ok 시각 중 늦은 것(결합 함수 하나)
-import { veeamCount, snapCount, snapVerdict, snapStaleMs } from '../../veeam/backupCounts.js';
+import { veeamCount, snapCount, snapVerdict, snapStaleMs, resultsTruncated } from '../../veeam/backupCounts.js';
 import { veeamEdgeStatus } from '../../central/veeamEdge.js';
 import { createYielder } from '../../util/timeSlice.js';
 import { requirePerm, requireRole, toolActorOf } from '../../auth/auth.js';
@@ -433,7 +433,8 @@ export function registerVeeamBadges(api) {
           // v2.758: VM 목록이 없으면(재시작 직후 · 수집 전) 대조 결과 0 은 사실이 아니다 — 모름.
           if (snap?.initial === true || !vms.length) { byVc[vc.id] = { src: 'veeam', n: null, vmTotal: null, reason: 'no-inventory' }; continue; }
           const m = results.length ? matchToVcenter({ id: vc.id, host }, vms, results, { otherHosts }) : null;
-          const vcnt = veeamCount({ views, byVm: m ? m.byVm : null, vmTotal: vms.length, otherVcenter: m?.otherVcenter || 0 });
+          // 결정 A9(2026-11-20): 잘린 수집 목록으로 대조했으면 수는 하한 — partial + truncated(웹 '부분(목록 잘림)').
+          const vcnt = veeamCount({ views, byVm: m ? m.byVm : null, vmTotal: vms.length, otherVcenter: m?.otherVcenter || 0, truncated: resultsTruncated(results) });
           byVc[vc.id] = { ...maskOtherVcenter(vcnt, admin, vcnt.n), snap: await snapCell(vc.id, vms) };   // v2.762(F5): 수는 관리자만 · v2.778.1: 스냅샷 수도 같이
         } else if (isMockMode()) {
           const vcnt = veeamCount({ views: [DEMO_SERVER_VIEW()], byVm: demoVeeamMatch(vc.id, vms).byVm, vmTotal: vms.length });
@@ -707,7 +708,7 @@ export function veeamMatchFor(vc, vms, req) {
   const known = br.length >= brCount && Array.isArray(vms) && vms.length > 0;
   const match = known ? matchToVcenter({ id: vc.id, host: r.host }, vms, r.results, { otherHosts: r.otherHosts }) : null;
   // 96회차(94회차 남긴 것 ①): 신선한 결과 중 하나라도 목록 상한에서 잘렸으면 대조에 없는 VM 은 '미보호' 가 아니라 '모름'(planBackup 이 포탈 잡에 넣지 않는다).
-  const truncated = br.some((x) => Array.isArray(x.result?.truncated) && x.result.truncated.length > 0);
+  const truncated = resultsTruncated(br);   // 결정 A9: 모니터링 수(veeamCount)와 같은 판정
   return { known, match, views: r.views, host: r.host, results: br.length, ...(truncated ? { truncated: true } : {}) };
 }
 
@@ -726,7 +727,7 @@ async function vcBackup(vc, vms, req, { initial = false, scope = null } = {}) {
     if (noInventory) vcnt = { src: 'veeam', n: null, reason: 'no-inventory' };
     else {
       match = r.results.length ? matchToVcenter({ id: vc.id, host: r.host }, vms, r.results, { otherHosts: r.otherHosts }) : null;
-      vcnt = maskOtherVcenter(veeamCount({ views, byVm: match ? match.byVm : null, vmTotal: vms.length, otherVcenter: match?.otherVcenter || 0 }), admin, match ? Object.keys(match.byVm).length : 0);
+      vcnt = maskOtherVcenter(veeamCount({ views, byVm: match ? match.byVm : null, vmTotal: vms.length, otherVcenter: match?.otherVcenter || 0, truncated: resultsTruncated(r.results) }), admin, match ? Object.keys(match.byVm).length : 0);
       // v2.781(점검 G3 B-B1): 실패·오래된 결과라 '백업 중' 을 지운 서버가 있으면 실행 중·대기 수는 확정이 아니다(badges v2.761 D5 와 같은 판정).
       runningStale = r.results.some((x) => x.result?.runningStale === true);
     }

@@ -20,6 +20,19 @@ export function vgpuProfileGB(profile) {
 }
 
 /**
+ * 결정(76~105 남긴 것 · 2026-11-20) A7: MIG 기반 vGPU 프로파일인가 — 이름 꼴 `…-<MIG 슬라이스>-<프레임버퍼 GB><시리즈>`(예 grid_a100-4-20c · grid_a100-3-40c).
+ *   MIG 프로파일은 GPU 한 장에 올릴 수 있는 수가 연산 슬라이스 · MIG 구성에 달려 있어 'GPU 메모리 ÷ 프로파일 GB' 가 과대일 수 있다
+ *   (4-20c: 메모리로는 2 · 실제는 더 적을 수 있음 — 모델별 MIG 표는 이 환경에서 확인하지 못해 수를 넣지 않는다 · 정직 기록).
+ *   → allocTree 는 MIG 꼴이면 슬롯 수를 지어내지 않고 null('슬롯 계산 안 함(MIG)'). 형식이 맞지 않으면 false(vgpuProfileGB 와 같은 끝 규칙 · 128자 상한).
+ *   웹 gpuAllocText.profileIsMig 가 같은 규칙(서버 시험이 같은 입력으로 대조 — 판정 코어 하나).
+ */
+export function vgpuProfileIsMig(profile) {
+  const s = String(profile ?? '').trim();
+  if (!s || s.length > 128) return false;
+  return /-\d{1,2}-\d{1,3}[a-z]{1,2}\d?$/i.test(s);
+}
+
+/**
  * VM 의 vGPU·패스스루 장치 수. 수집기(soapClient parseVmGpu)는 vgpu·passthrough 를 따로 싣지만,
  * 그 필드가 없는 객체(구버전 스냅샷·목 데이터)는 type + count 로 되돌린다.
  */
