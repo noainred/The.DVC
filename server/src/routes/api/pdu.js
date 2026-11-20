@@ -275,7 +275,7 @@ export function registerPdu(api) {
     res.json({ ok: true, added, updated, failed, total: rows.length, ...(droppedSecrets.length ? { droppedSecrets } : {}) });
   });
 
-  api.post('/tools/pdu/test', adminOnly, fullScopeOnly, textFields('host', 'name'), async (req, res) => {
+  api.post('/tools/pdu/test', adminOnly, fullScopeOnly, textFields('host', 'name', 'username', 'sshPort'), async (req, res) => {   // 165회차: 옆 칸 계정 · SSH 포트도 deviceInputIssue 의 String() · Number() 를 지난다
     const b = req.body || {};
     const issue = deviceInputIssue(b);
     if (issue) return res.status(400).json({ ok: false, reason: issue });
@@ -316,7 +316,7 @@ export function registerPdu(api) {
     res.json({ ok: true, intervals: runtimeIntervals(), saved: next, forEdge: intervalsForEdge() });
   });
 
-  api.post('/tools/pdu/devices', adminOnly, fullScopeOnly, textFields('host', 'name'), (req, res) => {
+  api.post('/tools/pdu/devices', adminOnly, fullScopeOnly, textFields('host', 'name', 'username', 'sshPort'), (req, res) => {   // 165회차(163 반증 — 재현): 계정이 객체면 여전히 500 이었다
     const r = saveDevice(req.body || {});
     if (r.ok) logAudit({ user: req.user?.username, action: 'PDU 등록/수정', target: `${r.device.name}(${r.device.host})`, detail: r.device.agent ? `엣지 ${r.device.agent}` : '중앙 직접' });
     res.status(r.ok ? 200 : (r.status || 400)).json(r);   // 결정(78 남긴 것 ①): 등록부 읽기 오류는 409

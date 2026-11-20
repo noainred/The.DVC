@@ -194,7 +194,8 @@ api.get('/tools/focus-mon', adminOnly, fullScopeOnly, async (req, res) => {
 
 /* ── 대상 ─────────────────────────────────────────────────────────────────── */
 
-api.post('/tools/focus-mon/targets', adminOnly, fullRwOnly, demoBlockWrite, textFields('name', 'host', 'username'), (req, res) => {
+// 165회차(163 반증 — 재현): 옆 칸(담당 노드 · 포트 · 그룹 · 법인)도 checkTargetInput 의 s() · Number() 를 지난다 — 이름 · 주소 · 계정이 정상이면 여전히 500 이었다
+api.post('/tools/focus-mon/targets', adminOnly, fullRwOnly, demoBlockWrite, textFields('name', 'host', 'username', 'agent', 'port', 'group', 'corp'), (req, res) => {
   if (registryUnreadable(res)) return;
   const r = registry.addTarget(req.body || {}, { agents: knownAgentNames(), by: req.user?.username, corps: corpResolver().list });
   if (!r.ok) return res.status(r.code === 'registry-unreadable' ? 503 : 400).json(r);

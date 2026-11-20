@@ -373,7 +373,8 @@ adminRouter.get('/idrac/scan-ranges', adminOnly, fleetOnly, (_req, res) => {
 // 저장/수정. Body: { id?, datacenterId, service?, ranges?, username?, password?, agent?, enabled?, mode? }
 // id가 있으면 그 엔트리 수정, 없으면 새 엔트리 생성(한 법인에 여러 서비스 엔트리 허용).
 // (구버전 클라이언트 호환: vcenterId로 와도 datacenterId로 처리)
-adminRouter.put('/idrac/scan-ranges', adminOnly, fleetOnly, textFields('datacenterId', 'vcenterId'), (req, res) => {
+// 165회차(163 반증 — 재현): 옆 칸(서비스 · 계정 · 비밀번호 · 담당 엣지 · iLO 계정)도 saveScanRanges 의 String() 을 지난다 — 법인 칸이 정상이면 여전히 500 이었다
+adminRouter.put('/idrac/scan-ranges', adminOnly, fleetOnly, textFields('datacenterId', 'vcenterId', 'id', 'service', 'username', 'password', 'agent', 'iloUsername', 'iloPassword'), (req, res) => {
   const b = req.body || {};
   const dcId = b.datacenterId || b.vcenterId;
   const r = saveScanRanges({ ...b, datacenterId: dcId });

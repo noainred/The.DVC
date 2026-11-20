@@ -462,6 +462,8 @@ adminRouter.put('/security/guest-scans', adminOnly, textFields('id', 'vcenterId'
   }
   const code = guestScanAccess(req.user, b.vcenterId);
   if (code) return res.status(code).json({ ok: false, reason: code === 403 ? GUEST_SCAN_READONLY : 'vCenter 를 찾을 수 없습니다(범위 제한 계정은 자기 범위 vCenter 를 지정해야 합니다).' });
+  // 165회차(163 반증 — 재현): 옆 칸 name 이 객체면 saveGuestScan 의 String() 이 던져 500(사유 'Cannot convert object…')이었다 — 범위 판정(404 · 403) 뒤 · 저장 앞에서 400
+  if (rejectNonText(res, b, ['name'])) return undefined;
   // 22회차 반증 D-12: 저장이 던지면(21회차 L-3 — 잠금 · 키 없음 · 디스크) 사유를 그대로(500 'internal error' 로 사유가 사라지던 것)
   try { res.json(saveGuestScan(b)); } catch (e) { res.status(e?.status === 409 ? 409 : e?.code === 'SECRETS_KEY_MISSING' || e?.code === 'SECRETS_POLICY_UNAVAILABLE' ? 503 : 500).json({ ok: false, code: e?.code || null, reason: String(e?.message || e).slice(0, 300) }); }
 });

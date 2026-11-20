@@ -63,7 +63,7 @@ import { listGroups, groupsLoadError, groupsRev } from '../../bareos/groups.js';
 import { getMarks, marksUnreadable, marksRev } from '../../veeam/backupMarks.js';
 import { registryHosts, vcHostOf } from '../../bareos/vcHost.js';
 import { scopeSig } from '../../util/scopeSig.js';
-import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
+import { textFields, rejectNonText } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 
 const adminOnly = requireRole('admin');
 const fullScopeOnly = fullScopeOnlyWith('Bareos Director 설정은 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 볼 수 있습니다.');
@@ -1718,9 +1718,11 @@ api.put('/tools/bareos-backup/rehearsal', adminOnly, fullScopeOnly, fullWriteOnl
     res.json({ ok: true, policy: saved });
   } catch (e) { res.status(e?.code === 'unreadable' ? 503 : 400).json({ ok: false, reason: String(e?.message || e) }); }
 });
-api.post('/tools/bareos-backup/rehearsal/run', adminOnly, fullScopeOnly, fullWriteOnly, textFields('directorId'), async (req, res) => {
+api.post('/tools/bareos-backup/rehearsal/run', adminOnly, fullScopeOnly, fullWriteOnly, async (req, res) => {
   const name = req.user?.username || '';
   if (config.auth.enabled && !getUser(name)?.totpEnabled) return res.status(403).json({ ok: false, needEnroll: true, reason: '복원 검증은 OTP 가 등록된 계정만 실행할 수 있습니다.' });
+  // 165회차(163 반증 — 재현): 163 의 모양 검사가 위 계정 판정(403 · OTP 등록 안내)보다 앞이라 OTP 를 등록하지 않은 계정이 403 대신 400(칸 이름)을 받았다 — 판정 뒤에서 본다
+  if (rejectNonText(res, req.body, ['directorId'])) return undefined;
   const dirId = String(req.body?.directorId || '');
   const settings = effectiveSettings();
   if (!directorById(dirId, settings)) return res.status(404).json({ ok: false, reason: '그 Director 를 찾을 수 없습니다.' });

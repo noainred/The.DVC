@@ -452,7 +452,7 @@ adminRouter.get('/datacenters', adminOnly, (req, res) => {
   const le = datacentersLoadError();
   res.json({ datacenters: listDatacenters(), assign: getDatacenterAssign(), ...(le ? { loadError: le } : {}) });
 });
-adminRouter.post('/datacenters', adminOnly, fleetOnly, textFields('id', 'name'), (req, res) => {
+adminRouter.post('/datacenters', adminOnly, fleetOnly, textFields('id', 'name', 'region', 'note'), (req, res) => {   // 165회차: 옆 칸 region · note 도 같은 norm()(String) 을 지난다 — 500 이었다
   const r = addDatacenter(req.body || {});
   if (r.ok) logAudit({ user: req.user?.username, action: 'DataCenter 등록', target: r.datacenter?.id || '', detail: r.datacenter?.name || '', ip: req.ip || '' });
   res.status(r.ok ? 201 : r.code === 'settings-unreadable' ? 409 : 400).json(r);   // 73 ①: 파일을 못 읽은 동안은 409

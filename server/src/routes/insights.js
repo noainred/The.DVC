@@ -410,7 +410,7 @@ insightsRouter.get('/fleet/hardware-export', hwCsvPerm, hwFullScopeOnly, async (
 
 // 수동 분류 예외 지정/해제(관리자). body: { key, tag: 'baremetal'|'virtualization'|'exclude'|'auto' }
 // 전체 vCenter 재폴링(store.refresh) 없이 fleetRev만 올려 다음 GET에서 즉시 재계산(고RTT·30개 환경 보호).
-insightsRouter.put('/fleet/tag', adminOnly, fleetFullScopeOnly, textFields('key'), (req, res) => {
+insightsRouter.put('/fleet/tag', adminOnly, fleetFullScopeOnly, textFields('key', 'tag'), (req, res) => {   // 165회차(163 반증 — 재현): tag 가 객체면 '잘못된 tag' 사유를 만드는 템플릿이 던져 500 이었다
   const r = setFleetTag(req.body?.key, req.body?.tag);
   if (r.ok) logAudit({ user: req.user?.username, action: '플릿 분류 변경', target: String(req.body?.key || ''), detail: String(req.body?.tag || 'auto'), ip: req.ip || '' });
   // v2.732(점검 2회차 B5-03): 실패(입력 거부·디스크 쓰기 실패)를 200 {ok:false} 로 주던 것 — 형제 /fleet/assign 처럼 400.

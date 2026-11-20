@@ -22,7 +22,7 @@ import { mailStatus, previewMail, sendDigest, sendVcenter, sendTest } from '../.
 import { load as loadGuestDiskSettings } from '../../guestdisk/settings.js';
 import { load as loadMailCfg } from '../../mail/settings.js';
 import { todayStamp } from '../../util/dayKey.js';
-import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
+import { textFields, listOrText } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 
 const csvPerm = requirePerm('data.csv');
 const toolsPerm = requirePerm('tools');
@@ -129,7 +129,8 @@ export function registerToolsGuestPart(api) {
     res.json(r);
   });
 
-  api.post('/tools/guest-partition/mail/test', adminOnly, fullScopeOnly, async (req, res) => {
+  // 165회차(163 반증 — 재현): 163 의 '수정 전 500 표' 에 있던 자리인데 고쳐지지 않았다(to 객체 → 주소 정리의 String() 이 던짐). to 는 글자 또는 목록 — 화면은 목록을 보낸다.
+  api.post('/tools/guest-partition/mail/test', adminOnly, fullScopeOnly, listOrText('to'), async (req, res) => {
     logAudit({ user: req.user?.username, action: '게스트 파티션 사용률 메일 테스트 발송', ip: req.ip || '' });
     const r = await sendTest(req.body?.to, req.user?.username || 'admin');
     if (r.error) return res.status(400).json({ ok: false, reason: r.error });
