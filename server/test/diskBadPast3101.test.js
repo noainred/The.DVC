@@ -388,7 +388,9 @@ test('F5 · F6 · F15 · F16 — 바쁜 장비에 더 묻지 않음 · 인증 �
   const dv = code('diskbad/diskvals.js');
   assert.match(dv, /if \(isBusy\(e, signal\)\) break;/);
   const rt = code('routes/api/diskBad.js');
-  assert.match(rt, /if \(!isAdminDetailUser\(req\.user\) && v\.coverage\?\.vals\) v\.coverage\.vals = \{ \.\.\.v\.coverage\.vals, seen: \[\] \};/);
+  // 4회차: 응답 다듬기를 shapeServerView 로 뺐다(동작 시험은 diskBadLoopR4).
+  assert.match(rt, /shapeServerView\(serverView\(d\.server, d\.records, d\.serials\), \{ admin: isAdminDetailUser\(req\.user\) \}\)/);
+  assert.match(rt, /if \(!admin && out\.coverage\?\.vals\) out\.coverage = \{ \.\.\.out\.coverage, vals: \{ \.\.\.out\.coverage\.vals, seen: \[\] \} \};/);
   // 덧붙인 읽기는 로그 읽기 시한 **밖**이다 — 서버 한 대 최악 = 로그 + 디스크 값 + SEL (+ 수동이면 장비 진단). 진행 보고(2분)가 따로 있어 무응답 판정과는 무관하다.
   const worst = SC.SERVER_TIMEOUT_MS() + SC.VALS_TIMEOUT_MS + SC.SEL_TIMEOUT_MS + SC.PROBE_TIMEOUT_MS;
   assert.ok(worst <= 15 * 60_000, `서버 한 대 최악 ${worst / 60_000}분`);

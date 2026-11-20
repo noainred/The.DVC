@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **334개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **337개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-11-20)
@@ -224,6 +224,9 @@
 | `peer-trust.json` | 설정 | 장비 SSH 호스트키·TLS 인증서 지문 신뢰 저장소(검토 S-01·S-02) | ✅ | ✅ | ✅ | security/peerTrust.js |
 | `perf-hangs.ndjson` | 로그(NDJSON) | hang(이벤트 루프 정체·화면 장기 로딩) 이벤트를 `perf-hangs.ndjson` 에 남긴다(v2.498). | ✅ |  | ✅ | perf/hangLog.js |
 | `perf-monitor.json` | 설정 | 서버 성능 측정 설정(`perf-monitor.json`, v2.498, 사용자 요청 "설정에 서버 성능 | ✅ | ✅ | ✅ | perf/settings.js |
+| `periodic-report-state.json` | 설정 | 정기 점검 보고의 설정 · 상태 · 틱 · 회차 생성 · 전달 · 재시도 · 미리보기(설계 docs/design/periodic-report §4.4 · §4.5). | ✅ | ✅ | ✅ | periodic/service.js |
+| `periodic-report.json` | 설정 | 정기 점검 보고의 설정 · 상태 · 틱 · 회차 생성 · 전달 · 재시도 · 미리보기(설계 docs/design/periodic-report §4.4 · §4.5). | ✅ | ✅ | ✅ | periodic/service.js |
+| `periodic.db` | DB | 정기 점검 보고 보관 DB. 파일: `<dbDir>/periodic.db`(설계 §4.4). |  |  | ✅ | periodic/db.js |
 | `permissions.json` | 설정 | 역할별 권한 매트릭스 + 도구별 접근 거부 | ✅ | ✅ | ✅ | auth/permissions.js |
 | `ping-monitor.db` | DB | 핑 모니터 응답시간·손실 시계열 |  |  |  | config.js |
 | `ping-settings.json` | 설정 | Ping 모니터 측정 설정(v2.964 · 사용자 요청 "화면에서 주기 설정할 수 있게 · ping 은 중단없이 계속 ping"). | ✅ | ✅ | ✅ | ping/settings.js |

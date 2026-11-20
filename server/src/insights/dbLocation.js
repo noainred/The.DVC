@@ -65,6 +65,7 @@ export const MIGRATABLE = [
   { file: 'vm-dns.db', label: 'VM DNS 서버 설정 변경 이력(바뀐 것만 — v2.696)' },
   { file: 'xfer-speed.db', label: '법인 간 전송 속도 측정 이력(중앙↔엣지 10MB 왕복 — 원시 + 일 요약, v2.735)' },
   { file: 'usage.db', label: '기능 사용 현황 — 사용자 × 화면 × 날 열람 수 · 머문 시간 일 집계(v2.913)' },
+  { file: 'periodic.db', label: '정기 점검 보고 보관함 — 일일 · 주간 · 월간 · 분기 회차 · 전달 기록(v3.32)' },
   { file: 'focusmon.db', label: '서버 집중 모니터링 기록(서버별 1분 묶음 · 프로세스 상위 30 — 30일, v2.976)' },
   { file: 'isidu.db', label: '아이실론 디렉터리 사용량 이력(사용자 폴더 크기 — 조사마다 전체, v2.736)' },
   { file: 'disk-bad.db', label: '디스크 배드 섹터 이력(iDRAC Lifecycle 로그 · 시리얼 이력, v3.8.0)' },

@@ -64,6 +64,15 @@ export function clsOfCode(code, refs) {
  * 서버 상세의 판정 띠. 못 읽음 · 일부만 읽음은 판정하지 않는다 — '기록 없음' 은 '발생한 적 없음' 이 아니다.
  * @returns {{tone:string, title:string, lines:string[]}}
  */
+/**
+ * 서버 창 띠(노드까지 보고 — 4회차 반증 F6). 엣지 포탈은 결과를 중앙에서 본다 — 결과가 없는 엣지에서 '점검을 누르면 읽어 옵니다' 라고 한 뒤
+ * 누르면 409 였다. 엣지에도 결과가 있으면(중앙 직결이던 옛 판) 그대로 보인다.
+ */
+export function serverBandFor(view, node, now = Date.now()) {
+  if (!view && node === 'edge') return { tone: 'neutral', title: '이 노드에는 결과가 없습니다 — 결과는 중앙 포탈에서 봅니다', lines: ['엣지 포탈은 중앙이 보낸 점검을 법인 안에서 읽어 올리는 일만 합니다. 이 서버의 배드 섹터 이력 · 판정은 중앙 포탈의 같은 화면에서 보세요.'] };
+  return serverBand(view, now);
+}
+
 export function serverBand(view, now = Date.now()) {
   if (!view) return { tone: 'neutral', title: '아직 조회하지 않았습니다', lines: ['Lifecycle 로그 전체를 읽는 작업이라 탭을 열 때 자동으로 돌지 않습니다. 점검을 누르면 이 서버를 맡은 노드(법인 엣지 또는 중앙)가 읽어 옵니다.'] };
   const cov = view.coverage || {};
@@ -252,6 +261,53 @@ export function mailInfoText(m) {
   const ok = res.filter((x) => x && x.ok).length;
   const bad = res.filter((x) => x && !x.ok);
   return { ok: !bad.length, text: `마지막 새 기록 메일 ${fmtDateTime(m.at)} — ${ok}/${res.length}통 보냄${bad.length ? ` · 못 보낸 이유: ${[...new Set(bad.map((x) => x.reason || '알 수 없음'))].join(' · ').slice(0, 200)}` : ''}` };
+}
+
+/**
+ * 법인 담당자 저장 결과 문구(반증 3회차 D3). 서버 보고(corpReport)와 화면이 못 읽은 줄 수를 합쳐 말한다 — 버린 것이 없으면 '저장했습니다.'
+ */
+/**
+ * 엣지 포탈 띠의 '마지막 작업' 한 줄(4회차 반증 F2). 서버 `diskBadEdgeStatus()` 는 {configured, agent, busy, last:{at, ok, idle, error}} —
+ * 값은 `last` 아래에 있다(전에는 edge.at 을 읽어 늘 '—' 였고 오류를 보이지 못했다).
+ */
+export function edgeLastText(edge) {
+  const last = edge && typeof edge === 'object' ? edge.last : null;
+  const at = last && Number.isFinite(last.at) ? fmtDateTime(last.at) : '—';
+  const tail = last?.error ? ` · ${String(last.error).slice(0, 160)}` : (edge?.busy ? ' · 읽는 중' : (last?.idle ? ' · 대기 중' : ''));
+  const off = edge && edge.configured === false ? ' · 중앙 주소 · 토큰이 설정되지 않았습니다' : '';
+  return `마지막 작업: ${at}${tail}${off}`;
+}
+
+/**
+ * 서버 탭 행의 판정 배지(4회차 반증 F9 — 행은 초록 '기록 없음' 인데 서버 창 띠는 빨강 '디스크 값에 흔적' 이었다). 띠와 같은 기준:
+ * 로그 기록이 없고 흔적이 있으면 주황, 그 가운데 복구 불가 흔적이 있으면 빨강.
+ * @returns {{tone:string, label:string, note:string}}
+ */
+export function serverRowBadge(s) {
+  const st = s?.status;
+  const base = st === 'records' ? 'red' : st === 'unread' ? 'gray' : st === 'clean' ? 'green' : 'amber';
+  const traces = Number.isFinite(s?.traces) ? s.traces : 0;
+  const unrec = Number.isFinite(s?.traceUnrec) ? s.traceUnrec : 0;
+  if (traces > 0 && st !== 'records') {
+    const tone = unrec > 0 ? 'red' : (base === 'green' ? 'amber' : base);
+    return { tone, label: s?.statusLabel || st || '', note: `디스크 값 흔적 ${traces}개${unrec > 0 ? `(복구 불가 ${unrec})` : ''}` };
+  }
+  return { tone: base, label: s?.statusLabel || st || '', note: '' };
+}
+
+export function corpSaveText(rep, badLines = 0) {
+  const parts = [];
+  if (badLines > 0) parts.push(`‘id=메일’ 꼴이 아닌 ${badLines}줄은 읽지 않았습니다`);
+  // 법인 이름으로 적은 키는 서버가 그 법인 id 로 바꿔 저장했다(3회차 화면 확인 — 이름을 적으면 메일이 가지 않았다).
+  if (rep && Array.isArray(rep.renamed) && rep.renamed.length) parts.push(`법인 이름을 id 로 바꿔 저장: ${rep.renamed.slice(0, 5).map((r) => `${r.from} → ${r.to}`).join(', ')}${rep.renamed.length > 5 ? ` 외 ${rep.renamed.length - 5}건` : ''}`);
+  if (rep && Array.isArray(rep.droppedCorps) && rep.droppedCorps.length) parts.push(`올바른 메일이 없어 뺀 법인: ${rep.droppedCorps.slice(0, 5).join(', ')}${rep.droppedCorps.length > 5 ? ` 외 ${rep.droppedCorps.length - 5}곳` : ''}`);
+  if (rep && Number.isFinite(rep.droppedEmails) && rep.droppedEmails > 0) parts.push(`메일 주소로 읽지 못한 값 ${rep.droppedEmails}개를 뺐습니다`);
+  // 4회차 반증 F8: 중복 · 상한으로 빠진 **올바른** 주소 · 법인을 따로 말한다(상한 값은 서버가 준다 — 화면에 박지 않는다).
+  if (rep && Number.isFinite(rep.dupEmails) && rep.dupEmails > 0) parts.push(`겹친 주소 ${rep.dupEmails}개는 하나로 남겼습니다`);
+  if (rep && Number.isFinite(rep.overEmails) && rep.overEmails > 0) parts.push(`법인당 ${Number.isFinite(rep.toMax) ? `${rep.toMax}개` : '상한'}를 넘는 주소 ${rep.overEmails}개는 저장하지 않았습니다`);
+  if (rep && Number.isFinite(rep.overCorpsTotal) && rep.overCorpsTotal > 0) parts.push(`법인 ${Number.isFinite(rep.corpMax) ? `${rep.corpMax}곳` : '상한'}을 넘는 ${rep.overCorpsTotal}곳은 저장하지 않았습니다${Array.isArray(rep.overCorps) && rep.overCorps.length ? `(${rep.overCorps.slice(0, 3).join(', ')}${rep.overCorpsTotal > 3 ? ' …' : ''})` : ''}`);
+  if (rep && Array.isArray(rep.unknownCorps) && rep.unknownCorps.length) parts.push(`지금 법인(vCenter id) 목록에 없는 키: ${rep.unknownCorps.slice(0, 5).join(', ')} — 이 담당자에게는 메일이 가지 않습니다`);
+  return parts.length ? `저장했습니다 — ${parts.join(' · ')}.` : '저장했습니다.';
 }
 
 export const JOB_STATE_LABEL = Object.freeze({

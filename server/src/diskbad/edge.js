@@ -38,7 +38,16 @@ async function postSplitWith(send, batch, st) {
     if (e?.status !== 413 || batch.length <= 1) throw e;
     const mid = Math.ceil(batch.length / 2);
     const a = await postSplitWith(send, batch.slice(0, mid), { ...st, final: false });
-    const b = await postSplitWith(send, batch.slice(mid), st);
+    let b;
+    try { b = await postSplitWith(send, batch.slice(mid), st); } catch (e2) {
+      // 6회차 반증 R6-3: 앞쪽 반은 저장됐다는 답을 받았다 — 뒤쪽 반의 오류에 그 서버를 덧붙인다(엣지가 앞쪽 반까지 '저장 못 함' 으로 셌다).
+      //   커서는 여전히 보내지 않는다(scan.js — 묶음이 저장됐다는 답일 때만).
+      if (a && a.stored !== false && e2 && typeof e2 === 'object') {
+        const front = batch.slice(0, mid).map((x) => String(x?.id ?? '').slice(0, 128)).filter(Boolean);
+        e2.storedIds = [...front, ...(Array.isArray(e2.storedIds) ? e2.storedIds : [])].slice(0, 1_000);
+      }
+      throw e2;
+    }
     return { ...b, stored: a.stored !== false && b.stored !== false, stop: !!(a.stop || b.stop), newRecords: (Number(a.newRecords) || 0) + (Number(b.newRecords) || 0),
       reason: a.stored === false ? a.reason : b.reason };
   }
@@ -57,7 +66,8 @@ async function postChunk(job, batch, stat, seq) {
   if (res.status === 413) throw Object.assign(new Error(`중앙이 본문 크기를 거부(413) — 서버 ${batch.length}대 · ${Math.round(json.length / 1024)}KB. 중앙 BIG_JSON 등록을 확인하세요.`), { status: 413 });
   let ack = null;
   try { ack = await res.json(); } catch { ack = null; }
-  if (!res.ok) throw Object.assign(new Error(`disk-bad <- ${res.status}${ack?.reason ? ` (${ack.reason})` : ''}`), { status: res.status });
+  // 저장 실패(503)에도 중앙이 저장한 서버를 알려 준다 — 그 수는 '저장 못 함' 에서 뺀다(5회차 I-b · 커서는 여전히 보내지 않는다).
+  if (!res.ok) throw Object.assign(new Error(`disk-bad <- ${res.status}${ack?.reason ? ` (${ack.reason})` : ''}`), { status: res.status, storedIds: Array.isArray(ack?.storedIds) ? ack.storedIds.slice(0, 500).map((x) => String(x).slice(0, 128)) : null });
   return ack || {};
 }
 
@@ -111,7 +121,7 @@ export async function runDiskBadEdgeOnce() {
             }
             sent += batch.length;
             return true;
-          } catch (e) { failures.push(String(e?.message || e).slice(0, 200)); return false; }
+          } catch (e) { failures.push(String(e?.message || e).slice(0, 200)); return Array.isArray(e?.storedIds) ? { stored: false, storedIds: e.storedIds } : false; }
         },
       });
     } finally { clearInterval(hb); }

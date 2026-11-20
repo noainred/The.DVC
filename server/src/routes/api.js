@@ -43,6 +43,7 @@ import { registerSanSwitch } from './api/sanSwitch.js';   // SAN 스위치 모�
 import { registerHostSan } from './api/hostSan.js';
 import { registerSanStorage } from './api/sanStorage.js'; // v2.948 SAN 스토리지 성능(독립 도구 san-storage — 어레이 · 디렉터 · 컨트롤러별 처리량 · 점검 · 매핑)
 import { registerPsInspect } from './api/psInspect.js'; // v2.965 PowerScale 장비 점검(독립 도구 ps-inspect — 법인별 주간 점검 · 보고서 · Top 10 노드 편중)
+import { registerPeriodicReport } from './api/periodicReport.js'; // v3.32 정기 점검 보고(도구 periodic-report — 일일 · 주간 · 월간 · 분기 · 설계 docs/design/periodic-report)
 import { registerSanFlow } from './api/sanFlow.js';       // v2.935(C-②) Brocade Flow Vision 플로우 모니터(포탈이 dvc_ 플로우를 만들고 읽는다)       // v2.920 호스트 ↔ SAN 조닝·트래픽 귀속 + CVP 업링크 매칭
 import { registerCvp } from './api/cvp.js';               // Arista CloudVision(CVP) 네트워크 스위치(v2.608)
 import { registerCvpBulk } from './api/cvpBulk.js';       // CVP 서버 CSV·자유텍스트 대량 등록(v2.641)
@@ -181,6 +182,7 @@ registerBareosManage(api);
 registerBareosLive(api);
 registerStorageMon(api);
 registerPsInspect(api); // v2.965
+registerPeriodicReport(api); // v3.32
 registerSanSwitch(api);
 registerSanStorage(api);   // v2.948 — /tools/san-storage*(조회 tools+전체 범위 · 매핑 · 임계값 PUT 은 전체 범위 관리자)
 registerHostSan(api);
