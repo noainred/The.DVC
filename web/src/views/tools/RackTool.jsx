@@ -15,6 +15,7 @@ import { downloadFailText } from '../downloadFailText.js';
 import {
   U_PX, KIND_LABEL, FACE_LABEL, colorOf, legendOf, fmtU, placesForFace, placementIssue, dropStartU, boxOf, wattText,
   roomSummary, matchPlace, ACTION_LABEL, partChips, chipColor, statusKeyOf,
+  diffCountText, DIFF_OP_LABEL, DIFF_TYPE_LABEL, fieldsText,
 } from './rackView.js';
 
 const card = { background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 12, minWidth: 0 };
@@ -305,6 +306,129 @@ function TypesModal({ types, onClose, onAdd, onRemove, busy, error }) {
   );
 }
 
+/**
+ * 판 기록(법인별 최근 30개) — 판을 고르면 '이 판에서 바뀐 것' 과 '되돌리면 바뀌는 것' 을 보여 주고, 권한이 있으면 그 판으로 되돌린다.
+ * 되돌리기는 확인을 한 번 더 받는다(원장을 통째로 바꾼다). 판 목록은 열 때 1회 + 되돌린 뒤 다시 읽는다(폴링 없음).
+ */
+function VersionsModal({ corpId, corpName, onClose, onRestored }) {
+  const [list, setList] = useState(null);
+  const [err, setErr] = useState(null);
+  const [selVid, setSelVid] = useState(null);
+  const [detail, setDetail] = useState(null);
+  const [detailErr, setDetailErr] = useState('');
+  const [confirm, setConfirm] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const seqRef = useRef(0);
+  const load = useCallback(async () => {
+    try { const r = await fetchJson('/tools/rack/versions', { corp: corpId }); setList(r); setErr(null); return r; } catch (e) { setErr(e); return null; }
+  }, [corpId]);
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    setDetail(null); setDetailErr(''); setConfirm(false); setMsg('');
+    if (selVid == null) return;
+    const my = ++seqRef.current;
+    fetchJson(`/tools/rack/versions/${selVid}`, { corp: corpId })
+      .then((d) => { if (my === seqRef.current) setDetail(d); })
+      .catch((e) => { if (my === seqRef.current) setDetailErr(e?.serverReason || e?.message || '판을 읽지 못했습니다.'); });
+  }, [selVid, corpId]);
+  const restore = async () => {
+    setBusy(true); setMsg('');
+    try {
+      const r = await postJson('/tools/rack/op', { op: 'version.restore', corpId, versionId: selVid, expectLatestId: list?.latestId });
+      if (r?.ok === false) {
+        setMsg(r.reason || '되돌리지 못했습니다.');
+        if (r.code === 'versionConflict') { await load(); setConfirm(false); }
+        return;
+      }
+      await load();
+      setSelVid(null);
+      onRestored(`판 #${r.restoredFrom} 으로 되돌렸습니다(새 판 #${r.latestId} 로 남김 — 다시 되돌릴 수 있습니다).`);
+    } catch (e) { setMsg(e?.serverReason || e?.message || '되돌리지 못했습니다.'); } finally { setBusy(false); }
+  };
+  const versions = list?.versions || [];
+  const sel = versions.find((v) => v.id === selVid);
+  const itemList = (d) => (
+    <ul style={{ listStyle: 'none', margin: 0, padding: 0, maxHeight: 220, overflowY: 'auto', border: '1px solid var(--border-soft)', borderRadius: 8 }}>
+      {d.items.map((it, i) => (
+        <li key={`${it.type}-${it.id}-${it.op}-${i}`} style={{ padding: '5px 10px', borderBottom: '1px solid var(--border-soft)', fontSize: 12, display: 'flex', gap: 8, flexWrap: 'wrap', minWidth: 0 }}>
+          <span style={{ color: it.op === 'remove' ? '#fca5a5' : it.op === 'add' ? '#bbf7d0' : '#fde68a', fontWeight: 700, flex: '0 0 auto' }}>{DIFF_TYPE_LABEL[it.type]} {DIFF_OP_LABEL[it.op]}</span>
+          <span style={{ ...mono, overflowWrap: 'anywhere' }}>{it.name}</span>
+          {it.where ? <span style={{ color: 'var(--text-dim)', overflowWrap: 'anywhere' }}>{it.where}</span> : null}
+          {it.fields ? <span style={{ color: 'var(--text-dim)' }}>{fieldsText(it.fields)}</span> : null}
+        </li>
+      ))}
+      {!d.items.length ? <li style={{ padding: '6px 10px', fontSize: 12, color: 'var(--text-dim)' }}>바뀐 것 없음</li> : null}
+      {d.omitted ? <li style={{ padding: '6px 10px', fontSize: 11, color: 'var(--text-dim)' }}>외 {d.omitted}건은 줄였습니다.</li> : null}
+    </ul>
+  );
+  return (
+    <Modal title={`판 기록 — ${corpName}`} onClose={onClose} width={980}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>
+          변경이 저장될 때마다 이 법인의 랙 실장도 전체(데이터센터 · 전산실 · 랙 · 장비 배치)를 한 판으로 남깁니다. 법인마다 최근 {list?.keep ?? '—'}개만 남고 더 오래된 판은 지워집니다.
+        </span>
+        {err ? <ErrorBox error={err} /> : !list ? <Loading label="판 기록" /> : (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-start' }}>
+            <ul style={{ listStyle: 'none', margin: 0, padding: 0, flex: '1 1 300px', minWidth: 0, maxHeight: 460, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}>
+              {versions.map((v, i) => (
+                <li key={v.id}>
+                  <button type="button" onClick={() => setSelVid(v.id)} aria-pressed={v.id === selVid}
+                    style={{ width: '100%', textAlign: 'left', padding: '8px 12px', border: 0, borderBottom: '1px solid var(--border-soft)', cursor: 'pointer', background: v.id === selVid ? 'rgba(59,130,246,.16)' : 'transparent', color: 'var(--text)', display: 'flex', flexDirection: 'column', gap: 2, minHeight: 44 }}>
+                    <span style={{ display: 'flex', gap: 8, flexWrap: 'wrap', fontSize: 11, color: 'var(--text-dim)' }}>
+                      <span style={mono}>#{v.id}</span><span style={mono}>{new Date(v.ts).toLocaleString()}</span>
+                      {i === 0 ? <span style={{ color: '#93c5fd', fontWeight: 700 }}>지금 원장</span> : null}
+                      {v.user ? <span>{v.user}</span> : null}
+                    </span>
+                    <span style={{ fontSize: 12, fontWeight: 600 }}>{ACTION_LABEL[v.action] || v.action}</span>
+                    <span style={{ fontSize: 11.5, color: 'var(--text-dim)', overflowWrap: 'anywhere' }}>{v.detail}</span>
+                    <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>랙 {v.counts?.racks ?? '—'} · 장비 {v.counts?.places ?? '—'}</span>
+                  </button>
+                </li>
+              ))}
+              {!versions.length ? <li style={{ padding: 12, fontSize: 12, color: 'var(--text-dim)' }}>아직 저장된 판이 없습니다.</li> : null}
+            </ul>
+            <div style={{ flex: '2 1 420px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {selVid == null ? <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>왼쪽에서 판을 고르면 무엇이 바뀌었는지 보여 줍니다.</span> : null}
+              {detailErr ? <div role="alert" style={{ fontSize: 12, color: '#fecaca' }}>{detailErr}</div> : null}
+              {selVid != null && !detail && !detailErr ? <Loading label="판" /> : null}
+              {detail && !detail.readable ? <div role="alert" style={{ fontSize: 12, color: '#fecaca' }}>이 판을 읽지 못했습니다(손상) — 보거나 되돌릴 수 없습니다.</div> : null}
+              {detail?.readable ? (
+                <>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <strong style={{ fontSize: 13 }}>이 판에서 바뀐 것 <span style={{ fontWeight: 400, color: 'var(--text-dim)', fontSize: 12 }}>(바로 앞 판 → 판 #{detail.version.id})</span></strong>
+                    {detail.changes ? <><span style={{ fontSize: 12 }}>{diffCountText(detail.changes.counts)}</span>{itemList(detail.changes)}</> : <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>앞 판이 남아 있지 않아 비교할 수 없습니다(가장 오래된 판).</span>}
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <strong style={{ fontSize: 13 }}>되돌리면 바뀌는 것 <span style={{ fontWeight: 400, color: 'var(--text-dim)', fontSize: 12 }}>(지금 원장 → 판 #{detail.version.id})</span></strong>
+                    {detail.restore ? <><span style={{ fontSize: 12 }}>{diffCountText(detail.restore.counts)}</span>{itemList(detail.restore)}</> : <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>—</span>}
+                  </div>
+                  {list.canRestore && sel && selVid !== list.latestId ? (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', padding: '10px 12px', border: `1px solid ${confirm ? 'var(--red)' : 'var(--border)'}`, borderRadius: 10, background: confirm ? 'rgba(239,68,68,.10)' : 'transparent' }}>
+                      {!confirm ? (
+                        <button type="button" style={btnPri} onClick={() => setConfirm(true)}>이 판으로 되돌리기</button>
+                      ) : (
+                        <>
+                          <span style={{ fontSize: 12, flex: '1 1 260px' }}>{corpName} 의 랙 실장도 전체가 판 #{selVid} 의 모습으로 바뀝니다. 지금 모습도 판으로 남아 다시 되돌릴 수 있습니다. 열려 있는 다른 편집 화면은 다음 저장에서 최신을 다시 불러옵니다.</span>
+                          <button type="button" style={btn} disabled={busy} onClick={() => setConfirm(false)}>취소</button>
+                          <button type="button" style={{ ...btnPri, background: 'var(--red)', borderColor: 'var(--red)', color: '#ffffff' }} disabled={busy} onClick={restore}>{busy ? '되돌리는 중…' : '되돌리기 확인'}</button>
+                        </>
+                      )}
+                    </div>
+                  ) : null}
+                  {sel && selVid === list.latestId ? <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>지금 원장과 같은 판입니다.</span> : null}
+                  {!list.canRestore ? <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>되돌리기는 관리자(이 법인 쓰기 범위)만 할 수 있습니다.</span> : null}
+                </>
+              ) : null}
+              {msg ? <div role="alert" style={{ fontSize: 12, color: '#fecaca', border: '1px solid var(--red)', background: 'rgba(239,68,68,.12)', borderRadius: 8, padding: '8px 10px' }}>{msg}</div> : null}
+            </div>
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
 export default function RackTool() {
   const [tree, setTree] = useState(null);
   const [treeErr, setTreeErr] = useState(null);
@@ -483,6 +607,7 @@ export default function RackTool() {
         <SearchBox value={q} onChange={setQ} placeholder="이름 · 시리얼 · 호스트 이름 찾기" style={{ flex: '1 1 160px', minWidth: 120 }} />
         <button type="button" style={btn} onClick={() => { loadTree(); loadRoom(roomId); }}>새로 고침</button>
         {view && canCsv() ? <button type="button" style={btn} onClick={exportXlsx}>엑셀 내보내기</button> : null}
+        {corpId && sites.length ? <button type="button" style={btn} onClick={() => setModal({ kind: 'versions' })}>판 기록</button> : null}
         {tree.canEditTypes ? <button type="button" style={btn} onClick={() => { setModalErr(''); setModal({ kind: 'types' }); }}>랙 종류</button> : null}
         {(canEdit || corpWritable) ? <button type="button" style={edit ? btn : btnPri} aria-pressed={edit} onClick={() => setEdit((x) => !x)}>{edit ? '편집 끝내기' : '배치 편집'}</button> : null}
       </div>
@@ -631,6 +756,10 @@ export default function RackTool() {
         <NameModal title="전산실 이름 · 삭제" init={view?.room?.name || ''} busy={busy} error={modalErr} onClose={() => setModal(null)}
           onSave={async (name) => { if (await run({ op: 'room.rename', id: roomId, name })) { await loadTree(); await loadRoom(roomId); } }}
           onRemove={async () => { if (await run({ op: 'room.remove', id: roomId }, { okText: '전산실을 지웠습니다.' })) await loadTree(); }} removeLabel="전산실 지우기(랙이 없을 때만)" />
+      ) : null}
+      {modal?.kind === 'versions' ? (
+        <VersionsModal corpId={corpId} corpName={corp?.name || corpId} onClose={() => setModal(null)}
+          onRestored={async (text) => { setModal(null); say('ok', text); await loadTree(); await loadRoom(roomId); }} />
       ) : null}
       {modal?.kind === 'types' ? (
         <TypesModal types={types} busy={busy} error={modalErr} onClose={() => setModal(null)}

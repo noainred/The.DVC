@@ -134,7 +134,30 @@ export const ACTION_LABEL = Object.freeze({
   'room.add': '전산실 추가', 'room.rename': '전산실 이름 변경', 'room.remove': '전산실 삭제',
   'rack.add': '랙 추가', 'rack.update': '랙 수정', 'rack.remove': '랙 삭제',
   'place.add': '장비 놓기', 'place.move': '장비 옮기기', 'place.update': '장비 정보 수정', 'place.remove': '장비 빼기',
+  'version.restore': '판 되돌리기', 'version.baseline': '기준 판(판 기록 시작)',
 });
+
+const DIFF_PARTS = [
+  ['site', '데이터센터'], ['room', '전산실'], ['rack', '랙'], ['place', '장비'],
+];
+/** 판 차이 개수 → 한 줄 글(0 인 항목은 뺀다). 바뀐 것이 없으면 '바뀐 것 없음'. */
+export function diffCountText(c) {
+  if (!c) return '—';
+  const out = [];
+  for (const [k, label] of DIFF_PARTS) {
+    const bits = [];
+    if (c[`${k}Add`]) bits.push(`추가 ${c[`${k}Add`]}`);
+    if (c[`${k}Remove`]) bits.push(`삭제 ${c[`${k}Remove`]}`);
+    if (k === 'place' && c.placeMove) bits.push(`이동 ${c.placeMove}`);
+    if (c[`${k}Change`]) bits.push(`수정 ${c[`${k}Change`]}`);
+    if (bits.length) out.push(`${label} ${bits.join(' · ')}`);
+  }
+  return out.length ? out.join(' / ') : '바뀐 것 없음';
+}
+export const DIFF_OP_LABEL = Object.freeze({ add: '추가', remove: '삭제', move: '이동', change: '수정' });
+export const DIFF_TYPE_LABEL = Object.freeze({ site: '데이터센터', room: '전산실', rack: '랙', place: '장비' });
+const FIELD_LABEL = { kind: '종류', label: '이름', model: '모델', serial: '시리얼', extraSerials: '추가 시리얼', note: '메모', ratedW: '정격 전력', opW: '운전 전력', weightKg: '무게', name: '이름', row: '줄', typeId: '랙 종류', heightU: '높이', role: '용도', pduA: 'PDU A', pduB: 'PDU B', roomId: '전산실', siteId: '데이터센터' };
+export const fieldsText = (fields) => (fields || []).map((f) => FIELD_LABEL[f] || f).join(' · ');
 
 const PART_LABEL = { psu: '전원공급장치', disk: '디스크', mem: '메모리', fan: '팬' };
 /** iDRAC 부품 롤업 → 칩. 못 읽은 부품은 '못 읽음' 으로 따로(정상으로 접지 않는다). */
