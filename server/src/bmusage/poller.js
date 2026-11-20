@@ -30,6 +30,7 @@ import { createAuthGuard, isAuthFailureText, authStopText } from '../util/authGu
 import { loadBmUsageSettings, bmUsageEnabled, enterpriseActive, onBmUsageSettingsChange, STORE_DEFAULTS, effectiveRawDays, SNAPSHOT_KEEP_DAYS, bmUsageLocalLoadError, RETENTION_MAX } from './settings.js';
 import { withResolvedAuth, authCredOf, AUTH_ERROR } from './onboard/refs.js'; // 7b: OS 등록 항목의 키 · 공통 계정 참조 → 접속 자격
 import { gateAccountLogin } from '../sshaccess/accountGate.js';   // v3.24 반증 F2: 같은 공통 계정 비밀번호는 탐침 하나의 결과를 본 뒤에
+import { markPasswordSent, markLoggedIn } from '../sshaccess/loginMark.js';   // 점검 2회차 B1 · Q1(b)
 import { noteCredOutcome } from '../sshaccess/outcome.js';   // v3.9.0 키 사용 기록 · v3.24 공통 계정 사용 기록 + 계정 단위 정지(로그인 거부)
 import { resolveTargets, pathCountsOf } from './targets.js';
 import { enterpriseEligible } from './license.js';
@@ -672,7 +673,9 @@ async function collectOne(target, { trigger = 'auto', intervalMs = null, prevRun
   const dev = authDev(target);
   // ⚠ **수동 실행은 막지 않는다** — 사람이 1회 누르는 것은 잠금 위험이 없고, 비밀번호를 고친 뒤
   //   확인할 길을 없애면 안 된다(v2.528·v2.535 규약). 막는 것은 주기 수집뿐이다.
-  const stopped = (dev && trigger !== 'manual') ? guard.authStopFor(dev) : null;
+  // 3회차 보안 R3S-1: 공통 계정 비밀번호 서버는 계정 단위 정지 하나가 판정한다(서버별 정지가 남아 계정을 풀어도 그 서버만 빠지던 것)
+  const viaAccountPw = !!(target.osHost?.credAccountId && target.osHost?.credVersion != null && !target.osHost?.keyFingerprint);
+  const stopped = (dev && trigger !== 'manual' && !viaAccountPw) ? guard.authStopFor(dev) : null;
   if (stopped) _authStopped.set(target.key, stopped); else _authStopped.delete(target.key);
   const jobs = [];
   /*
@@ -697,8 +700,9 @@ async function collectOne(target, { trigger = 'auto', intervalMs = null, prevRun
   const osT0 = Date.now();
   jobs.push((target.paths.includes('os') && !stopped)
     // v3.24 반증 F2: 공통 계정 비밀번호 접속은 계정 탐침을 지난다 — 대기는 장비 시한 밖(시한은 탐침 뒤 run 안에서 연다).
-    ? gateAccountLogin(target.osHost, () => withDeadline(DEVICE_TIMEOUT_MS, (signal) => collectOsUsage(target.osHost, { signal, budgetMs: OS_BUDGET.effective, ...osStoreOpts(storeOf(), peakPlan), ...(logExtra ? { extraCommands: [logExtra] } : {}), top }), 'OS 수집 시한 초과')
-      .catch((e) => ({ ok: false, error: String(e?.message || e).slice(0, 300) })), {
+    // 점검 2회차 B1: 장비 시한이 먼저 오면(비밀번호를 보낸 뒤 판정 전) 그 결과에도 표시 — 탐침 문이 남은 서버에 이어 보내지 않게
+    ? gateAccountLogin(target.osHost, () => { let pwSent = false; let logged = false; return withDeadline(DEVICE_TIMEOUT_MS, (signal) => collectOsUsage(target.osHost, { signal, budgetMs: OS_BUDGET.effective, ...osStoreOpts(storeOf(), peakPlan), ...(logExtra ? { extraCommands: [logExtra] } : {}), top, onPasswordSent: () => { pwSent = true; }, onLoggedIn: () => { logged = true; } }), 'OS 수집 시한 초과')
+      .catch((e) => { const o = { ok: false, error: String(e?.message || e).slice(0, 300) }; return logged ? markLoggedIn(o) : pwSent ? markPasswordSent(o) : o; }); }, {
       feature: 'bm-usage',
       rejected: (r) => !!r && r.ok === false && !r.authErrorCode && isSshAuthError({ message: String(r.error || '') }),
       stopped: (code) => ({ ok: false, error: AUTH_ERROR[code] || AUTH_ERROR['account-stopped'], authErrorCode: code }),

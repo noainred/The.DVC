@@ -112,13 +112,13 @@ test('① 기계 산수 — 주 명령 · Top-N exec · 7a 로그 exec · 집중
   assert.match(tc, new RegExp(`timeout ${T.TOP_TIMEOUT_S} top -b`));
   // 집중 모니터링(반증 F10): run.js 가 top:false 를 명시 · 주 명령은 같은 산수 · 스냅샷 exec 은 자기 시한(12초) 안
   const fr = SRC('bmusage/focus/run.js');
-  assert.match(fr, /_D\.collectOs\((?:tg\.osHost|osHostNow), \{[\s\S]{0,900}?top: false,[\s\S]{0,40}?\}\), '집중 수집 시한 초과'\)/, '집중 경로는 Top-N 을 끈다');
+  assert.match(fr, /_D\.collectOs\((?:tg\.osHost|osHostNow), \{[\s\S]{0,900}?top: false,[\s\S]{0,160}?\}\), '집중 수집 시한 초과'\)/, '집중 경로는 Top-N 을 끈다');
   const snapTmo = Number(/name: 'snap', cmd: FOCUS_SNAPSHOT_COMMAND, timeoutMs: (\d[\d_]*)/.exec(fr)?.[1]?.replace(/_/g, ''));
   assert.ok(snapTmo > 0);
   assert.ok(worstOf(SNAP.FOCUS_SNAPSHOT_COMMAND).worstS * 1000 + 5_000 <= snapTmo, '집중 스냅샷 안 대기 + 여유 ≤ 스냅샷 exec 시한');
   assert.ok(FOCUS.FOCUS_BUDGET_MS - 15_000 >= OS.CMD_TIMEOUT_MS && FOCUS.FOCUS_BUDGET_MS < FOCUS.FOCUS_DEADLINE_MS, '집중 예산 − READY ≥ 주 명령 시한 · 예산 < 집중 시한');
   // 폴러는 설정 top.on 을 넘긴다 · 수집기 기본값은 끔(호출부가 켜야 돈다)
-  assert.match(SRC('bmusage/collectors/osSsh.js'), /extraCommands = \[\], top = false \} = \{\}\) \{/);
+  assert.match(SRC('bmusage/collectors/osSsh.js'), /extraCommands = \[\], top = false(?:, onPasswordSent = null, onLoggedIn = null)? \} = \{\}\) \{/);
   assert.match(SRC('bmusage/poller.js'), /collectOne\(tg, \{[^}]*top: topOn \}\)/);
 });
 

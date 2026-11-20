@@ -14,11 +14,12 @@
 import { listBmServersRaw, registryLoadError as bmLoadError } from '../../bmstor/registry.js';
 import * as KS from '../../bmusage/onboard/keyStore.js';
 import { resolveOsAuth } from '../../bmusage/onboard/refs.js';
+import { KEY_EXPLICIT_FEATURES } from '../../bmusage/onboard/placement.js';
 
 export const INSTALL_FEATURE = 'disk-audit-install';
 /** v3.18.0 접속 자동 준비(수집 계정 · 공개키) — 같은 찾는 순서 · 같은 '직접 켠 키만' 규칙, 기능만 다르다. */
 export const PREP_FEATURE = 'focus-mon-prep';
-export const CRED_FEATURES = Object.freeze([INSTALL_FEATURE, PREP_FEATURE]);
+export const CRED_FEATURES = KEY_EXPLICIT_FEATURES;   // 점검 2회차 W2-2: 기능 이름은 placement 한 곳(화면 카탈로그의 ‘직접 켜야’ 표시와 같은 목록 — 시험이 대조)
 /** 상태(화면 문구 키 — 웹 `focusMonAuditInstallText.js CRED_TEXT` 와 같다 · 시험 대조). */
 export const CRED_STATES = Object.freeze(['ok', 'feature', 'noentry', 'ambig', 'dup', 'password', 'stopped', 'folder', 'key-missing', 'unreadable', 'error']);
 const t = (v) => String(v ?? '').trim();

@@ -79,7 +79,7 @@ function verifyAuth({ neg, chal, auth, accounts, certDer }) {
   return 'ok';
 }
 const b64 = (s) => Buffer.from(s).toString('base64');
-async function fakeWinrm({ cert = 'server-ok', accounts = { 'corp\\svc': 'Right-1' }, stdout = 'hello from windows\r\n', exitCode = 0, receiveTimeouts = 0, hugeOutput = 0, dropAfterCreate = false, neverDone = false, rejectAfterAuth = false } = {}) {
+async function fakeWinrm({ cert = 'server-ok', accounts = { 'corp\\svc': 'Right-1' }, stdout = 'hello from windows\r\n', exitCode = 0, receiveTimeouts = 0, hugeOutput = 0, dropAfterCreate = false, neverDone = false, rejectAfterAuth = false, closeAfterChallenge = false, gatewayOnAuth = 0, faultOnCreate = false, gatewaySoap11 = false, createWeird = false } = {}) {
   const st = { conns: 0, auths: [], authHeaders: 0, requests: [], receiveTimeouts: 0 };
   const certDer = new crypto.X509Certificate(pem(`${cert}.crt`)).raw;
   const srv = https.createServer({ key: pem(`${cert}.key`), cert: pem(`${cert}.crt`) }, (req, res) => {
@@ -95,16 +95,23 @@ async function fakeWinrm({ cert = 'server-ok', accounts = { 'corp\\svc': 'Right-
         const m = Buffer.from(a[1], 'base64');
         if (m.readUInt32LE(8) === 1) {
           sock.neg = m; sock.chal = challengeMsg(crypto.randomBytes(8));
-          res.writeHead(401, { 'www-authenticate': `Negotiate ${sock.chal.toString('base64')}` }); return res.end();
+          res.writeHead(401, { 'www-authenticate': `Negotiate ${sock.chal.toString('base64')}`, ...(closeAfterChallenge ? { connection: 'close' } : {}) }); return res.end();
         }
+        // 3회차 W3-2: 비밀번호를 검증하지 않는 앞단(게이트웨이)이 AUTHENTICATE 요청에 맨 5xx 를 준다
+        if (gatewayOnAuth) { st.auths.push('not-verified'); res.writeHead(gatewayOnAuth, { 'content-type': 'text/html' }); return res.end('<html>Bad Gateway</html>'); }
+        // 4회차 R4W-4: 검증하지 않는 앞단이 SOAP 1.1 Fault 로 503
+        if (gatewaySoap11) { st.auths.push('not-verified'); res.writeHead(503, { 'content-type': 'text/xml' }); return res.end('<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"><soap:Body><soap:Fault><faultcode>soap:Server</faultcode><faultstring>busy</faultstring></soap:Fault></soap:Body></soap:Envelope>'); }
         const v = verifyAuth({ neg: sock.neg, chal: sock.chal, auth: m, accounts, certDer });
         st.auths.push(v);
         if (v !== 'ok') { res.writeHead(401, { 'www-authenticate': 'Negotiate' }); return res.end(); }
         sock.ntlmOk = true;
+        // 3회차 W3-2: 인증 뒤 WinRM 서비스가 셸 만들기를 SOAP Fault 로 거절(원격 셸 꺼짐 등) — 비밀번호는 받아들여졌다
+        if (faultOnCreate) { res.statusCode = 500; res.setHeader('content-type', 'application/soap+xml;charset=UTF-8'); return res.end('<s:Envelope><s:Body><s:Fault><s:Reason><s:Text>The WS-Management service cannot process the request. Remote shell access is not allowed.</s:Text></s:Reason><s:Detail><f:WSManFault Code="2150858843"/></s:Detail></s:Fault></s:Body></s:Envelope>'); }
       }
       const action = /<a:Action[^>]{0,80}>([^<]{1,200})</.exec(body)?.[1] || '';
       if (rejectAfterAuth && action === WS.ACTION.command) { res.writeHead(401, { 'www-authenticate': 'Negotiate' }); return res.end(); }   // 같은 연결에서 세션을 잃음(서버 쪽 만료 흉내)
       res.setHeader('content-type', 'application/soap+xml;charset=UTF-8');
+      if (action === WS.ACTION.create && createWeird) { res.end('<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body><x:Odd>no shell id here</x:Odd></s:Body></s:Envelope>'); return undefined; }   // 4회차 R4W-5
       if (action === WS.ACTION.create) { res.setHeader('connection', dropAfterCreate ? 'close' : 'keep-alive'); res.end('<s:Envelope><s:Body><rsp:Shell><rsp:ShellId>11111111-2222-3333-4444-555555555555</rsp:ShellId></rsp:Shell></s:Body></s:Envelope>'); return undefined; }
       if (action === WS.ACTION.command) return res.end('<s:Envelope><s:Body><rsp:CommandResponse><rsp:CommandId>AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE</rsp:CommandId></rsp:CommandResponse></s:Body></s:Envelope>');
       if (action === WS.ACTION.receive) {
@@ -146,7 +153,7 @@ test('② 성공 — CA 체인 인증서 · 연결 하나 · AD 계정(도메인
 test('③ 거부 — 틀린 비밀번호는 한 번만(다시 시도하지 않음) · kind auth-rejected', async (t) => {
   const W = await fakeWinrm();
   t.after(() => W.close());
-  await assert.rejects(C.winrmRun({ host: '127.0.0.1', port: W.port, username: 'svc', domain: 'CORP', password: 'Wrong-9', command: 'hostname' }), (e) => e.kind === 'auth-rejected');
+  await assert.rejects(C.winrmRun({ host: '127.0.0.1', port: W.port, username: 'svc', domain: 'CORP', password: 'Wrong-9', command: 'hostname' }), (e) => e.kind === 'auth-rejected' && e.afterLogin !== true);
   assert.deepEqual(W.st.auths, ['bad-proof']);
   assert.equal(W.st.requests.filter((x) => x.auth).length, 2, 'NEGOTIATE · AUTHENTICATE 각 한 번 — 재시도 없음');
 });
@@ -155,16 +162,16 @@ test('③-b 반증(review326) — 연결이 갈리면 로그인 거부가 아니
   // F1: 인증 뒤 서버가 연결을 끊으면 다음 요청은 새 연결 — 바이트를 보내기 전에 거절(인증 없는 요청이 401 을 받아 ‘거부’ 로 보이지 않게)
   const W = await fakeWinrm({ dropAfterCreate: true });
   t.after(() => W.close());
-  await assert.rejects(C.winrmRun({ host: '127.0.0.1', port: W.port, username: 'svc', domain: 'CORP', password: 'Right-1', command: 'hostname' }), (e) => e.kind === 'connection-split');
+  await assert.rejects(C.winrmRun({ host: '127.0.0.1', port: W.port, username: 'svc', domain: 'CORP', password: 'Right-1', command: 'hostname' }), (e) => e.kind === 'connection-split' && e.afterLogin === true);
   assert.deepEqual(W.st.auths, ['ok']); assert.equal(W.st.conns, 1, '두 번째 연결을 열지 않았다');
   // F1 둘째 겹: 같은 연결에서 인증 뒤에 받은 401 은 세션을 잃은 것 — 로그인 거부(계정 정지 대상)가 아니다
   const Wr = await fakeWinrm({ rejectAfterAuth: true });
   t.after(() => Wr.close());
-  await assert.rejects(C.winrmRun({ host: '127.0.0.1', port: Wr.port, username: 'svc', domain: 'CORP', password: 'Right-1', command: 'hostname' }), (e) => e.kind === 'session-lost');
+  await assert.rejects(C.winrmRun({ host: '127.0.0.1', port: Wr.port, username: 'svc', domain: 'CORP', password: 'Right-1', command: 'hostname' }), (e) => e.kind === 'session-lost' && e.afterLogin === true);   // 점검 1회차 R2: 로그인 뒤 실패는 afterLogin(계정 탐침은 성공으로 본다)
   // F6: Done 이 끝내 오지 않으면 성공이 아니다
   const W2 = await fakeWinrm({ neverDone: true });
   t.after(() => W2.close());
-  await assert.rejects(C.winrmRun({ host: '127.0.0.1', port: W2.port, username: 'svc', domain: 'CORP', password: 'Right-1', command: 'hostname' }), (e) => e.kind === 'timeout');
+  await assert.rejects(C.winrmRun({ host: '127.0.0.1', port: W2.port, username: 'svc', domain: 'CORP', password: 'Right-1', command: 'hostname' }), (e) => e.kind === 'timeout' && e.afterLogin === true);
   // F5: 응답 하나가 상한(640KB)을 넘으면 읽기를 그만둔다(출력 상한과 별개)
   const W3 = await fakeWinrm({ hugeOutput: 600_000 });
   t.after(() => W3.close());
@@ -187,7 +194,7 @@ test('③-b 반증(review326) — 연결이 갈리면 로그인 거부가 아니
 test('④ 상대 확인 — 승인하지 않은 자체서명 인증서는 TLS 단계에서 끊고 인증 머리를 하나도 보내지 않는다', async (t) => {
   const W = await fakeWinrm({ cert: 'self-a' });
   t.after(() => W.close());
-  await assert.rejects(C.winrmRun({ host: '127.0.0.1', port: W.port, username: 'svc', domain: 'CORP', password: 'Right-1', command: 'hostname' }), (e) => e.kind === 'tls-peer');
+  await assert.rejects(C.winrmRun({ host: '127.0.0.1', port: W.port, username: 'svc', domain: 'CORP', password: 'Right-1', command: 'hostname' }), (e) => e.kind === 'tls-peer' && e.preAuthConfig === true && e.passwordSent !== true);   // 4회차 R4W-3: 비밀번호 전 설정 실패(탐침 판정 밖)
   assert.equal(W.st.authHeaders, 0, '비밀번호에서 만든 값은 물론 NEGOTIATE 도 가지 않았다');
   assert.equal(W.st.requests.length, 0);
 });
@@ -216,6 +223,11 @@ test('⑥ 응답 읽기 — 큰 · 이상한 입력에도 선형(정규식 되�
   WS.faultReason(`<s:Fault>${'<s:Text>'.repeat(50_000)}`);
   const ms = Number(process.hrtime.bigint() - t0) / 1e6;
   assert.ok(ms < 500, `선형 — ${ms.toFixed(0)}ms`);
+  // 점검 1회차 R3: 여는 태그 안 공백이 많아도 같은 크기의 공백 하나짜리와 비슷해야 한다(비율 — 예전 \s+ 겹침은 약 35배 · 재현 416ms)
+  const timeOf = (x) => { let best = Infinity; for (let i = 0; i < 3; i += 1) { const a = process.hrtime.bigint(); WS.parseReceive(x); best = Math.min(best, Number(process.hrtime.bigint() - a) / 1e6); } return best; };
+  const one = timeOf(`<rsp:Stream ${'a'.repeat(299)}>${'A'.repeat(640_000)}`);
+  const many = timeOf(`<rsp:Stream${' '.repeat(300)}>${'A'.repeat(640_000)}`);
+  assert.ok(many < Math.max(one, 2) * 8, `공백 겹침 없음 — 공백 300 ${many.toFixed(1)}ms · 공백 1 ${one.toFixed(1)}ms`);
   assert.throws(() => WS.parseShellId('<rsp:ShellId>../../etc</rsp:ShellId>'));
   assert.equal(WS.parseShellId('<x:ShellId>11111111-2222-3333-4444-555555555555</x:ShellId>'), '11111111-2222-3333-4444-555555555555');
   assert.match(WS.faultReason('<s:Fault><s:Text>Access is denied.</s:Text><f:WSManFault Code="5"/></s:Fault>'), /Access is denied\. \(WSMan 5\)/);
@@ -247,7 +259,7 @@ test('⑦ 코어 연결(3단계) — Windows 단계 지정이 WinRM 이면 readS
   W.st.auths.length = 0;
   KS.saveAccount({ id: a.account.id, password: 'Ad-Old-0' }, { by: 't' });   // 포탈에 저장된 비밀번호가 틀린 상황
   const rej = await RS.readServer(s.id, { feature: 'server-info', plan: P.SERVER_INFO_PLAN });
-  assert.equal(rej.code, 'auth-rejected'); assert.deepEqual(W.st.auths, ['bad-proof']);
+  assert.equal(rej.code, 'auth-rejected'); assert.ok(rej.reason.includes('권한(Administrators · Remote Management Users · 원격 UAC)'), `점검 1회차 R1: WinRM 거부는 권한 가능성을 밝힌다 — ${rej.reason}`); assert.deepEqual(W.st.auths, ['bad-proof']);
   assert.ok(ST.accountStopFor(a.account.id, KS.accountSecretVersion(KS.accountById(a.account.id))));
   const again = await RS.readServer(s.id, { feature: 'server-info', plan: P.SERVER_INFO_PLAN });
   assert.equal(again.code, 'cred'); assert.equal(W.st.auths.length, 1, '정지된 계정은 보내지 않는다');
@@ -295,4 +307,36 @@ test('⑦ 코어 연결(3단계) — Windows 단계 지정이 WinRM 이면 readS
   // 지정 칸 검사 — WinRM 은 Windows 단계만 · 포트 범위
   assert.equal((await SVC.setAssignment({ corp: 'vcW', level: 'linux', accountId: a.account.id, via: 'winrm', by: 't', dryRun: true })).code, 'account-os');
   assert.equal(ST.setAssign('vcW', 'windows', { account: a.account.id, via: 'winrm', port: 70000 }, { by: 't' }).code, 'bad-port');
+});
+
+test('⑧ 3회차 W3-1 · W3-2 — 바이트 0 연결 갈림은 비밀번호 송신이 아니다 · 앞단 맨 5xx 는 로그인 성공이 아니다(송신 뒤 모름) · SOAP Fault 는 로그인 성공', async (t) => {
+  // W3-1: CHALLENGE 뒤 서버가 연결을 닫음 → AUTHENTICATE 는 새 연결에 0바이트로 막힌다 → passwordSent 아님
+  const A = await fakeWinrm({ closeAfterChallenge: true });
+  t.after(() => A.close());
+  await assert.rejects(C.winrmRun({ host: '127.0.0.1', port: A.port, username: 'svc', domain: 'CORP', password: 'Right-1', command: 'hostname' }),
+    (e) => e.kind === 'connection-split' && e.passwordSent !== true && e.afterLogin !== true);
+  assert.deepEqual(A.st.auths, [], '서버는 AUTHENTICATE 를 받지 않았다');
+  // W3-2: 앞단 502(검증 없음) — 로그인 성공으로 치지 않는다(빠른 길을 열지 않게) · 판정 전 송신(passwordSent)
+  const B = await fakeWinrm({ gatewayOnAuth: 502 });
+  t.after(() => B.close());
+  await assert.rejects(C.winrmRun({ host: '127.0.0.1', port: B.port, username: 'svc', domain: 'CORP', password: 'Wrong-1', command: 'hostname' }),
+    (e) => e.afterLogin !== true && e.passwordSent === true);
+  // 인증 뒤 SOAP Fault(원격 셸 꺼짐) — 비밀번호는 받아들여졌다(로그인 성공 · 탐침 직렬 풀기 방지)
+  const F = await fakeWinrm({ faultOnCreate: true });
+  t.after(() => F.close());
+  await assert.rejects(C.winrmRun({ host: '127.0.0.1', port: F.port, username: 'svc', domain: 'CORP', password: 'Right-1', command: 'hostname' }),
+    (e) => e.kind === 'fault' && e.afterLogin === true);
+  assert.deepEqual(F.st.auths, ['ok']);
+});
+
+test('⑨ 4회차 R4W-4 · R4W-5 — 앞단의 SOAP 1.1 Fault 는 로그인 성공이 아니다(송신 뒤 모름) · 인증 뒤 200 SOAP 1.2 인데 ShellId 를 못 읽으면 로그인 성공(파서 어긋남을 송신 뒤 모름으로 두지 않는다)', async (t) => {
+  const A = await fakeWinrm({ gatewaySoap11: true });
+  t.after(() => A.close());
+  await assert.rejects(C.winrmRun({ host: '127.0.0.1', port: A.port, username: 'svc', domain: 'CORP', password: 'Wrong-1', command: 'hostname' }),
+    (e) => e.afterLogin !== true && e.passwordSent === true);
+  const B = await fakeWinrm({ createWeird: true });
+  t.after(() => B.close());
+  await assert.rejects(C.winrmRun({ host: '127.0.0.1', port: B.port, username: 'svc', domain: 'CORP', password: 'Right-1', command: 'hostname' }),
+    (e) => e.afterLogin === true && e.passwordSent !== true);
+  assert.deepEqual(B.st.auths, ['ok']);
 });
