@@ -14,10 +14,17 @@ import {
   PROFILE_STATUS_TEXT, APP_LABEL, PLANNED_LABEL, ROLE_LABEL, TUNING_STATUS_TEXT, matrixCellText, PROFILE_HONEST, faultKpiCards,
 } from './bmOpsText.js';
 import './bmOps.css';
+import { refOf } from './bmPerfUrl.js'; // 다음 점검 ①: 서버 = (법인, 키) 쌍
 
 const SEGS = [['matrix', '매트릭스'], ['catalog', '카탈로그'], ['servers', '점검 결과'], ['tuning', '튜닝 차이']];
+/** 6단계: 용도 그룹(기능) 서버 키 — 용도 판정이 나쁜 순(서버 rank) · 상위 5(비교 상한은 비교 화면이 다시 자른다). 판정이 아니라 목록 고르기다. */
+export function groupCompareKeys(servers = [], app = '', { ref = false } = {}) {
+  const rank = (s) => (PROFILE_STATUS_TEXT[s.status] || PROFILE_STATUS_TEXT.unknown).rank ?? 9;   // 작을수록 나쁘다(이상 0 · 주의 1)
+  // 다음 점검 ①: ref — 비교에 담는 ‘법인|키’ 쌍 글자(같은 키 · 다른 법인 서버가 한 칸으로 합쳐지지 않게)
+  return (Array.isArray(servers) ? servers : []).filter((s) => (s.apps || []).includes(app)).sort((a, b) => rank(a) - rank(b)).slice(0, 5).map((s) => (ref ? refOf(s.key, s.vcenterId) : s.key));
+}
 
-export function PurposeFleetView({ resp, onOpen }) {
+export function PurposeFleetView({ resp, onOpen, onCompare = null }) {
   const [seg, setSeg] = useState('matrix');
   const cols = resp?.columns || [];
   return (
@@ -44,6 +51,15 @@ export function PurposeFleetView({ resp, onOpen }) {
             </tbody>
           </STable>
           {!!resp?.noFacts && <p className="bmo-note">튜닝 · 용도 사실을 아직 받지 못한 서버 {resp.noFacts}대는 ‘미확인’ 행에 있습니다(OS 경로 없음 · 수집 전 · 엣지 이전 판).</p>}
+          {/* 6단계: 같은 용도 그룹 비교(상위 5 — 용도 판정이 나쁜 순서 · 서버 목록 순서). 같은 법인만이 기본이라 다른 법인 서버는 비교 화면이 ‘다른 법인’ 으로 말한다. */}
+          {onCompare && (
+            <div className="bmcmp-tray">
+              {cols.filter((c) => c !== 'none').map((c) => {
+                const list = groupCompareKeys(resp?.servers, c, { ref: true });
+                return list.length >= 2 ? <button key={c} type="button" className="btn btn-sm bmp-touch" onClick={() => onCompare(list)}>‘{APP_LABEL[c] || c}’ 그룹 비교(상위 {Math.min(5, list.length)})</button> : null;
+              })}
+            </div>
+          )}
           <p className="bmo-note">예정(만들지 않음): {(resp?.planned || []).map((p) => PLANNED_LABEL[p.id] || p.id).join(' · ')} — 그 조합은 ‘프로파일 없음’ 입니다.</p>
         </section>
       )}
@@ -79,7 +95,7 @@ export function PurposeFleetView({ resp, onOpen }) {
                 const st = PROFILE_STATUS_TEXT[s.status] || PROFILE_STATUS_TEXT.unknown;
                 return (
                   <tr key={`${s.agent || ''}|${s.key}`}>
-                    <td data-sort={s.name}><span className="bmp-link" role="button" tabIndex={0} onClick={() => onOpen?.(s.key)} onKeyDown={(e) => { if (e.key === 'Enter') onOpen?.(s.key); }}>{s.name}</span>{s.agent && <div className="bmo-sub">엣지 {s.agent}</div>}</td>
+                    <td data-sort={s.name}><span className="bmp-link" role="button" tabIndex={0} onClick={() => onOpen?.(s.key, s.vcenterId)} onKeyDown={(e) => { if (e.key === 'Enter') onOpen?.(s.key, s.vcenterId); }}>{s.name}</span>{s.agent && <div className="bmo-sub">엣지 {s.agent}</div>}</td>
                     <td data-sort={s.vcenterId}>{s.vcenterId || '—'}</td>
                     <td data-sort={s.os}>{s.os}</td>
                     <td data-sort={(s.apps || []).join(',')}>{(s.apps || []).map((a) => APP_LABEL[a] || a).join(' · ') || '—'}{s.manual && <div className="bmo-sub">수동 태그</div>}</td>
@@ -121,7 +137,7 @@ export function PurposeFleetView({ resp, onOpen }) {
   );
 }
 
-export function BmPurposeFleet({ onOpen }) {
+export function BmPurposeFleet({ onOpen, onCompare = null }) {
   const { resp, err, loading, reload } = useOpsLoad(() => '/tools/bm-usage/profiles', 'fleet');
   return (
     <div className="card" style={{ minWidth: 0 }}>
@@ -132,7 +148,7 @@ export function BmPurposeFleet({ onOpen }) {
       </div>
       <OpsError err={err} />
       {!resp && !err && <p className="bmo-note">불러오는 중…</p>}
-      {resp && <PurposeFleetView resp={resp} onOpen={onOpen} />}
+      {resp && <PurposeFleetView resp={resp} onOpen={onOpen} onCompare={onCompare} />}
     </div>
   );
 }

@@ -174,8 +174,10 @@ export function rowMark(r) {
  * 머리 상태 줄 — '● 12대 수집 정상 · 실패 1대 · 5개 법인 · 마지막 수집 2분 전'. 0대면 등록 안내.
  * 실패가 있으면 점 색을 바꾼다(전부 정상이 아닌데 초록 점을 두지 않는다).
  */
-export function headStatus(rows = [], dcCount = 0) {
+export function headStatus(rows = [], dcCount = 0, unreadText = '') {
   const n = rows.length;
+  // 등록부를 못 읽은 동안의 빈 목록은 '등록 없음' 이 아니다(128회차가 표 안 문구만 고쳤다 — 머리 줄과 KPI 는 그대로 '등록된 … 없습니다' 였다. Chromium 검증에서 확인).
+  if (!n && unreadText) return { tone: 'warn', text: String(unreadText) };
   if (!n) return { tone: 'muted', text: '등록된 SAN 스위치가 없습니다' };
   const ok = rows.filter((r) => r?.snap?.ok).length;
   const failed = n - ok;

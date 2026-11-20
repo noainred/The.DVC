@@ -75,7 +75,14 @@ export function agoText(at, now = Date.now()) {
 export function sourceTiles(status = {}, { liveOn = true, now = Date.now() } = {}) {
   const n = (v) => (typeof v === 'number' && Number.isFinite(v) ? v.toLocaleString() : '—');
   const total = status.vmTotal;
-  const inv = { key: 'inv', name: '인벤토리', value: `${n(total)}대`, meta: [`켜짐 ${n(status.vmOn)} · 템플릿 ${n(status.templates)}`, agoText(status.invAt, now) && `마지막 ${agoText(status.invAt, now)}`].filter(Boolean).join(' · '), tone: 'ok', dot: '#22c55e' };
+  // 130회차(126 반증): 수집이 멈춘 vCenter(점검중 · 연결 실패 · 엣지 보고 끊김 — 서버 status.invNotCurrent)의 인벤토리는 마지막으로 읽은 값이다.
+  //   예전에는 스냅샷 시각으로 ‘마지막 N초 전’ 이라 말했다. 읽은 시각을 모르면 그렇게 말한다(지어내지 않는다).
+  const nc = status.invNotCurrent || null;
+  const invAgo = agoText(status.invAt, now);
+  const inv = { key: 'inv', name: '인벤토리', value: `${n(total)}대`,
+    meta: [`켜짐 ${n(status.vmOn)} · 템플릿 ${n(status.templates)}`,
+      nc ? `수집 멈춤(${nc.why || '읽지 못함'}) — ${invAgo ? `${invAgo}에 읽은 값` : '읽은 시각 모름'}` : (invAgo && `마지막 ${invAgo}`)].filter(Boolean).join(' · '),
+    tone: nc ? 'opt' : 'ok', dot: nc ? '#f59e0b' : '#22c55e' };
   const missCfg = typeof total === 'number' && typeof status.cfgVms === 'number' ? total - status.cfgVms : null;
   const cfg = { key: 'cfg', name: '구성 · 장치 캐시', value: `${n(status.cfgVms)} / ${n(total)}`,
     meta: `주기 수집 · 장치 ${n(status.devVms)}대${missCfg > 0 ? ` · 아직 못 읽은 VM ${missCfg.toLocaleString()}대` : ''}`, tone: 'cache', dot: '#3b82f6' };

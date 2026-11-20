@@ -17,9 +17,10 @@ import { scanGuestNetCounters } from './guestNetScan.js';
 import { recordLoginFails } from './loginStore.js';
 import { recordNetScan } from './netIssueStore.js';
 import { enqueueNotify as notify } from '../alerts.js'; // v2.742(감사 TIMING-01): 결과를 기다리지 않는 발송은 alerts.js 대기열로 — 동시 발송이 메일 인증 정지 가드를 우회하지 않게 한 번에 하나씩 보낸다.
-import { atomicWriteFileSync, safeLoadText } from '../util/atomicWrite.js';
-import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // v2.538: 이 파일은 v2.537 까지 봉인 대상 미등록이었다(감사 M4 계열)
-import { createAuthGuard, authStopView, createAuthBreaker, runWithBreakerWarmup } from '../util/authGuard.js';
+import { atomicWriteFileSync, safeLoadText, corruptBackupPath } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 103회차 F7: 읽기 오류 ≠ 손상
+import { openSecretsDeep, sealSecretsDeep, decryptFailureCount } from '../security/secretVault.js'; // v2.538: 이 파일은 v2.537 까지 봉인 대상 미등록이었다(감사 M4 계열)
+import { createAuthGuard, authStopView, authStopText, createAuthBreaker, runWithBreakerWarmup } from '../util/authGuard.js';
 import { vcAuthGuard, isVcAuthError } from '../vcenter/restClient.js';
 import { gpuAuthGuard, isGpuAuthError, guestAccountStopDev } from '../gpu/sshCollect.js';
 import { numOrNull } from '../util/numOrNull.js';
@@ -33,7 +34,7 @@ const FILE = path.join(config.configDir, 'guest-scans.json');
  */
 function backupCorrupt(err) {
   try {
-    const bak = `${FILE}.corrupt.${Date.now()}`;
+    const bak = corruptBackupPath(FILE);   // v3.25.1: 같은 밀리초 보존본을 덮어쓰지 않게
     fs.renameSync(FILE, bak);
     // v2.744(최종 수정분 검토 RV2744F-LOAD-01): 사유는 요약(safeLoadText) — V8 JSON.parse 오류 원문은 파일 조각(게스트 비밀번호 앞부분)을 싣는다.
     console.warn(`[gscan] ${FILE} 읽기/파싱 실패(${safeLoadText(err) || '사유 미상'}) — ${bak}로 보존하고 빈 목록으로 시작합니다.`);
@@ -41,21 +42,58 @@ function backupCorrupt(err) {
 }
 
 let cache = null;
+/*
+ * 103회차 F7(재현 — EISDIR): 예전 catch 하나는 **읽기 오류**도 손상으로 보고 원본(게스트 자격증명 봉인본 포함 작업 정의)을 `.corrupt.*` 로 옮긴 뒤
+ *   빈 목록을 캐시했다 — 다음 저장 한 번이 그 한 건만 든 guest-scans.json 을 써서 나머지 작업 · 비밀이 보존본에만 남았다.
+ *   읽기 단계는 공용 읽기(util/jsonFileRead.js — 30초 간격 재읽기): 읽기 오류는 원본을 두고 · 캐시하지 않고 · 저장 · 삭제를 409 로 거절한다
+ *   (실행 기록 persist 는 쓰지 않는다). parse · 형식 · 복호 실패는 예전과 같이 backupCorrupt.
+ */
+const _reader = makeJsonFileReader(() => FILE, { parse: (t) => t, preserve: false, tag: 'gscan' });
+let _readErr = null;   // { at, code }
+/** 103회차 F7: guest-scans.json 읽기 오류(원본은 그대로)면 `{ at, code }`, 아니면 null. */
+export function guestScansReadError() { load(); return _readErr ? { ..._readErr } : null; }
+/*
+ * 105회차 A3(103 추정 반증 · 재현): 복호 실패는 손상으로 옮기지 않는다(openSecret 이 던지지 않고 '' 로 연다) — 103 추정은 틀렸다. 실제 결함은 그 반대다:
+ *   키가 **바뀐**(SECRETS_KEY 가 다른 값) 뒤에는 금고의 저장 거절(키 없음 전용)이 걸리지 않아, 이름만 고친 저장 한 번 · 정기 실행 기록(persist) 한 번이
+ *   **전 작업의 게스트 비밀번호 암호문을 '' 로 덮었다**(키를 되돌려도 복구 불가). 이제 연 값 중 복호 실패가 있으면 실행 기록은 쓰지 않고(메모리만) ·
+ *   저장 · 삭제는 409 로 거절한다(bmusage/onboard/keyStore 의 undecryptable 과 같은 판정). 키를 정말 잃었다고 확정한(SECRETS_KEY_LOST=true) 설치는 예전처럼 저장된다.
+ */
+let _undecryptable = 0;
+/** 105회차 A3: 봉인을 풀지 못한 게스트 비밀 수(0 이면 정상). */
+export function guestScansUndecryptable() { load(); return _undecryptable; }
+const keyLostConfirmed = () => process.env.SECRETS_KEY_LOST === 'true';
+function assertWritable() {
+  if (_undecryptable && !keyLostConfirmed()) throw Object.assign(new Error(`봉인을 풀지 못한 게스트 비밀 ${_undecryptable}개가 있어(자격증명 비밀키 불일치 의심) 게스트 조사 작업을 저장하지 않았습니다 — 저장하면 그 암호문이 지워집니다. 원래 비밀키(SECRETS_KEY · secrets-key)로 되돌린 뒤 다시 시도하세요(키를 정말 잃었으면 SECRETS_KEY_LOST=true 로 재시작).`), { status: 409, code: 'secrets-undecryptable' });   // 105회차 A3
+  if (!_readErr) return;
+  throw Object.assign(new Error(`게스트 조사 작업 파일(guest-scans.json)을 읽지 못한 상태라 저장하지 않았습니다 — 읽기 오류(${_readErr.code})이고 원본(자격증명 포함)은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽습니다).`), { status: 409, code: 'settings-unreadable', readError: true });
+}
 function load() {
   if (cache) return cache;
+  const rr = _reader.read();
+  if (rr.kind === 'read-error') {
+    if (!_readErr) _readErr = { at: Date.now(), code: String(rr.error?.code || 'read-error').slice(0, 32) };
+    return [];   // 캐시하지 않는다 — 저장 · 삭제는 assertWritable 이 거절한다
+  }
+  _readErr = null;
   cache = [];
+  _undecryptable = 0;
   try {
-    if (fs.existsSync(FILE)) {
-      const p = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+    if (rr.kind === 'ok') {
+      const p = JSON.parse(rr.value);
       if (!Array.isArray(p)) throw new Error('배열이 아님'); // 형식 불일치도 손상으로 취급
+      const failBefore = decryptFailureCount();
       cache = openSecretsDeep(p);
+      _undecryptable = Math.max(0, decryptFailureCount() - failBefore);   // 105회차 A3
     }
-  } catch (e) { cache = []; backupCorrupt(e); }
+  } catch (e) { cache = []; _undecryptable = 0; backupCorrupt(e); }
   return cache;
 }
 // 원자적 쓰기(0600) — runJob이 매 실행마다 lastRun/lastErr을 저장하므로 쓰기 빈도가 높고,
 // 그중 한 번이라도 부분기록으로 끊기면 load가 []가 되어 자격증명 포함 작업 정의가 사라진다.
-function persist() { try { atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep(cache), null, 2), { mode: 0o600 }); } catch { /* */ } }
+function persist() { if (!cache || (_undecryptable && !keyLostConfirmed())) return; try { writeList(cache); } catch { /* 실행 기록(lastRun 등)만 — 다음 저장에 함께 */ } }   // 103회차 F7: 캐시가 없으면(읽기 오류) 쓰지 않는다 · 105회차 A3: 복호 실패가 있으면 쓰지 않는다(암호문 보존)
+// 21회차 L-3(재현): 사람이 하는 저장 · 삭제는 쓰기 실패를 삼키지 않는다 — 예전에는 응답이 정상인데 메모리만 바뀌어(파일은 그대로)
+//   메모리 작업이 게스트 로그인을 하고 재시작 뒤 사라졌다(삭제 실패면 되살아났다). 쓰기가 성공한 뒤에만 메모리를 바꾼다.
+function writeList(list) { atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep(list), null, 2), { mode: 0o600 }); }
 
 const redact = (j) => ({ id: j.id, name: j.name, type: j.type, vcenterId: j.vcenterId, os: j.os, intervalMin: j.intervalMin, days: j.days, maxVms: j.maxVms, enabled: j.enabled, lastRun: j.lastRun || null, lastFound: j.lastFound ?? null, lastErr: j.lastErr || '', lastAuth: j.lastAuth || null });
 export function listGuestScans() { return load().map(redact); }
@@ -70,6 +108,7 @@ function posOr(v, max, def) {
 
 export function saveGuestScan(body = {}) {
   load();
+  assertWritable();   // 103회차 F7
   // v2.783: 새 id 는 시각만으로 만들지 않는다 — 같은 밀리초에 두 개를 만들면 id 가 겹쳐 새 항목이 기존 항목의 '수정' 이 되고 이전 값을 물려받았다
   //   (CI 빠른 러너에서 audit2600e LO2600-0x 가 [1440,…] 을 받은 원인). 시각 + 임의 6자리.
   const id = body.id || `gscan_${Date.now().toString(36)}${randomBytes(3).toString('hex')}`;
@@ -88,16 +127,30 @@ export function saveGuestScan(body = {}) {
     lastRun: null, lastFound: null, lastErr: '',
   };
   const idx = cache.findIndex((x) => x.id === id);
+  let next;
   if (idx >= 0) {
     const p = cache[idx];
-    j.guestUser = body.guestUser || p.guestUser; j.guestPass = body.guestPass || p.guestPass; // 비우면 기존 유지
+    j.guestUser = body.guestUser || p.guestUser;
+    // 21회차 L-2(재현): 계정 이름이나 vCenter 가 바뀌면 저장된 게스트 비밀번호를 물려주지 않는다(gpu/settings.js v2.611 과 같은 규약 —
+    //   빈 칸 = 기존 유지는 '같은 계정 · 같은 대상' 일 때만). 예전에는 vc-A 의 도메인 계정 비밀번호가 vc-B 의 다른 계정 이름으로 쓰였다.
+    const moved = j.guestUser !== p.guestUser || j.vcenterId !== p.vcenterId;
+    j.guestPass = body.guestPass || (moved ? '' : p.guestPass);
     j.lastRun = p.lastRun; j.lastFound = p.lastFound; j.lastErr = p.lastErr; j.lastAuth = p.lastAuth || null;
-    cache[idx] = j;
-  } else cache.push(j);
-  persist();
+    next = cache.map((x, i) => (i === idx ? j : x));
+  } else next = [...cache, j];
+  writeList(next);   // 21회차 L-3: 실패면 던진다(메모리 불변)
+  cache = next;
   return redact(j);
 }
-export function removeGuestScan(id) { load(); const b = cache.length; cache = cache.filter((x) => x.id !== id); if (cache.length !== b) persist(); return b !== cache.length; }
+export function removeGuestScan(id) {
+  load();
+  assertWritable();   // 103회차 F7
+  const next = cache.filter((x) => x.id !== id);
+  if (next.length === cache.length) return false;
+  writeList(next);   // 21회차 L-3
+  cache = next;
+  return true;
+}
 
 
 /**
@@ -128,11 +181,11 @@ async function runJob(j, { manual = false } = {}) {
   //   해제는 주 폴러·연결 테스트만). 수동 '지금 실행' 은 막지 않는다.
   if (!manual) {
     const st = vcAuthGuard.peekAuthStop(vc);
-    if (st) { lastAuth.vcStopped = authStopView(st); finish(null, [`vCenter 인증 실패로 주기 실행 정지(${st.attempts}회) — 비밀번호를 고치거나 설정 › vCenter 연결 테스트가 성공하면 재개`]); return; }
+    if (st) { lastAuth.vcStopped = authStopView(st); finish(null, [authStopText(st, `vCenter 인증 실패로 주기 실행 정지(${st.attempts}회) — 비밀번호를 고치거나 설정 › vCenter 연결 테스트가 성공하면 재개`)]); return; }
     // 작업 계정이 인증 실패로 멈춰 있으면(회로 차단기가 기록) 주기 실행은 시작하지 않는다. 계정을 고치면 credHash 가
     // 바뀌어 authStopFor 가 기록을 지우고 이번 주기부터 다시 돈다(자동 재개).
     const js = jobCreds ? guestScanAuthGuard.authStopFor(jobDevOf(j)) : null;
-    if (js) { lastAuth.jobStopped = authStopView(js); finish(null, [`작업 계정 ${j.guestUser} 인증 실패로 주기 실행 정지(${js.attempts}회) — 계정을 고치면 자동 재개`]); return; }
+    if (js) { lastAuth.jobStopped = authStopView(js); finish(null, [authStopText(js, `작업 계정 ${j.guestUser} 인증 실패로 주기 실행 정지(${js.attempts}회) — 계정을 고치면 자동 재개`)]); return; }
   }
   const snap = store.get();
   const hostByName = new Map(); for (const h of snap.hosts || []) if (h.vcenterId === j.vcenterId) hostByName.set(h.name, h);
@@ -252,3 +305,6 @@ export async function runGuestScanNow(id, { trigger = 'manual' } = {}) {
   try { await runJob(j, { manual: trigger === 'manual' }); return { ok: true, ...redact(j) }; }
   finally { runningJobs.delete(id); }
 }
+
+/** 테스트 전용(103회차). */
+export function _resetGuestScansForTest() { cache = null; _readErr = null; _undecryptable = 0; _reader.reset(); }

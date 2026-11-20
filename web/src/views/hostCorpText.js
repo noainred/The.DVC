@@ -38,6 +38,32 @@ export function gbText(v) {
   return Math.abs(n) >= 1024 ? `${(Math.round((n / 1024) * 10) / 10).toLocaleString('en-US')} TB` : `${n.toLocaleString('en-US')} GB`;
 }
 
+/**
+ * 법인 · 클러스터 한 줄의 'vCore : 물리' 칸 — 숫자는 서버 값 그대로(판정 코어 server vcenter/vmSums.js).
+ *   · VM 의 vCPU 를 하나도 못 읽었으면 서버가 vcpu · vcpuPerCore 를 null 로 준다 → '—'(0.0 : 1 이 아니다 — v3.19.1).
+ *   · 일부만 못 읽었으면 읽은 값의 합(최소값)이라 '≥' 를 붙이고 못 읽은 VM 수를 밝힌다(/hosts 요약 타일과 같은 표기).
+ * @returns {{ text:string, title:string, partial:boolean }}
+ */
+export function vcoreCell(c) {
+  const unknown = numOrNull(c?.vcpuUnknown) ?? 0;
+  if (c?.capUnknown) return { text: '—', partial: false, title: `용량을 못 읽은 호스트 ${c.capUnknown}대 — 비율을 내지 않습니다` };
+  if (unknown > 0 && numOrNull(c?.vcpu) == null) return { text: '—', partial: false, title: `VM ${fmtN(unknown)}대의 vCPU 를 하나도 읽지 못했습니다 — 할당 합과 비율을 내지 않습니다(0 이 아닙니다)` };
+  const base = `할당 vCore ${fmtN(c?.vcpu)} / 물리 코어 ${fmtN(c?.cores)} · 템플릿 제외 · 눈금 2.5 · 4`;
+  const r = ratioText(c?.vcpuPerCore);
+  if (unknown > 0 && r !== '—') return { text: `≥${r}`, partial: true, title: `${base} · vCPU 를 못 읽은 VM ${fmtN(unknown)}대 제외(최소값)` };
+  return { text: r, partial: false, title: base };
+}
+
+/** 법인 · 클러스터 한 줄의 'RAM 할당' 칸 — vcoreCell 과 같은 규칙(못 읽은 VM 수는 서버 vmMemUnknown). */
+export function ramCell(c) {
+  const unknown = numOrNull(c?.vmMemUnknown) ?? 0;
+  if (unknown > 0 && numOrNull(c?.vmMemGB) == null) return { text: '—', partial: false, title: `VM ${fmtN(unknown)}대의 메모리를 하나도 읽지 못했습니다 — 할당 합과 비율을 내지 않습니다(0 이 아닙니다)` };
+  const base = `VM 메모리 할당 ${gbText(c?.vmMemGB)} / 물리 ${gbText(c?.memTotalGB)} · 눈금 100% · 150%`;
+  const p = pctText(c?.ramPct);
+  if (unknown > 0 && p !== '—') return { text: `≥${p}`, partial: true, title: `${base} · 메모리를 못 읽은 VM ${fmtN(unknown)}대 제외(최소값)` };
+  return { text: p, partial: false, title: unknown > 0 ? `${base} · 메모리를 못 읽은 VM ${fmtN(unknown)}대 제외` : base };
+}
+
 /** 3단계 색 — 'ok' | 'warn' | 'crit' | 'none'(못 읽음). */
 export function stepTone(v, [warnAt, critAt]) {
   const n = numOrNull(v);
@@ -113,15 +139,27 @@ export function corpKpis(data) {
   const known = corps.filter((c) => c.hosts != null);
   const sum = (f) => known.reduce((a, c) => a + (numOrNull(f(c)) || 0), 0);
   const capOk = known.filter((c) => c.capUnknown === 0 && c.cores != null);
-  const cores = capOk.reduce((a, c) => a + c.cores, 0);
-  const vcpu = capOk.reduce((a, c) => a + (c.vcpu || 0), 0);
+  // v3.19.1: VM 의 vCPU 를 하나도 못 읽은 법인(서버 vcpu null)은 분자 · 분모 둘 다에서 뺀다 — 0 으로 더하면 코어만 늘어 비율이 낮게 나온다.
+  //   일부만 못 읽은 법인은 읽은 합(최소값)이라 '≥' 를 붙이고 못 읽은 VM 수를 밝힌다.
+  const ratioOk = capOk.filter((c) => numOrNull(c.vcpu) != null);
+  const cores = ratioOk.reduce((a, c) => a + c.cores, 0);
+  const vcpu = ratioOk.reduce((a, c) => a + c.vcpu, 0);
+  const vcpuUnknown = ratioOk.reduce((a, c) => a + (numOrNull(c.vcpuUnknown) ?? 0), 0);
+  const vcpuUnreadCorps = capOk.length - ratioOk.length;
+  // 뺀 것을 앞에 적는다 — 요약 칸은 좁아(1440 에서 6칸) 뒤쪽 글자가 말줄임되므로, 뒤에 두면 '제외' 가 마우스를 올려야만 보인다(Chromium 판독).
+  const ratioSub = [
+    vcpuUnreadCorps ? `vCPU 못 읽은 ${fmtN(vcpuUnreadCorps)}곳 제외` : '',   // '곳' = 법인(다른 칸의 '미수집 N곳 제외' 와 같은 말) — 400px 에서 '제외' 가 잘리지 않는 길이
+    vcpuUnknown ? `vCPU 못 읽은 VM ${fmtN(vcpuUnknown)}대 제외(최소값)` : '',
+    ratioOk.length ? `물리 코어 ${fmtN(cores)} · 할당 vCore ${fmtN(vcpu)}` : '비율을 낼 법인이 없습니다',
+    capOk.length < known.length ? '용량 못 읽은 법인 제외' : '',
+  ].filter(Boolean).join(' · ');
   const partial = t.corpsUnknown > 0 ? ` · 미수집 ${t.corpsUnknown}곳 제외` : '';
   return [
     { key: 'corps', label: '법인(vCenter)', value: fmtN(t.corps), sub: `연결 ${fmtN(t.corpsOk)} · 낡은 값 ${fmtN(t.corpsStale)} · 실패 ${fmtN(t.corpsFail)}` },
     { key: 'clusters', label: '클러스터', value: fmtN(t.clusters), sub: data?.access?.cluster ? `N+1 불가 ${fmtN(t.n1Fail)} · HA 꺼짐 ${fmtN(t.haOff)}` : '구성 · N+1 은 클러스터 점검 권한 필요' },
     { key: 'hosts', label: '호스트(ESXi)', value: fmtN(t.hosts), sub: `점검 ${fmtN(t.maint)} · 끊김 · 무응답 ${fmtN(t.down)}${partial}` },
     { key: 'hot', label: 'CPU 90% 초과', value: fmtN(t.hot), sub: `법인 ${fmtN(t.hotCorps)}곳 · 정격 용량 대비`, tone: t.hot > 0 ? 'crit' : 'ok' },
-    { key: 'ratio', label: 'vCore : 물리', value: cores > 0 ? ratioText(Math.round((vcpu / cores) * 10) / 10) : '—', sub: `물리 코어 ${fmtN(cores)} · 할당 vCore ${fmtN(vcpu)}${capOk.length < known.length ? ' · 용량 못 읽은 법인 제외' : ''}` },
+    { key: 'ratio', label: 'vCore : 물리', value: cores > 0 ? `${vcpuUnknown ? '≥' : ''}${ratioText(Math.round((vcpu / cores) * 10) / 10)}` : '—', sub: ratioSub },
     { key: 'kw', label: '전력', value: known.length ? `${(Math.round(sum((c) => c.powerKw) * 10) / 10).toLocaleString('en-US')} kW` : '—', sub: `VM ${fmtN(sum((c) => c.vms))}${partial}` },
   ];
 }

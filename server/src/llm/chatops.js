@@ -7,6 +7,7 @@
 import { loadLlmConfig } from './config.js';
 import { ollamaGenerate } from './ollama.js';
 import { nlSearch, NL_ENTITY_PERM, NL_QUERY_MAX } from './nlSearch.js';
+import { acquireLlmSlot, llmBusyError } from './limit.js'; // 결정(56~75 남긴 것) 67: LLM 동시 실행 상한
 import { store, usageReadable } from '../store.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { alertStatus } from '../alerts.js';
@@ -65,6 +66,14 @@ export async function chatOps(question, allowed = null, { can = () => true } = {
   if (!q) return { answer: '질문을 입력하세요.', source: 'none' };
   // v2.605(감사 SEC2605-01): 길이 상한 — 이 질문은 nlSearch·LLM 프롬프트로 그대로 들어간다(긴 입력이 루프를 막았다).
   if (q.length > NL_QUERY_MAX) return { answer: `질문이 너무 깁니다(최대 ${NL_QUERY_MAX}자).`, source: 'none', tooLong: true, max: NL_QUERY_MAX };
+  // 결정(56~75 남긴 것) 67: LLM 을 쓰는 요청은 자리 하나를 잡는다(검색 해석 + 답변 두 호출이 같은 자리) — 없으면 429(라우트).
+  const cfg = loadLlmConfig();
+  const release = cfg.enabled ? acquireLlmSlot() : null;
+  if (cfg.enabled && !release) throw llmBusyError();
+  try { return await chatOpsInner(q, allowed, can, cfg); } finally { release?.(); }
+}
+
+async function chatOpsInner(q, allowed, can, cfg) {
   const ctx = buildContext(allowed, can);
 
   // 데이터 조회 의도가 있으면 nlSearch 결과를 근거로 첨부(사용자 scope 관통).
@@ -72,7 +81,7 @@ export async function chatOps(question, allowed = null, { can = () => true } = {
   let search = null;
   if (/(몇|개수|목록|리스트|보여|찾아|조회|이상|초과|넘는|top|상위)/i.test(q)) {
     try {
-      const r = await nlSearch(q, allowed);
+      const r = await nlSearch(q, allowed, { slotHeld: cfg.enabled });
       if (r && r.total != null) {
         const need = NL_ENTITY_PERM[r.entity];
         search = need && !can(need)
@@ -82,7 +91,6 @@ export async function chatOps(question, allowed = null, { can = () => true } = {
     } catch { /* 무시 */ }
   }
 
-  const cfg = loadLlmConfig();
   if (!cfg.enabled) {
     // 폴백: 컨텍스트 + 검색결과를 결정적으로 요약.
     const lines = ['(LLM 비활성 — 규칙 기반 요약. 설정 › AI 검색에서 Ollama 활성화 시 자연어 답변)'];

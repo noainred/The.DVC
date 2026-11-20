@@ -579,13 +579,42 @@ if ! id "$SERVICE_USER" &>/dev/null; then
 fi
 
 # 2) Runtime -----------------------------------------------------------------
+# 109회차 A-2: 런타임·앱은 **옆에 다 복사한 뒤에** 바꾼다. 예전에는 런타임을 먼저 지우고(rm -rf) 복사했고 앱은 백업으로 옮긴 뒤 복사했다 —
+#   복사가 중간에 실패하면(디스크 부족 — 이 스크립트는 app.bak.* 를 정리하지 않아 재설치할수록 찬다) 런타임이 없거나 앱이 반쪽인 채 set -e 로
+#   끝났고, 되돌리는 단계가 없어 돌고 있던 서비스는 다음 재시작에서 기동하지 못했다(재현). 이제 복사가 실패하면 기존 런타임·앱은 그대로다.
+#   임시 이름은 고정이다(node.new · app.new.install) — 중간에 끊긴 설치의 찌꺼기는 다음 install.sh 실행이 지운다(vp_stage_tree 첫 줄).
+#   앱 내 업그레이드의 정리(upgrade.js pruneOldBackups)는 숫자 꼬리(app.new.<ms>)만 지우므로 이 이름을 건드리지 않는다(복사 중에 지워지지 않는다).
+#   복사본은 root 로 실행하지 않는다(위 VP_CFG_NODE 규칙 그대로).
+# vp_stage_tree <원본 폴더> <새 폴더> <이름> — 원본을 새 폴더로 통째로 복사한다. 실패하면 새 폴더를 지우고 1.
+vp_stage_tree() {
+  local src="$1" dst="$2" label="$3"
+  rm -rf -- "$dst"
+  # 113회차 R3(재현): 지난 설치의 찌꺼기를 지우지 못했는데(이 함수는 `||` · `if !` 안에서 불려 set -e 가 rm 실패를 보지 않는다) 그대로 복사하면
+  #   cp -a 가 남은 폴더 **안으로** 들어가($dst/node/…) 그 폴더가 런타임 자리에 놓였다 — bin/node 가 없는 런타임으로 설치가 0 으로 끝나고 서비스를 재시작했다.
+  if [[ -e "$dst" || -L "$dst" ]]; then
+    echo "✖ 지난 설치가 남긴 임시 폴더($dst)를 지우지 못했습니다 — 기존 런타임·앱은 바꾸지 않았고 서비스도 건드리지 않았습니다." >&2
+    echo "  그 폴더를 직접 지운 뒤(변경 불가 속성 lsattr · 마운트 여부 확인) install.sh 를 다시 실행하세요." >&2
+    return 1
+  fi
+  if ! cp -a "$src" "$dst"; then
+    rm -rf -- "$dst"
+    echo "✖ $label 복사에 실패했습니다($dst) — 기존 런타임·앱은 바꾸지 않았고 서비스도 건드리지 않았습니다." >&2
+    echo "  디스크 여유 공간을 확인하세요(df -h $PREFIX · 지난 백업 $PREFIX/app.bak.* 는 정상 동작을 확인했다면 지워도 됩니다). 고친 뒤 install.sh 를 다시 실행하세요." >&2
+    return 1
+  fi
+  return 0
+}
 echo "==> Node.js 런타임 설치: $PREFIX/runtime/node"
 mkdir -p "$PREFIX/runtime"
-rm -rf "$PREFIX/runtime/node"
-cp -a "$SCRIPT_DIR/runtime/node" "$PREFIX/runtime/node"
-
-# 3) App (atomic swap with backup; aligns with the in-app auto-upgrade) ------
 APP_DST="$PREFIX/app"
+RT_NEW="$PREFIX/runtime/node.new"
+APP_NEW="$APP_DST.new.install"
+vp_stage_tree "$SCRIPT_DIR/runtime/node" "$RT_NEW" "Node.js 런타임" || exit 1
+if ! vp_stage_tree "$SCRIPT_DIR/app" "$APP_NEW" "앱"; then rm -rf -- "$RT_NEW"; exit 1; fi
+rm -rf "$PREFIX/runtime/node"
+mv -T -- "$RT_NEW" "$PREFIX/runtime/node"   # -T: 그사이 같은 이름의 폴더가 생겨도 그 안으로 들어가지 않는다(빈 폴더면 바꿔 놓고 내용이 있으면 실패)
+
+# 3) App (swap with backup; aligns with the in-app auto-upgrade) -------------
 BAK=""
 if [[ -d "$APP_DST" ]]; then
   BAK="$APP_DST.bak.$(date +%s)"
@@ -593,7 +622,11 @@ if [[ -d "$APP_DST" ]]; then
   mv "$APP_DST" "$BAK"
 fi
 echo "==> 앱 설치: $APP_DST"
-cp -a "$SCRIPT_DIR/app" "$APP_DST"
+if ! mv -T -- "$APP_NEW" "$APP_DST"; then
+  echo "✖ 새 앱을 제자리($APP_DST)에 놓지 못했습니다." >&2
+  if [[ -n "$BAK" ]] && mv -T -- "$BAK" "$APP_DST"; then echo "  기존 앱을 되돌렸습니다($APP_DST) — 서비스는 건드리지 않았습니다." >&2; fi
+  exit 1
+fi
 
 # 4) Config — lives in $CONFIG_DIR (OUTSIDE the app), so upgrades never touch it
 mkdir -p "$CONFIG_DIR"
@@ -639,7 +672,8 @@ vp_cfg_settings_owners "$CONFIG_DIR"
 for f in vcenters.json users.json upgrade.json; do
   MIG_ST=0; vp_cfg_state "$CONFIG_DIR/$f" || MIG_ST=$?
   if [[ $MIG_ST -eq 1 ]]; then
-    for src in "$BAK/server/config/$f" "$APP_DST/server/config/$f"; do
+    # 113회차 R5: 첫 설치(BAK 가 비어 있다)에서는 첫 후보가 '/server/config/<파일>' — 파일시스템 루트의 남의 파일이었다(있으면 root 가 설정으로 가져온다). 백업이 있을 때만 본다.
+    for src in ${BAK:+"$BAK/server/config/$f"} "$APP_DST/server/config/$f"; do
       if [[ -n "$src" && -f "$src" && ! -L "$src" ]]; then
         if vp_cfg_copy_new "$src" "$CONFIG_DIR/$f"; then echo "==> 기존 설정 이전: $f -> $CONFIG_DIR/"; fi
         break
@@ -808,16 +842,19 @@ if declare -F vp_install_root_tools >/dev/null; then
     echo "⚠ root 소유 콘솔 도구 폴더를 만들지 못했습니다($TOOLS_DIR) — 콘솔 도구 바로가기를 걸지 않습니다."
   fi
 fi
-# vp_link <링크 이름> <root 래퍼 이름> <앱 트리 도구(있을 때만)> <설명>
+# vp_link <링크 이름> <root 래퍼 이름> <설명>
+#   113회차 R2(통째 실행으로 재현): 설명을 `$4` 로 읽었는데 부르는 세 곳은 인자를 셋만 준다 — set -u 라 첫 링크(vmware-portal-otp)를 건 직후
+#   'install.sh: $4: unbound variable' 로 **설치가 1 로 끝났다**. 서비스는 이미 재시작된 뒤라 포탈은 돌지만 vmware-portal-verify · vmware-portal-users
+#   링크, 7) firewalld 포트 허용, '설치 완료' · 최초 로그인 안내가 전부 빠졌다(구간 실행 테스트는 이 함수를 부르지 않았다).
 vp_link() {
-  local link="/usr/local/bin/$1" target="$TOOLS_DIR/$2" cur
+  local link="/usr/local/bin/$1" target="$TOOLS_DIR/$2" label="${3:-콘솔 도구}" cur
   # 이 설치본의 예전 링크(앱 트리를 가리킴)는 어떤 경우에도 남기지 않는다 — 그것이 root 상승 경로다.
   if [[ -L "$link" ]]; then
     cur="$(readlink "$link")"
     if [[ "$cur" == "$APP_DST/"* ]]; then rm -f -- "$link"; fi
   fi
   if [[ -n "$TOOLS_DIR" && -f "$target" && -x "$target" ]]; then
-    ln -sfn "$target" "$link" 2>/dev/null && echo "==> $4: $1 (→ $target · root 소유 사본)"
+    ln -sfn "$target" "$link" 2>/dev/null && echo "==> $label: $1 (→ $target · root 소유 사본)"
   fi
   return 0   # best-effort — 링크 실패로 설치를 멈추지 않는다(set -e)
 }

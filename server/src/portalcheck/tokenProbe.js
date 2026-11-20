@@ -23,6 +23,7 @@
  *    포워딩 되돌림 탐지 규칙이 갈라진다.
  */
 
+import { envPositive, ENV_INT_MAX } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { resilientFetch } from '../util/resilientFetch.js';
 import { withOutboundTag } from '../util/outboundStats.js'; // v2.601 WEB2601-02: 같은 주소 엣지를 기록에서 나눈다
 import { identityIssue } from '../collector/registry.js';
@@ -42,9 +43,9 @@ async function readProbeJson(res, what) {
 }
 
 /** 장비가 아니라 포탈이라 가볍지만, 28곳 × 고RTT 를 감당해야 한다. */
-export const PROBE_CONCURRENCY = Math.max(1, Number(process.env.PORTALCHECK_CONCURRENCY) || 4);
+export const PROBE_CONCURRENCY = Math.max(1, envPositive(process.env.PORTALCHECK_CONCURRENCY, 4));
 /** 한 요청 시한. 폴란드·미국 동부는 RTT 800ms 를 넘는다(CLAUDE.md 운영 환경). */
-export const PROBE_TIMEOUT_MS = Math.max(2_000, Number(process.env.PORTALCHECK_TIMEOUT_MS) || 8_000);
+export const PROBE_TIMEOUT_MS = Math.max(2_000, envPositive(process.env.PORTALCHECK_TIMEOUT_MS, 8_000, { max: ENV_INT_MAX }));
 /**
  * 점검 1회의 **총 예산**. 사람이 버튼을 누르고 기다리는 화면이라 무한히 늘릴 수 없다.
  * ⚠ 예산에 걸려 시도하지 못한 행은 **조용히 빼지 않고** `not-run` + 사유를 남긴다.

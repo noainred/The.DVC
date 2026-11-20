@@ -17,28 +17,27 @@ import BoldText from '../../components/boldText.jsx';
 import { windowSpan, backForSpan, dateJumpEnd, dateInputOf, windowRangeText } from '../../components/vmperf/vmPerfText.js';
 import { createTrendLoader, trendFetcher } from './bmTrendLoad.js';
 import { TrendSvg, TimeAxis, usePointer } from './BmTrendChart.jsx';
+import BmTopProc from './BmTopProc.jsx'; // 8b단계 ⑳ — 이 시점 프로세스 · 시간 × 프로세스 띠
 import {
   TREND_RANGES, trendRangeOf, SHOW_MODES, showAvg, showPeak, metricInfo, SERVER_METRIC_INFO, DEVICE_METRIC_INFO, resText, resHint,
   peakSrcText, peakPointText, trendNotes, trendErrorText, valText, axisText, yMaxFor, noPeakRuns, nearestPoint, windowSummary, peakRatioText,
   baselineText, whenText, trendMaxBack, trendCsv, trendCsvName, seriesKey, seriesLabel, toggleDevices,
 } from './bmTrendText.js';
 import './bmTrend.css';
+import { saveBlob } from '../../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나
+import { backdropClose } from '../../components/backdropClose.js'; // 96회차(95회차 남긴 것 ①): 창 안에서 끌다 배경에서 떼면 닫히던 것 — 누름 · 뗌 모두 배경일 때만
 
 function downloadText(text, name) {
   if (typeof document === 'undefined' || typeof URL === 'undefined' || typeof Blob === 'undefined') return;
   const blob = new Blob([text], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = name;
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  saveBlob(blob, name);
 }
 
 /**
  * @param {{itemKey:string, name?:string, init:{kind,metric,dev,rangeK,show,sel}, devices?:object, keepDays?:object|null, anchor?:number,
  *   initWin?:{from:number,to:number}|null, peakWindowS?:number|null, onClose:()=>void, onSel?:(sel)=>void, narrowOverride?:boolean}} p
  */
-export default function BmTrendPopup({ itemKey, name = '', init = {}, devices = {}, keepDays = null, anchor = null, initWin = null, peakWindowS = null, onClose, onSel, narrowOverride = null }) {
+export default function BmTrendPopup({ itemKey, vc = '', name = '', init = {}, devices = {}, keepDays = null, anchor = null, initWin = null, peakWindowS = null, peakWindowCapS = null, onClose, onSel, narrowOverride = null }) {
   // ⚠ 훅은 전부 조기 return 위.
   const [spec, setSpec] = useState(() => ({ kind: init.kind || 'server', metric: init.metric || 'cpu_pct', dev: init.dev || '' }));
   const [rangeK, setRangeK] = useState(() => trendRangeOf(init.rangeK).k);
@@ -52,7 +51,7 @@ export default function BmTrendPopup({ itemKey, name = '', init = {}, devices = 
   const [res, setRes] = useState(null);
   const [narrow, setNarrow] = useState(() => (narrowOverride != null ? narrowOverride : typeof window !== 'undefined' && window.innerWidth < 720));
   const loader = useRef(null);
-  if (!loader.current) loader.current = createTrendLoader(trendFetcher(itemKey));
+  if (!loader.current) loader.current = createTrendLoader(trendFetcher(itemKey, vc));
   const span = trendRangeOf(rangeK).ms;
   const base = useMemo(() => (anchor != null ? anchor : Date.now()), [anchor]);
   const win = useMemo(() => {
@@ -120,10 +119,10 @@ export default function BmTrendPopup({ itemKey, name = '', init = {}, devices = 
   const pctX = (ms) => ((ms - win.from) / (win.to - win.from)) * 100;
   const yTicks = [0, 0.25, 0.5, 0.75, 1].map((r) => ({ r, v: yMax * r }));
   const title = `${spec.dev ? `${spec.dev} · ` : ''}${info.label} — ${show === 'avg' ? '평균' : show === 'peak' ? '피크' : '평균 · 피크'}`;
-  const srcText = peakSrcText(d?.peakSrc || [], peakWindowS);
+  const srcText = peakSrcText(d?.peakSrc || [], peakWindowS, peakWindowCapS);
 
   return (
-    <div className="bmt-pop-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="bmt-pop-overlay" {...backdropClose(() => onClose())}>
       <EscClose onClose={onClose} />
       <div className={`bmt-pop${isFull ? ' full' : ''}`} role="dialog" aria-modal="true" aria-label={`${title} 확대`}>
         {/* ── 머리 ── */}
@@ -204,6 +203,9 @@ export default function BmTrendPopup({ itemKey, name = '', init = {}, devices = 
             <button type="button" className="btn btn-sm" onClick={() => setPicked(null)}>닫기</button>
           </div>
         )}
+
+        {/* ── 8b단계 ⑳: 이 시점 프로세스(누른 점 → 없으면 창의 피크 시각 → 창 끝) · 시간 × 프로세스 띠(이 창) — 서버 대표값 지표에서만 ── */}
+        {spec.kind === 'server' && <BmTopProc itemKey={itemKey} vc={vc} ts={pp?.t ?? sum.peakAt ?? sum.maxAt ?? win.to} win={win} narrow={narrow} />}
 
         {/* ── 구간 이동 줄(공용 창 계산) ── */}
         <div className="bmt-nav">

@@ -3,6 +3,7 @@ import { useLatest } from '../../hooks/useLatest.js';
 import { useHashTab } from '../../hooks/useHashTab.js';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
 import { fetchJson, postJson, delJson, downloadFile, canCsv } from '../../api.js';
+import { requireChanged } from '../changeResult.js';   // 112회차: delJson 은 409 · 400 을 던지지 않고 본문을 준다 — 거절(등록부 읽기 오류 · 사용 중)을 삭제 성공으로 읽지 않는다
 import { droppedSecretNote } from '../droppedSecretText.js';
 import { Loading, ErrorBox, Kpi, UsageCell, Modal, SearchBox, usageColor } from '../../components/ui.jsx';
 import { columnsFor, cellValue, sortValue } from './storageColumns.js';
@@ -243,7 +244,9 @@ function TypedTable({ list, type, caption, ctx, typeLabel, empty, onClear }) {
       )}
       {/* ⚠ 표에 자체 세로 스크롤(max-height)을 다시 넣지 말 것 — 장비가 20대만 넘어도 페이지
           스크롤과 표 스크롤이 이중으로 겹쳐 목록을 훑기 불편하다(2026-09-02 사용자 지적). */}
-      <div className="table-wrap">
+      {/* v2.977(전체 점검 — 재현): 종류별 열이 많아(PowerStore 1,580px · Unity 1,404px …) 1440px 에서 '상태' · '작업' 열이 가로 스크롤 뒤로 갔다(v2.403 재발).
+          폭을 깎아서는 맞지 않아 두 열을 표 오른쪽에 고정한다(sm-pin-right — styles.css). 가운데 용량 열만 스크롤된다. */}
+      <div className="table-wrap sm-pin-right">
         <STable>
           <thead><tr>{cols.map((c) => <th key={c.key} className={c.align === 'right' ? 'right' : undefined} style={c.align === 'right' ? { textAlign: 'right' } : undefined}>{c.label}</th>)}</tr></thead>
           <tbody>
@@ -687,7 +690,7 @@ export default function StorageMonTool() {
   };
   const remove = async (r) => {
     if (!window.confirm(`'${r.name}' (${r.host}) 장비를 삭제할까요? (수집 이력 스냅샷도 화면에서 제거)`)) return;
-    setBusy(true); try { await delJson(`/tools/storage/devices/${encodeURIComponent(r.id)}`); await load(); } catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(false); }
+    setBusy(true); try { requireChanged(await delJson(`/tools/storage/devices/${encodeURIComponent(r.id)}`)); await load(); } catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(false); }
   };
   // 전체 새로고침(v2.315) — 중앙 직접 장비 즉시 재수집 + 화면 갱신. 엣지 장비는 원격 강제 불가라
   // '다음 주기 반영'으로 안내만 한다(서버 collect-all 이 수를 세어 돌려줌 — 과장 없이 정직하게).
@@ -815,7 +818,7 @@ export default function StorageMonTool() {
            것이 원인) 그 host 로 좁힌 뒤 등록 폼을 닫는다. 'devices' 뷰로 되돌려야 표에 나온다. */
         onShowConflict={(c) => { clearFacets(); setDcQuery(c.host || ''); setView('devices'); setForm(null); }} />}
       {canCsv() && importOpen && (
-        <BulkDeviceIo base="/tools/storage" title="스토리지 장비 대량 등록 — CSV · 자유텍스트" keyLabel="host+type"
+        <BulkDeviceIo base="/tools/storage" title="스토리지 장비 대량 등록 — CSV · 자유텍스트" keyLabel="host+type" blankKeeps
           onClose={() => setImportOpen(false)} onDone={() => { setImportOpen(false); load(); }} />
       )}
       {canCsv() && exportOpen && <CsvExport onClose={() => setExportOpen(false)} />}
@@ -982,6 +985,8 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
   // v2.540: 용량 산정이 쓰는 추이 점 — `CapacityTrend` 가 이미 불러온 것을 올려받는다(새 API 왕복 0).
   // ⚠ 훅은 조기 return 위에 둔다(React #310 — v2.202 실제 사고).
   const [trendPoints, setTrendPoints] = useState(null);
+  // v2.938: 노드 표 ID 열 → 노드 부하 구역의 드로어(그 노드의 클라이언트·프로토콜). 같은 노드를 다시 눌러도 열리게 시각을 함께 둔다.
+  const [nodeReq, setNodeReq] = useState(null);
   const s = r.snap;
   // 수집 방식/타입별 UI 분기(v2.325, 사용자 요구 '가져오는 정보에 맞는 최적 UI·최대한 많은 정보').
   // SSH(isi status): 시리얼 없음 · 클러스터 헬스/감축비/효율/VHS/L3/Critical Events/Job Status +
@@ -1186,7 +1191,7 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
               노드 표제도 타입에 맞춘다(컨트롤러/SP/디렉터). */}
           {/* v2.926 노드 부하 추이(사용자 요청 — 아이실론 노드별 네트워크·디스크·CPU 저장 + 차트 · 이전 구간 · 지난주 비교 · 잡 엔진).
               Isilon 만(다른 타입 수집기는 노드 처리량을 재지 않는다 — 값이 없으면 패널이 스스로 그리지 않는다). */}
-          {r.type === 'isilon' && nodeList.length > 0 && <NodeLoadPanel deviceId={r.id} snap={s} isEdge={!!r.agent} />}
+          {r.type === 'isilon' && nodeList.length > 0 && <NodeLoadPanel deviceId={r.id} snap={s} isEdge={!!r.agent} openNode={nodeReq} />}
           {nodeList.length > 0 && (
             <>
               <div className="section-title" style={{ fontSize: 13 }}>{r.type === 'xtremio' ? '스토리지 컨트롤러' : r.type === 'unity480' ? '스토리지 프로세서(SP)' : (r.type === 'vplex' || r.type === 'metronode') ? '디렉터' : '노드'} {nodeList.length}{s.nodes.count > nodeList.length ? ` (표시 상한 — 전체 ${s.nodes.count})` : ''}</div>
@@ -1210,7 +1215,9 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
                   <tbody>
                     {nodeList.map((n) => (
                       <tr key={n.id}>
-                        <td style={{ textAlign: 'right' }}>{n.id}</td>
+                        <td style={{ textAlign: 'right' }} data-sort={String(n.id)}>{r.type === 'isilon'
+                          ? <button type="button" className="cell-link" title="이 노드의 클라이언트·프로토콜 — 위 노드 부하 구역에 드로어로 펼칩니다" onClick={() => setNodeReq({ id: n.id, at: Date.now() })}>{n.id}</button>
+                          : n.id}</td>
                         {ncol.name && <td style={{ whiteSpace: 'nowrap' }}>{n.name || '—'}</td>}
                         <td style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{n.ip || '—'}</td>
                         {ncol.serial && <td style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12, whiteSpace: 'nowrap' }} title={nodeSerialTitle(n) || undefined}>{n.serial || <span className="muted">—</span>}</td>}
@@ -1660,11 +1667,12 @@ function DeviceForm({ d, form, setForm, onSaved, onShowConflict }) {
         <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12, padding: '6px 0' }}>
           <input type="checkbox" checked={form.enabled !== false} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} /> 활성
         </label>
-        {/* v2.932(2차 ⑨): 노드 부하 표본 수집 — 아이실론만 · 기본 켬. 주기는 설정 › 스토리지 수집 주기(노드 부하 표본 주기)에서. SSH 장비는 표본마다 로그인이 생긴다(장비 로그). */}
-        {form.type === 'isilon' && (
+        {/* v2.932(2차 ⑨): 노드 부하 표본 수집 — 아이실론 · 기본 켬. 주기는 설정 › 스토리지 수집 주기(노드 부하 표본 주기)에서. SSH 장비는 표본마다 로그인이 생긴다(장비 로그).
+            v2.952: REST 로 수집하는 어레이(PowerMax · VMAX · PowerStore · Unity)도 같은 토글 — 디렉터 · 노드 · SP 성능 표본(SAN 스토리지 성능 상세 · 점검이 쓴다). SSH 변형은 경로가 없어 토글이 없다. */}
+        {(form.type === 'isilon' || (['powermax', 'vmax', 'powerstore', 'unity480'].includes(form.type) && (form.collectMethod || 'api') === 'api')) && (
           <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12, padding: '6px 0' }}
             title="수집 주기와 따로 도는 가벼운 폴러가 노드별 부하·클라이언트·프로토콜 표본을 읽습니다(주기는 설정 › 스토리지 수집 주기). 끄면 1시간 수집 값만 남고 노드 드로어·클라이언트 분포가 비어 있습니다. SSH 장비는 표본마다 로그인이 생겨 장비 감사 로그가 늘어납니다.">
-            <input type="checkbox" checked={form.nodeLoadEnabled !== false} onChange={(e) => setForm({ ...form, nodeLoadEnabled: e.target.checked })} /> 노드 부하 표본 수집
+            <input type="checkbox" checked={form.nodeLoadEnabled !== false} onChange={(e) => setForm({ ...form, nodeLoadEnabled: e.target.checked })} /> {form.type === 'isilon' ? '노드 부하 표본 수집' : '디렉터 · 노드 · SP 성능 표본 수집(5분 · SAN 스토리지 성능)'}
           </label>
         )}
         {/* 연결 테스트 — 저장하지 않고 수집기를 1회 돌려 API 가 실제로 도는지 확인(v2.404).

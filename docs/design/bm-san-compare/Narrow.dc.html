@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>베어메탈 스토리지 › SAN 비교 (400)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums}
+.muted{color:#8b9bb4}
+.num{font-family:"JetBrains Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums;white-space:nowrap}
+.card{background:linear-gradient(180deg,#141b2d,#111726);border:1px solid #243049;border-radius:14px;box-shadow:0 4px 24px rgba(0,0,0,.4);min-width:0}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:36px;padding:0 14px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;flex:1 1 auto}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.seg{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden;background:#0f1626}
+.seg button{height:30px;padding:0 10px;border:0;border-left:1px solid #243049;background:transparent;color:#8b9bb4;font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
+.seg button:first-child{border-left:0}
+.seg button.on{background:rgba(59,130,246,.22);color:#93c5fd;font-weight:700}
+.chip{display:inline-flex;align-items:center;height:28px;padding:0 10px;border-radius:14px;border:1px solid #243049;background:#0f1626;color:#8b9bb4;font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
+.chip.on{border-color:#34e0b4;color:#34e0b4}
+.tag{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.bm{background:rgba(52,224,180,.14);color:#5eead4}
+.tag.pmax{background:rgba(59,130,246,.16);color:#93c5fd}
+.tag.vmax{background:rgba(168,85,247,.16);color:#d8b4fe}
+.tag.ok{background:rgba(34,197,94,.14);color:#86efac}
+.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}
+.top{height:44px;background:rgba(12,17,30,.9);border-bottom:1px solid #1f2a40;opacity:.45;display:flex;align-items:center;padding:0 14px;gap:10px;font-weight:800}
+.content{padding:12px 16px 32px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.crumb{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:12px;color:#8b9bb4}
+.crumb b{color:#e6edf6}
+.subtabs{display:flex;align-items:flex-end;gap:4px;border-bottom:1px solid #243049}
+.subtab{height:36px;padding:0 12px;border:0;border-bottom:2px solid transparent;background:transparent;color:#8b9bb4;font:inherit;font-size:13.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+.subtab.on{color:#e6edf6;border-bottom-color:#34e0b4}
+.lbl{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12px;letter-spacing:.14em;color:#8b9bb4}
+.lbl::first-letter{color:#34e0b4}
+.status{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11.5px;color:#8b9bb4;line-height:1.7}
+.status b{color:#e6edf6;font-weight:600}
+.who{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;color:#8b9bb4;margin-top:12px}
+.sw{width:10px;height:10px;border-radius:3px;flex:none}
+.big{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-top:4px}
+.big .v{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:30px;font-weight:700;line-height:1;white-space:nowrap}
+.big .v small{font-size:15px;color:#8b9bb4;font-weight:600;margin-left:2px}
+.big .s{font-size:12px;color:#8b9bb4}
+.bar{display:block;position:relative;height:8px;border-radius:8px;background:#1f2a40;overflow:hidden;margin-top:8px}
+.bar > span{position:absolute;left:0;top:0;bottom:0;border-radius:8px}
+.delta{margin-top:12px;padding-top:10px;border-top:1px dashed #243049;font-size:12.5px;color:#8b9bb4}
+.delta b{color:#e6edf6;font-family:"JetBrains Mono",ui-monospace,monospace}
+/* 행 카드(표 대신) */
+.rowcard{display:flex;flex-direction:column;gap:6px;padding:12px 14px;border:1px solid #243049;border-radius:12px;background:#0f1626;min-width:0}
+.rowcard .h{display:flex;align-items:center;gap:8px;min-width:0}
+.rowcard .h b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}
+.rowcard .kv{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 12px;font-size:12px}
+.rowcard .kv span{color:#8b9bb4;display:block;font-size:11px}
+.rowcard .kv b{font-family:"JetBrains Mono",ui-monospace,monospace;font-weight:600}
+.pbar{display:inline-block;position:relative;width:100%;height:6px;border-radius:5px;background:rgba(148,163,184,.15);overflow:hidden;vertical-align:middle}
+.pbar > span{position:absolute;left:0;top:0;bottom:0;border-radius:5px}
+.part{color:#fbbf24}
+.basis{font-size:11px;color:#8b9bb4;line-height:1.5}
+.note{font-size:12.5px;line-height:1.65;color:#c7d2e2}
+.note li{margin:4px 0}
+.note b{color:#e6edf6}
+</style>
+</helmet>
+<div style="min-height:2900px">
+  <div class="top" aria-hidden="true"><span>≡</span><span>The Davinci</span></div>
+  <div class="content">
+    <div class="crumb"><span>특수 기능</span><span>›</span><b>베어메탈 스토리지</b></div>
+    <div class="subtabs">
+      <button class="subtab" type="button">현황</button>
+      <button class="subtab on" type="button">SAN 비교</button>
+    </div>
+    <div class="muted" style="font-size:13px;line-height:1.55">베어메탈 디스크 사용률 · 전송 속도를 SAN 어레이(VMAX · PowerMax)와 같은 기준표에서 숫자로 비교합니다.</div>
+    <div class="status"><span style="color:#22c55e">●</span> 베어메탈 <b>10대</b> · I/O 측정 <b>9대</b> · <span style="color:#fbbf24">측정 불가 1</span><br>최근 수집 <b>3분 전</b> · SAN 어레이 <b>4대</b> · 포트 표본 <b>2분 전</b> · 용량 <b>41분 전</b></div>
+
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn primary" type="button">지금 측정</button>
+      <button class="btn" type="button">새로 고침</button>
+      <button class="btn" type="button">CSV</button>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+      <button class="chip on" type="button">VMAX · PowerMax</button><button class="chip" type="button">Unity</button><button class="chip" type="button">PowerStore</button><button class="chip" type="button">XtremIO</button>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+      <div class="seg"><button class="on" type="button">1시간</button><button type="button">24시간</button><button type="button">7일</button></div>
+      <div class="seg"><button class="on" type="button">평균</button><button type="button">피크</button></div>
+    </div>
+    <!-- 법인 바로가기 — 좁은 폭은 한 줄 가로 스크롤 -->
+    <div style="border:1px solid #243049;border-radius:12px;background:#0f1626;padding:8px 10px;min-width:0">
+      <div class="muted" style="font-size:11.5px;margin-bottom:6px">법인 바로가기 · 숫자 = 비교 대상 수 · 고른 법인은 파랗게</div>
+      <div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:2px">
+        <button class="chip" type="button" style="color:#e6edf6;flex:none"><span style="width:7px;height:7px;border-radius:50%;background:#22c55e;display:inline-block"></span>서울 <span style="color:#fbbf24;font-size:11px">5</span></button>
+        <button class="chip" type="button" style="color:#e6edf6;flex:none"><span style="width:7px;height:7px;border-radius:50%;background:#22c55e;display:inline-block"></span>프랑크푸르트 <span style="color:#fbbf24;font-size:11px">2</span></button>
+        <button class="chip" type="button" style="color:#e6edf6;flex:none"><span style="width:7px;height:7px;border-radius:50%;background:#f59e0b;display:inline-block"></span>폴란드 <span style="color:#fbbf24;font-size:11px">1</span></button>
+        <button class="chip" type="button" style="color:#e6edf6;flex:none"><span style="width:7px;height:7px;border-radius:50%;background:#22c55e;display:inline-block"></span>미국 동부 <span style="color:#fbbf24;font-size:11px">1</span></button>
+        <button class="chip" type="button" style="color:#e6edf6;flex:none"><span style="width:7px;height:7px;border-radius:50%;background:#f59e0b;display:inline-block"></span>(법인 미지정) <span style="color:#fbbf24;font-size:11px">5</span></button>
+      </div>
+    </div>
+
+    <!-- 요약 세로 -->
+    <div class="card" style="padding:14px 16px">
+      <div class="lbl">▸ 용량 사용률</div>
+      <div class="who"><span class="sw" style="background:#34e0b4"></span>베어메탈 전체 · 10대</div>
+      <div class="big"><span class="v">67.4<small>%</small></span><span class="s">463.3 / 687.2 TB</span></div>
+      <span class="bar"><span style="width:67.4%;background:#34e0b4"></span></span>
+      <div class="who"><span class="sw" style="background:#3b82f6"></span>SAN 전체 · VMAX · PowerMax 4대</div>
+      <div class="big"><span class="v">62.8<small>%</small></span><span class="s">414.2 / 660.0 TB</span></div>
+      <span class="bar"><span style="width:62.8%;background:#3b82f6"></span></span>
+      <div class="delta">차이 <b>+4.6%p</b> 베어메탈이 더 찼습니다</div>
+    </div>
+    <div class="card" style="padding:14px 16px">
+      <div class="lbl">▸ 전송 속도 (읽기 + 쓰기)</div>
+      <div class="who"><span class="sw" style="background:#34e0b4"></span>베어메탈 · 9대 측정 합</div>
+      <div class="big"><span class="v">412<small>MB/s</small></span><span class="s">읽기 217 · 쓰기 195</span></div>
+      <div class="basis">수집 시점 2초 표본 · 서버 전체 물리 디스크 · <span class="part">측정 불가 1대는 합에 없음</span></div>
+      <div class="who"><span class="sw" style="background:#3b82f6"></span>SAN · 3대 측정 합 · 1시간 평균</div>
+      <div class="big"><span class="v">1.84<small>GB/s</small></span><span class="s">피크 합 상한 4.24 GB/s</span></div>
+      <div class="basis">스위치 포트 트래픽 합 · <span class="part">시리얼 미대조 1대는 합에 없음</span></div>
+      <div class="delta">배율 <b>4.5배</b> SAN 쪽이 많습니다 · 표본 방식이 달라 참고치</div>
+    </div>
+
+    <!-- 비교 — 카드 행 -->
+    <div class="lbl" style="margin-top:4px">▸ 비교 <span style="letter-spacing:0;color:#8b9bb4">· 사용률 높은 순 · 합계 2 + 행 11</span></div>
+    <div class="rowcard" style="border-color:#34e0b4">
+      <div class="h"><span class="tag bm">베어메탈</span><b>전체 합계 · 10대</b><span class="num" style="font-weight:700;color:#fbbf24">67.4%</span></div>
+      <span class="pbar"><span style="width:67.4%;background:#f59e0b"></span></span>
+      <div class="kv"><div><span>총 / 사용</span><b>687.2 / 463.3 TB</b></div><div><span>전송 속도</span><b>412 MB/s</b> <span class="part" style="display:inline">9/10대</span></div></div>
+      <div class="basis">df · I/O 2초 표본 · 3분 전</div>
+    </div>
+    <div class="rowcard" style="border-color:#3b82f6">
+      <div class="h"><span class="tag pmax">SAN</span><b>전체 합계 · 4대</b><span class="num" style="font-weight:700;color:#4ade80">62.8%</span></div>
+      <span class="pbar"><span style="width:62.8%;background:#22c55e"></span></span>
+      <div class="kv"><div><span>총 / 사용</span><b>660.0 / 414.2 TB</b></div><div><span>전송 속도 · 피크</span><b>1.84 GB/s</b> <span class="part" style="display:inline">3/4대</span> · 4.24</div></div>
+      <div class="basis">Unisphere 41분 전 · 포트 28 · 스위치 8 · 1시간 평균</div>
+    </div>
+    <div class="rowcard">
+      <div class="h"><span class="tag vmax">VMAX</span><b>VMAX-100K-PL1</b><span class="num" style="font-weight:700;color:#fbbf24">81.3%</span></div>
+      <span class="pbar"><span style="width:81.3%;background:#f59e0b"></span></span>
+      <div class="kv"><div><span>폴란드 · 총 / 사용</span><b>64.0 / 52.0 TB</b></div><div><span>전송 속도</span><b class="muted">—</b> <span class="part" style="display:inline">시리얼 미대조</span></div></div>
+      <div class="basis">Unisphere 38분 전 · 포트 대조 0 <span class="tag warn" style="margin-left:6px">전송 측정 없음</span></div>
+    </div>
+    <div class="rowcard">
+      <div class="h"><span class="tag bm">베어메탈</span><b>백업 · 2대</b><span class="num" style="font-weight:700;color:#fbbf24">79.5%</span></div>
+      <span class="pbar"><span style="width:79.5%;background:#f59e0b"></span></span>
+      <div class="kv"><div><span>총 / 사용</span><b>240.8 / 191.4 TB</b></div><div><span>전송 속도</span><b>96 MB/s</b></div></div>
+      <div class="basis">backup-media-01 · 02 · df · 2초 표본 · 3분 전</div>
+    </div>
+    <div class="rowcard">
+      <div class="h"><span class="tag vmax">VMAX</span><b>VMAX-250F-FRA1</b><span class="num" style="font-weight:700;color:#4ade80">74.8%</span></div>
+      <span class="pbar"><span style="width:74.8%;background:#22c55e"></span></span>
+      <div class="kv"><div><span>프랑크푸르트 · 총 / 사용</span><b>96.0 / 71.8 TB</b></div><div><span>전송 속도 · 피크</span><b>612 MB/s</b> · 1.20 GB/s</div></div>
+      <div class="basis">Unisphere 41분 전 · 포트 4 · 스위치 2</div>
+    </div>
+    <div class="rowcard">
+      <div class="h"><span class="tag bm">베어메탈</span><b>DB · 2대</b><span class="num" style="font-weight:700;color:#4ade80">71.2%</span></div>
+      <span class="pbar"><span style="width:71.2%;background:#22c55e"></span></span>
+      <div class="kv"><div><span>총 / 사용</span><b>48.6 / 34.6 TB</b></div><div><span>전송 속도</span><b>148 MB/s</b></div></div>
+      <div class="basis">oradb-prod-01 · 02 · df · 2초 표본 · 3분 전</div>
+    </div>
+    <div class="rowcard">
+      <div class="h"><span class="tag pmax">PowerMax</span><b>PMAX-2500-KR1</b><span class="num" style="font-weight:700;color:#4ade80">68.9%</span></div>
+      <span class="pbar"><span style="width:68.9%;background:#22c55e"></span></span>
+      <div class="kv"><div><span>서울 · 총 / 사용</span><b>180.0 / 124.0 TB</b></div><div><span>전송 속도 · 피크</span><b>1.03 GB/s</b> · 2.40</div></div>
+      <div class="basis">Unisphere 41분 전 · 포트 8 · 스위치 2</div>
+    </div>
+    <div class="rowcard">
+      <div class="h"><span class="tag bm">베어메탈</span><b>HPC · 3대</b><span class="num" style="font-weight:700;color:#4ade80">64.0%</span></div>
+      <span class="pbar"><span style="width:64%;background:#22c55e"></span></span>
+      <div class="kv"><div><span>총 / 사용</span><b>181.5 / 116.2 TB</b></div><div><span>전송 속도</span><b class="part">88 MB/s</b> <span class="part" style="display:inline">2/3대 부분 합</span></div></div>
+      <div class="basis">hpc-node-03 측정 불가(엣지 구버전) <span class="tag warn" style="margin-left:6px">1대 측정 불가</span></div>
+    </div>
+    <div class="muted" style="font-size:12px;text-align:center;padding:4px">… 로그 · 서울 · 프랑크푸르트 · AI · PMAX-8000-US1 (5행 더)</div>
+
+    <!-- 서버별 I/O 접기 -->
+    <div class="card" style="padding:14px 16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+        <div class="lbl">▸ 서버별 디스크 I/O <span style="letter-spacing:0;color:#8b9bb4">· 10대</span></div>
+        <button class="chip" type="button" style="flex:none">펼치기</button>
+      </div>
+      <div class="basis" style="margin-top:6px">서버 전체 물리 디스크 2초 표본 · 읽기 · 쓰기 · 바쁨(가장 바쁜 디스크) · 측정 불가 사유</div>
+    </div>
+
+    <div class="card" style="padding:14px 16px">
+      <div class="lbl">▸ 알아 둘 것</div>
+      <ul class="note" style="margin:8px 0 0;padding-left:16px">
+        <li><b>용량의 뜻이 다릅니다</b> — df used/(used+avail) ↔ Unisphere 감축 후 실사용.</li>
+        <li><b>전송 속도의 출처가 다릅니다</b> — 서버 diskstats 2초 표본 ↔ SAN 스위치 포트 1시간 평균.</li>
+        <li><b>못 읽은 값은 0 이 아닙니다</b> — ‘—’ 로 두고 합에서 빼며 몇 대가 빠졌는지 씁니다.</li>
+      </ul>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":400,"height":2900}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

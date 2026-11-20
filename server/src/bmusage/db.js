@@ -22,7 +22,9 @@
  *
  * node:sqlite 미지원 환경은 no-op 폴백 — 수집·화면은 살고 DB 만 비활성(`available()` 이 밝힌다).
  */
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import fs from 'node:fs';
+import { pushAll } from '../util/pushAll.js';
 import path from 'node:path';
 import { config } from '../config.js';
 import { numOrNull } from '../util/numOrNull.js';
@@ -58,7 +60,7 @@ let _tried = false;
 let _opening = null;   // 진행 중인 open 프라미스
 let _tick = 0;
 let _counts = null;    // { raw, daily, at } — dbStatus 의 COUNT(*) 캐시(아래 주석 참조)
-const COUNT_CACHE_MS = Math.max(0, Number(process.env.BMUSAGE_COUNT_CACHE_MS) || 60_000);
+const COUNT_CACHE_MS = Math.max(0, envPositive(process.env.BMUSAGE_COUNT_CACHE_MS, 60_000));
 
 /**
  * ⚠⚠ **진행 중인 open 을 공유한다**(v2.550 실화면 검증에서 잡은 결함): 예전에는 `_tried = true` 를
@@ -147,7 +149,24 @@ async function openDb() {
       );
       CREATE INDEX IF NOT EXISTS idx_bm_change_ts ON change_event(ts);
       CREATE INDEX IF NOT EXISTS idx_bm_change_key ON change_event(key, ts);
-      CREATE TABLE IF NOT EXISTS change_latest (agent TEXT NOT NULL DEFAULT '', key TEXT NOT NULL, at INTEGER, facts_json TEXT, PRIMARY KEY (agent, key));`);
+      CREATE TABLE IF NOT EXISTS change_latest (agent TEXT NOT NULL DEFAULT '', key TEXT NOT NULL, at INTEGER, facts_json TEXT, PRIMARY KEY (agent, key));
+      CREATE TABLE IF NOT EXISTS collect_cycle (agent TEXT NOT NULL DEFAULT '', ts INTEGER NOT NULL, ms INTEGER, budget_ms INTEGER, servers INTEGER, ok INTEGER,
+        conc_max INTEGER, conc_cap INTEGER, ssh_p50 INTEGER, ssh_p95 INTEGER, PRIMARY KEY (agent, ts));
+      CREATE INDEX IF NOT EXISTS idx_bm_cycle_ts ON collect_cycle(ts);
+      /* 7a단계(bmusage/logs/store.js — 서버 로그 분석): 읽기 위치(서버당 1행 · rev 로 비교 후 쓰기 — 늦게 끝난 옛 주기가 새 위치를 덮지 않게) ·
+         패턴(서명별 누적 · 가린 표본 5줄) · 시간 집계(패턴 · 분류 안 됨 · 읽은 양 · 잘림 — 시각 단독 인덱스로 청크 정리) · 보안 상위(IP · 계정 — 시간 · 종류마다 상한).
+         원문 전체는 없다(설계 §17). 보관은 perfRules logs.keepDays(청크 DELETE — 메인 파일). */
+      CREATE TABLE IF NOT EXISTS log_cursor (agent TEXT NOT NULL DEFAULT '', key TEXT NOT NULL, at INTEGER NOT NULL, rev INTEGER NOT NULL DEFAULT 0,
+        state_json TEXT, status_json TEXT, bad_json TEXT, PRIMARY KEY (agent, key));
+      CREATE TABLE IF NOT EXISTS log_pattern (agent TEXT NOT NULL DEFAULT '', key TEXT NOT NULL, sig TEXT NOT NULL, cls TEXT NOT NULL, severity TEXT, rule_id TEXT,
+        src TEXT, unit TEXT, tmpl TEXT, count INTEGER NOT NULL DEFAULT 0, first INTEGER, last INTEGER, samples_json TEXT, PRIMARY KEY (agent, key, sig));
+      CREATE INDEX IF NOT EXISTS idx_bm_logpat_last ON log_pattern(last);
+      CREATE TABLE IF NOT EXISTS log_hour (agent TEXT NOT NULL DEFAULT '', key TEXT NOT NULL, hour INTEGER NOT NULL, sig TEXT NOT NULL, cls TEXT NOT NULL,
+        count INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (agent, key, hour, sig));
+      CREATE INDEX IF NOT EXISTS idx_bm_loghour_hour ON log_hour(hour);
+      CREATE TABLE IF NOT EXISTS log_sec (agent TEXT NOT NULL DEFAULT '', key TEXT NOT NULL, hour INTEGER NOT NULL, kind TEXT NOT NULL, item TEXT NOT NULL,
+        count INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (agent, key, hour, kind, item));
+      CREATE INDEX IF NOT EXISTS idx_bm_logsec_hour ON log_sec(hour);`);
     // v2.919(리눅스 성능 1단계): 새 열은 CREATE 문이 아니라 **ALTER 마이그레이션**으로 더한다 — 기존 DB(v2.918 이하)와 새 DB 가
     //   같은 경로를 탄다(두 벌 스키마가 갈라지지 않게). ADD COLUMN 은 표를 다시 쓰지 않는다(O(1)).
     const mig = migratePerfColumns(conn);
@@ -199,11 +218,14 @@ export const PERF_TABLE_COLS = Object.freeze({
   usage_daily: PERF_COL_NAMES.map((c) => [`${c}_max`, 'REAL']),
   usage_latest: [...PERF_COL_NAMES.map((c) => [c, 'REAL']), ['os_at', 'INTEGER'], ['idrac_at', 'INTEGER'], ['detail_json', 'TEXT'], ['tuning_json', 'TEXT'],
     // v2.922: 피크(<열>_peak · _peak_at) · 피크 출처·창 · 장치 상한 초과 수 — 최신값에도 둔다(보드가 이 파일만 읽는다).
-    ...PEAK_SQL_COLS, ...PEAK_META_COLS, ['dev_over', 'INTEGER']],
+    ...PEAK_SQL_COLS, ...PEAK_META_COLS, ['dev_over', 'INTEGER'],
+    // v2.993(출처 색): CPU · 메모리 **지표별** 출처 두 글자(o = OS · i = iDRAC 텔레메트리 · e = iDRAC 대체 수집 · - = 없음 — `usage.js srcCmOf`).
+    //   행 출처(src)는 지표를 가르지 않아 I/O 만 iDRAC 이어도 CPU · 메모리가 OS 인 행이 '혼합' 이었다.
+    ['src_cm', 'TEXT']],
 });
 /** v2.922 — 최신값 전용 추가 열(지표 열 뒤에 붙는다). os_at·idrac_at 만 ‘그 경로의 마지막 성공’ 이라 COALESCE 로 지킨다. */
-export const LATEST_EXTRA_COLS = Object.freeze(['os_at', 'idrac_at', 'detail_json', 'tuning_json', ...PEAK_SQL_COLS.map(([c]) => c), ...PEAK_META_COLS.map(([c]) => c), 'dev_over']);
-const TEXT_EXTRA = new Set(['detail_json', 'tuning_json', 'peak_src']);
+export const LATEST_EXTRA_COLS = Object.freeze(['os_at', 'idrac_at', 'detail_json', 'tuning_json', ...PEAK_SQL_COLS.map(([c]) => c), ...PEAK_META_COLS.map(([c]) => c), 'dev_over', 'src_cm']);
+const TEXT_EXTRA = new Set(['detail_json', 'tuning_json', 'peak_src', 'src_cm']);
 export function migratePerfColumns(conn) {
   let added = 0; const failed = []; const have = {};
   for (const [table, cols] of Object.entries(PERF_TABLE_COLS)) {
@@ -269,6 +291,10 @@ export async function dbStatus() {
     const dailyRows = Number(daily) + Number(files?.d1?.rows || 0);
     return {
       available: true, path: FILE(), rawRows, dailyRows, countsAt: _counts?.at ?? null, firstTs: span.a ?? null, lastTs: span.b ?? null, bytes,
+      // 42회차 R3: 못 연 시간 단위 파일이 있으면 행 수는 하한(40회차 F5 표지를 화면까지) · 장치 1시간 롤업 누락(40회차 F2)
+      ...(files?.raw?.rowsPartial ? { rawRowsPartial: true, rawUnread: Number(files.raw.unreadCount) || (files.raw.unread || []).length } : {}),
+      ...(files?.d1?.rowsPartial ? { dailyRowsPartial: true } : {}),
+      ...(files?.devRollupMissed ? { devRollupMissed: files.devRollupMissed } : {}),
       // v2.922: 시간 단위 파일(가족별 파일 수·행 수·바이트) · 예전 표 잔여 행 · 마이그레이션 상태
       legacyRows: { raw: Number(raw), daily: Number(daily) }, files, migration: mig ? migrationView(mig) : null,
       ...(_migrateError ? { migrateError: _migrateError } : {}),
@@ -339,7 +365,9 @@ export async function mainDb() { return getDb(); }
  */
 export function readRule(m) {
   const phase = m?.phase || 'none';
-  const legacyAuth = ['copy-raw', 'copy-daily', 'verify', 'failed'].includes(phase);
+  // 81회차 F1(재현): 삭제 단계에서 실패하면(failedPhase 'delete') 예전 표는 이미 일부를 지운 뒤다 — 그것을 원본으로 읽으면 대조를 통과한
+  //   시간 단위 파일을 건너뛰어 이력에 구멍이 났다(72행 중 52행). 삭제 단계 실패는 '삭제 중' 과 같은 규칙(파일이 원본)이다.
+  const legacyAuth = ['copy-raw', 'copy-daily', 'verify'].includes(phase) || (phase === 'failed' && m?.failedPhase !== 'delete');
   return {
     phase,
     legacyRaw: legacyAuth,
@@ -360,7 +388,7 @@ export async function migrationReadRule() {
  *   ‘원시만 있고 롤업·최신값은 아직’ 상태를 보지 못한다(서버 단위 원자성은 예전과 같다). 조각 사이의 서버는 이번 주기 적재가 끝났거나 아직 시작 전이다 —
  *   한 서버의 부분 합은 생기지 않는다(지금 시간·날 버킷은 원래 진행 중인 값이다). 두 커밋 사이에 프로세스가 끝나는 경우는 예전과 같이 _pend 보정이 덮는다.
  */
-export const INSERT_CHUNK_ROWS = Math.max(16, Number(process.env.BMUSAGE_INSERT_CHUNK_ROWS) || 256);
+export const INSERT_CHUNK_ROWS = Math.max(16, envPositive(process.env.BMUSAGE_INSERT_CHUNK_ROWS, 256));
 /** 서버 키별로 묶어(처음 나온 순서 · 서버 안 순서 유지) 무게(서버 행 + 장치 행 + 마운트 행)가 상한을 넘기 전에 조각을 끊는다. 서버 하나는 쪼개지 않는다(순수). */
 export function chunkByServer(rows = [], devices = [], mounts = [], maxRows = INSERT_CHUNK_ROWS) {
   const by = new Map();
@@ -532,7 +560,8 @@ export async function pruneUsage({ rawDays = 90, dailyDays = 365 * 5, every = 12
        *   예전 표를 지우면 대조(예전 행 수 = 사본 · 1시간 표본 합)가 어긋나고, 사본 파일을 지우면 재시도 대조가 다시 실패한다.
        */
       const rule = readRule(readMeta(db, MIGRATE_KEY));
-      const migHold = ['copy-raw', 'copy-daily', 'verify', 'failed'].includes(rule.phase);
+      // 81회차 F1: 멈추는 조건은 읽기 규칙과 같다(예전 표가 원본인 동안) — 삭제 단계 실패는 대조가 끝났으므로 파일 보존을 멈추지 않는다.
+      const migHold = rule.legacyRaw;
       const a = migHold ? { deleted: 0, done: true } : await chunkedDelete(db.prepare('DELETE FROM usage_history WHERE rowid IN (SELECT rowid FROM usage_history WHERE ts < ? LIMIT ?)'), [rawCut], { label: 'bmusage.usage_history' });
       const b = migHold ? { deleted: 0, done: true } : await chunkedDelete(db.prepare('DELETE FROM usage_daily WHERE rowid IN (SELECT rowid FROM usage_daily WHERE day < ? LIMIT ?)'), [dayCut], { label: 'bmusage.usage_daily' });
       if (a.deleted || b.deleted) _counts = null;
@@ -579,6 +608,28 @@ export async function latestUsage({ json = false } = {}) {
   } catch { return []; }
 }
 let _latestLiteSql = null;
+
+/**
+ * 8a단계 용량 예측(xfs · btrfs 동적 inode 판별) — 이 노드(agent) 최신값의 **key · tuning_json 두 열만** 키 순 조각(기본 200행)으로 읽는다.
+ *   조각 사이 yieldFn(시간 기준 양보) — SELECT * 를 JSON 열까지 한 번에 동기로 읽지 않는다(반증 의심 항목). 기본 키(agent, key) 순서라 조각마다 인덱스로 이어 읽는다.
+ */
+export async function latestTuningRows({ agent = '', chunk = 200, yieldFn = null } = {}) {
+  const db = await getDb();
+  if (!db) return [];
+  const out = [];
+  try {
+    const st = db.prepare('SELECT key, tuning_json FROM usage_latest WHERE agent = ? AND key > ? AND tuning_json IS NOT NULL ORDER BY key LIMIT ?');
+    let after = '';
+    for (let i = 0; i < 10_000; i += 1) {
+      const rows = st.all(String(agent || ''), after, chunk);
+      pushAll(out, rows);
+      if (rows.length < chunk) break;
+      after = String(rows[rows.length - 1].key);
+      if (yieldFn) await yieldFn();
+    }
+  } catch { /* 열이 없는 옛 DB · 열기 실패 — 모르면 비운다(상한 있음으로 본다) */ }
+  return out;
+}
 
 /**
  * 원시 추이(한 서버). 상한을 두고 **잘렸으면 밝힌다**(조용한 상한 금지).

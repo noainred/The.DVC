@@ -38,6 +38,12 @@ const EXAMPLE_SITES = [
   { id: 'vc-ap-northeast', name: 'vcenter-ap-northeast.corp.local' },
 ];
 
+/** v3.26.0: 목 vCenter 사이트의 베어메탈 대수(`bm`) — 사이트 표에 없는 id(테스트의 가짜 vCenter 등)는 null. */
+export function mockSiteBareMetal(vcId) {
+  const s = SITES.find((x) => x.id === String(vcId || ''));
+  return s && Number.isFinite(s.bm) ? s.bm : null;
+}
+
 /** 이 vCenter(또는 {id,name})가 목 데이터/예제 템플릿인가 — id·이름 동시 일치. */
 export function isMockVcenter(vc) {
   const id = String(vc?.id || '').trim();
@@ -47,19 +53,57 @@ export function isMockVcenter(vc) {
     || EXAMPLE_SITES.some((s) => s.id === id && s.name === name);
 }
 
+/**
+ * v3.26.0 — 고객 시연 규모(사용자 요청 2026-11-19 '30개 데이터 · 물리 서버 1,200대 중 650대 가상화 · 나머지 베어메탈'):
+ * 데이터센터(법인) 30곳 = vCenter 가 있는 20곳(아래) + vCenter 없는 베어메탈 전용 10곳(`BM_ONLY_SITES`).
+ * ESXi 호스트 합 **650대**(테스트가 고정) · VM 은 호스트당 약 9대(운영 비율 — 658 호스트 · 5,850 VM).
+ * 베어메탈 550대는 30곳 전부에 나눈다 — `bm` 이 그 법인의 베어메탈 대수(이 표 310 + 베어메탈 전용 240 = 550,
+ * `mock/demo/idrac.js demoBareMetalSpecs` 가 쓴다). 물리 서버 합 = 650 + 550 = 1,200대.
+ * ⚠ 앞 11개의 id·name·도시는 v2.914 까지와 같다 — 데모 모듈(스토리지 사양·데모 엣지)과 이미 시드된 데모 설치본이 이 id 로 묶여 있다.
+ * ⚠ 호스트 수를 17의 배수로 두지 말 것 — VM 은 `v % hosts` 로 호스트에 놓이고 템플릿은 `idx % 17 === 0` 이라 첫 호스트의 VM 이
+ *   전부 템플릿이 되어 GPU VM 이 0대가 된다(gpuTable2653 ⑨ 가 잡았다 — 처음 넣은 도쿄 34대).
+ */
 const BASE_SITES = [
-  { id: 'vc-us-east', name: 'vcenter-us-east-01', city: 'Ashburn', country: 'USA', region: '북미', lat: 39.04, lon: -77.49, hosts: 24 },
-  { id: 'vc-us-west', name: 'vcenter-us-west-01', city: 'San Jose', country: 'USA', region: '북미', lat: 37.33, lon: -121.89, hosts: 18 },
-  { id: 'vc-br-sao', name: 'vcenter-br-sao-01', city: 'São Paulo', country: 'Brazil', region: '북미', lat: -23.55, lon: -46.63, hosts: 8 },
-  { id: 'vc-eu-central', name: 'vcenter-eu-central-01', city: 'Frankfurt', country: 'Germany', region: '유럽', lat: 50.11, lon: 8.68, hosts: 30 },
-  { id: 'vc-eu-west', name: 'vcenter-eu-west-01', city: 'Dublin', country: 'Ireland', region: '유럽', lat: 53.35, lon: -6.26, hosts: 16 },
-  { id: 'vc-me-uae', name: 'vcenter-me-uae-01', city: 'Dubai', country: 'UAE', region: '유럽', lat: 25.20, lon: 55.27, hosts: 6 },
-  { id: 'vc-ap-northeast', name: 'vcenter-ap-northeast-01', city: 'Seoul', country: 'South Korea', region: '아시아', lat: 37.57, lon: 126.98, hosts: 22 },
-  { id: 'vc-ap-southeast', name: 'vcenter-ap-southeast-01', city: 'Singapore', country: 'Singapore', region: '아시아', lat: 1.35, lon: 103.82, hosts: 14 },
-  { id: 'vc-ap-south', name: 'vcenter-ap-south-01', city: 'Mumbai', country: 'India', region: '아시아', lat: 19.08, lon: 72.88, hosts: 12 },
-  { id: 'vc-cn-east', name: 'vcenter-cn-east-01', city: 'Shanghai', country: 'China', region: '중국', lat: 31.23, lon: 121.47, hosts: 20 },
-  { id: 'vc-cn-north', name: 'vcenter-cn-north-01', city: 'Beijing', country: 'China', region: '중국', lat: 39.90, lon: 116.41, hosts: 16 },
+  { id: 'vc-us-east', name: 'vcenter-us-east-01', city: 'Ashburn', country: 'USA', region: '북미', lat: 39.04, lon: -77.49, hosts: 44, bm: 22 },
+  { id: 'vc-us-west', name: 'vcenter-us-west-01', city: 'San Jose', country: 'USA', region: '북미', lat: 37.33, lon: -121.89, hosts: 32, bm: 15 },
+  { id: 'vc-br-sao', name: 'vcenter-br-sao-01', city: 'São Paulo', country: 'Brazil', region: '북미', lat: -23.55, lon: -46.63, hosts: 16, bm: 10 },
+  { id: 'vc-eu-central', name: 'vcenter-eu-central-01', city: 'Frankfurt', country: 'Germany', region: '유럽', lat: 50.11, lon: 8.68, hosts: 48, bm: 22 },
+  { id: 'vc-eu-west', name: 'vcenter-eu-west-01', city: 'Dublin', country: 'Ireland', region: '유럽', lat: 53.35, lon: -6.26, hosts: 26, bm: 13 },
+  { id: 'vc-me-uae', name: 'vcenter-me-uae-01', city: 'Dubai', country: 'UAE', region: '유럽', lat: 25.20, lon: 55.27, hosts: 12, bm: 8 },
+  { id: 'vc-ap-northeast', name: 'vcenter-ap-northeast-01', city: 'Seoul', country: 'South Korea', region: '아시아', lat: 37.57, lon: 126.98, hosts: 64, bm: 30 },
+  { id: 'vc-ap-southeast', name: 'vcenter-ap-southeast-01', city: 'Singapore', country: 'Singapore', region: '아시아', lat: 1.35, lon: 103.82, hosts: 30, bm: 15 },
+  { id: 'vc-ap-south', name: 'vcenter-ap-south-01', city: 'Mumbai', country: 'India', region: '아시아', lat: 19.08, lon: 72.88, hosts: 24, bm: 14 },
+  { id: 'vc-cn-east', name: 'vcenter-cn-east-01', city: 'Shanghai', country: 'China', region: '중국', lat: 31.23, lon: 121.47, hosts: 40, bm: 18 },
+  { id: 'vc-cn-north', name: 'vcenter-cn-north-01', city: 'Beijing', country: 'China', region: '중국', lat: 39.90, lon: 116.41, hosts: 28, bm: 14 },
+  { id: 'vc-kr-south', name: 'vcenter-kr-south-01', city: 'Busan', country: 'South Korea', region: '아시아', lat: 35.18, lon: 129.08, hosts: 36, bm: 16 },
+  { id: 'vc-jp-east', name: 'vcenter-jp-east-01', city: 'Tokyo', country: 'Japan', region: '아시아', lat: 35.68, lon: 139.69, hosts: 35, bm: 16 },
+  { id: 'vc-vn-north', name: 'vcenter-vn-north-01', city: 'Hanoi', country: 'Vietnam', region: '아시아', lat: 21.03, lon: 105.85, hosts: 30, bm: 14 },
+  { id: 'vc-au-east', name: 'vcenter-au-east-01', city: 'Sydney', country: 'Australia', region: '아시아', lat: -33.87, lon: 151.21, hosts: 22, bm: 10 },
+  { id: 'vc-cn-south', name: 'vcenter-cn-south-01', city: 'Shenzhen', country: 'China', region: '중국', lat: 22.54, lon: 114.06, hosts: 42, bm: 16 },
+  // 바르샤바는 한국에서 RTT 800ms 를 넘는 사이트(운영 환경 — CLAUDE.md)를 흉내 낸다.
+  { id: 'vc-pl-central', name: 'vcenter-pl-central-01', city: 'Warsaw', country: 'Poland', region: '유럽', lat: 52.23, lon: 21.01, hosts: 30, bm: 14 },
+  { id: 'vc-uk-south', name: 'vcenter-uk-south-01', city: 'London', country: 'United Kingdom', region: '유럽', lat: 51.49, lon: -0.13, hosts: 32, bm: 15 },
+  { id: 'vc-us-central', name: 'vcenter-us-central-01', city: 'Dallas', country: 'USA', region: '북미', lat: 32.78, lon: -96.80, hosts: 35, bm: 16 },
+  { id: 'vc-mx-north', name: 'vcenter-mx-north-01', city: 'Monterrey', country: 'Mexico', region: '북미', lat: 25.69, lon: -100.32, hosts: 24, bm: 12 },
 ];
+
+/**
+ * v3.26.0 — vCenter 가 없는 데이터센터(법인) 10곳 — 베어메탈·스토리지·네트워크·PDU 만 있다(공장 MES · AI/HPC · DR · 물류).
+ * `mock/demo/pdu.js demoCorps` 가 DataCenter 로 만들고(id `dc-<slug>`), 베어메탈·스토리지 데모가 이 법인에 장비를 둔다.
+ * vCenter 가 아니므로 `mockVcenterIdentities`·`isMockVcenter` 에는 들어가지 않는다.
+ */
+export const BM_ONLY_SITES = Object.freeze([
+  { slug: 'ulsan', city: 'Ulsan', country: 'South Korea', region: '아시아', role: '공장(MES)', lat: 35.54, lon: 129.31, bm: 30 },
+  { slug: 'daejeon', city: 'Daejeon', country: 'South Korea', region: '아시아', role: 'AI/HPC 센터', lat: 36.35, lon: 127.38, bm: 34 },
+  { slug: 'gumi', city: 'Gumi', country: 'South Korea', region: '아시아', role: '공장(MES)', lat: 36.12, lon: 128.34, bm: 24 },
+  { slug: 'chennai', city: 'Chennai', country: 'India', region: '아시아', role: '공장(MES)', lat: 13.08, lon: 80.27, bm: 22 },
+  { slug: 'bangkok', city: 'Bangkok', country: 'Thailand', region: '아시아', role: '물류 센터', lat: 13.76, lon: 100.50, bm: 14 },
+  { slug: 'chongqing', city: 'Chongqing', country: 'China', region: '중국', role: '공장(MES)', lat: 29.56, lon: 106.55, bm: 26 },
+  { slug: 'wroclaw', city: 'Wroclaw', country: 'Poland', region: '유럽', role: '공장(MES)', lat: 51.11, lon: 17.04, bm: 22 },
+  { slug: 'budapest', city: 'Budapest', country: 'Hungary', region: '유럽', role: 'DR 사이트', lat: 47.50, lon: 19.04, bm: 18 },
+  { slug: 'atlanta', city: 'Atlanta', country: 'USA', region: '북미', role: 'DR 사이트', lat: 33.75, lon: -84.39, bm: 20 },
+  { slug: 'toronto', city: 'Toronto', country: 'Canada', region: '북미', role: 'AI/HPC 센터', lat: 43.65, lon: -79.38, bm: 30 },
+]);
 
 /**
  * ⚠⚠ 운영 규모 부하 측정용 스케일 — `MOCK_SCALE`(기본 1, 상한 8).
@@ -69,8 +113,9 @@ const BASE_SITES = [
  * 2,242 VM** 이라 그 규모를 재는 수단이 아예 없었다. v2.576 감사가 성능을 "확정 결함 0건" 으로
  * 보고하면서 *"측정은 목 데이터 기준이다"* 를 한계로 적어야 했던 것이 그 때문이다.
  * `MOCK_SCALE=3` 이면 33 vCenter · 558 호스트 · 약 6,700 VM 으로 **운영 규모를 넘어서** 측정된다.
+ * v3.26.0: 기본 데모 자체가 시연 규모(20 vCenter · 650 호스트 · 약 6,000 VM)가 됐다 — 기본 1 이 이미 운영 규모다.
  *
- * ⚠ 기본값은 **1** 이다 — 데모·CI 의 기존 수치(테스트가 고정하는 vCenter 11개)를 바꾸지 않는다.
+ * ⚠ 기본값은 **1** 이다 — 데모·CI 의 기존 수치(테스트가 고정하는 vCenter 20개)를 바꾸지 않는다.
  * ⚠ 사본 id·name 은 **접미사로만** 구분한다(`-c2`). `mockVcenterList()`·`isMockVcenter()` 가
  *   이 배열에서 파생하므로 사본도 자동으로 'mock' 으로 인식된다 — 그래야 엣지 push 차단
  *   (v2.257 direct-mode 봉인)과 '빈 인벤토리' 판정(v2.560)이 사본에서도 같게 동작한다.
@@ -94,15 +139,17 @@ const GUEST_OS = [
 const APP_ROLES = ['web', 'app', 'db', 'cache', 'mq', 'lb', 'k8s-node', 'monitor', 'backup', 'dns'];
 const ESXI_VERSIONS = ['8.0.3', '8.0.2', '8.0.1', '7.0.3', '7.0.2', '6.7.0'];
 // Host hardware vendor/model mix.
+// v3.26.0(시연 규모): ESXi 호스트는 전부 Dell 이다 — 포탈의 서버 기능(전력·온도·부품 장애·전산실 온도·'물리 서버' 카드)은 iDRAC 등록 서버를 센다.
+//   예전 섞음(Dell 3/8)이면 ESXi 650대 중 238대만 iDRAC 에 잡혀 Overview '물리 서버' 가 1,200 이 아니라 788 이었다. 비-Dell 장비는 '미지원 서버' 데모(idrac.js)가 따로 보인다.
 const HW = [
   { vendor: 'Dell Inc.', model: 'PowerEdge R760' },
   { vendor: 'Dell Inc.', model: 'PowerEdge R750' },
   { vendor: 'Dell Inc.', model: 'PowerEdge R740' },
-  { vendor: 'HPE', model: 'ProLiant DL380 Gen11' },
-  { vendor: 'HPE', model: 'ProLiant DL360 Gen10' },
-  { vendor: 'Lenovo', model: 'ThinkSystem SR650 V3' },
-  { vendor: 'Cisco Systems Inc', model: 'UCSC-C240-M6' },
-  { vendor: 'Supermicro', model: 'SYS-220U-TNR' },
+  { vendor: 'Dell Inc.', model: 'PowerEdge R660' },
+  { vendor: 'Dell Inc.', model: 'PowerEdge R650' },
+  { vendor: 'Dell Inc.', model: 'PowerEdge R7625' },
+  { vendor: 'Dell Inc.', model: 'PowerEdge R6625' },
+  { vendor: 'Dell Inc.', model: 'PowerEdge MX760c' },
 ];
 /* v2.556: CPU 모델 믹스(데모) — 코어 수와 어울리는 실제 제품명을 쓴다. 이 값은 mock 이며
    실장비 값은 vCenter `summary.hardware.cpuModel` 에서 온다. */
@@ -530,7 +577,8 @@ function buildBaseline() {
     }
 
     const vms = [];
-    const vmCount = site.hosts * intBetween(8, 16);
+    // v3.26.0: 호스트당 7~11대(평균 약 9 — 운영 비율). v2.914 까지 8~16대.
+    const vmCount = site.hosts * intBetween(7, 11);
     for (let v = 0; v < vmCount; v++) {
       const host = hosts[v % hosts.length];
       vms.push({
@@ -638,6 +686,10 @@ export function generateSnapshot() {
         // v2.716: 서비스태그 — 예전엔 없어서 시리얼 조회 'ESXi 호스트' 가 0건이었다. iDRAC 데모 시드(seed.js)와 같은 규칙이라
         //   Dell 호스트는 자기 iDRAC 서버와 태그가 같다(다르면 hostMatch 가 '다른 장비' 로 본다 — v2.682 R3D-04).
         serviceTag: mockServiceTag(`${site.id}|${h.name}`),
+        // v3.6.0(IP 관리 재설계 묶음 다): vmk 주소(관리 · vMotion · 일부 vSAN)와 ESXi 에 설정된 호스트명 — 실수집 soapClient parseVmks · hostDnsName 과 같은 모양.
+        //   mgmtIp 는 싣지 않는다(목 원장 행 수를 바꾸지 않게 — 목 호스트 이름은 IP 가 아니라 원장에 호스트 행이 없다).
+        vmks: mkVmks(site, h.idx),
+        ...mkHostDns(site, h),
         hbas: mkHbas(h.idx, `${site.id}|${h.name}`),
         nics: mkPnics(h.idx, `${site.id}|${h.name}`),   // v2.935(C-③)
         gpus: mkGpus(h.idx, site),
@@ -683,8 +735,11 @@ export function generateSnapshot() {
 
     // VMs
     const vmOrd = new Map(); // v2.653: 호스트별 VM 순번(mkVmGpu)
+    // v3.26.0: 호스트 찾기를 이름 색인으로(예전 `hosts.find` 는 VM 마다 전 사이트 호스트를 훑어 650 호스트 · 6,000 VM 에서 틱마다 수백만 번 비교했다).
+    const hostByName = new Map();
+    for (const x of hosts) if (x.vcenterId === site.id && !hostByName.has(x.name)) hostByName.set(x.name, x);
     for (const vm of env.vms) {
-      const hostState = hosts.find((x) => x.name === vm.host.name && x.vcenterId === site.id);
+      const hostState = hostByName.get(vm.host.name);
       const ord = vmOrd.get(vm.host.name) || 0; vmOrd.set(vm.host.name, ord + 1);
       const hostDown = hostState?.connectionState === 'DISCONNECTED';
       const powered = vm.baseOn && !hostDown;
@@ -719,7 +774,7 @@ export function generateSnapshot() {
         memUsagePct,
         ipAddress: powered ? mkIp(site, vm.idx) : null,
         ipAddresses: powered ? mkIps(site, vm.idx) : [],
-        dns: powered ? mkDns(site, vm.idx) : null,   // v2.695: VM 이 쓰는 DNS 서버(IP 대장에는 들어가지 않는다)
+        dns: powered ? mkDns(site, vm.idx, vm.name) : null,   // v2.695: VM 이 쓰는 DNS 서버(IP 대장에는 들어가지 않는다)
         folder: VM_FOLDERS[(vm.idx * 7 + site.id.length) % VM_FOLDERS.length],
         resourcePool: RES_POOLS[(vm.idx * 3) % RES_POOLS.length],
         // v2.820: Bareos 연동용 정확한 위치(vcenter/vmPlacement.js 와 같은 모양) — 데이터센터는 사이트별 1개, 폴더는 위 folder 의 '/' 경로.
@@ -754,6 +809,15 @@ export function generateSnapshot() {
     }
 
     // Datastores
+    // v3.26.0: 데이터스토어 → 그 위에 디스크가 있는 VM 의 호스트(VM 순서) — 예전에는 데이터스토어마다 전 VM 을 다시 훑었다(같은 결과).
+    const placedByDs = new Map();
+    for (const v of vms) {
+      if (v.vcenterId !== site.id || !v.host) continue;
+      for (const dsName of new Set((v.dev?.disks || []).map((d) => d.datastore))) {
+        if (!placedByDs.has(dsName)) placedByDs.set(dsName, []);
+        placedByDs.get(dsName).push(v.host);
+      }
+    }
     for (const ds of env.datastores) {
       // ~1 in 7 datastores is near-full so capacity alarms appear.
       const hot = ds.idx % 7 === 2;
@@ -786,7 +850,7 @@ export function generateSnapshot() {
           mounts: (() => {
             const hs = env.hosts.length ? (ds.storageType === 'local' ? [env.hosts[ds.idx % env.hosts.length]] : Array.from({ length: Math.min(8, env.hosts.length) }, (_, k) => env.hosts[(ds.idx + k) % env.hosts.length])) : [];
             // VM 디스크가 놓인 호스트는 반드시 마운트한 것으로(호스트 데이터스토어 탭의 'VM 디스크로 역산' 과 '마운트' 가 서로 어긋나지 않게 — v2.901 화면 판독)
-            const placed = vms.filter((v) => v.vcenterId === site.id && (v.dev?.disks || []).some((d) => d.datastore === ds.name)).map((v) => v.host).filter(Boolean);
+            const placed = placedByDs.get(ds.name) || [];
             const refs = [...new Set([...hs.map((h) => h.name), ...placed])];
             const bad = ds.idx % 13 === 5 && refs.length > 1 ? [{ h: refs[refs.length - 1], accessible: false, mounted: true }] : [];
             return { total: refs.length, notAccessible: bad.length, notMounted: 0, hosts: refs, bad, hostsOmitted: 0 };
@@ -835,6 +899,27 @@ function mkIp(site, idx) {
   const oct = Math.abs(Math.round(site.lat)) % 250;
   return `10.${oct}.${Math.floor(idx / 254) % 254}.${(idx % 253) + 1}`;
 }
+// v3.6.0(호스트명 대조 시연): 게스트 OS 호스트명 — 대부분 VM 이름과 같고, 17대에 1대는 OS 쪽 이름이 다르다(옛 이름). 이름이 없으면 예전 값.
+function guestHostName(name, idx) {
+  const n = String(name || '').toLowerCase();
+  if (!n) return `vm${idx}`;
+  return idx % 17 === 3 ? `${n}-old` : n;
+}
+// v3.6.0: ESXi vmk 주소(목). 관리(vmk0) 는 VM 대역과 겹치지 않는 10.<법인>.250.x, vMotion · vSAN 은 172.20 · 172.21.
+function mkVmks(site, idx) {
+  const oct = Math.abs(Math.round(site.lat)) % 250;
+  const last = (idx % 240) + 10;
+  const out = [{ dev: 'vmk0', ip: `10.${oct}.250.${last}`, mask: '255.255.255.0', pg: 'Management Network' },
+    { dev: 'vmk1', ip: `172.20.${oct}.${last}`, mask: '255.255.255.0', pg: 'vMotion' }];
+  if (idx % 3 === 0) out.push({ dev: 'vmk2', ip: `172.21.${oct}.${last}`, mask: '255.255.255.0', pg: '' });
+  return out;
+}
+// v3.6.0: ESXi 에 설정된 호스트명(목). 대부분 vCenter 이름과 같고, 일부는 옛 이름(대조 '다름' 시연) · 일부는 못 읽음(null).
+function mkHostDns(site, h) {
+  if (h.idx % 13 === 5) return { osHostName: null, osDomain: null };
+  const dom = `${site.id.replace(/^vc-/, '')}.corp.example`;
+  return { osHostName: h.idx % 11 === 4 ? `${h.name}-old` : h.name, osDomain: dom };
+}
 // Some VMs are multi-homed (mgmt + service + storage NIC). Returns 1-3 IPv4s.
 function mkIps(site, idx) {
   const ips = [mkIp(site, idx)];
@@ -844,7 +929,7 @@ function mkIps(site, idx) {
 }
 // v2.695: 게스트가 보고하는 DNS 설정(목). 사내 DNS 는 같은 법인 VM 1·2번의 IP(정체 대조가 VM 으로 찾게),
 //   일부는 공인 DNS·다른 법인 DNS·DHCP·NIC/OS 불일치·미보고(null)로 둔다.
-function mkDns(site, idx) {
+function mkDns(site, idx, name = '') {
   if (idx % 19 === 0) return null;                                   // Tools 가 DNS 를 보고하지 않음(모름)
   const corp = [mkIp(site, 1), mkIp(site, 2)];
   const dom = `${site.id.replace(/^vc-/, '')}.corp.example`;
@@ -853,7 +938,7 @@ function mkDns(site, idx) {
   else if (idx % 41 === 0) servers = ['168.126.63.1', '168.126.63.2'];
   else if (idx % 37 === 0) servers = ['10.0.0.53'];                  // 대장에 없는 주소
   const dhcp = idx % 7 === 0;
-  const stack = { servers, domain: dom, search: [dom, 'corp.example'], dhcp, hostName: `vm${idx}` };
+  const stack = { servers, domain: dom, search: [dom, 'corp.example'], dhcp, hostName: guestHostName(name, idx) };
   const nicServers = idx % 31 === 0 ? [corp[1], '1.1.1.1'] : servers;   // NIC 설정 ≠ OS 실제
   return { servers: [...new Set([...servers, ...nicServers])].slice(0, 8), stack,
     nics: [{ network: 'VM Network', mac: `00:50:56:${(idx >> 8 & 255).toString(16).padStart(2, '0')}:${(idx & 255).toString(16).padStart(2, '0')}:01`,

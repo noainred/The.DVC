@@ -11,7 +11,6 @@
  *   · 상한은 거부다: 컴포넌트 규칙 100 · 후보 100 · 사람 500 · 이름 64자 · 메일 254자.
  * 저장은 라우트가 관리자 + 전체 범위로 막는다(전 법인 공용 설정).
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
@@ -131,10 +130,14 @@ export function normalizeIssueSettings(raw, { strict = true } = {}) {
 export function loadIssueSettings() {
   if (cache) return cache;
   const f = fileOf();
-  loadErr.clear();
+  if (!loadErr.readPending()) loadErr.clear();   // 97회차 F5: 읽기 오류 재시도 중에는 지우지 않는다(30초 간격 · 처음 시각 유지)
+  // 97회차 F5: 읽기 단계는 등록부 공용 읽기(util/registryCore.js read) — 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니라 원본을 옮기지 않고 · 캐시하지 않고 ·
+  //   오류(readError)를 세워 저장을 거절한다(409). parse · 형식 실패만 아래 catch(예전과 같다 — 보존본 + 기본값).
+  const rr = loadErr.read(f, (t) => t);
+  if (rr.kind === 'read-error') return defaultIssueSettings();
   try {
-    if (fs.existsSync(f)) {
-      const j = JSON.parse(fs.readFileSync(f, 'utf8'));
+    if (rr.kind === 'ok') {
+      const j = JSON.parse(rr.value);
       const { value, dropped } = normalizeIssueSettings(j, { strict: false });
       if (dropped) console.warn(`[issues] issue-settings.json 의 형식 밖 항목 ${dropped}개를 읽지 않았습니다`);
       cache = value;
@@ -161,6 +164,7 @@ export function saveIssueSettings(body) {
     for (const k of ['sla', 'automation', 'inbox']) if (!Object.hasOwn(b, k)) b = { ...b, [k]: cur[k] };
   }
   const { value } = normalizeIssueSettings(b, { strict: true });
+  loadIssueSettings(); loadErr.assertWritable('이슈 설정(issue-settings.json)');   // 97회차 F5: 읽기 오류면 던진다(status 409) — 원본을 덮지 않게
   atomicWriteFileSync(fileOf(), JSON.stringify(value, null, 1), { mode: 0o600 });
   cache = value; loadErr.clear();
   return value;

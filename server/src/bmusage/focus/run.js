@@ -18,7 +18,7 @@
 import crypto from 'node:crypto';
 import { withDeadline } from '../../proxy/sshExec.js';
 import { config } from '../../config.js';
-import { isAuthFailureText, isPeerRejectText } from '../../util/authGuard.js';
+import { osMissOf, idracMissOf } from '../missReason.js';
 import { numOrNull } from '../../util/numOrNull.js';
 import { dayKey, DAY_MS, DAY_OFFSET_MIN } from '../../util/dayKey.js';
 import { capStr } from '../../util/capStr.js';
@@ -41,16 +41,22 @@ export const FOCUS_METRICS = Object.freeze([
 export const FOCUS_COLS = Object.freeze(FOCUS_METRICS.map((m) => m.col));
 export const FOCUS_STATUS = Object.freeze(['queued', 'running', 'done', 'stopped', 'auth', 'interrupted', 'failed']);
 /** 결측 사유(웹 문구 1:1). */
-export const FOCUS_MISS = Object.freeze(['timeout', 'auth', 'auth-stopped', 'ssh-error', 'host-key', 'not-linux', 'no-path', 'pool-busy', 'unreachable', 'no-telemetry', 'error']);
+// 1회차 점검 D5(b): iDRAC 셋 · 재확인 N4: os-disabled · os-edge(분마다 다시 해석이 막은 등록 — 주기 수집은 그 등록을 대상에서 빼므로 수집 건강 열거에는 없다)
+export const FOCUS_MISS = Object.freeze(['timeout', 'auth', 'auth-stopped', 'ssh-error', 'host-key', 'not-linux', 'no-path', 'pool-busy', 'unreachable', 'no-telemetry', 'error', 'cred-config', 'forbidden', 'ids-unmatched', 'cert-untrusted', 'os-disabled', 'os-edge']);
 /** 결과 code → HTTP(라우트 · 엣지 대행 공용 — 스냅샷과 같은 규약: 업무 결과는 code 로). */
 export const FOCUS_CODE_STATUS = Object.freeze({
   ok: 200, queued: 200, 'bad-reason': 400, 'bad-request': 400, 'not-found': 404, forbidden: 403, 'no-path': 409, busy: 409, 'daily-cap': 429,
   'auth-stopped': 409, 'store-unavailable': 503, 'settings-unreadable': 503, edge: 502,
+  maintenance: 409,   // 8a단계 ③: 정비 창 안 자동 집중(수동은 이 code 가 나오지 않는다)
 });
 export const FOCUS_CODES = Object.freeze(Object.keys(FOCUS_CODE_STATUS));
-/** 세션 시한(SSH 연결 15 + 주 명령 30 + 피크 창 + 경량 스냅샷) — 50초 안(주기 수집 SESSION_BUDGET 과 같다). */
+/**
+ * 세션 시한(SSH 연결 15 + 주 명령 + 피크 창 + 경량 스냅샷) — 50초 안(주기 수집 SESSION_BUDGET 과 같다).
+ *   예산 − 연결(15) ≥ 주 명령 시한(osSsh CMD_TIMEOUT_MS)이어야 주 명령 안 timeout 산수가 집중 경로에서도 선다(bmTop8bBudget ①).
+ *   1회차 점검 D2: 주 명령 시한이 34초가 되어 45초 → 49초(시한 50초보다 작게 — 이 모듈의 예산 가드가 먼저 끊는다).
+ */
 export const FOCUS_DEADLINE_MS = 50_000;
-export const FOCUS_BUDGET_MS = 45_000;
+export const FOCUS_BUDGET_MS = 49_000;
 /** 1분 창 피크 — 같은 세션 1초 창(A 안). 설정 peakWindowS 보다 길게 잡지 않는다. */
 export const FOCUS_PEAK_WINDOW_S = 10;
 
@@ -92,6 +98,7 @@ function deps0(D = {}) {
     loadRules: async () => (await import('../perfRules.js')).loadPerfRules(),
     loadSettings: async () => (await import('../settings.js')).loadBmUsageSettings(),
     collectOs: async (osHost, o) => (await import('../collectors/osSsh.js')).collectOsUsage(osHost, o),
+    refreshOsHost: async (osHost) => refreshOsHost0(osHost),
     idracJob: async (entry, o) => pollHook('idracTelemetryJob')(entry, o),
     prevFor: async (key) => pollHook('prevCountersFor')(key),
     osAuthStop: async (tg) => (_poll ? pollHook('osAuthStopFor')(tg) : HOOKS_MISSING_STOP),
@@ -102,12 +109,42 @@ function deps0(D = {}) {
     buildEntry: async (o) => (await import('../perfView.js')).buildPerfEntry(o),
     hwReader: async (o) => (await import('../hwFacts.js')).hwFactsReader(o),
     rawBefore: async (o) => (await import('../db.js')).rawRangeMerged(o),
+    // 8a단계 ③: 정비 창 판정(판정 코어 하나 — maint/judge.js · 이 노드의 창 + 중앙 배포본).
+    maintState: async (tg, now) => (await (await import('../maint/runtime.js')).maintJudge({ now })).stateFor(tg, now),
     db: ops,
     setTimer: (fn, ms) => { const h = setTimeout(fn, Math.max(0, ms)); h.unref?.(); return h; },
     clearTimer: (h) => clearTimeout(h),
     ...D,
   };
 }
+/**
+ * v3.9.0(점검 B-2): 분마다 OS 접속 자격을 **등록부에서 다시 해석**한다 — 세션을 시작할 때 푼 키를 최대 60분 그대로 쓰면,
+ * 그 사이 건 법인 키 사용 중지 · 키 교체 · 퇴역 · 기능 해제 · 바꿔치기 표지가 집중 모니터링에만 먹지 않았다.
+ * 등록 항목 id 가 없는 대상(예전 형태)은 그대로 둔다. 항목이 지워졌거나 접속처가 바뀌었으면 접속하지 않는다(authError).
+ */
+async function refreshOsHost0(osHost) {
+  const id = osHost && typeof osHost.id === 'string' ? osHost.id : '';
+  if (!id) return osHost;
+  const fail = (code, msg) => ({ ...osHost, password: '', privateKey: undefined, passphrase: undefined, authError: msg, authErrorCode: code });
+  const R = await import('../../bmstor/registry.js');
+  if (R.registryLoadError()) return fail('registry-unreadable', 'OS 계정 등록부를 읽지 못해 이번 분은 접속하지 않았습니다.');
+  const raw = R.listBmServersRaw().find((x) => x.id === id);
+  if (!raw) return fail('gone', 'OS 등록 항목이 그 사이 지워져 접속하지 않았습니다.');
+  // host · port 만 본다(세션 대상의 username 은 공통 계정 해석 뒤 값이라 등록부 칸과 다를 수 있다 — 계정이 바뀌면 등록부가 참조를 이미 버린다).
+  if (String(raw.host || '').trim().toLowerCase() !== String(osHost.host || '').trim().toLowerCase() || (Number(raw.port) || 22) !== (Number(osHost.port) || 22)) {
+    return fail('moved', 'OS 등록 항목의 접속처가 그 사이 바뀌어 접속하지 않았습니다(세션을 다시 시작하세요).');
+  }
+  // 1회차 점검 D3 · D4: 그 사이 ‘사용 안 함’ 으로 꺼졌거나 엣지 등록(agent)으로 바뀐 항목으로는 접속하지 않는다(대상 해석과 같은 함수 — targets.js osEntryIssue).
+  const { osEntryIssue } = await import('../targets.js');
+  const issue = osEntryIssue(raw, { isEdge: !!config.agent?.centralUrl, agentName: config.agent?.name || '' });
+  //   재확인 N4: 사유 code 는 대상 해석과 같은 열거(os-disabled · os-edge — missReason.osMissOf 가 그대로 결측 사유로 · FOCUS_MISS). 예전 판은 'disabled' · 'edge-registry' 로
+  //   실려 cred-config(‘키 · 계정 설정’)로 보였다 — 조치가 다르다.
+  if (issue === 'os-disabled') return fail('os-disabled', 'OS 등록 항목이 그 사이 ‘사용 안 함’ 으로 꺼져 접속하지 않았습니다.');
+  if (issue === 'os-edge') return fail('os-edge', 'OS 등록 항목이 그 사이 엣지 지정으로 바뀌어 이 노드에서는 접속하지 않았습니다.');
+  const { withResolvedAuth } = await import('../onboard/refs.js');
+  return withResolvedAuth([raw], { feature: 'bm-usage' })[0];
+}
+export { refreshOsHost0 as refreshFocusOsHost };   // 테스트(sshAccess390 ⑭)
 let _D = deps0();
 /** 테스트 주입(가짜 SSH · Redfish · 시계 · 타이머). */
 export function _setFocusDepsForTest(d) { _D = deps0(d || {}); }
@@ -181,6 +218,21 @@ export async function startFocusLocal({ target, reason = '', by = '', trigger = 
     if (osSt || idSt) {
       return { ok: false, code: 'auth-stopped', authStopped: osSt ? 'os' : 'idrac',
         reason: `${osSt ? 'OS(SSH)' : 'iDRAC'} 계정이 인증 실패로 정지돼 있어 ${trigger === 'manual' ? '' : '자동 '}집중 모니터링을 시작하지 않았습니다 — 분마다 로그인하면 계정이 잠길 수 있습니다. 자격증명을 고친 뒤 주기 수집이 성공하면 풀립니다.` };
+    }
+  }
+  /*
+   * 8a단계 ③ 자동 집중 억제(설계 §20 ⑲): 정비 창(③ focus 또는 ④ collect 를 켠 창) 안이면 **자동** 집중은 시작하지 않는다 — 수동 집중은 허용(사유를 적고 실행).
+   *   인증 정지(위)가 먼저다 — 창과 무관하게 막는다. 억제는 그 발생의 끝까지(시한)이고 적용 기록은 ‘창 끝 뒤 억제 0’ 점검에 남긴다.
+   *   ⚠ 이 함수가 choke point 다(자동 집중은 perfAlerts.dispatch → 여기 하나로만 들어온다).
+   */
+  if (trigger !== 'manual') {
+    let ms = null;
+    try { ms = await _D.maintState(target, now); } catch { ms = null; }
+    if (ms && (ms.scopes?.focus || ms.scopes?.collect)) {
+      const scope = ms.scopes.focus ? 'focus' : 'collect';
+      const ids = (ms.windows || []).filter((w) => (w.scopes || []).includes(scope)).map((w) => w.id);
+      try { const R = await import('../maint/runtime.js'); R.countSuppression('focus', ids, { now }); R.noteApplied(scope, target.key, ms.until?.[scope], ids, now, { occ: R.scopeOccOf(ms, scope) }); } catch { /* 계수 실패는 억제를 바꾸지 않는다 */ }
+      return { ok: false, code: 'maintenance', maint: { ids, until: ms.until?.[scope] ?? null }, reason: '정비 창 안이라 자동 집중 모니터링을 시작하지 않았습니다(수동 집중은 사유를 적고 실행할 수 있습니다).' };
     }
   }
   if (_byKey.has(target.key)) return { ok: false, code: 'busy', reason: '이 서버의 집중 모니터링이 이미 진행 중이거나 대기 중입니다.', id: _byKey.get(target.key) };
@@ -300,28 +352,7 @@ export function beforeStats(rows = []) {
   return out;
 }
 
-/** OS 결과 → 결측 사유(없으면 ''). */
-function osMissOf(os) {
-  if (!os) return 'no-path';
-  if (os.ok) return '';
-  const e = String(os.error || '');
-  if (os.busy) return 'pool-busy';
-  if (isPeerRejectText(e)) return 'host-key';
-  if (isAuthFailureText(e)) return 'auth';
-  if (/시한 초과|timeout|타임아웃/i.test(e)) return 'timeout';
-  if (/어느 형식으로도|Linux/i.test(e)) return 'not-linux';
-  return 'ssh-error';
-}
-function idracMissOf(idr) {
-  if (!idr) return 'no-path';
-  if (idr.ok) return '';
-  if (idr.busy) return 'pool-busy';
-  if (idr.kind === 'auth') return 'auth';
-  if (idr.kind === 'auth-stopped') return 'auth-stopped';
-  if (idr.kind === 'timeout') return 'timeout';
-  if (idr.kind === 'no-telemetry' || idr.kind === 'empty-report') return 'no-telemetry';
-  return 'unreachable';
-}
+// 결측 사유 판정은 bmusage/missReason.js 하나(6단계 수집 건강과 같은 코어).
 
 async function tick(sess, idx) {
   if (sess.stopped || !_active.has(sess.id)) return;
@@ -344,10 +375,15 @@ async function tick(sess, idx) {
   const idrStop = sess.hasIdrac ? await _D.idracAuthStop(tg).catch(() => null) : null;
   const busy = () => ({ ok: false, busy: true, error: '전역 동시성 풀이 가득 차 이번 분을 건너뛰었습니다' });
   const waitMs = Math.max(5_000, Math.min(45_000, sess.intervalS * 1000 * 0.75));
+  // 분마다 자격 다시 해석(점검 B-2) — 실패하면 authError 로 접속하지 않고 그 분은 결측(cred-config).
+  const osHostNow = sess.hasOs ? await _D.refreshOsHost(tg.osHost).catch((e) => ({ ...tg.osHost, password: '', privateKey: undefined, passphrase: undefined, authError: `자격 해석 실패(${String(e?.message || e).slice(0, 80)})`, authErrorCode: 'auth-unresolved' })) : null;
   const [os, idrac] = await Promise.all([
-    sess.hasOs ? withSlot(() => withDeadline(FOCUS_DEADLINE_MS, (signal) => _D.collectOs(tg.osHost, {
+    sess.hasOs ? withSlot(() => withDeadline(FOCUS_DEADLINE_MS, (signal) => _D.collectOs(osHostNow, {
       signal, budgetMs: FOCUS_BUDGET_MS, partitionIo: !!st.partitionIo, blkqMax: st.blkqMax, peakWindowS: Math.min(FOCUS_PEAK_WINDOW_S, Number(st.peakWindowS ?? FOCUS_PEAK_WINDOW_S) || 0),
-      extraCommands: [{ name: 'snap', cmd: FOCUS_SNAPSHOT_COMMAND, timeoutMs: 12_000, maxBytes: 16 * 1024 }],
+      // 83회차: 경량 스냅샷 안 시한 합(ps 2 · io 2+2 · 간격 2 · 이름 1 = 9초) + 여유 5초 ≤ 이 시한(산수 시험 bmTop8bBudget · rebut83) — ps 에도 시한을 붙여 12 → 15초.
+      extraCommands: [{ name: 'snap', cmd: FOCUS_SNAPSHOT_COMMAND, timeoutMs: 15_000, maxBytes: 16 * 1024 }],
+      // 8b 반증 F10: 집중 모니터링은 프로세스 Top-N exec 을 돌리지 않는다(자체 스냅샷 ps 상위가 있다 · top 값은 저장하지 않는다 — 매 분 top 대기 · /proc 읽기를 더하지 않게).
+      top: false,
     }), '집중 수집 시한 초과').catch((e) => ({ ok: false, error: String(e?.message || e).slice(0, 300) })), { priority: true, waitMs, onBusy: busy }) : null,
     sess.hasIdrac ? (idrStop ? { ok: false, kind: 'auth-stopped' } : withSlot(() => _D.idracJob(tg.idrac, { full: false, allowList: false, timeoutMs: FOCUS_DEADLINE_MS }).catch((e) => ({ ok: false, error: String(e?.message || e).slice(0, 300) })), { priority: true, waitMs, onBusy: busy })) : null,
   ]);
@@ -356,7 +392,8 @@ async function tick(sess, idx) {
   const missOs = sess.hasOs ? osMissOf(os) : 'no-path';
   const missIdrac = sess.hasIdrac ? idracMissOf(idrac) : 'no-path';
   // 인증 결과를 주기 수집과 같은 가드에 — 실패는 정지 · 성공은 해제.
-  if (sess.hasOs && os) await _D.recordOsAuth(tg, { ok: !!os.ok, errorText: missOs === 'auth' ? os.error : '' }).catch(() => {});
+  // 인증 결과는 이번 분에 실제로 쓴 자격 기준(세션 시작 때의 옛 자격이 아니라 — 반증 D9). 해석이 막은 분은 로그인하지 않았으므로 적지 않는다.
+  if (sess.hasOs && os && !osHostNow?.authError) await _D.recordOsAuth({ ...tg, osHost: osHostNow }, { ok: !!os.ok, errorText: missOs === 'auth' ? os.error : '' }).catch(() => {});
   if (sess.hasIdrac && idrac && idrac.kind !== 'auth-stopped' && !idrac.busy) await _D.recordIdracAuth(tg, { ok: !!idrac.ok, kind: idrac.kind || '', errorText: idrac.error || '' }).catch(() => {});
 
   // 값 — 주기 수집과 같은 계산(buildUsage · buildPerfEntry). 누적 카운터 이전 표본은 이 세션 것(첫 분은 주기 수집의 마지막 표본 사본 — 주기 수집 상태는 건드리지 않는다).

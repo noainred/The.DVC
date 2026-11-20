@@ -8,7 +8,7 @@
  * ⚠ 게이트는 소스 grep 이 아니라 **실제 라우터 스택**(api · adminRouter · svcmonRouter)에서 본다 —
  *   요청 문맥 사용자를 주입해 상태코드로 확인한다(v2.536 규약). 자식 프로세스인 이유: config 싱글턴.
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -16,12 +16,19 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
 const J = (p) => JSON.stringify(path.join(SRC, p));
 
 function run(script, { matrix = null, users = null } = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'superadmin2643-'));
+  const dir = tmpDir('superadmin2643-');
   if (matrix) fs.writeFileSync(path.join(dir, 'permissions.json'), JSON.stringify(matrix));
   if (users) fs.writeFileSync(path.join(dir, 'users.json'), JSON.stringify({ users }));
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', script], {

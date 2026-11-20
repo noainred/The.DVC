@@ -1,8 +1,8 @@
 // VM 프로비저닝 조회 — api.js(구 2,445줄) 분할(v2.283.0). 본문은 원본 그대로, 등록 순서는 api.js 호출 순서가 보존한다.
 import { expandSpec } from '../../provision/spec.js';
-import { listSources, listJobsScoped, getJob } from '../../provision/jobs.js';
+import { listSources, listJobsScoped, getJob, jobsStoreError } from '../../provision/jobs.js';
 import { getPlacement } from '../../provision/placement.js';
-import { listSaved, getSaved } from '../../provision/saved.js';
+import { listSaved, getSaved, savedReadError } from '../../provision/saved.js';
 import { requirePerm } from '../../auth/auth.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
@@ -47,7 +47,12 @@ api.get('/provision/saved', canProvision, (req, res) => {
 });
 api.get('/provision/saved/:id', canProvision, (req, res) => {
   const item = getSaved(req.params.id);
-  if (!item) return res.status(404).json({ ok: false, reason: '저장된 작업을 찾을 수 없습니다.' });
+  // 75회차(74회차 F9 반증 — 재현): 파일 읽기 오류 중에는 load() 가 빈 목록을 돌려 모든 id 가 '찾을 수 없음'(404)이었다 — 목록(readError)과 같은 사실로 503.
+  if (!item) {
+    const re = savedReadError();
+    if (re) return res.status(503).json({ ok: false, readError: true, reason: `저장된 작업 파일을 읽지 못했습니다(${re.code}) — 파일 권한 · 소유자를 확인하세요.` });
+    return res.status(404).json({ ok: false, reason: '저장된 작업을 찾을 수 없습니다.' });
+  }
   // 범위 밖(또는 vCenter 귀속 없는) 저장 작업은 존재를 숨기고 404(403 이 아닌 — 존재 은닉).
   const allowed = scopeOf(req);
   if (allowed && (!item.vcenterId || !allowed.has(item.vcenterId))) return res.status(404).json({ ok: false, reason: '저장된 작업을 찾을 수 없습니다.' });
@@ -59,7 +64,8 @@ api.get('/provision/saved/:id', canProvision, (req, res) => {
 api.get('/provision/jobs', (req, res) => {
   const allowed = scopeOf(req);
   const { jobs, omittedOutOfScope } = listJobsScoped(req.user, allowed);
-  res.json({ jobs, ...(allowed ? { scoped: true, omittedOutOfScope } : {}) });
+  const storeError = jobsStoreError();   // 반증 후속 ⑥: 작업 기록 파일을 못 읽어 저장을 보류 중이면 표지
+  res.json({ jobs, ...(allowed ? { scoped: true, omittedOutOfScope } : {}), ...(storeError ? { storeError } : {}) });
 });
 api.get('/provision/jobs/:id', (req, res) => {
   const job = getJob(req.params.id, req.user, scopeOf(req));

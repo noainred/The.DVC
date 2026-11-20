@@ -8,6 +8,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { centralSource } from './_centralSource.js'; // v2.954: central.js 가 영역별 파일로 나뉘었다(소스 스윕은 합친 소스로)
 
 test('logQueries: vcenterOfReq 가 reqId 의 발급 vCenter 를 유지(take 이후에도 소유권 검증 가능)', async () => {
   const m = await import('../src/central/logQueries.js');
@@ -19,7 +20,7 @@ test('logQueries: vcenterOfReq 가 reqId 의 발급 vCenter 를 유지(take 이�
 });
 
 test('정적: log-queries·ping-jobs GET 이 agent 모드에서 소유권 필터', () => {
-  const src = fs.readFileSync(new URL('../src/routes/central.js', import.meta.url), 'utf8');
+  const src = centralSource();
   for (const anchor of ["centralRouter.get('/log-queries'", "centralRouter.get('/ping-jobs'"]) {
     const i = src.indexOf(anchor);
     assert.ok(i >= 0, `${anchor} 존재`);
@@ -30,7 +31,7 @@ test('정적: log-queries·ping-jobs GET 이 agent 모드에서 소유권 필터
 });
 
 test('정적: log-query-result 는 vcenterOfReq 로, ping-result 는 vcenterId 로 소유권 검사', () => {
-  const src = fs.readFileSync(new URL('../src/routes/central.js', import.meta.url), 'utf8');
+  const src = centralSource();
   const lq = src.slice(src.indexOf("centralRouter.post('/log-query-result'"), src.indexOf("centralRouter.post('/log-query-result'") + 600);
   assert.match(lq, /vcenterOfReq\(b\.reqId\)/);
   assert.match(lq, /agentOwnsVcenter/);
@@ -39,7 +40,7 @@ test('정적: log-query-result 는 vcenterOfReq 로, ping-result 는 vcenterId �
 });
 
 test('정적: ip-scan-result 가 배정 ranges 밖 IP 를 드롭(agent 모드) — ranges 는 필터 전 1회 컴파일(논블로킹)', () => {
-  const src = fs.readFileSync(new URL('../src/routes/central.js', import.meta.url), 'utf8');
+  const src = centralSource();
   const body = src.slice(src.indexOf("centralRouter.post('/ip-scan-result'"), src.indexOf("centralRouter.post('/ip-scan-result'") + 1200);
   assert.match(body, /req\.centralAuth\.mode === 'agent'/);
   // ranges 를 필터 진입 전 1회 로드·컴파일해야 한다(IP마다 loadScanSettings 무캐시 read 금지 — 감사 회귀).

@@ -22,8 +22,14 @@ import { createTrendLoader, trendFetcher } from './bmTrendLoad.js';
 import { TrendRow, TimeAxis, Spark } from './BmTrendChart.jsx';
 // v2.929(5단계): 베이스라인 띠 · 변경 이벤트 · 집중 1분 점 겹침 · 구간 비교(BmTrendOps.jsx) — 패널 행에는 변경 이벤트 점만 얹는다.
 import { BaselineOverlay, CompareView } from './BmTrendOps.jsx';
+import { maintBands } from './bmMaintText.js'; // 8a단계 정비 창 음영
 import { changeMarks } from './bmPerfOpsText.js';
+// 6단계: 운영 주석 ◆ 핀(패널 행 · 겹침 카드) · 목록 · 입력.
+import AnnotationsCard, { useAnnotations } from './BmAnnotations.jsx';
+import { annotMarks } from './bmAnnotText.js';
+import { violationBands } from './bmRunbookText.js'; // 6단계 목표선 위반 띠(서버 판정 그대로)
 import BmTrendPopup from './BmTrendPopup.jsx';
+import { windowRangeText } from '../../components/vmperf/vmPerfText.js'; // 점검 반복 2회차 I1 — 창 문구(날짜 포함 · 공용 코어)
 import {
   TREND_RANGES, trendRangeOf, SHOW_MODES, showAvg, showPeak, metricInfo, PANEL_ROWS, SOCKET_NOTE, SOURCE_TAGS, SOURCE_ORDER, RECO_TILES,
   SECOND_COLORS, recoMetrics, resText, resHint, peakSrcText, trendNotes, trendErrorText, valText, yMaxFor, noPeakRuns, nearestPoint,
@@ -32,6 +38,8 @@ import {
   pairText, mapSourceRows, portStateCounts, portNotes,
 } from './bmTrendText.js';
 import './bmTrend.css';
+import { perfPath } from './bmPerfUrl.js'; // 다음 점검 ①: 서버 = (법인, 키) 쌍 — 요청에 법인을 싣는다
+import { saveBlob } from '../../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나
 
 const DEV_SEGS = Object.freeze([
   { k: 'none', label: '서버 전체' },
@@ -48,11 +56,7 @@ const hm = (ms) => { const d = new Date(ms); return `${two(d.getHours())}:${two(
 function downloadText(text, name) {
   if (typeof document === 'undefined' || typeof URL === 'undefined' || typeof Blob === 'undefined') return;
   const blob = new Blob([text], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = name;
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  saveBlob(blob, name);
 }
 
 /** 단순 조회(장치 목록 · 포트 대조) — 세대로 늦은 응답을 버린다. */
@@ -100,18 +104,19 @@ function Seg({ items, value, onChange, label, className = '' }) {
  * @param {{itemKey:string, name?:string, th?:object, latest?:object|null, keepDays?:{server?:number,dev?:number}|null, narrowOverride?:boolean}} p
  *   latest — 성능 상세의 최근 5분 장치 값(entry.detail: disks · nics) · keepDays — 이 노드 대상의 보존(일). 엣지 위임 서버는 null(모름).
  */
-export default function BmTrendTab({ itemKey, name = '', latest = null, keepDays = null, initialRange = '24h', narrowOverride = null }) {
+export default function BmTrendTab({ itemKey, name = '', latest = null, keepDays = null, initialRange = '24h', narrowOverride = null, vcenterId = '', initial = null, onState = null }) {
   // ⚠ 훅은 전부 조기 return 위.
-  const [rangeK, setRangeK] = useState(() => trendRangeOf(initialRange).k);
-  const [show, setShow] = useState('both');
+  // 6단계 공유 링크: initial(기간 · 창 끝 · 커서 · 구간 · 평균/피크 · 장치 토글)로 시작할 수 있다 — 형식은 bmShare.parseShareHash 가 이미 걸렀다.
+  const [rangeK, setRangeK] = useState(() => trendRangeOf(initial?.range || initialRange).k);
+  const [show, setShow] = useState(() => initial?.show || 'both');
   const [sync, setSync] = useState(true);
-  const [clock, setClock] = useState(() => ({ at: Date.now(), n: 0 }));
+  const [clock, setClock] = useState(() => ({ at: Number.isFinite(initial?.to) && initial.to < Date.now() ? initial.to : Date.now(), n: 0 }));
   const [series, setSeries] = useState({});
   const [mountSeries, setMountSeries] = useState({});
-  const [tg, setTg] = useState({ linked: true, editing: 'avg', avg: { ...DEFAULT_TOGGLE }, peak: { ...DEFAULT_TOGGLE } });
+  const [tg, setTg] = useState(() => { const t0 = { ...DEFAULT_TOGGLE, ...(initial?.disk ? { disk: initial.disk } : {}), ...(initial?.net ? { net: initial.net } : {}), ...(initial?.layout ? { layout: initial.layout } : {}) }; return { linked: true, editing: 'avg', avg: { ...t0 }, peak: { ...t0 } }; });
   const [legend, setLegend] = useState({});
-  const [cur, setCur] = useState(null);       // { ms, panel }
-  const [sel, setSel] = useState(null);       // { from, to }
+  const [cur, setCur] = useState(() => (Number.isFinite(initial?.cursor) ? { ms: initial.cursor, panel: 'avg' } : null));       // { ms, panel }
+  const [sel, setSel] = useState(() => initial?.sel || null);       // { from, to }
   const [pop, setPop] = useState(null);
   const [recoOn, setRecoOn] = useState(false);
   const [devSeg, setDevSeg] = useState('none');
@@ -121,19 +126,34 @@ export default function BmTrendTab({ itemKey, name = '', latest = null, keepDays
   const recoRef = useRef(null);
   const loader = useRef(null);
   const mLoader = useRef(null);
-  if (!loader.current) loader.current = createTrendLoader(trendFetcher(itemKey));
-  if (!mLoader.current) mLoader.current = createTrendLoader(trendFetcher(itemKey));
+  // 다음 점검 ①: 서버 = (법인, 키) 쌍 — vcenterId(상세가 정한 그 서버의 법인)를 모든 요청에 함께(서버를 바꾸면 이 탭은 새로 마운트된다 — key).
+  if (!loader.current) loader.current = createTrendLoader(trendFetcher(itemKey, vcenterId));
+  if (!mLoader.current) mLoader.current = createTrendLoader(trendFetcher(itemKey, vcenterId));
 
   const span = trendRangeOf(rangeK).ms;
   const win = useMemo(() => ({ from: clock.at - span, to: clock.at }), [clock.at, span]);
   const mWin = useMemo(() => ({ from: clock.at - MOUNT_SPAN, to: clock.at }), [clock.at]);
   const winKey = `${itemKey}|${win.from}|${win.to}|${clock.n}`;
-  const devs = useOnceJson(itemKey ? `/tools/bm-usage/perf/${encodeURIComponent(itemKey)}/devices` : '', clock.n);
-  const ports = useOnceJson(itemKey ? `/tools/bm-usage/perf/${encodeURIComponent(itemKey)}/ports` : '', clock.n);
+  const devs = useOnceJson(itemKey ? perfPath(itemKey, vcenterId, '/devices') : '', clock.n);
+  const ports = useOnceJson(itemKey ? perfPath(itemKey, vcenterId, '/ports') : '', clock.n);
   const devices = useMemo(() => (devs.data && devs.data.ok !== false && devs.data.devices) || { disk: [], nic: [], mount: [] }, [devs.data]);
   // v2.929: 같은 창의 변경 이벤트(+ 집중 1분 점) — 창이 바뀔 때 1회(폴링 없음). 패널 행 위 점과 겹침 카드가 같은 응답을 쓴다.
-  const changes = useOnceJson(itemKey ? `/tools/bm-usage/perf/${encodeURIComponent(itemKey)}/changes?from=${Math.floor(win.from)}&to=${Math.floor(win.to)}&focus=1` : '', clock.n);
-  const chMarks = useMemo(() => changeMarks(changes.data?.events || [], win), [changes.data, win]);
+  const changes = useOnceJson(itemKey ? perfPath(itemKey, vcenterId, '/changes', `from=${Math.floor(win.from)}&to=${Math.floor(win.to)}&focus=1`) : '', clock.n);
+  // 6단계: 공유 링크 · 캡처가 쓸 지금 상태를 부모에 알린다(렌더마다가 아니라 값이 바뀔 때만).
+  useEffect(() => { onState?.({ range: rangeK, show, to: clock.at, cursor: cur?.ms ?? null, sel, disk: tg.avg?.disk, net: tg.avg?.net, layout: tg.avg?.layout, from: clock.at - span }); }, [rangeK, show, clock.at, cur?.ms, sel, tg, span]); // eslint-disable-line react-hooks/exhaustive-deps
+  const chMarks0 = useMemo(() => changeMarks(changes.data?.events || [], win), [changes.data, win]);
+  // 6단계: 같은 창의 운영 주석 — 창이 바뀌거나 저장할 때 1회(annTick). 기계 이벤트(●)와 같은 줄에 ◆ 핀.
+  const [annTick, setAnnTick] = useState(0);
+  const ann = useAnnotations(itemKey ? [itemKey] : [], win, `${clock.n}|${annTick}`, [vcenterId]);
+  const anMarks = useMemo(() => annotMarks(ann.list, win), [ann.list, win]);
+  const chMarks = useMemo(() => [...chMarks0, ...anMarks], [chMarks0, anMarks]);
+  // 6단계: 목표선 위반 띠 — 켤 때만 읽는다(목표 지표마다 추이를 다시 읽는다 — 엣지 위임 서버는 그만큼 WAN 요청이 는다).
+  const [sloOn, setSloOn] = useState(false);
+  const slo = useOnceJson(itemKey && sloOn ? perfPath(itemKey, vcenterId, '/slo', `from=${Math.floor(win.from)}&to=${Math.floor(win.to)}`) : '', clock.n);
+  const vb = useMemo(() => violationBands(slo.data), [slo.data]);
+  // 8a단계: 정비 창 음영 — 그 서버를 덮는 창 구간(서버 판정 코어 · 창이 바뀔 때 1회 · 폴링 없음). 변경 이벤트 ‘정비 창 안’ 묶음도 같은 구간.
+  const maint = useOnceJson(itemKey ? `/tools/bm-usage/maintenance/occurrences?key=${encodeURIComponent(itemKey)}${vcenterId ? `&vcenterId=${encodeURIComponent(vcenterId)}` : ''}&from=${Math.floor(win.from)}&to=${Math.floor(win.to)}` : '', clock.n);
+  const mb = useMemo(() => maintBands(maint.data), [maint.data]);
 
   useEffect(() => {
     if (narrowOverride != null || typeof window === 'undefined') return undefined;
@@ -201,7 +221,7 @@ export default function BmTrendTab({ itemKey, name = '', latest = null, keepDays
   const res = headData?.res || null;
   const notes = trendNotes(headData || {});
   const peakSrcs = [...new Set([...(headData?.peakSrc || []), ...wanted.flatMap((s) => dataOf(s)?.peakSrc || [])])];
-  const pSrcText = peakSrcText(peakSrcs.length ? peakSrcs : (devs.data?.peakSrc ? [devs.data.peakSrc] : []), devs.data?.peakWindowS);
+  const pSrcText = peakSrcText(peakSrcs.length ? peakSrcs : (devs.data?.peakSrc ? [devs.data.peakSrc] : []), devs.data?.peakWindowS, devs.data?.peakWindowCapS);
   const loadingN = Object.values(series).filter((v) => v.status === 'loading').length;
   const err403 = headErr?.error?.status === 403 ? headErr.error : null;
   const setRange = (k) => { setRangeK(k); setClock((c) => ({ at: Date.now(), n: c.n })); };
@@ -213,7 +233,7 @@ export default function BmTrendTab({ itemKey, name = '', latest = null, keepDays
     return { ...p, [which]: { ...p[which], ...patch } };
   });
   const tgNow = tg.linked || tg.editing === 'avg' ? tg.avg : tg.peak;
-  const selText = sel ? `${whenText(sel.from, span)} ~ ${whenText(sel.to, span)} (선택)` : '';
+  const selText = sel ? `${windowRangeText(sel.from, sel.to)} (선택)` : '';   // 점검 반복 2회차 I1: 날짜를 붙인 공용 코어(팝업 칩과 같은 글자)
 
   /** 패널 한 장. */
   const renderPanel = (which) => {
@@ -288,7 +308,7 @@ export default function BmTrendTab({ itemKey, name = '', latest = null, keepDays
           const sub = [baseSub, groupFirst ? restNote(rp.rest) : '', groupFirst && rp.autoRows ? '8개 초과 — 행 나눔으로 바꿨습니다' : ''].filter(Boolean).join(' · ');
           return (
             <TrendRow key={rp.id} title={title} sub={sub} readout={readout} series={lines} win={win} yMax={yMax} cursor={cursorMs} sel={sel} baseline={isPeak ? null : baseline}
-              gaps={[]} noPeak={noPeak} message={lines.length ? '' : msg} note={lines.length ? msg : ''} legend={lg} unit={info.unit} marks={chMarks}
+              gaps={[]} noPeak={noPeak} message={lines.length ? '' : msg} note={lines.length ? msg : ''} legend={lg} unit={info.unit} marks={chMarks} vbands={!rp.dev ? (vb[r.metric] || []) : []} mbands={mb}
               onHover={(ms) => setCur(ms == null ? null : { ms, panel: which })} onSelect={setSel}
               onOpen={() => open(first, { show: isPeak ? 'peak' : 'avg' })} />
           );
@@ -324,7 +344,8 @@ export default function BmTrendTab({ itemKey, name = '', latest = null, keepDays
       </div>
       <div className="bmt-meta">
         <span className="bmp-chip">{headData ? resText(headData) : '해상도 —'}</span>
-        <span>{`${whenText(win.from, span)} ~ ${whenText(win.to, span)} · 서버가 창 · 해상도 · 결측을 정합니다`}</span>
+        {/* 점검 반복 2회차 I1: 창 문구는 날짜를 붙인 공용 코어(vmPerfText.windowRangeText — 팝업과 같은 글자) · 24시간 창이 ‘01:24 ~ 01:24’ 로 길이 0 처럼 읽혔다. 축 눈금은 그대로 whenText. */}
+        <span>{`${windowRangeText(win.from, win.to)} · 서버가 창 · 해상도 · 결측을 정합니다`}</span>
       </div>
       {res && <p className="bmt-note">{resHint(res)}</p>}
       {notes.map((x, i) => <p key={i} className="bmt-note"><BoldText text={x} /></p>)}
@@ -352,16 +373,21 @@ export default function BmTrendTab({ itemKey, name = '', latest = null, keepDays
       {/* ── ① 평균 · ② 피크 ── */}
       {showAvg(show) && renderPanel('avg')}
       {showPeak(show) && renderPanel('peak')}
-      <p className="bmt-note">{SOCKET_NOTE}{chMarks.length ? ` · 행 위 파란 점선 = 변경 이벤트(${chMarks.length}곳 — 아래 목록)` : ''}</p>
+      <div className="bmt-ctl">
+        <label className="bmt-check"><input type="checkbox" checked={sloOn} onChange={(e) => setSloOn(e.target.checked)} /> 목표선 위반 띠(빨강) 겹치기</label>
+        {sloOn && <span className="bmt-hint">{slo.loading ? '목표를 대 보는 중…' : slo.err ? `목표를 읽지 못했습니다: ${trendErrorText(slo.err)}` : `목표 ${(slo.data?.items || []).length}개 · 위반 띠 ${Object.values(vb).reduce((a, x) => a + x.length, 0)}곳 — 목표선 탭에 달성률`}</span>}
+      </div>
+      <p className="bmt-note">{SOCKET_NOTE}{chMarks0.length ? ` · 행 위 파란 점선 = 변경 이벤트(${chMarks0.length}곳 — 아래 목록)` : ''}{anMarks.length ? ` · 보라 ◆ = 운영 주석(${anMarks.length}곳 — 가리키면 내용)` : ''}{mb.length ? ` · 주황 음영 = 정비 창(${mb.length}곳 — 가리키면 이름)` : ''}</p>
 
       {/* ── v2.929(5단계): 베이스라인 띠 · 변경 이벤트 · 집중 1분 점 · 구간 비교 ── */}
-      <BaselineOverlay itemKey={itemKey} win={win} changes={changes.data && changes.data.ok !== false ? changes.data : null} narrow={narrow} />
+      <BaselineOverlay itemKey={itemKey} vc={vcenterId} win={win} changes={changes.data && changes.data.ok !== false ? changes.data : null} narrow={narrow} annotMarks={anMarks} maintBands={mb} />
+      <AnnotationsCard itemKey={itemKey} name={name} vcenterId={vcenterId} sel={sel} list={ann.list} err={ann.err} actions={ann.actions} onChanged={() => setAnnTick((v) => v + 1)} />
       {changes.err && <p className="bmt-note" style={{ color: toneVar('warn') }}>변경 이벤트를 읽지 못했습니다: {trendErrorText(changes.err)}</p>}
       <div className="bmt-ctl">
         <button type="button" className="btn btn-sm bmp-touch" aria-expanded={cmpOn} onClick={() => setCmpOn((v) => !v)}>{cmpOn ? '구간 비교 닫기' : '구간 비교(A/B) 열기'}</button>
         <span className="bmt-hint">위 패널에서 끌어 고른 구간이 B 가 됩니다(없으면 최근 1시간).</span>
       </div>
-      {cmpOn && <CompareView itemKey={itemKey} sel={sel} name={name} />}
+      {cmpOn && <CompareView itemKey={itemKey} vc={vcenterId} sel={sel} name={name} />}
 
       {/* ── 선택 구간 요약 ── */}
       <section className="bmt-card" aria-label="선택 구간 요약">
@@ -662,8 +688,8 @@ export default function BmTrendTab({ itemKey, name = '', latest = null, keepDays
       </section>
 
       {pop && (
-        <BmTrendPopup itemKey={itemKey} name={name} init={pop} devices={devices} keepDays={keepDays} anchor={clock.at}
-          initWin={pop.rangeK === rangeK ? win : null} peakWindowS={devs.data?.peakWindowS ?? null}
+        <BmTrendPopup itemKey={itemKey} vc={vcenterId} name={name} init={pop} devices={devices} keepDays={keepDays} anchor={clock.at}
+          initWin={pop.rangeK === rangeK ? win : null} peakWindowS={devs.data?.peakWindowS ?? null} peakWindowCapS={devs.data?.peakWindowCapS ?? null}
           onClose={() => setPop(null)} onSel={(s) => setSel(s)} />
       )}
     </div>

@@ -1,7 +1,7 @@
 // v2.909 통합 장비 검색 — 화면 쪽 순수 모듈(접두 · 이동 주소 · 최근 항목 · 행 메타) 고정. 서버 판정과의 접두 대조는 server/test/invSearch2909.test.js.
 import { describe, it, expect } from 'vitest';
 import {
-  splitPrefix, withKindPrefix, focusPlan, listPlan, canFilter, HANDOFF_TARGETS, FOCUS_TARGETS, readRecent, pushRecent, clearRecent, RECENT_MAX, agoText, recentKeyFor,
+  splitPrefix, withKindPrefix, focusPlan, listPlan, canFilter, HANDOFF_TARGETS, FOCUS_TARGETS, EXTRA_HANDOFF_TARGETS, readRecent, pushRecent, clearRecent, RECENT_MAX, agoText, recentKeyFor,
   highlightParts, metaParts, shownSerial, shownIp, statusTone, builtAgoText, recentIdsParam, VIA_LABEL, RECENT_ID_MAX,
 } from './invSearchQuery.js';
 import fs from 'node:fs';
@@ -64,7 +64,7 @@ describe('이동 — 기존 상세 주소 · 검색어는 메모리 인계(URL �
     walk(root);
     const src = files.map((f) => fs.readFileSync(f, 'utf8')).join('\n');
     const app = fs.readFileSync(path.join(root, 'App.jsx'), 'utf8');
-    for (const t of [...HANDOFF_TARGETS, ...FOCUS_TARGETS]) {
+    for (const t of [...HANDOFF_TARGETS, ...FOCUS_TARGETS, ...EXTRA_HANDOFF_TARGETS]) {
       const viaHook = src.includes(`useSearchHandoff('${t}'`) || src.includes(`useFocusHandoff('${t}'`);
       const viaTake = src.includes(`takeSearch('${t}')`);
       const viaApp = new RegExp(`INV_FILTER_TABS = \\[[^\\]]*'${t}'`).test(app);

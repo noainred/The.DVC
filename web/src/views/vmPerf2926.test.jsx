@@ -12,9 +12,9 @@ describe('① EntityDetail type=vm → VmDrawer (옛 VM 모달 제거)', () => {
     expect(s).toMatch(/const VmDrawer = React\.lazy\(\(\) => import\('\.\.\/views\/vms\/VmDrawer\.jsx'\)\)/);
     expect(s).toMatch(/if \(type === 'vm'\) return <Lazy><VmDrawer vm=\{item\} rows=\{\[\]\} onClose=\{onClose\}/);
     expect(s).not.toMatch(/type === 'vm' && <VmPartitionsSection|<DRow label="vCPU">|RightsizeReport|<VmMetricButton/);
-    expect(s).toMatch(/type === 'host' && <HostBasicRows/);
-    expect(s).toMatch(/type === 'datastore' && <DsBrowseSection/);
-    expect(s).toMatch(/<HostMetricButton hostId=\{item\.id\}/);
+    // v2.975: 호스트 가지도 드로어로 위임됐다(hosts/hostDrawer2975.test.jsx) — 남은 모달은 데이터스토어뿐.
+    expect(s).toMatch(/if \(type === 'host'\) return <Lazy><HostDrawer host=\{item\} rows=\{\[\]\}/);
+    expect(s).toMatch(/<DsBrowseSection item=\{item\} \/>/);
   });
   it('옛 모달을 쓰던 5곳은 여전히 EntityDetail/VmLink 를 거친다(드로어가 자동으로 적용된다) — 직접 Modal 을 만들지 않는다', () => {
     for (const rel of ['./Alarms.jsx', './Explore.jsx', './VCenters.jsx']) expect(read(rel)).toMatch(/<EntityDetail /);

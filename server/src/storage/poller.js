@@ -29,11 +29,12 @@ import { withDeadline, deadlineMs } from '../proxy/sshExec.js';
 import { poolRun } from '../util/pool.js'; // v2.575 IMP-08 — 동시성 풀 단일 소스
 // v2.708 데모(mock): 등록부 시드·이력 백필·타입별 합성 스냅샷. live 에서는 mock- 장비를 건너뛴다.
 import { isMockMode, ensureStorageDemo, demoStorageSnapshot, isDemoId, demoIsilonAreas } from '../mock/demo/storage.js';
+import { envPositive, ENV_INT_MAX } from '../util/envNumber.js'; // 결정(56~75 남긴 것) 57 · 58: 시한 · 개수 env 의 Infinity · 2^31 초과 · 음수는 기본값(예전 `Math.max(하한, Number(env) || 기본)` 은 Infinity · 3e9 를 통과시켜 setTimeout 이 1ms 로 바꿨다 · 개수는 무제한)
 /** 장비당 수집 타임아웃 — 느린 어레이 1대가 전체 주기를 막지 않게(기본 3분, 하한 30초). */
-const DEVICE_TIMEOUT_MS = Math.max(30_000, Number(process.env.STORAGE_DEVICE_TIMEOUT_MS) || 180_000);
+const DEVICE_TIMEOUT_MS = Math.max(30_000, envPositive(process.env.STORAGE_DEVICE_TIMEOUT_MS, 180_000, { max: ENV_INT_MAX }));
 // v2.598 T2598-01: OneFS 영역 수집(66 엔드포인트 직렬)의 시한 — 예전엔 없어서 응답 없는 장비 하나가 최대 약 16.5분
 // 동안 폴러의 재진입 가드를 붙잡았다. 장비 수집 시한과 따로 둔다(고RTT 현장의 정상 영역 수집이 3분을 넘을 수 있다).
-const AREAS_TIMEOUT_MS = Math.max(60_000, Number(process.env.STORAGE_AREAS_TIMEOUT_MS) || 300_000);
+const AREAS_TIMEOUT_MS = Math.max(60_000, envPositive(process.env.STORAGE_AREAS_TIMEOUT_MS, 300_000, { max: ENV_INT_MAX }));
 const COLLECTORS = { isilon: isilon.collect, powerstore: powerstore.collect, unity480: unity.collect,
   xtremio: xtremio.collect, vmax: powermax.collect, powermax: powermax.collect,
   vplex: vplex.collect, metronode: vplex.collect };

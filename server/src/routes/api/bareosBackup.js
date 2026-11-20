@@ -15,9 +15,10 @@ import { logAudit } from '../../audit.js';
 import {
   publicSettings, publicDirector, saveSettings, addDirector, updateDirector, checkDirectorUpdate, deleteDirector, settingsLoadError, settingsRev,
   directorConn, directorCred, directorById, loadSettings, jobDirectorId, siteMissing, anyDirectorConfigured, LIMITS,
+  directorEndpointPeers,   // 104회차 D1 우회 — 같은 Director(주소 · 포트 · 담당)를 가리키는 다른 등록(화면의 vCenter 묶기 판정)
 } from '../../bareos/settings.js';
 import {
-  listJobs, getJob, patchJob, deleteJob, markPending, addRestore, registryLoadError, jobVmIds, MAX_JOBS, restoreOpen, restoreHeld, restoreUnknownHeld, restoreFinishing, clearPending, applyRunRow, applyRestoreRow, registryRev, inBatch, markCancelReq,
+  listJobs, jobDigests, getJob, patchJob, deleteJob, markPending, addRestore, registryLoadError, jobVmIds, MAX_JOBS, restoreOpen, restoreHeld, restoreUnknownHeld, restoreFinishing, clearPending, applyRunRow, applyRestoreRow, registryRev, inBatch, markCancelReq, runUnknownHeld, RUN_UNKNOWN_HOLD_MS,
 } from '../../bareos/registry.js';
 import { cancelInfo, cancelGate, CANCEL_WAIT_MS } from '../../bareos/cancelState.js';
 import { parseBanner } from '../../bareos/director.js';
@@ -61,6 +62,7 @@ import { jobPolicyResolver, policyRev } from '../../bareos/policy.js';
 import { listGroups, groupsLoadError, groupsRev } from '../../bareos/groups.js';
 import { getMarks, marksUnreadable, marksRev } from '../../veeam/backupMarks.js';
 import { registryHosts, vcHostOf } from '../../bareos/vcHost.js';
+import { scopeSig } from '../../util/scopeSig.js';
 
 const adminOnly = requireRole('admin');
 const fullScopeOnly = fullScopeOnlyWith('Bareos Director 설정은 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 볼 수 있습니다.');
@@ -253,6 +255,21 @@ function visibleDirectorIds(user, settings) {
   return ids;
 }
 
+/**
+ * 52회차 D2: 수동 대조를 해도 되는 Director — 그 Director 의 vCenter(매핑 + 대상)가 모두 쓰기 범위 안. 쓰기 무제한이면 null(전부).
+ * 판정이 던지면 빈 집합(대조 없음 — 거부 기본값). vCenter 가 하나도 없는 Director 는 쓰기 범위 계정에 밖이다.
+ */
+function reconcileDirectorIds(user, settings) {
+  let w = null;
+  try { w = writeScopedVcenterIds(user, store.get()); } catch { return new Set(); }
+  if (!w) return null;
+  const vcsOf = new Map();
+  const add = (dir, vc) => { const a = vcsOf.get(dir) || new Set(); a.add(String(vc)); vcsOf.set(dir, a); };
+  for (const s of settings.sites || []) add(s.directorId, s.vcenterId);
+  for (const j of jobDigests()) add(jobDirectorId(j, settings), j.vcenterId);   // 반증 D1b: 얕은 요약으로(깊은 복사 listJobs 는 3,000건 약 100ms)
+  return new Set([...vcsOf.entries()].filter(([, vcs]) => vcs.size > 0 && [...vcs].every((v) => w.has(v))).map(([id]) => id));
+}
+
 /** 범위 필터(조회 범위) — 뺀 개수는 밝힌다. */
 function scopedJobs(user) {
   const all = listJobs();
@@ -433,7 +450,7 @@ api.get('/tools/bareos-backup', adminOnly, (req, res) => memoJson(req, res, 'bar
 function bareosListKey(req) {
   const snap = store.get();
   let w = 'err';
-  try { const ws = writeScopedVcenterIds(req.user, snap); w = ws ? [...ws].sort().join(',') : 'all'; } catch { w = 'err'; }
+  try { w = scopeSig(writeScopedVcenterIds(req.user, snap)); } catch { w = 'err'; }
   const p = pollerStatus();
   const dirs = Object.entries(p.directors || {}).map(([k, v]) => `${k}:${v?.at ?? ''}:${v?.ok}:${v?.relay || ''}:${v?.code || ''}`).join(',');
   let auth = '';
@@ -523,7 +540,8 @@ api.get('/tools/bareos-backup/settings', adminOnly, fullScopeOnly, (req, res) =>
   res.json({
     demo,
     ...pub,
-    directors: pub.directors.map((d) => ({ ...d, jobs: jobsByDir.get(d.id) || 0, busy: isSetupBusy(d.id) })),
+    // 104회차: sameEndpoint = 같은 Director 를 가리키는 다른 등록 id(서버 directorBindIssue 와 같은 판정 directorEndpointPeers — 화면이 '이미 묶임' 을 같은 규칙으로 막는다)
+    directors: (() => { const peers = directorEndpointPeers(st.directors); return pub.directors.map((d) => ({ ...d, jobs: jobsByDir.get(d.id) || 0, busy: isSetupBusy(d.id), ...(peers.get(d.id)?.length ? { sameEndpoint: peers.get(d.id) } : {}) })); })(),
     rev: revToken(),   // 매핑·기본값 저장 때 돌려보낸다(P4 — 다른 화면의 저장을 덮지 않게)
     agents: (() => { try { return knownAgentNames(); } catch { return []; } })(),   // v2.824 담당 엣지 고르기(중앙이 아는 엣지)
     // v2.824 검토(W11·I3): 대행 작업 인출은 엣지별 개별 토큰 전용 — 토큰이 있는 엣지 이름(화면이 없는 이름을 '대행 불가' 로 표시)
@@ -735,7 +753,7 @@ async function runSetup(d, kind, b, local) {
   try { value = await relayToEdge(d, kind, args, { secretArgs }); }
   catch (e) {
     // 엣지가 되돌렸다(새 콘솔 접속 실패·저장 실패) — 그사이 주기 조회가 남긴 인증 정지는 사실이 아니다(직접 경로 P2-12 와 같다 · C10)
-    if (kind === 'setup.director' && (e?.code === 'console-login' || e?.code === 'save')) bareosAuthGuard.clearAuthStop(directorCred(d).id);
+    if (kind === 'setup.director' && (e?.code === 'console-login' || e?.code === 'save')) bareosAuthGuard.clearAuthStop(directorCred(d).id, { verified: false });
     throw e;
   }
   if (kind === 'setup.director') {
@@ -913,6 +931,7 @@ api.post('/tools/bareos-backup/jobs/:id/run', adminOnly, async (req, res) => {
 async function runRoute(req, res, job) {
   const mm = modeMismatch(job); if (mm) return res.status(409).json({ ok: false, reason: mm });
   if (job.pending?.jobid) return res.status(409).json({ ok: false, reason: `이미 실행 중입니다(jobid ${job.pending.jobid}).` });
+  if (runUnknownHeld(job)) return res.status(409).json({ ok: false, code: 'held', reason: `직전 실행 요청의 결과를 모릅니다(Director 가 받았을 수 있습니다) — 같은 백업이 두 번 돌지 않게 ${Math.round(RUN_UNKNOWN_HOLD_MS / 60_000)}분 동안 다시 보내지 않습니다. Director 에서 실행 여부를 확인하세요(실행이 원장에 보이면 먼저 풀립니다).` });
   if (!job.enabled) return res.status(409).json({ ok: false, reason: '비활성 대상입니다 — 먼저 활성화하세요.' });
   const level = normLevel(req.body?.level || job.level);
   try {
@@ -922,9 +941,11 @@ async function runRoute(req, res, job) {
     audit(req, 'Bareos 백업 실행', `${job.vcenterId}/${job.vmName}`, `jobid ${jobid} · ${level}`);
     res.status(202).json({ ok: true, jobid });
   } catch (e) {
-    patchJob(job.id, { lastError: { at: Date.now(), message: String(e?.message || e).slice(0, 300) } });
-    audit(req, 'Bareos 백업 실행', `${job.vcenterId}/${job.vmName}`, `실패 — ${String(e?.message || e).slice(0, 160)}`);
-    sendErr(res, e);
+    // 전체 점검 3회차(B-3): 보낸 뒤 끊김 · 엣지 대행 결과 모름은 '실패' 가 아니다 — 원장에 결과 모름 표지(시한부 재요청 막기)를 남기고 504
+    const unknown = !!e?.unknown || e?.code === 'unknown';
+    patchJob(job.id, { lastError: { at: Date.now(), message: String(e?.message || e).slice(0, 300), ...(unknown ? { unknown: true } : {}) } });
+    audit(req, 'Bareos 백업 실행', `${job.vcenterId}/${job.vmName}`, `${unknown ? '결과 모름' : '실패'} — ${String(e?.message || e).slice(0, 160)}`);
+    sendErr(res, unknown ? Object.assign(new Error(String(e?.message || e)), { code: 'unknown' }) : e);
   }
 }
 
@@ -1742,12 +1763,16 @@ api.post('/tools/bareos-backup/digest/send', adminOnly, fullScopeOnly, fullWrite
 /** 지금 상태 조회(폴러와 같은 가드 — 모든 Director). */
 api.post('/tools/bareos-backup/poll', adminOnly, async (req, res) => {
   // v2.823 검토(S1): 범위 계정의 '지금 조회' 는 자기 법인 Director 만 조회한다(다른 법인 Director 에 접속·대조를 일으키지 않는다)
-  const vis = visibleDirectorIds(req.user, effectiveSettings());
+  const eff = effectiveSettings();
+  const vis = visibleDirectorIds(req.user, eff);
+  // 52회차 D2(사용자 결정 — 2026-11-17): 수동 조회의 대조(Director 잡 끄기 · 켜기 — 상태 변경)는 그 Director 의 vCenter 가 **모두 쓰기 범위 안**인 계정만.
+  //   조회 전용 범위 계정(writeVcenters 로 좁힌 계정 포함)은 상태만 새로 읽는다 — 예전에는 조회만 되는 계정의 POST 가 Director 잡을 다시 disable 했다.
+  const recOnly = reconcileDirectorIds(req.user, eff);
   if (vis) {
-    const p = vis.size ? await pollOnce({ trigger: 'manual', directorIds: [...vis] }) : pollerStatus();
+    const p = vis.size ? await pollOnce({ trigger: 'manual', directorIds: [...vis], ...(recOnly ? { reconcileOnly: recOnly } : {}) }) : pollerStatus();
     return res.json({ ok: true, poller: scopedPoller(p, vis) });
   }
-  const p = await pollOnce({ trigger: 'manual' });
+  const p = await pollOnce({ trigger: 'manual', ...(recOnly ? { reconcileOnly: recOnly } : {}) });
   res.json({ ok: true, poller: addrVisible(req) ? p : maskedPoller(p) });
 });
 
@@ -1762,3 +1787,6 @@ api.get('/tools/bareos-backup/badges', requirePerm('tools'), (req, res) => {
 });
 
 }
+
+/** 시험 전용(52회차 D2) — 수동 대조를 해도 되는 Director 판정. */
+export const _reconcileDirectorIdsForTest = reconcileDirectorIds;

@@ -345,10 +345,12 @@ export function registerIssues(api) {
   // v2.888 C-3 수정 버전별 이슈 수(릴리스 노트의 '이 버전에서 고친 이슈' 한 줄) — 로그인 사용자 전부 · 범위가 먼저(볼 수 있는 이슈만 센다).
   api.get('/issues/versions', (req, res) => {
     res.set('Cache-Control', 'no-store');
-    const fix = {};
+    // 67회차 F2(재현): 버전 이름이 표의 키다 — VERSION_RE 는 'constructor' · 'toString' · 'valueOf' 를 받는데 예전 `{}` 는 그 키에서
+    //   전역 Object 함수(Object.prototype.toString 등)를 꺼내 total · open 을 그 함수에 덧붙였고 응답에서는 그 버전이 빠졌다. 프로토타입 없는 표 + 자기 칸만.
+    const fix = Object.create(null);
     for (const r of listIssues({ done: 'all', limit: LIMITS.issueMax, access: accessOf(req) }).rows) {
       if (!r.fixVersion) continue;
-      const c = fix[r.fixVersion] || (fix[r.fixVersion] = { total: 0, open: 0 });
+      const c = Object.hasOwn(fix, r.fixVersion) ? fix[r.fixVersion] : (fix[r.fixVersion] = { total: 0, open: 0 });
       c.total += 1; if (r.status !== 'done') c.open += 1;
     }
     res.json({ ok: true, fix });

@@ -115,6 +115,7 @@ export function alertKeyOf(x) {
   if (!t(x?.scope)) return `|${t(x?.testId)}`;
   const tn = t(x?.target?.name); const sn = t(x?.test?.name);
   if (!tn || !sn) return x?.metaTimeout === true ? `${t(x.scope)}${SEP}#${t(x?.testId)}` : null;
+  if (x?.test?.dupPending === true) return null;   // v2.954: 이름 중복을 아직 확정할 수 없다(svcmonEdge alertInfoOf) — 보류(시한은 svcmonEdge)
   if (x?.test?.dupName) return `${t(x.scope)}${SEP}#${t(x?.testId)}`;
   return [t(x.scope), t(x?.target?.path), tn, sn].join(SEP);
 }
@@ -134,6 +135,38 @@ export function noteAlertOnly(r) {
       metaTimeout: r?.metaTimeout === true });   // v2.932(점검 D1-03): 보류 시한을 넘긴 재판정만 testId 키로
   } catch { /* 알림은 부가 정보 */ }
 }
+
+/*
+ * v2.960(쉬운 등록 A — 시험 점검): 시험 중인 대상의 실패 · 경고 알림을 보내지 않는다. 키는 (경로 · 대상 이름 소문자) —
+ *   직접 실행(scope '')과 엣지 행이 같은 키를 쓴다(엣지 점검 id 는 재배정마다 바뀐다). **시한이 있다**(시험 시한 — 지나면 저절로 풀린다 ·
+ *   루트 CLAUDE.md '보류에는 반드시 시한'). 알린 상태(_alerted)를 만들지 않으므로 시험이 끝난 뒤 실패가 이어지면 그때 처음으로 알린다.
+ */
+const _muted = new Map();   // key -> until(ms)
+const MUTE_MAX = 20_000;
+const KINDS_MUTE = ['infra', 'service'];
+/*
+ * v2.988(쉬운 등록 후속 — 반증 L1): 키에 대상 구분(infra|service)을 넣는다 — 같은 경로 · 이름의 다른 구분 대상 알림이 시험 동안 막혔다.
+ *   구분을 모르는 결과(구분을 싣지 않는 옛 엣지)는 그 경로 · 이름의 어느 구분이든 억제 중이면 억제로 본다(예전 동작 — 시험 대상의 알림을 놓치지 않게).
+ */
+const muteKey = (p, n, k) => `${t(p)}${SEP}${t(n).toLowerCase()}${SEP}${KINDS_MUTE.includes(k) ? k : 'infra'}`;
+export function muteTarget(path, name, until, kind = 'infra') {
+  const k = muteKey(path, name, kind);
+  if (!t(name) || !(Number(until) > 0)) return;
+  if (!_muted.has(k) && _muted.size >= MUTE_MAX) _muted.delete(_muted.keys().next().value);
+  _muted.set(k, Number(until));
+}
+export function unmuteTarget(path, name, kind = 'infra') { _muted.delete(muteKey(path, name, kind)); }
+export function isMuted(path, name, now = Date.now(), kind = '') {
+  for (const kk of (KINDS_MUTE.includes(kind) ? [kind] : KINDS_MUTE)) {
+    const k = muteKey(path, name, kk);
+    const until = _muted.get(k);
+    if (!until) continue;
+    if (until <= now) { _muted.delete(k); continue; }
+    return true;
+  }
+  return false;
+}
+export function mutedCount(now = Date.now()) { let n = 0; for (const u of _muted.values()) if (u > now) n += 1; return n; }
 
 function evalAlert(x) {
   const s = getAlertSettings();
@@ -157,6 +190,7 @@ function evalAlert(x) {
     return;
   }
   if (!inScope(s, path)) return;
+  if (isMuted(path, x.target?.name, x.at, t(x.target?.kind))) return;   // v2.960: 시험 점검 중(시한 있음) — 복구 판정은 위에서 이미 했다 · v2.988 구분
   if (x.status === 'bad') {
     if (x.streak >= s.failCount && !_alerted.has(key)) {
       if (_alerted.size >= ALERTED_MAX) _alerted.delete(_alerted.keys().next().value);
@@ -303,7 +337,7 @@ export function transitionsSince() { return _startedAt; }
 
 /** 테스트 전용. */
 export function _resetTransitionsForTest({ send = null } = {}) {
-  _ring = []; _hours.clear(); _alerted.clear(); _warned.clear(); _queue = []; _setAlertSettingsCache(null); _send = send; _held.clear();
+  _ring = []; _hours.clear(); _alerted.clear(); _warned.clear(); _queue = []; _setAlertSettingsCache(null); _send = send; _held.clear(); _muted.clear();
   if (_flushTimer) { clearTimeout(_flushTimer); _flushTimer = null; }
   _sentStats = { individual: 0, summaries: 0, lastAt: 0 };
 }

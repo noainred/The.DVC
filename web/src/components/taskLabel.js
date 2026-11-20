@@ -32,6 +32,7 @@ const EXACT = {
   '/compare/matrix': { label: '비교 매트릭스 집계' },
   '/health': { label: '서버 상태 확인' },
   '/release-notes': { label: '릴리스 노트' },
+  '/release-notes/since': { label: '업그레이드에서 바뀐 것(릴리스 노트)' },   // v2.999 업그레이드 뒤 새로고침 안내(upgradeNotice.js)
   '/auth/me': { label: '로그인 정보 확인' },
   '/auth/config': { label: '로그인 설정 확인' },
 

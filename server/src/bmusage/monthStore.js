@@ -35,6 +35,7 @@
  *  · **1초 샘플은 여기 들어오지 않는다**(설계 §4.4 — 피크 창의 1초 표본은 집계 뒤 버린다. 이 모듈에는 1초 해상도 표가 없다).
  * node:sqlite 가 없으면 전부 no-op(수집·화면은 살고 이력만 없다 — db.js 와 같은 관행).
  */
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import fs from 'node:fs';
 import path from 'node:path';
 import { config, clampIntervalMs } from '../config.js';
@@ -53,7 +54,7 @@ const OFF_MS = DAY_OFFSET_MIN * 60_000;
 /** 조회 한 번에 여는 파일 상한 — SQLite ATTACH 기본 상한(SQLITE_MAX_ATTACHED 10)과 같은 값(설계 ‘상한 10 안’). */
 export const MONTH_FILES_PER_QUERY = 10;
 /** 동시에 열어 두는 핸들 상한(LRU). 쓰는 파일 5종(이번 달) + 조회 10 + 여유. 쓰는 중(pin)인 핸들은 닫지 않는다. */
-export const MONTH_MAX_OPEN = Math.max(8, Number(process.env.BMUSAGE_MONTH_MAX_OPEN) || 24);
+export const MONTH_MAX_OPEN = Math.max(8, envPositive(process.env.BMUSAGE_MONTH_MAX_OPEN, 24));
 
 /* ── 기존 다섯 지표 열(+ HBA·I/O) — db.js METRICS 와 같은 9개. 롤업 이름은 예전 일 롤업 규약(cpu_sum·net_max …)을 따른다. ── */
 export const BASE_COLS = Object.freeze(['cpu_pct', 'mem_pct', 'disk_busy_pct', 'disk_used_pct', 'net_pct', 'net_bps', 'hba_pct', 'hba_bps', 'io_pct']);
@@ -71,8 +72,11 @@ export const FAMILIES = Object.freeze({
   d1: { prefix: 'bm-usage-1d-', period: 'year', table: 'usage_daily', keep: 'd1' },
   dev: { prefix: 'bm-usage-dev-', period: 'month', table: 'usage_device_history', keep: 'dev' },
   dev1h: { prefix: 'bm-usage-dev1h-', period: 'month', table: 'usage_device_hourly', keep: 'dev1h' },
+  // 8b단계 프로세스 Top-N(topStore.js) — 5분 표본은 **날 파일**(보존 7일 = 파일 삭제만 · 경계 청크 없음) · comm 별 시간 집계는 월 파일(90일).
+  top: { prefix: 'bm-usage-top-', period: 'day', table: 'top_sample', keep: 'top' },
+  toph: { prefix: 'bm-usage-toph-', period: 'month', table: 'top_proc_hourly', keep: 'toph' },
 });
-const FILE_RE = /^bm-usage-(?:(1h|1d|dev|dev1h)-)?(\d{4})(?:-(\d{2}))?\.db$/;
+const FILE_RE = /^bm-usage-(?:(1h|1d|dev|dev1h|top|toph)-)?(\d{4})(?:-(\d{2}))?(?:-(\d{2}))?\.db$/;
 
 export const dbDir = () => config.dbDir || config.configDir;
 
@@ -81,13 +85,15 @@ export const dbDir = () => config.dbDir || config.configDir;
 export function periodKeyOf(family, ts) {
   const d = dayKey(ts);
   if (!d) return null;
-  return FAMILIES[family].period === 'year' ? d.slice(0, 4) : d.slice(0, 7);
+  const per = FAMILIES[family].period;
+  return per === 'year' ? d.slice(0, 4) : per === 'day' ? d : d.slice(0, 7);
 }
 /** 기간 [시작, 끝) ms(포탈 시각 경계). */
 export function periodRange(family, key) {
   const y = Number(key.slice(0, 4));
   if (FAMILIES[family].period === 'year') return [Date.UTC(y, 0, 1) - OFF_MS, Date.UTC(y + 1, 0, 1) - OFF_MS];
   const m = Number(key.slice(5, 7)) - 1;
+  if (FAMILIES[family].period === 'day') { const d = Number(key.slice(8, 10)); return [Date.UTC(y, m, d) - OFF_MS, Date.UTC(y, m, d + 1) - OFF_MS]; }
   return [Date.UTC(y, m, 1) - OFF_MS, Date.UTC(y, m + 1, 1) - OFF_MS];
 }
 export const fileNameOf = (family, key) => `${FAMILIES[family].prefix}${key}.db`;
@@ -95,11 +101,12 @@ export const fileNameOf = (family, key) => `${FAMILIES[family].prefix}${key}.db`
 export function parseFileName(name) {
   const m = FILE_RE.exec(String(name || ''));
   if (!m) return null;
-  const family = m[1] === '1h' ? 'h1' : m[1] === '1d' ? 'd1' : m[1] === 'dev' ? 'dev' : m[1] === 'dev1h' ? 'dev1h' : 'raw';
+  const family = m[1] === '1h' ? 'h1' : m[1] === '1d' ? 'd1' : m[1] === 'dev' ? 'dev' : m[1] === 'dev1h' ? 'dev1h' : m[1] === 'top' ? 'top' : m[1] === 'toph' ? 'toph' : 'raw';
   const per = FAMILIES[family].period;
   if (per === 'year' && m[3]) return null;
-  if (per === 'month' && !m[3]) return null;
-  return { family, key: m[3] ? `${m[2]}-${m[3]}` : m[2] };
+  if (per === 'month' && (!m[3] || m[4])) return null;
+  if (per === 'day' && (!m[3] || !m[4])) return null;
+  return { family, key: m[4] ? `${m[2]}-${m[3]}-${m[4]}` : m[3] ? `${m[2]}-${m[3]}` : m[2] };
 }
 /** 창 [from, to] 에 걸리는 기간 키(오래된 것부터). */
 export function periodsInWindow(family, from, to) {
@@ -181,6 +188,20 @@ export const SCHEMA = Object.freeze({
     ${DEV_ROLL.map((c) => `${c}_sum REAL, ${c}_n INTEGER NOT NULL DEFAULT 0, ${c}_max REAL`).join(', ')}, ${peakColsSql(DEVICE_PEAK_COLS)},
     PRIMARY KEY (agent, key, kind, dev, h));
     CREATE INDEX IF NOT EXISTS idx_bmm_dev1h_h ON usage_device_hourly(h);`,
+  // 8b단계(topStore.js) — 표본 머리 1행/서버/주기 + ‘바뀐 표본’ 에만 종류(cpu · mem · io) × 순위 행. base_ts = 같은 내용의 기준 표본(바뀌지 않았으면 그 표본 · 바뀌었으면 자기 ts).
+  top: `CREATE TABLE IF NOT EXISTS top_sample (
+    agent TEXT NOT NULL DEFAULT '', key TEXT NOT NULL, ts INTEGER NOT NULL, base_ts INTEGER NOT NULL, src TEXT, nproc INTEGER, nrun INTEGER, nd INTEGER,
+    cpu_total REAL, dt_s REAL, up_s REAL, cands INTEGER, io_perm INTEGER, io_unknown INTEGER, PRIMARY KEY (agent, key, ts));
+    CREATE INDEX IF NOT EXISTS idx_bmm_top_ts ON top_sample(ts);
+    CREATE TABLE IF NOT EXISTS top_proc (
+    agent TEXT NOT NULL DEFAULT '', key TEXT NOT NULL, ts INTEGER NOT NULL, kind TEXT NOT NULL, rank INTEGER NOT NULL,
+    pid INTEGER, starttime INTEGER, user TEXT, comm TEXT, val REAL, rss REAL, state TEXT, cpu_s REAL, rd REAL, wr REAL, io_perm INTEGER,
+    PRIMARY KEY (agent, key, ts, kind, rank));
+    CREATE INDEX IF NOT EXISTS idx_bmm_topp_ts ON top_proc(ts);`,
+  toph: `CREATE TABLE IF NOT EXISTS top_proc_hourly (
+    agent TEXT NOT NULL DEFAULT '', key TEXT NOT NULL, hour INTEGER NOT NULL, comm TEXT NOT NULL, cpu_s REAL NOT NULL DEFAULT 0, rss_max REAL, samples INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (agent, key, hour, comm));
+    CREATE INDEX IF NOT EXISTS idx_bmm_toph_hour ON top_proc_hourly(hour);`,
 });
 
 /* ════════════════════════ 핸들(진행 중인 open 공유 · LRU · pin) ════════════════════════ */
@@ -390,6 +411,9 @@ async function writeServerRowsInner(rows, agent, { rollup, pend, pendDaily }) {
   for (const [k, list] of groupBy(valid, 'raw', (r) => Number(r.ts))) {
     await withPeriodFile('raw', k, { create: true }, (db) => {
       if (!db) { res.ok = false; res.errors.push(`${fileNameOf('raw', k)}: ${_failed.get(fileNameOf('raw', k))?.reason || '열기 실패'}`); return; }
+      // 40회차 F1(재현): 새 행 · 새 대기는 **COMMIT 을 마친 뒤에만** res · fresh 로 옮긴다 — 예전에는 트랜잭션 안에서 바로 넣어, 행 중간 실패로
+      //   ROLLBACK 돼도 그 행들이 1시간 · 1일 롤업에 더해졌고(원시 0행 · 롤업 N표본) 대기도 함께 롤백돼 보정이 되돌리지 못했다(재전송하면 이중 계수).
+      const newRows = []; const newPend = []; let dup = 0;
       try {
         txn(db, () => {
           const st = prep(db, fileNameOf('raw', k), 'ins', RAW_INS);
@@ -410,17 +434,18 @@ async function writeServerRowsInner(rows, agent, { rollup, pend, pendDaily }) {
             });
             const out = st.run(...vals);
             const isNew = !!Number(out?.changes);
-            if (isNew) { res.inserted += 1; res.insertedRows.push(r); } else res.duplicates += 1;
+            if (isNew) newRows.push(r); else dup += 1;
             if (pend === 'none' || (pend === 'inserted' && !isNew)) continue;
             const key = String(r.key).trim(); const h = hourOf(Number(r.ts));
             const sk = `${key}|${h}`;
             if (seen.has(sk)) continue;
             seen.add(sk);
             const ex = selP.get(agent, key, h);
-            if (!ex) { insP.run(agent, key, h, pendDaily ? 1 : 0, Date.now()); fresh.push([k, key, h]); }
+            if (!ex) { insP.run(agent, key, h, pendDaily ? 1 : 0, Date.now()); newPend.push([k, key, h]); }
             else if (pendDaily && !Number(ex.daily)) upP.run(agent, key, h);
           }
         });
+        res.inserted += newRows.length; for (const r of newRows) res.insertedRows.push(r); res.duplicates += dup; for (const p of newPend) fresh.push(p);   // 40회차 F1: 커밋된 것만(펼침 push 금지 — 큰 배열)
       } catch (e) { res.ok = false; res.errors.push(`${fileNameOf('raw', k)}: ${String(e?.message || e).slice(0, 160)}`); }
     });
   }
@@ -501,6 +526,8 @@ export const REPAIR_BUDGET_MS = clampIntervalMs(process.env.BMUSAGE_REPAIR_BUDGE
 export const REPAIR_BACKOFF_BASE_MS = 10 * 60_000;
 export const REPAIR_BACKOFF_MAX_MS = 60 * 60_000;
 /** 연속 실패 횟수 → 다음 시도까지 기다릴 시간(첫 실패는 다음 틱에 바로 다시 — 일시 오류). */
+/** v2.954: 한 보정 실행에서 raw 파일 하나당 읽는 대기 쪽 수 상한(쪽 = max 건 — 기본 2,000 × 10 = 2만 건). */
+export const PEND_PAGES_MAX = 10;
 export const repairBackoffMs = (fails) => (fails < 2 ? 0 : Math.min(REPAIR_BACKOFF_MAX_MS, REPAIR_BACKOFF_BASE_MS * 2 ** (fails - 2)));
 const _repairFail = new Map();   // 롤업 파일 이름 → { fails, since, at, nextAt, reason }
 /** 재집계가 읽는 원시 열(aggregateRows 가 쓰는 것 — 시각 · 이름 · 법인 · 피크 출처 · 롤업 열 · 피크 값과 시각). 1일(D1_ROLL_ALL)도 같은 열 집합이다. */
@@ -537,53 +564,70 @@ async function repairPendingInner({ dailyLiveAfter, rawKeepFrom, max, budgetMs, 
     if (overBudget()) { out.budgetHit = true; break; }
     await withPeriodFile('raw', f.key, { create: false }, async (rawDb) => {
       if (!rawDb) return;
-      let pend = [];
-      try { pend = rawDb.prepare('SELECT agent, key, h, daily FROM _pend ORDER BY h LIMIT ?').all(max); } catch { return; }
-      if (!pend.length) return;
-      const sel = repairSelect(rawDb);
-      // 묶음: 1일까지 다시 해야 하는 대기는 (agent·key·날), 1시간만이면 버킷 하나 — 묶음 단위로 끝내거나 통째로 다음으로 미룬다.
-      const groups = new Map();
-      for (const pd of pend) {
-        const h = Number(pd.h); const daily = !!Number(pd.daily);
-        const day = daily ? dayKey(h) : null;
-        const gk = daily ? `d\u0000${pd.agent}\u0000${pd.key}\u0000${day}` : `h\u0000${pd.agent}\u0000${pd.key}\u0000${h}`;
-        if (!groups.has(gk)) groups.set(gk, { agent: pd.agent, key: pd.key, day, items: [] });
-        groups.get(gk).items.push(pd);
-      }
-      const done = [];
-      for (const g of groups.values()) {
-        if (overBudget()) { out.budgetHit = true; out.deferred += g.items.length; continue; }
-        const [ds, de] = g.day ? dayRange(g.day) : [0, 0];
-        const expired = !!g.day && rawKeepFrom != null && ds < rawKeepFrom;
-        const targets = new Set(g.items.map((pd) => fileNameOf('h1', month0('h1', Number(pd.h)))));
-        if (g.day && !expired) targets.add(fileNameOf('d1', g.day.slice(0, 4)));
-        for (const t of targets) run.targeted.add(t);
-        if ([...targets].some(blocked)) { out.skipped += g.items.length; continue; }
-        progressed = true;
-        const dayRows = g.day ? sel.all(g.agent, g.key, ds, de) : null;
-        const hourOk = [];
-        for (const pd of g.items) {
-          const h = Number(pd.h);
-          if (run.failed.has(fileNameOf('h1', month0('h1', h)))) continue;   // 이 실행에서 이미 실패한 파일은 다시 열지 않는다
-          const rows = dayRows ? dayRows.filter((r) => Number(r.ts) >= h && Number(r.ts) < h + HOUR_MS) : sel.all(pd.agent, pd.key, h, h + HOUR_MS);
-          const ok = await replaceRollup('h1', month0('h1', h), 'usage_hourly', H1_COLS, 'h', h, rows, { agent: pd.agent, key: pd.key, rolls: ROLL }, out, run);
+      // v2.954(개선 검토 1번 — audits '보정 대기 읽기는 파일당 LIMIT 2,000'): 앞 쪽이 전부 재시도 간격 중인 파일로 가는 대기면 예전에는 그 2,000건만 다시 읽고
+      //   끝나, 뒤의 정상 대기(다른 파일로 가는 1시간 대기)가 간격이 풀릴 때까지(손상 파일이면 끝없이) 밀렸다. 이제 (h, rowid) 키셋으로 다음 쪽을 잇는다 —
+      //   쪽이 가득 찼을 때만 · 시간 상한(overBudget) 안에서만 · 파일당 PEND_PAGES_MAX 쪽까지(건너뛰기는 읽기만이라 싸다).
+      let cursor = null;
+      for (let page = 0; page < PEND_PAGES_MAX; page += 1) {
+        let pend = [];
+        try {
+          pend = cursor
+            ? rawDb.prepare('SELECT rowid AS rid, agent, key, h, daily FROM _pend WHERE h > ? OR (h = ? AND rowid > ?) ORDER BY h, rowid LIMIT ?').all(cursor.h, cursor.h, cursor.rid, max)
+            : rawDb.prepare('SELECT rowid AS rid, agent, key, h, daily FROM _pend ORDER BY h, rowid LIMIT ?').all(max);
+        } catch { return; }
+        if (!pend.length) return;
+        cursor = { h: Number(pend[pend.length - 1].h), rid: Number(pend[pend.length - 1].rid) };
+        const sel = repairSelect(rawDb);
+        // 묶음: 1일까지 다시 해야 하는 대기는 (agent·key·날), 1시간만이면 버킷 하나 — 묶음 단위로 끝내거나 통째로 다음으로 미룬다.
+        const groups = new Map();
+        for (const pd of pend) {
+          const h = Number(pd.h); const daily = !!Number(pd.daily);
+          const day = daily ? dayKey(h) : null;
+          const gk = daily ? `d\u0000${pd.agent}\u0000${pd.key}\u0000${day}` : `h\u0000${pd.agent}\u0000${pd.key}\u0000${h}`;
+          if (!groups.has(gk)) groups.set(gk, { agent: pd.agent, key: pd.key, day, items: [] });
+          groups.get(gk).items.push(pd);
+        }
+        const done = [];
+        for (const g of groups.values()) {
+          if (overBudget()) { out.budgetHit = true; out.deferred += g.items.length; continue; }
+          const [ds, de] = g.day ? dayRange(g.day) : [0, 0];
+          const expired = !!g.day && rawKeepFrom != null && ds < rawKeepFrom;
+          const targets = new Set(g.items.map((pd) => fileNameOf('h1', month0('h1', Number(pd.h)))));
+          if (g.day && !expired) targets.add(fileNameOf('d1', g.day.slice(0, 4)));
+          for (const t of targets) run.targeted.add(t);
+          if ([...targets].some(blocked)) { out.skipped += g.items.length; continue; }
+          progressed = true;
+          const dayRows = g.day ? sel.all(g.agent, g.key, ds, de) : null;
+          const hourOk = [];
+          for (const pd of g.items) {
+            const h = Number(pd.h);
+            // 40회차 F3(재현): 버킷 시작이 원시 보존 밖이면 다시 집계하지 않는다(원시가 지워져 0행 · 덜 센 값으로 1시간 롤업을 지우거나 덮었다) —
+            //   1일의 expired 와 같은 규칙. 대기만 지운다.
+            if (rawKeepFrom != null && h < rawKeepFrom) { out.expiredHourly = (out.expiredHourly || 0) + 1; hourOk.push(pd); continue; }
+            if (run.failed.has(fileNameOf('h1', month0('h1', h)))) continue;   // 이 실행에서 이미 실패한 파일은 다시 열지 않는다
+            const rows = dayRows ? dayRows.filter((r) => Number(r.ts) >= h && Number(r.ts) < h + HOUR_MS) : sel.all(pd.agent, pd.key, h, h + HOUR_MS);
+            const ok = await replaceRollup('h1', month0('h1', h), 'usage_hourly', H1_COLS, 'h', h, rows, { agent: pd.agent, key: pd.key, rolls: ROLL }, out, run);
+            await maybeYield();
+            if (!ok) continue;
+            out.buckets += 1; hourOk.push(pd);
+          }
+          if (!g.day) { for (const it of hourOk) done.push(it); continue; }
+          if (!hourOk.length) continue;
+          if (expired) { out.expiredDaily += 1; for (const it of hourOk) done.push(it); continue; }
+          const rows = dailyLiveAfter == null ? dayRows : dayRows.filter((r) => Number(r.ts) > dailyLiveAfter);
+          const ok = await replaceRollup('d1', g.day.slice(0, 4), 'usage_daily', D1_COLS, 'day', g.day, rows, { agent: g.agent, key: g.key, rolls: D1_ROLL_ALL }, out, run);
           await maybeYield();
           if (!ok) continue;
-          out.buckets += 1; hourOk.push(pd);
+          out.days += 1; for (const it of hourOk) done.push(it);
         }
-        if (!g.day) { for (const it of hourOk) done.push(it); continue; }
-        if (!hourOk.length) continue;
-        if (expired) { out.expiredDaily += 1; for (const it of hourOk) done.push(it); continue; }
-        const rows = dailyLiveAfter == null ? dayRows : dayRows.filter((r) => Number(r.ts) > dailyLiveAfter);
-        const ok = await replaceRollup('d1', g.day.slice(0, 4), 'usage_daily', D1_COLS, 'day', g.day, rows, { agent: g.agent, key: g.key, rolls: D1_ROLL_ALL }, out, run);
-        await maybeYield();
-        if (!ok) continue;
-        out.days += 1; for (const it of hourOk) done.push(it);
+        if (done.length) {
+          try { txn(rawDb, () => { const del = rawDb.prepare('DELETE FROM _pend WHERE agent=? AND key=? AND h=?'); for (const pd of done) del.run(pd.agent, pd.key, pd.h); }); }
+          catch (e) { out.errors.push(`${f.name}: ${String(e?.message || e).slice(0, 120)}`); }
+        }
+        if (pend.length < max || overBudget()) return;
+        out.pages = (out.pages || 0) + 1;
       }
-      if (done.length) {
-        try { txn(rawDb, () => { const del = rawDb.prepare('DELETE FROM _pend WHERE agent=? AND key=? AND h=?'); for (const pd of done) del.run(pd.agent, pd.key, pd.h); }); }
-        catch (e) { out.errors.push(`${f.name}: ${String(e?.message || e).slice(0, 120)}`); }
-      }
+      out.pendMore = true;   // 쪽 상한까지 가득 — 뒤에 못 본 대기가 있다(아래 '가리키지 않는 파일' 정리를 하지 않는다)
     });
   }
   // 재시도 간격 — 실패한 파일은 횟수를 올리고, 성공만 한 파일은 지운다. 아무 대기도 가리키지 않는 파일은(끝까지 본 실행에서만) 지운다.
@@ -593,7 +637,7 @@ async function repairPendingInner({ dailyLiveAfter, rawKeepFrom, max, budgetMs, 
   }
   for (const name of [..._repairFail.keys()]) {
     if (run.failed.has(name)) continue;
-    if (run.ok.has(name) || (!out.budgetHit && !run.targeted.has(name))) _repairFail.delete(name);
+    if (run.ok.has(name) || (!out.budgetHit && !out.pendMore && !run.targeted.has(name))) _repairFail.delete(name);
   }
   if (_repairFail.size) {
     out.backoff = [..._repairFail.entries()].slice(0, 8).map(([file, v]) => ({ file, ...v }));
@@ -727,6 +771,7 @@ export async function writeDeviceRows(rows = [], agent = '') {
   for (const [k, list] of groupBy(valid, 'dev', (r) => Number(r.ts))) {
     await withPeriodFile('dev', k, { create: true }, (db) => {
       if (!db) { res.ok = false; res.errors.push(`${fileNameOf('dev', k)}: ${_failed.get(fileNameOf('dev', k))?.reason || '열기 실패'}`); return; }
+      const newRows = []; let dup = 0;   // 40회차 F1: 커밋된 것만 롤업 대상으로(서버 행과 같은 규칙)
       try {
         txn(db, () => {
           const st = prep(db, fileNameOf('dev', k), 'ins', DEV_INS);
@@ -734,15 +779,16 @@ export async function writeDeviceRows(rows = [], agent = '') {
             const vals = DEV_COLS.map((c) => (c === 'agent' ? agent : c === 'key' ? String(r.key).trim() : c === 'ts' ? Number(r.ts)
               : c === 'kind' ? r.kind : c === 'dev' ? String(r.dev).slice(0, 64) : c === 'oper' ? (r.oper ? String(r.oper).slice(0, 16) : null) : n(r[c])));
             const out = st.run(...vals);
-            if (Number(out?.changes)) { res.inserted += 1; ins.push(r); } else res.duplicates += 1;
+            if (Number(out?.changes)) newRows.push(r); else dup += 1;
           }
         });
+        res.inserted += newRows.length; for (const r of newRows) ins.push(r); res.duplicates += dup;
       } catch (e) { res.ok = false; res.errors.push(`${fileNameOf('dev', k)}: ${String(e?.message || e).slice(0, 160)}`); }
     });
   }
   for (const [k, list] of groupBy(ins, 'dev1h', (r) => Number(r.ts))) {
     await withPeriodFile('dev1h', k, { create: true }, (db) => {
-      if (!db) { res.ok = false; res.errors.push(`${fileNameOf('dev1h', k)}: 열기 실패`); return; }
+      if (!db) { res.ok = false; res.errors.push(`${fileNameOf('dev1h', k)}: 열기 실패`); noteDevRollupMissed(list.length, fileNameOf('dev1h', k)); return; }
       try {
         txn(db, () => {
           const st = prep(db, fileNameOf('dev1h', k), 'up', DEV1H_UPSERT);
@@ -752,11 +798,18 @@ export async function writeDeviceRows(rows = [], agent = '') {
               ...DEV_ROLL.flatMap((c) => { const v = n(r[c]); return [v ?? 0, v == null ? 0 : 1, v]; }), ...peakVals(r, DEVICE_PEAK_COLS));
           }
         });
-      } catch (e) { res.ok = false; res.errors.push(`${fileNameOf('dev1h', k)}: ${String(e?.message || e).slice(0, 160)}`); }
+      } catch (e) { res.ok = false; res.errors.push(`${fileNameOf('dev1h', k)}: ${String(e?.message || e).slice(0, 160)}`); noteDevRollupMissed(list.length, fileNameOf('dev1h', k)); }
     });
   }
   return res;
 }
+/*
+ * 40회차 F2(재현): 장치 1시간 롤업(dev1h)은 서버 행의 보정 대기(_pend) 같은 장치가 없어 한 번 실패하면 그 표본이 롤업에서 영구히 빠진다
+ *   (원시는 커밋돼 재전송은 중복 처리). 보정 설계(장치 대기 표)는 남긴 것으로 두고, 지금은 **빠진 사실을 상태에 센다**(못 읽음을 숨기지 않게).
+ */
+let _devRollupMissed = { rows: 0, at: 0, file: '' };
+function noteDevRollupMissed(n, file) { _devRollupMissed = { rows: _devRollupMissed.rows + (Number(n) || 0), at: Date.now(), file: String(file || '') }; }
+export function devRollupMissed() { return _devRollupMissed.rows ? { ..._devRollupMissed } : null; }
 
 /** 마운트(공간·inode) — 일 롤업만(5분 원시 없음 · 설계 §9 B). rows: `{ key, ts, mount, used_pct, inode_pct, size_bytes, used_bytes }` */
 export async function writeMountRows(rows = [], agent = '') {
@@ -893,7 +946,7 @@ export function mergeDailyRows(a, b) {
 let _counts = null;
 let _countsRunning = null;
 /** v2.922(반증 D11): 파일별 행 수는 비싸다(장치 5분 월 파일 수천만 행 — 추정) → 10분 캐시 · 계산은 뒤에서(화면 로드가 기다리지 않는다). */
-const COUNT_CACHE_MS = Math.max(0, Number(process.env.BMUSAGE_MONTH_COUNT_CACHE_MS) || 10 * 60_000);
+const COUNT_CACHE_MS = Math.max(0, envPositive(process.env.BMUSAGE_MONTH_COUNT_CACHE_MS, 10 * 60_000));
 /**
  * 가족별 파일 수·행 수·바이트. COUNT 는 파일마다 **집계 하나짜리 문장**.
  *  · v2.922(반증 D11): 캐시 10분 · 낡았으면 **지난 값을 바로 돌려주고** 뒤에서 다시 센다(stale-while-revalidate — 첫 호출만 기다린다) ·
@@ -913,7 +966,7 @@ async function countAll() {
   const mod = await sqliteMod();
   for (const fam of Object.keys(FAMILIES)) {
     const files = listFamilyFiles(fam);
-    let rows = 0; let bytes = 0;
+    let rows = 0; let bytes = 0; const unread = [];
     for (const f of files) {
       const file = path.join(dbDir(), f.name);
       try { bytes += fs.statSync(file).size; } catch { /* */ }
@@ -922,12 +975,12 @@ async function countAll() {
       try {
         const db = h ? h.db : (mod ? (tmp = new mod.DatabaseSync(file, { readOnly: true })) : null);
         if (db) rows += Number(db.prepare(`SELECT COUNT(*) c FROM ${FAMILIES[fam].table}`).get()?.c ?? 0);
-      } catch { /* 못 연 파일은 행 수에서 빠진다(failed 로 밝힌다) */ } finally { try { tmp?.close(); } catch { /* */ } }
+      } catch { unread.push(f.name); } finally { try { tmp?.close(); } catch { /* */ } }   // 40회차 F5: 못 연 파일을 0행으로 더하지 않고 따로 센다
       await maybeYield();
     }
-    out[fam] = { files: files.length, first: files[0]?.key ?? null, last: files.at(-1)?.key ?? null, rows, bytes };
+    out[fam] = { files: files.length, first: files[0]?.key ?? null, last: files.at(-1)?.key ?? null, rows, bytes, ...(unread.length ? { unread: unread.slice(0, 8), unreadCount: unread.length, rowsPartial: true } : {}) };
   }
-  _counts = { at: Date.now(), v: { ...out, countsAt: Date.now(), failed: failedFiles().slice(0, 8) } };
+  _counts = { at: Date.now(), v: { ...out, countsAt: Date.now(), failed: failedFiles().slice(0, 8), ...(devRollupMissed() ? { devRollupMissed: devRollupMissed() } : {}) } };   // 40회차 F2
   return _counts.v;
 }
 /** 낡음 표시만(지난 값은 남긴다 — 다음 조회가 바로 돌려받고 뒤에서 다시 센다). */
@@ -942,6 +995,9 @@ const RESIDUAL = Object.freeze({
   d1: [['usage_daily', 'day'], ['usage_daily_mig', 'day'], ['usage_mount_daily', 'day']],
   dev: [['usage_device_history', 'ts']],
   dev1h: [['usage_device_hourly', 'h']],
+  // 8b 반증 F3: 날 가족(top)은 **파일 삭제만** — 경계 청크가 ‘같음’ 머리의 기준 행(앞 시각)을 먼저 지워 머리가 빈 기준을 가리키게 했다(보존은 keepDays + 최대 1일).
+  top: [],
+  toph: [['top_proc_hourly', 'hour']],
 });
 /**
  * 보존 집행. keepDays: { raw, h1, d1, dev, dev1h }(일). paused: 이 가족은 건너뛴다(마이그레이션 중 원시 — 대조 전에 지우지 않게).

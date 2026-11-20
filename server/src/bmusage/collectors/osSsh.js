@@ -28,6 +28,7 @@ import {
 } from '../parse/linuxProc.js';
 import { FACT_SHELL, FACT_SECTIONS, FACT_LINE_CAP, FACT_LINE_BYTES, parseOsRel, parseUnits, parsePorts, parseProcs, parseAccts, parseKargs, parseSoftnet, parseNetq, parseXfs } from '../parse/linuxFacts.js'; // v2.923: 4단계 용도 감지 · 튜닝 사실
 import { HEALTH_SHELL, HEALTH_SECTIONS, HEALTH_LINE_CAP, HEALTH_LINE_BYTES, parseChrony, parseDmesgCounts, parseChanges } from '../parse/linuxHealth.js'; // v2.929(5단계): 점검 소모품 · 변경 이벤트
+import { topCommand, readTopOutput, TOP_EXEC_TIMEOUT_MS } from '../parse/linuxTop.js'; // 8b단계: 프로세스 Top-N — 같은 세션의 별도 exec(반증 F1 — 주 명령 밖)
 import { planWindow, peakCommand, parsePeakOutput, computePeaks, PEAK_OVERHEAD_MS } from '../peakWindow.js'; // v2.922: 피크 A 안
 import { samplerCommand, parseSamplerFile, SAMPLER_MAX_LINES } from '../samplerSpec.js'; // v2.922: 피크 B 안(수거 자리만)
 import { parseWinPerf } from '../parse/winPerf.js';
@@ -35,7 +36,23 @@ import { reqTimeoutMs } from '../../agent/envTimeout.js';
 
 // v2.605(TIM2605-04): 음수·2^31 초과 env 가 즉시 타임아웃이 되지 않게 [1초, 10분] 으로 정규화한다(agent/envTimeout.js).
 const READY_TIMEOUT_MS = reqTimeoutMs(process.env.BMUSAGE_SSH_TIMEOUT_MS, 15_000);
-const CMD_TIMEOUT_MS = reqTimeoutMs(process.env.BMUSAGE_CMD_TIMEOUT_MS, 30_000);
+// 1회차 점검 D2: 30초 → 34초 — ##DF · ##DFI 의 df 에 시한(DF_TIMEOUT_S × 2)을 두면서 늘린 몫. 8b 산수(안 timeout 최악 합 24초 + 여유 6초)가 30초에 꽉 차 있었다.
+export const CMD_TIMEOUT_MS = reqTimeoutMs(process.env.BMUSAGE_CMD_TIMEOUT_MS, 34_000);
+/**
+ * ⚠⚠ 8b 반증 F1(8b 이전부터의 결함 — 4 · 5단계): 주 명령 **안** 구획 timeout(systemctl · chronyc · dmesg · needs-restarting · dnf …)의 최악 합 + 이 여유 ≤ CMD_TIMEOUT_MS.
+ *   합이 시한보다 크면 ‘한 칸이 전 구획을 잃지 않게’ 둔 timeout 이 목적을 잃는다 — exec 시한에 걸리면 sshExec 가 모은 출력을 버려 그 주기 **전 구획**이 사라진다.
+ *   예전 최악 합 34초(8b 가 ##TOP 을 넣어 37초 + 대기 1초) > 30초였다. 여유는 ssh 왕복(고 RTT 800ms+ · 채널 열기 · 출력) · 시한 없는 짧은 읽기(ps · ss · sysctl -a · find)의 몫(추정).
+ *   bmTop8bBudget 시험이 명령 문자열에서 timeout · sleep 을 기계적으로 뽑아 합을 고정하고(needs-restarting ↔ dnf 는 한 주기에 하나 — 실제 셸로 확인),
+ *   가짜 PATH(멈추는 명령) + 실제 collectOsUsage 로 주 표본이 살아남는지 본다. env 로 CMD_TIMEOUT_MS 를 낮추면 이 산수가 깨진다(운영 기본값만 보장).
+ */
+export const CMD_INNER_MARGIN_MS = 6_000;
+/**
+ * 1회차 점검 D2 — ##DF · ##DFI 의 df 시한(초). 예전에는 시한이 없어 멈춘 마운트(응답 없는 NFS 등 — 일반적 현상 · 이 저장소 실측 아님) 하나가 df 를 붙잡으면
+ *   주 명령이 exec 시한(30초)에 걸려 **그 서버의 전 구획**(CPU · 메모리 · 디스크 · 네트워크)을 매 주기 잃고 사유는 'not-linux' 로 보였다(재현 30,029ms).
+ *   이제 df 만 시한에 걸리고 그 구획(디스크 사용 공간 · inode)만 missing 이다. ⚠ 커널이 깨우지 못하는 대기(TASK_UNINTERRUPTIBLE)면 timeout 도 df 를 끝내지 못한다 —
+ *   NFS 의 대기는 보통 kill 로 깨는 대기(TASK_KILLABLE)다(일반 지식 — 실장비 미확인). 그 경우는 바깥 exec 시한이 마지막 방어선이다.
+ */
+export const DF_TIMEOUT_S = 2;
 /**
  * ⚠⚠ **세션 예산 — 두 번 시도하는 경로는 장비 시한을 넘길 수 있다**(v2.550.3 에 고친 결함.
  *   CLAUDE.md v2.528 이 Unity 에서 겪은 것과 **같은 유형**):
@@ -103,9 +120,10 @@ export const LINUX_SECTIONS = Object.freeze(['STAT', 'MEM', 'DISK', 'NET', 'NETI
 
 /** Linux 수집 명령 — 구획 표지로 나눈 한 방. */
 export function linuxCommand(mounts = [], { sampler = false } = {}) {
-  const dfPart = mounts.length ? `df -P -k -- ${mounts.join(' ')} 2>/dev/null | head -n ${SECTION_LINE_CAP.DF + 1} | cut -c1-1024` : 'true';
+  // 1회차 점검 D2: df 도 다른 대기 명령처럼 timeout 으로 감싼다(멈춘 마운트가 주 명령 전체를 시한에 걸리게 하지 않게 — DF_TIMEOUT_S 머리말).
+  const dfPart = mounts.length ? `timeout ${DF_TIMEOUT_S} df -P -k -- ${mounts.join(' ')} 2>/dev/null | head -n ${SECTION_LINE_CAP.DF + 1} | cut -c1-1024` : 'true';
   // v2.919: inode(##DFI) — 같은 sanitize 된 마운트만(변수 삽입은 이 화이트리스트뿐).
-  const dfiPart = mounts.length ? `df -P -i -- ${mounts.join(' ')} 2>/dev/null | head -n ${SECTION_LINE_CAP.DFI}` : 'true';
+  const dfiPart = mounts.length ? `timeout ${DF_TIMEOUT_S} df -P -i -- ${mounts.join(' ')} 2>/dev/null | head -n ${SECTION_LINE_CAP.DFI}` : 'true';
   const cmds = [
     // v2.919: /proc/stat 전체 — cpu 합계 + cpuN(코어 수 = 줄 수) + ctxt·intr·procs_running·procs_blocked. 줄 폭은 cut 으로(intr 줄은 수천 칸).
     "echo '##STAT'", `grep -v '^cpu' /proc/stat 2>/dev/null | head -n ${SECTION_LINE_CAP.STAT_OTHER} | cut -c1-256`, `grep '^cpu' /proc/stat 2>/dev/null | head -n ${SECTION_LINE_CAP.STAT_CPU} | cut -c1-256`,
@@ -144,6 +162,8 @@ export function linuxCommand(mounts = [], { sampler = false } = {}) {
     ...FACT_SECTIONS.flatMap((k) => [`echo '##${k}'`, FACT_SHELL[k]]),
     // ── v2.929(5단계) 점검 소모품 · 변경 이벤트 — 상수 조각(parse/linuxHealth.js HEALTH_SHELL). 줄마다 고정 접두 · 내용은 CRC · 개수만(설정 파일 · dmesg 원문 없음).
     ...HEALTH_SECTIONS.flatMap((k) => [`echo '##${k}'`, HEALTH_SHELL[k]]),
+    // ⚠ 8b단계 프로세스 Top-N 은 여기(주 명령)에 넣지 않는다 — 같은 세션의 별도 exec(collectOsUsage · parse/linuxTop.js topCommand). 반증 F1: 주 명령은 exec 시한 하나라
+    //   top 대기 · 시한이 구획 timeout 합을 시한 밖으로 밀면 그 주기 전 구획을 잃었다. 구획 timeout 합 + 여유 ≤ CMD_TIMEOUT_MS 는 bmTop8bBudget 시험이 고정한다.
     // v2.922: 피크 B 안 수거 구획 — 옵트인일 때만(기본 명령은 그대로). 파일이 없으면 0줄(absent).
     ...(sampler ? ["echo '##SAMPLER'", samplerCommand()] : []),
     "echo '##END'",
@@ -250,6 +270,8 @@ export function shapeLinux(stdout, mounts = [], { partitionIo = false, blkqMax =
       ctxt: perf.stat.value?.ctxt ?? null, intr: perf.stat.value?.intr ?? null,
       vm: perf.vmstat.value || null,
       tcp: perf.snmp.value ? { retransSegs: perf.snmp.value.retransSegs, outSegs: perf.snmp.value.outSegs, inErrs: perf.snmp.value.inErrs } : null,
+      // 1회차 점검 D1: 부팅 시각(/proc/stat btime — ##STAT 에 이미 온다 · 새 명령 없음). usage.js 가 직전 표본과 같은 장비 · 같은 부팅인지 본다.
+      btime: perf.stat.value?.btime ?? null,
     },
     // v2.919 — 순간값·튜닝 현재값(누적이 아니라 델타가 필요 없다)과 구획별 상태.
     perf,
@@ -294,13 +316,32 @@ export function shapePerfSections(sec = {}, { blkqMax = MAX_BLKQ } = {}) {
 }
 
 /**
+ * 1회차 점검 D5(a) — exec 거부 → 종류(순수). sshExec.exec 는 시한이면 'SSH exec 타임아웃(Ns): <명령>' · 출력 상한이면 '… 출력 상한 … 초과' 로 거부하고
+ *   채널 · 연결 오류(‘Channel open failure’ 등)는 그 오류 그대로 거부한다. 문구는 이 모듈이 정한 것만 싣는다(명령 전문을 결과에 싣지 않는다).
+ */
+export function execErrorKind(e) {
+  const m = String(e?.message ?? e ?? '').slice(0, 200);
+  if (/^SSH exec 타임아웃/.test(m) || /timed? ?out/i.test(m)) return 'timeout';
+  if (/^SSH exec 출력 상한/.test(m)) return 'output-limit';
+  return 'channel';
+}
+export const EXEC_ERROR_TEXT = Object.freeze({
+  timeout: '수집 명령이 시한 초과로 끊겨 출력을 받지 못했습니다(서버 부하 · 멈춘 명령일 수 있습니다 — OS 종류 문제가 아닙니다).',
+  'output-limit': '수집 명령의 출력이 상한을 넘어 버렸습니다(OS 종류 문제가 아닙니다).',
+  channel: '수집 명령을 실행하지 못했습니다(SSH 채널 오류 — sshd 세션 제한 · 연결 끊김일 수 있습니다).',
+});
+
+/**
  * 한 서버에서 수집한다. **자격증명은 반환값에 담지 않는다.**
  * @param {object} osHost  `bmstor` 등록 항목(host·port·username·password·mounts)
  * @param {{signal?:AbortSignal}} opt
  */
-export async function collectOsUsage(osHost = {}, { signal, budgetMs = SESSION_BUDGET_MS, partitionIo = false, blkqMax = MAX_BLKQ, peakWindowS = 0, sampler = false, samplerSha = '', peakCycle = null, extraCommands = [] } = {}) {
+export async function collectOsUsage(osHost = {}, { signal, budgetMs = SESSION_BUDGET_MS, partitionIo = false, blkqMax = MAX_BLKQ, peakWindowS = 0, sampler = false, samplerSha = '', peakCycle = null, extraCommands = [], top = false } = {}) {
   const host = String(osHost.host || '').trim();
-  if (!host) return { ok: false, error: 'OS host 가 없습니다.' };
+  if (!host) return { ok: false, error: 'OS host 가 없습니다.', notConnected: true };   // 1회차 점검 D6: 접속하지 않음(SSH 소요에 넣지 않는다)
+  // 7b: 키 · 공통 계정 참조를 해석하지 못했으면(키 삭제 · 봉인 해제 실패 · 저장소 손상) 접속하지 않는다 — 빈 비밀번호로 시도해
+  //   인증 실패 · 계정 잠금을 부르지 않게(onboard/refs.js withResolvedAuth 가 단다).
+  if (osHost.authError) return { ok: false, error: String(osHost.authError).slice(0, 300), authErrorCode: String(osHost.authErrorCode || '') };
   const { mounts } = sanitizeMounts(osHost.mounts);
   const hostKey = host.toLowerCase();
   const known = _osKind.get(hostKey) || '';
@@ -309,8 +350,8 @@ export async function collectOsUsage(osHost = {}, { signal, budgetMs = SESSION_B
     return await withSsh({
       host, port: Number(osHost.port) || 22,
       username: String(osHost.username || 'root'),
-      password: osHost.password || '', privateKey: osHost.privateKey || undefined,
-      readyTimeout: READY_TIMEOUT_MS, signal,
+      password: osHost.password || '', privateKey: osHost.privateKey || undefined, passphrase: osHost.passphrase || undefined,
+      readyTimeout: READY_TIMEOUT_MS, signal, singlePasswordAttempt: true,   // v3.25 반증 F1: 비밀번호는 한 번만(k-i 재시도 없음 — 계정 잠금 횟수)
     }, async ({ exec }) => {
       // 예산 시계는 **SSH 연결이 끝난 시점**부터 센다(READY 는 withSsh 가 이미 소비했다).
       // v2.613 RUNTIME2613-05: 예산은 호출자(폴러)가 장비 시한과 묶어 준 값(`budgetMs`)이 먼저다 — 기본은 이 모듈의 상수.
@@ -324,6 +365,30 @@ export async function collectOsUsage(osHost = {}, { signal, budgetMs = SESSION_B
         const r = await exec(linuxCommand(mounts, { sampler }), slice());
         const shaped = shapeLinux(r.stdout || '', mounts, { partitionIo, blkqMax, samplerSha });
         if (!shaped) return null;
+        // 전체 점검 34회차 F3(재현): 덧붙인 exec(로그 · 스냅샷)를 **피크 창보다 먼저** 돌린다 — 피크 창은 남은 예산에 맞춰 줄일 수 있지만(planWindow ·
+        //   사유를 남긴다) 로그 exec 는 안 timeout 합(최악 22초)보다 짧은 시한으로 시작하면 통째로 잘려 출력 0바이트 · 커서 제자리였다
+        //   (피크 10초 + 여유가 남은 예산을 먼저 써서 로그 시한이 13초까지 줄었다 — 'exec 안 timeout 합 + 여유 ≤ 그 exec 시한' 위반).
+        /*
+         * v2.929(5단계 — 집중 모니터링 경량 스냅샷): 같은 세션에서 덧붙일 **상수 명령**(호출부가 상수만 넘긴다 — snapshot/command.js FOCUS_SNAPSHOT_COMMAND).
+         *   남은 예산 안에서만 돌리고(MIN_SLICE 아래면 건너뛰고 사유) 출력은 상한으로 자른다. 실패해도 본 수집 결과는 그대로다(그 칸만 비운다).
+         */
+        const extra = {};
+        for (const x of Array.isArray(extraCommands) ? extraCommands.slice(0, 2) : []) {
+          if (!x || typeof x.cmd !== 'string' || !/^[a-z]{1,16}$/.test(String(x.name || ''))) continue;
+          if (slice() < MIN_SLICE_MS) { extra[x.name] = { skipped: 'budget' }; continue; }
+          // 39회차 R1(반증 — 재현): 37회차의 '시작 최소 시간(minMs) 못 미치면 건너뜀' 은 주 명령이 13초를 넘는 서버에서 로그를 **매 주기** 버렸다
+          //   (정상 서버의 로그 exec 는 1~2초에 끝난다). 이제 남은 예산으로 시작하되, minMs 보다 짧은 시한으로 시작한 exec 가 **시한에 걸리면**
+          //   실패가 아니라 '예산' 사유로 센다(37회차 R1 — 잘린 exec 가 '실패' 로 집계되던 것). 커서는 어느 쪽이든 제자리라 다음 주기가 이어 읽는다.
+          const short = slice() < (Number(x.minMs) || 0);
+          try {
+            const EXTRA_TMO = Math.min(Number(x.timeoutMs) || 15_000, slice());   // ⚠ 위치 인자(숫자) — 객체를 넘기면 NaN → 즉시 시한
+            const er = await exec(x.cmd, EXTRA_TMO);
+            extra[x.name] = { stdout: String(er.stdout || '').slice(0, Math.max(1_024, Number(x.maxBytes) || 64 * 1024)) };
+          } catch (e) {
+            const msg = String(e?.message || e);
+            extra[x.name] = short && /타임아웃|timed? ?out/i.test(msg) ? { skipped: 'budget' } : { error: msg.slice(0, 160) };
+          }
+        }
         // v2.922 피크 A 안 — 같은 세션에서 1초 창. 남은 예산이 모자라면 줄이고(planWindow) 그 사실을 남긴다. 1초 표본은 여기서 집계 뒤 버린다.
         const plan = planWindow({ wantS: peakWindowS, remainingMs: endsAt - Date.now() });
         let peak = { windowS: 0, wantS: Math.max(0, Number(peakWindowS) || 0), reduced: plan.reduced, reason: plan.reason,
@@ -343,20 +408,21 @@ export async function collectOsUsage(osHost = {}, { signal, budgetMs = SESSION_B
           } catch (e) { peak = { ...peak, windowS: 0, reason: 'error', error: String(e?.message || e).slice(0, 160) }; }
         }
         /*
-         * v2.929(5단계 — 집중 모니터링 경량 스냅샷): 같은 세션에서 덧붙일 **상수 명령**(호출부가 상수만 넘긴다 — snapshot/command.js FOCUS_SNAPSHOT_COMMAND).
-         *   남은 예산 안에서만 돌리고(MIN_SLICE 아래면 건너뛰고 사유) 출력은 상한으로 자른다. 실패해도 본 수집 결과는 그대로다(그 칸만 비운다).
+         * 8b단계 프로세스 Top-N — 같은 세션의 **별도 exec**(반증 F1 · S1). 주 명령 · 피크 · 덧붙인 exec 뒤 남은 예산 안에서만(MIN_SLICE 아래면 건너뛰고 사유 'budget') ·
+         *   실패 · 시한이어도 본 표본은 그대로다(그 칸만 missing). 끄면(설정 top.on=false · 집중 모니터링 — 기본값 false) exec 하지 않고 ‘꺼짐’(1초 대기 없음 — 반증 F10).
          */
-        const extra = {};
-        for (const x of Array.isArray(extraCommands) ? extraCommands.slice(0, 2) : []) {
-          if (!x || typeof x.cmd !== 'string' || !/^[a-z]{1,16}$/.test(String(x.name || ''))) continue;
-          if (slice() < MIN_SLICE_MS) { extra[x.name] = { skipped: 'budget' }; continue; }
-          try {
-            const EXTRA_TMO = Math.min(Number(x.timeoutMs) || 15_000, slice());   // ⚠ 위치 인자(숫자) — 객체를 넘기면 NaN → 즉시 시한
-            const er = await exec(x.cmd, EXTRA_TMO);
-            extra[x.name] = { stdout: String(er.stdout || '').slice(0, Math.max(1_024, Number(x.maxBytes) || 64 * 1024)) };
-          } catch (e) { extra[x.name] = { error: String(e?.message || e).slice(0, 160) }; }
+        let topSec = { value: { off: true }, absent: false, missing: false };
+        if (top) {
+          if (slice() < MIN_SLICE_MS) topSec = { value: null, absent: false, missing: true, skipped: 'budget' };
+          else {
+            try {
+              const TOP_TMO = Math.min(TOP_EXEC_TIMEOUT_MS, slice());   // ⚠ 위치 인자(숫자) — 객체를 넘기면 NaN → 즉시 시한
+              const tr = await exec(topCommand(), TOP_TMO);
+              topSec = readTopOutput(tr.stdout || '');
+            } catch (e) { topSec = { value: null, absent: false, missing: true, error: String(e?.message || e).slice(0, 160) }; }
+          }
         }
-        return { ...shaped, peak, ok: true, stderr: (r.stderr || '').slice(0, 300), ...(Object.keys(extra).length ? { extra } : {}) };
+        return { ...shaped, perf: { ...shaped.perf, top: topSec }, peak, ok: true, stderr: (r.stderr || '').slice(0, 300), ...(Object.keys(extra).length ? { extra } : {}) };
       };
       const tryWin = async () => {
         const r = await exec(winCommand(), slice());
@@ -367,14 +433,31 @@ export async function collectOsUsage(osHost = {}, { signal, budgetMs = SESSION_B
 
       // 아는 쪽을 먼저, 실패하면 반대쪽을 **같은 세션에서** 한 번 더.
       const order = known === 'windows' ? [tryWin, tryLinux] : [tryLinux, tryWin];
+      /*
+       * 1회차 점검 D5(a): exec 자체가 실패한 시도(시한 · 채널 오류 · 출력 상한)를 삼키지 않는다 — 예전에는 catch(() => null) 이 ‘출력은 왔는데 표지가 없음’ 과
+       *   같은 갈래로 보내 사유가 'not-linux'(‘Linux 출력 아님 — OS 종류 · 셸을 확인’)였다(재현: uname 멈춤 30,030ms → not-linux). 첫 exec 오류의 종류를 결과에 남긴다
+       *   (execError: 'timeout' | 'channel' | 'output-limit') — missReason.osMissOf 가 문구가 아니라 이 값으로 가른다. 오류 원문(명령 전문이 실린다)은 싣지 않는다.
+       * 재확인 N2: 판정은 **첫 시도의 결과**로 한다 — 첫 시도가 출력은 받았는데 표지가 없었으면(그 형식이 아니라는 증거) 대체 시도가 시한에 걸려도 예전처럼 not-linux 갈래다
+       *   (예전 판: 대체 시도의 시한이 ‘timeout · OS 종류 문제가 아닙니다’ 로 원인을 뒤집었다). 첫 시도 자체가 exec 오류일 때만 execError 를 싣는다.
+       */
+      let first = '';   // '' · 'no-markers' · 'exec:<종류>'
       for (const fn of order) {
         // ⚠ 남은 예산이 없으면 **시작하지 않고 사유를 남긴다**(조용히 생략하지 않는다 — v2.528 규약).
         if (slice() < MIN_SLICE_MS) {
           budgetSkipped = '남은 수집 시간이 부족해 다른 형식(Windows/Linux) 시도는 건너뛰었습니다.';
           break;
         }
-        const got = await fn().catch(() => null);
+        const got = await fn().catch((e) => { if (!first) first = `exec:${execErrorKind(e)}`; return null; });
         if (got) { _osKind.set(hostKey, got.osKind); return got; }
+        if (!first) first = 'no-markers';
+      }
+      const execErr = first.startsWith('exec:') ? first.slice(5) : '';
+      if (execErr) {
+        return {
+          ok: false, execError: execErr,
+          error: `${EXEC_ERROR_TEXT[execErr]}${budgetSkipped ? ` ${budgetSkipped}` : ''}`,
+          budgetSkipped: !!budgetSkipped,
+        };
       }
       return {
         ok: false,

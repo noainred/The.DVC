@@ -29,11 +29,11 @@
  *    롤백'으로 영구 거부돼 하나씩 손으로 지우는 수밖에 없어진다(부분 커밋).
  */
 
-import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 107회차: 읽기 오류 ≠ 손상(공용 읽기 — 30초 간격 재읽기)
 import { KINDS } from './testSchema.js';
 import { LIMITS, deleteTargetsByBatch, batchCounts } from './store.js';
 
@@ -144,10 +144,22 @@ function rowsOf(parsed) {
   return null;
 }
 
+/*
+ * 107회차(재현 — EISDIR): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 예전 catch 하나는 온전한 원본을 .corrupt 로 옮기고 빈 값 · 기본값을 캐시해
+ *   다음 저장이 원본 자리를 덮었다. 읽기 단계는 공용 읽기: 원본을 두고 · 캐시하지 않고(30초 간격 재읽기) · 저장을 거절한다(503 settingsUnreadable). parse 실패는 예전과 같다.
+ */
+const _reader = makeJsonFileReader(() => FILE(), { parse: (t) => t, preserve: false, tag: 'svcmon-batches' });
+let _readErr = '';
+/** 107회차: 원장을 못 읽은 상태(읽기 오류 코드) 또는 ''. */
+export function batchLedgerReadError() { load(); return _readErr; }
 function load() {
   if (cache) return cache;
+  const rr = _reader.read();
+  if (rr.kind === 'read-error') { _readErr = String(rr.error?.code || 'read-error').slice(0, 32); return []; }   // 107회차: 캐시하지 않는다 — 쓰기는 거절한다
+  _readErr = '';
+  if (rr.kind === 'missing') { cache = []; return cache; }
   try {
-    const parsed = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
+    const parsed = JSON.parse(rr.value);
     const rows = rowsOf(parsed);
     if (rows === null) {
       // JSON 파싱은 됐지만 원장이 아니다 — 조용히 [] 로 넘기면 다음 저장이 이 파일을
@@ -181,6 +193,7 @@ function load() {
  * @returns {boolean} 파일에 실제로 썼는지.
  */
 function save() {
+  if (_readErr || !cache) { console.warn('[svcmon] 배치 원장을 읽지 못한 상태라 쓰지 않았습니다(원본 유지 — 이번 등록은 원장에 남지 않고, 다시 읽혀도 기록되지 않습니다).'); return false; }   // 107회차 · 115회차: '읽히면 다시 기록됩니다' 는 사실이 아니었다(다시 기록하지 않는다)
   try {
     atomicWriteFileSync(FILE(), JSON.stringify({ batches: cache || [] }, null, 2));
     return true;
@@ -306,6 +319,8 @@ export function rollbackBatch(id, opts = {}) {
   if (!key) return { removed: 0, tests: 0, error: '배치 ID 가 필요합니다.' };
   try {
     const rec = load().find((b) => b.id === key) || null;
+    // 107회차: 원장을 못 읽으면 '이미 롤백' 가드를 볼 수 없다 — 지우지 않는다(다시 등록된 같은 태그의 대상을 지우지 않게).
+    if (_readErr) return { removed: 0, tests: 0, error: `배치 원장 파일을 읽지 못해 롤백하지 않았습니다 — 읽기 오류(${_readErr})이고 원본은 그대로 있습니다. 파일 권한 · 디스크를 확인하세요(30초마다 다시 읽습니다).` };
     if (rec?.rolledBackAt) {
       // 대상이 다시 등록돼 태그가 같은 경우까지 지우면 '되돌리기'가 남의 데이터를 지운다.
       return {
@@ -358,4 +373,4 @@ export function deleteBatchRecord(id) {
   }
 }
 
-export function _resetBatchCache() { cache = null; }
+export function _resetBatchCache() { cache = null; _reader.reset(); _readErr = ''; }

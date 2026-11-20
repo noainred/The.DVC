@@ -10,11 +10,12 @@ import re
 import threading
 
 from .datacenters import DATACENTERS as SEED_DATACENTERS, REGIONS
-from .jsonfile import read_json, write_json
+from .jsonfile import StoreUnavailable, load_error_text, read_json_state, write_json
 from .ssrf import ValidationError
 
 STATUSES = ("operational", "degraded", "maintenance")
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
+RESERVED_IDS = frozenset({"all"})   # 바로가기 datacenterId 의 '전체 공통' 표지(store.py) — 센터 id 로 쓰지 않는다
 MAX_DATACENTERS = 300
 
 
@@ -28,7 +29,8 @@ def _text(value, limit, default=""):
 def _number(value, low, high, default):
     try:
         num = float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # 117회차 F8(재현): 310자리가 넘는 정수는 float() 가 OverflowError 다 — 예전에는 racks 한 칸으로 500 + traceback(설정 v2.762 H5 와 같은 꼴)
         return default
     if num != num:                       # NaN
         return default
@@ -40,21 +42,44 @@ class DatacenterStore:
         self._path = path
         self._lock = threading.RLock()
         self._items = None
+        self._load_error = None
 
     # ---------- 내부 ----------
 
     def _load(self):
         if self._items is None:
-            raw = read_json(self._path, None, expect=list)
-            if raw is None:
+            raw, state = read_json_state(self._path, expect=list, quiet=self._load_error == "unreadable")
+            self._load_error = state if state in ("corrupt", "unreadable") else None
+            if state == "missing":
                 # 첫 기동: 내장 28개로 시작하고 즉시 파일로 굳힌다.
                 self._items = [self._clean(dc, keep_id=True) for dc in SEED_DATACENTERS]
                 write_json(self._path, self._items)
+            elif self._load_error:
+                # 46회차 H2(재현): 손상 · 읽기 오류는 첫 기동이 아니다 — 예전에는 내장 28곳을 파일에 굳혀 공개 대시보드에 샘플 센터가
+                #   실제처럼 떴고, 바로가기의 센터 연결이 'all' 로 바뀌었다. 빈 목록 + 표지(쓰기 거절). 읽기 오류는 캐시하지 않는다.
+                if state == "unreadable":
+                    return []
+                self._items = []
             else:
                 self._items = [dc for dc in (self._clean(entry, keep_id=True) for entry in raw) if dc]
         return self._items
 
+    def _load_writable(self):
+        """47회차 #1(재현): 손상 · 읽기 오류 상태의 쓰기는 **메모리를 바꾸기 전에** 거절한다 — 예전에는 add · reset · delete 가 목록을 먼저 고친 뒤
+        _save 에서 400 으로 거절돼, 거절된 변경(샘플 28곳 · 지운 분류)이 화면에 남았고 읽기 오류 상태가 재기동 전까지 굳었다."""
+        items = self._load()
+        if self._load_error:
+            raise ValidationError(load_error_text("datacenters.json", self._load_error))
+        return items
+
+    def load_error(self):
+        with self._lock:
+            self._load()
+            return self._load_error
+
     def _save(self):
+        if self._load_error:
+            raise ValidationError(load_error_text("datacenters.json", self._load_error))
         write_json(self._path, self._items)
 
     def _clean(self, data, *, keep_id=False, existing=None):
@@ -74,6 +99,10 @@ class DatacenterStore:
         dc_id = _text(data.get("id", base.get("id", "")), 32).lower()
         if not ID_RE.match(dc_id or ""):
             dc_id = re.sub(r"[^a-z0-9-]", "-", code.lower()).strip("-")[:32] or "dc"
+        if dc_id in RESERVED_IDS:
+            # 31회차 F7(재현): 'all' 은 바로가기의 '전체 공통' 표지다 — 코드 ALL 인 센터가 id 'all' 을 받으면 전체 공통 링크가
+            #   그 센터 전용으로 보이고, 센터를 지워도 옮길 링크를 구분할 수 없었다.
+            dc_id = f"dc-{dc_id}"
 
         region = data.get("region", base.get("region"))
         status = data.get("status", base.get("status"))
@@ -101,7 +130,10 @@ class DatacenterStore:
 
     def ids(self):
         with self._lock:
-            return {dc["id"] for dc in self._load()}
+            items = self._load()
+            if self._load_error:
+                raise StoreUnavailable(self._load_error)
+            return {dc["id"] for dc in items}
 
     def visible(self, limit=0):
         """화면에 노출할 목록. limit 0(또는 범위 밖)이면 전체.
@@ -133,7 +165,7 @@ class DatacenterStore:
 
     def add(self, data):
         with self._lock:
-            items = self._load()
+            items = self._load_writable()
             if len(items) >= MAX_DATACENTERS:
                 raise ValidationError(f"데이터센터는 최대 {MAX_DATACENTERS}개까지 등록할 수 있습니다.")
             item = self._clean(data)
@@ -145,7 +177,7 @@ class DatacenterStore:
 
     def update(self, dc_id, data):
         with self._lock:
-            items = self._load()
+            items = self._load_writable()
             for index, dc in enumerate(items):
                 if dc["id"] != dc_id:
                     continue
@@ -161,7 +193,7 @@ class DatacenterStore:
         어떤 사이트를 화면에 띄울지는 결국 이 순서로 정해진다.
         """
         with self._lock:
-            items = self._load()
+            items = self._load_writable()
             for index, dc in enumerate(items):
                 if dc["id"] != dc_id:
                     continue
@@ -175,7 +207,7 @@ class DatacenterStore:
 
     def delete(self, dc_id):
         with self._lock:
-            items = self._load()
+            items = self._load_writable()
             remaining = [dc for dc in items if dc["id"] != dc_id]
             if len(remaining) == len(items):
                 return False
@@ -185,6 +217,7 @@ class DatacenterStore:
 
     def reset(self):
         with self._lock:
+            self._load_writable()
             self._items = [self._clean(dc, keep_id=True) for dc in SEED_DATACENTERS]
             self._save()
             return self.all()

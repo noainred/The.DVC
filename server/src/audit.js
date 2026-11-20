@@ -10,9 +10,10 @@ import path from 'node:path';
 import { config } from './config.js';
 import { atomicWriteFileSync } from './util/atomicWrite.js';
 import { clientIp } from './util/rateLimit.js'; // v2.479(감사 코어 B-4): XFF 는 TRUST_PROXY 일 때만
+import { envPositive } from './util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
 
 const FILE = path.join(config.configDir, 'audit.ndjson');
-const MAX = Number(process.env.AUDIT_MAX) || 20000;
+const MAX = envPositive(process.env.AUDIT_MAX, 20000);
 
 // Human labels for the auto-logged admin/remote write routes (method + path).
 function describe(method, urlPath) {
@@ -225,6 +226,30 @@ export function listAudit({ limit = 100, offset = 0, user = '', q = '' } = {}) {
   const lim = Math.max(1, Math.min(1000, Number(limit) || 100));
   const off = Math.max(0, Number(offset) || 0);
   return { total, items: items.slice(off, off + lim), users: [...new Set(items.map((e) => e.user))].sort() };
+}
+
+/**
+ * v3.9.0(SSH 공용 접속 › 키 보안 ‘키 변경 기록’): `action` 이 주어진 접두 중 하나로 시작하는 줄(최신 먼저 · 읽기 소독 후 · 상한 limit).
+ * 비동기 읽기 — 요청 경로에서 큰 감사 파일을 동기로 읽어 이벤트 루프를 막지 않는다.
+ */
+export async function listAuditByActionPrefix(prefixes = [], { limit = 200 } = {}) {
+  const pre = (Array.isArray(prefixes) ? prefixes : []).map((x) => String(x || '')).filter(Boolean);
+  if (!pre.length) return [];
+  let text = '';
+  try { text = await fs.promises.readFile(FILE, 'utf8'); } catch { return []; }
+  const lines = text.split('\n');
+  const lim = Math.max(1, Math.min(1000, Number(limit) || 200));
+  const out = [];
+  for (let i = lines.length - 1; i >= 0 && out.length < lim; i -= 1) {
+    const l = lines[i];
+    if (!l || !pre.some((p) => l.includes(`"${p}`))) continue;   // 싼 거르기 — 정확한 판정은 아래
+    let e = null;
+    try { e = JSON.parse(l); } catch { continue; }
+    const action = e && typeof e === 'object' ? auditStr(e.action) : '';
+    if (!pre.some((p) => action.startsWith(p))) continue;
+    out.push({ at: auditStr(e.at), user: auditStr(e.user) || 'unknown', action, target: auditStr(e.target), detail: auditStr(e.detail), ip: auditStr(e.ip) });
+  }
+  return out;
 }
 
 /**

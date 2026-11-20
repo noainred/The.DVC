@@ -15,7 +15,14 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 
-const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'sanflow2935-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const DIR = tmpDir('sanflow2935-');
 Object.assign(process.env, { CONFIG_DIR: DIR, DATA_SOURCE: 'live', AUTH_ENABLED: 'true', CENTRAL_TOKEN: 'ctok-2935f' });
 fs.writeFileSync(path.join(DIR, 'runtime.json'), JSON.stringify({ dataSource: 'live' }));
 fs.writeFileSync(path.join(DIR, 'permissions.json'), JSON.stringify({ schemaVersion: 3, matrix: { viewer: ['dashboard', 'tools', 'inv.hosts'], operator: ['dashboard', 'tools', 'inv.hosts'] } }));
@@ -121,7 +128,7 @@ test('③ 작업 큐 — 비밀 없음 · 그 엣지만 · ttl · pending · 늦
   assert.deepEqual(done.result.outputs.map((o) => o.cmd), [createCmd(N1), `flow --show ${N1}`], '실행했어야 하는 명령만');
   assert.ok(done.result.outputs[1].out.length <= C.OUT_MAX);
   assert.equal('extra' in done.result, false);
-  assert.equal(rec.lastError, '카운터 형식을 알아보지 못했습니다(원문은 작업 기록에)', '카운터를 못 읽으면 0 이 아니라 사유');
+  assert.equal(rec.lastError, '카운터 형식을 알아보지 못했습니다(원문 앞부분은 기록에)', '카운터를 못 읽으면 0 이 아니라 사유');
   assert.equal(rec.counters, undefined); assert.equal(rec.lastAt, undefined, '반증 M-4: 못 읽은 시도는 성공 시각을 움직이지 않는다'); assert.ok(rec.lastTryAt);
   assert.equal(J.completeFlowJob(r.id, 'edge-a', res).already, true, '두 번째 회신은 무시');
 

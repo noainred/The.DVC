@@ -15,7 +15,7 @@
 import { numOrNull } from '../util/numOrNull.js';
 
 const n = numOrNull;
-export const CHANGE_KINDS = Object.freeze(['reboot', 'kernel', 'needs-restart', 'package', 'sysctl', 'sysctl-file', 'sysctl-all', 'cron', 'tuned', 'selinux', 'firewalld', 'units-failed', 'firmware', 'cvp-map', 'health']);
+export const CHANGE_KINDS = Object.freeze(['reboot', 'kernel', 'needs-restart', 'package', 'sysctl', 'sysctl-file', 'sysctl-all', 'cron', 'tuned', 'selinux', 'firewalld', 'units-failed', 'firmware', 'cvp-map', 'health', 'idle']);
 /** 한 주기 한 서버 이벤트 상한(목록 폭주 방지 — 넘으면 ‘그 밖 n건’ 한 줄). */
 export const EVENTS_PER_CYCLE_MAX = 24;
 export const SX_NOISY_STREAK = 3;

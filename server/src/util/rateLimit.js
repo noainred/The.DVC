@@ -8,9 +8,17 @@
  * API_RATE_DISABLED(=true 비활성).
  */
 
+import { envPositive, ENV_INT_MAX } from './envNumber.js';
+
 const DISABLED = String(process.env.API_RATE_DISABLED || '').toLowerCase() === 'true';
-const MAX = Math.max(1, Number(process.env.API_RATE_LIMIT) || 1800);   // 분당 1800 = 30 req/s/IP(여유)
-const WINDOW_MS = Math.max(1000, Number(process.env.API_RATE_WINDOW_MS) || 60_000);
+/*
+ * 102회차 F2(재현): `Math.max(하한, Number(env) || 기본값)` 은 Infinity 를 통과시켰다 — API_RATE_WINDOW_MS=Infinity 면 창이 **영영 안 바뀌어**
+ *   한 IP 가 한도에 한 번 닿으면 재시작 전까지 429(Retry-After: Infinity — 프록시 뒤면 전 사용자), API_RATE_LIMIT=Infinity 면 제한이 꺼졌다
+ *   (끄는 키는 API_RATE_DISABLED 다). 이제 유한 양수만 · 창은 2^31−1ms 이하(그 밖 기본값).
+ */
+const MAX = Math.max(1, envPositive(process.env.API_RATE_LIMIT, 1800));   // 분당 1800 = 30 req/s/IP(여유)
+const WINDOW_MS = Math.max(1000, envPositive(process.env.API_RATE_WINDOW_MS, 60_000, { max: ENV_INT_MAX }));
+export { MAX as API_RATE_MAX, WINDOW_MS as API_RATE_WINDOW_MS };   // 102회차: 해석 결과를 시험이 대조한다
 const HARD_CAP = 50_000; // 키 맵 메모리 상한(초과 시 만료 항목 강제 정리)
 
 const buckets = new Map(); // key -> { count, windowStart }

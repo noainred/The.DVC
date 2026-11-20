@@ -31,6 +31,7 @@ import AttachAdmin from '../attach/AttachAdmin.jsx';
 import IssueCalendar from './IssueCalendar.jsx';
 import MentionBox from '../../components/MentionBox.jsx';
 import { mentionsInText } from '../../components/mentionText.js';
+import { copyText as copyToClipboard } from '../../util/copyText.js';   // v3.10.6: HTTP 포탈에서도 복사(Clipboard API → execCommand 폴백 · 실패는 false)
 
 const SUBS = [['board', '보드'], ['list', '목록'], ['calendar', '캘린더'], ['mine', '내 작업'], ['inbox', '알림함'], ['activity', '활동'], ['sprint', '스프린트'], ['epics', '에픽'], ['filters', '필터'], ['report', '리포트']]; // v2.882 스프린트 · 에픽 · 필터 · v2.889 캘린더 · v2.908 알림함 · 리포트
 /** v2.871: 설정 탭은 전체 범위 관리자에게만 보인다(서버가 같은 기준으로 막는다). 해시 키는 늘 유효 — 권한이 없으면 안내만. */
@@ -651,7 +652,7 @@ function CopyLink({ issueKey }) {
   const [state, setState] = useState('');
   const url = issueLink(issueKey);
   const copy = async () => {
-    try { await navigator.clipboard.writeText(url); setState('ok'); setTimeout(() => setState(''), 2000); } catch { setState('manual'); }
+    if (await copyToClipboard(url)) { setState('ok'); setTimeout(() => setState(''), 2000); } else setState('manual');
   };
   if (!url) return null;
   return (

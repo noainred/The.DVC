@@ -13,6 +13,7 @@ import path from 'node:path';
 import { config } from '../../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../../util/atomicWrite.js';
 import { makeSettingsLoadError } from '../../util/settingsLoadError.js';
+import { makeJsonFileReader, READ_RETRY_MS } from '../../util/jsonFileRead.js';   // 105회차 A5: 읽기 오류 ≠ 손상
 import { ROLES, itemOf } from './catalog.js';
 
 const FILE = () => path.join(config.configDir, 'bmusage-tuning.json');
@@ -33,7 +34,7 @@ let _cache = null; let _mtime = '';
  * 로드 오류는 공용 코어(util/settingsLoadError.js — v2.631·v2.633)로: 손상이면 보존본으로 옮기고 오류를 세운다 · 파일이 없는데 보존본만 남았으면
  *   (재시작 뒤에도) 여전히 못 읽은 것이다 · 관리자가 저장하거나 서비스 점검에서 ‘기본값으로 확정’ 하면 풀린다. 사유 문구는 원문 조각을 싣지 않는다(safeLoadText).
  */
-const _err = makeSettingsLoadError(FILE, { label: '베어메탈 튜닝 권장값 덮어쓰기', confirm: () => writeFile({ v: 1, all: {}, corps: {}, by: 'confirm-default', at: Date.now() }) });
+const _err = makeSettingsLoadError(FILE, { label: '베어메탈 튜닝 권장값 덮어쓰기', confirm: () => writeFile({ v: 1, all: {}, corps: {}, by: 'confirm-default', at: Date.now() }) , ownerOnly: true });   // 20회차 F8: 쓰기 라우트가 소유자 등급
 const mtimeOf = () => { try { const st = fs.statSync(FILE()); return `${st.mtimeMs}:${st.size}`; } catch { return ''; } };
 export function tuningOverridesLoadError() { load(); return _err.get(); }
 
@@ -54,13 +55,28 @@ function cleanRoleMap(m) {
   return out;
 }
 
+/*
+ * 105회차 A5(103 남긴 것 — 엣지 배포 설정 4개 · cvp/settings F20 과 같은 최소 수정): 예전 catch 하나는 **읽기 오류**(EACCES · EIO · EISDIR)도 손상으로 보고
+ *   원본을 `.corrupt.*` 로 옮겨, 재시작 뒤 '보존본만 있음' 이 되고 '기본값으로 확정'(빈 덮어쓰기) · 수동 복구로만 풀렸다. 이제 원본을 두고 · 캐시하지 않고
+ *   (30초 간격 재읽기 — 읽히면 재시작 · 확정 없이 풀림) · 표지 readError(확정 불가 · 판정 거부 · 저장 409). parse 실패는 예전과 같다.
+ */
+const _reader = makeJsonFileReader(FILE, { parse: (t) => t, preserve: false, tag: 'bmusage-tuning' });
 function load() {
   const mt = mtimeOf();
   if (_cache && mt === _mtime) return _cache;
+  // 106회차(105회차 A5 회귀 — 재현): 파일이 없으면 직전 읽기 오류는 끝난 일이다 — 읽기 상태를 비운다. 안 비우면 읽기 오류(EISDIR) → 그 자리를 치움 → 재읽기 간격 안의 저장
+  //   (없음 = 저장 허용) 직후 load 가 미뤄 둔 옛 읽기 오류를 다시 세워, 방금 저장한 온전한 파일을 '읽기 오류' 라 하고 판정을 거부했다(최대 30초).
+  if (!mt) { _mtime = mt; _reader.reset(); _err.missing(); _cache = { v: 1, all: bare(), corps: bare(), by: '', at: 0 }; return _cache; }
+  const rr = _reader.read();
+  if (rr.kind === 'read-error') {
+    _err.readError(rr.error, { retryMs: READ_RETRY_MS });
+    _cache = null; _mtime = '';   // 캐시하지 않는다 — 판정 · 저장은 _err 로 거절된다
+    return { v: 1, all: bare(), corps: bare(), by: '', at: 0 };
+  }
   _mtime = mt;
-  if (!mt) { _err.missing(); _cache = { v: 1, all: bare(), corps: bare(), by: '', at: 0 }; return _cache; }
   try {
-    const raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
+    if (rr.kind === 'missing') { _err.missing(); _cache = { v: 1, all: bare(), corps: bare(), by: '', at: 0 }; return _cache; }
+    const raw = JSON.parse(rr.value);
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('객체가 아닙니다');
     const corps = bare();
     for (const [vc, m] of Object.entries(raw.corps && typeof raw.corps === 'object' ? raw.corps : {})) {
@@ -109,7 +125,7 @@ export function overridesFor({ role = 'general', vcenterId = '' } = {}) {
  */
 export function saveTuningOverride({ scope = 'all', role, itemId, value } = {}, { by = '' } = {}) {
   load();
-  if (_err.get()) return { ok: false, unreadable: true, reason: _err.get().reason };
+  if (_err.get()) return { ok: false, unreadable: true, ...(_err.get().readError ? { readError: true } : {}), reason: _err.get().reason };   // 105회차 A5: 읽기 오류는 라우트 409
   if (!ROLES.includes(role)) return { ok: false, reason: `역할은 ${ROLES.join(' · ')} 중 하나입니다.` };
   const item = itemOf(itemId);
   if (!item) return { ok: false, reason: '모르는 항목입니다.' };
@@ -139,4 +155,4 @@ export function saveTuningOverride({ scope = 'all', role, itemId, value } = {}, 
   return { ok: true, prev: prev === undefined ? null : prev, next: clear ? undefined : (value === null ? null : String(value)), cleared: clear };
 }
 
-export function _resetTuningOverridesForTest() { _cache = null; _mtime = ''; _err.ok(); }
+export function _resetTuningOverridesForTest() { _cache = null; _mtime = ''; _err.ok(); _reader.reset(); }

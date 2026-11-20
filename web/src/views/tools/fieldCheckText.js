@@ -14,6 +14,7 @@ export const CHECK_TEXT = Object.freeze({
   'vapi-tags': { label: 'vSphere 태그(vAPI)', what: '그 법인 vCenter 의 태그 응답을 실제로 읽었는가(인벤토리 태그 수집)' },
   'lacp-path': { label: 'vDS LACP 경로', what: 'vDS 의 LACP(LAG) 구성 경로를 실제로 읽었는가(vCenter 정보 · 포트그룹)' },
   'bareos-dir': { label: 'Bareos Director 콘솔', what: '그 법인 Bareos Director 콘솔에 실제로 접속했는가(Bareos 사전 점검)' },
+  'onefs-detach': { label: '아이실론 분리 실행', what: '그 법인 엣지가 아이실론 du 를 장비에서 분리 실행(nohup)했는가(엣지 디렉터리 사용량 상태 — v2.954 이상 엣지)' },
 });
 export const stateOf = (c) => STATE_TEXT[c?.state] || STATE_TEXT.unknown;
 

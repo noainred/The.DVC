@@ -1,6 +1,6 @@
 // v2.935(C-②) SAN 플로우 모니터 문구 — 못 읽음 ≠ 없음 · 값이 없으면 ‘—’ · 사람이 만든 플로우는 보기만 · 차이 % 는 둘 다 있을 때만
 import { describe, it, expect } from 'vitest';
-import { fvBadge, checkBadge, createBlock, deviceRows, diffPct, diffText, flowRows, flowKpis, jobTitle, jobTone, traceLines, hbaOptions, targetOptions, shortWwn, existingPairs, cycleText, deadlineText } from './sanFlowText.js';
+import { fvBadge, checkBadge, createBlock, deviceRows, diffPct, diffText, flowRows, flowKpis, jobTitle, jobTone, traceLines, hbaOptions, targetOptions, shortWwn, existingPairs, cycleText, deadlineText, CONFIRM } from './sanFlowText.js';
 
 const T0 = new Date(2026, 10, 7, 12, 30).getTime();
 const dev = (over = {}) => ({ id: 'sw1', name: 'us-sw-a1', fv: { state: 'yes', expires: null }, limit: 128, check: { at: T0, ok: true, total: 9, portal: 3, others: ['ops_backup'] }, portalFlows: 3, collectedAt: T0, agent: 'us-edge-01', ...over });
@@ -116,5 +116,26 @@ describe('반증 1인 확정분(v2.935)', () => {
     expect(deadlineText(1_200_000)).toContain('20분 안에');
     expect(deadlineText(undefined)).toContain('정해진 시간');
     expect(jobTitle({ action: 'create', deviceName: 'sw', status: 'done', timedOut: true, result: { ok: false } })).toBe('만들기 · sw · 결과 모름');
+  });
+});
+
+describe('v2.940 비활성화 · 다시 켜기(시안 C-②)', () => {
+  it('활성은 비활성화 · 비활성은 다시 켜기 · 등록부에 없으면 둘 다 없음', () => {
+    const rows = flowRows({ devices: [dev()], flows: [flow({ name: 'a' }), flow({ name: 'b', state: 'inactive', rxBps: null, txBps: null }), flow({ name: 'c', deviceKnown: false })] });
+    expect(rows.slice(0, 3).map((r) => [r.state.label, r.canDeactivate, r.canActivate])).toEqual([['활성', true, false], ['비활성', false, true], ['활성', false, false]]);
+    expect(rows[3]).toMatchObject({ canDeactivate: false, canActivate: false });   // 사람이 만든 플로우
+    expect(rows[1].rate).toBe('— / —');
+    // 반증 M-1 · L-4: 오래된 속도는 '오래됨' · 엣지가 끄기 · 켜기를 모르면 버튼을 잠근다
+    expect(flowRows({ devices: [dev()], flows: [flow({ stale: true, rxBps: null, txBps: null })] })[0].rate).toBe('오래됨(최근에 못 읽음)');
+    const locked = flowRows({ devices: [dev({ toggleIssue: '엣지 "e" 의 버전(2.937.0)은 …' })], flows: [flow({ name: 'a' }), flow({ name: 'b', state: 'inactive' })] });
+    expect(locked.slice(0, 2).map((r) => [r.canDeactivate, r.canActivate, r.toggleLocked])).toEqual([[false, false, true], [false, false, true]]);
+    expect(flowRows({ devices: [dev()], flows: [flow()] })[0].toggleLocked).toBe(false);
+    const k = flowKpis({ devices: [dev()], flows: [flow({ name: 'a' }), flow({ name: 'b', state: 'inactive' }), flow({ name: 'c', state: 'failed' })] });
+    expect(k[2].meta).toBe('활성 1 · 비활성 1 · 그 밖 1');
+  });
+  it('확인 줄 문구 · 라우트', () => {
+    expect(CONFIRM.deactivate.path).toBe('/tools/san-flow/deactivate');
+    expect(CONFIRM.activate.text('dvc_x_01')).toContain('다시 켭니다');
+    expect(CONFIRM.delete.danger).toBe(true); expect(CONFIRM.deactivate.danger).toBe(false);
   });
 });

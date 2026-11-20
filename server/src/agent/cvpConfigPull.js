@@ -113,22 +113,35 @@ export function runEndpointRequests(reqs) {
     else if (_epQueue.length < 64) _epQueue.push({ cvpId: r.cvpId, macs: r.macs.slice(0, 64) });
   }
   if (_epRun) return _epRun;
-  _epRun = (async () => {
-    let tried = 0; let done = 0;
-    while (_epQueue.length) {
-      const r = _epQueue.shift();
-      const mine = new Set(serversForThisNode().map((s) => s.id));
-      if (!mine.has(r.cvpId)) continue;   // 이 엣지 몫이 아닌 CVP — 등록부가 원천(중앙 요청을 그대로 믿지 않는다)
-      const macs = r.macs.filter((m) => typeof m === 'string' && /^[0-9a-f]{12}$/.test(m)).slice(0, 64);
-      tried += 1;
-      try { const x = await lookupEndpointsNow(r.cvpId, macs); if (x.ok) done += 1; else console.warn(`[cvp-config] EndpointLocation 지금 조회 실패(${r.cvpId}): ${x.reason}`); }
-      catch (e) { console.warn(`[cvp-config] EndpointLocation 지금 조회 실패(${r.cvpId}): ${e.message}`); }
-    }
-    // 실패도 MAC 마다 '오류' 로 저장된다(endpointNow) — 그 사실이 중앙에 닿도록 시도했으면 push 한다.
-    if (tried) { try { await pushCvpNow(); } catch (e) { console.warn(`[cvp-config] EndpointLocation 결과 push 실패(다음 주기에 다시 갑니다): ${e.message}`); } }
-    return done;
-  })().finally(() => { _epRun = null; });
-  return _epRun;
+  /*
+   * 85회차 F6(재현 — 모듈 목): 예전에는 대기열을 비운 뒤 결과 push(고RTT 수 초)를 기다리는 동안 들어온 요청이 '실행 중' 을 보고 붙기만 하고
+   *   처리되지 않았다 — 실행은 push 뒤 그대로 끝났고(.finally 가 _epRun 을 비움) 그 요청은 다음 epNow 가 올 때까지 대기열에 남았다
+   *   (중앙은 내려보낼 때 큐에서 지우므로 다시 오지 않는다). 이제 push 뒤 대기열을 다시 보고, 비었을 때만 끝낸다 — 그 확인과 _epRun 비우기
+   *   사이에 await 가 없다(storage '지금 수집' 작업과 같은 규칙). 첫 await 전에 끝나 대입보다 먼저 비우지 않게 시작에서 한 번 양보한다.
+   */
+  const run = (async () => {
+    await null;
+    let done = 0;
+    try {
+      for (;;) {
+        let tried = 0;
+        while (_epQueue.length) {
+          const r = _epQueue.shift();
+          const mine = new Set(serversForThisNode().map((s) => s.id));
+          if (!mine.has(r.cvpId)) continue;   // 이 엣지 몫이 아닌 CVP — 등록부가 원천(중앙 요청을 그대로 믿지 않는다)
+          const macs = r.macs.filter((m) => typeof m === 'string' && /^[0-9a-f]{12}$/.test(m)).slice(0, 64);
+          tried += 1;
+          try { const x = await lookupEndpointsNow(r.cvpId, macs); if (x.ok) done += 1; else console.warn(`[cvp-config] EndpointLocation 지금 조회 실패(${r.cvpId}): ${x.reason}`); }
+          catch (e) { console.warn(`[cvp-config] EndpointLocation 지금 조회 실패(${r.cvpId}): ${e.message}`); }
+        }
+        // 실패도 MAC 마다 '오류' 로 저장된다(endpointNow) — 그 사실이 중앙에 닿도록 시도했으면 push 한다.
+        if (tried) { try { await pushCvpNow(); } catch (e) { console.warn(`[cvp-config] EndpointLocation 결과 push 실패(다음 주기에 다시 갑니다): ${e.message}`); } }
+        if (!_epQueue.length) return done;   // ⚠ 이 확인과 아래 finally 사이에 await 를 두지 말 것
+      }
+    } finally { if (_epRun === run) _epRun = null; }
+  })();
+  _epRun = run;
+  return run;
 }
 export function _epQueueForTest() { return _epQueue.map((x) => ({ ...x })); }
 

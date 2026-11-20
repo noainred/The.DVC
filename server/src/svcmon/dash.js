@@ -67,7 +67,12 @@ export function createDashAcc({ targets = [] } = {}) {
 
   // 엣지 행 → 중앙 대상(출처) 조인 키 — 엣지 사본은 경로·이름이 같다(배정 스냅샷).
   const byPathName = new Map();
-  for (const tg of targets) byPathName.set(`${t(tg.path)}\u0001${t(tg.name).toLowerCase()}`, tg);
+  // v2.988: 구분(infra|service)까지 맞춘 조인 — 같은 경로 · 이름의 다른 구분 대상이 섞이지 않게(엣지가 구분을 실을 때만 · 옛 엣지는 위 키로).
+  const byPathNameKind = new Map();
+  for (const tg of targets) {
+    byPathName.set(`${t(tg.path)}\u0001${t(tg.name).toLowerCase()}`, tg);
+    byPathNameKind.set(`${t(tg.path)}\u0001${t(tg.name).toLowerCase()}\u0001${tg.kind === 'service' ? 'service' : 'infra'}`, tg);
+  }
 
   const add = (state, { tg, where, test, reply, ms, streak, type, targetName, host, path }) => {
     summary.total += 1;
@@ -90,7 +95,9 @@ export function createDashAcc({ targets = [] } = {}) {
     const item = { state, where, target: targetName, host, path, test, type, reply: t(reply).slice(0, 120), ms: m, streak: Number(streak) || 0, kind };
     if ((state === 'ok' || state === 'warn') && m != null && type !== 'cert' && type !== 'domain') pushTop(slow, item, TOP_SLOW, (a, b) => a.ms > b.ms);
     if (state === 'bad') pushTop(streaks, item, TOP_STREAK, (a, b) => a.streak > b.streak);
-    if (type === 'cert' || type === 'domain') {
+    // 61회차 F3(재현): 만료 임박 표는 **지금 결과**(ok · warn · bad)만 — 낡음(stale) · 무보고 엣지(unknown) 행의 옛 'D-n' 이 지금 남은 일수처럼
+    //   'CERT D-5' 로 실렸다(10일 전 측정이면 실제로는 만료됐을 수 있다). 그 행은 KPI 의 낡음 · 알 수 없음으로만 센다(느린 TOP · 연속 실패와 같은 규칙).
+    if ((type === 'cert' || type === 'domain') && (state === 'ok' || state === 'warn' || state === 'bad')) {
       const days = certDaysOf(item.reply);
       if (days != null && days <= CERT_WINDOW_DAYS) pushTop(certs, { ...item, days }, TOP_CERT, (a, b) => a.days < b.days);
     }
@@ -125,7 +132,7 @@ export function createDashAcc({ targets = [] } = {}) {
       slow, streaks, certs,
     };
   };
-  return { add, finish, byPathName };
+  return { add, finish, byPathName, byPathNameKind };
 }
 
 /** 직접 실행 결과 1건 → 누산기. */
@@ -135,7 +142,8 @@ function addLocal(acc, tg, x, results, now) {
 }
 /** 엣지 행 1건 → 누산기. */
 function addEdge(acc, agent, it) {
-  const tg = acc.byPathName.get(`${t(it.path)}\u0001${t(it.target).toLowerCase()}`) || null;
+  const base = `${t(it.path)}\u0001${t(it.target).toLowerCase()}`;
+  const tg = (it.kind ? acc.byPathNameKind.get(`${base}\u0001${it.kind}`) : null) || (it.kind ? null : acc.byPathName.get(base)) || null;
   acc.add(DASH_STATES.includes(it.state) ? it.state : 'unknown', { tg, where: agent, test: it.test, reply: it.reply, ms: it.ms, streak: it.streak, type: it.type, targetName: it.target, host: it.host, path: it.path });
 }
 

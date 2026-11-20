@@ -12,14 +12,14 @@ import { store, usageReadable } from './../store.js';
 /** v2.666: 호스트별 vCenter CPU 사용률 적재(iDRAC 통합 추이의 비교 계열). '0' 이면 끈다. */
 const HOST_CPU_SERIES = String(process.env.HOST_CPU_SERIES ?? '').trim() !== '0';
 import { getMetricsDb } from './db.js';
-import { loadMetricsSettings } from './settings.js';
+import { loadMetricsSettings, metricsRetentionUnknown } from './settings.js';
 import { rollupBackfillStatus, scheduleRollupBackfill } from './rollupBackfill.js'; // v2.675: 롤업 도입 이전 원본 → 시간당 롤업
 import { getGuestGpuHost, getGuestGpuVms } from '../gpu/store.js';
 import { loadGpuGuestSettings } from '../gpu/settings.js';
 import { updateVmStats } from '../reports/vmStats.js';
 import { memSampleRows, maybeLogMem } from '../system/memtrack.js';
 import { insertVmperf, pruneVmperf } from './vmperfDb.js';
-import { loadVmperfSettings, vmperfTracks } from './vmperfSettings.js';
+import { loadVmperfSettings, vmperfTracks, vmperfRetentionUnknown } from './vmperfSettings.js';
 import { roomTempRows } from '../idrac/roomTempSeries.js';
 import { serverTempRows } from '../idrac/serverTempSeries.js';   // v2.504: 서버별 온도 추이(아래 주석)
 import { serverTrendRows } from '../idrac/serverTrendSeries.js'; // v2.660: iDRAC 통합 추이(CPU 사용률·CPU/GPU 온도)
@@ -126,6 +126,9 @@ export function vmAllocRows(snap, settings) {
   //   ⚠ 계열 전체를 보류하지 않는다 — REST 폴백 vCenter 하나가 그 계열을 영원히 비운다(v2.682 R3A-03 교훈). 메모리 할당 계열은
   //   이제 '사용률을 읽은 켜진 VM' 의 합이다 — 그 vCenter 가 REST 폴백인 동안 메모리 행은 만들어지지 않는다(전부 모름이면 할당 0).
   const vmUsageUnknown = { cpu: 0, mem: 0 };
+  // v3.28.1: 할당 크기(vCPU 수 · 메모리 MB)를 못 읽은 켜진 VM 도 같은 규칙 — 0 으로 더하지 않고 그 지표 계열에서 빼고 센다
+  //   (예전 `Number(v.memMB) || 0` 은 사용률이 있으면 할당 0 · 사용 0 을 더해 메모리 계열이 표지 없이 작게 쌓였고, vCPU 는 `vcpu > 0` 문에서 조용히 빠졌다).
+  const vmAllocUnknown = { cpu: 0, mem: 0 };
   for (const v of snap.vms || []) {
     if (v.template) continue;
     if (!fresh(v.vcenterId)) continue;
@@ -151,20 +154,22 @@ export function vmAllocRows(snap, settings) {
       }
     }
     if (v.powerState !== 'POWERED_ON') continue;
-    const memMB = Number(v.memMB) || 0;
+    const memMB = numOrNull(v.memMB);           // v3.28.1: 못 읽으면 null
     const memPct = numOrNull(v.memUsagePct);   // v2.741(VC-02): 모르면 null — 0 으로 채우지 않는다
-    const vcpu = Number(v.cpuCount) || 0;
+    const vcpu = numOrNull(v.cpuCount);         // v3.28.1: 못 읽으면 null
     const cpuPct = numOrNull(v.cpuUsagePct);
     const mhzPerCore = hostMhz.get(`${v.vcenterId}|${v.host}`);
     // 설정(v2.376): 대상 vCenter 만 수집. vcenterIds 가 비어 있으면 전체가 대상이다.
     if (!vmperfTracks(v.vcenterId, settings)) continue;
     const cpuCounted = !!(mhzPerCore && vcpu > 0);  // 호스트 MHz 를 모르는 VM 은 예전부터 CPU 집계 밖(추정 금지)
-    if (memMB > 0 && memPct == null) vmUsageUnknown.mem += 1;
+    if (memMB == null) vmAllocUnknown.mem += 1;   // v3.28.1
+    if (vcpu == null) vmAllocUnknown.cpu += 1;
+    if (memMB != null && memMB > 0 && memPct == null) vmUsageUnknown.mem += 1;
     if (cpuCounted && cpuPct == null) vmUsageUnknown.cpu += 1;
     const targets = settings.trackTotal ? [v.vcenterId, ''] : [v.vcenterId];
     for (const id of targets) {                    // vCenter별 (+ 선택 시 전체 합계)
       const e = bucket(id);
-      if (memPct != null) {
+      if (memPct != null && memMB != null) {
         e.memAlloc += memMB;
         e.memUsed += memMB * (memPct / 100);
       }
@@ -228,6 +233,7 @@ export function vmAllocRows(snap, settings) {
   out.vmStorageUnknown = vmStorageUnknown;       // v2.727(C-01): 스토리지를 못 읽어 VM 디스크 계열에서 뺐거나(committed) 부분 합으로 만든(uncommitted) VM 수
   out.vmStorageUnknownBy = vmStorageUnknownBy;   //   { committed, uncommitted } — 조치가 다르다(전자는 계열에서 빠짐 · 후자는 prov 만 하한)
   out.vmUsageUnknown = vmUsageUnknown;           // v2.741(VC-02): 사용률을 못 읽어 CPU·메모리 할당/사용 계열에서 뺀 켜진 VM 수 { cpu, mem }
+  out.vmAllocUnknown = vmAllocUnknown;           // v3.28.1: 할당 크기(vCPU · 메모리)를 못 읽어 CPU·메모리 계열에서 뺀 켜진 VM 수 { cpu, mem }
   out.staleVcenters = staleTracked;              // v2.620(SRV2620-03): 낡아서 뺀 대상 vCenter 수(점검중 제외)
   out.maintenanceExcluded = maintenanceTracked;   // v2.622(RECENT-01): 점검중이라 행을 빼고 전체 합계에서도 빠진 대상 vCenter 수
   out.totalWithheld = false;
@@ -241,6 +247,7 @@ async function sampleOnceInner() {
   let gpuMemPartialHosts = 0; // v2.681 R2D-06 — 게스트 GPU 메모리 합이 부분 합이라 게스트 값을 적재하지 않은 호스트 수
   let dsUsedUnknown = 0; // v2.598 RECENT2598-03 — vmAllocRows 가 센 '사용량 미상으로 뺀 DS' 수
   let vmStorageUnknown = 0; let vmStorageUnknownBy = null; // v2.727(C-01) — vmAllocRows 가 센 '스토리지 미상 VM' 수·사유
+  let vmAllocUnknown = null; // v3.28.1 — 할당 크기(vCPU · 메모리)를 못 읽어 CPU·메모리 계열에서 뺀 VM 수 { cpu, mem }
   let vmUsageUnknown = null; // v2.741(VC-02) — vmAllocRows 가 센 '사용률 미상으로 CPU·메모리 계열에서 뺀 VM' 수 { cpu, mem }
   const snap = store.get();
   const db = await getMetricsDb();
@@ -386,6 +393,8 @@ async function sampleOnceInner() {
       vmStorageUnknownBy = vmStorageUnknown ? { ...vmperfByVc.vmStorageUnknownBy } : null;
       const vu = vmperfByVc.vmUsageUnknown;
       vmUsageUnknown = vu && (vu.cpu || vu.mem) ? { cpu: vu.cpu || 0, mem: vu.mem || 0 } : null;
+      const va = vmperfByVc.vmAllocUnknown;
+      vmAllocUnknown = va && (va.cpu || va.mem) ? { cpu: va.cpu || 0, mem: va.mem || 0 } : null;
       if (vmperfByVc.staleVcenters || vmperfByVc.maintenanceExcluded) {
         vmperfStale = {
           vcenters: vmperfByVc.staleVcenters || 0, totalWithheld: !!vmperfByVc.totalWithheld,
@@ -404,7 +413,9 @@ async function sampleOnceInner() {
       // 보존기간 prune — DB 개수만큼 DELETE 가 돌므로 공용(20틱)보다 더 드물게(120틱 ≈ 2시간@1분).
       // v2.583: `% 120 === 1` 은 **기동 첫 샘플에서 즉시 참**이었다(v2.453 규약 위반 — 보존일을 줄이고 재시작하면
       //   첫 틱이 그 차액을 한 번에 지운다). `(++t % N) === 0` 으로 쓴다.
-      if (vmperfCfg.retentionDays > 0 && ((++_vmperfPruneTicks % 120) === 0)) {
+      // 92회차 F2: 설정 파일을 한 번도 못 읽었으면 보존일은 '모름' — 기본값(90일)으로 지우지 않는다.
+      if (vmperfCfg.retentionDays > 0 && (_vmperfPruneTicks + 1) % 120 === 0 && vmperfRetentionUnknown()) warnRetentionUnknown('VM 성능');   // 96회차: 위 지표와 같은 판단
+      if (vmperfCfg.retentionDays > 0 && ((++_vmperfPruneTicks % 120) === 0) && !vmperfRetentionUnknown()) {
         for (const vcId of vmperfByVc.keys()) {
           try { await pruneVmperf(vcId, vmperfCfg.retentionDays); } catch { /* per-DB 격리 */ }
         }
@@ -456,7 +467,11 @@ async function sampleOnceInner() {
   // 돌아, 보존기간을 줄인 직후 재시작한 포탈이 첫 1분 안에 대량 삭제를 시작한다 —
   // v2.451 에서 실제로 그렇게 멈췄다(34.3GB DB, accept 큐가 차서 웹 타임아웃).
   // 이제 삭제 자체도 청크로 양보하지만(metrics/db.js), 기동 직후를 피하는 것도 함께 유지한다.
-  if (retentionDays > 0 && (++_pruneTicks % 20 === 0)) {
+  // 92회차 F2: 설정 파일을 한 번도 못 읽었으면(읽기 오류) 보존일은 기본값이 아니라 '모름' 이다 — 기본값으로 지우지 않는다(다시 읽히면 그 값으로).
+  // 96회차(92 F2 반증): '모름' 동안의 건너뜀은 83회차 R1 의 '허용 최장 보존으로만 정리' 와 결과가 같다 — 이 설정은 0(무제한)을 허용하므로
+  //   허용 최장이 곧 무제한이다(유한한 상한 3,650일로 지우면 무제한을 고른 관리자의 이력을 지울 수 있다). 대신 조용히 서지 않게 콘솔(10분 1줄) · 상태(retentionUnknown)로 밝힌다.
+  if (retentionDays > 0 && (_pruneTicks + 1) % 20 === 0 && metricsRetentionUnknown()) warnRetentionUnknown('지표(온도 · 용량 · GPU)');
+  if (retentionDays > 0 && (++_pruneTicks % 20 === 0) && !metricsRetentionUnknown()) {
     try {
       // v2.451: 원본은 rawRetentionDays, 롤업은 retentionDays(기본 5년).
       // rawRetentionDays 가 0 이거나 retentionDays 보다 길면 예전처럼 같은 기준을 쓴다.
@@ -475,6 +490,8 @@ async function sampleOnceInner() {
     ...(vmStorageUnknown ? { vmStorageUnknown, vmStorageUnknownBy } : {}),
     // v2.741(VC-02): 사용률을 못 읽어 CPU·메모리 계열에서 뺀 켜진 VM 수(REST 폴백 vCenter 등 — 0 이면 싣지 않는다).
     ...(vmUsageUnknown ? { vmUsageUnknown } : {}),
+    // v3.28.1: 할당 크기를 못 읽어 CPU·메모리 계열에서 뺀 켜진 VM 수(0 이면 싣지 않는다).
+    ...(vmAllocUnknown ? { vmAllocUnknown } : {}),
     // v2.620(SRV2620-03): 낡아서 적재하지 않은 vCenter·호스트·DS 수와, 그 때문에 전체('') VM 합계를 적재하지 않았는지.
     ...(staleSkipped.vcenters ? { staleSkipped } : {}),
     ...(vmperfStale ? { vmperfStale } : {}),
@@ -513,18 +530,33 @@ export function samplerWithheldOf(lastRun) {
   const vuCpu = _num(lastRun.vmUsageUnknown?.cpu) || 0;
   const vuMem = _num(lastRun.vmUsageUnknown?.mem) || 0;
   if (vuCpu || vuMem) out.vmUsageUnknown = { cpu: vuCpu, mem: vuMem };
+  // v3.28.1: 할당 크기(vCPU · 메모리)를 못 읽어 같은 계열에서 뺀 VM 수 — 있을 때만 싣는다(기존 요약 모양 유지).
+  const vaCpu = _num(lastRun.vmAllocUnknown?.cpu) || 0;
+  const vaMem = _num(lastRun.vmAllocUnknown?.mem) || 0;
+  if (vaCpu || vaMem) out.vmAllocUnknown = { cpu: vaCpu, mem: vaMem };
   // v2.742(VC-02 후속): 연결 끊긴 호스트라 온도 계열(temp_host·클러스터·vCenter 집계)에서 뺀 호스트 수 — 있을 때만 싣는다(기존 요약 모양 유지).
   const thd = _num(lastRun.tempHostsDisconnected) || 0;
   if (thd > 0) out.tempHostsDisconnected = thd;
   if (!out.staleVcenters && !out.totalWithheld && !out.totalPartial && !out.maintenanceExcluded && !out.vmStatsSkipped
-    && !out.dsUsedUnknown && !out.vmStorageUnknown && !out.vmUsageUnknown && !out.tempHostsDisconnected) return null;
+    && !out.dsUsedUnknown && !out.vmStorageUnknown && !out.vmUsageUnknown && !out.vmAllocUnknown && !out.tempHostsDisconnected) return null;
   return out;
 }
 const _num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
+/** 96회차: 설정 파일을 한 번도 못 읽어 보존 정리를 건너뛰는 중이면 10분에 1줄(조용히 서지 않게 — 크기는 무제한 보존과 같이 자란다). */
+let _retWarnAt = 0;
+function warnRetentionUnknown(what) {
+  const t = Date.now();
+  if (t - _retWarnAt < 600_000) return;
+  _retWarnAt = t;
+  console.warn(`[metrics] ${what} 보존 정리를 건너뜁니다 — 설정 파일을 읽지 못해 보존일을 모릅니다(읽기 오류 · 원본은 그대로 · 30초마다 다시 읽음). 그동안 DB 는 무제한 보존처럼 자랍니다 — 파일 권한 · 소유자 · 디스크를 확인하세요`);
+}
+
 export function metricsSamplerStatus() {
   const s = loadMetricsSettings();
-  return { intervalMs: s.sampleIntervalMs, retentionDays: s.retentionDays, rawRetentionDays: s.rawRetentionDays, lastRun, rollupBackfill: rollupBackfillStatus() };
+  // 96회차: 보존일을 모르는 동안(설정 파일 읽기 오류 · 한 번도 못 읽음) 위 retentionDays 는 기본값이다 — 표지로 밝힌다(prune 은 건너뛴다).
+  return { intervalMs: s.sampleIntervalMs, retentionDays: s.retentionDays, rawRetentionDays: s.rawRetentionDays, lastRun, rollupBackfill: rollupBackfillStatus(),
+    ...(metricsRetentionUnknown() ? { retentionUnknown: true } : {}), ...(vmperfRetentionUnknown() ? { vmperfRetentionUnknown: true } : {}) };
 }
 
 /** (Re)arm the periodic timer from the current effective settings. */

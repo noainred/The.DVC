@@ -6,7 +6,7 @@ import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianG
 import { fetchJson } from '../api.js';
 import { ErrorBox } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
-import { CONF, STATUS_LABEL, SPLIT_LABEL, bytesText, rwText, confOf, confText, sanStateText, sanKpis, hbaTargetsText, storageNoteText, seriesRows, sanFootText, pathRows, pathStateText, latText, licenseBand } from './hostSanText.js';
+import { CONF, STATUS_LABEL, SPLIT_LABEL, bytesText, rwText, confOf, confText, sanStateText, sanKpis, hbaTargetsText, storageNoteText, seriesRows, sanFootText, pathRows, pathStateText, latText, licenseBand, flowCellText, unmatchedFlows, unparsedTitle } from './hostSanText.js';
 import BoldText from '../components/boldText.jsx';
 import { agoText } from './tools/relTime.js';
 
@@ -80,7 +80,7 @@ export default function HostSanSection({ hostId, onData }) {
       )}
       <div className="flex wrap" style={{ alignItems: 'baseline', gap: '4px 10px', justifyContent: 'space-between', margin: '12px 0 6px' }}>
         <div style={{ fontSize: 12.5, minWidth: 0 }}><b>경로별 실측 · ESXi</b> <span className="muted">vCenter 실시간 통계(storagePath) 최근 창 — 타깃 WWN 으로 스토리지를 찾고, 이 비율로 HBA 포트 바이트를 나눕니다(라이선스 불필요)</span></div>
-        {d.spath ? <span className="muted" style={{ fontSize: 11 }}>{d.spath.mock ? '데모 값 · ' : ''}{d.spath.samples == null ? '표본 —' : `표본 ${d.spath.samples}개`} · 경로 {d.spath.instances ?? '—'}{d.spath.unparsed ? ` · 이름 못 푼 경로 ${d.spath.unparsed}` : ''}{d.spath.truncated ? ' · 상한으로 일부만' : ''}</span> : null}
+        {d.spath ? <span className="muted" style={{ fontSize: 11 }}>{d.spath.mock ? '데모 값 · ' : ''}{d.spath.samples == null ? '표본 —' : `표본 ${d.spath.samples}개`} · 경로 {d.spath.instances ?? '—'}{d.spath.unparsed ? <span title={unparsedTitle(d.spath)}>{` · 이름 못 푼 경로 ${d.spath.unparsed}`}</span> : ''}{d.spath.truncated ? ' · 상한으로 일부만' : ''}</span> : null}
       </div>
       {!d.spath ? (
         <div className="muted hd-note">{d.storPathScan === false ? '경로 카운터 수집이 꺼져 있습니다(STORPATH_SCAN=false) — 분배는 IPF · 타깃 포트 비율로 합니다.' : '아직 이 호스트의 경로 카운터를 읽지 않았습니다 — FC HBA 가 있는 연결 호스트를 매시 한 번 읽습니다. 그동안 분배는 IPF · 타깃 포트 비율로 합니다.'}</div>
@@ -88,14 +88,15 @@ export default function HostSanSection({ hostId, onData }) {
         <div className="muted hd-note">경로 계열은 받았지만 타깃 WWN 으로 푼 경로가 없습니다{d.spath.unparsed ? `(이름 형식을 모르는 경로 ${d.spath.unparsed}개)` : ''} — 분배는 IPF · 타깃 포트 비율로 합니다.</div>
       ) : (
         <div className="table-wrap" style={{ maxHeight: '32vh' }}>
-          <STable minWidth={980}>
-            <thead><tr><th>어댑터</th><th>스토리지</th><th style={{ textAlign: 'right' }}>지금 읽기 / 쓰기</th><th style={{ textAlign: 'right' }} title="표본 창(기본 5분) 동안 이 타깃으로 오간 양">창 전송량</th><th style={{ textAlign: 'right' }}>지연 읽기 / 쓰기</th><th>경로</th><th>스위치 · 포트</th><th>타깃 WWN</th></tr></thead>
+          <STable minWidth={1120}>
+            <thead><tr><th>어댑터</th><th>스토리지</th><th style={{ textAlign: 'right' }}>지금 읽기 / 쓰기</th><th style={{ textAlign: 'right' }} title="같은 HBA → 타깃의 Brocade Flow Vision 플로우가 센 지금 속도(SAN 플로우 모니터) — ESXi 값과 나란히 보여 줍니다(하나를 고르지 않습니다)">스위치 플로우 읽기 / 쓰기</th><th style={{ textAlign: 'right' }} title="표본 창(기본 5분) 동안 이 타깃으로 오간 양">창 전송량</th><th style={{ textAlign: 'right' }}>지연 읽기 / 쓰기</th><th>경로</th><th>스위치 · 포트</th><th>타깃 WWN</th></tr></thead>
             <tbody>
               {prows.map((r) => (
                 <tr key={r.key}>
                   <td><b>{r.adapter}</b></td>
                   <td data-sort={r.storage || ''}>{r.storage ? <>{r.storage}{r.registered ? <span className="badge blue" style={{ marginLeft: 6 }}>등록</span> : null}</> : <span className="muted" title="이 타깃 WWN 이 수집된 SAN 스위치 어디에도 로그인해 있지 않습니다">스위치에서 못 찾음</span>}</td>
                   <td style={{ textAlign: 'right' }} data-sort={r.read ?? ''}>{rwText(r.read, r.write)}</td>
+                  <td style={{ textAlign: 'right' }} className={r.flow ? '' : 'muted'} title={r.flow ? `${r.flow.name} · ${r.flow.switchName}` : '이 HBA → 타깃의 스위치 플로우가 없습니다'}>{flowCellText(r.flow)}</td>
                   <td style={{ textAlign: 'right' }} data-sort={r.windowBytes ?? ''} title={r.partial ? '표본이 빠진 경로가 있어 창 일부의 합입니다' : ''}>{bytesText(r.windowBytes)}{r.partial ? <span className="muted"> (일부)</span> : null}</td>
                   <td style={{ textAlign: 'right' }} data-sort={r.latR ?? ''}>{latText(r.latR, r.latW)}</td>
                   <td data-sort={r.live ?? r.paths ?? ''}>{pathStateText(r)}{r.dead ? <span className="badge red" style={{ marginLeft: 6 }}>죽은 경로</span> : null}</td>
@@ -106,6 +107,27 @@ export default function HostSanSection({ hostId, onData }) {
             </tbody>
           </STable>
         </div>
+      )}
+      {unmatchedFlows(d).length > 0 && (
+        <>
+          <div className="muted" style={{ fontSize: 12, margin: '12px 0 6px' }}>스위치 플로우 실측(Flow Vision) — 경로별 실측 표에 짝이 없는 {unmatchedFlows(d).length}개 · SAN 플로우 모니터가 만든 플로우의 지금 속도</div>
+          <div className="table-wrap" style={{ maxHeight: '24vh' }}>
+            <STable minWidth={720}>
+              <thead><tr><th>어댑터</th><th>스토리지(타깃)</th><th style={{ textAlign: 'right' }}>읽기 / 쓰기</th><th>스위치</th><th>타깃 WWN</th></tr></thead>
+              <tbody>
+                {unmatchedFlows(d).map((f) => (
+                  <tr key={`${f.deviceId}|${f.name}`}>
+                    <td><b>{f.hba || '—'}</b></td>
+                    <td>{f.targetName || '—'}</td>
+                    <td style={{ textAlign: 'right' }} title={f.name}>{flowCellText(f)}</td>
+                    <td className="muted">{f.switchName}</td>
+                    <td className="muted" style={{ fontSize: 11, fontFamily: 'var(--mono)' }}>{f.dstdev}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </STable>
+          </div>
+        </>
       )}
       {d.storages?.length > 0 && (
         <>

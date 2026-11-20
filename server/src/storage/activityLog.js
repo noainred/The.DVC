@@ -11,11 +11,12 @@
  * central/storageEdge.saveEdgeStorage)을 시간순으로 남겨 화면 '완료(로그)' 구획의 원천이 된다.
  * '진행중' 은 poller 의 in-flight 집합이 담당한다(여긴 완료분).
  */
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { createActivityLog } from '../util/activityLog.js';
 
 const log = createActivityLog({
   fileName: 'storage-activity.json',
-  max: Number(process.env.STORAGE_ACTIVITY_MAX) || 500,
+  max: envPositive(process.env.STORAGE_ACTIVITY_MAX, 500),
   // 스토리지 전용 수치 — 화면의 '노드'·'용량' 열이 이 값을 쓴다.
   numFields: ['nodes', 'usedBytes', 'totalBytes'],
 });

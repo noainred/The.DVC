@@ -15,6 +15,7 @@ import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atom
 import { registerStateFile } from '../util/stateFiles.js';
 import { dayIndex } from '../util/dayKey.js';
 import { linregSlope } from '../util/linreg.js';
+import { envPositive } from '../util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
 
 const CONFIG_DIR = config.configDir;
 // 옮긴 DB 저장 경로(null = configDir 사용). db-location.json → config.dbDir (v2.379).
@@ -65,6 +66,8 @@ const PURPOSES = {
   'os-scan.json': '실제 OS(게스트) 스캔 설정',
   'ipam-scan.json': 'IPAM 능동 스캔 설정',
   'ipam-scan-agents.json': 'IP 스캔 에이전트별 마지막 보고(시각·스캔 수·응답 수)',
+  'ipam-changes.json': 'IP 스캔이 본 변화 기록(새 미등록 IP · MAC 변경 · 충돌 의심 · 호스트명 변경 — 최근 5,000건 · 180일)',
+  'ipam-change-baseline.json': 'IP 스캔 대역 줄마다 첫 완료 스캔 시각(새 미등록 IP 판정의 기준선)',
   'ipam-vcrange-migration.json': 'vCenter 별 스캔 대역 → 에이전트 1회 이전 기록(v2.691 — 옮긴 곳·남긴 사유·백업 파일명)',
   'ipam-scan-history.json': 'IPAM 스캔 이력',
   'ipam-scan-results.json': 'IPAM 스캔 결과(최근)',
@@ -86,6 +89,7 @@ const PURPOSES = {
   // ── v2.376~377 신규 ────────────────────────────────────────────────
   'vmperf.json': 'VM 성능 트래킹 설정(보존기간·대상 vCenter)',
   'vm-track.db': 'VM 수량·데이터스토어 사용량 추이(하루 2회 슬롯 스냅샷 + 변경분)',
+  'snap-history.db': 'VM 별 스냅샷 이력(하루 1번 — 스냅샷이 있는 VM · 스냅샷 하나의 생김/없어짐) 400일 — 특수 기능 › 스냅샷 있는 VM(v3.26.0)',
   'capacity.db': '포탈 서버 자신의 리소스(CPU·메모리·디스크·네트워크) 샘플 — 리소스 적정성 진단용',
   'veeam-snap.db': 'Veeam 스냅샷 이벤트(생성·제거만 · 최근 31일) — vCenter 카드 백업 수량·VM 화면 Veeam 백업 시도를 바로 계산',
   'veeam-history.db': 'Veeam 일 단위 이력(라이선스 사용·만료 · 저장소 용량) 400일 — EM 탭 추이·소진 예측(v2.788)',
@@ -103,17 +107,28 @@ const PURPOSES = {
   'guest-disk.db': '게스트 디스크 회수 리포트 추이(변경분 저장, v2.459)',
   'curuser.db': "'현재 사용자' 로그인 사용자 수 추이(v2.520)",
   'san-health.db': 'SAN 스위치 월간 점검 이력(최근 N회 비교, v2.522)',
+  'san-storage-check.db': 'SAN 스토리지 성능 점검 결과 이력(바뀌었거나 1시간마다 한 건 · 최근 N회 비교, v2.955)',
   'horizon-sessions.db': 'Horizon 실시간 사용자(세션) 추이(v2.525)',
   'part-faults.db': '물리 파트(부품) 장애 이력 — 열림/변화/해소 전이만 적재(v2.547)',
+  'disk-bad.db': '디스크 배드 섹터 이력 — iDRAC Lifecycle 로그의 물리·가상 디스크 기록(PDR/VDR) · 서버별 읽은 구간 · 자리별 시리얼 이력(v3.8.0)',
   'bm-usage.db': '베어메탈 사용률(CPU·메모리·디스크·네트워크·HBA) 원시 90일 + 일 롤업(v2.550)',
   'link-check.db': '통신 점검 이력(중앙↔엣지·vCenter 링크 표본·이벤트·일 롤업, v2.552)',
   'cvp.db': 'Arista CloudVision(CVP) 네트워크 스위치 — 장비·포트 최신값·포트 사용량 이력(v2.608)',
   'log-analysis-stats.json': '로그 분석 누적 통계(로그 줄 종류별 개수 — 최근 7일, 시간 단위)',
   'portal-db-size-history.json': '포탈 DB 크기 표본(이 화면의 증가량·용량 예측용 — 10분 표본 + 일 표본 400일, v2.674)',
   'bmstor-history.db': '베어메탈 스토리지 디스크 사용량 12시간 이력 — 서버·그룹·합계(v2.635)',
+  'bmstor-io.db': '베어메탈 스토리지 디스크 I/O 시계열 — 원시(수집마다) · 15분 · 1시간 집계(v2.915)',
   'vm-dns.db': 'VM DNS 서버 설정 변경 이력 — VM 별 최신값 + 바뀐 것만(v2.696)',
   'xfer-speed.db': '법인 간 전송 속도 측정 이력 — 엣지·방향별 원시 + 일 요약 + 최신값(v2.735)',
   'usage.db': '기능 사용 현황 — 사용자 × 화면 × 날 열람 수 · 머문 시간 일 집계 + 계정별 마지막 이름 · 역할(v2.913)',
+  'focusmon.db': '서버 집중 모니터링 기록 — 서버별 1분 묶음(CPU · 메모리 · 네트워크 · 디스크 iostat) · CPU 상위 30 프로세스 · 수집 기록(30일 보관, v2.976)',
+  'focusmon-targets.json': '서버 집중 모니터링 대상 서버 등록부(이름 · IP · 포트 · 계정 · 담당 노드 · 보관 설정 — 비밀번호 · 개인키 없음, v2.976)',
+  'focusmon-sessions.json': '서버 집중 모니터링 계속 수집 정의(상태 — 재시작 뒤 이어서 수집할 서버 · 주기, v2.976)',
+  'focusmon-keys.json': '서버 집중 모니터링 엣지 공개키 기록(상태 — 엣지가 올린 공개키 · 지문 · 마지막 동기화 시각, v2.976)',
+  'focusmon-auth-stops.json': '서버 집중 모니터링 키 로그인 거부 정지 기록(상태 — 거부된 서버는 사람이 다시 연결을 누를 때까지 접속하지 않는다, v2.976)',
+  'focusmon-audit.json': '서버 집중 모니터링 디스크 점검 작업 · 서버별 준비 상태 · 마지막 연결 오류(상태 — 결과 본문은 focusmon DB, v3.11.0)',
+  'focusmon-alert-rules.json': '서버 집중 모니터링 알림 규칙(지표 · 문턱 · 지속 · 대상 · 심각도 — 비밀 없음, v3.16.0)',
+  'focusmon-alert-state.json': '서버 집중 모니터링 알림 판정 상태(규칙 × 서버의 발생 · 보류 · 정상 — 재시작 뒤 알림 폭주를 막는 캐시, v3.16.0)',
   'isidu.db': '아이실론 디렉터리 사용량 이력 — 조사(du)마다 사용자 폴더 전체 크기 + 대상별 최신(v2.736)',
   'isidu-settings.json': '아이실론 디렉터리 사용량 조사 대상(아이실론·경로·주기·실행 노드·보존일 — 비밀 없음, v2.736)',
   'isidu-edge-targets.json': '엣지가 받은 아이실론 디렉터리 사용량 대상 사본(상태 — 원본은 중앙, v2.736)',
@@ -133,6 +148,8 @@ const PURPOSES = {
   'cvp-servers.json': 'Arista CloudVision(CVP) 서버 등록부(주소·토큰/계정·담당 엣지 — 비밀 봉인, v2.608)',
   'veeam-servers.json': 'Veeam Backup & Replication 서버 등록부(주소·계정·연결 vCenter·담당 엣지 — 비밀번호 봉인, v2.751)',
   'veeam-latest.json': 'Veeam 서버별 마지막 백업 상태(상태 — 작업·VM·실행 중 백업, 중앙 직접 수집 + 엣지 push, v2.751)',
+  'diskbad-cursors.json': '디스크 배드 섹터 — 서버마다 지난번 읽은 가장 새 Lifecycle 로그 항목(상태 — 6시간 점검이 새 로그만 읽게. 지우면 다음 점검이 처음부터 읽는다, v3.8.0)',
+  'diskbad-auth-stops.json': '디스크 배드 섹터 iDRAC 로그인 실패 정지 기록(상태 — 자격증명이 바뀌면 자동 재개, v3.8.0)',
   'veeam-auth-stops.json': 'Veeam 서버 인증 실패 정지 기록(상태 — 자격증명이 바뀌면 자동 재개, v2.751)',
   'veeam-em.json': 'Veeam Enterprise Manager 등록부(주소·계정 — 비밀번호 봉인 · 중앙 전용, v2.788)',
   'veeam-em-latest.json': 'Veeam Enterprise Manager 별 마지막 수집 결과(상태 — 요약·작업·세션·저장소, v2.788)',
@@ -159,7 +176,12 @@ const PURPOSES = {
   'linkcheck-settings.json': '통신 점검 설정(켜짐·주기·단계별 시한·엣지 짝·보존일, v2.552)',
   'xfer-speed-settings.json': '법인 간 전송 속도 측정 설정(켜짐·간격 실행·예약 실행·크기·동시성·시한·느려짐 기준·제외 엣지·보존일, v2.735)',
   'partfault-settings.json': '물리 파트 장애 기능 스위치(중앙·엣지별) + 이력 보존일(v2.548 · v2.613)',
+  'disk-bad-settings.json': '디스크 배드 섹터 이력 설정 — 6시간 자동 점검(기본 꺼짐) · 새 기록 메일 · 법인별 담당자 메일(v3.8.0)',
   'storage-intervals.json': '스토리지 수집 주기 중앙 배포값(엣지별 지정 키만, v2.409)',
+  'storage-inspect.json': 'PowerScale 장비 점검 설정(주간 요일 · 시각 · 보고서 메일 · 받는 사람 · 판정 기준, v2.965)',
+  'storage-inspect-runs.json': 'PowerScale 장비 점검 결과 이력(상태 — 장비마다 최근 12회의 읽은 값 · 오류, v2.965)',
+  'storage-inspect-ring.json': 'PowerScale 장비 점검 결과 중앙 미전송분(상태 — 엣지 · 다음 storage push 에 싣는다, v2.965)',
+  'storage-inspect-state.json': 'PowerScale 주간 점검 일정 기록(상태 — 마지막 회차 · 보고서 메일 발송, v2.965)',
   // ── v2.613 PERSIST2613-02: 백업이 '상태·캐시' 로 분류하는 파일(backup/service.js RUNTIME_STATE_NAMES) 전부에 용도를 적는다 —
   //    테스트가 그 목록 ⊆ PURPOSES 를 고정한다. 폴러·엣지 push 가 스스로 다시 쓰는 파일이라 편집 대상이 아니다.
   'central-agent-config.json': '엣지가 push 한 자기 설정 사본(중앙 백업 번들에 포함 — 비밀은 엣지가 REDACTED 로 보낸다)',
@@ -214,6 +236,12 @@ const DETAILS = {
     writer: 'vmtrack 폴러(하루 2회 슬롯 00시·12시 + 수동 스냅샷)',
     retention: 'prune 용 ts 인덱스 유지 — 슬롯 기반이라 증가가 완만',
     note: '전량 로스터를 매 슬롯 적재하지 않고 변경분만 저장한다(5,850 VM·1,100 DS 규모에서 연 수백만 행을 피하기 위함).',
+  },
+  'snap-history.db': {
+    keeps: 'vCenter 별 그날 합계(snap_vcday — 못 읽은 날은 사유만) · 그날 스냅샷이 있던 VM(snap_day) · 스냅샷 하나의 생애(snap_item — 처음 본 날 · 마지막으로 본 날 · 없어진 날).',
+    writer: '스냅샷 이력 폴러(하루 1번 — 기본 3시 뒤, 못 읽은 vCenter 는 같은 날 다시 시도) · vCenter 왕복 없음',
+    retention: '400일(SNAPHIST_RETENTION_DAYS, 30~3650) · 청크 정리',
+    note: '스냅샷이 있는 VM 만 넣는다(전체 VM 을 매일 넣지 않는다). 못 읽은 vCenter 의 날은 0 이 아니라 빠진 날로 남는다. 이 파일이 없으면 추이 · 7일 변화 · 정리된 것만 비고 스냅샷 화면은 그대로다.',
   },
   'veeam-history.db': {
     keeps: 'B&R 서버별 라이선스 사용·만료 하루 한 점(license_daily) · Enterprise Manager 저장소별 용량·여유 하루 한 점(repo_daily).',
@@ -441,7 +469,7 @@ export function recordDbSizeSample(now = Date.now(), { persist = true } = {}) {
  *  - 감소 추세(prune 직후 등)면 예측은 현재 크기로 둔다(shrinking:true). 크게 줄어든 지점(80% 미만) 앞의 일 표본은 쓰지 않는다.
  *  - confidence: 관측 구간 길이로 low/medium/high.
  */
-const MIN_FORECAST_SPAN_MS = Number(process.env.PORTAL_DB_MIN_FORECAST_MS) || 3_600_000; // 1시간
+const MIN_FORECAST_SPAN_MS = envPositive(process.env.PORTAL_DB_MIN_FORECAST_MS, 3_600_000); // 1시간
 
 function forecastFrom(nowBytes, perDayBytes, spanMs) {
   if (!(spanMs >= MIN_FORECAST_SPAN_MS) || !Number.isFinite(perDayBytes)) {

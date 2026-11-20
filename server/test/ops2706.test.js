@@ -1,11 +1,18 @@
 // v2.706 — C5 VM 생성·삭제 이력 · C4 크래시 대비(스크래치·로그·진단 파티션·PSOD·재부팅 분류) · C2/C3 CPU 경합·디스크 지연.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'ops2706-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const TMP = tmpDir('ops2706-');
 process.env.CONFIG_DIR = TMP;
 const { eventDetail, detailJson, LIFE_TYPES, OPS_TYPES, OPS_SQL, TRACKED_TYPES, LIFE_KIND } = await import('../src/vmchanges/eventDetail.js');
 const { analyzeLifecycle, LIFE_ROWS_MAX } = await import('../src/vmlife/analyze.js');
@@ -72,7 +79,8 @@ test('③ 생성·삭제 분석 — 순증·사용자·단명 VM·지금 있는�
   assert.equal(r.byKind.rename, 1);
   assert.equal(r.noDetail, 1);
   assert.equal(r.shortLivedCount, 1); assert.equal(r.shortLived[0].vm, 'tmp1'); assert.equal(r.shortLived[0].lifeMs, 3 * H);
-  assert.equal(r.series.length, 7);
+  // 결정(56~75 남긴 것) 69 ① — 기대값 갱신: 막대는 since(now − 7일)가 걸친 날부터라 7일 기간이 8칸이다.
+  assert.equal(r.series.length, 8);
   assert.equal(r.series.reduce((a, s) => a + s.added, 0), 2); assert.equal(r.series.reduce((a, s) => a + s.removed, 0), 2);
   assert.equal(r.events.find((e) => e.vm === 'web01' && e.kind === 'create').existsNow, true);
   assert.equal(r.events.find((e) => e.vm === 'old').existsNow, false);

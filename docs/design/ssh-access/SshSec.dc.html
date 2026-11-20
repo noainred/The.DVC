@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>설정 — SSH 공용 접속 · 키 보안</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0}
+.muted{color:#8b9bb4}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.sm{font-size:11.5px;color:#8b9bb4}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+.btn.danger{border-color:#7f2d36;background:rgba(239,68,68,.12);color:#fecaca}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap;box-sizing:border-box}
+.tag.ok{background:rgba(34,197,94,.16);color:#86efac}
+.tag.bad{background:rgba(239,68,68,.16);color:#fca5a5}
+.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}
+.tag.unk{background:rgba(139,155,180,.14);color:#aebbd0}
+.tag.lock{border:1px solid #33415c;color:#aebbd0}
+h2{margin:0;font-size:14px;font-weight:800}
+.hd{display:flex;gap:10px;align-items:baseline;justify-content:space-between;flex-wrap:wrap;padding:12px 14px;border-bottom:1px solid #1f2a40}
+table{border-collapse:collapse;width:100%}
+th{font-size:12px;font-weight:600;color:#8b9bb4;text-align:left;padding:8px 12px;background:#0f1626;border-bottom:1px solid #243049;white-space:nowrap}
+td{padding:8px 12px;border-bottom:1px solid #1f2a40;vertical-align:middle;font-size:12.5px;white-space:nowrap}
+tr:last-child td{border-bottom:0}
+.chk{display:flex;gap:10px;align-items:flex-start;padding:9px 14px;border-bottom:1px solid #1f2a40}
+.chk:last-child{border-bottom:0}
+.chk .t{flex:0 0 76px}
+.chk .b{flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:2px}
+.g{display:flex;gap:12px;align-items:flex-start;padding:10px 14px;border-bottom:1px solid #1f2a40}
+.g:last-child{border-bottom:0}
+.g .b{flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:2px}
+.sw{flex:0 0 38px;height:22px;border-radius:999px;background:#33415c;position:relative;border:0;padding:0;cursor:pointer}
+.sw i{position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#e6edf6}
+.sw.on{background:#3b82f6}
+.sw.on i{left:19px}
+</style>
+</helmet>
+<div style="width:1240px;height:1560px;box-sizing:border-box;padding:24px;display:flex;flex-direction:column;gap:16px;background:#0a0e17">
+
+<header style="display:flex;flex-direction:column;gap:5px">
+<h1 style="margin:0;font-size:19px;font-weight:800">SSH 공용 접속 · 키 보안</h1>
+<p class="muted" style="margin:0;max-width:980px">로그인 키 하나가 그 법인의 서버 전부를 엽니다. 그래서 키는 다른 비밀번호보다 엄하게 다룹니다 — 항상 암호화해 두고, 바꾸는 일은 OTP 와 두 사람의 승인을 거치며, 누가 언제 어디에 썼는지 남기고, 이상하면 바로 멈춥니다.</p>
+</header>
+
+<div style="display:flex;gap:16px;align-items:flex-start">
+
+<section class="card" style="flex:1 1 0" aria-label="폴란드 키 점검">
+<div class="hd"><h2>폴란드 — 키 점검</h2><span class="sm">주기 확인 · 마지막 11-14 16:40</span></div>
+<div class="chk"><span class="t"><span class="tag ok">정상</span></span><span class="b"><b>개인키 암호화 저장</b><span class="sm">폴더 안 키 3개 모두 암호화 — 평문 파일 없음</span></span></div>
+<div class="chk"><span class="t"><span class="tag ok">정상</span></span><span class="b"><b>폴더 · 파일 권한</b><span class="sm">폴더 0700 · 파일 0600 · 포탈 실행 계정 소유</span></span></div>
+<div class="chk"><span class="t"><span class="tag ok">정상</span></span><span class="b"><b>키 바꿔치기 감시</b><span class="sm">파일의 지문이 등록한 지문과 일치 — 다르면 그 키를 즉시 멈춥니다</span></span></div>
+<div class="chk"><span class="t"><span class="tag warn">확인</span></span><span class="b"><b>서버 쪽 제한</b><span class="sm">4대 중 3대 적용 — pl-app-01 은 키 줄에 출발지 제한이 없습니다 <a href="#fix" style="font-weight:600;text-decoration:none">다시 넣기</a></span></span></div>
+<div class="chk"><span class="t"><span class="tag ok">정상</span></span><span class="b"><b>키 나이</b><span class="sm">공통 키 4일 · 서버별 키 61일 — 교체 기준 180일</span></span></div>
+<div class="chk"><span class="t"><span class="tag warn">확인</span></span><span class="b"><b>승인 안 된 키</b><span class="sm">폴더에 직접 넣은 legacy_rsa 1개 — 승인하거나 지우세요. 그 전에는 쓰지 않습니다</span></span></div>
+<div class="chk"><span class="t"><span class="tag ok">정상</span></span><span class="b"><b>서버 신원 고정</b><span class="sm">5대 모두 호스트 키 지문 일치 — 바뀌면 접속하지 않고 승인을 기다립니다</span></span></div>
+</section>
+
+<section class="card" style="flex:1 1 0" aria-label="보호 장치">
+<div class="hd"><h2>보호 장치</h2><span class="sm">전 법인 공통 설정 · 바꾸려면 OTP</span></div>
+<div class="g"><span class="tag lock" style="flex:0 0 auto">항상 켬</span><span class="b"><b>개인키는 항상 암호화</b><span class="sm">포탈의 비밀 저장 방식이 ‘평문’ 이어도 로그인 키는 암호화합니다. 화면 · 응답 · 로그 · 내려받기로 내보내지 않습니다.</span></span></div>
+<div class="g"><span class="tag lock" style="flex:0 0 auto">항상 켬</span><span class="b"><b>키 작업은 본인 OTP</b><span class="sm">만들기 · 가져오기 · 승인 · 교체 · 삭제 · 서버에 넣기 · 이 화면의 설정 변경.</span></span></div>
+<div class="g"><button class="sw on" type="button" role="switch" aria-checked="true" aria-label="두 사람 승인"><i></i></button><span class="b"><b>두 사람 승인</b><span class="sm">키 만들기 · 교체 · 삭제 · 승인은 다른 관리자 1명이 승인해야 실행됩니다. 요청은 24시간 뒤 사라집니다.</span></span></div>
+<div class="g"><button class="sw on" type="button" role="switch" aria-checked="true" aria-label="서버 쪽 제한"><i></i></button><span class="b"><b>서버 쪽 제한</b><span class="sm">서버에 넣는 키 줄에 ‘이 엣지 주소에서 올 때만’ · ‘포워딩 금지’ 를 붙입니다 — 키가 새도 다른 곳에서는 쓸 수 없습니다.</span></span></div>
+<div class="g"><button class="sw on" type="button" role="switch" aria-checked="true" aria-label="쓸 수 있는 기능 제한"><i></i></button><span class="b"><b>쓸 수 있는 기능만</b><span class="sm">키마다 허용한 기능만 그 키로 접속합니다 — 폴란드 공통: 디스크 점검 · 스토리지 · 사용률 · Bareos 설정. 자유 명령 실행 경로는 없습니다.</span></span></div>
+<div class="g"><button class="sw on" type="button" role="switch" aria-checked="true" aria-label="교체 기준"><i></i></button><span class="b"><b>교체 기준 180일</b><span class="sm">넘으면 ‘교체 권고’ 를 띄우고 알립니다. 교체는 새 키 접속을 확인한 뒤에만 옛 키 줄을 지웁니다.</span></span></div>
+<div class="g"><button class="sw on" type="button" role="switch" aria-checked="true" aria-label="알림"><i></i></button><span class="b"><b>알림</b><span class="sm">키가 바뀜 · 폴더에 새 파일 · 지문/권한 이상 · 로그인 실패 · 처음 보는 서버나 기능에서 사용 — 보안 담당 메일로.</span></span></div>
+<div class="g"><button class="sw" type="button" role="switch" aria-checked="false" aria-label="포탈 백업에 포함"><i></i></button><span class="b"><b>포탈 백업에 키 넣기</b><span class="sm">꺼 두면 백업 파일에 키가 없습니다 — 복구한 뒤 키를 새로 만들어 다시 넣어야 합니다.</span></span></div>
+<div class="g"><button class="sw" type="button" role="switch" aria-checked="false" aria-label="잠금 해제 방식"><i></i></button><span class="b"><b>잠금 해제 방식</b><span class="sm">켜면 포탈이 다시 시작할 때마다 관리자가 암호를 넣어야 키를 씁니다. 서버가 통째로 넘어가도 키는 열리지 않지만, 넣기 전까지 SSH 수집이 모두 멈춥니다.</span></span></div>
+</section>
+
+</div>
+
+<section class="card" aria-label="긴급 조치" style="border-color:#5b2a33">
+<div class="hd"><h2>긴급 조치 — 폴란드</h2><span class="sm">키가 샜다고 의심될 때 · OTP 필요 · 두 사람 승인 없이 바로 실행(멈추는 방향)</span></div>
+<div style="display:flex;gap:12px;flex-wrap:wrap;padding:14px">
+<div style="flex:1 1 320px;min-width:0;display:flex;flex-direction:column;gap:6px"><button class="btn danger" type="button" style="align-self:flex-start">이 법인 키 사용 중지</button><span class="sm">지금부터 포탈 · 엣지가 이 법인의 키로 접속하지 않습니다. 서버는 바꾸지 않습니다. 다시 켜려면 두 사람 승인.</span></div>
+<div style="flex:1 1 320px;min-width:0;display:flex;flex-direction:column;gap:6px"><button class="btn danger" type="button" style="align-self:flex-start">서버에서 키 거두기</button><span class="sm">서버마다 포탈이 넣은 키 줄을 지웁니다. 닿지 못한 서버는 목록으로 남겨 사람이 지우게 합니다.</span></div>
+<div style="flex:1 1 320px;min-width:0;display:flex;flex-direction:column;gap:6px"><button class="btn" type="button" style="align-self:flex-start">새 키로 교체</button><span class="sm">새 키를 만들어 넣고 확인한 뒤 옛 키 줄을 지웁니다. 옛 키 파일은 지우고 지문만 기록에 남깁니다.</span></div>
+</div>
+</section>
+
+<div style="display:flex;gap:16px;align-items:flex-start">
+
+<section class="card" style="flex:1.25 1 0" aria-label="키 사용 기록">
+<div class="hd"><h2>키 사용 기록</h2><span class="sm">접속마다 한 줄 · 90일 보관</span></div>
+<table>
+<thead><tr><th>시각 ▾</th><th>키</th><th>서버</th><th>기능</th><th>시작</th><th>결과</th></tr></thead>
+<tbody>
+<tr><td>11-14 16:40</td><td class="sm">폴란드 공통</td><td>pl-bkp-sd01</td><td>스토리지</td><td class="sm">주기</td><td><span class="tag ok">성공</span></td></tr>
+<tr><td>11-14 15:40</td><td class="sm">폴란드 공통</td><td>pl-bkp-sd01</td><td>디스크 점검</td><td class="sm">kim.admin</td><td><span class="tag ok">성공</span></td></tr>
+<tr><td>11-14 15:38</td><td class="sm">pl-gpu-01 키</td><td>pl-gpu-01</td><td>접속 확인</td><td class="sm">kim.admin</td><td><span class="tag ok">성공</span></td></tr>
+<tr><td>11-14 03:12</td><td class="sm">폴란드 공통</td><td>pl-app-01</td><td>디스크 점검</td><td class="sm">lee.ops</td><td><span class="tag ok">성공</span> <span class="tag warn">평소와 다름</span></td></tr>
+<tr><td>11-13 02:10</td><td class="sm">폴란드 공통</td><td>pl-db-03</td><td>사용률</td><td class="sm">주기</td><td><span class="tag bad">로그인 실패</span></td></tr>
+</tbody>
+</table>
+<div class="sm" style="padding:10px 14px">‘평소와 다름’ = 그 사람이 그 서버에 처음 쓴 경우 · 그 키가 처음 쓰인 기능. 막지는 않고 표시 · 알림만 합니다.</div>
+</section>
+
+<section class="card" style="flex:1 1 0" aria-label="키 변경 기록">
+<div class="hd"><h2>키 변경 기록</h2><span class="sm">지우지 못함 · 감사 로그와 같이 보관</span></div>
+<table>
+<thead><tr><th>시각 ▾</th><th>무엇</th><th>요청</th><th>승인</th></tr></thead>
+<tbody>
+<tr><td>11-14 16:31</td><td>새 파일 발견 <span class="sm">legacy_rsa</span></td><td class="muted">—</td><td><span class="tag warn">승인 대기</span></td></tr>
+<tr><td>11-14 15:36</td><td>서버에 넣기 <span class="sm">pl-gpu-01</span></td><td class="sm">kim.admin</td><td class="sm">park.sec</td></tr>
+<tr><td>11-10 10:02</td><td>공통 키 만들기</td><td class="sm">kim.admin</td><td class="sm">park.sec</td></tr>
+<tr><td>11-10 09:58</td><td>옛 공통 키 삭제 <span class="sm">SHA256:Qm81…</span></td><td class="sm">kim.admin</td><td class="sm">park.sec</td></tr>
+</tbody>
+</table>
+</section>
+
+</div>
+
+<div class="card" style="padding:12px 14px;display:flex;flex-direction:column;gap:4px">
+<b>이 보호가 막지 못하는 것</b>
+<span class="sm">키를 암호화하는 열쇠는 포탈(엣지) 서버 안에 있습니다. 그 서버의 관리자 권한이 넘어가면 키도 함께 열립니다 — 저장 암호화는 백업 · 사본 · 디스크 유출을 막는 보호입니다. 그 경우까지 막으려면 ‘잠금 해제 방식’ 을 켜야 하고, 대신 다시 시작할 때마다 사람이 필요합니다.</span>
+<span class="sm">서버 쪽 제한은 서버의 SSH 가 그 표기를 지키는 한에서만 유효합니다. 서버 관리자가 키 줄을 고치면 포탈은 다음 ‘키 점검’ 에서 그것을 알립니다.</span>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1240,"height":1560}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

@@ -12,6 +12,7 @@ import { buildExport } from '../collector/agent.js';
 import { registryLoadError as idracRegistryLoadError } from '../idrac/registry.js'; // v2.743(감사 EDGE-01)
 import { summarizeRegistryError } from '../util/registryCore.js'; // v2.744(리드 후속 RY): 503 사유는 요약(원문 없음)
 import { upgradeManager } from '../upgrade/manager.js';
+import { holdPushIfBusy, clearPushHold } from '../upgrade/pushHold.js';   // 51회차 #3
 import { tokenMatches } from '../util/secureCompare.js';
 import { upgradeFromBundleBytes, restartProcess, bundleShaIssue } from '../upgrade/upgrade.js';
 import { decodeManifestHeader, MANIFEST_HEADER } from '../upgrade/signature.js'; // v2.730(검토 S-10): push 의 서명 manifest
@@ -24,6 +25,7 @@ import { checkpointConfigDbs } from '../upgrade/dbCheckpoint.js';
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
 import { getCollectorDenyStats, _resetCollectorDenyStats, logCollectorDeny } from '../collector/denyLog.js'; // v2.579
 import { edgeIsiduNudge, edgeIsiduTest } from '../isidu/edgeOps.js'; // v2.736 — 정적 import(엣지 로그 표가 부팅 모듈만 읽는다)
+import { wakeFocusMon } from '../agent/focusMonWorker.js'; // v2.976 집중 모니터링 — 중앙이 수집 시작 때 한 번 깨운다
 
 export const collectorRouter = Router();
 // v2.574 BUG-03: express 4 는 async 핸들러의 throw 를 잡지 않아 그 요청이 **응답 없이
@@ -188,7 +190,7 @@ async function bmTrendCollector(req, res, mode) {
     const { loadBmUsageSettings } = await import('../bmusage/settings.js');
     const agent = config.agent?.name || '';
     const s = loadBmUsageSettings();
-    const r = mode === 'devices' ? await q.devicesFor({ agent, key }) : mode === 'nics' ? await q.nicLatestFor({ agent, key, intervalMs: s.intervalMs })
+    const r = mode === 'devices' ? await q.devicesFor({ agent, key, settings: s }) : mode === 'nics' ? await q.nicLatestFor({ agent, key, intervalMs: s.intervalMs })
       : await q.trendFor({ agent, key, q: req.query || {}, settings: s });
     if (r && r.__status) { const { __status, ...rest } = r; return res.status(__status).json(rest); }
     res.json(r);
@@ -258,6 +260,14 @@ collectorRouter.get('/bm-usage/snapshot', tokenFirst('bm-usage-snapshot-get'), a
  *  · 감사: 이 엣지 감사 로그에 ‘중앙 대행 집중 모니터링’ + 중앙이 보낸 실행자 · 사유(중앙도 자기 감사 로그에 남긴다).
  *  · 조회는 보관하지 않는 계산 응답이다(중앙은 복제 적재하지 않는다).
  */
+/**
+ * v2.976 집중 모니터링 깨우기 — 중앙이 수집을 시작 · 시험 · 다시 연결할 때 한 번 부른다. 본문은 읽지 않는다(빈 객체 · 4kb).
+ * 엣지는 곧바로 중앙에 동기화해 지금 수집할 목록을 받는다(목록은 중앙 동기화 응답이 진실 — 이 요청은 신호일 뿐).
+ */
+collectorRouter.post('/focus-mon/wake', tokenFirst('focus-mon-wake'), express.json({ limit: '4kb' }), (req, res) => {
+  res.json({ ok: wakeFocusMon() === true });
+});
+
 collectorRouter.post('/bm-usage/focus', tokenFirst('bm-usage-focus'), express.json({ limit: '4kb' }), async (req, res) => {
   try {
     const b = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
@@ -309,6 +319,66 @@ async function bmPerfOpsCollector(req, res, mode) {
 collectorRouter.get('/bm-usage/changes', tokenFirst('bm-usage-changes'), (req, res) => bmPerfOpsCollector(req, res, 'changes'));
 collectorRouter.get('/bm-usage/baseline', tokenFirst('bm-usage-baseline'), (req, res) => bmPerfOpsCollector(req, res, 'baseline'));
 collectorRouter.get('/bm-usage/compare', tokenFirst('bm-usage-compare'), (req, res) => bmPerfOpsCollector(req, res, 'compare'));
+// 6단계 서버 비교 — 엣지 위임 서버 1대의 지표 여러 개 계열 통계(요청 1개 · 보관 없음 · central/bmComparePull.js). 대상 목록 밖 키는 404.
+collectorRouter.get('/bm-usage/compare-series', tokenFirst('bm-usage-compare-series'), (req, res) => bmPerfOpsCollector(req, res, 'compare-series'));
+/**
+ * 7a단계 — 로그 분석 엣지 대행(central/bmLogsPull.js pullEdgeLogs). 같은 url · 같은 토큰(새 포트 · 새 인증 없음) · 이 엣지가 수집하는 서버만(대상 밖 키는 404).
+ *   집계 · 가린 표본 · 보안 상위만 돌려준다(원문 전체는 보관하지 않으므로 내줄 것이 없다). 보안 상위의 IP · 계정 가림은 중앙 라우트가 사람(관리자 판본 판정)에 맞춰 한다.
+ */
+collectorRouter.get('/bm-usage/logs', tokenFirst('bm-usage-logs'), async (req, res) => {
+  try {
+    const target = await bmSnapTarget(req.query.key);
+    if (!target) return res.status(404).json({ ok: false, reason: '이 엣지의 대상 서버가 아닙니다.' });
+    const V = await import('../bmusage/logs/view.js');
+    const r = await V.logViewFor({ key: target.key, range: String(req.query.range || '24h').slice(0, 8) });
+    if (!r?.ok) return res.status(503).json(r || { ok: false, reason: '응답이 없습니다.' });
+    res.json(r);
+  } catch (err) { res.status(500).json({ ok: false, reason: String(err?.message || err).slice(0, 300) }); }
+});
+
+/**
+ * 8a단계 — 용량 소진 예측 서버 상세 엣지 대행(central/bmCapacityPull.js pullEdgeCapacity). 같은 url · 같은 토큰 · 이 엣지가 수집하는 서버만(대상 밖 키는 404).
+ *   그 서버 하나를 볼 때 계산한다(일 계열 · 맞춤선 · 이 엣지의 정비 창 제외 날짜) — 하루 계산 결과(함대 표)는 봉투로 간다.
+ */
+collectorRouter.get('/bm-usage/capacity', tokenFirst('bm-usage-capacity'), async (req, res) => {
+  try {
+    const target = await bmSnapTarget(req.query.key);
+    if (!target) return res.status(404).json({ ok: false, reason: '이 엣지의 대상 서버가 아닙니다.' });
+    const C = await import('../bmusage/capacity.js');
+    const rules = (await import('../bmusage/perfRules.js')).loadPerfRules();
+    const R = await import('../bmusage/maint/runtime.js');
+    const judge = await R.maintJudge({ now: Date.now() }).catch(() => null);
+    const r = await C.computeServer({ agent: config.agent?.name || '', target, cfg: { targetPct: rules.capacity?.targetPct, minDays: rules.capacity?.minDays }, judge, series: true });
+    res.json({ ...r, key: target.key });
+  } catch (err) { res.status(500).json({ ok: false, reason: String(err?.message || err).slice(0, 300) }); }
+});
+
+/**
+ * 8b단계 — 프로세스 Top-N 엣지 대행(central/bmTopPull.js pullEdgeTop · pullEdgeTopBand). 같은 url · 같은 토큰 · 이 엣지가 수집하는 서버만(대상 밖 키는 404).
+ *   ‘이 시점 프로세스’(가까운 표본 · 기준 표본 행 · 지속 · PID 재사용) · 시간 × 프로세스 띠(창 ≤ 26시간 5분 표본 · 넘으면 시간 집계). 보관 없음(볼 때 당긴다).
+ */
+collectorRouter.get('/bm-usage/top', tokenFirst('bm-usage-top'), async (req, res) => {
+  try {
+    const target = await bmSnapTarget(req.query.key);
+    if (!target) return res.status(404).json({ ok: false, reason: '이 엣지의 대상 서버가 아닙니다.' });
+    const ts = Number(req.query.ts);
+    if (!Number.isFinite(ts) || ts <= 0) return res.status(400).json({ ok: false, reason: 'ts 가 필요합니다.' });
+    const T = await import('../bmusage/topStore.js');
+    const { loadBmUsageSettings } = await import('../bmusage/settings.js');
+    const r = await T.topAt({ agent: config.agent?.name || '', key: target.key, ts, toleranceMs: (Number(loadBmUsageSettings().intervalMs) || 300_000) * 1.5 });
+    res.json({ ...r, key: target.key });
+  } catch (err) { res.status(500).json({ ok: false, reason: String(err?.message || err).slice(0, 300) }); }
+});
+collectorRouter.get('/bm-usage/top/band', tokenFirst('bm-usage-top-band'), async (req, res) => {
+  try {
+    const target = await bmSnapTarget(req.query.key);
+    if (!target) return res.status(404).json({ ok: false, reason: '이 엣지의 대상 서버가 아닙니다.' });
+    const T = await import('../bmusage/topStore.js');
+    const r = await T.topBand({ agent: config.agent?.name || '', key: target.key, from: Number(req.query.from), to: Number(req.query.to) });
+    if (!r.ok) return res.status(400).json(r);
+    res.json({ ...r, key: target.key });
+  } catch (err) { res.status(500).json({ ok: false, reason: String(err?.message || err).slice(0, 300) }); }
+});
 
 /**
  * 이 엣지의 **토큰 자기보고**(v2.560 — 사용자 요청 "등록된 모든 엣지/수집 서버의 모든 토큰 …
@@ -486,6 +556,12 @@ collectorRouter.post('/upgrade',
     // without configuring UPGRADE_INSTALL_DIR explicitly.
     const installDir = upgradeManager.settings.installDir || config.appRoot;
     const force = String(req.query.force) === 'true';
+    // 51회차 #3(사용자 결정): 재시작 요청 push 는 자동 적용과 같은 진행 중 작업을 같은 상한까지 기다린다 — 설치 자체를 미룬다(upgrade/pushHold.js).
+    if (String(req.query.restart) === 'true') {
+      const held = holdPushIfBusy({ bytes: req.body, installDir, pkgName: upgradeManager.settings.packageName, allowSame: force,
+        manifestText: decodeManifestHeader(req.get(MANIFEST_HEADER)), where: 'push-collector', source: 'collector-push' });
+      if (held) { upgradeManager.lastResult = { at: Date.now(), source: 'collector-push', ...held }; return res.json(held); }
+    } else clearPushHold();
     // v2.730(검토 S-10): 배포자 서명 — 이 수집기가 가진 신뢰 공개키로 설치 전에 검증한다(force 재설치도 같다).
     const result = upgradeFromBundleBytes(req.body, installDir, currentVersion(), upgradeManager.settings.packageName,
       { allowSame: force, manifestText: decodeManifestHeader(req.get(MANIFEST_HEADER)), where: 'push-collector' });

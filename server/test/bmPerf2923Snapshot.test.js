@@ -95,7 +95,9 @@ test('② 소스 스윕 — 스냅샷 모듈 · 대행 라우트에 sudo · su -
   const c = CMD.SNAPSHOT_COMMAND;
   for (const re of [/cmdline/, /environ/, /-o\s+[^ ]*args/, /\bargs=/, />>?\s*\/(?!dev\/null)/, /\btee\b/, /\bsudo\b/, /\brm\b/, /\bkill\b/, /\becho\s+[^']*>\s*\/proc/]) assert.ok(!re.test(c), `명령 ${re}`);
   assert.ok(/ps -e -o pid=,user=,pcpu=,rss=,comm=/.test(c), 'ps 는 comm(이름)만');
-  assert.ok(c.includes('/proc/" best "/comm'), '이름은 /proc/<pid>/comm');
+  // 83회차(80회차 E1): 이름은 셸이 고른 pid 의 /proc/<pid>/comm 을 grep 으로(awk getline 으로 /proc 을 읽지 않는다 — 8b 규칙)
+  assert.ok(c.includes("printf '/proc/%s/comm '"), '이름은 /proc/<pid>/comm');
+  assert.ok(!/getline/.test(c), 'awk getline 없음');
   // 실행 경로는 상수 하나만 넘긴다(run.js 의 exec 호출 인자 스윕)
   const runSrc = stripComments(fs.readFileSync(path.join(SRC, 'bmusage/snapshot/run.js'), 'utf8'));
   const execs = [...runSrc.matchAll(/exec\(([^,)]+)/g)].map((m) => m[1].trim());

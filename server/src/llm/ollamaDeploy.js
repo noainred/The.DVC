@@ -83,6 +83,33 @@ export function checkOllamaArchive(p) {
   return { ok: true, real };
 }
 
+/**
+ * 67회차 F4(재현): 오프라인 설치 압축 해제 명령. 검증(checkOllamaArchive)은 gzip 과 zstd(.tar.zst) 를 받는데 예전 명령은 `tar -xzf` 라
+ * gzip 을 강제해 zstd 파일은 **언제나** 'gzip: stdin: not in gzip format' 으로 실패했다. GNU tar 는 읽을 때 앞머리 서명으로 압축 형식을
+ * 고르므로 `-xf` 로 둔다(gzip 은 그대로 · zstd 는 대상에 zstd 가 있어야 한다 — 없으면 tar 의 오류 문구가 사유로 나간다).
+ * 경로는 이 모듈이 만든 값(remoteTmpDir 결과)만 받는다 — 셸 메타 문자가 있으면 던진다.
+ */
+export function ollamaExtractCmd(archive, dest = '/usr') {
+  const safe = (v) => { const s = String(v ?? ''); if (!/^\/[A-Za-z0-9._/-]{1,255}$/.test(s)) throw new Error(`압축 해제 경로 형식이 아닙니다: ${s.slice(0, 80)}`); return s; };
+  return `tar -C ${safe(dest)} -xf ${safe(archive)}`;
+}
+/**
+ * 67회차 개선: 받을 모델 이름 — 문자열만 · 허용 글자만 · 앞의 '-' 는 뗀다(`ollama pull --insecure` 같은 선택 인자로 읽히지 않게).
+ * 받은 이름과 포탈 LLM 설정에 저장하는 이름이 같은 값이어야 한다(예전에는 거른 값으로 받고 원문을 저장해 '모델 없음' 이 됐다).
+ */
+export function ollamaModelName(v) {
+  if (typeof v !== 'string') return '';
+  return v.replace(/[^\w.:/-]/g, '').replace(/^-+/, '').slice(0, 200);
+}
+
+/**
+ * 116회차 F5(재현 — 실패하는 가짜 curl): 온라인 설치 명령. 예전 `curl -fsSL … | sh` 는 파이프라인의 종료값이 **마지막 명령(sh)** 것이라
+ * curl 이 실패해도(대상 서버에 인터넷이 없을 때 — 머리말의 폐쇄망 배포) sh 가 빈 입력으로 0 을 냈다 — 아래 '설치 스크립트 실패(인터넷 필요?)' 판정이
+ * 받기 실패에는 걸리지 않았고, 설치되지 않은 서버에 override.conf 를 쓰고 API 확인(최대 10초)을 기다린 뒤 'Ollama API 가 응답하지 않습니다. 서비스 로그를
+ * 확인하세요' 라는 다른 사유를 냈다. 스크립트를 먼저 받아(받기 실패 = 그 종료값 · stderr) 받은 것만 sh 로 넘긴다(POSIX — pipefail 에 기대지 않는다).
+ */
+export const OLLAMA_ONLINE_INSTALL_CMD = 's=$(curl -fsSL https://ollama.com/install.sh) && printf \'%s\\n\' "$s" | sh';
+
 export async function installOllama(target, { mode = 'online', binaryPath, model, ollamaPort, applyToPortal = true } = {}) {
   if (!target?.host || !target?.username) return { ok: false, reason: 'host/username을 입력하세요.' };
   const port = normOllamaPort(ollamaPort);
@@ -109,14 +136,14 @@ export async function installOllama(target, { mode = 'online', binaryPath, model
         let x;
         try {
           await putFile(binaryPath, remote);
-          x = await exec(`tar -C /usr -xzf ${remote}`);
+          x = await exec(ollamaExtractCmd(remote));
         } finally { await exec(`rm -rf ${tmp}`).catch(() => {}); }
         if (x.code !== 0) return { ok: false, reason: `압축 해제 실패: ${x.stderr}` };
         await writeFile('/etc/systemd/system/ollama.service', serviceUnit(port), 0o644);
         const up = await exec('systemctl daemon-reload && systemctl enable --now ollama');
         if (up.code !== 0) return { ok: false, reason: `서비스 시작 실패: ${up.stderr || up.stdout}` };
       } else {
-        const inst = await exec('curl -fsSL https://ollama.com/install.sh | sh');
+        const inst = await exec(OLLAMA_ONLINE_INSTALL_CMD);
         if (inst.code !== 0) return { ok: false, reason: `설치 스크립트 실패(인터넷 필요?): ${(inst.stderr || inst.stdout).slice(-400)}` };
         // expose on all interfaces so the portal can connect
         await exec('mkdir -p /etc/systemd/system/ollama.service.d');
@@ -130,12 +157,13 @@ export async function installOllama(target, { mode = 'online', binaryPath, model
       if (tags.stdout.includes('FAIL')) return { ok: false, reason: `Ollama API(${port})가 응답하지 않습니다. 서비스 로그를 확인하세요.` };
 
       let pulled = null;
-      if (model) {
-        const p = await exec(`OLLAMA_HOST=127.0.0.1:${port} ollama pull ${model.replace(/[^\w.:/-]/g, '')}`);
-        pulled = { model, ok: p.code === 0, error: p.code === 0 ? undefined : (p.stderr || p.stdout).slice(-300) };
+      const modelName = ollamaModelName(model);
+      if (modelName) {
+        const p = await exec(`OLLAMA_HOST=127.0.0.1:${port} ollama pull ${modelName}`);
+        pulled = { model: modelName, ok: p.code === 0, error: p.code === 0 ? undefined : (p.stderr || p.stdout).slice(-300) };
       }
 
-      if (applyToPortal) saveLlmConfig({ enabled: true, url: `http://${target.host}:${port}`, ...(model ? { model } : {}) });
+      if (applyToPortal) saveLlmConfig({ enabled: true, url: `http://${target.host}:${port}`, ...(modelName ? { model: modelName } : {}) });
 
       const ver = await exec('/usr/bin/ollama --version 2>/dev/null || ollama --version 2>/dev/null');
       return { ok: true, version: ver.stdout.trim(), pulled, url: `http://${target.host}:${port}`, appliedToPortal: applyToPortal };

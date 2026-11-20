@@ -5,7 +5,7 @@ import React, { useEffect, useState } from 'react';
 import { fetchJson } from '../../api.js';
 import { ErrorBox, SearchBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
-import { CONF, RANGES, SPLITS, bytesText, rwText, attribKpis, storageBars, sortRows, filterRows, rowTotalText, attribStateText, ipfRows, licenseRows } from './sanHostAttribText.js';
+import { CONF, RANGES, SPLITS, bytesText, rwText, attribKpis, storageBars, sortRows, filterRows, rowTotalText, attribStateText, ipfRows, licenseRows, flowSumParts } from './sanHostAttribText.js';
 import { PERF_TABLE_PAGE, limitRows } from './sanSwitchPerfText.js';
 import { agoText } from './relTime.js';
 
@@ -122,24 +122,25 @@ export default function SanHostAttrib({ datacenterIds = [], datacenters = [], dc
           )}
           <div className="muted" style={{ fontSize: 12, margin: '4px 0 6px' }}>호스트 × 스토리지 — {rows.length}행{rows.length !== (data.rows || []).length ? ` (전체 ${(data.rows || []).length})` : ''} · 제목 클릭 정렬</div>
           <div className="table-wrap" style={{ maxHeight: '44vh' }}>
-            <STable minWidth={1080}>
-              <thead><tr>{th('host', '호스트')}{th('corp', '법인')}{th('storage', '스토리지')}{th('conf', '귀속')}{th('confirmed', '확정분', { textAlign: 'right' })}{th('measured', '실측 비율분', { textAlign: 'right' })}{th('estimated', '추정분', { textAlign: 'right' })}{th('total', '합(참고)', { textAlign: 'right' })}<th data-nosort style={{ textAlign: 'right' }}>지금 읽기 / 쓰기(확정)</th><th data-nosort>포트</th></tr></thead>
+            <STable minWidth={1200}>
+              <thead><tr>{th('host', '호스트')}{th('corp', '법인')}{th('storage', '스토리지')}{th('conf', '귀속')}{th('confirmed', '확정분', { textAlign: 'right' })}{th('measured', '실측 비율분', { textAlign: 'right' })}{th('estimated', '추정분', { textAlign: 'right' })}{th('total', '합(참고)', { textAlign: 'right' })}<th data-nosort style={{ textAlign: 'right' }}>지금 읽기 / 쓰기(확정)</th><th data-nosort style={{ textAlign: 'right' }} title="같은 호스트 → 스토리지의 Brocade Flow Vision 플로우가 센 지금 속도(SAN 플로우 모니터) — 분배 값과 섞지 않고 나란히 보여 줍니다">● 실측(스위치 플로우)</th><th data-nosort>포트</th></tr></thead>
               <tbody>
                 {lim.rows.map((r) => (
                   <tr key={`${r.hostId}|${r.storageId}`}>
                     <td><a href={`#/hosts/${encodeURIComponent(r.hostId)}`} title="호스트 상세 열기"><b>{r.hostName}</b></a><div className="muted" style={{ fontSize: 11 }}>{r.vcenterName}</div></td>
                     <td>{r.datacenterName}</td>
-                    <td>{r.storageName}{r.registered ? <span className="badge blue" style={{ marginLeft: 4, fontSize: 10 }}>등록</span> : <span className="muted" style={{ fontSize: 11 }}> · {r.kind === 'array' ? '미등록' : '어레이 미확인'}</span>}</td>
+                    <td>{r.storageName}{r.registered ? <span className="badge blue" style={{ marginLeft: 4, fontSize: 10 }}>등록</span> : <div className="muted" style={{ fontSize: 11 }}>{r.kind === 'array' ? '미등록' : '어레이 미확인'}</div>}</td>
                     <td>{confBadge(r.conf)}</td>
                     <td style={{ textAlign: 'right' }}>{r.confirmedBytes != null ? bytesText(r.confirmedBytes) : '—'}</td>
                     <td style={{ textAlign: 'right' }}>{r.measuredBytes != null ? bytesText(r.measuredBytes) : '—'}</td>
                     <td style={{ textAlign: 'right' }}>{r.estimatedBytes != null ? `≈ ${bytesText(r.estimatedBytes)}` : '—'}</td>
                     <td style={{ textAlign: 'right' }} className="muted" title="확정분 + 실측 비율분 + 추정분 — 정렬·비교용 참고값이며 확정값이 아닙니다">{rowTotalText(r)}</td>
                     <td style={{ textAlign: 'right' }}>{rwText(r.nowRead, r.nowWrite)}</td>
+                    <td style={{ textAlign: 'right' }} className={r.flow ? '' : 'muted'} title={r.flow ? `플로우 ${r.flow.n}개 중 속도를 읽은 것 ${r.flow.measured}개의 합${r.flow.stale ? ` · 오래됨(최근에 못 읽음) ${r.flow.stale}개는 합에 넣지 않았습니다` : ''}` : ''}>{(() => { const [a, b] = flowSumParts(r.flow); return <>{a}{b ? <div className="muted" style={{ fontSize: 11 }}>{b}</div> : null}</>; })()}</td>
                     <td className="muted" style={{ fontSize: 11 }}>{CONF.confirmed.glyph}{r.ports?.confirmed ?? 0}{r.ports?.measured ? ` 실측${r.ports.measured}` : ''} {CONF.estimated.glyph}{r.ports?.estimated ?? 0}{r.ports?.unsplit ? ` —${r.ports.unsplit}` : ''}{r.ports?.unmeasured ? ` 측정없음${r.ports.unmeasured}` : ''}</td>
                   </tr>
                 ))}
-                {!lim.rows.length && <tr><td colSpan={10} className="muted" style={{ textAlign: 'center', padding: 20 }}>{(data.rows || []).length ? '검색·확정 · 실측만 조건에 맞는 행이 없습니다.' : '귀속된 호스트 × 스토리지 쌍이 없습니다.'}</td></tr>}
+                {!lim.rows.length && <tr><td colSpan={11} className="muted" style={{ textAlign: 'center', padding: 20 }}>{(data.rows || []).length ? '검색·확정 · 실측만 조건에 맞는 행이 없습니다.' : '귀속된 호스트 × 스토리지 쌍이 없습니다.'}</td></tr>}
               </tbody>
             </STable>
           </div>

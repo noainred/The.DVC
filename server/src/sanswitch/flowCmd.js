@@ -56,11 +56,25 @@ export function flowDefIssue(f) {
 }
 
 /**
+ * 58회차 F2(재현): Virtual Fabrics 논리 스위치 컨텍스트 접두 — 수집기(fosSsh specs · perfPoller)와 같은 규칙(exec 마다 독립 채널이라 `setcontext` 가
+ *   이어지지 않는다 — 명령마다 앞에 붙인다). 예전에는 플로우 명령에만 빠져, vfId 를 둔 스위치에서 포탈이 그 논리 스위치의 switchshow 로 고른 포트로
+ *   **기본 컨텍스트**에서 만들기 · 보기 · 지우기를 했다. vfId 는 등록부가 1~128 정수로만 받는다 — 그 밖은 접두 없음.
+ */
+export function vfPrefixOf(device) {
+  const n = Number(device?.vfId);
+  return device?.vfId != null && device.vfId !== '' && Number.isInteger(n) && n >= 1 && n <= 128 ? `setcontext ${n}; ` : '';
+}
+
+/** 동작 이름 — 엣지 버전 게이트 · 화면 문구가 같은 목록을 본다. 비활성화 · 다시 켜기는 v2.940 에 더했다(그 전 엣지는 모른다). */
+export const FLOW_ACTIONS = Object.freeze(['check', 'create', 'show', 'delete', 'deactivate', 'activate']);
+
+/**
  * 동작 → 실행할 명령들(검사를 통과한 값만). action:
  *   check  — `flow --show`(읽기만 · 계정이 flow 명령을 쓸 수 있는지 · 라이선스 문구 확인)
  *   create — 플로우마다 `flow --create … -feature monitor -ingrport … -srcdev … -dstdev … -bidir` 다음 `flow --show <name>`
  *   show   — 플로우마다 `flow --show <name>`
  *   delete — `flow --delete <name>`(dvc_ 만)
+ *   deactivate · activate — `flow --deactivate|--activate <name> -feature monitor` 다음 `flow --show <name>`(dvc_ 만 · v2.940)
  * @returns {{ cmds: string[] } | { issue: string }}
  */
 export function buildFlowCommands(action, flows = []) {
@@ -77,6 +91,11 @@ export function buildFlowCommands(action, flows = []) {
     } else if (action === 'show' || action === 'delete') {
       if (!FLOW_NAME_RE.test(String(f?.name || ''))) return { issue: `포탈이 만든(${FLOW_PREFIX}) 플로우만 다룹니다` };
       cmds.push(action === 'show' ? `flow --show ${f.name}` : `flow --delete ${f.name}`);
+    } else if (action === 'deactivate' || action === 'activate') {
+      // v2.940(C-② 시안의 '비활성화'): 모니터 기능만 끄고 켠다(플로우 정의는 장비에 남는다). 문법은 FOS 8.0.1 명령 참조 기준 — 실장비 미확인.
+      if (!FLOW_NAME_RE.test(String(f?.name || ''))) return { issue: `포탈이 만든(${FLOW_PREFIX}) 플로우만 다룹니다` };
+      cmds.push(`flow --${action} ${f.name} -feature monitor`);
+      cmds.push(`flow --show ${f.name}`);
     } else return { issue: `알 수 없는 동작: ${String(action).slice(0, 20)}` };
   }
   return { cmds };
@@ -151,7 +170,7 @@ export function parseFlowList(text) {
   const names = new Set();
   for (const m of s.matchAll(/Name\s*:\s*([A-Za-z0-9_]{1,64})/g)) names.add(m[1]);
   for (const line of s.split(/\r?\n/).slice(0, 2000)) {
-    const m = /^\s*\|?\s*([A-Za-z][A-Za-z0-9_]{0,63})\s*\|/.exec(line);
+    const m = /^\s*(?:\|\s*)?([A-Za-z][A-Za-z0-9_]{0,63})\s*\|/.exec(line);   // 24회차 #8: \s*\|?\s* 는 공백 줄에서 O(n²)(16KB 88ms) — 선택 묶음으로
     if (m && !/^(name|flow|feature|sys)$/i.test(m[1])) names.add(m[1]);
   }
   const list = [...names].slice(0, 600);

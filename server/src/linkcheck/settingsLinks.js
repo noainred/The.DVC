@@ -216,7 +216,8 @@ export async function buildSettingsTargets(deps = {}) {
     push(makeTarget(kind, {
       ref: t(s.id), name: t(s.name) || t(s.id), address: s.host, vcenterId: t(s.vcenterId), enabled: s.enabled !== false,
       agent: t(s.remoteAgent) || t(s.agent),
-      facts: { type: t(s.type) || 'idrac', username: t(s.username), serviceTag: t(s.serviceTag) },
+      // v2.960(쉬운 등록 C): 등록부의 소속 법인(datacenterId) — Monitoring 설정 연동의 법인 판정(svcmon/settingsSync.js corpOf)이 쓴다.
+      facts: { type: t(s.type) || 'idrac', username: t(s.username), serviceTag: t(s.serviceTag), datacenterId: t(s.datacenterId) },
     }));
   }
   for (const b of await load('bmstor', '../bmstor/registry.js', ['listBmServers'], (m, n) => m[n]())) {
@@ -247,7 +248,8 @@ export async function buildSettingsTargets(deps = {}) {
       ref: t(d.id), name: t(d.name) || t(d.host), address: d.host,
       port: rest ? (Number(d.httpsPort) || 443) : (Number(d.sshPort) || 22),
       agent: t(d.agent), enabled: d.enabled !== false,
-      facts: { type: t(d.type), collectMethod: t(d.collectMethod) || 'ssh', username: t(d.username), vfId: d.vfId ?? null },
+      // v2.960(쉬운 등록 C): 등록부의 소속 법인(datacenterId) — 예전에는 싣지 않아 설정 연동에서 SAN 스위치가 전부 '전역' 이었다(데모 86/86).
+      facts: { type: t(d.type), collectMethod: t(d.collectMethod) || 'ssh', username: t(d.username), vfId: d.vfId ?? null, datacenterId: t(d.datacenterId) },
     }));
   }
   for (const d of await load('pdu', '../pdu/registry.js', ['listDevices'], (m, n) => m[n]())) {

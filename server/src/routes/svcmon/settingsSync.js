@@ -11,18 +11,30 @@
  */
 
 import { logAudit } from '../../audit.js';
-import { listTargets, storeRevision, planBulkTargets } from '../../svcmon/store.js';
+import { listTargets, storeRevision, planBulkTargets, svcmonStoreWriteRefusal } from '../../svcmon/store.js';
 import {
   readCatalog, planApply, previewOf, executePlan, detachTarget, getOptions, setOptions, kindMeta, driftRing, dailySummary, syncEvents,
   lastDetection, syncAvailableHere, ackDrift, MAX_ROWS, MAX_APPLY, GONE_ACTIONS, EXCLUDED_KINDS, SYNC_ROOT, detectTiming,
+  coverageSummary, requestDetect, planRepath, executeRepath,
 } from '../../svcmon/settingsSync.js';
+import { edgeOfTarget } from '../../central/svcmonAssignSync.js';
+import { svcmonAssignLoadError } from '../../central/svcmonAssign.js';
+import { cancelTrials } from '../../svcmon/trial.js';
+import { isAdminDetailUser } from '../../auth/demoGuest.js';
+import { scopedVcenterIds } from '../../auth/scope.js';
+import { store as _storeForScope } from '../../store.js';
 import { recordBatch } from '../../svcmon/batches.js';
 import { buildDashAsync } from '../../svcmon/dash.js';
 import { recentTransitions, hourlySeries, getAlertSettings, saveAlertSettings, alertStats, transitionsSince, alertBatchInfo, HOURS_KEEP } from '../../svcmon/transitions.js';
+import { alertSettingsLoadError } from '../../svcmon/alertSettings.js';   // 28회차 P-3
 import { getResults, executesHere, pollerRole } from '../../svcmon/poller.js';
 import { edgeSummary, edgeState, listAgentNames, MAX_ROWS_PER_AGENT } from '../../central/svcmonEdge.js';
-import { listAssignments, setAssignment, DEFAULT_EXCEPT_TYPES } from '../../central/svcmonAssign.js';
+import { listAssignments } from '../../central/svcmonAssign.js';
+import { syncByAgentAssignments } from '../../central/svcmonAssignSync.js';
 import { canEdit, fullScopeOnly, adminOnly } from './shared.js';
+// 105회차 A6(103 F1 덜 고침): 감시 대상 파일 읽기 오류 동안 설정 연동 적용 · 정리 · 해제는 store.save() 가 409 를 던졌지만 이 라우트는 잡지 않아
+//   전역 오류 처리기의 사유 없는 500 이 됐다(형제 tree · transfer · generate 는 사전 검사). 같은 사전 검사로 사유를 화면까지 싣는다.
+const storeUnreadable = (res) => { const r = svcmonStoreWriteRefusal(); if (!r) return false; res.status(409).json({ ok: false, error: r.reason, code: r.code, readError: true }); return true; };
 
 const t = (v) => String(v ?? '').trim();
 
@@ -47,26 +59,8 @@ function edgeRows(now = Date.now()) {
 
 const edgeOnly = (res) => res.status(409).json({ ok: false, reason: 'edge-node', error: '엣지 노드에서는 설정 연동을 쓰지 않습니다 — Monitoring 대상은 중앙에서 배정됩니다.' });
 
-/**
- * 담당 엣지 배정 동기화 — byAgent 배정이거나 배정이 없는 엣지만 다시 굳힌다. **경로 기준 배정을 byAgent 로 바꾸지 않는다**
- * (그 엣지가 맡던 경로 대상이 통째로 빠진다 — 파괴적). 그런 엣지는 '건너뜀' 으로 보고하고 엣지 배정 탭에서 사람이 고른다.
- */
-function syncAssignments(agents, user) {
-  const out = [];
-  let cur = [];
-  try { cur = listAssignments(); } catch (e) { return agents.map((agent) => ({ agent, ok: false, reason: `배정 파일을 읽지 못했습니다: ${t(e?.message).slice(0, 120)}` })); }
-  const byName = new Map(cur.map((a) => [a.agent, a]));
-  for (const agent of agents) {
-    const a = byName.get(agent);
-    if (a && a.scope?.byAgent !== true) { out.push({ agent, ok: false, skipped: true, reason: '이 엣지는 경로 기준 배정입니다 — 엣지 배정 탭에서 범위를 확인하세요(자동으로 바꾸지 않습니다).' }); continue; }
-    try {
-      const picked = listTargets().filter((x) => t(x.agent) === agent).map((x) => ({ ...x, tests: x.tests.map((y) => ({ ...y })) }));
-      const r = setAssignment(agent, { byAgent: true, exceptTypes: a?.exceptTypes || DEFAULT_EXCEPT_TYPES, note: '설정 연동 동기화' }, picked, { user });
-      out.push({ agent, ok: true, targets: r?.counts?.targets ?? picked.length });
-    } catch (e) { out.push({ agent, ok: false, reason: t(e?.message).slice(0, 200) }); }
-  }
-  return out;
-}
+/** 담당 엣지 배정 동기화 — 규칙 · 구현은 central/svcmonAssignSync.js 하나(v2.960 — 사용/중지 · 시험 점검과 공유). */
+const syncAssignments = (agents, user) => syncByAgentAssignments(agents, user);
 
 /* ── Monitoring 개요(기술 뷰) ── */
 let _dashMemo = null;       // { key, at, body }
@@ -99,6 +93,9 @@ async function computeDash(now) {
 /** 테스트 전용 — 개요 캐시·계산 횟수. */
 export function _dashStateForTest({ reset = false } = {}) { if (reset) { _dashMemo = null; _dashInflight = null; _dashBuilds = 0; } return { builds: _dashBuilds }; }
 
+/** 개요 '감시 범위' 를 실을 수 있는 요청 — adminOnly + fullScopeOnly 와 같은 기준(관리자 판본 · 범위 없음) · 엣지 노드 아님. */
+const coverageAllowed = (req) => syncAvailableHere() && isAdminDetailUser(req.user) && !scopedVcenterIds(req.user, _storeForScope.get());
+
 export function registerSettingsSync(svcmonRouter) {
 
 /** 카탈로그 × Monitoring 대상 — 행 · 집계 · 드리프트 이력 · 엣지 · 이벤트. */
@@ -110,7 +107,7 @@ svcmonRouter.get('/settings-sync/catalog', adminOnly, fullScopeOnly, async (req,
   for (const x of listTargets()) if (x.origin && t(x.agent)) assignedTargets.set(t(x.agent), (assignedTargets.get(t(x.agent)) || 0) + 1);
   res.json({
     ok: true, at: cat.at, readMs: cat.ms, rows, truncated: cat.rows.length > rows.length, total: cat.rows.length,
-    counts: cat.counts, sourceErrors: cat.sourceErrors, kinds: kindMeta(), excluded: EXCLUDED_KINDS,
+    counts: cat.counts, sourceErrors: cat.sourceErrors, kinds: kindMeta(), excluded: EXCLUDED_KINDS, corpEdges: cat.corpEdges || [],
     options: getOptions(), drift: { ring: driftRing(), daily: dailySummary(), last: lastDetection() },
     edges: edgeRows().map((e) => ({ ...e, syncTargets: assignedTargets.get(e.agent) || 0 })),
     events: syncEvents().slice(0, 50), limits: { maxApply: MAX_APPLY, goneActions: GONE_ACTIONS }, root: SYNC_ROOT,
@@ -130,7 +127,7 @@ async function planFrom(body = {}) {
   const builtByKey = new Map((built.targets || []).map((x) => [t(x.id), x]));
   const plan = planApply(cat.rows, keys, {
     enabled: body.enabled === true, goneAction: GONE_ACTIONS.includes(body.goneAction) ? body.goneAction : 'disable',
-    withChecks: body.withChecks !== false, builtByKey,
+    withChecks: body.withChecks !== false, builtByKey, corpEdge: body.corpEdge === true,
   });
   return { plan, keys };
 }
@@ -147,6 +144,7 @@ svcmonRouter.post('/settings-sync/preview', adminOnly, fullScopeOnly, async (req
 /** 적용 — 추가(전부 성공 또는 전부 취소) · 주소 반영 · 사라짐 처리 · (선택) 담당 엣지 배정 동기화. */
 svcmonRouter.post('/settings-sync/apply', adminOnly, fullScopeOnly, async (req, res) => {
   if (!syncAvailableHere()) return edgeOnly(res);
+  if (storeUnreadable(res)) return;   // 105회차 A6
   const r = await planFrom(req.body || {});
   if (r.error) return res.status(400).json({ ok: false, error: r.error });
   const user = req.user?.username || '';
@@ -159,8 +157,33 @@ svcmonRouter.post('/settings-sync/apply', adminOnly, fullScopeOnly, async (req, 
     user, action: 'svcmon.settings-sync.apply', target: out.batch,
     detail: `추가 ${out.added}(점검 ${out.newTests}) · 주소 반영 ${out.changed.length} · 사라짐 ${out.gone.length} · 건너뜀 ${r.plan.skip.length} · 실패 ${out.errors.length}${out.committed ? '' : ' · 추가 취소'}${assign.length ? ` · 배정 ${assign.filter((x) => x.ok).length}/${assign.length}` : ''}`,
   });
+  requestDetect();   // v2.960(B): 개요 '감시 범위' 카드를 곧바로 맞춘다(2초 묶음 · 감지 타이머가 돌 때만)
   // 추가가 취소돼도(오류 1건이면 0건 — 대량 등록 규약) 200 + ok:false 로 결과 본문을 그대로 돌려준다 — 화면이 어떤 행이 왜 막혔는지 보여 준다.
   res.json({ ok: out.committed && !out.errors.length, result: { ...out, skip: r.plan.skip.slice(0, 200) }, assign });
+});
+
+/**
+ * v2.988 '법인 폴더로 정리' — 설정 연동이 놓은 자리에 그대로 있는 연동 대상을 지금 법인 폴더로 옮긴다. mode 'preview' 는 저장하지 않는다.
+ *   서버가 **지금** 다시 분류한 행으로만 판정한다(화면이 본 상태를 믿지 않는다 — 적용과 같은 규약). 경로 기준 엣지 배정이 맡는 대상은 건너뜀.
+ */
+svcmonRouter.post('/settings-sync/repath', adminOnly, fullScopeOnly, async (req, res) => {
+  if (!syncAvailableHere()) return edgeOnly(res);
+  if (storeUnreadable(res)) return;   // 105회차 A6
+  const keys = Array.isArray(req.body?.keys) ? req.body.keys.map(t).filter(Boolean) : [];
+  if (!keys.length) return res.status(400).json({ ok: false, error: '옮길 항목을 고르세요.' });
+  if (keys.length > MAX_APPLY) return res.status(400).json({ ok: false, error: `한 번에 ${MAX_APPLY}건까지 옮길 수 있습니다(요청 ${keys.length}건).` });
+  const cat = await readCatalog();
+  const assignUnreadable = !!svcmonAssignLoadError();
+  let list = []; try { list = listAssignments(); } catch { list = []; }
+  const plan = planRepath(cat.rows, keys, { edgeOf: (x) => edgeOfTarget(x, list), assignUnreadable });
+  if (req.body?.mode !== 'apply') return res.json({ ok: true, preview: { move: plan.move.map(({ agent, ...m }) => m), skip: plan.skip.slice(0, 500) } });
+  const user = req.user?.username || '';
+  cancelTrials(plan.move.map((m) => m.targetId), '대상을 법인 폴더로 옮겨 시험 대기를 멈췄습니다.');   // 경로가 바뀌면 대기 판정 키(경로 · 이름)가 맞지 않는다
+  const out = executeRepath(plan);
+  const assign = out.agents.length ? syncAssignments(out.agents, user) : [];
+  logAudit({ user, action: 'svcmon.settings-sync.repath', detail: `옮김 ${out.moved.length} · 건너뜀 ${plan.skip.length} · 실패 ${out.errors.length}${assign.length ? ` · 배정 ${assign.filter((x) => x.ok).length}/${assign.length}` : ''}` });
+  if (out.moved.length) requestDetect();
+  res.json({ ok: !out.errors.length, result: { moved: out.moved, errors: out.errors, skip: plan.skip.slice(0, 500) }, assign });
 });
 
 /** 자동 등록 종류(기본 없음 = 끔). */
@@ -169,7 +192,10 @@ svcmonRouter.put('/settings-sync/options', adminOnly, fullScopeOnly, (req, res) 
   const before = getOptions();
   const next = setOptions(req.body || {});
   logAudit({ user: req.user?.username, action: 'svcmon.settings-sync.options', detail: `자동 등록 ${before.autoKinds.join(',') || '없음'} → ${next.autoKinds.join(',') || '없음'}` });
-  res.status(next.saved ? 200 : 500).json({ ok: next.saved, options: { autoKinds: next.autoKinds } });
+  // v3.18.14(결함 D3): 새 종류를 켜면 다음 감지(최대 감지 주기)까지 아무 일도 없어 '안 된다' 로 보였다 — 저장 직후 한 번 감지한다(2초 묶음 · 감지 타이머가 도는 중앙에서만).
+  const added = next.autoKinds.filter((k) => !before.autoKinds.includes(k));
+  const detectQueued = !!(next.saved && added.length && requestDetect());
+  res.status(next.saved ? 200 : 500).json({ ok: next.saved, options: { autoKinds: next.autoKinds }, detectQueued });
 });
 
 /** 배너 '확인' — 지금까지 설정에 새로 생긴 항목을 본 것으로 둔다(미등록 상태는 설정 연동 탭에 그대로 남는다). */
@@ -181,6 +207,7 @@ svcmonRouter.post('/settings-sync/ack', adminOnly, fullScopeOnly, (req, res) => 
 
 /** 연동 해제 — 대상은 남기고 출처만 지운다(수동 대상으로 전환). */
 svcmonRouter.post('/settings-sync/detach/:id', adminOnly, fullScopeOnly, (req, res) => {
+  if (storeUnreadable(res)) return;   // 105회차 A6
   const r = detachTarget(String(req.params.id || ''));
   if (!r) return res.status(404).json({ ok: false, error: '대상을 찾을 수 없습니다.' });
   if (r.changed) logAudit({ user: req.user?.username, action: 'svcmon.settings-sync.detach', target: r.target?.id, detail: r.target?.name || '' });
@@ -192,7 +219,9 @@ svcmonRouter.get('/overview', async (req, res) => {
   const now = Date.now();
   // 같은 저장소 세대·30초 안이면 재사용(화면 60초 갱신 — 무거운 API 15초 폴링 금지). 계산 중이면 그 계산을 함께 기다린다.
   const key = `${storeRevision()}|${Math.floor(now / 30_000)}`;
-  if (_dashMemo && _dashMemo.key === key) return res.json(_dashMemo.body);
+  // v2.960(B): '감시 범위' 는 관리자(전체 범위)에게만 — 캐시 본문(전 계정 공유)에 넣지 않고 응답마다 붙인다(카탈로그 게이트와 같은 기준 · 반증 H1).
+  const withCoverage = (body) => (coverageAllowed(req) ? { ...body, coverage: coverageSummary() } : body);
+  if (_dashMemo && _dashMemo.key === key) return res.json(withCoverage(_dashMemo.body));
   if (!_dashInflight || _dashInflight.key !== key) {
     const promise = computeDash(now)
       // 늦게 끝난 옛 계산이 더 새 캐시를 덮지 않게(반증 재검토 L1).
@@ -200,14 +229,16 @@ svcmonRouter.get('/overview', async (req, res) => {
       .finally(() => { if (_dashInflight?.promise === promise) _dashInflight = null; });
     _dashInflight = { key, promise };
   }
-  try { res.json(await _dashInflight.promise); }
+  try { res.json(withCoverage(await _dashInflight.promise)); }
   catch (e) { res.status(500).json({ ok: false, error: `개요 집계 실패: ${t(e?.message).slice(0, 200)}` }); }
 });
 
 /* ── 실패 알림 설정 ── */
 svcmonRouter.get('/alert-settings', canEdit, (req, res) => {
   // v2.932(점검 D1-08): 요약 묶음 창·기준 건수를 싣는다 — 화면이 '20초 안에 6건' 을 박지 않게(+1 해석은 서버 alertBatchInfo 한 곳).
-  res.json({ ok: true, settings: getAlertSettings(), stats: alertStats(), batch: alertBatchInfo() });
+  // 28회차 P-3: 설정 파일을 못 읽었으면 그 사실을 싣는다(화면이 기본값을 저장값처럼 보이지 않게)
+  const le = alertSettingsLoadError();
+  res.json({ ok: true, settings: getAlertSettings(), stats: alertStats(), batch: alertBatchInfo(), ...(le ? { loadError: { at: le.at, reason: le.reason } } : {}) });
 });
 svcmonRouter.put('/alert-settings', adminOnly, fullScopeOnly, (req, res) => {
   try {

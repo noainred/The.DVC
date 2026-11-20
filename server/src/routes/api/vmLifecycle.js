@@ -9,6 +9,7 @@ import { logAudit } from '../../audit.js';
 import { store } from '../../store.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { memoJson, scopeKey } from './shared.js';
+import { isSummaryQuery, groupByVc } from './toolSummary.js';   // v3.21.0 VM 분석 화면 요약 — 같은 라우트 · 같은 게이트 안에서
 import { capStr } from '../../util/capStr.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { fileStamp } from '../../util/dayKey.js';
@@ -17,6 +18,7 @@ import { loadLogSettings } from '../../logs/settings.js';
 import { eventNotCollectedMap, notCollectedList } from '../../logs/coverage.js'; // v2.733(C1-01): 지금 이벤트를 수집하지 않는 vCenter
 import { analyzeLifecycle, kindOfLife } from '../../vmlife/analyze.js';
 import { LIFE_TYPES, parseDetail } from '../../vmchanges/eventDetail.js';
+import { eventCoverageRows } from '../../vmchanges/analyze.js'; // 69회차 F2: 수집 범위 행(미래 행 경계) — vm-changes 와 한 벌
 import { inventoryUnreadReason } from '../../vmtrack/diff.js'; // v2.743(VC-01): '이 vCenter 의 VM 목록을 지금 읽었는가' 판정 한 벌(VM 수량 추이와 같다)
 
 const toolsPerm = requirePerm('tools');
@@ -43,7 +45,7 @@ async function load(req, snap) {
   // v2.733(점검 3회차 C1-01): 이 포탈이 지금 이벤트를 수집하지 않는 vCenter(엣지 위임·비활성·점검중)는 항목에 notCollected(사유)를 싣는다 —
   //   lastTs 가 남아 있어도(수집을 멈추기 전 이벤트) '없음' 이 아니라 '지금 수집하지 않는다' 다. 목록(notCollected)은 범위로 이미 거른 ids 기준.
   const nc = eventNotCollectedMap();
-  const coverage = ids.slice(0, 200).map((id) => ({ vcenterId: id, name: vcName.get(id) || id, lastTs: db.lastTs(id) || null, ...(nc.has(id) ? { notCollected: nc.get(id) } : {}) }));
+  const coverage = eventCoverageRows(db, ids, { vcName, nc });
   const notCollected = notCollectedList(nc, { only: ids, names: vcName });
   const s = loadLogSettings();
   return { rows, truncated, days, since, vcName, ids, coverage, notCollected, settings: { enabled: s.enabled, retentionDays: s.retentionDays, pollIntervalMin: s.pollIntervalMin, minSeverity: s.minSeverity } };
@@ -76,10 +78,24 @@ export function liveNamesOf(snap, ids) {
 export function registerVmLifecycle(api) {
   api.get('/tools/vm-lifecycle', toolsPerm, (req, res) => memoJson(req, res, 'vm-lifecycle', async (snap) => {
     const L = await load(req, snap);
+    // v3.21.0: ?summary=1 — 법인별 줄(VM 분석 화면 'VM 수 추이 · 생성/삭제'). 게이트(tools · toolGate 'vm-lifecycle')와 범위(load)는 그대로 ·
+    //   같은 읽기(L.rows — 읽기 상한 LIFE_READ_MAX 는 원본과 같다 · 잘렸으면 truncated)를 법인마다 analyzeLifecycle 에 넘긴다(판정 그대로).
+    //   종류 · 검색 거르기는 보지 않는다 · 이벤트 목록은 싣지 않는다. 쌓인 이벤트가 없는 법인도 줄을 준다(0 은 '받은 이벤트 없음' — 수집 범위는 vcenters · notCollected).
+    if (isSummaryQuery(req.query)) {
+      const by = groupByVc(L.rows);
+      const rows = L.ids.map((id) => {
+        const a = analyzeLifecycle(by.get(String(id)) || [], { days: L.days, since: L.since, vcName: L.vcName });
+        return { vcenterId: id, name: L.vcName.get(id) || id, total: a.total, added: a.added, removed: a.removed, net: a.net, byKind: a.byKind, noDetail: a.noDetail,
+          shortLivedCount: a.shortLivedCount, series: a.series };
+      });
+      return { summary: true, tool: 'vm-lifecycle', days: L.days, since: L.since, truncated: L.truncated, readMax: LIFE_READ_MAX,
+        vcenters: L.coverage, notCollected: L.notCollected, logs: L.settings, rows, initial: snap.initial === true };
+    }
     return {
       days: L.days, since: L.since, truncated: L.truncated, readMax: LIFE_READ_MAX,
       vcenters: L.coverage, notCollected: L.notCollected, logs: L.settings,
-      life: analyzeLifecycle(L.rows, { days: L.days, vcName: L.vcName, q: qStr(req.query.q, 128), kind: qStr(req.query.kind, 16), liveNames: liveNamesOf(snap, L.ids) }),
+      // 결정(56~75 남긴 것) 69 ①: since 를 넘겨 하루 막대가 since 가 걸친 날부터 시작한다(KPI 합 = 막대 합)
+      life: analyzeLifecycle(L.rows, { days: L.days, since: L.since, vcName: L.vcName, q: qStr(req.query.q, 128), kind: qStr(req.query.kind, 16), liveNames: liveNamesOf(snap, L.ids) }),
       initial: snap.initial === true,
     };
   }, { ttlMs: 30_000, extraKey: `${scopeKey(req.user, store.get())}` }));
@@ -94,6 +110,8 @@ export function registerVmLifecycle(api) {
         lines.push(csvLine([fmt(r.ts), L.vcName.get(r.vcenterId) || r.vcenterId, r.entity, kindOfLife(r.type, d) || r.type, r.user || '',
           d?.host || '', d?.ds || '', d?.source || '', d?.oldName || '', d?.newName || '', r.message || '']));
       }
+      // 69회차 I1: 읽기 상한으로 잘렸으면 파일에도 밝힌다(X-Truncated 헤더만으로는 파일만 받은 사람이 '그 기간 전부' 로 읽는다).
+      if (L.truncated) { const oldest = L.rows[L.rows.length - 1]?.ts; lines.push(csvLine([`(이벤트가 많아 최신 ${LIFE_READ_MAX}건까지만 실음${Number.isFinite(oldest) ? ` — ${fmt(oldest)} 이후만 빠짐없음` : ''} · 기간이나 vCenter 를 좁혀 다시 받으세요)`])); }
       logAudit({ user: req.user?.username, action: 'vm-lifecycle.csv', target: 'vm-lifecycle', detail: `${lines.length - 1} rows · ${L.days}d${L.truncated ? ' (truncated)' : ''}`, ip: req.ip });
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="vm-lifecycle-${fileStamp()}.csv"`);

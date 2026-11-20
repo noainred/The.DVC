@@ -133,7 +133,8 @@ describe('B5-03 · B5-04 · B5-05 · B5-08 배정 파일의 변경 호출은 전
   });
   it('StorageIntervals·SanSwitchPerf 는 판정한 뒤에만 폼을 바꾼다(실패 본문으로 폼을 덮지 않는다)', () => {
     expect(src('StorageIntervals.jsx')).toMatch(/const r = requireChanged\(await putJson\('\/tools\/storage\/intervals'/);
-    expect(src('SanSwitchPerf.jsx')).toMatch(/const r = requireChanged\(await putJson\('\/tools\/sanswitch\/perf\/settings', form\)\); setData\(r\); setForm\(r\.settings\)/);
+    // 112회차: 저장 성공은 폼의 '채운 상태' 도 읽음으로 돌린다(seedKind — 못 읽은 값으로 채운 폼 다시 채우기 판정). 판정 뒤에만 폼을 바꾸는 순서는 그대로다.
+    expect(src('SanSwitchPerf.jsx')).toMatch(/const r = requireChanged\(await putJson\('\/tools\/sanswitch\/perf\/settings', form\)\); setData\(r\); seedKind\.current = ''; setForm\(r\.settings\)/);
   });
 });
 

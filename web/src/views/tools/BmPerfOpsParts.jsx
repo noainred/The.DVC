@@ -69,7 +69,7 @@ export function HealthFleetTable({ items = [], onOpen = () => {}, now = Date.now
             <td data-sort={r.vcenterId}>{r.vcenterId || '귀속 없음'}</td>
             <td data-sort={r.cells.length} className="bmo-wrap">{r.cells.map((c, i) => <React.Fragment key={c.id}>{i > 0 && ' · '}<span style={{ color: toneVar(c.code === 'bad' ? 'bad' : 'warn') }}>{HEALTH_CELL_TEXT[c.id]?.label || c.id}</span></React.Fragment>)}</td>
             <td className="right" data-sort={r.since}>{daysSinceText(r.since, now)}</td>
-            <td data-nosort><button className="btn btn-sm bmp-touch" onClick={() => onOpen(r.key, 'summary')}>상세</button></td>
+            <td data-nosort><button className="btn btn-sm bmp-touch" onClick={() => onOpen(r.key, 'summary', r.vcenterId || '')}>상세</button></td>
           </tr>
         ))}
       </tbody>
@@ -94,7 +94,7 @@ export function FocusFleetTable({ sessions = [], onOpen = () => {} }) {
               <td data-sort={x.trigger}>{x.trigger === 'auto' ? '자동' : '수동'}</td>
               <td data-sort={x.status}><span style={{ color: toneVar(st.tone) }}>{st.label}{x.status === 'running' ? ` ${x.done}/${x.count}` : ''}{x.status === 'queued' && x.queuePos ? ` · 대기 ${x.queuePos}번째` : ''}</span></td>
               <td data-sort={x.verdictTo || ''}>{x.verdictFrom ? `${verdictView(x.verdictFrom).label} → ${verdictView(x.verdictTo).label}` : '—'}</td>
-              <td data-nosort><button className="btn btn-sm bmp-touch" onClick={() => onOpen(x.key, 'focus')}>보기</button></td>
+              <td data-nosort><button className="btn btn-sm bmp-touch" onClick={() => onOpen(x.key, 'focus', x.vcenterId || '')}>보기</button></td>
             </tr>
           );
         })}

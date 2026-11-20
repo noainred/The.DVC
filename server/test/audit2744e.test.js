@@ -14,7 +14,7 @@
  * ②는 실제 authMiddleware·requireEnrolled 와 실제 api·admin·auth·svcmon 라우터를 띄워 상태코드·응답 본문으로 본다(소스 grep 아님).
  * 임시 파일은 os.tmpdir() 아래에만 만든다(저장소 안에 CONFIG_DIR 를 만들지 않는다).
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -23,12 +23,19 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { stripComments } from './_stripComments.js';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
 const J = (p) => JSON.stringify(path.join(SRC, p));
 
 // 순수 모듈·logs DB 도 config.js 를 거친다 — 저장소의 server/config 를 건드리지 않게 먼저 임시 CONFIG_DIR 을 잡는다.
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2744e-'));
+const TMP = tmpDir('audit2744e-');
 process.env.CONFIG_DIR = TMP;
 
 // ── ① 소스 스윕(AUTHZ-01) ────────────────────────────────────────────────
@@ -42,8 +49,6 @@ const ALLOW = {
   // 저장 역할 비교 — req.user 가 아니라 대상 계정의 저장 레코드(target.role)다(관리자 계정에 기능 제한을 걸지 않는다).
   'routes/admin/users.js': { n: 1, why: 'stored-role' },
   // 같은 줄에서 isDemoGuest 로 데모 계정을 함께 뺀다 — isAdminDetailUser 와 같은 판정(③ 이 줄 내용을 확인).
-  'routes/api/bulletin.js': { n: 1, why: 'demo-excluded' },
-  'routes/api/userMenu.js': { n: 1, why: 'demo-excluded' },
   // 원격 접속: HTTP 는 READ_DENY '/api/remote'(모든 메서드)가 데모 계정을 라우트 앞에서 막고, WS 게이트웨이는 remoteUserIssue 가
   //   매핑 판정(mappingAccessIssue) 전에 demoGuest 를 403 으로 막는다 — 데모 계정은 이 비교에 닿지 않는다(③ 이 두 근거를 확인).
   'routes/remote.js': { n: 3, why: 'remote-blocked' },
@@ -80,7 +85,9 @@ test('① AUTHZ-01 routes·provision·proxy·util 의 role 직접 비교는 허�
   // 직접 비교를 고친 파일들은 판정 함수를 쓴다(되돌리면 ① 이 먼저 실패하지만, import 만 남고 호출이 빠진 경우도 막는다)
   for (const f of ['routes/api/relaytopo.js', 'routes/api/relaycheck.js', 'routes/svcmon/overview.js', 'routes/svcmon/edge.js', 'routes/svcmon/logs.js',
     'routes/ping.js', 'routes/api/checksLogs.js', 'routes/api/perfClient.js', 'provision/jobs.js', 'routes/api/hostHygiene.js', 'routes/api/clusterCheck.js',
-    'routes/api/vmHygiene.js', 'routes/api/vmTags.js', 'routes/api/contention.js', 'routes/api/vmSeries.js', 'routes/api/overviewNsx.js']) {
+    'routes/api/vmHygiene.js', 'routes/api/vmTags.js', 'routes/api/contention.js', 'routes/api/vmSeries.js', 'routes/api/overviewNsx.js',
+    'routes/api/bulletin.js', 'routes/api/userMenu.js']) {   // 75회차 제안: userMenu.js seesNames 도 같은 사본이었다
+       // 73회차: bulletin.js 의 같은 식 사본(role === 'admin' && !isDemoGuest)을 isAdminDetailUser 로 바꿨다 — 허용 목록에서 뺐다
     const s = stripComments(fs.readFileSync(path.join(SRC, f), 'utf8'));
     assert.match(s, /isAdminDetailUser\(/, `${f}: isAdminDetailUser 호출`);
   }
@@ -98,7 +105,7 @@ test('① AUTHZ-01 memo 키 — 역할에 따라 본문이 갈리는 memoJson �
 
 // ── ② 실제 라우터 하니스 ─────────────────────────────────────────────────
 function runHarness() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2744e-h-'));
+  const dir = tmpDir('audit2744e-h-');
   const script = `
     const fs = await import('node:fs');
     const path = await import('node:path');

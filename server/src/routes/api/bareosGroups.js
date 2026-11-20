@@ -222,7 +222,7 @@ api.get('/tools/bareos-backup/groups/tree', adminOnly, (req, res) => {
   // v2.846 버그 점검(U-9): Director 상태(인증 정지 · 조회 실패 · 미설정)면 원장의 결과는 마지막으로 읽은 값이다 — 통합·법인별 현황과 같은 판정
   //   (bareosViews.directorInfo → vmView.directorState)으로 resultsKnown 을 실어 화면이 '성공 n/n'(초록) 대신 '모름' 으로 그리게 한다.
   let dirSt = null;
-  try { const di = directorInfo(vcenterId, settings, pollerStatus(), isDemoActive()); dirSt = { state: di.state, resultsKnown: di.resultsKnown }; } catch { dirSt = { state: 'error', resultsKnown: false }; }
+  try { const di = directorInfo(vcenterId, settings, pollerStatus(), isDemoActive()); dirSt = { state: di.state, resultsKnown: di.resultsKnown, ...(di.partial ? { partial: true } : {}) }; } catch { dirSt = { state: 'error', resultsKnown: false }; }   // 반증 G1: 잘린 조회 표지
   res.json({
     ok: true, vcenterId, vcName: vc?.name || vcenterId, now, tz: serverTz(), clocks: clockInfo(now), catchupMs: CATCHUP_MS,
     director: si.view ? { ...si.view, ...dirSt } : null, directorState: dirSt, mapped: !!si.site && !si.mappingMissing?.length, mappingMissing: si.mappingMissing, siteDefaults: si.site ? { storage: si.site.storage, pool: si.site.pool, schedule: si.site.schedule || '' } : null,

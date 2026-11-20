@@ -58,22 +58,29 @@ const STATE = Object.freeze({
   unknown: { label: '결과 모름', tone: 'amber', note: '만들기 결과를 받지 못했습니다 — 장비에 있을 수 있습니다(카운터 읽기 · 권한 점검으로 확인)' },
   conflict: { label: '이름 충돌', tone: 'amber', note: '같은 이름의 플로우가 장비에 이미 있습니다 — 정의가 같은지 확인하지 못했습니다' },
   gone: { label: '장비에 없음', tone: 'amber' }, failed: { label: '만들지 못함', tone: 'red' }, deleted: { label: '지움', tone: 'gray' },
+  inactive: { label: '비활성', tone: 'gray', note: '장비에 플로우는 있지만 모니터를 껐습니다 — 카운터가 늘지 않습니다(다시 켜기로 켭니다)' },
 });
 export function flowRows(d) {
   const devName = new Map((d?.devices || []).map((x) => [x.id, x.name]));
+  const toggleIssue = new Map((d?.devices || []).map((x) => [x.id, x.toggleIssue || null]));
   const portal = (Array.isArray(d?.flows) ? d.flows : []).map((f) => {
     const p = diffPct(f);
     const c = f.counters || null;
     const bytes = c && numOrNull(c.rxBytes) != null && numOrNull(c.txBytes) != null ? numOrNull(c.rxBytes) + numOrNull(c.txBytes) : null;   // 한쪽만이면 '—'(반증 M-5)
     return { key: `${f.deviceId}|${f.name}`, portal: true, name: f.name, deviceId: f.deviceId, sw: devName.get(f.deviceId) || f.deviceId,
       host: f.hostName ? `${String(f.hostName).split('.')[0]} · ${f.hba || '—'}` : '—', pair: `${shortWwn(f.srcdev)} → ${shortWwn(f.dstdev)}`, pairTitle: `${f.srcdev} → ${f.dstdev} · 포트 ${f.ingrport}`,
-      target: f.targetName || '—', rate: c ? `${rateText(f.rxBps)} / ${rateText(f.txBps)}` : '—', rateSort: (numOrNull(f.rxBps) ?? -1) + (numOrNull(f.txBps) ?? 0),
+      target: f.targetName || '—', rate: f.stale ? '오래됨(최근에 못 읽음)' : c ? `${rateText(f.rxBps)} / ${rateText(f.txBps)}` : '—', rateSort: (numOrNull(f.rxBps) ?? -1) + (numOrNull(f.txBps) ?? 0),
       bytes: bytesText(bytes), bytesSort: bytes ?? -1, diff: diffText(p), diffSort: p == null ? null : Math.abs(p), diffWarn: p != null && Math.abs(p) > 5,
-      esxi: rateText(f.esxiBps), state: STATE[f.state] || { label: f.state || '—', tone: 'gray' }, lastAt: f.lastAt || null, lastError: f.lastError || null,
-      canDelete: f.state !== 'deleted' && f.state !== 'failed' && f.deviceKnown !== false, canForget: f.deviceKnown === false && f.state !== 'deleted' };
+      esxi: rateText(f.esxiBps), state: STATE[f.state] || { label: f.state || '—', tone: 'gray' }, lastAt: f.lastAt || null, lastError: f.lastError || null, rawSample: f.rawSample || null,
+      canDelete: f.state !== 'deleted' && f.state !== 'failed' && f.deviceKnown !== false, canForget: f.deviceKnown === false && f.state !== 'deleted',
+      // 반증 L-4: 엣지가 비활성화 · 다시 켜기를 모르는 버전이면 버튼을 잠근다(누르면 OTP 를 쓰고 거부되던 것)
+      canDeactivate: f.state === 'active' && f.deviceKnown !== false && !toggleIssue.get(f.deviceId), canActivate: f.state === 'inactive' && f.deviceKnown !== false && !toggleIssue.get(f.deviceId),
+      toggleIssue: toggleIssue.get(f.deviceId) || null,
+      // 잠근 이유를 버튼 자리에 말한다(버튼만 사라지면 왜 없는지 모른다)
+      toggleLocked: !!toggleIssue.get(f.deviceId) && f.deviceKnown !== false && (f.state === 'active' || f.state === 'inactive') };
   });
   const human = [];
-  const blank = { host: '—', pair: '—', pairTitle: '', target: '—', rate: '—', rateSort: -1, bytes: '—', bytesSort: -1, diff: '—', diffSort: null, diffWarn: false, esxi: '—', lastError: null, canForget: false };
+  const blank = { host: '—', pair: '—', pairTitle: '', target: '—', rate: '—', rateSort: -1, bytes: '—', bytesSort: -1, diff: '—', diffSort: null, diffWarn: false, esxi: '—', lastError: null, canForget: false, canDeactivate: false, canActivate: false };
   for (const x of d?.devices || []) {
     for (const n of x.check?.others || []) human.push({ ...blank, key: `${x.id}|${n}`, portal: false, name: n, deviceId: x.id, sw: x.name, state: { label: '사람이 만듦 · 보기만', tone: 'gray' }, lastAt: x.check?.at || null, canDelete: false });
     // 장비에 있는데 포탈 기록이 없는 dvc_ — 재시작 · 시한으로 기록을 놓친 것(반증 M-2). 지울 수 있다.
@@ -92,6 +99,7 @@ export function flowKpis(d) {
   const pass = checked.filter((x) => x.check.ok).length;
   const flows = (d?.flows || []).filter((f) => f.state !== 'deleted');
   const active = flows.filter((f) => f.state === 'active').length;
+  const inactive = flows.filter((f) => f.state === 'inactive').length;
   const diffs = flows.map(diffPct).filter((p) => p != null).map(Math.abs).sort((a, b) => a - b);
   const mid = Math.floor(diffs.length / 2);
   const med = !diffs.length ? null : diffs.length % 2 ? diffs[mid] : (diffs[mid - 1] + diffs[mid]) / 2;
@@ -100,14 +108,21 @@ export function flowKpis(d) {
   return [
     { label: 'Fabric Vision 라이선스', value: `${yes} / ${devs.length}`, meta: `없음 ${no} · 못 읽음 ${unk}` },
     { label: '계정 권한 점검 통과', value: checked.length ? `${pass} / ${checked.length}` : '—', meta: checked.length ? `막힘 · 오류 ${checked.length - pass}` : '점검한 스위치 없음' },
-    { label: '포탈이 만든 플로우', value: String(flows.length), meta: `활성 ${active} · 만들지 못함 ${flows.length - active}` },
+    { label: '포탈이 만든 플로우', value: String(flows.length), meta: `활성 ${active}${inactive ? ` · 비활성 ${inactive}` : ''} · 그 밖 ${flows.length - active - inactive}` },
     { label: 'ESXi 경로 실측 대비', value: med == null ? '—' : `${med.toFixed(1)}%`, meta: med == null ? '둘 다 있는 짝 없음' : `차이 중앙값 · 5% 넘는 짝 ${diffs.filter((p) => p > 5).length}` },
     { label: '마지막 카운터 수집', value: hm(last), meta: every ? `${Math.round(every / 60_000)}분 주기 · flow --show` : 'flow --show' },
   ];
 }
 
 const JOB_STATUS = Object.freeze({ running: '실행 중', queued: '엣지 대기(설정 pull 전)', dispatched: '엣지 결과 기다림', done: '끝남' });
-const ACTION = Object.freeze({ check: '계정 권한 점검', create: '만들기', show: '카운터 읽기', delete: '지우기' });
+const ACTION = Object.freeze({ check: '계정 권한 점검', create: '만들기', show: '카운터 읽기', delete: '지우기', deactivate: '비활성화', activate: '다시 켜기' });
+/** OTP 확인 줄 — 동작별 문구 · 라우트(지우기 · 기록 정리 · 비활성화 · 다시 켜기). */
+export const CONFIRM = Object.freeze({
+  delete: { path: '/tools/san-flow/delete', button: '지우기', text: (n) => `‘${n}’ 을 스위치에서 지웁니다 —`, danger: true },
+  forget: { path: '/tools/san-flow/forget', button: '기록 정리', text: (n) => `‘${n}’ 기록만 정리합니다(스위치가 등록부에 없어 장비에는 명령을 보내지 않습니다) —`, danger: false },
+  deactivate: { path: '/tools/san-flow/deactivate', button: '비활성화', text: (n) => `‘${n}’ 의 모니터를 끕니다(플로우는 장비에 남고 상한 개수에도 셉니다) —`, danger: false },
+  activate: { path: '/tools/san-flow/activate', button: '다시 켜기', text: (n) => `‘${n}’ 의 모니터를 다시 켭니다 —`, danger: false },
+});
 export function jobTitle(j) {
   if (!j) return '';
   const st = j.status === 'done' ? (j.result?.ok ? '완료' : j.timedOut && !j.lateApplied ? '결과 모름' : '실패') : (JOB_STATUS[j.status] || j.status);

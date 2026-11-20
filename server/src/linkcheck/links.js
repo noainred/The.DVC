@@ -93,6 +93,23 @@ export function linkIdOf(kind, from, to) {
   return `${kind}|${t(from) || '-'}|${t(to) || '-'}`;
 }
 
+/** 수집 서버 표시 이름(없으면 id)별 개수 — 이름이 겹치는지 가른다. buildLinks 와 통신 지도(commmap)가 같은 셈을 쓴다. */
+export function collectorNameCount(collectors = []) {
+  const m = new Map();
+  for (const c of Array.isArray(collectors) ? collectors : []) { const n = t(c?.name) || t(c?.id); if (n) m.set(n, (m.get(n) || 0) + 1); }
+  return m;
+}
+/**
+ * '중앙 → 엣지' 링크 id(전체 점검 18회차 반증 A-2): 표시 이름이 겹치면 `이름#id` 로 가른다(16회차 T-2). **판정 하나** — 예전에는 통신 지도가
+ *   이름만으로 id 를 다시 만들어, 이름이 겹친 엣지의 점검 실패를 찾지 못하고(null) 장애로 칠하지 않았다.
+ * @param {{id?:string, name?:string}} c  수집 서버
+ * @param {Map<string, number>} nameCount  collectorNameCount(전체 등록부)
+ */
+export function centralEdgeLinkId(c, nameCount) {
+  const name = t(c?.name) || t(c?.id);
+  return linkIdOf('central->edge', 'central', (nameCount?.get?.(name) || 0) > 1 ? `${name}#${t(c?.id)}` : name);
+}
+
 /**
  * 엣지↔엣지 짝. ⚠ **전량은 만들지 않는다** — 28곳이면 28×27=756 방향이고 주기마다 그만큼
  * 나가면 그 자체가 사고다. `pairs` 설정(명시 짝)이 있으면 그것만, 없으면 **빈 배열**이다
@@ -135,10 +152,15 @@ export function buildLinks({ collectors = [], vcenters = [], pairs = [], setting
   const on = (kind) => settings.kinds?.[kind] !== false;   // 기본 켜짐(명시 false 만 끈다)
 
   const agents = [];
+  // 16회차 T-2: 같은 표시 이름의 수집 서버가 둘 이상이면 링크 id 를 수집 서버 id 로 가른다(표본 · 이벤트가 섞이지 않게) · 그 사실을 problems 로 밝힌다
+  const nameN = new Map();
+  for (const [n0, k] of collectorNameCount(collectors)) nameN.set(n0, k);
+  const dupSaid = new Set();
   for (const c of collectors) {
     const name = t(c.name) || t(c.id);
     if (!name) continue;
     agents.push(name);
+    if (nameN.get(name) > 1 && !dupSaid.has(name)) { dupSaid.add(name); problems.push({ kind: 'central->edge', from: 'central', to: name, reason: `같은 표시 이름의 수집 서버가 ${nameN.get(name)}개입니다 — 점검은 수집 서버 id 로 가르지만 화면에서 구분하기 어렵습니다(이름을 서로 다르게 하세요).` }); }
     const enabled = c.enabled !== false;
     const tg = parseTarget(c.url);
     if (tg.bad) {
@@ -148,10 +170,10 @@ export function buildLinks({ collectors = [], vcenters = [], pairs = [], setting
     }
     if (on('central->edge')) {
       links.push({
-        id: linkIdOf('central->edge', 'central', name),
+        id: centralEdgeLinkId(c, nameN),
         kind: 'central->edge', by: 'central', from: 'central', to: name,
         host: tg.host, port: tg.port, scheme: tg.scheme, origin: tg.origin,
-        path: '/api/collector/export', auth: 'collector-token',
+        path: '/api/collector/export', auth: 'collector-token', collectorId: t(c.id),   // 16회차 T-2: 토큰은 이 id 의 항목에서(이름 아님)
         enabled, agent: name, note: t(c.note) || '',
       });
     }

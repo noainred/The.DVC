@@ -3,11 +3,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
+import { fileMissing } from '../util/fileMissing.js';   // 134회차: '정말 없는가'(ENOENT 만 — existsSync 는 stat 실패도 false)
 import { authenticateAD, loadAdConfig, adPolicyState } from './ad.js';
 import { capStr } from '../util/capStr.js';
 import * as totp from './totp.js';
 import { checkOtpAllowed, recordOtpFailure, recordOtpSuccess } from '../security/loginRateLimit.js';
-import { userHasPermission } from './permissions.js';
+import { userHasPermission, setUserTools, userToolOverrides } from './permissions.js';
 import { VALID_ROLES, SUPER_ADMIN, isAdminTier, authzRole } from './roles.js';
 import { effectiveLoginPolicy, userLoginPolicy, singleSessionRequired, loadSessionSecurity, sessionPolicySettings } from '../security/securitySettings.js';
 import { isActiveSession } from './sessions.js';
@@ -66,13 +67,19 @@ export function verifyPassword(password, stored) {
 function resolveAuthSecret() {
   if (config.auth.secret) return config.auth.secret;                  // env 우선(명시 운영)
   const file = path.join(config.configDir, 'auth-secret');
-  try {
-    if (fs.existsSync(file)) {
-      const s = fs.readFileSync(file, 'utf8').trim();
-      if (s.length >= 32) return s;                                   // 기존 영속 시크릿 재사용
-    }
-  } catch { /* 읽기 실패 → 아래에서 재생성 시도 */ }
   const gen = crypto.randomBytes(32).toString('hex');
+  try {
+    const s = fs.readFileSync(file, 'utf8').trim();
+    if (s.length >= 32) return s;                                     // 기존 영속 시크릿 재사용
+  } catch (e) {
+    // 134회차: 파일이 **있는데 못 읽었으면**(EACCES · EIO · ESTALE — ENOENT 가 아닌 실패) 새 시크릿으로 덮지 않는다. 예전에는 `fs.existsSync`(stat 실패 = false) ·
+    //   읽기 실패 둘 다 '재생성' 으로 가서, 일시 오류 한 번에 영속 시크릿을 새 값으로 **덮어썼다**(오류가 풀려도 예전 토큰 전부 무효 · 되돌릴 수 없음).
+    //   이 프로세스만 임의 시크릿으로 돈다(전원 재로그인 — 닫는 쪽). 원본은 그대로라 권한을 고치고 재시작하면 예전 세션이 살아난다.
+    if (e?.code !== 'ENOENT') {
+      if (config.auth.enabled) console.warn(`[auth] ⚠ 시크릿 파일(${file})을 읽지 못했습니다(${String(e?.code || '읽기 오류')}) — 원본을 덮지 않고 이 프로세스만 임의 시크릿으로 동작합니다(전원 재로그인). 파일 · 설정 폴더 권한을 고치고 재시작하세요.`);
+      return gen;
+    }
+  }
   try {
     atomicWriteFileSync(file, gen, { mode: 0o600 });                  // 재시작에도 세션 유지되도록 영속
     if (config.auth.enabled) console.warn(`[auth] AUTH_SECRET 미설정 — ${file} 에 시크릿을 생성·영속했습니다(재시작 시 세션 유지). 멀티노드/명시 운영이면 AUTH_SECRET env 를 설정하세요.`);
@@ -175,18 +182,45 @@ function ensureDemoUser(list) {
   return false;
 }
 
+/*
+ * 전체 점검 19회차 A-4(재현 — EISDIR): **읽기 오류**(EACCES · EISDIR · EIO — root 로 도구를 돌려 users.json 이 root 0600 이 된 경우가 대표)를
+ *   파싱 손상과 같은 catch 로 받아 원본을 .corrupt 로 옮기고 기본 admin · 데모 계정을 새로 만들었다 — 다음 재시작에서 **전 계정이 사라진 채** 열리고
+ *   미인증 /auth/config 가 초기 비밀번호 파일을 안내했다. 이제 읽기 오류는 원본을 그대로 두고 계정을 만들지 않으며 **아무도 로그인하지 못한다**
+ *   (fail-closed — 관리자가 권한을 고치고 재시작하면 그대로 읽는다). 이 상태에서는 사용자 파일을 쓰지 않는다(persistUsers 거절).
+ */
+let _usersReadError = null;
+/** users.json 을 읽지 못해(ENOENT 아닌 읽기 오류) 로그인을 막고 있으면 { at, code }, 아니면 null. */
+export function usersReadError() { return _usersReadError; }
+
 export function loadUsers() {
   if (users) return users;
+  _usersReadError = null;
   const file = path.join(CONFIG_DIR, 'users.json');
-  if (fs.existsSync(file)) {
+  // 134회차(재현): 파일 유무를 `fs.existsSync` 로 갈랐다 — stat 이 실패하는 **폴더 수준 읽기 오류**(설정 폴더 탐색 권한 · EIO · ESTALE · ELOOP)가 '파일 없음' 으로 읽혀
+  //   아래 시드로 떨어졌다: 기본 admin(DEFAULT_ADMIN_PASSWORD 가 있으면 그 비밀번호)이 생기고 실계정은 전부 사라진 채 열리며, 미인증 /auth/config 가 초기 구축 중이라 했고,
+  //   오류가 풀린 뒤의 첫 저장이 실사용자 전부를 시드 한 건으로 덮었다(19회차 A-4 가 막은 사고 그대로 — 가드가 그 갈래 앞에 있었다). 이제 곧바로 읽어 ENOENT 만 없음이다.
+  let text = null;
+  try { text = fs.readFileSync(file, 'utf8'); }
+  catch (err) {
+    if (err?.code !== 'ENOENT') {
+      _usersReadError = { at: Date.now(), code: String(err?.code || 'read-error').slice(0, 32) };
+      console.error(`[auth] users.json 을 읽지 못했습니다(${_usersReadError.code}) — 원본을 그대로 두고 계정을 만들지 않습니다(로그인 불가). 파일 소유자 · 권한(포탈 서비스 계정 · 0600)을 확인하고 포탈을 재시작하세요.`);
+      users = [];
+      return users;
+    }
+  }
+  if (text != null) {
     try {
-      const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const parsed = JSON.parse(text);
       if (Array.isArray(parsed?.users) && parsed.users.length) {
         users = parsed.users;
         const changed = [ensureDemoUser(users), ensureSuperUser(users)].some(Boolean);
         if (changed) { try { persistUsers(); } catch { /* 다음 저장 때 함께 기록 */ } }
         return users;
       }
+      // 19회차 A-4: 형태가 다른 파일(users 가 배열 아님 · 빈 목록 · null)도 시드 전에 보존한다 — 예전에는 보존 없이 시드가 덮었다.
+      preserveCorrupt(file, 'users 가 비었거나 배열이 아닙니다(형식 불일치)');
+      console.error('[auth] Failed to parse users.json: 형식 불일치(users 가 비었거나 배열이 아님) — 원본을 보존하고 기본 계정을 만듭니다');
     } catch (err) {
       // 손상본을 조용히 무시하고 아래에서 기본 admin을 시드하면, 다음 persistUsers가
       // 실사용자 전부를 시드 1건으로 덮어써 계정이 영구 유실된다 → 손상본을 .corrupt로 보존.
@@ -230,12 +264,13 @@ export function loadUsers() {
 export function reloadUsersFromDisk() {
   // 파일이 아직 없으면(첫 설치 — 시드한 관리자가 메모리에만 있다) 비우지 않는다: 비우면 다시 시드하면서
   // 임의 비밀번호를 새로 만들어 initial-admin-password.txt 를 다른 값으로 덮어쓴다(v2.723 자체 검증에서 발견).
-  if (fs.existsSync(path.join(CONFIG_DIR, 'users.json'))) users = null;
+  if (!fileMissing(path.join(CONFIG_DIR, 'users.json'))) users = null;   // 134회차: 확인하지 못한 것(stat 실패)은 없음이 아니다 — 다시 읽어 읽기 오류로 가른다(메모리의 옛 목록으로 덮지 않게)
   return loadUsers();
 }
 
 function persistUsers() {
   const file = path.join(CONFIG_DIR, 'users.json');
+  if (_usersReadError) throw new Error('users.json 을 읽지 못한 상태라 저장하지 않습니다(원본 보호) — 파일 권한을 고치고 재시작하세요.');   // 19회차 A-4
   // 원자적 쓰기 — 자격증명 파일이 부분기록으로 손상돼 전 사용자가 유실되는 사고를 방지.
   try {
     atomicWriteFileSync(file, JSON.stringify({ users: loadUsers() }, null, 2), { mode: 0o600 });
@@ -337,6 +372,7 @@ export function isOtpOnlyUser(username, role) {
 export function setupState() {
   try {
     const list = loadUsers();
+    if (_usersReadError) return { setupPending: false, initialPasswordFile: null };   // 19회차 A-4: 읽기 오류는 초기 구축이 아니다(초기 비밀번호 파일 안내 금지)
     const setupPending = !list.some((u) => isAdminTier(u.role) && u.totpEnabled);
     if (!setupPending) return { setupPending: false, initialPasswordFile: null };
     const file = path.join(CONFIG_DIR, 'initial-admin-password.txt');
@@ -535,6 +571,8 @@ function superAdminGuardDenied(u, { nextRole, actor = null, actorUser = null, tr
 }
 
 export function createUser({ username, name, role = 'viewer', password, scope } = {}, { actor = null, actorUser = null, trusted = false } = {}) {
+  loadUsers();
+  if (_usersReadError) return { ok: false, reason: 'users.json 을 읽지 못한 상태라 계정을 만들지 않습니다(원본 보호) — 파일 권한을 고치고 재시작하세요.' };   // 20회차 F9
   username = String(username || '').trim();
   if (!/^[A-Za-z0-9._@-]{2,64}$/.test(username)) return { ok: false, reason: '사용자 ID 형식이 올바르지 않습니다.' };
   if (!VALID_ROLES.includes(role)) return { ok: false, reason: '역할이 올바르지 않습니다.' };
@@ -671,7 +709,16 @@ export function deleteUser(username, { actor = null, actorUser = null, trusted =
   queueUserRevocation(username, 'account-deleted');
   persistUsers();
   try { forgetUserActivity(username); } catch { /* 정리 실패는 삭제 결과와 무관 */ }
-  return { ok: true };
+  // 91회차(88회차 결정 ⑤ — 권장안): 그 계정의 사용자별 도구 재정의(permissions.json users[이름])도 지운다 — 남기면 같은 이름으로 다시 만든 계정 ·
+  //   같은 이름의 AD 세션이 지운 계정의 제한(allow 목록 · deny)을 물려받았다. 정리 실패(권한 파일 읽기 오류 등)는 삭제 결과와 무관 — 경고만.
+  let toolOverrideCleared = false;
+  try {
+    if (Object.hasOwn(userToolOverrides(), username)) {
+      const r = setUserTools(username, { mode: 'off', by: String(actor || '').slice(0, 64) });
+      if (r?.ok) toolOverrideCleared = true; else console.warn(`[auth] ${username} 삭제 — 사용자별 도구 재정의를 지우지 못했습니다(${r?.reason || r?.code || '알 수 없음'}) · 설정 › 권한에서 지우세요.`);
+    }
+  } catch (e) { console.warn(`[auth] ${username} 삭제 — 사용자별 도구 재정의 정리 실패: ${e?.message || e}`); }
+  return { ok: true, ...(toolOverrideCleared ? { toolOverrideCleared: true } : {}) };
 }
 
 /**
@@ -684,6 +731,8 @@ export function deleteUser(username, { actor = null, actorUser = null, trusted =
  */
 export function applyManagedUsers(managed = []) {
   const list = loadUsers();
+  // 20회차 반증 F9(재현): 읽기 오류 중 중앙 배포 계정을 메모리에 더하면(저장은 거절) 엣지에서 '아무도 로그인 못 함' 이 깨졌다 — 바꾸기 전에 멈춘다.
+  if (_usersReadError) throw new Error('users.json 을 읽지 못한 상태라 중앙 배포 사용자를 적용하지 않습니다(원본 보호) — 파일 권한을 고치고 재시작하세요.');
   const want = new Map((managed || []).filter((u) => u && u.username).map((u) => [String(u.username).trim(), u]));
   const result = { created: 0, updated: 0, removed: 0, skipped: [] };
   for (const [username, m] of want) {
@@ -964,7 +1013,9 @@ export function confirmTotpEnroll(username, code, { actor = null, actorUser = nu
   if (isAdminTier(u.role || '')) {
     try { fs.rmSync(path.join(CONFIG_DIR, 'initial-admin-password.txt'), { force: true }); } catch { /* 없으면 무시 */ }
   }
-  return { ok: true };
+  // 88회차 F5: 비밀번호를 남겼는지 알린다 — OTP 전용 정책이 아니면(레거시 viewer · 혼용 · 비밀번호 전용) 비밀번호 로그인이 계속 된다.
+  //   관리자 화면이 늘 'OTP 로만 로그인합니다' 라고 말해, 유출된 비밀번호를 OTP 등록으로 막았다고 오인하게 했다(재현: viewer · 기본 정책).
+  return { ok: true, passwordKept: !!u.passwordHash };
 }
 
 /**
@@ -1082,6 +1133,9 @@ export function _resetAdShadowForTest() { _adShadow.clear(); }
 export function localNameTaken(username) {
   const n = String(username ?? '').trim().toLowerCase();
   if (!n) return false;
+  // 20회차 반증 F3(재현): users.json 을 읽지 못한 동안(19회차 A-4 — 목록이 비어 있다)은 **어떤 이름도 AD 로 받지 않는다** — 그러지 않으면
+  //   로컬 'noainred'(설정 소유자) 와 같은 이름의 AD 계정이 소유자 등급으로 로그인했다(v2.681 방패가 빈 목록에서 사라짐). 발급 · 검사 둘 다 이 함수.
+  if (_usersReadError) return true;
   try { return loadUsers().some((u) => String(u?.username ?? '').toLowerCase() === n); } catch { return false; }
 }
 

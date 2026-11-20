@@ -20,7 +20,7 @@
  *   · vSGA GPU  할당형이 아니라 행으로만 보이고 합계(용량·할당·예비)에 넣지 않는다.
  */
 import { numOrNull } from '../util/numOrNull.js';
-import { vgpuProfileGB, vmGpuDevices, gpuModeOf, gpuDevicesOnHost, isGpuVmOnHost } from './vgpuProfile.js';
+import { vgpuProfileGB, vgpuProfileIsMig, vmGpuDevices, gpuModeOf, gpuDevicesOnHost, isGpuVmOnHost } from './vgpuProfile.js';
 import { inferGpuMemGB } from './gpuModelMem.js';
 
 const ON = 'POWERED_ON';
@@ -195,7 +195,11 @@ export function buildHostAlloc(h, vmsIn) {
       const profiles = [...new Set(g.vms.map((x) => x.profile))];
       const per = profiles.length === 1 ? vgpuProfileGB(profiles[0]) : null;
       const usedDev = g.vms.reduce((s, x) => s + (x.onGpu || 1), 0);   // v2.939: 슬롯은 VM 수가 아니라 장치 수
+      // 결정(76~105 남긴 것 · 2026-11-20) A7: MIG 기반 프로파일은 'GPU 메모리 ÷ 프로파일 GB' 가 과대일 수 있다(연산 슬라이스 · MIG 구성) — 근거 표가 없어
+      //   전체 · 남은 슬롯을 지어내지 않고 null + mig 표지(화면 '슬롯 계산 안 함(MIG)'). 사용 장치 수 · 할당 GB 는 사실이라 그대로.
+      const mig = profiles.length === 1 && vgpuProfileIsMig(profiles[0]);
       g.slots = profiles.length === 0 ? { total: null, used: 0, free: null, profile: null }
+        : mig ? { total: null, used: usedDev, free: null, profile: profiles[0], mig: true }
         : per && g.capGB != null ? { total: Math.floor(g.capGB / per), used: usedDev, free: Math.max(0, Math.floor(g.capGB / per) - usedDev), profile: profiles[0] }
           : { total: null, used: usedDev, free: null, profile: profiles.length === 1 ? profiles[0] : null, mixed: profiles.length > 1 };
     }
@@ -270,6 +274,15 @@ export function buildGpuAllocTree(snap, { allowed = null, vcenterId = null, vcen
   const vcs = new Map();
   let truncated = 0;
   let n = 0;
+  // 41회차 F4(재현): 끊긴 호스트는 GPU 목록이 빈 배열('없음')로 와 계층 · 합계 · 일 이력에서 **조용히** 빠졌다(용량과 할당이 함께 줄어 할당률은 그럴듯하게 남음).
+  //   GPU VM 이 그 호스트에 있다고 알려진 끊긴 호스트는 'GPU 를 못 읽은 호스트' 로 세어(hostsDown) 법인 합계가 부분임을 밝히고 일 이력에 쓰지 않는다.
+  const downByVc = new Map();
+  for (const h of snap?.hosts || []) {
+    if (!h || !inScope(h.vcenterId) || !hostDown(h) || (Array.isArray(h.gpus) && h.gpus.length)) continue;
+    if (!(gpuVmsByHost.get(`${h.vcenterId}\t${h.name}`) || []).length) continue;
+    const id = str(h.vcenterId);
+    downByVc.set(id, (downByVc.get(id) || 0) + 1);
+  }
   for (const h of snap?.hosts || []) {
     if (!h || !inScope(h.vcenterId) || !Array.isArray(h.gpus) || !h.gpus.length) continue;
     if (n >= ALLOC_TREE_HOSTS_MAX) { truncated += 1; continue; }
@@ -306,9 +319,13 @@ export function buildGpuAllocTree(snap, { allowed = null, vcenterId = null, vcen
       return { name: dc.name, totals: finishTotals(dt), clusters };
     }).sort((a, b) => (a.name === NO_DC) - (b.name === NO_DC) || a.name.localeCompare(b.name));
     addTotals(all, vt);
-    return { id: vc.id, name: vc.name, city: vc.city, country: vc.country, region: vc.region, totals: finishTotals(vt), datacenters };
+    const down = downByVc.get(vc.id) || 0;
+    // 43회차: 끊긴 GPU 호스트가 있으면 용량이 부분이라 예비 · 할당률을 내지 않는다(모름 — 부분 합을 비율로 보이지 않는다)
+    return { id: vc.id, name: vc.name, city: vc.city, country: vc.country, region: vc.region, totals: { ...finishTotals(vt), ...(down ? { hostsDown: down, spareGB: null, allocPct: null } : {}) }, datacenters };
   }).sort(byName);
-  return { totals: finishTotals(all), vcenters, truncated };
+  const downAll = [...downByVc.values()].reduce((a, b) => a + b, 0);
+  // 42회차 R2: GPU 호스트가 모두 끊긴 법인은 계층 노드가 없다 — 법인 목록(allocCorpRoster · 웹 corpChips)이 '실제 0대' 로 읽지 않게 법인별 수를 싣는다.
+  return { totals: { ...finishTotals(all), ...(downAll ? { hostsDown: downAll, spareGB: null, allocPct: null } : {}) }, vcenters, truncated, ...(downAll ? { hostsDownByVc: Object.fromEntries(downByVc) } : {}) };
 }
 
 /**
@@ -319,15 +336,16 @@ export function buildGpuAllocTree(snap, { allowed = null, vcenterId = null, vcen
  * @returns {''|'pending'|'unreachable'|'disabled'|'maintenance'|'truncated'} '' = 아는 값(노드가 있거나 실제 0대)
  */
 export const CORP_INV_EMPTY = Object.freeze(['pending', 'unreachable', 'disabled', 'maintenance']);
-export function corpUnknownOf(meta, hasNode, truncated = 0) {
+export function corpUnknownOf(meta, hasNode, truncated = 0, hostsDown = 0) {
   if (hasNode) return '';
   const st = str(meta?.status);
   if (!meta?.stale && CORP_INV_EMPTY.includes(st)) return st;
+  if (Number(hostsDown) > 0) return 'hostsDown';   // 42회차 R2: GPU VM 이 있는 끊긴 호스트뿐 — 0대가 아니라 모름
   return truncated > 0 ? 'truncated' : '';
 }
 /** 목차·창 칩 글자(모름 사유) — 웹 gpuAllocText.js CORP_UNKNOWN_TEXT 와 같은 글자. */
 export const CORP_UNKNOWN_TEXT = Object.freeze({
-  pending: '수집 전', unreachable: '접속 불가', disabled: '수집 꺼짐', maintenance: '점검 중', truncated: '상한으로 잘림',
+  pending: '수집 전', unreachable: '접속 불가', disabled: '수집 꺼짐', maintenance: '점검 중', truncated: '상한으로 잘림', hostsDown: 'GPU 호스트 끊김',
 });
 
 /**
@@ -346,7 +364,7 @@ export function allocCorpRoster(snap, opt = {}, tree = null) {
     const id = str(m.id);
     if (!id || out.has(id) || !inScope(id)) continue;
     const vc = byId.get(id) || null;
-    out.set(id, { id, name: str(m.name) || id, city: str(m.location?.city), country: str(m.location?.country), vc, unknown: corpUnknownOf(m, !!vc, truncated) });
+    out.set(id, { id, name: str(m.name) || id, city: str(m.location?.city), country: str(m.location?.country), vc, unknown: corpUnknownOf(m, !!vc, truncated, tree?.hostsDownByVc?.[id]) });
   }
   for (const v of byId.values()) if (!out.has(v.id) && inScope(v.id)) out.set(v.id, { id: v.id, name: v.name, city: v.city, country: v.country, vc: v, unknown: '' });
   return [...out.values()].sort((a, b) => a.id.localeCompare(b.id));
@@ -383,9 +401,13 @@ export const UNPLACED_TEXT = Object.freeze({
 });
 export const locationText = (vc) => [vc.city, vc.country].filter(Boolean).join(' · ');
 export const dcText = (name) => (name === NO_DC ? '(데이터센터 모름)' : name);
+/** 결정(76~105 남긴 것 · 2026-11-20) A7: MIG 기반 프로파일 GPU 의 슬롯 칸 — 웹 gpuAllocText.MIG_SLOTS_TEXT 와 같은 말(시험이 대조). */
+export const MIG_SLOTS_TEXT = '슬롯 계산 안 함(MIG)';
+export const MIG_NOTE_TEXT = 'MIG 기반 프로파일 — 한 장에 올릴 수 있는 수가 MIG 구성에 달려 있어 남은 슬롯을 계산하지 않음';
 /** 슬롯 글자 — CSV 를 엑셀로 열 때 '4/4' 가 날짜(4월 4일)로 바뀌지 않게 낱말을 붙인다. */
 export function slotsText(s) {
   if (!s) return '';
+  if (s.mig) return `사용 ${s.used} / 전체 ${MIG_SLOTS_TEXT}`;   // 결정 A7 — 전체를 지어내지 않는다
   if (s.total != null) return `사용 ${s.used} / 전체 ${s.total}`;
   return s.used ? `사용 ${s.used} / 전체 ?` : '';
 }
@@ -395,6 +417,7 @@ export function gpuProfText(g) {
   if (!g.placement) return '배치 정보 없음';
   if (g.mode === 'passthrough') return g.vms.length ? '패스스루 · 1장 할당' : '패스스루 · 미할당';
   if (!g.vms.length) return '비어 있음';
+  if (g.slots?.mig) return `${g.slots.profile} · ${g.slots.used}대 · ${MIG_SLOTS_TEXT}`;   // 결정 A7
   return g.slots?.profile ? `${g.slots.profile} · ${g.slots.used}/${g.slots.total ?? '?'} 슬롯` : '여러 프로파일';
 }
 /** GPU 한 장의 VM 칸 — 배치를 모르면 '—'(0 이 아니다 · v2.870 감사 A4-05) · vSGA 는 빈 칸. */
@@ -406,6 +429,7 @@ export function gpuNoteText(g) {
   if (!g.vms.length) return '비어 있음 — 모든 프로파일 가능';
   if (g.allocGB == null) return '프로파일 해석 불가 VM 포함 — 할당·예비 모름';
   if (g.slots?.mixed) return '여러 프로파일(혼합 크기 모드) — 슬롯 계산 안 함';
+  if (g.slots?.mig) return MIG_NOTE_TEXT;   // 결정 A7
   if (g.slots?.free > 0) return `같은 프로파일 ${g.slots.free}대 더 가능`;
   if (g.slots?.free === 0) return '슬롯 모두 사용';
   return '';

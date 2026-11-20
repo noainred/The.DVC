@@ -11,14 +11,21 @@
  *
  * 기준 시각은 실제 시각을 정시 경계로 떨어뜨려 고정한다(docs/rules/common.md).
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
 
-const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'a2768b-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const DIR = tmpDir('a2768b-');
 process.env.CONFIG_DIR = DIR;
 process.env.AUTH_ENABLED = 'false';
 
@@ -73,7 +80,9 @@ test('C5-03 ① 낡은 위임 vCenter 의 마지막 값으로 경보·호스트�
   assert.deepEqual(both.map((a) => a.key), ['vc:vc-pl']);
   // 점검중 표지도 stale 보다 우선 — 알림 없음(보류만)
   const mt = alerts.evaluate({ vcenters: [staleVc({ maintenance: true })], hosts: [], alarms: [], datastores: [dsPl(95)] }, CFG);
-  assert.deepEqual(mt.map((a) => a.key), ['ds:ds-pl-1'], '점검중은 기존과 같다(값은 직전 캐시 — 보류 대상이지만 신규 억제는 stale 만)');
+  // 126회차: 점검중도 직전 캐시(기한 없이 서빙)라 그 값으로 새로 내지 않는다 — v2.768 은 신규 억제를 stale 에만 걸어 점검 내내 쿨다운마다 재발송됐다
+  //   (공용 판정의 세 사유 전부 · 회귀 staleSnapshotSweep126). 해소 보류(unreadVcenters)는 그대로다.
+  assert.deepEqual(mt.map((a) => a.key), [], '점검중 vCenter 의 직전 캐시 값을 지금 발생으로 내면 안 된다');
   assert.ok(mt.unreadVcenters.has('vc-pl'));
   // 규칙(vcenterDown)이 꺼져 있으면 보고 끊김 알림도 없다 — 하지만 stale 값으로 신규 발생은 여전히 내지 않는다
   const off = alerts.evaluate({ vcenters: [staleVc()], hosts: [], alarms: [], datastores: [dsPl(92)] }, { ...CFG, rules: { ...CFG.rules, vcenterDown: { enabled: false } } });

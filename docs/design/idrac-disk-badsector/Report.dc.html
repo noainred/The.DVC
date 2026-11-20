@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>디스크 배드 섹터 이력 점검 — 설계 요약 보고</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&display=swap">
+<style>
+body{margin:0;background:#ffffff}
+a{color:#1d4ed8}a:hover{color:#1e3a8a}
+.sec{display:flex;flex-direction:column;gap:7px;min-width:0}
+.sec h2{margin:0;font-size:14px;font-weight:800;color:#141a26;display:flex;align-items:baseline;gap:7px;padding-bottom:5px;border-bottom:2px solid #141a26}
+.sec h2 span{color:#1d4ed8;font-size:13px}
+.sec h2 small{font-size:12px;font-weight:500;color:#4b5567}
+.li{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:5px}
+.li li{position:relative;padding-left:11px;font-size:12.5px;line-height:1.5;color:#232b3a}
+.li li::before{content:"";position:absolute;left:0;top:8px;width:4px;height:4px;background:#1d4ed8}
+.f{display:flex;flex-direction:column;gap:1px;min-width:0}
+.f b{font-size:12.5px;font-weight:700;color:#141a26;line-height:1.45;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.f b i{font-style:normal;font-size:11px;font-weight:700;color:#1d4ed8;border:1px solid #1d4ed8;padding:0 4px;margin-left:5px}
+.f span{font-size:12px;color:#4b5567;line-height:1.45;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+table{border-collapse:collapse;width:100%}
+td{padding:3px 6px 3px 0;border-bottom:1px solid #c9d0db;font-size:12.5px;line-height:1.45;vertical-align:top;color:#232b3a}
+td.k{width:92px;font-weight:700;color:#141a26;white-space:nowrap}
+.st{display:flex;gap:8px;align-items:flex-start;font-size:12.5px;line-height:1.45;color:#232b3a}
+.st i{flex:none;display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border:1px solid #141a26;font-style:normal;font-size:11.5px;font-weight:800;color:#141a26}
+.st b{font-weight:700;color:#141a26}
+</style>
+</helmet>
+<div style="width:1123px;height:794px;box-sizing:border-box;padding:38px 40px 32px;background:#ffffff;color:#141a26;font-family:'Inter','Noto Sans KR','Apple SD Gothic Neo',sans-serif;display:flex;flex-direction:column;gap:11px;overflow:hidden">
+
+  <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:20px;padding-bottom:9px;border-bottom:3px solid #141a26">
+    <div style="min-width:0">
+      <div style="font-size:12px;font-weight:700;color:#1d4ed8">VMware Global Monitoring Portal · 기능 설계 보고</div>
+      <h1 style="margin:2px 0 0;font-size:24px;font-weight:800;line-height:1.25">디스크 배드 섹터 이력 점검 기능 — 설계 요약</h1>
+    </div>
+    <div style="text-align:right;font-size:12px;line-height:1.55;color:#4b5567;white-space:nowrap">
+      보고일 2026-11-14 · 기준 버전 v2.914.0<br>
+      단계 <b style="color:#141a26">화면 시안 13장 완료 · 구현 전</b>
+    </div>
+  </div>
+
+  <div style="border:1px solid #141a26;background:#eef3fb;padding:9px 13px;font-size:13.5px;line-height:1.55;color:#141a26">
+    <b>요약</b> — 서버 디스크에 과거 배드 섹터가 났는지, 그 디스크를 <b>아직 쓰는지</b>, <b>어디에 쓰이는지</b>, <b>어느 것부터 바꿀지</b>를 포탈에서 찾는 기능입니다.
+    법인 엣지가 6시간마다 iDRAC 로그를 읽어 중앙에 쌓습니다. 화면 시안과 근거 문서 정리를 마쳤고, <b>실장비 확인 뒤 구현</b>합니다.
+  </div>
+
+  <section class="sec">
+    <h2><span>1</span>기능 구성 <small>화면 시안 13장 — ‘추가’ 는 처음 설계 뒤에 더한 기능</small></h2>
+    <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px 20px">
+      <div class="f"><b>서버별 디스크 이력</b><span>슬롯별 발생 시점 · 기록 ID 와 주석</span></div>
+      <div class="f"><b>아직 사용 중 판정</b><span>사용 중 · 교체됨 · 판단 불가</span></div>
+      <div class="f"><b>전 법인 분석</b><span>국가 · 법인 · 모델 · 월별 추이</span></div>
+      <div class="f"><b>법인별 보기<i>추가</i></b><span>범위를 한 법인으로 좁혀 보기</span></div>
+      <div class="f"><b>한 번에 점검</b><span>전체 · 법인별 · 도는 중 조작</span></div>
+      <div class="f"><b>지금 쓰이는 곳</b><span>디스크 → 마운트 · 데이터스토어</span></div>
+      <div class="f"><b>판단 근거<i>추가</i></b><span>확신 수준 · 근거 · 틀릴 조건</span></div>
+      <div class="f"><b>근거 문서 보기</b><span>ID 의 뜻 · Dell 권장 조치 · 출처</span></div>
+      <div class="f"><b>교체 우선순위<i>추가</i></b><span>같은 묶음에 둘 · 교체 뒤 재발</span></div>
+      <div class="f"><b>조치 추적<i>추가</i></b><span>이슈 자동 등록 · 교체되면 닫힘</span></div>
+      <div class="f"><b>디스크 상태 값<i>추가</i></b><span>재할당 · 보류 · 복구 불가 수</span></div>
+      <div class="f"><b>vSAN · ESXi 상태<i>추가</i></b><span>로그로 못 보는 디스크를 메움</span></div>
+      <div class="f"><b>설정 점검<i>추가</i></b><span>Patrol Read · 핫 스페어 · 자동 교체</span></div>
+      <div class="f"><b>모델 · 펌웨어별<i>추가</i></b><span>같은 모델 안 펌웨어 판 비교</span></div>
+      <div class="f"><b>새 기록 메일</b><span>법인별 1통 요약 · 쓰이는 곳 포함</span></div>
+      <div class="f"><b>상태별 · 좁은 화면</b><span>못 읽음은 판정하지 않음 · 400px</span></div>
+    </div>
+  </section>
+
+  <div style="display:grid;grid-template-columns:430px minmax(0,1fr) 262px;gap:22px">
+    <section class="sec">
+      <h2><span>2</span>정해진 것</h2>
+      <table>
+        <tbody>
+          <tr><td class="k">수집 주기</td><td>6시간마다, 새 로그만 이어 읽기</td></tr>
+          <tr><td class="k">점검 범위</td><td>전체 · 법인별 · 서버 1대</td></tr>
+          <tr><td class="k">실행 위치</td><td>법인 엣지가 읽고 요약만 중앙으로</td></tr>
+          <tr><td class="k">메일 알림</td><td>새 기록이 나오면 법인별 1통 요약<br>법인 담당자 + 전체 관리자 · 첫 점검분은 화면에만</td></tr>
+          <tr><td class="k">화면 공개</td><td>법인 계정에도 공개 (자기 법인만)</td></tr>
+          <tr><td class="k">기록 표기</td><td>Dell 기록 ID 그대로 + 주석<br>PDR46 · 47 · 63 · 64 · 54 · 59 · 57 · 16</td></tr>
+          <tr><td class="k">쓰이는 곳</td><td>ESXi 는 vCenter 로, 베어메탈은 OS 접속으로<br>OS 계정이 없으면 가상 디스크까지만</td></tr>
+          <tr><td class="k" style="border-bottom:none">대상 제외</td><td style="border-bottom:none">HPE iLO 서버</td></tr>
+        </tbody>
+      </table>
+    </section>
+    <section class="sec">
+      <h2><span>3</span>근거와 한계</h2>
+      <ul class="li">
+        <li><b>근거</b> 외부 문서를 검색 요약으로 확인했고 원문은 열지 못함. 실장비 대조 0건.</li>
+        <li>로그가 남은 구간만 봅니다. ‘기록 없음’ 은 ‘발생한 적 없음’ 이 아닙니다.</li>
+        <li>RAID 로 묶이지 않은 디스크(HBA · vSAN)는 로그로 볼 수 없습니다.</li>
+        <li>교체된 디스크의 모델은 로그에 없어 모델별 비율이 낮게 나옵니다.</li>
+        <li>가상 디스크와 OS 장치를 못 맞추면 ‘확정하지 못함’ 으로 둡니다.</li>
+        <li><b>추가 기능</b>의 디스크 값 · vSAN 상태 · 컨트롤러 설정은 읽는 방법이 미확인입니다.</li>
+      </ul>
+    </section>
+    <section class="sec">
+      <h2><span>4</span>다음 단계 <small>나눠 내기는 제안</small></h2>
+      <div class="st"><i>1</i><span><b>실장비 확인</b> 서버 3종에서 읽기 전용 조회</span></div>
+      <div class="st"><i>2</i><span><b>1단계</b> 로그 기반 기능 + 교체 우선순위 · 조치 추적</span></div>
+      <div class="st"><i>3</i><span><b>2단계</b> 설정 점검 · 펌웨어</span></div>
+      <div class="st"><i>4</i><span><b>3단계</b> 디스크 상태 값 · vSAN (확인 결과에 달림)</span></div>
+      <div style="margin-top:2px;padding:6px 9px;border:1px solid #141a26;font-size:12.5px;line-height:1.45"><b>일정</b> 미정 — 실장비 확인 결과로 산정. 범위는 처음 설계의 약 두 배(추정).</div>
+    </section>
+  </div>
+
+  <div style="margin-top:auto;display:flex;justify-content:space-between;align-items:flex-end;gap:20px;padding-top:7px;border-top:1px solid #141a26;font-size:12px;line-height:1.5;color:#4b5567">
+    <span>설계 문서 docs/design/idrac-disk-badsector/README.md · PR #1043(초안) · 대상 법인 28곳(vCenter 28개)</span>
+    <span>시안 화면의 수치 · 서버 이름은 예시입니다 — 1 / 1</span>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1123,"height":794}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

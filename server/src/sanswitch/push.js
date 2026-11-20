@@ -26,6 +26,7 @@
  *   `portsOmitted`, `portsScopeReason`). 화면은 이 값으로 배너를 고른다 — 구버전 엣지는 계속
  *   문제 포트만 보내므로(필드 없음) '전체를 받았다' 고 단정하면 거짓이 된다.
  */
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import zlib from 'node:zlib';
 import { promisify } from 'node:util';
 import { config, clampIntervalMs } from '../config.js';
@@ -46,11 +47,11 @@ const _regLog = createChangeLogger({ windowMs: 60 * 60_000 }); // v2.621(감사 
 //   상한이 없으면 adaptiveTimer 가 자른 값과 `sanSwitchPushStatus().intervalMs` 가 다르게 보고됐다.
 export const pushMs = () => clampIntervalMs(Number(process.env.SANSW_PUSH_MS) || 5 * 60_000, 5 * 60_000, 60_000);
 /** 중앙으로 올릴 포트 상한 — 문제 포트 우선. */
-const PUSH_PORT_LIMIT = Math.max(0, Number(process.env.SANSW_PUSH_PORT_LIMIT) || 64);
+const PUSH_PORT_LIMIT = Math.max(0, envPositive(process.env.SANSW_PUSH_PORT_LIMIT, 64));
 const gzipAsync = promisify(zlib.gzip);
 // 요청당 JSON 상한(압축 전, v2.417) — 중앙 express.json 한도(1MB, 해제 후 길이)보다 넉넉히 아래.
 // 문제 포트 64개 × ~625B ≈ 40KB/장비라 스위치 ~25대면 1MB 를 넘겨 413 으로 전량 실패했다(리뷰 확정).
-const PUSH_CHUNK_BYTES = Math.max(64 * 1024, Number(process.env.SANSW_PUSH_CHUNK_BYTES) || 700 * 1024);
+const PUSH_CHUNK_BYTES = Math.max(64 * 1024, envPositive(process.env.SANSW_PUSH_CHUNK_BYTES, 700 * 1024));
 const PUSH_GZIP = process.env.SANSW_PUSH_GZIP !== 'false';
 /**
  * 포트 전송 범위(v2.517). 기본 `full`. `problem` 이면 예전 동작(문제 포트만) — 회선이 좁은
@@ -58,7 +59,7 @@ const PUSH_GZIP = process.env.SANSW_PUSH_GZIP !== 'false';
  */
 export const portsScopeSetting = () => (String(process.env.SANSW_PUSH_PORTS || '').toLowerCase() === 'problem' ? 'problem' : 'full');
 /** 장비 1대의 전체 스냅샷 상한(압축 전). 넘으면 그 장비만 문제 포트로 떨어진다(413 방지). */
-const DEVICE_MAX_BYTES = Math.max(128 * 1024, Number(process.env.SANSW_PUSH_DEVICE_MAX_BYTES) || 900 * 1024);
+const DEVICE_MAX_BYTES = Math.max(128 * 1024, envPositive(process.env.SANSW_PUSH_DEVICE_MAX_BYTES, 900 * 1024));
 
 /** 장비 목록을 JSON 크기 기준으로 나눈다(순수). 한 장비가 상한을 넘어도 단독 청크로 보낸다. */
 export function chunkDevices(devices, maxBytes = PUSH_CHUNK_BYTES) {

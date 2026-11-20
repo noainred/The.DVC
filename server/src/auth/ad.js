@@ -19,6 +19,7 @@ import { config } from '../config.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js'; // v2.478(감사 B5/S12): 원자적 쓰기 + 손상 시 preserveCorrupt — 크래시 1회로 설정이 소실되고 다음 저장이 빈 값으로 덮어쓰는 사고 방지
 import { notifySessionRevoked } from './sessionRevocation.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js'; // 88회차 F3: 읽기 오류 ≠ 손상
 
 const FILE = path.join(config.configDir, 'auth.json');
 
@@ -69,9 +70,31 @@ function normTimeoutMs(v) {
   return Math.min(60_000, Math.max(1000, Math.round(n)));
 }
 
+/*
+ * 88회차 F3(재현 — EIO 한 번): 예전 load 는 읽기 오류(EACCES · EIO · EISDIR)도 손상과 같은 catch 로 받아 **원본을 .corrupt 로 옮기고** env 기본값으로 돌았다 —
+ *   화면에서 저장한 AD 설정(사용 · 주소 · 그룹 매핑)이 영구히 사라지고 정책 카운터(policyEpoch — A→B→A 로 되돌린 매핑의 옛 AD 토큰 부활을 막는 값)가 0 으로
+ *   돌아갔다(같은 설정을 다시 저장하면 카운터가 옛 값과 겹친다). 이제(결정 78 ① 과 같은 규칙): 읽기 오류는 원본을 그대로 두고 · 이 프로세스가 마지막으로 읽은
+ *   값을 쓰고(없으면 env 기본값 — AD 는 보통 꺼짐이라 AD 로그인 거부 쪽) · 30초마다 다시 읽고 · 그동안 저장은 거절한다. 손상은 예전 그대로(보존 + env 기본값).
+ */
+const _reader = makeJsonFileReader(() => FILE, { parse: (t) => JSON.parse(t), tag: 'ad-config' });
+let _lastGoodSaved = null;
+let _readErr = null;
+/** auth.json 을 읽지 못해(ENOENT 아닌 읽기 오류) 저장을 거절하는 중이면 { at, code }, 아니면 null. */
+export function adConfigReadError() { return _readErr; }
+export function _resetAdConfigReadForTest() { _reader.reset(); _lastGoodSaved = null; _readErr = null; }
+function readSavedAd() {
+  const r = _reader.read();
+  if (r.kind === 'ok') { const saved = r.value?.ad || {}; _lastGoodSaved = saved; _readErr = null; return saved; }
+  if (r.kind === 'read-error') {
+    _readErr = { at: _readErr?.at || Date.now(), code: String(r.error?.code || 'read-error').slice(0, 32) };
+    return _lastGoodSaved || {};
+  }
+  _lastGoodSaved = null; _readErr = null;   // missing · corrupt(손상본은 readJsonFile 이 보존 — 예전과 같다)
+  return {};
+}
+
 export function loadAdConfig() {
-  let saved = {};
-  try { if (fs.existsSync(FILE)) saved = JSON.parse(fs.readFileSync(FILE, 'utf8'))?.ad || {}; } catch (e) { preserveCorrupt(FILE, e.message); saved = {}; }
+  const saved = readSavedAd();
   const merged = { ...ENV_DEFAULTS, ...saved };
   // 이미 저장된 '' · 문자열 · 범위 밖 값도 여기서 복구한다(저장 경로만 고치면 옛 파일이 계속 로그인을 막는다).
   merged.timeoutMs = normTimeoutMs(merged.timeoutMs) ?? ENV_DEFAULTS.timeoutMs;
@@ -191,6 +214,8 @@ export function adSaveIssue(cur, next, partial = {}) {
 export function saveAdConfig(partial) {
   partial = partial && typeof partial === 'object' ? partial : {};
   const cur = loadAdConfig();
+  // 88회차 F3: 읽기 오류 동안은 쓰지 않는다 — 원자 쓰기(rename)가 읽지 못한 원본(그리고 정책 카운터)을 env 기본값 기반 값으로 덮는다.
+  if (_readErr) throw Object.assign(new Error(`AD 설정 파일(auth.json)을 읽지 못하는 상태(${_readErr.code})라 저장하지 않았습니다 — 원본을 덮지 않습니다. 파일 소유자 · 권한(포탈 서비스 계정 · 0600)을 고친 뒤 다시 저장하세요.`), { status: 503, code: 'ad-config-unreadable' });
   const allowed = ['enabled', 'url', 'domain', 'baseDN', 'userFilter', 'adminGroup', 'operatorGroup', 'viewerGroup', 'defaultRole', 'tlsRejectUnauthorized', 'timeoutMs', 'groupMatch', 'startTls', 'caCert', 'tlsServerName', 'maxSessionHours'];
   const next = { ...cur };
   for (const k of allowed) if (partial[k] !== undefined) next[k] = partial[k];

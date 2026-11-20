@@ -70,7 +70,9 @@ test('같은 ts 재삽입은 INSERT OR IGNORE + changes 검사로 이중 계수�
   const s = bare('bmusage/db.js') + bare('bmusage/monthStore.js');
   assert.match(s, /INSERT OR IGNORE INTO usage_history/);
   assert.ok(!/INSERT OR REPLACE INTO usage_history/.test(s), 'REPLACE 면 롤업이 두 번 누적된다');
-  assert.match(s, /const isNew = !!Number\(out\?\.changes\);\s*if \(isNew\) \{ res\.inserted \+= 1; res\.insertedRows\.push\(r\); \} else res\.duplicates \+= 1;/, 'changes 0 이면 롤업을 건드리지 않는다(v2.922: 보정 대기도 새 행만 — pend inserted)');
+  // 40회차 F1: 새 행은 트랜잭션 안 지역 배열(newRows)에 모았다가 COMMIT 뒤에만 res.insertedRows 로 옮긴다(롤백된 행이 롤업에 들어가지 않게).
+  assert.match(s, /const isNew = !!Number\(out\?\.changes\);\s*if \(isNew\) newRows\.push\(r\); else dup \+= 1;/, 'changes 0 이면 롤업을 건드리지 않는다(v2.922: 보정 대기도 새 행만 — pend inserted)');
+  assert.match(s, /res\.inserted \+= newRows\.length; for \(const r of newRows\) res\.insertedRows\.push\(r\);/, '커밋된 것만 롤업 대상(40회차 F1)');
 });
 test('최신값은 ts 가 더 클 때만 갱신한다 — 엣지 push 는 순서대로 오지 않는다', () => {
   assert.match(bare('bmusage/db.js'), /WHERE excluded\.ts > usage_latest\.ts/);
@@ -118,23 +120,32 @@ test('대상에서 사라진 서버의 인메모리 항목을 버린다 (누수 
 });
 
 // ── B6 ───────────────────────────────────────────────────────────────────────
-test('키 충돌을 감지해 개수·목록으로 밝힌다 (대상에서 빼지는 않는다)', async () => {
-  const { resolveTargets } = await import('../src/bmusage/targets.js');
+test('키 충돌을 감지해 개수·목록으로 밝히고 — 다음 점검 ①: 같은 키의 모든 대상을 수집에서 뺀다(key-conflict · 섞인 값을 만들지 않는다)', async () => {
+  const { resolveTargets, NO_PATH_REASON } = await import('../src/bmusage/targets.js');
   const bm = [
     { serverId: 's1', fleetId: 'DUP1', name: 'bm-a', serviceTag: '', vcenterId: 'vc1' },
     { serverId: 's2', fleetId: 'x2', name: 'bm-b', serviceTag: 'DUP1', vcenterId: 'vc1' },
+    { serverId: 's3', fleetId: 'x3', name: 'bm-c', serviceTag: 'UNIQ3', vcenterId: 'vc1' },
   ];
   const reg = [
     { id: 's1', host: 'https://10.0.0.1', username: 'u', password: 'p' },
     { id: 's2', host: 'https://10.0.0.2', username: 'u', password: 'p', serviceTag: 'DUP1' },
+    { id: 's3', host: 'https://10.0.0.3', username: 'u', password: 'p', serviceTag: 'UNIQ3' },
   ];
   const r = resolveTargets({ bareMetal: bm, registry: reg, bmServers: [],
     settings: { corps: { vc1: true }, osSsh: true, idracTelemetry: true }, isEdge: false, agentName: 'C' });
-  assert.equal(r.targets.length, 2, '충돌해도 대상에서 빼지 않는다(어느 쪽을 버릴지 알 수 없다)');
-  assert.equal(r.counts.keyConflicts, 1);
-  assert.equal(r.keyConflicts[0].key, 'DUP1');
-  assert.deepEqual(r.keyConflicts[0].names.sort(), ['bm-a', 'bm-b']);
-  assert.equal(r.keyConflicts[0].vcenterId, 'vc1', 'scope 로 거를 수 있어야 한다(없으면 범위 계정에 전부 숨는다)');
+  assert.deepEqual(r.targets.map((x) => x.key), ['UNIQ3'], '같은 키 두 대는 둘 다 수집하지 않는다(어느 하나를 고르지 않는다) — 겹치지 않는 서버는 그대로');
+  assert.equal(r.counts.targets, 1);
+  assert.equal(r.counts.keyConflicts, 1, '겹친 키 수');
+  assert.equal(r.keyConflicts.length, 2, '서버마다 한 줄');
+  assert.deepEqual(r.keyConflicts.map((x) => x.key), ['DUP1', 'DUP1']);
+  assert.deepEqual(r.keyConflicts.map((x) => x.names[0]).sort(), ['bm-a', 'bm-b']);
+  assert.ok(r.keyConflicts.every((x) => x.names.length === 1 && x.vcenterId === 'vc1' && x.peers === 2), '한 줄 = 그 서버의 이름 · 법인만(범위로 거를 때 다른 법인 서버 이름이 따라오지 않게)');
+  const sk = r.skipped.filter((x) => x.reason === 'key-conflict');
+  assert.deepEqual(sk.map((x) => x.name).sort(), ['bm-a', 'bm-b'], '제외 목록에 사유와 함께 남는다(조용히 사라지지 않는다)');
+  assert.equal(r.counts.byReason['key-conflict'], 2);
+  assert.ok(sk.every((x) => !('idrac' in x) && !('password' in x)), '제외 행에 자격증명이 없다');
+  assert.ok(NO_PATH_REASON['key-conflict'].includes('서비스태그'), '조치를 말한다');
 });
 
 // ── B7 ───────────────────────────────────────────────────────────────────────
@@ -150,7 +161,8 @@ test('⚠⚠ 세션 예산 < 장비 시한 — 두 번 시도해도 결과가 �
    */
   const os = await import('../src/bmusage/collectors/osSsh.js');
   const poller = bare('bmusage/poller.js');
-  const m = /DEVICE_TIMEOUT_MS = Math\.max\(20_000, Number\(process\.env\.BMUSAGE_DEVICE_TIMEOUT_MS\) \|\| (\d+)_?(\d*)\)/.exec(poller);
+  // 99회차: env 수치는 공용 해석기(envPositive — 시한이라 2^31−1 상한)로 읽는다 — 기본값은 둘째 인자.
+  const m = /DEVICE_TIMEOUT_MS = Math\.max\(20_000, envPositive\(process\.env\.BMUSAGE_DEVICE_TIMEOUT_MS, (\d+)_?(\d*), \{ max: ENV_INT_MAX \}\)\)/.exec(poller);
   assert.ok(m, '장비 시한 상수를 찾지 못했다');
   const deviceMs = Number(`${m[1]}${m[2]}`);
   assert.equal(deviceMs, 60000);

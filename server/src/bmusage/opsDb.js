@@ -1,5 +1,6 @@
 /**
- * bmusage/opsDb.js — 5단계(v2.929 예정) 보관: **집중 모니터링**(focus_session · focus_sample) · **변경 이벤트**(change_event · change_latest).
+ * bmusage/opsDb.js — 5단계(v2.929 예정) 보관: **집중 모니터링**(focus_session · focus_sample) · **변경 이벤트**(change_event · change_latest) ·
+ *   6단계 **수집 건강 주기 기록**(collect_cycle — 주기당 한 행 · 개수 · ms 만 · 30일 · 같은 청크 정리).
  *   표 정의는 db.js openDb(메인 파일 `bm-usage.db` — 기간 파일이 아니다: 행이 적고 30일 보관이라 파일 삭제 대신 청크 DELETE).
  *
  * ⚠ 설계와 다른 결정(PROFILES §13): focus_sample 의 지표는 열 30개가 아니라 **JSON 한 칸**(분 × {평균, 피크})이다 — 세션당 행이 10개 안팎이고
@@ -198,4 +199,25 @@ export async function changeLatestKeep({ agent = '', keys = [] } = {}) {
   db.exec('BEGIN');
   try { for (const k of gone) del.run(String(agent), k); db.exec('COMMIT'); } catch { try { db.exec('ROLLBACK'); } catch { /* */ } return 0; }
   return gone.length;
+}
+
+/* ── 6단계 수집 건강 — 주기 기록(주기당 한 행 · 서버 이름 없음) ─────────────────── */
+export async function cycleInsert({ agent = '', ts, ms, budgetMs, servers, ok, concMax, concCap, sshP50, sshP95 } = {}) {
+  const db = await mainDb();
+  if (!db) return { ok: false, reason: 'db-unavailable' };
+  const i = (v) => (v == null || !Number.isFinite(Number(v)) ? null : Math.round(Number(v)));
+  db.prepare('INSERT OR REPLACE INTO collect_cycle (agent,ts,ms,budget_ms,servers,ok,conc_max,conc_cap,ssh_p50,ssh_p95) VALUES (?,?,?,?,?,?,?,?,?,?)')
+    .run(s64(agent, 128), i(ts), i(ms), i(budgetMs), i(servers), i(ok), i(concMax), i(concCap), i(sshP50), i(sshP95));
+  return { ok: true };
+}
+export async function cycleRange({ agent = '', from, to, limit = 5_000 } = {}) {
+  const db = await mainDb();
+  if (!db) return null;
+  return db.prepare('SELECT ts,ms,budget_ms,servers,ok,conc_max,conc_cap,ssh_p50,ssh_p95 FROM collect_cycle WHERE agent=? AND ts>=? AND ts<=? ORDER BY ts LIMIT ?')
+    .all(String(agent), Math.round(Number(from)), Math.round(Number(to)), Math.max(1, Math.min(20_000, Math.floor(Number(limit) || 5_000))));
+}
+export async function cyclePrune({ before }) {
+  const db = await mainDb();
+  if (!db) return 0;
+  return chunkDelete(db, 'collect_cycle', 'ts', before);
 }

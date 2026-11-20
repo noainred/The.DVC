@@ -1,6 +1,6 @@
 // v2.920 — SAN 호스트 귀속 보기 문구: 확정/추정 분리 · null 은 뒤로 · 막대 폭은 전체 합 기준.
 import { describe, it, expect } from 'vitest';
-import { attribKpis, storageBars, sortRows, filterRows, rowTotalText, attribStateText } from './sanHostAttribText.js';
+import { attribKpis, storageBars, sortRows, filterRows, rowTotalText, attribStateText , flowSumParts } from './sanHostAttribText.js';
 
 const d = { counts: { ok: 3, unseen: 1, zonedOnly: 0, noHba: 2, confirmedPairs: 2, estimatedPairs: 1, unsplitPairs: 0, zonedOnlyPairs: 1 },
   storages: [{ id: 'a', name: 'PMAX', kind: 'array', registered: {}, hosts: 2, confirmedBytes: 3000, estimatedBytes: 1000 }, { id: 'b', name: 'PS', kind: 'array', hosts: 1, confirmedBytes: null, estimatedBytes: null, unmeasuredHosts: 1 }],
@@ -31,5 +31,17 @@ describe('호스트 귀속 문구', () => {
   it('상태 문구', () => {
     expect(attribStateText({ fabrics: [] })).toContain('스냅샷이 없습니다'); expect(attribStateText({ fabrics: [1], hostsWithHba: 0 })).toContain('HBA 정보');
     expect(attribStateText({ fabrics: [1], hostsWithHba: 1, perfUnavailable: true })).toContain('DB'); expect(attribStateText(d)).toBe('');
+  });
+});
+
+describe('v2.940 귀속 표 ‘실측(스위치 플로우)’', () => {
+  it('합 · 일부만 읽음 · 속도 없음 · 없음', () => {
+    expect(flowSumParts({ n: 2, measured: 2, rxBps: 1000, txBps: 2000 })).toEqual(['16 Kbps / 8 Kbps', '']);
+    expect(flowSumParts({ n: 3, measured: 2, rxBps: 1000, txBps: 2000 })).toEqual(['16 Kbps / 8 Kbps', '2/3개']);
+    expect(flowSumParts({ n: 1, measured: 0, rxBps: null, txBps: null })).toEqual(['플로우 1개 · 속도 없음', '']);
+    expect(flowSumParts({ n: 1, measured: 0, stale: 1, rxBps: null, txBps: null })).toEqual(['플로우 1개 · 속도 없음', '오래됨 1']);
+    // 두 줄(보조 문구는 둘째 줄) · 오래된 것은 따로 센다(v2.940 반증 M-1)
+    expect(flowSumParts({ n: 3, measured: 2, stale: 1, rxBps: 1000, txBps: 2000 })).toEqual(['16 Kbps / 8 Kbps', '2/3개 · 오래됨 1']);
+    expect(flowSumParts(null)).toEqual(['—', '']);
   });
 });

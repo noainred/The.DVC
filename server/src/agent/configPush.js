@@ -3,6 +3,7 @@
  * 중앙으로 보내 중앙의 통합 백업에 합쳐지게 한다. 시작 시 + 주기적 + 설정 변경 시 push.
  */
 
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
@@ -55,7 +56,7 @@ export function splitStateFiles(files) {
  *   (index.js JSON_BODY_LIMIT)보다 1MB 아래 — 엣지는 중앙 설정값을 모르므로 기본값에 맞추고, 그보다 작게 설정된 중앙이면 아래
  *   dropLargestFiles 가 최소 1개는 빼고, 그래도 413 이면 실패로 남는다(그때 중앙은 직전 사본을 그대로 들고 있다).
  */
-export const RETRY_TARGET_BYTES = Math.max(1024 * 1024, Number(process.env.AGENT_CONFIG_PUSH_TARGET_BYTES) || 15728640);   // 기본 15MB
+export const RETRY_TARGET_BYTES = Math.max(1024 * 1024, envPositive(process.env.AGENT_CONFIG_PUSH_TARGET_BYTES, 15728640));   // 기본 15MB
 
 /**
  * v2.620(EDGE2620-04): 413 재전송용 — 큰 파일부터 뺀다(순수). 뺀 목록은 [{name,size}].

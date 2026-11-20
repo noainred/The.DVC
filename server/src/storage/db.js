@@ -19,17 +19,33 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { openSqlite, isSqliteLockError, createLockRetry } from '../util/sqliteOpen.js'; // v2.613 PERSIST2613-03: open 코어는 하나
 import { numOrNull } from '../util/numOrNull.js';
+import { envPositive } from '../util/envNumber.js';   // 57회차 I3: 보존 일수 env 폴백 — 음수 · Infinity 를 통과시키지 않는다(파괴적 sink)
 import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';
 import { createYielder } from '../util/timeSlice.js';   // v2.743 DB-01: 합계 추이 조각 사이 양보(시간 기준)
 import { pushAll } from '../util/pushAll.js';
 import { normalizeResourceList, resourceKey } from './resources.js';   // v2.789 하위 항목
-import { nodeLoadRowsOf, sampleRowsOf, METRIC_BY_KEY, NODE_LOAD_GROUPS, NODE_LOAD_METRICS, NODE_LOAD_LIMIT } from './nodeLoad.js';   // v2.926 노드 부하 · v2.932 5분 표본
+import { nodeLoadRowsOf, sampleRowsOf, METRIC_BY_KEY, NODE_LOAD_GROUPS, NODE_LOAD_METRICS, NODE_LOAD_LIMIT, sanitizeNodeUnits } from './nodeLoad.js';   // v2.926 노드 부하 · v2.932 5분 표본
 
 // DB 저장 경로 설정(v2.379)을 따른다 — dbLocation 이 지정한 dbDir 아래, 없으면 configDir.
 // (vmperf/vmtrack 과 동일 규약. MIGRATABLE 에 이 파일이 있어 미적용 시 마이그레이션 후
 //  옛 경로에 계속 쓰다 원본 삭제 단계에서 이력이 소실된다 — v2.386 수정.)
 const FILE = () => path.join(config.dbDir || config.configDir, 'storage-history.db');
 const MAX_JSON_BYTES = 512 * 1024; // 엔드포인트당 원문 상한 — 512KB 초과는 절단 표기(폭주 방지)
+/**
+ * v2.952 — 노드 지표 열은 `NODE_LOAD_METRICS` 가 유일한 원천: 원시 INSERT · 일/시간 upsert 문장을 여기서 만든다(v2.932 까지는 세 문장을 손으로
+ * 적어 지표를 더할 때마다 열 목록 · 자리표 · ON CONFLICT 절을 맞춰야 했다). 열 이름은 고정 상수라 SQL 조립이 안전하다(사용자 입력 아님).
+ * ⚠ max 는 스칼라 max() 를 쓰지 않는다 — SQLite 의 max(a, NULL) 은 NULL 이라 못 읽은 표본 하나가 그 날 최대를 지운다.
+ */
+const NODE_RAW_SQL = `INSERT INTO node_load_history (device_id, ts, node_id, ${NODE_LOAD_METRICS.map((m) => m.col).join(', ')}) VALUES (?,?,?,${NODE_LOAD_METRICS.map(() => '?').join(',')})`;
+function nodeAggUpsertSql(table, bucketCol) {
+  const cols = NODE_LOAD_METRICS.flatMap((m) => [`${m.key}_sum`, `${m.key}_n`, `${m.key}_max`]);
+  const sets = NODE_LOAD_METRICS.map((m) => `${m.key}_sum = T.${m.key}_sum + excluded.${m.key}_sum, ${m.key}_n = T.${m.key}_n + excluded.${m.key}_n,
+          ${m.key}_max = CASE WHEN excluded.${m.key}_max IS NULL THEN T.${m.key}_max WHEN T.${m.key}_max IS NULL OR excluded.${m.key}_max > T.${m.key}_max THEN excluded.${m.key}_max ELSE T.${m.key}_max END`);
+  return `INSERT INTO ${table} AS T (device_id, node_id, ${bucketCol}, samples, ${cols.join(', ')})
+        VALUES (?,?,?,1,${cols.map(() => '?').join(',')})
+        ON CONFLICT(device_id, node_id, ${bucketCol}) DO UPDATE SET samples = T.samples + 1,
+          ${sets.join(',\n          ')}`;
+}
 /** v2.932 — 없는 열만 ALTER TABLE ADD COLUMN(멱등 · bmusage/db.js v2.919 와 같은 방식). 'duplicate column' 만 삼킨다(잠금은 던진다). */
 function ensureColumns(conn, table, cols) {
   let have;
@@ -87,17 +103,30 @@ export function setKeepDays({ rawKeepDays, dailyKeepDays, nodeLoadRawKeepDays, n
   _keepDays = { raw: numOrNull(rawKeepDays), daily: numOrNull(dailyKeepDays), nodeRaw: numOrNull(nodeLoadRawKeepDays),
     nodeHourly: numOrNull(nodeLoadHourlyKeepDays), clientRaw: numOrNull(nodeClientRawKeepDays), clientHourly: numOrNull(nodeClientHourlyKeepDays), clientDaily: numOrNull(nodeClientDailyKeepDays) };
 }
+/*
+ * 전체 점검 23회차 S-3(재현): 보존 기간 설정 파일이 손상되면 기본값(원시 90일 · 일 요약 5년)으로 떨어져, 관리자가 400일 · 10년으로 둔 이력을
+ *   **다음 정리가 되돌릴 수 없게 지웠다**. 설정을 못 읽은 동안은 정리를 보류한다(growthSettings 가 세운다 — 보류에는 해제 경로가 있다: 확정 · 보존본 복구).
+ *   ⚠ 27회차 D-4: growthSettings 는 이제 보류 대신 **설정 상한 보존(setKeepDays(max))** 으로 정리한다(보류는 디스크가 끝없이 찼다) — 이 표지는 지금 세우는 곳이 없고
+ *   다른 호출부를 위한 장치로만 남았다.
+ */
+let _pruneHold = null;
+let _pruneHoldWarned = null;
+/** 보존 정리 보류(사유) — null 이면 해제. */
+export function setPruneHold(reason) { _pruneHold = reason ? String(reason).slice(0, 200) : null; if (!_pruneHold) _pruneHoldWarned = null; }
+export function pruneHold() { return _pruneHold; }
+// 57회차 I3: env 폴백은 envPositive — `Number(env) || 기본값` 은 -5 를 그대로 통과시켜 보존 −5일(= 정리가 미래 시각 이전 행을 전부 지움)이 됐다.
+//   applyGrowthSettings 가 기동 때 설정값을 넣으므로 보통은 닿지 않는 경로다(그 적용이 실패했을 때의 폴백).
 function keepDays() {
   return {
-    raw: _keepDays.raw ?? (Number(process.env.STORAGE_HISTORY_KEEP_DAYS) || RAW_KEEP_DAYS_DEF),
-    daily: _keepDays.daily ?? (Number(process.env.STORAGE_DAILY_KEEP_DAYS) || DAILY_KEEP_DAYS_DEF),
+    raw: _keepDays.raw ?? envPositive(process.env.STORAGE_HISTORY_KEEP_DAYS, RAW_KEEP_DAYS_DEF),
+    daily: _keepDays.daily ?? envPositive(process.env.STORAGE_DAILY_KEEP_DAYS, DAILY_KEEP_DAYS_DEF),
     // v2.926 노드 부하 원시 — 노드 × 주기라 용량 원시보다 크다(64 노드 · 1시간 = 하루 1,536행) → 기본을 짧게(30일).
-    nodeRaw: _keepDays.nodeRaw ?? (Number(process.env.STORAGE_NODELOAD_KEEP_DAYS) || NODE_LOAD_RAW_KEEP_DAYS_DEF),
+    nodeRaw: _keepDays.nodeRaw ?? envPositive(process.env.STORAGE_NODELOAD_KEEP_DAYS, NODE_LOAD_RAW_KEEP_DAYS_DEF),
     // v2.932 — 노드 시간 요약 · 클라이언트/프로토콜 원시·시간·일(설정 → env → 기본).
-    nodeHourly: _keepDays.nodeHourly ?? (Number(process.env.STORAGE_NODELOAD_HOURLY_KEEP_DAYS) || NODE_LOAD_HOURLY_KEEP_DAYS_DEF),
-    clientRaw: _keepDays.clientRaw ?? (Number(process.env.STORAGE_NODECLIENT_KEEP_DAYS) || NODE_CLIENT_RAW_KEEP_DAYS_DEF),
-    clientHourly: _keepDays.clientHourly ?? (Number(process.env.STORAGE_NODECLIENT_HOURLY_KEEP_DAYS) || NODE_CLIENT_HOURLY_KEEP_DAYS_DEF),
-    clientDaily: _keepDays.clientDaily ?? (Number(process.env.STORAGE_NODECLIENT_DAILY_KEEP_DAYS) || NODE_CLIENT_DAILY_KEEP_DAYS_DEF),
+    nodeHourly: _keepDays.nodeHourly ?? envPositive(process.env.STORAGE_NODELOAD_HOURLY_KEEP_DAYS, NODE_LOAD_HOURLY_KEEP_DAYS_DEF),
+    clientRaw: _keepDays.clientRaw ?? envPositive(process.env.STORAGE_NODECLIENT_KEEP_DAYS, NODE_CLIENT_RAW_KEEP_DAYS_DEF),
+    clientHourly: _keepDays.clientHourly ?? envPositive(process.env.STORAGE_NODECLIENT_HOURLY_KEEP_DAYS, NODE_CLIENT_HOURLY_KEEP_DAYS_DEF),
+    clientDaily: _keepDays.clientDaily ?? envPositive(process.env.STORAGE_NODECLIENT_DAILY_KEEP_DAYS, NODE_CLIENT_DAILY_KEEP_DAYS_DEF),
   };
 }
 
@@ -262,6 +291,16 @@ async function openInner() {
     // v2.932 — 1차 표에 열 추가(멱등 · bmusage/db.js v2.919 와 같은 방식: 없는 열만 ALTER).
     ensureColumns(conn, 'node_load_history', [['ops', 'REAL'], ['lat', 'REAL'], ['busy', 'REAL'], ['iops', 'REAL']]);
     ensureColumns(conn, 'node_load_daily', ['ops', 'lat', 'busy', 'iops'].flatMap((k) => [[`${k}_sum`, 'REAL NOT NULL DEFAULT 0'], [`${k}_n`, 'INTEGER NOT NULL DEFAULT 0'], [`${k}_max`, 'REAL']]));
+    // v2.952 — 어레이 프런트엔드 단위 지표(hbps · queue) 열 + 단위 카탈로그 표(node_id ↔ 이름 · 종류 · 부모). 세 표 모두 없는 열만 더한다.
+    ensureColumns(conn, 'node_load_history', [['hbps', 'REAL'], ['queue', 'REAL']]);
+    for (const tbl of ['node_load_daily', 'node_load_hourly']) {
+      ensureColumns(conn, tbl, ['hbps', 'queue'].flatMap((k) => [[`${k}_sum`, 'REAL NOT NULL DEFAULT 0'], [`${k}_n`, 'INTEGER NOT NULL DEFAULT 0'], [`${k}_max`, 'REAL']]));
+    }
+    conn.exec(`CREATE TABLE IF NOT EXISTS node_unit (
+        device_id TEXT NOT NULL, node_id INTEGER NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL DEFAULT '', parent INTEGER,
+        first_seen INTEGER NOT NULL, last_seen INTEGER NOT NULL,
+        PRIMARY KEY (device_id, node_id)
+      );`);
     _db = {
       conn,
       upLatest: conn.prepare(`INSERT INTO api_latest (device_id, area, endpoint, ts, ok, bytes, truncated, json, error)
@@ -334,17 +373,21 @@ async function openInner() {
        *   그 하한은 NULLIF 로 **반드시 되돌려야** 한다 — 안 되돌리면 -1e308 이 값으로 저장된다.
        * ⚠ 실측(v2.574): 첫 관측이 null 일 때 예전 형태는 **0**, 새 형태는 **null** 이다.
        */
+      // 전체 점검 23회차 S-6(재현): 그날 마지막 관측의 '못 읽음'(null)이 앞선 유효값을 덮었다(used null → 증가량 no-latest-used 로 합계에서 빠짐).
+      //   사용량 · 매체 칸은 **그날 마지막 유효 관측**(새 관측이 null 이면 기존 값 유지). total 은 적재 조건(capacityPointEligible)이 양수를 보장한다.
+      //   27회차 반증 D-9: 용량(total · hdd_total · ssd_total)은 **짝이 되는 used 와 같은 관측일 때만** 바꾼다 — used 가 null 인 늦은 관측의 total 만
+      //   들어가 한 행에 다른 시점의 total 과 used 가 섞였다(09시 100T/90T → 18시 50T/null 이 50T/90T = 180%). 그날 used 가 아직 없으면 그대로 최신 total.
       upDaily: conn.prepare(`INSERT INTO capacity_daily
           (device_id, day, last_ts, total_bytes, used_bytes, hdd_total, hdd_used, ssd_total, ssd_used, max_used, samples)
         VALUES (?,?,?,?,?,?,?,?,?,?,1)
         ON CONFLICT(device_id, day) DO UPDATE SET
           last_ts     = CASE WHEN excluded.last_ts > capacity_daily.last_ts THEN excluded.last_ts     ELSE capacity_daily.last_ts     END,
-          total_bytes = CASE WHEN excluded.last_ts > capacity_daily.last_ts THEN excluded.total_bytes ELSE capacity_daily.total_bytes END,
-          used_bytes  = CASE WHEN excluded.last_ts > capacity_daily.last_ts THEN excluded.used_bytes  ELSE capacity_daily.used_bytes  END,
-          hdd_total   = CASE WHEN excluded.last_ts > capacity_daily.last_ts THEN excluded.hdd_total   ELSE capacity_daily.hdd_total   END,
-          hdd_used    = CASE WHEN excluded.last_ts > capacity_daily.last_ts THEN excluded.hdd_used    ELSE capacity_daily.hdd_used    END,
-          ssd_total   = CASE WHEN excluded.last_ts > capacity_daily.last_ts THEN excluded.ssd_total   ELSE capacity_daily.ssd_total   END,
-          ssd_used    = CASE WHEN excluded.last_ts > capacity_daily.last_ts THEN excluded.ssd_used    ELSE capacity_daily.ssd_used    END,
+          total_bytes = CASE WHEN excluded.last_ts > capacity_daily.last_ts AND (excluded.used_bytes IS NOT NULL OR capacity_daily.used_bytes IS NULL) THEN excluded.total_bytes ELSE capacity_daily.total_bytes END,
+          used_bytes  = CASE WHEN excluded.last_ts > capacity_daily.last_ts AND excluded.used_bytes IS NOT NULL THEN excluded.used_bytes  ELSE capacity_daily.used_bytes  END,
+          hdd_total   = CASE WHEN excluded.last_ts > capacity_daily.last_ts AND excluded.hdd_total IS NOT NULL AND (excluded.hdd_used IS NOT NULL OR capacity_daily.hdd_used IS NULL) THEN excluded.hdd_total   ELSE capacity_daily.hdd_total   END,
+          hdd_used    = CASE WHEN excluded.last_ts > capacity_daily.last_ts AND excluded.hdd_used IS NOT NULL THEN excluded.hdd_used    ELSE capacity_daily.hdd_used    END,
+          ssd_total   = CASE WHEN excluded.last_ts > capacity_daily.last_ts AND excluded.ssd_total IS NOT NULL AND (excluded.ssd_used IS NOT NULL OR capacity_daily.ssd_used IS NULL) THEN excluded.ssd_total   ELSE capacity_daily.ssd_total   END,
+          ssd_used    = CASE WHEN excluded.last_ts > capacity_daily.last_ts AND excluded.ssd_used IS NOT NULL THEN excluded.ssd_used    ELSE capacity_daily.ssd_used    END,
           -- v2.574 BUG-04 — COALESCE(..., 0) 은 '못 읽음' 을 '최대 사용량 0바이트' 로 바꾼다.
           -- v2.561 이 used_bytes 는 고쳤는데 여기만 남아 있었다. 근거·정답 형태는 이 함수의
           -- JSDoc 에 적었다(리터럴 안이라 여기에는 백틱을 쓸 수 없다 — v2.550.3 규약).
@@ -374,6 +417,7 @@ async function openInner() {
       prune2: conn.prepare('DELETE FROM capacity_history WHERE rowid IN (SELECT rowid FROM capacity_history WHERE ts < ? LIMIT ?)'),
       prune3: conn.prepare('DELETE FROM capacity_daily WHERE day < ?'),
       // v2.789 하위 항목 일 롤업 — capacity_daily 와 같은 upsert 규칙(더 늦은 관측만 갱신).
+      //   27회차 반증 D-9: total 도 짝이 되는 used 와 같은 관측일 때만(capacity_daily 와 같은 규칙).
       upRes: conn.prepare(`INSERT INTO resource_daily
           (device_id, rkey, day, last_ts, kind, name, pool, total_bytes, used_bytes, samples)
         VALUES (?,?,?,?,?,?,?,?,?,1)
@@ -381,8 +425,8 @@ async function openInner() {
           last_ts     = CASE WHEN excluded.last_ts > resource_daily.last_ts THEN excluded.last_ts     ELSE resource_daily.last_ts     END,
           name        = CASE WHEN excluded.last_ts > resource_daily.last_ts THEN excluded.name        ELSE resource_daily.name        END,
           pool        = CASE WHEN excluded.last_ts > resource_daily.last_ts THEN excluded.pool        ELSE resource_daily.pool        END,
-          total_bytes = CASE WHEN excluded.last_ts > resource_daily.last_ts THEN excluded.total_bytes ELSE resource_daily.total_bytes END,
-          used_bytes  = CASE WHEN excluded.last_ts > resource_daily.last_ts THEN excluded.used_bytes  ELSE resource_daily.used_bytes  END,
+          total_bytes = CASE WHEN excluded.last_ts > resource_daily.last_ts AND (excluded.used_bytes IS NOT NULL OR resource_daily.used_bytes IS NULL) THEN excluded.total_bytes ELSE resource_daily.total_bytes END,
+          used_bytes  = CASE WHEN excluded.last_ts > resource_daily.last_ts AND excluded.used_bytes IS NOT NULL THEN excluded.used_bytes  ELSE resource_daily.used_bytes  END,
           samples     = resource_daily.samples + 1`),
       // 조회는 **일 구간 조각**으로 읽는다(resourceDailyRange — 조각 사이 양보). day 인덱스를 탄다.
       selResRange: conn.prepare(`SELECT device_id, rkey, day, kind, name, pool, total_bytes, used_bytes
@@ -392,51 +436,13 @@ async function openInner() {
       prune4: conn.prepare('DELETE FROM resource_daily WHERE rowid IN (SELECT rowid FROM resource_daily WHERE day < ? LIMIT ?)'),
       // v2.926 노드 부하 — 적재(스냅샷 1개 = 트랜잭션 1개 · saveNodeLoadPoint) · 조회(nodeLoadQuery — 장비·시각 인덱스) · 정리(청크).
       insNodeSample: conn.prepare('INSERT OR IGNORE INTO node_load_sample (device_id, ts, nodes, jobs) VALUES (?,?,?,?)'),
-      insNodeRaw: conn.prepare('INSERT INTO node_load_history (device_id, ts, node_id, in_bps, out_bps, disk_in, disk_out, cpu_pct, ops, lat, busy, iops) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)'),
-      // ⚠ max 는 스칼라 max() 를 쓰지 않는다 — SQLite 의 max(a, NULL) 은 NULL 이라 못 읽은 표본 하나가 그 날 최대를 지운다.
-      // ⚠ max 는 스칼라 max() 를 쓰지 않는다 — SQLite 의 max(a, NULL) 은 NULL 이라 못 읽은 표본 하나가 그 날 최대를 지운다.
-      upNodeDaily: conn.prepare(`INSERT INTO node_load_daily AS T (device_id, node_id, day, samples, in_sum, in_n, in_max, out_sum, out_n, out_max, din_sum, din_n, din_max, dout_sum, dout_n, dout_max, cpu_sum, cpu_n, cpu_max, ops_sum, ops_n, ops_max, lat_sum, lat_n, lat_max, busy_sum, busy_n, busy_max, iops_sum, iops_n, iops_max)
-        VALUES (?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        ON CONFLICT(device_id, node_id, day) DO UPDATE SET samples = T.samples + 1,
-          in_sum = T.in_sum + excluded.in_sum, in_n = T.in_n + excluded.in_n,
-          in_max = CASE WHEN excluded.in_max IS NULL THEN T.in_max WHEN T.in_max IS NULL OR excluded.in_max > T.in_max THEN excluded.in_max ELSE T.in_max END,
-          out_sum = T.out_sum + excluded.out_sum, out_n = T.out_n + excluded.out_n,
-          out_max = CASE WHEN excluded.out_max IS NULL THEN T.out_max WHEN T.out_max IS NULL OR excluded.out_max > T.out_max THEN excluded.out_max ELSE T.out_max END,
-          din_sum = T.din_sum + excluded.din_sum, din_n = T.din_n + excluded.din_n,
-          din_max = CASE WHEN excluded.din_max IS NULL THEN T.din_max WHEN T.din_max IS NULL OR excluded.din_max > T.din_max THEN excluded.din_max ELSE T.din_max END,
-          dout_sum = T.dout_sum + excluded.dout_sum, dout_n = T.dout_n + excluded.dout_n,
-          dout_max = CASE WHEN excluded.dout_max IS NULL THEN T.dout_max WHEN T.dout_max IS NULL OR excluded.dout_max > T.dout_max THEN excluded.dout_max ELSE T.dout_max END,
-          cpu_sum = T.cpu_sum + excluded.cpu_sum, cpu_n = T.cpu_n + excluded.cpu_n,
-          cpu_max = CASE WHEN excluded.cpu_max IS NULL THEN T.cpu_max WHEN T.cpu_max IS NULL OR excluded.cpu_max > T.cpu_max THEN excluded.cpu_max ELSE T.cpu_max END,
-          ops_sum = T.ops_sum + excluded.ops_sum, ops_n = T.ops_n + excluded.ops_n,
-          ops_max = CASE WHEN excluded.ops_max IS NULL THEN T.ops_max WHEN T.ops_max IS NULL OR excluded.ops_max > T.ops_max THEN excluded.ops_max ELSE T.ops_max END,
-          lat_sum = T.lat_sum + excluded.lat_sum, lat_n = T.lat_n + excluded.lat_n,
-          lat_max = CASE WHEN excluded.lat_max IS NULL THEN T.lat_max WHEN T.lat_max IS NULL OR excluded.lat_max > T.lat_max THEN excluded.lat_max ELSE T.lat_max END,
-          busy_sum = T.busy_sum + excluded.busy_sum, busy_n = T.busy_n + excluded.busy_n,
-          busy_max = CASE WHEN excluded.busy_max IS NULL THEN T.busy_max WHEN T.busy_max IS NULL OR excluded.busy_max > T.busy_max THEN excluded.busy_max ELSE T.busy_max END,
-          iops_sum = T.iops_sum + excluded.iops_sum, iops_n = T.iops_n + excluded.iops_n,
-          iops_max = CASE WHEN excluded.iops_max IS NULL THEN T.iops_max WHEN T.iops_max IS NULL OR excluded.iops_max > T.iops_max THEN excluded.iops_max ELSE T.iops_max END`),
-      upNodeHourly: conn.prepare(`INSERT INTO node_load_hourly AS T (device_id, node_id, hour, samples, in_sum, in_n, in_max, out_sum, out_n, out_max, din_sum, din_n, din_max, dout_sum, dout_n, dout_max, cpu_sum, cpu_n, cpu_max, ops_sum, ops_n, ops_max, lat_sum, lat_n, lat_max, busy_sum, busy_n, busy_max, iops_sum, iops_n, iops_max)
-        VALUES (?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        ON CONFLICT(device_id, node_id, hour) DO UPDATE SET samples = T.samples + 1,
-          in_sum = T.in_sum + excluded.in_sum, in_n = T.in_n + excluded.in_n,
-          in_max = CASE WHEN excluded.in_max IS NULL THEN T.in_max WHEN T.in_max IS NULL OR excluded.in_max > T.in_max THEN excluded.in_max ELSE T.in_max END,
-          out_sum = T.out_sum + excluded.out_sum, out_n = T.out_n + excluded.out_n,
-          out_max = CASE WHEN excluded.out_max IS NULL THEN T.out_max WHEN T.out_max IS NULL OR excluded.out_max > T.out_max THEN excluded.out_max ELSE T.out_max END,
-          din_sum = T.din_sum + excluded.din_sum, din_n = T.din_n + excluded.din_n,
-          din_max = CASE WHEN excluded.din_max IS NULL THEN T.din_max WHEN T.din_max IS NULL OR excluded.din_max > T.din_max THEN excluded.din_max ELSE T.din_max END,
-          dout_sum = T.dout_sum + excluded.dout_sum, dout_n = T.dout_n + excluded.dout_n,
-          dout_max = CASE WHEN excluded.dout_max IS NULL THEN T.dout_max WHEN T.dout_max IS NULL OR excluded.dout_max > T.dout_max THEN excluded.dout_max ELSE T.dout_max END,
-          cpu_sum = T.cpu_sum + excluded.cpu_sum, cpu_n = T.cpu_n + excluded.cpu_n,
-          cpu_max = CASE WHEN excluded.cpu_max IS NULL THEN T.cpu_max WHEN T.cpu_max IS NULL OR excluded.cpu_max > T.cpu_max THEN excluded.cpu_max ELSE T.cpu_max END,
-          ops_sum = T.ops_sum + excluded.ops_sum, ops_n = T.ops_n + excluded.ops_n,
-          ops_max = CASE WHEN excluded.ops_max IS NULL THEN T.ops_max WHEN T.ops_max IS NULL OR excluded.ops_max > T.ops_max THEN excluded.ops_max ELSE T.ops_max END,
-          lat_sum = T.lat_sum + excluded.lat_sum, lat_n = T.lat_n + excluded.lat_n,
-          lat_max = CASE WHEN excluded.lat_max IS NULL THEN T.lat_max WHEN T.lat_max IS NULL OR excluded.lat_max > T.lat_max THEN excluded.lat_max ELSE T.lat_max END,
-          busy_sum = T.busy_sum + excluded.busy_sum, busy_n = T.busy_n + excluded.busy_n,
-          busy_max = CASE WHEN excluded.busy_max IS NULL THEN T.busy_max WHEN T.busy_max IS NULL OR excluded.busy_max > T.busy_max THEN excluded.busy_max ELSE T.busy_max END,
-          iops_sum = T.iops_sum + excluded.iops_sum, iops_n = T.iops_n + excluded.iops_n,
-          iops_max = CASE WHEN excluded.iops_max IS NULL THEN T.iops_max WHEN T.iops_max IS NULL OR excluded.iops_max > T.iops_max THEN excluded.iops_max ELSE T.iops_max END`),
+      insNodeRaw: conn.prepare(NODE_RAW_SQL),
+      upNodeDaily: conn.prepare(nodeAggUpsertSql('node_load_daily', 'day')),
+      upNodeHourly: conn.prepare(nodeAggUpsertSql('node_load_hourly', 'hour')),
+      // v2.952 — 단위 카탈로그(어레이 FE 단위 이름 · 종류). 이름은 마지막 값 · first_seen 은 유지.
+      upNodeUnit: conn.prepare(`INSERT INTO node_unit (device_id, node_id, name, kind, parent, first_seen, last_seen) VALUES (?,?,?,?,?,?,?)
+        ON CONFLICT(device_id, node_id) DO UPDATE SET name = excluded.name, kind = excluded.kind, parent = excluded.parent, last_seen = excluded.last_seen`),
+      selNodeUnits: conn.prepare('SELECT node_id AS id, name, kind, parent, first_seen AS firstSeen, last_seen AS lastSeen FROM node_unit WHERE device_id = ? ORDER BY kind, name LIMIT 256'),
       // 클라이언트 · 프로토콜(v2.932) — 같은 upsert 규칙(평균 = sum / n · 이름은 마지막 값).
       insClientRaw: conn.prepare('INSERT INTO node_client_sample (device_id, ts, node_id, client, proto, name, ops, in_bps, out_bps, lat) VALUES (?,?,?,?,?,?,?,?,?,?)'),
       upClientHourly: conn.prepare(`INSERT INTO node_client_hourly AS T (device_id, node_id, client, proto, hour, name, samples, ops_sum, ops_n, in_sum, in_n, out_sum, out_n, lat_sum, lat_n)
@@ -556,6 +562,10 @@ const _pruneFlight = createPruneFlight({ covers: (run, next) => ['cut', 'dayCut'
  * @returns {Promise<{apiHistory:number, capacityHistory:number, capacityDaily:number, done:boolean}>}
  */
 function runPrune(db) {
+  if (_pruneHold) {
+    if (_pruneHoldWarned !== _pruneHold) { _pruneHoldWarned = _pruneHold; console.warn(`[storage-db] 보존 정리를 보류합니다 — ${_pruneHold}`); }
+    return Promise.resolve(false);
+  }
   const { raw, daily, nodeRaw, nodeHourly, clientRaw, clientHourly, clientDaily } = keepDays();
   const now = Date.now();
   const key = { cut: now - raw * DAY_MS, dayCut: dayIndex(now) - daily, nodeCut: now - nodeRaw * DAY_MS,
@@ -1053,6 +1063,21 @@ export async function purgeZeroCapacityRows({ once = null, reason = '0 바이트
   return { ran: true, devices, rows };
 }
 
+/**
+ * 1회 정리 마커(`migration:<id>`)의 값 — 없거나 못 읽으면 null. `resetCapacityHistory` · `purgeZeroCapacityRows` 의 `once` 마커는
+ *   **처음 한 번만** 쓰인다(이미 있으면 그대로 돌아간다) — 그래서 `at` 은 그 정리가 처음 돈 기동 시각이다.
+ */
+export async function migrationMarker(id) {
+  const db = await open();
+  if (!db) return null;
+  try {
+    const row = db.metaGet.get(`migration:${String(id || '')}`);
+    if (!row || row.v == null) return null;
+    const v = JSON.parse(row.v);
+    return v && typeof v === 'object' && !Array.isArray(v) ? v : null;
+  } catch { return null; }
+}
+
 export async function capacityResets() {
   const db = await open();
   if (!db) return {};
@@ -1102,7 +1127,7 @@ function writeNodeLoad(db, deviceId, ts, nodes, jobs, clients, protos) {
     const ins = db.insNodeSample.run(deviceId, ts, nodes.length, jobs ? JSON.stringify(jobs) : null);
     if (!Number(ins?.changes)) { db.conn.exec('ROLLBACK'); return { saved: false, duplicate: true, reason: 'duplicate' }; }
     for (const n of nodes) {
-      db.insNodeRaw.run(deviceId, ts, n.id, n.in, n.out, n.din, n.dout, n.cpu, n.ops, n.lat, n.busy, n.iops);
+      db.insNodeRaw.run(deviceId, ts, n.id, ...NODE_LOAD_METRICS.map((m) => n[m.key] ?? null));
       const args = [];
       for (const m of NODE_LOAD_METRICS) { const v = n[m.key]; args.push(v ?? 0, v == null ? 0 : 1, v ?? null); }
       db.upNodeDaily.run(deviceId, n.id, day, ...args);
@@ -1210,6 +1235,34 @@ export async function nodeLoadQuery(deviceId, { group = 'net', kind = 'raw', fro
 export async function nodeLoadJobs(deviceId, from, to) {
   const db = await open();
   return db ? db.selNodeJobs.all(String(deviceId), from, to) : [];
+}
+
+/**
+ * v2.952 — 어레이 프런트엔드 단위 카탈로그 저장(표본과 함께 · 정제는 nodeLoad.sanitizeNodeUnits). 같은 id 는 이름 · 종류를 갱신하고 first_seen 은 지킨다.
+ * @returns {Promise<{saved:number}>}
+ */
+export async function saveNodeUnits(deviceId, units, now = Date.now()) {
+  const db = await open();
+  const list = sanitizeNodeUnits(units);
+  if (!db || !list.length) return { saved: 0, db: !!db };
+  const id = String(deviceId ?? '');
+  if (!id) return { saved: 0, db: true };
+  db.conn.exec('BEGIN');
+  try {
+    for (const u of list) db.upNodeUnit.run(id, u.id, u.name, u.kind, u.parent, now, now);
+    db.conn.exec('COMMIT');
+  } catch (e) {
+    try { db.conn.exec('ROLLBACK'); } catch { /* */ }
+    console.warn(`[storage-db] 단위 카탈로그 저장 실패(${id}): ${e.message}`);
+    return { saved: 0, db: true, reason: 'db-error' };
+  }
+  return { saved: list.length, db: true };
+}
+/** 장비의 단위 카탈로그(id → 이름 · 종류 · 부모 · 처음/마지막 본 시각). DB 없음 · 없음은 []. */
+export async function nodeUnitsOf(deviceId) {
+  const db = await open();
+  if (!db) return [];
+  return db.selNodeUnits.all(String(deviceId ?? ''));
 }
 
 /** 가장 오래된 기록 — 원시 표본 시각 · 일 롤업 날짜(화면이 '몇 칸까지 과거로 갈 수 있나' 를 계산한다). 없으면 null. */

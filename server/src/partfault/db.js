@@ -339,10 +339,16 @@ export async function applyTransition(tr, { now = Date.now() } = {}) {
       // 같은 상태가 이어지는 것은 **이벤트가 아니다** — 이벤트로 남기면 전이 테이블이 전량 적재가 된다.
       if (!p.sameState) ev('change', p, { prevState: p.prevState });
     }
+    let closedN = 0;
     for (const p of tr.closed || []) {
-      st.del.run(agentOf(p), p.partKey);
+      // 96회차 ⓒ(93회차 P2 — 재현): 관리자 수동 닫기와 폴러 전이가 같은 열린 행(둘 다 openFaults 를 먼저 읽는다)을 닫으면 close 이벤트가
+      //   두 번 남았다(사건 묶음 · 이력에 같은 닫힘 두 줄). 행을 **실제로 지운 쪽만** 이벤트를 남긴다 — 이미 닫힌 행은 조용히 지나간다.
+      const r = st.del.run(agentOf(p), p.partKey);
+      if (Number(r?.changes ?? 1) === 0) continue;
+      closedN += 1;
       ev('close', p, { state: null, prevState: p.state, closeReason: p.closeReason || 'ok' });
     }
+    tr = { ...tr, _closedN: closedN };
     // 유지(held)는 **이벤트를 만들지 않는다** — 사유만 갱신해 화면이 '왜 아직 열려 있나' 를 말한다.
     for (const p of tr.held || []) st.touch.run(p.lastSeenAt || p.lastHeldAt || now, p.holdReason || null, p.rawState || null, agentOf(p), p.partKey);
     db.exec('COMMIT');
@@ -359,7 +365,7 @@ export async function applyTransition(tr, { now = Date.now() } = {}) {
   return {
     saved: true,
     opened: (tr.opened || []).length,
-    closed: (tr.closed || []).length,
+    closed: tr._closedN ?? (tr.closed || []).length,   // 96회차 ⓒ: 실제로 닫은 수(이미 닫힌 행은 세지 않는다)
     changed: (tr.updated || []).filter((u) => !u.sameState).length,
   };
 }

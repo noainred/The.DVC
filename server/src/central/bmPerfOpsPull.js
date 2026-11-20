@@ -8,17 +8,19 @@
  *   · 중앙은 받기만 한다(복제 적재 없음 — 상세는 볼 때 당긴다 · 설계 §13 ‘중앙은 요약만 봉투로’).
  * 이슈: 엣지 봉투의 발송 기록 중 ‘pending-central’(엣지 규칙이 이슈를 원함)을 **중앙의 문지기**(중앙 규칙의 같은 규칙 issue 켬 · 하루 상한 · 법인 예외)로 판단해 만든다(ingestEdgeAlertIssues).
  */
+import { envPositive, ENV_INT_MAX } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { pullFromEdge } from './edgePull.js';
 import { strOf } from '../util/coercionTrap.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { capStr } from '../util/capStr.js';
-import fs from 'node:fs';
 import { clampEdgeTs } from '../util/clampEdgeTs.js';
-import { currentVersion } from '../config.js';
+import { featureMinEdgeVersion, STAGE5_TITLE_RE, _resetFeatureMinEdgeVersionForTest } from './featureMinEdgeVersion.js';
 import { BMPERF_RULE_LABEL, applyBmPerfFires } from '../issues/alertIssues.js';
+import { RULE_IDS as PERF_RULE_IDS, loadPerfRules } from '../bmusage/perfRules.js';
+import { parseRackKey, rackKeyOf } from '../bmusage/powerAlerts.js';
 
 const isObj = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
-const TIMEOUT_MS = Math.max(5_000, Number(process.env.BMUSAGE_PULL_TIMEOUT_MS) || 20_000);
+const TIMEOUT_MS = Math.max(5_000, envPositive(process.env.BMUSAGE_PULL_TIMEOUT_MS, 20_000, { max: ENV_INT_MAX }));
 /**
  * 이 엔드포인트들을 내주기 시작한 엣지 버전 — **릴리스 노트(사실의 원천)에서 읽는다**(반증 F15 · v2.933 bmUsageMinEdgeVersion 와 같은 사고 방지).
  *   제목에 ‘리눅스 통합 성능 모니터링 5단계’ 가 든 가장 낮은 게시 번호 · 노트에 아직 없으면(개발 중 · 릴리스 직전) 지금 실행 중인 package.json 번호.
@@ -26,26 +28,16 @@ const TIMEOUT_MS = Math.max(5_000, Number(process.env.BMUSAGE_PULL_TIMEOUT_MS) |
  *   ⚠ 이 값은 게이트가 아니다: 판정은 ‘그 경로가 엣지에 있는가’(구버전 엣지는 collector 라우터에 경로가 없어 401/404 → old-version)이고 이 번호는 안내 문구에만 들어간다.
  *   한 번 읽어 메모한다(노트는 프로세스 수명 동안 바뀌지 않는다 — 업그레이드는 재시작).
  */
-export const PERF_OPS_RELEASE_TITLE_RE = /리눅스 통합 성능 모니터링 5단계/;
-const verCmp = (a, b) => { const x = String(a).split('.').map(Number); const y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0); return 0; };
-let _minVerMemo = null;
-export function perfOpsMinEdgeVersion({ notesFile = new URL('../release-notes.json', import.meta.url), fallback = currentVersion } = {}) {
-  if (_minVerMemo) return _minVerMemo;
-  let v = null;
-  try {
-    const notes = JSON.parse(fs.readFileSync(notesFile, 'utf8'))?.notes;
-    v = (Array.isArray(notes) ? notes : []).filter((x) => PERF_OPS_RELEASE_TITLE_RE.test(String(x?.title || '')) && /^\d+\.\d+\.\d+$/.test(String(x?.version || ''))).map((x) => String(x.version)).sort(verCmp)[0] || null;
-  } catch { v = null; }
-  if (!v) v = fallback();
-  if (v && v !== '0.0.0') _minVerMemo = v;
-  return v;
-}
-export function _resetPerfOpsMinEdgeVersionForTest() { _minVerMemo = null; }
+export const PERF_OPS_RELEASE_TITLE_RE = STAGE5_TITLE_RE;
+// 6단계: 본체는 central/featureMinEdgeVersion.js(표지별 메모 · 같은 폴백) — 5단계 이름 · 인자 · 동작은 그대로(bmPerfMinEdgeVersion2929 가 고정).
+export function perfOpsMinEdgeVersion(o = {}) { return featureMinEdgeVersion(PERF_OPS_RELEASE_TITLE_RE, o); }
+export function _resetPerfOpsMinEdgeVersionForTest() { _resetFeatureMinEdgeVersionForTest(PERF_OPS_RELEASE_TITLE_RE); }
 const FOCUS_CODES = new Set(['ok', 'queued', 'bad-reason', 'bad-request', 'not-found', 'no-path', 'busy', 'daily-cap', 'auth-stopped', 'store-unavailable', 'settings-unreadable']);
 const FOCUS_STATUS = new Set(['queued', 'running', 'done', 'stopped', 'auth', 'interrupted', 'failed']);
 const VERDICTS = new Set(['bottleneck', 'saturated', 'errors', 'warn', 'ok', 'partial', 'stale', 'unknown']);
-const MISS = new Set(['timeout', 'auth', 'auth-stopped', 'ssh-error', 'host-key', 'not-linux', 'no-path', 'pool-busy', 'unreachable', 'no-telemetry', 'error']);
-const CHANGE_KINDS = new Set(['reboot', 'kernel', 'needs-restart', 'package', 'sysctl', 'sysctl-file', 'sysctl-all', 'cron', 'tuned', 'selinux', 'firewalld', 'units-failed', 'firmware', 'cvp-map', 'health']);
+// 1회차 점검 D5(b): iDRAC 셋 추가(focus/run.js FOCUS_MISS 와 같은 열거 — 시험이 대조). 구버전 중앙은 모르는 값을 'error' 로 본다(아래 enumOr).
+const MISS = new Set(['timeout', 'auth', 'auth-stopped', 'ssh-error', 'host-key', 'not-linux', 'no-path', 'pool-busy', 'unreachable', 'no-telemetry', 'error', 'cred-config', 'forbidden', 'ids-unmatched', 'cert-untrusted', 'os-disabled', 'os-edge']);   // 재확인 N4: os-disabled · os-edge
+const CHANGE_KINDS = new Set(['reboot', 'kernel', 'needs-restart', 'package', 'sysctl', 'sysctl-file', 'sysctl-all', 'cron', 'tuned', 'selinux', 'firewalld', 'units-failed', 'firmware', 'cvp-map', 'health', 'idle']);
 const VAL_KEYS = new Set(['cpu_pct', 'cpu_iowait_pct', 'runq_per_core', 'disk_busy_pct', 'disk_await_ms', 'disk_aqu', 'psi_io_full10', 'mem_pct', 'swap_out_ps', 'net_pct', 'net_drop_delta', 'net_err_delta', 'power_w', 'inlet_c', 'idrac_cpu_pct', 'dmesg_err']);
 const RES_KEYS = new Set(['cpu', 'mem', 'disk', 'net', 'hw']);
 const ts = (v, now) => clampEdgeTs(numOrNull(v), now);
@@ -178,13 +170,22 @@ export function sanitizeCompareBody(b, now = Date.now()) {
   };
 }
 const SANITIZERS = { changes: sanitizeChangesBody, baseline: sanitizeBaselineBody, compare: sanitizeCompareBody };
+/**
+ * 응답 모양 판정(모드마다 — 6단계 반증 F2 정정). pullFromEdge 기본 판정은 봉투의 `{ok, node}` 라 node 가 없는 이 응답들은 v2.929(5단계) 게시 이후 성공이 전부 bad-body 였다
+ *   (5단계 테스트는 구버전 401 · 404 경로만 불렀다). 회귀: server/test/bmEdgeRoundTrip.test.js(실제 collector 라우터 왕복).
+ */
+export const PERF_OPS_BODY_OK = Object.freeze({
+  changes: (b) => isObj(b) && b.ok === true && Array.isArray(b.events),
+  baseline: (b) => isObj(b) && b.ok === true && Array.isArray(b.series),
+  compare: (b) => isObj(b) && b.ok === true && Array.isArray(b.metrics),
+});
 /** GET 한 번(보관 없음). mode: changes · baseline · compare. */
 export async function pullEdgePerfOps(agent, mode, { key, query = {} } = {}) {
   if (!SANITIZERS[mode]) return { ok: false, kind: 'bad-request', reason: 'mode' };
   const qs = new URLSearchParams({ key: String(key) });
   for (const k of ['from', 'to', 'metric', 'aFrom', 'aTo', 'bFrom', 'bTo', 'res', 'focus']) if (query?.[k] != null && query[k] !== '') qs.set(k, capStr(String(query[k]), 64));
   const r = await pullFromEdge(agent, `/api/collector/bm-usage/${mode}?${qs.toString()}`, {
-    timeoutMs: TIMEOUT_MS, retries: 1, minVersion: perfOpsMinEdgeVersion(), what: '성능 기록을 읽을', label: '엣지 성능 기록 응답',
+    timeoutMs: TIMEOUT_MS, retries: 1, minVersion: perfOpsMinEdgeVersion(), what: '성능 기록을 읽을', label: '엣지 성능 기록 응답', bodyOk: PERF_OPS_BODY_OK[mode],
     missing401: true,   // 경로가 없는 구버전 엣지는 사용자 인증 미들웨어로 떨어져 401 — 토큰 문제가 아니라 버전 문제다(스냅샷 대행과 같은 판정)
   });
   if (!r.ok) return { ok: false, kind: r.kind, reason: r.reason };
@@ -193,7 +194,8 @@ export async function pullEdgePerfOps(agent, mode, { key, query = {} } = {}) {
 }
 
 /* ── 봉투 요약 정제(central/bmPerfSanitize.js 가 부른다) ─────────────────── */
-const RULES = new Set(['use', 'cross', 'focusEnd', 'baseline', 'health', 'profile']);
+// 규칙 id 는 규칙 목록 하나(perfRules.RULE_IDS)에서 — ⚠ 정정(다음 점검 ②): 손으로 적은 목록에 8a ‘capacity’ 가 빠져 엣지의 용량 예측 발송 건이 중앙 이력 · 이슈에서 ‘use’(USE 판정 변화)로 바뀌었다.
+const RULES = new Set(PERF_RULE_IDS);
 const RESULTS = new Set(['queued', 'sent', 'failed', 'suppressed', 'no-channel', 'no-channel-config', 'daily-cap', 'maintenance', 'error', '']);
 const ISSUE = new Set(['pending-central', 'daily-cap', 'created', 'commented', 'dup', 'error', 'skipped']);
 export function sanitizeFocusSummary(list, now = Date.now()) {
@@ -205,13 +207,22 @@ export function sanitizeFocusSummary(list, now = Date.now()) {
     verdictFrom: s.verdictFrom == null ? null : enumOr(s.verdictFrom, VERDICTS, 'unknown'), verdictTo: s.verdictTo == null ? null : enumOr(s.verdictTo, VERDICTS, 'unknown'), candidate: s.candidate == null ? null : strOf(s.candidate, 32),
   })).filter((s) => s.id && s.key);
 }
+/**
+ * 모르는 규칙 id(판 차이 — 이 중앙보다 새 엣지의 규칙 · 형식 밖)는 'unknown' 으로 둔다(점검 반복 3회차 I1 — 예전 'use' 로 바꿔 다른 규칙 알림이 ‘USE 판정 변화’ 로 보였고
+ *   이슈 생성 여부도 중앙의 use 규칙 설정으로 판단됐다). 'unknown' 은 이슈를 만들지 않는다 — 이슈 표지가 ‘중앙에서 판단’(pending-central)이면 ‘건너뜀’(skipped)으로 바꾼다.
+ */
+export const UNKNOWN_RULE = 'unknown';
 export function sanitizeAlertSent(list, now = Date.now()) {
   if (!Array.isArray(list)) return null;
-  return list.slice(-200).filter(isObj).map((r) => ({
-    id: strOf(r.id, 16), at: ts(r.at, now), rule: enumOr(r.rule, RULES, 'use'), key: strOf(r.key, 256), name: strOf(r.name, 120), vcenterId: strOf(r.vcenterId, 128), title: strOf(r.title, 200),
-    channels: (Array.isArray(r.channels) ? r.channels : []).slice(0, 4).filter((c) => ['email', 'webhook', 'slack', 'teams'].includes(c)),
-    result: enumOr(r.result, RESULTS, ''), issue: r.issue == null ? null : enumOr(r.issue, ISSUE, 'skipped'), autoFocus: r.autoFocus == null ? null : strOf(r.autoFocus, 40),
-  })).filter((r) => r.id && r.key);
+  return list.slice(-200).filter(isObj).map((r) => {
+    const rule = enumOr(r.rule, RULES, UNKNOWN_RULE);
+    const issue = r.issue == null ? null : enumOr(r.issue, ISSUE, 'skipped');
+    return {
+      id: strOf(r.id, 16), at: ts(r.at, now), rule, key: strOf(r.key, 256), name: strOf(r.name, 120), vcenterId: strOf(r.vcenterId, 128), title: strOf(r.title, 200),
+      channels: (Array.isArray(r.channels) ? r.channels : []).slice(0, 4).filter((c) => ['email', 'webhook', 'slack', 'teams'].includes(c)),
+      result: enumOr(r.result, RESULTS, ''), issue: rule === UNKNOWN_RULE && issue === 'pending-central' ? 'skipped' : issue, autoFocus: r.autoFocus == null ? null : strOf(r.autoFocus, 40),
+    };
+  }).filter((r) => r.id && r.key);
 }
 
 /** 엣지 문자열 → 표시용 이름(URL 제거 · 공백 정리 · 상한 — 길이를 먼저 자르고 선형 치환). */
@@ -234,13 +245,35 @@ export async function centralizeEdgeSent(agent, snap, deps = {}) {
   const ag = capStr(String(agent ?? ''), 64);
   for (const r of sent) {
     if (!isObj(r)) { dropped += 1; continue; }
+    // 6단계 수집 건강 — 서버가 아니라 그 수집 노드 한 칸(key '__node__'): 대상 목록과 대지 않고 법인은 공용(''), 이름은 중앙이 아는 엣지 이름으로.
+    if (r.rule === 'collect' && String(r.key || '') === '__node__') {
+      const nm = safeEdgeName(`수집 노드 ${capStr(String(agent ?? ''), 64)}`, 80);
+      list.push({ ...r, key: '__node__', name: nm, vcenterId: '', title: capStr(`${nm} — ${BMPERF_RULE_LABEL.collect}`, 200) });
+      continue;
+    }
+    /*
+     * 다음 점검 ② 랙 여유 — 서버가 아니라 랙 한 칸(키 rack:<법인>|<랙>): 대상 목록과 대지 않는다. 랙 이름은 엣지 글자라 형식(perfRules 랙 규칙 — 1~32자 · 쉼표 · 제어문자 없음)을
+     *   통과한 것만 받고 표시용으로 다시 정리한다. 법인은 **중앙이 정한다**(키 안의 법인 = 엣지 주장 → 그 엣지 담당 vCenter 일 때만 · 아니면 담당 하나 · 아니면 공용) —
+     *   키도 중앙이 정한 법인으로 다시 만든다(엣지가 다른 법인 이름을 키에 넣어 그 법인 이력 · 이슈에 끼워 넣지 못한다).
+     */
+    if (r.rule === 'rack') {
+      const rk = parseRackKey(r.key);
+      if (!rk || !/^[^\u0000-\u001f\u007f,]{1,32}$/.test(rk.rack)) { dropped += 1; continue; }
+      let vc = null;
+      try { vc = await resolve({ agent: ag, scope: 'idrac', deviceKeyKind: '', deviceKey: '', claimedVcenterId: strOf(rk.vcenterId, 128) }, ctx); } catch { vc = null; }
+      const vcId = String(vc?.id || '');
+      const nm = safeEdgeName(`랙 ${rk.rack}`, 80);
+      list.push({ ...r, key: rackKeyOf(vcId, rk.rack), name: nm, vcenterId: vcId, title: capStr(`${nm} — ${BMPERF_RULE_LABEL.rack}(수집 노드 ${ag})`, 200) });
+      continue;
+    }
     const tg = targets.get(String(r.key || ''));
     if (!tg) { dropped += 1; continue; }
     const tag = strOf(tg.serviceTag, 64);
     let vc = null;
     try { vc = await resolve({ agent: ag, scope: 'idrac', deviceKeyKind: tag ? 'serviceTag' : '', deviceKey: tag || strOf(tg.key, 256), claimedVcenterId: strOf(tg.vcenterId, 128) }, ctx); } catch { vc = null; }
     const name = safeEdgeName(tg.name || tg.key, 80) || safeEdgeName(tg.key, 80);
-    const label = BMPERF_RULE_LABEL[r.rule] || '성능 규칙';
+    // 3회차 I1: 모르는 규칙은 ‘알 수 없는 규칙’(다른 규칙 이름으로 보이지 않게 — 판 차이일 수 있다)
+    const label = r.rule === UNKNOWN_RULE || !RULES.has(r.rule) ? '알 수 없는 규칙' : (BMPERF_RULE_LABEL[r.rule] || '성능 규칙');
     list.push({ ...r, key: strOf(tg.key, 256), name, vcenterId: String(vc?.id || ''), title: capStr(`${name} — ${label}(수집 노드 ${ag})`, 200) });
   }
   return { list, dropped };
@@ -254,13 +287,14 @@ export async function ingestEdgeAlertIssues(agent, snap, deps = {}) {
   const pend = (Array.isArray(snap?.perfAlertSent) ? snap.perfAlertSent : []).filter((r) => isObj(r) && r.issue === 'pending-central');
   if (!pend.length) return { created: 0, dropped: 0 };
   const D = {
-    rules: async () => (await import('../bmusage/perfRules.js')).loadPerfRules(),
+    rules: async () => loadPerfRules(),
     apply: async (fires, o) => applyBmPerfFires(fires, o),
     ...deps,
   };
   const { list, dropped } = await centralizeEdgeSent(agent, { ...snap, perfAlertSent: pend }, deps);
   const rules = await D.rules();
-  const fires = list.filter((r) => rules.rules?.[r.rule]?.on && rules.rules[r.rule].issue === true && !(rules.rules[r.rule].corpsOff || []).includes(r.vcenterId))
+  // 3회차 I1: 아는 규칙만(모르는 규칙 · 'unknown' 은 이슈를 만들지 않는다 — 다른 규칙의 이슈 설정으로 판단하지 않게)
+  const fires = list.filter((r) => RULES.has(r.rule) && Object.hasOwn(rules.rules || {}, r.rule) && rules.rules[r.rule]?.on && rules.rules[r.rule].issue === true && !(rules.rules[r.rule].corpsOff || []).includes(r.vcenterId))
     .map((r) => ({ ...r, id: `${capStr(String(agent), 48)}:${r.id}`, agent: capStr(String(agent), 64) }));
   if (!fires.length) return { created: 0, dropped };
   const res = await D.apply(fires, { dailyMax: rules.daily?.issues ?? 20 });

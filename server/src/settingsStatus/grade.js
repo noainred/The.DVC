@@ -25,12 +25,13 @@ export const RULES = Object.freeze({
   // --- 인프라 등록 ---
   'datacenter-admin': (f) => (f.count === 0 ? { grade: 'unset', text: '등록된 법인 없음' } : null),
   'vcenter-admin': (f) => {
+    if (f.readError) return { grade: 'warn', text: '등록부를 읽지 못함(읽기 오류 — 원본은 그대로)' };   // 118회차 메인: 못 읽음을 '등록된 vCenter 없음' 으로 보이지 않는다(손상은 아래 공통 문구 — 보존본 확인)
     if (f.count === 0) return { grade: 'unset', text: '등록된 vCenter 없음' };
     if (n(f.authStopped) > 0) return { grade: 'warn', text: `인증 실패로 수집 정지 ${f.authStopped}대`, count: f.authStopped };
     return null;
   },
-  'nsx-admin': (f) => (f.count === 0 ? { grade: 'off', text: '사용 안 함(등록 없음)' } : null),
-  'horizon-admin': (f) => (f.count === 0 ? { grade: 'off', text: '사용 안 함(등록 없음)' } : null),
+  'nsx-admin': (f) => (f.readError ? { grade: 'warn', text: '등록부를 읽지 못함(읽기 오류 — 원본은 그대로)' } : f.count === 0 ? { grade: 'off', text: '사용 안 함(등록 없음)' } : null),   // 118회차 메인: 못 읽음 ≠ 등록 없음(손상은 공통 문구)
+  'horizon-admin': (f) => (f.loadError ? { grade: 'warn', text: '등록부를 읽지 못함' } : f.count === 0 ? { grade: 'off', text: '사용 안 함(등록 없음)' } : null),   // 38회차 R3: 못 읽음을 '등록 없음' 으로 보이지 않게
   'idrac-admin': (f) => (f.loadError ? { grade: 'warn', text: '등록부를 읽지 못함' } : null),
   // --- 백업 ---
   veeam: (f) => {
@@ -128,7 +129,10 @@ export function buildSettingsStatus(sources = {}, { superAdmin = false } = {}) {
     try { out = rule(facts); } catch { out = { grade: 'unknown', text: '상태를 읽지 못함' }; }
     // v2.916 반증 D2: 설정 파일이 손상돼 보존본만 남았으면(로더가 기본값을 돌려준다) 미설정 · 꺼짐이 아니라 주의다 —
     //   '등록된 vCenter 없음' 을 보고 28개를 새로 등록하지 않고 보존본을 되돌리게. 규칙이 이미 주의를 냈으면 그 문구를 둔다.
-    if (facts.loadError === true && out?.grade !== 'warn') out = { grade: 'warn', text: '설정 파일을 읽지 못함(손상 보존본 확인)' };
+    // 123회차(메인 수정 반증 — 형제 전수): **읽기 오류**(readError — 원본은 그대로 · 보존본이 없다)는 손상과 문구를 가른다 — 없는 보존본을 찾게 하지 않는다.
+    //   규칙이 이미 주의를 냈으면(등록부 · 설정 '읽지 못함') 그 문구를 둔다.
+    if (facts.readError === true && out?.grade !== 'warn') out = { grade: 'warn', text: '설정 파일을 읽지 못함(읽기 오류 — 원본은 그대로)' };
+    else if (facts.loadError === true && out?.grade !== 'warn') out = { grade: 'warn', text: '설정 파일을 읽지 못함(손상 보존본 확인)' };
     if (out) items[k] = out;
   }
   return { items };

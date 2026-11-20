@@ -69,3 +69,20 @@ describe('matchNode — 폴더/대상/호스트 검색(하위 폴더 전파)', (
     expect(matchNode(root.children.get('A'), '')).toBe(true); // 빈 검색 = 전부
   });
 });
+
+describe('avgReplyMs(26회차 F11 — 표본이 없으면 null)', () => {
+  it('빈 표본 · null 만 → null', async () => {
+    const { avgReplyMs } = await import('./tree.js');
+    expect(avgReplyMs([])).toBeNull();
+    expect(avgReplyMs([null, undefined, ''])).toBeNull();
+    expect(avgReplyMs([10, null, 20])).toBe(15);
+  });
+});
+
+describe('edgeNoReportTotal(28회차 N-7)', () => {
+  it('첫 보고 대기는 따로 말한다', async () => {
+    const { edgeNoReportTotal } = await import('./edgeCardText.js');
+    expect(edgeNoReportTotal({ assignedNoReport: 0, awaitingFirstReport: 2 }, [])).toBe(' · 첫 보고 대기 2');
+    expect(edgeNoReportTotal({ assignedNoReport: 1 }, [])).toBe(' · 배정만 있고 보고 없음 1');
+  });
+});

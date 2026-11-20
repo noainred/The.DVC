@@ -86,6 +86,8 @@ const SCREEN = Object.freeze({
 export const canFilter = (kind) => !!SCREEN[kind]?.target;
 export const HANDOFF_TARGETS = Object.freeze([...new Set(Object.values(SCREEN).map((s) => s.target).filter(Boolean))]);
 export const FOCUS_TARGETS = Object.freeze(Object.values(SCREEN).map((s) => s.focus).filter(Boolean));
+/** v2.955: SCREEN 표 밖의 인계 target — 팔레트의 'SAN 스토리지 성능에서 찾기' 행 · SAN 스토리지 성능 상세 → Flow Vision 타깃 WWN. 받는 화면이 있어야 한다(테스트가 소스로 대조). */
+export const EXTRA_HANDOFF_TARGETS = Object.freeze(['san-storage', 'san-flow:targets']);
 
 const masked = (row) => !!row?.addrHidden && String(row?.name || '').endsWith('(이름 가림)');
 
@@ -121,10 +123,10 @@ export function normPlan(plan) {
   return { hash: plan.hash.slice(0, 400), handoffs };
 }
 
-/** ‘모두 보기’ 링크의 화면 이름. */
+/** ‘모두 보기’ 링크의 화면 이름. v2.994: 서버 분석 → 'Physical Server'(메뉴 이름 변경 — 종류 키 server · gpu 는 그대로). */
 export const LIST_SCREEN = Object.freeze({
-  vm: '가상머신 탭', host: 'VM호스트 탭', datastore: '스토리지 탭', vcenter: 'Platform', server: '서버 분석',
-  gpu: '서버 분석 › GPU', storage: '스토리지 모니터링', sanswitch: 'SAN 스위치', netswitch: 'Arista CVP', pdu: 'PDU 정보', ip: 'IP관리',
+  vm: '가상머신 탭', host: 'VM호스트 탭', datastore: '스토리지 탭', vcenter: 'Platform', server: 'Physical Server',
+  gpu: 'Physical Server › GPU', storage: '스토리지 모니터링', sanswitch: 'SAN 스위치', netswitch: 'Arista CVP', pdu: 'PDU 정보', ip: 'IP관리',
 });
 
 // ── 최근 연 항목(컨펌 ④ — 브라우저 localStorage 10개). 저장소가 막혀 있으면 조용히 빈 목록(편의 기능). ──
@@ -270,7 +272,7 @@ export function metaParts(row, { mode = 'all', needle = '' } = {}) {
 
 /** 행 오른쪽 '어디로 가나' 표기. */
 export const TO_LABEL = Object.freeze({
-  vm: '가상머신 › 상세', host: 'VM호스트 › 상세', datastore: '스토리지 탭', vcenter: 'Platform', server: '서버 분석 › 정보',
+  vm: '가상머신 › 상세', host: 'VM호스트 › 상세', datastore: '스토리지 탭', vcenter: 'Platform', server: 'Physical Server › 정보',
   gpu: 'GPU 인벤토리', storage: '스토리지 모니터링', sanswitch: 'SAN 스위치', netswitch: 'Arista CVP', pdu: 'PDU 정보', ip: 'IP관리',
 });
 

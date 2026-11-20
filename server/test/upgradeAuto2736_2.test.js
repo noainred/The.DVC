@@ -13,7 +13,7 @@
  *  ⑥ 정제 — 아는 필드만 · 주소의 계정·쿼리 제거 · 손상 파일 보존 후 새로 시작 · 파일 권한 0600 · 상태 파일 등록
  *  ⑦ 엣지·수집기 push 수신 결과도 기록한다(routes 소스)
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -21,8 +21,15 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stripComments } from './_stripComments.js';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'upg-auto-'));
+const CFG = tmpDir('upg-auto-');
 Object.assign(process.env, { CONFIG_DIR: CFG, DATA_SOURCE: 'mock' });
 for (const k of ['UPGRADE_ENABLED', 'UPGRADE_POLL_INTERVAL_MS', 'UPGRADE_AUTO_APPLY', 'UPGRADE_INSTALL_DIR', 'UPGRADE_REMOTE_BASE', 'UPGRADE_WATCH_DIR', 'EDGE_MODE', 'CENTRAL_URL']) delete process.env[k];
 

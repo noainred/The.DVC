@@ -9,7 +9,10 @@
  *  · OS 는 경로 모양으로 가린다: 'C:\' 처럼 드라이브 문자로 시작하거나 '\\' 로 시작하면 Windows, '/' 로 시작하면 Linux, 그 밖은 other.
  *    VM 의 게스트 OS 칸이 비어 있어도(Tools 가 OS 를 못 알아도) 판정된다.
  *  · 무시 규칙은 경보·메일에서만 뺀다(수집·저장은 그대로). 무시한 파티션은 이유와 함께 센다(조용히 사라지지 않게).
- *  · 판정 단위: 'part' = 파티션 하나라도 임계 이상이면 그 파티션이 초과 · 'vm' = VM 의 (무시하지 않은·값을 아는) 파티션 합계 사용률로 판정.
+ *  · 판정 단위: 'part' = 파티션 하나라도 임계 이상이면 그 파티션이 초과 · 'vm' = VM 의 (무시하지 않은) 파티션 합계 사용률로 판정.
+ *    결정(56~75 남긴 것) 68 D1: 'vm' 에서 값 모름 파티션(무시하지 않은 것)이 하나라도 있는 VM 은 아는 파티션만의 **부분 합으로 판정하지 않는다** —
+ *    VM 합계 사용률은 null 이고 초과에도 정상에도 넣지 않으며 '값 모름' 으로 따로 센다(루트 규칙 '부분 합은 정상에도 장애에도 넣지 않는다').
+ *    모든 파티션을 아는 VM 은 예전 그대로다.
  *  · 임계는 vCenter 별 덮어쓰기(vcThresholds)가 있으면 그 값, 없으면 기본값.
  *
  * ── 패턴 ────────────────────────────────────────────────────────────────────
@@ -214,7 +217,7 @@ export function thresholdFor(vcenterId, settings) {
 
 /**
  * 판정(순수). parts = listPartLatest 행. 반환:
- *  { parts:[{...part, os, pct, ignored, over, crit, thr}], vms: Map<vmId,{...}> } — vms 는 VM 합계(무시·값 모름 제외).
+ *  { parts:[{...part, os, pct, ignored, over, crit, thr}], vms: Map<vmId,{...}> } — vms 는 VM 합계(무시·값 모름 제외 · 값 모름이 있으면 pct null · unknown = 값 모름 수).
  * thrOverride: 화면에서 고른 임계(모든 vCenter 공통) — 주면 vCenter 별 덮어쓰기보다 우선한다(화면 슬라이더).
  */
 export function evaluate(parts, settings, { thrOverride = null, mode = null } = {}) {
@@ -239,7 +242,10 @@ export function evaluate(parts, settings, { thrOverride = null, mode = null } = 
   }
   for (const v of vms.values()) {
     v.capGB = Math.round(v.capGB * 10) / 10; v.usedGB = Math.round(v.usedGB * 10) / 10;
-    v.pct = v.known ? pctOf(v.usedGB, v.capGB) : null;
+    // 결정(56~75 남긴 것) 68 D1: 값 모름 파티션이 있으면 capGB · usedGB 는 아는 파티션만의 부분 합이다 — VM 합계 사용률을 만들지 않는다
+    //   (예전: C: 9/10 + D: 값 모름 → 90% 초과 · C: 10/100 + D: 값 모름 → 10% 정상). partial = 아는 파티션도 있는 부분 합.
+    v.partial = v.unknown > 0 && v.known > 0;
+    v.pct = v.known && !v.unknown ? pctOf(v.usedGB, v.capGB) : null;
     v.maxPct = null;
     v.over = false; v.crit = false;
   }

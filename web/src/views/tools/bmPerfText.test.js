@@ -147,7 +147,7 @@ describe('기준값 · 근거 — 보여 주기만(숫자는 API 값)', () => {
   it('근거 한 줄 — 장치 · 값 · 못 읽은 이유', () => {
     expect(T.basisText({ label: '평균 대기열', value: 9.2, unit: '', code: 'bad', device: 'nvme0n1' })).toBe('nvme0n1 평균 대기열 9.2');
     expect(T.basisText({ label: 'ECC 정정', value: null, code: 'missing' })).toBe('ECC 정정 —(못 읽음)');
-    expect(T.basisText({ label: 'PSI io full', value: null, code: 'none' })).toBe('PSI io full —(그 커널에 없음)');
+    expect(T.basisText({ key: 'psi_io_full10', label: 'PSI io full', value: null, code: 'none' })).toBe('PSI io full —(그 커널에 없음)');   // 2회차 E3: none 이유는 항목(key)별
   });
   it('근거 열은 API perfCols 의 judged:false · 그 자원만 · 못 읽은 값은 ‘—’', () => {
     const cols = [{ col: 'load1', res: 'cpu', use: 'S', judged: false, unit: '', label: 'load 1분' }, { col: 'runq_per_core', res: 'cpu', use: 'S', judged: true, unit: '', label: '런큐' }, { col: 'swap_in_ps', res: 'mem', use: 'S', judged: false, unit: 'pages/s', label: '스왑 인' }];
@@ -240,8 +240,8 @@ describe('서버 상세 — 안내 · 경로 시각 · 하드웨어 사실', () 
   });
   it('탭은 기능이 있는 것만 — 아트보드 탭 열 순서(장애 기록 · 튜닝 · 용도 · 진단 스냅샷은 4단계 · 추이는 3b)', () => {
     // v2.923(4단계): 장애 기록 · 튜닝 · 용도 · 진단 스냅샷이 생겨 아트보드 탭 열 순서로 더했다(없는 기능은 여전히 그리지 않는다).
-    expect(T.DETAIL_TABS.map((x) => x.id)).toEqual(['summary', 'res', 'hw', 'faults', 'tuning', 'profile', 'snap', 'trend', 'focus']);
-    expect(T.DETAIL_TABS.map((x) => x.label)).toEqual(['요약', '자원(USE)', '하드웨어(iDRAC)', '장애 기록', '튜닝', '용도', '진단 스냅샷', '추이(평균 · 피크)', '집중 모니터링']);   // v2.929 집중 모니터링
+    expect(T.DETAIL_TABS.map((x) => x.id)).toEqual(['summary', 'res', 'hw', 'faults', 'tuning', 'profile', 'snap', 'trend', 'focus', 'playbook', 'slo', 'logs']);   // 6단계 진단 플레이북 · 목표선 · 7a단계 로그
+    expect(T.DETAIL_TABS.map((x) => x.label)).toEqual(['요약', '자원(USE)', '하드웨어(iDRAC)', '장애 기록', '튜닝', '용도', '진단 스냅샷', '추이(평균 · 피크)', '집중 모니터링', '진단 플레이북', '목표선', '로그']);   // v2.929 집중 모니터링
   });
 });
 

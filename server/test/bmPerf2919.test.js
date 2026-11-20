@@ -317,7 +317,8 @@ test('⑦ 중앙 정제 화이트리스트 — 모르는 필드 제거 · 문자
   });
   assert.equal(snap.rows[0].runq_per_core, 1.5, '새 열의 문자열 수치는 수로');
   assert.equal(snap.rows[0].psi_io_full10, null, '빈 값은 null(0 이 아니다)');
-  assert.equal(snap.rows[0].cpu_pct, 'oops', '기존 열 계약(원시값 그대로 — CEN2604-03)은 바꾸지 않는다');
+  // 다음 작업 ⑤(2026-11-19): 기존 열도 아는 열 표(bmusage/publicFields.js LATEST_ROW_SPEC)로 — 수치 열의 글자는 수로 좁히고 못 읽으면 null(예전 원시값 계약 → 바꿈 · 근거는 루트 CLAUDE.md ‘문자열 수치는 수로’).
+  assert.equal(snap.rows[0].cpu_pct, null, '못 읽은 수치는 null(0 도 글자도 아니다)');
   assert.ok(!('detail_json' in snap.rows[0]) && !('tuning_json' in snap.rows[0]), 'JSON 문자열 열은 받지 않는다(perf 객체로 온다)');
   const p = snap.perf[0];
   assert.equal(snap.perf.length, 1); assert.ok(snap.sanitizeDropped >= 1, '버린 원소 수를 밝힌다');
@@ -530,7 +531,8 @@ test('⑬ DB — v2.918 스키마 DB 에 migratePerfColumns 를 돌리면 새 �
   old.prepare('INSERT INTO usage_latest (agent,key,ts,cpu_pct) VALUES (?,?,?,?)').run('', 'OLD', 1, 33);
   const r1 = db.migratePerfColumns(old);
   // v2.922: 최신값에 피크 열(8 × 2) · 피크 메타 3 · 장치 상한 초과 1 이 더해졌다(3a — 3단 저장 구조).
-  assert.equal(r1.added, PERF_COL_NAMES.length * 3 + 4 + 16 + 3 + 1, '이력·롤업·최신값 × 새 열 + 최신값 전용 4 + v2.922 피크 20');
+  // v2.993: 최신값 전용 src_cm(CPU · 메모리 지표별 출처) 1칸 더
+  assert.equal(r1.added, PERF_COL_NAMES.length * 3 + 4 + 16 + 3 + 1 + 1, '이력·롤업·최신값 × 새 열 + 최신값 전용 4 + v2.922 피크 20 + v2.993 src_cm');
   assert.equal(db.migratePerfColumns(old).added, 0, '멱등');
   const row = old.prepare("SELECT * FROM usage_latest WHERE key='OLD'").get();
   assert.equal(row.cpu_pct, 33, '기존 행 보존'); assert.equal(row.runq_per_core, null, '기존 행의 새 열은 null(0 이 아니다)');

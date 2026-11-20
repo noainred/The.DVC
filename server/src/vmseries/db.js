@@ -46,9 +46,11 @@ async function loadSqlite() {
 const INDEX_FILE = () => path.join(DIR, '_index.json');
 // v2.681(R2B-03): 인덱스는 파일명이 비가역(sha1 접미)이라 DB 파일만으로 재구축할 수 없다 — 손상되면 다음 저장이
 //   빈 인덱스로 덮어써 역매핑을 영영 잃는다. 원자 쓰기 + 파싱 실패 시 손상본 보존(없음 ENOENT 는 빈 값).
-function readIndex() {
+// 119회차(재현 — EIO): 읽기 오류(EACCES · EIO)는 '없음' 이 아니다 — rememberIndex 가 빈 색인에 한 줄을 더해 쓰면 다른 vCenter 의 역매핑이 사라졌다
+//   (사용량 화면이 원본 id 대신 파일 이름을 보이고, 대상에서 뺀 vCenter 의 DB 정리가 엉뚱한 이름을 지우려다 0개를 '삭제' 로 적는다). strict 면 던진다(쓰지 않게).
+function readIndex({ strict = false } = {}) {
   let txt;
-  try { txt = fs.readFileSync(INDEX_FILE(), 'utf8'); } catch { return {}; }
+  try { txt = fs.readFileSync(INDEX_FILE(), 'utf8'); } catch (e) { if (strict && e?.code !== 'ENOENT') throw e; return {}; }
   try {
     const v = JSON.parse(txt);
     if (v && typeof v === 'object' && !Array.isArray(v)) return v;
@@ -57,7 +59,7 @@ function readIndex() {
 }
 function rememberIndex(file, vcenterId) {
   try {
-    const idx = readIndex();
+    const idx = readIndex({ strict: true });   // 119회차: 색인을 못 읽었으면 쓰지 않는다(아래 catch — 다음 open 이 다시 등록한다)
     if (idx[file] === vcenterId) return;
     idx[file] = vcenterId;
     atomicWriteFileSync(INDEX_FILE(), JSON.stringify(idx, null, 2));

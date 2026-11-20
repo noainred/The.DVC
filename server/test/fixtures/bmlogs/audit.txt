@@ -1,0 +1,2 @@
+type=AVC msg=audit(1793937600.123:456): avc:  denied  { read } for  pid=1234 comm="httpd" name="secret.conf" dev="dm-0" ino=12345 scontext=system_u:system_r:httpd_t:s0 tcontext=unconfined_u:object_r:user_home_t:s0 tclass=file permissive=0
+type=USER_AUTH msg=audit(1793937601.223:457): pid=2211 uid=0 auid=4294967295 ses=4294967295 msg='op=PAM:authentication grantors=? acct="root" exe="/usr/sbin/sshd" hostname=203.0.113.45 addr=203.0.113.45 terminal=ssh res=failed'

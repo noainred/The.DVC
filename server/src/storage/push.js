@@ -18,6 +18,7 @@ import { centralStatusOnlySupport, sendStatusOnly as sendStatusOnlyTo, STATUS_ON
 export { centralStatusOnlySupport, STATUS_ONLY_MIN_CENTRAL, _resetStatusOnlyCapForTest };
 import { agentNameHeader } from '../util/agentNameHeader.js'; // v2.620(RECENT2620-02)
 import { pendingNodeLoadSamples, markNodeLoadSamplesSent } from './nodeLoadPoller.js'; // v2.932(2차 ⑨): 미전송 5분 표본 고리
+import { pendingInspectRuns, markInspectRunsSent, setAfterEdgeInspectHook } from './inspect/runner.js'; // v2.965: 미전송 PowerScale 점검 결과(중앙 요청으로 이 엣지가 돌린 것)
 
 // v2.409: 주기는 중앙 배포값(storage/intervals.js)을 매번 조회 — 모듈 로드 시 상수로 굳히지 않는다.
 const pushMs = () => runtimeIntervals().pushMs;
@@ -89,7 +90,9 @@ async function pushStorageOnce() {
     // v2.932(2차 ⑨): 미전송 노드 부하 표본(장비당 ≤ RING_MAX)을 같은 본문에 싣는다 — 새 경로·새 토큰 없이 기존 push 축 하나. 중앙이 200 을 주면 고리에서 지운다.
     //   ⚠ v2.931 이하 중앙은 이 키를 모르고 버린다(200 응답에 nodeLoadSamples 가 없다) — 상태에 `samples.ack:null` 로 남겨 화면이 '중앙 구버전' 을 말할 수 있게 한다.
     const nodeLoadSamples = pendingNodeLoadSamples();
-    const json = JSON.stringify({ agent: config.agent.name, devices, ...(nodeLoadSamples.length ? { nodeLoadSamples } : {}) });
+    // v2.965: 미전송 점검 결과(장비당 ≤ 2) — 같은 본문 · 같은 소유권 필터. v2.962 이하 중앙은 키를 모르고 버린다(응답에 inspectRuns 확인이 없다 — 상태에 남긴다).
+    const inspectRuns = pendingInspectRuns();
+    const json = JSON.stringify({ agent: config.agent.name, devices, ...(nodeLoadSamples.length ? { nodeLoadSamples } : {}), ...(inspectRuns.length ? { inspectRuns } : {}) });
     const hdrs = { 'Content-Type': 'application/json', ...agentNameHeader(config.agent.name), ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
     let body = json;
     if (PUSH_GZIP) { try { body = await gzipAsync(json); hdrs['Content-Encoding'] = 'gzip'; } catch { body = json; } }
@@ -108,12 +111,22 @@ async function pushStorageOnce() {
     if (ds?.rejected) console.warn(`[storage-push] 중앙이 장비 ${ds.rejected}대를 받지 않았습니다(${dropText(ds.dropped)}) — 그 장비는 중앙 화면에 나오지 않습니다`);
     let samples = null;
     if (nodeLoadSamples.length) {
-      markNodeLoadSamplesSent(nodeLoadSamples); // 200 = 중앙이 본문을 받았다(모르는 키였어도 다시 보내 봐야 같다)
       const ack = ds?.nodeLoadSamples || null;
+      // 200 = 중앙이 본문을 받았다(모르는 키였어도 다시 보내 봐야 같다). 전체 점검 14회차(C-2): 단, 중앙이 '표본 DB 를 쓰지 못했다'(dbUnavailable — 잠김 · 쓰기 예외)고
+      //   답하면 고리를 지우지 않는다 — 예전에는 200 만 보고 지워 그 구간이 영구 결손됐다(다시 보내면 중앙이 중복은 세고 넘긴다).
+      if (ack?.dbUnavailable) console.warn(`[storage-push] 중앙이 노드 부하 표본을 적재하지 못했습니다(중앙 DB) — 표본을 지우지 않고 다음 주기에 다시 보냅니다`);
+      else markNodeLoadSamplesSent(nodeLoadSamples);
       samples = { sent: nodeLoadSamples.reduce((a, d) => a + d.samples.length, 0), devices: nodeLoadSamples.length, ack };
       if (!ack) console.warn(`[storage-push] 노드 부하 표본 ${samples.sent}개를 보냈지만 중앙 응답에 확인(nodeLoadSamples)이 없습니다 — 중앙이 v2.932 이전이면 표본은 버려집니다`);
     }
-    _last = { at: Date.now(), sent: devices.length, bytes: json.length, gzip: PUSH_GZIP && hdrs['Content-Encoding'] === 'gzip', ...(ds?.rejected ? { rejected: ds.rejected, dropped: ds.dropped } : {}), ...(samples ? { samples } : {}) };
+    let inspect = null;
+    if (inspectRuns.length) {
+      markInspectRunsSent(inspectRuns);
+      const ack = ds?.inspectRuns || null;
+      inspect = { sent: inspectRuns.reduce((a, d) => a + d.runs.length, 0), devices: inspectRuns.length, ack };
+      if (!ack) console.warn(`[storage-push] 점검 결과 ${inspect.sent}건을 보냈지만 중앙 응답에 확인(inspectRuns)이 없습니다 — 중앙이 v2.965 이전이면 결과는 버려집니다`);
+    }
+    _last = { at: Date.now(), sent: devices.length, bytes: json.length, ...(inspect ? { inspect } : {}), gzip: PUSH_GZIP && hdrs['Content-Encoding'] === 'gzip', ...(ds?.rejected ? { rejected: ds.rejected, dropped: ds.dropped } : {}), ...(samples ? { samples } : {}) };
     return { ok: true, sent: devices.length, ...(ds?.rejected ? { rejected: ds.rejected, dropped: ds.dropped } : {}), ...(samples ? { samples } : {}) };
   } catch (e) {
     _last = { at: Date.now(), error: e.message };
@@ -169,5 +182,6 @@ export function startStoragePush() {
   if (_timer || !config.agent.centralUrl || !config.agent.centralToken) return;
   // 첫 수집(15s+α) 뒤에 첫 push, 이후 현재 주기로 재무장.
   _timer = startAdaptiveTimer(pushMs, () => pushStorageNow(), { firstDelayMs: 45_000, name: '중앙 push' });
+  setAfterEdgeInspectHook(() => pushStorageNow()); // v2.965 반증 E1: 엣지 점검 결과를 다음 주기까지 묵히지 않는다
 }
 export function storagePushStatus() { return { ..._last, intervalMs: pushMs() }; }

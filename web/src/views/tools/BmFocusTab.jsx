@@ -6,13 +6,15 @@
  * ⚠ 폴링: **진행 중 · 대기 세션을 보고 있을 때만** FOCUS_POLL_MS(30초)마다 그 세션 하나를 다시 읽는다 — 1분 표본이라 30초면 한 분을 놓치지 않고,
  *   세션당 focusPollMax 회로 묶이며 끝나면(완료 · 중지 · 중단) 멈춘다. 그 밖에는 탭을 열 때 1회 + ‘다시 읽기’(웹 규약의 예외 — web.md v2.929).
  */
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useAnnotations } from './BmAnnotations.jsx'; // 6단계 운영 주석(이벤트 줄 ◆)
 import { postJson, fetchJson, hasRole, canCsv } from '../../api.js';
 import { ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { toneVar } from './toneVar.js';
 import { useOpsLoad, OpsError } from './BmTuningTab.jsx';
+import { perfPath } from './bmPerfUrl.js'; // 다음 점검 ①: 서버 = (법인, 키) 쌍 — 요청에 법인을 싣는다
 import { verdictView } from './bmPerfText.js';
 import { shortStamp } from './bmOpsText.js';
 import { fmtHm } from '../../components/vmperf/vmPerfText.js';
@@ -21,14 +23,15 @@ import {
   FOCUS_MISS_TEXT, ACTION_TEXT, FOCUS_HONEST, focusStatusView, focusCodeView, vText, progressCells, heatRows, heatAlpha, beforeRows, focusEvents, conclusionParts, missPathParts, osMissed,
   focusCsv, focusCsvName, FOCUS_POLL_MS, focusPollStep, FOCUS_METRIC_TEXT,
 } from './bmPerfOpsText.js';
+import { gateOk, gateWhy } from './bmWriteText.js'; // 점검 반복 8회차 F2 — 서버 표지(데모 · 역할)
 import './bmOps.css';
 import './bmPerfOps.css';
+import { saveBlob } from '../../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나
 
 function download(text, name) {
   try {
     const blob = new Blob([`﻿${text}`], { type: 'text/csv;charset=utf-8' });
-    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1_000);
+    saveBlob(blob, name);
   } catch { /* 내려받기 실패는 화면을 바꾸지 않는다 */ }
 }
 
@@ -48,7 +51,7 @@ export function ProgressBand({ session, samples }) {
 }
 
 /** 세션 상세(상태 없음 — 응답을 받아 그린다). */
-export function FocusSessionView({ resp, name = '' }) {
+export function FocusSessionView({ resp, name = '', annotations = [] }) {
   const s = resp?.session || null;
   const samples = resp?.samples || [];
   if (!s) return null;
@@ -57,7 +60,9 @@ export function FocusSessionView({ resp, name = '' }) {
   const mp = missPathParts(s, sum);
   const rows = heatRows(samples);
   const before = beforeRows(sum, samples);
-  const events = focusEvents(s, samples, resp?.changes || []);
+  // 6단계: 같은 시간의 운영 주석(◆ — 사람이 남긴 맥락)도 이벤트 줄에.
+  const events = [...focusEvents(s, samples, resp?.changes || []),
+    ...(annotations || []).filter((a) => !a.deleted && (a.end ?? a.at) >= (s.start || s.created) && a.at <= (s.end || Date.now())).map((a) => ({ at: a.at, kind: 'annot', text: `◆ ${a.by} — ${a.text}` }))].sort((a, b) => a.at - b.at);
   const c1 = (sum.candidates || [])[0];
   const maxAwait = sum.maxBy?.disk_await_ms; const maxCpu = sum.maxBy?.cpu_pct;
   const companion = [sum.maxBy?.cpu_iowait_pct ? `iowait ${vText(sum.maxBy.cpu_iowait_pct.value, '%')}` : '', sum.maxBy?.psi_io_full10 ? `PSI io ${vText(sum.maxBy.psi_io_full10.value, '%')}` : '', sum.maxBy?.swap_out_ps ? `스왑아웃 ${vText(sum.maxBy.swap_out_ps.value, '/s')}` : ''].filter(Boolean).join(' · ');
@@ -156,7 +161,7 @@ export function FocusSessionView({ resp, name = '' }) {
         {!events.length ? <p className="bmo-note">이벤트가 없습니다.</p> : (
           <div className="bmo-tl">
             {events.map((e, i) => (
-              <div key={i} className="bmo-tl-row"><span className="bmo-tl-at">{fmtHm(e.at)}</span><span className="bmp-chip">{({ start: '시작', verdict: '판정', missing: '결측', dmesg: 'dmesg', change: '변경', end: '끝' })[e.kind] || e.kind}</span><span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{e.text}</span></div>
+              <div key={i} className="bmo-tl-row"><span className="bmo-tl-at">{fmtHm(e.at)}</span><span className="bmp-chip">{({ start: '시작', verdict: '판정', missing: '결측', dmesg: 'dmesg', change: '변경', end: '끝', annot: '주석' })[e.kind] || e.kind}</span><span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{e.text}</span></div>
             ))}
           </div>
         )}
@@ -210,8 +215,8 @@ export function FocusSessionList({ sessions = [], selId = '', onOpen = () => {} 
   );
 }
 
-export default function BmFocusTab({ itemKey, name = '' }) {
-  const list = useOpsLoad((k) => `/tools/bm-usage/perf/${encodeURIComponent(k)}/focus`, itemKey);
+export default function BmFocusTab({ itemKey, vc = '', name = '' }) {
+  const list = useOpsLoad((k, v) => perfPath(k, v, '/focus'), itemKey, vc);
   const [reason, setReason] = useState('');
   const [run, setRun] = useState({ busy: false, resp: null, err: null });
   const [sel, setSel] = useState({ id: '', resp: null, err: null });
@@ -219,10 +224,15 @@ export default function BmFocusTab({ itemKey, name = '' }) {
   const polls = useRef(0);
   const sessions = list.resp?.sessions || [];
   const live = sessions.find((x) => x.status === 'running' || x.status === 'queued') || null;
-  const roleOk = hasRole('admin', 'operator');
+  // 8회차 F2: 역할 · 데모는 서버 표지(actions.start — 시작 라우트와 같은 판정). 표지가 없으면(구버전 응답) 예전처럼 역할.
+  const startG = list.resp?.actions?.start;
+  const roleOk = startG ? gateOk(startG) : hasRole('admin', 'operator');
   const writable = list.resp?.writable;
   const canRun = roleOk && writable !== false;
   const plan = list.resp?.plan || null;
+  // 6단계: 고른 세션 시간의 운영 주석(자동 주석 포함) — 세션을 고를 때 1회.
+  const sessWin = useMemo(() => { const x = sel.resp?.session; return x ? { from: (x.start || x.created) - 60_000, to: (x.end || Date.now()) + 60_000 } : null; }, [sel.resp]);
+  const ann = useAnnotations(itemKey && sessWin ? [itemKey] : [], sessWin, 0, [vc]);
 
   // poll = 폴링 타이머가 부른 것 — 횟수 카운터를 되돌리지 않는다(반증 F8: 예전에는 open 이 늘 0 으로 돌려 상한이 동작하지 않고 목록도 매번 다시 읽었다).
   const open = async (id, { poll = false } = {}) => {
@@ -230,7 +240,7 @@ export default function BmFocusTab({ itemKey, name = '' }) {
     if (!poll) polls.current = 0;
     setSel((p) => ({ id, resp: p.id === id ? p.resp : null, err: null }));
     try {
-      const resp = await fetchJson(`/tools/bm-usage/perf/${encodeURIComponent(itemKey)}/focus/${encodeURIComponent(id)}`, {}, undefined, { timeoutMs: 60_000 });
+      const resp = await fetchJson(perfPath(itemKey, vc, `/focus/${encodeURIComponent(id)}`), {}, undefined, { timeoutMs: 60_000 });
       if (g === gen.current) setSel({ id, resp, err: null });
     } catch (e) { if (g === gen.current) setSel({ id, resp: null, err: e }); }
   };
@@ -257,7 +267,7 @@ export default function BmFocusTab({ itemKey, name = '' }) {
   const start = async () => {
     setRun({ busy: true, resp: null, err: null });
     try {
-      const r = await postJson(`/tools/bm-usage/perf/${encodeURIComponent(itemKey)}/focus`, { reason }, { timeoutMs: 60_000 });
+      const r = await postJson(perfPath(itemKey, vc, '/focus'), { reason }, { timeoutMs: 60_000 });
       setRun({ busy: false, resp: r, err: null }); setReason('');
       await list.reload();
       if (r?.id) open(r.id);
@@ -267,7 +277,7 @@ export default function BmFocusTab({ itemKey, name = '' }) {
     }
   };
   const stop = async (id) => {
-    try { await postJson(`/tools/bm-usage/perf/${encodeURIComponent(itemKey)}/focus/${encodeURIComponent(id)}/stop`, {}, { timeoutMs: 60_000 }); } catch (e) { setRun({ busy: false, resp: null, err: e }); }
+    try { await postJson(perfPath(itemKey, vc, `/focus/${encodeURIComponent(id)}/stop`), {}, { timeoutMs: 60_000 }); } catch (e) { setRun({ busy: false, resp: null, err: e }); }
     await list.reload(); open(id);
   };
   const cv = run.resp ? focusCodeView(run.resp.code) : null;
@@ -282,7 +292,7 @@ export default function BmFocusTab({ itemKey, name = '' }) {
             <button className="btn bmp-touch" disabled={run.busy || reason.trim().length < 2 || !!live} onClick={start}>{run.busy ? '시작하는 중…' : live ? '진행 중 세션이 있습니다' : '집중 모니터링 시작'}</button>
             {live && live.status === 'running' && <button className="btn bmp-touch" onClick={() => stop(live.id)}>중지</button>}
           </div>
-        ) : !roleOk ? <p className="bmo-note">시작은 운영자(operator) 이상만 할 수 있습니다 — 아래 세션은 볼 수 있습니다.</p>
+        ) : !roleOk ? <p className="bmo-note">{startG?.why === 'demo' ? `시작 — ${gateWhy(startG)}` : '시작은 운영자(operator) 이상만 할 수 있습니다'} — 아래 세션은 볼 수 있습니다.</p>
           : <p className="bmo-note">{focusCodeView('forbidden').text} 아래 세션은 볼 수 있습니다.</p>}
         {cv && <p className="bmo-note" style={{ color: toneVar(cv.tone) }}>{cv.text}{run.resp?.queuePos ? ` — 대기 ${run.resp.queuePos}번째` : ''}{run.resp?.reason && !run.resp.ok ? ` (${run.resp.reason})` : ''}</p>}
         {run.err && <ErrorBox error={run.err} />}
@@ -290,7 +300,7 @@ export default function BmFocusTab({ itemKey, name = '' }) {
 
       {sel.err && <OpsError err={sel.err} />}
       {sel.resp?.ok === false && <p className="bmo-note" style={{ color: toneVar('bad') }}>{focusCodeView(sel.resp.code).text}{sel.resp.reason ? ` (${sel.resp.reason})` : ''}</p>}
-      {sel.resp?.session && <FocusSessionView resp={sel.resp} name={name} />}
+      {sel.resp?.session && <FocusSessionView resp={sel.resp} name={name} annotations={ann.list} />}
 
       <section className="bmo-card">
         <h5 className="bmo-h">세션 — 이 서버 · 최근 {list.resp?.keepDays ?? 30}일 <button type="button" className="btn btn-sm bmp-touch" onClick={() => list.reload()} disabled={list.loading}>{list.loading ? '읽는 중…' : '다시 읽기'}</button></h5>

@@ -8,8 +8,10 @@ import { forceCollectorToken } from '../../agent/deploy.js';
 import { listTargets, getTargetRaw, pickSshTarget } from '../../agent/deployRegistry.js';
 import { logAudit } from '../../audit.js';
 import { loadVcenterConfig } from '../../config.js';
-import { getVmHardware, reconfigVm } from '../../provision/reconfig.js';
+import { getVmHardware, reconfigVm, tryLockVmReconfig, reconfigBusyBody } from '../../provision/reconfig.js';
 import { onDemandErrorFields } from '../../vcenter/dsBrowse.js';   // v2.743(VC-03): 주문형 로그인 문이 막은 409 의 사유 필드
+import { setCollectorDatacenterId } from '../../collector/registry.js'; // v2.972: 수집 서버 ↔ 법인 매칭(사용자 지정)
+import { matchDatacenterId, resolvePickedDc } from '../../collector/datacenterMatch.js';
 import { listCollectors, addCollector, updateCollector, removeCollector, loadCollectors, ssrfBlockReason, collectorInputIssue, identityIssue, registryLoadErrorSummary } from '../../collector/registry.js';
 // 2026-10-09 검토 S-09(그룹 J): 평문 HTTP 는 승인된 예외만 — 판정은 transportPolicy, 이 파일은 관리자 문맥·감사·상태만 싣는다.
 import { withDefaultScheme, urlTransport, transportSummary, allowlistSummary, rejectedHttpRegistrations, centralUrlTransport } from '../../collector/transportPolicy.js';
@@ -18,7 +20,7 @@ import { wanTlsStatus } from '../../util/resilientFetch.js';
 import { precheckTarget } from '../../sanswitch/precheck.js';
 import { collectorsToCsv, sampleCsv as collectorsSampleCsv, parseCollectorsCsv, analyzeCollectorsImport } from '../../collector/csv.js';
 import { clearCollectorServers } from '../../collector/remoteInventory.js';
-import { listDatacenters, getDatacenterAssign, addDatacenter, updateDatacenter, removeDatacenter, setVcenterDatacenterMany, getDatacenterOrder, saveDatacenterOrder } from '../../datacenter/store.js';
+import { listDatacenters, getDatacenterAssign, addDatacenter, updateDatacenter, removeDatacenter, setVcenterDatacenterMany, getDatacenterOrder, saveDatacenterOrder, datacentersLoadError } from '../../datacenter/store.js';
 import { allCollectorStatus, clearCollectorHosts, clearCollectorStatus } from '../../collector/state.js';
 import { agentIdentitySummary } from '../../central/agentIdentity.js';
 import { pullNow, EDGE_REASON_TEXT } from '../../collector/puller.js';
@@ -33,7 +35,7 @@ import { readJsonCapped, EDGE_EXPORT_MAX_BYTES } from '../../util/readCapped.js'
 const EDGE_SMALL_MAX_BYTES = 256 * 1024;
 import { resolveBundleBytes, lastBundleReject } from '../../upgrade/bundleSource.js';
 import { upgradeManager } from '../../upgrade/manager.js';
-import { adminOnly, ensureCollectorDatacenter, requireSettingsOwner, fullScopeOnlyWith } from './shared.js';
+import { adminOnly, ensureCollectorDatacenter, requireSettingsOwner, fullScopeOnlyWith, fullReadWriteScopeOnlyWith, remoteServersResolved, hostVcByTag } from './shared.js';
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
 const csvPerm = requirePerm('data.csv');
 // v2.611 AUTHZ2611: 전 법인 등록부·동작은 전체 범위 계정만(v2.607 fleetWideOnly 의 형제 등록부).
@@ -130,6 +132,74 @@ function transportView(list) {
   };
 }
 
+/**
+ * v2.972: 수집 서버 → { id(법인 id · ''), via: 'manual'|'name'|'', stale?: true }(순수). 순서는 analysisServers.collectorToDatacenterMap 과 같다:
+ * 사용자 매칭(datacenterId — 지금 목록에 있을 때만) → 이름 맞춤(datacenter 라벨 · id · 이름 ↔ DataCenter id · 이름).
+ */
+export function collectorDcMatch(collectors, datacenters, { assign = null, serversOf = null, tagVc = null, vcName = null } = {}) {
+  const out = {};
+  for (const c of collectors || []) {
+    if (!c || c.id == null) continue;
+    const picked = String(c.datacenterId || '').trim();
+    const hit = resolvePickedDc(picked, datacenters || []);   // P5 · 반증 D2: 정확 일치 → 대소문자 무시(하나의 규칙)
+    let r;
+    if (hit) r = { id: hit, via: 'manual' };
+    else {
+      const m = matchDatacenterId([c.datacenter, c.id, c.name], datacenters || []);
+      r = { id: m || '', via: m ? 'name' : '', ...(picked ? { stale: true, picked } : {}) };   // picked: 지워진 법인 id — 화면이 그 값을 선택지로 보여 줘야 '자동' 으로 해제할 수 있다(반증 F6)
+    }
+    const conflicts = dcConflictsOf(c, { assign, serversOf, tagVc, vcName, datacenters });
+    out[c.id] = conflicts.length ? { ...r, conflicts } : r;
+  }
+  return out;
+}
+
+/**
+ * v2.986(사용자 결정 2026-11-12 '불일치가 생기면 사용자가 매칭을 선택' · 방식 '버튼으로 한쪽에 맞추기'): **서버 한 대 단위**로 판정한다(반증 D1 · D2 — 처음 판은
+ * 수집 서버 수준 매칭과 비교해 거짓 경보를 냈고, 그 버튼이 오히려 화면을 갈랐다).
+ *   A = 서버 분석이 그 서버에 쓰는 법인(analysisServers.remoteServersResolved 의 datacenterId — 사용자 매칭 > 엣지 태그 > 이름 맞춤).
+ *   B = 전력 분석 · 통합 인벤토리가 쓰는 vCenter 할당 법인 — 그 서버의 vCenter 는 전력 분석과 같은 순서: 수집 서버 등록부 vcenterId(전력 샘플 · collector/puller.js) →
+ *       서버의 vcenterId → 서비스태그로 찾은 ESXi 호스트의 vCenter(mappedVcenterId · hostVcByTag — 반증 D2).
+ *   A · B 가 모두 있고 다르면 불일치. (vCenter, A, B) 로 묶어 대수를 센다(8묶음 상한). 판정 규칙은 바꾸지 않는다 — 원천을 사용자가 한쪽으로 맞춘다:
+ *   '수집 서버를 B 로 매칭' 이면 사용자 매칭이 엣지 태그 · 이름 맞춤보다 먼저라 모든 서버가 B, 'vCenter 를 A 에 할당' 이면 B 가 A 가 된다.
+ * @returns {Array<{vcenterId:string, vcenterName:string, datacenterId:string, datacenterName:string, serverDatacenterId:string, serverDatacenterName:string, servers:number}>}
+ */
+export function dcConflictsOf(c, { assign, serversOf, tagVc, vcName, datacenters } = {}) {
+  if (!c || !assign || typeof assign !== 'object' || typeof serversOf !== 'function') return [];
+  const lowAssign = new Map(Object.entries(assign).map(([k, v]) => [String(k), String(v || '')]));
+  const nameOf = (id) => String((datacenters || []).find((d) => String(d.id) === String(id))?.name || id);
+  const own = String(c.vcenterId || '').trim();
+  const groups = new Map();
+  for (const s of serversOf(String(c.id)) || []) {
+    const a = String(s?.datacenterId || '').trim();
+    if (!a) continue;
+    const tag = String(s?.serviceTag || s?.inv?.system?.serviceTag || '').trim().toLowerCase();
+    const vc = own || String(s?.vcenterId || '').trim() || (tag && typeof tagVc === 'function' ? String(tagVc(tag) || '') : '');
+    if (!vc) continue;
+    const b = lowAssign.get(vc) || '';
+    if (!b || b.toLowerCase() === a.toLowerCase()) continue;
+    const k = `${vc}\u0000${a}\u0000${b}`;
+    const g = groups.get(k) || { vcenterId: vc, vcenterName: (typeof vcName === 'function' && vcName(vc)) || vc, datacenterId: b, datacenterName: nameOf(b), serverDatacenterId: a, serverDatacenterName: nameOf(a), servers: 0 };
+    g.servers += 1; groups.set(k, g);
+  }
+  return [...groups.values()].sort((x, y) => y.servers - x.servers || x.vcenterId.localeCompare(y.vcenterId)).slice(0, 8);
+}
+
+export function dcMatchContext() {
+  let assign = {}; try { assign = getDatacenterAssign() || {}; } catch { assign = {}; }
+  const vcNames = new Map(((store.get()?.vcenters) || []).map((v) => [String(v.id), String(v.name || v.id)]));
+  const byCollector = new Map();
+  try {
+    for (const s of remoteServersResolved()) {
+      const cid = String(s?.collectorId || ''); if (!cid) continue;
+      if (!byCollector.has(cid)) byCollector.set(cid, []);
+      byCollector.get(cid).push(s);
+    }
+  } catch { /* 원격 목록을 못 읽으면 불일치를 말하지 않는다(지어내지 않는다) */ }
+  let tags = new Map(); try { tags = hostVcByTag(); } catch { tags = new Map(); }
+  return { assign, serversOf: (cid) => byCollector.get(cid) || [], tagVc: (t) => tags.get(t) || '', vcName: (id) => vcNames.get(String(id)) || '' };
+}
+
 export function registerCollectorsDc(adminRouter) {
 
 // ---- Distributed collection: remote collector agents ----------------------
@@ -137,13 +207,22 @@ export function registerCollectorsDc(adminRouter) {
 // List registered collectors (tokens redacted) + live pull status.
 adminRouter.get('/collectors', adminOnly, fleetOnly, (_req, res) => {
   const collectors = listCollectors();
+  // v2.972: 수집 서버마다 지금 쓰이는 법인(DataCenter)과 그 근거 — 사용자 매칭(manual) · 이름 맞춤(name) · 없음('') + 매칭한 법인이 지워졌는지(stale).
+  //   판정은 insights/analysisServers.js collectorToDatacenterMap 과 같은 순서다(테스트가 대조). 화면은 이 값으로만 '자동(→ X)' 을 그린다.
+  let dcMatch = {};
+  try { dcMatch = collectorDcMatch(collectors, listDatacenters() || [], dcMatchContext()); } catch { dcMatch = {}; }   // v2.986: + 불일치(conflicts)
   // v2.771(점검 R6-F4-2): 등록부를 읽지 못했으면 빈 목록이 '등록 없음' 으로 보이지 않게 사유 요약(원문 없음)을 함께 싣는다.
   // v2.775: 마지막 자동 적용의 수집 서버 push 결과(재시작 전에 파일로 남긴 것)를 상태에 합치고, 요약(autoPush)을 함께 싣는다 — 화면이 '왜 자동 업그레이드가 안 됐는지' 를 말한다.
   const lr = upgradeManager.lastResult;
   const cp = lr?.collectorPush;
-  const autoPush = cp && Number.isFinite(Number(lr.at)) ? { at: lr.at, version: lr.version || null, total: cp.total ?? 0, ok: cp.ok ?? 0, ...(cp.skipped ? { skipped: cp.skipped } : {}) } : null;
+  // 87회차 ⓒ(86회차 남긴 것 — 권장안): '이미 최신'(엣지가 /dl 로 먼저 올라감 — 실패가 아니다 · v2.859) · '설치 대기'(ok 이지만 아직 설치 전 · 51회차 #3) 수를 따로 싣는다 —
+  //   예전 한 줄은 ok 만 세어 이미 최신 엣지를 '실패' 로 셌다(화면 'n/m 성공 — 실패한 서버는…'). 항목은 64개까지라(summarizeCollectorPush) 그 안에서 센다.
+  const cpItems = Array.isArray(cp?.items) ? cp.items : [];
+  const upToDate = cpItems.filter((i) => i && i.ok !== true && i.upToDate === true).length;
+  const deferred = cpItems.filter((i) => i && i.ok === true && i.deferred === true).length;
+  const autoPush = cp && Number.isFinite(Number(lr.at)) ? { at: lr.at, version: lr.version || null, total: cp.total ?? 0, ok: cp.ok ?? 0, ...(upToDate ? { upToDate } : {}), ...(deferred ? { deferred } : {}), ...(cp.skipped ? { skipped: cp.skipped } : {}) } : null;
   // v2.865 C: 엣지 자동 업그레이드 동기화 상태(켜짐·다음·마지막·뒤처진 엣지) — 수집 서버 화면이 한 줄로 말하고 '구버전 엣지 밀어 넣기' 버튼을 연다.
-  res.json({ collectors, loadError: registryLoadErrorSummary(), status: mergeAutoPushStatus(allCollectorStatus(), lr), autoPush, identity: agentIdentitySummary(), transport: transportView(collectors), edgeSync: upgradeManager.edgeSync.status() });
+  res.json({ collectors, dcMatch, loadError: registryLoadErrorSummary(), status: mergeAutoPushStatus(allCollectorStatus(), lr), autoPush, identity: agentIdentitySummary(), transport: transportView(collectors), edgeSync: upgradeManager.edgeSync.status() });
 });
 
 adminRouter.post('/collectors', adminOnly, fleetOnly, (req, res) => {
@@ -151,7 +230,7 @@ adminRouter.post('/collectors', adminOnly, fleetOnly, (req, res) => {
   const t0 = Date.now();
   const result = addCollector(req.body || {}, { managed: true, transport: adminTransport(req) });
   if (result.ok) { ensureCollectorDatacenter(result.collector); pullNow().catch(() => {}); logAudit({ user: req.user?.username, action: '수집 서버 등록', target: result.collector?.id || '', detail: `url=${result.collector?.url || ''} vcenterId=${result.collector?.vcenterId || ''}${httpExceptionAudit(result.collector, t0)}`, ip: req.ip || '' }); }
-  res.status(result.ok ? 201 : 400).json(result);
+  res.status(result.ok ? 201 : (result.status || 400)).json(result);   // 97회차 F3: 등록부 읽기 오류는 409
 });
 
 adminRouter.put('/collectors/:id', adminOnly, fleetOnly, (req, res) => {
@@ -166,7 +245,29 @@ adminRouter.put('/collectors/:id', adminOnly, fleetOnly, (req, res) => {
     pullNow().catch(() => {});
     logAudit({ user: req.user?.username, action: '수집 서버 수정', target: req.params.id, detail: `url=${result.collector?.url || ''} vcenterId=${result.collector?.vcenterId || ''}${httpExceptionAudit(result.collector, t0)}`, ip: req.ip || '' });
   }
-  res.status(result.ok ? 200 : 400).json(result);
+  res.status(result.ok ? 200 : (result.status || 400)).json(result);   // 97회차 F3: 등록부 읽기 오류는 409
+});
+
+// v2.972(사용자 요청 '수집 서버 agent 와 datacenter id 를 사용자가 매칭하는 기능'): 이 수집 서버(Agent)가 수집한 서버의 법인(DataCenter).
+// body: { datacenterId } — '' = 매칭 해제(이름 맞춤으로). 수동 고정(managed)을 바꾸지 않는다(엣지 자기등록의 URL · 토큰 갱신을 막지 않게) · 이 값을 쓰는 길은 여기 하나다 —
+// 엣지 자기등록 · 관리자 폼 · CSV 가져오기는 이 값을 덮지 않는다(registry.js normalize 가 이어받는다). 없는 법인은 400 · 등록부를 못 읽으면 503.
+// 반증 F4: 전 법인 판정을 바꾸는 쓰기라 조회 ∧ 쓰기 모두 전체 범위(fullReadWriteScopeOnlyWith — v2.904 규칙). F5: datacenterId 는 문자열만('' = 해제) — 없거나 다른 형이면 400.
+adminRouter.put('/collectors/:id/datacenter', adminOnly, fullReadWriteScopeOnlyWith('수집 서버의 법인 매칭은 전 법인 판정을 바꾸므로 조회 · 쓰기 모두 전체 범위(vCenter 제한 없는) 관리자만 바꿀 수 있습니다.'), (req, res) => {
+  const b = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : null;
+  if (!b || typeof b.datacenterId !== 'string') return res.status(400).json({ ok: false, reason: 'datacenterId(문자열 — 해제는 빈 문자열)가 필요합니다.' });
+  const dc = b.datacenterId;
+  let valid = new Set();
+  try { valid = new Set((listDatacenters() || []).map((d) => String(d.id))); } catch { valid = new Set(); }
+  if (dc.trim() && !valid.size) return res.status(503).json({ ok: false, reason: '법인(DataCenter) 목록이 비어 있거나 읽지 못했습니다 — 설정 › DataCenter(법인)를 먼저 확인하세요.' });
+  const r = setCollectorDatacenterId(req.params.id, dc, valid);
+  if (!r.ok) return res.status(r.status || 400).json({ ok: false, reason: r.reason, ...(r.code ? { [r.code]: true } : {}) });
+  if (r.changed) {
+    logAudit({ user: req.user?.username, action: '수집 서버 법인 매칭', target: req.params.id, detail: r.collector?.datacenterId ? `→ ${r.collector.datacenterId}` : '해제(이름 맞춤)', ip: req.ip || '' });
+    pullNow().catch(() => {});   // 다음 화면에서 원격 서버 법인이 바로 바뀌게(원격 목록의 datacenterId 해석은 읽을 때 하지만, 상태를 새로 받아 둔다)
+  }
+  let dcMatch = {};
+  try { dcMatch = collectorDcMatch([r.collector], listDatacenters() || [], dcMatchContext()); } catch { dcMatch = {}; }
+  res.json({ ok: true, changed: r.changed, collector: r.collector, match: dcMatch[r.collector.id] || null });
 });
 
 adminRouter.delete('/collectors/:id', adminOnly, fleetOnly, (req, res) => {
@@ -177,7 +278,7 @@ adminRouter.delete('/collectors/:id', adminOnly, fleetOnly, (req, res) => {
     clearCollectorStatus(req.params.id);  // v2.583 #31: 수집 상태도(원격 호스트 0개인 수집기는 정리 루프가 못 만난다)
     logAudit({ user: req.user?.username, action: '수집 서버 삭제', target: req.params.id, ip: req.ip || '' });
   }
-  res.status(result.ok ? 200 : 404).json(result);
+  res.status(result.ok ? 200 : (result.status || 404)).json(result);   // 97회차 F3: 등록부 읽기 오류는 409
 });
 
 /* ── 수집 서버 CSV 일괄 관리(v2.338, 사용자 요구) — 내보내기·샘플·가져오기. ───────────────
@@ -346,32 +447,36 @@ adminRouter.get('/datacenters', adminOnly, (req, res) => {
   // 백필: 등록된 수집 서버의 데이터센터를 DataCenter 목록에 없으면 자동 생성(이미 등록된 OC1 같은
   // 수집기도 재등록 없이 '스캔 대역 추가' 등에서 바로 보이게 한다). idempotent.
   try { for (const c of loadCollectors()) ensureCollectorDatacenter(c); } catch { /* best effort */ }
-  res.json({ datacenters: listDatacenters(), assign: getDatacenterAssign() });
+  // 결정(56~75 남긴 것) 73 ①: 등록부를 못 읽었으면 표지(사유 요약) — 그동안 법인 추가 · 할당 · 순서 저장은 409(백필도 건너뜀).
+  const le = datacentersLoadError();
+  res.json({ datacenters: listDatacenters(), assign: getDatacenterAssign(), ...(le ? { loadError: le } : {}) });
 });
 adminRouter.post('/datacenters', adminOnly, fleetOnly, (req, res) => {
   const r = addDatacenter(req.body || {});
   if (r.ok) logAudit({ user: req.user?.username, action: 'DataCenter 등록', target: r.datacenter?.id || '', detail: r.datacenter?.name || '', ip: req.ip || '' });
-  res.status(r.ok ? 201 : 400).json(r);
+  res.status(r.ok ? 201 : r.code === 'settings-unreadable' ? 409 : 400).json(r);   // 73 ①: 파일을 못 읽은 동안은 409
 });
 // '/datacenters/assign'을 '/:id'보다 먼저 둬야 라우트 충돌이 없다.
-adminRouter.put('/datacenters/assign', adminOnly, fleetOnly, (req, res) => {
+// v2.986(반증 D4): vCenter → 법인 할당은 전 법인 판정을 바꾸는 쓰기 — 조회 ∧ 쓰기 모두 전체 범위(수집 서버 매칭 PUT 과 같은 게이트 · v2.904 규칙).
+//   예전 fleetOnly 는 조회 범위만 봐서 writeVcenters 로 쓰기만 줄인 관리자가 쓰기 범위 밖 vCenter 의 법인을 바꿀 수 있었다.
+adminRouter.put('/datacenters/assign', adminOnly, fullReadWriteScopeOnlyWith('vCenter 의 법인 할당은 전 법인 판정을 바꾸므로 조회 · 쓰기 모두 전체 범위(vCenter 제한 없는) 관리자만 바꿀 수 있습니다.'), (req, res) => {
   const entries = Array.isArray(req.body?.entries) ? req.body.entries.slice(0, 5000) : [];
   if (!entries.length) return res.status(400).json({ ok: false, reason: 'entries가 비었습니다.' });
   const r = setVcenterDatacenterMany(entries);
   // v2.632 AX3-08: 모양이 전부 틀렸으면 400 — 원소는 [vcenterId, datacenterId] 또는 {vcenterId, datacenterId}.
   if (r.ok && r.malformed === entries.length) return res.status(400).json({ ok: false, reason: 'entries 원소는 [vcenterId, datacenterId] 또는 {vcenterId, datacenterId} 형식이어야 합니다.', malformed: r.malformed });
   if (r.ok) logAudit({ user: req.user?.username, action: 'vCenter→DataCenter 할당', target: `${r.changed}건`, ip: req.ip || '' });
-  res.status(r.ok ? 200 : 400).json(r);
+  res.status(r.ok ? 200 : r.code === 'settings-unreadable' ? 409 : 400).json(r);   // 73 ①
 });
 adminRouter.put('/datacenters/:id', adminOnly, fleetOnly, (req, res) => {
   const r = updateDatacenter(req.params.id, req.body || {});
   if (r.ok) logAudit({ user: req.user?.username, action: 'DataCenter 수정', target: req.params.id, ip: req.ip || '' });
-  res.status(r.ok ? 200 : 400).json(r);
+  res.status(r.ok ? 200 : r.code === 'settings-unreadable' ? 409 : 400).json(r);   // 73 ①
 });
 adminRouter.delete('/datacenters/:id', adminOnly, fleetOnly, (req, res) => {
   const r = removeDatacenter(req.params.id);
   if (r.ok) logAudit({ user: req.user?.username, action: 'DataCenter 삭제', target: req.params.id, ip: req.ip || '' });
-  res.status(r.ok ? 200 : 404).json(r);
+  res.status(r.ok ? 200 : r.code === 'settings-unreadable' ? 409 : 404).json(r);   // 73 ①
 });
 // DataCenter 표시 순서(vCenter 순서와 동일한 개념) — 모든 'DataCenter 선택' 목록에 적용.
 adminRouter.get('/datacenter-order', adminOnly, (req, res) => {
@@ -392,7 +497,7 @@ adminRouter.put('/datacenter-order', adminOnly, fleetOnly, (req, res) => {
   if (!ids.length && body.clear !== true) return res.status(400).json({ ok: false, reason: '빈 순서는 저장하지 않습니다 — 순서를 초기화하려면 clear:true 를 보내세요.' });
   const r = saveDatacenterOrder(ids);
   if (r.ok) logAudit({ user: req.user?.username, action: 'DataCenter 순서 변경', detail: `${(r.order || []).length}개`, ip: req.ip || '' });
-  res.status(r.ok ? 200 : 400).json(r);
+  res.status(r.ok ? 200 : r.code === 'settings-unreadable' ? 409 : 400).json(r);   // 73 ①
 });
 
 // 현재 하드웨어 + NIC 추가용 네트워크 목록.
@@ -448,8 +553,13 @@ adminRouter.post('/vm/:id/reconfig', requirePerm('vm.reconfig'), async (req, res
   for (const a of plan.diskAdds) {
     if (a.datastore && !validDs.has(a.datastore)) return res.status(400).json({ ok: false, reason: `데이터스토어 '${a.datastore}'를 찾을 수 없습니다(이 vCenter의 데이터스토어를 선택하세요).` });
   }
+  // 결정(56~75 남긴 것) 74 ④: 같은 VM 의 사양 변경이 진행 중이면 두 번째 요청은 409 — 화면 잠금만으로는 두 탭 · 두 사람이 디스크 · NIC 추가를 겹쳐 보냈다.
+  //   잠금은 끝나면(성공 · 실패 · 예외) 풀리고, 멈춘 요청의 잠금은 시한(reconfig.js RECONFIG_LOCK_TTL_MS) 뒤 새 요청이 가져간다.
+  const unlock = tryLockVmReconfig(t.vm.id);
+  if (!unlock) return res.status(409).json(reconfigBusyBody(t.vm.id));   // 반증 후속 ②: 앞 작업이 시간 초과 뒤 확인 중이면 그 사실을 말한다
   try {
-    const r = await reconfigVm(t.vc, t.moref, plan);
+    // 반증 후속 ②: 결과 대기가 시간 초과면 잠금을 풀지 않고 같은 세션으로 그 작업을 잠금 시한까지 확인한다(finally 의 unlock 은 그동안 무시된다).
+    const r = await reconfigVm(t.vc, t.moref, plan, { onTimeout: (p) => unlock.holdUntil(p), extraWaitMs: unlock.remainingMs() });
     logAudit({
       user: req.user?.username, action: 'VM 사양 변경',
       target: t.vm.name,
@@ -462,7 +572,7 @@ adminRouter.post('/vm/:id/reconfig', requirePerm('vm.reconfig'), async (req, res
     logAudit({ user: req.user?.username, action: 'VM 사양 변경', target: t.vm.name, detail: `오류: ${e.message}`, ip: req.ip || '' });
     if (e?.status === 409) return res.status(409).json({ ok: false, reason: e.message, ...onDemandErrorFields(e) });   // v2.743(VC-03)
     res.status(502).json({ ok: false, reason: e.message });
-  }
+  } finally { unlock(); }
 });
 
 // Trigger an immediate pull of all collectors.
@@ -486,6 +596,13 @@ adminRouter.post('/collectors/upgrade', adminOnly, fleetOnly, async (req, res) =
   res.json({ ok: true, version: bundle.version, source: bundle.source, pushed: results.length, succeeded: ok, results });
 });
 
+/** 100회차: 시험 주소 비교 열쇠 — 스킴 기본값(https://) · 앞뒤 공백 · 대소문자 · 끝 슬래시를 같게 본다(정규식 반복 없이 — 외부 입력). */
+function collectorUrlKey(u) {
+  const t = withDefaultScheme(String(u ?? '').trim()).toLowerCase();
+  let end = t.length;
+  while (end > 0 && t.charCodeAt(end - 1) === 47) end -= 1;   // '/'
+  return t.slice(0, end);
+}
 // Test connectivity to one collector (saved by id, or an ad-hoc {url, token}).
 adminRouter.post('/collectors/test', adminOnly, fleetOnly, async (req, res) => {
   const body = req.body || {};
@@ -494,6 +611,11 @@ adminRouter.post('/collectors/test', adminOnly, fleetOnly, async (req, res) => {
     const saved = loadCollectors().find((c) => c.id === body.id);
     // v2.480(3차 감사 S2): 저장 토큰을 물려받으면 URL 도 저장값으로 고정 — 임의 URL 에 저장 토큰을 헤더로 보내던 경로 차단
     // (토큰 열람은 소유자 전용인데 전송은 admin 이었다). 새 URL 을 시험하려면 토큰도 함께 입력해야 한다.
+    // 100회차(98회차 남긴 것 ③ — 결정 · 91ⓐ · 98 F2 와 같은 규칙): 저장 토큰을 쓸 때 본문 주소가 저장 주소와 다르면 예전에는 조용히 저장 주소로 바꿔 시험해
+    //   '입력한 주소' 의 결과처럼 보였다(편집 폼에서 URL 만 고치고 시험 → 옛 주소 성공). 이제 거절하고 토큰 입력 · 저장 뒤 시험을 안내한다(비밀은 보내지 않는다).
+    if (saved && !token && saved.token && url != null && String(url).trim() !== '' && collectorUrlKey(url) !== collectorUrlKey(saved.url)) {
+      return res.json({ ok: false, method: 'carry-refused', code: 'carry-refused', reason: '입력한 URL 이 저장된 주소와 달라 저장된 토큰을 쓰지 않습니다 — 새 주소를 시험하려면 토큰을 함께 입력하거나, 먼저 저장한 뒤 시험하세요.' });
+    }
     if (saved) { if (!token) { token = saved.token; url = saved.url; } else { url = url || saved.url; } }
   }
   if (!url) return res.status(400).json({ ok: false, reason: 'url이 필요합니다.' });

@@ -7,7 +7,9 @@ import { fetchJson, postJson } from '../../api.js';
 import { ErrorBox, Loading } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
-import { deviceRows, flowRows, flowKpis, jobTitle, jobTone, traceLines, isJobActive, hbaOptions, targetOptions, timeText, existingPairs, cycleText, deadlineText } from './sanFlowText.js';
+import { deviceRows, flowRows, flowKpis, jobTitle, jobTone, traceLines, isJobActive, hbaOptions, targetOptions, timeText, existingPairs, cycleText, deadlineText, CONFIRM } from './sanFlowText.js';
+import { unreadMarkOf, registryEmptyText } from '../settingsUnread.js';   // 133회차: 등록부를 못 읽은 동안의 빈 목록을 ‘등록 없음’ 으로 말하지 않는다
+import useSearchHandoff from '../../hooks/useSearchHandoff.js';   // v2.955 어레이 포트 WWN 인계(SAN 스토리지 성능 상세 → 타깃 미리 고르기)
 
 const OTP_IN = { width: 120 };
 const WRAP = { whiteSpace: 'normal', overflowWrap: 'anywhere', maxWidth: '100%' };   // 긴 작업 제목 · 버튼이 좁은 화면에서 넘치지 않게(400px 가로 넘침 31px — 화면 판독)
@@ -20,6 +22,8 @@ function CreateForm({ dev, existing = [], onStarted, onClose }) {
   const [cand, setCand] = useState({ d: null, error: null });
   const [hba, setHba] = useState('');
   const [picked, setPicked] = useState([]);
+  const [pre, setPre] = useState('');   // v2.955 SAN 스토리지 성능 상세가 넘긴 어레이 포트 WWN(쉼표) — 타깃 목록이 생기면 그것부터 고른다
+  useSearchHandoff('san-flow:targets', setPre);
   const [pv, setPv] = useState({ d: null, error: '' });
   const [otp, setOtp] = useState('');
   const [busy, setBusy] = useState(false);
@@ -47,7 +51,12 @@ function CreateForm({ dev, existing = [], onStarted, onClose }) {
   const targets = targetOptions(cur);
   // 이미 같은 정의(이 스위치 · 이 초기자 · 이 타깃)의 활성 포탈 플로우가 있는 타깃은 고르지 못한다 — 서버도 같은 규칙으로 거부한다.
   const has = new Set(existingPairs(existing, dev.id, cur?.wwn));
-  useEffect(() => { setPicked(targets.filter((t) => !has.has(t.wwn)).slice(0, 1).map((t) => t.wwn)); }, [hba, cand.d]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const want = new Set(String(pre || '').split(',').map(normWwnKey).filter(Boolean));
+    const avail = targets.filter((t) => !has.has(t.wwn));
+    const hit = want.size ? avail.filter((t) => want.has(normWwnKey(t.wwn))).slice(0, 8) : [];
+    setPicked((hit.length ? hit : avail.slice(0, 1)).map((t) => t.wwn));
+  }, [hba, cand.d, pre]); // eslint-disable-line react-hooks/exhaustive-deps
   // 미리보기 — 서버가 만들기와 같은 판정 · 같은 명령 조립으로 답한다(스위치는 건드리지 않는다).
   useEffect(() => {
     const my = ++pvSeq.current;
@@ -118,6 +127,9 @@ function CreateForm({ dev, existing = [], onStarted, onClose }) {
   );
 }
 
+/** WWN 비교 키 — 구분자 · 대소문자 무시(port_meta 의 WWN 과 타깃 후보의 WWN 표기가 다를 수 있다). */
+const normWwnKey = (v) => String(v || '').toLowerCase().replace(/[^0-9a-f]/g, '');
+
 export default function SanFlowTool() {
   const [st, setSt] = useState({ d: null, error: null });
   const [form, setForm] = useState(null);           // 만들기 폼을 연 스위치 id
@@ -156,17 +168,19 @@ export default function SanFlowTool() {
       .then((r) => { if (r?.ok) { setAct({ busy: '', msg: '', error: '' }); started(r.id); } else setAct({ busy: '', msg: '', error: r?.reason || '실패' }); })
       .catch((e) => setAct({ busy: '', msg: '', error: e?.message || String(e) }));
   };
+  // OTP 확인 줄의 실행 — 지우기 · 비활성화 · 다시 켜기는 작업(기록 폴링), 기록 정리는 즉시(작업 없음 — 목록을 다시 읽는다).
   const doDelete = () => {
     const x = del; setDel(null);
-    if (x.forget) {
-      // 등록부에 없는 스위치 — 장비 명령 없이 기록만 정리(작업 기록이 없다 — 목록을 다시 읽는다)
+    const c = CONFIRM[x.mode] || CONFIRM.delete;
+    if (x.mode === 'forget') {
       setAct({ busy: `forget:${x.name}`, msg: '', error: '' });
-      postJson('/tools/san-flow/forget', { deviceId: x.deviceId, name: x.name, otp: delOtp })
+      postJson(c.path, { deviceId: x.deviceId, name: x.name, otp: delOtp })
         .then((r) => { setAct({ busy: '', msg: '', error: r?.ok ? '' : (r?.reason || '실패') }); load(); })
         .catch((e) => setAct({ busy: '', msg: '', error: e?.message || String(e) }));
-    } else run('/tools/san-flow/delete', { deviceId: x.deviceId, name: x.name, otp: delOtp }, `del:${x.name}`);
+    } else run(c.path, { deviceId: x.deviceId, name: x.name, otp: delOtp }, `${x.mode}:${x.name}`);
     setDelOtp('');
   };
+  const ask = (f, mode) => { setDel({ deviceId: f.deviceId, name: f.name, mode }); setDelOtp(''); };
 
   if (st.error && !st.d) return <ErrorBox error={st.error} />;
   if (!st.d) return <Loading />;
@@ -215,20 +229,32 @@ export default function SanFlowTool() {
         <div className="hd-card-h"><b>플로우 결과</b><span className="muted">flow --show 누적 카운터의 직전 두 번 차이 · ESXi 경로 실측(같은 HBA · 타깃)과 비교는 시점이 달라 참고값</span></div>
         {del && (
           <div className="flex wrap" style={{ gap: 8, alignItems: 'center', marginBottom: 8 }}>
-            <span style={{ minWidth: 0 }}>{del.forget ? `‘${del.name}’ 기록만 정리합니다(스위치가 등록부에 없어 장비에는 명령을 보내지 않습니다) —` : `‘${del.name}’ 을 스위치에서 지웁니다 —`}</span>
-            <input className="input mono" style={OTP_IN} inputMode="numeric" autoComplete="one-time-code" placeholder="본인 OTP" aria-label="본인 OTP(지우기)" value={delOtp} onChange={(e) => setDelOtp(otpClean(e.target.value))} />
-            <button type="button" className="btn danger" onClick={doDelete}>{del.forget ? '기록 정리' : '지우기'}</button>
+            <span style={{ minWidth: 0 }}>{(CONFIRM[del.mode] || CONFIRM.delete).text(del.name)}</span>
+            <input className="input mono" style={OTP_IN} inputMode="numeric" autoComplete="one-time-code" placeholder="본인 OTP" aria-label={`본인 OTP(${(CONFIRM[del.mode] || CONFIRM.delete).button})`} value={delOtp} onChange={(e) => setDelOtp(otpClean(e.target.value))} />
+            <button type="button" className={`btn${(CONFIRM[del.mode] || CONFIRM.delete).danger ? ' danger' : ' primary'}`} onClick={doDelete}>{(CONFIRM[del.mode] || CONFIRM.delete).button}</button>
             <button type="button" className="btn" onClick={() => { setDel(null); setDelOtp(''); }}>취소</button>
           </div>
         )}
         <div className="table-wrap">
           <STable minWidth={1080}>
-            <thead><tr><th>플로우</th><th>상태</th><th>지금 Rx / Tx</th><th>ESXi 실측 대비</th><th>호스트 · HBA</th><th>SID → DID</th><th>스토리지</th><th>누적 바이트</th><th>스위치</th><th data-nosort>동작</th></tr></thead>
+            <thead><tr><th>플로우</th><th>상태</th><th data-nosort>동작</th><th>지금 Rx / Tx</th><th>ESXi 실측 대비</th><th>호스트 · HBA</th><th>SID → DID</th><th>스토리지</th><th>누적 바이트</th><th>스위치</th></tr></thead>
             <tbody>
               {flows.map((f) => (
                 <tr key={f.key}>
                   <td className="mono" style={{ fontSize: 12 }}>{f.name}</td>
-                  <td data-sort={f.state.label} title={[f.state.note, f.lastError].filter(Boolean).join(' — ') || undefined}><span className={`badge ${f.state.tone}`}>{f.state.label}</span>{f.lastError ? <div className="muted" style={{ fontSize: 11, maxWidth: 220, overflowWrap: 'anywhere' }}>{f.lastError}</div> : null}</td>
+                  <td data-sort={f.state.label} title={[f.state.note, f.lastError, f.rawSample ? `장비 출력 앞부분:\n${f.rawSample}` : ''].filter(Boolean).join(' — ') || undefined}><span className={`badge ${f.state.tone}`}>{f.state.label}</span>{f.lastError ? <div className="muted" style={{ fontSize: 11, maxWidth: 220, overflowWrap: 'anywhere' }}>{f.lastError}</div> : null}</td>
+                  {/* 동작은 상태 바로 뒤 — 표가 넓어(1440px 에서도 가로 스크롤) 맨 끝에 두면 버튼이 처음 화면 밖에 있었다(v2.940 Chromium 판독) */}
+                  <td>
+                    {f.canDelete || f.canForget || f.canDeactivate || f.canActivate || f.toggleLocked ? (
+                      <div className="flex wrap" style={{ gap: 6 }}>
+                        {f.canDeactivate ? <button type="button" className="btn" disabled={!!act.busy} onClick={() => ask(f, 'deactivate')} title="모니터만 끕니다(플로우는 장비에 남습니다)">비활성화</button> : null}
+                        {f.canActivate ? <button type="button" className="btn" disabled={!!act.busy} onClick={() => ask(f, 'activate')}>다시 켜기</button> : null}
+                        {f.toggleLocked ? <span className="muted" title={f.toggleIssue}>끄기 · 켜기 잠김(엣지 버전)</span> : null}
+                        {f.canDelete ? <button type="button" className="btn danger" disabled={!!act.busy} onClick={() => ask(f, 'delete')}>지우기</button> : null}
+                        {f.canForget ? <button type="button" className="btn" disabled={!!act.busy} onClick={() => ask(f, 'forget')} title="스위치가 등록부에 없습니다 — 장비 명령 없이 기록만 정리">기록 정리</button> : null}
+                      </div>
+                    ) : <span className="muted">—</span>}
+                  </td>
                   <td data-sort={f.rateSort} className="tabular">{f.rate}</td>
                   <td data-sort={f.diffSort ?? undefined} className="tabular" title={`ESXi 경로 실측 ${f.esxi}`} style={f.diffWarn ? { color: 'var(--amber, #fbbf24)' } : undefined}>{f.diff}{f.diffWarn ? ' △' : ''}</td>
                   <td>{f.host}</td>
@@ -236,9 +262,6 @@ export default function SanFlowTool() {
                   <td>{f.target}</td>
                   <td data-sort={f.bytesSort} className="tabular">{f.bytes}</td>
                   <td className="muted">{f.sw}</td>
-                  <td>{f.canDelete ? <button type="button" className="btn danger" disabled={!!act.busy} onClick={() => { setDel({ deviceId: f.deviceId, name: f.name }); setDelOtp(''); }}>지우기</button>
-                    : f.canForget ? <button type="button" className="btn" disabled={!!act.busy} onClick={() => { setDel({ deviceId: f.deviceId, name: f.name, forget: true }); setDelOtp(''); }} title="스위치가 등록부에 없습니다 — 장비 명령 없이 기록만 정리">기록 정리</button>
-                      : <span className="muted">—</span>}</td>
                 </tr>
               ))}
             </tbody>
@@ -285,7 +308,7 @@ export default function SanFlowTool() {
           </STable>
         </div>
         {swRows.length > SW_LIMIT ? <button type="button" className="btn" style={{ marginTop: 8 }} onClick={() => setShowAll((v) => !v)}>{showAll ? `처음 ${SW_LIMIT}대만` : `${swRows.length}대 모두 보기`}</button> : null}
-        {!devs.length ? <div className="muted" style={{ padding: 8 }}>등록된 SAN 스위치가 없습니다(SAN 스위치 모니터링에서 등록).</div> : null}
+        {!devs.length ? <div className="muted" style={{ padding: 8 }}>{registryEmptyText(unreadMarkOf(d), 'SAN 스위치 등록부') || '등록된 SAN 스위치가 없습니다(SAN 스위치 모니터링에서 등록).'}</div> : null}
       </div>
 
     </div>

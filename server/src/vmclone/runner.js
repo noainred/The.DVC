@@ -51,7 +51,7 @@ import { morefOf } from '../vcenter/registry.js';
 import { fileStamp, localStamp } from '../util/dayKey.js';   // v2.447: 콜론 포함 vcenterId 안전(감사 B1)
 import { snapshotTreeList } from './snapTree.js';
 import { vcAuthGuard, isVcAuthError } from '../vcenter/restClient.js';
-import { authStopView } from '../util/authGuard.js';
+import { authStopView, authStopText, isUnreadStop } from '../util/authGuard.js';
 
 // v2.447(감사 B1): 로컬 split(':') 헬퍼 제거 — vcenterId 에 콜론이 있으면 잘못된 MoRef 로
 // 스냅샷/클론을 시도하게 된다. 공용 morefOf(id, vcenterId) 사용.
@@ -392,11 +392,12 @@ async function runJobBody(jobId, trigger) {
     if (trigger === 'schedule' || trigger === 'resume') {
       const st = vcAuthGuard.peekAuthStop(vcCfg);
       if (st) {
-        let detail = `건너뜀 — vCenter 인증 실패로 주기 수집이 멈춰 있어 스케줄 실행을 하지 않았습니다(실패 ${st.attempts}회). 비밀번호를 고치거나 설정 › vCenter 의 연결 테스트가 성공하면 다시 실행합니다. '지금 실행' 은 막지 않습니다.`;
-        if (stale) detail += ` ${postponeRecovery(jobId, stale, 'vCenter 인증 실패 정지').text}`;
+        let detail = `건너뜀 — ${authStopText(st, `vCenter 인증 실패로 주기 수집이 멈춰 있어 스케줄 실행을 하지 않았습니다(실패 ${st.attempts}회). 비밀번호를 고치거나 설정 › vCenter 의 연결 테스트가 성공하면 다시 실행합니다.`)} '지금 실행' 은 막지 않습니다.`;
+        const why = isUnreadStop(st) ? '인증 정지 기록 읽기 오류' : 'vCenter 인증 실패 정지';   // 127회차: 못 읽음 정지를 '인증 실패 정지(0회)' 라고 적지 않는다
+        if (stale) detail += ` ${postponeRecovery(jobId, stale, why).text}`;
         recordRun(jobId, { ok: false, detail, ms: Date.now() - t0, skipped: 'auth-stopped', authStopped: authStopView(st) });
-        logAudit({ user: `vm-clone(${trigger})`, action: 'VM 복제 건너뜀(인증 정지)', target: `${job.vcenterId}/${job.vmName}`, detail: detail.slice(0, 200) });
-        console.warn(`[vmclone] ${job.vcenterId}/${job.vmName}: vCenter 인증 실패 정지 — 스케줄 실행 건너뜀(${st.attempts}회)`);
+        logAudit({ user: `vm-clone(${trigger})`, action: isUnreadStop(st) ? 'VM 복제 건너뜀(인증 정지 기록 읽기 오류)' : 'VM 복제 건너뜀(인증 정지)', target: `${job.vcenterId}/${job.vmName}`, detail: detail.slice(0, 200) });
+        console.warn(`[vmclone] ${job.vcenterId}/${job.vmName}: ${why} — 스케줄 실행 건너뜀${isUnreadStop(st) ? '' : `(${st.attempts}회)`}`);
         _running.jobId = null; _running.phase = '';
         return;
       }

@@ -31,7 +31,17 @@ function fail(res, e, next) {
   return next(e);
 }
 const rangeOf = (q) => ({ days: q.days, from: q.from, to: q.to });
-const unreadable = (res) => res.status(503).json({ ok: false, error: 'settingsUnreadable', reason: `usage-settings.json 을 읽지 못했습니다(${usageSettingsLoadError()?.reason || '손상'}) — 손상본은 .corrupt.<시각> 으로 보존했습니다. 수집 설정에서 다시 저장하면 기본값으로 시작합니다.` });
+// 릴리스 전 Chromium 검증(132~135회차 묶음): 읽기 오류(권한 · 디스크 — 원본 그대로)에도 '손상본은 .corrupt 로 보존 · 다시 저장하면 기본값' 이라고 말했다(읽기 오류에는
+//   보존본이 없고 저장도 거절된다). 그리고 본문에 code 가 없어 화면이 이 503 을 '서비스에 일시적으로 연결할 수 없습니다 · 5분 후 재시도' 로 바꿔 원인을 가렸다
+//   (web serviceDownText 는 reason · code 가 Unreadable 로 끝나는 503 만 사유 그대로 보인다) — code 를 싣는다(error 는 예전 소비처를 위해 그대로).
+const unreadable = (res) => {
+  const le = usageSettingsLoadError();
+  const why = String(le?.reason || (le?.readError ? '읽기 오류' : '손상')).slice(0, 200);
+  const reason = le?.readError
+    ? `사용 기록 설정(usage-settings.json)을 읽지 못해 집계를 내지 않았습니다(${why}) — 파일 권한 · 소유자 · 디스크를 확인하세요. 30초마다 다시 읽고, 읽히면 풀립니다(손상 보존본은 없습니다).`
+    : `usage-settings.json 을 읽지 못했습니다(${why}) — 손상본은 .corrupt.<시각> 으로 보존했습니다. 수집 설정에서 다시 저장하면 기본값으로 시작합니다.`;
+  return res.status(503).json({ ok: false, error: 'settingsUnreadable', code: 'settingsUnreadable', reason });
+};
 
 export function registerUsageAdmin(adminRouter) {
   adminRouter.get('/usage/report', ...gate, async (req, res, next) => {

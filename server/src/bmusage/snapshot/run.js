@@ -21,6 +21,30 @@ import { isAuthFailureText, isPeerRejectText } from '../../util/authGuard.js';
 import { cleanReason } from './reason.js';
 
 /** 세션 시한(연결 + 명령 — 명령 안 sleep 2초 포함). 장비 시한보다 짧은 명령 시한(산수는 테스트가 고정). */
+/**
+ * 이 서버에 스냅샷을 실행할 수 없는 이유(없으면 null) — 실행(아래 runSnapshotLocal)과 GET 표지(routes/api/bmUsage.js actions.run — 10회차 L2)가 같은 판정.
+ *   · 'demo-target'(다음 작업 ④ 2026-11-19): 데모(mock) 대상의 OS 표시는 응답 단계 합성이다(demoOs — 실제 SSH 등록이 없다). 스냅샷은 데모에서 합성하지 않는다
+ *     — 예전에는 화면이 ‘OS + iDRAC’ 이라 말하는데 실행하면 ‘OS 계정이 없습니다’(no-os-path)였다. 데모 대상에는 절대 SSH 하지 않는다(osHost 를 만들지 않는다).
+ *   · 'no-os-path': OS 등록(osHost)이 없다.
+ *   · 'auth-unresolved'(다음 작업 ⑥ · 10회차 재확인 의심 2): 키 · 공통 계정 참조를 해석하지 못했다(onboard/refs.js — 주기 수집과 같은 판정) — 예전에는 표지가 열리고 누르면 거절됐다.
+ */
+export const snapshotOsPathIssue = (target) => (target?.demoOs === true ? 'demo-target'
+  : !target?.osHost || !String(target.osHost.host || '').trim() ? 'no-os-path'
+    : target.osHost.authError ? 'auth-unresolved' : null);
+/**
+ * 엣지 대행 대상(중앙이 가진 것은 봉투의 공개 대상 — osHost 가 없다)의 같은 판정: demoOs · paths('os' = 엣지가 OS 등록을 해석함) · osAuthUnresolved(publicTarget 이
+ *   osHost.authError 로 만든 표지). 시험(bmUsageNextGb)이 snapshotOsPathIssue(x) === snapshotPublicPathIssue(publicTarget(x)) 를 대조한다.
+ *   paths 를 모르면(배열이 아님) 판정하지 않는다(null — 엣지가 다시 거절한다). 판정 재료는 **마지막으로 가져온 봉투**다(화면이 그 시각을 밝힌다 — ⑥ b).
+ */
+export const snapshotPublicPathIssue = (pt) => (pt?.demoOs === true ? 'demo-target'
+  : !Array.isArray(pt?.paths) ? null
+    : !pt.paths.includes('os') ? 'no-os-path'
+      : pt.osAuthUnresolved === true ? 'auth-unresolved' : null);
+const PATH_ISSUE_REASON = Object.freeze({
+  'demo-target': '데모 대상입니다 — 화면의 OS 값은 데모 합성이라 실제 SSH 경로가 없어 스냅샷을 실행하지 않습니다(데모에서 합성하지 않음).',
+  'no-os-path': '이 서버에는 OS 계정(베어메탈 스토리지 등록부)이 없습니다 — 스냅샷은 SSH 경로가 있어야 합니다.',
+});
+
 export const SNAPSHOT_READY_MS = 15_000;
 export const SNAPSHOT_CMD_MS = 30_000;
 export const SNAPSHOT_DEADLINE_MS = 50_000;
@@ -65,7 +89,8 @@ export async function idracSnapshotFacts(target, deps = {}) {
   try { inv = await D.getInventory(id); } catch { inv = null; }
   try { sensor = (await D.getSensorSeries(id))?.latest || null; } catch { sensor = null; }
   try { power = await D.powerLatest(id); } catch { power = null; }
-  const events = Array.isArray(inv?.events) ? inv.events.slice(0, 5).map((e) => ({ severity: String(e?.severity || '').slice(0, 16), at: String(e?.created || '').slice(0, 40), message: String(e?.message || '').slice(0, 200) })) : null;
+  // 93회차 F1: 매니저 로그(SEL · LC)를 못 읽은 인벤토리는 '이벤트 없음' 이 아니다 — null(못 읽음 · hwFacts selCritical 과 같은 판정).
+  const events = Array.isArray(inv?.events) && inv?.collections?.events !== 'failed' ? inv.events.slice(0, 5).map((e) => ({ severity: String(e?.severity || '').slice(0, 16), at: String(e?.created || '').slice(0, 40), message: String(e?.message || '').slice(0, 200) })) : null;
   const temps = sensor?.temps && typeof sensor.temps === 'object' ? Object.entries(sensor.temps).slice(0, 12).map(([name, c]) => ({ name: String(name).slice(0, 48), c: typeof c === 'number' ? c : null })) : null;
   return {
     events, eventsAt: typeof inv?.collectedAt === 'number' ? inv.collectedAt : null,
@@ -95,7 +120,9 @@ export async function runSnapshotLocal({ target, reason, by = '', settings = {},
   const r = cleanReason(reason);
   if (!r) return { ok: false, code: 'bad-reason', reason: '사유를 2자 이상 적어야 합니다(감사 기록에 남습니다).' };
   if (!target || !target.key) return { ok: false, code: 'not-found', reason: '대상 서버를 찾지 못했습니다.' };
-  if (!target.osHost || !String(target.osHost.host || '').trim()) return { ok: false, code: 'no-os-path', reason: '이 서버에는 OS 계정(베어메탈 스토리지 등록부)이 없습니다 — 스냅샷은 SSH 경로가 있어야 합니다.' };
+  // 경로 판정은 표지와 같은 함수 하나(위) — 7b: 키 · 공통 계정 참조를 해석하지 못한 서버는 접속하지 않는다(주기 수집과 같은 판정 — onboard/refs.js).
+  const pathIssue = snapshotOsPathIssue(target);
+  if (pathIssue) return { ok: false, code: pathIssue, reason: pathIssue === 'auth-unresolved' ? String(target.osHost.authError).slice(0, 300) : PATH_ISSUE_REASON[pathIssue] };
   // ⚠ 동시 1건: 검사와 등록 사이에 await 를 두지 않는다(같은 틱의 두 요청이 둘 다 통과하지 않게).
   if (_running.has(target.key)) return { ok: false, code: 'busy', reason: '이 서버의 스냅샷이 이미 실행 중입니다 — 끝난 뒤 다시 누르세요.' };
   _running.add(target.key);
@@ -125,7 +152,7 @@ export async function runSnapshotLocal({ target, reason, by = '', settings = {},
     try {
       const out = await D.withDeadline(SNAPSHOT_DEADLINE_MS, (signal) => D.withSsh({
         host: String(target.osHost.host).trim(), port: Number(target.osHost.port) || 22,
-        username: String(target.osHost.username || 'root'), password: target.osHost.password || '', privateKey: target.osHost.privateKey || undefined,
+        username: String(target.osHost.username || 'root'), password: target.osHost.password || '', privateKey: target.osHost.privateKey || undefined, passphrase: target.osHost.passphrase || undefined,
         readyTimeout: SNAPSHOT_READY_MS, signal,
       }, async ({ exec }) => exec(SNAPSHOT_COMMAND, SNAPSHOT_CMD_MS)), '진단 스냅샷 시한 초과');
       const parsed = parseSnapshot(out?.stdout || '', { topN: snapCfg.topN, dmesgLines: snapCfg.dmesgLines });

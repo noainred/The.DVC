@@ -203,8 +203,7 @@ test('A2-01 ⑦ 라우트 — 수집 성공 기록이 없으면 마지막 이벤
     await pollLogsOnce({ manual: true });
     const after = await get('/api/tools/vm-availability?vcenterId=' + encodeURIComponent(vc) + '&days=30&target=99.5');
     srv.close();
-    process.stdout.write('@@' + JSON.stringify({ now, before, after }) + '\\n');
-    process.exit(0);
+    process.stdout.write('@@' + JSON.stringify({ now, before, after }) + '\\n', () => process.exit(0));   // v3.26.0: 출력이 다 나간 뒤 종료(시연 규모 응답 수백 KB 가 파이프에서 잘렸다)
   `);
   assert.equal(o.before.status, 200);
   const v1 = o.before.b.vcenters[0];
@@ -258,8 +257,7 @@ test('A2-03 ② 라우트 — unreachable vCenter 의 호스트는 행·호스�
     ${SERVE}
     const r = await get('/api/tools/esxi-temp');
     srv.close();
-    process.stdout.write('@@' + JSON.stringify({ vcA, vcB, nB: withTemp(vcB), r }) + '\\n');
-    process.exit(0);
+    process.stdout.write('@@' + JSON.stringify({ vcA, vcB, nB: withTemp(vcB), r }) + '\\n', () => process.exit(0));   // v3.26.0: 출력이 다 나간 뒤 종료(시연 규모 응답 수백 KB 가 파이프에서 잘렸다)
   `);
   assert.equal(o.r.status, 200);
   const body = o.r.b;

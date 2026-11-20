@@ -83,14 +83,17 @@ export function summarizeHostPaths(byCounter, ids, { rtMap = new Map(), hbaByWwn
   const insts = new Set([...(rd ? rd.keys() : []), ...(wr ? wr.keys() : [])]);
   const byT = new Map();
   let unparsed = 0; let seen = 0; let truncated = false;
+  // v2.940: 못 푼 인스턴스 이름 원문 표본(최대 UNPARSED_SAMPLES · 120자) — 이름 형식이 실장비 미확인이라 처음 붙은 현장에서 형식을 확인할 근거.
+  const unparsedSamples = [];
+  const keepSample = (inst, why) => { if (unparsedSamples.length < UNPARSED_SAMPLES) unparsedSamples.push({ name: sampleText(inst), why }); };
   for (const inst of insts) {
     if (seen >= SPATH_PATHS_MAX) { truncated = true; break; }
     seen += 1;
     const k = pathKeyOf(inst);
-    if (!k) { unparsed += 1; continue; }
+    if (!k) { unparsed += 1; keepSample(inst, 'format'); continue; }
     const target = k.target || (k.tid ? rtMap.get(k.tid) || null : null);
     const adapter = k.adapter || (k.init ? hbaByWwn.get(k.init) || null : null);
-    if (!target) { unparsed += 1; continue; }
+    if (!target) { unparsed += 1; keepSample(inst, 'no-target'); continue; }
     const key = `${adapter || k.init || '?'}|${target}`;
     let T = byT.get(key);
     if (!T) {
@@ -120,11 +123,17 @@ export function summarizeHostPaths(byCounter, ids, { rtMap = new Map(), hbaByWwn
     latR: t.latRs.length ? r1(avg(t.latRs)) : null, latW: t.latWs.length ? r1(avg(t.latWs)) : null,
     paths: t.paths, partial: t.partial,
   })).sort((a, b) => String(a.adapter || '').localeCompare(String(b.adapter || ''), 'en', { numeric: true }) || a.wwn.localeCompare(b.wwn));
-  return { at, sampleSec: SPATH_SAMPLE_SEC, samples, instances: insts.size, unparsed, truncated, targets };
+  return { at, sampleSec: SPATH_SAMPLE_SEC, samples, instances: insts.size, unparsed, truncated, targets, ...(unparsedSamples.length ? { unparsedSamples } : {}) };
 }
 
 const intOr = (x, lo, hi) => { const n = Number(x); return Number.isFinite(n) ? Math.max(lo, Math.min(hi, Math.trunc(n))) : null; };
 const numOr = (x) => { const n = typeof x === 'number' ? x : typeof x === 'string' && x.trim() !== '' ? Number(x) : NaN; return Number.isFinite(n) && n >= 0 ? n : null; };
+
+/** 못 푼 인스턴스 이름 표본 수 · 글자 정리(제어문자 제거 · 120자). 엣지 정제도 같은 함수를 쓴다. */
+export const UNPARSED_SAMPLES = 5;
+// 제어문자 · 양방향 제어문자(U+202A~202E · U+2066~2069 — 글자 방향을 뒤집어 다른 이름처럼 보이게 한다 · 반증 L-4)를 지운다.
+const sampleText = (v) => String(v ?? '').replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]+/g, ' ').slice(0, 120); // eslint-disable-line no-control-regex
+const SAMPLE_WHY = new Set(['format', 'no-target']);
 
 /** 엣지가 보낸 host.spath 정제(아는 필드만 · 상한 · 수치는 수로 · 엣지 시각은 수신 시각으로 자르고 원본은 edgeAt). 모양이 아니면 null. */
 export function sanitizeHostSpath(v, now = Date.now()) {
@@ -144,5 +153,8 @@ export function sanitizeHostSpath(v, now = Date.now()) {
     at, ...(at0 != null && at0 > now ? { edgeAt: Math.trunc(at0) } : {}),
     sampleSec: intOr(v.sampleSec, 1, 3600) ?? SPATH_SAMPLE_SEC, samples: intOr(v.samples, 0, 1000) ?? 0,
     instances: intOr(v.instances, 0, 100_000) ?? 0, unparsed: intOr(v.unparsed, 0, 100_000) ?? 0, truncated: v.truncated === true, targets,
+    // v2.940: 못 푼 이름 표본 — 아는 모양만 · 상한 · 글자 정리(엣지가 보낸 것은 정제한다)
+    ...(Array.isArray(v.unparsedSamples) ? { unparsedSamples: v.unparsedSamples.slice(0, UNPARSED_SAMPLES).filter((x) => x && typeof x === 'object' && typeof x.name === 'string')
+      .map((x) => ({ name: sampleText(x.name), why: SAMPLE_WHY.has(x.why) ? x.why : 'format' })) } : {}),
   };
 }

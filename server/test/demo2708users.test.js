@@ -6,13 +6,20 @@
  * ③ Horizon 시드는 등록부가 비어 있을 때만 · `mock-` 접두 · 데모 등록에는 로그인하지 않는다
  * ④ 합성 결과가 실수집과 같은 판정 함수를 통과한다(세션 해석·누적 쌍·로그인 실패 판정·스파이크 저장 형식)
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'demo2708users-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const dir = tmpDir('demo2708users-');
 process.env.CONFIG_DIR = dir;
 
 const rt = await import('../src/runtime-settings.js');

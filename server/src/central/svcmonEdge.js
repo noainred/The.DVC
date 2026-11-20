@@ -36,13 +36,34 @@ import { noteResult, noteAlertOnly, alertKeyOf, forgetHeld, forgetAlertedWhere, 
 
 const envNum = (k, d) => { const n = Number(process.env[k]); return Number.isFinite(n) && n > 0 ? Math.round(n) : d; };
 
-/** 보고 부속 객체의 직렬화 크기 상한(16KB). 넘으면 원본 대신 {dropped, bytes} 로 그 사실을 남긴다. */
-export const EDGE_AUX_MAX_BYTES = 16 * 1024;
-function boundedObj(o) {
-  let len = 0;
-  try { len = JSON.stringify(o).length; } catch { return { dropped: true, reason: 'unserializable' }; }
-  return len > EDGE_AUX_MAX_BYTES ? { dropped: true, bytes: len } : o;
+// v2.594(EDGE2-01)의 크기 상한(boundedObj · 16KB)은 26회차 F5 의 필드 정제(cleanEdge* — 아래)로 대체됐다(정제한 값은 필드 수 · 길이가 묶인다).
+
+/*
+ * 전체 점검 26회차 F5(재현): poller · caps · log 를 크기만 보고 그대로 상주시켜 응답에 실었다 — ① caps.portalPort 가 남아 최상위 portalPort 가림(v2.595)이 무력
+ *   ② 엣지 CSV 라이터의 log.lastError(파일 경로 원문)가 범위 · viewer 계정에 나갔다 ③ 엣지가 보낸 미정의 필드도 16KB 까지 그대로. 이제 **아는 필드 · 수 · 길이 상한**으로
+ *   정제한다(엣지 svcmonPush 가 보내는 필드 그대로 — 새 필드는 여기에도 넣을 것). 가림은 auth/scopeStatus.js redactEdgeSummary.
+ */
+const capNum = (v, max) => { const n = numOrNull(v); return n == null ? null : Math.max(0, Math.min(max, n)); };
+export function cleanEdgePoller(p) {
+  const o = p && typeof p === 'object' && !Array.isArray(p) ? p : {};
+  return { tickMs: capNum(o.tickMs, 1e9), maxPerTick: capNum(o.maxPerTick, 1e7), lastSweepMs: capNum(o.lastSweepMs, 1e9), lastCount: capNum(o.lastCount, 1e7), overdueSkipped: capNum(o.overdueSkipped, 1e9), maxLagMs: capNum(o.maxLagMs, 1e12) };
 }
+export function cleanEdgeCaps(c) {
+  const o = c && typeof c === 'object' && !Array.isArray(c) ? c : {};
+  const port = numOrNull(o.portalPort);
+  return {
+    platform: text(o.platform, 32), pingMode: text(o.pingMode, 32), svcmonEnabled: o.svcmonEnabled === true,
+    portalPort: port != null && port >= 1 && port <= 65535 ? Math.round(port) : null,
+    workers: capNum(o.workers, 1024), inlineFallbacks: capNum(o.inlineFallbacks, 1e9), version: text(o.version, 40),
+  };
+}
+export function cleanEdgeLog(l) {
+  const o = l && typeof l === 'object' && !Array.isArray(l) ? l : {};
+  return { written: capNum(o.written, 1e15), dropped: capNum(o.dropped, 1e15), bytes: capNum(o.bytes, 1e18), rotations: capNum(o.rotations, 1e9), buffered: capNum(o.buffered, 1e9), bufferBytes: capNum(o.bufferBytes, 1e15), pausedUnreadable: capNum(o.pausedUnreadable, 1e15), lastError: text(o.lastError, 300) };   // 28회차 N-3: 손상 중 멈춘 기록 수
+}
+/** 26회차 F12: 엣지가 알리는 push 주기 · 점검 주기의 범위(정상 엣지는 clampIntervalMs · 저장소 TEST_FIELDS 범위로 보낸다). */
+export const EDGE_EXPECT_MS = Object.freeze({ min: 15_000, max: 24 * 3600_000 });
+export const EDGE_IV_SEC = Object.freeze({ min: 10, max: 86400 });
 
 export const MAX_AGENTS = envNum('SVCMON_EDGE_MAX_AGENTS', 64);
 /** v2.606 EDGE2606-02: 예열 완결의 GC 보류 상한(엣지 SVCMON_WARM_MAX_MS 기본 15분보다 길게). */
@@ -64,6 +85,8 @@ const RECV_SEQS_MAX = 1000;
  */
 export const META_ALERT_HOLD_MS = envNum('SVCMON_EDGE_META_ALERT_HOLD_MS', 3 * 60_000);
 const META_ALERT_HOLD_MAX_MS = 15 * 60_000;
+/** v2.988: 엣지 메타의 대상 구분 — 아는 값만(store KINDS 와 같다). */
+const KIND_OK = new Set(['infra', 'service']);
 export function metaAlertHoldMs(a) { return Math.min(META_ALERT_HOLD_MAX_MS, Math.max(META_ALERT_HOLD_MS, 2 * (Number(a?.expectMs) || 60_000))); }
 /** 시계 오차 경고 임계 — 넘어도 결과를 버리지 않는다(경고만). */
 export const SKEW_WARN_MS = envNum('SVCMON_EDGE_SKEW_WARN_MS', 60_000);
@@ -147,12 +170,26 @@ function sameNameCount(a, id, mm, win) {
   }
   return n;
 }
-/** 알림 판정용 대상·점검 정보 — 이름 키가 (창 안에서) 겹치면 dupName(=testId 키로). 메타가 없으면 이름 없이(판정 보류). */
-function alertInfoOf(a, id, win) {
+/**
+ * 알림 판정용 대상·점검 정보 — 이름 키가 (창 안에서) 겹치면 dupName(=testId 키로). 메타가 없으면 이름 없이(판정 보류).
+ * v2.954(개선 검토 2번 — v2.934 '남긴 것' ① ③): 넓은 창(이번 스냅샷을 아직 다 받지 못함)에서는 이름 중복을 **확정할 수 없는** 두 경우가 있다 —
+ *   ① 형제가 직전 완결에만 보이고 이번 스냅샷에는 아직 없다(재배정으로 GC 대기 중인 옛 id 인지, 뒤 청크로 올 진짜 형제인지 모른다)
+ *   ③ 이번 스냅샷에 메타가 오는 중이다(뒤 청크의 메타가 같은 이름 형제를 더할 수 있다).
+ *   예전에는 ①을 중복으로 ③을 유일로 정해 버려, 다 받은 뒤 키가 바뀌며 같은 실패를 한 번 더 알렸다. 이제 `dupPending` 으로 판정을 미루고
+ *   (alertKeyOf → null · 보류) 이번 스냅샷을 다 받으면(좁은 창) 다시 판정한다. 보류 시한(metaAlertHoldMs)을 넘기면 예전 판정(넓은 창 —
+ *   중복이면 testId 키 · 거짓 복구 없음)으로 확정한다. narrowSnap = 이번 snapId(넓은 창일 때만 준다).
+ */
+function alertInfoOf(a, id, win, narrowSnap = 0) {
   const mm = a.meta.get(id);
+  const dupName = !!mm && sameNameCount(a, id, mm, win) > 1;
+  let dupPending = false;
+  if (mm && narrowSnap) {
+    if (dupName) dupPending = sameNameCount(a, id, mm, new Set([narrowSnap])) <= 1;   // ① 형제가 직전 완결에만
+    else if (a.metaSnapId === narrowSnap) dupPending = true;                            // ③ 메타가 이번 스냅샷에 오는 중
+  }
   return {
-    target: { name: mm?.n, path: mm?.p, host: mm?.h },
-    test: { name: mm?.t, type: mm?.y, dupName: !!mm && sameNameCount(a, id, mm, win) > 1 },
+    target: { name: mm?.n, path: mm?.p, host: mm?.h, kind: mm?.k || '' },
+    test: { name: mm?.t, type: mm?.y, dupName, ...(dupPending ? { dupPending: true } : {}) },
   };
 }
 /** 테스트 전용 — 이름 키별 id 색인이 메타와 맞는지(metaSet/metaDelete 로만 고친다). */
@@ -238,7 +275,10 @@ export function ingestReport(agent, body, recvAt = Date.now(), net = {}) {
   a.counters.chunks += 1;
   if (sentAt) a.skewMs = recvAt - sentAt;   // 편도 지연 포함 → 오차의 상한 추정치
   if (Number.isFinite(Number(body?.expectMs)) && Number(body.expectMs) > 0) {
-    a.expectMs = Number(body.expectMs);
+    // 26회차 F12: 상한 없이 받으면(1e15) 그 엣지는 영원히 무보고가 아니고 행도 낡지 않아 마지막 ok 가 계속 정상으로 보였다 — 범위로 자르고 원본은 따로
+    const rawExpect = Number(body.expectMs);
+    a.expectMs = Math.min(EDGE_EXPECT_MS.max, Math.max(EDGE_EXPECT_MS.min, rawExpect));
+    if (a.expectMs !== rawExpect) a.expectMsRaw = rawExpect; else delete a.expectMsRaw;
     // v2.630(감사 R2630-06): 재시작 뒤 '기동 후 보고 없음' 유예가 이 엣지의 실제 주기를 쓰게 영속한다(바뀔 때만 쓴다).
     try { noteExpectMs(name, a.expectMs); } catch (e) { console.warn(`[svcmon-edge] 엣지 주기 기록 실패(${name}): ${e?.message || e}`); }
   }
@@ -247,13 +287,13 @@ export function ingestReport(agent, body, recvAt = Date.now(), net = {}) {
   // v2.594(감사 EDGE2-01): poller·caps·log 는 엣지가 보낸 객체를 그대로 상주시키고 edgeSummary 로 되돌려 줬다 —
   //   크기 상한이 없어 한 엣지가 수 MB 를 반복해 중앙 메모리·화면 응답을 부풀릴 수 있었다. 직렬화 크기 상한을 넘으면
   //   버리고 그 사실만 남긴다(partFaultEdge SCANNED_MAX_BYTES 와 같은 방식 — 조용히 자르지 않는다).
-  if (body?.poller && typeof body.poller === 'object') a.poller = boundedObj(body.poller);
+  //   26회차 F5: 크기 상한에 더해 아는 필드만(위 cleanEdge* — 정제한 값은 크기가 묶인다).
+  if (body?.poller && typeof body.poller === 'object') a.poller = cleanEdgePoller(body.poller);
   if (body?.caps && typeof body.caps === 'object') {
-    a.caps = boundedObj(body.caps);
-    const p = Number(body.caps.portalPort);
-    if (Number.isFinite(p) && p >= 1 && p <= 65535) a.portalPort = Math.round(p);
+    a.caps = cleanEdgeCaps(body.caps);
+    if (a.caps.portalPort != null) a.portalPort = a.caps.portalPort;
   }
-  if (body?.log && typeof body.log === 'object') a.log = boundedObj(body.log);
+  if (body?.log && typeof body.log === 'object') a.log = cleanEdgeLog(body.log);
   if (net?.sourceIp) a.sourceIp = text(net.sourceIp, 64);
 
   let accepted = 0;
@@ -313,22 +353,28 @@ export function ingestReport(agent, body, recvAt = Date.now(), net = {}) {
       }
       metaSet(a, id, {
         p: text(m?.p, 620), n: text(m?.n, 120), h: text(m?.h, 253),
-        t: text(m?.t, 80), y: text(m?.y, 16), iv: num(m?.iv) || 60,
+        t: text(m?.t, 80), y: text(m?.y, 16), iv: (() => { const v = num(m?.iv); return v > 0 ? Math.min(EDGE_IV_SEC.max, Math.max(EDGE_IV_SEC.min, v)) : 60; })(),   // 26회차 F12: 음수 · 거대값 자름
+        // v2.988(쉬운 등록 후속 — 구분): 대상 구분(infra|service). 아는 값만 받는다(정제 화이트리스트) — 옛 엣지는 싣지 않는다(빈 값 = 모름).
+        k: KIND_OK.has(m?.k) ? m.k : '',
       });
     }
     a.metaSig = text(body?.metaSig, 64);
+    a.metaSnapId = snapId;   // v2.954: 이번 스냅샷에 메타가 오는 중(다 받기 전 이름 중복 판정 보류 — alertInfoOf ③)
   }
 
   // v2.934: 이름 중복 창 — 완결 청크이고 이번 스냅샷을 다 받았고 예열이 아니면 이번 스냅샷만(재배정으로 GC 대기 중인 옛 id 행을 세지 않는다).
   //   warm 은 아래 GC 보류에도 쓴다(같은 판정).
   const warm = seq >= total && (body?.warmingUp === true || (num(body?.items) > 0 && Number.isFinite(Number(body?.reported)) && num(body.reported) === 0));
-  const win = nameWindowOf(a, snapId, seq >= total && fullyReceived && !warm);
+  const narrow = seq >= total && fullyReceived && !warm;
+  const win = nameWindowOf(a, snapId, narrow);
+  const narrowSnap = narrow ? 0 : snapId;   // v2.954: 넓은 창일 때만 '확정할 수 없는 중복' 을 가린다(alertInfoOf)
   for (const c of changed) {
     const { id, row } = c;
-    const info = alertInfoOf(a, id, win);
+    const info = alertInfoOf(a, id, win, narrowSnap);
     noteResult({ at: row.measuredAt, scope: a.agent, testId: id, prev: c.prevS, status: row.s, reply: row.r, ms: row.m, streak: row.k, ...info });
     // 메타가 아직 없으면(중앙 재시작 직후) 알림 판정이 보류된다 — 아래에서 다시 판정한다(N2 · v2.932 D1-03: 다음 요청에 메타가 와도 · 시한).
-    if (!info.target.name || !info.test.name) { if (!a.alertPending.has(id)) a.alertPending.set(id, recvAt); } else a.alertPending.delete(id);
+    // v2.954: 이름 중복을 아직 확정할 수 없어도(dupPending) 같은 보류로 — 이번 스냅샷을 다 받으면 다시 판정한다.
+    if (!info.target.name || !info.test.name || info.test.dupPending) { if (!a.alertPending.has(id)) a.alertPending.set(id, recvAt); } else a.alertPending.delete(id);
   }
   // v2.928(반증 재검토 N2): 메타 없이 보류됐던 행은 메타가 오면 지금 다시 판정한다 — 같은 측정의 재전송은 다시 세지 않으므로(M5)
   //   여기서 놓치면 다음 측정(인증서·도메인은 하루)까지 알림이 늦었다. 시간별 집계·전이 이력은 이미 셌다(알림만).
@@ -340,9 +386,12 @@ export function ingestReport(agent, body, recvAt = Date.now(), net = {}) {
     for (const [id, since] of a.alertPending) {
       const row = a.rows.get(id);
       if (!row) { a.alertPending.delete(id); forgetHeld(a.agent, id); continue; }
-      const info = alertInfoOf(a, id, win);
+      const info = alertInfoOf(a, id, win, narrowSnap);
       const named = !!(info.target.name && info.test.name);
-      if (!named && recvAt - since < hold) continue;
+      const expired = recvAt - since >= hold;
+      if ((!named || info.test.dupPending) && !expired) continue;
+      // 시한을 넘긴 '확정할 수 없는 중복' 은 넓은 창 판정(dupName — 중복이면 testId 키)으로 확정한다(거짓 복구보다 한 번 더 알림 쪽)
+      if (info.test.dupPending) delete info.test.dupPending;
       a.alertPending.delete(id);
       noteAlertOnly({ at: row.measuredAt, scope: a.agent, testId: id, status: row.s, reply: row.r, ms: row.m, streak: row.k, ...info, ...(named ? {} : { metaTimeout: true }) });
     }
@@ -389,7 +438,9 @@ export function ingestReport(agent, body, recvAt = Date.now(), net = {}) {
         const live = new Set();
         let unknown = false;
         for (const id of a.rows.keys()) {
-          const k = alertKeyOf({ scope: a.agent, testId: id, ...alertInfoOf(a, id, win) });   // v2.934: 판정과 같은 창
+          // v2.954 반증: 판정과 같은 창 · 같은 보류 — 넓은 창에서 확정할 수 없는 중복(dupPending)은 키를 모름으로 보고 정리를 건너뛴다
+          //   (narrowSnap 없이 계산하면 그 행이 testId 키로 확정돼 이름 키 '알린 상태' 를 지우고 같은 실패를 한 번 더 알렸다 — 재현)
+          const k = alertKeyOf({ scope: a.agent, testId: id, ...alertInfoOf(a, id, win, narrowSnap) });
           if (!k) { unknown = true; break; }
           live.add(k);
         }
@@ -550,6 +601,7 @@ export function edgeState(agent, { path: scope = '', limit = 500, only = '', sor
       host: m?.h || '',
       test: m?.t || '',
       type: m?.y || '',
+      kind: m?.k || '',   // v2.988: 대상 구분(옛 엣지는 '' — 모름)
       intervalSec: m?.iv || null,
     });
   }
@@ -568,9 +620,11 @@ export function edgeState(agent, { path: scope = '', limit = 500, only = '', sor
 /** 전체 엣지 합산(중앙 화면 KPI 에 더할 값). 무보고 엣지는 unknown 으로만 센다. */
 export function edgeTotals(now = Date.now()) {
   // v2.630(감사 UI2630-03): 배정만 있고 보고가 없는 엣지는 별도 축(assignedNoReport)으로 센다 — agents(보고 중)와 섞지 않는다.
-  const t = { agents: 0, silent: 0, rows: 0, ok: 0, warn: 0, bad: 0, stale: 0, unknown: 0, notRun: 0, assignedNoReport: 0 };
+  // 28회차 N-7(재현): 기동 유예 중(awaitingFirstReport — 중앙 재시작 직후 첫 보고 대기)인 엣지도 assignedNoReport 로 세어 콘솔 타일이 릴리스마다 '주의' 였다 —
+  //   유예 중은 awaitingFirstReport 로 따로 센다(assignedNoReport 는 유예가 끝난 무보고 — 예전 화면 의미 유지).
+  const t = { agents: 0, silent: 0, rows: 0, ok: 0, warn: 0, bad: 0, stale: 0, unknown: 0, notRun: 0, assignedNoReport: 0, awaitingFirstReport: 0 };
   for (const s of edgeSummaryWithAssigned(now)) {
-    if (s.assignedOnly) { t.assignedNoReport += 1; continue; }
+    if (s.assignedOnly) { if (s.awaitingFirstReport) t.awaitingFirstReport += 1; else t.assignedNoReport += 1; continue; }
     t.agents += 1;
     if (s.silent) { t.silent += 1; t.unknown += s.rows; }
     else { t.ok += s.counts.ok; t.warn += s.counts.warn; t.bad += s.counts.bad; t.stale += s.counts.stale; }

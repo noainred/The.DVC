@@ -4,7 +4,7 @@
  */
 import net from 'node:net';
 import { probeRelayPath } from '../vcenter/relayProbe.js';
-import { identityIssue } from '../collector/registry.js';
+import { identityIssue, ipBlockReason } from '../collector/registry.js';
 import { instanceId } from '../instanceId.js';
 // v2.506(적대적 검증): 전역 fetch 는 lookup 이 없어 수집 토큰이 리바인딩된 주소로 나갈 수 있었다.
 import { resilientFetch } from '../util/resilientFetch.js';
@@ -74,9 +74,15 @@ function sshBanner(host, port, timeoutMs) {
   });
 }
 
-async function portalPing(host, port, { token, expectAgent, otherIds = [], timeoutMs, tag = '' }) {
+/** TLS 인증서 · 프로토콜 실패 코드(node:tls · undici 가 cause.code 로 싣는 것) — 'cert' 단계. 접두 판정이라 선형. */
+const CERT_CODE_RE = /^(?:CERT_|ERR_TLS_|ERR_SSL_|DEPTH_ZERO_SELF_SIGNED_CERT$|SELF_SIGNED_CERT_IN_CHAIN$|UNABLE_TO_(?:VERIFY_LEAF_SIGNATURE|GET_ISSUER_CERT|GET_ISSUER_CERT_LOCALLY)$)/;
+
+async function portalPing(host, port, { token, expectAgent, otherIds = [], timeoutMs, tag = '', scheme = '' }) {
   const t0 = Date.now();
-  const base = `http://${host}:${port}`;
+  // 전체 점검 16회차(T-1): 토큰을 싣는 요청은 등록 URL 의 스킴(https 기본) — 스킴을 모르는데 토큰이 있으면 https(평문으로 비밀을 보내지 않는다)
+  const sch = scheme === 'http' ? 'http' : (scheme === 'https' || token ? 'https' : 'http');
+  const h = String(host).includes(':') && !String(host).startsWith('[') ? `[${host}]` : host;
+  const base = `${sch}://${h}:${port}`;
   // v2.613 EDGE2613-10: 수집 서버 id 를 알면(`collectorId`·`expectAgent`) 나가는 기록에 태그를 붙인다 — 없으면 outboundStats 가
   //   URL 만으로 기록해 같은 origin 의 두 엣지가 `sharedUrl` 로 뭉친다. 태그가 없으면(수집 서버 미등록 호스트) 예전 그대로.
   const tagged = (fn) => (tag ? withOutboundTag(tag, fn) : fn());
@@ -105,13 +111,21 @@ async function portalPing(host, port, { token, expectAgent, otherIds = [], timeo
     return { ok: true, detail: `health 200 v${remoteText(j.version, 40) || '?'}`, got: { instance: remoteText(j.instance, 80) || undefined, agent: remoteText(j.agent), ...(instanceBad ? { instanceBad: true } : {}) }, ms: Date.now() - t0 };
   } catch (e) {
     const code = e?.cause?.code || e?.code || '';
-    return { ok: false, phase: code === 'ECONNREFUSED' ? 'refused' : /timeout|abort/i.test(e.name || e.message) ? 'timeout' : 'http', error: code || e.message, ms: Date.now() - t0 };
+    // 18회차 반증 A-3: 16회차(T-1)부터 https 로 등록된 엣지는 https 로 붙는다 — 인증서 검증 실패 · 평문 포트(ERR_SSL_WRONG_VERSION_NUMBER)를
+    //   'http'(백엔드 서비스 점검 안내)로 오진하지 않게 'cert' 로 가른다(해결방안이 인증서 · 사설 CA · 스킴을 말한다).
+    const phase = code === 'ECONNREFUSED' ? 'refused' : CERT_CODE_RE.test(String(code)) ? 'cert' : /timeout|abort/i.test(e.name || e.message) ? 'timeout' : 'http';
+    return { ok: false, phase, error: code || e.message, ms: Date.now() - t0 };
   }
 }
 
 /** 한 대상 점검. target: { host, port, kind, token?, expectAgent?, relayAgent?, otherIds? } */
 export async function runCheck(target, { timeoutMs = 8_000 } = {}) {
   const { host, port, kind } = target;
+  // 78회차 F2: IP 리터럴은 ssrfLookup 을 타지 않는다(lookup 은 이름일 때만 불린다 — util/ssrfLookup.js 머리말 '리터럴 검사를 없애면 안 된다').
+  //   수동 호스트(settings.hosts — 형식 정규식만)에 127.0.0.1 · 169.254.169.254 를 넣으면 TCP · SSH 배너 · /api/health 가 그대로 나갔다
+  //   (배너 실패 문구가 그 포트의 첫 40바이트를 화면에 싣는다). vCenter 종류(probeRelayPath)와 중계 토폴로지 SSH(relaytopo/ops.js)는 이미 막는다 — 같은 판정.
+  const blocked = ipBlockReason(host);
+  if (blocked) return { ok: false, phase: 'unknown', error: `접속하지 않았습니다 — ${blocked}`, ms: 0 };
   if (kind === 'irs-ssh') return sshBanner(host, port, timeoutMs);
   if (kind === 'edge-vcenter' || kind === 'irs-vcenter') {
     const p = await probeRelayPath(`${host}:${port}`, { timeoutMs });
@@ -126,11 +140,14 @@ export async function runCheck(target, { timeoutMs = 8_000 } = {}) {
     if (!r.ok) return r;
     if (r.got?.instanceBad) return { ok: false, phase: 'hq', error: '응답 포탈의 인스턴스 값을 읽지 못함(문자열이 아님) — 이 중앙인지 확인할 수 없습니다', got: r.got, ms: r.ms };
     if (r.got?.instance && r.got.instance !== instanceId()) return { ok: false, phase: 'hq', error: `응답 포탈 인스턴스가 이 중앙이 아님(${r.got.agent || r.got.instance.slice(0, 8)})`, got: r.got, ms: r.ms };
-    if (!r.got?.instance) return { ok: true, detail: `${r.detail} (구버전 응답 — 인스턴스 대조 불가)`, ms: r.ms };
+    // 78회차 F3: 인스턴스 값이 없는 응답은 **이 중앙이 아니다** — 이 중앙의 /api/health 는 v2.429(이 점검과 같은 판)부터 늘 instance 를 싣는다.
+    //   예전에는 '구버전 응답 — 대조 불가' 로 정상(초록)이라, 포트가 다른 웹 서버(200 아무 페이지 — 본문을 못 읽어도 {})나 옛 포탈로 잘못
+    //   전달돼도 HQ 경로가 정상으로 보였다(확인 불가 ≠ 정상). instanceBad(v2.743)와 같은 'hq' 단계 실패로 낸다.
+    if (!r.got?.instance) return { ok: false, phase: 'hq', error: '응답에 인스턴스 값이 없음 — 이 중앙의 응답이 아닙니다(포탈이 아닌 웹 서버이거나 다른 포탈로 전달됨)', got: r.got, ms: r.ms };
     return { ok: true, detail: '중앙 자신에게 도달', ms: r.ms };
   }
   // edge-portal / irs-portal
   const t = await tcp(host, port, timeoutMs);
   if (!t.ok) return t;
-  return portalPing(host, port, { token: target.token, expectAgent: target.expectAgent, otherIds: target.otherIds || [], timeoutMs, tag: target.collectorId || target.expectAgent || '' });
+  return portalPing(host, port, { token: target.token, expectAgent: target.expectAgent, otherIds: target.otherIds || [], timeoutMs, tag: target.collectorId || target.expectAgent || '', scheme: target.scheme || '' });
 }

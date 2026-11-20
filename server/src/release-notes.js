@@ -73,3 +73,47 @@ export function deleteNote(version) {
   _notesCache = null;
   return { ok: true };
 }
+
+/**
+ * v2.999(사용자 요청 2026-11-13 · 설계 docs/design/upgrade-reload): '이 창의 판(from)보다 새 판' 의 노트 — 업그레이드 뒤 열어 둔 창이
+ * '프로그램이 업그레이드되었으니 새로고침 하세요' 상자에 '이번 업그레이드에서 바뀐 것' 을 보인다(웹 upgradeNotice.js · UpgradeNotice.jsx).
+ * 전체 노트(1,200판 · 1.9MB)를 내려보내지 않으려고 따로 둔다.
+ *  · from < version ≤ to(지금 돌고 있는 판) 만 · 최신 먼저 · 판 수 · 줄 수 · 줄 길이 상한(관리자 기록 노트도 오므로). 넘친 판 수는 truncated.
+ *  · 버전 형식이 아닌 항목은 건너뛴다(관리자 기록은 '1.2.3-xyz' 처럼 들어올 수 있다 — saveNote 정규식이 접두만 본다).
+ *  · ⚠ 옛 판 창이 새 서버에 부르는 계약이다 — 경로(/api/release-notes/since) · 응답 모양({ current, from, notes[{version,date,title,notes}], truncated })을 바꾸지 않는다.
+ */
+export const SINCE_LIMITS = Object.freeze({ maxVersions: 20, maxLinesPerVersion: 30, maxLineLen: 600, maxTitleLen: 200 });
+const SINCE_VER_RE = /^(\d{1,4})\.(\d{1,5})\.(\d{1,6})$/;
+export function parseSinceVersion(v) {
+  if (typeof v !== 'string' || v.length > 32) return null;
+  const s = v.trim();
+  return SINCE_VER_RE.test(s) ? s : null;
+}
+function cmpVer(a, b) {
+  const pa = a.split('.').map(Number); const pb = b.split('.').map(Number);
+  for (let i = 0; i < 3; i++) if (pa[i] !== pb[i]) return pa[i] - pb[i];
+  return 0;
+}
+const clip = (s, n) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+export function notesSince(list, from, to, limits = SINCE_LIMITS) {
+  const f = parseSinceVersion(from); const t = parseSinceVersion(to);
+  if (!f || !t) return { notes: [], truncated: 0 };
+  const hits = [];
+  for (const n of Array.isArray(list) ? list : []) {
+    const v = parseSinceVersion(typeof n?.version === 'string' ? n.version : '');
+    if (!v || cmpVer(v, f) <= 0 || cmpVer(v, t) > 0) continue;
+    hits.push({ n, v });
+  }
+  hits.sort((a, b) => cmpVer(b.v, a.v));
+  const keep = hits.slice(0, limits.maxVersions);
+  const notes = keep.map(({ n, v }) => ({
+    version: v,
+    date: typeof n.date === 'string' ? n.date.slice(0, 32) : '',
+    title: clip(typeof n.title === 'string' ? n.title.trim() : '', limits.maxTitleLen),
+    notes: (Array.isArray(n.notes) ? n.notes : [])
+      .filter((x) => typeof x === 'string' && x.trim())
+      .slice(0, limits.maxLinesPerVersion)
+      .map((x) => clip(x.trim(), limits.maxLineLen)),
+  }));
+  return { notes, truncated: hits.length - keep.length };
+}

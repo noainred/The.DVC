@@ -25,7 +25,7 @@ import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { fileStamp, dayKey } from '../util/dayKey.js';
 import { SETTING_KINDS, SETTINGS_PATHS, GROUP_ORDER, DEPTH_LABEL } from '../linkcheck/settingsKinds.js';
 import {
-  listTargets, bulkAddTargets, updateTarget, updateTest, addTest, deleteTarget, getTarget, validateEndpoint, cleanOrigin, LIMITS,
+  listTargets, bulkAddTargets, updateTarget, updateTest, addTest, deleteTarget, getTarget, validateEndpoint, cleanOrigin, LIMITS, svcmonStoreReadError,
 } from './store.js';
 
 const FILE = () => path.join(config.configDir, 'svcmon-settings-sync.json');
@@ -96,23 +96,60 @@ export function pathSeg(v) {
 /**
  * 법인 이름 — 카탈로그 항목의 vcenterId(종류에 따라 datacenterId 가 실린다 — settingsLinks 의 storage·pdu·cvp)를 사람이 읽는 이름으로.
  * vCenter 면 그 vCenter 의 DataCenter 이름(배정돼 있으면) → vCenter 이름 순. 모르면 '전역'.
+ * v2.960(쉬운 등록 C — 법인 판정 보강): ① `facts.datacenterId`(iDRAC · SAN 스위치 등록부의 소속 법인) ② vCenter 등록부에 없는 vCenter id 도
+ *   DataCenter 할당(`vcAssign`)으로 ③ 수집 서버의 `facts.datacenter`(이름)는 DataCenter id · 이름과 **대소문자만 무시하고 같을 때**만(지어내지 않는다).
+ *   `key` = 법인 묶음 키(DataCenter 가 있으면 그 id — 같은 법인의 vCenter 둘이 따로 묶이지 않게). `id` 는 예전 뜻 그대로.
  * @param {object} x 카탈로그 항목
- * @param {{vcNames?:Map, dcNames?:Map, dcOfVc?:Map}} ctx
+ * @param {{vcNames?:Map, dcNames?:Map, dcOfVc?:Map, vcAssign?:Map, dcByName?:Map}} ctx
  */
 export function corpOf(x, ctx = {}) {
   const vcNames = ctx.vcNames || new Map();
   const dcNames = ctx.dcNames || new Map();
   const dcOfVc = ctx.dcOfVc || new Map();
-  const ids = [t(x?.vcenterId), t(x?.facts?.vcenterId), t(x?.facts?.datacenter)].filter(Boolean);
+  const vcAssign = ctx.vcAssign || new Map();
+  const dcByName = ctx.dcByName || new Map();
+  const ids = [t(x?.vcenterId), t(x?.facts?.vcenterId), t(x?.facts?.datacenterId), t(x?.facts?.datacenter)].filter(Boolean);
   for (const id of ids) {
     if (vcNames.has(id)) {
-      const dc = dcOfVc.get(id);
-      if (dc && dcNames.has(dc)) return { id, label: dcNames.get(dc) };
-      return { id, label: vcNames.get(id) };
+      const dc = dcOfVc.get(id) || vcAssign.get(id);
+      if (dc && dcNames.has(dc)) return { id, key: dc, label: dcNames.get(dc) };
+      return { id, key: id, label: vcNames.get(id) };
     }
-    if (dcNames.has(id)) return { id, label: dcNames.get(id) };
+    if (dcNames.has(id)) return { id, key: id, label: dcNames.get(id) };
+    const viaAssign = vcAssign.get(id);
+    if (viaAssign && dcNames.has(viaAssign)) return { id, key: viaAssign, label: dcNames.get(viaAssign) };
+    const byName = dcByName.get(id.toLowerCase());
+    if (byName && dcNames.has(byName)) return { id: byName, key: byName, label: dcNames.get(byName) };
   }
-  return { id: '', label: '전역' };
+  return { id: '', key: '', label: '전역' };
+}
+
+/**
+ * 법인 담당 엣지 — 순수(v2.960 쉬운 등록 C '법인 엣지에 배정'). 근거는 둘뿐이다(지어내지 않는다):
+ *   ① 현지 수집 vCenter 를 실제로 수집한 엣지(카탈로그 set:vcenter 의 agent · 스냅샷 `collectedBy` — `ctx.vcEdge`)
+ *   ② 수집 서버 등록부의 법인(vcenterId · datacenter → corpOf) — 그 수집 서버 이름이 배정 후보일 때.
+ * 한 법인에 서로 다른 엣지가 둘 이상이면 **고르지 않는다**(ambiguous) — 사람이 대상마다 정한다.
+ * @returns {Map<string,{agent:string, ambiguous:string[]}>} 법인 key → 담당 엣지
+ */
+export function corpEdgesOf(builtTargets = [], ctx = {}, candidates = new Map()) {
+  const seen = new Map();   // key -> Set(agent)
+  const add = (key, agent) => {
+    const k = t(key); const hit = candidates.get(t(agent).toLowerCase());
+    if (!k || !hit) return;
+    if (!seen.has(k)) seen.set(k, new Set());
+    seen.get(k).add(hit);
+  };
+  for (const [vcId, agent] of (ctx.vcEdge || new Map())) add(corpOf({ vcenterId: vcId }, ctx).key, agent);
+  for (const x of builtTargets) {
+    if (t(x?.kind) === 'set:vcenter' && t(x.agent)) add(corpOf(x, ctx).key, x.agent);
+    if (t(x?.kind) === 'set:collector') add(corpOf(x, ctx).key, x.name || x.ref);
+  }
+  const out = new Map();
+  for (const [k, set] of seen) {
+    const list = [...set].sort();
+    out.set(k, list.length === 1 ? { agent: list[0], ambiguous: [] } : { agent: '', ambiguous: list });
+  }
+  return out;
 }
 
 /** 대상 트리 경로 — `설정 연동\<그룹>\<법인>`. */
@@ -133,6 +170,22 @@ const DEFAULT_PORT_OF = { https: 443, http: 80 };
  * 인터벌: TCP 120초 · HTTP·SSH·SMTP 300초 · 인증서 1일.
  * @returns {object[]} store.cleanTest 입력 모양 + tpl/tplKey
  */
+/** 엣지 포탈(수집 서버) HTTP 점검 — 무인증으로 200 을 주는 공개 경로와 그 본문의 표지(v3.18.14 결함 D1). */
+export const COLLECTOR_PROBE_PATH = '/api/auth/config';
+export const COLLECTOR_PROBE_KEYWORD = 'authEnabled';
+/** v2.915 ~ v3.18.13 가 만든 엣지 포탈 HTTP 점검의 경로 — 로그인이 필요해 인증 포탈에서 늘 401 이었다. */
+const LEGACY_COLLECTOR_PATH = '/api/health';
+const urlPathOf = (u) => { try { return new URL(String(u || '')).pathname; } catch { return ''; } };
+
+/**
+ * 설정 연동이 만든 점검(tpl='settings') 중 **옛 정의라 고쳐야 하는 것**인가 — 지금은 엣지 포탈 HTTP 점검의 옛 경로 하나뿐(결함 D1).
+ *   주소 비교로 일반화하지 않는다: 버전마다 URL 표기가 조금씩 달라(대괄호 · 기본 포트) 정상 대상이 대량으로 '변경' 이 된다.
+ * @returns {boolean}
+ */
+export function isLegacyCheck(kind, test) {
+  return t(kind) === 'set:collector' && test?.tpl === SYNC_TPL && test?.tplKey === 'http' && urlPathOf(test.url) === LEGACY_COLLECTOR_PATH;
+}
+
 export function checksFor(x) {
   const spec = SETTING_KINDS[t(x?.kind)];
   if (!spec) return [];
@@ -143,8 +196,10 @@ export function checksFor(x) {
   const mode = spec.probe?.mode;
   if (mode === 'http') {
     const scheme = isHttps(x) ? 'https' : 'http';
-    // 엣지 포탈의 카탈로그 프로브(/api/collector/ping)는 포탈 토큰을 보낸다 — Monitoring 은 토큰을 싣지 않으므로 공개 상태 경로를 쓴다.
-    const probePath = t(x.kind) === 'set:collector' ? '/api/health' : t(spec.probe?.path);
+    // 엣지 포탈의 카탈로그 프로브(/api/collector/ping)는 포탈 토큰을 보낸다 — Monitoring 은 토큰을 싣지 않으므로 **무인증 경로**를 쓴다.
+    //   v3.18.14(결함 D1 — 재현): v2.915 부터 '/api/health' 였는데 그 경로는 `/api` 인증 라우터 아래라 인증을 켠 포탈(운영 기본)에서 늘 401 →
+    //   200 고정 점검이 'HTTP 401' 실패였다. 로그인 화면이 쓰는 공개 설정 경로(/api/auth/config — 200 · 'authEnabled' 가 실린다)로 바꾼다.
+    const probePath = t(x.kind) === 'set:collector' ? COLLECTOR_PROBE_PATH : t(spec.probe?.path);
     const hostPart = x.host && String(x.host).includes(':') && !String(x.host).startsWith('[') ? `[${x.host}]` : t(x.host);
     const portPart = port === DEFAULT_PORT_OF[scheme] ? '' : `:${port}`;
     const url = `${scheme}://${hostPart}${portPart}${t(x.basePath)}${probePath}` || `${scheme}://${hostPart}${portPart}/`;
@@ -154,7 +209,7 @@ export function checksFor(x) {
       // 인증서 **신뢰**는 이 점검의 질문이 아니다(자체서명 장비가 대부분) — 만료는 cert 점검이 본다.
       insecure: true,
       ...(identity ? { expectStatus: 200 } : {}),
-      ...(t(x.kind) === 'set:collector' ? { keyword: 'status' } : {}),
+      ...(t(x.kind) === 'set:collector' ? { keyword: COLLECTOR_PROBE_KEYWORD } : {}),
     });
     return scheme === 'https' ? [tcp, cert, http] : [tcp, http];
   }
@@ -190,6 +245,7 @@ export function classifyCatalog(built = {}, svcTargets = [], { ctx = {}, candida
   }
   const failedSources = new Set((built.sourceErrors || []).map((e) => t(e?.source)).filter(Boolean));
   const present = new Set();
+  const corpEdges = corpEdgesOf(built.targets || [], ctx, candidates);   // v2.960(C): 법인 → 담당 엣지(근거 있는 것만)
   const rows = [];
 
   const agentOf = (x) => {
@@ -207,8 +263,10 @@ export function classifyCatalog(built = {}, svcTargets = [], { ctx = {}, candida
       key: t(x.id), kind: t(x.kind), kindLabel: spec.label || t(x.kind), group: spec.group || '기타', depth: spec.depth || '',
       settings: spec.settings || '', name: t(x.name) || t(x.ref), ref: t(x.ref),
       host: t(x.host), port: Number(x.port) || null, scheme: t(x.scheme),
-      settingsEnabled: x.enabled !== false, corp: corp.label, corpId: corp.id, address: safeAddress(x.address, t(x.kind)),
+      settingsEnabled: x.enabled !== false, corp: corp.label, corpId: corp.id, corpKey: corp.key || '', address: safeAddress(x.address, t(x.kind)),
       agent: ag.agent, agentDeclared: ag.declared, agentNote: ag.note,
+      // v2.960(C): 이 항목의 법인 담당 엣지(항목 자체에 엣지가 없을 때 '법인 엣지에 배정' 이 쓴다). 엣지 포탈 자신은 중앙이 잰다.
+      corpAgent: t(x.kind) === 'set:collector' ? '' : (corpEdges.get(corp.key)?.agent || ''),
       path: syncPathOf({ group: spec.group }, corp),
     };
   };
@@ -235,9 +293,18 @@ export function classifyCatalog(built = {}, svcTargets = [], { ctx = {}, candida
       // v2.915(반증 M3 — 재현): 사라짐으로 표지(·중지)된 대상이 설정에 다시 나타나면 '연동' 으로 두면 영구히 중지·표지가 남았다 —
       //   '변경(다시 나타남)' 으로 올려 적용이 표지를 지우고, 설정 연동이 중지한 것이었으면 다시 켠다(goneOff).
       const reappeared = !!o.gone;
-      const changed = hostChanged || portChanged || reappeared;
+      // v3.18.14(결함 D1): 옛 정의(엣지 포탈 HTTP 점검 '/api/health' — 인증 포탈에서 늘 401)가 남은 연동 대상은 '변경' 으로 올린다.
+      //   감지는 읽기만 한다(적용은 사람이) — 적용하면 점검 id 를 승계한 채 경로 · 표지만 고친다(executePlan).
+      const defStale = !reappeared && (Array.isArray(st.tests) ? st.tests : []).some((x2) => isLegacyCheck(row.kind, x2));
+      const changed = hostChanged || portChanged || reappeared || defStale;
+      // v2.988(쉬운 등록 후속 — '법인 폴더로 정리'): 대상이 **설정 연동이 놓은 자리**(등록 때 법인의 기본 경로)에 그대로 있는데 지금 법인 판정으로는
+      //   다른 폴더여야 하면(법인 판정 보강 전에 '전역' 으로 등록된 것 · DataCenter 이름이 바뀐 것) 옮길 경로를 싣는다. 사람이 옮긴 대상은 건드리지 않는다.
+      const placedAt = syncPathOf({ group: SETTING_KINDS[t(x.kind)]?.group }, { label: t(o.corp) || '전역' });
+      //   v2.988(반증 R3): 지금 법인을 **알 때만**(corpKey — '전역' 이 아님) · 법인 등록부를 읽었을 때만 — 모르는 판정으로 거꾸로 옮기지 않는다.
+      const repath = !changed && !ctx?.corpUnreadable && row.corpKey && t(st.path) === placedAt && row.path && row.path !== t(st.path) ? row.path : '';
       rows.push({
-        ...row, state: changed ? 'changed' : 'linked', ...(reappeared ? { reappeared: true, reason: '설정에 다시 나타났습니다 — 적용하면 사라짐 표지를 지웁니다(설정 연동이 중지했다면 다시 켭니다).' } : {}),
+        ...row, state: changed ? 'changed' : 'linked', ...(repath ? { repath } : {}), ...(reappeared ? { reappeared: true, reason: '설정에 다시 나타났습니다 — 적용하면 사라짐 표지를 지웁니다(설정 연동이 중지했다면 다시 켭니다).' } : {}),
+        ...(defStale && !hostChanged && !portChanged ? { defChanged: true, reason: `점검 정의 갱신 — 옛 HTTP 경로(${LEGACY_COLLECTOR_PATH})는 인증 포탈에서 늘 401 이었습니다. 적용하면 공개 경로로 고칩니다(점검 id 승계).` } : {}),
         targetId: st.id, targetPath: st.path, targetName: st.name, targetEnabled: st.enabled !== false, targetAgent: t(st.agent),
         tests: Array.isArray(st.tests) ? st.tests.length : 0, syncedAt: o.syncedAt || null, ...(o.gone ? { wasGone: o.gone } : {}),
         ...(changed ? { prevHost: t(st.host), prevPort: o.port || null } : {}),
@@ -289,7 +356,8 @@ export function classifyCatalog(built = {}, svcTargets = [], { ctx = {}, candida
     const ga = GROUP_ORDER.indexOf(a.group); const gb = GROUP_ORDER.indexOf(b.group);
     return (ga < 0 ? 99 : ga) - (gb < 0 ? 99 : gb) || a.kindLabel.localeCompare(b.kindLabel) || a.corp.localeCompare(b.corp) || a.name.localeCompare(b.name);
   });
-  return { rows, counts: countsOf(rows) };
+  const corpEdgeList = [...corpEdges].map(([key, v]) => ({ key, agent: v.agent, ambiguous: v.ambiguous }));
+  return { rows, counts: countsOf(rows), corpEdges: corpEdgeList };
 }
 
 /** 상태별 · 종류별 집계(화면 Query Value · 커버리지 Top List · 패싯이 같은 값을 쓴다). */
@@ -304,6 +372,9 @@ export function countsOf(rows = []) {
     k.total += 1;
     if (r.state === 'linked' || r.state === 'changed') k.linked += 1;
   }
+  // v2.960(B): 연동됐지만 중지된 대상 — 개요 '감시 범위' 카드가 '감시 중' 과 '등록됐지만 중지' 를 가른다.
+  c.linkedOff = rows.filter((r) => (r.state === 'linked' || r.state === 'changed') && r.targetEnabled === false).length;
+  c.repath = rows.filter((r) => r.repath).length;   // v2.988: 법인 폴더로 옮길 수 있는 연동 대상
   // 아직 처리하지 않은 사라짐(표지 없음) — 배너는 이것만 센다(중지 처리한 뒤에도 계속 뜨지 않게 — 반증 낮음).
   c.goneOpen = rows.filter((r) => r.state === 'gone' && !r.goneAt).length;
   const denom = rows.filter((r) => r.state !== 'gone' && r.state !== 'held' && r.state !== 'excluded').length;
@@ -483,13 +554,32 @@ export async function readCatalog(deps = {}) {
 
 async function loadCorpContext() {
   const vcNames = new Map(); const dcNames = new Map(); const dcOfVc = new Map();
+  const vcAssign = new Map(); const dcByName = new Map(); const vcEdge = new Map();
   try { for (const v of (await import('../vcenter/registry.js')).listRegistry()) if (t(v.id)) vcNames.set(t(v.id), t(v.name) || t(v.id)); } catch { /* 이름 없이 진행 */ }
   try {
     const dc = await import('../datacenter/store.js');
-    for (const d of dc.listDatacenters()) if (t(d.id)) dcNames.set(t(d.id), t(d.name) || t(d.id));
+    for (const d of dc.listDatacenters()) {
+      if (!t(d.id)) continue;
+      dcNames.set(t(d.id), t(d.name) || t(d.id));
+      dcByName.set(t(d.id).toLowerCase(), t(d.id));
+      if (t(d.name) && !dcByName.has(t(d.name).toLowerCase())) dcByName.set(t(d.name).toLowerCase(), t(d.id));
+    }
     for (const id of vcNames.keys()) { const x = t(dc.datacenterOfVcenter(id)); if (x) dcOfVc.set(id, x); }
+    // v2.960(C): 등록부에 없는 vCenter id(iDRAC 의 vcenterId 등)도 DataCenter 할당으로 법인을 찾는다.
+    for (const [vc, d] of Object.entries(dc.getDatacenterAssign?.() || {})) if (t(vc) && t(d)) vcAssign.set(t(vc), t(d));
   } catch { /* DataCenter 없이 진행 */ }
-  return { vcNames, dcNames, dcOfVc };
+  // v2.960(C): 현지 수집 vCenter 를 실제로 수집한 엣지(스냅샷 collectedBy) — 법인 담당 엣지의 근거. mock 이면 데모 엣지 표지(통신 지도와 같은 사본).
+  try {
+    const snap = (await import('../store.js')).store.get();
+    let vcs = Array.isArray(snap?.vcenters) ? snap.vcenters : [];
+    try { vcs = (await import('../mock/demo/edge.js')).demoDecorateVcenters(vcs) || vcs; } catch { /* 데모 표지 없이 */ }
+    for (const v of vcs) if (t(v?.id) && t(v?.collectedBy)) vcEdge.set(t(v.id), t(v.collectedBy));
+  } catch { /* 스냅샷 없이 진행 */ }
+  // v2.988(반증 R3 — 재현): DataCenter · vCenter 등록부가 손상돼 못 읽으면 법인 판정이 '전역' · vCenter 이름으로 내려앉는다 — 그 판정으로 '법인 폴더로 정리' 를 제안하면
+  //   이미 정리된 대상을 거꾸로 옮긴다. 손상 판정은 settingsStatus/sources.js damaged 하나(복제 금지).
+  let corpUnreadable = false;
+  try { const { damaged } = await import('../settingsStatus/sources.js'); corpUnreadable = damaged('datacenters.json') || damaged('vcenters.json'); } catch { corpUnreadable = false; }
+  return { vcNames, dcNames, dcOfVc, vcAssign, dcByName, vcEdge, corpUnreadable };
 }
 
 /** 배정 후보 엣지 — 개별 토큰이 발급됐거나 보고 중인 엣지(routes/svcmon/edge.js candidates 와 같은 합집합). */
@@ -497,6 +587,11 @@ export async function loadCandidates() {
   const m = new Map();
   try { for (const x of (await import('../central/agentTokens.js')).listAgentTokens()) if (t(x.agent)) m.set(t(x.agent).toLowerCase(), t(x.agent)); } catch { /* 없음 */ }
   try { for (const e of (await import('../central/svcmonEdge.js')).edgeSummary()) if (t(e.agent)) m.set(t(e.agent).toLowerCase(), t(e.agent)); } catch { /* 없음 */ }
+  // v2.988: 데모(mock)에서는 데모 엣지(mock-Edge-*)도 배정 후보로 본다 — 개별 토큰도 보고도 없어 '법인 엣지에 배정' 이 늘 '엣지 없음' 이었다(데모 전용 · live 무관).
+  try {
+    const { isMockMode } = await import('../mock/demo/flags.js');
+    if (isMockMode()) for (const e of (await import('../mock/demo/edge.js')).demoEdgeList()) if (t(e.name)) m.set(t(e.name).toLowerCase(), t(e.name));
+  } catch { /* 데모 없이 */ }
   return m;
 }
 
@@ -528,7 +623,7 @@ export function syncNameFor(r, taken) {
  * @param {string[]} keys
  * @param {{enabled?:boolean, goneAction?:string, withChecks?:boolean, builtByKey?:Map}} o
  */
-export function planApply(rows, keys, { enabled = false, goneAction = 'disable', withChecks = true, builtByKey = new Map(), now = Date.now(), svcTargets = null } = {}) {
+export function planApply(rows, keys, { enabled = false, goneAction = 'disable', withChecks = true, builtByKey = new Map(), now = Date.now(), svcTargets = null, corpEdge = false } = {}) {
   const want = new Set((Array.isArray(keys) ? keys : []).map(t).filter(Boolean));
   const byKey = new Map(rows.map((r) => [r.key, r]));
   const add = []; const change = []; const gone = []; const skip = [];
@@ -545,16 +640,18 @@ export function planApply(rows, keys, { enabled = false, goneAction = 'disable',
       const name = syncNameFor(r, taken);
       if (!name) { skip.push({ key: k, name: r.name, reason: `같은 폴더(${r.path})에 같은 이름의 대상이 이미 있습니다(종류 라벨을 붙여도 겹칩니다) — 한쪽 이름을 바꾸세요.` }); continue; }
       taken.add(nameKeyOf(r.path, name));
+      // v2.960(C): '법인 엣지에 배정' — 항목 자체에 담당 엣지가 없으면 그 법인의 담당 엣지(근거 있는 것만 — corpEdgesOf)로.
+      const agent = r.agent || (corpEdge && r.corpAgent ? r.corpAgent : '');
       add.push({
-        key: k, name, kindLabel: r.kindLabel, path: r.path, host: r.host, port: r.port, agent: r.agent,
+        key: k, name, kindLabel: r.kindLabel, path: r.path, host: r.host, port: r.port, agent, ...(agent && !r.agent ? { agentFrom: 'corp' } : {}),
         row: {
-          kind: 'infra', path: r.path, name, host: r.host, enabled, ...(r.agent ? { agent: r.agent } : {}),
+          kind: 'infra', path: r.path, name, host: r.host, enabled, ...(agent ? { agent } : {}),
           tests: withChecks ? checksFor(x) : [], origin: originOf(x, { label: r.corp }, now),
         },
       });
     } else if (r.state === 'changed') {
       if (!x) { skip.push({ key: k, name: r.name, reason: '카탈로그 항목을 다시 읽지 못했습니다.' }); continue; }
-      change.push({ key: k, name: r.name, kindLabel: r.kindLabel, targetId: r.targetId, prevHost: r.prevHost, prevPort: r.prevPort, host: r.host, port: r.port, x, corp: r.corp });
+      change.push({ key: k, name: r.name, kindLabel: r.kindLabel, targetId: r.targetId, prevHost: r.prevHost, prevPort: r.prevPort, host: r.host, port: r.port, x, corp: r.corp, ...(r.defChanged ? { defChanged: true } : {}) });
     } else if (r.state === 'gone') {
       gone.push({ key: k, name: r.name, kindLabel: r.kindLabel, targetId: r.targetId, action: GONE_ACTIONS.includes(goneAction) ? goneAction : 'disable' });
     }
@@ -565,8 +662,8 @@ export function planApply(rows, keys, { enabled = false, goneAction = 'disable',
 /** 계획을 미리보기 응답 모양으로(내부 x·row 를 싣지 않는다). */
 export function previewOf(plan, bulkPlan = null) {
   return {
-    add: plan.add.map((a) => ({ key: a.key, name: a.name, kindLabel: a.kindLabel, path: a.path, host: a.host, port: a.port, agent: a.agent, checks: checkBrief(a.row.tests) })),
-    change: plan.change.map((c) => ({ key: c.key, name: c.name, kindLabel: c.kindLabel, targetId: c.targetId, prevHost: c.prevHost, prevPort: c.prevPort, host: c.host, port: c.port })),
+    add: plan.add.map((a) => ({ key: a.key, name: a.name, kindLabel: a.kindLabel, path: a.path, host: a.host, port: a.port, agent: a.agent, ...(a.agentFrom ? { agentFrom: a.agentFrom } : {}), checks: checkBrief(a.row.tests) })),
+    change: plan.change.map((c) => ({ key: c.key, name: c.name, kindLabel: c.kindLabel, targetId: c.targetId, prevHost: c.prevHost, prevPort: c.prevPort, host: c.host, port: c.port, ...(c.defChanged ? { defChanged: true } : {}) })),
     gone: plan.gone.map((g) => ({ key: g.key, name: g.name, kindLabel: g.kindLabel, targetId: g.targetId, action: g.action })),
     skip: plan.skip.slice(0, 500),
     ...(bulkPlan ? {
@@ -582,7 +679,7 @@ export function previewOf(plan, bulkPlan = null) {
  */
 export function executePlan(plan, { user = '', now = Date.now(), batchPrefix = 'settings' } = {}) {
   const batch = `${batchPrefix}:${fileStamp(now)}${String(Math.floor((now / 1000) % 60)).padStart(2, '0')}`.slice(0, 40);
-  const out = { batch, added: 0, newTests: 0, addErrors: [], addSkipped: [], changed: [], gone: [], errors: [], agents: [], committed: true };
+  const out = { batch, added: 0, newTests: 0, addErrors: [], addSkipped: [], changed: [], gone: [], errors: [], agents: [], committed: true, addedIds: [] };
   if (plan.add.length) {
     const r = bulkAddTargets(plan.add.map((a) => a.row), { atomic: true, dedup: true, batch, trustedOrigin: true });
     out.committed = r.committed;
@@ -593,13 +690,18 @@ export function executePlan(plan, { user = '', now = Date.now(), batchPrefix = '
       const added = plan.add.filter((_, i) => !skippedRows.has(i + 1));
       markKnown(added.map((a) => a.key), now);
       out.agents = [...new Set(added.map((a) => a.row.agent).filter(Boolean))];
+      // v2.960(B·C): 추가된 대상 id — 화면이 곧바로 '시험 점검 후 사용' · '바로 사용' 으로 잇는다(출처 키로 찾는다 — 이번 배치만).
+      const addedKeys = new Set(added.map((a) => a.key));
+      out.addedIds = listTargets().filter((x) => x.batch === batch && addedKeys.has(t(x.origin?.key))).map((x) => x.id);
     }
   }
   for (const c of plan.change) {
     try {
       const cur = getTarget(c.targetId);
       if (!cur) { out.errors.push({ key: c.key, name: c.name, reason: '대상이 이미 지워졌습니다.' }); continue; }
-      const origin = { ...(cur.origin || {}), ...originOf(c.x, { label: c.corp }, now) };
+      // v2.988(반증 R7 — 재현): 출처의 법인은 '놓인 자리' 다 — 주소만 고치는 적용이 법인을 지금 판정으로 덮으면 경로는 …\전역 인 채 법인만 바뀌어
+      //   '법인 폴더로 정리' 후보에서 영구히 빠졌다. 경로를 옮기는 정리(executeRepath)만 법인을 바꾼다.
+      const origin = { ...(cur.origin || {}), ...originOf(c.x, { label: c.corp }, now), ...(cur.origin ? { corp: t(cur.origin.corp) } : {}) };
       const reEnable = !!(cur.origin?.gone && cur.origin?.goneOff);
       delete origin.gone; delete origin.goneOff;
       updateTarget(c.targetId, { host: c.host, ...(reEnable ? { enabled: true } : {}) }, { origin });
@@ -611,7 +713,9 @@ export function executePlan(plan, { user = '', now = Date.now(), batchPrefix = '
         const s = specs.get(test.tplKey);
         if (!s) continue;
         // 주소에 묶인 칸(포트·URL)만 고친다 — 사람이 바꾼 사용 여부·주기·이름·임계는 그대로(반증 낮음: 예전에는 전부 덮어썼다).
-        updateTest(c.targetId, test.id, Object.fromEntries(Object.entries({ port: s.port, url: s.url }).filter(([, v]) => v !== undefined)));
+        //   v3.18.14(결함 D1): 옛 정의 점검은 경로와 함께 그 경로에 묶인 표지 · 기대 코드도 새 정의로(옛 표지 'status' 는 새 경로 본문에 없다).
+        const legacy = isLegacyCheck(c.x?.kind, test);
+        updateTest(c.targetId, test.id, Object.fromEntries(Object.entries({ port: s.port, url: s.url, ...(legacy ? { keyword: s.keyword, expectStatus: s.expectStatus } : {}) }).filter(([, v]) => v !== undefined)));
         specs.delete(test.tplKey);
         fixed += 1;
       }
@@ -658,6 +762,60 @@ export function executePlan(plan, { user = '', now = Date.now(), batchPrefix = '
   return out;
 }
 
+/**
+ * v2.988 '법인 폴더로 정리' — 순수 계획. 경로 기준 엣지 배정이 맡는 대상(옮기기 전 · 뒤 어느 쪽이든)은 **건너뛴다**(사용자 결정 —
+ *   옮기면 엣지 배포본과 경로가 달라지고, 배정 범위 밖으로 나가면 그 엣지가 대상을 잃는다). byAgent 엣지 대상은 옮긴 뒤 배정을 다시 굳힌다.
+ * @param {object[]} rows 지금 분류한 카탈로그 행 · @param {string[]} keys · @param {(target)=>{agent,mode}} edgeOf 배정 판정(central/svcmonAssignSync edgeOfTarget)
+ */
+export function planRepath(rows, keys, { svcTargets = null, edgeOf = () => ({ agent: '', mode: '' }), assignUnreadable = false } = {}) {
+  const want = new Set((Array.isArray(keys) ? keys : []).map(t).filter(Boolean));
+  const byKey = new Map(rows.map((r) => [r.key, r]));
+  const all = svcTargets || listTargets();
+  const byId = new Map(all.map((x) => [x.id, x]));
+  // v2.988(반증 R4 — 재현): 옮길 폴더에 같은 구분 · 이름의 대상이 있으면(또는 이번에 옮길 다른 대상과 겹치면) 경로 · 이름 식별이 갈린다 —
+  //   엣지 bulkAddTargets(dedup) 가 한쪽을 건너뛰어 감시가 빠지고 ack 가 mismatch 였다. 설정 연동 적용의 nameKeyOf 와 같은 키(구분 포함).
+  const keyOf = (kind, p, name) => `${t(kind || 'infra')}\u0001${nameKeyOf(p, name)}`;
+  const taken = new Map(all.map((x) => [keyOf(x.kind, x.path, x.name), x.id]));
+  const move = []; const skip = [];
+  for (const k of want) {
+    const r = byKey.get(k);
+    if (!r || !r.repath) { skip.push({ key: k, name: r?.name || '', reason: '옮길 경로가 없습니다(지금 분류로는 이미 제자리이거나 사람이 옮긴 대상입니다).' }); continue; }
+    const st = byId.get(r.targetId);
+    if (!st) { skip.push({ key: k, name: r.name, reason: '대상이 이미 지워졌습니다.' }); continue; }
+    // v2.988(반증 R5 — 재현): 분류(카탈로그 읽기) 뒤 사람이 옮겼으면 그 자리를 존중한다 — 지금 경로가 분류 때 경로 · 설정 연동이 놓은 자리와 같을 때만.
+    const placedAt = syncPathOf({ group: SETTING_KINDS[t(st.origin?.kind || r.kind)]?.group }, { label: t(st.origin?.corp) || '전역' });
+    if (t(st.path) !== t(r.targetPath) || t(st.path) !== placedAt) { skip.push({ key: k, name: r.name, reason: '대상이 그사이 다른 폴더로 옮겨졌습니다 — 사람이 옮긴 자리는 건드리지 않습니다(카탈로그를 다시 읽으세요).' }); continue; }
+    if (assignUnreadable) { skip.push({ key: k, name: r.name, reason: '엣지 배정 파일을 읽지 못했습니다 — 엣지 배정 탭에서 확인한 뒤 다시 하세요.' }); continue; }
+    const dest = keyOf(st.kind, r.repath, st.name);
+    if (taken.has(dest) && taken.get(dest) !== st.id) { skip.push({ key: k, name: r.name, reason: `옮길 폴더(${r.repath})에 같은 이름의 대상이 이미 있습니다 — 겹치면 엣지가 한쪽을 건너뜁니다(이름을 바꾸거나 한쪽을 정리한 뒤 옮기세요).` }); continue; }
+    const before = edgeOf(st); const after = edgeOf({ ...st, path: r.repath });
+    if (before.mode === 'path' || after.mode === 'path') {
+      skip.push({ key: k, name: r.name, reason: `경로 기준 배정 엣지(${before.mode === 'path' ? before.agent : after.agent})가 맡는 대상입니다 — 옮기면 엣지 배포본과 경로가 달라집니다(엣지 배정 탭에서 범위를 확인한 뒤 옮기세요).` });
+      continue;
+    }
+    taken.delete(keyOf(st.kind, st.path, st.name)); taken.set(dest, st.id);
+    move.push({ key: k, name: r.name, targetId: st.id, from: t(st.path), to: r.repath, corp: r.corp, agent: t(st.agent) });
+  }
+  return { move, skip };
+}
+
+/** 계획 실행 — 경로와 출처의 법인 이름만 고친다(대상 id · 점검 id 는 그대로 — 연속 횟수 · 만기 유지). */
+export function executeRepath(plan, { now = Date.now() } = {}) {
+  const out = { moved: [], errors: [], agents: [] };
+  for (const m of plan.move) {
+    try {
+      const cur = getTarget(m.targetId);
+      if (!cur) { out.errors.push({ key: m.key, name: m.name, reason: '대상이 이미 지워졌습니다.' }); continue; }
+      updateTarget(m.targetId, { path: m.to }, { origin: { ...(cur.origin || {}), corp: m.corp, syncedAt: now } });
+      out.moved.push({ key: m.key, name: m.name, targetId: m.targetId, from: m.from, to: m.to });
+      if (m.agent) out.agents.push(m.agent);
+    } catch (e) { out.errors.push({ key: m.key, name: m.name, reason: String(e?.message || e).slice(0, 200) }); }
+  }
+  out.agents = [...new Set(out.agents)];
+  if (out.moved.length) pushEvent({ kind: 'apply', text: `법인 폴더로 정리 — ${out.moved.length}건 옮김${out.errors.length ? ` · 실패 ${out.errors.length}` : ''}` });
+  return out;
+}
+
 /** 출처 해제 — 대상은 그대로 두고 '수동 대상' 으로 바꾼다(다음 동기화가 건드리지 않는다). */
 export function detachTarget(id) {
   const cur = getTarget(id);
@@ -693,10 +851,12 @@ let _running = false;
 /** 감지 1회 — 카탈로그 읽기 + 이력 반영 + (켰으면) 자동 등록. 진행 중이면 건너뛴다. */
 export async function detectOnce(deps = {}) {
   if (_running) return null;
+  // 105회차 A6: 감시 대상 파일을 읽지 못한 동안(읽기 오류 — 빈 목록)에 감지하면 연동 대상이 전부 '새 항목' 으로 보여 거짓 감지 이벤트 · 일별 요약(연동 0)을
+  //   남겼다(자동 등록은 save 409 로 막혔다). 다시 읽힐 때까지 감지를 건너뛴다(다음 주기에 다시 본다).
+  if (!deps.svcTargets && svcmonStoreReadError()) return null;
   _running = true;
   try {
-    const cat = await readCatalog(deps);
-    noteDetection(cat, { at: cat.at, ms: cat.ms, sourceErrors: cat.sourceErrors });
+    let cat = await readCatalog(deps);
     const auto = new Set(getOptions().autoKinds);
     if (auto.size) {
       const known = knownKeys();
@@ -708,6 +868,9 @@ export async function detectOnce(deps = {}) {
         const plan = planApply(cat.rows, keys, { enabled: false, builtByKey });
         if (plan.add.length) {
           const r = executePlan({ add: plan.add, change: [], gone: [], skip: [] }, { user: 'auto', batchPrefix: 'settings-auto' });
+          // v3.18.14(결함 D2 — 재현): 감지값을 자동 등록 **전** 카탈로그로 남겨 개요 '감시 범위' 가 다음 감지(5분)까지 '감시 0 · 미등록 N' 이었다 —
+          //   대상을 더했으면 저장소 기준으로 다시 분류한 값을 남긴다(이력 · 일별 요약은 한 감지에 한 번).
+          if (r.added) cat = await readCatalog({ ...deps, svcTargets: undefined });
           try {
             const { recordBatch } = await import('./batches.js');
             if (r.added) recordBatch({ id: r.batch, createdBy: 'auto', source: 'settings', kind: 'infra', path: SYNC_ROOT, targets: r.added, tests: r.newTests, note: '설정 연동 자동 등록(중지 상태)' });
@@ -715,6 +878,7 @@ export async function detectOnce(deps = {}) {
         }
       }
     }
+    noteDetection(cat, { at: cat.at, ms: cat.ms, sourceErrors: cat.sourceErrors });
     return cat;
   } catch (e) {
     console.warn('[svcmon] 설정 연동 감지 실패:', e?.message || e);
@@ -731,6 +895,34 @@ export function startSettingsSyncDetector() {
   _timer = setInterval(() => { detectOnce().catch(() => {}); }, DETECT_INTERVAL_MS);
   _timer.unref?.();
 }
+/**
+ * v2.960(B): 적용 · 사용/중지 · 시험 직후 감지를 곧바로 한 번 더(2초 묶음) — 개요 '감시 범위' 카드가 다음 5분 감지까지 옛 수를 보이지 않게.
+ *   감지 타이머가 돌고 있을 때만(엣지 노드 · 테스트에서는 아무것도 하지 않는다).
+ */
+let _reqTimer = null;
+export function requestDetect(delayMs = 2000) {
+  if (!_timer) return false;
+  if (_reqTimer) return true;   // 이미 곧 돈다(v3.18.14 — 저장 응답의 detectQueued 가 '안 돈다' 로 거짓 보고하지 않게)
+  _reqTimer = setTimeout(() => { _reqTimer = null; detectOnce().catch(() => {}); }, delayMs);
+  _reqTimer.unref?.();
+  return true;
+}
+
+/**
+ * v2.960(B): 개요 '감시 범위' — 설정된 시스템 = 감시 중 + 등록됐지만 중지 + 미등록(제외 · 설정 문제 · 사라짐 · 보류는 분모 밖, 따로 센다). 마지막 감지 값(카탈로그를 다시 읽지 않는다).
+ *   **관리자(전체 범위)에게만** 싣는다(라우트) — 카탈로그 자체가 adminOnly + fullScopeOnly 다(반증 H1).
+ */
+export function coverageSummary() {
+  if (!_last) return null;
+  const c = _last.counts || {};
+  const linked = (c.linked || 0) + (c.changed || 0);
+  const off = Math.min(linked, c.linkedOff || 0);
+  return {
+    at: _last.at, configured: linked + (c.new || 0), monitored: linked - off, stopped: off, unregistered: c.new || 0,
+    problem: c.problem || 0, excluded: c.excluded || 0, gone: c.gone || 0, held: c.held || 0, intervalMs: DETECT_INTERVAL_MS,
+  };
+}
+
 /** 이 노드에서 설정 연동을 쓸 수 있는가(엣지 노드는 409). */
 export function syncAvailableHere() { return !String(config.agent?.centralUrl || '').trim(); }
 

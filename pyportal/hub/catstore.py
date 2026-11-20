@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 import threading
 
-from .jsonfile import read_json, write_json
+from .jsonfile import StoreUnavailable, load_error_text, read_json_state, write_json
 from .ssrf import ValidationError
 
 # 화면 배지 색. CSS 는 `.cat-<color>` 클래스를 갖고 있다(styles.css).
@@ -69,15 +69,24 @@ class CategoryStore:
         self._path = path
         self._lock = threading.RLock()
         self._items = None
+        self._load_error = None
 
     # ---------- 내부 ----------
 
     def _load(self):
         if self._items is None:
-            raw = read_json(self._path, None, expect=list)
-            if raw is None:
+            raw, state = read_json_state(self._path, expect=list, quiet=self._load_error == "unreadable")
+            self._load_error = state if state in ("corrupt", "unreadable") else None
+            if state == "missing":
                 self._items = [dict(cat) for cat in SEED_CATEGORIES]
                 write_json(self._path, self._items)
+            elif self._load_error:
+                # 46회차 H2: 손상 · 읽기 오류는 첫 기동이 아니다 — seed 를 파일에 굳히지 않고(바로가기 분류가 'custom' 으로 바뀌던 원인)
+                #   화면이 쓸 수 있게 내장 분류만 메모리에 둔다(쓰기 거절 · 바로가기는 원값 유지 — resolve 가 StoreUnavailable).
+                items = [dict(cat) for cat in SEED_CATEGORIES]
+                if state == "unreadable":
+                    return items
+                self._items = items
             else:
                 cleaned = [cat for cat in (self._clean(entry, keep_id=True) for entry in raw) if cat]
                 self._items = self._ensure_default(cleaned)
@@ -93,7 +102,22 @@ class CategoryStore:
             items.append(dict(fallback))
         return items
 
+    def _load_writable(self):
+        """47회차 #1(재현): 손상 · 읽기 오류 상태의 쓰기는 **메모리를 바꾸기 전에** 거절한다 — 예전에는 add · reset · delete 가 목록을 먼저 고친 뒤
+        _save 에서 400 으로 거절돼, 거절된 변경(샘플 28곳 · 지운 분류)이 화면에 남았고 읽기 오류 상태가 재기동 전까지 굳었다."""
+        items = self._load()
+        if self._load_error:
+            raise ValidationError(load_error_text("categories.json", self._load_error))
+        return items
+
+    def load_error(self):
+        with self._lock:
+            self._load()
+            return self._load_error
+
     def _save(self):
+        if self._load_error:
+            raise ValidationError(load_error_text("categories.json", self._load_error))
         write_json(self._path, self._items)
 
     def _clean(self, data, *, keep_id=False, existing=None):
@@ -134,6 +158,10 @@ class CategoryStore:
         text = _text(value, 64)
         if not text:
             return None
+        with self._lock:
+            self._load()
+            if self._load_error:
+                raise StoreUnavailable(self._load_error)
         known = self.ids()
         if text in known:
             return text
@@ -142,7 +170,7 @@ class CategoryStore:
 
     def add(self, data):
         with self._lock:
-            items = self._load()
+            items = self._load_writable()
             if len(items) >= MAX_CATEGORIES:
                 raise ValidationError(f"카테고리는 최대 {MAX_CATEGORIES}개까지 만들 수 있습니다.")
             item = self._clean(data)
@@ -160,7 +188,7 @@ class CategoryStore:
 
     def update(self, cat_id, data):
         with self._lock:
-            items = self._load()
+            items = self._load_writable()
             for index, cat in enumerate(items):
                 if cat["id"] != cat_id:
                     continue
@@ -176,7 +204,7 @@ class CategoryStore:
         if cat_id == DEFAULT_CATEGORY_ID:
             raise ValidationError("기본 카테고리는 삭제할 수 없습니다.")
         with self._lock:
-            items = self._load()
+            items = self._load_writable()
             remaining = [cat for cat in items if cat["id"] != cat_id]
             if len(remaining) == len(items):
                 return False
@@ -187,7 +215,7 @@ class CategoryStore:
     def move(self, cat_id, delta):
         """표시 순서 한 칸 이동 — 대시보드 필터 칩과 선택 목록이 이 순서로 나온다."""
         with self._lock:
-            items = self._load()
+            items = self._load_writable()
             for index, cat in enumerate(items):
                 if cat["id"] != cat_id:
                     continue
@@ -201,6 +229,7 @@ class CategoryStore:
 
     def reset(self):
         with self._lock:
+            self._load_writable()
             self._items = [dict(cat) for cat in SEED_CATEGORIES]
             self._save()
             return self.all()

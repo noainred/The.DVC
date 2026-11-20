@@ -65,7 +65,7 @@ export function demoBmUsageRow(target, t) {
   const hasFc = /db/.test(String(target.name || ''));
   return {
     // v2.719(감사 R1-03): 데모 행 표지 — src 토큰 'demo'. 'idrac' 토큰은 그대로 둔다(iDRAC 출처 판정 bmSrcIsIdrac·IDRAC_ONLY_SQL 이 같게 읽는다).
-    key, name: target.name || key, vcenterId: target.vcenterId || '', ts: t, src: 'idrac+demo',
+    key, name: target.name || key, vcenterId: target.vcenterId || '', ts: t, src: 'idrac+demo', src_cm: 'ii', // v2.993: 지표별 출처(데모 — iDRAC 행)
     cpu_pct: r1(load), mem_pct: r1(clamp(memBase + load * 0.25 + (wob('m') - 0.5) * 4, 1, 99)),
     disk_busy_pct: null, disk_used_pct: null,
     net_pct: netPct, net_bps: Math.round((netPct / 100) * (fast / 8)),
@@ -133,7 +133,9 @@ export function demoPerfOverlay(target, t, scenario, base = {}) {
   const h = judgeHealth({ hfacts: detail.hfacts, tuning, row: cols, cert: scenario === 'disk-sat' ? { days: 12, count: 1 } : null, th: {}, now: t });
   h.since = Object.fromEntries(Object.entries(h.cells).map(([k, c]) => [k, ['warn', 'bad'].includes(c.code) ? t - (1 + (demoHash(`${key}|${k}`) % 6)) * DAY : t - 20 * DAY]));
   detail.health = h;
-  return { ...cols, src: 'os+idrac+demo', os_at: t, idrac_at: t, detail_json: JSON.stringify(detail), tuning_json: JSON.stringify(tuning) };
+  // v2.993(출처 색): 지표별 출처 — 데모 서버 일곱 대 중 하나는 메모리만 iDRAC(OS 가 메모리를 못 읽은 경우를 화면에서 보이게)
+  const srcCm = demoHash(`srccm|${key}`) % 7 === 0 ? 'oi' : 'oo';
+  return { ...cols, src: 'os+idrac+demo', src_cm: srcCm, os_at: t, idrac_at: t, detail_json: JSON.stringify(detail), tuning_json: JSON.stringify(tuning) };
 }
 
 /** v2.929 — 데모 소모품 사실(가상). 시나리오마다 주의 칸이 다르게 — 화면의 8칸 · 함대 ‘소모품 주의’ 표를 볼 수 있게. */
@@ -268,6 +270,17 @@ export function demoTuningFacts(key, t, cores = 32) {
   };
 }
 /**
+ * 데모 대상 키 → 시나리오(키 정렬 순위 % 9 — 0 은 iDRAC 만). 성능 열 겹침(demoPerfLatestRows)과 표시 경로(demoDisplayTargets — 다음 작업 ④)가
+ *   **이 함수 하나**를 쓴다(화면마다 시나리오가 갈리지 않게). 변경 · 집중 시드(seedDemoOps)는 같은 규칙(정렬 순위 % 9 ≠ 0)을 따로 쓴다(1회 시드 — 이번에 바꾸지 않았다).
+ */
+export function demoScenarioMap(targets = []) {
+  const keys = [...new Set((targets || []).filter(isDemoBmTarget).map((tg) => String(tg.key || '')))].sort();
+  return new Map(keys.map((k, i) => [k, DEMO_PERF_SCENARIOS[i % DEMO_PERF_SCENARIOS.length]]));
+}
+/** 그 시나리오가 OS 열(os_at · 성능 열)을 겹치는가 — demoPerfOverlay 의 첫 줄과 같은 조건. */
+export const demoScenarioShowsOs = (scenario) => DEMO_PERF_SCENARIOS.includes(scenario) && scenario !== 'idrac-only';
+
+/**
  * 최신값 행 → 데모 대상이면 성능 열을 겹친 사본(조회 응답 전용 — DB 에 쓰지 않는다). mock 이 아니면 입력 그대로.
  * 다섯 지표 열(cpu_pct·mem_pct·disk_busy_pct·disk_used_pct·net_pct·hba_*)은 바꾸지 않는다.
  */
@@ -276,14 +289,33 @@ export function demoPerfLatestRows(rows = [], targets = []) {
   const demoTg = (targets || []).filter(isDemoBmTarget);
   if (!demoTg.length) return rows;
   const byKey = new Map(demoTg.map((tg) => [String(tg.key || ''), tg]));
-  const rank = new Map([...byKey.keys()].sort().map((k, i) => [k, i]));
+  const scOf = demoScenarioMap(demoTg);
   return rows.map((r) => {
     const k = String(r?.key ?? '');
     const tg = byKey.get(k);
     if (!tg || r?.ts == null) return r;
-    const sc = DEMO_PERF_SCENARIOS[rank.get(k) % DEMO_PERF_SCENARIOS.length];
-    const o = demoPerfOverlay(tg, r.ts, sc, r);
+    const o = demoPerfOverlay(tg, r.ts, scOf.get(k), r);
     return { ...r, ...o, src: o.src || r.src };
+  });
+}
+
+/**
+ * 다음 작업 ④(2026-11-19 · 10회차 L1 · 9회차 J1): 데모 **표시 경로** 한 규칙 — 성능 열 겹침이 OS 열을 싣는 시나리오(8종)의 데모 대상에
+ *   표지를 싣는다: `demoOs: true` · `pathsShown`(등록 경로 + 'os') · `missingShown`(OS 쪽 누락 사유를 뺀 것 — 그 대상은 iDRAC 경로가 있어 누락은 OS 사유뿐이다 → []).
+ *   KPI(counts — targets.pathCountsOf) · 장비 종류 칩 · 사용률 표 · CSV(웹은 이 값을 그대로 읽는다) · 스냅샷 표지(snapshot/run.js 'demo-target')가 이 표지를 읽는다.
+ *   ⚠⚠ **대상 paths · osHost 는 바꾸지 않는다** — paths 에 os 를 넣으면 스냅샷 · 집중이 데모 대상에 SSH 를 시도한다(데모 대상에는 절대 SSH 하지 않는다).
+ *   ⚠ mock 이 아니면 입력 그대로(실운영 대상에는 이 칸들이 생기지 않는다 — 시험이 고정). 이미 OS 경로가 있는 대상 · iDRAC 만 시나리오는 그대로.
+ *   예전 9회차 J1 은 KPI(counts)만 겹쳐 어긋남을 칩 · 표 · CSV · 스냅샷으로 옮겼을 뿐이라 10회차에 되돌렸다 — 이번에는 모든 표시가 같은 표지를 읽는다.
+ */
+export function demoDisplayTargets(targets = []) {
+  if (!isMockMode() || !Array.isArray(targets) || !targets.length) return targets;
+  const scOf = demoScenarioMap(targets);
+  if (!scOf.size) return targets;
+  return targets.map((tg) => {
+    if (!isDemoBmTarget(tg) || !demoScenarioShowsOs(scOf.get(String(tg.key || '')))) return tg;
+    const paths = Array.isArray(tg.paths) ? tg.paths : [];
+    if (paths.includes('os') || !paths.includes('idrac')) return tg;
+    return { ...tg, demoOs: true, pathsShown: [...paths, 'os'], missingShown: [] };
   });
 }
 
@@ -317,12 +349,37 @@ export async function backfillBmUsage(targets = [], { now = Date.now() } = {}) {
       inserted += r?.inserted || 0;
       await new Promise((res) => setImmediate(res));
     }
-    console.log(`[mock] 베어메탈 사용률 데모 백필: ${targets.length}대 · ${inserted}행(원시 14일 + 일 롤업 45일)`);
+    // 8a단계: 마운트 일 롤업 데모(용량 소진 예측 화면 — 증가 · 평탄 · 주기 정리 · 등록 직후 꼴). 같은 쓰기 경로(monthStore.writeMountRows).
+    let mounts = 0;
+    try { const M = await import('../../bmusage/monthStore.js'); const mr = demoMountRows(targets, now); await M.writeMountRows(mr, agent); mounts = mr.length; } catch { /* 데모 마운트는 없어도 된다 */ }
+    console.log(`[mock] 베어메탈 사용률 데모 백필: ${targets.length}대 · ${inserted}행(원시 14일 + 일 롤업 45일) · 마운트 일 ${mounts}행`);
     return { inserted };
   })();
   // v2.929(5단계): 변경 이벤트 · 지난 집중 세션 데모 시드(1회 — 백필과 같은 때).
   _bmBackfill.then(() => seedDemoOps(targets, { now })).catch(() => {});
   return _bmBackfill;
+}
+
+/**
+ * 8a단계 데모 마운트 일 롤업(순수) — 서버마다 키 해시로 꼴을 고른다: 0 증가(/data — 7일 안 도달) · 1 평탄 · 2 주기 정리(톱니 — 불안정) · 3 등록 직후(4일만 — 데이터 부족) · 4 느린 증가.
+ *   inode 는 / 만 값(나머지는 xfs 처럼 값 없음 — ‘상한 없음’).
+ */
+export function demoMountRows(targets = [], now = Date.now()) {
+  const out = [];
+  for (const tg of targets) {
+    const k = String(tg?.key || ''); if (!k) continue;
+    let h = 0; for (const c of k) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+    const shape = h % 5;
+    const days = shape === 3 ? 4 : 30;
+    for (let b = days - 1; b >= 0; b -= 1) {
+      const ts = now - b * DAY - 2 * HOUR;
+      const age = days - 1 - b;
+      const data = shape === 0 ? 62 + age * 0.9 + ((h >> 3) % 7) * 0.4 : shape === 1 ? 48 + ((age * 7 + h) % 3) * 0.2 : shape === 2 ? 40 + (age % 6) * 6 + ((h >> 5) % 4) : shape === 3 ? 22 + age * 0.3 : 30 + age * 0.15;
+      out.push({ key: k, ts, mount: '/', used_pct: 35 + ((h >> 2) % 10) + age * 0.02, inode_pct: 4 + age * 0.01, size_bytes: 200e9, used_bytes: 80e9 });
+      out.push({ key: k, ts, mount: '/data', used_pct: Math.min(99, Math.round(data * 10) / 10), inode_pct: null, size_bytes: 7.3e12, used_bytes: 7.3e12 * Math.min(0.99, data / 100) });
+    }
+  }
+  return out;
 }
 
 export function _resetBareMetalDemoForTest() { _resetBareMetalSeedForTest(); _bmBackfill = null; _opsSeeded = null; }

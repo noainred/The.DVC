@@ -21,7 +21,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { openSqlite, createLockRetry } from '../util/sqliteOpen.js';
 import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';
-import { loadPerfSettings } from './perfSettings.js';
+import { loadPerfSettings, perfSettingsLoadError, LIMITS as PERF_LIMITS } from './perfSettings.js';
 import { isMockMode } from '../mock/demo/flags.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { isDemoPerfQuery, demoStorageMultiAsync, demoStorageOne, demoPortSeries } from './demoPerfSynth.js';   // v2.715 목업: 수식으로 만든다
@@ -33,7 +33,10 @@ const lockRetry = createLockRetry();
 const DAY = 86_400_000;
 // v2.728(SAN 2차): 15분 집계 표 보관 일수 — 24시간·3일 같은 짧은 구간만 이 표를 쓴다(그보다 길면 1시간 표). 빈 값·범위 밖은 31일.
 const R15_DAYS = (() => { const n = numOrNull(process.env.SANSW_PERF_ROLLUP_15M_DAYS ?? 31); return n != null && n >= 2 && n <= 400 ? Math.round(n) : 31; })();
-const rollupDays = () => { try { const n = Number(loadPerfSettings()?.rollupRetentionDays); return Number.isFinite(n) && n > 0 ? n : 730; } catch { return 730; } };
+const rollupDays = () => {
+  try { if (perfSettingsLoadError()) return PERF_LIMITS.rollupRetentionDays.max; } catch { return PERF_LIMITS.rollupRetentionDays.max; }   // 27회차 D-4: 손상 중 상한
+  try { const n = Number(loadPerfSettings()?.rollupRetentionDays); return Number.isFinite(n) && n > 0 ? n : 730; } catch { return 730; }
+};
 
 const FILE = () => path.join(config.dbDir || config.configDir, 'sanswitch-perf.db');
 const PRUNE_EVERY = 20;      // N회 저장마다 1회만 prune
@@ -303,13 +306,27 @@ const _pruneFlight = createPruneFlight();   // util/chunkedPrune.js — 같은 �
 function holdDb(db) { db.users = (db.users || 0) + 1; return () => { db.users -= 1; if (db.retired && db.users <= 0) closeDb(db); }; }
 function closeDb(db) { if (db.closed) return; db.closed = true; try { db.conn?.close?.(); } catch { /* 닫기 실패는 무시 — 새로 연다 */ } }
 function retireDb(db) { if (!db || db === 'unavailable') return; db.retired = true; if (!(db.users > 0)) closeDb(db); }
+/*
+ * 전체 점검 24회차 #4(재현): 설정 파일이 손상되면 1시간 집계는 기본 730일 · 원본은 기본 90일로 정리돼(v2.632 는 중앙 수신 경로의 원본만 보류했다)
+ *   관리자가 3650일로 둔 이력이 되돌릴 수 없게 지워졌다. 못 읽은 동안은 **모든 진입점의 정리를 보류**한다(스토리지 23회차 S-3 과 같은 판단).
+ */
+let _holdWarned = false;
+function pruneHeld() {
+  let e = null;
+  try { e = perfSettingsLoadError(); } catch { e = { reason: '판정 실패' }; }
+  if (!e) { _holdWarned = false; return null; }
+  if (!_holdWarned) { _holdWarned = true; console.warn(`[sanswitch-perf] 설정 파일을 읽지 못해 보존 정리를 설정 상한(최대 보관)으로만 합니다(기본값으로 지우지 않음) — ${String(e.reason || '').slice(0, 160)}`); }
+  return e;
+}
 function pruneOld(db, retentionDays) {
-  const days = Math.max(1, Number(retentionDays) || 90);
+  // 27회차 반증 D-4: 보류(무한 증가) 대신 못 읽은 동안은 **설정 상한(LIMITS.max)** 으로 정리 — 관리자가 둘 수 있었던 어떤 값보다 오래된 것만
+  const held = !!pruneHeld();
+  const days = held ? PERF_LIMITS.retentionDays.max : Math.max(1, Number(retentionDays) || 90);
   return _pruneFlight.run(days, async () => {
     if (db.retired || db.closed) db = await open();
     if (!db) throw new Error('DB 를 열 수 없습니다');
     const release = holdDb(db);
-    try { return await pruneOldInner(db, days); } finally { release(); }
+    try { const r = await pruneOldInner(db, days); return held ? { ...r, held: true } : r; } finally { release(); }
   });
 }
 async function pruneOldInner(db, days) {
@@ -356,7 +373,7 @@ export async function pruneNow(retentionDays) {
   if (!db) return { deleted: 0, unavailable: true };
   try {
     const r = await pruneOld(db, retentionDays);
-    return { deleted: r.deleted, done: r.done, metaDeleted: r.metaDeleted, rollupDeleted: r.rollupDeleted ?? 0 };
+    return { deleted: r.deleted, done: r.done, metaDeleted: r.metaDeleted, rollupDeleted: r.rollupDeleted ?? 0, ...(r.held ? { held: true } : {}) };
   } catch (e) { console.warn(`[sanswitch-perf] prune 실패: ${e.message}`); return { deleted: 0, error: e.message }; }
 }
 
@@ -784,8 +801,9 @@ async function storageSeriesInner(deviceId, { hours = 24, points = 120, from = n
  * @returns { buckets, bucketMs, series:[{ key, ports:[{deviceId,port}], deviceIds[], sum[], avgTotal, maxTotal }] }
  */
 export async function storageSeriesMulti(deviceIds = [], opt = {}) {
-  const { hours = 24, points = 120, groupOf = null, from = null, to = null, carryMs = null, signal = null } = opt;
-  const keyOpts = { ids: deviceIds.map(String), hours, points, from, to, carryMs, groupOf: groupOf ? [...groupOf.entries()] : null };
+  // v2.948(SAN 스토리지 성능): withPorts 면 시리즈마다 포트별 시계열(portsDetail)을 함께 — 디렉터 · 팹 · 회선 용량을 화면이 묶는다(조회는 한 번).
+  const { hours = 24, points = 120, groupOf = null, from = null, to = null, carryMs = null, signal = null, withPorts = false } = opt;
+  const keyOpts = { ids: deviceIds.map(String), hours, points, from, to, carryMs, groupOf: groupOf ? [...groupOf.entries()] : null, withPorts: !!withPorts };
   if (isDemoPerfQuery(isMockMode(), deviceIds)) {
     // v2.732(감사 B6-07): 데모 수식은 기억·합류 없이 60초 폴링마다 다시 계산했다(데모 260대 1회 약 430ms — 결과는 같은 조건이면 같다).
     //   live 와 같은 heavyQuery(기억 TTL = 수집 주기·같은 줄·감시)를 타고, 계산은 시간 기준으로 양보하며 취소 확인을 한다.
@@ -793,14 +811,14 @@ export async function storageSeriesMulti(deviceIds = [], opt = {}) {
     return heavyQuery(qkey('demo-multi', keyOpts), async (ctx) => {
       const { since, until, bucketMs } = rangeOf({ hours, from, to, points });
       const yielder = createYielder(15);
-      return demoStorageMultiAsync(await demoMeta(deviceIds), { since, until, bucketMs, groupOf, storageKey, carryMs: carryMs ?? defaultCarryMs() },
+      return demoStorageMultiAsync(await demoMeta(deviceIds), { since, until, bucketMs, groupOf, storageKey, carryMs: carryMs ?? defaultCarryMs(), withPorts: !!withPorts },
         async () => { checkCancel(ctx); await yielder(); });
     }, { lane: 'multi', signal });
   }
   const key = qkey('multi', keyOpts);
-  return heavyQuery(key, (ctx) => storageSeriesMultiInner(deviceIds, { hours, points, groupOf, from, to, carryMs, ctx }), { lane: 'multi', signal });
+  return heavyQuery(key, (ctx) => storageSeriesMultiInner(deviceIds, { hours, points, groupOf, from, to, carryMs, ctx, withPorts: !!withPorts }), { lane: 'multi', signal });
 }
-async function storageSeriesMultiInner(deviceIds = [], { hours = 24, points = 120, groupOf = null, from = null, to = null, carryMs = null, ctx = null } = {}) {
+async function storageSeriesMultiInner(deviceIds = [], { hours = 24, points = 120, groupOf = null, from = null, to = null, carryMs = null, ctx = null, withPorts = false } = {}) {
   const db = await open();
   if (!db || !deviceIds.length) return { buckets: [], series: [], bucketMs: 0, unavailable: !db };
   const { since, until, bucketMs } = rangeOf({ hours, from, to, points });
@@ -811,9 +829,10 @@ async function storageSeriesMultiInner(deviceIds = [], { hours = 24, points = 12
   const yielder = createYielder(15);
   const agg = await aggPorts(db, deviceIds.map(String), since, until, bucketMs, { yielder, ctx });
   const { qb0, nb } = agg;
-  const metaRows = db.conn.prepare(`SELECT device_id, port, attached_name FROM port_meta WHERE device_id IN (${ph})`)
+  const metaRows = db.conn.prepare(`SELECT device_id, port, attached_name, attached_wwn, speed, port_type FROM port_meta WHERE device_id IN (${ph})`)   // v2.955 attached_wwn — portsDetail.wwn
     .all(...deviceIds.map(String));
   const storageOf = new Map(metaRows.map((m) => [`${m.device_id}|${m.port}`, storageKey(m.attached_name)]));
+  const metaOf = withPorts ? new Map(metaRows.map((m) => [`${m.device_id}|${m.port}`, m])) : null;   // v2.948 포트별 출력용(이름 · 속도 · 종류)
   /*
    * v2.621(감사 DATA-03 — 재현: 1h 조회 22버킷 전부 절반 값·avgTotal 125MB/s, 정답 250): 팹 A/B 스위치의 캡처 시각은 수십 초
    *   어긋난다. 버킷(1h 60초·6h 180초)이 수집 주기(기본 5분)보다 짧으면 한 버킷에 한 스위치 표본만 들어가 **그 버킷의 합이
@@ -887,8 +906,21 @@ async function storageSeriesMultiInner(deviceIds = [], { hours = 24, points = 12
     const vals = sum.filter((v) => v != null);
     const pv = peak.filter((v) => v != null);
     const ports = s.ports.map((p) => ({ deviceId: p.x.deviceId, port: p.x.port }));
+    // v2.948: 포트별 시계열(요청했을 때만) — 자기 표본이 있는 칸만 값, 나머지는 null(이월하지 않는다 — 합산 쪽 규칙과 다르다: 포트 하나의 값은 '모른다' 가 맞다).
+    let portsDetail = null;
+    if (withPorts) {
+      portsDetail = s.ports.map((p) => {
+        const m = metaOf?.get(p.pk) || {};
+        const avg = new Array(n).fill(null); const pk = new Array(n).fill(null);
+        for (let j = 0; j < n; j++) {
+          const i = pos[j]; const cnt = p.x.a[i];
+          if (cnt > 0) { avg[j] = Math.round(p.x.a[nb + i] / cnt); pk[j] = Math.round(p.x.a[2 * nb + i]); }
+        }
+        return { deviceId: p.x.deviceId, port: p.x.port, name: m.attached_name || '', wwn: m.attached_wwn || '', speed: m.speed || '', portType: m.port_type || '', avg, peak: pk };   // v2.955 wwn — Flow Vision 타깃 필터 링크
+      });
+    }
     series.push({
-      key: s.key, group: s.group, ports, deviceIds: [...new Set(ports.map((p) => p.deviceId))], sum, peak,
+      key: s.key, group: s.group, ports, deviceIds: [...new Set(ports.map((p) => p.deviceId))], sum, peak, ...(portsDetail ? { portsDetail } : {}),
       // v2.720(감사 B1-05): 모든 버킷이 부분 합으로 비워졌으면(vals 0개) 0 이 아니라 null(측정 없음) — 0 은 '트래픽 없음' 이라는 거짓이다.
       avgTotal: vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null,   // 버킷 평균 합의 평균
       maxTotal: vals.length ? Math.max(...vals) : null,                                 // 버킷 평균 합의 최댓값

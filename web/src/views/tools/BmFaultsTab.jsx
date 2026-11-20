@@ -8,6 +8,7 @@ import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { toneVar } from './toneVar.js';
 import { OpsError, useOpsLoad } from './BmTuningTab.jsx';
+import { perfPath } from './bmPerfUrl.js'; // 다음 점검 ①: 서버 = (법인, 키) 쌍 — 요청에 법인을 싣는다
 import { incidentStateText, incidentStartText, incidentEndText, incidentStateRank, INCIDENT_END_TEXT } from './partFaultText.js';
 import { faultKpiCards, FAULT_RULES_NOTE, faultTimeline, durationText, shortStamp, holdText } from './bmOpsText.js';
 import './bmOps.css';
@@ -32,7 +33,7 @@ export function IncidentTable({ rows = [], labels = {}, withServer = false, onSe
             <tr key={`${i.key || ''}|${i.id}`}>
               {/* ⚠ 칸은 배열로(Fragment 로 감싸면 STable 정렬이 칸을 세지 못한다 — web.md v2.920 D1 · Chromium 1440 판독) */}
               {withServer && [
-                <td key="srv" data-sort={i.server}>{onServer ? <span className="bmp-link" role="button" tabIndex={0} onClick={() => onServer(i.key)} onKeyDown={(e) => { if (e.key === 'Enter') onServer(i.key); }}>{i.server}</span> : i.server}</td>,
+                <td key="srv" data-sort={i.server}>{onServer ? <span className="bmp-link" role="button" tabIndex={0} onClick={() => onServer(i.key, i.vcenterId || '')} onKeyDown={(e) => { if (e.key === 'Enter') onServer(i.key, i.vcenterId || ''); }}>{i.server}</span> : i.server}</td>,
                 <td key="corp" data-sort={i.vcenterId || ''}>{i.vcenterId || '—'}</td>,
               ]}
               <td data-sort={i.openedAt ?? ''} title={s0.title || ''}>{s0.text}{s0.note && <div className="bmo-sub">{s0.note}</div>}</td>
@@ -107,11 +108,11 @@ export function FaultsView({ resp, days, onDays }) {
 }
 
 /** 키 = ‘서버 키|기간’ — 기간을 바꾸면 키가 바뀌어 다시 읽는다(늦은 응답은 세대로 버림). */
-export const faultsUrl = (k) => { const i = String(k).lastIndexOf('|'); return `/tools/bm-usage/perf/${encodeURIComponent(String(k).slice(0, i))}/faults?days=${String(k).slice(i + 1)}`; };
+export const faultsUrl = (k, vc = '') => { const i = String(k).lastIndexOf('|'); return perfPath(String(k).slice(0, i), vc, '/faults', `days=${String(k).slice(i + 1)}`); };
 
-export default function BmFaultsTab({ itemKey }) {
+export default function BmFaultsTab({ itemKey, vc = '' }) {
   const [days, setDays] = useState(90);
-  const { resp, err, loading, reload } = useOpsLoad(faultsUrl, `${itemKey}|${days}`);
+  const { resp, err, loading, reload } = useOpsLoad(faultsUrl, `${itemKey}|${days}`, vc);
   return (
     <div style={{ minWidth: 0 }}>
       <div className="bmo-bar">

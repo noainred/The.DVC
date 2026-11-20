@@ -32,17 +32,18 @@
  *  ③ iDRAC SSH 가 exec 채널로 `racadm …` 을 받는지(대화형 `racadm>>` 셸만 주는 장비가 있을 수 있다).
  *     그 경우 출력이 비고 `parsed:false` 가 되며 **정상을 지어내지 않는다**.
  */
+import { envPositive, ENV_INT_MAX } from '../../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { withSsh, isSshAuthError } from '../../proxy/sshExec.js';
 import { parseSystemPerf, rawSample } from '../parse/racadm.js';
 
 /** 세션 전체 예산 — ⚠ **폴러의 장비 시한(기본 60초)보다 작아야 한다**(위 주석). */
-export const SESSION_BUDGET_MS = Math.max(15_000, Number(process.env.BMUSAGE_ENT_BUDGET_MS) || 45_000);
+export const SESSION_BUDGET_MS = Math.max(15_000, envPositive(process.env.BMUSAGE_ENT_BUDGET_MS, 45_000, { max: ENV_INT_MAX }));
 /** Redfish 센서 단계에 줄 수 있는 최대 시간. */
-export const API_SLICE_MS = Math.max(5_000, Number(process.env.BMUSAGE_ENT_API_MS) || 20_000);
+export const API_SLICE_MS = Math.max(5_000, envPositive(process.env.BMUSAGE_ENT_API_MS, 20_000, { max: ENV_INT_MAX }));
 /** SSH 핸드셰이크 시한 — ⚠ ssh2 기본(60초)을 그대로 쓰면 예산이 통째로 날아간다. */
-export const SSH_READY_MS = Math.max(5_000, Number(process.env.BMUSAGE_ENT_SSH_READY_MS) || 12_000);
+export const SSH_READY_MS = Math.max(5_000, envPositive(process.env.BMUSAGE_ENT_SSH_READY_MS, 12_000, { max: ENV_INT_MAX }));
 /** 명령 1개 시한. */
-export const CMD_TIMEOUT_MS = Math.max(5_000, Number(process.env.BMUSAGE_ENT_CMD_MS) || 12_000);
+export const CMD_TIMEOUT_MS = Math.max(5_000, envPositive(process.env.BMUSAGE_ENT_CMD_MS, 12_000, { max: ENV_INT_MAX }));
 /** 남은 예산이 이보다 적으면 **SSH 를 시작하지 않는다**(핸드셰이크만 하고 잘리면 결과가 0이다). */
 export const MIN_SSH_SLICE_MS = Math.max(8_000, SSH_READY_MS + 3_000);
 

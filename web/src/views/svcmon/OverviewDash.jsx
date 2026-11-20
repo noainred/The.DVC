@@ -4,6 +4,7 @@ import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import './techView.css';
 import { stackedBars, fmtMs, fmtAge } from './syncLogic.js';
+import CoverageCard from './CoverageCard.jsx';   // v2.960 감시 범위 · 법인별 추천 등록(관리자 전체 범위 — 서버가 coverage 를 실을 때만)
 
 /**
  * Monitoring › **개요(기술 뷰)**(v2.915 · 시안 ⑦ · Datadog 대시보드 참고) — 모니터 요약 · 출처별 체크 상태 · ALERT/WARN 추이 · 엣지 보고 ·
@@ -98,6 +99,8 @@ export default function OverviewDash({ onPickTarget = null }) {
           <div key={t.k} className={`t ${t.cls}`}><span>{t.label}</span><b>{(val[t.k] || 0).toLocaleString()}</b><small>{note[t.k]}</small></div>
         ))}
       </div>
+
+      {Object.prototype.hasOwnProperty.call(d, 'coverage') && <CoverageCard cov={d.coverage} onChanged={load} />}
 
       <div className="tv-row3">
         <div className="tv-w">

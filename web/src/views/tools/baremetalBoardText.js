@@ -69,8 +69,12 @@ export function boardState(p) {
 
 /** 가상화 소속 vCenter: 명시 vcenterId, 없으면 서비스태그 매칭 mappedVcenterId. */
 export const effVcOf = (s) => (s && (s.vcenterId || s.mappedVcenterId)) || '';
-/** 소속 법인: 스캔 등록분은 datacenterId 직접, 그 외는 (매핑 포함) vCenter → DataCenter 할당. */
-export const dcOfServer = (s, assign = {}) => (s && (s.datacenterId || (assign || {})[effVcOf(s)])) || '';
+/**
+ * 소속 법인: 스캔 등록분은 datacenterId 직접, 그 외는 (매핑 포함) vCenter → DataCenter 할당, 그것도 없으면
+ * v2.969: Agent 로 스캔한 대역 → 그 Agent(수집 서버)의 법인(서버가 준 scanDatacenterId — 사용자 요청 '수집한 Agent 이름에 따라 분류').
+ * 순서는 서버 analysisScope.serverInScope + withScanDatacenter 와 같다(스캔 단계는 vCenter 할당이 없을 때만 채운다).
+ */
+export const dcOfServer = (s, assign = {}) => (s && (s.datacenterId || (assign || {})[effVcOf(s)] || s.scanDatacenterId)) || '';
 /**
  * 상단 2단 필터 스코프 { datacenterId?, vcenterId?, baremetal? } 적용 — 백엔드 serverInScope 와 같은 규칙:
  * 법인 = 그 법인 전체, vCenter = 그 vCenter 가상화, Baremetal = vCenter 미소속.

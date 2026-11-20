@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { login, getToken } from '../api.js';
 import { THEMES, THEMES_CSS } from './loginThemes.jsx';
 import { loadLoginId, saveLoginId } from './loginIdMemory.js';
+import { backdropClose } from '../components/backdropClose.js'; // 96회차(95회차 남긴 것 ①): 창 안에서 끌다 배경에서 떼면 닫히던 것 — 누름 · 뗌 모두 배경일 때만
 
 // 브라우저에 남아있는 SSO 토큰(JWT)의 payload를 디코드해 표시 이름을 추출(서명검증 아님 — 인사말 표시용).
 function nameFromToken() {
@@ -83,7 +84,7 @@ export default function Login({ onSuccess, notice, setup }) {
       </button>
 
       {setupPopup && (
-        <div className="modal-overlay" style={{ zIndex: 49 }} onClick={(e) => { if (e.target === e.currentTarget) setSetupPopup(false); }}>
+        <div className="modal-overlay" style={{ zIndex: 49 }} {...backdropClose(() => setSetupPopup(false))}>
           <div className="modal card" style={{ maxWidth: 560, border: '1px solid var(--accent,#3b82f6)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
               <span style={{ fontSize: 22 }}>🔑</span>
@@ -111,7 +112,7 @@ export default function Login({ onSuccess, notice, setup }) {
       )}
 
       {warn && (
-        <div className="modal-overlay" style={{ zIndex: 50 }} onClick={(e) => { if (e.target === e.currentTarget) setWarn(false); }}>
+        <div className="modal-overlay" style={{ zIndex: 50 }} {...backdropClose(() => setWarn(false))}>
           <div className="modal card" style={{ maxWidth: 460, border: '1px solid var(--red,#ef4444)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
               <span style={{ fontSize: 22 }}>⚠️</span>

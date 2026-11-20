@@ -12,13 +12,20 @@
  *   와 같은 하니스). 자식 프로세스인 이유는 `config.js` 가 싱글턴이라 한 프로세스에서
  *   CONFIG_DIR 을 다시 가리킬 수 없기 때문이다.
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
@@ -36,7 +43,7 @@ import { stripComments } from './_stripComments.js';
  * `@@<json>` 한 줄을 받아 돌려준다.
  */
 function runLive(script) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'papi2562-'));
+  const dir = tmpDir('papi2562-');
   const boot = `
     const express = (await import('express')).default;
     const { store } = await import(${JSON.stringify(path.join(SRC, 'store.js'))});
@@ -133,7 +140,7 @@ test('거부 기본값 — 키 없음 401 · 분류 없음 403 · 다른 분류 
 
 test('투사 계약 — 응답 키 집합이 선언 fields 와 정확히 같다(내부 필드 유출 0)', () => {
   const r = runLive(`
-    const k = keys.issueApiKey({ name: 'all', groups: ['inventory', 'capacity', 'faults'] }).plaintext;
+    const k = keys.issueApiKey({ name: 'all', groups: ['inventory', 'capacity', 'faults', 'san'] }).plaintext;   // v2.950: san 분류(SAN 스토리지 성능)
     const { ENDPOINTS } = await import(${JSON.stringify(path.join(SRC, 'publicapi/allowlist.js'))});
     const out = {};
     for (const ep of ENDPOINTS) {
@@ -368,9 +375,9 @@ test('시각 필드는 numOrNull 이 아니라 msOrNull 을 쓴다 — 실제 �
 
 /* ── ⑩ 고르지 않은 분류를 만들지 않았다 ─────────────────────────────────── */
 
-test('1차 허용 분류는 셋뿐이다 — 고르지 않은 포탈 자체 상태를 함께 싣지 않았다', async () => {
+test('허용 분류는 넷(1차 셋 + v2.953 san) — 고르지 않은 포탈 자체 상태를 함께 싣지 않았다', async () => {
   const { GROUP_KEYS, ENDPOINTS } = await import('../src/publicapi/allowlist.js');
-  assert.deepEqual([...GROUP_KEYS].sort(), ['capacity', 'faults', 'inventory'],
+  assert.deepEqual([...GROUP_KEYS].sort(), ['capacity', 'faults', 'inventory', 'san'],
     `허용 분류가 바뀌었습니다: ${GROUP_KEYS.join(',')}`);
   assert.deepEqual(ENDPOINTS.filter((e) => !GROUP_KEYS.includes(e.group)), [],
     '선언된 분류에 없는 엔드포인트가 있습니다');

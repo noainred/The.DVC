@@ -5,13 +5,20 @@
  *  - 코어2 S2: secretVault 복호 실패 파일은 정책 전환 시 재기록하지 않는다(암호문 소거 방지; 실패값은 '' 유지).
  *  - 코어2 S1: 번들 수신측 sha256 판정(헤더 부재 거부·불일치 거부·일치 통과·UNVERIFIED 예외).
  */
-import { test, before } from 'node:test';
+import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'portal-audit2480-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+process.env.CONFIG_DIR = tmpDir('portal-audit2480-');
 process.env.DEFAULT_ADMIN_PASSWORD = 'test-admin-pw-123';
 
 let auth; let totp; let mail; let vault; let upg;
@@ -38,8 +45,12 @@ test('코어2 S5: OTP 등록 확정 코드 재사용(replay) 거부', () => {
 test('S8: SMTP host 변경 시 비밀번호 이월 금지', () => {
   mail.save({ smtp: { host: 'smtp-a.corp', port: 587, user: 'u', password: 'mail-pw-1' } });
   assert.equal(mail.load().smtp.password, 'mail-pw-1');
+  mail.save({ smtp: { host: 'smtp-a.corp', port: 587, user: 'u', fromName: '포탈' } });
+  assert.equal(mail.load().smtp.password, 'mail-pw-1', '접속 신원(host · 포트 · 계정) 불변 편집은 기존 비밀번호 유지');
+  // 98회차(의도 변경): 계정 · 포트도 신원이다 — 예전 기대값(계정만 바꾸면 유지)은 저장 비밀번호를 다른 계정명으로 보내던 동작이다(securityResidual98).
   mail.save({ smtp: { host: 'smtp-a.corp', port: 587, user: 'u2' } });
-  assert.equal(mail.load().smtp.password, 'mail-pw-1', 'host 불변 편집은 기존 비밀번호 유지');
+  assert.equal(mail.load().smtp.password, '', '계정 변경 시 비밀번호를 이월하지 않는다');
+  mail.save({ smtp: { host: 'smtp-a.corp', port: 587, user: 'u2', password: 'mail-pw-1' } });
   mail.save({ smtp: { host: 'smtp-b.corp' } });
   assert.equal(mail.load().smtp.password, '', 'host 변경 시 비밀번호가 새 host 로 이월되면 안 된다');
 });

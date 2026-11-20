@@ -67,7 +67,8 @@ describe('문구 — 값이 없으면 단위 없는 대시 · 방식을 밝힌�
     expect(pingMethodText(pingResp({ method: 'icmp' }))).toBe('ICMP');
     const note = pingHeadNote(pingResp());
     expect(note).toContain('TCP 연결(443)');
-    expect(note).toContain('1분 간격');
+    expect(note).toContain('1분 간격');   // 구버전 응답(probeIntervalMs 없음)
+    expect(pingHeadNote(pingResp({ probeIntervalMs: 1000 }))).toContain('1초마다 측정 · 1분 요약');
     expect(note).toContain('6분 평균');
     expect(pingHeadNote(pingResp({ bucketMs: 3 * HOUR, source: 'hourly' }))).toContain('3시간 평균(시간 요약)');
   });

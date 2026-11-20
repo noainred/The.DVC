@@ -13,6 +13,7 @@ import { jobDigests, registryLoadError, registryRev } from '../../bareos/registr
 import { listGroups, groupsRev } from '../../bareos/groups.js';
 import { touchLive, liveSnapshot, runningRunOf, liveRev, LIVE_MS, LIVE_IDLE_MS } from '../../bareos/liveStatus.js';
 import { pollerStatus } from '../../bareos/poller.js';
+import { directorInfo } from './bareosViews.js';   // 52회차 F2: 결과를 믿을 수 있나 — 판정 코어 하나(vmView.directorState)
 import { cancelInfo, CANCEL_WAIT_MS } from '../../bareos/cancelState.js';
 import { cancelPlan, groupCanceling, cancellingKey } from '../../bareos/groupRunner.js';
 import { nextSlot } from '../../bareos/groupSchedule.js';
@@ -21,6 +22,7 @@ import { isFinalStatus } from '../../bareos/names.js';
 import { numOrNull } from '../../util/numOrNull.js';
 import { memoJson, scopeKey } from './shared.js';
 import { relayLimits } from '../../bareos/edgeOps.js';
+import { scopeSig } from '../../util/scopeSig.js';
 
 const adminOnly = requireRole('admin');
 /** 느림 판정 — 지난 성공 평균의 이 비율 이하 · 시작하고 이만큼 지난 뒤(막 시작한 잡은 스냅샷 준비로 느리다). */
@@ -126,6 +128,9 @@ export function corpView(site, settings, digests, { now = Date.now(), vms = new 
   const mine = digests.filter((j) => j.vcenterId === site.vcenterId && !!j.demo === demo);
   const { live, hist } = liveSnapshot(site.directorId, site.vcenterId);
   const dirOk = !!live?.dir?.ok;
+  // 52회차 F2(재현): 폴러가 그 Director 를 못 읽고 있으면(조회 실패 · 인증 정지) 원장의 '오늘 끝난 수' 는 멈춘 값이다 — Bareos 통합 · 그룹 트리와 같은 판정으로 밝히고 합계에서 뺀다
+  let resultsKnown = true; let resultsState = 'ok';
+  try { const di = directorInfo(site.vcenterId, settings, pollerStatus(), demo); resultsKnown = di.resultsKnown !== false; resultsState = di.state; } catch { /* 판정 못 하면 예전처럼 */ }
   const t0 = startOfToday(now);
   const running = []; let ok = 0; let warn = 0; let fail = 0; let canceled = 0; let bytes = 0; let bytesUnknown = 0;
   const rates = [];
@@ -166,6 +171,7 @@ export function corpView(site, settings, digests, { now = Date.now(), vms = new 
     stuck: running.filter((r) => r.stuck).length,
     waitGroups: waitGroups(wait),
     today: { ok, warn, fail, canceled, bytes, bytesUnknown },
+    resultsKnown, resultsState,
     rateMedian: median(rates), rateSamples: rates.length,
     live: live ? { at: live.at, ok: live.ok, code: live.code || '', dirOk, dirCode: live.dir?.code || '' } : null,
     hist: hist.map((p) => [p.at, p.rate]),
@@ -198,7 +204,7 @@ export function corpView(site, settings, digests, { now = Date.now(), vms = new 
 
 /** v2.867 쓰기 범위 열쇠(법인별 writable 이 사람마다 다르다 — 캐시로 다른 계정의 값을 받지 않게). */
 function writeKey(user, snap) {
-  try { const w = writeScopedVcenterIds(user, snap); return w ? [...w].sort().join(',') : 'all'; } catch { return 'err'; }
+  try { return scopeSig(writeScopedVcenterIds(user, snap)); } catch { return 'err'; }
 }
 
 /**
@@ -234,7 +240,7 @@ export function registerBareosLive(api) {
       const corps = sites.map((s) => corpView(s, settings, digests, { now, vms, groupOf, vcName: vcName.get(s.vcenterId), diag, groups, writable: bareosAccess(req.user, s.vcenterId) === 0 }));
       const act = corps.filter((c) => c.running > 0);
       const knownRate = act.filter((c) => c.rateNow !== null);
-      const sum = (k) => corps.reduce((a, c) => a + (c.today[k] || 0), 0);
+      const sum = (k) => corps.reduce((a, c) => a + (c.resultsKnown === false ? 0 : (c.today[k] || 0)), 0);   // 52회차 F2: 결과를 모르는 법인은 더하지 않고 따로 센다
       return {
         ok: true, now, liveMs: LIVE_MS, idleMs: LIVE_IDLE_MS, demo: isDemoActive(), registryLoadError: !!registryLoadError(),
         relayLimits: relayLimits(),   // v2.858 실행 중 상세가 로그를 읽을 때 엣지 대행 Director 의 화면 시한(숫자를 화면에 박지 않는다)
@@ -244,6 +250,7 @@ export function registerBareosLive(api) {
           rateNow: act.length ? (knownRate.length ? knownRate.reduce((a, c) => a + c.rateNow, 0) : null) : 0, rateUnknownCorps: act.length - knownRate.length,
           slow: corps.reduce((a, c) => a + c.slow, 0), stuck: corps.reduce((a, c) => a + c.stuck, 0),
           today: { ok: sum('ok'), warn: sum('warn'), fail: sum('fail'), canceled: sum('canceled'), bytes: sum('bytes'), bytesUnknown: sum('bytesUnknown') },
+          resultsUnknownCorps: corps.filter((c) => c.resultsKnown === false).length,
         },
         corps,
       };

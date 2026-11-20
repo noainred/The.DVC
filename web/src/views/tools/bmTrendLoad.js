@@ -8,15 +8,17 @@
  */
 import { fetchJson } from '../../api.js';
 import { seriesKey } from './bmTrendText.js';
+import { perfPath } from './bmPerfUrl.js'; // 다음 점검 ①: 서버 = (법인, 키) 쌍 — 요청에 법인을 싣는다
 
 export const TREND_CONCURRENCY = 4;
 
-/** 기본 조회 — 계열 하나. 폴백 재시도 1회(엣지 대행이 느리면 사용자가 다시 읽는다). */
-export function trendFetcher(itemKey) {
-  const path = `/tools/bm-usage/perf/${encodeURIComponent(itemKey)}/history`;
+/** 기본 조회 — 계열 하나. 폴백 재시도 1회(엣지 대행이 느리면 사용자가 다시 읽는다). 다음 점검 ①: vc = 그 서버의 법인(서버 = (법인, 키) 쌍). */
+export function trendFetcher(itemKey, vc = '') {
+  const path = perfPath(itemKey, '', '/history');
   return (spec, win, signal) => fetchJson(path, {
     kind: spec.kind || 'server', metric: spec.metric, ...(spec.dev ? { dev: spec.dev } : {}),
     ...(win?.from != null ? { from: Math.floor(win.from) } : {}), ...(win?.to != null ? { to: Math.floor(win.to) } : {}),
+    ...(vc ? { vcenterId: String(vc) } : {}),
   }, signal, { retries: 1, timeoutMs: 90_000 });
 }
 

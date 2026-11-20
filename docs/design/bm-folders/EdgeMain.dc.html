@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>물리서버 폴더 — 엣지 포탈 목록 보기(읽기 전용 사본)</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./bmf.css">
+<link rel="stylesheet" href="./bmf2.css">
+<link rel="stylesheet" href="./bmfe.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+</style>
+</helmet>
+<div class="root" style="width:1440px;height:960px">
+  <div class="tb">
+    <span class="logo"><span class="v">V</span><span>VMware Global Monitoring Portal</span></span>
+    <span class="ver">v2.990.0</span>
+    <span class="bdg e">엣지</span>
+    <span class="cmdk"><span>기능 · 탭 · 장비 찾기</span><span class="kbd" style="margin-left:auto">⌘K</span></span>
+    <span class="pill" style="margin-left:auto"><span class="dot" style="background:#22c55e"></span><span>중앙 연결 · 3분 전</span></span>
+    <span class="pill"><span>vcenter-pl-waw-01</span></span>
+    <span class="pill"><span>operator</span></span>
+  </div>
+  <div class="body">
+    <nav class="sb" aria-label="주 메뉴">
+      <span class="h">모니터링</span>
+      <a href="#">Overview</a>
+      <a href="#">Platform</a>
+      <a href="#">호스트</a>
+      <a href="#">가상머신</a>
+      <a href="#">데이터스토어</a>
+      <a href="#">네트워크</a>
+      <a href="#">IP 관리</a>
+      <a href="#">알람</a>
+      <span class="h">도구</span>
+      <a href="#" class="on">특수 기능</a>
+      <a href="#">게시판</a>
+      <a href="#">위키</a>
+      <a href="#">설정</a>
+    </nav>
+    <div class="main">
+      <div class="crumb">특수 기능 › 서버 · 하드웨어 › 물리서버 폴더</div>
+      <h1 class="h1">
+        <span>물리서버 폴더</span>
+        <div class="seg" role="group" aria-label="보기 방식"><button type="button" class="on">목록</button><button type="button">맵</button></div>
+        <button class="sel" type="button" aria-label="저장한 보기"><span><span class="dim">보기</span> 기본</span><span class="dim">▾</span></button>
+        <span class="sp row"><button class="btn" type="button">CSV</button><button class="btn" type="button">새로고침</button></span>
+      </h1>
+
+      <div class="sync" role="status">
+        <span class="si"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 4v5h-5"></path><path d="M4 12a8 8 0 0 1 14-5l2 2"></path><path d="M4 20v-5h5"></path><path d="M20 12a8 8 0 0 1-14 5l-2-2"></path></svg></span>
+        <span style="flex:none"><b>중앙에서 받은 폴더</b> · 읽기 전용 사본</span>
+        <span class="vr"></span>
+        <span class="sv2"><span class="sk">판본</span><b class="mono">r128</b></span>
+        <span class="sv2"><span class="sk">받은 시각</span><b>3분 전</b><span class="sk">(11-13 06:07)</span></span>
+        <span class="sv2"><span class="sk">다음 받기</span><b>약 7분 뒤</b></span>
+        <span class="sp row">
+          <button class="btn sm" type="button">지금 받기</button>
+          <a class="btn sm" href="#">중앙에서 편집<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 5h5v5"></path><path d="M19 5l-8 8"></path><path d="M11 7H6v11h11v-5"></path></svg></a>
+        </span>
+      </div>
+
+      <div class="card sumbar">
+        <div><div class="big num">44</div><div class="cap">물리서버(이 엣지 목록)</div></div>
+        <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:6px">
+          <div class="stk" style="height:10px" role="img" aria-label="폴더 등록 38, 미분류 6, 이 엣지 밖 등록 3"><i class="sa" style="width:80.9%"></i><i class="su" style="width:12.7%"></i><i class="so" style="width:6.4%"></i></div>
+          <div class="row" style="gap:16px">
+            <span class="lg"><i style="background:#3b82f6"></i>폴더 등록 <b style="color:#e6edf6">38</b> · 86%</span>
+            <span class="lg"><i style="background:#f59e0b"></i>미분류 <b style="color:#e6edf6">6</b></span>
+            <span class="lg"><i class="ho"></i>이 엣지 밖 등록 <b style="color:#e6edf6">3</b></span>
+            <span class="lg">폴더 6개</span>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <span class="lg"><span class="sd bad"></span>부품 장애 <b style="color:#e6edf6">2대</b></span>
+          <span class="lg"><span class="sd na"></span>사용률 못 읽음 <b style="color:#e6edf6">1대</b></span>
+        </div>
+      </div>
+
+      <div class="pane">
+        <div class="card tree">
+          <div class="th">
+            <div class="row"><span class="co"></span><b>vcenter-pl-waw-01</b><span class="bdg e sp">이 엣지</span></div>
+            <input class="inp" type="text" placeholder="폴더 이름 찾기" aria-label="폴더 이름 찾기" style="width:100%">
+          </div>
+          <div class="rows">
+            <button class="tr" type="button"><span class="tw"></span><span class="nm">전체 물리서버</span><span class="ct">44</span></button>
+            <button class="tr d1" type="button"><span class="tw">▾</span><span class="fo"></span><span class="nm">DB</span><span class="sd bad" style="margin-left:auto"></span><span class="ct" style="margin-left:0">12</span></button>
+            <button class="tr d2 on" type="button"><span class="tw"></span><span class="fo"></span><span class="nm">Oracle RAC</span><span class="sd bad" style="margin-left:auto"></span><span class="ct" style="margin-left:0">4</span></button>
+            <button class="tr d2" type="button"><span class="tw"></span><span class="fo"></span><span class="nm">MySQL</span><span class="ct">8</span></button>
+            <button class="tr d1" type="button"><span class="tw"></span><span class="fo"></span><span class="nm">WEB</span><span class="sd bad" style="margin-left:auto"></span><span class="ct" style="margin-left:0">14</span></button>
+            <button class="tr d1" type="button"><span class="tw"></span><span class="fo"></span><span class="nm">GPU</span><span class="ct">7</span></button>
+            <button class="tr d1" type="button"><span class="tw"></span><span class="fo"></span><span class="nm">백업 · 미디어 서버</span><span class="ct">5</span></button>
+            <button class="tr d1 un" type="button"><span class="tw"></span><span class="fo un"></span><span class="nm">(미분류)</span><span class="ct">6</span></button>
+            <button class="tr d1 out" type="button"><span class="tw"></span><span class="fo out"></span><span class="nm">이 엣지 밖 등록</span><span class="ct">3</span></button>
+          </div>
+          <div class="foot" style="flex-direction:column;align-items:flex-start;gap:4px">
+            <span>폴더 · 등록은 <b style="color:#e6edf6">중앙 포탈</b>에서 만들고 바꿉니다.</span>
+            <span>여기서는 그 결과를 이 엣지의 지금 값과 함께 봅니다.</span>
+          </div>
+        </div>
+
+        <div class="card cnt">
+          <div class="fh">
+            <div class="path">
+              <span class="dim" style="font-weight:600">vcenter-pl-waw-01</span><span class="sep">›</span><span>DB</span><span class="sep">›</span><span>Oracle RAC</span>
+              <span class="bdg c">서비스: Oracle RAC</span>
+              <span class="ro"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path></svg>읽기 전용</span>
+              <span class="sp note">값은 이 엣지가 수집한 지금 값 · 06:09</span>
+            </div>
+            <div class="tiles">
+              <div class="tile"><span class="tk2">서버 4대 — 상태</span><span class="tv2"><span class="sd ok"></span>켜짐 4 · 꺼짐 0</span><span class="ts2">사용률 못 읽음 0</span></div>
+              <div class="tile"><span class="tk2">CPU(용량 가중)</span><span class="tv2 num">34%</span><span class="ts2">4대 기준</span></div>
+              <div class="tile"><span class="tk2">메모리(용량 가중)</span><span class="tv2 num">61%</span><span class="ts2">4대 기준</span></div>
+              <div class="tile"><span class="tk2">전력</span><span class="tv2 num">1,912 W</span><span class="ts2">4대 합</span></div>
+              <div class="tile" style="border-color:rgba(239,68,68,.45)"><span class="tk2">부품 장애</span><span class="tv2" style="color:#fca5a5">1대</span><span class="ts2">모름 0</span></div>
+            </div>
+          </div>
+          <div class="bar">
+            <div class="qbar" style="flex:1"><span class="ph">이 목록에서 거르기(이름 · 모델 · 서비스 태그)</span></div>
+            <button class="qf on" type="button">장애 1</button>
+            <button class="qf" type="button">못 읽음 0</button>
+            <button class="qf" type="button">꺼짐 0</button>
+            <label class="lbl"><input class="chk" type="checkbox" checked="checked">하위 폴더 포함</label>
+          </div>
+          <div class="tw2">
+            <table class="t">
+              <thead><tr><th style="width:26%">이름</th><th style="width:20%">모델 · 서비스 태그</th><th style="width:12%">등록</th><th style="width:12%">부품 장애</th><th class="r" style="width:11%">CPU</th><th class="r" style="width:11%">메모리</th><th class="r" style="width:8%">전력</th></tr></thead>
+              <tbody>
+                <tr><td><span class="nm"><span class="sd ok"></span>pl-ora-rac01</span></td><td>PowerEdge R750 <span class="dim mono">7XK2M03</span></td><td><span class="bdg n">손 등록</span></td><td class="dim">—</td><td><div class="mb"><span class="mbt"><i style="width:38%"></i></span><span class="mbn">38%</span></div></td><td><div class="mb"><span class="mbt"><i style="width:64%"></i></span><span class="mbn">64%</span></div></td><td class="r num">486 W</td></tr>
+                <tr><td><span class="nm"><span class="sd ok"></span>pl-ora-rac02</span></td><td>PowerEdge R750 <span class="dim mono">7XK2N03</span></td><td><span class="bdg n">손 등록</span></td><td class="dim">—</td><td><div class="mb"><span class="mbt"><i style="width:41%"></i></span><span class="mbn">41%</span></div></td><td><div class="mb"><span class="mbt"><i style="width:66%"></i></span><span class="mbn">66%</span></div></td><td class="r num">492 W</td></tr>
+                <tr><td><span class="nm"><span class="sd bad"></span>pl-ora-rac03</span></td><td>PowerEdge R750 <span class="dim mono">7XK2P03</span></td><td><span class="bdg n">손 등록</span></td><td><span class="bdg r">전원 장치 1건</span></td><td><div class="mb"><span class="mbt"><i style="width:29%"></i></span><span class="mbn">29%</span></div></td><td><div class="mb"><span class="mbt"><i style="width:58%"></i></span><span class="mbn">58%</span></div></td><td class="r num">471 W</td></tr>
+                <tr><td><span class="nm"><span class="sd ok"></span>pl-ora-rac04</span></td><td>PowerEdge R750xa <span class="dim mono">9HT4Q13</span></td><td><span class="bdg w">자동 규칙</span></td><td class="dim">—</td><td><div class="mb"><span class="mbt"><i style="width:27%"></i></span><span class="mbn">27%</span></div></td><td><div class="mb"><span class="mbt"><i style="width:55%"></i></span><span class="mbn">55%</span></div></td><td class="r num">463 W</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="outrow">
+            <span class="fo out"></span>
+            <span><b style="color:#e6edf6">이 엣지 밖 등록 1대</b> — 중앙에는 이 폴더에 있지만 이 엣지의 서버 목록에 없습니다.</span>
+            <span class="tag">pl-ora-rac05</span>
+            <span class="note">중앙이 직접 수집하는 서버이거나, 이 엣지에서 빠진 서버입니다.</span>
+          </div>
+          <div class="foot">
+            <span>4대 · 못 읽은 값(‘—’)은 평균 · 합계에 넣지 않습니다 · 행을 누르면 옆 패널(지난 24시간 추이는 이 엣지 값)</span>
+            <span class="sp">등록 · 옮기기 · 폴더 만들기는 중앙 포탈에서 합니다</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":960}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

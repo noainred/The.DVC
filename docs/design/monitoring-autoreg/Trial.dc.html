@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>시험 점검 후 사용 — 결과 (1440)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a111c;color:#c8d6e8;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#9fcaff}a:hover{color:#cfe4ff}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+.pc-mode{display:inline-flex;align-items:center;padding:7px 16px;border-radius:999px;border:1px solid #1e3350;background:#0f1a2b;color:#9fb4cc;font-size:13px}
+.pc-mode.on{background:#1668d8;color:#fff;font-weight:700;border-color:#1668d8}
+.pc-card{background:#0f1a2b;border:1px solid #1c2c42;border-radius:8px;padding:11px 14px;border-top:2px solid #1e3350;display:flex;flex-direction:column;gap:3px;min-width:0}
+.pc-card-label{font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.08em;color:#8ea4bd}
+.pc-card-value{font-family:"JetBrains Mono",monospace;font-size:26px;font-weight:600;color:#dbe7f5;line-height:1.15}
+.pc-card.b{border-top-color:#4b9bff}.pc-card.g{border-top-color:#3ddc84}.pc-card.g .pc-card-value{color:#3ddc84}.pc-card.a{border-top-color:#f0a92e}.pc-card.a .pc-card-value{color:#f0a92e}.pc-card.r{border-top-color:#ff5c5c}.pc-card.r .pc-card-value{color:#ff5c5c}.pc-card.o{border-top-color:#6b7f99}
+.pc-card-note{font-size:11px;color:#8ea4bd}
+.pc-panel{background:#0f1a2b;border:1px solid #1c2c42;border-radius:8px;overflow:hidden}
+.pc-panel-head{display:flex;justify-content:space-between;padding:10px 12px;font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.1em;color:#8ea4bd}
+.pc-btn{padding:7px 13px;border:1px solid #1e3350;border-radius:6px;background:#0f1a2b;color:#c8d6e8;font:inherit;font-size:12.5px;white-space:nowrap}
+.pc-btn.primary{border-color:#1668d8;background:#1668d8;color:#fff;font-weight:600}
+.pc-btn.sm{padding:3px 9px;font-size:11.5px}
+.overlay{position:absolute;inset:0;background:rgba(5,10,18,.66)}
+.modal{position:absolute;left:250px;top:52px;width:940px;background:#0f1a2b;border:1px solid #24405f;border-radius:10px;box-shadow:0 24px 60px rgba(0,0,0,.55);overflow:hidden;display:flex;flex-direction:column}
+.modal-head{display:flex;align-items:center;gap:10px;padding:13px 16px;border-bottom:1px solid #1c2c42}
+.modal-head b{color:#e8f1fb;font-size:14.5px}
+.sum{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;padding:0 16px}
+.sum div{border:1px solid #1c2c42;border-left:4px solid #1e3350;border-radius:8px;background:#0b1727;padding:9px 12px;display:flex;flex-direction:column;gap:1px;min-width:0}
+.sum span{font-family:"JetBrains Mono",monospace;font-size:10.5px;letter-spacing:.06em;color:#8ea4bd}
+.sum b{font-family:"JetBrains Mono",monospace;font-size:22px;font-weight:600;color:#dbe7f5;line-height:1.2}
+.sum small{font-size:11px;color:#9fb4cc}
+.sum .pass{border-left-color:#3ddc84}.sum .pass b{color:#3ddc84}
+.sum .fail{border-left-color:#ff5c5c}.sum .fail b{color:#ff7b7b}
+.sum .wait{border-left-color:#4b9bff}.sum .wait b{color:#7db8ff}
+.th,.tr{display:grid;grid-template-columns:256px 190px 70px minmax(0,1fr) 156px;align-items:center;column-gap:10px;padding:0 16px}
+.th{height:30px;background:#132132;font-family:"JetBrains Mono",monospace;font-size:10.5px;letter-spacing:.06em;color:#8ea4bd}
+.tr{height:30px;border-bottom:1px solid #131f30;font-size:12.5px}
+.tr > span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.tr .nm{color:#dbe7f5}
+.tr .nm em{font-style:normal;font-family:"JetBrains Mono",monospace;font-size:11px;color:#8ea4bd;margin-left:8px}
+.tr .wh{font-family:"JetBrains Mono",monospace;font-size:11.5px;color:#9fb4cc}
+.tr .rs{font-family:"JetBrains Mono",monospace;font-size:11.5px;color:#cfe0f2}
+.tr .act{display:flex;gap:6px;justify-content:flex-end;font-size:11.5px;color:#9fb4cc;overflow:visible}
+.tr.fail{background:#1a0d10}
+.tr.wait{background:#0c1a2e}
+.pill{display:inline-flex;align-items:center;justify-content:center;height:20px;padding:0 8px;border-radius:4px;font-family:"JetBrains Mono",monospace;font-size:10.5px;font-weight:600;white-space:nowrap}
+.pill.pass{background:#0f3d24;color:#5eeaa0}.pill.fail{background:#4c1414;color:#ffa3a3}.pill.wait{background:#12305a;color:#a9d0ff}
+.note{margin:12px 16px 0;border:1px solid #1c2c42;background:#0b1727;border-radius:8px;padding:9px 12px;font-size:11.5px;color:#9fb4cc;line-height:1.6}
+.note b{color:#dbe7f5;font-weight:600}
+.foot{display:flex;align-items:center;gap:8px;padding:12px 16px 14px}
+</style>
+</helmet>
+<div style="width:1440px;height:900px;box-sizing:border-box;position:relative;overflow:hidden;background:#0a111c">
+
+  <div style="padding:16px 24px;display:flex;flex-direction:column;gap:12px">
+    <div style="display:flex;align-items:center;gap:8px;height:36px"><span class="pc-mode on">인프라</span><span class="pc-mode">서비스</span></div>
+    <div style="display:flex;align-items:center;gap:12px;height:24px"><span class="mono" style="font-size:12px;letter-spacing:.14em;color:#8ea4bd">INFRASTRUCTURE PERFORMANCE TESTS</span><span style="flex:1;height:1px;background:#1c2c42"></span></div>
+    <div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:12px;height:86px">
+      <div class="pc-card b"><span class="pc-card-label">TOTAL TESTS</span><span class="pc-card-value">134</span><span class="pc-card-note">53개 대상 그룹</span></div>
+      <div class="pc-card g"><span class="pc-card-label">정상</span><span class="pc-card-value">96</span><span class="pc-card-note">Ok · Host is alive</span></div>
+      <div class="pc-card a"><span class="pc-card-label">경고</span><span class="pc-card-value">4</span><span class="pc-card-note">임계치 근접</span></div>
+      <div class="pc-card r"><span class="pc-card-label">실패</span><span class="pc-card-value">7</span><span class="pc-card-note">No answer · Error</span></div>
+      <div class="pc-card o"><span class="pc-card-label">중지</span><span class="pc-card-value">23</span><span class="pc-card-note">Disabled · 대상 9</span></div>
+      <div class="pc-card o"><span class="pc-card-label">갱신 안 됨</span><span class="pc-card-value">0</span><span class="pc-card-note">주기 초과</span></div>
+      <div class="pc-card o"><span class="pc-card-label">점검 대기</span><span class="pc-card-value">4</span><span class="pc-card-note">엣지 첫 보고 전</span></div>
+    </div>
+    <div style="display:grid;grid-template-columns:340px minmax(0,1fr);gap:20px">
+      <div class="pc-panel" style="height:560px"><div class="pc-panel-head"><span>TEST TREE</span><span>53 hosts</span></div></div>
+      <div class="pc-panel" style="height:560px"></div>
+    </div>
+  </div>
+
+  <div class="overlay" aria-hidden="true"></div>
+
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="tr-title">
+    <div class="modal-head">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#9fcaff" stroke-width="2" aria-hidden="true"><path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.8 3h10.4a2 2 0 0 0 1.8-3l-5-9V3"/></svg>
+      <b id="tr-title">시험 점검 후 사용</b>
+      <span class="mono" style="font-size:11.5px;color:#9fb4cc">대상 13 · 점검 15 · 10:21 시작 · 9초 걸림</span>
+      <button type="button" aria-label="닫기" style="margin-left:auto;border:0;background:none;font-size:16px;color:#8ea4bd">✕</button>
+    </div>
+
+    <div style="padding:12px 16px 10px;font-size:12.5px;color:#c8d6e8">점검을 한 번씩 실제로 실행해 <b style="color:#fff">통과한 대상만 사용</b>으로 바꿨습니다. 실패한 대상은 중지로 두었고, 시험 중에는 실패 알림을 보내지 않았습니다.</div>
+
+    <div class="sum">
+      <div class="pass"><span>통과</span><b>9</b><small>사용으로 바꿈</small></div>
+      <div class="fail"><span>실패</span><b>2</b><small>중지로 둠 · 사유는 아래</small></div>
+      <div class="wait"><span>엣지 보고 대기</span><b>2</b><small>시한 10:36 까지 판정</small></div>
+      <div><span>점검 위치</span><b style="font-size:15px;line-height:1.7">이 포탈 11 · 엣지 2</b><small>엣지 전용 대상은 엣지가 잽니다</small></div>
+    </div>
+
+    <div style="margin-top:12px">
+      <div class="th"><span>대상</span><span>점검 위치</span><span>결과</span><span>점검 결과</span><span style="text-align:right">조치</span></div>
+
+      <div class="tr fail"><span class="nm">hpc-node-03<em>172.107.120.14</em></span><span class="wh">이 포탈(직접)</span><span><span class="pill fail">실패</span></span><span class="rs">SSH 배너(22) · 연결 시간 초과 4,000 ms</span><span class="act"><button class="pc-btn sm" type="button">다시 시험</button><button class="pc-btn sm" type="button">그래도 사용</button></span></div>
+      <div class="tr fail"><span class="nm">legacy-nfs-01<em>172.172.195.243</em></span><span class="wh">이 포탈(직접)</span><span><span class="pill fail">실패</span></span><span class="rs">SSH 배너(22) · 연결 거부(ECONNREFUSED)</span><span class="act"><button class="pc-btn sm" type="button">다시 시험</button><button class="pc-btn sm" type="button">그래도 사용</button></span></div>
+
+      <div class="tr wait"><span class="nm">CVP-ASH-01<em>10.80.206.45</em></span><span class="wh">엣지 mock-Edge-Virginia</span><span><span class="pill wait">대기</span></span><span class="rs">배정을 내려보냄 · 엣지 첫 보고를 기다리는 중</span><span class="act">시한 10:36</span></div>
+      <div class="tr wait"><span class="nm">CVP-FRA-02<em>10.118.212.222</em></span><span class="wh">엣지 mock-Edge-Frankfurt</span><span><span class="pill wait">대기</span></span><span class="rs">배정을 내려보냄 · 엣지 첫 보고를 기다리는 중</span><span class="act">시한 10:36</span></div>
+
+      <div class="tr"><span class="nm">ai-train-01<em>172.39.142.167</em></span><span class="wh">이 포탈(직접)</span><span><span class="pill pass">통과</span></span><span class="rs">SSH 배너(22) Ok · 38 ms</span><span class="act">사용으로 바꿈</span></div>
+      <div class="tr"><span class="nm">ai-train-02<em>172.151.160.192</em></span><span class="wh">이 포탈(직접)</span><span><span class="pill pass">통과</span></span><span class="rs">SSH 배너(22) Ok · 41 ms</span><span class="act">사용으로 바꿈</span></div>
+      <div class="tr"><span class="nm">backup-media-01<em>172.218.22.244</em></span><span class="wh">이 포탈(직접)</span><span><span class="pill pass">통과</span></span><span class="rs">SSH 배너(22) Ok · 22 ms</span><span class="act">사용으로 바꿈</span></div>
+      <div class="tr"><span class="nm">backup-media-02<em>172.5.28.168</em></span><span class="wh">이 포탈(직접)</span><span><span class="pill pass">통과</span></span><span class="rs">SSH 배너(22) Ok · 25 ms</span><span class="act">사용으로 바꿈</span></div>
+      <div class="tr"><span class="nm">hpc-node-01<em>172.183.132.115</em></span><span class="wh">이 포탈(직접)</span><span><span class="pill pass">통과</span></span><span class="rs">SSH 배너(22) Ok · 19 ms</span><span class="act">사용으로 바꿈</span></div>
+      <div class="tr"><span class="nm">hpc-node-02<em>172.70.114.90</em></span><span class="wh">이 포탈(직접)</span><span><span class="pill pass">통과</span></span><span class="rs">SSH 배너(22) Ok · 18 ms</span><span class="act">사용으로 바꿈</span></div>
+      <div class="tr"><span class="nm">log-archive-01<em>172.5.175.85</em></span><span class="wh">이 포탈(직접)</span><span><span class="pill pass">통과</span></span><span class="rs">SSH 배너(22) Ok · 64 ms</span><span class="act">사용으로 바꿈</span></div>
+      <div class="tr"><span class="nm">oradb-prod-01<em>172.136.54.182</em></span><span class="wh">이 포탈(직접)</span><span><span class="pill pass">통과</span></span><span class="rs">SSH 배너(22) Ok · 12 ms</span><span class="act">사용으로 바꿈</span></div>
+      <div class="tr"><span class="nm">oradb-prod-02<em>172.249.72.207</em></span><span class="wh">이 포탈(직접)</span><span><span class="pill pass">통과</span></span><span class="rs">SSH 배너(22) Ok · 13 ms</span><span class="act">사용으로 바꿈</span></div>
+    </div>
+
+    <div class="note">
+      <b>통과 기준</b> — 그 대상의 점검이 모두 정상 또는 경고. 하나라도 실패하면 대상을 중지로 둡니다.<br>
+      <b>엣지 전용 대상</b>은 이 포탈이 직접 재지 않습니다. 엣지가 첫 결과를 올리면 같은 기준으로 판정하고, 시한까지 보고가 없으면 중지로 되돌립니다.<br>
+      이 포탈이 점검을 직접 실행하지 않는 역할(중앙)이면 모든 대상이 ‘엣지 보고 대기’ 로 갑니다.
+    </div>
+
+    <div class="foot">
+      <span style="font-size:11.5px;color:#8ea4bd">결과는 개요의 상태 전이 이벤트에도 남습니다.</span>
+      <span style="margin-left:auto;display:inline-flex;gap:8px">
+        <button class="pc-btn" type="button">실패 2건 다시 시험</button>
+        <button class="pc-btn primary" type="button">닫기 — 대기 2건은 뒤에서 계속 판정</button>
+      </span>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

@@ -12,22 +12,27 @@ const CAP_DEFAULT = 32;
 let CAP = CAP_DEFAULT;
 export function configureSlots({ capacity } = {}) { const c = Math.floor(Number(capacity)); CAP = Number.isFinite(c) && c >= 1 ? c : CAP_DEFAULT; grant(); }
 let _used = 0;
+// 6단계 수집 건강: 주기 동안 동시에 쓴 최대 슬롯 수(‘동시성 사용 n/설정값’) — 폴러가 주기 시작에 0 으로 두고 끝에 읽는다(재시작하면 0 부터).
+let _peak = 0;
+const bumpPeak = () => { if (_used > _peak) _peak = _used; };
 const _waiters = [];   // { resolve, priority, timer }
 
 export function slotCapacity() { return CAP; }
-export function slotStatus() { return { capacity: CAP, used: _used, waiting: _waiters.length }; }
+export function slotStatus() { return { capacity: CAP, used: _used, waiting: _waiters.length, peak: _peak }; }
+/** 지금까지의 최대 사용 수를 돌려주고 지금 사용 수로 다시 시작한다(주기 경계). */
+export function slotPeakReset() { const p = _peak; _peak = _used; return p; }
 
 function grant() {
   while (_used < CAP && _waiters.length) {
     const w = _waiters.shift();
     if (w.timer) clearTimeout(w.timer);
-    _used += 1;
+    _used += 1; bumpPeak();
     w.resolve(true);
   }
 }
 /** 슬롯 하나를 얻는다 — true(얻음) · false(대기 상한 초과). */
 export function acquireSlot({ priority = false, waitMs = Infinity } = {}) {
-  if (_used < CAP && !_waiters.length) { _used += 1; return Promise.resolve(true); }
+  if (_used < CAP && !_waiters.length) { _used += 1; bumpPeak(); return Promise.resolve(true); }
   return new Promise((resolve) => {
     const w = { resolve, priority, timer: null };
     if (Number.isFinite(waitMs)) {
@@ -46,4 +51,4 @@ export async function withSlot(fn, { priority = false, waitMs = Infinity, onBusy
   if (!ok) return onBusy();
   try { return await fn(); } finally { releaseSlot(); }
 }
-export function _resetSlotsForTest() { for (const w of _waiters.splice(0)) { if (w.timer) clearTimeout(w.timer); w.resolve(false); } _used = 0; }
+export function _resetSlotsForTest() { for (const w of _waiters.splice(0)) { if (w.timer) clearTimeout(w.timer); w.resolve(false); } _used = 0; _peak = 0; }

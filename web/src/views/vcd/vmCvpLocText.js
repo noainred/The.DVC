@@ -3,6 +3,7 @@
  *   판정은 서버(호스트 업링크 포트 집합과 비교)가 하고, 여기서는 이름 · 색 · 이유만 붙인다. 모르면 ‘판정 보류’ — ‘없음’ 으로 단정하지 않는다.
  */
 import { epCycleText } from '../hostNetText.js';
+import { edgeClockAheadMark } from '../tools/edgeLateText.js';
 
 export const VERDICT = Object.freeze({
   match: { label: '일치', tone: 'green', note: 'CVP 가 이 vNIC MAC 을 지금 호스트의 업링크 포트에서 배웠습니다' },
@@ -26,6 +27,8 @@ export function locRows(d) {
     vlan: (r.locations || []).map((l) => l.vlan).filter((x) => x != null).join(', ') || '—',
     learned: (r.locations || []).map((l) => hm(l.learnedAt)).filter(Boolean)[0] || '—',
     reason: r.reason || '',
+    // v2.940(C-③ L-10): 엣지 시계가 빨라 '물어본 시각' 을 수신 시각으로 잘랐으면 그 차이. 학습 시각(CVP 가 준 값)은 잘리지 않는다 — 표지는 vNIC 칸에 단다(반증 L-2).
+    clock: (() => { const m = edgeClockAheadMark(r); return m ? { label: m.label, title: `엣지 시계가 중앙보다 빠릅니다 — 이 vNIC 을 물어본 시각을 중앙이 받은 시각으로 맞췄습니다(${m.label.replace('엣지 시계 ', '')}). 학습 시각은 CVP 가 준 값이라 그대로입니다. 그 엣지 서버의 시각 동기(NTP)를 확인하세요.` } : null; })(),
     note: r.note || '',   // 서버가 판정을 보류한 이유(LAG · 위치 모르는 업링크 NIC · DB 못 읽음)
   }));
 }

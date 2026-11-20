@@ -96,7 +96,7 @@ export default function VmTagsTool({ scope }) {
   if (!data) return <Loading />;
   const vcs = Array.isArray(data.vcenters) ? data.vcenters : [];
   const cov = coverageNote(data.coverage, vcs);
-  const pol = policyNote(data.policy);
+  const pol = policyNote(data.policy, { unreadable: data.policyUnreadable === true });
   const rows = Array.isArray(data.rows) ? data.rows : [];
   const cats = Array.isArray(data.categories) ? data.categories : [];
   const fields = Array.isArray(data.fields) ? data.fields : [];

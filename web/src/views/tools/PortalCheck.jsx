@@ -40,8 +40,9 @@ import {
 import { probeAgeLine, sameTokenCell } from './tokenProbeAge.js'; // v2.785(GE O-B1): 프로브 나이·낡음·등록값 변경 표시
 import { ArchCheckView } from './ArchCheckView.jsx'; // v2.614: 세 번째 서브메뉴 — 아키텍처 점검(자기 데이터·상태를 갖는다)
 import { FieldCheckView } from './FieldCheckView.jsx'; // v2.938: 네 번째 — 법인별 실환경 확인
+import { CommonCatalogView } from './CommonCatalogView.jsx'; // v3.10: 다섯째 — 공통 기능(빌드 때 만든 공용 모듈 목록 · 읽기만)
 
-const VIEWS = [['tokens', '토큰 점검'], ['inventory', '인벤토리 점검'], ['arch', '아키텍처 점검'], ['field', '법인별 실환경 확인']];
+const VIEWS = [['tokens', '토큰 점검'], ['inventory', '인벤토리 점검'], ['arch', '아키텍처 점검'], ['field', '법인별 실환경 확인'], ['common', '공통 기능']];
 
 const TONE = Object.freeze({
   green: 'var(--ok, #35c46a)', red: 'var(--bad, #ef5a5a)',
@@ -563,7 +564,7 @@ export function PortalCheck() {
           </button>
         ))}
       </div>
-      {view === 'field' ? <FieldCheckView /> : view === 'arch' ? <ArchCheckView /> : view === 'inventory' ? <InventoryCheckView /> : <TokenCheckView />}
+      {view === 'common' ? <CommonCatalogView /> : view === 'field' ? <FieldCheckView /> : view === 'arch' ? <ArchCheckView /> : view === 'inventory' ? <InventoryCheckView /> : <TokenCheckView />}
     </div>
   );
 }

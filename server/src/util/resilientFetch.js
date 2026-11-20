@@ -20,6 +20,7 @@ import { recordOutbound } from './outboundStats.js';
 import { Agent } from 'undici';
 import { ssrfLookup } from './ssrfLookup.js';   // v2.506: DNS 리바인딩(TOCTOU) 차단
 import { ssrfBlockReason } from './ssrfBlock.js'; // v2.583: 리다이렉트 hop 마다 IP 리터럴 대상 검사
+import { envPositive, ENV_INT_MAX } from './envNumber.js';
 
 // TLS 검증은 기본 ON(보안). 과거 이 값은 `WAN_TLS_INSECURE === 'false' ? true : false`로,
 // 이름과 반대로 '미설정=검증 off'였다 — 중앙↔엣지 구간은 수집 토큰·배포 사용자 자격증명이
@@ -131,12 +132,20 @@ export function wanTlsStatus() {
 // `ipBlockReason` 은 공인 IP 와 RFC1918 을 허용하고 루프백/링크로컬/메타데이터/우회표기만
 // 막으므로, GitHub 업그레이드 다운로드·중앙↔엣지 같은 정상 흐름에는 영향이 없다
 // (루프백을 치는 resilientFetch 호출부가 없음을 grep 으로 확인했다).
+/*
+ * 102회차 F1(재현): 예전 `Number(env) || 기본값` 은 음수 · Infinity 를 그대로 undici 에 넘겼다. undici Agent 는 connectTimeout 을 검사하지 않고
+ *   연결 시한 타이머(fast timer — 약 0.5초 눈금)에 넣는다 — WAN_CONNECT_TIMEOUT_MS=-1 이면 **약 1초 안에** 'Connect Timeout Error' 라
+ *   연결 수립에 1초 넘게 걸리는 법인(RTT 800ms — TCP + TLS 왕복)의 중앙↔엣지 요청이 전부 실패했고, Infinity 면 연결 시한이 사라졌다.
+ *   WAN_MAX_CONNECTIONS=-1 은 첫 요청에서 'invalid connections' 로 전부 실패, Infinity 는 연결 상한이 꺼졌다. 이제 유한 양수만(그 밖 기본값).
+ */
+export const WAN_CONNECT_TIMEOUT_MS = envPositive(process.env.WAN_CONNECT_TIMEOUT_MS, 20_000, { max: ENV_INT_MAX });
+export const WAN_MAX_CONNECTIONS = envPositive(process.env.WAN_MAX_CONNECTIONS, 6);
 const wanAgent = new Agent({
   connect: { ...wanTlsConnectOptions(), lookup: ssrfLookup },
-  connectTimeout: Number(process.env.WAN_CONNECT_TIMEOUT_MS) || 20_000,
+  connectTimeout: WAN_CONNECT_TIMEOUT_MS,
   keepAliveTimeout: 10_000,
   keepAliveMaxTimeout: 30_000,
-  connections: Number(process.env.WAN_MAX_CONNECTIONS) || 6,
+  connections: WAN_MAX_CONNECTIONS,
 });
 
 /*
@@ -150,10 +159,10 @@ export const UNDICI_DEFAULT_IO_TIMEOUT_MS = 300_000;
 const LONG_IO_TIMEOUT_MS = 1_800_000 + 60_000;
 const wanLongAgent = new Agent({
   connect: { ...wanTlsConnectOptions(), lookup: ssrfLookup },
-  connectTimeout: Number(process.env.WAN_CONNECT_TIMEOUT_MS) || 20_000,
+  connectTimeout: WAN_CONNECT_TIMEOUT_MS,
   keepAliveTimeout: 10_000,
   keepAliveMaxTimeout: 30_000,
-  connections: Number(process.env.WAN_MAX_CONNECTIONS) || 6,
+  connections: WAN_MAX_CONNECTIONS,
   headersTimeout: LONG_IO_TIMEOUT_MS,
   bodyTimeout: LONG_IO_TIMEOUT_MS,
 });

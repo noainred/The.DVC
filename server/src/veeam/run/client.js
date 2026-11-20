@@ -102,15 +102,29 @@ export function makeRunClient(server, { signal = null, fetchImpl = fetch } = {})
   }
 
   /** 목록(`{data:[…], pagination}`)을 상한까지. */
+  /**
+   * 페이지를 합친 원소 배열. 상한(max · 100쪽)에서 멈췄거나 total 보다 적게 끝났으면 배열에 truncated:true 를 단다(호출부가 '다 보지 못함' 으로 다룬다).
+   * 전체 점검 2회차(V-2): 모니터링 클라이언트(veeam/client.js getAll · v2.761 A4)에서 고친 두 결함이 이 쓰기 쪽 사본에 남아 있었다 —
+   *   ① `Number(null) === 0` 이라 total 이 null 이면 첫 쪽에서 멈췄다 ② total 이 더 있다고 해도 짧은 쪽을 끝으로 봤다(서버가 limit 을 낮춰 주는 경우).
+   *   백업 삭제의 '이 VM 개체 찾기' · '그 개체의 복원 지점이 전부 이 포탈 백업 안' 확인이 부분 목록으로 판정할 수 있었다.
+   */
   async function list(path, { max = 2000, query = {} } = {}) {
     const out = [];
     for (let guard = 0; guard < 100; guard++) {
       const { json } = await call('GET', path, { query: { ...query, skip: out.length, limit: PAGE } });
       const data = Array.isArray(json) ? json : Array.isArray(json?.data) ? json.data : [];
-      for (const x of data) { if (out.length >= max) return out; out.push(x); }
-      const total = Number(json?.pagination?.total);
-      if (Array.isArray(json) || data.length < PAGE || (Number.isFinite(total) && out.length >= total)) return out;
+      for (let i = 0; i < data.length; i++) {
+        if (out.length >= max) { out.truncated = true; return out; }
+        out.push(data[i]);
+      }
+      if (Array.isArray(json)) return out;   // 쪽 나눔 없는 응답(배열 그대로)
+      const tv = json?.pagination?.total;
+      const total = typeof tv === 'number' || (typeof tv === 'string' && tv.trim() !== '') ? Number(tv) : NaN;
+      const hasTotal = Number.isFinite(total) && total >= 0;
+      if (!data.length) { if (hasTotal && out.length < total) out.truncated = true; return out; }
+      if (hasTotal ? out.length >= total : data.length < PAGE) return out;
     }
+    out.truncated = true;
     return out;
   }
 

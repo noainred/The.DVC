@@ -165,7 +165,7 @@ test('③ 적재 규칙 — 실패·노드 없음·값 없는 타입은 적재�
   assert.equal(r.ok, true);
   assert.equal(r.nodes.length, 3, '값이 모두 빈 노드도 행을 남긴다(부분 합 판정 근거)');
   // v2.932: 지표 4개(ops·lat·busy·iops)가 늘었다 — 스냅샷에 없으면 null(0 이 아니다).
-  const N4 = { ops: null, lat: null, busy: null, iops: null };
+  const N4 = { ops: null, lat: null, busy: null, iops: null, hbps: null, queue: null };
   assert.deepEqual(r.nodes[1], { id: 2, in: null, out: null, din: null, dout: null, cpu: null, ...N4 });
   assert.deepEqual(r.nodes[2], { id: 3, in: 5, out: null, din: 0, dout: null, cpu: null, ...N4 }, '음수·100% 초과 CPU 는 null, 0 은 0');
   const many = M.nodeLoadRowsOf(snapOf('d', NOW, Array.from({ length: 70 }, () => [1])));

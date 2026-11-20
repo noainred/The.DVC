@@ -29,7 +29,13 @@ export async function buildWorkbook(sheets, opts = {}) {
   // v2.741(LEFT-01): '4시트마다' 대신 시간 기준(15ms)으로 양보한다(util/timeSlice.js — 개수 기준 양보는 한 건이 느리면 막지 못한다).
   // 결과물은 같다. ⚠ 이 함수의 진짜 정지는 시트 조립이 아니라 `wb.xlsx.write`(XML 직렬화 — 동기)였다 — 라우트는 renderIpamWorkbook(워커)을 쓴다.
   const maybeYield = createYielder(15);
-  for (const s of sheets) {
+  // v3.5.0(재설계 묶음 나 — 시안 ⑨ ⑩): 요약 · 대역 목록 · 조치 필요 시트를 앞에, 안내를 뒤에(extra 가 있을 때만 — 없으면 예전 파일 그대로).
+  const extra = opts.extra && typeof opts.extra === 'object' ? opts.extra : null;
+  const inc = extra?.include || {};
+  if (extra && inc.summary !== false) addSummarySheet(wb, extra);
+  if (extra && inc.nets !== false) addNetsSheet(wb, extra);
+  if (extra && inc.issues !== false) addIssuesSheet(wb, extra);
+  for (const s of (extra && inc.ledger === false ? [] : sheets)) {
     await maybeYield();
     const name = s.subnet.replace(/[\\/?*[\]:]/g, '_').slice(0, 31);
     const ws = wb.addWorksheet(name, { views: [{ state: 'frozen', ySplit: 2 }] });
@@ -43,25 +49,77 @@ export async function buildWorkbook(sheets, opts = {}) {
       { header: '전원', key: 'power', width: 7 },
       { header: '분류', key: 'scope', width: 8 },
       { header: '상태', key: 'status', width: 10 },
+      // v3.5.0: 사람이 넣은 용도 · 요청자 · 할당자(Purpose 는 예전 그대로 자동 값) — 맨 뒤에 덧붙인다(앞 열 순서를 바꾸지 않게).
+      { header: '용도', key: 'ipPurpose', width: 22 },
+      { header: '요청자', key: 'requester', width: 16 },
+      { header: '할당자', key: 'assigner', width: 16 },
     ];
     // Title row
     ws.spliceRows(1, 0, [`VLAN — ${s.subnet}`, `사용 ${s.used}/255`]);
-    ws.mergeCells('A1:I1');
+    ws.mergeCells('A1:L1');
     const title = ws.getCell('A1');
     title.font = { bold: true, size: 12 };
     title.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFC000' } };
     ws.getRow(2).font = { bold: true };
     ws.getRow(2).eachCell((c) => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF3D9C9' } }; });
 
-    const label = { used: '사용', multihomed: '멀티홈', duplicate: '중복', network: 'Network ID', empty: '' };
+    const label = { used: '사용', multihomed: '복수IP', duplicate: '중복', network: 'Network ID', released: '해제(이력)', scanned: '스캔 확인', empty: '' }; // v3.4.0: '멀티홈' → '복수IP'(사용자 결정)
     for (const r of s.rows) {
-      const row = ws.addRow({ ip: r.ip, purpose: r.purpose, hostname: r.hostname, serverType: r.serverType, os: r.os, notes: r.notes, power: r.power, scope: r.scope, status: label[r.status] });
+      const row = ws.addRow({ ip: r.ip, purpose: r.purpose, hostname: r.hostname, serverType: r.serverType, os: r.os, notes: r.notes, power: r.power, scope: r.scope, status: label[r.status], ipPurpose: r.ipPurpose || '', requester: r.requester || '', assigner: r.assigner || '' });
       const argb = FILL[r.status];
       if (argb) row.eachCell((c) => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb } }; });
     }
   }
-  if (sheets.length === 0) wb.addWorksheet('empty');
+  if (extra && inc.info !== false) addInfoSheet(wb, extra);
+  if (wb.worksheets.length === 0) wb.addWorksheet('empty');
   return wb;
+}
+
+// ── v3.5.0 덧붙인 시트(시안 docs/design/ipam-redesign ⑩ ExportSheet) — 값은 라우트가 만든 extra(excelExtra.js)를 그대로 쓴다 ──────────
+const HEAD_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F2A40' } };
+function headRow(ws, n) { const r = ws.getRow(n); r.font = { bold: true, color: { argb: 'FFFFFFFF' } }; r.eachCell((c) => { c.fill = HEAD_FILL; }); }
+function titleRows(ws, title, sub, span) {
+  ws.addRow([title]); ws.getCell('A1').font = { bold: true, size: 13 };
+  ws.addRow([sub]); ws.getCell('A2').font = { color: { argb: 'FF5B6370' } };
+  if (span > 1) { ws.mergeCells(1, 1, 1, span); ws.mergeCells(2, 1, 2, span); }
+}
+function addSummarySheet(wb, x) {
+  const ws = wb.addWorksheet('요약');
+  const s = x.summary || {};
+  titleRows(ws, `IP 관리 대장 — ${x.scopeText || ''}`, `기준 ${x.createdText || ''} · 숨길 대역의 주소는 뺐습니다`, 6);
+  ws.addRow([]);
+  ws.addRow(['전체 주소', '대장 주소(사용 중)', '예약', 'DHCP', '빈 주소', '사용률(예약 · DHCP 포함)']); headRow(ws, 4);
+  ws.addRow([s.cap ?? null, s.used ?? null, s.rsv ?? null, s.dhcp ?? null, s.free ?? null, s.pctText || '—']);
+  ws.addRow([]);
+  ws.addRow(['상태', '주소 수']); headRow(ws, 7);
+  for (const [k, v] of (s.byStatus || [])) ws.addRow([k, v]);
+  ws.addRow([]);
+  ws.addRow(['대역 수', s.nets ?? null, '조치 필요', s.issues ?? null]);
+  ws.columns.forEach((c, i) => { c.width = i === 0 ? 22 : 18; });
+}
+function addNetsSheet(wb, x) {
+  const ws = wb.addWorksheet('대역 목록', { views: [{ state: 'frozen', ySplit: 3 }] });
+  titleRows(ws, `대역 목록 — ${x.scopeText || ''}`, `대역 ${(x.nets || []).length}개 · 사용률은 (대장 주소 + 예약 + DHCP) / 254`, 9);
+  ws.addRow(['대역', '용도', '대장 주소', '예약', 'DHCP', '빈 주소', '사용률', '중복', '설명']); headRow(ws, 3);
+  for (const n of (x.nets || [])) ws.addRow([n.subnet, n.purpose || '', n.used, n.rsv, n.dhcp, n.free, n.pctText, n.dup || 0, n.desc || '']);
+  ws.autoFilter = { from: { row: 3, column: 1 }, to: { row: 3, column: 9 } };
+  [18, 22, 10, 8, 8, 9, 9, 7, 40].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+}
+function addIssuesSheet(wb, x) {
+  const ws = wb.addWorksheet('조치 필요', { views: [{ state: 'frozen', ySplit: 3 }] });
+  const list = x.issues || [];
+  titleRows(ws, `조치 필요 — ${x.scopeText || ''}`, `${list.length}건${x.issuesTruncated ? ` (상한 ${list.length}건에서 잘렸습니다 — 화면에서 나머지를 보세요)` : ''}`, 7);
+  ws.addRow(['종류', 'IP 주소', 'vCenter', '자원', '용도', '요청자', '내용']); headRow(ws, 3);
+  for (const it of list) ws.addRow([it.kind, it.ip, it.vcenter || '', it.owner || '', it.purpose || '', it.requester || '', it.detail || '']);
+  ws.autoFilter = { from: { row: 3, column: 1 }, to: { row: 3, column: 7 } };
+  [16, 16, 24, 26, 18, 14, 60].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+}
+function addInfoSheet(wb, x) {
+  const ws = wb.addWorksheet('안내');
+  titleRows(ws, '안내', `만든 시각 ${x.createdText || ''}`, 2);
+  ws.addRow(['항목', '내용']); headRow(ws, 3);
+  for (const [k, v] of (x.info || [])) ws.addRow([k, v]);
+  ws.getColumn(1).width = 22; ws.getColumn(2).width = 110;
 }
 
 /*
@@ -84,7 +142,8 @@ export function slimSheet(s) {
   const out = new Array(rows.length);
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i] || {};
-    out[i] = { ip: r.ip, purpose: r.purpose, hostname: r.hostname, serverType: r.serverType, os: r.os, notes: r.notes, power: r.power, scope: r.scope, status: r.status };
+    out[i] = { ip: r.ip, purpose: r.purpose, hostname: r.hostname, serverType: r.serverType, os: r.os, notes: r.notes, power: r.power, scope: r.scope, status: r.status,
+      ipPurpose: r.ipPurpose || '', requester: r.requester || '', assigner: r.assigner || '' }; // v3.5.0
   }
   return { subnet: s?.subnet, base: s?.base, used: s?.used, rows: out };
 }
@@ -99,8 +158,8 @@ const xlsxWorkerEnabled = () => String(process.env.IPAM_XLSX_WORKER ?? '1').trim
 
 function codedError(code, message) { const e = new Error(message); e.code = code; return e; }
 
-async function renderInline(sheets, created) {
-  const wb = await buildWorkbook(sheets, { created });
+async function renderInline(sheets, created, extra = null) {
+  const wb = await buildWorkbook(sheets, { created, extra });
   const buf = await wb.xlsx.writeBuffer();
   return Buffer.isBuffer(buf) ? buf : Buffer.from(buf);
 }
@@ -120,14 +179,14 @@ export async function renderIpamWorkbook(sheets, opts = {}) {
   const created = Number.isFinite(opts.created) ? opts.created : Date.now();
   const signal = opts.signal || null;
   if (signal?.aborted) throw codedError('aborted', '요청이 끊겨 엑셀 생성을 멈췄습니다.');
-  if (!xlsxWorkerEnabled()) return { buffer: await renderInline(list, created), mode: 'inline', reason: 'disabled', sheets: list.length };
+  if (!xlsxWorkerEnabled()) return { buffer: await renderInline(list, created, opts.extra || null), mode: 'inline', reason: 'disabled', sheets: list.length };
   const timeoutMs = deadlineMs(opts.timeoutMs ?? process.env.IPAM_XLSX_TIMEOUT_MS ?? 600_000, DEFAULT_TIMEOUT_MS);
   let worker;
   try {
     worker = new Worker(_xlsxWorkerUrl);
   } catch (err) {
     console.warn(`[ipam] 엑셀 워커를 띄우지 못했습니다(${err.message}) — 메인 스레드에서 만듭니다(그동안 포탈 응답이 멈출 수 있습니다).`);
-    return { buffer: await renderInline(list, created), mode: 'inline', reason: 'spawn-failed', sheets: list.length };
+    return { buffer: await renderInline(list, created, opts.extra || null), mode: 'inline', reason: 'spawn-failed', sheets: list.length };
   }
   let ready = false;
   let settled = false;
@@ -172,7 +231,7 @@ export async function renderIpamWorkbook(sheets, opts = {}) {
           worker.postMessage({ type: 'sheet', sheet: slimSheet(s) });
           await maybeYield();
         }
-        if (!settled) worker.postMessage({ type: 'end', created, total: list.length });
+        if (!settled) worker.postMessage({ type: 'end', created, total: list.length, extra: opts.extra || null }); // v3.5.0: 덧붙일 시트 값
       } catch (err) {
         finish({ err: codedError('worker-error', `엑셀 워커로 보내지 못했습니다: ${String(err?.message || err).slice(0, 300)}`) });
       }
@@ -181,7 +240,7 @@ export async function renderIpamWorkbook(sheets, opts = {}) {
   if (outcome.startFailed != null) {
     if (signal?.aborted) throw codedError('aborted', '요청이 끊겨 엑셀 생성을 멈췄습니다.');
     console.warn(`[ipam] 엑셀 워커를 띄우지 못했습니다(${outcome.startFailed}) — 메인 스레드에서 만듭니다(그동안 포탈 응답이 멈출 수 있습니다).`);
-    return { buffer: await renderInline(list, created), mode: 'inline', reason: 'spawn-failed', sheets: list.length };
+    return { buffer: await renderInline(list, created, opts.extra || null), mode: 'inline', reason: 'spawn-failed', sheets: list.length };
   }
   if (outcome.err) throw outcome.err;
   return { buffer: outcome.buffer, mode: 'worker', sheets: list.length };

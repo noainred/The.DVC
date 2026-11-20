@@ -74,7 +74,8 @@ describe('U-9 그룹 — Director 결과를 모르면 모름', () => {
     const s = code('BareosGroupsTab.jsx');
     const calls = s.split('\n').filter((l) => l.includes('memberResults('));
     expect(calls.length).toBe(3);
-    expect(calls.every((l) => l.includes('{ resultsKnown: resultsKnownOf(tree) }'))).toBe(true);
+    // 반증 G1(55회차 #9): 잘린 조회 표지(partial)도 함께 넘긴다 — 결과 모름 판정(resultsKnownOf)은 그대로
+    expect(calls.every((l) => l.includes('{ resultsKnown: resultsKnownOf(tree), partial: tree?.director?.partial === true }'))).toBe(true);
     expect(s).toMatch(/directorState\?\.resultsKnown !== false/);
   });
 });

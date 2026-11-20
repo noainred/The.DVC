@@ -212,14 +212,18 @@ export function attributeHost(host, fabrics = [], { storageOf = null, portBytes 
       else {
         // v2.935(C-①) ① 실측 비율 — ESXi 경로 카운터(그 어댑터의 타깃 WWN 별 전송량). 경로가 없는 후보는 실측 0 이다(그 어댑터로 그 타깃에 간 I/O 가 없다).
         const ms = split === 'auto' ? measuredSharesOf(pathWeights, hba.name) : null;
+        // 결정(56~75 남긴 것) 68 P2: 표본이 빠진 경로(partial)가 있던 표본은 이 어댑터의 가중치에서 빠졌다(storpath/history.js) — 개수를 밝힌다.
+        const excludedPartial = split === 'auto' ? (Number(pathWeights?.excludedOf?.get?.(hba.name)) || 0) : 0;
+        if (excludedPartial && !ms) basis += ` · ESXi 경로 표본이 빠진 경로가 있어 실측 비율을 쓰지 않음(제외 ${excludedPartial}개)`;
         if (ms) {
           shares = [...cands.values()].map((c) => [c.idn.id, [...c.wwns].reduce((a, tw) => a + (ms.get(tw) || 0), 0)]);
           const tot = shares.reduce((a, [, v]) => a + v, 0);
           if (tot > 0) {
             shares = shares.map(([id, v]) => [id, v / tot]);
             conf = 'measured'; splitBy = 'measured';
-            splitInfo = { samples: pathWeights.samples ?? null, firstAt: pathWeights.firstAt ?? null, lastAt: pathWeights.lastAt ?? null, outside: Math.round((1 - tot) * 1000) / 1000 };
-            basis += ` · 후보 ${cands.size}개 — ESXi 경로 카운터 비율로 분배(표본 ${pathWeights.samples ?? '—'}개)`;
+            splitInfo = { samples: pathWeights.samples ?? null, firstAt: pathWeights.firstAt ?? null, lastAt: pathWeights.lastAt ?? null, outside: Math.round((1 - tot) * 1000) / 1000,
+              ...(excludedPartial ? { excludedPartial } : {}) };
+            basis += ` · 후보 ${cands.size}개 — ESXi 경로 카운터 비율로 분배(표본 ${pathWeights.samples ?? '—'}개${excludedPartial ? ` · 표본이 빠진 경로 ${excludedPartial}개 제외` : ''})`;
             if (tot < 0.999) basis += ` · 후보 밖 타깃 몫 ${Math.round((1 - tot) * 100)}% 제외`;
           } else shares = [];
         }
@@ -327,6 +331,25 @@ export function attributeFleet(hosts = [], fabrics = [], opt = {}) {
     counts.hosts += 1;
     if (r.status === 'no-hba') counts.noHba += 1; else if (r.status === 'unseen') counts.unseen += 1; else if (r.status === 'zoned-only') counts.zonedOnly += 1; else counts.ok += 1;
     hostRows.push({ id: r.host.id, name: r.host.name, vcenterId: r.host.vcenterId, status: r.status, totals: r.totals, hbas: r.hbas.length, mpTargets: r.mpTargets });
+    /*
+     * v2.940(C-② 시안 — '실측(스위치 플로우)' 줄): 이 호스트의 Flow Vision 플로우(HBA · 타깃 WWN)를 같은 호스트 귀속의 타깃 → 스토리지 대응으로 묶는다.
+     *   ESXi 경로 실측 · 포트 비율 분배와 **섞지 않는다**(나란히 보여 준다 — 하나를 고르지 않는다). 속도를 못 읽은 플로우는 개수에만 넣는다.
+     */
+    const flowBySid = new Map();
+    const fl = typeof opt.flowsOf === 'function' ? (opt.flowsOf(h) || []) : [];
+    if (fl.length) {
+      const sidOf = new Map();
+      for (const x of r.hbas) for (const t of x.targets || []) for (const w of t.wwns || []) sidOf.set(`${x.hba}|${w}`, t.id);
+      for (const f of fl) {
+        const sid = sidOf.get(`${f.hba}|${f.dstdev}`);
+        if (!sid) continue;
+        const e = flowBySid.get(sid) || { n: 0, measured: 0, stale: 0, rxBps: null, txBps: null };
+        e.n += 1;
+        if (f.stale) e.stale += 1;   // v2.940 반증 M-1: 오래된 플로우는 합에 넣지 않고 따로 센다
+        if (numOrNull(f.rxBps) != null && numOrNull(f.txBps) != null) { e.measured += 1; e.rxBps = (e.rxBps ?? 0) + f.rxBps; e.txBps = (e.txBps ?? 0) + f.txBps; }
+        flowBySid.set(sid, e);
+      }
+    }
     for (const s of r.storages) {
       const hasTraffic = s.confirmedPorts.length || s.measuredPorts.length || s.estimatedPorts.length || s.unsplitPorts.length;
       // 짝의 근거 — 가장 약한 포트 근거를 따른다(추정이 하나라도 섞이면 추정 · 실측과 확정만이면 실측 · 확정만이면 확정).
@@ -337,7 +360,8 @@ export function attributeFleet(hosts = [], fabrics = [], opt = {}) {
       const measuredAny = s.confirmedBytes != null || s.estimatedBytes != null || s.measuredBytes != null;
       const row = { hostId: r.host.id, hostName: r.host.name, vcenterId: r.host.vcenterId, storageId: s.id, storageName: s.name, kind: s.kind, registered: !!s.registered,
         conf, confirmedBytes: s.confirmedBytes, estimatedBytes: s.estimatedBytes, measuredBytes: s.measuredBytes, measured: measuredAny, nowRead: s.nowRead, nowWrite: s.nowWrite,
-        ports: { confirmed: s.confirmedPorts.length, measured: s.measuredPorts.length, estimated: s.estimatedPorts.length, unsplit: s.unsplitPorts.length, unmeasured: s.unmeasuredPorts.length, zonedOnly: s.zonedOnlyPorts.length }, fabrics: s.fabrics };
+        ports: { confirmed: s.confirmedPorts.length, measured: s.measuredPorts.length, estimated: s.estimatedPorts.length, unsplit: s.unsplitPorts.length, unmeasured: s.unmeasuredPorts.length, zonedOnly: s.zonedOnlyPorts.length }, fabrics: s.fabrics,
+        ...(flowBySid.has(s.id) ? { flow: flowBySid.get(s.id) } : {}) };
       if (!hasTraffic) { zonedOnly.push({ ...row, zones: s.zones.slice(0, 8) }); counts.zonedOnlyPairs += 1; continue; }
       rows.push(row);
       if (conf === 'confirmed') counts.confirmedPairs += 1; else if (conf === 'measured') counts.measuredPairs += 1; else if (conf === 'estimated') counts.estimatedPairs += 1; else if (conf === 'unsplit') counts.unsplitPairs += 1;

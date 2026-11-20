@@ -12,6 +12,8 @@
   재동기화는 `tpl:'settings'` + `tplKey` 로 **test.id 를 승계**한다(연속 횟수·만기 리셋 금지). 사람이 더한 점검은 건드리지 않는다.
 - **배정 동기화는 byAgent 배정이거나 배정이 없는 엣지만** — 경로 기준 배정을 byAgent 로 바꾸면 그 엣지의 경로 대상이 통째로 빠진다(파괴적). 건너뜀으로 보고한다.
 - **자동 등록 기본 끔** · 켜도 한 번도 연동된 적 없는 키(`known`)만 · 언제나 중지 상태 · 배정 동기화 없음. 감지(5분)는 카탈로그 **읽기만** · 엣지 노드(CENTRAL_URL)는 돌지 않고 라우트는 409.
+  v3.18.14(회귀 `svcmonSettingsSyncFix31814`): 자동 등록 종류를 **늘리는** 저장은 곧바로 한 번 감지(`requestDetect` — 응답 `detectQueued`) · 자동 등록이 대상을 더한 감지는 **등록 뒤 카탈로그**로 감지값을 남긴다(개요 '감시 범위' 가 5분 동안 0 이던 것) ·
+  엣지 포탈 HTTP 점검은 **무인증 공개 경로**(`COLLECTOR_PROBE_PATH` — `/api/health` 는 `/api` 인증 라우터 아래라 인증 포탈에서 늘 401 이었다). 옛 정의(`isLegacyCheck` — 그 경로 하나만, URL 일반 비교 금지)가 남은 연동 대상은 '변경'(`defChanged`) → 적용이 경로 · 표지 · 기대 코드만 고친다(id 승계).
 - **배너의 '새 항목' 은 기준점(첫 감지 · 마지막 확인) 이후 생긴 것만**(`driftSummary` — Chromium 실측: 미등록 258건을 '설정이 바뀌었습니다' 로 띄웠다). 미등록 전체는 `unregistered`.
 - **상태 파일** `svcmon-settings-sync.json`(옵션 · known · seen · 일별 요약)은 감지가 쓰므로 `backup/service.js CHANGE_WATCH_EXCLUDE`(번들에는 들어간다). `svcmon-alert.json` 은 `alertSettings.js` 하나만 쓴다
   (`transitions.js` 는 파일을 쓰지 않는다 — ARCH-4·MIXED_STATE 스윕).
@@ -35,3 +37,19 @@
   알림은 연속 N회째 한 번 · 복구 한 번 · 20초 창에 6건 이상이면 요약 1건(키에 시각 — 고정 키는 억제 창에 버려졌다, M4) · `enqueueNotify`(폴러를 멈추지 않게) · **기본 꺼짐**. 알린 상태는 메모리(재시작 뒤 한 번 더 알릴 수 있음 — 화면이 밝힌다).
 - **개요 집계(`dash.js`)**: 상태는 `status.js testState` · 엣지 `edgeState` 값 그대로(다시 판정하지 않는다). 중앙(실행 안 함)은 직접 결과를 세지 않는다. 30초 memo(저장소 rev 포함) · **시간 기준 양보**(`buildDashAsync` · createYielder 15ms — 동기판 `buildDash` 와 누산기 하나를 공유, 테스트가 결과 대조) · 엣지 행은 엣지 하나씩 · 표 위젯은 상위 K 만 · 같은 세대 동시 요청은 계산 하나를 함께 기다린다(v2.928 — 반증 M6 실측: 로컬 200k 0.39초 · 엣지 192k 0.86초 동기였다 · v2.932 점검 E1-05 도 같은 지적). 남은 동기 구간은 엣지 표의 `edgeSummary` 1회(192k 행 약 50ms — 다른 라우트와 공유).
   화면 문구의 주기·창·건수(감지 주기 · 요약 묶음 창/기준 · 개요 '최근 N시간·N건')는 API 값(`detect` · `batch` · `limits` · `settingsDrift.intervalMs`)으로만 쓴다(v2.932 D1-08 — 요약 기준 +1 은 서버 `alertBatchInfo` 한 곳).
+- **쉬운 등록(v2.960 · 설계 README §11 · 회귀 `svcmonEasyRegister`)**: 사용/중지는 `store.setEnabledMany` 하나(enabled 만 · 저장 한 번 · 재검증 없음) → 바뀐 대상의 엣지는
+  `central/svcmonAssignSync.js syncByAgentAssignments`(설정 연동 · 사용/중지 · 시험이 공유 — 사본 금지 · 경로 기준 배정은 건너뜀 보고). **엣지는 배정 스냅샷의 켜진 대상만 돈다** — 중앙에서 켜고 끄면 배정을 다시 굳혀야 반영된다.
+  시험 점검(`trial.js`): 중지된 대상만(이미 켠 대상은 실패해도 끄지 않게 건너뜀) · 직접 시험은 폴러 워커 풀 · 결과를 폴러 결과 · 전이 · CSV 에 넣지 않는다 · 동시에 하나(409) ·
+  엣지 시험은 켜고 배정 → 첫 보고(measuredAt ≥ 시작 — v2.988 부터 배정 ack 뒤)로 판정 · 기대 점검 = 켜진 점검 − 배정 제외 유형 · **시한**(`edgeDeadlineMs` — 넘기면 중지로 되돌림) · 대기는 `svcmon-trial.json`(재시작 이어 판정 · CHANGE_WATCH_EXCLUDE) ·
+  알림 억제는 `transitions.muteTarget`(경로 · 대상 이름 소문자 · 시한 — 복구 판정 뒤 · 범위 검사 뒤). 개요 `coverage` 는 관리자 판본 ∧ 전체 범위 ∧ 중앙 노드에만 — **캐시 본문(전 계정 공유)에 넣지 않고 응답마다** 붙인다.
+  반증(§11.7.1): 배정 파일 로드 오류면 배정을 **다시 굳히지 않는다**(빈 목록으로 덮으면 다른 엣지 배포분이 지워진다) · 되돌린 대상은 `revertMuteMs` 동안 억제를 잇는다(엣지가 옛 스냅샷으로 잰다) ·
+  사람의 사용/중지 · 주소 수정 · 삭제는 `cancelTrials`(사람이 마지막) · 엣지 판정은 지금 주소 · 기대 이름 · 점검마다 최근 행 하나.
+  법인 판정(`corpOf`)은 `key`(DataCenter id — 묶음) · `id`(예전 뜻) · `label`. 법인 담당 엣지(`corpEdgesOf`)는 근거(수집 vCenter 의 collectedBy · 수집 서버 등록부의 법인)가 있고 배정 후보인 것만 · 둘 이상이면 고르지 않는다 · 엣지 포탈 자신은 제외.
+- **잔여 작업(v2.988 · README §11.8 · 회귀 `svcmonEasyRegisterFollowup`)**: 엣지 시험은 **배정 적용이 확인된 뒤 측정분만**(`trial.readyAtFor` — 여유 없음): ack(시작 이후) · 같은 sig 의 '변경 없음' pull 확인(그 sig 가 **오류 없이** 적용된 적 있을 때만 — `okSigs` · 메모리 `noteUnchangedPull`) · 시험이 굳힌 sig 가 그대로이고 ack 가 시작 전(이미 켜진 채 실려 있던 대상 → 시작 이후 행). ack 만 보면 A→B→A 배정에서 엣지가 다시 ack 하지 않아 거짓 실패였다(반증 R1).
+  엣지 메타 `k`(infra|service)는 **아는 값만**(그 밖 = 빈 값 · `metaSig` 판 `m2:`) · 빈 값(옛 엣지)은 v2.960 과 같게 — 억제는 어느 구분이든 · 시험은 거르지 않음 · 개요는 경로 · 이름 조인. 수신 계약은 넓히기만 할 것.
+  '법인 폴더로 정리'(`planRepath` · `executeRepath`)는 **설정 연동이 놓은 자리에 그대로 있는 대상만**(`row.repath` — 지금 법인을 알 때(corpKey) · 법인 등록부를 읽었을 때만) · 계획 때 지금 경로를 다시 대조 · 옮길 폴더의 (구분 · 경로 · 이름) 충돌이면 건너뜀 · 경로 기준 배정 엣지가 옮기기 전/뒤를 덮으면 건너뜀 · 배정 파일 못 읽으면 건너뜀 · id 승계. 출처의 법인은 '놓인 자리' 라 주소 변경 적용이 덮지 않는다.
+  '지금 한 번 점검'(`runOnceTest`)은 실행 역할일 때만 · 결과는 응답으로만(폴러 결과 · 전이 · 알림 금지) · 동시 상한. 데모 엣지 배정 후보는 mock 에서만(데모 엣지 대상의 시험은 이 포탈이 대신 — 보고하지 않는다).
+- **전체 점검 26회차(`svcmonFullAudit26`)**: `batch` 는 **서버만 발급**(`cleanTarget` 은 `opts.batch` 또는 승계 — 엣지 롤백만 `trustedBatch`) · 단건 추가 · 수정도 (구분 · 경로 · 이름 소문자) 중복 검사(수정은 키를 바꿀 때만) ·
+  비-HTTP 접속은 `lookup: ssrfLookup`, **dgram 은 `dgramLookup`**(bind 주소 0.0.0.0 도 lookup 으로 풀린다 — ssrfLookup 그대로면 UDP · NTP 전부 실패) · 엣지 caps · poller · log 는 아는 필드만(`cleanEdge*`) ·
+  로그 보관 · 알림 설정 손상은 서비스 점검 등재, 손상 중 로그 정리는 설정 상한(파일 3650개)으로만 · **CSV 기록은 멈춤**(위치 · 총량을 모른다 — 28회차 N-3) · 저장 409 · 확정은 보관 최대 + 총량 무제한(N-1).
+  점검 lookup 은 `checkLookup(점검 시한)`(공용 3초 시한은 느린 DNS 를 포트 장애로 오진 — N-5) · `[ssrf]` 경고는 이름마다 10분에 한 줄(N-6).

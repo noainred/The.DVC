@@ -11,11 +11,13 @@ import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { toneVar } from './toneVar.js';
 import { useOpsLoad, OpsError } from './BmTuningTab.jsx';
+import { perfPath } from './bmPerfUrl.js'; // 다음 점검 ①: 서버 = (법인, 키) 쌍 — 요청에 법인을 싣는다
 import { STATE_TEXT } from './bmPerfText.js';
-import { SNAP_CODE_TEXT, SNAP_STATE_TEXT, snapPermState, bpsText, kbText, snapResultNote, snapCodeShort, snapTrimNote, snapRunGate, SNAP_NOTE, SNAP_PS_NOTE, shortStamp } from './bmOpsText.js';
+import { SNAP_CODE_TEXT, SNAP_STATE_TEXT, snapPermState, bpsText, kbText, snapResultNote, snapCodeShort, snapTrimNote, snapRunGate, SNAP_NOTE, SNAP_PS_NOTE, shortStamp, snapPathBasisNote } from './bmOpsText.js';
+import { gateOk, gateWhy } from './bmWriteText.js'; // 점검 반복 8회차 F2 — 서버 표지(데모 · 역할)
 import './bmOps.css';
 
-const SNAP_REASON_CODES = Object.freeze(['ssh-error', 'auth', 'host-key', 'timeout', 'not-linux', 'edge', 'daily-cap', 'store-unavailable']);
+const SNAP_REASON_CODES = Object.freeze(['ssh-error', 'auth', 'host-key', 'timeout', 'not-linux', 'edge', 'daily-cap', 'store-unavailable', 'auth-unresolved']);   // auth-unresolved: 사유 = 해석 실패 내용(다음 작업 ⑥)
 
 function ProcTable({ rows = [], kind = 'cpu' }) {
   if (!rows.length) return <p className="bmo-note">—</p>;
@@ -92,7 +94,7 @@ export function SnapshotResult({ snap }) {
             {r.idrac ? (
               <>
                 <div style={{ fontSize: 12 }}>전력 {r.idrac.powerW == null ? '—' : `${r.idrac.powerW}W`} · CPU {r.idrac.cpuPct == null ? '—' : `${r.idrac.cpuPct}%`} · {(r.idrac.temps || []).map((x) => `${x.name} ${x.c == null ? '—' : `${x.c}℃`}`).join(' · ') || '온도 —'}</div>
-                <pre className="bmo-pre">{(r.idrac.events || []).map((e) => `[${e.at || '—'}] ${e.severity} ${e.message}`).join('\n') || '최근 이벤트 없음(인벤토리 기준)'}</pre>
+                <pre className="bmo-pre">{r.idrac.events == null ? '—(이벤트 로그를 읽지 못했습니다 — 인벤토리 없음 또는 SEL · LC 로그 조회 실패)' : (r.idrac.events.map((e) => `[${e.at || '—'}] ${e.severity} ${e.message}`).join('\n') || '최근 이벤트 없음(인벤토리 기준)')}</pre>
               </>
             ) : <p className="bmo-note">iDRAC 경로 없음 — 이 서버는 iDRAC 등록이 없거나 이 노드가 그 값을 갖고 있지 않습니다.</p>}
           </section>
@@ -125,14 +127,16 @@ export function SnapshotListTable({ snaps = [], selId = '', onOpen = () => {} })
   );
 }
 
-export default function BmSnapshotTab({ itemKey }) {
-  const list = useOpsLoad((k) => `/tools/bm-usage/perf/${encodeURIComponent(k)}/snapshots`, itemKey);
+export default function BmSnapshotTab({ itemKey, vc = '' }) {
+  const list = useOpsLoad((k, v) => perfPath(k, v, '/snapshots'), itemKey, vc);
   const [reason, setReason] = useState('');
   const [run, setRun] = useState({ busy: false, resp: null, err: null });
   const [sel, setSel] = useState({ id: '', resp: null, err: null });
   const selGen = useRef(0);
   // 반증 W4: 역할(operator 이상)과 쓰기 범위(서버 GET 의 writable — 조회만 되는 법인이면 false) 둘 다 있어야 실행 칸을 연다. 서버도 403.
-  const gate = snapRunGate({ roleOk: hasRole('admin', 'operator'), writable: list.resp?.writable });
+  // 8회차 F2: 역할 · 데모는 서버 표지(actions.run — 실행 라우트와 같은 판정)로 — 역할만 보면 데모 계정에 열리고 누르면 403. 표지가 없으면(구버전 응답) 예전처럼 역할.
+  const runG = list.resp?.actions?.run;
+  const gate = snapRunGate({ roleOk: runG ? gateOk(runG) : hasRole('admin', 'operator'), writable: list.resp?.writable });
   const canRun = gate === 'ok';
   const doRun = async () => {
     // 반증 W1: 보관분 ‘보기’ 상태를 비운다 — 그렇지 않으면 새 실행 결과 대신 예전 보관분이 계속 보였다. 진행 중인 ‘보기’ 응답도 버린다.
@@ -140,7 +144,7 @@ export default function BmSnapshotTab({ itemKey }) {
     setSel({ id: '', resp: null, err: null });
     setRun({ busy: true, resp: null, err: null });
     try {
-      const r = await postJson(`/tools/bm-usage/perf/${encodeURIComponent(itemKey)}/snapshot`, { reason }, { timeoutMs: 120_000 });
+      const r = await postJson(perfPath(itemKey, vc, '/snapshot'), { reason }, { timeoutMs: 120_000 });
       setRun({ busy: false, resp: r, err: null });
       list.reload();
     } catch (e) {
@@ -154,7 +158,7 @@ export default function BmSnapshotTab({ itemKey }) {
     const gen = ++selGen.current;
     setSel({ id, resp: null, err: null });
     try {
-      const resp = await fetchJson(`/tools/bm-usage/perf/${encodeURIComponent(itemKey)}/snapshots/${encodeURIComponent(id)}`, {}, undefined, { timeoutMs: 60_000 });
+      const resp = await fetchJson(perfPath(itemKey, vc, `/snapshots/${encodeURIComponent(id)}`), {}, undefined, { timeoutMs: 60_000 });
       if (gen === selGen.current) setSel({ id, resp, err: null });
     } catch (e) { if (gen === selGen.current) setSel({ id, resp: null, err: e }); }
   };
@@ -171,8 +175,10 @@ export default function BmSnapshotTab({ itemKey }) {
             <input className="input bmo-input" type="text" maxLength={300} placeholder="사유(필수 — 감사 기록에 남습니다)" value={reason} onChange={(e) => setReason(e.target.value)} />
             <button className="btn bmp-touch" disabled={run.busy || reason.trim().length < 2} onClick={doRun}>{run.busy ? '실행 중… (SSH 1회 · 최대 1분)' : '진단 스냅샷 실행'}</button>
           </div>
-        ) : gate === 'role' ? <p className="bmo-note">실행은 운영자(operator) 이상만 할 수 있습니다 — 아래 보관분은 볼 수 있습니다.</p>
+        ) : gate === 'role' ? <p className="bmo-note">{runG && !runG.ok && !String(runG.why || '').startsWith('role-') && gateWhy(runG) ? `실행 — ${gateWhy(runG)}` : '실행은 운영자(operator) 이상만 할 수 있습니다'} — 아래 보관분은 볼 수 있습니다.</p>
           : <p className="bmo-note">{SNAP_CODE_TEXT.forbidden.text} 아래 보관분은 볼 수 있습니다.</p>}
+        {/* 다음 작업 ⑥(b): 엣지 대행 서버 — 칸 판정은 마지막으로 가져온 엣지 봉투 기준(그 시각은 API 값). */}
+        {snapPathBasisNote(list.resp?.pathBasis) && <p className="bmo-note">{snapPathBasisNote(list.resp.pathBasis)}</p>}
         {run.err && <ErrorBox error={run.err} />}
       </section>
       {shown && <SnapshotResult snap={shown} />}
