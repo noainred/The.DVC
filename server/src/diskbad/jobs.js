@@ -198,7 +198,15 @@ export async function acceptPush(agent, push) {
   const t = now();
   u.reported = true;   // 한 번이라도 보고했다 — 엣지가 이 조각을 받았다(claimForAgent 가 다시 내줄지 닫을지를 가른다)
   let localIds = null;
-  if (push.servers.length) { try { localIds = new Set((await localServers()).map((x) => String(x?.id))); } catch { localIds = null; } }
+  // 5회차 반증 R5-2: 등록부를 못 읽었으면(손상 · 읽기 오류 — loadRegistry 는 빈 목록을 준다) '등록부에 없음' 이 아니라 **모름**이다 — 옮기지 않는다
+  //   (빈 목록을 그대로 쓰면 중앙이 아직 맡은 서버의 '' 행까지 합쳐 지웠다).
+  if (push.servers.length) {
+    try {
+      const { registryLoadError } = await import('../idrac/registry.js');
+      const list = await localServers();
+      localIds = registryLoadError() ? null : new Set(list.map((x) => String(x?.id)));
+    } catch { localIds = null; }
+  }
   const canMoveFrom = makeCanMoveFrom(localIds);
   const r = await ingestServers(a, push.servers, { now: t, canMoveFrom });
   u.newRecords += r.newRecords.length; for (const x of r.newRecords) { if (u._new.length >= 2_000) break; u._new.push(x); }

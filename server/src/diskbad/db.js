@@ -88,6 +88,7 @@ function prepare(db) {
         first_seen=MIN(COALESCE(dbr_serial.first_seen, excluded.first_seen), COALESCE(excluded.first_seen, dbr_serial.first_seen)),
         last_seen=MAX(COALESCE(dbr_serial.last_seen, excluded.last_seen), COALESCE(excluded.last_seen, dbr_serial.last_seen))`),
     // 처음 본 때 · 본 가장 오래된 때만 앞으로 당긴다(끊김 없이 본 구간은 이 노드 것 그대로 — 두 노드 사이 틈을 '봤다' 고 하지 않는다).
+    serverSetPast: db.prepare('UPDATE dbr_server SET vals_json=?, sel_json=? WHERE agent=? AND server_id=?'),
     serverMergeSpan: db.prepare(`UPDATE dbr_server SET first_ok_at=MIN(COALESCE(first_ok_at, ?1), COALESCE(?1, first_ok_at)),
         covered_from=MIN(COALESCE(covered_from, ?2), COALESCE(?2, covered_from)) WHERE agent=?3 AND server_id=?4`),
     deleteRecordsOf: db.prepare('DELETE FROM dbr_record WHERE agent=? AND server_id=?'),
@@ -203,9 +204,10 @@ export async function ingestServers(agent, servers, { now = Date.now(), yielder 
       //   그 서버를 맡지 않는다' 를 보장하므로 D1 이 막은 왕복은 생기지 않는다(합친 뒤 옛 행을 지운다).
       const mine = h.st.serverGet.get(a, s.id) || null;
       if (s.ok && s.serviceTag) {
-        const others = h.st.serverOthers.all(s.id, String(s.serviceTag), a);
-        if (others.length === 1 && canMoveFrom(others[0].agent, s.id) === true) {
-          const from = others[0].agent;
+        // 5회차 개선 I-a: 옮길 수 있는 후보만 골라 그것이 정확히 하나일 때(다른 엣지 행이 함께 있어도 '' 행 하나면 합친다).
+        const cands = h.st.serverOthers.all(s.id, String(s.serviceTag), a).filter((o) => canMoveFrom(o.agent, s.id) === true);
+        if (cands.length === 1) {
+          const from = cands[0].agent;
           if (!mine || mine.first_ok_at == null) {
             if (mine) h.st.deleteServer.run(a, s.id);
             h.st.moveServer.run(a, from, s.id); h.st.moveRecords.run(a, from, s.id); h.st.moveSerials.run(a, from, s.id);
@@ -214,6 +216,13 @@ export async function ingestServers(agent, servers, { now = Date.now(), yielder 
             h.st.moveRecords.run(a, from, s.id);
             for (const x of h.st.serialsOf.all(from, s.id)) h.st.serialMerge.run(a, s.id, x.slot_key, x.serial, x.model, x.first_seen, x.last_seen);
             h.st.serverMergeSpan.run(finite(old?.first_ok_at), finite(old?.covered_from), a, s.id);
+            // 5회차 반증 R5-1: 옛 행의 SEL 보관 항목(장비가 SEL 을 지워도 포탈이 남긴 디스크 빠짐 · 장착)과 디스크 값 이력(처음 본 때 · 늘어난 때 · 늘기 전 값)도
+            //   합친다 — 옛 행을 지우면서 함께 사라졌다(되돌릴 수 없는 손실). 합친 것이 상한을 넘으면 이 노드 값을 둔다(fitJson — 글자로 자르지 않는다).
+            const mSel = mergeKeptSel(parseObj(mine.sel_json), parseObj(old?.sel_json));
+            const mVals = mergeKeptVals(parseObj(mine.vals_json), parseObj(old?.vals_json));
+            const selJ = mSel ? fitJson(mSel, SEL_JSON_MAX, (o) => (o.events?.length > 1 ? (o.events = o.events.slice(0, Math.floor(o.events.length / 2)), true) : false)) : null;
+            const valsJ = mVals ? fitJson(mVals, VALS_JSON_MAX, (o) => (o.seen?.length ? (o.seen = [], true) : false)) : null;
+            h.st.serverSetPast.run(valsJ ?? mine.vals_json ?? null, selJ ?? mine.sel_json ?? null, a, s.id);
           }
           // 옮기지 못하고 남은 것(겹친 기록 · 시리얼)은 이 노드에 같은 것이 있다 — 옛 노드 행을 비운다.
           h.st.deleteRecordsOf.run(from, s.id); h.st.deleteSerialsOf.run(from, s.id); h.st.deleteServer.run(from, s.id);
@@ -385,6 +394,44 @@ export const SEL_KEEP_MAX = 200;
  * SEL 디스크 항목 저장 모양(순수). iDRAC 가 SEL 을 지우거나 덮어써도 포탈이 본 항목은 남긴다(합집합 · 가장 새 것 200건).
  * `range` 는 이번에 읽은 SEL 이 담은 기간, `keptFrom` 은 포탈이 보관한 가장 오래된 항목 — 화면이 둘을 섞지 않는다.
  */
+/**
+ * 노드 합치기의 SEL 보관 항목(순수 — 5회차 반증 R5-1). 이 노드 것에 옛 노드 항목을 **합집합**으로(같은 키 = 장비가 준 원래 시각 · 종류 · 자리 · 문장,
+ * 가장 새 SEL_KEEP_MAX 건). 읽기 상태(read · total · range)는 이 노드 것을 둔다. 한쪽이 없으면 다른 쪽.
+ */
+export function mergeKeptSel(mine, old) {
+  const oe = old && Array.isArray(old.events) ? old.events : [];
+  if (!mine) return old || null;
+  if (!oe.length) return mine;
+  const seen = new Set(); const events = [];
+  for (const e of [...(Array.isArray(mine.events) ? mine.events : []), ...oe]) { const k = selKey(e); if (seen.has(k)) continue; seen.add(k); events.push(e); }
+  events.sort((x, y) => (y.created ?? -Infinity) - (x.created ?? -Infinity));
+  const kept = events.slice(0, SEL_KEEP_MAX);
+  const dated = kept.map((e) => e.created).filter(Number.isFinite);
+  return { ...mine, events: kept, keptFrom: dated.length ? Math.min(...dated) : null };
+}
+
+/**
+ * 노드 합치기의 디스크 값 이력(순수 — 5회차 반증 R5-1). 이 노드의 디스크마다, 옛 노드에 **같은 Id · 같은 디스크**(시리얼이 다르면 다른 디스크 — 반증 F1)가 있으면
+ * 처음 읽은 때는 더 이른 쪽, 이 노드가 늘어난 것을 못 봤으면 옛 노드가 본 때 · 늘기 전 값을 잇는다. 이 노드에 없는 디스크는 되살리지 않는다(지금 목록이 진실).
+ */
+export function mergeKeptVals(mine, old) {
+  const od = old && Array.isArray(old.drives) ? old.drives : [];
+  if (!mine) return old || null;
+  if (!od.length || !Array.isArray(mine.drives)) return mine;
+  const byId = new Map(od.filter((d) => d && d.id).map((d) => [d.id, d]));
+  const drives = mine.drives.map((d) => {
+    const p = d && byId.get(d.id);
+    if (!p || (p.serial && d.serial && p.serial !== d.serial)) return d;
+    const firsts = [d.firstAt, p.firstAt].filter(Number.isFinite);
+    const out = { ...d, firstAt: firsts.length ? Math.min(...firsts) : (d.firstAt ?? null) };
+    if (!Number.isFinite(d.changedAt) && Number.isFinite(p.changedAt)) { out.changedAt = p.changedAt; if (p.before) out.before = p.before; }
+    return out;
+  });
+  return { ...mine, drives };
+}
+
+const selKey = (e) => `${Number.isFinite(e?.createdRaw) ? e.createdRaw : e?.created}|${e?.kind}|${e?.slotKey}|${String(e?.message || '').slice(0, 80)}`;
+
 export function mergeSel(prev, cur, now) {
   const base = { status: cur.status, tryAt: now };
   const prevEvents = prev && Array.isArray(prev.events) ? prev.events : [];
@@ -393,7 +440,7 @@ export function mergeSel(prev, cur, now) {
     return { ...base, at: null, read: null, total: null, stopped: '', range: null, kinds: {}, events: [], keptFrom: null };
   }
   // 키에는 장비가 준 원래 시각(createdRaw — 반증 F3: 자른 시각은 점검마다 달라져 같은 항목이 쌓였다).
-  const key = (e) => `${Number.isFinite(e.createdRaw) ? e.createdRaw : e.created}|${e.kind}|${e.slotKey}|${String(e.message || '').slice(0, 80)}`;
+  const key = selKey;
   const seen = new Set();
   const events = [];
   for (const e of [...(cur.events || []), ...prevEvents]) {

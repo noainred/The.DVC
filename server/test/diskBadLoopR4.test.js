@@ -157,3 +157,64 @@ test('F8 — 담당자 저장 보고는 빠진 이유를 나눠 센다(형식 ·
   assert.deepEqual(ST.normalizeSettings({ corpTo: m.corpTo }).corpTo['vc-1'], ['a@x.com', 'b@x.com', 'c@x.com']);
   assert.equal(Object.getPrototypeOf(R.mapCorpKeys({ ['__proto__']: ['a@x.com'] }, []).corpTo), Object.prototype, '키로 원형을 바꾸지 않는다');
 });
+
+// ── 5회차 반증이 찾은 이 회차(F4)의 결함 — 4회차를 내기 전에 고쳤다 ──────────────────────────────
+const I = await import('../src/diskbad/ingest.js');
+const VID = 'Disk.Bay.2:Enclosure.Internal.0-1:RAID.Integrated.1-1';
+const vals = (realloc) => ({ status: 'ok', telemetry: 'ok', metrics: '', reportAt: null, seen: [], drives: [{ id: VID, realloc, pending: 0, uncorrectable: 0, powerOnHours: 100, src: 'telemetry' }] });
+const selOf = (events) => ({ status: 'ok', read: events.length, total: events.length, pages: 1, stopped: '', oldest: null, newest: null, kinds: {}, events });
+const ev = (created, kind) => ({ created, createdRaw: created, kind, disk: 2, bp: 1, slotKey: 'bp1:d2', messageId: '', message: `Drive 2 is ${kind} in disk drive bay 1.`, severity: 'OK', sensor: 'Drive Slot / Bay' });
+
+test('R5-1 — 합칠 때 옛 행의 SEL 보관 항목과 디스크 값 이력(처음 본 때 · 늘어난 때 · 늘기 전 값)을 잃지 않는다', async () => {
+  const id = '10.8.8.8';
+  await D.ingestServers('', [{ ...srv(id, [], NOW - 30 * DAY), vals: vals(1), sel: selOf([ev(NOW - 40 * DAY, 'removed')]) }], { now: NOW - 30 * DAY });
+  await D.ingestServers('', [{ ...srv(id, [], NOW - 25 * DAY), vals: vals(3), sel: selOf([]) }], { now: NOW - 25 * DAY });
+  const near = (x) => ({ ...x, log: { ...x.log, oldestRead: NOW - 3 * DAY } });   // 엣지는 최근 3일만 읽었다(N5 — 본 가장 오래된 때를 당기는지)
+  await D.ingestServers('edge-m', [near({ ...srv(id, [], NOW - DAY), vals: vals(3), sel: selOf([ev(NOW - 2 * DAY, 'installed')]) })], { now: NOW - DAY, canMoveFrom: () => false });
+  const old = await D.loadServer('', id);
+  assert.equal(old.server.vals.drives[0].changedAt, NOW - 25 * DAY, '전제: 옛 행이 늘어난 때를 봤다');
+  await D.ingestServers('edge-m', [near(srv(id, []))], { now: NOW, canMoveFrom: (from) => from === '' });
+  const e = await D.loadServer('edge-m', id);
+  assert.equal(e.server.coveredFrom, NOW - 60 * DAY, '본 가장 오래된 때는 옛 행 쪽으로 당긴다(N5)');
+  assert.equal((await D.loadServer('', id)).server, null, '옛 행은 지운다');
+  assert.deepEqual(e.server.sel.events.map((x) => x.kind).sort(), ['installed', 'removed'], 'SEL 보관 항목은 합집합');
+  const d = e.server.vals.drives[0];
+  assert.equal(d.firstAt, NOW - 30 * DAY, '처음 읽은 때는 더 이른 쪽');
+  assert.equal(d.changedAt, NOW - 25 * DAY, '이 노드가 못 본 늘어남은 옛 노드가 본 때로');
+  assert.equal(d.before?.realloc, 1);
+  // 시리얼이 다르면(그 자리에 다른 디스크) 잇지 않는다.
+  const k = D.mergeKeptVals({ drives: [{ id: VID, serial: 'NEW', firstAt: NOW, changedAt: null }] }, { drives: [{ id: VID, serial: 'OLD', firstAt: NOW - 9 * DAY, changedAt: NOW - 8 * DAY, before: { realloc: 1 } }] });
+  assert.deepEqual(k.drives[0], { id: VID, serial: 'NEW', firstAt: NOW, changedAt: null });
+});
+
+test('R5-2 · N1 · N2 — acceptPush 의 옮기기: 중앙 등록부에 있으면 옮기지 않음 · 없으면 합침 · 등록부를 못 읽으면 옮기지 않음 · I-a 후보가 하나면', async () => {
+  const REG = path.join(TMP, 'idrac.json');
+  const reg = (ids) => fs.writeFileSync(REG, JSON.stringify({ servers: ids.map((x) => ({ id: x, host: x, name: x, username: 'root', password: 'x' })) }));
+  const mk = (id, tag) => ({ id, name: id, serviceTag: tag, ok: true, reason: '', records: [], drives: [],
+    log: { order: 'desc', total: 5, read: 5, undated: 0, newestId: '5', newestCreated: NOW - HOUR, oldestRead: NOW - 10 * DAY, reachedEnd: true, foundCursor: false, cursorUsed: false, stopped: '' } });
+  const seed = async (id, tag, extra = []) => {
+    await D.ingestServers('', [I.cleanServer(mk(id, tag), NOW - 20 * DAY)], { now: NOW - 20 * DAY });
+    for (const ag of ['edge-q', ...extra]) await D.ingestServers(ag, [I.cleanServer(mk(id, tag), NOW - DAY)], { now: NOW - DAY });
+  };
+  const push = async (id, tag) => {
+    J._resetJobsForTest();
+    const job = J.createJob({ scope: 'all', units: [{ agent: 'edge-q', kind: 'edge', serverIds: null }] });
+    assert.equal(J.claimForAgent('edge-q')?.id, job.id);
+    const p = I.cleanPush({ v: 1, jobId: job.id, servers: [mk(id, tag)], final: true }, { now: NOW });
+    assert.equal(p.ok, true);
+    return J.acceptPush('edge-q', p);
+  };
+  await seed('10.5.5.1', 'T1'); await seed('10.5.5.2', 'T2'); await seed('10.5.5.3', 'T3'); await seed('10.5.5.4', 'T4', ['edge-other']);
+  reg(['10.5.5.1', '10.5.5.3']);
+  await push('10.5.5.1', 'T1');
+  assert.ok((await D.loadServer('', '10.5.5.1')).server, '중앙 등록부에 있으면 옮기지 않는다(N1)');
+  await push('10.5.5.2', 'T2');
+  assert.equal((await D.loadServer('', '10.5.5.2')).server, null, '등록부에 없으면 합친다(N2)');
+  assert.equal((await D.loadServer('edge-q', '10.5.5.2')).server.firstOkAt, NOW - 20 * DAY);
+  await push('10.5.5.4', 'T4');
+  assert.equal((await D.loadServer('', '10.5.5.4')).server, null, '다른 엣지 행이 함께 있어도 옮길 수 있는 후보가 하나면 합친다(I-a)');
+  assert.ok((await D.loadServer('edge-other', '10.5.5.4')).server, '엣지끼리는 옮기지 않는다');
+  fs.writeFileSync(REG, '{"servers": [ {"id": "10.5.5.3"');   // 손상 — loadRegistry 는 빈 목록을 준다
+  await push('10.5.5.3', 'T3');
+  assert.ok((await D.loadServer('', '10.5.5.3')).server, '등록부를 못 읽으면 옮기지 않는다(R5-2)');
+});
