@@ -362,7 +362,8 @@ export default function RackTool() {
   }, [tree, corpId]);
   useEffect(() => { if (tree && !sites.some((s) => s.id === siteId)) setSiteId(sites[0]?.id || ''); }, [tree, sites, siteId]);
   useEffect(() => { if (tree && !rooms.some((r) => r.id === roomId)) setRoomId(rooms[0]?.id || ''); }, [tree, rooms, roomId]);
-  useEffect(() => { setSelId(''); setPreview(null); loadRoom(roomId); }, [roomId, loadRoom]);
+  // 전산실을 바꾸면 고른 장비 · 미리 보기 · 앞 전산실의 알림 줄을 지운다(다른 전산실 작업 결과가 남아 보이지 않게).
+  useEffect(() => { setSelId(''); setPreview(null); setNote(null); loadRoom(roomId); }, [roomId, loadRoom]);
 
   const corp = (tree?.corps || []).find((c) => c.id === corpId);
   const canEdit = !!view?.canEdit;
