@@ -64,7 +64,10 @@ test('② 베어메탈 550대 — 고유하고 ESXi 와 겹치지 않으며 v2.7
   assert.equal(specs.filter((s) => esx.has(s.name) || esxTags.has(s.serviceTag)).length, 0, 'ESXi 호스트와 이름·태그가 겹치지 않는다');
   const dcOnly = specs.filter((s) => s.datacenterId);
   assert.equal(dcOnly.length, 240, 'vCenter 없는 법인 240대');
-  assert.ok(dcOnly.every((s) => !s.vcenterId && /^dc-[a-z]+$/.test(s.datacenterId)));
+  // v3.31.0(사용자 선택 '인근 vCenter 법인에 귀속'): DataCenter 는 그대로이고 vCenter 귀속은 인근 vCenter(parentVc)
+  const parentOf = new Map(gen.BM_ONLY_SITES.map((x) => [`dc-${x.slug}`, x.parentVc]));
+  assert.ok(dcOnly.every((s) => /^dc-[a-z]+$/.test(s.datacenterId) && s.vcenterId === parentOf.get(s.datacenterId)), 'vCenter 없는 법인 베어메탈은 인근 vCenter 에 귀속');
+  assert.ok(gen.BM_ONLY_SITES.every((x) => SNAP.vcenters.some((v) => v.id === x.parentVc)), 'parentVc 는 실제 목 vCenter');
   assert.equal(new Set(dcOnly.map((s) => s.datacenterId)).size, 10);
   // v2.708 이 시드한 id(이미 시드된 데모 설치본) — 모든 vCenter 의 db01 · 앞 4곳 gpu01 · 앞 2곳 법인 귀속 없는 app01
   const byId = new Map(specs.map((s) => [s.id, s]));
@@ -173,12 +176,14 @@ test('⑥ 데모 iDRAC 서버 법인 연결 — vCenter 의 법인 할당을 채
   ], 'merge');
   dcs.ensureDatacenter({ id: 'dc-ashburn', name: 'Ashburn 법인' });
   dcs.setVcenterDatacenterMany([{ vcenterId: 'vc-us-east', datacenterId: 'dc-ashburn' }]);
+  idracDemo.primeBareMetalSpecs(SNAP);   // 베어메탈 사양 캐시(인근 vCenter 귀속의 근거)
   const r = await idracDemo.linkDemoServerDatacenters();
-  assert.equal(r.linked, 1);
+  assert.equal(r.linked, 2, '법인 채움 1 + vCenter 없는 법인 베어메탈의 인근 vCenter 귀속 1(v3.31.0)');
   const by = new Map(reg.loadRegistry().map((x) => [x.id, x]));
   assert.equal(by.get('mock-idrac-vc-us-east-esxi-a').datacenterId, 'dc-ashburn');
   assert.ok(by.get('mock-idrac-vc-us-east-esxi-a').password, '비밀번호를 이어받는다');
   assert.equal(by.get('mock-bmsrv-dc-ulsan-mes01').datacenterId, 'dc-ulsan', '이미 있는 법인은 그대로');
+  assert.equal(by.get('mock-bmsrv-dc-ulsan-mes01').vcenterId, 'vc-kr-south', 'v3.26.0 이 귀속 없이 시드한 베어메탈 → 인근 vCenter');
   assert.equal(by.get('real-esxi').datacenterId, '', '사람이 등록한 서버는 건드리지 않는다');
   assert.equal((await idracDemo.linkDemoServerDatacenters()).skipped, 'done', '한 번만');
 });
