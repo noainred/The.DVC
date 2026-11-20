@@ -289,7 +289,7 @@ export function trimRecordsForView(records, otherMax = OTHER_RECORDS_VIEW_MAX, c
   const kept = [];
   for (const [c, g] of groups) {
     g.sort((a, b) => (b?.created ?? -Infinity) - (a?.created ?? -Infinity));
-    kept.push(...g.slice(0, c === CLS.other ? otherMax : classMax));
+    for (const r of g.slice(0, c === CLS.other ? otherMax : classMax)) kept.push(r);   // push(...) 금지(인벤토리 규모 — audit2603a 스윕)
   }
   return { records: kept, total: list.length, trimmed: list.length - kept.length };
 }
