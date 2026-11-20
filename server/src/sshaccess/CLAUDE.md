@@ -60,3 +60,8 @@
 - 코어 `readServer` · 기능 ‘서버 정보’ 불변조건은 `server/src/serverinfo/CLAUDE.md`, WinRM HTTPS + NTLMv2 는 `server/src/winrm/CLAUDE.md`. **서버에 붙어 명령을 돌리는 새 기능은 `readServer` 하나를 부른다**
   (자격 해석 → 탐침 → 로그인 한 번(비밀번호 한 번 — `singlePasswordAttempt`) → 명령 하나 → 결과 기록 — 이 폴더의 판정을 우회하지 않는다).
 - v3.30 서버 명령 실행(`server/src/servercmd/CLAUDE.md`): 여러 대 일괄 틀은 `batch.js` 하나 · 허용 기능 판정은 `placement.featureBlocked` 하나(키 · 공통 계정 — `EXPLICIT_FEATURES` 는 직접 켠 것만).
+
+## 점검 1회차(2026-11-20 ‘버그 안 나올 때까지’) — 상세 `docs/rules/audits.md` · 회귀 `serverAccessHunt1.test.js`
+- 탐침 빠른 길은 **최근 성공(`OK_FRESH_MS` 60초)만** · 빠른 길도 결과를 보고 거부면 정지 · 로그인 뒤 실패(`loggedIn`)는 성공으로(직렬 풀기 금지).
+- 키 로그인 성공은 비밀번호 판 정지를 풀지 않는다(`keptStop`) · 효력 계정 없는 승인 서버는 붙지 않는다(`no-account` — root + 빈 비밀번호 금지).
+- 지정 **지우기**도 위 단계 계정으로 옮겨 가는 서버 한 대로 먼저 확인 · 저장 전 확인 후보는 계정과 같은 OS · 계정 OS 변경이 서버와 어긋나면 거절.
