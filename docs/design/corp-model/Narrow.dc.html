@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>물리서버 폴더 — 400px</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./corp.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+</style>
+</helmet>
+<div class="root" style="width:400px;height:900px">
+  <div class="tb" style="padding:0 12px;gap:8px">
+    <span class="logo"><span class="v">V</span><span>The Davinci</span></span>
+    <span class="ver">v3.3.0</span>
+    <span class="pill" style="margin-left:auto">admin</span>
+  </div>
+  <div class="main" style="padding:12px;gap:10px">
+    <div class="row">
+      <h1 class="h1" style="font-size:16px">Bare Metal Server</h1>
+      <span class="sp"><button type="button" class="btn pri sm" style="height:44px;padding:0 14px">서버 찾아 등록</button></span>
+    </div>
+    <div class="card" style="padding:6px;display:flex;flex-direction:column;gap:1px">
+      <button type="button" class="tr" style="height:44px"><span class="tw"></span><span class="nm">전체 물리서버</span><span class="ct">480</span></button>
+      <button type="button" class="tr on" style="height:44px"><span class="tw">▾</span><span class="co"></span><span class="nm">폴란드 법인</span><span class="bdg e">서비스 3</span><span class="ct">153</span></button>
+      <button type="button" class="tr d1" style="height:44px"><span class="tw">▸</span><span class="fo"></span><span class="nm">ERP</span><span class="ct">42</span></button>
+      <button type="button" class="tr d1" style="height:44px"><span class="tw">▸</span><span class="fo"></span><span class="nm">분석</span><span class="ct">76</span></button>
+      <button type="button" class="tr" style="height:44px"><span class="tw">▸</span><span class="co"></span><span class="nm">미국 동부 법인</span><span class="bdg e">서비스 2</span><span class="ct">121</span></button>
+      <button type="button" class="tr un" style="height:44px"><span class="tw">▸</span><span class="sg" style="border-color:#fbbf24"></span><span class="nm">vc-lab-01</span><span class="bdg w">법인 미배정</span><span class="ct">4</span></button>
+    </div>
+    <div class="card" style="display:flex;flex-direction:column">
+      <div class="fh" style="padding:10px 12px">
+        <span class="path"><span class="co"></span><span>폴란드 법인</span></span>
+        <div class="row" style="gap:6px">
+          <span class="svc"><span class="sg"></span><b>PL-ERP</b><span class="ba">Bareos</span></span>
+          <span class="svc"><span class="sg"></span><b>PL-MES</b><span class="ba">Bareos</span></span>
+          <span class="svc"><span class="sg"></span><b>PL-GPDB</b><span class="no">Bareos 없음</span></span>
+        </div>
+      </div>
+      <div class="bar" style="padding:8px 12px;gap:6px">
+        <button type="button" class="chipb on" style="height:36px">전체 153</button>
+        <button type="button" class="chipb" style="height:36px">PL-ERP 31</button>
+        <button type="button" class="chipb" style="height:36px">PL-MES 12</button>
+        <button type="button" class="chipb" style="height:36px">PL-GPDB 9</button>
+        <button type="button" class="chipb" style="height:36px">법인 직속 101</button>
+      </div>
+      <div style="display:flex;flex-direction:column">
+        <div style="padding:10px 12px;border-bottom:1px solid #1f2a40;display:flex;flex-direction:column;gap:2px">
+          <div class="row"><span class="sv"></span><b>pl-erp-db01</b><span class="sp bdg e">엣지</span></div>
+          <div class="soft" style="font-size:12px">ERP › DB · <span style="color:#5eead4">PL-ERP</span> · PowerEdge R750</div>
+          <div class="soft" style="font-size:12px">CPU 35% · 메모리 72% · 446 W</div>
+          <div class="dim" style="font-size:12px">2×24C · 512 GB · SSD 8 · 15.4 TB · RHEL 9.2</div>
+        </div>
+        <div style="padding:10px 12px;border-bottom:1px solid #1f2a40;display:flex;flex-direction:column;gap:2px">
+          <div class="row"><span class="sv bad"></span><b>pl-mes-db01</b><span class="bdg r">1건</span><span class="sp bdg e">엣지</span></div>
+          <div class="soft" style="font-size:12px">MES › DB · <span style="color:#5eead4">PL-MES</span> · PowerEdge R750</div>
+          <div class="soft" style="font-size:12px">CPU 44% · 메모리 82% · 935 W</div>
+          <div class="dim" style="font-size:12px">2×24C · 1 TB · SSD 6 · 16.3 TB · RHEL 8.9</div>
+        </div>
+        <div style="padding:10px 12px;border-bottom:1px solid #1f2a40;display:flex;flex-direction:column;gap:2px">
+          <div class="row"><span class="sv"></span><b>pl-ana-gp01</b><span class="sp bdg e">엣지</span></div>
+          <div class="soft" style="font-size:12px">분석 › GPDB · 법인 직속 · PowerEdge R760</div>
+          <div class="soft" style="font-size:12px">CPU 58% · 메모리 77% · 702 W</div>
+          <div class="dim" style="font-size:12px">2×32C · 1 TB · SSD 10 · 38.4 TB · Rocky Linux 9.3</div>
+        </div>
+        <div style="padding:10px 12px;display:flex;flex-direction:column;gap:2px">
+          <div class="row"><span class="sv"></span><b>pl-new-07</b><span class="sp bdg e">엣지</span></div>
+          <div class="soft" style="font-size:12px">(미분류) · 법인 직속 · PowerEdge R660</div>
+          <div class="soft" style="font-size:12px">CPU 3% · 메모리 9% · 188 W</div>
+          <div class="dim" style="font-size:12px">2×24C · 512 GB · SSD 2 · 960 GB</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":400,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

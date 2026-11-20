@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>범위 계정 — 같은 법인을 세 계정이 볼 때</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./corp.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+</style>
+</helmet>
+<div class="root" style="width:1100px;height:760px;padding:20px;gap:12px">
+  <div class="row">
+    <h1 class="h1" style="font-size:16px">범위 계정에 보이는 것</h1>
+    <span class="note">폴란드 법인 = 서비스 3(PL-ERP · PL-MES · PL-GPDB) + 법인 직속 물리서버 101대. 계정 범위는 지금처럼 vCenter 로 정합니다.</span>
+  </div>
+  <div class="grid3" style="flex:1;min-height:0">
+    <div class="card st">
+      <h3><span class="n">1</span>전체 범위 계정</h3>
+      <span class="pill" style="align-self:flex-start">범위 없음(전 법인)</span>
+      <div class="mini">
+        <div class="ln"><span class="co"></span><b>폴란드 법인</b><span class="bdg e">서비스 3</span><span class="sp num">153</span></div>
+        <div class="ln" style="padding-left:16px"><span class="sg"></span>PL-ERP<span class="sp num">31</span></div>
+        <div class="ln" style="padding-left:16px"><span class="sg"></span>PL-MES<span class="sp num">12</span></div>
+        <div class="ln" style="padding-left:16px"><span class="sg"></span>PL-GPDB<span class="sp num">9</span></div>
+        <div class="ln" style="padding-left:16px"><span class="sv"></span>법인 직속<span class="sp num">101</span></div>
+      </div>
+      <p class="note"><b style="color:#e6edf6">합계</b> 법인 전체.</p>
+      <p class="note"><b style="color:#e6edf6">폴더</b> 전부 보고, 만들고 옮깁니다.</p>
+      <p class="note"><b style="color:#e6edf6">주소 · 서비스 태그</b> 관리자 판본이면 그대로.</p>
+    </div>
+    <div class="card st">
+      <h3><span class="n">2</span>법인의 vCenter 를 전부 가진 계정</h3>
+      <span class="pill" style="align-self:flex-start">범위 vc-pl-erp · vc-pl-mes · vc-pl-gpdb</span>
+      <div class="mini">
+        <div class="ln"><span class="co"></span><b>폴란드 법인</b><span class="bdg e">서비스 3</span><span class="sp num">153</span></div>
+        <div class="ln" style="padding-left:16px"><span class="sg"></span>PL-ERP<span class="sp num">31</span></div>
+        <div class="ln" style="padding-left:16px"><span class="sg"></span>PL-MES<span class="sp num">12</span></div>
+        <div class="ln" style="padding-left:16px"><span class="sg"></span>PL-GPDB<span class="sp num">9</span></div>
+        <div class="ln" style="padding-left:16px"><span class="sv"></span>법인 직속<span class="sp num">101</span></div>
+      </div>
+      <p class="note"><b style="color:#e6edf6">합계</b> 법인 전체 — 법인 직속도 이 계정 것입니다.</p>
+      <p class="note"><b style="color:#e6edf6">폴더</b> 전부 봅니다. 만들고 옮기는 것은 쓰기 범위도 세 vCenter 전부일 때만.</p>
+      <p class="note"><b style="color:#e6edf6">주소 · 서비스 태그</b> 범위 판본 — 지금처럼 가립니다.</p>
+    </div>
+    <div class="card st" style="border-color:rgba(245,158,11,.45)">
+      <h3><span class="n">3</span>일부만 가진 계정</h3>
+      <span class="pill" style="align-self:flex-start">범위 vc-pl-erp</span>
+      <div class="mini">
+        <div class="ln"><span class="co"></span><b>폴란드 법인</b><span class="bdg w">일부만 보임</span><span class="sp num">31</span></div>
+        <div class="ln" style="padding-left:16px"><span class="sg"></span>PL-ERP<span class="sp num">31</span></div>
+        <div class="ln hid" style="padding-left:16px"><span class="sg"></span>PL-MES</div>
+        <div class="ln hid" style="padding-left:16px"><span class="sg"></span>PL-GPDB</div>
+        <div class="ln hid" style="padding-left:16px"><span class="sv off"></span>법인 직속</div>
+      </div>
+      <p class="note"><b style="color:#e6edf6">합계</b> 보이는 서비스만 더한 값이고 ‘일부만 보임’ 을 붙입니다. 가려진 서비스 수는 말하지 않습니다.</p>
+      <p class="note"><b style="color:#e6edf6">폴더</b> PL-ERP 서버가 든 폴더만 보이고, 폴더 안 대수도 그 서버만 셉니다. 폴더 만들기 · 옮기기는 못 합니다(읽기 전용).</p>
+      <p class="note"><b style="color:#e6edf6">법인 직속</b> 어느 서비스 것인지 가를 수 없어 보이지 않습니다.</p>
+    </div>
+  </div>
+  <div class="band w" style="align-items:flex-start"><span><b>대안(기본 아님)</b> ‘법인의 vCenter 를 하나라도 가지면 법인 직속도 보인다’ — 3번 계정이 다른 서비스가 쓰는 물리서버의 이름과 대수를 보게 됩니다. 지금 규칙(귀속 없는 것은 범위 계정에 보이지 않는다)보다 넓어지는 방향이라 기본으로 두지 않았습니다.</span></div>
+  <p class="note">같은 규칙을 개요 · 법인별 사용량 · iDRAC 화면 · Bareos 법인 줄 합계에 그대로 씁니다. 범위 밖 서비스는 지금처럼 404(있는지도 알리지 않음)입니다.</p>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1100,"height":760}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

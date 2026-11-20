@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>개요 — 법인별 서버를 법인과 서비스 두 단으로</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./corp.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+</style>
+</helmet>
+<div class="root" style="width:1440px;height:700px">
+  <div class="tb">
+    <span class="logo"><span class="v">V</span><span>The Davinci</span></span>
+    <span class="ver">v3.3.0</span>
+    <span class="cmdk"><span>장비 · 기능 찾기 — 이름 · IP · 시리얼</span><span class="kbd" style="margin-left:auto">Ctrl K</span></span>
+    <span class="pill" style="margin-left:auto"><span class="dot" style="background:#22c55e"></span><span>vCenter 28/28</span></span>
+    <span class="pill"><span>admin · 전체 범위</span></span>
+  </div>
+  <div class="body">
+    <nav class="sb" aria-label="주 메뉴">
+      <span class="h">모니터링</span>
+      <a href="#" class="on">Overview</a>
+      <a href="#">서버</a>
+      <a href="#">스토리지</a>
+      <a href="#">네트워크</a>
+      <span class="h">도구</span>
+      <a href="#">특수 기능</a>
+      <a href="#">설정</a>
+    </nav>
+    <div class="main">
+      <div class="crumb">Overview › 법인별 서버</div>
+      <div class="pane">
+        <div class="card cnt">
+          <div class="bar">
+            <span class="h2">법인별 서버</span>
+            <span class="note">법인 줄 = 그 법인의 합 · 서비스 줄 = vCenter 하나 · 법인 직속 = vCenter 에 매이지 않은 물리서버</span>
+            <span class="sp row"><button type="button" class="btn sm">모두 펼치기</button><button type="button" class="btn sm">CSV</button></span>
+          </div>
+          <div style="overflow:hidden">
+            <table class="t">
+              <thead><tr>
+                <th>법인 · 서비스(vCenter)</th><th class="r">서버 합계</th><th class="r">물리서버(iDRAC)</th><th class="r">가상화 호스트</th><th class="r">게스트 OS</th><th class="r">구동중</th><th class="r">호스트당 게스트</th>
+              </tr></thead>
+              <tbody>
+                <tr class="grp">
+                  <td><span class="nm"><span class="co"></span>▾ 폴란드 법인</span> <span class="bdg e">서비스 3</span></td>
+                  <td class="r num">205</td><td class="r num">153</td><td class="r num">52</td><td class="r num">930</td><td class="r num">885</td><td class="r num">17.9</td>
+                </tr>
+                <tr class="kid">
+                  <td><span class="nm"><span class="sg"></span>PL-ERP</span></td>
+                  <td class="r num">62</td><td class="r num">31</td><td class="r num">31</td><td class="r num">620</td><td class="r num">588</td><td class="r num">20.0</td>
+                </tr>
+                <tr class="kid">
+                  <td><span class="nm"><span class="sg"></span>PL-MES</span></td>
+                  <td class="r num">24</td><td class="r num">12</td><td class="r num">12</td><td class="r num">214</td><td class="r num">201</td><td class="r num">17.8</td>
+                </tr>
+                <tr class="kid">
+                  <td><span class="nm"><span class="sg"></span>PL-GPDB</span></td>
+                  <td class="r num">18</td><td class="r num">9</td><td class="r num">9</td><td class="r num">96</td><td class="r num">96</td><td class="r num">10.7</td>
+                </tr>
+                <tr class="kid">
+                  <td><span class="nm"><span class="sv"></span>법인 직속</span></td>
+                  <td class="r num">101</td><td class="r num">101</td><td class="r dim">—</td><td class="r dim">—</td><td class="r dim">—</td><td class="r dim">—</td>
+                </tr>
+                <tr class="grp">
+                  <td><span class="nm"><span class="co"></span>▸ 미국 동부 법인</span> <span class="bdg e">서비스 2</span></td>
+                  <td class="r num">185</td><td class="r num">121</td><td class="r num">64</td><td class="r num">1,180</td><td class="r num">1,102</td><td class="r num">18.4</td>
+                </tr>
+                <tr class="grp">
+                  <td><span class="nm"><span class="co"></span>▸ 한국 본사</span> <span class="bdg e">서비스 4</span></td>
+                  <td class="r num">284</td><td class="r num">196</td><td class="r num">88</td><td class="r num">2,060</td><td class="r num">1,944</td><td class="r num">23.4</td>
+                </tr>
+                <tr>
+                  <td><span class="nm" style="color:#fbbf24"><span class="sg" style="border-color:#fbbf24"></span>vc-lab-01</span> <span class="bdg w">법인 미배정</span></td>
+                  <td class="r num">8</td><td class="r num">4</td><td class="r num">4</td><td class="r num">31</td><td class="r num">12</td><td class="r num">7.8</td>
+                </tr>
+                <tr>
+                  <td><span class="nm" style="color:#fbbf24"><span class="fo un"></span>(법인 미지정)</span></td>
+                  <td class="r num">6</td><td class="r num">6</td><td class="r dim">—</td><td class="r dim">—</td><td class="r dim">—</td><td class="r dim">—</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="foot"><span>법인별 서버 사용량 · 호스트 ‘법인별’ · VM ‘법인별’ 표도 같은 두 단으로 맞춥니다 · 정렬은 법인 줄끼리, 서비스 줄은 그 법인 안에서</span></div>
+        </div>
+
+        <div class="card" style="width:400px;flex:none;display:flex;flex-direction:column">
+          <div class="bar"><span class="h2">지금(v3.3.0)</span><span class="bdg n">비교용</span></div>
+          <div style="overflow:hidden">
+            <table class="t">
+              <thead><tr><th>법인(vCenter)</th><th class="r">서버 합계</th><th class="r">물리</th><th class="r">호스트</th></tr></thead>
+              <tbody>
+                <tr class="was"><td>vc-pl-erp</td><td class="r num">62</td><td class="r num">31</td><td class="r num">31</td></tr>
+                <tr class="was"><td>vc-pl-mes</td><td class="r num">24</td><td class="r num">12</td><td class="r num">12</td></tr>
+                <tr class="was"><td>vc-pl-gpdb</td><td class="r num">18</td><td class="r num">9</td><td class="r num">9</td></tr>
+                <tr class="was"><td>vc-us-east-01</td><td class="r num">…</td><td class="r num">…</td><td class="r num">…</td></tr>
+                <tr><td style="color:#fbbf24">폴란드 법인 · vCenter 미지정</td><td class="r num">101</td><td class="r num">101</td><td class="r dim">—</td></tr>
+                <tr><td style="color:#fbbf24">미국 동부 법인 · vCenter 미지정</td><td class="r num">57</td><td class="r num">57</td><td class="r dim">—</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div style="padding:10px 14px;display:flex;flex-direction:column;gap:8px">
+            <div class="band w" style="align-items:flex-start"><span>법인은 정상인데 <b>미지정</b>처럼 읽힙니다. 한 법인이 vCenter 줄 여러 개로 흩어져 법인 합계가 없습니다.</span></div>
+            <div class="band w" style="align-items:flex-start"><span>범위 계정에는 ‘vCenter 미지정’ 줄이 보이지 않아 자기 법인 물리서버가 실제보다 적게 보입니다.</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":700}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
