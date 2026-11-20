@@ -29,7 +29,7 @@ import { poolSettled } from './util/pool.js'; // v2.575 IMP-08 — 동시성 풀
  *   그 주석이 직접 "store.js 와 같은 env·같은 기본값" 이라 적고 있었다. 두 벌이면 한쪽만
  *   바꿨을 때 **인벤토리 점검 화면이 store 와 다른 기준으로 '낡음' 을 세면서도 오류가 없다**.
  */
-export const SITE_STALE_MS = Number(process.env.SITE_INVENTORY_STALE_MS) || 300_000;
+export const SITE_STALE_MS = envPositive(process.env.SITE_INVENTORY_STALE_MS, 300_000);
 import { pushAll } from './util/pushAll.js';
 import { msOrNull } from './publicapi/time.js'; // v2.771(R6-F3-5): 엣지 staleSince 를 시각으로 좁힌다(순수 leaf)
 import { createChangeLogger } from './util/logThrottle.js';
@@ -38,15 +38,18 @@ import { hostCfgStatus, syncVcConfigCaches } from './hostcfg/cache.js'; // v2.69
 import { contentionStatus } from './contention/cache.js'; // v2.706(C2·C3)
 import { dsCfgStatus } from './dscfg/collect.js'; // v2.700
 import { clusterCfgStatus } from './clustercfg/collect.js'; // v2.701
+import { envPositive } from './util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
 const ledgerWarnLog = createChangeLogger({ windowMs: 3_600_000, maxKeys: 4 }); // v2.603: 같은 동기화 실패 사유는 1시간에 1줄
 // 수집 실패 시 마지막 정상 수집(lastGood)을 이월해 서빙하는 최대 시간(v2.279). 이 창 안에서는
 // 일시 실패(고RTT 타임아웃 등)로 vCenter 인벤토리가 스냅샷에서 사라지지 않는다(호스트/VM 소실·
 // ipam.db 대량 재기록·알람 전원 해소→재발송 방지). 이 창을 넘겨 계속 실패하면 진짜 장기 장애로
 // 보고 unreachable 엔트리로 떨어뜨린다(낡은 데이터를 영원히 정상처럼 보여주지 않기 위함).
-const LASTGOOD_HOLD_MS = Number(process.env.LASTGOOD_HOLD_MS) || 6 * 3_600_000; // 기본 6시간
+const LASTGOOD_HOLD_MS = envPositive(process.env.LASTGOOD_HOLD_MS, 21_600_000); // 기본 6시간 · 54회차: 식 기본값도 envPositive
 
 // 매 폴링 주기의 동시 vCenter 수집 개수 상한(고RTT·다수 vCenter에서 CPU 스파이크 완화).
-const COLLECT_CONCURRENCY = Math.max(1, Number(process.env.COLLECT_CONCURRENCY) || 8);
+// 102회차 F6(재현): 예전 `Math.max(1, Number(env) || 8)` 은 Infinity 를 통과시켰고, util/pool.js workerCount 는 유한하지 않은 limit 을 1 로 읽어
+//   COLLECT_CONCURRENCY=Infinity 면 vCenter 28곳을 **하나씩 차례로** 수집했다(동시성 최고 1 — 고RTT 법인이 주기를 그만큼 늘린다). 유한 양수만.
+const COLLECT_CONCURRENCY = envPositive(process.env.COLLECT_CONCURRENCY, 8);
 
 /**
  * Promise.allSettled과 같은 결과 배열([{status,value|reason}])을 돌려주되, 동시 실행을
@@ -265,6 +268,12 @@ export function withRegistryRegion(loc, vc) {
   if (!loc || typeof loc !== 'object' || Array.isArray(loc) || regRegion == null || regRegion === '') return loc;
   return loc.region === regRegion ? loc : { ...loc, region: regRegion };
 }
+/** 89회차 F1: 캐시된 vCenter 항목(직접 수집 정상 · lastGood)에 등록부 region 을 입힌다 — 같으면 그 객체 그대로(캐시 객체는 바꾸지 않는다). */
+export function withRegistryVcenter(cachedVc, vc) {
+  if (!cachedVc || typeof cachedVc !== 'object') return cachedVc;
+  const loc = withRegistryRegion(cachedVc.location ?? vc?.location, vc);
+  return loc === cachedVc.location ? cachedVc : { ...cachedVc, location: loc };
+}
 
 class Store {
   constructor() {
@@ -319,7 +328,19 @@ class Store {
         return;
       }
 
-      const { vcenters } = loadVcenterConfig();
+      const vcCfg = loadVcenterConfig();
+      // 118회차: 등록부를 **못 읽었고 마지막으로 읽은 목록도 없으면**(기동 때부터 읽기 오류 — EACCES · EIO) 'vCenter 0개' 가 아니라 모른다 — 이 주기를 건너뛴다.
+      //   빈 목록으로 돌면 아래가 구성 캐시 · 수집 캐시(lastGood) · 위임 인벤토리(디스크 — pruneInventory)를 지우고 빈 스냅샷으로 원장 · 알림을 다시 쓴다.
+      //   읽히면 다음 주기부터 그대로 이어 간다. 마지막으로 읽은 목록이 있으면 loadVcenterConfig 가 그 목록을 준다(이 분기로 오지 않는다).
+      if (vcCfg.readError && !vcCfg.file) {
+        if (!this._vcRegUnreadWarned) { this._vcRegUnreadWarned = true; console.warn(`[collect] vCenter 등록부(vcenters.json)를 읽지 못해(${vcCfg.readError}) 수집 주기를 건너뜁니다 — 등록 0개로 보지 않습니다(캐시 · 위임 인벤토리를 지우지 않음). 파일 권한 · 소유자 · 디스크를 확인하세요`); }
+        // 121회차(118회차 반증 R6 — 재현): 건너뛴 사실이 콘솔 한 줄뿐이었다 — 기동 때부터 못 읽으면 스냅샷이 비어 있어 storeStatus(중앙의 '빈 인벤토리' 진단)가
+        //   `registered: 0 · lastError: null` 로 '이 엣지에 등록된 vCenter 가 없습니다'(등록하라는 틀린 조치)라고만 말했다. 사유를 lastError 에 남긴다(다음 병합이 지운다).
+        this.lastError = `vCenter 등록부(vcenters.json)를 읽지 못해(읽기 오류 ${vcCfg.readError}) 수집 주기를 건너뛰고 있습니다 — 등록된 vCenter 가 없는 것이 아닙니다(파일 권한 · 소유자 · 디스크 확인)`;
+        return;
+      }
+      this._vcRegUnreadWarned = false;
+      const { vcenters } = vcCfg;
       // v2.721(감사 S1-01·R1-04): 구성 캐시 6종 정리는 수집 '전' 에 한다. 수집 뒤에 하면 접속처(host)를 바꾼 첫 주기에
       //   soapClient 가 아직 남은 옛 vCenter 의 같은 moref 구성·태그·경합 값을 새 스냅샷에 싣고, 그 값이 다음 수집까지(실패면
       //   lastGood 으로 더 오래) 지금 값처럼 서빙된다(오류 없이 틀린 값). 삭제된 vCenter 의 항목 정리도 여기서 함께 한다.
@@ -472,7 +493,9 @@ class Store {
         const authStop = c?.ok ? null : authStopView(vcAuthGuard.authStopFor(vc));
         if (c?.ok) {
           const s = c.data;
-          merged.vcenters.push(s.vcenter);
+          // 89회차 F1: 정상 분기 · lastGood 분기도 등록부 region 이 이긴다(v2.611 AUTHZ2611-05 — 점검중 · 위임 분기만 고쳤다). 캐시의 location 은
+          //   수집 시각의 등록부 값이라, 관리자가 region 을 바꾸면 다음 수집까지(실패 중 lastGood 이면 보존 창 6시간까지) 지역 범위 판정이 옛 region 을 봤다.
+          merged.vcenters.push(withRegistryVcenter(s.vcenter, vc));
           pushAll(merged.hosts, s.hosts);
           pushAll(merged.vms, s.vms);
           pushAll(merged.datastores, s.datastores);
@@ -484,13 +507,16 @@ class Store {
             // 마지막 정상 수집을 이월(보존 창 안) — 상태는 unreachable + stale 로 표시해 낡은
             // 데이터임을 알리되, 인벤토리·알람은 유지해 소실 플랩·ipam.db 재기록·알람 재발송을 막는다.
             const s = c.lastGood;
-            merged.vcenters.push({ ...s.vcenter, status: 'unreachable', stale: true, staleSince: c.lastGoodAt, error: c.err.message, hint: c.err.hint, code: c.err.code, ...(authStop ? { authStopped: authStop } : {}) });
+            merged.vcenters.push({ ...withRegistryVcenter(s.vcenter, vc), status: 'unreachable', stale: true, staleSince: c.lastGoodAt, error: c.err.message, hint: c.err.hint, code: c.err.code, ...(authStop ? { authStopped: authStop } : {}) });
             pushAll(merged.hosts, s.hosts);
             pushAll(merged.vms, s.vms);
             pushAll(merged.datastores, s.datastores);
             pushAll(merged.networks, s.networks);
             pushAll(merged.alarms, s.alarms);
           } else if (isAuto && pushSite(merged, getMock(), vc.id, { mock: true })) {
+            // 91회차(89 F1 반증 — 형제 분기): 목으로 채운 항목도 등록부 region 이 이긴다(목 데이터의 지역으로 지역 범위 판정이 갈렸다).
+            const li = merged.vcenters.length - 1;
+            if (merged.vcenters[li]?.id === vc.id) merged.vcenters[li] = withRegistryVcenter(merged.vcenters[li], vc);
             // auto 폴백: 목 데이터에 이 vc.id가 있으면 그걸로 채운다.
             // v2.443: 채운 vCenter 에 mock 표시를 남긴다 — 이 데이터는 가짜라서 중앙에 push 하면
             // 안 되는데, DATA_SOURCE 는 'auto' 라 기존 차단(source==='mock')을 그냥 통과했다.
@@ -759,7 +785,8 @@ export const usageReadable = (h) => h.connectionState !== 'DISCONNECTED' && h.co
  * v2.733(점검 3회차 C2-06): 호스트 용량(코어·CPU 총량·메모리 총량)을 읽었는가. REST 폴백 vCenter(vcenter/restClient.js — 목록 API 에
  *   하드웨어 요약이 없다)의 호스트는 세 필드가 **없다**. 예전에는 `|| 0` 으로 더해져 그 법인 코어 0 · vCPU:코어 0 · 오버커밋 0% 라는
  *   거짓이 됐다. 용량 합계·과할당 비율은 이것이 참인 호스트만 쓰고, 거짓인 호스트는 개수로 밝힌다(hostsCapacityUnknown·capacityUnknown).
- *   SOAP 경로는 세 필드를 항상 수로 싣는다(soapClient num() — 0 일 수는 있다) — 동작 변화는 '못 읽은' 호스트에만 있다.
+ *   54회차 F5(정정): 예전 이 자리의 'SOAP 경로는 세 필드를 항상 수로 싣는다(0 일 수는 있다)' 가 결함이었다 — 못 읽은 용량이 0 으로 실려 이 판정을 통과했다.
+ *   이제 SOAP 도 못 읽음 · 0 이하를 null 로 싣는다(soapClient hostCapacityOf). 웹 판정은 `web/src/hostCapacity.js` — 같은 입력에 같은 답(test/leftoverC56 대조).
  */
 /**
  * v2.771(점검 R6-F3-3): VM GPU 장치 조회가 실패한 스냅샷(`vcenter.vmGpuUnknown` — soapClient)에 직전 스냅샷의 vm.gpu 를 이월한다.
@@ -784,7 +811,8 @@ export function carryVmGpu(snap, prevSnap) {
   snap.vcenter.vmGpuCarried = n;
   return n;
 }
-export const hostCapacityKnown = (h) => !!h && [h.cpuCores, h.cpuTotalMhz, h.memTotalMB].every((v) => typeof v === 'number' && Number.isFinite(v));
+// 반증 K1(54회차 F5): 0 이하도 못 읽음 — 예전 판 엣지는 못 읽은 용량을 0 으로 올리고 중앙 정제(INV_NUM_KEYS)를 그대로 지난다(0 코어 · 0 MHz · 0 MB 호스트는 실재하지 않는다)
+export const hostCapacityKnown = (h) => !!h && [h.cpuCores, h.cpuTotalMhz, h.memTotalMB].every((v) => typeof v === 'number' && Number.isFinite(v) && v > 0);
 
 /**
  * v2.599 RECENT2599-03: 데이터스토어 사용량을 읽었는가 — usedGB·freeGB 가 둘 다 null 이면 못 읽은 것이다

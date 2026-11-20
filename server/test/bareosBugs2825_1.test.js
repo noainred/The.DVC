@@ -276,7 +276,7 @@ test('G15 재시작하면 결과를 잃는 작업 목록: 엣지 대행 상태 �
   assert.equal(IF.runningBareosWork().length, 1);
   E._resetForTest();
   const src = fs.readFileSync(new URL('../src/upgrade/manager.js', import.meta.url), 'utf8');
-  assert.match(src, /\.\.\.bareosWork\(\)\]/, '업그레이드 자동 적용 대기 목록에 들어 있다');
+  assert.match(src, /\.\.\.bareosWork\(\)[,\]]/, '업그레이드 자동 적용 대기 목록에 들어 있다(전체 점검 2회차: 뒤에 veeamWork 가 붙는다)');
 });
 
 test('G17 폴러 상태: running 은 지금 조회 중일 때만(타이머 유무는 started)', async () => {

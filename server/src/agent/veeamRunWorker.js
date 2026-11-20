@@ -20,19 +20,32 @@ import { poolRun } from '../util/pool.js';
 import { agentHeaders, withAgentQuery } from './agentNameCarry.js';
 import { getServerWithSecret } from '../veeam/registry.js';
 import { authGuard } from '../veeam/poller.js';
+import { isUnreadStop } from '../util/authGuard.js';
 import { runOp, MUTATING } from '../veeam/run/ops.js';
 import { SANITIZERS } from '../veeam/run/parse.js';
+import { noteVeeamEdgeOpStart, noteVeeamEdgeOpEnd } from '../veeam/run/inflight.js';   // 전체 점검 2회차 V-3: 실행 중 상태 변경은 업그레이드가 기다린다
 
 const POLL_MS = clampIntervalMs(Number(process.env.AGENT_VEEAM_RUN_POLL_MS) || 5_000, 5_000, 1_000);
 const OP_CONCURRENCY = 2;
 let timer = null;
-let running = false;
+let fetching = false;   // 52회차 F5: 인출만 겹치지 않게(예전 running 은 실행 · 회신까지 덮어, 긴 세션 조회 동안 같은 엣지의 다른 B&R 작업을 가져가지 않아 120초 뒤 '엣지가 가져가지 않음' 으로 끝났다)
+let inflight = 0;
+/** 이 엣지가 동시에 들고 있는 대행 작업 상한(중앙 TAKE_MAX 와 같게 — 빈 자리만큼 ?max= 로 인출). */
+export const SLOT_MAX = OP_CONCURRENCY;   // 53회차 N7: 한 엣지의 동시 Veeam 세션은 예전처럼 2 — 빈 자리만큼만 더 가져온다
 let _last = null;
+// v2.977(전체 점검 — 재현 · audits.md '별건' 이던 것): 마지막 실패는 따로 10분 남긴다 — 5초마다 도는 빈 인출 틱이 `_last` 를 ok 로 덮어
+//   회신 실패가 엣지 로그에서 곧바로 사라졌다(bareosOpWorker G18 과 같은 모양 · 같은 고침).
+let _lastError = null;
+const ERROR_KEEP_MS = 10 * 60_000;
+const noteError = (msg) => { _lastError = { at: Date.now(), error: msg }; };
 const _logChange = createChangeLogger({ windowMs: 10 * 60_000 });
 const lc = (s) => String(s ?? '').trim().toLowerCase();
 
 /** 마지막 실행 결과 — edgelog/spec.js 가 화면에 싣는다. 비밀은 담지 않는다. */
-export function veeamRunWorkerStatus() { return { pollMs: POLL_MS, ..._last }; }
+export function veeamRunWorkerStatus() {
+  const recentError = _lastError && Date.now() - _lastError.at < ERROR_KEEP_MS ? { lastError: _lastError } : {};
+  return { pollMs: POLL_MS, ..._last, ...recentError };
+}
 
 function headers() {
   return { 'Content-Type': 'application/json', ...agentHeaders(config.agent.name), ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
@@ -45,13 +58,18 @@ export function localServerIssue(server, agentName = config.agent.name) {
   return null;
 }
 
-async function postResult(id, result) {
+async function postResult(id, result, kind = '') {
   let r;
   try { r = await resilientFetch(withAgentQuery(`${config.agent.centralUrl}/api/central/veeam-run-result`, config.agent.name), { method: 'POST', headers: headers(), body: JSON.stringify({ id, result }), timeoutMs: 30_000, retries: 2 }); }
   catch (e) { return `결과 회신 실패 — ${String(e?.message || e).slice(0, 200)}`; }
-  if (r.ok) return null;
+  if (r.ok) {
+    // 중앙이 모르는 작업(시한으로 닫았거나 중앙이 재시작)이면 결과가 반영되지 않았다 — Veeam 에 실제로 실행한(상태를 바꾼) 작업이면 조용히 넘기지 않는다(bareos G15 와 같은 규칙)
+    let b = null; try { b = await readJsonCapped(r, 64 * 1024, '회신 응답'); } catch { b = null; }   // 94회차 I1: 85 E3 형제 — 상한 있는 읽기
+    if (b?.stale && MUTATING.has(kind) && result?.ok) return `중앙이 ${kind} 결과를 받지 않았습니다(시한이 지났거나 중앙이 재시작) — 이 엣지가 Veeam 에 실행한 작업이 포탈에 반영되지 않았을 수 있습니다(Veeam 콘솔에서 확인)`;
+    return null;
+  }
   let reason = '';
-  try { const b = await r.json(); reason = String(b?.reason || '').slice(0, 200); } catch { /* 본문 없음 */ }
+  try { const b = await readJsonCapped(r, 64 * 1024, '회신 오류 응답'); reason = String(b?.reason || '').slice(0, 200); } catch { /* 본문 없음 */ }
   return `결과 회신 HTTP ${r.status}${reason ? ` — ${reason}` : ''}`;
 }
 
@@ -67,7 +85,8 @@ export async function runEdgeOp(op, { receivedAt = Date.now(), fetchImpl, getSer
   if (!ttl || Date.now() >= deadlineAt) return sanitize({ ok: false, notSent: true, reason: '요청 시한이 지나 Veeam 에 보내지 않았습니다.' });
   // 인증 정지는 작업 종류와 무관하게(읽기도 같은 계정으로 로그인한다 — 중앙 dispatch.js 와 같은 규칙)
   const stop = authGuard.peekAuthStop(server);
-  if (stop) return sanitize({ ok: false, notSent: true, reason: `이 엣지에서 Veeam 서버 '${server.name}' 이(가) 인증 실패로 정지 중입니다(${stop.reason}) — 보내지 않았습니다.` });
+  // 127회차: 정지 기록 파일을 못 읽어 건너뛰는 것은 인증 실패가 아니다 — 중앙에서 사람이 누른 작업을 막지 않는다(dispatch.js 머리말 · 거부되면 아래에서 실제 정지로 기록)
+  if (stop && !isUnreadStop(stop)) return sanitize({ ok: false, notSent: true, reason: `이 엣지에서 Veeam 서버 '${server.name}' 이(가) 인증 실패로 정지 중입니다(${stop.reason}) — 보내지 않았습니다.` });
   const res = await runOp(server, op.kind, { ...(op.args && typeof op.args === 'object' ? op.args : {}), deadlineAt }, { signal: AbortSignal.timeout(Math.max(1_000, deadlineAt - Date.now())), fetchImpl });
   if (res.authFailed) { authGuard.markAuthStopped(server.id, server, res.reason); authGuard.flush?.(); }
   return res;
@@ -75,36 +94,50 @@ export async function runEdgeOp(op, { receivedAt = Date.now(), fetchImpl, getSer
 
 export async function runVeeamRunWorkerOnce({ fetchImpl } = {}) {
   if (!config.agent.centralUrl) return null;
-  if (running) return null;
-  running = true;
+  if (fetching || inflight >= SLOT_MAX) { if (inflight >= SLOT_MAX) _last = { at: Date.now(), ok: true, ops: 0, busy: inflight }; return null; }   // 53회차 N2: 꽉 찬 틱도 상태에 남긴다
+  fetching = true;
+  let ops = [];
+  let receivedAt = 0;
   try {
     let r;
-    try { r = await resilientFetch(withAgentQuery(`${config.agent.centralUrl}/api/central/veeam-run-ops`, config.agent.name), { headers: headers(), timeoutMs: 15_000, retries: 1 }); }
-    catch (e) { const msg = `인출 실패 — ${String(e?.message || e).slice(0, 200)}`; _last = { at: Date.now(), ok: false, error: msg }; if (_logChange('인출', msg)) console.warn(`[veeam-run-agent] ${msg}`); return null; }
-    const receivedAt = Date.now();
+    try { r = await resilientFetch(withAgentQuery(`${config.agent.centralUrl}/api/central/veeam-run-ops?max=${SLOT_MAX - inflight}`, config.agent.name), { headers: headers(), timeoutMs: 15_000, retries: 1 }); }
+    catch (e) { const msg = `인출 실패 — ${String(e?.message || e).slice(0, 200)}`; _last = { at: Date.now(), ok: false, error: msg }; noteError(msg); if (_logChange('인출', msg)) console.warn(`[veeam-run-agent] ${msg}`); return null; }
+    receivedAt = Date.now();
     if (!r.ok) {
       let reason = '';
-      try { const b = await r.json(); reason = String(b?.reason || '').slice(0, 200); } catch { /* */ }
+      try { const b = await readJsonCapped(r, 64 * 1024, '인출 오류 응답'); reason = String(b?.reason || '').slice(0, 200); } catch { /* */ }
       const msg = `인출 HTTP ${r.status}${reason ? ` — ${reason}` : ''}`;
       _last = { at: Date.now(), ok: false, error: msg, status: r.status };
+      noteError(msg);
       if (_logChange('인출', msg)) console.warn(`[veeam-run-agent] ${msg}`);
       return null;
     }
     let body;
     try { body = await readJsonCapped(r, 1_048_576, '인출 응답'); } catch (e) { _last = { at: Date.now(), ok: false, error: `인출 응답 형식 오류 — ${String(e?.message || e).slice(0, 120)}` }; return null; }
-    const ops = (Array.isArray(body?.ops) ? body.ops : []).filter((o) => o && typeof o.id === 'string' && typeof o.kind === 'string').slice(0, 10)
+    ops = (Array.isArray(body?.ops) ? body.ops : []).filter((o) => o && typeof o.id === 'string' && typeof o.kind === 'string').slice(0, 10)   // 55회차 #2(재현): 받은 작업은 버리지 않는다 — 옛 중앙(3.18.3 이하)은 ?max 를 몰라 5건까지 넘긴다(동시 실행은 OP_CONCURRENCY 가 묶는다)
       .sort((a, b) => MUTATING.has(b.kind) - MUTATING.has(a.kind));
     if (!ops.length) { _last = { at: Date.now(), ok: true, ops: 0 }; return _last; }
+    // 52회차 F5: 상태 변경 작업은 받은 즉시(실행 전 대기 자리 포함) 업그레이드 대기 목록에 — 재시작하면 중앙이 '결과 모름' 으로 닫는다
+    for (const op of ops) if (MUTATING.has(op.kind)) noteVeeamEdgeOpStart(op.id, op.kind, op.serverId);
+    inflight += ops.length;
+  } finally { fetching = false; }
+  try {
     let postErr = null;
     await poolRun(ops, OP_CONCURRENCY, async (op) => {
-      const res = await runEdgeOp(op, { receivedAt, fetchImpl });
-      console.log(`[veeam-run-agent] ${op.kind} → ${op.serverId}: ${res.ok ? '성공' : `${res.unknown ? '결과 모름' : res.notSent ? '보내지 않음' : '실패'} — ${String(res.reason || '').slice(0, 160)}`}`);
-      postErr = (await postResult(op.id, res)) || postErr;
+      // 상태 변경은 실행부터 회신까지 업그레이드 대기 목록에(재시작하면 Veeam 에는 실행됐는데 중앙이 결과를 모른다 — bareosOpWorker 와 같은 모양)
+      const track = MUTATING.has(op.kind);
+      let released = false;
+      try {
+        const res = await runEdgeOp(op, { receivedAt, fetchImpl });
+        console.log(`[veeam-run-agent] ${op.kind} → ${op.serverId}: ${res.ok ? '성공' : `${res.unknown ? '결과 모름' : res.notSent ? '보내지 않음' : '실패'} — ${String(res.reason || '').slice(0, 160)}`}`);
+        postErr = (await postResult(op.id, res, op.kind)) || postErr;
+      } finally { if (track) noteVeeamEdgeOpEnd(op.id); if (!released) { released = true; inflight = Math.max(0, inflight - 1); } }   // 53회차 N2: 작업마다 자리를 돌려준다(묶음 끝이 아니라)
     });
     _last = postErr ? { at: Date.now(), ok: false, ops: ops.length, error: postErr } : { at: Date.now(), ok: true, ops: ops.length };
+    if (postErr) noteError(postErr);
     if (postErr && _logChange('회신', postErr)) console.warn(`[veeam-run-agent] ${postErr}`);
     return _last;
-  } finally { running = false; }
+  } finally { /* 자리는 작업마다 돌려준다(위) */ }
 }
 
 export function startVeeamRunWorker() {

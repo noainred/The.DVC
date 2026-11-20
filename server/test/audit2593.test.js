@@ -4,7 +4,7 @@
  * 각 테스트는 **수정을 되돌리면 실패하도록** 입력을 골랐다(변이 검증은 릴리스 노트에 기록).
  * 라우트 권한은 소스 grep 이 아니라 **실제 라우터를 띄워 응답으로** 본다(v2.506·v2.536 교훈).
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -15,13 +15,20 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { stripComments } from './_stripComments.js';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
 const read = (p) => stripComments(fs.readFileSync(path.join(SRC, p), 'utf8'));
 
 /* ── R2593-01 iDRAC 세션 동시 생성 — 뒤 요청이 앞 요청의 세션을 지워 거짓 401 이 나던 것 ── */
 test('R2593-01 — 같은 키로 동시에 캐시를 놓쳐도 세션은 하나만 만들고 401 이 나지 않는다', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'a2593-rf-'));
+  const dir = tmpDir('a2593-rf-');
   const script = `
     import http from 'node:http';
     const valid = new Set(); let n = 0, del = 0, get401 = 0;
@@ -120,7 +127,7 @@ test('R2593-04 — 미검증 이름 500개로 개별 토큰 엣지의 수신 기
 
 /* ── AUTHZ-01·02 — 실제 라우터로 ── */
 function runApp(script, extraFiles = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'a2593-api-'));
+  const dir = tmpDir('a2593-api-');
   for (const [f, v] of Object.entries(extraFiles)) fs.writeFileSync(path.join(dir, f), JSON.stringify(v));
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', `
     const express = (await import('express')).default;

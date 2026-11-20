@@ -6,6 +6,8 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { fetchJson, putJson, downloadFile } from '../../api.js';
 import { attachSizeText } from './attachText.js';
 import { unitText } from '../unitText.js';
+import { unreadMarkOf, saveLockedByUnread } from '../settingsUnread.js';   // 123회차: 못 읽은 동안의 기본 상한으로 저장하지 않는다
+import { SettingsUnreadBanner } from '../SettingsUnreadBanner.jsx';
 
 export default function AttachAdmin() {
   const [data, setData] = useState(null);
@@ -22,7 +24,12 @@ export default function AttachAdmin() {
   const u = data.usage || {};
   const max = (u.maxTotalMB || 0) * 1024 * 1024;
   const pct = max > 0 ? Math.min(100, Math.round((u.bytes / max) * 100)) : null;
+  // 123회차(112회차 분류표 'left' 대조): 상한 설정 파일을 못 읽은 동안(읽기 오류) 칸의 값은 저장된 상한이 아니라 기본 상한이다 — 다시 읽힌 뒤 그 값의 저장이 올려 둔 상한을 덮는다.
+  //   읽기 오류 동안 저장을 잠그고(서버도 503), ‘다시 확인’ 이 설정을 다시 받아 칸을 채운다(load 는 늘 칸을 다시 채운다).
+  const unread = unreadMarkOf(data);
+  const saveLocked = saveLockedByUnread(unread);
   const save = async () => {
+    if (saveLocked) return;
     setBusy(true); setMsg('');
     try { const r = await putJson('/attach/admin/settings', { maxTotalMB: Number(cap) }); setMsg(r?.ok === false ? (r.reason || '저장하지 못했습니다') : '저장했습니다.'); load(); } catch (e) { setMsg(String(e?.message || e)); } finally { setBusy(false); }
   };
@@ -34,7 +41,10 @@ export default function AttachAdmin() {
     <div className="card iss-editor">
       <h3 className="iss-h3">첨부 파일(위키 · 이슈)</h3>
       {err && <div className="banner warn" style={{ whiteSpace: 'normal' }}>사용량을 새로 읽지 못했습니다 — 아래는 직전에 읽은 값입니다({err.message || String(err)}).</div>}{/* v2.904 점검 W-9 */}
-      {data.loadError && <div className="banner bad" style={{ whiteSpace: 'normal' }}>첨부 설정 파일(attach-settings.json)을 읽지 못해 기본 상한으로 동작 중입니다 — 손상본은 옆에 보존했습니다. 원인: {data.loadError}</div>}
+      {/* 123회차: 읽기 오류(원본 그대로 · 보존본 없음)에 '손상본은 옆에 보존했습니다' 라고 말했다 — 표지가 있으면 공용 안내(잠금 · 다시 확인)로, 손상은 예전 문구 그대로 */}
+      {unread
+        ? <SettingsUnreadBanner le={unread} what="첨부 전체 상한 설정" save="상한 저장" onRecheck={load} busy={busy} />
+        : data.loadError && <div className="banner bad" style={{ whiteSpace: 'normal' }}>첨부 설정 파일(attach-settings.json)을 읽지 못해 기본 상한으로 동작 중입니다 — 손상본은 옆에 보존했습니다. 원인: {data.loadError}</div>}
       <div>
         사용 <b>{attachSizeText(u.bytes)}</b> / 상한 {attachSizeText(max)}{pct != null ? ` (${pct}%)` : ''} · 파일 {unitText(u.count, '개')}(위키 {unitText(u.wiki?.count, '개')} · 이슈 {unitText(u.issue?.count, '개')})
         {u.missing > 0 && <span className="iss-chip iss-sla warn" style={{ marginLeft: 6 }} title="목록에는 있지만 파일 본체가 없는 첨부 — 백업에서 되살린 포탈이면 첨부를 따로 옮겨야 합니다">본체 없음 {u.missing}</span>}
@@ -43,7 +53,7 @@ export default function AttachAdmin() {
       <div className="muted" style={{ fontSize: 12.5 }}>파일당 {attachSizeText(data.limits?.fileBytes)} · 문서 · 이슈마다 {data.limits?.perOwner ?? 20}개 · 받는 형식 {(data.exts || []).join(' · ')}. 첨부는 <b>포탈 백업에 들어가지 않습니다</b> — 아래 ‘전체 내려받기’ 로 따로 보관하세요(tar.gz · 원래 이름은 안의 index.json).</div>
       <div className="iss-checks">
         <label className="iss-inline">전체 상한(MB)<input className="input iss-num" type="number" min={1} max={data.limits?.maxTotalMBMax ?? 102400} value={cap} onChange={(e) => setCap(e.target.value)} /></label>
-        <button type="button" className="btn" disabled={busy || !cap} onClick={save}>상한 저장</button>
+        <button type="button" className="btn" disabled={busy || !cap || saveLocked} onClick={save}>상한 저장</button>
         <button type="button" className="btn" disabled={busy || !u.count} onClick={archive}>{busy ? '처리 중…' : '전체 내려받기'}</button>
       </div>
       {msg && <div className="banner">{msg}</div>}

@@ -9,10 +9,10 @@
  *  · 저장된 id 를 믿지 않는다 — 목록을 돌려줄 때 위키 저장소가 **지금 범위로 다시 거른다**(범위가 줄었거나 지워진 문서는 빠진다).
  *  · 쓰기는 util/userDocWriter.js(디바운스 · 비동기 원자 쓰기) — 문서 열기마다 파일을 쓰지 않는다. 손상은 보존하고 빈 상태로 시작.
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 107회차: 읽기 오류 ≠ 손상(공용 읽기 — 30초 간격 재읽기)
 import { createUserDocWriter } from '../util/userDocWriter.js';
 import { dayIndex } from '../util/dayKey.js';
 
@@ -43,13 +43,33 @@ function cleanDays(m, minDay) {
   for (const [d, n] of Object.entries(m)) { const di = Number(d); if (Number.isInteger(di) && di >= minDay && Number.isInteger(n) && n > 0) out[d] = n; }
   return out;
 }
+/*
+ * 67회차 F1(재현): 사용자 표는 **프로토타입 없는 객체**다. 로컬 계정 ID 규칙(`[A-Za-z0-9._@-]{2,64}`)은 `constructor` · `toString` ·
+ *   `valueOf` · `__proto__` 같은 이름을 받는데, 예전 `{}` 는 `users['constructor']` 가 Object 함수를 돌려줘 그 계정의 문서 열기 · 대문 ·
+ *   즐겨찾기가 `u.recent.filter` TypeError(500)였다. 조회는 자기 칸(Object.hasOwn)만 본다.
+ */
+const ownUser = (users, name) => (Object.hasOwn(users, name) ? users[name] : null);
+/*
+ * 107회차(재현 — EISDIR): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 예전 catch 하나는 온전한 원본을 .corrupt 로 옮기고 빈 값 · 기본값을 캐시해
+ *   다음 저장이 원본 자리를 덮었다. 읽기 단계는 공용 읽기: 원본을 두고 · 캐시하지 않고(30초 간격 재읽기) · 저장을 거절한다(503 settingsUnreadable). parse 실패는 예전과 같다.
+ */
+const _reader = makeJsonFileReader(() => wikiUserFile(), { parse: (t) => t, preserve: false, tag: 'wiki-user' });
+let _readErr = '';
+/** 107회차: 읽기 오류 중의 저장 거절 본문(503) 또는 null. */
+export function wikiUserWriteRefusal() {
+  load();
+  return _readErr ? { ok: false, status: 503, code: 'settingsUnreadable', readError: true, reason: `위키 즐겨찾기 · 조회 기록 파일(${path.basename(wikiUserFile())})을 읽지 못해 저장하지 않았습니다 — 읽기 오류(${_readErr})이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 저장이 다시 열립니다).` } : null;
+}
 function load(now = Date.now()) {
   if (cache) return cache;
   const file = wikiUserFile();
-  const users = {}; const views = {};
+  const rr = _reader.read();
+  if (rr.kind === 'read-error') { _readErr = String(rr.error?.code || 'read-error').slice(0, 32); return { users: Object.create(null), views: Object.create(null) }; }   // 107회차: 캐시하지 않는다 — 쓰기는 거절한다
+  _readErr = '';
+  const users = Object.create(null); const views = Object.create(null);
   try {
-    if (fs.existsSync(file)) {
-      const j = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (rr.kind === 'ok') {
+      const j = JSON.parse(rr.value);
       if (!isObj(j) || !isObj(j.users)) throw new Error('users 객체가 없습니다');
       for (const [name, u] of Object.entries(j.users)) { if (!USER_RE.test(name)) continue; const c = cleanUser(u); if (c) users[name] = c; }
       const minDay = dayIndex(now) - USER_LIMITS.days + 1;
@@ -66,7 +86,8 @@ function load(now = Date.now()) {
 }
 function userOf(c, name, { create = false } = {}) {
   if (typeof name !== 'string' || !USER_RE.test(name)) return null;
-  if (c.users[name]) return c.users[name];
+  const have = ownUser(c.users, name);
+  if (have) return have;
   if (!create || Object.keys(c.users).length >= USER_LIMITS.users) return null;
   c.users[name] = { fav: [], recent: [] };
   return c.users[name];
@@ -76,6 +97,7 @@ function userOf(c, name, { create = false } = {}) {
 export function recordView(user, id, now = Date.now()) {
   if (!PAGE_ID_RE.test(String(id))) return { recorded: false };
   const c = load(now);
+  if (_readErr) return { recorded: false };   // 107회차: 못 읽은 동안은 기록하지 않는다(빈 상태 위에 쓰지 않는다)
   const u = userOf(c, user, { create: true });
   if (!u) return { recorded: false };
   u.recent = [{ id, at: now }, ...u.recent.filter((r) => r.id !== id)].slice(0, USER_LIMITS.recent);
@@ -98,6 +120,7 @@ export function recordView(user, id, now = Date.now()) {
 export function setFavorite(user, id, on) {
   if (!PAGE_ID_RE.test(String(id))) { const e = new Error('없는 문서입니다'); e.status = 404; throw e; }
   const c = load();
+  { const no = wikiUserWriteRefusal(); if (no) throw Object.assign(new Error(no.reason), no, { extra: { code: no.code, readError: true } }); }   // 107회차: 읽기 오류 중에는 빈 값 · 기본값 위에 쓰지 않는다
   const u = userOf(c, user, { create: !!on });
   if (!u) {
     if (!on) return { fav: false };
@@ -150,4 +173,4 @@ export function forgetPage(id) {
 
 export const flushWikiUserNow = () => writer.flushNow();
 export const wikiUserIdle = (o) => writer.idle(o);
-export function _resetWikiUserCache() { writer.reset(); cache = null; }
+export function _resetWikiUserCache() { writer.reset(); cache = null; _reader.reset(); _readErr = ''; }

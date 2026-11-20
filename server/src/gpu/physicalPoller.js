@@ -5,8 +5,9 @@
  */
 
 import { loadGpuGuestSettings } from './settings.js';
-import { loadPhysical, updatePhysical } from './physicalRegistry.js';
+import { loadPhysical, updatePhysical, physicalHostIssue } from './physicalRegistry.js';
 import { collectVmGpuSsh, detectPhysicalGpu, gpuAuthGuard, gpuStopView, isGpuAuthError } from './sshCollect.js';
+import { authStopText } from '../util/authGuard.js';
 import { setPhysicalGpu, prunePhysicalGpu, physicalGpuCounts } from './physicalStore.js';
 import { isStopped } from '../security/emergencyStop.js';
 import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스(util/pool.js) — 손으로 쓴 사본 제거
@@ -42,12 +43,15 @@ export async function pollPhysicalOnce({ manual = false } = {}) {
     let ok = 0; let failed = 0; let authStopped = 0;
     await poolSettled(servers, Math.max(1, s.concurrency || 4), async (sv) => {
       const vm = { name: sv.name, ipAddresses: [sv.host], ipAddress: sv.host };
+      // 36회차 F3: 예전에 호스트명으로 등록된 항목 — 수집 경로가 쓰지 않는 주소라는 사실을 그대로 말한다('VMware Tools 가 IP 미보고' 가 아니다).
+      const hostWhy = physicalHostIssue(sv.host);
+      if (hostWhy) { setPhysicalGpu(sv.id, { id: sv.id, name: sv.name, host: sv.host, vcenterId: sv.vcenterId || '', error: hostWhy, errorCode: 'config', errorLabel: '주소 확인' }); failed++; return; }
       const creds = { username: sv.username, password: sv.password || '' };
       const authDev = { id: `phys|${sv.id}`, username: sv.username, password: sv.password || '' };
       const stop = manual ? null : gpuAuthGuard.authStopFor(authDev);
       if (stop) {
         // 정지 사실을 결과에 싣는다 — 조용히 건너뛰면 화면이 '마지막 값' 을 지금 값처럼 보여준다.
-        setPhysicalGpu(sv.id, { id: sv.id, name: sv.name, host: sv.host, vcenterId: sv.vcenterId || '', error: `인증 실패로 주기 수집 정지(${stop.attempts}회) — 비밀번호를 고치면 자동 재개합니다`, errorCode: 'login', errorLabel: '로그인 안됨', authStopped: gpuStopView(stop) });
+        setPhysicalGpu(sv.id, { id: sv.id, name: sv.name, host: sv.host, vcenterId: sv.vcenterId || '', error: authStopText(stop, `인증 실패로 주기 수집 정지(${stop.attempts}회) — 비밀번호를 고치면 자동 재개합니다`), errorCode: 'login', errorLabel: '로그인 안됨', authStopped: gpuStopView(stop) });
         authStopped++;
         return;
       }
@@ -55,7 +59,8 @@ export async function pollPhysicalOnce({ manual = false } = {}) {
         const r = await collectVmGpuSsh(vm, creds, { timeoutMs: s.timeoutMs, port: sv.port || 22 });
         setPhysicalGpu(sv.id, {
           id: sv.id, name: sv.name, host: sv.host, vcenterId: sv.vcenterId || '',
-          count: r.count, utilPct: r.utilPct, utilNA: !!r.utilNA, memUsedPct: r.memUsedPct, memUsedMB: r.memUsedMB ?? null, memTotalMB: r.memTotalMB ?? null, tempC: r.tempC ?? null, gpus: r.gpus || [], error: null,
+          count: r.count, utilPct: r.utilNA ? null : r.utilPct, utilNA: !!r.utilNA,   // 95회차: MIG(utilNA)의 파서 0 을 싣지 않는다(게스트 폴러 v2.593 DATA-02 와 같은 규칙 — 0% 가 아니라 모름)
+          memUsedPct: r.memUsedPct, memUsedMB: r.memUsedMB ?? null, memTotalMB: r.memTotalMB ?? null, tempC: r.tempC ?? null, gpus: r.gpus || [], error: null,
           // v2.769(점검 R4-D5-3): 일부 GPU 응답 없음(장수) — 예전에는 버려져 죽은 GPU 가 개수에서 조용히 빠졌다.
           gpuErrors: Number.isFinite(r.gpuErrors) && r.gpuErrors > 0 ? Math.floor(r.gpuErrors) : 0,
         });

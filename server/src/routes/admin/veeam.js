@@ -3,7 +3,7 @@
 // 연결 시험은 **저장된 서버만**(id 로) — 요청 본문의 host 로 저장 비밀번호를 보내지 않는다(server/CLAUDE.md v2.480 규칙).
 import { adminOnly, fullScopeOnlyWith } from './shared.js';
 import { logAudit } from '../../audit.js';
-import { listServers, saveServer, deleteServer, getServerWithSecret, registryLoadError, serversForThisNode, centralManagedReason, DEFAULT_PORT, DEFAULT_API_VERSION } from '../../veeam/registry.js';
+import { listServers, saveServer, deleteServer, getServerWithSecret, registryLoadError, serversForThisNode, centralManagedReason, DEFAULT_PORT, DEFAULT_API_VERSION, registryWriteRefusal } from '../../veeam/registry.js';
 import { resultMaxAgeMs } from '../api/veeam.js';
 import { getRecord, dropResult } from '../../veeam/store.js';
 import { pollVeeamOnce, veeamPollerStatus, authGuard } from '../../veeam/poller.js';
@@ -122,6 +122,8 @@ export function registerVeeam(adminRouter) {
   });
 
   adminRouter.post('/veeam/servers', adminOnly, fleetWideOnly, (req, res) => {
+    const refused = registryWriteRefusal();   // 결정(78 남긴 것 ①): 등록부 읽기 오류 중에는 409(원본은 그대로 — 읽히면 다시 열린다)
+    if (refused) return res.status(409).json(refused);
     try {
       // 읽는 곳(엣지)은 중앙이 아는 엣지 목록에서만(대소문자·공백 차이는 목록 표기로) — 이미 저장된 값은 목록에 없어도 통과(docs/rules/edge.md).
       const body = { ...(req.body || {}) };
@@ -133,19 +135,21 @@ export function registerVeeam(adminRouter) {
       body.agent = ag.value;
       const d = saveServer(body);
       // v2.761 B4: 접속처가 바뀌면 옛 접속처의 결과(lastOk — 실패해도 승계된다)와 인증 정지를 지운다(다른 서버다 — secretCarry 와 같은 판단).
-      if (d.moved) { dropResult(d.id); authGuard.clearAuthStop(d.id); }
+      if (d.moved) { dropResult(d.id); authGuard.clearAuthStop(d.id, { verified: false }); }
       logAudit({ user: req.user?.username, action: 'Veeam 서버 저장', target: d.name, detail: `${d.host}:${d.port} · vCenter ${d.vcenterIds.join(',')} · 읽는 곳=${d.agent || '중앙'}${d.moved ? ' · 접속처 변경으로 이전 결과·인증 정지 지움' : ''}${d.droppedSecrets ? ' · 접속처 변경으로 저장 비밀번호 폐기' : ''}` });
       res.status(201).json({ ok: true, server: d });
     } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
   });
 
   adminRouter.delete('/veeam/servers/:id', adminOnly, fleetWideOnly, (req, res) => {
+    const refused = registryWriteRefusal();   // 결정(78 남긴 것 ①): '서버를 찾을 수 없습니다' 404 보다 먼저
+    if (refused) return res.status(409).json(refused);
     const d = getServerWithSecret(req.params.id);
     const locked = centralManagedReason(d);   // v2.763(V2-1): 지워도 pull 이 되살리지 않아 아무도 읽지 않게 된다 — 중앙에서 지운다
     if (locked) return res.status(409).json({ ok: false, reason: locked, centralManaged: true });
     if (!d || !deleteServer(req.params.id)) return res.status(404).json({ ok: false, reason: '서버를 찾을 수 없습니다.' });
     dropResult(req.params.id);
-    authGuard.clearAuthStop(req.params.id);
+    authGuard.clearAuthStop(req.params.id, { verified: false });
     logAudit({ user: req.user?.username, action: 'Veeam 서버 삭제', target: d.name, detail: `${d.host}:${d.port || DEFAULT_PORT}` });
     res.json({ ok: true });
   });
@@ -229,6 +233,8 @@ export function registerVeeam(adminRouter) {
   // ② 실제 연결 시험 — 저장 전에 중앙 직접 행만 로그인해 본다. 자동 재시도 없음(계정 잠금). 엣지 담당 행은 '테스트 불가'(실패 아님).
   //   비밀번호를 비운 기존 행은 **저장된 서버(같은 host:port·같은 계정)의 비밀번호**로만 시험한다 — 행의 다른 값으로 저장 비밀번호를 보내지 않는다.
   adminRouter.post('/veeam/servers/import/test', csvPerm, adminOnly, fleetWideOnly, (req, res) => {
+    const refused = registryWriteRefusal();   // 결정(78 남긴 것 ①)
+    if (refused) return res.status(409).json(refused);
     const p = vbParse(req.body || {});
     if (p.error) return res.status(400).json({ ok: false, reason: p.error });
     const ctx = vbCtx();
@@ -268,6 +274,8 @@ export function registerVeeam(adminRouter) {
 
   // ①/③ 가져오기 — dryRun 이면 검증만, 아니면 고른 행을 저장. 걸러낸 행은 사유와 함께 skipped 로 돌려준다.
   adminRouter.post('/veeam/servers/import', csvPerm, adminOnly, fleetWideOnly, (req, res) => {
+    const refused = registryWriteRefusal();   // 결정(78 남긴 것 ①): 빈 목록과 대조하면 전부 '추가' 로 보인다(드라이런 포함)
+    if (refused) return res.status(409).json(refused);
     const p = vbParse(req.body || {});
     if (p.error) return res.status(400).json({ ok: false, reason: p.error });
     const ctx = vbCtx();
@@ -286,7 +294,7 @@ export function registerVeeam(adminRouter) {
       if (issue) { failed.push({ line: row._line, name: row.name || row.host, reason: issue }); continue; }
       try {
         const d = saveServer(vbBulk.cleanInput(input));
-        if (d.moved) { dropResult(d.id); authGuard.clearAuthStop(d.id); } // v2.761 B4: 단건 저장과 같다
+        if (d.moved) { dropResult(d.id); authGuard.clearAuthStop(d.id, { verified: false }); } // v2.761 B4: 단건 저장과 같다
         if (input.id) updated++; else added++;
         if (d.droppedSecrets?.length) dropped.push({ line: row._line, name: row.name || row.host, reason: '접속처가 바뀌어 저장된 비밀번호를 폐기했습니다 — 비밀번호를 다시 등록하세요.' });
       } catch (e) { failed.push({ line: row._line, name: row.name || row.host, reason: String(e?.message || e).slice(0, 300) }); }

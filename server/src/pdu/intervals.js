@@ -13,12 +13,11 @@
  *  - 엣지에서 `PDU_INTERVALS_LOCAL=1` 이면 중앙 값을 무시한다(현장 고정 탈출구).
  */
 
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { startAdaptiveTimer as baseAdaptiveTimer } from '../util/adaptiveTimer.js';
-import { makeSettingsLoadError } from '../util/settingsLoadError.js';
+import { makeJsonFileLoader } from '../util/jsonFileLoad.js';   // 78회차 F6: 읽기 오류 ≠ 손상(결정 G2 공용 로더)
 
 const FILE = path.join(config.configDir, 'pdu-intervals.json');
 const MAX_MS = 24 * 60 * 60_000;
@@ -42,23 +41,28 @@ let _listeners = new Set();
  *   돌아갔다. 오류면 라우트가 intervals 를 싣지 않고(`intervalsUnreadable` — 구버전 엣지에는 503) 엣지는 직전 값을 유지한다.
  *   재시작 뒤 보존본만 남은 경우도 못 읽은 것이다. 관리자 저장(saveIntervals)만 해제한다.
  */
-const _loadErr = makeSettingsLoadError(() => FILE, { label: 'PDU 수집 주기', confirm: () => saveIntervals({}) });
-/** 설정 파일을 못 읽었으면 { at, reason }, 읽었으면 null. */
-export function pduIntervalsLoadError() { loadFile(); return _loadErr.get(); }
+// 78회차 F6: 판정은 공용 로더(util/jsonFileLoad.js) 하나 — 예전 catch 하나는 **읽기 오류**(EACCES · EIO · EISDIR)도 손상으로 보고 온전한 원본을
+//   `.corrupt` 로 옮겼다(결정 G2 의 같은 꼴). 이제 손상만 옮기고, 읽기 오류는 원본을 두고 30초마다 다시 읽으며 그동안 저장을 409 로 거절한다
+//   (pdu-config 는 예전처럼 intervalsUnreadable). 손상 상태의 관리자 저장이 오류를 푸는 규약은 그대로다.
+// 78회차: 예전 판정 그대로 — `null` 도 손상이다(공용 parseJsonObject 는 null 을 {} 로 읽는다 · v2.601 TIM2601-03 이 null 파일을 손상 보존으로 고정).
+const parseStrictObject = (t) => { const v = JSON.parse(t); if (!v || typeof v !== 'object' || Array.isArray(v)) throw new SyntaxError('객체가 아닌 JSON 값'); return v; };
+const _file = makeJsonFileLoader(() => FILE, { label: 'PDU 수집 주기', confirm: () => saveIntervals({}), parse: parseStrictObject, tag: 'pdu-intervals' });
+/** 설정 파일을 못 읽었으면 { at, reason, readError? }, 읽었으면 null. */
+export function pduIntervalsLoadError() { loadFile(); return _file.loadError(); }
 
 function loadFile() {
-  if (!fs.existsSync(FILE)) { _loadErr.missing(); return {}; }
-  try {
-    const j = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-    if (!j || typeof j !== 'object' || Array.isArray(j)) throw new Error('객체가 아닌 JSON 값');
-    _loadErr.ok();
-    return j;
-  } catch (e) { _loadErr.corrupt(e); preserveCorrupt(FILE, e.message); return {}; }
+  const r = _file.load();   // 객체가 아닌 JSON(null 포함)은 손상(parseStrictObject)
+  return r.kind === 'ok' ? r.value : {};
 }
 
 /** 중앙 UI 저장 — 지정한 키만 남긴다(빈 값/0 은 '미지정'으로 제거). */
 export function saveIntervals(partial = {}) {
   const cur = loadFile();
+  // 78회차 F6: 읽기 오류면 원본이 디스크에 그대로 있다 — {} 위에 쓰면 지정해 둔 다른 주기를 덮는다(라우트 409).
+  if (_file.loadError()?.readError) {
+    const no = _file.refusal('PDU 수집 주기');
+    throw Object.assign(new Error(no?.reason || 'PDU 수집 주기 파일을 읽지 못해 저장하지 않았습니다.'), { status: 409, code: 'settings-unreadable' });
+  }
   const next = { ...cur };
   for (const s of INTERVAL_SPEC) {
     if (!(s.key in partial)) continue;
@@ -70,7 +74,7 @@ export function saveIntervals(partial = {}) {
   }
   const effBefore = runtimeIntervals();
   atomicWriteFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
-  _loadErr.ok();
+  _file.saved();
   // v2.743(감사 TIMING-01): 실효 주기가 그대로면 알리지 않는다(같은 값 저장이 타이머를 다시 잡지 않게 — applyCentralIntervals 와 같은 규칙).
   if (effectiveDiffers(effBefore, runtimeIntervals())) notify();
   return next;
@@ -134,4 +138,4 @@ export function startAdaptiveTimer(getMs, fn, opts = {}) {
   return baseAdaptiveTimer(getMs, fn, { ...opts, subscribe: onIntervalsChange });
 }
 
-export function _resetForTest() { _central = null; _listeners = new Set(); _loadErr.ok(); }
+export function _resetForTest() { _central = null; _listeners = new Set(); _file.saved(); }

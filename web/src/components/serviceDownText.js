@@ -12,6 +12,11 @@
 
 const NET_RE = /Failed to fetch|NetworkError|load failed|ERR_NETWORK|ERR_CONNECTION_(REFUSED|RESET)/i;
 const TMO_RE = /AbortError|TimeoutError/;
+// 전체 점검 129회차 A5: 브라우저가 실제로 주는 시한 초과 문구는 이름(TimeoutError)이 아니라 본문이다 — Chrome 'signal timed out' ·
+//   Firefox · Safari 'The operation timed out.' · Node 'The operation was aborted due to timeout'. 화면은 대부분 e.message 만 넘기므로
+//   (usePolling 도) 위 판정은 실제 시한 초과에 맞지 않았고 빨간 '오류: signal timed out' 이 떴다(v2.742 '응답 지연' 안내가 닿지 않았다).
+//   장비 · 서버 사유 문장에 든 'timed out' 을 포탈 지연으로 오인하지 않게 **문장 전체가 같을 때만** 받는다.
+const TMO_EXACT_RE = /^(?:signal timed out|The operation timed out\.?|The operation was aborted due to timeout)$/i;
 const DOWN_STATUS = [500, 502, 503, 504];
 
 /**
@@ -23,6 +28,11 @@ export function serviceDownKind(message, http = null) {
   const status = Number(http?.status) || 0;
   // 4xx(권한·잘못된 요청·없음·충돌)는 재시도해도 결과가 같다 — 절대 이 안내로 바꾸지 않는다.
   if (status >= 400 && status < 500) return null;
+  // 전체 점검 30회차 A: 서버가 '파일을 못 읽음'(등록부 · 설정 손상 — registryUnreadable 등)이라고 밝힌 503 은 업그레이드 중이 아니다 —
+  //   다시 시도해도 같고 사람이 보존본을 확인해야 한다. 이 안내로 바꾸지 않고 서버 사유를 그대로 보인다.
+  const b = http?.body;
+  //   132~135회차 묶음 Chromium 검증: 표지를 `error` 칸에 싣는 응답(사용 기록 집계 등 13곳 — `error: 'settingsUnreadable'`)은 이 판정을 비켜 가 '5분 후 재시도' 로 보였다 — error 칸도 본다.
+  if (status === 503 && b && typeof b === 'object' && [b.reason, b.code, b.error].some((v) => typeof v === 'string' && /Unreadable$/.test(v))) return null;
   if (DOWN_STATUS.includes(status)) return status === 500 ? 'internal' : 'gateway';
   const m = typeof message === 'string' ? message : String(message?.message || '');
   if (!m) return null;
@@ -30,7 +40,7 @@ export function serviceDownKind(message, http = null) {
   if (/->\s*500\b/.test(m)) return 'internal';
   if (/->\s*(502|503|504)\b/.test(m)) return 'gateway';
   if (NET_RE.test(m)) return 'network';
-  if (TMO_RE.test(m)) return 'timeout';
+  if (TMO_RE.test(m) || (m.length <= 64 && TMO_EXACT_RE.test(m.trim()))) return 'timeout';
   return null;
 }
 

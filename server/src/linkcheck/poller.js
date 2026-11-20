@@ -109,8 +109,13 @@ export async function pollOnce({ trigger = 'timer' } = {}) {
   try {
     const s = loadLinkCheckSettings();
     const { mine, counts, problems, collectors } = centralLinks();
+    // 전체 점검 16회차(T-2 — 재현): 수집 서버는 **id 로** 찾는다 — 표시 이름 키 Map 은 같은 이름 항목 중 마지막만 남아, 다른 수집 서버의 토큰을
+    //   엉뚱한 엣지 URL 로 보냈다(등록부는 id 만 유일). 이름 찾기는 그 이름이 하나뿐일 때만(옛 링크 · 화면 호환).
+    const nameCount = new Map();
+    for (const c of collectors) { const n = String(c.name || c.id); nameCount.set(n, (nameCount.get(n) || 0) + 1); }
     const ctx = {
-      collectors: new Map(collectors.map((c) => [String(c.name || c.id), c])),
+      collectors: new Map(collectors.map((c) => [String(c.id || ''), c])),
+      collectorsByName: new Map(collectors.filter((c) => nameCount.get(String(c.name || c.id)) === 1).map((c) => [String(c.name || c.id), c])),
       collectorIds: collectors.map((c) => String(c.id || '')),
     };
     const timeouts = { dnsMs: s.dnsTimeoutMs, tcpMs: s.tcpTimeoutMs, tlsMs: s.tlsTimeoutMs, httpMs: s.httpTimeoutMs, sshMs: s.sshTimeoutMs, smtpMs: s.smtpTimeoutMs };

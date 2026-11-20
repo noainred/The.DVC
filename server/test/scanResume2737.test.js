@@ -17,7 +17,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 
-const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'scanres2737-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const DIR = tmpDir('scanres2737-');
 process.env.CONFIG_DIR = DIR;
 process.env.DATA_SOURCE = 'live';
 process.env.IPAM_SCAN_WORKER = '0';   // 인라인 스캔(자식 프로세스 없이 빠르게)
@@ -34,7 +41,7 @@ const waitFor = async (fn, ms = 15_000, step = 50) => {
 };
 
 /* 가짜 du(실제 셸) — 마지막 인자가 경로. 호출마다 카운트 파일에 한 줄 · 선택적으로 잠들고 · 끝났다는 표지를 남긴다. */
-const FAKE = fs.mkdtempSync(path.join(os.tmpdir(), 'fakedu2737-'));
+const FAKE = tmpDir('fakedu2737-');
 fs.writeFileSync(path.join(FAKE, 'du'), [
   '#!/bin/sh',
   'for a; do last="$a"; done',
@@ -264,7 +271,7 @@ test('② 상태 확인 도중 작업이 끝나도(rc 확인 → 생존 확인 �
   // 환경에서는 좀비가 kill -0 을 통과시켜 드러나지 않으므로, 그 사이를 셸에서 그대로 만든다 — kill 은 내장이라 바꿀 수 없어 외부 명령 cat 을 가로챈다:
   // .pid 를 읽는 순간 .rc 를 만들고(작업이 방금 끝남) 이미 거둔 pid 를 내준다.
   const realCat = process.env.PATH.split(':').map((d) => path.join(d, 'cat')).find((p) => fs.existsSync(p));
-  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'fakecat2737-'));
+  const bin = tmpDir('fakecat2737-');
   fs.writeFileSync(path.join(bin, 'cat'), `#!/bin/sh\ncase "$1" in *.pid) printf '0\\n' > "\${1%.pid}.rc";; esac\nexec '${realCat}' "$@"\n`, { mode: 0o755 });
   const id = D.newJobId('race');
   const dead = await new Promise((r) => { const c = execFile('sh', ['-c', 'exit 0'], () => r(c.pid)); });

@@ -43,8 +43,15 @@ export function computePowerBreakdown(snap, measuredList, opts = {}) {
   //  3) 그래도 없으면 원격 수집기 라벨/collectorId를 등록 DataCenter와 매칭(원격 베어메탈 귀속)
   const resolveDc = (m, hi) => {
     if (hi) return String(assign[hi.vcenterId] || '');
+    // v2.972: 사용자가 이 수집 서버를 법인에 매칭했으면 그것이 서버에 붙은 법인(엣지 태그)보다 먼저 — analysisServers.remoteServersResolved 와 같은 순서.
+    const cid = m.collectorId != null ? String(m.collectorId) : '';
+    const manual = cid && opts.collectorDcManual ? String(opts.collectorDcManual.get(cid) || '') : '';
+    if (manual) return manual;
     const explicit = String(m.datacenterId || '').trim();
     if (explicit) return explicit;
+    // 그다음 수집 서버 지도(사용자 매칭 → 이름 맞춤 — analysisServers.collectorDcMaps 하나)를 라우트가 주면 그것.
+    const viaCollector = cid && opts.collectorDc ? String(opts.collectorDc.get(cid) || '') : '';
+    if (viaCollector) return viaCollector;
     return matchDatacenterId([m.datacenterLabel, m.collectorId], datacenters);
   };
 
@@ -100,6 +107,8 @@ export function computePowerBreakdown(snap, measuredList, opts = {}) {
     };
   };
 
+  // 70회차 F2: 측정한 서버가 0대면 합계는 '모름'(null) — FinOps 와 같은 규약(키는 그대로 · 값만 null).
+  const unknownPack = () => Object.fromEntries(Object.keys(pack(0)).map((k) => [k, null]));
   return {
     config: cfg,
     scope: vcFilter || '',
@@ -107,7 +116,7 @@ export function computePowerBreakdown(snap, measuredList, opts = {}) {
     mappedServers: mapped,
     unmappedServers: unmapped,
     unmappedWatts: Math.round(unmappedW),
-    totals: pack(totalW),
+    totals: servers.length ? pack(totalW) : unknownPack(),
     byVcenter: [...byVc.values()].map((c) => ({ vcId: c.vcId, region: c.region, servers: c.servers, ...pack(c.watts) })).sort((a, b) => b.watts - a.watts),
     // 1차 DataCenter → 2차 vCenter/Baremetal. 미지정 법인(__nodc__)은 맨 뒤.
     byDatacenter: [...byDc.values()].map((d) => ({

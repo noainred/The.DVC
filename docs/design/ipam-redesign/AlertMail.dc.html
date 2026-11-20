@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>IP 관리 — 정기 보고 메일 미리 보기</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#1f2328;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.5}
+*{box-sizing:border-box}
+a{color:#0b57d0}a:hover{color:#0842a0}
+.chrome{display:flex;align-items:center;gap:12px;flex-wrap:wrap;color:#e6edf6}
+.seg{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden}
+.seg button{border:0;background:transparent;color:#8b9bb4;font:inherit;font-size:12.5px;font-weight:600;padding:8px 14px;cursor:pointer}
+.seg button.on{background:#3b82f6;color:#fff}
+.mail{background:#fff;border-radius:10px;overflow:hidden}
+.meta{padding:16px 28px;background:#f4f6f9;border-bottom:1px solid #dfe3e8;display:grid;grid-template-columns:64px minmax(0,1fr);gap:4px 12px;font-size:12.5px}
+.meta dt{color:#5b6370;margin:0}.meta dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.body{padding:26px 28px 30px;display:flex;flex-direction:column;gap:22px}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.dim{color:#5b6370}
+.h2{margin:0 0 8px;font-size:14.5px;font-weight:800}
+.h2 small{font-size:12px;font-weight:500;color:#5b6370;margin-left:6px}
+.kp{display:grid;gap:10px}
+.kp div{border:1px solid #dfe3e8;border-radius:8px;padding:11px 13px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.kp .l{font-size:11.5px;color:#5b6370;font-weight:600}
+.kp .v{font-size:22px;font-weight:800;line-height:1.15}
+.kp .d{font-size:12px;color:#5b6370}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;font-size:11.5px;font-weight:700;color:#5b6370;padding:7px 9px;border-bottom:2px solid #dfe3e8;white-space:nowrap}
+td{padding:7px 9px;border-bottom:1px solid #eceff3;vertical-align:top}
+.r{text-align:right;white-space:nowrap}
+.pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.pill.crit{background:#fbe3e4;color:#a1211b}.pill.warn{background:#fdefd4;color:#7a4b00}.pill.gray{background:#eceff3;color:#454c57}.pill.ok{background:#dff3e3;color:#17602d}
+.note{border:1px solid #dfe3e8;border-radius:8px;padding:11px 13px;font-size:12.5px;background:#fafbfc}
+.sum td{font-weight:800;border-top:2px solid #dfe3e8}
+</style>
+</helmet>
+<div style="width:860px;min-height:1640px;padding:24px 30px 34px;display:flex;flex-direction:column;gap:16px">
+
+  <div class="chrome">
+    <a href="AlertSettings.dc.html" style="color:#93c5fd;font-size:12.5px;font-weight:600;text-decoration:none">‹ 알림 · 정기 보고</a>
+    <span style="font-size:16px;font-weight:800">메일 미리 보기</span>
+    <span class="seg" role="group" aria-label="보고 종류" style="margin-left:auto">
+      <button type="button" class="{{corpCls}}" onClick="{{pickCorp}}">법인별 — VC-KR1</button>
+      <button type="button" class="{{allCls}}" onClick="{{pickAll}}">전체 종합</button>
+    </span>
+  </div>
+
+  <sc-if value="{{isCorp}}" hint-placeholder-val="{{ true }}">
+  <div class="mail">
+    <dl class="meta">
+      <dt>제목</dt><dd><b>[IP 관리] VC-KR1 주간 변경 보고 · 11-01 ~ 11-08</b></dd>
+      <dt>받는 사람</dt><dd>ops-kr@corp.example, web-team@corp.example</dd>
+      <dt>첨부</dt><dd class="mono">ip-changes_VC-KR1_20261108.xlsx</dd>
+    </dl>
+    <div class="body">
+      <div style="font-size:15px;line-height:1.6">지난 7일 동안 VC-KR1 에서 주소 <b>31개</b>가 새로 쓰이기 시작했고 <b>13개</b>가 해제됐습니다. <b>웹 서비스망(10.20.30.0/24)</b>이 95% 로 가득 찼고, 충돌 1건이 새로 생겼습니다.</div>
+
+      <div class="kp" style="grid-template-columns:repeat(5,minmax(0,1fr))">
+        <div><span class="l">사용 중 주소</span><span class="v">1,204</span><span class="d">▲ 18 (지난 구간 1,186)</span></div>
+        <div><span class="l">사용률</span><span class="v">41.0%</span><span class="d">▲ 0.2%p</span></div>
+        <div><span class="l">새 주소</span><span class="v">31</span><span class="d">VM 27 · 물리 2 · 스캔만 2</span></div>
+        <div><span class="l">해제</span><span class="v">13</span><span class="d">회수 가능</span></div>
+        <div><span class="l">조치 필요</span><span class="v">6</span><span class="d">새로 2 · 해결 1</span></div>
+      </div>
+
+      <div>
+        <h2 class="h2">대역 사용률 변화<small>변화 큰 순 · 38개 중 4개</small></h2>
+        <table>
+          <thead><tr><th>대역</th><th>용도</th><th class="r">지난 구간</th><th class="r">이번 구간</th><th class="r">변화</th><th class="r">사용률</th><th></th></tr></thead>
+          <tbody>
+            <tr><td class="mono">10.20.32.0/24</td><td>개발 · 스테이징</td><td class="r mono">143</td><td class="r mono">151</td><td class="r mono">▲ 8</td><td class="r mono">59%</td><td></td></tr>
+            <tr><td class="mono">10.20.33.0/24</td><td class="dim">용도 없음</td><td class="r mono">14</td><td class="r mono">22</td><td class="r mono">▲ 8</td><td class="r mono">9%</td><td><span class="pill gray">용도를 넣어 주세요</span></td></tr>
+            <tr><td class="mono">10.20.30.0/24</td><td>웹 서비스망</td><td class="r mono">237</td><td class="r mono">241</td><td class="r mono">▲ 4</td><td class="r mono"><b>95%</b></td><td><span class="pill crit">가득 참 · 빈 주소 13</span></td></tr>
+            <tr><td class="mono">10.20.31.0/24</td><td>앱 서버망</td><td class="r mono">210</td><td class="r mono">208</td><td class="r mono">▼ 2</td><td class="r mono">82%</td><td><span class="pill warn">여유 적음</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div>
+        <h2 class="h2">새로 쓰기 시작한 주소<small>31개 중 6개 · 전체는 첨부 엑셀</small></h2>
+        <table>
+          <thead><tr><th>IP 주소</th><th>자원</th><th>용도</th><th>요청자</th><th>할당자</th><th>처음 본 때</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">10.20.33.18</td><td><b>web-kr1-031</b> <span class="dim">VM</span></td><td>웹 프런트</td><td>web-team</td><td>ops-kr</td><td class="mono dim">11-07 14:40</td></tr>
+            <tr><td class="mono">10.20.32.71</td><td><b>stg-kr1-api-04</b> <span class="dim">VM</span></td><td>스테이징</td><td>api-team</td><td>ops-kr</td><td class="mono dim">11-07 10:12</td></tr>
+            <tr><td class="mono">10.20.31.52</td><td><b>db-kr1-phy02</b> <span class="dim">물리 서버</span></td><td>DB 서버</td><td>dba-team</td><td>net-admin</td><td class="mono dim">11-06 16:03</td></tr>
+            <tr><td class="mono">10.20.30.28</td><td><b>prn-3f.kr1.example</b> <span class="dim">스캔만</span></td><td class="dim">—</td><td class="dim">—</td><td class="dim">—</td><td class="mono dim">11-05 09:20</td></tr>
+            <tr><td class="mono">10.20.32.72</td><td><b>stg-kr1-api-05</b> <span class="dim">VM</span></td><td>스테이징</td><td>api-team</td><td>ops-kr</td><td class="mono dim">11-04 11:47</td></tr>
+            <tr><td class="mono">10.20.32.80</td><td><b>dev-kr1-build-02</b> <span class="dim">VM</span></td><td class="dim">—</td><td class="dim">—</td><td class="dim">—</td><td class="mono dim">11-03 13:30</td></tr>
+          </tbody>
+        </table>
+        <div class="dim" style="font-size:12px;margin-top:6px">용도 · 요청자가 비어 있는 새 주소 9개 — 대장에 적어 주세요.</div>
+      </div>
+
+      <div>
+        <h2 class="h2">해제된 주소<small>13개 중 3개</small></h2>
+        <table>
+          <thead><tr><th>IP 주소</th><th>직전 자원</th><th>용도</th><th>마지막 응답</th><th>쓰인 기간</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">10.20.30.17</td><td>api-kr1-006</td><td>API 서버</td><td class="mono dim">11-02 23:10</td><td class="dim">402일</td></tr>
+            <tr><td class="mono">10.20.31.140</td><td>tmp-kr1-migr-01</td><td>이관 임시</td><td class="mono dim">11-04 18:00</td><td class="dim">12일</td></tr>
+            <tr><td class="mono">10.20.30.212</td><td>esx-kr1-07 <span class="dim">예전 관리 주소</span></td><td>ESXi 관리망</td><td class="mono dim">11-02 13:40</td><td class="dim">380일</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div>
+        <h2 class="h2">조치 필요<small>6건 — 새로 생긴 것 먼저</small></h2>
+        <table>
+          <tbody>
+            <tr><td style="width:96px"><span class="pill crit">충돌 · 새로</span></td><td class="mono" style="width:120px">10.20.30.47</td><td>VC-KR1 web-kr1-023 · VC-KR2 legacy-app-02 가 같은 주소 · 스캔에서도 다른 MAC 이 응답(충돌 의심)</td></tr>
+            <tr><td><span class="pill warn">DNS · 새로</span></td><td class="mono">10.20.30.20</td><td>역DNS 이름 old-api-03.kr1.example 을 정방향으로 물으면 10.20.30.77 — 이 IP 가 아닙니다</td></tr>
+            <tr><td><span class="pill crit">중복</span></td><td class="mono">10.20.31.105</td><td>VM 2대 — app-kr1-051 외 1 · 9일째</td></tr>
+            <tr><td><span class="pill warn">예약 만료</span></td><td class="mono">10.20.30.210</td><td>‘신규 DB 이중화’ · 요청자 infra-kr</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div>
+        <h2 class="h2">관리 정보 변경<small>사람이 바꾼 것 · 7건 중 3건</small></h2>
+        <table>
+          <thead><tr><th>언제</th><th>누가</th><th>무엇을</th></tr></thead>
+          <tbody>
+            <tr><td class="mono dim" style="white-space:nowrap">11-07 10:05</td><td>ops-kr</td><td>관리 정보 CSV 가져오기 — 38행(용도 · 요청자)</td></tr>
+            <tr><td class="mono dim">11-06 15:58</td><td>net-admin</td><td><span class="mono">10.20.31.52 · .60</span> 고정할당 · 요청자 dba-team</td></tr>
+            <tr><td class="mono dim">11-05 09:31</td><td>ops-kr</td><td>대역 <span class="mono">10.20.32.0/24</span> 용도 ‘개발’ → ‘개발 · 스테이징’</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="note"><b>수집 상태</b> — 스캔 에이전트 edge-kr1 은 이 구간에 정상 보고했습니다(11-05 03:00 ~ 05:00 두 시간은 보고가 없어 그 사이의 사용 · 해제 시각은 실제보다 늦게 적혔을 수 있습니다).</div>
+
+      <div class="dim" style="font-size:12px;border-top:1px solid #dfe3e8;padding-top:14px">이 메일은 The Davinci 포탈의 IP 관리 › 설정 › 알림 · 정기 보고에서 보냅니다 · <a href="Main.dc.html">포탈에서 보기</a> · 받는 사람을 바꾸려면 관리자에게 요청하세요.</div>
+    </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{isAll}}" hint-placeholder-val="{{ false }}">
+  <div class="mail">
+    <dl class="meta">
+      <dt>제목</dt><dd><b>[IP 관리] 전체 법인 주간 변경 보고 · 11-01 ~ 11-08</b></dd>
+      <dt>받는 사람</dt><dd>메일 설정의 기본 받는 사람 3명, net-admin@corp.example, infra-lead@corp.example</dd>
+      <dt>첨부</dt><dd class="mono">ip-changes_all_20261108.xlsx</dd>
+    </dl>
+    <div class="body">
+      <div style="font-size:15px;line-height:1.6">지난 7일 동안 28개 법인에서 주소 <b>64개</b>가 새로 쓰이기 시작했고 <b>41개</b>가 해제됐습니다. 가득 찬 대역은 <b>9개</b>(새로 1), 충돌은 <b>4건</b>(새로 1)입니다. 법인 2곳은 스캔 보고가 온전하지 않았습니다.</div>
+
+      <div class="kp" style="grid-template-columns:repeat(5,minmax(0,1fr))">
+        <div><span class="l">사용 중 주소</span><span class="v">8,047</span><span class="d">▲ 23 (지난 구간 8,024)</span></div>
+        <div><span class="l">사용률</span><span class="v">26.0%</span><span class="d">변화 0.1%p 미만</span></div>
+        <div><span class="l">새 주소</span><span class="v">64</span><span class="d">법인 21곳</span></div>
+        <div><span class="l">해제</span><span class="v">41</span><span class="d">법인 17곳</span></div>
+        <div><span class="l">조치 필요</span><span class="v">23</span><span class="d">새로 5 · 해결 3</span></div>
+      </div>
+
+      <div>
+        <h2 class="h2">법인별<small>변화 큰 순 · 28곳 중 6곳</small></h2>
+        <table>
+          <thead><tr><th>법인</th><th class="r">사용 중</th><th class="r">새 주소</th><th class="r">해제</th><th class="r">사용률</th><th class="r">조치 필요</th><th>스캔 보고</th></tr></thead>
+          <tbody>
+            <tr><td><b>VC-KR1</b> <span class="dim">서울</span></td><td class="r mono">1,204 <span class="dim">▲ 18</span></td><td class="r mono">31</td><td class="r mono">13</td><td class="r mono">41%</td><td class="r mono">6 <span class="dim">새로 2</span></td><td><span class="pill ok">온전</span></td></tr>
+            <tr><td><b>VC-US1</b> <span class="dim">미국 동부</span></td><td class="r mono">842 <span class="dim">▲ 3</span></td><td class="r mono">12</td><td class="r mono">9</td><td class="r mono">33%</td><td class="r mono">4 <span class="dim">새로 1</span></td><td><span class="pill ok">온전</span></td></tr>
+            <tr><td><b>VC-PL1</b> <span class="dim">폴란드</span></td><td class="r mono">611 <span class="dim">▲ 2</span></td><td class="r mono">6</td><td class="r mono">4</td><td class="r mono">35%</td><td class="r mono">3</td><td><span class="pill warn">일부 구간 없음</span></td></tr>
+            <tr><td><b>VC-DE1</b> <span class="dim">독일</span></td><td class="r mono">574 <span class="dim">▼ 1</span></td><td class="r mono">5</td><td class="r mono">6</td><td class="r mono">29%</td><td class="r mono">1</td><td><span class="pill ok">온전</span></td></tr>
+            <tr><td><b>VC-KR2</b> <span class="dim">부산</span></td><td class="r mono">388 <span class="dim">▲ 1</span></td><td class="r mono">3</td><td class="r mono">2</td><td class="r mono">24%</td><td class="r mono">1</td><td><span class="pill ok">온전</span></td></tr>
+            <tr><td><b>VC-BR1</b> <span class="dim">브라질</span></td><td class="r mono">201 <span class="dim">변화 없음</span></td><td class="r mono">0</td><td class="r mono">0</td><td class="r mono">18%</td><td class="r mono">0</td><td><span class="pill gray">스캔 꺼짐</span></td></tr>
+            <tr><td class="dim">그 밖의 22곳</td><td class="r mono">4,227 <span class="dim">변화 없음</span></td><td class="r mono">7</td><td class="r mono">7</td><td class="r mono dim">—</td><td class="r mono">8 <span class="dim">새로 2</span></td><td class="dim">첨부 엑셀</td></tr>
+            <tr class="sum"><td>합계</td><td class="r mono">8,047 <span class="dim">▲ 23</span></td><td class="r mono">64</td><td class="r mono">41</td><td class="r mono">26%</td><td class="r mono">23</td><td></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div>
+        <h2 class="h2">가득 찬 대역<small>9개 중 3개 · 새로 넘은 것 먼저</small></h2>
+        <table>
+          <thead><tr><th>대역</th><th>용도</th><th>법인</th><th class="r">사용률</th><th class="r">빈 주소</th><th></th></tr></thead>
+          <tbody>
+            <tr><td class="mono">10.31.7.0/24</td><td>백업망</td><td>VC-PL1</td><td class="r mono">80%</td><td class="r mono">51</td><td><span class="pill warn">이번에 넘음</span></td></tr>
+            <tr><td class="mono">10.20.30.0/24</td><td>웹 서비스망</td><td>VC-KR1</td><td class="r mono"><b>95%</b></td><td class="r mono">13</td><td><span class="pill crit">가득 참</span></td></tr>
+            <tr><td class="mono">10.31.4.0/24</td><td>DB 망</td><td>VC-PL1</td><td class="r mono"><b>92%</b></td><td class="r mono">21</td><td><span class="pill crit">가득 참</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="note"><b>수집 상태</b> — VC-PL1 은 11-07 02:00 이후 스캔 보고가 없어 그 뒤의 사용 · 해제가 빠졌을 수 있습니다. VC-BR1 은 주기 스캔이 꺼져 있어 vCenter 가 아는 주소의 변화만 실었습니다. 못 읽은 구간을 ‘변화 없음’ 으로 세지 않았습니다.</div>
+
+      <div class="dim" style="font-size:12px;border-top:1px solid #dfe3e8;padding-top:14px">이 메일은 The Davinci 포탈의 IP 관리 › 설정 › 알림 · 정기 보고에서 보냅니다 · <a href="Main.dc.html">포탈에서 보기</a> · 법인별 상세는 각 법인 받는 사람에게 따로 갔습니다(22통 · 변경 없는 6곳은 건너뜀).</div>
+    </div>
+  </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":860,"height":1640}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const all = (this.state && this.state.kind) === 'all';
+    return {
+      isCorp: !all, isAll: all,
+      corpCls: all ? '' : 'on', allCls: all ? 'on' : '',
+      pickCorp: () => this.setState({ kind: 'corp' }),
+      pickAll: () => this.setState({ kind: 'all' }),
+    };
+  }
+}
+</script>
+</body>
+</html>

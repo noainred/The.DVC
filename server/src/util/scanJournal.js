@@ -357,8 +357,11 @@ export async function processScanResumes({ at = now() } = {}) {
   try {
     for (const x of [..._interrupted]) {
       if (x.state !== 'pending') continue;
+      if (!_interrupted.includes(x)) continue;   // 125회차 F4: 앞 항목의 재개 함수를 기다리는 사이 이 항목이 다른 경로로 시작돼 이미 이력으로 갔다 — 재개 함수를 부르지 않는다
       if (x.nextAt && at < x.nextAt) continue;
-      const done = (outcome, note) => { _interrupted = _interrupted.filter((y) => y !== x); pushHistory(x, outcome, note); changed = true; };
+      // 125회차 F4: 재개 함수가 기다리는 사이(대상 목록 조회 등) 같은 대상이 다른 경로로 시작되면 scanStarted 가 이 항목을 이미 이력('covered')으로 옮겼다 —
+      //   그 뒤 여기서 한 번 더 남기면 같은 실행이 이력에 두 줄로 보였다(재현). 대기 목록에 아직 있을 때만 옮긴다.
+      const done = (outcome, note) => { if (!_interrupted.includes(x)) return; _interrupted = _interrupted.filter((y) => y !== x); pushHistory(x, outcome, note); changed = true; };
       if (!resumeEnabled()) { done('skipped', 'SCAN_RESUME=0 — 자동 재개가 꺼져 있습니다'); continue; }
       if (x.resumes >= RESUME_LIMIT) { done('limit', `자동 재개를 이미 ${x.resumes}번 했습니다 — 재시작이 반복되는 원인을 확인하세요(다음 주기·수동 실행은 그대로 동작합니다)`); continue; }
       if (x.since && at - x.since > EXPIRE_MS) { done('expired', '시작한 지 48시간이 넘어 다시 돌리지 않습니다(다음 주기를 기다립니다)'); continue; }

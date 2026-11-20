@@ -9,10 +9,11 @@ import { requirePerm } from '../../auth/auth.js';
 import { inUserScope } from '../../auth/scope.js';
 import { isAdminDetailUser } from '../../auth/demoGuest.js';
 import { store } from '../../store.js';
-import { memoJson, applyFilters, scopeKey } from './shared.js';
+import { memoJson, applyFilters, scopeKey, vcenterPickKey } from './shared.js';
 import { accessOf, makeIdracFor, BOOT_DAYS } from './hostExport.js';
 import { analyzeReboots } from '../../hostcfg/reboots.js';
 import { HOSTOPS_TYPES } from '../../vmchanges/eventDetail.js';
+import { eventLastTsOf } from '../../vmchanges/analyze.js';   // 71회차: 마지막 이벤트 시각(지금 + 여유 이하 MAX — 69회차 F2 한 벌)
 import { getLogsDb } from '../../logs/db.js';
 import { eventNotCollectedMap } from '../../logs/coverage.js';
 import { listRegistry } from '../../idrac/registry.js';
@@ -23,8 +24,8 @@ import { hostChecksOf, vmsByHostOf } from '../../vcenter/hostChecks.js';
 const invHosts = requirePerm('inv.hosts');
 const READ_MAX = 20_000;   // 재부팅 근거 이벤트 읽기 상한(hostHygiene.js /reboots 와 같다)
 
-/** 범위 안 vCenter 의 재부팅 판정(hostHygiene.js /reboots 와 같은 입력). */
-async function rebootsOf(snap, hosts, vcIds, now) {
+/** 범위 안 vCenter 의 재부팅 판정(hostHygiene.js /reboots 와 같은 입력). v3.22.0 /hosts/insight 도 이 함수를 부른다(한 벌). */
+export async function rebootsOf(snap, hosts, vcIds, now) {
   const db = await getLogsDb();
   const since = now - BOOT_DAYS * 86_400_000 - 86_400_000;
   const got = vcIds.length ? await db.opsEventsAsync({ vcenterIds: vcIds, since, types: [...HOSTOPS_TYPES] }, READ_MAX + 1) : [];
@@ -33,7 +34,7 @@ async function rebootsOf(snap, hosts, vcIds, now) {
   const readFrom = truncated && events.length ? events[events.length - 1].ts : null;
   const ncMap = eventNotCollectedMap();
   const vcName = new Map((snap.vcenters || []).map((v) => [v.id, v.name || v.id]));
-  const cov = new Map(vcIds.map((id) => [id, { firstTs: db.firstTs(id) || null, lastTs: db.lastTs(id) || null, why: ncMap.get(id) || null }]));
+  const cov = new Map(vcIds.map((id) => [id, { firstTs: db.firstTs(id) || null, lastTs: eventLastTsOf(db, id), why: ncMap.get(id) || null }]));   // 71회차(69회차 남긴 것 ②): 미래 행 경계 — 이력 화면과 같은 함수
   const r = analyzeReboots(hosts, events, { now, days: BOOT_DAYS, vcName, coverageOf: (id) => cov.get(id) || null, readFrom });
   return new Map(r.rows.map((x) => [x.id, x]));
 }
@@ -60,7 +61,7 @@ export function registerHostChecks(api) {
       }
       const r = hostChecksOf(hosts, { access, idracFor, reboots, veeamOf: (id) => veeamByVc.get(id) || null, vmsByHost: vmsByHostOf(snap.vms), now });
       return { ok: true, ...r, bootDays: BOOT_DAYS, at: now, initial: snap.initial === true, hosts: hosts.length };
-    }, { ttlMs: 60_000, extraKey: `${scopeKey(req.user, store.get())}|${accessKey}` });
+    }, { ttlMs: 60_000, extraKey: `${scopeKey(req.user, store.get())}|${vcenterPickKey(req.query, store.get())}|${accessKey}` });
   });
 
   api.get('/hosts/:id', invHosts, (req, res) => {

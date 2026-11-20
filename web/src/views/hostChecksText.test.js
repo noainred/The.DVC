@@ -7,6 +7,7 @@ import path from 'node:path';
 import {
   COL_GROUPS, COLUMNS, FIXED_GROUP, parseColPrefs, stringifyColPrefs, visibleColumns, secCountsOf, secText, secTone, uplinkDownOf, nicLinkDownOf, deadPathsOf,
   uptimeDays, coresText, gbText, kwText, ratioText, hwCell, bootCell, veeamCell, hostKpis, CHECK_CHIPS, chipCounts, matchesChip, filterHostsExt, focusLabelExt, reasonBadges,
+  vmAllocCells,
 } from './hostChecksText.js';
 import { HOST_CFG_CODES } from './hostcfg/hostCfgText.js';
 
@@ -120,6 +121,29 @@ describe('hostChecksText — 요약 8칸·칩·거르기', () => {
     const empty = hostKpis({}, [], NOW);
     expect(empty[4].value).toBe('—'); expect(empty[4].unit).toBe(''); expect(empty[6].value).toBe('—');
   });
+  it('v3.19.0 할당 vCore · 메모리 할당 — 못 읽은 VM 이 있으면 부분 합(≥ · 수를 따로) · 없으면 예전 문구 그대로', () => {
+    expect(hostKpis({ ...summary, vcpuUnknown: 0, vmemUnknown: 0 }, rows, NOW)[3].sub).toBe('vCore:물리 2.0 : 1');
+    const k = hostKpis({ ...summary, vcpuUnknown: 3, vmemUnknown: 2 }, rows, NOW);
+    expect(k[3].value).toBe('192');
+    expect(k[3].sub).toBe('vCore:물리 ≥2.0 : 1(vCPU 못 읽은 VM 3대 제외 · 최소값)');
+    expect(k[4].sub).toMatch(/할당 ≥0\.5 : 1\(메모리 못 읽은 VM 2대 제외\)/);
+    expect(hostKpis(summary, rows, NOW)[4].sub).toMatch(/할당 0\.5 : 1$/);
+    // 전부 못 읽음 — 서버가 합 · 비율을 null 로 준다: 값 '—' · 0 으로 보이지 않는다
+    const none = hostKpis({ ...summary, vcoreAllocated: null, memOvercommit: null, vcpuUnknown: 4, vmemUnknown: 4 }, rows, NOW);
+    expect(none[3].value).toBe('—');
+    expect(none[3].sub).toBe('vCore:물리 —(vCPU 못 읽은 VM 4대)');
+    expect(none[4].sub).toMatch(/할당 —\(메모리 못 읽은 VM 4대\)$/);
+    // 6회차: 진짜 0(VM 0대 — 서버가 0 을 준다)은 '0 : 1' · 모름(null)과 다르다
+    const zero = hostKpis({ ...summary, vcoreAllocated: 0, memOvercommit: 0, vmemAllocatedGB: 0, vcpuUnknown: 0, vmemUnknown: 0 }, rows, NOW);
+    expect(zero[4].sub).toMatch(/할당 0 : 1$/);
+    expect(zero[3].sub).toBe('vCore:물리 0.0 : 1');
+    // 용량 못 읽은 호스트가 있으면(서버 null) vCore 칸과 같은 사유
+    expect(hostKpis({ ...summary, memOvercommit: null, hostsCapacityUnknown: 1 }, rows, NOW)[4].sub).toMatch(/할당 —\(용량 못 읽은 호스트 1\)$/);
+    // 사유 없는 null(옛 서버 등)은 그냥 '—'
+    expect(hostKpis({ ...summary, memOvercommit: null, vmemUnknown: 0 }, rows, NOW)[4].sub).toMatch(/할당 —$/);
+    // 호스트 용량을 못 읽었으면 그 사유가 먼저(예전 문구 그대로)
+    expect(hostKpis({ ...summary, hostsCapacityUnknown: 1, vcpuUnknown: 3 }, rows, NOW)[3].sub).toBe('vCore:물리 —(용량 못 읽은 호스트 1)');
+  });
   it('칩 — 묶음을 못 읽었으면 null(0 이 아니다) · 구성 칩은 findings 코드로 · 서버 칩은 checks 로', () => {
     const secOf = (h) => secCountsOf(h, NOW);
     const none = chipCounts(rows, { secOf, checks: null, access: null });
@@ -144,5 +168,88 @@ describe('hostChecksText — 요약 8칸·칩·거르기', () => {
     expect(focusLabelExt({ kind: 'down' })).toBe('끊김·무응답 호스트');
     const b = reasonBadges(rows[0], { sec: secOf(rows[0]), checks });
     expect(b.map((x) => x.kind)).toEqual(['uplink', 'unexpected', 'hw', 'veeam-n']);
+  });
+});
+
+// v3.19.2 — 호스트 표 · 상세 · 드로어의 VM 할당 칸. '전부 못 읽음' 판정은 서버 vcenter/vmSums.js vmAllocOf 하나이고(서버가 null 을 준다 — server/test/hostVmAlloc3192.test.js),
+//   웹은 그 null 을 '—'(단위 없음)로 그릴 뿐이다. v3.19.1 까지 서버가 원래 합 0 을 줘 표가 '0+?', 상세가 '0' · '0.0 : 1' 이었다.
+describe('v3.19.2 VM 할당 칸(vmAllocCells) — 전부 못 읽음 · 일부 못 읽음 · VM 없음', () => {
+  const host = { id: 'vc-a:h1', cpuCores: 8, memTotalMB: 65536 };
+  const ALL = { n: 3, on: 2, templates: 1, vcpu: null, memMB: null, vcpuUnknown: 3, memUnknown: 3 };
+  const PART = { n: 3, on: 3, templates: 0, vcpu: 6, memMB: 12288, vcpuUnknown: 1, memUnknown: 2 };
+  const NONE = { n: 0, on: 0, templates: 0, vcpu: 0, memMB: 0, vcpuUnknown: 0, memUnknown: 0 };
+  const FULL = { n: 2, on: 2, templates: 0, vcpu: 1200, memMB: 2 * 1024 * 1024, vcpuUnknown: 0, memUnknown: 0 };
+
+  it('전부 못 읽음 — 세 칸 다 ‘—’(단위 · ‘+?’ 없음) · 정렬 값 null(항상 뒤) · 이유를 적는다', () => {
+    const c = vmAllocCells(ALL, host);
+    for (const k of ['vcpu', 'ratio', 'mem']) {
+      expect(c[k].text).toBe('—');
+      expect(c[k].sort).toBe(null);
+      expect(c[k].partial).toBe(false);   // ‘—+?’ 가 되지 않는다
+      expect(c[k].all).toBe(true);
+    }
+    expect(c.vcpu.title).toBe('VM 3대의 vCPU 를 모두 못 읽었습니다');
+    expect(c.mem.title).toBe('VM 3대의 메모리를 모두 못 읽었습니다');
+    expect(c.vcpu.note).toBe('VM 3대 모두 못 읽음');
+    expect(c.ratio.title).toBe(c.vcpu.title);
+  });
+
+  it('일부 못 읽음 — 읽은 값의 합 + partial(화면이 ‘+?’ · ‘이상’ 을 붙인다) · 못 읽은 VM 수', () => {
+    const c = vmAllocCells(PART, host);
+    expect(c.vcpu).toMatchObject({ text: '6', sort: 6, partial: true, all: false, note: '못 읽은 VM 1' });
+    expect(c.vcpu.title).toBe('vCPU 를 못 읽은 VM 1 — 읽은 VM 만의 합(최소값)');
+    expect(c.ratio).toMatchObject({ text: '0.8 : 1', sort: 0.75, partial: true, all: false });
+    expect(c.mem).toMatchObject({ text: '12 GB', sort: 12288, partial: true, all: false, note: '못 읽은 VM 2' });
+    expect(c.mem.title).toBe('메모리를 못 읽은 VM 2 — 읽은 VM 만의 합(최소값)');
+  });
+
+  it('VM 없음 — 0 · ‘0 GB’(모름이 아니다 — ‘—’ 와 구분) · 표지 없음', () => {
+    const c = vmAllocCells(NONE, host);
+    expect(c.vcpu).toMatchObject({ text: '0', sort: 0, partial: false, all: false, title: '', note: '' });
+    expect(c.ratio).toMatchObject({ text: '0.0 : 1', sort: 0, partial: false, all: false });
+    expect(c.mem).toMatchObject({ text: '0 GB', sort: 0, partial: false, all: false, title: '', note: '' });
+  });
+
+  it('다 읽음 — 천 단위 구분 · 한쪽만 전부 못 읽으면 그 칸만 ‘—’', () => {
+    const c = vmAllocCells(FULL, host);
+    expect(c.vcpu.text).toBe('1,200'); expect(c.mem.text).toBe('2,048 GB'); expect(c.ratio.text).toBe('150.0 : 1');
+    const cpuOnly = vmAllocCells({ ...PART, vcpu: null, vcpuUnknown: 3, memUnknown: 0 }, host);
+    expect(cpuOnly.vcpu.text).toBe('—'); expect(cpuOnly.ratio.text).toBe('—'); expect(cpuOnly.mem).toMatchObject({ text: '12 GB', partial: false });
+    const memOnly = vmAllocCells({ ...PART, memMB: null, memUnknown: 3, vcpuUnknown: 0 }, host);
+    expect(memOnly.mem.text).toBe('—'); expect(memOnly.vcpu).toMatchObject({ text: '6', partial: false }); expect(memOnly.ratio.text).toBe('0.8 : 1');
+  });
+
+  it('점검 묶음을 아직 못 받았거나(vm 없음) 코어 수를 모르면 ‘—’ · 정렬 값 null — 0 으로 나누거나 0 으로 정렬하지 않는다', () => {
+    for (const vm of [null, undefined, 'x']) {
+      const c = vmAllocCells(vm, host);
+      for (const k of ['vcpu', 'ratio', 'mem']) expect(c[k]).toMatchObject({ text: '—', sort: null, partial: false, all: false, title: '' });
+    }
+    for (const cores of [null, 0, undefined, '']) {
+      const c = vmAllocCells(PART, { ...host, cpuCores: cores });
+      expect(c.ratio).toMatchObject({ text: '—', sort: null, partial: false, all: false });
+      expect(c.vcpu.text).toBe('6');
+    }
+    // 예전 식 v.vcpu / h.cpuCores 는 vcpu 가 null 이면 0 이 돼 ‘—’ 인 행이 오름차순 맨 앞에 섰다
+    expect(vmAllocCells(ALL, host).ratio.sort).not.toBe(0);
+  });
+
+  it('문구에 백틱이 없다', () => {
+    for (const vm of [ALL, PART, NONE]) for (const c of Object.values(vmAllocCells(vm, host))) expect(`${c.text}${c.title}${c.note}`.includes('`')).toBe(false);
+  });
+
+  it('소스 — 표 · 상세 · 드로어가 이 함수 하나를 쓰고, 웹에 ‘전부 못 읽음’ 판정(unknown 수 === n) 사본이 없다', async () => {
+    const { stripComments } = await import('../test/_stripComments.js');
+    const judge = /Unknown\s*={2,3}\s*[\w.?]*\bn\b|\bn\s*={2,3}\s*[\w.?]*Unknown/;
+    for (const f of ['views/Hosts.jsx', 'views/HostDetail.jsx', 'views/hosts/hostDrawerText.js', 'views/hostChecksText.js']) {
+      const code = stripComments(src(f));
+      expect(code, f).toMatch(/vmAllocCells\(/);
+      expect(judge.test(code), `${f} 에 판정 사본`).toBe(false);
+    }
+    // 원래 합을 직접 그리던 식이 되살아나지 않는다(null 이 '—+?' · 0 으로 정렬되던 자리)
+    const hosts = stripComments(src('views/Hosts.jsx'));
+    expect(hosts).not.toMatch(/numText\(v\.vcpu\)|gbText\(v\.memMB\)|v\.vcpu\s*\/\s*h\.cpuCores/);
+    const detail = stripComments(src('views/HostDetail.jsx'));
+    expect(detail).not.toMatch(/numText\(vmSum\.vcpu\)|gbText\(vmSum\.memMB\)|ratioText\(vmSum\./);
+    expect(stripComments(src('views/hosts/hostDrawerText.js'))).not.toMatch(/fmt\(vm\.vcpu\)|ratioText\(vm\.vcpu/);
   });
 });

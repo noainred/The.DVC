@@ -112,7 +112,8 @@ export async function tcpProbeMany(targets = [], { timeoutMs = 2500, concurrency
 }
 
 export async function pingMany(ips = [], { timeoutMs = 1500, concurrency = 8 } = {}) {
-  const list = [...new Set(ips.map((s) => String(s).trim()).filter(Boolean))];
+  // v3.10.4: 배열이 아니면(null · 문자열 하나) TypeError 대신 빈 결과 — tcpProbeMany 와 같은 규칙.
+  const list = [...new Set((Array.isArray(ips) ? ips : []).map((s) => String(s).trim()).filter(Boolean))];
   const out = new Array(list.length); // v2.593(DEPS-01): 공용 풀 — concurrency 0 도 최소 1 워커
   await poolRun(list, concurrency, async (ip, i) => { out[i] = await pingOne(ip, { timeoutMs }); });
   return out;

@@ -7,16 +7,33 @@
  *   svcmon 대상 수정(엣지 이름 형식 위반)·로그 설정(경로 검사) · RMA 비밀번호(256자 초과)·원격 관리(롱폴 범위 밖)·분배 방식 ·
  *   vCenter 로그 보관 설정(저장 경로 검사).
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import express from 'express';
 
-const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'a2731g4a-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const CFG = tmpDir('a2731g4a-');
 process.env.CONFIG_DIR = CFG;
 process.env.DATA_SOURCE = 'mock';
+// 반증 G1a(사용자 결정 '권장안대로'): RMA 비밀번호 설정 · 해제는 소유자 등급 + 본인 OTP 가 됐다 — 이 시험의 계정을 소유자 + OTP 등록으로 둔다
+//   (시험 대상인 '거부 본문을 화면이 실패로 읽는가' 는 그대로 — 게이트를 지난 뒤의 400 · 200 본문을 본다).
+const { generateSecret, generateToken } = await import('../src/auth/totp.js');
+const OTP_SECRET = generateSecret();
+fs.writeFileSync(path.join(CFG, 'users.json'), JSON.stringify({ users: [{ username: 'adm', role: 'admin', totpEnabled: true, totpSecret: OTP_SECRET }] }));
+fs.writeFileSync(path.join(CFG, 'security-session.json'), JSON.stringify({ settingsOwners: ['adm'] }));
+let otpLast = -Infinity;
+// 전량 verify(119~131회차 묶음)에서 간헐 실패(403 'OTP 코드가 일치하지 않습니다'): 첫 코드를 '이전 단계(지금 − 1)' 로 만들면 발급과 검증 사이에
+//   30초 경계를 넘는 순간(부하) 검증 창(±1 단계) 밖이 된다. 이 파일은 코드를 2개만 쓰므로 지금 단계에서 시작한다(경계를 한 번 넘어도 유효 · 둘째는 + 1).
+const otp = () => { otpLast = Math.max(Math.floor(Date.now() / 30_000), otpLast + 1); return generateToken(OTP_SECRET, { counter: otpLast }); };
 
 const ADMIN = { username: 'adm', role: 'admin', scope: {} };
 const { changeFailText, requireChanged } = await import('../../web/src/views/changeResult.js');
@@ -65,12 +82,12 @@ test('svcmon — 로그 설정 경로 거부 400({error})은 실패, 정상 저�
 
 test('RMA — 비밀번호·원격 관리 400({ok:false,reason})은 실패, 정상 응답({ok:true})은 성공', async () => {
   const { api } = await import('../src/routes/api.js');
-  const pw = await call('/api', api, 'PUT', '/tools/rma/agents/g4a-edge/password', { password: 'a'.repeat(300) });
+  const pw = await call('/api', api, 'PUT', '/tools/rma/agents/g4a-edge/password', { password: 'a'.repeat(300), otp: otp() });
   assert.equal(pw.status, 400, JSON.stringify(pw.body));
   assert.equal(pw.body.hasPassword, undefined, '실패 본문에는 hasPassword 가 없다 — 예전 화면은 이것을 \'해제했습니다\' 로 읽었다');
   assert.equal(changeFailText(pw.body), pw.body.reason);
 
-  const clear = await call('/api', api, 'PUT', '/tools/rma/agents/g4a-edge/password', { password: '' });
+  const clear = await call('/api', api, 'PUT', '/tools/rma/agents/g4a-edge/password', { password: '', otp: otp() });
   assert.equal(clear.status, 200, JSON.stringify(clear.body));
   assert.equal(changeFailText(clear.body), null);
 

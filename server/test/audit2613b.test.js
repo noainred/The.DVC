@@ -31,12 +31,9 @@ const rel = (root, f) => path.relative(root, f).split(path.sep).join('/');
  * 제품명·단위의 대소문자는 정보다(v2.575 BUG-13 — vCenter→VCENTER · kWh→KWH). 허용은 **고정 장식 라벨**뿐이고
  * 값(`{children}`·`{label}`)이 들어가는 자리면 사유를 적어야 한다.
  */
-const UPPER_ALLOW = new Map([
-  ['views/About.jsx', { count: 3, why: '고정 한글 소제목(저작자·저작권·주요 기능) — 한글에 대문자화는 무연산' }],
-  ['views/tools/StorageGrowthTool.jsx', { count: 1, why: "고정 영문 보고서 제목 'Storage Growth Report' — 값 아님" }],
-  ['views/tools/serverTemp/ServerTempBoard.jsx', { count: 1, why: "시안 B 장식 라벨 'Sampling …'(고정 문구 + 시각·숫자) — 값 아님" }],
-  ['views/tools/serverTemp/parts.jsx', { count: 1, why: 'MonoLabel(시안 B) — 호출 3곳 전부 고정 한글 문구(ServerTempBoard:289,316 · parts.jsx:95). ⚠ 장비·vCenter 이름을 넣지 말 것' }],
-]);
+// 96회차(95회차 남긴 것 ② — 결정 권장안): 허용 목록이던 장식 라벨 6곳(About 3 · StorageGrowthTool · ServerTempBoard · parts.jsx MonoLabel)에서
+//   textTransform 을 빼고 영문 고정 문구는 대문자로 적었다(보이는 글자 그대로) — 이제 허용 0곳(루트 규칙 'text-transform: uppercase 금지').
+const UPPER_ALLOW = new Map([]);
 test('WEB2613-11(b) JSX 인라인 textTransform: uppercase 는 허용 목록(고정 장식 라벨)에만 있다', () => {
   const seen = new Map();
   for (const f of walk(WEB)) {

@@ -26,7 +26,7 @@ import { isMockVcenter } from '../mock/generator.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 import { withJob } from '../perf/monitor.js';
 import { describeError } from '../util/errors.js';
-import { loadVmSeriesSettings, onVmSeriesSettingsChange } from './settings.js';
+import { loadVmSeriesSettings, onVmSeriesSettingsChange, vmSeriesSettingsLoadError, VMSERIES_LIMITS } from './settings.js';
 import { resolveTargets, vcenterSelected } from './scope.js';
 import { collectVcenterSpikes } from './collect.js';
 import { commitVmSeries, loadCursors, pruneVmSeries, vmSeriesFreeBytes, setVmSeriesMeta, vmSeriesDiskUsage } from './db.js';
@@ -39,12 +39,13 @@ import { demoOn, isMockMode } from '../mock/demo/flags.js';
 import { demoVmSeriesRows } from '../mock/demo/users.js'; // v2.708 데모(mock 에서만)
 import { VM_COUNTERS, HOST_COUNTERS } from './counters.js';
 import { packMoments } from './spikes.js';
+import { envPositive } from '../util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
 
 const CONCURRENCY = Math.max(1, Math.min(8, Number(process.env.VMSERIES_CONCURRENCY) || 4));
 // v2.589: 빈 값·'abc' 가 Number() 로 0·NaN 이 되어 디스크 가드가 꺼졌다 — 못 읽으면 기본 5GB(명시적 0 만 '끔').
 const MIN_FREE_BYTES = Math.max(0, numOrNull(process.env.VMSERIES_MIN_FREE_GB) ?? 5) * 1024 ** 3;
 const PRUNE_EVERY_MS = 10 * 3_600_000;       // 보존 정리 간격(예전 '50분 주기 × 12회' 와 같은 10시간 — 이제 시각 기준)
-const FIRST_DELAY_MS = Number(process.env.VMSERIES_FIRST_DELAY_MS) || 180_000; // 첫 인벤토리 수집이 자리잡은 뒤
+const FIRST_DELAY_MS = envPositive(process.env.VMSERIES_FIRST_DELAY_MS, 180_000); // 첫 인벤토리 수집이 자리잡은 뒤
 
 let running = false;
 let pruneTicks = 0;        // 시간 기준 정리의 타이머 틱 수 — 첫 틱(기동 직후)은 정리하지 않는다
@@ -75,7 +76,8 @@ export function runVmSeriesPrune(reason = 'manual') {
     return pruneFlight;
   }
   const started = Date.now();
-  const days = loadVmSeriesSettings().retentionDays;
+  // 103회차 F21: 설정을 못 읽는 동안(읽기 오류 · 손상)은 기본 보존일로 지우지 않고 저장 상한으로만 정리한다(83 R1 '멈춤에도 상한' · 97 F14 와 같은 모양).
+  const days = vmSeriesSettingsLoadError() ? VMSERIES_LIMITS.maxRetentionDays : loadVmSeriesSettings().retentionDays;
   pruneFlightDays = days;
   pruneFlight = (async () => {
     let deleted = 0; let files = 0; const errors = [];

@@ -59,3 +59,6 @@ export function inUserWriteScope(user, snap, vcenterId) {
 export function isFullReadWriteScope(user, snap) {
   try { return !scopedVcenterIds(user, snap) && !writeScopedVcenterIds(user, snap); } catch { return false; }
 }
+
+/** 쓰기 범위 때문에 막을 때의 사유(6회차 A1 — 조회 범위 사유는 이 계정에 틀린 설명). 공용 게이트(routes/admin/shared.js)와 scopeMerge.denyFleetWrite 가 같이 쓴다. */
+export const WRITE_SCOPE_PARTIAL_REASON = '이 작업은 쓰기 범위도 전체(vCenter 제한 없는)인 계정만 할 수 있습니다 — 이 계정은 쓰기 범위가 일부 법인으로 제한되어 있습니다.';

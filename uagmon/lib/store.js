@@ -14,6 +14,23 @@ import crypto from 'node:crypto';
 
 const MAX_POINTS = 2880; // 30초 폴링 기준 24시간
 
+// 폴링 주기(초) 정규화 — 109회차 D-3. 설정 파일·--poll 값이 숫자가 아니면(NaN) setInterval 이 1ms 로 돌고, 2,147,483초(약 24.8일)를
+//   넘으면 Node 가 지연을 1ms 로 바꾼다(TimeoutOverflowWarning) — 둘 다 UAG 관리 API 를 쉬지 않고 두드린다. 10초~1일로 묶는다.
+export const POLL_MIN_SECONDS = 10;
+export const POLL_MAX_SECONDS = 24 * 3600;
+export function pollSecondsOf(v, fallback = 30) {
+  if (v == null || v === '' || typeof v === 'boolean') return fallback;
+  const n = Number(v);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(POLL_MAX_SECONDS, Math.max(POLL_MIN_SECONDS, Math.floor(n)));
+}
+
+/** 수정 요청이 대상의 host 를 바꾸는가 — normalizeTarget 의 '비밀번호 이월 금지' 판정과 같은 비교(서버가 재입력을 요구할 때 쓴다). */
+export function hostChanges(body = {}, existing = {}) {
+  if (body == null || typeof body !== 'object' || body.host === undefined || existing.host == null) return false;
+  return String(body.host ?? '').trim() !== String(existing.host).trim();
+}
+
 export function normalizeTarget(body = {}, existing = {}) {
   const host = String(body.host ?? existing.host ?? '').trim();
   const name = String(body.name ?? existing.name ?? '').trim() || host;
@@ -46,6 +63,7 @@ export class Store {
       const doc = JSON.parse(fs.readFileSync(this.file, 'utf8'));
       if (Array.isArray(doc.targets)) this.targets = doc.targets.map((t) => normalizeTarget(t, t));
       if (doc.settings && typeof doc.settings === 'object') this.settings = { ...this.settings, ...doc.settings };
+      this.settings.pollSeconds = pollSecondsOf(this.settings.pollSeconds);
     } catch {
       // 손상 보존 — 조용히 빈 값으로 넘기면 다음 save() 가 원본을 덮어쓴다.
       try { fs.copyFileSync(this.file, `${this.file}.corrupt.${Date.now()}`); } catch { /* best effort */ }

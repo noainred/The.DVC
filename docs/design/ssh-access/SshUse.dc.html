@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>SSH 공용 접속 — 다른 기능에서 함께 쓰기</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0}
+.muted{color:#8b9bb4}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.sm{font-size:11.5px;color:#8b9bb4}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+.btn.pri{background:#3b82f6;border-color:#3b82f6;color:#ffffff}
+.btn.sm{min-height:28px;padding:0 10px;font-size:12px;color:#e6edf6}
+.tag{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap;box-sizing:border-box}
+.tag.ok{background:rgba(34,197,94,.16);color:#86efac}
+.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}
+.tag.unk{background:rgba(139,155,180,.14);color:#aebbd0}
+.tag.none{border:1px solid #33415c;color:#8b9bb4}
+h2{margin:0;font-size:14px;font-weight:800}
+.hd{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;padding:12px 14px;border-bottom:1px solid #1f2a40}
+table{border-collapse:collapse;width:100%}
+th{font-size:12px;font-weight:600;color:#8b9bb4;text-align:left;padding:9px 12px;background:#0f1626;border-bottom:1px solid #243049;white-space:nowrap}
+td{padding:9px 12px;border-bottom:1px solid #1f2a40;vertical-align:top;font-size:12.5px}
+tr:last-child td{border-bottom:0}
+.opt{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid #243049;border-radius:10px;background:#0f1626}
+.opt.on{border-color:#3b82f6;background:rgba(59,130,246,.10)}
+input[type=radio]{accent-color:#3b82f6;margin:3px 0 0;width:15px;height:15px}
+input[type=text]{height:34px;box-sizing:border-box;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit;font-size:12.5px;padding:0 10px;min-width:0}
+label.fl{display:flex;flex-direction:column;gap:4px;font-size:12px;color:#8b9bb4;flex:1 1 180px;min-width:0}
+</style>
+</helmet>
+<div style="width:1240px;height:1100px;box-sizing:border-box;padding:24px;display:flex;flex-direction:column;gap:16px;background:#0a0e17">
+
+<div style="display:flex;gap:16px;align-items:flex-start">
+
+<section class="card" style="flex:1 1 0">
+<div class="hd"><h2>기능 화면에서 — 서버를 더할 때</h2><span class="sm">예: 베어메탈 스토리지 › 서버 추가</span></div>
+<div style="padding:14px;display:flex;flex-direction:column;gap:12px">
+<div style="display:flex;gap:10px;flex-wrap:wrap">
+<label class="fl">법인<input type="text" value="폴란드" readonly></label>
+<label class="fl">서버<input type="text" value="pl-app-01 · 192.0.2.71" readonly></label>
+</div>
+<div style="display:flex;flex-direction:column;gap:8px">
+<span class="sm">접속 계정</span>
+<label class="opt on"><input type="radio" name="src" checked>
+<span style="min-width:0;display:flex;flex-direction:column;gap:3px"><b>SSH 공용 접속 사용</b><span class="sm">폴란드 법인 공통 · <span class="mono">root</span> · <span class="tag ok">키 로그인 됨</span> — 계정을 여기서 다시 넣지 않습니다. 공용 접속에서 계정을 바꾸면 이 기능도 함께 바뀝니다.</span></span>
+</label>
+<label class="opt"><input type="radio" name="src">
+<span style="min-width:0;display:flex;flex-direction:column;gap:3px"><b>이 기능만의 계정</b><span class="sm">지금까지의 방식 — 이 기능의 등록부에 계정 · 비밀번호를 따로 둡니다.</span></span>
+</label>
+</div>
+<span class="sm">공용 접속에 없는 서버를 고르면 ‘SSH 공용 접속에 서버 추가’ 로 이어집니다(설정 권한이 있을 때).</span>
+</div>
+</section>
+
+<section class="card" style="flex:1 1 0">
+<div class="hd"><h2>함께 쓰는 규칙</h2></div>
+<div style="padding:14px;display:flex;flex-direction:column;gap:10px">
+<div style="display:flex;gap:10px"><b style="flex:0 0 110px">한 곳에서 꺼냄</b><span>모든 기능이 같은 함수 하나로 계정을 받습니다 — 서버 단독 → 법인 공통 순. 기능마다 판정을 복제하지 않습니다.</span></div>
+<div style="display:flex;gap:10px"><b style="flex:0 0 110px">실패도 함께</b><span>한 기능에서 로그인이 실패하면 그 서버의 자동 접속을 모든 기능이 멈춥니다. 기능마다 따로 실패를 쌓아 계정이 잠기는 일을 막습니다.</span></div>
+<div style="display:flex;gap:10px"><b style="flex:0 0 110px">법인 밖으로 안 나감</b><span>엣지 법인의 접속은 그 엣지가 합니다. 개인키 · 비밀번호는 중앙으로 올라오지 않습니다.</span></div>
+<div style="display:flex;gap:10px"><b style="flex:0 0 110px">보이지 않음</b><span>비밀번호 · 개인키는 화면 · 응답 · 로그 어디에도 싣지 않습니다. 지문과 공개키만 보입니다.</span></div>
+<div style="display:flex;gap:10px"><b style="flex:0 0 110px">바뀌면 새로</b><span>주소 · 포트 · 계정이 바뀌면 저장된 비밀과 확인 상태를 이어받지 않습니다.</span></div>
+</div>
+</section>
+
+</div>
+
+<section class="card">
+<div class="hd"><h2>SSH 를 쓰는 기능과 옮기는 방법</h2><span class="sm">‘쓰는 기능’ 탭 — 기능마다 지금 계정이 어디 있는지와 공용 접속으로 옮기는 단추</span></div>
+<table>
+<thead><tr><th style="width:230px">기능</th><th style="width:330px">지금 계정을 두는 곳</th><th>공용 접속</th><th style="width:150px;text-align:right"><span class="sm">동작</span></th></tr></thead>
+<tbody>
+<tr><td><b>디스크 오류 이력 점검</b> <span class="tag none">신규</span></td><td class="muted">—</td><td><span class="tag ok">공용만 사용</span> 처음부터 공용 접속에 등록된 서버가 점검 대상입니다.</td><td></td></tr>
+<tr><td><b>베어메탈 스토리지 · 베어메탈 사용률</b></td><td>베어메탈 스토리지 등록부 — 서버마다 계정 · 비밀번호</td><td><span class="tag warn">자체 계정 11대</span> 서버를 골라 옮깁니다. 주소 · 계정이 같을 때만 저장된 비밀번호를 가져갑니다.</td><td style="text-align:right"><button class="btn sm" type="button">공용으로 옮기기</button></td></tr>
+<tr><td><b>GPU 사용량 수집</b></td><td>GPU 설정 — 법인 공용 계정 + VM 단독 계정</td><td><span class="tag warn">자체 계정</span> 모양이 같아 법인 단위로 옮깁니다(공용 → 법인 공통 · VM 단독 → 서버 단독).</td><td style="text-align:right"><button class="btn sm" type="button">공용으로 옮기기</button></td></tr>
+<tr><td><b>Bareos 법인별 설정 · 설치</b></td><td>저장하지 않음 — 다른 서버의 Bareos 는 매번 비밀번호 입력</td><td><span class="tag unk">입력 생략</span> 그 서버가 공용 접속에 있으면 비밀번호를 묻지 않습니다.</td><td></td></tr>
+<tr><td><b>스토리지 · SAN 스위치 · PDU · 아이실론</b></td><td>각 장비 등록부</td><td><span class="tag none">대상 아님</span> 장비 계정입니다 — 서버처럼 키를 넣는 방식이 아니어서 이번 범위에서 뺍니다.</td><td></td></tr>
+<tr><td><b>엣지 배포 대상</b></td><td>배포 등록부 — 비밀번호 또는 개인키</td><td><span class="tag none">대상 아님</span> 엣지를 설치하기 전의 접속이라 그 법인 엣지의 키를 쓸 수 없습니다.</td><td></td></tr>
+</tbody>
+</table>
+<div class="sm" style="padding:12px 14px;display:flex;flex-direction:column;gap:4px">
+<span>옮기기는 자동으로 하지 않습니다 — 기능마다 관리자가 눌러야 하고, 옮긴 뒤에도 그 기능의 화면 · 수집은 그대로입니다(계정을 꺼내는 곳만 바뀝니다).</span>
+<span>옮긴 서버는 기능의 등록부에서 비밀번호를 지웁니다. 되돌리려면 그 기능에서 ‘이 기능만의 계정’ 을 다시 넣습니다.</span>
+</div>
+</section>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1240,"height":1100}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

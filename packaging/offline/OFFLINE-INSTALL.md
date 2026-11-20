@@ -12,7 +12,9 @@ vmware-portal-offline-<버전>-el9-x64/
 ├── app/                    # 포탈 (server + 벤더링된 node_modules + web/dist)
 ├── install.sh              # 설치 스크립트
 ├── uninstall.sh            # 제거 스크립트
+├── release-verify-lib.sh   # install.sh 가 쓰는 패키지 서명 확인
 ├── vmware-portal.service   # systemd 유닛 템플릿
+├── vmware-portal-rma@.service  # RMA(원격 명령 에이전트) 유닛 템플릿
 ├── portal.env.example      # 환경설정 예시
 ├── VERSION
 └── README.md               # (이 문서)
@@ -78,18 +80,15 @@ sudo vi /etc/vmware-portal/portal.env      # DATA_SOURCE, vCenter, 비밀번호 
 sudo systemctl restart vmware-portal
 ```
 
+> ⚠ 설치본은 설정 파일을 **`/etc/vmware-portal`**(portal.env 의 `CONFIG_DIR` — install.sh 가 넣는다)에서 읽습니다.
+> 앱 폴더(`/opt/vmware-portal/app/server/config`)에 쓴 `vcenters.json`·`users.json` 은 **읽지 않습니다**(그 폴더에는 예시 파일만 있습니다).
+
 실제 vCenter 연결: `DATA_SOURCE=live` 로 바꾸고
-`/opt/vmware-portal/app/server/config/vcenters.json` 을 작성하세요
-(예시: `vcenters.example.json`).
+`/etc/vmware-portal/vcenters.json` 을 작성하세요(서비스 계정 소유로)
+(예시: `/opt/vmware-portal/app/server/config/vcenters.example.json`).
 
-사용자 관리: `/opt/vmware-portal/app/server/config/users.json` 작성
-(비밀번호 해시 생성):
-
-```bash
-cd /opt/vmware-portal/app/server
-sudo -u vmportal /opt/vmware-portal/runtime/node/bin/node \
-  -e "import('./src/auth/auth.js').then(m=>console.log(m.hashPassword(process.argv[1])))" 'YourPassword'
-```
+사용자 관리: 콘솔 메뉴 `sudo vmware-portal-users`(계정 생성·편집·비밀번호·로그인 방식·OTP) 또는 포탈 화면에서 합니다.
+계정은 `/etc/vmware-portal/users.json` 에 저장됩니다 — root 로 직접 고치면 파일이 root 소유가 되어 포탈이 저장하지 못합니다.
 
 ### 호스트 접근 제어 sudoers (v2.485)
 

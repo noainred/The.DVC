@@ -58,7 +58,8 @@ import {
   scanInventory, findingsOf as invFindingsOf, groupFindings as invGroupFindings,
   findingCounts as invFindingCounts, INV_STATE, INV_FINDING, INV_GRADE, maskInventoryForDemoGuest,
 } from '../../portalcheck/invScan.js';
-import { isDemoGuest } from '../../auth/demoGuest.js';
+import { isDemoGuest, isAdminDetailUser } from '../../auth/demoGuest.js';
+import { getCommonCatalog, COMMON_STATUS } from '../../portalcheck/commonCatalog.js';   // v3.10 — 공통 기능(다섯째 서브메뉴)
 // v2.614 — 아키텍처 점검(세 번째 서브메뉴): 라우터 스택·게이트 태그·카탈로그·엣지 로그 표·BIG_JSON·DB·설정 파일·import 그래프.
 //   판정 코어(`portalcheck/archScan.js`)는 routes/ 를 import 하지 않으므로(arch2579 규칙 ①) 라우터는 **여기서** 넘긴다.
 import { adminRouter } from '../admin.js';
@@ -70,6 +71,13 @@ import { isMockMode } from '../../mock/demo/flags.js';
 import { isDemoCollector, isDemoEdgeId, demoProbeResult, demoSiteVcenters, demoInventoryRows } from '../../mock/demo/edge.js'; // v2.708 데모 엣지
 import { snapCacheClear } from '../../util/snapCache.js';
 import { currentVersion } from '../../config.js';
+// v2.938(제안 8번 — 법인별 실환경 확인): 중앙이 이미 받은 실장비 결과로 법인마다 판정(왕복 0)
+import { buildFieldChecks, FIELD_STATES, FIELD_CHECKS } from '../../fieldcheck/judge.js';
+import { getVcInfo } from '../../vcinfo/collect.js';
+import { healthView as bareosHealthView } from '../../bareos/health.js';
+import { isMockVcenter } from '../../mock/generator.js';
+import { getInventory } from '../../central/inventory.js';
+import { isiduEdgeStatus } from '../../central/isiduEdge.js';   // v2.954 법인별 실환경 확인 — 아이실론 분리 실행
 import { gatherArchInputs, scanArch, scopeArchPaths, ARCH_CODES, ARCH_STATES } from '../../portalcheck/archScan.js';
 
 // vc 별 위임 여부만 필요하다 — redact() 는 이미 password 를 뺀다(vcenter/registry.js:45).
@@ -102,12 +110,11 @@ let running = '';
  */
 function collectorAlias() {
   const m = new Map();
-  for (const c of safe(() => loadCollectors(), [])) {
-    const id = t(c.id || c.name);
-    if (!id) continue;
-    m.set(norm(id), id);
-    if (c.name) m.set(norm(c.name), id);
-  }
+  const list = safe(() => loadCollectors(), []);
+  for (const c of list) { const id = t(c.id || c.name); if (id) m.set(norm(id), id); }
+  // 66회차(63회차 F5 의 형제): **id 가 표시 이름보다 먼저**다 — 한 루프에서 이름을 덮어쓰면, 다른 엣지의 표시 이름이 이 엣지 id 와 같을 때
+  //   이 엣지의 등록부 · 토큰 · 보고 출처가 그 엣지로 접혔다(통신 지도 aliasMap 과 같은 규칙).
+  for (const c of list) { const id = t(c.id || c.name); const n = norm(c.name); if (id && n && !m.has(n)) m.set(n, id); }
   return m;
 }
 
@@ -159,8 +166,11 @@ function localScan() {
   // v2.767(점검 R2-B4-5): 비활성 수집 서버 표시 — 프로브 토큰 조회(tokenLookup)가 비활성 항목을 건너뛰어 예전에는
   //   '중앙 등록부에 토큰이 저장돼 있지 않습니다'(지문 칸에는 토큰이 보이는데) 라는 거짓 안내가 나갔다. 같은 키에 활성 항목이 하나라도 있으면 활성.
   const enabledKeys = new Set(); const disabledKeys = new Set();
+  // 66회차: 표시 이름 키는 **다른 항목의 id 가 아닐 때만** — 예전에는 켜진 'seoul-2'(표시 이름 'seoul')가 꺼진 'seoul' 을 '활성' 으로 만들어
+  //   그 행이 프로브 대상이 됐다(아래 tokenLookup 과 함께 남의 토큰이 꺼진 엣지 주소로 나갔다 — 재현).
+  const idKeys = new Set(collectors.map((c) => norm(c?.id || c?.name)).filter(Boolean));
   for (const c of collectors) {
-    const ks = [norm(c?.id || c?.name), norm(c?.name)].filter(Boolean);
+    const ks = [norm(c?.id || c?.name), norm(c?.name)].filter((k, i) => k && (i === 0 || !idKeys.has(k)));
     for (const k of ks) (c?.enabled === false ? disabledKeys : enabledKeys).add(k);
   }
   scan.rows = scan.rows.map((r) => {
@@ -193,12 +203,16 @@ function fullScan() {
 /** 등록부에서 이 행의 수집 토큰 평문을 꺼낸다 — **응답에는 절대 나가지 않는다**(프로브 헤더 전용). */
 function tokenLookup() {
   const by = new Map();
-  for (const c of safe(() => loadCollectors(), [])) {
-    if (c.enabled === false) continue;
-    const tok = String(c.token ?? '');
+  const list = safe(() => loadCollectors(), []);
+  // 66회차(재현): **꺼진 항목의 id 도 자리를 잡는다**(토큰은 빈 값) — 예전에는 꺼진 항목을 건너뛰어, 다른 켜진 항목의 표시 이름이
+  //   그 id 와 같으면 그 이름 칸에 **남의 수집 토큰**이 들어가 꺼진 엣지의 주소로 프로브 헤더에 실려 나갔다(v2.480 '저장 비밀은 그 접속처에만').
+  for (const c of list) {
     const k = norm(c.id || c.name); // #29: 행 키(id)와 같은 값
-    if (k) by.set(k, tok);
-    if (c.name && !by.has(norm(c.name))) by.set(norm(c.name), tok); // 표시 이름으로 들어온 행도 찾는다
+    if (k && (!by.has(k) || c.enabled !== false)) by.set(k, c.enabled === false ? '' : String(c.token ?? ''));
+  }
+  for (const c of list) {
+    if (c.enabled === false) continue;
+    if (c.name && !by.has(norm(c.name))) by.set(norm(c.name), String(c.token ?? '')); // 표시 이름으로 들어온 행도 찾는다(id 가 먼저)
   }
   return (row) => by.get(norm(row?.agent)) || '';
 }
@@ -366,6 +380,25 @@ api.post('/tools/portal-check/arch/run', adminOnly, fullScopeOnly, async (req, r
 });
 
 /**
+ * 다섯째 서브메뉴 — 공통 기능(v3.10 · 설계 docs/design/common-catalog).
+ *
+ * 빌드 때 `scripts/common-doc.mjs` 가 소스에서 만든 공통 기능 목록(`portalcheck/commonCatalog.json`)을 **읽어 주기만** 한다 —
+ * 배포본에는 소스가 없어 여기서 다시 만들 수 없다. 왕복 0 · 폴링 없음(화면은 마운트 1회).
+ *  · 문지기는 형제 보기와 같다(`adminOnly, fullScopeOnly`) + **관리자 판본만**(`isAdminDetailUser`) — 목록에는 서버 내부 모듈의
+ *    설명(SSRF 판정 · 비밀 승계 · 인증 정지 규칙)과 소스 경로가 들어 있다. 데모 계정(admin 문맥)은 403 이다.
+ *  · 파일이 없거나 못 읽으면 **200 + status** 로 말한다(`missing`·`unreadable`) — 빈 목록(모듈 0개)으로 만들지 않고,
+ *    읽기 오류의 원문(파일 조각 · 절대 경로)도 싣지 않는다.
+ */
+const COMMON_DENY_REASON = '공통 기능 목록은 관리자 계정만 조회할 수 있습니다 — 서버 내부 모듈의 설명과 소스 경로가 들어갑니다.';
+api.get('/tools/portal-check/common', adminOnly, fullScopeOnly, (req, res) => {
+  if (!isAdminDetailUser(req.user)) return res.status(403).json({ ok: false, error: 'forbidden', reason: COMMON_DENY_REASON });
+  const out = getCommonCatalog();
+  const version = safe(() => currentVersion(), '');
+  if (out.status !== COMMON_STATUS.OK) return res.json({ ok: true, status: out.status, version });
+  res.json({ ok: true, status: COMMON_STATUS.OK, version, ...out.catalog });
+});
+
+/**
  * 두 번째 서브메뉴 — 인벤토리 점검(v2.570).
  *
  * 사용자 요청: 에이전트 수신 트래픽 진단의 '최근 페이로드 —' 를 보고 "여기서 수집되는 데이터가
@@ -405,6 +438,37 @@ api.get('/tools/portal-check/inventory', adminOnly, fullScopeOnly, (req, res) =>
     findingCounts: invFindingCounts(findings),
     vocab: { states: INV_STATE, findings: INV_FINDING, grades: INV_GRADE },
   });
+});
+
+
+/**
+ * v2.938 포탈 점검 › **법인별 실환경 확인**(제안 8번 — '법인별로 적용'). 규칙 문서의 '실장비 미확인' 항목을, 법인 엣지가 실제 장비에서 읽어
+ * 보낸 결과로 법인마다 판정한다(fieldcheck/judge.js). **왕복 0** — 엣지·장비에 나가지 않는다. 권한은 형제와 같다(관리자 + 전체 범위).
+ * 데모 계정은 목 vCenter 행만 받는다(사람이 등록한 법인 이름 · 엣지 이름 · 실패 원문을 싣지 않는다 — 인벤토리 점검과 같은 판단).
+ */
+api.get('/tools/portal-check/field', adminOnly, fullScopeOnly, (req, res) => {
+  const snap = safe(() => store.get(), null);
+  const vcById = new Map((snap?.vcenters || []).filter((v) => v && v.id).map((v) => [String(v.id), v]));
+  const corps = new Map((safe(() => bareosHealthView().corps, []) || []).map((c) => [String(c.vcenterId), c]));
+  const mock = (id, vc) => !!vc && safe(() => isMockVcenter(vc), false);
+  const demo = isDemoGuest(req.user);
+  // 데모(mock) 모드에서 등록 vCenter 가 없으면 스냅샷의 목 vCenter 를 행으로 쓴다(인벤토리 점검 v2.708 과 같은 판단 — 판정은 그대로, 목은 '판정 불가')
+  const reg0 = safe(() => listVcentersFull(), []);
+  const regAll = reg0.length || !isMockMode() ? reg0 : [...vcById.values()].map((v) => ({ id: v.id, name: v.name, collectMode: v.collectSource === 'site' ? 'site' : 'direct' }));
+  const reg = demo ? regAll.filter((r) => mock(r?.id, vcById.get(String(r?.id)))) : regAll;   // 데모 계정: 목 vCenter 만(개수도 그 기준)
+  const out = buildFieldChecks({
+    registry: reg,
+    vcOf: (id) => vcById.get(id) || null,
+    agentOf: (id) => safe(() => getInventory(id)?.agent, '') || '',
+    collectors: safe(() => loadCollectors(), []),
+    statusById: safe(() => allCollectorStatus(), {}),
+    vcInfoOf: (id) => safe(() => getVcInfo(id), null),
+    corpOf: (id) => corps.get(id) || null,
+    isiduOf: (agent) => safe(() => isiduEdgeStatus(agent), null),
+    isMock: mock,
+    centralVersion: safe(() => currentVersion(), ''),
+  });
+  res.json({ ok: true, at: Date.now(), ...out, ...(demo && reg.length !== regAll.length ? { hiddenForDemo: true } : {}), vocab: { states: FIELD_STATES, checks: FIELD_CHECKS } });
 });
 
 }

@@ -74,7 +74,8 @@ export function Insights({ scope }) {
                   판단하려면 OS·IP·스냅샷 등 상세가 필요한데 여기서 바로 확인할 수 있게 한다. */}
               <td><VmLink name={v.name} vcenterId={v.vcenterId} label={v.name} style={{ fontWeight: 700 }} /></td>
               <td className="muted">{v.vcenterId}</td><td className="muted" style={{ fontSize: 12 }}>{v.host}</td>
-              <td style={{ textAlign: 'right' }}>{v.vcpu}</td><td style={{ textAlign: 'right' }}>{v.ramGB} GB</td>
+              {/* v3.28.1: 크기를 못 읽은 VM 은 서버가 null 을 준다 — '0' · ' GB' 가 아니라 '—'(단위 없음). */}
+              <td style={{ textAlign: 'right' }}>{v.vcpu ?? '—'}</td><td style={{ textAlign: 'right' }}>{v.ramGB == null ? '—' : `${v.ramGB} GB`}</td>
               <td>{v.cpuPct == null ? '—' : <UsageCell pct={v.cpuPct} />}</td><td>{v.memPct == null ? '—' : <UsageCell pct={v.memPct} />}</td>
             </tr>
           ))}

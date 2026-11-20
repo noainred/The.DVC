@@ -17,11 +17,14 @@ import { numOrNull } from '../util/numOrNull.js';
 import { setIsiduBaseResolver } from '../isidu/collectRequests.js';
 
 const FUTURE_SKEW_MS = 5 * 60_000;
+const RUN_MODES = new Set(['detached', 'attached-fallback', 'attached']);
 const AGENT_MAX = 256;
 const SCANS_PER_POST = 50;
 // 상주 저장소에 들어가는 문자열은 capStr(자르고 평탄화 — v2.607 TIM2607-01: slice 는 원문을 붙잡는다). 문자열만 받는다.
 const str = (v, max) => (typeof v === 'string' ? capStr(v, max) : '');
 const num = numOrNull; // 숫자·숫자 문자열만, 그 밖은 null(util/numOrNull — 사본을 두지 않는다)
+/** 90회차 F6: 크기 · 소요 · 개수는 음수가 뜻을 갖지 않는다 — 폴더 행(entries)처럼 음수는 못 읽은 값(null)으로 둔다(합계 · 변화 판정에 음수가 들어가지 않게). */
+const nonNeg = (v) => { const n = num(v); return n != null && n >= 0 ? n : null; };
 
 /**
  * 본문 → 정제된 스캔 목록. owned: 이 엣지에 배정된 대상 id 집합.
@@ -56,12 +59,12 @@ export function sanitizeIsiduScans(body, owned, now = Date.now()) {
         entries.push({ name, bytes: Math.round(bytes), res: Math.max(1, Math.round(res ?? 1)) });
       }
     }
-    const total = raw.total && typeof raw.total === 'object' && num(raw.total.bytes) != null ? { bytes: num(raw.total.bytes), res: num(raw.total.res) ?? 1 } : null;
+    const total = raw.total && typeof raw.total === 'object' && nonNeg(raw.total.bytes) != null ? { bytes: nonNeg(raw.total.bytes), res: Math.max(1, nonNeg(raw.total.res) ?? 1) } : null;
     scans.push({
       targetId, ts: Math.round(ts), srcTs, ...(edgeTs != null ? { edgeTs } : {}), ok,
       path: str(raw.path, 1024), host: str(raw.host, 256), sizeMode: raw.sizeMode === 'k' ? 'k' : 'h',
-      durationMs: num(raw.durationMs), total, sumBytes: num(raw.sumBytes), sumRes: num(raw.sumRes), count: ok ? entries.length : null,
-      skipped: num(raw.skipped), errLines: num(raw.errLines),
+      durationMs: nonNeg(raw.durationMs), total, sumBytes: nonNeg(raw.sumBytes), sumRes: nonNeg(raw.sumRes), count: ok ? entries.length : null,
+      skipped: nonNeg(raw.skipped), errLines: nonNeg(raw.errLines),
       errSample: Array.isArray(raw.errSample) ? raw.errSample.filter((x) => typeof x === 'string').slice(0, 5).map((x) => capStr(x, 200)) : [],
       truncated: raw.truncated === true, kind: str(raw.kind, 32), error: str(raw.error, 600), trig: str(raw.trig, 16),
       edgeScanId: num(raw.id ?? raw.edgeScanId), entries,
@@ -96,6 +99,9 @@ export function sanitizeIsiduStatus(st) {
         .map((r) => ({ targetId: str(r.targetId, 64), since: num(r.since), detectedAt: num(r.detectedAt), nextAt: num(r.nextAt), resumes: num(r.resumes) })) : [],
       resumes: Array.isArray(poller.resumes) ? poller.resumes.filter((r) => r && typeof r === 'object').slice(0, 10)
         .map((r) => ({ targetId: str(r.targetId, 64), at: num(r.at), outcome: str(r.outcome, 16), note: str(r.note, 300), resumes: num(r.resumes) })) : [],
+      // v2.954(개선 검토 3번): 대상별 마지막 실행 방식 — 법인별 실환경 확인의 '아이실론 분리 실행' 근거(아는 값만 · 상한).
+      lastRuns: Array.isArray(poller.lastRuns) ? poller.lastRuns.filter((r) => r && typeof r === 'object' && RUN_MODES.has(r.mode)).slice(0, 20)
+        .map((r) => ({ targetId: str(r.targetId, 64), at: num(r.at), mode: r.mode, ok: r.ok === true, detach: r.detach !== false, ...(r.attached === true ? { attached: true } : {}), ...(typeof r.fallback === 'string' && r.fallback ? { fallback: str(r.fallback, 200) } : {}) })) : [],
     } : null,
     targets: num(s.targets),
     version: str(s.version, 32) || null,

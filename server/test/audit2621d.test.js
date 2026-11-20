@@ -10,14 +10,21 @@
  *  · LIFE-03: 작업 로그가 기록 1건마다 전량 직렬화 + 동기 원자 쓰기(fsync)를 해, push 수신 루프의 장비 N대가 N번 썼다.
  *    같은 틱의 기록을 묶어 쓰기 2번(첫 기록 + 틱 끝)이 되는지를 **실제 rename 호출 수**로 센다.
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 
-const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2621d-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const dir = tmpDir('audit2621d-');
 process.env.CONFIG_DIR = dir; // config.configDir 는 import 시점에 굳는다 — 모듈을 동적으로 불러오기 전에 둔다
 
 const SRC = new URL('../src/', import.meta.url);
@@ -172,26 +179,32 @@ function countRenames(file) {
   return { get n() { return n; }, reset() { n = 0; }, restore() { fs.renameSync = orig; } };
 }
 
-test('LIFE-03 — 한 틱에 장비 60대를 기록해도 파일 쓰기는 2번(첫 기록 + 틱 끝)이고, 조회는 즉시 전부 보인다', async () => {
+// ⚠ 정정(점검 반복 5회차 I1): 묶음의 끝은 ‘틱 끝(마이크로태스크)’ 이 아니라 ‘쓰기 간격(writeGapMs) 끝’ 이다 — 폴러의 서버별 완료(서로 다른 틱)도 묶으려고.
+//   따로 떨어진 첫 기록은 예전처럼 곧바로 쓴다(아래 세 번째 시험 그대로). 여기서는 간격을 30ms 로 줄여 기다린다.
+test('LIFE-03 · 5회차 I1 — 한 틱에 장비 60대를 기록해도 파일 쓰기는 2번(첫 기록 + 간격 끝)이고, 조회는 즉시 전부 보인다', async () => {
   const { createActivityLog } = await import('../src/util/activityLog.js');
-  const log = createActivityLog({ fileName: 'burst-activity.json', numFields: ['portsOnline'] });
+  const GAP = 30;
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const log = createActivityLog({ fileName: 'burst-activity.json', numFields: ['portsOnline'], writeGapMs: GAP });
   // 운영 상태처럼 링버퍼를 상한까지 채운다(여러 틱에 걸쳐 — 채우는 동안의 쓰기는 세지 않는다).
   for (let i = 0; i < log.MAX; i++) {
     log.recordActivity({ deviceId: `old-${i}`, ok: true, at: 1_790_000_000_000 + i, portsOnline: 1 });
     if (i % 100 === 99) await null;
   }
-  await null;
+  await sleep(GAP * 2 + 10);   // 채운 것의 간격 끝 쓰기가 끝나고 간격이 지난 뒤(조용한 상태)
   const spy = countRenames(log.FILE);
   try {
     for (let i = 0; i < 60; i++) {
       log.recordActivity({ deviceId: `sw-${i}`, name: `SAN-SW-${i}`, host: `10.2.0.${i}`, source: 'edge-pl1', ok: true, durationMs: 900, portsOnline: 40, at: 1_790_000_100_000 + i });
     }
-    assert.equal(spy.n, 1, `같은 틱의 기록마다 전량을 다시 썼다(쓰기 ${spy.n}회) — 첫 기록만 곧바로 쓰고 나머지는 틱 끝에서 한 번이어야 한다`);
-    await null; // 틱 끝(마이크로태스크) — 대기분 1회
-    assert.equal(spy.n, 2, `틱 끝의 묶음 쓰기가 한 번이어야 한다(실제 ${spy.n}회)`);
+    assert.equal(spy.n, 1, `같은 묶음의 기록마다 전량을 다시 썼다(쓰기 ${spy.n}회) — 첫 기록만 곧바로 쓰고 나머지는 간격 끝에서 한 번이어야 한다`);
+    await null;
+    assert.equal(spy.n, 1, '틱 끝에는 쓰지 않는다(간격 끝까지 기다린다)');
+    await sleep(GAP * 2 + 10);
+    assert.equal(spy.n, 2, `간격 끝의 묶음 쓰기가 한 번이어야 한다(실제 ${spy.n}회)`);
     const onDisk = JSON.parse(fs.readFileSync(log.FILE, 'utf8'));
     assert.equal(onDisk.length, log.MAX, '상한(MAX)을 지킨다');
-    assert.equal(onDisk.at(-1).deviceId, 'sw-59', '틱 끝 쓰기가 마지막 기록까지 담는다');
+    assert.equal(onDisk.at(-1).deviceId, 'sw-59', '간격 끝 쓰기가 마지막 기록까지 담는다');
   } finally { spy.restore(); }
   assert.equal(log.listActivity(1)[0].deviceId, 'sw-59');
 });

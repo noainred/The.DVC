@@ -10,6 +10,7 @@
  * 관측 횟수를 남겨 화면에서 상세로 펼칠 수 있게 한다.
  */
 import { capStr } from '../util/capStr.js';
+import { envPositive } from '../util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
 const agents = new Map();   // agentLower → { agent, hostname, peer, mock, at, seen, verified, conflict:{...} | null }
 const owners = new Map();   // vcenterId → { agent, peer, at, seen, conflict:{...} | null }
 const CONFLICT_WINDOW_MS = 30 * 60_000;
@@ -24,7 +25,7 @@ const CONFLICT_WINDOW_MS = 30 * 60_000;
  *  · owners(vcenterId 키)는 상한을 넘으면 가장 오래 갱신되지 않은 것부터 밀어낸다(실제 vCenter 는 매 주기 갱신되어 뒤에 있다).
  */
 const TXT_MAX = 128;
-const envInt = (v, d) => { const n = v == null || v === '' ? NaN : Number(v); return Number.isFinite(n) && n > 0 ? Math.floor(n) : d; };
+const envInt = (v, d) => envPositive(v, d);   // v3.17.6: 지역 사본 → 공용 util/envNumber.js(같은 규칙 — 양수 내림 · 그 밖 기본값)
 const AGENTS_MAX = envInt(process.env.CENTRAL_AGENT_IDENTITY_MAX, 2_000);
 const UNVERIFIED_MAX = envInt(process.env.CENTRAL_AGENT_IDENTITY_UNVERIFIED_MAX, 64);
 const OWNERS_MAX = envInt(process.env.CENTRAL_VCENTER_OWNER_NOTE_MAX, 4_096);

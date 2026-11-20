@@ -10,14 +10,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, safeLoadText } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // v2.538: 이 파일은 v2.537 까지 봉인 대상 미등록이었다(감사 M4 계열)
 import { parseCsvRows } from '../util/csv.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { registerExitFlush } from '../util/exitFlush.js'; // v2.582 ARCH-4: 디바운스 저장은 종료 시 동기 flush 를 등록한다
 import { capStr } from '../util/capStr.js';
 import { makeSettingsLoadError } from '../util/settingsLoadError.js'; // v2.727(감사 D-01): 손상 → 설정 pull 503(v2.631 규약)
+import { makeJsonFileReader, readJsonFile, READ_RETRY_MS } from '../util/jsonFileLoad.js'; // 87회차 ⓐ: 읽기 오류 ≠ 손상(공용 읽기 판정)
+import { inRetryWindow } from '../util/jsonFileRead.js';   // 128회차: 재읽기 간격 판정은 공용(시계가 뒤로 가도 그 차만큼 굳지 않게)
 import { accessMoved } from '../util/secretCarry.js'; // v2.731(점검 A3-01 ②): 접속처가 바뀌면 저장 비밀번호를 승계하지 않는다
+import { envPositive } from '../util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
 
 const FILE = path.join(config.configDir, 'agent-assignments.json');
 const RESULT_FILE = path.join(config.configDir, 'agent-results.json');
@@ -31,31 +34,54 @@ const RESULT_FILE = path.join(config.configDir, 'agent-results.json');
  *   엣지는 직전 상태를 유지한다. 재시작 뒤(원본이 .corrupt 로 옮겨져 ENOENT)도 보존본만 있으면 여전히 못 읽은 것이다(missing()).
  *   오류는 **관리자 저장**(save — 추가·수정·삭제·가져오기)만 해제한다. confirm 은 지금 읽히는 값(손상이면 빈 목록)을 그대로 쓴다.
  */
-const _loadErr = makeSettingsLoadError(() => FILE, { label: 'iDRAC 스캔 배정(엣지별)', confirm: () => save(loadAssignments()) });
+const _loadErr = makeSettingsLoadError(() => FILE, { label: 'iDRAC 스캔 배정(엣지별)', confirm: () => save(loadAssignments()), recheckMs: READ_RETRY_MS });   // 87회차 ⓐ: 이 로더는 부를 때마다 다시 읽는다(읽기 오류만 간격)
 /** 배정 파일을 못 읽었으면 { at, reason }, 읽었으면 null — 라우트가 pull 응답 전에 본다. */
 export function assignmentsLoadError() { loadAssignments(); return _loadErr.get(); }
 
+/*
+ * 87회차 ⓐ(84회차 남긴 것 ② — 권장안): 공용 읽기 판정(util/jsonFileLoad.js). 예전 catch 하나는 **읽기 오류**(EACCES · EIO)도 손상으로 보고
+ *   온전한 원본(iDRAC 자격증명 전량)을 `.corrupt.*` 로 옮겼다 — 권한을 고쳐도 보존본을 되돌려야 했고, '전체 목록 가져오기(바꾸기)' · 확정이 열렸다.
+ *   이제 읽기 오류는 원본을 두고 · 오류(readError)를 세워 배정 pull 503 · 모든 저장(바꾸기 포함) 거절을 유지하며 · READ_RETRY_MS 간격으로만 디스크를 다시 본다
+ *   (엣지 28곳의 pull 마다 죽어 가는 디스크를 두드리지 않게). 읽히면 재시작 없이 풀린다. 손상은 예전과 같다(보존 → 503 → 관리자 저장 · 확정 · 바꾸기로 풀림).
+ */
+const parseAssignmentsFile = (text) => { const p = JSON.parse(text); return Array.isArray(p?.assignments) ? openSecretsDeep(p.assignments) : []; };
+const _reader = makeJsonFileReader(() => FILE, { parse: parseAssignmentsFile, preserve: true, tag: 'central' });
 export function loadAssignments() {
-  if (!fs.existsSync(FILE)) { _loadErr.missing(); return []; }
-  try {
-    const p = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-    _loadErr.ok();
-    return Array.isArray(p?.assignments) ? openSecretsDeep(p.assignments) : [];
-  } catch (err) {
-    // ⚠ 손상 파일을 조용히 []로 넘기면 다음 save()가 온전했던 원본(=iDRAC 자격증명 전량)을 빈
-    // 목록으로 영구히 덮어쓴다 — server/CLAUDE.md '자격증명 파일은 원자적 쓰기 + 로드 손상
-    // preserveCorrupt' 불변조건. 보존 후에만 빈 값을 반환한다.
-    _loadErr.corrupt(err); // v2.727(D-01): 보존 전에 세운다(보존 뒤에는 파일이 없어 missing() 이 같은 상태를 유지한다)
-    preserveCorrupt(FILE, err.message);
-    // v2.744(최종 검토 RG2744-02): 사유는 요약이다 — 원문은 iDRAC 스캔 비밀번호 앞부분 같은 파일 조각을 싣고 이 줄은 콘솔 링버퍼로 나간다.
-    console.error(`[central] agent-assignments.json 파싱 실패: ${safeLoadText(err) || '사유 미상'}`);
-    return [];
-  }
+  const r = _reader.read();
+  if (r.kind === 'ok') { _loadErr.ok(); return r.value; }
+  if (r.kind === 'missing') { _loadErr.missing(); return []; }
+  if (r.kind === 'read-error') { _loadErr.readError(r.error, { retryMs: READ_RETRY_MS }); return []; }
+  // ⚠ 손상 파일을 조용히 []로 넘기면 다음 save()가 온전했던 원본(=iDRAC 자격증명 전량)을 빈
+  // 목록으로 영구히 덮어쓴다 — server/CLAUDE.md '자격증명 파일은 원자적 쓰기 + 로드 손상
+  // preserveCorrupt' 불변조건. reader 가 보존(preserveCorrupt)한 뒤에만 빈 값을 반환한다.
+  _loadErr.corrupt(r.error); // v2.727(D-01)
+  // v2.744(최종 검토 RG2744-02): 사유는 요약이다 — 원문은 iDRAC 스캔 비밀번호 앞부분 같은 파일 조각을 싣고 이 줄은 콘솔 링버퍼로 나간다.
+  console.error(`[central] agent-assignments.json 파싱 실패: ${safeLoadText(r.error) || '사유 미상'}`);
+  return [];
+}
+/** 87회차 ⓐ: 읽기 오류(원본이 그 자리에 그대로)인가 — 그동안은 '바꾸기' 를 포함한 모든 저장을 거절한다(원자적 rename 이 보존본도 없이 원본을 덮는다). */
+const readBlocked = () => !!_loadErr.get()?.readError;
+
+/*
+ * 전체 점검 18회차 반증 B-3(재현): 못 읽은 동안 **한 엣지의 추가 · 수정 · 삭제 · 병합 가져오기는 쓰지 않는다**. 예전에는 그 저장이 빈 목록에 한 건을 얹어
+ *   파일을 쓰고 표지를 풀어, 다른 모든 엣지가 /api/central/assignment 에서 200 assigned:false 를 받고 위임 iDRAC 스캔을 조용히 멈췄다(관리 화면은
+ *   손상을 알리지 않는다). 해제는 손상 보존본을 되돌리고 재시작 · 서비스 점검 '기본값으로 확정' · 전체 목록 가져오기(replace — 사람이 목록 전체를 다시 정함).
+ *   agentUsers(17회차 C-10)와 같은 판단.
+ */
+function writeRefusal() {
+  if (!_loadErr.get()) return null;
+  if (readBlocked()) return { ok: false, code: 'registry-unreadable', status: 503, readError: true,
+    reason: `iDRAC 스캔 배정 파일(agent-assignments.json)을 읽지 못한 상태라 저장하지 않았습니다 — 읽기 오류이고 원본은 그대로 있습니다. 파일 권한 · 소유자(포탈 서비스 계정) · 디스크를 확인하세요(${Math.round(READ_RETRY_MS / 1000)}초마다 다시 읽고, 읽히면 저장이 다시 열립니다).` };   // 87회차 ⓐ
+  return { ok: false, code: 'registry-unreadable', status: 503,
+    reason: 'iDRAC 스캔 배정 파일(agent-assignments.json)을 읽지 못한 상태라 저장하지 않았습니다 — 지금 한 엣지를 저장하면 손상 보존본(.corrupt.*)에만 남은 다른 엣지의 배정이 빠져 그 엣지들의 위임 스캔이 멈춥니다. 보존본을 되돌리고 재시작하거나, 서비스 점검의 설정 파일에서 기본값으로 확정하거나, 전체 목록 가져오기(바꾸기)로 목록 전체를 다시 정하세요.' };
 }
 
 function save(list) {
+  // 87회차 ⓐ: 마지막 방어선 — 읽기 오류 중에는 어느 경로(바꾸기 · 확정 포함)도 원본을 덮지 않는다.
+  if (readBlocked()) throw Object.assign(new Error('iDRAC 스캔 배정 파일을 읽지 못한 상태라 저장하지 않았습니다(읽기 오류 — 원본은 그대로).'), { code: 'registry-unreadable', readError: true });
   atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep({ assignments: list }), null, 2), { mode: 0o600 });
   _loadErr.ok(); // v2.727(D-01): 관리자 저장이 로드 오류를 푼다(settingsLoadError 규약)
+  _reader.reset();
 }
 
 export function redact(a) {
@@ -122,6 +148,7 @@ function normalize(body, existing = null) {
 
 export function addAssignment(body) {
   const list = loadAssignments();
+  const refused = writeRefusal(); if (refused) return refused;
   const [entry, err] = normalize(body);
   if (err) return { ok: false, reason: err };
   if (list.some((a) => a.agent.toLowerCase() === entry.agent.toLowerCase())) return { ok: false, reason: `이미 존재하는 에이전트: ${entry.agent}` };
@@ -131,6 +158,7 @@ export function addAssignment(body) {
 
 export function updateAssignment(agent, body) {
   const list = loadAssignments();
+  const refused = writeRefusal(); if (refused) return refused;
   const idx = list.findIndex((a) => a.agent.toLowerCase() === String(agent).toLowerCase());
   if (idx === -1) return { ok: false, reason: `없는 에이전트: ${agent}` };
   const [entry, err, dropped] = normalize({ ...body, agent: list[idx].agent }, list[idx]);
@@ -142,6 +170,7 @@ export function updateAssignment(agent, body) {
 
 export function removeAssignment(agent) {
   const list = loadAssignments();
+  const refused = writeRefusal(); if (refused) return refused;
   const next = list.filter((a) => a.agent.toLowerCase() !== String(agent).toLowerCase());
   if (next.length === list.length) return { ok: false, reason: `없는 에이전트: ${agent}` };
   save(next);
@@ -186,6 +215,7 @@ export function parseCsv(text) {
 export function importAssignments(incoming, mode = 'merge') {
   if (!Array.isArray(incoming)) return { ok: false, reason: 'assignments 배열을 찾을 수 없습니다.' };
   const existing = loadAssignments();
+  if (mode !== 'replace' || readBlocked()) { const refused = writeRefusal(); if (refused) return refused; }   // 18회차 B-3: 바꾸기(목록 전체)만 손상 중에도 쓴다 — 87회차 ⓐ: 읽기 오류(원본 그대로)는 바꾸기도 거절
   const result = mode === 'replace' ? [] : [...existing];
   let added = 0, updated = 0;
   const skipped = [];
@@ -245,8 +275,13 @@ let results = Object.create(null);
 //   쓰기만 고치면 이미 저장된 줄이 계속 화면을 죽인다. v2.569 감사 로그와 같은 판단).
 //   ⚠ 정제 헬퍼(const)는 이 로드보다 **위에** 있어야 한다 — 아래로 옮기면 TDZ 로 로드가 던지고, catch 가
 //   멀쩡한 파일을 손상으로 보존(preserveCorrupt)해 결과가 전부 사라진다(v2.566 TDZ 교훈).
-function loadResultsFile() {
-  const raw = JSON.parse(fs.readFileSync(RESULT_FILE, 'utf8')) || {};
+// 87회차 ⓐ: 결과 파일도 공용 읽기 판정 — **읽기 오류**(EACCES · EIO)는 손상이 아니다: 원본을 옮기지 않고 빈 메모리로 시작하되, 그동안은 저장하지 않는다
+//   (원자적 rename 이 원본을 덮는다). 저장 시점에 READ_RETRY_MS 간격으로 다시 읽어 읽히면 파일의 결과 중 메모리에 없는 agent 만 합친 뒤 저장한다
+//   (메모리 쪽이 더 새 보고다 — 79회차 R2 정비 창 계수와 같은 '덮지 않고 합친다'). 손상은 예전과 같다(보존 후 빈 값).
+let resultsReadBlocked = false; let resultsRetryAt = 0;
+const parseResultsFile = (text) => loadResultsFileText(text);
+function loadResultsFileText(text) {
+  const raw = JSON.parse(text) || {};
   const out = Object.create(null);
   if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
     for (const k of Object.keys(raw)) {
@@ -257,8 +292,23 @@ function loadResultsFile() {
   }
   return out;
 }
-try { if (fs.existsSync(RESULT_FILE)) results = loadResultsFile(); }
-catch (err) { preserveCorrupt(RESULT_FILE, err.message); console.error(`[central] agent-results.json 파싱 실패: ${safeLoadText(err) || '사유 미상'}`); results = Object.create(null); } // v2.744 RG2744-02: 사유는 요약(원문 = 파일 조각)
+{
+  const r = readJsonFile(RESULT_FILE, { parse: parseResultsFile });
+  if (r.kind === 'ok') results = r.value;
+  else if (r.kind === 'read-error') { resultsReadBlocked = true; resultsRetryAt = Date.now() + READ_RETRY_MS; console.warn(`[central] agent-results.json 읽기 오류(${(capStr(r.error?.code, 32) || 'read-error')}) — 손상이 아니라 원본은 그대로 둡니다 · 읽힐 때까지 결과를 저장하지 않습니다`); }
+  else if (r.kind === 'corrupt') console.error(`[central] agent-results.json 파싱 실패: ${safeLoadText(r.error) || '사유 미상'}`); // v2.744 RG2744-02: 사유는 요약(원문 = 파일 조각)
+}
+/** 87회차 ⓐ: 저장해도 되는가 — 읽기 오류였으면 간격마다 다시 읽어 합친다. 아직 못 읽으면 false(이번 저장을 건너뛴다). */
+function resultsWritable() {
+  if (!resultsReadBlocked) return true;
+  if (inRetryWindow(Date.now(), resultsRetryAt, READ_RETRY_MS)) return false;
+  const r = readJsonFile(RESULT_FILE, { parse: parseResultsFile });
+  if (r.kind === 'read-error') { resultsRetryAt = Date.now() + READ_RETRY_MS; return false; }
+  if (r.kind === 'ok') for (const k of Object.keys(r.value)) if (!(k in results)) results[k] = r.value[k];
+  resultsReadBlocked = false; resultsRetryAt = 0;
+  console.warn('[central] agent-results.json 다시 읽었습니다(읽기 오류 풀림 — 파일의 결과를 합쳤습니다)');
+  return true;
+}
 
 let persistTimer = null;
 function persistResults() {
@@ -266,6 +316,7 @@ function persistResults() {
   persistTimer = setTimeout(() => {
     persistTimer = null;
     try {
+      if (!resultsWritable()) { persistResults(); return; }   // 87회차 ⓐ: 읽기 오류 중 — 원본을 덮지 않고 다음 주기에 다시 본다
       fs.mkdirSync(path.dirname(RESULT_FILE), { recursive: true });
       // 원자적 쓰기 — 직접 writeFileSync 는 쓰는 도중 크래시/정전 시 절단본을 남기고,
       // 위의 로드 catch 가 그 절단본을 보고 빈 값으로 출발하게 만든다(같은 파일 왕복 손상).
@@ -274,11 +325,11 @@ function persistResults() {
   }, 3_000);
   persistTimer.unref?.();
 }
-registerExitFlush('central/assignments.results', () => { if (!persistTimer) return; clearTimeout(persistTimer); persistTimer = null; atomicWriteFileSync(RESULT_FILE, JSON.stringify(results), { mode: 0o600 }); });
+registerExitFlush('central/assignments.results', () => { if (!persistTimer) return; clearTimeout(persistTimer); persistTimer = null; if (!resultsWritable()) return; atomicWriteFileSync(RESULT_FILE, JSON.stringify(results), { mode: 0o600 }); });   // 87회차 ⓐ
 
 // v2.601(감사 CEN2601-04): 결과를 가진 agent 수 상한 — 라우트가 배정 없는 이름을 거절하지만(1차 방어), 배정이 지워진 옛 이름·
 //   파일에 이미 쌓인 이름이 무한히 남지 않게 가장 오래된 보고부터 밀어낸다.
-const RESULT_AGENTS_MAX = Number(process.env.CENTRAL_RESULT_AGENTS_MAX) || 500;
+const RESULT_AGENTS_MAX = envPositive(process.env.CENTRAL_RESULT_AGENTS_MAX, 500);
 export function setResult(agent, data) {
   const key = String(agent);
   if (!(key in results)) {

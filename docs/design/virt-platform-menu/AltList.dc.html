@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>가상화 플랫폼 — 시안 C · 통합 인벤토리 표(와이어프레임)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.w{border:1px dashed #5d6b85;border-radius:8px;background:rgba(139,155,180,.06);color:#aebbd0}
+.box{display:flex;align-items:center;gap:8px;padding:0 12px;min-height:34px;box-sizing:border-box;white-space:nowrap}
+.box.on{background:rgba(139,155,180,.18);color:#e6edf6;border-style:solid}
+.muted{color:#8b9bb4}.faint{color:#5d6b85}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.sb{width:236px;flex:none;border-right:1px dashed #5d6b85;padding:12px 10px;display:flex;flex-direction:column;gap:6px;box-sizing:border-box}
+.sb div{height:30px;border-radius:6px;background:rgba(139,155,180,.08);display:flex;align-items:center;padding:0 10px;color:#8b9bb4;font-size:12px}
+.sb div.on{background:rgba(139,155,180,.2);color:#e6edf6;font-weight:700}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;font-size:11.5px;font-weight:700;color:#8b9bb4;padding:8px 10px;border-bottom:1px dashed #5d6b85;white-space:nowrap}
+td{padding:8px 10px;border-bottom:1px dashed #243049;white-space:nowrap;vertical-align:middle}
+tr.g td{background:rgba(139,155,180,.1);font-weight:700;color:#e6edf6}
+.ty{display:inline-block;font-size:10.5px;font-weight:800;padding:1px 6px;border-radius:4px;border:1px solid #5d6b85;color:#aebbd0;margin-right:6px;font-family:"JetBrains Mono",monospace}
+.pane{border-left:1px dashed #5d6b85;padding:12px 14px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.ph{height:12px;border-radius:4px;background:rgba(139,155,180,.18)}
+.note{font-size:11.5px;color:#5d6b85}
+</style>
+</helmet>
+
+<div style="min-height:100%;display:flex;flex-direction:column;background:#0a0e17">
+  <div class="box" style="height:44px;border-bottom:1px dashed #5d6b85;gap:14px"><b>The Davinci</b><span class="muted">v2.915.0</span><span style="flex:1"></span><span class="w box" style="width:420px;min-height:30px;justify-content:space-between" aria-label="통합 검색"><span class="faint">장비 · 기능 찾기</span><span class="faint mono">Ctrl K</span></span><span style="flex:1"></span><span class="muted mono" style="font-size:12px">28/28 vCenter OK</span></div>
+
+  <div style="display:flex;flex:1;min-width:0">
+    <aside class="sb" aria-label="메뉴(와이어)">
+      <div>Overview</div><div>Summary</div><div class="on">서버 › 가상화 플랫폼</div><div style="padding-left:22px">물리 서버</div><div style="padding-left:22px">Backup</div><div style="padding-left:22px">알람</div><div>스토리지</div><div>네트워크</div><div>자원관리</div><div>자원 최적화</div><div>특수 기능</div>
+    </aside>
+
+    <main style="flex:1;min-width:0;padding:16px 24px 24px;display:flex;flex-direction:column;gap:12px">
+      <header style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 14px">
+        <h1 style="margin:0;font-size:20px;font-weight:800">가상화 플랫폼 — 인벤토리</h1>
+        <span class="muted" style="font-size:12.5px">표 하나 · 유형은 필터 · 소속은 열 · 보기는 저장(Datadog Infrastructure List · Zabbix Hosts 식)</span>
+      </header>
+
+      <!-- 툴바: 유형 토글 · 그룹화 · 열 · 저장 보기 -->
+      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+        <span class="muted" style="font-size:12px">유형</span>
+        <span class="w box on">vCenter 28</span><span class="w box on">호스트 658</span><span class="w box">VM 5,850</span>
+        <span class="muted" style="font-size:12px;margin-left:8px">그룹화</span><span class="w box">법인(vCenter) ▾</span>
+        <span class="muted" style="font-size:12px;margin-left:8px">열</span><span class="w box">기본 · 자원 · 백업 ▾</span>
+        <span style="flex:1"></span>
+        <span class="w box">저장 보기: ‘확인 대상 호스트’ ▾</span><span class="w box">CSV</span>
+      </div>
+
+      <div style="display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:0;border:1px dashed #5d6b85;border-radius:10px;overflow:hidden;min-width:0">
+        <div style="overflow-x:auto;min-width:0">
+          <table>
+            <thead><tr><th>개체</th><th>소속</th><th>상태</th><th class="r">자식</th><th>CPU</th><th>메모리</th><th>백업</th><th>신호</th></tr></thead>
+            <tbody>
+              <tr class="g"><td colspan="8">vcenter-us-east-01 · Ashburn · 24 호스트 · 240 VM · Veeam 152 · Bareos 61</td></tr>
+              <tr><td><span class="ty">VC</span>vcenter-us-east-01</td><td class="muted">북미</td><td>Connected</td><td class="r mono">24 · 240</td><td class="mono">53%</td><td class="mono">63%</td><td class="mono">152 / 61</td><td class="muted">알람 6</td></tr>
+              <tr><td><span class="ty">HOST</span>esx-us-east-01</td><td class="muted">Ashburn-CL1</td><td>연결</td><td class="r mono">VM 11</td><td class="mono">62%</td><td class="mono">71%</td><td class="mono">11 / 4</td><td class="muted">SSH 실행 중</td></tr>
+              <tr><td><span class="ty">HOST</span>esx-us-east-07</td><td class="muted">Ashburn-CL1</td><td>점검</td><td class="r mono">VM 0</td><td class="mono">3%</td><td class="mono">9%</td><td class="muted">—</td><td class="muted">재부팅 필요</td></tr>
+              <tr class="g"><td colspan="8">vcenter-eu-central-01 · Frankfurt · 30 호스트 · 480 VM · Veeam 320 · Bareos 118</td></tr>
+              <tr><td><span class="ty">VC</span>vcenter-eu-central-01</td><td class="muted">유럽</td><td>Connected</td><td class="r mono">30 · 480</td><td class="mono">56%</td><td class="mono">65%</td><td class="mono">320 / 118</td><td class="muted">알람 7</td></tr>
+              <tr><td><span class="ty">HOST</span>esx-eu-central-11</td><td class="muted">Frankfurt-CL3</td><td>연결</td><td class="r mono">VM 14</td><td class="mono">88%</td><td class="mono">74%</td><td class="mono">14 / 5</td><td class="muted">CPU 75%↑</td></tr>
+              <tr><td class="faint" colspan="8">… 유형 ‘VM’ 을 켜면 같은 표에 VM 행이 호스트 아래로 들어온다(가상 페이지 · 1,000행 단위)</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <aside class="pane" aria-label="선택 개체 패널(와이어)">
+          <b>esx-us-east-01</b><span class="muted" style="font-size:12px">행을 고르면 여기 — 개체 보기의 요약 탭 축약</span>
+          <div class="ph" style="width:70%"></div><div class="ph" style="width:55%"></div><div class="ph" style="width:80%"></div><div class="ph" style="width:40%"></div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px"><span class="w box" style="min-height:28px">⤢ 개체 보기</span><span class="w box" style="min-height:28px">전체 페이지 상세</span></div>
+          <div class="ph" style="width:90%;margin-top:6px"></div><div class="ph" style="width:60%"></div>
+        </aside>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px">
+        <div class="w" style="padding:12px 14px;display:flex;flex-direction:column;gap:6px">
+          <b>얻는 것</b>
+          <span class="muted">메뉴도 화면도 하나 · 열·그룹·저장 보기로 ‘법인별’ ‘확인 대상’ 같은 옛 화면을 보기로 대체 · VM·호스트·vCenter 를 한 검색창</span>
+        </div>
+        <div class="w" style="padding:12px 14px;display:flex;flex-direction:column;gap:6px">
+          <b>잃는 것(그래서 와이어로만)</b>
+          <span class="muted">호스트 화면의 ‘지금 확인할 것’ 카드 · 클러스터 CPU 타일 · VM 분포 패널 · vCenter 카드 같은 <b style="color:#e6edf6">유형 전용 요약</b>이 표 위에 들어갈 자리가 없다 · 유형마다 열이 달라 한 표가 성기다 · 승인된 v2.805 · v2.909 화면을 버린다</span>
+        </div>
+      </div>
+      <div class="note">와이어프레임 — 색·글자는 일부러 비웠다. 시안 A 의 ‘유형별 목록’ 성격은 이 표가 아니라 각 탭의 기존 표가 맡고, 시안 B 의 ‘유형별 목록’ 전환이 이 표에 가장 가깝다.</div>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":820}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

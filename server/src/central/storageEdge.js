@@ -160,6 +160,50 @@ export function narrowStorageSnapshot(d) {
   return { snap: r.snap, narrowed: r.narrowed + na };
 }
 
+/*
+ * 전체 점검 23회차 S-4(재현): extra 의 jobs · criticalEvents · clusters · perf 를 원문 그대로 저장했다 — 화면(StorageMonTool)이
+ *   `jobs.running.length` · `e.event` 를 그대로 그려, 배열이 아니거나 칸이 객체면 TypeError · React #31 로 상세 탭 전체가 오류 화면이 됐다.
+ *   아는 모양으로만: 배열은 배열 · 원소는 객체 · 칸은 글자/수(객체 · 배열 칸은 버림) · 상한. 모양이 틀리면 그 칸을 null(화면이 건너뛴다).
+ */
+const EXTRA_LIST_MAX = 200;
+const EXTRA_ROW_KEYS_MAX = 24;
+function scalarRow(o) {
+  const out = {};
+  let n = 0;
+  for (const k of Object.keys(o)) {
+    if (n >= EXTRA_ROW_KEYS_MAX) break;
+    const v = o[k];
+    if (typeof v === 'string') { out[capStr(k, 64)] = capStr(v, 512); n += 1; }
+    else if (typeof v === 'number' && Number.isFinite(v)) { out[capStr(k, 64)] = v; n += 1; }
+    else if (typeof v === 'boolean' || v === null) { out[capStr(k, 64)] = v; n += 1; }
+  }
+  return out;
+}
+function rowList(v) { return Array.isArray(v) ? v.filter(isPlainObj).slice(0, EXTRA_LIST_MAX).map(scalarRow) : null; }
+export function narrowStorageExtraLists(ex) {
+  let n = 0;
+  if (Object.hasOwn(ex, 'clusters') && ex.clusters != null) { const r = rowList(ex.clusters); n += r && r.length === ex.clusters.length ? 0 : 1; ex.clusters = r; }
+  if (Object.hasOwn(ex, 'criticalEvents') && ex.criticalEvents != null) { const r = rowList(ex.criticalEvents); n += r && r.length === ex.criticalEvents.length ? 0 : 1; ex.criticalEvents = r; }
+  if (Object.hasOwn(ex, 'criticalEventsOmitted')) ex.criticalEventsOmitted = (() => { const x = numOrNull(ex.criticalEventsOmitted); return x != null && x >= 0 ? Math.round(x) : 0; })();
+  if (Object.hasOwn(ex, 'jobs') && ex.jobs != null) {
+    if (!isPlainObj(ex.jobs)) { ex.jobs = null; n += 1; }
+    else {
+      const j = {};
+      for (const k of ['running', 'paused', 'failed', 'recent']) { const r = rowList(ex.jobs[k]); if (!r && ex.jobs[k] != null) n += 1; j[k] = r || []; }
+      ex.jobs = j;
+    }
+  }
+  if (Object.hasOwn(ex, 'perf') && ex.perf != null) {
+    if (!isPlainObj(ex.perf)) { ex.perf = null; n += 1; }
+    else {   // 성능 칸은 수(못 읽으면 null — 0 으로 위장 금지) · 기준 시각 at 만 글자
+      const p = {};
+      for (const k of Object.keys(ex.perf).slice(0, EXTRA_ROW_KEYS_MAX)) p[capStr(k, 64)] = k === 'at' ? (typeof ex.perf.at === 'string' ? capStr(ex.perf.at, 40) : null) : numOrNull(ex.perf[k]);
+      ex.perf = p;
+    }
+  }
+  return n;
+}
+
 function narrowStorageSnapshotRest(d) {
   if (d.extra.power != null || d.extra.powerProbe != null) {
     const exP = { ...d.extra };
@@ -170,8 +214,8 @@ function narrowStorageSnapshotRest(d) {
   // v2.607(감사 CEN2607-02 — 재현): 화면이 글자로 그리는 extra 필드(헬스 배지·경보 문구·용량 기준 설명·버전 원문)가
   //   객체면 null 로. 예전에는 `extra.alertsNote:{a:1}` 가 그대로 저장돼 상세 모달이 React #31 로 죽었다.
   const ex0 = { ...d.extra };
-  const sc = scalarizeFields(ex0, STORAGE_EXTRA_DISPLAY_KEYS, 4096); // 긴 설명문은 자르지 않게 상한을 넓힌다
-  if (sc) d = { ...d, extra: ex0 };
+  const sc = scalarizeFields(ex0, STORAGE_EXTRA_DISPLAY_KEYS, 4096) + narrowStorageExtraLists(ex0); // 긴 설명문은 자르지 않게 상한을 넓힌다 · 23회차 S-4 목록 칸
+  d = { ...d, extra: ex0 };
   if (!Object.hasOwn(d.extra, 'appliances') || d.extra.appliances == null) return { snap: d, narrowed: sc };
   const raw = Array.isArray(d.extra.appliances) ? d.extra.appliances : null;
   let narrowed = (raw ? 0 : 1) + sc;
@@ -184,7 +228,8 @@ function narrowStorageSnapshotRest(d) {
 }
 import { recordActivity } from '../storage/activityLog.js';
 import { sanitizeEdgeResources } from '../storage/resources.js'; // v2.789
-import { saveCapacityPoint } from '../storage/db.js';
+import { saveCapacityPoint, saveNodeLoadPoint, saveNodeLoadSample, saveNodeUnits } from '../storage/db.js';
+import { sanitizeNodeLoadSample, CLIENT_LIMIT_MAX } from '../storage/nodeLoad.js'; // v2.932(2차 ⑨)
 import { ackCollect, setCollectBaseResolver } from '../storage/collectRequests.js';
 
 const FILE = path.join(config.configDir, 'central-agent-storage.json');
@@ -193,6 +238,8 @@ let _map = null;
 // 엣지 push 로그 중복 제거 — 엣지는 5분마다 전 장비를 다시 보내므로, 같은 collectedAt 을
 // 매번 로그에 남기면 같은 수집이 중복 기록된다. deviceId → 마지막 기록한 collectedAt.
 const _lastRec = new Map();
+// 23회차 S-7: 적재 실패 콘솔 — 장비당 10분에 한 줄(DB 잠김이 길어도 push 주기마다 찍지 않게)
+const capFailLog = (() => { const seen = new Map(); return { note(k, line) { const t = Date.now(); if ((seen.get(k) || 0) > t - 600_000) return; seen.set(k, t); if (seen.size > 2000) seen.clear(); console.warn(line); } }; })();
 
 // v2.599(CEN-2599-04): push 마다 전체 맵을 동기로 쓰던 것 → 디바운스 비동기 + 종료 시 동기 flush.
 const writer = createDebouncedWriter(FILE, () => JSON.stringify(Object.fromEntries(load())), { name: 'storageEdge' });
@@ -207,9 +254,17 @@ function load() {
 }
 
 // v2.591: '지금 수집' 요청 큐의 기준선 — 중앙 재시작 직후에도 보관 중인 엣지 스냅샷의 수집 시각(엣지 시계 값)을 쓴다.
+// 59회차(58회차 F1 반증 — SAN 과 같은 꼴 · 재현): 여러 엣지가 같은 장비 사본을 들고 있으면(위임을 옮김) **수집 시각이 가장 늦은 사본**의 값 —
+//   첫 일치는 옛 엣지의 낡은 시각을 기준선으로 잡아, 새 엣지가 이미 보관 중인 스냅샷을 다시 보내기만 해도 '지금 수집' 이 완료로 지워졌다.
 setCollectBaseResolver((id) => {
-  for (const rec of load().values()) for (const d of rec?.devices || []) if (String(d?.deviceId || d?.id) === String(id)) return Number(d.edgeCollectedAt ?? d.collectedAt) || null; // v2.630 A4-02: 엣지 시계 원본
-  return null;
+  let hit = null;
+  for (const rec of load().values()) {
+    for (const d of rec?.devices || []) {
+      if (String(d?.deviceId || d?.id) !== String(id)) continue;
+      if (!hit || (Number(d.collectedAt) || 0) > (Number(hit.collectedAt) || 0)) hit = d;
+    }
+  }
+  return hit ? (Number(hit.edgeCollectedAt ?? hit.collectedAt) || null) : null; // v2.630 A4-02: 엣지 시계 원본
 });
 
 /**
@@ -260,7 +315,12 @@ export function saveEdgeStorage(agent, devices, info = {}) {
     // (수집 노드 로컬 DB 원칙의 예외 — 용량 4~8필드뿐이라 WAN/저장 부담 없음. 원문 API 응답은
     // 여전히 엣지 DB). 같은 collectedAt 재push 는 위 dedup 이 걸러 중복 점이 쌓이지 않는다.
     // 실패 스냅샷은 saveCapacityPoint 가 자체 스킵(ok 만 적재 — 그래프 0값 오염 방지).
-    saveCapacityPoint(dv).catch(() => { /* DB 비활성 — 스냅샷 보관·로그는 계속 */ });
+    // 전체 점검 23회차 S-7(재현): 중복 제거 표지를 적재 결과보다 먼저 세워, 중앙 DB 가 잠긴 동안 받은 점이 영구히 빠지고 기록도 없었다 —
+    //   적재가 실패하면(던짐 · DB 없음) 표지를 되돌려 다음 push 가 같은 스냅샷을 다시 적재한다(14회차 C-2 노드 부하 표본과 같은 판단). 콘솔은 조절.
+    const unmark = (why) => { if (_lastRec.get(key) === ca) _lastRec.delete(key); capFailLog.note(key, `[storage-edge] 용량 점 적재 실패(${why}) — 다음 push 에 다시 적재합니다: ${capStr(String(key), 64)}`); };
+    saveCapacityPoint(dv).then((r) => { if (r && r.saved === false && r.reason === 'db-unavailable') unmark('db-unavailable'); }).catch((e) => unmark(capStr(String(e?.code || e?.message || 'error'), 60)));
+    // v2.926 — 노드 부하 시계열도 같은 자리(같은 중복 제거 뒤). 노드 값은 위 sanitizeNodeList(NODE_NUM_KEYS)를 거친 것이다.
+    saveNodeLoadPoint(dv).catch(() => { /* DB 비활성 — 스냅샷 보관·로그는 계속 */ });
     try {
       recordActivity({
         deviceId: key, name: dv.name || key, host: dv.host || '', source: agent,
@@ -283,6 +343,42 @@ function pruneLastRec() {
 }
 /** 테스트·진단용 — 중복 제거 Map 크기. */
 export function _lastRecSize() { return _lastRec.size; }
+
+/**
+ * v2.932(2차 ⑨) — 엣지가 storage push 본문에 실어 보낸 5분 표본 고리(`nodeLoadSamples: [{ deviceId, samples:[…] }]`)를 중앙 DB 에 적재한다.
+ *  · 소유권(중앙 직접 장비 거절 · 개별 토큰은 위임분만)은 라우트가 장비 목록과 같은 함수로 먼저 거른다 — 여기서는 모양·상한·정제만.
+ *  · 표본마다 `sanitizeNodeLoadSample`(아는 필드만 · 노드 64 · 클라이언트 상한 · 문자열 수치는 수로) + ts 는 수신 시각 이하로.
+ *  · 같은 (장비, ts) 는 DB PK 가 거른다(엣지 재전송 — duplicate 로 센다, 실패가 아니다). 뺀 것은 `dropped` 로 밝힌다(조용한 상한 금지).
+ *  · 적재는 표본마다 트랜잭션 1개(db.saveNodeLoadSample) — 장비 500 × 표본 6 상한이라 한 push 에 최대 3,000 개지만 실제는 장비당 ≤3.
+ */
+export const NODE_LOAD_SAMPLES_MAX_DEVICES = 500;
+export const NODE_LOAD_SAMPLES_PER_DEVICE = 6;
+export async function saveEdgeNodeLoadSamples(agent, list, { now = Date.now() } = {}) {
+  const out = { devices: 0, received: 0, saved: 0, duplicate: 0, dropped: 0 };
+  if (!Array.isArray(list)) return out;
+  for (const ent of list.slice(0, NODE_LOAD_SAMPLES_MAX_DEVICES)) {
+    if (!isPlainObj(ent) || !Array.isArray(ent.samples)) { out.dropped += 1; continue; }
+    const id = capStr(ent.deviceId, 128).trim(); // 글자·수만(객체·불리언은 '' — capStr)
+    if (!id) { out.dropped += 1; continue; }
+    out.devices += 1;
+    for (const raw of ent.samples.slice(0, NODE_LOAD_SAMPLES_PER_DEVICE)) {
+      out.received += 1;
+      const s = sanitizeNodeLoadSample(raw, { clientLimit: CLIENT_LIMIT_MAX, maxTs: now });
+      if (!s) { out.dropped += 1; continue; }
+      // v2.952: 어레이 단위 카탈로그(표본 안 units — 아는 필드만 · 64 · 이름 60자 · 종류 목록) — 표본이 중복이어도 이름은 갱신한다(이름 바뀜).
+      if (Array.isArray(raw.units) && raw.units.length) { try { const su = await saveNodeUnits(id, raw.units, now); out.units = (out.units || 0) + (su?.saved || 0); } catch { /* 표본 적재와 따로 — 조용히 넘기지 않고 아래 saved 로 드러난다 */ } }
+      let r;
+      try { r = await saveNodeLoadSample(id, s); } catch { r = { saved: false, reason: 'db-error' }; }
+      if (r?.saved) out.saved += 1;
+      else if (r?.duplicate) out.duplicate += 1;
+      else { out.dropped += 1; if (r?.reason === 'db-unavailable' || r?.reason === 'db-error') out.dbUnavailable = true; }   // 전체 점검 14회차(C-2): 쓰기 예외도 '적재 못 함' — 엣지가 고리를 지우지 않게
+    }
+    if (ent.samples.length > NODE_LOAD_SAMPLES_PER_DEVICE) out.dropped += ent.samples.length - NODE_LOAD_SAMPLES_PER_DEVICE;
+  }
+  if (list.length > NODE_LOAD_SAMPLES_MAX_DEVICES) out.dropped += list.length - NODE_LOAD_SAMPLES_MAX_DEVICES;
+  if (out.saved) console.log(`[central] storage-data: 엣지 '${String(agent).slice(0, 64)}' 노드 부하 표본 ${out.saved}개 적재(장비 ${out.devices} · 중복 ${out.duplicate} · 뺀 것 ${out.dropped})`);
+  return out;
+}
 
 /**
  * v2.581(BUG-D): 엣지의 상태 전용 보고 — 장비 목록(`devices`·`at`)은 그대로 두고 `status` 만 기록한다.

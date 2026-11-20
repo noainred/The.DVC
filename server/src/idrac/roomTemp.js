@@ -21,6 +21,7 @@
  *  그 외(DIMM·PSU·보드 등)는 other 로 세기만 하고 집계에서 제외한다.
  */
 
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { getSensorSeries, sensorPollCycle } from './sensorStore.js';
 import { listDatacenters } from '../datacenter/store.js';
 
@@ -39,7 +40,7 @@ export const UNASSIGNED_KEY = '__unassigned__';
  * latest 로 남는다. 그것을 '현재값'으로 집계하고 매 분 시계열에 새 타임스탬프로 재적재하면
  * 차트가 동결값 평탄선이 되어 실제 급등을 은폐한다(전력의 POWER_CURRENT_STALE_MS 와 같은 취지).
  */
-export const DEFAULT_MAX_AGE_MS = Number(process.env.ROOMTEMP_STALE_MS) || 15 * 60_000;
+export const DEFAULT_MAX_AGE_MS = envPositive(process.env.ROOMTEMP_STALE_MS, 15 * 60_000);
 
 /**
  * v2.634 — 신선도 경계를 **폴 주기 소요에 맞춰 넓힌다**(2026-09-28 사용자 신고 '측정 서버 0/980 · 미갱신 975').

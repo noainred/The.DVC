@@ -28,7 +28,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 97회차 F1: 읽기 오류 ≠ 손상
 import { tokenFingerprint } from '../util/tokenFingerprint.js';
 import { GROUP_KEYS } from './allowlist.js';
 
@@ -46,26 +47,49 @@ function sha256(s) { return crypto.createHash('sha256').update(String(s), 'utf8'
 
 let _cache = null;
 
+/*
+ * 97회차 F1(재현 — EISDIR): 예전 catch 하나는 ENOENT 가 아닌 **읽기 오류**(EACCES · EIO · EISDIR)도 손상으로 보고 온전한 원본(전 키의 해시)을
+ *   `.corrupt.*` 로 옮긴 뒤 빈 목록을 **캐시했다** — 표지 없이 모든 연동 키가 401 이 되고(재시작해도 원본은 보존본에만), 다음 발급 한 번이 그 키 하나만 든
+ *   파일을 썼다. 판정은 공용 읽기 하나(util/jsonFileRead.js — 읽기 단계 실패 = read-error · parse 실패 = corrupt → 예전처럼 보존):
+ *   읽기 오류는 원본을 두고 · 캐시하지 않고(30초 간격으로 다시 읽는다) · 발급 · 수정 · 폐기 · 삭제 · 사용 통계 저장을 거절한다(409). 검증은 그동안 실패 쪽이다.
+ */
+const _reader = makeJsonFileReader(FILE, {
+  parse: (text) => { const j = JSON.parse(text); return Array.isArray(j?.keys) ? { keys: j.keys } : { keys: [] }; },
+  tag: 'api-keys',
+});
+let _readErr = null;   // { at, code } — 마지막 읽기가 읽기 오류였다
 function load() {
   if (_cache) return _cache;
-  try {
-    const raw = fs.readFileSync(FILE(), 'utf8');
-    const j = JSON.parse(raw);
-    _cache = Array.isArray(j?.keys) ? { keys: j.keys } : { keys: [] };
-  } catch (e) {
-    // ⚠ 손상은 조용히 `[]` 로 넘기지 않는다 — 다음 저장이 온전했던 원본을 덮어쓴다(v2.190 규약).
-    if (e?.code !== 'ENOENT') preserveCorrupt(FILE(), String(e?.message || e));
-    _cache = { keys: [] };
+  const r = _reader.read();
+  if (r.kind === 'read-error') {
+    if (!_readErr) _readErr = { at: Date.now(), code: String(r.error?.code || 'read-error').slice(0, 32) };
+    return { keys: [] };   // 캐시하지 않는다 — 간격 안의 다음 호출은 디스크를 보지 않고 같은 결과
   }
+  _readErr = null;
+  // ⚠ 손상은 조용히 `[]` 로 넘기지 않는다 — 보존본으로 옮겼다(readJsonFile · v2.190 규약).
+  _cache = r.kind === 'ok' ? r.value : { keys: [] };
   return _cache;
+}
+/** 97회차 F1: 키 파일을 읽지 못했으면(읽기 오류 — 원본은 그대로) `{ at, code, reason }`, 아니면 null. */
+export function apiKeysLoadError() {
+  load();
+  return _readErr ? { at: _readErr.at, code: _readErr.code, readError: true, reason: `연동 키 파일(api-keys.json)을 읽지 못했습니다(${_readErr.code}) — 손상이 아니라 원본은 그대로 둡니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽습니다).` } : null;
+}
+/** 97회차 F1: 읽기 오류 중의 쓰기 거절(라우트 409) 또는 null. */
+function writeRefusal() {
+  const e = apiKeysLoadError();
+  return e ? { ok: false, status: 409, code: 'settings-unreadable', reason: `${e.reason} 그동안 발급 · 수정 · 폐기 · 삭제는 하지 않습니다(지금 쓰면 원본을 덮습니다).` } : null;
 }
 
 function persist() {
+  // 97회차 F1: 마지막 방어선 — 읽기 오류 중에는 어떤 경로(사용 통계 포함)도 원본을 덮지 않는다.
+  const no = writeRefusal();
+  if (no) throw Object.assign(new Error(no.reason), { status: 409, code: no.code });
   atomicWriteFileSync(FILE(), JSON.stringify({ keys: load().keys }, null, 2), { mode: 0o600 });
 }
 
 /** 테스트용 — 캐시를 버린다(파일은 건드리지 않는다). */
-export function _resetApiKeyCache() { _cache = null; _rate.clear(); }
+export function _resetApiKeyCache() { _cache = null; _readErr = null; _reader.reset(); _rate.clear(); }
 
 /* ── 정규화 ───────────────────────────────────────────────────────────────── */
 
@@ -147,6 +171,8 @@ export function normalizeKeyInput(input = {}, { knownVcenters = undefined } = {}
  * @returns {{key:object, plaintext:string, issues:string[]}}
  */
 export function issueApiKey(input = {}, by = '') {
+  const no = writeRefusal();   // 97회차 F1
+  if (no) return { key: null, plaintext: '', issues: [no.reason], status: no.status, code: no.code };
   const { values, issues } = normalizeKeyInput(input);
   if (!values.name) return { key: null, plaintext: '', issues };
 
@@ -170,6 +196,7 @@ export function issueApiKey(input = {}, by = '') {
 
 /** 폐기 — 행을 지우지 않고 `revokedAt` 을 찍는다(감사 흔적을 남긴다). */
 export function revokeApiKey(id, by = '') {
+  const no = writeRefusal(); if (no) return no;   // 97회차 F1
   const rec = load().keys.find((k) => k.id === String(id));
   if (!rec) return { ok: false, reason: '없는 키입니다.' };
   if (rec.revokedAt) return { ok: false, reason: '이미 폐기된 키입니다.' };
@@ -181,6 +208,7 @@ export function revokeApiKey(id, by = '') {
 
 /** 이미 폐기된 키의 행을 완전히 지운다(목록 정리용 — 산 키는 지울 수 없다). */
 export function deleteApiKey(id) {
+  const no = writeRefusal(); if (no) return no;   // 97회차 F1
   const ks = load().keys;
   const i = ks.findIndex((k) => k.id === String(id));
   if (i < 0) return { ok: false, reason: '없는 키입니다.' };
@@ -192,6 +220,7 @@ export function deleteApiKey(id) {
 
 /** 수정 — 허용 분류·범위·만료·상한만 바꾼다. **해시는 바꾸지 않는다**(키 값은 그대로). */
 export function updateApiKey(id, input = {}) {
+  const no = writeRefusal(); if (no) return no;   // 97회차 F1
   const rec = load().keys.find((k) => k.id === String(id));
   if (!rec) return { ok: false, reason: '없는 키입니다.' };
   if (rec.revokedAt) return { ok: false, reason: '폐기된 키는 수정할 수 없습니다.' };

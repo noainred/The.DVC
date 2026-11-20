@@ -140,6 +140,7 @@ export function registerVmDns(api) {
       const hist = vmDnsHistoryStatus();
       body.history = { lastRunAt: hist.lastRunAt, intervalMs: hist.intervalMs, retentionDays: hist.retentionDays, idleReason: hist.idleReason || '' };
       if (pol.invalid?.length) body.policy.invalid = pol.invalid.length;
+      if (pol.loadError) body.policy.loadError = pol.loadError;   // 결정(56~75 남긴 것) 60: 정책을 못 읽어 기본값으로 판정했음을 밝힌다
       return body;
     }, { ttlMs: 12_000, extraKey });
   });
@@ -186,7 +187,8 @@ export function registerVmDns(api) {
     const corps = {};
     for (const [id, list] of Object.entries(p.corps)) if (!allowed || allowed.has(id)) corps[id] = list;
     res.json({ corps, publicUnapproved: p.publicUnapproved, rev: p.rev, invalid: allowed ? [] : p.invalid,
-      orphan: allowed ? [] : Object.keys(p.corps).filter((id) => !known.has(id)), updatedAt: p.updatedAt, scoped: !!allowed });
+      orphan: allowed ? [] : Object.keys(p.corps).filter((id) => !known.has(id)), updatedAt: p.updatedAt, scoped: !!allowed,
+      ...(p.loadError ? { loadError: p.loadError } : {}) });   // 60: 손상 · 읽기 오류 표지(화면이 '설정 없음' 과 구분 — 그동안 저장은 409)
   });
 
   api.put('/tools/vm-dns/policy', adminOnly, toolsPerm, fleetOnly, (req, res) => {
@@ -194,6 +196,7 @@ export function registerVmDns(api) {
     const r = saveVmDnsPolicy(req.body || {}, user);
     if (!r.ok) {
       if (r.code === 'stale') return res.status(409).json({ ok: false, code: 'stale', reason: r.reason, rev: r.rev });
+      if (r.code === 'settings-unreadable') return res.status(409).json(r);   // 60
       return res.status(400).json({ ok: false, code: r.code || 'invalid', reason: r.reason || '형식이 맞지 않는 항목이 있습니다', invalid: r.invalid || [] });
     }
     const known = new Set((store.get()?.vcenters || []).map((v) => String(v.id)));

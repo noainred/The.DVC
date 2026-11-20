@@ -32,6 +32,7 @@ import { fileURLToPath } from 'node:url';
 import { config, currentVersion } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { registerStateFile } from '../util/stateFiles.js';
+import { fileMissing } from '../util/fileMissing.js';   // 134회차: '정말 없는가'(ENOENT 만 — existsSync 는 stat 실패도 false)
 import { activeOverride, loadOverride } from './signatureOverride.js';   // v2.810 화면에서 시한부로 끈 상태
 import {
   parseKeysDoc, mergeTrust, verifyEnvelopeText, matchArtifact, sha256Hex, strictBase64,
@@ -153,8 +154,9 @@ export function loadTrust({ repoFile = _repoKeysFile, hostFile = hostKeysFile(),
     sources.repo.error = String(e?.code || e?.message || e).slice(0, 120);
     fatal = `저장소 신뢰 키 파일을 읽지 못했습니다(${sources.repo.error})`;
   }
-  let present = false;
-  try { present = fs.existsSync(hostFile); } catch { present = false; }
+  // 134회차: `fs.existsSync` 는 stat 실패(폴더 수준 EACCES · EIO · ESTALE)도 false 라, 호스트 키 파일을 **확인하지 못한** 것이 '파일 없음' 이 되어 그 파일의
+  //   회수 목록 없이 검증을 진행했다(회수한 키로 서명한 번들을 받는다 — 아래 '회수 목록을 알 수 없어 검증을 진행하지 않습니다' 가 닿지 않았다). ENOENT 만 없음이다.
+  const present = !fileMissing(hostFile);
   if (present) {
     sources.host.present = true;
     const label = `호스트 신뢰 키 파일(${HOST_KEYS_NAME})`;

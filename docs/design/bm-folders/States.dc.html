@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>물리서버 폴더 — 상태와 예외</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./bmf.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+</style>
+</helmet>
+<div class="root" style="width:1440px;height:1000px;padding:22px 24px;gap:14px">
+  <div>
+    <h1 class="h1">상태 · 예외</h1>
+    <p class="intro" style="margin-top:4px">같은 화면이 계정 범위 · 엣지 보고 상태 · 쓰기 확인 · 오류에서 어떻게 보이는지. 값을 못 읽으면 0 이 아니라 ‘—’ 이고, 못 읽은 동안에는 지우지 않습니다.</p>
+  </div>
+  <div class="grid3">
+
+    <div class="card st">
+      <h3><span class="n">a</span>범위 계정(PL 법인만 보는 운영자)</h3>
+      <p>자기 법인 가지만 보이고 다른 법인은 개수도 싣지 않습니다. 서비스 태그는 가립니다.</p>
+      <div class="mini">
+        <span class="ln"><span class="co"></span><b>PL 폴란드</b><span class="bdg e">엣지</span><span class="sp num">41</span></span>
+        <span class="ln" style="padding-left:18px"><span class="fo"></span>DB<span class="sp num">8</span></span>
+        <span class="ln" style="padding-left:18px"><span class="fo"></span>MES<span class="sp num">21</span></span>
+        <span class="ln" style="padding-left:18px"><span class="sv"></span>pl-mes-app03<span class="mono dim sp">태그 ••••H55</span></span>
+      </div>
+      <p>‘전 법인’ 찾기 · (법인 미지정) · 폴더 구조 복사는 전체 범위 관리자만.</p>
+    </div>
+
+    <div class="card st">
+      <h3><span class="n">b</span>엣지 보고 만료(VN)</h3>
+      <p>폴더 등록은 그대로 두고 흐리게 표시합니다. 측정값은 ‘—’, 평균 · 합계에서 뺍니다.</p>
+      <div class="mini">
+        <span class="ln"><span class="fo"></span><b>VN 베트남 › DB</b><span class="bdg w sp">26시간 전 목록</span></span>
+        <span class="ln dim"><span class="sv off"></span>vn-db01<span class="sp">전원 — · CPU — · 전력 —</span></span>
+        <span class="ln dim"><span class="sv off"></span>vn-db02<span class="sp">전원 — · CPU — · 전력 —</span></span>
+        <span class="ln dim">서버 5대 · 측정 0대 기준(못 읽음 5)</span>
+      </div>
+      <p>엣지가 다시 보고하면 그대로 살아납니다 — 사람이 할 일은 없습니다.</p>
+    </div>
+
+    <div class="card st">
+      <h3><span class="n">c</span>폴더 삭제 확인</h3>
+      <p>지우기 전에 안에 든 대수를 보여 줍니다. 서버는 지워지지 않고 미분류로 돌아갑니다.</p>
+      <div class="mini">
+        <span class="ln"><span class="fo"></span><b>KR-HQ 본사 › DB › MySQL</b></span>
+        <span class="ln">서버 <b>20대</b> → (미분류) · 하위 폴더 0</span>
+        <span class="ln dim">자동 규칙 1개(‘mysql’ 포함)도 함께 지웁니다</span>
+        <span class="ln dim">서비스 인벤토리 ‘MySQL’ 연결 1개가 끊깁니다</span>
+      </div>
+      <div class="row"><button class="btn sm" type="button">취소</button><button class="btn sm danger" type="button">20대를 미분류로 돌리고 삭제</button></div>
+    </div>
+
+    <div class="card st">
+      <h3><span class="n">d</span>다른 폴더로 옮기기</h3>
+      <p>한 서버는 한 폴더에만 있으므로 ‘추가’ 가 아니라 ‘이동’ 입니다. 법인이 다른 폴더로는 못 옮깁니다.</p>
+      <div class="mini">
+        <span class="ln">선택 <b>3대</b> → <span class="fo"></span><b>KR-HQ 본사 › 백업 · 미디어 서버</b></span>
+        <span class="ln dim">지금 폴더: Oracle RAC 3대</span>
+        <span class="ln dim">옮긴 뒤: Oracle RAC 9 · 백업 · 미디어 서버 12</span>
+      </div>
+      <div class="row"><button class="btn sm" type="button">취소</button><button class="btn sm pri" type="button">3대 옮기기</button></div>
+    </div>
+
+    <div class="card st">
+      <h3><span class="n">e</span>없어진 서버(등록은 남았는데 목록에 없음)</h3>
+      <p>출처를 다 읽었을 때만 ‘없어짐’ 으로 봅니다. 못 읽은 출처가 있으면 판정을 미룹니다.</p>
+      <div class="mini">
+        <span class="ln"><span class="bdg r">없어짐 2</span><span class="dim">kr-ora-old01 · kr-ora-old02</span></span>
+        <span class="ln"><span class="bdg w">판정 보류 5</span><span class="dim">VN 엣지 보고 만료라 모릅니다</span></span>
+      </div>
+      <div class="row"><button class="btn sm" type="button">정리 미리보기(2대)</button><span class="note">미리 본 목록과 달라졌으면 지우지 않습니다</span></div>
+    </div>
+
+    <div class="card st">
+      <h3><span class="n">f</span>폴더 파일을 못 읽음</h3>
+      <p>빈 트리로 시작하지 않습니다(빈 목록을 저장하면 등록이 전부 사라집니다).</p>
+      <div class="band r"><span><b>폴더 정보를 읽지 못했습니다(파일 손상).</b> 조회 · 쓰기를 잠갔습니다. 손상본은 따로 보관했고, 백업에서 복원하거나 전체 범위 관리자가 초기화할 수 있습니다.</span></div>
+      <div class="row"><button class="btn sm off" type="button">서버 찾아 등록</button><button class="btn sm off" type="button">+ 폴더</button><span class="note">잠김</span></div>
+    </div>
+
+    <div class="card st">
+      <h3><span class="n">g</span>찾았는데 없음</h3>
+      <p>왜 없는지 단정하지 않고, 찾은 범위와 오래된 출처를 밝힙니다.</p>
+      <div class="mini">
+        <span class="ln"><b>‘orcl’ 이 들어간 서버가 없습니다</b></span>
+        <span class="ln dim">찾은 곳: 이름 · 호스트명 · 서비스 태그 — 503대</span>
+        <span class="ln dim">VN 엣지 목록은 26시간 전 것입니다</span>
+      </div>
+      <div class="row"><button class="btn sm" type="button">모델 · iDRAC 주소에서도 찾기</button><button class="btn sm" type="button">ESXi 호스트 포함</button></div>
+    </div>
+
+    <div class="card st">
+      <h3><span class="n">h</span>폴더 이름별(전 법인) 보기 — 읽기 전용</h3>
+      <p>같은 경로의 폴더를 법인을 넘어 합쳐 봅니다. 저장은 법인별 그대로입니다.</p>
+      <div class="box tw2">
+        <table class="t">
+          <thead><tr><th>폴더 경로</th><th class="r">법인</th><th class="r">서버</th><th class="r">KR</th><th class="r">PL</th><th class="r">IN</th><th class="r">그 외</th></tr></thead>
+          <tbody>
+            <tr><td><span class="nm"><span class="fo"></span>DB</span></td><td class="r num">11</td><td class="r num">97</td><td class="r num">32</td><td class="r num">8</td><td class="r num">6</td><td class="r num">51</td></tr>
+            <tr><td><span class="nm"><span class="fo"></span>MES</span></td><td class="r num">7</td><td class="r num">64</td><td class="r dim">—</td><td class="r num">21</td><td class="r num">9</td><td class="r num">34</td></tr>
+            <tr><td><span class="nm"><span class="fo"></span>AI · GPU</span></td><td class="r num">2</td><td class="r num">23</td><td class="r num">18</td><td class="r dim">—</td><td class="r dim">—</td><td class="r num">5</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card st">
+      <h3><span class="n">i</span>서비스 인벤토리 연결(2단계)</h3>
+      <p>VM 의 ‘vCenter 폴더 규칙’ 과 같은 자리에 ‘물리서버 폴더 규칙’ 을 둡니다.</p>
+      <div class="mini">
+        <span class="ln"><span class="bdg n">VM</span><span class="mono">/ERP/prod</span><span class="dim">→</span><b>ERP</b><span class="dim sp">vCenter 폴더 규칙(지금 있음)</span></span>
+        <span class="ln"><span class="bdg c">물리</span><span class="mono">/DB/Oracle RAC</span><span class="dim">→</span><b>Oracle RAC</b><span class="dim sp">새 규칙</span></span>
+        <span class="ln dim">판정 순서: 고정 → 폴더 규칙 → 스캔 라벨 → 이름 규칙</span>
+      </div>
+      <p>기존 자동 소속이 바뀌는 서버는 검토 큐에 먼저 보입니다.</p>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

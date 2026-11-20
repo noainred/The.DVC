@@ -31,6 +31,18 @@ const RESERVED = new Set(['__proto__', 'constructor', 'prototype']);
 export const safeKey = (k) => { const s = String(k); return RESERVED.has(s) ? `(${s})` : s; };
 const own = (obj, k) => (Object.hasOwn(obj, k) ? obj[k] : undefined);
 
+/*
+ * 73회차 F2(재현): 상한(CAPS)에 닿은 뒤에는 **새 키마다** `Object.keys(st.tmpl).length`(3,000개 배열)를 다시 만들었다 — 줄마다 다른
+ *   문장 20만 줄(8MB 붙여넣기)이 58초 CPU 를 잡았고, 실시간 분석(콘솔 전 줄)도 상한에 닿은 시간 버킷에서는 새 문장 한 줄마다 같은
+ *   비용을 냈다(v2.589 ARCH-A3 가 mergeState 에서 고친 것과 같은 꼴). 크기를 객체별로 기억한다(WeakMap — 상태 모양 · 파일은 그대로).
+ *   addItem 만 키를 하나씩 더하고 그때 +1 한다. 다른 경로(mergeState · compactState · load)는 새 객체를 만들거나 아래 forgetSize 로 지운다 —
+ *   처음 볼 때 한 번만 센다.
+ */
+const _sizes = new WeakMap();
+const sizeOf = (obj) => { let n = _sizes.get(obj); if (n == null) { n = Object.keys(obj).length; _sizes.set(obj, n); } return n; };
+const addedOne = (obj) => { const n = _sizes.get(obj); if (n != null) _sizes.set(obj, n + 1); };
+const forgetSize = (obj) => { if (obj && typeof obj === 'object') _sizes.delete(obj); };
+
 export function newState() {
   return {
     lines: 0, levels: { info: 0, warn: 0, error: 0, unknown: 0 },
@@ -79,8 +91,9 @@ export function addItem(state, item, idx) {
         const key = `${h.method} ${h.route} ${h.status}`;
         let e = own(st.http, key);
         if (!e) {
-          if (Object.keys(st.http).length >= CAPS.http) { st.overflow.http += 1; return; }
+          if (sizeOf(st.http) >= CAPS.http) { st.overflow.http += 1; return; }
           e = st.http[key] = { method: h.method, route: h.route, status: h.status, n: 0, sumMs: 0, maxMs: 0, slow: 0, rid: '' };
+          addedOne(st.http);
         }
         e.n += 1; e.sumMs += h.ms; if (h.ms > e.maxMs) { e.maxMs = h.ms; if (h.rid) e.rid = h.rid; }
         if (h.ms >= 5000) e.slow += 1;
@@ -104,7 +117,7 @@ export function addItem(state, item, idx) {
       if (hit.entity && m[hit.entity]) {
         const name = safeKey(String(m[hit.entity]).trim().slice(0, 120));
         if (own(e.ent, name) != null) e.ent[name] += 1;
-        else if (Object.keys(e.ent).length < CAPS.ent) e.ent[name] = 1;
+        else if (sizeOf(e.ent) < CAPS.ent) { e.ent[name] = 1; addedOne(e.ent); }
         else st.overflow.ent += 1;
       }
       if (e.samples.length < CAPS.samples) e.samples.push(sample(msg));
@@ -114,8 +127,8 @@ export function addItem(state, item, idx) {
     const key = `${tag}|${templateOf(msg)}`;
     let te = own(st.tmpl, key);
     if (!te) {
-      if (Object.keys(st.tmpl).length >= CAPS.tmpl) st.overflow.tmpl += 1;
-      else te = st.tmpl[key] = { n: 0, tag, level: lv, sample: sample(msg), rule: hit ? hit.id : '' };
+      if (sizeOf(st.tmpl) >= CAPS.tmpl) st.overflow.tmpl += 1;
+      else { te = st.tmpl[key] = { n: 0, tag, level: lv, sample: sample(msg), rule: hit ? hit.id : '' }; addedOne(st.tmpl); }
     }
     if (te) { te.n += 1; if (lv === 'error' || (lv === 'warn' && te.level !== 'error')) te.level = lv; }
 
@@ -125,8 +138,8 @@ export function addItem(state, item, idx) {
       if (problem) {
         let pe = own(st.prob, key);
         if (!pe) {
-          if (Object.keys(st.prob).length >= CAPS.prob) st.overflow.prob += 1;
-          else pe = st.prob[key] = { n: 0, tag, level: lv, guessed: lv === 'unknown', sample: sample(msg) };
+          if (sizeOf(st.prob) >= CAPS.prob) st.overflow.prob += 1;
+          else { pe = st.prob[key] = { n: 0, tag, level: lv, guessed: lv === 'unknown', sample: sample(msg) }; addedOne(st.prob); }
         }
         if (pe) pe.n += 1;
       }
@@ -192,6 +205,9 @@ export function mergeState(a, b) {
     else a.overflow.http += v.n || 0;
   }
   for (const k of Object.keys(a.overflow)) a.overflow[k] = addNum(a.overflow[k], b.overflow?.[k]);
+  // 73회차 F2: 여기서 키를 더한 객체의 기억한 크기는 낡았다 — 다음 addItem 이 다시 센다(상한을 넘겨 쌓지 않게).
+  forgetSize(a.tmpl); forgetSize(a.prob); forgetSize(a.http);
+  for (const r of Object.values(a.rules || {})) forgetSize(r?.ent);
   void minTs; void maxTs;
   return a;
 }

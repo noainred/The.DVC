@@ -9,8 +9,8 @@ import { hostUsagePct } from './vcdOverview.js';
 import { CPU_BUCKETS, cpuBucket } from './hostTriage.js';
 import { kwText } from './hostChecksText.js';
 import {
-  SEV_LABEL, SEV_BADGE, SEV_COLOR, REGION_COLOR, RATIO_STEPS, fmtN, pctText, ratioText, gbText, stepTone, TONE_TEXT, TONE_BAR,
-  rttCell, corpMark, collectText, placeText, corpSortKey, chipList, corpView, clusterTags, bucketSegs, corpKpis,
+  SEV_LABEL, SEV_BADGE, SEV_COLOR, REGION_COLOR, RATIO_STEPS, fmtN, pctText, gbText, stepTone, TONE_TEXT, TONE_BAR,
+  rttCell, corpMark, collectText, placeText, corpSortKey, chipList, corpView, clusterTags, bucketSegs, corpKpis, vcoreCell, ramCell,
 } from './hostCorpText.js';
 
 const BUCKET_KEYS = CPU_BUCKETS.map((b) => b.key);
@@ -171,10 +171,10 @@ export default function HostsCorp({ filters, rows, onOpenCluster }) {
                       <span className="hc-row"><Segs buckets={c.buckets} /><b className="tabular" style={{ color: c.hot >= 5 ? '#f87171' : c.hot > 0 ? '#fbbf24' : 'var(--text-dim)' }}>{fmtN(c.hot)}</b></span>
                     </td>
                     <td data-sort={c.vcpuPerCore ?? '—'} className={faded}>
-                      <Mini value={c.vcpuPerCore} steps={RATIO_STEPS.vcpu} max={5} text={ratioText(c.vcpuPerCore)} title={c.capUnknown ? `용량을 못 읽은 호스트 ${c.capUnknown}대 — 비율을 내지 않습니다` : `할당 vCore ${fmtN(c.vcpu)} / 물리 코어 ${fmtN(c.cores)} · 템플릿 제외 · 눈금 2.5 · 4`} />
+                      <Mini value={c.vcpuPerCore} steps={RATIO_STEPS.vcpu} max={5} text={vcoreCell(c).text} title={vcoreCell(c).title} />
                     </td>
                     <td data-sort={c.ramPct ?? '—'} className={faded}>
-                      <Mini value={c.ramPct} steps={RATIO_STEPS.ram} max={200} text={pctText(c.ramPct)} title={`VM 메모리 할당 ${gbText(c.vmMemGB)} / 물리 ${gbText(c.memTotalGB)} · 눈금 100% · 150%`} />
+                      <Mini value={c.ramPct} steps={RATIO_STEPS.ram} max={200} text={ramCell(c).text} title={ramCell(c).title} />
                     </td>
                     <td data-sort={c.headroomGB ?? '—'} className={`tabular${faded}`} title={`정격 메모리의 90% 에서 지금 사용 중인 양을 뺀 합${c.headroomExcluded ? ` — 사용률을 못 읽은 호스트 ${c.headroomExcluded}대 제외` : ''}`}>
                       <span style={{ color: c.headroomGB != null && c.headroomGB < 0 ? '#f87171' : undefined }}>{gbText(c.headroomGB)}</span>
@@ -236,7 +236,7 @@ function CorpPanel({ c, cfgOk, byId, open, setOpen, onOpenCluster, now }) {
         {[
           ['호스트', fmtN(c.hosts), `점검 ${fmtN(c.maint)} · 끊김 ${fmtN(c.down)}`],
           ['클러스터', c.hosts == null ? '—' : fmtN(c.clusterCount), cfgOk && c.cfg ? `N+1 불가 ${c.cfg.n1Fail}` : `독립 호스트 ${fmtN(c.standalone)}`],
-          ['VM', fmtN(c.vms), `vCore ${ratioText(c.vcpuPerCore)}`],
+          ['VM', fmtN(c.vms), `vCore ${vcoreCell(c).text}`],
           ['전력', c.powerKw > 0 ? `${c.powerKw} kW` : '—', `물리 코어 ${fmtN(c.cores)}`],
         ].map(([l, v, s]) => (
           <span key={l} className="hc-p-count"><span className="muted">{l}</span><b className="tabular">{v}</b><span className="muted">{s}</span></span>
@@ -274,7 +274,7 @@ function CorpPanel({ c, cfgOk, byId, open, setOpen, onOpenCluster, now }) {
                     return <i key={h.id} className={`ht-cell ${mt ? 'hc-cell-maint' : `ht-b-${cpuBucket(h)}`}`} title={`${h.name} — ${mt ? '점검 · ' : ''}CPU ${pctText(hostUsagePct(h, 'cpuUsagePct'))}`} />;
                   })}
                 </span>
-                <span className="muted tabular hc-cl-f">CPU 평균 {pctText(cl.cpuAvg)} · 최대 <b style={{ color: cl.cpuMax > 90 ? '#f87171' : cl.cpuMax >= 75 ? '#fbbf24' : 'var(--text)' }}>{pctText(cl.cpuMax)}</b> · vCore {ratioText(cl.vcpuPerCore)} · RAM 할당 {pctText(cl.ramPct)} · 여유 {gbText(cl.headroomGB)}</span>
+                <span className="muted tabular hc-cl-f">CPU 평균 {pctText(cl.cpuAvg)} · 최대 <b style={{ color: cl.cpuMax > 90 ? '#f87171' : cl.cpuMax >= 75 ? '#fbbf24' : 'var(--text)' }}>{pctText(cl.cpuMax)}</b> · <span title={vcoreCell(cl).title}>vCore {vcoreCell(cl).text}</span> · <span title={ramCell(cl).title}>RAM 할당 {ramCell(cl).text}</span> · 여유 {gbText(cl.headroomGB)}</span>
                 <span className="hc-tags">{clusterTags(cl, cfgOk).map((t) => <span key={t.label} className={`badge ${t.tone}`}>{t.label}</span>)}</span>
               </button>
               {isOpen && (

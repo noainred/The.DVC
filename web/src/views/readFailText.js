@@ -85,5 +85,20 @@ export function agentTokSummary(agentTok, err) {
 export function fileUnreadableText(loadError, what, { notMeaning = '' } = {}) {
   if (!loadError || typeof loadError !== 'object') return null;
   const why = typeof loadError.text === 'string' && loadError.text ? loadError.text.slice(0, 200) : '사유 미상';
+  // 87회차 ⓐ: 읽기 오류(readError — 권한 · 소유자 · 디스크, 원본은 그대로)는 보존본이 없고 저장도 거절된다 — 조치를 그대로 말한다.
+  if (loadError.readError === true) return `${what}을(를) 읽지 못했습니다(${why})${notMeaning ? ` — ${notMeaning}` : ''}. 손상이 아니라 읽기 오류이고 원본은 그대로 있습니다 — 중앙 설정 디렉터리의 그 파일 권한 · 소유자(포탈 서비스 계정) · 디스크를 확인하세요(읽히면 재시작 없이 풀립니다 · 그동안 저장은 거절됩니다).`;
   return `${what}을(를) 읽지 못했습니다(${why})${notMeaning ? ` — ${notMeaning}` : ''}. 중앙 설정 디렉터리의 손상 보존본(.corrupt.*)을 되돌리거나 이 화면에서 다시 저장하면 풀립니다.`;
+}
+
+/**
+ * 87회차 ⓐ(85회차 결정 — 권장안): 배포 대상 등록부 표지(`GET /admin/agent-deploy/targets` 의 loadError) → 화면 문구. 없으면 null.
+ *   읽기 오류(readError — 원본 그대로 · 모든 저장 거절)와 손상(corrupt · corrupt-only — 관리자 저장이 새 등록부를 만든다)은 조치가 다르다.
+ */
+export function deployTargetsUnreadableText(le) {
+  if (!le || typeof le !== 'object') return null;
+  const what = '배포 대상 등록부(agent-deploy-targets.json)';
+  const code = typeof le.code === 'string' && /^[A-Za-z-]{1,32}$/.test(le.code) ? le.code : '';
+  if (le.readError === true) return `${what}를 읽지 못했습니다${code ? `(${code})` : ''} — 저장된 대상이 없다는 뜻이 아닙니다. 손상이 아니라 읽기 오류이고 원본은 그대로 있습니다 — 파일 권한 · 소유자(포탈 서비스 계정) · 디스크를 확인하세요(읽히면 재시작 없이 풀립니다 · 그동안 저장 · 삭제는 거절됩니다).`;
+  if (le.code === 'corrupt-only') return `${what} 파일이 없고 손상 보존본(.corrupt.*)만 남아 있습니다 — 저장된 대상이 없다는 뜻이 아닙니다. 보존본을 되돌리고 재시작하거나, 대상을 다시 저장해 새 등록부를 만드세요(토큰 자동 적용의 배포 기록 맞춤은 그때까지 쓰지 않습니다).`;
+  return `${what}가 손상돼 보존본(.corrupt.*)으로 옮겼습니다 — 저장된 대상이 없다는 뜻이 아닙니다. 보존본을 되돌리고 재시작하거나, 대상을 다시 저장해 새 등록부를 만드세요(토큰 자동 적용의 배포 기록 맞춤은 그때까지 쓰지 않습니다).`;
 }

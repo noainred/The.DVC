@@ -28,9 +28,9 @@ function effectBody(code, deps) {
 
 describe('WEB-01 VM 수량 추이 — 조회 범위가 바뀌면 이전 값을 비운다', () => {
   const code = src('VmTrackTool.jsx');
-  it('[days, vcenterId] 효과가 setData(null)·setError(null) 를 load() 보다 먼저 부른다', () => {
-    const body = effectBody(code, ['days', 'vcenterId']);
-    expect(body, '[days, vcenterId] 효과가 있어야 한다').toBeTruthy();
+  it('[days, vcenterId, region] 효과가 setData(null)·setError(null) 를 load() 보다 먼저 부른다(v3.10.15: 리전도 조회 조건)', () => {
+    const body = effectBody(code, ['days', 'vcenterId', 'region']);
+    expect(body, '[days, vcenterId, region] 효과가 있어야 한다').toBeTruthy();
     const iData = body.indexOf('setData(null)');
     const iErr = body.indexOf('setError(null)');
     const iLoad = body.indexOf('load()');
@@ -39,7 +39,7 @@ describe('WEB-01 VM 수량 추이 — 조회 범위가 바뀌면 이전 값을 �
     expect(iLoad).toBeGreaterThan(Math.max(iData, iErr));
   });
   it('형제 화면(StorageTrackTool)과 같은 규칙이다 — 그쪽도 비우고 시작한다', () => {
-    const body = effectBody(src('StorageTrackTool.jsx'), ['days', 'vcenterId']);
+    const body = effectBody(src('StorageTrackTool.jsx'), ['days', 'vcenterId', 'region']);   // v3.10.15: 리전도 조회 조건
     expect(body).toBeTruthy();
     expect(body).toMatch(/setData\(null\)[\s\S]*setError\(null\)[\s\S]*refresh\(\)/);
   });
@@ -68,7 +68,7 @@ describe('DB-01 스토리지 변경 이력 — DS 피벗 검색은 300ms 디바�
     expect(list).not.toContain('q');
   });
   it('쪽 번호 초기화도 적용값 기준이다(입력 중에 페이지가 매 글자 0 으로 튀지 않게)', () => {
-    expect(effectBody(code, ['vcenterId', 'days', 'qApplied', 'changedOnly', 'view'])).toMatch(/setPage\(0\)/);
+    expect(effectBody(code, ['vcenterId', 'region', 'days', 'qApplied', 'changedOnly', 'view'])).toMatch(/setPage\(0\)/);   // v3.10.15: 리전도 조건
   });
 });
 

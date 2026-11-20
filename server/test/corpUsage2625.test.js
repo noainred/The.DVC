@@ -14,7 +14,7 @@
  *  ⑦ mergeLatestRows 는 ts 가 큰 쪽 · makeCapOf 폴백 순서
  *  ⑧ 실제 api 라우터: 200 · 응답에 서버 이름 없음 · 범위 계정 필터
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -25,6 +25,13 @@ import { buildCorpUsage, judgeServer, corpGroupOf, srcOfRow } from '../src/corpu
 import { resolveTargets } from '../src/bmusage/targets.js';
 import { mergeLatestRows, makeCapOf } from '../src/routes/api/corpUsage.js';
 import { normalizeSettings } from '../src/bmusage/settings.js';
+
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
@@ -181,7 +188,7 @@ test('⑦ mergeLatestRows · makeCapOf', () => {
 });
 
 test('⑧ 실제 api 라우터 — 200 · 서버 이름 없음 · 범위 계정', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'corpusage2625-'));
+  const dir = tmpDir('corpusage2625-');
   fs.writeFileSync(path.join(dir, 'permissions.json'), JSON.stringify({ schemaVersion: 2, matrix: { operator: ['dashboard', 'tools'], viewer: ['dashboard', 'tools'], toolsDenied: { operator: [], viewer: [] } } }));
   const script = `
     const express = (await import('express')).default;

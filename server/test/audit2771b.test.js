@@ -2,13 +2,20 @@
 //  R6-F5-2: IPv4-mapped 요청자 IP('::ffff:a.b.c.d')를 IPv4 로 정규화(라우트·상태·계획·parseCidr/ipInCidr). 전역 clientIp 는 그대로.
 //  R6-F5-3: 추가 규칙의 포트 '범위' drop/reject 가 포탈 포트를 덮으면 자기 잠금 오류(포함 판정 a≤p≤b, 소스 지정 검사도 같은 판정).
 //  R6-F5-4: NSX 범위 판정에서 'Unknown'(지역 미지정 표식)을 빈 지역과 같이 취급 — 무귀속 매니저가 범위 계정에 새지 않게.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2771b-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const tmp = tmpDir('audit2771b-');
 process.env.CONFIG_DIR = tmp;
 process.env.PORT = '4000';
 const R = await import('../src/hostaccess/render.js');

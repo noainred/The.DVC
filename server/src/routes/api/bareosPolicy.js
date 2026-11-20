@@ -50,13 +50,13 @@ export function registerBareosPolicy(api) {
       const allowed = scopedVcenterIds(req.user, snap);
       const settings = effectiveSettings();
       const regBad = !!registryLoadError();
-      let groups = [];
-      try { groups = groupsLoadError() ? [] : listGroups(); } catch { groups = []; }
+      let groups = []; let groupsKnown = true;   // 전체 점검 13회차(W-10): 못 읽은 그룹은 빈 목록이 아니라 모름
+      try { if (groupsLoadError()) groupsKnown = false; else groups = listGroups(); } catch { groups = []; groupsKnown = false; }
       const marksBad = marksUnreadable();
       const vmsById = new Map((snap?.vms || []).map((v) => [v.id, v]));
       const names = new Map((snap?.vcenters || []).map((v) => [v.id, v.name || v.id]));
       const view = policyView({
-        settings, digests: regBad ? [] : jobDigests(), digestsKnown: !regBad, groups, marks: marksBad ? {} : getMarks(), marksKnown: !marksBad,
+        settings, digests: regBad ? [] : jobDigests(), digestsKnown: !regBad, groups, groupsKnown, marks: marksBad ? {} : getMarks(), marksKnown: !marksBad,
         vmsById, allowed, admin, demo: isDemoActive(), now: Date.now(), vcName: (id) => names.get(id) || id, collecting,
       });
       return { ...view, demo: isDemoActive() || undefined, canCollect: admin, groupsUnreadable: (() => { try { return !!groupsLoadError(); } catch { return true; } })() || undefined };

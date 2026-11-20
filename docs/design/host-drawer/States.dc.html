@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>호스트 드로어 — 상태 4종</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.muted{color:#8b9bb4}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap;flex:none}
+.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}.tag.crit{background:rgba(239,68,68,.16);color:#fca5a5}.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;flex:none}
+.wrap{padding:20px 24px;display:grid;grid-template-columns:repeat(4, minmax(0, 1fr));gap:16px;min-width:0;min-height:760px;box-sizing:border-box;align-items:start}
+.col{display:flex;flex-direction:column;gap:8px;min-width:0}
+.cap{display:flex;flex-direction:column;gap:2px;padding:0 2px}
+.cap b{font-size:13.5px}
+.cap span{font-size:12px;color:#8b9bb4;line-height:1.5}
+.mini{background:#111726;border:1px solid #243049;border-radius:12px;overflow:hidden;display:flex;flex-direction:column;min-width:0}
+.dh{padding:12px 14px 10px;border-bottom:1px solid #1f2a40;display:flex;flex-direction:column;gap:8px}
+.dh .ttl{display:flex;align-items:center;gap:8px;min-width:0}
+.dh h2{margin:0;font-size:15px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.badges{display:flex;flex-wrap:wrap;gap:6px}
+.crumb{font-size:12px;color:#8b9bb4;display:flex;flex-wrap:wrap;gap:2px 6px;align-items:center}
+.body{padding:12px 14px 14px;display:flex;flex-direction:column;gap:14px}
+.sec{display:flex;flex-direction:column;gap:8px;min-width:0}
+.sec h3{margin:0;font-size:12.5px;font-weight:700;color:#8b9bb4}
+.tiles{display:grid;grid-template-columns:repeat(2, minmax(0, 1fr));gap:8px}
+.tile{background:#141b2d;border:1px solid #243049;border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.tile .lb{font-size:11px;color:#8b9bb4;font-weight:600}
+.tile .v{font-size:20px;font-weight:800;line-height:1}
+.tile .v small{font-size:11px;color:#8b9bb4;font-weight:600;margin-left:2px}
+.tile .s{font-size:11px;color:#8b9bb4;line-height:1.45}
+.spark{height:26px;width:100%}
+.row{display:flex;align-items:flex-start;gap:10px;padding:9px 12px;background:#141b2d;border:1px solid #243049;border-radius:10px;min-width:0}
+.row .t{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.row .t b{font-size:12.5px}
+.row .t span{font-size:11.5px;color:#8b9bb4;line-height:1.45}
+.plain{font-size:12px;color:#8b9bb4;line-height:1.55}
+</style>
+</helmet>
+
+<div class="wrap">
+  <div class="col">
+    <div class="cap"><b>A. 점검(Maintenance) 모드</b><span>머리 점 · 상태 배지가 주황 · VM 이 비어 있는 것이 정상이라 사용률 색은 올리지 않습니다.</span></div>
+    <div class="mini">
+      <div class="dh">
+        <div class="ttl"><span class="dot" style="background:#f59e0b" title="점검 모드"></span><h2>esx-kr1-03.kr.dvc.example</h2></div>
+        <div class="badges"><span class="tag warn">점검</span></div>
+        <div class="crumb"><span class="tag warn">점검 모드</span><span class="tag ok">전원 On</span><span>VC-KR1 › Cluster-A</span></div>
+      </div>
+      <div class="body">
+        <div class="sec"><h3>한눈에</h3>
+          <div class="tiles">
+            <div class="tile"><span class="lb">CPU</span><span class="v mono">0<small>%</small></span>
+              <svg class="spark" viewBox="0 0 100 26" preserveAspectRatio="none" aria-hidden="true"><polyline fill="none" stroke="#3b82f6" stroke-width="1.5" points="0,8 20,9 40,8 55,10 62,24 80,25 100,25"></polyline></svg>
+              <span class="s">32코어</span></div>
+            <div class="tile"><span class="lb">VM</span><span class="v mono">0<small>대</small></span><span class="s">켜짐 0 · 꺼짐 0</span></div>
+          </div>
+        </div>
+        <div class="sec"><h3>신호 1 — 봐야 할 것</h3>
+          <div class="row"><span class="dot" style="background:#f59e0b;margin-top:4px"></span><div class="t"><b>점검(Maintenance) 모드</b><span>유지보수 상태 호스트 — 호스트 목록의 ‘점검 모드’ 카드와 같은 판정입니다.</span></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="cap"><b>B. 끊김 · 무응답</b><span>못 읽은 값은 0 이 아닙니다 — ‘—’ 로 두고 단위 · 추이 · 구성 판정을 그리지 않습니다.</span></div>
+    <div class="mini">
+      <div class="dh">
+        <div class="ttl"><span class="dot" style="background:#ef4444" title="끊김"></span><h2>esx-kr1-11.kr.dvc.example</h2></div>
+        <div class="badges"><span class="tag crit">끊김</span></div>
+        <div class="crumb"><span class="tag crit">끊김</span><span class="tag gray">전원 모름</span><span>VC-KR1 › Cluster-B</span></div>
+      </div>
+      <div class="body">
+        <div class="sec"><h3>한눈에 · 끊긴 호스트는 사용률이 없습니다</h3>
+          <div class="tiles">
+            <div class="tile"><span class="lb">CPU</span><span class="v mono muted">—</span><span class="s">32코어</span></div>
+            <div class="tile"><span class="lb">메모리</span><span class="v mono muted">—</span><span class="s">256 GB</span></div>
+          </div>
+        </div>
+        <div class="sec"><h3>신호 1 — 봐야 할 것</h3>
+          <div class="row"><span class="dot" style="background:#ef4444;margin-top:4px"></span><div class="t"><b>끊김</b><span>vCenter 가 이 호스트의 사용률을 읽지 못했습니다.</span></div></div>
+        </div>
+        <div class="sec"><h3>구성 · 보안</h3><div class="plain">연결이 끊긴 호스트라 판정하지 않았습니다.</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="cap"><b>C. 신호 없음</b><span>배지 줄이 사라지고, 무엇을 봤는지 한 줄로 말합니다(빈 칸으로 두지 않습니다).</span></div>
+    <div class="mini">
+      <div class="dh">
+        <div class="ttl"><span class="dot" style="background:#22c55e" title="연결됨"></span><h2>esx-kr1-05.kr.dvc.example</h2></div>
+        <div class="crumb"><span class="tag ok">정상</span><span class="tag ok">전원 On</span><span>VC-KR1 › Cluster-A</span></div>
+      </div>
+      <div class="body">
+        <div class="sec"><h3>한눈에</h3>
+          <div class="tiles">
+            <div class="tile"><span class="lb">CPU</span><span class="v mono" style="color:#86efac">57<small>%</small></span>
+              <svg class="spark" viewBox="0 0 100 26" preserveAspectRatio="none" aria-hidden="true"><polyline fill="none" stroke="#3b82f6" stroke-width="1.5" points="0,14 15,12 30,13 45,11 60,12 75,10 90,11 100,11"></polyline></svg>
+              <span class="s">32코어 · 43.8 / 76.8 GHz</span></div>
+            <div class="tile"><span class="lb">메모리</span><span class="v mono" style="color:#86efac">48<small>%</small></span>
+              <svg class="spark" viewBox="0 0 100 26" preserveAspectRatio="none" aria-hidden="true"><polyline fill="none" stroke="#a855f7" stroke-width="1.5" points="0,14 20,14 40,13 60,14 80,13 100,13"></polyline></svg>
+              <span class="s">123 / 256 GB</span></div>
+          </div>
+        </div>
+        <div class="sec"><h3>신호 0 — 봐야 할 것</h3>
+          <div class="plain">신호 없음 — 점검 모드 · 끊김 · CPU 초과 · 업링크 · 인증서 · 스토리지 경로 · 재부팅 · 부품 · 백업 모두 해당하지 않습니다. 구성 · 경합 · 클러스터 항목은 아래에 있습니다.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="cap"><b>D. 못 읽은 것이 있을 때</b><span>권한이 없거나 아직 읽지 않은 묶음은 ‘없음’ 으로 세지 않고 따로 말합니다.</span></div>
+    <div class="mini">
+      <div class="dh">
+        <div class="ttl"><span class="dot" style="background:#22c55e" title="연결됨"></span><h2>esx-kr1-07.kr.dvc.example</h2></div>
+        <div class="badges"><span class="tag crit">CPU 93%</span></div>
+        <div class="crumb"><span class="tag ok">정상</span><span class="tag ok">전원 On</span><span>VC-KR1 › Cluster-A</span></div>
+      </div>
+      <div class="body">
+        <div class="sec"><h3>한눈에</h3>
+          <div class="tiles">
+            <div class="tile"><span class="lb">CPU</span><span class="v mono" style="color:#fca5a5">93<small>%</small></span><span class="s">24시간 추이를 읽지 못했습니다</span></div>
+            <div class="tile"><span class="lb">VM</span><span class="v mono">11<small>대</small></span><span class="s">켜짐 · 할당은 점검 묶음을 받지 못해 비웁니다</span></div>
+          </div>
+        </div>
+        <div class="sec"><h3>신호 1 — 봐야 할 것 · 확인 못 한 묶음 2</h3>
+          <div class="row"><span class="dot" style="background:#ef4444;margin-top:4px"></span><div class="t"><b>CPU 90% 초과</b><span>CPU 93%</span></div></div>
+          <div class="plain">iDRAC 부품 상태 · 재부팅 판정은 이 계정의 권한 밖이라 받지 않았습니다 — 이상 없음이 아닙니다.</div>
+        </div>
+        <div class="sec"><h3>구성 · 보안</h3><div class="plain">이 호스트의 구성 속성을 아직 읽지 않았습니다 — 수집 서버가 오래된 호스트부터 나눠 읽습니다.</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":760}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

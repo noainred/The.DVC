@@ -59,3 +59,67 @@ describe('v2.911 — 한 이동에 검색어 + 고른 장비를 함께', async (
     expect(takeSearch('datastores:focus', 1000)).toBe('vc:ds-1');
   });
 });
+
+// v2.928(A5): 새 탭 인계 — localStorage 일회용 칸 + 창 이름(주소에는 싣지 않는다).
+import { stashForNewTab, consumeNewTabHandoff, NEWTAB_KEY, NEWTAB_PREFIX, NEWTAB_TTL_MS } from './searchHandoff.js';
+
+function memStorage() {
+  const m = new Map();
+  return {
+    get length() { return m.size; },
+    key: (i) => [...m.keys()][i] ?? null,
+    getItem: (k) => (m.has(k) ? m.get(k) : null),
+    setItem: (k, v) => { m.set(k, String(v)); },
+    removeItem: (k) => { m.delete(k); },
+    _m: m,
+  };
+}
+const NONCE = '0123456789abcdef';
+
+describe('새 탭 인계(v2.928)', () => {
+  it('남긴 칸을 새 탭이 한 번 꺼내 메모리 인계로 옮기고 칸 · 창 이름을 지운다', () => {
+    const st = memStorage();
+    const name = stashForNewTab([['storage-mon', 'unity-01'], ['storage-mon:focus', 'st-7']], { storage: st, now: 1000, nonce: NONCE });
+    expect(name).toBe(NEWTAB_PREFIX + NONCE);
+    expect(st.getItem(NEWTAB_KEY + NONCE)).toBeTruthy();
+    const win = { name };
+    expect(consumeNewTabHandoff({ win, storage: st, now: 2000 })).toBe(true);
+    expect(win.name).toBe('');
+    expect(st.getItem(NEWTAB_KEY + NONCE)).toBe(null);
+    expect(takeSearch('storage-mon', 2000)).toBe('unity-01');
+    expect(takeSearch('storage-mon:focus', 2000)).toBe('st-7');
+    // 두 번째 시작(새로 고침)에는 아무것도 없다
+    expect(consumeNewTabHandoff({ win: { name }, storage: st, now: 2100 })).toBe(false);
+  });
+  it('넘길 것이 없거나 번호가 이상하면 칸을 만들지 않는다', () => {
+    const st = memStorage();
+    expect(stashForNewTab([], { storage: st, now: 0, nonce: NONCE })).toBe('');
+    expect(stashForNewTab([['ipam', '10.0.0.5']], { storage: st, now: 0, nonce: 'xyz' })).toBe('');
+    expect(st.length).toBe(0);
+  });
+  it('60초가 지난 칸은 버리고, 다음에 남길 때 낡은 칸을 치운다', () => {
+    const st = memStorage();
+    const name = stashForNewTab([['ipam', '10.0.0.5']], { storage: st, now: 0, nonce: NONCE });
+    expect(consumeNewTabHandoff({ win: { name }, storage: st, now: NEWTAB_TTL_MS + 1 })).toBe(false);
+    expect(takeSearch('ipam', NEWTAB_TTL_MS + 1)).toBe('');
+    st.setItem(NEWTAB_KEY + 'aaaaaaaaaaaaaaaa', JSON.stringify({ e: [['ipam', 'x']], at: 0 }));
+    stashForNewTab([['ipam', 'y']], { storage: st, now: NEWTAB_TTL_MS + 5, nonce: 'bbbbbbbbbbbbbbbb' });
+    expect(st.getItem(NEWTAB_KEY + 'aaaaaaaaaaaaaaaa')).toBe(null);
+    expect(st.getItem(NEWTAB_KEY + 'bbbbbbbbbbbbbbbb')).toBeTruthy();
+  });
+  it('우리 접두가 아닌 창 이름 · 형식이 다른 번호 · 손댄 값은 무시하거나 다시 자른다', () => {
+    const st = memStorage();
+    const w1 = { name: 'other-window' };
+    expect(consumeNewTabHandoff({ win: w1, storage: st, now: 0 })).toBe(false);
+    expect(w1.name).toBe('other-window'); // 남의 창 이름은 건드리지 않는다
+    expect(consumeNewTabHandoff({ win: { name: NEWTAB_PREFIX + '../x' }, storage: st, now: 0 })).toBe(false);
+    st.setItem(NEWTAB_KEY + NONCE, JSON.stringify({ e: [['ipam', 'z'.repeat(5000)], 'bad', ['a', 'b'], ['c', 'd'], ['e', 'f'], ['g', 'h']], at: 0 }));
+    expect(consumeNewTabHandoff({ win: { name: NEWTAB_PREFIX + NONCE }, storage: st, now: 10 })).toBe(true);
+    expect(takeSearch('ipam', 10)).toHaveLength(200);
+    expect(takeSearch('g', 10)).toBe(''); // 4칸까지만
+  });
+  it('저장소가 막혀 있으면 빈 이름(주소만 연다)', () => {
+    const st = { length: 0, key: () => null, getItem: () => null, setItem: () => { throw new Error('quota'); }, removeItem: () => {} };
+    expect(stashForNewTab([['ipam', '10.0.0.5']], { storage: st, now: 0, nonce: NONCE })).toBe('');
+  });
+});

@@ -10,14 +10,21 @@
  *  ⑤ 매핑 제안: 목록을 못 읽은 것(null)과 빈 목록을 가른다(unread)
  *  ⑥ 웹 directorPlanFiles(겹침 판정에 쓰는 목록) = 서버 directorResources 의 종류·이름
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bareos2841-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const tmp = tmpDir('bareos2841-');
 process.env.CONFIG_DIR = tmp;
 process.env.DATA_SOURCE = 'mock';
 
@@ -79,7 +86,7 @@ test('② parsePreflight @@own — 아는 종류·이름·상태만 · 구역이
 
 test('② 사전 점검 스크립트 @@own 을 실제 bash 로 — 표지 · 남의 파일 · 심링크 · 디렉터리 · 종류당 40개 · job 무시 · 내용은 싣지 않는다', async (t) => {
   if (!fs.existsSync('/bin/bash')) { t.skip('bash 없음'); return; }
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bareos2841-dir-'));
+  const root = tmpDir('bareos2841-dir-');
   for (const d of ['console', 'profile', 'pool', 'job']) fs.mkdirSync(path.join(root, d));
   fs.writeFileSync(path.join(root, 'console/admin.conf'), 'Console {\n  Name = admin\n  Password = "TopSecretAdminPw"\n}\n');
   fs.writeFileSync(path.join(root, 'console/portal.conf'), `${A.MARKER}\nConsole {}\n`);

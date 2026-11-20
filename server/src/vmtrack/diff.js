@@ -8,6 +8,7 @@
  */
 import { numOrNull } from '../util/numOrNull.js';
 import { DAY_OFFSET_MIN } from '../util/dayKey.js';
+import { envPositive } from '../util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
 
 const pad = (n) => String(n).padStart(2, '0');
 
@@ -157,7 +158,7 @@ export function diffVcenter(vms, prevRoster, { knownEmpty = false } = {}) {
 // '의미 있는 사용량 변화' 임계(GB). 이보다 작은 흔들림은 ds_changes 에 남기지 않는다 —
 // 수백 DS × 2회/일 × 28 vCenter 를 전부 적재하면 연 수백만 행이 되고, 목록도 노이즈가 된다.
 // 합계 시계열(ds_used_gb)은 임계와 무관하게 항상 정확하다(차트는 그 값을 쓴다).
-const DS_DELTA_MIN_GB = Number(process.env.VMTRACK_DS_DELTA_MIN_GB) || 1;
+const DS_DELTA_MIN_GB = envPositive(process.env.VMTRACK_DS_DELTA_MIN_GB, 1, { int: false });
 
 const num = numOrNull;   // v2.561: 판정은 util/numOrNull.js 하나가 갖는다(Number(null)===0 함정)
 

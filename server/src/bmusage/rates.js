@@ -140,3 +140,83 @@ export function maxStrict(list = []) {
   if (!list.length || list.some((v) => v == null || !Number.isFinite(Number(v)))) return null;
   return Math.max(...list.map(Number));
 }
+
+/* ════════════════════════════════════════════════════════════════════════════
+ * v2.919 리눅스 성능 1단계 — 새 누적 카운터 환산. 규약은 위와 같다: 첫 표본·리셋(음수)·간격 비정상은 `null`(0 이 아니다).
+ * ════════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * 누적값 두 개의 **증가분**(초당이 아니라 이번 간격 동안 늘어난 수) — 오류 칸(E)은 '5분 증가분' 이다(설계 §4).
+ * @returns {number|null} 첫 표본·리셋·간격 비정상이면 null
+ */
+export function deltaOrNull(prevVal, curVal, prevAt, curAt, maxSpanMs = MAX_SPAN_MS) {
+  const p = fin(prevVal); const c = fin(curVal);
+  if (p == null || c == null || !spanOk(prevAt, curAt, maxSpanMs)) return null;
+  const d = c - p;
+  return d < 0 ? null : d;
+}
+
+/**
+ * CPU 분해(%) — `/proc/stat` cpu 줄 두 개의 차이. user = user+nice · sys = system+irq+softirq(node_exporter 의 mode 셋을 합친 값) ·
+ *   iowait · steal. 분모는 cpu_pct 와 **같은 total**(user~steal 합)이다.
+ * ⚠ 한 칸이라도 못 읽었으면 그 칸만 null(다른 칸까지 지우지 않는다). 리셋·동일 표본이면 전부 null.
+ */
+export function cpuBreakdownPct(prev, cur, prevAt, curAt, maxSpanMs = MAX_SPAN_MS) {
+  const none = { user: null, sys: null, iowait: null, steal: null };
+  if ((prevAt !== undefined || curAt !== undefined) && !spanOk(prevAt, curAt, maxSpanMs)) return none;
+  const dt = (fin(cur?.total) ?? NaN) - (fin(prev?.total) ?? NaN);
+  if (!Number.isFinite(dt) || dt <= 0) return none;
+  const d = (k) => { const a = fin(prev?.[k]); const b = fin(cur?.[k]); if (a == null || b == null || b < a) return null; return b - a; };
+  const pct = (...ks) => {
+    let acc = 0;
+    for (const k of ks) { const v = d(k); if (v == null) return null; acc += v; }
+    return Math.min(100, Math.round((acc / dt) * 1000) / 10);
+  };
+  return { user: pct('user', 'nice'), sys: pct('system', 'irq', 'softirq'), iowait: pct('iowait'), steal: pct('steal') };
+}
+
+/**
+ * 코어별 최고 사용률(%) — 평탄 배열 `[total0, idle0, total1, idle1, …]` 두 개. 코어 수가 바뀌었으면(핫플러그) 겹치는 앞쪽만 본다.
+ * 한 코어도 계산하지 못하면 null.
+ */
+export function coreMaxPct(prevCores, curCores, prevAt, curAt, maxSpanMs = MAX_SPAN_MS) {
+  if (!Array.isArray(prevCores) || !Array.isArray(curCores)) return null;
+  if ((prevAt !== undefined || curAt !== undefined) && !spanOk(prevAt, curAt, maxSpanMs)) return null;
+  const n = Math.min(prevCores.length, curCores.length);
+  const vals = [];
+  for (let i = 0; i + 1 < n; i += 2) vals.push(cpuPctFromJiffies({ total: prevCores[i], idle: prevCores[i + 1] }, { total: curCores[i], idle: curCores[i + 1] }));
+  return maxOrNull(vals);
+}
+
+/**
+ * 디스크 await(ms) — Δ(read_ticks + write_ticks) ÷ Δ(reads + writes)(iostat r_await·w_await 를 합친 평균).
+ * ⚠ 이번 간격에 I/O 가 0 건이면 **null**(나눌 것이 없다 — '대기 0ms' 로 지어내지 않는다). 대표값은 장치 중 최대이고 전부 null 이면 null.
+ */
+export function awaitMs(prev, cur, prevAt, curAt, maxSpanMs = MAX_SPAN_MS) {
+  const dr = deltaOrNull(prev?.reads, cur?.reads, prevAt, curAt, maxSpanMs);
+  const dw = deltaOrNull(prev?.writes, cur?.writes, prevAt, curAt, maxSpanMs);
+  const tr = deltaOrNull(prev?.readTicksMs, cur?.readTicksMs, prevAt, curAt, maxSpanMs);
+  const tw = deltaOrNull(prev?.writeTicksMs, cur?.writeTicksMs, prevAt, curAt, maxSpanMs);
+  if (dr == null || dw == null || tr == null || tw == null) return null;
+  const ios = dr + dw;
+  if (ios <= 0) return null;
+  return Math.round(((tr + tw) / ios) * 10) / 10;
+}
+
+/** 평균 대기열 길이(aqu-sz) — Δweighted_ticks(ms) ÷ 경과(ms). iostat aqu-sz 와 같은 계산. */
+export function avgQueue(prevWeightedMs, curWeightedMs, prevAt, curAt, maxSpanMs = MAX_SPAN_MS) {
+  const d = deltaOrNull(prevWeightedMs, curWeightedMs, prevAt, curAt, maxSpanMs);
+  if (d == null) return null;
+  const span = fin(curAt) - fin(prevAt);
+  return Math.round((d / span) * 100) / 100;
+}
+
+/**
+ * TCP 재전송률(%) — ΔRetransSegs ÷ ΔOutSegs × 100. 이번 간격에 보낸 세그먼트가 0 이면 null(나눌 것이 없다).
+ */
+export function retransPct(prev, cur, prevAt, curAt, maxSpanMs = MAX_SPAN_MS) {
+  const r = deltaOrNull(prev?.retransSegs, cur?.retransSegs, prevAt, curAt, maxSpanMs);
+  const o = deltaOrNull(prev?.outSegs, cur?.outSegs, prevAt, curAt, maxSpanMs);
+  if (r == null || o == null || o <= 0) return null;
+  return Math.min(100, Math.round((r / o) * 10_000) / 100);
+}

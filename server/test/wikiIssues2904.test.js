@@ -14,7 +14,7 @@
  * S-7 timeField 가 '20261105' 를 1970 epoch ms 로 · 없는 날짜를 다음 달로 받았다.  S-8 issueKeys 색인 50개에서 조용히 잘렸다.
  * S-10 estimateField · SLA 목표가 Number(' ')===0 으로 0 을 받았다.
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -22,11 +22,18 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
 
 function run(body, { env = {} } = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'c2904-'));
+  const dir = tmpDir('c2904-');
   const script = `
     const express = (await import('express')).default;
     const { api } = await import(${JSON.stringify(path.join(SRC, 'routes/api.js'))});
@@ -160,7 +167,7 @@ test('P-5 · S-5 — 첨부는 범위 밖 주인에 본문 전에 거절 · 주�
 });
 
 test('S-5 — removeOwnerAfterPersist: 저장 전이면 기다렸다가 저장됐을 때만 지운다 · 저장 실패면 남긴다', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'c2904s5-'));
+  const dir = tmpDir('c2904s5-');
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', `
     const at = await import(${JSON.stringify(path.join(SRC, 'attach/store.js'))});
     at.addAttachment('issue', 'ISS-1', 'a.txt', Buffer.from('a'), 'u');
@@ -243,7 +250,7 @@ test('S-10 · S-7(검색식) — SLA 목표 공백은 기본값 · 없는 날짜
 });
 
 test('S-6 · S-9 — 팀 채팅 할당 해제 문구 · 조사가 붙은 멘션의 메일 문구', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'c2904n-'));
+  const dir = tmpDir('c2904n-');
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', `
     const n = await import(${JSON.stringify(path.join(SRC, 'issues/notify.js'))});
     const issue = { key: 'ISS-1', title: 't', assignee: '', reporter: 'alice', watchers: [], vcenterId: '' };

@@ -10,7 +10,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'veeam2761b-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const DIR = tmpDir('veeam2761b-');
 process.env.CONFIG_DIR = DIR;
 process.env.DATA_SOURCE = 'live';
 const VC1 = 'pl:vc01';    // 중앙 직접 Veeam — notes 에 주소
@@ -189,7 +196,8 @@ test('라우트 — B1·B7 가림 · B2·B5 stale · D5 runningStale · A5 hostM
     // B1·B7 — viewer
     const v1 = await get(`/veeam/badges?vcenterId=${VC1}`);
     const raw = JSON.stringify(v1);
-    for (const leak of ['vbr-pl.corp.local', '9419', '10.20.30.40', 'AB:CD:EF']) assert.equal(raw.includes(leak), false, `viewer badges 에 ${leak}`);
+    // v2.951: 포트는 'host:포트' 꼴(':9419')로 찾는다 — 맨 '9419' 는 실제 시각 ts(예 1794190447028 — 2026-11-09 01:06~03:53Z)에도 들어 있어 그 시간대에만 실패했다.
+    for (const leak of ['vbr-pl.corp.local', ':9419', '10.20.30.40', 'AB:CD:EF']) assert.equal(raw.includes(leak), false, `viewer badges 에 ${leak}`);
     assert.equal(v1.servers[0].notes.length, 3, '비고 개수는 그대로(문구만 일반화)');
     assert.ok(v1.servers[0].notes[0].startsWith('작업 상태을(를) 읽지 못했습니다'));
     assert.equal(v1.servers[0].counts, null, 'B7: 서버 전체 집계는 관리자만');

@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>디스크 배드 섹터 — 판단 근거</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.muted{color:#8b9bb4}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:10px;min-width:0;box-sizing:border-box}
+.cap{font-size:12px;font-weight:700;color:#8b9bb4}
+.hd{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:14px;font-weight:800;line-height:1.5}
+.tag{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;font-size:11.5px;font-weight:700;white-space:nowrap}
+.tag.bad{background:rgba(239,68,68,.16);color:#fca5a5}
+.tag.ok{background:rgba(34,197,94,.14);color:#86efac}
+.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}
+.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}
+.tag.blue{background:rgba(59,130,246,.18);color:#bfdbfe}
+.ev{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:0;border:1px solid #243049;border-radius:10px;overflow:hidden}
+.ev li{display:grid;grid-template-columns:22px minmax(0,1fr);gap:8px;padding:8px 11px;border-bottom:1px solid #1f2a40;background:#0f1626;line-height:1.5}
+.ev li:last-child{border-bottom:none}
+.ev .n{font-size:11.5px;font-weight:800;color:#8b9bb4;padding-top:1px}
+.ev .src{font-size:11.5px;color:#8b9bb4}
+.wrong{border:1px dashed #3a4a6b;border-radius:10px;padding:8px 11px;font-size:12px;line-height:1.6;color:#cbd5e1}
+.wrong b{color:#e6edf6}
+table{border-collapse:collapse;width:100%}
+th{font-size:12px;font-weight:600;color:#8b9bb4;text-align:left;padding:9px 10px;background:#0f1626;border-bottom:1px solid #243049;white-space:nowrap}
+td{padding:9px 10px;border-bottom:1px solid #1f2a40;vertical-align:top;font-size:12.5px;line-height:1.6}
+.box{overflow-x:auto;border:1px solid #243049;border-radius:10px}
+.nw{white-space:nowrap}
+</style>
+</helmet>
+<div style="width:100%;min-height:2200px;box-sizing:border-box;background:#0a0e17;padding:20px 24px 40px;color:#e6edf6;font-family:'Inter','Noto Sans KR','Apple SD Gothic Neo',sans-serif;font-size:13px">
+<div style="max-width:1392px;margin:0 auto;display:flex;flex-direction:column;gap:14px;min-width:0">
+
+  <div style="min-width:0">
+    <div style="font-size:22px;font-weight:800">판단 근거</div>
+    <div class="muted">화면의 판정 표지를 누르면 열립니다. 판정마다 확신 수준, 근거가 된 사실과 그 출처, 그리고 이 판정이 틀릴 수 있는 경우를 보여 줍니다.</div>
+  </div>
+
+  <div style="display:flex;gap:8px 18px;flex-wrap:wrap;font-size:12px;color:#aebbd0;line-height:1.6;border:1px solid #243049;border-radius:10px;background:#0f1626;padding:9px 12px">
+    <span><span class="tag ok">확정</span> 포탈이 직접 본 값끼리 맞춤 (시리얼 등)</span>
+    <span><span class="tag warn">추정</span> 로그에 남은 기록으로 미룸</span>
+    <span><span class="tag gray">판단 안 함</span> 근거가 모자라 어느 쪽으로도 말하지 않음</span>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,440px),1fr));gap:14px;align-items:start">
+
+    <section class="card">
+      <div class="cap">1 · 서버 판정 — 기록 있음</div>
+      <div class="hd">KR-ESX-R750-014 <span class="tag bad">배드 섹터 기록 있음</span><span class="tag ok">확정</span></div>
+      <ol class="ev">
+        <li><span class="n">1</span><span>분류에 든 기록 ID 가 7건 있습니다 — PDR46 3건 · PDR47 1건 · PDR54 3건<div class="src">출처: iDRAC Lifecycle 로그 · <a href="Main.dc.html">기록 7건 보기</a></div></span></li>
+        <li><span class="n">2</span><span>이 ID 들을 배드 섹터 기록으로 보는 이유<div class="src">출처: Dell 문서 · <a href="Refs.dc.html">근거 문서</a></div></span></li>
+        <li><span class="n">3</span><span>로그 12,480건을 끝까지 읽었습니다 (2023-03-14 ~ 2026-11-14)<div class="src">출처: 2026-11-14 07:02 점검 · 법인 엣지 KR 본사</div></span></li>
+      </ol>
+      <div class="wrong"><b>틀릴 수 있는 경우</b> — 고장 예측(PDR16)은 여기에 세지 않았습니다. 2023-03-14 이전 기록은 보지 못했습니다.</div>
+    </section>
+
+    <section class="card">
+      <div class="cap">2 · 서버 판정 — 기록 없음</div>
+      <div class="hd">KR-ESX-R750-022 <span class="tag gray">남은 로그에 기록 없음</span><span class="tag warn">추정</span></div>
+      <ol class="ev">
+        <li><span class="n">1</span><span>로그 9,204건을 끝까지 읽었고, 분류에 든 ID 가 0건입니다<div class="src">출처: 2026-11-14 07:02 점검</div></span></li>
+        <li><span class="n">2</span><span>로그가 남아 있는 구간은 2024-01-08 ~ 2026-11-14 입니다<div class="src">출처: 가장 오래된 로그 항목의 시각</div></span></li>
+        <li><span class="n">3</span><span>디스크 8개 가운데 8개가 가상 디스크 구성원이라 Patrol Read 대상입니다<div class="src">출처: iDRAC 스토리지 구성</div></span></li>
+      </ol>
+      <div class="wrong"><b>틀릴 수 있는 경우</b> — ‘발생한 적 없음’ 이 아닙니다. 2024-01-08 이전에 났다면 알 수 없고, 컨트롤러의 Patrol Read 가 꺼져 있었다면 기록 자체가 생기지 않습니다.</div>
+    </section>
+
+    <section class="card">
+      <div class="cap">3 · 디스크 판정 — 아직 사용 중 (시리얼로 확정)</div>
+      <div class="hd">PL-DB-R750-003 · Disk 7 <span class="tag bad">아직 사용 중</span><span class="tag ok">확정</span></div>
+      <ol class="ev">
+        <li><span class="n">1</span><span>마지막 기록은 2026-11-06 PDR46 입니다<div class="src">출처: iDRAC Lifecycle 로그</div></span></li>
+        <li><span class="n">2</span><span>이 슬롯의 시리얼은 2025-03-02 부터 지금까지 <span class="mono">WBM2F81R</span> 로 같습니다<div class="src">출처: 포탈이 점검 때마다 적어 둔 시리얼 이력 (첫 관측 2025-03-02 · 마지막 2026-11-14)</div></span></li>
+        <li><span class="n">3</span><span>기록 시각이 그 사이에 있습니다 — 기록이 난 디스크와 지금 디스크가 같습니다</span></li>
+      </ol>
+      <div class="wrong"><b>틀릴 수 있는 경우</b> — 2025-03-02 이전 기록 2건은 시리얼 이력이 없던 때라 이 디스크의 것인지 확정하지 못합니다(추정으로 따로 표시).</div>
+    </section>
+
+    <section class="card">
+      <div class="cap">4 · 디스크 판정 — 아직 사용 중 (로그로 추정)</div>
+      <div class="hd">KR-ESX-R750-014 · Disk 5 <span class="tag bad">아직 사용 중</span><span class="tag warn">추정</span></div>
+      <ol class="ev">
+        <li><span class="n">1</span><span>기록 3건 — 2026-08-30 · 2026-10-12 PDR54, 2026-11-03 PDR46<div class="src">출처: iDRAC Lifecycle 로그</div></span></li>
+        <li><span class="n">2</span><span>첫 기록 뒤로 이 슬롯에 디스크 제거 · 삽입 기록이 없습니다<div class="src">출처: 같은 로그 — 2026-08-30 이후 구간을 끊김 없이 읽음</div></span></li>
+        <li><span class="n">3</span><span>포탈의 시리얼 이력은 오늘(첫 점검)부터 있습니다 — 기록 당시의 시리얼은 모릅니다<div class="src">지금 시리얼 <span class="mono">WBM41T9E</span></div></span></li>
+      </ol>
+      <div class="wrong"><b>틀릴 수 있는 경우</b> — 디스크를 바꿨는데 그 기록이 로그에 남지 않았다면 틀립니다. 다음 점검부터는 시리얼로 확정합니다.</div>
+    </section>
+
+    <section class="card">
+      <div class="cap">5 · 디스크 판정 — 교체됨</div>
+      <div class="hd">KR-ESX-R750-014 · Disk 3 <span class="tag gray">교체됨</span><span class="tag warn">추정</span></div>
+      <ol class="ev">
+        <li><span class="n">1</span><span>기록 4건은 모두 2024-06-02 ~ 2024-11-20 사이입니다<div class="src">출처: iDRAC Lifecycle 로그</div></span></li>
+        <li><span class="n">2</span><span>2025-01-15 에 이 슬롯에서 디스크 제거와 삽입 기록이 둘 다 있습니다<div class="src">출처: 같은 로그 — 제거 기록만 있으면 교체로 보지 않습니다(케이블 문제로도 뜸)</div></span></li>
+        <li><span class="n">3</span><span>그 뒤로 이 슬롯에 분류에 든 기록이 없습니다</span></li>
+      </ol>
+      <div class="wrong"><b>틀릴 수 있는 경우</b> — 같은 디스크를 뺐다가 다시 꽂은 것이라면 교체가 아닙니다. 당시 시리얼이 없어 가릴 수 없습니다.</div>
+    </section>
+
+    <section class="card">
+      <div class="cap">6 · 디스크 판정 — 판단 불가</div>
+      <div class="hd">US-DB-R650-031 · Disk 0 <span class="tag gray">판단 불가</span><span class="tag gray">판단 안 함</span></div>
+      <ol class="ev">
+        <li><span class="n">1</span><span>기록 2건은 2024-02 에 있습니다<div class="src">출처: 포탈이 보관한 지난 점검 결과</div></span></li>
+        <li><span class="n">2</span><span>지금 iDRAC 에 남은 로그는 2025-09-02 부터입니다 — 그 사이 구간을 읽을 수 없습니다<div class="src">출처: 가장 오래된 로그 항목의 시각</div></span></li>
+        <li><span class="n">3</span><span>그 사이의 시리얼 이력도 없습니다</span></li>
+      </ol>
+      <div class="wrong"><b>왜 말하지 않는가</b> — 그 사이에 디스크를 바꿨는지 알 방법이 없습니다. ‘사용 중’ 에도 ‘교체됨’ 에도 넣지 않고 따로 셉니다.</div>
+    </section>
+
+    <section class="card">
+      <div class="cap">7 · 디스크 판정 — 이 방법으로 볼 수 없음</div>
+      <div class="hd">IN-ESX-R740-030 · Disk 0~11 <span class="tag gray">볼 수 없음</span><span class="tag ok">확정</span></div>
+      <ol class="ev">
+        <li><span class="n">1</span><span>컨트롤러가 HBA 모드이고 디스크 12개가 모두 가상 디스크에 들어 있지 않습니다<div class="src">출처: iDRAC 스토리지 구성</div></span></li>
+        <li><span class="n">2</span><span>Patrol Read 는 가상 디스크 구성원과 핫 스페어에서만 돕니다<div class="src">출처: Dell 문서 · <a href="Refs.dc.html">근거 문서</a></div></span></li>
+      </ol>
+      <div class="wrong"><b>뜻</b> — 이 디스크들은 ‘기록 없음’ 이 아닙니다. 분석의 디스크 수에도 넣지 않습니다.</div>
+    </section>
+
+    <section class="card">
+      <div class="cap">8 · 지금 쓰이는 곳 — 확정하지 못함</div>
+      <div class="hd">DE-BK-R740XD-002 · Disk 11 <span class="tag gray">확정하지 못함</span><span class="tag gray">판단 안 함</span></div>
+      <ol class="ev">
+        <li><span class="n">1</span><span>Disk 11 은 Virtual Disk 2 (RAID-6 · 48 TB) 의 구성원입니다<div class="src">출처: iDRAC 스토리지 구성</div></span></li>
+        <li><span class="n">2</span><span>가상 디스크의 식별자가 비어 있어 OS 장치와 맞출 값이 없습니다<div class="src">출처: iDRAC 응답</div></span></li>
+        <li><span class="n">3</span><span>OS 에 크기가 같은 장치가 2개 있습니다 — <span class="mono">/dev/sdc</span> · <span class="mono">/dev/sdd</span><div class="src">출처: OS 장치 목록 · <a href="Usage.dc.html">따라가 보기</a></div></span></li>
+      </ol>
+      <div class="wrong"><b>왜 말하지 않는가</b> — 크기나 순서로 하나를 고르면 틀린 마운트를 알려 줄 수 있습니다.</div>
+    </section>
+
+  </div>
+
+  <section class="card">
+    <div class="hd">판단 규칙을 정할 때 참고한 자료 <span class="muted" style="font-size:12px;font-weight:400">기록 ID 의 뜻은 <a href="Refs.dc.html">근거 문서</a>에 따로 있습니다</span></div>
+    <div class="box">
+    <table style="min-width:980px">
+      <thead><tr><th>무엇을 뒷받침하나</th><th>자료</th><th>이 포탈에서의 쓰임</th></tr></thead>
+      <tbody>
+        <tr><td>고장 예측은 디스크 · iDRAC · 컨트롤러 펌웨어를 먼저 올리고, 그래도 남으면 교체한다. 교체 · 리빌드 전에 백업한다</td><td><a href="https://www.dell.com/support/kbdoc/en-uk/000126418/poweredge-hdd-what-is-predicted-drive-failure-and-how-to-solve-it">Dell KB 000126418 — Predictive Drive Failure (PDR16)</a> · <a href="https://dl.dell.com/manuals/common/dell-emc-poweredge-prefailure-alerts-sysmgmt.pdf">Dell 백서 — PowerEdge prefailure alerts</a></td><td class="nw"><span class="tag ok">판단에 반영</span><div class="src" style="font-size:11.5px;color:#8b9bb4">고장 예측은 배드 섹터와 따로 셈</div></td></tr>
+        <tr><td>Patrol Read 때마다 오류가 나오면 곧 교체, 고쳐진 뒤 멈추면 대개 무해하다. 교체 뒤에도 다시 나오면 가상 디스크 문제일 수 있다</td><td><a href="https://www.dell.com/community/PowerEdge-HDD-SCSI-RAID/R720XD-Correctable-Disk-Media-Errors/td-p/5183008">Dell 커뮤니티 — R720XD Correctable Disk Media Errors</a> · <a href="https://www.dell.com/community/PowerEdge-HDD-SCSI-RAID/PERC-H700-predictive-failure-continues-with-new-drive/m-p/7209908">Dell 커뮤니티 — PERC H700 predictive failure continues with new drive</a> · <a href="https://www.esdm.co.uk/looking-at-perc-raid-controller-log-files-for-disk-errors">ESDM — Looking at PERC RAID controller log files for disk errors</a></td><td class="nw"><span class="tag warn">시안에 추가 · 실장비 확인 전</span><div class="src" style="font-size:11.5px;color:#8b9bb4">재발 판정 · 교체 뒤 재발 알림</div></td></tr>
+        <tr><td>vSAN 은 고장 나는 디스크를 감지해 데이터를 옮기거나 디스크를 내린다. 소프트웨어 정의 스토리지가 고장으로 표시한 디스크는 교체 대상이다</td><td><a href="https://knowledge.broadcom.com/external/article/326859/how-to-troubleshoot-vsan-osa-disk-issues.html">Broadcom KB 326859 — Troubleshooting vSAN OSA disk issues</a> · <a href="https://knowledge.broadcom.com/external/article/395966">Broadcom KB 395966 — vSAN disk health Evacuated</a> · <a href="https://blogs.vmware.com/cloud-foundation/2021/01/01/degraded-device-handling/">VMware 블로그 — Degraded Device Handling</a> · <a href="https://www.dell.com/support/kbdoc/000219050/drives-replacement-request-for-drives-marked-as-failed-or-unusable-by-software-defined-storage-solution-sdss">Dell KB 000219050 — SDS 가 고장으로 표시한 디스크 교체</a></td><td class="nw"><span class="tag warn">시안에 추가 · 실장비 확인 전</span><div class="src" style="font-size:11.5px;color:#8b9bb4">‘볼 수 없음’ 디스크를 메우는 길</div></td></tr>
+        <tr><td>디스크의 SMART 누적 값(재할당 · 보류 · 복구 불가)이 고장 위험을 말해 준다. 복구 불가 수가 0 을 넘으면 교체를 잡는 운영 사례</td><td><a href="https://www.backblaze.com/blog/hard-drive-smart-stats/">Backblaze — Hard Drive SMART Stats</a> · <a href="https://www.computerworld.com/article/2846009/the-5-smart-stats-that-actually-predict-hard-drive-failure.html">Computerworld — The 5 SMART stats that actually predict hard drive failure</a></td><td class="nw"><span class="tag warn">시안에 추가 · 실장비 확인 전</span><div class="src" style="font-size:11.5px;color:#8b9bb4">디스크 SMART 값 수집</div></td></tr>
+        <tr><td>제조사는 예측 고장에 케이스를 자동으로 열고 부품을 보낸다. 컨트롤러는 예측 고장 디스크를 스페어로 미리 바꿀 수 있다</td><td><a href="https://i.dell.com/sites/doccontent/shared-content/services/en/Documents/Dell_SupportAssist_Enterprise_Customer_Overview.pdf">Dell SupportAssist Enterprise 개요</a> · <a href="https://m.principledtechnologies.com/Dell/ProSupport_Plus_with_SupportAssist_for_servers_0618.pdf">Principled Technologies — ProSupport Plus with SupportAssist</a> · <a href="https://www.manualslib.com/manual/600037/Dell-6-Series.html?page=38">Dell PERC 매뉴얼 — Automatic Replace Member with Predicted Failure</a></td><td class="nw"><span class="tag warn">시안에 추가 · 실장비 확인 전</span><div class="src" style="font-size:11.5px;color:#8b9bb4">조치 추적 · 스페어 설정 점검</div></td></tr>
+        <tr><td>모니터링 제품은 제조사 임계 대신 실제 고장 통계로 임계를 잡고, 값의 변화를 시간순으로 본다. 스토리지 제조사는 디스크 오류 계수를 점수로 만든다</td><td><a href="https://www.linuxlinks.com/scrutiny-webui-smartd-smart-monitoring/">LinuxLinks — Scrutiny</a> · <a href="https://grafana.com/grafana/dashboards/24591">Grafana — Disk SMART Exporter 대시보드</a> · <a href="https://shop.zimaspace.com/blogs/product-comparisons/best-raid-monitoring-tools-home-servers">ZimaSpace — RAID 모니터링 도구 비교 (판매처 블로그)</a> · <a href="https://snia.org/sites/default/files/2025-05/SNIA-SDC21-Jibbe-Binford-Drive-Health-Monitor-for-HDD-drives-On-Prem-and-Cloud.pdf">SNIA — NetApp Drive Health Monitor 발표</a> · <a href="https://kb.netapp.com/on-prem/ontap/OHW/OHW-KBs/What_is_the_difference_between_disk_predictive_failure_and_physical_disk_failure_in_ONTAP_9">NetApp KB — disk predictive failure 와 physical failure 의 차이</a></td><td class="nw" style="border-bottom:none"><span class="tag warn">시안에 추가 · 실장비 확인 전</span><div class="src" style="font-size:11.5px;color:#8b9bb4">가동 시간 기준 고장률 검토</div></td></tr>
+      </tbody>
+    </table>
+    </div>
+    <div class="wrong"><b>이 자료들의 확인 수준</b> — 원문을 열어 대조한 것이 아니라 검색 결과의 요약으로 확인했습니다. ‘시안에 추가 · 실장비 확인 전’ 은 화면 시안에는 넣었지만 값을 실제로 읽을 수 있는지 아직 확인하지 않은 것입니다 — <a href="Priority.dc.html">조치</a> · <a href="Health.dc.html">상태 값</a> · <a href="Config.dc.html">설정 점검</a>.</div>
+  </section>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2200}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

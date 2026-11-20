@@ -20,9 +20,16 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src');
 const J = (p) => JSON.stringify(pathToFileURL(path.join(SRC, p)).href);
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bareos2892-'));
+const tmp = tmpDir('bareos2892-');
 process.env.CONFIG_DIR = tmp;
 process.env.DATA_SOURCE = 'mock';
 process.env.AUTH_ENABLED = 'true';
@@ -381,7 +388,7 @@ test('⑧ 라우트 — 범위 · 전 법인 점검 문지기 · 설정 · 지�
 
 /* ── ⑨ 메일 ── */
 test('⑨ mailTick — 나빠짐 한 통 · 반복 없음 · 회복 · 꺼짐이면 커서만 · 실패면 10분 뒤', () => {
-  const cfg = fs.mkdtempSync(path.join(os.tmpdir(), 'bareos2892m-'));
+  const cfg = tmpDir('bareos2892m-');
   const corp = (verdict, notified) => ({ at: 1, directorId: 'd1', directorName: '폴란드 Bareos', from: 'edge', verdict, notified, items: [{ key: 'vc', status: verdict === 'ok' ? 'ok' : 'bad', label: 'vCenter 접속', detail: 'vc:443 접속 거부(ECONNREFUSED) · 엣지 노드에서', action: 'FD 서버에서 nc -vz vc 443' }], history: [] });
   fs.writeFileSync(path.join(cfg, 'bareos-health-state.json'), JSON.stringify({ corps: { 'vc-pl': corp('bad', null), 'vc-kr': corp('ok', null) }, disks: {}, mail: {} }));
   fs.writeFileSync(path.join(cfg, 'bareos.json'), JSON.stringify({ version: 2, directors: [{ id: 'dir_pl', name: 'PL', host: '10.0.0.1', port: 9101, consoleName: 'portal', password: 'x' }], defaults: {}, sites: [{ vcenterId: 'vc-pl', directorId: 'dir_pl', vcserver: 'vc' }, { vcenterId: 'vc-kr', directorId: 'dir_pl', vcserver: 'vc2' }] }));

@@ -14,11 +14,13 @@ import { dayStamp } from '../../dayStamp.js';
 import { vmDiskRows, vmDatastoreRows, vmsOnHost, hostDatastoresFromVms } from './objTabs.js';
 import { gbText } from './vcdTabs.js';
 import { unitText } from '../unitText.js';
+import { allocByHost } from '../vcdVirt.js';   // v3.28.1: 할당 합의 '못 읽음' 판정은 트리와 같은 한 벌
 import {
   VM_TUNING_DAYS, DEFAULT_VM_TUNING_DAYS, vmTuningAxes, vmTuningPlan, hostTuningAxes, hostTuningPlan, heavyNeighbors, planCsv, planMarkdown,
 } from './tuning.js';
 import { vmContentionFindings, CONTENTION_TEXT } from '../contention/contentionText.js';
 import { vmCfgFindings, VM_CFG_TEXT } from '../vmcfg/vmCfgText.js';
+import { saveBlob } from '../../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나(즉시 revoke · 문서 밖 click 금지)
 
 const RightsizeReport = React.lazy(() => import('../tools/RightsizeReport.jsx'));
 const STATE_COLOR = { ok: 'var(--green)', warn: 'var(--amber)', crit: 'var(--red)', unknown: 'var(--text-dim)' };
@@ -41,10 +43,7 @@ function Axes({ axes }) {
 
 function download(name, text, type) {
   try {
-    const url = URL.createObjectURL(new Blob([text], { type }));
-    const a = document.createElement('a');
-    a.href = url; a.download = name; a.click();
-    URL.revokeObjectURL(url);
+    saveBlob(new Blob([text], { type }), name);
   } catch { /* 내려받기를 막은 환경 — 버튼이 아무것도 하지 않는다 */ }
 }
 
@@ -191,15 +190,19 @@ export function VmTuning({ vm, vms, datastores }) {
 export function HostTuning({ host, vms, datastores, includeOff = true }) {
   const onHost = useMemo(() => vmsOnHost(vms, host), [vms, host]);
   const counted = useMemo(() => (includeOff ? onHost : onHost.filter((v) => v.powerState === 'POWERED_ON')), [onHost, includeOff]);
-  const vcpuAlloc = counted.reduce((a, v) => a + (Number(v.cpuCount) || 0), 0);
-  const memAllocMB = counted.reduce((a, v) => a + (Number(v.memMB) || 0), 0);
+  // v3.28.1: 못 읽은 vCPU · 메모리는 0 으로 더하지 않는다(트리 배지와 같은 allocByHost) — 합은 읽은 VM 만(최소값), 뺀 수를 진단 머리에 밝힌다.
+  const alloc = useMemo(() => allocByHost(counted), [counted]);
+  const sumMap = (m) => [...m.values()].reduce((a, x) => a + x, 0);
+  const vcpuAlloc = sumMap(alloc.vcpu);
+  const memAllocMB = sumMap(alloc.vmem);
+  const allocUnk = [sumMap(alloc.vcpuUnk) ? `vCPU 미상 ${sumMap(alloc.vcpuUnk)}대` : '', sumMap(alloc.vmemUnk) ? `메모리 미상 ${sumMap(alloc.vmemUnk)}대` : ''].filter(Boolean).join(' · ');
   const ds = useMemo(() => hostDatastoresFromVms(onHost, datastores), [onHost, datastores]);
   const axes = hostTuningAxes({ host, vcpuAlloc, memAllocMB, onHost, dsRows: ds.rows });
   const plan = hostTuningPlan({ host, onHost, dsRows: ds.rows, vcpuAlloc });
   const heavy = heavyNeighbors(onHost, 8);
   return (
     <>
-      <Card title="진단" sub={`이 호스트 VM ${onHost.length}대 · 가상화율 기준 ${includeOff ? '전체 VM(꺼진 VM 포함)' : '켜진 VM 만'}`}>
+      <Card title="진단" sub={`이 호스트 VM ${onHost.length}대 · 가상화율 기준 ${includeOff ? '전체 VM(꺼진 VM 포함)' : '켜진 VM 만'}${allocUnk ? ` · 할당 ${allocUnk} 제외(가상화율은 최소값)` : ''}`}>
         <Axes axes={axes} />
         <Note>판정은 기존 값 그대로(호스트 사용률 · 트리와 같은 가상화율 기준 · CPU 경합 규칙 · ESXi 호스트 구성 점검 · 데이터스토어 알람 규칙). 호스트 벌룬 · 스왑 합 · 전원 정책 · NUMA 는 수집하지 않습니다.</Note>
       </Card>

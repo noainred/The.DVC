@@ -283,9 +283,9 @@ export default function ServerTempBoard({ scope }) {
           <Segment items={VIEWS} value={view} onPick={setView} />
         </div>
         <div className="flex gap wrap" style={{ alignItems: 'center', gap: 12 }}>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, letterSpacing: '.14em', textTransform: 'uppercase', color: 'var(--text-faint)', display: 'flex', alignItems: 'center', gap: 7 }}>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, letterSpacing: '.14em', color: 'var(--text-faint)', display: 'flex', alignItems: 'center', gap: 7 }}>
             <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--teal)', boxShadow: '0 0 8px var(--teal)', animation: 'pulse 2.4s infinite' }} />
-            Sampling {data.avgWindowLabel || '5분'} · <b style={{ color: 'var(--text)', fontWeight: 700 }}>{sampledAt}</b>
+            SAMPLING {data.avgWindowLabel || '5분'} · <b style={{ color: 'var(--text)', fontWeight: 700 }}>{sampledAt}</b>
           </div>
           <DensityToggle dense={dense} onChange={onDense} />
         </div>

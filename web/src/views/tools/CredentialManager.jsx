@@ -57,19 +57,20 @@ export default function CredentialManager() {
           <tbody>
             {items.map((c) => (
               <tr key={c.id}>
-                <td><b>{c.name}</b>{c.note ? <div className="muted" style={{ fontSize: 11 }}>{c.note}</div> : null}</td>
+                {/* v2.977(전체 점검): 이름 · 메모 · 사용 법인 · 동작 칸이 한 줄로 이어져 1440px 에서 '변경' · 동작 열이 가로 스크롤 뒤로 갔다 — 접는다 */}
+                <td style={{ whiteSpace: 'normal', maxWidth: 220, overflowWrap: 'anywhere' }}><b>{c.name}</b>{c.note ? <div className="muted" style={{ fontSize: 11 }}>{c.note}</div> : null}</td>
                 <td>{c.kind === 'key' ? <span className="badge blue">SSH 키{c.hasPassphrase ? ' +패스프레이즈' : ''}</span> : <span className="badge">ID/비밀번호</span>}</td>
                 <td><code>{c.username}</code></td>
-                <td className="muted">{(c.agents || []).join(', ')}</td>
+                <td className="muted" style={{ whiteSpace: 'normal', maxWidth: 200, overflowWrap: 'anywhere' }}>{(c.agents || []).join(', ')}</td>
                 <td className="muted" style={{ maxWidth: 260, wordBreak: 'break-all' }}>{(c.hosts || []).join(', ')}</td>
                 <td className="muted" style={{ fontSize: 11 }}>{c.fingerprint ? `${c.keyType} ${c.fingerprint}` : '—'}</td>
                 <td className="muted">{c.useCount || 0}회{c.lastUsedAt ? <div style={{ fontSize: 11 }}>{ago(c.lastUsedAt)} · {c.lastUsedBy}</div> : null}</td>
                 <td className="muted" style={{ fontSize: 11 }}>{c.updatedBy || c.createdBy}<div>{ago(c.updatedAt || c.createdAt)}</div></td>
-                <td className="flex gap">
+                <td><div className="flex gap" style={{ flexWrap: 'wrap', maxWidth: 170 }}>
                   <button className="tab" onClick={() => setTest(c)}>연결 테스트</button>
                   <button className="tab" onClick={() => setForm({ ...EMPTY, ...c, hosts: (c.hosts || []).join(', '), agents: (c.agents || []).join(', '), password: '', privateKey: '', passphrase: '' })}>수정</button>
                   <button className="tab" onClick={() => setForm({ ...c, _delete: true })}>삭제</button>
-                </td>
+                </div></td>
               </tr>
             ))}
             {!items.length && <tr><td colSpan={9} className="muted">등록된 계정이 없습니다.</td></tr>}

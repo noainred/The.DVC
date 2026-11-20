@@ -1,10 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson, putJson, delJson, canCsv } from '../api.js';
+import { requireChanged } from './changeResult.js';   // 112회차: delJson 은 409 · 400 을 던지지 않고 본문을 준다 — 거절(등록부 읽기 오류 · 사용 중)을 삭제 성공으로 읽지 않는다
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import EscClose from '../components/EscClose.jsx';
 import { STable } from '../components/STable.jsx';
 import { countText, durationText, strField } from './agentScanText.js'; // v2.598 CENTRAL-03: 숫자만 글자로, 나머지는 —
 import { droppedSecretNote, passwordDroppedLines } from './droppedSecretText.js'; // v2.731(A3-01 ②): 대역·계정 변경 시 비밀번호 폐기 안내
+import { saveBlob } from '../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나(즉시 revoke · 문서 밖 click 금지)
 
 const EMPTY = { agent: '', ips: '', username: 'root', password: '', enabled: true };
 
@@ -31,11 +33,7 @@ export default function AgentScans() {
 
   const downloadSample = () => {
     const blob = new Blob([SAMPLE_CSV], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = 'agent-assignments-sample.csv';
-    document.body.appendChild(a); a.click(); a.remove();
-    URL.revokeObjectURL(url);
+    saveBlob(blob, 'agent-assignments-sample.csv');
   };
 
   const onFile = async (e) => {
@@ -59,17 +57,22 @@ export default function AgentScans() {
     finally { setBusy(false); }
   };
 
+  // v2.977(전체 점검): 403 · 404 는 다시 물어도 같다 — 폴링을 멈추고 오류 객체를 넘겨 ErrorBox 가 권한 안내로 그리게 한다.
+  const pollRef = React.useRef(null);
   const load = async () => {
     try { setData(await fetchJson('/admin/assignments')); setError(null); }
-    catch (e) { setError(e.message); }
+    catch (e) {
+      setError(e);
+      if ((e?.status === 403 || e?.status === 404) && pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    }
   };
   useEffect(() => {
     load();
-    const t = setInterval(load, 15_000);
-    return () => clearInterval(t);
+    pollRef.current = setInterval(load, 15_000);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); pollRef.current = null; };
   }, []);
 
-  if (error && !data) return <ErrorBox message={error} />; // 데이터 보유 중 일시 폴링 오류로 화면 전체를 갈아치우지 않음(CLAUDE.md)
+  if (error && !data) return <ErrorBox error={error} />; // 데이터 보유 중 일시 폴링 오류로 화면 전체를 갈아치우지 않음(CLAUDE.md)
   if (!data) return <Loading />;
 
   // 등록된 에이전트가 없으면 처음부터 직접 입력, 있으면 목록 선택을 기본값으로.
@@ -92,7 +95,7 @@ export default function AgentScans() {
 
   const remove = async (a) => {
     if (!window.confirm(`'${a.agent}' 작업 할당을 삭제할까요?`)) return;
-    try { await delJson(`/admin/assignments/${encodeURIComponent(a.agent)}`); await load(); }
+    try { requireChanged(await delJson(`/admin/assignments/${encodeURIComponent(a.agent)}`)); await load(); }
     catch (e) { setError(e.message); }
   };
 
@@ -172,7 +175,7 @@ export default function AgentScans() {
       </div>
 
       {form && (
-        <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) close(); }}>
+        <div className="modal-overlay" {...backdropClose(() => close())}>
           <EscClose onClose={close} />
           <div className="modal card" style={{ maxWidth: 640 }}>
             <div className="flex between" style={{ marginBottom: 12 }}>
@@ -239,7 +242,7 @@ export default function AgentScans() {
       )}
 
       {csvOk && csvOpen && (
-        <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setCsvOpen(false); }}>
+        <div className="modal-overlay" {...backdropClose(() => setCsvOpen(false))}>
           <EscClose onClose={() => setCsvOpen(false)} />
           <div className="modal card" style={{ maxWidth: 760 }}>
             <div className="flex between" style={{ marginBottom: 10 }}>
@@ -306,3 +309,4 @@ export default function AgentScans() {
 }
 
 import Select from '../components/Select.jsx';
+import { backdropClose } from '../components/backdropClose.js'; // 96회차(95회차 남긴 것 ①): 창 안에서 끌다 배경에서 떼면 닫히던 것 — 누름 · 뗌 모두 배경일 때만

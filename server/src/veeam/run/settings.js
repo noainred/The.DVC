@@ -7,10 +7,9 @@
  * Veeam 서버 자체(주소·계정·담당 엣지·연결 vCenter)는 모니터링 등록부(veeam/registry.js) 하나다 — 여기서 다시 등록하지 않는다.
  * 원자적 쓰기 + 로드 손상 preserveCorrupt(설정 파일 규칙). 못 읽었으면 registryUnreadable 처럼 loadError 로 말한다.
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../../util/atomicWrite.js';
 import { makeLoadError } from '../../util/registryCore.js';
 import { numOrNull } from '../../util/numOrNull.js';
 
@@ -52,11 +51,16 @@ export function normalizeRunSettings(raw) {
   return { jobPrefix: typeof r.jobPrefix === 'string' && RE_PREFIX.test(r.jobPrefix.trim()) ? r.jobPrefix.trim() : DEFAULT_JOB_PREFIX, servers, hosts };
 }
 
+/*
+ * 94회차 F2(형제 — veeam/registry.js 결정 78 ① 과 같은 판정): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 예전에는 catch 하나로 받아
+ *   온전한 설정(서버별 저장소 · 보존 · vCenter 이름)을 `.corrupt.*` 로 옮겼다. 이제 원본을 두고 · 캐시하지 않고(30초 간격 재읽기) · 저장을 거절한다.
+ *   손상(JSON 파싱 실패)은 예전과 같다(보존본으로 옮기고 오류를 세운다 — 저장이 풀어 준다).
+ */
 function load() {
-  if (_db) return _db;
-  try {
-    if (fs.existsSync(FILE())) { _db = normalizeRunSettings(JSON.parse(fs.readFileSync(FILE(), 'utf8'))); return _db; }
-  } catch (e) { preserveCorrupt(FILE(), e?.message); loadErr.set(e); }
+  if (_db && !loadErr.readPending()) return _db;
+  const r = loadErr.read(FILE(), (t) => normalizeRunSettings(JSON.parse(t)));
+  if (r.kind === 'ok') { _db = r.value; return _db; }
+  if (r.kind === 'read-error') return normalizeRunSettings({});   // 캐시하지 않는다
   loadErr.checkCorruptOnly(FILE());
   _db = normalizeRunSettings({});
   return _db;
@@ -83,13 +87,16 @@ export function saveRunSettings(input = {}) {
     if (h && !RE_VC_HOST.test(h)) return { ok: false, reason: `vCenter 이름 형식 오류(${String(k).slice(0, 40)}) — 호스트 이름·IP 만` };
   }
   const cur = load();
-  _db = normalizeRunSettings({
+  const refused = loadErr.writeRefusal('백업 실행 설정(veeam-backup-run.json)');   // 94회차 F2: 읽기 오류 중에는 원본을 기본값 위의 입력으로 덮지 않는다
+  if (refused) return { ok: false, status: 409, code: refused.code, readError: true, reason: refused.reason };
+  const next = normalizeRunSettings({
     jobPrefix: i.jobPrefix !== undefined ? i.jobPrefix : cur.jobPrefix,
     // 서버별 값은 합친다 — 입력에 없는 서버 id 는 유지(빈 서버 목록 화면이 저장소·보존을 지우지 않게 — v2.820.1 B3). 값을 지우려면 그 id 에 빈 저장소를 보낸다.
     servers: i.servers && typeof i.servers === 'object' && !Array.isArray(i.servers) ? { ...cur.servers, ...i.servers } : cur.servers,
     hosts: i.hosts !== undefined ? i.hosts : cur.hosts,
   });
-  atomicWriteFileSync(FILE(), JSON.stringify({ version: 1, ..._db }, null, 2), { mode: 0o600 });
+  atomicWriteFileSync(FILE(), JSON.stringify({ version: 1, ...next }, null, 2), { mode: 0o600 });
+  _db = next;   // 94회차 F1(형제): 쓰기 성공 뒤에 메모리에 반영
   loadErr.clear();
   return { ok: true, settings: getRunSettings() };
 }

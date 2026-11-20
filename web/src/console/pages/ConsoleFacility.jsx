@@ -17,13 +17,13 @@ export default function ConsoleFacility({ global: g, sitesAll, scope, polls, per
   const ps = polls.pdu.data ? pduSummary(polls.pdu.data) : null;
   const lr = polls.idrac.data?.poller?.lastRun || null;
   const bmc = bmcPollSummary(lr);
-  const pduDevs = (polls.pdu.data?.devices || []).map((d) => ({ id: d.id, name: d.name || d.host, dc: d.datacenterId || '', ok: d.snapshot ? d.snapshot.ok !== false : null, powerW: d.snapshot?.summary?.powerW ?? null, tempMaxC: d.snapshot?.summary?.tempMaxC ?? null, sensors: d.snapshot?.summary?.sensors ?? 0, units: d.snapshot?.summary?.units ?? 0, violations: (d.snapshot?.violations || []).length, error: d.snapshot?.error || '' })).filter((d) => rowMatches(d, scope.q));
+  const pduDevs = (polls.pdu.data?.devices || []).map((d) => ({ id: d.id, name: d.name || d.host, dc: d.datacenterId || '', ok: d.snapshot ? d.snapshot.ok !== false : null, powerW: d.snapshot?.summary?.powerW ?? null, powerPartial: !!(d.snapshot?.summary?.unitsIncomplete || d.snapshot?.summary?.powerPartial), tempMaxC: d.snapshot?.summary?.tempMaxC ?? null, sensors: d.snapshot?.summary?.sensors ?? 0, units: d.snapshot?.summary?.units ?? 0, violations: (d.snapshot?.violations || []).length, error: d.snapshot?.error || '' })).filter((d) => rowMatches(d, scope.q));
 
   return (
     <>
       <div className="dvc-kpis">
         <KpiCard label="서버 소비전력" value={g?.powerReporting ? `${fmtInt(g.powerKw)} kW` : '—'} accent="#f59e0b" meta={g ? `전력 보고 ${fmtInt(g.powerReporting)}대${g.powerRegistered ? ` / iDRAC 등록 ${fmtInt(g.powerRegistered)}대` : ''}${g.powerUnmappedKw ? ` · 미매핑 ${g.powerUnmappedKw} kW` : ''}` : '수집 대기'} />
-        <KpiCard label="PDU" value={ps ? fmtInt(ps.devices) : '—'} accent="#0f172a" meta={ps ? (ps.devices ? `수집 정상 ${ps.ok} · 실패 ${ps.failed} · 임계 위반 ${ps.violations}${ps.powerW != null ? ` · 전력 ${ps.powerRead ?? '?'}/${ps.devices}대 합 ${(ps.powerW / 1000).toFixed(1)} kW` : ''}` : '등록된 PDU 없음') : perms.pdu ? '수집 대기' : "권한 필요('tools')"} />
+        <KpiCard label="PDU" value={ps ? fmtInt(ps.devices) : '—'} accent="#0f172a" meta={ps ? (ps.devices ? `수집 정상 ${ps.ok} · 실패 ${ps.failed} · 임계 위반 ${ps.violations}${ps.powerW != null ? ` · 전력 ${ps.powerRead ?? '?'}/${ps.devices}대 합 ${(ps.powerW / 1000).toFixed(1)} kW${ps.powerPartial ? `(그중 ${ps.powerPartial}대는 유닛 일부만 읽은 부분 합)` : ''}` : ''}` : '등록된 PDU 없음') : perms.pdu ? '수집 대기' : "권한 필요('tools')"} />
         <KpiCard label="호스트 온도 (ESXi/iDRAC 보고)" value={maxT != null ? `${maxT}°C` : '—'} accent={maxT == null ? '#6b7280' : maxT >= 26 ? '#ef4444' : maxT >= 24 ? '#f59e0b' : '#22c55e'} meta={hosts.data ? `최고값 · 측정 ${fmtInt(measured)}/${fmtInt(hostN)}대 · 26°C 이상 ${hot}대` : '호스트 수집 대기'} />
         <KpiCard label="iDRAC 연동 호스트" value={hosts.data && hostN ? fmtPct((idracN / hostN) * 100) : '—'} accent="#0891b2" meta={hosts.data ? `${fmtInt(idracN)} / ${fmtInt(hostN)}대 (호스트 ↔ iDRAC 매핑)` : '호스트 수집 대기'} />
         {/* v2.631(감사 WEB2631-07): 폴링한 서버가 0 이면(긴급중단·대상 없음) 초록 '0/0' 이 아니라 '—' + 사유(bmcPollSummary). */}
@@ -86,7 +86,7 @@ export default function ConsoleFacility({ global: g, sitesAll, scope, polls, per
                         <tr key={d.id}>
                           <td className="dvc-mono" style={{ fontSize: 12, fontWeight: 600 }}>{d.name}</td>
                           <td className="dvc-dim">{d.dc || '—'}</td>
-                          <td className="num" style={{ color: '#d97706' }}>{d.powerW != null ? `${fmtInt(d.powerW)} W` : '—'}</td>
+                          <td className="num" style={{ color: '#d97706' }} title={d.powerW != null && d.powerPartial ? '데이지체인 유닛 일부의 전력을 읽지 못했습니다 — 읽은 유닛만의 합입니다.' : undefined}>{d.powerW != null ? `${fmtInt(d.powerW)} W${d.powerPartial ? ' (부분 합)' : ''}` : '—'}</td>
                           <td className="num" style={{ color: d.tempMaxC == null ? '#9ca3af' : d.tempMaxC >= 26 ? '#dc2626' : '#6b7280' }}>{d.tempMaxC != null ? `${d.tempMaxC}°C` : '—'}</td>
                           <td className="num dvc-dim">{d.sensors}</td>
                           <td className="num" style={{ color: d.violations ? '#dc2626' : '#9ca3af' }}>{d.violations}</td>

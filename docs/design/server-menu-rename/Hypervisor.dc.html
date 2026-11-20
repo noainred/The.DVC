@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Hypervisor 메뉴를 누른 화면</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./shell.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+</style>
+</helmet>
+<div style="display: flex; flex-direction: column; min-height: 760px; background: #0a0e17; color: #e6edf6">
+
+<header class="tb">
+<button type="button" aria-label="메뉴 접기" style="display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: none; background: none; color: #8b9bb4; cursor: pointer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="width: 18px; height: 18px"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+<span class="logo"><span class="v">V</span>The Davinci</span>
+<span class="ver">v2.990.0</span>
+<span style="flex: 1 1 auto"></span>
+<label for="gq" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%)">통합 검색</label>
+<input id="gq" class="input" type="search" placeholder="검색" style="flex: 0 1 420px; min-height: 32px">
+</header>
+
+<div style="display: flex; flex-wrap: wrap; flex: 1 1 auto; align-items: stretch">
+
+<nav class="sb" aria-label="메뉴" style="flex: 0 0 236px">
+<div class="sb-nav">
+<button type="button" class="sb-item sb-top"><svg class="sb-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg><span class="sb-label">Overview</span></button>
+<button type="button" class="sb-item sb-top"><svg class="sb-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19h16M7 16V9M12 16V5M17 16v-5"/></svg><span class="sb-label">Summary</span></button>
+<button type="button" class="sb-item sb-top"><svg class="sb-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 6.5a4 4 0 0 0 5 5L10 21l-3-3 7.5-7.5zM21 3l-3.5 3.5"/></svg><span class="sb-label">서비스 인벤토리</span></button>
+<button type="button" class="sb-item sb-top active" aria-expanded="true"><svg class="sb-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v5H4zM4 14h16v5H4zM7 7.5h.01M7 16.5h.01"/></svg><span class="sb-label">서버</span><span class="sb-count">6</span><svg class="sb-chev up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+<ul class="sb-sub">
+<li><button type="button" class="sb-item sb-child"><span class="sb-dot"></span><span class="sb-label">Virtual Machine(VM)</span></button></li>
+<li><button type="button" class="sb-item sb-child active" aria-current="page"><span class="sb-dot"></span><span class="sb-label">Hypervisor</span></button></li>
+<li><button type="button" class="sb-item sb-child"><span class="sb-dot"></span><span class="sb-label">Bare Metal Server</span></button></li>
+<li><button type="button" class="sb-item sb-child"><span class="sb-dot"></span><span class="sb-label">물리 서버</span><svg class="sb-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="관리자 전용"><path d="M5 11h14v10H5zM8 11V7a4 4 0 0 1 8 0v4"/></svg></button></li>
+<li><button type="button" class="sb-item sb-child"><span class="sb-dot"></span><span class="sb-label">베어메탈 사용률</span></button></li>
+<li><button type="button" class="sb-item sb-child"><span class="sb-dot"></span><span class="sb-label">통합 서버 인벤토리</span></button></li>
+</ul>
+<button type="button" class="sb-item sb-top" aria-expanded="false"><svg class="sb-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3v12c0 1.7-3.6 3-8 3s-8-1.3-8-3zM4 6c0 1.7 3.6 3 8 3s8-1.3 8-3M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg><span class="sb-label">스토리지</span><span class="sb-count">8</span><svg class="sb-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+<button type="button" class="sb-item sb-top" aria-expanded="false"><svg class="sb-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 5h4v4H5zM15 5h4v4h-4zM10 15h4v4h-4zM7 9v3h10V9M12 12v3"/></svg><span class="sb-label">네트워크</span><span class="sb-count">6</span><svg class="sb-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+<button type="button" class="sb-item sb-top" aria-expanded="false"><svg class="sb-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7h10v10H7zM10 10h4v4h-4zM9 3v4M15 3v4M9 17v4M15 17v4M3 9h4M3 15h4M17 9h4M17 15h4"/></svg><span class="sb-label">자원관리</span><span class="sb-count">4</span><svg class="sb-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+</div>
+</nav>
+
+<main style="flex: 999 1 560px; min-width: 0; box-sizing: border-box; padding: 18px 22px; display: flex; flex-direction: column; gap: 14px">
+
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; min-width: 0">
+<h1 style="margin: 0; font-size: 20px; font-weight: 800">Hypervisor</h1>
+<span class="muted" style="font-size: 12.5px; min-width: 0">법인 = vCenter = Bareos 한 단위 · vCenter 에서 호스트 · VM 으로 내려가고, 숫자를 누르면 그 범위로 탭이 바뀝니다</span>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; min-width: 0">
+<a class="ph-tab" href="#vcenters"><span class="lb"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/></svg>vCenter<span class="sub">· 법인</span></span><span class="val">28</span></a>
+<a class="ph-tab on" href="#hosts" aria-current="page"><span class="lb"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v5H4zM4 14h16v5H4zM7 7.5h.01M7 16.5h.01"/></svg>Hypervisor<span class="sub">· ESXi 호스트</span></span><span class="val">658</span></a>
+<a class="ph-tab" href="#vms"><span class="lb"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7h10v10H7zM10 10h4v4h-4zM9 3v4M15 3v4M9 17v4M15 17v4M3 9h4M3 15h4M17 9h4M17 15h4"/></svg>Virtual Machine<span class="sub">· VM</span></span><span class="val">5,850</span></a>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0">
+<label for="f-region" class="muted" style="font-size: 12px; font-weight: 600">리전</label>
+<select id="f-region" class="input"><option>전체</option></select>
+<label for="f-vc" class="muted" style="font-size: 12px; font-weight: 600">vCenter</label>
+<select id="f-vc" class="input"><option>전체</option></select>
+<label for="f-q" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%)">이름 · IP 검색</label>
+<input id="f-q" class="input" type="search" placeholder="vCenter · 호스트 · VM 이름 · IP" style="flex: 1 1 220px; max-width: 320px">
+<span style="flex: 1 1 auto"></span>
+<a class="chip" href="#host-hygiene">ESXi 호스트 구성 점검</a>
+<a class="chip" href="#esxi">ESXi 버전별</a>
+<a class="chip" href="#hba">HBA 카드 속도</a>
+<a class="chip" href="#cluster-check">클러스터 HA·DRS 점검</a>
+</div>
+
+<div class="card" style="overflow-x: auto; min-width: 0">
+<table class="tbl">
+<thead><tr><th scope="col">호스트</th><th scope="col">법인(vCenter)</th><th scope="col">클러스터</th><th scope="col">상태</th><th scope="col" class="num">CPU</th><th scope="col" class="num">메모리</th><th scope="col" class="num">VM</th></tr></thead>
+<tbody>
+<tr><td class="mono">esx-kr-a01</td><td>KR-SEOUL</td><td>CL-PROD-01</td><td><span class="st ok">연결됨</span></td><td class="num">41%</td><td class="num">63%</td><td class="num">18</td></tr>
+<tr><td class="mono">esx-kr-a02</td><td>KR-SEOUL</td><td>CL-PROD-01</td><td><span class="st ok">연결됨</span></td><td class="num">37%</td><td class="num">58%</td><td class="num">16</td></tr>
+<tr><td class="mono">esx-pl-b01</td><td>PL-WARSAW</td><td>CL-APP-02</td><td><span class="st ok">연결됨</span></td><td class="num">52%</td><td class="num">71%</td><td class="num">21</td></tr>
+<tr><td class="mono">esx-us-c04</td><td>US-EAST</td><td>CL-VDI-01</td><td><span class="st warn">점검 모드</span></td><td class="num">—</td><td class="num">—</td><td class="num">0</td></tr>
+<tr><td class="mono">esx-us-c05</td><td>US-EAST</td><td>CL-VDI-01</td><td><span class="st ok">연결됨</span></td><td class="num">29%</td><td class="num">44%</td><td class="num">12</td></tr>
+</tbody>
+</table>
+</div>
+
+</main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":760}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

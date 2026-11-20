@@ -20,15 +20,35 @@ import { parseCsvRows, csvLine, unguardCell, delimiterHint, CSV_BOM } from '../u
 import { analyzeBulkImport } from '../util/bulkImport.js';
 import { parseFreeRows, rowsToFreeText, unmark, EMPTY_MARK } from '../util/bulkText.js';
 import { isKnownType, isImplementedType, STORAGE_TYPES, collectMethodsFor, defaultCollectMethod } from './types.js';
+import { isFePerfType } from './collectors/arrayPerf.js';   // v2.955 REST 어레이도 nodeLoad 칸
 
 // 내보내기/샘플 공통 컬럼 순서(password 는 가져오기 전용이라 맨 끝 — export 는 값 비움).
-export const CSV_COLUMNS = ['type', 'name', 'host', 'username', 'collectMethod', 'sshPort', 'datacenter', 'agent', 'enabled', 'note', 'password'];
+// v2.938: `nodeLoad` — 아이실론의 '노드 부하 표본 수집'(registry.nodeLoadEnabled). 헤더로 읽으므로 위치는 자유지만 password 는 끝(가져오기 전용).
+export const CSV_COLUMNS = ['type', 'name', 'host', 'username', 'collectMethod', 'sshPort', 'datacenter', 'agent', 'enabled', 'nodeLoad', 'note', 'password'];
+
+/**
+ * 결정(78 남긴 것 ③ — CSV 빈 칸 계약): 수정 행(같은 host+type)의 **빈 칸(또는 파일에 없는 열)** 은 저장값 유지 · **`-` 하나** 는 비움(명시 — 새 장비면 기본값).
+ *   행의 `_blank` = 빈 칸이었던 필드(아래 목록 중) — 라우트(routes/api/storageMon.js stParseBody)가 수정 행이면 저장값으로 채운다(util/bulkImport.js fillBlankFromSaved).
+ *   예전에는 빈 agent 가 엣지 위임 장비를 중앙 직접 수집으로, 빈 enabled 가 꺼 둔 장비를 켬으로, 빈 법인 · 메모가 지워지고, 빈 계정 · 포트가 비밀번호 폐기로 이어졌다.
+ *   type · host 는 식별 키, password · nodeLoad 는 이미 '빈 칸 = 유지' 라 목록 밖이다.
+ */
+export const KEEP_ON_BLANK = Object.freeze(['name', 'username', 'collectMethod', 'sshPort', 'datacenter', 'agent', 'enabled', 'note']);
 
 const bool = (v, dflt = true) => {
   const s = String(v ?? '').trim().toLowerCase();
   if (!s) return dflt;
   return !['false', '0', 'no', 'n', 'off', '비활성', 'disabled', '아니오'].includes(s);
 };
+/** 세 값 불리언 — 빈 칸은 **undefined(유지)**. `enabled` 와 달리 비웠다고 켜지 않는다(가져오기가 꺼 둔 장비를 조용히 켜지 않게). */
+const triBool = (v) => (String(v ?? '').trim() === '' ? undefined : bool(v));
+/**
+ * 내보낼 노드 부하 표본 수집 값 — 표본을 낼 수 있는 장비(아이실론 · REST 로 수집하는 PowerMax/PowerStore/Unity — registry.normalizeDevice sampleCapable 과 같은 조건)만 true|false,
+ * 그 밖은 빈칸(해당 없음 — 가져오기도 빈칸은 유지). v2.955: v2.951 의 REST 어레이 토글(디렉터 · 노드 · SP 성능 표본)이 CSV 에 빠져 있던 것을 채움.
+ */
+export function exportedNodeLoad(d) {
+  const capable = d?.type === 'isilon' || (isFePerfType(d?.type) && String(d?.collectMethod || 'api') === 'api');
+  return capable ? (d.nodeLoadEnabled === false ? 'false' : 'true') : '';
+}
 
 
 /**
@@ -77,6 +97,7 @@ export function devicesToCsv(devices, dcName = (x) => x, { includePasswords = fa
       dcName(d.datacenterId) || d.datacenterId || '',          // 사람이 읽는 법인명(가져오기는 이름/ID 둘 다 허용)
       d.agent || '',                                            // 빈 값 = 중앙 직접
       d.enabled === false ? 'false' : 'true',
+      exportedNodeLoad(d),                                      // v2.938: 아이실론만 — 노드 부하 표본 수집
       d.note || '',
       includePasswords ? (d.password || '') : '',               // 기본: 절대 내보내지 않음(선택 시만)
     ]));
@@ -153,11 +174,11 @@ export function sampleCsv() {
     // 주석 행(# 로 시작) — 파서가 컬럼 매핑을 못 찾는 헤더가 아니라 데이터 행이지만, 가져오기 시
     // type 이 '#...' 라 isKnownType 실패로 걸러진다(안내 목적). 실제 사용 시 이 행은 지운다.
     csvLine([`# type: ${impl} 중 하나`, '# name: 표시명', '# host: IP/FQDN', '# username: 접속 계정',
-      '# collectMethod: 방식이 둘인 타입(isilon·powerstore·unity480)은 ssh|api — 비우면 그 타입 기본값으로 저장됩니다',
-      '# sshPort: ssh 일 때만 의미(기본 22)', '# datacenter: 법인 이름 또는 ID(비우면 미지정)',
-      '# agent: 엣지 이름(비우면 중앙 직접 수집)', '# enabled: true|false', '# note: 메모', '# password: 비우면 기존 유지(신규는 없음)']),
-    csvLine(['isilon', 'WA-Isilon-01', '10.20.0.50', 'root', 'ssh', '22', 'WA', 'WA-Edge', 'true', '법인 WA 아카이브', 'ChangeMe!1']),
-    csvLine(['unity480', 'KR-Unity-01', '10.10.0.9', 'service', 'ssh', '22', '한국', '', 'true', 'SSH(uemcli) 수집', 'ChangeMe!2']),
+      '# collectMethod: 방식이 둘인 타입(isilon·powerstore·unity480)은 ssh|api — 신규는 비우면 그 타입 기본값으로 저장됩니다',
+      '# sshPort: ssh 일 때만 의미(기본 22)', '# datacenter: 법인 이름 또는 ID(신규는 비우면 미지정)',
+      '# agent: 엣지 이름(신규는 비우면 중앙 직접 수집 · 수정 행은 빈 칸 = 기존 유지, - = 중앙 직접)', '# enabled: true|false', '# nodeLoad: 아이실론 · REST 어레이(PowerMax/PowerStore/Unity) true|false(노드 부하 · 디렉터 성능 표본 수집 — 비우면 기존 유지·신규는 켬)', '# note: 메모', '# password: 비우면 기존 유지(신규는 없음) — 수정 행(같은 host+type)의 빈 칸은 모두 기존 값 유지, 값을 지우려면 - 하나']),
+    csvLine(['isilon', 'WA-Isilon-01', '10.20.0.50', 'root', 'ssh', '22', 'WA', 'WA-Edge', 'true', 'true', '법인 WA 아카이브', 'ChangeMe!1']),
+    csvLine(['unity480', 'KR-Unity-01', '10.10.0.9', 'service', 'ssh', '22', '한국', '', 'true', '', 'SSH(uemcli) 수집', 'ChangeMe!2']),
   ];
   return CSV_BOM + lines.join('\r\n') + '\r\n';
 }
@@ -182,6 +203,7 @@ export function parseDevicesCsv(text) {
     collectMethod: idx('collectmethod', 'method', '수집방식'), sshPort: idx('sshport', 'port', '포트'),
     datacenter: idx('datacenter', 'datacenterid', '법인', 'dc'), agent: idx('agent', '엣지', '수집주체'),
     enabled: idx('enabled', '활성'), note: idx('note', '메모', 'comment'),
+    nodeLoad: idx('nodeload', 'nodeloadenabled', '표본', '노드부하', '노드부하표본'), // v2.938
   };
   if (col.name < 0 || col.host < 0) return { rows: [], error: "필수 헤더 'name' 과 'host' 가 없습니다." + delimiterHint(rows[0]) };
 
@@ -203,7 +225,10 @@ export function parseDevicesCsv(text) {
     if (!name && !host) return;                    // 완전 빈 행 스킵
     const type = cell(cells, col.type);
     if (type.startsWith('#')) return;              // 샘플 주석 행 스킵
+    // 결정(78 남긴 것 ③): 빈 칸(열 없음 포함)이었던 필드 — `-` 는 비지 않은 것(명시적 비움)
+    const blank = KEEP_ON_BLANK.filter((f) => col[f] < 0 || unguardCell(cells[col[f]] ?? '').trim() === '');
     out.push({
+      ...(blank.length ? { _blank: blank } : {}),
       _line: n + 2,                                // 사람용 행 번호(헤더=1)
       type, name, host,
       username: cell(cells, col.username),
@@ -213,6 +238,7 @@ export function parseDevicesCsv(text) {
       datacenter: cell(cells, col.datacenter),
       agent: cell(cells, col.agent),
       enabled: bool(cell(cells, col.enabled)),
+      nodeLoadEnabled: triBool(cell(cells, col.nodeLoad)),   // v2.938: 빈 칸·열 없음 = undefined(유지)
       note: cell(cells, col.note),
       _hasPassword: col.password >= 0 && cell(cells, col.password, { trim: false }) !== '',
     });
@@ -235,7 +261,8 @@ export function rowIssue(row) {
  */
 
 /** 자유텍스트 위치형 열 순서 — password 는 맨 끝(내보내기는 늘 비운다). */
-export const TEXT_FIELDS = ['type', 'name', 'host', 'username', 'collectMethod', 'sshPort', 'datacenter', 'agent', 'enabled', 'note', 'password'];
+// v2.938: `nodeLoad` 는 **맨 끝** — 위치형(①)은 열 순서가 계약이라 가운데에 끼우면 옛 파일의 note·password 가 한 칸씩 밀린다(비밀번호가 메모로 읽히는 사고).
+export const TEXT_FIELDS = ['type', 'name', 'host', 'username', 'collectMethod', 'sshPort', 'datacenter', 'agent', 'enabled', 'note', 'password', 'nodeLoad'];
 
 /** 별칭 — CSV 헤더 별칭(parseDevicesCsv 의 idx 목록)과 **같은 어휘**를 쓴다. */
 export const TEXT_ALIASES = {
@@ -245,6 +272,7 @@ export const TEXT_ALIASES = {
   port: 'sshPort', 포트: 'sshPort', sshport: 'sshPort',
   datacenterid: 'datacenter', 법인: 'datacenter', dc: 'datacenter',
   엣지: 'agent', 수집주체: 'agent', 활성: 'enabled', 메모: 'note', comment: 'note',
+  nodeload: 'nodeLoad', nodeloadenabled: 'nodeLoad', 표본: 'nodeLoad', 노드부하: 'nodeLoad', 노드부하표본: 'nodeLoad', // v2.938
 };
 
 /**
@@ -261,7 +289,9 @@ export function parseDevicesText(text, { defaults = {} } = {}) {
     // 내보내기가 빈칸에 넣은 `-` 와 공백 보존용 인용부호를 되돌린다(왕복 안전).
     const v = (f) => unmark(row[f]);
     const password = v('password');
+    const blank = KEEP_ON_BLANK.filter((f) => String(row[f] ?? '').trim() === '');   // 결정(78 남긴 것 ③): `-` 는 비지 않은 것
     return {
+      ...(blank.length ? { _blank: blank } : {}),
       _line: row._line,
       type: v('type'), name: v('name'), host: v('host'),
       username: v('username'),
@@ -271,6 +301,7 @@ export function parseDevicesText(text, { defaults = {} } = {}) {
       datacenter: v('datacenter'),
       agent: v('agent'),
       enabled: bool(v('enabled')),
+      nodeLoadEnabled: triBool(v('nodeLoad')),   // v2.938
       note: v('note'),
       _hasPassword: password !== '',
     };
@@ -288,12 +319,15 @@ export function devicesToText(devices, dcName = (x) => x) {
     datacenter: dcName(d.datacenterId) || d.datacenterId || '',
     agent: d.agent || '', enabled: d.enabled === false ? 'false' : 'true',
     note: d.note || '', password: '',                        // 절대 내보내지 않는다
+    nodeLoad: exportedNodeLoad(d),                           // v2.938: 아이실론만(다른 타입은 빈칸)
   }));
   return rowsToFreeText(rows, TEXT_FIELDS, {
     comment: [
       '스토리지 장비 목록(자유텍스트) — 이 파일을 고쳐 그대로 가져올 수 있습니다.',
       '· 열 구분: 탭 · | · 쉼표 · 공백 중 아무거나. 빈칸은 `-`.',
-      '· 비밀번호는 보안상 내보내지 않습니다 — 새로 넣을 때만 마지막 열에 적으세요(비우면 기존 유지).',
+      '· 이미 있는 장비(같은 host+type)를 고칠 때: 비운 칸 · 적지 않은 항목은 기존 값 유지, `-` 는 그 값을 비움(agent 를 `-` 로 두면 중앙 직접 수집).',
+      '· 비밀번호는 보안상 내보내지 않습니다 — 새로 넣을 때만 password 열에 적으세요(비우면 기존 유지).',
+      '· nodeLoad(마지막 열): 아이실론의 노드 부하 표본 수집 true|false — 비우면 기존 유지, 다른 타입은 빈칸.',
     ].join('\n'),
   });
 }
@@ -311,7 +345,7 @@ export function sampleText() {
     'isilon  WA-Isilon-01  10.20.0.50  root  ssh  22  WA  WA-Edge  true  "법인 WA 아카이브"  ChangeMe!1',
     'powerstore  KR-PS-500T  10.10.0.9  admin  -  -  한국  -  true  "중앙 직접 수집"  ChangeMe!2',
     '',
-    '# ② 키=값형 — 아는 항목만 적습니다(순서 무관, 한글 키도 가능).',
+    '# ② 키=값형 — 아는 항목만 적습니다(순서 무관, 한글 키도 가능). 이미 있는 장비는 적지 않은 항목 · 빈 칸이 기존 값을 유지합니다(지우려면 -).',
     'type=unity name=KR-Unity-01 host=10.10.0.20 계정=admin 비밀번호=ChangeMe!3 법인=한국',
     '',
     '# ③ 헤더형 — 첫 줄에 열 이름을 적으면 그 순서로 읽습니다(엑셀에서 헤더까지 복사한 경우).',

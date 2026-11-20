@@ -21,8 +21,12 @@ import ScopeOmitBanner from '../ScopeOmitBanner.jsx';
 import { gpuFinderNote } from './gpuFinderText.js';
 import Select from '../../components/Select.jsx';
 import { partsCell } from '../idrac/hwStatusText.js'; // v2.728: '부품 이상' 열(판정은 서버 — 색·문구만)
+import { effVcOf, dcOfServer, scopeMatchServer, matchServerQuery } from './baremetalBoardText.js'; // v2.917 소속·스코프 판정 하나로
+import BaremetalBoard from './BaremetalBoard.jsx'; // v2.917 물리 서버 › 상태 보드
 import useSearchHandoff from '../../hooks/useSearchHandoff.js'; // v2.909 헤더 ⌘K 통합 장비 검색 — 검색어 인계
 import { useFocusHandoff } from '../../hooks/useSearchHandoff.js'; // v2.911 고른 장비 상세 열기
+import { saveBlob } from '../../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나(즉시 revoke · 문서 밖 click 금지)
+import { backdropClose } from '../../components/backdropClose.js'; // 96회차(95회차 남긴 것 ①): 창 안에서 끌다 배경에서 떼면 닫히던 것 — 누름 · 뗌 모두 배경일 때만
 
 /**
  * v2.622(감사 RECENT-04): 상세 모달 열기 — 행이 벤더를 모르면(온도·GPU·드릴다운) 먼저 'BMC' 로 열고 서버 목록을
@@ -136,7 +140,7 @@ function HwDrillModal({ dc, dim, keyVal, onClose, onServer }) {
   const { loading, data, error } = useTool('/admin/idrac/hardware-servers', { datacenterId: dc || '', dim, key: keyVal });
   const rows = data?.servers || [];
   return (
-    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="modal-overlay" {...backdropClose(() => onClose())}>
       <EscClose onClose={onClose} />
       <div className="modal card" style={{ maxWidth: 820, width: '92vw', maxHeight: '82vh', overflow: 'auto' }}>
         <div className="flex between" style={{ marginBottom: 10 }}>
@@ -212,7 +216,7 @@ function HardwareSummary() {
     <div>
       <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 12 }}>
         <div className="muted" style={{ fontSize: 13 }}>
-          대상 서버 <b style={{ color: 'var(--accent)' }}>{d.totalServers}</b>대 · 수집 <b>{d.collected}</b> · 미수집 <span className="badge amber">{d.missing}</span> · GPU 카드 <b>{d.totalGpuCards}</b>장
+          대상 서버 <b style={{ color: 'var(--accent)' }}>{d.totalServers}</b>대 · 수집 <b>{d.collected}</b> · 미수집 <span className="badge amber">{d.missing}</span> · GPU 카드 <b>{d.totalGpuCards}</b>장{d.gpuUnread > 0 && <span className="badge amber" style={{ marginLeft: 6 }} title="GPU 목록(Processors)을 못 읽은 서버 — GPU 카드 합계는 최소값입니다">GPU 목록 못 읽음 {d.gpuUnread}대</span>}
           <span style={{ marginLeft: 6 }}>— 항목을 클릭하면 그 서버만 볼 수 있습니다.</span>
         </div>
         <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }} title="법인(DataCenter) 기준. 스캔 등록분은 법인 직접, 그 외는 vCenter→법인 할당으로 해석.">
@@ -259,28 +263,18 @@ function ServerInfoByVcenter({ vc, onServer }) {
     fetchJson('/admin/idrac?parts=1').then((r) => { setScopeMeta(r?.scoped ? { scoped: true, omittedOutOfScope: r.omittedOutOfScope } : null); return r.servers || []; }),
     fetchJson('/admin/datacenters').then((r) => { setDcErr(null); return { datacenters: r.datacenters || [], assign: r.assign || {} }; }).catch((e) => { setDcErr(e); return { datacenters: [], assign: {} }; }),
   ]).then(([servers, dc]) => { setD(servers); setDcs(dc); setErr(null); }).catch((e) => setErr(e.message));
-  useEffect(() => { setD(null); load(); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { setD(null); load(); }, []);
   if (err) return <ErrorBox message={err} />;
   if (!d) return <Loading />;
   const dcName = new Map((dcs.datacenters || []).map((x) => [x.id, x.name || x.id]));
   const assign = dcs.assign || {};
   // 가상화 소속 vCenter: 명시 vcenterId가 있으면 그것, 없으면 mappedVcenterId(서비스태그=ESXi
   // 일련번호 매칭으로 찾은 vCenter). 스캔 등록 iDRAC 서버도 서비스태그가 ESXi와 일치하면 그 vCenter로.
-  const effVc = (s) => s.vcenterId || s.mappedVcenterId || '';
-  // 서버의 소속 법인: 스캔 등록분은 datacenterId 직접, 그 외는 (매핑 포함) vCenter→DataCenter 할당.
-  const dcOf = (s) => s.datacenterId || assign[effVc(s)] || '';
-  // 상단 2단 필터(스코프 객체 { datacenterId?, vcenterId?, baremetal? })를 적용. 백엔드
-  // serverInScope와 동일 규칙: 법인=그 법인 전체, vCenter=그 vCenter 가상화, Baremetal=vCenter 미소속.
-  const scopeMatch = (s) => {
-    const sc = (vc && typeof vc === 'object') ? vc : {};
-    const ev = effVc(s);
-    if (sc.vcenterId) { if (sc.vcenterId === '__unmapped__' ? ev : ev !== sc.vcenterId) return false; }
-    if (sc.datacenterId) { if (dcOf(s) !== (sc.datacenterId === '__unmapped__' ? '' : sc.datacenterId)) return false; }
-    if (sc.baremetal && ev) return false;
-    return true;
-  };
-  const ql = q.trim().toLowerCase();
-  const match = (s) => !ql || [s.name, s.serviceTag, s.host, s.model].some((x) => String(x || '').toLowerCase().includes(ql));
+  // v2.917: 소속·스코프·검색 판정은 baremetalBoardText.js 하나(상태 보드 탭과 같은 규칙 — 백엔드 serverInScope 와 동일).
+  const effVc = effVcOf;
+  const dcOf = (s) => dcOfServer(s, assign);
+  const scopeMatch = (s) => scopeMatchServer(s, vc, assign);
+  const match = (s) => matchServerQuery(s, q);
   const rows = d.filter((s) => scopeMatch(s) && match(s));
   const groups = new Map();
   for (const s of rows) { const id = dcOf(s) || '__unmapped__'; if (!groups.has(id)) groups.set(id, []); groups.get(id).push(s); }
@@ -402,8 +396,7 @@ function ServerListBody({ corpName, model, servers, onRow }) {
     const lines = [head.join(',')];
     for (const s of rows) lines.push([s.name || s.id, s.model || model || '', serverCsvType(s), serverCsvVendor(s), String(s.host || '').replace(/^https?:\/\//, ''), s.serviceTag || '', s._vc || '', s.enabled === false ? '중지' : '수집'].map(esc).join(','));
     const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = `servers-${String(model || corpName).replace(/[^a-zA-Z0-9._-]+/g, '_')}-${dayStamp()}.csv`; a.click(); URL.revokeObjectURL(url);
+    saveBlob(blob, `servers-${String(model || corpName).replace(/[^a-zA-Z0-9._-]+/g, '_')}-${dayStamp()}.csv`);
   };
   return (
     <>
@@ -500,10 +493,7 @@ function PartsInventory({ vc, onServer }) {
     .sort((a, b) => (sortKey === 'label' ? a.label.localeCompare(b.label) : (b[sortKey] || 0) - (a[sortKey] || 0)));
   const exportCsv = () => {
     const csv = ['분류,파트,상세,수량,서버수', ...rows.map((b) => [b.catName, b.label, b.detail, b.count, b.serverCount].map(esc).join(','))].join('\n');
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv' }));
-    a.download = `hardware-parts-${dayStamp()}.csv`;
-    a.click(); URL.revokeObjectURL(a.href);
+    saveBlob(new Blob(['﻿' + csv], { type: 'text/csv' }), `hardware-parts-${dayStamp()}.csv`);
   };
   const th = (key, label) => (
     <th style={{ cursor: 'pointer', whiteSpace: 'nowrap' }} onClick={() => setSortKey(key)}>{label}{sortKey === key ? ' ▾' : ''}</th>
@@ -524,6 +514,7 @@ function PartsInventory({ vc, onServer }) {
       </div>
       <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
         대상 서버 <b>{data.total}</b>대 · 수집 {data.collected} · 미수집 {(data.missing || []).length}
+        {(data.unread || []).length > 0 && <span className="badge amber" style={{ marginLeft: 6 }} title={`인벤토리는 있지만 이 파트 목록을 못 읽은 서버 — 그 서버의 수량은 빠져 있습니다(0 이 아닙니다)\n${data.unread.slice(0, 50).map((x) => x.name).join(', ')}`}>파트 목록 못 읽음 {data.unread.length}대</span>}
         {(data.missing || []).length > 0 && <span title={(data.missing || []).slice(0, 30).map((m) => m.name).join(', ')}> (목록은 마우스 오버)</span>}
         {' '}— 파트 {rows.length}종 · 행을 클릭하면 장착 서버가 보입니다. 인벤토리는 30분 주기 수집이며 세대/라이선스에 따라 일부 항목이 비어 있을 수 있습니다.
       </div>
@@ -603,7 +594,8 @@ export function ServerAnalysis() {
 
 function ServerAnalysisView({ bm = false }) {
   // 하위 탭을 URL 에 실어 새로고침·북마크·뒤로가기에서 유지한다(v2.438, hooks/useHashTab.js).
-  const [sub, setSub] = useHashTab({ base: bm ? ['tools', 'serveranalysis', BAREMETAL_SEG] : ['tools', 'serveranalysis'], valid: ['info', 'hw', 'parts', 'temp', 'gpu', 'fw', 'unsupported'], fallback: 'info' });
+  const [sub, setSub] = useHashTab({ base: bm ? ['tools', 'serveranalysis', BAREMETAL_SEG] : ['tools', 'serveranalysis'], valid: ['board', 'info', 'hw', 'parts', 'temp', 'gpu', 'fw', 'unsupported'], fallback: bm ? 'board' : 'info' });
+  // v2.917: '상태 보드' 탭(docs/design/baremetal/ 시안 A) — 물리 서버 메뉴의 첫 화면. 서버 분석(전체)에서는 둘째 선택지.
   const [dc, setDc] = useState('');   // 1차 박스: '' 전체 | DataCenter id
   const [lvl2, setLvl2] = useState(bm ? 'baremetal' : ''); // 2차 박스: '' 전체 | vc:<id> | baremetal (물리 서버 메뉴면 baremetal 고정)
   const [vcs, setVcs] = useState([]);
@@ -632,6 +624,8 @@ function ServerAnalysisView({ bm = false }) {
     <div>
       <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 12 }}>
         <div className="flex gap wrap">
+          <button className={sub === 'board' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('board')}
+            title="서버 1대 = 타일 1개 — 부품 상태(장애·경고·확인 불가·판정 못함)를 법인별로 한눈에 봅니다.">🧭 상태 보드</button>
           <button className={sub === 'info' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('info')}>🗄 법인별 서버 정보</button>
           <button className={sub === 'hw' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('hw')}>🔩 하드웨어 집계</button>
           <button className={sub === 'parts' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('parts')}>🧩 파트 인벤토리</button>
@@ -654,7 +648,7 @@ function ServerAnalysisView({ bm = false }) {
           <label className="flex gap" style={{ alignItems: 'center' }} title="2차: vCenter=가상화 장비만 · Baremetal=vCenter에 속하지 않는 물리 서버">
             <span className="muted">구분</span>
             <Select className="select" value={lvl2} onChange={(e) => setLvl2(e.target.value)} style={{ minWidth: 180 }} disabled={bm}
-              title={bm ? '서버 › 물리 서버 메뉴는 Baremetal(미가상화 물리)로 고정입니다 — 다른 구분은 자원관리 › 서버 분석에서 고릅니다.' : undefined}>
+              title={bm ? '서버 › Physical Server 메뉴는 Baremetal(미가상화 물리)로 고정입니다 — 다른 구분은 자원관리 › Physical Server(전체) 에서 고릅니다.' : undefined}>
               <option value="">{vcErr ? '전체 (vCenter 목록을 읽지 못함)' : dc ? '전체 (법인 모든 장비)' : '전체'}</option>
               {dcVcs.length > 0 && (
                 <optgroup label="🖥 vCenter (가상화 장비만)">
@@ -668,10 +662,11 @@ function ServerAnalysisView({ bm = false }) {
       </div>
       {bm && (
         <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
-          물리 서버 — 서버 분석의 구분 ‘Baremetal(미가상화 물리)’ 을 보여 줍니다. 법인을 고르지 않으면 전체 법인입니다. 하드웨어 집계 탭은 구분과 무관하게 전체 서버를 셉니다.
+          서버 › Physical Server — 자원관리 › Physical Server(전체) 의 구분 ‘Baremetal(미가상화 물리)’ 을 보여 줍니다. 법인을 고르지 않으면 전체 법인입니다. 하드웨어 집계 탭은 구분과 무관하게 전체 서버를 셉니다.
         </div>
       )}
       <DcErrNote err={dcErr} />
+      {sub === 'board' && <BaremetalBoard {...sp} bm={bm} dcLabel={dc ? ((dcs.find((x) => x.id === dc) || {}).name || dc) : ''} />}
       {sub === 'info' && <ServerInfoByVcenter {...sp} vcs={vcs} />}
       {sub === 'hw' && <HardwareSummary />}
       {sub === 'parts' && <PartsInventory {...sp} />}
@@ -801,7 +796,7 @@ function ServerTempFinder({ vc, onServer }) {
   // 세대 가드: 고RTT vCenter에서 스코프를 빠르게 바꾸면 느린 이전 응답이 나중에 도착해 최신
   // 스코프 데이터를 덮어쓰던 경쟁을 막는다(가장 마지막 요청 결과만 반영).
   const load = () => { const g = ++genRef.current; return fetchJson(`/admin/idrac/temps${vcQS(vc)}`).then((r) => { if (g === genRef.current) { setD(r); setErr(null); } }).catch((e) => { if (g === genRef.current) setErr(e.message); }); };
-  useEffect(() => { setD(null); load(); const t = setInterval(load, 30_000); return () => clearInterval(t); /* eslint-disable-next-line */ }, [vc]);
+  useEffect(() => { setD(null); load(); const t = setInterval(load, 30_000); return () => clearInterval(t); }, [vc]); // eslint-disable-line react-hooks/exhaustive-deps
   if (err) return <ErrorBox message={err} />;
   if (!d) return <Loading />;
   const ql = q.trim().toLowerCase();
@@ -856,7 +851,7 @@ function ServerFirmwareFinder({ vc }) {
   const [model, setModel] = useState(null);
   const genRef = useRef(0);
   const load = () => { const g = ++genRef.current; return fetchJson(`/admin/idrac/firmware-inventory${vcQS(vc)}`).then((r) => { if (g === genRef.current) { setD(r); setErr(null); } }).catch((e) => { if (g === genRef.current) setErr(e.message); }); };
-  useEffect(() => { setD(null); load(); /* eslint-disable-next-line */ }, [vc]);
+  useEffect(() => { setD(null); load(); }, [vc]); // eslint-disable-line react-hooks/exhaustive-deps
   if (err) return <ErrorBox message={err} />;
   if (!d) return <Loading />;
   const sel = model && d.models.find((m) => m.model === model);
@@ -924,7 +919,7 @@ function ServerGpuFinder({ vc, onServer }) {
   const [open, setOpen] = useState(null); // 펼친 모델
   const genRef = useRef(0);
   const load = () => { const g = ++genRef.current; return fetchJson(`/admin/idrac/gpu-inventory${vcQS(vc)}`).then((r) => { if (g === genRef.current) { setD(r); setErr(null); } }).catch((e) => { if (g === genRef.current) setErr(e.message); }); };
-  useEffect(() => { setD(null); load(); /* eslint-disable-next-line */ }, [vc]);
+  useEffect(() => { setD(null); load(); }, [vc]); // eslint-disable-line react-hooks/exhaustive-deps
   if (err) return <ErrorBox message={err} />;
   if (!d) return <Loading />;
   const ql = q.trim().toLowerCase();
@@ -938,6 +933,7 @@ function ServerGpuFinder({ vc, onServer }) {
 GPU <b style={{ color: 'var(--accent)' }}>{d.totalGpus}</b>장 · <b>{d.models.length}</b>종 · iDRAC {d.collectedServers}/{d.totalServers}
           <span title="Overview 'GPU 카드' 와 같은 기준입니다 — iDRAC 인벤토리에 있는 카드만 셉니다(비활성 서버 제외).">{gpuFinderNote(d)}</span>
           {d.missing?.length > 0 && <span className="badge amber" style={{ marginLeft: 8 }} title={d.missing.map((x) => x.name).join(', ')}>미수집 {d.missing.length}대</span>}
+          {d.gpuUnread > 0 && <span className="badge amber" style={{ marginLeft: 8 }} title={`인벤토리는 읽었지만 GPU 목록(Processors)을 못 읽은 서버입니다 — 합계는 최소값입니다(GPU 가 없다는 뜻이 아닙니다).${(d.gpuUnreadServers || []).length ? `\n${d.gpuUnreadServers.map((x) => x.name).join(', ')}` : ''}`}>GPU 목록 못 읽음 {d.gpuUnread}대</span>}
         </div>
         <div className="flex gap" style={{ alignItems: 'center' }}>
           <SearchBox className="input" style={{ maxWidth: 260 }} placeholder="GPU 모델 / 서비스태그 검색" value={q} onChange={setQ} />

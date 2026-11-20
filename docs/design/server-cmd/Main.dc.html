@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>서버 명령 실행 — 배치와 흐름</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./sc.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#60a5fa}a:hover{color:#93c5fd}
+</style>
+</helmet>
+<div class="pg" style="min-height: 2200px; padding: 28px 32px 44px; display: flex; flex-direction: column; gap: 18px">
+
+  <div style="display: flex; flex-direction: column; gap: 6px; max-width: 1100px">
+    <div class="crumb">서버 접속 공용 모듈 · 다음 기능(안) · 2026-11-20</div>
+    <h1>서버 명령 실행 — 정해 둔 명령을 골라 서버에서 돌리고 출력을 받는다</h1>
+    <p class="soft" style="font-size: 14px">이미 만든 접속 코어(계정 고르기 · 잠금 방지 · 시한 · 출력 상한)를 그대로 쓰고, 그 위에 ‘프리셋 목록’ 과 ‘출력 보여 주기’ 만 얹습니다. 화면에서 명령 글자를 직접 넣는 길은 만들지 않습니다.</p>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px">
+    <div class="card hi" style="display: flex; flex-direction: column; gap: 6px">
+      <h3>별도 특수 기능으로 둔다</h3>
+      <p class="soft">‘서버 정보’ 와 같은 자리(특수 기능 › 서버)에 화면 하나를 더합니다. 접속 · 계정 · 비밀은 코어가 하고, 새 기능은 프리셋과 출력만 맡습니다.</p>
+    </div>
+    <div class="card hi" style="display: flex; flex-direction: column; gap: 6px">
+      <h3>명령은 프리셋만</h3>
+      <p class="soft">화면은 프리셋 번호와 값(서비스 이름 · 경로)만 보냅니다. 실제 명령 글자는 서버 코드에만 있고, 실행 전에 화면에 그대로 보여 줍니다.</p>
+    </div>
+    <div class="card hi" style="display: flex; flex-direction: column; gap: 6px">
+      <h3>읽기 전용 · 출력은 저장하지 않는다</h3>
+      <p class="soft">서버 상태를 바꾸는 명령은 넣지 않습니다. 출력은 포탈 메모리에 마지막 실행 한 건만 두고, 감사 로그에는 출력을 싣지 않습니다.</p>
+    </div>
+  </div>
+
+  <div class="sec">
+    <h2>실행 한 번의 흐름</h2>
+    <div style="overflow-x: auto">
+      <div style="position: relative; width: 1376px; height: 368px">
+
+        <svg role="img" aria-label="화면에서 라우트로" width="63" height="8" viewBox="0 0 63 8" preserveAspectRatio="none" style="position: absolute; left: 176px; top: 108px; width: 63px; height: 8px; overflow: visible; fill: none; stroke: #8b9bb4; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="dc-arrow-head-filled-1" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#8b9bb4" stroke="none" style="stroke: none; fill: #8b9bb4; fill: context-stroke"/></marker></defs><path d="M 0 4 L 59 4" marker-end="url(#dc-arrow-head-filled-1)"></path></svg>
+        <svg role="img" aria-label="라우트에서 서버 명령으로, 권한 확인을 통과했을 때" width="63" height="8" viewBox="0 0 63 8" preserveAspectRatio="none" style="position: absolute; left: 416px; top: 108px; width: 63px; height: 8px; overflow: visible; fill: none; stroke: #8b9bb4; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="dc-arrow-head-filled-2" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#8b9bb4" stroke="none" style="stroke: none; fill: #8b9bb4; fill: context-stroke"/></marker></defs><path d="M 0 4 L 59 4" marker-end="url(#dc-arrow-head-filled-2)"></path></svg>
+        <svg role="img" aria-label="서버 명령에서 코어로, 완성된 고정 명령을 넘긴다" width="63" height="8" viewBox="0 0 63 8" preserveAspectRatio="none" style="position: absolute; left: 656px; top: 108px; width: 63px; height: 8px; overflow: visible; fill: none; stroke: #8b9bb4; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="dc-arrow-head-filled-3" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#8b9bb4" stroke="none" style="stroke: none; fill: #8b9bb4; fill: context-stroke"/></marker></defs><path d="M 0 4 L 59 4" marker-end="url(#dc-arrow-head-filled-3)"></path></svg>
+        <svg role="img" aria-label="코어에서 전송으로" width="63" height="8" viewBox="0 0 63 8" preserveAspectRatio="none" style="position: absolute; left: 896px; top: 108px; width: 63px; height: 8px; overflow: visible; fill: none; stroke: #8b9bb4; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="dc-arrow-head-filled-4" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#8b9bb4" stroke="none" style="stroke: none; fill: #8b9bb4; fill: context-stroke"/></marker></defs><path d="M 0 4 L 59 4" marker-end="url(#dc-arrow-head-filled-4)"></path></svg>
+        <svg role="img" aria-label="전송에서 대상 서버로" width="63" height="8" viewBox="0 0 63 8" preserveAspectRatio="none" style="position: absolute; left: 1136px; top: 108px; width: 63px; height: 8px; overflow: visible; fill: none; stroke: #8b9bb4; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="dc-arrow-head-filled-5" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#8b9bb4" stroke="none" style="stroke: none; fill: #8b9bb4; fill: context-stroke"/></marker></defs><path d="M 0 4 L 59 4" marker-end="url(#dc-arrow-head-filled-5)"></path></svg>
+        <svg role="img" aria-label="코어에서 출력 다듬기로, 명령이 끝났을 때" width="8" height="79" viewBox="0 0 8 79" preserveAspectRatio="none" style="position: absolute; left: 804px; top: 176px; width: 8px; height: 79px; overflow: visible; fill: none; stroke: #8b9bb4; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="dc-arrow-head-filled-6" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#8b9bb4" stroke="none" style="stroke: none; fill: #8b9bb4; fill: context-stroke"/></marker></defs><path d="M 4 0 L 4 75" marker-end="url(#dc-arrow-head-filled-6)"></path></svg>
+        <svg role="img" aria-label="출력 다듬기에서 결과 보관으로" width="63" height="8" viewBox="0 0 63 8" preserveAspectRatio="none" style="position: absolute; left: 657px; top: 300px; width: 63px; height: 8px; overflow: visible; fill: none; stroke: #8b9bb4; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="dc-arrow-head-filled-7" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#8b9bb4" stroke="none" style="stroke: none; fill: #8b9bb4; fill: context-stroke"/></marker></defs><path d="M 63 4 L 4 4" marker-end="url(#dc-arrow-head-filled-7)"></path></svg>
+        <svg aria-hidden="true" width="392" height="8" viewBox="0 0 392 8" preserveAspectRatio="none" style="position: absolute; left: 88px; top: 300px; width: 392px; height: 8px; overflow: visible; fill: none; stroke: #8b9bb4; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><path d="M 0 4 L 392 4"></path></svg>
+        <svg role="img" aria-label="결과 보관에서 화면으로, 화면이 진행과 결과를 물어 볼 때" width="8" height="127" viewBox="0 0 8 127" preserveAspectRatio="none" style="position: absolute; left: 84px; top: 177px; width: 8px; height: 127px; overflow: visible; fill: none; stroke: #8b9bb4; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="dc-arrow-head-filled-8" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#8b9bb4" stroke="none" style="stroke: none; fill: #8b9bb4; fill: context-stroke"/></marker></defs><path d="M 4 127 L 4 4" marker-end="url(#dc-arrow-head-filled-8)"></path></svg>
+
+        <div class="fc n" style="left: 0px; top: 48px; width: 176px; height: 128px"><span><b>화면</b><br>프리셋 · 값 · 대상<br>서버를 고른다</span></div>
+        <div class="fc n" style="left: 240px; top: 48px; width: 176px; height: 128px"><span><b>라우트</b><br>관리자 + 전체 범위<br>감사 기록(출력 없음)</span></div>
+        <div class="fc n" style="left: 480px; top: 48px; width: 176px; height: 128px"><span><b>서버 명령(새 기능)</b><br>프리셋 · 값 검사<br>고정 명령으로 바꾼다</span></div>
+        <div class="fc" style="left: 720px; top: 48px; width: 176px; height: 128px"><span><b>코어 readServer</b><br>계정 고르기 · 탐침<br>로그인 한 번 · 명령 하나<br>시한 · 출력 상한</span></div>
+        <div class="fc" style="left: 960px; top: 48px; width: 176px; height: 128px"><span><b>전송</b><br>SSH<br>WinRM HTTPS</span></div>
+        <div class="fc" style="left: 1200px; top: 48px; width: 176px; height: 128px"><span><b>대상 서버</b><br>Linux<br>Windows</span></div>
+        <div class="fc n" style="left: 720px; top: 256px; width: 176px; height: 96px"><span><b>출력 다듬기</b><br>제어문자 제거<br>줄 · 크기 상한 · 잘림 표시</span></div>
+        <div class="fc n" style="left: 480px; top: 256px; width: 176px; height: 96px"><span><b>결과 보관</b><br>메모리에만 · 마지막 실행<br>30분 뒤 지움</span></div>
+        <div class="fc" style="left: 960px; top: 256px; width: 416px; height: 96px; border-style: dashed"><span><b>엣지가 수집하는 서버</b><br>중앙은 붙지 않습니다 — 그 엣지 포탈의 같은 화면에서 실행합니다<br>(비밀이 법인 밖으로 나가지 않게 · 지금 규칙)</span></div>
+
+        <div style="position: absolute; left: 0px; top: 4px; width: 620px; font-size: 12.5px; color: #8b9bb4"><span class="chip c-new">새로</span> 이번에 만드는 것(파란 테두리) &nbsp; <span class="chip c-ok">있음</span> v3.24 · v3.25 에 만든 것 그대로</div>
+        <div style="position: absolute; left: 204px; top: 276px; width: 160px; text-align: center; font-size: 13px; line-height: 16px; color: #8b9bb4">진행 · 결과 조회</div>
+      </div>
+    </div>
+    <p class="dim">출력은 같은 길로 돌아옵니다. 코어는 지금 코드 그대로 씁니다(명령의 끝 코드도 이미 돌려줍니다 — 구현 착수 때 정정). 일괄 틀(한 번에 여러 대 · 동시 실행 수 · 진행 표시)은 ‘서버 정보’ 에서 공용으로 뽑아 둘이 같이 씁니다.</p>
+  </div>
+
+  <div class="sec">
+    <h2>겹치는 기능과의 관계 — 이미 있는 넷과 새 기능</h2>
+    <div class="tw">
+      <table class="t" style="min-width: 1180px">
+        <thead>
+          <tr><th>기능</th><th>어디에 붙나</th><th>어느 계정으로</th><th>무슨 명령</th><th>출력</th><th>실행 조건</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="k">원격 명령 에이전트 프리셋 <span class="chip c-ok">있음</span></td><td>에이전트가 깔린 호스트 자신(엣지 포탈 서버)</td><td>에이전트 실행 계정</td><td>프리셋(인자 배열 · 셸 없음)</td><td>원문(줄 수 상한)</td><td>관리자 + 전체 범위 · 상태를 바꾸는 것은 설정 소유자 등급 + 본인 OTP</td></tr>
+          <tr><td class="k">에이전트의 SSH 원격 실행 <span class="chip c-ok">있음</span></td><td>그 엣지 망 안의 서버(엣지 허용 목록)</td><td>통합 계정 또는 한 번 입력</td><td>자유 명령</td><td>원문</td><td>엣지에서 직접 켠 경우만 · 설정 소유자 등급 + 본인 OTP</td></tr>
+          <tr><td class="k">원격 접속(SSH 터미널) <span class="chip c-ok">있음</span></td><td>원격 접속 매핑 대상</td><td>쓰는 사람이 넣는 계정</td><td>대화형(무엇이든)</td><td>터미널 화면</td><td>원격 접속 권한</td></tr>
+          <tr><td class="k">서버 정보 <span class="chip c-ok">있음</span></td><td>등록된 서버</td><td>계층 계정(법인 › OS 종류 › 서버)</td><td>고정 읽기 묶음 하나</td><td>해석한 값만(원문은 저장하지 않음)</td><td>관리자 + 전체 범위</td></tr>
+          <tr><td class="k rec">서버 명령 실행 <span class="chip c-new">새로</span></td><td class="rec">등록된 서버</td><td class="rec">계층 계정(법인 › OS 종류 › 서버)</td><td class="rec">프리셋(코드에 고정 · 값은 이름과 경로만)</td><td class="rec">원문을 다듬어 화면에(저장하지 않음)</td><td class="rec">관리자 + 전체 범위(안 — ④ 의 D7)</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="note">새 기능이 채우는 빈자리: <b>포탈이 맡아 둔 계층 계정으로</b>, 터미널을 열지 않고, <b>여러 서버에 같은 확인 명령을 한 번에</b>. 자유 명령은 지금도 에이전트의 SSH 원격 실행(엣지에서 켠 경우)과 터미널로 할 수 있으므로 새 기능에는 넣지 않습니다.</div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start">
+
+    <div class="sec">
+      <h2>배치 — 세 가지 안</h2>
+      <div class="tw">
+        <table class="t">
+          <thead>
+            <tr><th>안</th><th>좋은 점</th><th>걸리는 점</th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="k">A · 서버 정보에 탭으로</td><td>화면이 늘지 않음</td><td>서버 정보는 해석한 값만 보관한다는 규칙에 원문 출력이 섞임 · 계정의 허용 기능을 따로 켤 수 없음</td></tr>
+            <tr><td class="k rec">B · 별도 특수 기능 <span class="chip c-new">권장</span></td><td class="rec">계정마다 ‘서버 명령’ 을 따로 켬 · 출력 규칙이 섞이지 않음 · 일괄 틀은 공용으로 뽑아 둘이 씀</td><td class="rec">화면 하나가 늘어남</td></tr>
+            <tr><td class="k">C · 원격 명령 에이전트에 합침</td><td>명령 화면이 하나로 모임</td><td>에이전트 경유라 그 법인에서 켜야 함 — 에이전트가 없는 곳의 서버에는 길이 없음 · 통합 계정과 계층 계정 두 체계가 섞임</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="sec">
+      <h2>명령에 값이 들어가는 길 — 여섯 겹</h2>
+      <div class="card" style="display: flex; flex-direction: column; gap: 10px">
+        <div style="display: flex; gap: 10px; align-items: flex-start"><span class="num">1</span><span class="soft">화면은 <b>프리셋 번호와 값만</b> 보냅니다. 명령 글자를 보내는 칸이 없습니다.</span></div>
+        <div style="display: flex; gap: 10px; align-items: flex-start"><span class="num">2</span><span class="soft">프리셋 번호는 서버 코드의 목록에 있는 것만 받습니다.</span></div>
+        <div style="display: flex; gap: 10px; align-items: flex-start"><span class="num">3</span><span class="soft">값은 종류별 허용 글자만 — 공백 · 따옴표 · <span class="mono">$ ; |</span> · 줄바꿈이 들어갈 수 없고, <span class="mono">-</span> 로 시작할 수 없습니다(② 의 값 종류 표).</span></div>
+        <div style="display: flex; gap: 10px; align-items: flex-start"><span class="num">4</span><span class="soft">그래도 작은따옴표로 감싸고 <span class="mono">--</span> 뒤에 둡니다.</span></div>
+        <div style="display: flex; gap: 10px; align-items: flex-start"><span class="num">5</span><span class="soft">코어에는 <b>완성된 문자열</b>만 넘깁니다. 코어는 글자를 이어 붙이지 않습니다(지금 그대로).</span></div>
+        <div style="display: flex; gap: 10px; align-items: flex-start"><span class="num">6</span><span class="soft">Linux 명령은 <span class="mono">timeout</span> 으로 감쌉니다 — 포탈 시한이 지나도 서버에 프로세스가 남지 않게.</span></div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="sec">
+    <h2>붙지 않는 경우 · 실패했을 때</h2>
+    <div class="tw">
+      <table class="t" style="min-width: 980px">
+        <thead>
+          <tr><th>경우</th><th>하는 일</th><th>화면에 보이는 것</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="k">엣지가 수집하는 서버</td><td>중앙은 붙지 않는다</td><td>‘엣지 ○○ 포탈의 같은 화면에서 실행’ · 고를 수 없음</td></tr>
+          <tr><td class="k">수집을 끈 서버</td><td>붙지 않는다</td><td>‘수집 끔’ · 고를 수 없음</td></tr>
+          <tr><td class="k">계정이 없거나 승인 대기</td><td>붙지 않는다(빈 비밀번호로 시도하지 않는다)</td><td>‘계정 없음’ · ‘승인 대기’</td></tr>
+          <tr><td class="k">계정에 ‘서버 명령’ 이 꺼져 있음</td><td>붙지 않는다(④ 의 D8)</td><td>‘이 계정은 서버 명령에 쓰지 않음’ — 설정 › 서버 접속에서 켠다</td></tr>
+          <tr><td class="k">계정이 멈춰 있음</td><td>붙지 않는다(앞선 로그인 거부로 멈춘 계정)</td><td>‘계정 정지’</td></tr>
+          <tr><td class="k">프리셋에 그 OS 묶음이 없음</td><td>붙지 않는다</td><td>‘이 프리셋은 Windows 에 없음’</td></tr>
+          <tr><td class="k">로그인 거부</td><td>다시 시도하지 않는다 · 공통 계정이면 계정 단위로 멈춘다(지금 규칙)</td><td>‘로그인 거부’</td></tr>
+          <tr><td class="k">명령 시한</td><td>SSH 는 받은 만큼 돌려준다 · WinRM 은 전부 아니면 실패(지금 한계)</td><td>‘시한 — 받은 만큼만’</td></tr>
+          <tr><td class="k">출력 상한</td><td>자르고 표시한다</td><td>‘잘림’</td></tr>
+          <tr><td class="k">명령이 0 이 아닌 코드로 끝남</td><td>실패로 치지 않는다 — 출력과 끝 코드를 그대로</td><td>‘끝 코드 3’</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2200}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

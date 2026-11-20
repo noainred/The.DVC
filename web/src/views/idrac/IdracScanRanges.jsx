@@ -31,6 +31,17 @@ export function intervalSaveText(r, hours) {
 // ---- vCenter별 iDRAC 스캔 대역(주기 자동 발견) ------------------------------
 // 각 vCenter에 iDRAC IP 대역 + 계정을 저장하면, 주기 스캐너가 그 대역을 돌며 Dell iDRAC을
 // 발견해 해당 vCenter로 자동 등록한다(IPMS의 'vCenter별 스캔 대역'과 같은 흐름).
+/**
+ * 96회차 R2(93회차 F3): GET /admin/idrac/scan-ranges 의 loadError(파일 읽기 오류 — 서버 고정 문구) → 화면 문구. 없으면 null.
+ *   빈 목록을 '대역 없음' 으로 말하지 않게 셸(IdracAdmin)이 오류 배너로 띄우고 표의 빈 줄을 숨긴다.
+ */
+export function scanRangesLoadErrorText(d) {
+  const le = d && typeof d === 'object' ? d.loadError : null;
+  if (!le || typeof le !== 'object') return null;
+  const why = typeof le.reason === 'string' && le.reason.trim() ? le.reason.trim() : '스캔 대역 파일을 읽지 못했습니다.';
+  return `${why} — 아래 목록은 비어 보여도 대역이 없다는 뜻이 아닙니다(읽기 오류 동안 저장 · 삭제 · 가져오기는 거절됩니다).`;
+}
+
 export function IdracScanRanges({ loadError = null, choiceErrors = null, data, vcenters, datacenters = [], agents, busy, form, setForm, msg, setMsg, onNew, onEdit, onSave, onDelete, onScan, onReload }) {
   const st = data?.status || {};
   const prog = st.progress;

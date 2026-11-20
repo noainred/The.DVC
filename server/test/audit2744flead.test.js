@@ -4,13 +4,20 @@
 //   ② xferspeed/settings.js — 설정 파싱 실패 사유를 String(e.message) 로 상주시켜 상태·서비스 점검에 실었다.
 //   ③ util/scanJournal.js — 실행 중 스캔 기록 파일의 파싱 실패 사유 원문을 scanJournalStatus().load.error 에 실었다(서비스 점검 응답).
 // 규칙(server/CLAUDE.md v2.744 — 로드 오류 원문은 어디에도 싣지 않는다): 요약은 util/atomicWrite.js safeLoadText 한 벌이다.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2744flead-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const tmp = tmpDir('audit2744flead-');
 process.env.CONFIG_DIR = tmp;
 const SECRET = 'SuperSecretPw2744';
 // V8 은 조각을 잘라 보여 준다('…"assword": SuperSecre"…') — 검사는 실제로 보이는 앞부분으로 한다.

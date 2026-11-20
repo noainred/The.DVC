@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>등록 마법사 — 설정된 시스템 입력 모드 (1440)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a111c;color:#c8d6e8;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#9fcaff}a:hover{color:#cfe4ff}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+.pc-mode{display:inline-flex;align-items:center;gap:7px;padding:7px 16px;border-radius:999px;border:1px solid #1e3350;background:#0f1a2b;color:#9fb4cc;font:inherit;font-size:13px}
+.pc-mode.on{background:#1668d8;color:#fff;font-weight:700;border-color:#1668d8}
+.pc-card{background:#0f1a2b;border:1px solid #1c2c42;border-radius:8px;padding:12px 14px;border-top:2px solid #1e3350;display:flex;flex-direction:column;gap:4px;min-width:0}
+.pc-card-label{font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.08em;color:#8ea4bd}
+.pc-card-value{font-family:"JetBrains Mono",monospace;font-size:26px;font-weight:600;color:#dbe7f5}
+.pc-card.b{border-top-color:#4b9bff}.pc-card.g{border-top-color:#3ddc84}.pc-card.g .pc-card-value{color:#3ddc84}.pc-card.a{border-top-color:#f0a92e}.pc-card.a .pc-card-value{color:#f0a92e}.pc-card.r{border-top-color:#ff5c5c}.pc-card.r .pc-card-value{color:#ff5c5c}.pc-card.o{border-top-color:#6b7f99}
+.pc-card-note{font-size:11px;color:#7b93ae}
+.pc-panel{background:#0f1a2b;border:1px solid #1c2c42;border-radius:8px}
+.pc-btn{padding:6px 12px;border:1px solid #1e3350;border-radius:6px;background:#0f1a2b;color:#c8d6e8;font:inherit;font-size:12.5px}
+.pc-btn.accent{border-color:#2b6fc0;background:#153357;color:#9fcaff}
+.pc-chip{padding:5px 11px;border-radius:14px;border:1px solid #1e3350;background:transparent;color:#8ea4bd;font:inherit;font-size:11.5px;font-family:"JetBrains Mono",monospace}
+.pc-chip.on{border-color:#4b9bff;background:#153357;color:#9fcaff}
+.overlay{position:absolute;inset:0;background:rgba(5,10,18,.68)}
+.modal{position:absolute;left:120px;top:36px;width:1200px;background:#0f1a2b;border:1px solid #24405f;border-radius:10px;box-shadow:0 24px 60px rgba(0,0,0,.55);display:flex;flex-direction:column;overflow:hidden}
+.modal-head{display:flex;align-items:center;gap:9px;padding:13px 16px;border-bottom:1px solid #1c2c42}
+.modal-head b{color:#e8f1fb;font-size:14px}
+.step{background:#0a141f;border:1px solid #1c2c42;border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+.step h3{margin:0;font-size:13.5px;color:#e8f1fb;display:flex;align-items:center;gap:8px}
+.step h3 i{width:18px;height:18px;border-radius:50%;border:1px solid #4b9bff;color:#9fcaff;font-style:normal;font-size:11px;display:inline-grid;place-items:center;font-family:"JetBrains Mono",monospace}
+.lbl{font-size:11.5px;color:#8ea4bd}
+.inp{height:32px;padding:0 10px;border-radius:6px;border:1px solid #1e3350;background:#0a141f;color:#c8d6e8;font:inherit;font-size:12.5px}
+.inp::placeholder{color:#7b93ae}
+.sel{height:32px;padding:0 28px 0 10px;border-radius:6px;border:1px solid #1e3350;background:#0a141f;color:#c8d6e8;font:inherit;font-size:12.5px;appearance:none;-webkit-appearance:none;background-image:linear-gradient(45deg,transparent 50%,#8ea4bd 50%),linear-gradient(135deg,#8ea4bd 50%,transparent 50%);background-position:calc(100% - 14px) 13px,calc(100% - 9px) 13px;background-size:5px 5px;background-repeat:no-repeat}
+.radio{display:inline-flex;align-items:center;gap:8px;font-size:12.5px;color:#c8d6e8}
+.radio i{width:14px;height:14px;border-radius:50%;border:1px solid #4b6a95;display:inline-block;position:relative;flex:none}
+.radio.on i{border-color:#4b9bff}.radio.on i::after{content:"";position:absolute;inset:3px;border-radius:50%;background:#4b9bff}
+.radio.on{color:#fff;font-weight:600}
+.pick{display:grid;grid-template-columns:300px minmax(0,1fr);gap:12px;min-height:360px}
+.kind{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:6px;font-size:12.5px;color:#cfe0f2;border-left:3px solid transparent}
+.kind.on{background:#14497f;border-left-color:#4b9bff;color:#fff}
+.kind .n{margin-left:auto;font-family:"JetBrains Mono",monospace;font-size:10.5px;color:#9fcaff;background:#10233a;border:1px solid #1e3350;border-radius:4px;padding:1px 6px}
+.kind.g{font-family:"JetBrains Mono",monospace;font-size:10.5px;letter-spacing:.08em;color:#7b93ae;padding:10px 10px 4px}
+.cb{width:15px;height:15px;border-radius:4px;border:1px solid #3b4a66;background:#0a141f;display:inline-block;position:relative;flex:none}
+.cb.on{background:#1668d8;border-color:#1668d8}
+.cb.on::after{content:"";position:absolute;left:4px;top:1px;width:4px;height:8px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
+.cb.half::after{content:"";position:absolute;left:3px;top:6px;width:7px;height:2px;background:#9fcaff}
+table{border-collapse:collapse;width:100%;table-layout:fixed}
+th{font-family:"JetBrains Mono",monospace;font-size:10.5px;letter-spacing:.06em;color:#8ea4bd;text-align:left;padding:8px 10px;background:#132132;font-weight:500;white-space:nowrap}
+td{padding:7px 10px;border-bottom:1px solid #131f30;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px}
+tr.off td{opacity:.5}
+.tag{display:inline-block;padding:1px 6px;border-radius:5px;font-size:10.5px;font-family:"JetBrains Mono",monospace;border:1px solid #1e3350;color:#8ea4bd;background:#0a141f;margin-right:4px}
+.tag.ok{color:#3ddc84;border-color:#1f5a3a}.tag.warn{color:#f0a92e;border-color:#5a3d07}
+.callout{font-size:12px;color:#9fb4cc;background:#10233a;border:1px solid #1e3350;border-radius:6px;padding:8px 12px;line-height:1.55}
+</style>
+</helmet>
+<div style="width:1440px;height:900px;box-sizing:border-box;position:relative;overflow:hidden;background:#0a111c">
+  <!-- 뒤에 깔린 Monitoring 화면(그대로) -->
+  <div style="padding:16px 24px;display:flex;flex-direction:column;gap:12px" aria-hidden="true">
+    <div style="display:flex;gap:8px"><span class="pc-mode on">인프라</span><span class="pc-mode">서비스</span></div>
+    <div style="display:flex;align-items:center;gap:12px;padding:10px 0"><span class="mono" style="font-size:12px;letter-spacing:.14em;color:#7b93ae">INFRASTRUCTURE PERFORMANCE TESTS</span><span style="flex:1;height:1px;background:#1c2c42"></span><span class="mono" style="font-size:11.5px;color:#8ea4bd">Root · 32 host(s)</span></div>
+    <div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:12px">
+      <div class="pc-card b"><span class="pc-card-label">TOTAL TESTS</span><span class="pc-card-value">96</span><span class="pc-card-note">32개 대상 그룹</span></div>
+      <div class="pc-card g"><span class="pc-card-label">정상</span><span class="pc-card-value">82</span><span class="pc-card-note">Ok · Host is alive</span></div>
+      <div class="pc-card a"><span class="pc-card-label">경고</span><span class="pc-card-value">8</span><span class="pc-card-note">임계치 근접</span></div>
+      <div class="pc-card r"><span class="pc-card-label">실패</span><span class="pc-card-value">6</span><span class="pc-card-note">No answer · Error</span></div>
+      <div class="pc-card o"><span class="pc-card-label">중지</span><span class="pc-card-value">0</span><span class="pc-card-note">Disabled</span></div>
+      <div class="pc-card o"><span class="pc-card-label">갱신 안 됨</span><span class="pc-card-value">0</span><span class="pc-card-note">주기 초과</span></div>
+      <div class="pc-card o"><span class="pc-card-label">점검 대기</span><span class="pc-card-value">0</span><span class="pc-card-note">아직 실행 안 됨</span></div>
+    </div>
+    <div style="display:grid;grid-template-columns:340px 8px minmax(0,1fr);gap:6px">
+      <div class="pc-panel" style="height:560px"></div><div></div><div class="pc-panel" style="height:560px"></div>
+    </div>
+  </div>
+  <div class="overlay" aria-hidden="true"></div>
+
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="reg-title">
+    <div class="modal-head"><b id="reg-title">＋ 등록</b><span class="mono" style="font-size:11.5px;color:#9fb4cc">Root · 인프라</span><button class="pc-btn" type="button" aria-label="닫기" style="margin-left:auto;border:0;background:none;font-size:16px;color:#7b93ae">✕</button></div>
+    <div style="padding:14px 16px;display:flex;flex-direction:column;gap:12px">
+
+      <section class="step">
+        <h3><i aria-hidden="true">1</i>어디에 만들까요</h3>
+        <div style="display:flex;gap:14px;align-items:end;flex-wrap:wrap">
+          <label class="lbl" for="kind" style="display:flex;flex-direction:column;gap:4px">구분<select id="kind" class="sel" style="width:120px"><option>인프라</option><option>서비스</option></select></label>
+          <label class="lbl" for="path" style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:300px">트리 경로 — 설정된 시스템 모드는 <span class="mono" style="color:#9fcaff">설정 연동\그룹\법인</span> 으로 자동 채워집니다(바꿀 수 있음)<input id="path" class="inp" value="설정 연동\{그룹}\{법인}"></label>
+          <button class="pc-btn" type="button">기존 폴더에서 선택</button>
+        </div>
+      </section>
+
+      <section class="step">
+        <h3><i aria-hidden="true">2</i>등록할 대상 입력</h3>
+        <div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap" role="radiogroup" aria-label="입력 방식">
+          <span class="radio"><i aria-hidden="true"></i>표로 입력</span>
+          <span class="radio"><i aria-hidden="true"></i>자유형식 붙여넣기</span>
+          <span class="radio"><i aria-hidden="true"></i>파일(CSV/XLSX)</span>
+          <span class="radio on"><i aria-hidden="true"></i>설정된 시스템에서 선택 <span class="tag warn" style="margin-left:4px">NEW</span></span>
+          <span class="lbl" style="margin-left:auto">통신 점검과 같은 카탈로그 · 자격증명 없이 주소만 가져옵니다</span>
+        </div>
+        <div class="pick">
+          <div class="pc-panel" style="padding:8px;display:flex;flex-direction:column;gap:2px;overflow:hidden">
+            <input class="inp" type="search" aria-label="종류·법인 검색" placeholder="종류 · 법인 검색" style="margin-bottom:6px">
+            <div class="kind g">종류별 — 미등록 / 전체</div>
+            <div class="kind"><span class="cb half" role="checkbox" aria-checked="mixed" aria-label="가상화 전체"></span>가상화 (vCenter · NSX)<span class="n">6 / 11</span></div>
+            <div class="kind on"><span class="cb on" role="checkbox" aria-checked="true" aria-label="중앙↔엣지 전체"></span>중앙↔엣지 (수집 서버)<span class="n">5 / 5</span></div>
+            <div class="kind"><span class="cb" role="checkbox" aria-checked="false" aria-label="서버 전체"></span>서버 (iDRAC · OME · 베어메탈)<span class="n">98 / 142</span></div>
+            <div class="kind"><span class="cb" role="checkbox" aria-checked="false" aria-label="스토리지 전체"></span>스토리지 (API · SSH)<span class="n">4 / 9</span></div>
+            <div class="kind"><span class="cb" role="checkbox" aria-checked="false" aria-label="네트워크·전력 전체"></span>네트워크 · 전력 (SAN · PDU)<span class="n">7 / 7</span></div>
+            <div class="kind"><span class="cb" role="checkbox" aria-checked="false" aria-label="백업·관리 전체"></span>백업 · 관리 (CVP · Veeam · Bareos)<span class="n">5 / 5</span></div>
+            <div class="kind"><span class="cb" role="checkbox" aria-checked="false" aria-label="알림·인증 전체"></span>알림 · 인증 (SMTP · AD)<span class="n">0 / 2</span></div>
+            <div class="kind g">법인별</div>
+            <div class="kind"><span class="cb" role="checkbox" aria-checked="false" aria-label="PL-WRO 전체"></span>PL-WRO (vc-eu-central)<span class="n">11 / 19</span></div>
+            <div class="kind"><span class="cb" role="checkbox" aria-checked="false" aria-label="KR-ICN 전체"></span>KR-ICN (vc-ap-northeast)<span class="n">3 / 24</span></div>
+            <div class="kind"><span class="cb" role="checkbox" aria-checked="false" aria-label="US-IAD 전체"></span>US-IAD (vc-us-east)<span class="n">12 / 31</span></div>
+          </div>
+          <div class="pc-panel" style="overflow:hidden;display:flex;flex-direction:column">
+            <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid #1c2c42;flex-wrap:wrap">
+              <span style="color:#e8f1fb;font-weight:600">중앙↔엣지 (수집 서버) · 5건</span>
+              <button class="pc-chip on" type="button">미등록만</button><button class="pc-chip" type="button">전체</button>
+              <span class="lbl" style="margin-left:auto">선택 5 · 전체 선택 12</span>
+            </div>
+            <table>
+              <colgroup><col style="width:36px"><col style="width:200px"><col style="width:130px"><col><col style="width:150px"><col style="width:220px"></colgroup>
+              <thead><tr><th><span class="cb on" role="checkbox" aria-checked="true" aria-label="이 종류 전체 선택"></span></th><th>이름</th><th>법인 · DC</th><th>주소</th><th>점검 위치</th><th>기본 점검</th></tr></thead>
+              <tbody>
+                <tr><td><span class="cb on" role="checkbox" aria-checked="true" aria-label="mock-Edge-Seoul"></span></td><td style="color:#dbe7f5">mock-Edge-Seoul</td><td>KR-ICN</td><td class="mono">edge-seoul.demo.invalid:443</td><td>중앙</td><td><span class="tag">TCP 443</span><span class="tag">인증서</span><span class="tag">HTTP /api/health</span></td></tr>
+                <tr><td><span class="cb on" role="checkbox" aria-checked="true" aria-label="mock-Edge-Singapore"></span></td><td style="color:#dbe7f5">mock-Edge-Singapore</td><td>SG-SIN</td><td class="mono">edge-singapore.demo.invalid:443</td><td>중앙</td><td><span class="tag">TCP 443</span><span class="tag">인증서</span><span class="tag">HTTP /api/health</span></td></tr>
+                <tr><td><span class="cb on" role="checkbox" aria-checked="true" aria-label="mock-Edge-Frankfurt"></span></td><td style="color:#dbe7f5">mock-Edge-Frankfurt</td><td>PL-WRO</td><td class="mono">edge-frankfurt.demo.invalid:443</td><td>중앙</td><td><span class="tag">TCP 443</span><span class="tag">인증서</span><span class="tag">HTTP /api/health</span></td></tr>
+                <tr><td><span class="cb on" role="checkbox" aria-checked="true" aria-label="mock-Edge-Virginia"></span></td><td style="color:#dbe7f5">mock-Edge-Virginia</td><td>US-IAD</td><td class="mono">edge-virginia.demo.invalid:443</td><td>중앙</td><td><span class="tag">TCP 443</span><span class="tag">인증서</span><span class="tag">HTTP /api/health</span></td></tr>
+                <tr><td><span class="cb on" role="checkbox" aria-checked="true" aria-label="mock-Edge-Shanghai"></span></td><td style="color:#dbe7f5">mock-Edge-Shanghai</td><td>CN-SHA</td><td class="mono">edge-shanghai.demo.invalid:443</td><td>중앙</td><td><span class="tag">TCP 443</span><span class="tag">인증서</span><span class="tag">HTTP /api/health</span></td></tr>
+              </tbody>
+            </table>
+            <div class="callout" style="margin:10px">엣지 포탈은 <b>중앙에서</b> 점검합니다(엣지가 자기 자신을 재면 회선 장애를 못 봅니다). 이 5건은 Ping 모니터(네트워크 › 체크)에도 이미 자동 등록돼 있습니다 — 그쪽은 1분 TCP 지연, 이쪽은 인증서·HTTP 상태까지 봅니다. 중복이 아니라 다른 질문입니다.</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="step">
+        <h3><i aria-hidden="true">3</i>어떤 점검을 넣을까요</h3>
+        <div style="display:flex;gap:14px;align-items:end;flex-wrap:wrap">
+          <label class="lbl" for="tpl" style="display:flex;flex-direction:column;gap:4px">적용할 템플릿<select id="tpl" class="sel" style="width:300px"><option>종류별 기본 (설정 연동 템플릿 · 권장)</option><option>웹 서비스(HTTPS)</option><option>Linux 서버 기본</option><option>(점검 없이 대상만 등록)</option></select></label>
+          <button class="pc-btn" type="button">템플릿 관리</button>
+          <label class="lbl" for="st" style="display:flex;flex-direction:column;gap:4px">등록 직후 상태<select id="st" class="sel" style="width:140px"><option>중지 (권장)</option><option>사용</option></select></label>
+          <label class="lbl" style="display:flex;align-items:center;gap:8px;padding-bottom:6px"><span class="cb on" role="checkbox" aria-checked="true" aria-label="엣지 배정 동기화"></span>등록 뒤 담당 엣지에 배정 동기화</label>
+          <span class="lbl">이미 있는 이름은 건너뜁니다 · 설정에서 온 대상은 <span class="mono" style="color:#9fcaff">출처(origin)</span>가 붙어 다음 동기화에서 다시 만들어지지 않습니다</span>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:4px"><button class="pc-btn accent" type="button">미리보기</button><button class="pc-btn" type="button">초기화</button></div>
+      </section>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

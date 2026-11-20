@@ -25,7 +25,11 @@ const MANAGE_COLUMNS = Object.freeze([
   { key: 'status', aliases: ['status', '상태', '관리상태'] },
   { key: 'deviceType', aliases: ['devicetype', 'device', '디바이스', '디바이스종류'] },
   { key: 'owner', aliases: ['owner', '담당자'] },
-  { key: 'label', aliases: ['label', '라벨', '용도'] },
+  { key: 'label', aliases: ['label', '라벨'] },
+  // v3.5.0(재설계 묶음 나): '용도' 는 이제 label 이 아니라 용도 칸이다(동작 변화 — 릴리스 노트에 적었다). 요청자 · 할당자 새 열.
+  { key: 'purpose', aliases: ['purpose', '용도'] },
+  { key: 'requester', aliases: ['requester', '요청자'] },
+  { key: 'assigner', aliases: ['assigner', '할당자'] },
   { key: 'hostname', aliases: ['hostname', 'host', '호스트명'] },
   { key: 'vcenter', aliases: ['vcenter', 'vcenterid', 'vc', '귀속vcenter', '센터'] },
   { key: 'reservedUntil', aliases: ['reserveduntil', 'reserved', '예약만료', '예약만료일'] },
@@ -34,9 +38,9 @@ const MANAGE_COLUMNS = Object.freeze([
   { key: 'tags', aliases: ['tags', '태그'] },
 ]);
 /** override 로 가는 열 → override 필드 이름. */
-const OVERRIDE_FIELD = Object.freeze({ status: 'status', deviceType: 'deviceType', owner: 'owner', label: 'label', hostname: 'hostnameOverride', vcenter: 'claimedVcenterId', reservedUntil: 'reservedUntil', note: 'note' });
+const OVERRIDE_FIELD = Object.freeze({ status: 'status', deviceType: 'deviceType', owner: 'owner', label: 'label', purpose: 'purpose', requester: 'requester', assigner: 'assigner', hostname: 'hostnameOverride', vcenter: 'claimedVcenterId', reservedUntil: 'reservedUntil', note: 'note' });
 /** 길이 상한 — overrides.clean·annotations 의 절단 값과 같다(여기서는 자르지 않고 오류로 보고한다). v2.639: 내부 상수(바깥 호출부 0건). */
-const MANAGE_LIMITS = Object.freeze({ owner: 200, label: 200, hostname: 253, vcenter: 120, note: 1000, memo: 2000, tagCount: 20, tagLen: 100 });
+const MANAGE_LIMITS = Object.freeze({ owner: 200, label: 200, purpose: 200, requester: 200, assigner: 200, hostname: 253, vcenter: 120, note: 1000, memo: 2000, tagCount: 20, tagLen: 100 });
 /** 파일 한 번에 받는 행 상한(청크가 아니라 요청 하나 기준). 화면은 이보다 작게 나눠 보낸다. */
 export const MANAGE_CHUNK_MAX = 2500;
 
@@ -56,7 +60,7 @@ export function manageToCsv(entries, { vcName = (x) => x, dayOf = (x) => String(
   for (const e of entries || []) {
     const o = e.override || {}; const a = e.annotation || {};
     lines.push(csvLine([
-      e.ip, o.status || '', o.deviceType || '', o.owner || '', o.label || '', o.hostnameOverride || '',
+      e.ip, o.status || '', o.deviceType || '', o.owner || '', o.label || '', o.purpose || '', o.requester || '', o.assigner || '', o.hostnameOverride || '',
       o.claimedVcenterId ? (vcName(o.claimedVcenterId) || o.claimedVcenterId) : '',
       o.reservedUntil ? dayOf(o.reservedUntil) : '', o.note || '', a.memo || '', tagsText(a.tags),
     ]));
@@ -68,9 +72,9 @@ export function manageToCsv(entries, { vcName = (x) => x, dayOf = (x) => String(
 export function manageSampleCsv(statuses = [], deviceTypes = []) {
   const lines = [
     csvLine(MANAGE_COLUMNS.map((c) => c.key)),
-    csvLine([`# ip 필수 · status: ${statuses.join('|')} · deviceType: ${deviceTypes.join('|')}`, '# 칸을 비우면 그 값을 지웁니다 · 열을 빼면 그 필드는 그대로 둡니다', '', '', '', '', '# vcenter: 이름 또는 ID', '# reservedUntil: YYYY-MM-DD(그날까지 예약)', '', '', '# tags: 세미콜론(;) 구분']),
-    csvLine(['10.10.0.25', 'reserved', 'server', '홍길동', 'DB 이관 예정', '', '', '2026-12-31', '', '이관 전 예약', 'db; 이관']),
-    csvLine(['10.10.0.26', 'active', 'switch', '네트워크팀', '코어 스위치', 'core-sw01', '', '', '', '', 'network']),
+    csvLine([`# ip 필수 · status: ${statuses.join('|')} · deviceType: ${deviceTypes.join('|')}`, '# 칸을 비우면 그 값을 지웁니다 · 열을 빼면 그 필드는 그대로 둡니다', '', '', '', '', '', '', '', '# vcenter: 이름 또는 ID', '# reservedUntil: YYYY-MM-DD(그날까지 예약)', '', '', '# tags: 세미콜론(;) 구분']),
+    csvLine(['10.10.0.25', 'reserved', 'server', '홍길동', 'DB 이관 예정', 'DB 서버', 'dba-team', 'net-admin', '', '', '2026-12-31', '', '이관 전 예약', 'db; 이관']),
+    csvLine(['10.10.0.26', 'active', 'switch', '네트워크팀', '코어 스위치', '코어 네트워크', '', '', 'core-sw01', '', '', '', '', 'network']),
   ];
   return CSV_BOM + lines.join('\r\n') + '\r\n';
 }
@@ -151,7 +155,7 @@ export function analyzeManageImport(rows, columns, ctx) {
       const v = String(r.deviceType || '').toLowerCase();
       if (v && !deviceTypes.includes(v)) errs.push(`디바이스 종류 '${r.deviceType}' 는 쓸 수 없습니다(허용: ${deviceTypes.join(', ')})`); else patch.deviceType = v;
     }
-    for (const k of ['owner', 'label', 'hostname', 'note']) {
+    for (const k of ['owner', 'label', 'purpose', 'requester', 'assigner', 'hostname', 'note']) {
       if (!has(k)) continue;
       const v = r[k] || '';
       if (v.length > MANAGE_LIMITS[k]) errs.push(`${k} 가 ${MANAGE_LIMITS[k]}자를 넘습니다(${v.length}자)`); else patch[OVERRIDE_FIELD[k]] = v;
@@ -192,7 +196,7 @@ export function analyzeManageImport(rows, columns, ctx) {
     const hadAny = Object.keys(cur).some((k) => !['updatedAt', 'updatedBy'].includes(k) && cur[k]) || !!(curA.memo || (curA.tags || []).length);
     const willAny = (() => {
       const next = { ...cur, ...patch };
-      const ov = ['status', 'owner', 'label', 'deviceType', 'hostnameOverride', 'note', 'reservedUntil', 'claimedVcenterId'].some((k) => next[k]);
+      const ov = ['status', 'owner', 'label', 'purpose', 'requester', 'assigner', 'deviceType', 'hostnameOverride', 'note', 'reservedUntil', 'claimedVcenterId'].some((k) => next[k]);
       const an = ann ? !!(ann.memo || ann.tags.length) : !!(curA.memo || (curA.tags || []).length);
       return ov || an;
     })();

@@ -6,10 +6,10 @@
  *   다시 보내도 표시에서 제외됨).
  */
 
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 96회차 ⓑ: 읽기 오류 ≠ 손상(공용 판정 — 손상만 preserveCorrupt)
 import { keepMappedMeasured } from './attribution.js';
 
 const FILE = path.join(config.configDir, 'power-settings.json');
@@ -18,16 +18,34 @@ const FILE = path.join(config.configDir, 'power-settings.json');
 const DEFAULTS = { excludeUnmapped: false, includeVcenterPower: true };
 
 let cache = null;
+/*
+ * 96회차 ⓑ(93회차 남긴 것 — 결정 G2 의 형제): 예전 catch 하나는 **읽기 오류**도 손상으로 보고 원본을 `.corrupt` 로 옮긴 뒤 기본값을 재시작까지 캐시했다
+ *   (미매핑 제외가 꺼지고 다음 저장이 새 파일). 이제 손상만 옮기고(공용 판정 — 형식 판정은 예전처럼 JSON.parse 만), 읽기 오류면 원본을 두고 캐시하지 않으며
+ *   (30초마다 다시 읽음) 저장은 거절한다(powerSettingsWriteRefusal — 라우트 409).
+ */
+const _reader = makeJsonFileReader(() => FILE, { tag: 'power-settings', parse: (t) => JSON.parse(t) });
+let _readError = false;
 export function loadPowerSettings() {
   if (cache) return cache;
-  cache = { ...DEFAULTS };
-  try {
-    if (fs.existsSync(FILE)) cache = { ...DEFAULTS, ...JSON.parse(fs.readFileSync(FILE, 'utf8')) };
-  } catch (e) { preserveCorrupt(FILE, e.message); /* defaults */ }
+  const r = _reader.read();
+  if (r.kind === 'read-error') { _readError = true; return { ...DEFAULTS }; }   // 자리 표시 — 캐시하지 않는다
+  _readError = false;
+  const v = r.kind === 'ok' && r.value && typeof r.value === 'object' && !Array.isArray(r.value) ? r.value : {};
+  cache = { ...DEFAULTS, ...v };
   return cache;
 }
+/** 96회차 ⓑ: 읽기 오류 중의 저장 거절 본문(409) 또는 null. */
+export function powerSettingsWriteRefusal() {
+  loadPowerSettings();
+  if (!_readError) return null;
+  return { ok: false, status: 409, code: 'settings-unreadable', readError: true, reason: `전력 집계 설정 파일(${path.basename(FILE)})을 읽지 못해 저장하지 않았습니다 — 읽기 오류이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽습니다).` };
+}
+/** 테스트 전용. */
+export function _resetPowerSettingsForTest() { cache = null; _readError = false; _reader.reset(); }
 
 export function savePowerSettings(body = {}) {
+  const no = powerSettingsWriteRefusal();
+  if (no) throw Object.assign(new Error(no.reason), { status: 409, code: no.code });   // 96회차 ⓑ: 마지막 방어선(라우트가 먼저 409)
   const cur = loadPowerSettings();
   const next = {
     excludeUnmapped: body.excludeUnmapped !== undefined ? Boolean(body.excludeUnmapped) : cur.excludeUnmapped,

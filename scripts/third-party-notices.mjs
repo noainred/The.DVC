@@ -25,6 +25,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -174,9 +175,23 @@ L.push('`server/src/intro/vendor/land-110m.json` 은 world-atlas(TopoJSON, ISC) 
 L.push('원천 데이터는 Natural Earth(퍼블릭 도메인)입니다.');
 L.push('  https://github.com/topojson/world-atlas  ·  https://www.naturalearthdata.com/');
 L.push('');
+// v2.999: MAC 제조사 표 — npm oui-data(BSD-2-Clause)에서 `scripts/oui-build.mjs` 가 만든 파생 데이터(조직 이름 줄만). BSD 2조(바이너리 재배포에 고지 사본).
+const OUI_LIC = fs.readFileSync(path.join(ROOT, 'server/src/ipam/vendor/oui-data-LICENSE.txt'), 'utf8').replace(/\r\n/g, '\n').trim();
+const OUI_SRC = (() => { try { return zlib.gunzipSync(fs.readFileSync(path.join(ROOT, 'server/src/ipam/vendor/oui.tsv.gz'))).toString('utf8').split('\n', 1)[0].replace(/^#\s*/, ''); } catch { return '(표를 읽지 못함)'; } })();
+L.push('-'.repeat(78));
+L.push('3. MAC 제조사 표');
+L.push('-'.repeat(78));
+L.push('');
+L.push('`server/src/ipam/vendor/oui.tsv.gz` 는 npm 패키지 oui-data 의 index.json 에서 조직 이름 줄만 뽑아');
+L.push(`만든 파생 데이터입니다(${OUI_SRC}). oui-data 는 IEEE 등록 기관이 공개하는 MA-L · MA-M · MA-S`);
+L.push('목록을 JSON 으로 담은 것입니다. 아래는 oui-data 의 라이선스 전문입니다.');
+L.push('  https://github.com/silverwind/oui-data  ·  https://standards.ieee.org/products-programs/regauth/');
+L.push('');
+L.push(OUI_LIC);
+L.push('');
 if (unresolved.length) {
   L.push('-'.repeat(78));
-  L.push('3. ⚠ 라이선스를 확인할 수 없는 패키지');
+  L.push('4. ⚠ 라이선스를 확인할 수 없는 패키지');
   L.push('-'.repeat(78));
   L.push('');
   L.push('아래 패키지는 `package.json` 의 `license` 필드도, 라이선스 본문 파일도 없습니다.');
@@ -186,7 +201,7 @@ if (unresolved.length) {
   L.push('');
 }
 L.push('-'.repeat(78));
-L.push(`${unresolved.length ? '4' : '3'}. 패키지 목록`);
+L.push(`${unresolved.length ? '5' : '4'}. 패키지 목록`);
 L.push('-'.repeat(78));
 L.push('');
 for (const p of [...packages.values()].sort((a, b) => a.name.localeCompare(b.name))) {
@@ -194,7 +209,7 @@ for (const p of [...packages.values()].sort((a, b) => a.name.localeCompare(b.nam
 }
 L.push('');
 L.push('-'.repeat(78));
-L.push(`${unresolved.length ? '5' : '4'}. 라이선스 본문`);
+L.push(`${unresolved.length ? '6' : '5'}. 라이선스 본문`);
 L.push('-'.repeat(78));
 for (const [, e] of [...bodies.entries()].sort((a, b) => b[1].users.length - a[1].users.length)) {
   L.push('');

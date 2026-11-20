@@ -7,8 +7,10 @@
  * df 는 없는 마운트가 섞여도 있는 것은 출력하고 exit≠0 — 있는 것은 살리고 없는 것만 오류 표기.
  */
 
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { withSsh, isSshAuthError } from '../proxy/sshExec.js';
 import { reqTimeoutMs } from '../agent/envTimeout.js';
+import { ioSampleSec, ioSampleCommand, ioResultFromExec } from './diskstats.js'; // v2.915: 디스크 I/O 표본(설계 bm-san-compare §4.1)
 
 /** 마운트 경로 검증 — 절대경로 + 안전 문자만(공백/따옴표/셸 메타문자 거부 = 명령 주입 방어). */
 export const MOUNT_RE = /^\/[A-Za-z0-9._\/-]*$/;
@@ -112,21 +114,31 @@ export function parseDfOutput(stdout, requestedMounts, stderr = '') {
 export async function collectServer(server) {
   const { mounts, errors } = sanitizeMounts(server.mounts);
   if (!mounts.length) return { ok: false, mounts: [], error: errors[0] || '측정할 마운트 포인트가 없습니다.' };
+  // 7b: 키 · 공통 계정 참조를 해석하지 못했으면 접속하지 않는다(bmusage/onboard/refs.js withResolvedAuth — 빈 비밀번호로 시도해 계정을 잠그지 않게).
+  if (server.authError) return { ok: false, mounts: [], error: String(server.authError).slice(0, 300) };
   try {
     const r = await withSsh({
       host: server.host, port: Number(server.port) || 22,
       username: server.username || 'root', password: server.password || '',
+      privateKey: server.privateKey || undefined, passphrase: server.passphrase || undefined,
       readyTimeout: reqTimeoutMs(process.env.BMSTOR_SSH_TIMEOUT_MS, 15_000),   // v2.605 TIM2605-04: [1초, 10분]
+      singlePasswordAttempt: true,   // v3.25 반증 F1: 비밀번호는 한 번만(k-i 재시도 없음 — 계정 잠금 횟수)
     }, async ({ exec }) => {
       const out = await exec(`df -P -k -- ${mounts.join(' ')}`);
-      return { out };
+      // v2.915: 같은 세션에서 디스크 I/O 표본(상수 명령 · 입력 없음). df 가 요청 마운트를 하나도 못 찾았으면 I/O 는 시도하지 않는다.
+      //   시한 = 표본 간격 + 20초(명령 자체는 cat 넷 · sleep 하나). 0 이면 끔(df 만 — 예전 동작).
+      const sec = ioSampleSec();
+      const dfOk = parseDfOutput(out.stdout, mounts, out.stderr).mounts.length > 0;
+      const io = sec > 0 && dfOk ? await exec(ioSampleCommand(sec), (sec + 20) * 1000) : null;
+      return { out, io, sec };
     });
     const { mounts: rows, missing } = parseDfOutput(r.out.stdout, mounts, r.out.stderr);
     if (!rows.length) {
       const err = (r.out.stderr || '').trim().split('\n')[0] || 'df 출력에서 요청 마운트를 찾지 못했습니다.';
       return { ok: false, mounts: [], missing, error: err };
     }
-    return { ok: true, mounts: rows, missing };
+    const ioPart = r.sec > 0 ? ioResultFromExec(r.io) : { io: null, ioError: 'I/O 표본 꺼짐(BMSTOR_IO_SAMPLE_SEC=0)' };
+    return { ok: true, mounts: rows, missing, ...ioPart };
   } catch (e) {
     // v2.590(감사 F2): 자격증명 거부를 출처에서 못 박는다 — 폴러가 주기 수집을 멈출 수 있게. 엣지 폴링 위임은
     // 회신에서 이 플래그를 빼므로(agent/bmstorWorker.js 가 용량 필드만 싣는다) 폴러는 문구(ssh2 정식 문구)도 본다.
@@ -135,14 +147,14 @@ export async function collectServer(server) {
 }
 
 /** 소규모 동시성 풀 — 서버 수십 대를 한꺼번에 SSH 하지 않게 제한(기본 4). */
-export async function collectMany(servers, { concurrency = Number(process.env.BMSTOR_CONCURRENCY) || 4 } = {}) {
+export async function collectMany(servers, { concurrency = envPositive(process.env.BMSTOR_CONCURRENCY, 4), collect = collectServer } = {}) {
   const list = [...servers];
   const results = new Array(list.length);
   let idx = 0;
   const worker = async () => {
     while (idx < list.length) {
       const i = idx++;
-      results[i] = { id: list[i].id, ...(await collectServer(list[i])) };
+      results[i] = { id: list[i].id, ...(await collect(list[i])) };   // v3.24: 폴러가 계정 탐침(sshaccess/accountGate)으로 감싼 함수를 넘긴다
     }
   };
   await Promise.all(Array.from({ length: Math.max(1, Math.min(concurrency, list.length)) }, worker));

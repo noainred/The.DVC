@@ -22,7 +22,9 @@ export function coverageNote(cov, vcenters) {
   if (absent.length) parts.push(`${absent.length}곳은 필수 카테고리 일부가 그 vCenter 에 아예 없어서 모든 VM 이 누락으로 보입니다(${absent.slice(0, 3).map((v) => `${v.name}: ${v.requiredAbsent.join(', ')}`).join(' · ')}${absent.length > 3 ? ' 외' : ''})`);
   return parts.length ? `${parts.join(' · ')}.` : null;
 }
-export function policyNote(policy) {
+export function policyNote(policy, { unreadable = false } = {}) {
+  // 71회차(69회차 F4 반증): 정책 파일을 읽지 못한 것(서버 policyUnreadable)은 '정하지 않음' 이 아니다 — 다시 정하라고 하지 않는다(저장도 거절된다).
+  if (unreadable === true) return '태그 정책 파일을 읽지 못해 필수 태그 누락을 판정하지 않았습니다 — 서버의 정책 파일(tag-policy.json)을 확인하세요(파일은 그대로 두었습니다).';
   if (!policy || !policy.requiredCategories?.length) return '필수 카테고리를 정하지 않아 누락 점검을 하지 않습니다 — 아래 정책에서 정하세요(관리자).';
   return null;
 }
@@ -30,6 +32,12 @@ export function policyNote(policy) {
 export function vmTagLine(d) {
   if (!d) return '—';
   if (d.tags == null) return d.state === 'unsupported' ? '이 vCenter 에는 태그 API 가 없습니다' : d.state === 'error' ? '태그를 읽지 못했습니다' : '태그를 아직 읽지 않았습니다';
-  if (!d.tags.length) return '붙은 태그 없음';
-  return d.tags.map((t) => (t.category ? `${t.category}: ${t.tag}` : t.tag)).join(' · ');
+  // 69회차 F3: 태그 연결을 일부만 읽은 vCenter(서버 /tools/vm-tags/of partial)는 '없음' 을 단정하지 않는다 — 서버는 missing 을 null 로 두고
+  //   읽은 연결에서 안 보인 필수 카테고리를 missingUnsure 로 준다(목록 화면의 '확인 안 됨(부분)' 과 같은 뜻).
+  const line = !d.tags.length ? (d.partial === true ? '읽은 연결에는 붙은 태그 없음' : '붙은 태그 없음') : d.tags.map((t) => (t.category ? `${t.category}: ${t.tag}` : t.tag)).join(' · ');
+  // 71회차(69회차 F4 반증): 정책 파일을 읽지 못했으면 서버가 missing 을 null 로 둔다 — '빠진 필수 태그 없음' 으로 읽히지 않게 밝힌다.
+  if (d.policyUnreadable === true) return `${line}${d.partial === true ? ' · 이 vCenter 의 태그 연결을 일부만 읽었습니다' : ''} · 태그 정책 파일을 읽지 못해 필수 태그는 판정하지 않았습니다`;
+  if (d.partial !== true) return line;
+  const unsure = Array.isArray(d.missingUnsure) && d.missingUnsure.length ? ` — 필수 ${d.missingUnsure.join(', ')} 는 확인 안 됨(없다는 뜻이 아님)` : '';
+  return `${line} · 이 vCenter 의 태그 연결을 일부만 읽었습니다${unsure}`;
 }

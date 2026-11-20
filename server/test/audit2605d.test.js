@@ -15,7 +15,14 @@ import path from 'node:path';
 import http from 'node:http';
 import zlib from 'node:zlib';
 
-const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'dvc-2605d-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+test.after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const CFG = tmpDir('dvc-2605d-');
 Object.assign(process.env, {
   CONFIG_DIR: CFG, CENTRAL_TOKEN: 'shared-2605d', AGENT_NAME: 'e1', DATA_SOURCE: 'live',
   IPAM_WRITE_WORKER: '0', SSRF_ALLOW_LOOPBACK: 'true',
@@ -206,7 +213,7 @@ test('LEFT2605-01: 중계 점검(주기 폴러)·토큰 점검·연결 테스트
   const big = bigJsonServer(40 * 1048576);
   await new Promise((r) => big.s.listen(0, '127.0.0.1', r));
   try {
-    const r = await runCheck({ host: '127.0.0.1', port: big.s.address().port, kind: 'edge-portal', token: 't' }, { timeoutMs: 20_000 });
+    const r = await runCheck({ host: '127.0.0.1', port: big.s.address().port, kind: 'edge-portal', token: 't', scheme: 'http' }, { timeoutMs: 20_000 });
     assert.equal(r.ok, true, JSON.stringify(r));
     assert.ok(big.written() < 12 * 1048576, `상한에서 멈춰야 한다(서버가 쓴 바이트 ${big.written()} — 수정 전에는 40MB 전량)`);
   } finally { big.s.close(); }

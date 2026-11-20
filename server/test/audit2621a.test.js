@@ -12,7 +12,7 @@
  * 예외: 라우트 하니스(자식 프로세스)는 라우트가 스스로 Date.now() 로 기간을 잡으므로 그 시각에 맞춰 적재하고,
  * 단언은 경계에 무관한 성질(잘렸는가·덮는 기간)만 본다.
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -20,9 +20,15 @@ import path from 'node:path';
 import { spawnSync, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
-const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2621a-'));
+const DIR = tmpDir('audit2621a-');
 process.env.CONFIG_DIR = DIR;
 process.env.TEMP_DB_PATH = path.join(DIR, 'host-temp.db');
 
@@ -70,7 +76,7 @@ test('★ RECENT-02 historyStep — 1주 · 분 버킷 · 상한 5000 이면 tru
 
 /** 실제 api 라우터를 띄워 esxi-temp/history 를 부른다(자식 프로세스 — 라우트가 Date.now() 로 기간을 잡는다). */
 function historyViaRoute(queries) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2621a-route-'));
+  const dir = tmpDir('audit2621a-route-');
   const script = `
     const HOUR = 3600000, MIN = 60000, DAY = 86400000;
     const { getMetricsDb } = await import(${JSON.stringify(path.join(SRC, 'metrics/db.js'))});
@@ -212,7 +218,7 @@ test('★ DATA-01 같은 줄은 같은 ts — 두 번 조사해도 로그인 실
 });
 
 test('DATA-01 조사 스크립트 — 첫 줄은 게스트 오프셋, 저널이 읽히면 파일(secure·auth.log)은 읽지 않는다(같은 사건 이중 적재 방지)', () => {
-  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2621a-bin-'));
+  const bin = tmpDir('audit2621a-bin-');
   const script = path.join(bin, 's.sh');
   fs.writeFileSync(script, gls.LINUX_SCRIPT(7, 80));
   const J = '2026-09-26T21:05:01+0900 web01 sshd[811]: Failed password for root from 10.0.0.5 port 22 ssh2';
@@ -367,3 +373,7 @@ test('DATA-04 Dell 센서 분류는 그대로다', () => {
 });
 
 test.after(() => { fs.rmSync(DIR, { recursive: true, force: true }); });
+
+// v3.18.8: 정리 훅은 파일 끝에서 등록한다 — 시험 사이에 최상위 await 가 있으면 앞 시험이 끝난 시점에 루트 after 가 먼저 돌아
+//   뒤 시험이 쓸 폴더를 지운다(node 22 실측 — audit2590 이 그렇게 깨졌다).
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });

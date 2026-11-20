@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { droppedSecretKeys, droppedSecretNote, passwordDroppedLines, relaySecretsDroppedText } from './droppedSecretText.js';
+import { droppedSecretKeys, droppedSecretNote, passwordDroppedLines, relaySecretsDroppedText, relaySecretsWillDropText } from './droppedSecretText.js';
 
 describe('droppedSecretText (WEB2607-03 · LEFT2607-07)', () => {
   it('droppedSecrets 가 있으면 다시 입력하라고 말한다', () => {
@@ -26,6 +26,13 @@ describe('droppedSecretText (WEB2607-03 · LEFT2607-07)', () => {
   it('중계 토폴로지 secretsDropped', () => {
     expect(relaySecretsDroppedText({ secretsDropped: ['DC1 Edge', 'DC1 IRS'] })).toMatch(/2개: DC1 Edge, DC1 IRS/);
     expect(relaySecretsDroppedText({ secretsDropped: [] })).toBe('');
+  });
+  it('66회차: 가져오기 미리보기는 아직 저장 전 — 폐기될 곳을 미래형으로', () => {
+    const t = relaySecretsWillDropText({ secretsDropped: ['AZ IRS(접속 경로 변경 — 중계 엣지 경유와 직접 접속이 바뀜)'] });
+    expect(t).toMatch(/^저장하면 .*폐기되는 곳 1개: AZ IRS/);
+    expect(relaySecretsWillDropText({ secretsDropped: [] })).toBe('');
+    expect(relaySecretsWillDropText(null)).toBe('');
+    expect(/[`*]/.test(t)).toBe(false);
   });
   it('백틱·별표 없음', () => {
     const t = droppedSecretNote({ droppedSecrets: ['password', 'privateKey'] }) + relaySecretsDroppedText({ secretsDropped: ['x'] });

@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>집중 모니터링 — 서버 상세</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#7dd3fc}a:hover{color:#bae6fd}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+.num{font-variant-numeric:tabular-nums}
+.dim{color:#8b9bb4}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.seg{display:inline-flex;flex-wrap:wrap;border:1px solid #243049;border-radius:8px;overflow:hidden;background:#0f1626}
+.seg button{height:34px;padding:0 12px;border:0;border-left:1px solid #243049;background:transparent;color:#8b9bb4;font:inherit;font-size:12.5px;cursor:pointer;white-space:nowrap}
+.seg button:first-child{border-left:0}
+.seg button.on{background:#1a2236;color:#e6edf6;font-weight:600}
+.btn{display:inline-flex;align-items:center;height:34px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#141b2d;color:#e6edf6;font:inherit;font-size:12.5px;cursor:pointer;white-space:nowrap;text-decoration:none;box-sizing:border-box}
+a.btn:hover{color:#e6edf6;border-color:#3b82f6}
+.tabs{display:flex;flex-wrap:wrap;gap:4px;border-bottom:1px solid #1f2a40}
+.tabs a{display:inline-flex;align-items:center;height:40px;padding:0 14px;color:#8b9bb4;text-decoration:none;font-size:13.5px;border-bottom:2px solid transparent;margin-bottom:-1px}
+.tabs a.on{color:#e6edf6;font-weight:600;border-bottom-color:#3b82f6}
+.tbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;padding:10px 14px}
+.tbar input[type=range]{width:100%;height:20px;margin:0;accent-color:#3b82f6}
+.sl{flex:1 1 220px;min-width:140px;display:flex;flex-direction:column;gap:3px}
+.sl svg{display:block;width:100%;height:5px;border-radius:3px}
+.tbar input[type=date]{height:34px;box-sizing:border-box;padding:0 8px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit;font-size:12.5px;color-scheme:dark}
+.tbar .cap{flex:1 1 100%;font-size:12px;color:#8b9bb4}
+.btn[disabled]{opacity:.45;cursor:default}
+.btn.on{background:#2563eb;border-color:#2563eb;color:#fff;font-weight:600}
+.badge{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:11px;font-size:12px;font-weight:600;white-space:nowrap}
+.badge.crit{background:rgba(239,68,68,.18);color:#fca5a5}
+.h3{margin:0;font-size:14.5px;font-weight:600}
+.big{font-size:30px;font-weight:600;letter-spacing:-.01em;line-height:1.1}
+.big small{font-size:14px;font-weight:500;color:#8b9bb4;margin-left:3px}
+.lg{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#c3cede;white-space:nowrap}
+.lg i{display:inline-block;width:10px;height:10px;border-radius:2px}
+.lg b{font-weight:600;color:#e6edf6}
+.tw{overflow-x:auto}
+.th,.tr{display:grid;align-items:center;column-gap:12px;padding:0 12px}
+.th{height:32px;font-size:12px;color:#8b9bb4;background:#0f1626;border-top:1px solid #1f2a40;border-bottom:1px solid #1f2a40}
+.tr{min-height:34px;border-bottom:1px solid #1a2236;font-size:12.5px}
+.tr.sel{background:rgba(59,130,246,.10)}
+.tr.sum{background:#0f1626;font-weight:600}
+.r{text-align:right}
+.net{grid-template-columns:minmax(150px,1.1fr) minmax(190px,1.5fr) 64px 150px 84px 84px 84px minmax(130px,1fr);min-width:1040px}
+.dsk{grid-template-columns:minmax(224px,1.7fr) 92px repeat(7,minmax(64px,.6fr)) 124px minmax(110px,1fr);min-width:1120px}
+.th.two{height:46px}
+.hh{display:flex;flex-direction:column;align-items:flex-end;line-height:1.25}
+.hh b{font-family:"JetBrains Mono",ui-monospace,monospace;font-weight:500;font-size:11.5px;color:#c3cede}
+.hh small{font-size:11px;color:#8b9bb4}
+.hh.l{align-items:flex-start}
+.dv{display:flex;align-items:center;gap:8px;min-width:0}
+.dnote{padding:6px 12px 8px 32px;font-size:12px;color:#c3cede;background:rgba(239,68,68,.07);border-bottom:1px solid #1a2236;min-width:1120px;box-sizing:border-box}
+.badge.warn{background:rgba(245,158,11,.16);color:#fbbf24}
+.meter{display:flex;align-items:center;gap:8px}
+.meter .t{flex:1;height:8px;border-radius:4px;background:#1b2a48;overflow:hidden}
+.meter .f{display:block;height:8px;border-radius:4px;background:#3987e5}
+.meter .p{width:38px;text-align:right}
+.sp{display:block;width:100%;height:22px}
+.nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pr{display:grid;grid-template-columns:28px 70px 76px 150px minmax(0,1fr);align-items:center;column-gap:12px;min-height:32px;border-bottom:1px solid #1a2236;font-size:12.5px;padding:0 12px;min-width:520px}
+</style>
+</helmet>
+<div style="max-width:1440px;margin:0 auto;box-sizing:border-box;padding:24px 32px 36px;display:flex;flex-direction:column;gap:16px">
+
+  <div class="row" style="justify-content:space-between;align-items:flex-end;gap:16px">
+    <div style="display:flex;flex-direction:column;gap:4px;min-width:0">
+      <div class="dim" style="font-size:12px">특수 기능 › 서버 › 집중 모니터링</div>
+      <div class="row" style="gap:10px"><h1 style="margin:0;font-size:22px;font-weight:700;letter-spacing:-.01em">pl-db-01</h1><span class="badge crit">위험 · CPU</span></div>
+      <div class="mono dim" style="font-size:12px;overflow-wrap:anywhere">10.48.20.11 · 엣지 PL-WRO · Red Hat Enterprise Linux Server 7.8 · 3.10.0-1127.el7.x86_64 · 32코어 · 256 GB · 가동 212일</div>
+    </div>
+    <div class="row" style="gap:8px">
+      <span class="row" style="gap:2px 6px;min-height:34px;box-sizing:border-box;padding:4px 12px;border:1px solid #243049;border-radius:8px;background:#0f1626">
+        <span aria-hidden="true" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e"></span>
+        <span style="font-weight:600">수집 중</span><span class="dim">· 주기 2초 · 마지막 표본 3초 전</span>
+      </span>
+      <a class="btn" href="Compare.dc.html">비교에 고정</a>
+      <a class="btn" href="Main.dc.html">개요로</a>
+    </div>
+  </div>
+
+  <nav class="tabs" aria-label="집중 모니터링 보기">
+    <a class="on" href="Main.dc.html">개요</a>
+    <a href="Compare.dc.html">비교</a>
+    <a href="Process.dc.html">프로세스</a>
+    <a href="Targets.dc.html">대상 · 키</a>
+  </nav>
+
+  <div class="card tbar">
+    <span class="dim" style="font-size:12px">구간</span>
+    <div class="seg" role="group" aria-label="차트 구간"><button type="button">1분</button><button type="button" class="on">5분</button><button type="button">10분</button><button type="button">30분</button></div>
+    <button type="button" class="btn">◀ 이전 5분</button>
+    <span class="sl"><input type="range" min="0" max="287" value="287" aria-label="구간 이동 — 오른쪽 끝이 최신"><svg viewBox="0 0 1440 6" preserveAspectRatio="none" role="img" aria-label="최근 24시간 가운데 기록이 있는 시간"><rect x="0" y="0" width="1440" height="6" fill="#1b2a48"></rect><rect x="0" y="0" width="191" height="6" fill="#3987e5"></rect><rect x="232" y="0" width="673" height="6" fill="#3987e5"></rect><rect x="921" y="0" width="519" height="6" fill="#3987e5"></rect></svg></span>
+    <button type="button" class="btn" disabled="disabled">다음 5분 ▶</button>
+    <button type="button" class="btn on">최신</button>
+    <label class="dim" style="font-size:12px" for="jump-srv">날짜로 이동</label><input id="jump-srv" type="date" value="2026-11-11" min="2026-10-12" max="2026-11-11">
+    <span class="cap num">최근 구간 · 11-11 21:44:38 ~ 21:49:38 · 슬라이더는 최근 24시간(날짜를 고르면 그 날 하루) · 뒤로 30일까지 — DB 에 보관 · 슬라이더 아래 띠는 기록이 있는 시간</span>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,520px),1fr));gap:12px">
+    <div class="card" style="padding:14px 16px;display:flex;flex-direction:column;gap:10px">
+      <div class="row" style="justify-content:space-between;align-items:flex-start">
+        <div style="display:flex;flex-direction:column;gap:2px"><h2 class="h3">CPU — 32코어</h2><span class="big num">93<small>%</small></span></div>
+        <div class="row" style="gap:14px;justify-content:flex-end">
+          <span class="lg"><i style="background:#3987e5"></i>사용자 <b class="num">62%</b></span>
+          <span class="lg"><i style="background:#d95926"></i>시스템 <b class="num">18%</b></span>
+          <span class="lg"><i style="background:#199e70"></i>I/O 대기 <b class="num">13%</b></span>
+          <span class="lg"><i style="background:#c98500"></i>steal <b class="num">0%</b></span>
+        </div>
+      </div>
+      <svg viewBox="0 0 640 214" role="img" aria-label="CPU 사용률 구성 추이 — 사용자, 시스템, I/O 대기, steal 을 쌓은 면" style="display:block;width:100%;height:auto">
+        <line x1="34" x2="632" y1="190" y2="190" stroke="#33415c"></line><text x="28" y="194" fill="#8b9bb4" font-size="11" text-anchor="end">0</text>
+        <line x1="34" x2="632" y1="145" y2="145" stroke="#1f2a40"></line><text x="28" y="149" fill="#8b9bb4" font-size="11" text-anchor="end">25</text>
+        <line x1="34" x2="632" y1="100" y2="100" stroke="#1f2a40"></line><text x="28" y="104" fill="#8b9bb4" font-size="11" text-anchor="end">50</text>
+        <line x1="34" x2="632" y1="55" y2="55" stroke="#1f2a40"></line><text x="28" y="59" fill="#8b9bb4" font-size="11" text-anchor="end">75</text>
+        <line x1="34" x2="632" y1="10" y2="10" stroke="#1f2a40"></line><text x="28" y="14" fill="#8b9bb4" font-size="11" text-anchor="end">100</text>
+        <text x="34" y="209" fill="#8b9bb4" font-size="11">5분 전</text><text x="333" y="209" fill="#8b9bb4" font-size="11" text-anchor="middle">2분 30초 전</text><text x="632" y="209" fill="#8b9bb4" font-size="11" text-anchor="end">지금</text>
+        <sc-for list="{{ cpuLayers }}" as="c" hint-placeholder-count="4">
+          <path d="{{ c.area }}" fill="{{ c.color }}" fill-opacity="0.30"></path>
+          <path d="{{ c.line }}" fill="none" stroke="{{ c.color }}" stroke-width="1.6" stroke-linejoin="round"></path>
+        </sc-for>
+      </svg>
+      <div class="row" style="justify-content:space-between;gap:12px">
+        <span class="lg">부하 평균 <b class="num">38.2</b> · <b class="num">35.9</b> · <b class="num">31.4</b> <span class="dim">(1 · 5 · 15분 · 코어 32개)</span></span>
+        <span class="lg">실행 대기 <b class="num">41</b> · 프로세스 <b class="num">1,284</b></span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:5px">
+        <div class="row" style="justify-content:space-between"><span class="dim" style="font-size:12px">코어별 사용률(cpu0 ~ cpu31)</span><span class="dim" style="font-size:12px">어두움 0% → 밝음 100%</span></div>
+        <svg viewBox="0 0 320 12" preserveAspectRatio="none" role="img" aria-label="코어 32개의 사용률" style="display:block;width:100%;height:16px"><sc-for list="{{ cores }}" as="c" hint-placeholder-count="32"><rect x="{{ c.x }}" y="0" width="9.4" height="12" fill="{{ c.fill }}"></rect></sc-for></svg>
+      </div>
+    </div>
+
+    <div class="card" style="padding:14px 16px;display:flex;flex-direction:column;gap:10px">
+      <div class="row" style="justify-content:space-between;align-items:flex-start">
+        <div style="display:flex;flex-direction:column;gap:2px"><h2 class="h3">메모리 — 256 GB</h2><span class="big num">84<small>%</small></span></div>
+        <span class="dim" style="font-size:12px;text-align:right">사용률 = (전체 − MemAvailable) ÷ 전체<br>캐시로 쓰는 메모리는 ‘사용’ 에 넣지 않습니다</span>
+      </div>
+      <div style="display:flex;gap:2px;height:28px" role="img" aria-label="메모리 구성: 사용 215.0 GB, 버퍼·캐시 31.2 GB, 여유 9.8 GB">
+        <div style="flex:215;background:#3987e5;border-radius:4px;display:flex;align-items:center;padding:0 8px;color:#fff;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden">215.0 GB</div>
+        <div style="flex:31.2;background:#199e70;border-radius:4px;display:flex;align-items:center;padding:0 8px;color:#fff;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden">31.2 GB</div>
+        <div style="flex:9.8;background:#33415c;border-radius:4px"></div>
+      </div>
+      <div class="row" style="gap:14px">
+        <span class="lg"><i style="background:#3987e5"></i>사용</span>
+        <span class="lg"><i style="background:#199e70"></i>버퍼 · 캐시(비울 수 있음)</span>
+        <span class="lg"><i style="background:#33415c"></i>여유 <b class="num">9.8 GB</b></span>
+      </div>
+      <svg viewBox="0 0 640 150" role="img" aria-label="메모리 사용률 추이" style="display:block;width:100%;height:auto">
+        <line x1="34" x2="632" y1="126" y2="126" stroke="#33415c"></line><text x="28" y="130" fill="#8b9bb4" font-size="11" text-anchor="end">0</text>
+        <line x1="34" x2="632" y1="68" y2="68" stroke="#1f2a40"></line><text x="28" y="72" fill="#8b9bb4" font-size="11" text-anchor="end">50</text>
+        <line x1="34" x2="632" y1="10" y2="10" stroke="#1f2a40"></line><text x="28" y="14" fill="#8b9bb4" font-size="11" text-anchor="end">100</text>
+        <text x="34" y="145" fill="#8b9bb4" font-size="11">5분 전</text><text x="632" y="145" fill="#8b9bb4" font-size="11" text-anchor="end">지금</text>
+        <path d="{{ memArea }}" fill="#3987e5" fill-opacity="0.12"></path>
+        <path d="{{ memLine }}" fill="none" stroke="#3987e5" stroke-width="2" stroke-linejoin="round"></path>
+      </svg>
+      <div class="row" style="justify-content:space-between;gap:12px">
+        <span class="lg">스왑 <b class="num">0 GB</b> / 16 GB <span class="dim">· 스왑 입출력 0 페이지/초</span></span>
+        <span class="lg">Dirty <b class="num">1.2 GB</b> · Slab <b class="num">6.4 GB</b></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="padding:14px 0 6px;display:flex;flex-direction:column;gap:10px">
+    <div class="row" style="justify-content:space-between;padding:0 16px">
+      <h2 class="h3">네트워크 — 본딩 2개 · 물리 인터페이스 6개</h2>
+      <div class="row">
+        <span class="lg"><i style="background:#3987e5"></i>수신</span><span class="lg"><i style="background:#d95926"></i>송신</span>
+        <div class="seg" role="group" aria-label="인터페이스 범위"><button type="button" class="on">본딩 · 물리</button><button type="button">전체(VLAN · 가상 포함)</button></div>
+      </div>
+    </div>
+    <div class="tw">
+      <div class="th net"><span>인터페이스</span><span>구성</span><span class="r">속도</span><span>사용률</span><span class="r">수신</span><span class="r">송신</span><span class="r">오류 · 드롭</span><span>최근 5분</span></div>
+      <sc-for list="{{ nets }}" as="n" hint-placeholder-count="8">
+        <div class="{{ n.cls }}">
+          <span class="nm mono" style="{{ n.pad }}">{{ n.name }}</span>
+          <span class="nm dim">{{ n.kind }}</span>
+          <span class="r num">{{ n.speed }}</span>
+          <span class="meter"><span class="t"><span class="f" style="{{ n.fill }}"></span></span><span class="p num">{{ n.util }}</span></span>
+          <span class="r num">{{ n.rx }}</span>
+          <span class="r num">{{ n.tx }}</span>
+          <span class="r num dim">{{ n.err }}</span>
+          <svg class="sp" viewBox="0 0 100 22" preserveAspectRatio="none" aria-hidden="true"><path d="{{ n.rxLine }}" fill="none" stroke="#3987e5" stroke-width="1.5" vector-effect="non-scaling-stroke"></path><path d="{{ n.txLine }}" fill="none" stroke="#d95926" stroke-width="1.5" vector-effect="non-scaling-stroke"></path></svg>
+        </div>
+      </sc-for>
+    </div>
+    <div class="dim" style="font-size:12px;padding:0 16px 8px;display:flex;flex-direction:column;gap:3px">
+      <span>사용률 = 수신·송신 중 큰 쪽 ÷ 링크 속도. 본딩 속도는 802.3ad 는 구성원 합(20 Gb), active-backup 은 사용 중인 구성원 하나(10 Gb)로 봅니다.</span>
+      <span>링크 속도를 못 읽은 인터페이스는 사용률을 내지 않고 ‘—’ 로 두며 수신·송신량만 보여 줍니다. 구성원 사이 치우침(한쪽만 바쁨)은 행을 나란히 두어 바로 보이게 합니다.</span>
+    </div>
+  </div>
+
+  <div class="card" style="padding:14px 0 14px;display:flex;flex-direction:column;gap:10px">
+    <div class="row" style="justify-content:space-between;padding:0 16px">
+      <h2 class="h3">디스크 — 물리 5개 · 파티션 6개 · LVM 볼륨 5개</h2>
+      <div class="row">
+        <span class="dim" style="font-size:12px">행을 누르면 아래 차트가 그 장치로 바뀝니다</span>
+        <div class="seg" role="group" aria-label="디스크 범위"><button type="button" class="on">트리</button><button type="button">물리 디스크만</button><button type="button">파티션 · 볼륨만</button></div>
+        <div class="seg" role="group" aria-label="표의 열"><button type="button" class="on">요약 열</button><button type="button">iostat 전체 열</button></div>
+      </div>
+    </div>
+    <div class="tw">
+      <div class="th dsk two"><span>장치</span><span>마운트</span>
+        <span class="hh"><b>r/s</b><small>읽기 횟수</small></span><span class="hh"><b>w/s</b><small>쓰기 횟수</small></span>
+        <span class="hh"><b>rMB/s</b><small>읽기량</small></span><span class="hh"><b>wMB/s</b><small>쓰기량</small></span>
+        <span class="hh"><b>r_await</b><small>읽기 지연</small></span><span class="hh"><b>w_await</b><small>쓰기 지연</small></span>
+        <span class="hh"><b>avgqu-sz</b><small>대기열</small></span><span class="hh l"><b>%util</b><small>사용률</small></span><span class="hh l"><b>w_await</b><small>이 구간 추이</small></span></div>
+      <sc-for list="{{ disks }}" as="d" hint-placeholder-count="17">
+        <div class="{{ d.cls }}">
+          <span class="dv" style="{{ d.pad }}"><span class="nm mono">{{ d.name }}</span><sc-if value="{{ d.flag }}" hint-placeholder-val="{{ false }}"><span class="{{ d.flagCls }}">{{ d.flagText }}</span></sc-if></span>
+          <span class="nm mono dim">{{ d.mnt }}</span>
+          <span class="r num">{{ d.ri }}</span>
+          <span class="r num">{{ d.wi }}</span>
+          <span class="r num">{{ d.rm }}</span>
+          <span class="r num">{{ d.wm }}</span>
+          <span class="r num" style="{{ d.raInk }}">{{ d.ra }}</span>
+          <span class="r num" style="{{ d.waInk }}">{{ d.wa }}</span>
+          <span class="r num" style="{{ d.qInk }}">{{ d.q }}</span>
+          <span class="meter"><span class="t"><span class="f" style="{{ d.fill }}"></span></span><span class="p num">{{ d.util }}</span></span>
+          <svg class="sp" viewBox="0 0 100 22" preserveAspectRatio="none" aria-hidden="true"><path d="{{ d.line }}" fill="none" stroke="#d95926" stroke-width="1.5" vector-effect="non-scaling-stroke"></path></svg>
+        </div>
+        <sc-if value="{{ d.hasNote }}" hint-placeholder-val="{{ false }}"><div class="dnote">{{ d.note }}</div></sc-if>
+      </sc-for>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,480px),1fr));gap:12px;padding:4px 16px 0">
+      <div style="border:1px solid #1f2a40;border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:6px;min-width:0">
+        <div class="row" style="justify-content:space-between"><span style="font-weight:600">sdb — 읽기 · 쓰기 처리량 <span class="dim" style="font-weight:400">MB/s</span></span>
+          <span class="row" style="gap:12px"><span class="lg"><i style="background:#3987e5"></i>읽기 <b class="num">71.2</b></span><span class="lg"><i style="background:#d95926"></i>쓰기 <b class="num">268.3</b></span></span></div>
+        <svg viewBox="0 0 640 200" role="img" aria-label="sdb 읽기·쓰기 처리량 추이" style="display:block;width:100%;height:auto">
+          <line x1="34" x2="632" y1="176" y2="176" stroke="#33415c"></line><text x="28" y="180" fill="#8b9bb4" font-size="11" text-anchor="end">0</text>
+          <line x1="34" x2="632" y1="134.5" y2="134.5" stroke="#1f2a40"></line><text x="28" y="138.5" fill="#8b9bb4" font-size="11" text-anchor="end">100</text>
+          <line x1="34" x2="632" y1="93" y2="93" stroke="#1f2a40"></line><text x="28" y="97" fill="#8b9bb4" font-size="11" text-anchor="end">200</text>
+          <line x1="34" x2="632" y1="51.5" y2="51.5" stroke="#1f2a40"></line><text x="28" y="55.5" fill="#8b9bb4" font-size="11" text-anchor="end">300</text>
+          <line x1="34" x2="632" y1="10" y2="10" stroke="#1f2a40"></line><text x="28" y="14" fill="#8b9bb4" font-size="11" text-anchor="end">400</text>
+          <text x="34" y="195" fill="#8b9bb4" font-size="11">5분 전</text><text x="632" y="195" fill="#8b9bb4" font-size="11" text-anchor="end">지금</text>
+          <path d="{{ thrR }}" fill="none" stroke="#3987e5" stroke-width="2" stroke-linejoin="round"></path>
+          <path d="{{ thrW }}" fill="none" stroke="#d95926" stroke-width="2" stroke-linejoin="round"></path>
+        </svg>
+      </div>
+      <div style="border:1px solid #1f2a40;border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:6px;min-width:0">
+        <div class="row" style="justify-content:space-between"><span style="font-weight:600">sdb — 읽기 · 쓰기 지연 <span class="dim" style="font-weight:400">ms</span></span>
+          <span class="row" style="gap:12px"><span class="lg"><i style="background:#3987e5"></i>읽기 <b class="num">6.8</b></span><span class="lg"><i style="background:#d95926"></i>쓰기 <b class="num">21.3</b></span></span></div>
+        <svg viewBox="0 0 640 200" role="img" aria-label="sdb 읽기·쓰기 지연 추이" style="display:block;width:100%;height:auto">
+          <line x1="34" x2="632" y1="176" y2="176" stroke="#33415c"></line><text x="28" y="180" fill="#8b9bb4" font-size="11" text-anchor="end">0</text>
+          <line x1="34" x2="632" y1="142.8" y2="142.8" stroke="#1f2a40"></line><text x="28" y="146.8" fill="#8b9bb4" font-size="11" text-anchor="end">10</text>
+          <line x1="34" x2="632" y1="109.6" y2="109.6" stroke="#1f2a40"></line><text x="28" y="113.6" fill="#8b9bb4" font-size="11" text-anchor="end">20</text>
+          <line x1="34" x2="632" y1="76.4" y2="76.4" stroke="#1f2a40"></line><text x="28" y="80.4" fill="#8b9bb4" font-size="11" text-anchor="end">30</text>
+          <line x1="34" x2="632" y1="43.2" y2="43.2" stroke="#1f2a40"></line><text x="28" y="47.2" fill="#8b9bb4" font-size="11" text-anchor="end">40</text>
+          <line x1="34" x2="632" y1="10" y2="10" stroke="#1f2a40"></line><text x="28" y="14" fill="#8b9bb4" font-size="11" text-anchor="end">50</text>
+          <text x="34" y="195" fill="#8b9bb4" font-size="11">5분 전</text><text x="632" y="195" fill="#8b9bb4" font-size="11" text-anchor="end">지금</text>
+          <path d="{{ latR }}" fill="none" stroke="#3987e5" stroke-width="2" stroke-linejoin="round"></path>
+          <path d="{{ latW }}" fill="none" stroke="#d95926" stroke-width="2" stroke-linejoin="round"></path>
+        </svg>
+      </div>
+    </div>
+    <div class="dim" style="font-size:12px;padding:0 16px;display:flex;flex-direction:column;gap:3px">
+      <span>요약 열은 iostat -x -m 의 13개 열 가운데 8개입니다(이름 · 계산식 같음). 나머지 병합 · 요청 크기 · 합친 지연 · 서비스 시간은 ‘iostat 전체 열’ 을 누르면 나옵니다. 단위: 지연 ms.</span>
+      <span>iostat 과 다른 점 두 가지 — ① 그 2초에 끝난 요청이 없으면 지연을 0.00 이 아니라 ‘—’ 로 둡니다 ② 끝난 요청은 없는데 걸린 요청이 있으면 ‘응답 없음’ 으로 알립니다. svctm 은 sysstat 이 믿지 말라고 밝힌 값이라 참고용입니다.</span>
+      <span>‘전체 디스크’ 는 물리 디스크(sd*)만 더합니다 — 파티션과 LVM 볼륨은 같은 입출력을 다시 보는 것이라 합계에 넣지 않습니다. 지연은 요청 수로 가중한 평균, 사용률은 가장 바쁜 디스크 값입니다. dm 장치의 병합은 항상 0 입니다(병합은 아래 물리 디스크에서 일어납니다).</span>
+    </div>
+  </div>
+
+  <div class="card" style="padding:14px 0 6px;display:flex;flex-direction:column;gap:10px">
+    <div class="row" style="justify-content:space-between;padding:0 16px">
+      <h2 class="h3">CPU 를 많이 쓰는 프로세스 — 상위 5</h2>
+      <a href="Process.dc.html">상위 30개 전부 보기</a>
+    </div>
+    <div class="tw">
+      <div class="pr" style="background:#0f1626;border-top:1px solid #1f2a40;border-bottom:1px solid #1f2a40;color:#8b9bb4;font-size:12px"><span>#</span><span>PID</span><span>사용자</span><span>CPU(1코어 = 100%)</span><span>명령</span></div>
+      <sc-for list="{{ procs }}" as="p" hint-placeholder-count="5">
+        <div class="pr"><span class="dim num">{{ p.no }}</span><span class="mono num">{{ p.pid }}</span><span class="mono">{{ p.user }}</span>
+          <span class="meter"><span class="t"><span class="f" style="{{ p.fill }}"></span></span><span class="p num" style="width:46px">{{ p.cpu }}</span></span>
+          <span class="nm mono">{{ p.cmd }}</span></div>
+      </sc-for>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2567}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const N = 150; const T = 1000;
+    const frac = (x) => x - Math.floor(x);
+    const hash = (a, b) => frac(Math.sin(a * 127.1 + b * 311.7) * 43758.5453);
+    const sm = (a, t) => (hash(a, t) + hash(a, t - 1) + hash(a, t - 2) + hash(a, t - 3)) / 4;
+    const wob = (base, rel, seed, t) => Math.max(0, base * (1 + rel * 0.5 * Math.sin((t + seed * 11) / 21) + rel * 1.6 * (sm(seed, t) - 0.5)));
+    const ser = (f) => { const a = []; for (let i = 0; i < N; i++) a.push(f(T - (N - 1) + i)); return a; };
+    const path = (vals, x0, x1, y0, y1, max) => vals.map((v, i) => (i ? 'L' : 'M') + (x0 + (i / (N - 1)) * (x1 - x0)).toFixed(1) + ' ' + (y1 - (Math.min(v, max) / max) * (y1 - y0)).toFixed(1)).join(' ');
+    const fmt = (v, dp) => (v == null ? '—' : Number(v).toLocaleString('en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp }));
+
+    // CPU — 쌓은 면(아래부터 사용자 · 시스템 · I/O 대기 · steal)
+    const parts = [
+      { color: '#3987e5', vals: ser((t) => wob(62, 0.07, 1, t)) },
+      { color: '#d95926', vals: ser((t) => wob(18, 0.12, 2, t)) },
+      { color: '#199e70', vals: ser((t) => wob(13, 0.28, 3, t)) },
+      { color: '#c98500', vals: ser((t) => wob(0.4, 0.5, 4, t)) },
+    ];
+    const X0 = 34; const X1 = 632;
+    const yOf = (v) => 190 - (Math.min(v, 100) / 100) * 180;
+    const xOf = (i) => X0 + (i / (N - 1)) * (X1 - X0);
+    const acc = new Array(N).fill(0);
+    const cpuLayers = parts.map((p) => {
+      const lo = acc.slice();
+      for (let i = 0; i < N; i++) acc[i] += p.vals[i];
+      const hi = acc.slice();
+      const top = hi.map((v, i) => (i ? 'L' : 'M') + xOf(i).toFixed(1) + ' ' + yOf(v).toFixed(1)).join(' ');
+      let back = '';
+      for (let i = N - 1; i >= 0; i--) back += ' L' + xOf(i).toFixed(1) + ' ' + yOf(lo[i]).toFixed(1);
+      return { color: p.color, line: top, area: top + back + ' Z' };
+    });
+    const RAMP = ['#17233b', '#0d366b', '#104281', '#184f95', '#1c5cab', '#256abf', '#2a78d6', '#3987e5', '#5598e7', '#6da7ec', '#86b6ef', '#9ec5f4', '#b7d3f6', '#cde2fb'];
+    const cores = []; for (let c = 0; c < 32; c++) { const v = Math.min(100, 78 + hash(c + 5, 3) * 24); cores.push({ x: c * 10, fill: RAMP[Math.round((v / 100) * (RAMP.length - 1))] }); }
+    const memVals = ser((t) => wob(84, 0.006, 9, t));
+    const memLine = path(memVals, 34, 632, 10, 126, 100);
+
+    // 네트워크 — [이름, 깊이, 구성, 속도(Gb), 수신 %, 송신 %, 오류·드롭, 상태]
+    const NET = [
+      ['bond0', 0, '802.3ad(LACP) · 구성원 2개', 20, 23, 14.5, '0 · 0', ''],
+      ['eno1', 1, 'bond0 구성원 · 링크 정상', 10, 24, 15, '0 · 0', ''],
+      ['eno2', 1, 'bond0 구성원 · 링크 정상', 10, 22, 14, '0 · 0', ''],
+      ['bond1', 0, 'active-backup · 지금 ens2f0 사용', 10, 3, 12, '0 · 0', ''],
+      ['ens2f0', 1, 'bond1 구성원 · 사용 중(active)', 10, 3, 12, '0 · 0', ''],
+      ['ens2f1', 1, 'bond1 구성원 · 대기(backup)', 10, 0, 0, '0 · 0', 'idle'],
+      ['eno3', 0, '단독 · 관리망', 1, 1.2, 2.1, '0 · 3', ''],
+      ['eno4', 0, '단독 · 링크 끊김(down)', null, null, null, '—', 'down'],
+    ];
+    const rate = (pct, gb) => { if (pct == null) return '—'; const g = (pct / 100) * gb; return g >= 1 ? fmt(g, 1) + ' Gb/s' : fmt(g * 1000, 0) + ' Mb/s'; };
+    const nets = NET.map((n, i) => {
+      const down = n[7] === 'down'; const idle = n[7] === 'idle';
+      const rxv = ser((t) => (down || idle ? 0 : wob(n[4], 0.22, 40 + i, t)));
+      const txv = ser((t) => (down || idle ? 0 : wob(n[5], 0.22, 60 + i, t)));
+      const u = down ? null : Math.max(n[4], n[5]);
+      return {
+        cls: 'tr net', name: n[0], kind: n[2], pad: 'padding-left:' + n[1] * 20 + 'px' + (n[1] ? ';color:#c3cede' : ';font-weight:600'),
+        speed: n[3] == null ? '—' : n[3] + ' Gb', util: u == null ? '—' : Math.round(u) + '%', fill: 'width:' + (u == null ? 0 : u) + '%',
+        rx: rate(n[4], n[3]), tx: rate(n[5], n[3]), err: n[6],
+        rxLine: down ? '' : path(rxv, 0, 100, 2, 21, 40), txLine: down ? '' : path(txv, 0, 100, 2, 21, 40),
+      };
+    });
+
+    // 디스크 — iostat -x -m 과 같은 열.
+    // [이름, 깊이, 마운트, rrqm/s, wrqm/s, r/s, w/s, rMB/s, wMB/s, r_await, w_await, %util, 종류, 대기열(직접 지정), 안내]
+    const DSK = [
+      ['sda · 446 GB', 0, '', 0, 1, 4, 86, 0.1, 1.9, 0.9, 1.4, 3, 'disk'],
+      ['sda1', 1, '/boot', 0, 0, 0, 0, 0, 0, null, null, 0, ''],
+      ['sda2 · LVM(rhel)', 1, '', 0, 1, 4, 86, 0.1, 1.9, 0.9, 1.4, 3, ''],
+      ['rhel-root (dm-0)', 2, '/', 0, 0, 2, 31, 0.1, 0.6, 0.8, 1.2, 1, ''],
+      ['rhel-swap (dm-1)', 2, '[swap]', 0, 0, 0, 0, 0, 0, null, null, 0, ''],
+      ['rhel-var (dm-2)', 2, '/var', 0, 0, 2, 56, 0, 1.3, 1.0, 1.5, 2, ''],
+      ['sdb · 3.5 TB', 0, '', 0, 83, 1620, 3940, 71.2, 268.3, 6.8, 21.3, 79, 'sel'],
+      ['sdb1 · LVM(oradata)', 1, '', 0, 83, 1620, 3940, 71.2, 268.3, 6.8, 21.3, 79, ''],
+      ['oradata-data01 (dm-3)', 2, '/oradata', 0, 0, 1620, 4023, 71.2, 268.3, 6.9, 21.5, 79, ''],
+      ['sdc · 1.7 TB', 0, '', 0, 0, 0, 52, 0, 7.85, null, 3076.2, 100, 'slow', 148.1, '쓰기 한 건이 끝나는 데 평균 3초가 걸립니다(대기열 148 · 사용률 100%). 이런 값이 섞이면 지연 차트는 로그 눈금으로 바꿔 봅니다.'],
+      ['sdc1 · LVM(oraarch)', 1, '', 0, 0, 0, 52, 0, 7.85, null, 3076.2, 100, '', 148.1],
+      ['oraarch-arch01 (dm-4)', 2, '/oraarch', 0, 0, 0, 52, 0, 7.85, null, 3076.2, 100, '', 148.1],
+      ['sdd · 3.5 TB', 0, '', 0, 0, 674, 44, 24.7, 11.5, 4.4, 3.0, 9, 'disk'],
+      ['sdd1', 1, '/backup', 0, 0, 674, 44, 24.7, 11.5, 4.4, 3.0, 9, ''],
+      ['sde · 1.1 TB', 0, '', 0, 0, 0, 0, 0, 0, null, null, 100, 'stuck', 2.0, '이 2초 동안 끝난 요청이 0건인데 2건이 걸려 있고 사용률이 100% 입니다. iostat 은 이때 await 를 0.00 으로 찍습니다 — 여기서는 ‘—’ 로 두고 ‘응답 없음’ 으로 알립니다.'],
+      ['sde1', 1, '/data2', 0, 0, 0, 0, 0, 0, null, null, 100, '', 2.0],
+    ];
+    const f2 = (v) => (v == null ? '—' : Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+    const ink = (v) => (v == null ? '' : v >= 1000 ? 'color:#fca5a5;font-weight:600' : v >= 20 ? 'color:#fbbf24;font-weight:600' : '');
+    const qOf = (d) => (d[13] != null ? d[13] : (d[5] * (d[9] || 0) + d[6] * (d[10] || 0)) / 1000);
+    const phys = DSK.filter((d) => d[1] === 0);
+    const sum = (k) => phys.reduce((a, d) => a + d[k], 0);
+    const wavg = (kv, kn) => { const n = phys.reduce((a, d) => a + (d[kv] == null ? 0 : d[kn]), 0); return n ? phys.reduce((a, d) => a + (d[kv] == null ? 0 : d[kv] * d[kn]), 0) / n : null; };
+    const total = ['전체 디스크(물리 5개 합)', 0, '', sum(3), sum(4), sum(5), sum(6), sum(7), sum(8), wavg(9, 5), wavg(10, 6), Math.max.apply(null, phys.map((d) => d[11])), 'sum', phys.reduce((a, d) => a + qOf(d), 0)];
+    const disks = [total].concat(DSK).map((d) => {
+      const k = d[12]; const ios = d[5] + d[6];
+      const ra = d[5] > 0 ? d[9] : null; const wa = d[6] > 0 ? d[10] : null;
+      const aw = ios > 0 ? (d[5] * (ra || 0) + d[6] * (wa || 0)) / ios : null;
+      const q = qOf(d);
+      return {
+        cls: 'tr dsk' + (k === 'sum' ? ' sum' : k === 'sel' ? ' sel' : ''), name: d[0], mnt: d[2] || '',
+        pad: 'padding-left:' + d[1] * 20 + 'px' + (d[1] === 0 ? ';font-weight:600' : ';color:#c3cede'),
+        rrqm: f2(d[3]), wrqm: f2(d[4]), ri: f2(d[5]), wi: f2(d[6]), rm: f2(d[7]), wm: f2(d[8]),
+        rq: ios > 0 ? f2(((d[7] + d[8]) * 2048) / ios) : '—',
+        q: f2(q), qInk: q >= 100 ? 'color:#fca5a5;font-weight:600' : '',
+        aw: f2(aw), awInk: ink(aw), ra: f2(ra), raInk: ink(ra), wa: f2(wa), waInk: ink(wa),
+        sv: ios > 0 ? f2((d[11] * 10) / ios) : '—', util: d[11] + '%', fill: 'width:' + d[11] + '%',
+        line: wa == null ? '' : path(ser((t) => wob(Math.min(wa, 47), wa > 47 ? 0.04 : 0.3, 70 + d[0].charCodeAt(2), t)), 0, 100, 2, 21, 50),
+        flag: k === 'slow' || k === 'stuck', flagCls: 'badge crit', flagText: k === 'stuck' ? '응답 없음' : '지연 위험',
+        hasNote: !!d[14], note: d[14] || '',
+      };
+    });
+    const thrR = path(ser((t) => wob(71, 0.3, 80, t)), 34, 632, 10, 176, 400);
+    const thrW = path(ser((t) => wob(268, 0.26, 81, t)), 34, 632, 10, 176, 400);
+    const bump = (t) => (t > T - 100 && t < T - 82 ? 16 * Math.sin(((t - (T - 100)) / 18) * Math.PI) : 0);
+    const latR = path(ser((t) => wob(6.8, 0.3, 82, t) + bump(t) * 0.25), 34, 632, 10, 176, 50);
+    const latW = path(ser((t) => wob(21.3, 0.3, 70, t) + bump(t)), 34, 632, 10, 176, 50);
+
+    const PR = [[41872, 'oracle', 99.6, 'oracleORCL (LOCAL=NO)'], [41877, 'oracle', 99.1, 'oracleORCL (LOCAL=NO)'], [40112, 'oracle', 98.7, 'ora_p007_ORCL'],
+      [40108, 'oracle', 98.2, 'ora_p003_ORCL'], [3391, 'oracle', 61.4, 'ora_dbw0_ORCL']];
+    const procs = PR.map((p, i) => ({ no: i + 1, pid: p[0], user: p[1], cpu: p[2].toFixed(1) + '%', fill: 'width:' + Math.min(100, p[2]) + '%', cmd: p[3] }));
+    return { cpuLayers, cores, memLine, memArea: memLine + ' L632 126 L34 126 Z', nets, disks, thrR, thrW, latR, latW, procs };
+  }
+}
+</script>
+</body>
+</html>
