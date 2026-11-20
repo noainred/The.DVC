@@ -386,7 +386,8 @@ test('화면 배선: 못 읽은 값으로 채운 폼은 상태가 바뀐 조회�
 
 test('C 디스크 점검 설정 저장: 409(엣지 노드) · 400 본문을 저장 성공으로 읽지 않는다(putJson 은 던지지 않고 본문을 준다)', async () => {
   const db = webOf('views/tools/DiskBadTool.jsx');
-  assert.match(db, /putJson\('\/tools\/disk-bad\/settings', \{ \.\.\.patch, corpTo \}\)\.then\(\(r\) => \{ requireChanged\(r\); setSt\(r\.settings\);/, '판정한 뒤에만 설정 칸을 바꾼다');
+  // 디스크 배드 섹터 3회차 D3: 담당자 글상자는 '담당자 저장' 만 보낸다(withCorpTo) — 판정 뒤에만 칸을 바꾸는 뜻은 그대로.
+  assert.match(db, /putJson\('\/tools\/disk-bad\/settings', withCorpTo \? \{ \.\.\.patch, corpTo \} : patch\)\.then\(\(r\) => \{\s*requireChanged\(r\); setSt\(r\.settings\);/, '판정한 뒤에만 설정 칸을 바꾼다');
   // 서버 전제: 엣지 노드의 저장은 409 {ok:false, reason} 이다 — 웹 putJson 은 409 를 던지지 않는다.
   assert.match(srcOf('routes/api/diskBad.js'), /api\.put\('\/tools\/disk-bad\/settings', adminOnly, fullScopeOnly, \(req, res\) => \{\s*if \(isEdge\(\)\) return res\.status\(409\)\.json\(EDGE_NODE\);/);
   assert.match(fs.readFileSync(path.join(WEB, 'api.js'), 'utf8'), /if \(!res\.ok && res\.status !== 409 && res\.status !== 400\) throw httpFail\(path, res, data\);/);

@@ -1197,13 +1197,13 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/data-flow` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/dataFlow.js:64](../server/src/routes/api/dataFlow.js#L64) |
 | POST | `/tools/deep-search` | 권한 `tools` | [server/src/routes/api/checksLogs.js:199](../server/src/routes/api/checksLogs.js#L199) |
 | GET | `/tools/device-flow` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/deviceFlow.js:30](../server/src/routes/api/deviceFlow.js#L30) |
-| GET | `/tools/disk-bad` | 권한 `tools` | [server/src/routes/api/diskBad.js:173](../server/src/routes/api/diskBad.js#L173) |
-| GET | `/tools/disk-bad/jobs` | 권한 `tools` | [server/src/routes/api/diskBad.js:200](../server/src/routes/api/diskBad.js#L200) |
-| POST | `/tools/disk-bad/jobs/:id/retry` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/diskBad.js:292](../server/src/routes/api/diskBad.js#L292) |
-| POST | `/tools/disk-bad/jobs/:id/stop` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/diskBad.js:279](../server/src/routes/api/diskBad.js#L279) |
-| POST | `/tools/disk-bad/scan` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/diskBad.js:221](../server/src/routes/api/diskBad.js#L221) |
-| GET | `/tools/disk-bad/server/:id` | 권한 `tools` | [server/src/routes/api/diskBad.js:204](../server/src/routes/api/diskBad.js#L204) |
-| PUT | `/tools/disk-bad/settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/diskBad.js:303](../server/src/routes/api/diskBad.js#L303) |
+| GET | `/tools/disk-bad` | 권한 `tools` | [server/src/routes/api/diskBad.js:211](../server/src/routes/api/diskBad.js#L211) |
+| GET | `/tools/disk-bad/jobs` | 권한 `tools` | [server/src/routes/api/diskBad.js:241](../server/src/routes/api/diskBad.js#L241) |
+| POST | `/tools/disk-bad/jobs/:id/retry` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/diskBad.js:339](../server/src/routes/api/diskBad.js#L339) |
+| POST | `/tools/disk-bad/jobs/:id/stop` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/diskBad.js:326](../server/src/routes/api/diskBad.js#L326) |
+| POST | `/tools/disk-bad/scan` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/diskBad.js:268](../server/src/routes/api/diskBad.js#L268) |
+| GET | `/tools/disk-bad/server/:id` | 권한 `tools` | [server/src/routes/api/diskBad.js:245](../server/src/routes/api/diskBad.js#L245) |
+| PUT | `/tools/disk-bad/settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/diskBad.js:350](../server/src/routes/api/diskBad.js#L350) |
 | GET | `/tools/duplicate-ips` | 권한 `tools` | [server/src/routes/api/vcTools.js:35](../server/src/routes/api/vcTools.js#L35) |
 | GET | `/tools/edge-log` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/edgeLog.js:110](../server/src/routes/api/edgeLog.js#L110) |
 | GET | `/tools/edge-log-local` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/edgeLog.js:122](../server/src/routes/api/edgeLog.js#L122) |

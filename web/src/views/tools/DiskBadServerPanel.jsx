@@ -66,7 +66,8 @@ export function DiskBadServerPanel({ serverId, agent = null }) {
       .finally(() => setBusy(false));
   };
 
-  if (err) return <ErrorBox error={err} />;
+  // 데이터가 있는데 다시 읽기가 실패하면 창 전체를 오류로 바꾸지 않고 띠로 알린다(반증 3회차 D8 · web.md — 다시 시도할 길이 없었다).
+  if (err && !data) return <ErrorBox error={err} />;
   if (!data) return <Loading label="디스크 이력" />;
   if (data.dbUnavailable) return <div className="muted">디스크 배드 섹터 DB 를 열지 못했습니다(포탈 로그 확인).</div>;
   if (data.excluded) return <div className="muted" style={{ padding: 8 }}>HPE iLO 서버입니다 — 이 기능은 Dell iDRAC 의 Lifecycle 로그만 읽어 점검 대상에서 제외했습니다.</div>;
@@ -99,6 +100,13 @@ export function DiskBadServerPanel({ serverId, agent = null }) {
         </div>
       </div>
       {msg && <div className={msgBad ? undefined : 'muted'} style={{ fontSize: 12, ...(msgBad ? { color: 'var(--red)', fontWeight: 600 } : {}) }}>{msg}</div>}
+      {err && (
+        <div style={{ border: '1px solid rgba(239,68,68,.45)', background: 'rgba(239,68,68,.08)', borderRadius: 10, padding: '6px 12px', fontSize: 12, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={{ minWidth: 0 }}><b>다시 읽지 못했습니다</b> — 아래는 그 전에 읽은 결과입니다. {String(err?.message || err).slice(0, 160)}</span>
+          <button className="tab" style={{ flex: 'none', padding: '2px 9px' }} onClick={() => load()}>다시 읽기</button>
+        </div>
+      )}
+      {!data.running && data.nodeBusy && <div className="muted" style={{ fontSize: 12 }}>이 서버를 맡은 노드가 다른 서버를 점검하는 중입니다 — 지금 누르면 시작되지 않습니다(점검 탭에서 진행 중인 작업을 볼 수 있습니다).</div>}
 
       <div style={{ ...BAND[band.tone], borderRadius: 10, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 4 }}>
         <div style={{ fontWeight: 800, fontSize: 14 }}>{band.title}</div>
@@ -228,7 +236,7 @@ export function DiskBadServerPanel({ serverId, agent = null }) {
       {v && recs.length > 0 && (
         <div style={{ minWidth: 0 }}>
           <div className="flex between" style={{ alignItems: 'center', gap: 8, flexWrap: 'wrap', margin: '4px 0 6px' }}>
-            <div style={{ fontSize: 13, fontWeight: 700 }}>기록 {recs.length}건{recs.length > LIMIT ? ` (최근 ${LIMIT}건 표시)` : ''}</div>
+            <div style={{ fontSize: 13, fontWeight: 700 }}>기록 {recs.length}건{recs.length > LIMIT ? ` (최근 ${LIMIT}건 표시)` : ''}{v.recordsTrimmed > 0 ? <span className="muted" style={{ fontSize: 12, fontWeight: 400 }}> · 분류에 없는 기록은 가장 새 것만 실었습니다(이 서버의 기록 전체 {v.recordsTotal.toLocaleString('ko-KR')}건 · 판정은 전체로 했습니다)</span> : null}</div>
             <label className="muted" style={{ fontSize: 12, display: 'inline-flex', gap: 6, alignItems: 'center' }}>
               <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} /> 분류에 없는 스토리지 기록도 보기
             </label>
