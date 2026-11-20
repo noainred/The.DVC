@@ -77,3 +77,29 @@ describe('v3.18.14 autoSavedText — 자동 등록 저장 뒤 안내(결함 D3)'
     expect(autoSavedText({ options: { autoKinds: [] } }, '5분')).toBe('자동 등록을 껐습니다.');
   });
 });
+
+describe('v3.30.6 changedSplit · driftBannerText — 주소 변경과 점검 정의 갱신을 따로 센다', async () => {
+  const { changedSplit, driftBannerText, SYNC_STATE_META } = await import('./syncLogic.js');
+  it('나누기 · 옛 서버(defChanged 없음) · 이상값', () => {
+    expect(changedSplit({ changed: 7, defChanged: 5 })).toEqual({ address: 2, def: 5 });
+    expect(changedSplit({ changed: 3 })).toEqual({ address: 3, def: 0 });
+    expect(changedSplit({ changed: 2, defChanged: 9 })).toEqual({ address: 0, def: 2 });
+    expect(changedSplit(null)).toEqual({ address: 0, def: 0 });
+  });
+  it('배너 — 0 인 항목은 빼고, 점검 정의 갱신만이면 제목도 그 일로', () => {
+    expect(driftBannerText({ new: 1, changed: 3, defChanged: 1, gone: 0 })).toEqual({ title: '설정이 바뀌었습니다', parts: ['새 항목 1', '주소 변경 2', '점검 정의 갱신 1'] });
+    expect(driftBannerText({ new: 0, changed: 5, defChanged: 5, gone: 0 })).toEqual({ title: '점검 정의를 갱신해야 할 대상이 있습니다', parts: ['점검 정의 갱신 5'] });
+    expect(driftBannerText({ new: 0, changed: 0, gone: 2 }).parts).toEqual(['설정에서 사라짐 2']);
+  });
+  it('상태 이름이 정의 변경도 덮는다', () => { expect(SYNC_STATE_META.changed.label).toBe('주소 · 정의 변경'); });
+});
+
+describe('v3.30.6 hostSegments — 주소는 . · : 뒤에서만 끊는다', async () => {
+  const { hostSegments } = await import('./syncLogic.js');
+  it('조각', () => {
+    expect(hostSegments('edge-frankfurt.demo.invalid:4000')).toEqual(['edge-frankfurt.', 'demo.', 'invalid:', '4000']);
+    expect(hostSegments('10.40.1.10:443').join('')).toBe('10.40.1.10:443');
+    expect(hostSegments('')).toEqual([]);
+    expect(hostSegments(null)).toEqual([]);
+  });
+});
