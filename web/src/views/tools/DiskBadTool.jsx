@@ -21,7 +21,7 @@ import { DiskBadServerPanel } from './DiskBadServerPanel.jsx';
 import { requireChanged } from '../changeResult.js';   // 112회차: 409(엣지 노드) 본문을 '저장했습니다' 로 읽지 않는다
 import { unreadMarkOf, unreadKind, saveLockedByUnread } from '../settingsUnread.js';   // 112회차: 못 읽은 동안의 기본값 폼으로 저장하지 않는다
 import { SettingsUnreadBanner } from '../SettingsUnreadBanner.jsx';
-import { fmtDate, fmtDateTime, rateText, pctText, num, clsTone, verdictTone, confidenceTone, noteOf, clsOfCode, JOB_STATE_LABEL, jobStateTone, unitProgress, scopeLabel, shortLogNote, spanText, scanSent, pastCoverageText, traceTone, valCell, mailInfoText, corpSaveText } from './diskBadText.js';
+import { fmtDate, fmtDateTime, rateText, pctText, num, clsTone, verdictTone, confidenceTone, noteOf, clsOfCode, JOB_STATE_LABEL, jobStateTone, unitProgress, scopeLabel, shortLogNote, spanText, scanSent, pastCoverageText, traceTone, valCell, mailInfoText, corpSaveText, edgeLastText } from './diskBadText.js';
 
 const TABS = [
   { k: 'summary', label: '요약' }, { k: 'disks', label: '디스크 목록' }, { k: 'corps', label: '국가 · 법인' },
@@ -117,7 +117,7 @@ export function DiskBadTool() {
       {isEdgePortal && (
         <div style={{ border: '1px solid rgba(59,130,246,.45)', background: 'rgba(59,130,246,.08)', borderRadius: 10, padding: '8px 12px', fontSize: 12.5, lineHeight: 1.6 }}>
           <b>엣지 포탈입니다 — 점검 결과는 중앙 포탈에서 봅니다.</b> 이 노드는 중앙이 보낸 점검을 법인 안에서 읽어 올리는 일만 합니다(점검 · 설정은 중앙에서).
-          {data.node?.edge ? <div className="muted" style={{ fontSize: 12 }}>마지막 작업: {data.node.edge.at ? fmtDateTime(data.node.edge.at) : '—'}{data.node.edge.error ? ` · ${String(data.node.edge.error).slice(0, 160)}` : (data.node.edge.idle ? ' · 대기 중' : '')}</div> : null}
+          {data.node?.edge ? <div className="muted" style={{ fontSize: 12 }}>{edgeLastText(data.node.edge)}</div> : null}
         </div>
       )}
       {err && data && (

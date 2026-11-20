@@ -24,7 +24,7 @@ const S = await import('../src/diskbad/summary.js');
 const VD = await import('../src/diskbad/verdict.js');
 const R = await import('../src/routes/api/diskBad.js');
 const { normalizeSettings } = await import('../src/diskbad/settings.js');
-const { dayKey } = await import('../src/util/dayKey.js');
+const { dayKey, portalParts, portalMs } = await import('../src/util/dayKey.js');
 
 after(() => { fs.rmSync(TMP, { recursive: true, force: true }); });
 
@@ -45,8 +45,8 @@ test('D4 — 이상 디스크 상한은 정렬 뒤(이상 먼저) · 전체 수�
 });
 
 test('D5 — 근거 날짜와 월은 포탈 시각(기본 KST)', () => {
-  const d = new Date(NOW);
-  const firstKst = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) - 6 * HOUR;   // 그달 1일 KST 03:00(UTC 로는 전달 말일)
+  const p = portalParts(NOW);
+  const firstKst = portalMs(p.y, p.mo, 1, 3);   // 그달 1일 03:00 포탈 시각(KST 면 UTC 로는 전달 말일 — 오프셋을 박지 않는다 · 4회차 반증)
   const created = firstKst <= NOW ? firstKst : firstKst - 31 * DAY;
   const j = VD.judgeServer({ records: [{ created, code: 'PDR46', cls: 'unrecoverable', slotKey: 'bp1:d0' }], drives: [{ id: ID0, name: 'Physical Disk 0:1:0', serial: 'S0', inVolume: true }],
     serialRows: [], coverage: { lastOkAt: NOW, continuousSince: created - 30 * DAY } });
@@ -55,6 +55,18 @@ test('D5 — 근거 날짜와 월은 포탈 시각(기본 KST)', () => {
   const f = S.buildFleet({ servers: [{ agent: '', id: 'm1', name: 'm1', corp: null }], db: { servers: rows, records: [{ agent: '', serverId: 'm1', entryKey: 'k', created, code: 'PDR46', slotKey: '', message: 'x' }], serials: [] }, now: NOW });
   const m = f.months.find((x) => x.month === dayKey(created).slice(0, 7));
   assert.ok(m && m.unrecoverable === 1, `KST 달(${dayKey(created).slice(0, 7)})에 들어간다`);
+});
+
+test('4회차 F3 — 월별 추이의 창도 포탈 시각의 달(1일 새벽에 이번 달 기록이 빠지지 않는다)', () => {
+  const p = portalParts(NOW);
+  const now = portalMs(p.y, p.mo, 1, 3);         // 이번 달 1일 03:00(포탈 시각)
+  const created = now - 2 * HOUR;                // 같은 날 01:00
+  const rows = [{ agent: '', serverId: 'm1', name: 'm1', lastStatus: 'ok', lastOkAt: now, continuousSince: created - DAY, drives: [] }];
+  const f = S.buildFleet({ servers: [{ agent: '', id: 'm1', name: 'm1', corp: null }], db: { servers: rows, records: [{ agent: '', serverId: 'm1', entryKey: 'k', created, code: 'PDR46', slotKey: '', message: 'x' }], serials: [] }, now });
+  const last = f.months[f.months.length - 1];
+  assert.equal(last.month, dayKey(now).slice(0, 7), '마지막 달은 포탈 시각의 이번 달');
+  assert.equal(last.unrecoverable, 1, '1일 새벽 기록이 이번 달 추이에 든다');
+  assert.equal(last.partial, true);
 });
 
 test('D9 — 서버 창에 싣는 기록: 판정에 쓰는 분류는 전부 · 그 밖은 가장 새 N건 · 전체 수', () => {

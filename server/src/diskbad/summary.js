@@ -15,7 +15,7 @@
 import { classOf, COUNTED, CLS, labelOfKey, refsTable, ID_TABLE, CLS_LABEL, loginShareOf, LOGIN_CODES, REPEAT_CODE } from './classify.js';
 import { judgeServer, VERDICT, VERDICT_LABEL, CONFIDENCE_LABEL, SERVER_STATUS_LABEL, TRACE, TRACE_LABEL, VALS_SRC_LABEL } from './verdict.js';
 import { REASON_LABEL } from './scan.js';
-import { dayKey, DAY_OFFSET_MIN } from '../util/dayKey.js';
+import { dayKey, portalParts, portalMs } from '../util/dayKey.js';
 
 export const SHORT_LOG_DAYS = 30;
 const ALERTING_MAX = 300;
@@ -78,7 +78,7 @@ export function diagView(readDiag) {
 const keyOf = (agent, id) => `${String(agent || '').toLowerCase()}|${id}`;
 // 월은 **포탈 시각**(기본 KST)으로 가른다 — UTC 로 가르면 한국 시각 11-01 03:00 기록이 10월로 들어갔다(반증 3회차 D5). util/dayKey.js 하나.
 const monthKey = (ms) => dayKey(ms).slice(0, 7);
-const monthEnd = (ym) => { const [y, m] = ym.split('-').map(Number); return Date.UTC(y, m, 1) - DAY_OFFSET_MIN * 60_000 - 1; };
+const monthEnd = (ym) => { const [y, m] = ym.split('-').map(Number); return portalMs(y, m, 1) - 1; };
 
 /**
  * 서버 하나의 판정 묶음(서버 상세 화면과 집계가 같이 쓴다).
@@ -233,9 +233,10 @@ export function buildFleet({ servers = [], db = { servers: [], records: [], seri
 
   // 월별 — 최근 N개월(진행 중인 달 포함). 그 달 말에 로그가 남아 있던 서버 비율(읽은 서버 기준).
   const months_ = [];
-  const d0 = new Date(now);
+  // 창도 포탈 시각의 달로(4회차 반증 F3 — 키만 KST 이고 창은 UTC 달이라 매달 KST 1일 00~09시에 이번 달 기록이 추이에서 빠졌다).
+  const p0 = portalParts(now);
   for (let i = months - 1; i >= 0; i -= 1) {
-    const ym = monthKey(Date.UTC(d0.getUTCFullYear(), d0.getUTCMonth() - i, 15));
+    const ym = monthKey(portalMs(p0.y, p0.mo - i, 15));
     const m = monthly.get(ym) || { month: ym, unrecoverable: 0, other: 0 };
     const end = monthEnd(ym);
     // '그 달을 봤다' 는 끊김 없이 본 구간으로 센다(coveredFrom 은 사이에 못 본 틈이 있어도 내려간다).

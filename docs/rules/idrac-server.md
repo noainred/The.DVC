@@ -1685,7 +1685,7 @@
     413 이면 묶음을 반으로 나눠 다시 보냄(I-6). 회귀 `server/test/diskBadLoopR2.test.js` · `diskBadField382` #6 기대값('short' → 'error') · 웹 `diskBadText.test.js`.
     실장비에서 같은 중복이 날 수 있는 조건(추정 — 장비 확인 전): 서머타임 · 시간대 변경 뒤 지난 항목의 `Created` 를 다른 오프셋으로 다시 보여 주는 펌웨어 · 오프셋 없는 `Created` 를 읽는 노드의 시간대가 바뀐 경우.
   - **VER_R3 — 개선 · 버그 수정 반복 3회차**(반증 1인 — 결함 9 · 개선 4 중 결함 9 · 개선 2 반영, 개선 2건은 참고):
-    D1 노드 이동 조건(2회차 R2-3 의 결함 — 위 v3.30.7 항목에 함께 적음) · 법인을 바꾸면 직전 수치를 비우고, 데이터가 있을 때 다시 읽기 실패는 띠 + '다시 읽기'(D2 · D8 — web.md 두 규칙) ·
+    D1 노드 이동 조건(2회차 R2-3 의 결함 — 위 v3.31.2 항목에 함께 적음) · 법인을 바꾸면 직전 수치를 비우고, 데이터가 있을 때 다시 읽기 실패는 띠 + '다시 읽기'(D2 · D8 — web.md 두 규칙) ·
     법인 담당자 저장은 '담당자 저장' 만 글상자를 보내고(체크박스가 편집 중인 글까지 저장했다), 서버가 남긴 값으로 글상자를 다시 채우며 못 읽은 줄 · 버린 주소 · 모르는 법인 키를 알린다
     (`routes/api/diskBad.js corpToReport` · `diskBadText.js corpSaveText` — 'vc=홍길동 <메일>' · ':' 줄 · 법인 이름 키가 소리 없이 빠졌다 · D3) ·
     이상 디스크 상한은 정렬 뒤(이상 먼저 · `alertingTotal` · D4) · **근거 날짜와 월은 포탈 시각**(util/dayKey.js — UTC 라 KST 11-01 03:00 기록이 10-31 · 10월이 됐다 · D5) ·
@@ -1694,6 +1694,8 @@
     법인 점검 버튼은 쓰기 범위 밖이면 잠금(`corps[].writable`) · 설정 칸은 `settingsEditable`(I1) · 디스크 목록 200곳 상한 알림(I2).
     화면 확인: 표는 법인 **이름**을 보이는데 담당자 키는 id 라 이름을 적으면 메일이 가지 않았다 — 이름이 법인 하나와 정확히 맞으면 id 로 바꿔 저장하고 알린다(`mapCorpKeys` · 둘 이상과 맞으면 추측하지 않는다).
     참고로 남긴 것: 전 법인 응답의 `inUse` 가 `slots` 일부를 한 번 더 싣는다(현실 분포 0.18MB) · 같은 AGENT_NAME 의 엣지 두 개는 서로의 조각을 닫을 수 있다(공유 토큰과 같은 신뢰 수준 — 문서만).
+    4회차 반증이 찾은 이 회차의 회귀 3건은 내기 전에 고쳤다: D3 가 바꾼 저장 호출을 옛 정규식이 막았다(`settingsUnreadSweep112` C 를 새 꼴로 — 판정 뒤에만 칸을 바꾸는 뜻은 그대로) ·
+    엣지 띠가 `edge.at` 을 읽었다(값은 `diskBadEdgeStatus().last` 아래 — 늘 '—' · `diskBadText.js edgeLastText`) · **월별 추이의 창도 포탈 시각의 달**(키만 KST 이고 창이 UTC 달이라 매달 KST 1일 00~09시에 이번 달 기록이 추이에서 빠졌다 — `portalParts` · `portalMs`).
     회귀 `server/test/diskBadLoopR3.test.js` · 웹 `diskBadText.test.js`.
   - 남은 것(설계 §16 · §18 범위 B · C · §22): 보관 로그 내보내기(§22 2단계 — 장비에 보내는 요청형 동작) · 세션 재사용(3단계) · 지금 쓰이는 곳(OS · vCenter) · 교체 우선순위 · 조치 추적 · vSAN 상태 · 설정 점검. 디스크 값은 v3.10.1 에 텔레메트리 · DriveMetrics 로 읽는다(실장비 대조 전). 실장비 대조는 3.8.2 의 장비 진단으로 받는다(§14.1 명령 대신) — 그 답으로 분류표 · 읽는 방법을 고친다.
   - 회귀 `server/test/diskBad380.test.js` · `server/test/diskBadReview380.test.js` · `server/test/diskBadField382.test.js` · `server/test/diskBadField383.test.js` · `server/test/diskBadPast3101.test.js` · 웹 `diskBadText.test.js`.

@@ -257,6 +257,18 @@ export function mailInfoText(m) {
 /**
  * 법인 담당자 저장 결과 문구(반증 3회차 D3). 서버 보고(corpReport)와 화면이 못 읽은 줄 수를 합쳐 말한다 — 버린 것이 없으면 '저장했습니다.'
  */
+/**
+ * 엣지 포탈 띠의 '마지막 작업' 한 줄(4회차 반증 F2). 서버 `diskBadEdgeStatus()` 는 {configured, agent, busy, last:{at, ok, idle, error}} —
+ * 값은 `last` 아래에 있다(전에는 edge.at 을 읽어 늘 '—' 였고 오류를 보이지 못했다).
+ */
+export function edgeLastText(edge) {
+  const last = edge && typeof edge === 'object' ? edge.last : null;
+  const at = last && Number.isFinite(last.at) ? fmtDateTime(last.at) : '—';
+  const tail = last?.error ? ` · ${String(last.error).slice(0, 160)}` : (edge?.busy ? ' · 읽는 중' : (last?.idle ? ' · 대기 중' : ''));
+  const off = edge && edge.configured === false ? ' · 중앙 주소 · 토큰이 설정되지 않았습니다' : '';
+  return `마지막 작업: ${at}${tail}${off}`;
+}
+
 export function corpSaveText(rep, badLines = 0) {
   const parts = [];
   if (badLines > 0) parts.push(`‘id=메일’ 꼴이 아닌 ${badLines}줄은 읽지 않았습니다`);
