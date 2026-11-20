@@ -24,7 +24,7 @@ export function registerServerInfo(api) {
   });
   api.post('/tools/server-info/read', adminOnly, fullScopeOnly, (req, res) => {
     const b = req.body && typeof req.body === 'object' ? req.body : {};
-    const ids = Array.isArray(b.ids) ? b.ids.slice(0, SVC.READ_BATCH_MAX + 1).map((x) => String(x ?? '').slice(0, 64)) : [];
+    const ids = Array.isArray(b.ids) ? b.ids.slice(0, SVC.READ_BATCH_MAX + 1) : [];   // 152회차: 여기서 String() 으로 바꾸지 않는다({"toString":1} 이 던져 500) — 글자 판정은 일괄 틀(batch.batchIdOf) 하나
     const r = SVC.startRead(ids, { by: who(req) });
     logAudit({ user: who(req), action: 'server-info.read', target: `${ids.length}대`, ip: req.ip || '', detail: JSON.stringify(r.ok ? { started: r.total } : { ok: false, code: r.code }).slice(0, 300) });
     if (!r.ok) return send(res, r);

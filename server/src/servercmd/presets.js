@@ -116,7 +116,13 @@ export function checkParam(kind, v) {
   if (kind === 'path' && v.split('/').some((seg) => seg === '..')) return { ok: false, reason: '경로에 .. 조각을 쓸 수 없습니다.' };
   // autofs ‘-hosts’ 지도(/net/<주소>)는 경로를 보는 것만으로 대상 서버가 그 주소에 NFS 마운트를 건다(상태 변경 · 다른 주소로 가는 탐침 — D2 · D4 · 반증 F8).
   //   다른 자동 마운트 자리(서버마다 다른 지도)는 알 수 없다 — 문서의 한계.
-  if (kind === 'path' && (v === '/net' || v.startsWith('/net/'))) return { ok: false, reason: '자동 마운트 자리(/net)는 쓸 수 없습니다(보는 것만으로 마운트가 일어납니다).' };
+  //   152회차(재현): 글자 앞머리만 봐서 같은 자리를 달리 쓴 경로(`//net/<주소>` · `/./net/<주소>` · `/proc/self/root/net/<주소>`)가 그대로 통과했다 —
+  //   빈 조각 · `.` 조각을 걷은 첫 조각으로 보고, /proc 아래 root · cwd 링크(그 프로세스의 / · 작업 폴더로 가는 길)도 거절한다. 서버 쪽 심링크는 여전히 모른다(한계).
+  if (kind === 'path') {
+    const segs = v.split('/').filter((seg) => seg && seg !== '.');
+    if (segs[0] === 'net') return { ok: false, reason: '자동 마운트 자리(/net)는 쓸 수 없습니다(보는 것만으로 마운트가 일어납니다).' };
+    if (segs[0] === 'proc' && segs.some((seg, i) => i > 0 && (seg === 'root' || seg === 'cwd'))) return { ok: false, reason: '/proc 아래 root · cwd 링크는 쓸 수 없습니다(다른 폴더로 이어지는 길입니다 — 그 폴더의 경로를 직접 넣으세요).' };
+  }
   return { ok: true, value: v };
 }
 
@@ -194,7 +200,8 @@ export function windowsScript(p, params) {
  */
 export function planOf(p, params) {
   const plan = {};
-  if (p.linux) plan.linux = { command: linuxCommand(p, params), timeoutMs: (p.linux.timeoutS * p.linux.steps(params).length + LINUX_SLACK_S) * 1000, maxBytes: MAX_BYTES };
+  // stderrMax(152회차): 끝 코드 표지는 stderr **끝**에 온다 — 코어 기본값(앞 2,000자)이면 stderr 가 긴 실행의 표지가 잘려 시한(124) · 0 아닌 끝 코드가 ‘모름’ 이 됐다(출력 상한이 이미 stdout + stderr 합을 막는다).
+  if (p.linux) plan.linux = { command: linuxCommand(p, params), timeoutMs: (p.linux.timeoutS * p.linux.steps(params).length + LINUX_SLACK_S) * 1000, maxBytes: MAX_BYTES, stderrMax: MAX_BYTES };
   if (p.windows) {
     const b64 = psEncode(windowsScript(p, params));
     plan.windows = { command: `powershell ${PS_ARGS.join(' ')} ${b64}`, timeoutMs: (p.windows.timeoutS + WIN_SLACK_S) * 1000, maxBytes: MAX_BYTES,

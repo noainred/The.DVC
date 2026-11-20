@@ -247,6 +247,9 @@ function exec(conn, command, rawTimeoutMs = SSH_EXEC_TIMEOUT_MS, opts = {}) {
     conn.exec(command, (err, stream) => {
       if (err) return reject(err);
       let stdout = '', stderr = '', done = false, bytes = 0;
+      // 152회차(재현): 청크마다 toString() 하면 여러 바이트 글자(한글 파일 이름 · 로그 글)가 청크 경계에 걸릴 때 깨진다(U+FFFD — 서버 명령 실행은 이 출력을 사람에게 보인다).
+      //   execStream 과 같이 StringDecoder 로 잇는다(끝까지 오지 않은 조각은 채널이 닫힐 때만 낸다 — 시한 · 상한으로 끊긴 결과에는 붙이지 않는다).
+      const decOut = new StringDecoder('utf8'); const decErr = new StringDecoder('utf8');
       const finish = (fn, arg) => { if (done) return; done = true; clearTimeout(timer); fn(arg); };
       const kill = () => { try { stream.close?.(); } catch { /* */ } try { stream.destroy?.(); } catch { /* */ } };
       // v3.25(서버 접속 반증 F6): `partial: true` 면 시한 · 출력 상한에서 던지지 않고 **받은 만큼** 돌려준다(timedOut · truncated 표지) —
@@ -261,13 +264,13 @@ function exec(conn, command, rawTimeoutMs = SSH_EXEC_TIMEOUT_MS, opts = {}) {
         bytes += d.length;
         const cap = opts.partial && Number(opts.maxBytes) > 0 ? Math.min(Number(opts.maxBytes), EXEC_MAX_OUTPUT) : EXEC_MAX_OUTPUT;
         if (bytes > cap) { kill(); if (opts.partial) return finish(resolve, { command, code: null, stdout, stderr, truncated: true }); return finish(reject, new Error(`SSH exec 출력 상한(${Math.round(cap / 1024)}KB) 초과: ${command}`)); }
-        if (which === 'out') stdout += d.toString(); else stderr += d.toString();
+        if (which === 'out') stdout += decOut.write(d); else stderr += decErr.write(d);
       };
       stream.on('data', onChunk('out'));
       stream.stderr.on('data', onChunk('err'));
       stream.on('error', (e) => finish(reject, e));          // 채널/연결 오류로도 반드시 결말 짓는다
       stream.stderr.on('error', () => { /* stderr 스트림 오류는 비치명 — 무시 */ });
-      stream.on('close', (code) => finish(resolve, { command, code, stdout, stderr }));
+      stream.on('close', (code) => { if (!done) { stdout += decOut.end(); stderr += decErr.end(); } finish(resolve, { command, code, stdout, stderr }); });
     });
   });
 }

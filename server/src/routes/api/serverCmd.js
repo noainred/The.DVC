@@ -45,7 +45,7 @@ export function registerServerCmd(api) {
   api.get('/tools/server-cmd/output', adminOnly, fullScopeOnly, (req, res) => send(res, SVC.outputs(str(req.query.id, 64), str(req.query.run, 64))));
   api.post('/tools/server-cmd/run', adminOnly, fullScopeOnly, (req, res) => {
     const b = req.body && typeof req.body === 'object' ? req.body : {};
-    const ids = Array.isArray(b.ids) ? b.ids.slice(0, SVC.RUN_BATCH_MAX + 1).map((x) => String(x ?? '').slice(0, 64)) : [];
+    const ids = Array.isArray(b.ids) ? b.ids.slice(0, SVC.RUN_BATCH_MAX + 1) : [];   // 152회차: 여기서 String() 으로 바꾸지 않는다({"toString":1} 이 던져 500) — 글자 판정은 일괄 틀(batch.batchIdOf) 하나
     const preset = str(b.preset, 64);
     const params = paramsOf(b.params);
     const r = SVC.startRun({ preset, params, ids }, { by: who(req) });

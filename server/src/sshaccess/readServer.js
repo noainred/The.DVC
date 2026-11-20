@@ -140,7 +140,9 @@ export async function readServer(serverId, { feature, plan = {}, deadlineMs = RE
   }
   const out = r.out || {};
   const exit = out.code;
-  const base = { os, via, auth, ms, exit: Number.isInteger(exit) ? exit : null, stdout: String(out.stdout || ''), stderr: String(out.stderr || '').slice(0, 2000) };
+  // 152회차(재현): stderr 는 앞 2,000자만 — 기능이 stderr 끝에서 표지를 읽으면(서버 명령 실행의 문장별 끝 코드) `plan.<os>.stderrMax` 로 넓힌다(상한 1MB · 주지 않으면 예전 그대로).
+  const stderrMax = Number(step.stderrMax) > 0 ? Math.min(Number(step.stderrMax), 1024 * 1024) : 2000;
+  const base = { os, via, auth, ms, exit: Number.isInteger(exit) ? exit : null, stdout: String(out.stdout || ''), stderr: String(out.stderr || '').slice(0, stderrMax) };
   if (out.timedOut) return { ok: false, code: 'exec-timeout', reason: `명령이 시한(${Math.round((step.timeoutMs || 0) / 1000)}초) 안에 끝나지 않았습니다 — 받은 칸만 씁니다.`, partial: true, ...base };
   if (out.truncated) return { ok: false, code: 'exec-truncated', reason: '출력이 상한을 넘어 잘랐습니다 — 받은 칸만 씁니다.', partial: true, ...base };
   return { ok: true, code: 'ok', ...base };

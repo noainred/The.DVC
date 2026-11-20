@@ -13,6 +13,11 @@ import { makeCredGate } from './readServer.js';
 import { poolRun } from '../util/pool.js';   // 동시성 풀은 공용 하나(arch2579)
 
 const t = (v, n = 256) => String(v ?? '').trim().slice(0, n);
+/**
+ * 요청이 준 서버 id 하나 → 글자(152회차 — 재현: 본문 `ids: [{"toString":1}]` 은 `String()` 에서 던져 라우트가 500 이었다).
+ *   글자만 받는다 · 글자가 아닌 것(객체 · 배열 · 수)은 등록부에 없는 값으로 바꾼다 — 조용히 빼지 않는다(섞이면 404 · 하나도 돌리지 않는다). null · 빈 값은 예전처럼 뺀다.
+ */
+export const batchIdOf = (x) => (typeof x === 'string' ? x.trim().slice(0, 64) : (x == null ? '' : '[not-a-string]'));
 
 /**
  * @param {{max:number, concurrency:number, text:{busy:string, tooMany:string, registry:string}}} o
@@ -34,7 +39,7 @@ export function createServerBatch({ max, concurrency, text }) {
      */
     start(ids = [], runOne, { by = '', meta = null } = {}) {
       if (registryLoadError()) return { ok: false, code: 'registry-unreadable', status: 503, reason: text.registry };
-      const want = [...new Set((Array.isArray(ids) ? ids : []).map((x) => t(x, 64)).filter(Boolean))];
+      const want = [...new Set((Array.isArray(ids) ? ids : []).map(batchIdOf).filter(Boolean))];
       if (!want.length) return { ok: false, code: 'no-servers', status: 400, reason: '서버를 고르세요.' };
       if (want.length > max) return { ok: false, code: 'too-many', status: 400, reason: text.tooMany };
       if (job) return { ok: false, code: 'busy', status: 429, reason: `${text.busy}(${job.done}/${job.total}대) — 끝난 뒤 다시 누르세요.` };
