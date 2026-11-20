@@ -21,7 +21,7 @@ import { listRegistry as listVcenters } from '../vcenter/registry.js';
 import { buildLinks, CENTRAL_KINDS } from './links.js';
 import { buildSettingsTargets } from './settingsLinks.js';
 import { runSettingsTarget } from './settingsRun.js';
-import { loadLinkCheckSettings, linkCheckEnabled, onLinkCheckSettingsChange } from './settings.js';
+import { loadLinkCheckSettings, linkCheckEnabled, onLinkCheckSettingsChange, linkCheckSettingsLoadError } from './settings.js';
 import { runLink } from './run.js';
 import { insertResults, pruneLinkCheck, latestAll } from './db.js';
 import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스
@@ -157,8 +157,13 @@ export async function pollOnce({ trigger = 'timer' } = {}) {
     const skippedLinks = [...results, ...setResults].filter((r) => r && r.skipped);
 
     const saved = await insertResults(measured, { byNode: node });
+    // 159회차(재현 — audits.md 가 추정으로 남긴 것): 설정을 **못 읽은** 주기의 `s` 는 기본값이다(보존 90 · 30일 · 5년). env 로 강제 켜진 폴러(LINKCHECK_ENABLED=true)는
+    //   그 주기에도 돌고, 정리 틱이 걸리면 사용자가 늘려 둔 보존일(예 365일) 대신 기본값으로 지웠다(200일 전 표본 삭제 실측 — 원본 설정 파일은 그 자리에 그대로).
+    //   보존일을 모르는 주기에는 지우지 않는다(틱은 그대로 센다 — 다음 정리 틱에 읽히면 그때 지운다) · 건너뛴 사실은 고정 낱말로 남긴다.
+    let pruneSkipped = '';
     // ⚠ 스로틀은 `(++tick % N) === 0` — 기동 첫 틱 즉발 금지(v2.453).
-    if ((++tick % 12) === 0) {
+    if ((++tick % 12) === 0 && linkCheckSettingsLoadError()) pruneSkipped = 'settings-unreadable';
+    else if ((tick % 12) === 0) {
       /*
        * v2.607(감사 LEFT2607-01): 고아 최신값 정리에 **현재 링크 집합**을 넘긴다 — 예전에는 currentIds 없이 불러
        *   pruneOrphanLatest 가 한 번도 돌지 않았다(엣지 삭제·vCenter 이관으로 사라진 링크가 보존일까지 남았다).
@@ -184,6 +189,7 @@ export async function pollOnce({ trigger = 'timer' } = {}) {
       problems: problems.length,
       dbOk: saved.ok !== false, dbError: saved.error || '',
       events: saved.events || 0,
+      ...(pruneSkipped ? { pruneSkipped } : {}),
     };
     return { ok: true, checked: measured.length, failed, skippedLinks: skippedLinks.length };
   } catch (e) {

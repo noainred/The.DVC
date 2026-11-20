@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import * as store from './store.js';
 import * as db from './db.js';
-import { getSettings } from './registry.js';
+import { getSettings, registryLoadError } from './registry.js';
 import { markDirty, rollupTick } from './rollup.js'; // v3.13.0 ⑭ 요약 표
 
 const MIN_FREE_BYTES = 2 * 2 ** 30;
@@ -67,6 +67,11 @@ export async function recordTick(now = Date.now()) {
 }
 
 async function housekeep(now) {
+  // 159회차(재현 — linkcheck · xferspeed 와 같은 꼴): 등록부(설정이 함께 든 focusmon-targets.json)를 **못 읽은** 상태의 설정은 기본값이다(보관 30일 · 상한 20GB).
+  //   예전에는 그 5분 틱에 보관 기간을 늘려 둔(최대 90일) 기록의 31일 넘은 부분을 지웠고(60 · 85일 전 묶음 삭제 실측), 상한을 키워 둔 DB 는 20GB 가 될 때까지 오래된 것부터 지웠다.
+  //   보관 기간 · 상한을 모르면 지우지 않는다(읽히거나 관리자가 확정하면 다음 틱에 정리) · 건너뛴 사실은 상태(고정 낱말)로 남긴다. 디스크 여유 부족 때의 기록 멈춤은 위 틱이 그대로 맡는다.
+  if (registryLoadError()) { st.pruneSkipped = 'settings-unreadable'; return; }
+  st.pruneSkipped = '';
   const s = getSettings();
   const cutMinute = Math.floor((now - s.retentionDays * 86_400_000) / 60_000);
   let n = 0;

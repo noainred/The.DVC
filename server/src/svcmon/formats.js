@@ -127,7 +127,7 @@ function zipCentral(buf, { maxEntries = XLSX_MAX_ENTRIES } = {}) {
     const nameLen = buf.readUInt16LE(p + 28);
     const next = p + 46 + nameLen + buf.readUInt16LE(p + 30) + buf.readUInt16LE(p + 32);
     if (next > eocd) return { ok: false, reason: 'bad-cd' };
-    entries.push({ method: buf.readUInt16LE(p + 10), csize: buf.readUInt32LE(p + 20), usize: buf.readUInt32LE(p + 24), lho: buf.readUInt32LE(p + 42), nameAt: p + 46, nameLen });
+    entries.push({ method: buf.readUInt16LE(p + 10), csize: buf.readUInt32LE(p + 20), usize: buf.readUInt32LE(p + 24), lho: buf.readUInt32LE(p + 42), nameAt: p + 46, nameLen, extraAt: p + 46 + nameLen, extraLen: buf.readUInt16LE(p + 30) });
     p = next;
   }
   if (p !== eocd || entries.length !== count) return { ok: false, reason: 'bad-cd' };   // 선언 개수 ≠ 실제 · 끝이 EOCD 가 아님
@@ -288,12 +288,19 @@ export function xlsxMergeStats(buf, { maxUncompressed = XLSX_MAX_UNCOMPRESSED } 
   if (!z.ok) return { ok: false, reason: z.reason === 'too-many-entries' ? 'bad-cd' : z.reason };
   const st = { ok: true, merges: 0, area: 0, over: false, unparsed: 0, dvArea: 0, dvOver: false, dvUnparsed: 0 };
   let budget = maxUncompressed;
-  for (const { method, csize, lho, nameAt, nameLen } of z.entries) {
-    // exceljs 는 이름 어디든 `xl/worksheets/sheet<수>.xml` 이 있으면 시트로 읽는다(앵커 없음 · 앞의 `/` 는 뗀다) — 그보다 넓게 본다.
-    if (!buf.toString('latin1', nameAt, nameAt + nameLen).includes('worksheets/')) continue;
+  for (const { method, csize, lho, nameAt, nameLen, extraAt, extraLen } of z.entries) {
     if (lho + 30 > buf.length || buf.readUInt32LE(lho) !== 0x04034b50) return { ok: false, reason: 'bad-entry' };
-    const start = lho + 30 + buf.readUInt16LE(lho + 26) + buf.readUInt16LE(lho + 28);
+    const localNameLen = buf.readUInt16LE(lho + 26);
+    const start = lho + 30 + localNameLen + buf.readUInt16LE(lho + 28);
     if (start + csize > buf.length) return { ok: false, reason: 'bad-entry' };
+    // exceljs 는 이름 어디든 `xl/worksheets/sheet<수>.xml` 이 있으면 시트로 읽는다(앵커 없음 · 앞의 `/` 는 뗀다) — 그보다 넓게 본다.
+    // 159회차(재현 — 각 6KB 급 파일로 이 점검을 건너뛰고 병합 폭탄이 로드됐다): **JSZip 은 항목 이름을 중앙 디렉터리가 아니라 로컬 머리말에서 읽고**
+    //   (zipEntry.js readCentralPart 는 이름을 건너뛴다), 중앙 디렉터리 extra 에 Unicode Path(0x7075)가 있으면 그 이름으로 바꾼다. 중앙 디렉터리 이름만 보면
+    //   '점검한 이름' 과 '로드되는 이름' 이 갈린다 → 두 이름 가운데 하나라도 시트 꼴이거나 Unicode Path 표지(바이트 75 70 — TLV 를 다시 해석하지 않고 넓게)가 있으면 본다.
+    const isSheetName = buf.toString('latin1', nameAt, nameAt + nameLen).includes('worksheets/')
+      || buf.toString('latin1', lho + 30, lho + 30 + localNameLen).includes('worksheets/')
+      || buf.subarray(extraAt, extraAt + extraLen).includes('\x75\x70', 0, 'latin1');
+    if (!isSheetName) continue;
     let xml;
     try { xml = method === 0 ? buf.subarray(start, start + csize) : method === 8 ? zlib.inflateRawSync(buf.subarray(start, start + csize), { maxOutputLength: budget + 1 }) : null; }
     catch { return { ok: false, reason: 'too-large' }; }
@@ -348,13 +355,41 @@ export function assertXlsxMergesOk(buf, { dataValidations = 'check' } = {}) {
   return r;
 }
 
+/** 엑셀 시트의 마지막 행 번호 — 이보다 큰 행 번호는 엑셀이 쓰지 않는다(손상 · 조작). */
+export const XLSX_SHEET_MAX_ROW = 1_048_576;
+/**
+ * 값만 읽는 가져오기(svcmon 대상 · 수동 IP 매핑 · 7b 서버 등록)가 exceljs 로 통합 문서를 로드하는 **한 곳**. 사전 점검(assertXlsxSizeOk · assertXlsxMergesOk) 뒤에 부른다.
+ * 159회차(재현 — 154 가 막은 병합 · 유효성 검사 밖에도 exceljs 4.4 가 범위 · 번호를 그대로 전개하는 경로가 셋 더 있었다. 각 6KB 급 파일 · 힙 256MB 자식 프로세스):
+ *  ① 정의된 이름(`xl/workbook.xml` 의 `<definedName>s!$A$1:$XFD$1048576</definedName>`) — `workbook.model =` 이 범위를 칸마다 CellMatrix 에 넣는다(1초 안에 힙 고갈 · 열 하나 104만 칸도 +309MB).
+ *     무시 옵션이 없어 파싱 결과에서 뺀다(가져오기는 이름 정의를 쓰지 않는다 · 인쇄 영역도 여기서 나온다). exceljs 의 그 함수가 사라지면 **조용히 지나가지 않고 던진다**.
+ *  ② 열 정의(`<col min="1" max="2000000000">`) — `Column.fromModel` 이 max 까지 Column 객체를 만든다(1.5초 안에 힙 고갈) → `ignoreNodes`(열 너비 · 숨김은 쓰지 않는다).
+ *  ③ 행 번호(`<row r="4294967295">`) — 로드는 빠르지만 `eachRow` 가 길이 42억짜리 성긴 배열을 forEach 로 돈다(40초 넘게 이벤트 루프 정지 · r=1억이면 3.9초) → 돌기 전에 `rowCount` 로 거부.
+ *  유효성 검사(154 Z3)도 여기서 읽지 않는다. 호출부가 각자 옵션을 주면 한쪽이 빠진다(154 의 '남은 호출부' — 메인이 따로 고쳤다) — 새 가져오기도 이 함수를 쓴다.
+ */
+export async function loadXlsxValues(buffer) {
+  const ExcelJS = (await import('exceljs')).default;
+  const wb = new ExcelJS.Workbook();
+  const reader = wb.xlsx;
+  const parseWorkbook = reader.parseWorkbook;
+  if (typeof parseWorkbook !== 'function') throw new Error('exceljs 로더가 바뀌었습니다(parseWorkbook 없음) — 이름 정의를 걸러낼 수 없어 읽지 않습니다.');
+  reader.parseWorkbook = async function parseWorkbookWithoutNames(stream) {
+    const model = await parseWorkbook.call(this, stream);
+    if (model) model.definedNames = [];
+    return model;
+  };
+  await reader.load(buffer, { ignoreNodes: ['dataValidations', 'cols'] });
+  for (const ws of wb.worksheets) {
+    if (ws.rowCount > XLSX_SHEET_MAX_ROW) throw new Error(`행 번호가 엑셀 범위(${XLSX_SHEET_MAX_ROW.toLocaleString()}행)를 넘습니다 — 손상된 파일입니다.`);
+  }
+  return wb;
+}
+
 async function xlsxToCsv(buffer) {
   assertXlsxSizeOk(buffer);
   assertXlsxMergesOk(buffer, { dataValidations: 'ignored' });   // 7b 감사 M-4 — 로드 전에 병합 전개 상한(유효성 검사는 아래에서 읽지 않는다)
-  const ExcelJS = (await import('exceljs')).default;
-  const wb = new ExcelJS.Workbook();
-  // 154회차 Z3: 유효성 검사(dataValidations)는 읽지 않는다 — exceljs 가 sqref 범위를 칸마다 전개한다(가져오기는 칸 값만 쓴다).
-  try { await wb.xlsx.load(buffer, { ignoreNodes: ['dataValidations'] }); } catch (e) { throw new Error(`XLSX 파싱 실패: ${e.message}`); }
+  // 154회차 Z3 · 159회차: 유효성 검사 · 이름 정의 · 열 정의는 읽지 않고 행 번호를 확인한다 — loadXlsxValues 하나(가져오기는 칸 값만 쓴다).
+  let wb;
+  try { wb = await loadXlsxValues(buffer); } catch (e) { throw new Error(`XLSX 파싱 실패: ${e.message}`); }
   const ws = wb.worksheets[0];
   if (!ws) throw new Error('XLSX 에 시트가 없습니다.');
   const lines = [];
