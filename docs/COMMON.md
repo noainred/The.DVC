@@ -5,7 +5,7 @@
 
 - 생성: `node scripts/common-doc.mjs` · 최신 여부: `node scripts/common-doc.mjs --check`
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다. 설명을 고치려면 그 모듈의 **머리 주석 첫 단락**을 고친다.
-- 훑은 소스 4544개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
+- 훑은 소스 4546개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
 
 ## 읽는 법 · 한계
 
@@ -36,7 +36,7 @@
 | `atomicWrite.js` | 원자적 파일 쓰기 — 임시파일에 기록 후 rename으로 교체한다. writeFileSync는 기록 도중 크래시/정전 시 파일을 truncate/부분기록 상태로 남겨, 다음 로드에서 JSON 파싱 실패 → 빈 값 반환 → 다음 저장이 손상본을 덮어쓰며 데이터가 영구 유… | `atomicWriteFileSync` `classifyLoadReason` `loadReasonWhere` `summarizeLoadReason` `safeLoadText` `corruptBackupPath` 외 2 | 259 | 73 | 12 |
 | `dayKey.js` | 날짜 경계 코어 — 하나다(v2.582 ARCH-2). | `resolveDayOffsetMin` `toMs` `dayKey` `todayStamp` `dayIndex` `dayStartMs` 외 9 | 136 | 35 | 38 |
 | `envNumber.js` | 환경변수의 '양수' 설정값(상한 · 개수 · 시한 · 지연)을 읽는다(v3.17.6 · 2차 공통 기능 점검 5회차). | `envPositive` `envNonNegative` `ENV_INT_MAX` `TCP_PORT_MAX` `ENV_DEFAULT_MAX` `envPort` 외 1 | 130 | 37 | 4 |
-| `jsonFileRead.js` | 설정 · 저장소 JSON 파일 **읽기 판정**(순수 단계 — 상태 등록부 없음). `util/jsonFileLoad.js` 에서 떼어 냈다. | `_setJsonFileLoadClockForTest` `nowMs` `inRetryWindow` `readJsonFile` `makeJsonFileReader` `READ_RETRY_MS` | 110 | 49 | 30 |
+| `jsonFileRead.js` | 설정 · 저장소 JSON 파일 **읽기 판정**(순수 단계 — 상태 등록부 없음). `util/jsonFileLoad.js` 에서 떼어 냈다. | `_setJsonFileLoadClockForTest` `nowMs` `inRetryWindow` `readJsonFile` `makeJsonFileReader` `READ_RETRY_MS` | 110 | 49 | 31 |
 | `capStr.js` | 외부 문자열을 **상주 구조**(Map 키·보관 레코드)에 넣을 때의 길이 상한(v2.606 감사 TIM2606-02). | `flatStr` `capStr` `capTrim` | 109 | 24 | 2 |
 | `resilientFetch.js` | 크로스-WAN(중앙↔수집서버/에이전트) 호출용 견고한 fetch. | `loadWanCa` `wanTlsConnectOptions` `wanTlsStatus` `dispatcherFor` `abortableSleep` `headersWithoutSecrets` 외 11 | 78 | 24 | 15 |
 | `registryCore.js` | 장비 등록부(storage·sanswitch·pdu·cvp·bmstor)의 **공용 판정**(v2.613 PERSIST2613-04 · DEPS2613-04). | `corruptOnlyReason` `makeLoadError` `registerRegistryStatus` `listRegistryLoadErrors` `registryStatusCount` `autoWriteRefusal` 외 8 | 75 | 30 | 10 |
@@ -231,18 +231,18 @@
 | `sessionActivity.js` | 서버측 세션 정리(2026-10-09 검토 S-05) — 로그아웃을 서버에 알리고, 서버측 유휴 만료의 기준인 '사용자 활동' 을 보낸다. | `createActivityPinger` `sendActivity` `serverLogout` `ACTIVITY_MIN_INTERVAL_MS` `ACTIVITY_EVENTS` | 1 | 1 | 1 |
 | `usageTracker.js` | 기능 사용 추적(화면 쪽, v2.913 · 설계 docs/design/feature-usage §4.2·§4.6). | `usageKeyFromHash` `createUsageTracker` `sendUsage` `POLL_MS` `STABLE_MS` `BEAT_MS` 외 2 | 1 | 1 | 3 |
 
-## 공용 위치 밖에서 널리 쓰이는 모듈 (87)
+## 공용 위치 밖에서 널리 쓰이는 모듈 (88)
 
 공용 위치(위 5곳) 밖에 있지만 사실상 공통 기능인 모듈이다. 새로 만들기 전에 함께 본다.
 
-### 서버 (74)
+### 서버 (75)
 
 **자기 영역 말고 5개 이상 영역**이 import 하는 모듈. 다른 영역 수가 많은 순.
 
 | 모듈 | 하는 일 | 사용처 | 다른 영역 | 테스트 |
 |---|---|---|---|---|
 | `server/src/config.js` | (머리 주석 없음) | 515 | 88 | 186 |
-| `server/src/store.js` | (머리 주석 없음) | 210 | 44 | 363 |
+| `server/src/store.js` | (머리 주석 없음) | 210 | 44 | 364 |
 | `server/src/collector/registry.js` | Collector registry — the list of remote collector agents (one per datacenter) the central portal pulls power from. Stored in CONFIG_DIR/collectors.jso… | 83 | 32 | 57 |
 | `server/src/security/secretVault.js` | 설정 파일 자격증명(비밀번호·SSH 키·토큰)의 저장 방식(평문/암호화) 중앙 모듈(v2.296). | 41 | 29 | 41 |
 | `server/src/mock/demo/flags.js` | 데모(DATA_SOURCE=mock) 모드 공용 판정(v2.708). | 85 | 26 | 3 |
@@ -258,8 +258,8 @@
 | `server/src/idrac/registry.js` | iDRAC registry — the managed list of Dell servers whose power draw we collect over Redfish. Stored in CONFIG_DIR/idrac.json (gitignored, 0600, holds c… | 35 | 12 | 64 |
 | `server/src/mock/demo/edge.js` | 데모(DATA_SOURCE=mock) 엣지(수집 서버) 그룹(v2.708). | 23 | 12 | 2 |
 | `server/src/audit.js` | Audit log — records security/operational actions (who did what, when) so the portal's write operations (VM 생성, 원격접속, 설정 변경 등)이 추적된다. Appended to CONFI… | 138 | 11 | 47 |
-| `server/src/security/tlsTrust.js` | 장비 TLS 상대 인증(2026-10-09 검토 S-02) — 자격증명을 보내는 HTTPS 연결이 **정말 그 장비인지** 확인한다. | 15 | 11 | 7 |
 | `server/src/auth/auth.js` | (머리 주석 없음) | 148 | 10 | 68 |
+| `server/src/security/tlsTrust.js` | 장비 TLS 상대 인증(2026-10-09 검토 S-02) — 자격증명을 보내는 HTTPS 연결이 **정말 그 장비인지** 확인한다. | 15 | 11 | 7 |
 | `server/src/metrics/unreadVcenters.js` | '지금 값' 으로 쓰지 않는 vCenter 와 그 사유(순수 leaf — import 0). | 19 | 10 | 8 |
 | `server/src/runtime-settings.js` | Runtime-adjustable settings that can be changed from the portal UI (and persisted), overriding the env defaults. Currently: the data source (mock \| li… | 19 | 10 | 29 |
 | `server/src/storage/registry.js` | 스토리지 장비 등록부(v2.302). | 28 | 9 | 45 |
@@ -297,6 +297,7 @@
 | `server/src/vcenter/dsBrowse.js` | 데이터스토어 브라우즈 (v2.276) — 데이터스토어 상세에서 ① 어떤 VM 이 할당돼 있는지, ② 실제 어떤 파일들이 있는지 보여준다. | 15 | 5 | 4 |
 | `server/src/ipam/ledger.js` | IPAM ledger builder — turns a snapshot into a per-center IP record list. Shared by the /tools/ipam API and the SQLite exporter so both stay in sync. | 14 | 5 | 26 |
 | `server/src/metrics/db.js` | Generic metrics time-series store (host temperature, datastore usage, GPU utilization …). Mirrors the iDRAC power DB: Node built-in SQLite when the --… | 14 | 5 | 33 |
+| `server/src/logs/coverage.js` | '이 포탈이 지금 vCenter 이벤트를 직접 수집하지 않는 vCenter' 판정 한 벌(v2.733 — 점검 3회차 C1-01). | 13 | 5 | 3 |
 | `server/src/central/storageEdge.js` | 엣지들이 push 한 스토리지 스냅샷의 중앙 보관(v2.302). agent → { at, devices:[NormalizedSnapshot] }. 파일 영속: central-agent-storage.json (central-agent-* 는 .gitignore 와일드… | 12 | 5 | 20 |
 | `server/src/idrac/db.js` | Time-series storage for iDRAC power samples. | 12 | 5 | 24 |
 | `server/src/mock/demo/storage.js` | 데모(DATA_SOURCE=mock) 스토리지 그룹(v2.708). | 12 | 5 | 6 |
@@ -331,8 +332,8 @@
 | `web/src/views/SettingsUnreadBanner.jsx` | 112회차: 설정 파일을 못 읽은 동안의 조회 안내(문구 · 판정은 settingsUnread.js — 순수). 표지가 없으면 아무것도 그리지 않는다. onRecheck 가 있으면 ‘다시 확인’ 버튼을 둔다(주기 조회가 없는 화면 — 다시 읽혔는지 사용자가 확인한다). | 26 | 2 | 2 |
 | `web/src/views/tools/shared.jsx` | SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동. | 26 | 1 | 4 |
 | `web/src/views/droppedSecretText.js` | 저장 비밀 폐기 안내(v2.607, 감사 WEB2607-03 · LEFT2607-07). | 21 | 3 | 4 |
-| `web/src/views/platform/platformText.js` | '서버 › 가상화 플랫폼' 허브(v2.915 · 설계 docs/design/virt-platform-menu 시안 A · 컨펌 2026-11-07)의 순수 보조(vitest 고정). | 13 | 6 | 6 |
 | `web/src/views/vcd/vcdRoute.js` | vCenter 화면 주소(v2.895 — 개체 보기 · 승인 시안 ⑧~⑪ · 기본값 8: 같은 vCenter 화면의 탭 자리 + 해시 주소). | 14 | 5 | 4 |
+| `web/src/views/platform/platformText.js` | '서버 › 가상화 플랫폼' 허브(v2.915 · 설계 docs/design/virt-platform-menu 시안 A · 컨펌 2026-11-07)의 순수 보조(vitest 고정). | 13 | 6 | 6 |
 | `web/src/views/hostcfg/hostCfgText.js` | v2.699 — ESXi 호스트 구성·보안 문구·판정. 서버 hostcfg/parse.js 와 같은 입력으로 대조한다(번들 경계라 두 벌). 문구에 백틱·별표 금지(BoldText 는 **강조** 만 해석). | 8 | 5 | 5 |
 | `web/src/views/contention/contentionText.js` | v2.706(C2·C3) — CPU 경합·디스크 지연 문구·판정. 서버 contention/parse.js 와 같은 입력으로 대조한다(번들 경계라 두 벌). 문구에 백틱·별표 금지(BoldText 는 **강조** 만 해석). | 6 | 5 | 2 |
 
