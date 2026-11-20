@@ -254,6 +254,32 @@ export function mailInfoText(m) {
   return { ok: !bad.length, text: `마지막 새 기록 메일 ${fmtDateTime(m.at)} — ${ok}/${res.length}통 보냄${bad.length ? ` · 못 보낸 이유: ${[...new Set(bad.map((x) => x.reason || '알 수 없음'))].join(' · ').slice(0, 200)}` : ''}` };
 }
 
+/**
+ * 법인 담당자 저장 결과 문구(반증 3회차 D3). 서버 보고(corpReport)와 화면이 못 읽은 줄 수를 합쳐 말한다 — 버린 것이 없으면 '저장했습니다.'
+ */
+/**
+ * 엣지 포탈 띠의 '마지막 작업' 한 줄(4회차 반증 F2). 서버 `diskBadEdgeStatus()` 는 {configured, agent, busy, last:{at, ok, idle, error}} —
+ * 값은 `last` 아래에 있다(전에는 edge.at 을 읽어 늘 '—' 였고 오류를 보이지 못했다).
+ */
+export function edgeLastText(edge) {
+  const last = edge && typeof edge === 'object' ? edge.last : null;
+  const at = last && Number.isFinite(last.at) ? fmtDateTime(last.at) : '—';
+  const tail = last?.error ? ` · ${String(last.error).slice(0, 160)}` : (edge?.busy ? ' · 읽는 중' : (last?.idle ? ' · 대기 중' : ''));
+  const off = edge && edge.configured === false ? ' · 중앙 주소 · 토큰이 설정되지 않았습니다' : '';
+  return `마지막 작업: ${at}${tail}${off}`;
+}
+
+export function corpSaveText(rep, badLines = 0) {
+  const parts = [];
+  if (badLines > 0) parts.push(`‘id=메일’ 꼴이 아닌 ${badLines}줄은 읽지 않았습니다`);
+  // 법인 이름으로 적은 키는 서버가 그 법인 id 로 바꿔 저장했다(3회차 화면 확인 — 이름을 적으면 메일이 가지 않았다).
+  if (rep && Array.isArray(rep.renamed) && rep.renamed.length) parts.push(`법인 이름을 id 로 바꿔 저장: ${rep.renamed.slice(0, 5).map((r) => `${r.from} → ${r.to}`).join(', ')}${rep.renamed.length > 5 ? ` 외 ${rep.renamed.length - 5}건` : ''}`);
+  if (rep && Array.isArray(rep.droppedCorps) && rep.droppedCorps.length) parts.push(`올바른 메일이 없어 뺀 법인: ${rep.droppedCorps.slice(0, 5).join(', ')}${rep.droppedCorps.length > 5 ? ` 외 ${rep.droppedCorps.length - 5}곳` : ''}`);
+  if (rep && Number.isFinite(rep.droppedEmails) && rep.droppedEmails > 0) parts.push(`메일 주소로 읽지 못한 값 ${rep.droppedEmails}개를 뺐습니다`);
+  if (rep && Array.isArray(rep.unknownCorps) && rep.unknownCorps.length) parts.push(`지금 법인(vCenter id) 목록에 없는 키: ${rep.unknownCorps.slice(0, 5).join(', ')} — 이 담당자에게는 메일이 가지 않습니다`);
+  return parts.length ? `저장했습니다 — ${parts.join(' · ')}.` : '저장했습니다.';
+}
+
 export const JOB_STATE_LABEL = Object.freeze({
   queued: '엣지 대기', running: '읽는 중', done: '끝남', failed: '실패', 'not-started': '시작 못 함', 'no-response': '응답 없음', stopped: '중단됨', busy: '다른 점검 진행 중',
 });
