@@ -182,7 +182,14 @@ export async function acceptPush(agent, push) {
   if (!u || u.state !== 'running') return { ok: true, stored: false, stop: true, reason: '이 엣지가 가져간 작업이 아니거나 이미 닫힌 작업입니다(중앙 재시작 포함) — 보관하지 않았습니다.' };
   const t = now();
   u.reported = true;   // 한 번이라도 보고했다 — 엣지가 이 조각을 받았다(claimForAgent 가 다시 내줄지 닫을지를 가른다)
-  const r = await ingestServers(a, push.servers, { now: t });
+  // 노드가 바뀐 서버의 이력 옮기기(R2-3)는 **중앙 직결 → 엣지** 이고 중앙 등록부에 그 서버가 더는 없을 때만(반증 3회차 D1). 엣지끼리는 옮기지 않는다.
+  let localIds = null;
+  const canMoveFrom = (from, id) => {
+    if (from !== '') return false;
+    return !!localIds && !localIds.has(String(id));
+  };
+  if (push.servers.length) { try { localIds = new Set((await localServers()).map((x) => String(x?.id))); } catch { localIds = null; } }
+  const r = await ingestServers(a, push.servers, { now: t, canMoveFrom });
   u.newRecords += r.newRecords.length; for (const x of r.newRecords) { if (u._new.length >= 2_000) break; u._new.push(x); }
   if (push.total != null) u.total = push.total;
   if (push.done != null) u.done = push.done; else u.done += push.servers.length;

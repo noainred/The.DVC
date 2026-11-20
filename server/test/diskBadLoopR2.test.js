@@ -58,14 +58,20 @@ test('R2-3 — 그 서버를 맡은 노드가 바뀌어도(중앙 직결 → 엣
     drives: [{ id: 'Disk.Bay.2:Enclosure.Internal.0-1:RAID.Integrated.1-1', name: 'Physical Disk 0:1:2', serial: 'SN-2', model: 'M' }], invAt: NOW - 40 * DAY });
   await D.ingestServers('', [srv('10.9.9.9')], { now: NOW - 40 * DAY });
   const moved = { ...srv('10.9.9.9'), records: [], log: { ...srv('10.9.9.9').log, oldestRead: NOW - 5 * DAY } };
-  await D.ingestServers('edge-x', [moved], { now: NOW });
+  // 3회차 D1: 실패 보고 · 옮기기를 허락하지 않은 호출은 옮기지 않는다.
+  await D.ingestServers('edge-x', [{ ...moved, ok: false, reason: 'error' }], { now: NOW, canMoveFrom: () => true });
+  assert.equal((await D.loadServer('', '10.9.9.9')).records.length, 1, '실패 보고는 옮기지 않는다');
+  await D.ingestServers('', [srv('10.9.9.8')], { now: NOW - 40 * DAY });
+  await D.ingestServers('edge-z', [{ ...moved, id: '10.9.9.8', name: '10.9.9.8' }], { now: NOW });
+  assert.equal((await D.loadServer('', '10.9.9.8')).records.length, 1, '판정이 없으면 옮기지 않는다');
+  await D.ingestServers('edge-x', [moved], { now: NOW, canMoveFrom: (from) => from === '' });
   const e = await D.loadServer('edge-x', '10.9.9.9');
   assert.equal(e.records.length, 1, '활성 로그에서 밀려난 기록도 남는다');
   assert.equal(e.serials.length, 1);
   assert.ok(Number.isFinite(e.server.firstOkAt) && e.server.firstOkAt <= NOW - 40 * DAY, '기준선을 다시 시작하지 않는다');
   assert.equal((await D.loadServer('', '10.9.9.9')).server, null, '옛 노드 행은 옮겨졌다');
   // 서비스 태그가 다르면(같은 IP 에 다른 서버) 옮기지 않는다.
-  await D.ingestServers('edge-y', [{ ...moved, serviceTag: 'OTHER' }], { now: NOW });
+  await D.ingestServers('edge-y', [{ ...moved, serviceTag: 'OTHER' }], { now: NOW, canMoveFrom: () => true });
   assert.equal((await D.loadServer('edge-y', '10.9.9.9')).records.length, 0);
 });
 

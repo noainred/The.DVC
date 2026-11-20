@@ -75,7 +75,8 @@ function migrate(db) {
 function prepare(db) {
   return {
     serverGet: db.prepare('SELECT * FROM dbr_server WHERE agent=? AND server_id=?'),
-    serverOthers: db.prepare("SELECT agent FROM dbr_server WHERE server_id=? AND service_tag=? AND service_tag<>'' AND agent<>?"),
+    serverOthers: db.prepare("SELECT agent FROM dbr_server WHERE server_id=? AND service_tag=? AND service_tag<>'' AND agent<>? AND first_ok_at IS NOT NULL"),
+    deleteServer: db.prepare('DELETE FROM dbr_server WHERE agent=? AND server_id=?'),
     moveServer: db.prepare('UPDATE dbr_server SET agent=? WHERE agent=? AND server_id=?'),
     moveRecords: db.prepare('UPDATE OR IGNORE dbr_record SET agent=? WHERE agent=? AND server_id=?'),
     moveSerials: db.prepare('UPDATE OR IGNORE dbr_serial SET agent=? WHERE agent=? AND server_id=?'),
@@ -164,7 +165,7 @@ export const RECORDS_PER_SERVER_MAX = 20_000;
  * 일부만 읽은 뒤 더 깊이 읽어 과거 항목을 채워 넣는 것은 새 기록이 아니다).
  * @returns {Promise<{ok:boolean, reason?:string, servers:number, storedIds:string[], newRecords:Array, baselineServers:number}>}
  */
-export async function ingestServers(agent, servers, { now = Date.now(), yielder = createYielder(15) } = {}) {
+export async function ingestServers(agent, servers, { now = Date.now(), yielder = createYielder(15), canMoveFrom = () => false } = {}) {
   // 진행 보고(서버 0대)는 DB 를 건드리지 않는다 — 세대를 올리면 화면 캐시만 버려진다.
   if (!Array.isArray(servers) || !servers.length) return { ok: true, servers: 0, storedIds: [], newRecords: [], baselineServers: 0 };
   const h = await open();
@@ -182,10 +183,15 @@ export async function ingestServers(agent, servers, { now = Date.now(), yielder 
     try {
       // 반증 2회차 R2-3: 그 서버를 맡은 노드가 바뀌면(엣지가 없던 법인에 엣지를 배포 · 중앙 직결 → 엣지) (노드, id) 행이 새로 생겨 지난 기록 ·
       //   시리얼 이력 · 기준선이 화면에서 사라졌다. 이 노드에 행이 없고, **같은 id · 같은 서비스 태그**(비어 있지 않음)의 행이 다른 노드에 정확히 하나면 그 이력을 이 노드로 옮긴다.
-      if (!h.st.serverGet.get(a, s.id) && s.serviceTag) {
+      //   반증 3회차 D1: 옮기는 것은 ① 이 점검이 **정상으로 읽었고**(실패 보고 한 줄로 남의 이력을 가져가지 않게) ② 호출자가 '원래 노드는 이제 그 서버를
+      //   맡지 않는다' 고 판정할 때만이다(canMoveFrom — 모르면 옮기지 않는다). 두 노드가 함께 가진 동안 점검마다 이력이 오가던 것도 이것으로 막는다.
+      //   이 노드의 행이 있어도 정상으로 읽은 적이 없으면(첫 보고가 실패) 빈 행이다 — 지우고 옮긴다. 옮겨 올 쪽은 정상으로 읽은 적이 있는 행만.
+      const mine = h.st.serverGet.get(a, s.id) || null;
+      if (s.ok && s.serviceTag && (!mine || mine.first_ok_at == null)) {
         const others = h.st.serverOthers.all(s.id, String(s.serviceTag), a);
-        if (others.length === 1) {
+        if (others.length === 1 && canMoveFrom(others[0].agent, s.id) === true) {
           const from = others[0].agent;
+          if (mine) h.st.deleteServer.run(a, s.id);
           h.st.moveServer.run(a, from, s.id); h.st.moveRecords.run(a, from, s.id); h.st.moveSerials.run(a, from, s.id);
         }
       }
