@@ -354,7 +354,7 @@ function bmSpec(id, name, role, i, extra) {
  * 스냅샷의 vCenter 들 + vCenter 없는 데모 법인(generator `BM_ONLY_SITES`)에서 베어메탈 사양을 결정적으로 만든다.
  *  · vCenter 법인: 사이트 표의 `bm` 대수(없으면 12). 첫 서버들은 v2.708 과 같은 id·이름·사양이다 — 모든 vCenter 의 `db01`,
  *    앞 4곳의 `gpu01`, 앞 2곳의 법인 귀속 없는 `app01`(이미 시드된 데모 설치본이 그 id 로 남아 있다).
- *  · vCenter 없는 법인: `vcenterId` 없이 `datacenterId: dc-<slug>`(pdu.js demoCorps 가 같은 id 로 DataCenter 를 만든다).
+ *  · vCenter 없는 법인: `datacenterId: dc-<slug>`(pdu.js demoCorps 가 같은 id 로 DataCenter 를 만든다) · v3.31.0 부터 `vcenterId` = 인근 vCenter(`parentVc`).
  * 기본 사이트 표(20 vCenter)면 310 + 240 = **550대**(테스트가 고정).
  * @returns {Array<{id,name,vcenterId,datacenterId,homeVc,host,serviceTag,model,cpuModel,sockets,cores,memGB,gpus:string[],loadBase}>}
  */
@@ -387,15 +387,18 @@ export function demoBareMetalSpecs(snapshot) {
       out.push(bmSpec(`${BM_PREFIX}${vc}-${role}${tag}`, `bm-${city}-${role}${tag}`, role, k % 3, { vcenterId: vc, datacenterId: '', homeVc: vc }));
     }
   });
+  const vcSet = new Set(vcs);
   for (const site of BM_ONLY_SITES) {
     const dc = `dc-${site.slug}`;
+    // v3.31.0: 인근 vCenter 법인에 귀속(그 vCenter 가 스냅샷에 있을 때만 — 테스트의 가짜 스냅샷이면 귀속 없음 그대로)
+    const parent = site.parentVc && vcSet.has(site.parentVc) ? site.parentVc : '';
     const cycle = ROLE_CYCLE[site.role] || ROLE_CYCLE.corp;
     const seq = new Map();
     for (let k = 0; k < site.bm; k++) {
       const role = cycle[k % cycle.length];
       const n = (seq.get(role) || 0) + 1; seq.set(role, n);
       const tag = String(n).padStart(2, '0');
-      out.push(bmSpec(`${BM_PREFIX}${dc}-${role}${tag}`, `bm-${site.slug}-${role}${tag}`, role, k % 3, { vcenterId: '', datacenterId: dc, homeVc: '' }));
+      out.push(bmSpec(`${BM_PREFIX}${dc}-${role}${tag}`, `bm-${site.slug}-${role}${tag}`, role, k % 3, { vcenterId: parent, datacenterId: dc, homeVc: parent }));
     }
   }
   return out;
@@ -560,13 +563,20 @@ export async function linkDemoServerDatacenters() {
   const [{ loadRegistry, importServers }, { datacenterOfVcenter }] = await Promise.all([import('../../idrac/registry.js'), import('../../datacenter/store.js')]);
   const fix = [];
   for (const s of loadRegistry()) {
-    if (!String(s?.id || '').startsWith('mock-') || String(s.datacenterId || '').trim() || !String(s.vcenterId || '').trim()) continue;
+    if (!String(s?.id || '').startsWith('mock-')) continue;
+    // v3.31.0: v3.26.0 이 귀속 없이 시드한 'vCenter 없는 법인' 베어메탈 → 인근 vCenter(사양의 vcenterId). DataCenter 는 그대로.
+    if (!String(s.vcenterId || '').trim() && String(s.datacenterId || '').trim()) {
+      const want = bareMetalSpecOf(s.id)?.vcenterId || '';
+      if (want) fix.push({ id: s.id, vcenterId: want });
+      continue;
+    }
+    if (String(s.datacenterId || '').trim() || !String(s.vcenterId || '').trim()) continue;
     const dc = datacenterOfVcenter(s.vcenterId);
     if (dc) fix.push({ id: s.id, datacenterId: dc });
   }
   if (!fix.length) return { linked: 0 };
   const r = importServers(fix, 'merge');
-  if (r?.ok) console.log(`[mock] 데모 iDRAC 서버 법인 연결: ${r.updated}대`);
+  if (r?.ok) console.log(`[mock] 데모 iDRAC 서버 법인 연결: ${r.updated}대`);   // 법인(DataCenter) 채움 + vCenter 없는 법인 베어메탈의 인근 vCenter 귀속
   return { linked: r?.ok ? r.updated : 0 };
 }
 
