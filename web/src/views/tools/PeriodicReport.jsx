@@ -36,12 +36,13 @@ export default function PeriodicReport() {
   const st = useLoad('/tools/periodic-report/status');
   const [preview, setPreview] = useState(null);   // { run, previewId } — 미리보기(보관 · 전달 안 함)
   const busy = st.data?.busy || null;
-  // 만드는 중일 때만 5초마다 상태를 본다(그 밖에는 폴링하지 않는다).
+  // 만드는 중일 때만 상태를 다시 본다 — 상시 폴링이 아니라 응답이 올 때마다 '아직 만드는 중이면 5초 뒤 한 번 더' 를 예약한다
+  // (요청이 겹치지 않고 · 끝나면 멈추고 · 조회 오류면 멈춘다 — 다시 보려면 새로고침). 상시 주기 조회는 usePolling 규약(audit2613b WEB2613-09).
   useEffect(() => {
-    if (!busy) return undefined;
-    const t = setInterval(() => st.reload(), 5000);
-    return () => clearInterval(t);
-  }, [busy, st.reload]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!busy || st.err) return undefined;
+    const t = setTimeout(() => st.reload(), 5000);
+    return () => clearTimeout(t);
+  }, [st.data, st.err]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const openRun = (id) => { window.location.hash = `#/${[...BASE, 'r', encodeURIComponent(id)].join('/')}`; };
   if (!st.data && st.err) return <div className="prr"><ErrorBox error={st.err} /></div>;
