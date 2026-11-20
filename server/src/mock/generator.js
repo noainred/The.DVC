@@ -91,18 +91,20 @@ const BASE_SITES = [
  * v3.26.0 — vCenter 가 없는 데이터센터(법인) 10곳 — 베어메탈·스토리지·네트워크·PDU 만 있다(공장 MES · AI/HPC · DR · 물류).
  * `mock/demo/pdu.js demoCorps` 가 DataCenter 로 만들고(id `dc-<slug>`), 베어메탈·스토리지 데모가 이 법인에 장비를 둔다.
  * vCenter 가 아니므로 `mockVcenterIdentities`·`isMockVcenter` 에는 들어가지 않는다.
+ * v3.31.0(사용자 선택 '인근 vCenter 법인에 귀속'): `parentVc` = 그 데이터센터 베어메탈의 vCenter 귀속(iDRAC 등록부 vcenterId — DataCenter 는 그대로 dc-<slug>).
+ *   서비스 인벤토리 · 법인별 서버 사용량 · 베어메탈 사용률은 법인 축이 vCenter 라, 귀속이 없으면 240대가 '법인 귀속 없음' 으로 빠졌다.
  */
 export const BM_ONLY_SITES = Object.freeze([
-  { slug: 'ulsan', city: 'Ulsan', country: 'South Korea', region: '아시아', role: '공장(MES)', lat: 35.54, lon: 129.31, bm: 30 },
-  { slug: 'daejeon', city: 'Daejeon', country: 'South Korea', region: '아시아', role: 'AI/HPC 센터', lat: 36.35, lon: 127.38, bm: 34 },
-  { slug: 'gumi', city: 'Gumi', country: 'South Korea', region: '아시아', role: '공장(MES)', lat: 36.12, lon: 128.34, bm: 24 },
-  { slug: 'chennai', city: 'Chennai', country: 'India', region: '아시아', role: '공장(MES)', lat: 13.08, lon: 80.27, bm: 22 },
-  { slug: 'bangkok', city: 'Bangkok', country: 'Thailand', region: '아시아', role: '물류 센터', lat: 13.76, lon: 100.50, bm: 14 },
-  { slug: 'chongqing', city: 'Chongqing', country: 'China', region: '중국', role: '공장(MES)', lat: 29.56, lon: 106.55, bm: 26 },
-  { slug: 'wroclaw', city: 'Wroclaw', country: 'Poland', region: '유럽', role: '공장(MES)', lat: 51.11, lon: 17.04, bm: 22 },
-  { slug: 'budapest', city: 'Budapest', country: 'Hungary', region: '유럽', role: 'DR 사이트', lat: 47.50, lon: 19.04, bm: 18 },
-  { slug: 'atlanta', city: 'Atlanta', country: 'USA', region: '북미', role: 'DR 사이트', lat: 33.75, lon: -84.39, bm: 20 },
-  { slug: 'toronto', city: 'Toronto', country: 'Canada', region: '북미', role: 'AI/HPC 센터', lat: 43.65, lon: -79.38, bm: 30 },
+  { slug: 'ulsan', city: 'Ulsan', country: 'South Korea', region: '아시아', role: '공장(MES)', lat: 35.54, lon: 129.31, bm: 30, parentVc: 'vc-kr-south' },
+  { slug: 'daejeon', city: 'Daejeon', country: 'South Korea', region: '아시아', role: 'AI/HPC 센터', lat: 36.35, lon: 127.38, bm: 34, parentVc: 'vc-ap-northeast' },
+  { slug: 'gumi', city: 'Gumi', country: 'South Korea', region: '아시아', role: '공장(MES)', lat: 36.12, lon: 128.34, bm: 24, parentVc: 'vc-kr-south' },
+  { slug: 'chennai', city: 'Chennai', country: 'India', region: '아시아', role: '공장(MES)', lat: 13.08, lon: 80.27, bm: 22, parentVc: 'vc-ap-south' },
+  { slug: 'bangkok', city: 'Bangkok', country: 'Thailand', region: '아시아', role: '물류 센터', lat: 13.76, lon: 100.50, bm: 14, parentVc: 'vc-ap-southeast' },
+  { slug: 'chongqing', city: 'Chongqing', country: 'China', region: '중국', role: '공장(MES)', lat: 29.56, lon: 106.55, bm: 26, parentVc: 'vc-cn-south' },
+  { slug: 'wroclaw', city: 'Wroclaw', country: 'Poland', region: '유럽', role: '공장(MES)', lat: 51.11, lon: 17.04, bm: 22, parentVc: 'vc-pl-central' },
+  { slug: 'budapest', city: 'Budapest', country: 'Hungary', region: '유럽', role: 'DR 사이트', lat: 47.50, lon: 19.04, bm: 18, parentVc: 'vc-eu-central' },
+  { slug: 'atlanta', city: 'Atlanta', country: 'USA', region: '북미', role: 'DR 사이트', lat: 33.75, lon: -84.39, bm: 20, parentVc: 'vc-us-east' },
+  { slug: 'toronto', city: 'Toronto', country: 'Canada', region: '북미', role: 'AI/HPC 센터', lat: 43.65, lon: -79.38, bm: 30, parentVc: 'vc-us-central' },
 ]);
 
 /**
@@ -895,9 +897,11 @@ export function generateSnapshot() {
 function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
 }
+// v3.31.0: 셋째 옥텟 = idx / 253 — 예전에는 254 로 나누고 253 으로 나머지를 내서 사이트 VM 이 253대를 넘으면 같은 주소가 다시 나왔다
+//   (시연 규모 IP 관리 '중복' 의 한 원인). idx < 253 은 예전과 같은 주소다.
 function mkIp(site, idx) {
   const oct = Math.abs(Math.round(site.lat)) % 250;
-  return `10.${oct}.${Math.floor(idx / 254) % 254}.${(idx % 253) + 1}`;
+  return `10.${oct}.${Math.floor(idx / 253) % 254}.${(idx % 253) + 1}`;
 }
 // v3.6.0(호스트명 대조 시연): 게스트 OS 호스트명 — 대부분 VM 이름과 같고, 17대에 1대는 OS 쪽 이름이 다르다(옛 이름). 이름이 없으면 예전 값.
 function guestHostName(name, idx) {
@@ -921,10 +925,20 @@ function mkHostDns(site, h) {
   return { osHostName: h.idx % 11 === 4 ? `${h.name}-old` : h.name, osDomain: dom };
 }
 // Some VMs are multi-homed (mgmt + service + storage NIC). Returns 1-3 IPv4s.
+// v3.31.0(사용자 요청 'IP 관리 충돌·중복 목업 고쳐줘' · 선택 '시연용 몇 건만'): 보조 IP 에 사이트 옥텟을 넣는다 — 예전에는 VM 순번만 써서
+//   20개 vCenter 에 같은 172.16·192.168 주소가 반복돼 IP 관리가 충돌 2,720 · 중복 270 을 보였다. 그 대신 시연용으로 일부러 몇 건만 만든다:
+//   사이트 순번 % 4 === 1 의 VM 42 는 다음 사이트 VM 3 의 주소를 하나 더 갖는다(다른 vCenter 와 겹침 = 충돌) ·
+//   % 4 === 2 의 VM 77 은 같은 사이트 VM 76 의 주소를 하나 더 갖는다(같은 vCenter 안 겹침 = 중복). 20개 사이트면 각 5건(꺼진 VM 이면 빠진다).
+const DEMO_CONFLICT_IDX = 42;
+const DEMO_DUP_IDX = 77;
 function mkIps(site, idx) {
+  const oct = Math.abs(Math.round(site.lat)) % 250;
   const ips = [mkIp(site, idx)];
-  if (idx % 3 === 0) ips.push(`172.16.${idx % 254}.${(idx * 7 % 253) + 1}`);
-  if (idx % 5 === 0) ips.push(`192.168.${idx % 254}.${(idx * 3 % 253) + 1}`);
+  if (idx % 3 === 0) { const j = idx / 3; ips.push(`172.${16 + (Math.floor(j / 253) % 4)}.${oct}.${(j % 253) + 1}`); }   // 스토리지망 — 172.16~19(172.20·21 은 vmk)
+  if (idx % 5 === 0) { const j = idx / 5; ips.push(`192.168.${oct}.${(j % 253) + 1}`); }                               // 백업망
+  const s = SITES.indexOf(site);
+  if (s >= 0 && idx === DEMO_CONFLICT_IDX && s % 4 === 1) ips.push(mkIp(SITES[(s + 1) % SITES.length], 3));
+  if (s >= 0 && idx === DEMO_DUP_IDX && s % 4 === 2) ips.push(mkIp(site, DEMO_DUP_IDX - 1));
   return ips;
 }
 // v2.695: 게스트가 보고하는 DNS 설정(목). 사내 DNS 는 같은 법인 VM 1·2번의 IP(정체 대조가 VM 으로 찾게),
