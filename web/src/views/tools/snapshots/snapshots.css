@@ -153,6 +153,9 @@
 .snp-hold label.grow { flex: 1 1 260px; }
 .snp-hold select, .snp-hold input { background: var(--panel-deep); border: 1px solid var(--border); border-radius: 6px; color: var(--text); padding: 5px 8px; font: inherit; min-width: 0; }
 .snp-hold input { flex: 1 1 auto; }
+/* 156회차: 보류 창은 표 상자(가로 스크롤 — 최소 폭 1180px) 안이라, 좁은 화면에서 기간 · 사유 칸과 저장 실패 사유가 화면 밖(스크롤 왼쪽)에 놓였다 —
+   창 폭을 화면에 맞추고 표를 옆으로 밀어도 왼쪽에 붙여 둔다(넓은 화면은 그대로 · 표 칸의 줄바꿈 금지를 풀어 안내 글이 접힌다). */
+@media (max-width: 720px) { .snp-hold { position: sticky; left: 0; max-width: calc(100vw - 84px); box-sizing: border-box; white-space: normal; } }
 .snp-sum { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-size: 12px; color: var(--text-dim); }
 
 @media (max-width: 1200px) {

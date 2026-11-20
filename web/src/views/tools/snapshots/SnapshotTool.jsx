@@ -21,6 +21,7 @@ import { saveBlob } from '../../../util/saveBlob.js';
 import { dayStamp } from '../../../dayStamp.js';
 import { copyText } from '../../../util/copyText.js';
 import { vcHash } from '../../vcd/vcdRoute.js';
+import { requireChanged } from '../../changeResult.js';
 import {
   BANDS, BAND_COLOR, BAND_FG, bandLabels, VIEWS, signalDefs, matchKey, sortItems, gbSum, groupItems, GROUPS, bandGradient, summaryOf, corpCards,
   logPos, gbText, daysText, dateText, requestText, CSV_HEAD, csvRow, parseSnapHash, buildSnapHash,
@@ -563,13 +564,20 @@ export function creatorText(c, x) {
   return `최근 만든 계정 ${hit.user || '(관리자만 볼 수 있습니다)'} · ${dateText(hit.ts)}${st === 'truncated' ? ' · 일부만 읽음' : ''}`;
 }
 
+/**
+ * 보류 저장 요청 → 성공 안내 글(156회차). putJson 은 400 · 409 를 던지지 않고 본문({ ok:false, reason })을 돌려준다(api.js sendJson) —
+ *   서버가 거절해도(보류 상한 · 사유 없음 · 일수 밖) ‘N일 보류했습니다’ 라고 말하고 창을 닫았다. 거절 본문은 사유를 던진다(changeResult.requireChanged).
+ */
+export function saveHold(form, put = putJson) {
+  return put('/tools/snapshots/holds', { vcenterId: form.vcenterId, vmId: form.vmId, days: Number(form.days), reason: form.reason })
+    .then((r) => { requireChanged(r); return Number(form.days) ? `${form.days}일 보류했습니다 — 그동안 이 VM 의 스냅샷은 판정하지 않습니다(카드 · VM 구성 점검 · 알림 포함).` : '보류를 풀었습니다.'; });
+}
+
 /** 보류(관리자) — 기한 1~90일 · 사유 필수 · 0 일 = 풀기. 판정은 서버 hygieneFindings 하나라 카드 · VM 구성 점검 · 알림에도 같이 빠진다. */
 function HoldForm({ form, setForm, held, onDone }) {
   const save = () => {
     setForm({ ...form, busy: true, error: '' });
-    putJson('/tools/snapshots/holds', { vcenterId: form.vcenterId, vmId: form.vmId, days: Number(form.days), reason: form.reason })
-      .then(() => onDone(Number(form.days) ? `${form.days}일 보류했습니다 — 그동안 이 VM 의 스냅샷은 판정하지 않습니다(카드 · VM 구성 점검 · 알림 포함).` : '보류를 풀었습니다.'))
-      .catch((e) => setForm({ ...form, busy: false, error: e.message }));
+    saveHold(form).then(onDone).catch((e) => setForm({ ...form, busy: false, error: e.message }));
   };
   return (
     <div className="snp-hold" role="group" aria-label="스냅샷 보류">

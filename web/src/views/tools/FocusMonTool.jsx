@@ -15,6 +15,7 @@ import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import { hashSegments } from '../../hooks/hashTab.js';
+import { requireChanged } from '../changeResult.js';   // 156회차: 연장 409(최대 시간 · 계속 수집) 본문을 조용히 삼키지 않게
 import {
   DASH, STATE_TEXT, TEST_TEXT, MODE_TEXT, ENDED_TEXT, sessionIndex, sessionLabel, startNote, joinResultText, TABS, IOSTAT_LABEL, SUMMARY_COLS, METRICS,
   pctText, msText, numText, bpsText, bytesText, sizeText, metricValueText, metricUnitText, iostatText, remainText, clockText, agoShort, etText,
@@ -1505,7 +1506,7 @@ export default function FocusMonTool() {
         <div className="fm-col"><span className="fm-dim">특수 기능 › 서버</span><h1 className="fm-h1">서버 집중 모니터링</h1></div>
         <div className="fm-row">
           <span className="fm-pill"><i className={pill.live ? 'on' : ''} /><b>{pill.text}</b><span className="fm-dim">· {pill.sub}{main.mock ? ' · 데모 모드' : ''}</span>{pill.remain ? <span className="fm-dim">남은 시간 <b className="fm-mono">{pill.remain}</b></span> : null}</span>
-          {mineSession && mineSession.mode === 'watch' ? <button type="button" className="fm-btn" onClick={() => postJson(`/tools/focus-mon/sessions/${mineSession.id}/extend`, {}).then(() => mainQ.reload()).catch((e) => setMsg({ tone: 'bad', text: e?.body?.reason || e?.message }))}>{main.limits.watchMin}분 연장</button> : null}
+          {mineSession && mineSession.mode === 'watch' ? <button type="button" className="fm-btn" onClick={() => postJson(`/tools/focus-mon/sessions/${mineSession.id}/extend`, {}).then((r) => { requireChanged(r); mainQ.reload(); }).catch((e) => setMsg({ tone: 'bad', text: e?.body?.reason || e?.message }))}>{main.limits.watchMin}분 연장</button> : null}
           {mineSession ? <button type="button" className="fm-btn danger" onClick={() => stopSession(mineSession, mineSession.mode === 'record')}>수집 종료</button> : null}
           {sessions.length > 1 ? <button type="button" className="fm-btn danger" onClick={stopAll}>모두 종료 · {sessions.length}건</button> : null}
         </div>
@@ -1518,7 +1519,7 @@ export default function FocusMonTool() {
           {sessions.map((s) => (
             <span key={s.id} className={`fm-sess ${ids.join() === s.targets.join() ? 'on' : ''}`}>
               <button type="button" className="fm-linkbtn" onClick={() => setViewIds(s.targets)} title="이 수집의 서버만 봅니다">{sessionLabel(s, now)}</button>
-              {s.mode === 'watch' ? <button type="button" className="fm-btn sm" onClick={() => postJson(`/tools/focus-mon/sessions/${encodeURIComponent(s.id)}/extend`, {}).then(() => mainQ.reload()).catch((e) => setMsg({ tone: 'bad', text: e?.body?.reason || e?.message }))}>{main.limits.watchMin}분 연장</button> : null}
+              {s.mode === 'watch' ? <button type="button" className="fm-btn sm" onClick={() => postJson(`/tools/focus-mon/sessions/${encodeURIComponent(s.id)}/extend`, {}).then((r) => { requireChanged(r); mainQ.reload(); }).catch((e) => setMsg({ tone: 'bad', text: e?.body?.reason || e?.message }))}>{main.limits.watchMin}분 연장</button> : null}
               <button type="button" className="fm-btn sm danger" onClick={() => stopSession(s, s.mode === 'record')}>종료</button>
             </span>
           ))}

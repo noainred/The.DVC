@@ -7,6 +7,7 @@
  */
 import React, { useMemo, useState } from 'react';
 import { postJson, putJson, delJson } from '../../api.js';
+import { requireChanged } from '../changeResult.js';   // 156회차: putJson · delJson 은 400 · 409 를 던지지 않는다 — 거절 본문을 성공으로 읽지 않게
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
@@ -47,7 +48,7 @@ function RuleForm({ data, main, onSaved, setMsg, editing, onCancel }) {
   const save = () => {
     setBusy(true); setErr('');
     const p = editing ? putJson(`/tools/focus-mon/alerts/rules/${encodeURIComponent(editing.id)}`, body()) : postJson('/tools/focus-mon/alerts/rules', body());
-    p.then(() => { setMsg?.({ tone: 'ok', text: `규칙 ‘${f.name}’ 을(를) ${editing ? '고쳤' : '만들었'}습니다.` }); onSaved(); })
+    p.then(requireChanged).then(() => { setMsg?.({ tone: 'ok', text: `규칙 ‘${f.name}’ 을(를) ${editing ? '고쳤' : '만들었'}습니다.` }); onSaved(); })
       .catch((e) => setErr(e?.body?.reason || e?.message || '저장하지 못했습니다.')).finally(() => setBusy(false));
   };
   const preview = () => {
@@ -94,7 +95,7 @@ export function AlertsTab({ main, setMsg, reloadMain }) {
   const nameOf = (id) => main.targets.find((t) => t.id === id)?.name || id;
   if (q.error && !d) return <ErrorBox error={q.error} />;
   if (!d) return <Loading />;
-  const act = (p, ok) => { setBusy(true); p.then(() => { setMsg?.({ tone: 'ok', text: ok }); q.reload(); }).catch((e) => setMsg?.({ tone: 'bad', text: e?.body?.reason || e?.message })).finally(() => setBusy(false)); };
+  const act = (p, ok) => { setBusy(true); p.then(requireChanged).then(() => { setMsg?.({ tone: 'ok', text: ok }); q.reload(); }).catch((e) => setMsg?.({ tone: 'bad', text: e?.body?.reason || e?.message })).finally(() => setBusy(false)); };
   const firing = d.rules.reduce((a, r) => a + (r.firing || 0), 0); const hold = d.rules.reduce((a, r) => a + (r.hold || 0), 0);
   return (
     <div className="fm-col fm-alerts">
