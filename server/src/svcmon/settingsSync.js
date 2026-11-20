@@ -375,6 +375,8 @@ export function countsOf(rows = []) {
   // v2.960(B): 연동됐지만 중지된 대상 — 개요 '감시 범위' 카드가 '감시 중' 과 '등록됐지만 중지' 를 가른다.
   c.linkedOff = rows.filter((r) => (r.state === 'linked' || r.state === 'changed') && r.targetEnabled === false).length;
   c.repath = rows.filter((r) => r.repath).length;   // v2.988: 법인 폴더로 옮길 수 있는 연동 대상
+  // v3.30.4: '변경' 중 점검 정의만 바뀐 것(v3.18.14 결함 D1 — 옛 엣지 포탈 HTTP 경로) — 화면이 '주소 변경' 과 따로 센다(같은 '변경' 상태 · 적용 경로도 같다).
+  c.defChanged = rows.filter((r) => r.state === 'changed' && r.defChanged).length;
   // 아직 처리하지 않은 사라짐(표지 없음) — 배너는 이것만 센다(중지 처리한 뒤에도 계속 뜨지 않게 — 반증 낮음).
   c.goneOpen = rows.filter((r) => r.state === 'gone' && !r.goneAt).length;
   const denom = rows.filter((r) => r.state !== 'gone' && r.state !== 'held' && r.state !== 'excluded').length;
@@ -463,7 +465,7 @@ export function dailySummary() { return loadState().daily.slice(); }
 export function driftSummary() {
   if (!_last) return null;
   const c = _last.counts || {};
-  return { at: _last.at, new: newSinceCount(), unregistered: c.new || 0, changed: c.changed || 0, gone: c.goneOpen ?? c.gone ?? 0, held: c.held || 0 };
+  return { at: _last.at, new: newSinceCount(), unregistered: c.new || 0, changed: c.changed || 0, defChanged: c.defChanged || 0, gone: c.goneOpen ?? c.gone ?? 0, held: c.held || 0 };
 }
 let _lastNewKeys = [];
 function newSinceCount() {

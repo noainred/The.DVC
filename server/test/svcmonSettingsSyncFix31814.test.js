@@ -86,6 +86,21 @@ test('D1 — 이미 등록된 옛 정의 대상은 \'변경\' · 적용하면 �
   assert.equal(SYNC.classifyCatalog({ targets: [x] }, STORE.listTargets(), {}).rows.find((r) => r.key === x.id).state, 'linked', '고친 뒤 다시 분류하면 연동');
 });
 
+test('v3.30.4 — 집계 · 배너가 점검 정의 갱신을 주소 변경과 따로 싣는다(defChanged)', () => {
+  const x = cat('set:collector', 'e9', { host: '10.30.9.5', port: 4000 });
+  const y = cat('set:collector', 'e8', { host: '10.30.9.6', port: 4000 });
+  const mk = (xx, url, host) => ({ id: `t-${xx.ref}`, kind: 'infra', path: 'P', name: xx.ref, host, enabled: true,
+    tests: SYNC.checksFor(xx).map((s2) => (s2.tplKey === 'http' && url ? { ...s2, url } : s2)), origin: SYNC.originOf(xx, { label: '전역' }) });
+  const svc = [mk(x, 'https://10.30.9.5:4000/api/health', '10.30.9.5'), mk(y, '', '10.30.9.99')];   // e9 = 옛 정의 · e8 = 주소 변경
+  const res = SYNC.classifyCatalog({ targets: [x, y] }, svc, {});
+  assert.equal(res.counts.changed, 2);
+  assert.equal(res.counts.defChanged, 1);
+  SYNC.noteDetection(res, { at: Date.now() });
+  const d = SYNC.driftSummary();
+  assert.equal(d.changed, 2);
+  assert.equal(d.defChanged, 1, '배너가 따로 센다');
+});
+
 test('D1 — 옛 정의 판정은 좁게: 사람이 더한 점검 · 다른 종류 · 다른 경로는 \'변경\' 이 아니다', () => {
   const legacy = { tpl: SYNC.SYNC_TPL, tplKey: 'http', url: 'https://e:4000/api/health' };
   assert.equal(SYNC.isLegacyCheck('set:collector', legacy), true);
