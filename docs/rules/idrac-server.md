@@ -1697,6 +1697,16 @@
     4회차 반증이 찾은 이 회차의 회귀 3건은 내기 전에 고쳤다: D3 가 바꾼 저장 호출을 옛 정규식이 막았다(`settingsUnreadSweep112` C 를 새 꼴로 — 판정 뒤에만 칸을 바꾸는 뜻은 그대로) ·
     엣지 띠가 `edge.at` 을 읽었다(값은 `diskBadEdgeStatus().last` 아래 — 늘 '—' · `diskBadText.js edgeLastText`) · **월별 추이의 창도 포탈 시각의 달**(키만 KST 이고 창이 UTC 달이라 매달 KST 1일 00~09시에 이번 달 기록이 추이에서 빠졌다 — `portalParts` · `portalMs`).
     회귀 `server/test/diskBadLoopR3.test.js` · 웹 `diskBadText.test.js`.
+  - **VER_R4 — 개선 · 버그 수정 반복 4회차**(반증 1인 — 결함 8(그 가운데 3회차 회귀 F1 · F2 · F3 은 3회차에서 고침) · 개선 7 · 변이 6 — 모두 반영):
+    노드가 바뀐 서버는 이 노드에 이미 정상 행이 있어도 옮길 수 있게 되면 **합친다**(F4 — 중앙 등록부에서 지우기 전에 엣지가 한 번 읽으면 옛 기록 · 시리얼이 영영 화면 밖에 남았다 ·
+    겹친 기록은 같은 항목 · 시리얼 처음/마지막 본 때는 MIN/MAX · 처음 본 때 · 본 가장 오래된 때만 당기고 끊김 없이 본 구간은 이 노드 것 · 옛 행 삭제) · 옮기기 판정은 `jobs.js makeCanMoveFrom` 하나(M1 · M2) ·
+    중단한 조각은 보고가 없어도 다시 내주지 않음(I1) · 저장 못 한 수는 서버 단위(`storedIds` — scan.js `onChunk` 가 `{stored:false, storedIds}` 를 받는다 · I5) ·
+    서버 창 기록은 **분류마다** 가장 새 것(`CLASS_RECORDS_VIEW_MAX` · 드문 분류가 흔한 분류에 밀리지 않음 · I2 · M3) · '점검 중' · 응답 다듬기는 순수 함수(`serverRunState` · `shapeServerView` — 라우트 글자만 보던 시험이 변이 M5 · M6 을 놓쳤다) ·
+    담당자 저장 보고는 정규화와 같은 판정(`settings.js corpEmailsOf` — 형식 · 중복 · 주소 상한 · 법인 상한을 따로, 상한 값은 응답에 · F8) · 배열 원소도 쉼표로 나눔(이름 키 합치기의 'a,b') ·
+    엣지 포탈: 설정 칸 잠금(`settingsEditable` 에 `!isEdge()`) · 점검 탭은 안내만 · 서버 창은 점검 버튼 대신 '결과는 중앙에서'(`node` · `serverBandFor` · F6) ·
+    설정 저장 결과는 설정 칸 안에(F7) · 서버 탭 배지는 서버 창 띠와 같은 기준(흔적 주황 · 복구 불가 흔적 빨강 — `traceUnrec` · `serverRowBadge` · F9) · 읽은 서버 0대면 요약 카드도 '—'(F10) ·
+    분류에 없는 기록만 있는 서버도 '분류에 없는 기록도 보기' 가 보임(F5) · 법인 범위 읽기 실패면 '다시 읽기' · '전체로'(I3) · 서버를 바꾸면 앞 서버 오류를 지움(I4).
+    회귀 `server/test/diskBadLoopR4.test.js`(변이 11개 — 반증의 6개 + 새 수정 5개 — 모두 잡음) · 웹 `diskBadText.test.js`.
   - 남은 것(설계 §16 · §18 범위 B · C · §22): 보관 로그 내보내기(§22 2단계 — 장비에 보내는 요청형 동작) · 세션 재사용(3단계) · 지금 쓰이는 곳(OS · vCenter) · 교체 우선순위 · 조치 추적 · vSAN 상태 · 설정 점검. 디스크 값은 v3.10.1 에 텔레메트리 · DriveMetrics 로 읽는다(실장비 대조 전). 실장비 대조는 3.8.2 의 장비 진단으로 받는다(§14.1 명령 대신) — 그 답으로 분류표 · 읽는 방법을 고친다.
   - 회귀 `server/test/diskBad380.test.js` · `server/test/diskBadReview380.test.js` · `server/test/diskBadField382.test.js` · `server/test/diskBadField383.test.js` · `server/test/diskBadPast3101.test.js` · 웹 `diskBadText.test.js`.
 

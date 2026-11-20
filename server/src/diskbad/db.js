@@ -51,6 +51,7 @@ function migrate(db) {
       received_at INTEGER, baseline INTEGER,
       PRIMARY KEY(agent, server_id, entry_key));
     CREATE INDEX IF NOT EXISTS ix_dbr_record_created ON dbr_record(created);
+    CREATE INDEX IF NOT EXISTS ix_dbr_server_sid ON dbr_server(server_id);
     CREATE TABLE IF NOT EXISTS dbr_serial(
       agent TEXT NOT NULL, server_id TEXT NOT NULL, slot_key TEXT NOT NULL, serial TEXT NOT NULL,
       model TEXT, first_seen INTEGER, last_seen INTEGER,
@@ -80,6 +81,17 @@ function prepare(db) {
     moveServer: db.prepare('UPDATE dbr_server SET agent=? WHERE agent=? AND server_id=?'),
     moveRecords: db.prepare('UPDATE OR IGNORE dbr_record SET agent=? WHERE agent=? AND server_id=?'),
     moveSerials: db.prepare('UPDATE OR IGNORE dbr_serial SET agent=? WHERE agent=? AND server_id=?'),
+    // 4회차 반증 F4 — 이미 이 노드에 정상 행이 있을 때 옛 노드의 이력을 **합친다**(옮기기가 아니라). 겹치는 기록은 같은 항목이다(키 = 같은 iDRAC 의 항목 Id · 시각).
+    serialsOf: db.prepare('SELECT slot_key, serial, model, first_seen, last_seen FROM dbr_serial WHERE agent=? AND server_id=?'),
+    serialMerge: db.prepare(`INSERT INTO dbr_serial(agent, server_id, slot_key, serial, model, first_seen, last_seen) VALUES(?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(agent, server_id, slot_key, serial) DO UPDATE SET model=COALESCE(dbr_serial.model, excluded.model),
+        first_seen=MIN(COALESCE(dbr_serial.first_seen, excluded.first_seen), COALESCE(excluded.first_seen, dbr_serial.first_seen)),
+        last_seen=MAX(COALESCE(dbr_serial.last_seen, excluded.last_seen), COALESCE(excluded.last_seen, dbr_serial.last_seen))`),
+    // 처음 본 때 · 본 가장 오래된 때만 앞으로 당긴다(끊김 없이 본 구간은 이 노드 것 그대로 — 두 노드 사이 틈을 '봤다' 고 하지 않는다).
+    serverMergeSpan: db.prepare(`UPDATE dbr_server SET first_ok_at=MIN(COALESCE(first_ok_at, ?1), COALESCE(?1, first_ok_at)),
+        covered_from=MIN(COALESCE(covered_from, ?2), COALESCE(?2, covered_from)) WHERE agent=?3 AND server_id=?4`),
+    deleteRecordsOf: db.prepare('DELETE FROM dbr_record WHERE agent=? AND server_id=?'),
+    deleteSerialsOf: db.prepare('DELETE FROM dbr_serial WHERE agent=? AND server_id=?'),
     serverUpsert: db.prepare(`INSERT INTO dbr_server(agent, server_id, name, host, service_tag, first_ok_at, last_scan_at, last_ok_at, last_status, last_reason,
         log_order, log_total, log_oldest, covered_from, continuous_since, complete, read_last, synthesized, inv_at, drives_json, updated_at, newest_created, read_stop, read_diag, probe_json, probe_at,
         vals_json, sel_json)
@@ -186,13 +198,25 @@ export async function ingestServers(agent, servers, { now = Date.now(), yielder 
       //   반증 3회차 D1: 옮기는 것은 ① 이 점검이 **정상으로 읽었고**(실패 보고 한 줄로 남의 이력을 가져가지 않게) ② 호출자가 '원래 노드는 이제 그 서버를
       //   맡지 않는다' 고 판정할 때만이다(canMoveFrom — 모르면 옮기지 않는다). 두 노드가 함께 가진 동안 점검마다 이력이 오가던 것도 이것으로 막는다.
       //   이 노드의 행이 있어도 정상으로 읽은 적이 없으면(첫 보고가 실패) 빈 행이다 — 지우고 옮긴다. 옮겨 올 쪽은 정상으로 읽은 적이 있는 행만.
+      //   4회차 반증 F4: 이 노드에 이미 정상 행이 있어도(중앙 등록부에서 지우기 전에 엣지가 한 번 읽음) 옮길 수 있게 되면 **합친다** — 건너뛰면
+      //   옛 노드의 기록 · 시리얼이 영영 화면 밖에 남았다(활성 로그에서 밀려난 기록이라 다시 읽을 수도 없다). canMoveFrom 이 '옛 노드는 이제
+      //   그 서버를 맡지 않는다' 를 보장하므로 D1 이 막은 왕복은 생기지 않는다(합친 뒤 옛 행을 지운다).
       const mine = h.st.serverGet.get(a, s.id) || null;
-      if (s.ok && s.serviceTag && (!mine || mine.first_ok_at == null)) {
+      if (s.ok && s.serviceTag) {
         const others = h.st.serverOthers.all(s.id, String(s.serviceTag), a);
         if (others.length === 1 && canMoveFrom(others[0].agent, s.id) === true) {
           const from = others[0].agent;
-          if (mine) h.st.deleteServer.run(a, s.id);
-          h.st.moveServer.run(a, from, s.id); h.st.moveRecords.run(a, from, s.id); h.st.moveSerials.run(a, from, s.id);
+          if (!mine || mine.first_ok_at == null) {
+            if (mine) h.st.deleteServer.run(a, s.id);
+            h.st.moveServer.run(a, from, s.id); h.st.moveRecords.run(a, from, s.id); h.st.moveSerials.run(a, from, s.id);
+          } else {
+            const old = h.st.serverGet.get(from, s.id);
+            h.st.moveRecords.run(a, from, s.id);
+            for (const x of h.st.serialsOf.all(from, s.id)) h.st.serialMerge.run(a, s.id, x.slot_key, x.serial, x.model, x.first_seen, x.last_seen);
+            h.st.serverMergeSpan.run(finite(old?.first_ok_at), finite(old?.covered_from), a, s.id);
+          }
+          // 옮기지 못하고 남은 것(겹친 기록 · 시리얼)은 이 노드에 같은 것이 있다 — 옛 노드 행을 비운다.
+          h.st.deleteRecordsOf.run(from, s.id); h.st.deleteSerialsOf.run(from, s.id); h.st.deleteServer.run(from, s.id);
         }
       }
       const prev = h.st.serverGet.get(a, s.id) || null;

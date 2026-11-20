@@ -215,7 +215,8 @@ export function buildFleet({ servers = [], db = { servers: [], records: [], seri
     serverRows.push({ ...base, status: v.status, statusLabel: SERVER_STATUS_LABEL[v.status], counts: v.counts, lastScanAt: row?.lastScanAt ?? null,
       lastStatusLabel: v.coverage?.lastStatusLabel || '', coveredFrom: row?.coveredFrom ?? null, complete: row?.complete ?? null, disks: (v.drives || []).length || null,
       alerting: Array.isArray(v.alerting) ? v.alerting.length : null,
-      traces: v.counts.traces, valsStatus: v.coverage?.vals?.status || null, selStatus: v.coverage?.sel?.status || null,
+      // 4회차 F9: 서버 탭이 '기록 없음(초록)' 만 보이고 흔적을 그리지 않았다 — 복구 불가 흔적 수를 함께 실어 띠와 같은 색으로 그린다.
+      traces: v.counts.traces, traceUnrec: Array.isArray(v.diskVals) ? v.diskVals.filter((d) => d?.trace === TRACE.unrecoverable).length : null, valsStatus: v.coverage?.vals?.status || null, selStatus: v.coverage?.sel?.status || null,
       logTotal: row?.logTotal ?? null, loginShare: loginShareOf(row?.readDiag), logSpanMs: logSpanOf(row)?.ms ?? null, continuousSince: row?.continuousSince ?? null });
     for (const sl of v.slots) {
       if (sl.total <= 0) continue;
@@ -270,16 +271,26 @@ export function buildFleet({ servers = [], db = { servers: [], records: [], seri
 
 /**
  * 서버 창에 싣는 기록(반증 3회차 D9 — 2만 건을 통째로 실어 6.8MB · 143ms 였고 화면은 200건만 그렸다).
- * 판정에 쓰는 분류(세는 것 · 고장 예측 · 빠짐)는 **전부**, 분류에 없는 기록은 가장 새 것 N건만. 판정은 이미 전부로 했다(serverView).
+ * **분류마다** 가장 새 것 N건(분류에 없는 기록은 더 적게). 판정은 이미 전부로 했다(serverView) — 이것은 화면에 싣는 몫이다.
+ * 4회차 반증 I2: 예전에는 분류된 기록을 상한 없이 남겨 PDR54 가 수천 건 쌓인 서버는 그대로 컸다. 분류마다 자르므로 고장 예측 · 빠짐 같은
+ * 드문 분류가 흔한 분류에 밀려 빠지지 않는다.
  * @returns {{records:Array, total:number, trimmed:number}}
  */
 export const OTHER_RECORDS_VIEW_MAX = 300;
-export function trimRecordsForView(records, otherMax = OTHER_RECORDS_VIEW_MAX) {
+export const CLASS_RECORDS_VIEW_MAX = 2_000;
+export function trimRecordsForView(records, otherMax = OTHER_RECORDS_VIEW_MAX, classMax = CLASS_RECORDS_VIEW_MAX) {
   const list = Array.isArray(records) ? records : [];
-  const keep = []; const other = [];
-  for (const r of list) (r && r.cls && r.cls !== CLS.other ? keep : other).push(r);
-  other.sort((a, b) => (b.created ?? -Infinity) - (a.created ?? -Infinity));
-  const kept = [...keep, ...other.slice(0, otherMax)];
+  const groups = new Map();
+  for (const r of list) {
+    const c = r && r.cls && r.cls !== CLS.other ? String(r.cls) : CLS.other;
+    if (!groups.has(c)) groups.set(c, []);
+    groups.get(c).push(r);
+  }
+  const kept = [];
+  for (const [c, g] of groups) {
+    g.sort((a, b) => (b?.created ?? -Infinity) - (a?.created ?? -Infinity));
+    kept.push(...g.slice(0, c === CLS.other ? otherMax : classMax));
+  }
   return { records: kept, total: list.length, trimmed: list.length - kept.length };
 }
 

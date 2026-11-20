@@ -117,7 +117,8 @@ async function runLocal(job, u) {
         const t = now();
         const r = await ingestServers('', batch.map((x) => cleanServer(x, t)).filter(Boolean), { now: t });
         u.newRecords += r.newRecords.length; for (const x of r.newRecords) { if (u._new.length >= 2_000) break; u._new.push(x); }
-        if (!r.ok) { u.error = String(r.reason || 'DB 저장 실패').slice(0, 200); return false; }
+        // 저장 못 한 묶음 — 그 가운데 저장된 서버를 알려 '저장 못 함' 수를 서버 단위로 센다(4회차 I5 · 커서는 여전히 묶음 전체를 보내지 않는다).
+        if (!r.ok) { u.error = String(r.reason || 'DB 저장 실패').slice(0, 200); return { stored: false, storedIds: r.storedIds || [] }; }
         return true;
       },
     });
@@ -153,6 +154,8 @@ export function claimForAgent(agent) {
     for (const u of j.units) {
       if (u.kind !== 'edge' || u.agent !== a || u.state !== 'running') continue;
       // 가져간 뒤 보고가 한 번도 없으면 — 엣지가 그 답을 받지 못한 것이다(가져오기 응답이 늦어 재시도 · 망 끊김 — R2-7). 닫지 않고 다시 내준다.
+      //   4회차 반증 I1: 그 사이 사용자가 중단했으면 다시 내주지 않고 '중단됨' 으로 닫는다(엣지가 중단한 조각을 처음부터 다시 읽었다).
+      if (!u.reported && u.stop) { u.state = 'stopped'; u.finishedAt = now(); finishUnit(j, u); continue; }
       if (!u.reported) { u.claimedAt = now(); u.updatedAt = u.claimedAt; return { id: j.id, mode: j.mode, manual: j.manual, serverIds: u.serverIds }; }
       u.state = 'failed'; u.finishedAt = now();
       u.error = '엣지가 끝을 알리지 않은 채 다음 작업을 가지러 왔습니다(엣지 재시작으로 보입니다) — 저장된 묶음은 남고, 나머지 서버는 다음 점검에서 읽습니다.';
@@ -171,6 +174,18 @@ export function claimForAgent(agent) {
 }
 
 /**
+ * 노드가 바뀐 서버의 이력 옮기기 판정(순수 — 4회차 반증 M1 · M2: 이 판정을 바꿔도 시험이 통과했다).
+ * **중앙 직결 → 엣지** 이고 중앙 등록부에 그 서버가 더는 없을 때만(반증 3회차 D1). 엣지끼리는 옮기지 않는다 · 등록부를 못 읽었으면(null) 옮기지 않는다.
+ * @param {Set<string>|null} localIds 중앙 등록부의 서버 id
+ */
+export function makeCanMoveFrom(localIds) {
+  return (from, id) => {
+    if (from !== '') return false;
+    return !!localIds && !localIds.has(String(id));
+  };
+}
+
+/**
  * 엣지의 보고(정제된 묶음). 그 엣지가 가져간 조각이 아니면 받지 않는다.
  * @returns {Promise<{ok:boolean, stored:boolean, stop?:boolean, reason?:string, newRecords?:number}>}
  */
@@ -182,13 +197,9 @@ export async function acceptPush(agent, push) {
   if (!u || u.state !== 'running') return { ok: true, stored: false, stop: true, reason: '이 엣지가 가져간 작업이 아니거나 이미 닫힌 작업입니다(중앙 재시작 포함) — 보관하지 않았습니다.' };
   const t = now();
   u.reported = true;   // 한 번이라도 보고했다 — 엣지가 이 조각을 받았다(claimForAgent 가 다시 내줄지 닫을지를 가른다)
-  // 노드가 바뀐 서버의 이력 옮기기(R2-3)는 **중앙 직결 → 엣지** 이고 중앙 등록부에 그 서버가 더는 없을 때만(반증 3회차 D1). 엣지끼리는 옮기지 않는다.
   let localIds = null;
-  const canMoveFrom = (from, id) => {
-    if (from !== '') return false;
-    return !!localIds && !localIds.has(String(id));
-  };
   if (push.servers.length) { try { localIds = new Set((await localServers()).map((x) => String(x?.id))); } catch { localIds = null; } }
+  const canMoveFrom = makeCanMoveFrom(localIds);
   const r = await ingestServers(a, push.servers, { now: t, canMoveFrom });
   u.newRecords += r.newRecords.length; for (const x of r.newRecords) { if (u._new.length >= 2_000) break; u._new.push(x); }
   if (push.total != null) u.total = push.total;
@@ -200,8 +211,10 @@ export async function acceptPush(agent, push) {
   //   닫지 않으면 '읽는 중' 으로 남아 그 엣지가 45분 동안 바쁜 것으로 보였다.
   if (!r.ok) {
     // 서버 id 로 센다 — 503 이면 엣지가 같은 묶음을 다시 보내 같은 서버를 두 번 셀 수 있었다(R2-6).
+    //   4회차 반증 I5: 서버 단위로 저장한다 — 이 묶음에서 저장된 서버(storedIds)는 세지 않는다(묶음 전체를 세어 수가 크게 나왔다).
     if (!u._unsavedIds) u._unsavedIds = new Set();
-    for (const x of push.servers) if (x?.id && u._unsavedIds.size < 5_000) u._unsavedIds.add(x.id);
+    const storedIds = new Set((r.storedIds || []).map(String));
+    for (const x of push.servers) if (x?.id && !storedIds.has(String(x.id)) && u._unsavedIds.size < 5_000) u._unsavedIds.add(x.id);
     u.unsaved = u._unsavedIds.size;
     if (!u.error) u.error = String(r.reason || 'DB 저장 실패').slice(0, 200);
   }

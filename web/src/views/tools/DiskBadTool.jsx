@@ -21,7 +21,7 @@ import { DiskBadServerPanel } from './DiskBadServerPanel.jsx';
 import { requireChanged } from '../changeResult.js';   // 112회차: 409(엣지 노드) 본문을 '저장했습니다' 로 읽지 않는다
 import { unreadMarkOf, unreadKind, saveLockedByUnread } from '../settingsUnread.js';   // 112회차: 못 읽은 동안의 기본값 폼으로 저장하지 않는다
 import { SettingsUnreadBanner } from '../SettingsUnreadBanner.jsx';
-import { fmtDate, fmtDateTime, rateText, pctText, num, clsTone, verdictTone, confidenceTone, noteOf, clsOfCode, JOB_STATE_LABEL, jobStateTone, unitProgress, scopeLabel, shortLogNote, spanText, scanSent, pastCoverageText, traceTone, valCell, mailInfoText, corpSaveText, edgeLastText } from './diskBadText.js';
+import { fmtDate, fmtDateTime, rateText, pctText, num, clsTone, verdictTone, confidenceTone, noteOf, clsOfCode, JOB_STATE_LABEL, jobStateTone, unitProgress, scopeLabel, shortLogNote, spanText, scanSent, pastCoverageText, traceTone, valCell, mailInfoText, corpSaveText, edgeLastText, serverRowBadge } from './diskBadText.js';
 
 const TABS = [
   { k: 'summary', label: '요약' }, { k: 'disks', label: '디스크 목록' }, { k: 'corps', label: '국가 · 법인' },
@@ -73,7 +73,16 @@ export function DiskBadTool() {
     return list.some((c) => typeof c.writable === 'boolean') ? new Set(list.filter((c) => c.writable).map((c) => c.id)) : null;
   }, [data]);
 
-  if (err && !data) return <ErrorBox error={err} />;
+  // 4회차 반증 I3: 법인 범위를 읽지 못하면(그 법인이 사라짐 · 서버 오류) 범위 선택 칸까지 사라져 '전체로' 돌아갈 길이 없었다.
+  if (err && !data) return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
+      <ErrorBox error={err} />
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        <button className="tab" style={{ flex: 'none', padding: '4px 12px' }} onClick={() => load()}>다시 읽기</button>
+        {corp && <button className="tab" style={{ flex: 'none', padding: '4px 12px' }} onClick={() => setCorp('')}>전체로</button>}
+      </div>
+    </div>
+  );
   if (!data) return <Loading label="디스크 배드 섹터 분석" />;
   if (!fleet) return <ErrorBox message={`디스크 배드 섹터 DB 를 열지 못했습니다 — ${data.db?.error || '포탈 로그를 확인하세요'}`} />;
   const T = fleet.totals;
@@ -106,7 +115,7 @@ export function DiskBadTool() {
         <div style={{ fontSize: 12.5, lineHeight: 1.6, minWidth: 0 }}>
           <b>서버 {num(T.servers)}대 중 {num(T.read)}대 읽음</b> · 못 읽음 {num(T.unread)}대 · 제외 {num(T.excluded)}대(HPE iLO)
           <div className="muted" style={{ fontSize: 12 }}>
-            {data.auto?.enabled ? `${data.auto.intervalHours}시간마다 자동 점검(새 로그만)` : '자동 점검 꺼짐 — 점검 탭에서 켜거나 직접 점검합니다'}
+            {isEdgePortal ? '점검 · 자동 점검은 중앙 포탈에서 합니다' : (data.auto?.enabled ? `${data.auto.intervalHours}시간마다 자동 점검(새 로그만)` : '자동 점검 꺼짐 — 점검 탭에서 켜거나 직접 점검합니다')}
             {' · '}못 읽은 서버의 디스크는 아래 수치에 들어 있지 않습니다{fleet.synthesized ? ' · 데모(합성) 결과가 섞여 있습니다' : ''}
             {Number.isFinite(T.staleServers) && T.staleServers > 0 ? ` · 마지막 점검이 실패해 지난 결과로 집계 중인 서버 ${num(T.staleServers)}대(서버 탭에서 이유를 봅니다)` : ''}
           </div>
@@ -141,7 +150,7 @@ export function DiskBadTool() {
         <Kpi label="디스크 1,000개당 기록 디스크" value={rateText(T.ratePer1000)} meta={`읽은 디스크 ${num(T.disks)}개 기준`} />
       </div>
 
-      {tab === 'summary' && <Summary fleet={fleet} refs={refs} openServer={openServer} setTab={setTab} setCorp={setCorp} />}
+      {tab === 'summary' && <Summary fleet={fleet} refs={refs} openServer={openServer} setTab={setTab} setCorp={setCorp} noneRead={noneRead} />}
       {tab === 'disks' && <Disks fleet={fleet} refs={refs} vf={vf} setVf={setVf} openServer={openServer} />}
       {tab === 'corps' && <Corps fleet={fleet} setCorp={setCorp} canScan={canScan} writable={writableCorps} onScanned={() => { setTab('scan'); load(); }} />}
       {tab === 'models' && <Models fleet={fleet} />}
@@ -160,8 +169,8 @@ export function DiskBadTool() {
   );
 }
 
-function InUseTable({ list, refs, openServer, limit = 0 }) {
-  if (!list.length) return <div className="muted" style={{ fontSize: 12.5 }}>해당하는 디스크가 없습니다.</div>;
+function InUseTable({ list, refs, openServer, limit = 0, emptyText = '해당하는 디스크가 없습니다.' }) {
+  if (!list.length) return <div className="muted" style={{ fontSize: 12.5 }}>{emptyText}</div>;
   return (
     // 1440px 카드(약 1,130px)에 '근거' 열까지 들어오게 — 위치는 서버 칸 아래, 최근 기록은 기록 칸 아래에 싣는다(화면 재확인에서 근거 열이 카드 밖으로 밀렸다).
     <STable className="data-table" minWidth={1080} limit={limit} style={{ width: '100%', fontSize: 12.5 }}>
@@ -255,15 +264,16 @@ function TraceCard({ fleet, openServer }) {
   );
 }
 
-function Summary({ fleet, refs, openServer, setTab, setCorp }) {
+function Summary({ fleet, refs, openServer, setTab, setCorp, noneRead = false }) {
   return (
     <>
       <div className="card" style={{ padding: 12, minWidth: 0 }}>
         <div className="flex between" style={{ alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
-          <b style={{ fontSize: 13.5 }}>배드 섹터 기록이 있는데 아직 쓰고 있는 디스크 <span className="muted" style={{ fontWeight: 400 }}>{fleet.inUse.length}개 · 복구 불가 많은 순</span></b>
+          <b style={{ fontSize: 13.5 }}>배드 섹터 기록이 있는데 아직 쓰고 있는 디스크 <span className="muted" style={{ fontWeight: 400 }}>{noneRead ? '—' : `${fleet.inUse.length}개`} · 복구 불가 많은 순</span></b>
           {fleet.inUse.length > 10 && <button className="tab" style={{ flex: 'none' }} onClick={() => setTab('disks')}>전부 보기</button>}
         </div>
-        <InUseTable list={fleet.inUse.slice(0, 10)} refs={refs} openServer={openServer} />
+        {/* 4회차 반증 F10: 읽은 서버가 없으면 '0개 · 해당 없음' 이 아니라 모름(KPI 와 같게). */}
+        <InUseTable list={fleet.inUse.slice(0, 10)} refs={refs} openServer={openServer} emptyText={noneRead ? '읽은 서버가 없습니다 — 점검한 뒤에 보입니다.' : undefined} />
         <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>빨강(복구 불가) = PDR46 · PDR47 · PDR63 · PDR64 / 주황 = PDR54(미디어 오류를 고쳐 씀) · PDR59(불량 블록을 옮김) · PDR57(불량 블록 표가 차 감) / 파랑 = PDR16(고장 예측 — 배드 섹터 수에 넣지 않음). 근거 칸은 판단 근거의 마지막 줄입니다 — 서버를 누르면 전부 봅니다.</div>
       </div>
       <AlertingCard fleet={fleet} openServer={openServer} />
@@ -420,7 +430,8 @@ function Servers({ fleet, labels, openServer }) {
           <tr key={`${s.agent}|${s.serverId}`}>
             <td>{s.country ? `${s.country} · ` : ''}{s.corpName}</td>
             <td><button className="tab" style={{ flex: 'none', padding: '2px 8px', fontSize: 12 }} onClick={() => openServer(s)}>{s.serverName}</button></td>
-            <td data-sort={s.status}><span className={`badge ${s.status === 'records' ? 'red' : s.status === 'unread' ? 'gray' : s.status === 'clean' ? 'green' : 'amber'}`}>{s.statusLabel}</span>{s.lastStatusLabel && <div className="muted" style={{ fontSize: 11 }}>{s.lastStatusLabel}</div>}</td>
+            {/* 4회차 반증 F9: 디스크 값 흔적을 서버 창 띠와 같은 기준으로(행은 초록인데 창은 빨강이었다). */}
+            {(() => { const b = serverRowBadge(s); return <td data-sort={s.status}><span className={`badge ${b.tone}`}>{b.label}</span>{b.note && <div style={{ fontSize: 11, color: b.tone === 'red' ? 'var(--red)' : undefined }}>{b.note}</div>}{s.lastStatusLabel && <div className="muted" style={{ fontSize: 11 }}>{s.lastStatusLabel}</div>}</td>; })()}
             {/* 못 읽은 서버의 수치는 0 이 아니라 모름(반증 R11). */}
             <td data-sort={s.status === 'unread' ? undefined : s.counts.slots} style={{ fontFamily: 'var(--mono)' }}>{s.status === 'unread' ? '—' : num(s.counts.slots)}</td>
             <td data-sort={s.status === 'unread' ? undefined : s.counts.inUse} style={{ fontFamily: 'var(--mono)' }}><b>{s.status === 'unread' ? '—' : num(s.counts.inUse)}</b></td>
@@ -476,6 +487,9 @@ function ScanPanel({ data, jobs, corp, canScan, reload, setJobs }) {
   const [mode, setMode] = useState('incremental');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
+  // 설정 저장 결과는 설정 칸 안에(4회차 반증 F7 — '어디를 점검할까요' 칸에 떠 저장한 자리에서 보이지 않았고, 그 칸이 없는 화면에서는 아예 안 보였다).
+  const [settingsMsg, setSettingsMsg] = useState('');
+  const [settingsMsgBad, setSettingsMsgBad] = useState(false);
   const [st, setSt] = useState(data.settings || null);
   const mailLine = mailInfoText(data.mail);
   // 설정을 바꿀 수 있는가(관리자 ∧ 조회 · 쓰기 전체 — 서버가 정한다). 모르면(옛 응답) 막지 않는다.
@@ -496,7 +510,7 @@ function ScanPanel({ data, jobs, corp, canScan, reload, setJobs }) {
   // 반증 3회차 D3: 체크박스(자동 점검 · 메일)는 담당자 글상자를 함께 보내지 않는다(편집 중인 글이 같이 저장됐다) — 담당자는 '담당자 저장' 만.
   //   저장 뒤 서버가 실제로 남긴 값으로 글상자를 다시 채우고, 못 읽은 줄 · 버린 주소 · 모르는 법인을 알린다(예전에는 '저장했습니다' 만 남고 메일이 소리 없이 빠졌다).
   const saveSettings = (patch, { withCorpTo = false } = {}) => {
-    if (saveLocked) { setMsg('설정 파일을 읽지 못한 상태라 저장하지 않았습니다.'); return Promise.resolve(); }
+    if (saveLocked) { setSettingsMsg('설정 파일을 읽지 못한 상태라 저장하지 않았습니다.'); setSettingsMsgBad(true); return Promise.resolve(); }
     let badLines = 0;
     const corpTo = {};
     if (withCorpTo) {
@@ -511,11 +525,18 @@ function ScanPanel({ data, jobs, corp, canScan, reload, setJobs }) {
     return putJson('/tools/disk-bad/settings', withCorpTo ? { ...patch, corpTo } : patch).then((r) => {
       requireChanged(r); setSt(r.settings);
       if (withCorpTo) setCorpToText(Object.entries(r.settings?.corpTo || {}).map(([k, v]) => `${k}=${v.join(',')}`).join('\n'));
-      setMsg(corpSaveText(r.corpReport, badLines));
+      setSettingsMsg(corpSaveText(r.corpReport, badLines)); setSettingsMsgBad(false);
       reload();
-    }).catch((e) => setMsg(e?.message || String(e)));
+    }).catch((e) => { setSettingsMsg(e?.message || String(e)); setSettingsMsgBad(true); });
   };
   const selCount = scope === 'all' ? null : (data.corps.find((c) => c.id === corpId)?.servers ?? 0);
+  // 4회차 반증 F6: 엣지 포탈은 점검 · 설정이 중앙에서만 된다 — 작업 목록(늘 비어 '아직 점검한 적이 없습니다')과 설정 칸(저장하면 409)을 보이지 않는다.
+  if (data.node?.role === 'edge') return (
+    <div className="card" style={{ padding: 14, minWidth: 0, fontSize: 12.5, lineHeight: 1.6 }}>
+      <b>엣지 포탈입니다 — 점검 작업 · 자동 점검 · 메일 설정은 중앙 포탈에서 합니다.</b>
+      <div className="muted" style={{ fontSize: 12 }}>이 노드는 중앙이 보낸 점검을 법인 안에서 읽어 올리기만 합니다. {data.node?.edge ? edgeLastText(data.node.edge) : ''}</div>
+    </div>
+  );
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-start' }}>
       {canScan && (
@@ -580,6 +601,7 @@ function ScanPanel({ data, jobs, corp, canScan, reload, setJobs }) {
           <label htmlFor="dbad-corpto" className="muted">법인 담당자 — 한 줄에 ‘vCenter id=메일,메일’</label>
           <textarea id="dbad-corpto" className="input" rows={4} value={corpToText} onChange={(e) => setCorpToText(e.target.value)} style={{ fontFamily: 'var(--mono)', fontSize: 12, width: '100%', boxSizing: 'border-box' }} placeholder={data.corps.slice(0, 2).map((c) => `${c.id}=it-admin@example.com`).join('\n')} />
           <div><button className="tab" style={{ flex: 'none' }} disabled={saveLocked || !editable} onClick={() => saveSettings({}, { withCorpTo: true })}>담당자 저장</button></div>
+          {settingsMsg && <div className={settingsMsgBad ? undefined : 'muted'} style={{ fontSize: 12, whiteSpace: 'normal', overflowWrap: 'anywhere', ...(settingsMsgBad ? { color: 'var(--red)', fontWeight: 600 } : {}) }}>{settingsMsg}</div>}
           {/* 123회차(112회차 반증): 이 화면은 주기 조회가 없다 — ‘다시 확인’ 이 없으면 다시 읽힌 뒤에도 페이지를 새로 열 때까지 잠긴 채였다(다시 읽으면 key 가 바뀌어 설정 칸을 저장된 값으로 다시 만든다). */}
           <SettingsUnreadBanner le={unread} what="디스크 배드 섹터 점검 설정" save="자동 점검 · 메일 · 담당자 저장" onRecheck={reload} style={{ marginBottom: 0 }} />
         </div>

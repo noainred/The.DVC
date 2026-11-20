@@ -74,7 +74,8 @@ test('#1 작업: 닫힌 · 모르는 작업(중앙 재시작)의 보고는 store
   assert.match(edge, /catch \(e\) \{ failures\.push\([^)]*\)[^}]*return false; \}/);
   // 중앙 직결도 저장 실패를 false 로(던지면 다음 묶음이 끊겼다).
   const jobs = code('diskbad/jobs.js');
-  assert.match(jobs, /if \(!r\.ok\) \{ u\.error = [^}]*return false; \}/);
+  // 4회차 I5: 저장 못 한 묶음은 그 가운데 저장된 서버를 함께 알린다(stored:false — scan.js 는 커서를 보내지 않고 수만 서버 단위로 센다).
+  assert.match(jobs, /if \(!r\.ok\) \{ u\.error = [^}]*return \{ stored: false, storedIds: r\.storedIds \|\| \[\] \}; \}/);
   assert.doesNotMatch(jobs, /throw new Error\(r\.reason \|\| 'DB 저장 실패'\)/);
 });
 
