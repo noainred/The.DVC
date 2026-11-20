@@ -220,6 +220,7 @@
 | `pdu-intervals.json` | 설정 | PDU 수집 주기(사용자 요구: '수집 시간은 설정에서 지정'). | ✅ |  | ✅ | pdu/intervals.js |
 | `pdu-thresholds.json` | 설정 | PDU 임계치 판정 + 알림 연동(v2.425). | ✅ |  | ✅ | pdu/thresholds.js |
 | `pdu.db` | DB | PDU 전력 시계열 |  |  | ✅ | pdu/db.js |
+| `rack.db` | DB | 랙 실장도 원장(데이터센터 · 전산실 · 랙 · 배치 · 변경 이력 — 사람이 입력, 자동 재생성 불가) |  |  | ✅ | rack/db.js |
 | `peer-trust.json` | 설정 | 장비 SSH 호스트키·TLS 인증서 지문 신뢰 저장소(검토 S-01·S-02) | ✅ | ✅ | ✅ | security/peerTrust.js |
 | `perf-hangs.ndjson` | 로그(NDJSON) | hang(이벤트 루프 정체·화면 장기 로딩) 이벤트를 `perf-hangs.ndjson` 에 남긴다(v2.498). | ✅ |  | ✅ | perf/hangLog.js |
 | `perf-monitor.json` | 설정 | 서버 성능 측정 설정(`perf-monitor.json`, v2.498, 사용자 요청 "설정에 서버 성능 | ✅ | ✅ | ✅ | perf/settings.js |
