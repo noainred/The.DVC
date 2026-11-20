@@ -28,7 +28,7 @@ import BoldText from '../../components/boldText.jsx';
 import { addressHiddenNote } from './addressHiddenText.js'; // v2.600 AUTHZ-2600-08
 import { rangeOf } from './bmUsageChart.js';
 import { distStateOf, lapsedVerifiedNote, distributionSummary, centralManagedNote, ignoredCentralNote, DIST_ENTERPRISE_NOTE,
-  distModeLabel, findDistRow, edgeOnView, edgeOnConfirmLines, edgeOffConfirmLines, edgeOnSavedText } from './bmUsageDistText.js'; // v2.627 · v2.927 중앙에서 켜기
+  distModeLabel, findDistRow, edgeOnView, edgeOnConfirmLines, edgeOffConfirmLines, edgeOnSavedText, DIST_OWNER_NOTE, distCanEdit } from './bmUsageDistText.js'; // v2.627 · v2.927 중앙에서 켜기
 import { fmtAgo } from '../../util/fmt.js';
 import {
   pctText, bpsText, ageText, usageTone, bmUtilThresholds, toneVar, srcMark,
@@ -454,7 +454,7 @@ export function BmUsage() {
    *   중앙 켜기 지시 상태(ev.instr)는 보관분 상태를 **대체하지 않고 함께** 보인다(반증 F8 — 보관분 오래됨·실패가 가려지지 않게).
    */
   const edgeRowView = (r) => {
-    const ev = edgeOnView(r, findDistRow(data?.distribution, r.agent), { canManage: !!data?.distribution });
+    const ev = edgeOnView(r, findDistRow(data?.distribution, r.agent), { canManage: distCanEdit(data?.distribution) });   // 재확인 N1: 소유자 등급만(서버 canEdit)
     const es = edgePullState(r, { minEdgeVersion: edges?.minEdgeVersion, staleMs: edges?.staleMs, canEnableCentral: ev.actions.includes('on'), offWhy: ev.offWhy });
     return { es, ev };
   };
@@ -1069,10 +1069,11 @@ export function BmUsage() {
             <>
               <h4 style={{ margin: '14px 0 6px' }}>엣지에 배포</h4>
               <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>
-                <input type="checkbox" checked={!!data.distribution.enabled} disabled={distSaving}
+                <input type="checkbox" checked={!!data.distribution.enabled} disabled={distSaving || !distCanEdit(data.distribution)}
                   onChange={(e) => saveDistribution({ enabled: e.target.checked })} />
                 {' '}이 설정을 모든 엣지에 배포(한 번에 켜기)
               </label>
+              {!distCanEdit(data.distribution) && <p style={{ margin: '0 0 6px', fontSize: 12, lineHeight: 1.6, color: toneVar('warn') }}><BoldText text={DIST_OWNER_NOTE} /></p>}
               <p style={{ margin: '0 0 6px', fontSize: 12, lineHeight: 1.6 }}><BoldText text={distributionSummary(data.distribution)} /></p>
               <p style={{ margin: '0 0 8px', fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}><BoldText text={DIST_ENTERPRISE_NOTE} /></p>
               {/* v2.927: 중앙 켜기(이 엣지만) 엣지 목록 — 전체 배포가 꺼져 있어도 이 엣지들은 중앙 값을 받는다. */}
@@ -1095,10 +1096,10 @@ export function BmUsage() {
                             {r.perEdge && (
                               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
                                 {r.corpsChanged === true && r.mode === 'per-edge' && (
-                                  <button className="btn btn-sm bmp-touch" disabled={!!edgeOnSaving}
+                                  <button className="btn btn-sm bmp-touch" disabled={!!edgeOnSaving || !distCanEdit(data.distribution)}
                                     onClick={() => setEdgeAsk({ agent: r.agent, on: true, reconfirm: true, where: 'dist' })}>다시 확인</button>
                                 )}
-                                <button className="btn btn-sm bmp-touch" disabled={!!edgeOnSaving}
+                                <button className="btn btn-sm bmp-touch" disabled={!!edgeOnSaving || !distCanEdit(data.distribution)}
                                   onClick={() => setEdgeAsk({ agent: r.agent, on: false, where: 'dist' })}>중앙 켜기 해제</button>
                               </div>
                             )}</td>
@@ -1107,7 +1108,7 @@ export function BmUsage() {
                             {lapsedVerifiedNote(r, fmtAgo) && <div className="muted" style={{ fontSize: 11 }}>{lapsedVerifiedNote(r, fmtAgo)}</div>}</td>
                           <td>
                             {/* v2.927: 중앙 켜기가 저장된 엣지는 제외할 수 없다(반대 지시 — 서버도 409). 중앙 켜기를 먼저 해제한다. */}
-                            <input type="checkbox" checked={!!r.excluded} disabled={distSaving || (!!r.perEdge && !r.excluded)}
+                            <input type="checkbox" checked={!!r.excluded} disabled={distSaving || !distCanEdit(data.distribution) || (!!r.perEdge && !r.excluded)}
                               title={r.perEdge && !r.excluded ? '중앙 켜기가 저장된 엣지입니다 — 중앙 켜기를 먼저 해제하세요' : ''}
                               onChange={(e) => saveDistribution({ excluded: { ...(data.distribution.excluded || {}), [r.agent.toLowerCase()]: e.target.checked } })} />
                           </td>

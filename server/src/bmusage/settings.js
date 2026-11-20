@@ -257,7 +257,7 @@ const CACHE_MS = 3_000;
 //   배포 라우트가 200 으로 내려보내면 전 엣지의 수집이 꺼진다 — 로드 오류를 기억해 /api/central/bmusage-config 가 503 으로 답한다.
 // 결정 반영(2026-11-19 ③): 확정은 보존을 기본값으로 다시 쓴다(못 읽은 지금 값보다 줄 수 있다 — 거부 쪽) → 서비스 점검 확정도 설정 소유자 등급(ownerOnly · checksLogs).
 const _localErr = makeSettingsLoadError(FILE, { label: '베어메탈 사용률 설정', confirm: () => saveBmUsageSettings({}, { confirmLoadError: true }), ownerOnly: true });   // 83회차: 서비스 점검 '기본값으로 확정' = 명시 확정
-const _distErr = makeSettingsLoadError(DIST_FILE, { label: '베어메탈 사용률 배포(전체 배포 · 제외 · 중앙 켜기 — 기본값으로 확정하면 모두 비워집니다)', confirm: ({ by } = {}) => saveDistribution({}, by || '') });
+const _distErr = makeSettingsLoadError(DIST_FILE, { label: '베어메탈 사용률 배포(전체 배포 · 제외 · 중앙 켜기 — 기본값으로 확정하면 모두 비워집니다)', confirm: ({ by } = {}) => saveDistribution({}, by || ''), ownerOnly: true });   // 재확인 N1: 확정은 배포를 모두 끈다(= 엣지 보존을 로컬 값으로) — 배포 라우트와 같은 소유자 등급
 // 전체 점검 34회차 F4(재현): 읽기 오류(EACCES · EISDIR 등 — e.code 가 있다)는 손상이 아니다 — 원본을 옮기지 않고 readError 로 기억하며,
 //   그동안 그 파일의 저장은 거절한다(저장하면 원자적 쓰기가 읽지 못한 원본을 기본값 + 패치로 덮는다). 20회차 F4(svcmon · 권한 파일)와 같은 규약.
 const UNREADABLE_SAVE = '베어메탈 사용률 설정 파일을 읽지 못한 상태(권한 · 소유자)라 저장하지 않았습니다 — 파일 권한을 고치고 재시작하세요(지금 저장하면 원본이 기본값으로 덮입니다).';

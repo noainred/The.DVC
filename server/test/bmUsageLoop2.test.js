@@ -312,7 +312,10 @@ test('R1 수집 설정 — 전역 값은 조회 ∧ 쓰기 전체 범위만 · �
   // 엣지 배포(전 엣지 수집 범위) — 쓰기만 좁은 관리자 403
   assert.equal((await call('wadm', 'PUT', '/tools/bm-usage/distribute', { enabled: false })).s, 403);
   assert.equal((await call('wadm', 'PUT', '/tools/bm-usage/distribute/edge', { agent: 'edge-x', on: false })).s, 403);
-  assert.notEqual((await call('adm', 'PUT', '/tools/bm-usage/distribute', { enabled: false })).s, 403);
+  // 재확인 N1(2026-11-19 사용자 '세 경로도 소유자 등급'): 배포 켜기 · 끄기는 엣지 보존을 바꿔 이력을 지울 수 있어 설정 소유자만 — adm 은 소유자가 아니다
+  //   (예전 이 줄은 '전체 관리자는 403 이 아니다' · 소유자 표는 bmUsageDecideGa N1)
+  const dn = await call('adm', 'PUT', '/tools/bm-usage/distribute', { enabled: false });
+  assert.equal(dn.s, 403); assert.equal(dn.j.code, 'distribute-owner');
 });
 
 test('R2 저활용 응답 캐시 — 본인 검토 사유 원문이 같은 범위의 다른 계정에 새지 않는다', async (t) => {

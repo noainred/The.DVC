@@ -283,6 +283,47 @@ test('③ 다른 경로 — 못 읽은 동안의 확정 저장 · 서비스 점�
   fs.rmSync(path.join(DIR, 'bmusage-central.json')); S._resetForTest();
 });
 
+test('③ 재확인 N1 — 엣지 배포 켜기 · 끄기 · 제외 · 중앙 켜기 · 해제 · 배포 파일 확정은 설정 소유자만 · 화면 표지 canEdit 은 같은 판정', async () => {
+  const DF = path.join(DIR, 'bmusage-distribute.json');
+  const distNow = () => S.loadDistribution();
+  assert.equal(distNow().enabled, false);
+  // 재현(기준판): 소유자가 아닌 전체 범위 관리자의 배포 켜기가 200 이었다 → 엣지 실효 보존이 중앙 값으로 바뀌어 다음 정리 틱이 이력을 지웠다
+  for (const body of [{ enabled: true }, { excluded: { e1: true } }]) {
+    const r = await call('adm', 'PUT', '/api/tools/bm-usage/distribute', body);
+    assert.equal(r.s, 403, `adm ${JSON.stringify(body)} ${r.txt.slice(0, 160)}`);
+    assert.equal(r.j.code, 'distribute-owner'); assert.equal(r.j.requiredOwner, true);
+  }
+  assert.equal(distNow().enabled, false, '아무것도 저장하지 않았다');
+  assert.equal(Object.keys(distNow().excluded || {}).length, 0);
+  for (const on of [true, false]) {
+    const r = await call('adm', 'PUT', '/api/tools/bm-usage/distribute/edge', { agent: 'e1', on });
+    assert.equal(r.s, 403, `adm 중앙 켜기 ${on} ${r.txt.slice(0, 160)}`); assert.equal(r.j.code, 'distribute-owner');
+  }
+  // 쓰기 일부 소유자는 전체 범위 게이트(fleetOnly)가 먼저 막는다(사유가 다르다)
+  const w = await call('wown', 'PUT', '/api/tools/bm-usage/distribute', { enabled: true });
+  assert.equal(w.s, 403); assert.notEqual(w.j.code, 'distribute-owner');
+  // 화면 표지 = 게이트 판정
+  const ga = await call('adm', 'GET', '/api/tools/bm-usage');
+  assert.equal(ga.s, 200, ga.txt.slice(0, 160)); assert.equal(ga.j.distribution?.canEdit, false, '비소유자 — 현황만');
+  const go = await call('own', 'GET', '/api/tools/bm-usage');
+  assert.equal(go.j.distribution?.canEdit, true);
+  // 소유자는 그대로(켜기 · 끄기)
+  const o1 = await call('own', 'PUT', '/api/tools/bm-usage/distribute', { enabled: true });
+  assert.equal(o1.s, 200, o1.txt.slice(0, 160)); assert.equal(o1.j.distribution.enabled, true); assert.equal(o1.j.distribution.canEdit, true);
+  assert.equal((await call('own', 'PUT', '/api/tools/bm-usage/distribute', { enabled: false })).s, 200);
+  assert.equal(distNow().enabled, false);
+  // 배포 파일 '기본값으로 확정'(서비스 점검)은 배포를 모두 끈다 = 끄기와 같은 결과 → 같은 등급
+  fs.writeFileSync(DF, '{ corrupt'); S._resetForTest(); S.loadDistribution();
+  const listed = (await import('../src/util/settingsLoadError.js')).listSettingsLoadErrors().find((x) => x.file === 'bmusage-distribute.json');
+  assert.equal(listed?.ownerOnly, true, JSON.stringify(listed));
+  const cf = await call('adm', 'POST', '/api/tools/service-check/settings-files/confirm', { file: 'bmusage-distribute.json' });
+  assert.equal(cf.s, 403, `배포 파일 확정도 소유자 — ${cf.txt.slice(0, 160)}`);
+  const co = await call('own', 'POST', '/api/tools/service-check/settings-files/confirm', { file: 'bmusage-distribute.json' });
+  assert.equal(co.s, 200, co.txt.slice(0, 160));
+  for (const f of fs.readdirSync(DIR).filter((n) => n.startsWith('bmusage-distribute.json'))) fs.rmSync(path.join(DIR, f));
+  S._resetForTest();
+});
+
 test('③ 판정 입력(retentionShrink) — 저장과 같은 정규화(범위 자름 · 빈 값 · store 키 단위 겹침)', () => {
   S._resetForTest();
   assert.deepEqual(S.retentionShrink({ rawRetentionDays: 3 }), { shrink: ['rawRetentionDays'], unknown: false }, '하한 7 로 잘려도 90 보다 작다');
