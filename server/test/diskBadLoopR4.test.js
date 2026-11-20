@@ -285,7 +285,9 @@ test('R7-1 — 같은 디스크는 누적 값을 가진 쪽 가운데 더 늦게
   // (b) 겹쳐 읽는 동안 옛 노드가 더 늦게 더 큰 값(7)을 봄.
   const mineD = { id: 'd1', serial: 'SN-1', realloc: 2, pending: 0, uncorrectable: 6, powerOnHours: 950, readAt: NOW - 2 * DAY, firstAt: NOW - 5 * DAY, changedAt: null, src: 'telemetry' };
   const later = { ...oldD, uncorrectable: 7, readAt: NOW - DAY, changedAt: NOW - DAY, before: { realloc: 2, pending: 0, uncorrectable: 6 } };
-  const b = D.mergeKeptVals({ status: 'ok', at: NOW - 2 * DAY, drives: [mineD] }, { status: 'ok', drives: [later] }, inv).drives[0];
+  const bAll = D.mergeKeptVals({ status: 'ok', at: NOW - 2 * DAY, drives: [mineD] }, { status: 'ok', at: NOW - DAY, drives: [later] }, inv);
+  assert.equal(bAll.at, NOW - 2 * DAY, '이 노드가 값을 읽었으면 마지막으로 읽은 때는 이 노드 것(8회차 S4)');
+  const b = bAll.drives[0];
   assert.equal(b.uncorrectable, 7);
   assert.equal(b.changedAt, NOW - DAY);
   assert.equal(b.before.uncorrectable, 6, '값과 늘기 전 값이 어긋나지 않는다');
