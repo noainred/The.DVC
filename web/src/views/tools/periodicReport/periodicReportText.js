@@ -1,5 +1,5 @@
 /**
- * periodicReportText.js — 정기 점검 보고 화면의 순수 문구 · 판정 표기(v3.31 · 설계 docs/design/periodic-report).
+ * periodicReportText.js — 정기 점검 보고 화면의 순수 문구 · 판정 표기(v3.32 · 설계 docs/design/periodic-report).
  * 판정 · 조립은 서버(server/src/periodic/*)가 하고, 화면은 그리기만 한다. 판정 표기는 색만으로 구분하지 않는다 — 기호 + 글자.
  * 서버 rules.js 의 STATUS_LABEL · KIND_LABEL 과 같은 글자(테스트가 대조한다).
  */

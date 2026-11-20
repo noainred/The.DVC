@@ -1929,7 +1929,7 @@ api.get('/tools/capacity-forecast', requirePerm('tools'), (req, res) => memoJson
   const mock = snap.source === 'mock';
   // 전 데이터스토어 한 벌로 센다(범위와 무관 — 범위는 바로 위 dss 에서 이미 골랐다). 첫 호출·첫 수집 직후에만 계산을 기다린다.
   const growth = await dsGrowthFor(all.map((d) => d.id));
-  // v3.31: 항목 계산은 tools/capacityForecastItems.js 하나(정기 점검 보고 리더와 같은 계산 — 판정 코어 하나).
+  // v3.32: 항목 계산은 tools/capacityForecastItems.js 하나(정기 점검 보고 리더와 같은 계산 — 판정 코어 하나).
   const items = forecastItems(dss, growth, { mock });
   const growthInfo = { source: 'rollup', windowDays: growth.windowDays, at: growth.at, stale: growth.stale, refreshing: growth.refreshing, error: growth.error };
   // v3.22.0: ?summary=1 — 법인별 줄 + 법인별 상위 N(Hypervisor 분석 화면 · dscfg/summary.js). 게이트(tools · toolGate 'capacity-forecast')와 범위(allowed)는 위 그대로 ·

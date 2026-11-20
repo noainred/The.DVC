@@ -1,5 +1,5 @@
 /**
- * tools/capacityForecastItems.js — 용량 고갈 예측 항목 계산(순수 · v3.31 정기 점검 보고 때 라우트에서 뽑았다 — 판정 코어 하나).
+ * tools/capacityForecastItems.js — 용량 고갈 예측 항목 계산(순수 · v3.32 정기 점검 보고 때 라우트에서 뽑았다 — 판정 코어 하나).
  * `/tools/capacity-forecast`(routes/api/toolsCapacity.js) 와 정기 점검 보고 리더(periodic/readers/vsphere.js capacityEta)가 같은 계산을 쓴다.
  *
  *  · 증가율은 롤업 추세(dsGrowthFor)의 점이 3개 이상일 때만 쓴다. 데모(mock)에서만 합성 증가율(synthesized 표지).

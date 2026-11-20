@@ -38,7 +38,7 @@ const AUTO_META_KEY = 'autoLastAt';
 let _corpOfFactory = () => () => null;
 
 export function setCorpResolver(factory) { if (typeof factory === 'function') _corpOfFactory = factory; }
-/** v3.31 정기 점검 보고 — 메일과 같은 법인 판정(agent, serverId) → { id(vCenter), name } | null. 표를 지금 한 번 만든다. */
+/** v3.32 정기 점검 보고 — 메일과 같은 법인 판정(agent, serverId) → { id(vCenter), name } | null. 표를 지금 한 번 만든다. */
 export function corpResolverNow() { try { return _corpOfFactory() || (() => null); } catch { return () => null; } }
 
 const now = () => Date.now();

@@ -1,6 +1,6 @@
 /**
  * periodic/readers/common.js — 리더 공용 도구(순수). 리더는 **저장된 것만 읽는다**(vCenter 로그인 · SSH · Director · 장비 호출 금지 —
- * periodicReport3310.test.js 가 readers/ 소스를 훑어 막는다).
+ * periodicReport3320.test.js 가 readers/ 소스를 훑어 막는다).
  */
 import { numOrNull } from '../../util/numOrNull.js';
 import { unreadVcenterReasons } from '../../metrics/unreadVcenters.js';

@@ -1,5 +1,5 @@
 /*
- * 정기 점검 보고(v3.31) — 전부 .prr 아래로만(전역 클래스를 바꾸지 않는다). text-transform 은 쓰지 않는다.
+ * 정기 점검 보고(v3.32) — 전부 .prr 아래로만(전역 클래스를 바꾸지 않는다). text-transform 은 쓰지 않는다.
  * 판정색: 정상 초록 · 주의 호박 · 이상 빨강 · 확인 불가 회색 빗금 · 정보 파랑 — 색만으로 구분하지 않게 칩에 기호 + 글자를 함께 쓴다.
  */
 .prr { display: flex; flex-direction: column; gap: 12px; min-width: 0; word-break: keep-all; }

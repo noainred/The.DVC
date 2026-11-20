@@ -1,5 +1,5 @@
 /**
- * routes/api/periodicReport.js — 정기 점검 보고(도구 `periodic-report` — 세그먼트 = 키 · 설계 docs/design/periodic-report · v3.31).
+ * routes/api/periodicReport.js — 정기 점검 보고(도구 `periodic-report` — 세그먼트 = 키 · 설계 docs/design/periodic-report · v3.32).
  *
  * 게이트(설계 §4.6):
  *  · 조회(보관함 · 보고서 · 카탈로그 · 상태) = tools 권한. **범위 계정은 자기 법인 행만**(rules.scopeCutDoc — 법인 행이 없는 포탈 자체 항목은 싣지 않는다) ·

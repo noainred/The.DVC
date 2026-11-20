@@ -82,7 +82,7 @@ function scopedCerts(user, snap, vcenterId) {
 }
 
 /**
- * 미보호 VM 계산(라우트 · 정기 점검 보고 공급자가 같이 쓴다 — v3.31). req.user 로 범위를 먼저 자른다(시스템 계정이면 전체).
+ * 미보호 VM 계산(라우트 · 정기 점검 보고 공급자가 같이 쓴다 — v3.32). req.user 로 범위를 먼저 자른다(시스템 계정이면 전체).
  * @param {{user:object}} req @param {object} snap @param {{vcenterId?:string, lookbackDays?:number|string, patterns?:string}} q
  */
 export async function unprotectedData(req, snap, q = {}) {
@@ -130,7 +130,7 @@ export async function unprotectedData(req, snap, q = {}) {
 }
 
 export function registerReports(api) {
-// v3.31 정기 점검 보고 — 미보호 VM 은 이 계산 하나(시스템 계정 = 전체 범위)를 리더가 공급자로 부른다(periodic/providers.js).
+// v3.32 정기 점검 보고 — 미보호 VM 은 이 계산 하나(시스템 계정 = 전체 범위)를 리더가 공급자로 부른다(periodic/providers.js).
 setPeriodicProvider('unprotected', (q = {}) => unprotectedData(SYSTEM_REQ, store.get(), q));
 
 // ① 일일 헬스체크 리포트(vCheck 스타일) — 화면 조회용(발송은 /admin/report/daily).

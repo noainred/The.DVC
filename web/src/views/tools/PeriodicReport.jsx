@@ -1,4 +1,4 @@
-// v3.31 — '정기 점검 보고'(도구 periodic-report · 메뉴 '특수 기능 › 리포트 · 점검' · 설계 docs/design/periodic-report · 컨펌 2026-11-20 '진행해').
+// v3.32 — '정기 점검 보고'(도구 periodic-report · 메뉴 '특수 기능 › 리포트 · 점검' · 설계 docs/design/periodic-report · 컨펌 2026-11-20 '진행해').
 //   일일 · 주간 · 월간 · 분기 — 인프라 · 서비스 · 설비를 저장된 수집 결과로 점검한 보고서의 보관함 · 점검 항목 · 일정 · 전달 · 보고서 열람.
 //   판정 · 조립 · 범위 절단은 서버(server/src/periodic/*) — 화면은 그리기만(periodicReport/periodicReportText.js 순수). 조회는 마운트 1회 + 버튼(폴링 없음 —
 //   보고서를 만드는 동안에만 상태를 5초마다 본다) · 늦게 온 이전 응답은 버린다. 보기는 해시 — archive · items · schedule · r/<회차 ID>.

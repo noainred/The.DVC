@@ -69,7 +69,7 @@ const SanSwitchTool = React.lazy(() => import('./tools/SanSwitchTool.jsx'));
 const SanFlowTool = React.lazy(() => import('./tools/SanFlowTool.jsx'));   // v2.935(C-②) Flow Vision 플로우 모니터
 const SanStorageTool = React.lazy(() => import('./tools/SanStorageTool.jsx'));   // v2.948 SAN 스토리지 성능(독립 도구)
 const PsInspectTool = React.lazy(() => import('./tools/PsInspectTool.jsx'));     // v2.965 PowerScale 장비 점검(독립 도구)
-const PeriodicReport = React.lazy(() => import('./tools/PeriodicReport.jsx'));   // v3.31 정기 점검 보고(일일 · 주간 · 월간 · 분기)
+const PeriodicReport = React.lazy(() => import('./tools/PeriodicReport.jsx'));   // v3.32 정기 점검 보고(일일 · 주간 · 월간 · 분기)
 const CvpTool = React.lazy(() => import('./tools/CvpTool.jsx'));         // Arista CloudVision(v2.608)
 const VmHygieneTool = React.lazy(() => import('./tools/VmHygieneTool.jsx')); // VM 구성 점검(v2.698)
 const HostHygieneTool = React.lazy(() => import('./tools/HostHygieneTool.jsx')); // ESXi 호스트 구성 점검(v2.699)

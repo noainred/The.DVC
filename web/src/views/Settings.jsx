@@ -8,7 +8,7 @@ import { badgeOf, filterByGrade, groupTone, isSearchHotkey, pushRecent, readKeyL
 import { useHashTab } from '../hooks/useHashTab.js';
 const VCenterAdmin = lazy(() => import('./VCenterAdmin.jsx'));
 const DatacenterAdmin = lazy(() => import('./DatacenterAdmin.jsx'));
-const PeriodicSchedule = lazy(() => import('./tools/periodicReport/ScheduleStandalone.jsx'));   // v3.31 정기 점검 보고 › 일정 · 전달(도구와 같은 화면)
+const PeriodicSchedule = lazy(() => import('./tools/periodicReport/ScheduleStandalone.jsx'));   // v3.32 정기 점검 보고 › 일정 · 전달(도구와 같은 화면)
 import VCenterConnTest from './VCenterConnTest.jsx';
 import NsxAdmin from './NsxAdmin.jsx';
 import IdracAdmin from './IdracAdmin.jsx';
@@ -125,7 +125,7 @@ const SUB = [
   // --- 알림·메일 ---
   { k: 'alerts', label: '알림', C: Alerts2, group: 'notify', desc: '임계 규칙과 알림 채널(Slack · Teams · 메일 · 웹훅)을 정하고 테스트 발송합니다. 일일 리포트 시각도 여기서.' },
   { k: 'mail', label: '메일 발송', C: MailSettings, group: 'notify', desc: '포탈 모든 기능이 함께 쓰는 SMTP 설정 — 기능별 켜기/끄기와 수신자도 정합니다.' },
-  // v3.31(사용자 요청 '일일/주간/월간/분기 정기 점검 보고 자동' · 설계 docs/design/periodic-report): 특수 기능 › 정기 점검 보고 의 일정 · 전달과 같은 화면.
+  // v3.32(사용자 요청 '일일/주간/월간/분기 정기 점검 보고 자동' · 설계 docs/design/periodic-report): 특수 기능 › 정기 점검 보고 의 일정 · 전달과 같은 화면.
   { k: 'periodic-report', label: '정기 점검 보고', C: PeriodicSchedule, group: 'notify', desc: '일일 · 주간 · 월간 · 분기 점검 보고서의 시각 · 받는 사람 · 알림 채널 · 공지 · 보관 기간을 정합니다.' },
   { k: 'ai-search', label: 'AI 검색', C: LlmSettings, group: 'notify', desc: '자연어 검색에 쓸 LLM(로컬 Ollama 또는 외부 API)을 정하고, 에어갭 환경에 Ollama 를 배포합니다.' },
   // --- 로그 ---

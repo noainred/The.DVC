@@ -1,4 +1,4 @@
-// v3.31 정기 점검 보고 — 화면 순수 문구(periodicReportText.js). 서버 rules.js · catalog.js 와 같은 글자 · 같은 축인지 대조한다.
+// v3.32 정기 점검 보고 — 화면 순수 문구(periodicReportText.js). 서버 rules.js · catalog.js 와 같은 글자 · 같은 축인지 대조한다.
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';

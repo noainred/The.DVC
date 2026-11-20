@@ -1,6 +1,6 @@
 # 설계: 특수 기능 › 리포트 · 점검 › 정기 점검 보고(`#/tools/periodic-report`) — 일일 · 주간 · 월간 · 분기 자동 점검 보고
 
-작성 2026-11-07 (main v2.939.0 `7910e18` 병합 기준 · 브랜치 `claude/pensive-cori-6nqpf3`) · 상태 **구현 — v3.31(§8)** · 컨펌 2026-11-20 '진행해'(§5 기본값 + 구현 때 갱신 두 가지 — §8 1 · 2) ·
+작성 2026-11-07 (main v2.939.0 `7910e18` 병합 기준 · 브랜치 `claude/pensive-cori-6nqpf3`) · 상태 **구현 — v3.32(§8)** · 컨펌 2026-11-20 '진행해'(§5 기본값 + 구현 때 갱신 두 가지 — §8 1 · 2) ·
 시안 캔버스: https://claude.ai/artifact/Q39QmkeATriGtawheikGha (아트보드 7장 — 이 폴더의 `*.dc.html` 이 같은 내용의 레퍼런스. HTML 프로토타입이지 복사 대상이 아니다.
 **모든 수치 · 법인 코드(KR1 · PL1 · CN2 …) · 날짜 · 상단 버전 배지는 그림용 가상값**이고 기능 이름 · 메뉴 경로 · 도구 키 · 모듈 · 함수 이름만 실제 포탈 것이다.
 색 · 글자는 `web/src/styles.css` `:root` 토큰 그대로. 축 3개의 범주 색은 feature-usage 시안에서 검증한 값(`#3b82f6 #d97706 #0891b2`)을 다시 썼고 dataviz 검증기를 어두운 패널(`#141b2d`) 위에서 통과했다(2026-11-07 실측).
@@ -145,9 +145,9 @@
 - 시안은 Chromium 으로 보지 않았다(규칙상 시안 단계는 캔버스 확인만 — 구현 때 1440/400 판독). 캔버스의 표 · 칩 배치는 브라우저에서 사용자가 보는 것이 최종이다.
 - 구현 기록은 §8 이다.
 
-## 8. 구현 기록(v3.31 — Opus · 2026-11-20)
+## 8. 구현 기록(v3.32 — Opus · 2026-11-20)
 
-컨펌: 2026-11-20 사용자 '진행해'. 직전 답변에서 '시안 갱신이 먼저 필요하다' 고 했는데 세션이 Opus 로 돌고 있었다 — 규칙(Opus 는 시안을 만들지 않는다)에 따라 **캔버스는 다시 그리지 않았고**, 갱신해야 할 결정 두 가지(§8 1 · 2)를 이 절에 적고 기본값으로 구현했다. 구현 시점 main v3.30.4 를 병합했고, 마무리 전에 v3.30.6 을 다시 병합했다.
+컨펌: 2026-11-20 사용자 '진행해'. 직전 답변에서 '시안 갱신이 먼저 필요하다' 고 했는데 세션이 Opus 로 돌고 있었다 — 규칙(Opus 는 시안을 만들지 않는다)에 따라 **캔버스는 다시 그리지 않았고**, 갱신해야 할 결정 두 가지(§8 1 · 2)를 이 절에 적고 기본값으로 구현했다. 구현 시점 main v3.30.4 를 병합했고, 마무리 전에 v3.30.6 을 다시 병합했다. 머지 직전 다른 작업이 v3.31.0 을 먼저 게시해 main(v3.31.0)을 병합하고 이 작업을 **v3.32.0** 으로 다시 매겼다(테스트 파일 이름도 `periodicReport3320`).
 
 | 영역 | 파일 |
 |---|---|
@@ -155,7 +155,7 @@
 | 기존 코드에서 뽑은 것(판정 코어 하나) | `tools/capacityForecastItems.js`(용량 고갈 예측 항목 — 라우트와 리더가 같이) · `routes/api/reports.js unprotectedData`(미보호 VM) · 공급자 등록 `veeam.js`(Backup Summary) · `reports.js`(미보호 VM) · `vmDns.js`(VM DNS) · `diskbad/jobs.js corpResolverNow`(메일과 같은 법인 판정) |
 | 등록 | `mail/kinds.js`(periodic-report) · `auth/toolAccess.js`(세그먼트 = 키) · `toolcats/catalog.js`(리포트·점검) · `insights/{dbLocation,portalDb,dbGuideData}.js`(periodic.db) · `docs/SETTINGS.md` 42번(뒤 번호 +1) · 생성 문서 5종 |
 | 웹 | `web/src/views/tools/PeriodicReport.jsx` · `periodicReport/{Archive,ReportView,CatalogTab,ScheduleTab,ScheduleStandalone,parts}.jsx` · `periodicReportText.js` · `periodicReport.css` · `specialToolsList.js` · `SpecialTools.jsx` · `Settings.jsx`(알림·메일 묶음) |
-| 테스트 | `server/test/periodicReport3310.test.js`(14) · `web/.../periodicReportText.test.js`(7) · 옮긴 계산을 따라간 스윕 3건(`audit2599e` · `audit2606g` · `bugfixes20260810`) · 등록부 · 분류표 5건(`settingsMenu2905` KEYS_ADDED · `usage/keys.js` SETTINGS_KEYS · `readErrorSweep97` ALLOW · `restoreSweep114` + `backup/stagedRestore.js` · `staleSnapshotSweep126` TABLE) |
+| 테스트 | `server/test/periodicReport3320.test.js`(14) · `web/.../periodicReportText.test.js`(7) · 옮긴 계산을 따라간 스윕 3건(`audit2599e` · `audit2606g` · `bugfixes20260810`) · 등록부 · 분류표 5건(`settingsMenu2905` KEYS_ADDED · `usage/keys.js` SETTINGS_KEYS · `readErrorSweep97` ALLOW · `restoreSweep114` + `backup/stagedRestore.js` · `staleSnapshotSweep126` TABLE) |
 
 **시안 · 컨펌 기본값과 달라진 점(정직 기록)**
 1. **PDF — 서버 PDF 엔진 대신 자급형 HTML 첨부**(§5 ④ 갱신): 시안 뒤 main 에 생긴 SAN 스토리지 성능 월간 · PowerScale 주간 보고서가 같은 방식(브라우저에서 인쇄 › PDF)이다. 의존성 · 한글 폰트 번들 없이 같은 결과를 낸다.
@@ -184,7 +184,7 @@
   · `readers/common.js vcUnreadReason` 이 ‘못 읽은 vCenter’ 판정을 따로 하나 더 두고 있었다 — 공용 `metrics/unreadVcenters.js` 를 부르게 바꿨다(첫 수집 중만 보고서 쪽에서 덧붙인다 — 공용 판정은 합계를 막지 않으려고 일부러 뺀다).
   · ‘소비 전력’(정보) 항목이 `allMeasuredPower` 에 vcSkip 을 넘기지 않아, 점검중 · 수집 실패 · 보고가 오래된 vCenter 와 끊긴 호스트의 마지막 추정 전력이 합계에 들어갔다 — store.js 와 같은 `unreadVcenterReasons + usageReadable` 을 넘기고 뺀 대수를 근거에 적는다.
 - Chromium(목 서버 · 1440 / 400 · 메인이 스크린샷 직접 판독) — 페이지 오류 0 · 페이지 가로 넘침 0(400 에서 표는 감싼 틀 안 가로 스크롤). 판독에서 고친 것: 조치 필요 표 상한 30 + ‘전부 보기’ · 타일 판정 칩 늘어짐 · 법인 기준 시각(asOf) · 확인 불가 항목 근거 앞 ‘—’ · 화면에 박힌 숫자 4곳(미리보기 ‘10분’ · 첨부 ‘5MB’ · 인증서 확인 주기 · 카탈로그 ‘기본 N’ — 주기 · 상한은 API 값이 아니면 쓰지 않는다) · 라이선스 도구 이름 · 일정 이력 ‘사유’ 열 1440 넘침 · DB 크기 1MB 미만 ‘0.0 MB’ → KB.
-- 전량 verify(커밋 7f3ed71e): 서버 node:test 11,379건 — 통과 11,378 · 실패 0 · 건너뜀 1. 웹 eslint 오류 0(경고 37 — 새 파일 0). 웹 vitest **실패 1** — `audit2613b` WEB2613-09(화면 도구에 손으로 만든 `setInterval` 폴러 금지)에 `PeriodicReport.jsx` 의 ‘만드는 중일 때 5초 폴링’ 이 걸렸다.
+- 전량 verify(커밋 7f3ed71e · 재번호 전): 서버 node:test 11,379건 — 통과 11,378 · 실패 0 · 건너뜀 1. 웹 eslint 오류 0(경고 37 — 새 파일 0). 웹 vitest **실패 1** — `audit2613b` WEB2613-09(화면 도구에 손으로 만든 `setInterval` 폴러 금지)에 `PeriodicReport.jsx` 의 ‘만드는 중일 때 5초 폴링’ 이 걸렸다.
   고친 것: 응답이 올 때마다 ‘아직 만드는 중이면 5초 뒤 한 번 더’ 를 `setTimeout` 으로 예약한다(요청이 겹치지 않고 · 끝나면 멈추고 · 조회 오류면 멈춘다). 상시 주기 조회가 아니라 usePolling 대상이 아니라고 판단했다 — 규약 목록(FOLLOW_UP)에 예외로 올리지 않았다.
   수정 뒤 웹 eslint · vitest(643파일 7,368건) · vite build 통과. 서버 쪽은 바뀐 것이 없어 다시 돌리지 않았다(CI 가 전량을 다시 돈다).
 

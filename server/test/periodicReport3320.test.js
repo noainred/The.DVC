@@ -1,5 +1,5 @@
 /**
- * v3.31 정기 점검 보고(server/src/periodic/* · routes/api/periodicReport.js · 설계 docs/design/periodic-report).
+ * v3.32 정기 점검 보고(server/src/periodic/* · routes/api/periodicReport.js · 설계 docs/design/periodic-report).
  *  ① 일정 — 일일(주말 건너뛰기) · 주간 · 월간(없는 날은 말일) · 분기(1 · 4 · 7 · 10월) 다음 · 이전 회차
  *  ② 보고 기간 · 회차 ID — 전날 · 앞 ISO 주(연도 경계) · 앞 달 · 앞 분기(1월이면 작년 4분기)
  *  ③ 회차 판정 — 유예 안 만들기 · 유예 밖 놓침(꺼져 있었음 · 늦음) · since 이전 소급 없음 · 시계 되감김

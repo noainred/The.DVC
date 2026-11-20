@@ -80,7 +80,7 @@ test('RECENT2599-03 store 롤업 — 부분 합(거짓 하락) 대신 미상 DS 
 });
 
 test('RECENT2599-03 capacity-forecast — 여유를 모르면 소진일도 null(전량 여유로 계산하지 않는다)', () => {
-  // v3.31: 항목 계산을 tools/capacityForecastItems.js 로 옮겼다(정기 점검 보고 리더와 같은 계산) — 같은 불변식을 그 파일에서 본다 · 라우트는 그 함수를 쓴다.
+  // v3.32: 항목 계산을 tools/capacityForecastItems.js 로 옮겼다(정기 점검 보고 리더와 같은 계산) — 같은 불변식을 그 파일에서 본다 · 라우트는 그 함수를 쓴다.
   const src = stripComments(fs.readFileSync(path.join(SRC, 'tools/capacityForecastItems.js'), 'utf8'));
   assert.doesNotMatch(src, /d\.freeGB \?\? Math\.max\(0, \(d\.capacityGB \|\| 0\) - \(d\.usedGB \|\| 0\)\)/);
   assert.match(src, /daysToFull = freeGB != null && slope/);

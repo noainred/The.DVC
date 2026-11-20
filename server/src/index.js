@@ -171,7 +171,7 @@ import { startLinkCheckPoller } from './linkcheck/poller.js';   // 통신 점검
 import { startIsiduPoller } from './isidu/poller.js';
 import { startIsiduDigest } from './isidu/digest.js';   // v2.742 아이실론 종합 메일(정한 요일·시각) — 중앙 전용 · 기본 꺼짐
 import { startIpamReport } from './ipam/report.js';   // v3.7.0 IP 관리 정기 보고(정한 요일·시각) — 중앙 전용 · 기본 꺼짐
-import { startPeriodicReport } from './periodic/service.js';   // v3.31 정기 점검 보고(일일 · 주간 · 월간 · 분기) — 중앙 전용 · 1분 틱 · 저장된 값만 읽는다
+import { startPeriodicReport } from './periodic/service.js';   // v3.32 정기 점검 보고(일일 · 주간 · 월간 · 분기) — 중앙 전용 · 1분 틱 · 저장된 값만 읽는다
 import { startGuestPartMail } from './guestpart/notify.js';   // v2.749 게스트 파티션 사용률 메일(통합·vCenter 별·95% 즉시·실패) — 중앙 전용 · 기본 꺼짐
 import { startIssueAutomation } from './issues/automation.js'; // v2.908 이슈 자동화 규칙(고정 4개 — 기본 꺼짐) · 저장소 이벤트 구독
 import { startAlertIssues } from './issues/alertIssues.js'; // v2.908 다른 알람 · 백업 실패 → 이슈 자동 등록(기본 꺼짐) — 알람 엔진 · Bareos 틱 구독

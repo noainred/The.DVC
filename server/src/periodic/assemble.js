@@ -2,7 +2,7 @@
  * periodic/assemble.js — 회차 하나를 조립한다(설계 §4.1 · §4.7): 그 주기의 항목마다 **리더**(readers/*.js)를 부르고, 결과를 법인(vCenter) 행 ·
  * 판정 · 근거로 정리해 회차 문서를 만든다. 파일 · DB · 메일은 모른다(service.js 가 저장 · 전달).
  *
- *  · 리더는 **저장된 것만 읽는다** — vCenter 로그인 · SSH · Director · 장비 호출 금지(소스 스윕 테스트가 고정 — periodicReport3310.test.js).
+ *  · 리더는 **저장된 것만 읽는다** — vCenter 로그인 · SSH · Director · 장비 호출 금지(소스 스윕 테스트가 고정 — periodicReport3320.test.js).
  *  · 리더 하나가 던지거나 시한을 넘기면 그 항목만 '확인 불가'(사유 적음) — 회차 전체를 실패시키지 않는다.
  *  · 항목 사이에 시간 기준 양보(createYielder) — 조립이 이벤트 루프를 오래 붙잡지 않게(perf-db v2.693).
  *  · 법인 행: { vc, status, count?, text? } — vc 를 모르고 DataCenter(법인 등록)만 아는 원천은 { dc } 로 주면 그 법인의 첫 vCenter 로 붙인다
