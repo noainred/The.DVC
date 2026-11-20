@@ -115,6 +115,7 @@ export const READ_STOP_LABEL = Object.freeze({
   capped: '배드 섹터 계열 기록이 한 번에 5,000건을 넘어 가장 새 것만 남겼습니다 — 그보다 오래된 구간은 본 것으로 치지 않습니다.',
   short: 'iDRAC 가 알려 준 건수보다 먼저 빈 쪽을 줘서 도중에 멈췄습니다 — 그 아래 구간은 읽지 못했습니다.',
   empty: 'iDRAC 가 로그 항목을 하나도 주지 않았습니다 — 로그가 비었거나 이 장비의 응답 모양이 달라 읽지 못한 것입니다.',
+  error: 'iDRAC 가 도중에 오류(바쁨 429 · 내부 오류 5xx)로 답해 멈췄습니다 — 그 아래 구간은 읽지 못했습니다. 다음 점검에서 다시 읽습니다.',
 });
 
 /**
@@ -130,6 +131,8 @@ export function diagInfo(diag) {
   if (Number.isFinite(diag.oldest)) lines.push(`읽은 로그의 범위: ${fmtDateTime(diag.oldest)} ~ ${fmtDateTime(diag.newest)} (${spanText(diag.oldest, Number.isFinite(diag.newest) ? diag.newest : diag.at)})${diag.oldestCode ? ` · 가장 오래된 항목 ${diag.oldestCode}` : ''}`);
   const top = Array.isArray(diag.top) ? diag.top.filter((x) => x && x.code) : [];
   if (top.length) lines.push(`많이 나온 기록 ID: ${top.map((x) => `${x.code} ${n(x.n)}`).join(' · ')}${Number.isFinite(diag.distinct) && diag.distinct > top.length ? ` · 그 밖 ${n(diag.distinct - top.length)}종` : ''}`);
+  // 시각을 못 읽은 항목(2000년 전 · 형식 오류)은 순서 · 구간 · 판정에 쓰지 않는다 — 저장 계열이 있으면 그 수를 밝힌다(못 읽음은 따로 센다).
+  if (Number.isFinite(diag.undated) && diag.undated > 0) lines.push(`시각을 못 읽은 항목 ${n(diag.undated)}건${Number.isFinite(diag.undatedStorage) && diag.undatedStorage > 0 ? ` — 그중 디스크 · 가상 디스크 기록 ${n(diag.undatedStorage)}건은 날짜를 몰라 판정에 넣지 못했습니다` : ''}`);
   let warn = '';
   if (Number.isFinite(diag.loginShare) && diag.loginShare >= 0.5) {
     warn = `읽은 로그의 ${Math.floor(diag.loginShare * 100)}% 이상이 로그인 계열로 보이는 기록(${(diag.loginCodes || []).join(' · ')})${diag.repeatCode ? `과 그 반복 표시(${diag.repeatCode})` : ''}입니다 — 위 ‘많이 나온 기록 ID’ 로 직접 확인할 수 있습니다. 이런 기록이 로그를 채우면 그 이전의 디스크 기록은 보관 로그로 넘어갔을 수 있습니다.`;
@@ -236,6 +239,20 @@ export function pastCoverageText(T) {
 /** 시스템 이벤트 로그 항목 종류(서버 sel.js SEL_KINDS). */
 export const SEL_KIND_LABEL = Object.freeze({ removed: '빠짐', installed: '장착', fault: '고장', predictive: '고장 예측', other: '그 밖' });
 export function selKindTone(k) { return k === 'fault' ? 'red' : k === 'predictive' ? 'blue' : k === 'removed' ? 'amber' : 'gray'; }
+
+/**
+ * 마지막 새 기록 메일(서버 notify.js diskBadMailInfo — 관리자 응답에만 온다). 없으면 null.
+ * @returns {{ok:boolean, text:string}|null}
+ */
+export function mailInfoText(m) {
+  if (!m || typeof m !== 'object' || !Number.isFinite(m.at)) return null;
+  if (m.skipped === 'off') return { ok: true, text: `새 기록 메일 꺼짐 — 마지막 판단 ${fmtDateTime(m.at)}` };
+  if (m.skipped === 'demo') return { ok: true, text: `데모 모드라 메일을 보내지 않았습니다(${fmtDateTime(m.at)})` };
+  const res = Array.isArray(m.results) ? m.results : [];
+  const ok = res.filter((x) => x && x.ok).length;
+  const bad = res.filter((x) => x && !x.ok);
+  return { ok: !bad.length, text: `마지막 새 기록 메일 ${fmtDateTime(m.at)} — ${ok}/${res.length}통 보냄${bad.length ? ` · 못 보낸 이유: ${[...new Set(bad.map((x) => x.reason || '알 수 없음'))].join(' · ').slice(0, 200)}` : ''}` };
+}
 
 export const JOB_STATE_LABEL = Object.freeze({
   queued: '엣지 대기', running: '읽는 중', done: '끝남', failed: '실패', 'not-started': '시작 못 함', 'no-response': '응답 없음', stopped: '중단됨', busy: '다른 점검 진행 중',

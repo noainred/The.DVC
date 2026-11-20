@@ -5,6 +5,12 @@
  * 결정적이다(서버 id 해시) — 다시 돌려도 같은 서버가 같은 기록을 낸다.
  */
 const DAY = 86_400_000;
+/**
+ * 지어낸 기록 · SEL 항목의 기준 시각(고정). 반증 2회차 R2-1: 예전에는 점검 시각(now)에서 거꾸로 셌다 — 항목 시각이 점검마다 달라져
+ * 중복 거르기 열쇠(항목 Id · 시각)가 매번 갈렸고, 데모에서 점검할 때마다 기록 · SEL 이 두 배가 되고 가짜 '새 기록' 이 났다.
+ * 지난 항목은 이 고정 시각 기준으로 만들고, '가장 새 항목' 과 커서만 지금 기준으로 둔다(실장비처럼 지난 항목의 시각은 바뀌지 않는다).
+ */
+export const MOCK_ANCHOR = Date.UTC(2026, 9, 1);
 
 function hash(s) {
   let h = 2166136261;
@@ -26,8 +32,9 @@ const PICK = ['PDR54', 'PDR54', 'PDR46', 'PDR59', 'PDR54', 'PDR47', 'PDR57', 'PD
 /** 한 서버의 전체(지어낸) 로그 — 시각 내림차순. */
 export function mockEntries(id, now) {
   const h = hash(`diskbad|${id}`);
+  const base = Math.min(now, MOCK_ANCHOR);
   const span = 120 + (h % 1300);                    // 로그가 남은 일수(넉 달 ~ 4년)
-  const oldest = now - span * DAY;
+  const oldest = base - span * DAY;
   const out = [];
   if (h % 100 < 14) {
     const disks = 2 + (h % 3 === 0 ? 1 : 0);
@@ -36,11 +43,11 @@ export function mockEntries(id, now) {
       const n = 1 + ((h >>> (k * 5 + 2)) % 5);
       for (let i = 0; i < n; i += 1) {
         const code = PICK[(h >>> (i * 2 + k)) % PICK.length];
-        const created = Math.max(oldest + DAY, now - ((h >>> (i + k * 4)) % span) * DAY - (i * 3_600_000));
+        const created = Math.max(oldest + DAY, base - ((h >>> (i + k * 4)) % span) * DAY - (i * 3_600_000));
         out.push({ entryId: String(1000 + k * 50 + i), created, messageId: `IDRAC.2.9.${code}`, severity: code === 'PDR54' || code === 'PDR59' ? 'OK' : 'Warning', message: MSG[code](disk), code });
       }
       if ((h >>> k) % 4 === 0) {
-        const created = now - (((h >>> 7) % 40) + 2) * DAY;
+        const created = base - (((h >>> 7) % 40) + 2) * DAY;
         out.push({ entryId: String(1900 + k), created, messageId: 'IDRAC.2.9.PDR5', severity: 'Warning', message: MSG.PDR5(disk), code: 'PDR5' });
       }
     }
@@ -91,7 +98,7 @@ function mockPast(id, drives, now) {
   const events = [];
   if (h % 3 === 0 && list.length) {
     const disk = 2 + (h % 4);
-    const created = now - (20 + (h % 300)) * DAY;
+    const created = Math.min(now, MOCK_ANCHOR) - (20 + (h % 300)) * DAY;
     events.push({ created, kind: 'removed', disk, bp: 1, slotKey: `bp1:d${disk}`, messageId: 'PDR1016', message: `Drive ${disk} is removed from disk drive bay 1.`, severity: 'Critical', sensor: 'Drive Slot / Bay' });
     events.push({ created: created + 600_000, kind: 'installed', disk, bp: 1, slotKey: `bp1:d${disk}`, messageId: '', message: `Drive ${disk} is installed in disk drive bay 1.`, severity: 'OK', sensor: 'Drive Slot / Bay' });
   }

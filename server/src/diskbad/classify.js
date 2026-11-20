@@ -24,6 +24,12 @@ export const CLS = Object.freeze({
   other: 'other',                 // 표에 없는 PDR/VDR — 원문만 보관
 });
 
+/**
+ * 장비 시각의 하한(2000-01-01 UTC). 그 전 시각은 iDRAC 의 초기화 전(RTC 초기화 · IPMI pre-init) 값이라 **못 읽은 시각**으로 본다 —
+ * 중앙 정제(ingest.js clampTime)와 엣지 파싱(lclog · sel)이 같은 값을 쓴다(반증 2회차 R2-5: 엣지는 1970 을 시각으로 쓰고 중앙은 버려 '끊김 없이 본 구간' 이 지워졌다).
+ */
+export const MIN_VALID_TIME = 946_684_800_000;
+
 /** 배드 섹터 기록으로 **세는** 분류(사용자 결정 2026-11-14: PDR54 · PDR59 · PDR57 포함). */
 export const COUNTED = Object.freeze(new Set([CLS.unrecoverable, CLS.corrected, CLS.reassigned, CLS.remapTable]));
 

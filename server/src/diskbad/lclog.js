@@ -22,7 +22,7 @@
  */
 import { redfishGetCapped } from '../idrac/redfish.js';
 import { numOrNull } from '../util/numOrNull.js';
-import { codeOf, isStorageCode, MESSAGE_MAX } from './classify.js';
+import { codeOf, isStorageCode, MESSAGE_MAX, MIN_VALID_TIME } from './classify.js';
 
 /** 장비가 준 관리자 경로는 **이 꼴일 때만** 쓴다(반증 3.8.2 #4 — 검사 없이 붙이면 다른 호스트 · 포트 꼴이 만들어지고, 끝 슬래시를 정규식으로 떼면 O(n²)). */
 export const MGR_PATH_RE = /^\/redfish\/v1\/Managers\/[A-Za-z0-9._-]{1,64}\/?$/;
@@ -43,7 +43,7 @@ export function entryRow(e) {
   if (!e || typeof e !== 'object') return null;
   const created = Date.parse(String(e.Created || ''));
   return {
-    entryId: t(e.Id, 64), created: Number.isFinite(created) ? created : null,
+    entryId: t(e.Id, 64), created: Number.isFinite(created) && created >= MIN_VALID_TIME ? created : null,
     messageId: t(e.MessageId, 64), severity: t(e.Severity, 16), message: t(e.Message, MESSAGE_MAX),
   };
 }
@@ -104,12 +104,15 @@ export async function readLclog(entry, { cursor = null, signal = null, budgetMs 
    *  · 인증 · 권한(401 · 403)과 상태 코드 없는 오류(연결 · 시한)는 그대로 던진다.
    */
   const nextPage = async (skip, prevHadNext) => {
-    const expectMore = prevHadNext || (out.total != null && skip < out.total);
+    // 건수를 알면 **건수로** 끝을 판정한다(반증 2회차 R2-4 — 마지막 쪽에도 다음 쪽 링크를 다는 장비가 다 읽은 뒤 범위 밖 오류를 주면 'short' 로 남아
+    //   매번 전량을 읽었다. 빈 쪽은 이미 건수로 판정했다 — 두 규칙을 맞춘다). 건수를 모를 때만 링크로.
+    const expectMore = out.total != null ? skip < out.total : prevHadNext;
     let r;
     try { r = await page(skip); } catch (e) {
       const st = e?.status;
       if (!Number.isFinite(st) || st === 401 || st === 403 || st < 400) throw e;
-      return expectMore ? { short: true } : { end: true };
+      // 429 · 5xx 는 '장비가 빈 쪽을 줬다' 가 아니다 — 오류로 멈췄다고 따로 밝힌다(화면 문구가 사실과 맞게).
+      return expectMore ? { short: true, error: st === 429 || st >= 500 } : { end: true };
     }
     if (r.noMembers) return expectMore ? { short: true } : { end: true };
     return r;
@@ -126,7 +129,7 @@ export async function readLclog(entry, { cursor = null, signal = null, budgetMs 
     return hit * 2 >= rows.length;
   };
 
-  const out = { mgrPath, order: 'unknown', total: null, read: 0, undated: 0, newest: null, oldestRead: null, reachedEnd: false, foundCursor: false, cursorUsed: false, stopped: '', entries: [],
+  const out = { mgrPath, order: 'unknown', total: null, read: 0, undated: 0, undatedStorage: 0, newest: null, oldestRead: null, reachedEnd: false, foundCursor: false, cursorUsed: false, stopped: '', entries: [],
     pages: 0, ms: 0, distinct: 0, top: [], firstLen: 0, hasNext: false, path: 'std', oldestCode: '' };
   // 읽은 항목의 기록 ID 구성(진단 — 판정에 쓰지 않는다). 로그인 기록이 활성 로그를 채웠는지 화면이 보여 준다.
   const codes = new Map();
@@ -141,7 +144,12 @@ export async function readLclog(entry, { cursor = null, signal = null, budgetMs 
     out.read += 1;
     const tc = codeOf(r.messageId) || '(ID 없음)';
     if (codes.has(tc) || codes.size < CODES_MAX) codes.set(tc, (codes.get(tc) || 0) + 1);
-    if (!Number.isFinite(r.created)) { out.undated += 1; return true; }
+    if (!Number.isFinite(r.created)) {
+      // 시각을 못 읽은 항목은 순서 · 구간에 쓰지 않고 센다. 저장 계열(PDR/VDR)이면 따로 센다 — 화면이 '날짜를 몰라 판정에 넣지 못한 기록 N건' 으로 밝힌다(R2-5).
+      out.undated += 1;
+      if (isStorageCode(codeOf(r.messageId))) out.undatedStorage += 1;
+      return true;
+    }
     // 가장 새 항목 = 시각이 가장 큰 것(최신 먼저면 첫 항목 · 건수를 몰라 오래된 것부터 읽을 때는 마지막 항목).
     if (!out.newest || r.created > out.newest.created) out.newest = { entryId: r.entryId, created: r.created };
     // 반증 #14: 지난번 자리는 **같은 항목(Id · 시각)** 을 만났을 때만 찾은 것이다. 시각이 더 오래된 항목을 먼저 만나도 멈추지 않는다 —
@@ -192,7 +200,7 @@ export async function readLclog(entry, { cursor = null, signal = null, budgetMs 
       if (start === 0) rows = first.rows.slice(0, end);
       else {
         const nx = await nextPage(start, true);
-        if (nx.short || nx.end) { out.stopped = 'short'; return done(); }
+        if (nx.short || nx.end) { out.stopped = nx.error ? 'error' : 'short'; return done(); }
         rows = nx.rows;
       }
       // 첫 쪽과 겹치는 자리(start < 첫 쪽 길이)는 겹치는 것이 정상이다 — 그때는 첫 행이 첫 쪽의 첫 행과 같은지만 본다.
@@ -225,7 +233,7 @@ export async function readLclog(entry, { cursor = null, signal = null, budgetMs 
     if (overBudget()) return done();
     const nx = await nextPage(skip, hadNext);
     if (nx.end) break;
-    if (nx.short) { out.stopped = 'short'; return done(); }
+    if (nx.short) { out.stopped = nx.error ? 'error' : 'short'; return done(); }
     if (skipIgnored(nx.rows)) { out.stopped = 'skip'; return done(); }
     if (!nx.rows.length) {
       // 장비가 알려 준 건수보다 먼저, 또는 다음 쪽이 있다고 해 놓고 빈 쪽이 왔다 — '끝' 으로 치지 않는다(도중에 끊김 · 일부만 읽음).

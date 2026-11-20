@@ -130,7 +130,7 @@ export async function scanOne(s, { mode = 'incremental', manual = false, invOf =
     const r = await withDeadline(timeout, (signal) => readLclog(s, { cursor, signal, budgetMs: Math.max(30_000, timeout - 60_000), maxEntries: MAX_ENTRIES(), now }), 'Lifecycle 로그 읽기 시한 초과');
     authGuard.clearAuthStop(s.id);
     const log = {
-      order: r.order, total: r.total, read: r.read, undated: r.undated, newestId: r.newest?.entryId || '', newestCreated: r.newest?.created ?? null,
+      order: r.order, total: r.total, read: r.read, undated: r.undated, undatedStorage: r.undatedStorage, newestId: r.newest?.entryId || '', newestCreated: r.newest?.created ?? null,
       oldestRead: r.oldestRead, reachedEnd: r.reachedEnd, foundCursor: r.foundCursor, cursorUsed: r.cursorUsed, stopped: r.stopped,
       cursorCreated: cursor?.created ?? null,
       // 무엇을 읽었는가(진단 — 판정에 쓰지 않는다): 쪽 수 · 걸린 시간 · 기록 ID 구성 · 첫 쪽 크기 · 다음 쪽 링크 · 경로.
