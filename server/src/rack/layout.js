@@ -111,7 +111,8 @@ export function cleanPlaceInput(body = {}, { partial = false } = {}) {
   const out = {};
   const has = (k) => Object.prototype.hasOwnProperty.call(b, k);
   if (!partial || has('face')) {
-    const face = cleanText(b.face, 8) || 'full';
+    // 반증 F3: 부분 수정에서 온 빈 값 · 문자열 아닌 값을 기본값(full)으로 바꾸지 않는다 — 새로 놓을 때만 비우면 full.
+    const face = cleanText(b.face, 8) || (partial ? '' : 'full');
     if (!FACES.includes(face)) return { error: '면은 full · front · rear 중 하나입니다.' };
     out.face = face;
   }
@@ -126,7 +127,7 @@ export function cleanPlaceInput(body = {}, { partial = false } = {}) {
     out.uSize = n;
   }
   if (!partial || has('kind')) {
-    const kind = cleanText(b.kind, 16) || 'other';
+    const kind = cleanText(b.kind, 16) || (partial ? '' : 'other');
     if (!KINDS.includes(kind)) return { error: '장비 종류를 알 수 없습니다.' };
     out.kind = kind;
   }

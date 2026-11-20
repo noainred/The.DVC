@@ -349,6 +349,8 @@ export function updateRack({ roomId, rev, user, id, input }) {
     const cur = racksById.get(id);
     if (!cur) fail(404, '랙을 찾지 못했습니다.');
     const next = { ...cur, ...input };
+    // 반증 F8: 높이만 고치고 종류를 고르지 않았으면 '직접 높이' 로 본다(종류의 높이와 어긋난 채 종류 이름이 남지 않게).
+    if (input.heightU != null && !input.typeId) next.typeId = '';
     if (input.name != null && [...racksById.values()].some((r) => r.id !== id && r.name === input.name)) fail(409, '같은 이름의 랙이 이 전산실에 이미 있습니다.');
     if (input.typeId) {
       const t = typeRow(db.prepare('SELECT * FROM rack_type WHERE id = ?').get(input.typeId));
@@ -376,16 +378,43 @@ export function removeRack({ roomId, rev, user, id }) {
 }
 
 const where = (p) => `U${p.uStart}${p.uSize > 1 ? `–${p.uStart + p.uSize - 1}` : ''}${p.face === 'front' ? '(앞)' : p.face === 'rear' ? '(뒤)' : ''}`;
-const nameOf = (p) => p.label || p.serial || '이름 없음';
+// 반증 F1: 이력 detail 은 범위 비관리자에게도 나간다 — 시리얼을 싣지 않는다(이름이 없으면 '이름 없는 장비').
+const nameOf = (p) => p.label || '이름 없는 장비';
+
+/** 이 배치의 시리얼 키(본 시리얼 + 추가 시리얼). */
+function keysOf(p) {
+  const out = new Set();
+  const k = serialKeyOf(p.serial); if (k) out.add(k);
+  for (const x of p.extraSerials || []) { const kx = serialKeyOf(x); if (kx) out.add(kx); }
+  return out;
+}
+/**
+ * 반증 F7: 같은 법인 원장에 같은 시리얼이 두 자리에 있으면 거절한다 — 한 장비가 두 곳에 '연결됨' 으로 보이면 어느 쪽이 맞는지 알 수 없다.
+ * (법인 안 모든 데이터센터 · 전산실을 본다 · 자기 자신은 뺀다)
+ */
+function serialClash(db, corpId, keys, ignoreId = '') {
+  if (!keys.size) return null;
+  const rows = db.prepare(`SELECT p.id, p.label, p.serial_key AS k, p.extra_serials AS x, r.name AS rack, m.name AS room FROM rack_place p
+    JOIN rack_rack r ON r.id = p.rack_id JOIN rack_room m ON m.id = r.room_id JOIN rack_site s ON s.id = m.site_id WHERE s.corp_id = ?`).all(corpId);
+  for (const r of rows) {
+    if (r.id === ignoreId) continue;
+    const theirs = new Set(r.k ? [r.k] : []);
+    try { for (const x of JSON.parse(r.x || '[]')) { const kx = serialKeyOf(x); if (kx) theirs.add(kx); } } catch { /* */ }
+    for (const k of keys) if (theirs.has(k)) return { id: r.id, where: `${r.room} › ${r.rack}`, label: r.label || '이름 없는 장비' };
+  }
+  return null;
+}
 
 export function addPlace({ roomId, rev, user, rackId, input }) {
-  return roomWrite(roomId, rev, user, ({ db, racksById, placesOf }) => {
+  return roomWrite(roomId, rev, user, ({ db, racksById, placesOf, corpId }) => {
     const rack = racksById.get(rackId);
     if (!rack) fail(404, '랙을 찾지 못했습니다.');
     const places = placesOf(rackId);
     if (places.length >= LIMITS.maxPlacesPerRack) fail(409, `랙 하나에 장비는 ${LIMITS.maxPlacesPerRack}대까지입니다.`);
     const issue = placementIssue(rack, places, input);
     if (issue) fail(409, issue.reason, { code: issue.code, withId: issue.withId });
+    const dup = serialClash(db, corpId, keysOf(input));
+    if (dup) fail(409, `같은 시리얼이 이미 ${dup.where} 의 ${dup.label} 에 있습니다 — 한 장비를 두 자리에 둘 수 없습니다.`, { code: 'serialDup', withId: dup.id });
     const id = newId();
     db.prepare(`INSERT INTO rack_place (id,rack_id,face,u_start,u_size,kind,label,model,serial,serial_key,extra_serials,note,rated_w,op_w,weight_kg,updated_at)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
@@ -397,7 +426,7 @@ export function addPlace({ roomId, rev, user, rackId, input }) {
 
 /** 장비 고치기 · 옮기기 — input 에 있는 필드만 바꾼다. rackId 가 오면 다른 랙으로 옮긴다(같은 전산실 안). */
 export function updatePlace({ roomId, rev, user, id, rackId = '', input }) {
-  return roomWrite(roomId, rev, user, ({ db, racksById, placesOf }) => {
+  return roomWrite(roomId, rev, user, ({ db, racksById, placesOf, corpId }) => {
     const curRow = db.prepare('SELECT * FROM rack_place WHERE id = ?').get(id);
     const cur = placeRow(curRow);
     if (!cur || !racksById.has(cur.rackId)) fail(404, '장비를 찾지 못했습니다.');
@@ -405,8 +434,17 @@ export function updatePlace({ roomId, rev, user, id, rackId = '', input }) {
     const rack = racksById.get(toRackId);
     if (!rack) fail(404, '옮길 랙을 이 전산실에서 찾지 못했습니다.');
     const next = { ...cur, ...input, rackId: toRackId };
-    const issue = placementIssue(rack, placesOf(toRackId), next, id);
+    // 반증 F4: 고친 결과가 이름도 시리얼도 없는 장비가 되면 거절(새로 놓을 때와 같은 기준).
+    if (!next.label && !next.serial) fail(400, '장비 이름이나 시리얼 중 하나는 있어야 합니다.');
+    const there = placesOf(toRackId);
+    // 반증 F5: 다른 랙으로 옮길 때도 랙당 장비 상한을 지킨다(놓을 때만 보던 상한).
+    if (toRackId !== cur.rackId && there.length >= LIMITS.maxPlacesPerRack) fail(409, `랙 하나에 장비는 ${LIMITS.maxPlacesPerRack}대까지입니다.`);
+    const issue = placementIssue(rack, there, next, id);
     if (issue) fail(409, issue.reason, { code: issue.code, withId: issue.withId });
+    if ('serial' in input || 'extraSerials' in input) {
+      const dup = serialClash(db, corpId, keysOf(next), id);
+      if (dup) fail(409, `같은 시리얼이 이미 ${dup.where} 의 ${dup.label} 에 있습니다 — 한 장비를 두 자리에 둘 수 없습니다.`, { code: 'serialDup', withId: dup.id });
+    }
     db.prepare(`UPDATE rack_place SET rack_id=?, face=?, u_start=?, u_size=?, kind=?, label=?, model=?, serial=?, serial_key=?, extra_serials=?, note=?,
       rated_w=?, op_w=?, weight_kg=?, updated_at=? WHERE id=?`)
       .run(toRackId, next.face, next.uStart, next.uSize, next.kind, next.label || '', next.model || '', next.serial || '', serialKeyOf(next.serial),

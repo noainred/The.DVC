@@ -30,6 +30,7 @@ import { hwSummaryOf, mgmtHostOf } from '../../idrac/hwSummary.js';
 import { partHealthRollup } from '../../idrac/invView.js';
 import { cleanText, cleanPlaceInput, cleanRackInput, intIn, rackTotals, serialKeyOf, LIMITS, KIND_LABEL } from '../../rack/layout.js';
 import * as R from '../../rack/db.js';
+import { acquireExport } from '../../util/exportBusy.js';
 
 const toolsPerm = requirePerm('tools');
 const csvPerm = requirePerm('data.csv');
@@ -188,12 +189,25 @@ async function roomView(req, roomId) {
 
 // ───────────────────────── 엑셀 내보내기(사용자 엑셀 실장도와 같은 꼴) ─────────────────────────
 
+/**
+ * 엑셀 시트 이름 — 금지 글자(\\ / ? * [ ] :) · 앞뒤 작은따옴표 · 예약어 'History' 를 피하고 31자로 자른다(반증 F2 — 그런 전산실 이름이면 내보내기가 500 이었다).
+ */
+export function sheetNameOf(name) {
+  let s = String(name || '').replace(/[\\/?*[\]:]/g, ' ').trim().slice(0, 31);
+  while (s.startsWith("'")) s = s.slice(1);
+  while (s.endsWith("'")) s = s.slice(0, -1);
+  s = s.trim();
+  if (!s) s = '전산실';
+  if (s.toLowerCase() === 'history') s = `전산실 ${s}`;
+  return s.slice(0, 31);
+}
+
 const fmtU = (p) => `U${p.uStart}${p.uSize > 1 ? `–${p.uStart + p.uSize - 1}` : ''}`;
 
 export async function buildRoomXlsx(view) {
   const wb = new ExcelJS.Workbook();
   wb.creator = 'THE DAVINCI';
-  const ws = wb.addWorksheet(String(view.room.name || '전산실').slice(0, 31).replace(/[\\/?*[\]:]/g, ' '));
+  const ws = wb.addWorksheet(sheetNameOf(view.room.name));
   const thin = { style: 'thin', color: { argb: 'FF808080' } };
   const box = { top: thin, left: thin, bottom: thin, right: thin };
   const COLS = 5; const GAP = 1;
@@ -385,7 +399,11 @@ export function registerRack(api) {
     try {
       const v = await roomView(req, req.params.id);
       if (!v) return res.status(404).json({ ok: false, reason: '전산실을 찾지 못했습니다.' });
-      const buf = await buildRoomXlsx(v);
+      // 반증 F6: 무거운 내보내기는 동시 1건(util/exportBusy.js — 루트 CLAUDE.md 성능 규약).
+      const lock = acquireExport('rack-xlsx', req);
+      if (!lock.ok) return res.status(lock.status).json(lock.body);
+      let buf;
+      try { buf = await buildRoomXlsx(v); } finally { lock.release(); }
       const fname = `rack-${v.site.name}-${v.room.name}.xlsx`.replace(/[^\w.\-가-힣]/g, '_');
       audit(req, 'rack.export', v.corp.id, `${v.site.name} › ${v.room.name}`);
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');

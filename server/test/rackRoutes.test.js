@@ -184,3 +184,70 @@ test('엑셀 내보내기: data.csv 권한 · 범위 404 · 장비 · 합계 줄
   assert.ok(texts.some((t) => t.startsWith('실장율(N/42)')));
   assert.ok(texts.some((t) => /560 W/.test(t)));
 });
+
+test('반증 F1: 이름 없이 시리얼만 넣은 장비 — 이력 내용에 시리얼이 나가지 않는다', async () => {
+  const p = await op(ADMIN, { op: 'place.add', rackId, rev, place: { face: 'rear', uStart: 30, uSize: 1, kind: 'other', serial: 'SECRETTAG9' } });
+  assert.equal(p.statusCode, 200); rev = p.body.rev;
+  const o = await call('GET /tools/rack/room/:id', { user: OP_A, params: { id: roomId } });
+  assert.ok(!JSON.stringify(o.body.logs).includes('SECRETTAG9'));
+  assert.ok(!JSON.stringify(o.body.places).includes('SECRETTAG9'));
+  const rm = await op(ADMIN, { op: 'place.remove', id: p.body.id, rev });
+  rev = rm.body.rev;
+  assert.ok(!JSON.stringify((await call('GET /tools/rack/room/:id', { user: OP_A, params: { id: roomId } })).body.logs).includes('SECRETTAG9'));
+});
+
+test('반증 F3 · F4 · F7: 부분 수정의 빈 면 · 종류는 400 · 이름과 시리얼을 모두 비우면 400 · 같은 법인 시리얼 중복 409', async () => {
+  const p = await op(ADMIN, { op: 'place.add', rackId, rev, place: { face: 'rear', uStart: 31, uSize: 1, kind: 'other', label: '후면 장비', serial: 'DUP-1' } });
+  assert.equal(p.statusCode, 200); rev = p.body.rev;
+  for (const bad of [{ face: '' }, { face: 123 }, { face: ['rear'] }, { kind: '' }]) {
+    assert.equal((await op(ADMIN, { op: 'place.update', id: p.body.id, rev, place: bad })).statusCode, 400, JSON.stringify(bad));
+  }
+  assert.equal((await op(ADMIN, { op: 'place.update', id: p.body.id, rev, place: { label: '', serial: '' } })).statusCode, 400);
+  const d = await op(ADMIN, { op: 'place.add', rackId, rev, place: { face: 'full', uStart: 33, uSize: 1, kind: 'other', label: '다른 장비', serial: 'dup1' } });
+  assert.equal(d.statusCode, 409); assert.equal(d.body.code, 'serialDup', '대소문자 · 하이픈이 달라도 같은 시리얼');
+  const d2 = await op(ADMIN, { op: 'place.add', rackId, rev, place: { face: 'full', uStart: 33, uSize: 1, kind: 'other', label: '다른 장비', extraSerials: ['DUP-1'] } });
+  assert.equal(d2.statusCode, 409, '추가 시리얼도 대조');
+  const same = await op(ADMIN, { op: 'place.update', id: p.body.id, rev, place: { serial: 'DUP-1', label: '후면 장비 2' } });
+  assert.equal(same.statusCode, 200, '자기 자신과는 중복 아님'); rev = same.body.rev;
+  rev = (await op(ADMIN, { op: 'place.remove', id: p.body.id, rev })).body.rev;
+});
+
+test('반증 F8: 랙 높이만 고치면 종류는 직접 입력으로 바뀐다', async () => {
+  const t = (await call('GET /tools/rack', { user: ADMIN })).body.types[0];
+  const r = await op(ADMIN, { op: 'rack.add', roomId, rev, rack: { name: 'T1', typeId: t.id } });
+  assert.equal(r.statusCode, 200); rev = r.body.rev;
+  const u = await op(ADMIN, { op: 'rack.update', id: r.body.id, rev, rack: { heightU: 45 } });
+  assert.equal(u.statusCode, 200); rev = u.body.rev;
+  const rk = (await call('GET /tools/rack/room/:id', { params: { id: roomId } })).body.racks.find((x) => x.id === r.body.id);
+  assert.equal(rk.heightU, 45); assert.equal(rk.typeId, '');
+  rev = (await op(ADMIN, { op: 'rack.remove', id: r.body.id, rev })).body.rev;
+});
+
+test('반증 F2 · F6: 시트 이름 예약어 · 작은따옴표 · 내보내기 동시 1건', async () => {
+  const { sheetNameOf } = await import('../src/routes/api/rack.js');
+  assert.equal(sheetNameOf('History'), '전산실 History');
+  assert.equal(sheetNameOf("'q'"), 'q');
+  assert.equal(sheetNameOf("''"), '전산실');
+  assert.equal(sheetNameOf('a/b:c'), 'a b c');
+  const r2 = (await op(ADMIN, { op: 'room.add', siteId, name: 'History' })).body.id;
+  const x = await call('GET /tools/rack/room/:id/xlsx', { user: ADMIN, params: { id: r2 } });
+  assert.equal(x.statusCode, 200);
+  const { acquireExport } = await import('../src/util/exportBusy.js');
+  const lock = acquireExport('rack-xlsx', { user: ADMIN });
+  try { assert.equal((await call('GET /tools/rack/room/:id/xlsx', { user: ADMIN, params: { id: roomId } })).statusCode, 409); } finally { lock.release(); }
+});
+
+test('범위: 같은 법인이라도 범위 밖 vCenter 의 서버는 범위 계정에 연결 · 미배치로 보이지 않는다(서버 목록을 먼저 자른다)', async () => {
+  registry.importServers([{ id: 's4', name: 'kr-esx-vcc', host: 'https://192.0.2.14', username: 'root', password: 'x', serviceTag: 'VCC0001', vcenterId: 'vc-c' }], 'merge');
+  const p = await op(ADMIN, { op: 'place.add', rackId, rev, place: { face: 'full', uStart: 36, uSize: 2, kind: 'server', label: 'vc-c 서버', serial: 'VCC0001' } });
+  assert.equal(p.statusCode, 200); rev = p.body.rev;
+  const a = (await call('GET /tools/rack/room/:id', { user: ADMIN, params: { id: roomId } })).body;
+  assert.equal(a.places.find((x) => x.id === p.body.id).linkState, 'linked', '전체 범위 관리자는 연결된다');
+  const o = (await call('GET /tools/rack/room/:id', { user: OP_A, params: { id: roomId } })).body;
+  const mine = o.places.find((x) => x.id === p.body.id);
+  assert.equal(mine.linkState, 'not-found'); assert.equal(mine.link, null, 'vc-c 서버의 iDRAC 정보가 vc-a 범위 계정에 새지 않는다');
+  rev = (await op(ADMIN, { op: 'place.remove', id: p.body.id, rev })).body.rev;
+  const o2 = (await call('GET /tools/rack/room/:id', { user: OP_A, params: { id: roomId } })).body;
+  assert.ok(!o2.unplaced.some((u) => u.serverId === 's4'), '범위 밖 서버는 미배치 목록에도 없다');
+  assert.ok((await call('GET /tools/rack/room/:id', { user: ADMIN, params: { id: roomId } })).body.unplaced.some((u) => u.serverId === 's4'));
+});
