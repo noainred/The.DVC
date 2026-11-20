@@ -185,6 +185,9 @@ function normalize(body, existing = null) {
   // Accept a bare IP/hostname and normalize to https://host.
   if (!/^https?:\/\//.test(host)) host = `https://${host}`;
   host = trimTrailingSlashes(host);
+  // 160회차(155 F2 반증 — 재현): 상한은 **저장되는 꼴**(스킴을 붙인 뒤)에도 건다 — 위 검사만으로는 스킴 없는 2,041~2,048자 host 가 등록은 되고
+  //   ‘https://’ 가 붙어 2,049자 넘게 저장돼, 그 뒤의 모든 수정(이름 · 사용 여부 · 병합 가져오기)이 저장값을 다시 읽다 '너무 깁니다' 로 거절됐다(지우기만 가능).
+  if (host.length > HOST_MAX_LEN) return [null, `host 가 너무 깁니다(최대 ${HOST_MAX_LEN.toLocaleString('en-US')}자 — 스킴 포함).`];
   // v2.537(인증·인가 3차 감사): 루프백·링크로컬·우회표기 차단 — storage/sanswitch/pdu 등록부와 같은 규칙.
   // 이 등록부는 v2.536 까지 host 를 **검사 없이** 받았다(형식 정규화만). 폴러가 그 host 로 Redfish
   // 자격증명(Basic/Digest)을 보내므로 등록 = 접속이다. bulkAddByIps·registerScanned 도 importServers

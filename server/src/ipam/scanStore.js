@@ -925,9 +925,15 @@ registerStateFile(BASE);
 const baseKey = (a) => String(a || LOCAL).toLowerCase();   // 에이전트 이름은 대소문자 무시(설정 · 보고와 같은 규칙)
 let baseline = (() => { const v = readJson(BASE, {}); return v && typeof v === 'object' && !Array.isArray(v) ? v : {}; })();
 registerStore(BASE, () => baseline);
+/*
+ * 160회차(재현): 기준선 맵은 에이전트 이름을 **소문자로** 바꿔 키로 쓴다 — 자기 속성만 읽고 쓴다. 예전 `baseline[k]` 는 이름 ‘__PROTO__’(대문자 · 섞어 쓴 꼴)에서
+ *   Object.prototype 을 '그 에이전트의 표시' 로 읽어, 완료 보고마다 대역 줄(‘10.0.0.0/24’ …)을 **Object.prototype 에 열거 속성으로** 써 넣었다(프로세스의 모든 객체가 그 키를 물려받는다).
+ *   recordAgentReport 의 가드(25회차 F-10)는 글자 그대로의 ‘__proto__’ 만 막았다. 에이전트 이름 규칙(영숫자 · . _ -)은 그 이름을 받는다.
+ */
+const baseMarksOf = (k) => { const m = Object.prototype.hasOwnProperty.call(baseline, k) ? baseline[k] : null; return m && typeof m === 'object' && !Array.isArray(m) ? m : null; };
 /** 그 에이전트의 대역 중 기준선이 잡힌 줄 안의 IP 인가 — 판정 함수를 돌려준다(대역은 한 번만 컴파일). */
 function baselineChecker(agent) {
-  const marks = baseline[baseKey(agent)] || {};
+  const marks = baseMarksOf(baseKey(agent)) || {};
   const bounds = (loadScanSettings(agent)?.ranges || []).filter((spec) => marks[spec]).map(specToRange).filter(Boolean);
   if (!bounds.length) return () => false;
   return (ip) => { const n = ipToNum(ip); return n != null && bounds.some((r) => n >= r.lo && n <= r.hi); };
@@ -937,16 +943,16 @@ function markBaseline(agent, ts = Date.now()) {
   const k = baseKey(agent);
   let ranges = [];
   try { ranges = loadScanSettings(agent)?.ranges || []; } catch { return []; }
-  const marks = baseline[k] && typeof baseline[k] === 'object' ? baseline[k] : {};
-  const added = ranges.filter((spec) => typeof spec === 'string' && !marks[spec]);
+  const marks = baseMarksOf(k) || {};   // 160회차: 자기 속성만(위 머리말)
+  const added = ranges.filter((spec) => typeof spec === 'string' && !Object.prototype.hasOwnProperty.call(marks, spec));
   if (!added.length) return added;
-  for (const spec of added) marks[spec] = ts;
-  baseline[k] = marks;
+  for (const spec of added) Object.defineProperty(marks, spec, { value: ts, writable: true, enumerable: true, configurable: true });
+  Object.defineProperty(baseline, k, { value: marks, writable: true, enumerable: true, configurable: true });   // ‘__proto__’ 대입은 원형을 바꾼다 — 자기 속성으로 둔다
   scheduleWrite(BASE);
   return added;
 }
 /** 테스트 · 진단 — 그 에이전트의 기준선 표시(사본). */
-export function changeBaselineOf(agent = LOCAL) { return { ...(baseline[baseKey(agent)] || {}) }; }
+export function changeBaselineOf(agent = LOCAL) { return { ...(baseMarksOf(baseKey(agent)) || {}) }; }
 
 // ---- IP 사용 이력 ----------------------------------------------------------
 // 어떤 IP가 "사용 시작(up) → 미사용(down)"으로 바뀌는 전이를 기록해 대장에서 추이를 본다.

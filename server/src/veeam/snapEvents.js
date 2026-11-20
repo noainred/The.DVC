@@ -215,7 +215,7 @@ function accFrom(text) {
   if (isObj(raw?.forgotten)) {
     for (const [k, t] of Object.entries(raw.forgotten).slice(0, MAX_FORGOTTEN)) {
       const a = canonAcct(k);
-      if (a && typeof t === 'number' && Number.isFinite(t) && t > 0) acc.forgotten[a] = t;
+      if (a && typeof t === 'number' && Number.isFinite(t) && t > 0) ownSet(acc.forgotten, a, t);   // 160회차: 지운 계정 표시도 자기 속성으로(아래 forgetLearned)
     }
   }
   return acc;
@@ -330,7 +330,8 @@ export function rememberLearned(list, now = Date.now()) {
 const forgetFresh = (t, now) => Number.isFinite(t) && Math.abs(now - t) < FORGET_TTL_MS;
 /** 그 계정을 지운 시각(시한 안일 때만) 또는 null. */
 function forgottenAt(a, account, now) {
-  const t = a.forgotten?.[canonAcct(account)];
+  const k = canonAcct(account);
+  const t = a.forgotten && Object.hasOwn(a.forgotten, k) ? a.forgotten[k] : undefined;   // 160회차: 자기 속성만
   return forgetFresh(t, now) ? t : null;
 }
 /** 학습 계정 지우기(관리자 — 잘못 배운 계정, 검토 #1). 지운 수. v2.763(V4-I1): 지운 계정은 FORGET_TTL_MS 동안 다시 배우지 않는다. */
@@ -339,7 +340,9 @@ export function forgetLearned(names, now = Date.now()) {
   let n = 0;
   for (const raw of Array.isArray(names) ? names.slice(0, MAX_LEARNED) : []) {
     const k = typeof raw === 'string' ? raw.trim() : '';
-    if (k && Object.hasOwn(a.learned, k)) { delete a.learned[k]; a.forgotten[canonAcct(k)] = now; n++; }   // 155회차: 배운 적 없는 ‘constructor’ 를 지웠다고 세지 않는다
+    // 160회차(155 F1ⓒ 반증 — 재현): 지운 표시도 자기 속성으로 — 예전 `a.forgotten[…] = now` 는 계정 ‘__proto__’ 에서 아무것도 남기지 않아(수를 원형에 대입 = 무시)
+    //   155회차부터 저장되는 그 학습 계정을 지워도 다음 요약이 곧바로 다시 배웠다(지운 계정은 FORGET_TTL_MS 동안 다시 배우지 않는다는 규칙이 그 이름에만 빠졌다).
+    if (k && Object.hasOwn(a.learned, k)) { delete a.learned[k]; ownSet(a.forgotten, canonAcct(k), now); n++; }   // 155회차: 배운 적 없는 ‘constructor’ 를 지웠다고 세지 않는다
   }
   if (n) {
     // 시한이 지난 것은 지우고, 상한을 넘으면 오래된 것부터 버린다(파일이 끝없이 자라지 않게).

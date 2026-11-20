@@ -493,8 +493,25 @@ export function compactZoning(parsed, resolved, { limits = ZONE_LIMITS } = {}) {
   };
 }
 
+/**
+ * 160회차(재현): 별칭 맵(이름 → WWN 목록)을 WWN → 별칭 이름으로 뒤집는다(먼저 나온 이름이 이긴다 — 매번 같은 답).
+ *   활성 섹션(Effective configuration · REST enabled-zone)은 zone 멤버를 **WWN 으로 풀어** 적는다 — 그래서 활성 조닝이 있는 장비(= 조닝을 쓰는 모든 장비)는
+ *   zone 행의 `aliasOf` 가 늘 비었고, 수집해 둔 `zoning.aliases` 를 WWN 으로 되찾는 곳이 없었다: 조닝 그림 · 불량 포트 상대편의 라벨이 WWN 그대로였고
+ *   스토리지 매핑의 ‘조닝 별칭’ 폴백(attribution.buildFabrics aliasOf)도 늘 비었다(시험 꾸밈은 정의 섹션만 있는 모양이라 드러나지 않았다).
+ */
+export function aliasByWwn(aliases) {
+  const out = new Map();
+  if (!aliases || typeof aliases !== 'object' || Array.isArray(aliases)) return out;
+  for (const [name, list] of Object.entries(aliases)) {
+    if (!Array.isArray(list)) continue;
+    for (const raw of list) { const w = normWwn(raw); if (w && !out.has(w)) out.set(w, name); }
+  }
+  return out;
+}
+
 /** compactZoning 결과 → resolveZones 와 같은 형태(화면·분석이 같은 함수를 쓰게). */
 export function zonesFromCompact(z) {
+  const byWwn = aliasByWwn(z?.aliases);   // 160회차: 활성 조닝(WWN 멤버)에도 별칭을 붙인다 — zone 행의 aliasOf 가 먼저(그 zone 이 실제로 쓴 이름)
   return (z?.zones || []).map((row) => {
     const wwns = []; const unresolved = []; const members = [];
     let properties = Number(row.properties) || 0;
@@ -502,7 +519,7 @@ export function zonesFromCompact(z) {
       // v2.742(DEV-04): 구버전 수집기·엣지는 속성 멤버를 WWN 으로 실어 보냈다 — 읽을 때도 끝점에서 뺀다(옛 스냅샷도 고쳐진다).
       if (isPropertyMember(raw)) { properties++; members.push({ raw, kind: 'property', wwn: null, alias: '' }); continue; }
       const w = normWwn(raw);
-      if (w) { wwns.push(w); members.push({ raw, kind: 'wwn', wwn: w, alias: row.aliasOf?.[w] || '' }); }
+      if (w) { wwns.push(w); members.push({ raw, kind: 'wwn', wwn: w, alias: row.aliasOf?.[w] || byWwn.get(w) || '' }); }
       else { unresolved.push(raw); members.push({ raw, kind: memberKind(raw), wwn: null, alias: memberKind(raw) === 'alias' ? raw : '' }); }
     }
     const principals = Array.isArray(row.principals) ? [...new Set(row.principals.map((x) => normWwn(x)).filter(Boolean))] : [];

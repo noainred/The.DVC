@@ -342,7 +342,7 @@ export function allocExportQuery({ scope = '', vcSel = null, depth = 'vm', sheet
 export function profileGB(profile) {
   const s = String(profile ?? '').trim();
   if (!s || s.length > 128) return null;
-  const m = /-(\d{1,3})([a-z]{1,2})\d?$/i.exec(s);   // 41회차 F7: 서버와 같은 규칙(B 시리즈 …-2b4)
+  const m = /-(\d{1,3})([a-z]{1,3})\d?$/i.exec(s);   // 41회차 F7: 서버와 같은 규칙(B 시리즈 …-2b4) · 160회차: 시리즈 1~3자(MIG 미디어 확장 …-1-5cme)
   if (!m) return null;
   const n = Number(m[1]);
   return Number.isFinite(n) ? (n === 0 ? 0.5 : n) : null;
@@ -354,11 +354,11 @@ export function profileGB(profile) {
 export function profileIsMig(profile) {
   const s = String(profile ?? '').trim();
   if (!s || s.length > 128) return false;
-  return /-\d{1,2}-\d{1,3}[a-z]{1,2}\d?$/i.test(s);
+  return /-\d{1,2}-\d{1,3}[a-z]{1,3}\d?$/i.test(s);   // 160회차: 서버와 같은 끝 규칙(시리즈 1~3자)
 }
 /** 프로파일의 GPU 계열(nvidia_l4-12q → l4 · grid_a100-3-40c → a100)과 MIG 여부(profileIsMig — 판정 하나). 형식 밖이면 null. */
 export function profileFamily(profile) {
-  const m = /^[a-z0-9]+_([a-z0-9]+)-(?:\d{1,2}-)?\d{1,3}[a-z]{1,2}$/i.exec(String(profile ?? '').trim());
+  const m = /^[a-z0-9]+_([a-z0-9]+)-(?:\d{1,2}-)?\d{1,3}[a-z]{1,3}$/i.exec(String(profile ?? '').trim());   // 160회차: 시리즈 1~3자(…cme)
   return m ? { family: m[1].toLowerCase(), mig: profileIsMig(profile) } : null;
 }
 /** GPU 모델 이름이 그 계열인가 — 낱말 단위(L4 가 L40S 에 맞지 않게). 'NVIDIA A100 80GB PCIe' · 'GA102GL [A40]' 모두 낱말로 자른다. */
