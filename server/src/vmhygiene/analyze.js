@@ -89,7 +89,9 @@ export function hygieneFindings(vm, s, now = Date.now()) {
 export function analyzeVmHygiene(vms, s, opt = {}) {
   const now = opt.now ?? Date.now();
   const vcName = opt.vcName || new Map();
-  const coverage = { vms: 0, templates: 0, cfg: 0, dev: 0, notCollected: 0, excepted: 0 };
+  // 153회차: held = 스냅샷 보류(기한 있는 예외 — holds.js)로 스냅샷 정책 판정에서 뺀 VM 수. v3.28.0 이 판정(hygieneFindings)에 보류를 넣으면서
+  //   이 요약과 알림 문구는 '예외 N대' 만 말해 보류한 VM 이 말없이 빠졌다(머리말 '조용한 제외 금지').
+  const coverage = { vms: 0, templates: 0, cfg: 0, dev: 0, notCollected: 0, excepted: 0, held: 0 };
   const byCode = {};
   for (const [c, sev] of Object.entries(ALL_CODES)) byCode[c] = { sev, vms: 0 };
   const rows = [];
@@ -105,6 +107,7 @@ export function analyzeVmHygiene(vms, s, opt = {}) {
     if (!hasCfg && !hasDev) coverage.notCollected += 1;
     const h = hygieneFindings(vm, s, now);
     if (h.excepted) coverage.excepted += 1;
+    if (h.held) coverage.held += 1;
     const findings = [...vmCfgFindings(vm), ...h.findings].sort((a, b) => SEV_ORDER[a.sev] - SEV_ORDER[b.sev]);
     const vcId = vm.vcenterId || '';
     let vc = byVc.get(vcId);
@@ -190,5 +193,6 @@ export function snapshotPolicySummary(result, limit = 30) {
   });
   const more = hits.length > limit ? `\n… 외 ${hits.length - limit}대` : '';
   const s = result.settings;
-  return `스냅샷 정책 위반 ${hits.length}대 (기준: ${s.snapAgeDays}일 · ${s.snapCount}개 · ${s.snapSizeGB}GB, 예외 ${result.coverage.excepted}대 제외)\n${lines.join('\n')}${more}`;
+  const held = Number(result.coverage.held) > 0 ? ` · 보류 ${result.coverage.held}대` : '';   // 153회차: 보류로 뺀 VM 도 밝힌다(없으면 예전 문구 그대로)
+  return `스냅샷 정책 위반 ${hits.length}대 (기준: ${s.snapAgeDays}일 · ${s.snapCount}개 · ${s.snapSizeGB}GB, 예외 ${result.coverage.excepted}대${held} 제외)\n${lines.join('\n')}${more}`;
 }

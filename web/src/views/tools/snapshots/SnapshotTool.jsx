@@ -31,7 +31,10 @@ import './snapshots.css';
 
 const KIND = (n) => (n.mem ? '메모리까지 담음' : n.quiesced ? '파일 시스템을 멈추고 찍음' : '디스크만');
 const SKIP_TEXT = { template: '템플릿', exception: '예외', hold: '보류', 'no-settings': '설정 없음' };
-const CREATOR_NOTE = { site: '위임 법인 — 이벤트가 법인 엣지에 있어 모름', 'no-db': '이벤트 DB 를 쓸 수 없어 모름', truncated: '이벤트가 많아 일부만 읽음' };
+// 153회차: partial = 이벤트 DB 가 31일을 다 덮지 못한 vCenter(백필 중 · 이벤트를 모으지 않음 · 적재 실패) — 못 찾은 VM 을 ‘기록 없음’ 이라 하지 않는다(truncated 도 같다)
+const CREATOR_NOTE = { site: '위임 법인 — 이벤트가 법인 엣지에 있어 모름', 'no-db': '이벤트 DB 를 쓸 수 없어 모름', truncated: '이벤트가 많아 일부만 읽어 모름', partial: '이벤트를 31일치 다 모으지 못해 모름',
+  'log-off': 'vCenter 이벤트 수집이 꺼져 있어 모름', 'severity-filter': '이벤트를 경고 이상만 저장해 모름', 'not-collected': '이 vCenter 의 이벤트를 모으지 않아 모름(비활성 · 점검중)' };
+const CREATOR_SOME = new Set(['truncated', 'partial', 'log-off', 'severity-filter', 'not-collected']);   // 읽은 만큼은 맞다 — 찾은 계정은 보이고, 못 찾은 VM 은 모름
 
 /** 작은 꺾은선 — 빠진 날은 선이 끊기고 빗금으로 보인다 · marks(일부 vCenter 를 빼고 더한 날 — 147회차)는 아래 띠. */
 function Spark({ values, cls = '', label, color = '#3b82f6', marks = [] }) {
@@ -558,10 +561,11 @@ function GoneList({ rows, sum, more, ageDays, tp }) {
 /** 만든 계정 칸 글자 — 계정 이름은 관리자 판본만(그 밖에는 ‘숨김’), 위임 법인은 모름. */
 export function creatorText(c, x) {
   const st = c.vcenters?.[x.vcenterId];
-  if (st && CREATOR_NOTE[st] && st !== 'truncated') return `만든 계정 — ${CREATOR_NOTE[st]}`;
+  const some = CREATOR_SOME.has(st);
+  if (st && CREATOR_NOTE[st] && !some) return `만든 계정 — ${CREATOR_NOTE[st]}`;
   const hit = c.byVm?.[`${x.vcenterId}\n${x.id}`];
-  if (!hit) return '만든 계정 — 31일 안 기록 없음';
-  return `최근 만든 계정 ${hit.user || '(관리자만 볼 수 있습니다)'} · ${dateText(hit.ts)}${st === 'truncated' ? ' · 일부만 읽음' : ''}`;
+  if (!hit) return some ? `만든 계정 — ${CREATOR_NOTE[st]}` : '만든 계정 — 31일 안 기록 없음';
+  return `최근 만든 계정 ${hit.user || '(관리자만 볼 수 있습니다)'} · ${dateText(hit.ts)}${some ? ' · 일부만 읽음' : ''}`;
 }
 
 /**

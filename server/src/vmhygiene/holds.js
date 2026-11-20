@@ -42,11 +42,16 @@ let _gen = 0;
 /** 보류 세대 — 바뀌면 오른다(응답 캐시 열쇠). */
 export function holdsGeneration() { return _gen; }
 export function onHoldsChange(fn) { _onChange = typeof fn === 'function' ? fn : null; }
+/**
+ * 153회차: 마지막 loadHolds 가 읽기 오류였는가 — 설정 캐시(settings.js)가 그때 붙인 목록(기동 직후면 빈 목록)을 굳히지 않게 한다.
+ *   읽기 오류가 풀리면 세대(_gen)도 올린다(스냅샷 화면 응답 캐시가 옛 판정을 붙잡지 않게).
+ */
+export function holdsUnreadable() { return _unreadable; }
 
 /** 지금 목록(지난 것은 뺀다). */
 export function loadHolds(now = Date.now()) {
   const r = _reader.read();
-  if (r.kind === 'ok') { _last = r.value.holds.map(normHold).filter(Boolean).slice(0, HOLDS_MAX); _unreadable = false; }
+  if (r.kind === 'ok') { if (_unreadable) _gen += 1; _last = r.value.holds.map(normHold).filter(Boolean).slice(0, HOLDS_MAX); _unreadable = false; }
   else if (r.kind === 'read-error') _unreadable = true;
   else { if (r.kind !== 'missing') console.warn('[snapshot-holds] 파일을 읽지 못해 보존하고 빈 목록으로 시작합니다'); _last = []; _unreadable = false; }
   return { holds: _last.filter((h) => h.until > now), unreadable: _unreadable };

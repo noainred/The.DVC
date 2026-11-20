@@ -90,6 +90,14 @@ export function orphanRecentHours(raw) {
   return Math.min(720, n);
 }
 
+/**
+ * 153회차(재현): 요청 값으로 여는 고정 표는 **자기 키만** 본다. `BUCKET[req.query.bucket]` · `USAGE_RANGES[req.query.range]` 는 상속 키
+ *   (`constructor` · `__proto__` · `toString` …)에 함수 · 객체를 돌려줘 '모르는 값 = 자동' 갈래로 떨어지지 않았다 — 버킷이 함수인 채 조회해
+ *   온도 추이는 점 1개 · bucket 'constructor', 사용률 추이는 range 'constructor' · 빈 점, VM · 호스트 성능은 vCenter 에
+ *   `<intervalId>function Object() …</intervalId>` 를 보냈다(routes/api/vmMetrics.js). 모르는 값은 undefined(호출부가 자동 · 기본값으로 간다).
+ */
+const ownBucketMs = (table, key) => (typeof key === 'string' && Object.hasOwn(table, key) ? table[key] : undefined);
+
 export function registerToolsCapacity(api) {
 
 // Capacity report — per-cluster compute capacity, allocation, overcommit, headroom.
@@ -836,7 +844,8 @@ api.get('/tools/waste/history', requirePerm('tools'), async (req, res) => {
   }
   const since = Date.now() - days * 86_400_000;
   const BUCKET = { hour: 3_600_000, day: 86_400_000, week: 7 * 86_400_000 };
-  const bucketMs = BUCKET[req.query.bucket]
+  // 153회차: 자기 키만 — `BUCKET['constructor']` 는 상속된 함수라 참이었다(위 ownBucketMs 머리말).
+  const bucketMs = ownBucketMs(BUCKET, req.query.bucket)
     || (days <= 3 ? 3_600_000 : days <= 60 ? 6 * 3_600_000 : days <= 400 ? 86_400_000 : 7 * 86_400_000);
   const limit = bucketMs <= 3_600_000 ? 3000 : 1500;
   let points = [];
@@ -927,7 +936,7 @@ api.get('/vcenters/:id/usage-history', async (req, res) => {
   if (allowed && !allowed.has(vcId)) return res.status(404).json({ ok: false, reason: 'not found' });
   if (!(snap.vcenters || []).some((v) => v.id === vcId)) return res.status(404).json({ ok: false, reason: 'not found' });
 
-  const rangeKey = USAGE_RANGES[req.query.range] ? req.query.range : '24h';
+  const rangeKey = Object.hasOwn(USAGE_RANGES, req.query.range) ? req.query.range : '24h';   // 153회차: 자기 키만(상속 키 'constructor' 는 모르는 값 → 기본 24h)
   const { ms, bucket: bucketMs } = USAGE_RANGES[rangeKey];
   const since = Date.now() - ms;
   // 점 수 상한 — 버킷이 작은 구간(1h/5분=12점)엔 여유가 크고, 365일/1일=365점도 안전하다.
@@ -1658,8 +1667,8 @@ api.get('/tools/esxi-temp/history', requirePerm('tools'), async (req, res) => {
   const since = nowH - days * 86_400_000;
   // 집계 단위(기준): 분/시간/일 명시 선택, 미지정 시 기간에 따라 자동.
   const BUCKET = { minute: 60_000, hour: 3_600_000, day: 86_400_000 };
-  const bucket = BUCKET[req.query.bucket] ? req.query.bucket : 'auto';
-  const bucketMs = BUCKET[req.query.bucket]
+  const bucket = ownBucketMs(BUCKET, req.query.bucket) ? req.query.bucket : 'auto';   // 153회차: 자기 키만
+  const bucketMs = ownBucketMs(BUCKET, req.query.bucket)
     || (days <= 2 ? 3_600_000 : days <= 14 ? 6 * 3_600_000 : days <= 120 ? 86_400_000 : days <= 800 ? 7 * 86_400_000 : 30 * 86_400_000);
   // 분 단위 등 미세 집계는 점이 많아질 수 있어 상한을 넉넉히.
   const baseLimit = bucketMs <= 60_000 ? 5000 : bucketMs <= 3_600_000 ? 3000 : 1500;
@@ -1845,7 +1854,8 @@ api.get('/tools/capacity/disk-history', requirePerm('tools'), async (req, res) =
   }
   const since = Date.now() - days * 86_400_000;
   const BUCKET = { hour: 3_600_000, day: 86_400_000, week: 7 * 86_400_000 };
-  const bucketMs = BUCKET[req.query.bucket]
+  // 153회차: 자기 키만 — `BUCKET['constructor']` 는 상속된 함수라 참이었다(위 ownBucketMs 머리말).
+  const bucketMs = ownBucketMs(BUCKET, req.query.bucket)
     || (days <= 3 ? 3_600_000 : days <= 60 ? 6 * 3_600_000 : days <= 400 ? 86_400_000 : 7 * 86_400_000);
   const limit = bucketMs <= 3_600_000 ? 3000 : 1500;
 

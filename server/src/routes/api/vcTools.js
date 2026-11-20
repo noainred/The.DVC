@@ -5,6 +5,7 @@ import { isAdminDetailUser } from '../../auth/demoGuest.js';
 import { logAudit } from '../../audit.js';
 import { loadHolds, setHold, HOLD_DAYS_MAX, holdsGeneration } from '../../vmhygiene/holds.js';
 import { snapshotCreators } from '../../snaphist/creators.js';
+import { kickSnapBackfill } from '../../veeam/snapWarm.js';   // 153회차: 이벤트 DB 가 31일을 덮지 못한 vCenter 가 있으면 백필을 시작한다(Veeam 화면과 같은 경로)
 import { store } from '../../store.js';
 import { sortByOrder } from '../../vcenter/order.js';
 import { nsxStore } from '../../nsx/store.js';
@@ -201,10 +202,13 @@ api.get('/tools/snapshots/creators', requirePerm('tools'), (req, res) => memoJso
   const pick = vcenterPickOf(req.query, snap);
   const vcIds = new Set((snap.vcenters || []).map((v) => String(v.id)).filter((id) => (!allowed || allowed.has(id)) && (!pick || pick.has(id))));
   const r = await snapshotCreators({ snap, vcIds });
+  // 153회차: 'partial'(31일을 다 덮지 못함)이 있으면 백필을 시작한다 — 기다리지 않는다 · 진행 중이면 그것을 쓴다(기동 뒤에 등록한 vCenter 는 Veeam 화면을 열기 전까지 덮음이 없었다)
+  if (Object.values(r.vcenters).includes('partial')) kickSnapBackfill();
   const admin = isAdminDetailUser(req.user);
   const byVm = {};
   for (const [k, c] of Object.entries(r.byVm)) byVm[k] = { user: admin ? c.user : null, ts: c.ts };
-  return { ok: true, byVm, vcenters: r.vcenters, ambiguous: r.ambiguous, ...(admin ? {} : { userMasked: Object.keys(byVm).length > 0 }), windowDays: 31 };
+  // 153회차: coveredFrom — 이벤트 DB 가 31일을 다 덮지 못한 vCenter('partial')의 '빠짐없이 가진 가장 이른 시각'(모르면 null)
+  return { ok: true, byVm, vcenters: r.vcenters, coveredFrom: r.coveredFrom, ambiguous: r.ambiguous, ...(admin ? {} : { userMasked: Object.keys(byVm).length > 0 }), windowDays: 31 };
 }, { extraKey: `${scopeKey(req.user, store.get())}|${vcenterPickKey(req.query, store.get())}|${isAdminDetailUser(req.user) ? 'a' : 'u'}`, ttlMs: 300_000 }));
 
 // v3.28.0 스냅샷 보류(기한 있는 예외 — vmhygiene/holds.js). 조회는 범위 안 보류만 · 건 계정은 관리자 판본만.

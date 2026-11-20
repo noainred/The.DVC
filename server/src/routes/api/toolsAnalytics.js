@@ -202,7 +202,7 @@ api.get('/tools/gpu/history', requirePerm('tools'), async (req, res) => {
   const since = now - days * 86_400_000;
   // v2.655: 집계 단위를 고를 수 있다(1분·10분·1시간·6시간) — 안 고르면 예전처럼 기간으로 정한다.
   //   점 상한(GPU_HIST_MAX_POINTS)을 넘는 조합은 최근 쪽만 남기고 **잘렸다고 밝힌다**(truncated·coveredSince — 조용한 절단 금지).
-  const pick = GPU_HIST_BUCKETS[req.query.bucket] || null;
+  const pick = (Object.hasOwn(GPU_HIST_BUCKETS, req.query.bucket) && GPU_HIST_BUCKETS[req.query.bucket]) || null;   // 153회차: 자기 키만(상속 키 'constructor' 는 모르는 값 → 자동)
   const bucketMs = pick || (days <= 2 ? 3_600_000 : days <= 14 ? 6 * 3_600_000 : days <= 120 ? 86_400_000 : days <= 800 ? 7 * 86_400_000 : 30 * 86_400_000);
   const limit = pick ? GPU_HIST_MAX_POINTS : 1000;
   let points = [];
