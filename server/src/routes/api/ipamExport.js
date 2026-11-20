@@ -35,6 +35,7 @@ import { entryMac, macInfo } from '../../ipam/macVendor.js'; // v2.999: 스캔 �
 import { renderIpamWorkbook } from '../../ipam/excel.js'; // v2.741 LEFT-01: 조립·직렬화는 워커 스레드에서
 import { acquireExport } from '../../util/exportBusy.js'; // v2.575 — 내보내기 동시 1건 가드
 import { todayStamp, DAY_OFFSET_MIN } from "../../util/dayKey.js";
+import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 
 /*
  * 결정(56~75 남긴 것) 60/62: 손상 · 읽기 오류 중 IPAM 조회가 빈 목록을 '없음' 으로 보이지 않게 표지(loadError — 사유 요약 · 읽기 오류 여부)를 싣고,
@@ -191,7 +192,7 @@ api.get('/tools/ipam/subnets', requirePerm('tools'), (req, res) => {
   res.json({ subnets: withSubnetNotes(listSubnets(snap, req.query.vcenterId, scopedVcenterIds(req.user, snap), { inputSig: ledgerInputSignatureOf(snap) })) });
 });
 // v3.5.0(재설계 묶음 나): 대역 용도 · 설명 저장 — 운영자 이상 + 전체 범위(한 /24 를 두 vCenter 가 나눠 쓸 수 있어 범위 계정은 쓰지 못한다).
-api.put('/tools/ipam/subnet-note', canWrite, requirePerm('tools'), (req, res) => {
+api.put('/tools/ipam/subnet-note', canWrite, requirePerm('tools'), textFields('base'), (req, res) => {
   // 전체 점검 7회차 반증 R-4: 전 법인 공용 데이터라 조회 ∧ 쓰기 전체만(쓰기 범위를 줄인 계정이 남의 대역 이름을 바꿨다) — 판정이 던지면 거부
   const denied = subnetNoteWriteDenied(isFullReadWriteScope(req.user, store.get()) ? null : new Set());
   if (denied) return res.status(403).json({ error: denied });
@@ -315,7 +316,7 @@ api.get('/tools/ipam/annotation', requirePerm('tools'), (req, res) => {
   const le = annotationsLoadMarker();   // 62: 못 읽은 동안 '메모 없음' 으로 보이지 않게
   res.json({ ip, annotation: getAnnotation(ip), ...(le ? { loadError: le } : {}) });
 });
-api.put('/tools/ipam/annotation', canWrite, requirePerm('tools'), (req, res) => {
+api.put('/tools/ipam/annotation', canWrite, requirePerm('tools'), textFields('ip'), (req, res) => {
   const { ip, memo, tags } = req.body || {};
   const snap = store.get();
   const allowed = scopedVcenterIds(req.user, snap);
@@ -450,7 +451,7 @@ api.get('/tools/ipam/policies/preview', requirePerm('tools'), (req, res) => {
   res.json({ spec: req.query.spec || '', valid: !!r, size: r?.size ?? 0, lo: r?.lo ?? null, hi: r?.hi ?? null });
 });
 // 정책 생성. body: { spec, status?, priority?, claimedVcenterId?, owner?, label?, deviceType?, note?, enabled? }.
-api.post('/tools/ipam/policies', canWrite, requirePerm('tools'), (req, res) => {
+api.post('/tools/ipam/policies', canWrite, requirePerm('tools'), textFields('id', 'spec'), (req, res) => {
   if (req.body?.claimedVcenterId && !isKnownVcenter(req.body.claimedVcenterId)) return res.status(400).json({ ok: false, reason: '알 수 없는 vCenter입니다.' });
   // 범위 제한 계정은 자기 vCenter 에 귀속된 정책만 만들 수 있다(전역 정책은 전 vCenter 뷰에 영향).
   const allowedP = scopedVcenterIds(req.user, store.get());
@@ -472,7 +473,7 @@ api.post('/tools/ipam/policies', canWrite, requirePerm('tools'), (req, res) => {
   res.status(r.ok ? 200 : 400).json(r);
 });
 // 정책 수정(부분). :id.
-api.put('/tools/ipam/policies/:id', canWrite, requirePerm('tools'), (req, res) => {
+api.put('/tools/ipam/policies/:id', canWrite, requirePerm('tools'), textFields('spec'), (req, res) => {
   if (req.body?.claimedVcenterId && !isKnownVcenter(req.body.claimedVcenterId)) return res.status(400).json({ ok: false, reason: '알 수 없는 vCenter입니다.' });
   // 범위 제한 계정: 기존 정책·변경 후 귀속 모두 자기 범위여야 한다(범위 밖 정책 탈취·전역화 차단).
   const allowedP = scopedVcenterIds(req.user, store.get());

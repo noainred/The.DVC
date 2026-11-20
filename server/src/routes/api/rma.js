@@ -24,6 +24,7 @@ import { knownAgentNames } from '../../central/knownAgents.js';
 import { listAgentTokens } from '../../central/agentTokens.js';
 import { fullScopeOnlyWith, requireSettingsOwner } from '../admin/shared.js';
 import { ownOtpGate } from './reauth.js';
+import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 
 const adminOnly = requireRole('admin');
 // v2.612 AUTHZ2612-04: RMA 는 엣지 단위 원격 명령이라 법인 축이 없다 — 범위 제한 admin 도 403(edge-log 와 같은 기준).
@@ -72,7 +73,7 @@ api.get('/tools/rma', adminOnly, fullScopeOnly, (_req, res) => {
 api.get('/tools/rma/agents/:agent/schedule', adminOnly, fullScopeOnly, (req, res) => {
   res.json({ ok: true, agent: req.params.agent, ...scheduleFor(String(req.params.agent || '')) });
 });
-api.put('/tools/rma/agents/:agent/schedule', adminOnly, fullScopeOnly, shellScheduleGate, (req, res) => {
+api.put('/tools/rma/agents/:agent/schedule', adminOnly, fullScopeOnly, textFields('test'), shellScheduleGate, (req, res) => {
   const agent = String(req.params.agent || '').trim();
   if (!RE_AGENT.test(agent)) return res.status(400).json({ ok: false, reason: 'agent 형식 오류' });
   try {
@@ -94,7 +95,7 @@ api.delete('/tools/rma/agents/:agent/schedule/:id', adminOnly, fullScopeOnly, (r
   res.json({ ok, ...scheduleFor(agent) });
 });
 /** 점검 미리 검증(형식) — 저장 전 화면에서. */
-api.post('/tools/rma/tests/validate', adminOnly, fullScopeOnly, (req, res) => {
+api.post('/tools/rma/tests/validate', adminOnly, fullScopeOnly, textFields('test'), (req, res) => {
   const b = buildTest(req.body?.test, req.body?.args || {});
   res.json(b.ok ? { ok: true, args: b.args } : { ok: false, reason: b.issue });
 });
@@ -137,7 +138,7 @@ api.put('/tools/rma/agents/:agent/remote', adminOnly, fullScopeOnly, (req, res) 
 });
 
 /** 명령 실행 요청 — Body { agent, instance?, cmd, args?, timeoutMs? } → { reqId, target }. */
-api.post('/tools/rma/run', adminOnly, fullScopeOnly, dangerRunGate, (req, res) => {
+api.post('/tools/rma/run', adminOnly, fullScopeOnly, textFields('agent', 'cmd'), dangerRunGate, (req, res) => {
   const b = req.body || {};
   const agent = String(b.agent || '').trim();
   if (!RE_AGENT.test(agent)) return res.status(400).json({ ok: false, reason: 'agent(법인/엣지 이름)가 필요합니다.' });
@@ -229,7 +230,7 @@ function targetOf(b) {
 }
 
 /** 서버의 RMA 인스턴스 조회(SSH). Body: { host, port, username, password } */
-api.post('/tools/rma/deploy/list', adminOnly, fullScopeOnly, async (req, res) => {
+api.post('/tools/rma/deploy/list', adminOnly, fullScopeOnly, textFields('host', 'port', 'username', 'password', 'privateKey'), async (req, res) => {
   const t = targetOf(req.body || {});
   if (t.error) return res.status(400).json({ ok: false, reason: t.error });
   res.json(await listRmaInstances(t));
@@ -237,7 +238,7 @@ api.post('/tools/rma/deploy/list', adminOnly, fullScopeOnly, async (req, res) =>
 
 /** 배포. Body: { host, port, username, password, instances:[{name,priority}], rmaPassword, allowCustom, agentName, centralUrl, centralToken } */
 // 결정(반증 G1a): 원격 배포는 대상 서버에 root 로 설치하고 RMA_ALLOW_CUSTOM · 재부팅 허용 · 비밀번호 해제를 심을 수 있다 — 소유자 등급 + 본인 OTP.
-api.post('/tools/rma/deploy', adminOnly, fullScopeOnly, ownerOtpThen, async (req, res) => {
+api.post('/tools/rma/deploy', adminOnly, fullScopeOnly, textFields('host', 'port', 'username', 'password', 'privateKey'), ownerOtpThen, async (req, res) => {
   const b = req.body || {};
   const t = targetOf(b);
   if (t.error) return res.status(400).json({ ok: false, reason: t.error });
@@ -256,7 +257,7 @@ api.post('/tools/rma/deploy', adminOnly, fullScopeOnly, ownerOtpThen, async (req
 
 /** 인스턴스 제거(SSH root — 유닛 중지 · 비활성 · env 삭제). Body: { host, port, username, password, name } */
 // 결정(반증 G1a 남긴 것 — 사용자 '권장안대로'): 대상 서버에서 RMA 를 지우는 상태 변경이라 배포와 같은 소유자 등급 + 본인 OTP(조회 /deploy/list 는 그대로).
-api.post('/tools/rma/deploy/remove', adminOnly, fullScopeOnly, ownerOtpThen, async (req, res) => {
+api.post('/tools/rma/deploy/remove', adminOnly, fullScopeOnly, textFields('host', 'port', 'username', 'password', 'privateKey'), ownerOtpThen, async (req, res) => {
   const b = req.body || {};
   const t = targetOf(b);
   if (t.error) return res.status(400).json({ ok: false, reason: t.error });

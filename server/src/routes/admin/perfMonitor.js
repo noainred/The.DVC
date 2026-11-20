@@ -14,6 +14,7 @@ import { loadPerfSettings, savePerfSettings, perfSettingsWriteRefusal, LIMITS as
 import { readHangs, clearHangs, hangLogStatus } from '../../perf/hangLog.js';
 import { adminOnly, fullScopeOnlyWith } from './shared.js';
 import { unreadMark } from '../settingsUnreadMark.js';   // 128회차: 조회 응답의 읽기 오류 표지(112회차 규약)
+import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 
 // v2.612 AUTHZ2612-05: hang 로그에는 다른 사용자의 계정·IP·UA·경로가 담긴다 — 범위 제한 admin 도 403(/admin/audit 와 같은 기준).
 const fullScopeOnly = fullScopeOnlyWith('서버 성능 측정에는 포탈 전체 사용자의 요청 기록이 섞여 있어 전체 범위(vCenter 제한 없는) 계정만 쓸 수 있습니다.');
@@ -47,7 +48,7 @@ export function registerPerfMonitor(adminRouter) {
    * '지금 측정' — 30초 창을 기다리지 않고 현재 루프 응답성을 잰다(setImmediate 왕복 + 1초 히스토그램).
    * 재진입 가드는 monitor.measureNow 안에 있고 진행 중이면 409 로 알린다(같은 작업 중복 실행 금지 규약).
    */
-  adminRouter.post('/perf/measure', adminOnly, fullScopeOnly, async (req, res) => {
+  adminRouter.post('/perf/measure', adminOnly, fullScopeOnly, textFields('samples'), async (req, res) => {
     const r = await measureNow({ samples: Number(req.body?.samples) || 60 });
     if (r.busy) return res.status(409).json(r);
     res.json(r);

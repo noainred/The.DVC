@@ -21,6 +21,7 @@ import { mergeScopedMap, filterScopedMap, denyScopedRun, denyFleetWrite, writeMe
 import { todayStamp } from "../../util/dayKey.js";
 import { csvLine } from '../../util/csv.js'; // v2.741(WEB-02 후속): CSV 수식 가드 한 벌
 import { requirePerm as requireCsvPerm } from '../../auth/auth.js';
+import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
 const csvPerm = requireCsvPerm('data.csv');
 
@@ -300,7 +301,7 @@ adminRouter.put('/os-scan/settings', adminOnly, (req, res) => {
 });
 // v2.599: 범위 제한 admin 의 즉시 스캔은 **범위 안 vCenter 하나**만 — 범위 밖 지정은 404(존재 은닉), 미지정은 400
 //   (미지정이면 전 vCenter 를 돌아 범위 밖 게스트에 로그인한다).
-adminRouter.post('/os-scan/run', adminOnly, async (req, res) => {
+adminRouter.post('/os-scan/run', adminOnly, textFields('vcenterId'), async (req, res) => {
   const vcId = String(req.body?.vcenterId || '');
   // 전체 점검 7회차: 게스트에 로그인하는 실행 — 조회 밖 404 → 쓰기 밖 403(전 vCenter 실행은 조회 ∧ 쓰기 전체만)
   const read = scopedVcenterIds(req.user, store.get());
@@ -337,7 +338,7 @@ adminRouter.get('/os-scan/results.csv', csvPerm, adminOnly, (req, res) => {
 });
 
 // --- VM 프로비저닝: 대량 생성 작업 시작 (관리자) ---
-adminRouter.post('/provision/jobs', adminOnly, (req, res) => {
+adminRouter.post('/provision/jobs', adminOnly, textFields('sourceId'), (req, res) => {
   // VM 생성은 vCenter 상태변경 — 쓰기 범위(writeVcenters, v2.369) 강제. 미설정이면 조회 범위와 동일.
   // v2.767(점검 R2-B3-1): 판정 대상은 **원본 VM 의 vCenter**(createJob 이 그 vCenter 에 클론을 만든다)다.
   //   예전엔 body.vcenterId 만 봐서 범위 관리자가 vcenterId 는 자기 vCenter, sourceId 는 범위 밖 VM 으로 보내 범위 밖 vCenter 에

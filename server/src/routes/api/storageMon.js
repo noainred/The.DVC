@@ -37,6 +37,7 @@ import { isDemoId } from '../../mock/demo/storage.js';
 import { isAdminReq, maskDeviceAddress, maskSnapAddress, maskActivityEvents, maskPollerStatus } from '../../auth/addressMask.js';
 import { latestMapByDevice } from '../../storage/latestSnapshots.js';
 import { numOrNull } from '../../util/numOrNull.js';
+import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
 const csvPerm = requirePerm('data.csv');
 /**
@@ -151,7 +152,7 @@ api.get('/tools/storage', toolsPerm, fullScopeOnly, (req, res) => {
  *    헤더 사전검증으로 값이 되울려 나오지 않는다.
  *  - 감사로그를 남긴다(자격증명 사용 + 외부 접속 시도).
  */
-api.post('/tools/storage/test', adminOnly, fullScopeOnly, async (req, res) => {
+api.post('/tools/storage/test', adminOnly, fullScopeOnly, textFields('type'), async (req, res) => {
   const body = req.body || {};
   const issue = deviceInputIssue(body);
   if (issue) return res.status(400).json({ ok: false, reason: issue });
@@ -423,7 +424,7 @@ api.get('/tools/storage/devices/sample.txt', csvPerm, adminOnly, fullScopeOnly, 
  * 검증 규칙은 실제 저장과 동일(registry.deviceInputIssue 단일 소스 — analyzeImport 주석) +
  * 파일 내 중복(host+type) 검출. UI 는 검증 통과 후에만 실행 버튼을 활성화한다.
  */
-api.post('/tools/storage/devices/import', csvPerm, adminOnly, fullScopeOnly, (req, res) => {
+api.post('/tools/storage/devices/import', csvPerm, adminOnly, fullScopeOnly, textFields('text'), (req, res) => {
   const refused = registryWriteRefusal();   // 결정(78 남긴 것 ①): 읽기 오류 중에는 409 — 빈 목록과 대조하면 전부 '추가' 로 보인다(드라이런 포함)
   if (refused) return res.status(409).json(refused);
   const { rows, error, warnings, headerUsed, order, format, raw } = stParseBody(req.body || {});
@@ -511,7 +512,7 @@ api.post('/tools/storage/devices/import', csvPerm, adminOnly, fullScopeOnly, (re
  *   (닿지 못한 것을 실패라 하면 사용자가 멀쩡한 자격증명을 의심하며 고친다 — 정직 규약).
  * ⚠ 자동 재시도 없음 — 잘못된 비밀번호를 반복하면 어레이 계정이 잠긴다(bulkRun 이 강제).
  */
-api.post('/tools/storage/devices/import/test', csvPerm, adminOnly, fullScopeOnly, (req, res) => {
+api.post('/tools/storage/devices/import/test', csvPerm, adminOnly, fullScopeOnly, textFields('text'), (req, res) => {
   const refused = registryWriteRefusal();   // 결정(78 남긴 것 ①): 읽지 못한 빈 목록과 대조하지 않는다(저장 비밀번호 판정도 못 한다)
   if (refused) return res.status(409).json(refused);
   const p = stParseBody(req.body || {});

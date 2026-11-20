@@ -373,7 +373,7 @@ test('⑧ 스윕 — 승인 · 계정 바꾸기 · 지정 쓰기는 sshaccess/se
     // ownerWrite 그대로이거나, 판정 거절을 OTP 앞에 두는 꼴(반증 F9 — adminOnly → 소유자 → judgeFirst(dryRun) → reauth 마지막)
     assert.ok(line && (/\.\.\.ownerWrite/.test(line) || /adminOnly, requireSettingsOwner, judgeFirst\(.*\), reauth, async/.test(line)), `${p} 는 소유자 + OTP`);
   }
-  assert.match(routes, /'\/settings\/ssh-access\/accounts', adminOnly, requireSettingsOwner, pwVaultFirst,\s*judgeFirst\([\s\S]{0,400}?dryRun: true[\s\S]{0,40}?\), reauth,/);
+  assert.match(routes, /'\/settings\/ssh-access\/accounts', adminOnly, requireSettingsOwner, (?:textFields\([^)]*\), )?pwVaultFirst,\s*judgeFirst\([\s\S]{0,400}?dryRun: true[\s\S]{0,40}?\), reauth,/);
   assert.match(routes, /const judgeFirst = [\s\S]{0,200}?r\.ok === false\) return send\(res, r\); return next\(\)/, 'dryRun 거절이면 OTP 전에 돌려준다');
   const restore = fs.readFileSync(path.join(SRC, 'backup/stagedRestore.js'), 'utf8');
   assert.match(restore, /\['ssh-access-state\.json', '[^']*계층 지정/);

@@ -24,6 +24,7 @@ import { ROW_CODE, WARN } from '../../bmusage/onboard/importAnalyze.js';
 import { TEMPLATE_COLUMNS, MAX_UPLOAD_BYTES, MAX_ROWS, parseOnboardFile } from '../../bmusage/onboard/importParse.js';
 import * as KS from '../../bmusage/onboard/keyStore.js';
 import * as REFS from '../../bmusage/onboard/refs.js';
+import { textFields, rejectNonText } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 
 const adminOnly = requireRole('admin');
 const toolsPerm = requirePerm('tools');
@@ -145,7 +146,7 @@ export function registerBmOnboard(api, deps = {}) {
     return REFS.legacyAccountWriteIssue(before, input) || REFS.accountUseIssue(before, dry.next);   // v3.24 반증 F7: 계층 지정 계정의 새 비밀번호는 새 화면에서
   };
   const accountFirst = (req, res, next) => { const { otp, ...input } = bodyOf(req); void otp; const w = accountWriteIssue(input); if (w) return send(res, w); return next(); };
-  api.post('/tools/bm-usage/accounts', adminOnly, toolsPerm, requireSettingsOwner, accountFirst, reauth, (req, res) => {
+  api.post('/tools/bm-usage/accounts', adminOnly, toolsPerm, requireSettingsOwner, textFields('id', 'name'), accountFirst, reauth, (req, res) => {
     const b = bodyOf(req);
     const { otp, ...input } = b; void otp;
     const w = accountWriteIssue(input);
@@ -291,6 +292,7 @@ export function registerBmOnboard(api, deps = {}) {
 
   api.delete('/tools/bm-usage/onboard/edge-rows', adminOnly, toolsPerm, noDemo, (req, res) => {
     const b = { ...(req.query || {}), ...bodyOf(req) };
+    if (rejectNonText(res, b, ['agent', 'name'])) return undefined;   // 163회차: 객체 · 배열(쿼리 ?name[a]=1 포함)은 t() 의 String() 이 던져 500 이었다
     const agent = t(b.agent, 64); const name = t(b.name, 128);
     const snap = store.get();
     const row = ED.edgeRowsFor(agent).find((r) => r.name.toLowerCase() === name.toLowerCase());
@@ -344,7 +346,7 @@ export function registerBmOnboard(api, deps = {}) {
    * 연결 시험(표본) — **저장된 항목의 주소로만**(v2.480: 요청이 주소를 바꿀 수 없다 — id 만 받는다) · 키 · 공통 계정 해석은 폴러와 같은 refs.resolveOsAuth ·
    * 한 번만(자동 재시도 없음) · 인증 거부는 '인증 정지 후보' 로 알리고(주기 수집은 authGuard 가 다음 실패에서 멈춘다) · 호스트키 미신뢰는 peerTrust 승인 안내.
    */
-  api.post('/tools/bm-usage/onboard/test', adminOnly, toolsPerm, noDemo, async (req, res) => {
+  api.post('/tools/bm-usage/onboard/test', adminOnly, toolsPerm, noDemo, textFields('id'), async (req, res) => {
     const id = t(bodyOf(req).id, 32);
     const BMR = await import('../../bmstor/registry.js');
     const s0 = BMR.listBmServersRaw().find((x) => x.id === id);

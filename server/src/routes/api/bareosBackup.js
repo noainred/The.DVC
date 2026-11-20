@@ -63,6 +63,7 @@ import { listGroups, groupsLoadError, groupsRev } from '../../bareos/groups.js';
 import { getMarks, marksUnreadable, marksRev } from '../../veeam/backupMarks.js';
 import { registryHosts, vcHostOf } from '../../bareos/vcHost.js';
 import { scopeSig } from '../../util/scopeSig.js';
+import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 
 const adminOnly = requireRole('admin');
 const fullScopeOnly = fullScopeOnlyWith('Bareos Director 설정은 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 볼 수 있습니다.');
@@ -567,7 +568,7 @@ api.get('/tools/bareos-backup/settings', adminOnly, fullScopeOnly, (req, res) =>
 });
 
 /** 공통 기본값·매핑 저장(Director 접속값은 /settings/directors). 백업 대상이 있는 vCenter 의 Director 는 바꾸지 않는다. */
-api.put('/tools/bareos-backup/settings', adminOnly, fullScopeOnly, fullWriteOnly, (req, res) => {
+api.put('/tools/bareos-backup/settings', adminOnly, fullScopeOnly, fullWriteOnly, textFields('rev'), (req, res) => {
   const body = req.body || {};
   // v2.823 검토(P4·W17 — 재현): 두 화면(다른 Director 편집)이 각자 마지막에 읽은 매핑 전체를 보내 먼저 저장한 쪽이 조용히 사라졌다 —
   //   화면이 읽은 설정 세대(rev)를 함께 보내면 그 뒤 다른 저장이 있었을 때 409 로 다시 읽게 한다.
@@ -872,7 +873,7 @@ api.get('/tools/bareos-backup/vm-candidates', adminOnly, (req, res) => {
 });
 
 /** 백업 대상 등록 — body { vcenterId, vmId, level?, schedule? }. 잡은 그 vCenter 의 법인 Director 에 만든다. */
-api.post('/tools/bareos-backup/jobs', adminOnly, async (req, res) => {
+api.post('/tools/bareos-backup/jobs', adminOnly, textFields('vcenterId', 'vmId'), async (req, res) => {
   const b = req.body || {};
   const a = bareosAccess(req.user, b.vcenterId);
   if (a === 404) return res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다.' });
@@ -892,7 +893,7 @@ api.post('/tools/bareos-backup/jobs', adminOnly, async (req, res) => {
  * 범위(조회 밖 404 → 쓰기 밖 403)는 vCenter 단위로 한 번. 원장 여유(MAX_JOBS)를 Director 에 닿기 전에 확인한다.
  * 응답 200 { ok: 하나라도 등록, created, failed, results[{vmId, vmName, ok, jobId?, bareosJob?, reason?}], maxBulk }.
  */
-api.post('/tools/bareos-backup/jobs/bulk', adminOnly, async (req, res) => {
+api.post('/tools/bareos-backup/jobs/bulk', adminOnly, textFields('vcenterId'), async (req, res) => {
   const b = req.body || {};
   const a = bareosAccess(req.user, b.vcenterId);
   if (a === 404) return res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다.' });
@@ -1717,7 +1718,7 @@ api.put('/tools/bareos-backup/rehearsal', adminOnly, fullScopeOnly, fullWriteOnl
     res.json({ ok: true, policy: saved });
   } catch (e) { res.status(e?.code === 'unreadable' ? 503 : 400).json({ ok: false, reason: String(e?.message || e) }); }
 });
-api.post('/tools/bareos-backup/rehearsal/run', adminOnly, fullScopeOnly, fullWriteOnly, async (req, res) => {
+api.post('/tools/bareos-backup/rehearsal/run', adminOnly, fullScopeOnly, fullWriteOnly, textFields('directorId'), async (req, res) => {
   const name = req.user?.username || '';
   if (config.auth.enabled && !getUser(name)?.totpEnabled) return res.status(403).json({ ok: false, needEnroll: true, reason: '복원 검증은 OTP 가 등록된 계정만 실행할 수 있습니다.' });
   const dirId = String(req.body?.directorId || '');

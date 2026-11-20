@@ -11,6 +11,7 @@ import { summarizeRegistryError } from '../../util/registryCore.js';
 import { probeRelayPath } from '../../vcenter/relayProbe.js';
 import { adminOnly, fullScopeOnlyWith } from './shared.js';
 import { scopedVcenterIds, writeScopedVcenterIds, isFullReadWriteScope, WRITE_SCOPE_PARTIAL_REASON } from '../../auth/scope.js';
+import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 
 /*
  * v2.607 AUTHZ2607-03 — vCenter 등록부는 법인 축이 있다. 예전에는 adminOnly 뿐이라 범위 제한 admin 이 범위 밖
@@ -90,7 +91,7 @@ adminRouter.get('/vcenters', adminOnly, (req, res) => {
 });
 
 // Register a new vCenter, then trigger a re-poll.
-adminRouter.post('/vcenters', adminOnly, fleetWideOnly, async (req, res) => {
+adminRouter.post('/vcenters', adminOnly, fleetWideOnly, textFields('host', 'name', 'username', 'password', 'id'), async (req, res) => {
   const result = addVcenter(req.body || {});
   if (!result.ok && result.code === 'registry-unreadable') return unreadable503(res, result);   // 118회차
   if (result.ok) store.refresh().catch(() => {});

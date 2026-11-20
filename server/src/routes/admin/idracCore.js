@@ -24,6 +24,7 @@ import { scopedVcenterIds } from '../../auth/scope.js';
 import { adminOnly, hostVcByTag, hostNameByTag, hostNicsByTag, withMappedVc, remoteServersResolved, analysisServersWithRemote, invForServer, fullScopeOnlyWith } from './shared.js';
 import { scanSiteIndex, withScanDatacenter } from '../../insights/analysisServers.js'; // v2.969: 상태 보드도 Agent 스캔 대역 법인
 import { scopeSig } from '../../util/scopeSig.js';
+import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 // v2.611 AUTHZ2611: 전 법인 등록부·동작은 전체 범위 계정만(v2.607 fleetWideOnly 의 형제 등록부).
 const fleetOnly = fullScopeOnlyWith('iDRAC 등록·연결 테스트·즉시 수집·전력 설정은 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꾸거나 실행할 수 있습니다.');
 
@@ -223,7 +224,7 @@ adminRouter.get('/idrac', adminOnly, async (req, res) => {
 });
 
 // Register a server, then poll immediately so power shows up right away.
-adminRouter.post('/idrac', adminOnly, fleetOnly, async (req, res) => {
+adminRouter.post('/idrac', adminOnly, fleetOnly, textFields('id', 'name', 'host', 'username'), async (req, res) => {
   const result = addServer(req.body || {});
   if (result.ok) pollNow().catch(() => {});
   res.status(result.ok ? 201 : (result.status || 400)).json(result);   // 결정(78 남긴 것 ①): 등록부 읽기 오류는 409
@@ -233,7 +234,7 @@ adminRouter.post('/idrac', adminOnly, fleetOnly, async (req, res) => {
 // 같은 리터럴 라우트를 가리지 않도록 이 섹션의 '맨 끝'(모든 리터럴 라우트 뒤)에 정의한다.
 
 // Test connectivity + read current power for a server (new or saved by id).
-adminRouter.post('/idrac/test', adminOnly, fleetOnly, async (req, res) => {
+adminRouter.post('/idrac/test', adminOnly, fleetOnly, textFields('id', 'name', 'host', 'username', 'password'), async (req, res) => {
   res.json(await testServer(req.body || {}));
 });
 

@@ -35,6 +35,7 @@ import { knownAgentNames } from '../../central/knownAgents.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
 import { isMockMode } from '../../mock/demo/flags.js'; // v2.708 데모(mock 전용)
 import { pduDemoActive } from '../../mock/demo/pdu.js';
+import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 /** v2.769(점검 R4-D4-01): 시계열 라우트 조회 창 상한(시간) — 웹 PduCharts RANGES 의 최대(30일)와 같다. */
 const SERIES_MAX_HOURS = 24 * 30;
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
@@ -239,7 +240,7 @@ export function registerPdu(api) {
     name: (d) => d.name || d.host, username: (d) => d.username || '', sshPort: (d) => Number(d.sshPort) || 22,
     datacenterId: (d) => d.datacenterId || '', agent: (d) => d.agent || '', enabled: (d) => d.enabled !== false, note: (d) => d.note || '',
   };
-  api.post('/tools/pdu/csv/import', csvPerm, adminOnly, fullScopeOnly, (req, res) => {
+  api.post('/tools/pdu/csv/import', csvPerm, adminOnly, fullScopeOnly, textFields('csv'), (req, res) => {
     const text = String(req.body?.csv || '');
     if (!text.trim()) return res.status(400).json({ ok: false, reason: 'CSV 내용이 비어 있습니다.' });
     const dcs = listDatacenters();
@@ -274,7 +275,7 @@ export function registerPdu(api) {
     res.json({ ok: true, added, updated, failed, total: rows.length, ...(droppedSecrets.length ? { droppedSecrets } : {}) });
   });
 
-  api.post('/tools/pdu/test', adminOnly, fullScopeOnly, async (req, res) => {
+  api.post('/tools/pdu/test', adminOnly, fullScopeOnly, textFields('host', 'name'), async (req, res) => {
     const b = req.body || {};
     const issue = deviceInputIssue(b);
     if (issue) return res.status(400).json({ ok: false, reason: issue });
@@ -315,7 +316,7 @@ export function registerPdu(api) {
     res.json({ ok: true, intervals: runtimeIntervals(), saved: next, forEdge: intervalsForEdge() });
   });
 
-  api.post('/tools/pdu/devices', adminOnly, fullScopeOnly, (req, res) => {
+  api.post('/tools/pdu/devices', adminOnly, fullScopeOnly, textFields('host', 'name'), (req, res) => {
     const r = saveDevice(req.body || {});
     if (r.ok) logAudit({ user: req.user?.username, action: 'PDU 등록/수정', target: `${r.device.name}(${r.device.host})`, detail: r.device.agent ? `엣지 ${r.device.agent}` : '중앙 직접' });
     res.status(r.ok ? 200 : (r.status || 400)).json(r);   // 결정(78 남긴 것 ①): 등록부 읽기 오류는 409

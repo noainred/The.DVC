@@ -40,6 +40,7 @@ import { config } from '../../config.js';
 import { getTarget, edgeTargetId } from '../../ping/store.js';
 import { windowOf, targetBoundsOf } from '../../ping/service.js';
 import { loadPingSettings } from '../../ping/settings.js';
+import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 
 const adminOnly = requireRole('admin');
 const csvPerm = requirePerm('data.csv');
@@ -390,7 +391,7 @@ api.get('/tools/xfer-speed/log', adminOnly, fullScopeOnly, async (req, res) => {
 });
 
 /** 지금 측정 — 기다리지 않고 시작만 한다(한 주기가 수 분 걸린다). 화면은 메인 응답의 status.progress 로 진행을 본다. */
-api.post('/tools/xfer-speed/run', adminOnly, fullScopeOnly, async (req, res) => {
+api.post('/tools/xfer-speed/run', adminOnly, fullScopeOnly, textFields('agent'), async (req, res) => {
   const want = t(req.body?.agent);
   let only = '';
   if (want) {

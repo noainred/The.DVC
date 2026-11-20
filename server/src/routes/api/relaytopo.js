@@ -15,6 +15,7 @@ import { scopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
 import { isAdminDetailUser } from '../../auth/demoGuest.js';
+import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
 const csvPerm = requirePerm('data.csv');
 
@@ -145,7 +146,7 @@ api.post('/tools/relaytopo/apply/:dc', adminOnly, fullScopeOnly, async (req, res
   logAudit({ user: req.user?.username, action: `중계 HAProxy 구성 ${dryRun ? '검증' : '적용'} 결과`, target: req.params.dc, detail: `ok=${r.ok} applied=${!!r.applied} ${(r.steps || []).filter((s) => !s.ok).map((s) => s.name).join(',')}`, ip: req.ip });
   res.json(r);
 });
-api.post('/tools/relaytopo/test-ssh', adminOnly, fullScopeOnly, async (req, res) => {
+api.post('/tools/relaytopo/test-ssh', adminOnly, fullScopeOnly, textFields('dc'), async (req, res) => {
   const { dc = '', role = 'edge' } = req.body || {};
   if (!['edge', 'irs', 'main'].includes(role)) return res.status(400).json({ ok: false, reason: 'role 은 edge|irs|main' });
   if (role !== 'main' && !RE_DC.test(dc)) return res.status(400).json({ ok: false, reason: '잘못된 사이트 이름' });

@@ -48,6 +48,7 @@ import { placeMember as bmfPlaceMember, sortRules as bmfSortRules, aliasGuardOf 
 import { lowSameLen, TAG_MASK_MIN } from '../../util/ruleName.js';
 import { scopeSig } from '../../util/scopeSig.js';
 import { ensureSvcInvDemo } from '../../mock/demo/svcinv.js';   // v3.31.0 데모(mock 전용 · 빈 저장소에만)
+import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 
 const toolsPerm = requirePerm('tools');
 const csvPerm = requirePerm('data.csv');
@@ -891,7 +892,7 @@ export function registerSvcInventory(api) {
   });
 
   // ── 쓰기 연산 하나로 ──
-  api.post('/tools/svc-inventory/op', writeRole, toolsPerm, async (req, res) => {
+  api.post('/tools/svc-inventory/op', writeRole, toolsPerm, textFields('op', 'corp'), async (req, res) => {
     try {
       const snap = store.get();
       const user = req.user;

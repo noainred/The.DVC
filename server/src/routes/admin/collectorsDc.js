@@ -36,6 +36,7 @@ const EDGE_SMALL_MAX_BYTES = 256 * 1024;
 import { resolveBundleBytes, lastBundleReject } from '../../upgrade/bundleSource.js';
 import { upgradeManager } from '../../upgrade/manager.js';
 import { adminOnly, ensureCollectorDatacenter, requireSettingsOwner, fullScopeOnlyWith, fullReadWriteScopeOnlyWith, remoteServersResolved, hostVcByTag } from './shared.js';
+import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
 const csvPerm = requirePerm('data.csv');
 // v2.611 AUTHZ2611: 전 법인 등록부·동작은 전체 범위 계정만(v2.607 fleetWideOnly 의 형제 등록부).
@@ -318,7 +319,7 @@ adminRouter.get('/collectors/sample.csv', csvPerm, adminOnly, (_req, res) => {
  *    보고 — 기존 URL/토큰/매핑을 실수로 갈아엎는 사고 방지). 행별 성공/실패 정직 반환.
  *  - 가져온 항목은 관리자 수동 등록과 동일하게 managed=true(자기등록이 못 덮어씀).
  */
-adminRouter.post('/collectors/import', csvPerm, adminOnly, fleetOnly, (req, res) => {
+adminRouter.post('/collectors/import', csvPerm, adminOnly, fleetOnly, textFields('csv'), (req, res) => {
   const { rows, error } = parseCollectorsCsv(String(req.body?.csv || ''));
   if (error) return res.status(400).json({ ok: false, reason: error });
   if (!rows.length) return res.status(400).json({ ok: false, reason: '가져올 데이터 행이 없습니다.' });
@@ -381,7 +382,7 @@ adminRouter.post('/collectors/import', csvPerm, adminOnly, fleetOnly, (req, res)
 // '전 엣지의 임의 계정 비밀번호를 심는 권능'이다 — /admin/edge-users* 를 소유자 전용으로 올린
 // 것과 정확히 같은 논리인데 그 승격에서 누락됐다. 엣지측에도 방어를 넣었지만(collector.js —
 // 보호 계정 거부) 중앙에서도 막아 다층으로 둔다.
-adminRouter.post('/collectors/set-password', adminOnly, fleetOnly, requireSettingsOwner, async (req, res) => {
+adminRouter.post('/collectors/set-password', adminOnly, fleetOnly, requireSettingsOwner, textFields('username', 'password'), async (req, res) => {
   const username = String(req.body?.username || 'admin').trim();
   const password = String(req.body?.password || '');
   if (password.length < 8) return res.status(400).json({ ok: false, reason: '비밀번호는 8자 이상이어야 합니다.' });
@@ -451,7 +452,7 @@ adminRouter.get('/datacenters', adminOnly, (req, res) => {
   const le = datacentersLoadError();
   res.json({ datacenters: listDatacenters(), assign: getDatacenterAssign(), ...(le ? { loadError: le } : {}) });
 });
-adminRouter.post('/datacenters', adminOnly, fleetOnly, (req, res) => {
+adminRouter.post('/datacenters', adminOnly, fleetOnly, textFields('id', 'name'), (req, res) => {
   const r = addDatacenter(req.body || {});
   if (r.ok) logAudit({ user: req.user?.username, action: 'DataCenter 등록', target: r.datacenter?.id || '', detail: r.datacenter?.name || '', ip: req.ip || '' });
   res.status(r.ok ? 201 : r.code === 'settings-unreadable' ? 409 : 400).json(r);   // 73 ①: 파일을 못 읽은 동안은 409
@@ -604,7 +605,7 @@ function collectorUrlKey(u) {
   return t.slice(0, end);
 }
 // Test connectivity to one collector (saved by id, or an ad-hoc {url, token}).
-adminRouter.post('/collectors/test', adminOnly, fleetOnly, async (req, res) => {
+adminRouter.post('/collectors/test', adminOnly, fleetOnly, textFields('url', 'token', 'id'), async (req, res) => {
   const body = req.body || {};
   let { url, token } = body;
   if (body.id) {

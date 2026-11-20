@@ -31,6 +31,7 @@ import { validateRestoreSpec, VERIFY_TIMEOUT_MIN } from '../../vmclone/vsOps.js'
 import {
   corpsOf, corpKeyOfTarget, edgeStateOf, listOpsView, pendingOpFor, PENDING_TTL_MS, CLAIM_MS,
 } from '../../vmclone/dispatch.js';
+import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 
 const adminOnly = requireRole('admin');
 
@@ -188,7 +189,7 @@ api.get('/tools/vm-clone', adminOnly, (req, res) => {
 });
 
 /** 잡 생성/수정 — body: { id?, vcenterId, vmId, vmName, dest, schedule, keep, quiesce, enabled } */
-api.post('/tools/vm-clone/jobs', adminOnly, (req, res) => {
+api.post('/tools/vm-clone/jobs', adminOnly, textFields('vcenterId', 'id', 'vmId'), (req, res) => {
   // 복제는 vCenter 상태변경 — 쓰기 범위(writeVcenters, v2.369) 강제. 미설정이면 조회 범위와 동일.
   const snap = store.get();
   const vcenterId = String(req.body?.vcenterId || '');
@@ -325,7 +326,7 @@ api.post('/tools/vm-clone/jobs/:id/restore', adminOnly, (req, res) => {
 });
 
 /** 법인 저장소: ESXi NFS 데이터스토어 추가 + 호스트 연결 — body: { vcenterId, name, server, exportPath, nfsVersion, hostIds } */
-api.post('/tools/vm-clone/nfs-datastores', adminOnly, (req, res) => {
+api.post('/tools/vm-clone/nfs-datastores', adminOnly, textFields('vcenterId'), (req, res) => {
   const vcenterId = String(req.body?.vcenterId || '');
   if (!vcenterId) return res.status(400).json({ ok: false, reason: 'vCenter 를 고르세요.' });
   const deny = accessOf(req, vcenterId); if (deny) return res.status(deny.status).json(deny.body);
@@ -358,7 +359,7 @@ api.post('/tools/vm-clone/nfs-datastores/:id/attach', adminOnly, (req, res) => {
  * v2.794 — 법인의 '백업에 쓸 마운트' 지정 — body: { corpKey: 'central' | 'edge:<이름>', mountIds: string[] | null(지정 해제) }.
  * 그 법인의 vCenter 를 **모두** 쓸 수 있는 계정만(조회 밖 404 → 쓰기 밖 403) — 한 법인 설정이 여러 vCenter 의 잡 대상을 좁힌다.
  */
-api.put('/tools/vm-clone/corps/mounts', adminOnly, (req, res) => {
+api.put('/tools/vm-clone/corps/mounts', adminOnly, textFields('corpKey'), (req, res) => {
   const corpKey = String(req.body?.corpKey ?? '').trim().slice(0, 70);
   const snap = store.get();
   const { vcenters, targets } = targetsNow();

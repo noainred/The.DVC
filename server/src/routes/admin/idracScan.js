@@ -42,6 +42,7 @@ import { idracScopeOf, idracInScope } from './idracCore.js'; // v2.629 AUTHZ2629
 const fleetOnly = fullScopeOnlyWith('iDRAC 등록부·스캔 대역·스캔 실행은 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꾸거나 실행할 수 있습니다(재귀속·삭제로 다른 법인 서버를 옮길 수 있었다).');
 import { requirePerm as requireCsvPerm } from '../../auth/auth.js';
 import { isAdminReq } from '../../auth/addressMask.js'; // v2.973(반증 F4): 관리자 판본이 아니면 관리 NIC 주소 · UUID · iDRAC 계정 가림
+import { textFields, listOrText } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
 const csvPerm = requireCsvPerm('data.csv');
 
@@ -268,14 +269,14 @@ adminRouter.post('/idrac/import', csvPerm, adminOnly, fleetOnly, (req, res) => {
 });
 
 // Preview how an IP list expands (count + sample + parse errors) — no writes.
-adminRouter.post('/idrac/expand-ips', adminOnly, (req, res) => {
+adminRouter.post('/idrac/expand-ips', adminOnly, listOrText('ips'), (req, res) => {
   const { ips, errors, truncated } = expandIpList((req.body || {}).ips || '');
   res.json({ ok: true, count: ips.length, truncated, sample: ips.slice(0, 12), errors });
 });
 
 // Bulk-register servers from an IP list with shared credentials, then poll.
 // Body: { ips, username, password, namePrefix?, mode? }
-adminRouter.post('/idrac/bulk-add', adminOnly, fleetOnly, (req, res) => {
+adminRouter.post('/idrac/bulk-add', adminOnly, fleetOnly, textFields('username', 'password'), (req, res) => {
   const result = bulkAddByIps(req.body || {});
   if (result.ok) pollNow().catch(() => {});
   res.status(result.ok ? 200 : (result.status || 400)).json(result);   // 93회차 F2
@@ -284,7 +285,7 @@ adminRouter.post('/idrac/bulk-add', adminOnly, fleetOnly, (req, res) => {
 // Scan an IP range and return only the IPs that are real Dell iDRACs (with
 // identity). No writes. Body: { ips, username, password, agent? }
 // agent 미지정/'__local__' = 이 포탈에서 직접 스캔(동기). 그 외 = 해당 에이전트에 위임.
-adminRouter.post('/idrac/scan', adminOnly, fleetOnly, async (req, res) => {
+adminRouter.post('/idrac/scan', adminOnly, fleetOnly, textFields('agent'), async (req, res) => {
   const { ips, username, password } = req.body || {};
   const agent = String(req.body?.agent || '').trim();
   if (!ips) return res.status(400).json({ ok: false, reason: 'IP 대역을 입력하세요.' });
@@ -346,7 +347,7 @@ adminRouter.get('/idrac/scan-agents', adminOnly, fleetOnly, (_req, res) => {
   for (const p of polling) add(p); // 실제 폴링 중인 이름을 반드시 선택 가능하게
   res.json({ agents: [...names].sort((a, b) => a.localeCompare(b)), pollingAgents: polling, centralEnabled: Boolean(config.central.token) });
 });
-adminRouter.post('/idrac/register-scanned', adminOnly, fleetOnly, (req, res) => {
+adminRouter.post('/idrac/register-scanned', adminOnly, fleetOnly, textFields('agent'), (req, res) => {
   const { found, username, password, mode, vcenterId, datacenterId, agent } = req.body || {};
   const ag = String(agent || '').trim();
   if (ag && ag !== '__local__') {
@@ -372,7 +373,7 @@ adminRouter.get('/idrac/scan-ranges', adminOnly, fleetOnly, (_req, res) => {
 // 저장/수정. Body: { id?, datacenterId, service?, ranges?, username?, password?, agent?, enabled?, mode? }
 // id가 있으면 그 엔트리 수정, 없으면 새 엔트리 생성(한 법인에 여러 서비스 엔트리 허용).
 // (구버전 클라이언트 호환: vcenterId로 와도 datacenterId로 처리)
-adminRouter.put('/idrac/scan-ranges', adminOnly, fleetOnly, (req, res) => {
+adminRouter.put('/idrac/scan-ranges', adminOnly, fleetOnly, textFields('datacenterId', 'vcenterId'), (req, res) => {
   const b = req.body || {};
   const dcId = b.datacenterId || b.vcenterId;
   const r = saveScanRanges({ ...b, datacenterId: dcId });
@@ -412,7 +413,7 @@ adminRouter.get('/idrac/scan-ranges/sample.csv', csvPerm, adminOnly, (_req, res)
   res.send(scanRangesSampleCsv());
 });
 
-adminRouter.post('/idrac/scan-ranges/import', csvPerm, adminOnly, fleetOnly, (req, res) => {
+adminRouter.post('/idrac/scan-ranges/import', csvPerm, adminOnly, fleetOnly, textFields('csv'), (req, res) => {
   const { rows, error } = parseScanRangesCsv(String(req.body?.csv || ''));
   if (error) return res.status(400).json({ ok: false, reason: error });
   if (!rows.length) return res.status(400).json({ ok: false, reason: '가져올 데이터 행이 없습니다.' });
@@ -470,7 +471,7 @@ adminRouter.post('/idrac/scan-ranges/import', csvPerm, adminOnly, fleetOnly, (re
 });
 
 // 지금 스캔(비동기). Body: { id? }(엔트리 하나) | { datacenterId? }(그 법인의 모든 서비스) | {}(전체 enabled).
-adminRouter.post('/idrac/scan-ranges/scan', adminOnly, fleetOnly, (req, res) => {
+adminRouter.post('/idrac/scan-ranges/scan', adminOnly, fleetOnly, textFields('id', 'datacenterId', 'vcenterId'), (req, res) => {
   const id = String(req.body?.id || '').trim();
   const datacenterId = String(req.body?.datacenterId || req.body?.vcenterId || '').trim();
   const opts = id ? { id } : datacenterId ? { datacenterId } : {};
@@ -536,7 +537,7 @@ adminRouter.get('/idrac/scan-job-log', adminOnly, fleetOnly, (req, res) => {
 });
 
 // 개별 대기 잡 취소 — 잘못된 AGENT_NAME 등으로 영원히 '대기'하는 잡 하나를 전체 중지 없이 정리.
-adminRouter.post('/idrac/scan-job/cancel', adminOnly, fleetOnly, (req, res) => {
+adminRouter.post('/idrac/scan-job/cancel', adminOnly, fleetOnly, textFields('reqId'), (req, res) => {
   const reqId = String(req.body?.reqId || '');
   const r = cancelIdracScanJob(reqId);
   if (r.ok) logAudit({ user: req.user?.username, action: 'iDRAC 대기 잡 취소', target: reqId });
@@ -544,7 +545,7 @@ adminRouter.post('/idrac/scan-job/cancel', adminOnly, fleetOnly, (req, res) => {
 });
 
 // 서버 일괄 삭제. Body: { all:true } 또는 { vcenterId } (빈 문자열=미지정 서버 삭제).
-adminRouter.post('/idrac/delete', adminOnly, fleetOnly, (req, res) => {
+adminRouter.post('/idrac/delete', adminOnly, fleetOnly, textFields('vcenterId'), (req, res) => {
   const b = req.body || {};
   const result = b.all
     ? deleteServers({ all: true })
@@ -557,7 +558,7 @@ adminRouter.post('/idrac/delete', adminOnly, fleetOnly, (req, res) => {
 
 // 다수 iDRAC 서버의 소속 vCenter 일괄 지정/해제. Body: { ids?:[], vcenterId, all? }
 // ids 미지정 + all=true → 전체 적용. 빈 vcenterId = 지정 해제(이름/태그 매칭으로 복귀).
-adminRouter.post('/idrac/assign-vcenter', adminOnly, fleetOnly, (req, res) => {
+adminRouter.post('/idrac/assign-vcenter', adminOnly, fleetOnly, textFields('vcenterId'), (req, res) => {
   const b = req.body || {};
   const ids = b.all ? null : (Array.isArray(b.ids) ? b.ids : []);
   if (!b.all && (!ids || !ids.length)) return res.status(400).json({ ok: false, reason: '대상(ids) 또는 all=true가 필요합니다.' });

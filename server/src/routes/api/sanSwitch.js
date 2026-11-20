@@ -49,6 +49,7 @@ import { fullScopeOnlyWith, fullReadWriteScopeOnlyWith } from '../admin/shared.j
 import { isDemoGuest, DEMO_ONLY_REASON } from '../../auth/demoGuest.js'; // v2.720(감사 R1-03·B2-01·R1-06)
 import { isSanDemoId } from '../../mock/demo/sanswitch.js';
 import { NONE_DC, abandoned, capacityIndexFor } from '../../sanswitch/storagePerfCore.js';   // v2.953: 라우트 밖(알림 · 보고서 · 공개 API)도 쓰는 코어 — 재수출
+import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 export { NONE_DC, abandoned, capacityIndexFor };
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
 const csvPerm = requirePerm('data.csv');
@@ -374,7 +375,7 @@ api.delete('/tools/sanswitch/devices/:id', adminOnly, fullScopeOnly, fullRwOnly,
  * 저장된 비밀번호를 이월하지 않는다**(uagmon M3 — host 바꿔치기로 자격증명이 공격자 서버로
  * 선제 전송되는 경로 차단). 비번을 새로 입력하지 않으면 접속처(host·계정·포트·방식)가 저장분과 같을 때만 저장분을 쓴다(v2.770 R5-E3-4).
  */
-api.post('/tools/sanswitch/test', adminOnly, fullScopeOnly, fullRwOnly, async (req, res) => {
+api.post('/tools/sanswitch/test', adminOnly, fullScopeOnly, fullRwOnly, textFields('type'), async (req, res) => {
   const b = req.body || {};
   const issue = deviceInputIssue(b);
   if (issue) return res.status(400).json({ ok: false, reason: issue });
@@ -1206,7 +1207,7 @@ api.get('/tools/sanswitch/devices/sample.txt', csvPerm, adminOnly, fullScopeOnly
  *   자격증명을 의심하며 고친다(정직 규약).
  * ⚠ 자동 재시도 없음(잘못된 비밀번호 반복 = 계정 잠금). bulkRun 이 강제한다.
  */
-api.post('/tools/sanswitch/devices/import/test', csvPerm, adminOnly, fullScopeOnly, fullRwOnly, (req, res) => {
+api.post('/tools/sanswitch/devices/import/test', csvPerm, adminOnly, fullScopeOnly, fullRwOnly, textFields('text'), (req, res) => {
   const refused = registryWriteRefusal();   // 결정(78 남긴 것 ①): 읽지 못한 빈 목록과 대조하지 않는다(저장 비밀번호 판정도 못 한다)
   if (refused) return res.status(409).json(refused);
   const p = swParseBody(req.body || {});
@@ -1266,7 +1267,7 @@ api.get('/tools/sanswitch/devices/import/test/:id', csvPerm, adminOnly, fullScop
  *  · `testRunId`    연결 테스트 실행 id — 주면 **통과한 줄과의 교집합**만 저장
  * 걸러낸 행은 버리지 않고 `skipped` 로 사유와 함께 돌려준다.
  */
-api.post('/tools/sanswitch/devices/import', csvPerm, adminOnly, fullScopeOnly, fullRwOnly, (req, res) => {
+api.post('/tools/sanswitch/devices/import', csvPerm, adminOnly, fullScopeOnly, fullRwOnly, textFields('text'), (req, res) => {
   const refused = registryWriteRefusal();   // 결정(78 남긴 것 ①): 읽기 오류 중에는 409 — 빈 목록과 대조하면 전부 '추가' 로 보인다(드라이런 포함)
   if (refused) return res.status(409).json(refused);
   const p = swParseBody(req.body || {});

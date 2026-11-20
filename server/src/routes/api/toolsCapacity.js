@@ -47,6 +47,7 @@ import { newVmSum, vmSumAdd, vmAllocOf } from '../../vcenter/vmSums.js'; // v3.2
 import { normGroupQuery, filterVmsByGroup, inventoryGroups, hasGroup } from './groupFilter.js'; // v2.491: 클러스터·폴더 하위 범위
 import { clusterIndex } from '../../clustercfg/analyze.js'; // v2.744(감사 VC-02): 클러스터 묶음 키 한 벌(ref 우선)
 import { ownsClusterKey } from '../../gpu/clusterKeyScope.js'; // v2.769(점검 R4-D5-4): 클러스터 키 소유 vCenter = 최장 프리픽스
+import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
 const csvPerm = requirePerm('data.csv');
 
@@ -462,7 +463,7 @@ const usageCache = new Map(); // `${vmId}|${days}` -> { at, u }
 const USAGE_TTL_MS = 5 * 60_000;
 const USAGE_MAX_VMS = Math.max(1, Math.min(200, Number(process.env.VM_USAGE_MAX_VMS) || 60));
 
-api.post('/vms/usage', requirePerm('inv.vms'), async (req, res) => {
+api.post('/vms/usage', requirePerm('inv.vms'), textFields('days'), async (req, res) => {
   const days = normDays(req.body?.days);
   const interval = intervalForDays(days);
   const ids = Array.isArray(req.body?.vmIds) ? req.body.vmIds.map(String) : [];
@@ -1413,7 +1414,7 @@ api.get('/tools/thin-vms', requirePerm('tools'), (req, res) => memoJson(req, res
 // Advanced VM finder: scope by 다수 vCenter + folder/cluster/resourcePool +
 // conditions. Optional withAvg → 1일/1주 평균 CPU(유휴 판정). 평균은 live는
 // vCenter 성능 API 온디맨드(상한 있음), mock은 현재값 기반 합성.
-api.post('/tools/vm-finder', requirePerm('tools'), async (req, res) => {
+api.post('/tools/vm-finder', requirePerm('tools'), textFields('q', 'os'), async (req, res) => {
   const b = req.body || {};
   const snap = store.get();
   // v2.629(감사 AUTHZ2629-01): 배열 필터는 Set 으로 한 번 만들어 VM 마다 O(1) 로 본다 — 예전 arr.includes 는
@@ -1732,7 +1733,7 @@ api.get('/tools/esxi-temp/history', requirePerm('tools'), async (req, res) => {
  */
 const TEMP_SPARK_MAX = Math.max(1, Math.min(1000, Number(process.env.ESXI_TEMP_SPARK_MAX) || 200));
 
-api.post('/tools/esxi-temp/spark', requirePerm('tools'), async (req, res) => {
+api.post('/tools/esxi-temp/spark', requirePerm('tools'), textFields('hours'), async (req, res) => {
   const hours = Math.max(1, Math.min(168, Number(req.body?.hours) || 24));
   const bucketMs = 3_600_000;
   const raw = Array.isArray(req.body?.items) ? req.body.items : [];

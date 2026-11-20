@@ -23,6 +23,7 @@ import { isSystemVm } from '../../veeam/backupStatus.js';
 import { poolPolicyOf, jobPolicyResolver } from '../../bareos/policy.js';
 import { pollerStatus } from '../../bareos/poller.js';
 import { directorInfo } from './bareosViews.js';
+import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 
 const adminOnly = requireRole('admin');
 /**
@@ -268,7 +269,7 @@ api.get('/tools/bareos-backup/groups/options', adminOnly, async (req, res) => {
 });
 
 /** 새 그룹 — body { vcenterId, name, vmIds, schedule, storage?, pool?, keep? }(keep: 보관 개수 · 비우면 제한 없음). 잡 없는 VM 은 먼저 등록(Director 스케줄 없이)하고, 등록된 VM 만 그룹에 넣는다. */
-api.post('/tools/bareos-backup/groups', adminOnly, async (req, res) => {
+api.post('/tools/bareos-backup/groups', adminOnly, textFields('vcenterId', 'name'), async (req, res) => {
   const vcenterId = String(req.body?.vcenterId || '');
   const v = precheck(req, res, vcenterId); if (!v) return;
   const si = siteInfo(vcenterId, effectiveSettings());

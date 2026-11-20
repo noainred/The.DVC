@@ -22,6 +22,7 @@ import { mailStatus, previewMail, sendDigest, sendVcenter, sendTest } from '../.
 import { load as loadGuestDiskSettings } from '../../guestdisk/settings.js';
 import { load as loadMailCfg } from '../../mail/settings.js';
 import { todayStamp } from '../../util/dayKey.js';
+import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 
 const csvPerm = requirePerm('data.csv');
 const toolsPerm = requirePerm('tools');
@@ -114,13 +115,13 @@ export function registerToolsGuestPart(api) {
     res.json({ ok: true, status: mailStatus(), server });
   });
 
-  api.post('/tools/guest-partition/mail/preview', adminOnly, fullScopeOnly, async (req, res) => {
+  api.post('/tools/guest-partition/mail/preview', adminOnly, fullScopeOnly, textFields('target'), async (req, res) => {
     const target = String(req.body?.target || 'digest');
     if (target !== 'digest' && !(store.get()?.vcenters || []).some((v) => v.id === target)) return res.status(404).json({ ok: false, error: 'not found' });
     res.json(await previewMail(target));
   });
 
-  api.post('/tools/guest-partition/mail/send', adminOnly, fullScopeOnly, async (req, res) => {
+  api.post('/tools/guest-partition/mail/send', adminOnly, fullScopeOnly, textFields('target'), async (req, res) => {
     const target = String(req.body?.target || 'digest');
     if (target !== 'digest' && !(store.get()?.vcenters || []).some((v) => v.id === target)) return res.status(404).json({ ok: false, error: 'not found' });
     logAudit({ user: req.user?.username, action: '게스트 파티션 사용률 메일 지금 보내기', target, ip: req.ip || '' });

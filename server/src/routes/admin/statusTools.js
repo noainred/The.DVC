@@ -18,6 +18,7 @@ import { memtrackReport } from '../../system/memtrack.js';
 import { adminOnly, fullScopeOnlyWith } from './shared.js';
 import { scopedVcenterIds, isFullReadWriteScope } from '../../auth/scope.js';
 import { authzRole } from '../../auth/roles.js';
+import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 // v2.611 AUTHZ2611: 전 법인 등록부·동작은 전체 범위 계정만(v2.607 fleetWideOnly 의 형제 등록부).
 const fleetOnly = fullScopeOnlyWith('서버 로그·포탈 DB 경로·보안 점검 기록은 전 법인에 걸친 서버 자기진단이라 전체 범위(vCenter 제한 없는) 계정만 쓸 수 있습니다.');
 
@@ -160,7 +161,7 @@ adminRouter.get('/portal-db/location', adminOnly, fleetOnly, (_req, res) => {
 });
 
 /** 사전 점검 — 실제로 디렉터리를 만들고 쓰기/여유공간을 실측한다(복사는 하지 않음). */
-adminRouter.post('/portal-db/location/preflight', adminOnly, fleetOnly, (req, res) => {
+adminRouter.post('/portal-db/location/preflight', adminOnly, fleetOnly, textFields('targetDir'), (req, res) => {
   try { res.json({ ok: true, ...preflight(String(req.body?.targetDir || '')) }); }
   catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
@@ -170,7 +171,7 @@ adminRouter.post('/portal-db/location/preflight', adminOnly, fleetOnly, (req, re
  * 서비스 정지·복사·검증·경로기록을 담은 bash 스크립트와 설명(README)을 만들고 경로를 알려준다.
  * 실제 실행은 관리자가 root 로 수행한다(서비스 정지·기동은 systemd 관할).
  */
-adminRouter.post('/portal-db/location/script', adminOnly, fleetOnly, (req, res) => {
+adminRouter.post('/portal-db/location/script', adminOnly, fleetOnly, textFields('targetDir'), (req, res) => {
   try {
     const targetDir = String(req.body?.targetDir || '').trim();
     const pf = preflight(targetDir);
