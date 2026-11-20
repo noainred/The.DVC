@@ -54,8 +54,10 @@ let readBlocked = false; let readRetryAt = 0;
 function inventoryWritable() {
   if (!readBlocked) return true;
   if (inRetryWindow(Date.now(), readRetryAt, READ_RETRY_MS)) return false;
-  const r = readJsonFile(FILE, { parse: parseInventoryFile, preserve: false });
-  if (r.kind === 'read-error') { readRetryAt = Date.now() + READ_RETRY_MS; return false; }
+  // 결정(76~105 남긴 것 · 2026-11-20) 반증: 창 동안 파일이 **손상**으로 바뀌었으면(디스크 복구 뒤 잘린 본문 등) 기동 때와 같이 보존본(.corrupt.*)으로 옮긴 뒤에만 연다 —
+  //   예전에는 preserve:false 라 다음 저장이 손상본(관리자 소유 지정 포함)을 보존본 없이 덮었다(재현). 옮기지 못했으면 읽기 오류처럼 계속 막는다(간격마다 다시).
+  const r = readJsonFile(FILE, { parse: parseInventoryFile, preserve: true });
+  if (r.kind === 'read-error' || (r.kind === 'corrupt' && !r.backup)) { readRetryAt = Date.now() + READ_RETRY_MS; return false; }
   const reverted = []; let restored = 0;
   if (r.kind === 'ok') {
     for (const [id, f] of Object.entries(r.value)) {
@@ -112,7 +114,7 @@ function noteUnreadWindowMerge(r, reverted, restored) {
     else if (String(f.agent || '').toLowerCase() === c.agent.toLowerCase()) same += 1;
   }
   const list = reverted.slice(0, 10).map((x) => `${capStr(x.id, 128)}: ${capStr(x.from, 64) || '(없음)'} → ${capStr(x.to, 64) || '(없음)'}${x.admin ? '(창 동안 관리자 지정)' : ''}`).join(', ');
-  const head = r.kind === 'ok' ? '다시 읽었습니다(읽기 오류 풀림 — 파일의 인벤토리 · 소유 엣지를 합쳤습니다)' : `다시 읽었지만 ${r.kind === 'missing' ? '파일이 없어' : '파일이 손상돼'} 대조하지 못했습니다(읽기 오류 풀림 — 지금 메모리 소유를 그대로 둡니다)`;
+  const head = r.kind === 'ok' ? '다시 읽었습니다(읽기 오류 풀림 — 파일의 인벤토리 · 소유 엣지를 합쳤습니다)' : `다시 읽었지만 ${r.kind === 'missing' ? '파일이 없어' : `파일이 손상돼(손상본은 ${path.basename(String(r.backup || ''))} 로 보존 — 관리자 소유 지정은 그 안에 있습니다)`} 대조하지 못했습니다(읽기 오류 풀림 — 지금 메모리 소유를 그대로 둡니다)`;
   const detail = `${head} — 창 동안 첫 push 로 잡힌 소유 ${claims}건(파일과 같음 ${same} · 파일에 없어 그대로 ${notInFile + windowClaimOverflow}) · 파일 쪽으로 되돌린 소유 ${reverted.length}건${list ? `(${list}${reverted.length > 10 ? ` 외 ${reverted.length - 10}건` : ''})` : ''} · 파일에서 되살린 vCenter ${restored}`;
   console.warn(`[central] ${path.basename(FILE)} ${detail}`);
   try { logAudit({ user: 'system', action: 'central-inventory.unread-window-merge', target: path.basename(FILE), detail }); } catch { /* 감사 실패가 저장을 막지 않게 */ }
