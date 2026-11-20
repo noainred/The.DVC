@@ -108,7 +108,7 @@
 | `focusmon/` | 37 | 8,721 | `focusmon/service.js` (6) | focusmon/service.js — 이 노드의 집중 모니터링을 묶는다(v2.976): 키 · 중앙 직접 수집기 · 1초/10초 틱 · 수집 시작/끝 · 엣지 깨우기. |
 | `gpu/` | 18 | 3,632 | `gpu/settings.js` (10) | GPU 게스트 수집 설정 — 어떤 법인(vCenter)의 패스쓰루 GPU VM을 게스트 OS 계정으로 |
 | `guest/` | 1 | 69 | `guest/accountService.js` (1) | 게스트 계정 추가 오케스트레이션 — vCenter에 로그인해 선택된 VM들의 게스트 OS에 sudo 계정을 |
-| `guestdisk/` | 5 | 1,447 | `guestdisk/settings.js` (6) | guestdisk/settings.js — 게스트 디스크 회수 리포트 설정 (`guest-disk.json`, v2.459). |
+| `guestdisk/` | 5 | 1,451 | `guestdisk/settings.js` (6) | guestdisk/settings.js — 게스트 디스크 회수 리포트 설정 (`guest-disk.json`, v2.459). |
 | `guestpart/` | 5 | 1,426 | `guestpart/notify.js` (2) | guestpart/notify.js — 게스트 파티션 사용률 메일 발송·일정·기록(v2.749). 규칙은 아이실론 디렉터리 사용량과 같은 코어를 쓴다 |
 | `health/` | 2 | 637 | `health/services.js` (2) | 다빈치 서비스 점검 — 포탈 내부 서비스/수집기의 상태를 한 번에 집계한다(빠르고 비차단). |
 | `horizon/` | 11 | 2,696 | `horizon/horizon.js` (4) | Horizon Connection Server 연동 — 등록부 · 공용 로그인 세션 · 연결 테스트 · 라이선스 만료일 조회. |
@@ -129,7 +129,7 @@
 | `metrics/` | 8 | 2,233 | `metrics/unreadVcenters.js` (19) | metrics/unreadVcenters.js — '지금 값' 으로 쓰지 않는 vCenter 와 그 사유(순수 leaf — import 0). |
 | `migration/` | 1 | 140 | `migration/analyze.js` (1) | migration/analyze.js — 특수 기능 'VM 이전 준비도'(도구 키 `migration-readiness`, v2.707 — C7) 판정(순수). |
 | `mock/` | 28 | 7,946 | `mock/demo/flags.js` (65) | mock/demo/flags.js — 데모(DATA_SOURCE=mock) 모드 공용 판정(v2.708). |
-| `net/` | 4 | 771 | `net/captureHistory.js` (5) | 네트워크 캡처 이력 저장소 — 캡처 결과의 메타·요약·진단을 CONFIG_DIR/capture-history.json에 |
+| `net/` | 4 | 789 | `net/captureHistory.js` (5) | 네트워크 캡처 이력 저장소 — 캡처 결과의 메타·요약·진단을 CONFIG_DIR/capture-history.json에 |
 | `nsx/` | 6 | 1,134 | `nsx/store.js` (10) | In-memory NSX aggregator + poller. Mirrors the vCenter store design: each |
 | `overview/` | 1 | 170 | `overview/trend.js` (1) | overview/trend.js — 경영 보기 Overview 핵심 지표 추이(v2.670, 순수 모듈). |
 | `partfault/` | 14 | 2,928 | `partfault/db.js` (9) | partfault/db.js — 파트 장애 이력 DB(v2.547, 스키마 v2 는 v2.548). 파일 `part-faults.db`. |
@@ -140,14 +140,14 @@
 | `portalcheck/` | 8 | 2,639 | `portalcheck/archScan.js` (2) | portalcheck/archScan.js — 특수 기능 › 포탈 점검 › **아키텍처 점검**(v2.614) 판정 코어. |
 | `power/` | 1 | 181 | `power/total.js` (2) | power/total.js — 전체 소비 전력 합산(v2.664, **순수 모듈** — 테스트로 고정). |
 | `provision/` | 7 | 1,452 | `provision/jobs.js` (2) | VM provisioning job engine. Holds deployment jobs in memory and runs them |
-| `proxy/` | 13 | 3,159 | `proxy/sshExec.js` (48) | Small SSH helper built on ssh2: connect, run commands, and upload files via |
+| `proxy/` | 13 | 3,162 | `proxy/sshExec.js` (48) | Small SSH helper built on ssh2: connect, run commands, and upload files via |
 | `publicapi/` | 5 | 838 | `publicapi/time.js` (3) | 공개 API 의 **시각 표기 단일 소유자** (v2.562) — 순수 모듈. |
 | `rack/` | 3 | 984 | `rack/db.js` (1) | rack/db.js — 랙 실장도 **원장**(중앙 한 곳 · 2026-11-20 사용자 결정 '원장 위치는 중앙에 한곳'). |
 | `relaycheck/` | 5 | 568 | `relaycheck/poller.js` (5) | relaycheck/poller.js — HAProxy 경로 주기 점검(v2.429). CLAUDE.md 폴러 규약: 재진입 가드 + 동시 점검 제한 + 대상당 타임아웃 + |
 | `relaytopo/` | 4 | 757 | `relaytopo/store.js` (4) | relaytopo/store.js — 중계 토폴로지(Main – Edge DVC – IRS) 저장(v2.431, 사용자 요구 '첨부한 표처럼 Main-Edge1-Edge2 구조의 |
 | `reports/` | 8 | 1,050 | `reports/compliance.js` (6) | 버전/패치 준수 리포트 — VMware Tools 상태·VM 하드웨어 버전·ESXi 버전 분포를 스냅샷만으로 |
 | `rma/` | 14 | 2,917 | `rma/jobs.js` (8) | RMA 원격 명령 잡 큐(중앙, 인메모리) — claim→ack 2단계 확인응답(captureJobs.js 패턴 이식) |
-| `routes/` | 177 | 55,380 | `routes/capacity.js` (1) | Capacity Advisor API — 포탈/엣지 호스트 리소스 실측·평가·권고 조회. |
+| `routes/` | 177 | 55,407 | `routes/capacity.js` (1) | Capacity Advisor API — 포탈/엣지 호스트 리소스 실측·평가·권고 조회. |
 | `sanswitch/` | 51 | 11,670 | `sanswitch/registry.js` (12) | sanswitch/registry.js — SAN 스위치 등록부(v2.410). |
 | `search/` | 4 | 944 | `search/deepSearch.js` (3) | 심층 검색 — 다조건으로 VM을 검색한다. 1차는 스냅샷 기반(즉시): 게이트웨이·IP/서브넷·OS·전원· |
 | `security/` | 20 | 5,221 | `security/secretVault.js` (37) | secretVault.js — 설정 파일 자격증명(비밀번호·SSH 키·토큰)의 저장 방식(평문/암호화) 중앙 모듈(v2.296). |
@@ -183,7 +183,7 @@
 | `winrm/` | 3 | 553 | `winrm/client.js` (2) | winrm/client.js — WinRM HTTPS(5986) + NTLMv2 로 PowerShell 하나를 돌리고 출력을 받는다(서버 접속 3단계 · 설계 docs/design/server-access ④). |
 | `xferspeed/` | 7 | 2,005 | `xferspeed/schedule.js` (7) | xferspeed/schedule.js — 전송 속도 측정의 **실행 일정**(순수 — 파일·타이머 없음, v2.735). |
 
-디렉터리 106개 · 파일 1547개 · 359,327줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
+디렉터리 106개 · 파일 1547개 · 359,379줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
 <!-- arch-doc:modules:end -->
 
 ### 3-3. 라우트 그룹 → 게이트
