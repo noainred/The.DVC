@@ -81,14 +81,6 @@ export function restorePlan({ mode, job, snapshot, newVm = {}, confirmName = '',
     if (String(confirmName) !== String(job.vmName)) return { ok: false, issue: `덮어쓸 VM 이름을 정확히 다시 입력하세요(‘${job.vmName}’).` };
     const vm = vms.find((v) => v.id === job.vmId);
     if (!vm) return { ok: false, issue: '원래 VM 이 인벤토리에 없습니다 — 새 VM 으로 복원하세요.' };
-    // 160회차(결정 → 권장안 구현): 아래 판정(이름 · 위치 · 같은 이름 VM · 전원 · 스냅샷)은 전부 인벤토리 값이다 — 그 vCenter 의 인벤토리가 **오래된 값**이면
-    //   (수집 실패로 이월한 마지막 정상분 · 엣지 보고 끊김 · 점검 모드 — store 가 stale · status 로 표시한다) 그사이 VM 이름이 바뀌고 같은 자리에 같은 이름의
-    //   다른 VM 이 생겼어도 통과한다(플러그인은 dc · folder · vmname 으로 덮어쓸 VM 을 찾는다). 오래된 값을 지금 값처럼 쓰지 않는다 — 새 VM 복원은 그대로 된다.
-    //   vCenter 항목이 스냅샷에 없으면(시험 꾸밈 · 옛 스냅샷) 예전처럼 판정한다(모르는 것을 '오래됨' 으로 단정하지 않는다).
-    const vcRow = (Array.isArray(snapshot?.vcenters) ? snapshot.vcenters : []).find((v) => v && String(v.id) === String(job.vcenterId));
-    if (vcRow && (vcRow.stale === true || vcRow.maintenance === true || (typeof vcRow.status === 'string' && vcRow.status && vcRow.status !== 'connected'))) {
-      return { ok: false, issue: '이 vCenter 의 인벤토리가 오래됐습니다(수집 실패 · 엣지 보고 지연 · 점검 모드) — VM 의 이름 · 위치 · 전원 · 스냅샷을 지금 값으로 확인할 수 없어 덮어쓰기를 진행하지 않습니다(수집이 돌아온 뒤 다시 하거나 새 VM 으로 복원하세요).' };
-    }
     // 플러그인은 vmname·dc·folder 로 VM 을 찾는다 — 등록 때와 같고, 그 자리에 같은 이름의 VM 이 하나뿐일 때만 덮어쓴다(S3)
     if (!vm.vcDcPath || !vm.folderPath) return { ok: false, issue: 'VM 의 데이터센터·폴더 경로를 읽지 못했습니다 — 덮어쓸 대상을 확인할 수 없어 진행하지 않습니다(새 VM 으로 복원하세요).' };
     const at = placementAt(job, jobid);

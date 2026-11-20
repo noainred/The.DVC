@@ -10,7 +10,7 @@
  *  R2  155 F2 반증 — 스킴 없는 2,041~2,048자 host 는 등록되고 ‘https://’ 가 붙어 2,049자 넘게 저장돼 그 뒤 모든 수정이 거절됐다.
  *  E1  155 추정 E1 — MIG 미디어 확장 vGPU 프로파일(…-1-5cme)이 '해석 불가' 였다(서버 · 웹 미러 같은 규칙).
  *  E2  155 추정 E2 — Bareos 사전 점검의 리소스 종류 칸 ‘constructor’ · ‘toString’ 한 줄이 점검 해석 전체를 던졌다.
- *  C1  결정 → 권장안: Bareos 덮어쓰기 복원은 그 vCenter 인벤토리가 오래됐으면(stale · 점검 모드 · 수집 실패) 진행하지 않는다.
+ *  C1  (메인이 뺌 — 결정 대기) Bareos 덮어쓰기 복원을 오래된 인벤토리에서 막는 권장안은 사용자 판단 뒤에: 회선이 끊긴 동안의 복원을 막는 동작 변화라 싣지 않았다.
  */
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -288,24 +288,4 @@ test('E2 사전 점검의 리소스 종류 칸이 ‘constructor’ · ‘toStri
   assert.doesNotThrow(() => { r = parsePreflight(out); }, '수정 전: resources[t].push is not a function');
   assert.deepEqual(r.resources, { client: ['bareos-fd', 'second-fd'], storage: ['File'], pool: ['Full'], schedule: ['Weekly'] });
   assert.match(r.items.find((i) => i.key === 'resources').detail, /client bareos-fd,second-fd/);
-});
-
-/* ───────────────────────── C1 덮어쓰기 복원 — 오래된 인벤토리 ───────────────────────── */
-
-test('C1 덮어쓰기 복원은 그 vCenter 인벤토리가 오래됐으면 진행하지 않는다 — 새 VM 복원 · vCenter 항목이 없는 스냅샷은 예전과 같다', async () => {
-  const { restorePlan } = await import('../src/bareos/restore.js');
-  const job = { id: 'j1', vcenterId: 'vc-a', vmId: 'vc-a:vm-1', vmName: 'db01', dc: 'DC1', folder: 'vm/prod' };
-  const vms = [{ id: 'vc-a:vm-1', vcenterId: 'vc-a', name: 'db01', vcDcPath: 'DC1', folderPath: 'vm/prod', powerState: 'POWERED_OFF', snapshotCount: 0 }];
-  const plan = (vc, mode = 'original') => restorePlan({ mode, job, snapshot: { vms, hosts: [], datastores: [], ...(vc === undefined ? {} : { vcenters: vc }) }, confirmName: 'db01', newVm: { name: 'db01-new' }, jobid: 10 });
-  assert.equal(plan(undefined).ok, true, 'vCenter 항목이 없는 스냅샷 — 예전과 같다');
-  assert.equal(plan([{ id: 'vc-a', status: 'connected' }]).ok, true);
-  assert.equal(plan([{ id: 'vc-a' }]).ok, true, '상태 칸이 없으면 오래됨으로 단정하지 않는다');
-  assert.equal(plan([{ id: 'vc-b', status: 'unreachable', stale: true }, { id: 'vc-a', status: 'connected', stale: false }]).ok, true, '다른 vCenter 의 상태는 보지 않는다');
-  for (const row of [{ id: 'vc-a', status: 'unreachable', stale: true }, { id: 'vc-a', status: 'connected', stale: true }, { id: 'vc-a', status: 'maintenance', maintenance: true }, { id: 'vc-a', status: 'pending' }]) {
-    const p = plan([row]);
-    assert.equal(p.ok, false, `${JSON.stringify(row)} — 수정 전: 오래된 전원 · 스냅샷 · 이름으로 통과`);
-    assert.match(p.issue, /인벤토리가 오래됐습니다/);
-    assert.equal(plan([row], 'newVm').ok, true, '새 VM 복원은 막지 않는다');
-    assert.equal(plan([row], 'localVmdk').ok, true);
-  }
 });
