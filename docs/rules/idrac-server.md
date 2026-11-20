@@ -1711,7 +1711,9 @@
     '' 행까지 합쳐 지웠다 · R5-2) · 옮길 수 있는 후보만 골라 하나일 때(I-a).
     6회차 반증 R6-1: 합치기의 디스크 값은 **양쪽 시리얼이 모두 있고 같을 때만** 같은 디스크로 보고, 이 노드가 값을 **못 읽은** 디스크(권한 · 보고서 없음 · 보고서에 빠짐)는
     지금 인벤토리에 같은 Id · 같은 시리얼이 있으면 옛 값 · 이력을 남긴다(평소 적재 F9 와 같다 — `mine.drives` 로만 만들어 지금도 꽂힌 디스크의 복구 불가 이력을 지웠다).
-    회귀 `server/test/diskBadLoopR4.test.js`(변이 20개 — 반증 6 + 새 수정 5 + 5회차 반증 6 + 6회차 반증 3 — 모두 잡음 · acceptPush 를 등록부 세 상태로 실제 호출) · 웹 `diskBadText.test.js`.
+    7회차 반증 R7-1: 같은 디스크는 **누적 값을 가진 쪽 가운데 더 늦게 읽은 쪽**을 기준으로 합친다(이 노드가 가동 시간만 읽은 디스크의 누적 값이 사라졌고, 옛 노드가 더 늦게 본 큰 값이
+    사라져 '값 = 늘기 전 값' 모순이 났다) — 처음 읽은 때 MIN · 가동 시간은 이 노드 것 · 늘어남은 기준 쪽 것이 없을 때만 다른 쪽. 이 노드가 값을 못 읽었고 옛 값을 남기면 `at` · `reportAt` 도 옛 것.
+    회귀 `server/test/diskBadLoopR4.test.js`(변이 20개 — 반증 6 + 새 수정 5 + 5회차 반증 6 + 6회차 반증 3 — 모두 잡음 · R7-1 순수 시험 · acceptPush 를 등록부 세 상태로 실제 호출) · 웹 `diskBadText.test.js`.
   - 남은 것(설계 §16 · §18 범위 B · C · §22): 보관 로그 내보내기(§22 2단계 — 장비에 보내는 요청형 동작) · 세션 재사용(3단계) · 지금 쓰이는 곳(OS · vCenter) · 교체 우선순위 · 조치 추적 · vSAN 상태 · 설정 점검. 디스크 값은 v3.10.1 에 텔레메트리 · DriveMetrics 로 읽는다(실장비 대조 전). 실장비 대조는 3.8.2 의 장비 진단으로 받는다(§14.1 명령 대신) — 그 답으로 분류표 · 읽는 방법을 고친다.
   - 회귀 `server/test/diskBad380.test.js` · `server/test/diskBadReview380.test.js` · `server/test/diskBadField382.test.js` · `server/test/diskBadField383.test.js` · `server/test/diskBadPast3101.test.js` · 웹 `diskBadText.test.js`.
 

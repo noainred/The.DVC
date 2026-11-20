@@ -269,3 +269,34 @@ test('R6-1 (적재 경로) — 엣지가 디스크 값을 못 읽은 상태에�
   assert.equal(d.realloc, 4);
   assert.equal(d.changedAt, NOW - 25 * DAY);
 });
+
+// ── 7회차 반증 R7-1(R6-1 덜 고침) — 4회차를 내기 전에 고쳤다 ─────────────────────────────────────
+test('R7-1 — 같은 디스크는 누적 값을 가진 쪽 가운데 더 늦게 읽은 쪽을 기준으로(가동 시간만 읽은 엣지 · 옛 노드가 더 늦게 본 큰 값)', () => {
+  const inv = () => 'SN-1';
+  const oldD = { id: 'd1', serial: 'SN-1', realloc: 2, pending: 0, uncorrectable: 6, powerOnHours: 900, readAt: NOW - 3 * DAY, firstAt: NOW - 30 * DAY, changedAt: NOW - 4 * DAY, before: { realloc: 2, pending: 0, uncorrectable: 1 }, src: 'telemetry' };
+  // (a) 엣지는 가동 시간만 읽음(텔레메트리 403 · DriveMetrics 가 가동 시간만).
+  const pohOnly = { id: 'd1', serial: 'SN-1', realloc: null, pending: null, uncorrectable: null, powerOnHours: 1000, src: 'metrics', readAt: null, firstAt: null, changedAt: null };
+  const a = D.mergeKeptVals({ status: 'ok', at: NOW, drives: [pohOnly] }, { status: 'ok', at: NOW - 3 * DAY, drives: [oldD] }, inv).drives[0];
+  assert.equal(a.uncorrectable, 6, '옛 노드의 복구 불가가 남는다');
+  assert.equal(a.readAt, NOW - 3 * DAY, '마지막으로 읽은 때는 그 값을 읽은 때(지난 값으로 판정)');
+  assert.equal(a.powerOnHours, 1000, '가동 시간은 지금 점검 것');
+  assert.equal(a.changedAt, NOW - 4 * DAY);
+  assert.deepEqual(a.before, oldD.before);
+  // (b) 겹쳐 읽는 동안 옛 노드가 더 늦게 더 큰 값(7)을 봄.
+  const mineD = { id: 'd1', serial: 'SN-1', realloc: 2, pending: 0, uncorrectable: 6, powerOnHours: 950, readAt: NOW - 2 * DAY, firstAt: NOW - 5 * DAY, changedAt: null, src: 'telemetry' };
+  const later = { ...oldD, uncorrectable: 7, readAt: NOW - DAY, changedAt: NOW - DAY, before: { realloc: 2, pending: 0, uncorrectable: 6 } };
+  const b = D.mergeKeptVals({ status: 'ok', at: NOW - 2 * DAY, drives: [mineD] }, { status: 'ok', drives: [later] }, inv).drives[0];
+  assert.equal(b.uncorrectable, 7);
+  assert.equal(b.changedAt, NOW - DAY);
+  assert.equal(b.before.uncorrectable, 6, '값과 늘기 전 값이 어긋나지 않는다');
+  assert.equal(b.firstAt, NOW - 30 * DAY);
+  // 이 노드가 더 늦게 읽었으면 이 노드 값 · 이 노드가 본 늘어남(P4 와 같음).
+  const c = D.mergeKeptVals({ status: 'ok', drives: [{ ...mineD, readAt: NOW, uncorrectable: 8, changedAt: NOW, before: { realloc: 2, pending: 0, uncorrectable: 7 } }] }, { drives: [later] }, inv).drives[0];
+  assert.equal(c.uncorrectable, 8);
+  assert.equal(c.before.uncorrectable, 7);
+  // 이 노드가 값을 한 번도 못 읽었고 옛 값을 남기면 '마지막으로 읽은 때' 도 옛 것(출처 표 설명).
+  const e = D.mergeKeptVals({ status: 'forbidden', at: null, drives: [] }, { status: 'ok', at: NOW - 3 * DAY, reportAt: NOW - 3 * DAY - HOUR, drives: [oldD] }, inv);
+  assert.equal(e.at, NOW - 3 * DAY);
+  assert.equal(e.reportAt, NOW - 3 * DAY - HOUR);
+  assert.equal(e.status, 'forbidden', '이 노드의 읽기 상태는 그대로');
+});

@@ -427,12 +427,23 @@ export function mergeKeptVals(mine, old, invSerial = () => '') {
   const mineDrives = Array.isArray(mine.drives) ? mine.drives : [];
   const byId = new Map(od.filter((d) => d && d.id).map((d) => [d.id, d]));
   const same = (a, b) => !!(a && b && a.serial && b.serial && a.serial === b.serial);
+  // 7회차 반증 R7-1: 같은 디스크면 **누적 값을 가진 쪽 가운데 더 늦게 읽은 쪽**을 기준으로 삼는다 — 늘 이 노드 값을 기준으로 하면
+  //   (a) 이 노드가 가동 시간만 읽은 디스크의 재할당 · 보류 · 복구 불가가 사라졌고(평소 적재는 '가동 시간만 고친다'),
+  //   (b) 겹쳐 읽는 동안 옛 노드가 더 늦게 본 더 큰 값이 사라져 '값 = 늘기 전 값' 인 모순이 생겼다.
+  //   처음 읽은 때는 더 이른 쪽, 가동 시간은 이 노드 것(지금 점검) 우선, 늘어남(changedAt · before)은 기준 쪽 것이 없을 때만 다른 쪽 것.
+  const hasCounter = (x) => VAL_KEYS.some((k) => Number.isFinite(x?.[k]));
   const drives = mineDrives.map((d) => {
     const p = d && byId.get(d.id);
     if (!same(p, d)) return d;
+    const pNewer = hasCounter(p) && (!hasCounter(d) || (Number.isFinite(p.readAt) ? p.readAt : -Infinity) > (Number.isFinite(d.readAt) ? d.readAt : -Infinity));
+    const base = pNewer ? p : d;
+    const other = pNewer ? d : p;
     const firsts = [d.firstAt, p.firstAt].filter(Number.isFinite);
-    const out = { ...d, firstAt: firsts.length ? Math.min(...firsts) : (d.firstAt ?? null) };
-    if (!Number.isFinite(d.changedAt) && Number.isFinite(p.changedAt)) { out.changedAt = p.changedAt; if (p.before) out.before = p.before; }
+    const { before: _b, ...rest } = base;
+    const out = { ...rest, id: d.id, serial: d.serial, firstAt: firsts.length ? Math.min(...firsts) : (base.firstAt ?? null),
+      powerOnHours: Number.isFinite(d.powerOnHours) ? d.powerOnHours : (p.powerOnHours ?? null) };
+    if (Number.isFinite(base.changedAt)) { if (base.before) out.before = base.before; }
+    else if (Number.isFinite(other.changedAt)) { out.changedAt = other.changedAt; if (other.before) out.before = other.before; }
     return out;
   });
   const have = new Set(mineDrives.map((d) => d?.id));
@@ -441,6 +452,9 @@ export function mergeKeptVals(mine, old, invSerial = () => '') {
     const sn = String(invSerial(p.id) || '').trim();
     if (sn && p.serial && sn === p.serial) drives.push(p);
   }
+  // 이 노드가 값을 한 번도 못 읽었는데 옛 값을 남겼으면, 마지막으로 읽은 때도 옛 것으로(출처 표가 '지난 값' 이라고 밝히게 — 7회차 참고).
+  const usedOld = drives.length !== mineDrives.length || drives.some((x, i) => x !== mineDrives[i]);
+  if (usedOld && !Number.isFinite(mine.at) && Number.isFinite(old.at)) return { ...mine, drives, at: old.at, reportAt: old.reportAt ?? null };
   return { ...mine, drives };
 }
 
