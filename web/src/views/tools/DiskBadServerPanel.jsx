@@ -152,7 +152,8 @@ export function DiskBadServerPanel({ serverId, agent = null }) {
           {diag.warn && <div style={{ marginTop: 4, color: 'var(--amber, #f59e0b)', fontWeight: 600 }}>{diag.warn}</div>}
         </div>
       )}
-      {data.canProbe && !data.probe && (
+      {/* 5회차 R5-3: 엣지 포탈은 점검 버튼이 없다 — '다시 점검을 눌러' 라는 안내를 보이지 않는다. */}
+      {data.canProbe && !data.probe && !edgeNode && (
         <div className="muted" style={{ border: '1px dashed var(--border)', borderRadius: 10, padding: '8px 12px', fontSize: 12, lineHeight: 1.6, minWidth: 0 }}>
           <b>장비 진단이 아직 없습니다</b> — 이 화면에서 ‘다시 점검’ 이나 ‘처음부터 다시 읽기’ 를 눌러 <b>이 서버 한 대만</b> 점검할 때 받아 옵니다(법인 · 전체 점검에서는 받지 않습니다).
           이 서버를 맡은 노드가 다른 점검을 하는 중이면 시작되지 않으니, 점검 탭에서 진행 중인 작업이 없는지 먼저 확인하세요.

@@ -159,8 +159,9 @@ export function claimForAgent(agent) {
       //   4회차 반증 I1: 그 사이 사용자가 중단했으면 다시 내주지 않고 '중단됨' 으로 닫는다(엣지가 중단한 조각을 처음부터 다시 읽었다).
       if (!u.reported && u.stop) { u.state = 'stopped'; u.finishedAt = now(); finishUnit(j, u); continue; }
       if (!u.reported) { u.claimedAt = now(); u.updatedAt = u.claimedAt; return { id: j.id, mode: j.mode, manual: j.manual, serverIds: u.serverIds }; }
-      u.state = 'failed'; u.finishedAt = now();
-      u.error = '엣지가 끝을 알리지 않은 채 다음 작업을 가지러 왔습니다(엣지 재시작으로 보입니다) — 저장된 묶음은 남고, 나머지 서버는 다음 점검에서 읽습니다.';
+      // 5회차 개선 I-c: 사용자가 중단한 조각이면 '중단됨' 으로 닫는다(엣지 재시작이 '실패' 로 보였다).
+      u.state = u.stop ? 'stopped' : 'failed'; u.finishedAt = now();
+      if (!u.stop) u.error = '엣지가 끝을 알리지 않은 채 다음 작업을 가지러 왔습니다(엣지 재시작으로 보입니다) — 저장된 묶음은 남고, 나머지 서버는 다음 점검에서 읽습니다.';
       finishUnit(j, u);
     }
   }
@@ -173,6 +174,18 @@ export function claimForAgent(agent) {
     }
   }
   return null;
+}
+
+/**
+ * 저장 못 한 서버를 센다(순수에 가깝다 — 조각 u 만 바꾼다 · 5회차 반증 N3: 이 셈을 되돌려도 시험이 통과했다). 서버 단위로 저장하므로
+ * 이 묶음에서 저장된 서버(storedIds)는 세지 않고(4회차 I5), 같은 서버를 두 번 세지 않는다(503 재전송 — R2-6).
+ */
+export function noteUnsaved(u, servers, storedIds) {
+  if (!u._unsavedIds) u._unsavedIds = new Set();
+  const stored = new Set((storedIds || []).map(String));
+  for (const x of Array.isArray(servers) ? servers : []) if (x?.id && !stored.has(String(x.id)) && u._unsavedIds.size < 5_000) u._unsavedIds.add(x.id);
+  u.unsaved = u._unsavedIds.size;
+  return u.unsaved;
 }
 
 /**
@@ -221,11 +234,7 @@ export async function acceptPush(agent, push) {
   //   닫지 않으면 '읽는 중' 으로 남아 그 엣지가 45분 동안 바쁜 것으로 보였다.
   if (!r.ok) {
     // 서버 id 로 센다 — 503 이면 엣지가 같은 묶음을 다시 보내 같은 서버를 두 번 셀 수 있었다(R2-6).
-    //   4회차 반증 I5: 서버 단위로 저장한다 — 이 묶음에서 저장된 서버(storedIds)는 세지 않는다(묶음 전체를 세어 수가 크게 나왔다).
-    if (!u._unsavedIds) u._unsavedIds = new Set();
-    const storedIds = new Set((r.storedIds || []).map(String));
-    for (const x of push.servers) if (x?.id && !storedIds.has(String(x.id)) && u._unsavedIds.size < 5_000) u._unsavedIds.add(x.id);
-    u.unsaved = u._unsavedIds.size;
+    noteUnsaved(u, push.servers, r.storedIds);
     if (!u.error) u.error = String(r.reason || 'DB 저장 실패').slice(0, 200);
   }
   if (push.final) {
@@ -233,7 +242,8 @@ export async function acceptPush(agent, push) {
     if (u.unsaved > 0) u.error = `서버 ${u.unsaved}대의 결과를 저장하지 못했습니다(${u.error || 'DB 저장 실패'}) — 다음 점검에서 다시 읽습니다.`.slice(0, 300);
     finishUnit(j, u);
   }
-  if (!r.ok) return { ok: false, stored: false, reason: r.reason || 'DB 저장 실패' };
+  // 저장된 서버를 함께 알린다 — 엣지도 '저장 못 함' 을 서버 단위로 센다(5회차 개선 I-b).
+  if (!r.ok) return { ok: false, stored: false, reason: r.reason || 'DB 저장 실패', storedIds: (r.storedIds || []).map(String).slice(0, 500) };
   return { ok: true, stored: true, stop: u.stop === true, newRecords: r.newRecords.length };
 }
 

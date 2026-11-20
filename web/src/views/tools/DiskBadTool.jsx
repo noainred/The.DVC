@@ -40,6 +40,8 @@ export function DiskBadTool() {
   const [jobs, setJobs] = useState(null);
   const [vf, setVf] = useState('inUse');
   const [detail, setDetail] = useState(null);
+  // 설정 저장 결과(담당자 보고) — 점검 칸이 다시 만들어져도(설정 파일 상태가 바뀌면 key 가 바뀐다) 사라지지 않게 여기 둔다(5회차 R5-5).
+  const [settingsMsg, setSettingsMsg] = useState({ text: '', bad: false });
   const reqSeq = useRef(0);
   const load = (c = corp) => {
     const seq = ++reqSeq.current;
@@ -151,14 +153,14 @@ export function DiskBadTool() {
       </div>
 
       {tab === 'summary' && <Summary fleet={fleet} refs={refs} openServer={openServer} setTab={setTab} setCorp={setCorp} noneRead={noneRead} />}
-      {tab === 'disks' && <Disks fleet={fleet} refs={refs} vf={vf} setVf={setVf} openServer={openServer} />}
+      {tab === 'disks' && <Disks fleet={fleet} refs={refs} vf={vf} setVf={setVf} openServer={openServer} noneRead={noneRead} />}
       {tab === 'corps' && <Corps fleet={fleet} setCorp={setCorp} canScan={canScan} writable={writableCorps} onScanned={() => { setTab('scan'); load(); }} />}
       {tab === 'models' && <Models fleet={fleet} />}
       {tab === 'trend' && <Trend fleet={fleet} />}
       {tab === 'servers' && <Servers fleet={fleet} labels={labels} openServer={openServer} />}
       {tab === 'basis' && <Basis refs={refs} labels={labels} />}
       {/* 112회차: 설정 칸은 열 때의 값으로 채운다 — 설정 파일 상태(읽음 · 읽기 오류 · 손상)가 바뀌면 다시 만들어 저장된 값으로 채운다(key). */}
-      {tab === 'scan' && <ScanPanel key={unreadKind(unreadMarkOf(data)) || 'ok'} data={data} jobs={jobs || []} corp={corp} canScan={canScan} reload={load} setJobs={setJobs} />}
+      {tab === 'scan' && <ScanPanel key={unreadKind(unreadMarkOf(data)) || 'ok'} data={data} jobs={jobs || []} corp={corp} canScan={canScan} reload={load} setJobs={setJobs} settingsMsg={settingsMsg} setSettingsMsg={setSettingsMsg} />}
 
       {detail && (
         <Modal title={`${detail.name} — 디스크 이력`} onClose={() => setDetail(null)} width={980}>
@@ -295,15 +297,16 @@ function Summary({ fleet, refs, openServer, setTab, setCorp, noneRead = false })
   );
 }
 
-function Disks({ fleet, refs, vf, setVf, openServer }) {
+function Disks({ fleet, refs, vf, setVf, openServer, noneRead = false }) {
   const list = vf ? fleet.slots.filter((s) => s.verdict === vf) : fleet.slots;
-  const count = (k) => (k ? fleet.slots.filter((s) => s.verdict === k).length : fleet.slots.length);
+  // 5회차 R5-4: 읽은 서버가 없으면 0 이 아니라 모름(KPI · 요약과 같게).
+  const count = (k) => (noneRead ? '—' : (k ? fleet.slots.filter((s) => s.verdict === k).length : fleet.slots.length));
   return (
     <div className="card" style={{ padding: 12, minWidth: 0 }}>
       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 8 }}>
         {VERDICT_FILTERS.map((f) => <button key={f.k} className={vf === f.k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '4px 10px' }} onClick={() => setVf(f.k)}>{f.label} {count(f.k)}</button>)}
       </div>
-      <InUseTable list={list} refs={refs} openServer={openServer} limit={200} />
+      <InUseTable list={list} refs={refs} openServer={openServer} limit={200} emptyText={noneRead ? '읽은 서버가 없습니다 — 점검한 뒤에 보입니다.' : undefined} />
       {list.length > 200 && <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>{num(list.length)}곳 가운데 200곳만 보입니다 — 열을 눌러 정렬하면 정렬한 상위 200곳입니다. 서버를 누르면 그 서버의 전부를 봅니다.</div>}
     </div>
   );
@@ -481,15 +484,14 @@ function Basis({ refs, labels }) {
   );
 }
 
-function ScanPanel({ data, jobs, corp, canScan, reload, setJobs }) {
+function ScanPanel({ data, jobs, corp, canScan, reload, setJobs, settingsMsg, setSettingsMsg }) {
   const [scope, setScope] = useState(corp ? 'corp' : (data.canScanAll ? 'all' : 'corp'));
   const [corpId, setCorpId] = useState(corp || '');
   const [mode, setMode] = useState('incremental');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   // 설정 저장 결과는 설정 칸 안에(4회차 반증 F7 — '어디를 점검할까요' 칸에 떠 저장한 자리에서 보이지 않았고, 그 칸이 없는 화면에서는 아예 안 보였다).
-  const [settingsMsg, setSettingsMsg] = useState('');
-  const [settingsMsgBad, setSettingsMsgBad] = useState(false);
+  //   상태는 부모(DiskBadTool)가 든다 — 이 칸이 다시 만들어져도 남게(5회차 R5-5).
   const [st, setSt] = useState(data.settings || null);
   const mailLine = mailInfoText(data.mail);
   // 설정을 바꿀 수 있는가(관리자 ∧ 조회 · 쓰기 전체 — 서버가 정한다). 모르면(옛 응답) 막지 않는다.
@@ -510,7 +512,7 @@ function ScanPanel({ data, jobs, corp, canScan, reload, setJobs }) {
   // 반증 3회차 D3: 체크박스(자동 점검 · 메일)는 담당자 글상자를 함께 보내지 않는다(편집 중인 글이 같이 저장됐다) — 담당자는 '담당자 저장' 만.
   //   저장 뒤 서버가 실제로 남긴 값으로 글상자를 다시 채우고, 못 읽은 줄 · 버린 주소 · 모르는 법인을 알린다(예전에는 '저장했습니다' 만 남고 메일이 소리 없이 빠졌다).
   const saveSettings = (patch, { withCorpTo = false } = {}) => {
-    if (saveLocked) { setSettingsMsg('설정 파일을 읽지 못한 상태라 저장하지 않았습니다.'); setSettingsMsgBad(true); return Promise.resolve(); }
+    if (saveLocked) { setSettingsMsg({ text: '설정 파일을 읽지 못한 상태라 저장하지 않았습니다.', bad: true }); return Promise.resolve(); }
     let badLines = 0;
     const corpTo = {};
     if (withCorpTo) {
@@ -525,9 +527,9 @@ function ScanPanel({ data, jobs, corp, canScan, reload, setJobs }) {
     return putJson('/tools/disk-bad/settings', withCorpTo ? { ...patch, corpTo } : patch).then((r) => {
       requireChanged(r); setSt(r.settings);
       if (withCorpTo) setCorpToText(Object.entries(r.settings?.corpTo || {}).map(([k, v]) => `${k}=${v.join(',')}`).join('\n'));
-      setSettingsMsg(corpSaveText(r.corpReport, badLines)); setSettingsMsgBad(false);
+      setSettingsMsg({ text: corpSaveText(r.corpReport, badLines), bad: false });
       reload();
-    }).catch((e) => { setSettingsMsg(e?.message || String(e)); setSettingsMsgBad(true); });
+    }).catch((e) => setSettingsMsg({ text: e?.message || String(e), bad: true }));
   };
   const selCount = scope === 'all' ? null : (data.corps.find((c) => c.id === corpId)?.servers ?? 0);
   // 4회차 반증 F6: 엣지 포탈은 점검 · 설정이 중앙에서만 된다 — 작업 목록(늘 비어 '아직 점검한 적이 없습니다')과 설정 칸(저장하면 409)을 보이지 않는다.
@@ -601,7 +603,7 @@ function ScanPanel({ data, jobs, corp, canScan, reload, setJobs }) {
           <label htmlFor="dbad-corpto" className="muted">법인 담당자 — 한 줄에 ‘vCenter id=메일,메일’</label>
           <textarea id="dbad-corpto" className="input" rows={4} value={corpToText} onChange={(e) => setCorpToText(e.target.value)} style={{ fontFamily: 'var(--mono)', fontSize: 12, width: '100%', boxSizing: 'border-box' }} placeholder={data.corps.slice(0, 2).map((c) => `${c.id}=it-admin@example.com`).join('\n')} />
           <div><button className="tab" style={{ flex: 'none' }} disabled={saveLocked || !editable} onClick={() => saveSettings({}, { withCorpTo: true })}>담당자 저장</button></div>
-          {settingsMsg && <div className={settingsMsgBad ? undefined : 'muted'} style={{ fontSize: 12, whiteSpace: 'normal', overflowWrap: 'anywhere', ...(settingsMsgBad ? { color: 'var(--red)', fontWeight: 600 } : {}) }}>{settingsMsg}</div>}
+          {settingsMsg?.text && <div className={settingsMsg.bad ? undefined : 'muted'} style={{ fontSize: 12, whiteSpace: 'normal', overflowWrap: 'anywhere', ...(settingsMsg.bad ? { color: 'var(--red)', fontWeight: 600 } : {}) }}>{settingsMsg.text}</div>}
           {/* 123회차(112회차 반증): 이 화면은 주기 조회가 없다 — ‘다시 확인’ 이 없으면 다시 읽힌 뒤에도 페이지를 새로 열 때까지 잠긴 채였다(다시 읽으면 key 가 바뀌어 설정 칸을 저장된 값으로 다시 만든다). */}
           <SettingsUnreadBanner le={unread} what="디스크 배드 섹터 점검 설정" save="자동 점검 · 메일 · 담당자 저장" onRecheck={reload} style={{ marginBottom: 0 }} />
         </div>
