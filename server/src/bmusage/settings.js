@@ -255,8 +255,9 @@ const CACHE_MS = 3_000;
 
 // v2.631(EDGE2631-01): 중앙에서는 이 파일이 **배포 원본**이다. 손상이면 기본값(꺼짐·빈 법인)으로 떨어지는데, 그 기본값을
 //   배포 라우트가 200 으로 내려보내면 전 엣지의 수집이 꺼진다 — 로드 오류를 기억해 /api/central/bmusage-config 가 503 으로 답한다.
-const _localErr = makeSettingsLoadError(FILE, { label: '베어메탈 사용률 설정', confirm: () => saveBmUsageSettings({}, { confirmLoadError: true }) });   // 83회차: 서비스 점검 '기본값으로 확정' = 명시 확정
-const _distErr = makeSettingsLoadError(DIST_FILE, { label: '베어메탈 사용률 배포(전체 배포 · 제외 · 중앙 켜기 — 기본값으로 확정하면 모두 비워집니다)', confirm: ({ by } = {}) => saveDistribution({}, by || '') });
+// 결정 반영(2026-11-19 ③): 확정은 보존을 기본값으로 다시 쓴다(못 읽은 지금 값보다 줄 수 있다 — 거부 쪽) → 서비스 점검 확정도 설정 소유자 등급(ownerOnly · checksLogs).
+const _localErr = makeSettingsLoadError(FILE, { label: '베어메탈 사용률 설정', confirm: () => saveBmUsageSettings({}, { confirmLoadError: true }), ownerOnly: true });   // 83회차: 서비스 점검 '기본값으로 확정' = 명시 확정
+const _distErr = makeSettingsLoadError(DIST_FILE, { label: '베어메탈 사용률 배포(전체 배포 · 제외 · 중앙 켜기 — 기본값으로 확정하면 모두 비워집니다)', confirm: ({ by } = {}) => saveDistribution({}, by || ''), ownerOnly: true });   // 재확인 N1: 확정은 배포를 모두 끈다(= 엣지 보존을 로컬 값으로) — 배포 라우트와 같은 소유자 등급
 // 전체 점검 34회차 F4(재현): 읽기 오류(EACCES · EISDIR 등 — e.code 가 있다)는 손상이 아니다 — 원본을 옮기지 않고 readError 로 기억하며,
 //   그동안 그 파일의 저장은 거절한다(저장하면 원자적 쓰기가 읽지 못한 원본을 기본값 + 패치로 덮는다). 20회차 F4(svcmon · 권한 파일)와 같은 규약.
 const UNREADABLE_SAVE = '베어메탈 사용률 설정 파일을 읽지 못한 상태(권한 · 소유자)라 저장하지 않았습니다 — 파일 권한을 고치고 재시작하세요(지금 저장하면 원본이 기본값으로 덮입니다).';
@@ -751,6 +752,32 @@ export function saveBmUsageSettings(body = {}, { confirmLoadError = false } = {}
   const out = { ...next };
   Object.defineProperty(out, 'ignoredCentralManaged', { value: ignoredCentralManaged, enumerable: false });
   return out;
+}
+
+/**
+ * 결정 반영(2026-11-19 ③ 사용자): 보존 기간을 **줄이는** 저장은 설정 소유자 등급만(routes/api/bmUsage.js 설정 PUT — 아니면 403 · 아무것도 저장하지 않는다).
+ *   이 함수는 그 판정의 입력이다 — 이 패치를 지금 저장하면 어느 보존 칸이 **저장된 값보다** 줄어드는가. saveBmUsageSettings 와 같은 꼴로 계산한다
+ *   (빈 값 · 0 은 미지정으로 버림 · 중앙 배포 사본이 있으면 배포 키는 저장하지 않음 · store 는 키 단위로 겹침 · 정규화 · 범위 자름).
+ *   보존 칸: rawRetentionDays · dailyRetentionDays(결정 본문) + store 의 rawDays · hourlyDays · devRawDays · devHourlyDays(같은 PUT 으로 바뀌는 보존 —
+ *   원시 실효 보존은 min(store.rawDays, rawRetentionDays) 라 store.rawDays 를 줄이는 것은 같은 값을 다른 칸으로 줄이는 것이다).
+ *   ⚠ 못 읽었으면(손상 · 읽기 오류) 지금 값을 모르므로 **확정 저장(confirmLoadError)은 줄어듦으로 본다**(거부 쪽 — ['unknown']). 확정이 아니면 저장이 어차피 409 다.
+ * @returns {{ shrink: string[], unknown: boolean }}
+ */
+export const RETENTION_FIELDS = Object.freeze(['rawRetentionDays', 'dailyRetentionDays']);
+export const STORE_RETENTION_FIELDS = Object.freeze(['rawDays', 'hourlyDays', 'devRawDays', 'devHourlyDays']);
+export function retentionShrink(body = {}, { confirmLoadError = false } = {}) {
+  const raw = readFile();
+  if (_localErr.get()) return { shrink: confirmLoadError === true ? ['unknown'] : [], unknown: true };
+  const { patch } = dropUnspecifiedNumbers(body);
+  if (readCentralCopy()) for (const k of DISTRIBUTED_KEYS) delete patch[k];
+  const prev = normalizeSettings(raw);
+  const st = patch.store && typeof patch.store === 'object' && !Array.isArray(patch.store) ? { ...prev.store, ...patch.store } : prev.store;
+  const pick = Object.fromEntries(RETENTION_FIELDS.filter((k) => Object.hasOwn(patch, k)).map((k) => [k, patch[k]]));
+  const next = normalizeSettings({ ...prev, ...pick, store: st });
+  const shrink = [];
+  for (const k of RETENTION_FIELDS) if (next[k] < prev[k]) shrink.push(k);
+  for (const k of STORE_RETENTION_FIELDS) if (next.store[k] < prev.store[k]) shrink.push(`store.${k}`);
+  return { shrink, unknown: false };
 }
 
 /** env 로 강제 끄기(현장 탈출구). `BMUSAGE_ENABLED=false` 면 설정과 무관하게 꺼진다. */

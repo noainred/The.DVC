@@ -289,7 +289,8 @@ test('82 결정 ⓐ — 사용률 설정 손상 중 저장은 명시 확정일 �
   assert.equal(fs.existsSync(F('bmusage-settings.json')), false, '저장하지 않았다(기본값 전역 필드 파일이 생기지 않는다)');
   assert.ok(S.bmUsageLocalLoadError(), '손상 표지 그대로(보존 정리 멈춤도 그대로)');
   // 라우트: 전체 범위(조회 ∧ 쓰기) + confirmDefaults 일 때만 확정 저장
-  assert.match(SRC('routes/api/bmUsage.js'), /const confirmLoadError = fullRw && req\.body\?\.confirmDefaults === true;[\s\S]{0,200}saveBmUsageSettings\(body, \{ confirmLoadError \}\)/);
+  //   결정 반영(2026-11-19 ③): 사이에 보존 줄이기 소유자 판정(retentionShrink — 같은 confirmLoadError 를 받는다)이 들어가 간격을 넓혔다
+  assert.match(SRC('routes/api/bmUsage.js'), /const confirmLoadError = fullRw && req\.body\?\.confirmDefaults === true;[\s\S]{0,2500}retentionShrink\(body, \{ confirmLoadError \}\)[\s\S]{0,1200}saveBmUsageSettings\(body, \{ confirmLoadError \}\)/);
   // 서비스 점검 '기본값으로 확정'(등록된 confirm)
   const util = await import('../src/util/settingsLoadError.js');
   const c = util.confirmSettingsDefault('bmusage-settings.json');
