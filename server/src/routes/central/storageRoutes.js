@@ -255,13 +255,16 @@ export function registerStorageRoutes(centralRouter, deps) {
   // 7b단계 서버 등록 배포 — 수집 경로 ‘edge’ 로 등록한 서버 목록(비밀 없음 — 공통 계정 · 키는 이름만). 엣지가 주기적으로 GET.
   //   **개별 토큰으로 인증된 이름에만** 행을 준다(공유 토큰의 ?agent= 는 남의 법인 서버 목록을 받아 갈 수 있다 — v2.589 규약).
   //   `?applied=<서명>&ok=&rej=&rm=` 은 엣지가 지금 적용한 판과 결과 수(숫자만) — 화면이 '반영됨 / 대기' 를 가른다(인메모리 기록).
+  //   결정(76~105 남긴 것 · 2026-11-20) A3: `&unread=1` 은 엣지가 적용 상태 파일을 읽지 못했다는 불리언 하나 — 정확히 '1' 만 참(배열 · 다른 글자 · 없음 = 거짓 → 표지 지움) ·
+  //   개별 토큰으로 검증된 이름에만 기록(공유 토큰 ?agent= 로 남의 엣지에 표지를 세우지 못한다) · 시각은 중앙 수신 시각(recordOnboardPull now).
   centralRouter.get('/bm-onboard', requireCentral(), async (req, res) => {
     const verified = req.centralAuth?.mode === 'agent';
     const agent = verified ? String(req.centralAuth.agent || '').trim() : String(req.query.agent || '').trim();
     const ED = await import('../../bmusage/onboard/edgeDeploy.js');
     const num = (v) => { const n = Number(v); return Number.isInteger(n) && n >= 0 && n <= 100000 ? n : null; };
     if (verified) {
-      ED.recordOnboardPull(agent, { appliedSig: String(req.query.applied || ''), version: String(req.get('x-agent-version') || ''), applied: { ok: num(req.query.ok), rejected: num(req.query.rej), removed: num(req.query.rm) } });
+      ED.recordOnboardPull(agent, { appliedSig: String(req.query.applied || ''), version: String(req.get('x-agent-version') || ''), applied: { ok: num(req.query.ok), rejected: num(req.query.rej), removed: num(req.query.rm) },
+        stateUnread: req.query.unread === '1' });
       try { ED.settlePending(agent, String(req.query.applied || '').slice(0, 64)); } catch { /* 정리 실패는 다음 인출에 다시 */ }   // 7b 반증 F14
     }
     if (settingsUnreadable(res, ED.edgeDeployLoadError, '서버 등록 배포(bm-onboard-edge.json)')) return;   // 엣지는 지난 등록을 그대로 둔다
