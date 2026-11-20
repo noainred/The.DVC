@@ -4,7 +4,10 @@
  * 하는 일: cmd 원격 셸 하나를 만들고(Create) → 명령 하나(Command) → 출력을 끝까지 받고(Receive 반복) → 셸을 지운다(Delete).
  *   명령은 **호출부가 고정 값으로 넘긴 PowerShell 하나**(읽기 묶음 — serverinfo 가 만든다). 사용자 입력을 명령에 끼워 넣지 않는다.
  * 읽기는 정규식으로 필요한 칸만(ShellId · CommandId · Stream · CommandState · ExitCode · Fault 이유) — XML 파서 의존을 두지 않는다.
- *   응답 크기는 호출부(client.js)가 자른다. 이 모듈은 외부 입력을 앵커 있는 비탐욕 패턴으로만 읽는다(루트 CLAUDE.md 정규식 규칙).
+ *   응답 크기는 호출부(client.js)가 자른다. 이 모듈은 외부 입력을 **길이 상한이 있고 서로 겹치지 않는 반복**으로만 읽는다(루트 CLAUDE.md 정규식 규칙 —
+ *   예전 이 줄은 ‘앵커 있는 비탐욕 패턴’ 이라 적었지만 실제로는 앵커 · 비탐욕이 아니었고, Stream 의 `\s+` + `[^>]{0,300}` 겹침이 남아 있었다 · 136회차 newcode136 ①).
+ *   태그 안 칸은 `[^<>]` — 다음 ‘<’ 에서 멈춘다(XML 속성 값에는 ‘<’ 가 올 수 없다). `[^>]` 이면 ‘<Stream <Stream …’ 처럼 시작점이 조밀한 응답에서
+ *   시작점마다 창(300 · 400 · 200자)을 다시 훑어 640KB 하나가 28~100ms 막혔다(142회차 rebut142 ① — WSManFault 도 태그 시작에 묶음).
  * ⚠ 실제 Windows 응답으로는 아직 확인하지 못했다 — 형식은 MS-WSMV 문서 예시를 따랐다(설계 README §7). 시험은 그 예시 모양의 가짜 서버로 한다.
  */
 import crypto from 'node:crypto';
@@ -70,7 +73,7 @@ export function signalBody(commandId) {
 
 /** 첫 번째 <prefix:Name ...>값</prefix:Name> 의 값(접두어는 무엇이든). 길이 상한이 있는 문서에서만 쓴다. */
 function firstText(xml, name) {
-  const re = new RegExp(`<(?:[A-Za-z0-9_]+:)?${name}(?:\\s[^>]{0,400})?>([^<]{0,4096})</(?:[A-Za-z0-9_]+:)?${name}>`);
+  const re = new RegExp(`<(?:[A-Za-z0-9_]+:)?${name}(?:\\s[^<>]{0,400})?>([^<]{0,4096})</(?:[A-Za-z0-9_]+:)?${name}>`);
   const m = re.exec(xml);
   return m ? m[1].trim() : '';
 }
@@ -94,8 +97,9 @@ export function parseCommandId(xml) {
  */
 export function parseReceive(xml) {
   const out = { stdout: [], stderr: [], done: false, exitCode: null };
-  // 점검 1회차 R3: `\s+` 와 `[^>]{0,300}` 가 공백을 둘 다 먹어 닫는 태그 없는 큰 응답에서 갈라 보기가 곱으로 늘었다(640KB 에 416ms · 재현) — 공백 하나만 앞에서 본다.
-  const re = /<(?:[A-Za-z0-9_]+:)?Stream\s([^>]{0,300})>([A-Za-z0-9+/=\s]{0,1048576})<\/(?:[A-Za-z0-9_]+:)?Stream>/g;
+  // 점검 1회차 R3 · 136회차: `\s+` 와 `[^>]{0,300}` 가 공백을 둘 다 먹어 닫는 태그 없는 큰 응답에서 갈라 보기가 곱으로 늘었다(640KB 에 416ms · 재현) — 공백 하나만 앞에서 본다.
+  //   142회차: 태그 안은 `[^<>]`(‘<’ 를 받으면 시작점이 조밀한 응답에서 다시 느려진다 — 640KB 28~134ms).
+  const re = /<(?:[A-Za-z0-9_]+:)?Stream\s([^<>]{0,300})>([A-Za-z0-9+/=\s]{0,1048576})<\/(?:[A-Za-z0-9_]+:)?Stream>/g;
   let m;
   while ((m = re.exec(xml))) {
     const name = /Name="(stdout|stderr)"/.exec(m[1]);
@@ -103,7 +107,7 @@ export function parseReceive(xml) {
     const data = Buffer.from(m[2].replace(/\s+/g, ''), 'base64');
     if (data.length) out[name[1]].push(data);
   }
-  const state = /<(?:[A-Za-z0-9_]+:)?CommandState\s[^>]{0,300}State="([^"]{1,200})"/.exec(xml);
+  const state = /<(?:[A-Za-z0-9_]+:)?CommandState\s[^<>]{0,300}State="([^"]{1,200})"/.exec(xml);
   if (state && /\/CommandState\/Done$/.test(state[1])) {
     out.done = true;
     const ec = firstText(xml, 'ExitCode');
@@ -115,7 +119,7 @@ export function parseReceive(xml) {
 export function faultReason(xml) {
   if (!/<(?:[A-Za-z0-9_]+:)?Fault[\s>]/.test(String(xml || ''))) return '';
   const t = firstText(xml, 'Text') || firstText(xml, 'Message') || '';
-  const code = /WSManFault[^>]{0,200}Code="(\d{1,12})"/.exec(xml);
+  const code = /<(?:[A-Za-z0-9_]+:)?WSManFault\s[^<>]{0,200}Code="(\d{1,12})"/.exec(xml);
   return `${t.replace(/\s+/g, ' ').slice(0, 300)}${code ? ` (WSMan ${code[1]})` : ''}` || 'WinRM 오류(사유 없음)';
 }
 /** Receive 시한 초과 Fault(아직 출력 없음 — 다시 Receive 하면 된다)인가. */

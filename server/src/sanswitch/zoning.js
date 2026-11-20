@@ -89,6 +89,15 @@ export function splitMembers(text) {
 }
 
 /**
+ * 155회차(재현): 장비가 준 이름(cfg · zone · alias)은 일반 객체의 **자기 속성**으로만 읽고 쓴다.
+ *   예전에는 `bucket[name]` · `cfgs[activeCfg]` · `dz[n]` 이 Object.prototype 의 상속 값(‘constructor’ · ‘toString’ · ‘valueOf’ · ‘hasOwnProperty’ …)을
+ *   ‘이미 있는 목록’ 으로 읽어 `.push is not a function` · `is not iterable` 로 던졌다 — 그런 이름의 zone · alias 하나가 그 스위치의 수집 전체
+ *   (buildSnapshot — 포트 · 오류 · SFP 포함)를 매 주기 실패로 만든다. ‘__proto__’ 는 대입이 원형을 바꾸므로 defineProperty 로 자기 속성을 만든다.
+ */
+export const ownOf = (o, k) => (o != null && Object.hasOwn(o, k) ? o[k] : undefined);
+export const ownPut = (o, k, v) => { Object.defineProperty(o, k, { value: v, writable: true, enumerable: true, configurable: true }); return v; };
+
+/**
  * cfgshow 전문 파싱.
  * @returns {{
  *   sections: string[],                       // 본 섹션 이름(정직: 출력이 잘렸는지 알 수 있게)
@@ -131,7 +140,7 @@ export function parseCfgShow(text) {
       if (kind === 'cfg' && inEffective) { effective.cfg = name; cur = null; continue; }
       const bucket = bucketFor(kind === 'qloop' ? 'zone' : kind);
       if (!bucket) { cur = null; continue; }
-      if (!bucket[name]) bucket[name] = [];
+      if (!Object.hasOwn(bucket, name)) ownPut(bucket, name, []);   // 155회차: 상속 값(‘constructor’ …)을 있는 목록으로 읽지 않는다
       cur = { bucket, name };
       // `cfg: cfg1  ZONE_A;` 처럼 이름 뒤에 멤버가 붙어 오는 형식(실장비 확인).
       if (rest.trim()) bucket[name].push(...splitMembers(rest));
@@ -191,10 +200,11 @@ export function resolveZones(parsed, { activeCfg = '' } = {}) {
     };
   }
   const cfgs = parsed?.defined?.cfgs || {};
-  const pick = activeCfg && cfgs[activeCfg] ? activeCfg : Object.keys(cfgs)[0] || '';
-  const zoneNames = pick ? cfgs[pick] : Object.keys(parsed?.defined?.zones || {});
+  // 155회차: 이름 조회는 자기 속성만(위 ownOf) — 헤더의 활성 cfg 이름 · cfg 멤버(zone 이름)가 ‘constructor’ · ‘valueOf’ 여도 던지지 않는다.
+  const pick = activeCfg && Object.hasOwn(cfgs, activeCfg) ? activeCfg : Object.keys(cfgs)[0] || '';
+  const zoneNames = pick ? ownOf(cfgs, pick) : Object.keys(parsed?.defined?.zones || {});
   const dz = parsed?.defined?.zones || {};
-  const zones = (zoneNames || []).filter((n) => dz[n]).map((name) => ({ name, ...expand(dz[name]) }));
+  const zones = (Array.isArray(zoneNames) ? zoneNames : []).filter((n) => Object.hasOwn(dz, n)).map((name) => ({ name, ...expand(dz[name]) }));
   if (!zones.length) return { source: 'none', cfgName: pick, zones: [] };
   return { source: 'defined', cfgName: pick, zones };
 }
@@ -483,8 +493,32 @@ export function compactZoning(parsed, resolved, { limits = ZONE_LIMITS } = {}) {
   };
 }
 
+/**
+ * 160회차(재현): 별칭 맵(이름 → WWN 목록)을 WWN → 별칭 이름으로 뒤집는다(먼저 나온 이름이 이긴다 — 매번 같은 답).
+ *   활성 섹션(Effective configuration · REST enabled-zone)은 zone 멤버를 **WWN 으로 풀어** 적는다 — 그래서 활성 조닝이 있는 장비(= 조닝을 쓰는 모든 장비)는
+ *   zone 행의 `aliasOf` 가 늘 비었고, 수집해 둔 `zoning.aliases` 를 WWN 으로 되찾는 곳이 없었다: 조닝 그림 · 불량 포트 상대편의 라벨이 WWN 그대로였고
+ *   스토리지 매핑의 ‘조닝 별칭’ 폴백(attribution.buildFabrics aliasOf)도 늘 비었다(시험 꾸밈은 정의 섹션만 있는 모양이라 드러나지 않았다).
+ */
+/*
+ * 162회차(160 S1 반증 — 실행 확인): '먼저 나온 이름' 만으로 고르면 묶음 별칭(한 별칭에 WWN 여럿 — `all_esx: w1; w2`)이 앞에 있을 때 끝점마다 따로 있는 별칭(`esx01_hba0: w1`)을
+ *   덮어, 서로 다른 끝점이 같은 라벨로 보였다(순서만 바꾸면 답이 달라졌다). **WWN 수가 가장 적은 별칭**(그 끝점을 가장 좁게 가리키는 이름)이 이기고, 같으면 먼저 나온 이름.
+ */
+export function aliasByWwn(aliases) {
+  const out = new Map();
+  if (!aliases || typeof aliases !== 'object' || Array.isArray(aliases)) return out;
+  const width = new Map();   // WWN → 지금 고른 별칭의 WWN 수
+  for (const [name, list] of Object.entries(aliases)) {
+    if (!Array.isArray(list)) continue;
+    const ws = new Set();
+    for (const raw of list) { const w = normWwn(raw); if (w) ws.add(w); }
+    for (const w of ws) { if (!out.has(w) || ws.size < width.get(w)) { out.set(w, name); width.set(w, ws.size); } }
+  }
+  return out;
+}
+
 /** compactZoning 결과 → resolveZones 와 같은 형태(화면·분석이 같은 함수를 쓰게). */
 export function zonesFromCompact(z) {
+  const byWwn = aliasByWwn(z?.aliases);   // 160회차: 활성 조닝(WWN 멤버)에도 별칭을 붙인다 — zone 행의 aliasOf 가 먼저(그 zone 이 실제로 쓴 이름)
   return (z?.zones || []).map((row) => {
     const wwns = []; const unresolved = []; const members = [];
     let properties = Number(row.properties) || 0;
@@ -492,7 +526,7 @@ export function zonesFromCompact(z) {
       // v2.742(DEV-04): 구버전 수집기·엣지는 속성 멤버를 WWN 으로 실어 보냈다 — 읽을 때도 끝점에서 뺀다(옛 스냅샷도 고쳐진다).
       if (isPropertyMember(raw)) { properties++; members.push({ raw, kind: 'property', wwn: null, alias: '' }); continue; }
       const w = normWwn(raw);
-      if (w) { wwns.push(w); members.push({ raw, kind: 'wwn', wwn: w, alias: row.aliasOf?.[w] || '' }); }
+      if (w) { wwns.push(w); members.push({ raw, kind: 'wwn', wwn: w, alias: row.aliasOf?.[w] || byWwn.get(w) || '' }); }
       else { unresolved.push(raw); members.push({ raw, kind: memberKind(raw), wwn: null, alias: memberKind(raw) === 'alias' ? raw : '' }); }
     }
     const principals = Array.isArray(row.principals) ? [...new Set(row.principals.map((x) => normWwn(x)).filter(Boolean))] : [];

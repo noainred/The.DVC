@@ -13,6 +13,9 @@ import { withSsh, isSshAuthError } from '../proxy/sshExec.js';
 import { reqTimeoutMs } from '../agent/envTimeout.js';
 import { ioSampleSec, ioSampleCommand, ioResultFromExec } from './diskstats.js'; // v2.915: 디스크 I/O 표본(설계 bm-san-compare §4.1)
 
+/** 146회차: 접속 자격이 없어 붙지 않은 결과 문구(엣지에서도 같은 판 — refs 를 들이지 않는다: 등록부 ↔ 이 모듈 순환 import 를 만들지 않게). */
+export const NO_CRED_TEXT = '이 서버에 접속 자격(키 · 비밀번호)이 없어 접속하지 않았습니다(빈 비밀번호로 시도하지 않습니다) — 서버 등록에서 비밀번호를 넣거나 키 · 공통 계정을 정하세요.';
+
 /** 마운트 경로 검증 — 절대경로 + 안전 문자만(공백/따옴표/셸 메타문자 거부 = 명령 주입 방어). */
 export const MOUNT_RE = /^\/[A-Za-z0-9._\/-]*$/;
 
@@ -110,6 +113,7 @@ export function parseDfOutput(stdout, requestedMounts, stderr = '') {
 /**
  * 서버 1대 수집 — SSH 접속 → df 실행 → 파싱. 실패해도 throw 하지 않고 {ok:false, error}.
  * @param {{host,port,username,password,mounts:string[]}} server
+ * @param {{signal?:AbortSignal, onLoggedIn?:() => void, onPasswordSent?:() => void}} [o]  로그인 · 비밀번호 송신 표시(계정 탐침 판정 — sshaccess/accountGate · loginMark)
  * @returns {Promise<{ok:boolean, mounts:Array, missing?:string[], error?:string}>}
  */
 /**
@@ -129,6 +133,9 @@ export async function collectServer(server, { signal, onLoggedIn = null, onPassw
   if (server.authError) return { ok: false, mounts: [], error: String(server.authError).slice(0, 300) };
   // 점검 2회차 Q1(b) · B1: 로그인 뒤 실패는 markLoggedIn(계정 탐침이 성공으로 본다 — 직렬 풀기 금지) · 비밀번호를 보낸 뒤 판정 모름은 markPasswordSent
   let logged = false; let pwSent = false;
+  // 146회차(141 결정 D2): 비밀번호도 키도 없으면 접속하지 않는다 — 엣지 위임 잡(agent/bmstorWorker) · 중앙 PUSH(/api/collector/bmstor-collect)가 받은 서버도
+  //   이 함수로 붙는다(옛 중앙이 빈 비밀번호를 실어 보내도 root + 빈 비밀번호로 로그인하지 않는다). 중앙 경로는 refs.withResolvedAuth 가 먼저 막는다(not-configured).
+  if (!server.privateKey && !(typeof server.password === 'string' && server.password)) return { ok: false, mounts: [], error: NO_CRED_TEXT, authErrorCode: 'not-configured' };
   try {
     const r = await withSsh({
       host: server.host, port: Number(server.port) || 22,

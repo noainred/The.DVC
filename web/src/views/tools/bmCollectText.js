@@ -49,7 +49,8 @@ export const REASON_TEXT = Object.freeze({
   unreachable: { label: 'iDRAC 미도달', action: 'iDRAC 네트워크 · 서비스 상태를 확인하세요.' },
   'pool-busy': { label: '동시성 대기 초과', action: '동시성 설정 · 진행 중인 집중 모니터링 수를 보세요.' },
   'no-telemetry': { label: '리포트 없음', action: 'Datacenter 라이선스가 없는 iDRAC — 센서 · 전력만 읽습니다(정상).' },
-  'cred-config': { label: '키 · 계정 설정으로 시도 안 함', action: '설정 › 보안 › 서버 접속(SSH · Windows)에서 이 서버의 키(법인 사용 중지 · 폴더 · 쓸 수 있는 기능 · 퇴역 · 바꿔치기)를 확인하세요.' },
+  // 146회차(141 결정 D2): 키 · 비밀번호 · 물려받기 승인이 모두 없는 예전 항목도 여기로 온다(빈 비밀번호로 시도하지 않는다 — 예전 사유는 ‘인증 거부’).
+  'cred-config': { label: '키 · 계정 설정으로 시도 안 함', action: '설정 › 보안 › 서버 접속(SSH · Windows)에서 이 서버의 계정 · 키를 확인하세요 — 접속 자격 없음(키 · 비밀번호 · 물려받기 승인 모두 없음 — 빈 비밀번호로는 시도하지 않습니다) · 법인 사용 중지 · 폴더 · 쓸 수 있는 기능 · 퇴역 · 바꿔치기 · 계정 정지 중 하나입니다.' },
   forbidden: { label: 'iDRAC 리포트 권한 거부(403)', action: '인증은 통했고 그 리포트가 허락되지 않았습니다 — iDRAC 계정 권한 · 라이선스를 확인하세요(비밀번호 문제가 아닙니다).' },
   'ids-unmatched': { label: 'iDRAC 리포트 지표 못 찾음', action: '리포트는 왔는데 아는 지표 id 가 없습니다 — 서버 상세의 응답 id 목록을 보고 알려 주세요(장비 펌웨어마다 이름이 다를 수 있습니다).' },
   'cert-untrusted': { label: 'iDRAC 인증서 신뢰 안 됨', action: '설정 › 장비 신뢰에서 그 iDRAC 의 인증서 지문을 확인하고 승인하세요(승인 전에는 접속하지 않습니다).' },

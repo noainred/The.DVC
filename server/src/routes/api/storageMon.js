@@ -612,7 +612,8 @@ const USAGE_RANGES = {
 };
 function usageRange(query = {}) {
   const key = String(query.range || '');
-  if (USAGE_RANGES[key]) return { range: key, ...USAGE_RANGES[key] };
+  // 158회차(재현 — 153회차 N153-3 과 같은 꼴): 자기 키만 — `USAGE_RANGES['constructor']` 는 상속된 함수라 참이어서 range 'constructor' · spanMs 없음(빈 점)이었다.
+  if (Object.hasOwn(USAGE_RANGES, key)) return { range: key, ...USAGE_RANGES[key] };
   // 하위호환: ?days=N (1~400). 기존 규칙(7일 초과면 ~800점 버킷)을 유지한다.
   const days = Math.max(1, Math.min(400, Number(query.days) || 30));
   return { range: `${days}d`, spanMs: days * 86400e3, bucketMs: days <= 7 ? 0 : Math.ceil((days * 86400e3) / 800) };

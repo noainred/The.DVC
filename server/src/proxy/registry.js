@@ -242,12 +242,27 @@ export function saveConfig(partial = {}) {
 }
 
 /**
+ * HAProxy 설정 파일 경로 검증(157회차 — 재현 · 순수). 이 값은 `proxy/deploy.js` 가 **원격 셸 명령**(`test -r` · `cp -a` · `mv` · `rm -f` · 검증 명령의 {file})에 그대로 보간한다.
+ *   `/remote/deploy/test` 는 요청의 값을 **저장된 SSH 비밀번호 · 개인키**와 함께 써서, 기본 · 공유 중계 서버 설정을 바꿀 수 없는 범위 관리자(PUT /config 403)가
+ *   경로 칸에 셸 문장(`/etc/hosts; <명령> #`)을 넣어 그 중계 서버에서 임의 명령을 돌리고 출력까지 받았다. 절대 경로 · 영숫자와 . _ - / 만 · 255자까지
+ *   (공백 · 따옴표 · 기호 · 제어문자 불가 — server/CLAUDE.md ‘셸 명령 조립: 화이트리스트 정규식 뒤에만’). 빈 값 · 주지 않은 칸은 기본 경로를 쓰므로 통과.
+ *   판정은 이 함수 하나 — 저장(deployTargetIssue) · 시험 · 배포(deploy.js)가 같이 쓴다.
+ */
+const HAPROXY_CFG_PATH_RE = /^\/[A-Za-z0-9._/-]{1,254}$/;
+export function haproxyCfgPathIssue(v) {
+  if (v === undefined || v === null || v === '') return null;
+  if (typeof v !== 'string' || !HAPROXY_CFG_PATH_RE.test(v)) return 'HAProxy 설정 파일 경로는 ‘/’ 로 시작하는 절대 경로여야 하고 영숫자와 . _ - / 만 쓸 수 있습니다(공백 · 따옴표 · 기호 불가 · 255자까지).';
+  return null;
+}
+
+/**
  * v2.631(AX3-02): 저장 시점에 배포 대상 주소도 검사한다(순수 · 동기). 형제 시험 라우트(/remote/deploy/test·/remote/test)는
  *   `ipBlockReason(deploy.host)`·`ssrfBlockReasonResolved(dataplane.url)` 로 막는데, 실제 배포(deployToProxy → SSH 다이얼)와
  *   Data Plane 매핑(applyMapping → resilientFetch)은 저장값을 그대로 쓴다 — 시험 버튼을 거치지 않는 저장·직접 API 경로가 그 검사를
  *   우회했다. 비어 있으면 통과(미설정 허용). 이름(DNS)은 동기 판정이라 리터럴·loopback 이름까지만 본다(해석 결과는 시험 라우트가 본다).
  */
 export function deployTargetIssue({ deploy, dataplane } = {}) {
+  if (deploy) { const b = haproxyCfgPathIssue(deploy.haproxyConfigPath); if (b) return b; }   // 157회차: 셸에 보간되는 값 — 저장할 때도 같은 판정
   if (deploy && deploy.host !== undefined) {
     const h = String(deploy.host ?? '').trim();
     if (h) { const b = ipBlockReason(h); if (b) return `배포 SSH 호스트가 차단되었습니다: ${b}`; }

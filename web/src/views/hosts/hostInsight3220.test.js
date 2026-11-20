@@ -154,7 +154,7 @@ describe('확인할 것 · 권한 없는 칸 숨김', () => {
 });
 
 describe('가상화 호스트 현황 — 칸 배치 · 색 · S6 · 못 버팀', () => {
-  it('처음 색 = 한 대 빠진 뒤 메모리 · 파랑 3단 + 경계 이상만 빨강', () => {
+  it('처음 색 = 한 대 빠진 뒤 메모리 · 파랑 3단 + 경계 초과만 빨강', () => {
     const f = fillDefs(R.thresholds, R.access);
     expect(f.map((x) => x.key)).toEqual(['n1mem', 'max', 'cpu', 'mem']);
     expect(f[0].steps).toEqual([50, 75]);
@@ -162,9 +162,10 @@ describe('가상화 호스트 현황 — 칸 배치 · 색 · S6 · 못 버팀',
     expect(hostTileColors(fillStep(40, f[1])).bg).toBe(RAMP[1]);
     expect(hostTileColors(fillStep(60, f[1])).bg).toBe(RAMP[2]);
     expect(hostTileColors(fillStep(80, f[1])).bg).toBe(RAMP[3]);
-    expect(hostTileColors(fillStep(90, f[1])).bg).toBe(CRIT_BG);
+    expect(hostTileColors(fillStep(90, f[1])).bg).toBe(RAMP[3]);     // 148회차(145 K1): 경계는 ‘초과’ — 정확히 90 은 서버 과부하 · N+1 처럼 정상
+    expect(hostTileColors(fillStep(90.1, f[1])).bg).toBe(CRIT_BG);
     expect(hostTileColors(fillStep(null, f[1])).bg).toBe(NONE_BG);   // 모름은 회색(0 단계가 아니다)
-    expect(hostScale(f[1]).map((x) => x.text)).toEqual(['50% 미만', '50–75%', '75–90%', '90% 이상(경고)', '값 모름']);
+    expect(hostScale(f[1]).map((x) => x.text)).toEqual(['50% 미만', '50–75%', '75–90%', '90% 초과(경고)', '값 모름']);
   });
   it('칸 = 클러스터 · 독립 호스트는 법인마다 한 칸 · 고르는 id = 법인 · 모름 법인은 칸이 없다', () => {
     const groups = mapGroups(R.clusters, R.rows, SIZE_DEFS[0]);

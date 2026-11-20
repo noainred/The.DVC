@@ -6,7 +6,8 @@
  * 추이의 마지막 전체 합계 점이 '적재 보류' 인지 '점검중 vCenter 를 뺀 부분 합' 인지 알 수 없었다.
  * 제외가 없으면 null(빈 줄을 만들지 않는다). 문구에 백틱·별표를 쓰지 않는다(평문으로 그린다).
  */
-const REASON_LABEL = { maintenance: '점검중', unreachable: '수집 실패', stale: '위임 보고 낡음' };
+// 158회차: stopped = 긴급중단(수집 정지) — 스냅샷이 통째로 얼어 있어 샘플러가 전 vCenter 를 적재하지 않는다(서버 metrics/sampler.js samplingUnreadReasons)
+const REASON_LABEL = { maintenance: '점검중', unreachable: '수집 실패', stale: '위임 보고 낡음', stopped: '긴급중단' };
 
 const cnt = (v) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0);
 /** v2.741(VC-02): 사용률을 못 읽어 CPU·메모리 할당/사용 계열에서 뺀 켜진 VM 수 { cpu, mem } — 둘 다 0 이면 null. */

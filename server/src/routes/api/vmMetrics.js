@@ -168,7 +168,7 @@ export function registerVmMetrics(api) {
 api.get('/vms/:id/metrics', requirePerm('inv.vms'), async (req, res) => {
   const id = req.params.id;
   const type = METRIC_TYPES.includes(req.query.type) ? req.query.type : 'cpu';
-  const interval = PERF_INTERVALS[req.query.interval] ? req.query.interval : 'realtime';
+  const interval = Object.hasOwn(PERF_INTERVALS, req.query.interval) ? req.query.interval : 'realtime';   // 153회차: 자기 키만 — 'constructor' 가 통과해 vCenter 에 깨진 intervalId 를 보냈다
   // Optional explicit date range (ISO/datetime-local). Empty = rolling window.
   const start = req.query.start && !Number.isNaN(Date.parse(req.query.start)) ? req.query.start : null;
   const end = req.query.end && !Number.isNaN(Date.parse(req.query.end)) ? req.query.end : null;
@@ -201,7 +201,7 @@ api.get('/vms/:id/metrics', requirePerm('inv.vms'), async (req, res) => {
 api.get('/hosts/:id/metrics', requirePerm('inv.hosts'), async (req, res) => {
   const id = req.params.id;
   const type = METRIC_TYPES.includes(req.query.type) ? req.query.type : 'cpu';
-  const interval = PERF_INTERVALS[req.query.interval] ? req.query.interval : 'realtime';
+  const interval = Object.hasOwn(PERF_INTERVALS, req.query.interval) ? req.query.interval : 'realtime';   // 153회차: 자기 키만 — 'constructor' 가 통과해 vCenter 에 깨진 intervalId 를 보냈다
   const start = req.query.start && !Number.isNaN(Date.parse(req.query.start)) ? req.query.start : null;
   const end = req.query.end && !Number.isNaN(Date.parse(req.query.end)) ? req.query.end : null;
 

@@ -16,7 +16,7 @@ import '../../vms/insight-tools/vmTools.css';
 import { toolAllowed } from '../../../api.js';
 import { unitText } from '../../unitText.js';
 import { useToolSummary } from '../../vms/insight-tools/useToolSummary.js';
-import { fmtN, fmtU, fmt1, gbText, corpNameOf, missingText, synthNote, barPct, toolLabel, gateOf } from '../../vms/insight-tools/toolSumText.js';
+import { fmtN, fmtU, fmt1, gbText, corpNameOf, missingText, synthNote, barPct, toolLabel, gateOf, staleOf } from '../../vms/insight-tools/toolSumText.js';
 import { PanelHead, PanelState, ToolLink, Gauge, TopTable, NameCell } from '../../vms/insight-tools/ToolParts.jsx';
 import { HYGIENE_CODE_ROWS, WARM, NEUTRAL, contentionRule, contentionEmpty } from '../../vms/insight-tools/vmToolPanelsText.js';
 import { SCAN_OFF_NOTE } from '../../contention/contentionText.js';
@@ -152,7 +152,12 @@ function DsPanel({ vcIds, rows, canTool }) {
   const nameOf = corpNameOf(rows, [...(qf.data?.rows || []), ...(qp.data?.rows || [])]);
   // 두 도구 중 먼저 온 것부터 그린다 — 한쪽이 늦어도 다른 쪽을 기다리지 않는다. 둘 다 없을 때만 PanelState(받는 중 · 못 받음 · 권한 안내).
   const lead = canFc ? qf : qp;
-  const both = { data: (canFc && qf.data) || (canSp && qp.data) || null, error: lead.error, loading: qf.loading || qp.loading, at: Math.max(qf.at || 0, qp.at || 0) || null };
+  //   r140: 값이 있으면 오류는 **값이 있는 도구의 다시 받기 실패**만 싣는다 — 예전 lead.error 는 예측이 처음부터 못 왔는데(경로만 옴) PanelState 가
+  //   ‘다시 받기에 실패했습니다 — 아래는 … 값입니다’ 라고 말했다(예측 실패는 아래 ‘용량 예측 요약을 받지 못했습니다’ 가 따로 밝힌다). 값이 없으면 예전 그대로 lead.error.
+  const bothData = (canFc && qf.data) || (canSp && qp.data) || null;
+  //   r145: 안내의 받은 시각은 실패한 도구의 것(staleOf) — 예전 both.at(둘 중 늦은 것)은 예측을 새로 받고 경로만 실패하면 옛 경로 값을 방금 값이라 말했다(머리줄 시각은 그대로).
+  const stale = staleOf([canFc && qf, canSp && qp]);
+  const both = { data: bothData, error: bothData ? stale.error : lead.error, loading: qf.loading || qp.loading, at: Math.max(qf.at || 0, qp.at || 0) || null };
   const reload = () => { if (canFc) qf.reload(); if (canSp) qp.reload(); };
   const soonMax = f ? f.soonest.reduce((a, x) => Math.max(a, Number(x.usagePct) || 0), 0) : 0;
   const deadMax = p ? p.deadHosts.reduce((a, x) => Math.max(a, Number(x.paths) || 0), 0) : 0;
@@ -160,7 +165,7 @@ function DsPanel({ vcIds, rows, canTool }) {
   return (
     <section className="vit-panel" aria-label="데이터스토어 — 곧 가득 · 경로">
       <PanelHead title="데이터스토어 — 곧 가득 · 경로" hint={`특수 기능 ${sub} 의 요약입니다`} q={both} onReload={reload} />
-      <PanelState q={both} waitText="데이터스토어 요약을 받는 중입니다…">
+      <PanelState q={bothData && stale.error ? { ...both, at: stale.at } : both} waitText="데이터스토어 요약을 받는 중입니다…">
         <div className="vit-gp">
           <div className="vit-sum">
             {f && (

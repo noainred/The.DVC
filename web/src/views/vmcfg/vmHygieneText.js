@@ -71,6 +71,8 @@ export function coverageText(c, notReadVcenters) {
   if (c.notCollected) parts.push(`아직 안 읽음 ${c.notCollected.toLocaleString()}`);
   if (c.templates) parts.push(`템플릿 ${c.templates.toLocaleString()} 제외`);
   if (c.excepted) parts.push(`스냅샷 정책 예외 ${c.excepted.toLocaleString()}`);
+  // 153회차: 스냅샷 보류(기한 있는 예외 — 스냅샷 화면에서 건다)로 스냅샷 정책 판정에서 뺀 VM 수(서버 coverage.held — 옛 서버는 칸이 없다).
+  if (c.held) parts.push(`스냅샷 보류 ${c.held.toLocaleString()}`);
   const nr = notReadKpiSub(notReadVcenters);
   if (nr) parts.push(nr);
   return parts.join(' · ');

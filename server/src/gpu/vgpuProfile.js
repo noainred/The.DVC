@@ -12,7 +12,9 @@ export function vgpuProfileGB(profile) {
   const s = String(profile ?? '').trim();
   if (!s || s.length > 128) return null;
   // 41회차 F7: B 시리즈 다중 디스플레이 이름(…-2b4 · -1b4)도 읽는다 — 시리즈 글자 뒤 디스플레이 수 한 자리(그런 VM 1대가 법인 · 전체 할당률을 통째로 지웠다).
-  const m = /-(\d{1,3})([a-z]{1,2})\d?$/i.exec(s);
+  // 160회차(155 추정 E1 판정): 시리즈 글자는 1~3자 — MIG 미디어 확장 프로파일은 `…-1-5cme`(NVIDIA 문서 A100-1-5CME = MIG 1g.5gb+me · A100X · H100 도 같은 꼴)다.
+  //   예전 1~2자는 그 이름을 null('프로파일 해석 불가')로 읽어 그 VM 의 GPU · 법인 할당이 '모름' 이 됐다. ⚠ 이 현장 프로파일 목록으로는 확인하지 못했다(문서 기준).
+  const m = /-(\d{1,3})([a-z]{1,3})\d?$/i.exec(s);
   if (!m) return null;
   const n = Number(m[1]);
   if (!Number.isFinite(n)) return null;
@@ -29,7 +31,7 @@ export function vgpuProfileGB(profile) {
 export function vgpuProfileIsMig(profile) {
   const s = String(profile ?? '').trim();
   if (!s || s.length > 128) return false;
-  return /-\d{1,2}-\d{1,3}[a-z]{1,2}\d?$/i.test(s);
+  return /-\d{1,2}-\d{1,3}[a-z]{1,3}\d?$/i.test(s);   // 160회차: 시리즈 1~3자(…-1-5cme) — vgpuProfileGB 와 같은 끝 규칙
 }
 
 /**

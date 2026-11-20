@@ -13,7 +13,7 @@ import { fmtAgo, fmtTime } from '../../util/fmt.js';
 import { copyText } from '../../util/copyText.js';
 import { numOrNull } from '../../numOrNull.js';
 import { unitText } from '../unitText.js';   // 값이 없으면 단위 없이 ‘—’(루트 CLAUDE.md)
-import { CODE_TEXT, CRED_TEXT, codeTone, pickIssue, sourceText, osText, paramsText, resultText, msText, resultCounts, copyAllText, outHead } from './serverCmdText.js';
+import { CODE_TEXT, CRED_TEXT, codeTone, pickIssue, sourceText, osText, paramsText, resultText, msText, resultCounts, copyAllText, outHead, outputStale, OUTPUT_STALE_TEXT } from './serverCmdText.js';
 import { Chip } from '../sshAccessParts.jsx';   // 서버 접속 화면과 같은 칩(같은 CSS)
 import { toneVar } from './toneVar.js';
 import '../sshAccess.css';
@@ -76,6 +76,8 @@ export default function ServerCmdTool() {
   }, [pvKey]);   // eslint-disable-line react-hooks/exhaustive-deps -- pvKey 가 presetId · params 를 담는다
   // 새 실행이 보이면 받아 둔 출력 · 펼침을 비운다(마지막 실행 한 건만 — 서버가 준 실행 열쇠)
   const lastKey = v?.last?.runKey || '';
+  const lastKeyRef = useRef('');
+  lastKeyRef.current = lastKey;   // 출력 응답이 올 때의 ‘지금 화면이 보는 실행’(156회차 — fetchOut 이 대조한다)
   useEffect(() => { setOuts(new Map()); setOpen(new Set()); setOutMsg(null); }, [lastKey]);
   const servers = useMemo(() => v?.servers || [], [v]);
   const corps = useMemo(() => [...new Set(servers.map((s) => s.corp).filter(Boolean))].sort(), [servers]);
@@ -107,8 +109,11 @@ export default function ServerCmdTool() {
   };
   // 출력은 화면이 본 실행(runKey)의 것만 — 그 사이 새 실행이 있으면 서버가 409 · 지워졌으면 404(반증 F2) → 안내하고 화면을 다시 읽는다
   const fetchOut = async (id = '') => {
+    const sent = v.last?.runKey || '';
     try {
-      const r = await fetchJson('/tools/server-cmd/output', { ...(id ? { id } : {}), run: v.last?.runKey || '' }, undefined, { retries: 0 });
+      const r = await fetchJson('/tools/server-cmd/output', { ...(id ? { id } : {}), run: sent }, undefined, { retries: 0 });
+      // 156회차: 늦게 온 지난 실행의 출력은 버린다 — 응답을 기다리는 사이 화면이 새 실행으로 바뀌면(위 효과가 비운 뒤) 새 표 아래에 지난 출력이 붙었다
+      if (outputStale(sent, r, lastKeyRef.current)) throw new Error(OUTPUT_STALE_TEXT);
       setOuts((m) => { const n = new Map(m); for (const x of r.rows || []) n.set(x.id, x); return n; });
       return { rows: r.rows || [], label: r.label || v.last?.label || '' };
     } catch (e) { load(); throw e; }

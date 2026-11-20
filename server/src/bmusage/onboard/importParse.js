@@ -12,7 +12,7 @@
  *  · 머리글 별칭(한/영 · 대소문자 · 공백 · 밑줄 · 하이픈 · 별표 무시). 비밀 칸 이름(password · 비밀번호 · private_key …)은 **값을 읽지 않고** 그 칸에 값이 있는 행을 표시한다.
  */
 import { parseCsvRows, unguardCell, delimiterHint } from '../../util/csv.js';
-import { assertXlsxSizeOk, assertXlsxMergesOk } from '../../svcmon/formats.js';
+import { assertXlsxSizeOk, assertXlsxMergesOk, loadXlsxValues } from '../../svcmon/formats.js';
 
 export const MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
 export const MAX_ROWS = 5000;
@@ -100,10 +100,13 @@ function mergeRows(ref) {
 /** .xlsx 첫 시트 → 표(행 = 칸 문자열 배열) + 병합 행 집합(시트 행 번호). */
 async function readXlsx(buf) {
   assertXlsxSizeOk(buf, XLSX_MAX_UNCOMPRESSED);
-  assertXlsxMergesOk(buf);   // 감사 M-4: exceljs 가 로드하며 병합을 칸 단위로 전개하기 전에 막는다(svcmon 가져오기와 같은 함수)
-  const ExcelJS = (await import('exceljs')).default;
-  const wb = new ExcelJS.Workbook();
-  try { await wb.xlsx.load(buf); } catch (e) { throw new Error(`XLSX 를 읽지 못했습니다(${String(e?.message || e).slice(0, 80)})`); }
+  // 감사 M-4: exceljs 가 로드하며 병합을 칸 단위로 전개하기 전에 막는다(svcmon 가져오기와 같은 함수).
+  //   154회차 Z3(메인): 유효성 검사(드롭다운)는 이 가져오기가 읽지 않는다 — exceljs 에 그 노드를 읽지 않게 하고(아래 ignoreNodes — 범위를 칸마다 전개하지 않는다)
+  //   점검도 'ignored' 로 둔다(전체 열 드롭다운이 둘 이상 든 정상 양식 파일을 넓이 상한으로 거부하지 않게).
+  assertXlsxMergesOk(buf, { dataValidations: 'ignored' });
+  // 159회차: 로드는 svcmon/formats.js loadXlsxValues 하나 — 유효성 검사 · 이름 정의 · 열 정의를 읽지 않고(exceljs 가 범위를 칸마다 전개한다) 행 번호를 확인한다.
+  let wb;
+  try { wb = await loadXlsxValues(buf); } catch (e) { throw new Error(`XLSX 를 읽지 못했습니다(${String(e?.message || e).slice(0, 80)})`); }
   const ws = wb.worksheets[0];
   if (!ws) throw new Error('XLSX 에 시트가 없습니다.');
   const merges = [];

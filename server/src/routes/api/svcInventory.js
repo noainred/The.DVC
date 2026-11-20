@@ -906,7 +906,11 @@ export function registerSvcInventory(api) {
       };
 
       // 전체 범위 관리자 연산
-      if (FLEET_OPS[op] || op === 'store.reset' || op === 'corp.purge') {
+      // 158회차(재현 — 153회차 N153-3 과 같은 꼴): 연산 표는 **자기 키만**. `FLEET_OPS['constructor']` · 'toString' · 'valueOf' 는 상속된 함수라 참이어서
+      //   모르는 연산이 400 이 아니라 200(rev 올림 · 파일 쓰기 · 감사 기록 'svc-inventory.constructor')이었고 '__proto__' 는 500 이었다.
+      const fleetOp = Object.hasOwn(FLEET_OPS, op) ? FLEET_OPS[op] : null;
+      const corpOp = Object.hasOwn(CORP_OPS, op) ? CORP_OPS[op] : null;
+      if (fleetOp || op === 'store.reset' || op === 'corp.purge') {
         if (!fleetAdmin(user, snap)) return res.status(403).json({ ok: false, error: 'forbidden', reason: '전역 카탈로그·태그 카테고리·초기화·법인 항목 정리는 전체 범위 관리자만 바꿀 수 있습니다.' });
         if (op === 'corp.purge') {
           // 등록 해제된 vCenter 의 법인 항목(서비스·폴더·규칙·별칭·이름 규칙)과 그 법인 고정을 지운다(5차 반증 R2 — 법인 쓰기는 스냅샷에 없으면 404 라
@@ -937,7 +941,7 @@ export function registerSvcInventory(api) {
           const r = resetCorrupt(); audit('service-map', `손상본 보존: ${r.moved.join(', ') || '(없음)'}`);
           return res.json({ ok: r.ok, rev: storeRev(), result: r });
         }
-        const r = mutateMap((d) => FLEET_OPS[op](d, b));
+        const r = mutateMap((d) => fleetOp(d, b));
         if (!r.ok) return res.status(r.status).json({ ok: false, reason: r.error });
         // 되돌릴 근거를 남긴다(7차 반증 6): 수정은 바꾸기 전 값(before) · 삭제는 지운 이름과 연결이 풀린 법인 서비스 수
         audit(b.id || b.name || op, JSON.stringify({ name: b.name, tier: b.tier, owner: b.owner, value: b.value,
@@ -971,8 +975,8 @@ export function registerSvcInventory(api) {
         }
         return res.json({ ok: true, result: { prefix: p, members: n, kept, from: [...from].map(([k, c]) => (k.startsWith('pin:') ? { serviceId: k.slice(4), pinned: true, n: c } : { serviceId: k || null, n: c })) } });
       }
-      if (CORP_OPS[op]) {
-        const r = mutateMap((d) => CORP_OPS[op](d, { ...b, corp }));
+      if (corpOp) {
+        const r = mutateMap((d) => corpOp(d, { ...b, corp }));
         if (!r.ok) return res.status(r.status).json({ ok: false, reason: r.error });
         // 서비스를 지우면 그 서비스를 가리키는 고정도 지운다(구성원은 미지정으로 — 자동 규칙이 있으면 그쪽으로).
         let pinsRemoved = 0;

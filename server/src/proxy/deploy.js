@@ -8,7 +8,7 @@
 import { withSsh } from './sshExec.js';
 import { fileStamp } from '../util/dayKey.js';
 import { haproxyAddress } from '../util/hostPort.js';
-import { mappingConfigIssue, mappingNameText } from './registry.js';
+import { mappingConfigIssue, mappingNameText, haproxyCfgPathIssue } from './registry.js';
 
 const BEGIN = '# >>> portal-remote-access (auto-generated — do not edit) >>>';
 const END = '# <<< portal-remote-access (auto-generated) <<<';
@@ -53,6 +53,7 @@ export function previewConfig(mappings, cfg) {
  */
 export async function deployToProxy(deploy, mappings, opts = {}) {
   if (!deploy?.host || !deploy?.username) return { ok: false, reason: '배포 SSH 접속 정보(host/username)가 필요합니다.' };
+  { const bad = haproxyCfgPathIssue(deploy.haproxyConfigPath); if (bad) return { ok: false, reason: bad }; }   // 157회차: 아래 셸 명령에 보간되는 값 — 접속 전에 거절
   const cfgPath = deploy.haproxyConfigPath || '/etc/haproxy/haproxy.cfg';
   const tmpPath = `${cfgPath}.portal.tmp`;
   const block = buildConfigBlock(mappings, { bindAddress: opts.bindAddress || '*' });
@@ -90,6 +91,8 @@ export async function deployToProxy(deploy, mappings, opts = {}) {
 /** Connectivity test: SSH in and check haproxy + config path. */
 export async function testDeploy(deploy) {
   if (!deploy?.host || !deploy?.username) return { ok: false, reason: 'host/username을 입력하세요.' };
+  // 157회차(재현): 시험 라우트는 요청의 경로를 저장된 SSH 비밀과 함께 쓴다 — 경로 칸의 셸 문장이 중계 서버에서 그대로 돌았다. 접속 전에 거절한다(registry.haproxyCfgPathIssue).
+  { const bad = haproxyCfgPathIssue(deploy.haproxyConfigPath); if (bad) return { ok: false, reason: bad }; }
   const creds = { host: deploy.host, port: deploy.port, username: deploy.username, password: deploy.password, privateKey: deploy.privateKey || undefined };
   try {
     return await withSsh(creds, async ({ exec }) => {

@@ -437,11 +437,24 @@ export async function postDownload(path, body = {}, filename = '') {
   return name;
 }
 
+/**
+ * 로그인 응답 시한 문구(161회차). 로그인 요청에는 시한이 없었다(다른 변경 요청 · 부팅 조회 2종은 있다) — 반열림 연결(VPN 끊김 · 프록시 정지 ·
+ *   재시작 중 TCP 만 살아 있음)에서 fetch 가 끝나지 않아 로그인 단추가 ‘진행 중’ 으로 영영 잠겼다(Chromium 실측 — 215초 뒤에도 잠김 · 새로 고침만 남는다).
+ *   시한은 변경 요청과 같은 넉넉한 백스톱이다(서버의 AD 단계 시한 기본 8초보다 훨씬 길다 — 정상 로그인을 끊지 않는다).
+ */
+export const LOGIN_TIMEOUT_TEXT = '로그인 응답이 없습니다(시한 초과) — 네트워크 · 서버 상태를 확인하고 다시 시도하세요.';
+const isTimeoutAbort = (e) => /AbortError|TimeoutError|timed out/i.test(`${e?.name || ''} ${e?.message || ''}`);
+
 export async function login(username, password, { keep = true } = {}) {
+  try { return await loginOnce(username, password, keep, timeoutSignal(MUT_TIMEOUT_MS)); }
+  catch (e) { throw isTimeoutAbort(e) ? new Error(LOGIN_TIMEOUT_TEXT) : e; }
+}
+async function loginOnce(username, password, keep, signal) {
   const res = await fetch(`${BASE}/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, password }),
+    signal,
   });
   if (!res.ok) {
     // 전체 점검 20회차 반증 F7: 429(잠금 · 진행 중 인증)는 서버 문구를 보인다 — '로그인 실패 (429)' 만으로는 기다리면 된다는 것을 알 수 없다.

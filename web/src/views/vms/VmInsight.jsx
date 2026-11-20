@@ -5,14 +5,14 @@
 //   새 판정 없음 — 신호 · 기준값은 응답의 thresholds, 도구 패널은 각 도구 판정. 도구 권한이 없으면 그 패널 · ‘과할당’ 칸을 숨긴다(canHubTool — 허브 도구 칸과 같은 판정).
 //   mode='over' 면 ‘과할당’ 보기(VmOverView — Optimization 요약)를 같은 응답의 법인 줄로 그린다.
 import React, { useEffect, useMemo, useState } from 'react';
-import { usePolling, toolAllowed } from '../../api.js';
+import { usePolling, toolAllowed, can } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { useNarrowScreen } from '../../components/useNarrowScreen.js';
 import { numOrNull } from '../../numOrNull.js';
 import { scopeIdsOf, normScopeIds, toggleScopeId } from '../platform/platformText.js';
 import { vcHash } from '../vcd/vcdRoute.js';
-import { pickRows, toolIdsOf, fmtN, fmtU, gbText, shareText, barPct } from '../insight/insightCore.js';
+import { pickRows, toolIdsOf, staleScopeText, fmtN, fmtU, gbText, shareText, barPct } from '../insight/insightCore.js';
 import { treemapLayout, maxTilesInCol, fillStep, tileColors, scaleLegend, RAMP, CRIT_BG, NONE_BG } from '../insight/treemap.js';
 import { mapHeightOf, autoMapHeight } from '../insight/insightPrefs.js';
 import { maxTilesPacked, worstMember, groupCountsText } from '../insight/tilePack.js'; // v3.23.0 지도 칸 글자(설계 docs/design/insight-tiles)
@@ -79,7 +79,8 @@ export default function VmInsight({ mode = 'insight', filters = {}, scopeIds = n
   const waste = useToolSummary('/tools/waste', null, { enabled: canTool('waste') });
   // 분포 묶음을 펼쳤을 때만: 호스트 법인 요약(S2 환산 기준 — 고른 범위 호스트 한 대의 평균 메모리 · memo 30초)
   const distOpen = mode === 'insight' && !folded.dist;
-  const hostCorp = useLazyJson('/hosts/corp', region ? { region } : {}, distOpen);
+  //   r140: /hosts/corp 는 inv.hosts 게이트(서버 routes/api/hostCorp.js) — VM 탭(inv.vms)만 있는 역할에는 부르지 않는다(마운트마다 403 을 만들지 않게 · 환산은 생략).
+  const hostCorp = useLazyJson('/hosts/corp', region ? { region } : {}, distOpen && can('inv.hosts'));
 
   const s = useMemo(() => sumVmRows(picked.used), [picked]);
   const usedIds = useMemo(() => picked.used.map((r) => String(r.id)), [picked]);
@@ -149,11 +150,14 @@ export default function VmInsight({ mode = 'insight', filters = {}, scopeIds = n
   };
   const scale = [...scaleLegend(fill.steps, { crit: fill.crit }).map((text, i) => ({ text, bg: RAMP[i] })),
     ...(fill.crit != null ? [{ text: `${fill.crit}% 이상(경고)`, bg: CRIT_BG }] : []), { text: '값 모름', bg: NONE_BG }];
-  const overN = fill.crit != null ? picked.all.filter((r) => r.unknown !== true && fillStep(fill.val(r), fill).over).length : 0;
+  // r145: ‘지금 … N곳’ 은 오래된 법인(stale — 139회차부터 점검중 vCenter 포함)을 세지 않는다(옛 값을 지금 경고로 세지 않게 · 합과 같은 법인 집합) — 경계를 넘은 오래된 법인 수는 따로.
+  const overOf = (rs) => (fill.crit != null ? rs.filter((r) => fillStep(fill.val(r), fill).over).length : 0);
+  const overN = overOf(picked.all.filter((r) => r.unknown !== true && r.stale !== true));
+  const overStaleN = overOf(picked.all.filter((r) => r.unknown !== true && r.stale === true));
   const scaleNote = fill.key === 'disk' && !gp.data
     ? (gp.loading ? '게스트 파티션 요약을 받는 중입니다 — 받기 전에는 칸이 회색(값 모름)입니다.' : `게스트 파티션 요약을 받지 못했습니다${gp.error ? `(${gp.error.message || gp.error})` : ''} — 칸이 회색(값 모름)입니다.`)
     : fill.crit != null
-      ? `파랑 = 값의 크기 · 빨강 = ${fill.crit}% 이상인 법인만. 지금 ${fill.crit}% 를 넘는 법인은 ${overN}곳입니다.`
+      ? `파랑 = 값의 크기 · 빨강 = ${fill.crit}% 이상인 법인만. 지금 ${fill.crit}% 이상인 법인은 ${overN}곳입니다${overStaleN ? `(경계를 넘은 오래된 값 ${overStaleN}곳은 세지 않았습니다)` : ''}.`
       : '이 색 기준에는 정해진 경계가 없어 경고색을 쓰지 않습니다(파랑 단계만). ‘평균 CPU’ · ‘평균 메모리’ 로 바꾸면 경계를 넘은 법인만 빨강이 됩니다.';
   const hiddenNote = layout.hidden.length ? `칸 없음 ${layout.hidden.length}곳(값 모름 또는 0): ${layout.hidden.map((t) => t.label).join(' · ')}` : '';
   const regions = regionRows(picked.used, total);
@@ -162,7 +166,7 @@ export default function VmInsight({ mode = 'insight', filters = {}, scopeIds = n
   // ── 범위 안내(고른 법인 · 오래됨 · 모름) ──
   const scopeNote = [
     ids.length ? `법인 ${ids.length}곳을 골랐습니다 — 아래 수는 그 법인들의 합입니다.` : '',
-    picked.stale.length ? `오래됨 ${picked.stale.length}곳(${picked.stale.map(corpName).join(' · ')}) — 값이 늦어 합에 넣지 않았습니다.` : '',
+    staleScopeText(picked.stale, corpName),
     picked.unknown.length ? `값 모름 ${picked.unknown.length}곳(${picked.unknown.map(corpName).join(' · ')}) — 아직 수집하지 못해 합에 넣지 않았습니다.` : '',
     data.initial ? '첫 수집이 끝나지 않았습니다 — 수가 아직 모자랄 수 있습니다.' : '',
   ].filter(Boolean).join(' ');

@@ -21,6 +21,23 @@ function cstr(buf, start, len) {
   return buf.toString('utf8', start, end);
 }
 
+/*
+ * 154회차 U1 · U2(재현 — 둘 다 수백 바이트 tgz 로 이벤트 루프를 붙잡았다):
+ *  U1 GNU 긴 이름 칸(typeflag L · K)의 끝 NUL 을 `/\0+$/` 로 뗐다 — 끝이 NUL 이 아닌 NUL 연속에서 O(n²)이고 칸 길이 상한도 없었다
+ *     (NUL 8만 개 + 글자 하나 = gzip 216B 에 2.2초 · 100만 개면 수 분 — 루트 CLAUDE.md '끝 앵커 무제한 반복 금지 · 길이를 먼저 자르고 선형으로'.
+ *     같은 꼴을 11회차 B-32 가 bareos/console.js 에서만 고쳤다). 이제 칸 길이 상한(PATH_MAX) 뒤에 끝 NUL 을 선형으로 뗀다.
+ *  U2 머리말의 크기 칸이 음수(`-1000` 8진)면 `offset += ceil(size/512)*512` 가 **뒤로** 가 같은 블록을 끝없이 다시 읽었다(일반 파일이 아니면
+ *     account() 도 불리지 않아 상한에 걸리지 않는다 — 512B tar 하나로 무한 루프). 음수 크기는 손상으로 보고 던진다.
+ * 닿는 길: 서명 판정(decideSignature) 뒤라 require 정책에서는 서명된 번들만 온다 — 신뢰 키가 없는 설치본(warn)의 push · 감시 폴더 · 원격 받기와 손상 파일에 대한 방어다.
+ */
+export const LONG_NAME_MAX_BYTES = 4096;
+function longField(data) {
+  if (data.length > LONG_NAME_MAX_BYTES) throw new Error(`아카이브의 긴 이름 칸이 너무 깁니다(${data.length}B — 상한 ${LONG_NAME_MAX_BYTES}B)`);
+  let end = data.length;
+  while (end > 0 && data[end - 1] === 0) end--;
+  return data.toString('utf8', 0, end);
+}
+
 /**
  * Parse a USTAR/GNU tar buffer into [{name, data}] (regular files + hard links).
  *
@@ -62,17 +79,18 @@ export function parseTar(buf) {
     const linkName = cstr(block, 157, 100);
     const typeflag = block[156] === 0 ? '0' : String.fromCharCode(block[156]);
     const prefix = cstr(block, 345, 155);
+    if (size < 0) throw new Error('아카이브가 손상됐습니다 — tar 머리말의 크기 칸이 음수입니다');   // 154회차 U2: 뒤로 가는 offset = 무한 루프
     offset += 512;
 
     const data = buf.subarray(offset, offset + size);
     offset += Math.ceil(size / 512) * 512;
 
     if (typeflag === 'L') {                 // GNU long name extension
-      longName = data.toString('utf8').replace(/\0+$/, '');
+      longName = longField(data);           // 154회차 U1: 길이 상한 + 끝 NUL 선형 제거
       continue;
     }
     if (typeflag === 'K') {                 // GNU long link-name extension
-      longLink = data.toString('utf8').replace(/\0+$/, '');
+      longLink = longField(data);
       continue;
     }
     if (typeflag === 'x' || typeflag === 'g') continue; // PAX headers — skip

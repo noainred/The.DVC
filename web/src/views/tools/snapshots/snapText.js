@@ -152,9 +152,16 @@ export function summaryOf(items) {
   };
 }
 
-/** 법인 카드 — 서버 corps 순서가 아니라 기준 넘긴 수 많은 순. 스냅샷 VM 이 없는 법인도 카드로 남긴다(0대 — 수집은 됐다). */
+/**
+ * 지금 값을 못 읽은 vCenter(서버 view.vcReadIssue 가 준 unread) — 값이 낡은 것(stale)은 ‘값이 낡음’ 으로 따로 말하므로 뺀다.
+ * 138회차: 이 vCenter 들은 items 에 없다 — ‘0대 · 스냅샷 없음’ 이 아니라 ‘못 읽음’ 이다(못 읽은 값은 0 이 아니다).
+ */
+export const unreadVcs = (vcs) => (vcs || []).filter((v) => v && v.unread && !v.stale);
+
+/** 법인 카드 — 서버 corps 순서가 아니라 기준 넘긴 수 많은 순. 스냅샷 VM 이 없는 법인도 카드로 남긴다(0대 — 수집은 됐다 · 못 읽은 vCenter 는 unread 로 센다). */
 export function corpCards(items, corps) {
-  const byCorp = new Map((corps || []).map((c) => [c.id, { id: c.id, name: c.name, stale: (c.vcenters || []).some((v) => v.stale), items: [] }]));
+  const byCorp = new Map((corps || []).map((c) => [c.id, { id: c.id, name: c.name, stale: (c.vcenters || []).some((v) => v.stale),
+    unread: unreadVcs(c.vcenters).length, unreadIds: unreadVcs(c.vcenters).map((v) => String(v.id)), vcN: (c.vcenters || []).length, items: [] }]));
   for (const x of items) {
     if (!byCorp.has(x.corpId)) byCorp.set(x.corpId, { id: x.corpId, name: x.corpName, stale: false, items: [] });
     byCorp.get(x.corpId).items.push(x);
@@ -162,8 +169,34 @@ export function corpCards(items, corps) {
   return [...byCorp.values()].map((c) => {
     const over = c.items.filter((x) => x.sig?.age === true);
     const judged = c.items.filter((x) => x.judged !== false).map((x) => numOrNull(x.days)).filter((d) => d != null);
-    return { ...c, n: c.items.length, over: over.length, gb: gbSum(c.items), overGb: gbSum(over), oldest: judged.length ? Math.max(...judged) : null };
+    const has = new Set(c.items.map((x) => String(x.vcenterId)));
+    return { ...c, n: c.items.length, over: over.length, gb: gbSum(c.items), overGb: gbSum(over), oldest: judged.length ? Math.max(...judged) : null,
+      unreadHeld: (c.unreadIds || []).filter((id) => has.has(id)).length,   // 못 읽었지만 직전 값(점검중 캐시 — stale 없이 서빙)으로 목록에 든 vCenter(143회차)
+      blind: !c.items.length && c.unread > 0 && c.unread === c.vcN };   // 이 법인의 vCenter 를 하나도 못 읽었다 — 수 · 크기를 말하지 않는다
   }).sort((a, b) => b.over - a.over || b.gb.gb - a.gb.gb || String(a.name).localeCompare(String(b.name)));
+}
+
+/**
+ * 요약 아래 줄의 ‘지금 값을 못 읽은 vCenter’ — 목록에 VM 이 하나도 없는 것만 ‘빠졌습니다’ 이고, 직전 값으로 목록 · 수에 든 것(점검중 — store.js 가
+ * 캐시를 stale 표시 없이 서빙한다)은 따로 말한다. 143회차(재현): 138회차 문구가 점검중 vCenter 의 VM 을 수에 넣은 채 ‘빠졌습니다’ 라고 적었다.
+ */
+export function unreadSumText(cards, corp = '') {
+  const cs = (cards || []).filter((c) => !corp || c.id === corp);
+  const held = cs.reduce((a, c) => a + (c.unreadHeld || 0), 0);
+  const out = cs.reduce((a, c) => a + (c.unread || 0), 0) - held;
+  if (out > 0 && held > 0) return ` · 지금 값을 못 읽은 vCenter ${out + held}곳(${out}곳은 빠졌고 ${held}곳은 직전 값으로 셌습니다)`;
+  return `${out > 0 ? ` · 지금 값을 못 읽은 vCenter ${out}곳은 빠졌습니다` : ''}${held > 0 ? ` · 지금 값을 못 읽은 vCenter ${held}곳은 직전 값으로 셌습니다` : ''}`;
+}
+
+/**
+ * 법인 카드 아래 줄 — 못 읽은 법인을 ‘스냅샷 없음’ 으로 적지 않는다(138회차).
+ * 143회차(Chromium 1440 · 400): 이 줄은 한 줄 말줄임이라 뒤에 붙인 ‘지금 값을 못 읽은 vCenter N곳’ 이 잘려 보이지 않았다 — 앞에 둔다(카드 title 에도 싣는다).
+ */
+export function corpFootText(c) {
+  const parts = [c.unread ? `지금 값을 못 읽은 vCenter ${c.unread}곳` : null,
+    c.oldest != null ? `가장 오래된 것 ${daysText(c.oldest)}` : c.n ? '판정한 스냅샷 없음' : c.blind ? null : '스냅샷 없음'];
+  if (c.stale) parts.push('값이 낡음');
+  return parts.filter(Boolean).join(' · ');
 }
 
 /** 로그 눈금 위치(%) — 1 ~ max. */
@@ -272,6 +305,83 @@ export function clearedSince(items, ago7, staleVcIds = new Set()) {
 
 /** 추이 한 줄의 값 — metric 'gb' | 'vms' | 'over'. 빠진 날은 null(선이 끊긴다). */
 export const seriesValues = (series, metric) => (series || []).map((p) => (p ? numOrNull(p[metric]) : null));
+
+/**
+ * 추이 그림과 그 아래 설명의 재료 — 법인을 고르면 그 법인의 줄(byCorp — 없으면 전체 줄) **하나**로 그림 · 처음 · 마지막 · 빠진 날 · 뺀 날을 센다.
+ * 143회차(재현): 그림은 법인 줄인데 처음 → 마지막 · 빠진 날은 전체 범위 줄에서 셌다. 서버가 따로 싣는 excluded(점검중 · 비활성으로 그날 묶음에서 뺀
+ * vCenter — history.aggregateDays)는 화면이 말하지 않아 그 vCenter 가 빠진 부분 합이 설명 없이 이어졌다.
+ */
+export function trendOf(hist, corp, metric) {
+  const series = (corp && hist?.byCorp?.[corp]) || hist?.series || [];
+  const values = seriesValues(series, metric);
+  const first = values.find((v) => v != null) ?? null;
+  const last = [...values].reverse().find((v) => v != null) ?? null;
+  // 값이 있는 날만(뺀 vCenter 하나뿐이면 그날은 null — 더한 것이 없다). 147회차: 그림의 띠와 같은 날(그 지표 값이 있는 날)로 센다
+  const idx = excludedMarks(series, values);
+  const exDays = idx.map((i) => series[i]);
+  const onlyDays = series.filter((p) => p && numOrNull(p.vms) == null && !(p.missing > 0) && p.excluded > 0);   // 뺀 vCenter 뿐이라 합이 없는 날
+  // 149회차: 그날 합은 있는데(VM 수) 이 지표만 없는 날 = 크기를 못 읽은 VM 이 있는 날(크기 합 null — 그림은 빗금) · 처음 · 마지막이 일부를 뺀 합인가
+  const unknownDays = series.filter((p, i) => p && values[i] == null && numOrNull(p.vms) != null).length;
+  const fi = values.findIndex((v) => v != null);
+  const li = values.length - 1 - [...values].reverse().findIndex((v) => v != null);
+  return { values, first, last, missingDays: series.filter((p) => p && p.missing > 0).length,
+    excludedDays: exDays.length, excludedOnlyDays: onlyDays.length, unknownDays,
+    excludedWhy: excludedWhyText(exDays), excludedOnlyWhy: excludedWhyText(onlyDays), excludedIdx: idx,
+    firstEx: fi >= 0 && idx.includes(fi), lastEx: fi >= 0 && idx.includes(li) };
+}
+
+/**
+ * 추이 아래 설명 두 줄 [첫 줄, 둘째 줄] — 그림에서 선이 끊긴 날(빗금)과 띠를 사유 · 수로 빠짐없이 밝힌다(149회차 — 147 반증).
+ *   · 처음 · 마지막 값이 일부 vCenter 를 뺀 합(띠가 있는 날)이면 그 값에 붙여 말한다 — 147 판은 ‘처음 45 GB → 마지막 10 GB’ 처럼
+ *     부분 합끼리(또는 전체 합과) 견준 수를 표시 없이 보였다(뺀 수가 달라 생긴 차이가 정리된 양처럼 읽혔다).
+ *   · 합이 하나도 없을 때 사유가 둘 이상(빠진 날 · 뺀 vCenter 뿐인 날 · 크기를 못 읽은 날)이면 한 사유로 단정하지 않고 둘째 줄에 수를 나눠 적는다 —
+ *     147 판은 REST 수집 vCenter 뿐인 법인 줄에 빠진 날(오늘 기록 전 포함)이 하루라도 있으면 ‘기록한 날마다 값을 못 읽은 vCenter 가 있어’ · ‘빠진 날 1일’ 만 말하고
+ *     나머지 날(REST 로 뺀 날)을 설명하지 않았다.
+ *   · 크기를 못 읽은 VM 이 있는 날(크기 합 null)은 빠진 날도 뺀 날도 아니다 — 예전에는 설명이 없었고 모든 날이 그러면 ‘아직 기록이 없습니다’ 였다(v3.27.0 부터).
+ * @param {ReturnType<typeof trendOf>} t
+ * @param {number} days  기간(일)
+ * @param {(v:number|null)=>string} valueText
+ * @returns {[string, string]}
+ */
+export function trendCaption(t, days, valueText) {
+  const kinds = [t.missingDays ? 'm' : '', t.excludedOnlyDays ? 'x' : '', t.unknownDays ? 'u' : ''].filter(Boolean);
+  let head;
+  if (t.first == null) {
+    head = !kinds.length ? '아직 기록이 없습니다'
+      : kinds.length > 1 ? '합을 그린 날이 없습니다 — 사유는 아래와 같습니다'
+        : kinds[0] === 'm' ? '기록한 날마다 값을 못 읽은 vCenter 가 있어 합을 그리지 않았습니다'
+          : kinds[0] === 'x' ? `${t.excludedOnlyWhy} vCenter 뿐이라 합을 그리지 않았습니다`
+            : '크기를 못 읽은 VM 이 있어 크기 합을 그리지 않았습니다';
+  } else {
+    const mark = (ex) => (ex ? '(일부 vCenter 를 뺀 합)' : '');
+    head = `${days}일 중 처음 ${valueText(t.first)}${mark(t.firstEx)} → 마지막 ${valueText(t.last)}${mark(t.lastEx)}`;
+  }
+  const detail = t.first != null || kinds.length > 1;   // 사유가 하나뿐이고 그린 합이 없으면 첫 줄이 이미 말했다
+  const tail = [t.missingDays ? `빠진 날 ${t.missingDays}일(선이 끊김)` : '',
+    t.excludedDays ? `${t.excludedWhy} vCenter 를 빼고 더한 날 ${t.excludedDays}일(아래 띠)` : '',
+    detail && t.excludedOnlyDays ? `${t.excludedOnlyWhy} vCenter 뿐이라 합이 없는 날 ${t.excludedOnlyDays}일(선이 끊김)` : '',
+    detail && t.unknownDays ? `크기를 못 읽은 VM 이 있어 크기 합이 없는 날 ${t.unknownDays}일(선이 끊김)` : ''].filter(Boolean).join(' · ');
+  return [head, tail];
+}
+
+/**
+ * 뺀 사유 — 서버 history.aggregateDays 의 excluded(뺀 vCenter 수) · excludedRest(그 가운데 REST 수집 — 스냅샷 개수를 받지 않는다).
+ * 147회차(143 결정 D1): REST 수집 vCenter 도 그날 묶음에서 뺀다. 그 날들에 실제로 있던 사유만 적는다(한 사유로 단정하지 않는다).
+ * excludedRest 가 없는 응답(예전 서버 — REST 를 빼지 않았다)은 전부 점검중 · 비활성이다.
+ */
+export function excludedWhyText(points) {
+  let maint = false; let rest = false;
+  for (const p of points || []) {
+    const ex = numOrNull(p?.excluded) ?? 0;
+    const r = Math.min(ex, numOrNull(p?.excludedRest) ?? 0);
+    if (r > 0) rest = true;
+    if (ex - r > 0) maint = true;
+  }
+  return [maint ? '점검중 · 비활성' : '', rest ? 'REST 수집' : ''].filter(Boolean).join(' · ');
+}
+
+/** 일부 vCenter 를 빼고 더한 날의 위치(그림에 값이 있는 날만) — 그림이 그날을 표시한다(부분 합을 표시 없이 잇지 않는다 — 147회차). */
+export const excludedMarks = (series, values) => (series || []).map((p, i) => (p && values[i] != null && p.excluded > 0 ? i : -1)).filter((i) => i >= 0);
 
 /**
  * SVG 꺾은선 조각 — null 은 선을 끊는다(빠진 날을 0 으로 잇지 않는다). 값은 0 ~ 최대값을 높이 h 에 맞춘다.

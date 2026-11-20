@@ -14,8 +14,8 @@ import { numOrNull } from '../../numOrNull.js';
 import { scopeIdsOf, normScopeIds, toggleScopeId } from '../platform/platformText.js';
 import { toolsFor } from '../platform/HubTabs.jsx';
 import { vcHash } from '../vcd/vcdRoute.js';
-import { pickRows, toolIdsOf, fmtN, fmtU, gbText, shareText, barPct } from '../insight/insightCore.js';
-import { treemapLayout, maxTilesInCol, fillStep } from '../insight/treemap.js';
+import { pickRows, toolIdsOf, staleScopeText, fmtN, fmtU, gbText, shareText, barPct } from '../insight/insightCore.js';
+import { treemapLayout, maxTilesInCol, fillStep, critWord } from '../insight/treemap.js';
 import { mapHeightOf, autoMapHeight } from '../insight/insightPrefs.js';
 import { maxTilesPacked, worstMember, groupCountsText } from '../insight/tilePack.js'; // v3.23.0 지도 칸 글자(설계 docs/design/insight-tiles)
 import { useFolded } from '../insight/useInsight.js';
@@ -124,9 +124,13 @@ export default function HostInsight({ filters = {}, scopeIds = null, scopeRegion
   };
   const scale = hostScale(fill);
   const clusterCells = layout.cols.flatMap((c) => c.tiles);
-  const overN = fill.crit != null ? clusterCells.filter((t) => fillStep(fill.val(t.cell), fill).over).length : 0;
+  // r145: ‘지금 … N칸’ 은 오래된 법인(stale — 139회차부터 점검중 vCenter 포함)의 칸을 세지 않는다 — 옛 값이 지금 경고로 셈되어 같은 화면의 ‘과부하 호스트’(합에서 뺌)와 갈렸다.
+  //   칸은 빗금으로 그대로 그리고, 경계를 넘은 오래된 칸 수는 따로 밝힌다(오래됨은 정상에도 장애에도 넣지 않고 따로 센다).
+  const overOf = (stale) => (fill.crit != null ? clusterCells.filter((t) => (t.row?.stale === true) === stale && fillStep(fill.val(t.cell), fill).over).length : 0);
+  const overN = overOf(false);
+  const overStaleN = overOf(true);
   const unknownN = clusterCells.filter((t) => fill.val(t.cell) == null).length;
-  const scaleNote = `파랑 = 값의 크기 · 빨강 = ${unitText(fill.crit, '%')} 이상인 칸만 — 지금 ‘${fill.label}’ 기준으로 ${fmtU(overN, '칸')}입니다(${fmtU(clusterCells.length, '칸')} 중).`
+  const scaleNote = `파랑 = 값의 크기 · 빨강 = ${unitText(fill.crit, '%')} ${critWord(fill)}인 칸만 — 지금 ‘${fill.label}’ 기준으로 ${fmtU(overN, '칸')}입니다(${fmtU(clusterCells.length, '칸')} 중)${overStaleN ? ` — 경계를 넘은 오래된 값 ${fmtU(overStaleN, '칸')}은 세지 않았습니다` : ''}.`
     + (access.cluster ? ' ‘못 버팀’ 표는 색 기준과 상관없이 붙습니다.' : '')
     + (unknownN ? ` 값 모름(회색) ${fmtU(unknownN, '칸')}${fill.key === 'n1mem' ? ' — 독립 호스트 · 용량을 모르는 호스트가 있는 클러스터는 빠진 뒤 값이 없습니다' : ''}.` : '');
   const hiddenNote = layout.hidden.length ? ` 칸 없음 ${fmtU(layout.hidden.length, '개')}(크기 값 모름 또는 0): ${layout.hidden.slice(0, 6).map((t) => t.label).join(' · ')}${layout.hidden.length > 6 ? ' 외' : ''}` : '';
@@ -136,7 +140,7 @@ export default function HostInsight({ filters = {}, scopeIds = null, scopeRegion
   // ── 범위 안내(고른 법인 · 오래됨 · 모름) ──
   const scopeNote = [
     ids.length ? `법인 ${ids.length}곳을 골랐습니다 — 아래 수는 그 법인들의 합입니다.` : '',
-    picked.stale.length ? `오래됨 ${picked.stale.length}곳(${picked.stale.map(corpName).join(' · ')}) — 값이 늦어 합에 넣지 않았습니다.` : '',
+    staleScopeText(picked.stale, corpName),
     picked.unknown.length ? `값 모름 ${picked.unknown.length}곳(${picked.unknown.map(corpName).join(' · ')}) — 호스트 수를 아직 몰라 합에 넣지 않았습니다.` : '',
     data.initial ? '첫 수집이 끝나지 않았습니다 — 수가 아직 모자랄 수 있습니다.' : '',
   ].filter(Boolean).join(' ');

@@ -251,6 +251,11 @@ export async function opDeleteBackup(server, { jobName = '', vm = {}, deadlineAt
         const mine = same.filter((o) => String(o.objectId || '') === ref.objectId);
         if (same.some((o) => !o.objectId)) return { ok: false, notSent: true, excluded, deleted, reason: `백업 개체에 moref 가 없어 이 VM 의 것인지 확인할 수 없습니다 — 지우지 않았습니다${excluded ? '(잡에서는 뺐습니다)' : ''}.`, notes };
         if (mine.length > 1) return { ok: false, notSent: true, excluded, deleted, reason: `같은 moref 의 백업 개체가 ${mine.length}개라 어느 것인지 정할 수 없습니다 — 지우지 않았습니다.`, notes };
+        // 160회차(재현): 이름은 다르고 moref 가 같은 개체 — 백업 뒤에 VM 이름이 바뀐 것으로 보인다(개체 이름은 백업 때 이름). 예전에는 이름이 같은 것만 봐서
+        //   ‘이 VM 의 백업이 없습니다 — 지울 것이 없습니다’(성공)로 답했다(잡에서는 이미 뺐고 백업은 디스크에 남는다). 확인할 수 없는 것을 '없음' 으로 답하지 않는다(V-2 와 같은 규칙) —
+        //   이름으로 고르지 않는 규칙(반증 F2)은 그대로라 지우지도 않는다(moref 는 vCenter 재설치로 다시 쓰일 수 있다).
+        const renamed = mine.length ? [] : objs.filter((o) => o && o.name !== ref.name && String(o.objectId || '') === ref.objectId);
+        if (renamed.length) return { ok: false, notSent: true, excluded, deleted, reason: `이 VM 과 moref 가 같은 백업 개체가 다른 이름(‘${String(renamed[0].name || '').slice(0, 80)}’)으로 있습니다 — 백업 뒤에 VM 이름이 바뀐 것으로 보이지만 같은 VM 인지 확인할 수 없어 지우지 않았습니다${excluded ? '(잡에서는 뺐습니다)' : ''}. Veeam 콘솔에서 확인하세요.`, notes };
         if (mine.length) targets.push({ backupId: String(b.id), objectId: String(mine[0].id || ''), only: objs.length === 1 });
       }
       if (!targets.length) return { ok: true, excluded, deleted: 0, notes: [...notes, '포탈 전용 잡에 이 VM 의 백업이 없습니다 — 지울 것이 없습니다.'] };

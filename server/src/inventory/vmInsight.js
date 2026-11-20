@@ -27,6 +27,7 @@ import { vmSignalsOf, OVERLOAD_BIN, OVERLOAD_PCT, SIGNAL_KEYS } from './vmSignal
 import { usageBinOf, osKeyOf, powerKindOf, OS_UNKNOWN_KEY, VM_DIST_BIN_PCT } from './vmDist.js';
 import { toolsRead } from './vmToolsDist.js';
 import { osKind } from './osKind.js';
+import { unreadVcenterReasons } from '../metrics/unreadVcenters.js';   // 139회차 R3: '지금 값이 아닌 vCenter' 공용 판정(leaf)
 
 export const INSIGHT_TOP_N = 5;
 /** 사용률 칸 — 10% × 10칸(5% 칸 두 개를 하나로). */
@@ -96,6 +97,17 @@ export function pushTop(arr, item, cmp, n) {
   while (i > 0 && cmp(item, arr[i - 1]) < 0) i -= 1;
   arr.splice(i, 0, item);
   if (arr.length > n) arr.pop();
+}
+/**
+ * 139회차 R3(결정 → 권장안): 지금 값이 아닌 법인 줄의 표지 — 판정은 metrics/unreadVcenters.js 하나(점검중 · 수집 실패 이월 · 엣지 보고 끊김).
+ *   점검중(maintenance) vCenter 는 store 가 직전 캐시를 **기한 없이** 서빙하고 stale 표지를 붙이지 않는다 — 줄의 stale 이 vc.stale 만 보면 false 라
+ *   화면(insightCore.pickRows — stale 줄만 합에서 뺀다)이 그 법인의 옛 사용률 · 수를 지금 값으로 더했다. 값이 있는 줄은 stale:true + notCurrent(사유),
+ *   모름 줄(unknown — 수가 전부 null)은 사유만 싣는다(화면은 unknown 을 먼저 본다). /hosts/insight(vcenter/hostInsight.js)도 이것을 쓴다(한 벌).
+ * @returns {(id:string, unknown?:boolean) => object} 줄에 펼칠 칸(해당 없으면 {})
+ */
+export function notCurrentOf(vcenters) {
+  const why = unreadVcenterReasons({ vcenters });
+  return (id, unknown = false) => { const r = why.get(String(id)); return r ? { notCurrent: r, ...(unknown ? {} : { stale: true }) } : {}; };
 }
 const byName = (a, b) => String(a.name).localeCompare(String(b.name)) || String(a.id).localeCompare(String(b.id));
 const CMP_CPU = (a, b) => (b.cpu - a.cpu) || ((b.mem ?? -1) - (a.mem ?? -1)) || byName(a, b);
@@ -283,10 +295,11 @@ export async function vmInsightOf({ vcenters = [], vms = [], ctx, unlisted = tru
   const rows = [];
   const top = [];
   const listed = new Set();
+  const notCurrent = notCurrentOf(vcenters);
   const emit = (identity, a, extra = {}) => {
     const n = a ? a.total : 0;
     const unknown = !extra.unlisted && corpUnknownOf(identity.vc, n);
-    rows.push({ ...identity.row, ...extra, unknown, ...(unknown ? NULL_STATS : finishRow(a || newAcc())) });
+    rows.push({ ...identity.row, ...(extra.unlisted ? {} : notCurrent(identity.row.id, unknown)), ...extra, unknown, ...(unknown ? NULL_STATS : finishRow(a || newAcc())) });
     top.push({ id: identity.row.id, cpuTop: unknown || !a ? [] : a.top.cpuTop, snapOldest: unknown || !a ? [] : a.top.snapOldest, snapBiggest: unknown || !a ? [] : a.top.snapBiggest });
   };
   for (const vc of vcenters) {

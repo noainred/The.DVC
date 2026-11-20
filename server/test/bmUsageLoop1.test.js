@@ -382,9 +382,12 @@ test('D5 ③ 재확인 N2 — 첫 시도가 표지 없는 출력(Linux 아님의
 
 /* ── 의심 1 · 2 ─────────────────────────────────────────────────────────── */
 test('의심 1 — hostKey 끝 슬래시 제거는 선형(재현: 슬래시 4만 자 + 글자 하나 855ms · O(n²)) · 뜻은 그대로', () => {
-  const time = (n) => { const s = `${'/'.repeat(n)}a`; let best = Infinity; for (let i = 0; i < 3; i += 1) { const t0 = process.hrtime.bigint(); T.hostKey(s); best = Math.min(best, Number(process.hrtime.bigint() - t0)); } return best; };
-  time(1000);
-  const small = Math.max(time(20_000), 50_000); const big = time(160_000);   // 8배 입력 — 선형이면 약 8배, O(n²) 면 약 64배
+  // 두 크기를 번갈아 7번 재고 각자의 최솟값을 비교한다 — 크기별로 몰아서 재면 다른 시험과 함께 도는 동안(6병렬 실측 1회 실패 · 단독 3/3 통과) 큰 쪽 표본만 느려져 비가 튄다.
+  const once = (n) => { const s = `${'/'.repeat(n)}a`; const t0 = process.hrtime.bigint(); T.hostKey(s); return Number(process.hrtime.bigint() - t0); };
+  once(1000);
+  let small = Infinity; let big = Infinity;
+  for (let i = 0; i < 7; i += 1) { small = Math.min(small, once(20_000)); big = Math.min(big, once(160_000)); }   // 8배 입력 — 선형이면 약 8배, O(n²) 면 약 64배
+  small = Math.max(small, 50_000);
   assert.ok(big / small < 24, `8배 입력 시간 비 ${(big / small).toFixed(1)}(O(n²) 면 약 64)`);
   for (const [v, k] of [['https://10.0.0.1/', '10.0.0.1'], ['HTTPS://Host.EX:443//', 'host.ex'], ['[fe80::1]:22', 'fe80::1'], ['10.0.0.1', '10.0.0.1'], ['/', ''], ['', '']]) assert.equal(T.hostKey(v), k, v);
   assert.doesNotMatch(fs.readFileSync(new URL('../src/bmusage/targets.js', import.meta.url), 'utf8'), /replace\(\/\\\/\+\$\//, '금지 패턴(/\\/+$/)이 남지 않았다');

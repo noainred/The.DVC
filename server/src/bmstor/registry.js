@@ -132,6 +132,15 @@ export function inheritActive(s = {}) {
   const ih = s && typeof s.inherit === 'object' && s.inherit ? s.inherit : null;
   return !!ih && typeof ih.key === 'string' && ih.key === inheritKeyOf(s) && !String(s.agent || '').trim();
 }
+/**
+ * 141회차(재현 — 137 남긴 것 P4): 승인은 **효력을 잃는 쓰기에서 죽는다**(승인 키를 비워 표지만 남긴다 — 화면 ‘승인 대기(주소 · OS 바뀜)’ 는 그대로).
+ *   예전에는 OS · 법인 · 주소 · 포트 · 엣지 지정을 바꿨다가 되돌리는 쓰기(bm-storage 서버 저장 — 관리자 · 묶음이 아니라 OTP 없음)가 잠든 승인을 되살렸다:
+ *   잠든 동안 바뀐 지정(물려받는 서버가 없어 확인 없이 저장된 계정)의 비밀번호가 소유자 OTP · 먼저 확인 없이 그 서버로 갔다(화면 · 문서는 ‘다시 승인하세요’).
+ *   쓰기 **전에도 뒤에도** 효력이 있을 때만 그대로 둔다. 다시 물려받으려면 소유자 + OTP 승인(setBmServerInherit — 새 키).
+ */
+function settleInherit(s, wasActive) {
+  if (s && s.inherit && typeof s.inherit === 'object' && s.inherit.key !== '' && !(wasActive && inheritActive(s))) s.inherit = { ...s.inherit, key: '' };
+}
 /** 서버가 자기 자격(키 · 공통 계정 · 비밀번호)을 갖고 있는가 — 있으면 ‘따로 정함’ 이고 계층 지정을 보지 않는다. */
 export function hasOwnCred(s = {}) {
   return !!(String(s.keyRef || '').trim() || String(s.credRef || '').trim() || (typeof s.password === 'string' && s.password !== ''));
@@ -168,6 +177,7 @@ function applyServerInput(data, body = {}, { now = Date.now() } = {}) {
 
   const existing = body.id ? data.servers.find((s) => s.id === body.id) : null;
   if (!existing && data.servers.length >= MAX_BM_SERVERS) return { ok: false, reason: '서버는 최대 1,000대까지 등록할 수 있습니다.' };
+  const inheritWasActive = !!existing && inheritActive(existing);   // 141회차: 쓰기 전 승인 효력(되돌리는 쓰기가 잠든 승인을 되살리지 않게)
   // 7b r3(재검증 R-N1) — **choke point**: 키 · 공통 계정 참조를 주소에 묶는(새 항목 · 주소 이동 · 다른 참조 · 같은 주소의 인증 방식 변경) 쓰기는
   //   게이트(설정 소유자 등급 + 본인 OTP)를 통과한 호출이 세운 `bindApproved === true` 가 있을 때만 묶는다. 없으면 주소가 바뀐 쓰기는 참조를 버리고,
   //   같은 주소면 기존 참조 · 인증 방식을 그대로 둔다(bindRefused). 판정은 bindRule.bindOfWrite 하나(분석 · bm-storage 라우트와 같은 함수).
@@ -204,7 +214,8 @@ function applyServerInput(data, body = {}, { now = Date.now() } = {}) {
   else if (typeof server.datacenterId !== 'string') server.datacenterId = '';
   server.mounts = mounts;
   server.enabled = body.enabled !== false;
-  // 빈/마스킹 비밀번호는 기존 유지(편집 시 재입력 강요 안 함) — 신규인데 비었으면 빈 값 저장(무비번 SSH 허용 안 하는 서버는 수집 실패로 표시됨).
+  // 빈/마스킹 비밀번호는 기존 유지(편집 시 재입력 강요 안 함) — 신규인데 비었으면 빈 값 저장.
+  //   146회차(141 결정 D2): 비밀번호도 키도 없는 서버는 접속하지 않는다(‘무비번 SSH’ 시도 없음 — refs.withResolvedAuth no-cred · 수집 함수 · 엣지 위임 잡에서 뺌).
   if (body.password !== undefined && body.password !== '' && body.password !== '********') server.password = String(body.password);
   else if (!existing || hostChanged) {                    // 신규 또는 접속처 변경 → 빈 값(재입력 필요)
     if (existing && server.password) droppedSecrets.push('password');
@@ -234,6 +245,7 @@ function applyServerInput(data, body = {}, { now = Date.now() } = {}) {
   //   계정이 생기면(비밀번호 · 키 · 공통 계정 참조) 표지를 지운다 — 그때부터 보통 항목. false 를 주면 지운다.
   if (!existing && body.addrOnly === true) server.addrOnly = true;
   else if (body.addrOnly === false) delete server.addrOnly;
+  settleInherit(server, inheritWasActive);   // 141회차: 이 쓰기로 효력을 잃었거나(OS · 법인 · 주소 · 포트 · 엣지) 잠든 승인이 되돌림으로 살아나면 — 죽인다
   if (server.addrOnly && (server.password || server.keyRef || server.credRef || inheritActive(server))) delete server.addrOnly;
   // v3.24 반증 F5(재현): 자기 자격이 생기면 계층 승인을 지운다 — 남겨 두면 위 단계 지정이 바뀌는 동안(이 서버는 ‘따로 정함’ 이라 확인 대상에서 빠진다)
   //   묻혀 있다가 OTP 없는 ‘떼기’ 한 번으로 새 지정의 비밀번호를 물려받았다. 다시 물려받으려면 소유자 + OTP 승인.
@@ -459,10 +471,13 @@ export function setBmServerOs(id, os) {
   const v = String(os || '');
   if (v && !SERVER_OS.includes(v)) return { ok: false, code: 'bad-os', reason: 'OS 는 linux · windows 중 하나입니다.' };
   const had = s.os;
+  const hadInherit = s.inherit; const wasActive = inheritActive(s);
   if (v) s.os = v; else delete s.os;
   if (had === s.os) return { ok: true, changed: false };
+  settleInherit(s, wasActive);   // 141회차: OS 를 바꾸면 승인은 죽는다(되돌려도 살아나지 않는다 — 다시 승인)
   try { persist(); } catch (e) {
     if (had === undefined) delete s.os; else s.os = had;
+    if (hadInherit === undefined) delete s.inherit; else s.inherit = hadInherit;
     return { ok: false, code: 'write-failed', status: 503, reason: `OS 계정 등록부를 쓰지 못했습니다(${String(e?.code || e?.message || e).slice(0, 60)}).` };
   }
   return { ok: true, changed: true };
@@ -479,12 +494,14 @@ export function setBmServersOs(map = {}) {
   for (const s of data.servers) {
     const v = Object.hasOwn(map, s.id) ? String(map[s.id] ?? '') : null;
     if (v == null || (v !== '' && !SERVER_OS.includes(v)) || (s.os || '') === v) continue;
-    had.set(s.id, s.os);
+    const wasActive = inheritActive(s);
+    had.set(s.id, { os: s.os, inherit: s.inherit });
     if (v) s.os = v; else delete s.os;
+    settleInherit(s, wasActive);   // 141회차: OS 를 바꾸면(미지정으로 포함) 승인은 죽는다
   }
   if (!had.size) return { ok: true, changed: 0 };
   try { persist(); } catch (e) {
-    for (const s of data.servers) if (had.has(s.id)) { const h = had.get(s.id); if (h === undefined) delete s.os; else s.os = h; }
+    for (const s of data.servers) if (had.has(s.id)) { const h = had.get(s.id); if (h.os === undefined) delete s.os; else s.os = h.os; if (h.inherit === undefined) delete s.inherit; else s.inherit = h.inherit; }
     return { ok: false, code: 'write-failed', status: 503, reason: `OS 계정 등록부를 쓰지 못했습니다(${String(e?.code || e?.message || e).slice(0, 60)}).` };
   }
   return { ok: true, changed: had.size };

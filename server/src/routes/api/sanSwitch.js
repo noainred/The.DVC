@@ -558,7 +558,10 @@ function zoneDetailFor(snap, problemRows) {
     };
   }
   const zones = zonesFromCompact(z);
-  const names = {}; const aliasOf = { ...(z.aliases || {}) };
+  // 160회차(재현): aliasOf 는 **WWN → 별칭 이름**이다(portZoneDetail 이 aliasOf[wwn] 으로 읽는다). 예전에는 `z.aliases`(이름 → WWN 목록)를 그대로 넘겨
+  //   어떤 WWN 도 맞지 않았다 — 불량 포트와 상대편의 별칭이 늘 비고 라벨이 WWN 이었다. zone 멤버가 가진 별칭(zonesFromCompact)으로 만든다(조닝 그림과 같은 방식).
+  const names = {}; const aliasOf = {};
+  for (const zn of zones) for (const m of zn.members || []) if (m?.wwn && m.alias && !aliasOf[m.wwn]) aliasOf[m.wwn] = m.alias;
   for (const p of list) for (const w of p.attached || []) { if (p.attachedName) names[String(w).toLowerCase()] = p.attachedName; }
   const roles = classifyEndpoints(zones, { names, aliasOf, nsRoles: {} });
   return { rows: portZoneDetail(zones, ports, { names, aliasOf, roles }), note: '' };

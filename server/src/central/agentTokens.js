@@ -122,6 +122,16 @@ export function listAgentTokens() {
 }
 
 /**
+ * 162회차(160 I1 의 뿌리 — 실행 확인): 이름 규칙 `[A-Za-z0-9._-]{1,64}` 는 ‘__proto__’ · ‘constructor’ · ‘toString’ 을 받는다. 인증된 에이전트 이름은 여러 모듈이
+ *   보통 객체의 키로(소문자로 바꿔서도) 쓴다 — IP 스캔 기준선이 ‘__PROTO__’ 로 Object.prototype 에 줄을 써 넣었다(160 I1). 자리마다 막는 대신 이름에서 막는다:
+ *   원문 또는 소문자로 바꾼 값이 Object.prototype 의 이름이면 새로 발급하지 않는다(이미 발급된 것의 인증 · 폐기는 그대로). 순수.
+ */
+export function reservedAgentName(name) {
+  const s = String(name ?? '');
+  return (s in Object.prototype) || (s.toLowerCase() in Object.prototype);
+}
+
+/**
  * 엣지용 토큰 발급(재발급 시 기존 것을 대체 — 회전). 평문은 이 반환값에서만 얻을 수 있다.
  * @returns {{ ok:boolean, agent?:string, token?:string, reason?:string }}
  */
@@ -129,6 +139,7 @@ export function issueAgentToken(agent, { note = '' } = {}) {
   const name = String(agent || '').trim();
   if (!name) return { ok: false, reason: '에이전트 이름이 필요합니다.' };
   if (!/^[A-Za-z0-9._-]{1,64}$/.test(name)) return { ok: false, reason: '에이전트 이름 형식이 올바르지 않습니다(영숫자·._- 64자 이내).' };
+  if (reservedAgentName(name)) return { ok: false, reason: '이 이름은 에이전트 이름으로 쓸 수 없습니다(__proto__ · constructor 처럼 예약된 이름).' };
   const refused = writeRefusal(); if (refused) return { ok: false, code: 'registry-unreadable', status: 409, readError: true, reason: refused };   // 87회차 ⓐ
   const token = crypto.randomBytes(32).toString('base64url'); // 256bit — 공유 토큰보다 강하게
   const list = load();

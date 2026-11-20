@@ -18,6 +18,7 @@
  */
 
 import { usageReadable, hostCapacityKnown } from '../store.js'; // v2.606 WEB2606-02: 사용률 판정은 store 하나(v2.594) · v2.733(C2-06) 용량 판정도
+import { newVmSum, vmSumAdd } from '../vcenter/vmSums.js'; // 153회차: 켜진 VM 의 vCPU · 메모리 할당 합 — '못 읽은 값' 판정은 이 코어 하나(v3.28.1 이 놓친 자리)
 
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
 const pct = (used, total) => (total > 0 ? Math.round((used / total) * 1000) / 10 : null);
@@ -89,7 +90,7 @@ export function clusterMatrix(slice = {}, { maxRows = 200, normalize = false } =
   const rowName = normalize ? stripSitePrefix : nameOf;
   const vcs = (slice.vcenters || []).map((v) => ({ id: v.id, name: v.name || v.id }));
   const allowed = new Set(vcs.map((v) => v.id));
-  const mkAcc = () => ({ hosts: 0, excluded: 0, capUnknown: 0, cores: 0, cpuTotalMhz: 0, cpuUsedMhz: 0, cpuReadMhz: 0, memTotalMB: 0, memUsedMB: 0, memReadMB: 0, vms: 0, vmsOn: 0, vcpuOn: 0, memAllocOnMB: 0 });
+  const mkAcc = () => ({ hosts: 0, excluded: 0, capUnknown: 0, cores: 0, cpuTotalMhz: 0, cpuUsedMhz: 0, cpuReadMhz: 0, memTotalMB: 0, memUsedMB: 0, memReadMB: 0, vms: 0, vmsOn: 0, vcpuOn: 0, memAllocOnMB: 0, vcpuUnknown: 0, memUnknown: 0 });   // ⚠ 수만(열 합계가 키마다 += 한다 — buildRows)
   const rows = new Map();     // 행 -> Map<vcId, acc>
   const totals = new Map();   // 행 -> acc(전 vCenter 합)
   const origNames = new Map(); // 행 -> Set<원래 이름>(정규화했을 때 무엇이 합쳐졌는지 밝힌다)
@@ -121,9 +122,13 @@ export function clusterMatrix(slice = {}, { maxRows = 200, normalize = false } =
     // VM 은 호스트가 없는 클러스터 이름을 가질 수 있다(스냅샷 불일치) — 그 경우에도 셀을 만든다.
     const row = rowName(v.cluster) || '(독립 호스트)';
     note(row, nameOf(v.cluster));
+    // 153회차(재현): 못 읽은 cpuCount · memMB(null — REST 폴백 · 엣지 정제)를 0 으로 더하지 않는다 — 예전 `num()` 은 그 VM 을 0 vCPU · 0 MB 로 더해
+    //   vCPU:코어 · 메모리 과할당이 표지 없이 작게(전부 못 읽으면 0 = '가장 여유 있는 셀') 나왔다. 읽기 판정은 vmSums 코어(vmSumAdd) 하나.
+    const on = v.powerState === 'POWERED_ON';
+    const one = on ? vmSumAdd(newVmSum(), v) : null;
     for (const a of [cellOf(rows, row, v.vcenterId, mkAcc), totalOf(totals, row, mkAcc)]) {
       a.vms += 1;
-      if (v.powerState === 'POWERED_ON') { a.vmsOn += 1; a.vcpuOn += num(v.cpuCount); a.memAllocOnMB += num(v.memMB); }
+      if (on) { a.vmsOn += 1; a.vcpuOn += one.vcpu; a.memAllocOnMB += one.memMB; a.vcpuUnknown += one.vcpuUnknown; a.memUnknown += one.memUnknown; }
     }
   }
 
@@ -136,8 +141,12 @@ export function clusterMatrix(slice = {}, { maxRows = 200, normalize = false } =
     // 지표가 아니라 설명용 — 있을 때만 싣는다(셀 키 = 지표 키 계약. DATASTORE usageUnknown 과 같은 방식).
     ...(a.excluded ? { hostsUsageExcluded: a.excluded } : {}),
     ...(a.capUnknown ? { capacityUnknown: a.capUnknown } : {}),
-    vcpuPerCore: capOk(a) && a.cores > 0 ? r1(a.vcpuOn / a.cores) : null,
-    memOvercommitPct: capOk(a) && a.memTotalMB > 0 ? Math.round((a.memAllocOnMB / a.memTotalMB) * 100) : null,
+    // 153회차: 할당을 못 읽은 켜진 VM 이 하나라도 있으면 그 비율은 부분 합(실제보다 작다)이라 null('—') + 개수 — 용량(C2-06)과 같은 규칙.
+    //   색이 표 안의 상대 위치라 '최소값' 을 그리면 그 셀이 가장 여유 있는 셀로 칠해진다.
+    ...(a.vcpuUnknown ? { vcpuUnknown: a.vcpuUnknown } : {}),
+    ...(a.memUnknown ? { ramUnknown: a.memUnknown } : {}),
+    vcpuPerCore: capOk(a) && a.cores > 0 && a.vcpuUnknown === 0 ? r1(a.vcpuOn / a.cores) : null,
+    memOvercommitPct: capOk(a) && a.memTotalMB > 0 && a.memUnknown === 0 ? Math.round((a.memAllocOnMB / a.memTotalMB) * 100) : null,
     hosts: a.hosts,
     vms: a.vms,
     vmsOn: a.vmsOn,

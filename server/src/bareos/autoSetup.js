@@ -681,7 +681,9 @@ export function parsePreflight(text) {
   const resources = { client: [], storage: [], pool: [], schedule: [] };
   for (const l of s.res || []) {
     const [t, n] = l.split(/\s+/);
-    if (resources[t] && isResourceName(n || '') && resources[t].length < 50) resources[t].push(n);
+    // 160회차(155 추정 E2 판정 — 재현): 종류 칸은 자기 속성만 — 설정 파일 이름에 줄바꿈이 있으면 basename 출력이 두 줄이 되고 둘째 줄의 첫 낱말이 종류 칸에 온다.
+    //   ‘constructor x’ · ‘toString x’ 한 줄이 상속 함수를 목록으로 읽어 `.push is not a function` 으로 사전 점검 전체를 던졌다(원격 출력은 믿지 않는다).
+    if (Object.hasOwn(resources, t) && isResourceName(n || '') && resources[t].length < 50) resources[t].push(n);
   }
   add('resources', '기본 리소스(파일 이름 기준)', s.res ? 'ok' : 'unknown',
     s.res ? ['client', 'storage', 'pool', 'schedule'].map((t) => `${t} ${resources[t].join(',') || '—'}`).join(' · ') : '읽지 못함',

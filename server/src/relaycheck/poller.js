@@ -5,8 +5,8 @@
 import { loadSettings, KINDS, onRelayCheckSettingsChange } from './settings.js';
 import { runCheck } from './checks.js';
 import { remedyFor } from './remedy.js';
-import { loadCollectors } from '../collector/registry.js';
-import { loadTopology } from '../relaytopo/store.js';        // 중계 토폴로지(v2.431) — 입력한 사이트도 점검 대상
+import { loadCollectors, registryLoadError } from '../collector/registry.js';
+import { loadTopology, relayTopologyReadError } from '../relaytopo/store.js';        // 중계 토폴로지(v2.431) — 입력한 사이트도 점검 대상
 import { kindForService } from '../relaytopo/validate.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 import { enqueueNotify as notify } from '../alerts.js'; // v2.742(감사 TIMING-01): 결과를 기다리지 않는 발송은 alerts.js 대기열로 — 동시 발송이 메일 인증 정지 가드를 우회하지 않게 한 번에 하나씩 보낸다.
@@ -87,6 +87,10 @@ export async function runRelayChecks({ force = false } = {}) {
     //   점검한다 — 사람이 넣은 호스트·실제 수집 서버(엣지 포털 점검은 수집 토큰을 싣는다)에 접속하지 않게.
     //   저장 설정이 켜져 있으면 예전처럼 전부 점검한다. 뺀 개수는 `skippedNonDemo` 로 밝힌다.
     const all = buildTargets(st, loadCollectors(), safeTopology());
+    // 154회차 R1(재현): 수집 서버 등록부 · 중계 토폴로지를 **못 읽은** 주기에는 그 원천의 대상이 목록에서 빠진다(loadCollectors 는 [] · 토폴로지는 빈 값) —
+    //   없어진 것이 아니라 모르는 것이다. 예전에는 아래 '빠진 항목 정리' 가 그 대상의 상태(연속 실패 수 · 알림 보냄 여부 · 마지막 정상 시각)를 지워,
+    //   다시 읽힌 뒤 이미 알린 장애를 처음부터 다시 알리고(중복) 복구 알림은 나가지 않았으며 화면은 '대상 0' 이 됐다. 못 읽은 주기에는 정리하지 않고 표지만 남긴다.
+    const unread = sourcesUnread();
     const demoOnly = isMockMode() && st.enabled !== true;
     const targets = demoOnly ? all.filter((t) => isDemoHost(t.host)) : all;
     const skippedNonDemo = all.length - targets.length;
@@ -119,14 +123,21 @@ export async function runRelayChecks({ force = false } = {}) {
         else notify({ key: `${key}:ok`, severity: 'warning', title: `[HAProxy 경로] ${t.site ? `${t.site} · ` : ''}${t.label} ${t.host}:${t.port} 복구`, detail: r.detail || '' }).catch(() => {});
       }
     });
-    for (const k of [..._state.keys()]) if (!seen.has(k)) _state.delete(k); // 대상에서 빠진 항목 정리
-    _last = { at: Date.now(), total: targets.length, okCount: okN, fail: failN, durationMs: Date.now() - t0, ...(demoOnly ? { demoOnly: true, skippedNonDemo } : {}), ...(_demoSuppressed ? { demoAlertsSuppressed: _demoSuppressed } : {}) };
+    if (!unread.length) for (const k of [..._state.keys()]) if (!seen.has(k)) _state.delete(k); // 대상에서 빠진 항목 정리(원천을 다 읽은 주기에만 — 154회차 R1)
+    _last = { at: Date.now(), total: targets.length, okCount: okN, fail: failN, durationMs: Date.now() - t0, ...(demoOnly ? { demoOnly: true, skippedNonDemo } : {}), ...(_demoSuppressed ? { demoAlertsSuppressed: _demoSuppressed } : {}), ...(unread.length ? { sourcesUnread: unread } : {}) };
     // v2.743(WEB-01): 성공 여부 `ok:true` 를 **마지막**에 둔다 — 상태 객체에 같은 이름이 다시 생겨도 덮이지 않게.
     return { ..._last, ok: true };
   } finally { _busy = false; }
 }
 
 function safeTopology() { try { return loadTopology(); } catch { return null; } }
+/** 154회차 R1: 이번 주기에 못 읽은 대상 원천(고정 낱말만 — 사유 원문 · 경로 없음). 바로 앞에서 둘 다 읽었으므로 다시 읽지 않는다(skipLoad · 캐시된 표지). */
+function sourcesUnread() {
+  const out = [];
+  try { if (registryLoadError({ skipLoad: true })) out.push('collectors'); } catch { out.push('collectors'); }
+  try { if (relayTopologyReadError()) out.push('topology'); } catch { out.push('topology'); }
+  return out;
+}
 export function relayCheckStatus() {
   const st = loadSettings();
   return { ...(isMockMode() ? { demo: true } : {}), last: _last, busy: _busy, settings: isMockMode() ? { ...st, enabled: demoOn(st.enabled) } : st, results: [..._state.values()].sort((a, b) => (a.target.host + a.target.port).localeCompare(b.target.host + b.target.port, undefined, { numeric: true })), kinds: KINDS };

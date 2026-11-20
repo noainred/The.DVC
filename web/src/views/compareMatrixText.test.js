@@ -116,6 +116,18 @@ describe('안내 문구·툴팁', () => {
   });
 });
 
+describe('153회차 — 할당을 못 읽은 켜진 VM 이 있는 셀의 툴팁', () => {
+  it('vCPU · 메모리를 못 읽은 수와 계산하지 않은 이유를 말한다(없으면 줄이 없다)', () => {
+    const mt = { key: 'vcpuPerCore', label: 'vCPU:코어', higher: 'bad' };
+    const t = cellTitle({ rowName: 'PROD', vcName: '한국', metric: mt, value: null, cell: { hosts: 2, vms: 5, vmsOn: 4, vcpuUnknown: 2, ramUnknown: 1 } });
+    expect(t).toMatch(/vCPU:코어 —/);
+    expect(t).toMatch(/vCPU 를 읽지 못한 켜진 VM 2대 — vCPU:코어를 계산하지 않았습니다/);
+    expect(t).toMatch(/메모리 할당을 읽지 못한 켜진 VM 1대 — 메모리 과할당을 계산하지 않았습니다/);
+    expect(t.includes('`')).toBe(false);
+    const ok = cellTitle({ rowName: 'PROD', vcName: '한국', metric: mt, value: 1.2, cell: { hosts: 2, vms: 5, vmsOn: 4 } });
+    expect(ok).not.toMatch(/읽지 못한/);
+  });
+});
 describe('희소도 안내 — 대각선 매트릭스라는 사실을 숨기지 않는다', () => {
   const mk = (n, shared) => Array.from({ length: n }, (_, i) => ({ name: `r${i}`, vcenters: i < shared ? 2 : 1, cells: {} }));
   it('행이 적으면 판단하지 않는다', () => {

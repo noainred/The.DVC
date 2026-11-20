@@ -851,7 +851,9 @@ function readLast(configDir) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); }
   catch (e) {
     // 손상(파일 없음이 아님)은 옆으로 보존한다 — 다음 적용 기록이 덮기 전에 사람이 볼 수 있게(server/CLAUDE.md 로드 손상 보존 규칙).
-    if (e?.code !== 'ENOENT') preserveCorrupt(file, e?.message || 'JSON');
+    // 159회차(재현 — audits.md 가 남긴 것): **읽기 오류**(EACCES · EIO · EISDIR)는 손상이 아니다 — 예전에는 그것도 '파싱 실패' 로 적고 옆으로 옮겨,
+    //   읽기가 돌아온 뒤에도 마지막 적용 기록(실패 · 거부 · 경고 목록)이 화면에서 사라졌다(20초 상태 폴링의 첫 요청이 옮긴다). 형식 오류만 보존한다.
+    if (e instanceof SyntaxError) preserveCorrupt(file, e?.message || 'JSON');
     return null;
   }
 }

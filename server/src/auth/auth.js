@@ -4,7 +4,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
 import { fileMissing } from '../util/fileMissing.js';   // 134회차: '정말 없는가'(ENOENT 만 — existsSync 는 stat 실패도 false)
-import { authenticateAD, loadAdConfig, adPolicyState } from './ad.js';
+import { authenticateAD, loadAdConfig, adPolicyState, adAccountKey } from './ad.js';
 import { capStr } from '../util/capStr.js';
 import * as totp from './totp.js';
 import { checkOtpAllowed, recordOtpFailure, recordOtpSuccess } from '../security/loginRateLimit.js';
@@ -162,6 +162,8 @@ export const SUPER_USERNAME = 'noainred';
 //   자기 앱에 묶을 수 있었다. 기존 계정 값은 건드리지 않는다(전원 로그아웃 없음). 증가(+1)·로그인 서명(u.tokenVersion||0)·
 //   복원의 max+1(backup/stagedRestore.js)은 그대로 동작한다. 신규 생성 경로(createUser·applyManagedUsers 신규·기본 시드)는 전부 이 함수로.
 function initialTokenVersion() { return crypto.randomInt(1, 2 ** 31); }
+/** 만들 수 없는 계정 이름(157회차) — 보통 객체에 자기 칸으로 넣을 수 없는 이름. 이름을 키로 쓰는 저장(권한 파일 users · 내 메뉴)이 조용히 빠진다. */
+export const RESERVED_USERNAMES = Object.freeze(new Set(['__proto__']));
 
 function ensureSuperUser(list) {
   const u = list.find((x) => x.username === SUPER_USERNAME);
@@ -575,6 +577,8 @@ export function createUser({ username, name, role = 'viewer', password, scope } 
   if (_usersReadError) return { ok: false, reason: 'users.json 을 읽지 못한 상태라 계정을 만들지 않습니다(원본 보호) — 파일 권한을 고치고 재시작하세요.' };   // 20회차 F9
   username = String(username || '').trim();
   if (!/^[A-Za-z0-9._@-]{2,64}$/.test(username)) return { ok: false, reason: '사용자 ID 형식이 올바르지 않습니다.' };
+  // 157회차(152 추정 E1 — 재현): 이 이름은 보통 객체의 칸이 되지 못한다(`obj['__proto__'] = …` 는 프로토타입을 바꾼다) — 사용자별 도구 재정의 · 내 메뉴가 '저장됨' 이라 답하고 저장되지 않았다.
+  if (RESERVED_USERNAMES.has(username)) return { ok: false, reason: '이 이름은 사용자 ID 로 쓸 수 없습니다(__proto__).' };
   if (!VALID_ROLES.includes(role)) return { ok: false, reason: '역할이 올바르지 않습니다.' };
   if (getUser(username)) return { ok: false, reason: '이미 존재하는 사용자입니다.' };
   const sa = superAdminGuardDenied(null, { nextRole: role, actor, actorUser, trusted, what: '생성' });
@@ -736,7 +740,7 @@ export function applyManagedUsers(managed = []) {
   const want = new Map((managed || []).filter((u) => u && u.username).map((u) => [String(u.username).trim(), u]));
   const result = { created: 0, updated: 0, removed: 0, skipped: [] };
   for (const [username, m] of want) {
-    if (!/^[A-Za-z0-9._@-]{2,64}$/.test(username)) { result.skipped.push(`${username}(ID 형식)`); continue; }
+    if (!/^[A-Za-z0-9._@-]{2,64}$/.test(username) || RESERVED_USERNAMES.has(username)) { result.skipped.push(`${username}(ID 형식)`); continue; }   // 157회차: `__proto__` 는 만들지 않는다(createUser 와 같은 판정)
     if (!VALID_ROLES.includes(m.role)) { result.skipped.push(`${username}(역할)`); continue; }
     // v2.643: 중앙 배포로 super_admin 을 만들지 않는다(super_admin 은 그 포탈의 super_admin 만 만든다).
     if (m.role === SUPER_ADMIN) { result.skipped.push(`${username}(super_admin 은 배포 불가)`); continue; }
@@ -1217,7 +1221,7 @@ export function revokeTokenSession(token, { reason = 'logout' } = {}) {
   if (p.sid) {
     revokeSessionImpl(String(p.sid), { username: p.sub, untilSec, reason });
     try { notifySessionRevoked({ scope: 'session', username: p.sub, sid: String(p.sid), source, reason }); } catch { /* */ }
-    return { ok: true, kind: 'session', username: p.sub, sid: String(p.sid) };
+    return { ok: true, kind: 'session', username: p.sub, sid: String(p.sid), source };
   }
   revokeDigestImpl(tokenDigest(token), { username: p.sub, untilSec, reason });
   return { ok: true, kind: 'token', username: p.sub, sid: null };
@@ -1243,6 +1247,13 @@ export function noteIssuedSession(payloadLike) {
   if (!payloadLike?.sid) return false;
   return noteActivity(String(payloadLike.sid), { username: payloadLike.sub, expSec: payloadLike.exp });
 }
+
+/**
+ * 단일 세션 등록부의 키(157회차) — 로컬 계정은 ''(이름 그대로) · 그 밖(AD)은 표기 변형을 접은 키. 발급(로그인) · 검사(resolveTokenUser) · 로그아웃이 같은 함수를 쓴다.
+ */
+export function activeSessionKeyOf(username, isLocal) { return isLocal ? '' : adAccountKey(username); }
+/** 162회차: 예전 판이 이름으로 등록한 기록이 지금 쓸 키 — 그 이름의 로컬 계정이 있으면 ''(로컬 세션의 기록 — AD 로그인이 걷지 않는다). setActiveSession 의 legacyKeyOf. */
+export function legacySessionKeyOf(name) { return activeSessionKeyOf(name, localNameTaken(name)); }
 
 /** 세션 정책 판정 — 일괄 무효 시각 → 개별 폐기 → 총 상한 → 서버측 유휴. */
 function sessionAlive(payload, token) {
@@ -1284,7 +1295,8 @@ export function resolveTokenUser(token) {
   const localU = payload.src === 'local' ? getUser(payload.sub) : null;
   if (payload.src === 'local' && !localU) return null; // 삭제된 계정
   if (!sessionAlive(payload, token)) return null;      // 로그아웃·총 상한·서버측 유휴(S-05·S-06)
-  if (singleSessionRequired(!!localU?.demo) && !isActiveSession(payload.sub, payload.sid)) return null;
+  // 157회차: AD 세션의 등록 키는 표기 변형을 접은 키(발급 routes/auth.js 와 같은 함수 — activeSessionKeyOf) · 로컬은 이름 그대로.
+  if (singleSessionRequired(!!localU?.demo) && !isActiveSession(payload.sub, payload.sid, { key: activeSessionKeyOf(payload.sub, payload.src === 'local') })) return null;
   const sidOf = payload.sid ? { sid: String(payload.sid) } : {};
   if (payload.src === 'local') {
     const u = localU;

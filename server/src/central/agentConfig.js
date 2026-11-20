@@ -54,6 +54,9 @@ function ensureLoaded() {
  */
 const _retainWanted = new Map();   // agent → 못 읽은 동안 retain 으로 청했지만 직전 사본을 몰라 유지하지 못한 이름
 const sizeOf = (val) => (typeof val === 'string' ? val.length : (() => { try { return JSON.stringify(val).length; } catch { return Infinity; } })());
+// 159회차(재현): 사본의 파일 맵은 **엣지가 보낸 이름**을 키로 쓴다 — 대입(`files[name] = v`)은 이름이 ‘__proto__’ 이고 값이 객체면 자기 속성을 만들지 않고 그 맵의 원형을 바꾼다
+//   (항목이 세지도 않고 사라지고, 맵이 엣지가 고른 객체의 키를 상속한다 — 가림을 거치지 않은 값이 `files['portal.env']` 로 읽힌다). 자기 속성으로 둔다(central/edgeRecord.js 별칭과 같은 규칙).
+const ownPut = (o, k, v) => { Object.defineProperty(o, k, { value: v, writable: true, enumerable: true, configurable: true }); };
 function fillRetained(cur, old, names) {
   if (!cur?.files || !old?.files || typeof old.files !== 'object') return;
   let total = 0;
@@ -64,7 +67,7 @@ function fillRetained(cur, old, names) {
     const size = sizeOf(old.files[name]);
     if (total + size > AGENT_CONFIG_MAX_BYTES) { cur.omitted = (Number(cur.omitted) || 0) + 1; continue; }
     total += size;
-    cur.files[name] = old.files[name];
+    ownPut(cur.files, name, old.files[name]);
     retained.push({ name, since: (Array.isArray(old.retained) ? old.retained.find((r) => r?.name === name)?.since : null) ?? old.at ?? null });
   }
   if (retained.length) cur.retained = retained;
@@ -104,7 +107,7 @@ export function setAgentConfig(agent, files, { retain = [] } = {}) {
     const size = typeof val === 'string' ? val.length : (() => { try { return JSON.stringify(val).length; } catch { return Infinity; } })();
     if (total + size > AGENT_CONFIG_MAX_BYTES) { omitted += 1; continue; }
     total += size;
-    cleaned[k] = val;
+    ownPut(cleaned, k, val);
   }
   /*
    * v2.621(감사 RECENT-09): 엣지가 413 으로 **보내지 못한** 파일(retain)은 직전 사본을 유지한다. 이 사본은 통째로 교체되므로
@@ -122,7 +125,7 @@ export function setAgentConfig(agent, files, { retain = [] } = {}) {
     const size = typeof val === 'string' ? val.length : (() => { try { return JSON.stringify(val).length; } catch { return Infinity; } })();
     if (total + size > AGENT_CONFIG_MAX_BYTES) { omitted += 1; continue; }
     total += size;
-    cleaned[name] = val;
+    ownPut(cleaned, name, val);
     const since = (Array.isArray(prev.retained) ? prev.retained.find((r) => r?.name === name)?.since : null) ?? prev.at ?? null;
     retained.push({ name, since });
   }

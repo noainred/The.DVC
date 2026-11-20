@@ -13,7 +13,7 @@ import { scopedVcenterIds } from '../../auth/scope.js';
 import { store, usageReadable, hostCapacityKnown } from '../../store.js';
 import { memoJson, scopeKey } from './shared.js';
 import { accessOf, makeIdracFor, BOOT_DAYS } from './hostExport.js';
-import { rebootsOf } from './hostChecks.js';
+import { rebootsOf, rebootsUnreadOf } from './hostChecks.js';
 import { hostChecksOf } from '../../vcenter/hostChecks.js';
 import { hostInsightOf } from '../../vcenter/hostInsight.js';
 import { listRegistry } from '../../idrac/registry.js';
@@ -40,16 +40,19 @@ export function registerHostInsight(api) {
       const vms = (snap.vms || []).filter((v) => v && (!allowed || allowed.has(v.vcenterId)) && (!regionIds || regionIds.has(v.vcenterId)));
       // 하드웨어 · 재부팅 — /hosts/checks 와 같은 함수 · 같은 권한(Veeam 은 이 화면에 없어 부르지 않는다)
       let checks = null;
+      let rebootsUnreadable = false;
       if (access.hw || access.hygiene) {
         const vcIds = [...new Set(hosts.map((h) => h.vcenterId))];
         let reboots = null;
-        if (access.hygiene) { try { reboots = await rebootsOf(snap, hosts, vcIds, now); } catch { reboots = new Map(); } }
+        // 139회차 R2(재현): 로그 DB 를 못 읽었으면 빈 Map 이 '재부팅 없음' 으로 셈됐다 — 못 읽음을 집계에 넘겨 칸을 모름으로 둔다.
+        //   144회차 F2: 못 읽음 판정은 /hosts/checks 와 같은 rebootsUnreadOf(기간 안 부팅만 판정 불가 — 기간 밖 부팅은 모름이 아니다).
+        if (access.hygiene) { try { reboots = await rebootsOf(snap, hosts, vcIds, now); } catch { reboots = rebootsUnreadOf(hosts, now); rebootsUnreadable = true; } }
         let idracFor = null;
         if (access.hw) { try { idracFor = makeIdracFor({ registry: listRegistry(), remote: allRemoteServers() }); } catch { idracFor = null; } }
         checks = hostChecksOf(hosts, { access: { hw: access.hw, hygiene: access.hygiene }, idracFor, reboots, now });
       }
       const r = await hostInsightOf({
-        vcenters, hosts, vms, readable: usageReadable, capKnown: hostCapacityKnown, access, checks,
+        vcenters, hosts, vms, readable: usageReadable, capKnown: hostCapacityKnown, access, checks, rebootsUnreadable,
         unlisted: !region, bootDays: access.hygiene ? BOOT_DAYS : null, yielder: createYielder(15), now,
       });
       return { ok: true, generatedAt: snap.generatedAt ?? null, initial: snap.initial === true, region, ...r };

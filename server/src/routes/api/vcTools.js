@@ -5,6 +5,7 @@ import { isAdminDetailUser } from '../../auth/demoGuest.js';
 import { logAudit } from '../../audit.js';
 import { loadHolds, setHold, HOLD_DAYS_MAX, holdsGeneration } from '../../vmhygiene/holds.js';
 import { snapshotCreators } from '../../snaphist/creators.js';
+import { kickSnapBackfill } from '../../veeam/snapWarm.js';   // 153회차: 이벤트 DB 가 31일을 덮지 못한 vCenter 가 있으면 백필을 시작한다(Veeam 화면과 같은 경로)
 import { store } from '../../store.js';
 import { sortByOrder } from '../../vcenter/order.js';
 import { nsxStore } from '../../nsx/store.js';
@@ -13,7 +14,7 @@ import { listDatacenters, datacenterOfVcenter } from '../../datacenter/store.js'
 import { vcListUnread, vcListItems, LIST_UNREAD_TEXT } from '../../corelicense/analyze.js'; // v2.742(VC-06): 확장 목록을 읽었는가 — 판정 한 벌
 import { isAdminReq } from '../../auth/addressMask.js';
 import { vmToolsDistribution, TOOLS_IDS_MAX } from '../../inventory/vmToolsDist.js';
-import { snapshotToolView } from '../../snaphist/view.js';
+import { snapshotToolView, readableVcenterIds } from '../../snaphist/view.js';
 import { historyStatus, historySeries, goneList, vmHistory, dayAgo, clampDays } from '../../snaphist/history.js';
 import { snapHistGeneration } from '../../snaphist/db.js';
 import { loadVmHygieneSettings } from '../../vmhygiene/settings.js';
@@ -189,7 +190,8 @@ api.get('/tools/snapshots/history', requirePerm('tools'), (req, res) => memoJson
   const [series, gone, ago] = await Promise.all([
     historySeries({ vcIds, days, now, corpOf: snapCorpOf() }),
     goneList({ vcIds, sinceTs: now - days * 86_400_000 }),
-    dayAgo({ vcIds, n: 7, now }),
+    // 138회차: 7일 변화는 **지금 값을 읽은** vCenter 만(view.vcReadIssue — 못 읽은 vCenter 의 7일 전 VM 을 ‘다 지운 VM’ 으로 세지 않는다)
+    dayAgo({ vcIds: readableVcenterIds(snap, vcIds), n: 7, now }),
   ]);
   return { ok: true, status, ...(series || {}), gone: gone?.items || [], goneMore: !!gone?.more, ago7: ago };
 }, { extraKey: `${scopeKey(req.user, store.get())}|${vcenterPickKey(req.query, store.get())}|g${snapHistGeneration()}`, ttlMs: 60_000 }));
@@ -202,10 +204,14 @@ api.get('/tools/snapshots/creators', requirePerm('tools'), (req, res) => memoJso
   let exclude = [];
   try { exclude = loadVmHygieneSettings().creatorExclude || []; } catch { exclude = []; }
   const r = await snapshotCreators({ snap, vcIds, exclude });
+  // 153회차: 'partial'(31일을 다 덮지 못함)이 있으면 백필을 시작한다 — 기다리지 않는다 · 진행 중이면 그것을 쓴다(기동 뒤에 등록한 vCenter 는 Veeam 화면을 열기 전까지 덮음이 없었다)
+  //   158회차: 백필이 메울 수 있는 틈이 있을 때만(needBackfill — 덮음 기록이 31일에 못 미침). 'partial' 에는 백필이 못 메우는 것(모은 지 31일이 안 된 vCenter)도 있다.
+  if (r.needBackfill) kickSnapBackfill();
   const admin = isAdminDetailUser(req.user);
   const byVm = {};
   for (const [k, c] of Object.entries(r.byVm)) byVm[k] = { user: admin ? c.user : null, ts: c.ts };
-  return { ok: true, byVm, vcenters: r.vcenters, ambiguous: r.ambiguous, listed: r.listed, excludeCount: exclude.length, ...(admin ? {} : { userMasked: Object.keys(byVm).length > 0 }), windowDays: 31 };
+  // 153회차: coveredFrom — 이벤트 DB 가 31일을 다 덮지 못한 vCenter('partial')의 '빠짐없이 가진 가장 이른 시각'(모르면 null)
+  return { ok: true, byVm, vcenters: r.vcenters, coveredFrom: r.coveredFrom, ambiguous: r.ambiguous, listed: r.listed, excludeCount: exclude.length, ...(admin ? {} : { userMasked: Object.keys(byVm).length > 0 }), windowDays: 31 };
 }, { extraKey: `${scopeKey(req.user, store.get())}|${vcenterPickKey(req.query, store.get())}|${isAdminDetailUser(req.user) ? 'a' : 'u'}|s${loadVmHygieneSettings().rev}`, ttlMs: 300_000 }));
 
 // v3.28.0 스냅샷 보류(기한 있는 예외 — vmhygiene/holds.js). 조회는 범위 안 보류만 · 건 계정은 관리자 판본만.

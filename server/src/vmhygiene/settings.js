@@ -15,7 +15,7 @@ import { config } from '../config.js';
 import { atomicWriteFileSync, safeLoadText } from '../util/atomicWrite.js';
 import { makeJsonFileReader } from '../util/jsonFileLoad.js';   // 결정(56~75 남긴 것) 71
 import { numOrNull } from '../util/numOrNull.js';
-import { activeHoldMap, onHoldsChange } from './holds.js';
+import { activeHoldMap, onHoldsChange, holdsUnreadable } from './holds.js';
 
 export const SETTINGS_FILE_NAME = 'vm-hygiene.json';
 const FILE = () => path.join(config.configDir, 'vm-hygiene.json');
@@ -88,8 +88,15 @@ const _reader = makeJsonFileReader(FILE, { parse: (t) => { const p = JSON.parse(
  */
 const withHolds = (o) => { try { Object.defineProperty(o, 'holds', { value: activeHoldMap(), enumerable: false, configurable: true }); } catch { /* 얼린 객체 — 보류 없이 */ } return o; };
 onHoldsChange(() => { cache = null; });
+// 153회차(재현): 보류 파일을 **읽지 못한 채** 만든 캐시는 그때의 목록(직전 목록 — 기동 직후면 빈 목록)을 굳히지 않는다. 예전에는 기동 때 읽기 오류였으면
+//   파일이 다시 읽혀도 캐시의 빈 Map 이 그대로라(보류 쓰기 · 설정 저장 · 재시작 전까지) 보류한 VM 이 위반으로 판정되고 알림에 실렸다.
+//   읽기 오류 동안만 호출마다 다시 붙인다 — 디스크는 공용 리더의 재읽기 간격(30초)으로만 본다(간격 안이면 직전 목록으로 Map 만 다시 만든다).
+let cacheHoldsUnread = false;
 export function loadVmHygieneSettings() {
-  if (cache) return cache;
+  if (cache) {
+    if (cacheHoldsUnread) { withHolds(cache); cacheHoldsUnread = holdsUnreadable(); }
+    return cache;
+  }
   let base = { ...DEFAULTS, notify: { ...DEFAULTS.notify } };
   // 69회차 F4(재현 — cost/settings.js 와 같은 꼴): 읽기 오류는 손상이 아니다 — 원본을 옮기지 않고 기본값을 캐시하지 않으며(71: 간격이 지난 다음 호출에서 다시 읽는다)
   //   unreadable 로 밝힌다. 저장은 거절하고 알림은 보내지 않는다(예전에는 원본을 .corrupt 로 옮겨 알림 · 예외 · 기준이 영구히 기본값으로 돌아갔다).
@@ -108,6 +115,7 @@ export function loadVmHygieneSettings() {
   }
   const { updatedAt = null, updatedBy = null, ...core } = base;
   cache = withHolds({ ...core, updatedAt, updatedBy, rev: revOf(core) });
+  cacheHoldsUnread = holdsUnreadable();
   return cache;
 }
 

@@ -22,7 +22,7 @@ import { fileStamp, DAY_OFFSET_MIN } from '../../util/dayKey.js';
 import { tzName } from '../../vcenter/vmExportCatalog.js';
 import { buildHostExport, clusterChoices, clusterKeys, HOST_EXPORT_PARTS, HOSTS_MAX } from '../../vcenter/hostExport.js';
 import { renderHostExportWorkbook, XLSX_MIME } from '../../vcenter/hostExportXlsx.js';
-import { analyzeReboots } from '../../hostcfg/reboots.js';
+import { rebootVerdictsByHost } from '../../hostcfg/reboots.js';   // 호스트별 판정(화면 상한 없이 — /hosts/checks 와 한 벌)
 import { HOSTOPS_TYPES } from '../../vmchanges/eventDetail.js';
 import { eventLastTsOf } from '../../vmchanges/analyze.js';   // 71회차: 마지막 이벤트 시각(지금 + 여유 이하 MAX — 69회차 F2 한 벌)
 import { getLogsDb } from '../../logs/db.js';
@@ -117,8 +117,8 @@ async function rebootsOf(vc, hosts) {
   const readFrom = truncated && events.length ? events[events.length - 1].ts : null;
   const why = eventNotCollectedMap().get(vc.id) || null;
   const cov = { firstTs: db.firstTs(vc.id) || null, lastTs: eventLastTsOf(db, vc.id, now), why };   // 71회차(69회차 남긴 것 ②): 미래 행 경계
-  const r = analyzeReboots(hosts, events, { now, days: BOOT_DAYS, vcName: new Map([[vc.id, vc.name || vc.id]]), coverageOf: () => cov, readFrom });
-  return new Map(r.rows.map((x) => [x.id, x]));
+  // 새 코드 점검(144회차 범위 밖 → 메인): rows 는 화면 상한(500행)에서 잘린다 — 한 vCenter 에서 기간 안 부팅이 500대를 넘으면 잘린 호스트가 '재부팅 없음' 이었다.
+  return rebootVerdictsByHost(hosts, events, { now, days: BOOT_DAYS, vcName: new Map([[vc.id, vc.name || vc.id]]), coverageOf: () => cov, readFrom });
 }
 
 const fileBase = (vcenterId, target) => `hosts-${String(vcenterId).replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 60)}-${target}-${fileStamp()}`;
@@ -170,7 +170,9 @@ export function registerHostExport(api) {
       const parts = s.parts;
       let reboots = null;
       if (parts.has('boot') && access.hygiene) {
-        try { reboots = await rebootsOf(vc, target); } catch { reboots = new Map(); }
+        // 새 코드 점검(144회차 범위 밖 → 메인 · 재현): 로그 DB 를 못 읽으면 빈 Map 이라 5일 전 부팅 호스트 칸에 '최근 30일 안에 재부팅하지 않았습니다(마지막 부팅 …)'
+        //   라는 모순 문장이 나갔다 — /hosts/checks 와 같이 이벤트 없는 판정(기간 안 부팅 = 판정 불가 'no-events')으로.
+        try { reboots = await rebootsOf(vc, target); } catch { reboots = rebootVerdictsByHost(target, [], { now: Date.now(), days: BOOT_DAYS }); }
       }
       let idracFor = null;
       if (parts.has('hw') && access.hw) {

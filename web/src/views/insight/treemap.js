@@ -4,7 +4,7 @@
  * 배치: 열 하나 = 묶음(지역 · 클러스터 등) · 열 폭 = 묶음 몫 · 열 안 칸 높이 = 그 묶음 안의 몫(넓이가 값에 정확히 비례한다).
  *  · 열 폭의 합 = 100% · 열마다 칸 높이의 합 = 100%(떠도는 소수는 마지막 열 · 칸이 받는다).
  *  · 크기가 0 · 모름인 칸은 그릴 수 없다 — hidden 으로 돌려준다(화면이 ‘칸 없음 N곳’ 으로 밝힌다 — 조용히 빼지 않는다).
- * 색: 눈금은 **절대값**(steps) — 칸끼리 작은 차이를 부풀리지 않는다. 경계(crit)가 있는 기준만 그 값 이상을 경고색으로(S6).
+ * 색: 눈금은 **절대값**(steps) — 칸끼리 작은 차이를 부풀리지 않는다. 경계(crit)가 있는 기준만 경계를 넘은 값을 경고색으로(S6 — VM 은 이상 · Hypervisor 는 초과: fillStep critOp).
  */
 import { numOrNull } from '../../numOrNull.js';
 
@@ -53,14 +53,19 @@ export const maxTilesInCol = (layout) => (layout?.cols || []).reduce((m, c) => M
 
 /**
  * 색 단계 — steps(오름차순 경계) 중 값 이상인 경계 수(0 ~ steps.length). 모르면 null(회색 — 0 단계가 아니다).
- * crit 가 있으면 그 값 이상은 경고(over:true) — 경계가 정해진 기준(평균 CPU · 메모리)만 넘긴다(S6).
+ * crit 가 있으면 경계를 넘은 값은 경고(over:true) — 경계가 정해진 기준(평균 CPU · 메모리)만 넘긴다(S6).
+ *  · critOp: 'gte'(처음값 — 경계 이상. VM 지도 — 서버 과부하 판정 vmSignals 가 ≥ OVERLOAD_BIN) ·
+ *    'gt'(경계 초과 — Hypervisor 지도. 148회차 145 K1: 같은 화면의 서버 판정 hostCorp CPU_ATTENTION_PCT · over90 · N+1 버팀(≤ N1_LIMIT_PCT)이
+ *    ‘90 초과’ 라 정확히 90 인 칸이 지도만 빨강이고 과부하 · 못 버팀 · 표는 정상이었다).
  */
-export function fillStep(value, { steps = [], crit = null } = {}) {
+export function fillStep(value, { steps = [], crit = null, critOp = 'gte' } = {}) {
   const v = numOrNull(value);
   if (v == null) return { step: null, over: false };
   const c = numOrNull(crit);
-  return { step: steps.filter((s) => v >= s).length, over: c != null && v >= c };
+  return { step: steps.filter((s) => v >= s).length, over: c != null && (critOp === 'gt' ? v > c : v >= c) };
 }
+/** 경계 낱말 — 범례 · 안내가 fillStep 과 같은 경계를 말하게(critOp 'gt' = 초과 · 그 밖 = 이상). */
+export const critWord = (def) => (def?.critOp === 'gt' ? '초과' : '이상');
 
 /** 칸 안 글 — 칸의 실제 높이(px)가 낮으면 한 줄(이름 · 값을 옆으로), 아니면 두 줄. */
 export const TILE_TWO_LINE_MIN_PX = 46;

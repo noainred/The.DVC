@@ -53,7 +53,8 @@ const RANGES = {
   '1h': 3_600_000, '6h': 6 * 3_600_000, '24h': DAY, '1d': DAY,
   '7d': 7 * DAY, '30d': 30 * DAY, '90d': 90 * DAY, '365d': 365 * DAY, '1y': 365 * DAY,
 };
-const rangeMsOf = (q, def = '1d') => RANGES[String(q || def)] || RANGES[def];
+// 158회차(재현 — 153회차 N153-3 과 같은 꼴): 자기 키만 — `RANGES['constructor']` 는 상속된 함수라 참이어서 기본 범위로 떨어지지 않았다(rangeMs 없음 · bucketMs null · 빈 계열).
+const rangeMsOf = (q, def = '1d') => (Object.hasOwn(RANGES, String(q || def)) ? RANGES[String(q || def)] : RANGES[def]);
 
 // ⚠ 보안(M-2, 2026-09-12): 조회 라우트에 사용자 vCenter scope 를 강제한다. 범위 제한 계정이
 // 전 vCenter 관리 호스트명·IP·응답시간을 열람하던 갭(CLAUDE.md "조회 라우트 scope 는 예외 없이")

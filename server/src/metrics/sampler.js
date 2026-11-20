@@ -28,6 +28,7 @@ let timer = null;
 import { pushAll } from '../util/pushAll.js';
 import { unreadVcenterReasons } from './unreadVcenters.js'; // v2.733(C2-02): 판정 본체(순수 leaf) — 아래에서 재수출
 import { demoVmperfBackfill } from '../mock/demo/vmperf.js'; // v2.718: 데모(mock) 과거 90일 백필(한 번)
+import { isStopped, getEmergencyStatus } from '../security/emergencyStop.js'; // 158회차: 긴급중단 동안 스냅샷은 얼어 있다(아래 samplingUnreadReasons) · 162회차: 푼 직후도
 let lastRun = null;
 let _pruneTicks = 0; // retention prune 주기 카운터(매 샘플 DELETE 스캔 방지)
 let _vmperfPruneTicks = 0; // vmperf(vCenter별 DB) prune 카운터 — DB 개수만큼 DELETE 라 더 드물게
@@ -66,16 +67,57 @@ export function staleVcenterIds(snap) {
 export { unreadVcenterReasons };
 
 /**
+ * 158회차(재현): **긴급중단** 동안에는 store.refresh 가 곧바로 돌아와(store.js `if (isStopped()) return`) 스냅샷이 통째로 얼어 있다 — vCenter 상태는
+ *   마지막 병합의 'connected' 그대로라 위 판정(unreadVcenterReasons)이 하나도 거르지 않는다. 예전 샘플러는 그 값을 매 분 `ts = now` 로 적재했다
+ *   (목 20곳 재현: 긴급중단 중 샘플 1회 = 1,707행 · staleSkipped 없음) — 중단이 이어진 시간만큼 온도 · 호스트 CPU · GPU · DS 사용량 · VM 할당/사용 계열과
+ *   시간당 롤업, VM 사용률 누적(라이트사이징)에 마지막 값의 평탄선이 실측처럼 쌓였다(v2.620 SRV2620-03 · 126회차가 vCenter 단위로 막은 것의 스냅샷 전체 판).
+ *   긴급중단이면 스냅샷의 모든 vCenter 를 사유 'stopped' 로 뺀다(결측은 결측으로 — lastRun.staleSkipped.byReason.stopped 가 밝힌다).
+ *   iDRAC 센서 계열 · 프로세스 메모리 계열은 스냅샷이 아니라 자기 신선도 판정을 쓰므로 그대로다.
+ *
+ * 162회차(158 N158-2 반증 — 재현): 긴급중단을 **푼 직후**에도 스냅샷은 다음 병합이 끝날 때까지 중단 전 값이다. 예전 판은 풀리자마자의 첫 샘플(매 분 — 고RTT vCenter 28곳의
+ *   수집이 끝나기 전)이 몇 시간 전 값을 지금 값으로 적재했다(158 시험이 그 동작을 ‘다시 적재’ 로 고정하고 있었다). 스냅샷의 만든 시각(`generatedAt` — 병합마다 새로 찍힌다)이
+ *   ‘마지막으로 긴급중단을 본 시각’(이 프로세스) · ‘해제 시각’(상태 파일의 at) 뒤가 아니면 여전히 얼어 있는 것으로 본다(사유 그대로 'stopped'). 만든 시각을 모르면 예전 그대로.
+ * @param {object} snap
+ * @param {{stopped?:boolean, frozenBefore?:number}} [o]  stopped 를 주지 않으면 isStopped()(읽지 못하면 false — 판정을 바꾸지 않는다) ·
+ *   frozenBefore(ms) 를 주지 않으면 이 프로세스가 본 마지막 긴급중단 시각과 해제 시각 가운데 늦은 쪽(순수 판정을 원하면 둘 다 준다)
+ * @returns {Map<string,'maintenance'|'unreachable'|'stale'|'stopped'>}
+ */
+let _stoppedSeenAt = 0;
+function frozenBeforeNow() {
+  let released = 0;
+  try { const s = getEmergencyStatus(); if (!s.active && Number(s.at) > 0) released = Number(s.at); } catch { released = 0; }
+  return Math.max(_stoppedSeenAt, released);
+}
+export function samplingUnreadReasons(snap, { stopped, frozenBefore } = {}) {
+  let st = stopped;
+  if (st === undefined) {
+    try { st = isStopped(); } catch { st = false; }
+    if (st === true) _stoppedSeenAt = Date.now();
+  }
+  if (st !== true) {
+    const fb = frozenBefore !== undefined ? Number(frozenBefore) : (stopped === undefined ? frozenBeforeNow() : 0);
+    const gen = Date.parse(snap?.generatedAt);
+    if (!(fb > 0) || !Number.isFinite(gen) || gen > fb) return unreadVcenterReasons(snap);
+  }
+  const out = new Map();
+  for (const vc of snap?.vcenters || []) if (vc && vc.id != null) out.set(String(vc.id), 'stopped');
+  return out;
+}
+/** @internal 시험 전용 */
+export function _resetStoppedSeenForTest() { _stoppedSeenAt = 0; }
+
+/**
  * VM 할당 vs 실사용 집계 행 생성(v2.374) — vCenter 별 + 전체('').
  * 할당 CPU clock 은 vCPU × 그 VM 이 올라간 호스트의 코어당 MHz 로 환산한다(VM 객체에 MHz
  * 원값이 없어 호스트를 조인). 호스트 코어 MHz 를 모르는 VM 은 **CPU 집계에서 제외**한다
  * (임의값 추정 금지 — /tools/waste 의 overAllocatedReport 와 같은 규칙). 메모리는 호스트
  * 정보 없이 계산 가능하므로 전원 On 전량을 집계한다. 전원 OFF/템플릿은 제외(사용률 0 이라 왜곡).
  */
-export function vmAllocRows(snap, settings) {
+export function vmAllocRows(snap, settings, { unread: unreadIn } = {}) {
   // v2.620(SRV2620-03): 낡은(stale·unreachable) vCenter 의 VM·DS 는 적재 대상이 아니다. 전체('') 합계는 대상 vCenter 중
   //   하나라도 빠지면 **적재하지 않는다** — 부분 합은 '거짓 하락' 이다(v2.594 vmtrack skipped 와 같은 판단).
-  const unread = unreadVcenterReasons(snap);
+  // 158회차: 호출부(샘플러)가 판정을 넘기면 그것을 쓴다(긴급중단 = 전 vCenter 'stopped' — samplingUnreadReasons). 주지 않으면 예전 그대로.
+  const unread = unreadIn instanceof Map ? unreadIn : unreadVcenterReasons(snap);
   const staleIds = new Set(unread.keys());
   const fresh = (id) => !staleIds.has(String(id));
   // v2.622(감사 RECENT-01 — 재현: 점검중 vCenter 하나로 전체('') 키가 사라졌다): 점검중(maintenance)은 관리자가 켜는 상태라
@@ -255,7 +297,7 @@ async function sampleOnceInner() {
   const rows = [];
   // v2.620(SRV2620-03): 낡은 vCenter(수집 실패 이월·위임 push 끊김)의 호스트·DS 는 '지금 값' 으로 적재하지 않는다(staleVcenterIds 주석).
   // v2.621(감사 RECENT-03): 점검중(maintenance) vCenter 도 뺀다 — 사유별 개수를 staleSkipped.byReason 으로 밝힌다.
-  const unreadReasons = unreadVcenterReasons(snap);
+  const unreadReasons = samplingUnreadReasons(snap);   // 158회차: 긴급중단이면 전 vCenter 'stopped'
   const staleIds = new Set(unreadReasons.keys());
   const freshHosts = (snap.hosts || []).filter((h) => !staleIds.has(String(h.vcenterId)));
   const byReason = {};
@@ -387,7 +429,7 @@ async function sampleOnceInner() {
     const vmperfCfg = loadVmperfSettings();
     if (vmperfCfg.enabled) {
       // 이름 주의: 이 함수 위쪽 온도 집계에도 byVc 가 있어 혼동을 막으려 vmperfByVc 로 둔다.
-      const vmperfByVc = vmAllocRows(snap, vmperfCfg);
+      const vmperfByVc = vmAllocRows(snap, vmperfCfg, { unread: unreadReasons });
       dsUsedUnknown = vmperfByVc.dsUsedUnknown || 0;
       vmStorageUnknown = vmperfByVc.vmStorageUnknown || 0;
       vmStorageUnknownBy = vmStorageUnknown ? { ...vmperfByVc.vmStorageUnknownBy } : null;

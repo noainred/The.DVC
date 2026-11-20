@@ -123,6 +123,9 @@ export function cellTitle({ rowName, vcName, metric, value, cell }) {
   if (cell?.usageUnknown > 0) parts.push(`사용량을 읽지 못한 데이터스토어 ${cell.usageUnknown}개는 용량·사용률 합계에서 제외`);
   // v2.733(C2-06): 용량을 못 읽은 호스트(REST 폴백)가 섞이면 총량·과할당 비율은 부분 합이라 '—' 다 — 그 이유를 말한다.
   if (cell?.capacityUnknown > 0) parts.push(`용량을 읽지 못한 호스트 ${cell.capacityUnknown}대(REST 폴백) — CPU·메모리 총량과 과할당 비율을 계산하지 않았습니다`);
+  // 153회차: vCPU · 메모리 할당을 못 읽은 켜진 VM 이 있으면 과할당 비율은 부분 합이라 '—' 다 — 그 이유를 말한다(서버 vcpuUnknown · ramUnknown).
+  if (cell?.vcpuUnknown > 0) parts.push(`vCPU 를 읽지 못한 켜진 VM ${cell.vcpuUnknown}대 — vCPU:코어를 계산하지 않았습니다`);
+  if (cell?.ramUnknown > 0) parts.push(`메모리 할당을 읽지 못한 켜진 VM ${cell.ramUnknown}대 — 메모리 과할당을 계산하지 않았습니다`);
   if (metric?.help) parts.push(metric.help);
   return parts.filter(Boolean).join('\n');
 }

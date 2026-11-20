@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **337개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **338개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-11-20)
@@ -220,7 +220,6 @@
 | `pdu-intervals.json` | 설정 | PDU 수집 주기(사용자 요구: '수집 시간은 설정에서 지정'). | ✅ |  | ✅ | pdu/intervals.js |
 | `pdu-thresholds.json` | 설정 | PDU 임계치 판정 + 알림 연동(v2.425). | ✅ |  | ✅ | pdu/thresholds.js |
 | `pdu.db` | DB | PDU 전력 시계열 |  |  | ✅ | pdu/db.js |
-| `rack.db` | DB | 랙 실장도 원장(데이터센터 · 전산실 · 랙 · 배치 · 변경 이력 — 사람이 입력, 자동 재생성 불가) |  |  | ✅ | rack/db.js |
 | `peer-trust.json` | 설정 | 장비 SSH 호스트키·TLS 인증서 지문 신뢰 저장소(검토 S-01·S-02) | ✅ | ✅ | ✅ | security/peerTrust.js |
 | `perf-hangs.ndjson` | 로그(NDJSON) | hang(이벤트 루프 정체·화면 장기 로딩) 이벤트를 `perf-hangs.ndjson` 에 남긴다(v2.498). | ✅ |  | ✅ | perf/hangLog.js |
 | `perf-monitor.json` | 설정 | 서버 성능 측정 설정(`perf-monitor.json`, v2.498, 사용자 요청 "설정에 서버 성능 | ✅ | ✅ | ✅ | perf/settings.js |
@@ -236,6 +235,7 @@
 | `power-settings.json` | 설정 | 전력 집계 표시 설정 — CONFIG_DIR/power-settings.json. | ✅ | ✅ | ✅ | idrac/powerSettings.js |
 | `provision-runs.json` | 설정 | VM provisioning job engine. Holds deployment jobs in memory and runs them |  |  |  | provision/jobs.js |
 | `provision-saved.json` | 설정 | Saved VM-provisioning jobs — every created job's spec is persisted so it can | ✅ | ✅ | ✅ | provision/saved.js |
+| `rack.db` | DB | 랙 실장도 **원장**(중앙 한 곳 · 2026-11-20 사용자 결정 '원장 위치는 중앙에 한곳'). |  |  | ✅ | rack/db.js |
 | `relay-topology.json` | 설정 | 중계(HAProxy) 토폴로지 정의 | ✅ |  | ✅ | relaytopo/store.js |
 | `relaycheck-settings.json` | 설정 | HAProxy 경로 점검 설정(v2.429, 사용자 요구 '특수기능에 haproxy 설정을 주기적으로 점검해서 알람으로 알려주고 | ✅ | ✅ | ✅ | relaycheck/settings.js |
 | `release-notes.json` | 설정 | Release notes: a built-in changelog (server/src/release-notes.json, shipped | ✅ | ✅ | ✅ | release-notes.js |

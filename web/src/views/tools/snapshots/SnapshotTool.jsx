@@ -21,19 +21,23 @@ import { saveBlob } from '../../../util/saveBlob.js';
 import { dayStamp } from '../../../dayStamp.js';
 import { copyText } from '../../../util/copyText.js';
 import { vcHash } from '../../vcd/vcdRoute.js';
+import { requireChanged } from '../../changeResult.js';
 import {
   BANDS, BAND_COLOR, BAND_FG, bandLabels, VIEWS, signalDefs, matchKey, sortItems, gbSum, groupItems, GROUPS, bandGradient, summaryOf, corpCards,
   logPos, gbText, daysText, dateText, requestText, CSV_HEAD, csvRow, parseSnapHash, buildSnapHash,
-  changeMap, changeKey, clearedSince, seriesValues, lineGeom, goneRows, goneSummary, GROW_GB,
+  changeMap, changeKey, clearedSince, seriesValues, lineGeom, goneRows, goneSummary, GROW_GB, corpFootText, unreadSumText, trendOf, excludedMarks, trendCaption,
 } from './snapText.js';
 import './snapshots.css';
 
 const KIND = (n) => (n.mem ? '메모리까지 담음' : n.quiesced ? '파일 시스템을 멈추고 찍음' : '디스크만');
 const SKIP_TEXT = { template: '템플릿', exception: '예외', hold: '보류', 'no-settings': '설정 없음' };
-const CREATOR_NOTE = { site: '위임 법인 — 이벤트가 법인 엣지에 있어 모름', 'no-db': '이벤트 DB 를 쓸 수 없어 모름', truncated: '이벤트가 많아 일부만 읽음' };
+// 153회차: partial = 이벤트 DB 가 31일을 다 덮지 못한 vCenter(백필 중 · 이벤트를 모으지 않음 · 적재 실패) — 못 찾은 VM 을 ‘기록 없음’ 이라 하지 않는다(truncated 도 같다)
+const CREATOR_NOTE = { site: '위임 법인 — 이벤트가 법인 엣지에 있어 모름', 'no-db': '이벤트 DB 를 쓸 수 없어 모름', truncated: '이벤트가 많아 일부만 읽어 모름', partial: '이벤트를 31일치 다 모으지 못해 모름',
+  'log-off': 'vCenter 이벤트 수집이 꺼져 있어 모름', 'severity-filter': '이벤트를 경고 이상만 저장해 모름', 'not-collected': '이 vCenter 의 이벤트를 모으지 않아 모름(비활성 · 점검중)' };
+const CREATOR_SOME = new Set(['truncated', 'partial', 'log-off', 'severity-filter', 'not-collected']);   // 읽은 만큼은 맞다 — 찾은 계정은 보이고, 못 찾은 VM 은 모름
 
-/** 작은 꺾은선 — 빠진 날은 선이 끊기고 빗금으로 보인다. */
-function Spark({ values, cls = '', label, color = '#3b82f6' }) {
+/** 작은 꺾은선 — 빠진 날은 선이 끊기고 빗금으로 보인다 · marks(일부 vCenter 를 빼고 더한 날 — 147회차)는 아래 띠. */
+function Spark({ values, cls = '', label, color = '#3b82f6', marks = [] }) {
   const g = lineGeom(values, 100, 30);
   const n = values.length;
   return (
@@ -43,6 +47,7 @@ function Spark({ values, cls = '', label, color = '#3b82f6' }) {
         {g.d && <path d={g.d} fill="none" stroke={color} strokeWidth="1.6" vectorEffect="non-scaling-stroke" />}
       </svg>
       {n > 1 && g.gaps.map((i) => <span key={i} className="gap" style={{ left: `${(i / (n - 1)) * 100 - 50 / n}%`, width: `${100 / n}%` }} />)}
+      {n > 1 && marks.map((i) => <span key={`x${i}`} className="ex" style={{ left: `${(i / (n - 1)) * 100 - 50 / n}%`, width: `${100 / n}%` }} />)}
     </span>
   );
 }
@@ -182,10 +187,12 @@ export default function SnapshotTool({ scope = '', initial = null, initialHist =
   const gRows = goneRows(hist?.gone, (id) => vcCorp.get(String(id)) || id, numOrNull(th.snapAgeDays))
     .filter((r) => !corp || (data?.corps || []).find((c) => c.id === corp)?.vcenters?.some((v) => v.id === r.vcenterId));
   const gSum = goneSummary(gRows);
-  const tVals = seriesValues(hist?.series, tm);
-  const tFirst = tVals.find((v) => v != null); const tLast = [...tVals].reverse().find((v) => v != null);
+  const trend = trendOf(hist, corp, tm);   // 그림 · 설명이 같은 줄(143회차)
   const tText = (v) => (v == null ? '—' : tm === 'gb' ? gbText(v) : `${Math.round(v).toLocaleString('en-US')}대`);
-  const missingDays = (hist?.series || []).filter((p) => p.missing > 0).length;
+  const tCap = trendCaption(trend, tp, tText);
+  // 법인 카드 그림 — 값 · 뺀 날(아래 띠) 위치(147회차: REST 수집 vCenter 도 빼고 더한다 — 그날을 그림에 표시)
+  const cardSpark = new Map(cards.filter((c) => hist?.byCorp?.[c.id]).map((c) => { const v = seriesValues(hist.byCorp[c.id], 'gb'); return [c.id, { values: v, marks: excludedMarks(hist.byCorp[c.id], v) }]; }));
+  const cardMarked = [...cardSpark.values()].some((x) => x.marks.length);
 
   return (
     <div className="snp">
@@ -226,7 +233,7 @@ export default function SnapshotTool({ scope = '', initial = null, initialHist =
 
       <div className="snp-kpis" aria-label="요약">
         <div className="snp-kp"><span className="l">스냅샷이 있는 VM</span><span className="v">{sum.vms.toLocaleString('en-US')}</span>
-          <span className="s">{corp ? `${corpName} 법인` : '전체 법인'} · 판정하지 않는 VM {sum.skip}대 포함{sum.stale ? ` · 값이 낡은 vCenter 의 ${sum.stale}대는 뺐습니다` : ''}</span></div>
+          <span className="s">{corp ? `${corpName} 법인` : '전체 법인'} · 판정하지 않는 VM {sum.skip}대 포함{sum.stale ? ` · 값이 낡은 vCenter 의 ${sum.stale}대는 뺐습니다` : ''}{unreadSumText(cards, corp)}</span></div>
         <div className="snp-kp"><span className="l">사내 기준{numOrNull(th.snapAgeDays) != null ? `(${th.snapAgeDays}일)` : ''}을 넘긴 VM</span><span className="v" style={{ color: sum.over ? '#fbbf24' : '#86efac' }}>{sum.over.toLocaleString('en-US')}</span>
           <span className="s">72시간(권고) 넘김 {sum.h72}대{sum.ageUnknown ? ` · 생성일 못 읽음 ${sum.ageUnknown}대는 따로` : ''}</span></div>
         <div className="snp-kp"><span className="l">스냅샷 크기</span><span className="v" style={{ color: '#67e8f9' }}>{gbText(sum.gb)}</span>
@@ -240,16 +247,16 @@ export default function SnapshotTool({ scope = '', initial = null, initialHist =
         </div>
       </div>
 
-      <div className="snp-sec"><h3>법인별</h3><span className="hint">카드를 누르면 그 법인만 봅니다 · 막대 = 나이 구간{hist?.byCorp ? ` · 아래 그림 = 스냅샷 크기 ${tp}일 추이(빗금 = 빠진 날)` : ''}</span></div>
+      <div className="snp-sec"><h3>법인별</h3><span className="hint">카드를 누르면 그 법인만 봅니다 · 막대 = 나이 구간{hist?.byCorp ? ` · 아래 그림 = 스냅샷 크기 ${tp}일 추이(빗금 = 빠진 날${cardMarked ? ' · 아래 띠 = 일부 vCenter 를 빼고 더한 날' : ''})` : ''}</span></div>
       <div className="snp-cards" role="group" aria-label="법인별 요약">
         {cards.map((c) => (
           <button key={c.id} type="button" className={`snp-cc${corp === c.id ? ' on' : ''}`} aria-pressed={corp === c.id} onClick={() => { setCorp(corp === c.id ? '' : c.id); setOpen(''); }}
-            title={`${c.name} — 스냅샷이 있는 VM ${c.n}대(기준 넘김 ${c.over}대) · ${gbText(c.gb.gb)} — 누르면 이 법인만 봅니다`}>
-            <span className="cn"><span>{c.name}</span><em className={c.over ? '' : 'none'}>{c.over ? `넘김 ${c.over}` : '넘김 없음'}</em></span>
-            <span className="tx">{c.n}대 · {gbText(c.gb.gb)}{c.over ? ` · 정리하면 ${gbText(c.overGb.gb)}` : ''}</span>
+            title={c.blind ? `${c.name} — 이 법인의 vCenter 값을 지금 못 읽었습니다` : `${c.name} — 스냅샷이 있는 VM ${c.n}대(기준 넘김 ${c.over}대) · ${gbText(c.gb.gb)}${c.unread ? ` · 지금 값을 못 읽은 vCenter ${c.unread}곳` : ''} — 누르면 이 법인만 봅니다`}>
+            <span className="cn"><span>{c.name}</span><em className={c.over ? '' : 'none'}>{c.over ? `넘김 ${c.over}` : c.blind ? '못 읽음' : '넘김 없음'}</em></span>
+            <span className="tx">{c.blind ? '—' : <>{c.n}대 · {gbText(c.gb.gb)}{c.over ? ` · 정리하면 ${gbText(c.overGb.gb)}` : ''}</>}</span>
             <span className="snp-gbar" style={{ background: bandGradient(c.items) }} aria-hidden="true" />
-            {hist?.byCorp?.[c.id] && <Spark values={seriesValues(hist.byCorp[c.id], 'gb')} label={`${c.name} 스냅샷 크기 ${tp}일 추이`} />}
-            <span className="tx">{c.oldest != null ? `가장 오래된 것 ${daysText(c.oldest)}` : c.n ? '판정한 스냅샷 없음' : '스냅샷 없음'}{c.stale ? ' · 값이 낡음' : ''}</span>
+            {cardSpark.has(c.id) && <Spark values={cardSpark.get(c.id).values} marks={cardSpark.get(c.id).marks} label={`${c.name} 스냅샷 크기 ${tp}일 추이`} />}
+            <span className="tx">{corpFootText(c)}</span>
           </button>
         ))}
       </div>
@@ -302,9 +309,10 @@ export default function SnapshotTool({ scope = '', initial = null, initialHist =
                 <span className="snp-seg" role="group" aria-label="무엇을 볼지">{TREND_METRICS.map(([k, label]) => <button key={k} type="button" className={tm === k ? 'on' : ''} aria-pressed={tm === k} onClick={() => setTm(k)}>{label}</button>)}</span>
                 <span className="snp-seg" role="group" aria-label="기간">{TREND_PERIODS.map((d) => <button key={d} type="button" className={tp === d ? 'on' : ''} aria-pressed={tp === d} onClick={() => setTp(d)}>{d}일</button>)}</span>
               </div>
-              <Spark cls="w" values={corp && hist?.byCorp?.[corp] ? seriesValues(hist.byCorp[corp], tm) : tVals} label={`${TREND_METRICS.find((m) => m[0] === tm)[1]} ${tp}일 추이`} />
-              <div className="snp-tcap"><span>{tFirst == null ? '아직 기록이 없습니다' : `${tp}일 중 처음 ${tText(tFirst)} → 마지막 ${tText(tLast)}`}</span>
-                <span>{missingDays ? `빠진 날 ${missingDays}일(선이 끊김)` : ''}</span></div>
+              <Spark cls="w" values={trend.values} marks={trend.excludedIdx} label={`${TREND_METRICS.find((m) => m[0] === tm)[1]} ${tp}일 추이`} />
+              {/* 147회차(143 결정 D1): 뺀 사유는 그 날들에 실제로 있던 것만(점검중 · 비활성 · REST 수집 — snapText.excludedWhyText) · 뺀 날은 그림 아래 띠 */}
+              {/* 149회차: 설명 두 줄은 snapText.trendCaption 하나(처음 · 마지막이 일부를 뺀 합이면 그 값에 · 합이 없는 날의 사유를 빠짐없이) */}
+              <div className="snp-tcap"><span>{tCap[0]}</span><span>{tCap[1]}</span></div>
             </>
           )}
           <div className="snp-ph"><h3>신호</h3><span className="hint">누르면 그 신호가 있는 VM 만 봅니다</span></div>
@@ -364,7 +372,7 @@ export default function SnapshotTool({ scope = '', initial = null, initialHist =
             {req === 'sel' && <ReqBox text={requestText('고른 VM', selItems, th, { onlyOver: false, whoOf })} onCopied={flash} />}
           </>
         )}
-        <STable className="snp-tbl" minWidth={1180}>
+        <STable className="snp-tbl" minWidth={1120}>
           <thead>
             <tr>
               <th className="nos"><button type="button" className={`snp-ck${allOn ? ' on' : ''}`} aria-pressed={allOn} aria-label="보이는 VM 모두 고르기"
@@ -411,7 +419,8 @@ export default function SnapshotTool({ scope = '', initial = null, initialHist =
                       <b><i className="snp-cv">{isOpen ? '▾' : '▸'}</i>{x.name}</b><span className="snp-sub">{group === 'corp' ? '' : `${x.corpName} · `}{x.cluster || '클러스터 없음'} · {x.host || '호스트 모름'}</span></button></td>
                     <td><span className="snp-sub" style={{ color: 'var(--text)', fontSize: 12.5 }}>{x.oldestName || '—'}</span>
                       <span className="snp-sub">{numOrNull(x.oldestTs) != null ? `${dateText(x.oldestTs)} 만듦` : '생성일 못 읽음'}{x.oldestDesc ? ` · ${x.oldestDesc}` : ' · 설명 없음'}</span>
-                      {creators?.ok && <span className="snp-sub" title="이 VM 에 최근 31일 안에 스냅샷을 만든 계정(백업 도구 계정 제외) — 가장 오래된 스냅샷을 만든 계정이 아닐 수 있습니다">
+                      {/* 161회차(Chromium 판독): 이 줄은 접는다 — 한 줄 말줄임(.snp-sub)이면 153회차가 붙인 ‘ · 일부만 읽음’ 이 ‘ · 일…’ 로, 긴 사유(…모름(비활성 · 점검중))가 중간에서 잘렸다 */}
+                      {creators?.ok && <span className="snp-sub wrap" title="이 VM 에 최근 31일 안에 스냅샷을 만든 계정(백업 도구 계정 제외) — 가장 오래된 스냅샷을 만든 계정이 아닐 수 있습니다">
                         {creatorText(creators, x)}</span>}</td>
                     <td><span className="snp-bar"><span className="snp-track"><i style={{ width: `${w(x.days, maxD)}%`, background: BAND_COLOR[x.band] }} /></span><b style={{ color: BAND_FG[x.band] }}>{daysText(x.days)}</b></span></td>
                     <td className="r snp-mono" style={{ color: s.count ? '#fdba74' : undefined }}>{x.snapshotCount}</td>
@@ -554,10 +563,20 @@ function GoneList({ rows, sum, more, ageDays, tp }) {
 /** 만든 계정 칸 글자 — 계정 이름은 관리자 판본만(그 밖에는 ‘숨김’), 위임 법인은 모름. */
 export function creatorText(c, x) {
   const st = c.vcenters?.[x.vcenterId];
-  if (st && CREATOR_NOTE[st] && st !== 'truncated') return `만든 계정 — ${CREATOR_NOTE[st]}`;
+  const some = CREATOR_SOME.has(st);
+  if (st && CREATOR_NOTE[st] && !some) return `만든 계정 — ${CREATOR_NOTE[st]}`;
   const hit = c.byVm?.[`${x.vcenterId}\n${x.id}`];
-  if (!hit) return '만든 계정 — 31일 안 기록 없음';
-  return `최근 만든 계정 ${hit.user || '(관리자만 볼 수 있습니다)'} · ${dateText(hit.ts)}${st === 'truncated' ? ' · 일부만 읽음' : ''}`;
+  if (!hit) return some ? `만든 계정 — ${CREATOR_NOTE[st]}` : '만든 계정 — 31일 안 기록 없음';
+  return `최근 만든 계정 ${hit.user || '(관리자만 볼 수 있습니다)'} · ${dateText(hit.ts)}${some ? ' · 일부만 읽음' : ''}`;
+}
+
+/**
+ * 보류 저장 요청 → 성공 안내 글(156회차). putJson 은 400 · 409 를 던지지 않고 본문({ ok:false, reason })을 돌려준다(api.js sendJson) —
+ *   서버가 거절해도(보류 상한 · 사유 없음 · 일수 밖) ‘N일 보류했습니다’ 라고 말하고 창을 닫았다. 거절 본문은 사유를 던진다(changeResult.requireChanged).
+ */
+export function saveHold(form, put = putJson) {
+  return put('/tools/snapshots/holds', { vcenterId: form.vcenterId, vmId: form.vmId, days: Number(form.days), reason: form.reason })
+    .then((r) => { requireChanged(r); return Number(form.days) ? `${form.days}일 보류했습니다 — 그동안 이 VM 의 스냅샷은 판정하지 않습니다(카드 · VM 구성 점검 · 알림 포함).` : '보류를 풀었습니다.'; });
 }
 
 /**
@@ -575,9 +594,7 @@ export function creatorExcludeNote(c) {
 function HoldForm({ form, setForm, held, onDone }) {
   const save = () => {
     setForm({ ...form, busy: true, error: '' });
-    putJson('/tools/snapshots/holds', { vcenterId: form.vcenterId, vmId: form.vmId, days: Number(form.days), reason: form.reason })
-      .then(() => onDone(Number(form.days) ? `${form.days}일 보류했습니다 — 그동안 이 VM 의 스냅샷은 판정하지 않습니다(카드 · VM 구성 점검 · 알림 포함).` : '보류를 풀었습니다.'))
-      .catch((e) => setForm({ ...form, busy: false, error: e.message }));
+    saveHold(form).then(onDone).catch((e) => setForm({ ...form, busy: false, error: e.message }));
   };
   return (
     <div className="snp-hold" role="group" aria-label="스냅샷 보류">

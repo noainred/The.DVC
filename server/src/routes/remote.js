@@ -384,6 +384,17 @@ remoteRouter.post('/deploy/test', adminOnly, async (req, res) => {
       return res.json({ ok: false, method: 'carry-refused', reason: '접속 주소 · 포트 · 계정이 저장값과 달라 저장된 비밀번호 · 개인키를 쓰지 않습니다 — 비밀번호(또는 개인키)를 입력해 주세요.' });
     }
     dep.host = proxy.deploy.host; dep.port = proxy.deploy.port;
+    // 162회차(157 추정 P3 — 실행 확인): 이 중계 서버의 설정을 **바꿀 수 없는** 범위 계정(기본 · 공유 중계 서버 — POST /proxies · PUT /config 가 403)이 저장 비밀로 접속하면서
+    //   경로만 바꿔 `test -r <임의 경로>` 의 결과(configReadable)로 그 서버의 파일 존재 · 읽기 여부를 알아냈다. 그 계정은 저장된 경로로만 시험한다(전체 범위 계정 · 자기 범위만 배정된 중계 서버는 예전 그대로).
+    const wScope = proxyWriteScope(req);
+    if (wScope && (proxy.id === 'default' || proxyScopeOf(wScope, proxy.id).outScope.length)) {
+      // 글자가 아닌 값은 여기서 글자로 바꾸지 않는다(강제 변환 함정 — toString 이 던진다) — 아래 testDeploy 의 경로 판정이 거절한다.
+      const pathOf = (v) => (typeof v === 'string' && v ? v : '/etc/haproxy/haproxy.cfg');
+      const want = dep.haproxyConfigPath;
+      if ((want == null || typeof want === 'string') && pathOf(want) !== pathOf(proxy.deploy.haproxyConfigPath)) {
+        return res.json({ ok: false, method: 'carry-refused', reason: '범위 제한 계정은 이 중계 서버(기본 · 다른 법인과 공유)의 저장된 비밀번호 · 개인키로 다른 설정 파일 경로를 시험할 수 없습니다 — 저장된 경로로 시험해 주세요.' });
+      }
+    }
   }
   const block = ipBlockReason(dep.host);
   if (block) return res.json({ ok: false, reason: `대상 호스트가 차단되었습니다: ${block}`, method: 'blocked' });

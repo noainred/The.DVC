@@ -40,7 +40,7 @@
   없으면 **승인된**(`registry.inheritActive`) 서버만 법인 › OS 종류 → 법인 순 가장 가까운 지정. OS 미지정 서버는 OS 단계를 건너뛴다 · **법인 단계 계정은 OS 계열이 같은 서버에만**(예전 계정 · 미지정 서버 = Linux).
 - **승인(`inherit.key`)은 주소 · 포트 · OS · 법인(`registry.inheritKeyOf`)에 묶인다** — 어느 쓰기 경로로든 넷 중 하나가 바뀌면 효력을 잃는다(요청 본문은 승인 칸을 세울 수 없다 — applyServerInput 이 모르는 칸).
   법인을 빼면 OTP 없는 서버 저장으로 다른 법인 계정 비밀번호가 간다(반증 F1 — 재현). **자기 자격이 생기는 쓰기(서버 저장 · 키 고르기)는 승인을 지운다**(남기면 OTP 없는 ‘떼기’ 로 되산다 — F5).
-  승인 쓰기는 화면이 본 `inheritKey` 를 돌려받아 대조한다(F8).
+  승인 쓰기는 화면이 본 `inheritKey` 를 돌려받아 대조한다(F8). 141회차(결정): 효력을 잃는 쓰기에서 승인은 **죽는다**(`settleInherit` — 되돌려도 OTP 없이 살아나지 않음 · `rebut141` ②).
   세우는 곳은 `setBmServerInherit` 하나 · 부르는 곳은 `service.js` 하나(설정 소유자 등급 + OTP 라우트 뒤 — 소스 스윕). **엣지 위임 서버(agent)는 물려받지 않는다**(승인도 거절 · 판정에서도 제외 — 위임 잡에 해석된 비밀번호가 실리지 않게).
 - **계층 지정은 상태 파일(`ssh-access-state.json` `assign`)** — 비밀 없이 계정 id 만 · 모양이 틀리면 손상 · 못 읽으면 물려받는 서버와 공통 계정 비밀번호 접속을 멈춘다(`account-state-unreadable`) · 복원 제외(OTP 없는 복원으로 지정을 되살리지 않는다).
   계정 삭제 · 종류 · OS · 법인 바꾸기는 지정과 어긋나면 거절(`refs.deleteAccountIfUnused` · `accountUseIssue` — 상태 파일을 못 읽으면 모름 = 거절).

@@ -74,7 +74,10 @@ test('② 비밀 원문 칸 판정 — 키 블록 · 공개키 줄 · password= 
   // ReDoS 회귀는 비율로(절대 시간 단언 금지 — CI 러너 편차): 입력이 50배 길어도 시간이 길이에 비례해 늘지 않는다(앞 4KB 만 본다).
   const time = (s) => { const t0 = process.hrtime.bigint(); for (let i = 0; i < 20; i += 1) P.cellLooksSecret(s); return Number(process.hrtime.bigint() - t0); };
   time('p'.repeat(4000));
-  const small = time('p:'.repeat(2000)); const big = time('p:'.repeat(100_000));
+  // 새 코드 점검(141 합칠 때 · 관련 시험 6병렬에서 1회 실패 · 단독 3/3 통과): 한 번씩 잰 값의 비율이라 부하 중 스케줄 · GC 한 번에 10배를 넘었다 —
+  //   교대로 5번 재 각자의 최솟값으로 비교한다(잡음은 시간을 늘리기만 한다 — 최솟값이 실제 비용에 가깝다 · O(n²) 면 최솟값도 50배 근처).
+  let small = Infinity; let big = Infinity;
+  for (let k = 0; k < 5; k += 1) { small = Math.min(small, time('p:'.repeat(2000))); big = Math.min(big, time('p:'.repeat(100_000))); }
   assert.ok(big < small * 10, `긴 입력 비율 ${(big / small).toFixed(1)} — 길이를 먼저 자른다`);
 });
 

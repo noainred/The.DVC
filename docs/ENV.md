@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **759개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **760개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-11-20)
@@ -55,7 +55,7 @@
 | `WAN_TLS_CA_FILE` | `''` | ✅ | util/resilientFetch.js |
 | `WAN_TLS_INSECURE` | `기본 적용('true' 로 끄기)` | ✅ | util/resilientFetch.js |
 
-## 공통 (239)
+## 공통 (240)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -214,6 +214,7 @@
 | `PORTALCHECK_BUDGET_MS` | `90000` |  | portalcheck/tokenProbe.js |
 | `PORTALCHECK_CONCURRENCY` | `4` |  | portalcheck/tokenProbe.js |
 | `PORTALCHECK_TIMEOUT_MS` | `8000` |  | portalcheck/tokenProbe.js |
+| `RACK_DB` |  |  | rack/db.js |
 | `SERVER_HEADERS_TIMEOUT_MS` | `90000` |  | index.js |
 | `SERVER_KEEPALIVE_MS` | `75000` |  | index.js |
 | `SERVER_REQUEST_TIMEOUT_MS` | `600000` |  | index.js |
@@ -948,4 +949,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 759
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 760

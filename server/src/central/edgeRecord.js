@@ -202,7 +202,10 @@ export function trimZoningToFit(o, maxBytes, { by = 'central' } = {}) {
   for (const [k, v] of aliasEntries) {
     let n; try { n = len(k) + len(v) + 2; } catch { continue; }
     if (n > budget) break;
-    keptAliases[k] = v; budget -= n; aliasKept += 1;
+    // 159회차(재현): 대입(`keptAliases[k] = v`)은 이름이 ‘__proto__’ 인 별칭에서 자기 속성을 만들지 않고 **이 맵의 원형을 그 값(배열)으로 바꾼다** —
+    //   별칭이 세지도 않고 사라지고(aliasesOmitted 에 안 잡힘) 맵이 length · 색인을 상속한다. 장비 파서(sanswitch/zoning.js ownPut — 155회차)와 같이 자기 속성으로 둔다.
+    Object.defineProperty(keptAliases, k, { value: v, writable: true, enumerable: true, configurable: true });
+    budget -= n; aliasKept += 1;
   }
   const zonesOmitted = zones.length - keptZones.length + (Number(prevTrim?.zonesOmitted) || 0);
   const aliasesOmitted = aliasEntries.length - aliasKept + (Number(prevTrim?.aliasesOmitted) || 0);

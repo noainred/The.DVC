@@ -114,7 +114,7 @@ function BundleCard({ ov, onReload, say, writable }) {
                 <td style={WRAP}>{x.contents?.pyvmomi?.versions?.join(' · ') || '—'}</td><td style={{ ...WRAP, fontSize: 12 }}>{x.contents?.vddk?.join(' · ') || '—'}</td>
                 <td className="right">{bytesText(x.size)}</td>
                 {/* v2.850: 서버 디렉터리의 번들은 사람의 파일 — 포탈이 지우지 않는다 */}
-                <td>{x.where === 'import' ? <span className="muted" title="서버 디렉터리의 파일은 포탈이 지우지 않습니다">—</span> : <button type="button" className="logout-btn" style={BTN} disabled={busy || !writable || ov.demo} onClick={() => act(() => delJson(`${P}/bundle/${encodeURIComponent(x.version)}`), `번들 ${x.version} 을(를) 지웠습니다.`)}>지우기</button>}</td>
+                <td>{x.where === 'import' ? <span className="muted" title="서버 디렉터리의 파일은 포탈이 지우지 않습니다">—</span> : <button type="button" className="logout-btn" style={BTN} disabled={busy || !writable || ov.demo} onClick={() => act(async () => okOrThrow(await delJson(`${P}/bundle/${encodeURIComponent(x.version)}`), `번들 ${x.version} 을(를) 지우지 못했습니다 — 이미 없거나 지울 수 없는 파일입니다(‘다시 확인’ 으로 목록을 맞추세요).`), `번들 ${x.version} 을(를) 지웠습니다.`)}>지우기</button>}</td>
               </tr>
             ))}
           </tbody>

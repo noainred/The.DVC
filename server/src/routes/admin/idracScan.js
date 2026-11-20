@@ -207,8 +207,10 @@ adminRouter.get('/idrac/:id/temp-history', adminOnly, async (req, res) => {
   const since = Date.now() - days * 86_400_000;
   // 집계 단위(기준) — /tools/esxi-temp/history 와 동일한 표와 자동 규칙.
   const BUCKET = { minute: 60_000, hour: 3_600_000, day: 86_400_000 };
-  const bucket = BUCKET[req.query.bucket] ? req.query.bucket : 'auto';
-  const bucketMs = BUCKET[req.query.bucket]
+  // 158회차(재현 — 153회차 N153-3 과 같은 꼴): 자기 키만 — `BUCKET['constructor']` 는 상속된 함수라 참이었다(bucket 'constructor' · 함수를 SQL 에 묶다 오류 · 빈 계열).
+  const ownBucket = typeof req.query.bucket === 'string' && Object.hasOwn(BUCKET, req.query.bucket) ? BUCKET[req.query.bucket] : undefined;
+  const bucket = ownBucket ? req.query.bucket : 'auto';
+  const bucketMs = ownBucket
     || (days <= 2 ? 3_600_000 : days <= 14 ? 6 * 3_600_000 : days <= 120 ? 86_400_000 : days <= 800 ? 7 * 86_400_000 : 30 * 86_400_000);
   const limit = bucketMs <= 60_000 ? 5000 : bucketMs <= 3_600_000 ? 3000 : 1500;
 

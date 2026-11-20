@@ -93,6 +93,19 @@ export function copyAllText(label, rows = []) {
   return rows.filter((r) => r && r.ran !== false).map((r) => [`### ${r.name} — ${label}${numOrNull(r.exit) != null ? ` · 끝 코드 ${r.exit}` : (r.ran && r.code === 'ok' ? ' · 끝 코드 모름' : '')}${r.code === 'exec-timeout' ? ' · 시한(일부만)' : ''}${r.cut ? ' · 잘림' : ''}`, r.out || '(출력 없음)', ...(r.err ? ['--- 오류 출력', r.err] : [])].join('\n')).join('\n\n');
 }
 
+/**
+ * 받은 출력이 ‘지금 화면이 보는 실행’ 의 것이 아닌가(156회차 — 늦게 온 지난 실행의 응답).
+ *   보낼 때의 실행 열쇠(sentKey) · 응답의 열쇠(resp.runKey — 있으면) · 응답이 온 때 화면의 열쇠(nowKey)가 모두 같아야 쓴다.
+ *   서버는 요청을 받은 때의 실행으로 답한다(다르면 409) — 답한 뒤 새 실행이 시작되고 그 화면 응답이 먼저 오면 이 판정만 남는다.
+ */
+export function outputStale(sentKey, resp, nowKey) {
+  const now = String(nowKey || '');
+  if (String(sentKey || '') !== now) return true;
+  const got = resp && typeof resp.runKey === 'string' ? resp.runKey : '';
+  return !!got && got !== now;
+}
+export const OUTPUT_STALE_TEXT = '그 사이 새 실행이 있어 받은 출력을 버렸습니다(지난 실행의 것) — 새 결과에서 다시 펼치세요.';
+
 /** 펼친 출력의 머리줄 — 데모 · 계정 정보가 없는 행은 접속 방식 · 로그인 방식을 지어내지 않는다(Chromium 확인: 데모 행이 ‘SSH · 비밀번호’ 로 보였다). */
 export function outHead(r) {
   if (!r) return '—';

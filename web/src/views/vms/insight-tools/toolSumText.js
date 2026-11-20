@@ -252,6 +252,20 @@ export function receivedText(at) {
 }
 
 /**
+ * 145회차: 두 도구 이상을 한 패널에 그릴 때 PanelState 의 ‘다시 받기에 실패했습니다 — 아래는 <받은 시각> 값입니다’ 에 실을 오류 · 받은 시각.
+ *   값이 남아 있는데 다시 받기가 실패한 도구만 본다(처음부터 못 온 도구는 패널 안 ‘받지 못했습니다’ 줄이 밝힌다 — 140회차).
+ *   받은 시각은 **그 도구의 것**(여럿이면 가장 이른 것) — 패널 시각(다른 도구가 방금 받은 시각)을 쓰면 옛 값을 새 값처럼 말한다.
+ * @param {Array<{data:any,error:any,at:number|null}|false|null>} qs 권한이 없는 도구는 false 로 넘긴다
+ * @returns {{ error:any, at:number|null }} 해당 없으면 { error:null, at:null }
+ */
+export function staleOf(qs) {
+  const xs = (Array.isArray(qs) ? qs : []).filter((q) => q && q.data && q.error);
+  if (!xs.length) return { error: null, at: null };
+  const ats = xs.map((q) => numOrNull(q.at)).filter((t) => t != null);
+  return { error: xs[0].error, at: ats.length ? Math.min(...ats) : null };
+}
+
+/**
  * 도구 응답에 더할 법인 줄이 하나도 없을 때(view.empty) 패널 본문 대신 쓰는 글 — 수 칸을 ‘—대’ 로 그리지 않는다(dbg3221 2회차).
  *   고른 법인이 응답에 없으면(missing) 그 사실만, 아니면 범위에 값이 없다는 사실만 말한다(이유를 단정하지 않는다). view 가 비지 않았으면 ''.
  */

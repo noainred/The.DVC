@@ -352,7 +352,7 @@ const TABLE = {
   'periodic/readers/facility.js': ['shared', 'v3.32 정기 점검 보고 전력(정보) — store.js 와 같은 vcSkip(unreadVcenterReasons + usageReadable)으로 멈춘 vCenter 추정 전력을 빼고 뺀 대수를 적는다'],
   'vmtrack/service.js': ['own', 'inventoryUnreadReason(v2.743) — 값이 남은 vCenter 는 변화 0 으로 diff, 빈 vCenter 는 건너뜀'],
 };
-const SHARED_RE = /\b(?:unreadVcenterReasons|unreadVcenterIds|notReadVcentersOf)\b/;
+const SHARED_RE = /\b(?:unreadVcenterReasons|unreadVcenterIds|notReadVcentersOf|samplingUnreadReasons)\b/;   // 162회차: samplingUnreadReasons = 공용 판정 + 긴급중단(metrics/sampler.js — /metrics 가 쓴다)
 const SNAP_RE = /\bstore\.get\(\)|\bstore\.snapshot\b|\bgetSnapshot\(|\bsnap(?:shot)?\??\.(?:hosts|datastores|vms|alarms)\b/;
 const FIELD_RE = /\b(?:cpuUsagePct|memUsagePct|cpuUsageMhz|memUsageMB|usagePct|freeGB|capacityGB|usedGB|powerWatts|tempC|gpuUtilPct|overallStatus)\b/;
 const SRC_DIR = fileURLToPath(new URL('../src/', import.meta.url));
