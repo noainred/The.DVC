@@ -98,6 +98,7 @@ export function DiskBadTool() {
           <div className="muted" style={{ fontSize: 12 }}>
             {data.auto?.enabled ? `${data.auto.intervalHours}시간마다 자동 점검(새 로그만)` : '자동 점검 꺼짐 — 점검 탭에서 켜거나 직접 점검합니다'}
             {' · '}못 읽은 서버의 디스크는 아래 수치에 들어 있지 않습니다{fleet.synthesized ? ' · 데모(합성) 결과가 섞여 있습니다' : ''}
+            {Number.isFinite(T.staleServers) && T.staleServers > 0 ? ` · 마지막 점검이 실패해 지난 결과로 집계 중인 서버 ${num(T.staleServers)}대(서버 탭에서 이유를 봅니다)` : ''}
           </div>
         </div>
         {canScan && <button className="login-btn" style={{ flex: 'none', padding: '6px 12px' }} onClick={() => setTab('scan')}>{running ? '점검 진행 보기' : '지금 점검'}</button>}
@@ -164,6 +165,7 @@ function InUseTable({ list, refs, openServer, limit = 0 }) {
 function AlertingCard({ fleet, openServer }) {
   const T = fleet.totals;
   const list = fleet.alerting || [];
+  const [all, setAll] = useState(false);   // 10행만 보이고 펼칠 길이 없었다(반증 R15)
   if (!Number.isFinite(T.alertingDisks)) return null;   // 3.8.2 이전 중앙 응답 — 표시하지 않는다(0 이라고 하지 않는다)
   const unknown = Number.isFinite(T.drivesUnknownServers) && T.drivesUnknownServers > 0 ? ` · 디스크 목록을 읽지 못한 서버 ${num(T.drivesUnknownServers)}대는 빠져 있습니다` : '';
   return (
@@ -173,7 +175,7 @@ function AlertingCard({ fleet, openServer }) {
         iDRAC 가 보고하는 현재 디스크 상태(주의 · 이상)와 고장 예측입니다 — 배드 섹터 기록과는 별개의 근거이고, 이것만으로 ‘배드 섹터가 났다’ 고 하지 않습니다{unknown}.
       </div>
       {list.length === 0 ? <div className="muted" style={{ fontSize: 12.5 }}>지금 iDRAC 가 주의 · 이상으로 알리는 디스크는 없습니다(디스크 목록을 읽은 서버 기준).</div> : (
-        <STable className="data-table" minWidth={860} limit={10} style={{ width: '100%', fontSize: 12.5 }}>
+        <STable className="data-table" minWidth={860} limit={all ? 0 : 10} style={{ width: '100%', fontSize: 12.5 }}>
           <thead><tr><th>국가 · 법인</th><th>서버 · 위치</th><th>모델 · 시리얼</th><th>iDRAC 상태</th><th>배드 섹터 기록</th></tr></thead>
           <tbody>{list.map((a, i) => (
             <tr key={`${a.agent}|${a.serverId}|${a.slotKey || a.serial || i}`}>
@@ -186,6 +188,7 @@ function AlertingCard({ fleet, openServer }) {
           ))}</tbody>
         </STable>
       )}
+      {list.length > 10 && <button className="tab" style={{ flex: 'none', marginTop: 6 }} onClick={() => setAll((x) => !x)}>{all ? '10개만 보기' : `전부 보기(${num(list.length)}개)`}</button>}
     </div>
   );
 }
@@ -197,6 +200,7 @@ function AlertingCard({ fleet, openServer }) {
 function TraceCard({ fleet, openServer }) {
   const T = fleet.totals;
   const cov = pastCoverageText(T);
+  const [all, setAll] = useState(false);   // 10행만 보이고 펼칠 길이 없었다(반증 R15). 훅은 조기 return 위.
   if (!cov) return null;   // 옛 중앙 응답 — 표시하지 않는다(0 이라고 하지 않는다)
   const list = fleet.traces || [];
   return (
@@ -208,7 +212,7 @@ function TraceCard({ fleet, openServer }) {
         <div>{cov.sel}</div>
       </div>
       {list.length === 0 ? <div className="muted" style={{ fontSize: 12.5 }}>값을 읽은 디스크 가운데 로그 기록 없이 흔적만 있는 디스크는 없습니다.</div> : (
-        <STable className="data-table" minWidth={900} limit={10} style={{ width: '100%', fontSize: 12.5 }}>
+        <STable className="data-table" minWidth={900} limit={all ? 0 : 10} style={{ width: '100%', fontSize: 12.5 }}>
           <thead><tr><th>국가 · 법인</th><th>서버 · 위치</th><th>모델 · 시리얼</th><th style={{ textAlign: 'right' }}>재할당</th><th style={{ textAlign: 'right' }}>보류</th><th style={{ textAlign: 'right' }}>복구 불가</th><th>판정</th></tr></thead>
           <tbody>{list.map((d, i) => (
             <tr key={`${d.agent}|${d.serverId}|${d.id || i}`}>
@@ -223,6 +227,7 @@ function TraceCard({ fleet, openServer }) {
           ))}</tbody>
         </STable>
       )}
+      {list.length > 10 && <button className="tab" style={{ flex: 'none', marginTop: 6 }} onClick={() => setAll((x) => !x)}>{all ? '10개만 보기' : `전부 보기(${num(list.length)}개)`}</button>}
     </div>
   );
 }
@@ -280,10 +285,11 @@ function CorpTable({ rows, setCorp, canScan = false, scanCorp = null, busy = '' 
         <tr key={c.id || '_none'}>
           <td>{c.id ? <button className="tab" style={{ flex: 'none', padding: '2px 8px', fontSize: 12 }} onClick={() => setCorp(c.id)}>{c.country ? `${c.country} · ` : ''}{c.name}</button> : c.name}</td>
           <td data-sort={c.read} style={{ fontFamily: 'var(--mono)' }}>{num(c.read)} / {num(c.servers)}</td>
-          <td data-sort={c.disks} style={{ fontFamily: 'var(--mono)' }}>{num(c.disks)}</td>
-          <td data-sort={c.recordSlots} style={{ fontFamily: 'var(--mono)' }}>{num(c.recordSlots)}</td>
+          {/* 읽은 서버가 없는 법인은 0 이 아니라 모름(반증 R11). */}
+          <td data-sort={c.read ? c.disks : undefined} style={{ fontFamily: 'var(--mono)' }}>{c.read ? num(c.disks) : '—'}</td>
+          <td data-sort={c.read ? c.recordSlots : undefined} style={{ fontFamily: 'var(--mono)' }}>{c.read ? num(c.recordSlots) : '—'}</td>
           <td data-sort={c.ratePer1000 ?? undefined}><div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>{bar(((c.ratePer1000 || 0) / max) * 100)}<span style={{ fontFamily: 'var(--mono)' }}>{rateText(c.ratePer1000)}</span></div></td>
-          <td data-sort={c.inUse} style={{ fontFamily: 'var(--mono)' }}><b>{num(c.inUse)}</b></td>
+          <td data-sort={c.read ? c.inUse : undefined} style={{ fontFamily: 'var(--mono)' }}><b>{c.read ? num(c.inUse) : '—'}</b></td>
           {canScan && <td>{c.id ? <button className="tab" style={{ flex: 'none', padding: '2px 8px', fontSize: 12 }} disabled={!!busy} onClick={() => scanCorp(c)}>{busy === c.id ? '보내는 중…' : '점검'}</button> : '—'}</td>}
         </tr>
       ))}</tbody>
@@ -381,7 +387,7 @@ function Servers({ fleet, labels, openServer }) {
   const reasons = Object.entries(fleet.unreadReasons || {});
   return (
     <div className="card" style={{ padding: 12, minWidth: 0 }}>
-      <b style={{ fontSize: 13.5 }}>서버별 <span className="muted" style={{ fontWeight: 400 }}>{fleet.servers.length}대</span></b>
+      <b style={{ fontSize: 13.5 }}>서버별 <span className="muted" style={{ fontWeight: 400 }}>{fleet.servers.length}대{fleet.servers.length > 300 ? ' · 표에는 300대만 보입니다(열을 눌러 정렬하면 정렬한 상위 300대)' : ''}</span></b>
       {reasons.length > 0 && <div className="muted" style={{ fontSize: 12, margin: '4px 0' }}>못 읽은 이유: {reasons.map(([k, n]) => `${k === 'never' ? '아직 점검하지 않음' : (labels.reason[k] || k)} ${n}대`).join(' · ')}</div>}
       <STable className="data-table" minWidth={1020} limit={300} style={{ width: '100%', fontSize: 12.5, marginTop: 6 }}>
         <thead><tr><th>국가 · 법인</th><th>서버</th><th>판정</th><th>기록 디스크</th><th>사용 중</th><th>복구 불가</th><th title="iDRAC 가 보여 주는 로그가 담고 있던 기간 — 로그 전체를 읽은 마지막 점검 기준(시간이 지나도 늘지 않습니다)">iDRAC 로그 길이</th><th>마지막 점검</th></tr></thead>
@@ -390,9 +396,10 @@ function Servers({ fleet, labels, openServer }) {
             <td>{s.country ? `${s.country} · ` : ''}{s.corpName}</td>
             <td><button className="tab" style={{ flex: 'none', padding: '2px 8px', fontSize: 12 }} onClick={() => openServer(s)}>{s.serverName}</button></td>
             <td data-sort={s.status}><span className={`badge ${s.status === 'records' ? 'red' : s.status === 'unread' ? 'gray' : s.status === 'clean' ? 'green' : 'amber'}`}>{s.statusLabel}</span>{s.lastStatusLabel && <div className="muted" style={{ fontSize: 11 }}>{s.lastStatusLabel}</div>}</td>
-            <td data-sort={s.counts.slots} style={{ fontFamily: 'var(--mono)' }}>{num(s.counts.slots)}</td>
-            <td data-sort={s.counts.inUse} style={{ fontFamily: 'var(--mono)' }}><b>{num(s.counts.inUse)}</b></td>
-            <td data-sort={s.counts.unrecoverable} style={{ fontFamily: 'var(--mono)' }}>{num(s.counts.unrecoverable)}</td>
+            {/* 못 읽은 서버의 수치는 0 이 아니라 모름(반증 R11). */}
+            <td data-sort={s.status === 'unread' ? undefined : s.counts.slots} style={{ fontFamily: 'var(--mono)' }}>{s.status === 'unread' ? '—' : num(s.counts.slots)}</td>
+            <td data-sort={s.status === 'unread' ? undefined : s.counts.inUse} style={{ fontFamily: 'var(--mono)' }}><b>{s.status === 'unread' ? '—' : num(s.counts.inUse)}</b></td>
+            <td data-sort={s.status === 'unread' ? undefined : s.counts.unrecoverable} style={{ fontFamily: 'var(--mono)' }}>{s.status === 'unread' ? '—' : num(s.counts.unrecoverable)}</td>
             <td data-sort={Number.isFinite(s.logSpanMs) ? s.logSpanMs : undefined} style={{ whiteSpace: 'nowrap' }}>
               {Number.isFinite(s.logSpanMs) ? <>{spanText(0, s.logSpanMs)}<div className="muted" style={{ fontSize: 11 }}>{Number.isFinite(s.continuousSince) ? `${fmtDate(s.continuousSince)} 부터 끊김 없이 봄` : '끊김 없이 본 구간 모름'}{Number.isFinite(s.loginShare) && s.loginShare >= 0.5 ? ` · 로그인 계열 ${Math.floor(s.loginShare * 100)}%+` : ''}</div></> : <span className="muted">—</span>}
             </td>
@@ -511,7 +518,7 @@ function ScanPanel({ data, jobs, corp, canScan, reload, setJobs }) {
                     <td style={{ fontFamily: 'var(--mono)' }}><b>{num(u.newRecords)}</b></td>
                     {canScan && <td>{(u.state === 'queued' || u.state === 'running')
                       ? <button className="tab" style={{ flex: 'none', padding: '2px 8px', fontSize: 12 }} onClick={() => act(j, 'stop', { agent: u.agent })}>중단</button>
-                      : ['not-started', 'no-response', 'failed', 'stopped', 'done'].includes(u.state)
+                      : ['not-started', 'no-response', 'failed', 'stopped', 'done', 'busy'].includes(u.state)
                         ? <button className="tab" style={{ flex: 'none', padding: '2px 8px', fontSize: 12 }} onClick={() => act(j, 'retry', { agent: u.agent })}>{u.state === 'done' ? '다시 점검' : '다시 보내기'}</button> : '—'}</td>}
                   </tr>
                 );

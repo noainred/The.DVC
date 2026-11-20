@@ -215,13 +215,17 @@ export async function ingestServers(agent, servers, { now = Date.now(), yielder 
           : s.log;
         if (baseline) { baselineServers += 1; isBaseline = true; }
         const prevNewest = finite(prev?.newest_created);
-        row.first_ok_at = prev?.first_ok_at ?? now;
+        // 반증 R3: **앞(오래된 쪽)에서부터** 읽다 도중에 멈춘 점검은 최신 쪽을 못 봤다(방향을 모르거나 · 오래된 것 먼저인데 건수를 몰라 거꾸로 못 읽음).
+        //   그 점검으로 '끊김 없이 본 구간' 을 지금까지로 적거나 '본 가장 새 항목' 을 올리면, 못 본 최신 쪽의 빠짐 기록을 놓친 채 '사용 중 · 추정' 이 되고
+        //   다음 점검에서 원래 있던 기록이 '새 기록' 메일이 된다. 그래서 구간을 모름(null)으로 두고, 첫 점검이면 기준선을 다음으로 미룬다.
+        const forwardPartial = !L.reachedEnd && !L.foundCursor && (L.order === 'unknown' || (L.order === 'asc' && L.total == null));
+        row.first_ok_at = prev?.first_ok_at ?? (forwardPartial ? null : now);
         row.last_ok_at = now;
         row.log_order = L.order || null;
         row.log_total = finite(L.total);
         if (L.reachedEnd) row.log_oldest = finite(L.oldestRead);
         row.covered_from = minOf(prev?.covered_from, L.oldestRead);
-        row.continuous_since = nextContinuousSince(prev?.continuous_since, L);
+        row.continuous_since = forwardPartial ? null : nextContinuousSince(prev?.continuous_since, L);
         row.complete = (L.reachedEnd || L.foundCursor) ? 1 : 0;
         row.read_last = finite(L.read);
         // 왜 끝까지 못 읽었나(budget · max · skip — 장비가 쪽 넘김을 지원하지 않음 · capped — 기록 상한). 화면이 '일부만 읽음' 의 이유로 밝힌다.
@@ -233,7 +237,7 @@ export async function ingestServers(agent, servers, { now = Date.now(), yielder 
             distinct: finite(s.log.distinct), firstLen: finite(s.log.firstLen), hasNext: s.log.hasNext ?? null, path: s.log.path || '', top: s.log.top,
             oldest: finite(s.log.oldestRead), newest: finite(s.log.newestCreated), reachedEnd: s.log.reachedEnd === true, oldestCode: s.log.oldestCode || '' }).slice(0, 4_000);
         }
-        const nc = finite(L.newestCreated);
+        const nc = forwardPartial ? null : finite(L.newestCreated);
         row.newest_created = nc != null && (prevNewest == null || nc > prevNewest) ? nc : prevNewest;
         for (const r of s.records || []) {
           if (!Number.isFinite(r.created)) continue;
