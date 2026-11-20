@@ -150,6 +150,12 @@ test('② 값 검사 — 주입 시도는 모두 거절(접속 전) · 통과한
   // 반증 F8: autofs /net 자리(보는 것만으로 마운트)
   for (const v of ['/net', '/net/10.0.0.5', '/net/host/export']) assert.equal(P.checkRequest('du-top', { path: v }).ok, false, v);
   assert.equal(P.checkRequest('du-top', { path: '/network' }).ok, true);
+  // 점검 1회차 U2: 커널이 /net 으로 푸는 꼴(빈 조각 · . 조각)도 거절 · 끝의 / 하나와 이름 속 점은 그대로
+  for (const v of ['//net', '//net/10.0.0.5', '/./net/h', '/var//log', '/var/./log', '/.']) assert.equal(P.checkRequest('du-top', { path: v }).ok, false, v);
+  for (const v of ['/var/log/', '/etc/.hidden', '/a.b/c..d']) assert.equal(P.checkRequest('du-top', { path: v }).ok, true, v);
+  // 점검 2회차 D1: /proc/self/root · /proc/<pid>/root 로 /net 거절을 비켜 가지 못한다(/proc 통째로)
+  for (const v of ['/proc', '/proc/self/root/net/10.0.0.5', '/proc/thread-self/root/net/h', '/proc/1/root/net/x']) assert.equal(P.checkRequest('du-top', { path: v }).ok, false, v);
+  assert.equal(P.checkRequest('du-top', { path: '/process' }).ok, true);
   // 통과한 값은 명령에 꼭 한 번 · 작은따옴표 · -- 뒤(journalctl 은 -u 값)
   const one = (id, params) => P.planOf(P.presetById(id), P.checkRequest(id, params).params).linux.command;
   assert.match(one('svc-state', { unit: 'chronyd.service' }), / -- 'chronyd\.service'; printf /);
@@ -220,7 +226,8 @@ test('④-2 설정 화면 기능 목록 — 직접 켜야 하는 기능을 서�
   const v = await SA.buildView();
   const f = v.features.find((x) => x.id === 'server-cmd');
   assert.equal(f.explicit, true);
-  assert.equal(v.features.filter((x) => x.explicit).map((x) => x.id).join(), PL.EXPLICIT_FEATURES.join());
+  // 점검 2회차 W2-2: 키로만 · 직접 켠 키만 쓰는 설치 · 준비 기능(KEY_EXPLICIT_FEATURES)도 ‘직접 켜야’ 로 싣는다
+  assert.equal(v.features.filter((x) => x.explicit).map((x) => x.id).sort().join(), [...PL.EXPLICIT_FEATURES, ...PL.KEY_EXPLICIT_FEATURES].sort().join());
 });
 
 test('⑤ 코어로 실행 — 보낸 명령은 계획 그대로 · 끝 코드 · 다듬은 출력 · 계정 판정(직접 켠 계정만 · 접속 0회) · OS 에 없는 프리셋 · 엣지 · 값 오류는 접속 전', async () => {
@@ -379,3 +386,26 @@ test('⑦ 라우트 — 관리자 + 전체 범위만 · 프리셋 · 값 · id �
   assert.match(auditTxt, /server-cmd\.run/); assert.match(auditTxt, /unit=chronyd/); assert.match(auditTxt, /server-cmd\.run\.done/);
   assert.equal(auditTxt.includes('Own-1'), false); assert.equal(auditTxt.includes('ActiveState'), false, '감사에 출력 없음');
 });
+
+test('⑧ 점검 1회차 W3 · W2 — 긴 오류 출력 뒤의 끝 코드 표지도 읽는다 · 실행 못 한 서버는 출력 목록에 없다', async () => {
+  const own = BM.listBmServersRaw().find((s) => s.name === 'own');
+  SSHD.st.passwords.root = 'Own-1';
+  // W3: 경고 3,000자 뒤에 시한 표지(124) — 예전에는 코어가 stderr 를 앞 2,000자로 잘라 표지를 잃고 ‘실행됨’(끝 코드 모름)이었다
+  SSHD.st.rc = null; SSHD.st.rcRaw = `${'w'.repeat(60)}\n`.repeat(50) + '\n#DVC-RC=124\n';
+  await SVC.runMany({ preset: 'df', params: {}, ids: [own.id] }, { by: 'own' });
+  let row = SVC.buildView().last.rows[0];
+  assert.equal(row.code, 'exec-timeout', `긴 오류 출력 뒤 표지 — ${row.code}`); assert.equal(row.partial, true);
+  SSHD.st.rcRaw = `${'w'.repeat(60)}\n`.repeat(50) + '\n#DVC-RC=2\n';
+  await SVC.runMany({ preset: 'df', params: {}, ids: [own.id] }, { by: 'own' });
+  row = SVC.buildView().last.rows[0];
+  assert.equal(row.code, 'ok'); assert.equal(row.exit, 2, '끝 코드를 잃지 않는다');
+  assert.ok(SVC.outputs(own.id).rows[0].err.split('\n').length <= 40, '보관하는 오류 출력은 여전히 줄 상한');
+  SSHD.st.rcRaw = null;
+  // W2: 접속 실패 서버와 함께 돌리면 출력 목록(전체 복사 · 모두 펼치기)에는 실행된 서버만
+  const dead = srv({ name: 'dead', vcenterId: 'vcA', os: 'linux', port: 1, password: 'x' });
+  await SVC.runMany({ preset: 'uptime', params: {}, ids: [own.id, dead.id] }, { by: 'own' });
+  const rows = SVC.buildView().last.rows;
+  assert.equal(rows.find((x) => x.id === dead.id)?.ran, false, '죽은 서버는 실행 못 함');
+  assert.deepEqual(SVC.outputs().rows.map((x) => x.id), [own.id], '출력 목록에 실행 못 한 서버를 섞지 않는다');
+  assert.equal(SVC.outputs(dead.id).status, 404);
+}, { timeout: 60_000 });

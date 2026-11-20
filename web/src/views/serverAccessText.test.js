@@ -77,6 +77,13 @@ describe('서버 접속 — 계층 지정 화면 도우미(v3.24)', () => {
   });
 });
 
+describe('3회차 F2 — 정지 사유', () => {
+  it('비밀번호를 보낸 뒤 판정 시한이 연달아 건 정지는 ‘거부’ 로 말하지 않는다', () => {
+    expect(accountStopText({ current: true, cause: 'timeout' }).label).toBe('로그인 판정 시한 연달음 — 정지 중');
+    expect(accountStopText({ current: true }).label).toBe('로그인 거부 — 정지 중');
+  });
+});
+
 describe('서버 접속 — 계정 계층 · 공통 계정 화면 규약(소스)', async () => {
   const fs = await import('node:fs');
   const path = await import('node:path');
@@ -92,9 +99,35 @@ describe('서버 접속 — 계정 계층 · 공통 계정 화면 규약(소스)
   });
   it('비밀번호는 보내기만 — 응답에서 비밀번호를 그리지 않는다 · OTP 는 동작마다 비운다 · 날 select 금지', () => {
     expect(src).not.toMatch(/r\.account\.password|\ba\.password\b|resp\.password|stop\.password/);
-    expect(src).toMatch(/finally \{ setBusy\(''\); setOtp\(''\); \}/);
+    // 2회차 W2-4: OTP 는 동작마다 비운다 — need-verify(OTP 앞 판정 · OTP 를 쓰지 않음)만 남긴다
+    expect((src.match(/finally \{ setBusy\(''\); if \(!keepOtp\) setOtp\(''\); \}/g) || []).length).toBe(2);
+    expect((src.match(/keepOtp = true;/g) || []).length).toBe(2);
+    expect(src).not.toMatch(/keepOtp = true[^\n]*\n[^\n]*\n[^\n]*code !== 'need-verify'/);
     expect(src).not.toMatch(/<select\b/);
     expect(src).not.toMatch(/text-transform/);
+  });
+  it('점검 1회차 W1 · S2 — 공통 계정 기능 0개는 저장 단추를 막는다(키 폼과 같이) · 지우기에도 확인할 서버를 고른다', () => {
+    expect(src).toMatch(/!featuresChosen\(form\.features\) \|\| !!busy\} onClick=\{save\}/);
+    expect(src).toMatch(/na\.state === 'set' && verifyFor === 'clear' && verifyCands && verifyCands\.length > 0/);
+    // 2회차 W2-1: 확인 대상을 화면이 지어내지 않는다 — 지정 폼은 서버 후보만 · 승인 막대는 고른 서버만
+    expect(src).toMatch(/const verifyChoices = verifyFor === 'assign' && verifyCands \? verifyCands : \[\];/);
+    expect(src).toMatch(/const approveChoices = verifyFor === 'approve' && verifyCands \? verifyCands : pickedList\.map/);
+    expect(src).not.toMatch(/inheritApproved && !s\.ownCred\)\.map\(\(s\) => \(\{ id: s\.id, name: s\.name \}\)\)/);
+    // 3회차 R3-W2 · W3: 확인 서버 · 후보는 받은 흐름(지정 · 지우기 · 승인) 하나에만 — 취소 · 성공 · 노드 바꾸기에 지운다
+    expect(src).toMatch(/const vidFor = \(flow\) => \(verifyFor === flow \? verifyId : ''\);/);
+    expect(src).toMatch(/verifyServerId: vidFor\(clear \? 'clear' : 'assign'\)/);
+    expect(src).toMatch(/verifyServerId: vidFor\('approve'\)/);
+    expect(src).not.toMatch(/verifyServerId: verifyId/);
+    expect((src.match(/clearVerify\(\)/g) || []).length).toBeGreaterThanOrEqual(5);
+    // 3회차 R3-W5: 공통 계정 폼의 확인 목록도 서버 후보만
+    expect(src).not.toMatch(/form\.cands \|\| usersOfForm/);
+    // 4회차 R4-W3: 승인 막대에서 고르면 다른 흐름의 후보를 비운다 · R4-W4 정지 칩에 설명(title)
+    expect(src).toMatch(/if \(verifyFor !== 'approve'\) setVerifyCands\(null\);/);
+    expect(src).toMatch(/<Chip tone=\{curStop\.tone\} title=\{curStop\.title\}>/);
+    expect(src).toMatch(/<Chip tone=\{stp\.tone\} title=\{stp\.title\}>/);
+    // 4회차 R4-W2: 변경 기록의 계정 정지 · 풀기 사건은 서버 사유(detail)를 함께
+    const settings = fs.readFileSync(path.join(HERE, 'SshAccessSettings.jsx'), 'utf8');
+    expect(settings).toMatch(/e\.kind === 'account-stopped' \|\| e\.kind === 'account-resumed'\) && e\.detail/);
   });
   it('공용 조각을 쓴다(두 벌 금지) — must · Chip · Otp · FeaturePicker 는 sshAccessParts.jsx', () => {
     expect(src).toMatch(/from '\.\/sshAccessParts\.jsx'/);

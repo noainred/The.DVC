@@ -16,7 +16,10 @@ export const codeTone = (code) => (code === 'ok' ? 'ok' : ['exec-timeout', 'exec
 export const CRED_TEXT = Object.freeze({
   'account-feature': '이 계정은 ‘서버 명령 실행’ 에 쓰지 않음 — 설정 › 보안 › 서버 접속에서 계정의 쓸 수 있는 기능에 켭니다',
   'key-feature': '이 키는 ‘서버 명령 실행’ 에 쓰지 않음 — 설정 › 보안 › 서버 접속에서 키의 쓸 수 있는 기능에 켭니다',
-  'account-stopped': '계정 정지(앞선 로그인 거부)', 'account-corp-stopped': '법인 사용 중지', 'winrm-needs-password': 'WinRM 은 비밀번호 계정만',
+  'account-stopped': '계정 정지(앞선 로그인 거부 · 판정 시한)', 'account-corp-stopped': '법인 사용 중지', 'winrm-needs-password': 'WinRM 은 비밀번호 계정만',
+  // 점검 2회차 — 계정 탐침 문 · 서버 단독 비밀번호 정지(비밀번호를 보내지 않았다)
+  'account-probe-unreached': '같은 계정 서버가 연달아 접속 안 됨 — 이번엔 보내지 않음', 'account-login-unknown': '같은 계정 로그인 판정 모름 — 이번엔 보내지 않음',
+  'server-auth-stopped': '이 서버 비밀번호 정지 — 사유는 칸에 마우스',
 });
 
 /** 서버의 OS 로 프리셋을 돌릴 수 있나(미지정 = Linux 로 붙는다 — 코어와 같은 규칙). */
@@ -61,7 +64,9 @@ export function resultText(r) {
   if (!r) return '—';
   const base = CODE_TEXT[r.code] || r.code || '—';
   const ex = numOrNull(r.exit);
-  return ex == null ? base : `${base} · 끝 코드 ${ex}`;
+  // 점검 1회차 U1: 실행은 됐는데 끝 코드를 못 읽었으면(표지 수가 어긋남 등) ‘모름’ 이라고 밝힌다 — ‘실행됨’ 만 보이면 성공으로 읽힌다.
+  if (ex == null) return r.ran && r.code === 'ok' ? `${base} · 끝 코드 모름` : base;
+  return `${base} · 끝 코드 ${ex}`;
 }
 
 /** 걸린 시간(초 한 자리) — 값이 없으면 ‘—’. */
@@ -85,7 +90,7 @@ export function resultCounts(rows = []) {
 
 /** 전체 복사 글 — 서버마다 머리줄 + 출력(값이 없으면 ‘(출력 없음)’). */
 export function copyAllText(label, rows = []) {
-  return rows.map((r) => [`### ${r.name} — ${label}${numOrNull(r.exit) != null ? ` · 끝 코드 ${r.exit}` : ''}${r.cut ? ' · 잘림' : ''}`, r.out || '(출력 없음)', ...(r.err ? ['--- 오류 출력', r.err] : [])].join('\n')).join('\n\n');
+  return rows.filter((r) => r && r.ran !== false).map((r) => [`### ${r.name} — ${label}${numOrNull(r.exit) != null ? ` · 끝 코드 ${r.exit}` : (r.ran && r.code === 'ok' ? ' · 끝 코드 모름' : '')}${r.code === 'exec-timeout' ? ' · 시한(일부만)' : ''}${r.cut ? ' · 잘림' : ''}`, r.out || '(출력 없음)', ...(r.err ? ['--- 오류 출력', r.err] : [])].join('\n')).join('\n\n');
 }
 
 /** 펼친 출력의 머리줄 — 데모 · 계정 정보가 없는 행은 접속 방식 · 로그인 방식을 지어내지 않는다(Chromium 확인: 데모 행이 ‘SSH · 비밀번호’ 로 보였다). */
@@ -94,8 +99,9 @@ export function outHead(r) {
   const parts = [];
   if (r.demo) parts.push('데모 서버(접속하지 않음)');
   else {
-    parts.push(r.via === 'winrm' ? 'WinRM' : 'SSH');
-    if (r.auth?.kind) parts.push(r.auth.kind === 'key' ? '키' : '비밀번호');
+    // 점검 1회차 W2: 값이 있을 때만 — 접속 방식이 비면 ‘SSH’ 로, 모르는 인증 종류를 ‘비밀번호’ 로 지어내지 않는다.
+    if (r.via === 'winrm' || r.via === 'ssh') parts.push(r.via === 'winrm' ? 'WinRM' : 'SSH');
+    if (r.auth?.kind === 'key' || r.auth?.kind === 'password') parts.push(r.auth.kind === 'key' ? '키' : '비밀번호');
     if (r.auth?.account) parts.push(r.auth.account);
   }
   parts.push(osText(r.os), resultText(r));

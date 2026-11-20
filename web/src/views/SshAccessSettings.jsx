@@ -549,7 +549,7 @@ function SecurityTab({ v, corpName, reload, say }) {
   const stopUnknown = !!stopSel?.unreadable;
   const stopped = stopUnknown ? null : stopSel;
   const changeRows = [
-    ...(chg.resp?.events || []).map((e) => ({ at: Number(e.at) || 0, what: EVENT_TEXT[e.kind] || e.kind, code: false, target: `${e.corp ? `${corpName(e.corp)} · ` : ''}${e.target || '—'}`, who: e.by || '포탈' })),
+    ...(chg.resp?.events || []).map((e) => ({ at: Number(e.at) || 0, what: `${EVENT_TEXT[e.kind] || e.kind}${(e.kind === 'account-stopped' || e.kind === 'account-resumed') && e.detail ? ` — ${String(e.detail).slice(0, 160)}` : ''}`, code: false,   /* 4회차 R4-W2: 정지 사유(거부 · 판정 시한)는 서버 기록 그대로 */ target: `${e.corp ? `${corpName(e.corp)} · ` : ''}${e.target || '—'}`, who: e.by || '포탈' })),
     ...(chg.resp?.items || []).map((e) => ({ at: auditTime(e.at), what: e.action, code: true, target: e.target || '—', who: e.user })),
   ].sort((a, b) => b.at - a.at);
   return (

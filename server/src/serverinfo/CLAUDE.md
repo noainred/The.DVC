@@ -21,3 +21,19 @@
   읽기 단계를 가른다(손상 = 보존 후 빈 값 · 읽기 오류 = 원본 그대로 · 쓰지 않음 · 30초 뒤 다시 읽고 그동안의 결과를 얹는다 — F11).
 - 허용 기능 id 는 `server-info`(KEY_FEATURES · FEATURE_CATALOG · FEATURE_LABEL 셋을 같이 — 시험이 대조). 기능 목록이 있는 키 · 계정은 이 기능을 켜야 쓴다.
 - 라우트는 관리자 + 전체 범위(베어메탈 스토리지와 같은 등록부 — 데모 계정은 관리자 게이트에서 막힌다) · 감사에 비밀 · 출력 없음 · 한 번에 50대 · 동시 4대.
+
+## 점검 1회차(2026-11-20) — 되돌리지 말 것(회귀 `serverInfo325.test.js` ⑧ · `serverAccessHunt1.test.js` · 웹 `serverInfoText.test.js`)
+- 디스크: 같은 WWN(없으면 시리얼)은 한 디스크로 묶고 경로 수(`paths`)를 단다(멀티패스가 디스크 수를 부풀렸다) · zram · ram 은 디스크가 아니다 · 빈 WWN · 시리얼은 묶지 않는다.
+- Windows JSON 의 `{ value:[…], Count:N }`(PS 5.1 확장 형식 배열)은 푼다(그 꼴 — 다른 칸이 없을 때만 · 실제 서버 미확인 방어).
+- 코어: 계획의 `stderrMax`(기본 2,000) · 로그인 뒤 실패는 `loggedIn`(계정 탐침이 성공으로 본다) · 효력 계정 없음은 `not-configured`(credCode `no-account`) · WinRM 거부 안내는 권한 가능성을 밝힌다.
+- `sshExec.exec` 는 흐름마다 StringDecoder(덩어리 경계의 한글이 깨졌다) · partial 상한에 걸린 마지막 덩어리도 상한까지 싣는다.
+- 화면: 늦게 온 이전 응답 버림 · 한 번 본 뒤 실패는 화면을 지우지 않고 알림 · 진행 중 폴링은 실패 뒤에도 이어짐(서버 명령 실행 화면과 같은 틀).
+
+## 점검 2회차(2026-11-20) — 되돌리지 말 것(회귀 `serverInfo325.test.js` ⑤ ⑧ · `serverAccessHunt2.test.js`)
+- 디스크 묶기: NVMe 는 시리얼로 묶지 않는다(이름공간끼리 컨트롤러 시리얼이 같다) · 시리얼 열쇠에는 크기도.
+- 코어: **서버 단독 비밀번호는 스토리지 수집 인증 정지(bmstor-auth-stops) 하나를 본다**(정지면 보내지 않음 `server-auth-stopped` · 거부 · 성공도 거기에 적는다 — 사람 실행마다 틀린 비밀번호가 나가던 것 · 재현) ·
+  비밀번호를 보낸 뒤 판정을 받지 못한 실패는 `passwordSent`(탐침 문 · 일괄 문이 남은 서버에 보내지 않는다) · 걸린 시간은 접속을 시작한 때부터(탐침 대기 제외).
+- 3회차: 서버 단독 비밀번호 정지는 로그인만 돼도(df 실패 · Windows) 스토리지 ‘지금 수집’ 이 푼다(`noteAuth` logged — 코어와 같은 기준) · 정지 문구는 `authStopText`(못 읽음 정지를 ‘거부’ 로 지어내지 않는다) ·
+  탐침 문이 보내지 않은 bm-usage 결과는 결측 사유를 사실대로(`missReason` — 계정 정지 auth-stopped · 망 끊김 건너뜀 unreachable · 판정 모름 보류 timeout · 키 설정 cred-config 아님).
+- 4회차: 탐침 문이 보내지 않은 결과의 결측 사유는 전용 `gate-held`(HEALTH_REASON_CODES · FOCUS_MISS · 중앙 bmPerfOpsPull MISS · 웹 문구 표 넷을 같이) — ‘iDRAC 미도달’ · ‘SSH 시한 초과’ 로 단정하지 않는다 ·
+  스토리지 중앙 수집은 장비 시한 안에서(`collect.collectDeadlineMs` + signal — 탐침 대기는 시한 밖).
