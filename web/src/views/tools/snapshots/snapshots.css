@@ -169,10 +169,11 @@
 .snp-hwarn { border: 1px solid #78350f; background: #2a1f0d; color: #fde68a; border-radius: 10px; padding: 9px 12px; font-size: 12.5px; line-height: 1.55; }
 .snp-hask, .snp-hext { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; border: 1px solid var(--accent); background: rgba(59, 130, 246, .12); border-radius: 10px; padding: 8px 12px; font-size: 12.5px; min-width: 0; }
 .snp-hext .snp-hold { margin-top: 0; flex: 1 1 100%; position: static; max-width: none; }
-.snp-hvm { display: block; font-weight: 700; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.snp-holds .snp-tbl .snp-sub { max-width: 220px; }
-/* Chromium 1440 판독: 사유 칸이 다른 칸(줄바꿈 금지)에 밀려 약 70px 로 좁아져 120자 사유 한 줄이 340px 높이가 됐다 — 사유 칸에 바닥 폭을 준다 */
-.snp-hrs { min-width: 220px; max-width: 360px; white-space: normal; overflow-wrap: anywhere; color: #c3cfe2; line-height: 1.5; }
+.snp-hvm { display: block; font-weight: 700; max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.snp-holds .snp-tbl .snp-sub { max-width: 190px; }
+/* Chromium 1440 판독: 사유 칸이 다른 칸(줄바꿈 금지)에 밀려 약 70px 로 좁아져 120자 사유 한 줄이 340px 높이가 됐다 — 사유 칸에 바닥 폭을 준다.
+   재측정: 그러자 표가 상자보다 50px 넓어 동작(연장 · 풀기) 칸이 가려졌다 — VM 칸 190px · 사유 바닥 200px · 남은 기간은 일수만(표) 으로 맞춘다 */
+.snp-hrs { min-width: 200px; max-width: 360px; white-space: normal; overflow-wrap: anywhere; color: #c3cfe2; line-height: 1.5; }
 .snp-hleft { display: grid; grid-template-columns: minmax(50px, 80px) auto; gap: 8px; align-items: center; min-width: 130px; }
 .snp-hleft b { font-family: var(--mono); font-weight: 700; font-size: 12px; white-space: nowrap; color: #c3cfe2; }
 .snp-hleft b.soon { color: #fbbf24; }

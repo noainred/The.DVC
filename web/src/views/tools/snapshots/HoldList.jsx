@@ -21,14 +21,14 @@ export function releaseHoldKeys(keys, post = postJson) {
     .then((r) => { requireChanged(r); return `${numOrNull(r.released) ?? keys.length}건의 보류를 풀었습니다 — 다음 판정부터 사내 기준으로 다시 봅니다.`; });
 }
 
-function LeftBar({ h, now, daysMax }) {
+function LeftBar({ h, now, daysMax, short = false }) {   // short = 표(끝나는 날 칸이 이미 노란색 — 칸 폭을 아낀다 · Chromium 1440 판독)
   const left = holdLeftDays(h, now);
   const soon = left != null && left <= 7;
   const pct = left == null ? 0 : Math.max(2, Math.min(100, Math.round((left / (daysMax || 90)) * 100)));
   return (
     <span className="snp-hleft" title={`남은 기간 — 막대 끝은 ${daysMax || 90}일`}>
       <span className="snp-track"><i style={{ width: `${pct}%`, background: soon ? '#fbbf24' : '#60a5fa' }} /></span>
-      <b className={soon ? 'soon' : ''}>{left == null ? '—' : `${left}일${soon ? ' · 곧 끝남' : ''}`}</b>
+      <b className={soon ? 'soon' : ''}>{left == null ? '—' : `${left}일${soon && !short ? ' · 곧 끝남' : ''}`}</b>
     </span>
   );
 }
@@ -161,7 +161,7 @@ export default function HoldList({ rows, isAdmin, unreadable = false, daysMax = 
                     {showBy && <td className="snp-mono">{h.by || '—'}</td>}
                     <td className="snp-mono" data-sort={numOrNull(h.at) ?? ''}>{dateText(h.at)}</td>
                     <td className="snp-mono" data-sort={numOrNull(h.until) ?? ''} style={{ color: left != null && left <= 7 ? '#fbbf24' : undefined }}>{dateText(h.until)}</td>
-                    <td data-sort={left ?? ''}><LeftBar h={h} now={now} daysMax={daysMax} /></td>
+                    <td data-sort={left ?? ''}><LeftBar h={h} now={now} daysMax={daysMax} short /></td>
                     {canWrite && <td className="r">{actions(h)}</td>}
                   </tr>
               );
