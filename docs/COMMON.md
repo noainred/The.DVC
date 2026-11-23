@@ -5,7 +5,7 @@
 
 - 생성: `node scripts/common-doc.mjs` · 최신 여부: `node scripts/common-doc.mjs --check`
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다. 설명을 고치려면 그 모듈의 **머리 주석 첫 단락**을 고친다.
-- 훑은 소스 4605개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
+- 훑은 소스 4610개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
 
 ## 읽는 법 · 한계
 
@@ -39,6 +39,7 @@
 | `jsonFileRead.js` | 설정 · 저장소 JSON 파일 **읽기 판정**(순수 단계 — 상태 등록부 없음). `util/jsonFileLoad.js` 에서 떼어 냈다. | `_setJsonFileLoadClockForTest` `nowMs` `inRetryWindow` `readJsonFile` `makeJsonFileReader` `READ_RETRY_MS` | 111 | 50 | 31 |
 | `capStr.js` | 외부 문자열을 **상주 구조**(Map 키·보관 레코드)에 넣을 때의 길이 상한(v2.606 감사 TIM2606-02). | `flatStr` `capStr` `capTrim` | 109 | 24 | 2 |
 | `resilientFetch.js` | 크로스-WAN(중앙↔수집서버/에이전트) 호출용 견고한 fetch. | `loadWanCa` `wanTlsConnectOptions` `wanTlsStatus` `dispatcherFor` `abortableSleep` `headersWithoutSecrets` 외 11 | 78 | 24 | 15 |
+| `coercionTrap.js` | 요청 값을 글자·수로 바꿀 때 던지지 않게 하는 공용 규칙(v2.603 감사 CEN2603-05). | `stripCoercionTraps` `nonTextField` `rejectNonText` `textFields` `listOrText` `strOf` | 77 | 8 | 2 |
 | `registryCore.js` | 장비 등록부(storage·sanswitch·pdu·cvp·bmstor)의 **공용 판정**(v2.613 PERSIST2613-04 · DEPS2613-04). | `corruptOnlyReason` `makeLoadError` `registerRegistryStatus` `listRegistryLoadErrors` `registryStatusCount` `autoWriteRefusal` 외 8 | 76 | 31 | 10 |
 | `csv.js` | RFC 4180 CSV 토크나이저 — 따옴표("...")로 감싼 필드 안의 쉼표·줄바꿈·이스케이프된 따옴표("")를 온전히 처리한다. 순진한 line.split(',')은 비밀번호에 쉼표(p@ss,w0rd)나 줄바꿈이 있으면 필드를 잘라 잘못된 자격증명을 저장했다(특수… | `parseCsvRows` `guardCell` `unguardCell` `delimiterHint` `csvCell` `csvLine` 외 1 | 65 | 21 | 22 |
 | `pool.js` | 동시성 제한 실행 풀 — **단일 소스**(v2.575 IMP-08). | `poolSettled` `poolRun` `default` | 65 | 35 | 3 |
@@ -55,7 +56,6 @@
 | `adaptiveTimer.js` | 주기를 스스로 다시 잡는 타이머(v2.409 에서 storage/intervals.js 로 도입, v2.410 에서 공용 유틸로 분리 — SAN 스위치 폴러도 같은 규칙을 쓴다). | `startAdaptiveTimer` | 32 | 17 | 6 |
 | `pushAll.js` | 큰 배열 붙이기(v2.603 감사 CEN2603-03 후속). | `pushAll` | 31 | 16 | 1 |
 | `exitFlush.js` | 종료 시 flush 레지스트리(v2.582 ARCH-4) — 하나다. | `registerExitFlush` `runExitFlush` `exitFlushNames` `_resetExitFlushForTest` | 30 | 16 | 12 |
-| `coercionTrap.js` | 요청 값을 글자·수로 바꿀 때 던지지 않게 하는 공용 규칙(v2.603 감사 CEN2603-05). | `stripCoercionTraps` `strOf` | 29 | 8 | 1 |
 | `secretCarry.js` | "접속 대상이 바뀌면 저장 비밀을 승계하지 않는다" — 공용 판정(v2.500). | `accessMoved` `dropCarriedSecrets` `secretProvided` | 28 | 20 | 4 |
 | `ssrfLookup.js` | **DNS 리바인딩(TOCTOU) 차단용 공용 lookup 훅**(v2.506). | `filterAddresses` `addressBlockReason` `ssrfLookupError` `makeSsrfLookup` `pinnedLookup` `ssrfLookup` 외 1 | 25 | 18 | 1 |
 | `jsonObject.js` | 설정 · 저장소 파일 읽기의 '객체 JSON' 판정(v3.17.2 — 2차 공통 기능 점검 1회차). | `parseJsonObject` `default` | 23 | 18 | 1 |
@@ -88,7 +88,7 @@
 | `ping.js` | ICMP ping 유틸 — OS의 ping CLI를 호출해 도달성/RTT를 반환한다(raw 소켓 불필요). Linux/Windows 모두 지원. 모든 실패는 격리되어 { alive:false }로 떨어진다. | `pingProbeMode` `pingProbeStats` `parsePingOutput` `pingOne` `tcpConnect` `tcpProbeMany` 외 1 | 7 | 5 | 3 |
 | `readPrefix.js` | 응답 본문을 **앞부분만** 읽는다(v2.603 감사 SEC2603-03). | `readBodyPrefix` | 7 | 7 | 0 |
 | `scanJournal.js` | 실행 중 스캔 기록 + 재시작 뒤 자동 재개(v2.737). | `resumeDelayMs` `scanStarted` `scanProgress` `scanFinished` `scanQueued` `scanQueuedMany` 외 21 | 7 | 7 | 11 |
-| `activityLog.js` | 수집 '작업 로그' 링버퍼 **공용 팩토리**(v2.516). | `createActivityLog` `ACTIVITY_WRITE_GAP_MS` | 6 | 5 | 7 |
+| `activityLog.js` | 수집 '작업 로그' 링버퍼 **공용 팩토리**(v2.516). | `createActivityLog` `ACTIVITY_WRITE_GAP_MS` | 6 | 5 | 8 |
 | `central404.js` | 엣지 설정 pull 의 404 판정(v2.600 감사 EDGE2600-06 · v2.613 DEPS2613-01 에 agent/ → util/ 로 이동, 옛 경로는 재수출). | `classifyCentral404` `classifyCentral404Body` | 6 | 2 | 1 |
 | `collectRequestQueue.js` | 엣지 위임 '지금 수집' 요청 큐의 공용 코어(v2.590 P16 · v2.591 재설계). | `createCollectRequestQueue` `SEEN_MAX` | 6 | 5 | 7 |
 | `smtp.js` | 의존성 없는 최소 SMTP 클라이언트 (v2.454). | `headerSafeText` `normalizeAddresses` `encodeHeaderWord` `formatDisplayName` `buildMime` `dotStuff` 외 9 | 6 | 5 | 8 |
@@ -122,7 +122,7 @@
 | `compress.js` | 경량 gzip 응답 압축 + ETag/304 미들웨어 — 외부 의존성 없이 Node 내장 zlib/crypto만 사용 (에어갭 배포 호환). res.json()을 감싸 큰 JSON 응답만 비동기 gzip한다(동기 gzipSync로 이벤트 루프를 막지 않음). res.s… | `compression` | 1 | 1 | 2 |
 | `loopLag.js` | 이벤트 루프 지연(lag) 모니터 — 대용량 동기 작업(수집 SOAP 파싱·집계·bulk write)이 메인 루프를 얼마나 오래 막는지 계측한다. docs/ARCH-HEAVY-JOB-ISOLATION.md §10-0 '계측 먼저'의 구현 — 실제 병목(수집 재구성 vs… | `startLoopLagMonitor` | 1 | 1 | 2 |
 | `parseWorker.js` | worker_threads 워커 — RetrieveProperties 응답 XML의 정규식 파싱(CPU 바운드)을 메인 이벤트 루프 밖에서 수행한다. 28개 vCenter를 매 주기 수집할 때 수 MB XML을 메인 스레드에서 파싱하면 그동안 HTTP 응답/다른 vCe… | (없음) | 1 | 1 | 0 |
-| `queryNormalize.js` | 쿼리스트링 정규화 — **`req.query` 의 모든 값은 문자열이다**(v2.575 BUG-22). | `normalizeQuery` `queryNormalizer` `default` | 1 | 1 | 10 |
+| `queryNormalize.js` | 쿼리스트링 정규화 — **`req.query` 의 모든 값은 문자열이다**(v2.575 BUG-22). | `normalizeQuery` `queryNormalizer` `default` | 1 | 1 | 12 |
 | `releaseFile.js` | RedHat 계열의 /etc/redhat-release 처럼, CONFIG_DIR에 현재 포탈 버전을 한 줄로 명시하는 릴리스 파일(CONFIG_DIR/vmware-portal-release)을 기록한다. | `writeReleaseFile` `RELEASE_FILE` | 1 | 1 | 1 |
 | `soapParsePool.js` | SOAP 파싱 워커 풀 — RetrieveProperties 응답의 CPU 바운드 정규식 파싱을 worker_threads로 오프로딩해 메인 이벤트 루프 블로킹을 없앤다(28+ vCenter·고RTT 환경에서 매 주기 파싱이 메인 스레드를 점유하면 HTTP 응답/다른… | `_setWorkerUrlForTest` `parseObjectContentAsync` `shutdownParsePool` `_poolInfo` `SOAP_PARSE_WORKERS_MAX` `RESPAWN_MAX` | 1 | 1 | 4 |
 | `staticGzip.js` | 빌드 자산(해시 이름·불변)의 gzip 전송(v2.596, 감사 PERFWEB-02 — 실측). | `acceptsGzip` `createStaticGzip` `STATIC_GZIP_MAX_BYTES` | 1 | 1 | 3 |
@@ -231,18 +231,18 @@
 | `sessionActivity.js` | 서버측 세션 정리(2026-10-09 검토 S-05) — 로그아웃을 서버에 알리고, 서버측 유휴 만료의 기준인 '사용자 활동' 을 보낸다. | `createActivityPinger` `sendActivity` `serverLogout` `ACTIVITY_MIN_INTERVAL_MS` `ACTIVITY_EVENTS` | 1 | 1 | 1 |
 | `usageTracker.js` | 기능 사용 추적(화면 쪽, v2.913 · 설계 docs/design/feature-usage §4.2·§4.6). | `usageKeyFromHash` `createUsageTracker` `sendUsage` `POLL_MS` `STABLE_MS` `BEAT_MS` 외 2 | 1 | 1 | 3 |
 
-## 공용 위치 밖에서 널리 쓰이는 모듈 (101)
+## 공용 위치 밖에서 널리 쓰이는 모듈 (102)
 
 공용 위치(위 5곳) 밖에 있지만 사실상 공통 기능인 모듈이다. 새로 만들기 전에 함께 본다.
 
-### 서버 (88)
+### 서버 (89)
 
 **자기 영역 말고 5개 이상 영역**이 import 하는 모듈. 다른 영역 수가 많은 순.
 
 | 모듈 | 하는 일 | 사용처 | 다른 영역 | 테스트 |
 |---|---|---|---|---|
 | `server/src/config.js` | (머리 주석 없음) | 519 | 90 | 186 |
-| `server/src/store.js` | (머리 주석 없음) | 216 | 45 | 370 |
+| `server/src/store.js` | (머리 주석 없음) | 216 | 45 | 372 |
 | `server/src/collector/registry.js` | Collector registry — the list of remote collector agents (one per datacenter) the central portal pulls power from. Stored in CONFIG_DIR/collectors.jso… | 84 | 33 | 57 |
 | `server/src/security/secretVault.js` | 설정 파일 자격증명(비밀번호·SSH 키·토큰)의 저장 방식(평문/암호화) 중앙 모듈(v2.296). | 41 | 29 | 43 |
 | `server/src/mock/demo/flags.js` | 데모(DATA_SOURCE=mock) 모드 공용 판정(v2.708). | 86 | 26 | 3 |
@@ -260,7 +260,8 @@
 | `server/src/audit.js` | Audit log — records security/operational actions (who did what, when) so the portal's write operations (VM 생성, 원격접속, 설정 변경 등)이 추적된다. Appended to CONFI… | 140 | 11 | 47 |
 | `server/src/metrics/unreadVcenters.js` | '지금 값' 으로 쓰지 않는 vCenter 와 그 사유(순수 leaf — import 0). | 20 | 11 | 8 |
 | `server/src/security/tlsTrust.js` | 장비 TLS 상대 인증(2026-10-09 검토 S-02) — 자격증명을 보내는 HTTPS 연결이 **정말 그 장비인지** 확인한다. | 15 | 11 | 7 |
-| `server/src/auth/auth.js` | (머리 주석 없음) | 150 | 10 | 70 |
+| `server/src/security/emergencyStop.js` | 긴급중단(Emergency Stop) — 2인 승인(관리자 2명 OTP)으로만 켜고/끄는 전역 수집 정지 스위치. | 13 | 11 | 12 |
+| `server/src/auth/auth.js` | (머리 주석 없음) | 150 | 10 | 71 |
 | `server/src/storage/registry.js` | 스토리지 장비 등록부(v2.302). | 29 | 10 | 45 |
 | `server/src/runtime-settings.js` | Runtime-adjustable settings that can be changed from the portal UI (and persisted), overriding the env defaults. Currently: the data source (mock \| li… | 19 | 10 | 30 |
 | `server/src/mock/generator.js` | Deterministic-ish mock data generator that simulates a large, globally distributed VMware estate. It produces the same normalized shape as the live vC… | 16 | 9 | 18 |
@@ -280,7 +281,6 @@
 | `server/src/sanswitch/registry.js` | SAN 스위치 등록부(v2.410). | 16 | 7 | 51 |
 | `server/src/storage/store.js` | 이 노드가 수집한 최신 스냅샷 보관(v2.302). deviceId → NormalizedSnapshot. 재시작 후에도 마지막 뷰가 비지 않게 파일로 영속 (자격증명 없음 — 정규화 스냅샷만. 그래도 계정 목록이 있어 0600 + gitignore). 시계열(용량 추… | 16 | 7 | 15 |
 | `server/src/idrac/poller.js` | Portal-embedded iDRAC power poller. On an interval it reads current power from every enabled registered Dell server (Redfish) and appends a sample to… | 12 | 7 | 13 |
-| `server/src/security/emergencyStop.js` | 긴급중단(Emergency Stop) — 2인 승인(관리자 2명 OTP)으로만 켜고/끄는 전역 수집 정지 스위치. | 9 | 7 | 10 |
 | `server/src/vcenter/collectTarget.js` | '이 포탈이 직접 로그인해 수집하는 vCenter 인가' 판정(순수 · import 0) — v2.732(점검 2회차 B4-01). | 9 | 7 | 2 |
 | `server/src/security/certMonitor.js` | TLS 인증서 만료 감시 — 등록된 vCenter·NSX Manager의 443 인증서를 주기적으로 프로브해 만료일(D-90 경고 / D-30 위험)을 추적한다. 28개 vCenter 규모에서 수동 추적이 불가능한 항목(커뮤니티 단골 장애: vCenter STS/머신… | 8 | 7 | 8 |
 | `server/src/dscfg/collect.js` | 데이터스토어 운영 속성 갱신(v2.700 — A17). 인벤토리 수집 한 주기 안에서 오래된 DS 부터 상한만큼. 캐시는 vmcfg 처럼 인메모리이고 DS 전용이다(다른 캐시의 prune 이 지우지 않게). 실패는 격리한다. | 7 | 7 | 2 |
@@ -323,7 +323,8 @@
 | `server/src/upgrade/manager.js` | Orchestrates the auto-upgrade feature for the running portal: tracks the last check, runs the optional background watcher (local folder + remote sourc… | 9 | 5 | 22 |
 | `server/src/bmstor/poller.js` | 베어메탈 스토리지 주기 수집(v2.340). | 8 | 5 | 21 |
 | `server/src/collector/datacenterMatch.js` | 수집기(에이전트)를 등록된 DataCenter(법인)에 매칭하는 순수 함수. collector.datacenter 라벨 / collector.id / collector.name 후보를 순서대로 보고, DataCenter의 id 또는 name과 대소문자 무시로 일치하면… | 8 | 5 | 3 |
-| `server/src/vmtrack/db.js` | VM 수량 추이 전용 시계열 DB(v2.345, 사용자 요구: "별도의 DB 를 만들어서 트래킹"). CONFIG_DIR/vm-track.db (업그레이드에 보존). node:sqlite 사용 — 없으면 기능을 비활성으로 정직하게 보고한다(NDJSON 폴백을 두지 않는… | 8 | 5 | 17 |
+| `server/src/metrics/sampler.js` | Metrics sampler — on an interval, snapshots host temperature and GPU utilization (per host + per-cluster/per-vCenter averages) and datastore used GB i… | 8 | 5 | 30 |
+| `server/src/vmtrack/db.js` | VM 수량 추이 전용 시계열 DB(v2.345, 사용자 요구: "별도의 DB 를 만들어서 트래킹"). CONFIG_DIR/vm-track.db (업그레이드에 보존). node:sqlite 사용 — 없으면 기능을 비활성으로 정직하게 보고한다(NDJSON 폴백을 두지 않는… | 8 | 5 | 18 |
 | `server/src/edgelog/spec.js` | 엣지 포탈의 **진행상태**를 어디서 읽는지 적은 표(순수 데이터, v2.549). | 7 | 5 | 19 |
 | `server/src/nsx/registry.js` | NSX Manager registry — read/write the managed list in CONFIG_DIR/nsx.json, with validation, password redaction, and a connectivity test. Edited throug… | 7 | 5 | 18 |
 | `server/src/focusmon/service.js` | 이 노드의 집중 모니터링을 묶는다(v2.976): 키 · 중앙 직접 수집기 · 1초/10초 틱 · 수집 시작/끝 · 엣지 깨우기. | 6 | 5 | 16 |
