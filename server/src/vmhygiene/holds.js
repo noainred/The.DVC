@@ -87,4 +87,30 @@ export function setHold({ vcenterId, vmId, vmName = '', days, reason = '' }, use
   return { ok: true, hold };
 }
 
+/** 지금 목록에 있는 보류(지난 것 제외) — 없으면 null. 라우트가 ‘VM 이 인벤토리에 없어도 풀 수 있는 보류인가’ 를 본다(v3.35.0). */
+export function activeHold(vcenterId, vmId, now = Date.now()) {
+  const key = holdKey(vcenterId, vmId);
+  return loadHolds(now).holds.find((h) => holdKey(h.vcenterId, h.vmId) === key) || null;
+}
+
+/**
+ * v3.35.0(시안 ⑫ 보류 목록 · 사용자 '시안 권장안대로 구현해줘'): 보류 여러 건을 한 번에 푼다 — 파일은 **한 번만** 쓴다(건마다 전량을 다시 쓰지 않게).
+ *   대상 · 범위 판정은 라우트가 먼저 한다(조회 밖 404 → 쓰기 밖 403). 그 사이 기한이 지나 목록에서 빠진 키는 건너뛰고, 실제로 푼 것만 돌려준다.
+ *   못 읽은 파일 위에는 쓰지 않는다(setHold 와 같은 503).
+ * @param {{vcenterId:string, vmId:string}[]} keys
+ * @returns {{ok:true, released:object[]} | {ok:false, status:number, reason:string}}
+ */
+export function releaseHolds(keys, now = Date.now()) {
+  const cur = loadHolds(now);
+  if (cur.unreadable) return { ok: false, status: 503, reason: '보류 목록 파일을 읽지 못해 저장하지 않습니다 — 파일을 확인한 뒤 다시 시도하세요.' };
+  const want = new Set((keys || []).map((k) => holdKey(k.vcenterId, k.vmId)));
+  const released = cur.holds.filter((h) => want.has(holdKey(h.vcenterId, h.vmId)));
+  if (!released.length) return { ok: true, released };
+  const rest = cur.holds.filter((h) => !want.has(holdKey(h.vcenterId, h.vmId)));
+  atomicWriteFileSync(FILE(), JSON.stringify({ holds: rest }, null, 2));
+  _reader.reset(); _last = rest; _gen += 1;
+  if (_onChange) { try { _onChange(); } catch { /* 캐시 무효화 실패는 다음 읽기에 맡긴다 */ } }
+  return { ok: true, released };
+}
+
 export function _resetHoldsForTest() { _reader.reset(); _last = []; _unreadable = false; }

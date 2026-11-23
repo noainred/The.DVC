@@ -95,7 +95,10 @@ test('⑤ 라우트(정적) — 관리자 쓰기 · 404 → 403 순서 · 감사
   assert.ok(i404 > 0 && i403 > i404, '조회 밖 404 가 먼저, 쓰기 밖 403 이 뒤');
   assert.match(put, /inUserWriteScope\(req\.user, snap, vcenterId\)/); assert.match(put, /logAudit\(/);
   const get = body("api.get('/tools/snapshots/holds'", "api.put('/tools/snapshots/holds'");
-  assert.match(get, /scopedVcenterIds\(req\.user/); assert.match(get, /by: admin \? h\.by : null/);
+  // v3.35.0: 보류 행은 snaphist/view.js holdRows 가 만든다 — 건 계정 가림도 그 함수(관리자 판본 판정은 라우트가 넘긴다 · server/test/snapHolds3350 ① ②)
+  assert.match(get, /scopedVcenterIds\(req\.user/); assert.match(get, /admin: isAdminDetailUser\(req\.user\)/);
+  const view = stripComments(fs.readFileSync(path.join(HERE, '../src/snaphist/view.js'), 'utf8'));
+  assert.match(view.slice(view.indexOf('export function holdRows')), /by: admin \? \(h\.by \|\| null\) : null/);
   const cr = body("api.get('/tools/snapshots/creators'", "api.get('/tools/snapshots/holds'");
   assert.match(cr, /scopedVcenterIds\(req\.user/); assert.match(cr, /user: admin \? c\.user : null/); assert.match(cr, /isAdminDetailUser\(req\.user\) \? 'a' : 'u'/);
   const list = body("api.get('/tools/snapshots'", "api.get('/tools/snapshots/history'");

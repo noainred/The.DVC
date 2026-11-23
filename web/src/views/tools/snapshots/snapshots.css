@@ -162,6 +162,32 @@
 @media (max-width: 720px) { .snp-hold { position: sticky; left: 0; max-width: calc(100vw - 128px); box-sizing: border-box; white-space: normal; } }
 .snp-sum { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-size: 12px; color: var(--text-dim); }
 
+/* v3.35.0 보류 탭(HoldList.jsx · 시안 docs/design/snapshot-holds ⑫ ⑬) */
+.snp-holds { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.snp-hkpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.snp-hkpis .snp-kp { background: var(--panel-deep); }
+.snp-hwarn { border: 1px solid #78350f; background: #2a1f0d; color: #fde68a; border-radius: 10px; padding: 9px 12px; font-size: 12.5px; line-height: 1.55; }
+.snp-hask, .snp-hext { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; border: 1px solid var(--accent); background: rgba(59, 130, 246, .12); border-radius: 10px; padding: 8px 12px; font-size: 12.5px; min-width: 0; }
+.snp-hext .snp-hold { margin-top: 0; flex: 1 1 100%; position: static; max-width: none; }
+.snp-hvm { display: block; font-weight: 700; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.snp-hrs { max-width: 320px; white-space: normal; overflow-wrap: anywhere; color: #c3cfe2; }
+.snp-hleft { display: grid; grid-template-columns: minmax(60px, 120px) auto; gap: 8px; align-items: center; min-width: 150px; }
+.snp-hleft b { font-family: var(--mono); font-weight: 700; font-size: 12px; white-space: nowrap; color: #c3cfe2; }
+.snp-hleft b.soon { color: #fbbf24; }
+.snp-hact { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.snp-hcards { display: flex; flex-direction: column; gap: 10px; }
+.snp-hcard { background: var(--panel-deep); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.snp-hcard.gone { border-color: #7f1d1d; }
+.snp-hcard .hd { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; min-width: 0; }
+.snp-hcard .hd .nm { display: flex; flex-direction: column; min-width: 0; }
+.snp-hcard .hd .nm b { font-size: 14px; overflow-wrap: anywhere; }
+.snp-hcard .hd .snp-tg { flex: none; white-space: normal; text-align: right; max-width: 55%; }
+.snp-hcard .rs { font-size: 12.5px; color: #c3cfe2; line-height: 1.5; overflow-wrap: anywhere; }
+.snp-hcard .ft { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; font-size: 12px; color: #c3cfe2; }
+.snp-hcard .snp-hleft { min-width: 0; grid-template-columns: minmax(0, 1fr) auto; }
+.snp-hcard .snp-hact { justify-content: flex-end; }
+.snp-hcard .snp-btn.sm { min-height: 40px; padding: 6px 14px; }
+
 @media (max-width: 1200px) {
   .snp-rules { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .snp-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -174,7 +200,17 @@
 @media (max-width: 720px) {
   .snp-rules { grid-template-columns: minmax(0, 1fr); }
   .snp-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .snp-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* v3.35.0(시안 ⑮ — 사용자 '시안 권장안대로'): 2열이면 카드 글자 자리가 약 143px 라 법인 이름 · 크기 줄 · 못 읽음 안내가 말줄임으로 잘렸다(휴대폰은 말풍선도 없다) →
+     한 줄에 카드 하나 · 왼쪽 글자(접힘) · 오른쪽에 나이 막대와 추이 그림을 작게. 구역은 길어진다(법인 20곳 어림 약 25%). */
+  .snp-cards { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .snp-cc { display: grid; grid-template-columns: minmax(0, 1fr) 112px; column-gap: 12px; row-gap: 6px; align-items: center; }
+  .snp-cc .cn { grid-column: 1 / -1; }
+  .snp-cc .cn span, .snp-cc .tx { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; line-height: 1.45; }
+  .snp-cc .tx.a { grid-column: 1; grid-row: 2; }
+  .snp-cc .snp-gbar { grid-column: 2; grid-row: 2; }
+  .snp-cc .tx.f { grid-column: 1; grid-row: 3; }
+  .snp-cc .snp-spark { grid-column: 2; grid-row: 3; height: 18px; border-radius: 4px; }
+  .snp-hkpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .snp-plot { margin-left: 46px; margin-right: 8px; height: 240px; }
   .snp-yt { left: -46px; width: 40px; }
   .snp-xt.adv, .snp-xt.far { display: none; }   /* 좁은 화면: 72시간 · 1,000일 글자가 이웃 글자와 겹친다(선은 남긴다) */
