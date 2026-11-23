@@ -11,6 +11,7 @@ import { healthWord } from '../healthWord.js';
 import { powerResult, powerProbe, applyScannedPower } from '../power.js';
 import { normalizeResourceList, resourceProbe } from '../resources.js';
 import { pushAll } from '../../util/pushAll.js';
+import { buildIfaces, ifaceProbe, restFcPorts, restEthPorts, restIscsiIfs, restFileIfs } from '../ifaces.js';   // v3.35.0 인터페이스
 import { envPort } from '../../util/envNumber.js'; // 결정(56~75 남긴 것) 57: 포트 env 는 1~65535 정수만(예전 `Number(env) || 443` 은 −1 · 70000 · 1.5 를 그대로 썼다)
 
 const entries = (v) => (v?.entries || []).map((e) => e.content || {});
@@ -87,6 +88,41 @@ export function applyUnityResources(extra, raw) {
   extra.resourcesProbe = probe;
 }
 
+/**
+ * v3.35.0 — SAN · NAS 인터페이스 구성(포트 링크 속도 · 상태 · iSCSI/NAS 인터페이스). 설계 docs/design/unity-iface.
+ * ⚠ 필드 이름은 Unisphere REST 문서 지식이고 **실장비 미확인**이다 — 없는 필드를 요구하면 장비가 그 호출을 통째로 거절할 수 있어
+ *   종류마다 따로 부르고 실패 사유를 `extra.ifaces.probe` 에 남긴다(다른 섹션은 깨지지 않는다).
+ */
+export const UNITY_IFACE_PATHS = Object.freeze({
+  fc: '/api/types/fcPort/instances?fields=id,name,wwn,currentSpeed,requestedSpeed,availableSpeeds,health,storageProcessor&per_page=200',
+  eth: '/api/types/ethernetPort/instances?fields=id,name,speed,requestedSpeed,supportedSpeeds,mtu,isLinkUp,health,storageProcessor&per_page=200',
+  iscsi: '/api/types/iscsiPortal/instances?fields=id,ethernetPort,ipAddress,vlanId&per_page=500',
+  nas: '/api/types/fileInterface/instances?fields=id,nasServer,ipPort,ipAddress,vlanId,role&per_page=500',
+});
+/** raw.ifFc · ifEth · ifIscsi · ifNas(·Err) → extra.ifaces(순수 — extra 변경). 조회 전 중단(아무 키도 없음)이면 싣지 않는다. */
+export function applyUnityIfaces(extra, raw, at = Date.now()) {
+  const keys = ['ifFc', 'ifEth', 'ifIscsi', 'ifNas'];
+  if (!keys.some((k) => raw[k] != null || raw[`${k}Err`] != null)) return;
+  const src = (k) => `Unisphere REST ${UNITY_IFACE_PATHS[k].split('?')[0]}`;
+  const probe = {};
+  const ports = []; const ifs = [];
+  const one = (pk, key, parse, into, pathKey) => {
+    if (raw[`${key}Err`]) { probe[pk] = ifaceProbe('failed', { source: src(pathKey), detail: raw[`${key}Err`] }); return; }
+    if (!raw[key]) return;
+    const list = parse(raw[key]);
+    const got = (raw[key]?.entries || []).length;
+    if (got && !list.length) { probe[pk] = ifaceProbe('unparsed', { source: src(pathKey), detail: `${got}건에서 id 를 읽지 못했습니다` }); return; }
+    pushAll(into, list);
+    const prev = probe[pk];
+    probe[pk] = ifaceProbe(prev?.state === 'failed' ? 'failed' : 'ok', { source: prev ? `${prev.source} + ${src(pathKey)}` : src(pathKey), count: (prev?.count || 0) + list.length, detail: prev?.detail || '' });
+  };
+  one('fc', 'ifFc', restFcPorts, ports, 'fc');
+  one('eth', 'ifEth', restEthPorts, ports, 'eth');
+  one('ifs', 'ifIscsi', restIscsiIfs, ifs, 'iscsi');
+  one('ifs', 'ifNas', restFileIfs, ifs, 'nas');
+  extra.ifaces = buildIfaces({ ports, interfaces: ifs, probe, at, source: 'Unisphere REST' });
+}
+
 /** 원시 응답 → 정규화(순수). raw: {system,sw,cap,pools,sps,users,alerts,power,luns,fs} */
 export function normalizeUnity(device, raw) {
   const snap = emptySnapshot(device);
@@ -154,6 +190,7 @@ export function normalizeUnity(device, raw) {
   }
   applyUnityPower(snap.extra, raw);
   applyUnityResources(snap.extra, raw);   // v2.789
+  applyUnityIfaces(snap.extra, raw, snap.collectedAt);   // v3.35.0 인터페이스 구성
   snap.extra.collectMethod = 'api';
   snap.ok = snap.sections.config === 'ok' || snap.sections.capacity === 'ok';
   if (!snap.ok && !snap.error) snap.error = '수집 실패(섹션 오류 참조)';
@@ -191,6 +228,12 @@ export async function collect(device, { signal = null } = {}) {
     catch (e) { if (isCredReject(e)) throw e; raw.lunsErr = String(e.message || e).slice(0, 200); }
     try { raw.fs = await get(UNITY_FS_PATH); }
     catch (e) { if (isCredReject(e)) throw e; raw.fsErr = String(e.message || e).slice(0, 200); }
+    // v3.35.0 — 인터페이스 구성(종류마다 따로 — 한 종류가 거절돼도 나머지는 읽는다).
+    for (const [key, pathKey] of [['ifFc', 'fc'], ['ifEth', 'eth'], ['ifIscsi', 'iscsi'], ['ifNas', 'nas']]) {
+      if (signal?.aborted) break;
+      try { raw[key] = await get(UNITY_IFACE_PATHS[pathKey]); }
+      catch (e) { if (isCredReject(e)) throw e; raw[`${key}Err`] = String(e.message || e).slice(0, 200); }
+    }
   } catch (e) {
     const out = normalizeUnity(device, raw);
     out.error = e.message;

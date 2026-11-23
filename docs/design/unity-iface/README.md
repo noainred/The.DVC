@@ -1,7 +1,7 @@
 # 설계: Unity SAN · NAS 인터페이스 — 속도 · 사용량 모니터링 / 트래킹
 
 작성 2026-11-23 (main **v3.34.2** 기준 — ⚠ 정정: 처음 조사는 main 보다 1,500 커밋 뒤인 체크아웃(v2.914.0)에서 했다. `git merge --ff-only origin/main` 뒤 다시 확인해 §2 를 고쳤다 ·
-브랜치 `claude/trusting-sagan-p6hh1x`) · 상태 **시안 — 컨펌 대기**(구현 전) ·
+브랜치 `claude/trusting-sagan-p6hh1x`) · 상태 **구현됨 v3.35.0**(컨펌 2026-11-23 15:17 KST — 표준 검증 · §6-3 ⓐ 구성은 SSH · 사용량은 REST 만 · §6-6 **알림 포함** · 나머지 기본값. 구현 기록은 §9) ·
 시안 캔버스: https://claude.ai/artifact/MX28kKbrDuJHQpeXV3oTij (아트보드 4장 — ① 전 장비 · ② 장비 한 대 · ③ 400px · ④ 상태 6종).
 이 폴더의 `*.dc.html` 이 같은 내용의 레퍼런스(HTML 프로토타입 — 복사 대상이 아님). **장비 · 포트 이름 · IP · WWN · 수치는 전부 가상**이다.
 색 · 글자는 `web/src/styles.css` `:root` 토큰과 SAN 포트 사용량의 칸 색(`sanPortUsageText.js LEVELS`) 그대로(예외: SP 균형 막대의 `#a5b4fc` 한 곳 — 구현 때 토큰으로 바꿀 것).
@@ -110,3 +110,13 @@ eval curl $A "'$Y/types/metricValue/instances?filter=path%20EQ%20%22sp.*.net.dev
 
 서버(REST · SSH 구성 수집 + 파서 · 이더넷 표본 · 읽기/쓰기 분리 · 변화 이력 · 엣지 정제 · API · 판정 모듈 · 목) + 웹(탭 · 장비 화면 · 문구 모듈 · STable) + 테스트(파서 픽스처 · SSH 예산 산수 · 정제 · scope · 판정 대조) + 문서(`docs/rules/storage.md`) + 릴리스.
 위험 등급: 엣지 수신 계약 · 표본 계약(`nodeLoad`) 변경 · SSH 예산이 걸려 **변이 검증 대상**이다. 예상 소요는 30분을 넘는다(추정 3~4시간 — 질문 3 에서 ⓑ 를 고르면 더) — 착수 전에 검증 수준을 다시 묻는다.
+
+## 9. 구현 기록(v3.35.0 · 2026-11-23 15:15~ KST · Opus)
+
+- 서버: `storage/ifaces.js`(파서 · 판정 · 정제 · 변화 비교 — 순수) · `storage/ifaceSummary.js`(화면 · 알림 조립) · `collectors/unity.js`(REST 4 호출) · `collectors/unitySsh.js`(SPECS 맨 뒤 3개) ·
+  `collectors/arrayPerf.js`(FC in/out · 이더넷 kind `eth`) · `storage/db.js`(`iface_state` · `iface_change` · 청크 정리) · `central/storageEdge.js`(정제 · 적재) · `auth/addressMask.js`(IP 가림) ·
+  `alerts.js`(규칙 3개) · `routes/api/storageMon.js`(`/tools/storage/ifaces` · `/tools/storage/devices/:id/ifaces`) · 데모(`mock/demo/storage.js` — 포화 · 저하 2 · 다운 1 · SP 편중 1).
+- 웹: `views/tools/storageIfaces/`(전 장비 표 · 장비 한 대 · 공용 조각 · 문구) · 탭 연결 `StorageMonTool.jsx` · 알림 라벨 `Alerts2.jsx`.
+- 시안과 다른 점: ① 400px 의 포트 목록은 카드 대신 STable 가로 스크롤(저장소 표 규약 — 정렬 유지) ② KPI 에 '링크 다운' 을 따로 둬 7개 ③ 장비 화면은 새 주소가 아니라 탭 안 전환(← 전 장비)
+  ④ 상태 ③(엣지가 아직 올리지 않음)은 '포트 구성을 아직 읽지 못했습니다' · 수집 실패는 따로 문구 ⑤ 이더넷 SP 균형 막대 추가.
+- 데모 수치(목 서버 · Chromium 1440/400 판독 18:27~18:52): UNITY-SJC-01 SPA FC0 사용률 86%(포화 근접) · SPA FC1 8 Gb(저하) · SPB ETH3 1 Gb(저하) · FC SP 편중 82.9 : 17.1 · UNITY-SEL-02 SPB ETH3 링크 다운(변화 이력).

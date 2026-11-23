@@ -36,6 +36,7 @@ import { hardwareSummaryParts } from './storageHardwareText.js'; // v2.599 C2599
 import { volumeProvisionText } from './powerstoreVolumeText.js'; // v2.603 COL-2603-07: 볼륨 size 결측 안내
 import { serialHeader, showNodeSerialCol, nodeSerialTitle, nodeSerialNote } from './storageSerialText.js';
 import useSearchHandoff from '../../hooks/useSearchHandoff.js'; // v2.909 헤더 ⌘K 통합 장비 검색 — 검색어 인계
+import StorageIfacesView from './storageIfaces/StorageIfacesView.jsx'; // v3.35.0 Unity SAN · NAS 인터페이스
 import NodeLoadPanel from './storageNodeLoad/NodeLoadPanel.jsx'; // v2.926 노드 부하 추이(네트워크·디스크·CPU)
 import { rateText, pctText } from './storageNodeLoad/nodeLoadText.js';
 
@@ -582,7 +583,7 @@ export default function StorageMonTool() {
   const [busyId, setBusyId] = useState(null);
   // 하위 탭을 URL 에 실어 새로고침·북마크·뒤로가기에서 유지한다(v2.438, hooks/useHashTab.js).
   // v2.615: 'faults' = 장애 장비만 모은 화면(KPI '장애 장비' 를 누르면 온다 — 주소로도 열린다).
-  const [view, setView] = useHashTab({ base: ['tools', 'storage-mon'], valid: ['devices', 'dc', 'type', 'faults', 'trend'], fallback: 'devices' });
+  const [view, setView] = useHashTab({ base: ['tools', 'storage-mon'], valid: ['devices', 'dc', 'type', 'faults', 'trend', 'ifaces'], fallback: 'devices' });   // v3.35.0 'ifaces' = Unity SAN · NAS 인터페이스
   const [detail, setDetail] = useState(null);    // 장비 상세 모달 — id 로 보관(v2.306: load() 후 최신 스냅샷 자동 반영)
   // 노드 장애 팝업(v2.523) — 같은 이유로 **id 로** 보관한다(폴링 후 최신 스냅샷이 자동 반영).
   const [nodeFault, setNodeFault] = useState(null);
@@ -719,10 +720,10 @@ export default function StorageMonTool() {
     <div>
       <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 12 }}>
         <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={() => setForm({ type: 'isilon', name: '', host: '', username: 'root', password: '', agent: '', datacenterId: '', collectMethod: 'ssh', sshPort: 22, enabled: true, nodeLoadEnabled: true })}>+ 장비 등록</button>
-        {['devices', 'dc', 'type', 'faults', 'trend'].map((v) => (
+        {['devices', 'dc', 'type', 'faults', 'trend', 'ifaces'].map((v) => (
           <button key={v} className={view === v ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 13px' }} onClick={() => setView(v)}
-            title={v === 'faults' ? faultKpiTitle(fk) : undefined}>
-            {v === 'devices' ? '🗄 장비별' : v === 'dc' ? '🏢 법인별' : v === 'type' ? '📦 타입별' : v === 'faults' ? `⚠ 장애 장비 ${fk.fault}` : '📈 추이'}
+            title={v === 'faults' ? faultKpiTitle(fk) : v === 'ifaces' ? 'Unity SAN · NAS 인터페이스 — 포트 링크 속도 · 사용량 · 변화 이력' : undefined}>
+            {v === 'devices' ? '🗄 장비별' : v === 'dc' ? '🏢 법인별' : v === 'type' ? '📦 타입별' : v === 'faults' ? `⚠ 장애 장비 ${fk.fault}` : v === 'ifaces' ? '🔌 인터페이스' : '📈 추이'}
           </button>
         ))}
         {/* CSV 일괄 관리(v2.313, 사용자 요구) — 내보내기·가져오기·샘플. v2.317: 내보내기는
@@ -828,6 +829,8 @@ export default function StorageMonTool() {
       {/* 통합 추이(v2.380) — 전체 합산 + 장비별 선택. 기간 12시간/24시간/1주 등.
           여기는 검색을 적용하지 않는다(전체 합산 차트라 부분집합이면 '전체'가 거짓이 된다). */}
       {view === 'trend' && <StorageTrendPanel devices={rows} />}
+      {/* v3.35.0 — Unity SAN · NAS 인터페이스(시안 docs/design/unity-iface). 자체 조회(폴링 없음) — 위 장비 목록 폴링과 독립. */}
+      {view === 'ifaces' && <StorageIfacesView dcName={dcName} />}
       {view === 'dc' && dcGroups.map(([dc, list]) => {
         const cg = capacityTotals(list.filter((r) => r.snap), (r) => r.snap.capacity);
         const t = cg.total; const u = cg.used;

@@ -36,6 +36,8 @@ export function unitsForArray(units = [], { serial = '' } = {}) {
   const out = [];
   for (const u of units || []) {
     if (!u || typeof u !== 'object') continue;
+    // v3.35.0: Unity 이더넷 포트(kind 'eth' — iSCSI · NAS)는 SAN(FC) 화면 대상이 아니다. 스토리지 모니터링 › 인터페이스가 쓴다.
+    if (u.kind === 'eth') continue;
     const name = String(u.name || '');
     const i = name.indexOf('::');
     if (i > 0) { if (!want || norm(name.slice(0, i)) !== want) continue; out.push({ ...u, display: name.slice(i + 2) }); }

@@ -25,6 +25,7 @@ import { createYielder } from '../util/timeSlice.js';   // v2.743 DB-01: 합계 
 import { pushAll } from '../util/pushAll.js';
 import { normalizeResourceList, resourceKey } from './resources.js';   // v2.789 하위 항목
 import { nodeLoadRowsOf, sampleRowsOf, METRIC_BY_KEY, NODE_LOAD_GROUPS, NODE_LOAD_METRICS, NODE_LOAD_LIMIT, sanitizeNodeUnits } from './nodeLoad.js';   // v2.926 노드 부하 · v2.932 5분 표본
+import { diffPortStates, isIfaceType } from './ifaces.js';   // v3.35.0 인터페이스 상태 · 변화
 
 // DB 저장 경로 설정(v2.379)을 따른다 — dbLocation 이 지정한 dbDir 아래, 없으면 configDir.
 // (vmperf/vmtrack 과 동일 규약. MIGRATABLE 에 이 파일이 있어 미적용 시 마이그레이션 후
@@ -300,7 +301,21 @@ async function openInner() {
         device_id TEXT NOT NULL, node_id INTEGER NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL DEFAULT '', parent INTEGER,
         first_seen INTEGER NOT NULL, last_seen INTEGER NOT NULL,
         PRIMARY KEY (device_id, node_id)
-      );`);
+      );
+      /* v3.35.0 Unity 인터페이스(설계 docs/design/unity-iface) — 규칙은 storage/ifaces.js diffPortStates.
+         iface_state = 장비 × 포트의 마지막으로 안 상태(속도 · 링크 · 마지막으로 링크 업을 본 시각 — '다운' 과 '처음부터 미연결' 을 가른다).
+           장비 × 포트 1행이라 유계(Unity 18대 × 포트 ≤ 96). 오래 안 보인 행은 변화 이력과 같은 보존일로 정리한다(청크).
+         iface_change = 속도 · 링크 변화(알 수 있는 값끼리만 · 처음 본 수집 시각). 보존은 일 롤업 보존일. */
+      CREATE TABLE IF NOT EXISTS iface_state (
+        device_id TEXT NOT NULL, port TEXT NOT NULL, speed REAL, link INTEGER, last_up_at INTEGER, updated_at INTEGER NOT NULL,
+        PRIMARY KEY (device_id, port)
+      );
+      CREATE INDEX IF NOT EXISTS idx_ifst_upd ON iface_state (updated_at);
+      CREATE TABLE IF NOT EXISTS iface_change (
+        device_id TEXT NOT NULL, port TEXT NOT NULL, ts INTEGER NOT NULL, field TEXT NOT NULL, before TEXT, after TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_ifch_ts ON iface_change (ts);
+      CREATE INDEX IF NOT EXISTS idx_ifch_dev_ts ON iface_change (device_id, ts);`);
     _db = {
       conn,
       upLatest: conn.prepare(`INSERT INTO api_latest (device_id, area, endpoint, ts, ok, bytes, truncated, json, error)
@@ -493,6 +508,15 @@ async function openInner() {
       pruneNode1: conn.prepare('DELETE FROM node_load_history WHERE rowid IN (SELECT rowid FROM node_load_history WHERE ts < ? LIMIT ?)'),
       pruneNode2: conn.prepare('DELETE FROM node_load_sample WHERE rowid IN (SELECT rowid FROM node_load_sample WHERE ts < ? LIMIT ?)'),
       pruneNode3: conn.prepare('DELETE FROM node_load_daily WHERE rowid IN (SELECT rowid FROM node_load_daily WHERE day < ? LIMIT ?)'),
+      // v3.35.0 인터페이스 상태 · 변화(saveIfaceState · ifaceStatesOf · ifaceChanges).
+      selIfState: conn.prepare('SELECT port, speed, link, last_up_at AS lastUpAt, updated_at AS updatedAt FROM iface_state WHERE device_id = ? LIMIT 512'),
+      upIfState: conn.prepare(`INSERT INTO iface_state (device_id, port, speed, link, last_up_at, updated_at) VALUES (?,?,?,?,?,?)
+        ON CONFLICT(device_id, port) DO UPDATE SET speed = excluded.speed, link = excluded.link, last_up_at = excluded.last_up_at, updated_at = excluded.updated_at`),
+      insIfChange: conn.prepare('INSERT INTO iface_change (device_id, port, ts, field, before, after) VALUES (?,?,?,?,?,?)'),
+      selIfChanges: conn.prepare('SELECT device_id AS deviceId, port, ts, field, before, after FROM iface_change WHERE ts >= ? ORDER BY ts DESC LIMIT ?'),
+      selIfChangesDev: conn.prepare('SELECT device_id AS deviceId, port, ts, field, before, after FROM iface_change WHERE device_id = ? AND ts >= ? ORDER BY ts DESC LIMIT ?'),
+      pruneIf1: conn.prepare('DELETE FROM iface_change WHERE rowid IN (SELECT rowid FROM iface_change WHERE ts < ? LIMIT ?)'),
+      pruneIf2: conn.prepare('DELETE FROM iface_state WHERE rowid IN (SELECT rowid FROM iface_state WHERE updated_at < ? LIMIT ?)'),
       nodeSel: new Map(),   // 묶음·종류별 조회 문장(처음 쓸 때 준비 — nodeLoadStmt)
     };
     lockRetry.ok();
@@ -587,10 +611,15 @@ function runPrune(db) {
     const c3 = await chunkedDelete(db.pruneClient3, [key.clientDayCut], { label: 'storage node_client_daily' });
     const p1 = await chunkedDelete(db.pruneProto1, [key.clientHourCut], { label: 'storage node_proto_hourly' });
     const p2 = await chunkedDelete(db.pruneProto2, [key.clientDayCut], { label: 'storage node_proto_daily' });
+    // v3.35.0: 인터페이스 변화 이력 · 오래 안 보인 포트 상태 — 일 롤업 보존일(시각 기준 · 청크).
+    const ifCut = now - daily * DAY_MS;
+    const i1 = await chunkedDelete(db.pruneIf1, [ifCut], { label: 'storage iface_change' });
+    const i2 = await chunkedDelete(db.pruneIf2, [ifCut], { label: 'storage iface_state' });
     return { apiHistory: a.deleted, capacityHistory: c.deleted, capacityDaily: d, resourceDaily: r.deleted,
       nodeLoadHistory: n1.deleted, nodeLoadSample: n2.deleted, nodeLoadDaily: n3.deleted, nodeLoadHourly: n4.deleted,
       nodeClientSample: c1.deleted, nodeClientHourly: c2.deleted, nodeClientDaily: c3.deleted, nodeProtoHourly: p1.deleted, nodeProtoDaily: p2.deleted,
-      done: [a, c, r, n1, n2, n3, n4, c1, c2, c3, p1, p2].every((x) => x.done) };
+      ifaceChange: i1.deleted, ifaceState: i2.deleted,
+      done: [a, c, r, n1, n2, n3, n4, c1, c2, c3, p1, p2, i1, i2].every((x) => x.done) };
   });
 }
 
@@ -1263,6 +1292,51 @@ export async function nodeUnitsOf(deviceId) {
   const db = await open();
   if (!db) return [];
   return db.selNodeUnits.all(String(deviceId ?? ''));
+}
+
+/**
+ * v3.35.0 — 인터페이스 상태 · 변화 적재(스냅샷 1개 = 트랜잭션 1개). 규칙은 ifaces.diffPortStates(알 수 있는 값끼리만 변화 · 처음 본 포트는 기준선).
+ * 같은 스냅샷을 두 번 받아도 상태가 같으면 변화가 생기지 않는다(엣지 재전송 안전). 포트가 없거나 실패 스냅샷이면 아무것도 쓰지 않는다.
+ * @returns {Promise<{saved:boolean, reason?:string, changes?:number}>}
+ */
+export async function saveIfaceState(snap) {
+  const ports = snap?.extra?.ifaces?.ports;
+  if (!snap?.ok || !isIfaceType(snap?.type) || !Array.isArray(ports) || !ports.length) return { saved: false, reason: 'no-ports' };
+  const id = String(snap.deviceId ?? '');
+  if (!id) return { saved: false, reason: 'no-id' };
+  const db = await open();
+  if (!db) return { saved: false, reason: 'db-unavailable' };
+  const ts = numOrNull(snap.extra.ifaces.at) ?? numOrNull(snap.collectedAt) ?? Date.now();
+  const prev = new Map(db.selIfState.all(id).map((r) => [r.port, { speedGbps: r.speed, linkUp: r.link == null ? null : r.link === 1, lastUpAt: r.lastUpAt }]));
+  const { changes, next } = diffPortStates(prev, ports, ts);
+  db.conn.exec('BEGIN');
+  try {
+    for (const n of next) db.upIfState.run(id, capStrDb(n.port, 64), n.speedGbps ?? null, n.linkUp == null ? null : (n.linkUp ? 1 : 0), n.lastUpAt ?? null, ts);
+    for (const c of changes) db.insIfChange.run(id, capStrDb(c.port, 64), ts, c.field, capStrDb(c.before, 32), capStrDb(c.after, 32));
+    db.conn.exec('COMMIT');
+  } catch (e) {
+    try { db.conn.exec('ROLLBACK'); } catch { /* */ }
+    console.warn(`[storage-db] 인터페이스 상태 적재 실패(${id}): ${e.message}`);
+    return { saved: false, reason: 'db-error' };
+  }
+  maybePrune(db);
+  return { saved: true, changes: changes.length };
+}
+const capStrDb = (v, n) => String(v ?? '').slice(0, n);
+/** 장비의 포트 상태(포트 id → { speedGbps, linkUp, lastUpAt, updatedAt }). DB 없음은 null. */
+export async function ifaceStatesOf(deviceId) {
+  const db = await open();
+  if (!db) return null;   // '모름' — 빈 Map(= 처음 본 포트들)과 구분한다(다운 판정 · 알림 보류가 이 차이를 쓴다)
+  return new Map(db.selIfState.all(String(deviceId ?? '')).map((r) => [r.port, { speedGbps: r.speed, linkUp: r.link == null ? null : r.link === 1, lastUpAt: r.lastUpAt, updatedAt: r.updatedAt }]));
+}
+/** 인터페이스 변화 이력(최근 순) — deviceId 가 없으면 전 장비. limit 상한 500. */
+export async function ifaceChanges({ deviceId = null, sinceTs = 0, limit = 200 } = {}) {
+  const db = await open();
+  if (!db) return { db: false, rows: [] };
+  const lim = Math.max(1, Math.min(500, Math.floor(numOrNull(limit) ?? 200)));
+  const since = numOrNull(sinceTs) ?? 0;
+  const rows = deviceId != null ? db.selIfChangesDev.all(String(deviceId), since, lim) : db.selIfChanges.all(since, lim);
+  return { db: true, rows, truncated: rows.length >= lim };
 }
 
 /** 가장 오래된 기록 — 원시 표본 시각 · 일 롤업 날짜(화면이 '몇 칸까지 과거로 갈 수 있나' 를 계산한다). 없으면 null. */

@@ -286,7 +286,7 @@ export function sampleRowsOf(deviceId, sample) {
 
 /* ── v2.952 어레이 프런트엔드 단위 카탈로그(순수) ─────────────────────── */
 /** 단위 종류 — fa(PowerMax FE 디렉터) · node(PowerStore 노드) · sp(Unity SP) · port(FC 포트 — 부모 단위 아래). 모르면 ''. */
-export const NODE_UNIT_KINDS = Object.freeze(['fa', 'node', 'sp', 'port', '']);
+export const NODE_UNIT_KINDS = Object.freeze(['fa', 'node', 'sp', 'port', 'eth', '']);   // v3.35.0 'eth' = Unity 이더넷 포트(iSCSI · NAS — SAN 스토리지 성능은 arraySide.unitsForArray 에서 뺀다)
 export const NODE_UNIT_NAME_MAX = 60;
 /**
  * 단위 이름 → 안정된 정수 id(FNV-1a 32비트의 하위 31비트). 노드 부하 표의 node_id 는 정수라 이름을 따로 둔다(node_unit 표).

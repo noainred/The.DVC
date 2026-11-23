@@ -15,6 +15,10 @@ const RULE_LABEL = {
   ramOvercommitPct: '클러스터 RAM 오버커밋 ≥ (%)',
   vcpuPerCore: '클러스터 vCPU:코어 ≥',
   gpuAllocPct: '법인 GPU 할당률 ≥ (%)',   // v2.939(GPU 할당율 개선 6 · 기본 끔 — 예비가 음수면 위험 등급)
+  // v3.35.0(Unity SAN · NAS 인터페이스 — 스토리지 모니터링 › 인터페이스): 판정은 서버 storage/ifaces.js judgePort 하나.
+  unityIfaceDown: 'Unity 포트 링크 다운(직전에 링크 업이던 포트)',
+  unityIfaceSlow: 'Unity 포트 속도 저하(자동 협상인데 최대보다 낮음)',
+  unityIfaceBusy: 'Unity 포트 사용률 ≥ (%) — 최근 5분 · REST 수집 장비만',
 };
 
 // v3.1.0(시안 docs/design/ipam-alerts-mac-dns ① — 컨펌 '기본값: 충돌 의심만 켬'): IP 스캔이 본 변화. 판정 · 묶음은 서버(ipam/changeNotify.js · conflict.js).
