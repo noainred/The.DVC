@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>CVP 작업 전후 비교</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="box-sizing: border-box; padding: clamp(12px, 2vw, 28px); background: #0a0e17; color: #e6edf6; font-family: 'Inter', 'Noto Sans KR', 'Apple SD Gothic Neo', sans-serif; font-size: 13px; line-height: 1.5; display: flex; flex-direction: column; gap: 14px;">
+
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<div style="font-size: 12px; color: #a9b6cc;">네트워크 › Arista CVP › 변경 · 준수</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center;">
+<h1 style="margin: 0; font-size: 20px; font-weight: 700;">작업 전후 비교</h1>
+<span style="display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: 999px; font-size: 12px; font-weight: 600; background: #16432a; border: 1px solid #22c55e; color: #eafff1;">⑬ 지금 있는 데이터 · 스냅샷 저장소만 추가</span>
+</div>
+<div style="font-size: 12.5px; color: #a9b6cc; overflow-wrap: anywhere;">작업 전에 스냅샷을 찍어 두고, 작업 뒤에 무엇이 달라졌는지만 봅니다. 의도한 변화와 의도하지 않은 변화를 가르는 것은 작업자입니다.</div>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start;">
+
+<div style="flex: 1 1 340px; min-width: 0; background: #141b2d; border: 1px solid #1f2a40; border-radius: 14px; padding: 16px 18px; display: flex; flex-direction: column; gap: 12px;">
+<div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between;">
+<b style="font-size: 14px;">스냅샷</b>
+<button type="button" style="height: 34px; padding: 0 14px; border-radius: 8px; border: 1px solid #1d4ed8; background: #2563eb; color: #ffffff; font: inherit; font-weight: 600; cursor: pointer;">지금 스냅샷 찍기</button>
+</div>
+<div style="display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; background: #0f1626; border: 1px solid #1f2a40; border-radius: 10px;">
+<label style="display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #a9b6cc;">이름
+<input type="text" value="KR1 leaf-b EOS 올리기 전" style="box-sizing: border-box; height: 32px; padding: 0 10px; border-radius: 8px; border: 1px solid #243049; background: #141b2d; color: #e6edf6; font: inherit; min-width: 0;"></label>
+<label style="display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #a9b6cc;">범위
+<select style="height: 32px; padding: 0 8px; border-radius: 8px; border: 1px solid #243049; background: #141b2d; color: #e6edf6; font: inherit;"><option>법인 KR1 — 스위치 7대</option><option>장비 고르기</option><option>전 법인</option></select></label>
+</div>
+<div style="display: flex; flex-direction: column;">
+<sc-for list="{{snaps}}" as="s" hint-placeholder-count="4">
+<button type="button" onClick="{{s.pick}}" aria-pressed="{{s.on}}" style="{{s.style}}">
+<span style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center;"><b style="overflow-wrap: anywhere;">{{s.name}}</b><span style="{{s.tagStyle}}">{{s.tag}}</span></span>
+<span style="font-size: 12px; color: #a9b6cc; font-family: 'JetBrains Mono', ui-monospace, monospace;">{{s.meta}}</span>
+</button>
+</sc-for>
+</div>
+<div style="font-size: 12px; color: #a9b6cc; overflow-wrap: anywhere;">스냅샷은 그 시각의 최신 수집값을 복사한 것입니다 — 장비에 새로 접속하지 않습니다. 보관 기간이 지나면 지워집니다(설정값).</div>
+</div>
+
+<div style="flex: 999 1 640px; min-width: 0; background: #141b2d; border: 1px solid #1f2a40; border-radius: 14px; padding: 16px 18px; display: flex; flex-direction: column; gap: 12px;">
+<div style="display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center;">
+<b style="font-size: 14px;">비교</b>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; color: #c9d5e6; overflow-wrap: anywhere;">{{pair}}</span>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 6px;">
+<sc-for list="{{chips}}" as="c" hint-placeholder-count="7">
+<button type="button" onClick="{{c.pick}}" aria-pressed="{{c.on}}" style="{{c.style}}">{{c.label}} <b style="font-family: 'JetBrains Mono', ui-monospace, monospace;">{{c.n}}</b></button>
+</sc-for>
+</div>
+<div style="overflow-x: auto; border: 1px solid #1f2a40; border-radius: 10px;">
+<div role="table" aria-label="달라진 항목" style="min-width: 860px; font-size: 12.5px;">
+<div role="row" style="{{k.head}}">
+<div role="columnheader" style="{{k.th}}">종류</div>
+<div role="columnheader" style="{{k.th}}">장비 · 대상</div>
+<div role="columnheader" style="{{k.th}}">전</div>
+<div role="columnheader" style="{{k.th}}">후</div>
+<div role="columnheader" style="{{k.th}}">읽는 법</div>
+</div>
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="9">
+<div role="row" style="{{k.row}}">
+<div role="cell" style="{{k.td}}"><span style="{{r.kindStyle}}">{{r.kind}}</span></div>
+<div role="cell" style="{{k.tdm}}">{{r.what}}</div>
+<div role="cell" style="{{k.tdm}}">{{r.before}}</div>
+<div role="cell" style="{{r.afterStyle}}">{{r.after}}</div>
+<div role="cell" style="{{k.td}}">{{r.read}}</div>
+</div>
+</sc-for>
+</div>
+</div>
+<div style="font-size: 12px; color: #a9b6cc; overflow-wrap: anywhere;">{{note}}</div>
+</div>
+
+</div>
+
+<div style="{{k.card}}">
+<b style="font-size: 13px;">무엇을 비교하나</b>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 6px 16px; font-size: 12.5px; color: #c9d5e6;">
+<div style="overflow-wrap: anywhere;">· 포트: 링크 오름/내림 · 속도 · 설명 · VLAN · LAG</div>
+<div style="overflow-wrap: anywhere;">· BGP 피어: 수와 상태(피어 주소는 관리자에게만)</div>
+<div style="overflow-wrap: anywhere;">· 부품: 전원 · 팬 · 트랜시버 상태와 장착 여부</div>
+<div style="overflow-wrap: anywhere;">· 장비: EOS 버전 · 스트리밍 상태 · 응답 여부</div>
+<div style="overflow-wrap: anywhere;">· LLDP 이웃(수집을 추가한 뒤): 상대 장비가 바뀜</div>
+<div style="overflow-wrap: anywhere;">· 설정 줄 비교는 ‘설정 백업’ 화면이 담당합니다</div>
+</div>
+<div style="font-size: 12px; color: #a9b6cc; overflow-wrap: anywhere;">한쪽에서 못 읽은 값은 ‘달라짐’ 으로 세지 않고 ‘비교 못 함’ 으로 따로 셉니다. 스냅샷을 찍은 시각의 수집이 오래된 장비는 그 사실을 표시합니다.</div>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+renderVals() {
+const st = this.state || {};
+const filt = st.filt || 'all';
+const snap = st.snap || 's2';
+const MONO = "font-family: 'JetBrains Mono', ui-monospace, monospace;";
+const COLS = 'display: grid; grid-template-columns: 120px minmax(190px, 1.2fr) minmax(130px, 1fr) minmax(130px, 1fr) minmax(170px, 1.2fr); align-items: center;';
+const k = {
+card: 'background: #141b2d; border: 1px solid #1f2a40; border-radius: 14px; padding: 16px 18px; min-width: 0; display: flex; flex-direction: column; gap: 10px;',
+head: COLS + ' background: #0f1626; color: #a9b6cc;', row: COLS + ' border-top: 1px solid #1f2a40; min-height: 40px;',
+th: 'padding: 8px 10px; font-weight: 600; white-space: nowrap;',
+td: 'padding: 6px 10px; min-width: 0; overflow-wrap: anywhere; color: #c9d5e6;',
+tdm: 'padding: 6px 10px; min-width: 0; overflow-wrap: anywhere; color: #c9d5e6; ' + MONO
+};
+const pill = 'display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; ';
+const S = [
+['s3', '(지금)', '2026-11-23 14:40 · 최신 수집값', '지금'],
+['s2', 'KR1 leaf-b EOS 올리기 전', '2026-11-22 23:05 · KR1 7대 · kim', '전'],
+['s1', 'PL-WRO 스파인 교체 전', '2026-11-15 22:10 · PL-WRO 3대 · lee', ''],
+['s0', '월간 점검 기준', '2026-11-01 09:00 · 전 법인 · kim', '']
+];
+const snaps = S.map((s) => { const on = s[0] === snap || s[0] === 's3'; return { name: s[1], meta: s[2], on: on, tag: s[0] === 's3' ? '후' : s[0] === snap ? '전' : '', tagStyle: (s[0] === 's3' || s[0] === snap) ? pill + 'background: #172f5c; border: 1px solid #60a5fa; color: #e6f0ff;' : 'display: none;', pick: () => { if (s[0] !== 's3') this.setState({ snap: s[0] }); }, style: 'display: flex; flex-direction: column; gap: 2px; align-items: flex-start; text-align: left; width: 100%; padding: 10px 12px; border: 0; border-top: 1px solid #1f2a40; color: #e6edf6; font: inherit; cursor: pointer; ' + (on ? 'background: #1a2a4a;' : 'background: transparent;') }; });
+const K = {
+down: ['포트 내려감', 'background: #5a1616; border: 1px solid #f87171; color: #ffe9e9;'],
+up: ['포트 올라옴', 'background: #16432a; border: 1px solid #22c55e; color: #eafff1;'],
+bgp: ['BGP 피어', 'background: #4a3208; border: 1px solid #f59e0b; color: #fff3d6;'],
+part: ['부품', 'background: #35205c; border: 1px solid #c084fc; color: #f1e6ff;'],
+ver: ['버전', 'background: #172f5c; border: 1px solid #60a5fa; color: #e6f0ff;'],
+attr: ['속성 바뀜', 'background: #1a2236; border: 1px solid #64748b; color: #cbd5e1;'],
+na: ['비교 못 함', 'background: #0f1626; border: 1px dashed #5d6b85; color: #a9b6cc;']
+};
+const D = [
+['down', 'kr1-leaf-b01 Ethernet17', '연결됨 · esx-kr1-21', '링크 없음', '작업 뒤 내려간 채입니다 — 케이블 · 상대 서버 확인'],
+['down', 'kr1-leaf-b02 Ethernet17', '연결됨 · esx-kr1-21', '링크 없음', '같은 서버의 양쪽 포트가 모두 내려감'],
+['up', 'kr1-leaf-b01 Ethernet40', '링크 없음', '연결됨', '새로 올라온 포트 — 설명 없음'],
+['bgp', 'kr1-leaf-b02 · VRF default', 'Established 4', 'Established 3 · Idle 1', '피어 하나가 올라오지 않음'],
+['ver', 'kr1-leaf-b01', 'EOS 4.28.6M', 'EOS 4.31.2F', '의도한 변화(업그레이드)'],
+['ver', 'kr1-leaf-b02', 'EOS 4.28.6M', 'EOS 4.31.2F', '의도한 변화(업그레이드)'],
+['attr', 'kr1-leaf-b01 Ethernet49/1', 'MTU 9214', 'MTU 1500', '업링크 MTU 가 기본값으로 돌아감 — 양끝 불일치'],
+['part', 'kr1-leaf-b02 · PowerSupply2', '정상', '정상', '달라지지 않음'],
+['na', 'kr1-spine-02 · 포트 전체', '읽음', '못 읽음(수집 실패)', '비교하지 않음 — 다음 수집 뒤 다시 보기']
+].map((r) => ({ t: r[0], kind: K[r[0]][0], kindStyle: pill + K[r[0]][1], what: r[1], before: r[2], after: r[3], read: r[4], same: r[2] === r[3] }));
+const changed = D.filter((r) => !r.same);
+const F = { all: () => true, down: (r) => r.t === 'down', up: (r) => r.t === 'up', bgp: (r) => r.t === 'bgp', ver: (r) => r.t === 'ver', attr: (r) => r.t === 'attr', na: (r) => r.t === 'na' };
+const chipStyle = (on) => 'height: 30px; padding: 0 11px; border-radius: 999px; font: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap; ' + (on ? 'border: 1px solid #2563eb; background: #1e3a8a; color: #ffffff;' : 'border: 1px solid #243049; background: #0f1626; color: #c9d5e6;');
+const chips = [['all', '달라진 것 전부'], ['down', '포트 내려감'], ['up', '포트 올라옴'], ['bgp', 'BGP 피어'], ['ver', '버전'], ['attr', '속성 바뀜'], ['na', '비교 못 함']].map((c) => ({ label: c[1], n: changed.filter(F[c[0]]).length, on: filt === c[0], style: chipStyle(filt === c[0]), pick: () => this.setState({ filt: c[0] }) }));
+const rows = changed.filter(F[filt]).map((r) => Object.assign({}, r, { afterStyle: k.tdm + ' color: #e6edf6; font-weight: 600;' }));
+const cur = S.find((s) => s[0] === snap) || S[1];
+return { k: k, snaps: snaps, chips: chips, rows: rows, pair: cur[1] + ' (' + cur[2].slice(0, 16) + ')  →  지금 (2026-11-23 14:40)', note: rows.length + '개 표시 · 달라지지 않은 항목(포트 386 · 부품 61 · 피어 23)은 접어 둡니다' };
+}
+}
+</script>
+</body>
+</html>
