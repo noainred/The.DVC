@@ -1,5 +1,5 @@
 // vCenter 목록 + 중복IP/솔루션/VMtools/스냅샷 도구 — api.js(구 2,445줄) 분할(v2.283.0). 본문은 원본 그대로, 등록 순서는 api.js 호출 순서가 보존한다.
-import { scopedVcenterIds, inUserScope, inUserWriteScope } from '../../auth/scope.js';
+import { scopedVcenterIds, inUserScope, inUserWriteScope, writeScopedVcenterIds } from '../../auth/scope.js';
 import { requirePerm, requireRole } from '../../auth/auth.js'; // v2.479(감사 S-4)
 import { isAdminDetailUser } from '../../auth/demoGuest.js';
 import { logAudit } from '../../audit.js';
@@ -21,6 +21,23 @@ import { loadVmHygieneSettings } from '../../vmhygiene/settings.js';
 import { loadVcenterConfig } from '../../config.js';
 import { numOrNull } from '../../util/numOrNull.js';
 import { memoJson, scopeKey, vcenterPickOf, vcenterPickKey } from './shared.js';
+
+/**
+ * 반증 r3350: 여러 건 풀기 감사 줄의 내용 — 이름을 **이름 경계에서** 자르고 남은 수를 밝힌다. 예전 `.slice(0, 500)` 은 이름 가운데를 표시 없이 잘라
+ *   (audit.js ‘조용한 절단 금지’) 잘린 조각이 실제 VM 이름처럼 남았고, 몇 건이 빠졌는지 detail 만으로는 알 수 없었다.
+ */
+const RELEASE_AUDIT_MAX = 500;
+function releaseAuditDetail(released) {
+  const names = (released || []).map((h) => `${h.vcenterId}/${h.vmName || h.vmId}`);
+  let out = '보류 풀기(여러 건) — ';
+  let i = 0;
+  for (; i < names.length; i += 1) {
+    const add = (i ? ', ' : '') + names[i];
+    if (i && out.length + add.length > RELEASE_AUDIT_MAX - 16) break;   // 첫 이름은 늘 싣는다(holds.js 가 id · 이름을 200자로 자른다)
+    out += add;
+  }
+  return i < names.length ? `${out} … 외 ${names.length - i}건` : out;
+}
 
 export function registerVcTools(api) {
 
@@ -224,11 +241,13 @@ api.get('/tools/snapshots/holds', requirePerm('tools'), (req, res) => {
   const snap = store.get();
   const allowed = scopedVcenterIds(req.user, snap);
   const r = loadHolds();
-  let registered = null;   // 등록부를 못 읽었으면 null — '등록에서 뺀 vCenter' 라고 단정하지 않는다
-  try { const c = loadVcenterConfig(); if (!c?.readError) registered = new Set((c?.vcenters || []).filter((v) => v && v.id != null).map((v) => String(v.id))); } catch { registered = null; }
+  // 등록부를 못 읽었으면 null — '등록에서 뺀 vCenter' 라고 단정하지 않는다. 반증 r3350(재현): JSON 손상이면 loadVcenterConfig 가 readError 없이
+  //   { file: null, vcenters: [] } 를 줘 모든 보류가 ‘VM 없음 · vCenter 등록 삭제’ 로 나왔다(풀기를 권한다) — 등록부 파일을 찾지 못한 것도 모름으로 본다.
+  let registered = null;
+  try { const c = loadVcenterConfig(); if (!c?.readError && c?.file) registered = new Set((c?.vcenters || []).filter((v) => v && v.id != null).map((v) => String(v.id))); } catch { registered = null; }
   let dcNames = new Map();
   try { dcNames = new Map(listDatacenters().map((d) => [d.id, d.name || d.id])); } catch { /* vCenter 이름으로 묶는다 */ }
-  const holds = holdRows(snap, r.holds, { allowed, pick: vcenterPickOf(req.query, snap), now: Date.now(), dcOf: (id) => datacenterOfVcenter(id), dcNames, registered,
+  const holds = holdRows(snap, r.holds, { allowed, writable: writeScopedVcenterIds(req.user, snap), pick: vcenterPickOf(req.query, snap), now: Date.now(), dcOf: (id) => datacenterOfVcenter(id), dcNames, registered,
     admin: isAdminDetailUser(req.user) });
   res.json({ ok: true, holds, unreadable: r.unreadable, daysMax: HOLD_DAYS_MAX, max: HOLDS_MAX, total: allowed ? null : r.holds.length });
 });
@@ -276,8 +295,7 @@ api.post('/tools/snapshots/holds/release', requireRole('admin'), requirePerm('to
   const r = releaseHolds(keys);
   if (!r.ok) return res.status(r.status).json({ ok: false, reason: r.reason });
   if (r.released.length) {
-    logAudit({ user: req.user?.username, action: 'snapshot.hold', target: `${r.released.length}건`,
-      detail: `보류 풀기(여러 건) — ${r.released.map((h) => `${h.vcenterId}/${h.vmName || h.vmId}`).join(', ')}`.slice(0, 500), ip: req.ip });
+    logAudit({ user: req.user?.username, action: 'snapshot.hold', target: `${r.released.length}건`, detail: releaseAuditDetail(r.released), ip: req.ip });
   }
   res.json({ ok: true, released: r.released.length });
 });

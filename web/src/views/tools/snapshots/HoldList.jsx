@@ -54,8 +54,11 @@ export default function HoldList({ rows, isAdmin, unreadable = false, daysMax = 
   const shown = useMemo(() => holdSort(rows).filter((h) => holdMatch(h, view, now))
     .filter((h) => !ql || [h.vmName, h.heldName, h.corpName, h.vcName, h.reason, h.cluster].some((s) => s && String(s).toLowerCase().includes(ql))), [rows, view, ql, now]);
   const canWrite = isAdmin && !unreadable;
-  const selKeys = (rows || []).filter((h) => sel[holdKeyOf(h)]);
-  const allOn = shown.length > 0 && shown.every((h) => sel[holdKeyOf(h)]);
+  // 반증 r3350: 쓰기 범위 밖 보류(서버 holdRows writable:false)는 풀기 · 고르기를 잠근다 — 섞어 고르면 서버가 전부 거절(403)한다.
+  const rowWrite = (h) => canWrite && h.writable !== false;
+  const selKeys = (rows || []).filter((h) => rowWrite(h) && sel[holdKeyOf(h)]);
+  const pickable = shown.filter(rowWrite);
+  const allOn = pickable.length > 0 && pickable.every((h) => sel[holdKeyOf(h)]);
   const showBy = isAdmin && (rows || []).some((h) => h.by);
 
   const askRelease = (hs, label) => { setErr(''); setExt(null); setAsk({ keys: hs, label }); };
@@ -66,7 +69,7 @@ export default function HoldList({ rows, isAdmin, unreadable = false, daysMax = 
       .catch((e) => { setBusy(false); setErr(e.message); });
   };
   const releaseLabel = (h) => (h.state === 'gone' ? `‘${h.vmName}’ 은 VM 이 없어 보류만 지웁니다.` : `‘${h.vmName}’ 의 보류를 풉니다 — 다음 판정부터 사내 기준으로 다시 봅니다.`);
-  const actions = (h) => canWrite && (
+  const actions = (h) => canWrite && (!rowWrite(h) ? <span className="snp-note">쓰기 범위 밖</span> :
     <span className="snp-hact">
       {h.state === 'has' && ExtendForm && (
         <button type="button" className="snp-btn sm" onClick={() => { setAsk(null); setExt(ext?.key === holdKeyOf(h) ? null : { key: holdKeyOf(h), vcenterId: h.vcenterId, vmId: h.vmId, days: 30, reason: h.reason || '' }); }}>연장…</button>
@@ -142,7 +145,7 @@ export default function HoldList({ rows, isAdmin, unreadable = false, daysMax = 
           <thead>
             <tr>
               {canWrite && <th className="nos"><button type="button" className={`snp-ck${allOn ? ' on' : ''}`} aria-pressed={allOn} aria-label="보이는 보류 모두 고르기"
-                onClick={() => setSel((s) => { const n = { ...s }; for (const h of shown) { if (allOn) delete n[holdKeyOf(h)]; else n[holdKeyOf(h)] = true; } return n; })}>{allOn ? '✓' : ''}</button></th>}
+                onClick={() => setSel((s) => { const n = { ...s }; for (const h of pickable) { if (allOn) delete n[holdKeyOf(h)]; else n[holdKeyOf(h)] = true; } return n; })}>{allOn ? '✓' : ''}</button></th>}
               <th>VM</th><th>지금 상태</th><th>사유</th>{showBy && <th>건 사람</th>}<th>건 날</th><th>끝나는 날</th><th>남은 기간</th>{canWrite && <th className="nos r" data-nosort>동작</th>}
             </tr>
           </thead>
@@ -152,8 +155,8 @@ export default function HoldList({ rows, isAdmin, unreadable = false, daysMax = 
               const left = holdLeftDays(h, now);
               return (
                   <tr key={k} className={`vm${sel[k] ? ' open' : ''}`}>
-                    {canWrite && <td><button type="button" className={`snp-ck${sel[k] ? ' on' : ''}`} aria-pressed={!!sel[k]} aria-label={`${h.vmName} 고르기`}
-                      onClick={() => setSel((s) => { const n = { ...s }; if (n[k]) delete n[k]; else n[k] = true; return n; })}>{sel[k] ? '✓' : ''}</button></td>}
+                    {canWrite && <td>{rowWrite(h) && <button type="button" className={`snp-ck${sel[k] ? ' on' : ''}`} aria-pressed={!!sel[k]} aria-label={`${h.vmName} 고르기`}
+                      onClick={() => setSel((s) => { const n = { ...s }; if (n[k]) delete n[k]; else n[k] = true; return n; })}>{sel[k] ? '✓' : ''}</button>}</td>}
                     <td data-sort={h.vmName}><b className="snp-hvm">{h.vmName}</b>
                       <span className="snp-sub" title={holdPlaceText(h, true)}>{holdPlaceText(h, true)}</span></td>
                     <td data-sort={h.state}><em className={`snp-tg ${HOLD_STATE_CLS[h.state] || 'x'}`}>{holdStateText(h)}</em></td>

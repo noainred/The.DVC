@@ -237,11 +237,13 @@ export const HOLD_STATES = Object.freeze(['has', 'none', 'gone', 'unknown']);
  *     등록부에서 지운 vCenter(registered 에 없음 — 등록부를 못 읽었으면 registered = null 이라 단정하지 않는다)의 보류는 gone(why 'vc-removed').
  *   · 건 계정(by)은 관리자 판본(admin)에만 — 예전 GET 라우트와 같은 규칙.
  *   · 범위(allowed) → 고른 법인(pick) 순으로 거른다(스냅샷 목록과 같다). 이름은 지금 VM 이름 → 걸 때 적어 둔 이름 → id.
+ *   · 반증 r3350: 쓰기 범위(writable — auth/scope.js writeScopedVcenterIds, null = 제한 없음) 밖 보류는 writable:false(server/CLAUDE.md v2.733 —
+ *     화면이 풀기 · 고르기를 잠근다. 없으면 쓰기를 줄인 관리자의 ‘보이는 보류 모두 고르기 → 고른 것 풀기’ 가 매번 403 으로 아무것도 풀지 못했다).
  * @param {object} snap
  * @param {object[]} holds  vmhygiene/holds.js loadHolds().holds(지난 것은 이미 빠졌다)
- * @param {{allowed?:Set<string>|null, pick?:Set<string>|null, now?:number, dcOf?:Function, dcNames?:Map<string,string>, registered?:Set<string>|null, admin?:boolean}} [o]
+ * @param {{allowed?:Set<string>|null, writable?:Set<string>|null, pick?:Set<string>|null, now?:number, dcOf?:Function, dcNames?:Map<string,string>, registered?:Set<string>|null, admin?:boolean}} [o]
  */
-export function holdRows(snap, holds, { allowed = null, pick = null, now = Date.now(), dcOf = () => '', dcNames = new Map(), registered = null, admin = false } = {}) {
+export function holdRows(snap, holds, { allowed = null, writable = null, pick = null, now = Date.now(), dcOf = () => '', dcNames = new Map(), registered = null, admin = false } = {}) {
   const inScope = (id) => (!allowed || allowed.has(id)) && (!pick || pick.has(id));
   const mine = (holds || []).filter((h) => h && h.vcenterId != null && inScope(String(h.vcenterId)));
   const vcById = new Map((snap?.vcenters || []).filter((vc) => vc && vc.id != null).map((vc) => [String(vc.id), vc]));
@@ -277,6 +279,7 @@ export function holdRows(snap, holds, { allowed = null, pick = null, now = Date.
       vmName: (v && typeof v.name === 'string' && v.name) || h.vmName || h.vmId, heldName: h.vmName || null,
       vcName: String(vc?.name || vcId), ...corpOf(vcId), cluster: (v && v.cluster) || null,
       until: h.until, reason: h.reason, at: h.at ?? null, by: admin ? (h.by || null) : null,
+      writable: !writable || writable.has(vcId),
       state, why,
       snapshotCount: state === 'has' ? numOrNull(v.snapshotCount) : state === 'none' ? 0 : null,
       snapGB: state === 'has' ? snapGbOf(v) : null,
