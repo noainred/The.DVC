@@ -119,4 +119,4 @@ eval curl $A "'$Y/types/metricValue/instances?filter=path%20EQ%20%22sp.*.net.dev
 - 웹: `views/tools/storageIfaces/`(전 장비 표 · 장비 한 대 · 공용 조각 · 문구) · 탭 연결 `StorageMonTool.jsx` · 알림 라벨 `Alerts2.jsx`.
 - 시안과 다른 점: ① 400px 의 포트 목록은 카드 대신 STable 가로 스크롤(저장소 표 규약 — 정렬 유지) ② KPI 에 '링크 다운' 을 따로 둬 7개 ③ 장비 화면은 새 주소가 아니라 탭 안 전환(← 전 장비)
   ④ 상태 ③(엣지가 아직 올리지 않음)은 '포트 구성을 아직 읽지 못했습니다' · 수집 실패는 따로 문구 ⑤ 이더넷 SP 균형 막대 추가.
-- 데모 수치(목 서버 · Chromium 1440/400 판독 18:27~18:52): UNITY-SJC-01 SPA FC0 사용률 86%(포화 근접) · SPA FC1 8 Gb(저하) · SPB ETH3 1 Gb(저하) · FC SP 편중 82.9 : 17.1 · UNITY-SEL-02 SPB ETH3 링크 다운(변화 이력).
+- 데모 수치(목 서버 · Chromium 1440/400 판독 15:40~15:46 KST — 파일 기록 시각으로 확인. 처음 이 줄에 18:27~18:52 라 적은 것은 date 로 뽑지 않은 짐작이었다 — 정정): UNITY-SJC-01 SPA FC0 사용률 86%(포화 근접) · SPA FC1 8 Gb(저하) · SPB ETH3 1 Gb(저하) · FC SP 편중 82.9 : 17.1 · UNITY-SEL-02 SPB ETH3 링크 다운(변화 이력).
