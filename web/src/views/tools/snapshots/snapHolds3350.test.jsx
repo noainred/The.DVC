@@ -35,6 +35,11 @@ describe('보류 — 거르기 · 세기(서버가 정한 상태 그대로)', ()
     expect(T.holdStateText(rows.find((r) => r.vmId === 'vp:x'))).toBe('확인 못 함 · 첫 수집 중');
     expect(T.holdStateText(rows.find((r) => r.vmId === 'va:has'))).toBe('스냅샷 3개 · 120 GB · 41일');
   });
+  it('자리 글 — 법인 이름이 vCenter 이름과 같으면 한 번 · 사라진 VM 은 걸 때의 이름', () => {
+    expect(T.holdPlaceText({ corpName: 'VC-A', vcName: 'VC-A', cluster: 'CL1', state: 'has' })).toBe('VC-A · CL1');
+    expect(T.holdPlaceText({ corpName: 'Seoul 법인', vcName: 'VC-A', cluster: 'CL1', state: 'has' }, false)).toBe('Seoul 법인 · VC-A');
+    expect(T.holdPlaceText({ corpName: 'VC-A', vcName: 'VC-A', state: 'gone', heldName: 'x' })).toBe('VC-A · 걸 때의 이름');
+  });
   it('빠른 보기 · 남은 일수 · 기본 정렬(끝나는 날이 이른 것부터)', () => {
     expect(rows.filter((r) => T.holdMatch(r, 'soon', NOW)).map((r) => r.vmId).sort()).toEqual(['va:none', 'vp:x']);
     expect(T.holdLeftDays(rows.find((r) => r.vmId === 'va:has'), NOW)).toBe(15);

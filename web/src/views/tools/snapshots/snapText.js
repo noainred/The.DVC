@@ -472,3 +472,11 @@ export function holdSort(rows) {
   return [...(rows || [])].sort((a, b) => (numOrNull(a.until) ?? Infinity) - (numOrNull(b.until) ?? Infinity) || String(a.vmName).localeCompare(String(b.vmName)));
 }
 export const holdKeyOf = (h) => `${h.vcenterId}\n${h.vmId}`;
+/** 보류 줄의 자리 글 — 법인 · vCenter(법인 이름이 vCenter 이름과 같으면 한 번) · 클러스터 · 사라진 VM 이면 ‘걸 때의 이름’(이름이 지금 것이 아님). */
+export function holdPlaceText(h, withCluster = true) {
+  const parts = [h?.corpName];
+  if (h?.vcName && h.vcName !== h.corpName) parts.push(h.vcName);
+  if (withCluster && h?.cluster) parts.push(h.cluster);
+  if (h?.state === 'gone' && h.heldName) parts.push('걸 때의 이름');
+  return parts.filter(Boolean).join(' · ');
+}

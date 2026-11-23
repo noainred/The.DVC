@@ -13,7 +13,7 @@ import { STable } from '../../../components/STable.jsx';
 import { useNarrowScreen } from '../../../components/useNarrowScreen.js';
 import { requireChanged } from '../../changeResult.js';
 import { numOrNull } from '../../../numOrNull.js';
-import { HOLD_VIEWS, HOLD_STATE_CLS, holdMatch, holdSummary, holdStateText, holdLeftDays, holdSort, holdKeyOf, dateText } from './snapText.js';
+import { HOLD_VIEWS, HOLD_STATE_CLS, holdMatch, holdSummary, holdStateText, holdLeftDays, holdSort, holdKeyOf, holdPlaceText, dateText } from './snapText.js';
 
 /** 보류 풀기 요청 → 안내 글. 여러 건 · 한 건 모두 이 한 경로(서버가 하나라도 걸리면 아무것도 풀지 않는다). */
 export function releaseHoldKeys(keys, post = postJson) {
@@ -128,7 +128,7 @@ export default function HoldList({ rows, isAdmin, unreadable = false, daysMax = 
         <div className="snp-hcards">
           {shown.map((h) => (
             <div key={holdKeyOf(h)} className={`snp-hcard${h.state === 'gone' ? ' gone' : ''}`}>
-              <div className="hd"><span className="nm"><b>{h.vmName}</b><span className="snp-note">{h.corpName} · {h.vcName}{h.state === 'gone' && h.heldName ? ' · 걸 때의 이름' : ''}</span></span>
+              <div className="hd"><span className="nm"><b>{h.vmName}</b><span className="snp-note">{holdPlaceText(h, false)}</span></span>
                 <em className={`snp-tg ${HOLD_STATE_CLS[h.state] || 'x'}`}>{holdStateText(h)}</em></div>
               <div className="rs">{h.reason || '—'}</div>
               <div className="ft"><LeftBar h={h} now={now} daysMax={daysMax} /><span className="snp-mono">{dateText(h.until)}</span></div>
@@ -155,7 +155,7 @@ export default function HoldList({ rows, isAdmin, unreadable = false, daysMax = 
                     {canWrite && <td><button type="button" className={`snp-ck${sel[k] ? ' on' : ''}`} aria-pressed={!!sel[k]} aria-label={`${h.vmName} 고르기`}
                       onClick={() => setSel((s) => { const n = { ...s }; if (n[k]) delete n[k]; else n[k] = true; return n; })}>{sel[k] ? '✓' : ''}</button></td>}
                     <td data-sort={h.vmName}><b className="snp-hvm">{h.vmName}</b>
-                      <span className="snp-sub">{h.corpName} · {h.vcName}{h.cluster ? ` · ${h.cluster}` : ''}{h.state === 'gone' && h.heldName ? ' · 걸 때의 이름' : ''}</span></td>
+                      <span className="snp-sub" title={holdPlaceText(h, true)}>{holdPlaceText(h, true)}</span></td>
                     <td data-sort={h.state}><em className={`snp-tg ${HOLD_STATE_CLS[h.state] || 'x'}`}>{holdStateText(h)}</em></td>
                     <td className="snp-hrs">{h.reason || '—'}</td>
                     {showBy && <td className="snp-mono">{h.by || '—'}</td>}
