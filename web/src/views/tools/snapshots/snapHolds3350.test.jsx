@@ -9,7 +9,7 @@ const role = { admin: true };
 vi.mock('../../../api.js', async (orig) => ({ ...(await orig()), fetchJson: () => new Promise(() => {}), canCsv: () => true, toolAllowed: () => true, hasRole: () => role.admin }));
 const T = await import('./snapText.js');
 const { default: SnapshotTool } = await import('./SnapshotTool.jsx');
-const { releaseHoldKeys } = await import('./HoldList.jsx');
+const { releaseHoldKeys, extendDays } = await import('./HoldList.jsx');
 
 const DAY = 86_400_000;
 const NOW = Math.floor(Date.now() / 3_600_000) * 3_600_000;
@@ -105,5 +105,14 @@ describe('400px 법인 카드 1열(⑮)', () => {
     expect(narrow).toMatch(/\.snp-cards \{ grid-template-columns: minmax\(0, 1fr\);/);
     expect(narrow).not.toMatch(/\.snp-cards \{ grid-template-columns: repeat\(2/);
     expect(narrow).toMatch(/\.snp-cc \.cn span, \.snp-cc \.tx \{ white-space: normal;/);
+  });
+});
+
+describe('연장 기본 기간(반증 r3350 D2)', () => {
+  it('남은 일수보다 짧게 줄이지 않는다 — 남은 일수 이상인 가장 짧은 선택지', () => {
+    expect(extendDays({ until: NOW + 80 * DAY }, NOW)).toBe(90);
+    expect(extendDays({ until: NOW + 15 * DAY }, NOW)).toBe(30);
+    expect(extendDays({ until: NOW + 3 * DAY }, NOW)).toBe(7);
+    expect(extendDays({ until: null }, NOW)).toBe(30);
   });
 });

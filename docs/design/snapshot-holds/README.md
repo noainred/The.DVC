@@ -57,4 +57,6 @@
   - 연장은 ‘스냅샷 있음’ 상태에만(시안은 ‘대상 없음 · 스냅샷 없음’ 에만 두지 않았다 — ‘확인 못 함’ 도 VM 이 있는지 모르므로 뺐다).
   - 표의 사유 칸은 바닥 폭 220px(Chromium 1440 판독 — 줄바꿈 금지 칸들에 밀려 약 70px 이 됐다).
   - 400px 법인 카드는 시안처럼 왼쪽 글자 · 오른쪽 막대와 추이 그림이지만, 카드 첫 줄(이름 · 넘김 수)은 두 칸을 걸친다(넘김 수가 이름 옆에 그대로).
-- 회귀: `server/test/snapHolds3350.test.js` · `web/src/views/tools/snapshots/snapHolds3350.test.jsx`. 규칙: `docs/rules/vcenter.md` ‘스냅샷 보류 목록’.
+  - 쓰기 범위 밖 보류(조회만 되는 vCenter)는 풀기 · 연장 · 고르기 대신 ‘쓰기 범위 밖’(반증 r3350).
+  - 연장 창의 기본 기간은 남은 일수 이상인 가장 짧은 선택지(시안은 고정 30일 — 남은 80일이면 기간을 줄였다).
+- 회귀: `server/test/snapHolds3350.test.js` · `rebut3350.test.js` · `web/src/views/tools/snapshots/snapHolds3350.test.jsx` · `rebut3350.test.jsx`. 규칙: `docs/rules/vcenter.md` ‘스냅샷 보류 목록’.

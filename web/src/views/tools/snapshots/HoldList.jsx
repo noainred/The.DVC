@@ -15,6 +15,16 @@ import { requireChanged } from '../../changeResult.js';
 import { numOrNull } from '../../../numOrNull.js';
 import { HOLD_VIEWS, HOLD_STATE_CLS, holdMatch, holdSummary, holdStateText, holdLeftDays, holdSort, holdKeyOf, holdPlaceText, dateText } from './snapText.js';
 
+/**
+ * 연장 창의 기본 기간(반증 r3350 D2): 창은 ‘오늘부터 N일’ 로 다시 건다 — 고정 30일이면 80일 남은 보류의 ‘연장’ 이 기간을 줄였다.
+ *   남은 일수 이상인 가장 짧은 선택지(7 · 14 · 30 · 60 · 90)를 기본으로 둔다(남은 일수를 모르면 30).
+ */
+export function extendDays(h, now = Date.now()) {
+  const left = holdLeftDays(h, now);
+  if (left == null) return 30;
+  return [7, 14, 30, 60, 90].find((d) => d >= left) ?? 90;
+}
+
 /** 보류 풀기 요청 → 안내 글. 여러 건 · 한 건 모두 이 한 경로(서버가 하나라도 걸리면 아무것도 풀지 않는다). */
 export function releaseHoldKeys(keys, post = postJson) {
   return post('/tools/snapshots/holds/release', { keys: keys.map((k) => ({ vcenterId: k.vcenterId, vmId: k.vmId })) })
@@ -72,7 +82,7 @@ export default function HoldList({ rows, isAdmin, unreadable = false, daysMax = 
   const actions = (h) => canWrite && (!rowWrite(h) ? <span className="snp-note">쓰기 범위 밖</span> :
     <span className="snp-hact">
       {h.state === 'has' && ExtendForm && (
-        <button type="button" className="snp-btn sm" onClick={() => { setAsk(null); setExt(ext?.key === holdKeyOf(h) ? null : { key: holdKeyOf(h), vcenterId: h.vcenterId, vmId: h.vmId, days: 30, reason: h.reason || '' }); }}>연장…</button>
+        <button type="button" className="snp-btn sm" onClick={() => { setAsk(null); setExt(ext?.key === holdKeyOf(h) ? null : { key: holdKeyOf(h), vcenterId: h.vcenterId, vmId: h.vmId, days: extendDays(h, now), reason: h.reason || '' }); }}>연장…</button>
       )}
       <button type="button" className="snp-btn sm" onClick={() => askRelease([h], releaseLabel(h))}>풀기</button>
     </span>
