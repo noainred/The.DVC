@@ -8,6 +8,7 @@ import path from 'node:path';
 import { config, loadVcenterConfig, clampIntervalMs } from '../config.js';
 import { poolRun } from '../util/pool.js';   // v2.447: vCenter 병렬 수집(감사 T2) · v2.579: routes 의존 제거
 import { store } from '../store.js';
+import { isStopped } from '../security/emergencyStop.js';
 import { collectVCenterEvents, CLEANUP_TIMEOUT_MS, EVENT_BATCH_ROWS as COLLECTOR_BATCH_ROWS } from '../vcenter/soapClient.js';
 import { vcAuthGuard, isVcAuthError } from '../vcenter/restClient.js';
 import { splitDirectCollectTargets } from '../vcenter/collectTarget.js'; // v2.732(B4-01): 직접 수집 대상 판정(store.js 주 폴러와 같은 조건)
@@ -594,6 +595,8 @@ export async function pollLogsOnce({ manual = false, budgetMs: budgetOverride = 
   const s = loadLogSettings();
   // 꺼져 있으면 skipped:true(수집하지 않음) — '0건 수집' 과 다르다(화면이 구분한다).
   if (!s.enabled) { lastRun = { at: Date.now(), collected: 0, skipped: true }; return lastRun; }
+  // 164회차(결정 6): 긴급중단(2인 승인) 동안은 vCenter 로 나가지 않는다 — store.refresh 와 같은 판정(isStopped) · 수동도 같다(주 폴러의 '지금 수집' 도 멈춘다)
+  if (isStopped()) { lastRun = { at: Date.now(), collected: 0, skipped: true, emergencyStop: true }; return lastRun; }
   running = true;
   runningSince = Date.now();
   const failed = [];   // v2.743(WEB-04): 이번 주기에 인증 외 사유로 수집하지 못한 vCenter — 반환에만 싣는다(아래)

@@ -35,6 +35,7 @@ import { entryMac, macInfo } from '../../ipam/macVendor.js'; // v2.999: 스캔 �
 import { renderIpamWorkbook } from '../../ipam/excel.js'; // v2.741 LEFT-01: 조립·직렬화는 워커 스레드에서
 import { acquireExport } from '../../util/exportBusy.js'; // v2.575 — 내보내기 동시 1건 가드
 import { todayStamp, DAY_OFFSET_MIN } from "../../util/dayKey.js";
+import { textFields, listOrText, rejectNonText } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 
 /*
  * 결정(56~75 남긴 것) 60/62: 손상 · 읽기 오류 중 IPAM 조회가 빈 목록을 '없음' 으로 보이지 않게 표지(loadError — 사유 요약 · 읽기 오류 여부)를 싣고,
@@ -196,6 +197,9 @@ api.put('/tools/ipam/subnet-note', canWrite, requirePerm('tools'), (req, res) =>
   const denied = subnetNoteWriteDenied(isFullReadWriteScope(req.user, store.get()) ? null : new Set());
   if (denied) return res.status(403).json({ error: denied });
   const b = req.body || {};
+  // 165회차(163 반증 — 재현): ① 옆 칸 purpose · desc 가 객체면 여전히 500('write-failed' — 쓰기 실패가 아니다)이었다 ② 163 의 base 검사가 위 범위 판정(403)보다 앞이라
+  //   범위 계정이 403 대신 400(칸 이름)을 받았다 — 세 칸을 범위 판정 뒤 · 저장 앞에서 함께 본다.
+  if (rejectNonText(res, b, ['base', 'purpose', 'desc'])) return undefined;
   let r;
   try { r = setSubnetNote(b.base, { purpose: b.purpose, desc: b.desc }, req.user?.username); }
   catch (e) { return res.status(500).json({ error: `저장하지 못했습니다: ${e?.code || 'write-failed'}` }); }
@@ -315,7 +319,7 @@ api.get('/tools/ipam/annotation', requirePerm('tools'), (req, res) => {
   const le = annotationsLoadMarker();   // 62: 못 읽은 동안 '메모 없음' 으로 보이지 않게
   res.json({ ip, annotation: getAnnotation(ip), ...(le ? { loadError: le } : {}) });
 });
-api.put('/tools/ipam/annotation', canWrite, requirePerm('tools'), (req, res) => {
+api.put('/tools/ipam/annotation', canWrite, requirePerm('tools'), textFields('ip'), (req, res) => {
   const { ip, memo, tags } = req.body || {};
   const snap = store.get();
   const allowed = scopedVcenterIds(req.user, snap);
@@ -325,6 +329,8 @@ api.put('/tools/ipam/annotation', canWrite, requirePerm('tools'), (req, res) => 
     return res.status(404).json({ ok: false, reason: '범위 밖 IP 입니다.' });
   }
   if (writeScopeDenied(req, snap, owners, ip, claimed)) return res.status(403).json({ ok: false, reason: WRITE_DENIED_MSG });
+  // 165회차(163 반증 — 재현): 옆 칸 memo · tags 가 객체면 setAnnotation 의 String() 이 던져 500 이었다 — 범위 판정(404 · 403) 뒤 · 저장 앞에서 400(tags 는 글자 또는 목록 — 목록은 그대로 받는다)
+  if (rejectNonText(res, { memo, tags: Array.isArray(tags) ? undefined : tags }, ['memo', 'tags'])) return undefined;
   const r = setAnnotation(ip, { memo, tags }, req.user);
   res.status(writeStatus(r)).json(r);   // 60/62: 파일을 못 읽은 동안은 409
 });
@@ -387,7 +393,8 @@ api.delete('/tools/ipam/ip/:ip', canWrite, requirePerm('tools'), (req, res) => {
   res.json(r);
 });
 // 여러 IP 일괄 관리(예: 한 대역 전체를 'reserved'로). body: { ips:[...], ...fields }.
-api.post('/tools/ipam/bulk', canWrite, requirePerm('tools'), (req, res) => {
+// 165회차(163 반증 — 재현): 163 의 '수정 전 500 표' 에 있던 자리인데 고쳐지지 않았다(ips 객체 → splitBatchIps 의 String() 이 던짐). ips 는 글자 또는 목록 — 화면은 목록을 보낸다.
+api.post('/tools/ipam/bulk', canWrite, requirePerm('tools'), listOrText('ips'), (req, res) => {
   const { ips, ...fields } = req.body || {};
   if (fields.claimedVcenterId && !isKnownVcenter(fields.claimedVcenterId)) return res.status(400).json({ ok: false, reason: '알 수 없는 vCenter입니다.' });
   const snap = store.get();
@@ -412,6 +419,8 @@ api.post('/tools/ipam/bulk', canWrite, requirePerm('tools'), (req, res) => {
       if (v?.status === 403) return res.status(403).json({ ok: false, reason: `수정 권한이 없는 vCenter 의 IP 가 포함됐습니다(${ip}). 전체를 적용하지 않았습니다.` });
     }
   }
+  // 165회차(163 반증 — 재현): 옆 칸(관리상태 · 소유자 · 메모 …)이 객체면 overrides.clean 의 String() 이 던져 500 이었다 — 범위 판정 뒤 · 저장 앞에서 400
+  if (rejectNonText(res, fields, ['status', 'owner', 'label', 'purpose', 'requester', 'assigner', 'deviceType', 'hostnameOverride', 'note', 'reservedUntil'])) return undefined;
   const r = setOverrideBatch(list, fields, req.user, { rejectInvalid: true });
   if (r.ok) logAudit({ user: req.user?.username, action: 'IP 관리상태 일괄 적용', target: `${r.changed}개 IP`, detail: JSON.stringify(fields).slice(0, 500) });
   res.status(writeStatus(r)).json(r);   // 60/62: 409
@@ -449,8 +458,10 @@ api.get('/tools/ipam/policies/preview', requirePerm('tools'), (req, res) => {
   const r = specToRange(String(req.query.spec || ''));
   res.json({ spec: req.query.spec || '', valid: !!r, size: r?.size ?? 0, lo: r?.lo ?? null, hi: r?.hi ?? null });
 });
+/** 165회차: 대역 정책 저장(rangePolicies.clean)이 String() · Number() 로 바꾸는 옆 칸 — 생성 · 수정이 함께 쓴다(spec · id 는 163 의 문지기가 본다 · claimedVcenterId 는 위 isKnownVcenter 가 거른다). */
+const POLICY_TEXT_FIELDS = ['status', 'priority', 'owner', 'label', 'deviceType', 'note'];
 // 정책 생성. body: { spec, status?, priority?, claimedVcenterId?, owner?, label?, deviceType?, note?, enabled? }.
-api.post('/tools/ipam/policies', canWrite, requirePerm('tools'), (req, res) => {
+api.post('/tools/ipam/policies', canWrite, requirePerm('tools'), textFields('id', 'spec'), (req, res) => {
   if (req.body?.claimedVcenterId && !isKnownVcenter(req.body.claimedVcenterId)) return res.status(400).json({ ok: false, reason: '알 수 없는 vCenter입니다.' });
   // 범위 제한 계정은 자기 vCenter 에 귀속된 정책만 만들 수 있다(전역 정책은 전 vCenter 뷰에 영향).
   const allowedP = scopedVcenterIds(req.user, store.get());
@@ -467,12 +478,14 @@ api.post('/tools/ipam/policies', canWrite, requirePerm('tools'), (req, res) => {
     if (bad) return res.status(400).json({ ok: false, reason: bad });
   }
   { const no = rangePoliciesWriteRefusal(); if (no) return res.status(503).json(no); }   // 107회차: 설정 파일 읽기 오류 중에는 저장하지 않는다(사유를 화면까지)
+  // 165회차(163 반증 — 재현): 옆 칸(상태 · 우선순위 · 소유자 · 이름 · 장치 종류 · 메모)이 객체면 rangePolicies.clean 의 String() · Number() 가 던져 500 이었다 — 범위 판정 뒤 · 저장 앞에서 400
+  if (rejectNonText(res, req.body, POLICY_TEXT_FIELDS)) return undefined;
   const r = setPolicy(req.body || {}, req.user);
   if (r.ok) { logAudit({ user: req.user?.username, action: '대역정책 저장', target: `정책 ${r.policy.spec}`, detail: JSON.stringify(r.policy).slice(0, 800) }); try { store.syncLedger(); } catch { /* */ } }
   res.status(r.ok ? 200 : 400).json(r);
 });
 // 정책 수정(부분). :id.
-api.put('/tools/ipam/policies/:id', canWrite, requirePerm('tools'), (req, res) => {
+api.put('/tools/ipam/policies/:id', canWrite, requirePerm('tools'), textFields('spec'), (req, res) => {
   if (req.body?.claimedVcenterId && !isKnownVcenter(req.body.claimedVcenterId)) return res.status(400).json({ ok: false, reason: '알 수 없는 vCenter입니다.' });
   // 범위 제한 계정: 기존 정책·변경 후 귀속 모두 자기 범위여야 한다(범위 밖 정책 탈취·전역화 차단).
   const allowedP = scopedVcenterIds(req.user, store.get());
@@ -501,6 +514,7 @@ api.put('/tools/ipam/policies/:id', canWrite, requirePerm('tools'), (req, res) =
     if (bad) return res.status(400).json({ ok: false, reason: bad });
   }
   { const no = rangePoliciesWriteRefusal(); if (no) return res.status(503).json(no); }   // 107회차: 설정 파일 읽기 오류 중에는 저장하지 않는다(사유를 화면까지)
+  if (rejectNonText(res, req.body, POLICY_TEXT_FIELDS)) return undefined;   // 165회차: 생성(POST)과 같은 옆 칸 — 같은 clean 을 지난다
   const r = setPolicy({ ...(req.body || {}), id: req.params.id }, req.user);
   if (r.ok) { logAudit({ user: req.user?.username, action: '대역정책 수정', target: `정책 ${r.policy.spec}`, detail: JSON.stringify(r.policy).slice(0, 800) }); try { store.syncLedger(); } catch { /* */ } }
   res.status(r.ok ? 200 : 400).json(r);

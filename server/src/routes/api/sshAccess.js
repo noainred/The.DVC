@@ -15,6 +15,7 @@ import { reauth } from './reauth.js';
 import { logAudit, listAuditByActionPrefix } from '../../audit.js';
 import * as SVC from '../../sshaccess/service.js';
 import * as ST from '../../sshaccess/state.js';   // 사건 목록 조회만(쓰기는 전부 service — 법인 사용 중지도 service 가 서버 목록을 함께 적는다)
+import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 
 const adminOnly = requireRole('admin');
 /** 조회 게이트 — 관리자 → 설정 소유자 등급. */
@@ -198,7 +199,7 @@ export function registerSshAccess(api) {
     ...(b.keyRef !== undefined ? { keyRef: t(b.keyRef, 32) } : {}), ...(typeof b.password === 'string' ? { password: b.password } : {}), ...(b.clearPassword === true ? { clearPassword: true } : {}),
     ...(b.features !== undefined ? { features: featuresOf(b.features) } : {}), ...(b.rotateBy !== undefined ? { rotateBy: b.rotateBy === null || b.rotateBy === '' ? null : t(b.rotateBy, 16) } : {}),
   });
-  api.post('/settings/ssh-access/accounts', adminOnly, requireSettingsOwner, pwVaultFirst,
+  api.post('/settings/ssh-access/accounts', adminOnly, requireSettingsOwner, textFields('id', 'name', 'os', 'logon', 'domain', 'keyRef', 'verifyServerId', 'rotateBy'), pwVaultFirst,
     judgeFirst((b) => { const { otp, ...rest } = b; void otp; return SVC.saveAccountChecked({ input: accountInput(rest), verifyServerId: t(rest.verifyServerId, 64), dryRun: true }); }), reauth, async (req, res) => {
     const { otp, ...b } = bodyOf(req); void otp;
     const r = await SVC.saveAccountChecked({ input: accountInput(b), verifyServerId: t(b.verifyServerId, 64), by: who(req) });

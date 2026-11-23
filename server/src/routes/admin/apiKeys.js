@@ -19,6 +19,7 @@ import {
   issueApiKey, revokeApiKey, deleteApiKey, updateApiKey, listApiKeys, apiKeysLoadError, DEFAULT_RPM, KEY_PREFIX,
 } from '../../publicapi/keys.js';
 import { GROUPS, ENDPOINTS } from '../../publicapi/allowlist.js';
+import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 
 export function registerApiKeys(adminRouter) {
   // v2.611 AUTHZ2611-04: 연동 키는 전 함대 조회 자격증명이다(v2.562 '백업·토큰과 같은 등급'). 범위 제한 계정(설정 소유자여도)이
@@ -65,7 +66,7 @@ export function registerApiKeys(adminRouter) {
    * 발급. **평문은 이 응답에만** 있다.
    * ⚠ 응답의 `plaintext` 를 로그·감사에 남기지 말 것.
    */
-  adminRouter.post('/api-keys', owner, (req, res) => {
+  adminRouter.post('/api-keys', owner, textFields('name', 'note'), (req, res) => {
     const { key, plaintext, issues, status, code } = issueApiKey(req.body || {}, req.user?.username || '');
     // 97회차 F1: 키 파일 읽기 오류면 409(settings-unreadable — 원본을 덮지 않으려고 거절)
     if (!key) return res.status(status || 400).json({ ok: false, reason: issues[0] || '발급할 수 없습니다.', issues, ...(code ? { code } : {}) });

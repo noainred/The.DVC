@@ -69,6 +69,24 @@ const parseMonitors = (text) => {
   return openSecretsDeep(p); // v2.296 캡처 호스트 SSH 자격증명 복호(메모리 평문)
 };
 const _reader = makeJsonFileReader(() => FILE, { parse: parseMonitors, preserve: false, tag: 'netmon' });   // 보존은 아래 backupCorrupt(사유 요약 문구 — RV2744F-LOAD-01)
+/*
+ * 165회차(163 반증 — 재현): 163 은 '받을 때' 만 막았다 — 그 전 판이 받아 저장해 둔 글자가 아닌 id · 접속 칸(화면 밖에서 API 를 부른 흔적)은 그대로 남아
+ *   목록(redact → netmonSideDev 의 템플릿 · String())이 던졌고(GET /net/monitors 가 늘 500), id 가 글자가 아니라 DELETE /:id 로 지울 수도 없었다(복구는 파일 직접 편집뿐).
+ *   읽을 때 고친다: 글자가 아닌 id 는 새 글자 id 로(목록에 보이고 지울 수 있게), 접속 칸의 객체 · 배열은 비운다(그 값으로는 접속할 수 없다 — 다시 입력).
+ *   읽기가 파일을 쓰지는 않는다 — 다음 저장 · 삭제 때 고친 모양으로 남는다.
+ */
+function healStoredShapes(list) {
+  for (const m of list) {
+    if (!m || typeof m !== 'object') continue;
+    if (typeof m.id !== 'string' || !m.id) m.id = `mon_fix${randomBytes(4).toString('hex')}`;
+    for (const side of ['hostA', 'hostB']) {
+      const h = m[side];
+      if (!h || typeof h !== 'object' || Array.isArray(h)) continue;
+      for (const k of ['host', 'port', 'username', 'password', 'privateKey']) if (h[k] != null && typeof h[k] === 'object') h[k] = '';
+    }
+  }
+  return list;
+}
 let cache = null;
 let _readError = false;
 function load() {
@@ -76,7 +94,7 @@ function load() {
   const r = _reader.read();
   if (r.kind === 'read-error') { _readError = true; cache = []; return cache; }   // 빈 목록은 자리 표시 — 다음 load() 가 다시 판정한다(간격 30초)
   _readError = false;
-  if (r.kind === 'ok') cache = r.value;
+  if (r.kind === 'ok') cache = healStoredShapes(r.value);
   else { cache = []; if (r.kind === 'corrupt') backupCorrupt(r.error); }
   return cache;
 }

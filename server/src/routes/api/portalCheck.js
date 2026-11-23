@@ -79,6 +79,7 @@ import { isMockVcenter } from '../../mock/generator.js';
 import { getInventory } from '../../central/inventory.js';
 import { isiduEdgeStatus } from '../../central/isiduEdge.js';   // v2.954 법인별 실환경 확인 — 아이실론 분리 실행
 import { gatherArchInputs, scanArch, scopeArchPaths, ARCH_CODES, ARCH_STATES } from '../../portalcheck/archScan.js';
+import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 
 // vc 별 위임 여부만 필요하다 — redact() 는 이미 password 를 뺀다(vcenter/registry.js:45).
 // v2.575 IMP-11: store.js 의 값을 그대로 쓴다(두 벌이면 판정 기준이 조용히 갈린다).
@@ -255,7 +256,7 @@ api.get('/tools/portal-check/tokens', adminOnly, fullScopeOnly, (_req, res) => {
  *   **중앙 저장값 == 엣지 저장값이 증명**된다(지문 8자 대조와 달리 확정이다).
  * ⚠ 본문에서 읽는 것은 `agent`(이름 필터)뿐이다 — url·token 을 받지 않는다.
  */
-api.post('/tools/portal-check/tokens/probe', adminOnly, fullScopeOnly, async (req, res) => {
+api.post('/tools/portal-check/tokens/probe', adminOnly, fullScopeOnly, textFields('agent'), async (req, res) => {
   if (running) return res.status(409).json({ ok: false, reason: `이미 점검이 진행 중입니다(${running}).` });
   const only = norm(req.body?.agent);
   const scan = localScan();
@@ -291,7 +292,7 @@ api.post('/tools/portal-check/tokens/probe', adminOnly, fullScopeOnly, async (re
  *   그때는 '엣지 저장값이 무엇인지' 를 알 길이 없다. 화면이 그 사실과 다음 단서(배포 대상 대조·
  *   그 엣지 호스트 직접 확인)를 말한다.
  */
-api.post('/tools/portal-check/tokens/edge-pull', adminOnly, fullScopeOnly, async (req, res) => {
+api.post('/tools/portal-check/tokens/edge-pull', adminOnly, fullScopeOnly, textFields('agent'), async (req, res) => {
   if (running) return res.status(409).json({ ok: false, reason: `이미 점검이 진행 중입니다(${running}).` });
   const only = norm(req.body?.agent);
   const selfProbe = req.body?.selfProbe !== false;

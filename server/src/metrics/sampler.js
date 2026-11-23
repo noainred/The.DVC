@@ -105,6 +105,14 @@ export function samplingUnreadReasons(snap, { stopped, frozenBefore } = {}) {
 }
 /** @internal 시험 전용 */
 export function _resetStoppedSeenForTest() { _stoppedSeenAt = 0; }
+/**
+ * 164회차(결정 6 '같은 판정으로 맞춰'): 스냅샷이 긴급중단으로 얼어 있는가 — 위 samplingUnreadReasons 와 **같은 판정**(긴급중단 중 · 푼 뒤 다음 병합 전).
+ *   스냅샷 이력 하루 기록(snaphist) · VM 수량 슬롯(vmtrack)이 얼어 있는 값을 지금 값으로 남기지 않게 쓴다(사본을 두지 말 것).
+ */
+export function snapshotFrozenByStop(snap) {
+  for (const r of samplingUnreadReasons(snap).values()) if (r === 'stopped') return true;
+  return false;
+}
 
 /**
  * VM 할당 vs 실사용 집계 행 생성(v2.374) — vCenter 별 + 전체('').

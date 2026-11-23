@@ -26,6 +26,7 @@ import { poolRun } from '../../util/pool.js'; // v2.575 IMP-08 — 동시성 풀
 import { strictIpv4Num } from '../../util/ipv4.js';
 import { ipBlockReason } from '../../util/ssrfBlock.js';
 import { accessMoved } from '../../util/secretCarry.js';   // 98회차: 연결 시험의 비밀 승계 판정 — 저장 경로(gpu/settings.js carriedPw)와 같은 판정
+import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 
 // v2.611 AUTHZ2611: 전 법인 등록부·동작은 전체 범위 계정만(v2.607 fleetWideOnly 의 형제 등록부).
 const fleetOnly = fullScopeOnlyWith('물리 GPU 서버·엣지 배포 설정·엣지 사용자는 전 법인에 걸친 등록부라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.');
@@ -325,7 +326,7 @@ adminRouter.get('/edge-users/:agent', adminOnly, fleetReadOnly, (req, res) => {
 // 전 엣지의 소유자가 되어(엣지 백업 다운로드 → 엣지 AUTH_SECRET·TOTP 시크릿) 로컬의 소유자
 // 경계를 우회한다 — 백업 라우트와 같은 등급으로 올린다. 조회(GET)는 v2.622(감사 SEC-03)부터 fleetReadOnly(전체 범위만).
 // 사용자 추가/수정(비밀번호 주면 해시로 변환 저장). Body { username, name, role, password }.
-adminRouter.post('/edge-users/:agent', adminOnly, fleetOnly, requireSettingsOwner, (req, res) => {
+adminRouter.post('/edge-users/:agent', adminOnly, fleetOnly, requireSettingsOwner, textFields('username', 'name', 'role', 'password'), (req, res) => {
   const r = upsertAgentUser(req.params.agent, req.body || {});
   res.status(r.ok ? 200 : (r.status || 400)).json(r.ok ? { ok: true, users: listAgentUsers(req.params.agent) } : r);
 });
@@ -346,7 +347,7 @@ adminRouter.get('/gpu-physical', adminOnly, (req, res) => {
   // 95회차 F1: 등록부 로드 오류(손상 · 읽기 오류 · 보존본만 있음)를 싣는다 — 예전에는 빈 목록이 '등록 없음' 처럼 보였다(요약 — 파일 원문 조각 없음).
   res.json({ ...scopePhysicalView(listPhysical(), getAllPhysicalGpu(), physicalPollerStatus(), scopedVcenterIds(req.user, store.get())), loadError: physicalRegistryLoadErrorSummary() }); // v2.622(감사 SEC-03)
 });
-adminRouter.post('/gpu-physical', adminOnly, fleetOnly, (req, res) => {
+adminRouter.post('/gpu-physical', adminOnly, fleetOnly, textFields('host'), (req, res) => {
   const r = addPhysical(req.body || {});
   if (r.ok) pollPhysicalOnce().catch(() => {});
   res.status(r.ok ? 201 : (r.status || 400)).json(r);   // 95회차 F1: 읽기 오류 중 거절은 409
@@ -365,7 +366,7 @@ adminRouter.post('/gpu-physical/poll', adminOnly, fleetOnly, async (_req, res) =
 });
 // IP+ID+PW+소속 vCenter만 받아 SSH 로그인→GPU/OS/호스트명 자동 감지→자동 등록.
 // 같은 host가 이미 있으면 갱신. Body { host, username, password, port?, vcenterId? }
-adminRouter.post('/gpu-physical/auto-register', adminOnly, fleetOnly, async (req, res) => {
+adminRouter.post('/gpu-physical/auto-register', adminOnly, fleetOnly, textFields('host', 'username', 'password'), async (req, res) => {
   const b = req.body || {};
   const host = String(b.host || '').trim();
   const username = String(b.username || '').trim();
@@ -393,7 +394,7 @@ adminRouter.post('/gpu-physical/auto-register', adminOnly, fleetOnly, async (req
 
 // 여러 IP 일괄 자동 등록 — 대역/CIDR을 펼쳐 각 IP에 SSH 로그인→감지→등록(동시성 제한).
 // Body { ips, username, password?, port?, vcenterId?, force? }
-adminRouter.post('/gpu-physical/bulk-auto-register', adminOnly, fleetOnly, async (req, res) => {
+adminRouter.post('/gpu-physical/bulk-auto-register', adminOnly, fleetOnly, textFields('username', 'password'), async (req, res) => {
   const b = req.body || {};
   const username = String(b.username || '').trim();
   if (!b.ips || !username) return res.status(400).json({ ok: false, reason: 'IP 목록과 계정이 필요합니다.' });
@@ -425,7 +426,7 @@ adminRouter.post('/gpu-physical/bulk-auto-register', adminOnly, fleetOnly, async
 });
 
 // 단건 SSH 테스트(저장 전 검증 가능) — body { host, username, password?, port?, revealCreds? } 또는 { id }
-adminRouter.post('/gpu-physical/test', adminOnly, fleetOnly, async (req, res) => {
+adminRouter.post('/gpu-physical/test', adminOnly, fleetOnly, textFields('host', 'username', 'password', 'port'), async (req, res) => {
   const b = req.body || {};
   let host = String(b.host || '').trim(); let username = String(b.username || '').trim(); let password = String(b.password || ''); let port = Number(b.port) || 22;
   if (b.id) {
@@ -590,7 +591,7 @@ adminRouter.post('/gpu-guest/test', adminOnly, async (req, res) => {
 
 // 빠른 단일 테스트(SSH) — VM 목록 로딩/ vCenter 없이 IP+계정만으로 nvidia-smi 1대 테스트.
 // Body: { ip, username, password?, port?, revealCreds? }
-adminRouter.post('/gpu-guest/test-ssh', adminOnly, rawIpFleetOnly, async (req, res) => {
+adminRouter.post('/gpu-guest/test-ssh', adminOnly, rawIpFleetOnly, textFields('ip', 'username', 'password'), async (req, res) => {
   const b = req.body || {};
   const ip = String(b.ip || '').trim();
   const username = String(b.username || '').trim();

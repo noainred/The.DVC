@@ -41,6 +41,7 @@ import { scopedVcenterIds, writeScopedVcenterIds, isFullReadWriteScope } from '.
 import { mergeScopedMap, filterScopedMap, keepScopedFields, ignoredGlobalFields } from '../../auth/scopeMerge.js';
 import { requirePerm as requireCsvPerm } from '../../auth/auth.js';
 import { registerBmOsSuggest } from './bmOsSuggest.js'; // v2.993: 물리서버 OS 주소 제안(설계 bm-folders §13 ②)
+import { textFields, listOrText } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
 const csvPerm = requireCsvPerm('data.csv');
 
@@ -165,7 +166,7 @@ function scanCfgWritable(_req, res, next) {
   if (e?.readError) return res.status(409).json({ ok: false, code: 'settings-unreadable', readError: true, reason: String(e.reason || '').slice(0, 300) });
   return next();
 }
-adminRouter.put('/ipam/scan/settings', adminOnly, fleetOnly, scanCfgWritable, (req, res) => {
+adminRouter.put('/ipam/scan/settings', adminOnly, fleetOnly, scanCfgWritable, textFields('agent', 'datacenterId'), listOrText('ranges'), (req, res) => {
   if (scanCfgUnreadable(res)) return;   // 25회차 F-3: 배정 파일 손상 중 쓰기 409
   const agent = (req.body && req.body.agent) || LOCAL;
   // v2.638: 데이터센터는 등록된 DataCenter 만(빈 값 = 자동). 목록에 없는 값을 저장하면 그 에이전트의 스캔 결과가 어디에도 귀속되지 않는다.
@@ -329,7 +330,7 @@ adminRouter.get('/ipam/scan/ranges', adminOnly, fleetOnly, (_req, res) => {
  * v2.692: 줄 단위 추가·수정·삭제. 그 에이전트의 다른 줄은 건드리지 않는다. `old` 가 지금 값과 다르면 409(다른 관리자가 바꿨다).
  * 대역 문법은 저장 PUT 과 같은 판정(checkRangeList — 뒤집힌 범위 오류·스캔 상한 경고).
  */
-adminRouter.post('/ipam/scan/ranges/line', adminOnly, fleetOnly, scanCfgWritable, (req, res) => {
+adminRouter.post('/ipam/scan/ranges/line', adminOnly, fleetOnly, scanCfgWritable, textFields('agent', 'op', 'index', 'value', 'old'), (req, res) => {
   if (scanCfgUnreadable(res)) return;   // 25회차 F-3: 배정 파일 손상 중 쓰기 409
   const b = req.body || {};
   const agent = String(b.agent || LOCAL).slice(0, 128);
@@ -355,7 +356,7 @@ adminRouter.post('/ipam/scan/ranges/line', adminOnly, fleetOnly, scanCfgWritable
  *   `expect`(화면이 본 대역 목록)가 지금 값과 다르면 409 — 다른 관리자가 그사이 바꿨으면 지우지 않는다(줄 단위 수정과 같은 규칙).
  *   이미 보고된 스캔 결과는 지우지 않는다(보존 기간·해제 판정이 정리한다) — 응답이 그 사실을 말한다.
  */
-adminRouter.post('/ipam/scan/agent/delete', adminOnly, fleetOnly, scanCfgWritable, (req, res) => {
+adminRouter.post('/ipam/scan/agent/delete', adminOnly, fleetOnly, scanCfgWritable, textFields('agent'), (req, res) => {
   if (scanCfgUnreadable(res)) return;   // 25회차 F-3: 배정 파일 손상 중 쓰기 409
   const b = req.body || {};
   const agent = String(b.agent || '').trim().slice(0, 128);
@@ -407,7 +408,7 @@ function migrationView() {
   return { ok: true, state: st, remaining, agents, ...(held ? { held } : {}), ...(remainingLoadError ? { remainingLoadError } : {}) };
 }
 adminRouter.get('/ipam/scan/migration', adminOnly, fleetOnly, (_req, res) => { res.json(migrationView()); });
-adminRouter.post('/ipam/scan/migration/move', adminOnly, fleetOnly, scanCfgWritable, (req, res) => {
+adminRouter.post('/ipam/scan/migration/move', adminOnly, fleetOnly, scanCfgWritable, textFields('vcenterId', 'agent'), (req, res) => {
   const vcenterId = String(req.body?.vcenterId || '').slice(0, 200);
   const agent = String(req.body?.agent || '').trim().slice(0, 128);
   if (!vcenterId || !agent) return res.status(400).json({ ok: false, reason: 'vcenterId 와 agent 가 필요합니다.' });
@@ -419,7 +420,7 @@ adminRouter.post('/ipam/scan/migration/move', adminOnly, fleetOnly, scanCfgWrita
   recordScanLog({ event: 'settings', agent, user: req.user?.username, message: `vCenter 별 스캔 대역을 에이전트로 옮김 — ${vcenterId.slice(0, 120)} · ${r.moved}줄` });
   res.json({ ...r, ...migrationView() });
 });
-adminRouter.post('/ipam/scan/migration/remove', adminOnly, fleetOnly, (req, res) => {
+adminRouter.post('/ipam/scan/migration/remove', adminOnly, fleetOnly, textFields('vcenterId'), (req, res) => {
   const vcenterId = String(req.body?.vcenterId || '').slice(0, 200);
   if (!vcenterId) return res.status(400).json({ ok: false, reason: 'vcenterId 가 필요합니다.' });
   const r = removeVcRangeManually(vcenterId, { user: req.user?.username });
@@ -518,7 +519,7 @@ adminRouter.get('/ipam/scan/ranges/sample.csv', csvPerm, adminOnly, fleetOnly, (
   res.setHeader('Content-Disposition', 'attachment; filename="ip-scan-ranges-sample.csv"');
   res.send(scanRangesSampleCsv());
 });
-adminRouter.post('/ipam/scan/ranges/import', csvPerm, adminOnly, fleetOnly, scanCfgWritable, (req, res) => {
+adminRouter.post('/ipam/scan/ranges/import', csvPerm, adminOnly, fleetOnly, scanCfgWritable, textFields('csv'), (req, res) => {
   if (scanCfgUnreadable(res)) return;   // 25회차 F-3: 배정 파일 손상 중 쓰기 409
   const { rows, error } = parseScanRangesCsv(String(req.body?.csv || ''));
   if (error) return res.status(400).json({ ok: false, reason: error });
@@ -543,7 +544,7 @@ adminRouter.post('/ipam/scan/ranges/import', csvPerm, adminOnly, fleetOnly, scan
 });
 
 // vCenter별 스캔 대역 저장/삭제 + 즉시 스캔(주기 스캔이 이 대역들을 함께 스캔).
-adminRouter.put('/ipam/vc-ranges', adminOnly, (req, res) => {
+adminRouter.put('/ipam/vc-ranges', adminOnly, textFields('vcenterId'), listOrText('ranges'), (req, res) => {
   const b = req.body || {};
   if (!vcRangeWritable(req.user, b.vcenterId)) return res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다.' }); // v2.607 AUTHZ2607-04
   // v2.637: 스캔이 읽지 못하는 줄(rangeSize 0 — 빈 마스크·/33·뒤집힌 범위·오타)을 저장하지 않는다. 예전에는 오류 없이 저장되고
@@ -620,7 +621,7 @@ adminRouter.get('/ipam/vc-ranges/sample.csv', csvPerm, adminOnly, (_req, res) =>
   res.send(vcRangesSampleCsv());
 });
 
-adminRouter.post('/ipam/vc-ranges/import', csvPerm, adminOnly, (req, res) => {
+adminRouter.post('/ipam/vc-ranges/import', csvPerm, adminOnly, textFields('csv'), (req, res) => {
   const { rows, error } = parseVcRangesCsv(String(req.body?.csv || ''));
   if (error) return res.status(400).json({ ok: false, reason: error });
   if (!rows.length) return res.status(400).json({ ok: false, reason: '가져올 데이터 행이 없습니다.' });

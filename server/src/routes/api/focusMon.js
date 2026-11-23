@@ -51,6 +51,7 @@ import { focusAuthGuard, authDevOf } from '../../focusmon/collector.js';
 import { registerFocusMonAudit } from './focusMonAudit.js'; // v3.11.0 디스크 점검(배드 섹터 점검 프로그램)
 import { corpResolver } from '../../focusmon/audit/corp.js';
 import { forgetTarget as auditForgetTarget, forgetReadiness as auditForgetReadiness } from '../../focusmon/audit/service.js';
+import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 
 const adminOnly = requireRole('admin');
 const csvPerm = requirePerm('data.csv');
@@ -193,7 +194,8 @@ api.get('/tools/focus-mon', adminOnly, fullScopeOnly, async (req, res) => {
 
 /* ── 대상 ─────────────────────────────────────────────────────────────────── */
 
-api.post('/tools/focus-mon/targets', adminOnly, fullRwOnly, demoBlockWrite, (req, res) => {
+// 165회차(163 반증 — 재현): 옆 칸(담당 노드 · 포트 · 그룹 · 법인)도 checkTargetInput 의 s() · Number() 를 지난다 — 이름 · 주소 · 계정이 정상이면 여전히 500 이었다
+api.post('/tools/focus-mon/targets', adminOnly, fullRwOnly, demoBlockWrite, textFields('name', 'host', 'username', 'agent', 'port', 'group', 'corp'), (req, res) => {
   if (registryUnreadable(res)) return;
   const r = registry.addTarget(req.body || {}, { agents: knownAgentNames(), by: req.user?.username, corps: corpResolver().list });
   if (!r.ok) return res.status(r.code === 'registry-unreadable' ? 503 : 400).json(r);
@@ -229,7 +231,7 @@ api.delete('/tools/focus-mon/targets/:id', adminOnly, fullRwOnly, demoBlockWrite
 
 /* ── 그룹(v2.982) — 수집 시작과 같은 문(admin · 조회 · 쓰기 전체 범위 · 데모 차단) · 감사 ─────────────── */
 const groupStatus = (r) => (r.code === 'not-found' ? 404 : r.code === 'registry-unreadable' ? 503 : r.code === 'duplicate' ? 409 : 400);
-api.post('/tools/focus-mon/groups', adminOnly, fullRwOnly, demoBlockWrite, (req, res) => {
+api.post('/tools/focus-mon/groups', adminOnly, fullRwOnly, demoBlockWrite, textFields('name'), (req, res) => {
   if (registryUnreadable(res)) return;
   const r = registry.createGroup(req.body?.name);
   if (!r.ok) return res.status(groupStatus(r)).json(r);
@@ -275,7 +277,7 @@ const testGate = new Map(); // targetId → { at, busy }
  * CSV 미리보기(v2.978) — 아무것도 바꾸지 않는다. 줄마다 새로 · 갱신 · 그대로 · 오류. 화면은 이 결과로 표를 그리고, 적용은 본문을 다시 계획한다.
  * 쓰기와 같은 문을 둔다(등록부 주소 · 계정이 계획에 그대로 들어간다 — 조회 범위만 있는 계정에 주지 않는다).
  */
-api.post('/tools/focus-mon/targets/import/preview', adminOnly, fullRwOnly, csvPerm, demoBlockWrite, (req, res) => {
+api.post('/tools/focus-mon/targets/import/preview', adminOnly, fullRwOnly, csvPerm, demoBlockWrite, textFields('text'), (req, res) => {
   if (registryUnreadable(res)) return;
   const r = registry.planCsv(String(req.body?.text ?? ''), { agents: knownAgentNames(), corps: corpResolver().list });
   if (!r.ok) return res.status(400).json(r);
@@ -286,7 +288,7 @@ api.post('/tools/focus-mon/targets/import/preview', adminOnly, fullRwOnly, csvPe
  * CSV 적용 — mode 'valid'(맞는 줄만) | 'all'(오류가 있으면 하나도 넣지 않는다 · 예전 동작이자 mode 를 안 보낸 호출의 기본) ·
  * update true 면 같은 IP · 포트의 기존 대상을 갱신(기본 false — 예전 호출은 추가만). 넣거나 바꾼 대상 id 를 돌려준다(화면이 일괄 시험에 쓴다).
  */
-api.post('/tools/focus-mon/targets/import', adminOnly, fullRwOnly, csvPerm, demoBlockWrite, (req, res) => {
+api.post('/tools/focus-mon/targets/import', adminOnly, fullRwOnly, csvPerm, demoBlockWrite, textFields('text'), (req, res) => {
   if (registryUnreadable(res)) return;
   const b = req.body || {};
   const before = new Map(registry.listTargets().map((t) => [t.id, t]));   // 29회차 F3: 접속처가 바뀐 대상의 예전 담당 노드(깨우기)
@@ -344,7 +346,7 @@ api.post('/tools/focus-mon/targets/test-bulk', adminOnly, fullRwOnly, demoBlockW
 });
 
 /** 노드 옮기기(v2.978) — from 노드(빈 문자열 = 중앙)의 대상(ids 를 주면 그중 from 에 속한 것만)을 to 노드로. 받는 엣지는 한 번 깨운다(키를 만들게). */
-api.post('/tools/focus-mon/targets/move', adminOnly, fullRwOnly, demoBlockWrite, (req, res) => {
+api.post('/tools/focus-mon/targets/move', adminOnly, fullRwOnly, demoBlockWrite, textFields('from', 'to'), (req, res) => {
   if (registryUnreadable(res)) return;
   const b = req.body || {};
   const agents = knownAgentNames();
@@ -449,7 +451,7 @@ api.put('/tools/focus-mon/settings', adminOnly, fullRwOnly, demoBlockWrite, (req
 
 /* ── 수집 ─────────────────────────────────────────────────────────────────── */
 
-api.post('/tools/focus-mon/sessions', adminOnly, fullRwOnly, demoBlockWrite, (req, res) => {
+api.post('/tools/focus-mon/sessions', adminOnly, fullRwOnly, demoBlockWrite, textFields('interval'), (req, res) => {
   if (registryUnreadable(res)) return;   // 29회차 F7
   const b = req.body || {};
   const vis = visibleById(req);
@@ -569,7 +571,7 @@ api.get('/tools/focus-mon/changes', adminOnly, fullScopeOnly, async (req, res) =
  * 사건 직접 적기(v3.13.0 ⑭ — 컨펌 ⑥ '관리자 · 전체 쓰기 범위 · 30일 · 감사'). 대상 서버 하나 + 범위(이 서버 · 그 그룹 · 그 수집) — 적는 때 서버들로 펴서 같은 id 로.
  * 수집 시작과 같은 문(관리자 · 조회 · 쓰기 전체 범위 · 데모 차단) · 등록부를 못 읽으면 503 · 보이는 대상만.
  */
-api.post('/tools/focus-mon/events', adminOnly, fullRwOnly, demoBlockWrite, async (req, res) => {
+api.post('/tools/focus-mon/events', adminOnly, fullRwOnly, demoBlockWrite, textFields('target'), async (req, res) => {
   if (registryUnreadable(res)) return;
   const vis = visibleTargets(req);
   const target = vis.find((t) => t.id === String(req.body?.target ?? ''));
@@ -748,11 +750,11 @@ const ruleWrite = (op) => (req, res) => {
   logAudit({ user: req.user?.username, action: `focus-mon.alert-${op}`, target: r.rule.id, detail: `${r.rule.name} — ${AL.condText(r.rule)} · ${r.rule.scope.kind}${r.rule.scope.group ? ` ${r.rule.scope.group}` : ''}${r.rule.enabled === false ? ' · 꺼짐' : ''}`, ip: req.ip });
   res.json({ ok: true, rule: r.rule });
 };
-api.post('/tools/focus-mon/alerts/rules', adminOnly, fullRwOnly, demoBlockWrite, ruleWrite('create'));
+api.post('/tools/focus-mon/alerts/rules', adminOnly, fullRwOnly, demoBlockWrite, textFields('name'), ruleWrite('create'));
 api.put('/tools/focus-mon/alerts/rules/:id', adminOnly, fullRwOnly, demoBlockWrite, ruleWrite('update'));
 api.delete('/tools/focus-mon/alerts/rules/:id', adminOnly, fullRwOnly, demoBlockWrite, ruleWrite('delete'));
 /** ‘지난 24시간에 걸었다면’(추정) — 서버 하나의 1분 요약으로. 조회 문 · 보이는 서버만 · 규칙은 저장하지 않는다(정제만). */
-api.post('/tools/focus-mon/alerts/preview', adminOnly, fullScopeOnly, async (req, res) => {
+api.post('/tools/focus-mon/alerts/preview', adminOnly, fullScopeOnly, textFields('target'), async (req, res) => {
   if (registryUnreadable(res)) return;   // 29회차 F7
   const body = req.body || {};
   const id = String(body.target || '');

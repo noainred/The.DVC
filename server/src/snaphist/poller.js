@@ -12,6 +12,7 @@
 import { store } from '../store.js';
 import { loadVmHygieneSettings } from '../vmhygiene/settings.js';
 import { unreadVcenterReasons } from '../metrics/unreadVcenters.js';
+import { snapshotFrozenByStop } from '../metrics/sampler.js'; // 164회차: 긴급중단으로 얼어 있는 스냅샷 판정(샘플러와 같은 것)
 import { dayRecord, dayKeyOf } from './record.js';
 import { commitDay, okVcentersOfDay, pruneSnapHist, getSnapHistDb, retentionDays } from './db.js';
 import { envPositive } from '../util/envNumber.js';
@@ -39,7 +40,7 @@ export function snapHistPollerStatus() {
   //   lastResult 는 다음 기록 시도가 성공해야 바뀐다.
   const why = lastTick && !lastTick.ok ? String(lastTick.reason || '기록 실패') : lastResult && lastResult.ok === false ? `기록 실패: ${String(lastResult.reason || '')}` : null;
   return { running, lastRun: lastTick ? { at: lastTick.at } : null, intervalMs: TICK_MS, ...(why ? { warn: true, warnText: why.slice(0, 200) } : {}),
-    lastResult, recordHour: recordHour(), retentionDays: retentionDays() };
+    lastResult, recordHour: recordHour(), retentionDays: retentionDays(), ...(lastTick?.emergencyStop ? { emergencyStop: true } : {}) };   // 164회차: 긴급중단으로 기록 보류(의도한 정지)
 }
 
 /** 기록이 필요한 vCenter — 등록된 것 중 오늘 'ok' 가 아닌 것. 순수(시험용). */
@@ -58,7 +59,7 @@ export function readableNow(snap, ids) {
 export async function runSnapHistOnce(opts = {}) {
   let r = null;
   try { r = await runInner(opts); return r; } finally {
-    if (!r?.skipped) lastTick = { at: opts.now ?? Date.now(), ok: !!r && r.ok !== false, reason: r ? r.reason || null : '예외' };
+    if (!r?.skipped) lastTick = { at: opts.now ?? Date.now(), ok: !!r && r.ok !== false, reason: r ? r.reason || null : '예외', ...(r?.idle === 'emergency-stop' ? { emergencyStop: true } : {}) };
   }
 }
 async function runInner({ now = Date.now(), force = false, trigger = 'tick' } = {}) {
@@ -70,6 +71,8 @@ async function runInner({ now = Date.now(), force = false, trigger = 'tick' } = 
     if (!force && new Date(now).getHours() < recordHour()) return { ok: true, idle: 'before-hour' };
     const snap = store.get();
     if (!snap?.vcenters?.length) return { ok: true, idle: 'no-inventory' };
+    // 164회차(결정 6): 긴급중단 중 · 푼 뒤 다음 병합 전에는 스냅샷이 얼어 있다 — 그 값을 오늘 기록으로 남기지 않는다(오늘 'ok' 가 아니니 풀리고 병합되면 같은 날 다시 시도)
+    if (snapshotFrozenByStop(snap)) return { ok: true, idle: 'emergency-stop' };
     const day = dayKeyOf(now);
     const okSet = await okVcentersOfDay(day);
     if (!okSet) return { ok: false, reason: 'snap-history DB 사용 불가' };

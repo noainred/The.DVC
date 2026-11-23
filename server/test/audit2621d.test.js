@@ -191,7 +191,10 @@ test('LIFE-03 · 5회차 I1 — 한 틱에 장비 60대를 기록해도 파일 �
     log.recordActivity({ deviceId: `old-${i}`, ok: true, at: 1_790_000_000_000 + i, portsOnline: 1 });
     if (i % 100 === 99) await null;
   }
-  await sleep(GAP * 2 + 10);   // 채운 것의 간격 끝 쓰기가 끝나고 간격이 지난 뒤(조용한 상태)
+  // v3.34.2: 조용한 상태를 고정 대기(GAP*2+10)로 만들지 않는다 — 느린 러너에서는 채운 것의 간격 끝 쓰기가 그 대기보다 늦게 끝날 수 있다
+  //   (v3.34.1 릴리스 실행이 이 시험에서 떨어졌다). 대기분을 지금 쓰고(쓰기가 얼마나 걸리든 여기서 끝난다) 그 뒤로 간격을 넘긴다.
+  log.flush();
+  await sleep(GAP + 10);
   const spy = countRenames(log.FILE);
   try {
     for (let i = 0; i < 60; i++) {

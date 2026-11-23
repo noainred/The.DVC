@@ -13,6 +13,7 @@ import { store } from '../store.js';
 import { slotKey } from './diff.js';
 import { takeVmSnapshot } from './service.js';
 import { lastSnapshotSlot, pruneVmtrack, getDb } from './db.js';
+import { snapshotFrozenByStop } from '../metrics/sampler.js'; // 164회차: 긴급중단으로 얼어 있는 스냅샷 판정(샘플러와 같은 것)
 
 const TICK_MS = 60_000;
 let running = false;      // 재진입 가드(폴러 + 수동 실행 공유)
@@ -29,7 +30,7 @@ let lastTick = null;   // { at, ok, reason }
 export function vmtrackPollerStatus() {
   const bad = lastTick && !lastTick.ok;
   return { running, lastResult, waiting, lastRun: lastTick ? { at: lastTick.at } : null, intervalMs: TICK_MS,
-    ...(bad ? { warn: true, warnText: String(lastTick.reason || '스냅샷 실패').slice(0, 200) } : {}) };
+    ...(bad ? { warn: true, warnText: String(lastTick.reason || '스냅샷 실패').slice(0, 200) } : {}), ...(lastTick?.emergencyStop ? { emergencyStop: true } : {}) };
 }
 
 /** 스냅샷 1회 실행(수동/자동 공용). 진행 중이면 skipped. */
@@ -40,6 +41,8 @@ export async function runVmtrackNow(trigger = 'manual') {
   try {
     const snap = store.get();
     if (!snap?.vcenters?.length) return { ok: false, reason: '수집된 vCenter 스냅샷이 없습니다(폴링 전).' };
+    // 164회차(결정 6): 긴급중단 중 · 푼 뒤 다음 병합 전에는 스냅샷이 얼어 있다 — 그 VM 수를 이 슬롯의 값으로 남기지 않는다(슬롯은 비워 두고 병합 뒤 늦게 채운다)
+    if (snapshotFrozenByStop(snap)) return { ok: false, emergencyStop: true, reason: '긴급중단으로 수집이 멈춰 인벤토리가 지금 값이 아닙니다 — 이 슬롯은 해제 뒤 다음 수집이 끝나면 기록합니다.' };
     const r = await takeVmSnapshot(snap, { trigger });
     if (r.ok) lastResult = { at: Date.now(), trigger, ...r, ms: Date.now() - started };
     return r;
@@ -52,6 +55,7 @@ export async function runVmtrackNow(trigger = 'manual') {
 export async function vmtrackTick() {
     if (running) return; // 재진입 가드
     let fail = null;
+    let stopped = false;
     try {
       const db = await getDb();
       if (!db) { fail = 'vmtrack DB 사용 불가'; return; } // DB 불가 — 기능 비활성(상태 API 가 사유를 노출)
@@ -76,13 +80,14 @@ export async function vmtrackTick() {
       }
       waiting = null;
       const r = await runVmtrackNow('slot');
-      if (r && r.ok === false && !r.skipped) fail = r.reason || '스냅샷 실패';
+      if (r?.emergencyStop) stopped = true;   // 164회차: 의도한 정지 — 실패(warn)가 아니다
+      else if (r && r.ok === false && !r.skipped) fail = r.reason || '스냅샷 실패';
       if (Date.now() - lastPruneAt > PRUNE_EVERY_MS) { lastPruneAt = Date.now(); pruneVmtrack().catch(() => {}); }
     } catch (e) {
       fail = e?.message || '예외';
       console.error('[vmtrack] 스냅샷 실패:', e.message);
     } finally {
-      lastTick = { at: Date.now(), ok: !fail, reason: fail };
+      lastTick = { at: Date.now(), ok: !fail, reason: fail, ...(stopped ? { emergencyStop: true } : {}) };
     }
 }
 

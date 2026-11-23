@@ -31,6 +31,7 @@ import zlib from 'node:zlib';
 import { createYielder } from '../../util/timeSlice.js';   // v2.742(DB-03): 필터 내보내기 조각 사이 시간 기준 양보
 import { todayStamp } from "../../util/dayKey.js";
 import { waitDrain } from '../../util/waitDrain.js'; // v2.783(점검 Q5): 공용 백프레셔 대기(drain·close·error 중 먼저 — 리스너 전부 뗀다)
+import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
 const csvPerm = requirePerm('data.csv');
 // v2.732(B4-01): /tools/vclogs/sources — 담당 엣지를 모르는 site vCenter 의 표지(이름을 지어내지 않는다). 아래 라우트 주석 참조.
@@ -357,7 +358,7 @@ function knownVcenterIds() {
 }
 
 // 엣지 로그 연합 조회 — 요청 큐잉(POST) / 결과 폴링(GET ?reqId=).
-api.post('/tools/vclogs/federate', requirePerm('tools'), (req, res) => {
+api.post('/tools/vclogs/federate', requirePerm('tools'), textFields('vcenterId'), (req, res) => {
   const b = req.body || {};
   const vcenterId = String(b.vcenterId || '').trim();
   if (!vcenterId) return res.status(400).json({ ok: false, reason: 'vcenterId가 필요합니다.' });

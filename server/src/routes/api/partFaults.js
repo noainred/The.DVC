@@ -66,6 +66,7 @@ const t = (v) => String(v ?? '').trim();
 // ⚠ 재수출(`export … from`)은 이 스코프에 이름을 만들지 않는다 — import 후 export 한다.
 import { cmpVersion } from '../../util/cmpVersion.js';
 import { pageArgs } from '../../util/pageArgs.js';   // v2.607 DB2607-04
+import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 
 export { cmpVersion };
 
@@ -457,7 +458,7 @@ api.put('/tools/part-faults/settings', adminOnly, fullScopeOnly, (req, res) => {
  * 자동으로 닫지 않는 이유: '보고에 없음' 은 '고쳐짐' 이 아니다(규칙 ④). 이벤트는 closeReason `manual` 로 남고
  * 감사 로그에 사유를 적는다. 열려 있지 않은 키는 404(이미 닫힘·키 불일치).
  */
-api.post('/tools/part-faults/close', adminOnly, fullScopeOnly, async (req, res) => {
+api.post('/tools/part-faults/close', adminOnly, fullScopeOnly, textFields('agent', 'partKey', 'reason'), async (req, res) => {
   const agent = String(req.body?.agent ?? '').trim().toLowerCase();
   const partKey = String(req.body?.partKey || '').trim();
   const note = String(req.body?.reason || '').trim().slice(0, 200);

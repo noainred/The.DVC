@@ -53,6 +53,7 @@ import { getPrefs as getHwPrefs, setPref as setHwPref, FMTS as HW_FMTS, BANDS as
 
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
 import { fullScopeOnlyWith } from './admin/shared.js';
+import { textFields } from '../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 export const insightsRouter = Router();
 // v2.574 BUG-03: express 4 는 async 핸들러의 throw 를 잡지 않아 그 요청이 **응답 없이
 // 매달린다**(소켓 fd 가 잡힌다). 라우트를 등록하기 **전에** 감싸 전역 에러 핸들러로 보낸다.
@@ -409,7 +410,7 @@ insightsRouter.get('/fleet/hardware-export', hwCsvPerm, hwFullScopeOnly, async (
 
 // 수동 분류 예외 지정/해제(관리자). body: { key, tag: 'baremetal'|'virtualization'|'exclude'|'auto' }
 // 전체 vCenter 재폴링(store.refresh) 없이 fleetRev만 올려 다음 GET에서 즉시 재계산(고RTT·30개 환경 보호).
-insightsRouter.put('/fleet/tag', adminOnly, fleetFullScopeOnly, (req, res) => {
+insightsRouter.put('/fleet/tag', adminOnly, fleetFullScopeOnly, textFields('key', 'tag'), (req, res) => {   // 165회차(163 반증 — 재현): tag 가 객체면 '잘못된 tag' 사유를 만드는 템플릿이 던져 500 이었다
   const r = setFleetTag(req.body?.key, req.body?.tag);
   if (r.ok) logAudit({ user: req.user?.username, action: '플릿 분류 변경', target: String(req.body?.key || ''), detail: String(req.body?.tag || 'auto'), ip: req.ip || '' });
   // v2.732(점검 2회차 B5-03): 실패(입력 거부·디스크 쓰기 실패)를 200 {ok:false} 로 주던 것 — 형제 /fleet/assign 처럼 400.
@@ -438,7 +439,7 @@ function assignOne({ serverId, serviceTag, key, vcenterId, validIds }) {
   return { ok: true, via: 'assign' };
 }
 
-insightsRouter.put('/fleet/assign', adminOnly, fleetFullScopeOnly, (req, res) => {
+insightsRouter.put('/fleet/assign', adminOnly, fleetFullScopeOnly, textFields('vcenterId', 'serverId', 'serviceTag', 'key'), (req, res) => {
   const vcenterId = String(req.body?.vcenterId || '').trim();
   const validIds = new Set((store.get().vcenters || []).map((v) => v.id));
   if (vcenterId && !validIds.has(vcenterId)) return res.status(400).json({ ok: false, reason: `존재하지 않는 vCenter id: ${vcenterId}` });
@@ -454,7 +455,7 @@ insightsRouter.put('/fleet/assign', adminOnly, fleetFullScopeOnly, (req, res) =>
 // 여러 베어메탈을 한 법인으로 일괄 귀속(관리자). body: { items:[{serverId,serviceTag,key}], vcenterId }.
 // 배치 I/O: 레지스트리 서버는 assignVcenter 1회(전체 1 read+1 write), 나머지는 setFleetAssignMany 1회.
 // (과거: 서버당 updateServer+setFleetAssign → 수천 회 동기 전체파일 쓰기로 이벤트 루프 블로킹)
-insightsRouter.put('/fleet/assign-bulk', adminOnly, fleetFullScopeOnly, (req, res) => {
+insightsRouter.put('/fleet/assign-bulk', adminOnly, fleetFullScopeOnly, textFields('vcenterId'), (req, res) => {
   const items = Array.isArray(req.body?.items) ? req.body.items.slice(0, 5000) : [];
   const vcenterId = String(req.body?.vcenterId || '').trim();
   if (!items.length) return res.status(400).json({ ok: false, reason: 'items가 비었습니다.' });

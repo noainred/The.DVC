@@ -22,6 +22,7 @@ import { AXES } from '../../periodic/catalog.js';
 import { renderReportHtml, corpNamer, corpMatrix, stamp, attachmentName } from '../../periodic/render.js';
 import * as svc from '../../periodic/service.js';
 import * as pdb from '../../periodic/db.js';
+import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 
 const toolsPerm = requirePerm('tools');
 const csvPerm = requirePerm('data.csv');
@@ -170,7 +171,7 @@ export function registerPeriodicReport(api) {
   });
 
   /** 지금 만들기 — preview:true 면 보관 · 전달 없이(10분 보관 미리보기). */
-  api.post('/tools/periodic-report/run', adminOnly, fullRwOnly, async (req, res) => {
+  api.post('/tools/periodic-report/run', adminOnly, fullRwOnly, textFields('kind'), async (req, res) => {
     const kind = String(req.body?.kind || '');
     if (!KINDS.includes(kind)) return res.status(400).json({ ok: false, reason: '주기는 일일 · 주간 · 월간 · 분기 중 하나입니다.' });
     const preview = req.body?.preview === true;
