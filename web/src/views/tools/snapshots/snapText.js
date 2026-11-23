@@ -429,3 +429,57 @@ export function goneSummary(rows) {
     inTimePct: judged.length ? Math.round((judged.filter((r) => r.inTime).length / judged.length) * 100) : null,
   };
 }
+
+/*
+ * v3.35.0 보류 목록(시안 ⑫ ⑬ · 사용자 '시안 권장안대로 구현해줘'). 지금 상태는 서버(snaphist/view.js holdRows)가 정한다 — 여기서는 거르고 세기만.
+ *   ‘확인 못 함’(그 vCenter 를 지금 못 읽음)은 ‘VM 없음’ 에도 ‘스냅샷 없음’ 에도 세지 않는다(못 읽은 값은 없음이 아니다).
+ */
+const HOLD_DAY = 86_400_000;
+export const HOLD_SOON_DAYS = 7;
+export const HOLD_VIEWS = Object.freeze([['all', '전체'], ['soon', '곧 끝남'], ['gone', '대상 없음'], ['none', '스냅샷 없음'], ['unknown', '확인 못 함']]);
+const HOLD_WHY = { maintenance: '점검중', unreachable: '수집 실패', stale: '값이 낡음', pending: '첫 수집 중', disabled: '비활성', 'no-snap': 'REST 수집이라 스냅샷 수 없음', 'no-count': '스냅샷 수를 못 읽음' };
+
+/** 남은 일수(올림 · 0 이상). 끝나는 날을 모르면 null. */
+export function holdLeftDays(h, now = Date.now()) {
+  const u = numOrNull(h?.until);
+  return u == null ? null : Math.max(0, Math.ceil((u - now) / HOLD_DAY));
+}
+export function holdMatch(h, view, now = Date.now()) {
+  if (view === 'soon') { const d = holdLeftDays(h, now); return d != null && d <= HOLD_SOON_DAYS; }
+  if (view === 'gone' || view === 'none' || view === 'unknown') return h?.state === view;
+  return true;
+}
+/** 숫자 4장 + 확인 못 함 — 법인 수는 보이는 보류의 법인. */
+export function holdSummary(rows, now = Date.now()) {
+  const xs = rows || [];
+  return {
+    n: xs.length, corps: new Set(xs.map((h) => h.corpId)).size,
+    soon: xs.filter((h) => holdMatch(h, 'soon', now)).length,
+    gone: xs.filter((h) => h.state === 'gone').length, none: xs.filter((h) => h.state === 'none').length,
+    unknown: xs.filter((h) => h.state === 'unknown').length,
+  };
+}
+/** 지금 상태 글자(표 · 카드 공용). */
+export function holdStateText(h) {
+  if (h?.state === 'has') {
+    const n = numOrNull(h.snapshotCount);   // 못 읽은 개수에 단위를 붙이지 않는다(‘— 개’ 금지 — audit2575 BUG-20 스윕)
+    return `스냅샷 ${n == null ? '—' : `${n}개`} · ${gbText(h.snapGB)} · ${daysText(h.days)}`;
+  }
+  if (h?.state === 'none') return '스냅샷 없음';
+  if (h?.state === 'gone') return h.why === 'vc-removed' ? 'VM 없음 · vCenter 등록 삭제' : 'VM 없음';
+  return `확인 못 함${HOLD_WHY[h?.why] ? ` · ${HOLD_WHY[h.why]}` : ''}`;
+}
+export const HOLD_STATE_CLS = Object.freeze({ has: 'g', none: 'a', gone: 'r', unknown: 'x' });
+/** 기본 정렬 — 끝나는 날이 이른 것부터(같으면 이름). */
+export function holdSort(rows) {
+  return [...(rows || [])].sort((a, b) => (numOrNull(a.until) ?? Infinity) - (numOrNull(b.until) ?? Infinity) || String(a.vmName).localeCompare(String(b.vmName)));
+}
+export const holdKeyOf = (h) => `${h.vcenterId}\n${h.vmId}`;
+/** 보류 줄의 자리 글 — 법인 · vCenter(법인 이름이 vCenter 이름과 같으면 한 번) · 클러스터 · 사라진 VM 이면 ‘걸 때의 이름’(이름이 지금 것이 아님). */
+export function holdPlaceText(h, withCluster = true) {
+  const parts = [h?.corpName];
+  if (h?.vcName && h.vcName !== h.corpName) parts.push(h.vcName);
+  if (withCluster && h?.cluster) parts.push(h.cluster);
+  if (h?.state === 'gone' && h.heldName) parts.push('걸 때의 이름');
+  return parts.filter(Boolean).join(' · ');
+}

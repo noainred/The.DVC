@@ -123,6 +123,17 @@ export function bandOf(days, judged, ageDays) {
   return 'd90';
 }
 
+/** 법인(묶음) 이름 — DataCenter 배정이 있으면 그 이름, 없으면 vCenter 하나가 한 법인(이름 = vCenter 이름 · 모르면 id). 스냅샷 목록과 보류 목록이 같이 쓴다. */
+function corpNamer(vcById, dcOf, dcNames) {
+  return (vcId) => {
+    let dc = '';
+    try { dc = String(dcOf(vcId) || ''); } catch { dc = ''; }
+    if (dc) return { corpId: `dc:${dc}`, corpName: dcNames.get(dc) || dc };
+    const vc = vcById.get(vcId);
+    return { corpId: `vc:${vcId}`, corpName: String(vc?.name || vcId) };
+  };
+}
+
 /**
  * @param {object} snap  store.get() 결과(vcenters · vms · datastores)
  * @param {object} o
@@ -140,13 +151,7 @@ export function snapshotToolView(snap, { allowed = null, pick = null, hygiene = 
   const dsIndex = new Map();
   for (const ds of snap?.datastores || []) if (ds && vcById.has(String(ds.vcenterId)) && ds.name) dsIndex.set(`${ds.vcenterId}\n${ds.name}`, ds);
 
-  const corpOf = (vcId) => {
-    let dc = '';
-    try { dc = String(dcOf(vcId) || ''); } catch { dc = ''; }
-    if (dc) return { corpId: `dc:${dc}`, corpName: dcNames.get(dc) || dc };
-    const vc = vcById.get(vcId);
-    return { corpId: `vc:${vcId}`, corpName: String(vc?.name || vcId) };
-  };
+  const corpOf = corpNamer(vcById, dcOf, dcNames);
 
   const ageDays = numOrNull(hygiene?.snapAgeDays);
   const items = [];
@@ -221,4 +226,64 @@ export function snapshotToolView(snap, { allowed = null, pick = null, hygiene = 
     corps: [...corps.values()],
     ghost,
   };
+}
+
+/** 보류의 ‘지금 상태’ — has(스냅샷 있음) · none(VM 은 있고 스냅샷 없음) · gone(VM 이 인벤토리에 없음) · unknown(그 vCenter 를 지금 못 읽음 · 개수를 못 읽음). */
+export const HOLD_STATES = Object.freeze(['has', 'none', 'gone', 'unknown']);
+
+/**
+ * v3.35.0(시안 ⑫ 보류 목록 · 사용자 '시안 권장안대로 구현해줘') — 보류마다 지금 상태를 붙인다(순수).
+ *   · 못 읽은 값은 없음이 아니다: 그 vCenter 를 지금 못 읽으면(vcReadIssue — 이 파일의 판정 하나) ‘VM 없음’ 이 아니라 unknown 이다.
+ *     등록부에서 지운 vCenter(registered 에 없음 — 등록부를 못 읽었으면 registered = null 이라 단정하지 않는다)의 보류는 gone(why 'vc-removed').
+ *   · 건 계정(by)은 관리자 판본(admin)에만 — 예전 GET 라우트와 같은 규칙.
+ *   · 범위(allowed) → 고른 법인(pick) 순으로 거른다(스냅샷 목록과 같다). 이름은 지금 VM 이름 → 걸 때 적어 둔 이름 → id.
+ *   · 반증 r3350: 쓰기 범위(writable — auth/scope.js writeScopedVcenterIds, null = 제한 없음) 밖 보류는 writable:false(server/CLAUDE.md v2.733 —
+ *     화면이 풀기 · 고르기를 잠근다. 없으면 쓰기를 줄인 관리자의 ‘보이는 보류 모두 고르기 → 고른 것 풀기’ 가 매번 403 으로 아무것도 풀지 못했다).
+ * @param {object} snap
+ * @param {object[]} holds  vmhygiene/holds.js loadHolds().holds(지난 것은 이미 빠졌다)
+ * @param {{allowed?:Set<string>|null, writable?:Set<string>|null, pick?:Set<string>|null, now?:number, dcOf?:Function, dcNames?:Map<string,string>, registered?:Set<string>|null, admin?:boolean}} [o]
+ */
+export function holdRows(snap, holds, { allowed = null, writable = null, pick = null, now = Date.now(), dcOf = () => '', dcNames = new Map(), registered = null, admin = false } = {}) {
+  const inScope = (id) => (!allowed || allowed.has(id)) && (!pick || pick.has(id));
+  const mine = (holds || []).filter((h) => h && h.vcenterId != null && inScope(String(h.vcenterId)));
+  const vcById = new Map((snap?.vcenters || []).filter((vc) => vc && vc.id != null).map((vc) => [String(vc.id), vc]));
+  const corpOf = corpNamer(vcById, dcOf, dcNames);
+  const want = new Set(mine.map((h) => `${h.vcenterId}\n${h.vmId}`));
+  const vmByKey = new Map();
+  if (want.size) {
+    for (const v of snap?.vms || []) {
+      if (!v) continue;
+      const k = `${v.vcenterId}\n${v.id}`;
+      if (want.has(k)) vmByKey.set(k, v);
+    }
+  }
+  const unread = unreadVcenterReasons(snap);
+  return mine.map((h) => {
+    const vcId = String(h.vcenterId);
+    const vc = vcById.get(vcId);
+    const v = vmByKey.get(`${vcId}\n${h.vmId}`) || null;
+    let state; let why = null;
+    if (!vc && registered && !registered.has(vcId)) { state = 'gone'; why = 'vc-removed'; }
+    else {
+      const issue = vcReadIssue(vc, vcId, unread);
+      if (issue) { state = 'unknown'; why = issue; }
+      else if (!v) state = 'gone';
+      else {
+        const cnt = numOrNull(v.snapshotCount);
+        if (cnt == null) { state = 'unknown'; why = 'no-count'; } else state = cnt > 0 ? 'has' : 'none';
+      }
+    }
+    const oldestTs = state === 'has' ? numOrNull(v.snapshotOldestTs) : null;
+    return {
+      vcenterId: vcId, vmId: h.vmId,
+      vmName: (v && typeof v.name === 'string' && v.name) || h.vmName || h.vmId, heldName: h.vmName || null,
+      vcName: String(vc?.name || vcId), ...corpOf(vcId), cluster: (v && v.cluster) || null,
+      until: h.until, reason: h.reason, at: h.at ?? null, by: admin ? (h.by || null) : null,
+      writable: !writable || writable.has(vcId),
+      state, why,
+      snapshotCount: state === 'has' ? numOrNull(v.snapshotCount) : state === 'none' ? 0 : null,
+      snapGB: state === 'has' ? snapGbOf(v) : null,
+      days: oldestTs != null && oldestTs > 0 ? Math.max(0, Math.floor((now - oldestTs) / DAY)) : null,
+    };
+  });
 }

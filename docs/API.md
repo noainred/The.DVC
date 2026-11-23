@@ -22,11 +22,11 @@
 
 | 항목 | 값 |
 |---|---|
-| 엔드포인트 | **1610개** |
+| 엔드포인트 | **1611개** |
 | 마운트 그룹 | 14개 |
 | 라우트 파일 | 162개 |
 | GET | 844개 |
-| POST | 515개 |
+| POST | 516개 |
 | PUT | 162개 |
 | PATCH | 3개 |
 | DELETE | 86개 |
@@ -45,7 +45,7 @@
 | [`/api/ping`](#apiping) | 16 | 네트워크 Ping 모니터링(조회=인증, 대상 관리=관리자). |
 | [`/metrics`](#metrics) | 1 | Prometheus/OTel 익스포터(선택 토큰). |
 | [`/api/v1`](#apiv1) | 12 | **외부 포탈용 공개 조회 API**(v2.562). 전용 API 키(`X-Api-Key`)로 인증하고 조회 전용이다. 상세는 [API-PUBLIC.md](API-PUBLIC.md). |
-| [`/api`](#api) | 966 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
+| [`/api`](#api) | 967 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
 | [`/dl`](#dl) | 2 | 중앙 업그레이드 소스(`versions.json` + 번들). **공개**다. |
 
 ---
@@ -1204,7 +1204,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 | POST | `/tools/disk-bad/scan` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/diskBad.js:295](../server/src/routes/api/diskBad.js#L295) |
 | GET | `/tools/disk-bad/server/:id` | 권한 `tools` | [server/src/routes/api/diskBad.js:276](../server/src/routes/api/diskBad.js#L276) |
 | PUT | `/tools/disk-bad/settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/diskBad.js:377](../server/src/routes/api/diskBad.js#L377) |
-| GET | `/tools/duplicate-ips` | 권한 `tools` | [server/src/routes/api/vcTools.js:36](../server/src/routes/api/vcTools.js#L36) |
+| GET | `/tools/duplicate-ips` | 권한 `tools` | [server/src/routes/api/vcTools.js:55](../server/src/routes/api/vcTools.js#L55) |
 | GET | `/tools/edge-log` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/edgeLog.js:111](../server/src/routes/api/edgeLog.js#L111) |
 | GET | `/tools/edge-log-local` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/edgeLog.js:123](../server/src/routes/api/edgeLog.js#L123) |
 | GET | `/tools/edge-log/:agent` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/edgeLog.js:172](../server/src/routes/api/edgeLog.js#L172) |
@@ -1551,13 +1551,14 @@ Prometheus/OTel 익스포터(선택 토큰).
 | POST | `/tools/server-info/read` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/serverInfo.js:25](../server/src/routes/api/serverInfo.js#L25) |
 | GET | `/tools/service-check` | 권한 `tools` | [server/src/routes/api/checksLogs.js:224](../server/src/routes/api/checksLogs.js#L224) |
 | POST | `/tools/service-check/settings-files/confirm` | 역할 `admin` · `settingsFleetOnly` | [server/src/routes/api/checksLogs.js:240](../server/src/routes/api/checksLogs.js#L240) |
-| GET | `/tools/snapshots` | 권한 `tools` | [server/src/routes/api/vcTools.js:160](../server/src/routes/api/vcTools.js#L160) |
-| GET | `/tools/snapshots/creators` | 권한 `tools` | [server/src/routes/api/vcTools.js:200](../server/src/routes/api/vcTools.js#L200) |
-| GET | `/tools/snapshots/history` | 권한 `tools` | [server/src/routes/api/vcTools.js:182](../server/src/routes/api/vcTools.js#L182) |
-| GET | `/tools/snapshots/history/vm` | 권한 `tools` | [server/src/routes/api/vcTools.js:241](../server/src/routes/api/vcTools.js#L241) |
-| GET | `/tools/snapshots/holds` | 권한 `tools` | [server/src/routes/api/vcTools.js:219](../server/src/routes/api/vcTools.js#L219) |
-| PUT | `/tools/snapshots/holds` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/vcTools.js:227](../server/src/routes/api/vcTools.js#L227) |
-| GET | `/tools/solutions` | 권한 `tools` | [server/src/routes/api/vcTools.js:72](../server/src/routes/api/vcTools.js#L72) |
+| GET | `/tools/snapshots` | 권한 `tools` | [server/src/routes/api/vcTools.js:179](../server/src/routes/api/vcTools.js#L179) |
+| GET | `/tools/snapshots/creators` | 권한 `tools` | [server/src/routes/api/vcTools.js:219](../server/src/routes/api/vcTools.js#L219) |
+| GET | `/tools/snapshots/history` | 권한 `tools` | [server/src/routes/api/vcTools.js:201](../server/src/routes/api/vcTools.js#L201) |
+| GET | `/tools/snapshots/history/vm` | 권한 `tools` | [server/src/routes/api/vcTools.js:303](../server/src/routes/api/vcTools.js#L303) |
+| GET | `/tools/snapshots/holds` | 권한 `tools` | [server/src/routes/api/vcTools.js:240](../server/src/routes/api/vcTools.js#L240) |
+| PUT | `/tools/snapshots/holds` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/vcTools.js:254](../server/src/routes/api/vcTools.js#L254) |
+| POST | `/tools/snapshots/holds/release` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/vcTools.js:274](../server/src/routes/api/vcTools.js#L274) |
+| GET | `/tools/solutions` | 권한 `tools` | [server/src/routes/api/vcTools.js:91](../server/src/routes/api/vcTools.js#L91) |
 | GET | `/tools/storage` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:89](../server/src/routes/api/storageMon.js#L89) |
 | GET | `/tools/storage-growth` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:880](../server/src/routes/api/storageMon.js#L880) |
 | GET | `/tools/storage-growth/:id/daily` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:955](../server/src/routes/api/storageMon.js#L955) |
@@ -1673,7 +1674,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 | PUT | `/tools/vmseries/settings` | 역할 `admin` | [server/src/routes/api/vmSeries.js:177](../server/src/routes/api/vmSeries.js#L177) |
 | GET | `/tools/vmseries/status` | 권한 `tools` | [server/src/routes/api/vmSeries.js:256](../server/src/routes/api/vmSeries.js#L256) |
 | GET | `/tools/vmseries/top` | 권한 `tools` | [server/src/routes/api/vmSeries.js:283](../server/src/routes/api/vmSeries.js#L283) |
-| GET | `/tools/vmtools` | 권한 `tools` | [server/src/routes/api/vcTools.js:142](../server/src/routes/api/vcTools.js#L142) |
+| GET | `/tools/vmtools` | 권한 `tools` | [server/src/routes/api/vcTools.js:161](../server/src/routes/api/vcTools.js#L161) |
 | GET | `/tools/vmware-config` | 권한 `tools` · `csvPermIfDownload` | [server/src/routes/api/checksLogs.js:270](../server/src/routes/api/checksLogs.js#L270) |
 | GET | `/tools/waste` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:418](../server/src/routes/api/toolsCapacity.js#L418) |
 | GET | `/tools/waste/export` | 권한 `data.csv`, `tools` | [server/src/routes/api/toolsCapacity.js:613](../server/src/routes/api/toolsCapacity.js#L613) |
@@ -1706,7 +1707,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 | POST | `/user-menu/distribute` | 역할 `admin` · `menuFleetOnly` · `requireSuperAdmin` | [server/src/routes/api/userMenu.js:118](../server/src/routes/api/userMenu.js#L118) |
 | POST | `/user-menu/restore-prev` | — | [server/src/routes/api/userMenu.js:98](../server/src/routes/api/userMenu.js#L98) |
 | GET | `/vcenter-info/:kind` | — | [server/src/routes/api/vcInfo.js:123](../server/src/routes/api/vcInfo.js#L123) |
-| GET | `/vcenters` | — | [server/src/routes/api/vcTools.js:25](../server/src/routes/api/vcTools.js#L25) |
+| GET | `/vcenters` | — | [server/src/routes/api/vcTools.js:44](../server/src/routes/api/vcTools.js#L44) |
 | GET | `/vcenters/:id/usage-history` | — | [server/src/routes/api/toolsCapacity.js:928](../server/src/routes/api/toolsCapacity.js#L928) |
 | GET | `/veeam/backup-counts` | — | [server/src/routes/api/veeam.js:405](../server/src/routes/api/veeam.js#L405) |
 | GET | `/veeam/badges` | — | [server/src/routes/api/veeam.js:297](../server/src/routes/api/veeam.js#L297) |

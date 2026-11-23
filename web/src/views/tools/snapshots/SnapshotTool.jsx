@@ -7,6 +7,8 @@
  *   지난 7일 숫자 · 줄 펼침의 VM 이력 · ‘정리된 것’ 탭. 빠진 날(그 vCenter 를 못 읽은 날)은 선을 끊는다 — 0 으로 잇지 않는다.
  * 3단계(v3.28.0): 만든 계정(스냅샷 이벤트 31일 — 계정 이름은 관리자 판본만) · 묶어 보기 ‘만든 계정’ · 보류(관리자 — 기한 1~90일 · 사유 필수,
  *   판정은 서버 hygieneFindings 하나라 카드 · VM 구성 점검 · 알림에도 같이 빠진다).
+ * v3.35.0(시안 docs/design/snapshot-holds ⑫~⑮): 표 위 탭 ‘보류 N’(HoldList.jsx — 범위 안 보류 전부 · 지금 상태 · 사라진 VM 의 보류 풀기 · 여러 건 풀기 · 연장) ·
+ *   720px 이하에서 법인 카드 1열(이름 · 크기 줄이 말줄임으로 잘리지 않게 — snapshots.css).
  * 판정은 서버(snaphist/view.js — hygieneFindings) · 화면은 거르고 묶고 세기만(snapText.js). 보기 전용 — 지우기 · 되돌리기 단추는 두지 않는다.
  * 무거운 집계라 15초 폴링하지 않는다 — 들어올 때 한 번 + ‘다시 받기’(루트 CLAUDE.md 프론트 규칙). 늦게 온 이전 응답은 버린다.
  */
@@ -27,6 +29,7 @@ import {
   logPos, gbText, daysText, dateText, requestText, CSV_HEAD, csvRow, parseSnapHash, buildSnapHash,
   changeMap, changeKey, clearedSince, seriesValues, lineGeom, goneRows, goneSummary, GROW_GB, corpFootText, unreadSumText, trendOf, excludedMarks, trendCaption,
 } from './snapText.js';
+import HoldList from './HoldList.jsx';
 import './snapshots.css';
 
 const KIND = (n) => (n.mem ? '메모리까지 담음' : n.quiesced ? '파일 시스템을 멈추고 찍음' : '디스크만');
@@ -59,7 +62,7 @@ function exportCsv(rows) {
   saveBlob(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }), `snapshots-${dayStamp()}.csv`);
 }
 
-export default function SnapshotTool({ scope = '', initial = null, initialHist = null, initialCreators = null }) {   // initial* = 시험용(서버 렌더 — 효과가 돌지 않는다)
+export default function SnapshotTool({ scope = '', initial = null, initialHist = null, initialCreators = null, initialHolds = null, initialTab = 'now' }) {   // initial* = 시험용(서버 렌더 — 효과가 돌지 않는다)
   const init = useMemo(() => parseSnapHash(typeof window === 'undefined' ? '' : window.location.hash), []);
   const [view, setView] = useState(init.view || 'all');
   const [vcPick, setVcPick] = useState(init.vcIds);
@@ -76,12 +79,13 @@ export default function SnapshotTool({ scope = '', initial = null, initialHist =
   const [state, setState] = useState(() => (initial ? { loading: false, data: initial, at: null } : { loading: true }));
   const [hist, setHist] = useState(initialHist);
   const [tick, setTick] = useState(0);
-  const [tab, setTab] = useState('now');
+  const [tab, setTab] = useState(initialTab);
   const [tm, setTm] = useState('gb');
   const [tp, setTp] = useState(30);
   const [vmHist, setVmHist] = useState({});
   const [creators, setCreators] = useState(initialCreators);
   const [holdForm, setHoldForm] = useState(null);   // { key, days, reason, busy, error }
+  const [holds, setHolds] = useState(initialHolds);   // v3.35.0 보류 목록(GET /tools/snapshots/holds — 가벼운 조회라 들어올 때 · 바꾼 뒤 한 번)
   const seq = useRef(0);
   const hseq = useRef(0);
 
@@ -107,6 +111,13 @@ export default function SnapshotTool({ scope = '', initial = null, initialHist =
   useEffect(() => {
     let live = true;
     fetchJson('/tools/snapshots/creators', params).then((d) => live && setCreators(d)).catch(() => live && setCreators({ ok: false }));
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pkey, tick]);
+  // v3.35.0 보류 목록 — 들어올 때 · 다시 받기 · 보류를 바꾼 뒤 한 번(늦게 온 이전 응답은 버린다). 실패하면 탭에 ‘—’.
+  useEffect(() => {
+    let live = true;
+    fetchJson('/tools/snapshots/holds', params).then((d) => live && setHolds(d)).catch((e) => live && setHolds({ ok: false, error: e.message }));
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pkey, tick]);
@@ -193,6 +204,7 @@ export default function SnapshotTool({ scope = '', initial = null, initialHist =
   // 법인 카드 그림 — 값 · 뺀 날(아래 띠) 위치(147회차: REST 수집 vCenter 도 빼고 더한다 — 그날을 그림에 표시)
   const cardSpark = new Map(cards.filter((c) => hist?.byCorp?.[c.id]).map((c) => { const v = seriesValues(hist.byCorp[c.id], 'gb'); return [c.id, { values: v, marks: excludedMarks(hist.byCorp[c.id], v) }]; }));
   const cardMarked = [...cardSpark.values()].some((x) => x.marks.length);
+  const holdShown = holds?.ok ? (holds.holds || []).filter((h) => !corp || h.corpId === corp) : [];   // 법인 카드를 고르면 그 법인의 보류만
 
   return (
     <div className="snp">
@@ -253,10 +265,10 @@ export default function SnapshotTool({ scope = '', initial = null, initialHist =
           <button key={c.id} type="button" className={`snp-cc${corp === c.id ? ' on' : ''}`} aria-pressed={corp === c.id} onClick={() => { setCorp(corp === c.id ? '' : c.id); setOpen(''); }}
             title={c.blind ? `${c.name} — 이 법인의 vCenter 값을 지금 못 읽었습니다` : `${c.name} — 스냅샷이 있는 VM ${c.n}대(기준 넘김 ${c.over}대) · ${gbText(c.gb.gb)}${c.unread ? ` · 지금 값을 못 읽은 vCenter ${c.unread}곳` : ''} — 누르면 이 법인만 봅니다`}>
             <span className="cn"><span>{c.name}</span><em className={c.over ? '' : 'none'}>{c.over ? `넘김 ${c.over}` : c.blind ? '못 읽음' : '넘김 없음'}</em></span>
-            <span className="tx">{c.blind ? '—' : <>{c.n}대 · {gbText(c.gb.gb)}{c.over ? ` · 정리하면 ${gbText(c.overGb.gb)}` : ''}</>}</span>
+            <span className="tx a">{c.blind ? '—' : <>{c.n}대 · {gbText(c.gb.gb)}{c.over ? ` · 정리하면 ${gbText(c.overGb.gb)}` : ''}</>}</span>
             <span className="snp-gbar" style={{ background: bandGradient(c.items) }} aria-hidden="true" />
             {cardSpark.has(c.id) && <Spark values={cardSpark.get(c.id).values} marks={cardSpark.get(c.id).marks} label={`${c.name} 스냅샷 크기 ${tp}일 추이`} />}
-            <span className="tx">{corpFootText(c)}</span>
+            <span className="tx f">{corpFootText(c)}</span>
           </button>
         ))}
       </div>
@@ -331,16 +343,23 @@ export default function SnapshotTool({ scope = '', initial = null, initialHist =
       </div>
 
       <section className="snp-panel" aria-label="스냅샷이 있는 VM">
-        <div className="snp-ph"><h3>{tab === 'gone' ? '정리된 스냅샷' : '스냅샷이 있는 VM'}</h3>
-          <span className="hint">{tab === 'gone' ? '스냅샷 이력이 ‘어제는 있었는데 오늘은 없는 스냅샷’ 을 찾아 적은 목록입니다' : '제목을 누르면 정렬 · VM 이름을 누르면 스냅샷 줄기와 이력이 펼쳐집니다 · 왼쪽 칸으로 골라 정리 요청을 만듭니다'}</span>
-          {status?.available && (
-            <span className="rt snp-seg" role="group" aria-label="지금 있는 것과 정리된 것">
+        <div className="snp-ph"><h3>{tab === 'gone' ? '정리된 스냅샷' : tab === 'hold' ? '보류한 VM' : '스냅샷이 있는 VM'}</h3>
+          <span className="hint">{tab === 'gone' ? '스냅샷 이력이 ‘어제는 있었는데 오늘은 없는 스냅샷’ 을 찾아 적은 목록입니다'
+            : tab === 'hold' ? '보류한 VM 은 기한까지 정책 판정에서 뺍니다 — 여기서 한눈에 보고 풀 수 있습니다(VM 이 사라진 보류 포함)'
+              : '제목을 누르면 정렬 · VM 이름을 누르면 스냅샷 줄기와 이력이 펼쳐집니다 · 왼쪽 칸으로 골라 정리 요청을 만듭니다'}</span>
+          {(status?.available || holds) && (
+            <span className="rt snp-seg" role="group" aria-label="지금 있는 것 · 정리된 것 · 보류">
               <button type="button" className={tab === 'now' ? 'on' : ''} aria-pressed={tab === 'now'} onClick={() => setTab('now')}>지금 있는 것 {scoped.length}</button>
-              <button type="button" className={tab === 'gone' ? 'on' : ''} aria-pressed={tab === 'gone'} onClick={() => setTab('gone')}>정리된 것 · {tp}일 {gRows.length}{hist?.goneMore ? '+' : ''}</button>
+              {status?.available && <button type="button" className={tab === 'gone' ? 'on' : ''} aria-pressed={tab === 'gone'} onClick={() => setTab('gone')}>정리된 것 · {tp}일 {gRows.length}{hist?.goneMore ? '+' : ''}</button>}
+              {holds && <button type="button" className={tab === 'hold' ? 'on' : ''} aria-pressed={tab === 'hold'} onClick={() => setTab('hold')}>보류 {holds.ok ? holdShown.length : '—'}</button>}
             </span>
           )}
         </div>
-        {tab === 'gone' ? <GoneList rows={gRows} sum={gSum} more={!!hist?.goneMore} ageDays={numOrNull(th.snapAgeDays)} tp={tp} /> : <>
+        {tab === 'gone' ? <GoneList rows={gRows} sum={gSum} more={!!hist?.goneMore} ageDays={numOrNull(th.snapAgeDays)} tp={tp} />
+          : tab === 'hold' ? (holds?.ok
+            ? <HoldList rows={holdShown} isAdmin={isAdmin} unreadable={!!holds.unreadable} daysMax={numOrNull(holds.daysMax) ?? 90} max={numOrNull(holds.max)} total={numOrNull(holds.total)}
+              ExtendForm={HoldForm} onChanged={(m) => { flash(m); setTick((t) => t + 1); }} />
+            : <div className="snp-note warn">보류 목록을 받지 못했습니다{holds?.error ? `(${holds.error})` : ''} — ‘다시 받기’ 로 다시 시도해 주세요.</div>) : <>
         <div className="snp-flt">
           <span className="lb">빠른 보기</span>
           {VIEWS.map(([k, label]) => (
