@@ -461,7 +461,10 @@ export function holdSummary(rows, now = Date.now()) {
 }
 /** 지금 상태 글자(표 · 카드 공용). */
 export function holdStateText(h) {
-  if (h?.state === 'has') return `스냅샷 ${numOrNull(h.snapshotCount) ?? '—'}개 · ${gbText(h.snapGB)} · ${daysText(h.days)}`;
+  if (h?.state === 'has') {
+    const n = numOrNull(h.snapshotCount);   // 못 읽은 개수에 단위를 붙이지 않는다(‘— 개’ 금지 — audit2575 BUG-20 스윕)
+    return `스냅샷 ${n == null ? '—' : `${n}개`} · ${gbText(h.snapGB)} · ${daysText(h.days)}`;
+  }
   if (h?.state === 'none') return '스냅샷 없음';
   if (h?.state === 'gone') return h.why === 'vc-removed' ? 'VM 없음 · vCenter 등록 삭제' : 'VM 없음';
   return `확인 못 함${HOLD_WHY[h?.why] ? ` · ${HOLD_WHY[h.why]}` : ''}`;
