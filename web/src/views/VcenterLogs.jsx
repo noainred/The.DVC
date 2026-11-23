@@ -192,10 +192,12 @@ export default function VcenterLogs() {
           <input className="input" placeholder="비우면 기본(CONFIG_DIR)" style={{ flex: 1, minWidth: 280 }} value={s.storagePath || ''} onChange={(e) => setS({ ...s, storagePath: e.target.value })} />
           <span className="muted" style={{ fontSize: 11 }}>서버의 디렉터리 경로. 변경 시 새 위치에 저장(기존 파일은 이동되지 않음).</span>
         </div>
-        <div className="flex gap" style={{ marginTop: 12, alignItems: 'center' }}>
-          <button className="login-btn" style={{ padding: '8px 16px' }} disabled={busy === 'save' || !!st.settingsUnreadable} onClick={save}>{busy === 'save' ? '저장 중…' : '정책 저장'}</button>
-          <button className="logout-btn" style={{ padding: '8px 16px' }} disabled={busy === 'collect'} onClick={collect}>{busy === 'collect' ? '수집 중…' : '⟳ 지금 수집'}</button>
-          <span className="muted" style={{ fontSize: 12 }}>{vcLogRunText(st.lastRun, fmtTime)}{msg ? ` · ${msg}` : ''}</span>
+        {/* v3.34.2(Chromium 1440 · 400 판독): 줄바꿈 없는 행이라 긴 결과 문구(긴급중단 · 설정 읽기 오류 · 오래 걸림)가 단추를 눌러 글자가 한 자씩 세로로 접혔다 —
+            단추는 줄지 않고(한 줄 글자), 행은 접히며, 문구는 남는 폭에서 줄바꿈한다(루트 CLAUDE.md '버튼 여러 개 행은 flexWrap'). */}
+        <div className="flex gap wrap" style={{ marginTop: 12, alignItems: 'center' }}>
+          <button className="login-btn" style={{ padding: '8px 16px', flex: 'none', whiteSpace: 'nowrap' }} disabled={busy === 'save' || !!st.settingsUnreadable} onClick={save}>{busy === 'save' ? '저장 중…' : '정책 저장'}</button>
+          <button className="logout-btn" style={{ padding: '8px 16px', flex: 'none', whiteSpace: 'nowrap' }} disabled={busy === 'collect'} onClick={collect}>{busy === 'collect' ? '수집 중…' : '⟳ 지금 수집'}</button>
+          <span className="muted" style={{ fontSize: 12, flex: '1 1 240px', minWidth: 0, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{vcLogRunText(st.lastRun, fmtTime)}{msg ? ` · ${msg}` : ''}</span>
         </div>
         {vcLogNotCollectedText(st.lastRun) && <div className="muted" style={{ fontSize: 12, marginTop: 6, whiteSpace: 'normal' }}>{vcLogNotCollectedText(st.lastRun)}</div>}
         {capNote && <div style={{ fontSize: 12, marginTop: 6, whiteSpace: 'normal', color: 'var(--amber)' }}>{capNote}</div>}
