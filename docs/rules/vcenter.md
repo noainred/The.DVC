@@ -31,6 +31,7 @@
 - v3.2.1(코드·테스트 표지는 v3.0.1) — vim25 데이터 객체는 스키마 원소 순서로 보낸다(NIC connectable — `vcenter/connectInfo.js` 하나 · 장치 edit 은 읽은 본문 그대로 + connectable 만 교체)
 - 54회차 F4 · F5 — VM 사양 변경 · SOAP 호스트 용량의 못 읽음은 null(0 아님) · 현재 값을 모르면 변경을 막는다 · 용량 판정 서버 ↔ 웹 한 벌
 - (원래 5751행) v2.701 — 클러스터 HA·DRS 점검(A6) + 호스트 네트워크(A10). 클러스터 구성은 클러스터 전용 캐시(`clustercfg/`)이고 vcenter.clusterCfg
+- (v3.35.0 추가) 스냅샷 보류 목록 — 지금 상태는 holdRows 하나 · 풀기는 VM 이 없어도 · 걸기 · 연장은 VM 이 있어야 · 여러 건은 전부 아니면 0
 
 ## 본문
 
@@ -552,3 +553,11 @@
   - 맞춤은 Veeam 계정과 같은 규칙(`creators.js listedMatcher` → `makeVeeamAccountMatcher` 의 'account' 만 — 'veeam' 이름 규칙은 끼지 않는다). 뺀 이벤트 수 `listed` · 적은 개수 `excludeCount` 를 응답에 싣고 화면이 밝힌다.
   - 계정 이름이라 **관리자 판본(`isAdminDetailUser`)이 아니면 개수만**(`vmHygiene.js creatorMasked` — 분석 · 설정 조회 · 저장 응답 세 곳이 `settingsFor` 하나) · 저장(관리자 · 전 법인)에서도 관리자 판본이 아니면 이 칸을 버린다(가린 빈 목록이 저장값을 지우지 않게 — 웹 `settingsPatch` 도 가린 판본은 보내지 않는다).
   - 만든 계정 응답은 5분 캐시 — 열쇠에 설정 판본(`|s${rev}`)을 넣어 목록을 바꾸면 바로 갈린다.
+- **스냅샷 보류 목록(v3.35.0 · 시안 `docs/design/snapshot-holds` ⑫~⑮ — 사용자 '시안 권장안대로 구현해줘')**:
+  - 보류의 **지금 상태는 `snaphist/view.js holdRows` 하나**(has · none · gone · unknown). 그 vCenter 를 지금 못 읽으면(`vcReadIssue` — 점검중 · 수집 실패 · 첫 수집 중 · 비활성 · REST) ‘VM 없음’ 이 아니라 unknown ·
+    개수를 못 읽은 VM 도 unknown(‘스냅샷 없음’ 아님) · 등록에서 뺀 vCenter 는 gone(why `vc-removed`) — **등록부를 못 읽었으면(`loadVcenterConfig().readError`) 단정하지 않는다**(registered = null). 화면(`snapText.holdSummary`)은 unknown 을 ‘대상 없음’ · ‘스냅샷 없음’ 에 세지 않는다.
+  - **풀기(0일)는 VM 이 인벤토리에 없어도** 그 보류가 지금 목록에 있으면(`holds.activeHold`) — 예전 404 라 기한(최대 90일)까지 상한(2,000건)을 차지했다. **걸기 · 연장은 여전히 VM 이 있어야** 한다(없는 VM 에 새 예외를 만들지 않는다). 조회 밖은 어느 쪽이든 404(존재 은닉) → 쓰기 밖 403.
+  - 여러 건 풀기 `POST /tools/snapshots/holds/release` 는 **전부 아니면 0**(보류마다 조회 밖 · 목록에 없음 404 → 쓰기 밖 403 · 하나라도 걸리면 아무것도 풀지 않는다) · 파일은 한 번만(`holds.releaseHolds`) · 못 읽은 파일 위에는 쓰지 않는다(503) · 감사 한 줄(500자에서 자름 — 수는 target 에).
+  - GET 응답의 건 계정(`by`)은 관리자 판본만 · 상한 대비 전체 수(`total`)는 전체 범위 계정만(범위 밖 보류 수를 흘리지 않는다).
+  - 화면 `HoldList.jsx`: 못 읽은 보류 파일이면 목록은 보이고 풀기 · 연장을 잠근다 · 목록을 못 받으면 탭 수 ‘—’ · 연장 창은 표 밖(위)에(표 줄 사이에 끼우면 STable 정렬이 짝을 잃는다) · 720px 이하는 카드.
+  - 720px 이하 법인 카드는 1열(`snapshots.css` — 2열이면 글자 자리 약 143px 라 이름 · 크기 줄이 말줄임). 회귀 `server/test/snapHolds3350.test.js` · `web/src/views/tools/snapshots/snapHolds3350.test.jsx`.
