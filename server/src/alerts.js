@@ -33,6 +33,13 @@ import { duplicateAlerts, subnetFullAlerts, scanStaleAlerts, DUP_MANY_KEY, dupBu
 import { peekIpamRows, listSubnets } from './ipam/ledger.js';
 import { withSubnetNotes } from './ipam/subnetNotes.js';
 import { setConflictSuspects } from './ipam/conflictState.js';
+import { listDevices as listStorageDevices, registryLoadError as storageRegistryLoadError } from './storage/registry.js';   // v3.35.0 Unity 인터페이스 알림
+import { localSnapshots } from './storage/store.js';
+import { edgeStorageSnapshots } from './central/storageEdge.js';
+import { latestMapByDevice } from './storage/latestSnapshots.js';
+import { fleetIfaces, ifaceAlertsOf } from './storage/ifaceSummary.js';
+import { isIfaceType } from './storage/ifaces.js';
+import { envIntervals as storageEnvIntervals, intervalsForAgent as storageIntervalsForAgent } from './storage/intervals.js';
 import { buildGpuAllocTree } from './gpu/allocTree.js';   // v2.939 개선 6: 법인 GPU 할당률 규칙(계층과 같은 합계) // v2.768(점검 R3-C5-03): '지금 값 아님' 판정 한 벌
 // v2.604(감사 SEC2604-03): 채널 웹훅 URL 은 그 자체가 비밀(경로에 토큰이 들어 있다)이라 암호화 모드에서 봉인한다.
 // 메모리는 평문이다 — 화면·연결 테스트·발송은 예전과 같다. 평문 파일(구버전·평문 모드)은 그대로 읽힌다.
@@ -70,6 +77,11 @@ const DEFAULTS = {
     ipamDuplicate: { enabled: false },
     ipamSubnetFull: { enabled: false, threshold: 90 },   // 대역 점유율(%) — 대장 + 예약 + DHCP
     ipamScanStale: { enabled: false, threshold: 3 },     // 주기의 몇 배
+    // v3.35.0(Unity SAN · NAS 인터페이스 — 설계 docs/design/unity-iface · 컨펌 '알림도 포함'): 상태형. 링크 다운 · 속도 저하는 기본 켬(실제 장애 신호 —
+    //   다운은 직전에 링크 업이던 포트만 · 처음부터 비어 있던 포트는 알리지 않는다), 사용률은 기본 끔(켜면 최근 5분 사용률 ≥ 임계 — REST 수집 장비만).
+    unityIfaceDown: { enabled: true },
+    unityIfaceSlow: { enabled: true },
+    unityIfaceBusy: { enabled: false, threshold: 80 },
   },
   // v3.1.0: IP 변화 알림을 보내지 않을(기록만 할) 스캔 에이전트 — 대역을 새로 넣는 동안 등.
   ipamQuietAgents: [],
@@ -95,6 +107,7 @@ export const RULE_THRESHOLD_RANGE = Object.freeze({
   ipamNewIp: { min: 1, max: 1000 },    // 묶음 상한 — 넘으면 요약 한 건
   ipamSubnetFull: { min: 50, max: 100 }, // v3.7.0 대역 점유율(%)
   ipamScanStale: { min: 2, max: 48 },    // v3.7.0 주기의 몇 배
+  unityIfaceBusy: { min: 10, max: 100 }, // v3.35.0 Unity 포트 사용률(%)
 });
 /** v3.1.0: 알리지 않을 에이전트 목록 정제 — 글자만 · 64자 · 200개 · 중복 제거(대소문자 무시). */
 export function cleanQuietAgents(v) {
@@ -948,10 +961,46 @@ async function tickInner() {
   await refreshState(cfg, true);
 }
 
+/**
+ * v3.35.0 — Unity 인터페이스 알림을 평가 결과에 붙인다(판정은 storage/ifaceSummary.js ifaceAlertsOf 하나 · 장비 호출 0 — DB · 스냅샷만).
+ * 등록부를 못 읽으면 장비가 사라진 것으로 보지 않고 전부 보류한다(발생 중인 것을 '해소' 로 기록하지 않는다).
+ */
+let _ifaceErrAt = 0;
+function ifaceAlertErrLog(e) {
+  const t = Date.now();
+  if (t - _ifaceErrAt < 3_600_000) return;
+  _ifaceErrAt = t;
+  console.warn(`[alerts] Unity 인터페이스 판정 실패(이번 회차 보류): ${String(e?.message || e).slice(0, 160)}`);
+}
+function ensureHidden(active, name) {
+  if (!(active[name] instanceof Set)) Object.defineProperty(active, name, { value: new Set(), enumerable: false, configurable: true });
+  return active[name];
+}
+async function addIfaceAlerts(active, cfg) {
+  const R = cfg.rules || {};
+  if (!R.unityIfaceDown?.enabled && !R.unityIfaceSlow?.enabled && !R.unityIfaceBusy?.enabled) return;
+  const heldP = ensureHidden(active, 'heldPrefixes');
+  const held = ensureHidden(active, 'held');
+  if (storageRegistryLoadError()) { heldP.add('unityif:'); return; }
+  const devices = listStorageDevices().filter((d) => isIfaceType(d.type));
+  if (!devices.length) return;
+  const snapById = latestMapByDevice([localSnapshots(), edgeStorageSnapshots()]);
+  const fleet = await fleetIfaces(devices, snapById, { withCells: false });
+  const env = Number(storageEnvIntervals()?.pollMs) || 3_600_000;
+  const pollOf = (d) => { try { const v = Number(storageIntervalsForAgent(d.agent || '')?.pollMs); return Number.isFinite(v) && v > 0 ? v : env; } catch { return env; } };
+  const r = ifaceAlertsOf(fleet, R, { staleMsOf: (d) => 3 * pollOf(d) });
+  for (const a of r.alerts) active.push(a);
+  for (const k of r.held) held.add(k);
+  for (const k of r.heldPrefixes) heldP.add(k);
+  for (const x of fleet) if (!x.view) heldP.add(`unityif:${x.device.id}:`);   // 조립 실패 장비도 보류
+}
+
 async function refreshState(cfg, sendEnabled) {
   let active = [];
   const snap = store.get();
   try { active = evaluate(snap, cfg); } catch { active = []; }
+  // v3.35.0: Unity 인터페이스(링크 다운 · 속도 저하 · 사용률) — DB 를 읽어야 해서 비동기 평가 밖에서 붙인다. 보류 키 · 접두는 아래에서 숨은 속성을 읽기 전에 넣는다.
+  try { await addIfaceAlerts(active, cfg); } catch (e) { ifaceAlertErrLog(e); }
   // 판정 보류 키는 아래 concat(새 배열) 전에 잡아 둔다 — 숨은 속성은 concat 으로 옮겨지지 않는다.
   const held = active.held instanceof Set ? active.held : new Set();
   const heldPrefixes = active.heldPrefixes instanceof Set ? [...active.heldPrefixes] : [];   // v3.8.1

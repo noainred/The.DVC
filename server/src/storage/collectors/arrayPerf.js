@@ -43,7 +43,12 @@ export const MAX_ARRAYS = 4;                 // Unisphere 하나가 관리하는
 export const UNITY_CPU_PATH = 'sp.*.cpu.summary.utilization';
 export const UNITY_FC_PATHS = Object.freeze({ readBytes: 'sp.*.fibreChannel.target.*.readBytes', writeBytes: 'sp.*.fibreChannel.target.*.writeBytes',
   reads: 'sp.*.fibreChannel.target.*.reads', writes: 'sp.*.fibreChannel.target.*.writes' });
-export const LAT_UNIT_NOTE = { powermax: 'ms(문서)', powerstore: 'us→ms(가정)', unity480: '없음(SP 단위 응답 시간 경로 미사용)' };
+/**
+ * v3.35.0(Unity 인터페이스 — 설계 docs/design/unity-iface): 이더넷 포트(iSCSI · NAS 공통) 누적 바이트. ⚠ 경로는 Unity 성능 지표 문서 지식이고
+ *   **실장비 미확인**이다(FC 경로와 같은 수준) — 그 장비가 이 경로의 이력을 모으지 않으면 probe.paths 가 0 · 'error' 로 밝힌다.
+ */
+export const UNITY_ETH_PATHS = Object.freeze({ bytesIn: 'sp.*.net.device.*.bytesIn', bytesOut: 'sp.*.net.device.*.bytesOut' });
+export const LAT_UNIT_NOTE ={ powermax: 'ms(문서)', powerstore: 'us→ms(가정)', unity480: '없음(SP 단위 응답 시간 경로 미사용)' };
 export const HBPS_NOTE = { powermax: 'HostMBs×1e6', powerstore: 'read_bandwidth+write_bandwidth(B/s)', unity480: 'FC target readBytes+writeBytes 누적 델타/초' };
 
 const str = (v, max = 60) => (typeof v === 'string' ? v.trim().slice(0, max) : (typeof v === 'number' ? String(v) : ''));
@@ -61,8 +66,10 @@ export const unitKindOf = (type) => (type === 'powerstore' ? 'node' : type === '
  * @returns {{ts:number, nodes:Array<object>, units:Array<{id:number,name:string,kind:string,parent:number|null}>, probe:object}}
  */
 export function buildFeSample({ ts, type, source = '', units = [], probe = {} }) {
-  const parents = units.filter((u) => u && u.kind !== 'port');
-  const ports = units.filter((u) => u && u.kind === 'port');
+  // v3.35.0(Unity 인터페이스): 이더넷 포트(kind 'eth')도 포트처럼 — 부모(fa · node · sp)를 다 담은 뒤 남는 자리에만.
+  const portLike = (u) => u.kind === 'port' || u.kind === 'eth';
+  const parents = units.filter((u) => u && !portLike(u));
+  const ports = units.filter((u) => u && portLike(u));
   const room = Math.max(0, NODE_LOAD_LIMIT - Math.min(parents.length, NODE_LOAD_LIMIT));
   const pick = [...parents.slice(0, NODE_LOAD_LIMIT), ...ports.slice(0, room)];
   const nodes = []; const catalog = []; const seen = new Set();
@@ -72,8 +79,9 @@ export function buildFeSample({ ts, type, source = '', units = [], probe = {} })
     seen.add(id);
     const parent = u.parent ? unitIdOf(u.parent) : null;
     catalog.push({ id, name, kind: u.kind || unitKindOf(type), parent });
+    // v3.35.0: in · out(bps) — Unity 포트의 들어온 · 나간 처리량(FC = 쓰기 · 읽기, 이더넷 = 받음 · 보냄). 다른 벤더는 null 그대로.
     nodes.push({ id, busy: pct(u.busy), cpu: pct(u.cpu), iops: nonneg(u.iops), lat: nonneg(u.lat) == null ? null : r1(nonneg(u.lat)), hbps: nonneg(u.hbps), queue: pct(u.queue),
-      in: null, out: null, din: null, dout: null, ops: null, proto: null, clients: [] });
+      in: nonneg(u.in), out: nonneg(u.out), din: null, dout: null, ops: null, proto: null, clients: [] });
   }
   const measured = (k) => nodes.filter((n) => n[k] != null).length;
   return {
@@ -388,19 +396,31 @@ const spName = (sp) => String(sp || '').toUpperCase();
  * SP · 포트 단위 조립(순수 — v2.954 점검 B-3에서 sampleUnity 밖으로 뺐다). 읽기 + 쓰기는 **둘 다** 있을 때만 합 —
  * 한쪽 경로(writeBytes 등) 조회만 실패하면 부분 합이 '최신 hbps' 가 되어 보고 대조가 거짓 주의였다. partial = 한쪽만 있어 null 로 둔 값 수.
  */
-export function unityUnits({ cpu = {}, rb, wb, rd, wr }, { withPorts = true } = {}) {
+export function unityUnits({ cpu = {}, rb, wb, rd, wr, ein = null, eout = null }, { withPorts = true } = {}) {
   let partial = 0;
   const add = (x, y) => { if ((x == null) !== (y == null)) partial += 1; return bothSum(x, y); };
+  // v3.35.0: 포트의 들어온 · 나간 처리량은 바이트/초 × 8(bps — 노드 부하 표의 in · out 열 단위). 한쪽만 읽혀도 그쪽은 싣는다(합이 아니라 방향별 값).
+  const bits = (x) => (x == null ? null : x * 8);
   const sps = new Set([...Object.keys(cpu), ...Object.keys(rb.perSp), ...Object.keys(rd.perSp)]);
   const units = [];
   for (const sp of [...sps].sort()) {
     units.push({ name: spName(sp), kind: 'sp', cpu: cpu[sp] ?? null, hbps: add(rb.perSp[sp], wb.perSp[sp]), iops: add(rd.perSp[sp], wr.perSp[sp]) });
   }
   if (withPorts) {
-    const ports = new Set([...Object.keys(rb.perPort), ...Object.keys(rd.perPort)]);
+    const ports = new Set([...Object.keys(rb.perPort), ...Object.keys(rd.perPort), ...Object.keys(wb.perPort)]);
     for (const p of [...ports].sort()) {
-      const sp = rb.perPort[p]?.sp || rd.perPort[p]?.sp || '';
-      units.push({ name: unityPortName(p), kind: 'port', parent: spName(sp), hbps: add(rb.perPort[p]?.rate, wb.perPort[p]?.rate), iops: add(rd.perPort[p]?.rate, wr.perPort[p]?.rate) });
+      const sp = rb.perPort[p]?.sp || wb.perPort[p]?.sp || rd.perPort[p]?.sp || '';
+      // FC: 호스트가 쓴 것 = 어레이로 들어온 것(in) · 읽은 것 = 나간 것(out).
+      units.push({ name: unityPortName(p), kind: 'port', parent: spName(sp), hbps: add(rb.perPort[p]?.rate, wb.perPort[p]?.rate), iops: add(rd.perPort[p]?.rate, wr.perPort[p]?.rate),
+        in: bits(wb.perPort[p]?.rate ?? null), out: bits(rb.perPort[p]?.rate ?? null) });
+    }
+    // v3.35.0: 이더넷 포트(iSCSI · NAS) — kind 'eth'. hbps 는 비운다(SAN 스토리지 성능의 FC 합 · 보고 대조에 섞이지 않게).
+    if (ein || eout) {
+      const ep = new Set([...Object.keys(ein?.perPort || {}), ...Object.keys(eout?.perPort || {})]);
+      for (const p of [...ep].sort()) {
+        const sp = ein?.perPort?.[p]?.sp || eout?.perPort?.[p]?.sp || '';
+        units.push({ name: unityPortName(p), kind: 'eth', parent: spName(sp), in: bits(ein?.perPort?.[p]?.rate ?? null), out: bits(eout?.perPort?.[p]?.rate ?? null) });
+      }
     }
   }
   return { units, partial };
@@ -419,11 +439,15 @@ export async function sampleUnity(full, { signal = null, now = Date.now(), port 
   const wbE = await fetchEntries('writeBytes', UNITY_FC_PATHS.writeBytes, 4);
   const rdE = await fetchEntries('reads', UNITY_FC_PATHS.reads, 4);
   const wrE = await fetchEntries('writes', UNITY_FC_PATHS.writes, 4);
+  // v3.35.0: 이더넷 포트 처리량(포트 단위를 읽을 때만 — withPorts 가 꺼지면 SP 값만 읽던 예전 호출 수 그대로).
+  const einE = withPorts ? await fetchEntries('ethIn', UNITY_ETH_PATHS.bytesIn, 4) : [];
+  const eoutE = withPorts ? await fetchEntries('ethOut', UNITY_ETH_PATHS.bytesOut, 4) : [];
   const cpu = unitySpLatest(cpuE);
   const rb = unityCounterRate(rbE); const wb = unityCounterRate(wbE); const rd = unityCounterRate(rdE); const wr = unityCounterRate(wrE);
+  const ein = unityCounterRate(einE); const eout = unityCounterRate(eoutE);
   const sps = new Set([...Object.keys(cpu), ...Object.keys(rb.perSp), ...Object.keys(rd.perSp)]);
   if (!sps.size) throw new Error(`SP 값을 읽지 못했습니다(metricValue 비어 있음${probe.errors[0] ? ` — ${probe.errors[0]}` : ''})`);
-  const { units, partial } = unityUnits({ cpu, rb, wb, rd, wr }, { withPorts });
+  const { units, partial } = unityUnits({ cpu, rb, wb, rd, wr, ein, eout }, { withPorts });
   probe.counterIntervalS = rb.intervalS ?? rd.intervalS ?? null;
   if (partial) probe.partialSums = partial;   // 읽기 · 쓰기 한쪽만 읽혀 null 로 둔 값 수(사유는 probe.errors · probe.paths)
   probe.counterNote = rb.intervalS == null ? '누적 항목이 둘 미만 — 첫 표본(또는 이력 수집 꺼짐)이라 처리량 · IOPS 는 null' : '';
