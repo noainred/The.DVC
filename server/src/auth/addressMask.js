@@ -275,6 +275,18 @@ export function maskSnapAddress(s, hostHint = '') {
       },
     };
   }
+  // v3.35.0(Unity 인터페이스): iSCSI · NAS 인터페이스의 **데이터 IP** 도 관리 주소와 같은 등급으로 가린다(구조화 필드).
+  //   그 IP 들은 uemcli `/net/if show -detail` 원문(extra.cliRaw)에도 그대로 실리므로, 알려진 그 주소만 원문에서도 지운다
+  //   (위 '정직 기록' — 원문 전체를 훑지는 않는다 — 의 예외가 아니라, 이번에 원문에 새로 실리게 된 주소를 새지 않게 하는 것이다).
+  const ifs = out.extra?.ifaces?.interfaces;
+  if (Array.isArray(ifs) && ifs.length) {
+    const ips = ifs.map((x) => (x && typeof x === 'object' && typeof x.ip === 'string' ? x.ip.trim() : '')).filter(Boolean);
+    out.extra = { ...out.extra, ifaces: { ...out.extra.ifaces, interfaces: ifs.map((x) => (x && typeof x === 'object' && !Array.isArray(x) ? { ...x, ip: x.ip ? '' : x.ip } : x)) } };
+    if (ips.length && Array.isArray(out.extra.cliRaw)) {
+      const sc = makeScrubber(ips);
+      out.extra = { ...out.extra, cliRaw: out.extra.cliRaw.map((r) => (r && typeof r === 'object' && typeof r.sample === 'string' ? { ...r, sample: sc(r.sample) } : r)) };
+    }
+  }
   return out;
 }
 

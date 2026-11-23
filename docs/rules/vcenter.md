@@ -553,7 +553,7 @@
   - 맞춤은 Veeam 계정과 같은 규칙(`creators.js listedMatcher` → `makeVeeamAccountMatcher` 의 'account' 만 — 'veeam' 이름 규칙은 끼지 않는다). 뺀 이벤트 수 `listed` · 적은 개수 `excludeCount` 를 응답에 싣고 화면이 밝힌다.
   - 계정 이름이라 **관리자 판본(`isAdminDetailUser`)이 아니면 개수만**(`vmHygiene.js creatorMasked` — 분석 · 설정 조회 · 저장 응답 세 곳이 `settingsFor` 하나) · 저장(관리자 · 전 법인)에서도 관리자 판본이 아니면 이 칸을 버린다(가린 빈 목록이 저장값을 지우지 않게 — 웹 `settingsPatch` 도 가린 판본은 보내지 않는다).
   - 만든 계정 응답은 5분 캐시 — 열쇠에 설정 판본(`|s${rev}`)을 넣어 목록을 바꾸면 바로 갈린다.
-- **스냅샷 보류 목록(v3.35.0 · 시안 `docs/design/snapshot-holds` ⑫~⑮ — 사용자 '시안 권장안대로 구현해줘')**:
+- **스냅샷 보류 목록(v3.35.0 — 실제 릴리스 v3.36.0 · 시안 `docs/design/snapshot-holds` ⑫~⑮ — 사용자 '시안 권장안대로 구현해줘')**:
   - 보류의 **지금 상태는 `snaphist/view.js holdRows` 하나**(has · none · gone · unknown). 그 vCenter 를 지금 못 읽으면(`vcReadIssue` — 점검중 · 수집 실패 · 첫 수집 중 · 비활성 · REST) ‘VM 없음’ 이 아니라 unknown ·
     개수를 못 읽은 VM 도 unknown(‘스냅샷 없음’ 아님) · 등록에서 뺀 vCenter 는 gone(why `vc-removed`) — **등록부를 못 읽었으면(`loadVcenterConfig().readError`) 단정하지 않는다**(registered = null). 화면(`snapText.holdSummary`)은 unknown 을 ‘대상 없음’ · ‘스냅샷 없음’ 에 세지 않는다.
   - **풀기(0일)는 VM 이 인벤토리에 없어도** 그 보류가 지금 목록에 있으면(`holds.activeHold`) — 예전 404 라 기한(최대 90일)까지 상한(2,000건)을 차지했다. **걸기 · 연장은 여전히 VM 이 있어야** 한다(없는 VM 에 새 예외를 만들지 않는다). 조회 밖은 어느 쪽이든 404(존재 은닉) → 쓰기 밖 403.

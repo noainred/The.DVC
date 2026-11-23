@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>인터페이스 — 좁은 화면 (400)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums}
+.muted{color:#8b9bb4}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;padding:0 13px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+.btn.on{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.btn:disabled{opacity:.5}
+.seg{display:flex;border:1px solid #243049;border-radius:8px;overflow:hidden}
+.seg button{flex:1;min-height:44px;padding:0 8px;border:0;border-left:1px solid #243049;background:transparent;color:#8b9bb4;font:inherit;font-size:12.5px;cursor:pointer;white-space:nowrap}
+.seg button:first-child{border-left:0}
+.seg button.on{background:#1a2236;color:#e6edf6;font-weight:600}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}.tag.crit{background:rgba(239,68,68,.16);color:#fca5a5}.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}.tag.blue{background:rgba(59,130,246,.18);color:#93c5fd}.tag.teal{background:rgba(45,212,191,.14);color:#5eead4}
+.kpi{padding:11px 12px;display:flex;flex-direction:column;gap:2px}
+.kpi .l{font-size:11.5px;color:#8b9bb4;font-weight:600}
+.kpi .v{font-size:21px;font-weight:800;line-height:1.2}
+.kpi .s{font-size:11px;color:#8b9bb4}
+.item{padding:11px 12px;display:flex;flex-direction:column;gap:7px;border-bottom:1px solid #1f2a40;text-decoration:none;color:inherit}
+.item:last-child{border-bottom:0}
+.bar{position:relative;height:8px;border-radius:4px;background:#0f1626;overflow:hidden}
+.bar i{position:absolute;left:0;top:0;bottom:0;border-radius:4px}
+.strip{display:grid;grid-template-columns:repeat(24, minmax(0, 1fr));gap:1px}
+.strip i{height:12px;border-radius:2px}
+.stat{padding:10px 11px;border:1px solid #1f2a40;border-radius:10px;background:#0f1626;display:flex;flex-direction:column;gap:2px;min-width:0}
+.stat .l{font-size:11px;color:#8b9bb4;font-weight:600}
+.stat .v{font-size:18px;font-weight:800;line-height:1.2}
+.stat .s{font-size:11px;color:#8b9bb4}
+.lg{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#aebbd0;white-space:nowrap}
+.lg i{width:14px;height:3px;border-radius:2px;display:inline-block}
+</style>
+</helmet>
+<div style="min-height: 1900px; box-sizing: border-box; padding: 14px 12px 28px; display: flex; flex-direction: column; gap: 12px; min-width: 0">
+
+  <b style="font-size: 16px">스토리지 모니터링</b>
+  <div style="display: flex; gap: 6px; flex-wrap: wrap">
+    <button class="btn on">+ 장비 등록</button><button class="btn">장비별</button><button class="btn">법인별</button><button class="btn">타입별</button><button class="btn">장애 장비 3</button><button class="btn">추이</button><button class="btn on" aria-current="page">인터페이스</button>
+  </div>
+
+  <div class="card" style="padding: 10px 12px; font-size: 12px; display: flex; flex-direction: column; gap: 3px">
+    <span><b>Unity 18대</b> · 포트 <b>288</b> <span class="muted">— FC 144 · 이더넷 144</span></span>
+    <span class="muted">사용량은 5분 표본 · 마지막 수집 <span class="mono">14:05 ~ 14:21</span></span>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px">
+    <div class="card kpi"><span class="l">포트</span><span class="v mono">288</span><span class="s">업 251 · 다운 9 · 미연결 28</span></div>
+    <div class="card kpi" style="border-color: rgba(245,158,11,.5)"><span class="l">속도 저하</span><span class="v mono" style="color: #fcd34d">3</span><span class="s">최대보다 낮게 연결</span></div>
+    <div class="card kpi" style="border-color: rgba(234,88,12,.55)"><span class="l">포화 근접</span><span class="v mono" style="color: #fdba74">5</span><span class="s">피크가 기준(80%) 이상</span></div>
+    <div class="card kpi"><span class="l">유휴</span><span class="v mono">22</span><span class="s">업 · 기간 내 1% 미만</span></div>
+    <div class="card kpi"><span class="l">SP 편중</span><span class="v mono">2 <span style="font-size: 12px; font-weight: 600">대</span></span><span class="s">SPA · SPB 차이 큼</span></div>
+    <div class="card kpi" style="border-style: dashed"><span class="l">사용량 못 읽음</span><span class="v mono" style="color: #aebbd0">2 <span style="font-size: 12px; font-weight: 600">대</span></span><span class="s">32 포트 · 따로 셈</span></div>
+  </div>
+
+  <div class="seg" role="group" aria-label="기간"><button class="on">24시간</button><button>7일</button><button>30일</button></div>
+  <div class="seg" role="group" aria-label="종류"><button class="on">전체</button><button>FC</button><button>iSCSI</button><button>NAS</button></div>
+  <input style="min-height: 44px; box-sizing: border-box; padding: 0 12px; border-radius: 8px; border: 1px solid #243049; background: #0f1626; color: #e6edf6; font: inherit" placeholder="장비 · 포트 · IP 검색" aria-label="검색">
+
+  <div class="card" style="overflow: hidden">
+    <div style="padding: 10px 12px; border-bottom: 1px solid #1f2a40; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap">
+      <b>인터페이스 포트</b><span class="muted" style="font-size: 12px">기간 피크 높은 순 · 288개 중 4개</span>
+    </div>
+    <sc-for list="{{rows}}" as="r" hint-placeholder-count="4">
+    <a class="item" href="Device.dc.html">
+      <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap">
+        <b class="mono" style="font-size: 13px">{{r.port}}</b><span class="{{r.kindCls}}">{{r.kind}}</span><span class="{{r.stCls}}">{{r.st}}</span>
+      </div>
+      <div class="muted" style="font-size: 12px">{{r.corp}} · {{r.dev}} · <span class="mono" style="{{r.spStyle}}">{{r.speed}}</span> {{r.speedSub}}</div>
+      <div style="display: flex; align-items: center; gap: 8px">
+        <div class="bar" style="flex-grow: 1"><i style="{{r.barStyle}}"></i></div>
+        <span class="mono" style="font-size: 12px">최근 {{r.now}}</span>
+        <span class="mono" style="font-size: 12px; {{r.peakStyle}}">피크 {{r.peak}}</span>
+      </div>
+      <div class="strip" aria-hidden="true"><sc-for list="{{r.cells}}" as="c" hint-placeholder-count="24"><i style="{{c}}"></i></sc-for></div>
+      <div class="mono muted" style="font-size: 11.5px">읽기 {{r.rd}} · 쓰기 {{r.wr}} MB/s</div>
+    </a>
+    </sc-for>
+    <div style="padding: 10px 12px; border-top: 1px solid #1f2a40"><button class="btn" style="width: 100%">더 보기(284)</button></div>
+  </div>
+
+  <div style="display: flex; align-items: center; gap: 10px; margin-top: 6px">
+    <span style="flex: 1; height: 1px; background: #243049"></span><span class="muted" style="font-size: 12px">포트를 누르면 — 장비 화면</span><span style="flex: 1; height: 1px; background: #243049"></span>
+  </div>
+
+  <div style="display: flex; flex-direction: column; gap: 4px">
+    <span class="muted" style="font-size: 12px"><a href="Main.dc.html">인터페이스</a> › UNITY-SEL-02</span>
+    <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap"><b class="mono" style="font-size: 15px">spa_iom_0_fc0</b><span class="tag blue">FC</span><span class="tag ok">정상</span></div>
+    <span class="muted" style="font-size: 12px">연결 <b class="mono" style="color: #e6edf6">16 Gb</b> · 최대 16 Gb · 한국 · 마지막 수집 <span class="mono">14:05</span></span>
+  </div>
+
+  <div class="card" style="padding: 10px 12px; display: flex; flex-direction: column; gap: 8px">
+    <span style="font-size: 12px; font-weight: 600">포트 배치 <span class="muted" style="font-weight: 400">· 띠 = 24시간 피크</span></span>
+    <sc-for list="{{sps}}" as="sp" hint-placeholder-count="2">
+    <div style="display: flex; align-items: center; gap: 8px">
+      <b style="width: 32px; font-size: 12px">{{sp.name}}</b>
+      <div style="flex: 1; display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 3px; min-width: 0">
+        <sc-for list="{{sp.ports}}" as="p" hint-placeholder-count="8"><span style="{{p}}"></span></sc-for>
+      </div>
+    </div>
+    </sc-for>
+    <span class="muted" style="font-size: 11.5px">왼쪽 4칸 이더넷(eth2~5) · 오른쪽 4칸 FC(fc0~3) · 점선 = 미연결</span>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px">
+    <div class="stat"><span class="l">읽기 · 최근 5분</span><span class="v mono" style="color: #67e8f9">612</span><span class="s">MB/s</span></div>
+    <div class="stat"><span class="l">쓰기 · 최근 5분</span><span class="v mono" style="color: #fcd34d">1,184</span><span class="s">MB/s · 74%</span></div>
+    <div class="stat"><span class="l">기간 피크</span><span class="v mono" style="color: #fdba74">93%</span><span class="s mono">1,488 MB/s · 03:10</span></div>
+    <div class="stat"><span class="l">기간 평균</span><span class="v mono">41%</span><span class="s">직전 24시간 대비 피크 +6%p</span></div>
+  </div>
+
+  <div class="card" style="padding: 12px">
+    <svg viewBox="0 0 360 220" style="width: 100%; height: auto; display: block" role="img" aria-label="spa_iom_0_fc0 최근 24시간 읽기·쓰기 처리량. 쓰기 피크 03시 10분 1,488 MB/s, 93퍼센트.">
+      <g font-family="JetBrains Mono, monospace" font-size="10" fill="#8b9bb4">
+        <line x1="40" y1="18" x2="352" y2="18" stroke="#ea580c" stroke-width="1" stroke-dasharray="5 4"></line>
+        <text x="352" y="12" text-anchor="end" fill="#fdba74">1,600 MB/s (100%)</text>
+        <line x1="40" y1="54" x2="352" y2="54" stroke="#f59e0b" stroke-width="1" stroke-dasharray="2 4" opacity=".7"></line>
+        <line x1="40" y1="108" x2="352" y2="108" stroke="#1f2a40" stroke-width="1"></line>
+        <line x1="40" y1="198" x2="352" y2="198" stroke="#243049" stroke-width="1"></line>
+        <text x="36" y="22" text-anchor="end">1,600</text><text x="36" y="112" text-anchor="end">800</text><text x="36" y="202" text-anchor="end">0</text>
+        <text x="40" y="214">어제 14:05</text><text x="196" y="214" text-anchor="middle">02:05</text><text x="352" y="214" text-anchor="end">14:05</text>
+      </g>
+      <path d="{{rdArea}}" fill="rgba(34,211,238,.16)"></path>
+      <path d="{{rdLine}}" fill="none" stroke="#22d3ee" stroke-width="1.4"></path>
+      <path d="{{wrLine}}" fill="none" stroke="#f59e0b" stroke-width="1.6"></path>
+      <circle cx="{{px}}" cy="{{py}}" r="3.5" fill="#0a0e17" stroke="#fdba74" stroke-width="2"></circle>
+    </svg>
+    <div style="display: flex; gap: 6px 14px; flex-wrap: wrap; align-items: center; margin-top: 8px">
+      <span class="lg"><i style="background: #22d3ee"></i>읽기</span><span class="lg"><i style="background: #f59e0b"></i>쓰기</span>
+      <span class="muted" style="font-size: 12px">80% 이상 1시간 25분</span>
+    </div>
+  </div>
+  <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px">
+    <button class="btn">◀ 이전</button><button class="btn" disabled>다음 ▶</button><button class="btn" disabled>최신</button>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":400,"height":1900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var LV = [[80, '#ea580c'], [60, '#22d3ee'], [40, '#0e7490'], [20, '#155e75'], [0, '#1e3a5f']];
+    function col(p) { for (var i = 0; i < LV.length; i++) { if (p >= LV[i][0]) return LV[i][1]; } return LV[4][1]; }
+    var seed = 11;
+    function rnd() { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; }
+    function cells(avg, peak, hour) {
+      var out = [];
+      for (var h = 0; h < 24; h++) {
+        var v = avg * (0.55 + 0.9 * rnd());
+        if (h === hour) v = peak;
+        if (Math.abs(h - hour) === 1) v = Math.max(v, peak * 0.8);
+        out.push('background:' + col(Math.min(100, v)));
+      }
+      return out;
+    }
+    var raw = [
+      ['UAE', 'UNITY-DXB-01', 'spa_iom_0_fc1', 'FC', 'tag blue', '8 Gb', '(최대 16)', 'tag warn', '속도 저하', '310', '655', 82, 99, 57, 2, true],
+      ['한국', 'UNITY-SEL-01', 'spb_eth3', 'NAS', 'tag gray', '1 Gb', '(최대 10)', 'tag warn', '속도 저하', '96', '41', 77, 100, 60, 11, true],
+      ['미국 서부', 'UNITY-SJC-01', 'spa_eth2', 'iSCSI', 'tag teal', '10 Gb', '', 'tag ok', '정상', '880', '1,050', 84, 97, 52, 2, false],
+      ['한국', 'UNITY-SEL-02', 'spa_iom_0_fc0', 'FC', 'tag blue', '16 Gb', '', 'tag ok', '정상', '612', '1,184', 74, 93, 41, 3, false]
+    ];
+    var rows = raw.map(function (a) {
+      return { corp: a[0], dev: a[1], port: a[2], kind: a[3], kindCls: a[4], speed: a[5], speedSub: a[6], stCls: a[7], st: a[8], rd: a[9], wr: a[10],
+        spStyle: a[15] ? 'color:#fcd34d;font-weight:600' : 'color:#e6edf6',
+        now: a[11] + '%', barStyle: 'width:' + a[11] + '%;background:' + col(a[11]),
+        peak: a[12] + '%', peakStyle: a[12] >= 80 ? 'color:#fdba74;font-weight:700' : '',
+        cells: cells(a[13], a[12], a[14]) };
+    });
+    function cell(pk, sel) {
+      if (pk == null) return 'height:26px;border-radius:5px;border:1px dashed #5d6b85;box-sizing:border-box';
+      return 'height:26px;border-radius:5px;background:' + col(pk) + (sel ? ';outline:2px solid #f8fafc;outline-offset:1px' : '');
+    }
+    var sps = [
+      { name: 'SPA', ports: [cell(34), cell(22), cell(0.4), cell(12), cell(93, true), cell(74), cell(61), cell(48)] },
+      { name: 'SPB', ports: [cell(31), cell(9), cell(null), cell(null), cell(38), cell(33), cell(27), cell(22)] }
+    ];
+    var n = 144, X0 = 40, X1 = 352, Y0 = 18, Y1 = 198, MAX = 1600, PK = 78;
+    var rd = [], wr = [];
+    seed = 5;
+    for (var i = 0; i < n; i++) {
+      var night = Math.exp(-Math.pow((i - PK) / 11, 2));
+      wr.push(Math.max(60, Math.min(1470, 520 + 160 * Math.sin(i / 8.5) + 90 * Math.sin(i / 2.7) + (rnd() - 0.5) * 120 + 880 * night)));
+      rd.push(Math.max(40, Math.min(900, 300 + 110 * Math.sin(i / 11.5 + 1) + (rnd() - 0.5) * 90 + 260 * Math.exp(-Math.pow((i - 125) / 9, 2)))));
+    }
+    wr[PK] = 1488;
+    function path(arr) {
+      var out = [];
+      for (var k = 0; k < arr.length; k++) {
+        out.push((k ? 'L' : 'M') + (X0 + (X1 - X0) * k / (arr.length - 1)).toFixed(1) + ' ' + (Y1 - (Y1 - Y0) * arr[k] / MAX).toFixed(1));
+      }
+      return out.join(' ');
+    }
+    var rdLine = path(rd);
+    return { rows: rows, sps: sps, rdLine: rdLine, rdArea: rdLine + ' L' + X1 + ' ' + Y1 + ' L' + X0 + ' ' + Y1 + ' Z', wrLine: path(wr),
+      px: (X0 + (X1 - X0) * PK / (n - 1)).toFixed(1), py: (Y1 - (Y1 - Y0) * 1488 / MAX).toFixed(1) };
+  }
+}
+</script>
+</body>
+</html>

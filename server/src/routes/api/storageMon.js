@@ -14,7 +14,7 @@ import { edgeStorageSnapshots, edgeStorageReports } from '../../central/storageE
 import { listActivity } from '../../storage/activityLog.js';
 import { areaSummary, areaJson, capacityHistory, capacityHistoryAll, dbAvailable,
   dailySeries, dailySpans, dayIndex, dayLabel, dayStartMs, pruneNow, effectiveKeepDays, DAY_OFFSET_MIN, capacityResets,
-  nodeLoadQuery, nodeLoadJobs, nodeLoadOldest,
+  nodeLoadQuery, nodeLoadJobs, nodeLoadOldest, nodeUnitsOf, ifaceChanges,
   nodeClientsQuery, nodeClientsLatest, nodeProtoQuery, nodeClientOldest, nodeLoadNodeIds, nodeLoadSampleCount } from '../../storage/db.js'; // v2.932 클라이언트·프로토콜
 import { nodeLoadWindow, buildNodeLoadSeries, jobsSeriesOf, NODE_LOAD_GROUPS, BASELINE, CLUSTER_AGG, METRIC_BY_KEY,
   NODE_LOAD_LIMIT, clientNodeMatrix, nodeSkew, rebalanceCandidates, FIXED_SHARE_DEF, SKEW_FACTOR_DEF, protoKeyOf } from '../../storage/nodeLoad.js';   // v2.926 노드 부하 추이 · v2.932 재배치 판정
@@ -36,6 +36,9 @@ import { isDemoGuest } from '../../auth/demoGuest.js'; // v2.720(감사 B2-04)
 import { isDemoId } from '../../mock/demo/storage.js';
 import { isAdminReq, maskDeviceAddress, maskSnapAddress, maskActivityEvents, maskPollerStatus } from '../../auth/addressMask.js';
 import { latestMapByDevice } from '../../storage/latestSnapshots.js';
+import { deviceIfaces, unitIdByPort, rangeKey as ifaceRangeKey, IFACE_CELLS } from '../../storage/ifaceSummary.js';   // v3.35.0 Unity 인터페이스
+import { isIfaceType, portMatchKey, IFACE_DEFAULTS } from '../../storage/ifaces.js';
+import { loadAlertConfig } from '../../alerts.js';
 import { numOrNull } from '../../util/numOrNull.js';
 import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
@@ -701,6 +704,88 @@ api.get('/tools/storage/devices/:id/node-load', toolsPerm, fullScopeOnly, async 
  *  · 이름은 포탈 인벤토리(VM IP · 호스트 이름/관리 IP)에서만(역방향 DNS 없음 — clientNames.js). 장비 호출 0 · 폴링 없음.
  *  · '클라이언트 없음' 은 '연결 없음' 이 아니다 — 쉬는 마운트는 통계에 없다(화면 문구). 게이트는 node-load 와 같다(toolsPerm + fullScopeOnly · 데모 404).
  */
+/**
+ * v3.35.0 — Unity SAN · NAS 인터페이스(사용자 요청 '속도 사용량 모니터링/트래킹' · 설계 docs/design/unity-iface · 컨펌 2026-11-23).
+ *  · 전 장비 `/tools/storage/ifaces?range=24h|7d|30d` — 포트 구성(속도 · 링크) + 기간 피크 · 평균 · 24칸 + 최근 5분 + 판정 + 변화 이력(30일).
+ *  · 장비 한 대 `/tools/storage/devices/:id/ifaces?range&port&end` — 위 + 고른 포트의 읽기 · 쓰기 추이(노드 부하 창 규약) + 그 장비의 변화 이력.
+ *  · 장비 호출 0(스냅샷 · DB 만). 무거운 조회라 화면은 폴링하지 않는다(탭 열 때 1회 + 새로 고침). 게이트는 노드 부하와 같다(toolsPerm + fullScopeOnly).
+ *  · 비-admin: 장비 관리 주소 · iSCSI/NAS 데이터 IP 를 가린다(addressHidden — maskDeviceAddress 와 같은 판본).
+ *  · 기준(포화 근접 % · 유휴 %)은 알림 규칙 임계를 따른다 — 화면은 이 응답의 값을 쓴다(숫자를 박지 않는다).
+ */
+function ifaceThresholds() {
+  let busyPct = IFACE_DEFAULTS.busyPct; let rules = {};
+  try { rules = loadAlertConfig()?.rules || {}; const t = numOrNull(rules.unityIfaceBusy?.threshold); if (t != null && t > 0) busyPct = t; } catch { /* 기본값 */ }
+  return { busyPct, idlePct: IFACE_DEFAULTS.idlePct,
+    alertRules: { down: !!rules.unityIfaceDown?.enabled, slow: !!rules.unityIfaceSlow?.enabled, busy: !!rules.unityIfaceBusy?.enabled } };
+}
+function ifaceSampleMs(dev, devs) {
+  const si = sampleIntervalOf(dev, devs);
+  return dev && dev.collectMethod !== 'ssh' && dev.nodeLoadEnabled !== false ? si.nodeLoadMs : si.pollMs;
+}
+function ifaceDeviceOut(d, snap, view, admin) {
+  const m = admin ? d : maskDeviceAddress(d);
+  const v = view ? { ...view, interfaces: admin ? view.interfaces : view.interfaces.map((x) => ({ ...x, ip: x.ip ? '' : x.ip })) } : null;
+  return { id: m.id, name: m.name, type: m.type, agent: m.agent || '', datacenterId: m.datacenterId || '', collectMethod: m.collectMethod || 'api',
+    enabled: m.enabled !== false, nodeLoadEnabled: m.nodeLoadEnabled !== false,
+    snapOk: !!snap?.ok, collectedAt: numOrNull(snap?.collectedAt), snapError: snap && !snap.ok ? (admin ? snap.error : maskSnapAddress(snap, d.host).error) || '' : '', view: v };
+}
+api.get('/tools/storage/ifaces', toolsPerm, fullScopeOnly, async (req, res) => {
+  const range = ifaceRangeKey(req.query.range);
+  const devs = listDevices();
+  const unity = devs.filter((d) => isIfaceType(d.type) && !(isDemoGuest(req.user) && !isDemoId(d.id)));
+  const byId = latestMapByDevice([localSnapshots(), edgeStorageSnapshots()]);
+  const th = ifaceThresholds();
+  const now = Date.now();
+  const out = [];
+  for (const d of unity) {
+    let view = null;
+    try { view = await deviceIfaces(d, byId.get(d.id) || null, { range, now, sampleMs: ifaceSampleMs(d, devs), busyPct: th.busyPct, idlePct: th.idlePct }); } catch { view = null; }
+    out.push(ifaceDeviceOut(d, byId.get(d.id) || null, view, isAdminReq(req)));
+  }
+  const ch = await ifaceChanges({ sinceTs: now - 30 * 86_400_000, limit: 200 });
+  const ids = new Set(unity.map((d) => d.id));
+  res.json({ ok: true, db: await dbAvailable(), range, cells: IFACE_CELLS, now, ...th, registryError: !!registryLoadError(),
+    devices: out, changes: ch.rows.filter((r) => ids.has(r.deviceId)), changesTruncated: !!ch.truncated,
+    ...(isAdminReq(req) ? {} : { addressHidden: true }) });
+});
+api.get('/tools/storage/devices/:id/ifaces', toolsPerm, fullScopeOnly, async (req, res) => {
+  const id = String(req.params.id || '');
+  if (demoGuard(req, res, id)) return;
+  const devs = listDevices();
+  const dev = devs.find((d) => d.id === id) || null;
+  if (!dev || !isIfaceType(dev.type)) return res.status(404).json({ ok: false, error: 'not-found' });
+  const range = ifaceRangeKey(req.query.range);
+  const snap = latestMapByDevice([localSnapshots(), edgeStorageSnapshots()]).get(id) || null;
+  const th = ifaceThresholds();
+  const now = Date.now();
+  const sampleMs = ifaceSampleMs(dev, devs);
+  const view = await deviceIfaces(dev, snap, { range, now, sampleMs, busyPct: th.busyPct, idlePct: th.idlePct });
+  // 고른 포트 — 요청 값이 그 장비 포트일 때만, 아니면 기간 피크가 가장 높은 링크 업 포트(없으면 첫 포트).
+  const ports = view?.ports || [];
+  const want = String(req.query.port || '');
+  const pick = ports.find((p) => p.id === want)
+    || [...ports].filter((p) => p.linkUp === true && p.peakPct != null).sort((a, b) => b.peakPct - a.peakPct)[0] || ports[0] || null;
+  let series = null;
+  if (pick && dev.collectMethod !== 'ssh') {
+    const units = unitIdByPort(await nodeUnitsOf(id));
+    const uid = units.get(portMatchKey(pick.id)) ?? units.get(portMatchKey(pick.name));
+    if (uid != null) {
+      const keep = effectiveKeepDays();
+      const w = nodeLoadWindow({ range, end: req.query.end, now, sampleMs });
+      const mk = kindOutsideRaw(w.start, w.kind, w.bucketMs, now - keep.nodeRaw * NL_DAY_MS);
+      const q = await nodeLoadQuery(id, { group: 'net', kind: mk.kind, from: w.start, to: w.end, bucketMs: mk.bucketMs });
+      const s = buildNodeLoadSeries(q.rows, ['in', 'out'], { kind: mk.kind });
+      const node = s.nodes.find((n) => n.id === uid) || null;
+      series = { port: pick.id, kind: mk.kind, bucketMs: mk.bucketMs, start: w.start, end: w.end, past: w.past, clamped: w.clamped, range: w.range,
+        cols: s.cols, in: node?.v.in || s.cols.map(() => null), out: node?.v.out || s.cols.map(() => null),
+        inMax: node?.mx?.in || null, outMax: node?.mx?.out || null, truncated: q.truncated, oldest: await nodeLoadOldest(id) };
+    }
+  }
+  const ch = await ifaceChanges({ deviceId: id, sinceTs: now - 30 * 86_400_000, limit: 100 });
+  res.json({ ok: true, now, range, cells: IFACE_CELLS, sampleMs, ...th, device: ifaceDeviceOut(dev, snap, view, isAdminReq(req)),
+    selected: pick?.id || null, series, changes: ch.rows, ...(isAdminReq(req) ? {} : { addressHidden: true }) });
+});
+
 api.get('/tools/storage/devices/:id/node-clients', toolsPerm, fullScopeOnly, async (req, res) => {
   const id = String(req.params.id || '');
   if (demoGuard(req, res, id)) return;

@@ -19,6 +19,7 @@ import { isMockMode, demoHash, demoRand, demoIp } from './flags.js';
 import { triedAreaEntry, notTriedAreaEntry, disabledAreaEntry, areaTotals } from '../../storage/onefsAreaSummary.js';
 import { sanDemoArraySerial } from './sanswitch.js';                       // v2.952 — SAN 데모 어레이와 같은 시리얼
 import { buildFeSample, isFePerfType } from '../../storage/collectors/arrayPerf.js'; // v2.952 — 어레이 프런트엔드 표본 모양(수집기와 같은 조립)
+import { buildIfaces } from '../../storage/ifaces.js';   // v3.35.0 Unity 인터페이스 데모(수집기와 같은 조립)
 
 export { isMockMode };
 
@@ -198,7 +199,7 @@ export function demoStorageSnapshot(dev, t = Date.now(), now = t) {
       ];
       snap.extra.resourcesProbe = spec.method === 'ssh'
         ? { lun: { state: 'ok', source: 'uemcli /stor/prov/luns/lun show -detail', count: 1 }, fs: { state: 'ok', source: 'uemcli /stor/prov/fs show -detail', count: fsDef.length } }
-        : { lun: { state: 'ok', source: 'Unisphere REST /api/types/lun/instances', count: 1 }, fs: { state: 'ok', source: 'Unisphere REST /api/types/filesystem/instances', count: fsDef.length } };
+        : { lun: { state: 'ok', source: 'Unisphere REST /api/types/lun/instances', count: 1 }, fs: { state: 'ok', source: 'Unisphere REST /api/types/filesystem/instances', count: fsDef.length } };      snap.extra.ifaces = demoUnityIfaces(spec, t, now);   // v3.35.0 인터페이스 구성(데모)
     }
     if (spec.type === 'powermax' || spec.type === 'vmax') {
       snap.extra.capacityBasis = 'system_capacity.usable';
@@ -522,7 +523,9 @@ async function backfillStorage(devices, now) {
       const r = await db.saveCapacityPoint(demoStorageSnapshot(d, t, now)); if (r.saved) points += 1;
     }
     for (let back = 7 * 24; back >= 1; back -= 1) {
-      const r = await db.saveCapacityPoint(demoStorageSnapshot(d, now - back * HOUR, now)); if (r.saved) points += 1;
+      const snapH = demoStorageSnapshot(d, now - back * HOUR, now);
+      const r = await db.saveCapacityPoint(snapH); if (r.saved) points += 1;
+      if (d.type === 'unity480') await db.saveIfaceState(snapH);   // v3.35.0 포트 상태 · 변화 이력(데모 — 속도 저하 · 링크 다운 1건씩)
     }
     await new Promise((res) => setImmediate(res)); // 장비 사이 양보(이벤트 루프를 길게 잡지 않는다)
   }
@@ -552,6 +555,42 @@ async function backfillStorage(devices, now) {
  *  · 노드 2(두 번째) 가 쏠린다 — ops 약 2.6배 · 고정 클라이언트 여럿(재배치 보드가 후보를 내게). 노드 3 은 클라이언트 0(‘최근 작업한 클라이언트 없음’ 문구 확인용).
  *  · 모양은 실제 수집기(isilonNodeLoad.buildNodeLoadSample)와 같다 — 그대로 db.saveNodeLoadSample 에 넣는다. 실패 스냅샷(수집 실패 흉내)이면 null.
  */
+/**
+ * v3.35.0 — Unity 인터페이스 구성(데모 · 설계 docs/design/unity-iface). 모양은 수집기(ifaces.buildIfaces)와 같다. 이름 · IP 는 합성이다.
+ *  · 공통: SP 마다 FC 16 Gb 2개(spX_fc0 · fc1 — SAN 데모의 'SPA FC0' 과 같은 이름) + 이더넷 10 Gb 4개(eth2 iSCSI · eth3 NAS · eth4 미연결 · eth5 SFP 없음).
+ *  · unity-sjc-01: spa_fc1 이 최근 5시간 8 Gb(속도 저하 · 변화 이력) · spb_eth3 은 늘 1 Gb(최대 10 — 저하).
+ *  · unity-sel-02: spb_eth3 이 최근 16시간 링크 다운(그 전엔 10 Gb — 변화 이력 · 다운 알림).
+ */
+export function demoUnityIfaces(spec, t = Date.now(), now = t) {
+  const ports = []; const interfaces = [];
+  for (const sp of ['spa', 'spb']) {
+    for (const n of [0, 1]) {
+      const id = `${sp}_fc${n}`;
+      const slow = spec.k === 'unity-sjc-01' && id === 'spa_fc1' && now - t < 5 * HOUR;
+      ports.push({ id, name: `${sp.toUpperCase()} FC Port ${n}`, kind: 'fc', sp, speedGbps: slow ? 8 : 16, requested: 'auto', maxGbps: 16, linkUp: true,
+        health: 'ok', healthDetail: 'The port is operating normally.', wwn: `50:06:01:6${sp === 'spa' ? 0 : 8}:${(demoHash(`${spec.k}:${id}`) % 89) + 10}:e0:1${n}:4a`, protocols: 'fc' });
+    }
+    for (const n of [2, 3, 4, 5]) {
+      const id = `${sp}_eth${n}`;
+      let speedGbps = 10; let linkUp = true; let detail = 'The port is operating normally.'; let sfp = null;
+      if (n === 4) { speedGbps = null; linkUp = false; detail = 'The port link is down.'; }
+      if (n === 5) { speedGbps = null; linkUp = false; detail = 'The SFP is not present.'; sfp = 'absent'; }
+      if (spec.k === 'unity-sjc-01' && id === 'spb_eth3') speedGbps = 1;
+      if (spec.k === 'unity-sel-02' && id === 'spb_eth3' && now - t < 16 * HOUR) { speedGbps = null; linkUp = false; detail = 'The port link is down.'; }
+      ports.push({ id, name: `${sp.toUpperCase()} Ethernet Port ${n}`, kind: 'eth', sp, speedGbps, requested: 'auto', maxGbps: 10, linkUp, sfp,
+        health: linkUp ? 'ok' : 'degraded', healthDetail: detail, mtu: 9000, protocols: n === 2 ? 'iscsi' : 'file, net', role: 'frontend' });
+    }
+    interfaces.push({ id: `if_${sp === 'spa' ? 2 : 3}`, kind: 'iscsi', port: `${sp}_eth2`, ip: demoIp(`iscsi:${spec.k}:${sp}`, 10), vlan: 120, nasServer: '', role: '' });
+    interfaces.push({ id: `if_${sp === 'spa' ? 8 : 11}`, kind: 'nas', port: `${sp}_eth3`, ip: demoIp(`nas:${spec.k}:${sp}`, 10), vlan: 140,
+      nasServer: `nas-${spec.k.split('-')[1]}-${sp === 'spa' ? 'prod' : 'bak'}`, role: sp === 'spa' ? 'production' : 'backup' });
+  }
+  const src = spec.method === 'ssh' ? 'uemcli' : 'Unisphere REST';
+  const probe = spec.method === 'ssh'
+    ? { fc: { state: 'ok', source: 'uemcli /net/port/fc show -detail', count: 4 }, eth: { state: 'ok', source: 'uemcli /net/port/eth show -detail', count: 8 }, ifs: { state: 'ok', source: 'uemcli /net/if show -detail', count: 4 } }
+    : { fc: { state: 'ok', source: 'Unisphere REST /api/types/fcPort/instances', count: 4 }, eth: { state: 'ok', source: 'Unisphere REST /api/types/ethernetPort/instances', count: 8 }, ifs: { state: 'ok', source: 'Unisphere REST /api/types/iscsiPortal/instances + /api/types/fileInterface/instances', count: 4 } };
+  return buildIfaces({ ports, interfaces, probe, at: t, source: src });
+}
+
 /** v2.952 — 어레이 FE 단위(디렉터 · 노드 · SP + Unity · PowerStore 포트) 5분 표본 합성 — 수집기와 같은 조립(buildFeSample). 첫 단위가 쏠린다(SAN 데모 편중과 같은 방향). */
 const FE_DEMO_UNITS = { powermax: ['FA-1D', 'FA-2D'], vmax: ['FA-1D', 'FA-2D'], powerstore: ['Node A', 'Node B'], unity480: ['SPA', 'SPB'] };
 export function demoArrayPerfSample(spec, t = Date.now()) {
@@ -573,7 +612,22 @@ export function demoArrayPerfSample(spec, t = Date.now()) {
   if (kind !== 'fa') {
     for (const parent of names) {
       const base = units.find((u) => u.name === parent);
-      for (let p = 0; p < 2; p++) units.push({ name: `${parent} FC${p}`, kind: 'port', parent, iops: Math.round(base.iops * (p === 0 ? 0.6 : 0.4)), hbps: Math.round(base.hbps * (p === 0 ? 0.6 : 0.4)), lat: base.lat });
+      for (let p = 0; p < 2; p++) {
+        // v3.35.0: Unity 포트는 들어온 · 나간 처리량(bps)도 싣는다(인터페이스 화면) — 쓰기 40 · 읽기 60. unity-sjc-01 SPA FC0 은 낮에 포화 근접(80%↑)이 되게 키운다.
+        const boost = spec.k === 'unity-sjc-01' && parent === 'SPA' && p === 0 ? 5.5 : 1;
+        const hb = Math.round(base.hbps * (p === 0 ? 0.6 : 0.4) * boost);
+        units.push({ name: `${parent} FC${p}`, kind: 'port', parent, iops: Math.round(base.iops * (p === 0 ? 0.6 : 0.4)), hbps: hb, lat: base.lat,
+          ...(type === 'unity480' ? { in: Math.round(hb * 0.4 * 8), out: Math.round(hb * 0.6 * 8) } : {}) });
+      }
+      if (type === 'unity480') {
+        // v3.35.0: 이더넷 포트(kind 'eth') — eth2 iSCSI · eth3 NAS. unity-sjc-01 SPB ETH3 은 1 Gb 링크라 사용률이 높게 보인다.
+        for (const n of [2, 3]) {
+          const share = n === 2 ? 0.28 : (spec.k === 'unity-sjc-01' && parent === 'SPB' ? 0.11 : 0.09);
+          const down = spec.k === 'unity-sel-02' && parent === 'SPB' && n === 3 && Date.now() - t < 16 * HOUR;
+          if (down) continue;
+          units.push({ name: `${parent} ETH${n}`, kind: 'eth', parent, in: Math.round(base.hbps * share * 0.55 * 8 * jig(`e${parent}${n}`, 0.25)), out: Math.round(base.hbps * share * 0.45 * 8 * jig(`o${parent}${n}`, 0.25)) });
+        }
+      }
     }
   }
   return buildFeSample({ ts: t, type, source: 'demo', units, probe: { demo: true } });

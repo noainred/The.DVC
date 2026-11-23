@@ -912,3 +912,18 @@
 - **전체 점검 27회차(23~25회차 반증 · `svcmonFullAudit26` 27 D-*)**: 수정의 중복 검사는 **키(host · type)를 바꿀 때만**(예전 '검사 없는 수정' 으로 이미 생긴 중복 두 대가 비활성화까지 잠기던 것 — D-6) ·
   일 요약(capacity_daily · resource_daily)의 용량 칸은 **짝이 되는 used 와 같은 관측일 때만** 바꾼다(09시 100T/90T → 18시 50T/null 이 50T/90T = 180% — D-9) ·
   보존 설정 저장 409 를 화면이 성공으로 보이지 않게 `requireChanged`(D-2). **남긴 것**: D-10 엣지 용량 점의 insCap → upDaily → 하위 항목 적재가 한 트랜잭션이 아니다(insCap 뒤 실패면 다음 push 가 duplicate 로 건너뜀 — 드묾).
+- **v3.35.0 — Unity SAN · NAS 인터페이스(속도 · 사용량 모니터링/트래킹)** — 사용자 요청 2026-11-23 · 시안 `docs/design/unity-iface/` · 컨펌(표준 검증 · **구성은 SSH 도 읽고 사용량은 REST 장비만** · 알림 포함).
+  화면 = 스토리지 모니터링 › `🔌 인터페이스` 탭(`#/tools/storage-mon/ifaces` — 도구 키 · 권한 그대로). 회귀 `server/test/unityIface3350.test.js` · `web/src/views/tools/storageIfaces/ifaceText.test.js`.
+  ① **판정은 `storage/ifaces.js judgePort` 하나**(서버 화면 응답 · 알림 공용 — 웹은 state · flags 를 글로만 바꾼다). 다운 = 직전에 링크 업이던 포트(`iface_state.last_up_at`) ·
+  처음부터 내려가 있던 포트는 미연결 · 저하 = 요청 '자동' 인데 최대보다 낮음(고정 속도는 저하 아님) · 처리량을 못 읽은 포트는 `unread` 로 **따로**(정상에도 이상에도 넣지 않는다).
+  ② 사용률 = 받음 · 보냄(FC 는 쓰기 = in · 읽기 = out) 중 **큰 쪽 ÷ 링크 속도**, 링크 용량은 SAN `capBpsOf` 와 같은 Gb/s × 1e9 ÷ 8. SAN 스토리지 성능의 회선 사용률(송수신 합 ÷ 스위치 포트)과 정의가 다르다.
+  ③ 처리량은 **새 폴러 · 새 DB 없이** 5분 표본 경로(`arrayPerf.sampleUnity` → 노드 부하 표 in/out 열)를 넓혔다 — FC 포트 단위에 in/out, 이더넷은 새 단위 종류 `eth`(부모 뒤 · 64 상한 안).
+  **`eth` 는 SAN 스토리지 성능에 섞지 않는다**(`sanswitch/arraySide.unitsForArray` 가 뺀다 · hbps 비움). 구성(속도 · 상태 · iSCSI/NAS 인터페이스)은 수집 주기 스냅샷 `extra.ifaces`(REST 4 호출 · SSH `SPECS` 맨 뒤 lowPriority 3개 —
+  예산 산수에 들지 않는다 · 건너뛰면 `probe` 가 사유).
+  ④ 엣지: `extra.ifaces` 는 `central/storageEdge.js narrowStorageSnapshot` → `ifaces.sanitizeEdgeIfaces`(아는 필드 · 상한 96/128 · 시각 자르기). 상태 · 변화 적재는 `db.saveIfaceState` 를
+  `saveNodeLoadPoint` 와 같은 두 자리(로컬 폴러 · 중앙 수신의 중복 제거 뒤)에서 — 같은 스냅샷 재전송은 변화 0. 변화는 **알 수 있는 값끼리만**(null 은 변화 아님) · 처음 본 포트는 기준선.
+  ⑤ 알림(`alerts.js addIfaceAlerts` → `ifaceSummary.ifaceAlertsOf`): 규칙 `unityIfaceDown`·`unityIfaceSlow`(기본 켬) · `unityIfaceBusy`(기본 끔 · 최근 5분 사용률 ≥ 임계). **'모름' 은 해소가 아니다** —
+  수집 실패 · 낡은 스냅샷(주기 × 3) · 구성 없음은 장비 접두 `unityif:<id>:` 보류, 상태 표를 못 읽음(DB 없음 — `ifaceStatesOf` 가 null)은 다운 보류, 사용률 못 읽음은 포화 보류, 등록부를 못 읽으면 전체 보류.
+  ⑥ 비-admin: iSCSI · NAS 데이터 IP 를 `maskSnapAddress` 가 가리고, 그 IP 가 새로 실리는 uemcli `/net/if` 원문(`extra.cliRaw`)에서도 그 주소만 지운다(원문 전체를 훑지는 않는다 — 기존 한계 그대로).
+  ⚠ **실장비 미확인**: REST 필드(currentSpeed · requestedSpeed · availableSpeeds · isLinkUp …) · uemcli 키 · 이더넷 지표 경로(`sp.*.net.device.*.bytesIn/Out`)는 문서 지식이다. 첫 실수집의 probe · CLI 원문으로 파서를 맞출 것(설계 §7 명령 목록).
+  **남긴 것**: 인터페이스별(NAS 서버 · iSCSI 포털) 처리량은 없다(포트 단위) · 링크 묶음(LACP) 구성 미수집 · FC 포트별 로그인 호스트 수 미수집 · 장비 화면의 '80% 이상이던 시간' 은 5분 원시 칸일 때만(24시간 창은 15분 칸이라 숨김).

@@ -156,6 +156,12 @@ export function narrowStorageSnapshot(d) {
     na += sanitizeEdgeResources(o);
     d = { ...d, extra: o.extra };
   }
+  // v3.35.0: Unity 인터페이스 구성(extra.ifaces)도 아는 필드 · 객체만 · 상한 · 시각은 수신 시각 이하(상태 적재 saveIfaceState 와 화면이 그대로 읽는다).
+  if (Object.hasOwn(d.extra, 'ifaces')) {
+    const o = { extra: { ...d.extra } };
+    na += sanitizeEdgeIfaces(o);
+    d = { ...d, extra: o.extra };
+  }
   const r = narrowStorageSnapshotRest(d);
   return { snap: r.snap, narrowed: r.narrowed + na };
 }
@@ -228,7 +234,8 @@ function narrowStorageSnapshotRest(d) {
 }
 import { recordActivity } from '../storage/activityLog.js';
 import { sanitizeEdgeResources } from '../storage/resources.js'; // v2.789
-import { saveCapacityPoint, saveNodeLoadPoint, saveNodeLoadSample, saveNodeUnits } from '../storage/db.js';
+import { sanitizeEdgeIfaces } from '../storage/ifaces.js'; // v3.35.0 인터페이스 구성
+import { saveCapacityPoint, saveNodeLoadPoint, saveNodeLoadSample, saveNodeUnits, saveIfaceState } from '../storage/db.js';
 import { sanitizeNodeLoadSample, CLIENT_LIMIT_MAX } from '../storage/nodeLoad.js'; // v2.932(2차 ⑨)
 import { ackCollect, setCollectBaseResolver } from '../storage/collectRequests.js';
 
@@ -321,6 +328,8 @@ export function saveEdgeStorage(agent, devices, info = {}) {
     saveCapacityPoint(dv).then((r) => { if (r && r.saved === false && r.reason === 'db-unavailable') unmark('db-unavailable'); }).catch((e) => unmark(capStr(String(e?.code || e?.message || 'error'), 60)));
     // v2.926 — 노드 부하 시계열도 같은 자리(같은 중복 제거 뒤). 노드 값은 위 sanitizeNodeList(NODE_NUM_KEYS)를 거친 것이다.
     saveNodeLoadPoint(dv).catch(() => { /* DB 비활성 — 스냅샷 보관·로그는 계속 */ });
+    // v3.35.0 — Unity 인터페이스 상태 · 변화(같은 중복 제거 뒤 — 같은 스냅샷 재전송은 변화를 만들지 않는다). 포트는 수신 정제(narrowStorageSnapshot → sanitizeEdgeIfaces)를 거친 것이다.
+    saveIfaceState(dv).catch(() => { /* DB 비활성 — 스냅샷 보관·로그는 계속 */ });
     try {
       recordActivity({
         deviceId: key, name: dv.name || key, host: dv.host || '', source: agent,
