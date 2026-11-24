@@ -4,6 +4,7 @@
  *  못 읽은 값은 0 · 정상 · 예비로 쓰지 않는다: 분류 'unknown' 은 '확인 불가', 근거의 lldpUnread 는 'LLDP 못 읽음'.
  */
 import { speedLabel } from './cvpIntfText.js';
+import { numOrNull } from '../../numOrNull.js';
 
 const GREEN = { background: '#16432a', border: '1px solid #22c55e', color: '#eafff1' };
 const AMBER = { background: '#4a3208', border: '1px solid #f59e0b', color: '#fff3d6' };
@@ -50,7 +51,7 @@ export const UTIL_DEFS = Object.freeze({
   na: { label: '측정 없음', paint: DASH },
 });
 export const UTIL_ORDER = Object.freeze(['u0', 'u20', 'u50', 'u80', 'na']);
-const num = (v) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
+const num = numOrNull;   // 못 읽은 값(null · '' · 숫자 아님)은 null — 공용 판정 하나(사본 금지 스윕 audit2617)
 /** 사용률(수신 · 송신 중 큰 쪽) — 링크가 없거나 못 읽으면 null(0% 가 아니다). */
 export function utilOf(p) {
   if (!p || p.oper !== 'up') return null;
