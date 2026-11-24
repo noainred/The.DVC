@@ -1,0 +1,119 @@
+/*
+ * vmTools.css — VM 분석 화면의 특수 기능 요약 패널 · ‘과할당’ 보기(v3.21.0 · 시안 docs/design/vm-insight/VmInsight.dc.html).
+ * 선택자는 전부 .vit 로 시작한다. 색은 :root 변수 + 시안의 따뜻한 4단(막대 바탕은 인라인 — vmToolPanelsText.WARM 한 곳).
+ * 그리드 · 플렉스 자식은 min-width:0 · 트랙은 minmax(0,…) · 글자 대문자 변환 금지 · 버튼 줄은 flex-wrap.
+ */
+.vit { --vit-hero: #fcd34d; --vit-crit: #fca5a5; --vit-warn: #fdba74; --vit-link: #93c5fd; --vit-used: #4b5873; --vit-idle: #f59e0b; --vit-thin: #9085e9; }
+.vit-panel { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.vit-ph { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; min-width: 0; }
+.vit-ph h2 { margin: 0; font-size: 15px; font-weight: 800; color: var(--text); }
+.vit-ph .vit-hint { font-size: 12px; color: var(--text-dim); min-width: 0; flex: 1 1 260px; }
+.vit-ph .vit-rt { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 12px; color: var(--text-dim); margin-left: auto; min-width: 0; }
+.vit-btn { display: inline-flex; align-items: center; min-height: 28px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--border); background: var(--panel-deep); color: var(--text); font-size: 12px; cursor: pointer; }
+.vit-btn:hover:not(:disabled) { border-color: var(--accent); }
+.vit-btn:disabled { opacity: .6; cursor: default; }
+.vit-note { font-size: 12px; color: var(--text-dim); line-height: 1.5; min-width: 0; }
+.vit-note.warn { color: var(--vit-warn); }
+.vit-wait { font-size: 12.5px; color: var(--text-dim); padding: 10px 0; }
+
+/* 왼쪽 요약 · 가운데 · 오른쪽 목록 */
+.vit-gp { display: grid; grid-template-columns: minmax(0, 310px) minmax(0, 1fr) minmax(0, 1fr); gap: 20px; min-width: 0; }
+.vit-gp > * { min-width: 0; }
+@media (max-width: 1180px) { .vit-gp { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .vit-gp > .vit-sum { grid-column: 1 / -1; } }
+@media (max-width: 760px) { .vit-gp { grid-template-columns: minmax(0, 1fr); } }
+.vit-sum { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.vit-hero { display: flex; align-items: flex-end; gap: 10px; min-width: 0; }
+.vit-hero b { font-family: var(--mono); font-size: 40px; font-weight: 800; line-height: .95; color: var(--vit-hero); white-space: nowrap; }
+.vit-hero span { font-size: 12.5px; color: #c3cfe2; line-height: 1.45; min-width: 0; }
+.vit-st { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.vit-st > div { background: var(--panel-deep); border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.vit-st b { font-family: var(--mono); font-size: 17px; font-weight: 800; line-height: 1.1; color: var(--text); overflow-wrap: anywhere; }
+.vit-st span { font-size: 11.5px; color: var(--text-dim); line-height: 1.35; }
+.vit-st .c b { color: var(--vit-crit); }
+.vit-st .s b { color: var(--vit-warn); }
+
+/* 조각 막대 · 범례 */
+.vit-stack { display: flex; gap: 2px; height: 12px; min-width: 0; }
+.vit-stack.tall { height: 40px; }
+.vit-stack > span { display: flex; align-items: center; justify-content: center; border-radius: 4px; font-size: 12px; font-weight: 700; min-width: 3px; overflow: hidden; white-space: nowrap; padding: 0 6px; box-sizing: border-box; }
+.vit-stack:not(.tall) > span { padding: 0; }
+.vit-lgd { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: #c3cfe2; min-width: 0; }
+.vit-lgd i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+.vit-lgd b { font-family: var(--mono); font-weight: 700; color: var(--text); }
+.vit-lnk { display: inline-flex; align-items: center; min-height: 34px; padding: 0 14px; border-radius: 8px; background: var(--accent); color: #fff; font-size: 13px; font-weight: 700; text-decoration: none; align-self: flex-start; max-width: 100%; }
+.vit-lnk:hover { filter: brightness(1.08); }
+.vit-lnk2 { font-size: 12px; color: var(--vit-link); text-decoration: none; }
+.vit-lnk2:hover { text-decoration: underline; }
+
+/* 상위 목록(STable) — 머리 + 줄 */
+.vit-lst { display: flex; flex-direction: column; min-width: 0; }
+.vit-lh { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+.vit-lh b { font-size: 13px; font-weight: 800; color: var(--text); }
+.vit-lh span { font-size: 12px; color: var(--text-dim); }
+.vit-tbl { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 12.5px; }
+.vit-tbl th { text-align: left; font-size: 11px; font-weight: 600; color: var(--text-faint); padding: 6px 4px; border-bottom: 1px solid var(--border-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vit-tbl th.r, .vit-tbl td.r { text-align: right; }
+.vit-tbl td { padding: 7px 4px; border-bottom: 1px solid var(--border-soft); vertical-align: middle; min-width: 0; }
+.vit-nm { display: block; font-size: 13px; font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vit-sb { display: block; font-size: 11.5px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vit-big { font-family: var(--mono); font-size: 15px; font-weight: 800; white-space: nowrap; color: var(--text); }
+.vit-big.hero { color: var(--vit-hero); }
+.vit-gt { display: block; height: 8px; border-radius: 4px; background: var(--panel-deep); overflow: hidden; position: relative; }
+.vit-gt > i { display: block; height: 100%; border-radius: 4px; }
+.vit-gt > em { position: absolute; top: -2px; bottom: -2px; width: 2px; background: #fff; opacity: .85; }
+.vit-fr { display: block; font-size: 11.5px; color: #c3cfe2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 4px; }
+.vit-empty { font-size: 12.5px; color: var(--text-dim); padding: 10px 0; }
+
+/* 순서 막대(문제 종류 · 날마다) */
+.vit-rb { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) 64px; gap: 10px; align-items: center; min-height: 26px; font-size: 12.5px; }
+.vit-rb .n { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+.vit-rb .v { font-family: var(--mono); font-size: 12px; text-align: right; white-space: nowrap; color: var(--text); }
+.vit-rb .t { display: block; height: 10px; border-radius: 3px; background: var(--panel-deep); overflow: hidden; }
+.vit-rb .t > i { display: block; height: 100%; border-radius: 3px; }
+.vit-duo { display: flex; gap: 2px; height: 12px; min-width: 6px; }
+.vit-duo > i { display: block; height: 100%; border-radius: 3px; min-width: 2px; }
+.vit-duo .u { background: var(--vit-used); }
+.vit-duo .d { background: var(--vit-idle); }
+.vit-duo .a { background: var(--accent); }
+
+/* 점 그래프(VM 수) */
+.vit-dots { position: relative; height: 150px; margin: 8px 0 0 44px; border-left: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.vit-dots > i { position: absolute; width: 8px; height: 8px; margin: 0 0 -4px -4px; border-radius: 50%; background: var(--accent); }
+.vit-dots > i.p { background: transparent; border: 2px solid var(--vit-warn); box-sizing: border-box; }
+.vit-dots .yl { position: absolute; left: -44px; width: 40px; text-align: right; font-family: var(--mono); font-size: 11px; color: var(--text-dim); }
+.vit-dots .yt { top: -6px; }
+.vit-dots .yb { bottom: -6px; }
+.vit-axis { display: flex; justify-content: space-between; margin-left: 44px; font-size: 11px; color: var(--text-dim); font-family: var(--mono); padding-top: 4px; }
+
+/* 정렬 · 갈래 단추 */
+.vit-seg { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.vit-seg button { min-height: 26px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--panel); color: #c3cfe2; font-size: 12px; cursor: pointer; }
+.vit-seg button[aria-pressed="true"] { background: rgba(59, 130, 246, .28); border-color: var(--accent); color: #fff; }
+
+/* ‘과할당’ 보기 */
+.vit-over { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.vit-row3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; min-width: 0; }
+.vit-row3 > * { min-width: 0; }
+@media (max-width: 1100px) { .vit-row3 { grid-template-columns: minmax(0, 1fr); } }
+.vit-ovh { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 4px 10px; min-width: 0; }
+.vit-ovh b { font-family: var(--mono); font-size: 30px; font-weight: 800; line-height: 1; color: var(--vit-hero); white-space: nowrap; }
+.vit-ovh span { font-size: 12.5px; color: #c3cfe2; line-height: 1.45; min-width: 0; }
+.vit-k4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; min-width: 0; }
+@media (max-width: 900px) { .vit-k4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.vit-kpi { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.vit-kpi .l { font-size: 12px; color: var(--text-dim); }
+.vit-kpi .v { font-family: var(--mono); font-size: 20px; font-weight: 800; color: var(--text); overflow-wrap: anywhere; }
+.vit-kpi .s { font-size: 11.5px; color: var(--text-dim); line-height: 1.4; }
+.vit-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; color: var(--text-dim); min-width: 0; }
+.vit-tabs button { display: inline-flex; align-items: center; gap: 8px; min-height: 34px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--border); background: var(--panel); color: #c3cfe2; font-size: 13px; font-weight: 600; cursor: pointer; }
+.vit-tabs button:hover { border-color: var(--accent); }
+.vit-tabs button[aria-selected="true"] { background: rgba(59, 130, 246, .28); border-color: var(--accent); color: #fff; }
+.vit-tabs button b { font-family: var(--mono); font-size: 12px; font-weight: 800; color: var(--vit-hero); }
+.vit-row2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 14px; min-width: 0; }
+.vit-row2 > * { min-width: 0; }
+@media (max-width: 1100px) { .vit-row2 { grid-template-columns: minmax(0, 1fr); } }
+.vit-oc { display: grid; grid-template-columns: minmax(0, 150px) minmax(0, 1fr) minmax(0, 220px); gap: 10px; align-items: center; min-height: 32px; font-size: 12.5px; border-bottom: 1px solid var(--border-soft); }
+.vit-oc .nm { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+.vit-oc .tx { font-size: 11.5px; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #c3cfe2; }
+.vit-oc .tx b { font-family: var(--mono); color: var(--vit-hero); font-size: 12.5px; }
+@media (max-width: 520px) { .vit-oc { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .vit-oc .tx { grid-column: 1 / -1; text-align: left; } }

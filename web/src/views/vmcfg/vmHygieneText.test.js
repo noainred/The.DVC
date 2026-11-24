@@ -46,3 +46,23 @@ describe('vmHygieneText', () => {
     for (const r of reasons) if (!['off', 'edge', 'before-hour', 'already-sent', 'sent', 'error'].includes(r)) expect(web.NOTIFY_NOW_TEXT[r], r).toBeTruthy();
   });
 });
+describe('153회차 — 스냅샷 보류로 뺀 VM 수를 수집 범위 줄이 말한다', () => {
+  it('서버 coverage.held → 스냅샷 보류 N(없으면 예전 문구 그대로)', () => {
+    const now = Math.floor(Date.now() / 3_600_000) * 3_600_000;
+    const s = { snapAgeDays: 7, snapCount: 3, snapSizeGB: 100, uptimeDays: 365, exceptions: [] };
+    Object.defineProperty(s, 'holds', { value: new Map([['va\nva:vm1', { until: now + 86_400_000, reason: '이관' }]]), enumerable: false });
+    const vm = (id) => ({ id: `va:${id}`, vcenterId: 'va', name: id, snapshotCount: 5, snapshotOldestTs: now - 50 * 86_400_000, powerState: 'POWERED_ON' });
+    const r = srv.analyzeVmHygiene([vm('vm1'), vm('vm2')], s, { now });
+    expect(r.coverage.held).toBe(1);
+    const t = web.coverageText(r.coverage);
+    expect(t).toMatch(/스냅샷 보류 1/);
+    expect(t.includes('`')).toBe(false);
+    const none = { ...r.coverage, held: 0 };
+    expect(web.coverageText(none)).toBe(t.replace(' · 스냅샷 보류 1', ''));
+    const old = { ...r.coverage }; delete old.held;   // 옛 서버 응답(칸 없음)
+    expect(web.coverageText(old)).toBe(web.coverageText(none));
+  });
+});
+describe('71회차 — 설정 파일을 읽지 못한 판정 배너', () => {
+  it('기본 기준으로 판정했다는 사실을 말한다', () => { expect(web.SETTINGS_UNREADABLE_NOTE).toMatch(/기본 기준/); expect(web.SETTINGS_UNREADABLE_NOTE.includes('`')).toBe(false); });
+});

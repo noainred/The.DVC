@@ -6,6 +6,7 @@ import { csvCell } from '../../util/csv.js'; // 수식 인젝션 가드 포함 �
 import { STable } from '../../components/STable.jsx';
 import ScopeOmitBanner from '../ScopeOmitBanner.jsx';
 import Select from '../../components/Select.jsx';
+import { saveBlob } from '../../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나(즉시 revoke · 문서 밖 click 금지)
 
 
 /**
@@ -44,8 +45,7 @@ export function NicSpeed() {
     const head = ['server', 'serviceTag', 'model', 'datacenter', 'type', 'maxSpeed', 'allSpeeds', 'nicPorts', 'nicModels', 'vcMaxSpeed', 'vcSpeeds', 'vcPorts'];
     const rows = servers.map((s) => [s.name, s.serviceTag, s.model, s.datacenter, typeLabel(s.type), s.maxSpeed, (s.speeds || []).join(' '), s.nicPorts, (s.nicModels || []).join(' | '), s.vcMaxSpeed || '', (s.vcSpeeds || []).join(' '), s.vcPorts || 0]);
     const csv = [head, ...rows].map((r) => r.map(csvCell).join(',')).join('\n');
-    const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }));
-    const a = document.createElement('a'); a.href = url; a.download = `nic-speed${dc ? `-${dc}` : ''}${type ? `-${type}` : ''}.csv`; a.click(); URL.revokeObjectURL(url);
+    saveBlob(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }), `nic-speed${dc ? `-${dc}` : ''}${type ? `-${type}` : ''}.csv`);
   };
 
   return (
@@ -171,8 +171,7 @@ export function NicModels() {
       for (const a of (s.vcAdapters || [])) lines.push([s.name, s.serviceTag, s.model, s.datacenter, typeLabel(s.type), 'vCenter', a.model, '', (a.speeds || []).join(' '), a.ports]);
     }
     const csv = [head, ...lines].map((r) => r.map(csvCell).join(',')).join('\n');
-    const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }));
-    const a = document.createElement('a'); a.href = url; a.download = `nic-models${dc ? `-${dc}` : ''}${type ? `-${type}` : ''}.csv`; a.click(); URL.revokeObjectURL(url);
+    saveBlob(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }), `nic-models${dc ? `-${dc}` : ''}${type ? `-${type}` : ''}.csv`);
   };
 
   return (

@@ -9,11 +9,14 @@ import { useHashTab } from '../../hooks/useHashTab.js';
 import { facetState, toggleIn, groupBy } from './deviceFacets.js';
 import DeviceFacetBar from './DeviceFacetBar.jsx';
 import { addressHiddenNote } from './addressHiddenText.js';
+import { unreadMarkOf, unreadKind, saveLockedByUnread } from '../settingsUnread.js';   // 112회차: 못 읽은 동안의 기본값 폼으로 저장하지 않는다
+import { SettingsUnreadBanner } from '../SettingsUnreadBanner.jsx';
 import {
   UNITS, bytesText, deltaText, pctText, pctTone, aggregateCells, groupSummary, inexactNote, partialNote,
   probeLine, chartSeries, wideCsv, longCsv, csvFileName, SKIP_TEXT, MISSED_TEXT, DAY_LABELS, mailDirty, parseMailList,
-  recipientCount, daysText, deltaOf, legendText, periodText, deviceSub, mailBodyText, ATTACH_TEXT,
+  recipientCount, adminToForCount, daysText, deltaOf, legendText, periodText, deviceSub, mailBodyText, ATTACH_TEXT,
 } from './storageUsageText.js';
+import { saveBlob } from '../../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나
 
 /**
  * 특수기능 › 스토리지 사용량 보고서(v2.789, 도구 키 storage-usage).
@@ -101,11 +104,7 @@ export default function StorageUsageTool({ isAdmin = false }) {
   const download = (kind) => {
     const opts = { dcName, typeLabel, unit, resources: showRes, pools: showPools, kindGroup };
     const body = kind === 'wide' ? wideCsv(shown, periods, opts) : longCsv(shown, periods, opts);
-    const url = URL.createObjectURL(new Blob(['﻿' + body], { type: 'text/csv;charset=utf-8' }));
-    const a = document.createElement('a');
-    a.href = url; a.download = csvFileName({ gran: d?.gran, asOfLabel: d?.asOfLabel, kind, filtered: facets.facetOn || !!query });
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    saveBlob(new Blob(['﻿' + body], { type: 'text/csv;charset=utf-8' }), csvFileName({ gran: d?.gran, asOfLabel: d?.asOfLabel, kind, filtered: facets.facetOn || !!query }));
   };
   // v2.791 엑셀 — 서버가 만든다(메일 첨부와 같은 파일: 주간 · 누적 전 주차 · 전 장비). 화면 필터는 적용되지 않는다(버튼 설명에 밝힌다).
   //   409(다른 내보내기 진행 중)·403 은 downloadFile 이 던진다 — 문구를 그대로 보인다.
@@ -161,7 +160,7 @@ export default function StorageUsageTool({ isAdmin = false }) {
         <Kpi label="사용" value={bytesText(cur?.usedBytes, unit)} meta={`사용률 ${pctText(cur?.pct)}`} tone={pctTone(cur?.pct) === 'crit' ? 'bad' : pctTone(cur?.pct) === 'warn' ? 'warn' : ''} />
         <Kpi label={prevLabel ? `${prevLabel} 대비` : '직전 기간 대비'} value={deltaText(total.delta, unit)} meta={total.deltaWhy || '사용량 변화'} />
         <Kpi label={`${periods[0]?.label || ''} → ${periods[periods.length - 1]?.label || ''}`} value={deltaText(total.range, unit)}
-          meta={total.avg != null ? `${granLabel === '일간' ? '하루' : granLabel === '주간' ? '한 주' : '한 달'} 평균 ${deltaText(total.avg, unit)}` : '범위 양 끝이 완전한 합계일 때만 냅니다'} />
+          meta={total.avg != null ? `${granLabel === '일간' ? '하루' : granLabel === '주간' ? '한 주' : '한 달'} 평균 ${deltaText(total.avg, unit)}` : '범위 양 끝이 같은 장비로 된 완전한 합계일 때만 냅니다'} />
       </div>
 
       {/* ── 조건(메일 탭에서는 숨긴다 — 메일은 화면 필터와 무관하게 전체 장비다) ── */}
@@ -670,12 +669,17 @@ function MailView({ offsetMin }) {
   const parsed = parseMailList(toText);
   const formFull = { ...form, to: parsed.list };
   const dirty = mailDirty(formFull, data.mail);
-  const rc = recipientCount(form.includeAdmin, data.adminTo, parsed.list);
+  const rc = recipientCount(form.includeAdmin, adminToForCount(data), parsed.list);   // 반증 후속 ①: 가린 주소는 개수만
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const toggleDay = (i) => set('days', form.days.includes(i) ? form.days.filter((x) => x !== i) : [...form.days, i].sort((a, b) => a - b));
   const st = data.status || {};
+  // 112회차: 서버가 메일 설정 파일을 못 읽은 동안(status.loadError) mail 은 저장된 값이 아니라 기본값(꺼짐 · 받는 사람 없음)이다 — 화면이 표지를 보지 않아
+  //   그 폼을 끝까지 들고 있었고, 다시 읽힌 뒤 ‘저장’(전체 교체)이 받는 사람 · 요일 · 시각을 덮었다. 이 설정은 손상(보존본)도 서버가 저장을 거절하므로 둘 다 잠근다.
+  const unread = unreadMarkOf(st);
+  const saveLocked = saveLockedByUnread(unread, { corruptLocks: true });
 
   const save = async () => {
+    if (saveLocked) return;
     setBusy('save'); setMsg(null);
     try {
       // ⚠ putJson(sendJson)은 400·409 를 던지지 않고 본문을 돌려준다 — ok 를 보지 않으면 거절을 '저장했습니다' 로 읽는다(v2.742 WEB-02).
@@ -690,7 +694,9 @@ function MailView({ offsetMin }) {
     try {
       // postJson 은 409(보내지 못함)를 던지지 않는다 — 결과 상태를 본다.
       const r = await postJson('/tools/storage-usage/mail/send-now', {});
-      if (r?.status) setData((x) => ({ ...x, status: r.status }));
+      // 123회차(112회차 반증): 이 응답의 status 만 갈아 끼우면, 못 읽은 동안 연 화면에서 표지(status.loadError)만 사라지고 폼 · data.mail 은 기본값 그대로라
+      //   ‘저장’ 잠금이 풀린 채 그 기본값 폼의 저장(전체 교체)이 받는 사람 · 요일 · 시각을 덮었다. 설정 파일 상태가 바뀌었으면 설정을 통째로 다시 받는다(폼을 다시 채운다).
+      if (r?.status) { if (unreadKind(unreadMarkOf(r.status)) !== unreadKind(unreadMarkOf(data.status))) await load(); else setData((x) => ({ ...x, status: r.status })); }
       if (!r?.ok) { setMsg({ ok: false, text: `보내지 않았습니다 — ${SKIP_TEXT[r?.code] || r?.reason || '사유 미상'}` }); return; }
       setMsg({ ok: true, text: r.to == null ? '보냈습니다.' : `보냈습니다(받는 사람 ${r.to}명).` });
     } catch (e) { setMsg({ ok: false, text: e.message }); load(); } finally { setBusy(''); }
@@ -708,6 +714,7 @@ function MailView({ offsetMin }) {
     <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 420px), 1fr))', gap: 14, minWidth: 0 }}>
       <div className="card" style={{ minWidth: 0 }}>
         <div style={{ fontWeight: 700, marginBottom: 10 }}>예약 메일 — 정한 요일·시각에 전체 사용량을 보냅니다</div>
+        <SettingsUnreadBanner le={unread} what="스토리지 사용량 예약 메일 설정" save="저장" corruptLocks onRecheck={load} busy={!!busy} />
         <label className="flex" style={{ gap: 8, alignItems: 'center', marginBottom: 10 }}>
           <input type="checkbox" checked={form.enabled} onChange={(e) => set('enabled', e.target.checked)} /> 예약 발송 켜기
         </label>
@@ -723,7 +730,7 @@ function MailView({ offsetMin }) {
         </div>
         <label className="flex" style={{ gap: 8, alignItems: 'center', marginBottom: 6 }}>
           <input type="checkbox" checked={form.includeAdmin} onChange={(e) => set('includeAdmin', e.target.checked)} />
-          통합 관리자(설정 › 메일 발송의 기본 받는 사람 {data.adminTo?.length || 0}명) 포함
+          통합 관리자(설정 › 메일 발송의 기본 받는 사람 {adminToForCount(data).length}명{data.adminToMasked ? ' — 주소는 전체 범위 관리자만 봅니다' : ''}) 포함
         </label>
         <div className="muted" style={{ fontSize: 12, margin: '6px 0 4px' }}>추가 받는 사람(줄바꿈·쉼표 구분, 최대 {data.limits?.listMax}명)</div>
         <textarea className="input" rows={4} value={toText} onChange={(e) => setToText(e.target.value)} style={{ width: '100%', resize: 'vertical' }} placeholder="ops@example.com" />
@@ -742,7 +749,7 @@ function MailView({ offsetMin }) {
           켜거나 요일·시각을 바꾸면 오늘 이미 지난 시각은 보내지 않습니다. 메일 서버는 설정 › 메일 발송에서 정합니다.
         </div>
         <div className="flex gap wrap" style={{ gap: 8, marginTop: 12 }}>
-          <button className="tab active" type="button" onClick={save} disabled={!!busy || parsed.invalid.length > 0}>{busy === 'save' ? '저장 중…' : '저장'}</button>
+          <button className="tab active" type="button" onClick={save} disabled={!!busy || saveLocked || parsed.invalid.length > 0}>{busy === 'save' ? '저장 중…' : '저장'}</button>
           <button className="tab" type="button" onClick={doPreview} disabled={!!busy}>{busy === 'preview' ? '만드는 중…' : '미리보기'}</button>
           <button className="tab" type="button" onClick={sendNow} disabled={!!busy || dirty} title={dirty ? '바뀐 칸을 먼저 저장하세요(저장된 설정으로 보냅니다).' : '저장된 설정으로 지금 한 통 보냅니다(예약 회차 기록은 바꾸지 않습니다).'}>
             {busy === 'send' ? '보내는 중…' : '지금 한 번 보내기'}

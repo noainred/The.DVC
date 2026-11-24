@@ -8,6 +8,7 @@ import { STable } from '../../components/STable.jsx';
 import { parseMarkdown, inlineText } from './markdown.js';
 import { resolvePageRef, wikiHash } from './wikiText.js';
 import { AttachImg, AttachLink } from '../attach/AttachBox.jsx';
+import { copyText as copyToClipboard } from '../../util/copyText.js';   // v3.10.6: HTTP 포탈에서도 복사(Clipboard API → execCommand 폴백 · 실패는 false)
 
 const CALLOUT_TEXT = Object.freeze({ info: '정보', warn: '주의', danger: '위험', tip: '팁' });
 
@@ -21,7 +22,7 @@ function CopyButton({ text }) {
   const copy = () => {
     const ok = () => { setDone('복사함'); setTimeout(() => setDone(''), 1500); };
     const no = () => { setDone('복사 못 함'); setTimeout(() => setDone(''), 2000); };
-    try { if (navigator?.clipboard?.writeText) navigator.clipboard.writeText(text).then(ok, no); else no(); } catch { no(); }
+    copyToClipboard(text).then((v) => (v ? ok() : no()), no);
   };
   return <button type="button" className="md-copy" onClick={copy} aria-label="코드 복사">{done || '복사'}</button>;
 }

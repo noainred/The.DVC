@@ -13,13 +13,15 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { fetchJson, canCsv } from '../../api.js';
 import BoldText from '../boldText.jsx';
 import { STable } from '../STable.jsx';
-import { metricErrorState, metricAuthStopText, metricSkipText, stopsAutoRefresh } from '../vmMetricsText.js';
+import { metricErrorState, metricAuthStopText, metricSkipText, stopsAutoRefresh, edgePortalHref } from '../vmMetricsText.js';
+import { vcHash } from '../../views/vcd/vcdRoute.js';
 import { numOrNull } from '../../numOrNull.js';
 import {
   RANGES, rangeOf, METRICS, METRIC_KEYS, metricOf, OVERLAYS, chartKeys, fmtVal, rollupLabel, fmtClock, durText, seriesStats,
   maxBackOf, windowOf, windowLabel, windowRangeText, dateJumpEnd, dateInputOf, backForEnd, yMaxOf, ticksOf, chartModel, hoverIndex, csvText, csvFileName,
 } from './vmPerfText.js';
 import './vmPerf.css';
+import { saveBlob } from '../../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나
 
 const VB_W = 1360; const VB_H = 270; const X0 = 56; const X1 = 1330; const Y0 = 16; const Y1 = 236;
 // 좁은 화면(720 미만)은 뷰박스 폭 400 — 1360 그대로면 340px 폭에서 높이가 68px 띠가 되고 글자가 6px 로 줄어든다(v2.911 Chromium 400 확인 · 시안 ③은 360 뷰박스).
@@ -32,14 +34,10 @@ const clockSec = (ms) => { const d = new Date(ms); return `${two(d.getHours())}:
 function downloadCsv(series, name, rangeK, endMs) {
   if (typeof document === 'undefined' || typeof URL === 'undefined' || typeof Blob === 'undefined') return;
   const blob = new Blob([csvText(series, METRIC_KEYS)], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = csvFileName(name, rangeK, endMs);
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  saveBlob(blob, csvFileName(name, rangeK, endMs));
 }
 
-export default function VmPerfView({ entityType = 'vm', id, name, powered = true, initialRange = null }) {
+export default function VmPerfView({ entityType = 'vm', id, name, vcenterId = null, powered = true, initialRange = null }) {
   const [rangeK, setRangeK] = useState(() => (initialRange && RANGES.some((r) => r.k === initialRange) ? initialRange : 'day'));
   const [metric, setMetric] = useState('cpu');
   const [overlay, setOverlay] = useState('one');
@@ -169,7 +167,18 @@ export default function VmPerfView({ entityType = 'vm', id, name, powered = true
       {st.authStopped && (
         <div className="error-box" style={{ whiteSpace: 'normal' }}><BoldText text={metricAuthStopText(st.authStopped)} /></div>
       )}
-      {st.skip && <div className="vmp-info"><BoldText text={metricSkipText(st.skip)} /></div>}
+      {st.skip && (
+        <div className="vmp-info">
+          <BoldText text={metricSkipText(st.skip)} />
+          {/* v2.926: 엣지 위임이면(관리자) 그 법인 엣지 포탈의 같은 화면으로 — 별도 로그인 · 같은 계정이 있어야 한다(지어내지 않는다). */}
+          {(() => { const href = edgePortalHref(st.skip.edge, vcHash(vcenterId, { type: entityType === 'host' ? 'host' : 'vm', id, tab: 'monitor' })); return href ? (
+            <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+              <a className="vmp-btn" href={href} target="_blank" rel="noopener noreferrer" title={href}>엣지 포탈{st.skip.edge?.name ? `(${st.skip.edge.name})` : ''}에서 이 화면 열기 ↗</a>
+              <span className="vmp-note">엣지 포탈은 따로 로그인합니다 — 거기 계정이 있어야 보입니다</span>
+            </div>
+          ) : null; })()}
+        </div>
+      )}
 
       <div className="vmp-stats" role="tablist" aria-label="지표">
         {METRICS.map((m) => {

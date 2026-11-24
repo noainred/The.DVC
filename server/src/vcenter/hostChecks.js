@@ -7,12 +7,14 @@
  *   · 재부팅: hostcfg/reboots.js analyzeReboots 의 행(kind · bootTime) 그대로
  *   · Veeam: veeam/backupStatus.js recentBackupYn(기본 1일 — 사용자 결정 '매일 백업') 을 이 호스트 VM 마다 세어 Y/N/모름 수로
  *   · VM 합(vm): 이 호스트 VM 의 vCPU·메모리 할당 합(표의 'VM' 묶음 — 호스트 객체에는 없고 /hosts 요약만 전체 합을 준다)
+ *     VM 이 있는데 하나도 못 읽었으면 vcpu · memMB 는 null(0 이 아니다 — vmSums.js vmAllocOf, v3.19.2)
  * 못 읽은 값은 0 이 아니다 — 묶음 자체를 못 읽었으면 null('수집 안 됨'), 등록 안 됨·읽는 중은 상태로 구분한다. 템플릿은 세지 않는다.
  * 권한으로 뺀 묶음은 키 자체를 싣지 않는다(access — 라우트가 accessOf 로 판정한다).
  * ⚠ store·DB·등록부를 import 하지 않는다(라우트가 읽어 넘긴다 — 테스트가 순수 함수로 부른다).
  */
 import { hwSummary } from './hostExport.js';
 import { recentBackupYn } from '../veeam/backupStatus.js';
+import { vmSumsOf, vmAllocOf } from './vmSums.js';
 
 export const HW_STATES = Object.freeze(['ok', 'warn', 'fault', 'unknown', 'none', 'pending', 'error']);
 export const VEEAM_YN_DAYS = 1;   // 사용자 결정(2026-10-27, veeam/backupStatus.js YN_DEFAULT_DAYS 와 같은 뜻 — '어제부터 지금까지')
@@ -42,18 +44,18 @@ export function veeamCountsOf(views, vms, now) {
   return out;
 }
 
-/** 이 호스트 VM 의 vCPU·메모리(MB) 합 — 못 읽은 VM 은 unknown 으로 따로. 템플릿은 세지 않는다(hostExport.js vmSums 와 같은 규칙). */
-export function vmSumsOf(vms) {
-  const out = { n: 0, on: 0, templates: 0, vcpu: 0, memMB: 0, vcpuUnknown: 0, memUnknown: 0 };
-  for (const v of vms || []) {
-    if (!v) continue;
-    if (v.template === true) { out.templates += 1; continue; }
-    out.n += 1;
-    if (v.powerState === 'POWERED_ON') out.on += 1;
-    const c = Number(v.cpuCount); if (Number.isFinite(c) && v.cpuCount != null && v.cpuCount !== '') out.vcpu += c; else out.vcpuUnknown += 1;
-    const m = Number(v.memMB); if (Number.isFinite(m) && v.memMB != null && v.memMB !== '') out.memMB += m; else out.memUnknown += 1;
-  }
-  return out;
+// 이 호스트 VM 의 vCPU · 메모리(MB) 합 — 판정 코어는 vcenter/vmSums.js 하나(v3.19.1 — /hosts 요약 · 법인별 · 호스트 엑셀과 같이 쓴다).
+//   여기서는 다시 내보내기만 한다(예전 import 경로 유지).
+export { vmSumsOf, vmAllocOf };
+
+/**
+ * 호스트 표 · 상세 · 드로어의 'VM' 묶음(c.vm) — 수(n · on · templates) · unknown 수는 vmSumsOf 그대로, 할당 합(vcpu · memMB)은 vmAllocOf 를 거친다(v3.19.2).
+ *   v3.19.1 까지 원래 합을 그대로 실어, VM 을 **전부** 못 읽은 호스트가 표에서 '0+?' · 상세에서 '0' 으로 보였다(/hosts 요약 · 법인별 · 엑셀은 null).
+ *   키는 그대로다 — vcpu · memMB 가 null 일 수 있을 뿐(전부 못 읽음). 일부만 못 읽었으면 읽은 값의 합(최소값) · VM 이 없으면 0.
+ */
+export function hostVmOf(vms) {
+  const sum = vmSumsOf(vms);
+  return { ...sum, ...vmAllocOf(sum) };
 }
 
 /**
@@ -87,7 +89,7 @@ export function hostChecksOf(hosts, o = {}) {
     }
     const views = typeof o.veeamOf === 'function' ? o.veeamOf(h.vcenterId) : null;
     const vms = o.vmsByHost instanceof Map ? (o.vmsByHost.get(`${h.vcenterId}\t${h.name}`) || []) : [];
-    c.vm = vmSumsOf(vms);
+    c.vm = hostVmOf(vms);
     c.veeam = veeamCountsOf(views, vms, now);
     if (c.veeam) { if (c.veeam.n > 0) counts.veeamN += 1; if (c.veeam.unknown > 0 && c.veeam.y + c.veeam.n === 0) counts.veeamUnknown += 1; }
     byId[h.id] = c;

@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>대안 — 별도 도구 · 자동 1분 측정</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums}
+.muted{color:#8b9bb4}
+.wrap{padding:24px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}
+.card{background:linear-gradient(180deg,#141b2d,#111726);border:1px solid #243049;border-radius:14px;padding:16px 18px;min-width:0;display:flex;flex-direction:column;gap:10px}
+.card h3{margin:0;font-size:14.5px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.pick{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700}
+.pick.rec{background:rgba(52,224,180,.14);color:#5eead4}
+.pick.alt{background:rgba(139,155,180,.14);color:#aebbd0}
+.mock{border:1px solid #1f2a40;border-radius:12px;background:#0f1626;padding:12px 14px;display:flex;flex-direction:column;gap:8px}
+.tile{display:flex;align-items:center;gap:10px;border:1px solid #243049;border-radius:10px;padding:10px 12px;background:#141b2d}
+.tile b{font-size:13px}
+.tile small{display:block;color:#8b9bb4;font-size:11.5px}
+.subtabs{display:flex;align-items:flex-end;gap:4px;border-bottom:1px solid #243049}
+.subtab{height:32px;padding:0 12px;border:0;border-bottom:2px solid transparent;background:transparent;color:#8b9bb4;font:inherit;font-size:13px;font-weight:600}
+.subtab.on{color:#e6edf6;border-bottom-color:#34e0b4}
+.pc{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;font-size:12.5px;line-height:1.6}
+.pc div{border-top:1px solid #1f2a40;padding-top:8px}
+.pc .t{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11.5px;letter-spacing:.1em;color:#8b9bb4;display:block;margin-bottom:2px}
+.pc ul{margin:0;padding-left:16px}
+.btn{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12px;font-weight:600;white-space:nowrap}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.sw{display:inline-flex;align-items:center;gap:8px;font-size:12.5px}
+.sw .k{width:34px;height:18px;border-radius:9px;background:#1f2a40;position:relative;border:1px solid #243049}
+.sw .k::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#8b9bb4}
+.sw.on .k{background:rgba(52,224,180,.25);border-color:#34e0b4}
+.sw.on .k::after{left:18px;background:#34e0b4}
+.foot{font-size:11.5px;color:#8b9bb4;line-height:1.6}
+</style>
+</helmet>
+<div class="wrap">
+  <div class="card">
+    <h3><span class="pick rec">추천</span>④-A 자리 — 기존 도구의 ‘SAN 비교’ 탭</h3>
+    <div class="mock">
+      <div class="subtabs"><span class="subtab">현황</span><span class="subtab on">SAN 비교</span></div>
+      <div class="muted" style="font-size:12px">특수 기능 › 베어메탈 스토리지 › SAN 비교 · <span class="mono">#/tools/bm-storage/compare</span></div>
+    </div>
+    <div class="pc">
+      <div><span class="t">좋은 점</span><ul><li>도구 키 · 권한 파일 · 카탈로그 변경 없음(기존 adminOnly · 전체 범위 그대로)</li><li>‘지금 측정’ · 주기 · 서버 등록이 한 도구 안</li><li>현황 탭의 12시간 이력 · 그룹 색을 같이 씀</li></ul></div>
+      <div><span class="t">아쉬운 점</span><ul><li>SAN 스위치 · 스토리지 모니터링 화면에서는 링크로만 온다</li><li>SAN 쪽 사람은 ‘베어메탈’ 메뉴 아래를 찾아야 한다 — 특수 기능 카드 설명에 ‘SAN 비교’ 를 적어 검색에 걸리게</li></ul></div>
+    </div>
+    <h3 style="margin-top:6px"><span class="pick alt">대안</span>④-B 자리 — 새 특수 기능 ‘스토리지 비교’</h3>
+    <div class="mock">
+      <div class="tile"><span style="width:28px;height:28px;border-radius:8px;background:rgba(59,130,246,.2);flex:none"></span><span><b>스토리지 비교</b><small>베어메탈 · SAN 어레이 용량 사용률 · 전송 속도 한 표 · 운영 작업</small></span></div>
+    </div>
+    <div class="pc">
+      <div><span class="t">좋은 점</span><ul><li>양쪽 사람이 찾기 쉬운 이름 · 독립 주소</li></ul></div>
+      <div><span class="t">비용</span><ul><li>새 도구 키 + 권한 매트릭스 + 카탈로그(PRESET) + 서버 집행 매핑 + 사용 현황 집계 — 변경 파일 6곳 이상 · 권한 테스트 대조</li><li>‘지금 측정’ 버튼이 두 화면에 생겨 재진입 가드 · 문구를 둘 다 맞춰야 함</li></ul></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3><span class="pick rec">추천</span>④-C ‘실시간’ 의 뜻 — 주기 하한 1분 + ‘지금 측정’</h3>
+    <div class="mock">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button class="btn primary" type="button">지금 측정</button><span class="muted" style="font-size:12px">수집 주기 <b style="color:#e6edf6">1분</b> (현황 탭의 ✎ 으로 바꿈 · 1~1440분)</span></div>
+      <div class="muted" style="font-size:12px">화면은 15초마다 가벼운 현황(메모리 값)만 다시 읽고, SSH 는 주기 · 버튼 때만 엽니다.</div>
+    </div>
+    <div class="pc">
+      <div><span class="t">좋은 점</span><ul><li>지금 있는 주기 설정 그대로 — 새 상태 없음</li><li>SSH 부하가 사람이 정한 주기를 넘지 않는다(28법인 · 1,000대 상한)</li><li>엣지 위임 서버도 같은 경로(잡 큐 · PUSH)</li></ul></div>
+      <div><span class="t">한계(화면이 말함)</span><ul><li>‘실시간’ 은 수집 주기 단위다 — 표본 시각을 행마다 표시</li><li>엣지 폴링 위임은 회신까지 수십 초 더 걸린다</li></ul></div>
+    </div>
+    <h3 style="margin-top:6px"><span class="pick alt">대안</span>④-D 화면이 열려 있는 동안 자동 1분 측정</h3>
+    <div class="mock">
+      <div class="sw on"><span class="k"></span>자동 측정 <b>켬</b> <span class="muted">· 이 화면을 보는 동안 1분마다 ‘지금 측정’ · 닫으면 멈춤</span></div>
+    </div>
+    <div class="pc">
+      <div><span class="t">좋은 점</span><ul><li>버튼을 누르지 않아도 1분 값이 흐른다</li></ul></div>
+      <div><span class="t">위험</span><ul><li>화면을 여러 사람이 열면 서버마다 SSH 로그인이 겹친다(재진입 가드가 막아도 로그인 시도는 쌓임 — 계정 잠금 규칙과 충돌)</li><li>수집 주기 설정과 두 번째 ‘주기’ 가 생긴다(판정 코어 둘)</li><li>엣지 폴링 위임 서버에는 1분이 의미가 없다(회신 지연)</li></ul></div>
+    </div>
+    <div class="foot">④-D 를 고르면 ‘자동 측정’ 은 서버가 관리자별 1건 · 최소 60초 · 5분 뒤 자동 꺼짐으로 묶고 감사 로그를 남기는 조건을 답니다. 기본 추천은 ④-A + ④-C.</div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1200,"height":620}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

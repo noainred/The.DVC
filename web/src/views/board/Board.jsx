@@ -16,6 +16,7 @@ import { STable } from '../../components/STable.jsx';
 import { Loading, ErrorBox } from '../../components/primitives.jsx';
 import Select from '../../components/Select.jsx';
 import { useHashTab } from '../../hooks/useHashTab.js';
+import { loadErrorText } from '../loadErrorText.js'; // 결정(56~75 남긴 것) 73 ①: 저장소 파일을 못 읽은 동안의 표지
 import {
   LEVEL_TEXT, LEVEL_TONE, timeText, windowText, noticeState, toLocalInput, fromLocalInput, saveFailText,
   threadComments, likersText, applyLike, makeLatest,
@@ -182,6 +183,7 @@ function Posts({ onPersist }) {
         </div>
       </div>
       {err && <div className="banner">목록을 새로 읽지 못했습니다 — 아래는 직전에 읽은 목록입니다.</div>}
+      {list.loadError && <div className="banner">{loadErrorText('게시판 글 · 댓글(board.json)', list.loadError, '그동안 글 목록이 비어 보일 수 있습니다.')}</div>}
       {writing && <PostEditor isAdmin={list.isAdmin} limits={list.limits} onPersist={onPersist} onCancel={() => setWriting(false)} onSaved={(p) => { setWriting(false); setOpenId(p.id); }} />}
       {list.rows.length === 0
         ? <div className="muted" style={{ padding: 16 }}>{query ? `‘${query}’ 에 맞는 글이 없습니다.` : '아직 글이 없습니다.'}</div>
@@ -465,6 +467,7 @@ function NoticeAdmin({ onPersist }) {
         </div>
       )}
       {msg && <div className="banner">{msg}</div>}
+      {data.loadError && <div className="banner">{loadErrorText('접속 공지(notices.json)', data.loadError, '그동안 공지 목록이 비어 보일 수 있습니다.')}</div>}
       {data.notices.length === 0
         ? <div className="muted" style={{ padding: 16 }}>등록된 공지가 없습니다.</div>
         : (

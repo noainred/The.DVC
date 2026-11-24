@@ -74,11 +74,17 @@ export function fdProgressMeta(row, live, fdl) {
  */
 export function corpBadge(c) {
   if (!c) return { key: 'none', text: '—', tone: 'muted' };
+  // 52회차 F2: 폴러가 그 Director 를 못 읽으면 '실행 없음' 이 아니라 결과 모름(조회 실패 거르기에 든다)
+  //   53회차 N5: 실행 · 대기가 있는 법인의 멈춤 · 느림은 덮지 않는다(그 아래로) · 사유는 판정 코어 상태로(설정 안 됨 · 인증 정지 · 조회 실패)
+  const unknownText = c.resultsState === 'unset' ? '결과 모름(Director 설정 안 됨)' : c.resultsState === 'auth' ? '결과 모름(인증 정지)' : '결과 모름(Director 조회 실패)';
+  if (c.resultsKnown === false && !(c.running > 0) && !(c.waiting > 0)) return { key: 'fail', text: unknownText, tone: 'bad' };
   if (!(c.running > 0) && !(c.waiting > 0)) return { key: 'idle', text: '실행 없음', tone: 'muted' };
-  if (!c.live) return { key: 'pending', text: '조회 전', tone: 'muted' };
+  // 55회차 #8: 결과 모름 법인의 실행 · 대기 행은 '조회 전' 이 아니라 결과 모름(서버 KPI resultsUnknownCorps 와 '조회 실패' 거르기가 같은 수)
+  if (!c.live) return c.resultsKnown === false ? { key: 'fail', text: unknownText, tone: 'bad' } : { key: 'pending', text: '조회 전', tone: 'muted' };
   if (c.stuck > 0) return { key: 'stuck', text: `멈춤 의심 ${c.stuck}`, tone: 'warn' };   // v2.833.1 — FD 조회는 됐고 3시간 넘게 진행 보고 없음
   if (!c.live.ok) return { key: 'fail', text: '조회 실패', tone: 'bad' };
   if (c.slow > 0) return { key: 'slow', text: `느림 ${c.slow}`, tone: 'warn' };
+  if (c.resultsKnown === false) return { key: 'fail', text: unknownText, tone: 'bad' };
   if (!(c.running > 0)) return { key: 'wait', text: '대기만', tone: 'run' };
   return { key: 'ok', text: '정상', tone: 'ok' };
 }
@@ -91,7 +97,7 @@ export function corpMatches(c, f) {
     case 'active': return c.running > 0 || c.waiting > 0;
     case 'stuck': return c.stuck > 0;
     case 'slow': return b === 'slow' || (c.slow > 0 && b === 'stuck');
-    case 'fail': return b === 'fail';
+    case 'fail': return b === 'fail' || c.resultsKnown === false;   // 55회차 #8: 멈춤 의심 · 느림 표지가 덮어도 결과 모름 법인은 '조회 실패' 에 든다(KPI 와 같은 수)
     default: return true;
   }
 }

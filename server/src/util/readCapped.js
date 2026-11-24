@@ -1,3 +1,5 @@
+import { envPositive } from './envNumber.js'; // 102회차: 상한 env 는 유한 양수만
+
 /**
  * util/readCapped.js — 응답 본문을 **상한까지만** 읽어 JSON 으로(v2.583 — 감사 확정).
  *
@@ -8,7 +10,10 @@
  *
  * 스트림을 읽으며 누적 바이트가 상한을 넘으면 **즉시 취소**한다(해제는 읽는 만큼만 일어난다 — 멈추면 더 풀지 않는다).
  * 넘으면 던진다 — 호출부는 이미 '응답 형식 이상' 실패 경로를 갖고 있다.
+ * 다음 작업 ⑤(c) 2026-11-19: 던지는 오류에 `code: 'too-large'` 를 단다 — 엣지 당김 사다리(central/edgePull.js)가 상한 초과를
+ *   ‘응답 형식이 다릅니다(엣지가 아닌 서버에 닿았을 수 있습니다)’ 로 뭉개지 않고 따로 말한다(조치가 다르다 — 10회차 의심 1 재현). 문장은 그대로다.
  */
+const tooLarge = (msg) => Object.assign(new Error(msg), { code: 'too-large' });
 export async function readJsonCapped(res, maxBytes, what = '응답') {
   const text = await readTextCapped(res, maxBytes, what);
   return JSON.parse(text);
@@ -20,11 +25,11 @@ export async function readTextCapped(res, maxBytes, what = '응답') {
   // Content-Length 는 **압축된 크기**일 수 있어 판정 근거로 부족하다 — 넘으면 바로 거절만 한다.
   if (Number.isFinite(len) && len > max) {
     try { await res.body?.cancel?.(); } catch { /* */ }
-    throw new Error(`${what}이 상한(${Math.round(max / 1048576)}MB)을 넘었습니다(${Math.round(len / 1048576)}MB)`);
+    throw tooLarge(`${what}이 상한(${Math.round(max / 1048576)}MB)을 넘었습니다(${Math.round(len / 1048576)}MB)`);
   }
   if (!res?.body || typeof res.body.getReader !== 'function') {
     const t = await res.text();
-    if (Buffer.byteLength(t) > max) throw new Error(`${what}이 상한(${Math.round(max / 1048576)}MB)을 넘었습니다`);
+    if (Buffer.byteLength(t) > max) throw tooLarge(`${what}이 상한(${Math.round(max / 1048576)}MB)을 넘었습니다`);
     return t;
   }
   const reader = res.body.getReader();
@@ -36,7 +41,7 @@ export async function readTextCapped(res, maxBytes, what = '응답') {
     n += value.byteLength;
     if (n > max) {
       try { await reader.cancel(); } catch { /* */ }
-      throw new Error(`${what}이 상한(${Math.round(max / 1048576)}MB)을 넘어 읽기를 멈췄습니다(압축 해제 후 크기)`);
+      throw tooLarge(`${what}이 상한(${Math.round(max / 1048576)}MB)을 넘어 읽기를 멈췄습니다(압축 해제 후 크기)`);
     }
     chunks.push(value);
   }
@@ -44,5 +49,7 @@ export async function readTextCapped(res, maxBytes, what = '응답') {
 }
 
 /** 엣지 응답 상한 — 인벤토리 export 는 수 MB 라 넉넉히, 나머지는 16MB(중앙 수신 한도와 같은 축). */
-export const EDGE_EXPORT_MAX_BYTES = Math.max(1_048_576, Number(process.env.EDGE_EXPORT_MAX_BYTES) || 64 * 1048576);
-export const EDGE_RESPONSE_MAX_BYTES = Math.max(1_048_576, Number(process.env.EDGE_RESPONSE_MAX_BYTES) || 16 * 1048576);
+// 102회차 F3: `Math.max(1MB, Number(env) || 기본값)` 은 Infinity 를 통과시켜 **이 모듈이 막으려던 gzip 폭탄 상한이 꺼졌다**(readTextCapped 의
+//   `Math.max(1024, Infinity)`). 유한 양수만(그 밖 기본값) — 1MB 하한은 그대로.
+export const EDGE_EXPORT_MAX_BYTES = Math.max(1_048_576, envPositive(process.env.EDGE_EXPORT_MAX_BYTES, 64 * 1048576));
+export const EDGE_RESPONSE_MAX_BYTES = Math.max(1_048_576, envPositive(process.env.EDGE_RESPONSE_MAX_BYTES, 16 * 1048576));

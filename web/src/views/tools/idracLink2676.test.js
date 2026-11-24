@@ -45,7 +45,7 @@ describe('인계 · 연결 근거', () => {
 
 describe('소스 — 버튼 위치 · 서비스 표기', () => {
   it('호스트 상세에 성능 그래프 보기 바로 뒤 통합 성능 모니터링', () => {
-    const s = read('../../components/EntityDetail.jsx');
+    const s = read('../hosts/HostDrawer.jsx');   // v2.975: 호스트 상세는 드로어(예전 EntityDetail 모달) — 단추 순서는 그대로
     const a = s.indexOf('<HostMetricButton'); const b = s.indexOf('<IdracTrendLinkButton');
     expect(a).toBeGreaterThan(0); expect(b).toBeGreaterThan(a);
     expect(read('../../components/IdracTrendLinkButton.jsx')).toMatch(/통합 성능 모니터링/);

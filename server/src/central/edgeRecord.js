@@ -20,6 +20,7 @@
  *    공유 토큰 발신자가 이름을 바꿔 가며 보내 **실제 엣지의 기록을 밀어내지 못하게** 한다(v2.589 pullStats 와 같은 판단).
  *  - 파일 쓰기는 디바운스 + 비동기(tmp→rename) + 종료 시 동기 flush(central/inventory.js · fleet.js 와 같은 규약).
  */
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import fs from 'node:fs';
 import path from 'node:path';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
@@ -29,10 +30,10 @@ import { capStr } from '../util/capStr.js'; // v2.606 TIM2606-02
 import { registerStateFile } from '../util/stateFiles.js'; // v2.613 PERSIST2613-08
 
 export const RESERVED_IDS = new Set(['__proto__', 'constructor', 'prototype']);
-export const EDGE_DEVICE_MAX_BYTES = Math.max(64 * 1024, Number(process.env.CENTRAL_EDGE_DEVICE_MAX_BYTES) || 1024 * 1024);
-export const EDGE_AGENT_MAX_BYTES = Math.max(1024 * 1024, Number(process.env.CENTRAL_EDGE_AGENT_MAX_BYTES) || 16 * 1024 * 1024);
-export const EDGE_MAX_AGENTS = Math.max(8, Number(process.env.CENTRAL_EDGE_MAX_AGENTS) || 128);
-export const EDGE_AGENT_EVICT_MS = Math.max(60 * 60_000, Number(process.env.CENTRAL_EDGE_AGENT_EVICT_MS) || 24 * 60 * 60_000);
+export const EDGE_DEVICE_MAX_BYTES = Math.max(64 * 1024, envPositive(process.env.CENTRAL_EDGE_DEVICE_MAX_BYTES, 1024 * 1024));
+export const EDGE_AGENT_MAX_BYTES = Math.max(1024 * 1024, envPositive(process.env.CENTRAL_EDGE_AGENT_MAX_BYTES, 16 * 1024 * 1024));
+export const EDGE_MAX_AGENTS = Math.max(8, envPositive(process.env.CENTRAL_EDGE_MAX_AGENTS, 128));
+export const EDGE_AGENT_EVICT_MS = Math.max(60 * 60_000, envPositive(process.env.CENTRAL_EDGE_AGENT_EVICT_MS, 24 * 60 * 60_000));
 
 /** 화면이 글자로 그리는 필드 — 객체·배열이면 null 로 바꾼다. */
 export const DISPLAY_KEYS = Object.freeze([
@@ -50,7 +51,8 @@ export const NUMERIC_PATHS = Object.freeze([
  * 미디어(hdd·ssd)는 객체이거나 null. 그 밖의 키는 담지 않는다(v2.598 CENTRAL '아는 필드만' 규약).
  */
 export const NODE_STR_KEYS = Object.freeze(['id', 'name', 'ip', 'health', 'ext', 'model', 'lnn', 'serial', 'chassisSerial']);   // v2.735.2 시리얼
-export const NODE_NUM_KEYS = Object.freeze(['inBps', 'outBps', 'totalBps', 'l3Bytes']);
+// v2.926 — 노드 부하 시계열(디스크 쓰기·읽기 B/s · CPU %). 새 엣지 export 필드는 여기에도(구버전 엣지는 없다 — null 로 남는다).
+export const NODE_NUM_KEYS = Object.freeze(['inBps', 'outBps', 'totalBps', 'l3Bytes', 'diskInBytesPs', 'diskOutBytesPs', 'cpuPct', 'busyPct', 'iops', 'opsPs', 'latencyMs']); // v2.932 busy·IOPS·ops·지연
 export const NODE_MEDIA_KEYS = Object.freeze(['hdd', 'ssd']);
 export const NODE_LIST_MAX = 64;
 const STR_MAX = 512;
@@ -200,7 +202,10 @@ export function trimZoningToFit(o, maxBytes, { by = 'central' } = {}) {
   for (const [k, v] of aliasEntries) {
     let n; try { n = len(k) + len(v) + 2; } catch { continue; }
     if (n > budget) break;
-    keptAliases[k] = v; budget -= n; aliasKept += 1;
+    // 159회차(재현): 대입(`keptAliases[k] = v`)은 이름이 ‘__proto__’ 인 별칭에서 자기 속성을 만들지 않고 **이 맵의 원형을 그 값(배열)으로 바꾼다** —
+    //   별칭이 세지도 않고 사라지고(aliasesOmitted 에 안 잡힘) 맵이 length · 색인을 상속한다. 장비 파서(sanswitch/zoning.js ownPut — 155회차)와 같이 자기 속성으로 둔다.
+    Object.defineProperty(keptAliases, k, { value: v, writable: true, enumerable: true, configurable: true });
+    budget -= n; aliasKept += 1;
   }
   const zonesOmitted = zones.length - keptZones.length + (Number(prevTrim?.zonesOmitted) || 0);
   const aliasesOmitted = aliasEntries.length - aliasKept + (Number(prevTrim?.aliasesOmitted) || 0);

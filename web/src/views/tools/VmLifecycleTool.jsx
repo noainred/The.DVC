@@ -28,7 +28,7 @@ function DayBars({ series }) {
   return (
     <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 56, minWidth: 0 }} aria-label="하루 추가·삭제">
       {series.map((s) => (
-        <div key={s.day} title={`${new Date(s.day).toLocaleDateString('ko-KR')} · 추가 ${s.added} · 삭제 ${s.removed}`}
+        <div key={s.day} title={`${new Date(s.day).toLocaleDateString('ko-KR')}${s.partialFrom ? ` ${new Date(s.partialFrom).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}부터(기간 첫날)` : ''} · 추가 ${s.added} · 삭제 ${s.removed}`}
           style={{ flex: '1 1 0', minWidth: 3, display: 'flex', gap: 1, alignItems: 'flex-end', height: '100%' }}>
           <div style={{ flex: 1, height: s.added ? `${Math.max(4, (s.added / max) * 100)}%` : 1, background: s.added ? 'var(--green)' : 'var(--border)' }} />
           <div style={{ flex: 1, height: s.removed ? `${Math.max(4, (s.removed / max) * 100)}%` : 1, background: s.removed ? 'var(--red)' : 'var(--border)' }} />

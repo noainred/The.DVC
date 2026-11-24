@@ -33,14 +33,26 @@ function exceptedBy(vm, exceptions) {
   return exceptions.find((e) => hay.includes(String(e).toLowerCase())) || null;
 }
 
+/**
+ * v3.28.0 스냅샷 보류(vmhygiene/holds.js) — 설정 s 에 열거되지 않는 속성 holds(Map, 키 'vCenter id\nVM id')로 붙어 온다.
+ * 기한이 지나지 않은 보류만 판정에서 뺀다(기한은 여기서 지금 시각으로 다시 본다 — 캐시된 Map 이 기한을 넘겨도 빼지 않는다).
+ */
+export function holdOf(vm, s, now = Date.now()) {
+  const m = s && s.holds instanceof Map ? s.holds : null;
+  if (!m || !vm) return null;
+  const h = m.get(`${vm.vcenterId}\n${vm.id}`);
+  return h && Number(h.until) > now ? h : null;
+}
+
 /** VM 하나의 이 모듈 판정(B10 판정은 vmCfgFindings 가 따로). */
 export function hygieneFindings(vm, s, now = Date.now()) {
   const out = [];
   const add = (code, facts = {}) => out.push({ code, sev: HYGIENE_CODES[code], facts });
-  if (!vm || vm.template === true) return { findings: out, excepted: null };
+  if (!vm || vm.template === true) return { findings: out, excepted: null, held: null };
   const exc = exceptedBy(vm, s.exceptions);
+  const held = exc ? null : holdOf(vm, s, now);
   const cnt = Number.isFinite(vm.snapshotCount) ? vm.snapshotCount : 0;
-  if (!exc && cnt > 0) {
+  if (!exc && !held && cnt > 0) {
     const ageDays = Number.isFinite(vm.snapshotOldestTs) && vm.snapshotOldestTs > 0 ? Math.floor((now - vm.snapshotOldestTs) / DAY) : null;
     if (ageDays != null && ageDays >= s.snapAgeDays) add('snap-age', { days: ageDays, limit: s.snapAgeDays });
     if (cnt > s.snapCount) add('snap-count', { count: cnt, limit: s.snapCount });
@@ -66,7 +78,7 @@ export function hygieneFindings(vm, s, now = Date.now()) {
     const days = Math.floor((now - boot) / DAY);
     if (days >= s.uptimeDays) add('uptime-long', { days, limit: s.uptimeDays });
   }
-  return { findings: out, excepted: exc };
+  return { findings: out, excepted: exc, held };
 }
 
 /**
@@ -77,7 +89,9 @@ export function hygieneFindings(vm, s, now = Date.now()) {
 export function analyzeVmHygiene(vms, s, opt = {}) {
   const now = opt.now ?? Date.now();
   const vcName = opt.vcName || new Map();
-  const coverage = { vms: 0, templates: 0, cfg: 0, dev: 0, notCollected: 0, excepted: 0 };
+  // 153회차: held = 스냅샷 보류(기한 있는 예외 — holds.js)로 스냅샷 정책 판정에서 뺀 VM 수. v3.28.0 이 판정(hygieneFindings)에 보류를 넣으면서
+  //   이 요약과 알림 문구는 '예외 N대' 만 말해 보류한 VM 이 말없이 빠졌다(머리말 '조용한 제외 금지').
+  const coverage = { vms: 0, templates: 0, cfg: 0, dev: 0, notCollected: 0, excepted: 0, held: 0 };
   const byCode = {};
   for (const [c, sev] of Object.entries(ALL_CODES)) byCode[c] = { sev, vms: 0 };
   const rows = [];
@@ -93,6 +107,7 @@ export function analyzeVmHygiene(vms, s, opt = {}) {
     if (!hasCfg && !hasDev) coverage.notCollected += 1;
     const h = hygieneFindings(vm, s, now);
     if (h.excepted) coverage.excepted += 1;
+    if (h.held) coverage.held += 1;
     const findings = [...vmCfgFindings(vm), ...h.findings].sort((a, b) => SEV_ORDER[a.sev] - SEV_ORDER[b.sev]);
     const vcId = vm.vcenterId || '';
     let vc = byVc.get(vcId);
@@ -113,8 +128,10 @@ export function analyzeVmHygiene(vms, s, opt = {}) {
   // 거르기(화면 칩) — 개수(byCode)는 거르기 전 기준이다(고른 칩만 남으면 해제할 수 없다 — v2.645 규약).
   const q = typeof opt.q === 'string' ? opt.q.trim().toLowerCase() : '';
   let shown = rows;
-  if (opt.code && ALL_CODES[opt.code]) shown = shown.filter((r) => r.findings.some((f) => f.code === opt.code));
-  if (opt.sev && SEV_ORDER[opt.sev] != null) shown = shown.filter((r) => r.findings.some((f) => f.sev === opt.sev));
+  // 158회차(재현 — 153회차 N153-3 과 같은 꼴): 모르는 값은 거르지 않는 것이 이 함수의 뜻인데, 표를 상속 키(?code=constructor · ?sev=__proto__)로 열면
+  //   참이 되어 '맞는 VM 0대' 가 됐다(모르는 값 'nope' 는 전체). 자기 키만 본다.
+  if (opt.code && Object.hasOwn(ALL_CODES, opt.code)) shown = shown.filter((r) => r.findings.some((f) => f.code === opt.code));
+  if (opt.sev && Object.hasOwn(SEV_ORDER, opt.sev)) shown = shown.filter((r) => r.findings.some((f) => f.sev === opt.sev));
   if (q) shown = shown.filter((r) => `${r.name} ${r.host} ${r.cluster} ${r.vcenterName}`.toLowerCase().includes(q));
   shown.sort((a, b) => SEV_ORDER[a.worst] - SEV_ORDER[b.worst] || b.findings.length - a.findings.length || String(a.name).localeCompare(String(b.name)));
   const out = {
@@ -135,6 +152,32 @@ export function analyzeVmHygiene(vms, s, opt = {}) {
 }
 
 /**
+ * v3.21.0 VM 분석 화면 요약(`/tools/vm-hygiene?summary=1` — docs/design/vm-insight §10) — 법인(vCenter)별 줄 + 법인별 상위 N.
+ *   result = 거르기 없이 돌린 analyzeVmHygiene 결과. 법인 줄의 vms · withFindings · crit · warn · notCollected 는 도구의 vcenters 그대로이고,
+ *   byCode(문제 종류별 VM 수)는 도구의 byCode 와 같은 셈(판정마다 +1)을 화면 상한 전 전체(allRows)로 법인별로 낸다(잘린 rows 로 세지 않는다).
+ *   상위 N: question = 응답을 기다리며 멈춘 VM(question 판정) · worst = 도구 정렬(심각도 → 판정 수 → 이름)의 앞 N.
+ */
+export function hygieneSummaryByVc(result, topN = 5) {
+  const src = Array.isArray(result.allRows) ? result.allRows : result.rows;
+  const per = new Map();
+  for (const v of result.vcenters || []) {
+    const byCode = {};
+    for (const c of Object.keys(ALL_CODES)) byCode[c] = 0;
+    per.set(v.vcenterId, { vcenterId: v.vcenterId, name: v.name, vms: v.vms, withFindings: v.withFindings, crit: v.crit, warn: v.warn, notCollected: v.notCollected, byCode, top: { question: [], worst: [] } });
+  }
+  const pick = (r) => ({ id: r.id, name: r.name, host: r.host, cluster: r.cluster, powerState: r.powerState, worst: r.worst,
+    codes: r.findings.map((f) => f.code), ...(r.findings.find((f) => f.code === 'question') ? { question: r.findings.find((f) => f.code === 'question').facts || {} } : {}) });
+  for (const r of src) {   // src 는 도구 정렬(심각도 → 판정 수 → 이름) 그대로
+    const e = per.get(r.vcenterId);
+    if (!e) continue;
+    for (const f of r.findings) if (e.byCode[f.code] != null) e.byCode[f.code] += 1;
+    if (e.top.worst.length < topN) e.top.worst.push(pick(r));
+    if (e.top.question.length < topN && r.findings.some((f) => f.code === 'question')) e.top.question.push(pick(r));
+  }
+  return [...per.values()].sort((a, b) => String(a.vcenterId).localeCompare(String(b.vcenterId)));
+}
+
+/**
  * 알림 요약(스냅샷 정책·유령 스냅샷만 — 하루 한 번). 반환 null 이면 보낼 것이 없다.
  * v2.742(RECENT-03): 유령 스냅샷 후보는 **주의(통합 필요가 함께 표시된 것)만** 알린다 — 이름 규칙만 맞는 참고 후보는 화면에만 보인다
  *   (링크드 클론 등 오탐 가능성이 있는 후보로 매일 알림을 보내지 않는다).
@@ -152,5 +195,6 @@ export function snapshotPolicySummary(result, limit = 30) {
   });
   const more = hits.length > limit ? `\n… 외 ${hits.length - limit}대` : '';
   const s = result.settings;
-  return `스냅샷 정책 위반 ${hits.length}대 (기준: ${s.snapAgeDays}일 · ${s.snapCount}개 · ${s.snapSizeGB}GB, 예외 ${result.coverage.excepted}대 제외)\n${lines.join('\n')}${more}`;
+  const held = Number(result.coverage.held) > 0 ? ` · 보류 ${result.coverage.held}대` : '';   // 153회차: 보류로 뺀 VM 도 밝힌다(없으면 예전 문구 그대로)
+  return `스냅샷 정책 위반 ${hits.length}대 (기준: ${s.snapAgeDays}일 · ${s.snapCount}개 · ${s.snapSizeGB}GB, 예외 ${result.coverage.excepted}대${held} 제외)\n${lines.join('\n')}${more}`;
 }

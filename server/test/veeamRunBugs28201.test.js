@@ -1,15 +1,22 @@
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
 
 // v2.820.1 Veeam 백업 실행·관리 버그 수정 회귀(사용자 요청 '버그 5개 찾아서 수정' — 2026-10-30).
 //  B1 복원 지점 '있음(개수 모름)'(rp -1)을 미보호로 판정 → 이미 백업된 VM 이 포탈 전용 잡에도 들어갔다
 //  B3 Veeam 서버 등록부를 못 읽은 채 설정을 저장하면 서버별 저장소·보존이 전부 지워졌다(재검토 뒤: 막지 않고 서버별 값을 합친다)
 //  B5 VM 하나만 담은 세션(복원·VM 별 Quick)이 작업 목록에 그 VM 이름이 없다는 이유로 '확인 불가' 가 됐다
 // (B2·B4 는 웹 — web/src/views/tools/backupRunText.test.js)
-const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'portal-veeambugs-'));
+const CFG = tmpDir('portal-veeambugs-');
 process.env.CONFIG_DIR = CFG;
 process.env.AUTH_ENABLED = 'false';
 fs.writeFileSync(path.join(CFG, 'veeam-servers.json'), '{ broken json');   // B3: 등록부 손상

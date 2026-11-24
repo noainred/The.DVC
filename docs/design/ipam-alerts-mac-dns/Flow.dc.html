@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>데이터 흐름 — 스캔에서 알림까지</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.5}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+.muted{color:#8b9bb4}
+.lane{box-sizing:border-box;border:1px solid #243049;border-radius:12px;background:linear-gradient(180deg,#141b2d,#111726);padding:12px 14px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.lane h3{margin:0;font-size:12px;font-weight:700;color:#8b9bb4;display:flex;flex-wrap:wrap;align-items:baseline;gap:8px}
+.lane h3 b{color:#e6edf6;font-size:13px}
+.steps{display:flex;align-items:stretch;gap:6px;min-width:0}
+.s{box-sizing:border-box;flex:1 1 0;min-width:0;border:1px solid #1f2a40;border-radius:8px;background:#0f1626;padding:8px 10px;display:flex;flex-direction:column;gap:3px;font-size:12px}
+.s b{font-size:12.5px}
+.s span{color:#8b9bb4;font-size:11.5px;line-height:1.5}
+.s.nw{border:2px dashed rgba(34,211,238,.6);background:rgba(34,211,238,.05)}
+.s.nw b{color:#67e8f9}
+.ar{flex:none;align-self:center;color:#4b5b78;font-size:16px;font-weight:700}
+.down{align-self:center;color:#4b5b78;font-size:12px;display:flex;align-items:center;gap:8px}
+.rule{font-size:12px;color:#8b9bb4;line-height:1.7}
+.rule b{color:#e6edf6;font-weight:600}
+.box{box-sizing:border-box;min-width:0;border:1px solid #243049;border-radius:12px;background:#0f1626;padding:12px 14px;display:flex;flex-direction:column;gap:6px}
+.box h3{margin:0;font-size:13px;font-weight:700}
+.f{display:grid;grid-template-columns:minmax(0,190px) minmax(0,1fr);gap:3px 10px;font-size:12px;align-items:baseline}
+.f .p{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11.5px;color:#67e8f9;overflow-wrap:anywhere}
+.f .p.old{color:#e6edf6}
+</style>
+</helmet>
+<div style="box-sizing:border-box;padding:20px 24px 28px;max-width:1240px;display:flex;flex-direction:column;gap:10px;min-width:0">
+
+  <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px">
+    <span style="font-size:15px;font-weight:700">데이터 흐름 — 스캔 한 번이 알림 한 건이 되기까지</span>
+    <div class="muted" style="font-size:12px;display:flex;align-items:center;gap:8px">
+      <span style="display:inline-block;width:22px;height:12px;border:2px dashed rgba(34,211,238,.6);border-radius:3px"></span>
+      <span>청록 = 새 단계 · 나머지는 지금 있는 단계</span>
+    </div>
+  </div>
+
+  <div class="lane">
+    <h3><b>스캔을 돌리는 쪽</b> 법인 엣지 에이전트(또는 엣지가 없는 법인은 중앙) · 자식 프로세스</h3>
+    <div class="steps">
+      <div class="s"><b>포트 확인</b><span>TCP 연결로 살아 있는 IP 찾기</span></div>
+      <span class="ar">›</span>
+      <div class="s"><b>ping</b><span>포트가 닫힌 장비 보완</span></div>
+      <span class="ar">›</span>
+      <div class="s"><b>이름 확인</b><span>역DNS · mDNS · NetBIOS (v2.991)</span></div>
+      <span class="ar">›</span>
+      <div class="s nw"><b>이웃 표 읽기</b><span>같은 서브넷 IP 의 MAC · 묶음마다 · 새 패킷 없음</span></div>
+      <span class="ar">›</span>
+      <div class="s"><b>정방향 확인</b><span>물리서버 이름 (v2.993)</span></div>
+      <span class="ar">›</span>
+      <div class="s nw"><b>역DNS 이름 재확인</b><span>남은 예산으로 · 하루 재사용</span></div>
+    </div>
+  </div>
+
+  <div class="down"><span>▼</span><span>엣지는 결과를 중앙에 올립니다(압축 · 조각 · 지금 경로 그대로). IP 한 건에 ‘MAC · MAC 출처 · 정방향 결과’ 가 늘어납니다.</span></div>
+
+  <div class="lane">
+    <h3><b>중앙</b> 수신 · 저장 · 판정 — 판정은 여기서 한 번만 합니다(엣지 판본이 달라도 같은 규칙)</h3>
+    <div class="steps">
+      <div class="s"><b>정제</b><span>아는 필드만 · 꼴 검사 · 상한 — 새 필드도 등록</span></div>
+      <span class="ar">›</span>
+      <div class="s nw"><b>변화 감지</b><span>저장 직전 값과 비교 · 완료된 스캔만</span></div>
+      <span class="ar">›</span>
+      <div class="s"><b>저장</b><span>결과 · 이력에 MAC 이력 · 정방향 결과 추가</span></div>
+      <span class="ar">›</span>
+      <div class="s nw"><b>변화 기록</b><span>파일 하나 · 보존 일수 뒤 삭제</span></div>
+      <span class="ar">›</span>
+      <div class="s nw"><b>알림 묶음</b><span>스캔 1회 · 종류별 1건 · 상한</span></div>
+      <span class="ar">›</span>
+      <div class="s"><b>알림 엔진</b><span>지금의 채널 · 쿨다운 · 실패 처리</span></div>
+    </div>
+    <div class="steps">
+      <div class="s" style="flex:2 1 0"><b>대장 계산</b><span>IP 마다 스캔 값 붙이기(v2.991) — 여기에 제조사 조회와 ‘VM 의 NIC MAC 과 대조’(충돌 의심)가 들어갑니다</span></div>
+      <span class="ar">›</span>
+      <div class="s nw" style="flex:1 1 0"><b>충돌 의심 상태</b><span>알림 엔진의 규칙 평가에 합류(발생 · 재통지 · 해소)</span></div>
+      <span class="ar">›</span>
+      <div class="s" style="flex:3 1 0"><b>화면</b><span>대장 목록(제조사 · MAC 열 · 칩) · IP 상세 창 · 추천 카드 2개 · <span style="color:#67e8f9">IP 변화 페이지</span> · 설정 › 알림</span></div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:minmax(0,560fr) minmax(0,600fr);gap:14px;align-items:start">
+    <div class="box">
+      <h3>파일 <span class="muted" style="font-weight:400;font-size:12px">청록 = 새 파일(이름은 구현 때 확정)</span></h3>
+      <div class="f">
+        <span class="p">ipam/neighbors.js</span><span class="muted">이웃 표 읽기 · 파싱(리눅스의 이웃 표 파일 — 명령 실행 없음)</span>
+        <span class="p">ipam/macVendor.js</span><span class="muted">앞자리 → 제조사 · 임의 지정 · 가상 MAC 판별</span>
+        <span class="p">ipam/changeDetect.js</span><span class="muted">이전 · 이번 결과 → 변화 목록(순수 함수 — 테스트의 중심)</span>
+        <span class="p">ipam/changeLog.js</span><span class="muted">변화 기록 저장 · 보존 · 조회</span>
+        <span class="p">web … IpamChanges.jsx</span><span class="muted">IP 변화 페이지</span>
+        <span class="p old">ipam/scan.js · scanStore.js</span><span class="muted">단계 추가 · 정제 목록 · MAC 이력</span>
+        <span class="p old">ipam/ledger.js · insights.js</span><span class="muted">제조사 · 충돌 판정 · 추천 카드</span>
+        <span class="p old">alerts.js · Alerts2.jsx</span><span class="muted">규칙 묶음 · 설정 카드</span>
+      </div>
+    </div>
+    <div class="box">
+      <h3>지키는 규칙</h3>
+      <div class="rule"><b>범위 계정</b> — 스캔이 본 MAC · 변화 기록 · 충돌 판정은 지금의 스캔 행과 같은 규칙으로 전 법인 계정에만 보입니다.</div>
+      <div class="rule"><b>엣지가 보낸 값</b> — MAC 은 꼴이 맞을 때만, 출처 · 정방향 결과는 정해진 값일 때만 받습니다. 엣지는 ‘변화’ 를 보내지 않습니다.</div>
+      <div class="rule"><b>못 읽은 값</b> — MAC ‘—’ · 정방향 ‘확인 못 함’ 은 변화도 일치도 아닙니다. 시한에 걸린 스캔은 비교하지 않습니다.</div>
+      <div class="rule"><b>부하</b> — 비교는 저장할 때 IP 수만큼 한 번, 기록은 한 번에 씁니다. 이웃 표는 파일 한 번 읽기입니다. 정방향 확인은 지금의 예산 · 동시 수 · 차단기 안에서 돕니다.</div>
+      <div class="rule"><b>무음 실패 금지</b> — 이웃 표를 못 읽은 에이전트는 에이전트 표의 ‘MAC’ 칸에 이유를 올립니다.</div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1240,"height":820}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

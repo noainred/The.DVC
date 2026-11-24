@@ -356,6 +356,9 @@ export function snapCollectorText(code) {
 /** v2.763(V4-2): 다른 vCenter 에서 배운 Veeam 계정이 이 vCenter 이벤트에는 한 번도 없다(서버 verdict.accountUnseen) — 0대가 확정이 아니다. */
 export const ACCOUNT_UNSEEN = '이 vCenter 에서는 아는 Veeam 계정의 스냅샷이 최근 이벤트에 한 건도 보이지 않습니다 — Veeam 이 이 vCenter 에 다른 계정으로 접속하면 설정 › Veeam 백업 서버의 ‘Veeam 이 vCenter 에 접속하는 계정’ 에 적으세요(정말 0대일 수도 있습니다).';
 
+/** 결정(76~105 남긴 것 · 2026-11-20) A9: Veeam 수집 목록(작업 · 백업 객체 · 복원 지점 · VM)이 상한에서 잘린 결과로 센 수 — 부분(목록 잘림) · 하한. */
+export const VEEAM_TRUNCATED_LINE = '* 부분(목록 잘림) — Veeam 수집 목록이 상한에서 잘려 일부만 읽었습니다. 잘린 쪽의 VM 은 세지 못해 실제보다 적을 수 있습니다(대조에 없는 VM 은 미백업이 아니라 모름).';
+
 /**
  * 카드의 백업 칸 — 'n/전체' 형식(사용자 지정). 모르면 '—'(0 으로 쓰지 않는다) · 부분 값은 '*' 와 노란 칸.
  * tone: veeam(채운 녹색) | snap(하늘색 점선) | warn(부분) | none(모름). entry 가 없으면 null(칸을 그리지 않는다).
@@ -398,6 +401,7 @@ export function backupCell(e, vmFallback = null, now = Date.now(), { refreshErro
     if (noLast > 0) lines.push(`* Veeam 서버 ${noLast}대는 아직 한 번도 읽지 못해 그 서버의 VM 이 빠졌습니다(사유는 설정 › Veeam 백업 서버).`);
     if (e.waiting) lines.push(`* Veeam 서버 ${e.waiting}대는 아직 첫 수집 전이라 빠졌습니다.`);
     if (e.stale > 0) lines.push(`* Veeam 서버 ${e.stale}대의 결과가 오래됐습니다 — 그 뒤의 백업 변화는 반영되지 않았습니다.`);   // v2.761(B2)
+    if (e.truncated) lines.push(VEEAM_TRUNCATED_LINE);   // 결정(76~105 남긴 것 · 2026-11-20) A9 — 서버 veeamCount truncated
     if (e.hostMismatch) lines.push(`Veeam 이 적은 ${otherSubject(e.otherVcenter)} 모두 다른 vCenter 로 되어 있습니다 — 포탈의 vCenter 주소(IP·FQDN)가 Veeam 이 쓰는 이름과 다를 수 있습니다(0대가 아닐 수 있음).`);   // v2.761(A5) · v2.762(F5) 수는 관리자만
   } else {
     lines.push(`스냅샷 기준 ${e.n}대${total != null ? ` / VM ${total}대` : ''}`);

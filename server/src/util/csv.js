@@ -43,7 +43,7 @@ function sniffDelimiter(s) {
  *   상한은 **스캔 중** 검사한다 — 전량 파싱 후 slice 하면 이미 메모리를 다 먹은 뒤다
  *   (1MB 개행 본문으로 heap +205MB·76ms 동기 블로킹 실측).
  */
-export function parseCsvRows(text, { maxRows = 0, maxCell = 0 } = {}) {
+export function parseCsvRows(text, { maxRows = 0, maxCell = 0, keepBlank = false } = {}) {
   const rows = [];
   let row = [];
   let field = '';
@@ -76,7 +76,8 @@ export function parseCsvRows(text, { maxRows = 0, maxCell = 0 } = {}) {
     } else { field += c; overCell(); }
   }
   if (field !== '' || row.length) { row.push(field); endRow(); }
-  return rows.filter((r) => r.some((cell) => cell.trim() !== ''));
+  // keepBlank(v2.978 서버 집중 모니터링 CSV): 빈 줄도 남겨 호출부가 ‘엑셀 행 번호’ 를 그대로 셀 수 있게 한다(기본은 예전처럼 거른다).
+  return keepBlank ? rows : rows.filter((r) => r.some((cell) => cell.trim() !== ''));
 }
 
 // 순수 숫자(부호·소수·지수만) — 엑셀이 숫자로 읽을 뿐 수식으로 실행하지 않는다(v2.741 WEB-02).

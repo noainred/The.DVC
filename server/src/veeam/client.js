@@ -315,7 +315,10 @@ export async function collectVeeamServer(server, { signal = null, fetchImpl } = 
     const license = licenseOf(licRaw);
         const r = buildServerResult({ jobs, states, backupObjects, sessions, lastTasks, restorePoints, backups });
     // v2.762(G1): target = 읽은 접속처 지문(registry.accessFingerprint) — 중앙·store 가 등록부의 지금 접속처와 대조한다.
-    return { ok: true, ts: Date.now(), ms: Date.now() - t0, apiVersion: c.apiVersion, target: accessFingerprint(server), error: '', jobs: r.jobs, vms: r.vms, counts: r.counts, backups: r.backups, ...(license ? { license } : {}), notes: [...notes, ...r.notes] };
+    // 96회차(94회차 남긴 것 ①): 증거 목록이 상한에서 잘렸거나 VM 상한을 넘겼으면 표지 — 대조에 없는 VM 은 '미보호' 가 아니라 '모름'(백업 실행 계획이 포탈 잡에 넣지 않는다).
+    const truncated = [['jobs', jobs], ['backupObjects', backupObjects], ['restorePoints', restorePoints]].filter(([, a]) => a?.truncated === true).map(([k]) => k);
+    if (Number(r.counts?.skipped) > 0) truncated.push('vms');
+    return { ok: true, ts: Date.now(), ms: Date.now() - t0, apiVersion: c.apiVersion, target: accessFingerprint(server), error: '', jobs: r.jobs, vms: r.vms, counts: r.counts, backups: r.backups, ...(license ? { license } : {}), ...(truncated.length ? { truncated } : {}), notes: [...notes, ...r.notes] };
   } finally {
     await c.logout();
   }

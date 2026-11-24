@@ -54,7 +54,7 @@ function SettingsFiles({ files }) {
   const confirmOne = async (f) => {
     if (!window.confirm(confirmPrompt(f))) return;
     setBusy(f.file);
-    try { const r = await postJson('/tools/service-check/settings-files/confirm', { file: f.file }); setMsg((m) => ({ ...m, [f.file]: { ok: true, text: resultText(r) } })); }
+    try { const r = await postJson('/tools/service-check/settings-files/confirm', { file: f.file }); setMsg((m) => ({ ...m, [f.file]: { ok: !!r?.ok, text: resultText(r) } })); }   // 409(이미 정상 · 파일 있음)는 postJson 이 던지지 않는다 — 성공 색으로 칠하지 않는다
     catch (e) { setMsg((m) => ({ ...m, [f.file]: { ok: false, text: resultText({ code: e?.body?.code, detail: e?.body?.code ? e?.body?.detail : e?.message }) } })); }
     finally { setBusy(''); }
   };
@@ -79,7 +79,9 @@ export function NetworkCheck() {
   const [d, setD] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
-  const load = () => { setLoading(true); fetchJson('/tools/network-check').then((r) => { setD(r); setError(null); }).catch((e) => setError(e.message)).finally(() => setLoading(false)); };
+  // 132회차: 이 GET 은 서버가 등록된 vCenter · NSX 주소 전부에 TCP 를 두드린다(12개씩 · 대상마다 시한 5초) — 대상 다수가 무응답이면 20초를 넘는다.
+  //   기본 20초 시한 · 재시도 2회를 타면 같은 점검이 세 번 겹쳐 시작됐다 — 넉넉히 한 번만 기다린다.
+  const load = () => { setLoading(true); fetchJson('/tools/network-check', {}, undefined, { timeoutMs: 60_000, retries: 0 }).then((r) => { setD(r); setError(null); }).catch((e) => setError(e.message)).finally(() => setLoading(false)); };
   useEffect(() => { load(); }, []);
   if (error) return <ErrorBox message={error} />;
   if (loading && !d) return <Loading />;

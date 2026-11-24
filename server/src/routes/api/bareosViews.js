@@ -50,7 +50,7 @@ export function directorInfo(vcenterId, settings, poller, demo) {
   const st = directorState({ mapped: !!site, configured, authStopped, poll });
   return {
     id: d?.id || '', name: d?.name || '', via: d?.agent ? 'edge' : 'central',
-    state: st.state, resultsKnown: st.resultsKnown, at: Number.isFinite(poll?.at) ? poll.at : null,
+    state: st.state, resultsKnown: st.resultsKnown, ...(st.partial ? { partial: true } : {}), at: Number.isFinite(poll?.at) ? poll.at : null,
     ...(site ? { schedule: site.schedule || '', pool: site.pool || '' } : {}),
   };
 }
@@ -135,13 +135,13 @@ export function summaryData(req, snap, { rpoDays = 1, now = Date.now(), detailOk
   for (const vc of p.vcs) {
     const dir = directorInfo(vc.id, p.settings, p.poller, p.demo);
     const { rows, vmTotal } = corpRows(vc.id, vmsBy.get(vc.id) || [], p.byVcVm.get(vc.id) || new Map(), p.marks, p);
-    const counts = corpCounts(rows, { marksKnown: p.marksKnown, resultsKnown: dir.resultsKnown, registryKnown: p.registryKnown, rpoDays, now });
+    const counts = corpCounts(rows, { marksKnown: p.marksKnown, resultsKnown: dir.resultsKnown, registryKnown: p.registryKnown, rpoDays, now, partial: !!dir.partial });
     // 버그 점검 S13: '마지막 백업' = 마지막으로 **백업이 만들어진**(성공·경고) 시각(b.ok) — 끝난 실행(b.at)이면 실패도 들어가 법인별 화면·우선 목록과 달랐다
     let lastAt = null;
     for (const r of rows) if (r.b?.ok && (lastAt == null || r.b.ok > lastAt)) lastAt = r.b.ok;
     out.push({ id: vc.id, name: vc.name || vc.id, region: vc.location?.region || '', vm: vmTotal, director: dir, counts, lastAt: dir.resultsKnown ? lastAt : null });
     for (const r of rows) {
-      const kind = priorityKind(r, { resultsKnown: dir.resultsKnown, marksKnown: p.marksKnown, rpoDays, now });
+      const kind = priorityKind(r, { resultsKnown: dir.resultsKnown, marksKnown: p.marksKnown, rpoDays, now, partial: !!dir.partial });
       if (kind) prio.push({ vcenterId: vc.id, vcName: vc.name || vc.id, id: r.id, name: r.name, folder: r.folder, crit: r.crit, kind, at: r.b?.at ?? null, ok: r.b?.ok ?? null, st: r.b?.st ?? null });
     }
   }
@@ -167,7 +167,7 @@ export function detailData(req, snap, vcenterId, { rpoDays = 1, now = Date.now()
   const dir = directorInfo(vc.id, p.settings, p.poller, p.demo);
   const vms = (snap?.vms || []).filter((v) => v.vcenterId === vc.id);
   const { rows, vmTotal } = corpRows(vc.id, vms, p.byVcVm.get(vc.id) || new Map(), p.marks, p, { withJob: true });
-  const counts = corpCounts(rows, { marksKnown: p.marksKnown, resultsKnown: dir.resultsKnown, registryKnown: p.registryKnown, rpoDays, now });
+  const counts = corpCounts(rows, { marksKnown: p.marksKnown, resultsKnown: dir.resultsKnown, registryKnown: p.registryKnown, rpoDays, now, partial: !!dir.partial });
   return {
     ok: true, at: now, rpoDays, vcenter: { id: vc.id, name: vc.name || vc.id }, vm: vmTotal, director: dir, counts, rows,
     // 법인 고르기 · 바로가기 칩(범위 안 vCenter 의 이름과 Director 상태만 — 다른 법인의 VM 은 싣지 않는다)
@@ -238,11 +238,12 @@ export function registerBareosViews(api) {
         '마지막 백업(UTC)', '진행 중', `${d.rpoDays}일+ 경과`, '인벤토리에 없음'])];
       for (const r of d.rows) {
         const k = bareosClass(r.b, { rpoDays: d.rpoDays, now });
+        const known = d.director.resultsKnown && !(d.director.partial && r.b?.run);   // 반증 G1(55회차 #9): 잘린 조회의 진행 중 VM 은 결과 모름(화면 칩과 같은 판정)
         lines.push(csvLine([d.vcenter.name, r.folder, r.name, r.power === 'POWERED_ON' ? '켜짐' : r.power ? '꺼짐' : '', n(r.gb),
           r.method == null ? '모름' : METHOD_TEXT[r.method] || '', r.b == null ? '모름' : k.job ? '있음' : k.missing ? '미등록' : '', k.job ? (k.on ? '예' : '아니오') : '',
           // 버그 점검 S17: 결과를 모르는 법인(인증 정지·조회 실패·미설정)은 결과·진행 칸에 '모름' 을 덧붙인다(값은 마지막으로 읽은 것 — 화면의 회색 칩과 같은 뜻)
-          k.job ? `${ST_TEXT[r.b.st] || ''}${d.director.resultsKnown ? '' : '(모름 — 마지막으로 읽은 값)'}` : '', iso(r.b?.at), r.b?.lv || '', n(r.b?.by), iso(r.b?.ok),
-          d.director.resultsKnown ? (r.b?.run ? '예' : '') : (k.job ? '모름' : ''), d.director.resultsKnown ? (k.old ? '예' : '') : '모름', r.gone ? '예' : '']));
+          k.job ? `${ST_TEXT[r.b.st] || ''}${known ? '' : '(모름 — 마지막으로 읽은 값)'}` : '', iso(r.b?.at), r.b?.lv || '', n(r.b?.by), iso(r.b?.ok),
+          d.director.resultsKnown ? (r.b?.run ? '예' : '') : (k.job ? '모름' : ''), known ? (k.old ? '예' : '') : '모름', r.gone ? '예' : '']));
       }
       logAudit({ user: req.user?.username, action: 'bareos-detail.csv', target: vcenterId, detail: `${d.rows.length} rows`, ip: req.ip });
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');

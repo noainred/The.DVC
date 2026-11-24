@@ -83,7 +83,7 @@ function summarySheet(wb, rep, ins, o) {
   kv('전체 용량 (TB)', unitNum(cur?.totalBytes, 'TB'), cur?.partial ? `부분 합 — 값 있음 ${cur.counted}/${cur.expected}대` : `${cur?.counted ?? 0}대 합계`, NUM_FMT);
   kv('사용 (TB)', unitNum(cur?.usedBytes, 'TB'), '', NUM_FMT);
   kv('사용률', pctFrac(cur?.pct), '', PCT_FMT);
-  kv('직전 주 대비 (TB)', unitNum(ins.total.delta, 'TB'), ins.total.delta == null ? (ins.total.deltaWhy === 'partial' ? '두 주 중 하나가 부분 합이라 내지 않음' : '값 없음') : '', NUM_FMT);
+  kv('직전 주 대비 (TB)', unitNum(ins.total.delta, 'TB'), ins.total.delta == null ? (ins.total.deltaWhy === 'partial' ? '두 주 중 하나가 부분 합이라 내지 않음' : ins.total.deltaWhy === 'changed' ? `두 주의 장비 구성이 달라 내지 않음(한쪽 주에만 있는 장비 ${ins.total.changed}대 — 새로 등록 · 꺼짐)` : '값 없음') : '', NUM_FMT);
   kv(`${ins.rule.avgWeeks}주 평균 증가 (TB/주)`, unitNum(ins.total.avg, 'TB'), ins.total.avg == null ? '완전한 주가 부족해 내지 않음' : '', NUM_FMT);
   kv(`${ins.rule.warnPct}% 이상`, `${k.warnDevices}대 · ${k.warnItems}항목`, `${ins.rule.critPct}% 이상 ${k.critDevices}대 · ${k.critItems}항목(항목 = 장비·풀·LUN·파일시스템)`);
   kv('이번 주 값을 못 읽은 장비', `${k.missing}대`, k.missing ? '합계에서 뺐습니다(0 으로 넣지 않음)' : '');
@@ -131,7 +131,7 @@ function summarySheet(wb, rep, ins, o) {
     headRow(ws, [title.replace('별', ''), '장비', '전체 (TB)', '사용 (TB)', '사용률', '직전 주 대비 (TB)', '', '비고'], C.dev);
     for (const g of list) {
       const c = g.cur;
-      const note = c?.partial ? `부분 합 · 값 있음 ${c.counted}/${c.expected}대` : '';
+      const note = c?.partial ? `부분 합 · 값 있음 ${c.counted}/${c.expected}대` : g.deltaWhy === 'changed' ? `장비 구성이 바뀌어 직전 주 대비를 내지 않음(${g.changed}대)` : '';   // 57회차 F2
       const r = ws.addRow([g.key, g.devices, unitNum(c?.totalBytes, 'TB'), unitNum(c?.usedBytes, 'TB'), pctFrac(c?.pct), unitNum(g.delta, 'TB'), null, note]);
       for (const i of [3, 4, 6]) r.getCell(i).numFmt = NUM_FMT; r.getCell(5).numFmt = PCT_FMT;
       if (note) r.getCell(8).font = { color: { argb: C.partFg } };

@@ -10,6 +10,7 @@ import { ErrorBox, Loading, StateBadge, UsageCell, GpuBadge } from '../../compon
 import { STable } from '../../components/STable.jsx';
 import { VmIpPing, VmCfgSection, VmPartitionsSection, VmTagsSection, VmChangesSection, PerfcSection, ClusterCfgSection } from '../../components/EntityDetail.jsx';
 import { VmConsoleButton } from '../../components/VmConsole.jsx';
+import VmCvpLocation from './VmCvpLocation.jsx';   // v2.935(SAN·CVP 설계 C-③) 네트워크 위치(CVP)
 import { VmRemoteButton } from '../../components/VmRemote.jsx';
 import { VmReconfigButton } from '../../components/VmReconfig.jsx';
 import { dayStamp } from '../../dayStamp.js';
@@ -181,7 +182,7 @@ export default function VmObject({ site, vcenterId, vm, vmsOk, gate, datastores,
       {tab === 'monitor' && (
         <>
           {/* v2.911(시안 docs/design/vm-perf ②): 성능은 모달이 아니라 이 탭의 첫 섹션 — 4지표 1회 조회 · 과거 창 · 구간 요약. */}
-          <Lazy><VmPerfView entityType="vm" id={vm.id} name={vm.name} powered={powered} /></Lazy>
+          <Lazy><VmPerfView entityType="vm" id={vm.id} name={vm.name} vcenterId={vm.vcenterId} powered={powered} /></Lazy>
         <div className={GRID}>
           {/* 성능 카드가 빠져 혼자 남은 줄 — 한 줄을 다 쓴다(v2.911 Chromium 확인: 3열 격자에 혼자 좁게 남았다). */}
           <Card title="이벤트 · 이동" style={{ gridColumn: '1 / -1' }}><div style={{ padding: '0 14px 12px' }}>{toolAllowed('vm-changes') ? <VmChangesSection vm={vm} /> : <ErrorBox error={toolDenied('VM 이동·구성 변경 이력')} />}</div></Card>
@@ -248,6 +249,7 @@ export default function VmObject({ site, vcenterId, vm, vmsOk, gate, datastores,
             <Note>IP 는 VMware Tools 가 보고한 값입니다 — 꺼졌거나 Tools 가 없으면 비어 있습니다(‘IP 없음’ 이 아닙니다). 핑은 버튼을 누를 때만.</Note>
           </Card>
           <VmNicCard vm={vm} nics={nics} />
+          {toolAllowed('cvp') ? <VmCvpLocation vmId={vm.id} /> : null}
         </div>
       )}
 

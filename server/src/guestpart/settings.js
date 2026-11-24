@@ -12,10 +12,10 @@
  * 비밀이 없는 설정이지만 손상 시 조용히 기본값으로 넘기면 다음 저장이 관리자 설정을 지우므로, 원자적 쓰기 + preserveCorrupt 를 지킨다.
  * 저장 경로의 틀린 값은 **저장하지 않고 { error, field }**(조용히 고치지 않는다 — 사용자가 고른 값이 사라진다).
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 107회차: 읽기 오류 ≠ 손상(공용 읽기 — 30초 간격 재읽기)
 import { normalizeMailList, isEmail, MAIL_LIST_MAX, normalizeTargetMail, targetMailOf, targetMailIsDefault } from '../isidu/mailRules.js';
 import { TIME_RE } from '../isidu/digestRules.js';
 import { rulesOf, normalizeRules, thresholdOk, RANGES, MODES, VC_THRESHOLD_MAX } from './rules.js';
@@ -132,12 +132,30 @@ const stripSym = (o) => JSON.parse(JSON.stringify(o));   // 규칙의 내부 표
 let cache = null;
 let loadError = null;
 
+/*
+ * 107회차(재현 — EISDIR): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 예전 catch 하나는 온전한 원본을 .corrupt 로 옮기고 빈 값 · 기본값을 캐시해
+ *   다음 저장이 원본 자리를 덮었다. 읽기 단계는 공용 읽기: 원본을 두고 · 캐시하지 않고(30초 간격 재읽기) · 저장을 거절한다(503 settingsUnreadable). parse 실패는 예전과 같다.
+ */
+const _reader = makeJsonFileReader(() => FILE, { parse: (t) => t, preserve: false, tag: 'guest-partition' });
+let _readErr = '';
+/** 107회차: 읽기 오류 중의 저장 거절 본문(503) 또는 null. */
+export function guestPartWriteRefusal() {
+  load();
+  return _readErr ? { ok: false, status: 503, code: 'settingsUnreadable', readError: true, reason: `게스트 파티션 사용률 설정 파일(${path.basename(FILE)})을 읽지 못해 저장하지 않았습니다 — 읽기 오류(${_readErr})이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 저장이 다시 열립니다).` } : null;
+}
 export function load() {
   if (cache) return cache;
+  const rr = _reader.read();
+  if (rr.kind === 'read-error') {   // 107회차: 기본값으로 돌되 캐시하지 않는다 — 쓰기는 거절한다
+    _readErr = String(rr.error?.code || 'read-error').slice(0, 32);
+    loadError = `읽기 오류(${_readErr}) — 원본은 그대로 두었습니다(30초마다 다시 읽습니다)`;
+    return settingsOf(null);
+  }
+  _readErr = '';
   let raw = null;
   loadError = null;
   try {
-    if (fs.existsSync(FILE)) raw = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+    if (rr.kind === 'ok') raw = JSON.parse(rr.value);
   } catch (e) {
     preserveCorrupt(FILE, e?.message || '');
     loadError = safeLoadText(e) || '사유 미상';
@@ -147,7 +165,7 @@ export function load() {
   return cache;
 }
 export function settingsLoadError() { load(); return loadError; }
-export function invalidate() { cache = null; }
+export function invalidate() { cache = null; _reader.reset(); _readErr = ''; }
 
 /**
  * 저장(부분 요청 — 빠진 칸은 이전 값). 문제가 있으면 { error, field } 이고 아무것도 쓰지 않는다.
@@ -155,6 +173,7 @@ export function invalidate() { cache = null; }
  */
 export function save(body = {}, now = Date.now()) {
   const cur = load();
+  { const no = guestPartWriteRefusal(); if (no) return { error: no.reason, status: 503, code: no.code, readError: true }; }   // 107회차: 읽기 오류 중에는 기본값 위에 쓰지 않는다
   const b = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
   const next = JSON.parse(JSON.stringify(cur));
   if (b.threshold !== undefined) {

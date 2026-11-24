@@ -40,6 +40,8 @@
 
 /** VMDK 계열 파일인가(대소문자 무시). */
 export const isVmdk = (name) => /\.vmdk$/i.test(String(name || ''));
+/** VM 구성 파일인가 — `.vmx`(VM) · `.vmtx`(템플릿). 폴더에 있으면 그 폴더는 'VM · 템플릿 홈' 이다(111회차). */
+export const isVmConfigFile = (name) => /\.vmt?x$/i.test(String(name || ''));
 
 /**
  * 익스텐트(실제 데이터 파일) 접미사. 디스크립터는 이 접미사가 없다.
@@ -78,7 +80,13 @@ export function normDsPath(p) {
   let s = String(p || '').trim().replace(/\\/g, '/');
   s = s.replace(/^\[\s*([^\]]*?)\s*\]\s*\/*/, (_m, ds) => `[${ds}] `);   // 접두 뒤 슬래시도 흡수
   s = s.replace(/\/{2,}/g, '/');
-  s = s.replace(/\s*\/\s*/g, '/');                                       // 구분자 주변 공백
+  // 구분자 주변 공백. 111회차: 예전 `/\s*\/\s*/g` 는 '/' 가 뒤따르지 않는 긴 공백 줄에서 O(n²)였다(vCenter 가 준 경로 — 길이 상한이
+  //   없다. 공백 8만 자 한 줄에 4.5초 실측). 조각마다 앞뒤를 다듬는 선형 처리로 같은 결과를 낸다(\s 와 trim 이 지우는 글자 집합은 같다).
+  if (s.includes('/')) {
+    const segs = s.split('/');
+    const last = segs.length - 1;
+    s = segs.map((x, i) => { let y = x; if (i > 0) y = y.trimStart(); if (i < last) y = y.trimEnd(); return y; }).join('/');
+  }
   return s.toLowerCase();
 }
 
@@ -149,7 +157,7 @@ export const EXCLUDE_LABEL = {
   system: '시스템/숨김 폴더',
   ctk: '백업 CBT(변경 블록 추적) 파일',
   recent: '최근 변경 — 복제·마이그레이션·백업이 진행 중일 수 있습니다',
-  unregistered: '같은 폴더에 .vmx 가 있습니다 — 등록 해제된 VM 이거나 다른 vCenter 가 등록한 VM 일 수 있습니다',
+  unregistered: '같은 폴더에 .vmx(템플릿은 .vmtx)가 있습니다 — 등록 해제된 VM · 템플릿이거나 다른 vCenter 가 등록한 것일 수 있습니다',
 };
 
 /**
@@ -166,9 +174,11 @@ export const EXCLUDE_LABEL = {
 export function findOrphanDisks(files = [], owned = new Set(), { now = Date.now(), recentHours = 24 } = {}) {
   const recentMs = Math.max(0, Number(recentHours) || 0) * 3_600_000;
   // 폴더별 .vmx 존재 여부 — '미등록 VM 폴더' 와 '진짜 떠 있는 디스크' 를 가르는 핵심 신호.
+  // 111회차: 템플릿의 구성 파일은 `.vmtx` 다(VM 을 템플릿으로 바꾸면 vCenter 가 .vmx 를 .vmtx 로 바꾼다). 예전에는 .vmx 만 봐서
+  //   등록 해제된 템플릿 · 다른 vCenter 가 등록한 템플릿의 디스크가 '소유 VM 없음(vmx 도 없음)' 으로 나왔다 — 같은 신호로 본다.
   const vmxFolders = new Set();
   for (const f of files) {
-    if (/\.vmx$/i.test(f?.name || '')) vmxFolders.add(normDsPath(f.folder));
+    if (isVmConfigFile(f?.name)) vmxFolders.add(normDsPath(f.folder));
   }
   const folderHasVmx = (folder) => vmxFolders.has(normDsPath(folder));
 

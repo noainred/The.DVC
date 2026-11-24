@@ -1,0 +1,582 @@
+/**
+ * diskbad/db.js — 중앙의 디스크 배드 섹터 이력 저장소(SQLite, v3.8.0).
+ *
+ * 무엇을 쌓나(README §8.3):
+ *  · `dbr_server`  서버마다 마지막 점검 결과 · 로그가 남은 구간 · **끊김 없이 본 구간(continuous_since)** · 지금 디스크 목록.
+ *  · `dbr_record`  물리 · 가상 디스크 범주(PDR/VDR) 로그 원문 — (agent, 서버, 항목 Id|시각)로 중복을 거른다.
+ *                  iDRAC 로그가 덮어써져도 여기 남는다(다음 조회에 그대로 보인다).
+ *  · `dbr_serial`  자리마다 본 시리얼과 처음 · 마지막 본 시각 — '아직 사용 중 / 교체됨' 을 **확정**하는 근거.
+ *
+ * 규칙:
+ *  · 대량 쓰기는 **트랜잭션 하나**(루트 CLAUDE.md — 무트랜잭션 6천 행 25초 블로킹 사고).
+ *  · 경로는 `config.dbDir` 를 따르고 `insights/dbLocation.js MIGRATABLE` 에 등재한다(둘을 같이 — dbLocation2451 테스트).
+ *  · 첫 open 이 잠금이면 래치하지 않는다(`createLockRetry`). 손상 · 상위 판이면 `available:false` 로 밝힌다(포탈은 뜬다).
+ *  · '끊김 없이 본 구간' 계산은 **여기 한 곳**이다(엣지는 읽은 사실만 보낸다).
+ */
+import fs from 'node:fs';
+import path from 'node:path';
+import { config } from '../config.js';
+import { openSqlite, withOpenCleanup, createLockRetry } from '../util/sqliteOpen.js';
+import { createYielder } from '../util/timeSlice.js';
+import { slotOf, slotKeyOf, codeOf, driveSlotOf } from './classify.js';
+
+export const DB_FILE = 'disk-bad.db';
+// 파일 이름은 글자 그대로 둔다 — 설정 파일 문서 생성기(scripts/config-doc.mjs)가 path.join 의 '*.db' 글자를 찾는다(docsGen2452).
+const DB_PATH = () => process.env.DISKBAD_DB_PATH || path.join(config.dbDir || config.configDir, 'disk-bad.db');
+export const SCHEMA_VERSION = 1;
+
+let x = null;
+let ready = null;
+let initError = null;
+const lockRetry = createLockRetry();
+let _gen = 0;
+let _cache = null;        // loadAll 결과(세대가 바뀌면 버린다)
+let _countCache = null;   // 상태 표의 건수(세대가 바뀌면 다시 센다)
+
+function migrate(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT);
+    CREATE TABLE IF NOT EXISTS dbr_server(
+      agent TEXT NOT NULL, server_id TEXT NOT NULL,
+      name TEXT, host TEXT, service_tag TEXT,
+      first_ok_at INTEGER, last_scan_at INTEGER, last_ok_at INTEGER, last_status TEXT, last_reason TEXT,
+      log_order TEXT, log_total INTEGER, log_oldest INTEGER, covered_from INTEGER, continuous_since INTEGER,
+      complete INTEGER, read_last INTEGER, synthesized INTEGER, inv_at INTEGER, drives_json TEXT, updated_at INTEGER,
+      newest_created INTEGER, read_stop TEXT, read_diag TEXT, probe_json TEXT, probe_at INTEGER,
+      vals_json TEXT, sel_json TEXT,
+      PRIMARY KEY(agent, server_id));
+    CREATE TABLE IF NOT EXISTS dbr_record(
+      agent TEXT NOT NULL, server_id TEXT NOT NULL, entry_key TEXT NOT NULL,
+      created INTEGER, code TEXT, message_id TEXT, severity TEXT, message TEXT, slot_key TEXT,
+      received_at INTEGER, baseline INTEGER,
+      PRIMARY KEY(agent, server_id, entry_key));
+    CREATE INDEX IF NOT EXISTS ix_dbr_record_created ON dbr_record(created);
+    CREATE INDEX IF NOT EXISTS ix_dbr_server_sid ON dbr_server(server_id);
+    CREATE TABLE IF NOT EXISTS dbr_serial(
+      agent TEXT NOT NULL, server_id TEXT NOT NULL, slot_key TEXT NOT NULL, serial TEXT NOT NULL,
+      model TEXT, first_seen INTEGER, last_seen INTEGER,
+      PRIMARY KEY(agent, server_id, slot_key, serial));
+  `);
+  // 개발 중 만든 DB(열이 없던 판)도 연다 — 열만 더한다.
+  const cols = new Set(db.prepare('PRAGMA table_info(dbr_server)').all().map((c) => c.name));
+  if (!cols.has('newest_created')) db.exec('ALTER TABLE dbr_server ADD COLUMN newest_created INTEGER');
+  if (!cols.has('read_stop')) db.exec('ALTER TABLE dbr_server ADD COLUMN read_stop TEXT');
+  // v3.8.2: 읽기 진단(무엇을 읽었는가) · 장비 진단(그 장비가 무엇을 주는가). 3.8.0 · 3.8.1 이 만든 DB 에 열만 더한다.
+  if (!cols.has('read_diag')) db.exec('ALTER TABLE dbr_server ADD COLUMN read_diag TEXT');
+  if (!cols.has('probe_json')) db.exec('ALTER TABLE dbr_server ADD COLUMN probe_json TEXT');
+  if (!cols.has('probe_at')) db.exec('ALTER TABLE dbr_server ADD COLUMN probe_at INTEGER');
+  // 과거 기록 읽기 1단계(README §22): 디스크 값 · SEL. 앞 판이 만든 DB 에 열만 더한다.
+  if (!cols.has('vals_json')) db.exec('ALTER TABLE dbr_server ADD COLUMN vals_json TEXT');
+  if (!cols.has('sel_json')) db.exec('ALTER TABLE dbr_server ADD COLUMN sel_json TEXT');
+  const v = db.prepare("SELECT v FROM meta WHERE k='schema'").get()?.v;
+  if (v != null && Number(v) > SCHEMA_VERSION) throw new Error(`disk-bad.db 의 판(${v})이 이 포탈(${SCHEMA_VERSION})보다 새것입니다 — 포탈을 올리세요.`);
+  db.prepare("INSERT OR REPLACE INTO meta(k, v) VALUES('schema', ?)").run(String(SCHEMA_VERSION));
+}
+
+function prepare(db) {
+  return {
+    serverGet: db.prepare('SELECT * FROM dbr_server WHERE agent=? AND server_id=?'),
+    serverOthers: db.prepare("SELECT agent FROM dbr_server WHERE server_id=? AND service_tag=? AND service_tag<>'' AND agent<>? AND first_ok_at IS NOT NULL"),
+    deleteServer: db.prepare('DELETE FROM dbr_server WHERE agent=? AND server_id=?'),
+    moveServer: db.prepare('UPDATE dbr_server SET agent=? WHERE agent=? AND server_id=?'),
+    moveRecords: db.prepare('UPDATE OR IGNORE dbr_record SET agent=? WHERE agent=? AND server_id=?'),
+    moveSerials: db.prepare('UPDATE OR IGNORE dbr_serial SET agent=? WHERE agent=? AND server_id=?'),
+    // 4회차 반증 F4 — 이미 이 노드에 정상 행이 있을 때 옛 노드의 이력을 **합친다**(옮기기가 아니라). 겹치는 기록은 같은 항목이다(키 = 같은 iDRAC 의 항목 Id · 시각).
+    serialsOf: db.prepare('SELECT slot_key, serial, model, first_seen, last_seen FROM dbr_serial WHERE agent=? AND server_id=?'),
+    serialMerge: db.prepare(`INSERT INTO dbr_serial(agent, server_id, slot_key, serial, model, first_seen, last_seen) VALUES(?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(agent, server_id, slot_key, serial) DO UPDATE SET model=COALESCE(dbr_serial.model, excluded.model),
+        first_seen=MIN(COALESCE(dbr_serial.first_seen, excluded.first_seen), COALESCE(excluded.first_seen, dbr_serial.first_seen)),
+        last_seen=MAX(COALESCE(dbr_serial.last_seen, excluded.last_seen), COALESCE(excluded.last_seen, dbr_serial.last_seen))`),
+    // 처음 본 때 · 본 가장 오래된 때만 앞으로 당긴다(끊김 없이 본 구간은 이 노드 것 그대로 — 두 노드 사이 틈을 '봤다' 고 하지 않는다).
+    serverSetPast: db.prepare('UPDATE dbr_server SET vals_json=?, sel_json=? WHERE agent=? AND server_id=?'),
+    serverMergeSpan: db.prepare(`UPDATE dbr_server SET first_ok_at=MIN(COALESCE(first_ok_at, ?1), COALESCE(?1, first_ok_at)),
+        covered_from=MIN(COALESCE(covered_from, ?2), COALESCE(?2, covered_from)) WHERE agent=?3 AND server_id=?4`),
+    deleteRecordsOf: db.prepare('DELETE FROM dbr_record WHERE agent=? AND server_id=?'),
+    deleteSerialsOf: db.prepare('DELETE FROM dbr_serial WHERE agent=? AND server_id=?'),
+    serverUpsert: db.prepare(`INSERT INTO dbr_server(agent, server_id, name, host, service_tag, first_ok_at, last_scan_at, last_ok_at, last_status, last_reason,
+        log_order, log_total, log_oldest, covered_from, continuous_since, complete, read_last, synthesized, inv_at, drives_json, updated_at, newest_created, read_stop, read_diag, probe_json, probe_at,
+        vals_json, sel_json)
+      VALUES(@agent, @server_id, @name, @host, @service_tag, @first_ok_at, @last_scan_at, @last_ok_at, @last_status, @last_reason,
+        @log_order, @log_total, @log_oldest, @covered_from, @continuous_since, @complete, @read_last, @synthesized, @inv_at, @drives_json, @updated_at, @newest_created, @read_stop, @read_diag, @probe_json, @probe_at,
+        @vals_json, @sel_json)
+      ON CONFLICT(agent, server_id) DO UPDATE SET name=excluded.name, host=excluded.host, service_tag=excluded.service_tag,
+        first_ok_at=excluded.first_ok_at, last_scan_at=excluded.last_scan_at, last_ok_at=excluded.last_ok_at, last_status=excluded.last_status,
+        last_reason=excluded.last_reason, log_order=excluded.log_order, log_total=excluded.log_total, log_oldest=excluded.log_oldest,
+        covered_from=excluded.covered_from, continuous_since=excluded.continuous_since, complete=excluded.complete, read_last=excluded.read_last,
+        synthesized=excluded.synthesized, inv_at=excluded.inv_at, drives_json=excluded.drives_json, updated_at=excluded.updated_at,
+        newest_created=excluded.newest_created, read_stop=excluded.read_stop, read_diag=excluded.read_diag,
+        probe_json=excluded.probe_json, probe_at=excluded.probe_at, vals_json=excluded.vals_json, sel_json=excluded.sel_json`),
+    recInsert: db.prepare(`INSERT OR IGNORE INTO dbr_record(agent, server_id, entry_key, created, code, message_id, severity, message, slot_key, received_at, baseline)
+      VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+    serialUpsert: db.prepare(`INSERT INTO dbr_serial(agent, server_id, slot_key, serial, model, first_seen, last_seen) VALUES(?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(agent, server_id, slot_key, serial) DO UPDATE SET model=excluded.model,
+        first_seen=MIN(dbr_serial.first_seen, excluded.first_seen), last_seen=MAX(dbr_serial.last_seen, excluded.last_seen)`),
+    serversAll: db.prepare('SELECT * FROM dbr_server'),
+    recordsAll: db.prepare('SELECT agent, server_id, entry_key, created, code, message_id, severity, message, slot_key, received_at, baseline FROM dbr_record'),
+    serialsAll: db.prepare('SELECT agent, server_id, slot_key, serial, model, first_seen, last_seen FROM dbr_serial'),
+    recordsOf: db.prepare('SELECT * FROM dbr_record WHERE agent=? AND server_id=? ORDER BY created DESC'),
+    serialsOf: db.prepare('SELECT * FROM dbr_serial WHERE agent=? AND server_id=?'),
+    count: db.prepare('SELECT COUNT(*) AS n FROM dbr_record'),
+    countServers: db.prepare('SELECT COUNT(*) AS n FROM dbr_server'),
+    countOf: db.prepare('SELECT COUNT(*) AS n FROM dbr_record WHERE agent=? AND server_id=?'),
+    pruneOf: db.prepare(`DELETE FROM dbr_record WHERE rowid IN (SELECT rowid FROM dbr_record WHERE agent=? AND server_id=? ORDER BY created DESC LIMIT -1 OFFSET ?)`),
+    metaGet: db.prepare('SELECT v FROM meta WHERE k=?'),
+    metaSet: db.prepare('INSERT OR REPLACE INTO meta(k, v) VALUES(?, ?)'),
+  };
+}
+
+async function open() {
+  if (x) return x;
+  if (initError) return null;
+  if (!ready && lockRetry.blocked()) return null;
+  if (!ready) {
+    ready = (async () => withOpenCleanup(async () => {
+      // eslint-disable-next-line import/no-unresolved
+      const { DatabaseSync } = await import('node:sqlite');
+      const p = DB_PATH();
+      fs.mkdirSync(path.dirname(p), { recursive: true });
+      const db = openSqlite(new DatabaseSync(p));
+      try { migrate(db); } catch (e) { try { db.close(); } catch { /* */ } throw e; }
+      try { fs.chmodSync(p, 0o600); } catch { /* best effort */ }
+      x = { db, st: prepare(db), path: p };
+      return x;
+    }))().catch((e) => { if (lockRetry.onFail(e)) { ready = null; return null; } initError = e; return null; });
+  }
+  return ready;
+}
+
+/** 저장 세대 — 응답 캐시가 '바뀌었는가' 를 묻는다(적재마다 1 오른다). */
+export function diskBadGeneration() { return _gen; }
+
+const finite = (v) => (Number.isFinite(v) ? v : null);
+const minOf = (...v) => { const f = v.filter(Number.isFinite); return f.length ? Math.min(...f) : null; };
+
+/**
+ * 끊김 없이 본 구간의 시작(순수 — 테스트가 고정). 이 시각 이후의 '디스크 빠짐 기록 없음' 은 믿을 수 있다.
+ *  · 이어 읽기에서 지난번 자리를 찾았다 → 그대로(처음 보는 서버면 이번에 읽은 가장 오래된 시각).
+ *  · 끝까지 읽었다(처음 · 다시 전량 · 지난번 자리를 못 찾음 = 로그가 지워졌거나 넘어감) → 이번에 읽은 가장 오래된 시각.
+ *  · 도중에 멈췄다 → 이번에 읽은 가장 오래된 시각(그 아래는 이번에 못 봤다 — 보수적으로).
+ */
+export function nextContinuousSince(prev, log) {
+  if (!log) return finite(prev);
+  const oldest = finite(log.oldestRead);
+  if (log.cursorUsed && log.foundCursor) return finite(prev) ?? oldest ?? finite(log.cursorCreated);
+  return oldest;
+}
+
+/** 서버 한 대가 DB 에 들고 있는 기록 상한 — 넘으면 오래된 것부터 지운다(보관 정리 · 반증 #11). 배드 섹터 계열만 쌓이므로 정상 장비는 닿지 않는다. */
+export const RECORDS_PER_SERVER_MAX = 20_000;
+
+/**
+ * 엣지 · 중앙 직결 점검 결과를 적재한다(정제된 서버 결과 배열 — ingest.js 가 정제한다).
+ *
+ * 반증 #11: 서버 **한 대씩** 트랜잭션으로 쓰고 사이에서 양보한다(25대 × 5,000건을 한 동기 구간으로 쓰면 1초 가까이 막는다).
+ * 서버 단위로는 원자적이다 — 도중에 실패하면 그 서버는 되돌리고, 앞 서버들은 남는다(`storedIds`). 호출자는 실패한 묶음의
+ * 커서를 앞으로 보내지 않으므로(반증 #1) 남은 서버도 다음 점검에서 다시 읽는다(키로 중복을 거른다).
+ *
+ * 새 기록(메일 대상)은 **그 서버의 첫 정상 점검이 아니고**(기준선), **지난 점검에서 본 가장 새 항목보다 새 것**만이다(반증 #15 —
+ * 일부만 읽은 뒤 더 깊이 읽어 과거 항목을 채워 넣는 것은 새 기록이 아니다).
+ * @returns {Promise<{ok:boolean, reason?:string, servers:number, storedIds:string[], newRecords:Array, baselineServers:number}>}
+ */
+export async function ingestServers(agent, servers, { now = Date.now(), yielder = createYielder(15), canMoveFrom = () => false } = {}) {
+  // 진행 보고(서버 0대)는 DB 를 건드리지 않는다 — 세대를 올리면 화면 캐시만 버려진다.
+  if (!Array.isArray(servers) || !servers.length) return { ok: true, servers: 0, storedIds: [], newRecords: [], baselineServers: 0 };
+  const h = await open();
+  if (!h) return { ok: false, reason: dbUnavailableReason(), servers: 0, storedIds: [], newRecords: [], baselineServers: 0 };
+  const a = String(agent || '').trim().toLowerCase();
+  const newRecords = [];
+  const storedIds = [];
+  let baselineServers = 0;
+  for (const s of servers || []) {
+    // eslint-disable-next-line no-await-in-loop
+    await yielder();
+    const fresh = [];
+    let isBaseline = false;
+    h.db.exec('BEGIN');
+    try {
+      // 반증 2회차 R2-3: 그 서버를 맡은 노드가 바뀌면(엣지가 없던 법인에 엣지를 배포 · 중앙 직결 → 엣지) (노드, id) 행이 새로 생겨 지난 기록 ·
+      //   시리얼 이력 · 기준선이 화면에서 사라졌다. 이 노드에 행이 없고, **같은 id · 같은 서비스 태그**(비어 있지 않음)의 행이 다른 노드에 정확히 하나면 그 이력을 이 노드로 옮긴다.
+      //   반증 3회차 D1: 옮기는 것은 ① 이 점검이 **정상으로 읽었고**(실패 보고 한 줄로 남의 이력을 가져가지 않게) ② 호출자가 '원래 노드는 이제 그 서버를
+      //   맡지 않는다' 고 판정할 때만이다(canMoveFrom — 모르면 옮기지 않는다). 두 노드가 함께 가진 동안 점검마다 이력이 오가던 것도 이것으로 막는다.
+      //   이 노드의 행이 있어도 정상으로 읽은 적이 없으면(첫 보고가 실패) 빈 행이다 — 지우고 옮긴다. 옮겨 올 쪽은 정상으로 읽은 적이 있는 행만.
+      //   4회차 반증 F4: 이 노드에 이미 정상 행이 있어도(중앙 등록부에서 지우기 전에 엣지가 한 번 읽음) 옮길 수 있게 되면 **합친다** — 건너뛰면
+      //   옛 노드의 기록 · 시리얼이 영영 화면 밖에 남았다(활성 로그에서 밀려난 기록이라 다시 읽을 수도 없다). canMoveFrom 이 '옛 노드는 이제
+      //   그 서버를 맡지 않는다' 를 보장하므로 D1 이 막은 왕복은 생기지 않는다(합친 뒤 옛 행을 지운다).
+      const mine = h.st.serverGet.get(a, s.id) || null;
+      if (s.ok && s.serviceTag) {
+        // 5회차 개선 I-a: 옮길 수 있는 후보만 골라 그것이 정확히 하나일 때(다른 엣지 행이 함께 있어도 '' 행 하나면 합친다).
+        const cands = h.st.serverOthers.all(s.id, String(s.serviceTag), a).filter((o) => canMoveFrom(o.agent, s.id) === true);
+        if (cands.length === 1) {
+          const from = cands[0].agent;
+          if (!mine || mine.first_ok_at == null) {
+            if (mine) h.st.deleteServer.run(a, s.id);
+            h.st.moveServer.run(a, from, s.id); h.st.moveRecords.run(a, from, s.id); h.st.moveSerials.run(a, from, s.id);
+          } else {
+            const old = h.st.serverGet.get(from, s.id);
+            h.st.moveRecords.run(a, from, s.id);
+            for (const x of h.st.serialsOf.all(from, s.id)) h.st.serialMerge.run(a, s.id, x.slot_key, x.serial, x.model, x.first_seen, x.last_seen);
+            h.st.serverMergeSpan.run(finite(old?.first_ok_at), finite(old?.covered_from), a, s.id);
+            // 5회차 반증 R5-1: 옛 행의 SEL 보관 항목(장비가 SEL 을 지워도 포탈이 남긴 디스크 빠짐 · 장착)과 디스크 값 이력(처음 본 때 · 늘어난 때 · 늘기 전 값)도
+            //   합친다 — 옛 행을 지우면서 함께 사라졌다(되돌릴 수 없는 손실). 합친 것이 상한을 넘으면 이 노드 값을 둔다(fitJson — 글자로 자르지 않는다).
+            const mSel = mergeKeptSel(parseObj(mine.sel_json), parseObj(old?.sel_json));
+            // 6회차 반증 R6-1: 지금 꽂힌 디스크(이번 인벤토리 · 없으면 이 노드가 적어 둔 것)의 시리얼로 판정한다 — 이 노드가 값을 못 읽은 디스크의 옛 이력을 지우지 않게.
+            const invSerial = serialMapOf(Array.isArray(s.drives) ? s.drives : parseArr(mine.drives_json));
+            const mVals = mergeKeptVals(parseObj(mine.vals_json), parseObj(old?.vals_json), invSerial);
+            const selJ = mSel ? fitJson(mSel, SEL_JSON_MAX, (o) => (o.events?.length > 1 ? (o.events = o.events.slice(0, Math.floor(o.events.length / 2)), true) : false)) : null;
+            const valsJ = mVals ? fitJson(mVals, VALS_JSON_MAX, (o) => (o.seen?.length ? (o.seen = [], true) : false)) : null;
+            h.st.serverSetPast.run(valsJ ?? mine.vals_json ?? null, selJ ?? mine.sel_json ?? null, a, s.id);
+          }
+          // 옮기지 못하고 남은 것(겹친 기록 · 시리얼)은 이 노드에 같은 것이 있다 — 옛 노드 행을 비운다.
+          h.st.deleteRecordsOf.run(from, s.id); h.st.deleteSerialsOf.run(from, s.id); h.st.deleteServer.run(from, s.id);
+        }
+      }
+      const prev = h.st.serverGet.get(a, s.id) || null;
+      const baseline = !(prev && Number.isFinite(prev.first_ok_at));
+      const drivesJson = Array.isArray(s.drives) ? JSON.stringify(s.drives) : (prev?.drives_json ?? null);
+      const row = {
+        agent: a, server_id: s.id, name: s.name || prev?.name || '', host: s.host || prev?.host || '', service_tag: s.serviceTag || prev?.service_tag || '',
+        first_ok_at: prev?.first_ok_at ?? null, last_scan_at: now, last_ok_at: prev?.last_ok_at ?? null,
+        last_status: s.ok ? 'ok' : (s.reason || 'error'), last_reason: s.ok ? '' : (s.reasonText || ''),
+        log_order: prev?.log_order ?? null, log_total: prev?.log_total ?? null, log_oldest: prev?.log_oldest ?? null,
+        covered_from: prev?.covered_from ?? null, continuous_since: prev?.continuous_since ?? null, complete: prev?.complete ?? null,
+        read_last: prev?.read_last ?? null, synthesized: s.synthesized ? 1 : (prev?.synthesized ?? 0),
+        inv_at: Number.isFinite(s.invAt) ? s.invAt : (prev?.inv_at ?? null), drives_json: drivesJson, updated_at: now,
+        newest_created: prev?.newest_created ?? null, read_stop: prev?.read_stop ?? null,
+        read_diag: prev?.read_diag ?? null, probe_json: prev?.probe_json ?? null, probe_at: prev?.probe_at ?? null,
+        vals_json: prev?.vals_json ?? null, sel_json: prev?.sel_json ?? null,
+      };
+      // 과거 기록 읽기 1단계 — 온 것만 바꾼다(옛 판 엣지에는 없다 — 지난 값을 그대로 둔다).
+      //   반증 F1: 디스크 값은 **그 점검의 디스크 목록에서 Id 별 시리얼**을 함께 적는다(Dell Drive Id 는 자리 이름이다 — 시리얼이 바뀌면 이력을 잇지 않는다).
+      //   반증 F2: 글자 수로 자르지 않는다(잘린 JSON 은 못 읽어 보관분이 통째로 사라졌다) — 오래된 항목부터 빼고, 그래도 넘으면 지난 값을 둔다.
+      if (s.vals) {
+        const serialOf = serialMapOf(Array.isArray(s.drives) ? s.drives : parseArr(prev?.drives_json));
+        const j = fitJson(mergeVals(parseObj(prev?.vals_json), s.vals, now, serialOf), VALS_JSON_MAX, (o) => (o.seen?.length ? (o.seen = [], true) : false));
+        if (j) row.vals_json = j;
+      }
+      if (s.sel) {
+        const j = fitJson(mergeSel(parseObj(prev?.sel_json), s.sel, now), SEL_JSON_MAX, (o) => (o.events?.length > 1 ? (o.events = o.events.slice(0, Math.floor(o.events.length / 2)), true) : false));
+        if (j) row.sel_json = j;
+      }
+      // 장비 진단은 온 것만 바꾼다(서버 한 대를 직접 점검했을 때만 온다). 로그 읽기가 실패한 점검에도 실릴 수 있다.
+      //   답한 단계가 하나도 없는 진단(전부 실패 · 시한)은 지난 정상 진단을 덮지 않는다 — 지난 것이 없을 때만 남긴다(실패했다는 사실을 보이게).
+      if (s.probe && (probeAnswered(s.probe) || !prev?.probe_json)) { row.probe_json = JSON.stringify(s.probe).slice(0, 20_000); row.probe_at = now; }
+      if (s.ok && s.log) {
+        // 반증 #8: 기록 상한으로 잘렸으면 그 아래 구간은 이번에 '본' 것이 아니다 — 남긴 가장 오래된 기록부터만 본 것으로 적고 complete 를 내린다.
+        let capFloor = null;
+        if (s.recordsCapped) for (const r of s.records || []) if (Number.isFinite(r.created) && (capFloor == null || r.created < capFloor)) capFloor = r.created;
+        const L = s.recordsCapped
+          ? { ...s.log, oldestRead: Number.isFinite(capFloor) ? Math.max(capFloor, finite(s.log.oldestRead) ?? capFloor) : finite(s.log.oldestRead), reachedEnd: false, foundCursor: false, cursorUsed: false }
+          : s.log;
+        if (baseline) { baselineServers += 1; isBaseline = true; }
+        const prevNewest = finite(prev?.newest_created);
+        // 반증 R3: **앞(오래된 쪽)에서부터** 읽다 도중에 멈춘 점검은 최신 쪽을 못 봤다(방향을 모르거나 · 오래된 것 먼저인데 건수를 몰라 거꾸로 못 읽음).
+        //   그 점검으로 '끊김 없이 본 구간' 을 지금까지로 적거나 '본 가장 새 항목' 을 올리면, 못 본 최신 쪽의 빠짐 기록을 놓친 채 '사용 중 · 추정' 이 되고
+        //   다음 점검에서 원래 있던 기록이 '새 기록' 메일이 된다. 그래서 구간을 모름(null)으로 두고, 첫 점검이면 기준선을 다음으로 미룬다.
+        const forwardPartial = !L.reachedEnd && !L.foundCursor && (L.order === 'unknown' || (L.order === 'asc' && L.total == null));
+        row.first_ok_at = prev?.first_ok_at ?? (forwardPartial ? null : now);
+        row.last_ok_at = now;
+        row.log_order = L.order || null;
+        row.log_total = finite(L.total);
+        if (L.reachedEnd) row.log_oldest = finite(L.oldestRead);
+        row.covered_from = minOf(prev?.covered_from, L.oldestRead);
+        row.continuous_since = forwardPartial ? null : nextContinuousSince(prev?.continuous_since, L);
+        row.complete = (L.reachedEnd || L.foundCursor) ? 1 : 0;
+        row.read_last = finite(L.read);
+        // 왜 끝까지 못 읽었나(budget · max · skip — 장비가 쪽 넘김을 지원하지 않음 · capped — 기록 상한). 화면이 '일부만 읽음' 의 이유로 밝힌다.
+        row.read_stop = s.recordsCapped ? 'capped' : (s.log.stopped || null);
+        // 읽기 진단은 **로그 전체를 읽은 점검**의 것만 남긴다 — 지난 자리를 찾아 멈춘 이어 읽기는 새 항목 몇 건의 구성이라 활성 로그 전체를 말하지 않는다.
+        //   지난 자리를 못 찾고 끝까지 읽은 점검(활성 로그가 점검 간격보다 짧은 서버는 매번 이 경우다)은 전체 읽기다(반증 3.8.2 #2).
+        if (!s.log.foundCursor && Array.isArray(s.log.top)) {
+          row.read_diag = JSON.stringify({ at: now, read: finite(s.log.read), total: finite(s.log.total), pages: finite(s.log.pages), ms: finite(s.log.ms),
+            distinct: finite(s.log.distinct), firstLen: finite(s.log.firstLen), hasNext: s.log.hasNext ?? null, path: s.log.path || '', top: s.log.top,
+            oldest: finite(s.log.oldestRead), newest: finite(s.log.newestCreated), reachedEnd: s.log.reachedEnd === true, oldestCode: s.log.oldestCode || '',
+            undated: finite(s.log.undated), undatedStorage: finite(s.log.undatedStorage) });
+        }
+        const nc = forwardPartial ? null : finite(L.newestCreated);
+        row.newest_created = nc != null && (prevNewest == null || nc > prevNewest) ? nc : prevNewest;
+        for (const r of s.records || []) {
+          if (!Number.isFinite(r.created)) continue;
+          const code = codeOf(r.messageId) || String(r.code || '').toUpperCase().slice(0, 12);
+          const key = `${r.entryId}|${Number.isFinite(r.createdRaw) ? r.createdRaw : r.created}`.slice(0, 96);
+          const slotKey = slotKeyOf(slotOf(r.message));
+          const ch = h.st.recInsert.run(a, s.id, key, r.created, code, r.messageId, r.severity, r.message, slotKey, now, baseline ? 1 : 0);
+          const isNew = !baseline && (prevNewest == null || r.created > prevNewest);
+          if (ch.changes > 0 && isNew) fresh.push({ agent: a, serverId: s.id, serverName: row.name, created: r.created, code, message: r.message, slotKey });
+        }
+        if ((s.records || []).length && (h.st.countOf.get(a, s.id)?.n ?? 0) > RECORDS_PER_SERVER_MAX) h.st.pruneOf.run(a, s.id, RECORDS_PER_SERVER_MAX);
+      }
+      if (Array.isArray(s.drives)) {
+        const seen = Number.isFinite(s.invAt) ? s.invAt : now;
+        for (const d of s.drives) {
+          const sl = driveSlotOf(d);
+          const serial = String(d.serial || '').trim();
+          if (!sl || !serial) continue;
+          h.st.serialUpsert.run(a, s.id, slotKeyOf(sl), serial.slice(0, 64), String(d.model || '').slice(0, 80), seen, seen);
+        }
+      }
+      h.st.serverUpsert.run(row);
+      h.db.exec('COMMIT');
+    } catch (e) {
+      try { h.db.exec('ROLLBACK'); } catch { /* */ }
+      if (isBaseline) baselineServers -= 1;
+      _gen += 1; _cache = null;
+      return { ok: false, reason: `DB 저장 실패: ${String(e?.message || e).slice(0, 160)}`, servers: storedIds.length, storedIds, newRecords, baselineServers };
+    }
+    storedIds.push(s.id);
+    for (const f of fresh) newRecords.push(f);
+  }
+  _gen += 1; _cache = null;
+  return { ok: true, servers: storedIds.length, storedIds, newRecords, baselineServers };
+}
+
+const VAL_KEYS = ['realloc', 'pending', 'uncorrectable'];
+const hasCounter = (d) => !!d && VAL_KEYS.some((k) => Number.isFinite(d[k]));
+export const VALS_KEEP_MAX = 64;
+export const VALS_JSON_MAX = 100_000;
+export const SEL_JSON_MAX = 150_000;
+const parseArr = (v) => { try { const j = JSON.parse(v || 'null'); return Array.isArray(j) ? j : null; } catch { return null; } };
+/** 디스크 목록 → (Id → 시리얼). 못 읽은 목록이면 빈 맵(시리얼 모름). */
+function serialMapOf(drives) {
+  const m = new Map();
+  for (const d of Array.isArray(drives) ? drives : []) { const sn = String(d?.serial || '').trim(); if (d?.id && sn) m.set(String(d.id), sn.slice(0, 64)); }
+  return (id) => m.get(String(id)) || '';
+}
+/** 직렬화가 상한을 넘으면 `shrink` 로 줄여 다시 — 끝내 넘으면 null(호출자는 지난 값을 둔다). 글자 수로 자르지 않는다(반증 F2). */
+function fitJson(obj, max, shrink) {
+  let j = JSON.stringify(obj);
+  for (let i = 0; j.length > max && i < 16 && shrink(obj); i += 1) j = JSON.stringify(obj);
+  return j.length > max ? null : j;
+}
+
+/**
+ * 디스크 값 저장 모양(순수 — 테스트가 고정). 누적 값이라 **마지막으로 읽은 값**을 남기고, 포탈이 본 변화만 날짜를 단다:
+ *  · 디스크마다 `serial`(그 점검의 디스크 목록에서) · `readAt`(재할당 · 보류 · 복구 불가를 마지막으로 읽은 때) · `firstAt`(처음 읽은 때) ·
+ *    `changedAt`(그 가운데 하나가 늘어난 것을 본 때 — 못 봤으면 null) · `before`(늘기 전 값).
+ *  · 반증 F1: Dell Drive Id 는 **자리 이름**이다 — 같은 Id 라도 시리얼이 다르면 다른 디스크다. 이력을 잇지 않고, 그 자리의 지난 값도 남기지 않는다.
+ *  · 이번에 못 읽은 디스크(못 읽은 점검 · 보고서에 빠진 디스크 — 반증 F9)는 지난 값을 지우지 않는다. `readAt` 이 그대로라 화면 · 판정이 '지난 값' 으로 다룬다.
+ *  · 가동 시간만 온 디스크는 지난 재할당 · 보류 · 복구 불가를 덮지 않는다(가동 시간만 고친다).
+ * @param {(id:string)=>string} [serialOf]  그 점검의 Id → 시리얼(모르면 '')
+ */
+export function mergeVals(prev, cur, now, serialOf = () => '') {
+  const base = { status: cur.status, tryAt: now, telemetry: cur.telemetry || '', metrics: cur.metrics || '' };
+  const prevDrives = prev && Array.isArray(prev.drives) ? prev.drives : [];
+  const old = new Map(prevDrives.map((d) => [d.id, d]));
+  const sameDisk = (p, sn) => !(p && p.serial && sn && p.serial !== sn);
+  const out = [];
+  const done = new Set();
+  for (const d of Array.isArray(cur.drives) ? cur.drives : []) {
+    if (!d || !d.id || done.has(d.id)) continue;
+    done.add(d.id);
+    const sn = String(serialOf(d.id) || '').trim().slice(0, 64);
+    const p0 = old.get(d.id) || null;
+    const p = sameDisk(p0, sn) ? p0 : null;
+    if (!hasCounter(d)) {
+      // 가동 시간만 — 지난 값이 있으면 가동 시간만 고치고, 없으면 값 없는 줄로 둔다(흔적 판정은 '값 모름').
+      if (p) out.push({ ...p, powerOnHours: Number.isFinite(d.powerOnHours) ? d.powerOnHours : p.powerOnHours ?? null, serial: p.serial || sn });
+      else out.push({ id: d.id, serial: sn, realloc: null, pending: null, uncorrectable: null, powerOnHours: d.powerOnHours ?? null, src: d.src || '', readAt: null, firstAt: null, changedAt: null });
+      continue;
+    }
+    const grew = p && VAL_KEYS.some((k) => Number.isFinite(d[k]) && Number.isFinite(p[k]) && d[k] > p[k]);
+    out.push({ ...d, serial: sn || p?.serial || '', readAt: now, firstAt: Number.isFinite(p?.firstAt) ? p.firstAt : now,
+      changedAt: grew ? now : (Number.isFinite(p?.changedAt) ? p.changedAt : null),
+      ...(grew ? { before: Object.fromEntries(VAL_KEYS.map((k) => [k, Number.isFinite(p[k]) ? p[k] : null])) } : (p?.before ? { before: p.before } : {})) });
+  }
+  for (const p of prevDrives) {
+    if (!p || done.has(p.id)) continue;
+    if (!sameDisk(p, String(serialOf(p.id) || '').trim())) continue;   // 그 자리에 다른 디스크가 들어왔다 — 지난 값을 남기지 않는다
+    out.push(p);
+  }
+  const ok = cur.status === 'ok';
+  return { ...base, at: ok ? now : (prev?.at ?? null), reportAt: ok ? (cur.reportAt ?? null) : (prev?.reportAt ?? null),
+    seen: Array.isArray(cur.seen) && cur.seen.length ? cur.seen : (prev?.seen || []), drives: out.slice(0, VALS_KEEP_MAX) };
+}
+
+export const SEL_KEEP_MAX = 200;
+/**
+ * SEL 디스크 항목 저장 모양(순수). iDRAC 가 SEL 을 지우거나 덮어써도 포탈이 본 항목은 남긴다(합집합 · 가장 새 것 200건).
+ * `range` 는 이번에 읽은 SEL 이 담은 기간, `keptFrom` 은 포탈이 보관한 가장 오래된 항목 — 화면이 둘을 섞지 않는다.
+ */
+/**
+ * 노드 합치기의 SEL 보관 항목(순수 — 5회차 반증 R5-1). 이 노드 것에 옛 노드 항목을 **합집합**으로(같은 키 = 장비가 준 원래 시각 · 종류 · 자리 · 문장,
+ * 가장 새 SEL_KEEP_MAX 건). 읽기 상태(read · total · range)는 이 노드 것을 둔다. 한쪽이 없으면 다른 쪽.
+ */
+export function mergeKeptSel(mine, old) {
+  const oe = old && Array.isArray(old.events) ? old.events : [];
+  if (!mine) return old || null;
+  if (!oe.length) return mine;
+  const seen = new Set(); const events = [];
+  for (const e of [...(Array.isArray(mine.events) ? mine.events : []), ...oe]) { const k = selKey(e); if (seen.has(k)) continue; seen.add(k); events.push(e); }
+  events.sort((x, y) => (y.created ?? -Infinity) - (x.created ?? -Infinity));
+  const kept = events.slice(0, SEL_KEEP_MAX);
+  const dated = kept.map((e) => e.created).filter(Number.isFinite);
+  return { ...mine, events: kept, keptFrom: dated.length ? Math.min(...dated) : null };
+}
+
+/**
+ * 노드 합치기의 디스크 값 이력(순수 — 5회차 반증 R5-1 · 6회차 R6-1). 노드를 넘는 합치기라 **양쪽 시리얼이 모두 있고 같을 때만** 같은 디스크로 본다
+ * (Dell Drive Id 는 자리 이름 — 반증 F1. 시리얼을 모르면 다른 디스크의 이력이 붙을 수 있다).
+ *  · 이 노드의 디스크: 같은 디스크면 처음 읽은 때는 더 이른 쪽, 이 노드가 늘어난 것을 못 봤으면 옛 노드가 본 때 · 늘기 전 값을 잇는다(이 노드가 본 것은 덮지 않는다).
+ *  · 이 노드가 값을 **못 읽은** 디스크(권한 · 보고서 없음 · 보고서에 빠짐): 지금 인벤토리(`invSerial`)에 같은 Id · 같은 시리얼이 있으면 옛 값을 남긴다 —
+ *    평소 적재(mergeVals — 반증 F9)와 같다. readAt 이 옛 것이라 판정은 '지난 값' 으로 다룬다. 교체 · 제거된 디스크(시리얼이 다름 · Id 없음 · 모름)는 남기지 않는다.
+ * @param {(id:string)=>string} [invSerial] 지금 인벤토리의 Id → 시리얼(모르면 '')
+ */
+export function mergeKeptVals(mine, old, invSerial = () => '') {
+  const od = old && Array.isArray(old.drives) ? old.drives : [];
+  if (!mine) return old || null;
+  if (!od.length) return mine;
+  const mineDrives = Array.isArray(mine.drives) ? mine.drives : [];
+  const byId = new Map(od.filter((d) => d && d.id).map((d) => [d.id, d]));
+  const same = (a, b) => !!(a && b && a.serial && b.serial && a.serial === b.serial);
+  // 7회차 반증 R7-1: 같은 디스크면 **누적 값을 가진 쪽 가운데 더 늦게 읽은 쪽**을 기준으로 삼는다 — 늘 이 노드 값을 기준으로 하면
+  //   (a) 이 노드가 가동 시간만 읽은 디스크의 재할당 · 보류 · 복구 불가가 사라졌고(평소 적재는 '가동 시간만 고친다'),
+  //   (b) 겹쳐 읽는 동안 옛 노드가 더 늦게 본 더 큰 값이 사라져 '값 = 늘기 전 값' 인 모순이 생겼다.
+  //   처음 읽은 때는 더 이른 쪽, 가동 시간은 이 노드 것(지금 점검) 우선, 늘어남(changedAt · before)은 기준 쪽 것이 없을 때만 다른 쪽 것.
+  const hasCounter = (x) => VAL_KEYS.some((k) => Number.isFinite(x?.[k]));
+  const drives = mineDrives.map((d) => {
+    const p = d && byId.get(d.id);
+    if (!same(p, d)) return d;
+    const pNewer = hasCounter(p) && (!hasCounter(d) || (Number.isFinite(p.readAt) ? p.readAt : -Infinity) > (Number.isFinite(d.readAt) ? d.readAt : -Infinity));
+    const base = pNewer ? p : d;
+    const other = pNewer ? d : p;
+    const firsts = [d.firstAt, p.firstAt].filter(Number.isFinite);
+    const { before: _b, ...rest } = base;
+    const out = { ...rest, id: d.id, serial: d.serial, firstAt: firsts.length ? Math.min(...firsts) : (base.firstAt ?? null),
+      powerOnHours: Number.isFinite(d.powerOnHours) ? d.powerOnHours : (p.powerOnHours ?? null) };
+    if (Number.isFinite(base.changedAt)) { if (base.before) out.before = base.before; }
+    else if (Number.isFinite(other.changedAt)) { out.changedAt = other.changedAt; if (other.before) out.before = other.before; }
+    return out;
+  });
+  const have = new Set(mineDrives.map((d) => d?.id));
+  for (const p of od) {
+    if (!p || !p.id || have.has(p.id)) continue;
+    const sn = String(invSerial(p.id) || '').trim();
+    if (sn && p.serial && sn === p.serial) drives.push(p);
+  }
+  // 이 노드가 값을 한 번도 못 읽었는데 옛 값을 남겼으면, 마지막으로 읽은 때도 옛 것으로(출처 표가 '지난 값' 이라고 밝히게 — 7회차 참고).
+  const usedOld = drives.length !== mineDrives.length || drives.some((x, i) => x !== mineDrives[i]);
+  if (usedOld && !Number.isFinite(mine.at) && Number.isFinite(old.at)) return { ...mine, drives, at: old.at, reportAt: old.reportAt ?? null };
+  return { ...mine, drives };
+}
+
+const selKey = (e) => `${Number.isFinite(e?.createdRaw) ? e.createdRaw : e?.created}|${e?.kind}|${e?.slotKey}|${String(e?.message || '').slice(0, 80)}`;
+
+export function mergeSel(prev, cur, now) {
+  const base = { status: cur.status, tryAt: now };
+  const prevEvents = prev && Array.isArray(prev.events) ? prev.events : [];
+  if (cur.status !== 'ok' && cur.status !== 'empty') {
+    if (prev) return { ...prev, ...base };
+    return { ...base, at: null, read: null, total: null, stopped: '', range: null, kinds: {}, events: [], keptFrom: null };
+  }
+  // 키에는 장비가 준 원래 시각(createdRaw — 반증 F3: 자른 시각은 점검마다 달라져 같은 항목이 쌓였다).
+  const key = selKey;
+  const seen = new Set();
+  const events = [];
+  for (const e of [...(cur.events || []), ...prevEvents]) {
+    const k = key(e);
+    if (seen.has(k)) continue;
+    seen.add(k); events.push(e);
+  }
+  events.sort((a, b) => (b.created ?? -Infinity) - (a.created ?? -Infinity));
+  const kept = events.slice(0, SEL_KEEP_MAX);
+  const dated = kept.map((e) => e.created).filter(Number.isFinite);
+  return {
+    ...base, at: now, read: cur.read ?? null, total: cur.total ?? null, stopped: cur.stopped || '', kinds: cur.kinds || {},
+    range: Number.isFinite(cur.oldest) || Number.isFinite(cur.newest) ? { oldest: cur.oldest ?? null, newest: cur.newest ?? null } : null,
+    events: kept, keptFrom: dated.length ? Math.min(...dated) : null,
+  };
+}
+
+/** 장비 진단에 답한 단계가 하나라도 있는가(`{error}` · `{skipped}` 가 아닌 객체). */
+export function probeAnswered(p) {
+  if (!p || typeof p !== 'object') return false;
+  return Object.entries(p).some(([k, v]) => !['v', 'at', 'ms', 'error', 'authDenied', 'synthesized', 'filterVerdict'].includes(k)
+    && v && typeof v === 'object' && !('error' in v) && !('skipped' in v));
+}
+const parseObj = (v) => { try { const j = JSON.parse(v || 'null'); return j && typeof j === 'object' && !Array.isArray(j) ? j : null; } catch { return null; } };
+const rowServer = (r) => ({
+  agent: r.agent, serverId: r.server_id, name: r.name || '', host: r.host || '', serviceTag: r.service_tag || '',
+  firstOkAt: r.first_ok_at, lastScanAt: r.last_scan_at, lastOkAt: r.last_ok_at, lastStatus: r.last_status || '', lastReason: r.last_reason || '',
+  logOrder: r.log_order, logTotal: r.log_total, logOldest: r.log_oldest, coveredFrom: r.covered_from, continuousSince: r.continuous_since,
+  complete: r.complete == null ? null : r.complete === 1, readLast: r.read_last, synthesized: r.synthesized === 1, invAt: r.inv_at, newestCreated: r.newest_created ?? null, readStop: r.read_stop || '',
+  readDiag: parseObj(r.read_diag), probe: parseObj(r.probe_json), probeAt: r.probe_at ?? null,
+  vals: parseObj(r.vals_json), sel: parseObj(r.sel_json),
+  drives: (() => { try { const j = JSON.parse(r.drives_json || 'null'); return Array.isArray(j) ? j : null; } catch { return null; } })(),
+});
+const rowRecord = (r) => ({
+  agent: r.agent, serverId: r.server_id, entryKey: r.entry_key, created: r.created, code: r.code || '', messageId: r.message_id || '',
+  severity: r.severity || '', message: r.message || '', slotKey: r.slot_key || '', receivedAt: r.received_at, baseline: r.baseline === 1,
+});
+const rowSerial = (r) => ({ agent: r.agent, serverId: r.server_id, slotKey: r.slot_key, serial: r.serial, model: r.model || '', firstSeen: r.first_seen, lastSeen: r.last_seen });
+
+/**
+ * 화면 집계의 입력 전량. 반증 #11: 세대(적재)가 같으면 다시 읽지 않는다 — 화면을 몇 번 열어도 DB 는 적재 뒤 한 번만 읽는다.
+ * 읽을 때는 행을 하나씩 넘기며 **시간 기준으로 양보**한다(기록이 많을 때 한 동기 구간으로 막지 않게). 서버당 기록 상한은 ingest 가 지킨다.
+ */
+async function readAllRows(stmt, map, yielder) {
+  const out = [];
+  for (const r of stmt.iterate()) {
+    out.push(map(r));
+    // eslint-disable-next-line no-await-in-loop
+    // 16행마다 시간 기준 양보를 묻는다(I-3 — 1024행마다면 SEL · 디스크 값 JSON 을 가진 행 700개를 한 번에 풀어 185ms 를 막았다). 양보 자체는 15ms 가 지났을 때만.
+    if ((out.length & 15) === 0) await yielder();
+  }
+  return out;
+}
+export async function loadAll() {
+  const h = await open();
+  if (!h) return null;
+  if (_cache && _cache.gen === _gen) return _cache.v;
+  const gen = _gen;
+  const y = createYielder(15);
+  const v = {
+    servers: await readAllRows(h.st.serversAll, rowServer, y),
+    records: await readAllRows(h.st.recordsAll, rowRecord, y),
+    serials: await readAllRows(h.st.serialsAll, rowSerial, y),
+  };
+  if (gen === _gen) _cache = { gen, v };
+  return v;
+}
+
+/** 작은 값 보관(자동 점검의 마지막 실행 시각 — 재시작해도 6시간 주기를 지킨다 · 반증 #13). 못 읽으면 null. */
+export async function getDiskBadMeta(k) {
+  const h = await open();
+  if (!h) return null;
+  try { return h.st.metaGet.get(String(k))?.v ?? null; } catch { return null; }
+}
+export async function setDiskBadMeta(k, v) {
+  const h = await open();
+  if (!h) return false;
+  try { h.st.metaSet.run(String(k), String(v)); return true; } catch { return false; }
+}
+
+export async function loadServer(agent, serverId) {
+  const h = await open();
+  if (!h) return null;
+  const a = String(agent || '').trim().toLowerCase();
+  const s = h.st.serverGet.get(a, String(serverId));
+  return {
+    server: s ? rowServer(s) : null,
+    records: h.st.recordsOf.all(a, String(serverId)).map(rowRecord),
+    serials: h.st.serialsOf.all(a, String(serverId)).map(rowSerial),
+  };
+}
+
+function dbUnavailableReason() {
+  return initError ? String(initError.message || initError).slice(0, 200) : (lockRetry.note() || 'DB 를 아직 열지 못했습니다');
+}
+
+export async function diskBadDbStatus() {
+  const h = await open();
+  if (h && !(_countCache && _countCache.gen === _gen)) {
+    _countCache = { gen: _gen, records: h.st.count.get()?.n ?? null, servers: h.st.countServers.get()?.n ?? null };
+  }
+  return {
+    available: !!h, path: h ? h.path : DB_PATH(), error: h ? '' : dbUnavailableReason(),
+    records: h ? _countCache.records : null, servers: h ? _countCache.servers : null,
+  };
+}
+
+export function _resetDiskBadDbForTest() {
+  try { x?.db?.close(); } catch { /* */ }
+  x = null; ready = null; initError = null; _gen = 0; _cache = null; _countCache = null;
+}

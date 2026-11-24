@@ -9,7 +9,7 @@
  *   개수는 `zoneCount` 다. 숫자 `zones` 를 읽던 곳은 없었다(확인: 화면은 `effectiveConfig` 만 썼다).
  *   한 이름이 숫자와 배열 두 뜻을 갖지 않게 이렇게 정리한다.
  */
-import { parseCfgShow, resolveZones, compactZoning, normWwn, isPropertyMember, ZONE_LIMITS } from './zoning.js';
+import { parseCfgShow, resolveZones, compactZoning, normWwn, isPropertyMember, ZONE_LIMITS, ownOf, ownPut } from './zoning.js';
 
 /** 조닝 없음/미수집을 나타내는 빈 구조 — 모든 경로가 같은 모양을 돌려주게. */
 export function emptyZoning(effectiveConfig = '', reason = '') {
@@ -60,7 +60,7 @@ export function zoningFromRest(eff, def) {
   const aliases = {};
   for (const a of arr(defRoot.alias)) {
     const n = a['alias-name']; if (!n) continue;
-    aliases[n] = arr(a['member-entry']?.['alias-entry-name']).map(normWwn).filter(Boolean);
+    ownPut(aliases, String(n), arr(a['member-entry']?.['alias-entry-name']).map(normWwn).filter(Boolean));   // 155회차: ‘__proto__’ 별칭도 자기 속성으로(대입은 원형을 바꿔 별칭이 사라졌다)
   }
   // 활성이 있으면 활성을, 없으면 정의를 쓴다(SSH 경로와 같은 우선순위).
   const src = effZones.length ? effZones : defZones;
@@ -68,7 +68,7 @@ export function zoningFromRest(eff, def) {
   const resolveOne = (raw, aliasOf) => {
     const w = normWwn(raw);
     if (w) return [w];
-    const av = aliases[raw];
+    const av = ownOf(aliases, String(raw));   // 155회차: 멤버 이름이 ‘constructor’ · ‘hasOwnProperty’ 여도 상속 함수를 별칭 목록으로 읽지 않는다(‘is not iterable’ 로 수집 전체 실패)
     if (av?.length) { for (const x of av) aliasOf[x] = raw; return av; }
     return null;
   };

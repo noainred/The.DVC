@@ -8,7 +8,8 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { analyzeLoginFails } from './loginFails.js';
 import { enqueueNotify as notify } from '../alerts.js'; // v2.742(감사 TIMING-01): 결과를 기다리지 않는 발송은 alerts.js 대기열로 — 동시 발송이 메일 인증 정지 가드를 우회하지 않게 한 번에 하나씩 보낸다.
-import { atomicWriteFileSync, safeLoadText } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, safeLoadText, corruptBackupPath } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 107회차: 읽기 오류 ≠ 손상(공용 읽기 — 30초 간격 재읽기)
 import { numOrNull } from '../util/numOrNull.js';
 import { isMockMode } from '../mock/demo/flags.js';
 
@@ -22,7 +23,7 @@ const DEFAULTS = { enabled: true, intervalMin: 15, days: 7, threshold: 5, window
  */
 function backupCorrupt(err) {
   try {
-    const bak = `${FILE}.corrupt.${Date.now()}`;
+    const bak = corruptBackupPath(FILE);   // v3.25.1: 같은 밀리초 보존본을 덮어쓰지 않게
     fs.renameSync(FILE, bak);
     // v2.744(최종 수정분 검토 RV2744F-LOAD-01): 사유는 요약(safeLoadText) — V8 JSON.parse 오류 원문은 파일 조각을 싣는다(콘솔 → /admin/logs·엣지 로그).
     console.warn(`[loginmon] ${FILE} 읽기/파싱 실패(${safeLoadText(err) || '사유 미상'}) — ${bak}로 보존하고 기본 설정으로 시작합니다.`);
@@ -40,22 +41,42 @@ function clampNumbers(p) {
 }
 
 let cache = null;
+/*
+ * 107회차(재현 — EISDIR): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 예전 catch 하나는 온전한 원본을 .corrupt 로 옮기고 빈 값 · 기본값을 캐시해
+ *   다음 저장이 원본 자리를 덮었다. 읽기 단계는 공용 읽기: 원본을 두고 · 캐시하지 않고(30초 간격 재읽기) · 저장을 거절한다(503 settingsUnreadable). parse 실패는 예전과 같다.
+ */
+const _reader = makeJsonFileReader(() => FILE, { parse: (t) => t, preserve: false, tag: 'login-monitor' });
+let _readErr = '';
+/** 107회차: 읽기 오류 중의 저장 거절 본문(503) 또는 null. */
+export function loginMonitorWriteRefusal() {
+  loadLoginMonitor();
+  return _readErr ? { ok: false, status: 503, code: 'settingsUnreadable', readError: true, reason: `로그인 실패 감시 설정 파일(${path.basename(FILE)})을 읽지 못해 저장하지 않았습니다 — 읽기 오류(${_readErr})이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 저장이 다시 열립니다).` } : null;
+}
 export function loadLoginMonitor() {
   if (cache) return cache;
+  const rr = _reader.read();
+  if (rr.kind === 'read-error') { _readErr = String(rr.error?.code || 'read-error').slice(0, 32); return { ...DEFAULTS }; }   // 107회차: 캐시하지 않는다 — 쓰기는 거절한다
+  const was = _readErr;
+  _readErr = '';
   cache = { ...DEFAULTS };
   try {
-    if (fs.existsSync(FILE)) {
-      const p = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+    if (rr.kind === 'ok') {
+      const p = JSON.parse(rr.value);
       if (!p || typeof p !== 'object' || Array.isArray(p)) throw new Error('객체가 아님'); // 형식 불일치도 손상
       // v2.602(감사 TIM2602-04): 로드에도 저장과 같은 범위를 적용한다. 손으로 고친 파일·복원한 백업의 intervalMin 0·''·음수가
       // 그대로 setInterval 로 가서 1ms 루프(초당 약 1,000회 runOnce)가 됐다. 범위 밖·숫자 아님은 기본값이다.
       cache = { ...DEFAULTS, ...p, ...clampNumbers(p) };
     }
   } catch (e) { cache = { ...DEFAULTS }; backupCorrupt(e); }
+  // 115회차(107 추정 E2 — 재현): 기동 때 읽기 오류면 기본값(켜짐 · 15분)으로 타이머를 걸었고, 다시 읽혀도 그 주기가 다음 저장 · 재시작까지 그대로였다
+  //   (꺼 둔 감시도 15분 타이머가 남았다). 읽기 오류가 풀린 첫 읽기에서, 이미 시작한 감시면 읽힌 설정으로 다시 건다(캐시를 세운 뒤라 재귀하지 않는다).
+  if (was && started) reschedule();
   return cache;
 }
 export function saveLoginMonitor(body = {}) {
   const c = loadLoginMonitor();
+  { const no = loginMonitorWriteRefusal(); if (no) throw Object.assign(new Error(no.reason), no, { extra: { code: no.code, readError: true } }); }   // 107회차: 읽기 오류 중에는 빈 값 · 기본값 위에 쓰지 않는다
+
   const next = {
     enabled: body.enabled != null ? !!body.enabled : c.enabled,
     intervalMin: Math.max(1, Math.min(1440, Number(body.intervalMin) || c.intervalMin)),
@@ -72,6 +93,7 @@ export function saveLoginMonitor(body = {}) {
 }
 
 let timer = null;
+let started = false;   // 115회차: startLoginMonitor 가 불렸는가(읽기 오류가 풀렸을 때 타이머를 다시 걸지 판정)
 let lastRun = null;
 let lastSummary = null;
 let lastIncomplete = null;   // v2.682 R3E-02 — 마지막 주기가 일부 조각을 못 읽었으면 그 사실
@@ -159,6 +181,7 @@ function reschedule() {
 }
 
 export function startLoginMonitor() {
+  started = true;
   reschedule();
   setTimeout(() => runOnce().catch(() => {}), 40_000).unref?.();
   console.log('[loginmon] 로그인 실패 모니터 시작');

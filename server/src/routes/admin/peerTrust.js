@@ -11,6 +11,7 @@
  *   · 승인·거부·삭제·관찰 일괄 승인 — admin + 전체 범위. 승인은 본문 `confirmVerified:true`(관리자가 지문을 별도로 확인했다는
  *     명시적 확인)가 없으면 400 — 화면의 확인 대화상자를 건너뛴 호출로 '그냥 승인' 이 되지 않게.
  *   · 정책 변경 — 위 + 설정 소유 계정(requireSettingsOwner). observe 로 바꾸면 처음 보는 장비가 관찰로 통과하므로 보안 정책 등급이다.
+ *     91회차: observe(약화)는 본인 OTP 도(로그인 정책 약화와 같은 등급) — enforce(강화)는 묻지 않는다.
  *   · OTP 등록 전 세션은 /api/admin 마운트의 requireEnrolled 가 막는다 · 데모 계정은 READ_DENY('/api/admin/security') 가 막는다.
  * 모든 변경은 logAudit(지문은 공개 정보라 기록한다 — 비밀이 아니다).
  *
@@ -20,12 +21,15 @@
  */
 import {
   PEER_KINDS, PEER_MODES, TRUSTED_MAX, normalizeFingerprint, normalizePeerHost, listPeers, peerTrustStatus,
-  approvePeer, rejectPeer, removePeer, approveAllObserved, setPeerPolicy, peerApproveNode,
+  approvePeer, rejectPeer, removePeer, approveAllObserved, setPeerPolicy, peerApproveNode, getPeerPolicy,
 } from '../../security/peerTrust.js';
 import { tlsTrustStatus } from '../../security/tlsTrust.js';
 import { logAudit } from '../../audit.js';
 import { clientIp } from '../../util/rateLimit.js';
 import { adminOnly, fullScopeOnlyWith, requireSettingsOwner } from './shared.js';
+import { config } from '../../config.js';
+import { verifyUserOtp } from '../../auth/auth.js';
+import { nonTextField, rejectNonText } from '../../util/coercionTrap.js';
 
 const fleetOnly = fullScopeOnlyWith('장비 신뢰(SSH 호스트키·TLS 인증서)는 전 법인 장비에 공통이라 전체 범위(vCenter 제한 없는) 계정만 다룰 수 있습니다.');
 
@@ -34,6 +38,8 @@ const HOST_RE = /^[A-Za-z0-9._:%[\]-]{1,255}$/;
 
 /** 본문의 kind/host/port 를 검사한다. 문제면 { error } 를, 아니면 { kind, host, port } 를 돌려준다. */
 export function peerTarget(body = {}) {
+  const nt = nonTextField(body, ['kind', 'host', 'port']);   // 163회차: 객체는 String()/Number() 가 던져 500 이었다
+  if (nt) return { error: `‘${nt}’ 값은 글자여야 합니다.`, field: nt };
   const kind = String(body.kind ?? '').trim();
   if (!PEER_KINDS.includes(kind)) return { error: `종류(kind)는 ${PEER_KINDS.join('·')} 중 하나여야 합니다.`, field: 'kind' };
   const host = String(body.host ?? '').trim();
@@ -133,6 +139,7 @@ export function registerPeerTrust(adminRouter) {
 
   adminRouter.post('/security/peer-trust/approve-observed', adminOnly, fleetOnly, (req, res) => {
     const b = req.body || {};
+    if (rejectNonText(res, b, ['kind'])) return undefined;
     const kind = String(b.kind ?? '');
     if (!PEER_KINDS.includes(kind)) return res.status(400).json({ ok: false, reason: '종류(kind)가 올바르지 않습니다.', field: 'kind' });
     if (b.confirmVerified !== true) {
@@ -146,8 +153,17 @@ export function registerPeerTrust(adminRouter) {
 
   adminRouter.put('/security/peer-trust/policy', adminOnly, fleetOnly, requireSettingsOwner, (req, res) => {
     const b = req.body || {};
+    if (rejectNonText(res, b, ['kind', 'mode'])) return undefined;
     const kind = String(b.kind ?? '');
     const mode = String(b.mode ?? '');
+    // 91회차(88회차 결정 ④ — 권장안): observe 로 바꾸는 것(약화 — 처음 보는 장비가 관찰로 통과)은 로그인 정책 약화(PUT /security/session)와 같은 등급 —
+    //   소유자 + **본인 OTP**(재인증 실패는 403 — 401 이면 화면이 세션 만료로 보고 로그아웃한다, v2.277). enforce 로 닫는 것은 OTP 를 묻지 않는다(강화).
+    //   실제로 약해질 때만 묻는다(지금 enforce · 파일 정책) — 환경변수가 정하면 바꿀 수 없으니(409 env-forced) OTP 를 소모하지 않고, 이미 observe 면 바뀌는 것이 없다.
+    const cur = PEER_KINDS.includes(kind) && PEER_MODES.includes(mode) ? getPeerPolicy(kind) : null;
+    if (mode === 'observe' && cur && cur.source !== 'env' && cur.mode !== 'observe' && config.auth.enabled) {
+      const v = verifyUserOtp(actor(req), b.otp);
+      if (!v.ok) return res.status(403).json({ ok: false, reason: v.reason, needEnroll: !!v.needEnroll, code: 'otp-required' });
+    }
     const r = runOrUnwritable(res, () => setPeerPolicy(kind, mode, { by: actor(req) }));
     if (r === undefined) return undefined;
     if (!r.ok) {

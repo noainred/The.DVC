@@ -8,6 +8,7 @@
 import { unitText } from './unitText.js';
 import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, putJson, postJson } from '../api.js';
+import { changeFailText } from './changeResult.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { Field } from './gpu-guest/shared.jsx';
 import { fmtAgo, fmtTime } from '../util/fmt.js'; // v2.613 DEPS2613-11 · v2.744(회귀 검토 GI-R2) fmtTime
@@ -220,6 +221,10 @@ export default function GpuGuestSettings() {
     try {
       const payload = applyDrafts(form, drafts, NUM_MAPS);
       const r = await putJson(settingsUrl(deployAgent), payload);
+      // 38회차 R2(반증 — 재현): 409(설정 파일을 읽지 못함) 등 실패 본문은 던지지 않고 돌아온다 — 사유를 보이고 멈춘다
+      //   (예전에는 r.settings 가 없어 toForm 이 TypeError 를 냈고 서버 사유 대신 'Cannot read properties…' 가 보였다).
+      const why = changeFailText(r);
+      if (why != null) { setMsg(`오류: ${why}`); return; }
       const settings = deployAgent ? (r.settings || payload) : r.settings;
       if (!deployAgent) setData(r);
       setForm(toForm(settings, vcs, payload));
@@ -286,6 +291,8 @@ export default function GpuGuestSettings() {
     <div style={{ maxWidth: 1280 }}>
       <div className="section-title" style={{ marginTop: 0 }}>🎮 GPU 게스트 수집</div>
       {loadErr && <div className="banner warn" style={{ marginBottom: 8 }}>설정을 다시 불러오지 못했습니다: {loadErr} — 아래는 직전에 받은 값입니다.</div>}
+      {/* 38회차 R2: 서버가 설정 파일을 읽지 못했으면(손상 · 권한) 그 사실을 밝히고 저장을 잠근다 — 빈 값이 '설정 없음' 으로 읽히지 않게. */}
+      {!deployAgent && data?.loadError && <div className="banner warn" style={{ marginBottom: 8 }}>GPU 게스트 설정 파일(gpu-guest.json)을 읽지 못했습니다 — {data.loadError.reason} · 아래 값은 비어 보일 수 있고 저장은 막혀 있습니다{data.loadError.readError ? '(파일 권한 · 소유자를 고치고 재시작하세요)' : '(서비스 점검에서 확정하거나 손상 보존본을 되돌리세요)'}.</div>}
       <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
 패스쓰루(DirectPath I/O) GPU는 ESXi가 사용률을 보지 못하고, vGPU도 VM별 사용률은 게스트에서 읽는 게 정확합니다. 선택한 <b>법인의 VM</b>에
         VMware Tools 게스트 작업으로 <code>nvidia-smi</code>를 실행해 사용률을 수집합니다.
@@ -328,7 +335,7 @@ export default function GpuGuestSettings() {
           </div>
         )}
         <div className="flex gap" style={{ alignItems: 'center', marginTop: 12 }}>
-          <button className="login-btn" style={{ flex: 'none', padding: '8px 18px' }} disabled={busy} onClick={save}>{busy ? '저장 중…' : '설정 저장'}</button>
+          <button className="login-btn" style={{ flex: 'none', padding: '8px 18px' }} disabled={busy || (!deployAgent && !!data?.loadError)} onClick={save}>{busy ? '저장 중…' : '설정 저장'}</button>
           <span className="muted" style={{ fontSize: 12 }}>수집 방식·주기·동시성 등 전역 설정을 저장합니다(아래 공용 계정도 함께).</span>
           {msg && <span className="muted" style={{ fontSize: 13 }}>{msg}</span>}
         </div>
@@ -388,7 +395,7 @@ export default function GpuGuestSettings() {
           </div>
         )}
         <div className="flex gap" style={{ alignItems: 'center', marginTop: 12 }}>
-          <button className="login-btn" style={{ flex: 'none', padding: '8px 18px' }} disabled={busy} onClick={save}>{busy ? '저장 중…' : '전역·공용 설정 저장'}</button>
+          <button className="login-btn" style={{ flex: 'none', padding: '8px 18px' }} disabled={busy || (!deployAgent && !!data?.loadError)} onClick={save}>{busy ? '저장 중…' : '전역·공용 설정 저장'}</button>
           {msg && <span className="muted" style={{ fontSize: 13 }}>{msg}</span>}
         </div>
       </div>

@@ -9,10 +9,10 @@
  *    절대 경로 · '..' 없음 · 루트(/) 아님 · 300자. 그 디렉터리에서는 번들 이름 모양의 파일만 읽는다(다른 파일의 이름 · 내용을 응답에 싣지 않는다).
  * 비밀 없음(토큰을 받지 않는다 — 인증이 필요한 미러는 지원하지 않는다). 저장은 원자적 · 손상이면 보존하고 기본값.
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../../util/atomicWrite.js';
+import { makeJsonFileReader } from '../../util/jsonFileRead.js';   // 107회차: 읽기 오류 ≠ 손상(공용 읽기 — 30초 간격 재읽기)
 import { ssrfBlockReason } from '../../util/ssrfBlock.js';
 
 const FILE = () => path.join(config.configDir, 'bareos-bundle-source.json');   // ⚠ 리터럴 형태 유지 — scripts/config-doc.mjs 가 이 모양으로 찾는다
@@ -21,13 +21,31 @@ const bad = (msg) => Object.assign(new Error(msg), { code: 'invalid' });
 let _cache = null;
 let _loadErr = '';
 
+/*
+ * 107회차(재현 — EISDIR): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 예전 catch 하나는 온전한 원본을 .corrupt 로 옮기고 빈 값 · 기본값을 캐시해
+ *   다음 저장이 원본 자리를 덮었다. 읽기 단계는 공용 읽기: 원본을 두고 · 캐시하지 않고(30초 간격 재읽기) · 저장을 거절한다(503 settingsUnreadable). parse 실패는 예전과 같다.
+ */
+const _reader = makeJsonFileReader(() => FILE(), { parse: (t) => t, preserve: false, tag: 'bareos-bundle-source' });
+let _readErr = '';
+/** 107회차: 읽기 오류 중의 저장 거절 본문(503) 또는 null. */
+export function bundleSourceWriteRefusal() {
+  load();
+  return _readErr ? { ok: false, status: 503, code: 'settingsUnreadable', readError: true, reason: `Bareos 번들 받는 곳 설정 파일(${path.basename(FILE())})을 읽지 못해 저장하지 않았습니다 — 읽기 오류(${_readErr})이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 저장이 다시 열립니다).` } : null;
+}
 function load() {
   if (_cache) return _cache;
+  const rr = _reader.read();
+  if (rr.kind === 'read-error') {   // 107회차: 기본값으로 돌되 캐시하지 않는다 — 쓰기는 거절한다
+    _readErr = String(rr.error?.code || 'read-error').slice(0, 32);
+    _loadErr = '번들 설정 파일을 읽지 못해 기본값으로 둡니다(읽기 오류 — 원본은 그대로 두었고 30초마다 다시 읽습니다).';
+    return { baseUrl: '', importDir: '' };
+  }
+  _readErr = '';
   _cache = { baseUrl: '', importDir: '' };
   _loadErr = '';
   try {
-    if (fs.existsSync(FILE())) {
-      const raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
+    if (rr.kind === 'ok') {
+      const raw = JSON.parse(rr.value);
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('형식 오류');
       // 읽을 때도 같은 판정(손으로 고친 파일이 규칙을 우회하지 않게) — 맞지 않는 칸은 비운다
       try { _cache.baseUrl = normBundleUrl(raw.baseUrl); } catch { _cache.baseUrl = ''; }
@@ -76,6 +94,8 @@ export function getBundleSource() { const c = load(); return { baseUrl: c.baseUr
  */
 export function saveBundleSource(body = {}) {
   const cur = load();
+  { const no = bundleSourceWriteRefusal(); if (no) throw Object.assign(new Error(no.reason), no, { extra: { code: no.code, readError: true } }); }   // 107회차: 읽기 오류 중에는 빈 값 · 기본값 위에 쓰지 않는다
+
   const next = { baseUrl: cur.baseUrl, importDir: cur.importDir };
   if (body.baseUrl !== undefined) next.baseUrl = normBundleUrl(body.baseUrl);
   if (body.importDir !== undefined) next.importDir = normImportDir(body.importDir);
@@ -84,4 +104,4 @@ export function saveBundleSource(body = {}) {
   return { ...next };
 }
 
-export function _resetBundleSourceForTest() { _cache = null; _loadErr = ''; }
+export function _resetBundleSourceForTest() { _cache = null; _loadErr = ''; _reader.reset(); _readErr = ''; }

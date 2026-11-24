@@ -104,11 +104,17 @@ describe('cellValue', () => {
     }
   });
 
-  it('노드/계정/풀 개수는 스냅샷이 있으면 0 도 진짜 0 으로 돌려준다', () => {
-    const empty = { id: 'x', type: 'unity480', snap: { ok: true, nodes: { count: 0 }, accounts: [], pools: [] } };
+  it('노드/계정 개수는 그 섹션을 읽었을 때(ok)만 0 도 진짜 0 · 풀은 스냅샷이 있으면 0', () => {
+    const empty = { id: 'x', type: 'unity480', snap: { ok: true, nodes: { count: 0 }, accounts: [], pools: [], sections: { nodes: 'ok', accounts: 'ok' } } };
     expect(cellValue('nodes', empty)).toBe(0);
     expect(cellValue('accounts', empty)).toBe(0);
     expect(cellValue('pools', empty)).toBe(0);
+  });
+
+  it('전체 점검 23회차 S-5 — 섹션을 못 읽었으면(skip · 오류) 노드 · 계정은 0 이 아니라 비움', () => {
+    const skip = { id: 'x', type: 'unity480', snap: { ok: true, nodes: { count: 0 }, accounts: [], sections: { nodes: 'skip', accounts: 'HTTP 401' } } };
+    expect(cellValue('nodes', skip)).toBe(null);
+    expect(cellValue('accounts', skip)).toBe(null);
   });
 
   it('VPLEX 는 클러스터/스토리지 볼륨/헬스를 돌려준다', () => {
@@ -150,7 +156,7 @@ describe('v2.514 정렬 값 — 모든 열이 정렬 가능해야 한다', () =>
     snap: {
       ok: true, name: 'ZULU-PS', version: '4.1.0.1', collectedAt: 1,
       capacity: { totalBytes: 1e12, usedBytes: 4e11, pct: 40 },
-      nodes: { count: 2 }, accounts: [{ name: 'admin' }], sections: { config: 'ok' },
+      nodes: { count: 2 }, accounts: [{ name: 'admin' }], sections: { config: 'ok', nodes: 'ok', accounts: 'ok' },
       pools: [{ name: 'p1' }],
       media: { hdd: { usedBytes: 1e11, totalBytes: 5e11, pct: 20 }, ssd: { usedBytes: 2e11, totalBytes: 4e11, pct: 50 } },
       extra: {

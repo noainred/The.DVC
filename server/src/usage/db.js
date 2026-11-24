@@ -16,6 +16,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { openSqlite, createLockRetry } from '../util/sqliteOpen.js';
 import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';
+import { dayIndex, dayStartMs } from '../util/dayKey.js';
 
 const FILE = () => path.join(config.dbDir || config.configDir, 'usage.db');
 const lockRetry = createLockRetry();
@@ -81,6 +82,8 @@ function stmts(db) {
     purgeAllDaily: db.prepare('DELETE FROM fu_daily WHERE rowid IN (SELECT rowid FROM fu_daily LIMIT ?)'),
     delUser: db.prepare('DELETE FROM fu_user WHERE user = ?'),
     delAllUsers: db.prepare('DELETE FROM fu_user'),
+    // v2.932(점검 C1-02): 마지막 사용이 보관 기간 밖인 계정 — 계정 수만큼이라(수백) 한 문장으로 지운다(청크 불필요).
+    pruneUsers: db.prepare('DELETE FROM fu_user WHERE rowid IN (SELECT rowid FROM fu_user WHERE last_ts < ? LIMIT ?)'),   // 청크(chunkedDelete — perf-db 보존 정리 규약)
   };
   _stmtsFor = db;
   return _stmts;
@@ -144,12 +147,36 @@ export async function usageDbInfo() {
   return { ok: true, size, oldest, error: '' };
 }
 
+/** 'YYYY-MM-DD'(KST 날) → 그 날 시작 epoch ms. 형식이 틀리면 NaN. */
+function dayStartOfLabel(label) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(label || ''))) return NaN;
+  const t = Date.parse(`${label}T00:00:00Z`);
+  return Number.isFinite(t) ? dayStartMs(dayIndex(t, 0)) : NaN;
+}
+
+/**
+ * v2.932(점검 C1-02): 일 집계만 지우면 `fu_user`(표시 이름 · 역할 · 마지막 사용 시각)가 영구히 남아, 퇴사한 AD 계정이 보고서
+ *   '미사용 계정' 목록에 이름 · 마지막 사용 시각과 함께 계속 나왔다(고지 문구 'N일 뒤 지워집니다' 와 어긋남). 마지막 사용이 그 날 시작보다
+ *   앞인 계정(= 그 계정의 일 집계도 전부 그 날 앞)을 같이 지운다. 로컬 계정은 accountTable 이 지금 계정 목록으로 다시 채운다(마지막 사용은 '—').
+ *   last_ts 가 NULL 인 행은 비교가 참이 아니라 남는다(시각을 모르는 행을 추측으로 지우지 않는다).
+ */
+async function pruneUsersBefore(st, day, { maxRows } = {}) {
+  const ms = dayStartOfLabel(day);
+  if (!Number.isFinite(ms)) return 0;
+  const r = await chunkedDelete(st.pruneUsers, [ms], { label: 'usage.fu_user', ...(maxRows != null ? { maxRows } : {}) });
+  return Number(r?.deleted) || 0;
+}
+
 const _pruneFlight = createPruneFlight();
-/** 보관 기간 밖(day < cutoffDay)을 청크로 지운다. */
+/** 보관 기간 밖(day < cutoffDay)을 청크로 지운다 — 일 집계 + 그 앞에서 마지막으로 쓴 계정(C1-02). */
 export async function pruneUsage(cutoffDay) {
   const db = await getUsageDb();
-  if (!db || !cutoffDay) return { deleted: 0, done: true };
-  return _pruneFlight.run(cutoffDay, () => chunkedDelete(stmts(db).pruneDaily, [cutoffDay], { label: 'usage.fu_daily' }));
+  if (!db || !cutoffDay) return { deleted: 0, done: true, users: 0 };
+  return _pruneFlight.run(cutoffDay, async () => {
+    const st = stmts(db);
+    const r = await chunkedDelete(st.pruneDaily, [cutoffDay], { label: 'usage.fu_daily' });
+    return { ...r, users: await pruneUsersBefore(st, cutoffDay) };
+  });
 }
 
 /**
@@ -169,8 +196,10 @@ export async function purgeUsage({ scope, user = '', before = '' }) {
     st.delUser.run(user);
   } else if (scope === 'before') {
     r = await chunkedDelete(st.pruneDaily, [before], { label: 'usage.purge-before', maxRows: 0 });
+    // v2.932(점검 C1-02): '이전 기록 지우기' 도 그 날 앞에서 마지막으로 쓴 계정의 이름 · 역할 · 마지막 사용을 같이 지운다.
+    r = { ...r, users: await pruneUsersBefore(st, before, { maxRows: 0 }) };
   } else return { ok: false, deleted: 0, reason: 'bad-scope' };
-  return { ok: true, deleted: r.deleted };
+  return { ok: true, deleted: r.deleted, ...(r.users != null ? { users: r.users } : {}) };
 }
 
 /** 테스트용 — 핸들을 닫고 처음 상태로. */

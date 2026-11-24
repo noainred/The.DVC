@@ -36,6 +36,19 @@ export function splitTarget(raw, { defaultPort = 443, defaultScheme = 'https' } 
   } catch (e) { return { bad: `주소를 해석하지 못했습니다(${String(e?.message || e).slice(0, 60)}).` }; }
 }
 
+/**
+ * v2.932(점검 D1-01 — 재현): load-error 표지(`registryLoadError` 류)를 내보내지 않는 등록부 → 그 등록부 **파일 이름**.
+ *   이 모듈들은 손상된 파일을 보존본(<파일>.corrupt.<시각>)으로 옮기고 빈 목록을 준다 — 그것을 '등록 0건' 으로 읽으면 설정 연동이
+ *   그 종류의 연동 대상 전부를 '설정에서 사라짐' 으로 판정했다(vcenters.json 손상 → vCenter 대상 전부 gone → 적용하면 전부 중지).
+ *   판정은 설정 메뉴 상태 배지와 같은 `settingsStatus/sources.js damaged`(파일 없음 ∧ 손상 보존본만 있음) 하나를 쓴다.
+ *   ⚠ 이름이 틀리면 늘 '정상' 이다 — 각 모듈의 FILE 과 같은 문자열이어야 한다(시험이 실제 로더로 대조한다). '파일 없음 ∧ 보존본 없음' 은
+ *   진짜 0건이라 보류가 아니다.
+ */
+export const REGISTRY_FILE_OF = Object.freeze({
+  vcenters: 'vcenters.json', nsx: 'nsx.json', horizon: 'horizon.json', deploy: 'agent-deploy-targets.json',
+  relaytopo: 'relay-topology.json', gpuPhysical: 'gpu-physical.json', capture: 'capture-monitors.json', credentials: 'credentials.json',
+});
+
 /** 대상 id — **안정적**이어야 한다(DB 기본키이고 이력이 이어진다). */
 export function targetIdOf(kind, ref) { return `${kind}|${t(ref) || '-'}`; }
 
@@ -96,15 +109,57 @@ export async function buildSettingsTargets(deps = {}) {
       const m = await import(path);
       const name = fnNames.find((n) => typeof m[n] === 'function');
       if (!name) throw new Error(`${path} 에 ${fnNames.join('/')} 중 아무 함수도 없습니다(모듈이 바뀌었습니다 — 이 등록부는 점검에서 빠집니다).`);
-      return pick(m, name) ?? [];
+      const list = pick(m, name) ?? [];
+      // v2.932(점검 D1-01): 표지 함수가 없는 모듈은 등록부 파일의 손상 보존본으로 본다(로더가 파일을 옮긴 **뒤**라야 보인다 — pick 다음).
+      if (!noteLoadError(key, m)) await noteDamagedFile(key);
+      return list;
     }, errors);
   };
+  /*
+   * v2.915(반증 M2 — 재현): 손상된 등록부는 **던지지 않고 빈 목록**을 준다(preserveCorrupt 뒤 []). 그것을 '등록 0건' 으로 읽으면 설정 연동이
+   *   그 종류의 연동 대상 전부를 '설정에서 사라짐' 으로 판정했다. 모듈이 손상 상태를 알려 주면(registryLoadError 류) sourceErrors 로 올린다
+   *   — 통신 점검 화면도 '못 읽음' 을 말한다(조용한 0건 금지 — 이 파일 머리말과 같은 원칙). 원문(파일 조각)은 싣지 않는다.
+   */
+  const LOAD_ERROR_REASON = '등록부 파일을 읽지 못했습니다(손상본을 보존했습니다) — 이 출처의 항목이 빠졌을 수 있습니다.';
+  /** @returns {boolean} 모듈이 load-error 표지 함수를 갖고 있는가(있으면 그 판정이 진실 — 파일 판정을 겹쳐 보지 않는다) */
+  function noteLoadError(key, m) {
+    for (const fn of ['registryLoadError', 'emRegistryLoadError', 'settingsLoadError', 'isiduSettingsLoadError']) {
+      if (typeof m?.[fn] !== 'function') continue;
+      let bad = null;
+      try { bad = m[fn](); } catch { bad = null; }
+      if (bad) errors.push({ source: key, reason: LOAD_ERROR_REASON });
+      return true;
+    }
+    return false;
+  }
+  let damagedFile = null;
+  async function noteDamagedFile(key) {
+    const file = REGISTRY_FILE_OF[key];
+    if (!file) return;
+    try {
+      damagedFile ||= (await import('../settingsStatus/sources.js')).damaged;
+      if (damagedFile(file)) errors.push({ source: key, reason: LOAD_ERROR_REASON });
+    } catch (e) { console.warn(`[linkcheck] 등록부 손상 판정 실패(${key}): ${String(e?.message || e).slice(0, 120)}`); }
+  }
 
   /* ── 가상화 ───────────────────────────────────────────────────────────── */
+  /*
+   * v2.915(설정 연동 — 정직 정정): vCenter 등록부(vcenter/registry.js normalize)에는 `remoteAgent` 필드가 **없다** — 예전 코드는
+   *   현지 수집(site) vCenter 의 담당 엣지를 늘 빈 값으로 읽었다. 담당 엣지는 스냅샷이 관측한 push 엣지(`collectedBy`)로 보완한다
+   *   (commmap/build.js 의 '등록값 → 관측값' 순서와 같다). 스냅샷을 못 읽으면 빈 값 — 지어내지 않는다.
+   */
+  const observedBy = new Map();
+  {
+    const snap = deps.snapshot !== undefined ? deps.snapshot
+      : await (async () => { try { return (await import('../store.js')).store.get(); } catch { return null; } })();
+    for (const sv of (Array.isArray(snap?.vcenters) ? snap.vcenters : [])) {
+      if (t(sv?.id) && t(sv?.collectedBy)) observedBy.set(t(sv.id), t(sv.collectedBy));
+    }
+  }
   for (const v of await load('vcenters', '../vcenter/registry.js', ['listRegistry'], (m, n) => m[n]())) {
     push(makeTarget('set:vcenter', {
       ref: t(v.id), name: t(v.name) || t(v.id), address: v.host, vcenterId: t(v.id), enabled: v.enabled !== false,
-      agent: t(v.collectMode) === 'site' ? t(v.remoteAgent) : '',
+      agent: t(v.collectMode) === 'site' ? (t(v.remoteAgent) || observedBy.get(t(v.id)) || '') : '',
       facts: { collectMode: t(v.collectMode) || 'direct', username: t(v.username), hasPassword: v.hasPassword !== false },
     }));
   }
@@ -161,7 +216,8 @@ export async function buildSettingsTargets(deps = {}) {
     push(makeTarget(kind, {
       ref: t(s.id), name: t(s.name) || t(s.id), address: s.host, vcenterId: t(s.vcenterId), enabled: s.enabled !== false,
       agent: t(s.remoteAgent) || t(s.agent),
-      facts: { type: t(s.type) || 'idrac', username: t(s.username), serviceTag: t(s.serviceTag) },
+      // v2.960(쉬운 등록 C): 등록부의 소속 법인(datacenterId) — Monitoring 설정 연동의 법인 판정(svcmon/settingsSync.js corpOf)이 쓴다.
+      facts: { type: t(s.type) || 'idrac', username: t(s.username), serviceTag: t(s.serviceTag), datacenterId: t(s.datacenterId) },
     }));
   }
   for (const b of await load('bmstor', '../bmstor/registry.js', ['listBmServers'], (m, n) => m[n]())) {
@@ -192,14 +248,83 @@ export async function buildSettingsTargets(deps = {}) {
       ref: t(d.id), name: t(d.name) || t(d.host), address: d.host,
       port: rest ? (Number(d.httpsPort) || 443) : (Number(d.sshPort) || 22),
       agent: t(d.agent), enabled: d.enabled !== false,
-      facts: { type: t(d.type), collectMethod: t(d.collectMethod) || 'ssh', username: t(d.username), vfId: d.vfId ?? null },
+      // v2.960(쉬운 등록 C): 등록부의 소속 법인(datacenterId) — 예전에는 싣지 않아 설정 연동에서 SAN 스위치가 전부 '전역' 이었다(데모 86/86).
+      facts: { type: t(d.type), collectMethod: t(d.collectMethod) || 'ssh', username: t(d.username), vfId: d.vfId ?? null, datacenterId: t(d.datacenterId) },
     }));
   }
   for (const d of await load('pdu', '../pdu/registry.js', ['listDevices'], (m, n) => m[n]())) {
+    // v2.915: PDU 는 SSH 로 수집한다 — 등록된 sshPort(기본 22)를 잰다(예전에는 관리 웹 443 을 찔렀다).
     push(makeTarget('set:pdu', {
-      ref: t(d.id), name: t(d.name) || t(d.host), address: d.host, agent: t(d.agent), vcenterId: t(d.datacenterId), enabled: d.enabled !== false,
-      facts: { username: t(d.username), model: t(d.model) },
+      ref: t(d.id), name: t(d.name) || t(d.host), address: d.host, port: Number(d.sshPort) || 22,
+      agent: t(d.agent), vcenterId: t(d.datacenterId), enabled: d.enabled !== false,
+      facts: { username: t(d.username), model: t(d.model), sshPort: Number(d.sshPort) || 22 },
     }));
+  }
+  /* ── v2.915(설정 연동): 카탈로그에 없던 등록부 — CVP · Veeam · Veeam EM · Bareos Director · 아이실론 직접 대상 · LLM ── */
+  for (const c of await load('cvp', '../cvp/registry.js', ['listServers'], (m, n) => m[n]())) {
+    push(makeTarget('set:cvp', {
+      ref: t(c.id), name: t(c.name) || t(c.host), address: c.host, agent: t(c.agent), vcenterId: t(c.datacenterId), enabled: c.enabled !== false,
+      facts: { authMode: t(c.authMode), hasToken: !!c.hasToken, hasPassword: !!c.hasPassword },
+    }));
+  }
+  for (const v of await load('veeam', '../veeam/registry.js', ['listServers'], (m, n) => m[n]())) {
+    const vcs = Array.isArray(v.vcenterIds) ? v.vcenterIds.map(t).filter(Boolean) : [];
+    push(makeTarget('set:veeam', {
+      ref: t(v.id), name: t(v.name) || t(v.host), address: v.host, port: Number(v.port) || 9419, agent: t(v.agent),
+      vcenterId: vcs[0] || '', enabled: v.enabled !== false,
+      facts: { vcenterIds: vcs.slice(0, 20), username: t(v.username), hasPassword: !!v.hasPassword },
+    }));
+  }
+  for (const e of await load('veeamEm', '../veeam/em/registry.js', ['listEms'], (m, n) => m[n]())) {
+    push(makeTarget('set:veeam-em', {
+      ref: t(e.id), name: t(e.name) || t(e.host), address: e.host, port: Number(e.port) || 9398, agent: t(e.agent), enabled: e.enabled !== false,
+      facts: { username: t(e.username), hasPassword: !!e.hasPassword },
+    }));
+  }
+  {
+    // ⚠ publicSettings(비밀 제거본)만 읽는다 — loadSettings 는 Director 비밀번호를 담는다.
+    const bs = deps.bareos || (await safe('bareos', async () => {
+      const m = await import('../bareos/settings.js');
+      if (typeof m.publicSettings !== 'function') throw new Error('bareos/settings.js 에 publicSettings 가 없습니다(모듈이 바뀌었습니다).');
+      const v = m.publicSettings();
+      noteLoadError('bareos', m);
+      return v;
+    }, errors)) || {};
+    const sites = Array.isArray(bs.sites) ? bs.sites : [];
+    for (const d of (Array.isArray(bs.directors) ? bs.directors : [])) {
+      if (!t(d?.host)) continue;
+      const vcs = sites.filter((x) => t(x?.directorId) === t(d.id)).map((x) => t(x.vcenterId)).filter(Boolean);
+      push(makeTarget('set:bareos-dir', {
+        ref: t(d.id), name: t(d.name) || t(d.host), address: d.host, port: Number(d.port) || 9101, agent: t(d.agent),
+        vcenterId: vcs[0] || '',
+        facts: { vcenterIds: vcs.slice(0, 20), consoleName: t(d.consoleName) },
+      }));
+    }
+  }
+  {
+    // 장치 연결(deviceId) 대상은 스토리지 등록부 항목과 같은 장비라 빼고, 주소를 직접 적은 대상만 싣는다(중복 측정 방지).
+    const isd = deps.isidu || (await safe('isidu', async () => {
+      const m = await import('../isidu/settings.js');
+      if (typeof m.loadSettings !== 'function') throw new Error('isidu/settings.js 에 loadSettings 가 없습니다(모듈이 바뀌었습니다).');
+      const v = m.loadSettings();
+      noteLoadError('isidu', m);
+      return v;
+    }, errors)) || {};
+    for (const x of (Array.isArray(isd.targets) ? isd.targets : [])) {
+      if (!x || x.deviceId || !t(x.host)) continue;
+      push(makeTarget('set:isidu-host', {
+        ref: t(x.id) || t(x.host), name: t(x.label) || t(x.host), address: x.host, port: Number(x.port) || 22,
+        agent: t(x.agent), vcenterId: t(x.datacenterId), enabled: x.enabled !== false,
+        facts: { path: t(x.path).slice(0, 200), auth: t(x.auth) },
+      }));
+    }
+  }
+  {
+    const llm = deps.llm || (await safe('llm', async () => (await import('../llm/config.js')).loadLlmConfig(), errors)) || {};
+    // 꺼져 있으면 싣지 않는다 — 기본값(http://localhost:11434)이 늘 보여 '설정한 것' 처럼 읽힌다.
+    if (llm.enabled === true && t(llm.url)) {
+      push(makeTarget('set:llm', { ref: 'llm', name: `LLM (${t(llm.provider) || 'ollama'})`, address: llm.url, facts: { model: t(llm.model) } }));
+    }
   }
 
   /* ── 원격접속 · 캡처 · 통합 계정 ───────────────────────────────────────── */

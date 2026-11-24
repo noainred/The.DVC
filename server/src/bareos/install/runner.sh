@@ -254,7 +254,8 @@ step3() {
   local V="$P$VOLUME_DIR"
   if [ ! -d "$V" ]; then run "볼륨 디렉터리 만들기" install -d -o bareos -g bareos -m 0750 "$V" || return 1; jr voldir "$V"; fi
   if [ "$V" != "$DEFAULT_STORE" ] && command -v getenforce >/dev/null 2>&1 && [ "$(getenforce 2>/dev/null)" != Disabled ]; then
-    if ! semanage fcontext -l -C 2>/dev/null | grep -Fq "$VOLUME_DIR"; then
+    # 전체 점검 10회차(B-22): 첫 칸이 정확히 이 경로인 줄만 본다 — 부분 문자열(grep -F)이면 '/data/bareos-old' 규칙이 있을 때 '/data/bareos' 규칙을 넣지 않았다
+    if ! semanage fcontext -l -C 2>/dev/null | awk -v d="$VOLUME_DIR" '$1==d{f=1} END{exit !f}'; then
       run "SELinux 문맥(semanage fcontext -e)" semanage fcontext -a -e /var/lib/bareos/storage "$VOLUME_DIR" || return 1
       jr fcontext "$VOLUME_DIR"
     fi

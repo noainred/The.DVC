@@ -29,7 +29,7 @@ function MoveBars({ series }) {
   return (
     <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 48, minWidth: 0 }} aria-label="하루 이동 횟수">
       {series.map((s) => (
-        <div key={s.day} title={`${new Date(s.day).toLocaleDateString('ko-KR')} · ${s.moves}회`}
+        <div key={s.day} title={`${new Date(s.day).toLocaleDateString('ko-KR')}${s.partialFrom ? ` ${new Date(s.partialFrom).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}부터(기간 첫날)` : ''} · ${s.moves}회`}
           style={{ flex: '1 1 0', minWidth: 2, height: s.moves ? `${Math.max(4, (s.moves / max) * 100)}%` : 1,
             background: s.moves ? 'var(--accent)' : 'var(--border)' }} />
       ))}

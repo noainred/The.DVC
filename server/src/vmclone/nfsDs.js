@@ -11,10 +11,10 @@
  *  · ESXi 에서 데이터스토어를 **떼어 내는 기능은 없다**(사본이 남아 있을 수 있다 — vCenter 에서 직접). 삭제는 이 목록에서만 지운다.
  */
 
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { makeJsonFileLoader } from '../util/jsonFileLoad.js';   // 결정(56~75 남긴 것) 65 ②
 import { validateNfsDsSpec } from './vsphere.js';
 
 const FILE = path.join(config.configDir, 'vm-clone-nfsds.json');
@@ -22,16 +22,19 @@ export const MAX_ITEMS = 200;
 const MAX_HOSTS = 500;
 
 let _db = null;
+/*
+ * 결정(56~75 남긴 것) 65 ②(65회차 남긴 것): 읽기 오류(EACCES · EIO)도 손상으로 보고 preserveCorrupt 로 옮긴 뒤 빈 목록에서 시작해, 다음 정의 추가가
+ *   빈 목록으로 덮었다. 이제 공용 로더 — 읽기 오류는 원본을 두고 캐시하지 않으며(30초 간격 재읽기) · 손상은 보존 + 서비스 점검 등재 ·
+ *   오류 중 정의 추가는 거절(settings-unreadable — 라우트 409) · 연결 결과 반영 · 삭제는 빈 목록이라 대상을 못 찾아 쓰지 않는다 · 목록 응답 표지.
+ */
+const _file = makeJsonFileLoader(() => FILE, { label: 'VM 백업 — NFS 데이터스토어 정의(vm-clone-nfsds.json) — 확정하면 정의 목록이 비워집니다(ESXi 의 데이터스토어는 그대로)', confirm: () => { atomicWriteFileSync(FILE, JSON.stringify({ version: 1, items: [] }, null, 2), { mode: 0o600 }); _db = { items: [] }; _file.saved(); }, tag: 'vm-clone' });
+/** 정의 파일을 못 읽었으면 { reason, at, readError }, 아니면 null(목록 응답 표지). */
+export function nfsDsLoadError() { load(); return _file.marker(); }
 function load() {
-  if (_db) return _db;
-  try {
-    if (fs.existsSync(FILE)) {
-      const p = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-      _db = { items: Array.isArray(p?.items) ? p.items : [] };
-      return _db;
-    }
-  } catch { preserveCorrupt(FILE); }
-  _db = { items: [] };
+  if (_db && !_file.recheckDue()) return _db;   // 결정 G2 반증 후속 ③: 오류 중에는 캐시를 믿지 않고 30초마다 다시 판정(보존본을 되돌리면 재시작 없이 풀린다)
+  const r = _file.load();
+  if (r.kind === 'read-error') return { items: [] };   // 65 ②: 캐시하지 않는다 — 이 빈 목록은 쓰기에 쓰이지 않는다(createNfsDs 거절 · 나머지는 대상 없음)
+  _db = { items: r.kind === 'ok' && Array.isArray(r.value?.items) ? r.value.items : [] };
   return _db;
 }
 function persist() { atomicWriteFileSync(FILE, JSON.stringify({ version: 1, items: load().items }, null, 2), { mode: 0o600 }); }
@@ -43,6 +46,7 @@ export function getNfsDs(id) { const x = load().items.find((i) => i.id === id); 
 /** 정의 추가 — 같은 vCenter 에 같은 이름은 하나(데이터스토어 이름은 vCenter 안에서 유일하다). */
 export function createNfsDs({ vcenterId, ...spec } = {}, by = '') {
   const db = load();
+  { const no = _file.refusal('VM 백업 NFS 데이터스토어 정의'); if (no) throw Object.assign(new Error(no.reason), { code: no.code }); }   // 65 ②
   const vc = String(vcenterId ?? '').trim().slice(0, 200);
   if (!vc) throw new Error('vCenter 를 고르세요');
   const s = validateNfsDsSpec(spec);
@@ -99,4 +103,4 @@ export function deleteNfsDs(id) {
   return true;
 }
 
-export function _resetNfsDsForTest() { _db = null; }
+export function _resetNfsDsForTest() { _db = null; _file.resetRetry(); }

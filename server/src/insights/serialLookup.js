@@ -16,6 +16,7 @@
  *    다시 만들 수 없다.
  */
 
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { analysisServersWithRemote, invForServer } from './analysisServers.js'; // v2.579: ARCH-04
 import { allOmeDevices, dbKey as omeDbKey } from '../idrac/omeCache.js';
 import { store } from '../store.js';
@@ -39,7 +40,7 @@ export const KINDS = [
   { key: 'bm-edge', label: '엣지 베어메탈', icon: '💽' },
 ];
 
-const CACHE_MS = Math.max(5_000, Number(process.env.SERIAL_INDEX_CACHE_MS) || 30_000);
+const CACHE_MS = Math.max(5_000, envPositive(process.env.SERIAL_INDEX_CACHE_MS, 30_000));
 const REFRESH_MIN_MS = 10_000; // ?refresh=1 최소 간격
 let _cache = null; // { at, rows }
 
@@ -48,7 +49,8 @@ let _cache = null; // { at, rows }
  * WWN 을 `10:00:00:05` 로 적힌 대로만 찾게 하면, 사람이 자산대장에서 복사한
  * `1000000517` 이나 대시 표기가 안 걸린다. 표시용 원문은 그대로 두고 **검색 키만** 정규화한다.
  */
-export const normKey = (v) => String(v ?? '').toLowerCase().replace(/[\s:_.-]/g, '');
+import { normKey } from './serialKey.js';
+export { normKey };
 
 /** 한 행 만들기. serial 이 비면 null 을 돌려 호출부가 건너뛴다(빈 시리얼 행을 만들지 않는다). */
 function row(kind, serial, fields) {

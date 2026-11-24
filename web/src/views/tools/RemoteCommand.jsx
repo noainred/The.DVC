@@ -1,11 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useHashTab } from '../../hooks/useHashTab.js';
-import { fetchJson, postJson, putJson, delJson, usePolling } from '../../api.js';
+import { fetchJson, postJson, putJson, delJson, usePolling, getCurrentUser } from '../../api.js';
 // v2.731(A5-01): putJson·delJson 은 400·409 를 던지지 않고 본문을 돌려준다 — 성공 문구 전에 판정한다.
 import { requireChanged } from '../changeResult.js';
+import { unreadMarkOf, unreadKind, staleSeedLock } from '../settingsUnread.js';   // 112회차: 못 읽은 동안의 빈 설정 폼으로 저장하지 않는다
+import { SettingsUnreadBanner } from '../SettingsUnreadBanner.jsx';
 import { Loading, ErrorBox, Kpi, Modal } from '../../components/ui.jsx';
 import { rmaLateMark } from './edgeLateText.js'; // v2.631 A6-2631-04: 늦게 도착한 결과 배지
-import { ago, durationText, uptimeText, agentStatus, resultSummary, defaultArgs, argsIssue, groupCatalog, modeLabel, targetHint, statusTone, statusLabel } from './remoteCommand.js';
+import { ago, durationText, uptimeText, agentStatus, resultSummary, defaultArgs, argsIssue, groupCatalog, modeLabel, targetHint, statusTone, statusLabel, ownerOtpGate, otpInput, OWNER_OTP_ALWAYS } from './remoteCommand.js';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import DataList from '../../components/DataList.jsx';
@@ -55,6 +57,7 @@ export default function RemoteCommand() {
   return (
     <div>
       <div className="section-title">🖥️ 원격 명령 실행 (RMA — Remote Management Agent)</div>
+      <SettingsUnreadBanner le={unreadMarkOf(data)} what="RMA 분배 · 접속 허용 설정" save="설정(⚙️)의 저장" />
       <p className="muted" style={{ marginTop: 4 }}>
         엣지 서버의 별도 프로세스(<code>vmware-portal-rma@인스턴스</code>)가 중앙을 롱폴해 프리셋 명령을 실행하고 결과만 회신합니다(아웃바운드 전용).
         한 법인에 인스턴스를 여러 개 두면 분배 방식(Active-Active · 부하 분산 · Active-Backup)을 법인별로 고릅니다. 모든 실행은 감사로그에 남습니다.
@@ -90,9 +93,10 @@ export default function RemoteCommand() {
                 <tr key={g.agent}>
                   <td><b>{g.agent}</b></td>
                   <td style={{ color: st === 'online' ? TONE.ok : st === 'offline' ? TONE.bad : TONE.muted }}>{st === 'online' ? '온라인' : st === 'offline' ? '오프라인' : '미배포'}</td>
-                  <td>
+                  {/* v2.977(전체 점검): 인스턴스 칸이 한 줄로 이어져(913px) 1440px 에서 분배 · 대기 · 보안 · 동작 단추가 가로 스크롤 뒤로 숨었다 — 줄바꿈을 허용한다 */}
+                  <td style={{ whiteSpace: 'normal', minWidth: 300, maxWidth: 560 }}>
                     {(g.instances || []).length ? g.instances.map((i) => (
-                      <div key={i.instance} title={`${i.hostname || ''} · v${i.version || '?'} · ${i.os || ''} · pid ${i.pid || '?'} · 가동 ${uptimeText(i.uptimeSec)}${i.ip ? ` · ${i.ip}` : ''}`}>
+                      <div key={i.instance} style={{ overflowWrap: 'anywhere' }} title={`${i.hostname || ''} · v${i.version || '?'} · ${i.os || ''} · pid ${i.pid || '?'} · 가동 ${uptimeText(i.uptimeSec)}${i.ip ? ` · ${i.ip}` : ''}`}>
                         <Dot on={i.online} title={i.online ? '온라인' : `오프라인 (${ago(i.lastSeen)})`} />
                         <code>{i.instance}</code>
                         {g.mode === 'active-backup' && g.activePrimary === i.instance && <span className="badge" style={{ marginLeft: 4 }}>주</span>}
@@ -103,12 +107,16 @@ export default function RemoteCommand() {
                   </td>
                   <td>{(g.instances || []).length ? modeLabel(g.mode, data?.settings?.modes) : '—'}{g.primary ? <span className="muted"> · 주 {g.primary}</span> : null}</td>
                   <td>{g.pending || 0}</td>
-                  <td>{g.hasPassword ? <span style={{ color: TONE.ok }}>서명</span> : <span style={{ color: TONE.warn }} title="법인 비밀번호 미등록 — 토큰만으로 명령이 실행됩니다">무서명</span>}</td>
+                  <td style={{ whiteSpace: 'normal', minWidth: 0 }}>{g.hasPassword ? <span style={{ color: TONE.ok, whiteSpace: 'nowrap' }}>서명</span> : <span style={{ color: TONE.warn, whiteSpace: 'nowrap' }} title="법인 비밀번호 미등록 — 토큰만으로 명령이 실행됩니다">무서명</span>}
+                    {/* 결정(56~75) 64 F7: 스케줄의 외부 스크립트 · SSH 점검이 서명 문제로 멈췄으면 그 사실(문구는 서버 scheduleSignNote) */}
+                    {g.scheduleSignNote && <div style={{ color: TONE.warn, fontSize: 12, maxWidth: 280 }}>⚠ {g.scheduleSignNote}</div>}</td>
                   <td className="muted">{ago(g.lastSeen)}</td>
-                  <td className="flex gap">
-                    <button className="tab" disabled={st === 'none'} onClick={() => setRun({ agent: g.agent })}>▶ 실행</button>
-                    <button className="tab" onClick={() => setCfg(g)}>설정</button>
-                    <button className="tab" onClick={() => setDeploy({ agent: g.agent })}>배포</button>
+                  <td>
+                    <div className="flex gap" style={{ flexWrap: 'wrap' }}>
+                      <button className="tab" disabled={st === 'none'} onClick={() => setRun({ agent: g.agent })}>▶ 실행</button>
+                      <button className="tab" onClick={() => setCfg(g)}>설정</button>
+                      <button className="tab" onClick={() => setDeploy({ agent: g.agent })}>배포</button>
+                    </div>
                   </td>
                 </tr>
               );
@@ -144,7 +152,7 @@ export default function RemoteCommand() {
       </>}
 
       {run && <RunModal group={groups.find((g) => g.agent === run.agent)} catalog={data?.catalog || []} modes={data?.settings?.modes || []} onClose={() => { setRun(null); setRefreshTick((t) => t + 1); }} />}
-      {cfg && <SettingsModal group={cfg} modes={data?.settings?.modes || []} defaultMode={data?.settings?.defaultMode} onClose={() => setCfg(null)} />}
+      {cfg && <SettingsModal group={cfg} modes={data?.settings?.modes || []} defaultMode={data?.settings?.defaultMode} unread={unreadMarkOf(data)} onClose={() => setCfg(null)} />}
       {deploy && <DeployModal preset={deploy} groups={groups} onClose={() => setDeploy(null)} />}
       {view && (
         <Modal title={`${view.agent} · ${view.label || view.cmd}`} onClose={() => setView(null)} width={860}>
@@ -185,15 +193,17 @@ function RunModal({ group, catalog, modes, onClose }) {
   const creds = useCredentials(group?.agent);
   const [instance, setInstance] = useState('');
   const [timeoutS, setTimeoutS] = useState('');
+  const [otp, setOtp] = useState('');          // 결정(56~75): 상태 변경 · 임의 실행 명령의 본인 OTP(1회용 — 보낸 뒤 비운다)
   const [state, setState] = useState(null);   // { reqId, phase, job, err }
   const pollRef = useRef(null);
   const preset = catalog.find((p) => p.id === cmd);
   const onlineInst = (group?.instances || []).filter((i) => i.online);
   const customBlocked = preset?.shell && !!group && !(instance ? group.instances.find((i) => i.instance === instance)?.allowCustom : group.instances.some((i) => i.online && i.allowCustom));
+  const gate = ownerOtpGate(preset, getCurrentUser(), args);   // 반증 G1a: http-request 는 POST · 본문이면 위험 등급(인수로 판정)
 
   useEffect(() => () => { if (pollRef.current) clearTimeout(pollRef.current); }, []);
 
-  const pick = (id) => { setCmd(id); setArgs(defaultArgs(catalog.find((p) => p.id === id))); setState(null); };
+  const pick = (id) => { setCmd(id); setArgs(defaultArgs(catalog.find((p) => p.id === id))); setState(null); setOtp(''); };
 
   const submit = async () => {
     const isSsh = preset?.id === 'ssh-exec';
@@ -202,10 +212,14 @@ function RunModal({ group, catalog, modes, onClose }) {
     if (issue) { setState({ err: issue }); return; }
     if (isSsh && useStored && !sendArgs.credentialId) { setState({ err: '저장된 계정을 고르세요(통합 계정 관리에서 등록).' }); return; }
     if (isSsh && !useStored && (!secret.username || !secret.password)) { setState({ err: '1회 입력 계정의 ID/비밀번호를 입력하세요.' }); return; }
-    if (preset?.danger && !window.confirm(`'${preset.label}' 은 상태를 바꾸는 명령입니다. ${group.agent}${instance ? `/${instance}` : ''} 에서 실행할까요?`)) return;
+    if (gate.locked) { setState({ err: gate.reason }); return; }
+    if (gate.otp && otp.length !== 6) { setState({ err: '이 명령은 본인 OTP(6자리)가 필요합니다.' }); return; }
+    if ((preset?.danger || gate.need) && !window.confirm(`'${preset.label}' 은 상태를 바꾸는 명령입니다. ${group.agent}${instance ? `/${instance}` : ''} 에서 실행할까요?`)) return;
     setState({ phase: 'submit' });
     try {
-      const r = await postJson('/tools/rma/run', { agent: group.agent, instance, cmd, args: sendArgs, timeoutMs: timeoutS ? Number(timeoutS) * 1000 : undefined, ...(isSsh && !useStored ? { secret } : {}) });
+      const sentOtp = gate.otp ? otp : '';
+      setOtp('');
+      const r = await postJson('/tools/rma/run', { agent: group.agent, instance, cmd, args: sendArgs, timeoutMs: timeoutS ? Number(timeoutS) * 1000 : undefined, ...(isSsh && !useStored ? { secret } : {}), ...(sentOtp ? { otp: sentOtp } : {}) });
       setState({ phase: 'wait', reqId: r.reqId, target: r.target, signed: r.signed });
       const started = Date.now();
       const poll = async () => {
@@ -270,8 +284,15 @@ function RunModal({ group, catalog, modes, onClose }) {
       ))}
       {preset?.shell && <div className="card muted" style={{ borderColor: TONE.warn }}>자유 명령은 엣지 portal.env 의 <code>RMA_ALLOW_CUSTOM=true</code> 인 인스턴스에서만 실행됩니다.{customBlocked ? ' 현재 선택 범위의 온라인 인스턴스 중 허용된 곳이 없습니다 — 엣지가 거부 사유를 회신합니다.' : ''}</div>}
       {preset?.sudo && <div className="muted">sudo 규칙(install.sh 가 설치한 /etc/sudoers.d/vmware-portal-rma)이 필요합니다.</div>}
-      <div className="flex gap" style={{ marginTop: 8 }}>
-        <button className="login-btn" disabled={state?.phase === 'submit' || state?.phase === 'wait' || state?.phase === 'pending' || state?.phase === 'running'} onClick={submit}>실행</button>
+      {gate.locked && <div className="card muted" style={{ borderColor: TONE.warn, marginTop: 6 }}>🔒 {gate.reason}</div>}
+      {gate.need && !gate.locked && gate.otp && (
+        <div className="flex gap wrap" style={{ alignItems: 'center', marginTop: 6 }}>
+          <label>본인 OTP <input className="input" style={{ width: 110 }} inputMode="numeric" autoComplete="one-time-code" value={otp} onChange={(e) => setOtp(otpInput(e.target.value))} placeholder="6자리" /></label>
+          <span className="muted" style={{ fontSize: 12 }}>상태를 바꾸거나 임의로 실행하는 명령이라 설정 소유자 등급 + 본인 OTP 로만 보냅니다.</span>
+        </div>
+      )}
+      <div className="flex gap" style={{ marginTop: 8, flexWrap: 'wrap' }}>
+        <button className="login-btn" disabled={gate.locked || state?.phase === 'submit' || state?.phase === 'wait' || state?.phase === 'pending' || state?.phase === 'running'} onClick={submit}>실행</button>
         {state?.phase && state.phase !== 'done' && <span className="muted">{state.phase === 'pending' || state.phase === 'wait' ? `인출 대기 중${state.target ? ` (배정: ${state.target})` : ''}…` : state.phase === 'running' ? `실행 중 (${state.job?.instance || ''})…` : '요청 중…'}</span>}
         {state?.signed === false && state?.phase && <span style={{ color: TONE.warn }}>무서명 요청</span>}
       </div>
@@ -281,10 +302,16 @@ function RunModal({ group, catalog, modes, onClose }) {
   );
 }
 
-function SettingsModal({ group, modes, defaultMode, onClose }) {
+function SettingsModal({ group, modes, defaultMode, unread = null, onClose }) {
+  // 112회차: 서버가 분배 · 접속 허용 설정을 못 읽은 동안 연 창은 빈 값(분배 ‘전역 기본’ · 접속 허용 IP 없음 · 원격 관리 없음)으로 채워진다 — 이 창은 폼을 다시 채우지 않으므로
+  //   다시 읽힌 뒤에도 그 창의 저장은 잠근다(빈 ‘접속 허용 IP’ 저장 = 허용 목록이 ‘제한 없음’ 이 된다). 닫고 다시 열면 저장된 값이 보인다. 비밀번호(다른 파일)는 그대로.
+  const [openedKind] = useState(() => unreadKind(unread));
+  const lockWhy = staleSeedLock(openedKind, unread, { what: 'RMA 분배 · 접속 허용 설정' });
   const [mode, setMode] = useState(group.global ? (defaultMode || 'active-active') : (group.modeExplicit ? group.mode : ''));
   const [primary, setPrimary] = useState(group.primary || '');
   const [pw, setPw] = useState('');
+  const [pwOtp, setPwOtp] = useState('');   // 반증 G1a: 비밀번호 설정 · 해제는 소유자 등급 + 본인 OTP(1회용 — 보낸 뒤 비운다)
+  const pgate = ownerOtpGate(OWNER_OTP_ALWAYS, getCurrentUser());
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
   const [ips, setIps] = useState((group.allowedIps || []).join(', '));
@@ -311,9 +338,13 @@ function SettingsModal({ group, modes, defaultMode, onClose }) {
   };
   const savePw = async (clear) => {
     setErr(''); setMsg('');
+    if (pgate.locked) { setErr(pgate.reason); return; }
+    if (pgate.otp && pwOtp.length !== 6) { setErr('RMA 비밀번호 설정 · 해제는 본인 OTP(6자리)가 필요합니다.'); return; }
+    const sentOtp = pgate.otp ? pwOtp : '';
+    setPwOtp('');
     try {
       // v2.731(A5-01): 400(제어 문자·256자 초과·암호화 정책 잠금)을 성공으로 읽으면 hasPassword 가 없어 '해제했습니다' 라는 반대 방향의 거짓이 됐다.
-      const r = requireChanged(await putJson(`/tools/rma/agents/${encodeURIComponent(group.agent)}/password`, { password: clear ? '' : pw }));
+      const r = requireChanged(await putJson(`/tools/rma/agents/${encodeURIComponent(group.agent)}/password`, { password: clear ? '' : pw, ...(sentOtp ? { otp: sentOtp } : {}) }));
       setMsg(r.hasPassword ? '비밀번호를 등록했습니다 — 이후 명령은 서명되어 전송됩니다(엣지 RMA_PASSWORD 와 같아야 합니다).' : '비밀번호를 해제했습니다(무서명).');
       setPw('');
     } catch (e) { setErr(e.message); }
@@ -339,15 +370,18 @@ function SettingsModal({ group, modes, defaultMode, onClose }) {
           </label>
         </div>
       )}
-      <button className="login-btn" onClick={save}>저장</button>
+      {lockWhy && <div className="banner warn" data-settings-unread-lock="1" style={{ whiteSpace: 'normal', marginBottom: 8, fontSize: 12.5 }}>🔒 {lockWhy}</div>}
+      <button className="login-btn" disabled={!!lockWhy} onClick={save}>저장</button>
       {!group.global && (
         <div className="card" style={{ marginTop: 12 }}>
           <b>RMA 비밀번호(서명)</b> — 현재 {group.hasPassword ? <span style={{ color: TONE.ok }}>등록됨</span> : <span style={{ color: TONE.warn }}>미등록(무서명)</span>}
           <div className="muted">엣지 portal.env 의 <code>RMA_PASSWORD</code> 와 같은 값을 넣습니다. 값은 화면·감사로그에 표시되지 않습니다.</div>
-          <div className="flex gap" style={{ marginTop: 6 }}>
+          {pgate.locked && <div className="muted" style={{ color: TONE.warn, marginTop: 6 }}>🔒 {pgate.reason}</div>}
+          <div className="flex gap" style={{ marginTop: 6, flexWrap: 'wrap' }}>
             <input className="input" type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="비밀번호" />
-            <button className="tab" disabled={!pw} onClick={() => savePw(false)}>등록</button>
-            <button className="tab" disabled={!group.hasPassword} onClick={() => savePw(true)}>해제</button>
+            {pgate.otp && !pgate.locked && <input className="input" style={{ width: 110 }} inputMode="numeric" autoComplete="one-time-code" value={pwOtp} onChange={(e) => setPwOtp(otpInput(e.target.value))} placeholder="본인 OTP" />}
+            <button className="tab" disabled={!pw || pgate.locked} onClick={() => savePw(false)}>등록</button>
+            <button className="tab" disabled={!group.hasPassword || pgate.locked} onClick={() => savePw(true)}>해제</button>
           </div>
         </div>
       )}
@@ -358,7 +392,7 @@ function SettingsModal({ group, modes, defaultMode, onClose }) {
           <div className="flex gap wrap" style={{ marginTop: 6 }}>
             <input className="input" style={{ minWidth: 300 }} value={ips} onChange={(e) => setIps(e.target.value)} placeholder="10.0.0.0/8, 203.0.113.5" />
             <input className="input" value={comment} onChange={(e) => setComment(e.target.value)} placeholder="코멘트(중앙 표시용)" />
-            <button className="tab" onClick={saveAccess}>저장</button>
+            <button className="tab" disabled={!!lockWhy} onClick={saveAccess}>저장</button>
           </div>
         </div>
       )}
@@ -369,7 +403,7 @@ function SettingsModal({ group, modes, defaultMode, onClose }) {
             <label>롱폴(ms) <input className="input" style={{ width: 90 }} value={remote.longpollMs} onChange={(e) => setRemote({ ...remote, longpollMs: e.target.value.replace(/\D/g, '') })} placeholder="20000" /></label>
             <label>동시 점검 <input className="input" style={{ width: 60 }} value={remote.testConcurrency} onChange={(e) => setRemote({ ...remote, testConcurrency: e.target.value.replace(/\D/g, '') })} placeholder="4" /></label>
             <label>점검 차단 목록 <input className="input" style={{ minWidth: 200 }} value={remote.disabledTests} onChange={(e) => setRemote({ ...remote, disabledTests: e.target.value })} placeholder="script,text-log" /></label>
-            <button className="tab" onClick={saveRemote}>저장</button>
+            <button className="tab" disabled={!!lockWhy} onClick={saveRemote}>저장</button>
           </div>
           {pol && (
             <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
@@ -389,6 +423,7 @@ function ScheduleTab({ groups, tests, schedules }) {
   const [sch, setSch] = useState(null);
   const [err, setErr] = useState('');
   const [form, setForm] = useState(null); // { id?, test, args, intervalSec, instance, name, enabled }
+  const [otp, setOtp] = useState('');      // 결정(56~75): 셸 점검(script · ssh) 저장의 본인 OTP
   const [tick, setTick] = useState(0);
   const group = groups.find((g) => g.agent === agent);
   const grouped = useMemo(() => groupCatalog(tests), [tests]);
@@ -406,7 +441,12 @@ function ScheduleTab({ groups, tests, schedules }) {
     const t = testOf(form.test);
     const issue = argsIssue(t, form.args);
     if (issue) { setErr(issue); return; }
-    try { requireChanged(await putJson(`/tools/rma/agents/${encodeURIComponent(agent)}/schedule`, { ...form, intervalSec: Number(form.intervalSec) })); setForm(null); setTick((x) => x + 1); }
+    const g = ownerOtpGate(t, getCurrentUser());
+    if (g.locked) { setErr(g.reason); return; }
+    if (g.otp && otp.length !== 6) { setErr('이 점검(외부 스크립트 · SSH)은 저장할 때 본인 OTP(6자리)가 필요합니다.'); return; }
+    const sentOtp = g.otp ? otp : '';
+    setOtp('');
+    try { requireChanged(await putJson(`/tools/rma/agents/${encodeURIComponent(agent)}/schedule`, { ...form, intervalSec: Number(form.intervalSec), ...(sentOtp ? { otp: sentOtp } : {}) })); setForm(null); setTick((x) => x + 1); }
     catch (e) { setErr(e.message); }
   };
   const remove = async (row) => {
@@ -415,6 +455,7 @@ function ScheduleTab({ groups, tests, schedules }) {
     catch (e) { setErr(e.message); setTick((x) => x + 1); }
   };
   const tform = form ? testOf(form.test) : null;
+  const sgate = ownerOtpGate(tform, getCurrentUser());
   const creds = useCredentials(agent);
   return (
     <div>
@@ -477,7 +518,14 @@ function ScheduleTab({ groups, tests, schedules }) {
               </label>
             </div>
           ))}
-          <div className="flex gap" style={{ marginTop: 10 }}><button className="login-btn" onClick={save}>저장</button></div>
+          {sgate.locked && <div className="card muted" style={{ borderColor: TONE.warn, marginTop: 8 }}>🔒 {sgate.reason}</div>}
+          {sgate.need && !sgate.locked && sgate.otp && (
+            <div className="flex gap wrap" style={{ alignItems: 'center', marginTop: 8 }}>
+              <label>본인 OTP <input className="input" style={{ width: 110 }} inputMode="numeric" autoComplete="one-time-code" value={otp} onChange={(e) => setOtp(otpInput(e.target.value))} placeholder="6자리" /></label>
+              <span className="muted" style={{ fontSize: 12 }}>셸을 주기 실행하는 점검이라 설정 소유자 등급 + 본인 OTP 로만 저장합니다.</span>
+            </div>
+          )}
+          <div className="flex gap" style={{ marginTop: 10 }}><button className="login-btn" disabled={sgate.locked} onClick={save}>저장</button></div>
           {err && <div className="error-box" style={{ marginTop: 8 }}>{err}</div>}
         </Modal>
       )}
@@ -535,6 +583,9 @@ function DeployModal({ preset, groups, onClose }) {
   const [f, setF] = useState({ host: '', port: 22, username: 'root', password: '', agentName: preset.agent || '', centralUrl: '', centralToken: '', rmaPassword: '', registerPassword: true, allowCustom: false,
     serviceUnits: '', allowReboot: false, fileRoots: '', enabledCommands: '', enabledTests: '', remoteManage: false, comment: '' });
   const [instances, setInstances] = useState([{ name: 'default', priority: 100 }]);
+  const [otp, setOtp] = useState('');   // 반증 G1a: 원격 배포는 소유자 등급 + 본인 OTP(1회용 — 보낸 뒤 비운다)
+  const [rmOtp, setRmOtp] = useState('');   // 결정(반증 G1a 남긴 것): 인스턴스 제거도 같은 게이트 — 배포 칸과 따로(1회용이라 한쪽에 쓰면 다른 쪽은 새 코드)
+  const dgate = ownerOtpGate(OWNER_OTP_ALWAYS, getCurrentUser());
   const [busy, setBusy] = useState('');
   const [list, setList] = useState(null);
   const [result, setResult] = useState(null);
@@ -547,18 +598,28 @@ function DeployModal({ preset, groups, onClose }) {
     try { setList(await postJson('/tools/rma/deploy/list', target())); } catch (e) { setErr(e.message); } finally { setBusy(''); }
   };
   const doDeploy = async () => {
-    setBusy('deploy'); setErr(''); setResult(null);
+    setErr(''); setResult(null);
+    if (dgate.locked) { setErr(dgate.reason); return; }
+    if (dgate.otp && otp.length !== 6) { setErr('원격 배포는 본인 OTP(6자리)가 필요합니다.'); return; }
+    const sentOtp = dgate.otp ? otp : '';
+    setOtp('');
+    setBusy('deploy');
     try {
-      const r = await postJson('/tools/rma/deploy', { ...target(), instances, rmaPassword: f.rmaPassword, registerPassword: f.registerPassword, allowCustom: f.allowCustom, agentName: f.agentName, centralUrl: f.centralUrl, centralToken: f.centralToken,
+      const r = await postJson('/tools/rma/deploy', { ...target(), ...(sentOtp ? { otp: sentOtp } : {}), instances, rmaPassword: f.rmaPassword, registerPassword: f.registerPassword, allowCustom: f.allowCustom, agentName: f.agentName, centralUrl: f.centralUrl, centralToken: f.centralToken,
         serviceUnits: f.serviceUnits, allowReboot: f.allowReboot, fileRoots: f.fileRoots, enabledCommands: f.enabledCommands, enabledTests: f.enabledTests, remoteManage: f.remoteManage, comment: f.comment });
       setResult(r);
       if (!r.ok) setErr(r.reason || '배포 실패');
     } catch (e) { setErr(e.message); } finally { setBusy(''); }
   };
   const doRemove = async (name) => {
+    setErr('');
+    if (dgate.locked) { setErr(dgate.reason); return; }
+    if (dgate.otp && rmOtp.length !== 6) { setErr('인스턴스 제거는 본인 OTP(6자리)가 필요합니다.'); return; }
     if (!window.confirm(`인스턴스 '${name}' 을 이 서버에서 제거할까요?`)) return;
-    setBusy('remove'); setErr('');
-    try { const r = await postJson('/tools/rma/deploy/remove', { ...target(), name }); if (!r.ok) setErr(r.reason); else await doList(); } catch (e) { setErr(e.message); } finally { setBusy(''); }
+    const sentOtp = dgate.otp ? rmOtp : '';
+    setRmOtp('');
+    setBusy('remove');
+    try { const r = await postJson('/tools/rma/deploy/remove', { ...target(), name, ...(sentOtp ? { otp: sentOtp } : {}) }); if (!r.ok) setErr(r.reason); else await doList(); } catch (e) { setErr(e.message); } finally { setBusy(''); }
   };
 
   return (
@@ -580,8 +641,16 @@ function DeployModal({ preset, groups, onClose }) {
             <>
               <div>템플릿 유닛: {list.unitInstalled ? '설치됨' : '없음'}{list.install ? <span className="muted"> · 설치 경로 {list.install.prefix} · 계정 {list.install.user}</span> : <span style={{ color: TONE.warn }}> · 포탈 설치 경로를 찾지 못함</span>}</div>
               {(list.instances || []).length ? list.instances.map((i) => (
-                <div key={i.name}><code>vmware-portal-rma@{i.name}</code> — {i.active}/{i.sub} <button className="tab" disabled={!!busy} onClick={() => doRemove(i.name)}>제거</button></div>
+                <div key={i.name}><code>vmware-portal-rma@{i.name}</code> — {i.active}/{i.sub} <button className="tab" disabled={!!busy || dgate.locked} onClick={() => doRemove(i.name)}>제거</button></div>
               )) : <div className="muted">인스턴스 없음</div>}
+              {(list.instances || []).length > 0 && (dgate.locked
+                ? <div className="muted" style={{ marginTop: 4 }}>🔒 제거도 배포와 같은 등급입니다 — {dgate.reason}</div>
+                : dgate.otp && (
+                  <div className="flex gap" style={{ marginTop: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                    <label>제거용 본인 OTP <input className="input" style={{ width: 110 }} inputMode="numeric" autoComplete="one-time-code" value={rmOtp} onChange={(e) => setRmOtp(otpInput(e.target.value))} placeholder="6자리" /></label>
+                    <span className="muted" style={{ fontSize: 12 }}>대상 서버에서 RMA 를 지우는 동작이라 설정 소유자 등급 + 본인 OTP 로만 보냅니다.</span>
+                  </div>
+                ))}
             </>
           ) : <div className="error-box">{list.reason}</div>}
         </div>
@@ -617,8 +686,10 @@ function DeployModal({ preset, groups, onClose }) {
         <label style={{ alignSelf: 'flex-end' }}><input type="checkbox" checked={f.allowReboot} onChange={(e) => set('allowReboot', e.target.checked)} /> 재부팅 허용(RMA_ALLOW_REBOOT)</label>
         <label style={{ alignSelf: 'flex-end' }}><input type="checkbox" checked={f.remoteManage} onChange={(e) => set('remoteManage', e.target.checked)} /> 원격 관리 수용(RMA_REMOTE_MANAGE)</label>
       </div>
-      <div className="flex gap" style={{ marginTop: 10 }}>
-        <button className="login-btn" disabled={!!busy || !f.host || !f.password} onClick={doDeploy}>{busy === 'deploy' ? '배포 중…' : '배포 / 갱신'}</button>
+      {dgate.locked && <div className="card muted" style={{ borderColor: TONE.warn, marginTop: 10 }}>🔒 {dgate.reason}</div>}
+      <div className="flex gap" style={{ marginTop: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+        {dgate.otp && !dgate.locked && <label>본인 OTP <input className="input" style={{ width: 110 }} inputMode="numeric" autoComplete="one-time-code" value={otp} onChange={(e) => setOtp(otpInput(e.target.value))} placeholder="6자리" /></label>}
+        <button className="login-btn" disabled={!!busy || !f.host || !f.password || dgate.locked} onClick={doDeploy}>{busy === 'deploy' ? '배포 중…' : '배포 / 갱신'}</button>
       </div>
       {err && <div className="error-box" style={{ marginTop: 8 }}>{err}</div>}
       {result && (

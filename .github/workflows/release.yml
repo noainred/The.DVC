@@ -131,6 +131,15 @@ jobs:
             echo "::warning::uagmon 소스가 그대로라 macOS 앱 빌드를 건너뜁니다. 기존 macOS 자산은 그 버전이 versions.json 의 유지 목록(15개)에서 밀려나면 prune 이 삭제합니다 — 되살리려면 release 워크플로를 'build_macos = true' 로 수동 실행하세요."
           fi
 
+      # v3.10.1(공통 기능 — 사용자 선택 '릴리스 때 재생성'): 포탈 점검 › 공통 기능 화면이 읽는 server/src/portalcheck/commonCatalog.json 과
+      # docs/COMMON.md 는 저장소에서 조금 낡아 있을 수 있다 — 파일 하나만 추가해도 숫자가 바뀌므로 PR 마다 다시 만들게 하지 않는다(CI 는 경고만).
+      # 배포본은 여기서 **이 커밋의 소스로 다시 만든 것**을 싣는다(커밋하지 않는다 — 러너 작업본만 바뀐다).
+      # continue-on-error: 생성기가 못 읽은 것이 있으면(종료코드 1 · 파일을 쓰지 않는다) 저장소의 목록을 그대로 싣고 릴리스는 계속한다 —
+      # 문서 생성기 때문에 전 법인 업그레이드를 멈추지 않는다. 로그에 경고가 남는다. 회귀 server/test/commonDoc.test.js 가 이 단계의 위치를 고정한다.
+      - name: Regenerate common catalog (shipped portal-check list)
+        continue-on-error: true
+        run: node scripts/common-doc.mjs
+
       - name: Build el9 installer + upgrade bundle
         run: bash packaging/offline/build-package.sh --node-version "$NODE_VERSION" --out dist-offline
 

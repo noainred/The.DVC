@@ -6,7 +6,7 @@ import { Loading, ErrorBox, Kpi, Modal } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { buildGraph, frame3d, COLORS } from './relayTopoLayout.js';
 import { topologyPayload, servicesDroppedText } from './relayTopoForm.js'; // v2.606 WEB2606-10: 빈 포트 칸 · 버린 서비스 행
-import { relaySecretsDroppedText } from '../droppedSecretText.js'; // v2.607 WEB2607-03
+import { relaySecretsDroppedText, relaySecretsWillDropText } from '../droppedSecretText.js'; // v2.607 WEB2607-03 · 66회차 미리보기
 
 /**
  * 중계 토폴로지(HAProxy 구성) 도구(v2.431, 사용자 요구 '첨부한 표처럼 Main-Edge1-Edge2 구조의 접속이 필요한 서비스(ssh/vcsa/portal 등)를
@@ -144,7 +144,7 @@ export default function RelayTopoTool() {
 
       {data?.addressHidden && (
         <div className="card" style={{ marginBottom: 12, fontSize: 13, borderColor: 'var(--amber)' }}>
-          관리자 계정이 아니라서 <b>주소·SSH 계정명을 가렸습니다</b>(사설·공인 IP · vCenter IP). 구성·서비스 목록만 보입니다.
+          관리자 계정이 아니라서 <b>주소·SSH 계정명·사이트 비고를 가렸습니다</b>(사설·공인 IP · vCenter IP · 비고 자유 문구). 구성·서비스 목록만 보입니다.
           표 점검 결과는 문구에 주소가 들어 있어 개수만 알립니다 — {data.issueCount || 0}건. 저장·가져오기·적용은 관리자만 할 수 있습니다.
         </div>
       )}
@@ -233,7 +233,8 @@ export default function RelayTopoTool() {
                     <td>{s.irs?.privateIp || '—'}</td><td>{s.irs?.publicIp || '—'}</td><td>{s.irs?.vcenterIp || '—'}</td>
                     <td>{sshSummary(s.irs?.ssh)}</td>
                     <td className="muted" style={{ fontSize: 11 }}>{acc ? <>Edge {acc.edge.host}:{acc.edge.port}{acc.edge.error ? <span className="badge amber" style={{ marginLeft: 4 }} title={acc.edge.error}>자격증명 없음</span> : ''}<br />IRS {acc.irs.host ? `${acc.irs.host}:${acc.irs.port}` : '—'}{acc.irs.via ? ` (${acc.irs.via})` : ''}</> : '(저장 후 표시)'}</td>
-                    <td className="muted">{s.note || ''}</td>
+                    {/* 결정(56~75) 63 ②: 가린 판본은 비고도 비운다(noteHidden — 있었다는 사실만). */}
+                    <td className="muted">{s.note || (s.noteHidden ? '(관리자만)' : '—')}</td>
                     <td style={{ whiteSpace: 'nowrap' }}>
                       <button className="tab" onClick={() => setEdit({ site: structuredClone({ ...EMPTY_SITE, ...s, edge: { ...EMPTY_NODE, ...s.edge, ssh: { ...EMPTY_SSH, ...s.edge?.ssh } }, irs: { ...EMPTY_NODE, ...s.irs, ssh: { ...EMPTY_SSH, ...s.irs?.ssh } } }), index: i })}>편집</button>
                       <button className="tab" onClick={() => testSsh(s.dc, 'edge')} disabled={busy || !acc}>Edge SSH</button>
@@ -277,6 +278,7 @@ export default function RelayTopoTool() {
                     <tbody>{preview.preview.sites.map((s) => <tr key={s.dc}><td>{s.dc}</td><td>{s.edge.privateIp || '—'}</td><td>{s.edge.publicIp || '—'}</td><td>{s.irs.privateIp || '—'}</td><td>{s.irs.publicIp || '—'}</td></tr>)}</tbody>
                   </STable>
                   {preview.skipped.length > 0 && <pre className="muted" style={{ fontSize: 11, maxHeight: 100, overflow: 'auto' }}>{'건너뜀:\n' + preview.skipped.join('\n')}</pre>}
+                  {relaySecretsWillDropText(preview) && <div style={{ color: 'var(--amber)', marginTop: 4 }}>⚠ {relaySecretsWillDropText(preview)}</div>}
                 </div>
               )}
             </div>
@@ -315,7 +317,7 @@ export default function RelayTopoTool() {
                     <tbody>{[r.edge, r.irs].filter(Boolean).map((n) => (
                       <tr key={n.role}>
                         <td><b>{n.role === 'edge' ? 'Edge' : 'IRS'}</b></td>
-                        <td className="muted" style={{ fontSize: 11 }}>{n.host}:{n.port}{n.via ? <><br />{n.via}</> : ''}<br />{n.ok ? <span className="badge green">접속 {n.ms}ms</span> : <span className="badge red" title={n.error}>실패</span>}{!n.ok && <div style={{ color: 'var(--red)' }}>{n.error}</div>}</td>
+                        <td className="muted" style={{ fontSize: 11 }}>{n.host ? `${n.host}:${n.port}` : (r.maskedAddress ? '(주소 가림)' : '—')}{n.via ? <><br />{n.via}</> : ''}<br />{n.ok ? <span className="badge green">접속 {n.ms}ms</span> : <span className="badge red" title={n.error}>실패</span>}{!n.ok && <div style={{ color: 'var(--red)' }}>{n.error}</div>}</td>
                         <td>{n.node?.hostname || '—'}</td>
                         <td style={{ fontSize: 11 }}>{(n.node?.ips || []).join(' ') || '—'}</td>
                         <td>{n.ok ? (n.haproxy.installed ? <>{n.haproxy.version}<br /><span className={`badge ${n.haproxy.active ? 'green' : 'red'}`}>{n.haproxy.activeText}</span>{n.haproxy.enabled ? '' : <span className="badge amber" style={{ marginLeft: 3 }}>부팅 자동시작 아님</span>}</> : <span className="muted">미설치</span>) : '—'}</td>
@@ -337,7 +339,7 @@ export default function RelayTopoTool() {
                   )}
                   {r.irsIssues?.length > 0 && <ul style={{ fontSize: 12, marginTop: 8 }}>{r.irsIssues.map((i, k) => <li key={k}><span className={`badge ${LEVEL[i.level]?.[1]}`}>{LEVEL[i.level]?.[0]}</span> {i.text} <span className="muted">— {i.fix}</span></li>)}</ul>}
                   {r.maskedAddress && r.irsIssueCount > 0 && <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>IRS 점검 {r.irsIssueCount}건 — 문구에 주소가 들어 있어 관리자만 확인할 수 있습니다.</div>}
-                  {r.edge.ok && r.edge.haproxy?.hasCfg && <details style={{ marginTop: 6 }}><summary className="muted" style={{ fontSize: 12, cursor: 'pointer' }}>현재 haproxy.cfg 전문</summary><pre style={{ fontSize: 11, maxHeight: 320, overflow: 'auto' }}>{r.edge.haproxy.cfg}</pre></details>}
+                  {r.edge.ok && r.edge.haproxy?.hasCfg && r.edge.haproxy.cfg && <details style={{ marginTop: 6 }}><summary className="muted" style={{ fontSize: 12, cursor: 'pointer' }}>현재 haproxy.cfg 전문</summary><pre style={{ fontSize: 11, maxHeight: 320, overflow: 'auto' }}>{r.edge.haproxy.cfg}</pre></details>}
                 </>
               )}
               {r?.ok && !r.edge.ok && <div style={{ color: 'var(--red)', fontSize: 12, marginTop: 6 }}>Edge 접속 실패: {r.edge.error}</div>}

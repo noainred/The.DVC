@@ -1,0 +1,221 @@
+/*
+ * snapshots.css — 특수 기능 ‘스냅샷 있는 VM’(v3.26.0 · 시안 docs/design/snapshots/Snapshots.dc.html).
+ * 선택자는 전부 .snp 로 시작한다. 색은 포탈 변수 · 값에 따라 바뀌는 색(구간 · 막대)만 inline.
+ * 그리드 · 플렉스 자식 min-width:0 · 트랙 minmax(0, …) · 버튼 여러 개 줄은 flex-wrap · uppercase 금지.
+ */
+.snp { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.snp a:not([class]) { color: #93c5fd; }
+.snp a:not([class]):hover { color: #bfdbfe; }
+.snp-note { font-size: 12px; line-height: 1.6; color: var(--text-dim); min-width: 0; }
+.snp-note.warn { color: #fcd34d; }
+.snp-mono { font-family: var(--mono); }
+.snp-top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.snp-top .rt { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; font-size: 12px; color: var(--text-dim); }
+.snp-btn { border: 1px solid var(--border); background: var(--panel-deep); color: var(--text); border-radius: 8px; padding: 6px 12px; font-size: 12.5px; font-weight: 700; cursor: pointer; white-space: nowrap; min-height: 32px; }
+.snp-btn:hover { border-color: var(--accent); }
+.snp-btn:disabled { opacity: .5; cursor: default; }
+.snp-btn.sm { padding: 4px 10px; font-size: 12px; min-height: 28px; }
+
+.snp-rules { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.snp-rule { background: var(--panel-deep); border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; display: flex; flex-direction: column; gap: 3px; min-width: 0; font-size: 12.5px; color: #c3cfe2; line-height: 1.5; }
+.snp-rule .t { font-size: 11.5px; font-weight: 700; color: var(--text-dim); }
+.snp-rule b { font-family: var(--mono); font-weight: 700; color: var(--text); }
+.snp-rule a { font-size: 12px; font-weight: 700; text-decoration: none; }
+
+.snp-kpis { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+.snp-kp { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.snp-kp .l { font-size: 12px; font-weight: 600; color: var(--text-dim); }
+.snp-kp .v { font-family: var(--mono); font-size: 24px; font-weight: 800; line-height: 1.1; overflow-wrap: anywhere; }
+.snp-kp .s { font-size: 12px; color: #c3cfe2; line-height: 1.45; overflow-wrap: anywhere; }
+
+.snp-sec { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; }
+.snp-sec h3 { margin: 0; font-size: 15px; font-weight: 800; }
+.snp-sec .hint { font-size: 12px; color: var(--text-dim); }
+.snp-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.snp-cc { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; min-width: 0; text-align: left; color: var(--text); cursor: pointer; font: inherit; }
+.snp-cc:hover { border-color: var(--accent); }
+.snp-cc.on { border-color: var(--accent); background: #17213a; box-shadow: inset 0 0 0 1px var(--accent); }
+.snp-cc .cn { font-size: 14px; font-weight: 800; display: flex; justify-content: space-between; gap: 8px; min-width: 0; }
+.snp-cc .cn span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.snp-cc .cn em { font-style: normal; font-family: var(--mono); font-size: 12.5px; color: #fbbf24; white-space: nowrap; }
+.snp-cc .cn em.none { color: var(--text-dim); }
+.snp-cc .tx { font-size: 12px; color: #c3cfe2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.snp-gbar { display: block; height: 10px; border-radius: 5px; background: var(--panel-deep); }
+.snp-spark { display: block; height: 30px; background: var(--panel-deep); border-radius: 6px; position: relative; overflow: hidden; }
+.snp-spark svg { position: absolute; inset: 0; display: block; }
+.snp-spark.s { height: 18px; border-radius: 4px; }
+.snp-spark.w { height: 44px; }
+.snp-spark .gap { position: absolute; top: 0; bottom: 0; background: repeating-linear-gradient(135deg, rgba(148,163,184,.25) 0 3px, transparent 3px 6px); }
+/* 147회차: 일부 vCenter(점검중 · 비활성 · REST 수집)를 빼고 더한 날 — 아래 띠(부분 합을 표시 없이 잇지 않는다) */
+.snp-spark .ex { position: absolute; bottom: 0; height: 3px; background: #f59e0b; opacity: .85; }
+
+.snp-panel { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.snp-ph { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; }
+.snp-ph h3 { margin: 0; font-size: 15px; font-weight: 800; }
+.snp-ph .hint { font-size: 12px; color: var(--text-dim); }
+.snp-ph .rt { margin-left: auto; }
+.snp-two { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 14px; }
+
+.snp-plot { position: relative; height: 300px; margin: 8px 16px 26px 54px; border-left: 1px solid #33415c; border-bottom: 1px solid #33415c; }
+.snp-zone { position: absolute; right: 0; top: 0; background: rgba(239, 68, 68, .08); border-left: 1px dashed rgba(248, 113, 113, .7); border-bottom: 1px dashed rgba(248, 113, 113, .7); box-sizing: border-box; }
+.snp-zone span { position: absolute; right: 8px; top: 6px; font-size: 11.5px; font-weight: 700; color: #fca5a5; white-space: nowrap; }
+.snp-xg { position: absolute; top: 0; bottom: 0; border-left: 1px dashed #1e293f; }
+.snp-xg.th { border-left-color: rgba(253, 230, 138, .55); }
+.snp-yg { position: absolute; left: 0; right: 0; border-top: 1px dashed #1e293f; }
+.snp-xt { position: absolute; bottom: -22px; transform: translateX(-50%); font-size: 11.5px; color: var(--text-dim); white-space: nowrap; }
+.snp-yt { position: absolute; left: -54px; width: 48px; text-align: right; transform: translateY(50%); font-size: 11.5px; color: var(--text-dim); white-space: nowrap; }
+.snp-xt.th, .snp-yt.th { color: #fde68a; font-weight: 700; }
+.snp-dot { position: absolute; width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--bg); transform: translate(-50%, 50%); cursor: pointer; padding: 0; box-sizing: border-box; }
+.snp-dot:hover { filter: brightness(1.25); }
+.snp-dot.sel { outline: 2px solid #fde68a; outline-offset: 2px; }
+.snp-dot.dim { opacity: .2; }
+.snp-dot.ex { border: 2px dashed #c3cfe2; }
+.snp-lgd { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-size: 12px; color: #c3cfe2; }
+.snp-lg { border: 1px solid transparent; background: transparent; color: #c3cfe2; border-radius: 999px; padding: 3px 9px; font-size: 12px; cursor: pointer; white-space: nowrap; font: inherit; }
+.snp-lg:hover { border-color: var(--border); }
+.snp-lg.on { border-color: var(--accent); background: rgba(59, 130, 246, .16); color: #fff; }
+.snp-lg i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; }
+.snp-lg b { font-family: var(--mono); }
+
+.snp-trend { position: relative; height: 96px; background: var(--panel-deep); border-radius: 8px; overflow: hidden; }
+.snp-trend i { position: absolute; inset: 0; background: #3b82f6; opacity: .7; }
+.snp-tcap { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; font-size: 12px; color: #c3cfe2; }
+.snp-sg { display: grid; grid-template-columns: minmax(0, 1fr) 48px; gap: 0 10px; align-items: center; border: 0; border-bottom: 1px solid var(--border-soft); background: transparent; color: var(--text); padding: 7px 6px; text-align: left; cursor: pointer; border-radius: 6px; min-height: 40px; width: 100%; box-sizing: border-box; font: inherit; }
+.snp-sg:hover { background: var(--hover); }
+.snp-sg.on { background: rgba(59, 130, 246, .16); }
+.snp-sg .l { font-size: 12.5px; font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.snp-sg .l small { display: block; font-weight: 400; font-size: 11.5px; color: var(--text-dim); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.snp-sg .n { font-family: var(--mono); font-weight: 800; font-size: 14px; text-align: right; }
+
+.snp-flt { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.snp-flt .lb { font-size: 11.5px; font-weight: 700; color: var(--text-dim); white-space: nowrap; }
+.snp-chip { border: 1px solid var(--border); background: var(--panel-deep); color: #c3cfe2; border-radius: 999px; padding: 5px 12px; font-size: 12.5px; font-weight: 600; cursor: pointer; white-space: nowrap; min-height: 32px; font: inherit; }
+.snp-chip b { font-family: var(--mono); font-weight: 700; margin-left: 4px; color: var(--text); }
+.snp-chip.on { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 800; }
+.snp-chip.on b { color: #fff; }
+.snp-pill { border: 1px solid var(--accent); background: rgba(59, 130, 246, .12); color: #bfdbfe; border-radius: 999px; padding: 4px 10px; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; font: inherit; }
+.snp-seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--panel-deep); }
+.snp-seg button { border: 0; background: transparent; color: #c3cfe2; padding: 6px 12px; font-size: 12.5px; font-weight: 600; cursor: pointer; white-space: nowrap; font: inherit; }
+.snp-seg button.on { background: var(--accent); color: #fff; font-weight: 800; }
+.snp-find { margin-left: auto; width: 260px; max-width: 100%; background: var(--panel-deep); border: 1px solid var(--border); border-radius: 8px; color: var(--text); padding: 7px 10px; font-size: 12.5px; box-sizing: border-box; }
+.snp-selbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; background: rgba(59, 130, 246, .12); border: 1px solid var(--accent); border-radius: 10px; padding: 8px 12px; font-size: 12.5px; }
+.snp-req { padding: 10px 12px; background: var(--panel-deep); border: 1px solid var(--border-soft); border-radius: 8px; display: flex; flex-direction: column; gap: 6px; }
+.snp-req pre { max-height: 320px; overflow: auto; margin: 0; font-family: var(--mono); font-size: 12px; line-height: 1.6; color: var(--text); white-space: pre-wrap; word-break: break-word; }
+
+.snp-tbl { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.snp-tbl th { text-align: left; font-size: 11.5px; font-weight: 700; color: var(--text-dim); padding: 6px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; cursor: pointer; user-select: none; }
+.snp-tbl th.r, .snp-tbl td.r { text-align: right; }
+.snp-tbl th.on { color: var(--text); }
+.snp-tbl th.nos { cursor: default; }
+.snp-tbl td { padding: 8px; border-bottom: 1px solid var(--border-soft); vertical-align: middle; }
+.snp-tbl tr.vm:hover td { background: rgba(59, 130, 246, .06); }
+.snp-tbl tr.vm.open td { background: rgba(59, 130, 246, .12); }
+.snp-tbl tr.grp td { background: #101829; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: 6px 8px; }
+.snp-gt { border: 0; background: transparent; color: var(--text); text-align: left; padding: 4px 0; cursor: pointer; display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; min-height: 32px; font: inherit; }
+.snp-gt b { font-size: 14px; font-weight: 800; }
+.snp-gt span { font-size: 12px; color: #c3cfe2; }
+.snp-grow-bar { display: inline-block; width: 140px; height: 10px; border-radius: 5px; vertical-align: middle; margin: 0 10px; }
+.snp-ck { width: 20px; height: 20px; border-radius: 5px; border: 1px solid #4b5b78; background: var(--panel-deep); color: #fff; font-size: 12px; font-weight: 800; line-height: 1; padding: 0; cursor: pointer; }
+.snp-ck.on { background: var(--accent); border-color: var(--accent); }
+.snp-vm { border: 0; background: transparent; color: inherit; text-align: left; padding: 0; cursor: pointer; min-width: 0; max-width: 260px; font: inherit; }
+.snp-vm b { display: block; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.snp-sub { display: block; font-size: 11.5px; color: var(--text-dim); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 300px; }
+/* 161회차: ‘만든 계정’ 줄은 말줄임 대신 접는다 — 못 읽은 이유 · ‘일부만 읽음’ 이 잘려 보이지 않았다(폭 상한 300px 은 그대로) */
+.snp-sub.wrap { white-space: normal; word-break: keep-all; overflow-wrap: anywhere; }
+.snp-cv { display: inline-block; width: 12px; color: var(--text-dim); font-style: normal; }
+.snp-bar { display: grid; grid-template-columns: minmax(60px, 1fr) 70px; gap: 8px; align-items: center; min-width: 140px; }
+.snp-bar b { text-align: right; font-weight: 700; white-space: nowrap; font-family: var(--mono); }
+.snp-track { display: block; height: 8px; border-radius: 4px; background: var(--panel-deep); overflow: hidden; }
+.snp-track i { display: block; height: 100%; border-radius: 4px; }
+.snp-pw { font-style: normal; font-size: 11.5px; font-weight: 700; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-dim); white-space: nowrap; }
+.snp-pw.on { color: #86efac; border-color: rgba(134, 239, 172, .45); }
+.snp-tags { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; font-size: 11.5px; color: var(--text-dim); }
+.snp-tg { font-style: normal; font-size: 11.5px; font-weight: 700; padding: 1px 7px; border-radius: 999px; white-space: nowrap; border: 1px solid; }
+.snp-tg.a { color: #fcd34d; border-color: rgba(252, 211, 77, .55); }
+.snp-tg.h { color: #fde68a; border-color: rgba(253, 230, 138, .4); border-style: dashed; }
+.snp-tg.n { color: #fdba74; border-color: rgba(253, 186, 116, .55); }
+.snp-tg.g { color: #93c5fd; border-color: rgba(147, 197, 253, .55); }
+.snp-tg.r { color: #fca5a5; border-color: rgba(252, 165, 165, .6); }
+.snp-tg.p { color: #d8b4fe; border-color: rgba(216, 180, 254, .5); }
+.snp-tg.x { color: #c3cfe2; border-color: #4b5b78; border-style: dashed; }
+.snp-tg.ok { color: #86efac; border-color: rgba(134, 239, 172, .5); }
+.snp-tbl tr.node td { background: var(--panel-deep); border-bottom: 1px solid #1a2438; font-size: 12.5px; padding: 6px 8px; }
+.snp-tbl tr.foot td { background: var(--panel-deep); font-size: 12px; color: #c3cfe2; }
+.snp-node { display: flex; align-items: center; min-width: 0; }
+.snp-node b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.snp-node .br { display: inline-block; width: 10px; height: 10px; border-left: 1px solid #4b5b78; border-bottom: 1px solid #4b5b78; margin: 0 8px 4px 0; flex: none; }
+.snp-foot { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; }
+.snp-empty { font-size: 12.5px; color: var(--text-dim); padding: 14px 8px; }
+.snp-hist { display: grid; grid-template-columns: 96px minmax(0, 280px) minmax(0, 1fr); gap: 4px 14px; align-items: center; font-size: 12px; color: #c3cfe2; }
+.snp-hist .hl { font-weight: 700; color: var(--text-dim); }
+.snp-hist .ev { grid-column: 1 / -1; color: var(--text-dim); line-height: 1.55; }
+@media (max-width: 720px) { .snp-hist { grid-template-columns: minmax(0, 1fr); } }
+.snp-hold { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 8px; padding: 8px 10px; border: 1px dashed var(--border); border-radius: 8px; font-size: 12.5px; }
+.snp-hold label { display: inline-flex; align-items: center; gap: 6px; color: var(--text-dim); min-width: 0; }
+.snp-hold label.grow { flex: 1 1 260px; }
+.snp-hold select, .snp-hold input { background: var(--panel-deep); border: 1px solid var(--border); border-radius: 6px; color: var(--text); padding: 5px 8px; font: inherit; min-width: 0; }
+.snp-hold input { flex: 1 1 auto; }
+/* 156회차: 보류 창은 표 상자(가로 스크롤 — 최소 폭 1180px) 안이라, 좁은 화면에서 기간 · 사유 칸과 저장 실패 사유가 화면 밖(스크롤 왼쪽)에 놓였다 —
+   창 폭을 화면에 맞추고 표를 옆으로 밀어도 왼쪽에 붙여 둔다(넓은 화면은 그대로 · 표 칸의 줄바꿈 금지를 풀어 안내 글이 접힌다).
+   161회차(Chromium 400px — 표를 옆으로 밀지 않은 상태): 창은 고르기 칸(36px) + 칸 여백(8px) 뒤에서 시작한다 — 폭을 100vw - 84px 로 잡으면 그 44px 만큼
+   표 상자 오른쪽 밖으로 나가 사유 칸 31px · 저장 실패 사유의 줄 끝 12px 가 잘렸다(156 은 자동 스크롤로 밀린 뒤의 화면만 쟀다) → 그 44px 을 뺀다. */
+@media (max-width: 720px) { .snp-hold { position: sticky; left: 0; max-width: calc(100vw - 128px); box-sizing: border-box; white-space: normal; } }
+.snp-sum { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-size: 12px; color: var(--text-dim); }
+
+/* v3.35.0 보류 탭(HoldList.jsx · 시안 docs/design/snapshot-holds ⑫ ⑬) */
+.snp-holds { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.snp-hkpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.snp-hkpis .snp-kp { background: var(--panel-deep); }
+.snp-hwarn { border: 1px solid #78350f; background: #2a1f0d; color: #fde68a; border-radius: 10px; padding: 9px 12px; font-size: 12.5px; line-height: 1.55; }
+.snp-hask, .snp-hext { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; border: 1px solid var(--accent); background: rgba(59, 130, 246, .12); border-radius: 10px; padding: 8px 12px; font-size: 12.5px; min-width: 0; }
+.snp-hext .snp-hold { margin-top: 0; flex: 1 1 100%; position: static; max-width: none; }
+.snp-hvm { display: block; font-weight: 700; max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.snp-holds .snp-tbl .snp-sub { max-width: 190px; }
+/* Chromium 1440 판독: 사유 칸이 다른 칸(줄바꿈 금지)에 밀려 약 70px 로 좁아져 120자 사유 한 줄이 340px 높이가 됐다 — 사유 칸에 바닥 폭을 준다.
+   재측정: 그러자 표가 상자보다 50px 넓어 동작(연장 · 풀기) 칸이 가려졌다 — VM 칸 190px · 사유 바닥 200px · 남은 기간은 일수만(표) 으로 맞춘다 */
+.snp-hrs { min-width: 200px; max-width: 360px; white-space: normal; overflow-wrap: anywhere; color: #c3cfe2; line-height: 1.5; }
+.snp-hleft { display: grid; grid-template-columns: minmax(50px, 80px) auto; gap: 8px; align-items: center; min-width: 130px; }
+.snp-hleft b { font-family: var(--mono); font-weight: 700; font-size: 12px; white-space: nowrap; color: #c3cfe2; }
+.snp-hleft b.soon { color: #fbbf24; }
+.snp-hact { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.snp-hcards { display: flex; flex-direction: column; gap: 10px; }
+.snp-hcard { background: var(--panel-deep); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.snp-hcard.gone { border-color: #7f1d1d; }
+.snp-hcard .hd { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; }
+.snp-hcard .hd .nm { display: flex; flex-direction: column; min-width: 0; }
+.snp-hcard .hd .nm b { font-size: 14px; overflow-wrap: anywhere; }
+.snp-hcard .hd .snp-tg { white-space: normal; max-width: 100%; }
+.snp-hcard .rs { font-size: 12.5px; color: #c3cfe2; line-height: 1.5; overflow-wrap: anywhere; }
+.snp-hcard .ft { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; font-size: 12px; color: #c3cfe2; }
+.snp-hcard .snp-hleft { min-width: 0; grid-template-columns: minmax(0, 1fr) auto; }
+.snp-hcard .snp-hact { justify-content: flex-end; }
+.snp-hcard .snp-btn.sm { min-height: 40px; padding: 6px 14px; }
+
+@media (max-width: 1200px) {
+  .snp-rules { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .snp-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 900px) {
+  .snp-two { grid-template-columns: minmax(0, 1fr); }
+  .snp-find { margin-left: 0; width: 100%; }
+  .snp-top .rt { margin-left: 0; }
+}
+@media (max-width: 720px) {
+  .snp-rules { grid-template-columns: minmax(0, 1fr); }
+  .snp-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* v3.35.0(시안 ⑮ — 사용자 '시안 권장안대로'): 2열이면 카드 글자 자리가 약 143px 라 법인 이름 · 크기 줄 · 못 읽음 안내가 말줄임으로 잘렸다(휴대폰은 말풍선도 없다) →
+     한 줄에 카드 하나 · 왼쪽 글자(접힘) · 오른쪽에 나이 막대와 추이 그림을 작게. 구역은 길어진다(법인 20곳 어림 약 25%). */
+  .snp-cards { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .snp-cc { display: grid; grid-template-columns: minmax(0, 1fr) 112px; column-gap: 12px; row-gap: 6px; align-items: center; }
+  .snp-cc .cn { grid-column: 1 / -1; }
+  .snp-cc .cn span, .snp-cc .tx { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; line-height: 1.45; }
+  .snp-cc .tx.a { grid-column: 1; grid-row: 2; }
+  .snp-cc .snp-gbar { grid-column: 2; grid-row: 2; }
+  .snp-cc .tx.f { grid-column: 1; grid-row: 3; }
+  .snp-cc .snp-spark { grid-column: 2; grid-row: 3; height: 18px; border-radius: 4px; }
+  .snp-hkpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .snp-plot { margin-left: 46px; margin-right: 8px; height: 240px; }
+  .snp-yt { left: -46px; width: 40px; }
+  .snp-xt.adv, .snp-xt.far { display: none; }   /* 좁은 화면: 72시간 · 1,000일 글자가 이웃 글자와 겹친다(선은 남긴다) */
+  .snp-zone span { display: none; }
+}

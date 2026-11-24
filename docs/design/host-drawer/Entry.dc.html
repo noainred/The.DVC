@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>호스트 드로어 — 어디서 열리나</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.5}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.muted{color:#8b9bb4}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap;flex:none}
+.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}.tag.crit{background:rgba(239,68,68,.16);color:#fca5a5}.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}.tag.blue{background:rgba(59,130,246,.18);color:#93c5fd}
+.wrap{padding:20px 24px;display:grid;grid-template-columns:minmax(0, 7fr) minmax(0, 5fr);gap:20px;min-width:0;min-height:760px;box-sizing:border-box;align-items:start}
+.col{display:flex;flex-direction:column;gap:10px;min-width:0}
+.cap{display:flex;flex-direction:column;gap:2px}
+.cap b{font-size:14px}
+.cap span{font-size:12px;color:#8b9bb4}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;overflow:hidden;min-width:0}
+.tabs{display:flex;gap:6px;padding:10px 12px;border-bottom:1px solid #243049}
+.tab{height:30px;padding:0 10px;border-radius:8px;color:#8b9bb4;font-size:13px;display:inline-flex;align-items:center;white-space:nowrap}
+.tab.on{background:#3b82f6;color:#fff;font-weight:600}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{font-size:11px;font-weight:700;color:#8b9bb4;text-align:left;padding:8px 12px;border-bottom:1px solid #243049;background:#1a2236;white-space:nowrap}
+td{padding:9px 12px;border-bottom:1px solid #1f2a40;vertical-align:top}
+tr:last-child td{border-bottom:0}
+.r{text-align:right}
+.name{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.name a{font-weight:700}
+.quick{display:inline-flex;align-items:center;min-height:24px;padding:0 9px;border-radius:999px;font:inherit;font-size:11.5px;font-weight:700;color:#7dd3fc;background:rgba(56,189,248,.12);border:1px solid rgba(56,189,248,.45);cursor:pointer;white-space:nowrap}
+.quick.hot{background:rgba(56,189,248,.28);outline:2px solid rgba(56,189,248,.55)}
+.reasons{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+.hint{font-size:12px;color:#c3cfe2;background:rgba(15,22,38,.96);border:1px solid #3b82f6;border-radius:10px;padding:10px 12px;line-height:1.55}
+.hint b{color:#e6edf6}
+.map td:first-child{width:38%}
+.map b{color:#e6edf6}
+</style>
+</helmet>
+
+<div class="wrap">
+  <div class="col">
+    <div class="cap"><b>가상화 플랫폼 › ESXi 호스트 표 — 이름 옆 ‘빠른 확인’</b><span>VM 표와 같은 규칙입니다: 이름은 개체 보기로 가고(그대로), 드로어는 이름 옆 단추로 엽니다.</span></div>
+    <div class="card">
+      <div class="tabs"><span class="tab">vCenter · 법인 11</span><span class="tab on">ESXi 호스트 186</span><span class="tab">가상화 서버 · VM 2,242</span></div>
+      <table>
+        <thead><tr><th>호스트 · 사유</th><th>상태</th><th>vCenter</th><th>클러스터</th><th class="r">CPU</th><th class="r">메모리</th><th class="r">VM</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><div class="name"><a href="#">esx-kr1-02</a><button class="quick hot" type="button">빠른 확인</button></div><div class="reasons"><span class="tag crit">CPU 99%</span><span class="tag crit">쓰는 스위치의 업링크 끊김</span><span class="tag warn">Veeam 최근 백업 없는 VM</span></div></td>
+            <td><span class="tag ok">정상</span></td><td class="muted">vc-kr1</td><td>Cluster-A</td><td class="r mono" style="color:#fca5a5">99%</td><td class="r mono">59%</td><td class="r mono">14</td>
+          </tr>
+          <tr>
+            <td><div class="name"><a href="#">esx-kr1-03</a><button class="quick" type="button">빠른 확인</button></div><div class="reasons"><span class="tag warn">점검</span></div></td>
+            <td><span class="tag warn">점검</span></td><td class="muted">vc-kr1</td><td>Cluster-A</td><td class="r mono">0%</td><td class="r mono">3%</td><td class="r mono">0</td>
+          </tr>
+          <tr>
+            <td><div class="name"><a href="#">esx-kr1-11</a><button class="quick" type="button">빠른 확인</button></div><div class="reasons"><span class="tag crit">끊김</span></div></td>
+            <td><span class="tag crit">끊김</span></td><td class="muted">vc-kr1</td><td>Cluster-B</td><td class="r mono muted">—</td><td class="r mono muted">—</td><td class="r mono">9</td>
+          </tr>
+          <tr>
+            <td><div class="name"><a href="#">esx-kr1-04</a><button class="quick" type="button">빠른 확인</button></div></td>
+            <td><span class="tag ok">정상</span></td><td class="muted">vc-kr1</td><td>Cluster-A</td><td class="r mono">61%</td><td class="r mono">66%</td><td class="r mono">12</td>
+          </tr>
+          <tr>
+            <td><div class="name"><a href="#">esx-kr1-05</a><button class="quick" type="button">빠른 확인</button></div></td>
+            <td><span class="tag ok">정상</span></td><td class="muted">vc-kr1</td><td>Cluster-A</td><td class="r mono">57%</td><td class="r mono">48%</td><td class="r mono">13</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="hint"><b>‹ › 의 순서는 연 곳을 따릅니다</b> — 표에서 열면 지금 표의 정렬 · 거르기 순서, 트리에서 열면 트리에 보이는 호스트 순서입니다. 알람 · 탐색처럼 목록 없이 연 드로어는 ‹ › 가 잠깁니다(VM 드로어와 같음).<br>열 구성 · 묶음 켜기/끄기 · 사유 배지는 지금 표 그대로이고, 더하는 것은 단추 하나입니다.</div>
+  </div>
+
+  <div class="col">
+    <div class="cap"><b>호스트 정보가 열리는 곳 — 지금과 시안</b><span>모달을 여는 곳은 모두 같은 컴포넌트(EntityDetail type='host')라 한 번에 바뀝니다.</span></div>
+    <div class="card">
+      <table class="map">
+        <thead><tr><th>진입점</th><th>지금</th><th>시안</th></tr></thead>
+        <tbody>
+          <tr><td><b>vCenter › 호스트 및 클러스터</b><div class="muted">트리의 호스트 이름 · 검색 결과</div></td><td><span class="tag warn">모달</span></td><td><span class="tag ok">드로어</span> ‹ › = 트리 순서</td></tr>
+          <tr><td><b>ESXi 호스트 표</b><div class="muted">이름</div></td><td><span class="tag gray">개체 보기</span></td><td><span class="tag gray">그대로</span> + <span class="tag ok">빠른 확인</span></td></tr>
+          <tr><td><b>알람</b><div class="muted">호스트 알람 행</div></td><td><span class="tag warn">모달</span></td><td><span class="tag ok">드로어</span> ‹ › 잠김</td></tr>
+          <tr><td><b>탐색</b><div class="muted">Top-N 호스트(CPU · 메모리 · 전력 · VM 수)</div></td><td><span class="tag warn">모달</span></td><td><span class="tag ok">드로어</span> ‹ › 잠김</td></tr>
+          <tr><td><b>IP 관리</b><div class="muted">IP 의 소유 호스트</div></td><td><span class="tag warn">모달</span></td><td><span class="tag ok">드로어</span> ‹ › 잠김</td></tr>
+          <tr><td><b>통합 성능 모니터링</b><div class="muted">호스트 상세 열기</div></td><td><span class="tag warn">모달</span></td><td><span class="tag ok">드로어</span> ‹ › 잠김</td></tr>
+          <tr><td><b>개체 보기 · 전체 페이지 상세</b><div class="muted">탭 9개 · NIC · 경로 · 재부팅 · SAN</div></td><td><span class="tag gray">페이지</span></td><td><span class="tag gray">그대로</span> 드로어가 이쪽으로 보냅니다</td></tr>
+          <tr><td><b>데이터스토어 상세</b></td><td><span class="tag warn">모달</span></td><td><span class="tag gray">이번 범위 밖</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":760}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

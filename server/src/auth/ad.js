@@ -19,6 +19,7 @@ import { config } from '../config.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js'; // v2.478(감사 B5/S12): 원자적 쓰기 + 손상 시 preserveCorrupt — 크래시 1회로 설정이 소실되고 다음 저장이 빈 값으로 덮어쓰는 사고 방지
 import { notifySessionRevoked } from './sessionRevocation.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js'; // 88회차 F3: 읽기 오류 ≠ 손상
 
 const FILE = path.join(config.configDir, 'auth.json');
 
@@ -69,9 +70,31 @@ function normTimeoutMs(v) {
   return Math.min(60_000, Math.max(1000, Math.round(n)));
 }
 
+/*
+ * 88회차 F3(재현 — EIO 한 번): 예전 load 는 읽기 오류(EACCES · EIO · EISDIR)도 손상과 같은 catch 로 받아 **원본을 .corrupt 로 옮기고** env 기본값으로 돌았다 —
+ *   화면에서 저장한 AD 설정(사용 · 주소 · 그룹 매핑)이 영구히 사라지고 정책 카운터(policyEpoch — A→B→A 로 되돌린 매핑의 옛 AD 토큰 부활을 막는 값)가 0 으로
+ *   돌아갔다(같은 설정을 다시 저장하면 카운터가 옛 값과 겹친다). 이제(결정 78 ① 과 같은 규칙): 읽기 오류는 원본을 그대로 두고 · 이 프로세스가 마지막으로 읽은
+ *   값을 쓰고(없으면 env 기본값 — AD 는 보통 꺼짐이라 AD 로그인 거부 쪽) · 30초마다 다시 읽고 · 그동안 저장은 거절한다. 손상은 예전 그대로(보존 + env 기본값).
+ */
+const _reader = makeJsonFileReader(() => FILE, { parse: (t) => JSON.parse(t), tag: 'ad-config' });
+let _lastGoodSaved = null;
+let _readErr = null;
+/** auth.json 을 읽지 못해(ENOENT 아닌 읽기 오류) 저장을 거절하는 중이면 { at, code }, 아니면 null. */
+export function adConfigReadError() { return _readErr; }
+export function _resetAdConfigReadForTest() { _reader.reset(); _lastGoodSaved = null; _readErr = null; }
+function readSavedAd() {
+  const r = _reader.read();
+  if (r.kind === 'ok') { const saved = r.value?.ad || {}; _lastGoodSaved = saved; _readErr = null; return saved; }
+  if (r.kind === 'read-error') {
+    _readErr = { at: _readErr?.at || Date.now(), code: String(r.error?.code || 'read-error').slice(0, 32) };
+    return _lastGoodSaved || {};
+  }
+  _lastGoodSaved = null; _readErr = null;   // missing · corrupt(손상본은 readJsonFile 이 보존 — 예전과 같다)
+  return {};
+}
+
 export function loadAdConfig() {
-  let saved = {};
-  try { if (fs.existsSync(FILE)) saved = JSON.parse(fs.readFileSync(FILE, 'utf8'))?.ad || {}; } catch (e) { preserveCorrupt(FILE, e.message); saved = {}; }
+  const saved = readSavedAd();
   const merged = { ...ENV_DEFAULTS, ...saved };
   // 이미 저장된 '' · 문자열 · 범위 밖 값도 여기서 복구한다(저장 경로만 고치면 옛 파일이 계속 로그인을 막는다).
   merged.timeoutMs = normTimeoutMs(merged.timeoutMs) ?? ENV_DEFAULTS.timeoutMs;
@@ -156,7 +179,7 @@ export function adPolicyState() {
   const now = Date.now();
   if (_ps && _psAt && now - _psAt < 3000) return _ps;
   const ad = loadAdConfig();
-  _ps = { enabled: !!(ad.enabled && ad.url), epoch: adEpochOf(ad), counter: ad.policyEpoch || 0, maxSessionHours: ad.maxSessionHours };
+  _ps = { enabled: !!(ad.enabled && ad.url), epoch: adEpochOf(ad), counter: ad.policyEpoch || 0, maxSessionHours: ad.maxSessionHours, domain: String(ad.domain || '').trim().toLowerCase() };
   _psAt = now;
   return _ps;
 }
@@ -191,6 +214,8 @@ export function adSaveIssue(cur, next, partial = {}) {
 export function saveAdConfig(partial) {
   partial = partial && typeof partial === 'object' ? partial : {};
   const cur = loadAdConfig();
+  // 88회차 F3: 읽기 오류 동안은 쓰지 않는다 — 원자 쓰기(rename)가 읽지 못한 원본(그리고 정책 카운터)을 env 기본값 기반 값으로 덮는다.
+  if (_readErr) throw Object.assign(new Error(`AD 설정 파일(auth.json)을 읽지 못하는 상태(${_readErr.code})라 저장하지 않았습니다 — 원본을 덮지 않습니다. 파일 소유자 · 권한(포탈 서비스 계정 · 0600)을 고친 뒤 다시 저장하세요.`), { status: 503, code: 'ad-config-unreadable' });
   const allowed = ['enabled', 'url', 'domain', 'baseDN', 'userFilter', 'adminGroup', 'operatorGroup', 'viewerGroup', 'defaultRole', 'tlsRejectUnauthorized', 'timeoutMs', 'groupMatch', 'startTls', 'caCert', 'tlsServerName', 'maxSessionHours'];
   const next = { ...cur };
   for (const k of allowed) if (partial[k] !== undefined) next[k] = partial[k];
@@ -217,6 +242,32 @@ export function saveAdConfig(partial) {
     try { notifySessionRevoked({ scope: 'source', source: 'ad', reason }); } catch { /* 구독자 오류는 저장을 막지 않는다 */ }
   }
   return next;
+}
+
+/**
+ * 같은 AD 계정의 표기 변형을 한 키로(157회차 — 재현). AD 로그인은 **입력한 이름 그대로** 세션 이름이 된다(authenticateAD) — bind 는 대소문자를 가리지 않고
+ * `이름` · `이름@도메인` · `DOMAIN\이름` 을 다 받으므로, 이름을 키로 쓰는 판정(단일 세션 등록부)은 표기만 바꾸면 다른 계정으로 보였다.
+ *   소문자 · `DOMAIN\` 앞과 `@도메인` 은 **설정한 도메인과 같을 때만** 뗀다(다른 도메인의 같은 이름은 다른 계정일 수 있다 — 162회차에 역슬래시 꼴도 같은 규칙으로). `ad:` 접두 — 로컬 이름(`:` 을 쓸 수 없다)과 겹치지 않는다.
+ * 정책 상태 캐시(3초)에서 도메인을 읽는다 — 요청마다 파일을 읽지 않는다.
+ */
+/*
+ * 162회차(157 B1 반증 — 결정: 안전측): 예전 판은 `DOMAIN\` 를 **어느 도메인이든** 뗐다 — `CORP\kim` 과 `OTHER\kim` 이 같은 키라 서로의 세션을 끊었다(실행 확인).
+ *   `@도메인` 은 설정한 도메인일 때만 떼면서(다른 도메인의 같은 이름은 다른 계정일 수 있다) 역슬래시 꼴만 달랐다. 두 꼴에 같은 규칙을 쓴다:
+ *   도메인 부분이 **설정한 도메인**(전체 이름 또는 첫 마디 — 보통 NetBIOS 이름)일 때만 뗀다. 도메인을 설정하지 않았거나 다른 도메인이면 그대로 둔다(`ad:other\kim`).
+ *   한계(그대로): NetBIOS 이름이 도메인 첫 마디와 다른 구성 · 도메인 미설정 구성에서는 `NB\kim` 과 `kim` 이 다른 키다(157 이전과 같다 — 모르는 것을 같은 사람으로 접지 않는다).
+ */
+export function adAccountKey(username) {
+  const raw = String(username ?? '').trim().toLowerCase();
+  let dom = '';
+  try { dom = adPolicyState().domain || ''; } catch { dom = ''; }
+  const label = dom.split('.')[0];
+  const mine = (d) => !!dom && !!d && (d === dom || d === label);
+  let s = raw;
+  const bs = s.indexOf('\\');
+  if (bs > 0 && mine(s.slice(0, bs))) s = s.slice(bs + 1);
+  const at = s.lastIndexOf('@');
+  if (at > 0 && mine(s.slice(at + 1))) s = s.slice(0, at);
+  return `ad:${s || raw}`;
 }
 
 function upnFor(username, ad) {

@@ -16,8 +16,15 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'rvK-sign2-'));
+const CFG = tmpDir('rvK-sign2-');
 const EDGE_APP = path.join(CFG, 'edge-app');
 Object.assign(process.env, {
   CONFIG_DIR: CFG, AUTH_ENABLED: 'false', UPGRADE_ENABLED: 'true', UPGRADE_INSTALL_DIR: EDGE_APP,
@@ -183,12 +190,12 @@ test('S-10 ⑬ CI — update-versions 는 REQUIRE_MANIFEST=1 이면 manifest 없
 test('S-10 ⑭ release-keygen — 저장소 안에는 개인키를 쓰지 않고, 공개키 추가는 keyId 를 검사한다(키 생성 본체는 실행하지 않는다)', async () => {
   const kg = await import('../../scripts/release-keygen.mjs');
   // 임시 '저장소'(.git 폴더가 있는 곳) 안의 하위 폴더는 저장소 안이다 — 위로 올라가며 찾는다
-  const fakeRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'rvK-kg-repo-'));
+  const fakeRepo = tmpDir('rvK-kg-repo-');
   fs.mkdirSync(path.join(fakeRepo, '.git'));
   fs.mkdirSync(path.join(fakeRepo, 'a', 'b'), { recursive: true });
   assert.equal(kg.insideGitTree(path.join(fakeRepo, 'a', 'b')), fakeRepo, '저장소 안을 알아본다');
   fs.rmSync(fakeRepo, { recursive: true, force: true });
-  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'rvK-kg-'));
+  const outside = tmpDir('rvK-kg-');
   assert.equal(kg.insideGitTree(outside), null);
   const file = path.join(outside, 'keys.json');
   kg.addPublicKeyEntry(file, keyEntry(K1, { note: 't' }));

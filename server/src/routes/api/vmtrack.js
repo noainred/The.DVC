@@ -10,9 +10,12 @@ import { isAdminDetailUser } from '../../auth/demoGuest.js';   // v2.743 AUTHZ-0
 import { denyScopedRun } from '../../auth/scopeMerge.js'; // v2.605 AUTHZ2605-02: 전 법인 수동 실행은 범위 계정 403
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
-import { vmtrackSeries, vmtrackChanges, vmtrackDsChanges, vmtrackInfo, vmtrackDsList, vmtrackDsSeries, vmtrackDsSeriesAll, vmtrackDsTop, vmtrackDsChangeLog, vmtrackDsPivot } from '../../vmtrack/service.js';
+import { vmtrackSeriesByVc, vmtrackSeries, vmtrackChanges, vmtrackDsChanges, vmtrackInfo, vmtrackDsList, vmtrackDsSeries, vmtrackDsSeriesAll, vmtrackDsTop, vmtrackDsChangeLog, vmtrackDsPivot } from '../../vmtrack/service.js';
 import { runVmtrackNow, vmtrackPollerStatus } from '../../vmtrack/poller.js';
 import { getDb } from '../../vmtrack/db.js';
+import { trackScopeIds } from '../../vmtrack/scopeIds.js'; // v2.958: ?region= 교집합
+import { vmtrackStatus } from '../../vmtrack/db.js';
+import { isSummaryQuery } from './toolSummary.js';   // v3.21.0 VM 분석 화면 요약 — 같은 라우트 · 같은 게이트 안에서
 
 export function registerVmTrack(api) {
   // 차트 데이터 + 상태. ?days=30&vcenterId=<특정 vCenter|빈값=전체>
@@ -23,14 +26,24 @@ export function registerVmTrack(api) {
       const allowed = scopedVcenterIds(req.user, snap); // null = 전체 허용
       const vcenterId = String(req.query.vcenterId || '').trim();
       const days = Number(req.query.days) || 30;
+      // v2.958: ?region= 은 사용자 범위와의 교집합으로만 좁힌다(허브 범위 바 — 리전을 고르면 KPI 가 그 리전만 합한다). vcenterId 가 있으면 그 vCenter 가 region 으로 좁힌 범위 안일 때만 그 계열을 준다(밖이면 빈 결과 · scoped — 32회차 주석 정정: 예전 주석은 'region 무시' 였다).
+      const scopeIds = trackScopeIds({ allowed, region: String(req.query.region || ''), vcenters: snap.vcenters || [] });
+      // v3.21.0: ?summary=1 — 법인별 수집 점 시계열(VM 분석 화면 'VM 수 추이'). 게이트(tools · toolGate 'vm-track')와 범위(scopeIds — 범위 ∩ 리전)는 그대로 ·
+      //   vcenterId 는 보지 않는다(법인별 줄을 주고 화면이 고른 법인을 더한다) · 폴러 상태 · DB 경로 · 전 함대 행 수(meta)는 싣지 않는다.
+      if (isSummaryQuery(req.query)) {
+        const r = await vmtrackSeriesByVc({ days, scopeIds });
+        const vcName = new Map((snap.vcenters || []).map((vc) => [vc.id, vc.name || vc.id]));
+        return res.json({ ok: true, summary: true, tool: 'vm-track', ...r, rows: r.rows.filter((x) => !scopeIds || scopeIds.has(x.vcenterId)).map((x) => ({ ...x, name: vcName.get(x.vcenterId) || x.vcenterId })),
+          available: !!vmtrackStatus().available });
+      }
       const [series, info] = await Promise.all([
-        vmtrackSeries({ days, vcenterId, scopeIds: allowed }),
+        vmtrackSeries({ days, vcenterId, scopeIds }),
         vmtrackInfo(),
       ]);
       // 화면 콤보용 vCenter 목록(스냅샷 기준 — 아직 추적 이력이 없는 vCenter 도 선택 가능).
       const vcenters = (snap.vcenters || [])
         .filter((vc) => !allowed || allowed.has(vc.id))
-        .map((vc) => ({ id: vc.id, name: vc.name || vc.id }))
+        .map((vc) => ({ id: vc.id, name: vc.name || vc.id, region: String(vc.location?.region || '') }))   // v3.10.15: 화면의 리전 선택(?region=)용
         // 콤보 정렬(v2.356, 사용자 요구) — 스냅샷의 등록 순서가 아니라 이름순(숫자 인지).
         .sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { numeric: true, sensitivity: 'base' }));
       // 폴러 상태의 lastResult 는 전 vCenter 합계(total/added/removed)라 범위 제한 계정에 노출하면
@@ -47,7 +60,8 @@ export function registerVmTrack(api) {
   // 증감 상세 — ?snapId=<vCenter 스냅샷 id> 또는 ?slot=YYYY-MM-DDT00(그 시각 전체)
   api.get('/tools/vm-track/changes', requirePerm('tools'), async (req, res) => {
     try {
-      const allowed = scopedVcenterIds(req.user, store.get());
+      const snapR = store.get();
+      const allowed = trackScopeIds({ allowed: scopedVcenterIds(req.user, snapR), region: String(req.query.region || ''), vcenters: snapR.vcenters || [] });   // v3.10.15: ?region= 교집합(화면 리전 선택)
       const snapId = req.query.snapId ? Number(req.query.snapId) : null;
       const slot = req.query.slot ? String(req.query.slot) : null;
       if (snapId == null && !slot) return res.status(400).json({ ok: false, reason: 'snapId 또는 slot 이 필요합니다.' });
@@ -61,7 +75,8 @@ export function registerVmTrack(api) {
   // 데이터스토어 사용량 변경 상세(v2.348) — ?snapId= 또는 ?slot=
   api.get('/tools/vm-track/ds-changes', requirePerm('tools'), async (req, res) => {
     try {
-      const allowed = scopedVcenterIds(req.user, store.get());
+      const snapR = store.get();
+      const allowed = trackScopeIds({ allowed: scopedVcenterIds(req.user, snapR), region: String(req.query.region || ''), vcenters: snapR.vcenters || [] });   // v3.10.15: ?region= 교집합(화면 리전 선택)
       const snapId = req.query.snapId ? Number(req.query.snapId) : null;
       const slot = req.query.slot ? String(req.query.slot) : null;
       if (snapId == null && !slot) return res.status(400).json({ ok: false, reason: 'snapId 또는 slot 이 필요합니다.' });
@@ -76,7 +91,8 @@ export function registerVmTrack(api) {
   api.get('/tools/vm-track/ds-list', requirePerm('tools'), async (req, res) => {
     try {
       await getDb();
-      const allowed = scopedVcenterIds(req.user, store.get());
+      const snapR = store.get();
+      const allowed = trackScopeIds({ allowed: scopedVcenterIds(req.user, snapR), region: String(req.query.region || ''), vcenters: snapR.vcenters || [] });   // v3.10.15: ?region= 교집합(화면 리전 선택)
       const items = await vmtrackDsList({ scopeIds: allowed, vcenterId: String(req.query.vcenterId || '').trim() });
       res.json({ ok: true, items, total: items.length });
     } catch (e) {
@@ -125,7 +141,8 @@ export function registerVmTrack(api) {
   api.get('/tools/vm-track/ds-change-log', requirePerm('tools'), async (req, res) => {
     try {
       await getDb();
-      const allowed = scopedVcenterIds(req.user, store.get());
+      const snapR = store.get();
+      const allowed = trackScopeIds({ allowed: scopedVcenterIds(req.user, snapR), region: String(req.query.region || ''), vcenters: snapR.vcenters || [] });   // v3.10.15: ?region= 교집합(화면 리전 선택)
       const r = await vmtrackDsChangeLog({
         days: Number(req.query.days) || 30,
         vcenterId: String(req.query.vcenterId || '').trim(),
@@ -142,7 +159,8 @@ export function registerVmTrack(api) {
   api.get('/tools/vm-track/ds-pivot', requirePerm('tools'), async (req, res) => {
     try {
       await getDb();
-      const allowed = scopedVcenterIds(req.user, store.get());
+      const snapR = store.get();
+      const allowed = trackScopeIds({ allowed: scopedVcenterIds(req.user, snapR), region: String(req.query.region || ''), vcenters: snapR.vcenters || [] });   // v3.10.15: ?region= 교집합(화면 리전 선택)
       const r = await vmtrackDsPivot({
         days: Number(req.query.days) || 30,
         vcenterId: String(req.query.vcenterId || '').trim(),
@@ -163,7 +181,8 @@ export function registerVmTrack(api) {
   api.get('/tools/vm-track/ds-top', requirePerm('tools'), async (req, res) => {
     try {
       await getDb();
-      const allowed = scopedVcenterIds(req.user, store.get());
+      const snapR = store.get();
+      const allowed = trackScopeIds({ allowed: scopedVcenterIds(req.user, snapR), region: String(req.query.region || ''), vcenters: snapR.vcenters || [] });   // v3.10.15: ?region= 교집합(화면 리전 선택)
       const r = await vmtrackDsTop({
         days: Number(req.query.days) || 30,
         vcenterId: String(req.query.vcenterId || '').trim(),

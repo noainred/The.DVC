@@ -21,8 +21,15 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import ssh2 from 'ssh2';
 import { stripComments } from './_stripComments.js';
+import { centralSource } from './_centralSource.js'; // v2.954: central.js 가 영역별 파일로 나뉘었다(소스 스윕은 합친 소스로)
 
-const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2769c-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+
+const DIR = tmpDir('audit2769c-');
 process.env.CONFIG_DIR = DIR;
 process.env.DATA_SOURCE = 'live';
 process.env.AUTH_ENABLED = 'false';
@@ -286,7 +293,7 @@ test('D4-02 실제 centralRouter pdu-config — 중앙 파일이 있을 때만 t
 test('D4-02 중앙은 엣지 스냅샷을 평가하지 않는다(이중 발송 방지 — 엣지 현장 알림이 설계) · 알림 채널 설정은 pdu-config 에 없다', () => {
   const poller = stripComments(read('pdu/poller.js'));
   assert.ok(!/edgePduSnapshots/.test(poller), '중앙 폴러가 엣지 스냅샷을 평가하지 않는다');
-  const central = stripComments(read('routes/central.js'));
+  const central = stripComments(centralSource());
   const seg = central.slice(central.indexOf("centralRouter.get('/pdu-config'"), central.indexOf("centralRouter.post('/pdu-data'"));
   assert.ok(seg.length > 100);
   assert.ok(!/loadAlertConfig|alerts\b/.test(seg), '알림 채널 설정을 배포하지 않는다');
@@ -527,3 +534,7 @@ test('D4-06 연결 시험 — 편집 중인 다른 포트로 성공해도 저장
   // 엣지 isidu-test 도 같은 판정을 쓴다.
   assert.match(stripComments(read('isidu/edgeOps.js')), /clearStopId: saved && sameConnIdentity\(t, saved\) \? t\.id : ''/);
 });
+
+// v3.18.8: 정리 훅은 파일 끝에서 등록한다 — 시험 사이에 최상위 await 가 있으면 앞 시험이 끝난 시점에 루트 after 가 먼저 돌아
+//   뒤 시험이 쓸 폴더를 지운다(node 22 실측 — audit2590 이 그렇게 깨졌다).
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });

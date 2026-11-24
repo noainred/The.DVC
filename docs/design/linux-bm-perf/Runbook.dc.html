@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>진단 플레이북 · 목표선(SLO)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:Inter,"Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#22d3ee}a:hover{color:#67e8f9}
+.card{background:linear-gradient(180deg,#141b2d,#111726);border:1px solid #243049;border-radius:12px;padding:16px 18px;box-shadow:0 4px 24px rgba(0,0,0,.4);min-width:0}
+.dim{color:#8b9bb4}.mono{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:600;border:1px solid #243049;background:#0f1626;color:#8b9bb4;white-space:nowrap}
+.chip.ok{color:#4ade80;border-color:rgba(34,197,94,.35);background:rgba(34,197,94,.1)}
+.chip.warn{color:#fbbf24;border-color:rgba(245,158,11,.35);background:rgba(245,158,11,.1)}
+.chip.bad{color:#f87171;border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.1)}
+.chip.info{color:#67e8f9;border-color:rgba(34,211,238,.3);background:rgba(34,211,238,.08)}
+.btn{min-height:34px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-weight:600;cursor:pointer;font-size:12px}
+.sel{min-height:34px;padding:0 10px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit;font-size:12.5px}
+table{border-collapse:separate;border-spacing:0;width:100%}
+th{font-size:11.5px;font-weight:600;color:#8b9bb4;text-align:left;padding:6px 8px;border-bottom:1px solid #243049;background:#0f1626;white-space:nowrap;cursor:pointer;vertical-align:bottom}
+td{padding:7px 8px;border-bottom:1px solid #1f2a40;vertical-align:top;font-size:12.5px;line-height:1.5}
+.step{display:grid;grid-template-columns:28px minmax(0,1fr) auto;gap:10px;align-items:start;padding:8px 10px;border:1px solid #243049;border-radius:10px;background:#0f1626}
+.step .n{font-weight:800;color:#67e8f9}
+.cmd{display:block;background:#0a0e17;border:1px solid #243049;border-radius:6px;padding:6px 8px;font-size:11.5px;margin-top:4px;white-space:pre-wrap;overflow-wrap:anywhere}
+.ev{display:inline-block;width:14px;text-align:center;font-weight:700}.ev.a{color:#4ade80}.ev.b{color:#fbbf24}.ev.c{color:#8b9bb4}
+h2{margin:0;font-size:15px;font-weight:700}
+.bar{height:8px;border-radius:4px;background:#1a2236;overflow:hidden;min-width:90px}.bar span{display:block;height:100%;border-radius:4px}
+.ok{color:#4ade80}.warn{color:#fbbf24}.bad{color:#f87171}
+</style>
+</helmet>
+<div style="box-sizing:border-box;max-width:1680px;margin:0 auto;padding:18px 24px 40px;display:flex;flex-direction:column;gap:14px">
+  <div style="min-width:0">
+    <div style="font-size:12px;color:#8b9bb4"><a href="Server.dc.html">bm-kr1-db01</a> › <b style="color:#e6edf6">진단 플레이북 · 목표선</b> · 추천 E + D</div>
+    <h1 style="margin:0;font-size:20px;font-weight:700;letter-spacing:-.01em">진단 플레이북(읽기 전용 런북) 과 목표선(SLO) · 월간 달성률</h1>
+    <div class="dim" style="font-size:12px;margin-top:4px">플레이북은 판정이 ‘후보’ 로 끝난 뒤 사람이 할 다음 조사를 표준화한다 — 명령은 복사용이고 포탈이 실행하지 않는다 · 목표선은 ‘약속을 지켰나’ 를 묻는다(베이스라인 ‘평소와 다른가’ 와 다른 질문)</div>
+  </div>
+
+  <!-- E 플레이북 -->
+  <div class="card" style="border-color:rgba(34,211,238,.35)">
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-bottom:8px"><h2>플레이북 — 지금 판정에 맞는 것이 자동으로 열린다: 교차 ② ‘디스크 await 급등 · SMART 깨끗’</h2><span class="chip bad">판정</span><span class="dim" style="font-size:12px;margin-left:auto">다른 플레이북</span><select class="sel" aria-label="플레이북"><option>교차 ② await 급등(SMART 깨끗)</option><option>교차 ① CPU 포화 + 전력 cap</option><option>교차 ③ ECC + MCE</option><option>교차 ④ 드롭 층</option><option>교차 ⑤ 서버↔포트 불일치</option><option>Airflow 스케줄러 하트비트 없음</option><option>GPDB 다운 세그먼트</option><option>메모리 포화(스왑아웃)</option></select></div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div class="step"><span class="n">1</span><div><div><b>포탈에서 먼저 확인</b> — 집중 모니터링 결론 · 분별 프로세스 상위 · 구간 비교(어제 같은 시각) · 변경 이벤트 띠(크론 · dnf) · 주석</div><div class="dim" style="font-size:11.5px">이미 열린 결과: 원인 후보 pg_dump(11:40 크론 추가) · await 212ms · Dirty 4GB 상한 도달</div></div><span class="chip ok">자동 채움</span></div>
+      <div class="step"><span class="n">2</span><div><div><b>서버에서 지금 I/O 를 누가 내는지</b> — Netflix 60초 체크리스트 순서(오류·포화 먼저)</div><code class="cmd mono">dmesg -T | tail -30
+iostat -xz 1 5                # await · aqu-sz · %util — 포탈 값과 대조
+pidstat -d 1 5                # 프로세스별 kB_rd/s kB_wr/s
+cat /proc/pressure/io         # some/full avg10 avg60</code><div class="dim" style="font-size:11.5px">근거 <span class="ev b">◐</span> NF · <span class="ev b">◐</span> USE</div></div><span class="chip">복사</span></div>
+      <div class="step"><span class="n">3</span><div><div><b>쓰기 폭주면 writeback 설정과 DB 체크포인트를 본다</b></div><code class="cmd mono">grep -E 'Dirty|Writeback' /proc/meminfo
+sysctl vm.dirty_bytes vm.dirty_background_bytes vm.dirty_ratio vm.dirty_background_ratio
+# PostgreSQL/GPDB: checkpoint_timeout · checkpoint_completion_target · 최근 checkpoint 로그(DB 담당)</code><div class="dim" style="font-size:11.5px">튜닝 탭의 권장값(DB · GPDB 프로파일)과 대조 — 64GB 초과 호스트는 dirty_bytes 방식(G1 <span class="ev a">●</span>)</div></div><span class="chip">복사</span></div>
+      <div class="step"><span class="n">4</span><div><div><b>디스크 자체를 의심하면</b> — SMART 가 깨끗해도 펌웨어·온도·큐 설정을 본다</div><code class="cmd mono">cat /sys/block/nvme1n1/queue/scheduler /sys/block/nvme1n1/queue/nr_requests
+nvme smart-log /dev/nvme1n1   # 설치돼 있을 때 · iDRAC 디스크 상태와 대조
+# 기준선(F — 미도입)이 있으면 처리량 저하 비교</code><div class="dim" style="font-size:11.5px">NVMe 스케줄러는 none 유지(H2 <span class="ev b">◐</span>)</div></div><span class="chip">복사</span></div>
+      <div class="step"><span class="n">5</span><div><div><b>조치 후보와 기록</b> — 백업 창으로 이동 · 크론 소유자 확인 · 이슈에 결론 카드 첨부 · 주석 남기기</div><div class="dim" style="font-size:11.5px">포탈은 적용하지 않는다. 적용했으면 변경 이벤트 띠에 자동으로 잡히고(sysctl · cron 해시) 다음 비교에서 효과를 본다.</div></div><span class="chip info">주석 · 이슈</span></div>
+    </div>
+    <div class="dim" style="font-size:11.5px;margin-top:8px">플레이북은 파일 하나(판정 id → 단계 · 명령 · 근거 번호)이고 용도 프로파일처럼 카탈로그 테스트가 근거 번호를 검사한다. 현장이 고친 단계는 위키에 덮어쓰기(포탈 버전은 기본값). 명령은 읽기 전용만 싣는다(쓰기·재시작 명령 금지).</div>
+  </div>
+
+  <!-- D 목표선 -->
+  <div class="card" style="border-color:rgba(34,197,94,.35)">
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-bottom:8px"><h2>목표선(SLO) — 서버 · 용도별 목표와 11월 달성률</h2><span class="chip info">역할 DB 프로파일 목표 6</span><span class="dim" style="font-size:12px;margin-left:auto">목표는 설정(관리자) · 달성률 = 목표 안에 있던 주기 비율 · 결측 주기는 분모에서 뺀다</span><button class="btn" type="button">목표 편집</button></div>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>목표</th><th>기준</th><th>이번 달 달성률</th><th>위반 시간</th><th>최장 위반</th><th>추이(일)</th><th>상태</th></tr></thead>
+      <tbody>
+        <tr><td>디스크 await p95(5분 피크 기준)</td><td class="mono">&lt; 10 ms</td><td><div style="display:flex;align-items:center;gap:8px"><div class="bar"><span style="width:96%;background:#fbbf24"></span></div><b>96.4%</b></div></td><td>5.2 시간</td><td>11-06 02:00~05:10 (3h10m)</td><td class="mono dim">▁▁▁▂▁▁▁▁▁▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▂▇</td><td><span class="chip warn">목표 99% 미달</span></td></tr>
+        <tr><td>CPU 포화(런큐÷코어) 시간</td><td class="mono">&lt; 1.0 · 월 1% 이하</td><td><div style="display:flex;align-items:center;gap:8px"><div class="bar"><span style="width:99%;background:#4ade80"></span></div><b>99.6%</b></div></td><td>0.6 시간</td><td>11-06 13:41 (2분)</td><td class="mono dim">▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▂</td><td><span class="chip ok">달성</span></td></tr>
+        <tr><td>메모리 스왑아웃</td><td class="mono">0 /s</td><td><div style="display:flex;align-items:center;gap:8px"><div class="bar"><span style="width:100%;background:#4ade80"></span></div><b>100%</b></div></td><td>0</td><td class="dim">—</td><td class="mono dim">▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁</td><td><span class="chip ok">달성</span></td></tr>
+        <tr><td>데이터 볼륨 공간 (/data)</td><td class="mono">&lt; 75% (GPDB G3 ●)</td><td><div style="display:flex;align-items:center;gap:8px"><div class="bar"><span style="width:61%;background:#f87171"></span></div><b>61%</b></div></td><td>11.7 일</td><td>10-26 ~ 지금 (78%)</td><td class="mono dim">▃▃▃▄▄▄▄▅▅▅▅▅▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆</td><td><span class="chip bad">지속 위반 — 가득 예상 18일</span></td></tr>
+        <tr><td>하드웨어 이벤트(Critical)</td><td class="mono">0 건</td><td><div style="display:flex;align-items:center;gap:8px"><div class="bar"><span style="width:100%;background:#4ade80"></span></div><b>100%</b></div></td><td>0</td><td class="dim">—</td><td class="mono dim">▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁</td><td><span class="chip ok">달성</span></td></tr>
+        <tr><td>수집 성공률(이 서버)</td><td class="mono">≥ 99%</td><td><div style="display:flex;align-items:center;gap:8px"><div class="bar"><span style="width:99%;background:#4ade80"></span></div><b>99.3%</b></div></td><td>결측 7 주기</td><td>11-06 13:42 (1주기)</td><td class="mono dim">▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▂</td><td><span class="chip ok">달성</span></td></tr>
+      </tbody></table></div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;margin-top:10px;font-size:12.5px">
+      <span class="dim">목표 출처</span><span class="chip">역할 프로파일 DB(기본)</span><span class="chip">용도 프로파일 GPDB(G3 75%)</span><span class="chip">이 서버 개별 1</span>
+      <span class="dim">우선순위</span><span class="dim" style="font-size:12px">개별 &gt; 용도 &gt; 역할(튜닝 권장값과 같은 규칙)</span>
+      <span style="margin-left:auto"><a href="#">법인 월간 보고서에 포함</a></span>
+    </div>
+    <div class="dim" style="font-size:11.5px;margin-top:8px">달성률은 5분 주기 행(평균 또는 피크 — 목표마다 지정)으로 센다 · 결측·유지보수 창은 분모에서 뺀다(그 수를 적는다) · 목표는 숫자와 비교 기준(평균/피크/p95)을 함께 저장 · 화면에 숫자를 박지 않고 설정값을 받아 그린다 · ‘위반 시간’ 은 추이 탭에서 띠로 보인다.</div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1650}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

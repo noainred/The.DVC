@@ -499,7 +499,7 @@ test('v2.871 감사 A5-06 — Bareos 설정(법인 · Director 매핑)이 바뀌
   assert.equal(a2.s, 304, '바뀐 것이 없으면 304(전제)');
   assert.ok(!a.j.corps.some((c) => c.vcenterId === 'vc-b'), '전제: vc-b 는 아직 매핑 없음');
   try {
-    SET.saveSettings({ sites: [...before, { ...before[0], vcenterId: 'vc-b', vcserver: 'vc-b.corp' }] });
+    SET._seedLegacySitesForTest([...before, { ...before[0], vcenterId: 'vc-b', vcserver: 'vc-b.corp' }]);   // 52회차 D1: 설정이 바뀌기만 하면 된다(같은 Director 에 둘째 vCenter 는 옛 설정 모양으로)
     const b = await etagGet(a.etag);
     assert.equal(b.s, 200, '매핑이 바뀌었는데 304 면 옛 법인 목록이 남는다');
     assert.ok(b.j.corps.some((c) => c.vcenterId === 'vc-b'), '새 매핑 법인이 보인다');

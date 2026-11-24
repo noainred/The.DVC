@@ -37,6 +37,7 @@ const t = (v) => String(v ?? '').trim();
 // 적혀 있었지만 tokenScan 사본과는 실제로 달랐다).
 // ⚠ 재수출(`export … from`)은 이 스코프에 이름을 만들지 않는다 — import 후 export 한다.
 import { cmpVersion } from '../../util/cmpVersion.js';
+import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 
 export { cmpVersion };
 
@@ -136,7 +137,7 @@ api.get('/tools/edge-log-local', adminOnly, fullScopeOnly, async (req, res) => {
  * 지금 가져온다(pull). 닿지 못하면 **폴백 큐에 등록**하고 그 사실을 말한다.
  * ⚠ 실패를 '모름' 으로 뭉개지 않는다 — `kind` 를 그대로 화면에 넘긴다(조치가 전부 다르다).
  */
-api.post('/tools/edge-log/fetch', adminOnly, fullScopeOnly, async (req, res) => {
+api.post('/tools/edge-log/fetch', adminOnly, fullScopeOnly, textFields('agent'), async (req, res) => {
   const agent = t(req.body?.agent);
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent 가 필요합니다.' });
   const opt = {

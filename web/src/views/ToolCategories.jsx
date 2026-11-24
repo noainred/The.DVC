@@ -4,6 +4,8 @@ import { Loading, ErrorBox } from '../components/ui.jsx';
 import { TOOLS } from './specialToolsList.js';
 import { uncategorizedKeys, categoriesOf } from './toolSections.js';
 import ToolNamesStages from './ToolNamesStages.jsx'; // v2.679 — 특수 기능 화면의 드로어와 같은 편집기(핸드오프 §5)
+import { unreadMarkOf, unreadKind, saveLockedByUnread, shouldReseed } from './settingsUnread.js';   // 112회차: 못 읽은 동안의 기본값(분류 없음)으로 저장하지 않는다
+import { SettingsUnreadBanner } from './SettingsUnreadBanner.jsx';
 
 /**
  * 설정 › 특수 기능 카테고리(v2.455, admin 전용) — 사용자 요구사항:
@@ -27,12 +29,16 @@ export default function ToolCategories() {
   const [sel, setSel] = useState('');        // 편집 중인 카테고리 id
   const [q, setQ] = useState('');            // 도구 검색
   const inited = useRef(false);
+  // 112회차: 서버가 분류 설정 파일을 못 읽은 동안 settings 는 기본값(분류 없음)이다 — 저장이 분류 목록 전체 교체라, 다시 읽힌 뒤 그 빈 폼의 저장이 분류를 전부 지웠다.
+  //   읽기 오류면 저장을 잠그고, 못 읽은 값으로 채운 폼은 ‘다시 확인’ 으로 읽힌 조회에서 다시 채운다.
+  const seedKind = useRef('');
 
-  useEffect(() => {
+  const load = () => {
     fetchJson('/admin/tool-categories').then((r) => {
       setD(r);
-      if (!inited.current && r?.settings) {
-        inited.current = true;
+      const le = unreadMarkOf(r);
+      if ((!inited.current || shouldReseed(seedKind.current, le)) && r?.settings) {
+        inited.current = true; seedKind.current = unreadKind(le);
         setEnabled(!!r.settings.enabled);
         setShowUncat(r.settings.showUncategorized !== false);
         setCollapseOthers(!!r.settings.collapseOthers);
@@ -41,7 +47,8 @@ export default function ToolCategories() {
       }
       setErr(null);
     }).catch((e) => setErr(e.message));
-  }, []);
+  };
+  useEffect(() => { load(); }, []);
 
   // 카드로 노출되는 도구만 대상으로 한다(topTab 승격 항목은 특수 기능 화면에 없다).
   const allTools = useMemo(() => TOOLS.filter((t) => !t.topTab), []);
@@ -88,7 +95,10 @@ export default function ToolCategories() {
     finally { setBusy(false); }
   };
 
+  const unread = unreadMarkOf(d);
+  const saveLocked = saveLockedByUnread(unread);
   const save = async () => {
+    if (saveLocked) return;
     setBusy(true); setMsg(null);
     try {
       const r = await sendJson('/admin/tool-categories', 'PUT', {
@@ -110,6 +120,7 @@ export default function ToolCategories() {
   return (
     <div className="card" style={{ padding: 16 }}>
       <h3 style={{ marginTop: 0 }}>특수 기능 카테고리</h3>
+      <SettingsUnreadBanner le={unread} what="특수 기능 분류 설정" save="저장" onRecheck={load} busy={busy} />
       <p className="muted" style={{ fontSize: 12.5, lineHeight: 1.7, marginTop: -4 }}>
         특수 기능이 <b>{allTools.length}개</b>라 한 화면에 다 깔면 찾기 어렵습니다. 카테고리로 묶어 섹션별로 보여줍니다.
         <br />
@@ -216,7 +227,7 @@ export default function ToolCategories() {
       </div>
 
       <div className="flex gap" style={{ alignItems: 'center', marginTop: 18, flexWrap: 'wrap' }}>
-        <button className="logout-btn" style={{ padding: '7px 16px' }} disabled={busy} onClick={save}>{busy ? '저장 중…' : '저장'}</button>
+        <button className="logout-btn" style={{ padding: '7px 16px' }} disabled={busy || saveLocked} onClick={save}>{busy ? '저장 중…' : '저장'}</button>
         {msg && <span className="muted" style={{ fontSize: 12.5, color: msg.startsWith('오류') ? '#f0a' : undefined }}>{msg}</span>}
       </div>
 
@@ -224,8 +235,10 @@ export default function ToolCategories() {
       <p className="muted" style={{ fontSize: 12.5, lineHeight: 1.7, marginTop: -4 }}>
         특수 기능 화면의 ‘⚙ 이름·단계 설정’ 과 같은 편집기입니다. 위 카테고리 저장과 따로 저장됩니다.
       </p>
-      <ToolNamesStages embedded settings={d.settings} limits={d.limits} defaultStages={d.defaultStages}
-        onSaved={(s) => setD((prev) => ({ ...prev, settings: s }))} />
+      {saveLocked
+        ? <div className="muted" style={{ fontSize: 12.5 }}>설정 파일을 읽지 못한 동안에는 이름 · 단계 편집기를 열지 않습니다(지금 값은 저장된 설정이 아닙니다).</div>
+        : <ToolNamesStages key={unreadKind(unread) || 'ok'} embedded settings={d.settings} limits={d.limits} defaultStages={d.defaultStages}
+            onSaved={(s) => setD((prev) => ({ ...prev, settings: s }))} />}
     </div>
   );
 }

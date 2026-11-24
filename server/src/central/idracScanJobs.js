@@ -23,6 +23,7 @@ import { buildPendingRemedy, buildPushErrorRemedy } from './scanRemedy.js';
 import { credFingerprint } from '../util/credFingerprint.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { capStr } from '../util/capStr.js';
+import { envPositive } from '../util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
 
 
 const jobs = new Map();    // reqId -> { reqId, agent, ips, username, password, state, createdAt, takenAt, result, doneAt, progress, events }
@@ -55,7 +56,7 @@ const MAX_PENDING = 50;    // 에이전트당 동시 대기 잡 상한(남용 �
 const MAX_EVENTS = 300;    // 잡당 이벤트 로그 상한
 // claim→ack 2단계 확인응답: 인출(claim) 후 첫 진행/결과 보고(ack)가 ACK_TIMEOUT 내에 없으면,
 // 엣지가 인출 직후 재시작/단절된 것으로 보고 잡을 다시 대기로 되돌려 재인출 가능하게 한다(유실 방지).
-const ACK_TIMEOUT_MS = Number(process.env.IDRAC_SCAN_ACK_TIMEOUT_MS) || 90_000;
+const ACK_TIMEOUT_MS = envPositive(process.env.IDRAC_SCAN_ACK_TIMEOUT_MS, 90_000);
 const MAX_CLAIMS = 3;      // 재인출 한도(초과 시 오류 종결)
 /**
  * v2.621(감사 EDGE-01): 폴 한 번에 인출하는 잡 수. 엣지 워커(agent/idracScanWorker.js)는 받은 잡을 **순차로** 돌고 그동안

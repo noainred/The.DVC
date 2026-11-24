@@ -6,7 +6,8 @@
  * 추이의 마지막 전체 합계 점이 '적재 보류' 인지 '점검중 vCenter 를 뺀 부분 합' 인지 알 수 없었다.
  * 제외가 없으면 null(빈 줄을 만들지 않는다). 문구에 백틱·별표를 쓰지 않는다(평문으로 그린다).
  */
-const REASON_LABEL = { maintenance: '점검중', unreachable: '수집 실패', stale: '위임 보고 낡음' };
+// 158회차: stopped = 긴급중단(수집 정지) — 스냅샷이 통째로 얼어 있어 샘플러가 전 vCenter 를 적재하지 않는다(서버 metrics/sampler.js samplingUnreadReasons)
+const REASON_LABEL = { maintenance: '점검중', unreachable: '수집 실패', stale: '위임 보고 낡음', stopped: '긴급중단' };
 
 const cnt = (v) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0);
 /** v2.741(VC-02): 사용률을 못 읽어 CPU·메모리 할당/사용 계열에서 뺀 켜진 VM 수 { cpu, mem } — 둘 다 0 이면 null. */
@@ -22,6 +23,7 @@ export function normalizeWithheld(x) {
       maintenanceExcluded: cnt(x.maintenanceExcluded), vmStatsSkipped: cnt(x.vmStatsSkipped),
       dsUsedUnknown: cnt(x.dsUsedUnknown), vmStorageUnknown: cnt(x.vmStorageUnknown),   // v2.727(C-01)
       vmUsageUnknown: usageUnknown(x.vmUsageUnknown),                                   // v2.741(VC-02)
+      vmAllocUnknown: usageUnknown(x.vmAllocUnknown),                                   // v3.28.1 — 같은 모양 { cpu, mem }
       tempHostsDisconnected: cnt(x.tempHostsDisconnected),                              // v2.742(VC-02) — 요약이 싣지 않으면 0(말하지 않는다)
     };
   }
@@ -32,6 +34,7 @@ export function normalizeWithheld(x) {
     maintenanceExcluded: cnt(vs.maintenanceExcluded), vmStatsSkipped: cnt(x.vmStatsSkipped),
     dsUsedUnknown: cnt(x.dsUsedUnknown), vmStorageUnknown: cnt(x.vmStorageUnknown),     // v2.727(C-01)
     vmUsageUnknown: usageUnknown(x.vmUsageUnknown),                                     // v2.741(VC-02)
+    vmAllocUnknown: usageUnknown(x.vmAllocUnknown),                                     // v3.28.1
     tempHostsDisconnected: cnt(x.tempHostsDisconnected),                                // v2.742(VC-02) — 0 이면 서버가 키를 싣지 않는다
   };
 }
@@ -63,6 +66,11 @@ export function samplerWithheldNote(x, { totalView = true } = {}) {
   if (n.vmUsageUnknown) {
     const p = [n.vmUsageUnknown.cpu ? `CPU ${n.vmUsageUnknown.cpu}대` : '', n.vmUsageUnknown.mem ? `메모리 ${n.vmUsageUnknown.mem}대` : ''].filter(Boolean).join(' · ');
     out.push(`사용률을 읽지 못한 켜진 VM(${p})은 할당·사용 계열에서 뺐습니다 — 사용 0(유휴)으로 채우지 않았습니다`);
+  }
+  // v3.28.1: 할당 크기(vCPU 수 · 메모리)를 못 읽은 켜진 VM — 할당 0 으로 쌓지 않고 그 계열에서 뺐다.
+  if (n.vmAllocUnknown) {
+    const p = [n.vmAllocUnknown.cpu ? `vCPU ${n.vmAllocUnknown.cpu}대` : '', n.vmAllocUnknown.mem ? `메모리 ${n.vmAllocUnknown.mem}대` : ''].filter(Boolean).join(' · ');
+    out.push(`할당 크기를 읽지 못한 켜진 VM(${p})은 할당·사용 계열에서 뺐습니다 — 할당 0 으로 채우지 않았습니다`);
   }
   // v2.742(VC-02): 연결이 끊긴 호스트의 센서 값은 vCenter 가 마지막으로 받은 값이라 지금 온도가 아니다 — 온도 계열에 넣지 않았다.
   if (n.tempHostsDisconnected) out.push(`연결이 끊긴 호스트 ${n.tempHostsDisconnected}대의 온도는 적재하지 않았습니다(마지막으로 받은 값이라 지금 온도가 아닙니다) — 호스트·클러스터·vCenter 온도 추이에서 빠졌습니다`);

@@ -85,7 +85,7 @@ export function cancelRun(runId) {
   if (!run) return { ok: false, reason: '실행을 찾을 수 없습니다.' };
   if (run.status !== 'running') return { ok: false, reason: `이미 ${run.status} 상태입니다.` };
   run.cancelled = true;
-  for (const ac of run.aborts.values()) { try { ac.abort(); } catch { /* */ } }
+  for (const ac of run.aborts) { try { ac.abort(); } catch { /* */ } }
   return { ok: true, runId };
 }
 export function _resetForTest() { _runs.clear(); _active = null; }
@@ -109,7 +109,7 @@ export function startBulkDeploy(rows, opts = {}) {
 
   const run = {
     id: newId(), at: now(), status: 'running', by: String(opts.by || ''), cancelled: false,
-    aborts: new Map(),
+    aborts: new Set(),   // 전체 점검 15회차(A-1): 행마다 컨트롤러 하나(같은 host · 다른 포트 행이 서로 덮고 지우지 않게 — 예전 Map 키는 host)
     opts: {
       saveTargets: opts.saveTargets !== false,
       registerCollector: opts.registerCollector !== false,
@@ -146,7 +146,7 @@ export function startBulkDeploy(rows, opts = {}) {
         const ac = new AbortController();
         let timedOut = false;
         const timer = setTimeout(() => { timedOut = true; ac.abort(); }, timeoutMs);
-        run.aborts.set(item.host, ac);
+        run.aborts.add(ac);
         const failReason = (msg) => (run.cancelled ? '사용자 취소'
           : timedOut ? `배포 타임아웃(${Math.round(timeoutMs / 60_000)}분) — 세션을 끊었습니다.` : msg);
         try {
@@ -171,7 +171,7 @@ export function startBulkDeploy(rows, opts = {}) {
           item.reason = failReason(e.message);
         } finally {
           clearTimeout(timer);
-          run.aborts.delete(item.host);
+          run.aborts.delete(ac);
           item.ms = now() - t0; item.finishedAt = now();
         }
       });

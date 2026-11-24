@@ -96,7 +96,7 @@ export default function VeeamEmSettings() {
       {msg && <div className={`banner ${msg.ok ? 'info' : 'warn'}`} style={{ marginTop: 8 }}>{msg.text}</div>}
 
       <div className="card" style={{ marginTop: 10, overflowX: 'auto' }}>
-        {!d && !err ? <div className="muted" style={{ padding: 12 }}>읽는 중…</div> : !ems.length ? <div className="muted" style={{ padding: 12, fontSize: 13 }}>등록된 Enterprise Manager 가 없습니다 — 아래에서 추가하세요.</div> : (
+        {!d && !err ? <div className="muted" style={{ padding: 12 }}>읽는 중…</div> : !ems.length ? <div className="muted" style={{ padding: 12, fontSize: 13 }}>{d?.registryError ? 'Enterprise Manager 등록부를 읽지 못했습니다 — 목록이 비어 보여도 등록이 없는 것이 아닙니다.' : '등록된 Enterprise Manager 가 없습니다 — 아래에서 추가하세요.'}</div> : (
           <STable minWidth={820}>
             <thead><tr><th>이름</th><th>주소</th><th>계정</th><th>상태</th><th data-nosort=""><span style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)' }}>동작</span></th></tr></thead>
             <tbody>

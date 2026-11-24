@@ -7,6 +7,7 @@
 
 import fs from 'node:fs';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from './util/atomicWrite.js';
+import { makeJsonFileReader } from './util/jsonFileRead.js';   // 103회차 F13: 읽기 오류 ≠ 손상
 import path from 'node:path';
 import { config } from './config.js';
 
@@ -17,11 +18,34 @@ export function alarmTemplate(message) {
   return String(message || '').replace(/\d+/g, '#').trim();
 }
 
+/*
+ * 103회차 F13(재현 — EISDIR): 예전 catch 하나는 **읽기 오류**도 손상으로 보고 원본(뮤트 규칙)을 `.corrupt.*` 로 옮겼다 — 호출마다 읽는 파일이라 다음 호출부터
+ *   빈 목록(모든 뮤트 풀림 — 무시하기로 한 알람이 다시 쏟아짐)이었고, 다음 추가가 규칙 1개짜리 파일로 원본 자리를 채웠다.
+ *   읽기 단계는 공용 읽기(util/jsonFileRead.js — 30초 간격 재읽기): 읽기 오류는 원본을 두고 · **마지막으로 읽은 규칙**을 그대로 적용하고 ·
+ *   추가 · 삭제를 409 로 거절한다. parse 실패는 예전과 같다(보존본 + 빈 목록).
+ */
+const _reader = makeJsonFileReader(() => FILE, { parse: (t) => t, preserve: false, tag: 'alarm-mutes' });
+let _readErr = null;   // { at, code }
+let _lastGood = [];    // 마지막으로 읽은 규칙(읽기 오류 동안 이 규칙으로 가린다)
+const refusal = () => ({ ok: false, status: 409, code: 'settings-unreadable', readError: true,
+  reason: `알람 음소거 규칙 파일(alarm-mutes.json)을 읽지 못한 상태라 저장하지 않았습니다 — 읽기 오류(${_readErr?.code || 'read-error'})이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 저장이 다시 열립니다).` });
+/** 103회차 F13: 뮤트 규칙 파일 읽기 오류(원본은 그대로)면 `{ at, code }`, 아니면 null. */
+export function mutesReadError() { loadMutes(); return _readErr ? { ..._readErr } : null; }
+/** 테스트 전용. */
+export function _resetMutesForTest() { _readErr = null; _lastGood = []; _reader.reset(); }
 export function loadMutes() {
-  if (!fs.existsSync(FILE)) return [];
+  const rr = _reader.read();
+  if (rr.kind === 'read-error') {
+    if (!_readErr) _readErr = { at: Date.now(), code: String(rr.error?.code || 'read-error').slice(0, 32) };
+    return _lastGood.map((m) => ({ ...m }));
+  }
+  _readErr = null;
+  if (rr.kind === 'missing') { _lastGood = []; return []; }
   try {
-    const p = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-    return Array.isArray(p?.mutes) ? p.mutes : [];
+    const p = JSON.parse(rr.value);
+    const list = Array.isArray(p?.mutes) ? p.mutes : [];
+    _lastGood = list.map((m) => ({ ...m }));
+    return list;
   } catch (e) {
     // v2.447(감사 B4): 조용히 [] 를 돌려주면 **모든 뮤트가 풀려** 무시하기로 한 알람이 다시 쏟아지고,
     // 다음 save() 가 규칙 1개짜리 파일로 덮어써 기존 규칙이 영구 유실된다. 원본을 보존하고 경고를 남긴다.
@@ -47,6 +71,7 @@ export function addMute(body) {
   // scope: 'all' (every vCenter) or 'vcenter' (only the originating vCenter)
   const vcenterId = body.scope === 'vcenter' ? (body.vcenterId || '') : '';
   const list = loadMutes();
+  if (_readErr) return refusal();   // 103회차 F13
   const id = `${entityType}|${template}|${vcenterId}`;
   if (list.some((m) => m.id === id)) return { ok: true, already: true, mute: list.find((m) => m.id === id) };
   const mute = { id, entityType, template, sample: message, vcenterId, createdAt: Date.now() };
@@ -57,6 +82,7 @@ export function addMute(body) {
 
 export function removeMute(id) {
   const list = loadMutes();
+  if (_readErr) return refusal();   // 103회차 F13
   const next = list.filter((m) => m.id !== id);
   if (next.length === list.length) return { ok: false, reason: '없는 규칙' };
   save(next);

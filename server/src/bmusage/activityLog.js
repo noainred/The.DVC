@@ -7,11 +7,12 @@
  * ⚠ **실패 주기의 수치는 싣지 않는다** — 0 을 실으면 화면에 `CPU 0%` 가 찍혀 '부하 없음' 이라는
  *   거짓이 된다(v2.516 `snap.ok ? … : {}` 규약).
  */
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { createActivityLog } from '../util/activityLog.js';
 
 const log = createActivityLog({
   fileName: 'bmusage-activity.json',
-  max: Number(process.env.BMUSAGE_ACTIVITY_MAX) || 500,
+  max: envPositive(process.env.BMUSAGE_ACTIVITY_MAX, 500),
   // 수집 1건(서버 1대)마다 남기는 수치. 실패 주기에는 **싣지 않는다**(null).
   numFields: ['cpuPct', 'memPct', 'diskBusyPct', 'netPct', 'hbaPct'],
 });

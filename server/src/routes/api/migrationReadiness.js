@@ -46,6 +46,8 @@ export function registerMigrationReadiness(api) {
       // v2.744(감사 VC-03): 읽지 못한 vCenter 의 VM 은 이 파일에 없다 — 마지막 줄에 밝힌다.
       //   v2.744(회귀 검토 GF-R2): 읽지 못한 것(합계는 하한)과 비활성(수집하지 않음)을 나눠 적고 사유는 한글 — 화면 partial 과 같은 기준.
       for (const l of notReadCsvLines(r.notReadVcenters, { what: 'VM 이 이 목록에 없음' })) lines.push(csvLine([l]));
+      // 전체 점검 32회차 F4: 화면 상한으로 잘렸으면 파일 · 헤더에 밝힌다(형제 CSV 와 같은 모양 — 조용히 자르지 않는다).
+      if (r.omitted) { lines.push(csvLine([`(상한으로 ${r.omitted}행 생략 — 전체 ${r.matched}대)`])); res.setHeader('X-Omitted-Rows', String(r.omitted)); }
       logAudit({ user: req.user?.username, action: 'migration-readiness.csv', target: 'migration-readiness', detail: `${lines.length - 1} rows`, ip: req.ip });
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="migration-readiness-${fileStamp()}.csv"`);

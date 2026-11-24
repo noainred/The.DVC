@@ -23,6 +23,6 @@ export function scanSettingsBody(s, agent) {
     const m = blankOr(intervalMin);
     body.intervalMs = m == null ? undefined : m * 60000;
   }
-  for (const k of ['concurrency', 'timeoutMs', 'retentionDays']) body[k] = blankOr(rest[k]);
+  for (const k of ['concurrency', 'timeoutMs', 'retentionDays', 'dnsConfirmHours']) body[k] = blankOr(rest[k]);   // v3.2.0 dnsConfirmHours
   return body;
 }

@@ -4,6 +4,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 // v2.291 라우트 분할(routes/svcmon.js → routes/svcmon/*) 회귀 방지 — 라우트 등록 순서.
 //
 // 배경(분할 감사에서 확정된 유일한 HIGH 리스크): GET /targets/export.csv 는
@@ -13,7 +20,7 @@ import path from 'node:path';
 // 하나도 없었다(감사 지적) — 정적(소스 순서) + 런타임(실제 mount 후 응답) 이중으로 잡는다.
 //
 // svcmon/store.js 는 import 시점 CONFIG_DIR 을 쓴다 → 저장소 오염 방지를 위해 격리 후 로드.
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'svcmon-route-order-'));
+const TMP = tmpDir('svcmon-route-order-');
 process.env.CONFIG_DIR = TMP;
 
 let server; let base;

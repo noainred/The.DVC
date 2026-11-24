@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>SAN 비교 — 상태 6종</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums}
+.muted{color:#8b9bb4}
+.num{font-family:"JetBrains Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums;white-space:nowrap}
+.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px;padding:24px}
+.panel{display:flex;flex-direction:column;gap:10px;min-width:0}
+.ph{display:flex;align-items:baseline;gap:8px}
+.ph .n{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12px;color:#34e0b4}
+.ph b{font-size:14px}
+.ph small{color:#8b9bb4;font-size:12px}
+.card{background:linear-gradient(180deg,#141b2d,#111726);border:1px solid #243049;border-radius:14px;padding:14px 16px;min-width:0;display:flex;flex-direction:column;gap:8px}
+.lbl{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12px;letter-spacing:.14em;color:#8b9bb4}
+.lbl::first-letter{color:#34e0b4}
+.tag{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.bm{background:rgba(52,224,180,.14);color:#5eead4}
+.tag.pmax{background:rgba(59,130,246,.16);color:#93c5fd}
+.tag.vmax{background:rgba(168,85,247,.16);color:#d8b4fe}
+.tag.ok{background:rgba(34,197,94,.14);color:#86efac}
+.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}
+.tag.crit{background:rgba(239,68,68,.16);color:#fca5a5}
+.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}
+.btn{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.msg{font-size:12.5px;line-height:1.6}
+.msg b{color:#e6edf6}
+.empty{border:1px dashed #243049;border-radius:12px;padding:14px;font-size:12.5px;color:#8b9bb4;line-height:1.6}
+.big{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:28px;font-weight:700;line-height:1}
+.big small{font-size:14px;color:#8b9bb4;font-weight:600;margin-left:2px}
+.row{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid #1f2a40;border-radius:10px;background:#0f1626;font-size:12.5px}
+.row b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row .sub{display:block;font-size:11px;color:#8b9bb4;font-weight:400;white-space:normal}
+.errbox{border:1px solid #ef4444;border-radius:12px;padding:14px 16px;background:rgba(239,68,68,.06);font-size:12.5px;line-height:1.6}
+.errbox b{color:#fca5a5}
+.dim{opacity:.45}
+.pbar{display:inline-block;position:relative;width:76px;height:5px;border-radius:5px;background:rgba(148,163,184,.15);overflow:hidden;vertical-align:middle;margin-right:6px}
+.pbar > span{position:absolute;left:0;top:0;bottom:0;border-radius:5px}
+</style>
+</helmet>
+<div class="grid">
+
+  <div class="panel">
+    <div class="ph"><span class="n">③-1</span><b>SAN 어레이가 없음</b><small>VMAX · PowerMax 등록 0대</small></div>
+    <div class="card">
+      <div class="lbl">▸ 용량 사용률</div>
+      <div style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:#8b9bb4"><span style="width:10px;height:10px;border-radius:3px;background:#34e0b4"></span>베어메탈 전체 · 10대</div>
+      <div class="big">67.4<small>%</small></div>
+      <div class="empty"><b style="color:#e6edf6">비교할 SAN 어레이가 없습니다.</b> 스토리지 모니터링에 VMAX · PowerMax 가 등록돼 있지 않습니다. <a href="#">스토리지 모니터링에서 등록 →</a><br>SAN 종류 칩에서 다른 종류(Unity · PowerStore · XtremIO)를 고르면 그 어레이와 비교합니다.</div>
+      <div class="muted" style="font-size:11.5px">비교 표는 베어메탈 행만 보이고 SAN 합계 행은 그리지 않습니다(0% 로 그리지 않음).</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="ph"><span class="n">③-2</span><b>SAN 전송 속도 측정 없음</b><small>포트 사용량 수집 꺼짐 · 표본 없음</small></div>
+    <div class="card">
+      <div class="lbl">▸ 전송 속도 (읽기 + 쓰기)</div>
+      <div style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:#8b9bb4"><span style="width:10px;height:10px;border-radius:3px;background:#34e0b4"></span>베어메탈 · 9대 측정 합</div>
+      <div class="big">412<small>MB/s</small></div>
+      <div style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:#8b9bb4;margin-top:4px"><span style="width:10px;height:10px;border-radius:3px;background:#3b82f6"></span>SAN · 4대</div>
+      <div class="big muted">—</div>
+      <div class="msg" style="color:#fcd34d"><span class="tag warn">측정 없음</span> 설정 › 수집 › <b>SAN 스위치 포트 사용량</b>이 꺼져 있어 전송 속도 표본이 없습니다. 켜면 수집 주기(기본 5분) 뒤부터 채워집니다. 용량 사용률 비교는 그대로 됩니다.</div>
+      <div class="muted" style="font-size:11.5px">켜져 있는데 표본이 없으면 ‘엣지 스위치 N대의 시계열이 아직 중앙에 오지 않았습니다’ 로 사유를 바꿔 말합니다(SAN 스위치 화면과 같은 문구).</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="ph"><span class="n">③-3</span><b>시리얼 미대조 어레이</b><small>용량은 있는데 포트 이름에서 못 찾음</small></div>
+    <div class="card">
+      <div class="row"><span class="tag vmax">VMAX</span><b>VMAX-100K-PL1<span class="sub">폴란드 · 시리얼 000296800331</span></b><span class="num" style="color:#fbbf24;font-weight:700">81.3%</span></div>
+      <div class="row"><span class="muted" style="font-size:12px">전송 속도</span><b class="num muted">—</b><span class="tag warn">시리얼 미대조</span></div>
+      <div class="msg muted">스위치 포트에 붙은 이름(예: <span class="mono">SYMMETRIX::000296800331::SAF-1d</span>)에서 이 시리얼을 찾지 못했습니다. 포트 이름이 없거나 다른 표기면 전송 속도를 붙이지 않습니다 — 억지로 맞춘 값은 없느니만 못합니다.</div>
+      <div class="muted" style="font-size:11.5px">확인: SAN 스위치 › 포트 사용량 › 연결 대상 이름 · 스토리지 모니터링의 시리얼 열. 합계에서 빼고 ‘3/4대 측정 합’ 으로 밝힙니다.</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="ph"><span class="n">③-4</span><b>베어메탈 측정 불가 4가지</b><small>용량은 있어도 I/O 가 없는 경우</small></div>
+    <div class="card" style="gap:6px">
+      <div class="row"><b>hpc-node-03<span class="sub">엣지 ‘fra-edge’ 회신에 I/O 값 없음 — 엣지가 이 기능 이전 버전(업그레이드 필요)</span></b><span class="tag warn">측정 불가</span></div>
+      <div class="row"><b>nas-gw-01<span class="sub">/proc/diskstats 가 없음 — Linux 가 아닙니다(FreeBSD). 용량(df)은 수집됨</span></b><span class="tag warn">측정 불가</span></div>
+      <div class="row"><b>new-srv-07<span class="sub">아직 첫 수집 전 — 다음 주기(최대 10분) 또는 ‘지금 측정’</span></b><span class="tag gray">수집 대기</span></div>
+      <div class="row"><b>old-vault-02<span class="sub">인증 실패로 주기 수집 정지(3회) — 비밀번호를 고치면 자동 재개. 용량도 마지막 값</span></b><span class="tag crit">인증 정지</span></div>
+      <div class="muted" style="font-size:11.5px">네 경우 모두 합에서 빼고 개수를 씁니다. 용량은 있고 I/O 만 없으면 사용률 열은 그대로 두고 전송 속도 열만 ‘—’.</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="ph"><span class="n">③-5</span><b>측정 중</b><small>‘지금 측정’ 을 눌렀을 때</small></div>
+    <div class="card">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button class="btn primary" type="button" disabled>측정 중…</button>
+        <button class="btn" type="button" disabled>새로 고침</button>
+        <span class="muted" style="font-size:12px">베어메탈 10대 · SSH df + diskstats 2초 · 최대 약 75초</span>
+      </div>
+      <div class="dim">
+        <div class="lbl">▸ 용량 사용률</div>
+        <div class="big">67.4<small>%</small></div>
+        <div class="muted" style="font-size:11.5px">이전 값(3분 전) — 새 값이 오면 바뀝니다</div>
+      </div>
+      <div class="muted" style="font-size:11.5px">이전 값은 흐리게 유지하고 지우지 않습니다. 측정은 서버 쪽 재진입 가드를 공유해 두 번 눌러도 한 번만 돕니다. SAN 쪽은 다시 묻지 않습니다(그 쪽 주기는 따로).</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="ph"><span class="n">③-6</span><b>범위 제한 계정</b><small>403 — 전체 범위 관리자 전용</small></div>
+    <div class="card">
+      <div class="errbox"><b>이 화면은 전체 범위(vCenter 제한 없는) 관리자 계정만 쓸 수 있습니다.</b><br>베어메탈 스토리지는 vCenter 범위 밖(엣지 단위)이라 범위가 지정된 계정에는 열리지 않습니다 — 현황 탭과 같은 기준입니다. 관리자에게 범위 해제를 요청하세요.</div>
+      <div class="muted" style="font-size:11.5px">15초 재조회를 멈춥니다(다시 물어도 같은 답). 관리자 상세가 아닌 계정에는 장비 주소를 싣지 않습니다 — 이 화면은 애초에 주소를 보내지 않습니다(서버 이름 · 그룹 · 수치만).</div>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":820}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

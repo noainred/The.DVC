@@ -10,8 +10,9 @@
  */
 import { useEffect, useState } from 'react';
 
-// 셸마다 머리(sticky) 요소가 다르다. 첫 번째로 찾은 것의 높이를 쓴다.
-export const STICKY_HEADS = '.v6 .v6-top, .v5 .v5-top, .v3-top, .topbar';
+// 셸 머리(sticky) 요소. v3.10.12(공통 기능 점검 10회차): V3·V5·V6 셸은 v2.747 에 지웠다 — 그 머리 선택자(.v6-top·.v5-top·.v3-top)는
+//   어디에도 없는 요소를 찾고 있었다(셸을 되살리지 않는다 — CLAUDE.md). 관제 콘솔(.dvc-top)은 이 훅을 쓰는 화면을 그리지 않는다.
+export const STICKY_HEADS = '.topbar';
 
 function observeHeight(el, set) {
   const calc = () => set(Math.round(el.getBoundingClientRect().height || 0));

@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>집중 모니터링 — 디스크 점검 프로그램 자동 설치 · 설치 디렉터리</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+.num{font-variant-numeric:tabular-nums}
+.dim{color:#8b9bb4}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0;box-sizing:border-box}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.btn{height:32px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#141b2d;color:#e6edf6;font:inherit;font-size:12.5px;cursor:pointer;white-space:nowrap;box-sizing:border-box}
+.btn.sm{height:28px;padding:0 10px;font-size:12px}
+.btn.pri{background:#2563eb;border-color:#2563eb;color:#fff}
+.btn.off{opacity:.45;cursor:not-allowed}
+.h3{margin:0;font-size:14.5px;font-weight:600}
+.badge{display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:11px;font-size:12px;font-weight:600;white-space:nowrap;background:rgba(139,155,180,.16);color:#c3cede}
+.badge.new{background:rgba(125,211,252,.12);color:#7dd3fc}
+.badge.ok{background:rgba(34,197,94,.14);color:#86efac}
+.badge.warn{background:rgba(245,158,11,.16);color:#fcd34d}
+.badge.bad{background:rgba(239,68,68,.16);color:#fca5a5}
+.badge.live{background:rgba(59,130,246,.18);color:#93c5fd}
+.chip{height:30px;padding:0 12px;border-radius:15px;border:1px solid #243049;background:#0f1626;color:#c3cede;font:inherit;font-size:12.5px;cursor:pointer;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.chip.on{background:#1e3a8a;border-color:#2563eb;color:#fff}
+.pc{padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+.cap{font-size:12px;color:#8b9bb4;overflow-wrap:anywhere}
+.kp{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(220px,100%),1fr));gap:12px}
+.k{padding:12px 16px;display:flex;flex-direction:column;gap:2px}
+.k b{font-size:24px;line-height:1.2}
+.g2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(560px,100%),1fr));gap:14px;align-items:start}
+.tw{overflow-x:auto}
+.sg{display:grid;grid-template-columns:26px 150px 104px minmax(170px,1fr) minmax(190px,1.1fr) minmax(200px,1.2fr) minmax(190px,1.1fr) 92px;column-gap:12px;align-items:center;padding:6px 16px;min-width:1260px;box-sizing:border-box}
+.cg{display:grid;grid-template-columns:150px 92px minmax(190px,1.1fr) minmax(190px,1.1fr) 110px;column-gap:12px;align-items:center;padding:6px 16px;min-width:780px;box-sizing:border-box}
+.xg{display:grid;grid-template-columns:150px minmax(220px,1fr);column-gap:12px;align-items:center;padding:6px 16px;min-width:420px;box-sizing:border-box}
+.pg{display:grid;grid-template-columns:150px 92px 300px minmax(240px,1fr);column-gap:12px;align-items:center;padding:8px 16px;min-width:860px;box-sizing:border-box}
+.fg{display:grid;grid-template-columns:minmax(170px,.8fr) minmax(220px,1.2fr) minmax(220px,1.2fr);column-gap:12px;align-items:start;padding:8px 16px;min-width:680px;box-sizing:border-box}
+.kg{display:grid;grid-template-columns:minmax(150px,1fr) minmax(130px,.8fr) minmax(280px,2fr);column-gap:12px;align-items:center;padding:8px 16px;min-width:620px;box-sizing:border-box}
+.seg{display:inline-flex;flex-wrap:wrap;border:1px solid #243049;border-radius:8px;overflow:hidden;background:#0f1626}
+.seg button{height:30px;padding:0 12px;border:0;border-left:1px solid #243049;background:transparent;color:#8b9bb4;font:inherit;font-size:12.5px;cursor:pointer;white-space:nowrap}
+.seg button:first-child{border-left:0}
+.seg button.on{background:#1e3a8a;color:#fff}
+.th{min-height:34px;font-size:12px;color:#8b9bb4;background:#0f1626;border-top:1px solid #1f2a40;border-bottom:1px solid #1f2a40}
+.tr{min-height:46px;border-bottom:1px solid #1a2236;font-size:12.5px}
+.tr.sel{background:rgba(59,130,246,.10)}
+.chk{width:16px;height:16px;border-radius:4px;border:1.5px solid #5b6b86;display:inline-flex;align-items:center;justify-content:center;font-size:11px;cursor:pointer;background:transparent;color:#fff;padding:0}
+.chk.on{background:#2563eb;border-color:#2563eb}
+.chk.no{opacity:.35;cursor:not-allowed}
+.code{font-family:"JetBrains Mono",monospace;font-size:12px;background:#0b111d;border:1px solid #1f2a40;border-radius:8px;padding:10px 12px;line-height:1.6;white-space:pre;overflow-x:auto;color:#c3cede}
+.ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:#c3cede}
+.st{display:grid;grid-template-columns:24px minmax(0,1fr);column-gap:8px;row-gap:8px;font-size:12.5px}
+.st i{display:block;width:20px;height:20px;border-radius:10px;background:#1e3a8a;color:#fff;font-style:normal;font-size:11px;font-weight:700;line-height:20px;text-align:center}
+.cf{display:grid;grid-template-columns:28px minmax(0,1fr);column-gap:10px;row-gap:8px;font-size:12.5px}
+.cf>b{color:#7dd3fc}
+.inp{height:34px;padding:0 10px;border-radius:8px;border:1px solid #2f3d5c;background:#0b111d;color:#e6edf6;font:inherit;font-size:13px;box-sizing:border-box;min-width:0}
+.inp.bad{border-color:#ef4444}
+.fld{display:flex;flex-direction:column;gap:4px;min-width:0}
+.fld label{font-size:12px;color:#8b9bb4}
+.two{display:flex;flex-direction:column;min-width:0}
+.two small{color:#8b9bb4;overflow-wrap:anywhere}
+.dots{display:flex;align-items:center;gap:4px;flex-wrap:nowrap}
+.dots u{display:block;width:30px;height:8px;border-radius:4px;background:#1b2a48;text-decoration:none}
+.dots u.d{background:#22c55e}
+.dots u.n{background:#3b82f6}
+.dots u.f{background:#ef4444}
+.dots u.w{background:#f59e0b}
+.pv{display:grid;grid-template-columns:124px minmax(0,1fr);column-gap:10px;row-gap:6px;font-size:12.5px;align-items:baseline}
+.pv>span:nth-child(odd){color:#8b9bb4}
+.pv .mono{overflow-wrap:anywhere}
+.note{font-size:12.5px;color:#c3cede;background:#0f1626;border:1px solid #1f2a40;border-radius:8px;padding:8px 12px;overflow-wrap:anywhere}
+.note.bad{border-color:rgba(239,68,68,.5);color:#fca5a5}
+.note.ok{border-color:rgba(34,197,94,.4);color:#86efac}
+</style>
+</helmet>
+<div style="max-width:1440px;margin:0 auto;box-sizing:border-box;padding:24px 32px 32px;display:flex;flex-direction:column;gap:14px">
+  <div style="display:flex;flex-direction:column;gap:2px">
+    <div class="dim" style="font-size:12px">특수 기능 › 서버 집중 모니터링 › 디스크 점검 — 점검 프로그램을 포탈이 대상 서버에 설치합니다(지금은 관리자가 설치 파일을 받아 root 로 직접 실행)</div>
+    <div class="dim" style="font-size:12px">가상의 서버 · 계정 · 키입니다. 눌러 볼 수 있는 것: 설치 디렉터리 입력(바로 검사) · 예시 단추 · 키의 ‘설치’ 기능 켜기 · 서버 고르기 · 고른 서버 설치 → 확인 창 → 진행 → 결과.</div>
+  </div>
+
+  <div class="kp">
+    <sc-for list="{{ kpis }}" as="k" hint-placeholder-count="4"><div class="card k"><span class="cap">{{ k.label }}</span><b class="num" style="{{ k.color }}">{{ k.v }}</b><span class="cap">{{ k.sub }}</span></div></sc-for>
+  </div>
+
+  <div class="g2">
+    <div class="card pc">
+      <div class="row" style="justify-content:space-between"><h3 class="h3">설치 디렉터리 — 설치하기 전에 정해 둡니다</h3><span class="badge new">새 · 2차 요청</span></div>
+      <div class="row">
+        <div class="seg"><sc-for list="{{ modeBtns }}" as="b" hint-placeholder-count="2"><button type="button" class="{{ b.cls }}" onClick="{{ b.pick }}">{{ b.label }}</button></sc-for></div>
+        <span class="cap">포탈 전체에 하나 · 저장은 설치와 같은 문(관리자 · 설정 소유자 · 감사)</span>
+      </div>
+      <sc-if value="{{ isCustom }}" hint-placeholder-val="{{ true }}">
+        <div class="fld"><label for="f-dir">설치 디렉터리(절대 경로)</label>
+          <div class="row"><input id="f-dir" class="{{ dirCls }}" style="flex:1 1 260px" type="text" value="{{ dirText }}" onChange="{{ onDir }}" spellcheck="false" autocomplete="off"><button type="button" class="{{ saveCls }}">저장</button></div>
+        </div>
+        <div class="{{ dirNoteCls }}">{{ dirNote }}</div>
+        <div class="row"><span class="cap">넣어 보기</span><sc-for list="{{ tries }}" as="t" hint-placeholder-count="5"><button type="button" class="chip mono" onClick="{{ t.pick }}">{{ t.label }}</button></sc-for></div>
+      </sc-if>
+      <div class="pv">
+        <span>점검 프로그램</span><span class="mono">{{ pathProgram }}</span>
+        <span>실행 파일</span><span class="mono">{{ pathWrapper }}</span>
+        <span>sudoers</span><span><span class="mono">/etc/sudoers.d/dvc-disk-audit</span> <span class="dim">— 옮길 수 없습니다(sudo 가 읽는 곳)</span></span>
+        <span>sudoers 한 줄</span><span class="mono">{{ sudoLine }}</span>
+      </div>
+      <ul class="ul">
+        <li>글자 검사는 세 곳에서 합니다 — 포탈(저장할 때 · 명령을 만들 때) · 엣지(작업을 받을 때) · 설치 파일(대상 서버에서 root 로 돌기 전에).</li>
+        <li>대상 서버에서 다시 봅니다 — 그 디렉터리와 위쪽 폴더가 모두 root 소유 · 그룹과 다른 계정이 쓸 수 없음 · 심링크 아님 · 실행 금지(noexec) 마운트 아님 · 로컬 파일시스템. 하나라도 아니면 설치하지 않습니다.</li>
+        <li>디렉터리가 없으면 만듭니다(root 소유 0755). 있는 디렉터리의 다른 파일은 건드리지 않습니다.</li>
+        <li>설정을 바꿔도 <b>이미 설치된 서버는 그대로 동작</b>합니다 — 서버마다 설치된 곳을 기억하고 ‘옛 디렉터리’ 로 표시합니다. 다시 설치하면 새 곳으로 옮기고, 옛 파일은 포탈 판본과 같을 때만 지웁니다.</li>
+        <li>‘설치 파일 받기’(손으로 설치)에도 같은 디렉터리가 들어갑니다.</li>
+      </ul>
+    </div>
+
+    <div class="card" style="padding:14px 0 10px;display:flex;flex-direction:column;gap:10px">
+      <div class="row" style="justify-content:space-between;padding:0 16px"><h3 class="h3">설치에 쓰는 계정 — SSH 공용 접속에 등록한 키</h3><span class="badge new">새</span></div>
+      <div class="cap" style="padding:0 16px">설정 › 보안 › SSH 공용 접속의 키마다 ‘쓸 수 있는 기능’ 에 <b style="color:#e6edf6">디스크 점검 프로그램 설치(root)</b> 가 생깁니다. 이 기능을 <b style="color:#e6edf6">직접 켠 키만</b> 자동 설치에 씁니다 — 기능 목록이 없는 예전 키는 쓰지 않습니다. 아래에서 켜고 꺼 보면 서버 표가 바뀝니다.</div>
+      <div class="tw">
+        <div class="kg th"><span>키 · 계정</span><span>폴더</span><span>쓸 수 있는 기능</span></div>
+        <sc-for list="{{ keys }}" as="k" hint-placeholder-count="4">
+          <div class="kg tr">
+            <span class="two"><span class="mono" style="font-weight:600">{{ k.name }}</span><small>{{ k.acct }}</small></span>
+            <span class="two"><span>{{ k.folder }}</span><small>{{ k.where }}</small></span>
+            <span class="row" style="gap:6px"><sc-for list="{{ k.feats }}" as="f" hint-placeholder-count="3"><button type="button" class="{{ f.cls }}" onClick="{{ f.pick }}">{{ f.label }}</button></sc-for><small class="dim">{{ k.note }}</small></span>
+          </div>
+        </sc-for>
+      </div>
+      <ul class="ul" style="padding:0 16px 0 34px">
+        <li>설치 계정은 서버마다 이렇게 찾습니다 — ① 같은 주소로 등록된 SSH 공용 접속 서버의 접속 자격(서버 키 → 법인 공통 계정의 기본 키) ② 없으면 그 법인의 공통 계정 가운데 ‘설치’ 를 켠 키가 하나뿐일 때 그 계정. 둘 이상이면 설치 창에서 고릅니다.</li>
+        <li>법인 사용 중지 · 키 폴더 · 바뀐 키 감시는 지금 규칙 그대로 먹습니다. 키를 쓴 기록도 SSH 공용 접속의 사용 기록에 남습니다.</li>
+        <li>엣지가 맡은 서버는 <b>그 엣지 포탈에 등록한 키</b>를 씁니다. 중앙은 키를 보내지 않고, 엣지가 알려 준 계정 이름과 ‘할 수 있음 · 없음(까닭)’ 만 봅니다.</li>
+        <li>설치 계정은 그 서버에서 <b>비밀번호 없이 sudo</b> 할 수 있거나 root 여야 합니다. 저장된 계정 비밀번호를 sudo 에 넣지 않습니다.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card" style="padding:12px 0 10px;display:flex;flex-direction:column;gap:10px">
+    <div class="row" style="justify-content:space-between;padding:0 16px">
+      <div class="row"><h3 class="h3">서버별 설치</h3><span class="badge new">디스크 점검 탭 · ‘대상 서버 준비’ 자리</span>
+        <sc-for list="{{ chips }}" as="c" hint-placeholder-count="4"><button type="button" class="{{ c.cls }}" onClick="{{ c.pick }}">{{ c.label }}</button></sc-for></div>
+      <div class="row"><span style="font-weight:600">{{ pickedText }}</span><button type="button" class="btn" onClick="{{ pickAll }}">설치할 수 있는 서버 모두 고르기</button><button type="button" class="{{ goCls }}" onClick="{{ goConfirm }}">고른 서버에 설치</button></div>
+    </div>
+    <div class="tw">
+      <div class="sg th"><span></span><span>서버</span><span>법인 · 담당 노드</span><span>지금 상태</span><span>설치된 곳</span><span>설치에 쓸 계정</span><span>자동 설치</span><span></span></div>
+      <sc-for list="{{ rows }}" as="r" hint-placeholder-count="10">
+        <div class="{{ r.cls }}">
+          <span><button type="button" class="{{ r.chk }}" onClick="{{ r.pick }}" aria-label="고르기">{{ r.mark }}</button></span>
+          <span class="two"><span class="mono" style="font-weight:600">{{ r.name }}</span><small>{{ r.addr }}</small></span>
+          <span class="two"><span>{{ r.corp }}</span><small>{{ r.node }}</small></span>
+          <span class="two" style="gap:2px"><span class="row" style="gap:6px"><span class="{{ r.stCls }}">{{ r.st }}</span><sc-if value="{{ r.old }}" hint-placeholder-val="{{ false }}"><span class="badge warn">옛 디렉터리</span></sc-if></span><small>{{ r.stSub }}</small></span>
+          <span class="two"><span class="mono" style="overflow-wrap:anywhere">{{ r.where }}</span><small>{{ r.whereSub }}</small></span>
+          <span class="two"><span>{{ r.cred }}</span><small>{{ r.credSub }}</small></span>
+          <span class="two" style="gap:2px"><span><span class="{{ r.autoCls }}">{{ r.auto }}</span></span><small>{{ r.autoSub }}</small></span>
+          <span style="text-align:right"><button type="button" class="{{ r.btnCls }}" onClick="{{ r.one }}">{{ r.btn }}</button></span>
+        </div>
+      </sc-for>
+    </div>
+    <div class="cap" style="padding:0 16px">‘설치에 쓸 계정’ 은 대상 서버에 root 로 설치하는 계정이고, ‘수집 계정’(표 아래 확인 창에 보입니다)은 평소 집중 모니터링이 접속하는 일반 계정입니다. sudoers 한 줄은 수집 계정에 그 실행 파일 하나만 허용합니다 — 수집 계정의 권한은 지금과 같습니다.</div>
+  </div>
+
+  <div class="card" style="padding:12px 0 12px;display:flex;flex-direction:column;gap:10px">
+    <div class="row" style="justify-content:space-between;padding:0 16px">
+      <div class="row"><h3 class="h3">{{ sceneTitle }}</h3><span class="badge new">새</span></div>
+      <div class="row"><span class="cap">시안 장면</span><div class="seg"><sc-for list="{{ sceneBtns }}" as="b" hint-placeholder-count="4"><button type="button" class="{{ b.cls }}" onClick="{{ b.pick }}">{{ b.label }}</button></sc-for></div></div>
+    </div>
+
+    <sc-if value="{{ isPick }}" hint-placeholder-val="{{ false }}">
+      <div class="cap" style="padding:0 16px">위 표에서 서버를 고르고 ‘고른 서버에 설치’ 를 누르면 확인 창이 이 자리에 열립니다. 줄 끝의 ‘설치’ · ‘다시 설치’ 는 그 서버 하나만 고른 확인 창을 엽니다.</div>
+    </sc-if>
+
+    <sc-if value="{{ isConfirm }}" hint-placeholder-val="{{ true }}">
+      <div class="row" style="padding:0 16px"><span class="badge live">{{ doText }}</span><sc-if value="{{ hasSkip }}" hint-placeholder-val="{{ true }}"><span class="badge warn">{{ skipText }}</span></sc-if><span class="cap">{{ nodeText }}</span></div>
+      <div class="tw">
+        <div class="cg th"><span>서버</span><span>담당 노드</span><span>하는 일</span><span>설치에 쓸 계정</span><span>수집 계정</span></div>
+        <sc-for list="{{ doRows }}" as="d" hint-placeholder-count="5">
+          <div class="cg tr"><span class="mono" style="font-weight:600">{{ d.name }}</span><span>{{ d.node }}</span><span class="two"><span>{{ d.act }}</span><small>{{ d.actSub }}</small></span><span>{{ d.cred }}</span><span class="mono">{{ d.acct }}</span></div>
+        </sc-for>
+      </div>
+      <sc-if value="{{ hasSkip }}" hint-placeholder-val="{{ true }}">
+        <div class="tw">
+          <div class="xg th"><span>건너뛰는 서버</span><span>까닭</span></div>
+          <sc-for list="{{ skipRows }}" as="s" hint-placeholder-count="2"><div class="xg tr"><span class="mono">{{ s.name }}</span><span>{{ s.why }}</span></div></sc-for>
+        </div>
+      </sc-if>
+      <div style="padding:0 16px;display:flex;flex-direction:column;gap:10px">
+        <div class="pv">
+          <span>설치 디렉터리</span><span class="mono">{{ dirShown }}</span>
+          <span>서버에 생기는 것</span><span>파일 둘(프로그램 0644 · 실행 파일 0755 — root 소유) + sudoers 한 줄(0440). 패키지 · 서비스 · cron 은 건드리지 않습니다.</span>
+          <span>수집 계정에 주는 것</span><span class="mono">{{ sudoLine }}</span>
+        </div>
+        <div class="row" style="align-items:flex-end">
+          <div class="fld"><label for="f-otp">내 OTP 코드(6자리)</label><input id="f-otp" class="inp mono" style="width:140px" type="text" inputmode="numeric" maxlength="6" value="{{ otp }}" onChange="{{ onOtp }}" autocomplete="off"></div>
+          <button type="button" class="{{ startCls }}" onClick="{{ start }}">설치 시작</button><button type="button" class="btn" onClick="{{ cancel }}">취소</button>
+          <span class="cap">{{ startNote }}</span>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isRun }}" hint-placeholder-val="{{ false }}">
+      <div class="row" style="padding:0 16px"><span class="badge live">{{ runText }}</span><span class="cap">노드마다 한 번에 {{ limNode }}대 · 서버당 시한 {{ limMin }}분 · 화면을 닫아도 계속됩니다(맡은 노드가 돕니다)</span><button type="button" class="btn sm" onClick="{{ toDone }}">끝난 모습 보기</button></div>
+      <div class="tw">
+        <div class="pg th"><span>서버</span><span>담당 노드</span><span>단계 — 계정 · 접속 · sudo · 디렉터리 · 파일 · sudoers · 정리 · 준비 확인</span><span>지금</span></div>
+        <sc-for list="{{ runRows }}" as="p" hint-placeholder-count="5">
+          <div class="pg tr"><span class="mono" style="font-weight:600">{{ p.name }}</span><span>{{ p.node }}</span><span class="dots" role="img" aria-label="{{ p.aria }}"><sc-for list="{{ p.dots }}" as="x" hint-placeholder-count="8"><u class="{{ x.c }}"></u></sc-for></span><span>{{ p.now }}</span></div>
+        </sc-for>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isDone }}" hint-placeholder-val="{{ false }}">
+      <div class="row" style="padding:0 16px"><span class="badge ok">{{ okText }}</span><sc-if value="{{ hasFail }}" hint-placeholder-val="{{ true }}"><span class="badge bad">{{ failText }}</span></sc-if><span class="cap">실패한 서버는 자동으로 다시 시도하지 않습니다 — 까닭을 고친 뒤 그 서버만 다시 누릅니다.</span></div>
+      <div class="tw">
+        <div class="pg th"><span>서버</span><span>담당 노드</span><span>단계</span><span>결과</span></div>
+        <sc-for list="{{ doneRows }}" as="p" hint-placeholder-count="5">
+          <div class="pg tr"><span class="mono" style="font-weight:600">{{ p.name }}</span><span>{{ p.node }}</span><span class="dots" role="img" aria-label="{{ p.aria }}"><sc-for list="{{ p.dots }}" as="x" hint-placeholder-count="8"><u class="{{ x.c }}"></u></sc-for></span><span class="two" style="gap:2px"><span><span class="{{ p.cls }}">{{ p.res }}</span></span><small>{{ p.sub }}</small></span></div>
+        </sc-for>
+      </div>
+    </sc-if>
+  </div>
+
+  <div class="g2">
+    <div class="card pc">
+      <h3 class="h3">대상 서버에서 일어나는 일 — 설치할 때 한 번</h3>
+      <div class="st">
+        <i>1</i><span>맡은 노드(중앙 또는 엣지)가 <b>설치 계정의 키</b>로 접속합니다. 평소 수집에 쓰는 키 · 계정과 다른 접속입니다.</span>
+        <i>2</i><span><b>sudo -n true</b> 로 비밀번호 없는 sudo 가 되는지 먼저 봅니다. 안 되면 여기서 끝냅니다(아무것도 올리지 않습니다).</span>
+        <i>3</i><span>설치 파일 하나(지금 ‘설치 파일 받기’ 로 받는 것과 같은 내용)를 설치 계정 홈에 올리고 root 로 한 번 실행합니다. 설치 파일이 스스로 인자 · 디렉터리 · sha256 을 검사한 뒤 두 파일과 sudoers 한 줄을 놓습니다(sudoers 는 visudo 검사를 지난 것만).</span>
+        <i>4</i><span>올린 설치 파일을 지우고, <b>수집 계정으로 준비 확인</b>(지금 있는 것과 같은 확인 — 두 파일의 sha256 · 소유자 · sudo 규칙)까지 합니다. 점검 실행은 자동으로 하지 않습니다.</span>
+      </div>
+      <div class="code">{{ cmdText }}</div>
+      <span class="cap">명령에 들어가는 값은 둘뿐입니다 — 검사한 설치 디렉터리와 등록부의 수집 계정 이름(영문 · 숫자 · . _ - 만). 서버가 돌려준 글자는 명령에 넣지 않습니다.</span>
+    </div>
+
+    <div class="card" style="padding:14px 0 10px;display:flex;flex-direction:column;gap:10px">
+      <h3 class="h3" style="padding:0 16px">자동 설치가 안 될 때 — 화면이 말하는 까닭</h3>
+      <div class="tw">
+        <div class="fg th" style="align-items:center"><span>까닭</span><span>뜻</span><span>고칠 곳</span></div>
+        <sc-for list="{{ fails }}" as="f" hint-placeholder-count="9"><div class="fg tr"><span style="font-weight:600">{{ f.a }}</span><span>{{ f.b }}</span><span class="dim">{{ f.c }}</span></div></sc-for>
+      </div>
+      <span class="cap" style="padding:0 16px">어느 것이든 지금처럼 ‘설치 파일 받기’ 로 손으로 설치할 수 있습니다. 서버가 돌려준 오류 글은 화면 · 감사에 싣지 않고, 정해 둔 까닭 이름과 종료값만 남깁니다.</span>
+    </div>
+  </div>
+
+  <div class="card pc">
+    <h3 class="h3">정직하게 밝힐 것</h3>
+    <ul class="ul">
+      <li>지금까지 이 기능의 규칙은 ‘포탈은 대상 서버에 파일을 쓰지 않고 root 로 돌 코드를 보내지 않는다’ 였습니다. 자동 설치는 그 규칙의 예외입니다 — <b>설치할 때 한 번</b>, 설치 계정으로만, 포탈 판본의 설치 파일만 root 로 돕니다. 평소 수집 · 점검 실행은 지금과 같습니다.</li>
+      <li>설치 디렉터리는 원격 명령과 sudoers 줄에 들어갑니다. 지금까지 ‘원격 명령은 상수’ 였는데, 앞으로는 ‘검사한 디렉터리 하나를 넣어 만든 고정 꼴’ 이 됩니다. 그래서 글자 규칙을 좁게 잡았습니다.</li>
+      <li>실행 파일은 프로그램 경로를 안에 적어 두므로, 디렉터리가 다르면 실행 파일의 sha256 도 다릅니다. ‘판본’ 은 프로그램 sha256 과 디렉터리를 함께 봅니다(프로그램 원본은 여전히 한 글자도 고치지 않습니다).</li>
+      <li>sudo 가 비밀번호를 묻는 서버는 자동 설치가 안 됩니다. 저장된 비밀번호를 sudo 에 넣는 길은 만들지 않았습니다(컨펌 ③).</li>
+      <li>엣지 서버는 그 엣지 포탈이 이 판 이상이어야 합니다. 옛 판 엣지는 ‘엣지 포탈이 옛 판’ 으로 보입니다.</li>
+      <li>실제 RHEL 7 서버에서는 돌려 보지 못했습니다(이 개발 환경에 없음). 실행 금지 마운트 · 파일시스템 종류 판정 · /etc/sudoers 의 includedir 꼴은 구현 때 이 환경에서 돌려 확인한 것만 싣고, 실서버 확인이 필요한 것은 그렇게 적겠습니다.</li>
+      <li>설치 계정의 키 로그인이 거부되면 자동으로 다시 시도하지 않습니다. 한 번의 일괄 설치에서 같은 키가 연속 3대 거부되면 그 키로는 나머지를 시도하지 않습니다.</li>
+      <li>시안의 걸리는 시간 · 동시 대수는 정한 값이 아니라 제안입니다. 설치는 파일 둘을 놓는 일이라 수 초일 것으로 봅니다(추정 — 재지 않았습니다).</li>
+    </ul>
+  </div>
+
+  <div class="card pc">
+    <h3 class="h3">컨펌 받을 것(답이 없으면 괄호 값으로 구현)</h3>
+    <div class="cf">
+      <b>①</b><span>설치 계정을 찾는 순서 — (같은 주소로 등록된 SSH 공용 접속 서버의 자격 → 없으면 그 법인의 공통 계정 가운데 ‘설치’ 를 켠 키가 하나뿐일 때 · 둘 이상이면 설치 창에서 고르기)</span>
+      <b>②</b><span>‘설치’ 기능 — (직접 켠 키만 쓴다. 기능 목록이 없는 예전 키는 자동 설치에 쓰지 않는다)</span>
+      <b>③</b><span>sudo — (비밀번호 없는 sudo 또는 root 계정만. 저장된 계정 비밀번호를 sudo 에 넣지 않는다)</span>
+      <b>④</b><span>누가 누를 수 있나 — (관리자 · 설정 소유자 · 전체 범위 + 내 OTP 코드 · 데모 계정 차단 · 감사 기록 — SSH 공용 접속에서 키를 바꿀 때와 같은 문)</span>
+      <b>⑤</b><span>설치 디렉터리를 정하는 단위 — (포탈 전체에 하나 · ‘기본 경로’ 는 지금처럼 /usr/local 두 곳. 법인마다 다르게는 넣지 않는다)</span>
+      <b>⑥</b><span>디렉터리를 바꾼 뒤 이미 설치된 서버 — (그대로 동작 · 서버마다 설치된 곳을 기억 · ‘옛 디렉터리’ 표시 · 다시 설치하면 새 곳으로)</span>
+      <b>⑦</b><span>옛 디렉터리의 파일 — (다시 설치할 때 포탈 판본과 같은 파일만 지운다 · 다르면 두고 알린다)</span>
+      <b>⑧</b><span>둘 수 없는 곳 — (/tmp · /var/tmp · /dev · /proc · /sys · /run · /home · /root · /boot · /mnt · /media 아래 · 최상위 바로 아래 한 칸 · 네트워크 파일시스템)</span>
+      <b>⑨</b><span>한 번에 — (노드마다 4대 · 서버당 시한 2분 · 점검 실행의 줄(노드당 1대)과 따로)</span>
+      <b>⑩</b><span>설치 뒤 — (수집 계정으로 준비 확인까지 · 점검 실행은 사람이 누를 때만)</span>
+      <b>⑪</b><span>python3 가 없는 서버 — (설치는 하고 ‘python3 없음’ 으로 표시 · 패키지는 설치하지 않는다)</span>
+      <b>⑫</b><span>제거 단추 — (넣지 않는다 · 지우는 명령 안내만)</span>
+      <b>⑬</b><span>손으로 설치(설치 파일 받기) — (그대로 둔다 · 받는 파일에 지금 디렉터리가 들어간다)</span>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":3775}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { mode: 'custom', dir: '/opt/dvc/disk-audit', usInstall: false, picked: ['kr-db-01', 'kr-db-02', 'kr-was-01', 'pl-db-01', 'pl-db-02', 'pl-was-03', 'us-db-01'], filter: 'all', scene: 'confirm', otp: '' }; }
+  renderVals() {
+    const S = this.state;
+    const LIM = { node: 4, min: 2 };
+    const DEF = { program: '/usr/local/libexec/dvc/rhel_disk_audit.py', wrapper: '/usr/local/sbin/dvc-disk-audit' };
+    const OLD = '/opt/dvc/disk-audit'; // 예전에 이 디렉터리로 설치해 둔 서버(시안 값)
+    const dirIssue = (d) => {
+      if (!d) return '디렉터리를 적어 주세요.';
+      if (d.length > 120) return '120자를 넘습니다.';
+      if (d.charAt(0) !== '/') return '절대 경로(/ 로 시작)만 됩니다.';
+      if (/[^A-Za-z0-9._\/-]/.test(d)) return '쓸 수 있는 글자는 영문 · 숫자 · . _ - / 입니다(공백 · 따옴표 · $ · ; · 한글은 안 됩니다).';
+      if (d.length > 1 && d.charAt(d.length - 1) === '/') return '끝의 / 는 빼 주세요.';
+      const parts = d.split('/').slice(1);
+      if (parts.some((x) => x === '')) return '/ 가 겹쳤습니다.';
+      if (parts.some((x) => x === '.' || x === '..')) return '. 과 .. 은 쓸 수 없습니다.';
+      if (parts.some((x) => x.charAt(0) === '-')) return '이름이 - 로 시작할 수 없습니다.';
+      if (parts.length < 2) return '최상위 바로 아래 한 칸(/opt 같은 곳)에는 둘 수 없습니다 — 전용 폴더를 한 칸 더 두세요.';
+      if (parts.length > 8) return '8칸까지입니다.';
+      const deny = ['/tmp', '/var/tmp', '/dev', '/proc', '/sys', '/run', '/home', '/root', '/boot', '/mnt', '/media'];
+      const hit = deny.find((x) => d === x || d.indexOf(x + '/') === 0);
+      if (hit) return hit + ' 아래에는 둘 수 없습니다(다른 계정이 쓸 수 있거나, 재부팅 · 마운트에 따라 바뀌는 곳입니다).';
+      return '';
+    };
+    const custom = S.mode === 'custom';
+    const issue = custom ? dirIssue(S.dir) : '';
+    const okDir = !issue;
+    const cur = custom ? { program: S.dir + '/rhel_disk_audit.py', wrapper: S.dir + '/dvc-disk-audit', shown: S.dir } : { program: DEF.program, wrapper: DEF.wrapper, shown: '기본 경로(/usr/local/libexec/dvc · /usr/local/sbin)' };
+    const curKey = custom ? S.dir : 'def';
+    // [이름, 주소, 노드, 법인, 수집 계정, 상태, 설치된 곳('def' | OLD | null), 자격, 계정, 키, 출처]
+    // 상태: ready | none | ver | nosudo | nopy | auth     자격: ok | feature | noentry | edgeold | ambig
+    const usCred = S.usInstall ? 'ok' : 'feature';
+    const SV = [
+      ['kr-db-01', '10.10.20.11', '중앙', '한국', 'dvcmon', 'ready', 'def', 'ok', 'dvcadmin', 'kr-admin-2026', 'srv'],
+      ['kr-db-02', '10.10.20.12', '중앙', '한국', 'dvcmon', 'ready', 'def', 'ok', 'dvcadmin', 'kr-admin-2026', 'srv'],
+      ['kr-was-01', '10.10.30.21', '중앙', '한국', 'dvcmon', 'none', null, 'ok', 'dvcadmin', 'kr-admin-2026', 'corp'],
+      ['kr-bak-01', '10.10.40.5', '중앙', '', 'dvcmon', 'none', null, 'noentry', '', '', ''],
+      ['pl-db-01', '10.48.30.11', '엣지 PL', '폴란드', 'dvcmon', 'ver', OLD, 'ok', 'pl-ops', 'pl-common', 'edge'],
+      ['pl-db-02', '10.48.30.12', '엣지 PL', '폴란드', 'dvcmon', 'none', null, 'ok', 'pl-ops', 'pl-common', 'edge'],
+      ['pl-was-01', '10.48.20.11', '엣지 PL', '폴란드', 'dvcmon', 'ready', OLD, 'ok', 'pl-ops', 'pl-common', 'edge'],
+      ['pl-was-03', '10.48.20.13', '엣지 PL', '폴란드', 'svcmon', 'auth', null, 'ok', 'pl-ops', 'pl-common', 'edge'],
+      ['us-nfs-01', '10.60.40.9', '엣지 NJ', '미국', 'dvcmon', 'none', null, usCred, 'us-ops', 'us-common', 'edge'],
+      ['us-db-01', '10.60.30.11', '엣지 NJ', '미국', 'dvcmon', 'nosudo', 'def', usCred, 'us-ops', 'us-common', 'edge'],
+      ['us-db-02', '10.60.30.12', '엣지 NJ', '미국', 'dvcmon', 'nopy', 'def', usCred, 'us-ops', 'us-common', 'edge'],
+      ['us-web-01', '10.60.10.21', '엣지 NJ', '미국', 'dvcmon', 'ver', 'def', usCred, 'us-ops', 'us-common', 'edge'],
+      ['de-db-01', '10.72.30.11', '엣지 DE', '독일', 'dvcmon', 'none', null, 'edgeold', '', '', ''],
+      ['vn-was-01', '10.84.20.11', '엣지 VN', '베트남', 'dvcmon', 'none', null, 'ambig', '', '', ''],
+    ];
+    const ST = {
+      ready: ['badge ok', '준비됨', '두 파일 · sudo 규칙이 포탈 판본과 같음'],
+      none: ['badge', '설치 안 됨', '두 파일이 없음'],
+      ver: ['badge warn', '판본 다름', '설치된 파일이 포탈 판본과 다름 — 실행하지 않음'],
+      nosudo: ['badge warn', 'sudo 규칙 없음', '파일은 있고 sudoers 한 줄이 없음'],
+      nopy: ['badge warn', 'python3 없음', '설치는 됐지만 프로그램이 돌지 못함'],
+      auth: ['badge bad', '확인 못 함', '수집 계정 키 로그인 거부 — 준비 상태를 모름'],
+    };
+    const SRC = { srv: 'SSH 공용 접속 서버 항목(주소 일치)', corp: '법인 공통 계정(‘설치’ 를 켠 키 하나)', edge: '엣지가 고름 — 그 엣지의 SSH 공용 접속' };
+    const CRED = {
+      ok: ['badge ok', '설치할 수 있음', ''],
+      feature: ['badge warn', '못 함 — 키에 ‘설치’ 가 꺼짐', '그 키의 ‘쓸 수 있는 기능’ 에서 켜면 됩니다'],
+      noentry: ['badge warn', '못 함 — 설치 계정 없음', 'SSH 공용 접속에 이 서버도, 이 법인의 공통 계정도 없음'],
+      edgeold: ['badge warn', '못 함 — 엣지 포탈이 옛 판', '엣지를 올린 뒤 다시 확인'],
+      ambig: ['badge warn', '고르면 됨 — 공통 계정이 둘', '설치 창에서 계정을 고릅니다(vn-ops · vn-admin)'],
+    };
+    const whereOf = (s) => (s[6] == null ? null : s[6] === 'def' ? 'def' : s[6]);
+    const isCur = (s) => whereOf(s) != null && whereOf(s) === curKey;
+    const isOld = (s) => whereOf(s) != null && whereOf(s) !== curKey;
+    const can = (s) => s[7] === 'ok' && okDir;
+    const settled = (s) => s[5] === 'ready' && isCur(s);
+    const need = (s) => can(s) && !settled(s);
+    const actOf = (s) => (s[5] === 'none' || s[5] === 'auth' ? ['새로 설치', ''] : isOld(s) ? ['새 디렉터리로 옮김', '옛 파일은 포탈 판본과 같을 때만 지움'] : s[5] === 'ver' ? ['판본 맞춤', '같은 디렉터리에 다시 설치'] : s[5] === 'nosudo' ? ['sudoers 한 줄 다시', '파일도 다시 놓음'] : ['다시 설치', '']);
+    const FIL = { all: () => true, can: (s) => s[7] === 'ok', need, cant: (s) => s[7] !== 'ok' };
+    const chips = [['all', '전체'], ['need', '설치 · 다시 설치할 서버'], ['cant', '자동 설치 못 함']].map(([k, l]) => ({ label: l + ' ' + SV.filter(FIL[k]).length, cls: 'chip' + (S.filter === k ? ' on' : ''), pick: () => this.setState({ filter: k }) }));
+    const picked = S.picked.filter((n) => SV.some((s) => s[0] === n));
+    const toggle = (n) => this.setState({ picked: picked.indexOf(n) >= 0 ? picked.filter((x) => x !== n) : picked.concat([n]) });
+    const rows = SV.filter(FIL[S.filter]).map((s) => {
+      const on = picked.indexOf(s[0]) >= 0; const c = CRED[s[7]]; const w = whereOf(s);
+      const ok = s[7] === 'ok';
+      return {
+        name: s[0], addr: s[1], corp: s[3] || '법인 미지정', node: s[2],
+        cls: 'sg tr' + (on ? ' sel' : ''), chk: 'chk' + (on ? ' on' : ''), mark: on ? '✓' : '', pick: () => toggle(s[0]),
+        stCls: ST[s[5]][0], st: ST[s[5]][1], stSub: ST[s[5]][2], old: isOld(s),
+        where: w == null ? '—' : w === 'def' ? '/usr/local/…(기본 경로)' : w, whereSub: w == null ? '' : isOld(s) ? '지금 설정과 다름 — 그대로 동작합니다' : '지금 설정과 같음',
+        cred: ok || s[7] === 'feature' ? '계정 ' + s[8] + ' · 키 ' + s[9] : '—', credSub: ok || s[7] === 'feature' ? SRC[s[10]] : '',
+        autoCls: !okDir && ok ? 'badge warn' : c[0], auto: !okDir && ok ? '디렉터리부터 고쳐야 함' : c[1], autoSub: ok ? (settled(s) ? '할 일 없음 — 이미 지금 디렉터리에 준비됨' : okDir ? actOf(s)[0] : '') : c[2],
+        btnCls: 'btn sm' + (need(s) ? ' pri' : ' off'), btn: settled(s) ? '준비됨' : s[5] === 'none' || s[5] === 'auth' ? '설치' : '다시 설치',
+        one: () => { if (need(s)) this.setState({ picked: [s[0]], scene: 'confirm', otp: '' }); },
+      };
+    });
+    const pickedSv = SV.filter((s) => picked.indexOf(s[0]) >= 0);
+    const doSv = pickedSv.filter(need);
+    const skipSv = pickedSv.filter((s) => !need(s));
+    const skipWhy = (s) => (settled(s) ? '이미 지금 디렉터리에 준비됨' : !okDir ? '설치 디렉터리가 규칙에 맞지 않음' : CRED[s[7]][1].replace('못 함 — ', '').replace('고르면 됨 — ', '') + (s[7] === 'ambig' ? '(이 시안에서는 고르기 창을 그리지 않았습니다)' : ''));
+    const nodes = {}; doSv.forEach((s) => { nodes[s[2]] = (nodes[s[2]] || 0) + 1; });
+    const nodeText = Object.keys(nodes).map((k) => k + ' ' + nodes[k] + '대').join(' · ');
+    const STEPS = ['설치 계정', '접속', 'sudo 확인', '디렉터리 검사', '파일 설치', 'sudoers', '옛 파일 정리', '준비 확인'];
+    const dots = (doneN, kind) => STEPS.map((_, i) => ({ c: i < doneN ? 'd' : i === doneN ? (kind === 'fail' ? 'f' : kind === 'warn' ? 'w' : kind === 'now' ? 'n' : '') : '' }));
+    // 진행 중 장면 — 서버마다 다른 단계(차례를 기다리는 서버는 0)
+    const RUNAT = [8, 6, 4, 2, 0, 0, 0, 0];
+    const runRows = doSv.map((s, i) => { const at = RUNAT[i % RUNAT.length]; const fin = at >= STEPS.length; const wait = at === 0 && i >= LIM.node; return { name: s[0], node: s[2], dots: dots(at, fin || wait ? '' : 'now'), aria: fin ? '모든 단계 끝' : wait ? '차례 기다림' : STEPS[at] + ' 중', now: fin ? '끝 — 준비됨' : wait ? '차례를 기다리는 중' : STEPS[at] + ' 중' }; });
+    const RES = {
+      'kr-was-01': ['fail', 2, 'badge bad', 'sudo 가 비밀번호를 묻습니다', '설치 계정이 이 서버에서 비밀번호 없이 sudo 하지 못합니다 — 아무것도 올리지 않았습니다'],
+      'pl-db-02': ['fail', 3, 'badge bad', '디렉터리를 쓸 수 없는 상태', '위쪽 폴더를 그룹이 쓸 수 있습니다(권한 775) — 설치하지 않았습니다'],
+      'pl-was-03': ['warn', 7, 'badge warn', '설치함 — 준비 확인은 못 함', '수집 계정 svcmon 의 키 로그인이 거부돼 확인하지 못했습니다(대상 · 키 탭의 ‘다시 연결’)'],
+    };
+    const doneRows = doSv.map((s) => {
+      const r = RES[s[0]];
+      if (r) return { name: s[0], node: s[2], dots: dots(r[1], r[0]), aria: STEPS[r[1]] + ' 에서 멈춤', cls: r[2], res: r[3], sub: r[4] };
+      const a = actOf(s);
+      return { name: s[0], node: s[2], dots: dots(STEPS.length, ''), aria: '모든 단계 끝', cls: 'badge ok', res: '설치함 — 준비됨', sub: a[0] + (isOld(s) ? (s[5] === 'ver' ? ' · 옛 파일은 판본이 달라 그대로 두었습니다' : ' · 옛 파일 2개 지움(포탈 판본과 같음)') : '') };
+    });
+    const okN = doneRows.filter((r) => r.cls === 'badge ok').length; const failN = doneRows.filter((r) => r.cls === 'badge bad').length; const warnN = doneRows.length - okN - failN;
+    const otpOk = /^[0-9]{6}$/.test(S.otp);
+    const canStart = otpOk && doSv.length > 0;
+    const SCENES = [['pick', '고르기'], ['confirm', '확인 창'], ['run', '진행 중'], ['done', '결과']];
+    const TITLE = { pick: '설치 — 서버를 고르세요', confirm: '설치 확인 — 무엇을 어디에 설치하나', run: '설치 진행', done: '설치 결과' };
+    const sudoLine = 'dvcmon ALL=(root) NOPASSWD: ' + (okDir ? cur.wrapper : '(디렉터리가 정해지면 보입니다)') + (okDir ? ' ""' : '');
+    const cmdText = '# 설치 계정(키 로그인)으로 — 맡은 노드가 부르는 명령의 꼴\n'
+      + 'sudo -n true                                   # 비밀번호 없는 sudo 가 되는가\n'
+      + '(설치 파일 올림 0600)  ~/.dvc-da-install.8f3a1c.sh\n'
+      + 'sudo -n /bin/sh ~/.dvc-da-install.8f3a1c.sh dvcmon ' + (custom ? (okDir ? S.dir : '<설치 디렉터리>') : '-') + '\n'
+      + 'rm -f ~/.dvc-da-install.8f3a1c.sh\n'
+      + '# 그 뒤 수집 계정으로 — 준비 확인(지금 있는 확인) · 점검할 때는\n'
+      + 'sudo -n ' + (okDir ? cur.wrapper : '<설치 디렉터리>/dvc-disk-audit');
+    const FEAT = (onInstall, canToggle, key) => [
+      { label: '베어메탈 사용률', cls: 'chip on', pick: () => {} },
+      { label: '베어메탈 스토리지', cls: 'chip on', pick: () => {} },
+      { label: '디스크 점검 프로그램 설치(root)', cls: 'chip' + (onInstall ? ' on' : ''), pick: () => { if (canToggle) this.setState({ usInstall: !S.usInstall }); } },
+    ];
+    const keys = [
+      { name: 'kr-admin-2026', acct: '법인 공통 계정 dvcadmin', folder: '한국 › 공통', where: '중앙', feats: FEAT(true, false), note: '' },
+      { name: 'pl-common', acct: '법인 공통 계정 pl-ops', folder: '폴란드 › 공통', where: '엣지 PL 포탈에 등록', feats: FEAT(true, false), note: '' },
+      { name: 'us-common', acct: '법인 공통 계정 us-ops', folder: '미국 › 공통', where: '엣지 NJ 포탈에 등록', feats: FEAT(S.usInstall, true), note: S.usInstall ? '켰습니다 — 미국 서버 4대가 설치할 수 있음으로' : '← 눌러서 켜 보세요' },
+      { name: 'old-root', acct: '서버 키 · 계정 root', folder: '폴더 없음(예전 키)', where: '중앙', feats: [{ label: '기능 목록 없음 — 수집에는 그대로 쓰임', cls: 'chip', pick: () => {} }], note: '자동 설치에는 쓰지 않습니다' },
+    ];
+    const TRY = ['/opt/dvc/disk-audit', '/app/tools/dvc', '/opt', '/tmp/dvc', '/opt/dvc; rm -rf /', '/opt/dvc/../../etc'];
+    return {
+      kpis: [
+        { label: '자동 설치할 수 있는 서버', v: SV.filter((s) => s[7] === 'ok').length + ' / ' + SV.length, sub: '설치 계정을 찾은 서버', color: '' },
+        { label: '지금 디렉터리에 준비된 서버', v: String(SV.filter(settled).length), sub: okDir ? cur.shown : '디렉터리가 규칙에 맞지 않음', color: 'color:#86efac' },
+        { label: '설치 · 다시 설치할 서버', v: String(SV.filter(need).length), sub: '설치 안 됨 · 판본 다름 · 옛 디렉터리 · sudo 규칙', color: 'color:#93c5fd' },
+        { label: '자동 설치 못 하는 서버', v: String(SV.filter((s) => s[7] !== 'ok').length), sub: '키 기능 꺼짐 · 설치 계정 없음 · 엣지 옛 판 · 계정 둘', color: 'color:#fcd34d' },
+      ],
+      modeBtns: [['default', '기본 경로'], ['custom', '직접 지정']].map(([k, l]) => ({ label: l, cls: S.mode === k ? 'on' : '', pick: () => this.setState({ mode: k }) })),
+      isCustom: custom, dirText: S.dir, dirCls: 'inp mono' + (issue ? ' bad' : ''), onDir: (e) => this.setState({ dir: e && e.target ? String(e.target.value) : S.dir }),
+      saveCls: 'btn pri' + (issue ? ' off' : ''), dirNote: issue ? '저장할 수 없습니다 — ' + issue : '규칙에 맞습니다. 대상 서버에서는 소유자 · 권한 · 마운트를 다시 검사합니다.', dirNoteCls: 'note ' + (issue ? 'bad' : 'ok'),
+      tries: TRY.map((t) => ({ label: t, pick: () => this.setState({ dir: t, mode: 'custom' }) })),
+      pathProgram: okDir ? cur.program : '—', pathWrapper: okDir ? cur.wrapper : '—', sudoLine, dirShown: okDir ? cur.shown : '규칙에 맞지 않음 — 설치할 수 없습니다',
+      keys, chips, rows,
+      pickedText: '고른 서버 ' + picked.length + '대', pickAll: () => this.setState({ picked: SV.filter(need).map((s) => s[0]) }),
+      goCls: 'btn pri' + (picked.length ? '' : ' off'), goConfirm: () => { if (picked.length) this.setState({ scene: 'confirm', otp: '' }); },
+      sceneTitle: TITLE[S.scene], sceneBtns: SCENES.map(([k, l]) => ({ label: l, cls: S.scene === k ? 'on' : '', pick: () => this.setState({ scene: k }) })),
+      isPick: S.scene === 'pick', isConfirm: S.scene === 'confirm', isRun: S.scene === 'run', isDone: S.scene === 'done',
+      doText: '설치 ' + doSv.length + '대', hasSkip: skipSv.length > 0, skipText: '건너뜀 ' + skipSv.length + '대', nodeText: nodeText ? '담당 노드 — ' + nodeText : '설치할 서버가 없습니다',
+      doRows: doSv.map((s) => { const a = actOf(s); return { name: s[0], node: s[2], act: a[0], actSub: a[1], cred: s[8] + ' · ' + s[9], acct: s[4] }; }),
+      skipRows: skipSv.map((s) => ({ name: s[0], why: skipWhy(s) })),
+      otp: S.otp, onOtp: (e) => this.setState({ otp: e && e.target ? String(e.target.value).replace(/[^0-9]/g, '').slice(0, 6) : S.otp }),
+      startCls: 'btn pri' + (canStart ? '' : ' off'), start: () => { if (canStart) this.setState({ scene: 'run' }); }, cancel: () => this.setState({ scene: 'pick', otp: '' }),
+      startNote: !doSv.length ? '설치할 서버가 없습니다.' : otpOk ? '감사 기록에 누가 · 어느 서버에 · 어느 디렉터리로 설치했는지 남습니다.' : 'OTP 코드 6자리를 넣으면 시작할 수 있습니다(시안에서는 아무 숫자나).',
+      runText: '진행 중 ' + doSv.length + '대', runRows, toDone: () => this.setState({ scene: 'done' }), limNode: LIM.node, limMin: LIM.min,
+      doneRows, okText: '설치함 ' + (okN + warnN) + '대' + (warnN ? '(확인 못 함 ' + warnN + ')' : ''), hasFail: failN > 0, failText: '실패 ' + failN + '대',
+      cmdText,
+      fails: [
+        ['설치 계정 없음', 'SSH 공용 접속에 이 서버(같은 주소)도, 이 법인의 공통 계정도 없음', 'SSH 공용 접속에 서버나 법인 공통 계정을 등록'],
+        ['키에 ‘설치’ 가 꺼짐', '찾은 키의 쓸 수 있는 기능에 ‘디스크 점검 프로그램 설치’ 가 없음', '그 키의 기능에서 켜기(엣지 서버는 엣지 포탈에서)'],
+        ['법인 키 사용 중지', '그 법인의 키 접속을 멈춰 둔 상태', 'SSH 공용 접속에서 사용 중지 풀기'],
+        ['엣지 포탈이 옛 판', '그 엣지가 자동 설치를 모름', '엣지 업그레이드'],
+        ['sudo 가 비밀번호를 물음', '설치 계정이 비밀번호 없이 sudo 하지 못함', '그 계정에 NOPASSWD 를 주거나 손으로 설치'],
+        ['디렉터리를 쓸 수 없는 상태', '소유자가 root 가 아님 · 그룹/다른 계정이 쓸 수 있음 · 심링크 · 실행 금지 마운트 · 네트워크 파일시스템', '폴더 권한을 고치거나 다른 디렉터리로'],
+        ['sudoers 를 둘 수 없음', '/etc/sudoers.d 를 읽지 않는 설정이거나 visudo 검사 실패', '그 서버의 sudoers 설정 확인'],
+        ['키 로그인 거부', '설치 계정의 키를 서버가 받지 않음', '그 서버의 authorized_keys 확인 — 자동으로 다시 시도하지 않음'],
+        ['시한 · 연결 안 됨', '2분 안에 끝나지 않았거나 접속하지 못함', '네트워크 · 호스트키 승인 확인 뒤 다시'],
+      ].map((f) => ({ a: f[0], b: f[1], c: f[2] })),
+    };
+  }
+}
+</script>
+</body>
+</html>

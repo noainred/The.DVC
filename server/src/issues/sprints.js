@@ -8,11 +8,11 @@
  *  · 상태: planned(예정) · active(진행 중) · closed(끝남). 끝낸 스프린트는 회고로 남는다(지우지 않는다 — 상한을 넘으면 새로 만들지 못한다).
  *  · 작은 설정 파일이라 동기 원자 쓰기 · 손상 보존(issues/settings.js 와 같은 틀). 비밀 없음.
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';
 import { capStr } from '../util/capStr.js';
 import { dayIndex, dayLabel, DAY_MS } from '../util/dayKey.js';
 
@@ -23,16 +23,27 @@ export const sprintsFile = () => path.join(config.configDir, 'issue-sprints.json
 
 let cache = null;
 let loadError = null;
+const _reader = makeJsonFileReader(() => sprintsFile(), { parse: (t) => t, preserve: false, tag: 'issue-sprints' });   // 97회차 F8: 읽기 오류 ≠ 손상
+let _readErr = null;   // 마지막 읽기가 읽기 오류였으면 그 코드
 export function sprintsLoadError() { return loadError; }
-export function _resetSprintsCache() { cache = null; loadError = null; }
+export function _resetSprintsCache() { cache = null; loadError = null; _readErr = null; _reader.reset(); }
 
 function load() {
   if (cache) return cache;
   const file = sprintsFile();
   let sprints = []; let nextNum = 1;
+  // 97회차 F8: 읽기 단계는 공용 읽기(util/jsonFileRead.js) — 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니라 원본을 옮기지 않고 · 캐시하지 않고(30초 간격 재읽기) ·
+  //   저장을 거절한다(409). 예전 catch 하나는 권한만 틀린 원본을 보존본으로 옮긴 뒤 빈 목록을 캐시했고, 다음 저장이 그 한 건만 든 파일을 썼다. parse 실패는 아래 catch(예전과 같다).
+  const rr = _reader.read();
+  if (rr.kind === 'read-error') {
+    if (!_readErr) _readErr = String(rr.error?.code || 'read-error').slice(0, 32);
+    loadError = { message: `스프린트 파일(issue-sprints.json)을 읽지 못했습니다(읽기 오류 ${_readErr} — 원본은 그대로 · 저장 거절 중)`, at: Date.now(), readError: true };
+    return { sprints: [], nextNum: 1 };   // 캐시하지 않는다
+  }
+  _readErr = null;
   try {
-    if (fs.existsSync(file)) {
-      const j = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (rr.kind === 'ok') {
+      const j = JSON.parse(rr.value);
       if (!j || typeof j !== 'object' || !Array.isArray(j.sprints)) throw new Error('sprints 배열이 없습니다');
       sprints = j.sprints.filter((s) => s && typeof s === 'object' && typeof s.id === 'string' && typeof s.name === 'string');
       const maxNum = sprints.reduce((m, s) => Math.max(m, Number(s.num) || 0), 0);
@@ -49,6 +60,7 @@ function load() {
   return cache;
 }
 function save(c) {
+  if (_readErr) throw Object.assign(new Error(`스프린트 파일(issue-sprints.json)을 읽지 못한 상태라 저장하지 않았습니다 — 읽기 오류(${_readErr})이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽습니다).`), { status: 409, code: 'settings-unreadable' });   // 97회차 F8
   atomicWriteFileSync(sprintsFile(), JSON.stringify({ v: 1, nextNum: c.nextNum, sprints: c.sprints }, null, 1), { mode: 0o600 });
   cache = c;
 }

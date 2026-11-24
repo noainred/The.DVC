@@ -1,10 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, putJson, postJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import GuestScanJobs from './GuestScanJobs.jsx';
 import { STable } from '../components/STable.jsx';
 import { scanNote, analyzedAtText, ANALYSIS_REFRESH_MS, notCollectedLoginNote, laggingLoginNote, kpiValueText } from './loginFailsText.js';
+import { unreadMarkOf, unreadKind, saveLockedByUnread, shouldReseed } from './settingsUnread.js';   // 112회차: 못 읽은 동안의 기본값 폼으로 저장하지 않는다
+import { SettingsUnreadBanner } from './SettingsUnreadBanner.jsx';
 
 const fmtTime = (ts) => (ts ? new Date(ts).toLocaleString('ko-KR') : '—');
 const fmtHour = (ts) => new Date(ts).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit' });
@@ -19,8 +21,17 @@ export default function LoginFails() {
 
   // v2.675: 분석(7일치 전 범위)은 무겁다 — 예전에는 30초마다 다시 불러 서버가 매번 전 범위를 다시 훑었다. 설정·상태는 가볍게
   //   30초마다, 분석 결과는 ANALYSIS_REFRESH_MS 마다(서버도 같은 조건을 60초 기억한다). '지금 분석'·'새로고침' 은 바로 부른다.
+  // 112회차: 서버가 감시 설정 파일을 못 읽은 동안 status 의 settings 는 기본값이다 — 예전에는 처음 받은 값을 끝까지 폼에 들고 있어, 다시 읽힌 뒤 ‘저장’ 이 저장된 임계 · 주기를 덮었다.
+  //   못 읽은 값으로 채운 폼은 상태가 바뀐 조회의 값으로 다시 채우고(읽은 값 위의 편집은 그대로), 읽기 오류 동안은 저장을 잠근다.
+  const [unread, setUnread] = useState(null);
+  const seedKind = useRef(null);   // null = 아직 폼을 채우지 않음
   const loadStatus = async () => {
-    try { const st = await fetchJson('/admin/security/login-fails/status'); setS((cur) => cur || st.settings); setErr(null); }
+    try {
+      const st = await fetchJson('/admin/security/login-fails/status');
+      const le = unreadMarkOf(st); setUnread(le);
+      if (seedKind.current === null || shouldReseed(seedKind.current, le)) { seedKind.current = unreadKind(le); setS(st.settings); }
+      setErr(null);
+    }
     catch (e) { setErr(e.message); }
   };
   const loadAnalysis = async () => {
@@ -37,7 +48,8 @@ export default function LoginFails() {
   if (err && !s && !d) return <ErrorBox message={err} />; // 데이터 보유 중 일시 폴링 오류로 화면 전체를 갈아치우지 않음(CLAUDE.md)
   if (!s || !d) return <Loading />;
 
-  const save = async () => { setBusy('save'); setMsg(null); try { const r = await putJson('/admin/security/login-fails/settings', s); setS(r); setMsg('저장됨'); } catch (e) { setMsg(e.message); } finally { setBusy(''); } };
+  const saveLocked = saveLockedByUnread(unread);
+  const save = async () => { if (saveLocked) return; setBusy('save'); setMsg(null); try { const r = await putJson('/admin/security/login-fails/settings', s); seedKind.current = ''; setS(r); setMsg('저장됨'); } catch (e) { setMsg(e.message); } finally { setBusy(''); } };
   const run = async () => { setBusy('run'); setMsg(null); try { await postJson('/admin/security/login-fails/run', {}); await loadAll(); setMsg('분석 실행됨'); } catch (e) { setMsg(e.message); } finally { setBusy(''); } };
 
   const sm = d.summary;
@@ -50,6 +62,7 @@ export default function LoginFails() {
       </p>
 
       <div className="card" style={{ padding: 16, marginBottom: 14 }}>
+        <SettingsUnreadBanner le={unread} what="로그인 실패 감시 설정" save="저장" />
         <div className="flex gap wrap" style={{ alignItems: 'center', gap: 16 }}>
           <label className="flex gap" style={{ alignItems: 'center', cursor: 'pointer' }}><input type="checkbox" checked={s.enabled} onChange={(e) => setS({ ...s, enabled: e.target.checked })} /> <b>모니터링</b></label>
           <span className="muted">분석 주기</span><input className="input" type="number" style={{ width: 64 }} value={s.intervalMin} onChange={(e) => setS({ ...s, intervalMin: e.target.value })} /><span className="muted">분</span>
@@ -59,7 +72,7 @@ export default function LoginFails() {
           <label className="flex gap" style={{ alignItems: 'center', cursor: 'pointer' }}><input type="checkbox" checked={s.alert} onChange={(e) => setS({ ...s, alert: e.target.checked })} /> 알림</label>
         </div>
         <div className="flex gap" style={{ marginTop: 12, alignItems: 'center' }}>
-          <button className="login-btn" style={{ padding: '8px 16px' }} disabled={busy === 'save'} onClick={save}>저장</button>
+          <button className="login-btn" style={{ padding: '8px 16px' }} disabled={busy === 'save' || saveLocked} onClick={save}>저장</button>
           <button className="logout-btn" style={{ padding: '8px 16px' }} disabled={busy === 'run'} onClick={run}>지금 분석</button>
           <button className="logout-btn" style={{ padding: '8px 16px' }} disabled={busy === 'reload'} onClick={async () => { setBusy('reload'); try { await loadAnalysis(); } finally { setBusy(''); } }} title="분석 결과를 다시 불러옵니다(같은 조건은 서버가 1분 동안 기억합니다)">새로고침</button>
           {msg && <span className="muted" style={{ fontSize: 12 }}>{msg}</span>}

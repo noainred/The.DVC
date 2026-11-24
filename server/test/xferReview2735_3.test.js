@@ -7,7 +7,7 @@
  *  XS-10 CSV 가 end(보고 있는 구간)를 따른다
  *  XS-11 보존 정리는 시간 기준(6시간) — 측정이 꺼져 있어도, 첫 틱에는 하지 않는다
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -15,9 +15,16 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'xferreview2735_3-'));
+const TMP = tmpDir('xferreview2735_3-');
 process.env.CONFIG_DIR = TMP;
 process.env.DATA_SOURCE = 'live';
 delete process.env.XFER_SPEED_ENABLED;
@@ -96,7 +103,7 @@ test('XS-11 보존 정리는 시간 기준 — 첫 틱은 하지 않고 6시간 
 });
 
 test('XS-04·XS-10 실제 api 라우터 — 0곳이면 409 · CSV end', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'xferreview2735_3-api-'));
+  const dir = tmpDir('xferreview2735_3-api-');
   fs.writeFileSync(path.join(dir, 'collectors.json'), JSON.stringify({ collectors: [{ id: 'Edge-Off', name: 'Edge Off', url: 'https://10.20.0.6:4000', token: 't', enabled: false }, { id: 'Edge-On', name: 'Edge On', url: 'https://10.20.0.7:4000', token: 't', enabled: true }] }));
   const script = `
     const HOUR = 3600000, DAY = 24 * HOUR;

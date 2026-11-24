@@ -30,6 +30,7 @@ import {
   eventsKeyOf, eventsTagged, eventsAfterFail, eventsView, eventsFailText, // v2.744(감사 WEB-03): 로그는 요청 키별
 } from './linkCheckText.js';
 import Select from '../../components/Select.jsx';
+import { requireChanged } from '../changeResult.js';   // 105회차 A8: 409(설정 파일 읽기 오류)는 던지지 않고 본문으로 온다
 // v2.553: 설정 전수 점검(25종) + 해결책 — 같은 화면의 탭이다(도구를 하나 더 만들지 않는다).
 const SettingsCheckPanel = React.lazy(() => import('./SettingsCheckPanel.jsx'));
 
@@ -70,6 +71,22 @@ function PhaseTrail({ latest, phases, label }) {
   );
 }
 
+/**
+ * 106회차(105회차 A5 · A8 덜 고침): 서버가 통신 점검 설정 파일을 읽지 못한 동안 조회 응답의 settings 는 저장된 값이 아니라 기본값(점검 꺼짐 · 짝 없음)이다.
+ *   예전에는 그 표지가 응답에 없어 화면이 기본값으로 폼을 채웠고, 파일이 다시 읽힌 뒤(다시 조회하지 않은 채) ‘설정 저장’ 한 번이 저장된 설정을 그 기본값으로 덮었다.
+ *   읽기 오류면 저장을 잠그고(서버도 409), 못 읽은 값으로 채운 폼은 다시 읽힌 조회에서 편집 중이어도 서버값으로 다시 채운다.
+ *   손상(보존본으로 옮김)은 예전대로 저장이 해제 길이다 — 지금 값이 기본값이라는 사실만 말한다.
+ */
+export function linkSettingsUnreadNote(le) {
+  if (!le) return '';
+  const why = typeof le.reason === 'string' && le.reason.trim() ? le.reason.trim() : '통신 점검 설정 파일을 읽지 못했습니다';
+  return le.readError
+    ? `${why} — 아래 설정 값은 저장된 값이 아니라 기본값입니다. 다시 읽힐 때까지 설정 저장은 잠급니다(‘새로고침’ 으로 다시 확인합니다).`
+    : `${why} — 지금 보이는 설정 값은 기본값입니다. 저장하면 이 화면의 값이 새 설정이 됩니다(보존본은 그대로 남습니다).`;
+}
+/** 106회차: 못 읽은 값(기본값)으로 채운 폼인데 이번 조회는 읽혔는가 — 참이면 편집 중이어도 서버값으로 다시 채운다. */
+export function reseedAfterUnread(baseUnread, le) { return !!baseUnread && !le?.readError; }
+
 export function LinkCheck() {
   // ⚠ 훅은 전부 조기 return 위에(조기 반환 뒤 훅 추가는 React #310 크래시 — v2.202 실제 사고).
   // v2.613(CATALOG2613-06 / WEB2613-04): 서브메뉴를 해시(#/tools/link-check/<view>)에 싣는다(v2.438 규약). 기본은 '설정 전수'(v2.553 — 요청의 초점).
@@ -95,9 +112,13 @@ export function LinkCheck() {
   // v2.631 R2631-04: 편집 기준 서버값 서명 — 편집 중 서버값이 바뀌면 저장 전에 알린다. 닫기·폐기·저장 성공이 편집 표시를 내린다.
   const baseSig = useRef(null);
   const [serverChanged, setServerChanged] = useState(false);
+  // 106회차: 마지막 조회가 설정 읽기 오류였는가 · 폼을 채운 서버값이 그때의 기본값이었는가(linkSettingsUnreadNote 주석)
+  const lastUnread = useRef(false);
+  const baseUnread = useRef(false);
   const editForm = (next) => { formDirty.current = true; setForm(next); };
   const resetForm = (settings) => {
     formDirty.current = false;
+    baseUnread.current = lastUnread.current;
     baseSig.current = linkSettingsSig(settings);
     setServerChanged(false);
     setForm(linkFormFromSettings(settings));
@@ -108,10 +129,13 @@ export function LinkCheck() {
     try {
       const d = await fetchJson('/tools/link-check');
       setData(d);
+      lastUnread.current = !!d.settingsLoadError?.readError;
+      if (reseedAfterUnread(baseUnread.current, d.settingsLoadError)) formDirty.current = false;   // 106회차: 못 읽은 값 위의 편집은 버린다
       if (formDirty.current) {
         if (serverChangedWhileEditing(true, baseSig.current, d.settings)) setServerChanged(true);
       } else {
         baseSig.current = linkSettingsSig(d.settings);
+        baseUnread.current = lastUnread.current;
         setServerChanged(false);
       }
       setForm((f) => (f && formDirty.current ? f : linkFormFromSettings(d.settings)));
@@ -190,7 +214,7 @@ export function LinkCheck() {
   };
   const saveSettings = async () => {
     setBusy(true);
-    try { const r = await putJson('/tools/link-check/settings', linkSettingsPayload(form)); setNote('설정을 저장했습니다.'); setData({ ...data, settings: r.settings, enabled: r.settings.enabled }); resetForm(r.settings); }
+    try { const r = requireChanged(await putJson('/tools/link-check/settings', linkSettingsPayload(form))); setNote('설정을 저장했습니다.'); setData({ ...data, settings: r.settings, enabled: r.settings.enabled, settingsLoadError: null }); lastUnread.current = false; resetForm(r.settings); }
     catch (e) { setNote(`저장 실패: ${e?.message || e}`); }
     finally { setBusy(false); }
   };
@@ -205,6 +229,7 @@ export function LinkCheck() {
   return (
     <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'minmax(0, 1fr)', minWidth: 0 }}>
       {error && <div className="banner">{error}</div>}
+      {data?.settingsLoadError && <div className="banner warn" data-settings-unread="1" style={{ whiteSpace: 'normal' }}>{linkSettingsUnreadNote(data.settingsLoadError)}</div>}
 
       {/* 보기 전환 — 한 도구 안의 탭이다(셸을 더 만들지 않는다 — v2.508 규약) */}
       <div className="card" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -320,7 +345,7 @@ export function LinkCheck() {
             </div>
           )}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <button className="btn" onClick={saveSettings} disabled={busy}>설정 저장</button>
+            <button className="btn" onClick={saveSettings} disabled={busy || !!data?.settingsLoadError?.readError}>설정 저장</button>
             <button className="btn" onClick={() => { if (data?.settings) resetForm(data.settings); }} disabled={busy}>편집 취소(서버값 불러오기)</button>
           </div>
         </div>

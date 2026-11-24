@@ -5,7 +5,7 @@
  * prune 은 모듈 안에서 Date.now() 로 경계를 잡으므로 표본은 경계에서 **수 일** 떨어뜨려 심는다(v2.517 규약 —
  * 시각 경계에 걸릴 여지가 없게). 기준 시각은 일 단위로 내린 뒤 정오로 고정한다.
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -14,7 +14,14 @@ import http from 'node:http';
 import zlib from 'node:zlib';
 import { stripComments } from './_stripComments.js';
 
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2601a-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const TMP = tmpDir('audit2601a-');
 process.env.CONFIG_DIR = TMP;
 process.env.GUESTDISK_DB_PATH = path.join(TMP, 'guest-disk.db');
 process.env.VMTRACK_DB_PATH = path.join(TMP, 'vm-track.db');

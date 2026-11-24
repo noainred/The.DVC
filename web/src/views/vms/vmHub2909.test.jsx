@@ -27,17 +27,23 @@ describe('vmHubText — 서버와 같은 신호 키 · 메뉴 · 도구', () => 
     expect(keys).toEqual([...SIGNAL_ORDER]);
   });
   it('허브 도구는 카탈로그에 실재하고 메뉴 서버 › 가상화 서버 의 also 와 같다 → 그 도구를 열어도 이 메뉴가 켜진다', () => {
-    const vm = MENU_GROUPS.find((g) => g.id === 'server').children.find((c) => c.id === 'vm');
-    expect(vm.tab).toBe('vms');
-    expect(vm.also).toEqual([...HUB_TOOL_KEYS]);
+    // v2.915: '가상화 서버' 항목은 '가상화 플랫폼'(virt — vcenters · hosts · vms) 한 항목이 됐다 — VM 도구 6은 그 also 의 앞 여섯 그대로(뒤에 vCenter · 호스트 도구)
+    const vm = MENU_GROUPS.find((g) => g.id === 'server').children.find((c) => c.id === 'virt');
+    // v2.994: 'Virtual Machine(VM)' 의 처음 탭이 vms(같은 항목이 vcenters 도 맡는다 · 호스트는 Hypervisor 항목)
+    // v3.19.0: 이름 'Virtual Machine' · 처음 탭 vcenters(vCenter 카드) — vms 는 같은 항목의 나머지 탭
+    expect([vm.tab, ...vm.tabs]).toEqual(['vcenters', 'vms']);
+    expect(vm.also.slice(0, HUB_TOOL_KEYS.length)).toEqual([...HUB_TOOL_KEYS]);
     for (const k of HUB_TOOL_KEYS) {
       const t = TOOLS.find((x) => x.k === k);
       expect(t, k).toBeTruthy();
       expect(!!t.external || !!t.comingSoon, k).toBe(false);
-      expect(locate('tools', `#/tools/${k}`)).toEqual({ group: 'server', child: 'vm' });
+      expect(locate('tools', `#/tools/${k}`)).toEqual({ group: 'server', child: 'virt' });
     }
-    expect(locate('vms', '#/vms/corp')).toEqual({ group: 'server', child: 'vm' });
-    expect([...HUB_VIEW_KEYS]).toEqual(['list', 'corp', 'attention']);
+    expect(locate('vms', '#/vms/corp')).toEqual({ group: 'server', child: 'virt' });
+    // v3.21.0: 첫 보기 '분석'(insight) · 끝 '과할당'(over) 이 더해졌다 — 옛 키 list · corp · attention 은 그대로(저장된 주소가 산다 · vmInsight3210.test.js ⑥)
+    expect([...HUB_VIEW_KEYS]).toEqual(['insight', 'list', 'corp', 'attention', 'over']);
+    expect(locate('vms', '#/vms/insight')).toEqual({ group: 'server', child: 'virt' });
+    expect(locate('vms', '#/vms/over')).toEqual({ group: 'server', child: 'virt' });
   });
 });
 

@@ -48,7 +48,12 @@ export function scopeDbStatus(db, user) {
  */
 export function redactEdgeSummary(edges, full) {
   if (full || !Array.isArray(edges)) return edges;
-  return edges.map((e) => (e && typeof e === 'object' ? { ...e, sourceIp: null, portalPort: null } : e));
+  // 26회차 F5(재현): 형제 필드도 — caps.portalPort(최상위 portalPort 가림이 무력했다) · log.lastError(엣지 CSV 라이터의 파일 경로 원문 — 로컬 판본은 관리자만)
+  return edges.map((e) => (e && typeof e === 'object' ? {
+    ...e, sourceIp: null, portalPort: null,
+    ...(e.caps && typeof e.caps === 'object' ? { caps: { ...e.caps, portalPort: null } } : {}),
+    ...(e.log && typeof e.log === 'object' && e.log.lastError ? { log: { ...e.log, lastError: ADMIN_ONLY_TEXT } } : {}),
+  } : e));
 }
 
 /**

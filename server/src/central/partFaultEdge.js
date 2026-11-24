@@ -22,16 +22,19 @@
  * ⚠ **보고가 없는 엣지를 '장애 없음' 이라 말하지 말 것** — '모른다' 다. `at`(마지막 보고 시각)과
  *   `version`(엣지 포탈 버전)을 보관해 화면이 '구버전 / 무보고 / 오래됨' 을 **각각** 말하게 한다.
  */
-import { makePart, partKeyFromTail, PUSH_PROTOCOL, COLLECTION_KINDS } from '../partfault/types.js';
+import { makePart, partKeyFromTail, PUSH_PROTOCOL, PART_IDENTS_VERSION, COLLECTION_KINDS } from '../partfault/types.js';
 import { devKeyOf, REGISTRY_SCOPES } from '../partfault/scan.js';
 import { admitAgent } from './edgeRecord.js';
 import { capStr } from '../util/capStr.js';
 import { safeLoadText } from '../util/atomicWrite.js';
 import { REGISTRY_ERROR_CODES } from '../util/registryCore.js';
+import { numOrNull } from '../util/numOrNull.js';
+import { envPositive } from '../util/envNumber.js';
 
 const t = (v) => String(v ?? '').trim();
 const s = (v, n) => capStr(t(v), n); // v2.607(TIM2607-01): 평탄화 — `.slice` 는 본문 원문을 붙잡는다
-const MAX_DEVICES = Math.max(100, Number(process.env.PARTFAULT_EDGE_MAX_DEVICES) || 5_000);
+// 102회차: 엣지 수신 상한 셋은 유한 양수만(예전 `Math.max(하한, Number(env) || 기본)` 은 Infinity 를 통과시켜 엣지 본문 상한이 꺼졌다).
+const MAX_DEVICES = Math.max(100, envPositive(process.env.PARTFAULT_EDGE_MAX_DEVICES, 5_000));
 /**
  * 파트 배열 상한(v2.548 보안 리뷰 S2). 수신부가 장비 **수**만 제한하면 장비 1개에 키 꼬리 120만 개를 실은
  * 16MB 본문(BIG_JSON 한도 이내)이 파트 객체 120만 개로 펼쳐져 agent 당 ~450MB 가 상주한다(리뷰 실측 RSS 556MB).
@@ -39,8 +42,8 @@ const MAX_DEVICES = Math.max(100, Number(process.env.PARTFAULT_EDGE_MAX_DEVICES)
  * ⚠ 넘친 파트는 **조용히 버리지 않는다** — 그 장비를 `ok:false`(reason `parts-capped`)로 바꿔 전이가
  *   아무것도 닫지 못하게 하고(거짓 복구 방지 — v2.547 `unknownTruncated` 와 같은 방향) 개수를 밝힌다.
  */
-const DEVICE_PART_MAX = Math.max(100, Number(process.env.PARTFAULT_EDGE_DEVICE_PART_MAX) || 2_000);
-const REPORT_PART_MAX = Math.max(1_000, Number(process.env.PARTFAULT_EDGE_REPORT_PART_MAX) || 50_000);
+const DEVICE_PART_MAX = Math.max(100, envPositive(process.env.PARTFAULT_EDGE_DEVICE_PART_MAX, 2_000));
+const REPORT_PART_MAX = Math.max(1_000, envPositive(process.env.PARTFAULT_EDGE_REPORT_PART_MAX, 50_000));
 const SCANNED_MAX_BYTES = 32 * 1024;   // scanned 요약(실측 ~1KB)의 상한 — 임의 객체를 그대로 상주시키지 않는다
 const LIST_MAX = 64;                   // failedKinds·notCollected 같은 소형 배열
 /**
@@ -111,6 +114,9 @@ export async function putEdgeReport(agent, body = {}) {
   let totalParts = 0;     // 보고 전체 파트 수(REPORT_PART_MAX)
   let partsOmitted = 0;   // 상한으로 버린 파트 수(화면이 밝힌다)
 
+  // 96회차 ⓐ: 엣지가 시리얼 키 파트 이름을 싣는 판인가(PART_IDENTS_VERSION 이상의 양의 정수만 — 문자열 · 거짓 값은 옛 판).
+  const identsV = numOrNull(body.partIdents);
+  const idents = protocol === PUSH_PROTOCOL && identsV != null && Number.isInteger(identsV) && identsV >= PART_IDENTS_VERSION;
   if (protocol === PUSH_PROTOCOL) {
     for (const d of (Array.isArray(body.devices) ? body.devices : []).slice(0, MAX_DEVICES)) {
       if (!isObj(d)) continue;   // null·문자열 원소는 건너뛴다(S1 — 던지면 라우트가 응답 없이 매달린다)
@@ -133,6 +139,9 @@ export async function putEdgeReport(agent, body = {}) {
         parts.push(part); openN += 1;
       }
       const states = isObj(d.states) ? d.states : {};
+      // 96회차 ⓐ(93회차 F5): 시리얼 키 파트 이름 — 표지(partIdents)가 있는 판의 보고에서만 쓴다. 아는 모양만(객체 · 자기 키 · 글자 · 200자) —
+      //   그 밖은 예전처럼 keyKind 'name' · label = partId(교체 규칙이 맞지 않는 쪽 — 닫지 않는다).
+      const serialLabels = idents && isObj(d.serialLabels) ? d.serialLabels : null;
       for (const st of ['ok', 'unknown', 'absent']) {
         for (const tail of Array.isArray(states[st]) ? states[st] : []) {
           if (typeof tail !== 'string') continue;
@@ -140,7 +149,8 @@ export async function putEdgeReport(agent, body = {}) {
           const [kind, ...rest] = tail.split(':');
           const partId = rest.join(':');
           if (!kind || !partId) continue;
-          parts.push({ ...base, kind, partId, keyKind: 'name', state: st, rawState: '', label: partId, detail: '', partKey: partKeyFromTail({ scope, deviceKey, tail }) });
+          const sl = serialLabels && Object.hasOwn(serialLabels, tail) && typeof serialLabels[tail] === 'string' ? s(serialLabels[tail], 200) : '';
+          parts.push({ ...base, kind, partId, keyKind: sl ? 'serial' : 'name', state: st, rawState: '', label: sl || partId, detail: '', partKey: partKeyFromTail({ scope, deviceKey, tail }) });
         }
       }
       totalParts += parts.length;
@@ -172,18 +182,54 @@ export async function putEdgeReport(agent, body = {}) {
   let scanned = null;
   let scannedDropped = false;
   if (isObj(body.scanned)) {
-    try { scanned = JSON.stringify(body.scanned).length <= SCANNED_MAX_BYTES ? body.scanned : null; } catch { scanned = null; }
+    try { scanned = JSON.stringify(body.scanned).length <= SCANNED_MAX_BYTES ? sanitizeScanned(body.scanned) : null; } catch { scanned = null; }
     scannedDropped = scanned === null;
   }
   _map.set(key, {
     at: Date.now(), reportedAt: Number(body.at) || null,
-    version: s(body.version, 32), protocol,
-    devices, rejected, omitted: Number(body.omitted) || 0, partsOmitted, scannedDropped,
+    version: s(body.version, 32), protocol, idents,
+    devices, rejected, omitted: cnt(body.omitted) ?? 0, partsOmitted, scannedDropped,
     scanned,
     // v2.744(감사 EDGE-01): 엣지가 장비군 등록부를 읽지 못했다는 표지 — 아는 장비군(scope)만, 사유 글자 200자(아는 필드만).
     registryUnreadable: sanitizeRegistryUnreadable(body.registryUnreadable),
   });
   return { ok: true, protocol, devices: devices.length, rejected, open: openN, partsOmitted };
+}
+
+/**
+ * 전체 점검 17회차(C-11): 엣지 보고의 scanned 요약을 **아는 필드만** 남긴다(순수). 예전에는 크기(32KB)만 보고 원본 객체를 그대로
+ *   보관 · 응답했다(웹 partFaultText edgeScanTotals 가 a.scanned.summary 를 KPI 에 더한다). 모양은 partfault/scan.js 가 만드는 것.
+ *   개수는 0 이상 정수 · 못 읽으면 null(0 을 지어내지 않는다) · notCollected 는 키 64자 · LIST_MAX 개 · 장비군 표지는 sanitizeRegistryUnreadable 과 같은 규칙.
+ */
+const SCOPE_COUNT_KEYS = {
+  idrac: ['devices', 'ok', 'failed', 'stale', 'unreachable', 'legacy', 'partial', 'parts', 'capped', 'keyUnstable'],
+  storage: ['devices', 'ok', 'failed', 'parts'],
+  sanswitch: ['devices', 'ok', 'failed', 'parts', 'notJudged'],
+};
+const SUMMARY_KEYS = ['total', 'ok', 'warn', 'fault', 'unknown', 'absent'];
+const cnt = (v) => { const n = numOrNull(v); return n != null && n >= 0 ? Math.min(Math.round(n), 1e9) : null; };
+export function sanitizeScanned(v) {
+  if (!isObj(v)) return null;
+  const out = {};
+  if (Object.hasOwn(v, 'at')) { const at = numOrNull(v.at); out.at = at != null && at > 0 && at < 1e14 ? Math.round(at) : null; }   // ms 시각(1e9 개수 상한과 다르다)
+  if (Object.hasOwn(v, 'agent')) out.agent = s(v.agent, 128);
+  const ru = sanitizeRegistryUnreadable(Object.fromEntries(REGISTRY_SCOPES.filter((sc) => isObj(v[sc]) && isObj(v[sc].registryUnreadable)).map((sc) => [sc, v[sc].registryUnreadable])));
+  for (const [sc, keys] of Object.entries(SCOPE_COUNT_KEYS)) {
+    if (!Object.hasOwn(v, sc) || !isObj(v[sc])) continue;
+    const src = v[sc]; const o = {};
+    for (const k of keys) if (Object.hasOwn(src, k)) o[k] = cnt(src[k]);
+    if (sc !== 'idrac' && isObj(src.notCollected)) {
+      const nc = {};
+      for (const k of Object.keys(src.notCollected).slice(0, LIST_MAX)) { const kk = s(k, 64); if (kk) nc[kk] = cnt(src.notCollected[k]); }
+      o.notCollected = nc;
+    }
+    if (sc === 'sanswitch' && Object.hasOwn(src, 'extractor')) o.extractor = src.extractor === true;
+    if (ru?.[sc]) o.registryUnreadable = ru[sc];
+    out[sc] = o;
+  }
+  if (isObj(v.summary)) { const o = {}; for (const k of SUMMARY_KEYS) if (Object.hasOwn(v.summary, k)) o[k] = cnt(v.summary[k]); out.summary = o; }
+  if (Object.hasOwn(v, 'devicesFailed')) out.devicesFailed = cnt(v.devicesFailed);
+  return out;
 }
 
 /**
@@ -251,7 +297,7 @@ export function mergeEdgeReports({ staleMs = 3 * 3_600_000, now = Date.now() } =
       }
     }
     agents.push({
-      agent: r.agent, at: r.at, reportedAt: r.reportedAt, ageMs: age, stale, legacy, version: r.version, protocol: r.protocol,
+      agent: r.agent, at: r.at, reportedAt: r.reportedAt, ageMs: age, stale, legacy, version: r.version, protocol: r.protocol, idents: r.idents === true,
       devices: (r.devices || []).length, devicesFailed: (r.devices || []).filter((d) => !d.ok).length,
       open, rejected: r.rejected || 0, omitted: r.omitted || 0, partsOmitted: r.partsOmitted || 0, scannedDropped: !!r.scannedDropped, scanned: r.scanned,
       ...(r.registryUnreadable ? { registryUnreadable: r.registryUnreadable } : {}),   // v2.744(EDGE-01)

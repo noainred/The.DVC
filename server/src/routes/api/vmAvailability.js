@@ -108,6 +108,8 @@ export function registerVmAvailability(api) {
         lines.push(csvLine([v.name, v.vcenterName, v.cluster, pct(v.availability), pct(v.unplanned), Math.round(v.downMs / 60_000), v.offs, v.userOffs, v.reboots, v.resets, v.ha, v.failed,
           new Date(v.windowFrom).toISOString(), v.partial ? 'Y' : '', Number.isFinite(v.windowTo) ? new Date(v.windowTo).toISOString() : '', v.tailCut ? 'Y' : '']));
       }
+      // 전체 점검 32회차 F4: 화면 상한으로 잘렸으면 파일 · 헤더에 밝힌다(형제 CSV 와 같은 모양 — 조용히 자르지 않는다).
+      if (r.omitted) { lines.push(csvLine([`(상한으로 ${r.omitted}행 생략 — 전체 ${r.matched}대)`])); res.setHeader('X-Omitted-Rows', String(r.omitted)); }
       logAudit({ user: req.user?.username, action: 'vm-availability.csv', target: 'vm-availability', detail: `${lines.length - 1} rows · ${r.days}d`, ip: req.ip });
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="vm-availability-${fileStamp()}.csv"`);

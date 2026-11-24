@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>스냅샷 화면 — 보류 목록 400px</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+button,input{font:inherit}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.dim{color:#8b9bb4}
+.soft{color:#c3cfe2}
+.panel{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.tab{border:1px solid #243049;background:#0f1626;color:#c3cfe2;padding:9px 10px;font-weight:700;font-size:12.5px;cursor:pointer;flex:1;min-height:44px}
+.tab.on{background:#3b82f6;border-color:#3b82f6;color:#ffffff}
+.chip{border:1px solid #243049;background:#0f1626;color:#c3cfe2;border-radius:999px;padding:8px 12px;font-weight:700;font-size:12.5px;cursor:pointer;min-height:36px}
+.chip.on{background:#3b82f6;border-color:#3b82f6;color:#ffffff}
+.btn{border:1px solid #33415c;background:#141b2d;color:#e6edf6;border-radius:8px;padding:8px 14px;font-weight:700;font-size:13px;cursor:pointer;min-height:44px}
+.tag{display:inline-block;border-radius:999px;padding:2px 9px;font-size:11.5px;font-weight:700;border:1px solid #243049}
+.tag.gone{color:#fca5a5;border-color:#7f1d1d;background:#2a1215}
+.tag.none{color:#fcd34d;border-color:#78350f;background:#2a1f0d}
+.tag.has{color:#93c5fd;border-color:#1e3a8a;background:#12203f}
+.track{display:block;height:8px;border-radius:4px;background:#0f1626;overflow:hidden}
+.track i{display:block;height:100%;border-radius:4px}
+</style>
+</helmet>
+<div style="width: 400px; height: 1180px; box-sizing: border-box; padding: 18px 16px; display: flex; flex-direction: column; gap: 12px">
+
+  <h1 style="margin: 0; font-size: 17px; font-weight: 800">스냅샷이 있는 VM</h1>
+
+  <div style="display: flex">
+    <button type="button" class="tab" style="border-radius: 8px 0 0 8px">지금 있는 것 <span class="mono">1,002</span></button>
+    <button type="button" class="tab" style="border-left: 0">정리된 것 <span class="mono">0</span></button>
+    <button type="button" class="tab on" style="border-radius: 0 8px 8px 0">보류 <span class="mono">12</span></button>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px">
+    <div class="panel" style="padding: 10px 12px; background: #0f1626">
+      <div class="dim" style="font-size: 11.5px">보류 중</div>
+      <div class="mono" style="font-size: 20px; font-weight: 800">12</div>
+    </div>
+    <div class="panel" style="padding: 10px 12px; background: #0f1626">
+      <div class="dim" style="font-size: 11.5px">7일 안에 끝남</div>
+      <div class="mono" style="font-size: 20px; font-weight: 800; color: #fbbf24">3</div>
+    </div>
+    <div class="panel" style="padding: 10px 12px; background: #0f1626">
+      <div class="dim" style="font-size: 11.5px">대상이 사라진 보류</div>
+      <div class="mono" style="font-size: 20px; font-weight: 800; color: #fca5a5">2</div>
+    </div>
+    <div class="panel" style="padding: 10px 12px; background: #0f1626">
+      <div class="dim" style="font-size: 11.5px">스냅샷 없는 VM</div>
+      <div class="mono" style="font-size: 20px; font-weight: 800; color: #fcd34d">1</div>
+    </div>
+  </div>
+
+  <div style="display: flex; gap: 6px; flex-wrap: wrap">
+    <button type="button" class="chip on">전체 <span class="mono">12</span></button>
+    <button type="button" class="chip">곧 끝남 <span class="mono">3</span></button>
+    <button type="button" class="chip">대상 없음 <span class="mono">2</span></button>
+    <button type="button" class="chip">스냅샷 없음 <span class="mono">1</span></button>
+  </div>
+
+  <div style="border: 1px solid #78350f; background: #2a1f0d; border-radius: 10px; padding: 10px 12px; color: #fde68a; font-size: 12.5px; line-height: 1.55">
+    대상이 사라진 보류 <b>2건</b> — VM 이 인벤토리에 없습니다. 아래에서 바로 풀 수 있습니다.
+  </div>
+
+  <div class="panel" style="padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; border-color: #7f1d1d">
+    <div style="display: flex; justify-content: space-between; gap: 8px; align-items: flex-start">
+      <div style="min-width: 0"><b style="font-size: 14px; overflow-wrap: anywhere">tmp-restore-eu-07</b><div class="dim" style="font-size: 11.5px">Frankfurt 법인 · fra-vc01 — 보류를 걸 때의 이름</div></div>
+      <span class="tag gone" style="flex: none">VM 없음</span>
+    </div>
+    <div class="soft" style="font-size: 12.5px; line-height: 1.5">복원 검증용</div>
+    <div style="display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center">
+      <span class="track"><i style="width: 13%; background: #60a5fa"></i></span>
+      <span class="mono soft" style="font-size: 12px">2026-12-02 · 12일</span>
+    </div>
+    <div style="display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap">
+      <button type="button" class="btn">풀기</button>
+    </div>
+  </div>
+
+  <div class="panel" style="padding: 12px 14px; display: flex; flex-direction: column; gap: 8px">
+    <div style="display: flex; justify-content: space-between; gap: 8px; align-items: flex-start">
+      <div style="min-width: 0"><b style="font-size: 14px; overflow-wrap: anywhere">db-ap-0133</b><div class="dim" style="font-size: 11.5px">Seoul 법인 · Seoul-CL5</div></div>
+      <span class="tag none" style="flex: none">스냅샷 없음</span>
+    </div>
+    <div class="soft" style="font-size: 12.5px; line-height: 1.5">분기 결산 전 유지</div>
+    <div style="display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center">
+      <span class="track"><i style="width: 4%; background: #fbbf24"></i></span>
+      <span class="mono" style="font-size: 12px; color: #fbbf24">2026-11-24 · 4일 · 곧 끝남</span>
+    </div>
+    <div style="display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap">
+      <button type="button" class="btn">풀기</button>
+    </div>
+  </div>
+
+  <div class="panel" style="padding: 12px 14px; display: flex; flex-direction: column; gap: 8px">
+    <div style="display: flex; justify-content: space-between; gap: 8px; align-items: flex-start">
+      <div style="min-width: 0"><b style="font-size: 14px; overflow-wrap: anywhere">erp-app-02</b><div class="dim" style="font-size: 11.5px">Busan 법인 · Busan-CL1</div></div>
+      <span class="tag has" style="flex: none">3개 · 120 GB · 41일</span>
+    </div>
+    <div class="soft" style="font-size: 12.5px; line-height: 1.5">ERP 패치 롤백 대비 — 12월 첫 주에 정리</div>
+    <div style="display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center">
+      <span class="track"><i style="width: 17%; background: #60a5fa"></i></span>
+      <span class="mono soft" style="font-size: 12px">2026-12-05 · 15일</span>
+    </div>
+    <div style="display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap">
+      <button type="button" class="btn">연장…</button>
+      <button type="button" class="btn">풀기</button>
+    </div>
+  </div>
+
+  <div class="panel" style="padding: 12px 14px; display: flex; flex-direction: column; gap: 8px">
+    <div style="display: flex; justify-content: space-between; gap: 8px; align-items: flex-start">
+      <div style="min-width: 0"><b style="font-size: 14px; overflow-wrap: anywhere">file-kr-0031</b><div class="dim" style="font-size: 11.5px">Seoul 법인 · Seoul-CL1</div></div>
+      <span class="tag has" style="flex: none">1개 · 210 GB · 60일</span>
+    </div>
+    <div class="soft" style="font-size: 12.5px; line-height: 1.5">감사 대응 — 원본 보존 요청(법무)</div>
+    <div style="display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center">
+      <span class="track"><i style="width: 66%; background: #60a5fa"></i></span>
+      <span class="mono soft" style="font-size: 12px">2027-01-18 · 59일</span>
+    </div>
+    <div style="display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap">
+      <button type="button" class="btn">연장…</button>
+      <button type="button" class="btn">풀기</button>
+    </div>
+  </div>
+
+  <div class="dim" style="font-size: 12px; line-height: 1.6">좁은 화면에서는 표 대신 카드로 쌓습니다(가로로 밀지 않음) · 막대 = 남은 기간(90일 눈금) · 여러 건 고르기는 넓은 화면에서만 · 풀기 · 연장은 관리자만.</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":400,"height":1180}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

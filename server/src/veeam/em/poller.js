@@ -88,7 +88,9 @@ function recordHistory(em, r) {
   const rows = [];
   for (const x of r.repositories || []) if (x.capacity != null || x.free != null) rows.push({ key: `${x.server || ''}|${x.name}`, capacity: x.capacity, free: x.free, backupSize: null });
   if (!rows.length) for (const x of r.repoReport || []) rows.push({ key: `|${x.name}`, capacity: x.capacity, free: x.free, backupSize: x.backupSize });
-  try { recordRepoDaily(`em:${em.id}`, rows, r.ts); } catch (e) { if (_log('hist', String(e?.message || e))) console.warn(`[veeam-em] 저장소 이력 기록 실패: ${e?.message || e}`); }
+  // 전체 점검 9회차(V-22): recordRepoDaily 는 async — try/catch 로는 거부를 못 잡아 unhandledRejection 으로 샜다(의도한 스로틀 경고를 타지 않았다)
+  Promise.resolve().then(() => recordRepoDaily(`em:${em.id}`, rows, r.ts))
+    .catch((e) => { if (_log('hist', String(e?.message || e))) console.warn(`[veeam-em] 저장소 이력 기록 실패: ${e?.message || e}`); });
 }
 
 export async function pollEmOnce({ manual = false, ids = null } = {}) {

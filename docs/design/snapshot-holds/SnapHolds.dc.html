@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>스냅샷 화면 — 보류 목록(새 탭)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+button,input{font:inherit}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+td.mono,td.act{white-space:nowrap}
+td.act{text-align:right}
+.dim{color:#8b9bb4}
+.soft{color:#c3cfe2}
+.panel{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.tab{border:1px solid #243049;background:#0f1626;color:#c3cfe2;padding:7px 14px;font-weight:700;font-size:13px;cursor:pointer}
+.tab.on{background:#3b82f6;border-color:#3b82f6;color:#ffffff}
+.chip{border:1px solid #243049;background:#0f1626;color:#c3cfe2;border-radius:999px;padding:6px 14px;font-weight:700;font-size:12.5px;cursor:pointer}
+.chip.on{background:#3b82f6;border-color:#3b82f6;color:#ffffff}
+.btn{border:1px solid #33415c;background:#141b2d;color:#e6edf6;border-radius:8px;padding:6px 12px;font-weight:700;font-size:12.5px;cursor:pointer;min-height:32px}
+.btn.pri{background:#3b82f6;border-color:#3b82f6;color:#ffffff}
+.tag{display:inline-block;border-radius:999px;padding:2px 9px;font-size:11.5px;font-weight:700;border:1px solid #243049;white-space:nowrap}
+.tag.gone{color:#fca5a5;border-color:#7f1d1d;background:#2a1215}
+.tag.none{color:#fcd34d;border-color:#78350f;background:#2a1f0d}
+.tag.has{color:#93c5fd;border-color:#1e3a8a;background:#12203f}
+.tag.unk{color:#cbd5e1;border-color:#475569;background:#1a2233}
+.new{display:inline-block;background:#fbbf24;color:#1a1300;border-radius:4px;padding:1px 6px;font-size:10.5px;font-weight:800;margin-left:6px;vertical-align:middle}
+th{font-size:12px;color:#8b9bb4;font-weight:700;text-align:left;padding:10px 12px;background:#0f1626;border-bottom:1px solid #243049;white-space:nowrap}
+td{padding:11px 12px;border-bottom:1px solid #1c2740;vertical-align:middle}
+.ck{display:inline-block;width:18px;height:18px;border:1.5px solid #4b5b7a;border-radius:5px;background:#0f1626;vertical-align:middle;text-align:center;line-height:16px;font-size:12px;font-weight:800;color:#ffffff}
+.ck.on{background:#3b82f6;border-color:#3b82f6}
+.track{display:block;height:8px;border-radius:4px;background:#0f1626;overflow:hidden;width:120px}
+.track i{display:block;height:100%;border-radius:4px}
+</style>
+</helmet>
+<div style="width: 1440px; height: 1090px; box-sizing: border-box; padding: 28px 36px; display: flex; flex-direction: column; gap: 16px">
+
+  <div style="display: flex; align-items: baseline; gap: 12px">
+    <span class="dim" style="font-size: 13px">← 특수 기능</span>
+    <h1 style="margin: 0; font-size: 20px; font-weight: 800">스냅샷 있는 VM</h1>
+    <span class="dim">범위 · 전체 vCenter</span>
+  </div>
+
+  <div class="panel" style="padding: 18px 18px 8px; display: flex; flex-direction: column; gap: 14px">
+
+    <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap">
+      <h2 style="margin: 0; font-size: 16px; font-weight: 800">스냅샷이 있는 VM</h2>
+      <span class="dim" style="font-size: 12px">보류한 VM 은 기한까지 정책 판정에서 뺍니다 — 여기서 한눈에 보고 풀 수 있습니다</span>
+      <div style="margin-left: auto; display: flex">
+        <button type="button" class="tab" style="border-radius: 8px 0 0 8px">지금 있는 것 <span class="mono">1,002</span></button>
+        <button type="button" class="tab" style="border-left: 0">정리된 것 · 30일 <span class="mono">0</span></button>
+        <button type="button" class="tab on" style="border-radius: 0 8px 8px 0">보류 <span class="mono">12</span><span class="new">새</span></button>
+      </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px">
+      <div class="panel" style="padding: 12px 14px; background: #0f1626">
+        <div class="dim" style="font-size: 12px">보류 중</div>
+        <div class="mono" style="font-size: 24px; font-weight: 800; line-height: 1.2">12</div>
+        <div class="soft" style="font-size: 12px">법인 5곳 · 상한 2,000건</div>
+      </div>
+      <div class="panel" style="padding: 12px 14px; background: #0f1626">
+        <div class="dim" style="font-size: 12px">7일 안에 끝남</div>
+        <div class="mono" style="font-size: 24px; font-weight: 800; line-height: 1.2; color: #fbbf24">3</div>
+        <div class="soft" style="font-size: 12px">끝나면 다시 판정에 들어옵니다</div>
+      </div>
+      <div class="panel" style="padding: 12px 14px; background: #0f1626">
+        <div class="dim" style="font-size: 12px">대상이 사라진 보류</div>
+        <div class="mono" style="font-size: 24px; font-weight: 800; line-height: 1.2; color: #fca5a5">2</div>
+        <div class="soft" style="font-size: 12px">VM 이 인벤토리에 없음 — 지금은 풀 길이 없던 것</div>
+      </div>
+      <div class="panel" style="padding: 12px 14px; background: #0f1626">
+        <div class="dim" style="font-size: 12px">스냅샷이 없는 VM 의 보류</div>
+        <div class="mono" style="font-size: 24px; font-weight: 800; line-height: 1.2; color: #fcd34d">1</div>
+        <div class="soft" style="font-size: 12px">이미 정리됨 — 보류만 남음</div>
+      </div>
+    </div>
+
+    <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap">
+      <span class="dim" style="font-size: 12px">빠른 보기</span>
+      <button type="button" class="chip on">전체 <span class="mono">12</span></button>
+      <button type="button" class="chip">곧 끝남 <span class="mono">3</span></button>
+      <button type="button" class="chip">대상 없음 <span class="mono">2</span></button>
+      <button type="button" class="chip">스냅샷 없음 <span class="mono">1</span></button>
+      <label style="margin-left: 8px; display: flex; align-items: center; gap: 6px">
+        <span class="dim" style="font-size: 12px">찾기</span>
+        <input type="text" placeholder="VM · 법인 · 사유" style="background: #0f1626; border: 1px solid #243049; border-radius: 8px; color: #e6edf6; padding: 7px 10px; width: 220px">
+      </label>
+      <div style="margin-left: auto; display: flex; align-items: center; gap: 8px">
+        <span class="soft" style="font-size: 12.5px">고른 <b class="mono">2</b>건</span>
+        <button type="button" class="btn pri">고른 것 풀기</button>
+      </div>
+    </div>
+
+    <div style="border: 1px solid #78350f; background: #2a1f0d; border-radius: 10px; padding: 10px 14px; color: #fde68a; font-size: 12.5px; line-height: 1.55">
+      대상이 사라진 보류 <b>2건</b> — VM 이 인벤토리에 없습니다(지워졌거나 다른 vCenter 로 옮겨짐). 기한이 지나면 스스로 지워지지만 그때까지 상한(2,000건)에 들어갑니다. 아래에서 바로 풀 수 있습니다.
+    </div>
+
+    <div style="display: flex; align-items: center; gap: 8px 10px; flex-wrap: wrap; font-size: 12px">
+      <span class="dim">‘지금 상태’ 네 가지</span>
+      <span class="tag has">스냅샷 N개 · 크기 · 나이</span>
+      <span class="tag none">스냅샷 없음</span>
+      <span class="tag gone">VM 없음</span>
+      <span class="tag unk">확인 못 함</span>
+      <span class="soft">— 그 vCenter 를 지금 못 읽고 있으면 ‘VM 없음’ 이 아니라 ‘확인 못 함’ 입니다(대상 없음에 세지 않고 풀기는 열어 둠)</span>
+    </div>
+
+    <table style="width: 100%; border-collapse: collapse; font-size: 13px">
+      <thead>
+        <tr>
+          <th style="width: 36px"><span class="ck"></span></th>
+          <th>VM ↕</th>
+          <th>지금 상태 ↕</th>
+          <th>사유</th>
+          <th>건 사람 ↕</th>
+          <th>건 날 ↕</th>
+          <th>끝나는 날 ▲</th>
+          <th>남은 기간 · 90일 눈금</th>
+          <th style="text-align: right">동작</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr style="background: #17213a">
+          <td><span class="ck on">✓</span></td>
+          <td><b>tmp-restore-eu-07</b><div class="dim" style="font-size: 11.5px">Frankfurt 법인 · fra-vc01 · 걸 때의 이름</div></td>
+          <td><span class="tag gone">VM 없음</span></td>
+          <td class="soft">복원 검증용</td>
+          <td class="mono soft">lee.dba</td>
+          <td class="mono soft">2026-11-02</td>
+          <td class="mono">2026-12-02</td>
+          <td><span class="track"><i style="width: 13%; background: #60a5fa"></i></span><span class="mono soft" style="font-size: 12px">12일</span></td>
+          <td class="act"><button type="button" class="btn">풀기</button></td>
+        </tr>
+        <tr style="background: #17213a">
+          <td><span class="ck on">✓</span></td>
+          <td><b>batch-kr-0412</b><div class="dim" style="font-size: 11.5px">Seoul 법인 · sel-vc02 · 걸 때의 이름</div></td>
+          <td><span class="tag gone">VM 없음</span></td>
+          <td class="soft">이관 끝날 때까지</td>
+          <td class="mono soft">kim.ops</td>
+          <td class="mono soft">2026-10-28</td>
+          <td class="mono">2026-12-27</td>
+          <td><span class="track"><i style="width: 41%; background: #60a5fa"></i></span><span class="mono soft" style="font-size: 12px">37일</span></td>
+          <td class="act"><button type="button" class="btn">풀기</button></td>
+        </tr>
+        <tr>
+          <td><span class="ck"></span></td>
+          <td><b>db-ap-0133</b><div class="dim" style="font-size: 11.5px">Seoul 법인 · Seoul-CL5</div></td>
+          <td><span class="tag none">스냅샷 없음</span></td>
+          <td class="soft">분기 결산 전 유지</td>
+          <td class="mono soft">park.sys</td>
+          <td class="mono soft">2026-11-10</td>
+          <td class="mono" style="color: #fbbf24">2026-11-24</td>
+          <td><span class="track"><i style="width: 4%; background: #fbbf24"></i></span><span style="font-size: 12px; color: #fbbf24; white-space: nowrap"><span class="mono">4일</span> · 곧 끝남</span></td>
+          <td class="act"><button type="button" class="btn">풀기</button></td>
+        </tr>
+        <tr>
+          <td><span class="ck"></span></td>
+          <td><b>erp-app-02</b><div class="dim" style="font-size: 11.5px">Busan 법인 · Busan-CL1</div></td>
+          <td><span class="tag has">스냅샷 3개 · 120 GB · 41일</span></td>
+          <td class="soft">ERP 패치 롤백 대비 — 12월 첫 주에 정리</td>
+          <td class="mono soft">kim.ops</td>
+          <td class="mono soft">2026-11-05</td>
+          <td class="mono">2026-12-05</td>
+          <td><span class="track"><i style="width: 17%; background: #60a5fa"></i></span><span class="mono soft" style="font-size: 12px">15일</span></td>
+          <td class="act"><button type="button" class="btn">연장…</button> <button type="button" class="btn">풀기</button></td>
+        </tr>
+        <tr>
+          <td><span class="ck"></span></td>
+          <td><b>web-eu-0205</b><div class="dim" style="font-size: 11.5px">Frankfurt 법인 · Frankfurt-CL1</div></td>
+          <td><span class="tag has">스냅샷 1개 · 18 GB · 9일</span></td>
+          <td class="soft">배포 창(11/25) 뒤 정리</td>
+          <td class="mono soft">choi.web</td>
+          <td class="mono soft">2026-11-18</td>
+          <td class="mono" style="color: #fbbf24">2026-11-26</td>
+          <td><span class="track"><i style="width: 7%; background: #fbbf24"></i></span><span style="font-size: 12px; color: #fbbf24; white-space: nowrap"><span class="mono">6일</span> · 곧 끝남</span></td>
+          <td class="act"><button type="button" class="btn">연장…</button> <button type="button" class="btn">풀기</button></td>
+        </tr>
+        <tr>
+          <td><span class="ck"></span></td>
+          <td><b>mes-cn-011</b><div class="dim" style="font-size: 11.5px">Shanghai 법인 · Shanghai-CL4</div></td>
+          <td><span class="tag has">스냅샷 2개 · 64 GB · 23일</span></td>
+          <td class="soft">공장 라인 변경 검증 중</td>
+          <td class="mono soft">wang.mes</td>
+          <td class="mono soft">2026-11-12</td>
+          <td class="mono" style="color: #fbbf24">2026-11-27</td>
+          <td><span class="track"><i style="width: 8%; background: #fbbf24"></i></span><span style="font-size: 12px; color: #fbbf24; white-space: nowrap"><span class="mono">7일</span> · 곧 끝남</span></td>
+          <td class="act"><button type="button" class="btn">연장…</button> <button type="button" class="btn">풀기</button></td>
+        </tr>
+        <tr>
+          <td><span class="ck"></span></td>
+          <td><b>file-kr-0031</b><div class="dim" style="font-size: 11.5px">Seoul 법인 · Seoul-CL1</div></td>
+          <td><span class="tag has">스냅샷 1개 · 210 GB · 60일</span></td>
+          <td class="soft">감사 대응 — 원본 보존 요청(법무)</td>
+          <td class="mono soft">park.sys</td>
+          <td class="mono soft">2026-10-20</td>
+          <td class="mono">2027-01-18</td>
+          <td><span class="track"><i style="width: 66%; background: #60a5fa"></i></span><span class="mono soft" style="font-size: 12px">59일</span></td>
+          <td class="act"><button type="button" class="btn">연장…</button> <button type="button" class="btn">풀기</button></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="dim" style="font-size: 12px; line-height: 1.6; padding: 4px 2px 10px">
+      그 밖 5건은 아래로 이어집니다 · 대상이 없는 보류의 이름은 보류를 걸 때 적어 둔 것입니다(vCenter 에서 다시 읽을 수 없음) · 보류는 기한이 있는 예외입니다(1 ~ 90일 · 사유 필수). 풀기 · 연장은 관리자만 할 수 있고 감사 기록에 남습니다. ‘건 사람’ 은 관리자에게만 보입니다. 범위가 제한된 계정에는 자기 범위의 보류만 보입니다.
+    </div>
+  </div>
+
+  <div class="panel" style="padding: 14px 18px; display: flex; gap: 28px; align-items: flex-start">
+    <div style="flex: 1; min-width: 0">
+      <div style="font-weight: 800; font-size: 13.5px; margin-bottom: 6px">‘풀기’ 를 누르면</div>
+      <div class="soft" style="font-size: 12.5px; line-height: 1.6">그 자리에서 한 번 더 묻습니다 — “<b>erp-app-02</b> 의 보류를 풉니다. 다음 판정부터 사내 기준(7일 · 3개 · 100 GB)으로 다시 봅니다.” [풀기] [닫기]. 대상이 없는 보류는 “VM 이 없어 보류만 지웁니다” 로 말합니다.</div>
+    </div>
+    <div style="flex: 1; min-width: 0">
+      <div style="font-weight: 800; font-size: 13.5px; margin-bottom: 6px">‘연장…’ 을 누르면</div>
+      <div class="soft" style="font-size: 12.5px; line-height: 1.6">지금 VM 줄의 보류 창과 같은 칸이 줄 아래에 열립니다 — 기간(오늘부터 1 ~ 90일) · 사유(그대로 채워 둠). 연장하면 ‘건 사람 · 건 날’ 이 연장한 사람 · 오늘로 바뀝니다(지금 저장 방식 그대로). 대상이 없거나 스냅샷이 없는 보류에는 ‘연장’ 을 두지 않습니다(풀기만).</div>
+    </div>
+    <div style="flex: 1; min-width: 0">
+      <div style="font-weight: 800; font-size: 13.5px; margin-bottom: 6px">탭의 숫자</div>
+      <div class="soft" style="font-size: 12.5px; line-height: 1.6">‘보류 12’ 는 지금 살아 있는 보류 수입니다(기한이 지난 것은 세지 않음). 보류 파일을 읽지 못하면 숫자 대신 ‘—’ 와 사유를 보이고 풀기 · 연장을 잠급니다.</div>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1090}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

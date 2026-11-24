@@ -8,7 +8,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../../util/atomicWrite.js';
+import { makeJsonFileReader } from '../../util/jsonFileRead.js';   // 94회차 F2: 읽기 오류 ≠ 손상
 import { registerStateFile } from '../../util/stateFiles.js';
 
 const FILE_NAME = 'veeam-portal-vms.json';
@@ -19,18 +20,21 @@ const RESTORES_MAX = 10;
 const FINAL = new Set(['success', 'warning', 'failed', 'unknown']);
 
 let _map = null;
+// 94회차 F2: 읽기 오류(EACCES · EIO · EISDIR)는 원본을 옮기지 않고 · 캐시하지 않고(30초 간격 재읽기) · 그동안 저장하지 않는다(임시 빈 목록 위의 한 건으로
+//   원본을 덮지 않게). 손상(JSON 파싱 실패)은 예전과 같다(보존본 + 빈 목록).
+const _reader = makeJsonFileReader(() => FILE(), { parse: (t) => JSON.parse(t), tag: 'veeam-portal-vms' });
 function load() {
   if (_map) return _map;
+  const r = _reader.read();
+  if (r.kind === 'read-error') return new Map();   // 캐시하지 않는다
   _map = new Map();
-  if (!fs.existsSync(FILE())) return _map;
-  try {
-    const raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
-    for (const r of Array.isArray(raw?.vms) ? raw.vms : []) if (r && typeof r.vmId === 'string' && typeof r.vcenterId === 'string') _map.set(r.vmId, r);
-  } catch (e) { preserveCorrupt(FILE(), e?.message); _map = new Map(); }
+  const raw = r.kind === 'ok' ? r.value : null;
+  for (const x of Array.isArray(raw?.vms) ? raw.vms : []) if (x && typeof x.vmId === 'string' && typeof x.vcenterId === 'string') _map.set(x.vmId, x);
   return _map;
 }
 function persist() {
-  const m = load();
+  if (!_map) { console.warn('[veeam-run] 포탈 백업 VM 목록 파일을 읽지 못한 상태라 저장하지 않았습니다(원본을 덮지 않음)'); return; }   // 94회차 F2
+  const m = _map;
   if (m.size > MAX) {   // 오래된 것부터(마지막 활동 시각)
     const old = [...m.values()].sort((a, b) => (a.touchedAt || 0) - (b.touchedAt || 0)).slice(0, m.size - MAX);
     for (const r of old) m.delete(r.vmId);
@@ -94,4 +98,4 @@ export function listPortalVms({ allowed = null, vcenterId = '' } = {}) {
   return [...load().values()].filter((r) => (!allowed || allowed.has(r.vcenterId)) && (!vcenterId || r.vcenterId === vcenterId))
     .sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0));
 }
-export function _resetForTest() { _map = null; try { fs.rmSync(FILE()); } catch { /* 없음 */ } }
+export function _resetForTest() { _map = null; _reader.reset(); try { fs.rmSync(FILE()); } catch { /* 없음 */ } }

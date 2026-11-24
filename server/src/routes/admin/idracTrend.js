@@ -45,6 +45,7 @@ import { acquireExport } from '../../util/exportBusy.js';
 import { snapMemo, sendCached } from '../../util/snapCache.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { addLineCharts, sheetRef, colLetter } from '../../util/xlsxChart.js';
+import { scopeSig } from '../../util/scopeSig.js';
 
 const csvPerm = requirePerm('data.csv');
 const hiddenByScope = (req, s) => { const sc = idracScopeOf(req); return !!sc && !idracInScope(sc, s); };
@@ -76,6 +77,11 @@ export function dayBucketOffsetMs(offsetMin = DAY_OFFSET_MIN) {
   return Number.isFinite(off) && off % HOUR === 0 ? off : 0;
 }
 
+/**
+ * 158회차(재현 — 153회차 N153-3 과 같은 꼴): 요청 값으로 여는 고정 표는 **자기 키만**. `PRESETS['constructor']` 는 상속된 함수라 참이어서
+ *   기간이 기본(24h)으로 떨어지지 않고 start 가 NaN(응답 null · 점 0개 · 파일 이름 'constructor')이 됐다. 모르는 값은 undefined.
+ */
+const presetMs = (range) => (typeof range === 'string' && Object.hasOwn(PRESETS, range) ? PRESETS[range] : undefined);
 /** 요청 → { start, end, bucketMs, offsetMs, custom } | { error } (순수). 끝은 버킷 경계로 올린 배타 경계. */
 export function parseWindow(q, { now = Date.now(), retentionDays = 365, offsetMin = DAY_OFFSET_MIN } = {}) {
   let start, end = now, custom = false;
@@ -88,7 +94,7 @@ export function parseWindow(q, { now = Date.now(), retentionDays = 365, offsetMi
     if (end - start < HOUR) return { error: '기간은 최소 1시간입니다.' };
     if (end > now + MIN) return { error: '종료 시각이 현재 이후입니다.' };
   } else {
-    const span = PRESETS[q?.range] || DAY;
+    const span = presetMs(q?.range) || DAY;
     start = end - span;
   }
   const floor = now - retentionDays * DAY;
@@ -272,7 +278,7 @@ async function seriesFor(s, win, { host = undefined } = {}) {
   const hostGpuFirstTs = {};
   const cpuParts = { telemetry: [], sensor: [], bmIdrac: [], history: [] };
   let firstTs = null;
-  let cpuHistoryKey = null;
+  let cpuHistoryKey = null; let cpuHistoryNote = null;   // v2.922(반증 D14)
   try {
     const db = await getMetricsDb();
     // v2.729: 계열마다 조각으로 읽고 사이에 양보한다(historyRangeAsync — 결과는 historyRange 와 같다). 한 계열 원본을 한 문장으로
@@ -315,6 +321,16 @@ async function seriesFor(s, win, { host = undefined } = {}) {
       const r = await usageCpuRange([s.serviceTag, s.id, s.fleetId], { agent: config.agent?.name || '', start: win.start, end: win.end, bucketMs: off ? MIN : win.bucketMs, idracOnly: true });
       cpuParts.history = off ? rebucketMean(r.rows, win) : r.rows; cpuHistoryKey = r.key;
       if (r.rows.length && (firstTs == null || r.rows[0].ts < firstTs)) firstTs = r.rows[0].ts;
+      /*
+       * v2.922(리눅스 성능 3a · 반증 D14): 베어메탈 원시가 시간 단위 파일로 바뀌며 보존이 90일 → 30일(실효 min(store.rawDays, rawRetentionDays))이 됐다.
+       *   그보다 오래된 구간은 이 출처로 메울 수 없다(1시간 롤업은 행마다 출처(src)가 없어 iDRAC 전용 판정을 못 한다) — 응답이 그 사실을 말한다.
+       */
+      try {
+        const { loadBmUsageSettings, effectiveRawDays } = await import('../../bmusage/settings.js');
+        const rawDays = effectiveRawDays(loadBmUsageSettings());
+        const coverFrom = Date.now() - rawDays * 86_400_000;
+        if (win.start < coverFrom) cpuHistoryNote = { reason: 'bm-raw-retention', rawDays, coverFrom };
+      } catch { /* 참고 문구 — 실패해도 값은 그대로 */ }
     } catch (e) { errors.cpuHistory = e?.message || String(e); }
   }
   const cpu = mergeCpuSeries(win, cpuParts);
@@ -325,7 +341,7 @@ async function seriesFor(s, win, { host = undefined } = {}) {
     power = powerKeyOf(s, { entries: remotePowerEntries(), hasSeries: (k) => (typeof pdb.latest === 'function' ? pdb.latest(k) != null : false) });
     out.powerW = power.key && pdb.bucketRange ? pdb.bucketRange(power.key, win.start, win.end, win.bucketMs, win.offsetMs || 0) : [];
   } catch (e) { errors.powerW = e?.message || String(e); }
-  return { points: mergeSeries(win, out), errors, firstTs, cpuSources: cpu.sources, cpuHistoryKey, power: { found: !!power.key, reason: power.reason }, hostCpuFirstTs, hostGpuFirstTs };
+  return { points: mergeSeries(win, out), errors, firstTs, cpuSources: cpu.sources, cpuHistoryKey, ...(cpuHistoryNote ? { cpuHistoryNote } : {}), power: { found: !!power.key, reason: power.reason }, hostCpuFirstTs, hostGpuFirstTs };
 }
 
 /** 점 [{ts,v}] → 오프셋 버킷 평균(순수 — A-07). */
@@ -495,7 +511,7 @@ export function parseExportStyles(q) {
   const out = {};
   for (const part of String(q || '').slice(0, 400).split(',')) {
     const [k, dash, width, dot] = part.split(':');
-    if (!EXPORT_COLS[k] || !['solid', 'dash', 'dot', 'dashdot'].includes(dash)) continue;
+    if (!Object.hasOwn(EXPORT_COLS, k) || !['solid', 'dash', 'dot', 'dashdot'].includes(dash)) continue;   // 158회차: 자기 키만
     const w = Number(width);
     out[k] = { dash, width: Number.isInteger(w) && w >= 1 && w <= 4 ? w : 2, marker: dot === '1' };
   }
@@ -519,7 +535,7 @@ export function uniqueSheetName(base, used) {
 }
 function periodLabel(req, win) {
   if (win.custom) return `${localStamp(win.start)} ~ ${localStamp(win.end)}`;
-  return PRESETS[req.query.range] ? String(req.query.range) : '24h';
+  return presetMs(req.query.range) ? String(req.query.range) : '24h';
 }
 
 /** CSV·엑셀 공통 — 기간·대상·항목·파일 이름. 오류면 응답을 보내고 null. */
@@ -537,12 +553,12 @@ function exportJob(req, res, ext, gpuKeys) {
   }
   if (req.query.scope === 'dc') { const tf = typeFilterOf(req.query); targets = targets.filter((s) => matchType(s, tf)); }
   if (!targets.length) { res.status(404).json(NOT_FOUND); return null; }
-  const cols = String(req.query.cols || 'cpuPct,cpuTemp,gpuTemp,inletTemp,exhaustTemp,powerW,hostCpuPct,hostGpuPct,hostGpuMemPct').split(',').filter((c) => EXPORT_COLS[c]);
+  const cols = String(req.query.cols || 'cpuPct,cpuTemp,gpuTemp,inletTemp,exhaustTemp,powerW,hostCpuPct,hostGpuPct,hostGpuMemPct').split(',').filter((c) => Object.hasOwn(EXPORT_COLS, c));   // 158회차: 자기 키만 — 'constructor' 가 열로 들어가 머리글이 함수 원문이었다
   if (!cols.length) { res.status(400).json({ ok: false, reason: '내보낼 항목이 없습니다.' }); return null; }
   const max = ext === 'xlsx' ? XLSX_SERVER_MAX : SERVER_EXPORT_MAX;
   const omitted = Math.max(0, targets.length - max);
   const label = String(req.query.scope === 'dc' ? `${targets[0].corpName}-${targets[0].site}` : targets[0].name).replace(/[^\w.\-가-힣]+/g, '_').slice(0, 60);
-  const period = win.custom ? `${fileStamp(win.start).slice(0, 8)}-${fileStamp(win.end).slice(0, 8)}` : (PRESETS[req.query.range] ? req.query.range : '24h');
+  const period = win.custom ? `${fileStamp(win.start).slice(0, 8)}-${fileStamp(win.end).slice(0, 8)}` : (presetMs(req.query.range) ? req.query.range : '24h');
   const stamp = fileStamp();
   return { win, cols, omitted, targets: targets.slice(0, max),
     names: { full: `idrac-trend_${label}_${period}_${stamp}`, ascii: `idrac-trend_${period}_${stamp}` } };
@@ -652,7 +668,7 @@ export function registerIdracTrend(adminRouter) {
     const tf = typeFilterOf(req.query);
     const cond = [hours, String(req.query.corp ?? '*'), String(req.query.site ?? '*'), tf.gpu, tf.kind].map((x) => encodeURIComponent(String(x).slice(0, 200))).join('|');
     const role = `${req.user?.role || ''}${req.user?.superAdmin ? '+sa' : ''}`;
-    const key = `${snap.generatedAt}|idrac-trend-table|${cond}|${allowed ? [...allowed].sort().join(',') : 'all'}|${role}`;
+    const key = `${snap.generatedAt}|idrac-trend-table|${cond}|${scopeSig(allowed)}|${role}`;
     try {
       const payload = await snapMemo('idrac-trend-table', key, TABLE_MEMO_MS, () => trendTablePayload(req, hours));
       sendCached(req, res, key, payload);

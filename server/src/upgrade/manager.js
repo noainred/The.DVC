@@ -7,9 +7,11 @@
  * and can be reloaded at runtime. Everything is a no-op unless enabled.
  */
 
+import fs from 'node:fs';
 import path from 'node:path';
 import { currentVersion, config } from '../config.js';
-import { loadSettings, saveSettings, redactSettings, clampPollMs } from './settings.js';
+import { loadSettings, saveSettings, redactSettings, clampPollMs, upgradeSettingsWriteRefusal } from './settings.js';
+import { READ_RETRY_MS } from '../util/jsonFileRead.js';   // 123회차: 읽기 오류 뒤 다시 읽기 간격(설정 파일 공용 읽기와 같은 값)
 import { checkpointConfigDbs } from './dbCheckpoint.js';
 import {
   findNewerArchive, upgradeFromArchive, checkRemote, upgradeFromRemote,
@@ -32,6 +34,8 @@ import { runningBulkDeploys as bulkDeployRuns } from '../agent/bulkDeploy.js';  
 import { runnerStatus as vmcloneRunnerStatus } from '../vmclone/runner.js';  // v2.741(TIMING-01 ③): 실행 중 VM 복제 잡도 기다린다(읽기만)
 import { getJob as vmcloneJob } from '../vmclone/store.js';
 import { runningBareosFinishes } from '../vmclone/execOp.js';   // v2.874(점검 B2-02): Bareos 복원 마무리(NIC 끊기 · 검증 — vCenter 줄)도 기다린다(읽기만)
+import { runningVeeamWork } from '../veeam/run/inflight.js';
+import { runningAuditWork } from '../focusmon/audit/inflight.js';   // 전체 점검 50회차 R3: 집중 모니터링 root 작업도 기다린다(읽기만)   // 전체 점검 2회차 V-3: Veeam 관리 작업 · 보내는 중 실행 · 엣지 대행 상태 변경도 기다린다(읽기만)
 import { runningBareosWork } from '../bareos/inflight.js';   // v2.825.1(G15): 엣지 대행 작업·늦은 회신·자동 설정도 기다린다(재시작하면 결과를 잃는다 · 읽기만)
 import { poolSettled } from '../util/pool.js';
 import { numOrNull } from '../util/numOrNull.js';
@@ -42,8 +46,9 @@ import { cmpVersion } from '../util/cmpVersion.js';
  * v2.737(사용자 신고 "업그레이드되면 scan 하던 게 중단된다"): 자동 적용은 이 노드에서 **실행 중인 스캔**(아이실론 du·iDRAC 대역·IP 대역 —
  *   util/scanJournal)이 끝날 때까지 기다린다. 상한(기본 2시간)을 넘기면 적용한다 — 끝나지 않는 스캔이 업그레이드를 영원히 막지 않게.
  *   기다리는 동안 1분마다 다시 보고, 스캔이 끝나면 곧바로 적용한다(다음 확인 주기까지 미루지 않는다). 0 이면 기다리지 않는다.
- *   ⚠ 수동 '업그레이드 적용' 은 기다리지 않는다(화면이 실행 중 스캔을 먼저 경고한다). 중앙이 보낸 번들 push 도 기다리지 않는다 —
- *   그 경로는 받은 즉시 설치 디렉터리를 바꾸므로 재시작만 미루면 옛 프로세스가 새 파일을 읽게 된다. 끊긴 스캔은 자동 재개가 잇는다.
+ *   ⚠ 수동 '업그레이드 적용' 은 기다리지 않는다(화면이 실행 중 스캔을 먼저 경고한다). 끊긴 스캔은 자동 재개가 잇는다.
+ *   51회차 #3(사용자 결정 — 2026-11-17): 중앙이 보낸 번들 push(재시작 요청)도 같은 목록을 같은 상한까지 기다린다 — 재시작만 미루면 옛 프로세스가
+ *   새 파일을 읽게 되므로 **설치 자체를 미룬다**(번들을 메모리에 들고 있다가 설치 · 재시작 — upgrade/pushHold.js).
  */
 export function scanDeferMaxMs(v = process.env.UPGRADE_SCAN_DEFER_MAX_MS) {
   const n = numOrNull(v);
@@ -83,6 +88,14 @@ function bareosWork() {
   try { b = runningBareosFinishes(); } catch { b = []; }   // v2.874(점검 B2-02): 복원 마무리(NIC 끊기 · 검증 — vCenter 줄)
   return [...a, ...b];
 }
+/** 전체 점검 2회차 V-3: 재시작하면 결과 · 감사를 잃는 Veeam 작업(veeam/run/inflight.js). 상한은 스캔과 같다. */
+function veeamWork() {
+  try { return runningVeeamWork(); } catch { return []; }
+}
+/** 전체 점검 50회차 R3: 실행 중인 집중 모니터링 디스크 점검 · 자동 설치 · 접속 준비(focusmon/audit/inflight.js). 상한은 스캔과 같다. */
+function focusMonWork() {
+  try { return runningAuditWork(); } catch { return []; }
+}
 /**
  * v2.742(감사 RECENT-02): 자동 적용이 기다리는 **시작하지 못한 '지금 수집' 대기 요청**(util/scanJournal queuedScans).
  *   기록이 파일에 남은(resumable) 대기 요청은 재시작 뒤 그 기능의 대기열로 돌아오므로 기다리지 않는다(분리 실행 du 와 같은 판단 — TIMING-03).
@@ -91,17 +104,29 @@ function bareosWork() {
 function queuedEntries(list) { return (Array.isArray(list) ? list : []).filter((x) => x && x.queued); }
 const queuedLabel = (x) => `'지금 수집' 대기 ${x.label || x.key || x.kind}`.slice(0, 120);
 
+/**
+ * 재시작하면 끊기거나 결과를 잃는 진행 중 작업(기다릴 목록) — 자동 적용(#deferDecision)과 중앙 push 보류(upgrade/pushHold.js · 51회차 #3)가 같은 목록을 쓴다.
+ * 재시작 뒤 같은 작업에 다시 붙는 스캔(resumable)과 기록이 남은 대기 요청은 뺀다(v2.741 TIMING-03 · v2.742 RECENT-02).
+ */
+export function restartBlockers({ all = runningScans(), queued = queuedScans() } = {}) {
+  return [...all.filter((x) => !x.resumable), ...queued.filter((x) => !x.resumable).map((x) => ({ ...x, label: queuedLabel(x) })), ...runningVmClones(), ...runningBulkDeploys(), ...bareosWork(), ...veeamWork(), ...focusMonWork()];
+}
+
 /** 상한을 넘겨 적용할 때 — 스캔은 자동 재개가 잇고(resumeOutlookText), VM 복제·대량 배포·기록 못 한 대기 요청은 잇지 않는다(조용히 '재개된다' 고 말하지 않는다). */
-const NON_SCAN_KINDS = new Set(['vm-clone', 'bulk-deploy', 'bareos']);
+const NON_SCAN_KINDS = new Set(['vm-clone', 'bulk-deploy', 'bareos', 'veeam', 'focusmon']);
 const scansOnly = (list) => (Array.isArray(list) ? list : []).filter((x) => !NON_SCAN_KINDS.has(x.kind) && !x.queued);
 function cloneOutlookText(blocking) {
   const list = Array.isArray(blocking) ? blocking : [];
   const n = list.filter((x) => x.kind === 'vm-clone').length;
   const d = list.filter((x) => x.kind === 'bulk-deploy').length;
   const b = list.filter((x) => x.kind === 'bareos').length;
+  const vm = list.filter((x) => x.kind === 'veeam').length;
+  const fm = list.filter((x) => x.kind === 'focusmon').length;
   const q = queuedEntries(list).length;
   return joinOutlook(
+    fm ? `집중 모니터링 디스크 점검 · 자동 설치 · 접속 준비 ${fm}건은 결과를 받지 못합니다 — 그 서버의 디스크 점검 · 준비 화면에서 다시 실행하세요` : '',   // 51회차 #9
     b ? `Bareos 작업 ${b}건은 결과를 받지 못합니다 — 백업 대상·Director(자동 설정은 그 서버의 설정 파일)를 확인하세요` : '',
+    vm ? `Veeam 작업 ${vm}건은 결과를 받지 못합니다 — Veeam 콘솔에서 실행 · 삭제 여부를 확인하세요` : '',
     n ? `VM 복제 ${n}개는 중간에 끊깁니다 — 원본 VM 에 임시 스냅샷(portal-clone-*)이 남았는지 VM 복제 화면에서 확인하세요` : '',
     d ? `에이전트 대량 배포 ${d}건은 중간에 끊깁니다 — 설치가 끝나지 않은 노드가 남았는지 배포 화면에서 확인하고 다시 실행하세요` : '',
     q ? `'지금 수집' 대기 요청 ${q}개는 기록을 남기지 못해 재시작 뒤 다시 돌지 않습니다 — 다시 누르세요` : '',
@@ -150,8 +175,37 @@ export function summarizeCollectorPush(results) {
     ok: r.ok === true, status: Number.isFinite(r.status) ? r.status : null,
     version: typeof r.version === 'string' ? r.version.slice(0, 32) : '', reason: typeof r.reason === 'string' ? r.reason.slice(0, 300) : '',
     ...(r.upToDate === true ? { upToDate: true } : {}), // v2.859: 엣지의 '이미 최신' 응답은 실패가 아니다
+    ...(r.deferred === true ? { deferred: true } : {}), // 51회차 #3: 엣지가 진행 중 작업을 기다리며 설치를 미뤘다
   }));
   return { total: list.length, ok: list.filter((r) => r.ok === true).length, items };
+}
+
+/**
+ * 87회차 ⓑ: 자동 적용 고리 판정(순수) — 직전 자동 적용이 이 판(v)을 설치하고 재시작했는데(또는 이미 고리로 멈춘 기록인데) 지금 판이 그보다 낮고,
+ *   받을 판(latest)이 그보다 새롭지 않으면 v, 아니면 null. 버전을 못 읽으면 null(못 읽음 ≠ 고리 — 지어내지 않는다).
+ * @param {object|null} r lastResult  @param {{current:string, latest:(string|null), installDir:string}} o
+ */
+export function stuckApply(r, { current, latest = null, installDir = '' } = {}) {
+  if (!r || typeof r !== 'object' || r.trigger !== 'auto') return null;
+  let v = null;
+  if (r.ok === true && r.restarting === true) v = r.version;
+  else if (r.ok === false && r.code === 'apply-stuck') { if (r.installDir && installDir && r.installDir !== installDir) return null; v = r.target; }
+  if (!v) return null;
+  const c = cmpVersion(v, current);
+  if (c == null || c <= 0) return null;   // 지금 판이 그 판 이상 — 고리가 아니다
+  if (latest) { const l = cmpVersion(latest, v); if (l == null || l > 0) return null; }   // 더 새 판이 나왔다 — 한 번은 시도한다
+  return v;
+}
+
+/**
+ * 87회차 ⓑ: 설치 경로의 실경로가 지금 실행 중인 앱 경로(config.appRoot 실경로)와 다르면 { installDir, appRoot }, 같거나 설치 경로가 없으면 null.
+ *   실경로로 잰다(심볼릭 링크 설치 — /opt/vmware-portal → 판별 폴더 — 는 같은 곳이다). 실경로를 못 읽으면 글자 경로로.
+ */
+export function installDirMismatch(installDir, appRoot = config.appRoot) {
+  if (!installDir || !appRoot) return null;
+  const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+  const a = real(installDir); const b = real(appRoot);
+  return a === b ? null : { installDir: a, appRoot: b };
 }
 
 /** 두 출처(원격 latest · 감시 폴더 버전) 중 큰 버전 — 비교할 수 없는 값은 건너뛴다(v2.740 B-02 ③). */
@@ -184,6 +238,10 @@ export function withWatchFailure(watch, remote) {
 export class UpgradeManager {
   constructor() {
     this.settings = loadSettings();
+    // 123회차(103회차 F5 반증 — 재현): 기동 때 upgrade.json 이 **읽기 오류**면 위 값은 env 기본값이다(마지막으로 읽은 값이 없다). settings.js 는 30초마다 다시 읽지만
+    //   이 객체는 생성 때 한 번만 읽어, 다시 읽힌 뒤에도 재시작 · 저장까지 env 기본값(다른 원격 소스 · 토큰 없음 · env 의 자동 적용 여부)으로 돌았고 화면(status)도 그 값을 보였다 —
+    //   그 폼의 저장이 원격 소스 주소를 env 값으로 되돌리고 저장된 토큰을 폐기했다. 못 읽은 채 시작했음을 기억해 두고, 읽히면 한 번 다시 읽는다(syncSettingsAfterUnread).
+    this.settingsUnread = !!upgradeSettingsWriteRefusal();
     this.lastCheck = null;
     this.#lastResult = null;
     this.lastTick = null;       // v2.736.2: 백그라운드 확인 한 번의 결과(언제·무엇을 했나)
@@ -214,6 +272,7 @@ export class UpgradeManager {
     if (!this.#lastResult && prev.lastResult) this.#lastResult = prev.lastResult;
     if (!this.lastTick && prev.lastTick) this.lastTick = prev.lastTick;
     if (prev.lastEdgeSync) this.edgeSync.restore(prev.lastEdgeSync); // v2.865 A
+    if (prev.edgeSyncState) this.edgeSync.restoreState(prev.edgeSyncState); // v2.938: 연속 실패·알린 사실
     this.persist = { enabled: true, file, error: r.error || null, corruptKept: r.corruptKept || null, restored: !!(prev.lastCheck || prev.lastResult || prev.lastTick) };
     if (r.error) console.warn(`[upgrade] ${r.error}${r.corruptKept ? ` — 원본은 ${r.corruptKept}` : ''}`);
     return this.persist;
@@ -221,7 +280,7 @@ export class UpgradeManager {
 
   #save() {
     if (!this.persist?.enabled || !this.persist.file) return;
-    const err = writeUpgradeStatus(this.persist.file, { lastCheck: this.lastCheck, lastResult: this.#lastResult, lastTick: this.lastTick, lastEdgeSync: this.edgeSync?.lastRun || null }); // v2.865 A
+    const err = writeUpgradeStatus(this.persist.file, { lastCheck: this.lastCheck, lastResult: this.#lastResult, lastTick: this.lastTick, lastEdgeSync: this.edgeSync?.lastRun || null, edgeSyncState: this.edgeSync?.persistState?.() || null }); // v2.938: 연속 실패·알린 사실도 // v2.865 A
     if (err && err !== this.persist.error) console.warn(`[upgrade] ${err}`);
     this.persist.error = err;
   }
@@ -246,7 +305,7 @@ export class UpgradeManager {
       auto: autoUpgradeState({
         settings: s, intervalMs: this.timer ? this.armedMs : 0, armedAt: this.timer ? this.armedAt : null,
         lastCheck: sanitizeCheck(this.lastCheck), lastResult: sanitizeResult(this.#lastResult), lastTick: sanitizeTick(this.lastTick),
-        currentVersion: currentVersion(), deferral: this.deferral, now: Date.now(),
+        currentVersion: currentVersion(), deferral: this.deferral, installDirMismatch: installDirMismatch(s.installDir), now: Date.now(),
       }),
       // v2.737: 화면이 수동 적용 전에 '지금 스캔 N개가 끊긴다' 를 경고하고, 대기 중이면 무엇을 기다리는지 말한다.
       // v2.741(TIMING-03): resumable — 재시작 뒤 같은 작업에 다시 붙는 스캔(아이실론 분리 실행 du). 자동 적용은 그 스캔을 기다리지 않는다.
@@ -267,9 +326,32 @@ export class UpgradeManager {
     };
   }
 
+  /**
+   * 123회차: 기동 때 설정 파일을 읽지 못했으면(settingsUnread) 다시 읽혔는지 보고, 읽혔으면 저장된 설정으로 한 번 바꾼다(타이머 · 엣지 동기화도 그 설정으로 다시 건다).
+   *   아직 못 읽으면 읽힐 때까지 같은 간격으로 다시 본다(start() 한 프로세스만 · 타이머 하나 · unref). 운영 중에 생긴 읽기 오류는 해당 없음 — 그때 this.settings 는 읽은 값 그대로다.
+   * @returns {boolean} 지금도 못 읽은 채(env 기본값으로 도는 중)인가
+   */
+  syncSettingsAfterUnread() {
+    if (!this.settingsUnread) return false;
+    if (upgradeSettingsWriteRefusal()) { this.#armUnreadRetry(); return true; }
+    this.settingsUnread = false;
+    this.settings = loadSettings();
+    console.log('[upgrade] 설정 파일(upgrade.json)이 다시 읽혀 저장된 설정으로 돌아갑니다(기동 때는 읽기 오류라 환경 변수 기본값으로 돌았습니다).');
+    if (this.#started) { this.#restartTimer(); this.edgeSync.arm(); }
+    return false;
+  }
+  #started = false;
+  #unreadTimer = null;
+  #armUnreadRetry() {
+    if (this.#unreadTimer || !this.#started) return;
+    this.#unreadTimer = setTimeout(() => { this.#unreadTimer = null; try { this.syncSettingsAfterUnread(); } catch (e) { console.warn(`[upgrade] 설정 다시 읽기 실패: ${String(e?.message || e).slice(0, 160)}`); } }, READ_RETRY_MS + 1_000);
+    this.#unreadTimer.unref?.();
+  }
+
   /** Persist edited settings and restart the background poller. */
   updateSettings(partial) {
     this.settings = saveSettings(partial);
+    this.settingsUnread = false;   // 123회차: 저장이 받아들여졌다 = 파일이 읽힌다(읽기 오류 중 저장은 saveSettings 가 던진다)
     this.#restartTimer();
     this.edgeSync.arm(); // v2.859: edgeAutoUpgrade·enabled 변경을 바로 반영
     return this.status();
@@ -305,7 +387,12 @@ export class UpgradeManager {
     // 수동 apply가 겹치면 같은 installDir에 renameSync 스왑이 경합해 설치가 깨질 수 있다.
     if (this._applying) return { ok: false, reason: '업그레이드 적용이 이미 진행 중입니다.' };
     this._applying = true;
-    try { return await this.#applyInner({ source, restart, trigger }); }
+    try {
+      const r = await this.#applyInner({ source, restart, trigger });
+      // 반증 A7: 수동 · 자동 적용이 성공하면 중앙 push 보류(upgrade/pushHold.js)는 지운다 — 그 뒤 옛 보류 번들이 새 설치를 덮어쓰지 않게(등록으로 받는다 — 순환 import 회피)
+      if (r?.ok) { try { this.onApplied?.(); } catch { /* 보류 정리 실패가 적용 결과를 바꾸지 않는다 */ } }
+      return r;
+    }
     finally { this._applying = false; }
   }
 
@@ -437,7 +524,7 @@ export class UpgradeManager {
     const queuedKept = queued.filter((x) => x.resumable);
     // v2.741(감사 TIMING-01 ③): 실행 중 VM 복제 잡도 기다린다(재시작이 오면 원본 VM 에 임시 스냅샷이 남는다 — 이어 받는 경로가 없다).
     // v2.742(감사 TIMING-04): 진행 중인 에이전트 대량 배포도 기다린다(재시작이 원격 설치를 중간에 끊는다 — 이어 받는 경로가 없다).
-    const scans = [...all.filter((x) => !x.resumable), ...queued.filter((x) => !x.resumable).map((x) => ({ ...x, label: queuedLabel(x) })), ...runningVmClones(), ...runningBulkDeploys(), ...bareosWork()];
+    const scans = restartBlockers({ all, queued });   // 51회차 #3: 중앙 push 보류(pushHold.js)와 같은 목록 하나
     if (!scans.length || max <= 0) { const forced = false; this.#clearDeferral(); return { wait: false, forced, scans, detached, queuedKept }; }
     if (!this.deferral || this.deferral.latest !== latest) this.deferral = { since: now, until: now + max, latest, scans: [] };
     this.deferral.scans = scans.map((x) => ({ kind: x.kind, label: x.label, since: x.since }));
@@ -479,6 +566,27 @@ export class UpgradeManager {
     }
   }
 
+  /**
+   * 87회차 ⓑ(86회차 남긴 것 — 권장안): '이 판을 설치하고 재시작했는데 여전히 옛 판' 이면 자동 적용을 멈춘다(같은 판 재설치 · 재시작 고리 차단).
+   *   설치 경로(installDir)가 실행 중인 앱 경로와 다르면 설치는 성공해도 재시작한 프로세스가 옛 판이라, 기동 직후 확인이 다시 받아 설치 · 재시작했다.
+   *   기록(lastResult)에 사유를 남겨 상태 · 화면('마지막 적용이 실패했습니다' + 사유)에 보인다. 풀림: 지금 판이 그 판 이상 · 더 새 판이 나옴(한 번 시도) ·
+   *   설치 경로 변경 · 수동 적용(기록이 바뀐다). @returns 멈췄는가
+   */
+  #stuckGuard(at, latest) {
+    const s = this.settings;
+    const v = stuckApply(this.#lastResult, { current: currentVersion(), latest, installDir: s.installDir });
+    if (!v) return false;
+    if (this.#lastResult?.code !== 'apply-stuck') {
+      const mm = installDirMismatch(s.installDir);
+      const reason = `v${v} 을(를) 설치하고 재시작했는데 여전히 v${currentVersion()} 로 실행 중이라 자동 적용을 멈췄습니다(같은 판을 다시 설치 · 재시작하는 고리 차단)`
+        + (mm ? ` — 설치 경로 ‘${mm.installDir}’ 가 실행 중인 앱 경로 ‘${mm.appRoot}’ 와 다릅니다. 업그레이드 설정의 설치 경로를 실행 중인 경로로 고치세요.` : ' — 서비스가 새 설치 경로로 재시작했는지(systemd 유닛의 실행 경로) 확인하세요.')
+        + ' 설치 경로를 바꾸거나 ‘업그레이드 적용 + 재시작’ 을 누르면 다시 시도합니다.';
+      console.warn(`[upgrade] ${reason}`);
+      this.lastResult = { at, source: 'auto', trigger: 'auto', ok: false, code: 'apply-stuck', target: v, installDir: s.installDir, reason };
+    }
+    return true;
+  }
+
   #restartTimer() {
     this.#clearDeferral();
     if (this.timer) { clearInterval(this.timer); this.timer = null; }
@@ -496,6 +604,8 @@ export class UpgradeManager {
 
   start() {
     this.enablePersistence();
+    this.#started = true;
+    if (this.settingsUnread) this.#armUnreadRetry();   // 123회차: 못 읽은 채 시작했다 — 읽힐 때까지 다시 본다
     const s = this.settings;
     if (s.enabled) {
       console.log(`  ▸ auto-upgrade: enabled (watch=${s.watchDir || '-'}, remote=${s.remoteBase ? 'yes' : 'no'}, autoApply=${s.autoApply})`);
@@ -530,6 +640,7 @@ export class UpgradeManager {
       else if (checkFailed) rec = { at, outcome: 'check-failed', reason: check.remote.error || null };
       else if (!newer) rec = { at, outcome: 'up-to-date', latest };
       else if (!this.settings.autoApply) rec = { at, outcome: 'available', latest };
+      else if (this.#stuckGuard(at, latest)) rec = { at, outcome: 'apply-failed', latest, reason: this.#lastResult?.reason || null };   // 87회차 ⓑ: 같은 판 재설치 고리
       else if ((dd = this.#deferDecision(latest)).wait) {
         // v2.737: 실행 중 스캔이 끝날 때까지(상한 안에서) 기다린다 — 1분마다 다시 보고 끝나면 곧바로 적용한다(#deferTick).
         const scans = this.deferral?.scans || [];
