@@ -34,12 +34,25 @@ export function buildSnapshot(corpId, { sites = [], rooms = [], racks = [], plac
  * 저장된 판을 되살릴 수 있는 모양인지 검사하고 정리한다(손상 · 다른 판 형식이면 null — 되돌리기를 거절한다).
  * 참조(장비 → 랙 → 전산실 → 데이터센터)가 판 안에서 닫혀 있어야 한다 — 끊어진 참조가 있으면 반쪽 원장을 만들지 않게 거절.
  */
+/** 판 하나(법인 원장 전체)의 개수 상한 — 판 검사와 쓰기(`rack/db.js saveVersion`)가 같은 값을 쓴다(점검 C8: 쓰기는 상한이 없어 넘는 순간 판이 '손상' 이 됐다). */
+export const SNAP_CAPS = Object.freeze({ sites: 1000, rooms: 5000, racks: 100_000, places: 500_000 });
+/** 판 개수가 상한을 넘었으면 그 항목 이름('sites' 등), 아니면 ''. */
+export function capExceeded(counts) {
+  for (const k of Object.keys(SNAP_CAPS)) if ((counts?.[k] ?? 0) > SNAP_CAPS[k]) return k;
+  return '';
+}
+/** 되돌릴 때 실제로 들어갈 모습 — 그 사이 지워진 랙 종류는 '직접 높이'(typeId '')로. 미리 보기와 되돌리기가 같은 함수를 쓴다(점검 C10). */
+export function restorableSnapshot(snap, typeExists) {
+  if (!snap) return snap;
+  return { ...snap, racks: snap.racks.map((r) => (r.typeId && !typeExists(r.typeId) ? { ...r, typeId: '' } : r)) };
+}
+
 export function validateSnapshot(snap, corpId) {
   if (!snap || typeof snap !== 'object' || snap.format !== SNAPSHOT_FORMAT || snap.corpId !== corpId) return null;
   const arr = (k) => (Array.isArray(snap[k]) ? snap[k] : null);
   const sites = arr('sites'); const rooms = arr('rooms'); const racks = arr('racks'); const places = arr('places');
   if (!sites || !rooms || !racks || !places) return null;
-  if (sites.length > 1000 || rooms.length > 5000 || racks.length > 100_000 || places.length > 500_000) return null;
+  if (capExceeded({ sites: sites.length, rooms: rooms.length, racks: racks.length, places: places.length })) return null;
   const okId = (x) => typeof x?.id === 'string' && ID_RE.test(x.id);
   const siteIds = new Set(); const roomIds = new Set(); const rackIds = new Set(); const placeIds = new Set();
   const out = { sites: [], rooms: [], racks: [], places: [] };

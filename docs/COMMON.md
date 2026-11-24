@@ -5,7 +5,7 @@
 
 - 생성: `node scripts/common-doc.mjs` · 최신 여부: `node scripts/common-doc.mjs --check`
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다. 설명을 고치려면 그 모듈의 **머리 주석 첫 단락**을 고친다.
-- 훑은 소스 4629개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
+- 훑은 소스 4630개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
 
 ## 읽는 법 · 한계
 
@@ -98,11 +98,11 @@
 | `credFingerprint.js` | 자격증명 '지문'(v2.528, 순수 모듈). | `credFingerprint` `credFingerprintParts` | 4 | 4 | 1 |
 | `licenseExpiry.js` | 라이선스 만료일 확인 공용 헬퍼 — 특수기능 '라이선스 만료일 확인'(/tools/license-expiry). 제품군 분류와 만료 상태(만료/임박/정상/영구) 계산을 순수 함수로 분리(테스트 대상). | `licenseFamilyOf` `licenseExpiryStatus` | 4 | 3 | 1 |
 | `regions.js` | 지역(region) 목록 — **단일 소스**(v2.575 IMP-10). | `REGIONS` `default` | 4 | 3 | 1 |
+| `ruleName.js` | 규칙(이름 · 자동 규칙)이 보는 베어메탈 이름 — **가린 뒤 이름**(판정 코어 하나). · 이름 속 서비스 태그(TAG_MASK_MIN 자 이상)는 NUL 로 걷어 낸다(규칙 값에는 제어 문자가 들어갈 수 없다 — 걷어 낸 자리를 건너 맞지 않는다) · 관리 주소… | `lowSameLen` `ruleNameOf` `TAG_MASK_MIN` | 4 | 3 | 1 |
 | `xlsxSheetPrOrder.js` | exceljs 가 쓰는 시트 속성(`<sheetPr>`)의 하위 요소 순서를 OOXML 스키마 순서로 바로잡는다(v2.799.1). | `ensureSheetPrOrder` `sheetPrOrderState` | 4 | 4 | 1 |
 | `envRedact.js` | `.env` 텍스트에서 **키·토큰·비밀번호 값만** 가리는 순수 모듈(v2.538). | `redactEnvSecrets` `mergeRedactedEnv` `pinHostSecurityEnv` `REDACTED` `isSecretEnvKey` `HOST_PINNED_ENV` | 3 | 3 | 5 |
 | `linreg.js` | 최소제곱 기울기(순수). v2.672 에 routes/api/shared.js 에서 옮겼다 — 도메인 모듈(tools/dsGrowth.js)이 routes/ 를 import 하지 않게(의존 방향은 한쪽 — arch2579). shared.js 는 같은 이름으로 다시 내… | `linregSlope` | 3 | 3 | 0 |
 | `readBytesCapped.js` | 응답 본문을 **바이트 상한까지만** Buffer 로 읽는다(v2.607 감사 SEC2607-06). | `readBytesCapped` | 3 | 1 | 1 |
-| `ruleName.js` | 규칙(이름 · 자동 규칙)이 보는 베어메탈 이름 — **가린 뒤 이름**(판정 코어 하나). · 이름 속 서비스 태그(TAG_MASK_MIN 자 이상)는 NUL 로 걷어 낸다(규칙 값에는 제어 문자가 들어갈 수 없다 — 걷어 낸 자리를 건너 맞지 않는다) · 관리 주소… | `lowSameLen` `ruleNameOf` `TAG_MASK_MIN` | 3 | 3 | 1 |
 | `runtimeCheck.js` | Node 런타임 계약과 기동 시 호환성 자가 점검(검토 I-06). | `enginesRange` `parseNodeVersion` `judgeVersion` `selfCheckFetchDispatcher` `overallState` `runtimeStatus` 외 7 | 3 | 3 | 1 |
 | `sameHostName.js` | 두 호스트 이름이 같은 장비를 가리키는가(v2.777 — 사용자 요청 '엣지에서 보고하는 호스트네임을 기록해서 검증'). 대소문자 무시 · 끝 점 무시 · 한쪽만 FQDN 이면 첫 마디(짧은 이름)로 비교한다(os.hostname() 이 배포판마다 짧은 이름·FQDN… | `sameHostName` | 3 | 3 | 1 |
 | `secureCompare.js` | 공유 토큰/시크릿 비교를 상수시간(timing-safe)으로 수행한다. 일반 `===`는 첫 불일치 바이트에서 조기 반환해 응답시간 차이로 토큰을 한 바이트씩 복구당할 수 있다. 길이를 먼저 HMAC으로 정규화해 길이 자체도 누설하지 않는다. | `timingSafeEqualStr` `tokenMatches` | 3 | 1 | 1 |
@@ -293,7 +293,7 @@
 | `server/src/idrac/service.js` | Glue between the iDRAC registry (which server maps to which ESXi host) and the power-sample DB. Provides host-name → power lookups for the API and the… | 11 | 6 | 9 |
 | `server/src/bmusage/onboard/refs.js` | SSH 키 저장소 ↔ OS 계정 등록부(bm-storage.json) 연결(7b단계 · 설계 PROFILES §18). | 10 | 6 | 11 |
 | `server/src/pdu/poller.js` | PDU 주기 수집. | 7 | 6 | 14 |
-| `server/src/auth/addressMask.js` | 비-admin 응답에서 장비 관리 주소·계정명을 가린다(v2.599 AUTHZ-2599-03). | 45 | 5 | 18 |
+| `server/src/auth/addressMask.js` | 비-admin 응답에서 장비 관리 주소·계정명을 가린다(v2.599 AUTHZ-2599-03). | 46 | 5 | 18 |
 | `server/src/bareos/settings.js` | Bareos 연동 설정(v2.820 · v2.823 법인별 Director). 파일: CONFIG_DIR/bareos.json (0600 · 원자적 쓰기 · 비밀 봉인). | 31 | 5 | 36 |
 | `server/src/auth/permissions.js` | 기능별 권한(Permission) 프레임워크 — "모든 기능에 대해 역할별 권한을 켜고 끈다". | 17 | 5 | 22 |
 | `server/src/cvp/registry.js` | Arista CloudVision(CVP) 서버 등록부(v2.608). | 17 | 5 | 41 |
