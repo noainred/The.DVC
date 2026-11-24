@@ -1621,3 +1621,33 @@ export async function epStatus(owners = []) {
   }
   return { macs, lastAt, unsupported };
 }
+
+/* ── v3.37 포트 구성도(docs/design/cvp-port-map) — 장비 한 대의 LLDP 이웃 · 포트별 마지막 링크 날 ─────────────────────────── */
+/**
+ * 장비 한 대의 LLDP 이웃 전부(최신 한 벌 · 상한 L2_LLDP_MAX) + 읽음 상태.
+ * @returns {Promise<{ rows:Array<{port,sysName,portId,portDesc,chassisId}>, read:boolean, at:number|null, failing:boolean, unavailable?:true }>}
+ *   read=false 는 '이웃 없음' 이 아니라 '읽은 적 없음'(화면이 일치/불일치를 판정하지 않는다).
+ */
+export async function lldpForDevice(agent, cvpId, key) {
+  const db = await open();
+  if (!db) return { rows: [], read: false, at: null, failing: false, unavailable: true };
+  const m = db.conn.prepare('SELECT lldp_at, lldp_fail_at FROM l2_meta WHERE agent=? AND cvp_id=? AND device_key=?').get(String(agent ?? ''), String(cvpId), String(key));
+  if (!m || m.lldp_at == null) return { rows: [], read: false, at: null, failing: !!(m && m.lldp_fail_at != null) };
+  const rows = db.conn.prepare('SELECT port, idx, sys_name, port_id, port_desc, chassis_id FROM l2_lldp WHERE agent=? AND cvp_id=? AND device_key=? ORDER BY port, idx LIMIT ?')
+    .all(String(agent ?? ''), String(cvpId), String(key), L2_LLDP_MAX)
+    .map((r) => ({ port: r.port, sysName: r.sys_name || '', portId: r.port_id || '', portDesc: r.port_desc || '', chassisId: r.chassis_id || '' }));
+  return { rows, read: true, at: Number(m.lldp_at), failing: m.lldp_fail_at != null && Number(m.lldp_fail_at) > Number(m.lldp_at) };
+}
+/**
+ * 장비 한 대의 포트별 마지막 링크 날(일 롤업 port_daily 는 링크가 올라온 날의 표본만 쌓인다) + 기록 시작 날.
+ *   집계 함수는 문장마다 하나(perf-db 규약) · 한 장비(포트 수백 · 날 730)라 기본키 (agent, cvp_id, device_key, port, day) 범위 안이다.
+ * @returns {Promise<{ last: Map<string, number>, since: number|null, unavailable?:true }>}  값은 그날 시작 epoch ms
+ */
+export async function lastLinkDays(agent, cvpId, key) {
+  const db = await open();
+  if (!db) return { last: new Map(), since: null, unavailable: true };
+  const a = String(agent ?? ''); const c = String(cvpId); const k = String(key);
+  const rows = db.conn.prepare('SELECT port, MAX(day) AS d FROM port_daily WHERE agent=? AND cvp_id=? AND device_key=? AND samples > 0 GROUP BY port LIMIT 4096').all(a, c, k);
+  const first = db.conn.prepare('SELECT MIN(day) AS d FROM port_daily WHERE agent=? AND cvp_id=? AND device_key=?').get(a, c, k);
+  return { last: new Map(rows.filter((r) => r.d != null).map((r) => [r.port, dayStartMs(Number(r.d))])), since: first && first.d != null ? dayStartMs(Number(first.d)) : null };
+}

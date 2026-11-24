@@ -19,6 +19,7 @@
 - (원래 4688행) CVP 슬롯 전원(`ecb › LinecardN`)은 PSU 가 아니다 — 빈 슬롯/카드 전원 이상을 근거로 가른다
 - (v2.922) 포트 드롭 열(in_drop/out_drop — 추정 경로) · 베어메탈 NIC 매핑·대조는 hostMatch 하나
 - (v2.935) EndpointLocation(MAC → 지금 배운 포트) — 404 는 본문으로 가르고, likelihood 가 낮은 위치 · 스위치 사이 포트는 업링크가 아니다
+- (v3.37) 포트 구성도 — 판정은 서버 cvp/portmap.js 하나 · 배치표는 사진으로 확인한 모델만 · 못 읽은 설명은 예비가 아니다
 
 ## 본문
 
@@ -201,3 +202,18 @@
 - **전체 점검 25회차(`cvpIpamFullAudit25`)**: 설정 파일을 못 읽으면 ~~보존 정리 보류~~ → **27회차 정정: 설정 상한(원시 90일 · 일 롤업 3650일)으로만 정리**(`poller.prunePerSettings` — 기본 원시 7일 · 일 롤업 730일로 지우던 것 · 전면 보류는 디스크가 끝없이 찼다) ·
   확정은 두 보존을 최대값으로 · GET `loadError` · PUT 409(화면은 `requireChanged` — 27회차 D-2) · 27회차 D-6: 수정의 중복 검사는 **주소 · 담당을 바꿀 때만** · 메시지에 상대 서버 이름 ·
   등록부 저장 · 삭제 · pull 반영은 쓰기 성공 뒤에 메모리 교체 · 수정에도 주소 + 담당 중복 검사 · 엣지 상태 authStopped 시각은 수신 시각으로(tsClamp).
+
+- **CVP 포트 구성도(v3.37 — 설계 `docs/design/cvp-port-map/README.md`, 회귀 `server/test/cvpPortMap337.test.js` · 웹 `cvpPortMapText.test.js`)**
+  - 판정 코어는 **서버 `cvp/portmap.js` 하나**(배치표 · 분류 · 연결 근거). 웹 `cvpPortMapText.js` 는 색 · 칸 묶기 · 문장만 — 분류를 웹에서 다시 하지 않는다.
+    트랜시버 → 포트 매핑(`xcvrMapOf` · `intfOfPartName`)만 웹 `cvpIntfText.js` 와 두 벌이고, 테스트 ④ 가 같은 입력으로 대조한다.
+  - **배치표(`FACEPLATES`)는 사진으로 확인한 모델만** 넣는다(공개 NetBox devicetype-library 의 Arista 전면 · 후면 사진 판독). 확인 못 한 모델을 짐작으로 넣지 말 것 —
+    없는 모델은 번호 규칙(`source:'rule'`)으로 그리고 화면이 '번호 규칙(실물 배치 아님)' 이라고 말한다. 7504N 은 섀시만 확인 — 카드 안은 번호 규칙(`cardRule`)이고 슬롯 번호 매김도 추정.
+  - 분류: admin down → 꺼짐 · oper up → 사용 · oper 모름 → 확인 불가 · 링크 없음 + **설명 null(못 읽음) → 확인 불가(예비로 세지 않는다)** · 설명 있음 → 확인 필요 ·
+    설명 '' → 예비(배치표의 RJ45 칸 = 구리 · 트랜시버 꽂힘/빈 케이지 · 트랜시버 목록 못 읽음이나 목록에 없음 = 'GBIC 모름'). 관리 포트는 그리되 개수에서 뺀다.
+  - 연결 근거는 **링크가 올라온 포트만**: 설명 낱말 ↔ LLDP sysName(도메인 뗀 이름 포함) 일치 · 불일치(지금 붙은 상대 = LLDP 를 표시) · LLDP 만 · 설명만 · 근거 없음.
+    장비의 LLDP 를 읽은 적이 없으면(`l2_meta.lldp_at` null) 일치/불일치를 판정하지 않고 `lldpUnread` 로 '설명만(LLDP 못 읽음)' 이라고 말한다 — 이웃 없음으로 단정하지 말 것.
+    설명에서 이름 뽑기 · 낱말 나누기는 200자로 먼저 자르고 문자 하나 구분자로 나눈다(선형 — 테스트 ⑤).
+  - 라우트 `GET /tools/cvp/portmap`(장비 1대) · `/tools/cvp/portmap/summary`(전 스위치 · LLDP 없이 분류만)는 형제 CVP 라우트와 같은 게이트(tools + `fullScopeOnly` — 범위 계정 403).
+    비-admin 은 설명 · LLDP 문자열을 `maskErrText` 로 가리고 LLDP chassisId(MAC)는 누구에게도 싣지 않는다. 장비 · 엣지 왕복 0 — 엣지 수신 계약은 바꾸지 않았다.
+  - 화면: 전역 `tbody td { white-space: nowrap }` 때문에 긴 칸이 표를 넓힌다 — 설명 · LLDP · 장비 칸은 `whiteSpace:'normal'` + `minWidth` 를 함께 준다(Chromium 판독에서 찾은 넘침).
+
