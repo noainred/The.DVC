@@ -87,7 +87,7 @@ export default function CvpOpticsTrendView({ part = 'trend', onOpen }) {
                 <td data-sort={x.hostname}><button type="button" style={LINKBTN} onClick={() => onOpen && onOpen(x)}>{x.hostname}</button></td>
                 <td style={MONO}>{x.intf}</td>
                 <td data-sort={x.current ?? ''} style={MONO}>{dbmText(x.current)}</td>
-                <td><Spark points={x.points} ref={th.warnDbm} color={x.state === 'eta' || x.state.startsWith('already') ? '#fbbf24' : '#60a5fa'} title="일 최저 수신 광량" /></td>
+                <td><Spark points={x.points} refLine={th.warnDbm} color={x.state === 'eta' || x.state.startsWith('already') ? '#fbbf24' : '#60a5fa'} title="일 최저 수신 광량" /></td>
                 <td data-sort={x.perMonth ?? ''} style={MONO}>{perMonthText(x.perMonth, ' dB')}{x.resetAt ? <span style={{ ...NOTE, marginLeft: 6 }}>({dateText(x.resetAt)}부터 다시)</span> : null}</td>
                 <td data-sort={x.warnEta ?? ''}><Pill color={FORECAST_TONE[x.state] || 'var(--text-dim)'}>{opticTrendText(x, { minDays: r.minDays })}</Pill></td>
               </tr>

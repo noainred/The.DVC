@@ -118,6 +118,16 @@ test('④ 토폴로지 · 양끝 불일치', () => {
   assert.ok(b.some((x) => x.field === 'mtu' && x.state === 'na'), '한쪽 못 읽음 = 비교 못 함');
   assert.ok(b.some((x) => x.field.startsWith('desc') && x.state === 'diff'), '설명이 다른 장비를 가리킴');
   assert.equal(TP.normPort('Ethernet 1/1'), TP.normPort('et1/1'));
+  // 서버 LLDP 를 못 본 리프(이웃 = spine 둘)는 spine 줄로 올리지 않는다(v3.38 Chromium 판독)
+  const F = (k) => ({ agent: '', cvpId: 'f', key: k, hostname: k });
+  const fl = [];
+  for (const lf of ['lf1', 'lf2', 'lf3']) for (const [i, sp] of ['sp1', 'sp2'].entries()) {
+    fl.push({ agent: '', cvpId: 'f', key: lf, port: `Ethernet${49 + i}/1`, sysName: sp, portId: `Ethernet${lf.slice(2)}` });
+    fl.push({ agent: '', cvpId: 'f', key: sp, port: `Ethernet${lf.slice(2)}`, sysName: lf, portId: `Ethernet${49 + i}/1` });
+  }
+  const ft = TP.buildTopology({ devices: ['lf1', 'lf2', 'lf3', 'sp1', 'sp2'].map(F), lldp: fl, lldpMeta: new Map(), ports: [] });
+  assert.deepEqual(Object.fromEntries(ft.nodes.map((x) => [x.hostname, x.layer])), { lf1: 'leaf', lf2: 'leaf', lf3: 'leaf', sp1: 'spine', sp2: 'spine' });
+  assert.equal(ft.counts.both, 6, '양쪽이 서로 본 링크');
   assert.deepEqual(TP.compareEnds(null, null), [{ field: 'port', a: null, b: null, state: 'na' }]);
 });
 

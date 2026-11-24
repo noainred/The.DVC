@@ -6,6 +6,9 @@ import { STable } from '../../components/STable.jsx';
 import { NOTE, MONO, ROW, GRID1, LINKBTN, Seg, Tiles, Spark, Pill } from './CvpNetParts.jsx';
 import { idleText, RECLAIM_NOTE, forecastText, FORECAST_TONE, FORECAST_NOTE, perMonthText, speedText, pctText, dateText, rowKey } from './cvpNetText.js';
 
+/** 화면에 그리는 행 상한(서버는 더 많이 줄 수 있다 — 표가 정렬한 뒤 자른다). */
+const SHOW_MAX = 300;
+
 /**
  * CVP › 포트 구성도 › 회수 후보(⑤) · 고갈 · 포화 예측(⑨) — v3.38. 마운트 1회 + 새로고침(폴링 없음). 판정은 서버 cvp/portplan.js.
  */
@@ -45,7 +48,7 @@ export function ReclaimView({ onOpen }) {
         ...Object.entries(c.byIdle || {}).map(([d, n]) => [`${d}일 넘음`, n, '마지막 사용일 기준', 'var(--text)']),
       ]} />
       <div className="card" style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <STable className="v3-table" minWidth={960}>
+        <STable className="v3-table" minWidth={960} limit={SHOW_MAX}>
           <thead><tr><th>법인</th><th>스위치</th><th>포트</th><th>속도</th><th>지금</th><th>마지막 사용</th><th>설명</th></tr></thead>
           <tbody>
             {rows.map((x) => (
@@ -62,7 +65,7 @@ export function ReclaimView({ onOpen }) {
           </tbody>
         </STable>
         {!rows.length && <div style={NOTE}>조건에 맞는 포트가 없습니다.</div>}
-        <div style={NOTE}>{rows.length}개 표시{r.omitted ? ` · ⚠ 상위 ${r.rows.length}개만(${r.omitted}개 생략)` : ''}{r.truncated ? ' · ⚠ 포트 행이 상한을 넘어 일부만 봤습니다' : ''}</div>
+        <div style={NOTE}>{rows.length > SHOW_MAX ? `${rows.length}개 중 정렬 순서 앞 ${SHOW_MAX}개 표시(제목을 눌러 정렬을 바꾸면 그 순서로 자릅니다)` : `${rows.length}개 표시`}{r.omitted ? ` · ⚠ 상위 ${r.rows.length}개만(${r.omitted}개 생략)` : ''}{r.truncated ? ' · ⚠ 포트 행이 상한을 넘어 일부만 봤습니다' : ''}</div>
       </div>
     </div>
   );
@@ -88,7 +91,7 @@ export function ForecastView({ onOpen }) {
     <div style={GRID1}>
       <div className="card" style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
         <div style={ROW}>
-          <Seg label="예측" value={part} onChange={setPart} items={[['exhaust', '포트 고갈'], ['saturation', `업링크 포화(${sat.satPct ?? '—'}%)`]]} />
+          <Seg label="예측" value={part} onChange={setPart} items={[['exhaust', '포트 고갈'], ['saturation', sat.satPct == null ? '업링크 포화' : `업링크 포화(${sat.satPct}%)`]]} />
           <button type="button" className="btn" style={{ marginLeft: 'auto' }} onClick={() => setReload((x) => x + 1)}>새로고침</button>
         </div>
         <div style={NOTE}><BoldText text={FORECAST_NOTE} /> 기록 {r.minDays}일 이상일 때 최근 {r.windowDays}일로 봅니다.</div>
@@ -130,7 +133,7 @@ export function ForecastView({ onOpen }) {
                   <td data-sort={x.speedBps ?? ''}>{speedText(x.speedBps)}</td>
                   <td style={{ whiteSpace: 'normal', minWidth: 120 }}>{x.peer || (x.basis === 'speed' ? <span style={NOTE}>(LLDP 못 읽음 — 속도로 추정)</span> : '—')}</td>
                   <td data-sort={x.max30 ?? ''} style={MONO}>{pctText(x.max30)}</td>
-                  <td><Spark points={x.points} min={0} max={100} ref={sat.satPct} title="일 최대 사용률(%)" /></td>
+                  <td><Spark points={x.points} min={0} max={100} refLine={sat.satPct} title="일 최대 사용률(%)" /></td>
                   <td data-sort={x.perMonth ?? ''} style={MONO}>{perMonthText(x.perMonth, '%p')}</td>
                   <td data-sort={x.eta ?? (x.state === 'already' ? 0 : '')}><Pill color={FORECAST_TONE[x.state] || 'var(--text-dim)'}>{forecastText(x, { minDays: r.minDays })}</Pill></td>
                 </tr>

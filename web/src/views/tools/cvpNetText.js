@@ -159,7 +159,7 @@ export function changeValue(c, side) {
   if (c.kind === 'port' && (c.field === 'added' || c.field === 'removed')) return '';
   return v == null || v === '' ? '—' : String(v);
 }
-export const naText = (na) => (Array.isArray(na) && na.length ? `비교 못 함: ${na.map((x) => NA_TEXT[x] || x).join(' · ')}(한쪽이 못 읽음)` : '');
+export const naText = (na) => (Array.isArray(na) && na.length ? `비교 못 함: ${na.map((x) => NA_TEXT[x] || x).join(' · ')}(한쪽 또는 양쪽이 못 읽음)` : '');
 export const COMPARE_NOTE = '스냅샷은 그 시각 **중앙 DB 의 최신값 복사**입니다(장비에 다시 접속하지 않습니다). 버전 · 포트(링크 · 관리 상태 · 속도 · VLAN · 채널 · 설명 · MTU) · BGP 피어 상태 · 트랜시버 · LLDP 이웃을 비교하고, 한쪽이 못 읽은 묶음은 ‘비교 못 함’ 으로 따로 둡니다.';
 export const bytesText = (n) => { const v = numOrNull(n); return v == null ? '—' : v >= 1e6 ? `${(v / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(v / 1e3))} KB`; };
 

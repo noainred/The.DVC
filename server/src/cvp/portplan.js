@@ -55,6 +55,8 @@ export function exhaustForecast({ devices = [], series = new Map(), now = Date.n
     const s = series.get(devKey(d.agent, d.cvpId, d.key)) || [];
     if (!s.length) { counts.none++; rows.push({ ...pick(d), state: 'none', days: 0, used: null, total: null, eta: null, perMonth: null, points: [] }); continue; }
     const total = s[s.length - 1][1];
+    // 전체 포트 0(포트 목록이 비었던 날)은 '이미 넘음' 이 아니다 — 판정하지 않는다(v3.38 Chromium 측정: 0/0 이 '이미 넘음' 으로 보였다).
+    if (!(total > 0)) { counts.none++; rows.push({ ...pick(d), state: 'none', days: 0, used: null, total: null, eta: null, perMonth: null, points: [] }); continue; }
     const f = forecast(s.map((x) => [x[0], x[2]]), { target: total, dir: 'up', minDays, now });
     counts[f.state]++;
     rows.push({ ...pick(d), state: f.state, days: f.days, used: s[s.length - 1][2], total, eta: f.eta, perMonth: f.slopePerDay == null ? null : f.slopePerDay * 30,

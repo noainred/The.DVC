@@ -49,7 +49,7 @@ export default function CvpLinkQualityView({ servers = [], onOpen }) {
             <button type="button" className={`tab${only === 'all' ? ' active' : ''}`} onClick={() => setOnly('all')}>전체 <b style={MONO}>{rows.length}</b></button>
             {VERDICT_ORDER.map((k) => <button key={k} type="button" className={`tab${only === k ? ' active' : ''}`} onClick={() => setOnly(k)}>{VERDICT_DEFS[k].label} <b style={MONO}>{rows.filter((x) => x.verdict === k).length}</b></button>)}
           </div>
-          <STable className="v3-table" minWidth={1100}>
+          <STable className="v3-table" minWidth={1100} limit={300}>
             <thead><tr><th>판정</th><th>법인</th><th>스위치</th><th>포트</th><th>속도</th><th>오류</th><th>드롭</th><th>링크 내려감</th><th>수신 광량</th><th data-nosort>근거</th><th>설명</th></tr></thead>
             <tbody>
               {shown.map((x) => (
@@ -71,7 +71,7 @@ export default function CvpLinkQualityView({ servers = [], onOpen }) {
           </STable>
           {!shown.length && <div style={NOTE}>{rows.length ? '이 판정에 해당하는 포트가 없습니다.' : '기간 안에 오류가 늘거나 링크가 내려간 포트가 없습니다.'}</div>}
           <div style={NOTE}>
-            기간 {dateText(r.from)} ~ 오늘 · 수신 광량 주의 임계 {r.warnDbm} dBm(CVP 설정) · 플랩은 {r.flapMin}회 이상
+            {shown.length > 300 ? `${shown.length}개 중 정렬 순서 앞 300개 표시 · ` : ''}기간 {dateText(r.from)} ~ 오늘 · 수신 광량 주의 임계 {r.warnDbm} dBm(CVP 설정) · 플랩은 {r.flapMin}회 이상
             {r.flapRecordSince ? ` · 링크 내려감 기록은 ${dateText(r.flapRecordSince)}부터` : ' · 링크 내려감 기록이 아직 없습니다(이번 버전부터 쌓습니다)'}
             {r.omitted ? ` · ⚠ 상위 ${rows.length}개만 표시(${r.omitted}개 생략)` : ''}{r.truncated ? ' · ⚠ 포트 행이 상한을 넘어 일부만 봤습니다' : ''}
           </div>

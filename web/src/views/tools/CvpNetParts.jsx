@@ -39,13 +39,16 @@ export function Tiles({ tiles }) {
   );
 }
 
-/** 작은 추이선 — 값이 2개 미만이면 '—'. ref = 기준선 값(임계 등). */
-export function Spark({ points, w = 120, h = 28, color = '#60a5fa', min = null, max = null, ref = null, title = '' }) {
+/**
+ * 작은 추이선 — 값이 2개 미만이면 '—'. refLine = 기준선 값(임계 등).
+ * ⚠ prop 이름을 `ref` 로 하지 말 것 — React 가 ref 를 가로채 숫자 ref 로 #284 를 던진다(v3.38 Chromium 측정에서 화면 둘이 통째로 깨졌다).
+ */
+export function Spark({ points, w = 120, h = 28, color = '#60a5fa', min = null, max = null, refLine = null, title = '' }) {
   const d = sparkPath(points, { w, h, min, max });
   if (!d) return <span style={NOTE}>—</span>;
   const vals = points.map((p) => p[1]).filter((v) => v != null);
   const lo = min ?? Math.min(...vals); const hi = max ?? Math.max(...vals); const span = hi - lo || 1;
-  const ry = ref != null && ref >= lo && ref <= hi ? h - ((ref - lo) / span) * h : null;
+  const ry = refLine != null && refLine >= lo && refLine <= hi ? h - ((refLine - lo) / span) * h : null;
   return (
     <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} role="img" aria-label={title || '추이'} style={{ display: 'block', overflow: 'visible' }}>
       {ry != null && <line x1="0" x2={w} y1={ry} y2={ry} stroke="#f59e0b" strokeDasharray="3 3" strokeWidth="1" />}

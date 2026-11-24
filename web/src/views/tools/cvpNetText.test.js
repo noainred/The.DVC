@@ -63,7 +63,7 @@ describe('cvpNetText', () => {
     expect(changeLabel({ kind: 'device', field: 'version' })).toBe('EOS 버전');
     expect(changeValue({ kind: 'port', field: 'speed', before: 25e9 }, 'before')).toMatch(/25/);
     expect(changeValue({ kind: 'port', field: 'added', before: null }, 'before')).toBe('');
-    expect(naText(['ports', 'lldp'])).toBe('비교 못 함: 포트 · LLDP(한쪽이 못 읽음)');
+    expect(naText(['ports', 'lldp'])).toBe('비교 못 함: 포트 · LLDP(한쪽 또는 양쪽이 못 읽음)');
     expect(naText([])).toBe('');
   });
   it('회수 · 위치 문구', () => {

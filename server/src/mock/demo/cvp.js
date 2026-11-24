@@ -336,16 +336,17 @@ function demoFabricLinks(devices, leaves, now) {
     const ups = (lf.ports || []).filter((p) => p.oper === 'up' && /\/1$/.test(p.name)).slice(0, Math.min(2, spines.length));
     ups.forEach((p, u) => {
       const sp = spines[u % spines.length];
-      const spPort = `Ethernet${3 + (Math.floor(j / 24) % 2)}/${(j % 24) + 1}`;
+      // 데모 spine 은 leaf 와 같은 배치(Ethernet1~48 · 49/1~54/1)다 — leaf 순번으로 앞 48칸에 잇고, 상대 끝 값(속도 · MTU · 채널)을 leaf 업링크와 맞춘다.
+      const spPort = `Ethernet${(j % 48) + 1}`;
       const sport = (sp.ports || []).find((x) => x.name === spPort);
       lf.lldp.push({ port: p.name, idx: '1', sysName: sp.hostname, portId: spPort, portDesc: '', chassisId: '' });
       if (sport) {
         sp.lldp.push({ port: spPort, idx: '1', sysName: lf.hostname, portId: p.name, portDesc: '', chassisId: '' });
-        sport.oper = 'up'; sport.desc = `${lf.hostname} ${p.name}`;
+        Object.assign(sport, { oper: 'up', admin: 'up', operRaw: 'linkUp', desc: `${lf.hostname} ${p.name}`, speedBps: p.speedBps, mtu: 9214, duplex: p.duplex, lag: p.lag ? 'Port-Channel1' : '' });
       }
       const wrong = j % 7 === 6 && spines.length > 1 ? spines[(u + 1) % spines.length] : sp;
       p.desc = `${wrong.hostname} ${spPort}`;
-      if (j % 9 === 3 && u === 0) p.mtu = 1500;
+      p.mtu = j % 9 === 3 && u === 0 ? 1500 : 9214;
     });
   });
 }
@@ -486,7 +487,7 @@ async function demoNetHistory(servers, db, P, optics, now) {
       const usedNow = ports.filter((p) => p.oper === 'up').length;
       const kind = sw.h % 5;   // 0 = 빠르게 늘어남 · 1 = 천천히 · 그 밖 = 그대로
       const per = kind === 0 ? Math.max(0.02, (total - usedNow) / 150) : kind === 1 ? 0.04 : 0;
-      for (let i = 179; i >= 0; i--) devPort.push([srv.id, sw.key, today - i, total, Math.max(0, Math.round(usedNow - per * i))]);
+      if (total > 0) for (let i = 179; i >= 0; i--) devPort.push([srv.id, sw.key, today - i, total, Math.max(0, Math.round(usedNow - per * i))]);
       firstDay.push([srv.id, sw.key, today - 300]);
       ports.forEach((p, k) => {
         if (p.oper === 'up') { lastLink.push([srv.id, sw.key, p.name, today]); return; }

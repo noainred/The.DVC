@@ -5,7 +5,9 @@
  *  · both(실선)  — A 포트의 LLDP 이웃이 CVP 스위치 B 이고, B 쪽 그 포트의 LLDP 이웃도 A(포트까지 맞음).
  *  · one(점선 '추정') — 한쪽만 본 링크(상대 LLDP 를 못 읽었거나 상대 포트에 그 이웃이 없음).
  *  · desc(점선 '추정') — LLDP 없이 **포트 설명**이 다른 스위치 이름을 가리키고 링크가 올라와 있음.
- * 층(자동 추정 — 화면이 '추정' 이라고 말한다): 스위치 아닌 이웃(서버 등)이 있으면 leaf · 없고 스위치 이웃 2대 이상이면 spine · 스위치 이웃 1대면 other · 0대면 isolated.
+ * 층(자동 추정 — 화면이 '추정' 이라고 말한다): 스위치 아닌 이웃(서버 등)이 있으면 leaf. 서버 이웃이 없는 스위치는 스위치 이웃 수로 —
+ *   이웃 3대 이상이면 spine(그런 장비가 하나도 없으면 2대 이상), 이웃이 전부 spine 인 장비는 leaf(서버 LLDP 를 못 본 리프), 그 밖은 other · 0대면 isolated.
+ *   (v3.38 Chromium 판독: '이웃 2대 = spine' 만으로는 서버 LLDP 가 없는 리프가 전부 스파인 줄에 올라갔다.)
  * 양끝 불일치는 **두 끝 포트를 다 아는 링크**(both · one 중 상대 포트를 LLDP portId 로 아는 것)만 — 속도 · MTU · Duplex · 관리 상태 · 포트 채널 소속 · 설명이 가리키는 상대.
  *   한쪽 값을 못 읽었으면 '비교 못 함'(na)이다 — 다름으로 세지 않는다.
  */
@@ -167,12 +169,26 @@ export function buildTopology({ devices = [], lldp = [], lldpMeta = new Map(), p
   for (const l of links.values()) {
     for (const [x, y] of [[l.a, l.b], [l.b, l.a]]) { if (!swNb.has(x)) swNb.set(x, new Set()); swNb.get(x).add(y); }
   }
+  const degOf = (id) => swNb.get(id)?.size || 0;
+  const hostsOf = (id) => { const o = others.get(id); return o ? o.esxi + o.other : 0; };
+  const ids = devices.map((d) => devKey(d.agent, d.cvpId, d.key));
+  const minSpineDeg = ids.some((id) => !hostsOf(id) && degOf(id) >= 3) ? 3 : 2;
+  const spines = new Set(ids.filter((id) => !hostsOf(id) && degOf(id) >= minSpineDeg));
+  const layerOf = (id) => {
+    if (hostsOf(id) > 0) return 'leaf';
+    const deg = degOf(id);
+    if (deg === 0) return 'isolated';
+    const nbs = [...(swNb.get(id) || [])];
+    // 이웃이 전부 spine 후보이고 자기보다 이웃이 많은 장비들뿐이면 leaf(서버 LLDP 를 못 본 리프) — spine 끼리 맞물린 경우를 leaf 로 내리지 않게 차수를 비교한다.
+    if (nbs.length && nbs.every((n) => spines.has(n) && degOf(n) > deg)) return 'leaf';
+    return spines.has(id) ? 'spine' : 'other';
+  };
   const nodes = devices.map((d) => {
     const id = devKey(d.agent, d.cvpId, d.key);
-    const deg = swNb.get(id)?.size || 0;
+    const deg = degOf(id);
     const oth = others.get(id) || { esxi: 0, other: 0 };
     const m = lldpMeta.get(id);
-    const layer = oth.esxi + oth.other > 0 ? 'leaf' : deg >= 2 ? 'spine' : deg === 1 ? 'other' : 'isolated';
+    const layer = layerOf(id);
     return { id, agent: d.agent, cvpId: d.cvpId, key: d.key, hostname: d.hostname || d.key, model: d.model || '', corpName: d.corpName || '',
       layer, switchNeighbors: deg, esxi: oth.esxi, otherNeighbors: oth.other, lldpRead: !!(m && m.at != null), lldpAt: m?.at ?? null, lldpFailing: !!m?.failing };
   });
