@@ -19,7 +19,7 @@ import zlib from 'node:zlib';
 import { config } from '../config.js';
 import { openSqlite, createLockRetry, chmodDbFiles } from '../util/sqliteOpen.js';
 import { placementIssue, overflowOnResize, serialKeyOf, LIMITS } from './layout.js';
-import { buildSnapshot, validateSnapshot, countsOf, diffSnapshots, VERSION_KEEP } from './versions.js';
+import { buildSnapshot, validateSnapshot, countsOf, diffSnapshots, VERSION_KEEP, capExceeded, restorableSnapshot } from './versions.js';
 
 const lockRetry = createLockRetry();
 const fileOf = () => process.env.RACK_DB || path.join(config.dbDir || config.configDir, 'rack.db');
@@ -192,8 +192,12 @@ function bumpRevFloor(db, rev) {
  * 변경 직후 법인 원장을 판 하나로 남기고, 그 법인의 판을 최근 VERSION_KEEP 개로 자른다(같은 트랜잭션 — 변경과 판이 함께 저장되거나 함께 취소).
  * 오래된 판은 지운다(2026-11-20 사용자 선택 '지운다' — 감사 로그에는 남는다).
  */
+const CAP_LABEL = { sites: '데이터센터', rooms: '전산실', racks: '랙', places: '장비' };
 function saveVersion(db, corpId, { user, action, detail }) {
   const snap = buildSnapshot(corpId, corpRows(db, corpId));
+  // 점검 C8: 판으로 되살릴 수 없는 크기가 되는 변경은 받지 않는다(같은 트랜잭션이라 변경도 취소된다 — 판 검사와 같은 상한).
+  const over = capExceeded(countsOf(snap));
+  if (over) fail(409, `이 법인의 ${CAP_LABEL[over]} 수가 상한을 넘어 저장하지 않았습니다(판으로 되돌릴 수 있는 크기까지만).`, { code: 'corpCap' });
   db.prepare('INSERT INTO rack_version (corp_id,ts,user,action,detail,counts,data) VALUES (?,?,?,?,?,?,?)')
     .run(corpId, Date.now(), String(user || '').slice(0, 64), action, String(detail || '').slice(0, 500), JSON.stringify(countsOf(snap)), packSnap(snap));
   const cut = db.prepare('SELECT id FROM rack_version WHERE corp_id = ? ORDER BY id DESC LIMIT 1 OFFSET ?').get(corpId, VERSION_KEEP);
@@ -204,6 +208,11 @@ function log(db, { user, corpId, roomId = '', action, detail = '', version = tru
   if (version && corpId) saveVersion(db, corpId, { user, action, detail });
   db.prepare('INSERT INTO rack_log (ts,user,corp_id,room_id,action,detail) VALUES (?,?,?,?,?,?)')
     .run(Date.now(), String(user || '').slice(0, 64), corpId, roomId, action, String(detail).slice(0, 500));
+  if (!roomId && corpId) {
+    // 점검 C12: 전산실이 없는 이력(데이터센터 추가 · 이름 · 삭제, 전산실 삭제)도 법인마다 같은 수만 남긴다(예전엔 끝없이 쌓였다).
+    const cut = db.prepare("SELECT id FROM rack_log WHERE room_id = '' AND corp_id = ? ORDER BY id DESC LIMIT 1 OFFSET ?").get(corpId, LOG_KEEP_PER_ROOM);
+    if (cut) db.prepare("DELETE FROM rack_log WHERE room_id = '' AND corp_id = ? AND id <= ?").run(corpId, cut.id);
+  }
   if (roomId) {
     // 그 전산실의 오래된 이력 정리(몇 행) — 경계 id 를 먼저 구해 지운다(집계 함수 하나 · 같은 트랜잭션).
     const cut = db.prepare('SELECT id FROM rack_log WHERE room_id = ? ORDER BY id DESC LIMIT 1 OFFSET ?').get(roomId, LOG_KEEP_PER_ROOM);
@@ -358,7 +367,7 @@ export async function removeRoom({ id, user }) {
     ensureBaseline(db, s?.corpId);
     bumpRevFloor(db, m.rev);
     db.prepare('DELETE FROM rack_room WHERE id = ?').run(id);
-    db.prepare('DELETE FROM rack_log WHERE room_id = ?').run(id);
+    // 점검 C11: 이력은 지우지 않는다 — 판으로 전산실을 되살리면 이력도 함께 보인다(되돌리기와 같은 규칙 · 전산실마다 상한은 그대로).
     log(db, { user, corpId: s?.corpId || '', action: 'room.remove', detail: `${s?.name || ''} › ${m.name}` });
     return { id };
   });
@@ -375,8 +384,10 @@ export async function addType({ name, heightU, widthMm = null, depthMm = null })
 }
 
 /** 랙 종류 삭제 — 쓰는 랙이 있으면 거절. */
+let typeGen = 0;   // 랙 종류가 지워지면 '되돌리면 바뀌는 것' 이 달라진다(지워진 종류 → 직접 높이) — 차이 캐시 키에 넣는다
 export async function removeType({ id }) {
   const db = await need();
+  typeGen += 1;
   return tx(db, () => {
     const n = db.prepare('SELECT COUNT(*) AS n FROM rack_rack WHERE type_id = ?').get(id).n;
     if (n) fail(409, `이 종류를 쓰는 랙 ${n}개가 있어 지울 수 없습니다.`);
@@ -570,7 +581,7 @@ const DETAIL_CACHE_MAX = 40;
 export async function versionDetail(corpId, versionId) {
   const db = await need();
   const latest = db.prepare('SELECT id FROM rack_version WHERE corp_id = ? ORDER BY id DESC LIMIT 1').get(String(corpId))?.id ?? 0;
-  const key = `${corpId}\0${Number(versionId)}\0${latest}`;
+  const key = `${corpId}\0${Number(versionId)}\0${latest}\0${typeGen}`;
   if (DETAIL_CACHE.has(key)) return structuredClone(DETAIL_CACHE.get(key));
   const out = versionDetailRaw(db, corpId, versionId);
   if (out) { DETAIL_CACHE.set(key, out); while (DETAIL_CACHE.size > DETAIL_CACHE_MAX) DETAIL_CACHE.delete(DETAIL_CACHE.keys().next().value); }
@@ -585,11 +596,13 @@ function versionDetailRaw(db, corpId, versionId) {
   const prev = db.prepare('SELECT data FROM rack_version WHERE corp_id = ? AND id < ? ORDER BY id DESC LIMIT 1').get(String(corpId), v.id);
   const prevSnap = prev ? unpackSnap(prev.data, corpId) : null;
   const now = validateSnapshot(buildSnapshot(corpId, corpRows(db, corpId)), corpId);
+  const typeOk = db.prepare('SELECT 1 AS x FROM rack_type WHERE id = ?');
+  const target = restorableSnapshot(snap, (id) => !!typeOk.get(id));   // 되돌리면 실제로 들어갈 모습(점검 C10)
   return {
     version: head, readable: true, counts: countsOf(snap),
     changes: prevSnap ? diffSnapshots(prevSnap, snap) : null,
     prevUnreadable: !!prev && !prevSnap,   // 점검 C13: 앞 판이 '없음' 과 '손상' 을 가른다(화면이 '가장 오래된 판' 으로 잘못 설명했다)
-    restore: now ? diffSnapshots(now, snap) : null,
+    restore: now ? diffSnapshots(now, target) : null,
   };
 }
 
@@ -645,7 +658,7 @@ export async function restoreVersion({ corpId, versionId, expectLatestId, user }
     };
     for (const s of snap.sites) ins.site.run(s.id, corpId, s.name, s.sort, now);
     for (const r of snap.rooms) ins.room.run(r.id, r.siteId, r.name, r.sort, newRev, now);
-    for (const r of snap.racks) ins.rack.run(r.id, r.roomId, r.name, r.row, r.typeId && typeOk.get(r.typeId) ? r.typeId : '', r.heightU, r.role, r.pduA, r.pduB, r.sort);
+    for (const r of restorableSnapshot(snap, (id) => !!typeOk.get(id)).racks) ins.rack.run(r.id, r.roomId, r.name, r.row, r.typeId, r.heightU, r.role, r.pduA, r.pduB, r.sort);
     for (const p of snap.places) {
       ins.place.run(p.id, p.rackId, p.face, p.uStart, p.uSize, p.kind, p.label, p.model, p.serial, serialKeyOf(p.serial), JSON.stringify(p.extraSerials), p.note, p.ratedW, p.opW, p.weightKg, now);
     }

@@ -125,6 +125,12 @@ function corpServers(req, corpId) {
 function maskServerIdentity(obj, row, { admin, showSerial }) {
   if (admin) return obj;
   const out = maskIdentityFields(obj, addressMatcher([row.s?.host, row.s?.id].filter(Boolean)), { idFields: ['serverId'], nameFields: ['name', 'hostname'] });
+  // OS 호스트 이름은 관리자 판본만(반증 추가 1 — 물리서버 폴더 hwView 와 같은 기준). 등록 이름이 없어 호스트 이름으로 떨어진 이름도 비운다.
+  const osHost = String(row.inv?.system?.hostName || '');
+  if ('hostname' in out) out.hostname = '';
+  if (osHost && !row.s?.name && out.name === osHost) out.name = '';
+  if (out.hw?.host) out.hw = { ...out.hw, host: '' };
+  if (out.hw?.os?.host) out.hw = { ...out.hw, os: { ...out.hw.os, host: '' } };
   if (!showSerial && String(row.tag || '').length >= TAG_MASK_MIN) {
     for (const f of ['name', 'hostname']) if (out[f]) out[f] = stripTag(out[f], row.tag);
     if (out.hw?.host) out.hw = { ...out.hw, host: stripTag(out.hw.host, row.tag) };
@@ -188,7 +194,9 @@ async function roomView(req, roomId) {
   });
   const placesByRack = new Map();
   for (const p of places) { if (!placesByRack.has(p.rackId)) placesByRack.set(p.rackId, []); placesByRack.get(p.rackId).push(p); }
-  const racks = data.racks.map((r) => ({ ...r, totals: rackTotals(r, (placesByRack.get(r.id) || []).filter((p) => p.face !== 'rear')) }));
+  // 점검 C3(재현): 예전엔 후면 전용 장비를 걸러 전력 · 무게 · 대수 합에서 통째로 빠졌다(부분 합이 '몇 대 중 몇 대' 없이 전체처럼 보였다).
+  //   rackTotals 가 앞 · 뒤가 같은 U 면 한 번만 세므로 그대로 넘긴다.
+  const racks = data.racks.map((r) => ({ ...r, totals: rackTotals(r, placesByRack.get(r.id) || []) }));
   // 미배치 = 이 법인 서버 중 원장 어디에도(이 법인 전 데이터센터) 서비스 태그가 없는 것.
   const unplacedAll = list.filter((x) => x.key && !placedKeys.has(x.key));
   const unplaced = unplacedAll.slice(0, 300).map((x) => maskServerIdentity({
@@ -309,7 +317,10 @@ export async function buildRoomXlsx(view) {
     sumRow('장비 무게 합계', t.weightKg == null ? '—' : `${t.weightKg} kg${part(t.devices, t.weightRead)}`);
     sumRow('세로 PDU(A · B 계통)', `A ${rack.pduA} · B ${rack.pduB}`);
     const rear = mine.filter((p) => p.face === 'rear');
-    for (const p of rear) sumRow(`후면 ${fmtU(p)}`, [p.label, p.model, p.serial].filter(Boolean).join(' / '));
+    for (const p of rear) {
+      const vals = [p.weightKg != null ? `${p.weightKg} kg` : '', p.opW != null ? `운전 ${p.opW} W` : '', p.ratedW != null ? `정격 ${p.ratedW} W` : ''].filter(Boolean).join(' · ');
+      sumRow(`후면 ${fmtU(p)}`, [[p.label, p.model, p.serial].filter(Boolean).join(' / '), vals].filter(Boolean).join(' — '));
+    }
   }
   if (!ws) {   // 랙이 없는 전산실도 제목 시트 하나는 남긴다(예전 동작)
     ws = wb.addWorksheet(names[0]);
@@ -345,7 +356,9 @@ async function runOp(req, res) {
       case 'site.add': {
         const corpId = cleanText(b.corpId, 64);
         const acc = accessOf(req);
-        if (!corpId || !canRead(acc, corpId) || !listDatacenters().some((d) => String(d.id) === corpId)) return res.status(404).json({ ok: false, reason: '법인을 찾지 못했습니다.' });
+        // 점검 C16: 법인 목록에서 지워진 법인(원장은 남음 — 전체 범위 계정에만 보인다)은 다른 쓰기(전산실 · 랙)와 같게 다룬다(예전엔 site.add 만 404).
+        const known = listDatacenters().some((d) => String(d.id) === corpId) || (!acc.read && corpId && (await R.listTree(new Set([corpId]))).sites.length > 0);
+        if (!corpId || !canRead(acc, corpId) || !known) return res.status(404).json({ ok: false, reason: '법인을 찾지 못했습니다.' });
         if (!canWrite(acc, corpId)) return res.status(403).json({ ok: false, error: 'forbidden', reason: '이 법인의 랙 실장도를 고칠 권한이 없습니다(관리자 · 그 법인 쓰기 범위만).' });
         if (!name) return res.status(400).json({ ok: false, reason: '데이터센터 이름이 비어 있습니다.' });
         const r = await R.addSite({ corpId, name, user });
@@ -397,6 +410,8 @@ async function runOp(req, res) {
         const heightU = intIn(b.heightU, LIMITS.minHeightU, LIMITS.maxHeightU);
         if (!name || heightU == null) return res.status(400).json({ ok: false, reason: `이름과 높이(${LIMITS.minHeightU}~${LIMITS.maxHeightU}U)를 넣으세요.` });
         const mm = (v) => (v === '' || v == null ? null : intIn(v, 100, 3000));
+        // 점검 C18: 넣었는데 범위 밖이면 조용히 null 로 저장하지 않는다
+        for (const k of ['widthMm', 'depthMm']) if (b[k] !== '' && b[k] != null && mm(b[k]) == null) return res.status(400).json({ ok: false, reason: '너비 · 깊이는 100~3000mm 정수로 넣으세요(모르면 비워 두세요).' });
         const r = await R.addType({ name, heightU, widthMm: mm(b.widthMm), depthMm: mm(b.depthMm) });
         audit(req, 'rack.type.add', name, `${heightU}U`);
         return res.json({ ok: true, ...r });
