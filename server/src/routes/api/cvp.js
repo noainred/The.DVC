@@ -33,6 +33,7 @@ import { buildCvpOverview, corpResolver, freshnessBounds, RECENT_EVENTS_MAX, row
 import { cvpDeviceConfirm, cvpPartsStaleReason } from '../../cvp/confirm.js';
 import { runCvpFaultScan, cvpFaultScanStatus } from '../../cvp/faultScan.js';   // v2.640 ③ 장애 전이 판정(중앙)
 import { previewParse, PREVIEW_KINDS, PREVIEW_TEXT_MAX } from '../../cvp/preview.js'; // v2.640 ② 파서 시험(왕복 0)
+import { buildPortMap, summaryRow } from '../../cvp/portmap.js'; // v3.37 포트 구성도(판정 코어 — 웹은 그리기만)
 import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { fileStamp, localStamp } from '../../util/dayKey.js';
 import { isMockMode } from '../../mock/demo/flags.js'; // v2.708 데모(mock 전용)
@@ -418,6 +419,75 @@ api.get('/tools/cvp/device', toolsPerm, fullScopeOnly, async (req, res) => {
     // v2.640 ②: 그 CVP 의 종류별 원문 표본(첫 장비의 응답 앞부분) — admin 만. 장비마다 다르지 않다(표본은 CVP 단위).
     ...(admin ? { samples: st0.samples || null, probes: st0.probes || null } : { addressHidden: true, samplesHidden: true }),
   });
+});
+
+// ── v3.37 포트 구성도(docs/design/cvp-port-map) — 전면 배치 · 포트별 연결 장비(설명 + LLDP) · 사용/예비 ─────────────────
+/**
+ * 장비 한 대의 포트 구성도. 판정은 cvp/portmap.js 하나(분류 · 근거 · 배치표). 장비 · 엣지 왕복 0(중앙 DB 최신값 · v2.924 LLDP 표 · 일 롤업).
+ *   게이트는 형제 /tools/cvp/device 와 같다(tools + 전체 범위). 비-admin 은 설명 · LLDP 문자열의 주소를 가리고 chassisId(MAC)는 싣지 않는다.
+ */
+api.get('/tools/cvp/portmap', toolsPerm, fullScopeOnly, async (req, res) => {
+  kickDemo();
+  const admin = isAdminReq(req);
+  const cvpId = typeof req.query.cvpId === 'string' ? req.query.cvpId : '';
+  const key = typeof req.query.key === 'string' ? req.query.key : '';
+  const srv = cvpId ? getServer(cvpId) : null;
+  if (!srv || !key) return res.status(404).json({ ok: false, reason: '없는 장비입니다.' });
+  const agent = await agentFor(srv, cvpId, key);
+  if (agent === undefined) return res.status(404).json({ ok: false, reason: '수집된 장비 정보가 없습니다.' });
+  const det = await cdb.deviceDetail(agent, cvpId, key);
+  if (!det) return res.status(404).json({ ok: false, reason: '수집된 장비 정보가 없습니다.' });
+  const [ll, days, names] = await Promise.all([
+    cdb.lldpForDevice(agent, cvpId, key).catch(() => ({ rows: [], read: false, at: null, failing: false, unavailable: true })),
+    cdb.lastLinkDays(agent, cvpId, key).catch(() => ({ last: new Map(), since: null, unavailable: true })),
+    cdb.deviceNameIndex().catch(() => ({ rows: [] })),
+  ]);
+  const switchNames = new Set((names.rows || []).map((r) => String(r.hostname || '').toLowerCase().split('.')[0]).filter(Boolean));
+  const m = buildPortMap({ model: det.device.model, ports: det.ports, parts: det.device.partsList, lldp: ll.rows, lldpRead: ll.read, lastLink: days.last, switchNames });
+  const hosts = listServers().map((x) => x.host);
+  const mk = (v) => (admin || v == null ? v : maskErrText(v, hosts));
+  const corp = corpResolver(listServers(), dcList())(cvpId);
+  res.json({
+    device: { ...publicDevice(det.device, admin), corpId: corp.corpId, corpName: corp.corpName },
+    cvpName: srv.name || srv.id,
+    portsRead: m.portsRead, faceplate: m.faceplate, counts: m.counts, bySpeed: m.bySpeed,
+    ports: m.ports ? m.ports.map((p) => ({ ...p, desc: mk(p.desc), device: mk(p.device), lldp: p.lldp ? { ...p.lldp, sysName: mk(p.lldp.sysName), portDesc: mk(p.lldp.portDesc) } : null })) : null,
+    xcvrRead: !!m.xcvrRead, partsAt: det.device.partsAt ?? null, collectedAt: det.device.collectedAt ?? null,
+    lldp: { read: ll.read, at: ll.at, failing: !!ll.failing, ...(ll.unavailable ? { unavailable: true } : {}) },
+    linkHistory: { since: days.since, ...(days.unavailable ? { unavailable: true } : {}) },
+    ...(admin ? {} : { addressHidden: true }),
+  });
+});
+
+/** 전 스위치 포트 여유 — 장비마다 사용 · 예비 · 확인 필요 · 꺼짐(LLDP 없이 분류만). 화면은 마운트 1회 + 새로고침(폴링 없음). */
+  const PORTMAP_SUMMARY_PORTS_MAX = 200_000;
+api.get('/tools/cvp/portmap/summary', toolsPerm, fullScopeOnly, async (req, res) => {
+  kickDemo();
+  const admin = isAdminReq(req);
+  const servers = listServers();
+  const own = rowOwnerOf(servers);
+  const { rows, unavailable } = await cdb.listDeviceRows();
+  if (unavailable) return res.status(503).json({ ok: false, reason: '중앙 CVP DB 를 열지 못했습니다.' });
+  const devs = rows.filter(own);
+  const pr = await cdb.portLatestRows({ limit: PORTMAP_SUMMARY_PORTS_MAX });
+  if (pr.unavailable) return res.status(503).json({ ok: false, reason: '중앙 CVP DB 를 열지 못했습니다.' });
+  const byDev = new Map();
+  for (const r of pr.rows) {
+    const k = `${r.agent}\u0000${r.cvp_id}\u0000${r.device_key}`;
+    if (!byDev.has(k)) byDev.set(k, []);
+    byDev.get(k).push({ name: r.port, oper: r.oper || 'unknown', admin: r.admin || 'unknown', desc: r.descr == null ? null : r.descr, speedBps: r.speed_bps });
+  }
+  const corpOf = corpResolver(servers, dcList());
+  const byId = new Map(servers.map((x) => [x.id, x]));
+  const list = devs.map((d) => {
+    const ports = d.portsRead ? (byDev.get(`${d.agent}\u0000${d.cvpId}\u0000${d.key}`) || []) : null;
+    const s = summaryRow({ model: d.model, ports, parts: d.partsList });
+    const c = corpOf(d.cvpId);
+    return { cvpId: d.cvpId, key: d.key, hostname: d.hostname || d.key, model: d.model || '', corpId: c.corpId, corpName: c.corpName,
+      cvpName: byId.get(d.cvpId)?.name || d.cvpId, portsRead: s.portsRead, counts: s.counts, spareHigh: s.spareHigh, source: s.source || null };
+  });
+  // 여유 부족 기준(예비 이 개수 이하) — 화면에 숫자를 박지 않고 이 값을 쓴다.
+  res.json({ devices: list, lowSpareMax: 4, ...(pr.truncated ? { truncated: true, portsMax: PORTMAP_SUMMARY_PORTS_MAX } : {}), ...(admin ? {} : { addressHidden: true }) });
 });
 
 // ── v2.641 ③ CPU·메모리 추이 · ④ 이벤트 · ⑤ 포트 사용량 ──────────────────────────

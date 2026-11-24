@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>CVP 이중화 — MLAG · 포트 채널 점검</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="box-sizing: border-box; padding: clamp(12px, 2vw, 28px); background: #0a0e17; color: #e6edf6; font-family: 'Inter', 'Noto Sans KR', 'Apple SD Gothic Neo', sans-serif; font-size: 13px; line-height: 1.5; display: flex; flex-direction: column; gap: 14px;">
+
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<div style="font-size: 12px; color: #a9b6cc;">네트워크 › Arista CVP › 포트 · 링크</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center;">
+<h1 style="margin: 0; font-size: 20px; font-weight: 700;">이중화</h1>
+<span style="display: inline-flex; align-items: center; min-height: 22px; padding: 0 9px; border-radius: 999px; font-size: 12px; font-weight: 600; background: #35205c; border: 1px solid #c084fc; color: #f1e6ff;">⑧ 포트 채널 이름은 있음 · 멤버 상태 · MLAG 상태는 새 수집(경로 미확인)</span>
+</div>
+<div style="font-size: 12.5px; color: #a9b6cc; overflow-wrap: anywhere;">두 줄로 묶어 둔 연결에서 한 줄만 죽으면 통신은 계속되므로 아무도 모릅니다. 남은 한 줄이 죽기 전에 찾는 화면입니다.</div>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px;">
+<sc-for list="{{tiles}}" as="t" hint-placeholder-count="4">
+<div style="background: #141b2d; border: 1px solid #1f2a40; border-radius: 12px; padding: 12px 14px; min-width: 0; display: flex; flex-direction: column; gap: 2px;">
+<div style="font-size: 12px; color: #a9b6cc;">{{t.label}}</div>
+<div style="{{t.val}}">{{t.n}}</div>
+<div style="font-size: 12px; color: #a9b6cc; overflow-wrap: anywhere;">{{t.meta}}</div>
+</div>
+</sc-for>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 14px;">
+<sc-for list="{{pairs}}" as="p" hint-placeholder-count="2">
+<div style="background: #141b2d; border: 1px solid #1f2a40; border-radius: 14px; padding: 16px 18px; min-width: 0; display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
+<b style="font-size: 14px;">MLAG 쌍</b>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; overflow-wrap: anywhere;">{{p.name}}</span>
+<span style="{{p.pill}}">{{p.state}}</span>
+</div>
+<div style="display: flex; align-items: center; gap: 0;">
+<div style="flex: 1 1 0; min-width: 0; padding: 10px 12px; border: 1px solid #3b4a68; border-radius: 10px; background: #0f1626; display: flex; flex-direction: column; gap: 2px;"><b style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; overflow-wrap: anywhere;">{{p.a}}</b><span style="font-size: 11.5px; color: #a9b6cc;">{{p.aRole}}</span></div>
+<div style="flex: 0 0 96px; display: flex; flex-direction: column; align-items: center; gap: 3px;">
+<span style="font-size: 11px; color: #a9b6cc;">피어 링크</span>
+<div style="{{p.line1}}"></div>
+<div style="{{p.line2}}"></div>
+<span style="{{p.peerStyle}}">{{p.peer}}</span>
+</div>
+<div style="flex: 1 1 0; min-width: 0; padding: 10px 12px; border: 1px solid #3b4a68; border-radius: 10px; background: #0f1626; display: flex; flex-direction: column; gap: 2px;"><b style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; overflow-wrap: anywhere;">{{p.b}}</b><span style="font-size: 11.5px; color: #a9b6cc;">{{p.bRole}}</span></div>
+</div>
+<div style="display: flex; flex-direction: column;">
+<sc-for list="{{p.rows}}" as="x" hint-placeholder-count="3">
+<div style="display: flex; gap: 10px; padding: 7px 0; border-top: 1px solid #1f2a40;">
+<div style="flex: 0 0 132px; font-size: 12px; color: #a9b6cc;">{{x.k}}</div>
+<div style="{{x.vs}}">{{x.v}}</div>
+</div>
+</sc-for>
+</div>
+</div>
+</sc-for>
+</div>
+
+<div style="background: #141b2d; border: 1px solid #1f2a40; border-radius: 14px; padding: 16px 18px; min-width: 0; display: flex; flex-direction: column; gap: 10px;">
+<b style="font-size: 14px;">포트 채널 — 멤버가 다 올라와 있나</b>
+<div style="overflow-x: auto; border: 1px solid #1f2a40; border-radius: 10px;">
+<div role="table" aria-label="포트 채널 이중화 상태" style="min-width: 1000px; font-size: 12.5px;">
+<div role="row" style="{{k.head}}">
+<div role="columnheader" style="{{k.th}}">포트 채널</div>
+<div role="columnheader" style="{{k.th}}">연결 장비</div>
+<div role="columnheader" style="{{k.th}}">이쪽 멤버</div>
+<div role="columnheader" style="{{k.th}}">MLAG 짝 쪽 멤버</div>
+<div role="columnheader" style="{{k.th}}">판정</div>
+<div role="columnheader" style="{{k.th}}">읽는 법</div>
+</div>
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="6">
+<div role="row" style="{{k.row}}">
+<div role="cell" style="{{k.tdLink}}">{{r.po}}</div>
+<div role="cell" style="{{k.tdm}}">{{r.peer}}</div>
+<div role="cell" style="{{k.tdm}}">{{r.mine}}</div>
+<div role="cell" style="{{k.tdm}}">{{r.other}}</div>
+<div role="cell" style="{{k.td}}"><span style="{{r.pill}}">{{r.state}}</span></div>
+<div role="cell" style="{{k.td}}">{{r.read}}</div>
+</div>
+</sc-for>
+</div>
+</div>
+<div style="font-size: 12px; color: #a9b6cc; overflow-wrap: anywhere;">문제 있는 것이 위로 옵니다. 멤버 상태를 못 읽은 포트 채널은 ‘정상’ 이 아니라 ‘확인 불가’ 로 따로 셉니다(지금 3개).</div>
+</div>
+
+<div style="background: #141b2d; border: 1px solid #1f2a40; border-radius: 14px; padding: 16px 18px; min-width: 0; display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; color: #c9d5e6;">
+<div style="overflow-wrap: anywhere;">· ‘이중화 상실’ 은 지금 통신은 되지만 한 줄만 남은 상태입니다. 기존 장애 화면은 ‘관리상 켜져 있는데 내려간 포트’ 로만 잡으므로 이것을 따로 보여 줍니다.</div>
+<div style="overflow-wrap: anywhere;">· 의도적으로 한 줄만 쓰는 포트 채널은 ‘멤버 1개로 설정됨’ 으로 구분합니다(설정된 멤버 수 기준 — 올라온 수가 아님).</div>
+<div style="overflow-wrap: anywhere;">· MLAG 설정 정합성(양쪽 VLAN · 포트 채널 설정이 같은가)은 장비가 스스로 계산한 값을 읽습니다. 못 읽으면 판정하지 않습니다.</div>
+<div style="overflow-wrap: anywhere;">· 새 장애 종류로 열면 알림 · 닫는 규칙은 기존 부품 장애와 같은 규칙을 씁니다(판정은 중앙에서만).</div>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1060}}'>
+class Component extends DCLogic {
+renderVals() {
+const MONO = "font-family: 'JetBrains Mono', ui-monospace, monospace;";
+const COLS = 'display: grid; grid-template-columns: 200px 150px 130px 150px 130px minmax(220px, 1fr); align-items: center;';
+const k = {
+head: COLS + ' background: #0f1626; color: #a9b6cc;', row: COLS + ' border-top: 1px solid #1f2a40; min-height: 42px;',
+th: 'padding: 8px 10px; font-weight: 600; white-space: nowrap;',
+td: 'padding: 6px 10px; min-width: 0; overflow-wrap: anywhere; color: #c9d5e6;',
+tdm: 'padding: 6px 10px; min-width: 0; overflow-wrap: anywhere; ' + MONO,
+tdLink: 'padding: 6px 10px; min-width: 0; overflow-wrap: anywhere; font-weight: 600; color: #7dd3fc; ' + MONO
+};
+const pill = 'display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; ';
+const P = { ok: pill + 'background: #16432a; border: 1px solid #22c55e; color: #eafff1;', warn: pill + 'background: #4a3208; border: 1px solid #f59e0b; color: #fff3d6;', bad: pill + 'background: #5a1616; border: 1px solid #f87171; color: #ffe9e9;', na: pill + 'background: #1a2236; border: 1px solid #64748b; color: #cbd5e1;' };
+const line = (up) => 'width: 70px; height: 0; border-top: 3px ' + (up ? 'solid #22c55e' : 'dashed #f87171') + ';';
+const vs = (c) => 'flex: 1 1 0; min-width: 0; overflow-wrap: anywhere; font-size: 12.5px; color: ' + (c || '#e6edf6') + '; ' + MONO;
+const pairs = [
+{ name: 'kr1-leaf-a03 ↔ kr1-leaf-a04', state: '정상', pill: P.ok, a: 'kr1-leaf-a03', aRole: '주(primary)', b: 'kr1-leaf-a04', bRole: '부(secondary)', line1: line(true), line2: line(true), peer: 'Po1000 2/2', peerStyle: 'font-size: 11.5px; color: #86efac; ' + MONO,
+rows: [{ k: 'MLAG 상태', v: '활성 · 양쪽 연결됨', vs: vs() }, { k: 'MLAG 포트 채널', v: '14개 모두 양쪽에서 올라옴', vs: vs() }, { k: '설정 정합성', v: '불일치 없음', vs: vs() }] },
+{ name: 'kr1-leaf-b01 ↔ kr1-leaf-b02', state: '주의 — 이중화 약해짐', pill: P.warn, a: 'kr1-leaf-b01', aRole: '주(primary)', b: 'kr1-leaf-b02', bRole: '부(secondary)', line1: line(true), line2: line(false), peer: 'Po1000 1/2', peerStyle: 'font-size: 11.5px; color: #fbbf24; ' + MONO,
+rows: [{ k: 'MLAG 상태', v: '활성 · 피어 링크 한 줄만 남음', vs: vs('#fbbf24') }, { k: 'MLAG 포트 채널', v: '12개 중 10개 양쪽 · 1개 한쪽만 · 1개 양쪽 내려감', vs: vs('#fbbf24') }, { k: '설정 정합성', v: '불일치 2건(VLAN 210 이 한쪽에만)', vs: vs('#fbbf24') }] }
+];
+const r = (po, peer, mine, other, st, state, read) => ({ po: po, peer: peer, mine: mine, other: other, pill: P[st], state: state, read: read });
+const rows = [
+r('kr1-leaf-b01 Po21', 'esx-kr1-21', '1 중 0 올라옴', '1 중 0 올라옴', 'bad', '양쪽 내려감', '이 서버로 가는 길이 없습니다 — 기존 포트 장애로도 잡힙니다.'),
+r('kr1-leaf-b01 Po7', 'unity-kr1-b', '1 중 1 올라옴', '1 중 0 올라옴', 'warn', '이중화 상실', 'b02 쪽 멤버가 내려가 한 줄만 남았습니다.'),
+r('kr1-leaf-b01 Po1000', 'kr1-leaf-b02 (피어 링크)', '2 중 2 올라옴', '2 중 1 올라옴', 'warn', '이중화 상실', '피어 링크 한 줄만 남음 — 남은 줄이 죽으면 MLAG 이 갈라집니다.'),
+r('kr1-leaf-a03 Po31', 'gpu-kr1-01', '2 중 2 올라옴', '— (MLAG 아님)', 'ok', '정상', '한 스위치에만 묶인 채널입니다 — 스위치가 죽으면 끊깁니다.'),
+r('kr1-leaf-a03 Po12', 'bareos-kr1', '1 중 1 올라옴', '1 중 1 올라옴', 'ok', '정상', '양쪽 스위치에 한 줄씩.'),
+r('pl-leaf-01 Po4', 'esx-pl-02', '멤버 상태 못 읽음', '멤버 상태 못 읽음', 'na', '확인 불가', '정상으로 세지 않습니다.')
+];
+const big = (c) => MONO + ' font-size: 24px; font-weight: 600; color: ' + c + ';';
+const tiles = [
+{ label: 'MLAG 쌍', n: '31', meta: '정상 28 · 주의 2 · 확인 불가 1', val: big('#e6edf6') },
+{ label: '이중화 상실', n: 6, meta: '한 줄만 남은 포트 채널 — 통신은 됨', val: big('#fbbf24') },
+{ label: '양쪽 내려감', n: 1, meta: '통신 끊김', val: big('#fca5a5') },
+{ label: '설정 정합성 불일치', n: 2, meta: 'MLAG 쌍의 양쪽 설정이 다름', val: big('#c4b5fd') }
+];
+return { k: k, pairs: pairs, rows: rows, tiles: tiles };
+}
+}
+</script>
+</body>
+</html>

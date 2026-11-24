@@ -306,6 +306,9 @@ async function demoL2(srv, devices, now) {
     }
     a.d.lldp.push({ port: a.p.name, idx: '1', sysName: h.name, portId: 'vmnic0', portDesc: 'vmnic0', chassisId: '' });
     b.d.lldp.push({ port: b.p.name, idx: '1', sysName: h.name, portId: 'vmnic1', portDesc: 'vmnic1', chassisId: '' });
+    // v3.37 포트 구성도 — 데모 포트 설명을 LLDP 이웃과 대개 맞춘다(그래야 '일치' 가 보인다). 여섯 번째마다 설명을 비우고(LLDP 만),
+    //   그다음은 옛 설명을 남긴다(불일치 — 설명이 낡은 포트). 이름 · 수치는 가상값이다.
+    if (i % 6 === 4) { a.p.desc = ''; b.p.desc = ''; } else if (i % 6 !== 5) { a.p.desc = `${h.name} vmnic0`; b.p.desc = `${h.name} vmnic1`; }
     let n = 0;
     for (const v of vms) {
       if (v.vcenterId !== h.vcenterId || v.host !== h.name) continue;

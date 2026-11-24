@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>CVP 네트워크 기능 — 못 읽은 상태 · 기록 시작 전 · 권한</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="box-sizing: border-box; padding: clamp(12px, 2vw, 28px); background: #0a0e17; color: #e6edf6; font-family: 'Inter', 'Noto Sans KR', 'Apple SD Gothic Neo', sans-serif; font-size: 13px; line-height: 1.5; display: flex; flex-direction: column; gap: 14px;">
+
+<div style="display: flex; flex-direction: column; gap: 4px;">
+<h1 style="margin: 0; font-size: 20px; font-weight: 700;">공통 상태 — 값이 없을 때 화면이 하는 말</h1>
+<div style="font-size: 12.5px; color: #a9b6cc; overflow-wrap: anywhere;">12개 화면이 같은 문구 규칙을 씁니다. 못 읽은 것을 0 · 정상 · 없음으로 쓰지 않습니다.</div>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px;">
+<sc-for list="{{cards}}" as="c" hint-placeholder-count="6">
+<div style="background: #141b2d; border: 1px solid #1f2a40; border-radius: 14px; padding: 16px 18px; min-width: 0; display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: baseline;">
+<b style="font-size: 14px;">{{c.title}}</b>
+<span style="font-size: 12px; color: #a9b6cc;">{{c.where}}</span>
+</div>
+<div style="{{c.banner}}">{{c.text}}</div>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px;">
+<sc-for list="{{c.tiles}}" as="t" hint-placeholder-count="3">
+<div style="background: #0f1626; border: 1px solid #1f2a40; border-radius: 10px; padding: 8px 10px; min-width: 0;"><div style="font-size: 11.5px; color: #a9b6cc; overflow-wrap: anywhere;">{{t.label}}</div><div style="{{t.val}}">{{t.n}}</div></div>
+</sc-for>
+</div>
+<div style="font-size: 12px; color: #a9b6cc; overflow-wrap: anywhere;">{{c.note}}</div>
+</div>
+</sc-for>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":690}}'>
+class Component extends DCLogic {
+renderVals() {
+const MONO = "font-family: 'JetBrains Mono', ui-monospace, monospace;";
+const B = { warn: 'padding: 10px 12px; border-radius: 10px; background: #4a3208; border: 1px solid #f59e0b; color: #fff3d6; font-size: 12.5px; overflow-wrap: anywhere;', info: 'padding: 10px 12px; border-radius: 10px; background: #0f1626; border: 1px solid #243049; color: #e6edf6; font-size: 12.5px; overflow-wrap: anywhere;', deny: 'padding: 10px 12px; border-radius: 10px; background: #1a2236; border: 1px solid #64748b; color: #e6edf6; font-size: 12.5px; overflow-wrap: anywhere;' };
+const v = (c) => MONO + ' font-size: 20px; font-weight: 600; color: ' + (c || '#e6edf6') + ';';
+const t = (label, n, c) => ({ label: label, n: n, val: v(c) });
+const cards = [
+{ title: '표를 읽지 못함', where: '위치 찾기 · 이중화 · 설정 백업', banner: B.warn, text: '이 법인의 스위치 3대에서 MAC 주소 표를 읽지 못했습니다 — 찾지 못한 주소가 그 장비에 있을 수 있습니다.', tiles: [t('읽은 장비', '4'), t('못 읽은 장비', '3', '#fbbf24'), t('찾은 위치', '—', '#a9b6cc')], note: '검색 결과가 0건이어도 ‘없습니다’ 가 아니라 ‘읽은 4대에는 없습니다’ 라고 말합니다.' },
+{ title: '기록 시작 전', where: '회수 · 예측 · GBIC 추세 · 링크 품질', banner: B.info, text: '이 기능은 2026-11-23 부터 기록합니다. 추세와 예측은 기록이 30일(예측은 90일) 쌓인 뒤에 나옵니다.', tiles: [t('쌓인 기록', '0일'), t('추세', '—', '#a9b6cc'), t('예측', '—', '#a9b6cc')], note: '빈 차트를 0 으로 채우지 않습니다. 기록이 생긴 날부터 그립니다.' },
+{ title: '판정 기준이 오래됨', where: '버전 준수', banner: B.warn, text: 'CVP 의 버그 · 보안 권고 목록이 24일 전 것입니다. 그 뒤에 나온 권고는 여기에 없습니다.', tiles: [t('목록 날짜', '10-30'), t('노출 장비', '112'), t('그 뒤 권고', '모름', '#a9b6cc')], note: '오래된 판정을 지우지는 않습니다 — 날짜를 함께 보입니다.' },
+{ title: 'LLDP 를 읽지 못함', where: '토폴로지 · 양끝 불일치', banner: B.warn, text: 'LLDP 이웃을 읽지 못한 장비는 지도에 혼자 떠 있는 점으로 그립니다. 연결이 없다는 뜻이 아닙니다.', tiles: [t('그린 링크', '18'), t('추정 링크', '5', '#a9b6cc'), t('비교 못 함', '2', '#fbbf24')], note: '설명에만 적힌 링크는 점선 ‘추정’ 으로 그리고 불일치 비교에서 뺍니다.' },
+{ title: '권한 없음', where: '설정 백업 · 내려받기', banner: B.deny, text: '설정 백업은 관리자만 볼 수 있습니다. 설정 원문에는 계정 · 키 정보가 들어 있습니다.', tiles: [t('장비 목록', '숨김', '#a9b6cc'), t('변경 여부', '숨김', '#a9b6cc'), t('내려받기', '불가', '#a9b6cc')], note: '범위(법인) 계정은 CVP 화면 전체가 지금처럼 권한 안내로 나옵니다 — 새 탭도 같습니다.' },
+{ title: '일부만 수집함', where: '위치 찾기 · 링크 품질', banner: B.info, text: '장비당 시한 안에 다 읽지 못한 스위치가 있습니다. 읽은 만큼만 보이고, 순위 · 개수 옆에 ‘일부’ 를 붙입니다.', tiles: [t('다 읽은 장비', '168'), t('일부만', '5', '#fbbf24'), t('순위', '일부 기준', '#a9b6cc')], note: '부분 합을 전체처럼 쓰지 않고, 추이에도 쌓지 않습니다.' }
+];
+return { cards: cards };
+}
+}
+</script>
+</body>
+</html>
