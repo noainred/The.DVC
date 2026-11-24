@@ -6,7 +6,10 @@
  * 측정값(상태 · 온도 · 전력)은 여기에 넣지 않는다 — 화면을 그릴 때 수집 모듈에서 서비스 태그로 이어 읽는다(원장 = 사람이 정한 위치만).
  *
  * 동시 편집: 전산실마다 `rev`. 랙 · 배치를 바꾸는 쓰기는 요청의 rev 가 지금 값과 같을 때만 반영하고 rev 를 올린다 — 다르면 409(조용히 덮어쓰지 않는다).
- * 쓰기는 한 트랜잭션(동기 · 행 몇 개라 이벤트 루프를 오래 잡지 않는다). 변경 이력(rack_log)도 같은 트랜잭션에 적는다(이력만 빠지는 반쪽 저장 없음).
+ * 쓰기는 한 트랜잭션(동기). 변경 이력(rack_log)과 법인 판(rack_version)도 같은 트랜잭션에 적는다(반쪽 저장 없음).
+ *   ⚠ 판 저장 때문에 쓰기 1건이 법인 원장 전체를 읽고 · 직렬화 · 압축한다 — 실측(점검 C28, 4 vCPU 컨테이너): 장비 1,500대 법인 약 15ms ·
+ *   5,000대 약 40~80ms · 20,000대 약 140~240ms 동안 이벤트 루프를 잡는다. 사람이 하는 편집 빈도라 지금은 받아들이고, 대량 가져오기(엑셀 import)는
+ *   한 트랜잭션에 판 하나로 만들 것(행마다 판을 만들지 말 것).
  * 파일: `RACK_DB` 또는 `<dbDir|configDir>/rack.db`, 권한 0600. 열기 규칙은 util/sqliteOpen.js(busy_timeout 먼저 · 잠금이면 래치하지 않고 다시 연다).
  */
 import fs from 'node:fs';
@@ -585,6 +588,7 @@ function versionDetailRaw(db, corpId, versionId) {
   return {
     version: head, readable: true, counts: countsOf(snap),
     changes: prevSnap ? diffSnapshots(prevSnap, snap) : null,
+    prevUnreadable: !!prev && !prevSnap,   // 점검 C13: 앞 판이 '없음' 과 '손상' 을 가른다(화면이 '가장 오래된 판' 으로 잘못 설명했다)
     restore: now ? diffSnapshots(now, snap) : null,
   };
 }
