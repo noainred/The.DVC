@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { levelColor, rateText, pctText, speedText, timeText, portKindOf, flattenRows, kindMatch, textMatch, isProblem, kpisOf, notesOf, sortVal, stateBadge } from './ifaceText.js';
+import { groupByWhy, portWwn, WHY_TEXT, levelColor, rateText, pctText, speedText, timeText, portKindOf, flattenRows, kindMatch, textMatch, isProblem, kpisOf, notesOf, sortVal, stateBadge } from './ifaceText.js';
 
 describe('ifaceText — Unity 인터페이스 화면 문구 · 집계(v3.35.0)', () => {
   it('값이 없으면 단위를 붙이지 않는다(— ) · 0 은 값이다', () => {
@@ -59,5 +59,18 @@ describe('ifaceText — Unity 인터페이스 화면 문구 · 집계(v3.35.0)',
     expect(n.join(' ')).toContain('75%');
     for (const t of n) expect(t).not.toMatch(/`/);
     expect(stateBadge('nope').text).toBe('상태 못 읽음');
+  });
+  it('v3.36.1 — 사유별 묶음(사유 없는 장비는 빠짐) · 모든 사유에 문구 · 백틱 없음', () => {
+    const g = groupByWhy([{ id: 'a', view: { throughputWhy: 'ssh' } }, { id: 'b', view: { throughputWhy: 'no-match' } }, { id: 'c', view: { throughputWhy: 'ssh' } }, { id: 'd', view: { throughputWhy: '' } }, { id: 'e', view: null }]);
+    expect(g.map(([w, l]) => [w, l.map((x) => x.id)])).toEqual([['ssh', ['a', 'c']], ['no-match', ['b']]]);
+    for (const k of ['ssh', 'sample-off', 'db-unavailable', 'no-samples', 'sample-failed', 'no-port-units', 'no-match', 'no-recent', 'collect-failed', 'no-config']) {
+      expect(WHY_TEXT[k]).toBeTruthy();
+      expect(WHY_TEXT[k]).not.toMatch(/`/);
+    }
+  });
+  it('v3.36.1 — WWN 은 포트 WWN(뒤 8바이트)을 통째로(노드 WWN 꼬리가 같아 모든 포트가 같아 보이던 것)', () => {
+    expect(portWwn('50:06:01:60:C7:E0:48:62:50:06:01:64:4C:E0:48:62')).toBe('50:06:01:64:4C:E0:48:62');
+    expect(portWwn('50:06:01:64:4C:E0:48:62')).toBe('50:06:01:64:4C:E0:48:62');
+    expect(portWwn('')).toBe('');
   });
 });

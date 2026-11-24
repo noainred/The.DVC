@@ -14,6 +14,7 @@ import { numOrNull } from '../util/numOrNull.js';
 import { nodeLoadQuery, nodeUnitsOf, ifaceStatesOf, DAY_OFFSET_MIN } from './db.js';
 import { unitMatchKey } from './nodeLoad.js';
 import { judgePort, utilPct, spBalance, isIfaceType, portMatchKey, IFACE_DEFAULTS } from './ifaces.js';
+import { sampleDiagOf } from './sampleDiag.js';   // v3.36.1 사용량이 비는 이유의 근거
 
 const HOUR = 3_600_000;
 export const IFACE_RANGES = Object.freeze({ '24h': 24 * HOUR, '7d': 7 * 24 * HOUR, '30d': 30 * 24 * HOUR });
@@ -125,12 +126,13 @@ export async function deviceIfaces(dev, snap, { range = '24h', now = Date.now(),
   const from = Math.floor((now + off) / bucketMs) * bucketMs - off - (IFACE_CELLS - 1) * bucketMs;
   const staleMs = Math.max(15 * 60_000, sampleMs * 3);
   const restSample = dev.collectMethod !== 'ssh' && dev.nodeLoadEnabled !== false;
-  let unitMap = new Map(); let stats = new Map(); let lasts = new Map(); let states = new Map(); let db = true;
+  let unitMap = new Map(); let stats = new Map(); let lasts = new Map(); let states = new Map(); let db = true; let allUnits = [];
   let statesKnown = true;
   try { const st = await ifaceStatesOf(dev.id); if (st) states = st; else statesKnown = false; } catch { statesKnown = false; }
   if (restSample && ports.length) {
     try {
-      unitMap = unitIdByPort(await nodeUnitsOf(dev.id));
+      allUnits = await nodeUnitsOf(dev.id);
+      unitMap = unitIdByPort(allUnits);
       if (unitMap.size) {
         if (withCells) {
           const q = await nodeLoadQuery(dev.id, { group: 'net', kind: 'bucket', from, to: now + 1, bucketMs });
@@ -141,24 +143,53 @@ export async function deviceIfaces(dev, snap, { range = '24h', now = Date.now(),
       }
     } catch { db = false; }
   }
+  const unmatched = [];
   const rows = ports.map((p) => {
     const uid = unitMap.get(portMatchKey(p.id)) ?? unitMap.get(portMatchKey(p.name));
+    if (uid == null && p.linkUp === true) unmatched.push(p.id);
     return portRow(p, { stat: uid != null ? stats.get(uid) || null : null, last: uid != null ? lasts.get(uid) || null : null,
       state: states.get(p.id) || null, now, staleMs, busyPct, idlePct });
   });
-  const why = !ports.length ? (snap && !snap.ok ? 'collect-failed' : 'no-config')
-    : dev.collectMethod === 'ssh' ? 'ssh'
-      : dev.nodeLoadEnabled === false ? 'sample-off'
-        : !db ? 'db-unavailable'
-          : !unitMap.size ? 'no-samples' : '';
+  const upPorts = ports.filter((p) => p.linkUp === true).length;
+  const diag = sampleDiagOf(dev.id);
+  const why = throughputWhyOf({ ports: ports.length, snapFailed: !!snap && !snap.ok, method: dev.collectMethod, sampleOff: dev.nodeLoadEnabled === false, db,
+    units: allUnits.length, portUnits: unitMap.size, upPorts, unmatched: unmatched.length, withData: rows.filter((r) => !r.unread).length, diag });
+  // v3.36.1: 사유의 근거 — 마지막 표본 진단 · 표본 쪽 포트 이름 · 짝을 못 찾은 구성 포트(각 8개까지). 화면이 '왜' 를 단정 대신 근거로 보여 준다.
+  const unitNames = [...(allUnits || [])].filter((u) => u && (u.kind === 'port' || u.kind === 'eth')).slice(0, 8).map((u) => String(u.name || '').slice(0, 60));
+  const throughputDetail = { diag, unitKinds: kindCounts(allUnits), unitNames, unmatchedPorts: unmatched.slice(0, 8), unmatched: unmatched.length, upPorts };
   const fcRows = rows.filter((r) => r.kind === 'fc' && r.linkUp === true);
   return {
     deviceId: dev.id, at: numOrNull(ifc?.at), source: ifc?.source || '', probe: ifc?.probe || {},
     portsDropped: numOrNull(ifc?.portsDropped) || 0, ifsDropped: numOrNull(ifc?.ifsDropped) || 0,
     ports: rows, interfaces: Array.isArray(ifc?.interfaces) ? ifc.interfaces : [],
     sp: { fc: spBalance(fcRows), eth: spBalance(rows.filter((r) => r.kind === 'eth' && r.linkUp === true)) },
-    hasThroughput: rows.some((r) => !r.unread), throughputWhy: why, statesKnown, range: rk, bucketMs, from, to: now, staleMs,
+    hasThroughput: rows.some((r) => !r.unread), throughputWhy: why, throughputDetail, statesKnown, range: rk, bucketMs, from, to: now, staleMs,
   };
+}
+
+const kindCounts = (units) => { const o = {}; for (const u of units || []) { const k = String(u?.kind || '') || 'unknown'; o[k] = (o[k] || 0) + 1; } return o; };
+/**
+ * v3.36.1(사용자 신고 '사용량이 보이지 않음' — 실제 현장 496 포트 전부 '못 읽음'): 처리량이 비는 **이유 판정**(순수 — 한 곳).
+ * 예전에는 표본은 있는데 포트 이름이 짝지어지지 않으면 사유가 빈 글자('')였고, SP 값만 있고 포트 단위가 없으면 '아직 표본이 없습니다' 로 틀리게 말했다.
+ * 순서가 곧 우선순위다(앞이 더 근본 원인). '' = 사유 없음(읽힌 포트가 있다 — 일부만 비면 partial 은 화면이 따로 센다).
+ *  · no-config / collect-failed — 구성(포트 목록)이 없다          · ssh — SSH 수집 장비(사용자 결정 — 처리량은 REST 장비만)
+ *  · sample-off — 표본 수집 꺼짐                                  · db-unavailable — DB 를 못 열었다
+ *  · sample-failed — 표본이 하나도 없고 마지막 시도가 실패했다(진단 오류 문구가 근거)
+ *  · no-samples — 표본이 하나도 없다(첫 표본 전 · 엣지에서 실패해 중앙에 안 왔을 수 있다)
+ *  · no-port-units — 표본은 있는데 포트 단위가 없다(SP 값만 — 장비가 포트 지표 경로를 주지 않았다 · 진단의 경로별 항목 수가 근거)
+ *  · no-match — 포트 단위는 있는데 구성 포트 id 와 이름이 하나도 짝지어지지 않는다(두 이름 목록이 근거)
+ *  · no-recent — 짝은 맞는데 최근(표본 주기 × 3) · 기간 안에 값이 없다
+ */
+export function throughputWhyOf({ ports = 0, snapFailed = false, method = 'api', sampleOff = false, db = true, units = 0, portUnits = 0, upPorts = 0, unmatched = 0, withData = 0, diag = null } = {}) {
+  if (!ports) return snapFailed ? 'collect-failed' : 'no-config';
+  if (method === 'ssh') return 'ssh';
+  if (sampleOff) return 'sample-off';
+  if (!db) return 'db-unavailable';
+  if (!units) return diag && diag.ok === false ? 'sample-failed' : 'no-samples';
+  if (!portUnits) return 'no-port-units';
+  if (upPorts > 0 && unmatched >= upPorts) return 'no-match';
+  if (!withData) return 'no-recent';
+  return '';
 }
 
 /** 장비 목록(등록부 + 스냅샷 Map) → Unity 만 장비 보기 배열. 한 장비가 실패해도 나머지는 계속(사유는 그 장비 칸). */

@@ -725,6 +725,11 @@ function ifaceSampleMs(dev, devs) {
 function ifaceDeviceOut(d, snap, view, admin) {
   const m = admin ? d : maskDeviceAddress(d);
   const v = view ? { ...view, interfaces: admin ? view.interfaces : view.interfaces.map((x) => ({ ...x, ip: x.ip ? '' : x.ip })) } : null;
+  // v3.36.1: 표본 진단의 오류 원문(장비 주소가 들 수 있다 — 'connect ETIMEDOUT 10.x:443')은 관리자 판본만. 경로별 항목 수 · 단위 이름은 그대로.
+  if (v && !admin && v.throughputDetail?.diag) {
+    const dg = v.throughputDetail.diag;
+    v.throughputDetail = { ...v.throughputDetail, diag: { ...dg, error: dg.error ? '(관리자만 볼 수 있습니다)' : '', errors: (dg.errors || []).map(() => '(관리자만 볼 수 있습니다)') } };
+  }
   return { id: m.id, name: m.name, type: m.type, agent: m.agent || '', datacenterId: m.datacenterId || '', collectMethod: m.collectMethod || 'api',
     enabled: m.enabled !== false, nodeLoadEnabled: m.nodeLoadEnabled !== false,
     snapOk: !!snap?.ok, collectedAt: numOrNull(snap?.collectedAt), snapError: snap && !snap.ok ? (admin ? snap.error : maskSnapAddress(snap, d.host).error) || '' : '', view: v };

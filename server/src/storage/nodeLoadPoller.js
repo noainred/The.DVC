@@ -38,6 +38,7 @@ import { ISI_NODE_LOAD_REST_KEYS, ISI_SUMMARY_PATHS, ISI_SAMPLE_CMDS, restSample
   parseClientRows, parseProtocolRows, parseDriveRows, buildNodeLoadSample } from './collectors/isilonNodeLoad.js';
 import { saveNodeLoadSample, saveNodeUnits } from './db.js';
 import { sampleArrayPerf, isFePerfType } from './collectors/arrayPerf.js'; // v2.952 어레이 프런트엔드(디렉터 · 노드 · SP) 표본
+import { noteSampleDiag } from './sampleDiag.js'; // v3.36.1 표본 진단
 import { CLIENT_LIMIT_DEF, CLIENT_LIMIT_MAX, sanitizeNodeLoadSample } from './nodeLoad.js';
 import { isMockMode, isDemoId, demoNodeLoadSample } from '../mock/demo/storage.js';
 import { reqTimeoutMs } from '../agent/envTimeout.js'; // 시한 env 단일 관문(TIM2605-04 — [하한, 상한] 밖·NaN 은 기본값)
@@ -238,6 +239,8 @@ async function sampleOne(dev) {
       } catch (e) { error = capErr(e); auth = isCredReject(e) || isSshAuthError(e); }
     }
     if (auth) markAuthStopped(dev.id, full, error || '인증 실패'); // 수집 주기와 같은 레코드 — 재시도하지 않는다(계정 잠금)
+    // v3.36.1: 마지막 시도 진단(성공 · 실패) — 인터페이스 화면이 '사용량을 왜 못 읽는지' 를 말한다(storage/sampleDiag.js).
+    noteSampleDiag(dev.id, { at: t0, ok: !!sample, error: sample ? '' : (error || '표본 없음'), sample, source: 'local' });
     if (!sample) return { ok: false, error: error || '표본 없음', auth, ms: Date.now() - t0 };
     if (!useDemoSynth(dev)) clearAuthStop(dev.id);
     let saved;
