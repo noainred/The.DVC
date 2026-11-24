@@ -1,6 +1,6 @@
 # 설계: CVP 네트워크 기능 12개 — 링크 품질 · 포트 회수/예측 · 전후 비교 · GBIC 추세 · 토폴로지 · 위치 찾기 · 설정 백업 · 버전 준수 · 이중화
 
-작성 2026-11-23 (main v2.914.0 기준 · 브랜치 `claude/cool-mayer-w8gqtv`) · 상태 **시안 — 컨펌 대기**(구현 전) · 시안 캔버스: https://claude.ai/artifact/4i4hqv9ncpMqBvRtcvkYQW
+작성 2026-11-23 (main v2.914.0 기준 · 브랜치 `claude/cool-mayer-w8gqtv`) · 상태 **2차 구현(v3.38.0 — §9)** · ②③⑧ 다음 차수 · 시안 캔버스: https://claude.ai/artifact/4i4hqv9ncpMqBvRtcvkYQW
 (아트보드 12장 — 이 폴더의 `*.dc.html` 이 같은 내용의 레퍼런스(HTML 프로토타입 — 복사 대상이 아님). **장비 이름 · 포트 · 수치 · 권고 번호 · 날짜는 전부 가상**이다.
 색 · 글자는 `web/src/styles.css` `:root` 토큰 계열. 계정의 ‘Design System’ 아티팩트는 `project/` 파일이 없어 쓰지 않았다. 포트 구성도 시안은 `docs/design/cvp-port-map/`.)
 규칙(2026-11-03 ‘기억해’): 설계는 Fable + Claude Design 시안 → **컨펌 뒤** Opus 구현.
@@ -86,3 +86,29 @@
   남은 것은 '아무 이름 · IP · MAC 을 넣어 찾는 검색 화면' 뿐이다(§3 의 행 수 계산도 기존 상한 — 장비당 FDB 4,096 · LLDP 512 — 을 따른다).
 - 포트 구성도(별도 시안 `docs/design/cvp-port-map/`)는 v3.37.0 으로 구현했다. 나머지 12개는 다음 차수.
 
+
+## 9. 구현 기록(2026-11-25 — v3.38.0, 사용자 "나머지 네트워크 기능도 구현해줘")
+
+질문에 고른 값: 범위 **2차 — 있는 데이터 + 기록 시작**(②③⑧ 은 다음 차수) · 탭 **네 묶음** · 검증 **표준**.
+
+| # | 기능 | 들어간 곳 | 서버 판정 · API |
+|---|---|---|---|
+| ④ ⑩ | 불량 링크 · 플랩 순위 | 포트 · 링크 › **링크 품질** | `cvp/linkq.js` · `GET /tools/cvp/linkq` |
+| ⑤ | 미사용 포트 회수 | 포트 구성도 › **회수 후보** | `cvp/portplan.js reclaimCandidates` · `GET /tools/cvp/portplan/reclaim` |
+| ⑨ | 포트 고갈 · 업링크 포화 예측 | 포트 구성도 › **고갈 · 포화 예측** | `cvp/portplan.js` · `GET /tools/cvp/portplan/forecast` |
+| ⑮ | GBIC 열화 추세 · 재고 | 광신호 › **추세** · **재고** | `cvp/opticstrend.js` · `GET /tools/cvp/optics/trend` |
+| ⑥ ⑦ | 토폴로지 · 양끝 불일치 | 연결 › **토폴로지**(지도 · 링크 표 · 양끝 불일치) | `cvp/topology.js` · `GET /tools/cvp/topology` |
+| ① | 위치 찾기 | 연결 › **위치 찾기** | `cvp/locate.js` · `GET /tools/cvp/locate` |
+| ⑬ | 작업 전후 비교 | 변경 › **작업 전후 비교** | `cvp/snapdiff.js` · `GET/POST /tools/cvp/snapshots` · `DELETE /tools/cvp/snapshots/:id` · `GET /tools/cvp/compare` |
+
+새로 쌓는 기록(중앙 `cvp.db` — 엣지 계약 변경 없음): 포트 마지막 링크 날 · 장비 기록 시작 날 · 링크 내려감(일) · 장비 포트 수(일) · GBIC 일 최저 광량 · 스냅샷. 규칙은 `docs/rules/cvp.md` 'CVP 네트워크 기능 2차'.
+
+**시안과 다르게 한 것(정직 기록)**
+- 탭 묶음 이름은 시안의 '변경 · 준수' 대신 **'변경'** — 이번 차수에 준수(③)가 없어서다. ③ 이 들어오면 이름을 되돌린다.
+- **이중화(⑧)는 이번에 없다** — 시안의 '포트 · 링크' 묶음에서 빠졌다.
+- 업링크 포화는 시안의 '95 백분위' 가 아니라 **일 최대 사용률**로 예측한다(일 롤업에 이미 있는 값 — 새 열을 만들지 않았다). 화면이 그렇게 말한다.
+- GBIC 추세의 '기록 부족' 기준은 시안의 30일이 아니라 **최근 30일 창 안에서 링크가 있던 날 14일**이다(30일을 다 채워야 하면 교체 · 청소 뒤 한 달 동안 아무것도 못 본다).
+- 위치 찾기의 IP 는 vCenter 인벤토리로만 푼다 — 스위치 ARP 표는 수집하지 않는다(§8 정정 그대로).
+- 시안의 토폴로지 '서버 · 스토리지 종류별 개수' 는 **ESXi(인벤토리 호스트 이름과 맞음) · 기타** 두 가지다(스토리지를 가를 근거가 LLDP 이름뿐이라 지어내지 않았다).
+
+**확인**: 서버 `cvpNet338.test.js` 9 · 웹 `cvpNetText.test.js` 9 · 데모(목) 화면 — Chromium 결과는 PR 에 적는다. ⚠ 실장비 CVP 로는 확인하지 못했다(목 데이터 · LLDP 이름 표기 · 플랩 빈도는 현장 값으로 다시 볼 것).

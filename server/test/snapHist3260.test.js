@@ -29,7 +29,10 @@ const { DEFAULT_POLICY } = await import('../src/tools/diskTrend.js');
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DAY = 86_400_000;
 // 기준 시각: 실제 시각에서 정시 경계로 떨어뜨려 고정(docs/rules/common.md)
-const NOW = Math.floor(Date.now() / 3_600_000) * 3_600_000;
+// 기준 시각: 이 프로세스 시간대의 '어제 정오'(항상 과거 · 날 경계에서 12시간 떨어짐 — docs/rules/common.md '기준 시각은 경계에서 떨어뜨려 고정').
+// v3.38(2026-11-25): 예전 값(정시로 내림)은 지역 시각 23시대에 돌면 ③ 의 'D1 + 1시간' 이 다음 날로 넘어가 '같은 날' 단언이 깨졌다
+//   (CI · UTC 23:02~23:17 실행에서 실패 — dayKeyOf 는 지역 날짜). 제품 코드는 그대로다.
+const NOW = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime() - 12 * 3_600_000; })();
 const HY = { snapAgeDays: 7, snapCount: 3, snapSizeGB: 100, uptimeDays: 365, exceptions: ['keep-me'], notify: { enabled: true, hour: 9 } };
 
 const node = (name, daysAgo, o = {}) => ({ d: 0, name, desc: null, ts: daysAgo == null ? null : NOW - daysAgo * DAY, state: 'poweredOff', quiesced: false, current: false, ...o });

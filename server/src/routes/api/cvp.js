@@ -45,7 +45,7 @@ const csvPerm = requirePerm('data.csv');
  * v2.708: mock 모드에서 아직 이번 기동에 수집한 CVP 가 없으면 데모 시드 + 첫 수집을 바로 시작한다(폴러 첫 주기는 기동 45초 뒤).
  *   응답을 기다리게 하지 않는다 — 다음 새로고침부터 채워진다. 재진입은 pollCvpOnce 의 가드가 막는다.
  */
-function kickDemo() {
+export function kickDemo() {
   if (!isMockMode() || isPollerBusy()) return;
   const servers = listServers();
   if (servers.length && servers.some((x) => getStatus(x.id))) return;

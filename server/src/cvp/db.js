@@ -20,6 +20,8 @@
  */
 import fs from 'node:fs';
 import crypto from 'node:crypto';   // v2.924(B-②): L2 내용 해시
+import zlib from 'node:zlib';       // v3.38 작업 전후 비교 스냅샷(장비마다 gzip JSON)
+import { createYielder } from '../util/timeSlice.js';
 import { pushAll } from '../util/pushAll.js';
 import path from 'node:path';
 import { config } from '../config.js';
@@ -142,6 +144,7 @@ async function openInner() {
     addDeviceInfoCols(conn);
     addPortDetailCols(conn);
     addPortDropCols(conn);   // v2.922(3a): 포트 드롭(discards — 추정 경로)
+    addNetTables(conn);      // v3.38 네트워크 기능(docs/design/cvp-network-features) — 마지막 링크일 · 플랩 · 장비 포트 수 · GBIC 일 최저 · 스냅샷
     const maxOf = (col) => `NULLIF(MAX(IFNULL(port_daily.${col},-1e308), IFNULL(excluded.${col},-1e308)), -1e308)`;
     const st = {
       upDevice: conn.prepare(`INSERT INTO device_latest (agent,cvp_id,device_key,ts,hostname,model,serial,mgmt_ip,eos_version,streaming,telemetry,parts_json,parts_at,bgp_json,ports_read,extra_json,info_json,sys_ts,cpu_pct,mem_pct,mem_total)
@@ -221,6 +224,21 @@ async function openInner() {
       fDel: conn.prepare('DELETE FROM cvp_fault_state WHERE agent=? AND cvp_id=? AND device_key=? AND fault_key=?'),
       fGet: conn.prepare('SELECT * FROM cvp_fault_state WHERE agent=? AND cvp_id=? AND device_key=? AND fault_key=?'),
       fNotified: conn.prepare('UPDATE cvp_fault_state SET notified_at=? WHERE agent=? AND cvp_id=? AND device_key=? AND fault_key=?'),
+      // ── v3.38 네트워크 기능 — 기록 표(전부 upsert · 스칼라 MIN/MAX — 집계 함수 아님)
+      upLastLink: conn.prepare(`INSERT INTO port_lastlink (agent,cvp_id,device_key,port,day) VALUES (?,?,?,?,?)
+        ON CONFLICT(agent,cvp_id,device_key,port) DO UPDATE SET day=excluded.day WHERE excluded.day > port_lastlink.day`),
+      upFirstDay: conn.prepare(`INSERT INTO dev_linkhist (agent,cvp_id,device_key,first_day) VALUES (?,?,?,?)
+        ON CONFLICT(agent,cvp_id,device_key) DO UPDATE SET first_day=excluded.first_day WHERE excluded.first_day < dev_linkhist.first_day`),
+      selPortOper: conn.prepare('SELECT port, oper FROM port_latest WHERE agent=? AND cvp_id=? AND device_key=?'),
+      upFlap: conn.prepare(`INSERT INTO port_flap_daily (agent,cvp_id,device_key,port,day,downs) VALUES (?,?,?,?,?,1)
+        ON CONFLICT(agent,cvp_id,device_key,port,day) DO UPDATE SET downs=port_flap_daily.downs+1`),
+      upDevPort: conn.prepare(`INSERT INTO dev_port_daily (agent,cvp_id,device_key,day,total,used_max,used_last) VALUES (?,?,?,?,?,?,?)
+        ON CONFLICT(agent,cvp_id,device_key,day) DO UPDATE SET total=excluded.total, used_max=MAX(dev_port_daily.used_max, excluded.used_max), used_last=excluded.used_last`),
+      upXcvrDay: conn.prepare(`INSERT INTO xcvr_daily (agent,cvp_id,device_key,intf,day,rx_min,tx_min,n) VALUES (?,?,?,?,?,?,?,1)
+        ON CONFLICT(agent,cvp_id,device_key,intf,day) DO UPDATE SET
+          rx_min=CASE WHEN excluded.rx_min IS NULL THEN xcvr_daily.rx_min WHEN xcvr_daily.rx_min IS NULL THEN excluded.rx_min ELSE MIN(xcvr_daily.rx_min, excluded.rx_min) END,
+          tx_min=CASE WHEN excluded.tx_min IS NULL THEN xcvr_daily.tx_min WHEN xcvr_daily.tx_min IS NULL THEN excluded.tx_min ELSE MIN(xcvr_daily.tx_min, excluded.tx_min) END,
+          n=xcvr_daily.n+1`),
       fEvent: conn.prepare(`INSERT INTO cvp_fault_event (at,agent,cvp_id,device_key,fault_key,device_name,kind,label,event,state,prev_state,detail,close_reason)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`),
     };
@@ -234,6 +252,47 @@ async function openInner() {
     _db = 'unavailable';
     return null;
   }
+}
+
+/**
+ * v3.38 네트워크 기능 기록 표(docs/design/cvp-network-features §3 · docs/rules/cvp.md).
+ *  - port_lastlink  포트별 **마지막 링크 날**(최신 전용 표 — '키별 최신값' 을 port_daily GROUP BY MAX 로 만들지 않는다). 표본이 들어올 때 upsert.
+ *                   v3.38 이전 기록은 backfillLastLink 가 장비마다 한 번 옮긴다(양보하며).
+ *  - dev_linkhist   장비별 **기록 시작 날**(그보다 앞은 '기록 없음' — 일수로 세지 않는다).
+ *  - port_flap_daily 포트 · 날별 '링크 내려감' 횟수 — 장비 레코드를 받을 때 직전 oper 가 up 이었고 지금 down/nolink 면 1. 수집 주기보다 짧은 플랩은 놓친다(화면이 밝힌다).
+ *  - dev_port_daily 장비 · 날별 포트 수(전체 · 사용 최대 · 마지막) — 포트 고갈 예측용. 포트 목록을 읽은 레코드만.
+ *  - xcvr_daily     트랜시버 · 날별 최저 Rx/Tx(dBm) — **링크가 올라온 포트만**(링크 없는 날은 행이 없다). 부품을 읽은 레코드만.
+ *  - cvp_snap · cvp_snap_dev  작업 전후 비교 스냅샷(중앙 DB 복사 — 장비 접속 0). 장비마다 gzip JSON 한 행.
+ *  - cvp_kv         작은 표지(백필 완료 등).
+ */
+function addNetTables(conn) {
+  conn.exec(`CREATE TABLE IF NOT EXISTS port_lastlink (
+      agent TEXT NOT NULL, cvp_id TEXT NOT NULL, device_key TEXT NOT NULL, port TEXT NOT NULL, day INTEGER NOT NULL,
+      PRIMARY KEY (agent, cvp_id, device_key, port));
+    CREATE TABLE IF NOT EXISTS dev_linkhist (
+      agent TEXT NOT NULL, cvp_id TEXT NOT NULL, device_key TEXT NOT NULL, first_day INTEGER NOT NULL,
+      PRIMARY KEY (agent, cvp_id, device_key));
+    CREATE TABLE IF NOT EXISTS port_flap_daily (
+      agent TEXT NOT NULL, cvp_id TEXT NOT NULL, device_key TEXT NOT NULL, port TEXT NOT NULL, day INTEGER NOT NULL, downs INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (agent, cvp_id, device_key, port, day));
+    CREATE INDEX IF NOT EXISTS idx_pfd_day ON port_flap_daily (day);
+    CREATE TABLE IF NOT EXISTS dev_port_daily (
+      agent TEXT NOT NULL, cvp_id TEXT NOT NULL, device_key TEXT NOT NULL, day INTEGER NOT NULL,
+      total INTEGER NOT NULL, used_max INTEGER NOT NULL, used_last INTEGER NOT NULL,
+      PRIMARY KEY (agent, cvp_id, device_key, day));
+    CREATE INDEX IF NOT EXISTS idx_dpd_day ON dev_port_daily (day);
+    CREATE TABLE IF NOT EXISTS xcvr_daily (
+      agent TEXT NOT NULL, cvp_id TEXT NOT NULL, device_key TEXT NOT NULL, intf TEXT NOT NULL, day INTEGER NOT NULL,
+      rx_min REAL, tx_min REAL, n INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (agent, cvp_id, device_key, intf, day));
+    CREATE INDEX IF NOT EXISTS idx_xd_day ON xcvr_daily (day);
+    CREATE TABLE IF NOT EXISTS cvp_snap (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, by_user TEXT, label TEXT, cvp_id TEXT,
+      n_dev INTEGER NOT NULL DEFAULT 0, bytes INTEGER NOT NULL DEFAULT 0, done INTEGER NOT NULL DEFAULT 0);
+    CREATE TABLE IF NOT EXISTS cvp_snap_dev (
+      snap_id INTEGER NOT NULL, agent TEXT NOT NULL, cvp_id TEXT NOT NULL, device_key TEXT NOT NULL, body BLOB NOT NULL,
+      PRIMARY KEY (snap_id, agent, cvp_id, device_key));
+    CREATE TABLE IF NOT EXISTS cvp_kv (k TEXT PRIMARY KEY, v TEXT);`);
 }
 
 /**
@@ -369,8 +428,13 @@ export async function saveDevices({ agent = LOCAL_AGENT, cvpId, devices = [], sa
           const r = st.insDevSample.run(agent, cvpId, key, numOrNull(d.sysAt), pctOrNull(d.cpuPct), pctOrNull(d.memPct));
           if (Number(r.changes)) ns++;
         }
+        // v3.38 ⑮: 트랜시버 일 최저 광량(링크가 올라온 것만 — 링크 없는 날은 행을 만들지 않는다).
+        if (Array.isArray(d.parts) && !olderRecord) recordXcvrDay(st, agent, cvpId, key, partsAt ?? ts, d.parts);
         if (Array.isArray(d.ports)) {
           if (olderRecord) stalePorts++;
+          // v3.38 ⑩ · ⑨: 직전 oper(플랩 — up → down/nolink 만 센다) · 장비 포트 수 일 기록. 옛 레코드는 건너뛴다(순서 뒤바뀜을 플랩으로 세지 않게).
+          const prevOper = !olderRecord && prevTs != null ? new Map(st.selPortOper.all(agent, cvpId, key).map((r) => [r.port, r.oper])) : null;
+          if (!olderRecord) recordDevPorts(st, agent, cvpId, key, ts, d.ports, prevOper);
           for (const p of d.ports) {
             const name = txt(p?.name, 64);
             if (!name) continue;
@@ -396,6 +460,42 @@ export async function saveDevices({ agent = LOCAL_AGENT, cvpId, devices = [], sa
   return { devices: nd, ports: np, samples: ns, duplicates: dup, ...(stalePorts ? { stalePorts } : {}) };
 }
 
+/** v3.38: 링크 내려감으로 세는 oper(관리상 꺼짐은 플랩이 아니다 — 호출자가 admin 을 본다). */
+const FLAP_DOWN = new Set(['down', 'nolink']);
+/** v3.38 ⑩ · ⑨: 플랩(직전 up → 지금 down/nolink · 관리상 켜짐) + 장비 포트 수 일 기록. */
+function recordDevPorts(st, agent, cvpId, key, ts, ports, prevOper) {
+  const day = dayIndex(ts);
+  let total = 0; let used = 0;
+  for (const p of ports) {
+    const name = txt(p?.name, 64);
+    if (!name) continue;
+    total++;
+    const oper = txt(p.oper, 16);
+    if (oper === 'up') used++;
+    if (prevOper && prevOper.get(name) === 'up' && FLAP_DOWN.has(oper) && txt(p.admin, 16) !== 'down') st.upFlap.run(agent, cvpId, key, name, day);
+  }
+  if (total > 0) st.upDevPort.run(agent, cvpId, key, day, total, used, used);
+}
+/** v3.38 ⑮: 부품 목록의 트랜시버 → 그날 최저 Rx/Tx. 인터페이스는 optic.intf(없으면 부품 이름의 인터페이스 조각). */
+const XCVR_DAY_MAX = 1024;
+function recordXcvrDay(st, agent, cvpId, key, at, parts) {
+  const day = dayIndex(at);
+  let n = 0;
+  for (const p of parts) {
+    if (!p || p.kind !== 'xcvr' || p.state === 'absent') continue;
+    const o = p.optic && typeof p.optic === 'object' ? p.optic : null;
+    if (!o || o.linked !== true) continue;
+    const intf = txt(o.intf, 64) || txt(String(p.name || '').split(' › ').map((x) => x.trim()).find((x) => /^(ethernet|et)[\d/]+$/i.test(x)), 64);
+    const rx = numOrNull(o.rx ?? p.dom?.rxPower); const tx = numOrNull(o.tx ?? p.dom?.txPower);
+    if (!intf || (rx == null && tx == null)) continue;
+    // dBm 은 -60 ~ +15 밖이면 못 읽은 값으로 본다(장비가 -inf 대신 -40 · -99 같은 표식을 주기도 한다 — 0 으로 채우지 않는다).
+    const ok = (v) => (v != null && v >= -60 && v <= 15 ? v : null);
+    if (ok(rx) == null && ok(tx) == null) continue;
+    st.upXcvrDay.run(agent, cvpId, key, intf, day, ok(rx), ok(tx));
+    if (++n >= XCVR_DAY_MAX) break;
+  }
+}
+
 /** 원시 표본 1행 + 일 롤업(표본이 새로 들어갔을 때만 — 재전송 이중 계수 방지). 반환: 새로 넣었는가. */
 function insertSample(st, [agent, cvpId, key, port, ts, inBps, outBps, inUtil, outUtil, inErr, outErr, inDrop, outDrop]) {
   // v2.922: 드롭 두 칸을 뒤에 붙였다(구버전 엣지 push 행은 없다 → undefined → null — 드롭 0 이 아니다).
@@ -407,6 +507,10 @@ function insertSample(st, [agent, cvpId, key, port, ts, inBps, outBps, inUtil, o
     ib ?? 0, ib == null ? 0 : 1, ib, ob ?? 0, ob == null ? 0 : 1, ob,
     iu ?? 0, iu == null ? 0 : 1, iu, ou ?? 0, ou == null ? 0 : 1, ou, ie, oe, ie == null ? 0 : 1, oe == null ? 0 : 1,
     id, od, id == null ? 0 : 1, od == null ? 0 : 1);
+  // v3.38: 마지막 링크 날 · 기록 시작 날(표본은 링크가 올라온 포트만 들어온다 — sampleWorthy).
+  const day = dayIndex(ts);
+  st.upLastLink.run(agent, cvpId, key, port, day);
+  st.upFirstDay.run(agent, cvpId, key, day);
   return true;
 }
 
@@ -478,6 +582,8 @@ export async function pruneDevices(agent, keepByCvp = {}, { cvpIds = null } = {}
       for (const c of have) if (!keep.has(c)) {
         removed += Number(db.conn.prepare('DELETE FROM device_latest WHERE agent=? AND cvp_id=?').run(agent, c).changes);
         db.conn.prepare('DELETE FROM port_latest WHERE agent=? AND cvp_id=?').run(agent, c);
+        db.conn.prepare('DELETE FROM port_lastlink WHERE agent=? AND cvp_id=?').run(agent, c);   // v3.38 최신 표(장비 수 × 포트)
+        db.conn.prepare('DELETE FROM dev_linkhist WHERE agent=? AND cvp_id=?').run(agent, c);
         dropCvps.push(c);   // v2.924(B-② · 반증 L-2): L2 는 COMMIT 뒤 조각으로
       }
     }
@@ -488,6 +594,8 @@ export async function pruneDevices(agent, keepByCvp = {}, { cvpIds = null } = {}
       for (const k of have) if (!keep.has(k)) {
         removed += Number(db.conn.prepare('DELETE FROM device_latest WHERE agent=? AND cvp_id=? AND device_key=?').run(agent, cvpId, k).changes);
         db.conn.prepare('DELETE FROM port_latest WHERE agent=? AND cvp_id=? AND device_key=?').run(agent, cvpId, k);
+        db.conn.prepare('DELETE FROM port_lastlink WHERE agent=? AND cvp_id=? AND device_key=?').run(agent, cvpId, k);   // v3.38
+        db.conn.prepare('DELETE FROM dev_linkhist WHERE agent=? AND cvp_id=? AND device_key=?').run(agent, cvpId, k);
         dropL2(db.conn, agent, cvpId, k);   // v2.924(B-②)
       }
     }
@@ -1224,6 +1332,10 @@ export async function prune({ rawRetentionDays = 7, dailyRetentionDays = 730, no
     // v2.641: CPU·메모리 원시는 포트 원시와 같은 보존 · CVP 이벤트는 처음 받은 시각 기준 EVENT_RETENTION_DAYS.
     const d2 = await chunkedDelete(db.conn.prepare('DELETE FROM device_sample WHERE rowid IN (SELECT rowid FROM device_sample WHERE ts < ? LIMIT ?)'), [rawCut], { chunk: PRUNE_CHUNK });
     const e2 = await chunkedDelete(db.conn.prepare('DELETE FROM cvp_event WHERE rowid IN (SELECT rowid FROM cvp_event WHERE seen_at < ? LIMIT ?)'), [now - EVENT_RETENTION_DAYS * DAY_MS], { chunk: PRUNE_CHUNK });
+    // v3.38: 네트워크 기능 일 기록은 일 롤업과 같은 보존일(마지막 링크 날 · 기록 시작 날은 최신 표라 지우지 않는다 — 장비가 사라지면 pruneDevices 가).
+    for (const t of ['port_flap_daily', 'dev_port_daily', 'xcvr_daily']) {
+      await chunkedDelete(db.conn.prepare(`DELETE FROM ${t} WHERE rowid IN (SELECT rowid FROM ${t} WHERE day < ? LIMIT ?)`), [dayCut], { chunk: PRUNE_CHUNK });
+    }
     // v2.935(C-③): EndpointLocation — 물어본 지 EP_RETENTION_DAYS 가 넘은 MAC(사라진 VM 등)은 지운다.
     await chunkedDelete(db.conn.prepare('DELETE FROM ep_loc WHERE rowid IN (SELECT rowid FROM ep_loc WHERE at < ? LIMIT ?)'), [now - EP_RETENTION_DAYS * DAY_MS], { chunk: PRUNE_CHUNK });
     await chunkedDelete(db.conn.prepare('DELETE FROM ep_meta WHERE rowid IN (SELECT rowid FROM ep_meta WHERE at < ? LIMIT ?)'), [now - EP_RETENTION_DAYS * DAY_MS], { chunk: PRUNE_CHUNK });
@@ -1271,7 +1383,7 @@ export async function portLatestRows({ cvpIds = null, limit = 50_000 } = {}) {
   if (Array.isArray(cvpIds) && !cvpIds.length) return { rows: [] };
   const ids = Array.isArray(cvpIds) ? cvpIds.slice(0, 256).map(String) : null;
   const where = ids ? `WHERE p.cvp_id IN (${ids.map(() => '?').join(',')})` : '';
-  const rows = db.conn.prepare(`SELECT p.agent, p.cvp_id, p.device_key, p.port, p.ts, p.descr, p.speed_bps, p.oper, p.admin, p.lag,
+  const rows = db.conn.prepare(`SELECT p.agent, p.cvp_id, p.device_key, p.port, p.ts, p.descr, p.speed_bps, p.oper, p.admin, p.lag, p.vlan, p.mtu, p.duplex,
       p.in_bps, p.out_bps, p.in_util, p.out_util, p.in_err, p.out_err, p.in_drop, p.out_drop, p.rate_ts, d.hostname
     FROM port_latest p LEFT JOIN device_latest d ON d.agent=p.agent AND d.cvp_id=p.cvp_id AND d.device_key=p.device_key ${where} LIMIT ?`).all(...(ids || []), limit + 1);
   return { rows: rows.slice(0, limit), ...(rows.length > limit ? { truncated: true } : {}) };
@@ -1650,4 +1762,280 @@ export async function lastLinkDays(agent, cvpId, key) {
   const rows = db.conn.prepare('SELECT port, MAX(day) AS d FROM port_daily WHERE agent=? AND cvp_id=? AND device_key=? AND samples > 0 GROUP BY port LIMIT 4096').all(a, c, k);
   const first = db.conn.prepare('SELECT MIN(day) AS d FROM port_daily WHERE agent=? AND cvp_id=? AND device_key=?').get(a, c, k);
   return { last: new Map(rows.filter((r) => r.d != null).map((r) => [r.port, dayStartMs(Number(r.d))])), since: first && first.d != null ? dayStartMs(Number(first.d)) : null };
+}
+
+/* ── v3.38 네트워크 기능(docs/design/cvp-network-features) — 조회 · 백필 · 스냅샷 ─────────────────────────────────────────────
+ * 요청 경로의 큰 조회는 **날 하나씩**(day 단독 인덱스) 묻고 사이에 시간 기준 양보(createYielder — perf-db 규약). 집계 함수는 문장마다 하나.
+ */
+const devKeyOf = (a, c, k) => `${a}\u0000${c}\u0000${k}`;
+const kvGet = (conn, k) => conn.prepare('SELECT v FROM cvp_kv WHERE k=?').get(k)?.v ?? null;
+const kvSet = (conn, k, v) => conn.prepare('INSERT INTO cvp_kv (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v').run(k, String(v));
+export const LASTLINK_BACKFILL_KEY = 'lastlink_backfill_v1';
+let _backfill = null;   // 진행 중인 백필(공유)
+/**
+ * v3.38 이전에 쌓인 일 롤업에서 마지막 링크 날 · 기록 시작 날을 옮긴다 — 장비마다 트랜잭션 1회(그 장비의 PK 범위 안 GROUP BY) + COMMIT 뒤 양보.
+ *   한 번 끝나면 표지를 남겨 다시 하지 않는다(그 뒤로는 표본 적재가 바로 갱신한다). 진행 중이면 같은 프라미스를 돌려준다.
+ */
+export function backfillLastLink() {
+  if (_backfill) return _backfill;
+  _backfill = (async () => {
+    const db = await open();
+    if (!db) return { done: false, unavailable: true };
+    if (kvGet(db.conn, LASTLINK_BACKFILL_KEY) === 'done') return { done: true, devices: 0 };
+    const devs = db.conn.prepare('SELECT agent, cvp_id, device_key FROM device_latest LIMIT 20000').all();
+    const insLast = db.conn.prepare(`INSERT INTO port_lastlink (agent,cvp_id,device_key,port,day)
+        SELECT agent, cvp_id, device_key, port, MAX(day) FROM port_daily WHERE agent=? AND cvp_id=? AND device_key=? AND samples > 0 GROUP BY port
+        ON CONFLICT(agent,cvp_id,device_key,port) DO UPDATE SET day=excluded.day WHERE excluded.day > port_lastlink.day`);
+    const minDay = db.conn.prepare('SELECT MIN(day) AS d FROM port_daily WHERE agent=? AND cvp_id=? AND device_key=?');
+    const y = createYielder(15);
+    let n = 0;
+    for (const d of devs) {
+      db.conn.exec('BEGIN');
+      try {
+        insLast.run(d.agent, d.cvp_id, d.device_key);
+        const f = minDay.get(d.agent, d.cvp_id, d.device_key);
+        if (f && f.d != null) db.st.upFirstDay.run(d.agent, d.cvp_id, d.device_key, Number(f.d));
+        db.conn.exec('COMMIT');
+      } catch (e) { try { db.conn.exec('ROLLBACK'); } catch { /* */ } throw e; }
+      n++;
+      await y();
+    }
+    kvSet(db.conn, LASTLINK_BACKFILL_KEY, 'done');
+    return { done: true, devices: n };
+  })().catch((e) => { console.warn(`[cvp-db] 마지막 링크 날 백필 실패(다음 조회 때 다시): ${e.message}`); return { done: false, error: true }; })
+    .finally(() => { setTimeout(() => { _backfill = null; }, 0); });
+  return _backfill;
+}
+/** 백필이 끝났나(조회 응답이 '기록 정리 중' 을 밝힌다). */
+export async function lastLinkBackfilled() {
+  const db = await open();
+  return !!db && kvGet(db.conn, LASTLINK_BACKFILL_KEY) === 'done';
+}
+/**
+ * 전 장비의 포트별 마지막 링크 날(최신 표 — 포트 수만큼) + 장비별 기록 시작 날.
+ * @returns {Promise<{ last: Map<string, number>, first: Map<string, number>, backfilled: boolean, unavailable?: true }>}  키 = agent␀cvp␀key(␀port) · 값 = 그날 시작 epoch ms
+ */
+export async function lastLinkAll() {
+  const db = await open();
+  if (!db) return { last: new Map(), first: new Map(), backfilled: false, unavailable: true };
+  const last = new Map();
+  for (const r of db.conn.prepare('SELECT agent, cvp_id, device_key, port, day FROM port_lastlink LIMIT 500000').all()) last.set(`${devKeyOf(r.agent, r.cvp_id, r.device_key)}\u0000${r.port}`, dayStartMs(Number(r.day)));
+  const first = new Map(db.conn.prepare('SELECT agent, cvp_id, device_key, first_day FROM dev_linkhist LIMIT 20000').all().map((r) => [devKeyOf(r.agent, r.cvp_id, r.device_key), dayStartMs(Number(r.first_day))]));
+  return { last, first, backfilled: kvGet(db.conn, LASTLINK_BACKFILL_KEY) === 'done' };
+}
+
+/** 날 하나씩 묻고 양보하는 공용 루프 — fn(row) 를 행마다 부른다. */
+async function eachDay(sql, fromDay, toDay, fn) {
+  const db = await open();
+  if (!db) return { unavailable: true };
+  const q = db.conn.prepare(sql);
+  const y = createYielder(15);
+  let rows = 0;
+  for (let d = fromDay; d <= toDay; d++) {
+    for (const r of q.all(d)) { fn(r, d); rows++; }
+    await y();
+  }
+  return { rows };
+}
+/**
+ * ④ 링크 품질 — 기간(최근 days 일, 오늘 포함)의 포트별 오류 · 드롭 합(일 롤업 — 카운터 차이의 합이라 리셋 구간은 이미 빠졌다) + 읽은 날 수.
+ * @returns {Promise<{ map: Map<string, {inErr:number|null,outErr:number|null,inDrop:number|null,outDrop:number|null,errDays:number,days:number}>, unavailable?:true }>}
+ */
+export async function errWindow({ days = 7, now = Date.now() } = {}) {
+  const map = new Map();
+  const to = dayIndex(now); const from = to - Math.max(1, Math.min(90, Math.floor(days))) + 1;
+  const add = (a, k, v) => { const n = numOrNull(v); if (n != null) a[k] = (a[k] ?? 0) + n; };
+  const r = await eachDay(`SELECT agent, cvp_id, device_key, port, in_err_sum, out_err_sum, in_err_n, out_err_n, in_drop_sum, out_drop_sum FROM port_daily WHERE day = ? AND samples > 0`, from, to, (row) => {
+    const k = `${devKeyOf(row.agent, row.cvp_id, row.device_key)}\u0000${row.port}`;
+    let a = map.get(k);
+    if (!a) { a = { inErr: null, outErr: null, inDrop: null, outDrop: null, errDays: 0, days: 0 }; map.set(k, a); }
+    a.days++;
+    if (Number(row.in_err_n) > 0 || Number(row.out_err_n) > 0) a.errDays++;
+    if (Number(row.in_err_n) > 0) add(a, 'inErr', row.in_err_sum);
+    if (Number(row.out_err_n) > 0) add(a, 'outErr', row.out_err_sum);
+    add(a, 'inDrop', row.in_drop_sum); add(a, 'outDrop', row.out_drop_sum);
+  });
+  return { map, from: dayStartMs(from), ...(r.unavailable ? { unavailable: true } : {}) };
+}
+/** ⑩ 플랩 — 기간의 포트별 '링크 내려감' 횟수 합 + 그날별 값(최근 14일 막대용). */
+export async function flapWindow({ days = 7, now = Date.now() } = {}) {
+  const map = new Map();
+  const to = dayIndex(now); const from = to - Math.max(1, Math.min(90, Math.floor(days))) + 1;
+  const r = await eachDay('SELECT agent, cvp_id, device_key, port, downs FROM port_flap_daily WHERE day = ?', from, to, (row, d) => {
+    const k = `${devKeyOf(row.agent, row.cvp_id, row.device_key)}\u0000${row.port}`;
+    let a = map.get(k);
+    if (!a) { a = { downs: 0, byDay: [] }; map.set(k, a); }
+    a.downs += Number(row.downs) || 0;
+    a.byDay.push([dayStartMs(d), Number(row.downs) || 0]);
+  });
+  // 플랩 기록이 언제부터 있나(장비별이 아니라 전체 — 기록 시작 전은 0 이 아니라 '기록 없음').
+  const db = await open();
+  const first = db ? db.conn.prepare('SELECT MIN(day) AS d FROM port_flap_daily').get()?.d : null;
+  const firstDev = db ? db.conn.prepare('SELECT MIN(day) AS d FROM dev_port_daily').get()?.d : null;
+  return { map, from: dayStartMs(from), recordSince: firstDev != null ? dayStartMs(Number(firstDev)) : null, firstFlap: first != null ? dayStartMs(Number(first)) : null,
+    ...(r.unavailable ? { unavailable: true } : {}) };
+}
+/** ⑨ 장비별 포트 수 일 기록(기간) — 키 → [[dayMs, total, usedMax]] (날 오름차순). */
+export async function devPortSeries({ days = 180, now = Date.now() } = {}) {
+  const map = new Map();
+  const to = dayIndex(now); const from = to - Math.max(1, Math.min(730, Math.floor(days))) + 1;
+  const r = await eachDay('SELECT agent, cvp_id, device_key, total, used_max FROM dev_port_daily WHERE day = ?', from, to, (row, d) => {
+    const k = devKeyOf(row.agent, row.cvp_id, row.device_key);
+    if (!map.has(k)) map.set(k, []);
+    map.get(k).push([dayStartMs(d), Number(row.total), Number(row.used_max)]);
+  });
+  return { map, ...(r.unavailable ? { unavailable: true } : {}) };
+}
+/** ⑮ 트랜시버 일 최저 광량(기간) — 키(agent␀cvp␀key␀intf) → [[dayMs, rxMin, txMin]] (날 오름차순). */
+export async function xcvrSeries({ days = 90, now = Date.now() } = {}) {
+  const map = new Map();
+  const to = dayIndex(now); const from = to - Math.max(1, Math.min(730, Math.floor(days))) + 1;
+  const r = await eachDay('SELECT agent, cvp_id, device_key, intf, rx_min, tx_min FROM xcvr_daily WHERE day = ?', from, to, (row, d) => {
+    const k = `${devKeyOf(row.agent, row.cvp_id, row.device_key)}\u0000${row.intf}`;
+    if (!map.has(k)) map.set(k, []);
+    map.get(k).push([dayStartMs(d), row.rx_min ?? null, row.tx_min ?? null]);
+  });
+  return { map, ...(r.unavailable ? { unavailable: true } : {}) };
+}
+/**
+ * ⑨ 업링크 포화 — 포트들의 일 최대 사용률(%)(기간). 포트마다 PK 범위 조회 + 양보. 상한 UPLINK_SERIES_MAX 포트.
+ * @returns {Promise<{ map: Map<string, Array<[number, number|null]>>, truncated?: true, unavailable?: true }>}  값 = [dayMs, max(in_util_max, out_util_max)]
+ */
+export const UPLINK_SERIES_MAX = 2000;
+export async function utilMaxSeries(ports = [], { days = 180, now = Date.now() } = {}) {
+  const map = new Map();
+  const db = await open();
+  if (!db) return { map, unavailable: true };
+  const to = dayIndex(now); const from = to - Math.max(1, Math.min(730, Math.floor(days))) + 1;
+  const q = db.conn.prepare('SELECT day, in_util_max, out_util_max FROM port_daily WHERE agent=? AND cvp_id=? AND device_key=? AND port=? AND day >= ? AND day <= ? ORDER BY day');
+  const y = createYielder(15);
+  const list = Array.isArray(ports) ? ports : [];
+  for (const p of list.slice(0, UPLINK_SERIES_MAX)) {
+    const pts = [];
+    for (const r of q.all(String(p.agent ?? ''), String(p.cvpId), String(p.key), String(p.port), from, to)) {
+      const a = numOrNull(r.in_util_max); const b = numOrNull(r.out_util_max);
+      pts.push([dayStartMs(Number(r.day)), a == null && b == null ? null : Math.max(a ?? -Infinity, b ?? -Infinity)]);
+    }
+    map.set(`${devKeyOf(p.agent ?? '', p.cvpId, p.key)}\u0000${p.port}`, pts);
+    await y();
+  }
+  return { map, ...(list.length > UPLINK_SERIES_MAX ? { truncated: true } : {}) };
+}
+/** ⑥ ⑦ 토폴로지 — 전 장비 LLDP 행 + 장비별 읽음 상태(메타는 장비 수만큼). */
+export const LLDP_ALL_MAX = 200_000;
+export async function lldpAll() {
+  const db = await open();
+  if (!db) return { rows: [], meta: new Map(), unavailable: true };
+  const rows = db.conn.prepare('SELECT agent, cvp_id, device_key, port, sys_name, sys_lc, sys_short, port_id, port_desc FROM l2_lldp LIMIT ?').all(LLDP_ALL_MAX + 1);
+  const meta = new Map(db.conn.prepare('SELECT agent, cvp_id, device_key, lldp_at, lldp_fail_at FROM l2_meta LIMIT 20000').all()
+    .map((m) => [devKeyOf(m.agent, m.cvp_id, m.device_key), { at: m.lldp_at == null ? null : Number(m.lldp_at), failing: m.lldp_fail_at != null && (m.lldp_at == null || Number(m.lldp_fail_at) > Number(m.lldp_at)) }]));
+  return {
+    rows: rows.slice(0, LLDP_ALL_MAX).map((r) => ({ agent: r.agent, cvpId: r.cvp_id, key: r.device_key, port: r.port, sysName: r.sys_name || '', sysLc: r.sys_lc || '', sysShort: r.sys_short || '', portId: r.port_id || '', portDesc: r.port_desc || '' })),
+    meta, ...(rows.length > LLDP_ALL_MAX ? { truncated: true } : {}),
+  };
+}
+
+/**
+ * 네트워크 기능 일 기록을 한꺼번에 넣는다(지금은 **데모 시드만** 쓴다 — mock/demo/cvp.js demoNetHistory). 날(day)은 dayIndex 정수.
+ *   devPort [cvp,key,day,total,used] · xcvr [cvp,key,intf,day,rx,tx] · flap [cvp,key,port,day,downs] · lastLink [cvp,key,port,day] · firstDay [cvp,key,day]
+ *   · util [cvp,key,port,day,maxUtil%] (port_daily 에 없는 날만 — INSERT OR IGNORE). 2,000행마다 트랜잭션 · COMMIT 뒤 양보.
+ */
+export async function importNetHistory(agent, { devPort = [], xcvr = [], flap = [], lastLink = [], firstDay = [], util = [] } = {}) {
+  const db = await open();
+  if (!db) return { unavailable: true };
+  const { conn, st } = db;
+  const qFlap = conn.prepare('INSERT INTO port_flap_daily (agent,cvp_id,device_key,port,day,downs) VALUES (?,?,?,?,?,?) ON CONFLICT(agent,cvp_id,device_key,port,day) DO UPDATE SET downs=excluded.downs');
+  const qUtil = conn.prepare('INSERT OR IGNORE INTO port_daily (agent,cvp_id,device_key,port,day,samples,in_util_sum,in_util_n,in_util_max,out_util_sum,out_util_n,out_util_max) VALUES (?,?,?,?,?,1,?,1,?,?,1,?)');
+  const jobs = [
+    ...devPort.map((r) => () => st.upDevPort.run(agent, r[0], r[1], r[2], r[3], r[4], r[4])),
+    ...xcvr.map((r) => () => st.upXcvrDay.run(agent, r[0], r[1], r[2], r[3], r[4] ?? null, r[5] ?? null)),
+    ...flap.map((r) => () => qFlap.run(agent, r[0], r[1], r[2], r[3], r[4])),
+    ...lastLink.map((r) => () => st.upLastLink.run(agent, r[0], r[1], r[2], r[3])),
+    ...firstDay.map((r) => () => st.upFirstDay.run(agent, r[0], r[1], r[2])),
+    ...util.map((r) => () => qUtil.run(agent, r[0], r[1], r[2], r[3], r[4], r[4], r[4] * 0.6, r[4] * 0.6)),
+  ];
+  for (let i = 0; i < jobs.length; i += 2000) {
+    conn.exec('BEGIN');
+    try { for (const j of jobs.slice(i, i + 2000)) j(); conn.exec('COMMIT'); } catch (e) { try { conn.exec('ROLLBACK'); } catch { /* */ } throw e; }
+    await new Promise((r) => setImmediate(r));
+  }
+  return { rows: jobs.length };
+}
+
+/* ── ⑬ 작업 전후 비교 스냅샷 ── 중앙 DB 의 최신값을 복사한다(장비 · 엣지 왕복 0). 장비마다 gzip JSON 한 행. 개수 · 보존일 상한. */
+export const SNAP_MAX = 30;
+export const SNAP_RETENTION_DAYS = 180;
+export const SNAP_DEV_MAX = 5000;
+const SNAP_TXN_DEVICES = 50;
+/**
+ * 스냅샷 저장. bodies: [{ agent, cvpId, key, body:object }] — 장비 SNAP_TXN_DEVICES 대씩 트랜잭션 · COMMIT 뒤 양보. 끝나면 done=1 · 오래된 것 정리.
+ * @returns {Promise<{ id:number, devices:number, bytes:number } | { unavailable:true }>}
+ */
+export async function createSnap({ by = '', label = '', cvpId = null, bodies = [], now = Date.now() } = {}) {
+  const db = await open();
+  if (!db) return { unavailable: true };
+  const list = (Array.isArray(bodies) ? bodies : []).slice(0, SNAP_DEV_MAX);
+  const id = Number(db.conn.prepare('INSERT INTO cvp_snap (at, by_user, label, cvp_id, n_dev, bytes, done) VALUES (?,?,?,?,0,0,0)')
+    .run(now, capStr(by, 64), capStr(label, 120), cvpId == null ? null : capStr(cvpId, 128)).lastInsertRowid);
+  const ins = db.conn.prepare('INSERT OR REPLACE INTO cvp_snap_dev (snap_id, agent, cvp_id, device_key, body) VALUES (?,?,?,?,?)');
+  let bytes = 0; let n = 0;
+  try {
+    for (let i = 0; i < list.length; i += SNAP_TXN_DEVICES) {
+      const part = list.slice(i, i + SNAP_TXN_DEVICES).map((b) => ({ ...b, z: zlib.gzipSync(Buffer.from(JSON.stringify(b.body))) }));
+      db.conn.exec('BEGIN');
+      try {
+        for (const b of part) { ins.run(id, String(b.agent ?? ''), String(b.cvpId), String(b.key), b.z); bytes += b.z.length; n++; }
+        db.conn.exec('COMMIT');
+      } catch (e) { try { db.conn.exec('ROLLBACK'); } catch { /* */ } throw e; }
+      await new Promise((r) => setImmediate(r));
+    }
+    db.conn.prepare('UPDATE cvp_snap SET n_dev=?, bytes=?, done=1 WHERE id=?').run(n, bytes, id);
+  } catch (e) {
+    // 반쪽 스냅샷은 남기지 않는다(비교가 '사라진 장비' 를 지어내지 않게).
+    await deleteSnap(id).catch(() => {});
+    throw e;
+  }
+  await pruneSnaps({ now }).catch((e) => console.warn(`[cvp-db] 스냅샷 정리 실패: ${e.message}`));
+  return { id, devices: n, bytes };
+}
+/** 스냅샷 목록(최근 순). 끝나지 않은 것(done=0 — 저장 중 · 중단)은 표시만 한다. */
+export async function listSnaps() {
+  const db = await open();
+  if (!db) return { rows: [], unavailable: true };
+  return { rows: db.conn.prepare('SELECT id, at, by_user, label, cvp_id, n_dev, bytes, done FROM cvp_snap ORDER BY id DESC LIMIT ?').all(SNAP_MAX + 20)
+    .map((r) => ({ id: Number(r.id), at: Number(r.at), by: r.by_user || '', label: r.label || '', cvpId: r.cvp_id ?? null, devices: Number(r.n_dev), bytes: Number(r.bytes), done: r.done === 1 })) };
+}
+/** 스냅샷 하나의 장비 본문들 — Map(agent␀cvp␀key → body). 없으면 null. 장비마다 풀고 양보. */
+export async function readSnap(id) {
+  const db = await open();
+  if (!db) return { unavailable: true };
+  const head = db.conn.prepare('SELECT id, at, by_user, label, cvp_id, n_dev, done FROM cvp_snap WHERE id=?').get(Number(id));
+  if (!head || head.done !== 1) return null;
+  const out = new Map();
+  const y = createYielder(15);
+  for (const r of db.conn.prepare('SELECT agent, cvp_id, device_key, body FROM cvp_snap_dev WHERE snap_id=?').iterate(Number(id))) {
+    try { out.set(devKeyOf(r.agent, r.cvp_id, r.device_key), JSON.parse(zlib.gunzipSync(Buffer.from(r.body)).toString('utf8'))); } catch { /* 깨진 행은 '비교 못 함' 으로 남는다 */ }
+    await y();
+  }
+  return { head: { id: Number(head.id), at: Number(head.at), by: head.by_user || '', label: head.label || '', cvpId: head.cvp_id ?? null, devices: Number(head.n_dev) }, devices: out };
+}
+export async function deleteSnap(id) {
+  const db = await open();
+  if (!db) return { deleted: 0, unavailable: true };
+  await chunkedDelete(db.conn.prepare('DELETE FROM cvp_snap_dev WHERE rowid IN (SELECT rowid FROM cvp_snap_dev WHERE snap_id = ? LIMIT ?)'), [Number(id)], { chunk: PRUNE_CHUNK });
+  return { deleted: Number(db.conn.prepare('DELETE FROM cvp_snap WHERE id=?').run(Number(id)).changes) };
+}
+/** 개수(SNAP_MAX) · 보존일(SNAP_RETENTION_DAYS) 밖 스냅샷과, 1시간 넘게 끝나지 않은 것을 지운다. */
+export async function pruneSnaps({ now = Date.now() } = {}) {
+  const db = await open();
+  if (!db) return { deleted: 0 };
+  const all = db.conn.prepare('SELECT id, at, done FROM cvp_snap ORDER BY id DESC').all();
+  const cut = now - SNAP_RETENTION_DAYS * DAY_MS;
+  let kept = 0; let deleted = 0;
+  for (const r of all) {
+    const stale = r.done !== 1 ? now - Number(r.at) > 3_600_000 : (Number(r.at) < cut || kept >= SNAP_MAX);
+    if (r.done === 1 && !stale) kept++;
+    if (stale) { await deleteSnap(r.id); deleted++; }
+  }
+  return { deleted };
 }

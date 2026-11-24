@@ -46,6 +46,7 @@ import { registerPsInspect } from './api/psInspect.js'; // v2.965 PowerScale 장
 import { registerPeriodicReport } from './api/periodicReport.js'; // v3.32 정기 점검 보고(도구 periodic-report — 일일 · 주간 · 월간 · 분기 · 설계 docs/design/periodic-report)
 import { registerSanFlow } from './api/sanFlow.js';       // v2.935(C-②) Brocade Flow Vision 플로우 모니터(포탈이 dvc_ 플로우를 만들고 읽는다)       // v2.920 호스트 ↔ SAN 조닝·트래픽 귀속 + CVP 업링크 매칭
 import { registerCvp } from './api/cvp.js';               // Arista CloudVision(CVP) 네트워크 스위치(v2.608)
+import { registerCvpNet } from './api/cvpNet.js';         // v3.38 CVP 네트워크 기능(링크 품질 · 회수 · 예측 · 토폴로지 · 위치 찾기 · 전후 비교 · GBIC 추세)
 import { registerCvpBulk } from './api/cvpBulk.js';       // CVP 서버 CSV·자유텍스트 대량 등록(v2.641)
 import { registerPartFaults } from './api/partFaults.js'; // 파트 장애(물리 부품 장애 기록·알림, v2.547)
 import { registerDiskBad } from './api/diskBad.js'; // 디스크 배드 섹터 분석(v3.8.0)
@@ -188,6 +189,7 @@ registerSanStorage(api);   // v2.948 — /tools/san-storage*(조회 tools+전체
 registerHostSan(api);
 registerSanFlow(api);   // v2.935 — /tools/san-flow*(전체 범위 관리자 · 만들기 · 지우기는 OTP 재인증)   // v2.920 — /hosts/:id/san-attribution · /hosts/:id/net-uplinks · /tools/sanswitch/attribution
 registerCvp(api);
+registerCvpNet(api);
 registerCvpBulk(api);
 registerPartFaults(api);
 registerDiskBad(api);

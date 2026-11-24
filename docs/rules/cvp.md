@@ -217,3 +217,20 @@
     비-admin 은 설명 · LLDP 문자열을 `maskErrText` 로 가리고 LLDP chassisId(MAC)는 누구에게도 싣지 않는다. 장비 · 엣지 왕복 0 — 엣지 수신 계약은 바꾸지 않았다.
   - 화면: 전역 `tbody td { white-space: nowrap }` 때문에 긴 칸이 표를 넓힌다 — 설명 · LLDP · 장비 칸은 `whiteSpace:'normal'` + `minWidth` 를 함께 준다(Chromium 판독에서 찾은 넘침).
 
+- **CVP 네트워크 기능 2차(v3.38 — 설계 `docs/design/cvp-network-features/README.md` §9, 회귀 `server/test/cvpNet338.test.js` · 웹 `cvpNetText.test.js`)**
+  - 판정 코어는 서버 순수 모듈 하나씩: `cvp/linkq.js`(④ ⑩) · `cvp/portplan.js`(⑤ ⑨) · `cvp/opticstrend.js`(⑮) · `cvp/topology.js`(⑥ ⑦ — `switchIndex` · `uplinkPortsOf` 는 위치 찾기 · 예측도 같이 쓴다) ·
+    `cvp/locate.js`(①) · `cvp/snapdiff.js`(⑬) · 직선 추세는 `cvp/trend.js` 하나. 웹 `cvpNetText.js` 는 문장 · 색 · 배치만 — 판정을 웹에서 다시 하지 않는다.
+  - 라우트는 `routes/api/cvpNet.js`(형제 cvp.js 와 같은 게이트 — tools + `fullScopeOnly`, 범위 계정 403). 스냅샷 찍기 · 지우기는 `requireRole('admin','operator')` + 감사 로그.
+    비-admin 은 설명 · LLDP 문자열을 `maskErrText`, 비교의 BGP 피어 주소는 '(주소 가림)'(maskPeers 와 같은 등급). 장비 · 엣지 왕복 0 — **엣지 수신 계약은 바꾸지 않았다**(중앙이 받던 장비 레코드 · 표본으로 계산).
+  - 일 기록 표(`cvp.db`): `port_lastlink`(포트별 마지막 링크 날 — **최신 전용 표**, port_daily GROUP BY MAX 로 만들지 않는다) · `dev_linkhist`(장비 기록 시작 날) · `port_flap_daily` ·
+    `dev_port_daily` · `xcvr_daily`. 쓰기는 기존 적재 경로 안(`insertSample` · `saveDevices` 트랜잭션)에서 upsert(스칼라 MIN/MAX). **옛 레코드(ts ≤ 저장된 ts)는 플랩 · 포트 수 · 광량을 쓰지 않는다**(순서 뒤바뀜을 플랩으로 세지 않게 — 테스트 ⑦).
+    플랩 = 직전 oper 'up' → 지금 down/nolink + 관리상 켜짐. 광량 일 최저는 `optic.linked === true` 만 · -60 ~ +15 dBm 밖은 못 읽은 값. 일 기록 3종은 일 롤업과 같은 보존일로 정리, 최신 표 2종은 `pruneDevices` 가 장비와 함께 지운다.
+  - v3.38 이전 기록의 마지막 링크 날은 `backfillLastLink`(장비마다 트랜잭션 + 양보 · `cvp_kv` 표지로 한 번)가 옮긴다 — 회수 조회가 기다리지 않고 시작만 하고 `backfilling` 을 밝힌다.
+  - 요청 경로 조회는 **날 하나씩**(`day` 단독 인덱스) + `createYielder` — 오류 합 · 플랩 · 포트 수 · 광량. 업링크 사용률은 포트마다 PK 범위 + 양보(상한 2,000 포트).
+  - '못 읽은 값' 규칙: 오류 카운터를 기간 안에 한 번도 못 읽은 포트는 '판정 못 함'(0 이 아니다) · 기록 시작 뒤 한 번도 링크가 없던 포트는 일수로 세지 않는다(never) ·
+    장비 기록이 없으면 회수 후보 아님 · 예측은 기록 90일(GBIC 14일) 미만이면 '기록 부족', 목표 쪽으로 늘지 않으면 '예측 없음' · 양끝 비교에서 한쪽 null 은 '비교 못 함' · 스냅샷의 못 읽은 묶음은 null(빈 배열과 다르다).
+  - 토폴로지 이름 맞추기: 전체 이름(소문자) 우선, 짧은 이름(첫 점 앞)은 **하나뿐일 때만**(다른 법인 동명 장비를 잇지 않는다). 층은 자동 추정(서버 이웃 있음 = leaf · 스위치 이웃 2+ = spine).
+  - 위치 찾기: IP → MAC 은 vCenter 인벤토리로만(스위치 ARP 표는 수집하지 않는다 — 화면이 밝힌다). 답 = 이웃이 CVP 스위치가 아닌 포트, LLDP 로 못 가르는 포트(채널)는 배운 MAC 64개 이상이면 업링크로 본다(basis 'macs' — 추정).
+  - 스냅샷: 장비마다 gzip JSON 한 행 · 50대씩 트랜잭션 · 반쪽 스냅샷은 지운다 · 최근 30개 · 180일(`SNAP_MAX` · `SNAP_RETENTION_DAYS`) · 동시 1건(409). 한쪽이 한 CVP 만 찍었으면 비교도 그 CVP 만(나머지를 사라짐 · 새로 생김으로 지어내지 않는다).
+  - 데모: `mock/demo/cvp.js demoFabricLinks`(leaf ↔ spine 양쪽 LLDP · 일곱 번째 leaf 설명 불일치 · 아홉 번째 MTU 불일치) · `demoNetHistory`(`db.importNetHistory` — 지금은 데모 시드만 쓴다). 이름 · 수치는 가상.
+  - 남긴 것(다음 차수): ② 설정 백업 · ③ 버전 준수 · ⑧ MLAG/채널 이중화 — CVP 조회 경로 실장비 미확인 · 새 수집(엣지 계약 변경)이라 이번에 하지 않았다. ⑪ 트래픽 흐름 · ⑭ 경로 추적은 예약 작업.

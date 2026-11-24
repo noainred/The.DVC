@@ -278,6 +278,7 @@ async function demoL2(srv, devices, now) {
   const leaves = devices.filter((d) => d.telemetry === 'ok' && /-leaf-/.test(String(d.hostname || '')));
   if (!leaves.length) return;
   for (const d of leaves) { d.lldp = []; d.fdb = []; d.fdbMeta = { truncated: 0, portsOverCap: [], total: 0 }; d.l2At = now; }
+  demoFabricLinks(devices, leaves, now);   // v3.38 토폴로지 — leaf 업링크 ↔ spine(LLDP 양쪽)
   const slots = [];
   for (const d of leaves) for (const p of d.ports || []) if (p.oper === 'up' && !/\/1$/.test(p.name)) slots.push({ d, p });
   if (slots.length < 2) return;
@@ -320,6 +321,34 @@ async function demoL2(srv, devices, now) {
     }
   });
   for (const d of leaves) d.fdbMeta.total = d.fdb.length;
+}
+
+/**
+ * v3.38(⑥ ⑦ 토폴로지 · 양끝 불일치) 데모 — leaf 의 링크 올라온 업링크(이름이 /1 로 끝나는 100G) 앞 둘을 spine 두 대의 슬롯 포트에 잇고,
+ *   양쪽 LLDP 와 leaf 쪽 포트 설명(상대 이름 · 포트)을 맞춘다. 일곱 번째 leaf 는 설명이 다른 spine 을 가리키고(설명 불일치),
+ *   아홉 번째 leaf 의 첫 업링크는 MTU 1500(MTU 불일치) — 화면의 '불일치' 를 데모에서도 보이게. 이름 · 포트 · 수치는 가상값이다.
+ */
+function demoFabricLinks(devices, leaves, now) {
+  const spines = devices.filter((d) => d.telemetry === 'ok' && /-spine-/.test(String(d.hostname || '')));
+  if (!spines.length) return;
+  for (const sp of spines) { if (!Array.isArray(sp.lldp)) sp.lldp = []; sp.l2At = now; }
+  leaves.forEach((lf, j) => {
+    const ups = (lf.ports || []).filter((p) => p.oper === 'up' && /\/1$/.test(p.name)).slice(0, Math.min(2, spines.length));
+    ups.forEach((p, u) => {
+      const sp = spines[u % spines.length];
+      // 데모 spine 은 leaf 와 같은 배치(Ethernet1~48 · 49/1~54/1)다 — leaf 순번으로 앞 48칸에 잇고, 상대 끝 값(속도 · MTU · 채널)을 leaf 업링크와 맞춘다.
+      const spPort = `Ethernet${(j % 48) + 1}`;
+      const sport = (sp.ports || []).find((x) => x.name === spPort);
+      lf.lldp.push({ port: p.name, idx: '1', sysName: sp.hostname, portId: spPort, portDesc: '', chassisId: '' });
+      if (sport) {
+        sp.lldp.push({ port: spPort, idx: '1', sysName: lf.hostname, portId: p.name, portDesc: '', chassisId: '' });
+        Object.assign(sport, { oper: 'up', admin: 'up', operRaw: 'linkUp', desc: `${lf.hostname} ${p.name}`, speedBps: p.speedBps, mtu: 9214, duplex: p.duplex, lag: p.lag ? 'Port-Channel1' : '' });
+      }
+      const wrong = j % 7 === 6 && spines.length > 1 ? spines[(u + 1) % spines.length] : sp;
+      p.desc = `${wrong.hostname} ${spPort}`;
+      p.mtu = j % 9 === 3 && u === 0 ? 1500 : 9214;
+    });
+  });
 }
 
 let _seeding = null;
@@ -437,7 +466,60 @@ async function backfillCvp(servers, now = Date.now()) {
     const r = await runCvpFaultScan({ now: t, reason: `demo-history:${variant}`, notify: false });
     scans.push({ variant, opened: r.opened ?? null, closed: r.closed ?? null });
   }
-  return { samples, devSamples, scans };
+  // ③ v3.38 네트워크 기능 일 기록(포트 수 · GBIC 일 최저 · 플랩 · 마지막 링크 날 · 업링크 일 최대 사용률) — 추세 · 예측 화면이 데모에서 '기록 부족' 만 보이지 않게.
+  const net = await demoNetHistory(servers, db, P, optics, now).catch((e) => ({ error: e.message }));
+  return { samples, devSamples, scans, net };
+}
+
+/**
+ * v3.38 데모 일 기록 — 날짜 · 값은 전부 가상이다. 장비 hash 로 갈래를 나눠 '곧 고갈' · '늘지 않음' · 'GBIC 하강' · '플랩' · '오래 안 쓴 포트' 가 다 보이게.
+ */
+async function demoNetHistory(servers, db, P, optics, now) {
+  const DAY = 86_400_000;
+  const today = Math.floor(now / DAY);
+  const devPort = []; const xcvr = []; const flap = []; const lastLink = []; const firstDay = []; const util = [];
+  for (const srv of servers) {
+    for (const sw of demoSwitchSpecs(srv)) {
+      await new Promise((r) => setImmediate(r));
+      const d = demoCvpDevice(sw, now, { optics, P });
+      const ports = d.ports || [];
+      const total = ports.length;
+      const usedNow = ports.filter((p) => p.oper === 'up').length;
+      const kind = sw.h % 5;   // 0 = 빠르게 늘어남 · 1 = 천천히 · 그 밖 = 그대로
+      const per = kind === 0 ? Math.max(0.02, (total - usedNow) / 150) : kind === 1 ? 0.04 : 0;
+      if (total > 0) for (let i = 179; i >= 0; i--) devPort.push([srv.id, sw.key, today - i, total, Math.max(0, Math.round(usedNow - per * i))]);
+      firstDay.push([srv.id, sw.key, today - 300]);
+      ports.forEach((p, k) => {
+        if (p.oper === 'up') { lastLink.push([srv.id, sw.key, p.name, today]); return; }
+        const r = demoHash(`ll|${sw.key}|${p.name}`) % 4;
+        if (r === 0) lastLink.push([srv.id, sw.key, p.name, today - 200 - (k % 60)]);
+        else if (r === 1) lastLink.push([srv.id, sw.key, p.name, today - 40 - (k % 20)]);
+        // r 2 · 3 = 기록 시작 뒤 한 번도 링크 없음
+      });
+      const xs = (d.parts || []).filter((x) => x.kind === 'xcvr' && x.state !== 'absent' && x.dom);
+      xs.forEach((x, k) => {
+        const intf = String(x.name).split(' › ')[1];
+        const declining = sw.h % 6 === 1 && k === 0;
+        const rxNow = Number(x.dom.rxPower);
+        for (let i = 29; i >= 0; i--) xcvr.push([srv.id, sw.key, intf, today - i, declining ? Math.round((rxNow + 3.2 - i * 0.11) * 100) / 100 : Math.round((rxNow + (demoRand(`xd|${sw.key}|${intf}|${i}`) - 0.5) * 0.3) * 100) / 100, x.dom.txPower ?? null]);
+      });
+      if (sw.h % 4 === 1) {
+        const up = ports.filter((p) => p.oper === 'up');
+        const fp = up[(sw.h >>> 3) % Math.max(1, up.length)];
+        if (fp) for (const [ago, n] of [[0, 2], [1, 3], [3, 1], [5, 2]]) flap.push([srv.id, sw.key, fp.name, today - ago, n]);
+      }
+      // 업링크 일 최대 사용률(8일 전 이전만 — 최근 7일은 표본 백필이 채운다). 셋째 장비마다 늘어나는 추세.
+      if (sw.role === 'leaf' || sw.role === 'spine') {
+        const ups = ports.filter((p) => p.oper === 'up' && /\/1$/.test(p.name)).slice(0, 2);
+        for (const p of ups) {
+          const base = Number(p.inUtil) || 20;
+          const grow = sw.h % 3 === 0 ? 0.25 : 0.02;
+          for (let i = 179; i >= 8; i--) util.push([srv.id, sw.key, p.name, today - i, Math.max(1, Math.round((base - grow * i + (demoRand(`ut|${sw.key}|${p.name}|${i}`) - 0.5) * 6) * 10) / 10)]);
+        }
+      }
+    }
+  }
+  return db.importNetHistory(db.LOCAL_AGENT, { devPort, xcvr, flap, lastLink, firstDay, util });
 }
 
 export function _resetForTest() { _seeded = false; _seeding = null; }
