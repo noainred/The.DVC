@@ -35,6 +35,17 @@ function Seg({ items, value, onChange, label, wrap = false }) {
   );
 }
 
+/** 데이터가 있는데 다시 불러오기만 실패했을 때의 한 줄 안내(화면 전체를 오류 상자로 바꾸지 않는다 — 점검 C22). */
+function StaleBanner({ what, error, onRetry }) {
+  const why = error?.serverReason || error?.message || '';
+  return (
+    <div role="alert" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', padding: '8px 12px', borderRadius: 8, fontSize: 12, border: '1px solid var(--amber)', background: 'rgba(245,158,11,.12)' }}>
+      <span style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}>{what} 다시 불러오지 못했습니다{why ? `(${String(why).slice(0, 160)})` : ''} — 아래는 직전에 불러온 내용입니다.</span>
+      <button type="button" style={{ ...btn, height: 26 }} onClick={onRetry}>다시 시도</button>
+    </div>
+  );
+}
+
 function Tile({ k, n, s, color }) {
   return (
     <div style={{ ...card, borderRadius: 10, padding: '10px 12px' }}>
@@ -523,8 +534,9 @@ export default function RackTool() {
         const why = r.reason || '저장하지 못했습니다.';
         if (r.code === 'revConflict') {
           await loadRoom(roomIdRef.current);
-          setModalErr(`${why} 최신 배치를 불러왔습니다 — 확인한 뒤 다시 저장하세요.`);   // 창을 닫지 않는다(입력 유지 — 점검 C20)
-          say('warn', `${why} 최신 배치를 불러왔습니다.`);
+          // 창을 닫지 않는다(입력 유지 — 점검 C20). 서버 사유가 이미 '최신 배치를 불러온 뒤 다시 하세요' 라 덧붙이지 않는다(Chromium 확인에서 같은 말이 두 번 나왔다).
+          setModalErr(`${why} 입력은 그대로 두었습니다.`);
+          say('warn', why);
           return null;
         }
         setModalErr(why); say('err', why);
@@ -644,7 +656,7 @@ export default function RackTool() {
         </div>
       ) : null}
 
-      {treeErr && tree ? <ErrorBox error={treeErr} /> : null}
+      {treeErr && tree ? <StaleBanner what="목록을" error={treeErr} onRetry={() => { loadTree(); loadRoom(roomIdRef.current); }} /> : null}
       {note ? (
         <div role={note.tone === 'err' ? 'alert' : 'status'} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '8px 12px', borderRadius: 8, fontSize: 12,
           border: `1px solid ${note.tone === 'ok' ? 'var(--green)' : note.tone === 'warn' ? 'var(--amber)' : 'var(--red)'}`,
@@ -675,7 +687,7 @@ export default function RackTool() {
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'flex-start' }}>
             <div style={{ ...card, flex: '999 1 560px' }}>
               {loadingRoom ? <div style={{ padding: '6px 14px', fontSize: 11, color: 'var(--text-dim)' }}>불러오는 중…</div> : null}
-              {viewErr ? <div style={{ padding: '6px 14px' }}><ErrorBox error={viewErr} /></div> : null}
+              {viewErr ? <div style={{ padding: '6px 14px' }}><StaleBanner what="전산실을" error={viewErr} onRetry={() => loadRoom(roomIdRef.current)} /></div> : null}
               {!racks.length ? (
                 <div style={{ padding: 18, fontSize: 13, color: 'var(--text-dim)' }}>이 전산실에 랙이 없습니다.{canEdit ? ' ‘배치 편집’ › ‘+ 랙’ 으로 추가하세요.' : ''}</div>
               ) : (
