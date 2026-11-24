@@ -315,3 +315,51 @@ test('⑩ DB — 상태 · 변화 적재 → 칸 요약 · portRow', { skip: !sq
   const stale = S.portRow({ id: 'p', kind: 'fc', linkUp: true, speedGbps: 16 }, { last: { ts: NOW - 5 * HOUR, in: 1e9, out: 1e9 }, now: NOW });
   assert.deepEqual([stale.nowPct, stale.stale], [null, true], '오래된 표본은 최근 값으로 쓰지 않는다');
 });
+
+/* ── v3.36.1 사용자 신고 '사용량이 보이지 않음'(실제 현장 496 포트 전부 못 읽음) — 이유 판정 · 근거 · FC 대체 경로 ── */
+test('v3.36.1 ⑪ 이유 판정(throughputWhyOf) — 짝 실패 · 포트 단위 없음 · 표본 실패가 빈 사유 · 틀린 문구로 새지 않는다', () => {
+  const base = { ports: 10, method: 'api', db: true, units: 6, portUnits: 4, upPorts: 4, unmatched: 0, withData: 3 };
+  assert.equal(S.throughputWhyOf(base), '');
+  assert.equal(S.throughputWhyOf({ ...base, unmatched: 4, withData: 0 }), 'no-match', '예전에는 사유가 빈 글자였다');
+  assert.equal(S.throughputWhyOf({ ...base, portUnits: 0, withData: 0 }), 'no-port-units', '예전에는 ‘아직 표본이 없습니다’ 로 틀리게 말했다');
+  assert.equal(S.throughputWhyOf({ ...base, units: 0, portUnits: 0, withData: 0, diag: { ok: false } }), 'sample-failed');
+  assert.equal(S.throughputWhyOf({ ...base, units: 0, portUnits: 0, withData: 0, diag: null }), 'no-samples');
+  assert.equal(S.throughputWhyOf({ ...base, withData: 0 }), 'no-recent');
+  assert.equal(S.throughputWhyOf({ ...base, method: 'ssh' }), 'ssh', 'SSH 는 결정대로 먼저');
+  assert.equal(S.throughputWhyOf({ ...base, ports: 0, snapFailed: true }), 'collect-failed');
+});
+
+test('v3.36.1 ⑫ 표본 진단(sampleDiag) — 경로별 항목 수 · 오류를 상한으로 남긴다', async () => {
+  const D = await import('../src/storage/sampleDiag.js');
+  D._resetSampleDiagForTest();
+  D.noteSampleDiag('u9', { at: NOW, ok: true, source: 'edge', sample: { units: [{ kind: 'sp' }, { kind: 'sp' }, { kind: 'port' }, { kind: { x: 1 } }],
+    probe: { paths: { cpu: 4, readBytes: 0, ethIn: 'error', 'bad key!': 1 }, errors: ['ethIn: 422 x'.repeat(50)], fcPath: 'fePort' } } });
+  const g = D.sampleDiagOf('u9');
+  assert.deepEqual(g.kinds, { sp: 2, port: 1, unknown: 1 });
+  assert.deepEqual(g.paths, { cpu: 4, readBytes: 0, ethIn: 'error' });
+  assert.ok(g.errors[0].length <= 160);
+  assert.equal(g.fcPath, 'fePort');
+  assert.equal(D.sampleDiagOf('nope'), null);
+});
+
+test('v3.36.1 ⑬ FC 대체 경로 — target 이 비면 fePort 를 묻고 어느 쪽인지 probe.fcPath 로 밝힌다', async () => {
+  const asked = [];
+  const ent = (ts, values) => ({ content: { path: 'x', timestamp: new Date(ts).toISOString(), interval: 60, values } });
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const u = decodeURIComponent(String(url)); asked.push(u);
+    let body = { entries: [] };
+    if (u.includes('cpu.summary')) body = { entries: [ent(NOW, { spa: 10, spb: 20 })] };
+    else if (u.includes('fibreChannel.fePort.*.readBytes')) body = { entries: [ent(NOW, { spa: { spa_iom_0_fc0: 600e6 } }), ent(NOW - 60_000, { spa: { spa_iom_0_fc0: 0 } })] };
+    return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    const s = await A.sampleUnity({ id: 'u1', type: 'unity480', host: '127.0.0.1', username: 'u', password: 'p' }, { now: NOW });
+    assert.equal(s.probe.fcPath, 'fePort');
+    assert.ok(asked.some((u) => u.includes('fibreChannel.target.*.readBytes')), '먼저 target');
+    assert.ok(asked.some((u) => u.includes('fibreChannel.fePort.*.readBytes')), '비면 fePort');
+    const port = s.units.find((u) => u.name === 'SPA IOM 0 FC0');
+    assert.ok(port, 'fePort 값으로 포트 단위가 생긴다');
+    assert.equal(S.unitIdByPort(s.units).get(F.portMatchKey('spa_iom_0_fc0')), port.id, '구성 포트 id 와 짝지어진다');
+  } finally { globalThis.fetch = realFetch; }
+});

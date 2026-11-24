@@ -1560,10 +1560,10 @@ Prometheus/OTel 익스포터(선택 토큰).
 | POST | `/tools/snapshots/holds/release` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/vcTools.js:274](../server/src/routes/api/vcTools.js#L274) |
 | GET | `/tools/solutions` | 권한 `tools` | [server/src/routes/api/vcTools.js:91](../server/src/routes/api/vcTools.js#L91) |
 | GET | `/tools/storage` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:89](../server/src/routes/api/storageMon.js#L89) |
-| GET | `/tools/storage-growth` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:880](../server/src/routes/api/storageMon.js#L880) |
-| GET | `/tools/storage-growth/:id/daily` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:955](../server/src/routes/api/storageMon.js#L955) |
-| GET | `/tools/storage-growth/settings` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:967](../server/src/routes/api/storageMon.js#L967) |
-| POST | `/tools/storage-growth/settings` | 역할 `admin` · `fullScopeOnly` · `requireSettingsOwner` | [server/src/routes/api/storageMon.js:975](../server/src/routes/api/storageMon.js#L975) |
+| GET | `/tools/storage-growth` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:885](../server/src/routes/api/storageMon.js#L885) |
+| GET | `/tools/storage-growth/:id/daily` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:960](../server/src/routes/api/storageMon.js#L960) |
+| GET | `/tools/storage-growth/settings` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:972](../server/src/routes/api/storageMon.js#L972) |
+| POST | `/tools/storage-growth/settings` | 역할 `admin` · `fullScopeOnly` · `requireSettingsOwner` | [server/src/routes/api/storageMon.js:980](../server/src/routes/api/storageMon.js#L980) |
 | GET | `/tools/storage-paths` | 권한 `tools` | [server/src/routes/api/storagePaths.js:36](../server/src/routes/api/storagePaths.js#L36) |
 | GET | `/tools/storage-paths.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/storagePaths.js:55](../server/src/routes/api/storagePaths.js#L55) |
 | GET | `/tools/storage-usage` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageUsage.js:33](../server/src/routes/api/storageUsage.js#L33) |
@@ -1578,11 +1578,11 @@ Prometheus/OTel 익스포터(선택 토큰).
 | DELETE | `/tools/storage/devices/:id` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:224](../server/src/routes/api/storageMon.js#L224) |
 | GET | `/tools/storage/devices/:id/areas` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:585](../server/src/routes/api/storageMon.js#L585) |
 | GET | `/tools/storage/devices/:id/areas/json` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:590](../server/src/routes/api/storageMon.js#L590) |
-| GET | `/tools/storage/devices/:id/client-dist` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:826](../server/src/routes/api/storageMon.js#L826) |
+| GET | `/tools/storage/devices/:id/client-dist` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:831](../server/src/routes/api/storageMon.js#L831) |
 | POST | `/tools/storage/devices/:id/collect` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:278](../server/src/routes/api/storageMon.js#L278) |
 | GET | `/tools/storage/devices/:id/history` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:626](../server/src/routes/api/storageMon.js#L626) |
-| GET | `/tools/storage/devices/:id/ifaces` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:751](../server/src/routes/api/storageMon.js#L751) |
-| GET | `/tools/storage/devices/:id/node-clients` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:789](../server/src/routes/api/storageMon.js#L789) |
+| GET | `/tools/storage/devices/:id/ifaces` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:756](../server/src/routes/api/storageMon.js#L756) |
+| GET | `/tools/storage/devices/:id/node-clients` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:794](../server/src/routes/api/storageMon.js#L794) |
 | GET | `/tools/storage/devices/:id/node-load` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:659](../server/src/routes/api/storageMon.js#L659) |
 | GET | `/tools/storage/devices/export.csv` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:383](../server/src/routes/api/storageMon.js#L383) |
 | GET | `/tools/storage/devices/export.txt` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:407](../server/src/routes/api/storageMon.js#L407) |
@@ -1591,8 +1591,8 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/storage/devices/import/test/:id` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:578](../server/src/routes/api/storageMon.js#L578) |
 | GET | `/tools/storage/devices/sample.csv` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:398](../server/src/routes/api/storageMon.js#L398) |
 | GET | `/tools/storage/devices/sample.txt` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:415](../server/src/routes/api/storageMon.js#L415) |
-| GET | `/tools/storage/history` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:989](../server/src/routes/api/storageMon.js#L989) |
-| GET | `/tools/storage/ifaces` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:732](../server/src/routes/api/storageMon.js#L732) |
+| GET | `/tools/storage/history` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:994](../server/src/routes/api/storageMon.js#L994) |
+| GET | `/tools/storage/ifaces` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:737](../server/src/routes/api/storageMon.js#L737) |
 | GET | `/tools/storage/intervals` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:308](../server/src/routes/api/storageMon.js#L308) |
 | PUT | `/tools/storage/intervals` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:330](../server/src/routes/api/storageMon.js#L330) |
 | POST | `/tools/storage/test` | 역할 `admin` · `fullScopeOnly` · `textFields` | [server/src/routes/api/storageMon.js:158](../server/src/routes/api/storageMon.js#L158) |

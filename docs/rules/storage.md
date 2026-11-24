@@ -927,3 +927,9 @@
   ⑥ 비-admin: iSCSI · NAS 데이터 IP 를 `maskSnapAddress` 가 가리고, 그 IP 가 새로 실리는 uemcli `/net/if` 원문(`extra.cliRaw`)에서도 그 주소만 지운다(원문 전체를 훑지는 않는다 — 기존 한계 그대로).
   ⚠ **실장비 미확인**: REST 필드(currentSpeed · requestedSpeed · availableSpeeds · isLinkUp …) · uemcli 키 · 이더넷 지표 경로(`sp.*.net.device.*.bytesIn/Out`)는 문서 지식이다. 첫 실수집의 probe · CLI 원문으로 파서를 맞출 것(설계 §7 명령 목록).
   **남긴 것**: 인터페이스별(NAS 서버 · iSCSI 포털) 처리량은 없다(포트 단위) · 링크 묶음(LACP) 구성 미수집 · FC 포트별 로그인 호스트 수 미수집 · 장비 화면의 '80% 이상이던 시간' 은 5분 원시 칸일 때만(24시간 창은 15분 칸이라 숨김).
+  ⚠ **v3.36.1 — 사용자 신고 '사용량이 보이지 않음'(실제 현장 · Unity 496 포트 전부 ‘사용량 못 읽음’)**: 사유가 빈 글자이거나 틀렸다 — 표본은 있는데 포트 이름이 짝지어지지 않으면
+  사유 '' (무음), SP 값만 있고 포트 단위가 없으면 '아직 표본이 없습니다'(틀림), 표본 실패는 폴러 상태에만 있었다. 이제 ① 이유 판정은 `ifaceSummary.throughputWhyOf` 하나
+  (ssh · sample-off · db-unavailable · sample-failed · no-samples · no-port-units · no-match · no-recent) ② 근거 = 장비별 **마지막 표본 시도 진단**(`storage/sampleDiag.js` —
+  경로별 항목 수 · 오류 · 단위 종류 · FC 경로. 로컬 폴러와 중앙 수신에서 기록 · 메모리) + 표본 쪽 포트 이름 · 짝 없는 구성 포트(각 8개) ③ 화면은 사유를 **표 위에** 사유별로 묶고
+  비-admin 에는 진단 오류 원문을 가린다 ④ FC 처리량 `fibreChannel.target.*` 가 비면 `fibreChannel.fePort.*` 를 한 번 더(실장비 미확인 — probe.fcPath 가 밝힘)
+  ⑤ WWN 은 포트 WWN(뒤 8바이트) 전체 — 노드 WWN 꼬리가 같아 모든 포트가 같아 보였다. 회귀 `unityIface3350` ⑪~⑬ · 웹 `ifaceText.test.js`.

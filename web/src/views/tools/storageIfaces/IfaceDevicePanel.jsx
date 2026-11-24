@@ -3,7 +3,7 @@ import { ResponsiveContainer, ComposedChart, Line, XAxis, YAxis, Tooltip, Cartes
 import { fetchJson } from '../../../api.js';
 import { Loading, ErrorBox } from '../../../components/ui.jsx';
 import { STable } from '../../../components/STable.jsx';
-import { Seg, Strip, StateCell, SpeedCell } from './ifaceParts.jsx';
+import { Seg, Strip, StateCell, SpeedCell, WhyDetail } from './ifaceParts.jsx';
 import {
   RANGES, UNITS, levelColor, rateText, pctText, speedText, timeText, hourText, KIND_LABEL, portKindOf, WHY_TEXT, PROBE_STATE, sortVal, bucketText,
 } from './ifaceText.js';
@@ -123,7 +123,7 @@ export default function IfaceDevicePanel({ deviceId, range, onRange, unit, onUni
         <button type="button" className="tab" style={{ flex: 'none', padding: '4px 12px' }} disabled={loading} onClick={() => load()}>{loading ? '읽는 중…' : '새로 고침'}</button>
       </div>
       {err && <ErrorBox error={`새로 고침 실패 — 아래는 직전 결과입니다: ${err.message || err}`} />}
-      {v.throughputWhy && <div className="badge gray" style={{ whiteSpace: 'normal', padding: '6px 10px', lineHeight: 1.6 }}>{WHY_TEXT[v.throughputWhy] || v.throughputWhy}</div>}
+      {v.throughputWhy && <div className="card" style={{ padding: '10px 14px', borderColor: 'rgba(245,158,11,.45)' }}><b style={{ fontSize: 13 }}>사용량을 못 읽는 이유</b><WhyDetail why={v.throughputWhy} detail={v.throughputDetail} /></div>}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 10 }}>
         <div className="card kpi"><div className="label">포트</div><div className="value">{v.ports.length}</div>

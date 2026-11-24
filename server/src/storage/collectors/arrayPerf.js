@@ -47,6 +47,12 @@ export const UNITY_FC_PATHS = Object.freeze({ readBytes: 'sp.*.fibreChannel.targ
  * v3.35.0(Unity 인터페이스 — 설계 docs/design/unity-iface): 이더넷 포트(iSCSI · NAS 공통) 누적 바이트. ⚠ 경로는 Unity 성능 지표 문서 지식이고
  *   **실장비 미확인**이다(FC 경로와 같은 수준) — 그 장비가 이 경로의 이력을 모으지 않으면 probe.paths 가 0 · 'error' 로 밝힌다.
  */
+/**
+ * v3.36.1(사용자 신고 '사용량이 보이지 않음'): FC 처리량의 **다른 경로**. `fibreChannel.target.*` 가 항목을 하나도 주지 않으면(경로 없음 · 이력 수집 꺼짐)
+ *   `fibreChannel.fePort.*` 를 한 번 더 묻는다. ⚠ 두 경로 모두 Unity 성능 지표 문서 지식이고 **실장비 미확인**이다 — 어느 쪽을 썼는지는 probe.fcPath 가 밝힌다.
+ */
+export const UNITY_FC_PATHS_ALT = Object.freeze({ readBytes: 'sp.*.fibreChannel.fePort.*.readBytes', writeBytes: 'sp.*.fibreChannel.fePort.*.writeBytes',
+  reads: 'sp.*.fibreChannel.fePort.*.reads', writes: 'sp.*.fibreChannel.fePort.*.writes' });
 export const UNITY_ETH_PATHS = Object.freeze({ bytesIn: 'sp.*.net.device.*.bytesIn', bytesOut: 'sp.*.net.device.*.bytesOut' });
 export const LAT_UNIT_NOTE ={ powermax: 'ms(문서)', powerstore: 'us→ms(가정)', unity480: '없음(SP 단위 응답 시간 경로 미사용)' };
 export const HBPS_NOTE = { powermax: 'HostMBs×1e6', powerstore: 'read_bandwidth+write_bandwidth(B/s)', unity480: 'FC target readBytes+writeBytes 누적 델타/초' };
@@ -435,10 +441,22 @@ export async function sampleUnity(full, { signal = null, now = Date.now(), port 
   };
   const cpuE = await fetchEntries('cpu', UNITY_CPU_PATH, 4);   // 401 이면 여기서 던진다(첫 호출)
   if (signal?.aborted) throw new Error('수집 취소(타임아웃)');
-  const rbE = await fetchEntries('readBytes', UNITY_FC_PATHS.readBytes, 4);
-  const wbE = await fetchEntries('writeBytes', UNITY_FC_PATHS.writeBytes, 4);
-  const rdE = await fetchEntries('reads', UNITY_FC_PATHS.reads, 4);
-  const wrE = await fetchEntries('writes', UNITY_FC_PATHS.writes, 4);
+  let rbE = await fetchEntries('readBytes', UNITY_FC_PATHS.readBytes, 4);
+  let wbE = await fetchEntries('writeBytes', UNITY_FC_PATHS.writeBytes, 4);
+  let rdE = await fetchEntries('reads', UNITY_FC_PATHS.reads, 4);
+  let wrE = await fetchEntries('writes', UNITY_FC_PATHS.writes, 4);
+  probe.fcPath = rbE.length || wbE.length ? 'target' : '';
+  // v3.36.1: target 경로가 비면 fePort 경로를 한 번 더(포트 단위를 읽을 때만 — 위 상수 머리말).
+  if (withPorts && !rbE.length && !wbE.length) {
+    const a = await fetchEntries('readBytesFe', UNITY_FC_PATHS_ALT.readBytes, 4);
+    const b = await fetchEntries('writeBytesFe', UNITY_FC_PATHS_ALT.writeBytes, 4);
+    if (a.length || b.length) {
+      rbE = a; wbE = b;
+      rdE = await fetchEntries('readsFe', UNITY_FC_PATHS_ALT.reads, 4);
+      wrE = await fetchEntries('writesFe', UNITY_FC_PATHS_ALT.writes, 4);
+      probe.fcPath = 'fePort';
+    }
+  }
   // v3.35.0: 이더넷 포트 처리량(포트 단위를 읽을 때만 — withPorts 가 꺼지면 SP 값만 읽던 예전 호출 수 그대로).
   const einE = withPorts ? await fetchEntries('ethIn', UNITY_ETH_PATHS.bytesIn, 4) : [];
   const eoutE = withPorts ? await fetchEntries('ethOut', UNITY_ETH_PATHS.bytesOut, 4) : [];
