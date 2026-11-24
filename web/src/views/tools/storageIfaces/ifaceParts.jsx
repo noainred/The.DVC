@@ -1,5 +1,6 @@
 import React from 'react';
-import { LEVELS, GAP_BG, levelColor, stateBadge, pctText, speedText, timeText } from './ifaceText.js';
+import BoldText from '../../../components/boldText.jsx';
+import { LEVELS, GAP_BG, levelColor, stateBadge, pctText, speedText, timeText, WHY_TEXT } from './ifaceText.js';
 
 /** 인터페이스 화면(전 장비 · 장비 한 대) 공용 조각(v3.35.0). */
 export function Seg({ items, value, onPick, label }) {
@@ -61,5 +62,37 @@ export function SpeedCell({ r }) {
         {r.linkUp === false ? '' : slow ? `최대 ${speedText(r.maxGbps)}` : typeof r.requested === 'number' ? `고정 ${speedText(r.requested)}` : ''}
       </span>
     </span>
+  );
+}
+
+/** v3.36.1 — 사용량이 비는 이유 + 근거(서버 throughputDetail). 단정하지 않고 받은 사실만 보인다. */
+export function WhyDetail({ why, detail }) {
+  if (!why) return null;
+  const d = detail || {};
+  const dg = d.diag;
+  const paths = dg?.paths ? Object.entries(dg.paths) : [];
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
+      <span><BoldText text={WHY_TEXT[why] || why} /></span>
+      {dg && (
+        <span className="muted">
+          마지막 표본 시도 {timeText(dg.at)} · {dg.source === 'edge' ? '엣지가 올린 표본' : '이 포탈에서 수집'} · {dg.ok ? '성공' : '실패'}
+          {dg.fcPath ? ` · FC 경로 ${dg.fcPath}` : ''}
+          {Object.keys(dg.kinds || {}).length > 0 && ` · 단위 ${Object.entries(dg.kinds).map(([k, n]) => `${k} ${n}`).join(' · ')}`}
+        </span>
+      )}
+      {paths.length > 0 && <span className="muted" style={{ fontFamily: 'var(--mono)', overflowWrap: 'anywhere' }}>경로별 항목 수: {paths.map(([k, n]) => `${k} ${n}`).join(' · ')}</span>}
+      {dg?.error && <span style={{ color: 'var(--amber)', overflowWrap: 'anywhere' }}>오류: {dg.error}</span>}
+      {(dg?.errors || []).map((e, i) => <span key={i} className="muted" style={{ overflowWrap: 'anywhere' }}>· {e}</span>)}
+      {dg?.counterNote && <span className="muted">{dg.counterNote}</span>}
+      {why === 'no-match' && (
+        <>
+          <span className="muted" style={{ fontFamily: 'var(--mono)', overflowWrap: 'anywhere' }}>표본 쪽 포트 이름: {(d.unitNames || []).join(' · ') || '—'}</span>
+          <span className="muted" style={{ fontFamily: 'var(--mono)', overflowWrap: 'anywhere' }}>구성 쪽 포트 id(짝 없음 {d.unmatched ?? 0}개 중): {(d.unmatchedPorts || []).join(' · ') || '—'}</span>
+        </>
+      )}
+      {why === 'no-port-units' && d.unitKinds && <span className="muted">이 포탈에 저장된 단위: {Object.entries(d.unitKinds).map(([k, n]) => `${k} ${n}`).join(' · ') || '없음'}</span>}
+      {!dg && ['no-samples', 'no-port-units', 'no-match', 'no-recent'].includes(why) && <span className="muted">이 포탈은 아직 이 장비의 표본 시도 기록이 없습니다(재시작 뒤 첫 주기 전이거나, 엣지에서 실패한 표본은 중앙에 오지 않습니다).</span>}
+    </div>
   );
 }

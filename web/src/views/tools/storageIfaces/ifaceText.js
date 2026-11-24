@@ -126,12 +126,16 @@ export function kpisOf(devices = [], rows = []) {
     fc: rows.filter((r) => r.kind === 'fc').length, eth: rows.filter((r) => r.kind === 'eth').length };
 }
 
-/** 처리량을 못 읽은 이유(장비 단위 — 서버 throughputWhy). 단정하지 않는다. */
+/** 처리량을 못 읽은 이유(장비 단위 — 서버 throughputWhy · 판정은 storage/ifaceSummary.js throughputWhyOf 하나). 단정하지 않고 근거(throughputDetail)를 함께 보인다. */
 export const WHY_TEXT = Object.freeze({
   ssh: 'SSH(uemcli) 로 수집하는 장비라 사용량을 읽지 않습니다 — 속도 · 상태만 보입니다. 사용량은 REST 로 등록한 장비만 5분 표본으로 읽습니다.',
   'sample-off': '이 장비는 성능 표본 수집이 꺼져 있습니다(장비 등록 › 디렉터 · 노드 · SP 성능 표본).',
   'db-unavailable': '이 포탈의 저장소(DB)를 열지 못해 사용량을 읽지 못했습니다.',
-  'no-samples': '아직 이 장비의 5분 표본이 없습니다 — 첫 표본이 오기 전이거나, 장비가 포트 성능 이력을 주지 않았을 수 있습니다.',
+  'no-samples': '이 포탈에 이 장비의 5분 표본이 하나도 없습니다 — 첫 표본 전이거나, 엣지 수집 장비면 엣지에서 표본이 실패해 올라오지 않았을 수 있습니다(엣지 로그 확인).',
+  'sample-failed': '5분 표본 수집이 실패하고 있습니다 — 아래 오류가 마지막 시도의 사유입니다(인증 · 접속 · 장비가 성능 이력을 주지 않음 등).',
+  'no-port-units': '표본은 오는데 **포트 단위 값이 없습니다**(SP 값만) — 장비가 포트 처리량 지표 경로를 주지 않았습니다. 아래 ‘경로별 항목 수’ 가 근거입니다(0 · error 인 경로). Unity 의 성능 이력 수집(메트릭 서비스)이 꺼져 있어도 이렇게 보입니다.',
+  'no-match': '포트 단위 값은 오는데 **포트 구성의 이름과 짝지어지지 않습니다** — 아래 두 이름 목록이 근거입니다. 이 목록을 보내 주시면 짝짓는 규칙을 맞추겠습니다.',
+  'no-recent': '포트 짝은 맞는데 최근 · 이 기간 안의 값이 없습니다 — 표본이 멈췄거나 오래됐습니다(엣지 · 폴러 상태 확인).',
   'collect-failed': '마지막 수집이 실패해 포트 구성을 볼 수 없습니다 — 장비별 탭의 오류 사유를 확인하세요(지난 값을 지어내지 않습니다).',
   'no-config': '포트 구성을 아직 읽지 못했습니다(다음 수집을 기다리거나 아래 수집 출처의 사유를 확인하세요).',
 });
@@ -151,4 +155,24 @@ export function notesOf({ busyPct, idlePct } = {}) {
     'FC 포트를 **스위치 쪽에서 본 값**(송수신 합)은 SAN 스토리지 성능에 있습니다. 여기는 Unity 가 스스로 보고한 값이라 숫자가 다를 수 있습니다.',
     '값이 없는 칸(빗금)은 0 이 아닙니다 — 표본이 없었거나 장비가 그 구간을 보관하지 않습니다.',
   ];
+}
+
+/** 사유별로 장비를 묶는다(화면 맨 위 요약 — 사유가 있는 장비만). 순서는 WHY_TEXT 순. */
+export function groupByWhy(devices = []) {
+  const order = Object.keys(WHY_TEXT);
+  const m = new Map();
+  for (const d of devices || []) {
+    const w = d?.view?.throughputWhy;
+    if (!w) continue;
+    if (!m.has(w)) m.set(w, []);
+    m.get(w).push(d);
+  }
+  return [...m.entries()].sort((a, b) => (order.indexOf(a[0]) + 1 || 99) - (order.indexOf(b[0]) + 1 || 99));
+}
+/** WWN 표시 — Unity FC 는 노드 WWN + 포트 WWN(16바이트)으로 와서 뒤 몇 글자는 포트끼리 같다. 포트 WWN(뒤 8바이트)을 통째로 보인다. */
+export function portWwn(w) {
+  const v = String(w || '').trim();
+  if (!v) return '';
+  const parts = v.split(':');
+  return parts.length >= 16 ? parts.slice(-8).join(':') : v;
 }

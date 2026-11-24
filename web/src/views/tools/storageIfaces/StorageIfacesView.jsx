@@ -4,10 +4,10 @@ import { fetchJson } from '../../../api.js';
 import { Loading, ErrorBox, Kpi } from '../../../components/ui.jsx';
 import { STable } from '../../../components/STable.jsx';
 import IfaceDevicePanel from './IfaceDevicePanel.jsx';
-import { Seg, Legend, Strip, UtilBar, StateCell, SpeedCell } from './ifaceParts.jsx';
+import { Seg, Legend, Strip, UtilBar, StateCell, SpeedCell, WhyDetail } from './ifaceParts.jsx';
 import {
   RANGES, KINDS, UNITS, rateText, pctText, timeText, hourText,
-  KIND_LABEL, flattenRows, kindMatch, textMatch, isProblem, kpisOf, WHY_TEXT, sortVal, notesOf,
+  KIND_LABEL, flattenRows, kindMatch, textMatch, isProblem, kpisOf, sortVal, notesOf, groupByWhy, portWwn,
 } from './ifaceText.js';
 
 /**
@@ -15,7 +15,7 @@ import {
  * 서버(GET /tools/storage/ifaces)가 판정까지 해서 주고, 여기는 그린다. 무거운 조회라 폴링하지 않는다(탭 열 때 1회 + 새로 고침).
  * 조건(기간)을 바꾸면 이전 요청을 끊고 늦게 온 응답은 버린다. 장비를 누르면 그 장비 화면(시안 ②)으로.
  */
-const ifText = (r) => (r.kind === 'fc' ? (r.wwn ? `WWN …${r.wwn.slice(-11)}` : '') : (r.ifs || []).map((x) => [x.nasServer || x.id, x.ip, x.vlan ? `VLAN ${x.vlan}` : ''].filter(Boolean).join(' ')).join(' · '));
+const ifText = (r) => (r.kind === 'fc' ? (r.wwn ? `WWN ${portWwn(r.wwn)}` : '') : (r.ifs || []).map((x) => [x.nasServer || x.id, x.ip, x.vlan ? `VLAN ${x.vlan}` : ''].filter(Boolean).join(' ')).join(' · '));
 
 export default function StorageIfacesView({ dcName = (x) => x || '미지정' }) {
   const [range, setRange] = useState('24h');
@@ -81,6 +81,24 @@ export default function StorageIfacesView({ dcName = (x) => x || '미지정' }) 
         <Kpi label="사용량 못 읽음" value={k.unreadDevices} unit="대" meta={`${k.unreadPorts} 포트 · 정상에도 이상에도 넣지 않음`} />
       </div>
 
+      {/* v3.36.1(사용자 신고 '사용량이 보이지 않음'): 사유를 표 **위에** 사유별로 묶어 근거와 함께 — 예전엔 40행 표 아래에 있어 보이지 않았고, 짝 실패는 사유가 비었다. */}
+      {(groupByWhy(devs).length > 0 || devs.some((d) => !d.view)) && (
+        <div className="card" style={{ padding: '10px 14px', fontSize: 12.5, display: 'flex', flexDirection: 'column', gap: 10, borderColor: 'rgba(245,158,11,.45)' }}>
+          <b style={{ fontSize: 13 }}>사용량을 못 읽는 장비 {groupByWhy(devs).reduce((a, [, l]) => a + l.length, 0)}대 — 사유별</b>
+          {groupByWhy(devs).map(([why, list]) => (
+            <div key={why} style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingTop: 8, borderTop: '1px solid var(--border-soft, #1f2a40)' }}>
+              <span className="flex gap" style={{ flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                <span className="badge amber">{list.length}대</span>
+                {list.map((d) => <button key={d.id} type="button" className="tab" style={{ flex: 'none', padding: '2px 9px', fontSize: 12 }} onClick={() => setDeviceId(d.id)}>{d.name || d.id}</button>)}
+              </span>
+              <WhyDetail why={why} detail={list[0].view.throughputDetail} />
+              {list.length > 1 && <span className="muted" style={{ fontSize: 11.5 }}>근거는 첫 장비({list[0].name || list[0].id})의 것입니다 — 다른 장비는 이름을 눌러 장비 화면에서 확인하세요.</span>}
+            </div>
+          ))}
+          {devs.filter((d) => !d.view).map((d) => <span key={d.id}>{d.name || d.id}<span className="muted"> — 화면을 만들지 못했습니다(서버 오류)</span></span>)}
+        </div>
+      )}
+
       <div className="flex gap" style={{ flexWrap: 'wrap', alignItems: 'center', gap: 10 }}>
         <Seg label="기간" items={RANGES} value={range} onPick={setRange} />
         <Seg label="종류" items={KINDS} value={kind} onPick={setKind} />
@@ -140,17 +158,6 @@ export default function StorageIfacesView({ dcName = (x) => x || '미지정' }) 
           </div>
         )}
       </div>
-
-      {devs.some((d) => d.view && d.view.throughputWhy) && (
-        <div className="card" style={{ padding: '10px 14px', fontSize: 12.5, display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <b style={{ fontSize: 13 }}>사용량이 비어 있는 장비</b>
-          {devs.filter((d) => d.view?.throughputWhy).map((d) => (
-            <span key={d.id}><button type="button" style={{ background: 'none', border: 0, color: 'var(--accent)', cursor: 'pointer', padding: 0, font: 'inherit' }} onClick={() => setDeviceId(d.id)}>{d.name || d.id}</button>
-              <span className="muted"> — {WHY_TEXT[d.view.throughputWhy] || d.view.throughputWhy}</span></span>
-          ))}
-          {devs.filter((d) => !d.view).map((d) => <span key={d.id}>{d.name || d.id}<span className="muted"> — 화면을 만들지 못했습니다(서버 오류)</span></span>)}
-        </div>
-      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 420px), 1fr))', gap: 12 }}>
         <div className="card" style={{ padding: 0, overflow: 'hidden', minWidth: 0 }}>
