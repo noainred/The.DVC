@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>VM 개체 보기 — 전원 이력 탭(12개월 달력)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.muted{color:#8b9bb4}
+.tb{display:flex;align-items:center;gap:14px;height:44px;padding:0 16px;background:#0f1626;border-bottom:1px solid #243049}
+.logo{display:inline-flex;align-items:center;gap:8px;font-weight:800;font-size:14px}
+.logo .v{width:26px;height:26px;border-radius:7px;background:#3b82f6;display:inline-flex;align-items:center;justify-content:center;font-size:13px;color:#fff}
+.mock{font-size:11px;font-weight:800;color:#fcd34d;background:rgba(245,158,11,.16);border-radius:6px;padding:2px 7px}
+.sb{width:236px;flex:none;background:#0f1626;border-right:1px solid #243049;padding:12px 10px;display:flex;flex-direction:column;gap:2px}
+.sb a{display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:8px;color:#e6edf6;font-weight:600;text-decoration:none;font-size:13px}
+.sb a.sub{padding:6px 12px 6px 30px;color:#8b9bb4;font-weight:500;font-size:12.5px}
+.sb a.on{background:#1a2236;color:#22d3ee}
+.sb a.grp.on{background:transparent;color:#e6edf6;box-shadow:inset 3px 0 0 #22d3ee}
+.sb .n{margin-left:auto;font-size:11px;color:#8b9bb4;font-weight:600}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 11px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.icon{width:32px;padding:0;justify-content:center}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0}
+.ch{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 16px;padding:10px 14px;border-bottom:1px solid #1f2a40}
+.ch h3{margin:0;font-size:13px;font-weight:700}
+.cb{padding:12px 14px}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.blue{background:rgba(59,130,246,.18);color:#93c5fd}.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.new{background:rgba(34,211,238,.16);color:#67e8f9}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;flex:none}
+.crumb{font-size:12px;color:#8b9bb4;display:flex;flex-wrap:wrap;gap:2px 6px;align-items:center}
+.crumb a{color:#93c5fd;text-decoration:none}
+.hero{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px}
+.hero h1{margin:0;font-size:22px;font-weight:800}
+.tabs{display:flex;align-items:center;gap:2px;border-bottom:1px solid #243049;overflow-x:auto}
+.tabs a{display:inline-flex;align-items:center;gap:6px;padding:10px 14px;color:#8b9bb4;font-weight:600;white-space:nowrap;text-decoration:none;border-bottom:2px solid transparent;margin-bottom:-1px}
+.tabs a.on{color:#e6edf6;border-bottom-color:#3b82f6}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit, minmax(190px, 1fr));gap:12px}
+.tile{padding:12px 14px;display:flex;flex-direction:column;gap:6px}
+.tile .lb{font-size:11.5px;color:#8b9bb4;font-weight:600;display:flex;align-items:center;gap:6px}
+.tile .v{font-size:22px;font-weight:800;line-height:1.1}
+.tile .s{font-size:11.5px;color:#8b9bb4}
+.sw{display:inline-block;width:12px;height:12px;border-radius:3px;flex:none}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:11.5px;color:#8b9bb4;align-items:center}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.months{display:grid;gap:18px 22px}
+.mh{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:6px;min-width:0}
+.mh b{font-size:13px;font-weight:700;white-space:nowrap}
+.mh span{font-size:11px;color:#8b9bb4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wk{display:grid;grid-template-columns:repeat(7, minmax(0, 1fr));gap:3px}
+.wk i{font-style:normal;font-size:10.5px;color:#8b9bb4;text-align:center;padding-bottom:2px}
+.d{display:flex;flex-direction:column;justify-content:space-between;gap:2px;height:34px;padding:3px 3px 3px;border-radius:6px;border:1px solid transparent;background:#1a2236;color:#8b9bb4;font:inherit;font-size:10.5px;line-height:1;text-align:left;cursor:pointer;min-width:0}
+.d:hover{border-color:#3b82f6}
+.d:disabled{cursor:default;background:transparent;border-color:#1f2a40;color:#7483a0}
+.d .bar{display:block;height:14px;border-radius:3px}
+.blank{height:34px}
+.dayline{height:30px;border-radius:6px}
+.axis{display:flex;justify-content:space-between;font-size:10.5px;color:#8b9bb4;margin-top:4px}
+.seg{display:grid;grid-template-columns:14px 118px 1fr auto;gap:8px;align-items:center;padding:7px 0;border-bottom:1px solid #1f2a40;font-size:12.5px}
+.seg:last-child{border-bottom:0}
+.ev{display:flex;gap:10px;align-items:baseline;padding:7px 0;border-bottom:1px solid #1f2a40;font-size:12.5px}
+.ev:last-child{border-bottom:0}
+.tw{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:12.5px;min-width:640px}
+th{text-align:left;color:#8b9bb4;font-weight:700;font-size:11.5px;padding:8px 10px;border-bottom:1px solid #243049;background:#0f1626;white-space:nowrap}
+th button{all:unset;cursor:pointer;display:inline-flex;gap:4px;align-items:center}
+td{padding:8px 10px;border-bottom:1px solid #1f2a40;white-space:nowrap}
+tr:last-child td{border-bottom:0}
+td button{all:unset;cursor:pointer;color:#93c5fd}
+.note{font-size:12px;color:#8b9bb4;line-height:1.6}
+</style>
+</helmet>
+
+<div style="min-height:100%;display:flex;flex-direction:column;background:#0a0e17">
+  <div class="tb">
+    <span class="logo"><span class="v">V</span>THE DAVINCI</span>
+    <span class="mock">MOCK</span>
+    <span style="flex:1"></span>
+    <span class="muted mono" style="font-size:12px">28/28 vCenter <b style="color:#86efac">OK</b> · 11:00:12</span>
+    <span class="muted" style="font-size:12px">admin</span>
+  </div>
+  <div style="display:flex;flex-wrap:wrap;flex:1;min-width:0">
+  <aside class="sb" aria-label="메뉴">
+    <a href="#">Overview</a><a href="#">Summary</a>
+    <a href="#" class="grp on">서버 <span class="n">6 ▴</span></a>
+    <a href="#" class="sub">가상화 서버</a><a href="#" class="sub">ESXi 호스트</a><a href="#" class="sub on">vCenter</a><a href="#" class="sub">물리 서버</a><a href="#" class="sub">Backup</a><a href="#" class="sub">알람</a>
+    <a href="#">스토리지 <span class="n">7 ▾</span></a><a href="#">네트워크 <span class="n">6 ▾</span></a><a href="#">자원관리 <span class="n">3 ▾</span></a><a href="#">자원 최적화 <span class="n">2 ▾</span></a><a href="#">특수 기능</a><a href="#">이슈</a><a href="#">위키</a><a href="#">게시판</a><a href="#">설정 <span class="n">2 ▾</span></a>
+  </aside>
+
+  <main style="flex:999 1 560px;min-width:0;padding:14px 24px 28px;display:flex;flex-direction:column;gap:12px">
+    <div class="crumb"><a href="#">← 가상화 서버 목록</a><span>·</span><a href="#">VC-KR1</a><span>›</span><a href="#">DC-KR1</a><span>›</span><a href="#">/batch</a><span>›</span><span style="color:#e6edf6">batch-kr1-014</span></div>
+
+    <header class="hero">
+      <span class="dot" style="background:#22c55e;width:12px;height:12px" title="켜짐"></span>
+      <h1>batch-kr1-014</h1>
+      <span class="tag blue">VM</span>
+      <span class="muted">Rocky Linux 9.3 (64-bit) · vmx-19</span>
+      <span class="tag ok">켜짐 · {{upFor}}째</span>
+      <span style="flex:1"></span>
+      <button class="btn" type="button">콘솔</button>
+      <button class="btn" type="button">원격 접속</button>
+      <button class="btn" type="button">사양 변경</button>
+    </header>
+
+    <nav class="tabs" aria-label="VM 개체 탭">
+      <a href="#">요약</a><a href="#">모니터</a><a href="#">구성</a><a href="#">사용 권한</a><a href="#">데이터스토어</a><a href="#">네트워크</a><a href="#">스냅샷</a><a href="#">업데이트</a><a href="#" class="on">전원 이력 <span class="tag new">새 탭</span></a><a href="#">성능 튜닝</a>
+    </nav>
+
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px">
+      <button class="btn icon" type="button" aria-label="이전 12개월">‹</button>
+      <b class="mono" style="font-size:13px">2025-12 ~ 2026-11</b>
+      <button class="btn icon" type="button" aria-label="다음 12개월" disabled style="opacity:.45;cursor:default">›</button>
+      <span class="muted" style="font-size:12px">최근 12개월 · 기준 2026-11-24 11:00 (KST)</span>
+      <span style="flex:1"></span>
+      <div class="legend" aria-label="범례">
+        <span><i class="sw" style="background:#22c55e"></i>켜짐</span>
+        <span><i class="sw" style="background:#64748b"></i>꺼짐</span>
+        <span><i class="sw" style="background:linear-gradient(rgba(100,116,139,.45),rgba(100,116,139,.45)),repeating-linear-gradient(135deg,#33415c 0 2px,transparent 2px 5px),#111a2c"></i>경계 불확실</span>
+        <span><i class="sw" style="background:repeating-linear-gradient(135deg,#33415c 0 2px,#111a2c 2px 5px)"></i>기록 없음</span>
+        <span>칸의 가로 = 그 날 0시 → 24시</span>
+      </div>
+    </div>
+
+    <section class="tiles" aria-label="기간 요약">
+      <div class="card tile"><span class="lb"><i class="sw" style="background:#22c55e"></i>켜진 시간</span><span class="v mono">{{t.on}}</span><span class="s">판정된 시간의 {{t.onPct}}%</span></div>
+      <div class="card tile"><span class="lb"><i class="sw" style="background:#64748b"></i>꺼진 시간</span><span class="v mono">{{t.off}}</span><span class="s">판정된 시간의 {{t.offPct}}% · 꺼짐 구간 {{t.offCount}}번</span></div>
+      <div class="card tile"><span class="lb">전원 전환</span><span class="v mono">{{t.trans}}회</span><span class="s">꺼짐 {{t.offCount}} · 켜짐 {{t.onCount}}</span></div>
+      <div class="card tile"><span class="lb">가장 길게 꺼짐</span><span class="v mono">{{t.longest}}</span><span class="s mono">{{t.longestRange}}</span></div>
+      <div class="card tile"><span class="lb">판정하지 못한 시간</span><span class="v mono">{{t.unknown}}</span><span class="s">기록 없음 {{t.unk}} · 경계 불확실 {{t.est}} — 위 비율에서 뺐습니다</span></div>
+    </section>
+
+    <section class="card" aria-label="전원 달력">
+      <div class="ch">
+        <h3>전원 달력</h3>
+        <span class="note">날짜를 누르면 아래에 그 날의 시간대별 기록이 열립니다 · 날짜 숫자가 밝은 날 = 전원이 바뀐 날</span>
+      </div>
+      <div class="cb">
+        <div class="months" style="{{monthsStyle}}">
+          <sc-for list="{{months}}" as="m" hint-placeholder-count="12">
+            <div style="min-width:0">
+              <div class="mh"><b>{{m.title}}</b><span>{{m.sub}}</span></div>
+              <div class="wk" aria-hidden="true"><i>일</i><i>월</i><i>화</i><i>수</i><i>목</i><i>금</i><i>토</i></div>
+              <div class="wk">
+                <sc-for list="{{m.blanks}}" as="b" hint-placeholder-count="3"><span class="blank"></span></sc-for>
+                <sc-for list="{{m.days}}" as="d" hint-placeholder-count="30">
+                  <button class="d" type="button" onClick="{{d.pick}}" disabled="{{d.future}}" aria-pressed="{{d.on}}" aria-label="{{d.aria}}" style="{{d.cell}}"><span style="{{d.num}}">{{d.n}}</span><span class="bar" style="{{d.bar}}"></span></button>
+                </sc-for>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+        <p class="note" style="margin:14px 0 0">2026-01-01 이전은 이 기능을 켜기 전이라 VM 추적 기록(슬롯 간격)에서 소급한 값입니다 — 그 간격보다 짧게 꺼졌다 켜진 것은 vCenter 전원 이벤트 로그가 남아 있을 때만 보입니다.</p>
+      </div>
+    </section>
+
+    <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start">
+      <section class="card" aria-label="선택한 날" style="flex:1 1 340px">
+        <div class="ch"><h3>{{sel.title}}</h3><span class="muted mono" style="font-size:11.5px">{{sel.sum}}</span></div>
+        <div class="cb">
+          <div class="dayline" style="{{sel.bar}}" role="img" aria-label="{{sel.aria}}"></div>
+          <div class="axis mono" aria-hidden="true"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div>
+          <div style="margin-top:10px">
+            <sc-for list="{{sel.rows}}" as="r" hint-placeholder-count="2">
+              <div class="seg"><i class="sw" style="{{r.sw}}"></i><span class="mono">{{r.range}}</span><b style="font-weight:600">{{r.label}}</b><span class="mono muted">{{r.dur}}</span></div>
+            </sc-for>
+          </div>
+          <sc-if value="{{sel.hasEv}}" hint-placeholder-val="{{true}}">
+            <div style="margin-top:12px">
+              <div class="muted" style="font-size:11.5px;font-weight:700;margin-bottom:2px">이 날의 전원 전환</div>
+              <sc-for list="{{sel.evs}}" as="e" hint-placeholder-count="1">
+                <div class="ev"><span class="mono">{{e.at}}</span><b style="font-weight:600">{{e.kind}}</b><span class="muted" style="min-width:0">{{e.src}}{{e.by}}</span></div>
+              </sc-for>
+            </div>
+          </sc-if>
+        </div>
+      </section>
+
+      <section class="card" aria-label="전원 전환 기록" style="flex:2 1 520px;min-width:0">
+        <div class="ch"><h3>전원 전환 기록</h3><span class="muted" style="font-size:11.5px">최신 {{shown}}건 · 전체 {{t.trans}}건 · 제목을 누르면 정렬</span></div>
+        <div class="tw">
+          <table>
+            <thead><tr>
+              <th><button type="button">시각 ▾</button></th><th><button type="button">전환</button></th><th><button type="button">직전 상태가 이어진 시간</button></th><th><button type="button">출처 · 정밀도</button></th><th><button type="button">수행</button></th>
+            </tr></thead>
+            <tbody>
+              <sc-for list="{{trans}}" as="x" hint-placeholder-count="9">
+                <tr><td class="mono"><button type="button" onClick="{{x.pick}}">{{x.at}}</button></td><td><span class="dot" style="{{x.dot}}"></span> {{x.kind}}</td><td class="mono">{{x.prev}}</td><td class="muted">{{x.src}}</td><td class="mono muted">{{x.by}}</td></tr>
+              </sc-for>
+            </tbody>
+          </table>
+        </div>
+        <div style="padding:10px 14px;border-top:1px solid #1f2a40;display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+          <button class="btn" type="button">전체 {{t.trans}}건 보기</button>
+          <span class="note">정밀도는 출처마다 다릅니다 — vCenter 이벤트는 그 시각 그대로, 주기 점검 · 추적 소급은 ‘두 관측 사이’ 로만 압니다.</span>
+        </div>
+      </section>
+    </div>
+  </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"monthCols":{"editor":"enum","options":["3","4","6"],"default":"4","section":"달력"},"$preview":{"width":1440,"height":1640}}'>
+class Component extends DCLogic {
+  build() {
+    if (this._d) return this._d;
+    var H = 3600000, D = 24 * H;
+    function T(y, m, d, h, mi) { return Date.UTC(y, m - 1, d, h || 0, mi || 0); }
+    function p2(n) { return (n < 10 ? '0' : '') + n; }
+    function ymd(t) { var x = new Date(t); return x.getUTCFullYear() + '-' + p2(x.getUTCMonth() + 1) + '-' + p2(x.getUTCDate()); }
+    function md(t) { var x = new Date(t); return p2(x.getUTCMonth() + 1) + '-' + p2(x.getUTCDate()); }
+    function hm(t) { var x = new Date(t); return p2(x.getUTCHours()) + ':' + p2(x.getUTCMinutes()); }
+    function dur(ms) {
+      var m = Math.round(ms / 60000), d = Math.floor(m / 1440), h = Math.floor((m % 1440) / 60), mi = m % 60;
+      if (d > 0) return d + '일' + (h ? ' ' + h + '시간' : '');
+      if (h > 0) return h + '시간' + (mi ? ' ' + mi + '분' : '');
+      return mi + '분';
+    }
+    var WD = ['일', '월', '화', '수', '목', '금', '토'];
+    // 가상 데이터 — 시각은 KST 벽시계를 그대로 쓴다.
+    var NOW = T(2026, 11, 24, 11, 0), START = T(2025, 12, 1);
+    var GRAN = { event: 0, check: 6 * H, track: 12 * H };
+    var SRC = { event: 'vCenter 이벤트 · 그 시각 그대로', check: '주기 점검 · 정밀도 6시간', track: 'VM 추적 소급 · 정밀도 12시간' };
+    var offs = [];
+    function off(a, b, src, by) { offs.push({ a: a, b: b, src: src, by: by || '' }); }
+    off(T(2025, 12, 21, 0, 0), T(2025, 12, 21, 0, 0), 'track');
+    off(T(2026, 1, 17, 2, 10), T(2026, 1, 17, 6, 40), 'event', 'kr\\ops.lee');
+    off(T(2026, 3, 8, 19, 20), T(2026, 3, 21, 9, 5), 'event', 'kr\\ops.lee');
+    for (var i = 0; i < 13; i++) { var f = T(2026, 4, 3, 20, 0) + i * 7 * D; off(f, f + 2 * D + 11.5 * H, 'event', 'svc-scheduler'); }
+    off(T(2026, 9, 2, 12, 0), T(2026, 9, 2, 18, 0), 'check');
+    off(T(2026, 10, 28, 23, 40), T(2026, 11, 12, 8, 15), 'event', 'kr\\ops.park');
+    var marks = [{ a: T(2026, 7, 10, 3, 0), b: T(2026, 7, 13, 11, 0), st: 'unk' }];
+    offs.forEach(function (o) {
+      var g = GRAN[o.src];
+      if (g) marks.push({ a: o.a - g, b: o.a, st: 'est' });
+      if (o.b > o.a) marks.push({ a: o.a, b: o.b, st: 'off' });
+      if (g) marks.push({ a: o.b, b: o.b + g, st: 'est' });
+    });
+    marks.sort(function (x, y) { return x.a - y.a; });
+    var segs = [], cur = START;
+    marks.forEach(function (m) { if (m.a > cur) segs.push({ a: cur, b: m.a, st: 'on' }); segs.push(m); cur = m.b; });
+    if (cur < NOW) segs.push({ a: cur, b: NOW, st: 'on' });
+    function clip(a, b) {
+      var out = [];
+      for (var k = 0; k < segs.length; k++) { var s = segs[k]; if (s.b <= a || s.a >= b) continue; out.push({ a: Math.max(a, s.a), b: Math.min(b, s.b), st: s.st }); }
+      return out;
+    }
+    var COL = { on: '#22c55e', off: '#64748b', est: 'rgba(100,116,139,.45)', unk: 'transparent' };
+    var LABEL = { on: '켜짐', off: '꺼짐', est: '경계 불확실(켜짐 또는 꺼짐)', unk: '기록 없음(수집 중단)' };
+    var HATCH = 'repeating-linear-gradient(135deg,#33415c 0 2px,transparent 2px 5px)';
+    function bar(day0, parts) {
+      if (!parts.length) return 'background:transparent';
+      var stops = [], last = 0;
+      parts.forEach(function (p) {
+        var x = ((p.a - day0) / D * 100).toFixed(2), y = ((p.b - day0) / D * 100).toFixed(2);
+        stops.push(COL[p.st] + ' ' + x + '% ' + y + '%'); last = y;
+      });
+      if (last < 100) stops.push('#111a2c ' + last + '% 100%');
+      return 'background:linear-gradient(90deg,' + stops.join(',') + '),' + HATCH + ',#111a2c';
+    }
+    function sums(parts) { var s = { on: 0, off: 0, est: 0, unk: 0 }; parts.forEach(function (p) { s[p.st] += p.b - p.a; }); return s; }
+    var months = [], total = { on: 0, off: 0, est: 0, unk: 0 }, byKey = {};
+    for (var n = 0; n < 12; n++) {
+      var y = 2025 + Math.floor((11 + n) / 12), mo = (11 + n) % 12 + 1;
+      var m0 = T(y, mo, 1), m1 = mo === 12 ? T(y + 1, 1, 1) : T(y, mo + 1, 1);
+      var days = [], ms = { on: 0, off: 0, est: 0, unk: 0 };
+      for (var t = m0; t < m1; t += D) {
+        var future = t >= NOW, parts = future ? [] : clip(t, Math.min(t + D, NOW)), s = sums(parts);
+        ['on', 'off', 'est', 'unk'].forEach(function (k) { ms[k] += s[k]; total[k] += s[k]; });
+        var bits = [];
+        if (s.on) bits.push('켜짐 ' + dur(s.on)); if (s.off) bits.push('꺼짐 ' + dur(s.off));
+        if (s.est) bits.push('경계 불확실 ' + dur(s.est)); if (s.unk) bits.push('기록 없음 ' + dur(s.unk));
+        var x = new Date(t), day = { key: ymd(t), t: t, n: x.getUTCDate(), wd: WD[x.getUTCDay()], parts: parts, future: future, changed: (s.on ? 1 : 0) + (s.off ? 1 : 0) + (s.est ? 1 : 0) > 1, sumTxt: bits.join(' · ') };
+        day.aria = mo + '월 ' + day.n + '일 ' + day.wd + '요일 — ' + (future ? '아직 오지 않은 날' : day.sumTxt);
+        day.bar = bar(t, parts);
+        days.push(day); byKey[day.key] = day;
+      }
+      var known = ms.on + ms.off, sub = known ? '켜짐 ' + (ms.on / known * 100).toFixed(1) + '%' : '—';
+      if (ms.off) sub += ' · 꺼짐 ' + dur(ms.off);
+      if (ms.unk + ms.est) sub += ' · 판정 못함 ' + dur(ms.unk + ms.est);
+      var blanks = []; for (var b = 0; b < new Date(m0).getUTCDay(); b++) blanks.push({ k: b });
+      months.push({ title: y + '년 ' + mo + '월' + (m1 <= T(2026, 1, 1) ? ' · 소급' : ''), sub: sub, blanks: blanks, days: days });
+    }
+    // 전환 목록(최신순)
+    var trans = [], prevEnd = null, longest = null;
+    offs.forEach(function (o) {
+      var g = GRAN[o.src], approx = g ? '약 ' : '';
+      var atOff = g ? ymd(o.a - g) + ' ' + hm(o.a - g) + ' ~ ' + (md(o.a - g) === md(o.a) ? '' : md(o.a) + ' ') + hm(o.a) + ' 사이' : ymd(o.a) + ' ' + hm(o.a);
+      var atOn = g ? ymd(o.b) + ' ' + hm(o.b) + ' ~ ' + (md(o.b) === md(o.b + g) ? '' : md(o.b + g) + ' ') + hm(o.b + g) + ' 사이' : ymd(o.b) + ' ' + hm(o.b);
+      trans.push({ ts: o.a, key: ymd(o.a - (g ? 1 : 0)), at: atOff, kind: '켜짐 → 꺼짐', dot: 'background:#64748b', prev: prevEnd === null ? '기간 시작 전부터 켜짐' : '켜짐 ' + approx + dur(o.a - prevEnd), src: SRC[o.src], by: o.by || '—', evAt: g ? hm(o.a - g) + '~' + hm(o.a) : hm(o.a) });
+      trans.push({ ts: o.b + 1, key: ymd(o.b), at: atOn, kind: '꺼짐 → 켜짐', dot: 'background:#22c55e', prev: g ? (o.b > o.a ? '꺼짐 ' + dur(o.b - o.a) + ' 이상' : '꺼짐 ' + dur(2 * g) + ' 미만') : '꺼짐 ' + dur(o.b - o.a), src: SRC[o.src], by: o.by || '—', evAt: g ? hm(o.b) + '~' + hm(o.b + g) : hm(o.b) });
+      prevEnd = o.b;
+      if (!longest || o.b - o.a > longest.b - longest.a) longest = o;
+    });
+    trans.sort(function (p, q) { return q.ts - p.ts; });
+    var known = total.on + total.off;
+    this._d = {
+      months: months, byKey: byKey, trans: trans, COL: COL, LABEL: LABEL, bar: bar, hm: hm, dur: dur, D: D,
+      upFor: dur(NOW - offs[offs.length - 1].b),
+      t: {
+        on: dur(total.on), off: dur(total.off), onPct: (total.on / known * 100).toFixed(1), offPct: (total.off / known * 100).toFixed(1),
+        offCount: offs.length, onCount: offs.length, trans: offs.length * 2,
+        longest: dur(longest.b - longest.a), longestRange: ymd(longest.a) + ' ~ ' + ymd(longest.b),
+        unknown: dur(total.unk + total.est), unk: dur(total.unk), est: dur(total.est)
+      }
+    };
+    return this._d;
+  }
+  renderVals() {
+    var d = this.build(), self = this;
+    var selKey = (this.state && this.state.sel) || '2026-03-08';
+    var cols = parseInt(this.props.monthCols || '4', 10) || 4;
+    var months = d.months.map(function (m) {
+      return {
+        title: m.title, sub: m.sub, blanks: m.blanks,
+        days: m.days.map(function (x) {
+          var on = x.key === selKey;
+          return {
+            n: x.n, aria: x.aria, bar: x.bar, future: x.future, on: on,
+            cell: on ? 'border-color:#3b82f6;box-shadow:0 0 0 1px #3b82f6;background:#22304d' : '',
+            num: x.changed ? 'color:#e6edf6;font-weight:700' : '',
+            pick: function () { self.setState({ sel: x.key }); }
+          };
+        })
+      };
+    });
+    var day = d.byKey[selKey];
+    var rows = day.parts.map(function (p) {
+      var end = p.b - day.t >= d.D ? '24:00' : d.hm(p.b);
+      return { range: d.hm(p.a) + ' – ' + end, label: d.LABEL[p.st], dur: d.dur(p.b - p.a), sw: p.st === 'unk' ? 'background:repeating-linear-gradient(135deg,#33415c 0 2px,#111a2c 2px 5px)' : 'background:' + d.COL[p.st] };
+    });
+    var evs = d.trans.filter(function (x) { return x.key === selKey; }).reverse().map(function (x) {
+      return { at: x.evAt, kind: x.kind, src: x.src, by: x.by === '—' ? '' : ' · ' + x.by };
+    });
+    var shown = 9;
+    return {
+      upFor: d.upFor, t: d.t, months: months, shown: shown,
+      monthsStyle: 'grid-template-columns:repeat(auto-fit, minmax(' + (cols === 6 ? 170 : cols === 3 ? 320 : 240) + 'px, 1fr))',
+      sel: { title: selKey + ' (' + day.wd + ')', sum: day.sumTxt, aria: day.sumTxt, bar: d.bar(day.t, day.parts), rows: rows, evs: evs, hasEv: evs.length > 0 },
+      trans: d.trans.slice(0, shown).map(function (x) {
+        return { at: x.at, kind: x.kind, dot: x.dot, prev: x.prev, src: x.src, by: x.by, pick: function () { self.setState({ sel: x.key }); } };
+      })
+    };
+  }
+}
+</script>
+</body>
+</html>
