@@ -16,6 +16,11 @@ import CvpOpticsView from './CvpOptics.jsx';
 import CvpPowerView from './CvpPower.jsx';
 import CvpInterfacesView from './CvpInterfaces.jsx';
 import CvpPortMapView from './CvpPortMap.jsx';   // v3.37 포트 구성도
+import CvpLinkQualityView from './CvpLinkQuality.jsx';   // v3.38 ④ ⑩ 링크 품질
+import CvpTopologyView from './CvpTopology.jsx';         // v3.38 ⑥ ⑦ 토폴로지 · 양끝 불일치
+import CvpLocateView from './CvpLocate.jsx';             // v3.38 ① 위치 찾기
+import CvpCompareView from './CvpCompare.jsx';           // v3.38 ⑬ 작업 전후 비교
+import { TAB_GROUPS, TAB_KEYS } from './cvpNetText.js';
 import { descCell, byIntfName } from './cvpIntfText.js';
 import {
   facetRowsOf, corpNameFn, modelLabel, eosVersionOf, versionLabel, cvpServerVersionMap, cvpServerVersionOf, cvpVersionLabel, cvpVersionChips, eventCorpChips, eventSevChips, deviceSummaryTiles, historyNotes, CORP_NOTE, corpLabel,
@@ -85,7 +90,7 @@ export default function CvpTool() {
   const loadSeq = useRef(0);
   // v2.641: 화면 전환(장비 · 포트 사용량 · 이벤트) — URL 에 싣는다(v2.613 도구 안 서브탭 규약).
   // v2.645: Overview 가 기본 화면이다(사용자 승인 시안) · 모델 · 트래픽 추가.
-  const [view, setView] = useHashTab({ base: ['tools', 'cvp'], valid: ['overview', 'devices', 'models', 'traffic', 'intf', 'portmap', 'ports', 'optics', 'power', 'events', 'settings'], fallback: 'overview' });
+  const [view, setView] = useHashTab({ base: ['tools', 'cvp'], valid: TAB_KEYS, fallback: 'overview' });   // v3.38: 탭 키는 cvpNetText.TAB_GROUPS 하나(기존 키는 그대로)
 
   const u = getCurrentUser();
   const isAdmin = !u || u.role === 'admin';
@@ -198,9 +203,15 @@ export default function CvpTool() {
 
       {/* 등록부를 못 읽은 동안 — 설정 탭 밖에서도 말한다(Chromium 검증: 개요 탭은 '장비 0' 만 보이고 안내가 없었다). 설정 탭은 등록부 카드 안에 같은 안내가 있다. */}
       {view !== 'settings' && <RegistryUnreadBanner le={unreadMarkOf(data)} what="CVP 서버 등록부" />}
-      <div style={ROW}>
-        {[['overview', 'Overview'], ['devices', '장비'], ['models', '모델'], ['traffic', '트래픽'], ['intf', '인터페이스 세부 정보'], ['portmap', '포트 구성도'], ['ports', '포트 사용량'], ['optics', '광신호'], ['power', '전력'], ['events', '이벤트'], ['settings', 'CVP 설정']].map(([k, l]) => (
-          <button key={k} type="button" className={`tab${view === k ? ' active' : ''}`} onClick={() => setView(k)}>{l}</button>
+      {/* v3.38: 탭 17개 안팎 — 네 묶음(시안 docs/design/cvp-network-features §2). 묶음 이름은 글자만, 탭 키 · 도구 키는 바꾸지 않는다. */}
+      <div style={{ ...ROW, gap: '6px 14px' }}>
+        {TAB_GROUPS.map((g) => (
+          <div key={g.name || 'etc'} role="group" aria-label={g.name || '설정'} style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', minWidth: 0 }}>
+            {g.name ? <span style={{ fontSize: 11.5, color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>{g.name}</span> : null}
+            {g.tabs.map(([k, l]) => (
+              <button key={k} type="button" className={`tab${view === k ? ' active' : ''}`} onClick={() => setView(k)}>{l}</button>
+            ))}
+          </div>
         ))}
       </div>
 
@@ -213,6 +224,10 @@ export default function CvpTool() {
       {view === 'optics' && <CvpOpticsView servers={servers} onOpen={(t) => setDetailKey({ ...t, tab: 'parts' })} />}
       {view === 'power' && <CvpPowerView servers={servers} onOpen={(t) => setDetailKey({ ...t, tab: 'parts' })} />}
       {view === 'events' && <EventsCard servers={servers} isAdmin={isAdmin} onOpen={(t) => setDetailKey(t)} />}
+      {view === 'linkq' && <CvpLinkQualityView servers={servers} onOpen={(t) => setDetailKey({ ...t, tab: 'ports' })} />}
+      {view === 'topology' && <CvpTopologyView servers={servers} onOpen={(t) => setDetailKey(t)} />}
+      {view === 'locate' && <CvpLocateView onOpen={(t) => setDetailKey({ ...t, tab: 'ports' })} />}
+      {view === 'compare' && <CvpCompareView servers={servers} />}
 
       {view === 'devices' && (<>
       <div className="card" style={{ minWidth: 0 }}>

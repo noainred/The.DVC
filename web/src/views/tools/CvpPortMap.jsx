@@ -5,6 +5,8 @@ import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import { deviceOptions } from './cvpIntfText.js';
+import { Seg } from './CvpNetParts.jsx';
+import { ReclaimView, ForecastView } from './CvpPortPlan.jsx';
 import {
   SUB_DEFS, SUB_ORDER, EV_DEFS, EV_ORDER, UTIL_DEFS, UTIL_ORDER, paintOf, flagOf, evLabel, layoutCells, mgmtPorts, headline, barSegs,
   speedRowText, speedName, verdictText, lastLinkText, xcvrText, utilText, descText, lldpText, speedText, FILTERS, filterPorts, filterCount,
@@ -22,17 +24,6 @@ const MONO = { fontFamily: 'var(--mono)' };
 const ROW = { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' };
 const PANEL = { background: 'var(--panel-deep, #0f1626)', border: '1px solid var(--border-soft, #1f2a40)', borderRadius: 10 };
 
-function Seg({ items, value, onChange, label }) {
-  return (
-    <div role="group" aria-label={label} style={{ display: 'inline-flex', flexWrap: 'wrap', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
-      {items.map(([k, l]) => (
-        <button key={k} type="button" aria-pressed={value === k} onClick={() => onChange(k)}
-          style={{ height: 32, padding: '0 12px', border: 0, borderRight: '1px solid var(--border)', font: 'inherit', fontSize: 12.5, cursor: 'pointer', whiteSpace: 'nowrap',
-            background: value === k ? 'var(--accent)' : 'transparent', color: value === k ? '#fff' : 'var(--text-dim)', fontWeight: value === k ? 600 : 400 }}>{l}</button>
-      ))}
-    </div>
-  );
-}
 const Swatch = ({ paint, round }) => <span aria-hidden="true" style={{ display: 'inline-block', boxSizing: 'border-box', width: 14, height: 12, borderRadius: round ? 999 : 3, flex: '0 0 auto', ...paint }} />;
 
 function Cell({ cell, mode, sel, onPick, wide }) {
@@ -410,20 +401,29 @@ function Fleet({ onOpen }) {
   );
 }
 
+const VIEW_NOTE = Object.freeze({
+  one: '전면 배치 · 포트별 연결 장비 · 사용/예비',
+  fleet: '어느 스위치에 예비 포트가 남았는지 — 스위치 이름을 누르면 그 장비의 구성도로 갑니다',
+  reclaim: '오래 링크가 없던 포트 — 회수 · 재배치 후보(포탈은 바꾸지 않습니다)',
+  forecast: '사용 포트 수 · 업링크 사용률의 추세로 고갈 · 포화 시점을 추정합니다',
+});
+
 export default function CvpPortMapView({ devices = [] }) {
   const [view, setView] = useState('one');
   const [jump, setJump] = useState(0);
   const [jumpTo, setJumpTo] = useState(null);
+  const open = (d) => { setJumpTo(`${d.cvpId}|${d.key}`); setJump((x) => x + 1); setView('one'); };
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 14, minWidth: 0 }}>
       <div style={{ ...ROW, gap: '8px 14px' }}>
         <b style={{ fontSize: 15 }}>포트 구성도</b>
-        <Seg label="보기" value={view} onChange={setView} items={[['one', '스위치 1대'], ['fleet', '전 스위치 여유']]} />
-        <span style={NOTE}>{view === 'one' ? '전면 배치 · 포트별 연결 장비 · 사용/예비' : '어느 스위치에 예비 포트가 남았는지 — 스위치 이름을 누르면 그 장비의 구성도로 갑니다'}</span>
+        <Seg label="보기" value={view} onChange={setView} items={[['one', '스위치 1대'], ['fleet', '전 스위치 여유'], ['reclaim', '회수 후보'], ['forecast', '고갈 · 포화 예측']]} />
+        <span style={NOTE}>{VIEW_NOTE[view]}</span>
       </div>
-      {view === 'one'
-        ? <OneSwitch key={jump} devices={devices} initial={jumpTo} />
-        : <Fleet onOpen={(d) => { setJumpTo(`${d.cvpId}|${d.key}`); setJump((x) => x + 1); setView('one'); }} />}
+      {view === 'one' && <OneSwitch key={jump} devices={devices} initial={jumpTo} />}
+      {view === 'fleet' && <Fleet onOpen={open} />}
+      {view === 'reclaim' && <ReclaimView onOpen={open} />}
+      {view === 'forecast' && <ForecastView onOpen={open} />}
     </div>
   );
 }
