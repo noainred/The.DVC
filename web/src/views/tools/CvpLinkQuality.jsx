@@ -49,22 +49,21 @@ export default function CvpLinkQualityView({ servers = [], onOpen }) {
             <button type="button" className={`tab${only === 'all' ? ' active' : ''}`} onClick={() => setOnly('all')}>전체 <b style={MONO}>{rows.length}</b></button>
             {VERDICT_ORDER.map((k) => <button key={k} type="button" className={`tab${only === k ? ' active' : ''}`} onClick={() => setOnly(k)}>{VERDICT_DEFS[k].label} <b style={MONO}>{rows.filter((x) => x.verdict === k).length}</b></button>)}
           </div>
-          <STable className="v3-table" minWidth={1100} limit={300}>
-            <thead><tr><th>판정</th><th>법인</th><th>스위치</th><th>포트</th><th>속도</th><th>오류</th><th>드롭</th><th>링크 내려감</th><th>수신 광량</th><th data-nosort>근거</th><th>설명</th></tr></thead>
+          <STable className="v3-table" minWidth={1000} limit={300}>
+            <thead><tr><th>판정</th><th>스위치 · 법인</th><th>포트</th><th>속도</th><th>오류</th><th>드롭</th><th>링크 내려감</th><th>수신 광량</th><th data-nosort>근거</th><th>설명</th></tr></thead>
             <tbody>
               {shown.map((x) => (
                 <tr key={rowKey(x)}>
                   <td data-sort={VERDICT_ORDER.indexOf(x.verdict)}><Pill color={VERDICT_DEFS[x.verdict]?.color || 'var(--text-dim)'} title={VERDICT_DEFS[x.verdict]?.hint}>{VERDICT_DEFS[x.verdict]?.label || x.verdict}</Pill></td>
-                  <td>{x.corpName || '법인 미지정'}</td>
-                  <td data-sort={x.hostname}><button type="button" style={LINKBTN} onClick={() => onOpen && onOpen({ cvpId: x.cvpId, key: x.key, hostname: x.hostname })}>{x.hostname}</button></td>
+                  <td data-sort={x.hostname}><button type="button" style={LINKBTN} onClick={() => onOpen && onOpen({ cvpId: x.cvpId, key: x.key, hostname: x.hostname })}>{x.hostname}</button><div style={{ ...NOTE, fontSize: 11.5 }}>{x.corpName || '법인 미지정'}</div></td>
                   <td style={MONO}>{x.port}</td>
                   <td data-sort={x.speedBps ?? ''}>{speedText(x.speedBps)}</td>
                   <td data-sort={x.errs ?? ''} style={{ ...MONO, textAlign: 'right' }}>{x.errs == null ? '—' : numText(x.errs)}</td>
                   <td data-sort={x.drops ?? ''} style={{ ...MONO, textAlign: 'right' }}>{x.drops == null ? '—' : numText(x.drops)}</td>
                   <td data-sort={x.downs} style={{ ...MONO, textAlign: 'right' }}>{x.downs}</td>
                   <td data-sort={x.rx ?? ''} style={{ ...MONO, textAlign: 'right' }}>{x.rx == null ? '—' : `${x.rx.toFixed(1)}`}</td>
-                  <td style={{ whiteSpace: 'normal', minWidth: 220, fontSize: 12.5 }}>{linkqBasis(x, r.warnDbm)}</td>
-                  <td style={{ whiteSpace: 'normal', minWidth: 160, overflowWrap: 'anywhere', fontSize: 12.5 }}>{x.desc == null ? '(못 읽음)' : x.desc || '(설명 없음)'}</td>
+                  <td style={{ whiteSpace: 'normal', minWidth: 180, maxWidth: 260, fontSize: 12.5 }}>{linkqBasis(x, r.warnDbm)}</td>
+                  <td style={{ whiteSpace: 'normal', minWidth: 140, maxWidth: 240, overflowWrap: 'anywhere', fontSize: 12.5 }}>{x.desc == null ? '(못 읽음)' : x.desc || '(설명 없음)'}</td>
                 </tr>
               ))}
             </tbody>

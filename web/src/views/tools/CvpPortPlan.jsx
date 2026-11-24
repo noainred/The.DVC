@@ -105,7 +105,7 @@ export function ForecastView({ onOpen }) {
       ]} />
       <div className="card" style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
         {part === 'exhaust' ? (
-          <STable className="v3-table" minWidth={980}>
+          <STable className="v3-table" minWidth={980} limit={SHOW_MAX}>
             <thead><tr><th>법인</th><th>스위치</th><th>모델</th><th>사용 / 전체</th><th data-nosort>최근 사용 포트</th><th>증가</th><th>고갈 예상</th></tr></thead>
             <tbody>
               {ex.rows.map((x) => (
@@ -122,13 +122,12 @@ export function ForecastView({ onOpen }) {
             </tbody>
           </STable>
         ) : (
-          <STable className="v3-table" minWidth={1040}>
-            <thead><tr><th>법인</th><th>스위치</th><th>포트</th><th>속도</th><th>상대</th><th>최근 30일 최대</th><th data-nosort>일 최대 사용률</th><th>증가</th><th>포화 예상</th></tr></thead>
+          <STable className="v3-table" minWidth={980} limit={SHOW_MAX}>
+            <thead><tr><th>스위치 · 법인</th><th>포트</th><th>속도</th><th>상대</th><th>최근 30일 최대</th><th data-nosort>일 최대 사용률</th><th>증가</th><th>포화 예상</th></tr></thead>
             <tbody>
               {sat.rows.map((x) => (
                 <tr key={rowKey(x)}>
-                  <td>{x.corpName || '법인 미지정'}</td>
-                  <td data-sort={x.hostname}><button type="button" style={LINKBTN} onClick={() => onOpen && onOpen(x)}>{x.hostname}</button></td>
+                  <td data-sort={x.hostname}><button type="button" style={LINKBTN} onClick={() => onOpen && onOpen(x)}>{x.hostname}</button><div style={{ ...NOTE, fontSize: 11.5 }}>{x.corpName || '법인 미지정'}</div></td>
                   <td style={MONO}>{x.port}</td>
                   <td data-sort={x.speedBps ?? ''}>{speedText(x.speedBps)}</td>
                   <td style={{ whiteSpace: 'normal', minWidth: 120 }}>{x.peer || (x.basis === 'speed' ? <span style={NOTE}>(LLDP 못 읽음 — 속도로 추정)</span> : '—')}</td>
@@ -141,6 +140,7 @@ export function ForecastView({ onOpen }) {
             </tbody>
           </STable>
         )}
+        {cur.rows.length > SHOW_MAX && <div style={NOTE}>{cur.rows.length}개 중 정렬 순서 앞 {SHOW_MAX}개 표시(제목을 눌러 정렬을 바꾸면 그 순서로 자릅니다)</div>}
         {!cur.rows.length && <div style={NOTE}>{part === 'exhaust' ? '장비가 없습니다.' : '업링크를 찾지 못했습니다(LLDP 이웃이 CVP 스위치인 포트 · LLDP 를 못 읽은 장비의 40G 이상 포트).'}</div>}
         <div style={NOTE}>예상 날짜는 직선 추세의 추정이며 오늘 {dateText(Date.now())} 기준입니다{sat.truncated ? ' · ⚠ 업링크가 상한을 넘어 일부만 봤습니다' : ''}.</div>
       </div>
