@@ -9,8 +9,10 @@
  *    그 법인의 할당 vCenter 가 **모두** 쓰기 범위 안(조회 밖 404 → 쓰기 밖 403). 할당 vCenter 가 없는 법인은 전체 범위(조회 ∧ 쓰기) 관리자만.
  *  · 랙 종류(전 법인 공용 목록): 조회 ∧ 쓰기 전체 범위 관리자만(`isFullReadWriteScope`).
  *  · 연결 정보(iDRAC): 서버만 서비스 태그로 잇는다(2026-11-19 사용자 결정). 서버 목록은 범위로 먼저 자른다(`scopeIdracServers`).
- *    관리 주소는 관리자 판본에만. 시리얼(서비스 태그)은 전체 범위 계정 · 관리자에게만 — 범위 비관리자에게는 싣지 않는다
- *    (물리서버 폴더 범위 판본과 같은 기준: 태그를 맞혀 보는 길을 만들지 않는다).
+ *    관리 주소는 관리자 판본에만(IP 로 등록한 서버의 id · 이름도 비관리자에게는 가린다 — 다른 iDRAC 화면과 같은 addressMatcher).
+ *    시리얼(서비스 태그)은 관리자 또는 전체(조회) 범위 계정에게만(2026-11-20 사용자 결정 — rack/CLAUDE.md) — 범위 비관리자에게는 싣지 않고
+ *    이름 · 호스트 이름에 든 태그도 걷어 낸다(stripTag). ⚠ 물리서버 폴더는 범위 관리자에게도 태그를 숨긴다 — 랙은 관리자가 원장을 편집하므로
+ *    관리자에게는 보인다(점검 C26: 예전 주석의 '폴더와 같은 기준' 은 틀린 말이었다).
  *  · 엑셀 내보내기: `data.csv` 권한 + 조회와 같은 범위.
  * ── 동시 편집 ──────────────────────────────────────────────────────────────
  *  · 전산실 단위 쓰기(랙 · 장비)는 본문 `rev` 가 지금 판과 같을 때만 반영한다 — 아니면 409 `revConflict` + 지금 rev(조용히 덮어쓰지 않는다).
@@ -32,6 +34,9 @@ import { cleanText, cleanPlaceInput, cleanRackInput, intIn, rackTotals, serialKe
 import * as R from '../../rack/db.js';
 import { VERSION_KEEP } from '../../rack/versions.js';
 import { acquireExport } from '../../util/exportBusy.js';
+import { addressMatcher, maskIdentityFields } from '../../auth/addressMask.js';
+import { stripTag } from './svcInventory.js';
+import { TAG_MASK_MIN } from '../../util/ruleName.js';
 import { todayStamp } from '../../util/dayKey.js';
 
 const toolsPerm = requirePerm('tools');
@@ -112,11 +117,33 @@ function corpServers(req, corpId) {
   return { byKey, list };
 }
 
-function linkView(row, { admin }) {
+/**
+ * 비관리자 판본의 서버 식별 필드 가림(점검 C5 · C6 — 재현):
+ *  · IP 로 등록한 iDRAC 는 등록부 id · 이름이 곧 관리 주소다 — 다른 iDRAC 화면과 같은 `addressMatcher` 로 id 는 토큰, 이름은 '이름 가림'.
+ *  · 시리얼을 가리는 판본(범위 비관리자)은 이름 · 호스트 이름에 든 서비스 태그도 걷어 낸다(물리서버 폴더 · 서비스 인벤토리 `stripTag` 와 같은 함수 · 같은 임계).
+ */
+function maskServerIdentity(obj, row, { admin, showSerial }) {
+  if (admin) return obj;
+  const out = maskIdentityFields(obj, addressMatcher([row.s?.host, row.s?.id].filter(Boolean)), { idFields: ['serverId'], nameFields: ['name', 'hostname'] });
+  // OS 호스트 이름은 관리자 판본만(반증 추가 1 — 물리서버 폴더 hwView 와 같은 기준). 등록 이름이 없어 호스트 이름으로 떨어진 이름도 비운다.
+  const osHost = String(row.inv?.system?.hostName || '');
+  if ('hostname' in out) out.hostname = '';
+  if (osHost && !row.s?.name && out.name === osHost) out.name = '';
+  if (out.hw?.host) out.hw = { ...out.hw, host: '' };
+  if (out.hw?.os?.host) out.hw = { ...out.hw, os: { ...out.hw.os, host: '' } };
+  if (!showSerial && String(row.tag || '').length >= TAG_MASK_MIN) {
+    for (const f of ['name', 'hostname']) if (out[f]) out[f] = stripTag(out[f], row.tag);
+    if (out.hw?.host) out.hw = { ...out.hw, host: stripTag(out.hw.host, row.tag) };
+    if (out.hw?.os?.host) out.hw = { ...out.hw, os: { ...out.hw.os, host: stripTag(out.hw.os.host, row.tag) } };
+  }
+  return out;
+}
+
+function linkView(row, { admin, showSerial = true }) {
   const { s, inv } = row;
   const sys = inv?.system || {};
   const rollup = (k) => { const r = partHealthRollup(inv?.[k]); return r.state ? { state: r.state, ...r.counts } : null; };
-  return {
+  return maskServerIdentity({
     serverId: String(s.id),
     name: s.name || sys.hostName || '',
     hostname: sys.hostName || '',
@@ -128,7 +155,7 @@ function linkView(row, { admin }) {
     hw: hwSummaryOf(inv),
     parts: inv ? { psu: rollup('psus'), disk: rollup('disks'), mem: rollup('memoryDimms'), fan: rollup('fans') } : null,
     ...(admin ? { mgmtHost: mgmtHostOf(s.host) } : {}),
-  };
+  }, row, { admin, showSerial });
 }
 
 // ───────────────────────── 조회 ─────────────────────────
@@ -160,20 +187,22 @@ async function roomView(req, roomId) {
   const placedKeys = await R.placedSerialKeys(corpId);
   const places = data.places.map((p) => {
     const row = p.kind === 'server' && p.serialKey ? byKey.get(p.serialKey) : null;
-    const out = { ...p, link: row ? linkView(row, { admin }) : null, linkState: p.kind !== 'server' ? 'n/a' : !p.serialKey ? 'no-serial' : row ? 'linked' : 'not-found' };
+    const out = { ...p, link: row ? linkView(row, { admin, showSerial }) : null, linkState: p.kind !== 'server' ? 'n/a' : !p.serialKey ? 'no-serial' : row ? 'linked' : 'not-found' };
     delete out.serialKey;
     if (!showSerial) { out.serial = ''; out.extraSerials = []; out.serialHidden = true; }
     return out;
   });
   const placesByRack = new Map();
   for (const p of places) { if (!placesByRack.has(p.rackId)) placesByRack.set(p.rackId, []); placesByRack.get(p.rackId).push(p); }
-  const racks = data.racks.map((r) => ({ ...r, totals: rackTotals(r, (placesByRack.get(r.id) || []).filter((p) => p.face !== 'rear')) }));
+  // 점검 C3(재현): 예전엔 후면 전용 장비를 걸러 전력 · 무게 · 대수 합에서 통째로 빠졌다(부분 합이 '몇 대 중 몇 대' 없이 전체처럼 보였다).
+  //   rackTotals 가 앞 · 뒤가 같은 U 면 한 번만 세므로 그대로 넘긴다.
+  const racks = data.racks.map((r) => ({ ...r, totals: rackTotals(r, placesByRack.get(r.id) || []) }));
   // 미배치 = 이 법인 서버 중 원장 어디에도(이 법인 전 데이터센터) 서비스 태그가 없는 것.
   const unplacedAll = list.filter((x) => x.key && !placedKeys.has(x.key));
-  const unplaced = unplacedAll.slice(0, 300).map((x) => ({
+  const unplaced = unplacedAll.slice(0, 300).map((x) => maskServerIdentity({
     serverId: String(x.s.id), name: x.s.name || x.inv?.system?.hostName || '', model: x.inv?.system?.model || x.s.model || '',
     hostname: x.inv?.system?.hostName || '', ...(showSerial ? { serviceTag: x.tag } : {}),
-  }));
+  }, x, { admin, showSerial }));
   const noTag = list.filter((x) => !x.key).length;
   const corp = listDatacenters().find((d) => String(d.id) === corpId);
   return {
@@ -206,16 +235,40 @@ export function sheetNameOf(name) {
 
 const fmtU = (p) => `U${p.uStart}${p.uSize > 1 ? `–${p.uStart + p.uSize - 1}` : ''}`;
 
+/**
+ * 시트 하나에 그리는 랙 수(점검 C4 — 측정): ExcelJS 의 mergeCells 는 병합마다 그 시트의 기존 병합 전부와 겹침을 검사해 비용이 병합 수의 제곱이다.
+ * 랙 300개를 한 시트에 그리면 중앙 이벤트 루프가 약 21초 멈췄다(랙당 병합 약 55회). 시트를 RACKS_PER_SHEET 대씩 나누고 랙마다 양보한다.
+ */
+export const RACKS_PER_SHEET = 12;
+/** 나눈 시트 이름 — 전산실 이름 뒤에 랙 번호 범위(31자 · 금지 글자 규칙은 sheetNameOf). 시트가 하나면 예전처럼 전산실 이름만. */
+export function sheetNamesOf(roomName, rackCount, per = RACKS_PER_SHEET) {
+  const n = Math.max(1, Math.ceil(rackCount / per));
+  if (n === 1) return [sheetNameOf(roomName)];
+  const out = [];
+  for (let k = 0; k < n; k += 1) {
+    const tail = ` ${k * per + 1}-${Math.min(rackCount, (k + 1) * per)}`;
+    out.push(sheetNameOf(`${sheetNameOf(roomName).slice(0, 31 - tail.length).trim()}${tail}`));
+  }
+  return out;
+}
+const yieldTurn = () => new Promise((r) => setImmediate(r));
+
 export async function buildRoomXlsx(view) {
   const wb = new ExcelJS.Workbook();
   wb.creator = 'THE DAVINCI';
-  const ws = wb.addWorksheet(sheetNameOf(view.room.name));
+  const names = sheetNamesOf(view.room.name, view.racks.length);
   const thin = { style: 'thin', color: { argb: 'FF808080' } };
   const box = { top: thin, left: thin, bottom: thin, right: thin };
   const COLS = 5; const GAP = 1;
-  ws.getCell(1, 1).value = `${view.corp.name} › ${view.site.name} › ${view.room.name} — 랙 실장도(포탈 원장 · ${todayStamp()})`;
-  ws.getCell(1, 1).font = { bold: true, size: 12 };
-  view.racks.forEach((rack, i) => {
+  let ws = null;
+  for (const [idx, rack] of view.racks.entries()) {
+    const i = idx % RACKS_PER_SHEET;
+    if (i === 0 || !ws) {
+      ws = wb.addWorksheet(names[Math.floor(idx / RACKS_PER_SHEET)]);
+      ws.getCell(1, 1).value = `${view.corp.name} › ${view.site.name} › ${view.room.name} — 랙 실장도(포탈 원장 · ${todayStamp()})`;
+      ws.getCell(1, 1).font = { bold: true, size: 12 };
+    }
+    if (idx) await yieldTurn();   // 랙마다 양보 — 큰 전산실 내보내기가 다른 요청을 붙잡지 않게
     const c0 = 1 + i * (COLS + GAP);
     const H = rack.heightU;
     ws.getColumn(c0).width = 5; ws.getColumn(c0 + 1).width = 40; ws.getColumn(c0 + 2).width = 8; ws.getColumn(c0 + 3).width = 10; ws.getColumn(c0 + 4).width = 10;
@@ -264,8 +317,16 @@ export async function buildRoomXlsx(view) {
     sumRow('장비 무게 합계', t.weightKg == null ? '—' : `${t.weightKg} kg${part(t.devices, t.weightRead)}`);
     sumRow('세로 PDU(A · B 계통)', `A ${rack.pduA} · B ${rack.pduB}`);
     const rear = mine.filter((p) => p.face === 'rear');
-    for (const p of rear) sumRow(`후면 ${fmtU(p)}`, [p.label, p.model, p.serial].filter(Boolean).join(' / '));
-  });
+    for (const p of rear) {
+      const vals = [p.weightKg != null ? `${p.weightKg} kg` : '', p.opW != null ? `운전 ${p.opW} W` : '', p.ratedW != null ? `정격 ${p.ratedW} W` : ''].filter(Boolean).join(' · ');
+      sumRow(`후면 ${fmtU(p)}`, [[p.label, p.model, p.serial].filter(Boolean).join(' / '), vals].filter(Boolean).join(' — '));
+    }
+  }
+  if (!ws) {   // 랙이 없는 전산실도 제목 시트 하나는 남긴다(예전 동작)
+    ws = wb.addWorksheet(names[0]);
+    ws.getCell(1, 1).value = `${view.corp.name} › ${view.site.name} › ${view.room.name} — 랙 실장도(포탈 원장 · ${todayStamp()})`;
+    ws.getCell(1, 1).font = { bold: true, size: 12 };
+  }
   return wb.xlsx.writeBuffer();
 }
 
@@ -295,7 +356,9 @@ async function runOp(req, res) {
       case 'site.add': {
         const corpId = cleanText(b.corpId, 64);
         const acc = accessOf(req);
-        if (!corpId || !canRead(acc, corpId) || !listDatacenters().some((d) => String(d.id) === corpId)) return res.status(404).json({ ok: false, reason: '법인을 찾지 못했습니다.' });
+        // 점검 C16: 법인 목록에서 지워진 법인(원장은 남음 — 전체 범위 계정에만 보인다)은 다른 쓰기(전산실 · 랙)와 같게 다룬다(예전엔 site.add 만 404).
+        const known = listDatacenters().some((d) => String(d.id) === corpId) || (!acc.read && corpId && (await R.listTree(new Set([corpId]))).sites.length > 0);
+        if (!corpId || !canRead(acc, corpId) || !known) return res.status(404).json({ ok: false, reason: '법인을 찾지 못했습니다.' });
         if (!canWrite(acc, corpId)) return res.status(403).json({ ok: false, error: 'forbidden', reason: '이 법인의 랙 실장도를 고칠 권한이 없습니다(관리자 · 그 법인 쓰기 범위만).' });
         if (!name) return res.status(400).json({ ok: false, reason: '데이터센터 이름이 비어 있습니다.' });
         const r = await R.addSite({ corpId, name, user });
@@ -347,6 +410,8 @@ async function runOp(req, res) {
         const heightU = intIn(b.heightU, LIMITS.minHeightU, LIMITS.maxHeightU);
         if (!name || heightU == null) return res.status(400).json({ ok: false, reason: `이름과 높이(${LIMITS.minHeightU}~${LIMITS.maxHeightU}U)를 넣으세요.` });
         const mm = (v) => (v === '' || v == null ? null : intIn(v, 100, 3000));
+        // 점검 C18: 넣었는데 범위 밖이면 조용히 null 로 저장하지 않는다
+        for (const k of ['widthMm', 'depthMm']) if (b[k] !== '' && b[k] != null && mm(b[k]) == null) return res.status(400).json({ ok: false, reason: '너비 · 깊이는 100~3000mm 정수로 넣으세요(모르면 비워 두세요).' });
         const r = await R.addType({ name, heightU, widthMm: mm(b.widthMm), depthMm: mm(b.depthMm) });
         audit(req, 'rack.type.add', name, `${heightU}U`);
         return res.json({ ok: true, ...r });
@@ -361,7 +426,7 @@ async function runOp(req, res) {
           if (c.value.typeId && !isId(c.value.typeId)) return res.status(400).json({ ok: false, reason: '랙 종류 id 가 올바르지 않습니다.' });
           r = op === 'rack.add' ? await R.addRack({ roomId: g.roomId, rev, user, input: c.value }) : await R.updateRack({ roomId: g.roomId, rev, user, id: b.id, input: c.value });
         }
-        audit(req, `rack.${op}`, g.corpId, String(b.id || b.rack?.name || ''));
+        audit(req, `rack.${op}`, g.corpId, String(op === 'rack.add' ? (r?.id || '') : b.id));
         return res.json({ ok: true, ...r });
       }
       case 'place.add': case 'place.update': case 'place.remove': {
@@ -377,7 +442,7 @@ async function runOp(req, res) {
             r = await R.updatePlace({ roomId: g.roomId, rev, user, id: b.id, rackId: b.rackId || '', input: c.value });
           }
         }
-        audit(req, `rack.${op}`, g.corpId, String(b.id || b.place?.label || ''));
+        audit(req, `rack.${op}`, g.corpId, String(op === 'place.add' ? (r?.id || '') : b.id));
         return res.json({ ok: true, ...r });
       }
       default:
@@ -401,20 +466,20 @@ export function registerRack(api) {
   });
   // 법인별 판(최근 30개) — 조회는 그 법인 조회 범위 · 작업자 계정명은 관리자 판본만(변경 이력과 같은 기준).
   api.get('/tools/rack/versions', toolsPerm, async (req, res) => {
-    const corpId = cleanText(req.query?.corp, 64);
-    const acc = accessOf(req);
-    if (!corpId || !canRead(acc, corpId)) return res.status(404).json({ ok: false, reason: '법인을 찾지 못했습니다.' });
     try {
+      const corpId = cleanText(req.query?.corp, 64);
+      const acc = accessOf(req);
+      if (!corpId || !canRead(acc, corpId)) return res.status(404).json({ ok: false, reason: '법인을 찾지 못했습니다.' });
       const admin = isAdminDetailUser(req.user);
       const versions = (await R.listVersions(corpId)).map((v) => ({ ...v, user: admin ? v.user : '' }));
       return res.json({ ok: true, corpId, versions, latestId: versions[0]?.id ?? null, keep: VERSION_KEEP, canRestore: canWrite(acc, corpId) });
     } catch (e) { return sendErr(res, e); }
   });
   api.get('/tools/rack/versions/:vid', toolsPerm, async (req, res) => {
-    const corpId = cleanText(req.query?.corp, 64);
-    const acc = accessOf(req);
-    if (!corpId || !canRead(acc, corpId) || !/^\d{1,12}$/.test(String(req.params.vid))) return res.status(404).json({ ok: false, reason: '판을 찾지 못했습니다.' });
     try {
+      const corpId = cleanText(req.query?.corp, 64);
+      const acc = accessOf(req);
+      if (!corpId || !canRead(acc, corpId) || !/^\d{1,12}$/.test(String(req.params.vid))) return res.status(404).json({ ok: false, reason: '판을 찾지 못했습니다.' });
       const d = await R.versionDetail(corpId, Number(req.params.vid));
       if (!d) return res.status(404).json({ ok: false, reason: '판을 찾지 못했습니다.' });
       if (!isAdminDetailUser(req.user)) d.version.user = '';

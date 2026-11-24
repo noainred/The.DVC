@@ -1,6 +1,6 @@
 # 랙 실장도(`server/src/rack/` · 라우트 `routes/api/rack.js` · 화면 `web/src/views/tools/RackTool.jsx`) 불변조건
 
-설계: `docs/design/rack-elevation/README.md`. 회귀: `test/rackLedger.test.js` · `test/rackRoutes.test.js` · `web/src/views/tools/rackView.test.js`.
+설계: `docs/design/rack-elevation/README.md`. 회귀: `test/rackLedger.test.js` · `test/rackRoutes.test.js` · `test/rackVersions.test.js` · `test/rackAudit1124.test.js`(2026-11-24 점검) · `web/src/views/tools/rackView.test.js`.
 
 - **원장은 중앙 한 곳**(2026-11-20 사용자 결정). 사람이 정한 위치만 저장한다 — 상태 · 온도 · 전력 측정값은 넣지 않고 화면을 그릴 때 수집 모듈에서 잇는다.
   계층은 법인(`datacenter/store.js` DataCenter = 법인 묶음) → 데이터센터(site · 물리) → 전산실 → 랙 → 배치. 법인 하나에 데이터센터가 여럿일 수 있다.
@@ -18,3 +18,9 @@
   판 압축 해제는 `SNAP_MAX_BYTES` 상한 + 실패 경고(내용 없이) · 차이 결과 캐시는 (법인, 판, 최신 판) 키 + 사본 반환 · 차이에는 시리얼 값을 싣지 않는다(필드 이름만). 판정은 `rack/versions.js`.
   회귀 `test/rackVersions.test.js`(변이 13건 전부 잡힘).
 - 겹침 판정은 서버 `layout.js placementIssue` 가 진실 — 웹 `rackView.js` 는 끌어 놓는 동안 미리 보기만 하고, 두 판정은 `rackView.test.js` 가 같은 입력으로 대조한다.
+- **2026-11-24 점검(5축 + 반증 1인 · 확정 25건)에서 고정한 것**: 랙 합계에는 **후면 전용 장비도** 든다(`rackTotals` 가 앞 · 뒤 같은 U 를 한 번만 센다 — 라우트에서 거르지 말 것) ·
+  비관리자 판본은 IP 로 등록한 서버의 id · 이름을 `addressMatcher` 로 가리고(토큰 · '이름 가림') OS 호스트 이름은 관리자만 · 시리얼을 가리는 판본은 이름 속 서비스 태그도 `stripTag` ·
+  법인 원장 개수 상한 = 판 검사 상한(`versions.js SNAP_CAPS` — 넘는 변경은 `saveVersion` 에서 409 `corpCap`) · 되돌리기 미리 보기와 실제는 같은 `restorableSnapshot` ·
+  전산실 삭제도 이력을 지우지 않는다 · 전산실 없는 이력도 법인마다 2,000건 · 엑셀은 랙 `RACKS_PER_SHEET` 대씩 시트를 나누고 랙마다 양보(ExcelJS 병합이 시트마다 제곱 — 300랙 21초 정지 실측) ·
+  감사 상세는 서버가 만든 id. 화면: 보이는 전산실 = **지금 고른 전산실의 응답만**(늦은 응답으로 보이지 않는 원장에 쓰지 않게) · 성공한 쓰기의 rev 즉시 반영 + 저장 중 놓기 거절 ·
+  rev 충돌이면 창을 닫지 않는다 · 지우기는 확인 · 데이터가 있으면 새로 고침 실패는 배너.
