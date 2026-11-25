@@ -72,6 +72,7 @@ import * as m_gpuPoller from '../gpu/poller.js';
 import * as m_idracPoller from '../idrac/poller.js';
 import * as m_idracScanPoller from '../idrac/scanPoller.js';
 import * as m_powerOffPoller from '../tools/powerOffPoller.js';
+import * as m_powerWatch from '../vmpower/watcher.js';
 import * as m_vmCloneScheduler from '../vmclone/scheduler.js';
 import * as m_logsPoller from '../logs/poller.js';
 import * as m_capacitySampler from '../capacity/sampler.js';
@@ -131,6 +132,7 @@ const MODS = Object.freeze({
   '../idrac/poller.js': m_idracPoller,
   '../idrac/scanPoller.js': m_idracScanPoller,
   '../tools/powerOffPoller.js': m_powerOffPoller,
+  '../vmpower/watcher.js': m_powerWatch,
   '../vmclone/scheduler.js': m_vmCloneScheduler,
   '../logs/poller.js': m_logsPoller,
   '../capacity/sampler.js': m_capacitySampler,

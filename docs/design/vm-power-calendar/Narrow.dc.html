@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>전원 이력 — 400px</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.muted{color:#8b9bb4}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.ok{background:rgba(34,197,94,.14);color:#86efac}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;flex:none}
+.tabs{display:flex;gap:2px;border-bottom:1px solid #243049;overflow-x:auto;padding:0 8px}
+.tabs a{padding:12px 12px;color:#8b9bb4;font-weight:600;white-space:nowrap;text-decoration:none;border-bottom:2px solid transparent;margin-bottom:-1px}
+.tabs a.on{color:#e6edf6;border-bottom-color:#3b82f6}
+.tiles{display:grid;grid-template-columns:repeat(2, minmax(0, 1fr));gap:8px}
+.tile{padding:10px 12px;display:flex;flex-direction:column;gap:4px}
+.tile span{font-size:11px;color:#8b9bb4;font-weight:600;display:flex;align-items:center;gap:6px}
+.tile b{font-size:17px;font-weight:800;white-space:nowrap}
+.tile small{font-size:11px;color:#8b9bb4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sw{display:inline-block;width:11px;height:11px;border-radius:3px;flex:none}
+.h3{margin:0;font-size:13px;font-weight:700}
+.mons{display:grid;grid-template-columns:repeat(6, minmax(0, 1fr));gap:6px}
+.mons button{display:flex;flex-direction:column;justify-content:center;gap:6px;height:48px;padding:0 6px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12px;font-weight:600;cursor:pointer;min-width:0;text-align:left}
+.mons button i{display:block;height:5px;border-radius:3px}
+.wk{display:grid;grid-template-columns:repeat(7, minmax(0, 1fr));gap:4px}
+.wk em{font-style:normal;font-size:11px;color:#8b9bb4;text-align:center;padding-bottom:2px}
+.d{display:flex;flex-direction:column;justify-content:space-between;height:44px;padding:5px 4px 4px;border-radius:7px;border:1px solid transparent;background:#1a2236;color:#8b9bb4;font:inherit;font-size:11.5px;line-height:1;text-align:left;cursor:pointer;min-width:0}
+.d:disabled{cursor:default;background:transparent;border-color:#1f2a40;color:#7483a0}
+.d .bar{display:block;height:16px;border-radius:3px}
+.blank{height:44px}
+.legend{display:flex;flex-wrap:wrap;gap:5px 12px;font-size:11px;color:#8b9bb4;align-items:center}
+.legend span{display:inline-flex;align-items:center;gap:5px}
+.dayline{height:28px;border-radius:6px}
+.axis{display:flex;justify-content:space-between;font-size:10.5px;color:#8b9bb4;margin-top:4px}
+.seg{display:grid;grid-template-columns:12px 104px 1fr;gap:8px;align-items:baseline;padding:8px 0;border-bottom:1px solid #1f2a40;font-size:12.5px}
+.seg:last-child{border-bottom:0}
+.seg small{grid-column:2 / -1;font-size:11.5px;color:#8b9bb4}
+</style>
+</helmet>
+
+<div style="width:400px;box-sizing:border-box;min-height:1180px;background:#0a0e17;display:flex;flex-direction:column">
+  <div style="padding:14px 16px 10px;display:flex;flex-direction:column;gap:8px;background:#0f1626">
+    <a href="#" style="font-size:12px;text-decoration:none">← 가상화 서버 목록</a>
+    <div style="display:flex;align-items:center;gap:8px;min-width:0">
+      <span class="dot" style="background:#22c55e" title="켜짐"></span>
+      <b style="font-size:18px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">batch-kr1-014</b>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center"><span class="tag ok">켜짐 · {{upFor}}째</span><span class="muted" style="font-size:12px">VC-KR1 · Rocky Linux 9.3</span></div>
+  </div>
+  <nav class="tabs" aria-label="VM 개체 탭" style="background:#0f1626">
+    <a href="#">요약</a><a href="#">모니터</a><a href="#">구성</a><a href="#">스냅샷</a><a href="#" class="on">전원 이력</a><a href="#">성능 튜닝</a>
+  </nav>
+
+  <div style="padding:12px 16px 20px;display:flex;flex-direction:column;gap:12px">
+    <div class="muted" style="font-size:12px">최근 12개월 · 기준 2026-11-24 11:00 (KST)</div>
+    <section class="tiles" aria-label="기간 요약">
+      <div class="card tile"><span><i class="sw" style="background:#22c55e"></i>켜진 시간</span><b class="mono">{{t.on}}</b><small>판정된 시간의 {{t.onPct}}%</small></div>
+      <div class="card tile"><span><i class="sw" style="background:#64748b"></i>꺼진 시간</span><b class="mono">{{t.off}}</b><small>꺼짐 구간 {{t.offCount}}번</small></div>
+      <div class="card tile"><span>가장 길게 꺼짐</span><b class="mono">{{t.longest}}</b><small class="mono">{{t.longestFrom}} ~</small></div>
+      <div class="card tile"><span>판정하지 못한 시간</span><b class="mono">{{t.unknown}}</b><small>비율에서 뺐습니다</small></div>
+    </section>
+
+    <section class="card" style="padding:12px;display:flex;flex-direction:column;gap:10px" aria-label="월 고르기">
+      <h3 class="h3">월 고르기</h3>
+      <div class="mons">
+        <sc-for list="{{months}}" as="m" hint-placeholder-count="12">
+          <button type="button" onClick="{{m.pick}}" aria-pressed="{{m.on}}" aria-label="{{m.aria}}" style="{{m.style}}">{{m.short}}<i style="{{m.bar}}"></i></button>
+        </sc-for>
+      </div>
+    </section>
+
+    <section class="card" style="padding:12px;display:flex;flex-direction:column;gap:10px" aria-label="전원 달력">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px"><h3 class="h3">{{cur.title}}</h3><span class="muted" style="font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{cur.sub}}</span></div>
+      <div>
+        <div class="wk" aria-hidden="true"><em>일</em><em>월</em><em>화</em><em>수</em><em>목</em><em>금</em><em>토</em></div>
+        <div class="wk">
+          <sc-for list="{{cur.blanks}}" as="b" hint-placeholder-count="2"><span class="blank"></span></sc-for>
+          <sc-for list="{{cur.days}}" as="d" hint-placeholder-count="31">
+            <button class="d" type="button" onClick="{{d.pick}}" disabled="{{d.future}}" aria-pressed="{{d.on}}" aria-label="{{d.aria}}" style="{{d.cell}}"><span style="{{d.num}}">{{d.n}}</span><span class="bar" style="{{d.bar}}"></span></button>
+          </sc-for>
+        </div>
+      </div>
+      <div class="legend" aria-label="범례">
+        <span><i class="sw" style="background:#22c55e"></i>켜짐</span>
+        <span><i class="sw" style="background:#64748b"></i>꺼짐</span>
+        <span><i class="sw" style="background:repeating-linear-gradient(135deg,#33415c 0 2px,#111a2c 2px 5px)"></i>판정 못함</span>
+        <span>칸 가로 = 0시 → 24시</span>
+      </div>
+    </section>
+
+    <section class="card" style="padding:12px" aria-label="선택한 날">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:10px"><h3 class="h3">{{sel.title}}</h3></div>
+      <div class="dayline" style="{{sel.bar}}" role="img" aria-label="{{sel.sum}}"></div>
+      <div class="axis mono" aria-hidden="true"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div>
+      <div style="margin-top:8px">
+        <sc-for list="{{sel.rows}}" as="r" hint-placeholder-count="2">
+          <div class="seg"><i class="sw" style="{{r.sw}}"></i><span class="mono">{{r.range}}</span><b style="font-weight:600">{{r.label}} · <span class="mono muted" style="font-weight:400">{{r.dur}}</span></b><small>{{r.note}}</small></div>
+        </sc-for>
+      </div>
+    </section>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":400,"height":1180}}'>
+class Component extends DCLogic {
+  build() {
+    if (this._d) return this._d;
+    var H = 3600000, D = 24 * H;
+    function T(y, m, d, h, mi) { return Date.UTC(y, m - 1, d, h || 0, mi || 0); }
+    function p2(n) { return (n < 10 ? '0' : '') + n; }
+    function ymd(t) { var x = new Date(t); return x.getUTCFullYear() + '-' + p2(x.getUTCMonth() + 1) + '-' + p2(x.getUTCDate()); }
+    function hm(t) { var x = new Date(t); return p2(x.getUTCHours()) + ':' + p2(x.getUTCMinutes()); }
+    function dur(ms) {
+      var m = Math.round(ms / 60000), d = Math.floor(m / 1440), h = Math.floor((m % 1440) / 60), mi = m % 60;
+      if (d > 0) return d + '일' + (h ? ' ' + h + '시간' : '');
+      if (h > 0) return h + '시간' + (mi ? ' ' + mi + '분' : '');
+      return mi + '분';
+    }
+    var WD = ['일', '월', '화', '수', '목', '금', '토'];
+    // 가상 데이터(시안 A 와 같은 VM · 같은 구간)
+    var NOW = T(2026, 11, 24, 11, 0), START = T(2025, 12, 1);
+    var GRAN = { event: 0, check: 6 * H, track: 12 * H };
+    var SRC = { event: 'vCenter 이벤트', check: '주기 점검 — 두 관측 사이로만 압니다', track: 'VM 추적 소급 — 두 관측 사이로만 압니다' };
+    var offs = [];
+    function off(a, b, src) { offs.push({ a: a, b: b, src: src }); }
+    off(T(2025, 12, 21, 0, 0), T(2025, 12, 21, 0, 0), 'track');
+    off(T(2026, 1, 17, 2, 10), T(2026, 1, 17, 6, 40), 'event');
+    off(T(2026, 3, 8, 19, 20), T(2026, 3, 21, 9, 5), 'event');
+    for (var i = 0; i < 13; i++) { var f = T(2026, 4, 3, 20, 0) + i * 7 * D; off(f, f + 2 * D + 11.5 * H, 'event'); }
+    off(T(2026, 9, 2, 12, 0), T(2026, 9, 2, 18, 0), 'check');
+    off(T(2026, 10, 28, 23, 40), T(2026, 11, 12, 8, 15), 'event');
+    var marks = [{ a: T(2026, 7, 10, 3, 0), b: T(2026, 7, 13, 11, 0), st: 'unk', src: '' }];
+    offs.forEach(function (o) {
+      var g = GRAN[o.src];
+      if (g) marks.push({ a: o.a - g, b: o.a, st: 'est', src: o.src });
+      if (o.b > o.a) marks.push({ a: o.a, b: o.b, st: 'off', src: o.src });
+      if (g) marks.push({ a: o.b, b: o.b + g, st: 'est', src: o.src });
+    });
+    marks.sort(function (x, y) { return x.a - y.a; });
+    var segs = [], cur = START;
+    marks.forEach(function (m) { if (m.a > cur) segs.push({ a: cur, b: m.a, st: 'on', src: '' }); segs.push(m); cur = m.b; });
+    if (cur < NOW) segs.push({ a: cur, b: NOW, st: 'on', src: '' });
+    function clip(a, b) {
+      var out = [];
+      for (var k = 0; k < segs.length; k++) { var s = segs[k]; if (s.b <= a || s.a >= b) continue; out.push({ a: Math.max(a, s.a), b: Math.min(b, s.b), st: s.st, src: s.src }); }
+      return out;
+    }
+    function sums(parts) { var s = { on: 0, off: 0, est: 0, unk: 0 }; parts.forEach(function (p) { s[p.st] += p.b - p.a; }); return s; }
+    var COL = { on: '#22c55e', off: '#64748b', est: 'rgba(100,116,139,.45)', unk: 'transparent' };
+    var LABEL = { on: '켜짐', off: '꺼짐', est: '경계 불확실', unk: '기록 없음' };
+    var HATCH = 'repeating-linear-gradient(135deg,#33415c 0 2px,transparent 2px 5px)';
+    function bar(day0, parts) {
+      if (!parts.length) return 'background:transparent';
+      var stops = [], last = 0;
+      parts.forEach(function (p) { var x = ((p.a - day0) / D * 100).toFixed(2), y = ((p.b - day0) / D * 100).toFixed(2); stops.push(COL[p.st] + ' ' + x + '% ' + y + '%'); last = y; });
+      if (last < 100) stops.push('#111a2c ' + last + '% 100%');
+      return 'background:linear-gradient(90deg,' + stops.join(',') + '),' + HATCH + ',#111a2c';
+    }
+    var months = [], total = { on: 0, off: 0, est: 0, unk: 0 }, byKey = {};
+    for (var n = 0; n < 12; n++) {
+      var y = 2025 + Math.floor((11 + n) / 12), mo = (11 + n) % 12 + 1;
+      var m0 = T(y, mo, 1), m1 = mo === 12 ? T(y + 1, 1, 1) : T(y, mo + 1, 1);
+      var days = [], ms = { on: 0, off: 0, est: 0, unk: 0 }, first = null;
+      for (var t = m0; t < m1; t += D) {
+        var future = t >= NOW, parts = future ? [] : clip(t, Math.min(t + D, NOW)), s = sums(parts);
+        ['on', 'off', 'est', 'unk'].forEach(function (k) { ms[k] += s[k]; total[k] += s[k]; });
+        var bits = [];
+        if (s.on) bits.push('켜짐 ' + dur(s.on)); if (s.off) bits.push('꺼짐 ' + dur(s.off));
+        if (s.est + s.unk) bits.push('판정 못함 ' + dur(s.est + s.unk));
+        var x = new Date(t), day = { key: ymd(t), t: t, n: x.getUTCDate(), wd: WD[x.getUTCDay()], parts: parts, future: future,
+          changed: (s.on ? 1 : 0) + (s.off ? 1 : 0) + (s.est ? 1 : 0) > 1, sumTxt: bits.join(' · ') };
+        day.aria = mo + '월 ' + day.n + '일 ' + day.wd + '요일 — ' + (future ? '아직 오지 않은 날' : day.sumTxt);
+        day.bar = bar(t, parts);
+        if (!first && day.changed) first = day.key;
+        days.push(day); byKey[day.key] = day;
+      }
+      var all = ms.on + ms.off + ms.est + ms.unk, known = ms.on + ms.off;
+      var a = (ms.on / all * 100).toFixed(1), b = ((ms.on + ms.off) / all * 100).toFixed(1);
+      var sub = '켜짐 ' + (ms.on / known * 100).toFixed(1) + '%' + (ms.off ? ' · 꺼짐 ' + dur(ms.off) : '') + (ms.est + ms.unk ? ' · 판정 못함 ' + dur(ms.est + ms.unk) : '');
+      var blanks = []; for (var q = 0; q < new Date(m0).getUTCDay(); q++) blanks.push({ k: q });
+      months.push({ ym: y + '-' + p2(mo), short: mo + '월', title: y + '년 ' + mo + '월', sub: sub, blanks: blanks, days: days, first: first || days[0].key,
+        ratio: 'background:linear-gradient(90deg,#22c55e 0 ' + a + '%,#64748b ' + a + '% ' + b + '%,transparent ' + b + '% 100%),' + HATCH + ',#111a2c' });
+    }
+    var longest = offs.reduce(function (p, o) { return !p || o.b - o.a > p.b - p.a ? o : p; }, null), known2 = total.on + total.off;
+    this._d = { months: months, byKey: byKey, bar: bar, hm: hm, dur: dur, D: D, COL: COL, LABEL: LABEL, SRC: SRC,
+      upFor: dur(NOW - offs[offs.length - 1].b),
+      t: { on: dur(total.on), off: dur(total.off), onPct: (total.on / known2 * 100).toFixed(1), offCount: offs.length,
+        longest: dur(longest.b - longest.a), longestFrom: ymd(longest.a), unknown: dur(total.unk + total.est) } };
+    return this._d;
+  }
+  renderVals() {
+    var d = this.build(), self = this, st = this.state || {};
+    var selM = st.m || '2026-03';
+    var month = d.months.filter(function (m) { return m.ym === selM; })[0];
+    var selKey = st.day && st.day.slice(0, 7) === selM ? st.day : month.first;
+    var day = d.byKey[selKey];
+    return {
+      upFor: d.upFor, t: d.t,
+      months: d.months.map(function (m) {
+        var on = m.ym === selM;
+        return { short: m.short, on: on, aria: m.title + ' — ' + m.sub, bar: m.ratio, style: on ? 'border-color:#3b82f6;box-shadow:0 0 0 1px #3b82f6;background:#22304d' : '',
+          pick: function () { self.setState({ m: m.ym, day: null }); } };
+      }),
+      cur: { title: month.title, sub: month.sub, blanks: month.blanks,
+        days: month.days.map(function (x) {
+          var on = x.key === selKey;
+          return { n: x.n, aria: x.aria, bar: x.bar, future: x.future, on: on,
+            cell: on ? 'border-color:#3b82f6;box-shadow:0 0 0 1px #3b82f6;background:#22304d' : '',
+            num: x.changed ? 'color:#e6edf6;font-weight:700' : '',
+            pick: function () { self.setState({ day: x.key }); } };
+        }) },
+      sel: { title: selKey + ' (' + day.wd + ')', sum: day.sumTxt, bar: d.bar(day.t, day.parts),
+        rows: day.parts.map(function (p) {
+          var end = p.b - day.t >= d.D ? '24:00' : d.hm(p.b);
+          return { range: d.hm(p.a) + ' – ' + end, label: d.LABEL[p.st], dur: d.dur(p.b - p.a), note: p.st === 'unk' ? '포탈이 이 vCenter 를 수집하지 못한 시간' : (d.SRC[p.src] || ''),
+            sw: p.st === 'unk' ? 'background:repeating-linear-gradient(135deg,#33415c 0 2px,#111a2c 2px 5px)' : 'background:' + d.COL[p.st] };
+        }) }
+    };
+  }
+}
+</script>
+</body>
+</html>

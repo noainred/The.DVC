@@ -26,6 +26,7 @@ import { gbText, PERM_CATEGORY } from './vcdTabs.js';
 import { useDaySeries, Spark } from '../vms/vmSeries.jsx';
 import { signalText, usageTone, TONE_COLOR, TONE_TEXT, barW, pctText } from '../vms/vmHubText.js';
 import '../vms/vmHub.css';
+import { PowerCalendarTab } from '../vms/PowerHistory.jsx'; // v3.39.0 '전원 이력' 탭(시안 docs/design/vm-power-calendar A안)
 
 const VmMetricButton = React.lazy(() => import('../../components/VmMetrics.jsx').then((m) => ({ default: m.VmMetricButton })));
 const VmPerfView = React.lazy(() => import('../../components/vmperf/VmPerfView.jsx')); // v2.911 성능 — 모니터 탭 첫 섹션(시안 docs/design/vm-perf ②)
@@ -280,6 +281,8 @@ export default function VmObject({ site, vcenterId, vm, vmsOk, gate, datastores,
           </Card>
         </div>
       )}
+
+      {tab === 'power' && <PowerCalendarTab vm={vm} />}
 
       {extra}
     </ObjectShell>

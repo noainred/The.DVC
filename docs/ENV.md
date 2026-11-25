@@ -734,7 +734,7 @@
 |---|---|---|---|
 | `VMTRACK_DB_PATH` |  |  | vmtrack/db.js |
 | `VMTRACK_DS_DELTA_MIN_GB` | `1` |  | vmtrack/diff.js |
-| `VMTRACK_RETENTION_DAYS` | `1095` |  | vmtrack/db.js |
+| `VMTRACK_RETENTION_DAYS` | `1095` |  | vmpower/watcher.js, vmtrack/db.js |
 
 ## 헬스체크 (1)
 
