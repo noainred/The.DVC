@@ -7,6 +7,7 @@
  *   - vCenter 의 첫 관측 때 한 번 VM 추적 기록으로 지난 구간을 소급한다(spans.js planBackfill).
  *   - 하루 한 번(기동 첫 틱 제외) 보존 기간(VMTRACK_RETENTION_DAYS, 기본 1095일)보다 오래 전에 끝난 구간을 지운다.
  */
+import { performance } from 'node:perf_hooks';
 import { store } from '../store.js';
 import { samplingUnreadReasons } from '../metrics/sampler.js';
 import { numOrNull } from '../util/numOrNull.js';
@@ -30,6 +31,11 @@ let lastResult = null;
 let lastAt = 0;
 let runs = 0;
 let timer = null;
+/**
+ * vCenter → 건너뛰기를 시작한 단조 시각(performance.now — 벽시계와 무관). 건너뛴 길이를 시계 값이 아니라 실제 경과로 잰다(6회차 R6:
+ *   시계가 틀린 채 시작해 앞으로 보정되면 시작값이 9시간 어긋나 정상 기록을 '기록 없음' 으로 가렸다). 재시작으로 잃으면 DB 의 hold_from 으로 대체.
+ */
+const holdMono = new Map();
 
 export function powerWatchStatus() {
   return { running, intervalMs: WATCH_EVERY_MS, gapMs: GAP_MS, lastRun, lastResult };
@@ -38,13 +44,13 @@ export function powerWatchStatus() {
 const tickYield = () => new Promise((r) => { setImmediate(r); });
 
 /** 관측 1회(자동 · 시험 공용). snap 을 넘기면 그것을 쓴다(시험). */
-export async function runPowerWatchOnce({ now = Date.now(), snap = null, trigger = 'tick', uptimeMs = process.uptime() * 1000 } = {}) {
+export async function runPowerWatchOnce({ now = Date.now(), snap = null, trigger = 'tick', uptimeMs = process.uptime() * 1000, mono = () => performance.now() } = {}) {
   if (running) return { ok: false, skipped: true, reason: '이미 관측 중입니다.' };
   running = true;
   const started = Date.now();
   let r = null;
   try {
-    r = await runInner({ now, snap: snap || store.get(), trigger, uptimeMs });
+    r = await runInner({ now, snap: snap || store.get(), trigger, uptimeMs, mono });
     return r;
   } catch (e) {
     r = { ok: false, reason: String(e?.message || e).slice(0, 200) };
@@ -58,7 +64,13 @@ export async function runPowerWatchOnce({ now = Date.now(), snap = null, trigger
   }
 }
 
-async function runInner({ now, snap, uptimeMs }) {
+/** 건너뛰기 시작 시각(지금 시계 기준) — 단조 경과가 있으면 그것으로, 없으면 DB 값. 없으면 null. */
+function holdStartOf(id, watch, now, mono) {
+  if (holdMono.has(id)) return Math.min(now, now - Math.max(0, mono() - holdMono.get(id)));
+  return watch?.holdFrom ?? null;
+}
+
+async function runInner({ now, snap, uptimeMs, mono }) {
   if (!(await powerDb())) return { ok: false, reason: '추적 DB 사용 불가(node:sqlite 없음 또는 초기화 실패)' };
   if (!snap?.vcenters?.length) return { ok: true, idle: 'no-inventory' };
   const unread = samplingUnreadReasons(snap);
@@ -96,10 +108,12 @@ async function runInner({ now, snap, uptimeMs }) {
     // 시계가 뒤로 갔다(직전 관측 ≥ 지금) — 이번 관측은 쓰지 않는다. 미래로 크게 앞선 기록은 지금으로 되돌린다(그 사이는 다음 관측 때 끊김).
     if (watch.lastTs >= now) {
       if (watch.lastTs - now > CLOCK_REPAIR_MS && uptimeMs >= REPAIR_AFTER_UPTIME_MS) {
-        const rr = await repairFuture(id, now);
+        const rr = await repairFuture(id, now, holdStartOf(id, watch, now, mono));   // 건너뛴 시간도 끊김으로(6회차 R7)
+        holdMono.delete(id);
         console.warn(`[vmpower] ${id}: 마지막 관측 시각이 미래(${new Date(watch.lastTs).toISOString()}) — 시계가 바뀐 것으로 보고 미래에 쓰인 구간 ${rr?.deleted ?? 0}개를 지우고 ${rr?.reopened ?? 0}개를 다시 열었습니다`);
       } else {
         await markHold(id, now);   // 건너뛰기 시작 — 다시 관측할 때 그 사이를 '기록 없음' 으로(4회차 R3)
+        if (!holdMono.has(id)) holdMono.set(id, mono());
       }
       out.held.push([id, 'clock']);
       continue;
@@ -109,7 +123,9 @@ async function runInner({ now, snap, uptimeMs }) {
     if (!list.length && open?.size) { out.held.push([id, 'empty']); continue; }
     const plan = planObservation({ open: open || new Map(), watchLast: watch.lastTs, vms: list, ts: now });
     // 작은 시계 역행으로 건너뛴 동안은 관측하지 않았다 — 건너뛰기 시작(지금 시계) ~ 지금을 '기록 없음' 으로(시각 자체를 믿을 수 없어 앞선 기록과 겹쳐도 그렇게 칠한다).
-    if (!plan.skip && watch.holdFrom != null && watch.holdFrom < now) plan.holdGap = { from: watch.holdFrom, to: now };
+    const hs = plan.skip ? null : holdStartOf(id, watch, now, mono);
+    if (hs != null && hs < now) plan.holdGap = { from: hs, to: now };
+    if (!plan.skip) holdMono.delete(id);
     const c = await commitObservation(id, plan, now);
     out.opened += c?.opened || 0; out.closed += c?.closed || 0; if (c?.gap) out.gaps++;
     out.vcenters++;

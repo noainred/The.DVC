@@ -136,7 +136,7 @@ export async function markHold(vcenterId, ts) {
   p.st.setHold.run(ts, String(vcenterId));
 }
 
-export async function repairFuture(vcenterId, ts) {
+export async function repairFuture(vcenterId, ts, holdFrom = null) {
   const p = await powerDb();
   if (!p) return { ok: false };
   const vc = String(vcenterId);
@@ -161,6 +161,9 @@ export async function repairFuture(vcenterId, ts) {
     p.st.futCutGaps.run(ts, vc, ts);
     p.st.repairWatch.run(ts, vc);
     p.st.firstTsAtMost.run(ts, vc);   // 미래 기간에 처음 관측된 vCenter — 소급 끝(첫 관측)이 미래로 남지 않게
+    // 건너뛰다 복구로 넘어왔으면 건너뛴 동안은 관측하지 않았다 — 그 시간을 끊김으로(6회차 R7). 이 경로는 지금 시계가 맞다고 보는 경로다.
+    const hf = numOrNull(holdFrom);
+    if (hf != null && hf < ts) p.st.insGap.run(vc, hf, ts);
     p.st.clearHold.run(vc);
     return { ok: true, deleted, reopened };
   });

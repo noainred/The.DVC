@@ -298,15 +298,19 @@ test('4회차 R3 — 작은 역행으로 건너뛴 시간은 기록 없음 · �
   if (!(await D.powerDb())) return;
   const W8 = await import('../src/vmpower/watcher.js');
   const H = await import('../src/vmpower/history.js');
-  const obs = (ts, ps) => W8.runPowerWatchOnce({ now: ts, snap: { generatedAt: new Date(ts).toISOString(), vcenters: [{ id: 'vr', status: 'connected' }], vms: [{ id: 'vr:a', vcenterId: 'vr', name: 'vr-a', powerState: ps }] } });
+  let mono = 0;   // 실제 경과(분) — 1시간 역행 뒤에는 시계 값 + 60분
+  const obs = (ts, ps) => W8.runPowerWatchOnce({ now: ts, mono: () => mono * MIN, snap: { generatedAt: new Date(ts).toISOString(), vcenters: [{ id: 'vr', status: 'connected' }], vms: [{ id: 'vr:a', vcenterId: 'vr', name: 'vr-a', powerState: ps }] } });
   const T0 = NOW - 20 * DAY;
   for (const m of [0, 10, 20, 30]) await obs(T0 + m * MIN, 'POWERED_ON');
   for (const m of [40, 55]) await obs(T0 + m * MIN, 'POWERED_OFF');
+  mono = 65;
   assert.deepEqual((await obs(T0 + 5 * MIN, 'POWERED_OFF')).held, [['vr', 'clock']]);   // 1시간 역행 — 건너뛰기 시작(5분)
   const held = await H.vmPowerHistory({ id: 'vr:a', vcenterId: 'vr', name: 'vr-a', powerState: 'POWERED_OFF' }, { vms: [] }, { now: T0 + 6 * MIN });
   assert.equal(held.facts.current.clockHeld, true);
   assert.equal(held.facts.current.stale, true, '건너뛰는 동안 지금 상태를 단정하지 않는다');
+  mono = 80;
   await obs(T0 + 20 * MIN, 'POWERED_ON');                                                // 실제 80분 — 아직 건너뜀
+  mono = 121;
   await obs(T0 + 61 * MIN, 'POWERED_ON');                                                // 따라잡음
   const gaps = await D.gapsOf('vr', 0);
   assert.deepEqual(gaps, [{ from: T0 + 5 * MIN, to: T0 + 61 * MIN }], '건너뛰기 시작 ~ 다시 관측');
@@ -361,5 +365,38 @@ test('5회차 R5 — 관측 기록이 비어도 사라진 VM 을 되살리지 �
   assert.equal(y[0].end, T0, '사라진 Y 는 닫힌 채로');
   const a = await D.spansOfVm('vz', 'vz:a');
   assert.equal(a[a.length - 1].end, null);
+});
+
+test('6회차 R6 · R7 — 건너뛴 길이는 단조 경과로 · 복구로 넘어가도 건너뛴 시간은 끊김', async () => {
+  const D = await import('../src/vmpower/db.js');
+  if (!(await D.powerDb())) return;
+  const W8 = await import('../src/vmpower/watcher.js');
+  const HOUR_ = HOUR;
+  let mono = 0;
+  const obs = (vc, ts, ps, uptimeMs = Infinity) => W8.runPowerWatchOnce({ now: ts, uptimeMs, mono: () => mono, snap: { generatedAt: new Date(ts).toISOString(), vcenters: [{ id: vc, status: 'connected' }], vms: [{ id: `${vc}:a`, vcenterId: vc, name: `${vc}-a`, powerState: ps }] } });
+  // R6: 24시간 정상 관측 → 재부팅 · 시계 9시간 뒤처짐(건너뜀) → 20분 뒤 NTP 가 앞으로 보정
+  const T0 = NOW - 30 * DAY;
+  for (let m = 0; m <= 24 * 60; m += 10) await obs('v6', T0 + m * MIN, 'POWERED_ON');
+  const real = T0 + 24 * HOUR_;   // 마지막 정상 관측
+  mono = 1000;
+  assert.deepEqual((await obs('v6', real + MIN - 9 * HOUR_, 'POWERED_ON', MIN)).held, [['v6', 'clock']]);
+  mono += 10 * MIN;
+  await obs('v6', real + 11 * MIN - 9 * HOUR_, 'POWERED_ON', 11 * MIN);
+  mono += 10 * MIN;
+  await obs('v6', real + 21 * MIN, 'POWERED_ON', 21 * MIN);                                 // 보정 뒤 관측
+  const g6 = await D.gapsOf('v6', 0);
+  const unk = g6.reduce((a, g) => a + (g.to - g.from), 0);
+  assert.ok(g6.every((g) => g.from >= real), `정상 기록을 가리지 않는다: ${JSON.stringify(g6.map((g) => [(g.from - T0) / HOUR_, (g.to - T0) / HOUR_]))}`);
+  assert.ok(unk <= 40 * MIN, `건너뛴 시간 ${unk / MIN}분`);
+  // R7: 시계 9시간 뒤처짐 · NTP 없음 → 30분 건너뛰다 복구
+  mono = 5000;
+  const R = NOW - 25 * DAY;
+  for (let m = 0; m <= 10 * 60; m += 10) await obs('v7', R + m * MIN, 'POWERED_OFF');
+  const back = R + 10 * HOUR_ - 9 * HOUR_;   // 기동 직후 시계(뒤처짐)
+  await obs('v7', back + MIN, 'POWERED_OFF', MIN);
+  mono += 30 * MIN;
+  await obs('v7', back + 31 * MIN, 'POWERED_ON', 31 * MIN);                                  // 기동 31분 — 복구
+  const g7 = await D.gapsOf('v7', 0);
+  assert.ok(g7.some((g) => g.from === back + MIN && g.to === back + 31 * MIN), `건너뛴 30분이 끊김으로: ${JSON.stringify(g7.map((g) => [(g.from - R) / MIN, (g.to - R) / MIN]))}`);
 });
 
