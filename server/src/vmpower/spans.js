@@ -23,6 +23,8 @@ export const GAP_MS = 3 * WATCH_EVERY_MS;
 export const TRACK_GRAN_MS = 12 * HOUR;
 /** 소급에서 슬롯 사이가 이보다 벌어지면 추적이 비었던 것 — 그 사이는 '기록 없음'. */
 export const TRACK_GAP_MS = 1.5 * TRACK_GRAN_MS;
+/** 같은 상태로 이만큼 안에 목록에서 빠졌다 돌아온 VM 은 한 구간으로 본다(빠진 시간은 '기록 없음' — 2회차 N1: 30분이면 관측 간격이 조금만 늘어도 2~3번 빠짐을 놓쳤다). */
+export const ABSENT_MERGE_MS = 6 * HOUR;
 /** 이벤트 시각과 관측 창의 시계 오차 허용. */
 export const EVENT_SLACK_MS = 2 * MIN;
 
@@ -213,12 +215,20 @@ export function buildTimeline({ spans = [], gaps = [], events = [], now, watchLa
     .filter((s) => (s.state === 'on' || s.state === 'off') && s.start != null)
     .sort((a, b) => a.start - b.start);
   const fl = numOrNull(floor);
-  if (raw.length && fl != null && raw[0].lo != null && raw[0].lo < fl) raw[0].lo = null;
-  // ① 같은 상태가 잠깐(≤ gapMs) 목록에서 빠졌다 돌아온 것은 한 구간이다(재검토 #2 — '켜짐 · 2일째' 로 지어냈다).
+  // 보존 정리로 앞 구간이 지워졌으면(첫 구간의 앞 끝이 정리 경계보다 앞) 그 전 상태를 모른다 — 첫 구간을 기록 시작으로,
+  //   '처음 Power On' 도 기록 시작 전으로(남은 첫 구간이 꺼짐이어도 그 뒤 켜짐을 '처음' 으로 지어내지 않는다 — 2회차 N5).
+  const truncatedHead = !!(raw.length && fl != null && raw[0].lo != null && raw[0].lo < fl);
+  if (truncatedHead) raw[0].lo = null;
+  // ① 같은 상태로 잠깐(≤ ABSENT_MERGE_MS) 목록에서 빠졌다 돌아온 것은 한 구간이다(재검토 #2 · 2회차 N1) — 빠진 시간은 켜짐 · 꺼짐이 아니라 '기록 없음'(N2).
   const sp = [];
+  const holes = [];
   for (const s of raw) {
     const p = sp[sp.length - 1];
-    if (p && p.state === s.state && p.end != null && s.start - p.end <= gapMs) { p.end = s.end; continue; }
+    if (p && p.state === s.state && p.end != null && s.start - p.end <= Math.max(gapMs, ABSENT_MERGE_MS)) {
+      if (s.start > p.end) holes.push({ a: p.end, b: s.start });
+      p.end = s.end;
+      continue;
+    }
     sp.push({ ...s });
   }
   const wl = numOrNull(watchLast);
@@ -261,7 +271,7 @@ export function buildTimeline({ spans = [], gaps = [], events = [], now, watchLa
     if (s.end == null && tail < now) segs.push({ a: Math.max(s.start, tail), b: now, st: 'unk' });
   }
   // ④ 관측이 끊긴 시간은 무엇이었든 '기록 없음'
-  const overs = unionIntervals((gaps || []).map((g) => ({ a: numOrNull(g.from), b: numOrNull(g.to) })).filter((g) => g.a != null && g.b != null && g.b > g.a).sort((x, y) => x.a - y.a));
+  const overs = unionIntervals((gaps || []).map((g) => ({ a: numOrNull(g.from), b: numOrNull(g.to) })).concat(holes).filter((g) => g.a != null && g.b != null && g.b > g.a).sort((x, y) => x.a - y.a));
   segs = mergeSegs(paint(segs, overs));
   const overEnds = overs.map((o) => o.b);
   /** [lo, hi) 가 끊김과 겹치는가 — 합친 끊김은 시간순 · 겹침 없음이라 lo 보다 늦게 끝나는 첫 끊김만 보면 된다(이분 탐색). */
@@ -295,6 +305,8 @@ export function buildTimeline({ spans = [], gaps = [], events = [], now, watchLa
     return { ts: s.start, lo: s.lo, exact: !!s.exact, src: s.exact ? 'event' : (isBackfillSrc(s.src) ? 'backfill' : 'watch'), user: s.user || '', ...(isAppearSrc(s.src) && !s.exact ? { appeared: true } : {}) };
   };
   const idxOf = (pred) => { for (let i = sp.length - 1; i >= 0; i--) if (pred(sp[i])) return i; return -1; };
+  // 목록에 나타난 구간(appear)은 그 상태로 '바뀐' 것이 아니다 — 시작 시각을 모른다(길이는 하한 · 꺼짐 횟수에 넣지 않음 — 2회차 N1).
+  const startKnown = (s, i) => !(s.lo == null && i === 0) && !(isAppearSrc(s.src) && !s.exact);
   const firstOnIdx = sp.findIndex((s) => s.state === 'on');
   const lastOnIdx = idxOf((s) => s.state === 'on');
   const lastOffIdx = idxOf((s) => s.state === 'off');
@@ -305,7 +317,7 @@ export function buildTimeline({ spans = [], gaps = [], events = [], now, watchLa
     const e = s.end ?? tail;
     const next = sp[i + 1];
     const hi = s.end == null ? now : (next ? next.start : e);
-    return { minMs: Math.max(0, e - s.start), maxMs: s.lo == null ? null : Math.max(0, hi - s.lo), open: s.end == null };
+    return { minMs: Math.max(0, e - s.start), maxMs: startKnown(s, i) && s.lo != null ? Math.max(0, hi - s.lo) : null, open: s.end == null };
   };
   let longestOff = null;
   let longestOffInRange = null;
@@ -314,7 +326,7 @@ export function buildTimeline({ spans = [], gaps = [], events = [], now, watchLa
     if (s.state !== 'off') continue;
     const d = durOf(i);
     const key = d.maxMs ?? d.minMs;
-    if (!longestOff || key > (longestOff.maxMs ?? longestOff.ms)) longestOff = { a: s.start, b: s.end ?? tail, ms: d.minMs, maxMs: d.maxMs, open: d.open, fromStart: s.lo == null };
+    if (!longestOff || key > (longestOff.maxMs ?? longestOff.ms)) longestOff = { a: s.start, b: s.end ?? tail, ms: d.minMs, maxMs: d.maxMs, open: d.open, fromStart: !startKnown(s, i) };
     // 화면 범위 안에서 가장 길게 꺼짐(요약 타일 · 카드는 '이 기간' 을 말한다 — 범위 밖의 긴 꺼짐을 끌어오지 않는다).
     const e = s.end ?? tail;
     const a = Math.max(s.start, from);
@@ -324,9 +336,11 @@ export function buildTimeline({ spans = [], gaps = [], events = [], now, watchLa
     const lo = Math.max(0, b - a);
     const hi = clippedOut ? null : d.maxMs;
     if (!longestOffInRange || (hi ?? lo) > (longestOffInRange.maxMs ?? longestOffInRange.ms)) {
-      longestOffInRange = { a, b, ms: lo, maxMs: hi, open: d.open, fromStart: s.lo == null || s.start < from, clipped: clippedOut };
+      longestOffInRange = { a, b, ms: lo, maxMs: hi, open: d.open, fromStart: !startKnown(s, i) || s.start < from, clipped: clippedOut };
     }
   }
+  /** 그 시각 이후 '기록 없음' 합 — '켜짐 · N일째' 가 끊긴 시간을 포함하는지 밝힌다(2회차 남은 것). */
+  const unknownSince = (t0) => { let u = 0; for (const g of segs) if (g.st === 'unk' && g.b > t0) u += g.b - Math.max(g.a, t0); return u; };
   const sums = { on: 0, off: 0, est: 0, unk: 0 };
   const clipped = [];
   for (const g of segs) {
@@ -344,16 +358,17 @@ export function buildTimeline({ spans = [], gaps = [], events = [], now, watchLa
     sums,
     facts: {
       // 지금 상태 — 관측이 끊긴 채면 '마지막으로 본 상태'(seenTs · stale — 재검토 #4: 3일 끊겨도 '켜짐 · 20일째' 와 녹색 점이었다).
-      current: last && last.end == null ? { state: last.state, ...(fact(last, sp.length - 1) || {}), seenTs: tail, stale: tail < now } : null,
+      current: last && last.end == null ? { state: last.state, ...(fact(last, sp.length - 1) || {}), seenTs: tail, stale: tail < now, unknownMs: unknownSince(last.start) } : null,
       gone: !!(last && last.end != null),
-      firstOn: firstOnIdx >= 0 ? fact(sp[firstOnIdx], firstOnIdx) : null,
+      firstOn: truncatedHead && sp.length ? { before: sp[0].start, src: isBackfillSrc(sp[0].src) ? 'backfill' : 'watch' } : (firstOnIdx >= 0 ? fact(sp[firstOnIdx], firstOnIdx) : null),
       lastOn: lastOnIdx >= 0 ? fact(sp[lastOnIdx], lastOnIdx) : null,
       lastOff: lastOffIdx >= 0 ? fact(sp[lastOffIdx], lastOffIdx) : null,
       lastOffEnd: lastOffIdx >= 0 ? sp[lastOffIdx].end : null,
       lastOffDur: lastOffIdx >= 0 ? durOf(lastOffIdx) : null,
       longestOff,
       longestOffInRange,
-      offCount: sp.filter((s, i) => s.state === 'off' && !(i === 0 && s.lo == null)).length,
+      offCount: sp.filter((s, i) => s.state === 'off' && startKnown(s, i)).length,
+      onCount: sp.filter((s, i) => s.state === 'on' && startKnown(s, i)).length,
       transitionCount: transitions.length,
       recordStart: sp.length ? sp[0].start : null,
       backfill: bf.length ? { from: bf[0].start, to: watchSpans.length ? Math.min(...watchSpans.map((s) => s.start)) : null } : null,

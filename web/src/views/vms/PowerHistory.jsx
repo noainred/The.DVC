@@ -11,7 +11,7 @@ import { useOnce } from '../vcd/useOnce.js';
 import { vcHash } from '../vcd/vcdRoute.js';
 import {
   STATE_LABEL, durText, durRangeText, stampText, dayKey, whenText, srcText, clipSegs, sumsOf, onRatio, pctText, dayBarStyle, ratioBarStyle,
-  monthsBack, monthCells, sumsText, factText, currentText, selectedDayKey, windowOf,
+  monthsBack, monthCells, sumsText, factText, currentText, selectedDayKey, windowOf, lastOffSub, lastOnSub,
 } from './powerHistText.js';
 import './powerHist.css';
 
@@ -78,12 +78,6 @@ function stateNote(q) {
   return null;
 }
 
-function lastOffSub(f, now) {
-  if (!f.lastOff) return '기록된 기간에 꺼진 적 없음';
-  if (f.current?.state === 'off') return f.lastOff.before != null ? '기록 시작 전부터 꺼짐' : `꺼진 뒤 ${durText(now - f.lastOff.ts)} 지남`;
-  if (f.lastOffDur) return `${durRangeText(f.lastOffDur.minMs, f.lastOffDur.maxMs)} 동안 꺼져 있었음`;
-  return '';
-}
 
 /** ① 드로어 카드 */
 export function PowerCard({ q, onOpen }) {
@@ -108,7 +102,7 @@ export function PowerCard({ q, onOpen }) {
         </span>
         <span className="pwh-kv4">
           <span><i>처음 Power On</i><b>{first.main}</b><small>{f.firstOn ? first.sub : '기록된 기간에 켜진 적 없음'}</small></span>
-          <span><i>마지막 Power On</i><b>{lastOn.main}</b><small>{f.current?.state === 'on' && f.current.ts != null ? `${durText(d.now - f.current.ts)}째 켜져 있음` : lastOn.sub}</small></span>
+          <span><i>마지막 Power On</i><b>{lastOn.main}</b><small>{lastOnSub(f, lastOn, d.now)}</small></span>
           <span><i>마지막 Power Off</i><b>{lastOff.main}</b><small>{lastOffSub(f, d.now)}</small></span>
           <span><i>최근 12개월 켜짐 비율</i><b>{pctText(onRatio(d.sums))}</b><small>{`꺼짐 ${f.offCount ?? 0}번${f.recordStart ? ` · 기록 시작 ${stampText(f.recordStart).slice(0, 10)}` : ''}`}</small></span>
         </span>
@@ -247,7 +241,7 @@ export function PowerCalendarTab({ vm }) {
         <div className="card pwh-tile"><span className="lb">지금</span><span className="v">{cur.head}</span><span className="s">{cur.since || '—'}</span></div>
         <div className="card pwh-tile"><span className="lb"><i className="pwh-sw on" />켜진 시간</span><span className="v">{durText(s.on || 0)}</span><span className="s">{`판정된 시간의 ${pctText(r)}`}</span></div>
         <div className="card pwh-tile"><span className="lb"><i className="pwh-sw off" />꺼진 시간</span><span className="v">{durText(s.off || 0)}</span><span className="s">{`판정된 시간의 ${r == null ? '—' : pctText(1 - r)}`}</span></div>
-        <div className="card pwh-tile"><span className="lb">전원 전환</span><span className="v">{`${inRangeTotal}회`}</span><span className="s">{`꺼짐 ${inRange.filter((t) => t.to === 'off').length} · 켜짐 ${inRange.filter((t) => t.to === 'on').length}`}</span></div>
+        <div className="card pwh-tile"><span className="lb">전원 전환</span><span className="v">{`${inRangeTotal}회`}</span><span className="s">{`꺼짐 ${d.transitionsInRangeBy?.off ?? inRange.filter((t) => t.to === 'off').length} · 켜짐 ${d.transitionsInRangeBy?.on ?? inRange.filter((t) => t.to === 'on').length}`}</span></div>
         <div className="card pwh-tile"><span className="lb">가장 길게 꺼짐</span><span className="v">{longestText(f.longestOffInRange)}</span><span className="s">{longestSub(f.longestOffInRange, '이 기간에 꺼진 구간 없음')}</span></div>
         <div className="card pwh-tile"><span className="lb">판정하지 못한 시간</span><span className="v">{(s.est || 0) + (s.unk || 0) ? durText((s.est || 0) + (s.unk || 0)) : '없음'}</span><span className="s">{`경계 불확실 ${durText(s.est || 0)} · 기록 없음 ${durText(s.unk || 0)} — 비율에서 뺐습니다`}</span></div>
       </section>

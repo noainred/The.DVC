@@ -44,7 +44,8 @@ function ensure(x) {
     openOf: db.prepare('SELECT id, vm_id, state, start_ts FROM power_spans WHERE vcenter_id=? AND end_ts IS NULL'),
     watchOf: db.prepare('SELECT first_ts, last_ts, backfilled, pruned_to FROM power_watch WHERE vcenter_id=?'),
     repairWatch: db.prepare('UPDATE power_watch SET last_ts=? WHERE vcenter_id=?'),
-    markPruned: db.prepare('UPDATE power_watch SET pruned_to=MAX(COALESCE(pruned_to, 0), ?)'),
+    markPruned: db.prepare('UPDATE power_watch SET pruned_to=MAX(COALESCE(pruned_to, 0), ?) WHERE vcenter_id=?'),
+    prunableVcs: db.prepare('SELECT DISTINCT vcenter_id FROM power_spans WHERE end_ts IS NOT NULL AND end_ts<?'),
     staleWatchVcs: db.prepare('SELECT vcenter_id FROM power_watch WHERE last_ts<?'),
     dropOpenOfVc: db.prepare('DELETE FROM power_spans WHERE vcenter_id=? AND end_ts IS NULL'),
     dropGapsOfVc: db.prepare('DELETE FROM power_gaps WHERE vcenter_id=?'),
@@ -188,6 +189,8 @@ export async function prunePower(cutTs) {
     vcs++;
     await y();
   }
+  // 끝난 구간을 실제로 지울 vCenter 에만 정리 경계를 남긴다(2회차 N6 — 정리할 것이 없던 vCenter 의 '목록에 나타남' 을 지웠다).
+  const touched = p.st.prunableVcs.all(cutTs).map((r) => r.vcenter_id);
   for (let i = 0; i < 500; i++) {
     const a = Number(p.st.pruneSpans.run(cutTs).changes || 0);
     const b = Number(p.st.pruneGaps.run(cutTs).changes || 0);
@@ -195,6 +198,6 @@ export async function prunePower(cutTs) {
     if (!a && !b) break;
     await y();
   }
-  if (spans) p.st.markPruned.run(cutTs);
+  for (const vc of touched) p.st.markPruned.run(cutTs, vc);
   return { ok: true, spans, gaps, vcs };
 }

@@ -21,7 +21,7 @@ process.env.VMTRACK_DB_PATH = path.join(TMP, 'vt.db');
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const WEB = path.resolve(HERE, '../../web/src');
 const S = await import('../src/vmpower/spans.js');
-const { planObservation, planBackfill, backfillGaps, buildTimeline, WATCH_EVERY_MS: W, GAP_MS, TRACK_GRAN_MS } = S;
+const { planObservation, planBackfill, backfillGaps, buildTimeline, WATCH_EVERY_MS: W, GAP_MS, TRACK_GRAN_MS, ABSENT_MERGE_MS } = S;
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -37,7 +37,7 @@ test('#2 같은 상태로 한 번(≤ GAP) 빠졌다 돌아온 VM 은 한 구간
   const a = buildTimeline({ spans: A, now: NOW, watchLast: NOW });
   assert.deepEqual(a.facts.current.before, NOW - 10 * DAY, '켜짐 · 10일 이상');
   assert.equal(a.transitions.length, 0);
-  assert.equal(a.sums.unk, 0);
+  assert.equal(a.sums.unk, 2 * W, '빠진 20분은 기록 없음');
   // B: 5일 전 꺼짐 · 2일 전 한 번 빠짐
   const B = [
     { state: 'on', start: NOW - 10 * DAY, lo: null, end: NOW - 5 * DAY, src: 'watch' },
@@ -47,11 +47,23 @@ test('#2 같은 상태로 한 번(≤ GAP) 빠졌다 돌아온 VM 은 한 구간
   const b = buildTimeline({ spans: B, now: NOW, watchLast: NOW });
   assert.equal(b.facts.offCount, 1);
   assert.equal(b.facts.current.ts, NOW - 5 * DAY + W, '꺼진 지 5일');
-  // 길게(> GAP) 빠졌으면 그대로 두 구간(사이는 기록 없음)
-  const C = [B[0], B[1], { ...B[2], start: NOW - 2 * DAY + 2 * HOUR }];
-  const c = buildTimeline({ spans: C, now: NOW, watchLast: NOW });
-  assert.equal(c.sums.unk, 2 * HOUR);
-  assert.equal(c.facts.current.appeared, true);
+  assert.equal(b.sums.unk, 2 * W, '빠진 시간은 꺼짐이 아니라 기록 없음(2회차 N2)');
+  // 2회차 N1 — 관측 3번 빠짐(31.5분)도 한 구간 · 꺼짐 1번 · 마지막 Power Off 는 5일 전
+  const C = [B[0], B[1], { ...B[2], start: NOW - 2 * DAY + 31.5 * MIN }];
+  const c = buildTimeline({ spans: C, now: NOW, watchLast: NOW, from: NOW - 30 * DAY, to: NOW });
+  assert.equal(c.facts.offCount, 1);
+  assert.equal(c.facts.lastOff.ts, NOW - 5 * DAY + W);
+  assert.equal(c.facts.longestOffInRange.a, NOW - 5 * DAY + W);
+  // 아주 오래(> ABSENT_MERGE_MS) 빠졌다 돌아오면 '목록에 나타남' — 꺼짐 횟수에 넣지 않고 길이는 하한
+  const E = [B[0], B[1], { ...B[2], start: NOW - 2 * DAY + ABSENT_MERGE_MS + HOUR }];
+  const e = buildTimeline({ spans: E, now: NOW, watchLast: NOW });
+  assert.equal(e.facts.offCount, 1, 'appear 구간은 Power Off 가 아니다');
+  assert.equal(e.facts.current.appeared, true);
+  assert.equal(e.facts.lastOffDur.maxMs, null, '시작을 모르는 구간은 위 끝 없음');
+  // 꺼진 채 새로 만든 VM 은 꺼짐 0번
+  const n = buildTimeline({ spans: [{ state: 'off', start: NOW - DAY, lo: NOW - DAY - W, end: null, src: 'appear' }], now: NOW, watchLast: NOW });
+  assert.equal(n.facts.offCount, 0);
+  assert.equal(n.facts.lastOff.appeared, true);
 });
 
 test('#3 판정 코어는 선형 — 구간 2만 · 끊김 5천 · 이벤트 5천을 1초 안에', () => {
@@ -111,6 +123,17 @@ test('#7 시계가 뒤로 가면 관측을 쓰지 않는다 · #12 한 관측 �
   assert.equal(planObservation({ ts: NOW, vms: [{ vmId: 'y', state: 'on' }] }).insert[0].src, 'watch', '첫 관측은 기록 시작');
   const t = buildTimeline({ spans: [{ state: 'on', start: NOW - DAY, lo: NOW - DAY - W, end: null, src: 'appear' }], now: NOW, watchLast: NOW });
   assert.equal(t.facts.firstOn.appeared, true, "목록에 나타남 — 'Power On' 이 아니다");
+});
+
+test('2회차 N5 — 정리 뒤 남은 첫 구간이 꺼짐이어도 처음 Power On 을 지어내지 않는다 · 끊김 포함 시간', () => {
+  const spans = [
+    { state: 'off', start: NOW - 500 * DAY, lo: NOW - 500 * DAY - W, end: NOW - 100 * DAY, src: 'watch' },
+    { state: 'on', start: NOW - 100 * DAY + W, lo: NOW - 100 * DAY, end: null, src: 'watch' },
+  ];
+  assert.equal(buildTimeline({ spans, now: NOW, watchLast: NOW }).facts.firstOn.ts, NOW - 100 * DAY + W, '정리 전에는 그 날');
+  const t = buildTimeline({ spans, now: NOW, watchLast: NOW, floor: NOW - 400 * DAY, gaps: [{ from: NOW - 10 * DAY, to: NOW - 9 * DAY }] });
+  assert.deepEqual(t.facts.firstOn, { before: NOW - 500 * DAY, src: 'watch' });
+  assert.equal(t.facts.current.unknownMs, DAY, '지금 상태 길이에 끼어 있는 기록 없음');
 });
 
 test('#10 보존 정리 뒤 남은 첫 구간은 기록 시작 전으로', () => {
@@ -192,6 +215,19 @@ test('★ 실제 DB — #1 범위 안 전환 · 잘림 표시 · #6 계정 가�
   assert.equal((await D.watchOf('vf')).lastTs, NOW, '지금으로 되돌림');
   const r2 = await W8.runPowerWatchOnce({ now: NOW + W, snap: { ...snap, generatedAt: new Date(NOW + W).toISOString() } });
   assert.equal(r2.held.length, 0, '다음 관측부터 정상');
+  // 2회차 N4 — 복구 문턱은 관측 간격 두 배(6시간 미만으로 튄 시계도 오래 멈추지 않는다)
+  p.st.repairWatch.run(NOW + 3 * HOUR, 'vf');
+  const r3 = await W8.runPowerWatchOnce({ now: NOW + 2 * W, snap: { ...snap, generatedAt: new Date(NOW + 2 * W).toISOString() } });
+  assert.deepEqual(r3.held, [['vf', 'clock']]);
+  assert.equal((await D.watchOf('vf')).lastTs, NOW + 2 * W);
+  // 방향별 건수는 실린 건수가 아니라 범위 안 전체
+  assert.equal(recent.transitionsInRangeBy.on + recent.transitionsInRangeBy.off, recent.transitionsInRange);
+  // 2회차 N6 — 정리 경계는 끝난 구간을 실제로 지운 vCenter 에만
+  p.st.upsertWatch.run('vq', NOW - DAY, NOW, 0);
+  p.st.insSpan.run('vq', 'vq:a', 'a', 'on', NOW - 900 * DAY, NOW - 900 * DAY - W, null, 'appear');
+  await D.prunePower(NOW - 600 * DAY);
+  assert.equal((await D.watchOf('vq')).prunedTo, null, '정리할 것이 없던 vCenter 는 그대로');
+  assert.equal((await D.watchOf('vc1')).prunedTo, NOW - 600 * DAY, '2년치 중 앞부분을 지운 vCenter');
 });
 
 test('#13 개체 보기 탭은 VM 이 바뀌면 상태를 새로(key) · 달력은 요청 기준 시각으로', () => {
@@ -199,4 +235,9 @@ test('#13 개체 보기 탭은 VM 이 바뀌면 상태를 새로(key) · 달력�
   assert.match(vo, /<PowerCalendarTab key=\{vm\.id\} vm=\{vm\} \/>/);
   const ph = stripComments(fs.readFileSync(path.join(WEB, 'views/vms/PowerHistory.jsx'), 'utf8'));
   assert.match(ph, /monthsBack\(q\.base, 12, offset\)/);
+});
+
+test('2회차 N4 — 틱 게이트는 미래의 마지막 관측에서 멈추지 않는다', () => {
+  const src = stripComments(fs.readFileSync(path.resolve(HERE, '../src/vmpower/watcher.js'), 'utf8'));
+  assert.match(src, /const since = Date\.now\(\) - lastAt;\s*if \(since >= 0 && since < WATCH_EVERY_MS\) return;/);
 });

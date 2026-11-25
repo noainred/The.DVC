@@ -184,9 +184,11 @@ export function currentText(facts, now) {
   const label = STATE_LABEL[c.state] || c.state;
   // 관측이 끊긴 채면 지금 상태를 모른다 — '마지막으로 본 상태' 와 그 시각을 말한다(재검토 #4).
   if (c.stale && numOrNull(c.seenTs) != null) return { head: `마지막으로 본 상태 · ${label}`, since: `${stampText(c.seenTs)} 이후 관측 없음(${durText(now - c.seenTs)})`, stale: true };
-  if (c.before != null) return { head: `${label} · ${durText(now - c.before)} 이상`, since: `기록 시작(${stampText(c.before).slice(0, 10)}) 전부터` };
-  if (c.appeared) return { head: `${label} · ${durText(now - c.ts)} 이상`, since: `${whenText(c)} 목록에 나타남 — 그 전 상태는 모름` };
-  return { head: `${label} · ${durText(now - c.ts)}째`, since: `${whenText(c)} 부터` };
+  // 그 사이 '기록 없음'(포탈 중지 · 못 읽음)이 끼어 있으면 길이가 그 시간을 포함한다는 것을 밝힌다(2회차 남은 것).
+  const unk = numOrNull(c.unknownMs) > 0 ? ` · 그 사이 기록 없음 ${durText(c.unknownMs)} 포함` : '';
+  if (c.before != null) return { head: `${label} · ${durText(Math.max(0, now - c.before))} 이상`, since: `기록 시작(${stampText(c.before).slice(0, 10)}) 전부터${unk}` };
+  if (c.appeared) return { head: `${label} · ${durText(Math.max(0, now - c.ts))} 이상`, since: `${whenText(c)} 목록에 나타남 — 그 전 상태는 모름${unk}` };
+  return { head: `${label} · ${durText(Math.max(0, now - c.ts))}째`, since: `${whenText(c)} 부터${unk}` };
 }
 
 /**
@@ -203,4 +205,24 @@ export function selectedDayKey(sel, transitionsInRange, { to, now }) {
 export function defaultDayKey(transitions, now) {
   const t = (transitions || [])[0];
   return t && numOrNull(t.ts) != null ? dayKey(t.ts) : dayKey(now);
+}
+
+/** 마지막 Power Off 아래 글 — 관측 끊김 · 목록에 나타남을 머리글과 같은 판정으로(2회차 N3: 머리글은 '마지막으로 본 상태' 인데 이 칸은 단정했다). */
+export function lastOffSub(f, now) {
+  if (!f.lastOff) return '기록된 기간에 꺼진 적 없음';
+  if (f.lastOff.appeared) return '꺼진 채 목록에 나타남 — 언제 꺼졌는지는 모릅니다';
+  if (f.current?.state === 'off') {
+    if (f.lastOff.before != null) return '기록 시작 전부터 꺼짐';
+    if (f.current.stale) return `꺼진 뒤 마지막 관측까지 ${durText(Math.max(0, f.current.seenTs - f.lastOff.ts))} — 그 뒤는 관측 없음`;
+    return `꺼진 뒤 ${durText(Math.max(0, now - f.lastOff.ts))} 지남`;
+  }
+  if (f.lastOffDur) return `${durRangeText(f.lastOffDur.minMs, f.lastOffDur.maxMs)} 동안 꺼져 있었음`;
+  return '';
+}
+/** 마지막 Power On 아래 글 — 지금 켜져 있고 관측이 이어질 때만 'N째 켜져 있음'. */
+export function lastOnSub(f, lastOnFact, now) {
+  const c = f.current;
+  if (c?.state === 'on' && c.ts != null && !c.stale && !c.appeared && c.before == null) return `${durText(Math.max(0, now - c.ts))}째 켜져 있음`;
+  if (c?.state === 'on' && c.stale) return `마지막 관측(${stampText(c.seenTs)})까지 켜져 있었음`;
+  return lastOnFact.sub;
 }

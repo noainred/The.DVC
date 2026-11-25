@@ -1,7 +1,7 @@
 // powerHistText.test.js — v3.39.0 VM 전원 이력 화면 문구 · 달력 계산(지역 시각 기준 — 시험도 지역 생성자로 만든다).
 import { describe, it, expect } from 'vitest';
 import {
-  durText, durRangeText, whenText, selectedDayKey, clipSegs, sumsOf, onRatio, pctText, dayBarStyle, ratioBarStyle, monthsBack, monthCells, sumsText, factText, currentText, defaultDayKey, dayKey,
+  durText, durRangeText, whenText, selectedDayKey, lastOffSub, lastOnSub, clipSegs, sumsOf, onRatio, pctText, dayBarStyle, ratioBarStyle, monthsBack, monthCells, sumsText, factText, currentText, defaultDayKey, dayKey,
 } from './powerHistText.js';
 import { normObjTab, POWER_TAB } from '../vcd/objTabs.js';
 
@@ -117,6 +117,17 @@ describe('사실 글 — 기록 시작 전은 날짜를 지어내지 않는다',
     expect(currentText({ recordStart: 1, current: { state: 'on', ts: at(2026, 11, 20), lo: at(2026, 11, 19, 23, 50), appeared: true } }, now).head).toBe('켜짐 · 6일 9시간 이상');
     expect(factText({ ts: at(2026, 11, 20), lo: at(2026, 11, 19, 23, 50), appeared: true }).sub).toContain('목록에 처음 보인 시각');
     expect(factText({ ts: at(2026, 11, 20, 12), lo: at(2026, 11, 19, 12), src: 'watch' }, { watchMs: 600_000 }).sub).toBe('포탈 관측 · 시각 오차 최대 1일');
+  });
+  it('카드 보조 문구는 머리글과 같은 판정 — 관측 끊김 · 목록에 나타남 · 끊김 포함 시간(2회차 N3)', () => {
+    const now = at(2026, 11, 26, 9);
+    const stale = { current: { state: 'on', ts: at(2026, 11, 1), seenTs: at(2026, 11, 23, 9), stale: true }, lastOn: { ts: at(2026, 11, 1) } };
+    expect(lastOnSub(stale, { sub: 'x' }, now)).toBe('마지막 관측(2026-11-23 09:00)까지 켜져 있었음');
+    expect(lastOnSub({ current: { state: 'on', ts: at(2026, 11, 20), appeared: true } }, { sub: '나타남' }, now)).toBe('나타남');
+    expect(lastOnSub({ current: { state: 'on', ts: at(2026, 11, 20) } }, { sub: 'x' }, now)).toBe('6일 9시간째 켜져 있음');
+    expect(lastOffSub({ lastOff: { ts: at(2026, 11, 20), appeared: true }, current: { state: 'off' } }, now)).toContain('꺼진 채 목록에 나타남');
+    expect(lastOffSub({ lastOff: { ts: at(2026, 11, 20) }, current: { state: 'off', stale: true, seenTs: at(2026, 11, 22) } }, now)).toBe('꺼진 뒤 마지막 관측까지 2일 — 그 뒤는 관측 없음');
+    expect(currentText({ recordStart: 1, current: { state: 'on', ts: at(2026, 11, 1), unknownMs: 5 * H } }, now).since).toContain('그 사이 기록 없음 5시간 포함');
+    expect(currentText({ recordStart: 1, current: { state: 'off', ts: now + 2 * D } }, now).head).toBe('꺼짐 · 0분째');
   });
   it('currentText — 진행 시간 · 시작을 모르면 이상', () => {
     const now = at(2026, 11, 25, 16);

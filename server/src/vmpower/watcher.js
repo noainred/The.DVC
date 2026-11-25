@@ -16,7 +16,7 @@ import { powerDb, openSpansOf, watchOf, commitObservation, backfillSourceOf, com
 const TICK_MS = 60_000;
 const PRUNE_EVERY = 144;   // 관측 144회(약 하루)마다
 /** 마지막 관측이 이만큼 넘게 미래면 시계가 앞으로 튀었다 돌아온 것 — 마지막 관측을 지금으로 되돌린다(재검토 #7). */
-const CLOCK_REPAIR_MS = 6 * 3_600_000;
+const CLOCK_REPAIR_MS = 2 * WATCH_EVERY_MS;   // 2회차 N4: 6시간이면 그보다 작게 튀었다 돌아온 시계가 관측을 몇 시간 멈췄다
 /** 인벤토리를 아직 서빙하지 못하는 상태(VM 0 과 함께면 '모른다'). */
 const NOT_SERVING = new Set(['unreachable', 'pending', 'maintenance', 'disabled']);
 
@@ -119,7 +119,10 @@ export function startPowerWatch() {
     if (running) return;
     try {
       if (!lastAt) { const t = await lastWatchTs(); if (t) lastAt = t; }   // 재시작 직후 곧바로 다시 관측하지 않는다(기록이 있으면)
-      if (Date.now() - lastAt < WATCH_EVERY_MS) return;
+      // 마지막 관측이 미래면(시계가 앞으로 튀었다 돌아옴) 기다리지 않고 돈다 — runInner 가 vCenter 별 미래 기록을 지금으로 되돌린다(2회차 N4:
+      //   예전에는 이 게이트가 매 틱 return 해 관측기 전체가 멈췄다 · 재시작 때도 lastWatchTs 가 미래 최댓값).
+      const since = Date.now() - lastAt;
+      if (since >= 0 && since < WATCH_EVERY_MS) return;
       if (!store.get()?.vcenters?.length) return;
       await runPowerWatchOnce();
       runs += 1;

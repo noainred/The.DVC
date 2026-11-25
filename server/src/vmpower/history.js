@@ -93,6 +93,8 @@ function finish({ spans, gaps, events, watch, now, from, to, admin }) {
   }
   return {
     segments: t.segments, transitions, transitionsInRange: inRange.length, transitionsTruncated: inRange.length > transitions.length,
+    // 범위 안 방향별 건수 — 실은 2000건이 아니라 전체 기준(2회차 남은 것: 타일의 '꺼짐 N · 켜짐 M' 이 실린 건수였다)
+    transitionsInRangeBy: { on: inRange.filter((x) => x.to === 'on').length, off: inRange.filter((x) => x.to === 'off').length },
     transitionsTotal: t.transitions.length, sums: t.sums, facts: t.facts, ...(userMasked ? { userMasked: true } : {}),
   };
 }
