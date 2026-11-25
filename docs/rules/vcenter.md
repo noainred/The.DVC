@@ -587,7 +587,7 @@
     ④ 관측이 끊긴 채면 '마지막으로 본 상태'(current.stale · seenTs) · 지금 상태 길이에 낀 기록 없음(unknownMs)을 밝힌다. 카드 보조 문구는 `powerHistText.js lastOnSub · lastOffSub` 하나.
     ⑤ 소급 중 추적 슬롯이 빈 기간(`TRACK_GAP_MS` 초과)과 마지막 슬롯 ~ 지금은 끊김(`backfillGaps`).
     ⑥ 수행 계정 이름은 관리자 판본(`isAdminDetailUser`)에만 — 아니면 user 를 비우고 `userMasked`. 엣지 위임(site) vCenter 는 `eventsNote: 'site'`.
-    ⑦ 시계: 직전 관측 이하 시각은 쓰지 않는다(skip) · 6시간 넘게 미래인 관측은 `repairFuture`(미래에 시작한 구간 삭제 → 그 VM 의 남은 마지막 구간 다시 열기 → 끊김 자르기) · 그보다 작은 역행은 따라잡을 때까지 건너뜀 · 틱 게이트는 미래 관측에서 멈추지 않는다.
+    ⑦ 시계: 직전 관측 이하 시각은 쓰지 않는다(skip) · 6시간 넘게 미래인 관측은 `repairFuture`(미래에 시작한 구간 삭제 → 그 VM 의 남은 마지막 구간은 **끝이 튀기 직전 실제 관측(`power_obs` · 7일) 이상일 때만** 다시 열기 — 진짜로 사라진 VM 은 되살리지 않는다 → 끊김 자르기 · first_ts 보정) · 그보다 작은 역행은 따라잡을 때까지 건너뛰고(`hold_from`) 다시 관측할 때 그 사이를 끊김으로 · 건너뛰는 동안 지금 상태는 `clockHeld` · 틱 게이트는 미래 관측에서 멈추지 않는다.
     ⑧ 보존 정리는 끝난 구간을 실제로 지운 vCenter 에만 `pruned_to` 를 남기고, 남은 첫 구간의 앞 끝이 그보다 앞이면 기록 시작 전(처음 Power On 도) · 보존 기간 넘게 관측 안 된 vCenter 는 열린 구간 · 끊김 · 관측 행까지 정리.
     ⑨ 한 관측 안 중복 VM id 는 첫 것만 · 처음 보는 VM 은 첫 관측이면 기록 시작(src watch), 관측 중이면 목록에 나타남(src appear — Power On 이 아니다).
     ⑩ 화면: 오차는 전환마다 실제 창 폭 · 개체 보기 탭 `key={vm.id}` · 달력은 요청 기준 시각(q.base) · 이전 12개월 창의 기본 선택 날은 범위 끝(포함 안 함) 1ms 앞.
