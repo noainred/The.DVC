@@ -47,6 +47,8 @@ export function rangeText(spec = {}) {
 
 /** 주기가 아닌 항목(시한 — 사양의 `timer: false`). 화면이 '주기' 설명과 따로 안내한다. */
 export const timeoutSpecs = (spec = []) => (Array.isArray(spec) ? spec.filter((s) => s && s.timer === false) : []);
+/** 주기(타이머) 항목 — 시한이 아닌 나머지. 두 함수가 사양을 빠짐없이 · 겹치지 않게 나눈다. */
+export const timerSpecs = (spec = []) => (Array.isArray(spec) ? spec.filter((s) => s && s.timer !== false) : []);
 
 /** ms → 사람이 읽는 짧은 표기. 프리셋에 없는 값(직접 편집한 파일 등)도 근사 없이 정확히 표시. */
 export function msLabel(ms) {

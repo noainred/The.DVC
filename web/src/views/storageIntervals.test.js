@@ -4,7 +4,7 @@
  * 각 법인이 portal.env 로 잡아 둔 현장 설정을 통째로 덮어쓴다.
  */
 import { describe, it, expect } from 'vitest';
-import { effectiveFor, sourceOf, worstCaseLagMs, lagText, toBody, presetsFor, presetsForSpec, rangeText, timeoutSpecs, msLabel } from './storageIntervals.js';
+import { effectiveFor, sourceOf, worstCaseLagMs, lagText, toBody, presetsFor, presetsForSpec, rangeText, timeoutSpecs, timerSpecs, msLabel } from './storageIntervals.js';
 import fs from 'node:fs';
 
 describe('effectiveFor', () => {
@@ -95,11 +95,21 @@ describe('presetsForSpec / rangeText / timeoutSpecs (v3.39.0)', () => {
   it('시한 항목만 고른다 — 주기 설명과 따로 안내하려고', () => {
     expect(timeoutSpecs([POLL, ISI]).map((s) => s.key)).toEqual(['isiCmdTimeoutMs']);
     expect(timeoutSpecs(null)).toEqual([]);
+    // 주기 표와 대기 시간 표가 사양을 빠짐없이 · 겹치지 않게 나눈다(한 항목이 두 표에 나오거나 어느 표에도 안 나오면 안 된다)
+    expect(timerSpecs([POLL, ISI]).map((s) => s.key)).toEqual(['pollMs']);
+    expect(timerSpecs(null)).toEqual([]);
   });
   it('화면은 사양으로 선택지를 그리고 숫자를 따로 갖지 않는다', () => {
     const src = fs.readFileSync(new URL('./StorageIntervals.jsx', import.meta.url), 'utf8');
     expect(src).toMatch(/const presets = presetsForSpec\(s\);/);
-    expect(src).toMatch(/timeoutSpecs\(spec\)\.map/);
+    // 대기 시간은 주기 표의 열이 아니라 따로 그린다 — 주기 표는 1440px 에서도 가로로 넘쳐 새 열이 스크롤해야만 보였다(Chromium 판독).
+    expect(src).toMatch(/const timerSpec = timerSpecs\(spec\);/);
+    expect(src).toMatch(/const timeoutSpec = timeoutSpecs\(spec\);/);
+    expect(src).toMatch(/\{timerSpec\.map\(\(s\) => <th key=\{s\.key\}/);
+    expect(src).toMatch(/\{timeoutSpec\.length > 0 && \(/);
+    expect(src).not.toMatch(/\{spec\.map\(/);   // 사양 전체를 한 표에 그리지 않는다
+    // 이름 뒤에 조사를 붙이지 않는다(‘명령 대기은’ — 이름은 서버 사양에서 오므로 받침을 알 수 없다)
+    expect(src).not.toMatch(/\{s\.label\}<\/b>[은는이가을를]/);
     expect(src).not.toMatch(/300_?000|180_?000/);
   });
 });

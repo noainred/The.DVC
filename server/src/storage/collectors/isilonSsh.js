@@ -22,6 +22,7 @@ import { pickIsiPowerKey, keyNamesOfText, isiPowerFromStats, isiPowerResult, cac
 import { sshFailureSnapshot } from './cliSsh.js';
 import { readIsiHwSsh, applyIsiNodeHw, ISI_HW_CMD, HW_START_BUDGET_MS } from './isilonHw.js'; // v2.735.2 — 노드별 시리얼(6시간 캐시)
 import { emptySnapshot } from '../types.js';
+import { envPositive, ENV_INT_MAX } from '../../util/envNumber.js';
 import { runtimeIntervals } from '../intervals.js'; // v3.39.0 — 명령 대기 시간(설정 › 수집 주기·임계 › 스토리지 수집 주기 · 중앙 배포)
 import { clampIsiCmdTimeoutMs, isiDeviceTimeoutFor, isiSessionBudgetFor, ISI_DEADLINE_MARGIN_MS, ISI_CMD_TIMEOUT_MAX_MS } from '../isiTimeouts.js';
 import { healthWord } from '../healthWord.js'; // v2.615(SF-R1-04) — 비정상 계수는 공용 판정 하나(healthWord)
@@ -412,7 +413,10 @@ export async function readIsiPowerSsh(sh, host, { expectedNodes = null } = {}) {
  * Isilon SSH 장비 시한의 하한으로만 쓴다(폴러를 import 하면 수집기 → 폴러 방향의 순환이 생긴다).
  */
 const envMsOrNull = (v) => { const n = Number(v); return Number.isFinite(n) && n !== 0 ? n : null; };
-export const ISI_DEVICE_TIMEOUT_MS = Math.max(30_000, envMsOrNull(process.env.STORAGE_DEVICE_TIMEOUT_MS) ?? 180_000);
+// v3.39.0: 폴러와 **같은 함수**(envPositive · 상한 2^31−1)로 읽는다 — 예전 `envMsOrNull` 은 음수·2^31 초과를 그대로 받아 폴러(기본값으로 되돌림)와 값이 갈렸다.
+//   예산 기본 상한(150초)이 있던 때는 가려졌지만, 예산을 장비 시한에서 계산하는 지금은 `STORAGE_DEVICE_TIMEOUT_MS=3000000000`(단위 착오)에서
+//   예산이 폴러의 장비 시한을 넘는다(받은 결과를 통째로 버리는 그 회귀 — 변경분 재검토에서 찾음).
+export const ISI_DEVICE_TIMEOUT_MS = Math.max(30_000, envPositive(process.env.STORAGE_DEVICE_TIMEOUT_MS, 180_000, { max: ENV_INT_MAX }));
 export { ISI_DEADLINE_MARGIN_MS };
 /** 남은 예산이 이보다 적으면 부가 명령을 시작하지 않는다(cliSsh MIN_SLICE_MS 와 같은 값). 명령 시한이 짧게 설정된 현장에서도 비율을 지킨다. */
 export const ISI_MIN_SLICE_MS = Math.min(5_000, Math.max(250, Math.floor(execTimeoutMs() / 4)));

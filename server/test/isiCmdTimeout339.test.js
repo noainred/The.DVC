@@ -20,6 +20,7 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
+import { execFileSync } from 'node:child_process';
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'isi-cmd-timeout-'));
 process.env.CONFIG_DIR = TMP;
@@ -274,4 +275,27 @@ test('⑤ 소스 — 폴러는 장비별 시한을 쓰고, 수집기는 isi stat
   assert.doesNotMatch(ssh, /export const ISI_SESSION_BUDGET_MS\b/, '예산은 설정값에서 계산하는 함수다');
   const q = fs.readFileSync(new URL('storage/collectRequests.js', SRC), 'utf8');
   assert.match(q, /createCollectRequestQueue\(\{ ttlMs: TTL_MS, perItemMs,/);
+});
+
+test('⑤ 장비 시한 env 가 못 쓰는 값이어도 수집기와 폴러가 같은 장비 시한을 쓰고 예산은 그보다 작다(단위 착오 3000000000 · 음수 · Infinity)', () => {
+  // 모듈 로드 시 굳는 env 라 깨끗한 자식 프로세스에서 실제 모듈을 읽는다.
+  const read = (extraEnv) => {
+    const dir = fs.mkdtempSync(path.join(TMP, 'env-'));
+    const env = { ...process.env, CONFIG_DIR: dir, ...extraEnv };
+    delete env.SSH_EXEC_TIMEOUT_MS;
+    const code = `const i = await import(${JSON.stringify(new URL('storage/collectors/isilonSsh.js', SRC).href)});
+const p = await import(${JSON.stringify(new URL('storage/poller.js', SRC).href)});
+console.log(JSON.stringify({ base: i.ISI_DEVICE_TIMEOUT_MS, dev: i.isiDeviceTimeoutMs(), budget: i.isiSessionBudgetMs(), poller: p.deviceTimeoutMsFor({ type: 'isilon', collectMethod: 'ssh' }) }));
+process.exit(0);`;
+    return JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', code], { env, encoding: 'utf8', timeout: 60_000 }).trim().split('\n').pop());
+  };
+  for (const v of ['3000000000', '-5', 'Infinity', 'abc', '']) {
+    const r = read({ STORAGE_DEVICE_TIMEOUT_MS: v });
+    assert.equal(r.base, 180_000, `못 쓰는 값은 기본값: '${v}'`);
+    assert.equal(r.dev, r.poller, `수집기와 폴러의 장비 시한이 같다: '${v}'`);
+    assert.ok(r.budget < r.poller, `예산 ${r.budget} < 폴러 장비 시한 ${r.poller}: '${v}'`);
+  }
+  // 현장이 장비 시한을 길게 잡았으면(10분) 둘 다 그 값
+  const long = read({ STORAGE_DEVICE_TIMEOUT_MS: '600000' });
+  assert.equal(long.dev, 600_000); assert.equal(long.poller, 600_000); assert.equal(long.budget, 580_000);
 });
