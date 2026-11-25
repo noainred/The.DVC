@@ -104,17 +104,17 @@ function remember(key, rec) {
  * SSH 세션 안에서 노드 식별 정보를 읽는다(캐시가 살아 있으면 묻지 않는다).
  * @returns {{ ok:boolean, byLnn?:object, nodes?:number, cached:boolean, at:number, reason?:string, detail?:string, sample?:string }}
  */
-export async function readIsiHwSsh(sh, device, { sessionStartedAt = Date.now(), clusterName = '', now = Date.now } = {}) {
+export async function readIsiHwSsh(sh, device, { sessionStartedAt = Date.now(), clusterName = '', now = Date.now, budgetSkip = false } = {}) {
   const key = keyOf(device);
   const c = _cache.get(key);
   const t = now();
   if (c && t < c.nextAt) return { ...c, cached: true };
+  // 예산 초과는 '실패' 로 기억하지 않는다 — 다음 주기에 다시 시도한다(직전 성공값이 있으면 그것을 계속 쓴다).
+  const budgetOut = (detail) => (c?.ok ? { ...c, cached: true } : { ok: false, cached: false, at: t, reason: 'budget', detail });
+  // v3.41.1: 호출부가 '세션 예산이 바닥났다' 고 직접 말한다(`budgetSkip`) — 경과 시간을 꾸며 넘기지 않는다(문구가 늘 "이미 100초" 였다).
+  if (budgetSkip) return budgetOut('수집 시간 예산이 모자라 이번 주기에는 시리얼 조회를 시작하지 않았습니다');
   const elapsed = t - sessionStartedAt;
-  if (elapsed > HW_START_BUDGET_MS) {
-    // 예산 초과는 '실패' 로 기억하지 않는다 — 다음 주기에 다시 시도한다(직전 성공값이 있으면 그것을 계속 쓴다).
-    if (c?.ok) return { ...c, cached: true };
-    return { ok: false, cached: false, at: t, reason: 'budget', detail: `이번 수집 세션이 이미 ${Math.round(elapsed / 1000)}초 걸려 시리얼 조회를 시작하지 않았습니다` };
-  }
+  if (elapsed > HW_START_BUDGET_MS) return budgetOut(`이번 수집 세션이 이미 ${Math.round(elapsed / 1000)}초 걸려 시리얼 조회를 시작하지 않았습니다`);
   let rec;
   try {
     const r = await sh.exec(ISI_HW_CMD, HW_CMD_TIMEOUT_MS);
@@ -130,6 +130,9 @@ export async function readIsiHwSsh(sh, device, { sessionStartedAt = Date.now(), 
       rec = { ok: false, at: t, nextAt: t + HW_FAIL_RETRY_MS, reason: out.trim() ? 'parse' : 'empty', detail: detail.slice(0, 200), sample: (out || err).slice(0, 400) };
     }
   } catch (e) {
+    // v3.41.1(점검 1회차 — 재현): 세션 예산이 시한을 줄여 끝까지 기다리지 못한 것(`SESSION_BUDGET` — isilonSsh budgetedSh)은 명령의 실패가 아니다.
+    //   '실패' 로 기억하면(1시간) 바로 다음 수집에서 장비가 즉시 답해도 다시 묻지 않는다 — 예산 갈래로 돌려보내고 기억하지 않는다.
+    if (e?.code === 'SESSION_BUDGET') return budgetOut(String(e.message || '수집 시간 예산 초과').slice(0, 200));
     rec = { ok: false, at: t, nextAt: t + HW_FAIL_RETRY_MS, reason: 'exec', detail: String(e?.message || e).slice(0, 200) };
   }
   // 실패해도 직전 성공값은 버리지 않는다(시리얼은 바뀌지 않는다) — 1시간 뒤 다시 묻고, 그동안은 직전 값을 준다.

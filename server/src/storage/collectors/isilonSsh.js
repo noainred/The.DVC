@@ -20,7 +20,7 @@ import { reqTimeoutMs } from '../../util/envTimeout.js';
 import { powerProbe } from '../power.js';
 import { pickIsiPowerKey, keyNamesOfText, isiPowerFromStats, isiPowerResult, cachedIsiPowerKey, rememberIsiPowerKey, ISI_POWER_KEYS_CMD, isiPowerQueryCmd } from './isilonPower.js';
 import { sshFailureSnapshot } from './cliSsh.js';
-import { readIsiHwSsh, applyIsiNodeHw, ISI_HW_CMD, HW_START_BUDGET_MS } from './isilonHw.js'; // v2.735.2 — 노드별 시리얼(6시간 캐시)
+import { readIsiHwSsh, applyIsiNodeHw, ISI_HW_CMD } from './isilonHw.js'; // v2.735.2 — 노드별 시리얼(6시간 캐시)
 import { emptySnapshot } from '../types.js';
 import { envPositive, ENV_INT_MAX } from '../../util/envNumber.js';
 import { runtimeIntervals } from '../intervals.js'; // v3.39.0 — 명령 대기 시간(설정 › 수집 주기·임계 › 스토리지 수집 주기 · 중앙 배포)
@@ -432,22 +432,40 @@ export const isiSessionBudgetMs = (cmdMs = isiCmdTimeoutMs()) => isiSessionBudge
 /** 예산으로 시작하지 않은 명령의 사유 — Unity(cliSsh)와 같은 문구. */
 export const ISI_BUDGET_SKIP_REASON = '수집 시간 예산 초과로 이번 주기에는 실행하지 않았습니다(다음 주기에 시도).';
 
+/** 예산이 시한을 줄여 **끝까지 기다리지 못한** 명령의 사유(v3.41.1) — '시작하지 않음' 과 같은 갈래(`code: 'SESSION_BUDGET'`)지만 문구는 사실대로. */
+export const ISI_BUDGET_CUT_REASON = '수집 시간 예산 초과로 끝까지 기다리지 못했습니다(다음 주기에 시도).';
+const isExecTimeout = (e) => /^SSH exec 타임아웃\(/.test(String(e?.message || ''));
+
 /**
  * 부가 명령용 `sh` — exec 시한을 남은 예산으로 줄이고, 남은 시간이 `ISI_MIN_SLICE_MS` 아래면 **시작하지 않고** 던진다
  * (`code: 'SESSION_BUDGET'`). 전원·시리얼 읽기 함수에도 그대로 넘긴다(그 함수들의 catch 가 사유로 남긴다).
- * v3.39.0: 명령 시한은 호출부가 넘긴 값(`_t` — 20초·45초)이 아니라 **설정값 `cmdMs`** 다(모든 isi 명령에 적용 — 위 머리말).
+ * v3.39.0: 명령 시한은 호출부가 넘긴 값(`t` — 20초·45초)이 아니라 **설정값 `cmdMs`** 다(모든 isi 명령에 적용 — 위 머리말).
+ * v3.41.1(점검 1회차 — 재현):
+ *  · `honorCaller`(연결 테스트): 호출부의 짧은 시한을 **그대로 쓴다**. 연결 테스트는 바깥 시한이 60초라, 부가 명령 하나가 응답하지 않으면
+ *    설정값(3분)을 기다리다 테스트가 통째로 '시간 초과' 였다(v3.39.0 회귀 — 예전에는 20초·45초에 그 명령만 끊겼다).
+ *  · 예산이 시한을 줄였고(`left < 시한`) 그 줄어든 시한에 끊겼으면 **예산 갈래**로 바꿔 던진다 — 명령이 실패한 것이 아니라 기다릴 시간이
+ *    없었던 것이다. 시리얼 모듈이 이것을 '실패' 로 1시간 기억해, 바로 다음 수집에서 장비가 즉시 답해도 다시 묻지 않았다.
  */
-function budgetedSh(sh, leftMs, skipped, cmdMs) {
+function budgetedSh(sh, leftMs, skipped, cmdMs, { honorCaller = false } = {}) {
   return {
     ...sh,
-    exec(cmd, _t, o) {
+    exec(cmd, t, o) {
       const left = leftMs();
+      const label = String(cmd).split(/\s+/).slice(0, 3).join(' ');
       if (left < ISI_MIN_SLICE_MS) {
-        skipped.push(String(cmd).split(/\s+/).slice(0, 3).join(' '));
+        skipped.push(label);
         const e = new Error(ISI_BUDGET_SKIP_REASON); e.code = 'SESSION_BUDGET';
         return Promise.reject(e);
       }
-      return sh.exec(cmd, Math.max(ISI_MIN_SLICE_MS, Math.min(cmdMs, left)), o);
+      const want = honorCaller ? Math.min(cmdMs, execTimeoutMs(t)) : cmdMs;
+      const p = sh.exec(cmd, Math.max(ISI_MIN_SLICE_MS, Math.min(want, left)), o);
+      if (left >= want) return p;   // 예산이 시한을 줄이지 않았다 — 시한 초과는 그 명령의 실패다
+      return p.catch((e) => {
+        if (!isExecTimeout(e)) throw e;
+        skipped.push(label);
+        const b = new Error(ISI_BUDGET_CUT_REASON, { cause: e }); b.code = 'SESSION_BUDGET';
+        throw b;
+      });
     },
   };
 }
@@ -464,8 +482,10 @@ export function isiTimeoutHint(cmdMs) {
  * @param {{budgetMs?:number|null, cmdTimeoutMs?:number|null}} [opts] budgetMs — 세션 예산(기본 `isiSessionBudgetMs()` — 설정값에서 계산). 바깥 시한이
  *   장비 시한보다 짧은 호출부(연결 테스트 60초)는 그보다 작은 값을 넘겨야 같은 보호를 받는다. cmdTimeoutMs — 명령 대기 시간 주입(테스트 전용 —
  *   설정값의 하한이 1분이라 축척한 값을 넣을 길이 없다. 운영 호출부는 넘기지 않는다 — 설정값이 단일 소스다).
+ *   quick — 연결 테스트(v3.41.1): 부가 명령은 호출부의 짧은 시한(20초·45초·exec 기본값)을 쓴다. 호출부(`isilon.js collect`)가 `budgetMs` 도
+ *   바깥 시한에 맞춰 함께 넘긴다.
  */
-export async function collectViaSsh(device, { budgetMs = null, cmdTimeoutMs = null } = {}) {
+export async function collectViaSsh(device, { budgetMs = null, cmdTimeoutMs = null, quick = false } = {}) {
   // v3.39.0: 명령 대기 시간은 세션 시작에 **한 번** 읽는다 — 도중에 설정이 바뀌어도 한 세션의 명령·예산이 서로 다른 값으로 계산되지 않게.
   const cmdMs = Number.isFinite(Number(cmdTimeoutMs)) && Number(cmdTimeoutMs) > 0 ? Number(cmdTimeoutMs) : isiCmdTimeoutMs();
   // 예산 시계는 **접속 전**에 시작한다 — 장비 시한도 핸드셰이크를 포함해 세기 때문이다(cliSsh 와 같다).
@@ -480,10 +500,10 @@ export async function collectViaSsh(device, { budgetMs = null, cmdTimeoutMs = nu
         const status = await sh.exec('isi status', cmdMs); // 핵심 — 실패하면 아래 catch 로(수집 실패). 필수라 예산을 무시한다. v3.39.0: 설정값까지 기다린다.
         // v2.732(B2-07): 노드 수(전원 부분 합 대조용)를 위해 여기서 해석한다 — 아래에서 다시 해석하지 않는다.
         const parsedStatus = parseIsiStatus(status.stdout || '');
-        const bsh = budgetedSh(sh, leftMs, skipped, cmdMs);
+        const bsh = budgetedSh(sh, leftMs, skipped, cmdMs, { honorCaller: !!quick });
         // 부가 명령은 각각 best-effort: 버전·계정이 없어도 status 파싱 결과는 살린다.
         // v2.741(DEV-02): 예산으로 시작하지 않은 명령은 `budget` 표지를 남긴다 — '실행 실패' 와 조치가 다르다.
-        const soft = (p) => p.catch((e) => ({ stdout: '', budget: e?.code === 'SESSION_BUDGET' }));
+        const soft = (p) => p.catch((e) => ({ stdout: '', budget: e?.code === 'SESSION_BUDGET', budgetReason: e?.code === 'SESSION_BUDGET' ? e.message : '' }));
         // ⚠ 순서가 계약이다(v2.742 감사 RECENT-04 — Unity SPECS '필수 → 매주기 → 구성' 과 같은 원칙): 예산이 모자랄 때 먼저 잃는 것은
         //   **뒤** 명령이다. 예전에는 버전·계정 조회가 정확 용량 통계보다 앞이라, 두 조회가 느린 장비에서 통계가 시작되지 못해 그 주기의
         //   용량이 'isi status (반올림 표기)' 로 떨어졌다(증가량 시계열에 쓰는 값이 부가 정보에 밀렸다). 그래서
@@ -500,9 +520,12 @@ export async function collectViaSsh(device, { budgetMs = null, cmdTimeoutMs = nu
         // v2.741(DEV-02): 세션 예산이 바닥이면 시리얼 모듈의 '예산 초과' 갈래로 보낸다(직전 성공값은 그대로 쓰고, 실패로 기억하지 않는다).
         // v3.39.0: 시리얼의 시작 판정은 **남은 세션 예산 하나**다 — 예전에는 세션이 100초(HW_START_BUDGET_MS)를 넘기면 예산이 남아도 시작하지
         //   않았다(예산이 150초이던 때의 값). 명령을 설정값까지 기다리는 지금은 느린 클러스터의 세션이 늘 100초를 넘어 시리얼이 영영 빠진다.
-        const hwStart = leftMs() < ISI_MIN_SLICE_MS ? Date.now() - HW_START_BUDGET_MS - 1 : Date.now();
-        const hw = parsedStatus.nodes.length ? await readIsiHwSsh(bsh, device, { sessionStartedAt: hwStart, clusterName: parsedStatus.name }) : null;
-        return { status: status.stdout || '', parsedStatus, ver: ver.stdout || '', usersRaw: usersRaw.stdout || '', usersBudget: !!usersRaw.budget, stats: stats.stdout || '', sys: sys.stdout || '', sysBudget: !!sys.budget, power, hw };
+        // v3.41.1(점검 1회차): 예산이 바닥났다는 사실을 **그대로 넘긴다**(`budgetSkip`) — 예전에는 '세션이 100초 넘게 걸린 것' 처럼 시작 시각을
+        //   꾸며 넘겨, 사유 문구가 실제 경과와 무관하게 늘 "이미 100초 걸려" 였다.
+        const hw = parsedStatus.nodes.length
+          ? await readIsiHwSsh(bsh, device, { sessionStartedAt: Date.now(), clusterName: parsedStatus.name, budgetSkip: leftMs() < ISI_MIN_SLICE_MS })
+          : null;
+        return { status: status.stdout || '', parsedStatus, ver: ver.stdout || '', usersRaw: usersRaw.stdout || '', usersBudget: !!usersRaw.budget, usersBudgetReason: usersRaw.budgetReason || '', stats: stats.stdout || '', sys: sys.stdout || '', sysBudget: !!sys.budget, power, hw };
       },
     );
     const parsed = r.parsedStatus || parseIsiStatus(r.status);
@@ -515,7 +538,7 @@ export async function collectViaSsh(device, { budgetMs = null, cmdTimeoutMs = nu
     if (r.power?.power) snap.extra.power = r.power.power; else if (r.power?.probe) snap.extra.powerProbe = r.power.probe;
     applyIsiNodeHw(snap, r.hw, { source: ISI_HW_CMD });
     if (!users) {
-      snap.sections.accounts = r.usersBudget ? `미수집(${ISI_BUDGET_SKIP_REASON})`
+      snap.sections.accounts = r.usersBudget ? `미수집(${r.usersBudgetReason || ISI_BUDGET_SKIP_REASON})`
         : r.usersRaw ? '오류: users JSON 파싱 실패' : '오류: isi auth users list 실행 실패';
     }
     // v2.741(DEV-02): 예산으로 시작하지 않은 부가 명령 — 조용히 빼지 않는다. `cliSkipped` 는 Unity(unitySsh)와 같은 뜻·같은 모양(개수)이고

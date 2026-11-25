@@ -39,6 +39,8 @@ const DEVICE_TIMEOUT_MS = Math.max(30_000, envPositive(process.env.STORAGE_DEVIC
  * `isi status` 까지 버린다(v2.528 Unity 회귀와 같은 유형). 조건은 수집기 분기(`collectors/isilon.js` — `collectMethod !== 'api'`)와 같아야 한다.
  * 상수가 아니라 **매번 계산**한다 — 중앙이 값을 바꾸면 다음 수집부터 먹는다.
  */
+/** 엣지의 첫 수집 지연 — 첫 설정 pull(10초 뒤 시작 · 한 번의 시한 20초)이 끝난 뒤(`agent/storageConfigPull.js` firstDelayMs · timeoutMs). */
+export const EDGE_FIRST_POLL_DELAY_MS = 40_000;
 export function deviceTimeoutMsFor(dev) {
   return dev?.type === 'isilon' && dev?.collectMethod !== 'api'
     ? isiDeviceTimeoutFor(runtimeIntervals().isiCmdTimeoutMs, DEVICE_TIMEOUT_MS)
@@ -331,7 +333,7 @@ export async function testDeviceConnection(device, { timeoutMs = 60_000 } = {}) 
     const snap = await Promise.race([
       // `_test` 는 수집기가 '연결 테스트' 를 구분하는 표시다 — v2.525: Unity SSH 는 이때만
       // 전 명령의 원문(cliRaw)을 담는다(주기 수집에서는 실패한 명령만 — 대역폭).
-      fn({ ...device, _signal: ac.signal, _test: true }, { signal: ac.signal }),
+      fn({ ...device, _signal: ac.signal, _test: true, _testTimeoutMs: effMs }, { signal: ac.signal }),   // v3.41.1: 바깥 시한을 알려 준다(Isilon SSH 가 예산을 그 안으로 잡는다)
       new Promise((_, reject) => ac.signal.addEventListener('abort', () => reject(new Error(`테스트 시간 초과(${Math.round(effMs / 1000)}초) — 방화벽/포트 또는 장비 응답 지연을 확인하세요.`)), { once: true })),
     ]);
     return { ...snap, ms: Date.now() - startedAt };
@@ -353,7 +355,11 @@ export function startStoragePoller() {
   try { applyOwnIntervals(); } catch (e) { console.warn(`[storage] 수집 주기 설정 로드 실패(기본값 사용): ${e.message}`); }
   // 기동 15초 후 첫 수집, 이후 매 회 현재 주기로 재무장(setInterval 은 생성 시 간격에 묶여
   // 중앙 배포를 못 받는다). 재진입 가드(_busy)는 그대로 — 수동 실행과 공유한다.
-  _timer = startAdaptiveTimer(pollMs, () => pollStorageOnce(), { firstDelayMs: 15_000, name: '장비 수집' });
+  // v3.41.1(점검 1회차): **엣지**의 첫 수집은 첫 설정 pull(기동 10초 뒤 · 시한 20초) 뒤로 미룬다 — 중앙이 배포한 값은 엣지 메모리에만 있어
+  //   재시작 직후에는 env·기본값이다. 주기는 늦게 먹어도 탈이 없지만, 시한(PowerScale SSH 명령 대기)은 중앙이 5분으로 올려 둔 느린 클러스터가
+  //   첫 수집을 기본 3분으로 돌아 '실패' 로 남는다(다음 수집 주기까지). pull 이 재시도로 더 늦어지면 여전히 기본값으로 돈다(한계 — 값은 다음 수집부터 먹는다).
+  const isEdgeNode = !!(config.agent?.centralUrl && config.agent?.centralToken);
+  _timer = startAdaptiveTimer(pollMs, () => pollStorageOnce(), { firstDelayMs: isEdgeNode ? EDGE_FIRST_POLL_DELAY_MS : 15_000, name: '장비 수집' });
 }
 export function storagePollerStatus() {
   // v2.733(감사 C4-03): snapshotSave — 스냅샷 파일 저장 상태(대기·쓰기·실패 횟수·마지막 오류 코드. 경로·원문 없음).
