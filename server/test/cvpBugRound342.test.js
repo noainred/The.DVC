@@ -93,7 +93,10 @@ test('② 포트 구성도', () => {
   assert.equal(PM.deviceNameFromDesc('esx01-vmnic2'), 'esx01');
   assert.equal(PM.deviceNameFromDesc('te-sw01 trunk'), 'te-sw01');
   // ReDoS 가드: 긴 입력도 선형(길이를 먼저 자른다)
-  const t0 = performance.now(); PM.deviceNameFromDesc(`${'a-'.repeat(5000)}vmnic1`); PM.descTokens('x_'.repeat(5000)); assert.ok(performance.now() - t0 < 200);
+  // ReDoS 가드는 비율로(루트 CLAUDE.md — 절대 시간은 CPU 에 따라 깨진다): 입력 10배에 시간이 초선형으로 늘지 않는다(앞에서 200자로 자른다).
+  const tm = (n) => { const t = performance.now(); for (let i = 0; i < 50; i++) { PM.deviceNameFromDesc(`${'a-'.repeat(n)}vmnic1`); PM.descTokens('x_'.repeat(n)); } return performance.now() - t; };
+  tm(500); const small = tm(500); const big = tm(5000);
+  assert.ok(big < small * 30 + 20, `5,000 → ${big.toFixed(1)}ms · 500 → ${small.toFixed(1)}ms(선형이면 10배 이하)`);
   // 속도를 못 읽은 예비가 있으면 '40G 이상 예비' 를 0 으로 단정하지 않는다(A2-F4)
   const s = PM.summaryRow({ model: 'DCS-7050SX3-48YC8', ports: [{ name: 'Ethernet1', oper: 'nolink', admin: 'up', desc: '', speedBps: null }, { name: 'Ethernet2', oper: 'nolink', admin: 'up', desc: '', speedBps: null }] });
   assert.equal(s.spareHigh, null); assert.equal(s.spareSpeedUnknown, 2);
