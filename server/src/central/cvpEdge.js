@@ -243,6 +243,8 @@ export function cleanDevice(x, now = Date.now(), cnt = { ports: 0 }) {
     })),
   };
   if (Array.isArray(x.ports) && x.ports.length > PORT_MAX) cnt.ports += x.ports.length - PORT_MAX;
+  // v3.42(반증 A2-P1): 목록이 일부면(엣지 수집 잘림 · 여기 상한) 중앙이 '목록에 없는 포트' 를 지우지 않게 표지를 옮긴다.
+  if (Array.isArray(d.ports) && (x.portsPartial === true || x.ports.length > PORT_MAX)) d.portsPartial = true;
   // parts: 없음(undefined)=이번에 읽지 않음 · null=못 읽음 · 배열 — 셋을 구분해 옮긴다.
   if (Object.hasOwn(x, 'parts')) {
     d.parts = x.parts === null ? null : listOf(x.parts, PART_MAX, (p) => ({
@@ -267,11 +269,13 @@ export function cleanInfo(v, now = Date.now()) {
   const bool = (b) => (b === true ? true : b === false ? false : undefined);
   const out = {
     mac: s(v.mac, 32) || undefined, fqdn: s(v.fqdn, 256) || undefined, hwRevision: s(v.hwRevision, 64) || undefined,
-    bootAt: numOrNull(v.bootAt) ?? undefined, status: s(v.status, 32) || undefined,
+    // v3.42(반증 N6): 엣지 시각은 수신 시각으로 자른다(미래 값이 그대로 통과했다 — 루트 규칙 '엣지가 보낸 것은 정제한다').
+    bootAt: tsClamp(v.bootAt, now) ?? undefined, status: s(v.status, 32) || undefined,
     complianceCode: s(v.complianceCode, 32) || undefined, complianceIndication: s(v.complianceIndication, 32) || undefined,
     container: s(v.container, 128) || undefined, ztpMode: bool(v.ztpMode), mlag: bool(v.mlag), internalVersion: s(v.internalVersion, 64) || undefined,
     portsEmpty: v.portsEmpty === true || undefined, bgpEmpty: v.bgpEmpty === true || undefined,
-    readKinds: Array.isArray(v.readKinds) ? v.readKinds.filter((k) => ['enrich', 'lifecycle', 'bugs'].includes(k)) : undefined,
+    // v3.42(A3-F5): 중복 제거(최대 3개) — 개수 상한이 없어 20만 개가 오면 info 가 64KB 를 넘어 통째로 null 로 저장됐다(수명주기 · MLAG 까지 잃음).
+    readKinds: Array.isArray(v.readKinds) ? [...new Set(v.readKinds.slice(0, 64).filter((k) => ['enrich', 'lifecycle', 'bugs'].includes(k)))] : undefined,
   };
   if (isPlainObj(v.lifecycle)) {
     const l = v.lifecycle;

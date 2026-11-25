@@ -28,7 +28,8 @@ import { corpResolver, rowOwnerOf } from '../../cvp/overview.js';
 import { rankLinks, FLAP_MIN_DEFAULT } from '../../cvp/linkq.js';
 import { reclaimCandidates, exhaustForecast, saturationForecast, IDLE_CHOICES, FORECAST_MIN_DAYS, FORECAST_WINDOW_DAYS, UPLINK_SAT_PCT } from '../../cvp/portplan.js';
 import { opticTrends, opticInventory, TREND_DAYS, TREND_MIN_DAYS } from '../../cvp/opticstrend.js';
-import { buildTopology, switchIndex, uplinkPortsOf, normPort } from '../../cvp/topology.js';
+import { HORIZON_DAYS } from '../../cvp/trend.js';
+import { buildTopology, switchIndex, uplinkPortsOf, hostPortsOf, normPort } from '../../cvp/topology.js';
 import { parseQuery, subjectsOf, placeRows, MANY_MACS } from '../../cvp/locate.js';
 import { snapshotBody, diffSnapshots } from '../../cvp/snapdiff.js';
 import { complianceFleet } from '../../cvp/compliance.js';     // v3.41 ③
@@ -36,7 +37,7 @@ import { redundancyFleet } from '../../cvp/redundancy.js';    // v3.41 ⑧
 import { store } from '../../store.js';
 import { capStr } from '../../util/capStr.js';
 import { numOrNull } from '../../util/numOrNull.js';
-import { kickDemo, maskErrText } from './cvp.js';
+import { kickDemo, maskErrText, maskMlag } from './cvp.js';
 import { listDatacenters } from '../../datacenter/store.js';
 
 const writer = requireRole('admin', 'operator');
@@ -49,8 +50,24 @@ const hostsOf = () => listServers().map((x) => x.host);
 /** 법인 목록(cvp.js dcList 와 같은 모양 — 그쪽은 registerCvp 안 지역 함수다). */
 const dcList = () => { try { return listDatacenters().map((d) => ({ id: String(d.id), name: String(d.name || d.id) })); } catch { return []; } };
 
-/** 담당 장비 · 포트 행(등록부 담당만 — 옛 엣지 행을 섞지 않는다) + 법인. cvpId 가 있으면 그 CVP 만. */
-async function baseOf({ cvpId = null, withPorts = true } = {}) {
+/**
+ * 담당 장비 · 포트 행(등록부 담당만 — 옛 엣지 행을 섞지 않는다) + 법인. cvpId 가 있으면 그 CVP 만.
+ * v3.42(버그 점검 1회차):
+ *  · 포트는 장비마다 조각으로 읽고 양보한다(db.portRowsOf — 전량 동기 읽기가 요청마다 이벤트 루프를 250~360ms 멈췄다 · A3-F3 · A4-F1).
+ *  · 포트 목록을 못 읽은 장비의 옛 행은 쓰지 않는다(portsUnread 로 센다 — A2-F2: 옛 oper 로 채널 '정상' 을 판정했다).
+ *  · VLAN · 채널을 읽은 장비(info.cfgReadAt)의 빈 값(DB 에서 NULL)은 '없음'('')으로 돌린다 — 저장소가 '' 을 NULL 로 바꿔 양끝 비교 · 전후 비교가
+ *    채널 소속을 늘 '비교 못 함' 으로 보았다(A1-01 · A1-02 · A2-F1). 일부만 읽은 장비(lagPartial)는 그대로 null(모름).
+ *  · 같은 조건의 요청이 겹치면 진행 중인 결과를 함께 쓴다(값은 요청마다 새로 읽는다 — 기억하지 않는다).
+ */
+const _baseFlight = new Map();
+function baseOf(opts = {}) {
+  const k = `${opts.cvpId || ''}\u0000${opts.withPorts !== false}`;
+  if (_baseFlight.has(k)) return _baseFlight.get(k);
+  const p = baseOfInner(opts).finally(() => _baseFlight.delete(k));
+  _baseFlight.set(k, p);
+  return p;
+}
+async function baseOfInner({ cvpId = null, withPorts = true } = {}) {
   const servers = listServers();
   const own = rowOwnerOf(servers);
   const dl = await cdb.listDeviceRows(cvpId ? { cvpId } : {});
@@ -59,17 +76,19 @@ async function baseOf({ cvpId = null, withPorts = true } = {}) {
   const nameOf = new Map(servers.map((x) => [String(x.id), x.name || x.id]));
   const devices = dl.rows.filter(own).map((d) => ({ ...d, corpName: corpOf(d.cvpId).corpName, cvpName: nameOf.get(String(d.cvpId)) || d.cvpId }));
   const keys = new Set(devices.map((d) => devKey(d.agent, d.cvpId, d.key)));
-  let ports = []; let truncated = false;
+  let ports = []; let truncated = false; let portsUnread = 0;
   if (withPorts) {
-    const pr = await cdb.portLatestRows({ ...(cvpId ? { cvpIds: [cvpId] } : {}), limit: PORTS_MAX });
+    const pr = await cdb.portRowsOf(devices, { limit: PORTS_MAX });
     if (pr.unavailable) return null;
-    truncated = !!pr.truncated;
-    ports = pr.rows.filter((r) => keys.has(devKey(r.agent, r.cvp_id, r.device_key))).map((r) => ({
-      agent: r.agent, cvpId: r.cvp_id, key: r.device_key, hostname: r.hostname || r.device_key, port: r.port, oper: r.oper || 'unknown', admin: r.admin || 'unknown',
-      speedBps: r.speed_bps ?? null, desc: r.descr == null ? null : r.descr, lag: r.lag ?? null, vlan: r.vlan ?? null, mtu: r.mtu ?? null, duplex: r.duplex ?? null,
-    }));
+    truncated = !!pr.truncated; portsUnread = pr.unread;
+    const cfg = new Map(devices.map((d) => [devKey(d.agent, d.cvpId, d.key), d.info && typeof d.info === 'object' ? d.info.cfgReadAt || null : null]));
+    ports = pr.rows.map((r) => {
+      const c = cfg.get(devKey(r.agent, r.cvpId, r.key));
+      const lagRead = !!(c && c.lag && !c.lagPartial); const vlanRead = !!(c && c.vlan && !c.vlanPartial);
+      return { ...r, lag: r.lag ?? (lagRead ? '' : null), vlan: r.vlan ?? (vlanRead ? '' : null) };
+    });
   }
-  return { servers, devices, keys, ports, truncated };
+  return { servers, devices, keys, ports, truncated, portsUnread };
 }
 const cvpIdOf = (req) => (typeof req.query.cvpId === 'string' && req.query.cvpId ? req.query.cvpId : null);
 const unknownCvp = (id) => id && !listServers().some((x) => String(x.id) === id);
@@ -94,7 +113,7 @@ export function registerCvpNet(api) {
     res.json({
       days, from: err.from, rows: r.rows.map((x) => ({ ...x, corpName: corp.get(devKey(x.agent, x.cvpId, x.key)) || '', desc: admin ? x.desc : maskErrText(x.desc, hosts) })),
       counts: r.counts, omitted: r.omitted, flapMin: FLAP_MIN_DEFAULT, warnDbm: s.xcvrRxWarnDbm,
-      flapRecordSince: flap.recordSince, intervalMs: s.intervalMs, ...(b.truncated ? { truncated: true } : {}), ...(admin ? {} : { addressHidden: true }),
+      flapRecordSince: flap.recordSince, intervalMs: s.intervalMs, ...(b.portsUnread ? { portsUnread: b.portsUnread } : {}), ...(b.truncated ? { truncated: true } : {}), ...(admin ? {} : { addressHidden: true }),
     });
   });
 
@@ -116,7 +135,7 @@ export function registerCvpNet(api) {
     const hosts = hostsOf();
     const corp = new Map(b.devices.map((d) => [devKey(d.agent, d.cvpId, d.key), d.corpName]));
     res.json({ idle, choices: IDLE_CHOICES, rows: r.rows.map((x) => ({ ...x, corpName: corp.get(devKey(x.agent, x.cvpId, x.key)) || '', desc: admin ? x.desc : maskErrText(x.desc, hosts) })),
-      counts: r.counts, omitted: r.omitted, backfilling: !ll.backfilled, ...(b.truncated ? { truncated: true } : {}), ...(admin ? {} : { addressHidden: true }) });
+      counts: r.counts, omitted: r.omitted, backfilling: !ll.backfilled, ...(ll.truncated ? { lastLinkTruncated: true } : {}), ...(b.portsUnread ? { portsUnread: b.portsUnread } : {}), ...(b.truncated ? { truncated: true } : {}), ...(admin ? {} : { addressHidden: true }) });
   });
 
   // ── ⑨ 포트 고갈 · 업링크 포화 예측 ──────────────────────────────────────────────────────────────────────────
@@ -152,8 +171,8 @@ export function registerCvpNet(api) {
     res.json({
       exhaust: { rows: ex.rows, counts: ex.counts },
       saturation: { rows: sat.rows.map((x) => ({ ...x, corpName: corp.get(devKey(x.agent, x.cvpId, x.key)) || '', peer: admin ? x.peer : maskErrText(x.peer, hosts) })), counts: sat.counts, satPct: UPLINK_SAT_PCT,
-        ...(us.truncated ? { truncated: true } : {}) },
-      minDays: FORECAST_MIN_DAYS, windowDays: FORECAST_WINDOW_DAYS, ...(b.truncated ? { truncated: true } : {}), ...(admin ? {} : { addressHidden: true }),
+        omitted: sat.omitted || 0, pointsRows: sat.pointsRows, ...(us.truncated ? { truncated: true } : {}) },
+      minDays: FORECAST_MIN_DAYS, windowDays: FORECAST_WINDOW_DAYS, horizonDays: HORIZON_DAYS, ...(b.portsUnread ? { portsUnread: b.portsUnread } : {}), ...(b.truncated ? { truncated: true } : {}), ...(admin ? {} : { addressHidden: true }),
     });
   });
 
@@ -164,7 +183,8 @@ export function registerCvpNet(api) {
     if (unknownCvp(cvpId)) return res.status(404).json({ ok: false, reason: '없는 CVP 서버입니다.' });
     const b = await baseOf({ cvpId, withPorts: false });
     if (!b) return res.status(503).json(DB_DOWN);
-    const xs = await cdb.xcvrSeries({ days: 90 });
+    // v3.42(버그 점검 1회차 A4-F2): 회귀는 최근 TREND_DAYS 일만 쓴다 — 90일(135만 행 · 힙 +260MB)을 읽지 않는다. 7일 더 읽어 막 끊긴 GBIC 은 '오래됨' 으로 보인다.
+    const xs = await cdb.xcvrSeries({ days: TREND_DAYS + 7 });
     if (xs.unavailable) return res.status(503).json(DB_DOWN);
     const own = new Map();
     for (const [k, v] of xs.map) { const [a, c, d] = k.split('\u0000'); if (b.keys.has(devKey(a, c, d))) own.set(k, v); }
@@ -172,7 +192,7 @@ export function registerCvpNet(api) {
     const names = new Map(b.devices.map((d) => [devKey(d.agent, d.cvpId, d.key), { hostname: d.hostname || d.key, cvpId: d.cvpId, corpName: d.corpName }]));
     const t = opticTrends({ series: own, names, warnDbm: s.xcvrRxWarnDbm, faultDbm: s.xcvrRxFaultDbm });
     const inv = opticInventory(b.devices);
-    res.json({ trend: t, inventory: inv, trendDays: TREND_DAYS, minDays: TREND_MIN_DAYS });
+    res.json({ trend: t, inventory: inv, trendDays: TREND_DAYS, minDays: TREND_MIN_DAYS, horizonDays: HORIZON_DAYS });
   });
 
   // ── ⑥ ⑦ 토폴로지 · 양끝 불일치 ──────────────────────────────────────────────────────────────────────────────
@@ -193,7 +213,7 @@ export function registerCvpNet(api) {
     res.json({
       nodes: t.nodes, counts: t.counts, lldpReadDevices: t.lldpReadDevices, devices: b.devices.length,
       links: t.links.map((l) => ({ ...l, items: l.items ? l.items.map((x) => (x.field.startsWith('desc') ? { ...x, a: mk(x.a), b: mk(x.b) } : x)) : null })),
-      ...(lldp.truncated ? { lldpTruncated: true } : {}), ...(b.truncated ? { truncated: true } : {}), ...(admin ? {} : { addressHidden: true }),
+      ...(lldp.truncated ? { lldpTruncated: true } : {}), ...(b.portsUnread ? { portsUnread: b.portsUnread } : {}), ...(b.truncated ? { truncated: true } : {}), ...(admin ? {} : { addressHidden: true }),
     });
   });
 
@@ -218,7 +238,8 @@ export function registerCvpNet(api) {
     for (const d of b.devices) { const dk = devKey(d.agent, d.cvpId, d.key); if (lldp.meta.get(dk)?.at != null && !ups.has(dk)) ups.set(dk, new Set()); }
     const devs = [...new Map(fdbRows.map((r) => [devKey(r.agent, r.cvpId, r.key), { agent: r.agent, cvpId: r.cvpId, key: r.key }])).values()];
     const macCount = devs.length ? await cdb.fdbPortTotals(devs) : new Map();
-    const placed = placeRows({ fdb: fdbRows, ep: epRows, uplinks: ups, macCount });
+    const hostNames = new Set((snap.hosts || []).map((h) => String(h?.name || '').toLowerCase().split('.')[0]).filter((n) => n.length >= 3));
+    const placed = placeRows({ fdb: fdbRows, ep: epRows, uplinks: ups, macCount, hostPorts: hostPortsOf(lldp.rows.filter(own), hostNames) });
     const corp = new Map(b.devices.map((d) => [devKey(d.agent, d.cvpId, d.key), d.corpName]));
     const withCorp = (x) => ({ ...x, corpName: corp.get(devKey(x.agent, x.cvpId, x.key)) || '' });
     const vcName = new Map((snap.vcenters || []).map((v) => [v.id, v.name || v.id]));
@@ -255,8 +276,7 @@ export function registerCvpNet(api) {
     // 반증 E8: MLAG 도메인 · 피어 링크는 장비가 준 자유 문자열 — 비관리자에는 형제 라우트처럼 주소를 가린다.
     const admin = isAdminReq(req);
     const hosts = hostsOf();
-    const mk = (v) => (admin || v == null ? v : maskErrText(String(v), hosts));
-    res.json({ ...r, rows: admin ? r.rows : r.rows.map((x) => ({ ...x, mlag: { ...x.mlag, domain: mk(x.mlag.domain), peerLink: mk(x.mlag.peerLink) } })),
+    res.json({ ...r, rows: admin ? r.rows : r.rows.map((x) => ({ ...x, mlag: maskMlag(x.mlag, false, hosts) })), portsUnread: b.portsUnread,
       ...(b.truncated ? { truncated: true } : {}), ...(admin ? {} : { addressHidden: true }) });
   });
 
@@ -300,6 +320,7 @@ export function registerCvpNet(api) {
       logAudit({ user: req.user?.username, action: 'CVP 스냅샷 저장', target: `cvp-snapshot/${r.id}`, detail: `장비 ${r.devices}대 · ${cvpId ? `CVP ${cvpId}` : '모든 CVP'}${label ? ` · ${label}` : ''}` });
       res.json({ ok: true, id: r.id, devices: r.devices, bytes: r.bytes, ...(cur.truncated ? { truncated: true } : {}) });
     } catch (e) {
+      if (e?.code === 'SNAP_GONE') return res.status(409).json({ ok: false, reason: '저장하는 동안 스냅샷이 지워졌습니다 — 다시 찍어 주세요.' });
       console.warn(`[cvp-net] 스냅샷 저장 실패: ${e.message}`);
       res.status(500).json({ ok: false, reason: '스냅샷을 저장하지 못했습니다(서버 로그 참고).' });
     } finally { snapBusy = false; }
@@ -307,6 +328,8 @@ export function registerCvpNet(api) {
   api.delete('/tools/cvp/snapshots/:id', writer, toolsPerm, fullScopeOnly, async (req, res) => {
     const id = numOrNull(req.params.id);
     if (id == null || !Number.isInteger(id) || id <= 0) return res.status(400).json({ ok: false, reason: '스냅샷 번호가 올바르지 않습니다.' });
+    // v3.42(A3-F4 · A4-F7): 저장 중인 것은 지우지 않는다(지우면 찍은 쪽이 '저장 성공' 을 받고 감사 로그와 실제가 어긋났다). 끝나지 않은 채 1시간 넘은 것은 pruneSnaps 가 지운다.
+    if (snapBusy) return res.status(409).json({ ok: false, reason: '스냅샷을 저장하는 중입니다 — 끝난 뒤 다시 누르세요.' });
     const r = await cdb.deleteSnap(id);
     if (r.unavailable) return res.status(503).json(DB_DOWN);
     if (!r.deleted) return res.status(404).json({ ok: false, reason: '없는 스냅샷입니다.' });
@@ -319,10 +342,14 @@ export function registerCvpNet(api) {
     const bRaw = typeof req.query.b === 'string' ? req.query.b : 'now';
     const cvpId = cvpIdOf(req);
     if (aId == null) return res.status(400).json({ ok: false, reason: '비교할 스냅샷(a)을 고르세요.' });
+    if (unknownCvp(cvpId)) return res.status(404).json({ ok: false, reason: '없는 CVP 서버입니다.' });
     const A = await cdb.readSnap(aId);
     if (A && A.unavailable) return res.status(503).json(DB_DOWN);
     if (!A) return res.status(404).json({ ok: false, reason: '없는 스냅샷이거나 저장이 끝나지 않았습니다.' });
-    let B; let bHead;
+    // v3.42(A3-F2): 범위가 다른 것끼리는 비교하지 않는다 — 'X 전체 ↔ Y 만' 은 X 의 장비 전부를 '사라짐' 으로 지어냈다.
+    const scopeMismatch = (x) => x && A.head.cvpId && String(x) !== String(A.head.cvpId);
+    if (scopeMismatch(cvpId)) return res.status(400).json({ ok: false, reason: '이 스냅샷은 다른 CVP 를 찍은 것입니다 — 같은 범위끼리 비교하세요.' });
+    let B; let bHead; let bBroken = new Set();
     if (bRaw === 'now') {
       const cur = await currentBodies(cvpId || A.head.cvpId);
       if (!cur) return res.status(503).json(DB_DOWN);
@@ -334,12 +361,13 @@ export function registerCvpNet(api) {
       const Bs = await cdb.readSnap(bId);
       if (Bs && Bs.unavailable) return res.status(503).json(DB_DOWN);
       if (!Bs) return res.status(404).json({ ok: false, reason: '없는 스냅샷이거나 저장이 끝나지 않았습니다.' });
-      B = Bs.devices; bHead = Bs.head;
+      if ((Bs.head.cvpId ?? null) !== (A.head.cvpId ?? null)) return res.status(400).json({ ok: false, reason: '두 스냅샷의 범위(CVP)가 다릅니다 — 같은 범위끼리 비교하세요.' });
+      B = Bs.devices; bHead = Bs.head; bBroken = Bs.broken;
     }
     // 범위를 맞춘다: 한쪽이 한 CVP 만 찍었으면 다른 쪽도 그 CVP 만(나머지를 '사라짐 · 새로 생김' 으로 지어내지 않게). 요청 cvpId 가 있으면 그것.
     const only = cvpId || A.head.cvpId || bHead.cvpId || null;
     const keep = (m) => (only ? new Map([...m].filter(([k]) => k.split('\u0000')[1] === String(only))) : m);
-    const d = diffSnapshots(keep(A.devices), keep(B));
+    const d = diffSnapshots(keep(A.devices), keep(B), { broken: new Set([...(A.broken || []), ...bBroken]) });
     const hosts = hostsOf();
     const mk = (v) => (admin || v == null ? v : maskErrText(String(v), hosts));
     const devices = d.devices.map((x) => ({ ...x, changes: x.changes.map((c) => {

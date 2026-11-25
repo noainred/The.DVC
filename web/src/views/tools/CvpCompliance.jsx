@@ -50,7 +50,8 @@ export default function CvpComplianceView({ servers = [], onOpen }) {
           [`${r.soonDays}일 안 종료`, c.life?.soon ?? 0, '', TONE.amber],
           ['버그 · CVE 높음', c.bugs?.high ?? 0, `CVE 노출 장비 ${c.cveDevices ?? 0}대`, TONE.red],
           ['설정 불일치 · 오류', (c.config?.warn ?? 0) + (c.config?.bad ?? 0), 'CVP 준수 코드 기준', TONE.amber],
-          ['못 읽음', Math.max(c.bugs?.unread ?? 0, c.life?.unread ?? 0), `버그 ${c.bugs?.unread ?? 0} · 수명주기 ${c.life?.unread ?? 0} · 준수 ${c.config?.unread ?? 0}`, 'var(--text-dim)'],
+          // v3.42(D12 · A2-L1): 아래 칩 '못 읽음'(셋 중 하나라도) 과 같은 수 — 예전 타일은 max(버그, 수명주기) 라 준수 못 읽음이 빠졌다.
+          ['못 읽음', pick(rows, 'unread').length, `버그 ${c.bugs?.unread ?? 0} · 수명주기 ${c.life?.unread ?? 0} · 준수 ${c.config?.unread ?? 0}${c.bugs?.norecord ? ` · 버그 기록 없음 ${c.bugs.norecord}` : ''}`, 'var(--text-dim)'],
         ]} />
         <div className="card" style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
           {view === 'devices' ? (<>
@@ -65,7 +66,7 @@ export default function CvpComplianceView({ servers = [], onOpen }) {
                     <td style={MONO}>{x.version || '—'}</td>
                     <td data-sort={['passed', 'soon', 'ok', 'none', 'unread'].indexOf(x.life.state)}><Pill color={LIFE_DEFS[x.life.state][1]}>{LIFE_DEFS[x.life.state][0]}</Pill></td>
                     <td style={{ whiteSpace: 'normal', minWidth: 160, fontSize: 12.5 }}>{lifeText(x.life)}</td>
-                    <td data-sort={['high', 'low', 'none', 'unread'].indexOf(x.bugs.state)}><Pill color={BUG_DEFS[x.bugs.state][1]}>{BUG_DEFS[x.bugs.state][0]}</Pill></td>
+                    <td data-sort={['high', 'low', 'none', 'norecord', 'unread'].indexOf(x.bugs.state)}><Pill color={BUG_DEFS[x.bugs.state][1]}>{BUG_DEFS[x.bugs.state][0]}</Pill></td>
                     <td style={{ fontSize: 12.5 }}>{bugText(x.bugs)}</td>
                     <td data-sort={['bad', 'warn', 'unknown', 'ok', 'unread'].indexOf(x.config.state)}><Pill color={CONFIG_DEFS[x.config.state][1]}>{CONFIG_DEFS[x.config.state][0]}</Pill>{x.config.code && x.config.code !== '0000' ? <span style={{ ...NOTE, marginLeft: 6 }}>코드 {x.config.code}</span> : null}</td>
                   </tr>

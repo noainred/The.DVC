@@ -11,15 +11,17 @@ import { LAYER_DEFS, LINK_DEFS, FIELD_LABEL, fieldValue, linkCheckState, layoutN
  * 판정(링크 종류 · 층 · 불일치)은 서버 cvp/topology.js — 이 화면은 그리기만 한다.
  */
 const W = 1100; const BOX_W = 104; const BOX_H = 36;
+// v3.42(버그 점검 1회차 D9): 한 줄 대수는 상자 폭 + 틈으로 계산한다 — 10대면 간격 100px < 상자 104px 라 테두리가 겹쳤다.
+const PER_ROW = Math.max(1, Math.floor(W / (BOX_W + 8)) - 1);
 const CHECK_DEFS = { diff: { label: '다름', color: TONE.red }, na: { label: '비교 못 함', color: TONE.amber }, ok: { label: '같음', color: TONE.green }, none: { label: '비교 안 함', color: 'var(--text-dim)' } };
 
 function TopoMap({ nodes, links, sel, onSel, problemsOnly }) {
-  const lay = useMemo(() => layoutNodes(nodes, { width: W }), [nodes]);
+  const lay = useMemo(() => layoutNodes(nodes, { width: W, perRow: PER_ROW }), [nodes]);
   const ids = new Set(nodes.map((n) => n.id));
   const shown = links.filter((l) => ids.has(l.a) && ids.has(l.b));
   return (
     <div style={{ overflowX: 'auto', minWidth: 0 }}>
-      <svg width="100%" viewBox={`0 0 ${W} ${lay.height}`} role="img" aria-label="스위치 연결 지도" style={{ display: 'block', minWidth: 720, background: 'var(--panel-deep, #0f1626)', borderRadius: 10 }}>
+      <svg width="100%" viewBox={`0 0 ${W} ${lay.height}`} role="group" aria-label="스위치 연결 지도 — 장비 상자에서 Enter 로 선택" style={{ display: 'block', minWidth: 720, background: 'var(--panel-deep, #0f1626)', borderRadius: 10 }}>
         {lay.bands.map((b) => (
           <text key={b.layer} x="10" y={b.y - 8} fill="#8ea0bd" fontSize="12">{LAYER_DEFS[b.layer]?.label || b.layer}</text>
         ))}
@@ -38,9 +40,11 @@ function TopoMap({ nodes, links, sel, onSel, problemsOnly }) {
           const on = sel === n.id;
           const name = n.hostname.length > 15 ? `${n.hostname.slice(0, 14)}…` : n.hostname;
           return (
-            <g key={n.id} transform={`translate(${p.x - BOX_W / 2}, ${p.y - BOX_H / 2})`} style={{ cursor: 'pointer' }} onClick={() => onSel(on ? null : n.id)}>
-              <title>{`${n.hostname} — ${LAYER_DEFS[n.layer]?.label || n.layer} · 스위치 이웃 ${n.switchNeighbors}${n.esxi + n.otherNeighbors ? ` · 서버 등 ${n.esxi + n.otherNeighbors}` : ''}${n.lldpRead ? '' : ' · LLDP 못 읽음'}`}</title>
-              <rect width={BOX_W} height={BOX_H} rx="6" fill={on ? '#1e3a8a' : '#16213a'} stroke={on ? '#93c5fd' : n.lldpRead ? '#3b4b6b' : '#b45309'} strokeDasharray={n.lldpRead ? undefined : '4 3'} strokeWidth={on ? 2 : 1} />
+            <g key={n.id} transform={`translate(${p.x - BOX_W / 2}, ${p.y - BOX_H / 2})`} style={{ cursor: 'pointer' }} onClick={() => onSel(on ? null : n.id)}
+              role="button" tabIndex={0} aria-pressed={on} aria-label={`${n.hostname} — ${LAYER_DEFS[n.layer]?.label || n.layer}`}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSel(on ? null : n.id); } }}>
+              <title>{`${n.hostname} — ${LAYER_DEFS[n.layer]?.label || n.layer} · 스위치 이웃 ${n.switchNeighbors}${n.esxi + n.otherNeighbors ? ` · 서버 등 ${n.esxi + n.otherNeighbors}` : ''}${n.lldpRead ? '' : ' · LLDP 못 읽음'}${n.lldpFailing ? ' · LLDP 마지막 읽기 실패 — 이전 이웃으로 그렸습니다' : ''}${n.lldpAt ? ` · LLDP 읽은 시각 ${new Date(n.lldpAt).toLocaleString()}` : ''}`}</title>
+              <rect width={BOX_W} height={BOX_H} rx="6" fill={on ? '#1e3a8a' : '#16213a'} stroke={on ? '#93c5fd' : n.lldpRead && !n.lldpFailing ? '#3b4b6b' : '#b45309'} strokeDasharray={n.lldpRead && !n.lldpFailing ? undefined : '4 3'} strokeWidth={on ? 2 : 1} />
               <text x={BOX_W / 2} y="15" textAnchor="middle" fill="#e5edf9" fontSize="11" fontFamily="var(--mono)">{name}</text>
               <text x={BOX_W / 2} y="29" textAnchor="middle" fill="#8ea0bd" fontSize="9.5">{n.esxi || n.otherNeighbors ? `ESXi ${n.esxi} · 기타 ${n.otherNeighbors}` : n.lldpRead ? `이웃 ${n.switchNeighbors}` : 'LLDP 못 읽음'}</text>
             </g>
@@ -105,7 +109,9 @@ export default function CvpTopologyView({ servers = [], onOpen }) {
     return [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   }, [nodesAll]);
   // 지도는 법인 하나씩(전체를 한 장에 그리면 읽을 수 없다) — 기본은 스위치가 가장 많은 법인.
-  const corpSel = corp ?? (corps.length > 1 ? corps[0][0] : '__all');
+  // v3.42(D3): 고른 법인이 새 응답(다른 CVP)에 없으면 기본값으로 — 그대로 두면 장비 0대 지도에 갇혔다(법인 하나면 칩 줄이 숨어 되돌릴 수 없었다).
+  const corpOk = corp != null && (corp === '__all' || corps.some(([name]) => name === corp));
+  const corpSel = corpOk ? corp : (corps.length > 1 ? corps[0][0] : '__all');
   const nodes = corpSel === '__all' ? nodesAll : nodesAll.filter((n) => (n.corpName || '') === corpSel);
   const ids = new Set(nodes.map((n) => n.id));
   const links = (r && Array.isArray(r.links) ? r.links : []).filter((l) => ids.has(l.a) || ids.has(l.b));
@@ -160,7 +166,7 @@ export default function CvpTopologyView({ servers = [], onOpen }) {
           </>)}
           {view === 'links' && <LinkTable links={links} onlyCheck={false} />}
           {view === 'mismatch' && <LinkTable links={links} onlyCheck />}
-          <div style={NOTE}>전체 링크 {c.both + c.one + c.desc || 0}개(양쪽 {c.both ?? 0} · 한쪽 {c.one ?? 0} · 설명 {c.desc ?? 0}){r.lldpTruncated ? ' · ⚠ LLDP 행이 상한을 넘어 일부만 봤습니다' : ''}{r.truncated ? ' · ⚠ 포트 행이 상한을 넘어 일부만 봤습니다' : ''}</div>
+          <div style={NOTE}>전체 링크 {c.both + c.one + c.desc || 0}개(양쪽 {c.both ?? 0} · 한쪽 {c.one ?? 0} · 설명 {c.desc ?? 0}){r.lldpTruncated ? ' · ⚠ LLDP 행이 상한을 넘어 일부만 봤습니다' : ''}{r.truncated ? ' · ⚠ 포트 행이 상한을 넘어 일부만 봤습니다' : ''}{r.portsUnread ? ` · 포트 목록을 못 읽은 장비 ${r.portsUnread}대는 양끝 비교 · 설명 링크에서 빠졌습니다` : ''}</div>
         </div>
       </>)}
     </div>

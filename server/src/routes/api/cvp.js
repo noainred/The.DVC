@@ -172,6 +172,22 @@ function maskPeers(peers, admin) {
  *   cvp/overview.js rowBelongs·rowOwnerOf 하나다(Overview 카드·전체 소비 전력이 같은 함수를 쓴다 — 이 파일에 사본을 두지 말 것).
  */
 
+/**
+ * v3.42(버그 점검 1회차 A3-F1): 비관리자 MLAG 문자열(도메인 · 피어 링크 · 로컬 인터페이스) 가림 — 그 값이 실리는 응답 전부(장비 목록 · 상세 · 포트 구성도 · 이중화)가
+ *   이 함수 하나를 쓴다. 예전에는 /tools/cvp/redundancy 만 가려 형제 세 경로로 원문이 나갔다.
+ */
+export function maskMlag(ms, admin, hosts = []) {
+  if (admin || !ms || typeof ms !== 'object') return ms;
+  const mk = (v) => (v == null ? v : maskErrText(String(v), hosts));
+  return { ...ms, domain: mk(ms.domain), peerLink: mk(ms.peerLink), localIntf: mk(ms.localIntf) };
+}
+function publicInfo(info, admin) {
+  if (!info) return null;
+  if (admin) return info;
+  const { mac, ...rest } = info;   // 관리 식별자 등급
+  return rest.mlagStatus ? { ...rest, mlagStatus: maskMlag(rest.mlagStatus, false, listServers().map((x) => x.host)) } : rest;
+}
+
 function publicDevice(d, admin, confirm = null) {
   return {
     // v2.720(감사 B1-02): 화면의 필터 KPI(cvpText.totalsFromDevices)가 같은 판정을 쓰도록 서버 판정 결과를 싣는다(판정은 한 벌).
@@ -183,7 +199,7 @@ function publicDevice(d, admin, confirm = null) {
     ports: d.ports, collectedAt: d.collectedAt, telemetry: d.telemetry,
     // v2.641 ②③: CPU·메모리 최신값(못 읽으면 null) · 개요(비-admin 에는 MAC 을 뺀다 — 관리 식별자 등급)
     cpuPct: d.cpuPct ?? null, memPct: d.memPct ?? null, sysAt: d.sysAt ?? null,
-    info: d.info ? (admin ? d.info : (({ mac, ...rest }) => rest)(d.info)) : null,
+    info: publicInfo(d.info, admin),
   };
 }
 
@@ -469,13 +485,14 @@ api.get('/tools/cvp/portmap/summary', toolsPerm, fullScopeOnly, async (req, res)
   const { rows, unavailable } = await cdb.listDeviceRows();
   if (unavailable) return res.status(503).json({ ok: false, reason: '중앙 CVP DB 를 열지 못했습니다.' });
   const devs = rows.filter(own);
-  const pr = await cdb.portLatestRows({ limit: PORTMAP_SUMMARY_PORTS_MAX });
+  // v3.42(반증 C5): 포트 전량 한 번의 동기 조회 대신 장비별 PK 조회 + 시간 기준 양보(cdb.portRowsOf — 새 화면 라우트와 같은 함수 · 포트를 못 읽은 장비는 뺀다).
+  const pr = await cdb.portRowsOf(devs, { limit: PORTMAP_SUMMARY_PORTS_MAX });
   if (pr.unavailable) return res.status(503).json({ ok: false, reason: '중앙 CVP DB 를 열지 못했습니다.' });
   const byDev = new Map();
   for (const r of pr.rows) {
-    const k = `${r.agent}\u0000${r.cvp_id}\u0000${r.device_key}`;
+    const k = `${r.agent}\u0000${r.cvpId}\u0000${r.key}`;
     if (!byDev.has(k)) byDev.set(k, []);
-    byDev.get(k).push({ name: r.port, oper: r.oper || 'unknown', admin: r.admin || 'unknown', desc: r.descr == null ? null : r.descr, speedBps: r.speed_bps });
+    byDev.get(k).push({ name: r.port, oper: r.oper, admin: r.admin, desc: r.desc, speedBps: r.speedBps });
   }
   const corpOf = corpResolver(servers, dcList());
   const byId = new Map(servers.map((x) => [x.id, x]));
@@ -484,7 +501,7 @@ api.get('/tools/cvp/portmap/summary', toolsPerm, fullScopeOnly, async (req, res)
     const s = summaryRow({ model: d.model, ports, parts: d.partsList });
     const c = corpOf(d.cvpId);
     return { cvpId: d.cvpId, key: d.key, hostname: d.hostname || d.key, model: d.model || '', corpId: c.corpId, corpName: c.corpName,
-      cvpName: byId.get(d.cvpId)?.name || d.cvpId, portsRead: s.portsRead, counts: s.counts, spareHigh: s.spareHigh, source: s.source || null };
+      cvpName: byId.get(d.cvpId)?.name || d.cvpId, portsRead: s.portsRead, counts: s.counts, spareHigh: s.spareHigh, spareSpeedUnknown: s.spareSpeedUnknown || 0, source: s.source || null };
   });
   // 여유 부족 기준(예비 이 개수 이하) — 화면에 숫자를 박지 않고 이 값을 쓴다.
   res.json({ devices: list, lowSpareMax: 4, ...(pr.truncated ? { truncated: true, portsMax: PORTMAP_SUMMARY_PORTS_MAX } : {}), ...(admin ? {} : { addressHidden: true }) });

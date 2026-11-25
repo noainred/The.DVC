@@ -10,8 +10,9 @@ import { ReclaimView, ForecastView } from './CvpPortPlan.jsx';
 import {
   SUB_DEFS, SUB_ORDER, EV_DEFS, EV_ORDER, UTIL_DEFS, UTIL_ORDER, paintOf, flagOf, evLabel, layoutCells, mgmtPorts, headline, barSegs,
   speedRowText, speedName, verdictText, lastLinkText, xcvrText, utilText, descText, lldpText, speedText, FILTERS, filterPorts, filterCount,
-  fleetRows, fleetTotals, corpChips, utilBand, PORTMAP_NOTE,
+  fleetRows, fleetTotals, corpChips, utilBand, PORTMAP_NOTE, utilOf,
 } from './cvpPortMapText.js';
+import { devListText } from './cvpNetText.js';
 
 /**
  * CVP › 포트 구성도(v3.37 — 설계 docs/design/cvp-port-map). 두 보기:
@@ -152,7 +153,7 @@ function Detail({ p, data }) {
     ['속도 · 트랜시버', `${speedText(p)} · ${xcvrText(p)}`],
     ['VLAN · LAG', `${p.vlan || '—'} · ${p.lag || 'LAG 아님'}`],
     ['수신 / 송신', utilText(p)],
-    ['마지막 링크', lastLinkText(p, data.linkHistory?.since)],
+    ['마지막 링크', lastLinkText(p, data.linkHistory?.since, Date.now(), !!data.linkHistory?.unavailable)],
   ];
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -178,7 +179,7 @@ function Detail({ p, data }) {
   );
 }
 
-function OneSwitch({ devices, initial = null }) {
+function OneSwitch({ devices, initial = null, listState = 'ok' }) {
   const opts = useMemo(() => deviceOptions(devices), [devices]);
   const [sel, setSel] = useState(initial || '');
   const [q, setQ] = useState('');
@@ -220,7 +221,7 @@ function OneSwitch({ devices, initial = null }) {
         {r && <div style={NOTE}>{`포트 상태 ${r.collectedAt ? new Date(r.collectedAt).toLocaleString() : '—'} · 트랜시버 ${r.partsAt ? new Date(r.partsAt).toLocaleString() : '못 읽음'} · LLDP ${r.lldp?.read ? new Date(r.lldp.at).toLocaleString() : '못 읽음'}${r.lldp?.failing ? '(마지막 시도 실패 — 이전 값)' : ''}`}</div>}
       </div>
 
-      {!opts.length && <div className="banner">수집된 CVP 장비가 없습니다.</div>}
+      {!opts.length && (listState === 'loading' ? <Loading /> : <div className="banner">{devListText(listState)}</div>)}
       {err && <ErrorBox error={err} />}
       {cur && !r && !err && <Loading />}
       {r && !ports && <div className="banner">이 장비의 포트 목록을 아직 읽지 못했습니다(텔레메트리 스트리밍 · 수집 경로를 ‘읽은 경로’ 에서 확인하세요).</div>}
@@ -295,8 +296,8 @@ function OneSwitch({ devices, initial = null }) {
                     <td style={{ ...MONO, fontSize: 12, minWidth: 150, maxWidth: 240, whiteSpace: 'normal', overflowWrap: 'break-word' }} title={descText(p.desc)}>{p.desc ? p.desc : '—'}</td>
                     <td style={{ ...MONO, fontSize: 12, minWidth: 150, maxWidth: 240, whiteSpace: 'normal', overflowWrap: 'break-word' }}>{p.lldp ? lldpText(p) : '—'}</td>
                     <td style={{ whiteSpace: 'nowrap' }}>{xcvrText(p)}</td>
-                    <td data-sort={p.oper === 'up' ? Math.max(Number(p.inUtil) || 0, Number(p.outUtil) || 0) : ''} style={{ ...MONO, textAlign: 'right', whiteSpace: 'nowrap' }}>{utilText(p)}</td>
-                    <td data-sort={p.oper === 'up' ? Date.now() : p.lastLinkAt ?? ''} style={{ whiteSpace: 'nowrap' }}>{lastLinkText(p, r.linkHistory?.since)}</td>
+                    <td data-sort={p.oper === 'up' ? (utilOf(p) ?? '') : ''} style={{ ...MONO, textAlign: 'right', whiteSpace: 'nowrap' }}>{utilText(p)}</td>
+                    <td data-sort={p.oper === 'up' ? Date.now() : p.lastLinkAt ?? ''} style={{ whiteSpace: 'nowrap' }}>{lastLinkText(p, r.linkHistory?.since, Date.now(), !!r.linkHistory?.unavailable)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -323,8 +324,13 @@ function Fleet({ onOpen }) {
     fetchJson('/tools/cvp/portmap/summary').then((x) => { if (active) setR(x); }).catch((e) => { if (active) setErr(e); });
     return () => { active = false; };
   }, [reload]);
-  if (err) return <ErrorBox error={err} />;
-  if (!r) return <Loading />;
+  // v3.42(D14): 오류여도 새로고침 줄은 남긴다(예전에는 오류 상자가 조작 줄까지 대신해 다시 시도하려면 보기를 오가야 했다).
+  if (err || !r) return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 14, minWidth: 0 }}>
+      <div style={ROW}><button type="button" className="btn" onClick={() => setReload((x) => x + 1)}>새로고침</button></div>
+      {err ? <ErrorBox error={err} /> : <Loading />}
+    </div>
+  );
   const all = Array.isArray(r.devices) ? r.devices : [];
   const inCorp = corp == null ? all : all.filter((d) => (d.corpName || '') === corp);
   const lowMax = r.lowSpareMax ?? null;
@@ -375,21 +381,22 @@ function Fleet({ onOpen }) {
                 <td>{d.corpName || '법인 미지정'}</td>
                 <td data-sort={d.hostname}><button type="button" onClick={() => onOpen(d)} style={{ background: 'none', border: 0, padding: 0, color: 'var(--accent-2)', cursor: 'pointer', ...MONO, fontWeight: 600 }}>{d.hostname}</button></td>
                 <td style={{ whiteSpace: 'normal' }}>{d.model || '—'}{d.source === 'rule' ? <span style={{ ...NOTE, marginLeft: 6 }}>(번호 규칙)</span> : null}</td>
-                {d.counts ? (<>
-                  <td data-sort={d.counts.total} style={{ ...MONO, textAlign: 'right' }}>{d.counts.total}</td>
-                  <td data-sort={d.counts.use} style={{ ...MONO, textAlign: 'right' }}>{d.counts.use}</td>
-                  <td data-sort={d.counts.spare} style={{ ...MONO, textAlign: 'right', whiteSpace: 'nowrap' }}>
+                {/* v3.42(버그 점검 1회차 D1): 조건부 칸은 배열로 — Fragment 로 감싸면 STable 정렬이 칸을 세지 못해 숫자 열 8개가 정렬되지 않았다(web.md '표 칸은 배열로'). */}
+                {d.counts ? [
+                  <td key="t" data-sort={d.counts.total} style={{ ...MONO, textAlign: 'right' }}>{d.counts.total}</td>,
+                  <td key="u" data-sort={d.counts.use} style={{ ...MONO, textAlign: 'right' }}>{d.counts.use}</td>,
+                  <td key="s" data-sort={d.counts.spare} style={{ ...MONO, textAlign: 'right', whiteSpace: 'nowrap' }}>
                     <span style={d.low ? { padding: '1px 8px', borderRadius: 999, background: '#5a1616', border: '1px solid #f87171', color: '#ffe9e9', fontWeight: 600 } : { fontWeight: 600, color: '#93c5fd' }}>{d.counts.spare}</span>
-                  </td>
-                  <td data-sort={d.counts.check} style={{ ...MONO, textAlign: 'right' }}>{d.counts.check}</td>
-                  <td data-sort={d.counts.off} style={{ ...MONO, textAlign: 'right' }}>{d.counts.off}</td>
-                  <td data-sort={d.counts.unknown} style={{ ...MONO, textAlign: 'right' }}>{d.counts.unknown}</td>
-                  <td style={{ width: 130 }}><div style={{ display: 'flex', width: 120, height: 10, borderRadius: 5, overflow: 'hidden', background: 'var(--panel-deep, #0f1626)' }}>{barSegs(d.counts).map((s) => <div key={s.key} title={`${s.label} ${s.n}`} style={{ flex: `${s.n} 1 0`, background: s.color, borderRight: '2px solid var(--panel)' }} />)}</div></td>
-                  <td data-sort={d.spareHigh ?? ''} style={{ ...MONO, textAlign: 'right' }}>{d.spareHigh ?? '—'}</td>
-                </>) : (<>
-                  <td data-sort="" style={{ textAlign: 'right' }}>—</td><td data-sort="">—</td><td data-sort="">—</td><td data-sort="">—</td><td data-sort="">—</td><td data-sort="">—</td>
-                  <td style={{ color: 'var(--amber)', fontSize: 12, whiteSpace: 'normal', width: 130 }}>포트 목록 못 읽음(0 이 아님)</td><td data-sort="">—</td>
-                </>)}
+                  </td>,
+                  <td key="c" data-sort={d.counts.check} style={{ ...MONO, textAlign: 'right' }}>{d.counts.check}</td>,
+                  <td key="o" data-sort={d.counts.off} style={{ ...MONO, textAlign: 'right' }}>{d.counts.off}</td>,
+                  <td key="k" data-sort={d.counts.unknown} style={{ ...MONO, textAlign: 'right' }}>{d.counts.unknown}</td>,
+                  <td key="b" style={{ width: 130 }}><div style={{ display: 'flex', width: 120, height: 10, borderRadius: 5, overflow: 'hidden', background: 'var(--panel-deep, #0f1626)' }}>{barSegs(d.counts).map((s) => <div key={s.key} title={`${s.label} ${s.n}`} style={{ flex: `${s.n} 1 0`, background: s.color, borderRight: '2px solid var(--panel)' }} />)}</div></td>,
+                  <td key="h" data-sort={d.spareHigh ?? ''} style={{ ...MONO, textAlign: 'right', whiteSpace: 'nowrap' }}>{d.spareHigh ?? (d.spareSpeedUnknown ? `—(속도 모름 ${d.spareSpeedUnknown})` : '—')}</td>,
+                ] : [
+                  <td key="t" data-sort="" style={{ textAlign: 'right' }}>—</td>, <td key="u" data-sort="">—</td>, <td key="s" data-sort="">—</td>, <td key="c" data-sort="">—</td>, <td key="o" data-sort="">—</td>, <td key="k" data-sort="">—</td>,
+                  <td key="b" style={{ color: 'var(--amber)', fontSize: 12, whiteSpace: 'normal', width: 130 }}>포트 목록 못 읽음(0 이 아님)</td>, <td key="h" data-sort="">—</td>,
+                ]}
               </tr>
             ))}
           </tbody>
@@ -408,7 +415,7 @@ const VIEW_NOTE = Object.freeze({
   forecast: '사용 포트 수 · 업링크 사용률의 추세로 고갈 · 포화 시점을 추정합니다',
 });
 
-export default function CvpPortMapView({ devices = [] }) {
+export default function CvpPortMapView({ devices = [], listState = 'ok' }) {
   const [view, setView] = useState('one');
   const [jump, setJump] = useState(0);
   const [jumpTo, setJumpTo] = useState(null);
@@ -420,7 +427,7 @@ export default function CvpPortMapView({ devices = [] }) {
         <Seg label="보기" value={view} onChange={setView} items={[['one', '스위치 1대'], ['fleet', '전 스위치 여유'], ['reclaim', '회수 후보'], ['forecast', '고갈 · 포화 예측']]} />
         <span style={NOTE}>{VIEW_NOTE[view]}</span>
       </div>
-      {view === 'one' && <OneSwitch key={jump} devices={devices} initial={jumpTo} />}
+      {view === 'one' && <OneSwitch key={jump} devices={devices} initial={jumpTo} listState={listState} />}
       {view === 'fleet' && <Fleet onOpen={open} />}
       {view === 'reclaim' && <ReclaimView onOpen={open} />}
       {view === 'forecast' && <ForecastView onOpen={open} />}

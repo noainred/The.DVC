@@ -1,10 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import BoldText from '../../components/boldText.jsx';
 import { fetchJson } from '../../api.js';
-import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
-import { NOTE, MONO, ROW, GRID1, LINKBTN, Tiles, Spark, Pill } from './CvpNetParts.jsx';
-import { opticTrendText, OPTIC_TREND_NOTE, FORECAST_TONE, perMonthText, dbmText, dateText, rowKey, numText } from './cvpNetText.js';
+import { NOTE, MONO, ROW, GRID1, LINKBTN, Tiles, Spark, Pill, Pending } from './CvpNetParts.jsx';
+import { opticTrendText, OPTIC_TREND_NOTE, FORECAST_TONE, perMonthText, dbmText, dateText, rowKey, numText, horizonText } from './cvpNetText.js';
 
 /**
  * CVP › 광신호 › 추세 · 재고(v3.38 ⑮). `/tools/cvp/optics/trend` 마운트 1회 + 새로고침. 판정은 서버 cvp/opticstrend.js.
@@ -20,8 +19,7 @@ export default function CvpOpticsTrendView({ part = 'trend', onOpen }) {
     fetchJson('/tools/cvp/optics/trend').then((x) => { if (active) setR(x); }).catch((e) => { if (active) setErr(e); });
     return () => { active = false; };
   }, [reload]);
-  if (err) return <ErrorBox error={err} />;
-  if (!r) return <Loading />;
+  if (err || !r) return <Pending err={err} onRetry={() => setReload((x) => x + 1)} />;
   const t = r.trend || { rows: [], counts: {}, thresholds: {} };
   const th = t.thresholds || {};
   const risk = new Set(['alreadyFault', 'already', 'eta']);
@@ -73,9 +71,9 @@ export default function CvpOpticsTrendView({ part = 'trend', onOpen }) {
       <Tiles tiles={[
         ['장애 임계 이하', c.alreadyFault ?? 0, '', FORECAST_TONE.alreadyFault],
         ['주의 임계 이하', c.already ?? 0, '', FORECAST_TONE.already],
-        ['1년 안 주의 도달', c.eta ?? 0, '하강 추세', FORECAST_TONE.eta],
-        ['안정', (c.flat ?? 0) + (c.far ?? 0), '내려가지 않거나 1년 넘게', 'var(--text)'],
-        ['기록 부족', c.short ?? 0, '', 'var(--text-dim)'],
+        [`${horizonText(r.horizonDays)} 안 주의 도달`, c.eta ?? 0, '하강 추세', FORECAST_TONE.eta],
+        ['안정', (c.flat ?? 0) + (c.far ?? 0), `내려가지 않거나 ${horizonText(r.horizonDays)} 넘게`, 'var(--text)'],
+        ['기록 부족 · 끊김', (c.short ?? 0) + (c.stale ?? 0), `기록 부족 ${c.short ?? 0} · 최근 기록 끊김 ${c.stale ?? 0}`, 'var(--text-dim)'],
       ]} />
       <div className="card" style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
         <STable className="v3-table" minWidth={1000}>
@@ -89,7 +87,7 @@ export default function CvpOpticsTrendView({ part = 'trend', onOpen }) {
                 <td data-sort={x.current ?? ''} style={MONO}>{dbmText(x.current)}</td>
                 <td><Spark points={x.points} refLine={th.warnDbm} color={x.state === 'eta' || x.state.startsWith('already') ? '#fbbf24' : '#60a5fa'} title="일 최저 수신 광량" /></td>
                 <td data-sort={x.perMonth ?? ''} style={MONO}>{perMonthText(x.perMonth, ' dB')}{x.resetAt ? <span style={{ ...NOTE, marginLeft: 6 }}>({dateText(x.resetAt)}부터 다시)</span> : null}</td>
-                <td data-sort={x.warnEta ?? ''}><Pill color={FORECAST_TONE[x.state] || 'var(--text-dim)'}>{opticTrendText(x, { minDays: r.minDays })}</Pill></td>
+                <td data-sort={x.state === 'alreadyFault' ? 0 : x.state === 'already' ? 1 : (x.warnEta ?? '')}><Pill color={FORECAST_TONE[x.state] || 'var(--text-dim)'}>{opticTrendText(x, { minDays: r.minDays, horizonDays: r.horizonDays })}</Pill></td>
               </tr>
             ))}
           </tbody>

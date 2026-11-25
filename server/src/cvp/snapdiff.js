@@ -86,21 +86,30 @@ export function diffDevice(a, b) {
  * @param {Map<string,object>} after
  * @returns {{ devices:Array<{id, hostname, state:'changed'|'added'|'removed', changes, na}>, counts, unchanged:number, omitted:number }}
  */
-export function diffSnapshots(before, after) {
+export function diffSnapshots(before, after, { broken = new Set() } = {}) {
   const out = []; let unchanged = 0; let rowsN = 0;
   const counts = { devicesChanged: 0, added: 0, removed: 0, device: 0, port: 0, bgp: 0, xcvr: 0, lldp: 0, naDevices: 0 };
+  // v3.42(A2-F7): 스냅샷 본문이 깨진 장비는 '사라짐 · 새로 생김' 이 아니라 '비교 못 함'.
+  for (const id of broken) {
+    if (before.has(id) && after.has(id)) continue;
+    counts.naDevices++;
+    const x = before.get(id) || after.get(id) || {};
+    out.push({ id, hostname: x.h || '', state: 'na', changes: [], na: ['broken'] });
+  }
   for (const [id, a] of before) {
+    if (broken.has(id) && !after.has(id)) continue;
     const b = after.get(id);
     if (!b) { counts.removed++; out.push({ id, hostname: a.h || '', state: 'removed', changes: [], na: [] }); continue; }
     const d = diffDevice(a, b);
     if (d.na.length) counts.naDevices++;
-    if (!d.changes.length) { unchanged++; if (d.na.length) out.push({ id, hostname: b.h || a.h || '', state: 'na', changes: [], na: d.na }); continue; }
+    // v3.42(A2-F8): '그대로' 는 비교 못 한 묶음이 없는 장비만 센다(일부를 못 읽은 장비가 '그대로' 에 섞였다).
+    if (!d.changes.length) { if (d.na.length) out.push({ id, hostname: b.h || a.h || '', state: 'na', changes: [], na: d.na }); else unchanged++; continue; }
     counts.devicesChanged++;
     for (const c of d.changes) counts[c.kind]++;
     rowsN += d.changes.length;
     out.push({ id, hostname: b.h || a.h || '', state: 'changed', changes: d.changes, na: d.na });
   }
-  for (const [id, b] of after) if (!before.has(id)) { counts.added++; out.push({ id, hostname: b.h || '', state: 'added', changes: [], na: [] }); }
+  for (const [id, b] of after) if (!before.has(id) && !broken.has(id)) { counts.added++; out.push({ id, hostname: b.h || '', state: 'added', changes: [], na: [] }); }
   const order = { changed: 0, removed: 1, added: 2, na: 3 };
   out.sort((x, y) => (order[x.state] - order[y.state]) || String(x.hostname).localeCompare(String(y.hostname)));
   // 바뀐 항목 상한(장비 단위로 자른다 — 한 장비의 일부만 보이지 않게)

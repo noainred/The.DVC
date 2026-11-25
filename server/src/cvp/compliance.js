@@ -36,12 +36,14 @@ export function configState(info) {
   else if (code) state = 'warn';
   return { state, code: code || null, indication: ind || null };
 }
-/** 버그 · CVE 노출 — high · low · none(공지 없음 · 노출 없음) · unread. */
+/** 버그 · CVE 노출 — high · low · none(기록이 있고 노출 없음) · norecord(읽었는데 장비 기록 없음) · unread. */
 export function bugState(info) {
   const read = Array.isArray(info?.readKinds) && info.readKinds.includes('bugs');
   const b = info && typeof info.bugs === 'object' ? info.bugs : null;
   if (!read && !b) return { state: 'unread', bugCount: null, cveCount: null, highestBug: null, highestCve: null, acknowledged: false };
-  if (!b) return { state: 'none', bugCount: 0, cveCount: 0, highestBug: 'none', highestCve: 'none', acknowledged: false, noRecord: true };
+  // v3.42(버그 점검 1회차 A2-F6): 읽었는데 이 장비 기록이 없으면 '노출 없음'(초록 · 0) 이 아니라 '기록 없음'(회색 · 수 없음) — 빈 응답도 '읽음' 이 되고,
+  //   노출 없는 장비에도 행을 주는지는 확인하지 못했다(새 장비 · 버그 DB 미적재 CVP 일 수 있다).
+  if (!b) return { state: 'norecord', bugCount: null, cveCount: null, highestBug: null, highestCve: null, acknowledged: false, noRecord: true };
   const hi = [b.highestCve, b.highestBug].includes('high') ? 'high' : [b.highestCve, b.highestBug].includes('low') ? 'low'
     : ((numOrNull(b.bugCount) ?? 0) + (numOrNull(b.cveCount) ?? 0) > 0 ? 'low' : 'none');
   return { state: hi, bugCount: numOrNull(b.bugCount), cveCount: numOrNull(b.cveCount), highestBug: b.highestBug ?? null, highestCve: b.highestCve ?? null, acknowledged: b.acknowledged === true };
@@ -68,7 +70,7 @@ export function lifeState(info, now = Date.now()) {
  */
 export function complianceFleet(devices = [], { now = Date.now() } = {}) {
   const rows = [];
-  const counts = { devices: 0, config: { ok: 0, warn: 0, bad: 0, unknown: 0, unread: 0 }, bugs: { high: 0, low: 0, none: 0, unread: 0 },
+  const counts = { devices: 0, config: { ok: 0, warn: 0, bad: 0, unknown: 0, unread: 0 }, bugs: { high: 0, low: 0, none: 0, norecord: 0, unread: 0 },
     life: { passed: 0, soon: 0, ok: 0, none: 0, unread: 0 }, cveDevices: 0 };
   const byVer = new Map();
   for (const d of Array.isArray(devices) ? devices : []) {

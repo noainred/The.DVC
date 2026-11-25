@@ -28,7 +28,7 @@ export const SPARE_KEYS = Object.freeze(['spareX', 'spareE', 'spareC', 'spareU']
 export const EV_DEFS = Object.freeze({
   match: { label: '설명·LLDP 일치', short: '일치', paint: GREEN, color: '#4ade80' },
   lldp: { label: 'LLDP 만(설명 없음)', short: 'LLDP 만', paint: { background: '#0c3d47', border: '1px solid #22d3ee', color: '#e3fbff' }, color: '#22d3ee' },
-  desc: { label: '설명만(LLDP 이웃 없음)', short: '설명만', paint: { background: '#35205c', border: '1px solid #c084fc', color: '#f1e6ff' }, color: '#c4b5fd' },
+  desc: { label: '설명만(LLDP 이웃 기록 없음)', short: '설명만', paint: { background: '#35205c', border: '1px solid #c084fc', color: '#f1e6ff' }, color: '#c4b5fd' },
   mismatch: { label: '설명·LLDP 불일치', short: '불일치', paint: { background: '#5a1616', border: '1px solid #f87171', color: '#ffe9e9' }, color: '#fca5a5' },
   none: { label: '근거 없음(미확인 장비)', short: '근거 없음', paint: AMBER, color: '#fbbf24' },
   nolink: { label: '링크 없음', short: '—', paint: DASH, color: 'var(--text-dim)' },
@@ -147,8 +147,8 @@ export function verdictText(p) {
     if (p.ev === 'match') return '포트 설명과 LLDP 이웃이 같은 장비를 가리킵니다.';
     if (p.ev === 'mismatch') return `설명이 가리키는 장비와 LLDP 이웃(${p.device || '—'})이 다릅니다 — 지금 붙은 상대는 LLDP 쪽이고, 설명이 낡았을 수 있습니다.`;
     if (p.ev === 'lldp') return '설명이 비어 있어 LLDP 이웃을 연결 장비로 표시합니다. 설명을 채워 두면 링크가 끊겨도 어디에 쓰던 포트인지 남습니다.';
-    if (p.ev === 'desc') return p.lldpUnread ? '이 장비의 LLDP 이웃을 읽지 못해 설명에 적힌 이름을 표시합니다. 실제 연결은 확인하지 못했습니다.' : 'LLDP 이웃이 없어(상대가 LLDP 를 보내지 않음) 설명에 적힌 이름을 표시합니다. 실제 연결은 확인하지 못했습니다.';
-    return p.lldpUnread ? '설명이 없고 LLDP 이웃도 읽지 못했습니다 — 무엇이 꽂혀 있는지 이 정보로는 알 수 없습니다.' : '링크는 올라와 있는데 설명도 LLDP 이웃도 없습니다 — 무엇이 꽂혀 있는지 이 정보로는 알 수 없습니다.';
+    if (p.ev === 'desc') return p.lldpUnread ? '이 장비의 LLDP 이웃을 읽지 못해 설명에 적힌 이름을 표시합니다. 실제 연결은 확인하지 못했습니다.' : '마지막 LLDP 읽기에 이 포트의 이웃 기록이 없어 설명에 적힌 이름을 표시합니다(상대가 LLDP 를 보내지 않거나, 읽은 뒤에 링크가 올라왔을 수 있습니다). 실제 연결은 확인하지 못했습니다.';
+    return p.lldpUnread ? '설명이 없고 LLDP 이웃도 읽지 못했습니다 — 무엇이 꽂혀 있는지 이 정보로는 알 수 없습니다.' : '링크는 올라와 있는데 설명이 없고 마지막 LLDP 읽기에 이웃 기록도 없습니다 — 무엇이 꽂혀 있는지 이 정보로는 알 수 없습니다.';
   }
   const T = {
     check: '설명은 있는데 링크가 없습니다 — 연결이 끊겼거나, 연결 예정으로 잡아 둔 포트입니다.',
@@ -163,10 +163,11 @@ export function verdictText(p) {
 }
 
 /** 마지막 링크 기록 문구. at: 그날 시작 ms · since: 기록 시작 날 ms. */
-export function lastLinkText(p, since, now = Date.now()) {
+export function lastLinkText(p, since, now = Date.now(), unavailable = false) {
   if (!p) return '—';
   if (p.oper === 'up') return '지금 연결됨';
-  if (p.lastLinkAt == null) return since == null ? '기록 없음' : `기록 시작(${dayText(since)}) 뒤 없음`;
+  // v3.42(A2-L4): 링크 기록 조회가 실패했으면 '기록 없음' 이 아니라 '못 읽음'
+  if (p.lastLinkAt == null) return unavailable ? '못 읽음' : since == null ? '기록 없음' : `기록 시작(${dayText(since)}) 뒤 없음`;
   const days = Math.max(0, Math.floor((now - p.lastLinkAt) / 86_400_000));
   return days === 0 ? '오늘' : `${days}일 전(${dayText(p.lastLinkAt)})`;
 }
@@ -196,7 +197,7 @@ export const lldpText = (p) => {
   if (!p) return '—';
   if (p.lldp) return [p.lldp.sysName, p.lldp.portId].filter(Boolean).join(' · ') || '—';
   if (p.lldpUnread) return '(못 읽음)';
-  return p.oper === 'up' ? '이웃 없음' : '—(링크 없음)';
+  return p.oper === 'up' ? '이웃 기록 없음' : '—(링크 없음)';
 };
 export const speedText = (p) => speedLabel(p && p.speedBps) || '속도 모름';
 

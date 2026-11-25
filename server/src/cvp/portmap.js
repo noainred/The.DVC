@@ -9,6 +9,8 @@
  * ⚠ 정직: LLDP 경로는 v2.924 의 추정 경로다(실장비 미확인). 7504N 라인카드 안의 번호 배치는 그림에서 읽히지 않아 번호 규칙(16개씩)으로 그린다(cardRule).
  */
 
+import { numOrNull } from '../util/numOrNull.js';
+
 /* ── ① 모델별 전면 배치표 ─────────────────────────────────────────────────────────────────────────────────────── */
 
 const range = (a, b) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
@@ -188,10 +190,19 @@ export function classifyPort(p, { xcvr, copper = false } = {}) {
 
 /* ── ③ 연결 근거 ──────────────────────────────────────────────────────────────────────────────────────────────── */
 
-const IFNAME = /^(et|eth|ethernet|gi|te|fa|hu|po|port-channel|vmnic|ens|eno|enp|eth|bond|nic|p\d)\d*/i;
+// v3.42(버그 점검 1회차 A1-10): 끝까지 앵커 — 접두 뒤가 숫자(· / . :)뿐일 때만 인터페이스. 예전 '^(접두)\d*' 는 TESTDB01 · HUB01 · POD1LEAF01 같은
+//   호스트 이름을 인터페이스로 보고 뒤 낱말(vlan100 등)을 장비로 골랐다. 'port-channel10' 은 하이픈 때문에 장비 이름으로 새던 것도 막는다.
+const IFNAME = /^(?:(?:et|eth|ethernet|gi|te|fa|hu|po|port-channel|vmnic|ens|eno|bond|nic|vlan)[\d/.:]+|enp\d+s\d+(?:f\d+)?|p\d+p\d+)$/i;
 /** 설명을 낱말로(소문자) — 길이를 먼저 자르고 문자 하나짜리 구분자로 나눈다(선형). */
 export function descTokens(desc) {
-  return String(desc ?? '').slice(0, 200).toLowerCase().split(/[\s,;|()[\]<>"'=:]+/).filter((t) => t.length >= 3 && t.length <= 64).slice(0, 24);
+  // v3.42(A1-10): '/' 로도 나누고(spine1/Et1), '_' 가 든 낱말은 조각도 더한다(svr-01_eth0 → svr-01).
+  const out = [];
+  for (const t of String(desc ?? '').slice(0, 200).toLowerCase().split(/[\s,;|()[\]<>"'=:/]+/)) {
+    if (t.length < 3 || t.length > 64) continue;
+    out.push(t);
+    if (t.includes('_')) for (const u of t.split('_')) if (u.length >= 3) out.push(u);
+  }
+  return out.slice(0, 24);
 }
 /** 설명에서 장비 이름처럼 보이는 첫 낱말 — 하이픈 · 점 · 숫자를 품고, 인터페이스 이름(Et47 · vmnic0)은 아닌 것. 없으면 ''. */
 export function deviceNameFromDesc(desc) {
@@ -200,12 +211,17 @@ export function deviceNameFromDesc(desc) {
     if (t.length < 3 || t.length > 64) continue;
     if (!/^[a-z][a-z0-9_.-]*$/i.test(t)) continue;
     if (!/[-_.\d]/.test(t)) continue;
-    if (IFNAME.test(t) && /\d/.test(t) && !/-/.test(t)) continue;
-    return t;
+    if (IFNAME.test(t)) continue;
+    return stripIfSuffix(t);
   }
   return '';
 }
 const shortOf = (s) => String(s ?? '').toLowerCase().split('.')[0];
+/** v3.42(A1-10): 'esx01-vmnic0' · 'svr-01_eth1' 처럼 장비 이름 뒤에 인터페이스를 붙인 낱말 → 'esx01' · 'svr-01'(뒤 조각이 인터페이스 이름일 때만). */
+function stripIfSuffix(t) {
+  const m = /^(.{3,64}?)[-_]([a-z]+[\d/.:]+)$/i.exec(t);
+  return m && IFNAME.test(m[2]) ? m[1] : t;
+}
 
 export const EV_KEYS = Object.freeze(['match', 'mismatch', 'lldp', 'desc', 'none', 'nolink']);
 /**
@@ -217,16 +233,16 @@ export const EV_KEYS = Object.freeze(['match', 'mismatch', 'lldp', 'desc', 'none
  */
 export function evidenceOf(p, neighbors = [], lldpRead = false) {
   const descDev = deviceNameFromDesc(p && p.desc);
-  const nb = (Array.isArray(neighbors) ? neighbors : []).find((n) => n && String(n.sysName || '').trim()) || null;
-  const lldpDev = nb ? String(nb.sysName).trim().slice(0, 128) : '';
+  const names = (Array.isArray(neighbors) ? neighbors : []).filter((n) => n && String(n.sysName || '').trim()).slice(0, 16).map((n) => String(n.sysName).trim().slice(0, 128));
+  const lldpDev = names[0] || '';
   if (!p || p.oper !== 'up') return { ev: 'nolink', device: lldpDev || descDev, lldpUnread: !lldpRead };
   const hasDesc = !!String(p.desc ?? '').trim();
   if (lldpDev) {
     if (!hasDesc) return { ev: 'lldp', device: lldpDev, lldpUnread: false };
     const toks = descTokens(p.desc);
-    const lc = lldpDev.toLowerCase(); const sh = shortOf(lldpDev);
-    const hit = sh.length >= 3 && toks.some((t) => t === lc || t === sh || shortOf(t) === sh);
-    return { ev: hit ? 'match' : 'mismatch', device: lldpDev, lldpUnread: false };
+    // v3.42(A1-09): 이웃이 여럿이면(허브 · 가상 스위치 뒤) 하나라도 설명과 맞으면 일치 — 그 이웃을 보여 준다.
+    const hitName = names.find((nm) => { const lc = nm.toLowerCase(); const sh = shortOf(nm); return sh.length >= 3 && toks.some((t) => { const u = stripIfSuffix(t); return t === lc || t === sh || shortOf(t) === sh || u === lc || shortOf(u) === sh; }); });
+    return { ev: hitName ? 'match' : 'mismatch', device: hitName || lldpDev, lldpUnread: false };
   }
   if (hasDesc) return { ev: 'desc', device: descDev, lldpUnread: !lldpRead };
   return { ev: 'none', device: '', lldpUnread: !lldpRead };
@@ -309,6 +325,9 @@ export function buildPortMap({ model = '', ports = null, parts = null, lldp = []
 export function summaryRow({ model = '', ports = null, parts = null } = {}) {
   if (!Array.isArray(ports)) return { portsRead: false, counts: null, spareHigh: null };
   const m = buildPortMap({ model, ports, parts });
-  const spareHigh = m.ports.filter((r) => !r.mgmt && isSpare(r.sub) && Number(r.speedBps) >= 40e9).length;
-  return { portsRead: true, counts: m.counts, spareHigh, source: m.faceplate.source };
+  // v3.42(A2-F4): 속도를 못 읽은 예비가 있으면 '40G 이상 예비' 를 단정하지 않는다(0 이 아니라 null — 화면 '—') · 그 수를 따로.
+  const spares = m.ports.filter((r) => !r.mgmt && isSpare(r.sub));
+  const speedUnknown = spares.filter((r) => numOrNull(r.speedBps) == null || Number(r.speedBps) <= 0).length;
+  const spareHigh = speedUnknown ? null : spares.filter((r) => Number(r.speedBps) >= 40e9).length;
+  return { portsRead: true, counts: m.counts, spareHigh, spareSpeedUnknown: speedUnknown, source: m.faceplate.source };
 }

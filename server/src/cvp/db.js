@@ -450,7 +450,8 @@ export async function saveDevices({ agent = LOCAL_AGENT, cvpId, devices = [], sa
             }
           }
           // 이번 목록에 없는 포트(장비에서 사라진 것)는 지운다 — 목록을 읽었을 때만, 그리고 이 레코드가 최신일 때만(DB2612-01).
-          if (!olderRecord) st.delPortsOld.run(agent, cvpId, key, ts);
+          //   v3.42(반증 A2-P1): 목록이 일부(portsPartial — 포인터 추종 · 상한에 잘림)면 지우지 않는다 — 빠진 포트는 장비에서 사라진 것이 아니다.
+          if (!olderRecord && d.portsPartial !== true) st.delPortsOld.run(agent, cvpId, key, ts);
         }
       }
       conn.exec('COMMIT');
@@ -469,9 +470,11 @@ function recordDevPorts(st, agent, cvpId, key, ts, ports, prevOper) {
   for (const p of ports) {
     const name = txt(p?.name, 64);
     if (!name) continue;
-    total++;
+    // v3.42(반증 N5): 관리 포트는 포트 수(고갈 예측)에 넣지 않는다 — 포트 구성도 개수(portmap countSubs)와 같은 기준.
+    const mgmt = /^management/i.test(name);
+    if (!mgmt) total++;
     const oper = txt(p.oper, 16);
-    if (oper === 'up') used++;
+    if (oper === 'up') { if (!mgmt) used++; markLinkDay(st, agent, cvpId, key, name, day); }   // v3.42(A1-14): 카운터 표본이 없는 포트도 링크가 올라와 있으면 그날 쓴 것이다
     if (prevOper && prevOper.get(name) === 'up' && FLAP_DOWN.has(oper) && txt(p.admin, 16) !== 'down') st.upFlap.run(agent, cvpId, key, name, day);
   }
   if (total > 0) st.upDevPort.run(agent, cvpId, key, day, total, used, used);
@@ -508,10 +511,23 @@ function insertSample(st, [agent, cvpId, key, port, ts, inBps, outBps, inUtil, o
     iu ?? 0, iu == null ? 0 : 1, iu, ou ?? 0, ou == null ? 0 : 1, ou, ie, oe, ie == null ? 0 : 1, oe == null ? 0 : 1,
     id, od, id == null ? 0 : 1, od == null ? 0 : 1);
   // v3.38: 마지막 링크 날 · 기록 시작 날(표본은 링크가 올라온 포트만 들어온다 — sampleWorthy).
-  const day = dayIndex(ts);
+  markLinkDay(st, agent, cvpId, key, port, dayIndex(ts));
+  return true;
+}
+/*
+ * v3.42(버그 점검 1회차 A4-F6): 표본마다 같은 날 같은 값을 다시 쓰던 upsert(적재 비용 +30% 실측)를 그날 처음 한 번으로 줄인다.
+ *   기억은 (장비, 포트, 날) — 날이 바뀌면 비운다. 저장된 값보다 작은 날은 SQL 이 무시하므로 기억이 틀려도 값이 틀리지 않는다(쓰기만 한 번 더).
+ */
+let _linkDayMemo = { day: null, set: new Set() };
+const LINK_DAY_MEMO_MAX = 400_000;
+function markLinkDay(st, agent, cvpId, key, port, day) {
+  if (_linkDayMemo.day !== day) _linkDayMemo = { day, set: new Set() };
+  const mk = `${agent}\u0000${cvpId}\u0000${key}\u0000${port}`;
+  if (_linkDayMemo.set.has(mk)) return;
+  if (_linkDayMemo.set.size >= LINK_DAY_MEMO_MAX) _linkDayMemo.set.clear();
+  _linkDayMemo.set.add(mk);
   st.upLastLink.run(agent, cvpId, key, port, day);
   st.upFirstDay.run(agent, cvpId, key, day);
-  return true;
 }
 
 /**
@@ -654,9 +670,16 @@ const ADOPT_PK = {
   cvp_event: ['cvp_id', 'ev_key', 'ts'],
   cvp_fault_state: ['cvp_id', 'device_key', 'fault_key'],
   cvp_fault_event: [], // PK 가 id 라 충돌이 없다 — agent 만 바꾼다
+  // v3.42(버그 점검 1회차 A4-F8): v3.38 네트워크 기능 표도 옮긴다 — 빠지면 엣지 이름이 대소문자만 바뀌었을 때 마지막 링크 날 · 기록 시작 날이
+  //   옛 이름 행에 남아 회수 · 예측 기록이 끊겼다(백필은 한 번만 돈다). 날별 표는 같은 날이 겹치면 저장 키 행을 남긴다(변형 행은 버림).
+  port_lastlink: ['cvp_id', 'device_key', 'port'],
+  dev_linkhist: ['cvp_id', 'device_key'],
+  port_flap_daily: ['cvp_id', 'device_key', 'port', 'day'],
+  dev_port_daily: ['cvp_id', 'device_key', 'day'],
+  xcvr_daily: ['cvp_id', 'device_key', 'intf', 'day'],
 };
 /** 최신 행 비교 열 — 변형 쪽이 더 새면 저장 키 행을 비우고 변형 행을 옮긴다. */
-const NEWER_COL = { device_latest: 'ts', port_latest: 'ts', cvp_fault_state: 'last_seen' };
+const NEWER_COL = { device_latest: 'ts', port_latest: 'ts', cvp_fault_state: 'last_seen', port_lastlink: 'day' };
 const IN_CHUNK = 'rowid IN (SELECT value FROM json_each(?))';
 function dailyMergeSql() {
   const mx = (c) => `${c}=NULLIF(MAX(IFNULL(port_daily.${c},-1e308), IFNULL(v.${c},-1e308)), -1e308)`;
@@ -1333,6 +1356,7 @@ export async function prune({ rawRetentionDays = 7, dailyRetentionDays = 730, no
     const d2 = await chunkedDelete(db.conn.prepare('DELETE FROM device_sample WHERE rowid IN (SELECT rowid FROM device_sample WHERE ts < ? LIMIT ?)'), [rawCut], { chunk: PRUNE_CHUNK });
     const e2 = await chunkedDelete(db.conn.prepare('DELETE FROM cvp_event WHERE rowid IN (SELECT rowid FROM cvp_event WHERE seen_at < ? LIMIT ?)'), [now - EVENT_RETENTION_DAYS * DAY_MS], { chunk: PRUNE_CHUNK });
     // v3.38: 네트워크 기능 일 기록은 일 롤업과 같은 보존일(마지막 링크 날 · 기록 시작 날은 최신 표라 지우지 않는다 — 장비가 사라지면 pruneDevices 가).
+    // v3.42(반증 판정): xcvr_daily 보존을 따로 줄이는 것(A4-F3)은 결함이 아니라 보존 정책이라 사용자 결정으로 남겼다 — 일 롤업과 같은 보존일 그대로.
     for (const t of ['port_flap_daily', 'dev_port_daily', 'xcvr_daily']) {
       await chunkedDelete(db.conn.prepare(`DELETE FROM ${t} WHERE rowid IN (SELECT rowid FROM ${t} WHERE day < ? LIMIT ?)`), [dayCut], { chunk: PRUNE_CHUNK });
     }
@@ -1371,6 +1395,7 @@ export function _resetForTest() {
   try { if (_db && _db !== 'unavailable') _db.conn.close(); } catch { /* */ }
   _db = null; _opening = null; _counts = null; _pruneTick = 0; pruneFlight.reset(); lockRetry.ok();
   _adopted.clear(); _adopting.clear(); _lostUnsent = { total: 0, last: 0, at: null };
+  _linkDayMemo = { day: null, set: new Set() };
 }
 
 /**
@@ -1815,13 +1840,21 @@ export async function lastLinkBackfilled() {
  * 전 장비의 포트별 마지막 링크 날(최신 표 — 포트 수만큼) + 장비별 기록 시작 날.
  * @returns {Promise<{ last: Map<string, number>, first: Map<string, number>, backfilled: boolean, unavailable?: true }>}  키 = agent␀cvp␀key(␀port) · 값 = 그날 시작 epoch ms
  */
+const LASTLINK_ALL_MAX = 500_000; const LINKHIST_ALL_MAX = 20_000;
 export async function lastLinkAll() {
   const db = await open();
   if (!db) return { last: new Map(), first: new Map(), backfilled: false, unavailable: true };
-  const last = new Map();
-  for (const r of db.conn.prepare('SELECT agent, cvp_id, device_key, port, day FROM port_lastlink LIMIT 500000').all()) last.set(`${devKeyOf(r.agent, r.cvp_id, r.device_key)}\u0000${r.port}`, dayStartMs(Number(r.day)));
-  const first = new Map(db.conn.prepare('SELECT agent, cvp_id, device_key, first_day FROM dev_linkhist LIMIT 20000').all().map((r) => [devKeyOf(r.agent, r.cvp_id, r.device_key), dayStartMs(Number(r.first_day))]));
-  return { last, first, backfilled: kvGet(db.conn, LASTLINK_BACKFILL_KEY) === 'done' };
+  // v3.42(반증 A4-F9 · C5): 행마다 읽고 시간 기준 양보 · 상한을 넘으면 잘림 표지(조용히 자르면 잘린 포트가 '기록 시작 뒤 사용 없음' 거짓 후보가 된다).
+  const last = new Map(); const y = createYielder(15); let n = 0; let truncated = false;
+  for (const r of db.conn.prepare('SELECT agent, cvp_id, device_key, port, day FROM port_lastlink LIMIT ?').iterate(LASTLINK_ALL_MAX + 1)) {
+    if (++n > LASTLINK_ALL_MAX) { truncated = true; break; }
+    last.set(`${devKeyOf(r.agent, r.cvp_id, r.device_key)}\u0000${r.port}`, dayStartMs(Number(r.day)));
+    await y();
+  }
+  const fr = db.conn.prepare('SELECT agent, cvp_id, device_key, first_day FROM dev_linkhist LIMIT ?').all(LINKHIST_ALL_MAX + 1);
+  if (fr.length > LINKHIST_ALL_MAX) truncated = true;
+  const first = new Map(fr.slice(0, LINKHIST_ALL_MAX).map((r) => [devKeyOf(r.agent, r.cvp_id, r.device_key), dayStartMs(Number(r.first_day))]));
+  return { last, first, backfilled: kvGet(db.conn, LASTLINK_BACKFILL_KEY) === 'done', ...(truncated ? { truncated: true } : {}) };
 }
 
 /** 날 하나씩 묻고 양보하는 공용 루프 — fn(row) 를 행마다 부른다. */
@@ -1926,7 +1959,9 @@ export const LLDP_ALL_MAX = 200_000;
 export async function lldpAll() {
   const db = await open();
   if (!db) return { rows: [], meta: new Map(), unavailable: true };
-  const rows = db.conn.prepare('SELECT agent, cvp_id, device_key, port, sys_name, sys_lc, sys_short, port_id, port_desc FROM l2_lldp LIMIT ?').all(LLDP_ALL_MAX + 1);
+  // v3.42(반증 C5): 한 번의 동기 .all() 대신 행마다 읽고 시간 기준 양보(요청 경로 — 장비 수 × 이웃 수만큼 커진다).
+  const rows = []; const y = createYielder(15);
+  for (const r of db.conn.prepare('SELECT agent, cvp_id, device_key, port, sys_name, sys_lc, sys_short, port_id, port_desc FROM l2_lldp LIMIT ?').iterate(LLDP_ALL_MAX + 1)) { rows.push(r); await y(); }
   const meta = new Map(db.conn.prepare('SELECT agent, cvp_id, device_key, lldp_at, lldp_fail_at FROM l2_meta LIMIT 20000').all()
     .map((m) => [devKeyOf(m.agent, m.cvp_id, m.device_key), { at: m.lldp_at == null ? null : Number(m.lldp_at), failing: m.lldp_fail_at != null && (m.lldp_at == null || Number(m.lldp_fail_at) > Number(m.lldp_at)) }]));
   return {
@@ -1989,7 +2024,10 @@ export async function createSnap({ by = '', label = '', cvpId = null, bodies = [
       } catch (e) { try { db.conn.exec('ROLLBACK'); } catch { /* */ } throw e; }
       await new Promise((r) => setImmediate(r));
     }
-    db.conn.prepare('UPDATE cvp_snap SET n_dev=?, bytes=?, done=1 WHERE id=?').run(n, bytes, id);
+    // v3.42(A3-F4 · A4-F7): 저장 중에 지워졌으면(머리 행 없음) 성공으로 돌려주지 않는다 — 감사 로그 '저장' 과 실제가 어긋났다.
+    //   deleteSnap 은 먼저 done=2(지우는 중)로 표시한다 — 장비 행을 조각으로 지우는 동안 여기 UPDATE 가 끼어들어 성공으로 끝나던 틈을 막는다.
+    const ch = Number(db.conn.prepare('UPDATE cvp_snap SET n_dev=?, bytes=?, done=1 WHERE id=? AND done=0').run(n, bytes, id).changes);
+    if (ch !== 1) { const e = new Error('저장 중에 스냅샷이 지워졌습니다'); e.code = 'SNAP_GONE'; throw e; }
   } catch (e) {
     // 반쪽 스냅샷은 남기지 않는다(비교가 '사라진 장비' 를 지어내지 않게).
     await deleteSnap(id).catch(() => {});
@@ -2011,17 +2049,23 @@ export async function readSnap(id) {
   if (!db) return { unavailable: true };
   const head = db.conn.prepare('SELECT id, at, by_user, label, cvp_id, n_dev, done FROM cvp_snap WHERE id=?').get(Number(id));
   if (!head || head.done !== 1) return null;
-  const out = new Map();
+  const out = new Map(); const broken = new Set();
   const y = createYielder(15);
   for (const r of db.conn.prepare('SELECT agent, cvp_id, device_key, body FROM cvp_snap_dev WHERE snap_id=?').iterate(Number(id))) {
-    try { out.set(devKeyOf(r.agent, r.cvp_id, r.device_key), JSON.parse(zlib.gunzipSync(Buffer.from(r.body)).toString('utf8'))); } catch { /* 깨진 행은 '비교 못 함' 으로 남는다 */ }
+    // v3.42(A2-F7): 깨진 행은 건너뛰지 않고 '비교 못 함' 목록에 넣는다(예전에는 반대쪽에 '새로 생김' 으로 지어졌다).
+    try { out.set(devKeyOf(r.agent, r.cvp_id, r.device_key), JSON.parse(zlib.gunzipSync(Buffer.from(r.body)).toString('utf8'))); } catch { broken.add(devKeyOf(r.agent, r.cvp_id, r.device_key)); }
     await y();
   }
-  return { head: { id: Number(head.id), at: Number(head.at), by: head.by_user || '', label: head.label || '', cvpId: head.cvp_id ?? null, devices: Number(head.n_dev) }, devices: out };
+  // v3.42(A4-F7): 읽는 동안 지워졌으면 일부만 읽은 것이다 — 비교에 쓰지 않는다.
+  const still = db.conn.prepare('SELECT done FROM cvp_snap WHERE id=?').get(Number(id));
+  if (!still || still.done !== 1) return null;
+  return { broken, head: { id: Number(head.id), at: Number(head.at), by: head.by_user || '', label: head.label || '', cvpId: head.cvp_id ?? null, devices: Number(head.n_dev) }, devices: out };
 }
 export async function deleteSnap(id) {
   const db = await open();
   if (!db) return { deleted: 0, unavailable: true };
+  // v3.42(반증 C16): 머리 행을 먼저 '지우는 중'(done=2)으로 — 조각 삭제 사이에 저장(createSnap)이 끝나거나 비교(readSnap)가 읽어도 성공 · 일부로 쓰지 않게.
+  db.conn.prepare('UPDATE cvp_snap SET done=2 WHERE id=?').run(Number(id));
   await chunkedDelete(db.conn.prepare('DELETE FROM cvp_snap_dev WHERE rowid IN (SELECT rowid FROM cvp_snap_dev WHERE snap_id = ? LIMIT ?)'), [Number(id)], { chunk: PRUNE_CHUNK });
   return { deleted: Number(db.conn.prepare('DELETE FROM cvp_snap WHERE id=?').run(Number(id)).changes) };
 }
@@ -2038,4 +2082,30 @@ export async function pruneSnaps({ now = Date.now() } = {}) {
     if (stale) { await deleteSnap(r.id); deleted++; }
   }
   return { deleted };
+}
+
+/**
+ * v3.42(버그 점검 1회차 A3-F3 · A4-F1 · A2-F2): 새 화면 라우트의 포트 행 — 장비마다 PK 범위로 읽고 시간 기준 양보.
+ *   예전에는 port_latest 전량(23열 + 장비 표 JOIN, 상한 20만 행)을 한 번의 동기 .all() 로 읽어 500대 규모에서 요청마다 250~360ms 이벤트 루프가 멈췄다.
+ *   **포트 목록을 못 읽은 장비(portsRead=false)의 옛 행은 싣지 않는다** — 형제 경로(listDeviceRows · /portmap/summary)와 같은 판정. 몇 대인지 따로 센다.
+ * @param {Array<{agent,cvpId,key,hostname,portsRead}>} devices
+ * @returns {Promise<{ rows:Array, unread:number, truncated?:true, unavailable?:true }>}
+ */
+export async function portRowsOf(devices = [], { limit = 200_000 } = {}) {
+  const db = await open();
+  if (!db) return { rows: [], unread: 0, unavailable: true };
+  const q = db.conn.prepare('SELECT port, descr, speed_bps, oper, admin, lag, vlan, mtu, duplex FROM port_latest WHERE agent=? AND cvp_id=? AND device_key=?');
+  const y = createYielder(15);
+  const rows = []; let unread = 0; let truncated = false;
+  for (const d of Array.isArray(devices) ? devices : []) {
+    if (d.portsRead === false) { unread++; continue; }
+    for (const r of q.all(String(d.agent ?? ''), String(d.cvpId), String(d.key))) {
+      if (rows.length >= limit) { truncated = true; break; }
+      rows.push({ agent: d.agent, cvpId: d.cvpId, key: d.key, hostname: d.hostname || d.key, port: r.port, oper: r.oper || 'unknown', admin: r.admin || 'unknown',
+        speedBps: r.speed_bps ?? null, desc: r.descr == null ? null : r.descr, lag: r.lag ?? null, vlan: r.vlan ?? null, mtu: r.mtu ?? null, duplex: r.duplex ?? null });
+    }
+    if (truncated) break;
+    await y();
+  }
+  return { rows, unread, ...(truncated ? { truncated: true } : {}) };
 }

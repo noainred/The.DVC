@@ -19,22 +19,27 @@ const devKey = (a, c, k) => `${a}\u0000${c}\u0000${k}`;
  */
 export function opticTrends({ series = new Map(), names = new Map(), warnDbm = -10, faultDbm = -14, now = Date.now(), minDays = TREND_MIN_DAYS } = {}) {
   const rows = [];
-  const counts = { short: 0, flat: 0, eta: 0, far: 0, already: 0, alreadyFault: 0 };
+  const counts = { short: 0, flat: 0, eta: 0, far: 0, already: 0, alreadyFault: 0, stale: 0 };
+  // v3.42(버그 점검 1회차 A1-07 · A2-F3): 창은 '최근 TREND_DAYS 일'(날짜) — 예전 slice(-30) 은 링크가 있던 날만 행이 있어 '최근 30개 점' 이 최대 90일에 걸쳤고,
+  //   61일 전에 끊긴 포트가 '오늘 주의 도달' 로 맨 위에 왔다. 마지막 기록이 오래됐으면 stale(forecast).
+  const from = now - TREND_DAYS * 86_400_000;
   for (const [k, pts0] of series) {
     const [agent, cvpId, key, intf] = k.split('\u0000');
     const all = pts0.map((x) => [x[0], x[1]]);
-    const { points, resetAt } = sinceLastRecovery(all.slice(-TREND_DAYS), RECOVER_DB);
+    const { points, resetAt } = sinceLastRecovery(all.filter((x) => x[0] >= from), RECOVER_DB);
     const fw = forecast(points, { target: warnDbm, dir: 'down', minDays, now });
     const ff = forecast(points, { target: faultDbm, dir: 'down', minDays, now });
-    const state = ff.state === 'already' ? 'alreadyFault' : fw.state;
+    const state = ff.state === 'already' ? 'alreadyFault' : (fw.state === 'stale' || (!points.length && all.length)) ? 'stale' : fw.state;
     counts[state] = (counts[state] || 0) + 1;
     const n = names.get(devKey(agent, cvpId, key)) || {};
-    rows.push({ agent, cvpId, key, hostname: n.hostname || key, corpName: n.corpName || '', intf, state, days: fw.days, current: fw.current,
-      perMonth: fw.slopePerDay == null ? null : fw.slopePerDay * 30, warnEta: fw.eta, faultEta: ff.eta, resetAt, points: all.slice(-90) });
+    rows.push({ agent, cvpId, key, hostname: n.hostname || key, corpName: n.corpName || '', intf, state, days: fw.days, current: state === 'stale' ? null : fw.current,
+      lastAt: all.length ? all[all.length - 1][0] : null, perMonth: fw.slopePerDay == null ? null : fw.slopePerDay * 30, warnEta: fw.eta, faultEta: ff.eta, resetAt, _all: all });
   }
-  const order = { alreadyFault: 0, already: 1, eta: 2, far: 3, flat: 4, short: 5 };
+  const order = { alreadyFault: 0, already: 1, eta: 2, far: 3, flat: 4, short: 5, stale: 6 };
   rows.sort((a, b) => (order[a.state] - order[b.state]) || ((a.warnEta ?? Infinity) - (b.warnEta ?? Infinity)) || ((a.current ?? 99) - (b.current ?? 99)));
-  return { rows: rows.slice(0, TREND_ROWS_MAX), counts, omitted: Math.max(0, rows.length - TREND_ROWS_MAX), thresholds: { warnDbm, faultDbm } };
+  // v3.42(A4-F2): 점 배열은 내보내는 행에만 만든다(1.5만 계열 전부에 90점을 만들어 한 덩어리 268ms · 응답 4.4MB 였다).
+  const shown = rows.slice(0, TREND_ROWS_MAX).map(({ _all, ...r }) => ({ ...r, points: _all.filter((x) => x[0] >= from) }));
+  return { rows: shown, counts, omitted: Math.max(0, rows.length - TREND_ROWS_MAX), thresholds: { warnDbm, faultDbm } };
 }
 
 /** 재고 — devices: [{ partsList, ports? }] · 포트 oper 로 '링크 있음' 을 가른다(optic.linked 가 있으면 그 값). */
