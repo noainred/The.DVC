@@ -236,12 +236,12 @@ test('DEV-02 ③ Isilon: 부가 명령이 시한까지 매달려도 isi status �
 /** 깨끗한 환경(축척 env 없음)의 자식 프로세스에서 실제 모듈의 예산 상수를 읽는다. */
 function readBudgets(extraEnv = {}) {
   const env = { ...process.env, ...extraEnv };
-  for (const k of ['SANSW_CLI_TIMEOUT_MS', 'SSH_EXEC_TIMEOUT_MS']) if (!(k in extraEnv)) delete env[k];
+  for (const k of ['SANSW_CLI_TIMEOUT_MS', 'SSH_EXEC_TIMEOUT_MS', 'STORAGE_ISI_CMD_TIMEOUT_MS', 'STORAGE_DEVICE_TIMEOUT_MS', 'STORAGE_CLI_SESSION_BUDGET_MS', 'STORAGE_INTERVALS_LOCAL']) if (!(k in extraEnv)) delete env[k];
   const code = `const f = await import(${JSON.stringify(new URL('sanswitch/collectors/fosSsh.js', SRC).href)});
 const i = await import(${JSON.stringify(new URL('storage/collectors/isilonSsh.js', SRC).href)});
 const s = await import(${JSON.stringify(new URL('proxy/sshExec.js', SRC).href)});
 console.log(JSON.stringify({ san: { cmd: f.CMD_TIMEOUT_MS, dev: f.DEVICE_TIMEOUT_MS, budget: f.SESSION_BUDGET_MS, slice: f.MIN_SLICE_MS },
-  isi: { exec: s.execTimeoutMs(), dev: i.ISI_DEVICE_TIMEOUT_MS, budget: i.ISI_SESSION_BUDGET_MS, slice: i.ISI_MIN_SLICE_MS } }));`;
+  isi: { exec: s.execTimeoutMs(), cmd: i.isiCmdTimeoutMs(), base: i.ISI_DEVICE_TIMEOUT_MS, dev: i.isiDeviceTimeoutMs(), budget: i.isiSessionBudgetMs(), slice: i.ISI_MIN_SLICE_MS } }));`;
   return JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', code], { env, encoding: 'utf8' }).trim().split('\n').pop());
 }
 
@@ -256,11 +256,12 @@ test('DEV-02 ④ 기본값 산수 — 세션 예산 < 장비 시한, 필수 경�
   assert.equal(probe, 40_000, '명령 조사 시한이 바뀌었다 — 이 산수를 다시 볼 것');
   assert.ok(probe + d.san.cmd <= d.san.budget, `조사 ${probe} + switchshow ${d.san.cmd} 가 예산 ${d.san.budget} 을 넘는다`);
   assert.equal(d.san.slice, 5_000);
-  // Isilon: 장비 시한 180초 · exec 60초 · 예산 150초(cliSsh 와 같은 env·같은 기본값)
-  assert.equal(d.isi.dev, 180_000); assert.equal(d.isi.exec, 60_000);
-  assert.equal(d.isi.budget, 150_000);
+  // Isilon(v3.39.0 — 명령 대기 시간 설정): 명령 대기 180초(설정 기본값) · 장비 시한 300초(= 명령 대기 + 2분) · 예산 280초(= 장비 시한 − 여유 20초).
+  //   v2.741 의 60/150/180초는 명령 대기가 SSH exec 기본 시한(60초)이던 때의 값이다 — 이제 세 값은 설정값 하나에서 계산된다(storage/isiTimeouts.js).
+  assert.equal(d.isi.cmd, 180_000); assert.equal(d.isi.base, 180_000); assert.equal(d.isi.dev, 300_000);
+  assert.equal(d.isi.budget, 280_000);
   assert.ok(d.isi.budget + 10_000 <= d.isi.dev, `Isilon 예산 ${d.isi.budget} 은 장비 시한 ${d.isi.dev} 보다 작아야 한다`);
-  assert.ok(d.isi.exec <= d.isi.budget, '필수 isi status 시한이 예산 안이어야 한다');
+  assert.ok(d.isi.cmd <= d.isi.budget, '필수 isi status 시한이 예산 안이어야 한다');
   assert.equal(d.isi.slice, 5_000);
 });
 
