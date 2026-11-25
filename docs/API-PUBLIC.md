@@ -133,7 +133,8 @@ ISO 문자열이 섞여 나오지 않습니다.
 3. **`meta.scopedToVcenters`** 가 숫자면 그 키의 vCenter 범위로 걸러진 결과이고,
    `null` 이면 범위 제한이 없는 키입니다.
 4. **첫 수집이 끝나지 않았으면 빈 배열이 아니라 `503 not-collected`** 입니다.
-   '데이터가 없다' 와 '아직 못 모았다' 는 조치가 다르므로 구분합니다. 진행 상황은 `GET /inventory/collection` 만 답합니다(pending 수).
+   '데이터가 없다' 와 '아직 못 모았다' 는 조치가 다르므로 구분합니다. 이 503 은 **vCenter 인벤토리가 원천인 경로**(범위 적용 경로)에만 걸리고,
+   스토리지 · SAN · 부품 장애 · 전력은 vCenter 수집과 무관해 그대로 답합니다. 진행 상황은 `GET /inventory/collection` 이 답합니다(`firstCollectionDone`).
    (v3.42.0 정정: v2.675 부터 포탈이 첫 수집 전에 '골격' 상태를 먼저 띄우면서 이 503 이 사실상 사라져 첫 수집 동안 0 · 빈 배열이 나갔습니다 — 다시 503 입니다.)
    첫 수집이 끝난 뒤에도 **새로 등록했거나 엣지 보고를 기다리는 vCenter** 는 `meta.pendingVcenters` · `pendingVcenterIds`(v3.42.0 목록 경로)로 밝힙니다 — 그 vCenter 의 행이 없는 것은 0 개가 아닙니다.
 5. **분당 상한을 넘기면 `429`** 이고 `Retry-After` 헤더(초)가 옵니다. 그 시간 뒤에 재시도하세요.
@@ -264,7 +265,9 @@ ISO 문자열이 섞여 나오지 않습니다.
 
 ### 7-3. `GET /inventory/collection` — 수집 상태
 
-> 첫 수집 중(포탈 재기동 직후)에도 503 이 아니라 답하는 **유일한 경로**입니다 — `pending` 이 0 이 되면 다른 경로가 열립니다(v3.42.0).
+> 첫 수집 중(포탈 재기동 직후)에도 503 이 아니라 답하는 vCenter 경로입니다(v3.42.0). **`firstCollectionDone: true` 가 되면 다른 vCenter 범위 경로가 열립니다** —
+> `pending` 이 0 이 되기를 기다리지 마세요. 첫 수집이 끝난 뒤에도 새로 등록했거나 엣지 보고를 기다리는 vCenter 는 pending 으로 남습니다
+> (그 vCenter 는 각 목록 경로의 `meta.pendingVcenters` 가 밝힙니다). 필드 목록에 `firstCollectionDone`(불리언)이 더해졌습니다.
 
 분류 `inventory` · **범위 적용**(v2.599 — 범위를 지정한 키는 그 vCenter 들만 셉니다. 범위 미지정 키는 전체) · 단건 객체
 
@@ -515,7 +518,7 @@ ISO 문자열이 섞여 나오지 않습니다.
 
 ### 7-12. `GET /objects/vms` — VM 목록(v3.42.0, 쪽 나눔)
 
-분류 `objects` · 범위 적용 · 배열 · `?vcenterId=` · **`?offset=` `?limit=`**(정수 · limit 1~5000 · 기본 5000)
+분류 `objects` · 범위 적용 · 배열 · `?vcenterId=` · **`?offset=` `?limit=`**(정수 · limit 1~5000 · **기본 1000**)
 
 필드: `id` `vcenterId` `name` `instanceUuid` `powerState` `template` `guestOS` `cpuCount` `memMB` `storageGB` `host` `cluster` `ipAddresses` `toolsStatus` `cpuUsagePct` `memUsagePct` `snapshotCount`
 
@@ -545,7 +548,7 @@ ISO 문자열이 섞여 나오지 않습니다.
 
 분류 `objects` · 범위 적용 · 배열 · `?vcenterId=`
 
-필드: `id` `vcenterId` `name` `type` `vlanId` `hostCount` `vmCount` — `vlanId` 는 수(수가 아니면 글자 · 없으면 null).
+필드: `id` `vcenterId` `name` `type` `vlanId` `hostCount` `vmCount` — `vlanId` 는 수(없으면 null).
 
 > ⚠ **운영 수집(vCenter SOAP)은 지금 VLAN · 연결 호스트/VM 수를 읽지 않아 `vlanId` · `hostCount` · `vmCount` 가 null 입니다**(포트그룹마다 참조 배열을 받아야 해 매 주기 응답이 커지므로 측정 전에는 넣지 않았습니다). 값이 들어찬 예시는 목 데이터에만 해당합니다.
 
@@ -609,13 +612,13 @@ ISO 문자열이 섞여 나오지 않습니다.
 
 | 필드 | 뜻 |
 |---|---|
-| `inventoryUnknown` | 그 vCenter 의 VM 목록을 아직 못 받았다(첫 수집 중 · 엣지 보고 대기). **true 면 아래 수 · 정책 · RPO · 결과가 전부 null** 입니다(0 대가 아닙니다) |
+| `inventoryUnknown` | 그 vCenter 의 VM 목록이 없다(첫 수집 중 · 엣지 보고 대기 — VM 이 0대인 vCenter 도 여기에 듭니다: Backup › Summary 와 같은 판정). **true 면 아래 수 · 정책 · RPO · 결과가 전부 null** 입니다 |
 | `policy` | 사람이 정한 백업 방식별 VM 수 `{veeam, bareos, ssh, none, check}`(`check` = 확인 필요). **방식 표시를 하나도 못 읽었으면 null**(0 이 아닙니다) |
 | `backedUp` | `veeam + bareos + ssh`(`policy` 가 null 이면 null) |
 | `unprotected` `unverified` | 백업하기로 했는데 성공한 백업이 한 번도 없다고 확인된 VM · '백업 안 함' 이 아닌데 결과를 모르는 VM |
 | `rpo` | `{d1, d3, d7}` 각각 `{ok, miss, unknown}` — 그 기간 안에 성공한 백업이 있는가(백업 안 함 VM 은 세지 않음) |
 | `results24h` `success7d` | 최근 24시간에 끝난 마지막 결과 `{ok, warn, fail}` — **Veeam · Bareos 결과를 각각 셉니다**(한 VM 이 둘 다 있으면 두 번) · 최근 7일 `{veeam:{ok,bad}, bareos:{ok,bad}}` |
-| `veeamState` `veeamTruncated` | Veeam 쪽을 아는 정도 — `ok` · `partial`(일부 서버만) · `unlinked`(연동 없음 — Veeam '없음' 확정) · 그 밖은 모르는 까닭(`no-inventory` · `registry-unreadable` …). **`ok` · `unlinked` 가 아니면 Veeam 몫(results24h · success7d.veeam · running)은 일부이거나 모릅니다.** `veeamTruncated` = Veeam 결과 목록이 상한에서 잘렸다 |
+| `veeamState` `veeamTruncated` | Veeam 쪽을 아는 정도 — `ok`(실패 · 대기 · 낡음 · 잘림 없이 다 읽음) · `partial`(일부만) · `unlinked`(연동 없음 — Veeam '없음' 확정) · 모르는 까닭 `veeam-failed` · `veeam-pending` · `no-inventory` · `registry-unreadable` · `unknown`. **`ok` · `unlinked` 가 아니면 Veeam 몫(results24h · success7d.veeam · running)은 일부이거나 모릅니다.** `veeamTruncated` = Veeam 결과 목록이 상한에서 잘렸다 |
 | `lastSuccessAt` `nextRunAt` | 마지막 성공 · 다음 예정(epoch ms · 모르면 null) |
 | `veeamServers` `veeamFailed` `veeamStale` `bareosUnknown` | 연동 Veeam 서버 수 · 조회 실패 · 오래된 결과(Veeam 등록부를 못 읽었으면 셋 다 null — `meta.registryUnreadable`) · Bareos 결과를 모르는 법인 |
 
@@ -706,7 +709,7 @@ VM 이름 · 잡 이름은 싣지 않습니다. `meta.marksUnreadable`(백업 �
   "reason": "X-Api-Key 헤더가 없습니다. 설정 › 연동 키에서 발급한 값을 넣으세요." }
 ```
 
-> ⚠ 같은 인자를 여러 번 주거나(`?vcenterId=a&vcenterId=b`) 객체 모양(`?limit[a]=1`)으로 주면 400 `bad-query` 입니다(v3.42.0) — 마지막 값 · 기본값으로 바꾸지 않습니다.
+> ⚠ 같은 인자를 여러 번 주거나(`?vcenterId=a&vcenterId=b`) 객체 모양(`?limit[a]=1`)으로 주면 400 `bad-query` 입니다(v3.42.0) — 마지막 값 · 기본값으로 바꾸지 않습니다. 인자가 1,000개를 넘어 뒤쪽 인자가 해석되지 않은 경우도 400 입니다. 그 경로가 받지 않는 인자는 보지 않습니다.
 > ⚠ **`no-groups` 는 401 이 아니라 403 입니다.** 키 자체는 유효하고 인가가 비어 있는
 > 상태입니다 — 401 로 처리하면 멀쩡한 키를 재발급하게 됩니다.
 > ⚠ **404 는 경로 목록을 알려주지 않습니다**(열거 단서가 되므로). 목록은 카탈로그(`GET /api/v1/`)

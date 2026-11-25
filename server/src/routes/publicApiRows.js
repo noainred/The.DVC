@@ -42,22 +42,29 @@ const boolOrNull = (v) => (typeof v === 'boolean' ? v : null);
 /**
  * 원문 쿼리 모양 검사(반증 A C-2 — 재현): 운영은 index.js 의 queryNormalizer 가 /api/v1 **앞에서** 같은 이름 여러 번 → 마지막 값, 객체 모양(`?limit[a]=1`) →
  *   버림으로 바꿔, req.query 만 보면 '조용히 기본값 · 전체' 가 됐다(필터가 빠진 200). 내부 /vms(routes/api/inventory.js rawQueryOf)처럼 **원문**으로 판정한다.
+ *   재확인(A C-2 잔여 — 재현): 원문을 8,192자까지만 보면 그 뒤의 인자가, qs 의 인자 1,000개 상한 뒤의 인자는 파싱에서 버려져 검사를 비켜 갔다 —
+ *   원문 전체를 보고(요청 줄 길이는 Node 의 헤더 상한이 묶는다), **원문에는 있는데 파싱 결과(parsed)에는 없는** 인자도 400 이다.
  * @param {string} rawUrl  req.originalUrl
  * @param {string[]} names 이 경로가 읽는 인자 이름
+ * @param {object} [parsed] req.query(정규화 뒤) — 주면 '원문에 있는데 파싱에서 빠짐' 도 본다
  * @returns {string|null} 형식이 틀린 인자 이름(없으면 null)
  */
-export function rawQueryShapeIssue(rawUrl, names) {
+export function rawQueryShapeIssue(rawUrl, names, parsed = null) {
+  if (!names.length) return null;
   const u = typeof rawUrl === 'string' ? rawUrl : '';
   const i = u.indexOf('?');
   if (i < 0) return null;
   let sp;
-  try { sp = new URLSearchParams(u.slice(i + 1, i + 1 + 8192)); } catch { return names[0] || 'query'; }
+  try { sp = new URLSearchParams(u.slice(i + 1)); } catch { return names[0]; }
   const seen = new Map();
   for (const k of sp.keys()) {
     for (const n of names) {
       if (k === n) { seen.set(n, (seen.get(n) || 0) + 1); if (seen.get(n) > 1) return n; }
       else if (k.startsWith(`${n}[`)) return n;
     }
+  }
+  if (parsed && typeof parsed === 'object') {
+    for (const n of seen.keys()) if (parsed[n] == null) return n;   // 원문에는 있는데 파싱이 버렸다(인자 수 상한 등) — 조용히 '없음' 으로 읽지 않는다
   }
   return null;
 }
@@ -67,6 +74,8 @@ export function rawQueryShapeIssue(rawUrl, names) {
  *   값이 배열 · 객체(맨 express 는 `?limit=1&limit=2` 를 배열로 준다)면 형식 오류다. 운영은 index.js 의 queryNormalizer 가 먼저 글자로 바꾼다.
  * @returns {{ok:true, offset:number, limit:number} | {ok:false, field:string}}
  */
+export const PAGE_DEFAULT = 1000;   // 재확인 A C-3: 기본 쪽을 1,000행으로(5,000행 · 2MB 직렬화가 호출마다 남았다) — 상한은 listMax(5,000)
+
 export function pageQueryOf(q, listMax) {
   const read = (name, def, min, max) => {
     const v = q?.[name];
@@ -77,7 +86,7 @@ export function pageQueryOf(q, listMax) {
   };
   const off = read('offset', 0, 0, 999_999_999);
   if (!off.ok) return { ok: false, field: 'offset' };
-  const lim = read('limit', listMax, 1, listMax);
+  const lim = read('limit', Math.min(PAGE_DEFAULT, listMax), 1, listMax);
   if (!lim.ok) return { ok: false, field: 'limit' };
   return { ok: true, offset: off.n, limit: lim.n };
 }
@@ -171,7 +180,8 @@ export function vmRows(snap, inScope, vcId = null) {
  *   열쇠의 첫 조각이 세대라 새 스냅샷이 오면 옛 칸은 지워진다(util/snapCache.js 세대 축출). 범위 서명이 열쇠에 있어 범위가 다른 키끼리 섞이지 않는다.
  */
 export async function vmRowsMemo(snap, user, inPick, vcId = null) {
-  const key = `${snap?.generatedAt ?? ''}|${scopeKey(user, snap)}|${vcId || '*'}`;
+  // 고른 vCenter 조각은 접두로 갈라 단사로 만든다 — 예전 `vcId || '*'` 는 id 가 글자 그대로 '*' 인 vCenter 와 '고르지 않음' 이 같은 칸이었다(재확인 A — 재현).
+  const key = `${snap?.generatedAt ?? ''}|${scopeKey(user, snap)}|${vcId == null ? 'A' : `V${vcId}`}`;
   return snapMemo('publicapi-vms', key, 60_000, async () => vmRows(snap, inPick));
 }
 
@@ -244,7 +254,7 @@ export function snapshotContext(user, snap, vcId = null) {
  *   열쇠 = 세대 | 범위 서명 | 고른 vCenter.
  */
 export async function snapshotRowsMemo(snap, user, vcId = null) {
-  const key = `${snap?.generatedAt ?? ''}|${scopeKey(user, snap)}|${vcId || '*'}`;
+  const key = `${snap?.generatedAt ?? ''}|${scopeKey(user, snap)}|${vcId == null ? 'A' : `V${vcId}`}`;
   return snapMemo('publicapi-snapshots', key, 20_000, async () => snapshotRows(snap, snapshotContext(user, snap, vcId)));
 }
 

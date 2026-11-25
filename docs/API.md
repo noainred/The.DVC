@@ -777,27 +777,27 @@ Prometheus/OTel 익스포터(선택 토큰).
 
 | 메서드 | 경로 | 게이트(공통 제외) | 소스 |
 |---|---|---|---|
-| GET | `/` | — | [server/src/routes/publicApi.js:215](../server/src/routes/publicApi.js#L215) |
-| GET | `/backup/summary` | `guarded` | [server/src/routes/publicApi.js:777](../server/src/routes/publicApi.js#L777) |
-| GET | `/capacity/datastores` | `guarded` | [server/src/routes/publicApi.js:377](../server/src/routes/publicApi.js#L377) |
-| GET | `/capacity/storage` | `guarded` | [server/src/routes/publicApi.js:393](../server/src/routes/publicApi.js#L393) |
-| GET | `/capacity/storage-growth` | `guarded` | [server/src/routes/publicApi.js:515](../server/src/routes/publicApi.js#L515) |
-| GET | `/compliance/licenses` | `guarded` | [server/src/routes/publicApi.js:751](../server/src/routes/publicApi.js#L751) |
-| GET | `/compliance/snapshots` | `guarded` | [server/src/routes/publicApi.js:763](../server/src/routes/publicApi.js#L763) |
-| GET | `/faults/alarms` | `guarded` | [server/src/routes/publicApi.js:562](../server/src/routes/publicApi.js#L562) |
-| GET | `/faults/parts` | `guarded` | [server/src/routes/publicApi.js:589](../server/src/routes/publicApi.js#L589) |
-| GET | `/inventory/collection` | `guarded` | [server/src/routes/publicApi.js:344](../server/src/routes/publicApi.js#L344) |
-| GET | `/inventory/summary` | `guarded` | [server/src/routes/publicApi.js:257](../server/src/routes/publicApi.js#L257) |
-| GET | `/inventory/vcenters` | `guarded` | [server/src/routes/publicApi.js:318](../server/src/routes/publicApi.js#L318) |
-| GET | `/objects/clusters` | `guarded` | [server/src/routes/publicApi.js:738](../server/src/routes/publicApi.js#L738) |
-| GET | `/objects/hosts` | `guarded` | [server/src/routes/publicApi.js:704](../server/src/routes/publicApi.js#L704) |
-| GET | `/objects/networks` | `guarded` | [server/src/routes/publicApi.js:728](../server/src/routes/publicApi.js#L728) |
-| GET | `/objects/vms` | `guarded` | [server/src/routes/publicApi.js:716](../server/src/routes/publicApi.js#L716) |
-| GET | `/openapi.json` | — | [server/src/routes/publicApi.js:237](../server/src/routes/publicApi.js#L237) |
-| GET | `/resources/gpu` | `guarded` | [server/src/routes/publicApi.js:795](../server/src/routes/publicApi.js#L795) |
-| GET | `/resources/power` | `guarded` | [server/src/routes/publicApi.js:789](../server/src/routes/publicApi.js#L789) |
-| GET | `/san-storage/arrays` | `guarded` | [server/src/routes/publicApi.js:630](../server/src/routes/publicApi.js#L630) |
-| GET | `/san-storage/check` | `guarded` | [server/src/routes/publicApi.js:646](../server/src/routes/publicApi.js#L646) |
+| GET | `/` | — | [server/src/routes/publicApi.js:218](../server/src/routes/publicApi.js#L218) |
+| GET | `/backup/summary` | `guarded` | [server/src/routes/publicApi.js:783](../server/src/routes/publicApi.js#L783) |
+| GET | `/capacity/datastores` | `guarded` | [server/src/routes/publicApi.js:383](../server/src/routes/publicApi.js#L383) |
+| GET | `/capacity/storage` | `guarded` | [server/src/routes/publicApi.js:399](../server/src/routes/publicApi.js#L399) |
+| GET | `/capacity/storage-growth` | `guarded` | [server/src/routes/publicApi.js:521](../server/src/routes/publicApi.js#L521) |
+| GET | `/compliance/licenses` | `guarded` | [server/src/routes/publicApi.js:757](../server/src/routes/publicApi.js#L757) |
+| GET | `/compliance/snapshots` | `guarded` | [server/src/routes/publicApi.js:769](../server/src/routes/publicApi.js#L769) |
+| GET | `/faults/alarms` | `guarded` | [server/src/routes/publicApi.js:568](../server/src/routes/publicApi.js#L568) |
+| GET | `/faults/parts` | `guarded` | [server/src/routes/publicApi.js:595](../server/src/routes/publicApi.js#L595) |
+| GET | `/inventory/collection` | `guarded` | [server/src/routes/publicApi.js:347](../server/src/routes/publicApi.js#L347) |
+| GET | `/inventory/summary` | `guarded` | [server/src/routes/publicApi.js:260](../server/src/routes/publicApi.js#L260) |
+| GET | `/inventory/vcenters` | `guarded` | [server/src/routes/publicApi.js:321](../server/src/routes/publicApi.js#L321) |
+| GET | `/objects/clusters` | `guarded` | [server/src/routes/publicApi.js:744](../server/src/routes/publicApi.js#L744) |
+| GET | `/objects/hosts` | `guarded` | [server/src/routes/publicApi.js:710](../server/src/routes/publicApi.js#L710) |
+| GET | `/objects/networks` | `guarded` | [server/src/routes/publicApi.js:734](../server/src/routes/publicApi.js#L734) |
+| GET | `/objects/vms` | `guarded` | [server/src/routes/publicApi.js:722](../server/src/routes/publicApi.js#L722) |
+| GET | `/openapi.json` | — | [server/src/routes/publicApi.js:240](../server/src/routes/publicApi.js#L240) |
+| GET | `/resources/gpu` | `guarded` | [server/src/routes/publicApi.js:801](../server/src/routes/publicApi.js#L801) |
+| GET | `/resources/power` | `guarded` | [server/src/routes/publicApi.js:795](../server/src/routes/publicApi.js#L795) |
+| GET | `/san-storage/arrays` | `guarded` | [server/src/routes/publicApi.js:636](../server/src/routes/publicApi.js#L636) |
+| GET | `/san-storage/check` | `guarded` | [server/src/routes/publicApi.js:652](../server/src/routes/publicApi.js#L652) |
 
 ## `/api`
 

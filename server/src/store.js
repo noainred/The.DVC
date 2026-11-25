@@ -278,6 +278,7 @@ export function withRegistryVcenter(cachedVc, vc) {
 class Store {
   constructor() {
     this.snapshot = emptySnapshot();
+    this._bootSnapshot = this.snapshot;   // v3.42.0: 기동 때의 빈 스냅샷(병합 · 골격이 바꾸기 전) — beforeFirstCollection 이 정체성으로 본다
     this.lastError = null;
     this.timer = null;
     this.vcCache = new Map(); // vcId -> { ok, data } | { ok:false, vc, err, at }
@@ -640,6 +641,13 @@ class Store {
    * 자격증명 거부로 멈춘 vCenter 는 병합과 같이 unreachable + authStopped 다('기다리면 된다' 는 거짓 — v2.590).
    * @returns {boolean} 게시했으면 true
    */
+  /**
+   * v3.42.0(공개 API 반증 재확인 R-2): 지금 스냅샷이 첫 수집 전 것인가 — 기동 때의 빈 스냅샷(골격 게시 전 · 기동 때부터 등록부 읽기 오류) 또는 골격(initial).
+   *   생성자의 빈 스냅샷에는 initial 표지가 없고(emptySnapshot 은 병합의 바탕이라 건드리지 않는다) 내부 소비처 40여 곳의 initial 판정도 바꾸지 않으려고
+   *   **정체성**으로 본다 — 병합 · 목 데이터 · 테스트의 직접 대입은 새 객체라 자연히 false 가 된다.
+   */
+  beforeFirstCollection() { return this.snapshot === this._bootSnapshot || this.snapshot?.initial === true; }
+
   publishSkeleton(vcenters, dataSource) {
     if (this._merged) return false;
     const skel = emptySnapshot();

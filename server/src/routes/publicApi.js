@@ -25,7 +25,7 @@ import { apiKeyAuth } from '../publicapi/auth.js';
 import { setKnownVcenterSource, unknownScopeVcenters } from '../publicapi/keys.js';
 import fs from 'node:fs';
 import path from 'node:path';
-import { endpointAllowed, project, projectAll, ENDPOINTS, GROUPS } from '../publicapi/allowlist.js';
+import { endpointAllowed, project, projectAll, ENDPOINTS, GROUPS, ENDPOINT_BY_PATH } from '../publicapi/allowlist.js';
 import { buildOpenApi } from '../publicapi/openapi.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { vmSumsOf } from '../vcenter/vmSums.js'; // v3.19.2 — VM 할당 합(vmVcpu · vmRamMB)의 '못 읽음' 판정은 내부 /summary 와 같은 코어
@@ -163,7 +163,10 @@ function guarded(apiPath, handler) {
      *   `!snap` 만 보던 이 503 이 사실상 사라졌다 — 첫 수집 동안 전 경로가 200 + 0 · 빈 배열을 줬다(문서 §5 · OpenAPI 는 503 을 약속). 골격이면 503 이고,
      *   수집 상태 경로(servesSkeleton — pending 수가 값 자체)만 답한다.
      */
-    if (!snap || (snap.initial === true && gate.endpoint.servesSkeleton !== true)) {
+    //   재확인(R-1 · R-2): vCenter 인벤토리가 원천인 경로(scoped)만 — 스토리지 · SAN · 부품 장애 · 전력은 vCenter 첫 병합과 무관하다. 골격 게시 전
+    //   (생성자의 빈 스냅샷 · 기동 때부터 등록부 읽기 오류)도 첫 병합 전이다(store.beforeFirstCollection — 정체성 판정).
+    const beforeFirstMerge = !snap || snap.initial === true || store.beforeFirstCollection?.() === true;
+    if (!snap || (beforeFirstMerge && gate.endpoint.scoped === true && gate.endpoint.servesSkeleton !== true)) {
       return res.status(503).json({ ok: false, error: 'not-collected', code: 'not-collected',
         reason: '첫 수집이 아직 끝나지 않았습니다 — 잠시 뒤 다시 시도하세요(수집 진행은 GET /inventory/collection).' });
     }
@@ -361,6 +364,9 @@ v1.get('/inventory/collection', guarded('/inventory/collection', ({ res, snap, i
     // v2.732(B2-01): 담당 엣지의 push 가 기준 시간을 넘긴 위임 vCenter 수 — 위 상태 개수와 **겹치는 별도 축**이다(대개 connected 로
     //   함께 세어진다). 내부 /health vcentersStale 과 같은 판정(store.siteInventoryStale). 직접 수집의 접속 실패 이월은 unreachable 로 센다.
     stale: vcs.filter(siteInventoryStale).length,
+    // v3.42.0(반증 재확인 D-1): 첫 병합을 마쳤는가 — false 인 동안 vCenter 범위 경로는 503 not-collected 다(pending 수와 다르다: 첫 병합 뒤에도
+    //   새로 등록했거나 엣지 보고를 기다리는 vCenter 는 pending 으로 남는다).
+    firstCollectionDone: !(snap.initial === true || store.beforeFirstCollection?.() === true),
     generatedAt: msOrNull(snap.generatedAt),
     source: snap.source || null,
     intervalMs: numOrNull(config.pollIntervalMs),
@@ -669,7 +675,7 @@ v1.get('/san-storage/check', guarded('/san-storage/check', async ({ req, res, fi
  */
 function pickedVcenter(req, res, snap, inScope, apiPath) {
   // 원문 쿼리 모양 먼저(반증 A C-2) — 같은 이름 여러 번 · 객체 모양은 400(운영 정규화가 조용히 마지막 값 · 버림으로 바꾸기 전에)
-  const shape = rawQueryShapeIssue(req.originalUrl, ['vcenterId', 'offset', 'limit']);
+  const shape = rawQueryShapeIssue(req.originalUrl, (ENDPOINT_BY_PATH[apiPath]?.params || []).map((x) => x.name), req.query);   // 재확인 R-3: 그 경로가 받는 인자만 · A: 파싱에서 빠진 인자도
   if (shape) { badQuery(res, apiPath, shape); return null; }
   const p = vcenterPickOf(req.query, inScope, knownVcenterIdsNow(snap));
   if (!p.ok) {

@@ -134,9 +134,10 @@ export const ENDPOINTS = Object.freeze([
      */
     // v2.732(점검 2회차 B2-01): stale — 담당 엣지의 push 가 기준 시간을 넘긴 위임 vCenter 수(상태 개수와 겹치는 별도 축,
     //   /health vcentersStale 과 같은 판정).
-    fields: ['registered', 'connected', 'pending', 'unreachable', 'maintenance', 'stale', 'generatedAt', 'source', 'intervalMs'],
+    fields: ['registered', 'connected', 'pending', 'unreachable', 'maintenance', 'stale', 'firstCollectionDone', 'generatedAt', 'source', 'intervalMs'],
     // v3.42.0(반증 B-1): 첫 병합 전 골격 스냅샷(store.publishSkeleton — initial:true)에도 답하는 유일한 경로 — 수집 상태(pending 수)가 이 경로의 값 자체다.
-    //   나머지 경로는 골격이면 503 not-collected(문서 · OpenAPI 가 약속한 대로 — 골격의 0 · 빈 배열을 '없다' 로 주지 않는다).
+    //   vCenter 범위 경로(scoped)는 첫 병합 전이면 503 not-collected(문서 · OpenAPI 가 약속한 대로 — 골격의 0 · 빈 배열을 '없다' 로 주지 않는다).
+    //   스토리지 · SAN · 부품 장애 · 전력(범위 미적용)은 vCenter 첫 병합과 무관해 그대로 답한다(재확인 R-1). 열림 표지는 firstCollectionDone.
     servesSkeleton: true,
   },
   {
@@ -198,7 +199,7 @@ export const ENDPOINTS = Object.freeze([
     path: '/objects/vms', list: true, group: 'objects', method: 'GET', scoped: true, paged: true,
     params: [VC_PARAM,
       { name: 'offset', type: 'integer', desc: '건너뛸 행 수(기본 0) — meta.nextOffset 으로 다음 쪽을 받습니다' },
-      { name: 'limit', type: 'integer', max: 5000, desc: '한 쪽의 행 수(1~5000 · 기본 5000)' }],
+      { name: 'limit', type: 'integer', max: 5000, desc: '한 쪽의 행 수(1~5000 · 기본 1000)' }],
     summary: 'VM 목록 — 전원 · 게스트 OS · vCPU/메모리/디스크 할당 · 배치(호스트 · 클러스터) · IP · Tools · 사용률 · 스냅샷 수(id 순 · 쪽 나눔)',
     fields: ['id', 'vcenterId', 'name', 'instanceUuid', 'powerState', 'template', 'guestOS', 'cpuCount', 'memMB', 'storageGB', 'host', 'cluster',
       'ipAddresses', 'toolsStatus', 'cpuUsagePct', 'memUsagePct', 'snapshotCount'],

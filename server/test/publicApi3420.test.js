@@ -301,16 +301,43 @@ test('반증 B-1 — 첫 병합 전 골격 스냅샷이면 503 not-collected(수
     const all = keys.issueApiKey({ name: 'all', groups: [...GROUP_KEYS] }).plaintext;
     const out = {};
     for (const p of ['/inventory/summary', '/inventory/vcenters', '/inventory/collection', '/capacity/datastores', '/faults/alarms', '/objects/hosts', '/objects/vms', '/backup/summary', '/compliance/licenses']) {
-      const x = await call(p, all); out[p] = { status: x.status, code: x.body?.code, pending: x.body?.data?.pending };
+      const x = await call(p, all); out[p] = { status: x.status, code: x.body?.code, pending: x.body?.data?.pending, done: x.body?.data?.firstCollectionDone };
     }
-    return { initial: store.get()?.initial === true, out };
+    // 재확인 R-1: vCenter 와 무관한 경로(범위 미적용 — 스토리지 · SAN · 부품 · 전력)는 첫 병합 전에도 503 not-collected 가 아니다
+    const nonVc = {};
+    for (const p of ['/capacity/storage', '/san-storage/arrays', '/faults/parts', '/resources/power']) { const x = await call(p, all); nonVc[p] = { status: x.status, code: x.body?.code }; }
+    return { initial: store.get()?.initial === true, out, nonVc };
   `, { refresh: false });
   assert.equal(r.initial, true, '하니스가 골격 상태를 만들지 못했습니다');
   for (const [p, v] of Object.entries(r.out)) {
-    if (p === '/inventory/collection') { assert.equal(v.status, 200); assert.equal(v.pending, 2, '수집 상태 경로는 pending 수를 답해야 합니다'); continue; }
+    if (p === '/inventory/collection') {
+      assert.equal(v.status, 200); assert.equal(v.pending, 2, '수집 상태 경로는 pending 수를 답해야 합니다');
+      assert.equal(v.done, false, 'firstCollectionDone 이 첫 병합 전인데 true 입니다');
+      continue;
+    }
     assert.equal(v.status, 503, `${p}: 골격인데 ${v.status}(0 · 빈 배열을 '없다' 로 줌)`);
     assert.equal(v.code, 'not-collected');
   }
+  for (const [p, v] of Object.entries(r.nonVc)) assert.notEqual(v.code, 'not-collected', `${p}: vCenter 와 무관한 경로가 첫 수집 중 503 not-collected 입니다(재확인 R-1)`);
+});
+
+test('반증 재확인 R-2 · R-3 — 골격 게시 전(빈 스냅샷)도 수집 전 · 첫 병합 뒤 firstCollectionDone · 받지 않는 인자의 중복은 무시', () => {
+  const pre = runLive(`
+    // 골격도 병합도 없다(생성자의 빈 스냅샷 — 기동 직후 · 등록부 읽기 오류로 골격을 못 띄운 동안)
+    const all = keys.issueApiKey({ name: 'all', groups: [...GROUP_KEYS] }).plaintext;
+    return { hosts: (await call('/objects/hosts', all)).status, coll: (await call('/inventory/collection', all)).body?.data?.firstCollectionDone };
+  `, { refresh: false });
+  assert.equal(pre.hosts, 503, '골격 게시 전 빈 스냅샷인데 200(빈 목록)입니다');
+  assert.equal(pre.coll, false);
+  const post = runLive(`
+    const all = keys.issueApiKey({ name: 'all', groups: [...GROUP_KEYS] }).plaintext;
+    return { coll: (await call('/inventory/collection', all)).body?.data?.firstCollectionDone,
+      hostsDupLimit: (await call('/objects/hosts?limit=5&limit=6', all)).status,
+      vmsDupLimit: (await call('/objects/vms?limit=5&limit=6', all)).status };
+  `);
+  assert.equal(post.coll, true);
+  assert.equal(post.hostsDupLimit, 200, '호스트 목록은 limit 을 받지 않는다 — 중복이어도 무시(400 이 아니다)');
+  assert.equal(post.vmsDupLimit, 400, 'VM 목록은 limit 을 받는다 — 중복은 400');
 });
 
 test('반증 B-1 · B-3 — 백업 행: VM 목록을 모르면 수가 전부 null(inventoryUnknown) · 등록부를 못 읽으면 Veeam 서버 수는 null', async () => {
@@ -419,4 +446,24 @@ test('반증 A C-2 — 운영 구성(쿼리 정규화기 앞단)에서도 중복
   assert.ok(r.mw, 'queryNormalizer 를 만들지 못했습니다 — 하니스 확인');
   for (const k of ['dup', 'obj', 'lim']) { assert.equal(r[k].status, 400, `${k}: ${r[k].status}`); assert.equal(r[k].code, 'bad-query'); }
   assert.equal(r.ok.status, 200);
+});
+
+test('반증 A 재확인 — 메모의 \'고르지 않음\' 표식이 id 와 겹치지 않는다 · 8,192자 뒤 · 파싱에서 빠진 인자도 400 · 기본 쪽 1,000행', async () => {
+  const rows = await import('../src/routes/publicApiRows.js');
+  const N = ['vcenterId', 'offset', 'limit'];
+  assert.equal(rows.rawQueryShapeIssue(`/objects/vms?p=${'x'.repeat(8300)}&vcenterId[x]=a`, N), 'vcenterId', '8,192자 뒤의 객체 모양 인자');
+  assert.equal(rows.rawQueryShapeIssue('/objects/vms?vcenterId=a', N, {}), 'vcenterId', '원문에는 있는데 파싱 결과에 없는 인자');
+  assert.equal(rows.rawQueryShapeIssue('/objects/vms?vcenterId=a', N, { vcenterId: 'a' }), null);
+  assert.equal(rows.rawQueryShapeIssue('/objects/hosts?limit=1&limit=2', []), null, '받지 않는 인자는 보지 않는다');
+  assert.equal(rows.pageQueryOf({}, 5000).limit, 1000, '기본 쪽 크기');
+  assert.equal(rows.pageQueryOf({ limit: '5000' }, 5000).limit, 5000);
+  const src = stripComments(fs.readFileSync(path.join(SRC, 'routes/publicApiRows.js'), 'utf8'));
+  assert.ok(!/vcId \|\| '\*'/.test(src), "메모 열쇠에 '*' 표식이 남아 있습니다(id '*' 와 충돌)");
+  // 실제 메모: id '*' 인 vCenter 와 '고르지 않음' 이 다른 칸
+  const snap = { generatedAt: 't1', vcenters: [{ id: '*', status: 'connected' }, { id: 'vc2', status: 'connected' }],
+    vms: [{ id: '*:a', vcenterId: '*', name: 'a' }, { id: 'vc2:b', vcenterId: 'vc2', name: 'b' }] };
+  const user = { username: 't', role: 'viewer' };
+  const all = await rows.vmRowsMemo(snap, user, () => true, null);
+  const star = await rows.vmRowsMemo(snap, user, (id) => id === '*', '*');
+  assert.equal(all.length, 2); assert.equal(star.length, 1, `id '*' 를 고른 결과가 '고르지 않음' 칸을 받았습니다(${star.length}행)`);
 });
