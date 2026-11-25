@@ -87,6 +87,11 @@ const LIVE = (() => {
         const keep = ['/compliance/licenses', '/backup/summary', '/resources/power'].includes(p) ? f.body?.data
           : p === '/objects/hosts' ? (f.body?.data || []).filter((h) => (snap.hosts || []).some((x) => x.id === h.id && x.connectionState === 'DISCONNECTED')) : undefined;
         o.full[p] = { status: f.status, rows: Array.isArray(f.body?.data) ? f.body.data.length : null, data: keep, meta: f.body?.meta };
+        if (p === '/compliance/snapshots') {
+          const d = f.body?.data || [];
+          o.snapJudge = { unjudged: d.filter((x) => x.judged === false).length, unjudgedWithFlag: d.filter((x) => x.judged === false && (x.overAge !== null || x.overCount !== null || x.overSize !== null)).length,
+            judged: d.filter((x) => x.judged === true).length, judgedNonBool: d.filter((x) => x.judged === true && [x.overAge, x.overCount, x.overSize].some((v) => typeof v !== 'boolean')).length };
+        }
         const k = await call(p + (p.includes('?') ? '&' : '?') + 'vcenterId=' + SCOPE_VC, all);
         o.pick[p] = { status: k.status, vcs: Array.isArray(k.body?.data) ? [...new Set(k.body.data.map((x) => x.vcenterId))] : null };
       }
@@ -186,6 +191,13 @@ test('④ 판정 코어 하나 — 라이선스 · 스냅샷 · GPU · 백업 �
   assert.equal(r.full['/resources/gpu'].rows, r.internal.gpu);
   assert.deepEqual(r.full['/backup/summary'].data.map((b) => `${b.vcenterId}:${b.vms}`), r.internal.backup, '법인별 VM 수가 Summary 집계와 다릅니다');
   assert.equal(r.full['/backup/summary'].rows, r.internal.vcenters, '법인 줄 수가 vCenter 수와 다릅니다');
+});
+
+test('⑤ 판정하지 않은 스냅샷 행의 기준 초과 여부는 false 가 아니라 null — 판정한 행은 불리언', () => {
+  const r = LIVE();
+  assert.ok(r.snapJudge.unjudged > 0 && r.snapJudge.judged > 0, `목 데이터에 판정/미판정 행이 다 있어야 합니다 ${JSON.stringify(r.snapJudge)}`);
+  assert.equal(r.snapJudge.unjudgedWithFlag, 0, 'judged:false 인 행에 overAge · overCount · overSize 값이 있습니다(템플릿 · 예외 · 보류를 \'초과 아님\' 으로 말한다)');
+  assert.equal(r.snapJudge.judgedNonBool, 0, 'judged:true 인 행의 초과 여부가 불리언이 아닙니다');
 });
 
 test('⑤ 못 읽은 값은 null — 끊긴 호스트의 사용률', () => {
