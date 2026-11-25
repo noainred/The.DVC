@@ -39,7 +39,7 @@
 - (원래 5142행) v2.635 — 베어메탈 스토리지 디스크 사용량 12시간 이력. 새 수집이 아니라 '최신 결과를 떼어 적재' 한다
 - (v2.749) 게스트 파티션 사용률 경보 — 원천은 게스트 디스크 수집의 part_latest · 경로 모양으로 OS · 정규식 없는 패턴 · 메일은 아이실론 코어
 - (v2.789) 스토리지 사용량 보고서(일간·주간·월간 표 · LUN·파일시스템 · CSV · 법인/종류 비교 · 예약 메일)
-- (v2.915) 베어메탈 ↔ SAN 비교 — 디스크 I/O 표본(diskstats) · I/O 시계열 DB · 법인 축 · 비교/시계열 API · ‘SAN 비교’ 탭
+- (v3.39.0) 베어메탈 ↔ SAN 비교 — 디스크 I/O 표본(diskstats) · I/O 시계열 DB · 법인 축 · 비교/시계열 API · ‘SAN 비교’ 탭
 - (v2.962) 베어메탈 스토리지 ‘비교 세트’ — SAN 어레이 · 베어메탈 서버 · 그룹 · 법인 합계를 섞어 2~4개 · IOPS · 응답 시간 · 어레이 측 FE 표본 · 격자 하한
 - (v2.971) 베어메탈 I/O 구간 평균은 디스크별 카운터로 · 바쁨 평균 = 가장 바쁜 디스크 · 피크 ≥ 구간 평균 · 묶음 피크 부분 합 금지 · 위임 결과 BIG_JSON + gzip
 - v2.926 — 아이실론 노드 부하 시계열(네트워크·디스크·CPU). 규칙은 `storage/nodeLoad.js`(순수), 적재·조회는 `db.js`, 수집 키는 `collectors/isilonNodeLoad.js`
@@ -250,6 +250,14 @@
       **필수 → 매주기(always) → 구성(config)**. 순서를 흔들면 예산이 모자랄 때 용량·상태를 잃는다.
     · 건너뛴 항목은 **사유와 함께** 보고한다(`errors[key]` + `extra.cliSkipped`) — '이 장비에 그
       명령이 없다' 와 '이번에 시간이 모자랐다' 는 **조치가 다르다**. 조용히 생략하지 말 것.
+    · **v3.39.0 — PowerScale(Isilon) SSH 는 '명령 대기 시간' 이 설정값이고 나머지 두 시한은 거기서 계산한다**(사용자 보고
+      "isi 명령어 처리에 오래 걸려서 timeout · 설정에 timeout 메뉴 · 최대 5분 · 기본 3분"): 설정 › 수집 주기·임계 › 스토리지 수집 주기의
+      `isiCmdTimeoutMs`(기본 3분 · 1~5분 · 중앙이 엣지에 배포 — `intervals.js INTERVAL_SPEC` 의 `timer: false` 항목).
+      산수는 `storage/isiTimeouts.js` 하나 — **장비 시한 = max(기존 180초, 명령 대기 + 2분) · 세션 예산 = 장비 시한 − 20초**.
+      명령 대기만 올리고 장비 시한을 그대로 두면 위 v2.528 회귀가 그대로 재발한다(그래서 폴러는 `deviceTimeoutMsFor(dev)` 를 쓴다).
+      **모든 isi 명령**이 설정값까지 기다린다(사용자 결정) — 부가 명령은 남은 예산 안에서만. 호출부가 넘기던 20초·45초는 쓰지 않는다.
+      대가: 한 명령이 설정값까지 매달리면 뒤 명령은 그 주기에 '예산 초과로 미수집' 이다(순서가 계약). 중앙의 재수집 결과 대기
+      (`collectRequests.js perItemMs`)도 같은 산수를 쓴다. 연결 테스트(60초 시한)는 그대로다. 회귀 `test/isiCmdTimeout339.test.js`.
   - ⚠⚠ **v2.530 정정 — 원인은 명령 순서가 아니라 `SSH 터미널 폭` 이었다**(사용자 신고
     "unity 스토리지 지금 파싱이 안되" + **실장비 출력 3건 제공**):
     · v2.525 CSV 우선 → 실패 · v2.526 평문 우선 → 실패 · v2.529 CSV 우선 → 실패.
@@ -807,7 +815,7 @@
   · v2.770(점검 R5-E2): 엣지 소비 전력의 부분 합 표지(`partial`·`missing`)도 중앙 정제 화이트리스트에(missing>0 일 때만 partial) — 빠지면 전체 전력이 부분 합을 '측정' 으로 센다.
     장비 출력 파서에 `m` 플래그 + 무제한 부정 클래스 금지(외로운 \r 마다 시작점) · `/^(\d+):\s*(.*)$/` 대신 `uemcliParse.recStart` 를 쓴다(한 벌) · 주기 수집은 `_inFlight` 를 보고 건너뛰며(`inFlightSkipped`), finally 는 자기 항목만 지운다.
 
-- **v2.915 — 베어메탈 ↔ SAN(VMAX · PowerMax) 비교**(사용자 요청 2026-11-09 "베어메탈 스토리지의 실시간 디스크 사용율을 … SAN vmax, pmax 사용율/전송 속도와 숫자로 비교" + "법인별로 볼 수 있는 기능" + "각 장비별로 peak / average 디스크 access 성능을 비교하는 차트 … 실시간/트렌드" · 승인 시안 `docs/design/bm-san-compare` ①~⑥ · 컨펌 '진행해' 기본값 · 릴리스 번호는 main 이 앞서 v2.956.0 — 코드 · 테스트 표지는 v2.915). 화면 `views/tools/BmSanCompare.jsx` + `BmIoChart.jsx` · 문구 `bmSanCompareText.js` · `bmIoChartText.js` · 서버 `bmstor/{diskstats,ioDb,ioSeries,compare,corp}.js` · 회귀 `server/test/bmstorIo2915.test.js` + 웹 두 테스트):
+- **v3.39.0 — 베어메탈 ↔ SAN(VMAX · PowerMax) 비교**(사용자 요청 2026-11-09 "베어메탈 스토리지의 실시간 디스크 사용율을 … SAN vmax, pmax 사용율/전송 속도와 숫자로 비교" + "법인별로 볼 수 있는 기능" + "각 장비별로 peak / average 디스크 access 성능을 비교하는 차트 … 실시간/트렌드" · 승인 시안 `docs/design/bm-san-compare` ①~⑥ · 컨펌 '진행해' 기본값 · 릴리스 번호는 main 이 앞서 v2.956.0 — 코드 · 테스트 표지는 v3.39.0). 화면 `views/tools/BmSanCompare.jsx` + `BmIoChart.jsx` · 문구 `bmSanCompareText.js` · `bmIoChartText.js` · 서버 `bmstor/{diskstats,ioDb,ioSeries,compare,corp}.js` · 회귀 `server/test/bmstorIo2915.test.js` + 웹 두 테스트):
   - **디스크 I/O 표본은 df 와 같은 SSH 세션의 상수 명령 하나**(`diskstats.ioSampleCommand` — `cat /proc/uptime; cat /proc/diskstats; sleep N; …` · 입력이 끼는 자리 없음 · N = `BMSTOR_IO_SAMPLE_SEC` 기본 2 · 0 = 끔). **통짜 디스크만**(`WHOLE_DISK_RE` — dm · md · 파티션은 같은 I/O 의 중복) · 섹터 512B 고정 · 카운터 역행 장치는 뺀다 · df 가 성공했으면 I/O 실패가 서버를 오류로 만들지 않는다(`io:null` + `ioError`).
   - **엣지 회신 두 경로(폴링 · PUSH)는 `poller.sanitizeBmResult` 하나**로 정제한다 — v2.914 까지 PUSH 회신은 정제 없이 latest 에 들어갔다(발견 · 정정). 엣지 워커 회신 화이트리스트에 `io · ioError` 를 더했다 — 새 엣지 export 필드 = 중앙 정제 필드(루트 규칙). 구버전 엣지(io 없음)는 `ioError:'edge-legacy'`(화면 문장은 웹).
   - **I/O 시계열 DB `bmstor-io.db`(`bmstor/ioDb.js`)** — 12시간 용량 이력과 따로(보존 · 정리 주기가 다르다). 원시(서버 × 수집 1회) + `io_last`(차분용 — '키별 최신값' 을 GROUP BY+MAX 로 만들지 않는다) + 15분 · 1시간 집계(적재 때 upsert · 백필 없음). **평균 = 누적 카운터 차분 ÷ 경과**(uptime 차 — 수집 사이 구간 전체의 진짜 평균 · 첫 행 · 재부팅 · 공백 > 주기×2 는 null), **피크 = 2초 표본 최댓값(하한)** — 화면이 둘 다 말한다. ⚠ v2.971 정정: 평균은 **디스크별** 카운터 차분(합계 하나로 빼면 디스크 구성이 바뀐 구간이 튄다) · 피크는 **2초 표본과 구간 평균 중 큰 값**(2초 표본만이면 피크 < 평균이 나온다) — 아래 v2.971 항목. 집계 함수는 **한 문장에 하나**(`ioRank` 는 세 문장). 보존 env 3 · 31 · 730일. 엣지 위임 서버 값도 **중앙이 적재**(엣지에 DB 없음). 상한 산수는 파일 머리말.

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson, putJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
-import { presetsFor, msLabel, effectiveFor, sourceOf, lagText, toBody } from './storageIntervals.js';
+import { presetsForSpec, rangeText, timeoutSpecs, msLabel, effectiveFor, sourceOf, lagText, toBody } from './storageIntervals.js';
 import { STable } from '../components/STable.jsx';
 import Select from '../components/Select.jsx';
 import { requireChanged } from './changeResult.js'; // v2.732 B5-03: 400 본문을 '저장되었습니다' 로 읽지 않는다
@@ -28,14 +28,14 @@ function inheritTail(target) {
 function Cell({ target, form, s, globalForm, setCell }) {
   const inheritedFrom = target === '__global__' ? null : globalForm[s.key];
   const cur = form[s.key] ?? '';
-  const presets = presetsFor(s.min);
+  const presets = presetsForSpec(s);   // v3.39.0: 사양의 선택지·상한(PowerScale SSH 명령 대기 1~5분 · 노드 부하 표본 60분)을 따른다
   // 파일 직접 편집 등으로 프리셋에 없는 값이 들어오면 옵션을 하나 만들어 보여준다 — 없으면 브라우저가
   // 첫 옵션('미지정')을 표시해 '미지정'으로 읽힌다(상태에는 값이 남아 저장 시 유지되는데 화면만 다름).
   const extra = cur && !presets.some((p) => String(p.ms) === String(cur)) ? [{ ms: Number(cur), label: `${msLabel(Number(cur))} (직접 지정)` }] : [];
   return (
     <Select sort={false} className="input" style={{ minWidth: 104 }} value={cur}
       onChange={(e) => setCell(target, s.key, e.target.value)}
-      title={`${s.label}\n하한 ${msLabel(s.min)} · 기본 ${msLabel(s.def)}\n${s.hint}`}>
+      title={`${s.label}\n${rangeText(s)}\n${s.hint}`}>
       <option value="">
         {target === '__global__'
           ? '미지정(엣지 로컬)'
@@ -107,7 +107,7 @@ export default function StorageIntervals() {
 
   return (
     <>
-      <div className="section-title" style={{ marginTop: 0 }}>⏱ 스토리지 수집 주기</div>
+      <div className="section-title" style={{ marginTop: 0 }}>⏱ 스토리지 수집 주기 · 대기 시간</div>
       <SettingsUnreadBanner le={unread} what="스토리지 수집 주기" save="저장" onRecheck={load} busy={busy} />
 
       <div className="card" style={{ marginBottom: 12 }}>
@@ -119,6 +119,13 @@ export default function StorageIntervals() {
             • 엣지 반영은 <b>즉시가 아닙니다</b>. 그 엣지의 <b>설정 수신(pull) 주기</b>만큼 걸릴 수 있습니다(중앙은 엣지에 명령을 밀어넣을 수 없는 구조 — 엣지가 가지러 옵니다).<br />
             • 엣지에서 <code>STORAGE_INTERVALS_LOCAL=1</code> 을 켜 두면 그 엣지는 중앙 값을 무시합니다(현장 고정).<br />
             • 하한(수집·push·pull 60초 / 영역 수집 10분)은 서버가 강제합니다. 그 밑으로는 이전 주기가 끝나기 전에 다음 주기가 와서 실효가 없습니다.
+            {/* v3.39.0: 시한 항목(주기가 아니다) — 숫자는 서버 사양(spec)에서 온다. */}
+            {timeoutSpecs(spec).map((s) => (
+              <React.Fragment key={s.key}>
+                <br />• <b>{s.label}</b>은 주기가 아니라 <b>대기 시간</b>입니다 — isi 명령 하나의 응답을 이 시간까지 기다립니다({rangeText(s)}).
+                응답이 느린 클러스터가 시간 초과로 실패하면 그 법인(엣지) 행에서 늘리세요. 미지정이면 그 엣지의 로컬 값(없으면 기본 {msLabel(s.def)})을 씁니다.
+              </React.Fragment>
+            ))}
           </div>
         </div>
       </div>

@@ -340,7 +340,7 @@ test('RECENT-04 소스 순서 — isi status → 통계 → 전원 → 버전 �
   const s = fs.readFileSync(new URL('storage/collectors/isilonSsh.js', SRC), 'utf8');
   const body = s.slice(s.indexOf('export async function collectViaSsh'));
   const pos = [
-    "sh.exec('isi status')", 'bsh.exec(ISI_STATS_CMD', 'readIsiPowerSsh(bsh', "bsh.exec('isi version')", "bsh.exec('isi auth users list", 'readIsiHwSsh(bsh',
+    "sh.exec('isi status', cmdMs)", 'bsh.exec(ISI_STATS_CMD', 'readIsiPowerSsh(bsh', "bsh.exec('isi version')", "bsh.exec('isi auth users list", 'readIsiHwSsh(bsh',
   ].map((k) => { const i = body.indexOf(k); assert.ok(i >= 0, k); return i; });
   for (let i = 1; i < pos.length; i++) assert.ok(pos[i - 1] < pos[i], `순서가 바뀌었다: ${i}`);
 });

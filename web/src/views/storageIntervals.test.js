@@ -4,7 +4,8 @@
  * 각 법인이 portal.env 로 잡아 둔 현장 설정을 통째로 덮어쓴다.
  */
 import { describe, it, expect } from 'vitest';
-import { effectiveFor, sourceOf, worstCaseLagMs, lagText, toBody, presetsFor, msLabel } from './storageIntervals.js';
+import { effectiveFor, sourceOf, worstCaseLagMs, lagText, toBody, presetsFor, presetsForSpec, rangeText, timeoutSpecs, msLabel } from './storageIntervals.js';
+import fs from 'node:fs';
 
 describe('effectiveFor', () => {
   it('전역 위에 대상별 값을 덮는다', () => {
@@ -67,5 +68,38 @@ describe('presetsFor / msLabel', () => {
     expect(msLabel(420_000)).toBe('7분');
     expect(msLabel(90_000)).toBe('90초');
     expect(msLabel(0)).toBe('미지정');
+  });
+});
+
+// v3.39.0 — PowerScale SSH 명령 대기(주기가 아닌 시한 · 기본 3분 · 1~5분). 선택지·범위는 서버 사양에서 온다.
+describe('presetsForSpec / rangeText / timeoutSpecs (v3.39.0)', () => {
+  const ISI = { key: 'isiCmdTimeoutMs', label: 'PowerScale SSH 명령 대기', def: 180_000, min: 60_000, max: 300_000, timer: false,
+    presets: [60_000, 120_000, 180_000, 240_000, 300_000] };
+  const POLL = { key: 'pollMs', label: '장비 수집 주기', def: 3_600_000, min: 60_000 };
+
+  it('사양에 선택지가 있으면 그것만 — 5분을 넘는 주기 선택지(10분…24시간)를 보여 주지 않는다', () => {
+    const ps = presetsForSpec(ISI);
+    expect(ps.map((p) => p.ms)).toEqual([60_000, 120_000, 180_000, 240_000, 300_000]);
+    expect(ps.map((p) => p.label)).toEqual(['1분', '2분', '3분', '4분', '5분']);
+  });
+  it('선택지가 없는 항목은 예전 그대로(하한 이상 전부) · 상한이 있으면 그 위는 뺀다', () => {
+    expect(presetsForSpec(POLL)).toEqual(presetsFor(POLL.min));
+    expect(presetsForSpec({ min: 60_000, max: 300_000 }).map((p) => p.ms)).toEqual([60_000, 120_000, 180_000, 300_000]);
+    // 사양이 범위 밖 값을 실어도 고를 수 없다(서버가 어차피 가둔다 — 고를 수 있으면 거짓말이 된다)
+    expect(presetsForSpec({ ...ISI, presets: [30_000, 180_000, 600_000, 'x'] }).map((p) => p.ms)).toEqual([180_000]);
+  });
+  it('범위 문구 — 상한이 있는 항목만 상한을 말한다', () => {
+    expect(rangeText(ISI)).toBe('하한 1분 · 상한 5분 · 기본 3분');
+    expect(rangeText(POLL)).toBe('하한 1분 · 기본 1시간');
+  });
+  it('시한 항목만 고른다 — 주기 설명과 따로 안내하려고', () => {
+    expect(timeoutSpecs([POLL, ISI]).map((s) => s.key)).toEqual(['isiCmdTimeoutMs']);
+    expect(timeoutSpecs(null)).toEqual([]);
+  });
+  it('화면은 사양으로 선택지를 그리고 숫자를 따로 갖지 않는다', () => {
+    const src = fs.readFileSync(new URL('./StorageIntervals.jsx', import.meta.url), 'utf8');
+    expect(src).toMatch(/const presets = presetsForSpec\(s\);/);
+    expect(src).toMatch(/timeoutSpecs\(spec\)\.map/);
+    expect(src).not.toMatch(/300_?000|180_?000/);
   });
 });

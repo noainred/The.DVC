@@ -25,6 +25,7 @@ import { saveCapacityPoint, saveAreaResults, saveNodeLoadPoint, saveIfaceState }
 import { recordActivity } from './activityLog.js';
 import { runtimeIntervals, runtimeIntervalSource, centralIntervalsInfo, startAdaptiveTimer, applyOwnIntervals } from './intervals.js';
 
+import { isiDeviceTimeoutFor } from './isiTimeouts.js'; // v3.39.0 — Isilon SSH 장비 시한(명령 대기 설정값에서 계산)
 import { withDeadline, deadlineMs } from '../proxy/sshExec.js';
 import { poolRun } from '../util/pool.js'; // v2.575 IMP-08 — 동시성 풀 단일 소스
 // v2.708 데모(mock): 등록부 시드·이력 백필·타입별 합성 스냅샷. live 에서는 mock- 장비를 건너뛴다.
@@ -32,6 +33,17 @@ import { isMockMode, ensureStorageDemo, demoStorageSnapshot, isDemoId, demoIsilo
 import { envPositive, ENV_INT_MAX } from '../util/envNumber.js'; // 결정(56~75 남긴 것) 57 · 58: 시한 · 개수 env 의 Infinity · 2^31 초과 · 음수는 기본값(예전 `Math.max(하한, Number(env) || 기본)` 은 Infinity · 3e9 를 통과시켜 setTimeout 이 1ms 로 바꿨다 · 개수는 무제한)
 /** 장비당 수집 타임아웃 — 느린 어레이 1대가 전체 주기를 막지 않게(기본 3분, 하한 30초). */
 const DEVICE_TIMEOUT_MS = Math.max(30_000, envPositive(process.env.STORAGE_DEVICE_TIMEOUT_MS, 180_000, { max: ENV_INT_MAX }));
+/**
+ * v3.39.0: 장비별 수집 시한. **Isilon SSH 장비만** 설정값(PowerScale SSH 명령 대기 — 설정 › 수집 주기·임계 › 스토리지 수집 주기)에서 계산한다
+ * (`isiTimeouts.js` — max(위 시한, 명령 대기 + 2분)). 명령 대기만 늘리고 이 시한을 그대로 두면 `withDeadline` 이 먼저 끊어 이미 받은
+ * `isi status` 까지 버린다(v2.528 Unity 회귀와 같은 유형). 조건은 수집기 분기(`collectors/isilon.js` — `collectMethod !== 'api'`)와 같아야 한다.
+ * 상수가 아니라 **매번 계산**한다 — 중앙이 값을 바꾸면 다음 수집부터 먹는다.
+ */
+export function deviceTimeoutMsFor(dev) {
+  return dev?.type === 'isilon' && dev?.collectMethod !== 'api'
+    ? isiDeviceTimeoutFor(runtimeIntervals().isiCmdTimeoutMs, DEVICE_TIMEOUT_MS)
+    : DEVICE_TIMEOUT_MS;
+}
 // v2.598 T2598-01: OneFS 영역 수집(66 엔드포인트 직렬)의 시한 — 예전엔 없어서 응답 없는 장비 하나가 최대 약 16.5분
 // 동안 폴러의 재진입 가드를 붙잡았다. 장비 수집 시한과 따로 둔다(고RTT 현장의 정상 영역 수집이 3분을 넘을 수 있다).
 const AREAS_TIMEOUT_MS = Math.max(60_000, envPositive(process.env.STORAGE_AREAS_TIMEOUT_MS, 300_000, { max: ENV_INT_MAX }));
@@ -141,7 +153,7 @@ async function collectOneInner(dev, startedAt) {
     // 장비당 타임아웃(v2.417) — 예전에는 없었다(CLAUDE.md 'per-vCenter 타임아웃' 규약 위반). SSH 계열
     // 수집기는 device._signal 을 withSsh creds 로 넘겨 기한 만료 시 세션을 실제로 끊는다.
     // v2.425: SSH 계열은 device._signal, REST 계열은 opts.signal 을 읽는다 — 양쪽에 넘겨야 어느 수집기든 실제로 끊긴다(리뷰 #4).
-    try { snap = await withDeadline(DEVICE_TIMEOUT_MS, (signal) => fn({ ...full, _signal: signal }, { signal }), '수집 타임아웃'); }
+    try { snap = await withDeadline(deviceTimeoutMsFor(full), (signal) => fn({ ...full, _signal: signal }, { signal }), '수집 타임아웃'); }
     catch (e) { snap = emptySnapshot(full); snap.error = e.message; }
   }
   // ⚠ 스냅샷 저장(회귀 수정 — v2.310 적대적 검증에서 확정): v2.308 리팩터가 이 무조건
