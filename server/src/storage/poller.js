@@ -25,6 +25,7 @@ import { saveCapacityPoint, saveAreaResults, saveNodeLoadPoint, saveIfaceState }
 import { recordActivity } from './activityLog.js';
 import { runtimeIntervals, runtimeIntervalSource, centralIntervalsInfo, startAdaptiveTimer, applyOwnIntervals } from './intervals.js';
 
+import { whenFirstConfigPullSettled } from './firstPullGate.js'; // v3.41.1 — 엣지의 첫 수집은 첫 설정 pull 뒤
 import { isiDeviceTimeoutFor } from './isiTimeouts.js'; // v3.39.0 — Isilon SSH 장비 시한(명령 대기 설정값에서 계산)
 import { withDeadline, deadlineMs } from '../proxy/sshExec.js';
 import { poolRun } from '../util/pool.js'; // v2.575 IMP-08 — 동시성 풀 단일 소스
@@ -34,13 +35,16 @@ import { envPositive, ENV_INT_MAX } from '../util/envNumber.js'; // 결정(56~75
 /** 장비당 수집 타임아웃 — 느린 어레이 1대가 전체 주기를 막지 않게(기본 3분, 하한 30초). */
 const DEVICE_TIMEOUT_MS = Math.max(30_000, envPositive(process.env.STORAGE_DEVICE_TIMEOUT_MS, 180_000, { max: ENV_INT_MAX }));
 /**
+ * 엣지의 첫 수집이 첫 설정 pull 을 기다리는 상한(v3.41.1 — `storage/firstPullGate.js`). 첫 수집은 예전처럼 기동 15초 뒤에 시작하고, 그때 첫 pull
+ * (기동 10초 뒤 시작 · 한 번의 시한 20초)이 아직 안 끝났으면 그 끝이나 이 상한까지만 기다린다. 15초 + 이 값 ≥ 10초 + 20초 여야 한 번의 시한을 덮는다.
+ */
+export const EDGE_FIRST_PULL_WAIT_MS = 25_000;
+/**
  * v3.39.0: 장비별 수집 시한. **Isilon SSH 장비만** 설정값(PowerScale SSH 명령 대기 — 설정 › 수집 주기·임계 › 스토리지 수집 주기)에서 계산한다
  * (`isiTimeouts.js` — max(위 시한, 명령 대기 + 2분)). 명령 대기만 늘리고 이 시한을 그대로 두면 `withDeadline` 이 먼저 끊어 이미 받은
  * `isi status` 까지 버린다(v2.528 Unity 회귀와 같은 유형). 조건은 수집기 분기(`collectors/isilon.js` — `collectMethod !== 'api'`)와 같아야 한다.
  * 상수가 아니라 **매번 계산**한다 — 중앙이 값을 바꾸면 다음 수집부터 먹는다.
  */
-/** 엣지의 첫 수집 지연 — 첫 설정 pull(10초 뒤 시작 · 한 번의 시한 20초)이 끝난 뒤(`agent/storageConfigPull.js` firstDelayMs · timeoutMs). */
-export const EDGE_FIRST_POLL_DELAY_MS = 40_000;
 export function deviceTimeoutMsFor(dev) {
   return dev?.type === 'isilon' && dev?.collectMethod !== 'api'
     ? isiDeviceTimeoutFor(runtimeIntervals().isiCmdTimeoutMs, DEVICE_TIMEOUT_MS)
@@ -355,11 +359,17 @@ export function startStoragePoller() {
   try { applyOwnIntervals(); } catch (e) { console.warn(`[storage] 수집 주기 설정 로드 실패(기본값 사용): ${e.message}`); }
   // 기동 15초 후 첫 수집, 이후 매 회 현재 주기로 재무장(setInterval 은 생성 시 간격에 묶여
   // 중앙 배포를 못 받는다). 재진입 가드(_busy)는 그대로 — 수동 실행과 공유한다.
-  // v3.41.1(점검 1회차): **엣지**의 첫 수집은 첫 설정 pull(기동 10초 뒤 · 시한 20초) 뒤로 미룬다 — 중앙이 배포한 값은 엣지 메모리에만 있어
-  //   재시작 직후에는 env·기본값이다. 주기는 늦게 먹어도 탈이 없지만, 시한(PowerScale SSH 명령 대기)은 중앙이 5분으로 올려 둔 느린 클러스터가
-  //   첫 수집을 기본 3분으로 돌아 '실패' 로 남는다(다음 수집 주기까지). pull 이 재시도로 더 늦어지면 여전히 기본값으로 돈다(한계 — 값은 다음 수집부터 먹는다).
+  // v3.41.1(점검 1 · 2회차): **엣지**의 첫 수집은 첫 설정 pull 이 끝난 뒤에 돈다 — 중앙이 배포한 값은 엣지 메모리에만 있어 재시작 직후에는
+  //   env·기본값이다. 주기는 늦게 먹어도 탈이 없지만, 시한(PowerScale SSH 명령 대기)은 중앙이 5분으로 올려 둔 느린 클러스터가 첫 수집을 기본 3분으로
+  //   돌아 '실패' 로 남는다(다음 수집 주기까지). 첫 수집 시각(15초)은 그대로 두고 **pull 이 아직 안 끝났을 때만** 기다린다(상한 EDGE_FIRST_PULL_WAIT_MS) —
+  //   통째로 40초로 미루면 첫 push(45초)·첫 노드 부하 표본(40초)과 순서가 뒤집힌다(2회차 N1·N2). pull 이 재시도로 상한보다 늦으면 기본값으로 돈다(한계).
   const isEdgeNode = !!(config.agent?.centralUrl && config.agent?.centralToken);
-  _timer = startAdaptiveTimer(pollMs, () => pollStorageOnce(), { firstDelayMs: isEdgeNode ? EDGE_FIRST_POLL_DELAY_MS : 15_000, name: '장비 수집' });
+  let firstTick = true;
+  const tick = async () => {
+    if (firstTick) { firstTick = false; if (isEdgeNode) await whenFirstConfigPullSettled(EDGE_FIRST_PULL_WAIT_MS); }
+    return pollStorageOnce();
+  };
+  _timer = startAdaptiveTimer(pollMs, tick, { firstDelayMs: 15_000, name: '장비 수집' });
 }
 export function storagePollerStatus() {
   // v2.733(감사 C4-03): snapshotSave — 스냅샷 파일 저장 상태(대기·쓰기·실패 횟수·마지막 오류 코드. 경로·원문 없음).

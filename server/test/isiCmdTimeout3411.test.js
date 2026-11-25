@@ -6,7 +6,7 @@
  *     기다리게 하면서 이 경로를 빠뜨린 회귀. 예전에는 호출부의 짧은 시한(20초·45초·exec 기본값)에 그 명령만 끊겼다.
  *  ② 세션 예산이 시한을 줄여 끝까지 기다리지 못한 시리얼 조회가 '실패' 로 1시간 기억돼, 다음 수집에서 다시 묻지 않는다.
  *  ③ 시리얼 '예산 초과' 사유가 실제 경과와 무관하게 늘 "이미 100초 걸려" 라고 말한다.
- *  ④ 엣지 재시작 직후 첫 수집이 중앙 값을 받기 전에 돈다(시한은 늦게 먹으면 실패가 된다) — 첫 수집을 첫 설정 pull 뒤로.
+ *  ④ 엣지 재시작 직후 첫 수집이 중앙 값을 받기 전에 돈다(시한은 늦게 먹으면 실패가 된다) — 첫 pull 이 안 끝났을 때만 기다린다(2회차: 통째로 미루면 push·표본과 순서가 뒤집힌다).
  *  ⑤ SSH_EXEC_TIMEOUT_MS 를 3분보다 길게 잡아 넘기던 엣지는 업그레이드 뒤 isi 명령 대기가 줄어든다 — 옛 env 가 로컬 값을 올린다.
  *
  * ⚠ SSH exec 기본 시한을 1초로 축척한다(모듈 로드 시 굳는다) — 프로젝트 모듈은 전부 아래에서 동적 import 한다.
@@ -189,15 +189,51 @@ test('③ 예산이 바닥나 시작하지 않은 시리얼의 사유는 꾸며 
 
 /* ══════════════════════ ④ 엣지 첫 수집 ══════════════════════ */
 
-test('④ 엣지의 첫 수집은 첫 설정 pull 이 끝난 뒤다 — pull 시작 10초 + 한 번의 시한 20초 < 첫 수집 지연', () => {
+test('④ 첫 설정 pull 관문 — 끝났으면 곧바로 · 안 끝났으면 끝날 때 · 상한이 먼저면 기다리기를 그만둔다', async () => {
+  const g = await import(new URL('storage/firstPullGate.js', SRC));
+  g._resetForTest();
+  assert.equal(g.firstConfigPullSettled(), false);
+  // 상한이 먼저 — false 로 풀린다(기다리다 수집을 영영 못 하는 일이 없다)
+  let t0 = Date.now();
+  assert.equal(await g.whenFirstConfigPullSettled(120), false);
+  assert.ok(Date.now() - t0 >= 100 && Date.now() - t0 < 2_000);
+  // 상한 없음(0·NaN) — 기다리지 않는다
+  assert.equal(await g.whenFirstConfigPullSettled(0), false);
+  assert.equal(await g.whenFirstConfigPullSettled(NaN), false);
+  // 기다리는 중에 pull 이 끝나면 곧바로 true(상한까지 기다리지 않는다)
+  t0 = Date.now();
+  const p = g.whenFirstConfigPullSettled(10_000);
+  setTimeout(() => g.markFirstConfigPullSettled(), 80);
+  assert.equal(await p, true);
+  assert.ok(Date.now() - t0 < 2_000);
+  // 이미 끝났으면 즉시
+  assert.equal(await g.whenFirstConfigPullSettled(10_000), true);
+  g.markFirstConfigPullSettled();   // 여러 번 불러도 된다
+  g._resetForTest();
+});
+
+test('④ 실제 진입 함수: 설정 pull 은 성공·실패 무관하게 끝나면 관문을 연다(pull 꺼짐 포함)', async () => {
+  const g = await import(new URL('storage/firstPullGate.js', SRC));
+  const pull = await import(new URL('agent/storageConfigPull.js', SRC));
+  g._resetForTest();
+  const r = await pull.pullStorageConfigNow();   // 이 테스트 프로세스는 CENTRAL_URL 이 없다 — 'pull 비활성화' 로 곧바로 끝난다
+  assert.equal(r.ok, false);
+  assert.equal(g.firstConfigPullSettled(), true);
+  g._resetForTest();
+});
+
+test('④ 소스 산수 — 첫 수집 시각(15초)은 그대로 · 엣지만 기다린다 · 15초 + 상한 ≥ 첫 pull 시작(10초) + 한 번의 시한(20초)', () => {
   const poll = fs.readFileSync(new URL('storage/poller.js', SRC), 'utf8');
   const pull = fs.readFileSync(new URL('agent/storageConfigPull.js', SRC), 'utf8');
-  const delay = Number(/export const EDGE_FIRST_POLL_DELAY_MS = ([\d_]+);/.exec(poll)?.[1]?.replace(/_/g, ''));
+  const wait = Number(/export const EDGE_FIRST_PULL_WAIT_MS = ([\d_]+);/.exec(poll)?.[1]?.replace(/_/g, ''));
+  const pollFirst = Number(/startAdaptiveTimer\(pollMs, tick, \{ firstDelayMs: ([\d_]+)/.exec(poll)?.[1]?.replace(/_/g, ''));
   const pullFirst = Number(/startAdaptiveTimer\(configPullMs, \(\) => pullStorageConfigNow\(\), \{ firstDelayMs: ([\d_]+)/.exec(pull)?.[1]?.replace(/_/g, ''));
   const pullTimeout = Number(/storage-config\?agent=[\s\S]{0,400}?timeoutMs: ([\d_]+)/.exec(pull)?.[1]?.replace(/_/g, ''));
-  assert.ok(Number.isFinite(delay) && Number.isFinite(pullFirst) && Number.isFinite(pullTimeout), `${delay} ${pullFirst} ${pullTimeout}`);
-  assert.ok(pullFirst + pullTimeout < delay, `첫 pull(${pullFirst} + ${pullTimeout}) 이 첫 수집(${delay}) 전에 끝나야 한다`);
-  assert.match(poll, /firstDelayMs: isEdgeNode \? EDGE_FIRST_POLL_DELAY_MS : 15_000/, '중앙(직접 수집)은 예전 그대로 15초');
+  assert.ok([wait, pollFirst, pullFirst, pullTimeout].every(Number.isFinite), `${wait} ${pollFirst} ${pullFirst} ${pullTimeout}`);
+  assert.equal(pollFirst, 15_000, '첫 수집 시각을 통째로 미루면 첫 push(45초)·첫 노드 부하 표본(40초)과 순서가 뒤집힌다(2회차 N1·N2)');
+  assert.ok(pollFirst + wait >= pullFirst + pullTimeout, `15초 + 상한 ${wait} 이 첫 pull 한 번(${pullFirst} + ${pullTimeout})을 덮어야 한다`);
+  assert.match(poll, /if \(firstTick\) \{ firstTick = false; if \(isEdgeNode\) await whenFirstConfigPullSettled\(EDGE_FIRST_PULL_WAIT_MS\); \}/, '엣지만 · 첫 틱만');
+  assert.match(pull, /_pullStorageConfigNow\(\.\.\.args\)\.finally\(markFirstConfigPullSettled\); \} finally \{ running = false; \}/);
 });
 
 /* ══════════════════════ ⑤ 옛 env ══════════════════════ */
@@ -211,7 +247,9 @@ test('⑤ SSH_EXEC_TIMEOUT_MS 가 3분보다 길면 로컬 값으로 쓴다(올�
   try {
     for (const [env, want, src] of [['240000', 240_000, 'env'], ['300000', 300_000, 'env'], ['600000', 300_000, 'env'],
       ['180000', 180_000, 'default'], ['60000', 180_000, 'default'], ['1000', 180_000, 'default'],
-      ['3000000000', 180_000, 'default'], ['abc', 180_000, 'default'], ['', 180_000, 'default'], ['-5', 180_000, 'default']]) {
+      // 30분을 넘는 값도 버리지 않는다 — sshExec 가 그 env 를 30분으로 잘라 실제로 길게 기다렸다(2회차 N4). 이 항목의 상한 5분으로 자른다.
+      ['1800000', 300_000, 'env'], ['3600000', 300_000, 'env'], ['3000000000', 300_000, 'env'],
+      ['abc', 180_000, 'default'], ['', 180_000, 'default'], ['-5', 180_000, 'default'], ['0', 180_000, 'default'], ['Infinity', 180_000, 'default']]) {
       process.env.SSH_EXEC_TIMEOUT_MS = env;
       assert.equal(val(), want, `SSH_EXEC_TIMEOUT_MS='${env}'`);
       assert.equal(from(), src, `출처 SSH_EXEC_TIMEOUT_MS='${env}'`);

@@ -104,17 +104,17 @@ export function envIntervals() {
   return out;
 }
 
-/** sshExec 가 받는 exec 시한의 상한(30분 — `proxy/sshExec.js execTimeoutMs`) — 넘는 값은 단위 착오로 보고 쓰지 않는다. */
-const LEGACY_ENV_SANE_MAX_MS = 1_800_000;
 /**
- * 옛 env 가 이 항목의 로컬 기본값을 **올리는** 값(없으면 null). 사양의 `legacyEnv` 가 있고 · 그 값이 기본값보다 길고 · 쓸 수 있는 값일 때만.
+ * 옛 env 가 이 항목의 로컬 기본값을 **올리는** 값(없으면 null). 사양의 `legacyEnv` 가 있고 · 그 값이 기본값보다 길 때만.
  * 줄이는 방향으로는 쓰지 않는다(옛 env 의 기본 60초가 새 기본 3분을 깎으면 안 된다).
+ * 큰 값도 버리지 않고 이 항목의 상한으로 자른다 — `proxy/sshExec.js` 가 그 env 를 버리지 않고 30분으로 잘라 썼으므로(예전에 실제로 길게 기다렸다),
+ *   여기서만 버리면 그런 엣지의 대기가 업그레이드로 줄어든다(점검 2회차 N4 — 1회차는 30분 초과를 '단위 착오' 로 보고 무시했다).
  */
 function legacyEnvMs(spec) {
   if (!spec?.legacyEnv) return null;
   const raw = process.env[spec.legacyEnv];
   const l = typeof raw === 'string' && raw.trim() !== '' ? Number(raw) : NaN;
-  if (!Number.isFinite(l) || l <= spec.def || l > LEGACY_ENV_SANE_MAX_MS) return null;
+  if (!Number.isFinite(l) || l <= spec.def) return null;
   return Math.min(spec.max || MAX_MS, Math.round(l));
 }
 

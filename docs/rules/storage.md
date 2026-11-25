@@ -263,8 +263,12 @@
       `collectViaSsh(device, { quick: true, budgetMs: 바깥 시한 − 20초 })` — 부가 명령은 호출부의 짧은 시한(20초 · 45초 · exec 기본값)을 쓴다.
       같은 회차: ① **예산이 시한을 줄여 끊긴 명령은 실패가 아니라 예산 갈래**(`budgetedSh` 가 `SESSION_BUDGET` 으로 바꿔 던진다 · 시리얼은 그것을
       1시간 기억하지 않는다) ② 시리얼의 '예산 초과' 는 `budgetSkip` 으로 직접 넘긴다(경과 시간을 꾸며 넘기면 문구가 늘 "이미 100초") ③ 엣지의
-      첫 수집은 첫 설정 pull 뒤(`EDGE_FIRST_POLL_DELAY_MS` — 시한은 늦게 먹으면 '실패' 가 된다) ④ `SSH_EXEC_TIMEOUT_MS` 가 3분보다 길면 로컬 값으로
-      쓴다(사양의 `legacyEnv` — 올리기만 · 예전에 그 env 로 느린 클러스터를 넘기던 엣지의 대기가 업그레이드로 줄지 않게). 회귀 `test/isiCmdTimeout3411.test.js`.
+      첫 수집은 첫 설정 pull 이 **아직 안 끝났을 때만** 그 끝을 기다린다(`storage/firstPullGate.js` · 상한 `EDGE_FIRST_PULL_WAIT_MS` — 시한은 늦게
+      먹으면 '실패' 가 된다. ⚠ 첫 수집 시각(15초)을 통째로 미루지 말 것 — 첫 push(45초) · 첫 노드 부하 표본(40초)과 순서가 뒤집혀 새 스냅샷이
+      push 한 주기 늦고 첫 표본이 건너뛰어진다 — 2회차 N1 · N2. 대기 타이머는 unref 하지 않는다) ④ `SSH_EXEC_TIMEOUT_MS` 가 3분보다 길면 로컬 값으로
+      쓴다(사양의 `legacyEnv` — 올리기만 · 큰 값도 버리지 않고 상한 5분으로 — sshExec 가 그 env 를 30분으로 잘라 실제로 길게 기다렸다 · 예전에 그
+      env 로 느린 클러스터를 넘기던 엣지의 대기가 업그레이드로 줄지 않게) ⑤ 시리얼 사유 문구(`storageSerialText.js` budget)는 '시작하지 않았다' 로
+      못 박지 않는다(끝까지 못 기다린 경우도 같은 갈래다). 회귀 `test/isiCmdTimeout3411.test.js`.
       화면은 주기 표의 열이 아니라 **따로 '대기 시간' 표**로 그린다(`timerSpecs`/`timeoutSpecs` — 주기 표는 1440px 에서도 가로로 넘쳐 새 열이
       스크롤해야만 보였다 · 이름 뒤에 조사를 붙이지 않는다). 수집기의 장비 시한 env 는 폴러와 같은 `envPositive` 로 읽는다(값이 갈리면 예산이
       장비 시한을 넘는다). 회귀 `test/isiCmdTimeout339.test.js` · 웹 `storageIntervals.test.js`.
