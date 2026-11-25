@@ -193,7 +193,8 @@ export function demoCvpDevice(sw, ts, { variant = 'now', optics = {}, P = null }
     key: sw.key, hostname: sw.hostname, model: sw.model, serial: sw.serial, mgmtIp: sw.mgmtIp, eosVersion: sw.eosVersion,
     streaming: sw.streaming, ts,
     info: { fqdn: `${sw.hostname}.demo.local`, mac: `00:1c:73:${pad(((sw.h >>> 16) % 256).toString(16))}:${pad(((sw.h >>> 8) % 256).toString(16))}:${pad((sw.h % 256).toString(16))}`,
-      bootAt: ts - (5 + (sw.h % 200)) * 86_400_000, status: 'Registered', container: `Tenant/${sw.role}`, internalVersion: `${sw.eosVersion}-${30000000 + (sw.h % 9000000)}`, ztpMode: false },
+      bootAt: ts - (5 + (sw.h % 200)) * 86_400_000, status: 'Registered', container: `Tenant/${sw.role}`, internalVersion: `${sw.eosVersion}-${30000000 + (sw.h % 9000000)}`, ztpMode: false,
+      ...demoComplianceInfo(sw, ts) },
   };
   if (!sw.streaming) {
     return { ...dev, telemetry: 'not-streaming', parts: undefined, partsAt: null, bgp: null, ports: null, countersAt: null, sysAt: null, cpu: null, mem: null };
@@ -205,6 +206,28 @@ export function demoCvpDevice(sw, ts, { variant = 'now', optics = {}, P = null }
   return {
     ...dev, telemetry: 'ok', ports, parts, partsAt: ts, partsAttempted: true, descsAt: ts, bgp: bgpOf(sw, ts, variant),
     countersAt: ts, sysAt: ts, cpu: { pct: cpu, counters: null }, mem: { pct: mem, total: 8_589_934_592 },
+    // v3.41(⑧) 데모 — VLAN · 채널 소속을 읽은 시각 · MLAG 상태(leaf · spine 만 MLAG 사용). 여덟 번째마다 피어 링크 down · 열한 번째마다 협상 안 됨(가상).
+    cfgReadAt: { vlan: ts, lag: ts },
+    ...(sw.role === 'leaf' || sw.role === 'spine' ? { mlagStatus: { state: sw.h % 11 === 5 ? 'inactive' : 'active', negotiation: sw.h % 11 === 5 ? 'connecting' : 'connected',
+      peerLinkState: sw.h % 8 === 3 ? 'down' : 'up', peerLink: 'Port-Channel1000', domain: `${sw.hostname.split('-')[0]}-${sw.role}`, localIntf: 'Vlan4094', at: ts } } : { mlagStatus: { state: 'disabled', at: ts } }),
+  };
+}
+
+/**
+ * v3.41(③ 버전 준수) 데모 — CVP 레거시 인벤토리 준수 코드 · 버그/CVE 노출 · 수명주기. 값은 전부 **가상**이다(실제 Arista 공지가 아니다).
+ *   4.29.8M(oob) 은 지원 종료 지남 · 4.30.4M 은 180일 안 · 4.32.1F 는 CVE 높음 · 일곱 번째 장비마다 설정 불일치.
+ */
+function demoComplianceInfo(sw, ts) {
+  const DAY = 86_400_000;
+  const v = String(sw.eosVersion || '');
+  const swEnd = v.startsWith('4.29') ? ts - 40 * DAY : v.startsWith('4.30') ? ts + 120 * DAY : ts + 700 * DAY;
+  const bugs = v.startsWith('4.32') ? { bugCount: 7, cveCount: 2, highestBug: 'high', highestCve: 'high', acknowledged: false }
+    : v.startsWith('4.29') ? { bugCount: 3, cveCount: 1, highestBug: 'low', highestCve: 'low', acknowledged: false } : null;
+  return {
+    complianceCode: sw.h % 7 === 3 ? '0001' : '0000', complianceIndication: sw.h % 7 === 3 ? 'WARNING' : 'NONE', mlag: sw.role === 'leaf' || sw.role === 'spine',
+    readKinds: ['enrich', 'lifecycle', 'bugs'],
+    lifecycle: { swEolVersion: v.replace(/[A-Z]$/, ''), swEndOfSupport: swEnd, hwEndOfLife: sw.role === 'oob' ? ts + 300 * DAY : null, hwEndOfSale: sw.role === 'oob' ? ts - 100 * DAY : null, hwEndOfTacSupport: null, hwEndOfRma: null },
+    ...(bugs ? { bugs } : {}),
   };
 }
 

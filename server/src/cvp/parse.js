@@ -704,6 +704,28 @@ export function firstSpeed(flat) {
     const r = speedBps(unwrap(pick(flat, [k])));
     if (r != null) return r;
   }
+  return speedFromAnyField(flat);
+}
+/*
+ * v3.41(사용자 실장비 캡처 — DCS-7280SR-48C6 · EOS 4.27.4M 의 포트 표 '속도' 칸이 전부 '—'): 위 세 이름에 값이 없으면 이름에 'speed' 또는
+ *   'linkmode' 가 든 다른 필드에서 단위가 붙은 값('speed100Gbps' · 'linkModeForced100GbpsFull' · '100G')만 찾는다. 단위 없는 숫자는 여기서 쓰지 않는다
+ *   (어떤 단위인지 모르는 수를 bps 로 단정하지 않게 — 'speed' 이름의 정확한 필드만 위에서 수를 받는다). ⚠ 실장비 필드 이름은 아직 미확인(추정).
+ */
+const SPEED_IN_TEXT = /(\d{1,4})(?:p(\d{1,2}))?\s?(g|m)(?:bps|bit)/i;
+const SPEED_FIELD_RE = /speed|linkmode/i;
+const SPEED_FIELD_SKIP = /autoneg|duplex|advert|capab|supported|config|desired|lanes|max|min|default/i;   // 반증 E7: 최대 · 기본 속도는 지금 속도가 아니다
+function speedFromAnyField(flat) {
+  if (!isObj(flat)) return null;
+  for (const [k, v0] of Object.entries(flat)) {
+    const last = k.split('.').pop();
+    if (!SPEED_FIELD_RE.test(last) || SPEED_FIELD_SKIP.test(k)) continue;
+    const v = unwrap(v0);
+    if (typeof v !== 'string') continue;
+    const m = SPEED_IN_TEXT.exec(v.slice(0, 64));
+    if (!m) continue;
+    const n = Number(m[2] != null ? `${m[1]}.${m[2]}` : m[1]) * (m[3].toLowerCase() === 'g' ? 1e9 : 1e6);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
   return null;
 }
 
@@ -756,6 +778,137 @@ export function parseInterfaces(text, { max = PORT_MAX } = {}) {
   }
   if (!ports.length && unrecognized) return { ports: null, keys, truncated: 0 };
   return { ports, keys, truncated, droppedFields };
+}
+
+/* ── v3.41 VLAN(스위치포트) · 포트 채널 소속 · MLAG 상태 — 부품 주기에 읽는 별도 경로(⚠ 경로 · 필드 이름은 EOS Sysdb 관용 추정, 실장비 미확인) ──
+ * 사용자 실장비 캡처에서 포트 표의 VLAN · LAG 칸이 전부 비어 있었다. 인터페이스 상태 노드(intfStatus)에는 VLAN · 채널 소속 필드가 없어서
+ *   parseInterfaces 의 pick(vlan · lag)은 실장비에서 늘 비었던 것으로 본다(추정 — 데모만 값을 채웠다). 그래서 따로 읽는다.
+ */
+/**
+ * v3.41: 포트 목록에 VLAN · 채널 소속을 얹는다(순수). 읽은 맵에 그 포트가 있으면 그 값, 채널 맵을 읽었는데 없으면 ''(소속 없음),
+ *   맵을 못 읽었으면(null) 포트 값을 그대로 둔다(intfStatus 에서 읽은 값 — 대개 ''). 새 배열을 돌려준다.
+ */
+export function mergeL2Cfg(ports, { vlans = null, members = null, partial = {} } = {}) {
+  if (!Array.isArray(ports)) return ports;
+  return ports.map((p) => {
+    if (!p || typeof p !== 'object') return p;
+    const out = { ...p };
+    if (vlans instanceof Map && vlans.has(p.name)) out.vlan = vlans.get(p.name);
+    if (members instanceof Map) {
+      if (members.has(p.name)) out.lag = members.get(p.name);
+      // 반증 F1: 일부만 읽은 맵이면 맵에 없는 포트를 '소속 없음' 으로 비우지 않는다(모른다).
+      else if (!partial.lag) out.lag = p.lag && /port-?channel/i.test(p.lag) ? p.lag : '';
+    }
+    return out;
+  });
+}
+/** 스위치포트 설정(…/bridging/switchIntfConfig/switchIntfConfig) → { vlans: Map(포트 → 'routed' | '100' | 'trunk' | 'trunk · native 10') | null, keys }. */
+export function parseSwitchport(text) {
+  const { entities, format, keys } = entitiesOf(text);
+  if (notRead(format, entities)) return { vlans: null, keys };
+  const vlans = new Map();
+  for (const [name, f] of entities) {
+    const mode = String(unwrap(pick(f, ['switchportMode', 'mode', 'portMode'])) ?? '').toLowerCase();
+    const enabled = unwrap(pick(f, ['enabled', 'switchportEnabled']));
+    const access = numOrNull(unwrap(pick(f, ['accessVlan', 'accessVlanId'])));
+    const native = numOrNull(unwrap(pick(f, ['trunkNativeVlan', 'nativeVlan'])));
+    if (!mode && enabled === undefined && access == null) continue;   // 스위치포트 필드가 없는 개체
+    let v;
+    if (enabled === false || /routed/.test(mode)) v = 'routed';
+    else if (/trunk/.test(mode)) v = native != null && native > 0 && native <= 4094 ? `trunk · native ${native}` : 'trunk';
+    else if (/dot1q|tunnel/.test(mode)) v = mode.replace(/^switchportmode/, '').slice(0, 24) || 'tunnel';
+    else v = access != null && access > 0 && access <= 4094 ? String(access) : (mode ? mode.replace(/^switchportmode/, '').slice(0, 24) : '');
+    if (v) vlans.set(str(name, 64), v);
+  }
+  if (!vlans.size && entities.size) return { vlans: null, keys };
+  return { vlans, keys };
+}
+const PO_RE = /port-?channel\s?(\d{1,5})/i;
+/** 값(문자열 · 포인터 배열 · 객체)에서 'Port-ChannelN' 을 찾는다(길이를 먼저 자른다 — 선형). */
+function poNameOf(v) {
+  const x = unwrap(v);
+  let t = '';
+  if (typeof x === 'string') t = x;
+  else if (Array.isArray(x)) t = x.slice(0, 16).map((y) => (typeof y === 'string' ? y : '')).join('/');
+  else if (isObj(x)) { try { t = JSON.stringify(x); } catch { t = ''; } }
+  const m = PO_RE.exec(String(t).slice(0, 512));
+  return m ? `Port-Channel${m[1]}` : null;
+}
+/** 포트 채널 소속(…/lag/input/config/cli/phyIntf 등) → { members: Map(물리 포트 → 'Port-ChannelN') | null, keys }. 소속 없는 포트는 넣지 않는다. */
+export function parseLagMembers(text) {
+  const { entities, format, keys } = entitiesOf(text);
+  // 포인터만 든 응답(포트 노드 하나 — `lag: {ptr}`)은 entitiesOf 가 개체로 세지 않는다 — 그때도 아래 훑기로 본다.
+  if (notRead(format, entities)) { const raw = rawLagScan(text); return raw.seen ? { members: raw.members, keys } : { members: null, keys }; }
+  const members = new Map(); let seen = 0;
+  for (const [name, f] of entities) {
+    if (!/^(ethernet|et)\d/i.test(String(name))) continue;
+    // 반증 E1: 채널 소속 표(lag/…/phyIntf)에 포트 개체가 있으면 그 표는 읽은 것이다 — 소속 칸이 없는 포트는 '채널 없음'(null 로 두면 연속 실패 차단이 그 CVP 의 소속 읽기를 멈췄다).
+    seen++;
+    let po = null; let hasField = false;
+    // 평면화된 키(포인터는 'lag.ptr.3' 처럼 펼쳐진다)의 **어느 조각이든** lag · channel 이면 그 값을 본다.
+    for (const [k, v] of Object.entries(isObj(f) ? f : {})) {
+      if (!/(^|\.)(lag|lagintf|lagid|portchannel|channelgroup|channel)(\.|$)/i.test(k.slice(0, 128))) continue;
+      hasField = true;
+      po = poNameOf(v);
+      if (po) break;
+    }
+    if (po) members.set(str(name, 64), po);
+  }
+  // entitiesOf 는 포인터 값을 필드로 세지 않는다(없는 개체를 지어내지 않게) — 소속이 포인터(`{ptr:[…,'Port-Channel10']}`)로 오면 위에서 못 본다.
+  //   그래서 알림을 한 번 더 훑어 '포트 이름 개체의 lag·channel 갱신' 값만 본다(값은 512자로 잘라 정규식 — 선형).
+  const raw = rawLagScan(text);
+  for (const [port, po] of raw.members) if (!members.has(port)) members.set(port, po);
+  if (!seen && !raw.seen) return { members: null, keys };
+  return { members, keys };
+}
+const PORT_NAME_RE = /^(ethernet|et)\d[\d/]*$/i;
+const LAG_FIELD_RE = /^(lag|lagintf|lagid|portchannel|channelgroup|channel)$/i;   // 반증 E6: 칸 이름 전체 일치('flags' 가 'lag' 에 맞지 않게)
+function rawLagScan(text) {
+  const members = new Map(); let seen = 0;
+  let values = [];
+  try { values = splitJsonStream(text).values; } catch { return { members, seen }; }
+  for (const v of values) {
+    if (!isObj(v) || !Array.isArray(v.notifications)) continue;
+    for (const n of v.notifications.slice(0, 20_000)) {
+      if (!isObj(n) || !isObj(n.updates)) continue;
+      const segs = typeof n.path === 'string' ? n.path.split('/').filter(Boolean) : Array.isArray(n.path_elements) ? n.path_elements.filter((x) => typeof x === 'string') : [];
+      const tail = segs.length ? decodeSeg(segs[segs.length - 1]) : '';
+      for (const [k, u] of Object.entries(n.updates)) {
+        const val = isObj(u) && Object.hasOwn(u, 'value') ? u.value : u;
+        let port = null; let po = null;
+        if (PORT_NAME_RE.test(tail) && LAG_FIELD_RE.test(String(k))) { port = tail; po = poNameOf(isObj(val) && val.ptr ? val.ptr : val); }
+        // 컬렉션의 포트별 포인터(`Ethernet1: {ptr:[…/phyIntf/Ethernet1]}`)는 소속 값이 아니다 — 세지 않는다(세면 빈 맵으로 '읽음' 이 되어 포인터를 따라가지 않는다).
+        else if (PORT_NAME_RE.test(String(k)) && isObj(val) && ptrSegs(val) == null) {
+          let t = ''; try { t = JSON.stringify(val).slice(0, 512); } catch { t = ''; }
+          if (/"(lag|lagIntf|lagId|portChannel|channelGroup|channel)"/i.test(t)) { port = String(k); po = poNameOf(t); }
+        }
+        if (port) { seen++; if (po && members.size < 4096) members.set(str(port, 64), po); }
+      }
+    }
+  }
+  return { members, seen };
+}
+const MLAG_PREFIX = /^(mlagstate|mlagnegotiationstatus|negotiationstatus|negstatus|linkstate|mlaglinkstatus|peerlinkstatus|intfoper|link)/i;
+const mlagWord = (v) => { const x = unwrap(v); if (x == null || x === '' || (typeof x !== 'string' && typeof x !== 'boolean')) return null; const s0 = String(x).trim(); const c = s0.replace(MLAG_PREFIX, '').replace(/^[\s_:-]+/, ''); return (c || s0).slice(0, 32).toLowerCase(); };
+/**
+ * MLAG 상태(…/Sysdb/mlag/status) → { status: { state, negotiation, peerLink, peerLinkState, domain, localIntf } | null, keys }.
+ *   필드가 하나도 없으면 null('못 읽음'). 'disabled' 는 MLAG 를 쓰지 않는 장비다(문제가 아니다 — 판정은 cvp/redundancy.js).
+ */
+export function parseMlag(text) {
+  const { entities, format, keys } = entitiesOf(text);
+  if (notRead(format, entities)) return { status: null, keys };
+  const f = {};
+  for (const [, x] of entities) Object.assign(f, isObj(x) ? x : {});
+  const out = {
+    state: mlagWord(pick(f, ['mlagState', 'state', 'operState'])),
+    negotiation: mlagWord(pick(f, ['negotiationStatus', 'negStatus', 'mlagNegotiationStatus'])),
+    peerLink: (() => { const v = unwrap(pick(f, ['peerLink', 'peerLinkIntf', 'peerLinkName'])); return typeof v === 'string' ? str(v, 64) : poNameOf(v); })(),
+    peerLinkState: mlagWord(pick(f, ['peerLinkStatus', 'peerLinkState', 'mlagLinkStatus'])),
+    domain: (() => { const v = unwrap(pick(f, ['domainId', 'domain'])); return typeof v === 'string' || typeof v === 'number' ? str(String(v), 64) : null; })(),
+    localIntf: (() => { const v = unwrap(pick(f, ['localInterface', 'localIntf', 'localIntfId'])); return typeof v === 'string' ? str(v, 64) : null; })(),
+  };
+  if (Object.values(out).every((v) => v == null || v === '')) return { status: null, keys };
+  return { status: out, keys };
 }
 
 /*

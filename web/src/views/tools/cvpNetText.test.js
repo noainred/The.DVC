@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   dateText, forecastText, linkqBasis, fieldValue, linkCheckState, layoutNodes, sparkPath, TAB_GROUPS, TAB_KEYS, changeLabel, changeValue,
   macText, idleText, opticTrendText, naText, sourceText, transitBasis, perMonthText, bytesText,
+  emptyColumnNotes, bugText, lifeText, channelText,
 } from './cvpNetText.js';
 
 // v3.38 CVP 네트워크 기능 — 화면 문구 · 그리기 함수(판정은 서버 cvp/*.js).
@@ -55,7 +56,8 @@ describe('cvpNetText', () => {
     for (const k of ['overview', 'devices', 'models', 'traffic', 'intf', 'portmap', 'ports', 'optics', 'power', 'events', 'settings']) expect(TAB_KEYS).toContain(k);
     for (const k of ['linkq', 'topology', 'locate', 'compare']) expect(TAB_KEYS).toContain(k);
     expect(new Set(TAB_KEYS).size).toBe(TAB_KEYS.length);
-    expect(TAB_GROUPS.filter((g) => g.name).map((g) => g.name)).toEqual(['현황', '포트 · 링크', '연결', '변경']);
+    expect(TAB_GROUPS.filter((g) => g.name).map((g) => g.name)).toEqual(['현황', '포트 · 링크', '연결', '변경 · 준수']);
+    for (const k of ['compliance', 'redundancy']) expect(TAB_KEYS).toContain(k);
   });
   it('전후 비교 문구', () => {
     expect(changeLabel({ kind: 'port', item: 'Ethernet1', field: 'oper' })).toBe('Ethernet1 · 링크');
@@ -72,5 +74,23 @@ describe('cvpNetText', () => {
     expect(macText('005056AABBCC')).toBe('00:50:56:aa:bb:cc');
     expect(sourceText(['fdb', 'cvp'])).toBe('MAC 테이블 + CVP 위치');
     expect(transitBasis({ basis: 'macs', portMacs: 300 }, 64)).toContain('300');
+  });
+  it('v3.41 빈 칸 이유 — 모든 행이 빈 칸만 · 근거를 단정하지 않는다', () => {
+    const ports = [{ name: 'Ethernet1', oper: 'up', speedBps: null, vlan: '', lag: '', inBps: null, outBps: null }, { name: 'Ethernet2', oper: 'nolink', speedBps: null, vlan: '', lag: '' }, { name: 'Management1', speedBps: 1e9 }];
+    const n = emptyColumnNotes(ports, { usedPaths: { counters: '/c' }, missing: { switchport: '없음(404)' }, seenFields: { interfaces: ['operStatus', 'adminStatus'] } });
+    expect(n.map((x) => x.col)).toEqual(['속도', '수신 · 송신 · 오류', 'VLAN', 'LAG']);
+    expect(n[0].text).toContain('operStatus, adminStatus');
+    expect(n[2].text).toContain('없음(404)');
+    expect(n[3].text).toContain('v3.41');
+    expect(emptyColumnNotes([{ name: 'Ethernet1', oper: 'up', speedBps: 1e9, vlan: '1', lag: 'Port-Channel1', inBps: 1 }], {})).toEqual([]);
+    expect(emptyColumnNotes([], {})).toEqual([]);
+  });
+  it('v3.41 버전 준수 · 이중화 문구', () => {
+    expect(bugText({ state: 'unread' })).toBe('—');
+    expect(bugText({ state: 'none' })).toBe('노출 없음');
+    expect(bugText({ state: 'high', bugCount: 7, cveCount: 2, acknowledged: true })).toBe('버그 7 · CVE 2 (확인함)');
+    expect(lifeText({ state: 'none' })).toBe('날짜 없음');
+    expect(lifeText({ state: 'passed', first: NOW - 3 * 86_400_000, swEnd: NOW - 3 * 86_400_000 }, NOW)).toMatch(/^소프트웨어 \d{4}-\d{2}-\d{2}\(3일 지남\)$/);
+    expect(channelText({ up: 1, expected: 2, total: 3 })).toBe('1/2 (꺼짐 1)');
   });
 });

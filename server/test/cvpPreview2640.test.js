@@ -238,12 +238,13 @@ test('testCvp — 성공이면 sample(인벤토리 원문 앞부분) + cvpVersio
 test('cleanStatus — samples 를 좁힌다: head 5000 → 4096 · 모르는 키 제거 · 17종 → 16 · 수치는 numOrNull · 없으면 필드 생략', () => {
   const now = 1_700_000_000_000;
   const samples = {};
-  for (let i = 0; i < 17; i++) samples[`kind${i}`] = { path: `/p/${i}`, head: 'h'.repeat(5000), status: 200, bytes: '1234', ok: true, at: now + 999_999, reason: 'r'.repeat(400), device: 'D', extra: 'x', __proto__: { z: 1 } };
+  // v3.41: 상한을 16 → 32(SAMPLE_KINDS_MAX — 종류가 늘어 기존 표본을 밀어냈다)로 올렸다. 상한 + 1 종을 보내 잘리는지 본다(숫자를 박지 않는다).
+  for (let i = 0; i < E.SAMPLE_KINDS_MAX + 1; i++) samples[`kind${i}`] = { path: `/p/${i}`, head: 'h'.repeat(5000), status: 200, bytes: '1234', ok: true, at: now + 999_999, reason: 'r'.repeat(400), device: 'D', extra: 'x', __proto__: { z: 1 } };
   samples.kind0.status = ''; samples.kind0.bytes = null; samples.kind0.ok = 'true';
   samples.kind1.reason = undefined; samples.kind1.device = undefined;
   const st = E.cleanStatus({ cvpId: 'c1', name: 'n', ok: true, samples: { ...samples, __proto__: null, constructor: { path: '/evil' } }, }, now);
   assert.ok(st.samples);
-  assert.equal(Object.keys(st.samples).length, E.SAMPLE_KINDS_MAX, '17종 → 16');
+  assert.equal(Object.keys(st.samples).length, E.SAMPLE_KINDS_MAX, '상한 + 1 종 → 상한');
   assert.ok(!('constructor' in st.samples) || typeof st.samples.constructor !== 'object' || !st.samples.constructor.path, '예약 키는 받지 않는다');
   const k0 = st.samples.kind0;
   assert.equal(k0.head.length, E.SAMPLE_HEAD_MAX, 'head 5000 → 4096');

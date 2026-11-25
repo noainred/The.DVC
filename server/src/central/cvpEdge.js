@@ -17,7 +17,7 @@ import { admitAgent, createDebouncedWriter, isPlainObj } from './edgeRecord.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { capStr } from '../util/capStr.js';
 import { setCvpCollectBaseResolver, ackCvpCollect } from '../cvp/collectRequests.js';
-import { CANDIDATES } from '../cvp/client.js';
+import { CANDIDATES, PROBE_MAX } from '../cvp/client.js';
 import { DEVICE_MAX, PORT_MAX, PEER_MAX, PART_MAX, PART_STATES, PSU_W_MAX, FDB_MAX, LLDP_MAX } from '../cvp/parse.js';
 import { cmpVersion } from '../util/cmpVersion.js'; // v2.613 CONTRACT2613-04: 엣지 버전 게이트
 
@@ -154,7 +154,9 @@ const numObj = (o, keys) => {
 };
 
 /** v2.640: 원문 표본 종류 상한 · head 상한(client.js SAMPLE_HEAD_CHARS 와 같은 값 — 변조 엣지가 큰 본문을 실어도 여기서 잘린다). */
-export const SAMPLE_KINDS_MAX = 16;
+// v3.41 반증 F2: 종류가 늘어(스위치포트 · 채널 소속 · MLAG) 16 이면 새 종류가 앞에 들어가 기존 표본(냉각 · 온도 · 트랜시버 · LLDP · FDB)을 밀어냈다 —
+//   후보 종류 수 + 여유로 맞춘다(cvpRedundancy339 ③ 이 CANDIDATES 수 이상임을 고정한다).
+export const SAMPLE_KINDS_MAX = 32;
 export const SAMPLE_HEAD_MAX = 4096;
 const BAD_KEY = new Set(['__proto__', 'constructor', 'prototype']);
 /**
@@ -211,9 +213,9 @@ export function cleanStatus(x, now = Date.now()) {
   };
 }
 
-/** v2.641: 경로 탐색 표본 정제 — PROBE_MAX(28)개 · head 1536자. */
+/** v2.641: 경로 탐색 표본 정제 — client.PROBE_MAX 개 · head 1536자. v3.41 반증 F2: 예전 28 고정이라 표본을 늘리자 새 경로(채널 · MLAG 등)가 중앙에서 버려졌다. */
 export function cleanProbes(list, now = Date.now()) {
-  return list.filter(isPlainObj).slice(0, 28).map((x) => ({
+  return list.filter(isPlainObj).slice(0, PROBE_MAX).map((x) => ({
     path: s(x.path, 256), device: s(x.device, 128), status: numOrNull(x.status), at: tsClamp(x.at, now), ok: x.ok === true,
     bytes: numOrNull(x.bytes), head: s(x.head, 1536), empty: x.empty === true ? true : x.empty === false ? false : null,
     updates: numOrNull(x.updates), ptrs: numOrNull(x.ptrs), ptrKeys: Array.isArray(x.ptrKeys) ? x.ptrKeys.filter((k) => typeof k === 'string').slice(0, 12).map((k) => s(k, 128)) : [],
@@ -275,6 +277,19 @@ export function cleanInfo(v, now = Date.now()) {
     const l = v.lifecycle;
     out.lifecycle = { swEolVersion: s(l.swEolVersion, 64), swEndOfSupport: numOrNull(l.swEndOfSupport), hwEndOfLife: numOrNull(l.hwEndOfLife),
       hwEndOfSale: numOrNull(l.hwEndOfSale), hwEndOfTacSupport: numOrNull(l.hwEndOfTacSupport), hwEndOfRma: numOrNull(l.hwEndOfRma) };
+  }
+  // v3.41(⑧ 이중화): MLAG 상태 — 아는 칸 여섯 개 · 문자열 상한 · 시각은 수신 시각으로 자른다(엣지 시계가 빠르면 '지금보다 뒤' 가 되지 않게).
+  if (isPlainObj(v.mlagStatus)) {
+    const m = v.mlagStatus;
+    const w = (x) => { const t = s(x, 64); return t ? t.toLowerCase() : null; };
+    const ms = { state: w(m.state), negotiation: w(m.negotiation), peerLink: s(m.peerLink, 64) || null, peerLinkState: w(m.peerLinkState),
+      domain: s(m.domain, 64) || null, localIntf: s(m.localIntf, 64) || null, at: tsClamp(m.at, now) };   // 반증 F6: 0 · 음수 시각도 거른다(tsClamp)
+    // 반증 F6: 칸이 하나도 없는 MLAG 상태는 싣지 않는다('못 읽음' 이어야 한다 — 빈 객체가 '확인 불가' 로 판정됐다).
+    if (ms.state || ms.negotiation || ms.peerLinkState || ms.peerLink) out.mlagStatus = ms;
+  }
+  if (isPlainObj(v.cfgReadAt)) {   // v3.41: VLAN · 채널 소속을 읽은 시각(없으면 null — '못 읽음')
+    const t = (x) => { const n = numOrNull(x); return n == null || n <= 0 ? null : Math.min(n, now); };
+    out.cfgReadAt = { vlan: t(v.cfgReadAt.vlan), lag: t(v.cfgReadAt.lag), ...(v.cfgReadAt.lagPartial === true ? { lagPartial: true } : {}), ...(v.cfgReadAt.vlanPartial === true ? { vlanPartial: true } : {}) };
   }
   if (isPlainObj(v.bugs)) {
     const b = v.bugs;
