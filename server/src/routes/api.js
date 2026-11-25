@@ -3,6 +3,7 @@ import { config } from '../config.js';
 import { authDisabledRole, toolActorOf } from '../auth/auth.js';
 import { toolGate, exactToolAccessIssue } from '../auth/toolAccess.js';
 import { registerVmMetrics } from './api/vmMetrics.js';
+import { registerVmPower } from './api/vmPower.js'; // v3.39.0 VM 전원 이력(달력 · 드로어)
 import { registerOverviewNsx } from './api/overviewNsx.js';
 import { registerOverviewCards } from './api/overviewCards.js'; // v2.664 Overview 카드 8장 · 전체 소비 전력
 import { registerProvision } from './api/provision.js';
@@ -146,6 +147,7 @@ api.use('/tools', toolGate({ roleOf: toolGateRole, userOf: toolGateUser }));
 api.use(toolGate({ roleOf: toolGateRole, userOf: toolGateUser, issueOf: exactToolAccessIssue }));
 
 registerVmMetrics(api);
+registerVmPower(api);
 registerOverviewNsx(api);
 registerOverviewCards(api);
 registerProvision(api);

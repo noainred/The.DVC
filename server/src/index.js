@@ -196,6 +196,7 @@ import { startFocusMonWorker, stopFocusMonWorker } from './agent/focusMonWorker.
 import './central/focusMonEdge.js'; // 〃 엣지 깨우기 구현 등록(service.setWakeImpl)   // 법인 간 전송 속도(v2.735) — 중앙 전용 · 기본 꺼짐(opt-in)
 import { startLinkCheckWorker } from './agent/linkCheckWorker.js'; // 엣지가 재는 링크(엣지→중앙·엣지↔엣지)
 import { startPowerOffPoller } from './tools/powerOffPoller.js';     // 전원 꺼짐 점검(v2.484)
+import { startPowerWatch } from './vmpower/watcher.js';            // VM 전원 구간 관측(v3.39.0) — 달력 · 드로어 '전원 상태'
 import { resumeHostAccessPending } from './hostaccess/service.js';  // 호스트 접근 제어 확정 대기 복구(v2.485)
 import { startSshAccessScheduler } from './sshaccess/service.js';
 import { envPositive } from './util/envNumber.js';   // 55회차: 양수 env 는 하나로
@@ -668,6 +669,7 @@ const stagger = [
   resumeInstallJobs, // v2.844 Bareos 완전 설치 — 러너 상태 이어 읽기(업로드·중앙 단계 중이던 것은 '끊김' 실패로 — 다시 시도 가능)
   startSshAccessScheduler, // v3.9.0 SSH 공용 접속 주기 점검(첫 실행 90초 뒤 · 10분마다) — 키 원문 지문 대조 · 받는 곳 · 사용 기록 쓰기
   resumeHostAccessPending, // 호스트 접근 제어(v2.485) — 확정 대기(commit-confirm)가 남아 있으면 기한을 이어받아 자동 되돌림 타이머 재무장
+  startPowerWatch,      // VM 전원 구간(v3.39.0) — 60초 틱, 10분마다 스냅샷 전원 상태 diff 만 기록 + 첫 관측 때 VM 추적 기록으로 소급 + 재진입 가드, vCenter 왕복 없음
   startPowerOffPoller,  // 전원 꺼짐 점검(v2.484) — 60초 틱, 설정 주기(기본 6h) 경과 시 스냅샷의 꺼진 VM 관측 적재 + 재진입 가드, vCenter 왕복 없음
   startGuestDiskPush,   // 〃 엣지→중앙 push(v2.466) — site 모드 vCenter 의 guest.disk 를 엣지가 수집해 중앙에 올림. CENTRAL_URL·pushGuestDisk 미충족이면 자기기동 안 함
   startVmSeriesPoller,  // 실시간 스파이크 수집(v2.510) — 적응형 타이머(기본 50분) + 재진입 가드 + 동시성 4 + 디스크 가드. opt-in(기본 꺼짐). 엣지면 저장 후 중앙 push
