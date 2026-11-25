@@ -1,7 +1,7 @@
 // powerHistText.test.js — v3.39.0 VM 전원 이력 화면 문구 · 달력 계산(지역 시각 기준 — 시험도 지역 생성자로 만든다).
 import { describe, it, expect } from 'vitest';
 import {
-  durText, durRangeText, whenText, clipSegs, sumsOf, onRatio, pctText, dayBarStyle, ratioBarStyle, monthsBack, monthCells, sumsText, factText, currentText, defaultDayKey, dayKey,
+  durText, durRangeText, whenText, selectedDayKey, clipSegs, sumsOf, onRatio, pctText, dayBarStyle, ratioBarStyle, monthsBack, monthCells, sumsText, factText, currentText, defaultDayKey, dayKey,
 } from './powerHistText.js';
 import { normObjTab, POWER_TAB } from '../vcd/objTabs.js';
 
@@ -86,6 +86,15 @@ describe('달력', () => {
     expect(c.days[19].future).toBe(false);      // 오늘(진행 중)
     expect(c.sums.off).toBe(now - at(2026, 3, 8, 19, 20));
     expect(c.days[7].aria).toContain('3월 8일');
+  });
+  it('선택된 날 — 범위 끝(다음 달 1일 0시)은 포함하지 않는다', () => {
+    const to = at(2025, 12, 1);   // 이전 12개월 창의 끝 = 2025-12-01 0시
+    expect(selectedDayKey(null, [], { to, now: at(2026, 11, 26, 9) })).toBe('2025-11-30');
+    expect(selectedDayKey('2025-05-01', [], { to, now: at(2026, 11, 26) })).toBe('2025-05-01');
+    expect(selectedDayKey(null, [], { to: at(2026, 11, 26, 9), now: at(2026, 11, 26, 9) })).toBe('2026-11-26');
+  });
+  it('지금 글 — 기록이 아직 없으면 0 이 아니라 아직 없음', () => {
+    expect(currentText({ recordStart: null, current: null }, at(2026, 11, 26)).head).toBe('아직 기록 없음');
   });
   it('기본 선택 날 — 최근 전환의 날 · 없으면 기준일', () => {
     expect(defaultDayKey([{ ts: at(2026, 11, 12, 8, 15) }], at(2026, 11, 25))).toBe('2026-11-12');

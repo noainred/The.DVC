@@ -46,8 +46,9 @@ function ensure(x) {
     insSpan: db.prepare('INSERT INTO power_spans (vcenter_id, vm_id, name, state, start_ts, start_lo, end_ts, src) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'),
     closeSpan: db.prepare('UPDATE power_spans SET end_ts=? WHERE id=? AND end_ts IS NULL'),
     insGap: db.prepare('INSERT INTO power_gaps (vcenter_id, from_ts, to_ts) VALUES (?, ?, ?)'),
-    spansOfVm: db.prepare('SELECT state, start_ts, start_lo, end_ts, src FROM power_spans WHERE vcenter_id=? AND vm_id=? ORDER BY start_ts LIMIT 20000'),
-    gapsOf: db.prepare('SELECT from_ts, to_ts FROM power_gaps WHERE vcenter_id=? AND to_ts>=? ORDER BY from_ts LIMIT 5000'),
+    // 상한에 걸리면 **최근 것**을 남긴다(지금 상태 · 마지막 전환은 최신 쪽) — 최신부터 읽고 호출부에서 시간순으로 되돌린다.
+    spansOfVm: db.prepare('SELECT state, start_ts, start_lo, end_ts, src FROM power_spans WHERE vcenter_id=? AND vm_id=? ORDER BY start_ts DESC LIMIT ?'),
+    gapsOf: db.prepare('SELECT from_ts, to_ts FROM power_gaps WHERE vcenter_id=? AND to_ts>=? ORDER BY from_ts DESC LIMIT ?'),
     // 소급 원천(VM 추적 표 — 같은 연결)
     trackChangesOf: db.prepare("SELECT vm_id, kind, ts FROM changes WHERE vcenter_id=? AND kind IN ('powered_off','powered_on') ORDER BY ts"),
     trackSlotsOf: db.prepare('SELECT ts FROM snaps WHERE vcenter_id=? ORDER BY ts'),
@@ -137,18 +138,21 @@ export async function commitBackfill(vcenterId, rows, ts) {
   });
 }
 
-export async function spansOfVm(vcenterId, vmId) {
+export const SPANS_LIMIT = 20000;
+export const GAPS_LIMIT = 5000;
+
+export async function spansOfVm(vcenterId, vmId, { limit = SPANS_LIMIT } = {}) {
   const p = await powerDb();
   if (!p) return null;
-  return p.st.spansOfVm.all(String(vcenterId), String(vmId)).map((r) => ({
+  return p.st.spansOfVm.all(String(vcenterId), String(vmId), limit).reverse().map((r) => ({
     state: r.state, start: Number(r.start_ts), lo: r.start_lo == null ? null : Number(r.start_lo), end: r.end_ts == null ? null : Number(r.end_ts), src: r.src,
   }));
 }
 
-export async function gapsOf(vcenterId, sinceTs) {
+export async function gapsOf(vcenterId, sinceTs, { limit = GAPS_LIMIT } = {}) {
   const p = await powerDb();
   if (!p) return [];
-  return p.st.gapsOf.all(String(vcenterId), Number(sinceTs) || 0).map((r) => ({ from: Number(r.from_ts), to: Number(r.to_ts) }));
+  return p.st.gapsOf.all(String(vcenterId), Number(sinceTs) || 0, limit).reverse().map((r) => ({ from: Number(r.from_ts), to: Number(r.to_ts) }));
 }
 
 /** 보존 기간보다 오래 전에 **끝난** 구간 · 끊김만 지운다 — 2,000행 조각 + 시간 양보. */

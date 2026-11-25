@@ -11,7 +11,7 @@ import { useOnce } from '../vcd/useOnce.js';
 import { vcHash } from '../vcd/vcdRoute.js';
 import {
   STATE_LABEL, durText, durRangeText, stampText, dayKey, whenText, srcText, clipSegs, sumsOf, onRatio, pctText, dayBarStyle, ratioBarStyle,
-  monthsBack, monthCells, sumsText, factText, currentText, defaultDayKey,
+  monthsBack, monthCells, sumsText, factText, currentText, selectedDayKey,
 } from './powerHistText.js';
 import './powerHist.css';
 
@@ -43,13 +43,13 @@ function MonthStrip({ data, tall = false }) {
   const months = monthsBack(data.now, 12);
   const all = sumsOf(data.segments);
   return (
-    <div className={`pwh-mstrip${tall ? ' tall' : ''}`} role="img" aria-label={`최근 12개월 월별 켜짐 비율 — 전체 ${pctText(onRatio(all))}`}>
+    <span className={`pwh-mstrip${tall ? ' tall' : ''}`} role="img" aria-label={`최근 12개월 월별 켜짐 비율 — 전체 ${pctText(onRatio(all))}`}>
       {months.map((m) => {
         const s = sumsOf(clipSegs(data.segments, m.start, m.end));
         const st = ratioBarStyle(s);
         return <span key={m.start} title={`${m.title} — ${sumsText(s)}`}><i className={st ? undefined : 'none'} style={st || undefined} /><em>{m.m}월</em></span>;
       })}
-    </div>
+    </span>
   );
 }
 
@@ -100,6 +100,17 @@ export function PowerCard({ q, onOpen }) {
   );
 }
 
+/** 이 기간에서 가장 길게 꺼짐 — 범위에 잘린 구간은 '범위 안 길이 이상'. */
+function longestText(L) {
+  if (!L) return '—';
+  if (L.clipped || (L.fromStart && L.maxMs == null)) return `${durText(L.ms)} 이상`;
+  return durRangeText(L.ms, L.maxMs);
+}
+function longestSub(L, empty) {
+  if (!L) return empty;
+  return `${stampText(L.a).slice(0, 10)} ~ ${L.open ? '지금' : stampText(L.b).slice(0, 10)}${L.clipped ? ' · 기간 경계에서 잘림' : ''}`;
+}
+
 /** 전환 한 줄의 글 */
 function transitionRow(t, precision) {
   const by = t.exact ? `vCenter 이벤트${t.user ? ` · ${t.user}` : ''}` : srcText(t.src, precision);
@@ -131,7 +142,7 @@ export function PowerDetail({ vm, q, onBack, onClose }) {
     ['처음 Power On', first.main, f.firstOn ? first.sub : '기록된 기간에 켜진 적 없음'],
     ['마지막 Power On', lastOn.main, lastOn.sub],
     ['마지막 Power Off', lastOff ? lastOff.main : '기록 없음', [lastOffSub(f, d.now), lastOff?.sub].filter(Boolean).join(' · ')],
-    ['가장 길게 꺼짐', f.longestOff ? durRangeText(f.longestOff.ms, f.longestOff.maxMs) : '—', f.longestOff ? `${stampText(f.longestOff.a).slice(0, 10)} ~ ${f.longestOff.open ? '지금' : stampText(f.longestOff.b).slice(0, 10)}` : '꺼진 구간이 없습니다'],
+    ['가장 길게 꺼짐', longestText(f.longestOffInRange), longestSub(f.longestOffInRange, '최근 12개월에 꺼진 구간이 없습니다')],
     ['전원 전환', `${d.transitionsTotal ?? 0}회`, f.recordStart ? `기록 시작 ${stampText(f.recordStart).slice(0, 10)} 부터` : ''],
     ['켜진 시간 합', durText(s.on || 0), `최근 12개월 · 판정된 시간의 ${pctText(onRatio(s))}`],
     ['꺼진 시간 합', durText(s.off || 0), onRatio(s) == null ? '' : `판정된 시간의 ${pctText(1 - onRatio(s))}`],
@@ -198,7 +209,7 @@ export function PowerCalendarTab({ vm }) {
   const s = d.sums || {};
   const r = onRatio(s);
   const inRange = (d.transitions || []).filter((t) => t.ts >= d.from && t.ts <= d.to);
-  const selKey = sel || defaultDayKey(inRange, d.to);
+  const selKey = selectedDayKey(sel, inRange, d);
   const day = months.flatMap((m) => m.days).find((x) => x.key === selKey) || null;
   const dayTrans = (d.transitions || []).filter((t) => dayKey(t.ts) === selKey).slice().reverse();
   const cur = currentText(f, d.now);
@@ -219,7 +230,7 @@ export function PowerCalendarTab({ vm }) {
         <div className="card pwh-tile"><span className="lb"><i className="pwh-sw on" />켜진 시간</span><span className="v">{durText(s.on || 0)}</span><span className="s">{`판정된 시간의 ${pctText(r)}`}</span></div>
         <div className="card pwh-tile"><span className="lb"><i className="pwh-sw off" />꺼진 시간</span><span className="v">{durText(s.off || 0)}</span><span className="s">{`판정된 시간의 ${r == null ? '—' : pctText(1 - r)}`}</span></div>
         <div className="card pwh-tile"><span className="lb">전원 전환</span><span className="v">{`${inRange.length}회`}</span><span className="s">{`꺼짐 ${inRange.filter((t) => t.to === 'off').length} · 켜짐 ${inRange.filter((t) => t.to === 'on').length}`}</span></div>
-        <div className="card pwh-tile"><span className="lb">가장 길게 꺼짐</span><span className="v">{f.longestOff ? durRangeText(f.longestOff.ms, f.longestOff.maxMs) : '—'}</span><span className="s">{f.longestOff ? `${stampText(f.longestOff.a).slice(0, 10)} ~ ${f.longestOff.open ? '지금' : stampText(f.longestOff.b).slice(0, 10)}` : '꺼진 구간 없음'}</span></div>
+        <div className="card pwh-tile"><span className="lb">가장 길게 꺼짐</span><span className="v">{longestText(f.longestOffInRange)}</span><span className="s">{longestSub(f.longestOffInRange, '이 기간에 꺼진 구간 없음')}</span></div>
         <div className="card pwh-tile"><span className="lb">판정하지 못한 시간</span><span className="v">{(s.est || 0) + (s.unk || 0) ? durText((s.est || 0) + (s.unk || 0)) : '없음'}</span><span className="s">{`경계 불확실 ${durText(s.est || 0)} · 기록 없음 ${durText(s.unk || 0)} — 비율에서 뺐습니다`}</span></div>
       </section>
 

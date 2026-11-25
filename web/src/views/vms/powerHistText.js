@@ -172,11 +172,22 @@ export function factText(f, precision = {}) {
 
 /** 지금 상태 머리글 — '켜짐 · 13일 7시간째' / '꺼짐 · 26일째' · 시작을 모르면 '… 이상'. */
 export function currentText(facts, now) {
+  if (facts && facts.recordStart === null) return { head: '아직 기록 없음', since: '다음 관측부터 기록합니다' };
   const c = facts?.current;
   if (!c) return facts?.gone ? { head: '지금 목록에 없음', since: '' } : { head: '기록 없음', since: '' };
   const label = STATE_LABEL[c.state] || c.state;
   if (c.before != null) return { head: `${label} · ${durText(now - c.before)} 이상`, since: `기록 시작(${stampText(c.before).slice(0, 10)}) 전부터` };
   return { head: `${label} · ${durText(now - c.ts)}째`, since: `${whenText(c)} 부터` };
+}
+
+/**
+ * 달력에서 선택된 날 — 사용자가 고른 날이 있으면 그 날, 없으면 이 기간의 최근 전환 날, 그것도 없으면 기간의 마지막 날.
+ *   to 는 범위 끝(다음 달 1일 0시 — **포함하지 않음**)이라 1ms 앞을 쓴다(그대로 쓰면 기간 밖의 날이 골라졌다 — v3.42.0 점검).
+ */
+export function selectedDayKey(sel, transitionsInRange, { to, now }) {
+  if (sel) return sel;
+  const end = Math.min(numOrNull(to) ?? now, now);
+  return defaultDayKey(transitionsInRange, end - 1);
 }
 
 /** 선택할 기본 날 — 최근에 전원이 바뀐 날(없으면 오늘). */

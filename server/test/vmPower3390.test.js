@@ -153,6 +153,28 @@ test('구간 길이는 범위 — 한 번만 보인 꺼짐은 0분이 아니라 
   assert.equal(t.transitions[1].prevMaxMs, null, '기록 시작 전부터 켜짐 — 위 끝을 모른다');
 });
 
+test('이 기간 안의 가장 길게 꺼짐 — 범위 밖의 긴 꺼짐을 끌어오지 않고, 경계에 잘리면 표시한다', () => {
+  const spans = [
+    { state: 'off', start: NOW - 300 * DAY, lo: NOW - 300 * DAY - W, end: NOW - 200 * DAY, src: 'watch' },
+    { state: 'on', start: NOW - 200 * DAY + W, lo: NOW - 200 * DAY, end: NOW - 10 * DAY, src: 'watch' },
+    { state: 'off', start: NOW - 10 * DAY + W, lo: NOW - 10 * DAY, end: NOW - 8 * DAY, src: 'watch' },
+    { state: 'on', start: NOW - 8 * DAY + W, lo: NOW - 8 * DAY, end: null, src: 'watch' },
+  ];
+  const all = buildTimeline({ spans, now: NOW, watchLast: NOW });
+  assert.equal(all.facts.longestOff.a, NOW - 300 * DAY, '전체로는 100일 꺼짐');
+  const r = buildTimeline({ spans, now: NOW, watchLast: NOW, from: NOW - 30 * DAY, to: NOW });
+  assert.equal(r.facts.longestOffInRange.a, NOW - 10 * DAY + W, '30일 범위에서는 2일 꺼짐');
+  assert.equal(r.facts.longestOffInRange.clipped, false);
+  const c = buildTimeline({ spans, now: NOW, watchLast: NOW, from: NOW - 250 * DAY, to: NOW });
+  assert.equal(c.facts.longestOffInRange.a, NOW - 250 * DAY);
+  assert.equal(c.facts.longestOffInRange.clipped, true, '범위 시작에 잘림');
+  assert.equal(c.facts.longestOffInRange.maxMs, null);
+  const none = buildTimeline({ spans: spans.slice(1, 2), now: NOW, watchLast: NOW, from: NOW - 30 * DAY, to: NOW });
+  assert.equal(none.facts.longestOffInRange, null);
+  const outside = buildTimeline({ spans: spans.slice(0, 2), now: NOW, watchLast: NOW, from: NOW - 30 * DAY, to: NOW });
+  assert.equal(outside.facts.longestOffInRange, null, '범위 밖에서 끝난 꺼짐은 0분짜리로도 끌어오지 않는다');
+});
+
 test('★ 실제 DB — 첫 관측은 소급 · 다음 관측은 전환만 · 끊김 · 사라짐 · 못 읽은 vCenter 는 건드리지 않음', async () => {
   const vt = await import('../src/vmtrack/db.js');
   const x = await vt.getDb();
@@ -163,7 +185,7 @@ test('★ 실제 DB — 첫 관측은 소급 · 다음 관측은 전환만 · �
   x.db.exec(`INSERT INTO changes (snap_id, ts, vcenter_id, kind, vm_id, name) VALUES (2, ${NOW - 2 * DAY - 12 * HOUR}, 'vc1', 'powered_off', 'vc1:vm-1', 'a')`);
   const W8 = await import('../src/vmpower/watcher.js');
   const D = await import('../src/vmpower/db.js');
-  const snapAt = (t, vms, extra = {}) => ({ generatedAt: new Date(t).toISOString(), vcenters: [{ id: 'vc1', status: 'connected', ...extra.vc1 }, { id: 'vc2', status: 'unreachable' }], vms });
+  const snapAt = (t, vms, extra = {}) => ({ generatedAt: new Date(t).toISOString(), vcenters: [{ id: 'vc1', status: 'connected', ...extra.vc1 }, { id: 'vc2', status: 'unreachable' }, { id: 'vc3', status: 'pending' }], vms: [...vms, { id: 'vc3:vm-1', vcenterId: 'vc3', name: 'p', powerState: 'POWERED_ON' }] });
   const t0 = NOW - 2 * DAY;
   let r = await W8.runPowerWatchOnce({ now: t0, snap: snapAt(t0, [
     { id: 'vc1:vm-1', vcenterId: 'vc1', name: 'a', powerState: 'POWERED_OFF' },
@@ -172,7 +194,8 @@ test('★ 실제 DB — 첫 관측은 소급 · 다음 관측은 전환만 · �
   ]) });
   assert.equal(r.ok, true);
   assert.ok(r.backfilled >= 2, `소급 구간 ${r.backfilled}`);
-  assert.deepEqual(r.held, [['vc2', 'unreachable']]);
+  assert.deepEqual(r.held, [['vc2', 'unreachable'], ['vc3', 'pending']], '첫 수집 전 vCenter 는 캐시 VM 이 있어도 관측하지 않는다');
+  assert.deepEqual(await D.spansOfVm('vc3', 'vc3:vm-1'), []);
   let s1 = await D.spansOfVm('vc1', 'vc1:vm-1');
   assert.deepEqual(s1.map((s) => [s.state, s.src, s.end == null]), [['on', 'backfill', false], ['off', 'backfill', true]]);
   assert.equal(s1[0].end, NOW - 3 * DAY, '꺼짐을 본 슬롯의 직전 슬롯에서 닫힌다');
@@ -189,7 +212,7 @@ test('★ 실제 DB — 첫 관측은 소급 · 다음 관측은 전환만 · �
   // 목록이 통째로 비면(수집 이상) 열린 구간을 닫지 않는다
   const t2 = t1 + W;
   r = await W8.runPowerWatchOnce({ now: t2, snap: snapAt(t2, []) });
-  assert.deepEqual(r.held, [['vc1', 'empty'], ['vc2', 'unreachable']]);
+  assert.deepEqual(r.held, [['vc1', 'empty'], ['vc2', 'unreachable'], ['vc3', 'pending']]);
   assert.equal((await D.openSpansOf('vc1')).size, 2);
   // 2시간 뒤(끊김) — vm-2 사라짐
   const t3 = t1 + 2 * HOUR;
@@ -210,6 +233,26 @@ test('★ 실제 DB — 첫 관측은 소급 · 다음 관측은 전환만 · �
   assert.equal(res.facts.current.ts, t1);
   assert.ok(res.segments.some((g) => g.st === 'unk'), '끊긴 2시간은 기록 없음');
   assert.equal(res.facts.backfill.to, t0, '소급의 끝 = 실시간 관측 시작');
+  // 상한에 걸리면 최근 것을 남긴다(시간순으로 돌려준다)
+  const lim = await D.spansOfVm('vc1', 'vc1:vm-1', { limit: 2 });
+  assert.deepEqual(lim.map((s) => s.start), s1.slice(-2).map((s) => s.start));
+  assert.ok(lim[0].start < lim[1].start);
+  // 템플릿은 이유를 말한다
+  const tpl = await H.vmPowerHistory({ ...vm1, template: true }, { vms: [vm1] }, { now: t3 + MIN });
+  assert.equal(tpl.available, false);
+  assert.match(tpl.reason, /템플릿/);
+  // 이벤트 상한 — 최근 것을 남긴다(로그 DB 실제 조회)
+  const { getLogsDb } = await import('../src/logs/db.js');
+  const ldb = await getLogsDb();
+  if (ldb && typeof ldb.insertMany === 'function' && ldb.kind === 'sqlite') {
+    const evs = [];
+    for (let k = 0; k < 5005; k++) evs.push({ vcenterId: 'vcE', key: `e${k}`, ts: NOW - (6000 - k) * MIN, severity: 'info', type: k % 2 ? 'VmPoweredOnEvent' : 'VmPoweredOffEvent', user: 'u', entity: 'vmE', message: 'm' });
+    ldb.insertMany(evs);
+    const got = ldb.powerEventsOf('vcE', 'vmE', 0, NOW);
+    assert.equal(got.length, 5000);
+    assert.ok(got.some((e) => e.ts === NOW - (6000 - 5004) * MIN), '가장 최근 이벤트가 남는다');
+    assert.ok(!got.some((e) => e.ts === NOW - 6000 * MIN), '가장 오래된 것이 잘린다');
+  }
   // 정리 — 끝난 구간만
   const pr = await D.prunePower(NOW + DAY);
   assert.ok(pr.spans >= 3);

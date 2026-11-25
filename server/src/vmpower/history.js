@@ -45,6 +45,8 @@ export async function vmPowerHistory(vm, snap, { from: fromQ, to: toQ, now = Dat
     precision: { watchMs: WATCH_EVERY_MS, gapMs: GAP_MS, backfillMs: TRACK_GRAN_MS },
   };
   let spans; let gaps; let watch; let events = []; let eventsNote = null;
+  // 템플릿은 켜지지 않는다 — 관측기도 템플릿을 기록하지 않는다(빈 달력 대신 이유를 말한다).
+  if (vm.template) return { ...base, available: false, reason: '템플릿은 전원 상태를 기록하지 않습니다(켜지지 않는 VM 입니다).' };
   if (snap?.source === 'mock') {
     const d = demoPowerHistory(vm, now);
     ({ spans, gaps, watch, events } = d);

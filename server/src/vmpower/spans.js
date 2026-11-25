@@ -233,6 +233,23 @@ export function buildTimeline({ spans = [], gaps = [], events = [], now, watchLa
     const key = d.maxMs ?? d.minMs;
     if (!longestOff || key > (longestOff.maxMs ?? longestOff.ms)) longestOff = { a: s.start, b: s.end ?? tail, ms: d.minMs, maxMs: d.maxMs, open: d.open, fromStart: s.lo == null };
   }
+  // 화면 범위 안에서 가장 길게 꺼짐(요약 타일 · 카드는 '이 기간' 을 말한다 — 범위 밖의 긴 꺼짐을 끌어오지 않는다).
+  let longestOffInRange = null;
+  for (let i = 0; i < sp.length; i++) {
+    const s = sp[i];
+    if (s.state !== 'off') continue;
+    const e = s.end ?? tail;
+    const a = Math.max(s.start, from);
+    const b = Math.min(e, to);
+    if (!(b >= a) || e < from || s.start > to) continue;
+    const d = durOf(i);
+    const clippedOut = s.start < from || e > to;   // 범위에 잘렸으면 위 끝은 범위 안의 길이로만
+    const lo = Math.max(0, b - a);
+    const hi = clippedOut ? null : d.maxMs;
+    if (!longestOffInRange || (hi ?? lo) > (longestOffInRange.maxMs ?? longestOffInRange.ms)) {
+      longestOffInRange = { a, b, ms: lo, maxMs: hi, open: d.open, fromStart: s.lo == null || s.start < from, clipped: clippedOut };
+    }
+  }
   const sums = { on: 0, off: 0, est: 0, unk: 0 };
   const clipped = [];
   for (const g of segs) {
@@ -257,6 +274,7 @@ export function buildTimeline({ spans = [], gaps = [], events = [], now, watchLa
       lastOffEnd: lastOffIdx >= 0 ? sp[lastOffIdx].end : null,
       lastOffDur: lastOffIdx >= 0 ? durOf(lastOffIdx) : null,
       longestOff,
+      longestOffInRange,
       offCount: sp.filter((s, i) => s.state === 'off' && !(i === 0 && s.lo == null)).length,
       transitionCount: transitions.length,
       recordStart: sp.length ? sp[0].start : null,

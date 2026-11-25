@@ -73,7 +73,8 @@ async function runInner({ now, snap }) {
     const id = String(vc.id);
     const list = byVc.get(id) || [];
     if (unread.has(id)) { out.held.push([id, unread.get(id)]); continue; }
-    if (NOT_SERVING.has(vc.status) && !list.length) { out.held.push([id, vc.status]); continue; }
+    // 첫 수집 전(pending) · 비활성(disabled)은 VM 이 남아 있어도(지난 캐시) 지금 상태가 아니다 — 관측하지 않는다(그 사이는 '기록 없음').
+    if (NOT_SERVING.has(vc.status)) { out.held.push([id, vc.status]); continue; }
     const watch = await watchOf(id);
     if (!watch) {
       if (!list.length) { out.held.push([id, 'empty']); continue; }
