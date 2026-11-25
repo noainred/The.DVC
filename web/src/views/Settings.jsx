@@ -85,7 +85,7 @@ const SUB = [
   { k: 'nfs-mounts', label: 'NFS 마운트(백업 대상)', C: NfsMounts, group: 'backups', desc: '백업을 저장할 NFS 마운트를 등록하고 확인합니다.' },
   // --- 수집 주기·임계: 얼마나 자주 · 무엇을 · 어느 값부터 ---
   { k: 'metrics', label: '지표 수집', C: MetricsSettings, group: 'collect', desc: '성능 지표 샘플 주기와 보존 기간, VM 성능 추적 대상 vCenter 를 정하고 vCenter 별 DB 사용량을 봅니다.' },
-  { k: 'storage-intervals', label: '스토리지 수집 주기', C: StorageIntervals, group: 'collect', desc: '스토리지 장비 수집 · 보내기 · 설정 받기 주기를 중앙에서 정해 엣지에 내려보냅니다.' },
+  { k: 'storage-intervals', label: '스토리지 수집 주기', C: StorageIntervals, group: 'collect', desc: '스토리지 장비 수집 · 보내기 · 설정 받기 주기와 PowerScale SSH 명령 대기 시간(timeout)을 중앙에서 정해 엣지에 내려보냅니다.' },
   { k: 'power-off-check', label: '전원 꺼짐 점검', C: PowerOffCheckSettings, group: 'collect', desc: '몇 시간마다 전원 꺼진 VM 을 기록할지 정합니다 — Optimization › 전원 꺼짐 표의 꺼진 지 N일 이 이 기록을 씁니다.' },
   { k: 'vmseries', label: 'VM 실시간 스파이크 수집', C: VmSeriesSettings, group: 'collect', desc: 'ESXi 의 20초 실시간 표본을 주기마다 받아 임계 이상인 순간만 남깁니다(기본 꺼짐).' },
   { k: 'sansw-perf', label: 'SAN 스위치 포트 사용량', C: SanSwitchPerf, group: 'collect', desc: 'SAN 스위치 포트 처리량의 수집 주기 · 보존 기간을 정하고 즉시 수집 · 정리를 실행합니다.' },

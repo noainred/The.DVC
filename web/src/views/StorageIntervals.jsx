@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson, putJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
-import { presetsFor, msLabel, effectiveFor, sourceOf, lagText, toBody } from './storageIntervals.js';
+import { presetsForSpec, rangeText, timeoutSpecs, timerSpecs, msLabel, effectiveFor, sourceOf, lagText, toBody } from './storageIntervals.js';
 import { STable } from '../components/STable.jsx';
 import Select from '../components/Select.jsx';
 import { requireChanged } from './changeResult.js'; // v2.732 B5-03: 400 본문을 '저장되었습니다' 로 읽지 않는다
@@ -21,6 +21,8 @@ import { SettingsUnreadBanner } from './SettingsUnreadBanner.jsx';
 // v2.598 WEBUI-2598-09: 중앙(직접 수집) 행은 엣지가 아니다 — 상속 끝의 값은 '엣지 로컬' 이 아니라 중앙 자신의
 //   env·기본값이고, 중앙은 자기에게 push·설정 pull 을 하지 않으므로 그 두 칸은 적용 대상이 아니다.
 const CENTRAL_NA_KEYS = new Set(['pushMs', 'configPullMs']);
+/** 대기 시간 표의 대상 칸 — 설명을 줄바꿈한다(표 기본은 한 줄이라 좁은 화면에서 선택 칸을 밀어낸다). */
+const WRAP_TD = { whiteSpace: 'normal', minWidth: 140 };
 function inheritTail(target) {
   return target === '' ? '중앙 기본(env)' : '엣지 로컬';
 }
@@ -28,14 +30,14 @@ function inheritTail(target) {
 function Cell({ target, form, s, globalForm, setCell }) {
   const inheritedFrom = target === '__global__' ? null : globalForm[s.key];
   const cur = form[s.key] ?? '';
-  const presets = presetsFor(s.min);
+  const presets = presetsForSpec(s);   // v3.39.0: 사양의 선택지·상한(PowerScale SSH 명령 대기 1~5분 · 노드 부하 표본 60분)을 따른다
   // 파일 직접 편집 등으로 프리셋에 없는 값이 들어오면 옵션을 하나 만들어 보여준다 — 없으면 브라우저가
   // 첫 옵션('미지정')을 표시해 '미지정'으로 읽힌다(상태에는 값이 남아 저장 시 유지되는데 화면만 다름).
   const extra = cur && !presets.some((p) => String(p.ms) === String(cur)) ? [{ ms: Number(cur), label: `${msLabel(Number(cur))} (직접 지정)` }] : [];
   return (
     <Select sort={false} className="input" style={{ minWidth: 104 }} value={cur}
       onChange={(e) => setCell(target, s.key, e.target.value)}
-      title={`${s.label}\n하한 ${msLabel(s.min)} · 기본 ${msLabel(s.def)}\n${s.hint}`}>
+      title={`${s.label}\n${rangeText(s)}\n${s.hint}`}>
       <option value="">
         {target === '__global__'
           ? '미지정(엣지 로컬)'
@@ -77,6 +79,9 @@ export default function StorageIntervals() {
   if (!data) return <Loading />;
 
   const spec = data.spec || [];
+  // v3.39.0: 주기(타이머) 항목은 위 표에, 시한 항목(PowerScale SSH 명령 대기)은 아래 '대기 시간' 표에 — 사양의 `timer: false` 가 가른다.
+  const timerSpec = timerSpecs(spec);
+  const timeoutSpec = timeoutSpecs(spec);
   const envDefaults = data.central?.env || {};
   const targets = [{ key: '', label: '중앙(직접 수집)', hint: '수집 주체를 지정하지 않은 장비 — 중앙 포탈이 직접 접속해 수집한다. 저장 즉시 적용된다.' },
     ...Object.keys(agentForms).filter((a) => a !== '').sort().map((a) => ({ key: a, label: a, hint: `엣지 '${a}' 가 수집하는 장비. 다음 설정 pull 때 적용된다.` }))];
@@ -107,7 +112,7 @@ export default function StorageIntervals() {
 
   return (
     <>
-      <div className="section-title" style={{ marginTop: 0 }}>⏱ 스토리지 수집 주기</div>
+      <div className="section-title" style={{ marginTop: 0 }}>⏱ 스토리지 수집 주기 · 대기 시간</div>
       <SettingsUnreadBanner le={unread} what="스토리지 수집 주기" save="저장" onRecheck={load} busy={busy} />
 
       <div className="card" style={{ marginBottom: 12 }}>
@@ -128,14 +133,14 @@ export default function StorageIntervals() {
           <thead>
             <tr>
               <th style={{ minWidth: 160 }}>대상</th>
-              {spec.map((s) => <th key={s.key} title={s.hint}>{s.label}</th>)}
+              {timerSpec.map((s) => <th key={s.key} title={s.hint}>{s.label}</th>)}
               <th title="장비 수집 주기 + 중앙 전송(push) 주기 — 장비의 변화가 중앙 화면에 늦어도 이만큼 안에 보인다는 뜻.">중앙 반영 지연(최대)</th>
             </tr>
           </thead>
           <tbody>
             <tr style={{ background: 'var(--panel-2, rgba(127,127,127,.08))' }}>
               <td><b>전역 기본</b><div className="muted" style={{ fontSize: 11 }}>모든 엣지 + 중앙에 적용(개별 지정이 우선)</div></td>
-              {spec.map((s) => <td key={s.key}><Cell target="__global__" form={globalForm} s={s} globalForm={globalForm} setCell={setCell} /></td>)}
+              {timerSpec.map((s) => <td key={s.key}><Cell target="__global__" form={globalForm} s={s} globalForm={globalForm} setCell={setCell} /></td>)}
               <td className="muted">{lagText(effectiveFor(globalForm, {}), envDefaults)}</td>
             </tr>
             {targets.map((t) => {
@@ -144,7 +149,7 @@ export default function StorageIntervals() {
               return (
                 <tr key={t.key || '__central__'}>
                   <td><b>{t.label}</b><div className="muted" style={{ fontSize: 11 }}>{t.hint}</div></td>
-                  {spec.map((s) => (t.key === '' && CENTRAL_NA_KEYS.has(s.key)
+                  {timerSpec.map((s) => (t.key === '' && CENTRAL_NA_KEYS.has(s.key)
                     ? <td key={s.key} className="muted" style={{ fontSize: 12 }} title="중앙은 자기 자신에게 push·설정 pull 을 하지 않습니다.">해당 없음</td>
                     : (
                     <td key={s.key}>
@@ -161,6 +166,59 @@ export default function StorageIntervals() {
           </tbody>
         </STable>
       </div>
+
+      {/* v3.39.0 — 대기 시간(시한) 항목은 주기 표와 **따로** 그린다. 처음에는 주기 표의 열로 넣었는데, 그 표는 1440px 에서도 가로로 넘쳐
+          (대상 칸의 설명이 한 줄이라 넓다) 새 열이 스크롤해야만 보였다(Chromium 판독). 같은 폼 · 같은 저장 버튼이다 — 값은 한 번에 저장된다.
+          대상 칸은 줄바꿈을 허용한다(400px 에서 선택 칸이 화면 밖으로 밀리지 않게). 숫자는 서버 사양(spec)에서 온다. */}
+      {timeoutSpec.length > 0 && (
+        <>
+          <div className="section-title">⏳ 대기 시간(timeout)</div>
+          <div className="card" style={{ marginBottom: 12 }}>
+            <div className="muted" style={{ fontSize: 13, lineHeight: 1.7 }}>
+              {timeoutSpec.map((s) => (
+                <div key={s.key}>
+                  • <b>{s.label}</b> — 주기가 아니라 <b>대기 시간</b>입니다. PowerScale(Isilon) SSH 수집에서 isi 명령 하나의 응답을 이 시간까지 기다립니다({rangeText(s)}).
+                  응답이 느린 클러스터가 시간 초과로 수집에 실패하면 그 법인(엣지) 행에서 늘리세요. 장비 한 대의 전체 수집 시한도 이 값에 맞춰 함께 늘어납니다.
+                  미지정이면 그 엣지의 로컬 값(없으면 기본 {msLabel(s.def)})을 씁니다.
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="table-wrap">
+            <STable>
+              <thead>
+                <tr>
+                  <th style={{ minWidth: 140 }}>대상</th>
+                  {timeoutSpec.map((s) => <th key={s.key} title={s.hint}>{s.label}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                <tr style={{ background: 'var(--panel-2, rgba(127,127,127,.08))' }}>
+                  <td style={WRAP_TD}><b>전역 기본</b><div className="muted" style={{ fontSize: 11 }}>모든 엣지 + 중앙에 적용(개별 지정이 우선)</div></td>
+                  {timeoutSpec.map((s) => <td key={s.key}><Cell target="__global__" form={globalForm} s={s} globalForm={globalForm} setCell={setCell} /></td>)}
+                </tr>
+                {targets.map((t) => {
+                  const form = agentForms[t.key] || {};
+                  const eff = effectiveFor(globalForm, form);
+                  return (
+                    <tr key={t.key || '__central__'}>
+                      <td style={WRAP_TD}><b>{t.label}</b><div className="muted" style={{ fontSize: 11 }}>{t.hint}</div></td>
+                      {timeoutSpec.map((s) => (
+                        <td key={s.key}>
+                          <Cell target={t.key} form={form} s={s} globalForm={globalForm} setCell={setCell} />
+                          <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
+                            {sourceOf(s.key, globalForm, form) === 'inherit' ? inheritTail(t.key) : `→ ${msLabel(Number(eff[s.key]))}`}
+                          </div>
+                        </td>
+                      ))}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </STable>
+          </div>
+        </>
+      )}
 
       <div className="flex gap" style={{ marginTop: 12, alignItems: 'center' }}>
         <button className="login-btn" style={{ flex: 'none', padding: '8px 18px' }} disabled={busy || saveLocked} onClick={save}>
