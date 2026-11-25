@@ -9,6 +9,7 @@
  */
 import { getDb, addMissingColumns } from '../vmtrack/db.js';
 import { createYielder } from '../util/timeSlice.js';
+import { numOrNull } from '../util/numOrNull.js';
 
 const prepared = new WeakMap();   // db → 문장 묶음(연결이 다시 열리면 다시 만든다)
 
@@ -54,6 +55,7 @@ function ensure(x) {
     insObs: db.prepare('INSERT INTO power_obs (vcenter_id, ts) VALUES (?, ?)'),
     futLastObs: db.prepare('SELECT MAX(ts) AS mx FROM power_obs WHERE vcenter_id=? AND ts<?'),
     futDelObs: db.prepare('DELETE FROM power_obs WHERE vcenter_id=? AND ts>?'),
+    futGapStart: db.prepare('SELECT MAX(from_ts) AS mx FROM power_gaps WHERE vcenter_id=? AND from_ts<? AND to_ts>?'),
     pruneObs: db.prepare('DELETE FROM power_obs WHERE rowid IN (SELECT rowid FROM power_obs WHERE ts<? LIMIT 5000)'),
     dropObsOfVc: db.prepare('DELETE FROM power_obs WHERE vcenter_id=?'),
     futLastOfVm: db.prepare('SELECT id, end_ts FROM power_spans WHERE vcenter_id=? AND vm_id=? ORDER BY start_ts DESC LIMIT 1'),
@@ -143,7 +145,11 @@ export async function repairFuture(vcenterId, ts) {
     const deleted = Number(p.st.futDelSpans.run(vc, ts).changes || 0);
     // 튀기 직전 마지막 실제 관측 = 지금보다 앞선 마지막 관측 기록(power_obs · 7일). 미래 관측이 닫은 구간은 end = 그 시각이고,
     //   그보다 앞서 닫힌 구간은 진짜로 사라진 VM 이다 — 다시 열지 않는다(4회차 R4: 사라진 VM 을 되살려 목록에 없던 시간을 켜짐으로 칠했다).
-    const lastReal = Number(p.st.futLastObs.get(vc, ts)?.mx || 0);
+    // 대체 근거(5회차 R5): 관측 기록이 비었으면(업그레이드 직후 · 7일 넘게 못 읽음) 첫 미래 관측이 남긴 끊김 [실제 마지막 관측, 미래] 의 시작.
+    //   둘 다 없으면 아무것도 다시 열지 않는다(다음 관측이 '목록에 나타남' 으로 새로 연다 — 사라진 VM 을 되살리는 것보다 낫다).
+    const obsLast = numOrNull(p.st.futLastObs.get(vc, ts)?.mx);
+    const gapStart = numOrNull(p.st.futGapStart.get(vc, ts, ts)?.mx);
+    const lastReal = obsLast ?? gapStart ?? Infinity;
     p.st.futDelObs.run(vc, ts);
     let reopened = 0;
     for (const vm of vms) {

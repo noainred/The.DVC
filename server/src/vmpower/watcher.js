@@ -19,6 +19,8 @@ const PRUNE_EVERY = 144;   // 관측 144회(약 하루)마다
 //   이보다 작은 역행(NTP 보정 등)은 시계가 따라잡을 때까지 건너뛴다 — 데이터를 건드리지 않는다(3회차 R1: 20분으로 줄였더니 1시간 역행에 구간이 깨졌다).
 //   틱 게이트는 미래 관측에서도 매 틱 돌므로(2회차 N4) 따라잡는 즉시 관측이 이어진다.
 const CLOCK_REPAIR_MS = 6 * 3_600_000;
+/** 기동 직후 이 시간 동안은 큰 역행이어도 지우지 않고 건너뛰기만 한다 — 부팅 때 RTC 를 잘못 읽어 시계가 뒤처진 채 떴다가 NTP 가 맞추는 경우(5회차 결정 위험) 맞던 기록을 지우지 않게. */
+const REPAIR_AFTER_UPTIME_MS = 30 * 60_000;
 /** 인벤토리를 아직 서빙하지 못하는 상태(VM 0 과 함께면 '모른다'). */
 const NOT_SERVING = new Set(['unreachable', 'pending', 'maintenance', 'disabled']);
 
@@ -36,13 +38,13 @@ export function powerWatchStatus() {
 const tickYield = () => new Promise((r) => { setImmediate(r); });
 
 /** 관측 1회(자동 · 시험 공용). snap 을 넘기면 그것을 쓴다(시험). */
-export async function runPowerWatchOnce({ now = Date.now(), snap = null, trigger = 'tick' } = {}) {
+export async function runPowerWatchOnce({ now = Date.now(), snap = null, trigger = 'tick', uptimeMs = process.uptime() * 1000 } = {}) {
   if (running) return { ok: false, skipped: true, reason: '이미 관측 중입니다.' };
   running = true;
   const started = Date.now();
   let r = null;
   try {
-    r = await runInner({ now, snap: snap || store.get(), trigger });
+    r = await runInner({ now, snap: snap || store.get(), trigger, uptimeMs });
     return r;
   } catch (e) {
     r = { ok: false, reason: String(e?.message || e).slice(0, 200) };
@@ -56,7 +58,7 @@ export async function runPowerWatchOnce({ now = Date.now(), snap = null, trigger
   }
 }
 
-async function runInner({ now, snap }) {
+async function runInner({ now, snap, uptimeMs }) {
   if (!(await powerDb())) return { ok: false, reason: '추적 DB 사용 불가(node:sqlite 없음 또는 초기화 실패)' };
   if (!snap?.vcenters?.length) return { ok: true, idle: 'no-inventory' };
   const unread = samplingUnreadReasons(snap);
@@ -93,7 +95,7 @@ async function runInner({ now, snap }) {
     }
     // 시계가 뒤로 갔다(직전 관측 ≥ 지금) — 이번 관측은 쓰지 않는다. 미래로 크게 앞선 기록은 지금으로 되돌린다(그 사이는 다음 관측 때 끊김).
     if (watch.lastTs >= now) {
-      if (watch.lastTs - now > CLOCK_REPAIR_MS) {
+      if (watch.lastTs - now > CLOCK_REPAIR_MS && uptimeMs >= REPAIR_AFTER_UPTIME_MS) {
         const rr = await repairFuture(id, now);
         console.warn(`[vmpower] ${id}: 마지막 관측 시각이 미래(${new Date(watch.lastTs).toISOString()}) — 시계가 바뀐 것으로 보고 미래에 쓰인 구간 ${rr?.deleted ?? 0}개를 지우고 ${rr?.reopened ?? 0}개를 다시 열었습니다`);
       } else {

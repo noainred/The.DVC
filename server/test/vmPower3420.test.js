@@ -210,7 +210,7 @@ test('★ 실제 DB — #1 범위 안 전환 · 잘림 표시 · #6 계정 가�
   p.st.upsertWatch.run('vf', NOW - DAY, NOW - DAY, 1);
   p.st.repairWatch.run(NOW + 2 * DAY, 'vf');
   const snap = { generatedAt: new Date(NOW).toISOString(), vcenters: [{ id: 'vf', status: 'connected' }], vms: [{ id: 'vf:a', vcenterId: 'vf', name: 'a', powerState: 'POWERED_ON' }] };
-  const r = await W8.runPowerWatchOnce({ now: NOW, snap });
+  const r = await W8.runPowerWatchOnce({ now: NOW, snap, uptimeMs: Infinity });
   assert.deepEqual(r.held, [['vf', 'clock']]);
   assert.equal((await D.watchOf('vf')).lastTs, NOW, '지금으로 되돌림');
   const r2 = await W8.runPowerWatchOnce({ now: NOW + W, snap: { ...snap, generatedAt: new Date(NOW + W).toISOString() } });
@@ -247,7 +247,7 @@ test('3회차 R1 — 1시간 역행 · 2일 앞으로 튐 뒤에도 구간이 �
   if (!(await D.powerDb())) return;
   const W8 = await import('../src/vmpower/watcher.js');
   const H = await import('../src/vmpower/history.js');
-  const obs = (vc, ts, ps) => W8.runPowerWatchOnce({ now: ts, snap: { generatedAt: new Date(ts).toISOString(), vcenters: [{ id: vc, status: 'connected' }], vms: [{ id: `${vc}:a`, vcenterId: vc, name: `${vc}-a`, powerState: ps }] } });
+  const obs = (vc, ts, ps) => W8.runPowerWatchOnce({ now: ts, uptimeMs: Infinity, snap: { generatedAt: new Date(ts).toISOString(), vcenters: [{ id: vc, status: 'connected' }], vms: [{ id: `${vc}:a`, vcenterId: vc, name: `${vc}-a`, powerState: ps }] } });
   const vmOf = (vc, ps) => ({ id: `${vc}:a`, vcenterId: vc, name: `${vc}-a`, powerState: ps });
   const T0 = NOW - 10 * DAY;
   // ① 0~60분 관측(40분에 끔) → 시계 1시간 뒤로 → 실제 80분에 다시 켬
@@ -319,7 +319,7 @@ test('4회차 R4 — 미래 구간 복구는 진짜로 사라진 VM 을 되살�
   const D = await import('../src/vmpower/db.js');
   if (!(await D.powerDb())) return;
   const W8 = await import('../src/vmpower/watcher.js');
-  const obs = (ts, vms) => W8.runPowerWatchOnce({ now: ts, snap: { generatedAt: new Date(ts).toISOString(), vcenters: [{ id: 'vy', status: 'connected' }], vms } });
+  const obs = (ts, vms) => W8.runPowerWatchOnce({ now: ts, uptimeMs: Infinity, snap: { generatedAt: new Date(ts).toISOString(), vcenters: [{ id: 'vy', status: 'connected' }], vms } });
   const A = (ps) => ({ id: 'vy:a', vcenterId: 'vy', name: 'a', powerState: ps });
   const Y = (ps) => ({ id: 'vy:y', vcenterId: 'vy', name: 'y', powerState: ps });
   const T0 = NOW - 15 * DAY;
@@ -334,5 +334,32 @@ test('4회차 R4 — 미래 구간 복구는 진짜로 사라진 VM 을 되살�
   assert.equal(y[0].end, T0, '진짜로 사라진 Y 는 닫힌 채로');
   const a = await D.spansOfVm('vy', 'vy:a');
   assert.equal(a[a.length - 1].end, null, '계속 있던 A 는 열린 채로');
+});
+
+test('5회차 R5 — 관측 기록이 비어도 사라진 VM 을 되살리지 않는다 · 기동 직후에는 지우지 않는다', async () => {
+  const D = await import('../src/vmpower/db.js');
+  const p = await D.powerDb();
+  if (!p) return;
+  const W8 = await import('../src/vmpower/watcher.js');
+  const obs = (ts, vms, uptimeMs = Infinity) => W8.runPowerWatchOnce({ now: ts, uptimeMs, snap: { generatedAt: new Date(ts).toISOString(), vcenters: [{ id: 'vz', status: 'connected' }], vms } });
+  const A = (ps) => ({ id: 'vz:a', vcenterId: 'vz', name: 'a', powerState: ps });
+  const Y = (ps) => ({ id: 'vz:y', vcenterId: 'vz', name: 'y', powerState: ps });
+  const T0 = NOW - 12 * DAY;
+  await obs(T0, [A('POWERED_ON'), Y('POWERED_ON')]);
+  await obs(T0 + W, [A('POWERED_ON')]);
+  await obs(T0 + 2 * W, [A('POWERED_ON')]);
+  await obs(T0 + DAY, [A('POWERED_ON'), Y('POWERED_OFF')]);
+  p.db.exec("DELETE FROM power_obs WHERE vcenter_id='vz'");      // 관측 기록이 빈 상태(업그레이드 직후 등)
+  // 기동 직후(30분 미만)에는 큰 역행이어도 지우지 않고 건너뛰기만
+  const early = await obs(T0 + 3 * W, [A('POWERED_ON')], 5 * MIN);
+  assert.deepEqual(early.held, [['vz', 'clock']]);
+  assert.ok((await D.spansOfVm('vz', 'vz:y')).some((x) => x.start > T0 + 3 * W), '기동 직후에는 미래 구간을 지우지 않는다');
+  // 기동 30분 뒤 — 복구, 대체 근거(끊김 시작 = 실제 마지막 관측)로
+  await obs(T0 + 4 * W, [A('POWERED_ON')]);
+  const y = await D.spansOfVm('vz', 'vz:y');
+  assert.equal(y.length, 1);
+  assert.equal(y[0].end, T0, '사라진 Y 는 닫힌 채로');
+  const a = await D.spansOfVm('vz', 'vz:a');
+  assert.equal(a[a.length - 1].end, null);
 });
 
