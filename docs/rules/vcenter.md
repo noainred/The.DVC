@@ -580,3 +580,15 @@
   - 정리: 관측 144회(약 하루)마다 · 기동 첫 틱 아님 · **끝난 구간만**(`end_ts < 보존 경계` — 진행 중 구간은 지우지 않는다) · 2,000행 조각 + 양보. 보존은 `VMTRACK_RETENTION_DAYS`(기본 1095일).
   - 기존 '꺼진 지 N일'(`tools/powerOff.js resolveOffSince`)은 그대로 둔다 — 이 표를 그 판정의 출처로 합치는 것은 남긴 것(두 숫자가 다르게 보일 수 있다 · 출처와 정밀도는 각 화면이 밝힌다).
   - 회귀 `server/test/vmPower3390.test.js`(실제 DB 로 소급 → 전환 → 빈 목록 → 끊김 → 사라짐 → 정리) · `web/src/views/vms/powerHistText.test.js`.
+  - **v3.42.0 재검토(독립 반증 4회차까지) — 되돌리지 말 것**:
+    ① 전환은 **화면 범위 안만**(최대 `TRANSITIONS_CAP` · `transitionsInRange` · `transitionsInRangeBy` · 잘림 표시) — 범위와 상관없이 최신 N건이면 이전 창이 '바뀐 적 없음' 으로 보였다.
+    ② 같은 상태로 `ABSENT_MERGE_MS`(6시간) 안 목록에서 빠졌다 돌아오면 한 구간 · 빠진 시간은 '기록 없음'(holes) · `startKnown` 이 거짓인 구간(기록 시작 전 · 목록에 나타남 appear)은 꺼짐 횟수 · 길이 위 끝 · '처음 Power On' 에 넣지 않는다.
+    ③ `buildTimeline` 은 정렬 + 선형 칠하기 + 이분 탐색(2만 구간 · 5천 끊김 · 5천 이벤트 1초 미만 — 시험이 고정) — 요청 경로에서 제곱 비용 금지.
+    ④ 관측이 끊긴 채면 '마지막으로 본 상태'(current.stale · seenTs) · 지금 상태 길이에 낀 기록 없음(unknownMs)을 밝힌다. 카드 보조 문구는 `powerHistText.js lastOnSub · lastOffSub` 하나.
+    ⑤ 소급 중 추적 슬롯이 빈 기간(`TRACK_GAP_MS` 초과)과 마지막 슬롯 ~ 지금은 끊김(`backfillGaps`).
+    ⑥ 수행 계정 이름은 관리자 판본(`isAdminDetailUser`)에만 — 아니면 user 를 비우고 `userMasked`. 엣지 위임(site) vCenter 는 `eventsNote: 'site'`.
+    ⑦ 시계: 직전 관측 이하 시각은 쓰지 않는다(skip) · 6시간 넘게 미래인 관측은 `repairFuture`(미래에 시작한 구간 삭제 → 그 VM 의 남은 마지막 구간 다시 열기 → 끊김 자르기) · 그보다 작은 역행은 따라잡을 때까지 건너뜀 · 틱 게이트는 미래 관측에서 멈추지 않는다.
+    ⑧ 보존 정리는 끝난 구간을 실제로 지운 vCenter 에만 `pruned_to` 를 남기고, 남은 첫 구간의 앞 끝이 그보다 앞이면 기록 시작 전(처음 Power On 도) · 보존 기간 넘게 관측 안 된 vCenter 는 열린 구간 · 끊김 · 관측 행까지 정리.
+    ⑨ 한 관측 안 중복 VM id 는 첫 것만 · 처음 보는 VM 은 첫 관측이면 기록 시작(src watch), 관측 중이면 목록에 나타남(src appear — Power On 이 아니다).
+    ⑩ 화면: 오차는 전환마다 실제 창 폭 · 개체 보기 탭 `key={vm.id}` · 달력은 요청 기준 시각(q.base) · 이전 12개월 창의 기본 선택 날은 범위 끝(포함 안 함) 1ms 앞.
+    회귀 `server/test/vmPower3420.test.js` · `web/src/views/vms/powerHistText.test.js`. 남긴 것: 위임 vCenter 의 관측 시각은 데이터 시각이 아니라 관측 시각(엣지 수집 지연만큼 창이 밀림 — 추정 · 재현 안 함).
