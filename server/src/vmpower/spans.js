@@ -204,6 +204,8 @@ export function buildTimeline({ spans = [], gaps = [], events = [], now, watchLa
     transitions.push({
       to: s.state, ts: s.start, lo, exact: !!s.exact, src: s.exact ? 'event' : s.src, user: s.user || '', unknownWindow: unk,
       prevState: p.state, prevMs: Math.max(0, (p.end ?? s.start) - p.start), prevFromStart: p.lo == null && i - 1 === 0,
+      // 직전 상태가 이어진 시간의 위 끝 — 앞 창의 시작(lo)부터 이 전환 창의 끝까지. 기록 시작 전부터면 위 끝을 모른다(null).
+      prevMaxMs: p.lo == null ? null : Math.max(0, s.start - p.lo),
     });
   }
   transitions.reverse();
@@ -215,12 +217,21 @@ export function buildTimeline({ spans = [], gaps = [], events = [], now, watchLa
   const lastOnIdx = idxOf((s) => s.state === 'on');
   const lastOffIdx = idxOf((s) => s.state === 'off');
   const last = sp[sp.length - 1] || null;
-  let longestOff = null;
-  for (const s of sp) {
-    if (s.state !== 'off') continue;
+  // 구간 길이는 범위다 — 아래 끝 = 그 상태로 본 첫 · 마지막 관측 사이, 위 끝 = 앞 창 시작(lo) ~ 다음 구간 시작(진행 중이면 지금).
+  const durOf = (i) => {
+    const s = sp[i];
     const e = s.end ?? tail;
-    const ms = e - s.start;
-    if (!longestOff || ms > longestOff.ms) longestOff = { a: s.start, b: e, ms, open: s.end == null, fromStart: s.lo == null };
+    const next = sp[i + 1];
+    const hi = s.end == null ? now : (next ? next.start : e);
+    return { minMs: Math.max(0, e - s.start), maxMs: s.lo == null ? null : Math.max(0, hi - s.lo), open: s.end == null };
+  };
+  let longestOff = null;
+  for (let i = 0; i < sp.length; i++) {
+    const s = sp[i];
+    if (s.state !== 'off') continue;
+    const d = durOf(i);
+    const key = d.maxMs ?? d.minMs;
+    if (!longestOff || key > (longestOff.maxMs ?? longestOff.ms)) longestOff = { a: s.start, b: s.end ?? tail, ms: d.minMs, maxMs: d.maxMs, open: d.open, fromStart: s.lo == null };
   }
   const sums = { on: 0, off: 0, est: 0, unk: 0 };
   const clipped = [];
@@ -244,6 +255,7 @@ export function buildTimeline({ spans = [], gaps = [], events = [], now, watchLa
       lastOn: lastOnIdx >= 0 ? fact(sp[lastOnIdx], lastOnIdx) : null,
       lastOff: lastOffIdx >= 0 ? fact(sp[lastOffIdx], lastOffIdx) : null,
       lastOffEnd: lastOffIdx >= 0 ? sp[lastOffIdx].end : null,
+      lastOffDur: lastOffIdx >= 0 ? durOf(lastOffIdx) : null,
       longestOff,
       offCount: sp.filter((s, i) => s.state === 'off' && !(i === 0 && s.lo == null)).length,
       transitionCount: transitions.length,

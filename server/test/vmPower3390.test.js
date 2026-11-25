@@ -134,9 +134,23 @@ test('타임라인 — 소급 구간 표시 · 가장 길게 꺼짐(진행 중 �
   const t = buildTimeline({ spans, now: NOW, watchLast: NOW });
   assert.deepEqual(t.facts.backfill, { from: NOW - 40 * DAY, to: NOW - 3 * DAY + W });
   assert.equal(t.facts.longestOff.a, NOW - 40 * DAY);
+  assert.equal(t.facts.longestOff.maxMs, NOW - 20 * DAY - (NOW - 41 * DAY), '위 끝 = 앞 창 시작 ~ 다음 구간 시작');
   assert.equal(t.facts.firstOn.ts, NOW - 20 * DAY);
   assert.ok(t.segments.some((s) => s.src === 'backfill'));
   assert.equal(t.facts.current.state, 'off');
+});
+
+test('구간 길이는 범위 — 한 번만 보인 꺼짐은 0분이 아니라 0분 ~ 두 창 폭', () => {
+  const S12 = 12 * HOUR;
+  const spans = [
+    { state: 'on', start: NOW - 10 * DAY, lo: null, end: NOW - 5 * DAY, src: 'backfill' },
+    { state: 'off', start: NOW - 5 * DAY + S12, lo: NOW - 5 * DAY, end: NOW - 5 * DAY + S12, src: 'backfill' },
+    { state: 'on', start: NOW - 5 * DAY + 2 * S12, lo: NOW - 5 * DAY + S12, end: null, src: 'backfill' },
+  ];
+  const t = buildTimeline({ spans, now: NOW, watchLast: NOW });
+  assert.deepEqual(t.facts.lastOffDur, { minMs: 0, maxMs: 2 * S12, open: false });
+  assert.deepEqual([t.transitions[0].prevMs, t.transitions[0].prevMaxMs], [0, 2 * S12]);
+  assert.equal(t.transitions[1].prevMaxMs, null, '기록 시작 전부터 켜짐 — 위 끝을 모른다');
 });
 
 test('★ 실제 DB — 첫 관측은 소급 · 다음 관측은 전환만 · 끊김 · 사라짐 · 못 읽은 vCenter 는 건드리지 않음', async () => {

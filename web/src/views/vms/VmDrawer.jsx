@@ -56,6 +56,9 @@ export default function VmDrawer({ vm, rows, onClose, onMove, days = null }) {
   // v3.39.0: 전원 기록 — 드로어를 열 때 1회(VM 을 넘기면 새로 · 늦은 이전 응답은 useOnce 가 버린다). 카드와 상세가 같은 응답을 쓴다.
   const power = usePowerHistory(vm?.id, !!vm);
   const [powerView, setPowerView] = useState(false);
+  const bodyRef = useRef(null);
+  // 카드 → 상세(또는 되돌아옴) 때 본문을 맨 위로 — 400px 에서 상세의 '← VM 상세' 줄이 화면 밖에 남았다(v3.39.0 Chromium 확인).
+  useEffect(() => { try { bodyRef.current?.scrollTo?.({ top: 0 }); } catch { /* 시험 환경 */ } }, [powerView]);
   // 열 때 포커스를 드로어로(키보드 ↑↓·Esc) · 닫을 때 원래 자리로.
   useEffect(() => {
     backRef.current = typeof document !== 'undefined' ? document.activeElement : null;
@@ -123,7 +126,7 @@ export default function VmDrawer({ vm, rows, onClose, onMove, days = null }) {
             onClick={() => setShowReport(true)} title="이 VM 의 CPU·메모리를 줄여도 되는지 기간별 추이·근거로 확인합니다">📊 축소 근거 리포트</button>
         </div>
 
-        <div className="vmh-db">
+        <div className="vmh-db" ref={bodyRef}>
           {powerView ? <PowerDetail vm={vm} q={power} onBack={() => setPowerView(false)} onClose={onClose} /> : <>
           <section className="vmh-sec" aria-label="한눈에">
             <div className="sh"><h3>한눈에{on ? ' · 24시간 추이는 열 때 1회 조회' : ' · 꺼진 VM 은 사용률이 없습니다'}</h3></div>

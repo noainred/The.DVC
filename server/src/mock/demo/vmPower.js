@@ -30,16 +30,17 @@ function rng(seed) {
 export function demoPowerHistory(vm, now = Date.now()) {
   const r = rng(hashOf(vm?.id || vm?.name || 'vm'));
   const isOn = String(vm?.powerState || '').toUpperCase() === 'POWERED_ON';
-  const liveFrom = Math.floor((now - 75 * DAY) / WATCH) * WATCH;
-  const recordStart = Math.floor((now - 520 * DAY) / SLOT) * SLOT;
-  const created = r() < 0.3 ? now - (120 + Math.floor(r() * 200)) * DAY : now - 900 * DAY;
+  const day0 = Math.floor(now / DAY) * DAY;   // 구간은 날짜 경계에 고정 — 조회할 때마다 몇 분씩 움직이지 않게(v3.39.0 Chromium 확인)
+  const liveFrom = day0 - 75 * DAY;
+  const recordStart = day0 - 520 * DAY;
+  const created = r() < 0.3 ? day0 - (120 + Math.floor(r() * 200)) * DAY : day0 - 900 * DAY;
   const begin = Math.max(created, recordStart);
 
   // 실제 꺼짐 구간 [a, b]
   let offs = [];
   const kind = Math.floor(r() * 4);
   if (kind === 1) {
-    const base = now - 300 * DAY + Math.floor(r() * 7) * DAY;
+    const base = day0 - 300 * DAY + Math.floor(r() * 7) * DAY;
     for (let i = 0; i < 14; i++) { const a = base + i * 7 * DAY + 20 * HOUR; offs.push([a, a + 2 * DAY + 11.5 * HOUR]); }
   }
   const n = kind === 0 ? 1 : 3 + Math.floor(r() * 4);
@@ -55,7 +56,7 @@ export function demoPowerHistory(vm, now = Date.now()) {
     if (p && o[0] <= p[1] + HOUR) p[1] = Math.max(p[1], o[1]); else merged.push([o[0], Math.min(o[1], now - 20 * MIN)]);
   }
   if (!isOn) {
-    const since = now - (2 + Math.floor(r() * 60)) * DAY - Math.floor(r() * 20) * HOUR;
+    const since = day0 - (2 + Math.floor(r() * 60)) * DAY - Math.floor(r() * 20) * HOUR;
     while (merged.length && merged[merged.length - 1][1] >= since - HOUR) merged.pop();
     merged.push([since, null]);
   }

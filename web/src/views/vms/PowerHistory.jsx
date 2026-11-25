@@ -10,7 +10,7 @@ import { STable } from '../../components/STable.jsx';
 import { useOnce } from '../vcd/useOnce.js';
 import { vcHash } from '../vcd/vcdRoute.js';
 import {
-  STATE_LABEL, durText, stampText, dayKey, whenText, srcText, clipSegs, sumsOf, onRatio, pctText, dayBarStyle, ratioBarStyle,
+  STATE_LABEL, durText, durRangeText, stampText, dayKey, whenText, srcText, clipSegs, sumsOf, onRatio, pctText, dayBarStyle, ratioBarStyle,
   monthsBack, monthCells, sumsText, factText, currentText, defaultDayKey,
 } from './powerHistText.js';
 import './powerHist.css';
@@ -63,7 +63,7 @@ function stateNote(q) {
 function lastOffSub(f, now) {
   if (!f.lastOff) return '기록된 기간에 꺼진 적 없음';
   if (f.current?.state === 'off') return f.lastOff.before != null ? '기록 시작 전부터 꺼짐' : `꺼진 뒤 ${durText(now - f.lastOff.ts)} 지남`;
-  if (f.lastOffEnd != null && f.lastOff.ts != null) return `${durText(f.lastOffEnd - f.lastOff.ts)} 동안 꺼져 있었음`;
+  if (f.lastOffDur) return `${durRangeText(f.lastOffDur.minMs, f.lastOffDur.maxMs)} 동안 꺼져 있었음`;
   return '';
 }
 
@@ -103,7 +103,7 @@ export function PowerCard({ q, onOpen }) {
 /** 전환 한 줄의 글 */
 function transitionRow(t, precision) {
   const by = t.exact ? `vCenter 이벤트${t.user ? ` · ${t.user}` : ''}` : srcText(t.src, precision);
-  const prev = `${STATE_LABEL[t.prevState]} ${durText(t.prevMs)}${t.prevFromStart || !t.exact ? ' 이상' : ''}`;
+  const prev = `${STATE_LABEL[t.prevState]} ${t.prevFromStart ? `${durText(t.prevMs)} 이상` : durRangeText(t.prevMs, t.prevMaxMs)}`;
   return { when: whenText(t), to: STATE_LABEL[t.to], by: t.unknownWindow ? `${by} · 그 사이 기록 없음` : by, prev };
 }
 
@@ -131,7 +131,7 @@ export function PowerDetail({ vm, q, onBack, onClose }) {
     ['처음 Power On', first.main, f.firstOn ? first.sub : '기록된 기간에 켜진 적 없음'],
     ['마지막 Power On', lastOn.main, lastOn.sub],
     ['마지막 Power Off', lastOff ? lastOff.main : '기록 없음', [lastOffSub(f, d.now), lastOff?.sub].filter(Boolean).join(' · ')],
-    ['가장 길게 꺼짐', f.longestOff ? `${durText(f.longestOff.ms)}${f.longestOff.fromStart ? ' 이상' : ''}` : '—', f.longestOff ? `${stampText(f.longestOff.a).slice(0, 10)} ~ ${f.longestOff.open ? '지금' : stampText(f.longestOff.b).slice(0, 10)}` : '꺼진 구간이 없습니다'],
+    ['가장 길게 꺼짐', f.longestOff ? durRangeText(f.longestOff.ms, f.longestOff.maxMs) : '—', f.longestOff ? `${stampText(f.longestOff.a).slice(0, 10)} ~ ${f.longestOff.open ? '지금' : stampText(f.longestOff.b).slice(0, 10)}` : '꺼진 구간이 없습니다'],
     ['전원 전환', `${d.transitionsTotal ?? 0}회`, f.recordStart ? `기록 시작 ${stampText(f.recordStart).slice(0, 10)} 부터` : ''],
     ['켜진 시간 합', durText(s.on || 0), `최근 12개월 · 판정된 시간의 ${pctText(onRatio(s))}`],
     ['꺼진 시간 합', durText(s.off || 0), onRatio(s) == null ? '' : `판정된 시간의 ${pctText(1 - onRatio(s))}`],
@@ -164,15 +164,14 @@ export function PowerDetail({ vm, q, onBack, onClose }) {
       <section className="vmh-sec" aria-label="전원 전환">
         <div className="sh"><h3>{`전원 전환 · 최신 ${shown.length}건 / 전체 ${d.transitionsTotal ?? list.length}건`}</h3></div>
         {!list.length ? <div className="muted" style={{ fontSize: 12 }}>기록된 기간에 전원이 바뀐 적이 없습니다.</div> : (
-          <div className="pwh-rows pwh-spans">
+          <div className="pwh-rows pwh-spans pwh-trans">
             {shown.map((t) => {
               const r = transitionRow(t, d.precision);
               return (
                 <div key={`${t.ts}-${t.to}`}>
                   <span className="pwh-dot" style={{ background: DOT[t.to] }} aria-hidden="true" />
                   <b>{`${r.to}으로 바뀜 · ${r.when}`}</b>
-                  <span style={{ fontSize: 11.5, whiteSpace: 'nowrap' }}>{`직전 ${r.prev}`}</span>
-                  <small>{r.by}</small>
+                  <small>{`직전 ${r.prev} · ${r.by}`}</small>
                 </div>
               );
             })}
@@ -220,7 +219,7 @@ export function PowerCalendarTab({ vm }) {
         <div className="card pwh-tile"><span className="lb"><i className="pwh-sw on" />켜진 시간</span><span className="v">{durText(s.on || 0)}</span><span className="s">{`판정된 시간의 ${pctText(r)}`}</span></div>
         <div className="card pwh-tile"><span className="lb"><i className="pwh-sw off" />꺼진 시간</span><span className="v">{durText(s.off || 0)}</span><span className="s">{`판정된 시간의 ${r == null ? '—' : pctText(1 - r)}`}</span></div>
         <div className="card pwh-tile"><span className="lb">전원 전환</span><span className="v">{`${inRange.length}회`}</span><span className="s">{`꺼짐 ${inRange.filter((t) => t.to === 'off').length} · 켜짐 ${inRange.filter((t) => t.to === 'on').length}`}</span></div>
-        <div className="card pwh-tile"><span className="lb">가장 길게 꺼짐</span><span className="v">{f.longestOff ? `${durText(f.longestOff.ms)}${f.longestOff.fromStart ? ' 이상' : ''}` : '—'}</span><span className="s">{f.longestOff ? `${stampText(f.longestOff.a).slice(0, 10)} ~ ${f.longestOff.open ? '지금' : stampText(f.longestOff.b).slice(0, 10)}` : '꺼진 구간 없음'}</span></div>
+        <div className="card pwh-tile"><span className="lb">가장 길게 꺼짐</span><span className="v">{f.longestOff ? durRangeText(f.longestOff.ms, f.longestOff.maxMs) : '—'}</span><span className="s">{f.longestOff ? `${stampText(f.longestOff.a).slice(0, 10)} ~ ${f.longestOff.open ? '지금' : stampText(f.longestOff.b).slice(0, 10)}` : '꺼진 구간 없음'}</span></div>
         <div className="card pwh-tile"><span className="lb">판정하지 못한 시간</span><span className="v">{(s.est || 0) + (s.unk || 0) ? durText((s.est || 0) + (s.unk || 0)) : '없음'}</span><span className="s">{`경계 불확실 ${durText(s.est || 0)} · 기록 없음 ${durText(s.unk || 0)} — 비율에서 뺐습니다`}</span></div>
       </section>
 
@@ -269,15 +268,15 @@ export function PowerCalendarTab({ vm }) {
                 ))}
               </div>
               {dayTrans.length > 0 && (
-                <div className="pwh-rows pwh-spans" style={{ marginTop: 10 }}>
-                  {dayTrans.map((t) => { const x = transitionRow(t, d.precision); return <div key={`${t.ts}-${t.to}`}><span className="pwh-dot" style={{ background: DOT[t.to] }} /><b>{`${x.to}으로 바뀜 · ${x.when}`}</b><span /><small>{x.by}</small></div>; })}
+                <div className="pwh-rows pwh-spans pwh-trans" style={{ marginTop: 10 }}>
+                  {dayTrans.map((t) => { const x = transitionRow(t, d.precision); return <div key={`${t.ts}-${t.to}`}><span className="pwh-dot" style={{ background: DOT[t.to] }} /><b>{`${x.to}으로 바뀜 · ${x.when}`}</b><small>{`직전 ${x.prev} · ${x.by}`}</small></div>; })}
                 </div>
               )}
             </div>
           )}
         </section>
 
-        <section className="card" style={{ padding: 0, flex: '2 1 520px' }} aria-label="전원 전환 기록">
+        <section className="card" style={{ padding: 0, flex: '1 1 100%' }} aria-label="전원 전환 기록">
           <div className="vcd-card-h"><b style={{ fontSize: 13.5 }}>전원 전환 기록</b><span className="muted" style={{ fontSize: 11.5 }}>{`이 기간 ${inRange.length}건 · 제목을 누르면 정렬 · 시각을 누르면 그 날`}</span></div>
           {!inRange.length ? <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>이 기간에 전원이 바뀐 적이 없습니다.</div> : (
             <STable className="v3-table" minWidth={640} limit={60}>

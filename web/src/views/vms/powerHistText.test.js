@@ -1,7 +1,7 @@
 // powerHistText.test.js — v3.39.0 VM 전원 이력 화면 문구 · 달력 계산(지역 시각 기준 — 시험도 지역 생성자로 만든다).
 import { describe, it, expect } from 'vitest';
 import {
-  durText, whenText, clipSegs, sumsOf, onRatio, pctText, dayBarStyle, ratioBarStyle, monthsBack, monthCells, sumsText, factText, currentText, defaultDayKey, dayKey,
+  durText, durRangeText, whenText, clipSegs, sumsOf, onRatio, pctText, dayBarStyle, ratioBarStyle, monthsBack, monthCells, sumsText, factText, currentText, defaultDayKey, dayKey,
 } from './powerHistText.js';
 import { normObjTab, POWER_TAB } from '../vcd/objTabs.js';
 
@@ -16,6 +16,12 @@ describe('길이 · 시각 글', () => {
     expect(durText(7 * 60_000)).toBe('7분');
     expect(durText(null)).toBe('—');
     expect(durText('')).toBe('—');
+  });
+  it('durRangeText — 위 끝 모르면 이상 · 같으면 하나 · 아니면 범위', () => {
+    expect(durRangeText(0, 24 * H)).toBe('0분 ~ 1일');
+    expect(durRangeText(2 * H, null)).toBe('2시간 이상');
+    expect(durRangeText(2 * H, 2 * H + 30_000)).toBe('2시간');
+    expect(durRangeText(null, 5)).toBe('—');
   });
   it('whenText — 정확하면 시각 · 아니면 사이(같은 날은 시:분만)', () => {
     expect(whenText({ ts: at(2026, 3, 8, 19, 20), exact: true })).toBe('2026-03-08 19:20');

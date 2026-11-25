@@ -42,6 +42,16 @@ export function durText(ms) {
   return `${mi}분`;
 }
 
+/** 길이 범위 글 — 위 끝을 모르면 '… 이상', 거의 같으면 하나, 아니면 '아래 ~ 위'(관측 간격 안에서 바뀐 시각을 모른다). */
+export function durRangeText(minMs, maxMs) {
+  const lo = numOrNull(minMs);
+  const hi = numOrNull(maxMs);
+  if (lo == null) return '—';
+  if (hi == null) return `${durText(lo)} 이상`;
+  if (hi - lo < MIN) return durText(lo);
+  return `${durText(lo)} ~ ${durText(hi)}`;
+}
+
 /** 전환 시각 글 — 정확하면 그 시각, 아니면 '앞 끝 ~ 뒤 끝 사이'(같은 날이면 뒤는 시:분만). */
 export function whenText({ ts, lo, exact } = {}) {
   const t = numOrNull(ts);
