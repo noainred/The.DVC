@@ -234,3 +234,19 @@
   - 스냅샷: 장비마다 gzip JSON 한 행 · 50대씩 트랜잭션 · 반쪽 스냅샷은 지운다 · 최근 30개 · 180일(`SNAP_MAX` · `SNAP_RETENTION_DAYS`) · 동시 1건(409). 한쪽이 한 CVP 만 찍었으면 비교도 그 CVP 만(나머지를 사라짐 · 새로 생김으로 지어내지 않는다).
   - 데모: `mock/demo/cvp.js demoFabricLinks`(leaf ↔ spine 양쪽 LLDP · 일곱 번째 leaf 설명 불일치 · 아홉 번째 MTU 불일치) · `demoNetHistory`(`db.importNetHistory` — 지금은 데모 시드만 쓴다). 이름 · 수치는 가상.
   - 남긴 것(다음 차수): ② 설정 백업 · ③ 버전 준수 · ⑧ MLAG/채널 이중화 — CVP 조회 경로 실장비 미확인 · 새 수집(엣지 계약 변경)이라 이번에 하지 않았다. ⑪ 트래픽 흐름 · ⑭ 경로 추적은 예약 작업.
+- **빈 칸 점검 · ③ 버전 준수 · ⑧ 이중화(v3.39 — 사용자 실장비 캡처: DCS-7280SR-48C6 · EOS 4.27.4M 포트 표의 속도 · VLAN · LAG · 수신 · 송신 · 오류가 전부 '—', 회귀 `server/test/cvpRedundancy339.test.js` · 웹 `cvpNetText.test.js`)**
+  - **VLAN · 채널 소속은 인터페이스 상태 노드(intfStatus)에 없다**(추정 — parseInterfaces 의 pick(vlan · lag)은 실장비에서 늘 비었던 것으로 본다. 데모만 값을 채웠다). 부품 주기에 따로 읽는다:
+    `switchport`(…/bridging/switchIntfConfig/switchIntfConfig) · `lagMember`(…/lag/input/config/cli/phyIntf 외) · `mlag`(…/Sysdb/mlag/status) — **경로 · 필드 이름 모두 실장비 미확인 추정**, 경로 탐색 표본(PROBE_PATHS)에 5곳을 더했다.
+  - 새 장비별 종류는 **`kinds`(종류별 상태 표 ks)에 반드시 등록**한다 — 빠지면 readKind 가 던져 그 장비의 카운터 · BGP · 부품 · LLDP 까지 부품 주기마다 잃는다(v3.39 개발 중 통합 테스트 ② 가 잡은 결함 · 변이로 고정).
+  - 채널 소속이 포인터(`lag: {ptr:[…,'Port-Channel10']}`)로 오면 entitiesOf 가 필드로 세지 않는다 — `rawLagScan` 이 알림을 한 번 더 훑는다. **컬렉션의 포트별 포인터는 소속 값이 아니다**(세면 빈 맵으로 '읽음' 이 되어 포인터를 따라가지 않는다 — 변이로 고정).
+  - 부품 주기 사이에는 수집기 메모리의 직전 값(`_l2cfg` — 키 = CVP id + 장비 시리얼)을 `L2CFG_TTL_MS`(부품 주기 3배) 안에서만 쓴다. 재시작 뒤 첫 부품 주기 전은 비어 있다(모름).
+    '채널 없음' 과 '소속 못 읽음' 은 둘 다 lag '' 라 **info.cfgReadAt(VLAN · 채널을 읽은 시각)** 로 가른다.
+  - 엣지 → 중앙 info 에 `mlagStatus`(칸 여섯 + at) · `cfgReadAt` 를 더했다 — `db.INFO_KEYS` 와 `central/cvpEdge.cleanInfo` 를 **같이** 고친다(아는 칸만 · 문자열 64자 · 시각은 수신 시각으로 자름 — 변이로 고정).
+  - 속도: 'speed' · 'bandwidth' · 'speedEnum' 에 값이 없으면 이름에 speed · linkmode 가 든 필드에서 **단위가 붙은 값만**(자동 협상 · 광고 · 지원 칸 제외). 단위 없는 수는 추정하지 않는다.
+  - 장비 상세 › 포트의 **'모든 포트가 비어 있는 칸 — 이유'** 는 웹 `cvpNetText.emptyColumnNotes` 하나(근거 = 그 CVP 의 usedPaths · missing · seenFields — 장비별이 아니다). 단정하지 않는다.
+  - ③ 버전 준수(`cvp/compliance.js` · `GET /tools/cvp/compliance`): **새 수집 없음** — v2.641 CVP 단위 항목(인벤토리 준수 코드 · bugexposure · lifecycle)을 그대로. 포탈은 판정하지 않고 상태만 나눈다 —
+    '0000' 만 준수로 읽고 다른 코드는 그대로 보인다(뜻을 지어내지 않는다) · 읽었는데 값이 없으면 '공지 없음' · 못 읽었으면 '못 읽음' · 종료일은 소프트웨어 · 하드웨어 중 이른 날, 180일 안 = 곧.
+  - **수명주기 날짜는 epoch ms 숫자다**(parse.tsOf · cleanInfo) — 읽기는 `compliance.lifeMs` 하나. Overview 의 '지원 종료 지남' 은 v3.38 까지 `Date.parse(숫자)` = NaN 으로 **한 번도 세지 못했다**(v3.39 수정 · 테스트 ④).
+  - ⑧ 이중화(`cvp/redundancy.js` · `GET /tools/cvp/redundancy`): 채널 = 관리상 켜진 멤버 중 링크 올라온 수(전부 ok · 일부 degraded · 0 down · 모르는 멤버 섞임 unknown · 전부 꺼짐 off).
+    MLAG = active + connected + 피어 링크 up 이면 ok · disabled = 안 씀 · 상태 못 읽음 = unread(인벤토리 'MLAG 켜짐' 은 함께만). **장애로 열지 않는다**(화면만 — 시안 §6-5 기본값).
+  - 남긴 것: ② 설정 백업(다음 차수 · 보관 결정 = 비밀 줄을 가린 판을 중앙에). 속도 · 처리량 빈 칸은 실장비 '읽은 경로' 원문 표본을 받아야 원인을 확정한다(이번 보강은 추정 후보).
