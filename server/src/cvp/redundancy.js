@@ -26,12 +26,13 @@ export function channelsOf(ports = []) {
     const want = c.members.filter((x) => x.admin !== 'down');
     const up = want.filter((x) => x.oper === 'up').length;
     const unk = want.filter((x) => x.oper !== 'up' && x.oper !== 'down' && x.oper !== 'nolink').length;
+    const knownDown = want.length - up - unk;
     let state;
     if (!want.length) state = 'off';
     else if (up === want.length) state = 'ok';
-    else if (unk > 0) state = 'unknown';
-    else if (up === 0) state = 'down';
-    else state = 'degraded';
+    // 반증 F4: 내려간 멤버가 하나라도 확인되면 이중화 상실이다(모르는 멤버가 섞여도 — 예전에는 unknown 으로 가려졌다). 전부 확인된 내려감만 down.
+    else if (knownDown > 0) state = up === 0 && unk === 0 ? 'down' : 'degraded';
+    else state = 'unknown';
     c.members.sort((a, b) => a.port.localeCompare(b.port, 'en', { numeric: true }));
     out.push({ ...c, total: c.members.length, expected: want.length, up, state });
   }
@@ -50,7 +51,8 @@ export function mlagJudge(ms, enabled = undefined) {
   else if (/down|disabled|err/.test(pl)) state = 'peerDown';
   else if (neg && !/^connected$/.test(neg)) state = 'notConnected';
   else if (/inactive|primaryonly|secondaryonly/.test(st)) state = 'inactive';
-  else if (/active/.test(st) && (!neg || neg === 'connected') && (!pl || /up/.test(pl))) state = 'ok';
+  // 반증 F3: 협상 · 피어 링크를 **둘 다 읽고** 정상일 때만 ok(필드 이름이 추정이라 상태만 맞고 나머지를 못 읽으면 피어가 끊겨도 정상으로 셌다).
+  else if (/active/.test(st) && neg === 'connected' && /up/.test(pl)) state = 'ok';
   else state = 'unknown';
   return { state, enabled: enabled ?? null, raw: { state: ms.state ?? null, negotiation: ms.negotiation ?? null, peerLinkState: ms.peerLinkState ?? null }, peerLink: ms.peerLink ?? null, domain: ms.domain ?? null, at: ms.at ?? null };
 }
@@ -76,7 +78,7 @@ export function redundancyFleet({ devices = [], portsByDev = new Map() } = {}) {
     if (lagUnread) counts.lagUnread++;
     for (const c of chans) { counts.channels++; counts.ch[c.state]++; }
     rows.push({ agent: d.agent, cvpId: d.cvpId, key: d.key, hostname: d.hostname || d.key, model: d.model || '', corpName: d.corpName || '',
-      mlag, channels: chans, lagRead, lagUnread, portsRead: d.portsRead !== false, worst: worstOf(chans, mlag) });
+      mlag, channels: chans, lagRead, lagUnread, lagPartial: !!(info.cfgReadAt && info.cfgReadAt.lagPartial), portsRead: d.portsRead !== false, worst: worstOf(chans, mlag) });
   }
   rows.sort((a, b) => a.worst - b.worst || String(a.hostname).localeCompare(String(b.hostname)));
   return { rows, counts };

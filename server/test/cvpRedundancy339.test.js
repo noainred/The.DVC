@@ -49,6 +49,12 @@ test('① 파서', () => {
   const la = P.parseLagMembers(n('/x/phyIntf/all', { Ethernet4: { value: { channelGroup: 'Port-Channel 7' } }, Ethernet5: { value: { lag: '' } } }));
   assert.deepEqual([...la.members], [['Ethernet4', 'Port-Channel7']], '소속 없는 포트(빈 값)는 넣지 않는다');
   assert.equal(P.parseLagMembers(n('/x', { foo: { value: 1 } })).members, null, '채널 필드가 없는 응답은 못 읽음');
+  // 반증 E1: 채널 표에 포트 개체가 있으면 소속 칸이 없는 포트 = 채널 없음(읽음 — 빈 맵). null 이면 연속 실패 차단이 소속 읽기를 멈춘다.
+  const none = P.parseLagMembers(n('/x/phyIntf/all', { Ethernet1: { value: { mode: 'x' } }, Ethernet2: { value: { mode: 'y' } } }));
+  assert.ok(none.members instanceof Map && none.members.size === 0);
+  // 반증 E6: 'flags' 칸은 lag 가 아니다
+  assert.equal(P.parseLagMembers(n('/x/phyIntf/Ethernet1', { flags: { value: { ptr: ['a', 'Port-Channel9'] } } })).members, null);
+  assert.equal(P.firstSpeed({ maxSpeed: 'speed100Gbps' }), null, '반증 E7: 최대 속도는 지금 속도가 아니다');
   const ml = P.parseMlag(n('/Sysdb/mlag/status', { mlagState: { value: { Name: 'mlagStateActive' } }, negotiationStatus: { value: { Name: 'connected' } }, peerLinkStatus: { value: 'linkUp' }, domainId: { value: 'D1' } }));
   assert.deepEqual([ml.status.state, ml.status.negotiation, ml.status.peerLinkState, ml.status.domain], ['active', 'connected', 'up', 'D1']);
   assert.equal(P.parseMlag(n('/Sysdb/mlag/status', { foo: { value: 1 } })).status, null);
@@ -56,6 +62,7 @@ test('① 파서', () => {
   const m = P.mergeL2Cfg(ports, { vlans: new Map([['Ethernet1', '120']]), members: new Map([['Ethernet1', 'Port-Channel10']]) });
   assert.deepEqual(m.map((p) => [p.vlan, p.lag]), [['120', 'Port-Channel10'], ['', 'Port-Channel3'], ['x', '']], '맵에 없는 포트: 채널 이름이면 남기고 아니면 비운다');
   assert.equal(P.mergeL2Cfg(ports, { vlans: null, members: null })[2].lag, 'junk', '둘 다 못 읽었으면 그대로');
+  assert.equal(P.mergeL2Cfg(ports, { members: new Map(), partial: { lag: true } })[2].lag, 'junk', '반증 F1: 일부만 읽은 맵이면 맵에 없는 포트를 비우지 않는다');
   // 길어도 선형
   const t0 = process.hrtime.bigint();
   P.parseLagMembers(n('/x/phyIntf/Ethernet1', { lag: { value: 'port-channel'.repeat(50_000) } }));
@@ -101,6 +108,7 @@ test('② 수집기 실제 호출 — 부품 주기에 읽고 다음 주기에�
     const d2 = r2.devices[0];
     assert.equal(d2.ports.find((p) => p.name === 'Ethernet1').vlan, '120', '부품 아닌 주기에도 직전에 읽은 VLAN');
     assert.equal(d2.mlagStatus.state, 'active');
+    assert.ok(d2.cfgReadAt.lag, '부품 아닌 주기에도 읽은 시각을 싣는다');
   } finally { srv.close(); }
 });
 
@@ -115,6 +123,13 @@ test('③ 엣지 정제 — mlagStatus · cfgReadAt', () => {
   assert.deepEqual(x.cfgReadAt, { vlan: now - 1000, lag: null });
   assert.deepEqual(x.readKinds, ['bugs']);
   assert.equal(E.cleanInfo({ mlagStatus: 'nope' }, now), null, '객체가 아니면 버린다');
+  assert.equal(E.cleanInfo({ mlagStatus: {} }, now), null, '반증 F6: 칸이 없는 MLAG 상태는 싣지 않는다(못 읽음)');
+  assert.equal(E.cleanInfo({ mlagStatus: { state: 'active', at: -5 } }, now).mlagStatus.at, null, '반증 F6: 음수 시각');
+  // 반증 F2: 중앙 정제 상한이 수집 종류 · 탐색 표본 수보다 작으면 새 근거가 버려지고 기존 표본을 밀어낸다.
+  assert.ok(E.SAMPLE_KINDS_MAX >= Object.keys(C.CANDIDATES).length, `SAMPLE_KINDS_MAX ${E.SAMPLE_KINDS_MAX} < 종류 ${Object.keys(C.CANDIDATES).length}`);
+  assert.ok(C.PROBE_MAX >= C.PROBE_PATHS.length);
+  const probes = Array.from({ length: C.PROBE_MAX }, (_, i) => ({ path: `/p${i}`, ok: true }));
+  assert.equal(E.cleanProbes(probes, now).length, C.PROBE_MAX, '탐색 표본을 PROBE_MAX 까지 받는다(예전 28 고정)');
 });
 
 test('④ 버전 준수 · Overview 지원 종료', async () => {
@@ -154,9 +169,13 @@ test('⑤ 이중화', () => {
   const ch = R.channelsOf([P2('Et1', 'Port-Channel1', 'up'), P2('Et2', 'Port-Channel1', 'up'), P2('Et3', 'Port-Channel2', 'up'), P2('Et4', 'Port-Channel2', 'down'),
     P2('Et5', 'Port-Channel3', 'nolink'), P2('Et6', 'Port-Channel4', 'up'), P2('Et7', 'Port-Channel4', 'unknown'), P2('Et8', 'Port-Channel5', 'down', 'down'), P2('Et9', '', 'up'), P2('Et10', 'junk', 'up')]);
   assert.deepEqual(Object.fromEntries(ch.map((c) => [c.po, c.state])), { 'Port-Channel1': 'ok', 'Port-Channel2': 'degraded', 'Port-Channel3': 'down', 'Port-Channel4': 'unknown', 'Port-Channel5': 'off' });
+  const mix = R.channelsOf([P2('Et1', 'Port-Channel9', 'up'), P2('Et2', 'Port-Channel9', 'down'), P2('Et3', 'Port-Channel9', 'unknown')]);
+  assert.equal(mix[0].state, 'degraded', '반증 F4: 내려간 멤버가 확인되면 모르는 멤버가 섞여도 이중화 상실');
   assert.equal(R.mlagJudge({ state: 'active', negotiation: 'connected', peerLinkState: 'up' }).state, 'ok');
   assert.equal(R.mlagJudge({ state: 'active', negotiation: 'connected', peerLinkState: 'down' }).state, 'peerDown');
   assert.equal(R.mlagJudge({ state: 'active', negotiation: 'connecting' }).state, 'notConnected');
+  assert.equal(R.mlagJudge({ state: 'active', negotiation: '', peerLinkState: '' }).state, 'unknown', '반증 F3: 협상 · 피어 링크를 못 읽으면 정상이 아니다');
+  assert.equal(R.mlagJudge({ state: 'active', negotiation: 'connected', peerLinkState: null }).state, 'unknown');
   assert.equal(R.mlagJudge({ state: 'disabled' }).state, 'off');
   assert.equal(R.mlagJudge(null, true).state, 'unread', '인벤토리상 켜짐인데 상태를 못 읽음');
   assert.equal(R.mlagJudge(null, false).state, 'off');

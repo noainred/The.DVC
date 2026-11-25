@@ -713,7 +713,7 @@ export function firstSpeed(flat) {
  */
 const SPEED_IN_TEXT = /(\d{1,4})(?:p(\d{1,2}))?\s?(g|m)(?:bps|bit)/i;
 const SPEED_FIELD_RE = /speed|linkmode/i;
-const SPEED_FIELD_SKIP = /autoneg|duplex|advert|capab|supported|config|desired|lanes/i;
+const SPEED_FIELD_SKIP = /autoneg|duplex|advert|capab|supported|config|desired|lanes|max|min|default/i;   // 반증 E7: 최대 · 기본 속도는 지금 속도가 아니다
 function speedFromAnyField(flat) {
   if (!isObj(flat)) return null;
   for (const [k, v0] of Object.entries(flat)) {
@@ -788,13 +788,17 @@ export function parseInterfaces(text, { max = PORT_MAX } = {}) {
  * v3.39: 포트 목록에 VLAN · 채널 소속을 얹는다(순수). 읽은 맵에 그 포트가 있으면 그 값, 채널 맵을 읽었는데 없으면 ''(소속 없음),
  *   맵을 못 읽었으면(null) 포트 값을 그대로 둔다(intfStatus 에서 읽은 값 — 대개 ''). 새 배열을 돌려준다.
  */
-export function mergeL2Cfg(ports, { vlans = null, members = null } = {}) {
+export function mergeL2Cfg(ports, { vlans = null, members = null, partial = {} } = {}) {
   if (!Array.isArray(ports)) return ports;
   return ports.map((p) => {
     if (!p || typeof p !== 'object') return p;
     const out = { ...p };
     if (vlans instanceof Map && vlans.has(p.name)) out.vlan = vlans.get(p.name);
-    if (members instanceof Map) out.lag = members.get(p.name) || (p.lag && /port-?channel/i.test(p.lag) ? p.lag : '');
+    if (members instanceof Map) {
+      if (members.has(p.name)) out.lag = members.get(p.name);
+      // 반증 F1: 일부만 읽은 맵이면 맵에 없는 포트를 '소속 없음' 으로 비우지 않는다(모른다).
+      else if (!partial.lag) out.lag = p.lag && /port-?channel/i.test(p.lag) ? p.lag : '';
+    }
     return out;
   });
 }
@@ -838,6 +842,8 @@ export function parseLagMembers(text) {
   const members = new Map(); let seen = 0;
   for (const [name, f] of entities) {
     if (!/^(ethernet|et)\d/i.test(String(name))) continue;
+    // 반증 E1: 채널 소속 표(lag/…/phyIntf)에 포트 개체가 있으면 그 표는 읽은 것이다 — 소속 칸이 없는 포트는 '채널 없음'(null 로 두면 연속 실패 차단이 그 CVP 의 소속 읽기를 멈췄다).
+    seen++;
     let po = null; let hasField = false;
     // 평면화된 키(포인터는 'lag.ptr.3' 처럼 펼쳐진다)의 **어느 조각이든** lag · channel 이면 그 값을 본다.
     for (const [k, v] of Object.entries(isObj(f) ? f : {})) {
@@ -846,7 +852,6 @@ export function parseLagMembers(text) {
       po = poNameOf(v);
       if (po) break;
     }
-    if (hasField) seen++;
     if (po) members.set(str(name, 64), po);
   }
   // entitiesOf 는 포인터 값을 필드로 세지 않는다(없는 개체를 지어내지 않게) — 소속이 포인터(`{ptr:[…,'Port-Channel10']}`)로 오면 위에서 못 본다.
@@ -857,6 +862,7 @@ export function parseLagMembers(text) {
   return { members, keys };
 }
 const PORT_NAME_RE = /^(ethernet|et)\d[\d/]*$/i;
+const LAG_FIELD_RE = /^(lag|lagintf|lagid|portchannel|channelgroup|channel)$/i;   // 반증 E6: 칸 이름 전체 일치('flags' 가 'lag' 에 맞지 않게)
 function rawLagScan(text) {
   const members = new Map(); let seen = 0;
   let values = [];
@@ -870,11 +876,11 @@ function rawLagScan(text) {
       for (const [k, u] of Object.entries(n.updates)) {
         const val = isObj(u) && Object.hasOwn(u, 'value') ? u.value : u;
         let port = null; let po = null;
-        if (PORT_NAME_RE.test(tail) && /lag|channel/i.test(k)) { port = tail; po = poNameOf(isObj(val) && val.ptr ? val.ptr : val); }
+        if (PORT_NAME_RE.test(tail) && LAG_FIELD_RE.test(String(k))) { port = tail; po = poNameOf(isObj(val) && val.ptr ? val.ptr : val); }
         // 컬렉션의 포트별 포인터(`Ethernet1: {ptr:[…/phyIntf/Ethernet1]}`)는 소속 값이 아니다 — 세지 않는다(세면 빈 맵으로 '읽음' 이 되어 포인터를 따라가지 않는다).
         else if (PORT_NAME_RE.test(String(k)) && isObj(val) && ptrSegs(val) == null) {
           let t = ''; try { t = JSON.stringify(val).slice(0, 512); } catch { t = ''; }
-          if (/lag|channel/i.test(t)) { port = String(k); po = poNameOf(t); }
+          if (/"(lag|lagIntf|lagId|portChannel|channelGroup|channel)"/i.test(t)) { port = String(k); po = poNameOf(t); }
         }
         if (port) { seen++; if (po && members.size < 4096) members.set(str(port, 64), po); }
       }

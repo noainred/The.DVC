@@ -4,7 +4,8 @@ import { fetchJson } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { NOTE, MONO, ROW, GRID1, LINKBTN, Tiles, CvpSelect, Pill } from './CvpNetParts.jsx';
-import { CHANNEL_DEFS, MLAG_DEFS, REDUNDANCY_NOTE, channelText, rowKey, TONE, dateText } from './cvpNetText.js';
+import { CHANNEL_DEFS, MLAG_DEFS, REDUNDANCY_NOTE, channelText, rowKey, TONE } from './cvpNetText.js';
+import { agoText } from './cvpText.js';
 
 /**
  * CVP › 이중화(v3.39 ⑧) — MLAG 상태 · 포트 채널 멤버. `/tools/cvp/redundancy` 마운트 1회 + 새로고침. 판정은 서버 cvp/redundancy.js.
@@ -61,10 +62,11 @@ export default function CvpRedundancyView({ servers = [], onOpen }) {
                     <td data-sort={Object.keys(MLAG_DEFS).indexOf(x.mlag.state)}><Pill color={MLAG_DEFS[x.mlag.state][1]}>{MLAG_DEFS[x.mlag.state][0]}</Pill>{x.mlag.state === 'unread' && x.mlag.enabled === true ? <div style={{ ...NOTE, fontSize: 11.5 }}>인벤토리상 MLAG 켜짐</div> : null}</td>
                     <td style={{ whiteSpace: 'normal', minWidth: 180, fontSize: 12.5 }}>
                       {x.mlag.raw ? `상태 ${x.mlag.raw.state || '—'} · 협상 ${x.mlag.raw.negotiation || '—'} · 피어 링크 ${x.mlag.peerLink || ''} ${x.mlag.raw.peerLinkState || '—'}` : '—'}
-                      {x.mlag.at ? <div style={{ ...NOTE, fontSize: 11.5 }}>읽은 날 {dateText(x.mlag.at)}{x.mlag.domain ? ` · 도메인 ${x.mlag.domain}` : ''}</div> : null}
+                      {x.mlag.at ? <div style={{ ...NOTE, fontSize: 11.5 }}>읽은 시각 {agoText(x.mlag.at)}{x.mlag.domain ? ` · 도메인 ${x.mlag.domain}` : ''}</div> : null}
                     </td>
                     <td data-sort={badCh.length} style={{ ...MONO, textAlign: 'right' }}>{x.lagUnread ? '—' : badCh.length}</td>
                     <td style={{ whiteSpace: 'normal', minWidth: 300 }}>
+                      {x.lagPartial ? <div style={{ ...NOTE, color: TONE.amber }}>채널 소속을 일부만 읽었습니다 — 빠진 멤버가 있을 수 있습니다</div> : null}
                       {x.lagUnread ? <span style={NOTE}>채널 소속 못 읽음</span> : !x.channels.length ? <span style={NOTE}>포트 채널 없음</span> : (
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                           {x.channels.map((ch) => (

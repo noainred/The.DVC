@@ -1173,7 +1173,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 | PUT | `/tools/curuser/settings` | 역할 `admin` | [server/src/routes/api/curUser.js:191](../server/src/routes/api/curUser.js#L191) |
 | GET | `/tools/cvp` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:272](../server/src/routes/api/cvp.js#L272) |
 | POST | `/tools/cvp/collect` | 역할 `admin/operator` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:844](../server/src/routes/api/cvp.js#L844) |
-| GET | `/tools/cvp/compare` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvpNet.js:311](../server/src/routes/api/cvpNet.js#L311) |
+| GET | `/tools/cvp/compare` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvpNet.js:316](../server/src/routes/api/cvpNet.js#L316) |
 | GET | `/tools/cvp/compliance` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvpNet.js:235](../server/src/routes/api/cvpNet.js#L235) |
 | GET | `/tools/cvp/device` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:369](../server/src/routes/api/cvp.js#L369) |
 | GET | `/tools/cvp/device-series` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:499](../server/src/routes/api/cvp.js#L499) |
@@ -1204,9 +1204,9 @@ Prometheus/OTel 익스포터(선택 토큰).
 | POST | `/tools/cvp/servers/:id/test` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:912](../server/src/routes/api/cvp.js#L912) |
 | GET | `/tools/cvp/settings` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:940](../server/src/routes/api/cvp.js#L940) |
 | PUT | `/tools/cvp/settings` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:944](../server/src/routes/api/cvp.js#L944) |
-| GET | `/tools/cvp/snapshots` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvpNet.js:276](../server/src/routes/api/cvpNet.js#L276) |
-| POST | `/tools/cvp/snapshots` | 역할 `admin/operator` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvpNet.js:282](../server/src/routes/api/cvpNet.js#L282) |
-| DELETE | `/tools/cvp/snapshots/:id` | 역할 `admin/operator` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvpNet.js:302](../server/src/routes/api/cvpNet.js#L302) |
+| GET | `/tools/cvp/snapshots` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvpNet.js:281](../server/src/routes/api/cvpNet.js#L281) |
+| POST | `/tools/cvp/snapshots` | 역할 `admin/operator` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvpNet.js:287](../server/src/routes/api/cvpNet.js#L287) |
+| DELETE | `/tools/cvp/snapshots/:id` | 역할 `admin/operator` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvpNet.js:307](../server/src/routes/api/cvpNet.js#L307) |
 | GET | `/tools/cvp/topology` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvpNet.js:179](../server/src/routes/api/cvpNet.js#L179) |
 | GET | `/tools/data-flow` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/dataFlow.js:64](../server/src/routes/api/dataFlow.js#L64) |
 | POST | `/tools/deep-search` | 권한 `tools` | [server/src/routes/api/checksLogs.js:200](../server/src/routes/api/checksLogs.js#L200) |

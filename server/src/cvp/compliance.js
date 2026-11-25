@@ -53,12 +53,13 @@ export function lifeState(info, now = Date.now()) {
   if (!read && !l) return { state: 'unread', swEnd: null, hwEnd: null, swVersion: null };
   if (!l) return { state: 'none', swEnd: null, hwEnd: null, swVersion: null, noRecord: true };
   const swEnd = lifeMs(l.swEndOfSupport);
-  const hwCands = [l.hwEndOfTacSupport, l.hwEndOfRma, l.hwEndOfLife].map(lifeMs).filter((x) => x != null);
+  // 반증 E5: hwEndOfLife 는 '단종 공지일' 일 수 있어(뜻 미확인) 지원 종료 판정에 넣지 않는다 — TAC 지원 · RMA 종료만. 화면에는 따로 싣는다.
+  const hwCands = [l.hwEndOfTacSupport, l.hwEndOfRma].map(lifeMs).filter((x) => x != null);
   const hwEnd = hwCands.length ? Math.min(...hwCands) : null;
   const ends = [swEnd, hwEnd].filter((x) => x != null);
   const first = ends.length ? Math.min(...ends) : null;
   const state = first == null ? 'none' : first < now ? 'passed' : first < now + SOON_DAYS * DAY ? 'soon' : 'ok';
-  return { state, swEnd, hwEnd, hwEndOfSale: lifeMs(l.hwEndOfSale), swVersion: typeof l.swEolVersion === 'string' && l.swEolVersion ? l.swEolVersion : null, first };
+  return { state, swEnd, hwEnd, hwEndOfSale: lifeMs(l.hwEndOfSale), hwEndOfLife: lifeMs(l.hwEndOfLife), swVersion: typeof l.swEolVersion === 'string' && l.swEolVersion ? l.swEolVersion : null, first };
 }
 
 /**

@@ -252,7 +252,12 @@ export function registerCvpNet(api) {
     const portsByDev = new Map();
     for (const p of b.ports) { const k = devKey(p.agent, p.cvpId, p.key); if (!portsByDev.has(k)) portsByDev.set(k, []); portsByDev.get(k).push(p); }
     const r = redundancyFleet({ devices: b.devices, portsByDev });
-    res.json({ ...r, ...(b.truncated ? { truncated: true } : {}) });
+    // 반증 E8: MLAG 도메인 · 피어 링크는 장비가 준 자유 문자열 — 비관리자에는 형제 라우트처럼 주소를 가린다.
+    const admin = isAdminReq(req);
+    const hosts = hostsOf();
+    const mk = (v) => (admin || v == null ? v : maskErrText(String(v), hosts));
+    res.json({ ...r, rows: admin ? r.rows : r.rows.map((x) => ({ ...x, mlag: { ...x.mlag, domain: mk(x.mlag.domain), peerLink: mk(x.mlag.peerLink) } })),
+      ...(b.truncated ? { truncated: true } : {}), ...(admin ? {} : { addressHidden: true }) });
   });
 
   // ── ⑬ 작업 전후 비교 ──────────────────────────────────────────────────────────────────────────────────────
