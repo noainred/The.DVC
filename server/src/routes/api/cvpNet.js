@@ -8,8 +8,8 @@
  *  ⑥ ⑦ 토폴로지 · 양끝 불일치             GET  /tools/cvp/topology
  *  ①    MAC · IP · 이름으로 위치 찾기        GET  /tools/cvp/locate
  *  ⑬    작업 전후 비교(스냅샷)              GET/POST /tools/cvp/snapshots · DELETE /tools/cvp/snapshots/:id · GET /tools/cvp/compare
- *  ③    버전 준수(v3.39)                   GET  /tools/cvp/compliance
- *  ⑧    MLAG · 포트 채널 이중화(v3.39)      GET  /tools/cvp/redundancy
+ *  ③    버전 준수(v3.40)                   GET  /tools/cvp/compliance
+ *  ⑧    MLAG · 포트 채널 이중화(v3.40)      GET  /tools/cvp/redundancy
  *
  * 접근 규약은 형제 cvp.js 와 같다: 조회 = `requirePerm('tools')` + **전체 범위 계정만**(fullScopeOnly — 범위 계정 403).
  *   스냅샷 찍기 · 지우기는 상태 변경 — `requireRole('admin','operator')` + tools + 전체 범위 + 감사 로그.
@@ -31,8 +31,8 @@ import { opticTrends, opticInventory, TREND_DAYS, TREND_MIN_DAYS } from '../../c
 import { buildTopology, switchIndex, uplinkPortsOf, normPort } from '../../cvp/topology.js';
 import { parseQuery, subjectsOf, placeRows, MANY_MACS } from '../../cvp/locate.js';
 import { snapshotBody, diffSnapshots } from '../../cvp/snapdiff.js';
-import { complianceFleet } from '../../cvp/compliance.js';     // v3.39 ③
-import { redundancyFleet } from '../../cvp/redundancy.js';    // v3.39 ⑧
+import { complianceFleet } from '../../cvp/compliance.js';     // v3.40 ③
+import { redundancyFleet } from '../../cvp/redundancy.js';    // v3.40 ⑧
 import { store } from '../../store.js';
 import { capStr } from '../../util/capStr.js';
 import { numOrNull } from '../../util/numOrNull.js';
@@ -231,7 +231,7 @@ export function registerCvpNet(api) {
     });
   });
 
-  // ── ③ 버전 준수(v3.39) — CVP 가 준 준수 · 버그/CVE · 수명주기를 그대로(포탈이 판정하지 않는다). 새 수집 없음(v2.641 CVP 단위 항목). ──
+  // ── ③ 버전 준수(v3.40) — CVP 가 준 준수 · 버그/CVE · 수명주기를 그대로(포탈이 판정하지 않는다). 새 수집 없음(v2.641 CVP 단위 항목). ──
   api.get('/tools/cvp/compliance', toolsPerm, fullScopeOnly, async (req, res) => {
     kickDemo();
     const cvpId = cvpIdOf(req);
@@ -242,7 +242,7 @@ export function registerCvpNet(api) {
     res.json({ ...r, devicesCount: b.devices.length });
   });
 
-  // ── ⑧ MLAG · 포트 채널 이중화(v3.39) — 채널 = 포트 행의 lag · oper(새로 읽는 채널 소속) · MLAG = info.mlagStatus(새로 읽는 상태 노드). 장애로 열지 않는다(화면만). ──
+  // ── ⑧ MLAG · 포트 채널 이중화(v3.40) — 채널 = 포트 행의 lag · oper(새로 읽는 채널 소속) · MLAG = info.mlagStatus(새로 읽는 상태 노드). 장애로 열지 않는다(화면만). ──
   api.get('/tools/cvp/redundancy', toolsPerm, fullScopeOnly, async (req, res) => {
     kickDemo();
     const cvpId = cvpIdOf(req);

@@ -75,17 +75,17 @@ describe('cvpNetText', () => {
     expect(sourceText(['fdb', 'cvp'])).toBe('MAC 테이블 + CVP 위치');
     expect(transitBasis({ basis: 'macs', portMacs: 300 }, 64)).toContain('300');
   });
-  it('v3.39 빈 칸 이유 — 모든 행이 빈 칸만 · 근거를 단정하지 않는다', () => {
+  it('v3.40 빈 칸 이유 — 모든 행이 빈 칸만 · 근거를 단정하지 않는다', () => {
     const ports = [{ name: 'Ethernet1', oper: 'up', speedBps: null, vlan: '', lag: '', inBps: null, outBps: null }, { name: 'Ethernet2', oper: 'nolink', speedBps: null, vlan: '', lag: '' }, { name: 'Management1', speedBps: 1e9 }];
     const n = emptyColumnNotes(ports, { usedPaths: { counters: '/c' }, missing: { switchport: '없음(404)' }, seenFields: { interfaces: ['operStatus', 'adminStatus'] } });
     expect(n.map((x) => x.col)).toEqual(['속도', '수신 · 송신 · 오류', 'VLAN', 'LAG']);
     expect(n[0].text).toContain('operStatus, adminStatus');
     expect(n[2].text).toContain('없음(404)');
-    expect(n[3].text).toContain('v3.39');
+    expect(n[3].text).toContain('v3.40');
     expect(emptyColumnNotes([{ name: 'Ethernet1', oper: 'up', speedBps: 1e9, vlan: '1', lag: 'Port-Channel1', inBps: 1 }], {})).toEqual([]);
     expect(emptyColumnNotes([], {})).toEqual([]);
   });
-  it('v3.39 버전 준수 · 이중화 문구', () => {
+  it('v3.40 버전 준수 · 이중화 문구', () => {
     expect(bugText({ state: 'unread' })).toBe('—');
     expect(bugText({ state: 'none' })).toBe('노출 없음');
     expect(bugText({ state: 'high', bugCount: 7, cveCount: 2, acknowledged: true })).toBe('버그 7 · CVE 2 (확인함)');

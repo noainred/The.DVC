@@ -30,6 +30,7 @@ import { startAdaptiveTimer as baseAdaptiveTimer } from '../util/adaptiveTimer.j
 import { agentValueOf } from '../util/agentKey.js';
 import { makeSettingsLoadError } from '../util/settingsLoadError.js';
 import { makeJsonFileReader, READ_RETRY_MS } from '../util/jsonFileRead.js';   // 105회차 A5: 읽기 오류 ≠ 손상
+import { ISI_CMD_TIMEOUT_DEF_MS, ISI_CMD_TIMEOUT_MIN_MS, ISI_CMD_TIMEOUT_MAX_MS, ISI_CMD_TIMEOUT_PRESETS, ISI_SESSION_EXTRA_MS } from './isiTimeouts.js';
 
 /** 조정 가능한 주기 항목. min/def 는 서버가 단일 소스 — UI 가 이 표를 받아 폼을 그린다. */
 export const INTERVAL_SPEC = [
@@ -50,9 +51,20 @@ export const INTERVAL_SPEC = [
   //   상한 60분(`max`) — 수집 주기보다 길게 두면 표본은 수집 주기(1시간 스냅샷)마다만 남는다. 하한 1분은 다른 항목과 같다.
   { key: 'nodeLoadMs', env: 'STORAGE_NODELOAD_MS', def: 5 * 60_000, min: 60_000, max: 60 * 60_000,
     label: '노드 부하 표본 주기', hint: '아이실론 노드별 부하·클라이언트·프로토콜 표본을 읽는 간격(수집 주기와 따로 돕니다 — 장비 편집의 ‘노드 부하 표본 수집’ 이 켜진 장비만). SSH 장비는 이 간격마다 로그인이 생겨 장비 감사 로그가 늘어납니다.' },
+  // v3.39.0(사용자 요청 — "isi 명령어 처리에 오래 걸려서 timeout · 설정에 timeout 메뉴 · 최대 5분 · 기본 3분"): **주기가 아니라 시한**이다.
+  //   · `timer: false` — 값이 바뀌어도 폴러·push·pull 타이머를 다시 잡지 않는다(주기가 아니다 — applyCentralIntervals).
+  //   · `max`·`presets` — 화면은 이 사양으로 선택지를 그린다(숫자를 화면에 박지 않는다 · 주기 선택지 10분…24시간은 이 항목에 맞지 않는다).
+  //   · 같은 배포 경로(storage-config `intervals`)를 탄다 — 구버전 엣지는 모르는 키를 버린다(normalizeIntervals).
+  //   · 세션 예산·장비 시한은 이 값에서 계산한다(`storage/isiTimeouts.js` — 사람이 세 값을 맞추게 두지 않는다).
+  { key: 'isiCmdTimeoutMs', env: 'STORAGE_ISI_CMD_TIMEOUT_MS', def: ISI_CMD_TIMEOUT_DEF_MS, min: ISI_CMD_TIMEOUT_MIN_MS, max: ISI_CMD_TIMEOUT_MAX_MS,
+    timer: false, presets: ISI_CMD_TIMEOUT_PRESETS,
+    label: 'PowerScale SSH 명령 대기',
+    hint: `주기가 아니라 시한 — PowerScale(Isilon) SSH 수집에서 isi 명령 하나의 응답을 기다리는 최대 시간. 응답이 느린 클러스터가 시간 초과로 수집에 실패하면 늘린다. 장비 한 대의 전체 수집 시한은 이 값 + ${Math.round(ISI_SESSION_EXTRA_MS / 60_000)}분으로 함께 늘어난다.` },
 ];
 const SPEC_BY_KEY = new Map(INTERVAL_SPEC.map((s) => [s.key, s]));
 const MAX_MS = 24 * 60 * 60_000; // 상한 24시간 — 그 이상은 사실상 '끔'이라 오설정으로 본다.
+/** 타이머를 움직이는 항목(주기)인가 — `timer: false` 는 시한이라 재무장 대상이 아니다(v3.39.0). */
+const isTimerKey = (spec) => spec.timer !== false;
 
 /**
  * 입력 정규화(순수). 아는 키만 남기고 하한/상한으로 clamp 한다.
@@ -129,11 +141,14 @@ export function applyCentralIntervals(input = {}) {
   _overrideAt = Date.now();
   const eff = runtimeIntervals();
   const effectiveChanged = INTERVAL_SPEC.some((s) => eff[s.key] !== effBefore[s.key]);
+  // v3.39.0: 타이머는 **주기 항목이 바뀔 때만** 다시 잡는다 — 시한(`timer: false` · PowerScale SSH 명령 대기)만 바뀌었으면 값은 다음
+  //   수집부터 그대로 먹고(수집기가 매번 runtimeIntervals 를 읽는다), 타이머를 건드릴 이유가 없다(재무장하면 첫 실행 전의 firstDelay 가 사라진다).
+  const timersChanged = INTERVAL_SPEC.some((s) => isTimerKey(s) && eff[s.key] !== effBefore[s.key]);
   console.log('[storage-intervals] 중앙 지정 주기 적용: '
     + INTERVAL_SPEC.map((s) => `${s.key}=${Math.round(eff[s.key] / 1000)}s`).join(' ')
-    + (effectiveChanged ? '' : ' (실효 주기는 그대로 — 타이머를 다시 잡지 않습니다)'));
-  if (effectiveChanged) for (const cb of _listeners) { try { cb(eff); } catch { /* 리스너 하나가 나머지를 막지 않게 */ } }
-  return { applied: true, values, effective: eff, effectiveChanged };
+    + (timersChanged ? '' : effectiveChanged ? ' (주기는 그대로 — 타이머를 다시 잡지 않습니다)' : ' (실효 주기는 그대로 — 타이머를 다시 잡지 않습니다)'));
+  if (timersChanged) for (const cb of _listeners) { try { cb(eff); } catch { /* 리스너 하나가 나머지를 막지 않게 */ } }
+  return { applied: true, values, effective: eff, effectiveChanged, timersChanged };
 }
 
 export function onIntervalsChange(cb) { _listeners.add(cb); return () => _listeners.delete(cb); }
@@ -235,6 +250,17 @@ export function intervalsForAgent(agent) {
   //   화면의 ‘중앙(직접 수집)’ 칸에 적은 주기가 저장만 되고 중앙 자신에게 한 번도 적용되지 않았다(전역 칸만 먹었다). '' 키는 글자 그대로 찾는다.
   const own = String(agent ?? '').trim() === '' ? (Object.hasOwn(d.agents, '') ? d.agents[''] : undefined) : agentValueOf(d.agents, agent);
   return { ...d.global, ...(own || {}) };
+}
+
+/**
+ * 저장된 설정(전역 + 모든 엣지) 중 그 항목의 가장 큰 값. 지정한 곳이 없으면 0.
+ * v3.39.0: 중앙이 '엣지가 장비 한 대를 수집하는 데 길어야 얼마나 걸리는가' 를 어림할 때 쓴다(`collectRequests.js perItemMs`).
+ */
+export function maxConfiguredIntervalMs(key) {
+  const d = load();
+  let m = Number(d.global?.[key]) || 0;
+  for (const v of Object.values(d.agents || {})) m = Math.max(m, Number(v?.[key]) || 0);
+  return m;
 }
 
 let _ownRetry = null;   // 106회차: 읽기 오류로 미룬 자기 주기 재적용 타이머

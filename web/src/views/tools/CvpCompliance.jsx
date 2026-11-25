@@ -7,7 +7,7 @@ import { NOTE, MONO, ROW, GRID1, LINKBTN, Seg, Tiles, CvpSelect, Pill } from './
 import { CONFIG_DEFS, BUG_DEFS, LIFE_DEFS, bugText, lifeText, COMPLIANCE_NOTE, rowKey, TONE } from './cvpNetText.js';
 
 /**
- * CVP › 버전 준수(v3.39 ③). `/tools/cvp/compliance` 마운트 1회 + 새로고침(폴링 없음). CVP 가 준 값을 그대로 — 판정은 서버 cvp/compliance.js(상태 분류만).
+ * CVP › 버전 준수(v3.40 ③). `/tools/cvp/compliance` 마운트 1회 + 새로고침(폴링 없음). CVP 가 준 값을 그대로 — 판정은 서버 cvp/compliance.js(상태 분류만).
  */
 const FILTERS = [['all', '전체'], ['life', '지원 종료 지남 · 곧'], ['bugs', '버그 · CVE 높음'], ['config', '설정 불일치'], ['unread', '못 읽음']];
 const pick = (rows, f) => (f === 'life' ? rows.filter((r) => ['passed', 'soon'].includes(r.life.state))

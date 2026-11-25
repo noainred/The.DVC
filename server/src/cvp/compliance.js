@@ -1,5 +1,5 @@
 /**
- * cvp/compliance.js — ③ 버전 준수(순수, v3.39 — docs/design/cvp-network-features §3 '버전 준수').
+ * cvp/compliance.js — ③ 버전 준수(순수, v3.40 — docs/design/cvp-network-features §3 '버전 준수').
  *
  * **포탈은 판정하지 않는다** — CVP 가 준 값을 그대로 보인다: 설정 준수(레거시 인벤토리 complianceCode · complianceIndication) ·
  *   버그 · CVE 노출(bugexposure.v1) · 수명주기(lifecycle.v1 — 소프트웨어 지원 종료 · 하드웨어 단종). 모두 CVP 단위 항목으로 이미 수집하던 값이다(v2.641).

@@ -1,5 +1,5 @@
 /**
- * test/cvpRedundancy339.test.js — v3.39 CVP 빈 칸 점검 · ③ 버전 준수 · ⑧ 이중화(docs/design/cvp-network-features §3 · 사용자 실장비 캡처).
+ * test/cvpRedundancy339.test.js — v3.40 CVP 빈 칸 점검 · ③ 버전 준수 · ⑧ 이중화(docs/design/cvp-network-features §3 · 사용자 실장비 캡처).
  *  ① 파서 — 속도 보강(단위 붙은 값만) · VLAN(스위치포트) · 채널 소속(포인터 포함) · MLAG · 포트에 얹기
  *  ② 수집기 실제 호출(가짜 CVP) — 부품 주기에 VLAN · 채널 · MLAG 를 읽고 다음(부품 아닌) 주기에도 직전 값을 쓴다
  *  ③ 엣지 정제 — mlagStatus · cfgReadAt 는 아는 칸만 · 문자열 상한 · 시각은 수신 시각으로 자른다

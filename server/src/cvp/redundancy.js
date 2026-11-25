@@ -1,5 +1,5 @@
 /**
- * cvp/redundancy.js — ⑧ MLAG · 포트 채널 이중화(순수, v3.39 — docs/design/cvp-network-features §3 '이중화').
+ * cvp/redundancy.js — ⑧ MLAG · 포트 채널 이중화(순수, v3.40 — docs/design/cvp-network-features §3 '이중화').
  *
  * 포트 채널: 설정된 멤버(관리상 켜진 것) 대비 링크가 올라온 멤버 — 전부 올라옴 ok · 일부만 degraded(이중화 상실) · 하나도 없음 down ·
  *   멤버 상태를 모르는 것이 섞여 결론을 못 내면 unknown · 멤버가 전부 관리상 꺼짐이면 off. 채널 소속(lag)을 **읽지 못한 장비**는 채널을 세지 않고

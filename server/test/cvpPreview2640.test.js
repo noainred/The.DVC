@@ -238,7 +238,7 @@ test('testCvp — 성공이면 sample(인벤토리 원문 앞부분) + cvpVersio
 test('cleanStatus — samples 를 좁힌다: head 5000 → 4096 · 모르는 키 제거 · 17종 → 16 · 수치는 numOrNull · 없으면 필드 생략', () => {
   const now = 1_700_000_000_000;
   const samples = {};
-  // v3.39: 상한을 16 → 32(SAMPLE_KINDS_MAX — 종류가 늘어 기존 표본을 밀어냈다)로 올렸다. 상한 + 1 종을 보내 잘리는지 본다(숫자를 박지 않는다).
+  // v3.40: 상한을 16 → 32(SAMPLE_KINDS_MAX — 종류가 늘어 기존 표본을 밀어냈다)로 올렸다. 상한 + 1 종을 보내 잘리는지 본다(숫자를 박지 않는다).
   for (let i = 0; i < E.SAMPLE_KINDS_MAX + 1; i++) samples[`kind${i}`] = { path: `/p/${i}`, head: 'h'.repeat(5000), status: 200, bytes: '1234', ok: true, at: now + 999_999, reason: 'r'.repeat(400), device: 'D', extra: 'x', __proto__: { z: 1 } };
   samples.kind0.status = ''; samples.kind0.bytes = null; samples.kind0.ok = 'true';
   samples.kind1.reason = undefined; samples.kind1.device = undefined;

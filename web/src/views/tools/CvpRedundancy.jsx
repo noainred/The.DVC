@@ -8,7 +8,7 @@ import { CHANNEL_DEFS, MLAG_DEFS, REDUNDANCY_NOTE, channelText, rowKey, TONE } f
 import { agoText } from './cvpText.js';
 
 /**
- * CVP › 이중화(v3.39 ⑧) — MLAG 상태 · 포트 채널 멤버. `/tools/cvp/redundancy` 마운트 1회 + 새로고침. 판정은 서버 cvp/redundancy.js.
+ * CVP › 이중화(v3.40 ⑧) — MLAG 상태 · 포트 채널 멤버. `/tools/cvp/redundancy` 마운트 1회 + 새로고침. 판정은 서버 cvp/redundancy.js.
  */
 const BAD_CH = new Set(['degraded', 'down', 'unknown']);
 const BAD_MLAG = new Set(['peerDown', 'notConnected', 'inactive', 'unknown']);

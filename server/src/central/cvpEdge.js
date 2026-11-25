@@ -154,7 +154,7 @@ const numObj = (o, keys) => {
 };
 
 /** v2.640: 원문 표본 종류 상한 · head 상한(client.js SAMPLE_HEAD_CHARS 와 같은 값 — 변조 엣지가 큰 본문을 실어도 여기서 잘린다). */
-// v3.39 반증 F2: 종류가 늘어(스위치포트 · 채널 소속 · MLAG) 16 이면 새 종류가 앞에 들어가 기존 표본(냉각 · 온도 · 트랜시버 · LLDP · FDB)을 밀어냈다 —
+// v3.40 반증 F2: 종류가 늘어(스위치포트 · 채널 소속 · MLAG) 16 이면 새 종류가 앞에 들어가 기존 표본(냉각 · 온도 · 트랜시버 · LLDP · FDB)을 밀어냈다 —
 //   후보 종류 수 + 여유로 맞춘다(cvpRedundancy339 ③ 이 CANDIDATES 수 이상임을 고정한다).
 export const SAMPLE_KINDS_MAX = 32;
 export const SAMPLE_HEAD_MAX = 4096;
@@ -213,7 +213,7 @@ export function cleanStatus(x, now = Date.now()) {
   };
 }
 
-/** v2.641: 경로 탐색 표본 정제 — client.PROBE_MAX 개 · head 1536자. v3.39 반증 F2: 예전 28 고정이라 표본을 늘리자 새 경로(채널 · MLAG 등)가 중앙에서 버려졌다. */
+/** v2.641: 경로 탐색 표본 정제 — client.PROBE_MAX 개 · head 1536자. v3.40 반증 F2: 예전 28 고정이라 표본을 늘리자 새 경로(채널 · MLAG 등)가 중앙에서 버려졌다. */
 export function cleanProbes(list, now = Date.now()) {
   return list.filter(isPlainObj).slice(0, PROBE_MAX).map((x) => ({
     path: s(x.path, 256), device: s(x.device, 128), status: numOrNull(x.status), at: tsClamp(x.at, now), ok: x.ok === true,
@@ -278,7 +278,7 @@ export function cleanInfo(v, now = Date.now()) {
     out.lifecycle = { swEolVersion: s(l.swEolVersion, 64), swEndOfSupport: numOrNull(l.swEndOfSupport), hwEndOfLife: numOrNull(l.hwEndOfLife),
       hwEndOfSale: numOrNull(l.hwEndOfSale), hwEndOfTacSupport: numOrNull(l.hwEndOfTacSupport), hwEndOfRma: numOrNull(l.hwEndOfRma) };
   }
-  // v3.39(⑧ 이중화): MLAG 상태 — 아는 칸 여섯 개 · 문자열 상한 · 시각은 수신 시각으로 자른다(엣지 시계가 빠르면 '지금보다 뒤' 가 되지 않게).
+  // v3.40(⑧ 이중화): MLAG 상태 — 아는 칸 여섯 개 · 문자열 상한 · 시각은 수신 시각으로 자른다(엣지 시계가 빠르면 '지금보다 뒤' 가 되지 않게).
   if (isPlainObj(v.mlagStatus)) {
     const m = v.mlagStatus;
     const w = (x) => { const t = s(x, 64); return t ? t.toLowerCase() : null; };
@@ -287,7 +287,7 @@ export function cleanInfo(v, now = Date.now()) {
     // 반증 F6: 칸이 하나도 없는 MLAG 상태는 싣지 않는다('못 읽음' 이어야 한다 — 빈 객체가 '확인 불가' 로 판정됐다).
     if (ms.state || ms.negotiation || ms.peerLinkState || ms.peerLink) out.mlagStatus = ms;
   }
-  if (isPlainObj(v.cfgReadAt)) {   // v3.39: VLAN · 채널 소속을 읽은 시각(없으면 null — '못 읽음')
+  if (isPlainObj(v.cfgReadAt)) {   // v3.40: VLAN · 채널 소속을 읽은 시각(없으면 null — '못 읽음')
     const t = (x) => { const n = numOrNull(x); return n == null || n <= 0 ? null : Math.min(n, now); };
     out.cfgReadAt = { vlan: t(v.cfgReadAt.vlan), lag: t(v.cfgReadAt.lag), ...(v.cfgReadAt.lagPartial === true ? { lagPartial: true } : {}), ...(v.cfgReadAt.vlanPartial === true ? { vlanPartial: true } : {}) };
   }

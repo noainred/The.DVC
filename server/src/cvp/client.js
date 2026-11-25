@@ -33,7 +33,7 @@ import { poolSettled } from '../util/pool.js';
 import { pushAll } from '../util/pushAll.js';
 import { baseUrlOf } from './registry.js';
 import * as P from './parse.js';
-import { PARTS_EVERY_MS } from './faults.js';   // v3.39 반증 F5: VLAN · 채널 · MLAG 기억 시간 = 부품 주기 × 3
+import { PARTS_EVERY_MS } from './faults.js';   // v3.40 반증 F5: VLAN · 채널 · MLAG 기억 시간 = 부품 주기 × 3
 
 // 2026-10-09 S-02: 서버별 `verifyTls`(등록 폼 체크박스)가 true 면 CA 체인만(엄격), 아니면(기본) CA 체인 또는 장비별 승인 지문
 // (security/tlsTrust.js). 예전 기본(verifyTls=false)은 어떤 인증서든 받아 CVP 계정·토큰을 상대 확인 없이 보냈다 — CVP 에는
@@ -148,7 +148,7 @@ export const CANDIDATES = Object.freeze({
   lldp: ['/api/v1/rest/{serial}/Sysdb/l2discovery/lldp/status/local/1/portStatus', '/api/v1/rest/{serial}/Sysdb/l2discovery/lldp/status/local/1/portStatus/all'],
   fdb: ['/api/v1/rest/{serial}/Smash/bridging/status/smashFdbStatus', '/api/v1/rest/{serial}/Smash/bridging/status/smashFdbStatus/all'],
   /*
-   * v3.39(사용자 실장비 캡처 — 포트 표의 VLAN · LAG 칸이 전부 비어 있었다): 인터페이스 상태 노드에는 VLAN · 채널 소속이 없다(추정) — 따로 읽는다.
+   * v3.40(사용자 실장비 캡처 — 포트 표의 VLAN · LAG 칸이 전부 비어 있었다): 인터페이스 상태 노드에는 VLAN · 채널 소속이 없다(추정) — 따로 읽는다.
    *   ⚠ 경로 · 필드 이름은 EOS Sysdb 관용으로 **추정**했다(실장비 미확인 — 경로 탐색 표본(PROBE_PATHS)과 '읽은 경로' 탭이 확인한다). 부품 주기에만 읽는다.
    *   MLAG 는 장비마다 상태 노드 하나(⑧ 이중화 — docs/design/cvp-network-features §3).
    */
@@ -157,7 +157,7 @@ export const CANDIDATES = Object.freeze({
     '/api/v1/rest/{serial}/Sysdb/lag/config/phyIntf'],
   mlag: ['/api/v1/rest/{serial}/Sysdb/mlag/status'],
 });
-/** v3.39: 부품 주기에 읽은 VLAN · 채널 소속 · MLAG 의 기억(장비별 · 프로세스 메모리). 부품 주기의 3배가 지나면 쓰지 않는다(오래된 값을 지금 값처럼 두지 않게). */
+/** v3.40: 부품 주기에 읽은 VLAN · 채널 소속 · MLAG 의 기억(장비별 · 프로세스 메모리). 부품 주기의 3배가 지나면 쓰지 않는다(오래된 값을 지금 값처럼 두지 않게). */
 const _l2cfg = new Map();
 const L2CFG_MAX = 20_000;
 export const L2CFG_TTL_MS = 3 * PARTS_EVERY_MS;   // 반증 F5: 예전 90분 고정 — 부품 주기를 늘린 설치에서 주기 끝마다 '못 읽음' 으로 깜빡였다
@@ -194,7 +194,7 @@ export const PROBE_PATHS = Object.freeze([
   '/Sysdb/interface/status/eth/phy/slice', '/Sysdb/hardware/entmib',
   // v2.924(B-②): LLDP · MAC 테이블 후보 경로의 모양(추정 경로 확인용).
   '/Sysdb/l2discovery/lldp/status/local/1/portStatus', '/Smash/bridging/status/smashFdbStatus',
-  // v3.39: VLAN(스위치포트) · 포트 채널 소속 · MLAG · Smash 카운터 디렉터리(속도 · 처리량 빈 칸 점검 — 사용자 실장비 캡처) 후보의 모양.
+  // v3.40: VLAN(스위치포트) · 포트 채널 소속 · MLAG · Smash 카운터 디렉터리(속도 · 처리량 빈 칸 점검 — 사용자 실장비 캡처) 후보의 모양.
   '/Sysdb/bridging/switchIntfConfig/switchIntfConfig', '/Sysdb/lag', '/Sysdb/lag/input/config/cli/phyIntf', '/Sysdb/mlag/status',
   '/Sysdb/interface/status/eth/phy/slice/1/intfStatus/Ethernet1/speedEntry',
 ]);
@@ -671,7 +671,7 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
       }
       return ev;
     }
-    /** v3.39: VLAN · 채널 소속 · MLAG(부품 주기) + 직전 값 기억(주기 사이 · 재시작 뒤 첫 부품 주기 전은 비어 있다 — 모름). */
+    /** v3.40: VLAN · 채널 소속 · MLAG(부품 주기) + 직전 값 기억(주기 사이 · 재시작 뒤 첫 부품 주기 전은 비어 있다 — 모름). */
     async function readL2Cfg(dev, serial, cvpId) {
       const ck = `${cvpId}\u0000${serial}`;
       let c = _l2cfg.get(ck);
@@ -738,7 +738,7 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
       else if (bgp.empty) dev.bgpEmpty = true; // v2.641: 빈 응답 — '피어 없음' 도 '못 읽음' 도 아닌 '이 경로에 값 없음'(BGP 미설정일 수 있다)
       if (intf.empty) dev.portsEmpty = true;
       /*
-       * v3.39: VLAN · 포트 채널 소속 · MLAG — 부품 주기에 읽고(이번에 못 읽으면 직전 값), 그 사이 주기에는 직전에 읽은 값을 쓴다(L2CFG_TTL_MS 안에서만).
+       * v3.40: VLAN · 포트 채널 소속 · MLAG — 부품 주기에 읽고(이번에 못 읽으면 직전 값), 그 사이 주기에는 직전에 읽은 값을 쓴다(L2CFG_TTL_MS 안에서만).
        *   반증 E2: 카운터 · BGP 뒤에 둔다(포인터 컬렉션이면 요청이 많아 앞에 두면 고RTT 직접 수집에서 처리량이 예산에 밀릴 수 있다).
        */
       await readL2Cfg(dev, serial, server.id);
@@ -797,7 +797,7 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
      * v2.641: 경로 탐색 표본 — 부품 주기(partsDue)에만, 스트리밍 중인 장비 1대에 대해 PROBE_PATHS 를 차례로 GET 한다(예산 안에서).
      *   '어디에 값이 있는가' 를 실장비에서 보여 주는 근거다(추정 경로를 고칠 때 이것을 본다).
      */
-    // v3.39 반증(부수): 인벤토리에서 사라진 장비의 VLAN · 채널 · MLAG 기억을 지운다(poller TIM2611-05 '사라진 장비 인메모리 정리' 선례).
+    // v3.40 반증(부수): 인벤토리에서 사라진 장비의 VLAN · 채널 · MLAG 기억을 지운다(poller TIM2611-05 '사라진 장비 인메모리 정리' 선례).
     if (inv.devices.length) {
       const pre = `${server.id}\u0000`;
       const live = new Set(inv.devices.map((d) => `${pre}${d.serial || d.key}`));
