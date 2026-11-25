@@ -31,7 +31,7 @@ const REPO = path.resolve(ROOT, '..');
 const NEW_PATHS = ['/objects/hosts', '/objects/vms', '/objects/networks', '/objects/clusters', '/compliance/licenses', '/compliance/snapshots',
   '/backup/summary', '/resources/power', '/resources/gpu'];
 
-function runLive(script) {
+function runLive(script, { refresh = true } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'papi3420-'));
   const boot = `
     const express = (await import('express')).default;
@@ -39,7 +39,7 @@ function runLive(script) {
     const v1 = (await import(${JSON.stringify(path.join(SRC, 'routes/publicApi.js'))})).default;
     const keys = await import(${JSON.stringify(path.join(SRC, 'publicapi/keys.js'))});
     const { GROUP_KEYS } = await import(${JSON.stringify(path.join(SRC, 'publicapi/allowlist.js'))});
-    await store.refresh({ force: true });
+    ${refresh ? 'await store.refresh({ force: true });' : '/* 골격 시험 — 첫 병합을 하지 않는다 */'}
     const app = express();
     app.use('/api/v1', v1);
     const srv = await new Promise((r) => { const s = app.listen(0, () => r(s)); });
@@ -90,7 +90,10 @@ const LIVE = (() => {
         if (p === '/compliance/snapshots') {
           const d = f.body?.data || [];
           o.snapJudge = { unjudged: d.filter((x) => x.judged === false).length, unjudgedWithFlag: d.filter((x) => x.judged === false && (x.overAge !== null || x.overCount !== null || x.overSize !== null)).length,
-            judged: d.filter((x) => x.judged === true).length, judgedNonBool: d.filter((x) => x.judged === true && [x.overAge, x.overCount, x.overSize].some((v) => typeof v !== 'boolean')).length };
+            judged: d.filter((x) => x.judged === true).length,
+            // 판정했고 값(나이 · 크기)을 읽은 행만 불리언이어야 한다 — 값을 못 읽은 행은 null(반증 B-2 — 예전 단언은 '판정 = 불리언' 이라 그 결함을 굳혔다)
+            judgedNonBool: d.filter((x) => x.judged === true && ((x.ageDays != null && typeof x.overAge !== 'boolean') || (x.sizeGB != null && typeof x.overSize !== 'boolean') || typeof x.overCount !== 'boolean')).length,
+            judgedUnknownWithFlag: d.filter((x) => x.judged === true && ((x.ageDays == null && x.overAge !== null) || (x.sizeGB == null && x.overSize !== null))).length };
         }
         const k = await call(p + (p.includes('?') ? '&' : '?') + 'vcenterId=' + SCOPE_VC, all);
         o.pick[p] = { status: k.status, vcs: Array.isArray(k.body?.data) ? [...new Set(k.body.data.map((x) => x.vcenterId))] : null };
@@ -197,7 +200,8 @@ test('⑤ 판정하지 않은 스냅샷 행의 기준 초과 여부는 false 가
   const r = LIVE();
   assert.ok(r.snapJudge.unjudged > 0 && r.snapJudge.judged > 0, `목 데이터에 판정/미판정 행이 다 있어야 합니다 ${JSON.stringify(r.snapJudge)}`);
   assert.equal(r.snapJudge.unjudgedWithFlag, 0, 'judged:false 인 행에 overAge · overCount · overSize 값이 있습니다(템플릿 · 예외 · 보류를 \'초과 아님\' 으로 말한다)');
-  assert.equal(r.snapJudge.judgedNonBool, 0, 'judged:true 인 행의 초과 여부가 불리언이 아닙니다');
+  assert.equal(r.snapJudge.judgedNonBool, 0, 'judged:true 이고 값을 읽은 행의 초과 여부가 불리언이 아닙니다');
+  assert.equal(r.snapJudge.judgedUnknownWithFlag, 0, '나이 · 크기를 못 읽은 행에 초과 여부 값이 있습니다');
 });
 
 test('⑤ 못 읽은 값은 null — 끊긴 호스트의 사용률', () => {
@@ -244,7 +248,8 @@ test('⑥ 중첩 객체도 선언한 키만 — policy · rpo · results24h · s
   if (b.policy) assert.deepEqual(Object.keys(b.policy).sort(), ['bareos', 'check', 'none', 'ssh', 'veeam']);
   const p = r.full['/resources/power'].data;
   assert.deepEqual(Object.keys(p.servers).sort(), ['devices', 'excludedVcenter', 'measured', 'ome', 'unread', 'watts']);
-  assert.deepEqual(Object.keys(p.network).sort(), ['devices', 'measured', 'noTime', 'outputOnly', 'partial', 'stale', 'unread', 'watts']);
+  // 네트워크에는 noTime 이 없다(power/total.js ② — CVP 는 시각 없음을 stale 로 센다 · 반증 B-6: 항상 null 이던 칸을 계약에서 뺐다)
+  assert.deepEqual(Object.keys(p.network).sort(), ['devices', 'measured', 'outputOnly', 'partial', 'stale', 'unread', 'watts']);
   assert.deepEqual(Object.keys(p.storage).sort(), ['devices', 'measured', 'noTime', 'partial', 'stale', 'unread', 'unsupported', 'watts']);
   // 원천 오류 원문은 meta 에 없다(어느 원천인지 키 · 개수만)
   assert.ok(!('error' in (r.full['/resources/power'].meta || {})), '전력 meta 에 오류 원문 필드가 있습니다');
@@ -285,4 +290,133 @@ test('⑦ 문서 — 공개 경로 · 분류 개수가 카탈로그와 같고, �
   assert.ok(!/820개|686개/.test(doc), 'API-PUBLIC.md 에 낡은 전체 라우트 수가 남아 있습니다');
   const allow = fs.readFileSync(path.join(SRC, 'publicapi/allowlist.js'), 'utf8');
   assert.ok(!/686개/.test(allow), 'allowlist.js 머리말에 낡은 전체 라우트 수가 남아 있습니다');
+});
+
+/* ── 반증 B(v3.42.0 검토) 확정분 회귀 — 값을 모를 때 0 · false 가 나가지 않는다 ───────────────────── */
+
+test('반증 B-1 — 첫 병합 전 골격 스냅샷이면 503 not-collected(수집 상태 경로만 답한다)', () => {
+  const r = runLive(`
+    // 실제 경로로 골격을 게시한다(store.publishSkeleton — 첫 병합 전 · initial:true). refresh 를 부르지 않는다.
+    store.publishSkeleton([{ id: 'vc-a', name: 'A' }, { id: 'vc-b', name: 'B' }], 'mock');
+    const all = keys.issueApiKey({ name: 'all', groups: [...GROUP_KEYS] }).plaintext;
+    const out = {};
+    for (const p of ['/inventory/summary', '/inventory/vcenters', '/inventory/collection', '/capacity/datastores', '/faults/alarms', '/objects/hosts', '/objects/vms', '/backup/summary', '/compliance/licenses']) {
+      const x = await call(p, all); out[p] = { status: x.status, code: x.body?.code, pending: x.body?.data?.pending };
+    }
+    return { initial: store.get()?.initial === true, out };
+  `, { refresh: false });
+  assert.equal(r.initial, true, '하니스가 골격 상태를 만들지 못했습니다');
+  for (const [p, v] of Object.entries(r.out)) {
+    if (p === '/inventory/collection') { assert.equal(v.status, 200); assert.equal(v.pending, 2, '수집 상태 경로는 pending 수를 답해야 합니다'); continue; }
+    assert.equal(v.status, 503, `${p}: 골격인데 ${v.status}(0 · 빈 배열을 '없다' 로 줌)`);
+    assert.equal(v.code, 'not-collected');
+  }
+});
+
+test('반증 B-1 · B-3 — 백업 행: VM 목록을 모르면 수가 전부 null(inventoryUnknown) · 등록부를 못 읽으면 Veeam 서버 수는 null', async () => {
+  const { backupRowOf } = await import('../src/routes/publicApiRows.js');
+  const pa = { n: 0, on: 0, pol: { veeam: 0, bareos: 0, ssh: 0, none: 0, check: 0 }, polUnk: 0, unprot: 0, unver: 0, rpo: { d1: { ok: 0, miss: 0, unk: 0 } }, r24: { ok: 0, warn: 0, fail: 0 }, v7: { ok: 0, bad: 0 }, b7: { ok: 0, bad: 0 }, run: 0, lok: null, nx: null };
+  const unk = backupRowOf({ id: 'vc-a', name: 'A', vm: null, veeamState: 'no-inventory', pa, veeamServers: 1 });
+  assert.equal(unk.inventoryUnknown, true);
+  for (const k of ['vms', 'poweredOn', 'backedUp', 'policy', 'policyUnknown', 'unprotected', 'unverified', 'running']) assert.equal(unk[k], null, `${k}: 모르는 VM 목록인데 ${unk[k]}`);
+  assert.deepEqual(unk.rpo.d1, { ok: null, miss: null, unknown: null });
+  assert.deepEqual(unk.results24h, { ok: null, warn: null, fail: null });
+  assert.equal(unk.veeamState, 'no-inventory');
+  const known = backupRowOf({ id: 'vc-b', name: 'B', vm: 0, pa, veeamServers: 0, veeamFailed: 0 });
+  assert.equal(known.inventoryUnknown, false); assert.equal(known.vms, 0, '읽은 0 대는 값이다');
+  const reg = backupRowOf({ id: 'vc-c', name: 'C', vm: 3, pa: { ...pa, n: 3 }, veeamServers: 0, veeamFailed: 0, veeamStale: 0 }, { registryUnreadable: true });
+  assert.equal(reg.veeamServers, null); assert.equal(reg.veeamFailed, null); assert.equal(reg.veeamStale, null);
+});
+
+test('반증 B-2 · B-4 · B-5 · B-13 — 판정했어도 못 읽은 값 · 구성을 못 읽은 클러스터 · 한쪽만 못 읽은 사용률 · 모르는 template', async () => {
+  const rows = await import('../src/routes/publicApiRows.js');
+  const now = Date.now();
+  const snap = {
+    vcenters: [{ id: 'vc1', name: 'vc1', status: 'connected' }],
+    hosts: [{ id: 'vc1:h1', vcenterId: 'vc1', name: 'h1', cluster: 'C1', connectionState: 'CONNECTED', cpuUsagePct: 30, memUsagePct: null }],
+    vms: [{ id: 'vc1:v1', vcenterId: 'vc1', name: 'v1', host: 'h1', cluster: 'C1', powerState: 'POWERED_ON', snapshotCount: 2, snapshotOldestTs: null, snapshotSizeGB: null },
+      { id: 'vc1:v2', vcenterId: 'vc1', name: 'v2', powerState: 'POWERED_ON' }],
+    datastores: [], networks: [], alarms: [],
+  };
+  const hygiene = { snapAgeDays: 7, snapCount: 3, snapSizeGB: 100, exceptions: [] };
+  const s = rows.snapshotRows(snap, { allowed: null, vcId: null, now, hygiene, dcOf: () => '', dcNames: new Map() });
+  const v1 = s.rows.find((x) => x.vmId === 'vc1:v1');
+  assert.ok(v1, '스냅샷 행이 없습니다');
+  assert.equal(v1.judged, true, '판정 대상 VM 입니다(템플릿 · 예외 아님)');
+  assert.equal(v1.ageDays, null); assert.equal(v1.overAge, null, `생성일을 모르는데 overAge=${v1.overAge}`);
+  assert.equal(v1.sizeGB, null); assert.equal(v1.overSize, null, `크기를 모르는데 overSize=${v1.overSize}`);
+  assert.equal(typeof v1.overCount, 'boolean', '개수는 읽었으니 불리언');
+  const h = rows.hostRows(snap, () => true)[0];
+  assert.equal(h.usageUnknown, true, '메모리 사용률을 못 읽었는데 usageUnknown=false');
+  const c = rows.clusterRows(snap, { username: 't', role: 'viewer' }, null).rows[0];
+  assert.equal(c.collected, false); assert.equal(c.findings, null, `구성을 못 읽은 클러스터의 발견 수=${c.findings}`);
+  assert.equal(c.haEnabled, null);
+  const vm2 = rows.vmRows(snap, () => true).find((x) => x.id === 'vc1:v2');
+  assert.equal(vm2.template, null, 'template 을 모르는 VM 이 false 로 나갑니다');
+  assert.equal(vm2.ipAddresses, null, 'IP 배열이 없으면(못 읽음) null');
+});
+
+test('반증 B-7 · B-9 · B-12 — 라이선스 자리표시는 null · vcenterId 400 에 field', async () => {
+  const rows = await import('../src/routes/publicApiRows.js');
+  const snap = { vcenters: [{ id: 'vc1', name: 'vc1', licenses: [{ name: '', edition: '', product: 'X', key: 'AAAAA-BBBBB', expires: null }] }] };
+  const l = rows.licenseRows(snap, () => true).rows[0];
+  assert.equal(l.name, null, `이름을 못 읽은 라이선스가 '${l.name}' 로 나갑니다`);
+  const bad = rows.vcenterPickOf({ vcenterId: 'x'.repeat(201) }, () => true, null);
+  assert.equal(bad.status, 400); assert.equal(bad.field, 'vcenterId');
+  const src = stripComments(fs.readFileSync(path.join(SRC, 'routes/publicApi.js'), 'utf8'));
+  const lic = src.slice(src.indexOf("v1.get('/compliance/licenses'"), src.indexOf("v1.get('/compliance/snapshots'"));
+  assert.ok(/notCurrentMetaOf\(/.test(lic), '/compliance/licenses 에 멈춘 vCenter 표지가 없습니다');
+});
+
+test('반증 B-8 — OpenAPI 공통 응답에 400 bad-query · 404 unknown-vcenter · limit 최대값', async () => {
+  const { GROUP_KEYS } = await import('../src/publicapi/allowlist.js');
+  const { buildOpenApi } = await import('../src/publicapi/openapi.js');
+  const doc = buildOpenApi({ groups: [...GROUP_KEYS] });
+  const op = doc.paths['/objects/vms'].get;
+  assert.ok(op.responses[400] && /bad-query/.test(op.responses[400].description));
+  assert.ok(/unknown-vcenter/.test(op.responses[404].description));
+  assert.equal(op.parameters.find((p) => p.name === 'limit').schema.maximum, 5000);
+});
+
+/* ── 반증 A(v3.42.0 검토) 확정분 회귀 ─────────────────────────────────────────── */
+
+test('반증 A C-2 — 원문 쿼리 모양: 같은 이름 여러 번 · 객체 모양은 400(운영 정규화가 마지막 값 · 버림으로 바꾸기 전에 판정)', async () => {
+  const { rawQueryShapeIssue } = await import('../src/routes/publicApiRows.js');
+  const N = ['vcenterId', 'offset', 'limit'];
+  assert.equal(rawQueryShapeIssue('/objects/vms?vcenterId=a&vcenterId=b', N), 'vcenterId');
+  assert.equal(rawQueryShapeIssue('/objects/vms?limit[x]=1', N), 'limit');
+  assert.equal(rawQueryShapeIssue('/objects/vms?vcenterId%5Bx%5D=a', N), 'vcenterId', '퍼센트 인코딩한 대괄호도 객체 모양이다');
+  assert.equal(rawQueryShapeIssue('/objects/vms?offset=1&limit=2&vcenterId=a', N), null);
+  assert.equal(rawQueryShapeIssue('/objects/vms', N), null);
+  assert.equal(rawQueryShapeIssue('/objects/vms?other=1&other=2', N), null, '이 경로가 읽지 않는 인자는 보지 않는다');
+  // 정규화기를 붙인 운영 구성에서도 400 인가 — index.js 의 queryNormalizer 를 그대로 앞에 둔다
+  const src = stripComments(fs.readFileSync(path.join(SRC, 'routes/publicApi.js'), 'utf8'));
+  assert.ok(/rawQueryShapeIssue\(req\.originalUrl/.test(src), 'pickedVcenter 가 원문 쿼리로 판정하지 않습니다');
+});
+
+test('반증 A C-2 — 운영 구성(쿼리 정규화기 앞단)에서도 중복 · 객체 모양 인자는 400', () => {
+  const idx = fs.readFileSync(path.join(SRC, 'index.js'), 'utf8');
+  const m = idx.match(/import\s*\{\s*([^}]*queryNormalizer[^}]*)\}\s*from\s*'([^']+)'/);
+  assert.ok(m, 'index.js 에서 queryNormalizer 가져오기를 찾지 못했습니다');
+  const r = runLive(`
+    const qn = await import(${JSON.stringify(path.join(SRC, '/'))} + ${JSON.stringify(m[2].replace(/^\.\//, ''))});
+    const mw = qn.queryNormalizer ? qn.queryNormalizer() : null;
+    const app2 = express();
+    if (mw) app2.use(mw);
+    app2.use('/api/v1', v1);
+    const srv2 = await new Promise((r) => { const s = app2.listen(0, () => r(s)); });
+    const b2 = 'http://127.0.0.1:' + srv2.address().port + '/api/v1';
+    const all = keys.issueApiKey({ name: 'all', groups: [...GROUP_KEYS] }).plaintext;
+    const go = async (q) => { const res = await fetch(b2 + q, { headers: { 'X-Api-Key': all } }); const b = await res.json(); return { status: res.status, code: b.code, field: b.field }; };
+    const out = { mw: !!mw,
+      dup: await go('/objects/hosts?vcenterId=vc-ap-northeast&vcenterId=vc-us-east'),
+      obj: await go('/objects/hosts?vcenterId[x]=vc-ap-northeast'),
+      lim: await go('/objects/vms?limit[x]=1'),
+      ok: await go('/objects/vms?limit=2') };
+    srv2.close();
+    return out;
+  `);
+  assert.ok(r.mw, 'queryNormalizer 를 만들지 못했습니다 — 하니스 확인');
+  for (const k of ['dup', 'obj', 'lim']) { assert.equal(r[k].status, 400, `${k}: ${r[k].status}`); assert.equal(r[k].code, 'bad-query'); }
+  assert.equal(r.ok.status, 200);
 });

@@ -9,7 +9,7 @@ import { upgradeVmTools } from '../../vcenter/soapClient.js';
 import { onDemandLogin, onDemandErrorFields } from '../../vcenter/dsBrowse.js'; // v2.743(VC-03): 주문형 vCenter 로그인 문(판정은 collectTarget·authStopGate 하나)
 import { morefOf } from '../../vcenter/registry.js'; // v2.598 VC2598-06: 콜론 포함 vCenter id 안전한 분해
 import { nsxStore } from '../../nsx/store.js';
-import { licenseFamilyOf, licenseExpiryStatus } from '../../util/licenseExpiry.js';
+import { licenseExpiryStatus } from '../../util/licenseExpiry.js';
 import { collectHorizonLicenses, listHorizon } from '../../horizon/horizon.js';
 import { memoJson, scopeKey, osFamily } from './shared.js';
 import { aggregateGuestOs } from '../../inventory/guestOsAgg.js';

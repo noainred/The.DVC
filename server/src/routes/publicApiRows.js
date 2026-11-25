@@ -23,7 +23,7 @@ import { usageReadable } from '../store.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { msOrNull } from '../publicapi/time.js';
 import { analyzeClusters } from '../clustercfg/analyze.js';
-import { vcenterLicenseRows } from '../corelicense/analyze.js';
+import { vcenterLicenseRows, LICENSE_NAME_PLACEHOLDER } from '../corelicense/analyze.js';
 import { snapshotToolView } from '../snaphist/view.js';
 import { snapMemo } from '../util/snapCache.js';
 import { scopeSlice, scopeKey } from './api/shared.js';
@@ -38,6 +38,29 @@ const strOrNull = (v) => (typeof v === 'string' && v ? v : null);
 const boolOrNull = (v) => (typeof v === 'boolean' ? v : null);
 
 /* ── 요청 해석 ────────────────────────────────────────────────────────────── */
+
+/**
+ * 원문 쿼리 모양 검사(반증 A C-2 — 재현): 운영은 index.js 의 queryNormalizer 가 /api/v1 **앞에서** 같은 이름 여러 번 → 마지막 값, 객체 모양(`?limit[a]=1`) →
+ *   버림으로 바꿔, req.query 만 보면 '조용히 기본값 · 전체' 가 됐다(필터가 빠진 200). 내부 /vms(routes/api/inventory.js rawQueryOf)처럼 **원문**으로 판정한다.
+ * @param {string} rawUrl  req.originalUrl
+ * @param {string[]} names 이 경로가 읽는 인자 이름
+ * @returns {string|null} 형식이 틀린 인자 이름(없으면 null)
+ */
+export function rawQueryShapeIssue(rawUrl, names) {
+  const u = typeof rawUrl === 'string' ? rawUrl : '';
+  const i = u.indexOf('?');
+  if (i < 0) return null;
+  let sp;
+  try { sp = new URLSearchParams(u.slice(i + 1, i + 1 + 8192)); } catch { return names[0] || 'query'; }
+  const seen = new Map();
+  for (const k of sp.keys()) {
+    for (const n of names) {
+      if (k === n) { seen.set(n, (seen.get(n) || 0) + 1); if (seen.get(n) > 1) return n; }
+      else if (k.startsWith(`${n}[`)) return n;
+    }
+  }
+  return null;
+}
 
 /**
  * `?offset=&limit=` — 정수만 받는다(형식이 틀리면 400 · 조용히 기본값으로 바꾸지 않는다).
@@ -82,7 +105,7 @@ export function pageOf(rows, { offset, limit }) {
 export function vcenterPickOf(q, inScope, known) {
   const v = q?.vcenterId;
   if (v == null || v === '') return { ok: true, id: null };
-  if (typeof v !== 'string' || v.length > ID_MAX) return { ok: false, status: 400, code: 'bad-query', reason: 'vcenterId 는 글자 하나여야 합니다.' };
+  if (typeof v !== 'string' || v.length > ID_MAX) return { ok: false, status: 400, code: 'bad-query', field: 'vcenterId', reason: `vcenterId 는 ${ID_MAX}자 이하의 값 하나여야 합니다.` };
   if (!inScope(v) || (known && !known.has(v))) {
     return { ok: false, status: 404, code: 'unknown-vcenter', reason: '이 키로 볼 수 있는 vCenter 가 아닙니다(없는 id 이거나 키의 범위 밖입니다).' };
   }
@@ -106,7 +129,7 @@ export function hostRows(snap, inScope, vcId = null) {
       serviceTag: strOrNull(h.serviceTag),
       cpuSockets: numOrNull(h.cpuSockets), cpuCores: numOrNull(h.cpuCores), cpuThreads: numOrNull(h.cpuThreads), memTotalMB: numOrNull(h.memTotalMB),
       cpuUsagePct: readable ? numOrNull(h.cpuUsagePct) : null, memUsagePct: readable ? numOrNull(h.memUsagePct) : null,
-      vmCount: numOrNull(h.vmCount), usageUnknown: !readable || numOrNull(h.cpuUsagePct) == null,
+      vmCount: numOrNull(h.vmCount), usageUnknown: !readable || numOrNull(h.cpuUsagePct) == null || numOrNull(h.memUsagePct) == null,
       bootTime: msOrNull(h.bootTime),
     });
   }
@@ -122,7 +145,8 @@ function ipsOf(v) {
 
 /**
  * VM 행 — id 로 정렬한다(쪽 나누기가 같은 스냅샷 안에서 겹치거나 빠지지 않게). 메모 · 태그 · 폴더 · 구성 세부는 싣지 않는다(자유 글 · 내부 모양).
- * ⚠ storageGB 가 null 이면 못 읽은 것이다(v2.727 C-01 — /inventory/summary 의 vmStorageUnknown 과 같은 판정).
+ * ⚠ storageGB 는 VM 이 데이터스토어에서 **차지한** 용량(실수집 `summary.storage.committed` — thin 디스크는 프로비저닝 크기보다 작다)이고,
+ *   null 이면 못 읽은 것이다(v2.727 C-01 — /inventory/summary 의 vmStorageUnknown 과 같은 판정).
  */
 export function vmRows(snap, inScope, vcId = null) {
   const out = [];
@@ -130,7 +154,7 @@ export function vmRows(snap, inScope, vcId = null) {
     if (!v || !inScope(v.vcenterId) || (vcId && v.vcenterId !== vcId)) continue;
     out.push({
       id: v.id, vcenterId: v.vcenterId, name: strOrNull(v.name), instanceUuid: strOrNull(v.instanceUuid),
-      powerState: strOrNull(v.powerState), template: v.template === true, guestOS: strOrNull(v.guestOS),
+      powerState: strOrNull(v.powerState), template: boolOrNull(v.template), guestOS: strOrNull(v.guestOS),   // REST 폴백 VM 은 template 을 모른다(false 가 아니라 null)
       cpuCount: numOrNull(v.cpuCount), memMB: numOrNull(v.memMB), storageGB: numOrNull(v.storageGB),
       host: strOrNull(v.host), cluster: strOrNull(v.cluster), ipAddresses: ipsOf(v),
       toolsStatus: strOrNull(v.toolsStatus),
@@ -140,6 +164,15 @@ export function vmRows(snap, inScope, vcId = null) {
   }
   out.sort((a, b) => (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0));
   return out;
+}
+
+/**
+ * VM 행 메모(반증 A C-3 — 실측: 120건에 이벤트 루프 3.6초 · limit=1 도 매번 전 VM 생성 · 정렬). 같은 스냅샷 세대 · 같은 범위 · 같은 vCenter 면 한 번만 만든다.
+ *   열쇠의 첫 조각이 세대라 새 스냅샷이 오면 옛 칸은 지워진다(util/snapCache.js 세대 축출). 범위 서명이 열쇠에 있어 범위가 다른 키끼리 섞이지 않는다.
+ */
+export async function vmRowsMemo(snap, user, inPick, vcId = null) {
+  const key = `${snap?.generatedAt ?? ''}|${scopeKey(user, snap)}|${vcId || '*'}`;
+  return snapMemo('publicapi-vms', key, 60_000, async () => vmRows(snap, inPick));
 }
 
 export function networkRows(snap, inScope, vcId = null) {
@@ -169,7 +202,8 @@ export function clusterRows(snap, user, vcId = null) {
     collected: c.collected === true, collectedAt: msOrNull(c.at),
     haEnabled: boolOrNull(c.ha?.enabled), drsEnabled: boolOrNull(c.drs?.enabled), drsBehavior: strOrNull(c.drs?.behavior),
     evcMode: c.collected ? (typeof c.evc === 'string' ? c.evc : null) : null,
-    rulesTotal: numOrNull(c.rulesTotal), severity: strOrNull(c.sev), findings: Array.isArray(c.findings) ? c.findings.length : null,
+    rulesTotal: numOrNull(c.rulesTotal), severity: strOrNull(c.sev),
+    findings: c.collected === true && Array.isArray(c.findings) ? c.findings.length : null,   // 구성을 못 읽은 클러스터의 발견 0 건은 '문제 없음' 이 아니다
   }));
   return { rows, omitted: numOrNull(r.omitted) ?? 0, coverage: r.coverage || null };
 }
@@ -184,7 +218,7 @@ export function licenseRows(snap, inScope, vcId = null) {
   const vcs = (snap?.vcenters || []).filter((v) => v && inScope(v.id) && (!vcId || v.id === vcId));
   const r = vcenterLicenseRows(vcs);
   const rows = r.items.map((l) => ({
-    vcenterId: l.vcenterId, name: l.name, family: strOrNull(l.family), edition: strOrNull(l.edition), product: strOrNull(l.product),
+    vcenterId: l.vcenterId, name: l.name === LICENSE_NAME_PLACEHOLDER ? null : strOrNull(l.name), family: strOrNull(l.family), edition: strOrNull(l.edition), product: strOrNull(l.product),
     productVersion: strOrNull(l.productVersion), total: numOrNull(l.total), used: numOrNull(l.used),
     expires: strOrNull(l.expires), status: strOrNull(l.status), daysLeft: numOrNull(l.daysLeft),
   }));
@@ -194,7 +228,8 @@ export function licenseRows(snap, inScope, vcId = null) {
 
 /**
  * 스냅샷 판정 문맥 — 내부 /tools/snapshots(routes/api/vcTools.js)와 같은 입력(범위 · 'VM 구성 점검' 설정 · 법인 이름).
- *   설정 · 법인 목록을 못 읽으면 판정하지 않음(hygiene null — 행의 judged:false · skip 'no-settings') · vCenter 이름으로 묶음 — 내부와 같은 폴백.
+ *   설정 파일을 못 읽으면 loadVmHygieneSettings 가 기본값 + unreadable 표지를 준다(판정은 기본 기준으로 — meta.thresholds.settingsUnreadable 이 밝힌다).
+ *   불러오기 자체가 던지면 판정하지 않음(hygiene null — judged:false · skip 'no-settings'). 법인 목록을 못 읽으면 vCenter 이름으로 묶는다 — 내부와 같은 폴백.
  */
 export function snapshotContext(user, snap, vcId = null) {
   let dcNames = new Map();
@@ -202,6 +237,15 @@ export function snapshotContext(user, snap, vcId = null) {
   let hygiene = null;
   try { hygiene = loadVmHygieneSettings(); } catch { hygiene = null; }
   return { allowed: scopedVcenterIds(user, snap), vcId, now: Date.now(), hygiene, dcOf: (id) => datacenterOfVcenter(id), dcNames };
+}
+
+/**
+ * 스냅샷 행 메모(반증 A C-3 — 120건에 루프 2.1초). 20초(내부 /tools/snapshots 와 같은 TTL — 보류 · 기준 설정 변경은 그 안에 반영) ·
+ *   열쇠 = 세대 | 범위 서명 | 고른 vCenter.
+ */
+export async function snapshotRowsMemo(snap, user, vcId = null) {
+  const key = `${snap?.generatedAt ?? ''}|${scopeKey(user, snap)}|${vcId || '*'}`;
+  return snapMemo('publicapi-snapshots', key, 20_000, async () => snapshotRows(snap, snapshotContext(user, snap, vcId)));
 }
 
 /**
@@ -217,7 +261,10 @@ export function snapshotRows(snap, o) {
     powerState: strOrNull(x.powerState), template: x.template === true, snapshotCount: numOrNull(x.snapshotCount),
     sizeGB: numOrNull(x.snapGB), oldestAt: msOrNull(x.oldestTs), ageDays: numOrNull(x.days), band: strOrNull(x.band),
     judged: x.judged === true, skip: strOrNull(x.skip),
-    overAge: x.judged ? x.sig?.age === true : null, overCount: x.judged ? x.sig?.count === true : null, overSize: x.judged ? x.sig?.size === true : null,
+    // 판정했어도 그 값을 못 읽었으면(생성일 · 크기) 초과 여부는 모른다 — hygieneFindings 는 모르는 값에 위반을 붙이지 않으므로 false 가 '아님' 이 아니다.
+    overAge: x.judged && numOrNull(x.days) != null ? x.sig?.age === true : null,
+    overCount: x.judged && numOrNull(x.snapshotCount) != null ? x.sig?.count === true : null,
+    overSize: x.judged && numOrNull(x.snapGB) != null ? x.sig?.size === true : null,
     consolidationNeeded: boolOrNull(x.consolidationNeeded), stale: x.stale === true,
   }));
   const inPick = (id) => (!o.allowed || o.allowed.has(id)) && (!pick || pick.has(id));
@@ -256,7 +303,8 @@ export function powerRowOf(sum) {
   return {
     totalWatts: anyRead ? n(sum?.totalWatts) : null,
     servers: { watts: w(s), measured: n(s.measured), devices: n(s.devices), unread: n(s.unread), ome: n(s.ome), excludedVcenter: n(s.excludedVcenter) },
-    network: { watts: w(nw), measured: n(nw.measured), partial: n(nw.partial), devices: n(nw.devices), unread: n(nw.unread), stale: n(nw.stale), noTime: n(nw.noTime), outputOnly: n(nw.outputOnly) },
+    // 네트워크에는 noTime 이 없다 — CVP 판정은 시각 없음을 '낡음(stale)' 으로 센다(power/total.js ②). 항상 null 이던 칸을 계약에 두지 않는다.
+    network: { watts: w(nw), measured: n(nw.measured), partial: n(nw.partial), devices: n(nw.devices), unread: n(nw.unread), stale: n(nw.stale), outputOnly: n(nw.outputOnly) },
     storage: { watts: w(st), measured: n(st.measured), partial: n(st.partial), devices: n(st.devices), unsupported: n(st.unsupported), unread: n(st.unread), stale: n(st.stale), noTime: n(st.noTime) },
   };
 }
@@ -278,21 +326,31 @@ export async function powerSummary() {
 const RPO_KEYS = ['d1', 'd3', 'd7'];
 const okMissUnk = (x) => ({ ok: numOrNull(x?.ok), miss: numOrNull(x?.miss), unknown: numOrNull(x?.unk) });
 
-/** 법인(vCenter) 줄 하나 — Summary 의 `pa`(finishSiteAgg) 를 고른다. 정책을 하나도 모르면(표시 파일 손상) policy · backedUp 은 null. */
-export function backupRowOf(r) {
+/**
+ * 법인(vCenter) 줄 하나 — Summary 의 `pa`(finishSiteAgg) 를 고른다. 정책을 하나도 모르면(표시 파일 손상) policy · backedUp 은 null.
+ * ⚠ 그 vCenter 의 VM 목록이 없으면(첫 수집 중 · push 를 기다리는 위임 vCenter — 내부 행 `vm: null`, backupStatus.js) 집계는 '0 대' 가 아니라 모름이다:
+ *   inventoryUnknown:true 와 함께 수 · 정책 · RPO · 결과를 전부 null 로 낸다(반증 B-1 — 예전에는 'VM 0 · 백업 0' 으로 나갔다).
+ * ⚠ Veeam 쪽 '앎 상태'(veeamState — 'ok' · 'partial' · 'unlinked' · 모르는 까닭)를 함께 싣는다: 'ok' · 'unlinked' 가 아니면 results24h · success7d.veeam · running 의
+ *   Veeam 몫은 일부이거나 모른다(반증 B-3). 등록부를 못 읽었으면 Veeam 서버 수 · 실패 · 낡음은 0 이 아니라 null.
+ */
+export function backupRowOf(r, { registryUnreadable = false } = {}) {
   const pa = r?.pa || {};
-  const pol = pa.pol && typeof pa.pol === 'object' ? pa.pol : null;
+  const unknownInv = r?.vm === null;
+  const k = (v) => (unknownInv ? null : v);
+  const pol = !unknownInv && pa.pol && typeof pa.pol === 'object' ? pa.pol : null;
+  const vs = (v) => (registryUnreadable ? null : numOrNull(v));
   return {
-    vcenterId: r.id, name: strOrNull(r.name),
-    vms: numOrNull(pa.n), poweredOn: numOrNull(pa.on),
+    vcenterId: r.id, name: strOrNull(r.name), inventoryUnknown: unknownInv,
+    vms: k(numOrNull(pa.n)), poweredOn: k(numOrNull(pa.on)),
     backedUp: pol ? (numOrNull(pol.veeam) ?? 0) + (numOrNull(pol.bareos) ?? 0) + (numOrNull(pol.ssh) ?? 0) : null,
     policy: pol ? { veeam: numOrNull(pol.veeam), bareos: numOrNull(pol.bareos), ssh: numOrNull(pol.ssh), none: numOrNull(pol.none), check: numOrNull(pol.check) } : null,
-    policyUnknown: numOrNull(pa.polUnk), unprotected: numOrNull(pa.unprot), unverified: numOrNull(pa.unver),
-    rpo: Object.fromEntries(RPO_KEYS.map((k) => [k, okMissUnk(pa.rpo?.[k])])),
-    results24h: { ok: numOrNull(pa.r24?.ok), warn: numOrNull(pa.r24?.warn), fail: numOrNull(pa.r24?.fail) },
-    success7d: { veeam: { ok: numOrNull(pa.v7?.ok), bad: numOrNull(pa.v7?.bad) }, bareos: { ok: numOrNull(pa.b7?.ok), bad: numOrNull(pa.b7?.bad) } },
-    running: numOrNull(pa.run), lastSuccessAt: msOrNull(pa.lok), nextRunAt: msOrNull(pa.nx),
-    veeamServers: numOrNull(r.veeamServers), veeamFailed: numOrNull(r.veeamFailed), veeamStale: numOrNull(r.veeamStale),
+    policyUnknown: k(numOrNull(pa.polUnk)), unprotected: k(numOrNull(pa.unprot)), unverified: k(numOrNull(pa.unver)),
+    rpo: Object.fromEntries(RPO_KEYS.map((d) => [d, unknownInv ? { ok: null, miss: null, unknown: null } : okMissUnk(pa.rpo?.[d])])),
+    results24h: { ok: k(numOrNull(pa.r24?.ok)), warn: k(numOrNull(pa.r24?.warn)), fail: k(numOrNull(pa.r24?.fail)) },
+    success7d: { veeam: { ok: k(numOrNull(pa.v7?.ok)), bad: k(numOrNull(pa.v7?.bad)) }, bareos: { ok: k(numOrNull(pa.b7?.ok)), bad: k(numOrNull(pa.b7?.bad)) } },
+    running: k(numOrNull(pa.run)), lastSuccessAt: k(msOrNull(pa.lok)), nextRunAt: k(msOrNull(pa.nx)),
+    veeamState: strOrNull(r.veeamState), veeamTruncated: r.veeamTruncated === true,
+    veeamServers: vs(r.veeamServers), veeamFailed: vs(r.veeamFailed), veeamStale: vs(r.veeamStale),
     bareosUnknown: r.bareosUnknown === true,
   };
 }
@@ -306,9 +364,10 @@ export async function backupRows(user, snap) {
   return snapMemo('publicapi-backup', key, 60_000, async () => {
     const { backupSummaryRowsFor } = await import('./api/veeam.js');
     const s = await backupSummaryRowsFor(user, snap);
+    const registryUnreadable = s.registryUnreadable === true;
     return {
-      rows: (s.rows || []).map(backupRowOf),
-      registryUnreadable: s.registryUnreadable === true, marksUnreadable: s.marksUnreadable === true,
+      rows: (s.rows || []).map((r) => backupRowOf(r, { registryUnreadable })),
+      registryUnreadable, marksUnreadable: s.marksUnreadable === true,
     };
   });
 }

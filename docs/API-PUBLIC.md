@@ -133,7 +133,9 @@ ISO 문자열이 섞여 나오지 않습니다.
 3. **`meta.scopedToVcenters`** 가 숫자면 그 키의 vCenter 범위로 걸러진 결과이고,
    `null` 이면 범위 제한이 없는 키입니다.
 4. **첫 수집이 끝나지 않았으면 빈 배열이 아니라 `503 not-collected`** 입니다.
-   '데이터가 없다' 와 '아직 못 모았다' 는 조치가 다르므로 구분합니다.
+   '데이터가 없다' 와 '아직 못 모았다' 는 조치가 다르므로 구분합니다. 진행 상황은 `GET /inventory/collection` 만 답합니다(pending 수).
+   (v3.42.0 정정: v2.675 부터 포탈이 첫 수집 전에 '골격' 상태를 먼저 띄우면서 이 503 이 사실상 사라져 첫 수집 동안 0 · 빈 배열이 나갔습니다 — 다시 503 입니다.)
+   첫 수집이 끝난 뒤에도 **새로 등록했거나 엣지 보고를 기다리는 vCenter** 는 `meta.pendingVcenters` · `pendingVcenterIds`(v3.42.0 목록 경로)로 밝힙니다 — 그 vCenter 의 행이 없는 것은 0 개가 아닙니다.
 5. **분당 상한을 넘기면 `429`** 이고 `Retry-After` 헤더(초)가 옵니다. 그 시간 뒤에 재시도하세요.
 6. **응답은 `Cache-Control: no-store`** 입니다. 키마다 보이는 범위가 다르므로 중간 캐시가
    섞으면 **남의 법인 데이터가 갑니다.** 프록시를 두더라도 이 응답은 캐시하지 마세요.
@@ -160,9 +162,9 @@ ISO 문자열이 섞여 나오지 않습니다.
 | `faults` | 장애 · 알람 현황 | medium | vCenter 알람, 물리 부품 장애. **장비·엔티티 이름**이 들어갑니다 |
 | `san` | SAN 스토리지 성능 | medium | SAN 스위치가 본 **스토리지 어레이별** 처리량 · 회선 사용률 · 편중 · 성능 점검 판정(v2.953). **어레이 이름 · 시리얼 · 법인**이 들어갑니다. vCenter 범위로 나눌 수 없어 범위 지정 키는 403 `needs-full-scope` |
 | `objects` | 자원 목록 (이름 · IP) | **high** | 호스트 · VM · 네트워크 · 클러스터의 **개별 목록**(v3.42.0). **이름 · IP · 서비스태그 · 호스트 배치**가 들어가 민감도가 가장 높습니다 |
-| `compliance` | 점검 · 준수 | medium | vCenter 라이선스 만료와 VM 스냅샷 나이(v3.42.0). 라이선스 **키 값**과 스냅샷 **이름 · 설명**은 주지 않습니다 |
+| `compliance` | 점검 · 준수 | medium | vCenter 라이선스 만료와 VM 스냅샷 나이(v3.42.0). 스냅샷 목록에 **VM 이름 · 호스트 · 클러스터**가 들어갑니다(IP 는 없음). 라이선스 **키 값**과 스냅샷 **이름 · 설명**은 주지 않습니다 |
 | `backup` | 백업 현황 | medium | 법인(vCenter)별 백업 정책 · 최근 결과 · RPO 집계(v3.42.0). **VM 이름은 주지 않습니다** |
-| `resources` | 전력 · GPU | medium | 전체 소비 전력 합(서버 · 네트워크 · 스토리지)과 GPU 장착 호스트(v3.42.0). 전력은 vCenter 범위로 나눌 수 없어 범위 지정 키는 403 `needs-full-scope` |
+| `resources` | 전력 · GPU | medium | 전체 소비 전력 합(서버 · 네트워크 · 스토리지)과 GPU 장착 호스트(v3.42.0). GPU 목록에 **호스트 이름 · 클러스터**가 들어갑니다(할당 VM 이름은 없음). 전력은 vCenter 범위로 나눌 수 없어 범위 지정 키는 403 `needs-full-scope` |
 
 > 포탈 자신의 상태(엣지 주소·내부 IP·버전)는 **공개하지 않습니다.**
 >
@@ -190,7 +192,7 @@ ISO 문자열이 섞여 나오지 않습니다.
 | `storageCapacityGB` `storageUsedGB` | 데이터스토어 합계 — **사용량을 읽은 데이터스토어만**(v2.632: 내부 `/summary` 와 같은 기준. 사용량 미상 데이터스토어가 있으면 예전 값과 달라진다) |
 | `storageCapacityAllGB` | 사용량 미상 데이터스토어를 포함한 설치 용량(v2.632) |
 | `datastoresUsageUnknown` | 사용량을 읽지 못해 위 두 합계에서 뺀 데이터스토어 수(v2.632) |
-| `vmVcpu` `vmRamMB` `vmProvisionedGB` | VM 에 **할당된** 양(실제 사용량이 아닙니다). `vmProvisionedGB` 는 스토리지 용량을 읽은 VM 만의 합입니다(v2.727) |
+| `vmVcpu` `vmRamMB` `vmProvisionedGB` | `vmVcpu` · `vmRamMB` 는 VM 에 **할당된** 양(실제 사용량이 아닙니다). `vmProvisionedGB` 는 이름과 달리 VM 이 데이터스토어에서 **차지한** 용량(실수집 `summary.storage.committed` — thin 디스크는 프로비저닝 크기보다 작습니다)의 합이고, 그 값을 읽은 VM 만 더합니다(v2.727 · v3.42.0 문서 정정) |
 | `vmVcpuUnknown` `vmRamUnknown` | vCPU 수 · 메모리 크기를 읽지 못해 `vmVcpu` · `vmRamMB` 에서 뺀 VM 수(v3.20.1 — 0 으로 채우지 않습니다). 0 보다 크면 그 합은 **읽은 VM 만의 부분 합(최소값)** 이고, `vms` 와 같으면 하나도 읽지 못한 것이라 합 `0` 은 '할당 없음' 이 아니라 **모름**입니다 |
 | `vmStorageUnknown` | 스토리지 용량(`summary.storage.committed`)을 읽지 못해 `vmProvisionedGB` 에서 뺀 VM 수(v2.727 — 0 으로 채우지 않습니다) |
 
@@ -261,6 +263,8 @@ ISO 문자열이 섞여 나오지 않습니다.
 > ⚠ **접속처·자격증명은 주지 않습니다.** 이름과 id 까지입니다.
 
 ### 7-3. `GET /inventory/collection` — 수집 상태
+
+> 첫 수집 중(포탈 재기동 직후)에도 503 이 아니라 답하는 **유일한 경로**입니다 — `pending` 이 0 이 되면 다른 경로가 열립니다(v3.42.0).
 
 분류 `inventory` · **범위 적용**(v2.599 — 범위를 지정한 키는 그 vCenter 들만 셉니다. 범위 미지정 키는 전체) · 단건 객체
 
@@ -502,10 +506,10 @@ ISO 문자열이 섞여 나오지 않습니다.
 | 필드 | 뜻 |
 |---|---|
 | `connectionState` `powerState` | vCenter 가 보고한 값 그대로(`CONNECTED` · `MAINTENANCE` · `DISCONNECTED` · `NOT_RESPONDING` …) |
-| `cpuUsagePct` `memUsagePct` | 사용률 %. **끊긴 호스트(DISCONNECTED · NOT_RESPONDING)는 0 이 아니라 null** 이고 `usageUnknown: true` 입니다(Prometheus `/metrics` 와 같은 판정) |
+| `cpuUsagePct` `memUsagePct` | 사용률 %. **끊긴 호스트(DISCONNECTED · NOT_RESPONDING)는 0 이 아니라 null** 입니다(Prometheus `/metrics` 와 같은 판정). 둘 중 하나라도 null 이면 `usageUnknown: true` |
 | `serviceTag` `bootTime` | 하드웨어 서비스태그(없으면 null) · 부팅 시각(epoch ms) |
 
-`meta`: 상한(`count` `truncated` `omitted` `limit`) · `usageUnknownCount` · `notCurrentVcenters`(수집이 멈춘 vCenter — 그 행은 마지막으로 읽은 값입니다).
+`meta`: 상한(`count` `truncated` `omitted` `limit`) · `usageUnknownCount` · `notCurrentVcenters`(수집이 멈춘 vCenter — 그 행은 마지막으로 읽은 값입니다) · `pendingVcenters`(첫 수집 중 — 행이 아직 없습니다). 이 두 표지는 7-12 ~ 7-17 · 7-19 에도 같습니다.
 
 ---
 
@@ -517,8 +521,9 @@ ISO 문자열이 섞여 나오지 않습니다.
 
 | 필드 | 뜻 |
 |---|---|
-| `storageGB` | 할당(프로비저닝) 용량. **null 이면 읽지 못한 것**(`/inventory/summary` 의 `vmStorageUnknown` 과 같은 판정) |
-| `ipAddresses` | 보고된 IP(최대 32개). **null = IP 를 읽지 못함 · `[]` = 보고된 IP 없음** — 둘을 구분하세요 |
+| `storageGB` | VM 이 데이터스토어에서 **차지한** 용량(실수집 `summary.storage.committed` — thin 디스크는 프로비저닝 크기보다 작습니다). **null 이면 읽지 못한 것**(`/inventory/summary` 의 `vmStorageUnknown` 과 같은 판정) |
+| `template` | 템플릿 여부. REST 폴백으로 수집한 VM 처럼 **모르면 null**(false 가 아닙니다) |
+| `ipAddresses` | 보고된 IP(최대 32개). **null = IP 목록 자체를 읽지 못함 · `[]` = vCenter 가 보고한 IP 가 없음**(전원 꺼짐 · VMware Tools 미실행 VM 도 `[]` 입니다 — 'IP 가 없는 VM' 이라는 뜻이 아닙니다) |
 | `instanceUuid` | vCenter 안에서 유일한 VM 식별자(CMDB 대조용 — 없으면 null) |
 
 메모 · 태그 · 폴더 · 구성 세부는 싣지 않습니다(자유 글 · 내부 모양).
@@ -540,7 +545,9 @@ ISO 문자열이 섞여 나오지 않습니다.
 
 분류 `objects` · 범위 적용 · 배열 · `?vcenterId=`
 
-필드: `id` `vcenterId` `name` `type` `vlanId` `hostCount` `vmCount` — `vlanId` 는 수(트렁크 범위처럼 수가 아니면 글자 · 없으면 null).
+필드: `id` `vcenterId` `name` `type` `vlanId` `hostCount` `vmCount` — `vlanId` 는 수(수가 아니면 글자 · 없으면 null).
+
+> ⚠ **운영 수집(vCenter SOAP)은 지금 VLAN · 연결 호스트/VM 수를 읽지 않아 `vlanId` · `hostCount` · `vmCount` 가 null 입니다**(포트그룹마다 참조 배열을 받아야 해 매 주기 응답이 커지므로 측정 전에는 넣지 않았습니다). 값이 들어찬 예시는 목 데이터에만 해당합니다.
 
 ---
 
@@ -554,7 +561,8 @@ ISO 문자열이 섞여 나오지 않습니다.
 |---|---|
 | `ref` `vcDatacenter` `sameName` | 클러스터 moref · vSphere 데이터센터 이름(모르면 null) · 같은 vCenter 의 같은 이름 행 수 — **2 이상이면 이름만으로 구분할 수 없습니다** |
 | `collected` `collectedAt` | 클러스터 구성을 읽었는가 · 읽은 시각. **`collected: false` 면 HA · DRS · EVC 는 false 가 아니라 null** |
-| `severity` `findings` | 점검 결과 중 가장 높은 등급(없으면 null) · 발견 건수 |
+| `evcMode` | EVC 모드 키. **`''` = EVC 꺼짐 · null = 구성을 못 읽음** |
+| `severity` `findings` | 점검 결과 중 가장 높은 등급(없으면 null) · 발견 건수(구성을 못 읽은 클러스터는 0 이 아니라 null) |
 
 `meta.notCollected` = 구성을 아직 못 읽은 클러스터 수.
 
@@ -567,24 +575,27 @@ ISO 문자열이 섞여 나오지 않습니다.
 필드: `vcenterId` `name` `family` `edition` `product` `productVersion` `total` `used` `expires` `status` `daysLeft`
 
 - **라이선스 키 값은 주지 않습니다**(테스트가 응답 본문에 키 문자열이 없음을 고정합니다).
-- `expires` 는 날짜(`YYYY-MM-DD` — 무기한이면 null), `status` 는 포탈 화면과 같은 상태값, `daysLeft` 는 남은 일수.
+- `expires` 는 날짜(`YYYY-MM-DD` — 무기한이면 null), `daysLeft` 는 남은 일수(무기한이면 null).
+- `status`: `expired`(만료) · `expiring`(90일 이내) · `ok` · `perpetual`(무기한). `family`: `VCF` · `VVF` · `NSX` · `Horizon` · `vSAN` · `vCenter` · `Tanzu` · `ESXi(vSphere)` · `기타`.
+- `name` 은 라이선스 이름(없으면 에디션). 둘 다 못 읽으면 null 입니다.
 - **NSX · Horizon 라이선스는 이 경로에 없습니다.**
 - `meta.vcentersUnreadList`: 라이선스를 읽지 못한 vCenter 와 까닭(`why` — `failed` · `unreachable` · `pending` · `maintenance` · `disabled` · `not-read`). 그 vCenter 의 행이 없는 것은 **0 개가 아니라 모르는 것**입니다. 오류 원문은 싣지 않습니다.
+- `meta.notCurrentVcenters`: 점검중 · 접속 실패 이월 vCenter 의 라이선스 행은 **마지막으로 읽은 값**입니다.
 
 ---
 
 ### 7-16. `GET /compliance/snapshots` — 스냅샷이 있는 VM(v3.42.0)
 
-분류 `compliance` · 범위 적용 · 배열 · `?vcenterId=` · 특수 기능 '스냅샷 있는 VM' 과 **같은 판정**(`snaphist/view.js snapshotToolView`)
+분류 `compliance` · 범위 적용 · 배열 · `?vcenterId=` · 특수 기능 '스냅샷 있는 VM' 과 **같은 판정**(`snaphist/view.js snapshotToolView` · 최대 20초 전 값 — 보류 · 기준 설정 변경은 그 안에 반영)
 
 필드: `vmId` `vcenterId` `vmName` `cluster` `host` `powerState` `template` `snapshotCount` `sizeGB` `oldestAt` `ageDays` `band` `judged` `skip` `overAge` `overCount` `overSize` `consolidationNeeded` `stale`
 
 | 필드 | 뜻 |
 |---|---|
 | `sizeGB` `oldestAt` `ageDays` | 스냅샷 크기(못 읽으면 null) · 가장 오래된 스냅샷 시각 · 지난 일수 |
-| `band` | 나이 구간 — `new`(기준 미만) · `d7` · `d30` · `d90` · `unk`(생성일 모름) · `skip`(판정 안 함) |
+| `band` | 나이 구간 — `new`(기준 일수 미만) · `d7`(기준 이상 · 30일 미만) · `d30`(30~90일) · `d90`(90일 이상) · `unk`(생성일 모름) · `skip`(판정 안 함) |
 | `judged` `skip` | 판정했는가 · 안 했으면 까닭(`template` · `exception` · `hold` · `no-settings`) |
-| `overAge` `overCount` `overSize` | 기준(포탈 'VM 구성 점검' 설정) 초과 여부. **`judged: false` 면 null** |
+| `overAge` `overCount` `overSize` | 기준(포탈 'VM 구성 점검' 설정) 초과 여부. **`judged: false` 면 null**이고, 판정했어도 **그 값(생성일 · 크기)을 못 읽었으면 null** 입니다(false = '초과 아님' 으로 읽히지 않게) |
 
 `meta.thresholds`(나이 · 개수 · 크기 기준) · `meta.snapshotUnknownVms` — 스냅샷 개수를 못 읽은 VM 은 행이 없습니다(**스냅샷이 없다는 뜻이 아닙니다**). 스냅샷 이름 · 설명(자유 글)은 싣지 않습니다.
 
@@ -594,19 +605,21 @@ ISO 문자열이 섞여 나오지 않습니다.
 
 분류 `backup` · 범위 적용 · 배열 · `?vcenterId=` · Backup › Summary 의 법인 줄과 **같은 집계**(전원 전체 · 템플릿 · vCLS 제외 · 최대 60초 전 값)
 
-필드: `vcenterId` `name` `vms` `poweredOn` `backedUp` `policy` `policyUnknown` `unprotected` `unverified` `rpo` `results24h` `success7d` `running` `lastSuccessAt` `nextRunAt` `veeamServers` `veeamFailed` `veeamStale` `bareosUnknown`
+필드: `vcenterId` `name` `inventoryUnknown` `vms` `poweredOn` `backedUp` `policy` `policyUnknown` `unprotected` `unverified` `rpo` `results24h` `success7d` `running` `lastSuccessAt` `nextRunAt` `veeamState` `veeamTruncated` `veeamServers` `veeamFailed` `veeamStale` `bareosUnknown`
 
 | 필드 | 뜻 |
 |---|---|
+| `inventoryUnknown` | 그 vCenter 의 VM 목록을 아직 못 받았다(첫 수집 중 · 엣지 보고 대기). **true 면 아래 수 · 정책 · RPO · 결과가 전부 null** 입니다(0 대가 아닙니다) |
 | `policy` | 사람이 정한 백업 방식별 VM 수 `{veeam, bareos, ssh, none, check}`(`check` = 확인 필요). **방식 표시를 하나도 못 읽었으면 null**(0 이 아닙니다) |
 | `backedUp` | `veeam + bareos + ssh`(`policy` 가 null 이면 null) |
 | `unprotected` `unverified` | 백업하기로 했는데 성공한 백업이 한 번도 없다고 확인된 VM · '백업 안 함' 이 아닌데 결과를 모르는 VM |
 | `rpo` | `{d1, d3, d7}` 각각 `{ok, miss, unknown}` — 그 기간 안에 성공한 백업이 있는가(백업 안 함 VM 은 세지 않음) |
-| `results24h` `success7d` | 최근 24시간에 끝난 마지막 결과 `{ok, warn, fail}` · 최근 7일 `{veeam:{ok,bad}, bareos:{ok,bad}}` |
+| `results24h` `success7d` | 최근 24시간에 끝난 마지막 결과 `{ok, warn, fail}` — **Veeam · Bareos 결과를 각각 셉니다**(한 VM 이 둘 다 있으면 두 번) · 최근 7일 `{veeam:{ok,bad}, bareos:{ok,bad}}` |
+| `veeamState` `veeamTruncated` | Veeam 쪽을 아는 정도 — `ok` · `partial`(일부 서버만) · `unlinked`(연동 없음 — Veeam '없음' 확정) · 그 밖은 모르는 까닭(`no-inventory` · `registry-unreadable` …). **`ok` · `unlinked` 가 아니면 Veeam 몫(results24h · success7d.veeam · running)은 일부이거나 모릅니다.** `veeamTruncated` = Veeam 결과 목록이 상한에서 잘렸다 |
 | `lastSuccessAt` `nextRunAt` | 마지막 성공 · 다음 예정(epoch ms · 모르면 null) |
-| `veeamServers` `veeamFailed` `veeamStale` `bareosUnknown` | 연동 Veeam 서버 수 · 조회 실패 · 오래된 결과 · Bareos 결과를 모르는 법인 |
+| `veeamServers` `veeamFailed` `veeamStale` `bareosUnknown` | 연동 Veeam 서버 수 · 조회 실패 · 오래된 결과(Veeam 등록부를 못 읽었으면 셋 다 null — `meta.registryUnreadable`) · Bareos 결과를 모르는 법인 |
 
-VM 이름 · 잡 이름은 싣지 않습니다. `meta.marksUnreadable` · `registryUnreadable` 이 true 면 위의 null 이 그 까닭입니다.
+VM 이름 · 잡 이름은 싣지 않습니다. `meta.marksUnreadable`(백업 방식 표시 파일) · `registryUnreadable`(Veeam 등록부)이 true 면 위의 null 이 그 까닭입니다.
 
 ---
 
@@ -616,9 +629,10 @@ VM 이름 · 잡 이름은 싣지 않습니다. `meta.marksUnreadable` · `regis
 
 필드: `totalWatts` `servers` `network` `storage`
 
-- `servers` = `{watts, measured, devices, unread, ome, excludedVcenter}` · `network` = `{watts, measured, partial, devices, unread, stale, noTime, outputOnly}` · `storage` = `{watts, measured, partial, devices, unsupported, unread, stale, noTime}`.
+- `servers` = `{watts, measured, devices, unread, ome, excludedVcenter}` · `network` = `{watts, measured, partial, devices, unread, stale, outputOnly}` · `storage` = `{watts, measured, partial, devices, unsupported, unread, stale, noTime}`.
 - ⚠ **읽은 장비가 하나도 없는 원천의 `watts` 와, 어느 원천도 못 읽었을 때의 `totalWatts` 는 0 이 아니라 null** 입니다(화면은 같은 경우 '—'). 측정한 0 W 는 값입니다.
-- `measured` 가 `devices` 보다 작으면 **일부 장비만 더한 합**입니다(빠진 수 = `unread` · `stale` · `noTime`).
+- `watts` 는 측정 장비(`measured`)와 **일부 PSU 만 읽은 장비(`partial`)의 합**이라 partial 이 있으면 실제보다 작습니다. 못 읽음(`unread`) · 낡음(`stale`) · 시각 없음(`noTime` — 스토리지만, 네트워크는 시각 없음을 낡음으로 셉니다) · 전력 미지원(`unsupported`) 장비는 합에서 빠집니다.
+- 서버: `devices` 는 서버 분석에 등록된 대수(OME 콘솔 제외 · 모르면 null)이고 `measured` 에는 OME 로 읽은 장비(`ome`)가 들어가 `devices` 보다 클 수 있습니다. `excludedVcenter` 는 vCenter 추정 전력이라 합에서 뺀 호스트 수입니다.
 - `meta.errors` 는 실패한 원천의 **이름만**(`true`) — 오류 원문은 싣지 않습니다. `meta.unit: "watts"`.
 
 ---
@@ -677,7 +691,7 @@ VM 이름 · 잡 이름은 싣지 않습니다. `meta.marksUnreadable` · `regis
 | 403 | `group-denied` | 그 경로의 분류가 이 키에 없음 | 관리자가 그 분류를 켜야 합니다 |
 | 403 | `needs-full-scope` | 범위로 나눌 수 없는 자원(§8) | 범위 없는 키를 쓰거나 그 경로를 포기 |
 | 403 | `scope-empty` | 키의 vCenter 범위가 전부 등록되지 않은(삭제된) vCenter 다(v2.601) — 일부만 없으면 200 + `meta.scopeUnknownVcenters` | 설정 › 연동 키에서 범위를 고친다 |
-| 400 | `bad-query` | 쿼리 인자 형식 오류(v3.42.0 — `offset` · `limit` 은 정수만, `vcenterId` 는 글자 하나). `field` 가 어느 인자인지 밝힙니다 | 인자를 고쳐 다시 |
+| 400 | `bad-query` | 쿼리 인자 형식 오류(v3.42.0 — `offset` · `limit` 은 정수만, `vcenterId` 는 200자 이하의 값 하나). `field` 가 어느 인자인지 밝힙니다(`offset` · `limit` · `vcenterId`) | 인자를 고쳐 다시 |
 | 404 | `unknown-endpoint` | 공개되지 않은 경로 | `GET /api/v1/` 로 목록 확인 |
 | 404 | `unknown-vcenter` | `?vcenterId` 가 키의 범위 밖이거나 없는 id(v3.42.0 — 둘을 구분하지 않습니다) | `GET /api/v1/inventory/vcenters` 로 id 확인 |
 | 429 | `rate-limited` | 분당 상한 초과 | `Retry-After` 초 뒤 재시도 |
@@ -692,6 +706,7 @@ VM 이름 · 잡 이름은 싣지 않습니다. `meta.marksUnreadable` · `regis
   "reason": "X-Api-Key 헤더가 없습니다. 설정 › 연동 키에서 발급한 값을 넣으세요." }
 ```
 
+> ⚠ 같은 인자를 여러 번 주거나(`?vcenterId=a&vcenterId=b`) 객체 모양(`?limit[a]=1`)으로 주면 400 `bad-query` 입니다(v3.42.0) — 마지막 값 · 기본값으로 바꾸지 않습니다.
 > ⚠ **`no-groups` 는 401 이 아니라 403 입니다.** 키 자체는 유효하고 인가가 비어 있는
 > 상태입니다 — 401 로 처리하면 멀쩡한 키를 재발급하게 됩니다.
 > ⚠ **404 는 경로 목록을 알려주지 않습니다**(열거 단서가 되므로). 목록은 카탈로그(`GET /api/v1/`)

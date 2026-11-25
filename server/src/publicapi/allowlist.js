@@ -71,7 +71,7 @@ export const GROUPS = Object.freeze([
   {
     key: 'compliance',
     label: '점검 · 준수',
-    desc: 'vCenter 라이선스 만료와 VM 스냅샷 나이. 라이선스 키 값과 스냅샷 이름 · 설명은 주지 않습니다. 키의 vCenter 범위가 걸립니다.',
+    desc: 'vCenter 라이선스 만료와 VM 스냅샷 나이. 스냅샷 목록에 VM 이름 · 호스트 · 클러스터가 들어갑니다(IP 는 없음). 라이선스 키 값과 스냅샷 이름 · 설명은 주지 않습니다. 키의 vCenter 범위가 걸립니다.',
     sensitivity: 'medium',
   },
   {
@@ -83,7 +83,7 @@ export const GROUPS = Object.freeze([
   {
     key: 'resources',
     label: '전력 · GPU',
-    desc: '전체 소비 전력 합계(서버 · 네트워크 · 스토리지)와 GPU 장착 호스트별 장수 · 사용률. 전력은 vCenter 범위로 나눌 수 없어 범위 없는 키만 조회합니다.',
+    desc: '전체 소비 전력 합계(서버 · 네트워크 · 스토리지)와 GPU 장착 호스트별 장수 · 사용률. GPU 목록에 호스트 이름 · 클러스터가 들어갑니다(할당 VM 이름은 없음). 전력은 vCenter 범위로 나눌 수 없어 범위 없는 키만 조회합니다.',
     sensitivity: 'medium',
   },
 ]);
@@ -135,6 +135,9 @@ export const ENDPOINTS = Object.freeze([
     // v2.732(점검 2회차 B2-01): stale — 담당 엣지의 push 가 기준 시간을 넘긴 위임 vCenter 수(상태 개수와 겹치는 별도 축,
     //   /health vcentersStale 과 같은 판정).
     fields: ['registered', 'connected', 'pending', 'unreachable', 'maintenance', 'stale', 'generatedAt', 'source', 'intervalMs'],
+    // v3.42.0(반증 B-1): 첫 병합 전 골격 스냅샷(store.publishSkeleton — initial:true)에도 답하는 유일한 경로 — 수집 상태(pending 수)가 이 경로의 값 자체다.
+    //   나머지 경로는 골격이면 503 not-collected(문서 · OpenAPI 가 약속한 대로 — 골격의 0 · 빈 배열을 '없다' 로 주지 않는다).
+    servesSkeleton: true,
   },
   {
     path: '/capacity/datastores', list: true, group: 'capacity', method: 'GET', scoped: true,
@@ -195,7 +198,7 @@ export const ENDPOINTS = Object.freeze([
     path: '/objects/vms', list: true, group: 'objects', method: 'GET', scoped: true, paged: true,
     params: [VC_PARAM,
       { name: 'offset', type: 'integer', desc: '건너뛸 행 수(기본 0) — meta.nextOffset 으로 다음 쪽을 받습니다' },
-      { name: 'limit', type: 'integer', desc: '한 쪽의 행 수(1~5000 · 기본 5000)' }],
+      { name: 'limit', type: 'integer', max: 5000, desc: '한 쪽의 행 수(1~5000 · 기본 5000)' }],
     summary: 'VM 목록 — 전원 · 게스트 OS · vCPU/메모리/디스크 할당 · 배치(호스트 · 클러스터) · IP · Tools · 사용률 · 스냅샷 수(id 순 · 쪽 나눔)',
     fields: ['id', 'vcenterId', 'name', 'instanceUuid', 'powerState', 'template', 'guestOS', 'cpuCount', 'memMB', 'storageGB', 'host', 'cluster',
       'ipAddresses', 'toolsStatus', 'cpuUsagePct', 'memUsagePct', 'snapshotCount'],
@@ -230,8 +233,8 @@ export const ENDPOINTS = Object.freeze([
     path: '/backup/summary', list: true, group: 'backup', method: 'GET', scoped: true,
     params: [VC_PARAM],
     summary: '법인(vCenter)별 백업 집계 — 정책(Veeam · Bareos · SSH · 백업 안 함 · 확인 필요) · 보호 안 됨 · RPO(1/3/7일) · 24시간 결과 · 7일 성공 · 마지막 성공 · 다음 실행',
-    fields: ['vcenterId', 'name', 'vms', 'poweredOn', 'backedUp', 'policy', 'policyUnknown', 'unprotected', 'unverified', 'rpo', 'results24h',
-      'success7d', 'running', 'lastSuccessAt', 'nextRunAt', 'veeamServers', 'veeamFailed', 'veeamStale', 'bareosUnknown'],
+    fields: ['vcenterId', 'name', 'inventoryUnknown', 'vms', 'poweredOn', 'backedUp', 'policy', 'policyUnknown', 'unprotected', 'unverified', 'rpo', 'results24h',
+      'success7d', 'running', 'lastSuccessAt', 'nextRunAt', 'veeamState', 'veeamTruncated', 'veeamServers', 'veeamFailed', 'veeamStale', 'bareosUnknown'],
   },
   {
     path: '/resources/power', list: false, group: 'resources', method: 'GET', scoped: false, requiresFullScope: true,

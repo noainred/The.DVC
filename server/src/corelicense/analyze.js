@@ -11,9 +11,9 @@
  *  · vCenter 가 보고한 코어 단위 라이선스(costUnit 'core')의 사용량과 나란히 둔다 — 둘이 다르면 그 사실만 말한다.
  */
 import { numOrNull } from '../util/numOrNull.js';   // v2.727(감사 C-02)
-import { unreadVcenterReasons } from '../metrics/unreadVcenters.js';
+import { unreadVcenterReasons } from '../metrics/unreadVcenters.js';   // v2.744(감사 VC-03): '지금 값으로 쓰지 않는 vCenter' 판정 한 벌
 import { licenseFamilyOf, licenseExpiryStatus } from '../util/licenseExpiry.js';   // v3.42.0: 만료 행 판정(vcenterLicenseRows) — 특수 기능 · 공개 API 한 벌
-import { dayKey } from '../util/dayKey.js';   // v2.744(감사 VC-03): '지금 값으로 쓰지 않는 vCenter' 판정 한 벌
+import { dayKey } from '../util/dayKey.js';
 
 /**
  * v2.744(감사 VC-03): 리포트(코어 라이선스·비용 배분·이전 준비도)가 **읽지 못한 vCenter** — 인벤토리(호스트·VM)가 하나도 없는데 상태가
@@ -130,6 +130,9 @@ export const vcListItems = (vc, field) => (Array.isArray(vc?.[field]) ? vc[field
  * @returns {{ items: object[], unread: { vcenterId:string, vcenterName:string, why:string, error:string }[] }}
  *   unread[].error 는 원문(주소가 들어갈 수 있다 — 관리자 판본에만 싣는 것은 부르는 쪽 책임 · vcListUnread 와 같은 규약)
  */
+/** 이름 · 에디션을 못 읽은 라이선스의 화면용 자리표시 — 공개 API 는 이 글자를 null 로 바꾼다(값이 아니다). */
+export const LICENSE_NAME_PLACEHOLDER = '(이름 없음)';
+
 export function vcenterLicenseRows(vcs) {
   const items = [];
   const unread = [];
@@ -142,7 +145,7 @@ export function vcenterLicenseRows(vcs) {
       const st = licenseExpiryStatus(ts);
       items.push({
         source: 'vCenter', where: vc.name || vc.id, vcenterId: vc.id,
-        name: l.name || l.edition || '(이름 없음)',
+        name: l.name || l.edition || LICENSE_NAME_PLACEHOLDER,
         family: licenseFamilyOf(`${l.name} ${l.edition} ${l.product}`),
         edition: l.edition || '', product: l.product || '', productVersion: l.productVersion || '',
         key: l.key || '', total: l.total ?? null, used: l.used ?? null,

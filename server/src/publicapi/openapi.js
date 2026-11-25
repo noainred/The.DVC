@@ -39,7 +39,8 @@ const ERROR_SCHEMA = Object.freeze({
 const COMMON_RESPONSES = Object.freeze({
   401: { description: '키가 없거나(missing-key) 모르거나(unknown-key) 폐기·만료됨(revoked·expired). 같은 값으로 재시도해도 같습니다.', content: { 'application/json': { schema: ERROR_SCHEMA } } },
   403: { description: '이 키에 그 분류가 없음(group-denied·no-groups), 범위로 나눌 수 없는 자원(needs-full-scope) 또는 범위의 vCenter 가 전부 등록돼 있지 않음(scope-empty). 관리자가 설정 › 연동 키에서 바꿔야 합니다.', content: { 'application/json': { schema: ERROR_SCHEMA } } },
-  404: { description: '공개되지 않은 경로(unknown-endpoint). `GET /` 로 목록을 확인하세요.', content: { 'application/json': { schema: ERROR_SCHEMA } } },
+  400: { description: '쿼리 인자 형식 오류(bad-query — v3.42.0). `field` 가 어느 인자인지 밝힙니다(offset · limit 은 정수만, vcenterId 는 값 하나). 기본값으로 바꾸지 않습니다.', content: { 'application/json': { schema: ERROR_SCHEMA } } },
+  404: { description: '공개되지 않은 경로(unknown-endpoint — `GET /` 로 목록 확인) 또는 ?vcenterId 가 이 키로 볼 수 없는 vCenter(unknown-vcenter — 범위 밖과 없는 id 를 구분하지 않습니다).', content: { 'application/json': { schema: ERROR_SCHEMA } } },
   429: { description: '분당 상한 초과(rate-limited). `Retry-After` 초 뒤 재시도.', content: { 'application/json': { schema: ERROR_SCHEMA } } },
   503: { description: '첫 수집 미완료(not-collected) 또는 해당 모듈 사용 불가(unavailable). 빈 데이터와 구분하세요.', content: { 'application/json': { schema: ERROR_SCHEMA } } },
 });
@@ -72,7 +73,7 @@ export function buildOpenApi({ groups = [], baseUrl = '/api/v1' } = {}) {
         operationId: ep.path.replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_|_$/g, ''),
         // v3.42.0: 쿼리 인자 — 카탈로그의 params 선언에서 만든다(손으로 쓴 스펙을 두지 않는다). 전부 선택 인자다.
         ...(Array.isArray(ep.params) && ep.params.length ? { parameters: ep.params.map((p) => ({
-          name: p.name, in: 'query', required: false, description: p.desc, schema: { type: p.type === 'integer' ? 'integer' : 'string', ...(p.type === 'integer' ? { minimum: p.name === 'limit' ? 1 : 0 } : {}) },
+          name: p.name, in: 'query', required: false, description: p.desc, schema: { type: p.type === 'integer' ? 'integer' : 'string', ...(p.type === 'integer' ? { minimum: p.name === 'limit' ? 1 : 0 } : {}), ...(Number.isInteger(p.max) ? { maximum: p.max } : {}) },
         })) } : {}),
         description: ep.requiresFullScope
           ? '⚠ vCenter 범위로 나눌 수 없는 자원입니다 — 범위를 지정한 키는 403(needs-full-scope) 입니다.'
