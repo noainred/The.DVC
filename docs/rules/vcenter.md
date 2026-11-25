@@ -565,3 +565,18 @@
     남은 결정: 풀기에 전제 조건 없음(목록을 받은 뒤 다른 관리자가 연장 · 다시 건 보류도 지운다 — 키마다 `at` 을 보내 409 로 할지) · 여러 건 감사에 이름이 10~15건까지만(건마다 줄을 남길지) · 기존 VM 줄의 보류 단추(v3.28.0)는 쓰기 범위를 보지 않는다(서버가 403).
   - 화면 `HoldList.jsx`: 못 읽은 보류 파일이면 목록은 보이고 풀기 · 연장을 잠근다 · 목록을 못 받으면 탭 수 ‘—’ · 연장 창은 표 밖(위)에(표 줄 사이에 끼우면 STable 정렬이 짝을 잃는다) · 720px 이하는 카드.
   - 720px 이하 법인 카드는 1열(`snapshots.css` — 2열이면 글자 자리 약 143px 라 이름 · 크기 줄이 말줄임). 회귀 `server/test/snapHolds3350.test.js` · `web/src/views/tools/snapshots/snapHolds3350.test.jsx`.
+- v3.39.0(실제 릴리스 v3.40.0 — main 이 v3.39.0 을 먼저 써서 번호만 올렸다 · 코드 · 테스트 표지는 v3.39.0) — VM 전원 구간(켜짐 · 꺼짐 달력 · 드로어 '전원 상태' — 시안 `docs/design/vm-power-calendar` A안 · ⑤). 판정은 `server/src/vmpower/spans.js` 하나
+  - 저장은 VM 추적 DB(vm-track.db) 같은 연결의 표 3개(`vmpower/db.js`): `power_spans`(VM 의 같은 상태 구간 한 행 — **전환이 있을 때만 행이 생긴다** · `start_lo` null = 기록 시작 전부터 그 상태) ·
+    `power_watch`(vCenter 별 첫 · 마지막 관측) · `power_gaps`(관측이 `GAP_MS` 넘게 끊긴 구간). 10분마다 5,850 VM 을 갱신하지 않는다 — 관측 시각은 vCenter 당 한 행.
+  - 관측기 `vmpower/watcher.js`: 60초 틱 · 10분마다 스냅샷만 읽음(vCenter 왕복 0) · 재진입 가드 · vCenter 하나당 트랜잭션 하나 + 양보. 못 읽은 vCenter 판정은 `samplingUnreadReasons` 하나(사본 금지 —
+    긴급중단 · 점검중 · 연결 실패 · 낡음) · 스냅샷이 `GAP_MS` 보다 오래됐으면 관측 안 함 · **열린 구간이 있는데 VM 목록이 비면 닫지 않는다**(인벤토리 일시 누락을 '전부 삭제됨' 으로 기록하지 않게 — v2.590 P6 와 같은 이유).
+  - 소급: vCenter 의 첫 관측 때 한 번 VM 추적 `changes`(powered_on/off) · `snaps` 슬롯 · `roster.first_seen` 으로 지난 구간을 만든다(`planBackfill` — src 'backfill', 창 = 두 슬롯 사이).
+    슬롯 사이에서 바뀌었다 돌아온 것은 추적에 없다 — 화면이 '소급 · 정밀도 12시간' 을 밝힌다.
+  - 이벤트 보정: 조회 때 로그 DB 의 `VmPoweredOnEvent`/`VmPoweredOffEvent`(부분 인덱스 `idx_events_power` 와 같은 IN 리터럴 — `powerEventsOf`) 중 **전환 창 안의 같은 방향** 마지막 것으로 시각 · 수행 계정을 정한다.
+    이벤트 키가 VM 이름이라 **같은 vCenter 에 같은 이름 VM 이 둘 이상이면 보정하지 않는다**(`eventsNote: 'duplicate-name'` 을 화면이 밝힌다). 관측 간격(10분)보다 짧은 꺼짐 · 켜짐은 보정하지 않는다(남긴 것).
+  - 화면 상태 4가지 on · off · est(경계 불확실) · unk(기록 없음). **est · unk 는 켜짐 · 꺼짐 합 · 비율의 분모에 넣지 않는다**(못 읽은 값은 0 이 아니다). '처음 Power On' 이 기록 시작 전이면 날짜를 지어내지 않고 '기록 시작 전'.
+  - API `GET /api/vms/:id/power-history?from&to` — `requirePerm('inv.vms')` · 범위 밖 404 · 범위 상한 400일(`normRange`) · 화면은 **열 때 1회**(useOnce · 15초 폴링 없음). 데모(mock)는 `mock/demo/vmPower.js` 결정적 구간을 같은 판정에 넣는다.
+  - 화면: 개체 보기 탭 `power`(`objTabs.js POWER_TAB` — VM 에만 · 호스트는 요약으로) · 드로어 '한눈에' 아래 카드 → 드로어 본문이 상세로 바뀜(← VM 상세). 문구 · 달력 계산은 `web/src/views/vms/powerHistText.js`(날짜 경계 = 브라우저 지역 시각).
+  - 정리: 관측 144회(약 하루)마다 · 기동 첫 틱 아님 · **끝난 구간만**(`end_ts < 보존 경계` — 진행 중 구간은 지우지 않는다) · 2,000행 조각 + 양보. 보존은 `VMTRACK_RETENTION_DAYS`(기본 1095일).
+  - 기존 '꺼진 지 N일'(`tools/powerOff.js resolveOffSince`)은 그대로 둔다 — 이 표를 그 판정의 출처로 합치는 것은 남긴 것(두 숫자가 다르게 보일 수 있다 · 출처와 정밀도는 각 화면이 밝힌다).
+  - 회귀 `server/test/vmPower3390.test.js`(실제 DB 로 소급 → 전환 → 빈 목록 → 끊김 → 사라짐 → 정리) · `web/src/views/vms/powerHistText.test.js`.

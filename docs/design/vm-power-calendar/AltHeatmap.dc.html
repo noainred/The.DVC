@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>VM 개체 보기 — 전원 이력 탭(연간 히트맵)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.muted{color:#8b9bb4}
+.tb{display:flex;align-items:center;gap:14px;height:44px;padding:0 16px;background:#0f1626;border-bottom:1px solid #243049}
+.logo{display:inline-flex;align-items:center;gap:8px;font-weight:800;font-size:14px}
+.logo .v{width:26px;height:26px;border-radius:7px;background:#3b82f6;display:inline-flex;align-items:center;justify-content:center;font-size:13px;color:#fff}
+.mock{font-size:11px;font-weight:800;color:#fcd34d;background:rgba(245,158,11,.16);border-radius:6px;padding:2px 7px}
+.sb{width:236px;flex:none;background:#0f1626;border-right:1px solid #243049;padding:12px 10px;display:flex;flex-direction:column;gap:2px}
+.sb a{display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:8px;color:#e6edf6;font-weight:600;text-decoration:none;font-size:13px}
+.sb a.sub{padding:6px 12px 6px 30px;color:#8b9bb4;font-weight:500;font-size:12.5px}
+.sb a.on{background:#1a2236;color:#22d3ee}
+.sb a.grp.on{background:transparent;color:#e6edf6;box-shadow:inset 3px 0 0 #22d3ee}
+.sb .n{margin-left:auto;font-size:11px;color:#8b9bb4;font-weight:600}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 11px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.icon{width:32px;padding:0;justify-content:center}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0}
+.ch{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 16px;padding:10px 14px;border-bottom:1px solid #1f2a40}
+.ch h3{margin:0;font-size:13px;font-weight:700}
+.cb{padding:12px 14px}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.blue{background:rgba(59,130,246,.18);color:#93c5fd}.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.new{background:rgba(34,211,238,.16);color:#67e8f9}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;flex:none}
+.crumb{font-size:12px;color:#8b9bb4;display:flex;flex-wrap:wrap;gap:2px 6px;align-items:center}
+.crumb a{color:#93c5fd;text-decoration:none}
+.hero{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px}
+.hero h1{margin:0;font-size:22px;font-weight:800}
+.tabs{display:flex;align-items:center;gap:2px;border-bottom:1px solid #243049;overflow-x:auto}
+.tabs a{display:inline-flex;align-items:center;gap:6px;padding:10px 14px;color:#8b9bb4;font-weight:600;white-space:nowrap;text-decoration:none;border-bottom:2px solid transparent;margin-bottom:-1px}
+.tabs a.on{color:#e6edf6;border-bottom-color:#3b82f6}
+.sw{display:inline-block;width:12px;height:12px;border-radius:3px;flex:none}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:11.5px;color:#8b9bb4;align-items:center}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.sumbar{height:14px;border-radius:7px}
+.kpis{display:flex;flex-wrap:wrap;gap:8px 28px;margin-top:12px}
+.kpis div{display:flex;flex-direction:column;gap:3px}
+.kpis span{font-size:11.5px;color:#8b9bb4;font-weight:600}
+.kpis b{font-size:19px;font-weight:800}
+.kpis small{font-size:11.5px;color:#8b9bb4;font-weight:500}
+.hm-scroll{overflow-x:auto;padding-bottom:4px}
+.hm-wrap{display:flex;gap:6px;width:max-content}
+.hm-wd{display:grid;grid-template-rows:repeat(7, 17px);gap:3px;font-size:10.5px;color:#8b9bb4;line-height:17px;margin-top:20px}
+.hm-mon{display:flex;gap:3px;height:17px;margin-bottom:3px}
+.hm-mon span{width:17px;flex:none;font-size:10.5px;color:#8b9bb4;white-space:nowrap;overflow:visible}
+.hm{display:grid;grid-template-rows:repeat(7, 17px);grid-auto-flow:column;grid-auto-columns:17px;gap:3px}
+.hm button{all:unset;box-sizing:border-box;width:17px;height:17px;border-radius:4px;cursor:pointer}
+.hm button:disabled{cursor:default}
+.wrow{display:grid;grid-template-columns:86px minmax(0, 1fr) minmax(0, 230px);gap:12px;align-items:center;padding:5px 0}
+.wrow .bar{height:22px;border-radius:5px}
+.wrow .s{font-size:11.5px;color:#8b9bb4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.axis{display:grid;grid-template-columns:86px minmax(0, 1fr) minmax(0, 230px);gap:12px;font-size:10.5px;color:#8b9bb4;margin-top:2px}
+.axis div{display:flex;justify-content:space-between}
+.tw{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:12.5px;min-width:420px}
+th{text-align:left;color:#8b9bb4;font-weight:700;font-size:11.5px;padding:8px 10px;border-bottom:1px solid #243049;background:#0f1626;white-space:nowrap}
+th button{all:unset;cursor:pointer}
+td{padding:7px 10px;border-bottom:1px solid #1f2a40;white-space:nowrap}
+tr:last-child td{border-bottom:0}
+.r{text-align:right}
+.mbar{height:8px;border-radius:4px;min-width:110px}
+.note{font-size:12px;color:#8b9bb4;line-height:1.6}
+</style>
+</helmet>
+
+<div style="min-height:100%;display:flex;flex-direction:column;background:#0a0e17">
+  <div class="tb">
+    <span class="logo"><span class="v">V</span>THE DAVINCI</span>
+    <span class="mock">MOCK</span>
+    <span style="flex:1"></span>
+    <span class="muted mono" style="font-size:12px">28/28 vCenter <b style="color:#86efac">OK</b> · 11:00:12</span>
+    <span class="muted" style="font-size:12px">admin</span>
+  </div>
+  <div style="display:flex;flex-wrap:wrap;flex:1;min-width:0">
+  <aside class="sb" aria-label="메뉴">
+    <a href="#">Overview</a><a href="#">Summary</a>
+    <a href="#" class="grp on">서버 <span class="n">6 ▴</span></a>
+    <a href="#" class="sub">가상화 서버</a><a href="#" class="sub">ESXi 호스트</a><a href="#" class="sub on">vCenter</a><a href="#" class="sub">물리 서버</a><a href="#" class="sub">Backup</a><a href="#" class="sub">알람</a>
+    <a href="#">스토리지 <span class="n">7 ▾</span></a><a href="#">네트워크 <span class="n">6 ▾</span></a><a href="#">자원관리 <span class="n">3 ▾</span></a><a href="#">자원 최적화 <span class="n">2 ▾</span></a><a href="#">특수 기능</a><a href="#">이슈</a><a href="#">위키</a><a href="#">게시판</a><a href="#">설정 <span class="n">2 ▾</span></a>
+  </aside>
+
+  <main style="flex:999 1 560px;min-width:0;padding:14px 24px 28px;display:flex;flex-direction:column;gap:12px">
+    <div class="crumb"><a href="#">← 가상화 서버 목록</a><span>·</span><a href="#">VC-KR1</a><span>›</span><a href="#">DC-KR1</a><span>›</span><a href="#">/batch</a><span>›</span><span style="color:#e6edf6">batch-kr1-014</span></div>
+
+    <header class="hero">
+      <span class="dot" style="background:#22c55e;width:12px;height:12px" title="켜짐"></span>
+      <h1>batch-kr1-014</h1>
+      <span class="tag blue">VM</span>
+      <span class="muted">Rocky Linux 9.3 (64-bit) · vmx-19</span>
+      <span class="tag ok">켜짐 · {{upFor}}째</span>
+    </header>
+
+    <nav class="tabs" aria-label="VM 개체 탭">
+      <a href="#">요약</a><a href="#">모니터</a><a href="#">구성</a><a href="#">사용 권한</a><a href="#">데이터스토어</a><a href="#">네트워크</a><a href="#">스냅샷</a><a href="#">업데이트</a><a href="#" class="on">전원 이력 <span class="tag new">새 탭</span></a><a href="#">성능 튜닝</a>
+    </nav>
+
+    <section class="card" aria-label="기간 요약">
+      <div class="cb">
+        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-bottom:10px">
+          <button class="btn icon" type="button" aria-label="이전 12개월">‹</button>
+          <b class="mono">2025-12 ~ 2026-11</b>
+          <button class="btn icon" type="button" aria-label="다음 12개월" disabled style="opacity:.45;cursor:default">›</button>
+          <span class="muted" style="font-size:12px">최근 12개월 · 기준 2026-11-24 11:00 (KST)</span>
+        </div>
+        <div class="sumbar" style="{{sumBar}}" role="img" aria-label="{{sumAria}}"></div>
+        <div class="kpis">
+          <div><span>켜진 시간</span><b class="mono">{{t.on}} <small>{{t.onPct}}%</small></b></div>
+          <div><span>꺼진 시간</span><b class="mono">{{t.off}} <small>{{t.offPct}}%</small></b></div>
+          <div><span>전원 전환</span><b class="mono">{{t.trans}}회</b></div>
+          <div><span>가장 길게 꺼짐</span><b class="mono">{{t.longest}} <small>{{t.longestRange}}</small></b></div>
+          <div><span>판정하지 못한 시간</span><b class="mono">{{t.unknown}} <small>비율에서 뺌</small></b></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card" aria-label="연간 히트맵">
+      <div class="ch">
+        <h3>하루 한 칸 · 52주</h3>
+        <div class="legend" aria-label="범례">
+          <span><i class="sw" style="background:#22c55e"></i>하루 종일 켜짐</span>
+          <span><i class="sw" style="background:linear-gradient(0deg,#22c55e 0 55%,#64748b 55% 100%)"></i>일부 꺼짐(초록 높이 = 켜진 비율)</span>
+          <span><i class="sw" style="background:#64748b"></i>하루 종일 꺼짐</span>
+          <span><i class="sw" style="background:repeating-linear-gradient(135deg,#33415c 0 2px,#111a2c 2px 5px)"></i>판정 못함</span>
+        </div>
+      </div>
+      <div class="cb">
+        <div class="hm-scroll">
+          <div class="hm-wrap">
+            <div class="hm-wd" aria-hidden="true"><span>일</span><span></span><span>화</span><span></span><span>목</span><span></span><span>토</span></div>
+            <div>
+              <div class="hm-mon" aria-hidden="true"><sc-for list="{{monLabels}}" as="ml" hint-placeholder-count="52"><span>{{ml.t}}</span></sc-for></div>
+              <div class="hm">
+                <sc-for list="{{cells}}" as="c" hint-placeholder-count="364">
+                  <button type="button" onClick="{{c.pick}}" disabled="{{c.off}}" aria-label="{{c.aria}}" style="{{c.style}}"></button>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p class="note" style="margin:10px 0 0">칸을 누르면 그 주의 시간대별 기록이 아래에 열립니다 · 파란 테두리 = 지금 보고 있는 주.</p>
+      </div>
+    </section>
+
+    <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start">
+      <section class="card" aria-label="선택한 주" style="flex:3 1 520px">
+        <div class="ch"><h3>{{weekTitle}}</h3><span class="muted" style="font-size:11.5px">가로 = 0시 → 24시</span></div>
+        <div class="cb">
+          <sc-for list="{{weekRows}}" as="w" hint-placeholder-count="7">
+            <div class="wrow"><span class="mono" style="{{w.lb}}">{{w.label}}</span><div class="bar" style="{{w.bar}}" role="img" aria-label="{{w.sum}}"></div><span class="s">{{w.sum}}</span></div>
+          </sc-for>
+          <div class="axis mono" aria-hidden="true"><span></span><div><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div><span></span></div>
+        </div>
+      </section>
+
+      <section class="card" aria-label="월별 합계" style="flex:2 1 400px;min-width:0">
+        <div class="ch"><h3>월별 합계</h3><span class="muted" style="font-size:11.5px">제목을 누르면 정렬</span></div>
+        <div class="tw">
+          <table>
+            <thead><tr><th><button type="button">월 ▾</button></th><th><button type="button">비율</button></th><th class="r"><button type="button">켜짐</button></th><th class="r"><button type="button">꺼진 시간</button></th><th class="r"><button type="button">전환</button></th></tr></thead>
+            <tbody>
+              <sc-for list="{{monthRows}}" as="m" hint-placeholder-count="12">
+                <tr><td class="mono">{{m.ym}}</td><td><div class="mbar" style="{{m.bar}}"></div></td><td class="r mono">{{m.onPct}}</td><td class="r mono">{{m.off}}</td><td class="r mono">{{m.trans}}</td></tr>
+              </sc-for>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1180}}'>
+class Component extends DCLogic {
+  build() {
+    if (this._d) return this._d;
+    var H = 3600000, D = 24 * H;
+    function T(y, m, d, h, mi) { return Date.UTC(y, m - 1, d, h || 0, mi || 0); }
+    function p2(n) { return (n < 10 ? '0' : '') + n; }
+    function ymd(t) { var x = new Date(t); return x.getUTCFullYear() + '-' + p2(x.getUTCMonth() + 1) + '-' + p2(x.getUTCDate()); }
+    function md(t) { var x = new Date(t); return p2(x.getUTCMonth() + 1) + '-' + p2(x.getUTCDate()); }
+    function dur(ms) {
+      var m = Math.round(ms / 60000), d = Math.floor(m / 1440), h = Math.floor((m % 1440) / 60), mi = m % 60;
+      if (d > 0) return d + '일' + (h ? ' ' + h + '시간' : '');
+      if (h > 0) return h + '시간' + (mi ? ' ' + mi + '분' : '');
+      return mi + '분';
+    }
+    var WD = ['일', '월', '화', '수', '목', '금', '토'];
+    // 가상 데이터(시안 A 와 같은 VM · 같은 구간) — 시각은 KST 벽시계를 그대로 쓴다.
+    var NOW = T(2026, 11, 24, 11, 0), START = T(2025, 12, 1), W0 = T(2025, 11, 30);
+    var GRAN = { event: 0, check: 6 * H, track: 12 * H };
+    var offs = [];
+    function off(a, b, src) { offs.push({ a: a, b: b, src: src }); }
+    off(T(2025, 12, 21, 0, 0), T(2025, 12, 21, 0, 0), 'track');
+    off(T(2026, 1, 17, 2, 10), T(2026, 1, 17, 6, 40), 'event');
+    off(T(2026, 3, 8, 19, 20), T(2026, 3, 21, 9, 5), 'event');
+    for (var i = 0; i < 13; i++) { var f = T(2026, 4, 3, 20, 0) + i * 7 * D; off(f, f + 2 * D + 11.5 * H, 'event'); }
+    off(T(2026, 9, 2, 12, 0), T(2026, 9, 2, 18, 0), 'check');
+    off(T(2026, 10, 28, 23, 40), T(2026, 11, 12, 8, 15), 'event');
+    var marks = [{ a: T(2026, 7, 10, 3, 0), b: T(2026, 7, 13, 11, 0), st: 'unk' }];
+    offs.forEach(function (o) {
+      var g = GRAN[o.src];
+      if (g) marks.push({ a: o.a - g, b: o.a, st: 'est' });
+      if (o.b > o.a) marks.push({ a: o.a, b: o.b, st: 'off' });
+      if (g) marks.push({ a: o.b, b: o.b + g, st: 'est' });
+    });
+    marks.sort(function (x, y) { return x.a - y.a; });
+    var segs = [], cur = START;
+    marks.forEach(function (m) { if (m.a > cur) segs.push({ a: cur, b: m.a, st: 'on' }); segs.push(m); cur = m.b; });
+    if (cur < NOW) segs.push({ a: cur, b: NOW, st: 'on' });
+    function clip(a, b) {
+      var out = [];
+      for (var k = 0; k < segs.length; k++) { var s = segs[k]; if (s.b <= a || s.a >= b) continue; out.push({ a: Math.max(a, s.a), b: Math.min(b, s.b), st: s.st }); }
+      return out;
+    }
+    function sums(parts) { var s = { on: 0, off: 0, est: 0, unk: 0 }; parts.forEach(function (p) { s[p.st] += p.b - p.a; }); return s; }
+    function txt(s) {
+      var bits = [];
+      if (s.on) bits.push('켜짐 ' + dur(s.on)); if (s.off) bits.push('꺼짐 ' + dur(s.off));
+      if (s.est + s.unk) bits.push('판정 못함 ' + dur(s.est + s.unk));
+      return bits.join(' · ');
+    }
+    var COL = { on: '#22c55e', off: '#64748b', est: 'rgba(100,116,139,.45)', unk: 'transparent' };
+    var HATCH = 'repeating-linear-gradient(135deg,#33415c 0 2px,transparent 2px 5px)';
+    function dayBar(day0, parts) { // 시간순(가로 = 0시 → 24시)
+      if (!parts.length) return 'background:transparent;border:1px dashed #243049';
+      var stops = [], last = 0;
+      parts.forEach(function (p) { var x = ((p.a - day0) / D * 100).toFixed(2), y = ((p.b - day0) / D * 100).toFixed(2); stops.push(COL[p.st] + ' ' + x + '% ' + y + '%'); last = y; });
+      if (last < 100) stops.push('#111a2c ' + last + '% 100%');
+      return 'background:linear-gradient(90deg,' + stops.join(',') + '),' + HATCH + ',#111a2c';
+    }
+    function ratio(s, deg) { // 비율(시간순 아님): 켜짐 → 꺼짐 → 판정 못함
+      var all = s.on + s.off + s.est + s.unk; if (!all) return 'background:transparent';
+      var a = (s.on / all * 100).toFixed(1), b = ((s.on + s.off) / all * 100).toFixed(1);
+      return 'background:linear-gradient(' + deg + 'deg,#22c55e 0 ' + a + '%,#64748b ' + a + '% ' + b + '%,transparent ' + b + '% 100%),' + HATCH + ',#111a2c';
+    }
+    var days = [], total = { on: 0, off: 0, est: 0, unk: 0 }, monLabels = [];
+    for (var w = 0; w < 52; w++) {
+      var lab = '';
+      for (var k = 0; k < 7; k++) {
+        var t = W0 + (w * 7 + k) * D, x = new Date(t), out = t < START, future = t >= NOW;
+        var parts = out || future ? [] : clip(t, Math.min(t + D, NOW)), s = sums(parts);
+        ['on', 'off', 'est', 'unk'].forEach(function (q) { total[q] += s[q]; });
+        if (x.getUTCDate() === 1) lab = (x.getUTCMonth() + 1) + '월';
+        days.push({ w: w, t: t, key: ymd(t), label: md(t) + ' (' + WD[k] + ')', parts: parts, s: s, none: out || future, future: future,
+          aria: ymd(t) + ' ' + WD[k] + '요일 — ' + (out ? '기간 밖' : future ? '아직 오지 않은 날' : txt(s)) });
+      }
+      monLabels.push({ t: lab });
+    }
+    var monthRows = [];
+    for (var n = 11; n >= 0; n--) {
+      var y = 2025 + Math.floor((11 + n) / 12), mo = (11 + n) % 12 + 1;
+      var m0 = T(y, mo, 1), m1 = mo === 12 ? T(y + 1, 1, 1) : T(y, mo + 1, 1);
+      var ms = sums(clip(m0, Math.min(m1, NOW))), known = ms.on + ms.off, tr = 0;
+      offs.forEach(function (o) { if (o.a >= m0 && o.a < m1) tr++; if (o.b >= m0 && o.b < m1) tr++; });
+      monthRows.push({ ym: y + '-' + p2(mo), bar: ratio(ms, 90), onPct: known ? (ms.on / known * 100).toFixed(1) + '%' : '—', off: ms.off ? dur(ms.off) : '0', trans: tr + '회' });
+    }
+    var longest = offs.reduce(function (p, o) { return !p || o.b - o.a > p.b - p.a ? o : p; }, null), known2 = total.on + total.off;
+    this._d = {
+      days: days, monLabels: monLabels, monthRows: monthRows, dayBar: dayBar, ratio: ratio, txt: txt, ymd: ymd,
+      selW0: Math.floor((T(2026, 3, 8) - W0) / (7 * D)),
+      upFor: dur(NOW - offs[offs.length - 1].b), sumBar: ratio(total, 90), sumAria: txt(total),
+      t: { on: dur(total.on), off: dur(total.off), onPct: (total.on / known2 * 100).toFixed(1), offPct: (total.off / known2 * 100).toFixed(1), trans: offs.length * 2,
+        longest: dur(longest.b - longest.a), longestRange: ymd(longest.a) + ' ~ ' + ymd(longest.b), unknown: dur(total.unk + total.est) }
+    };
+    return this._d;
+  }
+  renderVals() {
+    var d = this.build(), self = this;
+    var selW = this.state && this.state.w != null ? this.state.w : d.selW0;
+    var cells = d.days.map(function (x) {
+      var st = x.none ? 'background:transparent;border:1px solid ' + (x.future ? '#1f2a40' : 'transparent') : d.ratio(x.s, 0);
+      if (x.w === selW && !x.none) st += ';box-shadow:0 0 0 1.5px #3b82f6';
+      return { aria: x.aria, off: x.none, style: st, pick: function () { self.setState({ w: x.w }); } };
+    });
+    var wk = d.days.filter(function (x) { return x.w === selW; });
+    return {
+      upFor: d.upFor, t: d.t, sumBar: d.sumBar, sumAria: d.sumAria, monLabels: d.monLabels, monthRows: d.monthRows, cells: cells,
+      weekTitle: wk[0].key + ' ~ ' + wk[6].key + ' 주',
+      weekRows: wk.map(function (x) {
+        return { label: x.label, lb: x.none ? 'color:#7483a0' : '', bar: d.dayBar(x.t, x.parts), sum: x.none ? (x.future ? '아직 오지 않은 날' : '기간 밖') : d.txt(x.s) };
+      })
+    };
+  }
+}
+</script>
+</body>
+</html>

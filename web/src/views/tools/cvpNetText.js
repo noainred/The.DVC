@@ -192,7 +192,7 @@ export function sparkPath(points, { w = 120, h = 28, min = null, max = null } = 
   return d.trim();
 }
 
-/* ── v3.40 장비 상세 › 포트 — 칸이 전부 빈 이유(사용자 실장비 캡처: 속도 · VLAN · LAG · 수신 · 송신 · 오류가 전부 '—') ─────────────── */
+/* ── v3.41 장비 상세 › 포트 — 칸이 전부 빈 이유(사용자 실장비 캡처: 속도 · VLAN · LAG · 수신 · 송신 · 오류가 전부 '—') ─────────────── */
 const blank = (v) => v == null || v === '';
 const listText = (a) => (Array.isArray(a) && a.length ? a.slice(0, 24).join(', ') : '');
 /**
@@ -218,14 +218,14 @@ export function emptyColumnNotes(ports, { usedPaths = {}, missing = {}, seenFiel
   const cfg = (kind, col) => {
     if (missing[kind]) return `${col} 경로를 읽지 못했습니다 — ${String(missing[kind]).slice(0, 200)}.`;
     if (usedPaths[kind]) return `${col} 경로는 읽었지만(${usedPaths[kind]}) 이 장비 포트에 값이 없습니다${seen(kind) ? ` — 응답에 있던 필드: ${seen(kind)}` : ''}.`;
-    return `${col}은(는) v3.40 부터 부품 주기(기본 30분)에 따로 읽습니다 — 업그레이드 뒤 첫 부품 주기가 지나면 채워집니다(경로는 실장비 미확인 추정).`;
+    return `${col}은(는) v3.41 부터 부품 주기(기본 30분)에 따로 읽습니다 — 업그레이드 뒤 첫 부품 주기가 지나면 채워집니다(경로는 실장비 미확인 추정).`;
   };
   if (list.every((p) => blank(p.vlan))) out.push({ col: 'VLAN', text: cfg('switchport', 'VLAN') });
   if (list.every((p) => blank(p.lag))) out.push({ col: 'LAG', text: `${cfg('lagMember', '포트 채널 소속')} 채널에 들지 않은 포트만 있는 장비도 이 칸이 비어 있습니다.` });
   return out;
 }
 
-/* ── v3.40 ③ 버전 준수 · ⑧ 이중화 ──────────────────────────────────────────────────────────────────────── */
+/* ── v3.41 ③ 버전 준수 · ⑧ 이중화 ──────────────────────────────────────────────────────────────────────── */
 export const CONFIG_DEFS = Object.freeze({ ok: ['준수', TONE.green], warn: ['불일치', TONE.amber], bad: ['오류', TONE.red], unknown: ['값 없음', 'var(--text-dim)'], unread: ['못 읽음', 'var(--text-dim)'] });
 export const BUG_DEFS = Object.freeze({ high: ['높음', TONE.red], low: ['낮음', TONE.amber], none: ['공지 없음', TONE.green], unread: ['못 읽음', 'var(--text-dim)'] });
 export const LIFE_DEFS = Object.freeze({ passed: ['지원 종료 지남', TONE.red], soon: ['곧 종료', TONE.amber], ok: ['지원 중', TONE.green], none: ['공지 없음', 'var(--text-dim)'], unread: ['못 읽음', 'var(--text-dim)'] });
@@ -248,5 +248,5 @@ export const COMPLIANCE_NOTE = '이 화면은 **CVP 가 준 값을 그대로** �
 export const CHANNEL_DEFS = Object.freeze({ degraded: ['이중화 상실', TONE.red], down: ['전부 내려감', TONE.red], unknown: ['확인 불가', TONE.amber], ok: ['정상', TONE.green], off: ['관리상 꺼짐', 'var(--text-dim)'] });
 export const MLAG_DEFS = Object.freeze({ peerDown: ['피어 링크 내려감', TONE.red], notConnected: ['협상 안 됨', TONE.red], inactive: ['비활성', TONE.amber], unknown: ['확인 불가', TONE.amber],
   ok: ['정상', TONE.green], off: ['MLAG 안 씀', 'var(--text-dim)'], unread: ['못 읽음', 'var(--text-dim)'] });
-export const REDUNDANCY_NOTE = '포트 채널은 **관리상 켜진 멤버 중 링크가 올라온 수**로 봅니다 — 일부만 올라오면 이중화 상실입니다. 채널 소속 · MLAG 상태는 v3.40 부터 부품 주기에 따로 읽는 값이고 경로는 **실장비 미확인 추정**입니다. 소속을 못 읽은 장비는 ‘채널 없음’ 이 아니라 ‘소속 못 읽음’ 으로 따로 셉니다. 장애로 열지 않습니다(화면에만).';
+export const REDUNDANCY_NOTE = '포트 채널은 **관리상 켜진 멤버 중 링크가 올라온 수**로 봅니다 — 일부만 올라오면 이중화 상실입니다. 채널 소속 · MLAG 상태는 v3.41 부터 부품 주기에 따로 읽는 값이고 경로는 **실장비 미확인 추정**입니다. 소속을 못 읽은 장비는 ‘채널 없음’ 이 아니라 ‘소속 못 읽음’ 으로 따로 셉니다. 장애로 열지 않습니다(화면에만).';
 export const channelText = (c) => `${c.up}/${c.expected}${c.total !== c.expected ? ` (꺼짐 ${c.total - c.expected})` : ''}`;

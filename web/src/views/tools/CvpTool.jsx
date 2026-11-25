@@ -21,8 +21,8 @@ import CvpTopologyView from './CvpTopology.jsx';         // v3.38 ⑥ ⑦ 토폴
 import CvpLocateView from './CvpLocate.jsx';             // v3.38 ① 위치 찾기
 import CvpCompareView from './CvpCompare.jsx';           // v3.38 ⑬ 작업 전후 비교
 import { TAB_GROUPS, TAB_KEYS, emptyColumnNotes } from './cvpNetText.js';
-import CvpComplianceView from './CvpCompliance.jsx';     // v3.40 ③ 버전 준수
-import CvpRedundancyView from './CvpRedundancy.jsx';     // v3.40 ⑧ 이중화
+import CvpComplianceView from './CvpCompliance.jsx';     // v3.41 ③ 버전 준수
+import CvpRedundancyView from './CvpRedundancy.jsx';     // v3.41 ⑧ 이중화
 import { descCell, byIntfName } from './cvpIntfText.js';
 import {
   facetRowsOf, corpNameFn, modelLabel, eosVersionOf, versionLabel, cvpServerVersionMap, cvpServerVersionOf, cvpVersionLabel, cvpVersionChips, eventCorpChips, eventSevChips, deviceSummaryTiles, historyNotes, CORP_NOTE, corpLabel,
@@ -612,7 +612,7 @@ function HistoryView({ h, addressHidden }) {
   );
 }
 
-/** v3.40: 포트 표에서 모든 행이 빈 칸의 이유(사용자 실장비 캡처 — 속도 · VLAN · LAG · 처리량이 전부 '—'). 판정 문장은 cvpNetText.emptyColumnNotes 하나. */
+/** v3.41: 포트 표에서 모든 행이 빈 칸의 이유(사용자 실장비 캡처 — 속도 · VLAN · LAG · 처리량이 전부 '—'). 판정 문장은 cvpNetText.emptyColumnNotes 하나. */
 function EmptyColsNote({ ports, d }) {
   const notes = emptyColumnNotes(ports, { usedPaths: d.usedPaths || {}, missing: d.missing || {}, seenFields: d.seenFields || {} });
   if (!notes.length) return null;

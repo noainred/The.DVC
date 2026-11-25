@@ -707,7 +707,7 @@ export function firstSpeed(flat) {
   return speedFromAnyField(flat);
 }
 /*
- * v3.40(사용자 실장비 캡처 — DCS-7280SR-48C6 · EOS 4.27.4M 의 포트 표 '속도' 칸이 전부 '—'): 위 세 이름에 값이 없으면 이름에 'speed' 또는
+ * v3.41(사용자 실장비 캡처 — DCS-7280SR-48C6 · EOS 4.27.4M 의 포트 표 '속도' 칸이 전부 '—'): 위 세 이름에 값이 없으면 이름에 'speed' 또는
  *   'linkmode' 가 든 다른 필드에서 단위가 붙은 값('speed100Gbps' · 'linkModeForced100GbpsFull' · '100G')만 찾는다. 단위 없는 숫자는 여기서 쓰지 않는다
  *   (어떤 단위인지 모르는 수를 bps 로 단정하지 않게 — 'speed' 이름의 정확한 필드만 위에서 수를 받는다). ⚠ 실장비 필드 이름은 아직 미확인(추정).
  */
@@ -780,12 +780,12 @@ export function parseInterfaces(text, { max = PORT_MAX } = {}) {
   return { ports, keys, truncated, droppedFields };
 }
 
-/* ── v3.40 VLAN(스위치포트) · 포트 채널 소속 · MLAG 상태 — 부품 주기에 읽는 별도 경로(⚠ 경로 · 필드 이름은 EOS Sysdb 관용 추정, 실장비 미확인) ──
+/* ── v3.41 VLAN(스위치포트) · 포트 채널 소속 · MLAG 상태 — 부품 주기에 읽는 별도 경로(⚠ 경로 · 필드 이름은 EOS Sysdb 관용 추정, 실장비 미확인) ──
  * 사용자 실장비 캡처에서 포트 표의 VLAN · LAG 칸이 전부 비어 있었다. 인터페이스 상태 노드(intfStatus)에는 VLAN · 채널 소속 필드가 없어서
  *   parseInterfaces 의 pick(vlan · lag)은 실장비에서 늘 비었던 것으로 본다(추정 — 데모만 값을 채웠다). 그래서 따로 읽는다.
  */
 /**
- * v3.40: 포트 목록에 VLAN · 채널 소속을 얹는다(순수). 읽은 맵에 그 포트가 있으면 그 값, 채널 맵을 읽었는데 없으면 ''(소속 없음),
+ * v3.41: 포트 목록에 VLAN · 채널 소속을 얹는다(순수). 읽은 맵에 그 포트가 있으면 그 값, 채널 맵을 읽었는데 없으면 ''(소속 없음),
  *   맵을 못 읽었으면(null) 포트 값을 그대로 둔다(intfStatus 에서 읽은 값 — 대개 ''). 새 배열을 돌려준다.
  */
 export function mergeL2Cfg(ports, { vlans = null, members = null, partial = {} } = {}) {

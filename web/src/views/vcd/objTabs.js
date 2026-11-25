@@ -33,11 +33,14 @@ export const HOST_OBJ_TABS = Object.freeze([
 
 /** v2.895: vSphere 에 없는 포탈 전용 탭 — 탭 줄 맨 끝(구분선 뒤 · 기본값 13 '성능 튜닝'). VM · 호스트 공통. */
 export const TUNING_TAB = Object.freeze({ k: 'tuning', label: '성능 튜닝' });
+/** v3.39.0: VM 전원 이력(켜짐 · 꺼짐 달력 — 시안 docs/design/vm-power-calendar A안). VM 개체 보기에만. */
+export const POWER_TAB = Object.freeze({ k: 'power', label: '전원 이력' });
 
 /** 개체 종류별 탭 목록 · 모르는 탭 키는 요약으로(포탈 전용 탭 'tuning' 은 둘 다 받는다). */
 export function objTabsOf(type) { return type === 'host' ? HOST_OBJ_TABS : VM_OBJ_TABS; }
 export function normObjTab(type, k) {
   if (k === TUNING_TAB.k) return k;
+  if (type === 'vm' && k === POWER_TAB.k) return k;
   return objTabsOf(type).some((t) => t.k === k) ? k : 'summary';
 }
 

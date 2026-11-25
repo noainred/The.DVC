@@ -287,7 +287,7 @@ export const ITEM_LABEL = {
   cpu: 'CPU', memory: '메모리',
   // v2.924 추가 항목(호스트 업링크 매칭 근거)
   lldp: 'LLDP 이웃', fdb: 'MAC 테이블',
-  // v3.40 추가 항목(빈 칸 점검 · ⑧ 이중화)
+  // v3.41 추가 항목(빈 칸 점검 · ⑧ 이중화)
   switchport: 'VLAN(스위치포트)', lagMember: '포트 채널 소속', mlag: 'MLAG 상태',
 };
 export const itemLabel = (k) => ITEM_LABEL[k] || String(k);

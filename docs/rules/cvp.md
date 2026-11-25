@@ -221,7 +221,7 @@
   - 판정 코어는 서버 순수 모듈 하나씩: `cvp/linkq.js`(④ ⑩) · `cvp/portplan.js`(⑤ ⑨) · `cvp/opticstrend.js`(⑮) · `cvp/topology.js`(⑥ ⑦ — `switchIndex` · `uplinkPortsOf` 는 위치 찾기 · 예측도 같이 쓴다) ·
     `cvp/locate.js`(①) · `cvp/snapdiff.js`(⑬) · 직선 추세는 `cvp/trend.js` 하나. 웹 `cvpNetText.js` 는 문장 · 색 · 배치만 — 판정을 웹에서 다시 하지 않는다.
   - 라우트는 `routes/api/cvpNet.js`(형제 cvp.js 와 같은 게이트 — tools + `fullScopeOnly`, 범위 계정 403). 스냅샷 찍기 · 지우기는 `requireRole('admin','operator')` + 감사 로그.
-    비-admin 은 설명 · LLDP 문자열을 `maskErrText`, 비교의 BGP 피어 주소는 '(주소 가림)'(maskPeers 와 같은 등급). 장비 · 엣지 왕복 0 — v3.38 에서는 **엣지 수신 계약을 바꾸지 않았다**(중앙이 받던 장비 레코드 · 표본으로 계산 — ⚠ v3.40 는 info 에 mlagStatus · cfgReadAt 를 더했다: 아래 v3.40 항목).
+    비-admin 은 설명 · LLDP 문자열을 `maskErrText`, 비교의 BGP 피어 주소는 '(주소 가림)'(maskPeers 와 같은 등급). 장비 · 엣지 왕복 0 — v3.38 에서는 **엣지 수신 계약을 바꾸지 않았다**(중앙이 받던 장비 레코드 · 표본으로 계산 — ⚠ v3.41 는 info 에 mlagStatus · cfgReadAt 를 더했다: 아래 v3.41 항목).
   - 일 기록 표(`cvp.db`): `port_lastlink`(포트별 마지막 링크 날 — **최신 전용 표**, port_daily GROUP BY MAX 로 만들지 않는다) · `dev_linkhist`(장비 기록 시작 날) · `port_flap_daily` ·
     `dev_port_daily` · `xcvr_daily`. 쓰기는 기존 적재 경로 안(`insertSample` · `saveDevices` 트랜잭션)에서 upsert(스칼라 MIN/MAX). **옛 레코드(ts ≤ 저장된 ts)는 플랩 · 포트 수 · 광량을 쓰지 않는다**(순서 뒤바뀜을 플랩으로 세지 않게 — 테스트 ⑦).
     플랩 = 직전 oper 'up' → 지금 down/nolink + 관리상 켜짐. 광량 일 최저는 `optic.linked === true` 만 · -60 ~ +15 dBm 밖은 못 읽은 값. 일 기록 3종은 일 롤업과 같은 보존일로 정리, 최신 표 2종은 `pruneDevices` 가 장비와 함께 지운다.
@@ -233,11 +233,11 @@
   - 위치 찾기: IP → MAC 은 vCenter 인벤토리로만(스위치 ARP 표는 수집하지 않는다 — 화면이 밝힌다). 답 = 이웃이 CVP 스위치가 아닌 포트, LLDP 로 못 가르는 포트(채널)는 배운 MAC 64개 이상이면 업링크로 본다(basis 'macs' — 추정).
   - 스냅샷: 장비마다 gzip JSON 한 행 · 50대씩 트랜잭션 · 반쪽 스냅샷은 지운다 · 최근 30개 · 180일(`SNAP_MAX` · `SNAP_RETENTION_DAYS`) · 동시 1건(409). 한쪽이 한 CVP 만 찍었으면 비교도 그 CVP 만(나머지를 사라짐 · 새로 생김으로 지어내지 않는다).
   - 데모: `mock/demo/cvp.js demoFabricLinks`(leaf ↔ spine 양쪽 LLDP · 일곱 번째 leaf 설명 불일치 · 아홉 번째 MTU 불일치) · `demoNetHistory`(`db.importNetHistory` — 지금은 데모 시드만 쓴다). 이름 · 수치는 가상.
-  - 남긴 것(다음 차수): ② 설정 백업 — 새 수집(엣지 계약 변경)이라 v3.38 · v3.40 모두 하지 않았다. ~~③ 버전 준수 · ⑧ MLAG/채널 이중화~~ → **v3.40 에 구현**(아래 항목). ⑪ 트래픽 흐름 · ⑭ 경로 추적은 예약 작업(아직 등록하지 않음).
-- **빈 칸 점검 · ③ 버전 준수 · ⑧ 이중화(v3.40 — 사용자 실장비 캡처: DCS-7280SR-48C6 · EOS 4.27.4M 포트 표의 속도 · VLAN · LAG · 수신 · 송신 · 오류가 전부 '—', 회귀 `server/test/cvpRedundancy339.test.js` · 웹 `cvpNetText.test.js`)**
+  - 남긴 것(다음 차수): ② 설정 백업 — 새 수집(엣지 계약 변경)이라 v3.38 · v3.41 모두 하지 않았다. ~~③ 버전 준수 · ⑧ MLAG/채널 이중화~~ → **v3.41 에 구현**(아래 항목). ⑪ 트래픽 흐름 · ⑭ 경로 추적은 예약 작업(아직 등록하지 않음).
+- **빈 칸 점검 · ③ 버전 준수 · ⑧ 이중화(v3.41 — 사용자 실장비 캡처: DCS-7280SR-48C6 · EOS 4.27.4M 포트 표의 속도 · VLAN · LAG · 수신 · 송신 · 오류가 전부 '—', 회귀 `server/test/cvpRedundancy339.test.js` · 웹 `cvpNetText.test.js`)**
   - **VLAN · 채널 소속은 인터페이스 상태 노드(intfStatus)에 없다**(추정 — parseInterfaces 의 pick(vlan · lag)은 실장비에서 늘 비었던 것으로 본다. 데모만 값을 채웠다). 부품 주기에 따로 읽는다:
     `switchport`(…/bridging/switchIntfConfig/switchIntfConfig) · `lagMember`(…/lag/input/config/cli/phyIntf 외) · `mlag`(…/Sysdb/mlag/status) — **경로 · 필드 이름 모두 실장비 미확인 추정**, 경로 탐색 표본(PROBE_PATHS)에 5곳을 더했다.
-  - 새 장비별 종류는 **`kinds`(종류별 상태 표 ks)에 반드시 등록**한다 — 빠지면 readKind 가 던져 그 장비의 카운터 · BGP · 부품 · LLDP 까지 부품 주기마다 잃는다(v3.40 개발 중 통합 테스트 ② 가 잡은 결함 · 변이로 고정).
+  - 새 장비별 종류는 **`kinds`(종류별 상태 표 ks)에 반드시 등록**한다 — 빠지면 readKind 가 던져 그 장비의 카운터 · BGP · 부품 · LLDP 까지 부품 주기마다 잃는다(v3.41 개발 중 통합 테스트 ② 가 잡은 결함 · 변이로 고정).
   - 채널 소속이 포인터(`lag: {ptr:[…,'Port-Channel10']}`)로 오면 entitiesOf 가 필드로 세지 않는다 — `rawLagScan` 이 알림을 한 번 더 훑는다. **컬렉션의 포트별 포인터는 소속 값이 아니다**(세면 빈 맵으로 '읽음' 이 되어 포인터를 따라가지 않는다 — 변이로 고정).
   - 부품 주기 사이에는 수집기 메모리의 직전 값(`_l2cfg` — 키 = CVP id + 장비 시리얼)을 `L2CFG_TTL_MS`(부품 주기 3배) 안에서만 쓴다. 재시작 뒤 첫 부품 주기 전은 비어 있다(모름).
     '채널 없음' 과 '소속 못 읽음' 은 둘 다 lag '' 라 **info.cfgReadAt(VLAN · 채널을 읽은 시각)** 로 가른다.
@@ -246,10 +246,10 @@
   - 장비 상세 › 포트의 **'모든 포트가 비어 있는 칸 — 이유'** 는 웹 `cvpNetText.emptyColumnNotes` 하나(근거 = 그 CVP 의 usedPaths · missing · seenFields — 장비별이 아니다). 단정하지 않는다.
   - ③ 버전 준수(`cvp/compliance.js` · `GET /tools/cvp/compliance`): **새 수집 없음** — v2.641 CVP 단위 항목(인벤토리 준수 코드 · bugexposure · lifecycle)을 그대로. 포탈은 판정하지 않고 상태만 나눈다 —
     '0000' 만 준수로 읽고 다른 코드는 그대로 보인다(뜻을 지어내지 않는다) · 읽었는데 값이 없으면 '공지 없음' · 못 읽었으면 '못 읽음' · 종료일은 소프트웨어 · 하드웨어 중 이른 날, 180일 안 = 곧.
-  - **수명주기 날짜는 epoch ms 숫자다**(parse.tsOf · cleanInfo) — 읽기는 `compliance.lifeMs` 하나. Overview 의 '지원 종료 지남' 은 v3.38 까지 `Date.parse(숫자)` = NaN 으로 **한 번도 세지 못했다**(v3.40 수정 · 테스트 ④).
+  - **수명주기 날짜는 epoch ms 숫자다**(parse.tsOf · cleanInfo) — 읽기는 `compliance.lifeMs` 하나. Overview 의 '지원 종료 지남' 은 v3.38 까지 `Date.parse(숫자)` = NaN 으로 **한 번도 세지 못했다**(v3.41 수정 · 테스트 ④).
   - ⑧ 이중화(`cvp/redundancy.js` · `GET /tools/cvp/redundancy`): 채널 = 관리상 켜진 멤버 중 링크 올라온 수(전부 ok · 일부 degraded · 0 down · 모르는 멤버 섞임 unknown · 전부 꺼짐 off).
     MLAG = active + connected + 피어 링크 up 이면 ok · disabled = 안 씀 · 상태 못 읽음 = unread(인벤토리 'MLAG 켜짐' 은 함께만). **장애로 열지 않는다**(화면만 — 시안 §6-5 기본값).
-  - 반증 1인(v3.40) 반영: 포인터 추종이 잘리면 **부분 맵**(직전 완전한 맵 유지 · 없으면 맵에 없는 포트를 비우지 않고 cfgReadAt.lagPartial) · MLAG ok 는 협상 · 피어 링크를 **둘 다 읽고** 정상일 때만 ·
+  - 반증 1인(v3.41) 반영: 포인터 추종이 잘리면 **부분 맵**(직전 완전한 맵 유지 · 없으면 맵에 없는 포트를 비우지 않고 cfgReadAt.lagPartial) · MLAG ok 는 협상 · 피어 링크를 **둘 다 읽고** 정상일 때만 ·
     내려간 멤버가 확인되면 모르는 멤버가 섞여도 이중화 상실 · 기억 시간 = 부품 주기 × 3 · MLAG 는 포트 목록 없이도 · 엣지 정제 `SAMPLE_KINDS_MAX` 32 · `cleanProbes` 는 `PROBE_MAX`(예전 28 고정이 새 경로 표본을 버렸다) ·
     빈 mlagStatus 는 싣지 않음 · 채널 표에 포트 개체가 있으면 소속 칸 없는 포트 = 채널 없음(연속 실패 차단 방지) · 'flags' 가 lag 에 맞지 않게 칸 이름 전체 일치 · hwEndOfLife 는 지원 종료 판정에서 뺌(뜻 미확인) · 비관리자 MLAG 문자열 가림.
   - 남긴 것: ② 설정 백업(다음 차수 · 보관 결정 = 비밀 줄을 가린 판을 중앙에). 속도 · 처리량 빈 칸은 실장비 '읽은 경로' 원문 표본을 받아야 원인을 확정한다(이번 보강은 추정 후보). MLAG 는 운영 상태인데 부품 주기(30분)로 읽는다(반증 E3 — 화면이 읽은 시각을 보인다).
