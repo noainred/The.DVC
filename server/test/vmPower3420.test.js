@@ -398,5 +398,14 @@ test('6회차 R6 · R7 — 건너뛴 길이는 단조 경과로 · 복구로 넘
   await obs('v7', back + 31 * MIN, 'POWERED_ON', 31 * MIN);                                  // 기동 31분 — 복구
   const g7 = await D.gapsOf('v7', 0);
   assert.ok(g7.some((g) => g.from === back + MIN && g.to === back + 31 * MIN), `건너뛴 30분이 끊김으로: ${JSON.stringify(g7.map((g) => [(g.from - R) / MIN, (g.to - R) / MIN]))}`);
+  // 7회차 R8 — 건너뛰는 동안 켠 전원은 [건너뛰기 시작, 다음 관측] 창 · 그 사이 기록 없음
+  mono += 10 * MIN;
+  await obs('v7', back + 41 * MIN, 'POWERED_ON');
+  const H = await import('../src/vmpower/history.js');
+  const h7 = await H.vmPowerHistory({ id: 'v7:a', vcenterId: 'v7', name: 'v7-a', powerState: 'POWERED_ON' }, { vms: [] }, { now: back + 42 * MIN });
+  const tr = h7.transitions[0];
+  assert.equal(tr.to, 'on');
+  assert.equal(tr.lo, back + MIN, '창의 앞 끝 = 건너뛰기 시작');
+  assert.equal(tr.unknownWindow, true);
 });
 

@@ -159,7 +159,10 @@ export async function repairFuture(vcenterId, ts, holdFrom = null) {
     reopened += Number(p.st.futReopen.run(vc, ts).changes || 0);
     p.st.futDelGaps.run(vc, ts);
     p.st.futCutGaps.run(ts, vc, ts);
-    p.st.repairWatch.run(ts, vc);
+    // 마지막 관측 = 알고 있는 마지막 시각 — 건너뛰기 시작이 있으면 그 시각(7회차 R8: 복구 시각으로 두면 건너뛰는 동안 바뀐 전원이
+    //   [복구 시각, 다음 관측] 창에 '그 사이 기록 없음' 없이 들어갔다). 그러면 다음 관측의 창이 [건너뛰기 시작, 관측] 이 되어 끊김과 겹친다.
+    const hfw = numOrNull(holdFrom);
+    p.st.repairWatch.run(hfw != null && hfw < ts ? hfw : ts, vc);
     p.st.firstTsAtMost.run(ts, vc);   // 미래 기간에 처음 관측된 vCenter — 소급 끝(첫 관측)이 미래로 남지 않게
     // 건너뛰다 복구로 넘어왔으면 건너뛴 동안은 관측하지 않았다 — 그 시간을 끊김으로(6회차 R7). 이 경로는 지금 시계가 맞다고 보는 경로다.
     const hf = numOrNull(holdFrom);
