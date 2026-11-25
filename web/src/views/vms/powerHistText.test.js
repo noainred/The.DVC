@@ -106,8 +106,17 @@ describe('사실 글 — 기록 시작 전은 날짜를 지어내지 않는다',
   it('factText', () => {
     expect(factText({ before: at(2025, 12, 1) }).main).toBe('기록 시작 전');
     expect(factText({ ts: at(2026, 2, 23, 14, 5), exact: true, user: 'VSPHERE.LOCAL\\ops' })).toEqual({ main: '2026-02-23 14:05', sub: 'vCenter 이벤트 · VSPHERE.LOCAL\\ops' });
-    expect(factText({ ts: at(2026, 2, 23, 14, 10), lo: at(2026, 2, 23, 14), src: 'watch' }, { watchMs: 600_000 }).sub).toBe('포탈 관측 · 정밀도 10분');
+    expect(factText({ ts: at(2026, 2, 23, 14, 10), lo: at(2026, 2, 23, 14), src: 'watch' }, { watchMs: 600_000 }).sub).toBe('포탈 관측 · 시각 오차 최대 10분');
     expect(factText(null).main).toBe('기록 없음');
+  });
+  it('관측이 끊겼으면 마지막으로 본 상태 · 목록에 나타난 것은 Power On 이 아니다 · 오차는 창 폭으로', () => {
+    const now = at(2026, 11, 26, 9);
+    const st = currentText({ recordStart: 1, current: { state: 'on', ts: at(2026, 11, 1), seenTs: at(2026, 11, 23, 9), stale: true } }, now);
+    expect(st.head).toBe('마지막으로 본 상태 · 켜짐');
+    expect(st.since).toBe('2026-11-23 09:00 이후 관측 없음(3일)');
+    expect(currentText({ recordStart: 1, current: { state: 'on', ts: at(2026, 11, 20), lo: at(2026, 11, 19, 23, 50), appeared: true } }, now).head).toBe('켜짐 · 6일 9시간 이상');
+    expect(factText({ ts: at(2026, 11, 20), lo: at(2026, 11, 19, 23, 50), appeared: true }).sub).toContain('목록에 처음 보인 시각');
+    expect(factText({ ts: at(2026, 11, 20, 12), lo: at(2026, 11, 19, 12), src: 'watch' }, { watchMs: 600_000 }).sub).toBe('포탈 관측 · 시각 오차 최대 1일');
   });
   it('currentText — 진행 시간 · 시작을 모르면 이상', () => {
     const now = at(2026, 11, 25, 16);

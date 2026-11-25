@@ -62,11 +62,15 @@ export function whenText({ ts, lo, exact } = {}) {
 }
 
 /** 출처 글. */
-export function srcText(src, precision = {}) {
+export function srcText(src, precision = {}, win = null) {
   if (src === 'event') return 'vCenter 이벤트';
-  if (src === 'backfill') return `VM 추적 소급${precision.backfillMs ? ` · 정밀도 ${durText(precision.backfillMs)}` : ''}`;
-  return `포탈 관측${precision.watchMs ? ` · 정밀도 ${durText(precision.watchMs)}` : ''}`;
+  // 오차는 그 전환의 실제 창 폭으로 말한다 — 고정 간격(10분 · 12시간)이 아니다(소급 직후 · 끊김 뒤 창은 훨씬 넓다 — 재검토 #9).
+  const w = numOrNull(win);
+  const tail = w != null && w > 0 ? ` · 시각 오차 최대 ${durText(w)}` : (src === 'backfill' && precision.backfillMs ? ` · 정밀도 ${durText(precision.backfillMs)}` : precision.watchMs ? ` · 정밀도 ${durText(precision.watchMs)}` : '');
+  return `${src === 'backfill' ? 'VM 추적 소급' : '포탈 관측'}${tail}`;
 }
+/** 사실 · 전환의 창 폭(ts - lo) — 정확하거나 모르면 null. */
+export const windowOf = (x) => (x && !x.exact && numOrNull(x.lo) != null && numOrNull(x.ts) != null ? x.ts - x.lo : null);
 
 /** 조각들을 [a, b) 로 자른 것(시간순). */
 export function clipSegs(segments, a, b) {
@@ -167,7 +171,9 @@ export function sumsText(s) {
 export function factText(f, precision = {}) {
   if (!f) return { main: '기록 없음', sub: '' };
   if (f.before != null) return { main: '기록 시작 전', sub: `${stampText(f.before).slice(0, 10)} 기록 시작 때 이미 이 상태` };
-  return { main: whenText(f), sub: f.exact ? `vCenter 이벤트${f.user ? ` · ${f.user}` : ''}` : srcText(f.src, precision) };
+  // 목록에 나타난 구간 — 전원이 켜진 시각이 아니다(생성 · 다른 vCenter 에서 이동 · 다시 등록 — 재검토 #11).
+  if (f.appeared) return { main: whenText(f), sub: '이 vCenter 목록에 처음 보인 시각 — 그 전 전원 상태는 모릅니다' };
+  return { main: whenText(f), sub: f.exact ? `vCenter 이벤트${f.user ? ` · ${f.user}` : ''}` : srcText(f.src, precision, windowOf(f)) };
 }
 
 /** 지금 상태 머리글 — '켜짐 · 13일 7시간째' / '꺼짐 · 26일째' · 시작을 모르면 '… 이상'. */
@@ -176,7 +182,10 @@ export function currentText(facts, now) {
   const c = facts?.current;
   if (!c) return facts?.gone ? { head: '지금 목록에 없음', since: '' } : { head: '기록 없음', since: '' };
   const label = STATE_LABEL[c.state] || c.state;
+  // 관측이 끊긴 채면 지금 상태를 모른다 — '마지막으로 본 상태' 와 그 시각을 말한다(재검토 #4).
+  if (c.stale && numOrNull(c.seenTs) != null) return { head: `마지막으로 본 상태 · ${label}`, since: `${stampText(c.seenTs)} 이후 관측 없음(${durText(now - c.seenTs)})`, stale: true };
   if (c.before != null) return { head: `${label} · ${durText(now - c.before)} 이상`, since: `기록 시작(${stampText(c.before).slice(0, 10)}) 전부터` };
+  if (c.appeared) return { head: `${label} · ${durText(now - c.ts)} 이상`, since: `${whenText(c)} 목록에 나타남 — 그 전 상태는 모름` };
   return { head: `${label} · ${durText(now - c.ts)}째`, since: `${whenText(c)} 부터` };
 }
 

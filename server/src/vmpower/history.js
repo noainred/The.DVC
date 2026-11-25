@@ -35,9 +35,10 @@ async function eventsOf(vcenterId, name, fromTs, toTs) {
 }
 
 /**
- * @param {object} vm  스냅샷 VM 행 · @param {object} snap 스냅샷 · @param {{from?,to?,now?}} q
+ * @param {object} vm  스냅샷 VM 행 · @param {object} snap 스냅샷 · @param {{from?,to?,now?,admin?}} q
+ *   admin = 관리자 판본(auth/demoGuest.js isAdminDetailUser) — 아니면 수행 계정 이름을 싣지 않고 userMasked(재검토 #6 · vcInfo · 만든 계정과 같은 규칙).
  */
-export async function vmPowerHistory(vm, snap, { from: fromQ, to: toQ, now = Date.now() } = {}) {
+export async function vmPowerHistory(vm, snap, { from: fromQ, to: toQ, now = Date.now(), admin = false } = {}) {
   const { from, to } = normRange(fromQ, toQ, now);
   const base = {
     ok: true, vmId: vm.id, name: vm.name || '', vcenterId: vm.vcenterId, now, from, to,
@@ -50,7 +51,7 @@ export async function vmPowerHistory(vm, snap, { from: fromQ, to: toQ, now = Dat
   if (snap?.source === 'mock') {
     const d = demoPowerHistory(vm, now);
     ({ spans, gaps, watch, events } = d);
-    return { ...base, available: true, demo: true, watch, eventsUsed: events.length > 0, ...finish({ spans, gaps, events, watch, now, from, to }) };
+    return { ...base, available: true, demo: true, watch, eventsUsed: events.length > 0, ...finish({ spans, gaps, events, watch, now, from, to, admin }) };
   }
   if (!(await powerDb())) return { ...base, available: false, reason: '전원 기록 DB 를 쓸 수 없습니다(node:sqlite 없음 또는 추적 DB 초기화 실패).' };
   spans = await spansOfVm(vm.vcenterId, vm.id) || [];
@@ -63,12 +64,35 @@ export async function vmPowerHistory(vm, snap, { from: fromQ, to: toQ, now = Dat
     events = ev.rows;
     if (!ev.ok) eventsNote = 'unavailable';
   } else if (sameName > 1) eventsNote = 'duplicate-name';
-  return { ...base, available: true, watch, eventsUsed: events.length > 0, eventsNote, ...finish({ spans, gaps, events, watch, now, from, to }) };
+  // 엣지 위임(site) vCenter 의 이벤트 로그는 법인 엣지가 보관한다 — 중앙에서는 이벤트로 좁힐 수 없다(재검토 #8 · logs/poller.js 와 같은 판정).
+  const vc = (snap?.vcenters || []).find((x) => x && String(x.id) === String(vm.vcenterId));
+  if (!events.length && (vc?.collectMode === 'site' || vc?.collectSource === 'site')) eventsNote = 'site';
+  return { ...base, available: true, watch, eventsUsed: events.length > 0, eventsNote, ...finish({ spans, gaps, events, watch, now, from, to, admin }) };
 }
 
-function finish({ spans, gaps, events, watch, now, from, to }) {
-  const t = buildTimeline({ spans, gaps, events, now, watchLast: watch?.lastTs ?? null, from, to });
+/** 화면 범위 안 전환을 몇 건까지 싣는가 — 넘으면 최신부터 싣고 transitionsInRange(전체 수)와 transitionsTruncated 를 밝힌다(재검토 #1). */
+export const TRANSITIONS_CAP = 2000;
+
+function maskUsers(obj) {
+  if (obj && typeof obj === 'object' && 'user' in obj) obj.user = '';
+}
+
+function finish({ spans, gaps, events, watch, now, from, to, admin }) {
+  const t = buildTimeline({ spans, gaps, events, now, watchLast: watch?.lastTs ?? null, from, to, floor: watch?.prunedTo ?? null });
   // 소급 구간의 끝은 실시간 관측을 시작한 시각(power_watch.first_ts)이다.
   if (t.facts.backfill && watch?.firstTs) t.facts.backfill.to = watch.firstTs;
-  return { segments: t.segments, transitions: t.transitions.slice(0, 500), transitionsTotal: t.transitions.length, sums: t.sums, facts: t.facts };
+  // 전환은 **화면 범위 안**만 싣는다(이전 12개월 창에서 최신 500건만 와 '전원이 바뀐 적이 없다' 로 보였다 — 재검토 #1).
+  const inRange = t.transitions.filter((x) => x.ts >= from && x.ts <= to);
+  const transitions = inRange.slice(0, TRANSITIONS_CAP);
+  let userMasked = false;
+  if (!admin) {
+    const had = transitions.some((x) => x.user) || ['current', 'firstOn', 'lastOn', 'lastOff'].some((k) => t.facts[k]?.user);
+    for (const x of transitions) maskUsers(x);
+    for (const k of ['current', 'firstOn', 'lastOn', 'lastOff']) maskUsers(t.facts[k]);
+    userMasked = had;
+  }
+  return {
+    segments: t.segments, transitions, transitionsInRange: inRange.length, transitionsTruncated: inRange.length > transitions.length,
+    transitionsTotal: t.transitions.length, sums: t.sums, facts: t.facts, ...(userMasked ? { userMasked: true } : {}),
+  };
 }

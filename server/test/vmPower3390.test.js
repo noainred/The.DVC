@@ -44,7 +44,7 @@ test('관측 계획 — 바뀌지 않으면 쓰기 없음 · 바뀌면 직전 �
   ] });
   assert.equal(p.gap, null);
   assert.deepEqual(p.close.find((c) => c.id === 2), { id: 2, end: prev });
-  assert.deepEqual(p.insert.find((x) => x.vmId === 'b'), { vmId: 'b', name: 'b', state: 'off', start: NOW, lo: prev });
+  assert.deepEqual(p.insert.find((x) => x.vmId === 'b'), { vmId: 'b', name: 'b', state: 'off', start: NOW, lo: prev, src: 'watch' });
   assert.ok(!p.close.some((c) => c.id === 1) && !p.close.some((c) => c.id === 3), '같은 상태 · 전원 모름은 닫지 않는다');
   assert.deepEqual(p.close.find((c) => c.id === 4), { id: 4, end: prev, gone: true }, '목록에서 사라진 VM 은 직전 관측에서 닫는다');
   assert.equal(p.insert.find((x) => x.vmId === 'n').lo, prev, '관측 중에 나타난 VM 은 그 사이에 생겼다');
@@ -254,9 +254,15 @@ test('★ 실제 DB — 첫 관측은 소급 · 다음 관측은 전환만 · �
     assert.ok(!got.some((e) => e.ts === NOW - 6000 * MIN), '가장 오래된 것이 잘린다');
   }
   // 정리 — 끝난 구간만
-  const pr = await D.prunePower(NOW + DAY);
-  assert.ok(pr.spans >= 3);
+  const pr = await D.prunePower(t1 + MIN);
+  assert.ok(pr.spans >= 3, `지운 구간 ${pr.spans}`);
   assert.equal((await D.openSpansOf('vc1')).size, 1, '진행 중 구간은 지우지 않는다');
+  assert.equal((await D.watchOf('vc1')).prunedTo, t1 + MIN, '정리 경계를 남긴다(남은 첫 구간을 처음으로 지어내지 않게)');
+  // 보존 기간 넘게 관측되지 않은 vCenter 는 열린 구간 · 관측 행까지 지운다
+  const pr2 = await D.prunePower(NOW + DAY);
+  assert.equal(pr2.vcs >= 1, true);
+  assert.equal((await D.openSpansOf('vc1')).size, 0);
+  assert.equal(await D.watchOf('vc1'), null);
 });
 
 test('데모 — 마지막 구간이 스냅샷 전원 상태와 같고 구간이 시간순 · 겹침 없음', async () => {
