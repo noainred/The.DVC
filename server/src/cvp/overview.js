@@ -17,6 +17,7 @@
  *  ④ 모델·버전은 **장비가 보고한 문자열 그대로** 묶는다. 벤더 지원 상태(권장·지원 종료)는 지어내지 않는다 — 수명주기 조회
  *     결과(info.lifecycle)가 있는 장비만 '지원 종료 지남' 을 센다.
  */
+import { lifeMs } from './compliance.js';   // v3.39 수명주기 날짜 읽기 하나
 import { partsSummary, bgpSummary } from './parse.js';
 import { TELEMETRY_OK, partsFresh } from './faults.js';
 import { agentKeyEq } from './registry.js';
@@ -195,8 +196,10 @@ export function buildCvpOverview(i = {}) {
     const lc = d.info && typeof d.info === 'object' ? d.info.lifecycle : null;
     if (lc && typeof lc === 'object') {
       totals.lifecycleRead++;
-      const eos = Date.parse(lc.swEndOfSupport || '');
-      if (Number.isFinite(eos) && eos < now) totals.swEolPassed++;
+      // v3.39(점검 — '지원 종료 지남' 이 늘 0): 수명주기 날짜는 수집(parse.tsOf) · 엣지 정제(cleanInfo) 모두 **epoch ms 숫자**인데 Date.parse(숫자)는 NaN 이라
+      //   한 번도 세지 못했다. 날짜 읽기는 cvp/compliance.js lifeMs 하나(문자열 날짜도 받는다).
+      const eos = lifeMs(lc.swEndOfSupport);
+      if (eos != null && eos < now) totals.swEolPassed++;
     }
   }
 

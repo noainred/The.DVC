@@ -67,7 +67,7 @@ const FOLLOW_DEPTH = 3;
  *   잃었다(재현). LLDP 만 상한을 3배로(예산·시한 안에서). 그래도 잘리면 부분 읽기로 표시하고 저장소가 읽은 포트만 바꾼다(db.saveL2 lldpPartial).
  */
 export const FOLLOW_REQ_MAX_BY_KIND = Object.freeze({ lldp: FOLLOW_REQ_MAX * 3 });
-export const FOLLOW_DEPTH_BY_KIND = Object.freeze({ interfaces: 1, intfConfig: 1, counters: 2, memory: 1, cpu: 2, bgp: 3, power: 2, cooling: 2, temperature: 2, xcvr: 3, lldp: 3, fdb: 1 });
+export const FOLLOW_DEPTH_BY_KIND = Object.freeze({ switchport: 1, lagMember: 1, mlag: 1, interfaces: 1, intfConfig: 1, counters: 2, memory: 1, cpu: 2, bgp: 3, power: 2, cooling: 2, temperature: 2, xcvr: 3, lldp: 3, fdb: 1 });
 /*
  * v2.646(사용자 신고 'xcvr 이 여전히 나오지 않는다' — 캡처: `all › Ethernet1` 등 전부 '상태 미확인'): 트랜시버 노드는 **장착 여부만** 주고
  *   건강 상태 필드가 없다. `show interfaces transceiver` 가 보여 주는 DOM(온도·전압·바이어스·Tx/Rx 광량)은 그 노드 **한 단계 아래**
@@ -146,7 +146,21 @@ export const CANDIDATES = Object.freeze({
    */
   lldp: ['/api/v1/rest/{serial}/Sysdb/l2discovery/lldp/status/local/1/portStatus', '/api/v1/rest/{serial}/Sysdb/l2discovery/lldp/status/local/1/portStatus/all'],
   fdb: ['/api/v1/rest/{serial}/Smash/bridging/status/smashFdbStatus', '/api/v1/rest/{serial}/Smash/bridging/status/smashFdbStatus/all'],
+  /*
+   * v3.39(사용자 실장비 캡처 — 포트 표의 VLAN · LAG 칸이 전부 비어 있었다): 인터페이스 상태 노드에는 VLAN · 채널 소속이 없다(추정) — 따로 읽는다.
+   *   ⚠ 경로 · 필드 이름은 EOS Sysdb 관용으로 **추정**했다(실장비 미확인 — 경로 탐색 표본(PROBE_PATHS)과 '읽은 경로' 탭이 확인한다). 부품 주기에만 읽는다.
+   *   MLAG 는 장비마다 상태 노드 하나(⑧ 이중화 — docs/design/cvp-network-features §3).
+   */
+  switchport: ['/api/v1/rest/{serial}/Sysdb/bridging/switchIntfConfig/switchIntfConfig', '/api/v1/rest/{serial}/Sysdb/bridging/switchIntfConfig/switchIntfConfig/all'],
+  lagMember: ['/api/v1/rest/{serial}/Sysdb/lag/input/config/cli/phyIntf', '/api/v1/rest/{serial}/Sysdb/lag/input/config/cli/phyIntf/all',
+    '/api/v1/rest/{serial}/Sysdb/lag/config/phyIntf'],
+  mlag: ['/api/v1/rest/{serial}/Sysdb/mlag/status'],
 });
+/** v3.39: 부품 주기에 읽은 VLAN · 채널 소속 · MLAG 의 기억(장비별 · 프로세스 메모리). 부품 주기의 3배가 지나면 쓰지 않는다(오래된 값을 지금 값처럼 두지 않게). */
+const _l2cfg = new Map();
+const L2CFG_MAX = 20_000;
+export const L2CFG_TTL_MS = 3 * 30 * 60_000;
+export function _resetL2CfgForTest() { _l2cfg.clear(); }
 /** v2.924(B-②): LLDP·MAC 테이블 수집 스위치 — 기본 켜짐. 요청 수(LLDP 는 링크가 올라온 포트당 1~2회 · 30분마다)가 부담이면 CVP_L2=false. */
 export const L2_COLLECT = String(process.env.CVP_L2 ?? '').trim().toLowerCase() !== 'false';
 /** v2.641: CVP 단위(장비별이 아닌) 추가 항목 — 한 주기에 CVP 당 요청 1회씩. */
@@ -179,9 +193,12 @@ export const PROBE_PATHS = Object.freeze([
   '/Sysdb/interface/status/eth/phy/slice', '/Sysdb/hardware/entmib',
   // v2.924(B-②): LLDP · MAC 테이블 후보 경로의 모양(추정 경로 확인용).
   '/Sysdb/l2discovery/lldp/status/local/1/portStatus', '/Smash/bridging/status/smashFdbStatus',
+  // v3.39: VLAN(스위치포트) · 포트 채널 소속 · MLAG · Smash 카운터 디렉터리(속도 · 처리량 빈 칸 점검 — 사용자 실장비 캡처) 후보의 모양.
+  '/Sysdb/bridging/switchIntfConfig/switchIntfConfig', '/Sysdb/lag', '/Sysdb/lag/input/config/cli/phyIntf', '/Sysdb/mlag/status',
+  '/Sysdb/interface/status/eth/phy/slice/1/intfStatus/Ethernet1/speedEntry',
 ]);
 export const PROBE_HEAD_CHARS = 1536;
-export const PROBE_MAX = 34;
+export const PROBE_MAX = 40;
 /** v2.648: 슬롯 전원 확인 루틴에서 링크 상태를 볼 표본 포트 수(슬롯당). */
 export const SLOT_SAMPLE = 8;
 /**
@@ -372,7 +389,7 @@ export function expandWildcard(tpl, keys, max = WILDCARD_MAX) {
 }
 const fill = (tpl, serial) => tpl.replaceAll('{serial}', encodeURIComponent(serial));
 /** v2.641: 포인터를 따라갈 종류(부품·인터페이스·카운터·BGP·CPU·메모리). */
-const FOLLOW_KINDS = new Set(['interfaces', 'intfConfig', 'counters', 'bgp', 'power', 'cooling', 'temperature', 'xcvr', 'cpu', 'memory', 'lldp', 'fdb']);
+const FOLLOW_KINDS = new Set(['switchport', 'lagMember', 'interfaces', 'intfConfig', 'counters', 'bgp', 'power', 'cooling', 'temperature', 'xcvr', 'cpu', 'memory', 'lldp', 'fdb']);
 /**
  * v2.641: 하위 개체 URL. 포인터가 '부모 경로 + / + 키' 모양이면 부모 URL 뒤에 **키를 인코딩해** 붙인다('Ethernet3/1' 의 '/' 를 지키려고).
  *   그렇지 않으면 포인터 경로를 조각마다 인코딩해 장비 텔레메트리 루트에 붙인다. 포인터 원문은 장비가 준 값이라 `..` 조각은 버린다.
@@ -502,7 +519,7 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
     }
 
     // ③ 장비별 텔레메트리 — 종류마다 후보 체인 + 연속 실패 차단.
-    const kinds = ['interfaces', 'counters', 'bgp', 'cpu', 'memory', ...(partsDue ? ['intfConfig', ...Object.keys(PART_KINDS), ...(L2_COLLECT ? ['lldp', 'fdb'] : [])] : [])];
+    const kinds = ['interfaces', 'counters', 'bgp', 'cpu', 'memory', ...(partsDue ? ['intfConfig', 'switchport', 'lagMember', 'mlag', ...Object.keys(PART_KINDS), ...(L2_COLLECT ? ['lldp', 'fdb'] : [])] : [])];
     const ks = Object.fromEntries(kinds.map((k) => [k, { ok: 0, fail: 0, streak: 0, stopped: false, last: '', empty: 0, followed: 0, followTruncated: 0 }]));
     /*
      * v2.641: 종류 하나를 읽는다. 응답이 ① 빈 응답(`{"notifications":[]}`)이면 **읽은 것이 아니다** — 다음 후보로 넘어가고 사유는
@@ -653,6 +670,36 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
       }
       return ev;
     }
+    /** v3.39: VLAN · 채널 소속 · MLAG(부품 주기) + 직전 값 기억(주기 사이 · 재시작 뒤 첫 부품 주기 전은 비어 있다 — 모름). */
+    async function readL2Cfg(dev, serial, cvpId) {
+      const ck = `${cvpId}\u0000${serial}`;
+      let c = _l2cfg.get(ck);
+      if (partsDue && ks.switchport && ks.lagMember && ks.mlag) {
+        const nx = { vlans: c?.vlans ?? null, members: c?.members ?? null, mlag: c?.mlag ?? null, vlanAt: c?.vlanAt ?? null, lagAt: c?.lagAt ?? null, mlagAt: c?.mlagAt ?? null };
+        if (left() >= MIN_SLICE_MS) {
+          const r = await readKind('switchport', serial, (t) => { const x = P.parseSwitchport(t); return { value: x.vlans, keys: x.keys }; });
+          if (r.value) { nx.vlans = r.value; nx.vlanAt = now(); }
+        }
+        if (left() >= MIN_SLICE_MS) {
+          const r = await readKind('lagMember', serial, (t) => { const x = P.parseLagMembers(t); return { value: x.members, keys: x.keys }; });
+          if (r.value) { nx.members = r.value; nx.lagAt = now(); }
+        }
+        if (left() >= MIN_SLICE_MS) {
+          const r = await readKind('mlag', serial, (t) => { const x = P.parseMlag(t); return { value: x.status, keys: x.keys }; });
+          if (r.value) { nx.mlag = r.value; nx.mlagAt = now(); }
+        }
+        c = nx;
+        _l2cfg.set(ck, c);
+        if (_l2cfg.size > L2CFG_MAX) _l2cfg.delete(_l2cfg.keys().next().value);
+      }
+      if (!c) return;
+      const fresh = (at) => at != null && now() - at <= L2CFG_TTL_MS;
+      const vl = fresh(c.vlanAt) ? c.vlans : null; const lg = fresh(c.lagAt) ? c.members : null;
+      if (vl || lg) dev.ports = P.mergeL2Cfg(dev.ports, { vlans: vl, members: lg });
+      // 읽은 시각(화면이 '채널 없음' 과 '소속을 못 읽음' 을 가른다 — 둘 다 lag '' 라 시각이 없으면 구분할 수 없다).
+      dev.cfgReadAt = { vlan: vl ? c.vlanAt : null, lag: lg ? c.lagAt : null };
+      if (fresh(c.mlagAt) && c.mlag) dev.mlagStatus = { ...c.mlag, at: c.mlagAt };
+    }
     const followNote = {};
     const devices = inv.devices.map((d) => ({ ...d, parts: undefined, partsAt: null, bgp: null, ports: null, counters: null, countersAt: null, telemetry: 'pending' }));
     await poolSettled(devices, DEVICE_CONCURRENCY, async (dev) => {
@@ -667,6 +714,8 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
         const cfg = await readKind('intfConfig', serial, (t) => { const x = P.parseIntfConfig(t); return { value: x.descs, keys: x.keys }; });
         if (cfg.value) { dev.ports = P.mergeIntfConfig(dev.ports, cfg.value); dev.descsAt = now(); }
       }
+      // v3.39: VLAN · 포트 채널 소속 · MLAG — 부품 주기에 읽고(이번에 못 읽으면 직전 값), 그 사이 주기에는 직전에 읽은 값을 쓴다(L2CFG_TTL_MS 안에서만).
+      if (Array.isArray(dev.ports)) await readL2Cfg(dev, serial, server.id);
       if (left() < MIN_SLICE_MS) { dev.telemetry = budgetTelemetry(intf.value); return; } // v2.743(DEV-04): 인터페이스를 못 읽었으면 'budget'
       const upSet = Array.isArray(dev.ports) ? new Set(dev.ports.filter((p) => p.oper === 'up').map((p) => p.name)) : null;
       const cnt = await readKind('counters', serial, (t) => { const x = P.parseCounters(t); return { value: x.counters, keys: x.keys }; }, upSet ? (k) => upSet.has(k) : null);

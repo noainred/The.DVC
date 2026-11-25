@@ -276,6 +276,18 @@ export function cleanInfo(v, now = Date.now()) {
     out.lifecycle = { swEolVersion: s(l.swEolVersion, 64), swEndOfSupport: numOrNull(l.swEndOfSupport), hwEndOfLife: numOrNull(l.hwEndOfLife),
       hwEndOfSale: numOrNull(l.hwEndOfSale), hwEndOfTacSupport: numOrNull(l.hwEndOfTacSupport), hwEndOfRma: numOrNull(l.hwEndOfRma) };
   }
+  // v3.39(⑧ 이중화): MLAG 상태 — 아는 칸 여섯 개 · 문자열 상한 · 시각은 수신 시각으로 자른다(엣지 시계가 빠르면 '지금보다 뒤' 가 되지 않게).
+  if (isPlainObj(v.mlagStatus)) {
+    const m = v.mlagStatus;
+    const w = (x) => { const t = s(x, 64); return t ? t.toLowerCase() : null; };
+    const at = numOrNull(m.at);
+    out.mlagStatus = { state: w(m.state), negotiation: w(m.negotiation), peerLink: s(m.peerLink, 64) || null, peerLinkState: w(m.peerLinkState),
+      domain: s(m.domain, 64) || null, localIntf: s(m.localIntf, 64) || null, at: at == null ? null : Math.min(at, now) };
+  }
+  if (isPlainObj(v.cfgReadAt)) {   // v3.39: VLAN · 채널 소속을 읽은 시각(없으면 null — '못 읽음')
+    const t = (x) => { const n = numOrNull(x); return n == null || n <= 0 ? null : Math.min(n, now); };
+    out.cfgReadAt = { vlan: t(v.cfgReadAt.vlan), lag: t(v.cfgReadAt.lag) };
+  }
   if (isPlainObj(v.bugs)) {
     const b = v.bugs;
     out.bugs = { bugCount: numOrNull(b.bugCount), cveCount: numOrNull(b.cveCount), highestBug: EXPO.has(b.highestBug) ? b.highestBug : null,

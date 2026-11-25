@@ -166,9 +166,9 @@ export const bytesText = (n) => { const v = numOrNull(n); return v == null ? '�
 /* ── 탭 묶음(v3.38 — 시안 §2 '네 묶음') ─────────────────────────────────────────────────────────────────── */
 export const TAB_GROUPS = Object.freeze([
   { name: '현황', tabs: [['overview', 'Overview'], ['devices', '장비'], ['models', '모델'], ['traffic', '트래픽'], ['power', '전력'], ['events', '이벤트']] },
-  { name: '포트 · 링크', tabs: [['intf', '인터페이스 세부 정보'], ['portmap', '포트 구성도'], ['ports', '포트 사용량'], ['optics', '광신호'], ['linkq', '링크 품질']] },
+  { name: '포트 · 링크', tabs: [['intf', '인터페이스 세부 정보'], ['portmap', '포트 구성도'], ['ports', '포트 사용량'], ['optics', '광신호'], ['linkq', '링크 품질'], ['redundancy', '이중화']] },
   { name: '연결', tabs: [['topology', '토폴로지'], ['locate', '위치 찾기']] },
-  { name: '변경', tabs: [['compare', '작업 전후 비교']] },
+  { name: '변경 · 준수', tabs: [['compare', '작업 전후 비교'], ['compliance', '버전 준수']] },
   { name: '', tabs: [['settings', 'CVP 설정']] },
 ]);
 export const TAB_KEYS = Object.freeze(TAB_GROUPS.flatMap((g) => g.tabs.map((t) => t[0])));
@@ -191,3 +191,62 @@ export function sparkPath(points, { w = 120, h = 28, min = null, max = null } = 
   }
   return d.trim();
 }
+
+/* ── v3.39 장비 상세 › 포트 — 칸이 전부 빈 이유(사용자 실장비 캡처: 속도 · VLAN · LAG · 수신 · 송신 · 오류가 전부 '—') ─────────────── */
+const blank = (v) => v == null || v === '';
+const listText = (a) => (Array.isArray(a) && a.length ? a.slice(0, 24).join(', ') : '');
+/**
+ * 포트 표에서 **모든 행이 비어 있는 칸**마다 이유 한 줄. 근거는 그 CVP 의 수집 상태(usedPaths · missing · seenFields — CVP 단위다).
+ *   단정하지 않는다: '응답에서 찾지 못함'(필드 이름 후보가 안 맞음 — 추정) · '경로를 읽지 못함'(사유 원문) · '아직 읽지 않음'(새 항목).
+ * @returns {Array<{ col:string, text:string }>}
+ */
+export function emptyColumnNotes(ports, { usedPaths = {}, missing = {}, seenFields = {} } = {}) {
+  const list = (Array.isArray(ports) ? ports : []).filter((p) => p && typeof p === 'object' && !/^management/i.test(String(p.name || '')));
+  if (!list.length) return [];
+  const up = list.filter((p) => p.oper === 'up');
+  const out = [];
+  const seen = (k) => listText(seenFields[k]);
+  if (list.every((p) => blank(p.speedBps))) {
+    out.push({ col: '속도', text: `인터페이스 응답에서 속도 필드를 찾지 못했습니다(필드 이름 후보가 이 장비와 맞지 않는 것으로 추정)${seen('interfaces') ? ` — 응답에 있던 필드: ${seen('interfaces')}` : ''}. 사용률(%)도 속도를 알아야 계산합니다.` });
+  }
+  if (up.length && up.every((p) => blank(p.inBps) && blank(p.outBps))) {
+    const t = missing.counters ? `카운터 경로를 읽지 못했습니다 — ${String(missing.counters).slice(0, 200)}`
+      : usedPaths.counters ? `카운터는 읽었지만(${usedPaths.counters}) 이 장비 포트와 이름이 맞지 않거나, 처리량을 낼 직전 표본이 아직 없습니다${seen('counters') ? ` — 응답에 있던 필드: ${seen('counters')}` : ''}`
+        : '카운터를 읽은 기록이 없습니다';
+    out.push({ col: '수신 · 송신 · 오류', text: `${t}.` });
+  }
+  const cfg = (kind, col) => {
+    if (missing[kind]) return `${col} 경로를 읽지 못했습니다 — ${String(missing[kind]).slice(0, 200)}.`;
+    if (usedPaths[kind]) return `${col} 경로는 읽었지만(${usedPaths[kind]}) 이 장비 포트에 값이 없습니다${seen(kind) ? ` — 응답에 있던 필드: ${seen(kind)}` : ''}.`;
+    return `${col}은(는) v3.39 부터 부품 주기(기본 30분)에 따로 읽습니다 — 업그레이드 뒤 첫 부품 주기가 지나면 채워집니다(경로는 실장비 미확인 추정).`;
+  };
+  if (list.every((p) => blank(p.vlan))) out.push({ col: 'VLAN', text: cfg('switchport', 'VLAN') });
+  if (list.every((p) => blank(p.lag))) out.push({ col: 'LAG', text: `${cfg('lagMember', '포트 채널 소속')} 채널에 들지 않은 포트만 있는 장비도 이 칸이 비어 있습니다.` });
+  return out;
+}
+
+/* ── v3.39 ③ 버전 준수 · ⑧ 이중화 ──────────────────────────────────────────────────────────────────────── */
+export const CONFIG_DEFS = Object.freeze({ ok: ['준수', TONE.green], warn: ['불일치', TONE.amber], bad: ['오류', TONE.red], unknown: ['값 없음', 'var(--text-dim)'], unread: ['못 읽음', 'var(--text-dim)'] });
+export const BUG_DEFS = Object.freeze({ high: ['높음', TONE.red], low: ['낮음', TONE.amber], none: ['공지 없음', TONE.green], unread: ['못 읽음', 'var(--text-dim)'] });
+export const LIFE_DEFS = Object.freeze({ passed: ['지원 종료 지남', TONE.red], soon: ['곧 종료', TONE.amber], ok: ['지원 중', TONE.green], none: ['공지 없음', 'var(--text-dim)'], unread: ['못 읽음', 'var(--text-dim)'] });
+export function bugText(b) {
+  if (!b || b.state === 'unread') return '—';
+  if (b.state === 'none') return '노출 없음';
+  const parts = [];
+  if (b.bugCount != null) parts.push(`버그 ${b.bugCount}`);
+  if (b.cveCount != null) parts.push(`CVE ${b.cveCount}`);
+  return `${parts.join(' · ') || '노출 있음'}${b.acknowledged ? ' (확인함)' : ''}`;
+}
+export function lifeText(l, now = Date.now()) {
+  if (!l || l.state === 'unread') return '—';
+  if (l.state === 'none') return '날짜 없음';
+  const d = daysFrom(l.first, now);
+  const which = l.first === l.swEnd ? '소프트웨어' : '하드웨어';
+  return `${which} ${dateText(l.first)}${d == null ? '' : d < 0 ? `(${-d}일 지남)` : `(${d}일 남음)`}`;
+}
+export const COMPLIANCE_NOTE = '이 화면은 **CVP 가 준 값을 그대로** 보입니다 — 설정 준수(인벤토리 준수 코드) · 버그 · CVE 노출 · 수명주기(지원 종료). 포탈이 판정하거나 날짜를 지어내지 않습니다. CVP 가 그 항목을 읽었는데 장비 값이 없으면 ‘공지 없음’, 읽지 못했으면 ‘못 읽음’ 입니다.';
+export const CHANNEL_DEFS = Object.freeze({ degraded: ['이중화 상실', TONE.red], down: ['전부 내려감', TONE.red], unknown: ['확인 불가', TONE.amber], ok: ['정상', TONE.green], off: ['관리상 꺼짐', 'var(--text-dim)'] });
+export const MLAG_DEFS = Object.freeze({ peerDown: ['피어 링크 내려감', TONE.red], notConnected: ['협상 안 됨', TONE.red], inactive: ['비활성', TONE.amber], unknown: ['확인 불가', TONE.amber],
+  ok: ['정상', TONE.green], off: ['MLAG 안 씀', 'var(--text-dim)'], unread: ['못 읽음', 'var(--text-dim)'] });
+export const REDUNDANCY_NOTE = '포트 채널은 **관리상 켜진 멤버 중 링크가 올라온 수**로 봅니다 — 일부만 올라오면 이중화 상실입니다. 채널 소속 · MLAG 상태는 v3.39 부터 부품 주기에 따로 읽는 값이고 경로는 **실장비 미확인 추정**입니다. 소속을 못 읽은 장비는 ‘채널 없음’ 이 아니라 ‘소속 못 읽음’ 으로 따로 셉니다. 장애로 열지 않습니다(화면에만).';
+export const channelText = (c) => `${c.up}/${c.expected}${c.total !== c.expected ? ` (꺼짐 ${c.total - c.expected})` : ''}`;
