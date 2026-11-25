@@ -21,6 +21,14 @@ const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), pre
 const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
 after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
 
+// v3.41.1: 프로젝트 모듈을 **하나라도 불러오기 전에** 설정 폴더를 임시 폴더로 잡는다. 예전에는 BUG-1·BUG-2 테스트 안에서야 CONFIG_DIR 을 바꿨는데,
+//   앞 테스트(storage/db.js 등)가 config.js 를 기본 폴더(server/config)로 이미 로드했고, 등록부처럼 **로드 시 경로를 굳히는 모듈**
+//   (`storage/registry.js` 의 `FILE = path.join(config.configDir, …)`)은 뒤에 config.configDir 를 바꿔도 따라오지 않는다. 그래서 BUG-2 가
+//   실제 `server/config/storage-devices.json` 에 장비를 쓰고, 같은 체크아웃의 **두 번째 실행부터** '같은 host 의 같은 타입 장비가 이미 등록' 으로 실패했다
+//   (전량 검증 재실행 · 개발자 PC 에서 재현 — CI 는 새 체크아웃이라 드러나지 않았다). 실제 설정 폴더에 시험 데이터를 남기는 것 자체도 잘못이다.
+const BASE_CFG = tmpDir('dvc-arch2582-cfg-');
+process.env.CONFIG_DIR = BASE_CFG;
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
 const read = (p) => fs.readFileSync(path.join(SRC, p), 'utf8');
@@ -248,6 +256,9 @@ test('BUG-2 — /tools/storage/collect-all 은 엣지 위임 장비의 재수집
     assert.equal(r1.ok, true);
     assert.equal(r1.edge, 1);
     assert.equal(r1.requested, 1, `엣지 장비 1대의 요청이 등록돼야 한다: ${JSON.stringify(r1)}`);
+    // v3.41.1: 등록부 파일은 이 파일이 만든 임시 폴더 안에 있어야 한다(실제 server/config 에 쓰면 다음 실행이 실패한다 — 위 BASE_CFG 주석).
+    assert.ok(TMP_DIRS.some((d) => fs.existsSync(path.join(d, 'storage-devices.json'))), '등록부를 임시 설정 폴더에 썼어야 한다');
+    assert.ok(config.configDir.startsWith(os.tmpdir()), `config.configDir 는 임시 폴더: ${config.configDir}`);
     const dev = reg.listDevices().find((d) => d.name === 'edge-unity');
     assert.equal(cr.hasPendingRequest(dev.id), true);
     const r2 = await (await fetch(`${base}/api/tools/storage/collect-all`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).json();

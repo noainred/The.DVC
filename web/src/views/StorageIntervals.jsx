@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson, putJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
-import { presetsForSpec, rangeText, timeoutSpecs, timerSpecs, msLabel, effectiveFor, sourceOf, lagText, toBody } from './storageIntervals.js';
+import { presetsForSpec, rangeText, timeoutSpecs, timerSpecs, unsetNote, msLabel, effectiveFor, lagText, toBody } from './storageIntervals.js';
 import { STable } from '../components/STable.jsx';
 import Select from '../components/Select.jsx';
 import { requireChanged } from './changeResult.js'; // v2.732 B5-03: 400 본문을 '저장되었습니다' 로 읽지 않는다
@@ -21,8 +21,27 @@ import { SettingsUnreadBanner } from './SettingsUnreadBanner.jsx';
 // v2.598 WEBUI-2598-09: 중앙(직접 수집) 행은 엣지가 아니다 — 상속 끝의 값은 '엣지 로컬' 이 아니라 중앙 자신의
 //   env·기본값이고, 중앙은 자기에게 push·설정 pull 을 하지 않으므로 그 두 칸은 적용 대상이 아니다.
 const CENTRAL_NA_KEYS = new Set(['pushMs', 'configPullMs']);
-/** 대기 시간 표의 대상 칸 — 설명을 줄바꿈한다(표 기본은 한 줄이라 좁은 화면에서 선택 칸을 밀어낸다). */
-const WRAP_TD = { whiteSpace: 'normal', minWidth: 140 };
+/*
+ * v3.41.1 — 표 폭(Chromium 판독으로 찾은 기존 결함): 표의 칸은 기본이 한 줄(`white-space: nowrap`)이라 대상 칸이 설명 한 줄 길이(471px)만큼
+ *   벌어지고, 선택 칸도 긴 첫 선택지(‘미지정(엣지 로컬)’ · ‘상속(중앙 기본(env))’)만큼 넓어져, 주기 표가 1440px 에서도 본문 폭(896px)을 넘어
+ *   영역 · 노드 부하 · 반영 지연 열이 가로 스크롤해야만 보였다. 400px 에서는 대상 칸 하나가 화면을 다 차지했다.
+ *   · 대상 칸 · 머리글 · 반영 지연 칸은 줄바꿈한다(WRAP_TD · WRAP_TH).
+ *   · 첫 선택지는 짧게(‘미지정’ · ‘상속’) — 무엇을 물려받는지는 칸 아래 줄이 말한다(unsetNote).
+ *   · 대상 칸은 왼쪽에 고정한다(STICKY_TD) — 좁은 화면에서 가로로 밀어도 어느 행인지 보인다. 고정 칸은 **불투명 배경**이어야 한다(뒤 칸이 비친다).
+ */
+// 줄바꿈은 **낱말 단위**(`word-break: keep-all`) — 기본값은 한글을 글자 사이 어디서나 끊어 ‘지연(최/대)’ · ‘1시간 5/분’ 이 됐다(Chromium 판독).
+const WRAP_TD = { whiteSpace: 'normal', wordBreak: 'keep-all', minWidth: 120 };
+const WRAP_TH = { whiteSpace: 'normal', wordBreak: 'keep-all', lineHeight: 1.35 };
+const CELL_TD = { paddingLeft: 8, paddingRight: 8 };
+// 고정 칸의 배경은 그 행의 배경과 **같은 불투명 색**이어야 한다 — 그래서 표 바탕(TABLE_BG)과 전역 행(GLOBAL_ROW)도 같은 변수로 못 박는다
+//   (표 바탕이 투명이면 고정 칸만 밝은 상자로 떠 보인다 — Chromium 판독).
+const TABLE_BG = { background: 'var(--panel)' };
+const GLOBAL_ROW = { background: 'var(--panel-2)' };
+const STICKY_TD = { ...WRAP_TD, position: 'sticky', left: 0, zIndex: 1, background: 'var(--panel)' };
+const STICKY_TD_GLOBAL = { ...STICKY_TD, background: 'var(--panel-2)' };
+const STICKY_TH = { ...WRAP_TH, minWidth: 120, left: 0, zIndex: 3 };
+/** 대기 시간 표 — 열이 둘뿐이라 대상 칸에 폭을 주어 선택 칸이 이름 바로 옆에 오게 한다(안 주면 선택 칸이 표 오른쪽 끝으로 밀린다). */
+const TIMEOUT_TARGET_W = { width: '38%' };
 function inheritTail(target) {
   return target === '' ? '중앙 기본(env)' : '엣지 로컬';
 }
@@ -35,13 +54,12 @@ function Cell({ target, form, s, globalForm, setCell }) {
   // 첫 옵션('미지정')을 표시해 '미지정'으로 읽힌다(상태에는 값이 남아 저장 시 유지되는데 화면만 다름).
   const extra = cur && !presets.some((p) => String(p.ms) === String(cur)) ? [{ ms: Number(cur), label: `${msLabel(Number(cur))} (직접 지정)` }] : [];
   return (
-    <Select sort={false} className="input" style={{ minWidth: 104 }} value={cur}
+    <Select sort={false} className="input" style={{ minWidth: 88, width: '100%', maxWidth: 200 }} value={cur}
       onChange={(e) => setCell(target, s.key, e.target.value)}
       title={`${s.label}\n${rangeText(s)}\n${s.hint}`}>
-      <option value="">
-        {target === '__global__'
-          ? '미지정(엣지 로컬)'
-          : `상속(${inheritedFrom ? msLabel(Number(inheritedFrom)) : inheritTail(target)})`}
+      {/* v3.41.1: 첫 선택지는 짧게 — 긴 글자가 선택 칸(=열) 폭을 정한다. 무엇을 물려받는지는 칸 아래 줄(unsetNote)과 툴팁이 말한다. */}
+      <option value="" title={target === '__global__' ? '미지정 — 그 엣지의 로컬 설정을 그대로 둡니다' : `상속 — ${inheritedFrom ? `전역 기본 ${msLabel(Number(inheritedFrom))}` : inheritTail(target)}`}>
+        {target === '__global__' ? '미지정' : '상속'}
       </option>
       {[...extra, ...presets].map((p) => <option key={p.ms} value={String(p.ms)}>{p.label}</option>)}
     </Select>
@@ -128,38 +146,41 @@ export default function StorageIntervals() {
         </div>
       </div>
 
-      <div className="table-wrap">
+      <div className="table-wrap" style={TABLE_BG}>
         <STable>
           <thead>
             <tr>
-              <th style={{ minWidth: 160 }}>대상</th>
-              {timerSpec.map((s) => <th key={s.key} title={s.hint}>{s.label}</th>)}
-              <th title="장비 수집 주기 + 중앙 전송(push) 주기 — 장비의 변화가 중앙 화면에 늦어도 이만큼 안에 보인다는 뜻.">중앙 반영 지연(최대)</th>
+              <th style={STICKY_TH}>대상</th>
+              {timerSpec.map((s) => <th key={s.key} title={s.hint} style={WRAP_TH}>{s.label}</th>)}
+              <th style={WRAP_TH} title="장비 수집 주기 + 중앙 전송(push) 주기 — 장비의 변화가 중앙 화면에 늦어도 이만큼 안에 보인다는 뜻.">중앙 반영 지연(최대)</th>
             </tr>
           </thead>
           <tbody>
-            <tr style={{ background: 'var(--panel-2, rgba(127,127,127,.08))' }}>
-              <td><b>전역 기본</b><div className="muted" style={{ fontSize: 11 }}>모든 엣지 + 중앙에 적용(개별 지정이 우선)</div></td>
-              {timerSpec.map((s) => <td key={s.key}><Cell target="__global__" form={globalForm} s={s} globalForm={globalForm} setCell={setCell} /></td>)}
-              <td className="muted">{lagText(effectiveFor(globalForm, {}), envDefaults)}</td>
+            <tr style={GLOBAL_ROW}>
+              <td style={STICKY_TD_GLOBAL}><b>전역 기본</b><div className="muted" style={{ fontSize: 11 }}>모든 엣지 + 중앙에 적용(개별 지정이 우선)</div></td>
+              {timerSpec.map((s) => (
+                <td key={s.key} style={CELL_TD}>
+                  <Cell target="__global__" form={globalForm} s={s} globalForm={globalForm} setCell={setCell} />
+                  <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{unsetNote(s.key, '__global__', globalForm, {})}</div>
+                </td>
+              ))}
+              <td className="muted" style={WRAP_TD}>{lagText(effectiveFor(globalForm, {}), envDefaults)}</td>
             </tr>
             {targets.map((t) => {
               const form = agentForms[t.key] || {};
               const eff = effectiveFor(globalForm, form);
               return (
                 <tr key={t.key || '__central__'}>
-                  <td><b>{t.label}</b><div className="muted" style={{ fontSize: 11 }}>{t.hint}</div></td>
+                  <td style={STICKY_TD}><b>{t.label}</b><div className="muted" style={{ fontSize: 11 }}>{t.hint}</div></td>
                   {timerSpec.map((s) => (t.key === '' && CENTRAL_NA_KEYS.has(s.key)
-                    ? <td key={s.key} className="muted" style={{ fontSize: 12 }} title="중앙은 자기 자신에게 push·설정 pull 을 하지 않습니다.">해당 없음</td>
+                    ? <td key={s.key} className="muted" style={{ ...CELL_TD, fontSize: 12 }} title="중앙은 자기 자신에게 push·설정 pull 을 하지 않습니다.">해당 없음</td>
                     : (
-                    <td key={s.key}>
+                    <td key={s.key} style={CELL_TD}>
                       <Cell target={t.key} form={form} s={s} globalForm={globalForm} setCell={setCell} />
-                      <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
-                        {sourceOf(s.key, globalForm, form) === 'inherit' ? inheritTail(t.key) : `→ ${msLabel(Number(eff[s.key]))}`}
-                      </div>
+                      <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{unsetNote(s.key, t.key, globalForm, form)}</div>
                     </td>
                   )))}
-                  <td className="muted">{lagText(eff, envDefaults, { isEdge: t.key !== '' })}</td>
+                  <td className="muted" style={WRAP_TD}>{lagText(eff, envDefaults, { isEdge: t.key !== '' })}</td>
                 </tr>
               );
             })}
@@ -184,31 +205,33 @@ export default function StorageIntervals() {
               ))}
             </div>
           </div>
-          <div className="table-wrap">
+          <div className="table-wrap" style={TABLE_BG}>
             <STable>
               <thead>
                 <tr>
-                  <th style={{ minWidth: 140 }}>대상</th>
-                  {timeoutSpec.map((s) => <th key={s.key} title={s.hint}>{s.label}</th>)}
+                  <th style={{ ...STICKY_TH, ...TIMEOUT_TARGET_W }}>대상</th>
+                  {timeoutSpec.map((s) => <th key={s.key} title={s.hint} style={WRAP_TH}>{s.label}</th>)}
                 </tr>
               </thead>
               <tbody>
-                <tr style={{ background: 'var(--panel-2, rgba(127,127,127,.08))' }}>
-                  <td style={WRAP_TD}><b>전역 기본</b><div className="muted" style={{ fontSize: 11 }}>모든 엣지 + 중앙에 적용(개별 지정이 우선)</div></td>
-                  {timeoutSpec.map((s) => <td key={s.key}><Cell target="__global__" form={globalForm} s={s} globalForm={globalForm} setCell={setCell} /></td>)}
+                <tr style={GLOBAL_ROW}>
+                  <td style={STICKY_TD_GLOBAL}><b>전역 기본</b><div className="muted" style={{ fontSize: 11 }}>모든 엣지 + 중앙에 적용(개별 지정이 우선)</div></td>
+                  {timeoutSpec.map((s) => (
+                    <td key={s.key} style={CELL_TD}>
+                      <Cell target="__global__" form={globalForm} s={s} globalForm={globalForm} setCell={setCell} />
+                      <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{unsetNote(s.key, '__global__', globalForm, {})}</div>
+                    </td>
+                  ))}
                 </tr>
                 {targets.map((t) => {
                   const form = agentForms[t.key] || {};
-                  const eff = effectiveFor(globalForm, form);
                   return (
                     <tr key={t.key || '__central__'}>
-                      <td style={WRAP_TD}><b>{t.label}</b><div className="muted" style={{ fontSize: 11 }}>{t.hint}</div></td>
+                      <td style={STICKY_TD}><b>{t.label}</b><div className="muted" style={{ fontSize: 11 }}>{t.hint}</div></td>
                       {timeoutSpec.map((s) => (
-                        <td key={s.key}>
+                        <td key={s.key} style={CELL_TD}>
                           <Cell target={t.key} form={form} s={s} globalForm={globalForm} setCell={setCell} />
-                          <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
-                            {sourceOf(s.key, globalForm, form) === 'inherit' ? inheritTail(t.key) : `→ ${msLabel(Number(eff[s.key]))}`}
-                          </div>
+                          <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{unsetNote(s.key, t.key, globalForm, form)}</div>
                         </td>
                       ))}
                     </tr>
