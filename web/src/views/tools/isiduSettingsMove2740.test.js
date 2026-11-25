@@ -58,9 +58,11 @@ describe('② Settings.jsx — 슈퍼 관리자 전용 항목', () => {
   it('그룹 탭과 상단 탭이 같은 필터(visibleSubs)를 거친다 — 한쪽만 거르면 그룹 버튼이 숨긴 항목을 연다', () => {
     // v2.878: Bareos 백업 서버의 show(도구 권한)도 같은 필터가 본다 — superOnly 판정은 그대로 앞에 있어야 한다
     expect(SETTINGS).toMatch(/const visibleSubs = \(\) => SUB\.filter\(\(s\) => \(!s\.superOnly \|\| isSuperAdminUser\(\)\) && \(!s\.show \|\| s\.show\(\)\)\)/);
-    expect(SETTINGS).toMatch(/const groupChildren = \(g\) => visibleSubs\(\)\.filter/);
-    // v2.905: 1단은 묶음 9개(GROUP_ORDER)이고 '보이는 하위가 있는 묶음' 만 그린다 — groupChildren(= visibleSubs)을 거친다.
-    expect(SETTINGS).toMatch(/GROUP_ORDER\.filter\(\(g\) => groupChildren\(g\)\.length > 0\)/);
+    // v2.916: 왼쪽 목록 — 묶음 · 검색 · 상태 요약 모두 visible(= visibleSubs) 하나를 거친다. 보이는 항목이 없는 묶음은 그리지 않는다.
+    expect(SETTINGS).toMatch(/const visible = visibleSubs\(\);/);
+    expect(SETTINGS).toMatch(/const kids = visible\.filter\(\(s\) => s\.group === g\);\s*if \(!kids\.length\) return null;/);
+    expect(SETTINGS).toMatch(/searchItems\(visible, query/);
+    expect(SETTINGS).toMatch(/summarize\(visible, statusItems\)/);
     // SUB 를 직접 훑어 탭을 만드는 곳이 남아 있으면 superOnly 가 새는 길이 된다.
     expect(SETTINGS).not.toMatch(/for \(const s of SUB\)/);
     expect(SETTINGS).not.toMatch(/SUB\.filter\(\(s\) => s\.group === g\)/);

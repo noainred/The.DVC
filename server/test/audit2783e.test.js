@@ -6,7 +6,7 @@
 //  ④ 소스 스윕 — server/src 에 drain 만 기다리는(once('drain')) 형태 · drain+close 를 각각 once 로 거는 형태를 새로 만들지 않는다.
 //  ⑤ 토큰 점검 엣지 인출 — 예산 판정이 실제 인출 시한(PULL_TIMEOUT_MS)을 쓰고, env 상한 60초 · 하한 3초(O-I2).
 //  ⑥ VM DNS CSV — 보고했지만 서버 0개인 VM 은 'DNS 없음'(N-I1).
-import { test, before } from 'node:test';
+import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -16,9 +16,16 @@ import { EventEmitter } from 'node:events';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
-const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2783e-'));
+const CFG = tmpDir('audit2783e-');
 process.env.CONFIG_DIR = CFG;
 process.env.DATA_SOURCE = 'mock';
 process.env.AUTH_ENABLED = 'false';

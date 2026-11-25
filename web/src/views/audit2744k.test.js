@@ -327,7 +327,7 @@ describe('③ 성능 창 — 409 + skipReason 이면 사유를 말하고 20초 �
     const err = Object.assign(new Error('점검중'), { status: 409, body: { ok: false, skipReason: 'maintenance', reason: '점검중 vCenter — 수집이 멈춰 있어 이 포탈이 로그인하지 않습니다' } });
     const s = metricErrorState(err);
     expect(s.authStopped).toBe(null);
-    expect(s.skip).toEqual({ skipReason: 'maintenance', reason: '점검중 vCenter — 수집이 멈춰 있어 이 포탈이 로그인하지 않습니다' });
+    expect(s.skip).toEqual({ skipReason: 'maintenance', reason: '점검중 vCenter — 수집이 멈춰 있어 이 포탈이 로그인하지 않습니다', edge: null });   // v2.926 edge(엣지 포탈 주소)는 실렸을 때만
     expect(stopsAutoRefresh(s)).toBe(true);
     const t = metricSkipText(s.skip);
     expect(t).toContain('점검중');
@@ -345,9 +345,9 @@ describe('③ 성능 창 — 409 + skipReason 이면 사유를 말하고 20초 �
   it('VmPerfView(실시간): skipReason 409 를 받으면 자동 새로고침 타이머를 멈추고(로그인 0 이어도 같은 409 를 20초마다 받지 않는다) 사유를 그린다', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     let calls = 0;
-    H.api.fetchJson = (path, params) => { calls += 1; expect(path).toBe('/vms/vc-s%3Avm-1/metrics'); expect(params.types).toBe('cpu,mem,disk,net'); return Promise.reject(Object.assign(new Error('엣지 위임'), { status: 409, body: { ok: false, skipReason: 'site', reason: '엣지 위임 vCenter — 담당 엣지가 수집하므로 중앙이 직접 로그인하지 않습니다' } })); };
+    H.api.fetchJson = (path, params) => { calls += 1; expect(path).toBe('/vms/vc-s%3Avm-1/metrics'); expect(params.types).toBe('cpu,mem,disk,net'); return Promise.reject(Object.assign(new Error('엣지 위임'), { status: 409, body: { ok: false, skipReason: 'site', reason: '엣지 위임 vCenter — 담당 엣지가 수집하므로 중앙이 직접 로그인하지 않습니다', edge: { id: 'edge1', name: 'AZ 엣지', url: 'http://192.0.2.10:4000/' } } })); };
     const VmPerfView = (await import('../components/vmperf/VmPerfView.jsx')).default;
-    const rt = mount(VmPerfView, { entityType: 'vm', id: 'vc-s:vm-1', name: 'vm-1', initialRange: 'realtime' });
+    const rt = mount(VmPerfView, { entityType: 'vm', id: 'vc-s:vm-1', name: 'vm-1', vcenterId: 'vc-s', initialRange: 'realtime' });
     await flush();
     expect(calls).toBe(1);
     await vi.advanceTimersByTimeAsync(65_000); await flush();
@@ -355,6 +355,11 @@ describe('③ 성능 창 — 409 + skipReason 이면 사유를 말하고 20초 �
     const texts = all(rt, (e) => e.type === BoldText).map((e) => e.props.text).join('\n');
     expect(texts).toContain('엣지 위임');
     expect(all(rt, (e) => /조회 실패/.test(textOf(e))).length).toBe(0);
+    // v2.926: 관리자 응답의 edge 로 그 법인 엣지 포탈의 같은 화면 링크(새 창) — 주소는 엣지 url + 같은 해시.
+    const links = all(rt, (e) => e.type === 'a' && /엣지 포탈/.test(textOf(e)));
+    expect(links.length).toBe(1);
+    expect(links[0].props.href).toBe('http://192.0.2.10:4000/#/vcenters/vc-s/vm/vc-s%3Avm-1/monitor');
+    expect(links[0].props.target).toBe('_blank');
     unmount(rt);
   });
 });

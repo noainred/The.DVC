@@ -35,11 +35,11 @@ const ROLES = {
 };
 const EOS_MAIN = ['4.31.2F', '4.31.2F', '4.30.4M'];
 
-/** 데모 CVP 서버 목록(등록부 모양). 법인 수에 맞춰 2~3대. */
+/** 데모 CVP 서버 목록(등록부 모양). 법인 5곳마다 1대 · 2~6대(v3.26.0 — 시연 규모 30곳이면 6대. 예전 상한 3대). */
 export function demoCvpServers(corps) {
   const list = (Array.isArray(corps) ? corps : []).filter(Boolean);
   if (!list.length) return [];
-  const n = Math.min(3, Math.max(2, list.length));
+  const n = Math.min(6, Math.max(2, Math.min(list.length, Math.ceil(list.length / 5))));
   const out = [];
   for (let i = 0; i < n; i++) {
     const c = list[(i * Math.max(1, Math.floor(list.length / n))) % list.length];
@@ -99,19 +99,21 @@ function portOf(sw, p, k, ts, variant) {
     duplex: 'duplexFull', fwdModel: isUplink ? 'routed' : 'bridged', mac: `00:1c:73:${pad(((ph >>> 16) % 256).toString(16))}:${pad(((ph >>> 8) % 256).toString(16))}:${pad((ph % 256).toString(16))}`,
     mtu: isUplink ? 9214 : 1500,
   };
-  if (!used) return { ...base, desc: '', oper: 'nolink', admin: 'up', operRaw: 'linkDown', inBps: null, outBps: null, inUtil: null, outUtil: null, inErr: null, outErr: null };
+  if (!used) return { ...base, desc: '', oper: 'nolink', admin: 'up', operRaw: 'linkDown', inBps: null, outBps: null, inUtil: null, outUtil: null, inErr: null, outErr: null, inDrop: null, outDrop: null };
   // 장애: 관리상 켜져 있는데 링크가 내려간 포트(정상 장비 대부분은 0개).
   const downNow = sw.streaming && sw.h % 8 === 1 && k === 7;
   const downPast = variant === 'past3' && sw.h % 7 === 2 && k === 9;   // 과거에만 있던 link down(이력에서 '해소' 로 닫힌다)
   const desc = isUplink ? `to ${sw.role === 'leaf' ? 'spine' : 'leaf'}-${pad(1 + (ph % 20))} ${p.name}` : `esx-${pad(1 + (ph % 90), 3)} vmnic${ph % 4}`;
-  if (downNow || downPast) return { ...base, desc, oper: 'down', admin: 'up', operRaw: 'linkDown', inBps: null, outBps: null, inUtil: null, outUtil: null, inErr: null, outErr: null };
+  if (downNow || downPast) return { ...base, desc, oper: 'down', admin: 'up', operRaw: 'linkDown', inBps: null, outBps: null, inUtil: null, outUtil: null, inErr: null, outErr: null, inDrop: null, outDrop: null };
   const hot = ph % 37 === 3;
   const u0 = hot ? 60 + (ph % 10) : 2 + (ph % 34);
   const utilIn = Math.min(97, Math.max(0.2, u0 * diurnal(ts) * (1 + (demoRand(`${sw.key}|${p.name}|${slot}`) * 2 - 1) * 0.08)));
   const utilOut = Math.min(97, Math.max(0.1, utilIn * (0.55 + (ph % 40) / 100)));
   const inBps = Math.round(p.speedBps * utilIn / 100);
   const outBps = Math.round(p.speedBps * utilOut / 100);
-  return { ...base, desc, oper: 'up', admin: 'up', operRaw: 'linkUp', inBps, outBps, inUtil: r2(utilIn), outUtil: r2(utilOut), inErr: ph % 23 === 0 ? 3 : 0, outErr: 0 };
+  return { ...base, desc, oper: 'up', admin: 'up', operRaw: 'linkUp', inBps, outBps, inUtil: r2(utilIn), outUtil: r2(utilOut), inErr: ph % 23 === 0 ? 3 : 0, outErr: 0,
+    // v2.923(B-①) 데모 드롭 — 붐비는 포트(hot)는 송신 쪽 드롭이 생긴다(큐 넘침 모양), 그 밖은 0.
+    inDrop: ph % 29 === 0 ? 1 : 0, outDrop: hot ? 12 + (ph % 7) : 0 };
 }
 
 /** 부품 목록(장비 접속 없이 합성). judgeOptics·judgeSlotPower 는 호출자(demoCvpDevice)가 적용한다. */
@@ -237,6 +239,7 @@ export async function demoCvpCollect(srv, { now = Date.now(), optics = {} } = {}
   const P = await import('../../cvp/parse.js');
   const specs = demoSwitchSpecs(srv);
   const devices = specs.map((sw) => demoCvpDevice(sw, now, { optics, P }));
+  await demoL2(srv, devices, now);   // v2.924(SAN·CVP 설계 B-②) — LLDP 이웃 · MAC 테이블(데모 호스트 이름 · VM MAC)
   const idx = Number(String(srv?.id || '').replace(/\D+/g, '')) || 1;
   return {
     ok: true, error: null, demo: true, devices,
@@ -244,6 +247,108 @@ export async function demoCvpCollect(srv, { now = Date.now(), optics = {} } = {}
     cvpVersion: CVP_VERSIONS[(idx - 1) % CVP_VERSIONS.length],
     events: demoCvpEvents(srv, specs, now), inventoryComplete: true,
   };
+}
+
+/**
+ * v2.924(B-②) 데모 L2 — 이 CVP 법인(datacenterId)의 데모 vCenter 호스트를 leaf 스위치의 서버 쪽 포트에 둘씩 붙인다:
+ *   LLDP 이웃(시스템 이름 = 호스트 이름 · 포트 ID = vmnic0/vmnic1) · MAC 테이블(vmnic0 포트에 그 호스트 VM 의 vNIC MAC 최대 16개 · VLAN 100).
+ *   호스트 상세의 CVP 업링크 블록이 데모에서도 '확정(LLDP)' · '높음(VM MAC)' 근거를 보여 준다. 스냅샷·법인 지정이 아직 없으면 싣지 않는다(undefined — 저장소를 건드리지 않음).
+ */
+const _demoEp = new Map();   // mac → { device, port, vlan, learnedAgoMs }
+/** v2.935(C-③) 데모 EndpointLocation 결과 — demoL2 가 채운 표에서(없는 MAC 은 'none'). 수치 · 위치는 가상값이다. */
+export function demoEndpoints(macs = [], now = Date.now()) {
+  const results = (Array.isArray(macs) ? macs : []).map((mac) => {
+    const e = _demoEp.get(mac);
+    return e ? { mac, at: now, status: 'ok', locations: [{ device: e.device, port: e.port, vlan: e.vlan, learnedAt: new Date(now - (e.learnedAgoMs || 600_000)).toISOString(), macType: 'MAC_TYPE_LEARNED_DYNAMIC', likelihood: 'LIKELIHOOD_VERY_LIKELY' }] }
+      : { mac, at: now, status: 'none', locations: [] };
+  });
+  return { results, unsupported: false, cut: 0 };
+}
+async function demoL2(srv, devices, now) {
+  let hosts = []; let vms = [];
+  try {
+    const { store } = await import('../../store.js');
+    const { datacenterOfVcenter } = await import('../../datacenter/store.js');
+    const snap = store.get();
+    const vcs = new Set((snap?.vcenters || []).filter((v) => String(datacenterOfVcenter(v.id) || '') === String(srv?.datacenterId || '')).map((v) => v.id));
+    if (!vcs.size) return;
+    hosts = (snap.hosts || []).filter((h) => vcs.has(h.vcenterId)).slice(0, 64);
+    vms = snap.vms || [];
+  } catch { return; }
+  const leaves = devices.filter((d) => d.telemetry === 'ok' && /-leaf-/.test(String(d.hostname || '')));
+  if (!leaves.length) return;
+  for (const d of leaves) { d.lldp = []; d.fdb = []; d.fdbMeta = { truncated: 0, portsOverCap: [], total: 0 }; d.l2At = now; }
+  demoFabricLinks(devices, leaves, now);   // v3.38 토폴로지 — leaf 업링크 ↔ spine(LLDP 양쪽)
+  const slots = [];
+  for (const d of leaves) for (const p of d.ports || []) if (p.oper === 'up' && !/\/1$/.test(p.name)) slots.push({ d, p });
+  if (slots.length < 2) return;
+  const devId = (d) => String(d.serial || d.key || '');
+  hosts.forEach((h, i) => {
+    const a = slots[(2 * i) % slots.length]; const b = slots[(2 * i + 1) % slots.length];
+    // v2.935(C-③) 데모 EndpointLocation — 호스트 NIC MAC 은 LLDP 와 같은 포트 · VM MAC 은 vmnic0 포트(일곱 번째마다 다음 호스트 포트 = vMotion 직후 옛 위치처럼).
+    const nics = Array.isArray(h.nics) ? h.nics : [];
+    const other = slots[(2 * i + 2) % slots.length];
+    // 아홉 번째 호스트마다 vmnic1 의 CVP 위치를 LLDP 와 다른 포트로 둔다 — 화면의 ‘LLDP 와 CVP 위치가 다릅니다’ 를 데모에서도 보이게(가상).
+    nics.forEach((nic, k) => {
+      const mac = String(nic?.mac || '').toLowerCase().replace(/[^0-9a-f]/g, '');
+      if (mac.length !== 12) return;
+      const slot = k === 1 && i % 9 === 4 ? other : k % 2 ? b : a;
+      _demoEp.set(mac, { device: devId(slot.d), port: slot.p.name, vlan: null });
+    });
+    let vi = 0;
+    for (const v of vms) {
+      if (v.vcenterId !== h.vcenterId || v.host !== h.name) continue;
+      for (const nic of v.dev?.nics || []) {
+        const mac = String(nic?.mac || '').toLowerCase().replace(/[^0-9a-f]/g, '');
+        if (mac.length !== 12) continue;
+        const stale = (vi++ % 7) === 6;
+        _demoEp.set(mac, { device: devId(stale ? other.d : a.d), port: (stale ? other.p : a.p).name, vlan: 100, learnedAgoMs: stale ? 3 * 3600_000 : 10 * 60_000 });
+      }
+    }
+    a.d.lldp.push({ port: a.p.name, idx: '1', sysName: h.name, portId: 'vmnic0', portDesc: 'vmnic0', chassisId: '' });
+    b.d.lldp.push({ port: b.p.name, idx: '1', sysName: h.name, portId: 'vmnic1', portDesc: 'vmnic1', chassisId: '' });
+    // v3.37 포트 구성도 — 데모 포트 설명을 LLDP 이웃과 대개 맞춘다(그래야 '일치' 가 보인다). 여섯 번째마다 설명을 비우고(LLDP 만),
+    //   그다음은 옛 설명을 남긴다(불일치 — 설명이 낡은 포트). 이름 · 수치는 가상값이다.
+    if (i % 6 === 4) { a.p.desc = ''; b.p.desc = ''; } else if (i % 6 !== 5) { a.p.desc = `${h.name} vmnic0`; b.p.desc = `${h.name} vmnic1`; }
+    let n = 0;
+    for (const v of vms) {
+      if (v.vcenterId !== h.vcenterId || v.host !== h.name) continue;
+      for (const nic of v.dev?.nics || []) {
+        const mac = String(nic?.mac || '').toLowerCase().replace(/[^0-9a-f]/g, '');
+        if (mac.length === 12 && n < 16) { a.d.fdb.push({ mac, vlan: 100, port: a.p.name }); n++; }
+      }
+      if (n >= 16) break;
+    }
+  });
+  for (const d of leaves) d.fdbMeta.total = d.fdb.length;
+}
+
+/**
+ * v3.38(⑥ ⑦ 토폴로지 · 양끝 불일치) 데모 — leaf 의 링크 올라온 업링크(이름이 /1 로 끝나는 100G) 앞 둘을 spine 두 대의 슬롯 포트에 잇고,
+ *   양쪽 LLDP 와 leaf 쪽 포트 설명(상대 이름 · 포트)을 맞춘다. 일곱 번째 leaf 는 설명이 다른 spine 을 가리키고(설명 불일치),
+ *   아홉 번째 leaf 의 첫 업링크는 MTU 1500(MTU 불일치) — 화면의 '불일치' 를 데모에서도 보이게. 이름 · 포트 · 수치는 가상값이다.
+ */
+function demoFabricLinks(devices, leaves, now) {
+  const spines = devices.filter((d) => d.telemetry === 'ok' && /-spine-/.test(String(d.hostname || '')));
+  if (!spines.length) return;
+  for (const sp of spines) { if (!Array.isArray(sp.lldp)) sp.lldp = []; sp.l2At = now; }
+  leaves.forEach((lf, j) => {
+    const ups = (lf.ports || []).filter((p) => p.oper === 'up' && /\/1$/.test(p.name)).slice(0, Math.min(2, spines.length));
+    ups.forEach((p, u) => {
+      const sp = spines[u % spines.length];
+      // 데모 spine 은 leaf 와 같은 배치(Ethernet1~48 · 49/1~54/1)다 — leaf 순번으로 앞 48칸에 잇고, 상대 끝 값(속도 · MTU · 채널)을 leaf 업링크와 맞춘다.
+      const spPort = `Ethernet${(j % 48) + 1}`;
+      const sport = (sp.ports || []).find((x) => x.name === spPort);
+      lf.lldp.push({ port: p.name, idx: '1', sysName: sp.hostname, portId: spPort, portDesc: '', chassisId: '' });
+      if (sport) {
+        sp.lldp.push({ port: spPort, idx: '1', sysName: lf.hostname, portId: p.name, portDesc: '', chassisId: '' });
+        Object.assign(sport, { oper: 'up', admin: 'up', operRaw: 'linkUp', desc: `${lf.hostname} ${p.name}`, speedBps: p.speedBps, mtu: 9214, duplex: p.duplex, lag: p.lag ? 'Port-Channel1' : '' });
+      }
+      const wrong = j % 7 === 6 && spines.length > 1 ? spines[(u + 1) % spines.length] : sp;
+      p.desc = `${wrong.hostname} ${spPort}`;
+      p.mtu = j % 9 === 3 && u === 0 ? 1500 : 9214;
+    });
+  });
 }
 
 let _seeding = null;
@@ -263,7 +368,7 @@ export function ensureCvpDemo() {
 
 async function seedInner() {
   const reg = await import('../../cvp/registry.js');
-  if (reg.listServers().length) { _seeded = true; return { seeded: false, reason: 'registry-not-empty' }; }
+  if (reg.listServers().length) return topUpInner(reg);
   const { store } = await import('../../store.js');
   const snap = store.get();
   // 메인 mock 스냅샷이 생긴 뒤에만 시드한다(테스트처럼 스냅샷 없이 폴러만 부르는 경우에는 시드하지 않는다).
@@ -281,6 +386,29 @@ async function seedInner() {
   console.log(`[mock] CVP 데모 시드: CVP ${servers.length}대 · 스위치 ${nDev}대 + 이력 ${JSON.stringify(hist)}`);
   _seeded = true;
   return { seeded: true, servers: servers.length, switches: nDev, history: hist };
+}
+
+/**
+ * v3.26.0: 보충 — 등록부가 데모 CVP 뿐이고 지금 규모(법인 수 기준)보다 적으면(v2.914 이전 시드 — 3대) 없는 데모 CVP 만 덧붙이고 그것만 백필한다.
+ */
+async function topUpInner(reg) {
+  const cur = reg.listServers();
+  if (cur.some((x) => !isDemoId(x?.id))) { _seeded = true; return { seeded: false, reason: 'registry-not-empty' }; }
+  const { store } = await import('../../store.js');
+  const snap = store.get();
+  if (!Array.isArray(snap?.vcenters) || !snap.vcenters.length) return { seeded: false, reason: 'snapshot-not-ready' };
+  const corps = await demoCorps(snap);
+  if (!corps.length) return { seeded: false, reason: 'snapshot-not-ready' };
+  const want = demoCvpServers(corps);
+  if (cur.length >= want.length) { _seeded = true; return { seeded: false, reason: 'registry-not-empty' }; }
+  const r = reg.topUpDemoServers(want);
+  if (!r.ok || !r.count) { _seeded = true; return { seeded: false, reason: r.reason || 'nothing-to-add' }; }
+  const added = want.filter((x) => r.added.includes(String(x.id)));
+  const hist = await backfillCvp(added).catch((e) => ({ error: e.message }));
+  const nDev = added.reduce((a, x) => a + demoSwitchSpecs(x).length, 0);
+  console.log(`[mock] CVP 데모 보충: CVP ${added.length}대 · 스위치 ${nDev}대 + 이력 ${JSON.stringify(hist)}`);
+  _seeded = true;
+  return { seeded: true, servers: added.length, switches: nDev, history: hist, topUp: true };
 }
 
 /** 포트 처리량 백필 시각(오래된 것부터): 7일 전 ~ 48시간 전 2시간, 최근 48시간 30분. */
@@ -312,7 +440,7 @@ async function backfillCvp(servers, now = Date.now()) {
         for (const { p, k } of pick) {
           const v = portOf(sw, p, k, t, 'now');
           if (v.oper !== 'up') continue;
-          rows.push([srv.id, sw.key, v.name, t, v.inBps, v.outBps, v.inUtil, v.outUtil, v.inErr, v.outErr]);
+          rows.push([srv.id, sw.key, v.name, t, v.inBps, v.outBps, v.inUtil, v.outUtil, v.inErr, v.outErr, v.inDrop, v.outDrop]);
         }
       }
       for (let t = now - 7 * 24 * HOUR; t < now - 20 * 60_000; t += 30 * 60_000) {
@@ -338,7 +466,60 @@ async function backfillCvp(servers, now = Date.now()) {
     const r = await runCvpFaultScan({ now: t, reason: `demo-history:${variant}`, notify: false });
     scans.push({ variant, opened: r.opened ?? null, closed: r.closed ?? null });
   }
-  return { samples, devSamples, scans };
+  // ③ v3.38 네트워크 기능 일 기록(포트 수 · GBIC 일 최저 · 플랩 · 마지막 링크 날 · 업링크 일 최대 사용률) — 추세 · 예측 화면이 데모에서 '기록 부족' 만 보이지 않게.
+  const net = await demoNetHistory(servers, db, P, optics, now).catch((e) => ({ error: e.message }));
+  return { samples, devSamples, scans, net };
+}
+
+/**
+ * v3.38 데모 일 기록 — 날짜 · 값은 전부 가상이다. 장비 hash 로 갈래를 나눠 '곧 고갈' · '늘지 않음' · 'GBIC 하강' · '플랩' · '오래 안 쓴 포트' 가 다 보이게.
+ */
+async function demoNetHistory(servers, db, P, optics, now) {
+  const DAY = 86_400_000;
+  const today = Math.floor(now / DAY);
+  const devPort = []; const xcvr = []; const flap = []; const lastLink = []; const firstDay = []; const util = [];
+  for (const srv of servers) {
+    for (const sw of demoSwitchSpecs(srv)) {
+      await new Promise((r) => setImmediate(r));
+      const d = demoCvpDevice(sw, now, { optics, P });
+      const ports = d.ports || [];
+      const total = ports.length;
+      const usedNow = ports.filter((p) => p.oper === 'up').length;
+      const kind = sw.h % 5;   // 0 = 빠르게 늘어남 · 1 = 천천히 · 그 밖 = 그대로
+      const per = kind === 0 ? Math.max(0.02, (total - usedNow) / 150) : kind === 1 ? 0.04 : 0;
+      if (total > 0) for (let i = 179; i >= 0; i--) devPort.push([srv.id, sw.key, today - i, total, Math.max(0, Math.round(usedNow - per * i))]);
+      firstDay.push([srv.id, sw.key, today - 300]);
+      ports.forEach((p, k) => {
+        if (p.oper === 'up') { lastLink.push([srv.id, sw.key, p.name, today]); return; }
+        const r = demoHash(`ll|${sw.key}|${p.name}`) % 4;
+        if (r === 0) lastLink.push([srv.id, sw.key, p.name, today - 200 - (k % 60)]);
+        else if (r === 1) lastLink.push([srv.id, sw.key, p.name, today - 40 - (k % 20)]);
+        // r 2 · 3 = 기록 시작 뒤 한 번도 링크 없음
+      });
+      const xs = (d.parts || []).filter((x) => x.kind === 'xcvr' && x.state !== 'absent' && x.dom);
+      xs.forEach((x, k) => {
+        const intf = String(x.name).split(' › ')[1];
+        const declining = sw.h % 6 === 1 && k === 0;
+        const rxNow = Number(x.dom.rxPower);
+        for (let i = 29; i >= 0; i--) xcvr.push([srv.id, sw.key, intf, today - i, declining ? Math.round((rxNow + 3.2 - i * 0.11) * 100) / 100 : Math.round((rxNow + (demoRand(`xd|${sw.key}|${intf}|${i}`) - 0.5) * 0.3) * 100) / 100, x.dom.txPower ?? null]);
+      });
+      if (sw.h % 4 === 1) {
+        const up = ports.filter((p) => p.oper === 'up');
+        const fp = up[(sw.h >>> 3) % Math.max(1, up.length)];
+        if (fp) for (const [ago, n] of [[0, 2], [1, 3], [3, 1], [5, 2]]) flap.push([srv.id, sw.key, fp.name, today - ago, n]);
+      }
+      // 업링크 일 최대 사용률(8일 전 이전만 — 최근 7일은 표본 백필이 채운다). 셋째 장비마다 늘어나는 추세.
+      if (sw.role === 'leaf' || sw.role === 'spine') {
+        const ups = ports.filter((p) => p.oper === 'up' && /\/1$/.test(p.name)).slice(0, 2);
+        for (const p of ups) {
+          const base = Number(p.inUtil) || 20;
+          const grow = sw.h % 3 === 0 ? 0.25 : 0.02;
+          for (let i = 179; i >= 8; i--) util.push([srv.id, sw.key, p.name, today - i, Math.max(1, Math.round((base - grow * i + (demoRand(`ut|${sw.key}|${p.name}|${i}`) - 0.5) * 6) * 10) / 10)]);
+        }
+      }
+    }
+  }
+  return db.importNetHistory(db.LOCAL_AGENT, { devPort, xcvr, flap, lastLink, firstDay, util });
 }
 
 export function _resetForTest() { _seeded = false; _seeding = null; }

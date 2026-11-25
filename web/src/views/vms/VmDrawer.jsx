@@ -18,7 +18,7 @@ import { VmReconfigButton } from '../../components/VmReconfig.jsx';
 import { vcHash } from '../vcd/vcdRoute.js';
 import { VM_OBJ_TABS, toolsStatusBadge } from '../vcd/objTabs.js';
 import { neighborOf, signalText, usageTone, pctText, fmtN, TONE_COLOR, TONE_TEXT } from './vmHubText.js';
-import { useDaySeries, Spark } from './vmSeries.jsx';
+import { useDaySeries, Spark, useVmSignals } from './vmSeries.jsx';
 import { numOrNull } from '../../numOrNull.js';
 import './vmHub.css';
 
@@ -50,6 +50,8 @@ export default function VmDrawer({ vm, rows, onClose, onMove, days = null }) {
   const [showReport, setShowReport] = useState(false);
   const on = vm?.powerState === 'POWERED_ON';
   const series = useDaySeries(vm?.id, on);
+  // v2.963: 목록 없이 연 드로어(알람 · 탐색 · Platform 검색 · VmLink · 호스트 전체 페이지)는 신호가 없다 — 열 때 1회 /vms/lookup 으로 받는다(훅은 조기 return 위).
+  const fetched = useVmSignals(vm?.id, !!vm && !Array.isArray(vm.signals));
   // 열 때 포커스를 드로어로(키보드 ↑↓·Esc) · 닫을 때 원래 자리로.
   useEffect(() => {
     backRef.current = typeof document !== 'undefined' ? document.activeElement : null;
@@ -62,7 +64,8 @@ export default function VmDrawer({ vm, rows, onClose, onMove, days = null }) {
   const nb = neighborOf(rows, vm.id);
   const now = Date.now();
   const [dotColor, dotLabel] = POWER_DOT[vm.powerState] || ['var(--text-faint)', vm.powerState || '전원 모름'];
-  const sigs = Array.isArray(vm.signals) ? vm.signals : null;
+  const sigs = Array.isArray(vm.signals) ? vm.signals : (Array.isArray(fetched.signals) ? fetched.signals : null);
+  const sigDays = days ?? fetched.days ?? null;   // 기준 일수: 목록 응답(prop) 우선 · 없으면 lookup 응답
   const ips = vm.ipAddresses?.length ? vm.ipAddresses : (vm.ipAddress ? [vm.ipAddress] : []);
   const cpu = on ? numOrNull(vm.cpuUsagePct) : null;
   const mem = on ? numOrNull(vm.memUsagePct) : null;
@@ -94,7 +97,7 @@ export default function VmDrawer({ vm, rows, onClose, onMove, days = null }) {
           </div>
           {/* 신호 배지는 이름 아래 줄 — 400px 에서 이름 칸을 줄이지 않게(v2.909 Chromium 확인: 'app-ap-...' 로 잘렸다) */}
           {sigs && sigs.length > 0 && (
-            <div className="vmh-sig">{sigs.map((k) => { const x = signalText(k, { days }); return <span key={k} className={`vmh-badge ${x.badge}`} title={x.desc}>{x.short}</span>; })}</div>
+            <div className="vmh-sig">{sigs.map((k) => { const x = signalText(k, { days: sigDays }); return <span key={k} className={`vmh-badge ${x.badge}`} title={x.desc}>{x.short}</span>; })}</div>
           )}
           <div className="vmh-crumb">
             <StateBadge state={vm.powerState} />
@@ -149,12 +152,15 @@ export default function VmDrawer({ vm, rows, onClose, onMove, days = null }) {
 
           <section className="vmh-sec" aria-label="신호">
             <div className="sh"><h3>신호 {sigs ? sigs.length : '—'} — 봐야 할 것</h3><a href={vcHash(vm.vcenterId, { type: 'vm', id: vm.id, tab: 'monitor' })} onClick={onClose}>개체 보기 › 모니터</a></div>
-            {!sigs ? <div className="muted" style={{ fontSize: 12 }}>이 목록은 신호를 함께 받지 않았습니다.</div>
+            {!sigs ? <div className="muted" style={{ fontSize: 12 }}>{fetched.loading ? '신호 확인 중…'
+              : fetched.error ? `신호를 읽지 못했습니다 — ${fetched.error}`
+                : fetched.missing ? '이 VM 을 지금 인벤토리에서 찾지 못해 신호를 계산하지 못했습니다(지워졌거나 조회 범위 밖일 수 있습니다).'
+                  : '이 목록은 신호를 함께 받지 않았습니다.'}</div>
               : !sigs.length ? <div className="muted" style={{ fontSize: 12 }}>신호 없음 — 과부하 · 사용률 미수집 · Tools 업그레이드 · 오래된 스냅샷 모두 해당하지 않습니다. 구성 점검 · 경합 · 클러스터 항목은 아래에 있습니다.</div>
                 : (
                   <div className="vmh-sigrows">
                     {sigs.map((k) => {
-                      const s = signalText(k, { days });
+                      const s = signalText(k, { days: sigDays });
                       return (
                         <div key={k} className="vmh-sigrow">
                           <span className="vmh-dot" style={{ background: s.tone === 'crit' ? 'var(--red)' : s.tone === 'warn' ? 'var(--amber)' : 'var(--text-faint)' }} aria-hidden="true" />

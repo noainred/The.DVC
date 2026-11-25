@@ -11,7 +11,7 @@ import { config, loadVcenterConfig } from '../config.js';
 import { listCollectors } from '../collector/registry.js';
 import { listDatacenters, getDatacenterAssign } from '../datacenter/store.js';
 import { listScanAgents, scanResultAgents, scanRev, LOCAL } from './scanStore.js';
-import { resolveAgentDatacenters, datacenterMapSig } from './scanDatacenter.js';
+import { resolveAgentDatacenters, datacenterMapSig, agentVcenterIds } from './scanDatacenter.js';
 
 const TTL_MS = 10_000;
 let _memo = null; // { at, snapKey, map, sig, inputs, tok }
@@ -78,6 +78,18 @@ export function scanDatacenterOf(agent, snapVcenters = []) {
   const key = String(agent || LOCAL).toLowerCase();
   if (m.map.has(key)) return m.map.get(key);
   return resolveAgentDatacenters({ ...m.inputs, agents: [String(agent || LOCAL)], snapVcenters }).get(key) || null;
+}
+
+/**
+ * 에이전트 → 그 에이전트가 수집하는 vCenter(법인) 집합 — IP 스캔 데이터센터 귀속과 같은 판정. 입력을 못 읽으면 null.
+ * v2.996: routes/admin/bmOsSuggest.js 에서 옮겼다 — 물리서버 폴더 엣지 묶음(routes/api/bmFolders.js)도 쓰는데, 라우트끼리 서로 import 하면
+ *   import 순환(SCC)이 생긴다(archCheck2614 ⑤-b 상한). 판정은 도메인 모듈 하나에 둔다.
+ */
+export function corpsOfFactory(snap) {
+  let inputs = null;
+  try { inputs = currentScanDatacenters(snap?.vcenters).inputs; } catch { inputs = null; }
+  if (!inputs) return null;
+  return (ag) => new Set(agentVcenterIds(ag || '', { vcenters: inputs.vcenters, snapVcenters: snap?.vcenters, collectors: inputs.collectors }));
 }
 
 /** 스캔 설정·DataCenter 할당을 바꾼 뒤 부른다(다음 판정이 새 값을 읽게). */

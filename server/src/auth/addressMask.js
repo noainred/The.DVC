@@ -34,7 +34,9 @@ export function hostVariants(h) {
   const raw = typeof h === 'string' ? h.trim() : '';
   if (!raw) return [];
   const bare = raw.replace(/^[a-z][a-z0-9+.-]*:\/\//i, '').replace(/\/.*$/, '').replace(/:\d+$/, '').replace(/^\[|\]$/g, '');
-  return [...new Set([raw, bare].filter(Boolean))];
+  // 110회차(재현): 소문자 표기도 함께 — REST 수집(fetch)은 URL 이 호스트 이름을 소문자로 바꿔 쓰므로 오류 문구('getaddrinfo ENOTFOUND stor01.corp' ·
+  //   TLS 상대 인증 거부 '… stor01.corp:8080 장비 인증서를 …')가 소문자다. 등록부는 입력한 대소문자를 그대로 둬('STOR01.Corp') 그 문구가 가려지지 않았다.
+  return [...new Set([raw, bare, raw.toLowerCase(), bare.toLowerCase()].filter(Boolean))];
 }
 
 /*
@@ -166,7 +168,8 @@ export function addressMatcher(hosts = []) {
     if (typeof v !== 'string') return false;
     const s = v.trim();
     if (!s) return false;
-    if (IPV4_ANY.test(s) || IPV6_LIT.test(s)) return true;
+    // 19회차 A-12: IPV6_LIT 은 콜론이 많은 긴 입력에 O(n²) — IPv6 리터럴은 대괄호 포함 50자를 넘지 않으므로 길이를 먼저 본다
+    if (IPV4_ANY.test(s) || (s.length <= 64 && IPV6_LIT.test(s))) return true;
     return set.has(s.toLowerCase());
   };
   fn.addressSet = set;
@@ -212,9 +215,11 @@ export function maskSnapAddress(s, hostHint = '') {
   if (!s || typeof s !== 'object') return s;
   const host = s.host || hostHint;
   const out = { ...s };
-  if (typeof out.error === 'string') out.error = scrub(out.error, host);
+  // 110회차(재현): error · errors 도 표기 변형(스킴 · 포트 뗀 꼴 · 소문자)으로 가린다 — 예전에는 원문 한 가지만 봐 sections(v2.605) · items(v2.603) 옆에서 샜다.
+  const scErr = typeof host === 'string' && host ? makeScrubber([host]) : (v) => v;
+  if (typeof out.error === 'string') out.error = scErr(out.error);
   if (out.errors && typeof out.errors === 'object' && !Array.isArray(out.errors)) {
-    out.errors = Object.fromEntries(Object.entries(out.errors).map(([k, v]) => [k, scrub(v, host)]));
+    out.errors = Object.fromEntries(Object.entries(out.errors).map(([k, v]) => [k, scErr(v)]));
   }
   // v2.605 AUTHZ2605-04: REST 수집기는 부분 실패를 `sections.<키> = '오류: <host>:<port> 응답이 없습니다…'` 로
   //   남긴다(netError.js describeFetchError · fosRest sections[key]=e.message) — error 만 가리면 옆 칸에서 샌다.
@@ -269,6 +274,18 @@ export function maskSnapAddress(s, hostHint = '') {
         }),
       },
     };
+  }
+  // v3.35.0(Unity 인터페이스): iSCSI · NAS 인터페이스의 **데이터 IP** 도 관리 주소와 같은 등급으로 가린다(구조화 필드).
+  //   그 IP 들은 uemcli `/net/if show -detail` 원문(extra.cliRaw)에도 그대로 실리므로, 알려진 그 주소만 원문에서도 지운다
+  //   (위 '정직 기록' — 원문 전체를 훑지는 않는다 — 의 예외가 아니라, 이번에 원문에 새로 실리게 된 주소를 새지 않게 하는 것이다).
+  const ifs = out.extra?.ifaces?.interfaces;
+  if (Array.isArray(ifs) && ifs.length) {
+    const ips = ifs.map((x) => (x && typeof x === 'object' && typeof x.ip === 'string' ? x.ip.trim() : '')).filter(Boolean);
+    out.extra = { ...out.extra, ifaces: { ...out.extra.ifaces, interfaces: ifs.map((x) => (x && typeof x === 'object' && !Array.isArray(x) ? { ...x, ip: x.ip ? '' : x.ip } : x)) } };
+    if (ips.length && Array.isArray(out.extra.cliRaw)) {
+      const sc = makeScrubber(ips);
+      out.extra = { ...out.extra, cliRaw: out.extra.cliRaw.map((r) => (r && typeof r === 'object' && typeof r.sample === 'string' ? { ...r, sample: sc(r.sample) } : r)) };
+    }
   }
   return out;
 }

@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>CVP 광신호 — GBIC 열화 추세 · 재고</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="box-sizing: border-box; padding: clamp(12px, 2vw, 28px); background: #0a0e17; color: #e6edf6; font-family: 'Inter', 'Noto Sans KR', 'Apple SD Gothic Neo', sans-serif; font-size: 13px; line-height: 1.5; display: flex; flex-direction: column; gap: 14px;">
+
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<div style="font-size: 12px; color: #a9b6cc;">네트워크 › Arista CVP › 광신호</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center;">
+<h1 style="margin: 0; font-size: 20px; font-weight: 700;">추세 · 재고</h1>
+<div style="display: inline-flex; border: 1px solid #243049; border-radius: 8px; overflow: hidden; font-size: 12.5px;">
+<span style="display: inline-flex; align-items: center; height: 30px; padding: 0 12px; color: #a9b6cc;">지금 상태</span>
+<span aria-current="page" style="display: inline-flex; align-items: center; height: 30px; padding: 0 12px; background: #2563eb; color: #ffffff; font-weight: 600;">추세 · 재고</span>
+</div>
+<span style="display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: 999px; font-size: 12px; font-weight: 600; background: #35205c; border: 1px solid #c084fc; color: #f1e6ff;">⑮ 광량 최신값은 있음 · 일별 기록을 새로 쌓음</span>
+</div>
+<div style="font-size: 12.5px; color: #a9b6cc; overflow-wrap: anywhere;">수신 광량이 서서히 떨어지는 GBIC 을 임계에 닿기 전에 찾고, 종류별로 몇 개를 쓰고 몇 개가 남는지 봅니다.</div>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start;">
+
+<div style="flex: 999 1 640px; min-width: 0; background: #141b2d; border: 1px solid #1f2a40; border-radius: 14px; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px;">
+<b style="font-size: 14px;">열화 순위 — 수신 광량이 떨어지는 순</b>
+<div style="overflow-x: auto; border: 1px solid #1f2a40; border-radius: 10px;">
+<div role="table" aria-label="광량 열화 순위" style="min-width: 900px; font-size: 12.5px;">
+<div role="row" style="{{k.head}}">
+<div role="columnheader" style="{{k.th}}">스위치 · 포트</div>
+<div role="columnheader" style="{{k.th}}">종류</div>
+<div role="columnheader" style="{{k.thr}}">수신 지금</div>
+<div role="columnheader" style="{{k.thr}}">30일 변화</div>
+<div role="columnheader" style="{{k.th}}">90일 추이</div>
+<div role="columnheader" style="{{k.th}}">임계 도달 예상</div>
+</div>
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="6">
+<div role="row" style="{{r.rowStyle}}">
+<div role="cell" style="padding: 3px 4px; min-width: 0;"><button type="button" onClick="{{r.pick}}" style="min-height: 34px; padding: 2px 6px; border: 0; border-radius: 6px; background: transparent; color: #7dd3fc; font: 600 12.5px 'JetBrains Mono', ui-monospace, monospace; cursor: pointer; text-align: left;">{{r.name}}</button></div>
+<div role="cell" style="{{k.td}}">{{r.type}}</div>
+<div role="cell" style="{{r.nowStyle}}">{{r.nowText}}</div>
+<div role="cell" style="{{r.dStyle}}">{{r.dText}}</div>
+<div role="cell" style="{{k.td}}"><div role="img" aria-label="{{r.sparkLabel}}" style="{{r.spark}}"></div></div>
+<div role="cell" style="{{k.td}}"><span style="{{r.whenStyle}}">{{r.when}}</span></div>
+</div>
+</sc-for>
+</div>
+</div>
+<div style="font-size: 12px; color: #a9b6cc; overflow-wrap: anywhere;">하루 최저 수신 광량 기준입니다. 링크가 없던 날은 뺍니다(빛이 없는 것이 정상). 레인이 여러 개인 100G 는 가장 낮은 레인을 씁니다.</div>
+</div>
+
+<div style="flex: 1 1 400px; min-width: 0; background: #141b2d; border: 1px solid #1f2a40; border-radius: 14px; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline;">
+<b style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 15px;">{{d.name}}</b>
+<span style="font-size: 12px; color: #a9b6cc;">{{d.type}} · {{d.peer}}</span>
+</div>
+<div style="display: flex; gap: 8px;">
+<div style="flex: 0 0 auto; display: flex; flex-direction: column; justify-content: space-between; height: 190px; font-size: 11px; color: #a9b6cc; font-family: 'JetBrains Mono', ui-monospace, monospace; text-align: right;"><span>−2</span><span>−6</span><span>−10</span><span>−14</span><span>−18</span></div>
+<div style="flex: 1 1 0; min-width: 0; position: relative; height: 190px; background: #0f1626; border: 1px solid #1f2a40; border-radius: 8px; overflow: hidden;" role="img" aria-label="{{d.chartLabel}}">
+<div style="position: absolute; left: 0; right: 0; top: 50%; border-top: 1px dashed #f59e0b;"></div>
+<div style="position: absolute; left: 0; right: 0; top: 75%; border-top: 1px dashed #f87171;"></div>
+<div style="position: absolute; left: 75%; top: 0; bottom: 0; border-left: 1px solid #243049;"></div>
+<div style="{{d.actual}}"></div>
+<div style="{{d.proj}}"></div>
+<div style="position: absolute; left: 6px; top: calc(50% + 3px); font-size: 11px; color: #fbbf24;">주의 −10</div>
+<div style="position: absolute; left: 6px; top: calc(75% + 3px); font-size: 11px; color: #fca5a5;">장애 −14</div>
+<div style="position: absolute; left: calc(75% + 6px); top: 6px; font-size: 11px; color: #a9b6cc;">예측</div>
+</div>
+</div>
+<div style="display: flex; justify-content: space-between; padding-left: 30px; font-size: 11px; color: #a9b6cc; font-family: 'JetBrains Mono', ui-monospace, monospace;"><span>08-25</span><span>10-09</span><span>11-23</span><span>12-23</span></div>
+<div style="font-size: 12.5px; color: #c9d5e6; overflow-wrap: anywhere;">{{d.text}}</div>
+<div style="font-size: 12px; color: #a9b6cc; overflow-wrap: anywhere;">예측은 최근 30일의 직선 추세를 늘린 것입니다. 청소 · 재장착으로 값이 갑자기 회복되면 그날부터 추세를 다시 셉니다. 송신 광량 · 온도 · 바이어스도 같은 방식으로 볼 수 있습니다.</div>
+</div>
+
+</div>
+
+<div style="{{k.card}}">
+<div style="display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center;">
+<b style="font-size: 14px;">GBIC 재고 — 종류별</b>
+<label style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #a9b6cc;">법인
+<select style="height: 32px; padding: 0 8px; border-radius: 8px; border: 1px solid #243049; background: #0f1626; color: #e6edf6; font: inherit;"><option>전체(28)</option><option>KR1</option><option>PL-WRO</option><option>US-EAST</option></select></label>
+</div>
+<div style="overflow-x: auto; border: 1px solid #1f2a40; border-radius: 10px;">
+<div role="table" aria-label="GBIC 재고" style="min-width: 760px; font-size: 12.5px;">
+<div role="row" style="{{k.head2}}">
+<div role="columnheader" style="{{k.th}}">종류</div>
+<div role="columnheader" style="{{k.thr}}">사용 중</div>
+<div role="columnheader" style="{{k.thr}}">꽂혀 있으나 미사용</div>
+<div role="columnheader" style="{{k.thr}}">합계</div>
+<div role="columnheader" style="{{k.thr}}">열화 중</div>
+<div role="columnheader" style="{{k.th}}">분포</div>
+</div>
+<sc-for list="{{inv}}" as="r" hint-placeholder-count="6">
+<div role="row" style="{{k.row2}}">
+<div role="cell" style="{{k.tdb}}">{{r.type}}</div>
+<div role="cell" style="{{k.tdr}}">{{r.use}}</div>
+<div role="cell" style="{{k.tdr}}">{{r.idle}}</div>
+<div role="cell" style="{{k.tdr}}">{{r.total}}</div>
+<div role="cell" style="{{k.tdr}}">{{r.bad}}</div>
+<div role="cell" style="{{k.td}}"><div style="display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: #0f1626;"><div style="{{r.useBar}}"></div><div style="{{r.idleBar}}"></div></div></div>
+</div>
+</sc-for>
+</div>
+</div>
+<div style="font-size: 12px; color: #a9b6cc; overflow-wrap: anywhere;">‘꽂혀 있으나 미사용’ 은 링크가 없는 포트에 장착된 GBIC 입니다 — 다른 곳으로 돌려쓸 수 있는 수량입니다(포트 구성도의 ‘예비 · GBIC 꽂힘’ 과 같은 값). 창고에 있는 GBIC 은 포탈이 알 수 없습니다. 종류를 못 읽은 것은 ‘종류 모름’ 으로 따로 셉니다.</div>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":950}}'>
+class Component extends DCLogic {
+renderVals() {
+const st = this.state || {};
+const MONO = "font-family: 'JetBrains Mono', ui-monospace, monospace;";
+const COLS = 'display: grid; grid-template-columns: 200px 130px 100px 100px 150px minmax(170px, 1fr); align-items: center;';
+const C2 = 'display: grid; grid-template-columns: minmax(150px, 1fr) 90px 150px 80px 80px minmax(180px, 1.4fr); align-items: center;';
+const k = {
+card: 'background: #141b2d; border: 1px solid #1f2a40; border-radius: 14px; padding: 16px 18px; min-width: 0; display: flex; flex-direction: column; gap: 10px;',
+head: COLS + ' background: #0f1626; color: #a9b6cc;',
+head2: C2 + ' background: #0f1626; color: #a9b6cc;', row2: C2 + ' border-top: 1px solid #1f2a40; min-height: 38px;',
+th: 'padding: 8px 10px; font-weight: 600; white-space: nowrap;',
+thr: 'padding: 8px 10px; font-weight: 600; white-space: nowrap; text-align: right;',
+td: 'padding: 6px 10px; min-width: 0; overflow-wrap: anywhere; color: #c9d5e6;',
+tdb: 'padding: 6px 10px; min-width: 0; overflow-wrap: anywhere; font-weight: 600; ' + MONO,
+tdr: 'padding: 6px 10px; min-width: 0; text-align: right; white-space: nowrap; ' + MONO
+};
+const pill = 'display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; ';
+const W = { soon: pill + 'background: #5a1616; border: 1px solid #f87171; color: #ffe9e9;', mid: pill + 'background: #4a3208; border: 1px solid #f59e0b; color: #fff3d6;', far: 'color: #c9d5e6;', none: 'color: #a9b6cc;' };
+const D = [
+['pl-leaf-01 Ethernet7', '25GBASE-SR', 'esx-pl-03', -13.6, -1.2, '장애 임계까지 약 2주', 'soon', '수신 광량이 한 달에 1.2 dB 씩 떨어져 장애 임계(−14 dBm)에 2주쯤 뒤 닿습니다. 오류도 함께 늘고 있어 교체 후보입니다.'],
+['kr1-leaf-a03 Ethernet21', '25GBASE-SR', 'esx-kr1-14', -11.8, -2.1, '장애 임계까지 약 5주', 'soon', '이미 주의 임계(−10 dBm) 아래이고 한 달에 2.1 dB 씩 떨어집니다. 지금 추세면 5주쯤 뒤 장애 임계입니다.'],
+['kr1-spine-01 Ethernet3/17', '100GBASE-SR4', 'kr1-leaf-b02', -9.2, -0.9, '주의 임계까지 약 4주', 'mid', '가장 낮은 레인이 주의 임계에 가깝습니다. 양쪽 커넥터 청소를 먼저 권합니다.'],
+['kr1-leaf-b02 Ethernet49/1', '100GBASE-SR4', 'kr1-spine-01', -6.4, -0.6, '3개월 넘음', 'far', '떨어지고 있지만 여유가 있습니다.'],
+['use-leaf-01 Ethernet50/1', '100GBASE-LR4', 'use-spine-01', -7.9, -0.1, '변화 없음 — 예측 없음', 'none', '90일 동안 거의 변하지 않았습니다.'],
+['pl-spine-01 Ethernet12/1', '100GBASE-SR4', 'pl-leaf-02', -5.1, null, '기록 부족(12일)', 'none', '기록이 30일보다 짧아 추세를 내지 않습니다.']
+].map((r, i) => ({ i: i, name: r[0], type: r[1], peer: r[2], now: r[3], d30: r[4], when: r[5], w: r[6], text: r[7] }));
+const sel = D.find((r) => r.name === st.sel) || D[1];
+const yOf = (rx) => Math.max(0, Math.min(1, (rx + 18) / 16));
+const hist = (r, n) => { const out = []; const slope = (r.d30 == null ? 0 : r.d30) / 30; for (let i = 0; i < n; i++) { const day = (n - 1 - i) * (90 / (n - 1)); const older = day > 30 ? 30 + (day - 30) * 0.45 : day; out.push(r.now - slope * older + (((r.i * 5 + i * 7) % 7) - 3) * 0.06); } return out; };
+const bandPx = (vals, w, h, t) => { const n = vals.length; const up = vals.map((v, i) => (i * (w / (n - 1))).toFixed(1) + 'px ' + ((1 - v) * (h - t)).toFixed(1) + 'px'); const dn = vals.map((v, i) => (i * (w / (n - 1))).toFixed(1) + 'px ' + ((1 - v) * (h - t) + t).toFixed(1) + 'px').reverse(); return 'clip-path: polygon(' + up.concat(dn).join(', ') + ');'; };
+const bandPct = (vals, t) => { const n = vals.length; const up = vals.map((v, i) => (i * (100 / (n - 1))).toFixed(2) + '% ' + ((1 - v) * 100 - t).toFixed(2) + '%'); const dn = vals.map((v, i) => (i * (100 / (n - 1))).toFixed(2) + '% ' + ((1 - v) * 100 + t).toFixed(2) + '%').reverse(); return 'clip-path: polygon(' + up.concat(dn).join(', ') + ');'; };
+const color = (r) => (r.w === 'soon' ? '#f87171' : r.w === 'mid' ? '#fbbf24' : r.w === 'far' ? '#60a5fa' : '#94a3b8');
+const nowColor = (rx) => (rx <= -14 ? '#fca5a5' : rx <= -10 ? '#fbbf24' : '#e6edf6');
+const rows = D.map((r) => ({
+name: r.name, type: r.type, pick: () => this.setState({ sel: r.name }),
+rowStyle: COLS + ' border-top: 1px solid #1f2a40; min-height: 42px;' + (r === sel ? ' background: #1a2a4a;' : ''),
+nowText: r.now.toFixed(1) + ' dBm', nowStyle: k.tdr + ' color: ' + nowColor(r.now) + ';',
+dText: r.d30 == null ? '—' : (r.d30 > 0 ? '+' : '') + r.d30.toFixed(1) + ' dB', dStyle: k.tdr + (r.d30 != null && r.d30 <= -0.9 ? ' color: #fca5a5; font-weight: 600;' : ''),
+spark: 'width: 130px; height: 26px; background: ' + color(r) + '; ' + bandPx(hist(r, 14).map((v) => Math.max(0.05, Math.min(0.95, (v - (r.now - 3)) / 6))), 130, 26, 2), sparkLabel: r.name + ' 수신 광량 90일 추이',
+when: r.when, whenStyle: W[r.w]
+}));
+const h = hist(sel, 31).map(yOf);
+const slope = (sel.d30 == null ? 0 : sel.d30) / 30;
+const pj = []; for (let i = 0; i <= 10; i++) pj.push(yOf(sel.now + slope * i * 3));
+const d = {
+name: sel.name, type: sel.type, peer: sel.peer, text: sel.text,
+chartLabel: sel.name + ' 수신 광량 90일 기록과 30일 예측',
+actual: 'position: absolute; left: 0; top: 0; width: 75%; height: 100%; background: ' + color(sel) + '; ' + bandPct(h, 0.9),
+proj: 'position: absolute; left: 75%; top: 0; width: 25%; height: 100%; opacity: 0.55; background: ' + color(sel) + '; ' + bandPct(pj, 0.9)
+};
+const inv = [['25GBASE-SR', 412, 38, 2], ['25GBASE-CR (DAC)', 96, 4, 0], ['100GBASE-SR4', 88, 9, 1], ['100GBASE-LR4', 14, 1, 0], ['1000BASE-T (SFP)', 22, 3, 0], ['종류 모름', 6, 0, 0]].map((r) => ({ type: r[0], use: r[1], idle: r[2], total: r[1] + r[2], bad: r[3] || '0', useBar: 'flex: ' + r[1] + ' 1 0; background: #22c55e; border-right: 2px solid #141b2d;', idleBar: r[2] ? 'flex: ' + r[2] + ' 1 0; background: #60a5fa;' : 'display: none;' }));
+return { k: k, rows: rows, d: d, inv: inv };
+}
+}
+</script>
+</body>
+</html>

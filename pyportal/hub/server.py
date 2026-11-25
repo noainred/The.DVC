@@ -18,6 +18,7 @@ import json
 import mimetypes
 import posixpath
 import re
+import sqlite3
 import time
 import traceback
 from http import HTTPStatus
@@ -25,13 +26,14 @@ from http.cookies import SimpleCookie
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 from .auth import AuthError
 from .catstore import COLORS as CATEGORY_COLORS, DEFAULT_CATEGORY_ID, slugify as cat_slugify
 from . import csvio
 from .config import APP_NAME, STATIC_DIR, VERSION, config
 from .history import RANGE_LABELS, RANGES
+from .jsonfile import load_error_text
 from .settings import BACKUP_INTERVAL_CHOICES, HEALTH_INTERVAL_CHOICES
 from .ssrf import ValidationError
 
@@ -53,10 +55,27 @@ SECURITY_HEADERS = {
 
 ID_PATTERN = r"([A-Za-z0-9_-]{1,64})"
 NAME_PATTERN = r"([A-Za-z0-9._-]{1,80})"
+# 전체 점검 31회차 F1(재현): 사용자 라우트는 ID_PATTERN 을 쓰면 안 된다 — 계정 생성은 1~64자 아무 글자나 받는데(`.`·`@`·한글)
+#   관리 라우트가 [A-Za-z0-9_-] 만 받아 그런 계정은 로그인은 되지만 중지·삭제·비밀번호 변경이 전부 404 였다(퇴사자 계정을 폐기할 수 없음).
+#   퍼센트 인코딩된 한 경로 조각을 받아 핸들러가 디코드한다(_user_arg — 64자 넘으면 404).
+USER_PATTERN = r"([^/]{1,800})"
 
 
 def _route(pattern: str):
     return re.compile("^" + pattern + "$")
+
+
+def _reject_lone_surrogates(value) -> None:
+    """전체 점검 117회차 F3(재현): JSON 은 짝 없는 서로게이트("\\ud800" — 잘린 이모지 등)를 그대로 str 로 읽지만 UTF-8 로는 쓸 수 없다.
+    저장소는 메모리 목록을 먼저 바꾼 뒤 파일에 쓰므로, viewer 가 그런 이름의 바로가기를 하나 만들면 저장은 400 으로 실패하고 **메모리에만 남아**
+    공개 GET /api/shortcuts · 내보내기가 전부 400(대시보드 빈 화면), 그 뒤의 모든 바로가기 저장도 400 이었다(재기동 전까지 — 임시 파일도 남음).
+    들어오는 경계에서 막는다 — 요청 본문과 서버 파일 가져오기(JSON)가 이 함수를 지난다."""
+    try:
+        json.dumps(value, ensure_ascii=False).encode("utf-8")
+    except UnicodeEncodeError:
+        raise ValidationError("저장할 수 없는 문자가 들어 있습니다(짝이 맞지 않는 서로게이트 — 잘린 이모지 등). 그 글자를 지우고 다시 시도하세요.") from None
+    except (ValueError, RecursionError):
+        pass   # NaN · 순환 등은 이 검사의 대상이 아니다(각 저장소의 정규화가 다룬다)
 
 
 class HubHandler(BaseHTTPRequestHandler):
@@ -133,9 +152,16 @@ class HubHandler(BaseHTTPRequestHandler):
         if not raw:
             return {}
         try:
-            return json.loads(raw.decode("utf-8"))
+            payload = json.loads(raw.decode("utf-8"))
         except (ValueError, UnicodeDecodeError):
             raise ValidationError("JSON 형식이 올바르지 않습니다.")
+        except RecursionError:
+            # 전체 점검 117회차 F4(재현): 깊게 중첩된 본문('[' 20만 개)은 RecursionError(ValueError 아님)라 미인증 요청 한 번마다
+            #   500 + traceback 이 콘솔에 쌓였다(POST /api/health/check 는 로그인 없이 본문을 읽는다) — 형식 오류 400 으로.
+            raise ValidationError("JSON 형식이 올바르지 않습니다(중첩이 너무 깊습니다).") from None
+        if b"\\u" in raw:
+            _reject_lone_surrogates(payload)
+        return payload
 
     def _body_dict(self):
         payload = self._read_json()
@@ -327,6 +353,9 @@ class HubHandler(BaseHTTPRequestHandler):
                 self.ctx.settings.section("display").get("datacenterLimit", 0))),
             "datacenterRegistered": len(self.ctx.datacenters.all()),
             "shortcutCount": len(self.ctx.shortcuts.all()),
+            # 47회차 #6: 분류 · 바로가기 파일을 못 읽었으면 화면이 '0개 · 없음' 대신 못 읽음을 밝힌다(상태만 — 경로는 싣지 않는다)
+            "loadErrors": {k: v for k, v in (("categories", self.ctx.categories.load_error()),
+                                             ("shortcuts", self.ctx.shortcuts.load_error())) if v} or None,
             "healthTlsVerify": config.health_tls_verify,
             # 메인 모니터링 포탈로 돌아가는 링크(설정된 경우에만). 등록된 바로가기 URL 이
             # 이미 공개 조회로 나가므로 이 주소만 따로 감출 이유는 없다.
@@ -337,7 +366,8 @@ class HubHandler(BaseHTTPRequestHandler):
             # 경로는 **로그인한 사용자에게만** 준다(6차 감사 수정). 미인증 응답에 절대경로를
             # 실으면 서버 구조가 드러나고, "초기 비밀번호가 아직 살아 있다"는 사실까지 알려
             # 공격자에게 표적을 지정해 주는 셈이 된다.
-            "initialPasswordFile": (str(config.initial_password_file)
+            # 35회차 R4: 경로(데이터 폴더 절대경로)는 admin 에게만 — 그 밖의 로그인 사용자는 있음 여부만(true).
+            "initialPasswordFile": ((str(config.initial_password_file) if user.get("role") == "admin" else True)
                                     if user and self.ctx.users.initial_password_present() else None),
             "setupPending": bool(self.ctx.users.initial_password_present()) if user else None,
         })
@@ -355,13 +385,17 @@ class HubHandler(BaseHTTPRequestHandler):
             "summary": self.ctx.datacenters.summary(visible),
             "displayLimit": limit,
             "totalRegistered": len(self.ctx.datacenters.all()),
+            # 46회차 H2: 목록을 못 읽었으면 '0곳' 이 아니라 못 읽음(손상 · 읽기 오류 — 내장 샘플을 대신 보이지 않는다)
+            "loadError": self.ctx.datacenters.load_error(),
         })
 
-    def api_health_latest(self):
+    def _latest_alive(self):
         # 삭제된 바로가기의 이력은 차트에는 남기되 '최근 상태' 표에는 띄우지 않는다.
         alive = {item["id"] for item in self.ctx.shortcuts.all()}
-        results = [row for row in self.ctx.history.latest().values() if row["id"] in alive]
-        return self._json({"success": True, "results": results})
+        return [row for row in self.ctx.history.latest().values() if row["id"] in alive]
+
+    def api_health_latest(self):
+        return self._json({"success": True, "results": self._latest_alive()})
 
     def api_health_history(self):
         query = self._query()
@@ -395,8 +429,9 @@ class HubHandler(BaseHTTPRequestHandler):
         results = self.ctx.run_health_check(targets)
         if results is None:
             # 이전 점검이 아직 진행 중 — 새로 돌리지 않고 최신 결과를 돌려준다.
-            return self._json({"success": True, "results": list(self.ctx.history.latest().values()),
-                               "skipped": True})
+            # 56회차 F6(재현): /api/health/latest 와 같은 규칙으로 삭제된 바로가기의 옛 이력은 뺀다 — 예전에는 이 응답만 그 행을 실어
+            #   '최근 상태' 표에 '(삭제됨)' 줄이 떠올랐다(다음 30초 갱신까지).
+            return self._json({"success": True, "results": self._latest_alive(), "skipped": True})
         return self._json({"success": True, "results": results, "skipped": False,
                            "checkedAt": self.date_time_string()})
 
@@ -423,24 +458,41 @@ class HubHandler(BaseHTTPRequestHandler):
             return self._error(HTTPStatus.UNAUTHORIZED, "로그인되어 있지 않습니다.")
         return self._json({"success": True, "user": user})
 
+    def _begin_auth_attempt(self, client) -> bool:
+        """전체 점검 131회차: 잠금 검사 + 진행 중인 시도 예약(SessionStore.begin_attempt — 잠금 검사와 실패 기록 사이의 동시 요청이 임계를 넘겨 평가되지 않게).
+        거절이면 429 를 쓰고 False. True 면 호출부가 인증 결과를 기록한 뒤 end_attempt 로 돌려준다(finally)."""
+        wait = self.ctx.sessions.begin_attempt(client)
+        if wait == 0:
+            return True
+        if wait > 0:
+            self._error(HTTPStatus.TOO_MANY_REQUESTS,
+                        f"로그인 시도가 많아 잠겼습니다. {wait}초 후 다시 시도하세요.")
+        else:
+            self._error(HTTPStatus.TOO_MANY_REQUESTS,
+                        "같은 출발지에서 확인 중인 로그인 시도가 많습니다. 잠시 후 다시 시도하세요.")
+        return False
+
     def api_session_login(self):
         client = self.client_address[0] if self.client_address else "-"
-        remaining = self.ctx.sessions.lock_remaining(client)
-        if remaining > 0:
-            return self._error(HTTPStatus.TOO_MANY_REQUESTS,
-                               f"로그인 시도가 많아 잠겼습니다. {remaining}초 후 다시 시도하세요.")
-        payload = self._body_dict()
-        username = payload.get("username")
-        password = payload.get("password")
-        user = self.ctx.users.authenticate(username if isinstance(username, str) else "",
-                                           password if isinstance(password, str) else "")
+        if not self._begin_auth_attempt(client):
+            return None
+        try:
+            payload = self._body_dict()
+            username = payload.get("username")
+            password = payload.get("password")
+            user = self.ctx.users.authenticate(username if isinstance(username, str) else "",
+                                               password if isinstance(password, str) else "")
+            if not user:
+                self.ctx.sessions.note_failure(client, username if isinstance(username, str) else "")   # 117회차 F2: 어느 계정을 틀렸는지
+            else:
+                self.ctx.sessions.note_success(client, user["username"])   # 117회차 F2: 이 계정의 실패만 지운다
+        finally:
+            self.ctx.sessions.end_attempt(client)   # 131회차: 결과를 기록한 뒤 · 응답을 쓰기 전에 돌려준다(본문 오류 · 예외에서도)
         if not user:
-            self.ctx.sessions.note_failure(client)
             print(f"[auth] 설정 로그인 실패 (from {client})", flush=True)
             self._audit("login", actor="-", result="fail")
             # 사용자명이 틀렸는지 비밀번호가 틀렸는지 구분해서 알리지 않는다(계정 열거 차단).
             return self._error(HTTPStatus.UNAUTHORIZED, "사용자명 또는 비밀번호가 올바르지 않습니다.")
-        self.ctx.sessions.note_success(client)
         session = self.ctx.sessions.create(user)
         print(f"[auth] 설정 로그인: {user['username']}", flush=True)
         self._audit("login", actor=user["username"], detail={"role": user.get("role")})
@@ -464,12 +516,22 @@ class HubHandler(BaseHTTPRequestHandler):
         # admin 전용인데 값 읽기가 일반 세션에 열려 권한 경계가 어긋났다. 비-admin 에게는 저장
         # 여부만 알린다(있다/없다) — 값을 가린 사실을 숨기지 않으려 hasWebhookUrl 로 표시한다.
         settings = self.ctx.settings.all()
-        if user.get("role") != "admin":
+        is_admin = user.get("role") == "admin"
+        # 31회차 F4(재현): 백업 개수 · 최신 파일명 · 저장 디렉터리 절대경로와 데이터 폴더 경로는 admin 에게만 — v2.500 L2 가 백업 목록 라우트를
+        #   admin 전용으로 막은 것과 같은 값이 이 응답으로 viewer 에게 나갔다(가림은 그 값이 실리는 응답 경로 전부에).
+        backup = self.ctx.backups.status() if is_admin else {"settings": (self.ctx.backups.status() or {}).get("settings"), "redacted": True}
+        if not is_admin:
             notify = dict(settings.get("notify") or {})
             notify["hasWebhookUrl"] = bool(notify.get("webhookUrl"))
             notify["webhookUrl"] = ""
             notify["redacted"] = True
             settings = {**settings, "notify": notify}
+        # 117회차 F7: 이력 DB 를 못 읽어도(잠김 · 손상 · 디스크) 설정 화면은 열린다 — 예전에는 이 한 칸으로 응답 전체가 500 이라
+        #   백업 · 복원 · 계정 관리에 들어갈 수 없었다. 못 읽으면 null(화면은 이 값을 쓰지 않는다).
+        try:
+            history_stats = self.ctx.history.stats()
+        except sqlite3.Error:
+            history_stats = None
         return self._json({
             "success": True,
             "settings": settings,
@@ -478,11 +540,14 @@ class HubHandler(BaseHTTPRequestHandler):
                 "healthIntervalMinutes": list(HEALTH_INTERVAL_CHOICES),
             },
             "users": self.ctx.users.public_list(),
-            "backup": self.ctx.backups.status(),
-            "history": self.ctx.history.stats(),
-            "initialPasswordFile": (str(config.initial_password_file)
+            "backup": backup,
+            "history": history_stats,
+            # 35회차 R4: 초기 비밀번호 파일 경로도 데이터 폴더 절대경로다 — 비-admin 에게는 있음 여부만.
+            "initialPasswordFile": ((str(config.initial_password_file) if is_admin else True)
                                     if self.ctx.users.initial_password_present() else None),
-            "dataDir": str(self.ctx.data_dir),
+            "dataDir": str(self.ctx.data_dir) if is_admin else None,
+            # 결정(56~75 남긴 것): 로그아웃 폐기 목록을 못 믿어 기동 때 전원 세션을 끊었으면 그 사유(파일 이름 · 상태 · 시각 — 경로 없음)
+            "sessionRevokedError": self.ctx.sessions.revoked_load_error(),
         })
 
     def api_settings_section(self, section):
@@ -537,6 +602,11 @@ class HubHandler(BaseHTTPRequestHandler):
         if not actor:
             return None
         payload = self._body_dict()
+        # 반증(결정 G1b ② — 사용자 결정 '권장안대로'): admin 계정을 새로 만들 때도 요청자 본인의 현재 비밀번호를 확인한다
+        #   (세션 토큰만 가로채서는 관리자를 늘릴 수 없게 — 같은 실패 카운터 · 잠금). viewer 생성은 그대로.
+        if payload.get("role") == "admin" and not self._verify_current_password(
+                actor, payload, what="admin 계정을 만들려면", action="user.create", target=payload.get("username")):
+            return None
         users = self.ctx.users.add(payload.get("username"), payload.get("role", "viewer"),
                                    payload.get("password", ""))
         self._audit("user.create", actor=actor["username"],
@@ -544,11 +614,31 @@ class HubHandler(BaseHTTPRequestHandler):
                             "role": str(payload.get("role", "viewer"))[:16]})
         return self._json({"success": True, "users": users}, status=HTTPStatus.CREATED)
 
+    @staticmethod
+    def _user_arg(raw):
+        """사용자 라우트의 경로 조각 → 사용자명(퍼센트 디코드). 64자 넘으면 None(없는 계정 — 31회차 F1)."""
+        name = unquote(str(raw or ""), errors="strict") if raw else ""
+        return name if 0 < len(name) <= 64 else None
+
     def api_users_update(self, username):
         actor = self._require_admin()
         if not actor:
             return None
+        username = self._user_arg(username)
+        if username is None:
+            return self._error(HTTPStatus.NOT_FOUND, "사용자를 찾을 수 없습니다.")
         payload = self._body_dict()
+        # 반증(결정 G1b ②): 다른 계정을 admin 으로 올릴 때도 요청자 본인의 현재 비밀번호(중지 · viewer 로 낮추기 · 삭제는 그대로).
+        current = self.ctx.users.get(username)
+        if payload.get("role") == "admin" and current is not None and current.get("role") != "admin" \
+                and not self._verify_current_password(actor, payload, what="admin 권한을 주려면", action="user.update", target=username):
+            return None
+        # 결정(반증 G1b 남긴 것): 중지된 admin 을 다시 켜는 것(enabled false → true · 역할은 admin 그대로)도 admin 을 늘리는 동작 —
+        #   같은 확인(요청자 본인 · 같은 카운터 · 잠금). viewer 다시 켜기 · 중지 · 'viewer 로 낮추며 켜기'(결과가 admin 이 아님)는 그대로.
+        if current is not None and current.get("role") == "admin" and not current.get("enabled", True) \
+                and payload.get("enabled") is True and payload.get("role") in (None, "admin") \
+                and not self._verify_current_password(actor, payload, what="중지된 admin 계정을 다시 켜려면", action="user.update", target=username):
+            return None
         users = self.ctx.users.update(username, role=payload.get("role"),
                                       enabled=payload.get("enabled"))
         if payload.get("enabled") is False:
@@ -562,20 +652,65 @@ class HubHandler(BaseHTTPRequestHandler):
         actor = self._require_session()
         if not actor:
             return None
+        username = self._user_arg(username)
+        if username is None:
+            return self._error(HTTPStatus.NOT_FOUND, "사용자를 찾을 수 없습니다.")
         # 남의 비밀번호를 바꾸려면 admin 이어야 한다(자기 것은 누구나).
         if actor["username"] != username and actor.get("role") != "admin":
             return self._error(HTTPStatus.FORBIDDEN, "본인 비밀번호만 변경할 수 있습니다.")
         payload = self._body_dict()
+        if actor["username"] == username and not self._verify_current_password(actor, payload):
+            return None
+        # 반증(결정 G1b ②): 다른 admin 의 비밀번호 재설정도 요청자 본인의 현재 비밀번호(viewer 재설정은 그대로).
+        target = self.ctx.users.get(username) if actor["username"] != username else None
+        if target is not None and target.get("role") == "admin" and not self._verify_current_password(
+                actor, payload, what="다른 admin 계정의 비밀번호를 재설정하려면", target=username):
+            return None
         self.ctx.users.set_password(username, payload.get("password", ""))
         # 비밀번호가 바뀐 계정의 기존 세션은 끊는다.
         self.ctx.sessions.destroy_user(username)
         self._audit("user.password", actor=actor["username"], detail={"target": username})
         return self._json({"success": True, "users": self.ctx.users.public_list()})
 
+    def _verify_current_password(self, actor, payload, *, what="본인 비밀번호를 바꾸려면", action="user.password", target=None) -> bool:
+        """결정(56~75 남긴 것 · 31회차 E3): 본인 비밀번호 변경은 현재 비밀번호를 확인한다 — 예전에는 세션 토큰(브라우저 저장소 · 8시간)만
+        가로채도 비밀번호를 바꿔 계정을 영구히 가져갈 수 있었다. 확인 · 실패 카운터 · 잠금은 로그인과 같은 함수
+        (authenticate · 출발지별 lock_remaining · note_failure · note_success)를 쓴다.
+        반증(결정 G1b ②): admin 을 늘리는 관리 동작(admin 생성 · 다른 admin 재설정 · admin 으로 올리기 · 중지된 admin 다시 켜기)도 **요청자 본인**의 현재 비밀번호를 이 함수로 본다.
+        실패면 응답을 쓰고 False."""
+        client = self.client_address[0] if self.client_address else "-"
+        if not self._begin_auth_attempt(client):   # 131회차: 잠금 검사 + 진행 중인 시도 예약(로그인과 같은 규칙)
+            return False
+        verdict = None   # None = 현재 비밀번호 없음(인증하지 않았다) · True · False
+        try:
+            current = payload.get("currentPassword")
+            if isinstance(current, str) and current:
+                verdict = bool(self.ctx.users.authenticate(actor["username"], current))
+                if verdict:
+                    self.ctx.sessions.note_success(client, actor["username"])
+                else:
+                    self.ctx.sessions.note_failure(client, actor["username"])
+        finally:
+            self.ctx.sessions.end_attempt(client)
+        if verdict is None:
+            self._error(HTTPStatus.BAD_REQUEST, f"{what} 요청한 본인의 현재 비밀번호를 입력하세요.",
+                        code="current_password_required")
+            return False
+        if not verdict:
+            print(f"[auth] {action} 거절 — 요청자 현재 비밀번호 불일치 (from {client})", flush=True)
+            self._audit(action, actor=actor["username"], result="fail",
+                        detail={"target": str(target if target is not None else actor["username"])[:64], "reason": "current_mismatch"})
+            self._error(HTTPStatus.FORBIDDEN, "현재 비밀번호가 올바르지 않습니다(요청한 본인의 비밀번호).", code="current_password_invalid")
+            return False
+        return True
+
     def api_users_delete(self, username):
         actor = self._require_admin()
         if not actor:
             return None
+        username = self._user_arg(username)
+        if username is None:
+            return self._error(HTTPStatus.NOT_FOUND, "사용자를 찾을 수 없습니다.")
         if actor["username"] == username:
             return self._error(HTTPStatus.BAD_REQUEST, "로그인 중인 계정은 삭제할 수 없습니다.")
         users = self.ctx.users.delete(username)
@@ -594,28 +729,35 @@ class HubHandler(BaseHTTPRequestHandler):
                            .get("datacenterLimit", 0)})
 
     def api_dc_create(self):
-        if not self._require_admin():
+        actor = self._require_admin()
+        if not actor:
             return None
         created = self.ctx.datacenters.add(self._body_dict())
+        # 56회차 F5: README 가 약속한 '설정 변경' 감사 — 데이터센터 생성 · 수정 · 삭제 · 이동이 빠져 있었다(초기화만 남았다)
+        self._audit("datacenter.create", actor=actor["username"], detail={"id": created["id"]})
         return self._json({"success": True, "datacenter": created,
                            "datacenters": self.ctx.datacenters.all()}, status=HTTPStatus.CREATED)
 
     def api_dc_update(self, dc_id):
-        if not self._require_admin():
+        actor = self._require_admin()
+        if not actor:
             return None
         updated = self.ctx.datacenters.update(dc_id, self._body_dict())
         if not updated:
             return self._error(HTTPStatus.NOT_FOUND, "데이터센터를 찾을 수 없습니다.")
+        self._audit("datacenter.update", actor=actor["username"], detail={"id": dc_id})
         return self._json({"success": True, "datacenter": updated,
                            "datacenters": self.ctx.datacenters.all()})
 
     def api_dc_delete(self, dc_id):
-        if not self._require_admin():
+        actor = self._require_admin()
+        if not actor:
             return None
         if not self.ctx.datacenters.delete(dc_id):
             return self._error(HTTPStatus.NOT_FOUND, "데이터센터를 찾을 수 없습니다.")
         # v2.760(점검 B-07): 그 데이터센터에 묶인 바로가기는 '전체'로 옮긴다(카테고리 삭제와 같은 규칙).
         moved = self.ctx.shortcuts.reassign_missing_datacenters(self.ctx.datacenters.ids())
+        self._audit("datacenter.delete", actor=actor["username"], detail={"id": dc_id, "movedShortcuts": moved})
         return self._json({"success": True, "datacenters": self.ctx.datacenters.all(),
                            "shortcuts": self.ctx.shortcuts.all(), "movedShortcuts": moved})
 
@@ -623,20 +765,23 @@ class HubHandler(BaseHTTPRequestHandler):
         actor = self._require_admin()
         if not actor:
             return None
-        self._audit("datacenter.reset", actor=actor["username"])
         datacenters = self.ctx.datacenters.reset()
+        self._audit("datacenter.reset", actor=actor["username"])   # 47회차 #1: 거절(손상 · 읽기 오류)이면 남기지 않는다 — 성공한 뒤에
         moved = self.ctx.shortcuts.reassign_missing_datacenters({dc["id"] for dc in datacenters})
         return self._json({"success": True, "datacenters": datacenters,
                            "shortcuts": self.ctx.shortcuts.all(), "movedShortcuts": moved})
 
     def api_dc_move(self, dc_id):
-        if not self._require_admin():
+        actor = self._require_admin()
+        if not actor:
             return None
         items = self.ctx.datacenters.move(dc_id, self._move_delta())
         if items is None:
             # 이미 맨 위/맨 아래 — 오류가 아니라 '변경 없음' 이다.
             return self._json({"success": True, "moved": False,
                                "datacenters": self.ctx.datacenters.all()})
+        # '표시 개수 N' 이 앞에서 N곳을 자르므로 순서 변경은 공개 화면에 보이는 센터를 바꾼다 — 설정 변경으로 남긴다.
+        self._audit("datacenter.move", actor=actor["username"], detail={"id": dc_id})
         return self._json({"success": True, "moved": True, "datacenters": items})
 
     def _move_delta(self) -> int:
@@ -664,11 +809,13 @@ class HubHandler(BaseHTTPRequestHandler):
                            "categories": self.ctx.categories.all()}, status=HTTPStatus.CREATED)
 
     def api_cat_update(self, cat_id):
-        if not self._require_admin():
+        actor = self._require_admin()
+        if not actor:
             return None
         updated = self.ctx.categories.update(cat_id, self._body_dict())
         if not updated:
             return self._error(HTTPStatus.NOT_FOUND, "카테고리를 찾을 수 없습니다.")
+        self._audit("category.update", actor=actor["username"], detail={"id": cat_id})   # 56회차 F5
         return self._json({"success": True, "category": updated,
                            "categories": self.ctx.categories.all()})
 
@@ -686,12 +833,14 @@ class HubHandler(BaseHTTPRequestHandler):
                            "shortcuts": self.ctx.shortcuts.all(), "movedShortcuts": moved})
 
     def api_cat_move(self, cat_id):
-        if not self._require_admin():
+        actor = self._require_admin()
+        if not actor:
             return None
         items = self.ctx.categories.move(cat_id, self._move_delta())
         if items is None:
             return self._json({"success": True, "moved": False,
                                "categories": self.ctx.categories.all()})
+        self._audit("category.move", actor=actor["username"], detail={"id": cat_id})   # 56회차 F5
         return self._json({"success": True, "moved": True, "categories": items})
 
     def api_cat_reset(self):
@@ -795,16 +944,25 @@ class HubHandler(BaseHTTPRequestHandler):
         return self._json({"success": True, "moved": True, "shortcuts": items})
 
     def api_shortcut_delete(self, shortcut_id):
-        if not self._require_session():
+        user = self._require_session()
+        if not user:
             return None
+        before = self.ctx.shortcuts.get(shortcut_id)
         if not self.ctx.shortcuts.delete(shortcut_id):
             return self._error(HTTPStatus.NOT_FOUND, "바로가기를 찾을 수 없습니다.")
+        # 56회차 F5: 지우는 동작은 남긴다(viewer 도 할 수 있다) — 같은 꼴의 '교체' 가져오기(shortcuts.import)는 이미 남기는데 삭제 · 초기화만 빠져 있었다
+        self._audit("shortcut.delete", actor=user["username"],
+                    detail={"id": shortcut_id, "name": (before or {}).get("name", "")})
         return self._json({"success": True, "shortcuts": self.ctx.shortcuts.all()})
 
     def api_shortcut_reset(self):
-        if not self._require_session():
+        user = self._require_session()
+        if not user:
             return None
-        return self._json({"success": True, "shortcuts": self.ctx.shortcuts.reset()})
+        before = len(self.ctx.shortcuts.all())
+        shortcuts = self.ctx.shortcuts.reset()
+        self._audit("shortcuts.reset", actor=user["username"], detail={"removed": before, "added": len(shortcuts)})   # 56회차 F5
+        return self._json({"success": True, "shortcuts": shortcuts})
 
     def _resolve_import_category(self, user, value):
         """가져오기 일괄 카테고리(v2.219) — id/라벨로 찾고, 없으면 admin 에 한해 즉석 생성.
@@ -821,6 +979,10 @@ class HubHandler(BaseHTTPRequestHandler):
         if user.get("role") != "admin":
             return None, self._error(HTTPStatus.BAD_REQUEST,
                                      f"카테고리가 없습니다: {text} (생성은 admin 만 가능)")
+        cat_err = self.ctx.categories.load_error()
+        if cat_err:
+            # 47회차 #1: 분류 파일을 못 읽는 동안의 거절을 '슬러그 충돌' 로 오인해 접미를 붙여 수십 번 다시 만들지 않는다
+            return None, self._error(HTTPStatus.BAD_REQUEST, load_error_text("categories.json", cat_err))
         try:
             created = self.ctx.categories.add({"label": text})
         except ValidationError:
@@ -975,7 +1137,12 @@ class HubHandler(BaseHTTPRequestHandler):
             return self._error(HTTPStatus.NOT_FOUND, f"파일이 없습니다: {name}")
         if path.stat().st_size > self.IMPORT_MAX_BYTES:
             return self._error(HTTPStatus.BAD_REQUEST, "파일이 너무 큽니다(최대 2MB).")
-        text = path.read_text(encoding="utf-8-sig")  # 엑셀 BOM 허용
+        try:
+            text = path.read_text(encoding="utf-8-sig")  # 엑셀 BOM 허용
+        except OSError as exc:
+            # 56회차 개선: 권한 오류(root 가 올린 0600 파일 등)는 예전에 _dispatch 의 '서버 내부 오류'(500)로 떨어져 원인을 알 수 없었다
+            return self._error(HTTPStatus.BAD_REQUEST,
+                               f"파일을 읽지 못했습니다: {name} ({exc.strerror or type(exc).__name__}) — 파일 소유자 · 권한을 확인하세요.")
         if name.lower().endswith(".csv"):
             entries = csvio.parse_csv(text)
         else:
@@ -983,6 +1150,9 @@ class HubHandler(BaseHTTPRequestHandler):
                 parsed = json.loads(text)
             except ValueError as exc:
                 return self._error(HTTPStatus.BAD_REQUEST, f"JSON 해석 실패: {exc}")
+            except RecursionError:
+                return self._error(HTTPStatus.BAD_REQUEST, "JSON 해석 실패: 중첩이 너무 깊습니다.")
+            _reject_lone_surrogates(parsed)   # 117회차 F3: 요청 본문과 같은 경계
             entries = parsed.get("shortcuts") if isinstance(parsed, dict) else parsed
         if not isinstance(entries, list) or not entries:
             return self._error(HTTPStatus.BAD_REQUEST,
@@ -1004,12 +1174,15 @@ class HubHandler(BaseHTTPRequestHandler):
 
         # '..' 이나 절대경로로 STATIC_DIR 밖을 읽지 못하게 정규화 후 재확인한다.
         relative = posixpath.normpath(path).lstrip("/")
-        candidate = (STATIC_DIR / relative).resolve()
         try:
+            candidate = (STATIC_DIR / relative).resolve()
             candidate.relative_to(STATIC_DIR.resolve())
-        except ValueError:
+            servable = candidate.suffix.lower() in STATIC_SUFFIXES and candidate.is_file()
+        except (ValueError, OSError):
+            # 56회차 F8(재현): NUL 이 든 경로(ValueError)·너무 긴 파일 이름(ENAMETOOLONG)은 이 함수가 _dispatch 의 try 밖이라
+            #   응답 없이 연결이 끊기고 요청 줄 전체가 든 traceback 이 로그에 쌓였다(미인증 요청 한 줄 — v2.768 R3-C3-3 과 같은 꼴).
             return self._error(HTTPStatus.NOT_FOUND, "없는 경로입니다.")
-        if candidate.suffix.lower() not in STATIC_SUFFIXES or not candidate.is_file():
+        if not servable:
             # SPA 해시 라우팅(#/settings 등)은 서버에 오지 않지만, 오탈자 경로는
             # 404 대신 첫 화면으로 보내 사용자가 막히지 않게 한다.
             return self._send_file(STATIC_DIR / "index.html")
@@ -1067,10 +1240,10 @@ ROUTES = [
 
     ("GET", _route(r"/api/settings/users"), HubHandler.api_users_list),
     ("POST", _route(r"/api/settings/users"), HubHandler.api_users_create),
-    ("POST", _route(r"/api/settings/users/" + ID_PATTERN + r"/password"),
+    ("POST", _route(r"/api/settings/users/" + USER_PATTERN + r"/password"),
      HubHandler.api_users_password),
-    ("PUT", _route(r"/api/settings/users/" + ID_PATTERN), HubHandler.api_users_update),
-    ("DELETE", _route(r"/api/settings/users/" + ID_PATTERN), HubHandler.api_users_delete),
+    ("PUT", _route(r"/api/settings/users/" + USER_PATTERN), HubHandler.api_users_update),
+    ("DELETE", _route(r"/api/settings/users/" + USER_PATTERN), HubHandler.api_users_delete),
 
     ("GET", _route(r"/api/settings/datacenters"), HubHandler.api_dc_list),
     ("POST", _route(r"/api/settings/datacenters/reset"), HubHandler.api_dc_reset),
@@ -1119,20 +1292,54 @@ class HubServer(ThreadingHTTPServer):
     allow_reuse_address = True
     request_queue_size = 64
 
-    def __init__(self, address, handler, ctx, max_connections: int = 64):
+    def __init__(self, address, handler, ctx, max_connections: int = 64, max_per_client=None):
         super().__init__(address, handler)
         self.ctx = ctx
         self._slots = threading.BoundedSemaphore(max_connections)
+        # 전체 점검 124회차(117회차 결정 D1 — 재현: 헤더를 흘리는 연결 64개가 소켓 시한을 지나서도 전체 상한을 쥐었다): 출발지(IP)당 동시 연결 상한.
+        #   한 출발지가 쥘 수 있는 자리를 전체보다 작게 두어 나머지 자리로 다른 사용자가 붙는다. 여러 출발지에서 나눠 여는 공격은 막지 못한다(앞단 프록시의 일).
+        per = config.max_conn_per_client if max_per_client is None else max_per_client
+        self._per_client_max = max(0, int(per))   # 0 = 끔
+        self._per_client = {}
+        self._per_client_lock = threading.Lock()
+
+    def _enter_client(self, client) -> bool:
+        if not self._per_client_max:
+            return True
+        with self._per_client_lock:
+            count = self._per_client.get(client, 0)
+            if count >= self._per_client_max:
+                return False
+            self._per_client[client] = count + 1
+            return True
+
+    def _leave_client(self, client) -> None:
+        if not self._per_client_max:
+            return
+        with self._per_client_lock:
+            count = self._per_client.get(client, 0) - 1
+            if count > 0:
+                self._per_client[client] = count
+            else:
+                self._per_client.pop(client, None)   # 0 이면 지운다 — 출발지 수만큼 자라지 않게
 
     def process_request_thread(self, request, client_address):
-        if not self._slots.acquire(timeout=5):
-            # 상한을 넘으면 새 연결을 기다리게 하지 않고 즉시 끊는다(큐가 무한정 늘지 않게).
+        client = client_address[0] if client_address else "-"
+        if not self._enter_client(client):
+            # 이 출발지가 이미 상한만큼 연결을 쥐고 있다 — 기다리게 하지 않고 끊는다(자리가 나면 다시 붙는다).
             self.shutdown_request(request)
             return
         try:
-            super().process_request_thread(request, client_address)
+            if not self._slots.acquire(timeout=5):
+                # 상한을 넘으면 새 연결을 기다리게 하지 않고 즉시 끊는다(큐가 무한정 늘지 않게).
+                self.shutdown_request(request)
+                return
+            try:
+                super().process_request_thread(request, client_address)
+            finally:
+                self._slots.release()
         finally:
-            self._slots.release()
+            self._leave_client(client)
 
 
 def create_server(host: str = None, port: int = None, ctx=None) -> HubServer:

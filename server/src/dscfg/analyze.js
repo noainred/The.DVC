@@ -58,7 +58,8 @@ export function analyzePaths(hosts, opt = {}) {
     rows.push({ id: h.id, name: h.name, vcenterId: h.vcenterId, vcenterName: opt.vcName?.get(h.vcenterId) || h.vcenterId, cluster: h.cluster, at: h.hcfg.at ?? null, ...mp });
   }
   rows.sort((a, b) => (b.dead > 0) - (a.dead > 0) || (b.singlePath > 0) - (a.singlePath > 0) || b.dead - a.dead || String(a.name).localeCompare(String(b.name)));
-  return { coverage, totals, policies, matched: rows.length, rows: rows.slice(0, ROWS_MAX), omitted: Math.max(0, rows.length - ROWS_MAX) };
+  const rowsMax = opt.rowsMax ?? ROWS_MAX;   // v3.22.0: 요약(dscfg/summary.js)은 상한 없이 — 잘린 목록으로 세지 않는다
+  return { coverage, totals, policies, matched: rows.length, rows: rows.slice(0, rowsMax), omitted: Math.max(0, rows.length - rowsMax) };
 }
 
 /** vSAN 클러스터 — vSAN 이 켜진 호스트가 있는 클러스터만. 멤버 수 < vSAN 호스트 수면 분할(partition) 후보. */

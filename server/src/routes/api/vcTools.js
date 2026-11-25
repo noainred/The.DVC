@@ -1,6 +1,11 @@
 // vCenter 목록 + 중복IP/솔루션/VMtools/스냅샷 도구 — api.js(구 2,445줄) 분할(v2.283.0). 본문은 원본 그대로, 등록 순서는 api.js 호출 순서가 보존한다.
-import { scopedVcenterIds } from '../../auth/scope.js';
-import { requirePerm } from '../../auth/auth.js'; // v2.479(감사 S-4)
+import { scopedVcenterIds, inUserScope, inUserWriteScope, writeScopedVcenterIds } from '../../auth/scope.js';
+import { requirePerm, requireRole } from '../../auth/auth.js'; // v2.479(감사 S-4)
+import { isAdminDetailUser } from '../../auth/demoGuest.js';
+import { logAudit } from '../../audit.js';
+import { loadHolds, setHold, releaseHolds, activeHold, holdKey, HOLD_DAYS_MAX, HOLDS_MAX, holdsGeneration } from '../../vmhygiene/holds.js';
+import { snapshotCreators } from '../../snaphist/creators.js';
+import { kickSnapBackfill } from '../../veeam/snapWarm.js';   // 153회차: 이벤트 DB 가 31일을 덮지 못한 vCenter 가 있으면 백필을 시작한다(Veeam 화면과 같은 경로)
 import { store } from '../../store.js';
 import { sortByOrder } from '../../vcenter/order.js';
 import { nsxStore } from '../../nsx/store.js';
@@ -8,6 +13,31 @@ import { visibleNsxManagers } from '../../nsx/scope.js';
 import { listDatacenters, datacenterOfVcenter } from '../../datacenter/store.js';
 import { vcListUnread, vcListItems, LIST_UNREAD_TEXT } from '../../corelicense/analyze.js'; // v2.742(VC-06): 확장 목록을 읽었는가 — 판정 한 벌
 import { isAdminReq } from '../../auth/addressMask.js';
+import { vmToolsDistribution, TOOLS_IDS_MAX } from '../../inventory/vmToolsDist.js';
+import { snapshotToolView, readableVcenterIds, holdRows } from '../../snaphist/view.js';
+import { historyStatus, historySeries, goneList, vmHistory, dayAgo, clampDays } from '../../snaphist/history.js';
+import { snapHistGeneration } from '../../snaphist/db.js';
+import { loadVmHygieneSettings } from '../../vmhygiene/settings.js';
+import { loadVcenterConfig } from '../../config.js';
+import { numOrNull } from '../../util/numOrNull.js';
+import { memoJson, scopeKey, vcenterPickOf, vcenterPickKey } from './shared.js';
+
+/**
+ * 반증 r3350: 여러 건 풀기 감사 줄의 내용 — 이름을 **이름 경계에서** 자르고 남은 수를 밝힌다. 예전 `.slice(0, 500)` 은 이름 가운데를 표시 없이 잘라
+ *   (audit.js ‘조용한 절단 금지’) 잘린 조각이 실제 VM 이름처럼 남았고, 몇 건이 빠졌는지 detail 만으로는 알 수 없었다.
+ */
+const RELEASE_AUDIT_MAX = 500;
+function releaseAuditDetail(released) {
+  const names = (released || []).map((h) => `${h.vcenterId}/${h.vmName || h.vmId}`);
+  let out = '보류 풀기(여러 건) — ';
+  let i = 0;
+  for (; i < names.length; i += 1) {
+    const add = (i ? ', ' : '') + names[i];
+    if (i && out.length + add.length > RELEASE_AUDIT_MAX - 16) break;   // 첫 이름은 늘 싣는다(holds.js 가 id · 이름을 200자로 자른다)
+    out += add;
+  }
+  return i < names.length ? `${out} … 외 ${names.length - i}건` : out;
+}
 
 export function registerVcTools(api) {
 
@@ -134,38 +164,156 @@ api.get('/tools/vmtools', requirePerm('tools'), (req, res) => {
   const allowed = scopedVcenterIds(req.user, snap);
   if (allowed) vms = vms.filter((v) => allowed.has(v.vcenterId));
   if (req.query.vcenterId) vms = vms.filter((v) => v.vcenterId === req.query.vcenterId);
-  const map = new Map();
-  for (const v of vms) {
-    const ver = v.toolsVersion || '없음';
-    if (!map.has(ver)) map.set(ver, { version: ver, count: 0, running: 0, outdated: 0, notRunning: 0, ids: [] });
-    const e = map.get(ver); e.count++;
-    if (e.ids.length < 2000) e.ids.push(v.id);
-    if (v.toolsStatus === 'RUNNING') e.running++;
-    else if (v.toolsStatus === 'OUTDATED') e.outdated++;
-    else e.notRunning++;
-  }
+  // 전체 점검 32회차 F1 · F3: 집계는 inventory/vmToolsDist.js 하나(오래됨 = VM 신호와 같은 집합 · 미수집 따로 · 업그레이드 id 는 켜진 VM · 템플릿 제외).
   res.json({
     scannedVms: vms.length,
-    versions: [...map.values()].sort((a, b) => b.count - a.count),
+    idsMax: TOOLS_IDS_MAX,
+    versions: vmToolsDistribution(vms),
   });
 });
 
 // VMs that have snapshots (optionally per vCenter).
-api.get('/tools/snapshots', requirePerm('tools'), (req, res) => {
-  const snap = store.get();
-  let vms = snap.vms.filter((v) => (v.snapshotCount || 0) > 0);
+// v3.26.0(설계 docs/design/snapshots): 응답은 snaphist/view.js 하나가 만든다 — 판정은 hygieneFindings(‘오래된 스냅샷’ 카드와 같은 함수) ·
+//   못 읽은 크기 · 생성일은 null · 법인 = DataCenter · 고른 법인(vcenterId 하나 또는 vcenterIds 목록 — 범위 뒤에 건다).
+//   예전 키(count · totalSizeGB · items[].snapshotSizeGB …)는 그대로 둔다. 범위가 먼저다(scopedVcenterIds — 요청 필터보다 먼저).
+api.get('/tools/snapshots', requirePerm('tools'), (req, res) => memoJson(req, res, 'tools-snapshots', (snap) => {
+    let dcNames = new Map();
+    try { dcNames = new Map(listDatacenters().map((d) => [d.id, d.name || d.id])); } catch { /* 목록 실패 — vCenter 이름으로 묶는다 */ }
+    let hygiene = null;
+    try { hygiene = loadVmHygieneSettings(); } catch { hygiene = null; }
+    return snapshotToolView(snap, {
+      allowed: scopedVcenterIds(req.user, snap), pick: vcenterPickOf(req.query, snap), hygiene, now: Date.now(),
+      dcOf: (id) => datacenterOfVcenter(id), dcNames,
+    });
+  }, { extraKey: `${scopeKey(req.user, store.get())}|${vcenterPickKey(req.query, store.get())}|h${holdsGeneration()}`, ttlMs: 20_000 }));   // 보류를 바꾸면 곧바로 다시 계산
+
+// v3.26.0 스냅샷 이력(snaphist — 하루 1번 기록). 범위 → 고른 법인 순으로 vCenter 를 고른 뒤 그 vCenter 의 기록만 읽는다.
+//   부분 합은 추이에 넣지 않는다(빠진 vCenter 가 있는 날은 null + missing — snaphist/history.js aggregateDays).
+const snapCorpOf = () => {
+  let dcNames = new Map();
+  try { dcNames = new Map(listDatacenters().map((d) => [d.id, d.name || d.id])); } catch { /* vCenter 로 묶는다 */ }
+  return (id) => {
+    let dc = '';
+    try { dc = String(datacenterOfVcenter(id) || ''); } catch { dc = ''; }
+    return { corpId: dc ? `dc:${dc}` : `vc:${id}`, corpName: dc ? (dcNames.get(dc) || dc) : null };
+  };
+};
+api.get('/tools/snapshots/history', requirePerm('tools'), (req, res) => memoJson(req, res, 'tools-snapshots-history', async (snap) => {
   const allowed = scopedVcenterIds(req.user, snap);
-  if (allowed) vms = vms.filter((v) => allowed.has(v.vcenterId));
-  if (req.query.vcenterId) vms = vms.filter((v) => v.vcenterId === req.query.vcenterId);
-  const items = vms.map((v) => ({
-    id: v.id, name: v.name, vcenterId: v.vcenterId, host: v.host, cluster: v.cluster,
-    snapshotCount: v.snapshotCount, snapshotSizeGB: v.snapshotSizeGB || 0,
-    powerState: v.powerState, guestOS: v.guestOS,
-  }));
-  res.json({
-    count: items.length,
-    totalSizeGB: Math.round(items.reduce((a, v) => a + (v.snapshotSizeGB || 0), 0) * 10) / 10,
-    items,
-  });
+  const pick = vcenterPickOf(req.query, snap);
+  const vcIds = new Set((snap.vcenters || []).map((v) => String(v.id)).filter((id) => (!allowed || allowed.has(id)) && (!pick || pick.has(id))));
+  const days = clampDays(req.query.days, 30);
+  const now = Date.now();
+  const status = await historyStatus();
+  if (!status.available) return { ok: true, status };
+  const [series, gone, ago] = await Promise.all([
+    historySeries({ vcIds, days, now, corpOf: snapCorpOf() }),
+    goneList({ vcIds, sinceTs: now - days * 86_400_000 }),
+    // 138회차: 7일 변화는 **지금 값을 읽은** vCenter 만(view.vcReadIssue — 못 읽은 vCenter 의 7일 전 VM 을 ‘다 지운 VM’ 으로 세지 않는다)
+    dayAgo({ vcIds: readableVcenterIds(snap, vcIds), n: 7, now }),
+  ]);
+  return { ok: true, status, ...(series || {}), gone: gone?.items || [], goneMore: !!gone?.more, ago7: ago };
+}, { extraKey: `${scopeKey(req.user, store.get())}|${vcenterPickKey(req.query, store.get())}|g${snapHistGeneration()}`, ttlMs: 60_000 }));
+
+// v3.28.0 만든 계정 — 스냅샷 이벤트 DB(31일). 계정 이름은 관리자 판본(isAdminDetailUser)에만 — 그 밖에는 수만 싣고 userMasked(vcInfo 작업 사용자와 같은 규칙).
+api.get('/tools/snapshots/creators', requirePerm('tools'), (req, res) => memoJson(req, res, 'tools-snapshots-creators', async (snap) => {
+  const allowed = scopedVcenterIds(req.user, snap);
+  const pick = vcenterPickOf(req.query, snap);
+  const vcIds = new Set((snap.vcenters || []).map((v) => String(v.id)).filter((id) => (!allowed || allowed.has(id)) && (!pick || pick.has(id))));
+  let exclude = [];
+  try { exclude = loadVmHygieneSettings().creatorExclude || []; } catch { exclude = []; }
+  const r = await snapshotCreators({ snap, vcIds, exclude });
+  // 153회차: 'partial'(31일을 다 덮지 못함)이 있으면 백필을 시작한다 — 기다리지 않는다 · 진행 중이면 그것을 쓴다(기동 뒤에 등록한 vCenter 는 Veeam 화면을 열기 전까지 덮음이 없었다)
+  //   158회차: 백필이 메울 수 있는 틈이 있을 때만(needBackfill — 덮음 기록이 31일에 못 미침). 'partial' 에는 백필이 못 메우는 것(모은 지 31일이 안 된 vCenter)도 있다.
+  if (r.needBackfill) kickSnapBackfill();
+  const admin = isAdminDetailUser(req.user);
+  const byVm = {};
+  for (const [k, c] of Object.entries(r.byVm)) byVm[k] = { user: admin ? c.user : null, ts: c.ts };
+  // 153회차: coveredFrom — 이벤트 DB 가 31일을 다 덮지 못한 vCenter('partial')의 '빠짐없이 가진 가장 이른 시각'(모르면 null)
+  return { ok: true, byVm, vcenters: r.vcenters, coveredFrom: r.coveredFrom, ambiguous: r.ambiguous, listed: r.listed, excludeCount: exclude.length, ...(admin ? {} : { userMasked: Object.keys(byVm).length > 0 }), windowDays: 31 };
+}, { extraKey: `${scopeKey(req.user, store.get())}|${vcenterPickKey(req.query, store.get())}|${isAdminDetailUser(req.user) ? 'a' : 'u'}|s${loadVmHygieneSettings().rev}`, ttlMs: 300_000 }));
+
+// v3.28.0 스냅샷 보류(기한 있는 예외 — vmhygiene/holds.js). 조회는 범위 안 보류만 · 건 계정은 관리자 판본만.
+//   쓰기는 관리자(requireRole) · 조회 범위 밖 vCenter 는 404 → 쓰기 범위 밖은 403(server/CLAUDE.md writeVcenters 규약) · 감사 기록.
+//   v3.35.0(시안 ⑫ 보류 목록): 보류마다 지금 상태(스냅샷 있음 · 없음 · VM 없음 · 확인 못 함 — snaphist/view.js holdRows)를 싣는다 · 고른 법인(vcenterIds)도 거른다.
+//     상한 대비 전체 수(total)는 전체 범위 계정에만(범위 밖 보류 수를 흘리지 않는다). 무거운 조회가 아니라 캐시하지 않는다(들어올 때 · 바꾼 뒤 한 번).
+api.get('/tools/snapshots/holds', requirePerm('tools'), (req, res) => {
+  const snap = store.get();
+  const allowed = scopedVcenterIds(req.user, snap);
+  const r = loadHolds();
+  // 등록부를 못 읽었으면 null — '등록에서 뺀 vCenter' 라고 단정하지 않는다. 반증 r3350(재현): JSON 손상이면 loadVcenterConfig 가 readError 없이
+  //   { file: null, vcenters: [] } 를 줘 모든 보류가 ‘VM 없음 · vCenter 등록 삭제’ 로 나왔다(풀기를 권한다) — 등록부 파일을 찾지 못한 것도 모름으로 본다.
+  let registered = null;
+  try { const c = loadVcenterConfig(); if (!c?.readError && c?.file) registered = new Set((c?.vcenters || []).filter((v) => v && v.id != null).map((v) => String(v.id))); } catch { registered = null; }
+  let dcNames = new Map();
+  try { dcNames = new Map(listDatacenters().map((d) => [d.id, d.name || d.id])); } catch { /* vCenter 이름으로 묶는다 */ }
+  const holds = holdRows(snap, r.holds, { allowed, writable: writeScopedVcenterIds(req.user, snap), pick: vcenterPickOf(req.query, snap), now: Date.now(), dcOf: (id) => datacenterOfVcenter(id), dcNames, registered,
+    admin: isAdminDetailUser(req.user) });
+  res.json({ ok: true, holds, unreadable: r.unreadable, daysMax: HOLD_DAYS_MAX, max: HOLDS_MAX, total: allowed ? null : r.holds.length });
+});
+api.put('/tools/snapshots/holds', requireRole('admin'), requirePerm('tools'), (req, res) => {
+  const snap = store.get();
+  const b = req.body && typeof req.body === 'object' ? req.body : {};
+  const vcenterId = typeof b.vcenterId === 'string' ? b.vcenterId : '';
+  const vmId = typeof b.vmId === 'string' ? b.vmId : '';
+  const vm = vcenterId && vmId ? (snap.vms || []).find((v) => String(v.vcenterId) === vcenterId && String(v.id) === vmId) : null;
+  // v3.35.0(시안 ⑫ — 153회차가 남긴 것): **풀기(0일)** 는 VM 이 인벤토리에 없어도 — 그 보류가 지금 목록에 있으면(지워진 VM · 옮겨진 VM · 등록에서 뺀 vCenter).
+  //   예전에는 404 라 기한(최대 90일)까지 상한(2,000건)을 차지했다. 걸기 · 연장은 지금처럼 VM 이 있어야 한다. 조회 밖은 어느 쪽이든 404(존재 은닉).
+  const held = !vm && vcenterId && vmId && numOrNull(b.days) === 0 ? activeHold(vcenterId, vmId) : null;
+  if ((!vm && !held) || !inUserScope(req.user, snap, vcenterId)) return res.status(404).json({ ok: false, reason: '찾을 수 없습니다.' });
+  if (!inUserWriteScope(req.user, snap, vcenterId)) return res.status(403).json({ ok: false, reason: '이 vCenter 는 쓰기 범위 밖입니다.' });
+  const r = setHold({ vcenterId, vmId, vmName: vm?.name || held?.vmName || '', days: b.days, reason: typeof b.reason === 'string' ? b.reason : '' }, req.user?.username);
+  if (!r.ok) return res.status(r.status).json({ ok: false, reason: r.reason });
+  logAudit({ user: req.user?.username, action: 'snapshot.hold', target: `${vcenterId}/${vm?.name || held?.vmName || vmId}`,
+    detail: r.hold ? `${b.days}일 보류 — ${r.hold.reason}` : vm ? '보류 풀기' : '보류 풀기(VM 이 인벤토리에 없음)', ip: req.ip });
+  res.json({ ok: true, hold: r.hold });
+});
+
+// v3.35.0(시안 ⑫ 보류 목록 — ‘고른 것 풀기’): 여러 건을 한 번에 푼다(파일은 한 번만 쓴다). 관리자 · 보류마다 조회 밖 또는 목록에 없음 404 → 쓰기 밖 403 —
+//   하나라도 걸리면 **아무것도 풀지 않는다**(일부만 풀린 상태를 만들지 않는다). VM 이 인벤토리에 없어도 풀 수 있다(위 PUT 의 풀기와 같다) · 감사 기록 한 줄.
+api.post('/tools/snapshots/holds/release', requireRole('admin'), requirePerm('tools'), (req, res) => {
+  const snap = store.get();
+  const list = req.body && typeof req.body === 'object' ? req.body.keys : null;
+  if (!Array.isArray(list) || !list.length || list.length > HOLDS_MAX) {
+    return res.status(400).json({ ok: false, reason: `풀 보류 목록(keys)이 비었거나 ${HOLDS_MAX}건을 넘습니다.`, field: 'keys' });
+  }
+  const seen = new Set(); const keys = [];
+  for (const k of list) {
+    if (!k || typeof k !== 'object' || typeof k.vcenterId !== 'string' || typeof k.vmId !== 'string' || !k.vcenterId || !k.vmId) {
+      return res.status(400).json({ ok: false, reason: '‘keys’ 는 { vcenterId, vmId }(글자) 목록이어야 합니다.', field: 'keys', code: 'not-text' });
+    }
+    const hk = holdKey(k.vcenterId, k.vmId);
+    if (!seen.has(hk)) { seen.add(hk); keys.push({ vcenterId: k.vcenterId, vmId: k.vmId }); }
+  }
+  const cur = loadHolds();
+  if (cur.unreadable) return res.status(503).json({ ok: false, reason: '보류 목록 파일을 읽지 못해 저장하지 않습니다 — 파일을 확인한 뒤 다시 시도하세요.' });
+  const active = new Set(cur.holds.map((h) => holdKey(h.vcenterId, h.vmId)));
+  const miss = keys.filter((k) => !inUserScope(req.user, snap, k.vcenterId) || !active.has(holdKey(k.vcenterId, k.vmId))).length;
+  if (miss) return res.status(404).json({ ok: false, reason: `찾을 수 없는 보류가 ${miss}건 있어 아무것도 풀지 않았습니다 — 이미 풀렸거나 기한이 지났을 수 있습니다(목록을 다시 받아 주세요).`, missing: miss });
+  const ro = keys.filter((k) => !inUserWriteScope(req.user, snap, k.vcenterId)).length;
+  if (ro) return res.status(403).json({ ok: false, reason: `쓰기 범위 밖 vCenter 의 보류가 ${ro}건 있어 아무것도 풀지 않았습니다.` });
+  const r = releaseHolds(keys);
+  if (!r.ok) return res.status(r.status).json({ ok: false, reason: r.reason });
+  if (r.released.length) {
+    logAudit({ user: req.user?.username, action: 'snapshot.hold', target: `${r.released.length}건`, detail: releaseAuditDetail(r.released), ip: req.ip });
+  }
+  res.json({ ok: true, released: r.released.length });
+});
+
+api.get('/tools/snapshots/history/vm', requirePerm('tools'), async (req, res) => {
+  const snap = store.get();
+  const vcenterId = typeof req.query.vcenterId === 'string' ? req.query.vcenterId : '';
+  const vmId = typeof req.query.vmId === 'string' ? req.query.vmId.slice(0, 200) : '';
+  // 범위 밖 vCenter 는 404(존재 은닉) — scopedVcenterIds 교집합과 같은 판정(inUserScope)
+  if (!vcenterId || !vmId || !inUserScope(req.user, snap, vcenterId) || !(snap.vcenters || []).some((v) => String(v.id) === vcenterId)) {
+    return res.status(404).json({ ok: false, reason: '찾을 수 없습니다.' });
+  }
+  try {
+    const h = await vmHistory({ vcenterId, vmId, days: clampDays(req.query.days, 30) });
+    if (!h) return res.json({ ok: true, available: false });
+    res.json({ ok: true, available: true, ...h });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 200) });
+  }
 });
 }

@@ -99,3 +99,35 @@ export function selectRows(rows, report, { lines = null, requireTested = null } 
   }
   return { picked, skipped };
 }
+
+/**
+ * 결정(78 남긴 것 ③ — CSV 빈 칸 계약, 사용자 '권장안대로'): 가져오기 **수정 행**의 빈 칸(또는 파일에 없는 열)은 저장값을 유지하고,
+ *   값을 지우려면 `-` 하나(EMPTY_MARK)로만 적는다. 새 장비 행은 예전 그대로(빈 칸 · `-` 모두 기본값). 파서가 행에 `_blank`
+ *   (빈 칸이었던 필드 이름 — `-` 는 넣지 않는다)를 싣고, 라우트가 `fillBlankFromSaved` 로 수정 행의 그 필드를 저장값으로 채운다.
+ *   검증 · 드라이런 · 연결 테스트 · 저장 **전에** 한 번 부른다(모든 경로가 같은 행을 본다 — 드라이런 통과 = 실제 저장 성공 · 입력 검증이 빈 계정을 '누락' 으로 보지 않는다).
+ *   예전에는 빈 agent 한 칸이 엣지 위임 장비를 중앙 직접 수집으로 바꾸고, 빈 enabled 가 꺼 둔 장비를 켜고, 빈 note · 법인이 값을 지웠다.
+ *
+
+ * @param {Array<object>} rows  파싱된 행(`_blank` 가 있으면 그 필드만 채운다)
+ * @param {(row:object) => (object|null|undefined)} findSaved  그 등록부의 멱등 키로 찾은 저장 장비(비밀 없음 — listDevices 결과)
+ * @param {Record<string, (saved:object) => any>} fromSaved  행 필드 → 저장값에서 행 값 만들기(예 datacenter ← saved.datacenterId)
+ * @returns {Array<object>} 새 배열(채운 행은 사본 + `_kept`: 채운 필드)
+ */
+export function fillBlankFromSaved(rows, findSaved, fromSaved = {}) {
+  return (Array.isArray(rows) ? rows : []).map((row) => {
+    const blank = Array.isArray(row?._blank) ? row._blank : [];
+    if (!blank.length) return row;
+    const saved = findSaved(row);
+    if (!saved) return row;
+    const out = { ...row };
+    const kept = [];
+    for (const f of blank) {
+      const get = fromSaved[f];
+      if (typeof get !== 'function') continue;
+      out[f] = get(saved);
+      kept.push(f);
+    }
+    if (kept.length) out._kept = kept;
+    return out;
+  });
+}

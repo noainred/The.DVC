@@ -18,6 +18,10 @@ describe('metricErrorState', () => {
     const s = metricErrorState({ body: { authStopped: true, attempts: null, since: '' } });
     expect(s.authStopped.attempts).toBe(null);
     expect(s.authStopped.since).toBe(null);
+    // v3.10.9: 공백 문자열 · 배열도 0 이 아니다(예전 손 판정은 Number('  ') === 0 · Number([]) === 0 으로 통과시켰다).
+    const w = metricErrorState({ body: { authStopped: true, attempts: '  ', since: [] } });
+    expect(w.authStopped.attempts).toBe(null);
+    expect(w.authStopped.since).toBe(null);
   });
 
   it('다른 오류(502·네트워크)는 정지가 아니다 — 자동 갱신을 멈추지 않는다', () => {

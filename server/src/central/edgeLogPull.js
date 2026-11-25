@@ -16,12 +16,13 @@
  * v2.613(CONTRACT2613-01 · EDGE2613-02): 사다리(등록부 → fetch → 상태코드 → 본문)는 `central/edgePull.js pullFromEdge`
  *   **하나**다 — bm-usage·token-check 와 세 벌이던 것을 합쳤다. 이 파일은 쿼리 조립과 **저장(putEdgeLog)** 만 갖는다.
  */
+import { envPositive, ENV_INT_MAX } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { pullFromEdge, findCollector } from './edgePull.js';
 import { putEdgeLog } from './edgeLogStore.js';
 
 /** 엣지 로그를 내주기 시작한 최소 버전 — 그 아래는 엔드포인트가 없다. */
 export const MIN_EDGE_VERSION = '2.549.0';
-const TIMEOUT_MS = Math.max(5_000, Number(process.env.EDGELOG_PULL_TIMEOUT_MS) || 20_000);
+const TIMEOUT_MS = Math.max(5_000, envPositive(process.env.EDGELOG_PULL_TIMEOUT_MS, 20_000, { max: ENV_INT_MAX }));
 
 /** 등록부 조회 — 호출부 호환용 재수출(본체는 edgePull.js → collector/registry.js findCollectorByName). */
 export { findCollector };

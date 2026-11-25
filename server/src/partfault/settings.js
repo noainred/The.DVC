@@ -17,11 +17,10 @@
  * ⚠ 이 파일은 **비밀을 담지 않는다**(SECRET_FILES 등록 대상 아님). 다만 `.gitignore` 에는 넣는다.
  */
 import { isMockMode } from '../mock/demo/flags.js'; // v2.708 데모(mock)
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
-import { makeSettingsLoadError } from '../util/settingsLoadError.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { makeJsonFileLoader } from '../util/jsonFileLoad.js';   // 93회차 F4: 읽기 오류 ≠ 손상(결정 G2 공용 로더 — 78회차 F8 relaycheck 와 같은 꼴)
 import { clampSetting } from '../util/clampSetting.js'; // v2.613 DEPS2613-12: 숫자 설정 정규화는 하나
 import { numOrNull } from '../util/numOrNull.js';
 
@@ -38,24 +37,33 @@ let _retentionFromFile = false; // v2.613 PERSIST2613-06: 파일에 retentionDay
 export const RETENTION_LIMITS = Object.freeze({ min: 30, max: 3650, def: 730 });
 const DEFAULTS = Object.freeze({ enabled: false, edges: {}, central: null, retentionDays: RETENTION_LIMITS.def });
 
-const _loadErr = makeSettingsLoadError(() => FILE(), { label: '파트 장애 설정', confirm: () => savePartFaultSettings({}) });
+// 예전 판정 그대로 — 객체가 아닌 JSON(null · 배열 · 수)은 손상이다.
+const parseStrictObject = (text) => { const v = JSON.parse(text); if (!v || typeof v !== 'object' || Array.isArray(v)) throw new SyntaxError('객체가 아닌 JSON 값'); return v; };
+/*
+ * 93회차 F4(재현 — 34회차 F4 · 78회차 F8 의 형제): 예전 로드는 읽기와 JSON.parse 를 catch 하나로 받아 **읽기 오류**(EACCES — root 가 손으로 고친
+ *   0600 파일 · EIO · EISDIR)에도 원본을 `.corrupt.<시각>` 으로 옮기고 기본값(꺼짐)을 **재시작까지** 캐시했다 — 중앙의 파트 장애 판정 · 알림이
+ *   조용히 꺼지고, 관리자가 다시 켜는 저장이 새 파일을 만들었다(엣지별 스위치 · 보존일 유실). 이제 공용 로더: 손상만 보존본으로 옮기고, 읽기 오류는
+ *   원본을 두고 30초마다 다시 읽으며(읽히면 재시작 없이 풀린다) 그동안 저장은 409(partFaultSettingsWriteRefusal)로 거절한다.
+ */
+const _file = makeJsonFileLoader(FILE, { label: '파트 장애 설정', confirm: () => savePartFaultSettings({}), parse: parseStrictObject, tag: 'partfault' });
 /** v2.631(EDGE2631-01): 설정 파일을 못 읽었으면 사유(배포 라우트가 503 으로 답한다), 읽었으면 null. */
-export function partFaultSettingsLoadError() { loadPartFaultSettings(); return _loadErr.get(); }
+export function partFaultSettingsLoadError() { loadPartFaultSettings(); return _file.loadError(); }
+/** 93회차 F4: 읽기 오류 중의 쓰기 거절(라우트 409) 또는 null — 손상(보존본으로 옮김)은 예전처럼 관리자 저장이 푼다. */
+export function partFaultSettingsWriteRefusal() {
+  loadPartFaultSettings();
+  if (!_file.loadError()?.readError) return null;
+  return { ..._file.refusal('파트 장애 설정'), status: 409 };
+}
 
 export function loadPartFaultSettings() {
-  if (_cache) return _cache;
+  if (_cache && !_file.recheckDue()) return _cache;   // 93회차 F4: 오류 중에는 캐시를 믿지 않고 간격마다 다시 판정
   // v2.631(EDGE2631-01): 손상이면 기본값(꺼짐)으로 시작하되 **로드 오류를 기억**한다 — 그 기본값을 /api/central/partfault-config 가
   //   200 으로 내려보내면 전 엣지의 파트 장애 수집이 꺼진다. 배포 라우트는 이 오류를 보고 503(엣지는 직전 값 유지)으로 답한다.
-  if (!fs.existsSync(FILE())) { _loadErr.missing(); _cache = { ...DEFAULTS }; }
-  else {
-    try {
-      const j = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
-      if (!j || typeof j !== 'object' || Array.isArray(j)) throw new Error('객체가 아닌 JSON 값');
-      _cache = { ...DEFAULTS, ...j };
-      _retentionFromFile = numOrNull(j.retentionDays) != null;
-      _loadErr.ok();
-    } catch (e) { _loadErr.corrupt(e); if (fs.existsSync(FILE())) preserveCorrupt(FILE(), e.message); _cache = { ...DEFAULTS }; }   // 설정 파일 — 손상이면 기본값(꺼짐)으로 시작. 켜진 척하지 않는다.
-  }
+  const r = _file.load();
+  if (r.kind === 'ok') {
+    _cache = { ...DEFAULTS, ...r.value };
+    _retentionFromFile = numOrNull(r.value.retentionDays) != null;
+  } else { _cache = { ...DEFAULTS }; _retentionFromFile = false; }   // 없음 · 손상 · 읽기 오류 — 기본값(꺼짐)으로. 켜진 척하지 않는다.
   if (!_cache.edges || typeof _cache.edges !== 'object') _cache.edges = {};
   _cache.retentionDays = clampSetting(_cache.retentionDays, RETENTION_LIMITS); // 손편집 값도 범위 안으로(비숫자는 기본값)
   return _cache;
@@ -65,9 +73,12 @@ export function loadPartFaultSettings() {
 //   바꿔, 쓰기가 실패해 화면이 오류를 받은 뒤에도 메모리는 켜짐이라 중앙 판정·알림이 돌고 /partfault-config 로 전 엣지가 켰다 —
 //   재시작하면 꺼짐으로 되돌아갔다. 엣지 applyCentral 도 같은 persist 라, 실패하면 다음 pull 이 '이미 같다' 로 건너뛰지 않고 다시 쓴다.
 function persist(next) {
+  // 93회차 F4: 마지막 방어선 — 읽기 오류 중에는 디스크의 원본(보존본도 없다)을 기본값 위의 값으로 덮지 않는다(엣지 applyCentral 포함 — 호출부가 잡는다).
+  const no = partFaultSettingsWriteRefusal();
+  if (no) throw Object.assign(new Error(no.reason), { status: 409, code: no.code, readError: true });
   atomicWriteFileSync(FILE(), JSON.stringify(next, null, 2), { mode: 0o600 });
   _cache = next;
-  _loadErr.ok();
+  _file.saved();
   return next;
 }
 
@@ -145,4 +156,4 @@ export function partFaultRetention() {
   return { days: clampSetting(s.retentionDays, RETENTION_LIMITS), source: _retentionFromFile ? 'settings' : 'default' };
 }
 
-export function _resetForTest() { _cache = null; _retentionFromFile = false; }
+export function _resetForTest() { _cache = null; _retentionFromFile = false; _file.resetRetry(); }

@@ -18,6 +18,7 @@ import { buildCommand } from '../../rma/commands.js';
 import { signJob } from '../../rma/signing.js';
 import { rmaPasswordFor } from '../../rma/agentSecrets.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
+import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 
 const adminOnly = requireRole('admin');
 // v2.612 AUTHZ2612-06: 통합 계정은 엣지·호스트 단위라 법인 축이 없다 — 범위 제한 admin 도 403.
@@ -30,7 +31,7 @@ api.get('/tools/credentials', adminOnly, fullScopeOnly, (_req, res) => {
 });
 
 /** 개인키 사전 검증(저장 전) — 지문만 돌려주고 키는 저장하지 않는다. */
-api.post('/tools/credentials/inspect-key', adminOnly, fullScopeOnly, (req, res) => {
+api.post('/tools/credentials/inspect-key', adminOnly, fullScopeOnly, textFields('privateKey', 'passphrase'), (req, res) => {
   const r = inspectPrivateKey(req.body?.privateKey || '', req.body?.passphrase || '');
   res.json(r.ok ? { ok: true, type: r.type, fingerprint: r.fingerprint, comment: r.comment } : { ok: false, reason: r.reason });
 });
@@ -56,7 +57,9 @@ api.put('/tools/credentials/:id', adminOnly, fullScopeOnly, reauth, (req, res) =
 });
 
 api.delete('/tools/credentials/:id', adminOnly, fullScopeOnly, reauth, (req, res) => {
-  const gone = deleteCredential(String(req.params.id));
+  let gone;
+  try { gone = deleteCredential(String(req.params.id)); }
+  catch (e) { return res.status(e?.code === 'SECRETS_KEY_MISSING' || e?.code === 'SECRETS_POLICY_UNAVAILABLE' ? 503 : 500).json({ ok: false, code: e?.code || null, reason: String(e?.message || e).slice(0, 300) }); }   // 22회차 D-12: 사유를 그대로
   if (!gone) return res.status(404).json({ ok: false, reason: '계정을 찾을 수 없습니다.' });
   logAudit({ user: req.user?.username, action: '통합 계정 삭제', target: gone.name, detail: `${gone.kind}/${gone.username}`, ip: req.ip });
   res.json({ ok: true });

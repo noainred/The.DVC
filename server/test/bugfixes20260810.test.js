@@ -24,7 +24,10 @@ test('report/changes: scope 를 f.vcenterIds 로 밀어넣고 post-filter 를 �
 
 test('report/unprotected: scope 를 로그 쿼리(lf.vcenterIds)로 밀어넣음', () => {
   const src = readApiSource(); // v2.283.0 분할 — api.js + routes/api/* 결합 소스 검사
-  const body = src.slice(src.indexOf("api.get('/tools/report/unprotected'"), src.indexOf("api.get('/tools/report/unprotected'") + 1100);
+  // v3.32: 계산을 unprotectedData(req, snap, q) 로 뽑았다(라우트 · 정기 점검 보고 공급자가 같이 쓴다) — 라우트는 그 함수를 부르고, 불변식은 그 함수에서 본다.
+  assert.match(src, /api\.get\('\/tools\/report\/unprotected'[^\n]*unprotectedData\(req, snap, req\.query\)/);
+  const at = src.indexOf('export async function unprotectedData');
+  const body = src.slice(at, at + 2600);
   assert.match(body, /lf\.vcenterIds = vcParam \? \(allowed\.has\(vcParam\) \? \[vcParam\] : \[\]\) : \[\.\.\.allowed\]/);
   assert.ok(!/rows\.filter\(\(r\) => allowed\.has/.test(body), 'post-filter 가 남아있으면 안 됨');
 });

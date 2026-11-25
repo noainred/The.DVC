@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>VM 개체 보기 › 모니터 › 성능 — 포탈 20초 Peak 겹쳐 보기 (1440)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums}
+.muted{color:#8b9bb4}.faint{color:#5d6b85}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.btn{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.btn.sm{height:28px;padding:0 10px;font-size:12px}
+.btn.peak{border-color:rgba(249,115,22,.6);background:rgba(249,115,22,.14);color:#fdba74}
+.btn.peak.off{border-color:#243049;background:#1a2236;color:#8b9bb4}
+.btn:disabled,.btn[aria-disabled="true"]{opacity:.5;cursor:not-allowed}
+.seg{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden}
+.seg button{height:30px;padding:0 11px;border:0;border-left:1px solid #243049;background:transparent;color:#8b9bb4;font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
+.seg button:first-child{border-left:0}
+.seg button.on{background:#1a2236;color:#e6edf6;font-weight:600}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}.tag.crit{background:rgba(239,68,68,.16);color:#fca5a5}.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}.tag.blue{background:rgba(59,130,246,.18);color:#93c5fd}.tag.peak{background:rgba(249,115,22,.18);color:#fdba74}
+.pill{display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 12px;border-radius:999px;border:1px solid #243049;background:#0f1626;font-size:12px;color:#8b9bb4;white-space:nowrap}
+.pill b{color:#e6edf6;font-weight:600}
+.pill.peak{border-color:rgba(249,115,22,.45)}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex:none}
+.dot.peak{background:#f97316;box-shadow:0 0 0 4px rgba(249,115,22,.15)}
+.shell{display:flex;min-height:2060px}
+.side{width:236px;flex:none;background:#0f1626;border-right:1px solid #1f2a40;opacity:.45;padding:18px 16px;display:flex;flex-direction:column;gap:14px;font-size:13px;color:#8b9bb4}
+.side .on{color:#e6edf6;font-weight:700}
+.top{height:44px;background:rgba(12,17,30,.9);border-bottom:1px solid #1f2a40;opacity:.45}
+.main{flex:1;min-width:0;display:flex;flex-direction:column}
+.content{padding:14px 24px 32px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.crumb{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:12px;color:#8b9bb4}
+.crumb b{color:#e6edf6}
+.ohead{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px 16px;padding:14px 16px}
+.tabs{display:flex;gap:6px;padding-bottom:8px;border-bottom:1px solid #243049;overflow:hidden}
+.tab{height:30px;padding:0 10px;border-radius:8px;border:1px solid transparent;background:transparent;color:#8b9bb4;font:inherit;font-size:13px;display:inline-flex;align-items:center;white-space:nowrap}
+.tab.on{background:#3b82f6;color:#fff;font-weight:600}
+.tabsep{width:1px;align-self:stretch;margin:4px 4px;background:#243049}
+.sec-h{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 14px;min-width:0}
+.sec-h h3{margin:0;font-size:16px;font-weight:700}
+.stats{display:grid;grid-template-columns:repeat(4, minmax(0, 1fr));gap:12px;min-width:0}
+.stat{background:#141b2d;border:1px solid #243049;border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:6px;min-width:0;text-align:left;font:inherit;color:#e6edf6;cursor:pointer}
+.stat.on{border-color:#3b82f6;box-shadow:inset 0 0 0 1px #3b82f6}
+.stat .lb{display:flex;justify-content:space-between;align-items:baseline;font-size:12px;font-weight:600;color:#8b9bb4}
+.stat .lb small{font-weight:500;color:#5d6b85;font-size:11px}
+.stat .v{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:26px;font-weight:700;line-height:1.05;white-space:nowrap}
+.stat .v small{font-size:12px;font-weight:600;color:#8b9bb4;margin-left:3px}
+.stat .pk{display:flex;align-items:baseline;gap:6px;font-size:12px;color:#fdba74;font-variant-numeric:tabular-nums;white-space:nowrap}
+.stat .pk b{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:15px;font-weight:700;color:#fdba74}
+.stat .pk .vs{color:#8b9bb4;font-size:11px}
+.stat .mm{display:flex;flex-wrap:wrap;gap:2px 10px;font-size:11.5px;color:#8b9bb4;font-variant-numeric:tabular-nums}
+.stat .mm b{color:#e6edf6;font-weight:600;font-family:"JetBrains Mono",ui-monospace,monospace}
+.spark{display:block;width:100%;height:28px}
+.chart-card{background:#141b2d;border:1px solid #243049;border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.chart-card h4{margin:0;font-size:14px;font-weight:700}
+.legend{display:flex;flex-wrap:wrap;align-items:center;gap:12px;font-size:12px;color:#8b9bb4}
+.legend i{display:inline-block;width:14px;height:0;border-top:2px solid #3b82f6;margin-right:6px;vertical-align:middle}
+.legend i.pdot{width:7px;height:7px;border:0;border-radius:50%;background:#f97316;margin-right:7px}
+.legend i.band{width:14px;height:10px;border:0;background:repeating-linear-gradient(135deg,rgba(139,155,180,.28) 0 3px,transparent 3px 6px);vertical-align:-2px}
+.note{font-size:12px;color:#5d6b85;overflow-wrap:anywhere}
+.tip{position:absolute;top:10px;min-width:230px;padding:8px 10px;border-radius:8px;border:1px solid rgba(249,115,22,.5);background:rgba(11,18,32,.96);box-shadow:0 6px 18px rgba(0,0,0,.35);font-size:12px;line-height:1.55;z-index:2;transform:translateX(calc(-100% - 12px))}
+.tip .h{font-family:"JetBrains Mono",ui-monospace,monospace;font-weight:600;margin-bottom:2px;white-space:nowrap}
+.tip .l{display:flex;gap:6px;align-items:baseline;font-variant-numeric:tabular-nums}
+svg text{font-family:"JetBrains Mono",ui-monospace,monospace}
+input[type=range]{accent-color:#3b82f6;flex:1 1 160px;min-width:0}
+.winrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;border-top:1px solid #1f2a40;padding-top:10px}
+.datejump{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#8b9bb4;white-space:nowrap}
+.datejump input{height:28px;padding:0 8px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit;font-size:12px;color-scheme:dark}
+table.sum{width:100%;border-collapse:collapse;font-size:12.5px}
+table.sum th{text-align:left;color:#8b9bb4;font-weight:700;font-size:11.5px;padding:8px 12px;border-bottom:1px solid #243049;background:#0f1626;white-space:nowrap}
+table.sum th.pk,table.sum td.pk{background:rgba(249,115,22,.06)}
+table.sum td{padding:8px 12px;border-bottom:1px solid #1f2a40;white-space:nowrap}
+table.sum td.r,table.sum th.r{text-align:right}
+.states{display:grid;grid-template-columns:repeat(3, minmax(0, 1fr));gap:12px;min-width:0}
+.state{background:#141b2d;border:1px solid #243049;border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.state h5{margin:0;font-size:12.5px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.state .box{border:1px dashed #2b3a55;border-radius:8px;padding:8px 10px;font-size:12px;color:#aebbd0;background:#0f1626}
+.flow{display:grid;grid-template-columns:150px minmax(0,1fr);gap:6px 12px;font-size:12px;padding:12px 14px}
+.flow .k{color:#8b9bb4;font-weight:600}
+</style>
+</helmet>
+
+<div class="shell">
+  <aside class="side" aria-hidden="true">
+    <div style="font-weight:800;color:#e6edf6">The Davinci</div>
+    <div>Overview</div><div>Summary</div>
+    <div class="on">서버</div>
+    <div class="on" style="padding-left:14px">가상화 플랫폼</div><div style="padding-left:14px">물리 서버</div><div style="padding-left:14px">Backup</div><div style="padding-left:14px">알람</div>
+    <div>스토리지</div><div>네트워크</div><div>자원관리</div><div>자원 최적화</div><div>특수 기능</div><div>이슈</div><div>위키</div><div>게시판</div><div>설정</div>
+  </aside>
+  <div class="main">
+    <div class="top"></div>
+    <div class="content">
+
+      <div class="crumb" aria-label="경로">
+        <span>가상화 플랫폼</span><span>›</span><span>vCenter</span><span>›</span><span>VC-KR1</span><span>›</span><span>Datacenter</span><span>›</span><span>A.MGMT/Console</span><span>›</span><b>web-kr1-023</b>
+        <span style="flex:1"></span><a href="#" style="font-size:12px">← VM 및 폴더</a>
+      </div>
+
+      <div class="card ohead">
+        <div style="min-width:0">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <span style="font-size:17px;font-weight:800">web-kr1-023</span>
+            <span class="tag ok">On</span><span class="tag ok">Running</span>
+          </div>
+          <div class="muted" style="font-size:12px;margin-top:2px">Windows Server 2019 (64-bit) · 호스트 esx-kr1-07.dvc.example · 클러스터 HQ-Admin · 리소스 풀 Resources · 10.12.4.23</div>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end">
+          <button type="button" class="btn">사양 변경</button>
+          <button type="button" class="btn">원격 콘솔</button>
+          <button type="button" class="btn">원격 접속</button>
+          <button type="button" class="btn primary">성능 그래프 보기</button>
+        </div>
+      </div>
+
+      <nav class="tabs" aria-label="VM 보기">
+        <a href="#" class="tab">요약</a><a href="#" class="tab on">모니터</a><a href="#" class="tab">구성</a><a href="#" class="tab">사용 권한</a><a href="#" class="tab">데이터스토어</a><a href="#" class="tab">네트워크</a><a href="#" class="tab">스냅샷</a><a href="#" class="tab">업데이트</a><span class="tabsep" aria-hidden="true"></span><a href="#" class="tab">성능 튜닝</a>
+      </nav>
+
+      <div class="sec-h">
+        <div style="display:flex;flex-direction:column;gap:2px;min-width:0">
+          <h3>성능</h3>
+          <span class="note">vCenter 성능 롤업 · 이 탭을 열 때 조회(포탈은 시계열을 저장하지 않습니다 — <b style="color:#fdba74">임계 이상 20초 순간만 ‘실시간 스파이크 수집’ 이 남깁니다</b>) · 4개 지표를 한 번에 묻습니다</span>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px">
+          <div class="seg" role="tablist" aria-label="기간"><button type="button">실시간 1시간</button><button type="button" class="on">24시간</button><button type="button">7일</button><button type="button">30일</button><button type="button">1년</button></div>
+          <span class="pill"><span class="dot" style="background:#5d6b85"></span>30분 평균 · 48점 · 읽은 시각 <b class="mono">10:21:27</b></span>
+          <span class="pill peak" title="포탈 실시간 스파이크 수집 — 설정값 · 응답값 그대로"><span class="dot peak"></span>포탈 20초 Peak · 임계 <b>50%</b> · 관측 <b>22 / 24시간</b> · 50분마다 · 마지막 수집 <b class="mono">10:05</b></span>
+          <button type="button" class="btn">CSV</button>
+          <button type="button" class="btn primary">지금 다시 조회</button>
+        </div>
+      </div>
+
+      <div class="stats" role="tablist" aria-label="지표">
+        <button type="button" class="stat on" role="tab" aria-selected="true">
+          <span class="lb">CPU 사용률 <small>8 vCPU</small></span>
+          <span class="v" style="color:#93c5fd">17<small>%</small></span>
+          <span class="pk"><span class="dot peak" style="width:7px;height:7px;box-shadow:none"></span>20초 Peak <b>97.2%</b> <span class="mono">02:05:40</span> <span class="vs">· vCenter 최대 71%(30분 평균)</span></span>
+          <svg class="spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true"><path d="{{sp.cpu}}" fill="none" stroke="#3b82f6" stroke-width="1.4" vector-effect="non-scaling-stroke"></path><path d="{{sp.cpuPk}}" fill="#f97316" opacity=".85"></path></svg>
+          <span class="mm"><span>평균 <b>14.1%</b></span><span>최대 <b>71%</b> 02:00</span><span>최저 <b>11.3%</b></span></span>
+        </button>
+        <button type="button" class="stat" role="tab" aria-selected="false">
+          <span class="lb">메모리 사용률 <small>32 GB 할당</small></span>
+          <span class="v">5.4<small>%</small></span>
+          <span class="pk"><span class="dot peak" style="width:7px;height:7px;box-shadow:none"></span>20초 Peak <b>—</b> <span class="vs">· 임계 50% 이상 순간 없음(그 아래 피크는 저장하지 않음)</span></span>
+          <svg class="spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true"><path d="{{sp.mem}}" fill="none" stroke="#a855f7" stroke-width="1.4" vector-effect="non-scaling-stroke"></path></svg>
+          <span class="mm"><span>평균 <b>4.8%</b></span><span>최대 <b>6.5%</b> 08:00</span><span>최저 <b>4.1%</b></span></span>
+        </button>
+        <button type="button" class="stat" role="tab" aria-selected="false">
+          <span class="lb">디스크 I/O <small>읽기+쓰기</small></span>
+          <span class="v">550<small>KB/s</small></span>
+          <span class="pk"><span class="dot peak" style="width:7px;height:7px;box-shadow:none"></span>Peak 순간의 값 <b>9.4 MB/s</b> <span class="mono">02:05:40</span> <span class="vs">· CPU 임계 순간에 함께 남은 값</span></span>
+          <svg class="spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true"><path d="{{sp.dsk}}" fill="none" stroke="#22d3ee" stroke-width="1.4" vector-effect="non-scaling-stroke"></path></svg>
+          <span class="mm"><span>평균 <b>389 KB/s</b></span><span>최대 <b>1.8 MB/s</b> 11:30</span><span>최저 <b>132 KB/s</b></span></span>
+        </button>
+        <button type="button" class="stat" role="tab" aria-selected="false">
+          <span class="lb">네트워크 I/O <small>수신+송신</small></span>
+          <span class="v">834<small>KB/s</small></span>
+          <span class="pk"><span class="dot peak" style="width:7px;height:7px;box-shadow:none"></span>Peak 순간의 값 <b>3.1 MB/s</b> <span class="mono">02:05:40</span> <span class="vs">· CPU 임계 순간에 함께 남은 값</span></span>
+          <svg class="spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true"><path d="{{sp.net}}" fill="none" stroke="#22c55e" stroke-width="1.4" vector-effect="non-scaling-stroke"></path></svg>
+          <span class="mm"><span>평균 <b>542 KB/s</b></span><span>최대 <b>881 KB/s</b> 11:00</span><span>최저 <b>217 KB/s</b></span></span>
+        </button>
+      </div>
+
+      <section class="chart-card" aria-label="24시간 추이">
+        <div style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;align-items:center">
+          <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px">
+            <h4>24시간 추이 · CPU 사용률</h4>
+            <span class="tag warn">과거 구간</span>
+            <div class="seg" role="tablist" aria-label="겹쳐 보기"><button type="button" class="on">한 지표</button><button type="button">CPU + 메모리</button><button type="button">디스크 + 네트워크</button></div>
+            <button type="button" class="btn sm peak" aria-pressed="true" title="포탈 실시간 스파이크 수집의 20초 순간을 같은 시간축에 겹칩니다 — 끄면 vCenter 롤업만"><span class="dot peak" style="width:7px;height:7px;box-shadow:none"></span>포탈 20초 Peak 겹치기 · 켜짐</button>
+          </div>
+          <div class="legend">
+            <span><i style="border-top-color:#3b82f6"></i>CPU 사용률(30분 평균)</span>
+            <span><i class="pdot"></i>포탈 20초 Peak — 임계 이상 순간 <b class="mono" style="color:#e6edf6">38</b>점</span>
+            <span><i style="border-top:1px dashed #f97316"></i>수집 임계 50%</span>
+            <span><i class="band"></i>미측정 2시간(수집 없음)</span>
+            <span><i style="border-top:1px dashed #8b9bb4"></i>기간 평균 14.1%</span>
+            <span><i style="border-top:1px dashed #ef4444"></i>과부하 기준 90%</span>
+            <span><i style="border-top:2px dotted #5d6b85"></i>결측 — 선을 끊음</span>
+          </div>
+        </div>
+        <div class="note">값은 vCenter 가 보관한 30분 평균입니다 — 이 구간은 요청한 5분보다 거친 30분 평균(vCenter 보관 주기)으로만 남아 있습니다 · 값 48점 · 결측 0점. <b style="color:#fdba74">주황 점은 포탈이 20초 표본에서 임계(50%) 이상일 때만 남긴 순간</b>이라 점이 없는 곳은 ‘피크 없음’ 이 아니라 ‘임계 미만 또는 미측정’ 입니다 · 빗금은 포탈 수집이 없던 시간(스파이크 0 이 아닙니다).</div>
+
+        <div style="position:relative;width:100%;min-width:0">
+          <svg viewBox="0 0 1360 300" role="img" aria-label="CPU 사용률 24시간 추이 — vCenter 30분 평균 + 포탈 20초 Peak" style="display:block;width:100%;height:auto">
+            <defs>
+              <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="3" height="6" fill="rgba(139,155,180,.22)"></rect></pattern>
+            </defs>
+            <rect x="{{gapX}}" y="16" width="{{gapW}}" height="220" fill="url(#hatch)"></rect>
+            <text x="{{gapMid}}" y="30" fill="#8b9bb4" font-size="10.5" text-anchor="middle">미측정 06:00~08:00 · 포탈 수집 없음</text>
+            <line x1="56" x2="1330" y1="236" y2="236" stroke="#1f2a40"></line><text x="48" y="240" fill="#5d6b85" font-size="11" text-anchor="end">0%</text>
+            <line x1="56" x2="1330" y1="181" y2="181" stroke="#1f2a40"></line><text x="48" y="185" fill="#5d6b85" font-size="11" text-anchor="end">25%</text>
+            <line x1="56" x2="1330" y1="126" y2="126" stroke="#1f2a40"></line><text x="48" y="130" fill="#5d6b85" font-size="11" text-anchor="end">50%</text>
+            <line x1="56" x2="1330" y1="71" y2="71" stroke="#1f2a40"></line><text x="48" y="75" fill="#5d6b85" font-size="11" text-anchor="end">75%</text>
+            <line x1="56" x2="1330" y1="16" y2="16" stroke="#1f2a40"></line><text x="48" y="20" fill="#5d6b85" font-size="11" text-anchor="end">100%</text>
+            <line x1="321.5" x2="321.5" y1="16" y2="236" stroke="#1a2236"></line><text x="321.5" y="256" fill="#5d6b85" font-size="11" text-anchor="middle">15:21</text>
+            <line x1="587" x2="587" y1="16" y2="236" stroke="#1a2236"></line><text x="587" y="256" fill="#5d6b85" font-size="11" text-anchor="middle">20:21</text>
+            <line x1="852.5" x2="852.5" y1="16" y2="236" stroke="#1a2236"></line><text x="852.5" y="256" fill="#5d6b85" font-size="11" text-anchor="middle">01:21 (11-10)</text>
+            <line x1="1118" x2="1118" y1="16" y2="236" stroke="#1a2236"></line><text x="1118" y="256" fill="#5d6b85" font-size="11" text-anchor="middle">06:21</text>
+            <line x1="56" x2="1330" y1="38" y2="38" stroke="#ef4444" stroke-dasharray="4 4" opacity=".6"></line>
+            <text x="1326" y="34" fill="#fca5a5" font-size="10.5" text-anchor="end">90%</text>
+            <line x1="56" x2="1330" y1="126" y2="126" stroke="#f97316" stroke-dasharray="3 5" opacity=".7"></line>
+            <text x="1326" y="122" fill="#fdba74" font-size="10.5" text-anchor="end">수집 임계 50%</text>
+            <line x1="56" x2="1330" y1="{{avgY}}" y2="{{avgY}}" stroke="#8b9bb4" stroke-dasharray="4 4" opacity=".6"></line>
+            <path d="{{area}}" fill="#3b82f6" opacity=".12"></path>
+            <path d="{{line}}" fill="none" stroke="#3b82f6" stroke-width="1.8" stroke-linejoin="round"></path>
+            <path d="{{dots}}" fill="#f97316" fill-opacity=".8" stroke="none"></path>
+            <g aria-hidden="true">
+              <line x1="{{pkX}}" x2="{{pkX}}" y1="{{pkY}}" y2="{{pkAvgY}}" stroke="#f97316" stroke-width="1" stroke-dasharray="2 3" opacity=".8"></line>
+              <path d="{{pkTri}}" fill="#f97316"></path>
+              <text x="{{pkLabelX}}" y="{{pkLabelY}}" fill="#fdba74" font-size="11" font-weight="700" text-anchor="start">Peak 97.2% · 02:05:40</text>
+              <text x="{{pkLabelX}}" y="{{pkLabelY2}}" fill="#8b9bb4" font-size="10" text-anchor="start">같은 30분의 vCenter 평균 71%</text>
+            </g>
+            <g aria-hidden="true">
+              <line x1="{{hx}}" x2="{{hx}}" y1="16" y2="236" stroke="#8b9bb4" stroke-dasharray="3 3"></line>
+              <circle cx="{{hx}}" cy="{{hy}}" r="4.5" fill="#f97316" stroke="#0b1220" stroke-width="1.5"></circle>
+            </g>
+            <!-- 커버리지 띠 — 시간 셀 24 · 회색 = 미측정 · 주황 짙기 = 그 시간의 임계 이상 순간 수 -->
+            <text x="48" y="286" fill="#5d6b85" font-size="10.5" text-anchor="end">포탈 수집</text>
+            <path d="{{covOk}}" fill="rgba(52,224,180,.28)"></path>
+            <path d="{{covGap}}" fill="rgba(139,155,180,.22)"></path>
+            <path d="{{covHot}}" fill="#f97316" fill-opacity=".75"></path>
+          </svg>
+          <div class="tip" style="left:{{tipLeft}}" role="status">
+            <div class="h">11-10 02:05:40 · <span style="color:#fdba74">포탈 20초 표본</span></div>
+            <div class="l"><span style="color:#fdba74">●</span><span>CPU <b class="mono">97.2%</b> · Ready <b class="mono">6.1%</b>/vCPU</span></div>
+            <div class="l"><span style="color:#d8b4fe">■</span><span>같은 순간 메모리 93% · 디스크 9.4 MB/s · 네트워크 3.1 MB/s</span></div>
+            <div class="l"><span style="color:#93c5fd">■</span><span>같은 30분 vCenter 평균 <b class="mono">71%</b> — 평균이 피크를 26%p 낮춰 보임</span></div>
+            <div class="l" style="color:#fca5a5"><span>▲</span><span>과부하 기준 90% 초과 · 이 run 12분 40초(38순간)</span></div>
+          </div>
+        </div>
+
+        <div class="winrow">
+          <button type="button" class="btn sm">◀ 이전 24시간</button>
+          <input type="range" min="0" max="29" step="1" value="27" aria-label="조회 구간 스크롤(오른쪽 끝 = 최근)">
+          <button type="button" class="btn sm">다음 24시간 ▶</button>
+          <button type="button" class="btn sm">최신</button>
+          <label class="datejump"><span>날짜로 이동</span><input type="date" value="2026-11-09" max="2026-11-10"></label>
+        </div>
+        <div class="note" style="text-align:center;font-variant-numeric:tabular-nums">2칸 전 (24시간 단위) · 11-09 10:21 ~ 11-10 10:21 · 과거 구간은 자동 갱신하지 않습니다 · 뒤로 29칸까지 — vCenter 보관 주기 · <span style="color:#fdba74">Peak 는 포탈 보존 60일 안에서만(설정값) — 그 밖은 띠가 전부 회색</span></div>
+      </section>
+
+      <section class="card" style="overflow:hidden;min-width:0" aria-label="구간 요약">
+        <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;border-bottom:1px solid #1f2a40">
+          <h4 style="margin:0;font-size:14px;font-weight:700">이 구간 요약 <span class="muted" style="font-weight:500;font-size:12px">· 11-09 10:21 ~ 11-10 10:21 · vCenter 열은 지금 받은 점으로, Peak 열은 포탈 수집 응답으로</span></h4>
+          <span class="note">머리글 클릭 정렬 · 시각은 브라우저 시각 · Peak 시각은 20초 표본 시각(초까지)</span>
+        </div>
+        <table class="sum">
+          <thead><tr><th>지표</th><th class="r">평균</th><th class="r">최대(30분 평균)</th><th>최대 시각</th><th class="r pk">20초 Peak</th><th class="pk">Peak 시각</th><th class="r pk">임계 이상 순간 · 지속</th><th class="r">90% 이상 시간</th><th class="r">결측</th></tr></thead>
+          <tbody>
+            <tr><td><b>CPU 사용률</b></td><td class="r mono">14.1%</td><td class="r mono">71%</td><td class="mono">11-10 02:00</td><td class="r mono pk" style="color:#fdba74;font-weight:700">97.2%</td><td class="mono pk">11-10 02:05:40</td><td class="r mono pk">38순간 · 12분 40초</td><td class="r mono">30분<span class="faint" title="30분 평균이 90% 를 넘은 시간 — 20초 기준으로는 더 짧고 더 높다">*</span></td><td class="r mono">0 / 48</td></tr>
+            <tr><td><b>메모리 사용률</b></td><td class="r mono">4.8%</td><td class="r mono">6.5%</td><td class="mono">11-10 08:00</td><td class="r pk muted" title="임계 50% 이상 순간이 없어 저장된 피크가 없습니다 — 피크가 없다는 뜻이 아닙니다">—(임계 미만)</td><td class="pk muted">—</td><td class="r mono pk">0순간</td><td class="r mono">0분</td><td class="r mono">0 / 48</td></tr>
+            <tr><td><b>디스크 I/O</b></td><td class="r mono">389 KB/s</td><td class="r mono">1.8 MB/s</td><td class="mono">11-09 11:30</td><td class="r mono pk">9.4 MB/s<span class="faint" title="디스크 · 네트워크는 트리거가 아닙니다 — CPU · 메모리 · Ready 임계 순간에 함께 남은 값의 최대">†</span></td><td class="mono pk">11-10 02:05:40</td><td class="r pk muted">—</td><td class="r muted">—</td><td class="r mono">0 / 48</td></tr>
+            <tr><td><b>네트워크 I/O</b></td><td class="r mono">542 KB/s</td><td class="r mono">881 KB/s</td><td class="mono">11-09 11:00</td><td class="r mono pk">3.1 MB/s<span class="faint">†</span></td><td class="mono pk">11-10 02:05:40</td><td class="r pk muted">—</td><td class="r muted">—</td><td class="r mono">0 / 48</td></tr>
+          </tbody>
+        </table>
+        <div class="note" style="padding:8px 14px;border-top:1px solid #1f2a40">* 30분 평균 기준 · † 디스크 · 네트워크는 수집 트리거가 아니라 CPU · 메모리 · Ready 임계 순간에 함께 남은 값의 최대 · 커버리지 91.7%(관측 22 / 24시간 · 미측정 2시간은 관측 없음) · 포탈 수집 주기 50분 · 보존 60일 — 숫자는 모두 설정 · 응답값</div>
+      </section>
+
+      <!-- 상태 6종 -->
+      <div class="states" aria-label="상태">
+        <div class="state"><h5><span class="tag gray">① 수집 대상 아님 · 수집 꺼짐</span></h5>
+          <div class="box"><span class="btn sm peak off" aria-disabled="true" style="display:inline-flex"><span class="dot" style="width:7px;height:7px;background:#5d6b85"></span>포탈 20초 Peak 겹치기 · 없음</span><div style="margin-top:6px">이 vCenter 의 포탈 수집 DB 가 없습니다 — 실시간 스파이크 수집이 꺼져 있거나 이 VM 이 대상이 아닙니다. <a href="#">설정 › VM 실시간 스파이크 수집</a>(관리자만 링크)</div></div>
+          <span class="note">타일 · 표의 Peak 열은 ‘—(수집 없음)’ · 띠 없음. 응답 available:false · reason no-db 그대로</span></div>
+        <div class="state"><h5><span class="tag gray">② 수집은 되나 이 창에 표본 없음</span></h5>
+          <div class="box">관측 22시간 동안 임계(50%) 이상 순간이 없었습니다 · 미측정 2시간은 알 수 없습니다. <span class="muted">— 타일 Peak ‘—(임계 미만)’ · 띠는 초록/회색만 · 점 0</span></div>
+          <span class="note">‘스파이크 0’ 과 ‘미측정’ 을 같은 말로 덮지 않는다(vmSeriesText.localPhaseText 그대로)</span></div>
+        <div class="state"><h5><span class="tag gray">③ 권한 없음</span></h5>
+          <div class="box">토글 · Peak 열 · 띠를 **숨기고** 머리 한 줄: ‘포탈 20초 Peak 는 자원 축소 도구 권한(도구 키 waste)이 있을 때 겹쳐 볼 수 있습니다’. 서버는 /tools/vmseries/local 에서 404/403 — 화면은 0 으로 그리지 않는다</div>
+          <span class="note">열린 질문 ②: 성능 화면용 별도 권한을 둘지(지금은 /tools/vmseries/* 전부 waste)</span></div>
+        <div class="state"><h5><span class="tag gray">④ 실시간 1시간 보기</span></h5>
+          <div class="box"><span class="btn sm peak off" aria-disabled="true" style="display:inline-flex"><span class="dot" style="width:7px;height:7px;background:#5d6b85"></span>포탈 20초 Peak 겹치기</span><div style="margin-top:6px">실시간 1시간은 vCenter 가 20초 값을 그대로 주므로 겹칠 Peak 가 없습니다 — 토글 비활성 + 툴팁. 타일의 Peak 줄은 ‘최근 24시간’ 으로 바꿔 남긴다</div></div>
+          <span class="note">같은 20초 표본을 두 번 그리지 않는다</span></div>
+        <div class="state"><h5><span class="tag gray">⑤ 7일 · 30일 보기(다운샘플)</span></h5>
+          <div class="box">순간 1,240 → 버킷(분)별 최대만 900점 · 띠는 일 단위 셀 · 범례에 ‘버킷 최대만’ 표시 · 응답 downsampled · momentCount 그대로 말한다</div>
+          <span class="note">1년 보기는 Peak 를 겹치지 않는다(보존 60일 밖 · 띠만 회색)</span></div>
+        <div class="state"><h5><span class="tag gray">⑥ 데모 · 엣지 위임</span></h5>
+          <div class="box"><span class="tag gray">데모 데이터</span> 배지 하나로 두 출처 모두 · 엣지 위임 vCenter 는 엣지가 수집해 중앙에 push 한 DB 를 읽는다(지금 /api/central/vmseries 경로) — 화면은 같다 · 마지막 수집 시각은 push 시각</div>
+          <span class="note">lastPollAt · synthesized 응답값으로만 말한다</span></div>
+      </div>
+
+      <section class="card" style="min-width:0" aria-label="데이터 · 호출">
+        <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;border-bottom:1px solid #1f2a40">
+          <h4 style="margin:0;font-size:14px;font-weight:700">데이터 · 호출(구현 메모 — 새 수집은 없다, 있는 것을 겹칠 뿐)</h4>
+          <span class="note">포탈 수집 = vmseries(v2.510) · 20초 표본 · 임계 이상 순간만 저장 · 50분 주기 · 60일 보존(전부 설정값)</span>
+        </div>
+        <div class="flow">
+          <span class="k">vCenter 선(지금)</span><span><span class="mono">GET /vms/:id/metrics?types=cpu,mem,disk,net&amp;interval=day[&amp;start&amp;end]</span> — 그대로</span>
+          <span class="k">Peak(추가 호출)</span><span><span class="mono">GET /tools/vmseries/local?vmId=…&amp;start=…&amp;end=…</span> — 지금 라우트는 <span class="mono">days=7|30|90|180|365</span> 만 받으므로 <b>start · end 를 더한다</b>(창과 같은 구간 · 서버 변경은 이 한 줄). 토글을 켤 때 1회 · 창을 옮길 때마다 1회 · 15초 폴링 없음 · 늦게 온 응답은 버린다</span>
+          <span class="k">응답에서 쓰는 것</span><span>moments[{t, cpuUsagePct, memUsagePct, cpuReadyPct, diskKBps, netKBps, …}] → 주황 점(고른 지표의 값) · peak.&lt;지표&gt;{v,t} → 타일 · 표 · coverage.hours → 띠 · thresholds · settings.intervalMin · retentionDays · lastPollAt → 문구 · runs → ‘임계 이상 순간 · 지속’ · downsampled · momentCount → 범례</span>
+          <span class="k">같은 시간축</span><span>점의 x 는 vCenter 선과 같은 창(start~end)으로 계산 · 겹쳐 보기(CPU+메모리)는 지표별 색의 점 · 디스크+네트워크는 ‘임계 순간의 값’ 으로만(† 표시)</span>
+          <span class="k">판정 코어</span><span>Peak · 커버리지 · 문구는 <span class="mono">views/vmSeriesText.js</span>(리포트와 같은 한 벌) · 결측 · 단위 없음 ‘—’ 규약(numOrNull) · 임계 미만을 0 으로 말하지 않는다</span>
+          <span class="k">400px</span><span>점 r 1.4 · 띠는 유지 · 타일 Peak 줄은 두 줄로 줄바꿈 · 툴팁은 아래 고정 — 1차 성능 화면 400px 규칙(뷰박스 400) 그대로</span>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2060}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var n = 48;                       // 24시간 · 30분 평균
+    var s = 11;
+    function rnd() { s = (s * 1103515245 + 12345) % 2147483648; return s / 2147483648; }
+    var X0 = 56, X1 = 1330, Y0 = 16, Y1 = 236;
+    var W = 24;                       // 창 길이(시간) · 시작 = 전날 10:21
+    function xOfH(h) { return X0 + (X1 - X0) * h / W; }
+    function yOfPct(p) { return Y1 - (Y1 - Y0) * Math.min(p, 100) / 100; }
+    // vCenter 30분 평균 — 11~18% 기본 · 15.7시간(02:05) 부근 한 버킷만 71%(평균이 피크를 깎은 모습) · 06:00~08:00(19.7~21.7h) 결측 없이 평균은 있다
+    var cpu = [], mem = [], dsk = [], net = [];
+    for (var i = 0; i < n; i++) {
+      var h = (i + 0.5) / 2;
+      var c = 13.5 + 2.5 * Math.sin(i / 5) + (rnd() - 0.5) * 2.2;
+      if (h > 15.4 && h < 16.0) c = 71;
+      if (h > 16.0 && h < 16.6) c = 29;
+      if (h > 8.4 && h < 9.1) c = 31;
+      cpu.push(Math.max(11, Math.min(100, c)));
+      mem.push(4.6 + 0.9 * Math.sin(i / 9) + (rnd() - 0.5) * 0.4);
+      dsk.push(0.35 + 0.15 * Math.sin(i / 4) + rnd() * 0.12 + (h > 15.4 && h < 16.0 ? 1.3 : 0));
+      net.push(0.5 + 0.2 * Math.sin(i / 6) + rnd() * 0.18 + (h > 15.4 && h < 16.0 ? 0.35 : 0));
+    }
+    function path(arr, max, x0, x1, y0, y1) {
+      var out = [];
+      for (var k = 0; k < arr.length; k++) {
+        var x = x0 + (x1 - x0) * k / (arr.length - 1);
+        var y = y1 - (y1 - y0) * Math.min(arr[k], max) / max;
+        out.push((k ? 'L' : 'M') + x.toFixed(1) + ' ' + y.toFixed(1));
+      }
+      return out.join(' ');
+    }
+    var line = path(cpu, 100, X0, X1, Y0, Y1);
+    // 포탈 20초 순간 — 임계 50% 이상만. run A: 01:53~02:06(38순간, 피크 97.2 @ 02:05:40) · run B: 18:50~19:00 부근 50~62 몇 점
+    var moments = [];
+    var hourCount = {};
+    var pkH = 15 + 44.67 / 60;        // 02:05:40 = 창 시작(10:21)에서 15시간 44분 40초
+    for (var a = 0; a < 38; a++) {
+      var hA = 15.53 + a * (20 / 3600) * 1.0;   // 20초 간격 · 12분 40초
+      var dist = Math.abs(hA - pkH);
+      var v = 97.2 - dist * 60 * 2.1 - rnd() * 4;  // 피크에서 멀수록 낮게
+      if (hA > pkH - 0.001 && hA < pkH + 0.001) v = 97.2;
+      v = Math.max(52, Math.min(97.2, v));
+      moments.push({ h: hA, v: v });
+      var hi = Math.floor(hA); hourCount[hi] = (hourCount[hi] || 0) + 1;
+    }
+    for (var b = 0; b < 7; b++) {
+      var hB = 8.52 + b * (20 / 3600) * 3;
+      var vb = 50 + rnd() * 12;
+      moments.push({ h: hB, v: vb });
+      var hib = Math.floor(hB); hourCount[hib] = (hourCount[hib] || 0) + 1;
+    }
+    var dots = [];
+    var peak = moments[0];
+    for (var m = 0; m < moments.length; m++) {
+      var mx = xOfH(moments[m].h), my = yOfPct(moments[m].v);
+      dots.push('M' + (mx - 1.8).toFixed(1) + ' ' + my.toFixed(1) + ' a1.8 1.8 0 1 0 3.6 0 a1.8 1.8 0 1 0 -3.6 0');
+      if (moments[m].v > peak.v) peak = moments[m];
+    }
+    var pkX = xOfH(peak.h), pkY = yOfPct(peak.v);
+    var pkAvgY = yOfPct(71);
+    var tri = 'M' + pkX.toFixed(1) + ' ' + (pkY - 7).toFixed(1) + ' l-5 -8 l10 0 z';
+    // 미측정 06:00~08:00 = 창 시작 10:21 에서 19.65h ~ 21.65h
+    var gapH0 = 19.65, gapH1 = 21.65;
+    var gapX = xOfH(gapH0), gapW = xOfH(gapH1) - gapX;
+    // 커버리지 띠(24 시간 셀) — y 278~290
+    var covOk = [], covGap = [], covHot = [];
+    for (var hh = 0; hh < 24; hh++) {
+      var cx0 = xOfH(hh), cw = (X1 - X0) / 24 - 1.5;
+      var isGap = hh >= Math.floor(gapH0) && hh < Math.ceil(gapH1) - 0;
+      if (hh === 19) isGap = false;       // 19.65 부터 미측정 — 19시 셀은 관측
+      if (hh === 21) isGap = true;
+      var rect = 'M' + cx0.toFixed(1) + ' 278 h' + cw.toFixed(1) + ' v12 h-' + cw.toFixed(1) + ' z';
+      if (isGap) covGap.push(rect); else covOk.push(rect);
+      var cnt = hourCount[hh] || 0;
+      if (cnt > 0 && !isGap) {
+        var hw = Math.max(3, Math.min(cw, cw * cnt / 38));
+        covHot.push('M' + cx0.toFixed(1) + ' 278 h' + hw.toFixed(1) + ' v12 h-' + hw.toFixed(1) + ' z');
+      }
+    }
+    // 스파크의 Peak 표시(CPU 타일) — 20초 피크 위치에 작은 삼각
+    var spx = 1 + 98 * (pkH / W), spy = 26 - 24 * 0.972;
+    var spTri = 'M' + spx.toFixed(1) + ' ' + spy.toFixed(1) + ' l-2 -3 l4 0 z';
+    return {
+      line: line,
+      area: line + ' L' + X1 + ' ' + Y1 + ' L' + X0 + ' ' + Y1 + ' Z',
+      avgY: yOfPct(14.1).toFixed(1),
+      dots: dots.join(' '),
+      pkX: pkX.toFixed(1), pkY: pkY.toFixed(1), pkAvgY: pkAvgY.toFixed(1),
+      pkTri: tri,
+      pkLabelX: (pkX + 12).toFixed(1), pkLabelY: (pkY - 2).toFixed(1), pkLabelY2: (pkY + 12).toFixed(1),
+      hx: pkX.toFixed(1), hy: pkY.toFixed(1),
+      tipLeft: ((pkX / 1360) * 100).toFixed(2) + '%',
+      gapX: gapX.toFixed(1), gapW: gapW.toFixed(1), gapMid: (gapX + gapW / 2).toFixed(1),
+      covOk: covOk.join(' '), covGap: covGap.join(' '), covHot: covHot.join(' '),
+      sp: {
+        cpu: path(cpu, 100, 1, 99, 2, 26),
+        cpuPk: spTri,
+        mem: path(mem, 100, 1, 99, 2, 26),
+        dsk: path(dsk, 2.0, 1, 99, 2, 26),
+        net: path(net, 1.0, 1, 99, 2, 26)
+      }
+    };
+  }
+}
+</script>
+</body>
+</html>

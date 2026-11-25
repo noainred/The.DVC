@@ -21,6 +21,7 @@ import { fork } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { scanRanges } from './scan.js';
 import { deadlineMs as clampDeadlineMs } from '../util/deadline.js';
+import { cacheToWire, absorbLearned } from './dnsConfirm.js'; // v3.2.0: 역DNS 이름 정방향 확인 — 답 기억은 이 프로세스에(중앙 · 엣지 공용)
 
 const WORKER = fileURLToPath(new URL('./scanWorker.js', import.meta.url));
 const workerEnabled = () => process.env.IPAM_SCAN_WORKER !== '0';
@@ -50,14 +51,26 @@ export function _setScanDeadlineOverrideForTest(ms) {
 }
 
 /**
- * @param {object} job { ranges, ports, concurrency, timeoutMs, reverseDns, ping }
+ * @param {object} job0 { ranges, ports, concurrency, timeoutMs, reverseDns, mdns, netbios, ping, fwdNames?, dnsConfirm?, dnsConfirmHours? }
  * @param {object} opts { onProgress?, deadlineMs? }
- * @returns {Promise<{scanned:number, alive:Array, viaWorker:boolean}>}
+ * @returns {Promise<{scanned:number, alive:Array, nameStats:object|null, viaWorker:boolean}>}
  */
-export async function runScan(job, { onProgress, deadlineMs = DEADLINE_MS } = {}) {
+/**
+ * v3.2.0: 역DNS 이름의 정방향 확인 — 켜져 있으면 지난 답(기억)을 잡에 싣는다(순수 · 기억은 인자). 켜짐 판정: 역DNS 를 켰고 dnsConfirm 이 false 가 아니다
+ *   (키 없는 옛 설정 · 옛 중앙 배정 = 켜짐 — 대상 장비가 아니라 DNS 서버에만 묻는다).
+ */
+export function withDnsConfirm(job0, cache) {
+  const on = job0?.reverseDns !== false && job0?.dnsConfirm !== false;
+  return { ...job0, dnsConfirm: on ? { on: true, hours: job0?.dnsConfirmHours, cache } : null };
+}
+
+export async function runScan(job0, { onProgress, deadlineMs = DEADLINE_MS } = {}) {
+  // v3.2.0: 새로 얻은 답을 돌려받아 기억에 넣는다(scanRunner 를 부르는 프로세스의 메모리 — 중앙 포탈 · 엣지 에이전트).
+  const job = withDnsConfirm(job0, job0?.reverseDns !== false && job0?.dnsConfirm !== false ? cacheToWire() : null);
+  const learn = (r) => { if (r && Array.isArray(r.dnsLearned)) absorbLearned(r.dnsLearned); return r; };
   if (workerEnabled()) {
     try {
-      return await runInWorker(job, onProgress, scanDeadlineMs(deadlineMs));
+      return learn(await runInWorker(job, onProgress, scanDeadlineMs(deadlineMs)));
     } catch (e) {
       // v2.732 B4-02: 데드라인 초과는 폴백하지 않고 던진다(같은 스캔을 메인에서 시한 없이 다시 돌리지 않게).
       if (!fallbackAllowed(e)) {
@@ -70,9 +83,12 @@ export async function runScan(job, { onProgress, deadlineMs = DEADLINE_MS } = {}
   }
   const r = await scanRanges(job.ranges || [], {
     ports: job.ports, concurrency: job.concurrency, timeoutMs: job.timeoutMs, reverseDns: job.reverseDns, ping: job.ping,
+    mdns: job.mdns !== false, netbios: job.netbios !== false, // v2.991
+    fwdNames: job.fwdNames, // v2.993: 정방향 DNS 이름
+    dnsConfirm: job.dnsConfirm, // v3.2.0
     onProgress,
   });
-  return { ...r, viaWorker: false };
+  return learn({ ...r, viaWorker: false });
 }
 
 function runInWorker(job, onProgress, deadlineMs) {
@@ -113,7 +129,7 @@ function runInWorker(job, onProgress, deadlineMs) {
         }
         return;
       }
-      if (m.type === 'done') return finish(resolve, { scanned: m.scanned, alive: m.alive || [], viaWorker: true });
+      if (m.type === 'done') return finish(resolve, { scanned: m.scanned, alive: m.alive || [], nameStats: m.nameStats || null, ...(m.fwd && typeof m.fwd === 'object' ? { fwd: m.fwd } : {}), ...(Array.isArray(m.dnsLearned) ? { dnsLearned: m.dnsLearned } : {}), viaWorker: true });
       if (m.type === 'error') return finish(reject, new Error(m.message || '워커 오류'));
     });
     child.on('error', (e) => finish(reject, e));      // spawn 실패 등

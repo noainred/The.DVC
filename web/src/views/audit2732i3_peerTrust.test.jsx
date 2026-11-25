@@ -37,6 +37,16 @@ describe('장비 신뢰 파일 배너 — 원인과 조치를 나눠 말한다',
     expect(b).toContain('<b>손상이 아니라</b>');
     expect(b).not.toContain('**');
   });
+  it('119회차: 읽기 오류(readError) — 원본을 옮기지 않았다 · 재시작이 아니라 다시 읽는다고 말한다', () => {
+    const b = banner(render({ code: 'unreadable', detail: 'EIO', writeBlocked: true, readError: true }));
+    expect(b).toContain('장비 신뢰 파일을 읽지 못했습니다(unreadable · EIO)');
+    expect(b).toContain('<b>원본은 그대로 두고 저장을 멈췄습니다</b>');
+    expect(b).toContain('30초마다 다시 읽고');
+    expect(b).not.toContain('옮기지 못해');
+    expect(b).not.toContain('재시작하세요');
+    expect(b).not.toContain('보존했습니다');
+    expect(b).not.toContain('**');
+  });
   it('읽지 못함 + 보존됨 — "손상" 이라 말하지 않고 보존본 이름을 준다', () => {
     const b = banner(render({ code: 'unreadable', detail: 'EACCES', preserved: 'peer-trust.json.corrupt.1780000000000' }));
     expect(b).toContain('읽지 못한 원본은 ‘peer-trust.json.corrupt.1780000000000’ 로 보존했습니다');

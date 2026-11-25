@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>CVP 네트워크 기능 — 메뉴 배치</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0}
+a{color:#7dd3fc}a:hover{color:#bae6fd}
+</style>
+</helmet>
+<div style="box-sizing: border-box; padding: clamp(12px, 2vw, 28px); background: #0a0e17; color: #e6edf6; font-family: 'Inter', 'Noto Sans KR', 'Apple SD Gothic Neo', sans-serif; font-size: 13px; line-height: 1.5; display: flex; flex-direction: column; gap: 14px;">
+
+<div style="display: flex; flex-direction: column; gap: 4px;">
+<div style="font-size: 12px; color: #a9b6cc;">네트워크 › Arista CVP</div>
+<h1 style="margin: 0; font-size: 20px; font-weight: 700;">CVP 에 더하는 12개 기능 — 어디에 들어가나</h1>
+<div style="font-size: 12.5px; color: #a9b6cc; overflow-wrap: anywhere;">탭이 10개에서 17개로 늘어 한 줄에 다 놓으면 찾기 어렵습니다. 탭을 네 묶음으로 나누는 안입니다. 도구 주소(‘#/tools/cvp’)와 기존 탭 이름은 바꾸지 않습니다.</div>
+</div>
+
+<div style="background: #141b2d; border: 1px solid #1f2a40; border-radius: 14px; padding: clamp(12px, 1.4vw, 18px); min-width: 0; display: flex; flex-direction: column; gap: 12px;">
+<b style="font-size: 14px;">탭 묶음(안)</b>
+<sc-for list="{{groups}}" as="g" hint-placeholder-count="5">
+<div style="display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center;">
+<div style="flex: 0 0 96px; font-weight: 600; color: #e6edf6;">{{g.name}}</div>
+<div style="flex: 1 1 300px; min-width: 0; display: flex; flex-wrap: wrap; gap: 6px;">
+<sc-for list="{{g.tabs}}" as="t" hint-placeholder-count="5">
+<span style="{{t.style}}">{{t.label}}<span style="{{t.tagStyle}}">{{t.tag}}</span></span>
+</sc-for>
+</div>
+</div>
+</sc-for>
+<div style="display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: #c9d5e6;">
+<span style="display: inline-flex; align-items: center; gap: 6px;"><span style="display: inline-block; width: 14px; height: 12px; border-radius: 3px; border: 1px solid #243049;"></span>지금 있는 탭</span>
+<span style="display: inline-flex; align-items: center; gap: 6px;"><span style="display: inline-block; width: 14px; height: 12px; border-radius: 3px; border: 1px solid #60a5fa; background: #172f5c;"></span>새 탭</span>
+<span style="display: inline-flex; align-items: center; gap: 6px;"><span style="display: inline-block; width: 14px; height: 12px; border-radius: 3px; border: 1px dashed #60a5fa;"></span>있는 탭에 보기 추가</span>
+</div>
+</div>
+
+<div style="background: #141b2d; border: 1px solid #1f2a40; border-radius: 14px; padding: clamp(12px, 1.4vw, 18px); min-width: 0; display: flex; flex-direction: column; gap: 10px;">
+<b style="font-size: 14px;">기능 12개 — 화면과 필요한 데이터</b>
+<div style="overflow-x: auto; border: 1px solid #1f2a40; border-radius: 10px;">
+<div role="table" aria-label="기능별 화면과 데이터" style="min-width: 1100px; font-size: 12.5px;">
+<div role="row" style="display: grid; grid-template-columns: 44px 210px 190px 170px minmax(260px, 1fr) 130px; align-items: center; background: #0f1626; color: #a9b6cc;">
+<div role="columnheader" style="padding: 8px 10px; font-weight: 600;">#</div>
+<div role="columnheader" style="padding: 8px 10px; font-weight: 600;">기능</div>
+<div role="columnheader" style="padding: 8px 10px; font-weight: 600;">들어갈 곳</div>
+<div role="columnheader" style="padding: 8px 10px; font-weight: 600;">데이터</div>
+<div role="columnheader" style="padding: 8px 10px; font-weight: 600;">무엇이 더 필요한가</div>
+<div role="columnheader" style="padding: 8px 10px; font-weight: 600;">시안</div>
+</div>
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="12">
+<div role="row" style="display: grid; grid-template-columns: 44px 210px 190px 170px minmax(260px, 1fr) 130px; align-items: center; border-top: 1px solid #1f2a40; min-height: 40px;">
+<div role="cell" style="padding: 6px 10px; font-family: 'JetBrains Mono', ui-monospace, monospace; color: #a9b6cc;">{{r.no}}</div>
+<div role="cell" style="padding: 6px 10px; font-weight: 600;">{{r.name}}</div>
+<div role="cell" style="padding: 6px 10px; color: #c9d5e6;">{{r.where}}</div>
+<div role="cell" style="padding: 6px 10px;"><span style="{{r.srcStyle}}">{{r.src}}</span></div>
+<div role="cell" style="padding: 6px 10px; color: #c9d5e6; overflow-wrap: anywhere;">{{r.need}}</div>
+<div role="cell" style="padding: 6px 10px;"><a href="{{r.href}}" style="text-decoration: none; font-weight: 600;">{{r.board}}</a></div>
+</div>
+</sc-for>
+</div>
+</div>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px;">
+<div style="background: #141b2d; border: 1px solid #1f2a40; border-radius: 14px; padding: clamp(12px, 1.4vw, 18px); min-width: 0; display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; color: #c9d5e6;">
+<b style="font-size: 14px; color: #e6edf6;">예약 작업(이번 시안에서 뺌)</b>
+<div style="overflow-wrap: anywhere;">⑪ 트래픽 흐름 분석 — 법인마다 흐름 수집기가 필요하고 데이터가 큽니다. 엣지에서 요약만 올리는 구조부터 정해야 합니다.</div>
+<div style="overflow-wrap: anywhere;">⑭ 경로 추적 — ① 위치 찾기와 ⑥ 토폴로지가 먼저 있어야 합니다.</div>
+</div>
+<div style="background: #141b2d; border: 1px solid #1f2a40; border-radius: 14px; padding: clamp(12px, 1.4vw, 18px); min-width: 0; display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; color: #c9d5e6;">
+<b style="font-size: 14px; color: #e6edf6;">공통 원칙</b>
+<div style="overflow-wrap: anywhere;">· 수집은 법인 엣지가 하고 중앙은 모아 보여 줍니다. 판정(순위 · 불일치 · 예측)은 중앙에서 한 번만 합니다.</div>
+<div style="overflow-wrap: anywhere;">· 못 읽은 값은 0 이나 ‘정상’ 으로 쓰지 않고 따로 셉니다. 기록을 시작하기 전 기간은 ‘기록 없음’ 입니다.</div>
+<div style="overflow-wrap: anywhere;">· ‘새 수집’ 의 CVP 조회 경로는 실장비로 확인하지 못한 추정입니다 — 원문 표본으로 확인한 뒤 굳힙니다.</div>
+</div>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1230}}'>
+class Component extends DCLogic {
+renderVals() {
+const base = 'display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 11px; border-radius: 8px; font-size: 12.5px; white-space: nowrap; ';
+const S = { old: base + 'border: 1px solid #243049; color: #a9b6cc;', neu: base + 'border: 1px solid #60a5fa; background: #172f5c; color: #e6f0ff; font-weight: 600;', add: base + 'border: 1px dashed #60a5fa; color: #e6edf6;' };
+const tag = "font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #bfdbfe;";
+const t = (label, kind, no) => ({ label: label, style: S[kind], tag: no || '', tagStyle: no ? tag : 'display: none;' });
+const groups = [
+{ name: '현황', tabs: [t('Overview', 'old'), t('장비', 'old'), t('모델', 'old'), t('트래픽', 'old'), t('전력', 'old'), t('이벤트', 'old')] },
+{ name: '포트 · 링크', tabs: [t('인터페이스 세부 정보', 'old'), t('포트 구성도', 'add', '⑤⑨'), t('포트 사용량', 'old'), t('광신호', 'add', '⑮'), t('링크 품질', 'neu', '④⑩'), t('이중화', 'neu', '⑧')] },
+{ name: '연결', tabs: [t('토폴로지', 'neu', '⑥⑦'), t('위치 찾기', 'neu', '①')] },
+{ name: '변경 · 준수', tabs: [t('설정 백업', 'neu', '②'), t('버전 준수', 'neu', '③'), t('작업 전후 비교', 'neu', '⑬')] },
+{ name: '설정', tabs: [t('CVP 설정', 'old')] }
+];
+const pill = 'display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; ';
+const SRC = { have: ['지금 있는 데이터', pill + 'background: #16432a; border: 1px solid #22c55e; color: #eafff1;'], lldp: ['LLDP 수집 필요', pill + 'background: #172f5c; border: 1px solid #60a5fa; color: #e6f0ff;'], neu: ['새 수집 필요', pill + 'background: #4a3208; border: 1px solid #f59e0b; color: #fff3d6;'], mix: ['있음 + 새 수집', pill + 'background: #35205c; border: 1px solid #c084fc; color: #f1e6ff;'] };
+const r = (no, name, where, src, need, file, board) => ({ no: no, name: name, where: where, src: SRC[src][0], srcStyle: SRC[src][1], need: need, href: file + '.dc.html', board: board });
+const rows = [
+r('④', '불량 링크 순위', '링크 품질', 'mix', '오류 합계는 있음. CRC · 폐기 구분은 새 수집', 'LinkQuality', '링크 품질'),
+r('⑩', '링크 플랩 순위 · Syslog', '링크 품질', 'neu', '상태 전이 횟수를 세는 수집. Syslog 는 2단계', 'LinkQuality', '링크 품질'),
+r('⑤', '미사용 포트 회수', '포트 구성도 › 회수 · 예측', 'have', '일별 기록(730일)으로 마지막 사용일 계산', 'PortReclaim', '회수 · 예측'),
+r('⑨', '포트 고갈 · 업링크 포화 예측', '포트 구성도 › 회수 · 예측', 'mix', '사용 포트 수의 일별 기록을 새로 쌓아야 추세가 생김', 'PortReclaim', '회수 · 예측'),
+r('⑬', '작업 전후 비교', '작업 전후 비교', 'have', '스냅샷 저장소만 추가(포트 · BGP · 부품 최신값 복사)', 'ChangeCompare', '전후 비교'),
+r('⑮', 'GBIC 열화 추세 · 재고', '광신호 › 추세 · 재고', 'mix', '광량은 최신값만 저장 중 — 일별 기록을 새로 쌓음', 'OpticsTrend', 'GBIC 추세'),
+r('⑥', '자동 토폴로지 지도', '토폴로지', 'lldp', '포트 구성도의 LLDP 이웃을 그대로 사용', 'Topology', '토폴로지'),
+r('⑦', '양끝 불일치 점검', '토폴로지 › 불일치', 'lldp', 'MTU · Duplex · 속도는 있음. 상대 포트는 LLDP', 'Topology', '토폴로지'),
+r('①', 'MAC/IP 위치 찾기', '위치 찾기', 'neu', 'MAC 주소 표 · ARP 표(조회 경로 미확인)', 'MacLocator', '위치 찾기'),
+r('②', '설정 백업 · 변경 비교', '설정 백업', 'neu', '장비 실행 설정(조회 경로 미확인) · 비밀 가림', 'ConfigBackup', '설정 백업'),
+r('③', 'EOS 버그 · CVE 노출 · 단종', '버전 준수', 'neu', 'CVP 준수 판정(조회 경로 미확인)', 'Compliance', '버전 준수'),
+r('⑧', 'MLAG · 포트 채널 이중화', '이중화', 'mix', 'LAG 이름은 있음. 멤버 상태 · MLAG 상태는 새 수집', 'Mlag', '이중화')
+];
+return { groups: groups, rows: rows };
+}
+}
+</script>
+</body>
+</html>

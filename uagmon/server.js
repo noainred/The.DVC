@@ -21,7 +21,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { fetchUagStats } from './lib/uag.js';
 import { hostBlockReason } from './lib/guard.js';
-import { Store } from './lib/store.js';
+import { Store, pollSecondsOf, hostChanges } from './lib/store.js';
 import { Auth, hashPassword } from './lib/auth.js';
 import { createPoller } from './lib/poller.js';
 import { loopbackHostOk, mutationVerdict } from './lib/httpGuard.js';
@@ -54,7 +54,7 @@ for (let i = 0; i < args.length; i++) {
 
 const DATA_DIR = opt.data || process.env.UAGMON_DATA || path.join(__dirname, 'data');
 const store = new Store(DATA_DIR);
-if (opt.poll > 0) store.settings.pollSeconds = Math.max(10, opt.poll);
+if (opt.poll > 0) store.settings.pollSeconds = pollSecondsOf(opt.poll);
 
 if (opt.setPassword != null) {
   if (String(opt.setPassword).length < 8) { console.error('비밀번호는 8자 이상이어야 합니다.'); process.exit(1); }
@@ -86,7 +86,7 @@ const auth = new Auth({ required: !isLoopback, passwordHash, onRehash });
 // 재진입 가드 + 대상 변경 직후 재실행 예약 + 삭제된 대상 결과 버림 — lib/poller.js.
 const poller = createPoller(store, (t) => fetchUagStats(t)); // 대상마다 전체 10초 시한(주소 해석~본문 끝, v2.767 R2-B5-5)
 const pollOnce = (o) => poller.pollOnce(o);
-const pollTimer = setInterval(() => { pollOnce().catch(logPollError); }, Math.max(10, store.settings.pollSeconds) * 1000);
+const pollTimer = setInterval(() => { pollOnce().catch(logPollError); }, pollSecondsOf(store.settings.pollSeconds) * 1000);
 pollTimer.unref?.();
 pollOnce().catch(logPollError);
 function logPollError(err) { console.error(`[uagmon] 폴링 실패: ${err?.stack || err}`); }
@@ -238,6 +238,12 @@ async function handle(req, res) {
       if (!body) return json(res, 400, { ok: false, error: '잘못된 요청 본문' });
       const bad = validateTarget(body, true);
       if (bad) return json(res, 400, { ok: false, error: bad });
+      // 109회차 D-2: host 를 바꾸면 저장 비밀번호를 이월하지 않는다(M3 — store.normalizeTarget). 예전에는 그 요청을 200 으로 받아 비밀번호가
+      //   조용히 비워졌고, 폴러가 빈 비밀번호로 UAG 관리 API 에 주기마다 로그인했다(화면에는 '인증 실패' 만). README 대로 재입력을 요구한다.
+      const cur = store.targets.find((x) => x.id === mt[1]);
+      if (cur && hostChanges(body, cur) && !String(body.password || '')) {
+        return json(res, 400, { ok: false, error: '주소(host)를 바꾸면 UAG 관리 비밀번호를 다시 입력해야 합니다(저장된 비밀번호는 새 주소로 넘기지 않습니다).' });
+      }
       const t = store.updateTarget(mt[1], body);
       if (!t) return json(res, 404, { ok: false, error: '대상 없음' });
       pollOnce({ again: true }).catch(logPollError);

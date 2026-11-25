@@ -1,8 +1,16 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { readFileSync } from 'node:fs';
+
+// v2.999(설계 docs/design/upgrade-reload): 이 번들의 판을 빌드에 새긴다 — 열어 둔 창이 업그레이드된 서버(/api/health version)와
+//   판이 다른지 판정한다(web/src/upgradeNotice.js). release.sh 가 루트 · 서버 · 웹 package.json 을 같은 버전으로 올린다.
+const WEB_VERSION = (() => {
+  try { return String(JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version || ''); } catch { return ''; }
+})();
 
 export default defineConfig({
   plugins: [react()],
+  define: { 'import.meta.env.VITE_APP_VERSION': JSON.stringify(WEB_VERSION) },
   server: {
     port: 5173,
     proxy: {

@@ -1,0 +1,6 @@
+kern  :warn  : [ 4812.438614] nvme nvme1: I/O 1024 QID 7 timeout, completion polled
+kern  :err   : [ 4812.900001] mce: [Hardware Error]: Machine check events logged
+kern  :err   : [ 4813.100002] EDAC MC0: 1 CE memory read error on CPU_SrcID#0_Ha#0_Chan#2_DIMM#1 (channel:2 slot:1 page:0x3e2a1f offset:0x400 grain:32 syndrome:0x0)
+kern  :warn  : [ 4900.000003] TCP: out of memory -- consider tuning tcp_mem
+kern  :err   : [ 5001.000004] Out of memory: Killed process 48112 (postgres) total-vm:8123456kB, anon-rss:7654321kB, file-rss:0kB, shmem-rss:0kB
+kern  :warn  : [ 5100.000005] software IO TLB: No low mem

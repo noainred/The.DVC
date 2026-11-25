@@ -30,6 +30,14 @@ const _edgeOps = new Map();   // 작업 id → { kind, directorId, since }(비�
 export function noteEdgeOpStart(id, kind, directorId) { _edgeOps.set(String(id), { kind: String(kind).slice(0, 40), directorId: String(directorId || '').slice(0, 64), since: Date.now() }); }
 export function noteEdgeOpEnd(id) { _edgeOps.delete(String(id)); }
 
+// 52회차 F1(재현): 중앙 직접 Director 의 상태 변경(단건 · 일괄 등록 · 그룹 저장 · 단건 실행 · 단건 복원 — service.onDirector 하나로 지난다).
+//   예전에는 엣지 대행 · 자동 설정 · 그룹 실행 · 묶음 복원만 기다려, 일괄 등록 도중 재시작하면 Director 에 잡이 만들어졌는데 원장에는 없고(스케줄 켜진 채)
+//   다시 등록하면 '-r2' 잡이 하나 더 생겨 같은 VM 을 두 잡이 백업했다. 비밀 · 인자는 싣지 않는다.
+const _directOps = new Map();   // 순번 → { kind, directorId, since }
+let _directSeq = 0;
+export function noteDirectOpStart(kind, directorId) { const id = `d${++_directSeq}`; _directOps.set(id, { kind: String(kind).slice(0, 40), directorId: String(directorId || '').slice(0, 64), since: Date.now() }); return id; }
+export function noteDirectOpEnd(id) { _directOps.delete(String(id)); }
+
 /**
  * 지금 도는(재시작하면 끊기는) Bareos 작업 — upgrade/manager.js 의 다른 대기 목록과 같은 모양.
  * 엣지 대행 상태 조회(poll)는 넣지 않는다(다음 주기에 다시 한다).
@@ -42,6 +50,7 @@ export function runningBareosWork(now = Date.now()) {
   for (const [id, g] of _groups) out.push({ kind: 'bareos', key: `group:${id}`, label: `Bareos 백업 그룹 실행(${g.name})`, since: g.since, resumable: false });
   for (const [id, r] of _restores) out.push({ kind: 'bareos', key: `restore:${id}`, label: `Bareos 묶음 복원(${r.name})`, since: r.since, resumable: false });
   for (const [id, o] of _edgeOps) out.push({ kind: 'bareos', key: `edge-run:${id}`, label: `Bareos 대행 실행 ${o.kind}(Director ${o.directorId})`.slice(0, 120), since: o.since, resumable: false });
+  for (const [id, o] of _directOps) out.push({ kind: 'bareos', key: `direct:${id}`, label: `Bareos 직접 실행 ${o.kind}(Director ${o.directorId})`.slice(0, 120), since: o.since, resumable: false });
   let ops = [];
   try { ops = pendingView(); } catch { ops = []; }
   for (const o of ops) {
@@ -55,4 +64,4 @@ export function runningBareosWork(now = Date.now()) {
   return out;
 }
 
-export function _resetInflightForTest() { _setups.clear(); _groups.clear(); _restores.clear(); _edgeOps.clear(); }
+export function _resetInflightForTest() { _setups.clear(); _groups.clear(); _restores.clear(); _edgeOps.clear(); _directOps.clear(); }

@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>집중 모니터링 — 비교</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#7dd3fc}a:hover{color:#bae6fd}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+.num{font-variant-numeric:tabular-nums}
+.dim{color:#8b9bb4}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.seg{display:inline-flex;flex-wrap:wrap;border:1px solid #243049;border-radius:8px;overflow:hidden;background:#0f1626}
+.seg button{height:34px;padding:0 12px;border:0;border-left:1px solid #243049;background:transparent;color:#8b9bb4;font:inherit;font-size:12.5px;cursor:pointer;white-space:nowrap}
+.seg button:first-child{border-left:0}
+.seg button.on{background:#1a2236;color:#e6edf6;font-weight:600}
+.seg a{display:inline-flex;align-items:center;height:34px;padding:0 12px;border-left:1px solid #243049;color:#8b9bb4;font-size:12.5px;white-space:nowrap;text-decoration:none;box-sizing:border-box}
+.seg a:first-child{border-left:0}
+.seg a.on{background:#1a2236;color:#e6edf6;font-weight:600}
+.btn{height:34px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#141b2d;color:#e6edf6;font:inherit;font-size:12.5px;cursor:pointer;white-space:nowrap}
+.tabs{display:flex;flex-wrap:wrap;gap:4px;border-bottom:1px solid #1f2a40}
+.tabs a{display:inline-flex;align-items:center;height:40px;padding:0 14px;color:#8b9bb4;text-decoration:none;font-size:13.5px;border-bottom:2px solid transparent;margin-bottom:-1px}
+.tabs a.on{color:#e6edf6;font-weight:600;border-bottom-color:#3b82f6}
+.tbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;padding:10px 14px}
+.tbar input[type=range]{width:100%;height:20px;margin:0;accent-color:#3b82f6}
+.sl{flex:1 1 220px;min-width:140px;display:flex;flex-direction:column;gap:3px}
+.sl svg{display:block;width:100%;height:5px;border-radius:3px}
+.tbar input[type=date]{height:34px;box-sizing:border-box;padding:0 8px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit;font-size:12.5px;color-scheme:dark}
+.tbar .cap{flex:1 1 100%;font-size:12px;color:#8b9bb4}
+.btn[disabled]{opacity:.45;cursor:default}
+.btn.on{background:#2563eb;border-color:#2563eb;color:#fff;font-weight:600}
+.lbl{font-size:12px;color:#8b9bb4;min-width:34px}
+.io{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11px;color:#8b9bb4;margin-left:5px}
+.seg button.on .io{color:#c3cede}
+.pin{display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 6px 0 10px;border:1px solid #243049;border-radius:15px;background:#0f1626;font-size:12.5px}
+.pin i{display:inline-block;width:10px;height:10px;border-radius:50%}
+.pin button{width:22px;height:22px;border:0;border-radius:50%;background:transparent;color:#8b9bb4;font:inherit;font-size:14px;line-height:1;cursor:pointer}
+.h3{margin:0;font-size:14.5px;font-weight:600}
+.rk{display:grid;grid-template-columns:22px minmax(0,104px) minmax(0,1fr) 62px;align-items:center;gap:8px;height:25px;font-size:12.5px}
+.rk .n{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rk .bar{height:10px;border-radius:0 4px 4px 0}
+.rk .v{text-align:right}
+.hm{display:grid;grid-template-columns:104px minmax(0,1fr) 58px;align-items:center;gap:10px;height:19px;font-size:12px}
+.hm svg{display:block;width:100%;height:15px}
+.tip{position:absolute;top:14px;width:232px;padding:8px 10px;border-radius:8px;border:1px solid #243049;background:rgba(11,18,32,.95);box-shadow:0 6px 18px rgba(0,0,0,.35);font-size:12px;line-height:1.6;pointer-events:none}
+.endl{position:absolute;left:87.2%;width:12.3%;transform:translateY(-50%);display:flex;justify-content:space-between;gap:6px;font-size:12px;white-space:nowrap}
+.endl b{font-weight:600}
+.tip .l{display:flex;align-items:center;gap:7px}
+@media (max-width:640px){.tip{display:none}.endl{display:none}}
+.tip .l i{display:inline-block;width:8px;height:8px;border-radius:50%;flex:none}
+.tip .l b{margin-left:auto;font-weight:600}
+</style>
+</helmet>
+<div style="max-width:1440px;margin:0 auto;box-sizing:border-box;padding:24px 32px 36px;display:flex;flex-direction:column;gap:16px">
+
+  <div class="row" style="justify-content:space-between;align-items:flex-end;gap:16px">
+    <div style="display:flex;flex-direction:column;gap:2px;min-width:0">
+      <div class="dim" style="font-size:12px">특수 기능 › 서버</div>
+      <h1 style="margin:0;font-size:22px;font-weight:700;letter-spacing:-.01em">집중 모니터링</h1>
+    </div>
+    <span class="row" style="gap:2px 6px;min-height:34px;box-sizing:border-box;padding:4px 12px;border:1px solid #243049;border-radius:8px;background:#0f1626">
+      <span aria-hidden="true" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e"></span>
+      <span style="font-weight:600">수집 중</span><span class="dim">· 20 / 20대 · 주기 2초 · 남은 시간</span><span class="mono num">12:38</span>
+    </span>
+  </div>
+
+  <nav class="tabs" aria-label="집중 모니터링 보기">
+    <a href="Main.dc.html">개요</a>
+    <a class="on" href="Compare.dc.html">비교</a>
+    <a href="Process.dc.html">프로세스</a>
+    <a href="Targets.dc.html">대상 · 키</a>
+  </nav>
+
+  <div class="card" style="padding:14px 16px;display:flex;flex-direction:column;gap:10px">
+    <div class="row"><span class="lbl">보기</span>
+      <div class="seg" role="group" aria-label="비교 보기"><a class="on" href="Compare.dc.html">지표 비교</a><a href="IostatCompare.dc.html">iostat 비교</a></div>
+      <span class="dim" style="font-size:12px">지표 하나를 20대에서 보거나, 고른 서버의 iostat 표를 나란히 봅니다</span>
+    </div>
+    <div class="row"><span class="lbl">지표</span>
+      <div class="seg" role="group" aria-label="지표"><button type="button">CPU</button><button type="button">메모리</button><button type="button">네트워크</button><button type="button" class="on">디스크</button></div>
+      <span class="dim" style="font-size:12px">디스크 항목은 iostat -x -m 의 13개 열 그대로입니다</span>
+    </div>
+    <div class="row" style="align-items:flex-start"><span class="lbl" style="padding-top:8px">항목</span>
+      <div class="seg" role="group" aria-label="디스크 항목" style="flex:1 1 300px"><button type="button">읽기 횟수<span class="io">r/s</span></button><button type="button">쓰기 횟수<span class="io">w/s</span></button><button type="button">읽기량<span class="io">rMB/s</span></button><button type="button">쓰기량<span class="io">wMB/s</span></button><button type="button">읽기 지연<span class="io">r_await</span></button><button type="button" class="on">쓰기 지연<span class="io">w_await</span></button><button type="button">지연<span class="io">await</span></button><button type="button">대기열<span class="io">avgqu-sz</span></button><button type="button">요청 크기<span class="io">avgrq-sz</span></button><button type="button">서비스 시간<span class="io">svctm</span></button><button type="button">사용률<span class="io">%util</span></button><button type="button">읽기 병합<span class="io">rrqm/s</span></button><button type="button">쓰기 병합<span class="io">wrqm/s</span></button></div>
+    </div>
+    <div class="row"><span class="lbl">범위</span>
+      <div class="seg" role="group" aria-label="디스크 범위"><button type="button" class="on">전체 디스크</button><button type="button">같은 마운트 지점</button><button type="button">장치 지정</button></div>
+      <span class="dim" style="font-size:12px">전체 디스크 = 서버마다 물리 디스크의 요청 수로 가중한 평균 · ‘같은 마운트 지점’ 은 /oradata 처럼 경로를 정해 그 파티션끼리 비교</span>
+    </div>
+    <div class="row"><span class="lbl">고정</span>
+      <sc-for list="{{ pins }}" as="p" hint-placeholder-count="4"><span class="pin"><i style="{{ p.dot }}"></i><span>{{ p.name }}</span><button type="button" aria-label="고정 해제">×</button></span></sc-for>
+      <span class="dim" style="font-size:12px">색은 고정한 서버에만 줍니다(최대 4대) · 나머지 16대는 회색 선 · 서버 이름을 누르면 고정이 바뀝니다</span>
+    </div>
+  </div>
+
+  <div class="card tbar">
+    <span class="dim" style="font-size:12px">구간</span>
+    <div class="seg" role="group" aria-label="차트 구간"><button type="button">1분</button><button type="button" class="on">5분</button><button type="button">10분</button><button type="button">30분</button></div>
+    <button type="button" class="btn">◀ 이전 5분</button>
+    <span class="sl"><input type="range" min="0" max="287" value="287" aria-label="구간 이동 — 오른쪽 끝이 최신"><svg viewBox="0 0 1440 6" preserveAspectRatio="none" role="img" aria-label="최근 24시간 가운데 기록이 있는 시간"><rect x="0" y="0" width="1440" height="6" fill="#1b2a48"></rect><rect x="0" y="0" width="191" height="6" fill="#3987e5"></rect><rect x="232" y="0" width="673" height="6" fill="#3987e5"></rect><rect x="921" y="0" width="519" height="6" fill="#3987e5"></rect></svg></span>
+    <button type="button" class="btn" disabled="disabled">다음 5분 ▶</button>
+    <button type="button" class="btn on">최신</button>
+    <label class="dim" style="font-size:12px" for="jump-cmp">날짜로 이동</label><input id="jump-cmp" type="date" value="2026-11-11" min="2026-10-12" max="2026-11-11">
+    <span class="cap num">최근 구간 · 11-11 21:44:38 ~ 21:49:38 · 슬라이더는 최근 24시간(날짜를 고르면 그 날 하루) · 뒤로 30일까지 — DB 에 보관 · 슬라이더 아래 띠는 기록이 있는 시간</span>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:stretch">
+    <div class="card" style="flex:2.15 1 560px;padding:14px 16px 10px;display:flex;flex-direction:column;gap:8px">
+      <div class="row" style="justify-content:space-between">
+        <h2 class="h3">디스크 쓰기 지연(w_await) — 전체 디스크 · 최근 5분</h2>
+        <div class="row"><span class="dim" style="font-size:12px">단위 ms</span><span class="lbl" style="min-width:0">눈금</span><div class="seg" role="group" aria-label="세로축 눈금"><button type="button" class="on">선형</button><button type="button">로그</button></div><button type="button" class="btn">표로 보기</button><button type="button" class="btn">CSV</button></div>
+      </div>
+      <div style="position:relative">
+        <svg viewBox="0 0 900 560" role="img" aria-label="서버 20대의 디스크 쓰기 지연 추이. 고정한 4대는 색 선, 나머지는 회색 선" style="display:block;width:100%;height:auto">
+          <line x1="46" x2="776" y1="530" y2="530" stroke="#33415c"></line><text x="40" y="534" fill="#8b9bb4" font-size="11" text-anchor="end">0</text>
+          <line x1="46" x2="776" y1="426.8" y2="426.8" stroke="#1f2a40"></line><text x="40" y="430.8" fill="#8b9bb4" font-size="11" text-anchor="end">10</text>
+          <line x1="46" x2="776" y1="323.6" y2="323.6" stroke="#1f2a40"></line><text x="40" y="327.6" fill="#8b9bb4" font-size="11" text-anchor="end">20</text>
+          <line x1="46" x2="776" y1="220.4" y2="220.4" stroke="#1f2a40"></line><text x="40" y="224.4" fill="#8b9bb4" font-size="11" text-anchor="end">30</text>
+          <line x1="46" x2="776" y1="117.2" y2="117.2" stroke="#1f2a40"></line><text x="40" y="121.2" fill="#8b9bb4" font-size="11" text-anchor="end">40</text>
+          <line x1="46" x2="776" y1="14" y2="14" stroke="#1f2a40"></line><text x="40" y="18" fill="#8b9bb4" font-size="11" text-anchor="end">50</text>
+          <text x="46" y="552" fill="#8b9bb4" font-size="11">5분 전</text>
+          <text x="193" y="552" fill="#8b9bb4" font-size="11" text-anchor="middle">4분 전</text>
+          <text x="340" y="552" fill="#8b9bb4" font-size="11" text-anchor="middle">3분 전</text>
+          <text x="486.9" y="552" fill="#8b9bb4" font-size="11" text-anchor="middle">2분 전</text>
+          <text x="633.9" y="552" fill="#8b9bb4" font-size="11" text-anchor="middle">1분 전</text>
+          <text x="776" y="552" fill="#8b9bb4" font-size="11" text-anchor="end">지금</text>
+          <sc-for list="{{ ctx }}" as="c" hint-placeholder-count="16">
+            <path d="{{ c.d }}" fill="none" stroke="#3d4a66" stroke-width="1"></path>
+          </sc-for>
+          <line x1="{{ hx }}" x2="{{ hx }}" y1="14" y2="530" stroke="#5d6b85"></line>
+          <sc-for list="{{ pins }}" as="p" hint-placeholder-count="4">
+            <path d="{{ p.d }}" fill="none" stroke="{{ p.color }}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></path>
+            <circle cx="{{ hx }}" cy="{{ p.hy }}" r="4" fill="{{ p.color }}" stroke="#141b2d" stroke-width="2"></circle>
+            <circle cx="776" cy="{{ p.ey }}" r="4.5" fill="{{ p.color }}" stroke="#141b2d" stroke-width="2"></circle>
+          </sc-for>
+        </svg>
+        <sc-for list="{{ pins }}" as="p" hint-placeholder-count="4">
+          <div class="endl num" style="{{ p.lbl }}"><span>{{ p.name }}</span><b>{{ p.now }}</b></div>
+        </sc-for>
+        <div class="tip" role="status" style="{{ tipStyle }}">
+          <div class="mono" style="font-weight:600">3분 12초 전 · 21:49:26</div>
+          <sc-for list="{{ pins }}" as="p" hint-placeholder-count="4"><div class="l"><i style="{{ p.dot }}"></i><span>{{ p.name }}</span><b class="num">{{ p.hv }} ms</b></div></sc-for>
+          <div style="border-top:1px solid #243049;margin:5px 0 4px"></div>
+          <div class="l"><i style="background:#3d4a66"></i><span class="dim">나머지 16대 최고</span><b class="num">{{ restMax }} ms</b></div>
+          <div class="l"><i style="background:#3d4a66"></i><span class="dim">나머지 16대 중앙값</span><b class="num">{{ restMed }} ms</b></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="flex:1 1 300px;padding:14px 16px;display:flex;flex-direction:column;gap:6px">
+      <div class="row" style="justify-content:space-between"><h2 class="h3">지금 — 높은 순</h2><span class="dim" style="font-size:12px">ms</span></div>
+      <div style="display:flex;flex-direction:column">
+        <sc-for list="{{ rank }}" as="r" hint-placeholder-count="20">
+          <div class="rk"><span class="dim num">{{ r.no }}</span><span class="n">{{ r.name }}</span><span><span class="bar" style="{{ r.bar }}"></span></span><span class="v num">{{ r.val }}</span></div>
+        </sc-for>
+      </div>
+      <div class="dim" style="font-size:12px;border-top:1px solid #1f2a40;padding-top:8px">‘—’ 은 그 2초 동안 쓰기가 없어 지연을 낼 수 없다는 뜻입니다. 0 ms 가 아닙니다.</div>
+    </div>
+  </div>
+
+  <div class="card" style="padding:14px 16px;display:flex;flex-direction:column;gap:8px">
+    <div class="row" style="justify-content:space-between">
+      <h2 class="h3">20대 × 시간 — 디스크 쓰기 지연</h2>
+      <div class="row" style="gap:6px;font-size:12px"><span class="dim">0 ms</span>
+        <svg viewBox="0 0 140 12" role="img" aria-label="색 눈금: 어두울수록 낮고 밝을수록 높음" style="width:140px;height:12px;display:block"><sc-for list="{{ legend }}" as="c" hint-placeholder-count="14"><rect x="{{ c.x }}" y="0" width="10" height="12" fill="{{ c.fill }}"></rect></sc-for></svg>
+        <span class="dim">50 ms 이상</span>
+        <span aria-hidden="true" style="display:inline-block;width:12px;height:12px;border:1px solid #33415c;background:#0a0e17;margin-left:10px"></span><span class="dim">쓰기 없음(값 없음)</span>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column">
+      <sc-for list="{{ heat }}" as="h" hint-placeholder-count="20">
+        <div class="hm"><span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ h.name }}</span>
+          <svg viewBox="0 0 75 10" preserveAspectRatio="none" aria-hidden="true"><sc-for list="{{ h.cells }}" as="c" hint-placeholder-count="75"><rect x="{{ c.x }}" y="0" width="0.94" height="10" fill="{{ c.fill }}"></rect></sc-for></svg>
+          <span class="num" style="text-align:right">{{ h.val }}</span></div>
+      </sc-for>
+    </div>
+    <div class="row dim" style="font-size:12px;justify-content:space-between"><span>한 칸 = 4초(표본 2개 평균) · 왼쪽 5분 전 → 오른쪽 지금 · 순서는 ‘지금 — 높은 순’ 과 같음</span><span>칸에 마우스를 올리면 서버·시각·값을 보여 줍니다</span></div>
+  </div>
+
+  <div class="dim" style="font-size:12px;display:flex;flex-direction:column;gap:3px">
+    <span>디스크 항목 13개는 iostat -x -m 과 같은 이름 · 같은 식입니다. ‘표로 보기’ 는 서버마다 한 줄씩 13개 열을 iostat 화면처럼 보여 줍니다(범위가 ‘장치 지정’ 이면 그 장치의 줄).</span>
+    <span>세로축은 값에 맞춰 스스로 잡습니다. 지연이 수 ms 인 서버와 수천 ms 인 서버가 섞이면 ‘로그’ 눈금으로 바꿔 함께 봅니다. 20대 × 시간 띠의 색 눈금도 같은 범위를 따릅니다.</span>
+    <span>CPU · 메모리 · 네트워크도 같은 화면에서 지표만 바꿔 봅니다. 네트워크는 항목(수신 · 송신 · 사용률)과 범위(본딩 인터페이스 · 물리 인터페이스 지정)를 고릅니다.</span>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1739}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const N = 150; const T = 1000;
+    const frac = (x) => x - Math.floor(x);
+    const hash = (a, b) => frac(Math.sin(a * 127.1 + b * 311.7) * 43758.5453);
+    const smooth = (a, t) => (hash(a, t) + hash(a, t - 1) + hash(a, t - 2) + hash(a, t - 3) + hash(a, t - 4)) / 5;
+    // 이름, 평소 쓰기 지연(ms)
+    const DEF = [
+      ['kr-db-01', 9.5], ['kr-db-02', 1.5], ['kr-was-01', 0.5], ['kr-was-02', 0.5], ['kr-web-01', 0.4], ['kr-bak-01', 28], ['kr-nfs-01', 11],
+      ['kr-mon-01', 1.0], ['pl-db-01', 21], ['pl-was-01', 0.5], ['pl-was-02', 0.5], ['pl-bak-01', 0.6], ['pl-file-01', 4.5], ['pl-mes-01', 1.4],
+      ['us-db-01', 7.6], ['us-was-01', 0.4], ['us-was-02', 0.4], ['us-bak-01', 0.7], ['us-file-01', 3.4], ['us-mes-01', 1.9],
+    ];
+    const IDLE = { 'pl-bak-01': 0.55, 'us-bak-01': 0.4, 'kr-web-01': 0.25 };
+    const lat = (d, i, t) => {
+      const idle = IDLE[d[0]];
+      if (idle && hash(i + 201, Math.floor(t / 3)) < idle) return null;
+      let v = d[1] * (1 + 0.2 * Math.sin((t + i * 13) / 23) + 0.85 * (smooth(i + 91, t) - 0.5));
+      if (d[0] === 'pl-db-01' && t > T - 100 && t < T - 82) v += 16 * Math.sin(((t - (T - 100)) / 18) * Math.PI);
+      return Math.max(0.1, v);
+    };
+    const X0 = 46; const X1 = 776; const Y0 = 14; const Y1 = 530; const YMAX = 50;
+    const px = (i) => X0 + (i / (N - 1)) * (X1 - X0);
+    const py = (v) => Y1 - (Math.min(v, YMAX) / YMAX) * (Y1 - Y0);
+    const one = (x) => (Math.round(x * 10) / 10).toFixed(1);
+    const series = DEF.map((d, i) => {
+      const vals = []; for (let k = 0; k < N; k++) vals.push(lat(d, i, T - (N - 1) + k));
+      let path = ''; let pen = false;
+      vals.forEach((v, k) => { if (v == null) { pen = false; return; } path += (pen ? ' L' : (path ? ' M' : 'M')) + px(k).toFixed(1) + ' ' + py(v).toFixed(1); pen = true; });
+      return { name: d[0], vals, d: path, now: vals[N - 1] };
+    });
+    const PIN = [['pl-db-01', '#3987e5'], ['kr-bak-01', '#d95926'], ['kr-db-01', '#199e70'], ['us-db-01', '#c98500']];
+    const colorOf = {}; PIN.forEach((p) => { colorOf[p[0]] = p[1]; });
+    const HI = 54;
+    let pins = PIN.map((p) => {
+      const s = series.find((x) => x.name === p[0]);
+      return { name: s.name, color: p[1], d: s.d, dot: 'background:' + p[1], ey: py(s.now), now: one(s.now), hy: py(s.vals[HI]), hv: one(s.vals[HI]) };
+    });
+    const byY = pins.slice().sort((a, b) => a.ey - b.ey);
+    let last = -100;
+    byY.forEach((p) => { const y = Math.max(p.ey, last + 16); p.lbl = 'top:' + ((y / 560) * 100).toFixed(2) + '%'; last = y; });
+    const rest = series.filter((s) => !colorOf[s.name]);
+    const restAt = rest.map((s) => s.vals[HI]).filter((v) => v != null).sort((a, b) => a - b);
+    const ranked = series.slice().sort((a, b) => (b.now == null ? -1 : b.now) - (a.now == null ? -1 : a.now));
+    const top = ranked[0].now;
+    const rank = ranked.map((s, i) => ({
+      no: i + 1, name: s.name, val: s.now == null ? '—' : one(s.now),
+      bar: 'display:block;width:' + (s.now == null ? 0 : Math.max(1.5, (s.now / top) * 100)).toFixed(1) + '%;background:' + (colorOf[s.name] || '#4b5b7a'),
+    }));
+    const RAMP = ['#17233b', '#0d366b', '#104281', '#184f95', '#1c5cab', '#256abf', '#2a78d6', '#3987e5', '#5598e7', '#6da7ec', '#86b6ef', '#9ec5f4', '#b7d3f6', '#cde2fb'];
+    const fillOf = (v) => (v == null ? '#0a0e17' : RAMP[Math.min(RAMP.length - 1, Math.floor((Math.min(v, YMAX) / YMAX) * (RAMP.length - 1) + 0.5))]);
+    const heat = ranked.map((s) => {
+      const cells = [];
+      for (let c = 0; c < 75; c++) {
+        const a = s.vals[c * 2]; const b = s.vals[c * 2 + 1];
+        const v = a == null && b == null ? null : a == null ? b : b == null ? a : (a + b) / 2;
+        cells.push({ x: c, fill: fillOf(v) });
+      }
+      return { name: s.name, cells, val: s.now == null ? '—' : one(s.now) + ' ms' };
+    });
+    return {
+      pins, rank, heat,
+      ctx: rest.map((s) => ({ d: s.d })),
+      hx: px(HI),
+      tipStyle: 'left:' + ((px(HI) / 900) * 100 + 1.6).toFixed(2) + '%',
+      restMax: one(restAt[restAt.length - 1]), restMed: one(restAt[Math.floor(restAt.length / 2)]),
+      legend: RAMP.map((c, i) => ({ x: i * 10, fill: c })),
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -11,6 +11,7 @@
  *  · CSV: `requirePerm('data.csv')`(v2.643) + tools + 범위. 감사 로그.
  * 화면은 폴링하지 않는다(마운트 1회 + 새로고침).
  */
+import { setPeriodicProvider, SYSTEM_REQ } from '../../periodic/providers.js';   // v3.32 정기 점검 보고 공급자
 import { requireRole, requirePerm } from '../../auth/auth.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { logAudit } from '../../audit.js';
@@ -125,6 +126,8 @@ async function recentChanges(allowed, vcenterId, vcName) {
 }
 
 export function registerVmDns(api) {
+  // v3.32 정기 점검 보고 — VM DNS 판정은 화면과 같은 색인 · 분석 하나(시스템 계정 = 전체 범위)를 리더가 공급자로 부른다. 최근 변경은 싣지 않는다(보고서는 판정 수만).
+  setPeriodicProvider('vm-dns', () => { const snap = store.get(); const inp = withIndex(SYSTEM_REQ, snap, ''); return analyzeVmDns({ ...inp, changes: { available: false, recent: [] }, probeState: probeStateFor(inp.allowed) }); });
   api.get('/tools/vm-dns', toolsPerm, async (req, res) => {
     const snap = store.get();
     const vcenterId = qStr(req.query.vcenterId, 128);
@@ -140,6 +143,7 @@ export function registerVmDns(api) {
       const hist = vmDnsHistoryStatus();
       body.history = { lastRunAt: hist.lastRunAt, intervalMs: hist.intervalMs, retentionDays: hist.retentionDays, idleReason: hist.idleReason || '' };
       if (pol.invalid?.length) body.policy.invalid = pol.invalid.length;
+      if (pol.loadError) body.policy.loadError = pol.loadError;   // 결정(56~75 남긴 것) 60: 정책을 못 읽어 기본값으로 판정했음을 밝힌다
       return body;
     }, { ttlMs: 12_000, extraKey });
   });
@@ -186,7 +190,8 @@ export function registerVmDns(api) {
     const corps = {};
     for (const [id, list] of Object.entries(p.corps)) if (!allowed || allowed.has(id)) corps[id] = list;
     res.json({ corps, publicUnapproved: p.publicUnapproved, rev: p.rev, invalid: allowed ? [] : p.invalid,
-      orphan: allowed ? [] : Object.keys(p.corps).filter((id) => !known.has(id)), updatedAt: p.updatedAt, scoped: !!allowed });
+      orphan: allowed ? [] : Object.keys(p.corps).filter((id) => !known.has(id)), updatedAt: p.updatedAt, scoped: !!allowed,
+      ...(p.loadError ? { loadError: p.loadError } : {}) });   // 60: 손상 · 읽기 오류 표지(화면이 '설정 없음' 과 구분 — 그동안 저장은 409)
   });
 
   api.put('/tools/vm-dns/policy', adminOnly, toolsPerm, fleetOnly, (req, res) => {
@@ -194,6 +199,7 @@ export function registerVmDns(api) {
     const r = saveVmDnsPolicy(req.body || {}, user);
     if (!r.ok) {
       if (r.code === 'stale') return res.status(409).json({ ok: false, code: 'stale', reason: r.reason, rev: r.rev });
+      if (r.code === 'settings-unreadable') return res.status(409).json(r);   // 60
       return res.status(400).json({ ok: false, code: r.code || 'invalid', reason: r.reason || '형식이 맞지 않는 항목이 있습니다', invalid: r.invalid || [] });
     }
     const known = new Set((store.get()?.vcenters || []).map((v) => String(v.id)));

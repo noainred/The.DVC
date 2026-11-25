@@ -13,13 +13,21 @@
  *
  * 기준 시각은 **정시 -30분**(CLAUDE.md v2.517 규약) — 절대 상수를 쓰면 조회 창 밖으로 떨어진다.
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { centralSource } from './_centralSource.js'; // v2.954: central.js 가 영역별 파일로 나뉘었다(소스 스윕은 합친 소스로)
 
-const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'partfault2548-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const dir = tmpDir('partfault2548-');
 process.env.CONFIG_DIR = dir;
 delete process.env.PARTFAULT_ENABLED;
 process.env.DATA_SOURCE = 'live';   // v2.708: 기본 데이터 소스(mock)면 파트 장애가 데모로 켜진다 — 이 파일은 저장값 판정을 고정한다
@@ -231,7 +239,7 @@ test('배선: 엣지 push 는 스위치를 보고, 중앙 poller 는 엣지에�
   assert.equal(/atomicWriteFileSync|writeFileSync/.test(src('central/partFaultEdge.js')), false);
   assert.match(src('idrac/poller.js'), /onSnapshotRefreshed\('idrac'\)/);
   assert.match(src('index.js'), /startPartFaultConfigPull/);
-  assert.match(src('routes/central.js'), /partfault-config/);
+  assert.match(centralSource(), /partfault-config/);
   assert.match(src('index.js'), /app\.use\('\/api\/central\/part-faults', BIG_JSON\)/);
 });
 

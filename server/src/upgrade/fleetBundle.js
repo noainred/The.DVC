@@ -25,7 +25,8 @@ import { config } from '../config.js';
 import { getPackageDir } from './packageSettings.js';
 import { manifestPathForArchive, readManifestFile } from './signature.js';
 import { manifestNameFor, VERSION_RE } from './signatureCore.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { readJsonFile } from '../util/jsonFileRead.js';   // 103회차 F10: 읽기 오류 ≠ 손상(손상 보존은 공용 읽기가 한다)
 import { registerStateFile } from '../util/stateFiles.js';
 import { numOrNull } from '../util/numOrNull.js';
 
@@ -55,17 +56,23 @@ export function localBundlePath(version, dir = getPackageDir()) {
   try { return fs.statSync(p).isFile() ? p : null; } catch { return null; }
 }
 
-function readKept() {
+/*
+ * 103회차 F10(재현 — EISDIR): 예전 catch 하나는 **읽기 오류**도 손상으로 보고 보관 기록을 `.corrupt.*` 로 옮긴 뒤 빈 목록으로 돌았다 — 다음 보관이 새 번들
+ *   하나만 든 기록을 써서 그 전에 넣은 번들은 기록에서 빠지고 **다시는 정리되지 않았다**(패키지 폴더가 버전마다 늘어남). 읽기 오류는 원본을 두고
+ *   그 보관 회차의 기록 갱신 · 정리를 건너뛴다(번들 복사는 한다 — 엣지 업그레이드는 계속된다). 손상(parse 실패)은 예전과 같이 보존본 + 빈 목록.
+ * @returns {object[]} 보관 기록 · 읽기 오류면 null
+ */
+function readKeptOrNull() {
   const f = keptFile();
-  if (!fs.existsSync(f)) return [];
-  try {
-    const d = JSON.parse(fs.readFileSync(f, 'utf8'));
-    const list = Array.isArray(d?.kept) ? d.kept : [];
-    return list.filter((x) => x && typeof x === 'object' && typeof x.name === 'string' && BUNDLE_NAME_RE.test(x.name))
-      .map((x) => ({ name: x.name, version: ver(x.version) || BUNDLE_NAME_RE.exec(x.name)[1], at: numOrNull(x.at) ?? 0 }))
-      .slice(0, KEPT_MAX * 2);
-  } catch (e) { preserveCorrupt(f, e?.message || String(e)); return []; }
+  const r = readJsonFile(f, { parse: (t) => JSON.parse(t) });
+  if (r.kind === 'read-error') return null;
+  if (r.kind !== 'ok') return [];
+  const list = Array.isArray(r.value?.kept) ? r.value.kept : [];
+  return list.filter((x) => x && typeof x === 'object' && typeof x.name === 'string' && BUNDLE_NAME_RE.test(x.name))
+    .map((x) => ({ name: x.name, version: ver(x.version) || BUNDLE_NAME_RE.exec(x.name)[1], at: numOrNull(x.at) ?? 0 }))
+    .slice(0, KEPT_MAX * 2);
 }
+function readKept() { return readKeptOrNull() || []; }
 function writeKept(list) {
   atomicWriteFileSync(keptFile(), JSON.stringify({ kept: list }, null, 2), { mode: 0o600 });
 }
@@ -108,7 +115,12 @@ export function keepBundle({ archivePath = null, bytes = null, version = null, m
     if (fs.existsSync(manDest)) out.manifest = true;
     else if (typeof man === 'string' && man) { atomicWriteFileSync(manDest, man, { mode: 0o644 }); out.manifest = true; }
     // 보관 기록 + 정리 — 이 모듈이 넣은 것만. 관리자가 내려받은 같은 이름의 파일(existing 인데 기록에 없음)은 기록하지 않는다(지우지 않게).
-    const prior = readKept();
+    const prior = readKeptOrNull();
+    if (!prior) {   // 103회차 F10: 보관 기록을 읽지 못했다(읽기 오류 — 원본 그대로) — 기록 · 정리를 건너뛴다(덮어쓰면 그 전 번들이 정리 대상에서 영영 빠진다)
+      console.warn('[fleet-bundle] 보관 기록 파일을 읽지 못해(읽기 오류) 이번 보관의 기록 갱신 · 정리를 건너뜁니다 — 원본은 그대로입니다. 파일 권한 · 소유자 · 디스크를 확인하세요.');
+      out.keptUnreadable = true;
+      return out;
+    }
     const mine = prior.find((x) => x.name === name) || null;
     const kept = prior.filter((x) => x.name !== name);
     if (!out.existing || mine) kept.push(mine || { name, version: v, at: now });

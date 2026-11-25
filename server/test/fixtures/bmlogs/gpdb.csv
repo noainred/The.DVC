@@ -1,0 +1,2 @@
+2026-11-06 13:43:20.123456 KST,"gpadmin","postgres",p12345,th123456,"10.0.0.5","51234",2026-11-06 13:43:19 KST,0,con12,cmd3,seg-1,,,,sx1,"FATAL","57P03","the database system is in recovery mode",,,,,,,0,,"postmaster.c",2272,
+2026-11-06 13:44:20.123456 KST,,,p12346,th123457,,,,0,,,seg-1,,,,,"LOG","00000","checkpoint complete: wrote 48112 buffers (18.4%); 0 WAL file(s) added, 0 removed, 3 recycled; write=29.9 s, sync=21.9 s, total=52.1 s",,,,,,,0,,"xlog.c",8211,

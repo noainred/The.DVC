@@ -11,6 +11,7 @@
  * 커서는 파일(sanswitch-perf-push.json)에 보관해 재시작 뒤에도 이어 올린다. 부분 성공 후 재전송은 중앙이 (device,ts,port)
  * 중복을 건너뛴다(perfDb.importSamples).
  */
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
@@ -28,8 +29,8 @@ import { postNo503Retry } from '../util/postNo503Retry.js'; // v2.743(감사 LEF
 
 const gzipAsync = promisify(zlib.gzip);
 const FILE = () => path.join(config.configDir, 'sanswitch-perf-push.json');
-const CHUNK_BYTES = Math.max(64 * 1024, Number(process.env.SANSW_PERF_PUSH_CHUNK_BYTES) || 700 * 1024);
-const MAX_ROWS = Math.max(1000, Number(process.env.SANSW_PERF_PUSH_ROWS) || 20_000);
+const CHUNK_BYTES = Math.max(64 * 1024, envPositive(process.env.SANSW_PERF_PUSH_CHUNK_BYTES, 700 * 1024));
+const MAX_ROWS = Math.max(1000, envPositive(process.env.SANSW_PERF_PUSH_ROWS, 20_000));
 const PUSH_GZIP = process.env.SANSW_PUSH_GZIP !== 'false';
 /** push 주기 — 기본은 수집 주기와 같다(수집 직후 즉시 push 하므로 타이머는 안전망). 하한 60초.
  *  v2.613 RUNTIME2613-04: env 는 `clampIntervalMs` 로 상한(2^31−1ms)까지 가둔다(v2.599 규약 — `loadPerfSettings().intervalMs` 는 이미 LIMITS 클램프). */

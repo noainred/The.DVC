@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>CVP 위치 찾기 — MAC · IP · 이름으로 스위치 포트 찾기</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="box-sizing: border-box; padding: clamp(12px, 2vw, 28px); background: #0a0e17; color: #e6edf6; font-family: 'Inter', 'Noto Sans KR', 'Apple SD Gothic Neo', sans-serif; font-size: 13px; line-height: 1.5; display: flex; flex-direction: column; gap: 14px;">
+
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<div style="font-size: 12px; color: #a9b6cc;">네트워크 › Arista CVP › 연결</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center;">
+<h1 style="margin: 0; font-size: 20px; font-weight: 700;">위치 찾기</h1>
+<span style="display: inline-flex; align-items: center; min-height: 22px; padding: 0 9px; border-radius: 999px; font-size: 12px; font-weight: 600; background: #4a3208; border: 1px solid #f59e0b; color: #fff3d6;">① 새 수집 필요 — MAC 주소 표 · ARP 표(조회 경로 미확인)</span>
+</div>
+<div style="font-size: 12.5px; color: #a9b6cc; overflow-wrap: anywhere;">VM · 서버 이름이나 IP · MAC 을 넣으면 어느 스위치의 어느 포트에 붙어 있는지 찾습니다. 설명도 LLDP 도 없는 포트에 무엇이 꽂혀 있는지도 거꾸로 알 수 있습니다.</div>
+</div>
+
+<div style="background: #141b2d; border: 1px solid #1f2a40; border-radius: 14px; padding: 16px 18px; min-width: 0; display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
+<input type="search" aria-label="찾을 이름 · IP · MAC" value="{{q.text}}" readOnly="{{yes}}" style="box-sizing: border-box; height: 38px; padding: 0 12px; flex: 1 1 260px; min-width: 0; border-radius: 8px; border: 1px solid #3b4a68; background: #0f1626; color: #e6edf6; font: 500 14px 'JetBrains Mono', ui-monospace, monospace;">
+<button type="button" style="height: 38px; padding: 0 18px; border-radius: 8px; border: 1px solid #1d4ed8; background: #2563eb; color: #ffffff; font: inherit; font-weight: 600; cursor: pointer;">찾기</button>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center;">
+<span style="font-size: 12px; color: #a9b6cc;">예</span>
+<sc-for list="{{examples}}" as="e" hint-placeholder-count="5">
+<button type="button" onClick="{{e.pick}}" aria-pressed="{{e.on}}" style="{{e.style}}">{{e.label}}</button>
+</sc-for>
+</div>
+</div>
+
+<div style="background: #141b2d; border: 1px solid #1f2a40; border-radius: 14px; padding: 16px 18px; min-width: 0; display: flex; flex-direction: column; gap: 12px;">
+<div style="display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center;">
+<b style="font-size: 14px;">{{q.title}}</b>
+<span style="{{q.pill}}">{{q.state}}</span>
+</div>
+<div style="font-size: 12.5px; color: #c9d5e6; overflow-wrap: anywhere;">{{q.summary}}</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: stretch;">
+<sc-for list="{{q.path}}" as="p" hint-placeholder-count="4">
+<div style="{{p.style}}">
+<span style="font-size: 11px; color: #a9b6cc;">{{p.kind}}</span>
+<b style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13.5px; overflow-wrap: anywhere;">{{p.name}}</b>
+<span style="font-size: 12px; color: #c9d5e6; overflow-wrap: anywhere;">{{p.sub}}</span>
+</div>
+<span aria-hidden="true" style="{{p.arrow}}">→</span>
+</sc-for>
+</div>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start;">
+
+<div style="flex: 999 1 560px; min-width: 0; background: #141b2d; border: 1px solid #1f2a40; border-radius: 14px; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px;">
+<b style="font-size: 14px;">근거 — 어디서 봤나</b>
+<div style="overflow-x: auto; border: 1px solid #1f2a40; border-radius: 10px;">
+<div role="table" aria-label="위치 근거" style="min-width: 760px; font-size: 12.5px;">
+<div role="row" style="{{k.head}}">
+<div role="columnheader" style="{{k.th}}">출처</div>
+<div role="columnheader" style="{{k.th}}">스위치 · 포트</div>
+<div role="columnheader" style="{{k.th}}">VLAN</div>
+<div role="columnheader" style="{{k.th}}">마지막으로 본 시각</div>
+<div role="columnheader" style="{{k.th}}">포트 종류</div>
+</div>
+<sc-for list="{{q.ev}}" as="r" hint-placeholder-count="4">
+<div role="row" style="{{r.rowStyle}}">
+<div role="cell" style="{{k.td}}">{{r.src}}</div>
+<div role="cell" style="{{k.tdLink}}">{{r.where}}</div>
+<div role="cell" style="{{k.tdm}}">{{r.vlan}}</div>
+<div role="cell" style="{{k.tdm}}">{{r.seen}}</div>
+<div role="cell" style="{{k.td}}">{{r.kind}}</div>
+</div>
+</sc-for>
+</div>
+</div>
+<div style="font-size: 12px; color: #a9b6cc; overflow-wrap: anywhere;">{{q.evNote}}</div>
+</div>
+
+<div style="flex: 1 1 340px; min-width: 0; display: flex; flex-direction: column; gap: 14px;">
+<div style="background: #141b2d; border: 1px solid #1f2a40; border-radius: 14px; padding: 16px 18px; display: flex; flex-direction: column; gap: 8px;">
+<b style="font-size: 14px;">포탈 인벤토리</b>
+<sc-for list="{{q.inv}}" as="x" hint-placeholder-count="3">
+<div style="display: flex; gap: 10px; padding: 7px 0; border-top: 1px solid #1f2a40;">
+<div style="flex: 0 0 96px; font-size: 12px; color: #a9b6cc;">{{x.k}}</div>
+<div style="flex: 1 1 0; min-width: 0; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; overflow-wrap: anywhere;">{{x.v}}</div>
+</div>
+</sc-for>
+</div>
+<div style="background: #141b2d; border: 1px solid #1f2a40; border-radius: 14px; padding: 16px 18px; display: flex; flex-direction: column; gap: 8px;">
+<b style="font-size: 14px;">이동 이력 — 최근 30일</b>
+<sc-for list="{{q.moves}}" as="m" hint-placeholder-count="2">
+<div style="display: flex; flex-direction: column; gap: 2px; padding: 7px 0; border-top: 1px solid #1f2a40;">
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #a9b6cc;">{{m.at}}</span>
+<span style="font-size: 12.5px; overflow-wrap: anywhere;">{{m.text}}</span>
+</div>
+</sc-for>
+</div>
+</div>
+
+</div>
+
+<div style="background: #141b2d; border: 1px solid #1f2a40; border-radius: 14px; padding: 16px 18px; min-width: 0; display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; color: #c9d5e6;">
+<div style="overflow-wrap: anywhere;">· 위치는 ‘가장자리 포트’(상대가 스위치가 아닌 포트)에서 본 것만 답으로 씁니다. 업링크에서도 같은 MAC 이 보이지만 그건 지나가는 길이라 뺍니다.</div>
+<div style="overflow-wrap: anywhere;">· VM 은 호스트의 NIC 뒤에 있으므로 답은 ‘그 호스트가 꽂힌 포트’ 입니다. VM 이 어느 호스트에 있는지는 vCenter 인벤토리로 맞춥니다.</div>
+<div style="overflow-wrap: anywhere;">· MAC 표는 장비가 잠깐 기억하는 값입니다. 꺼져 있는 장비는 지금은 안 보이고 ‘마지막으로 본 시각’ 만 남습니다 — 없다는 뜻이 아닙니다.</div>
+<div style="overflow-wrap: anywhere;">· 저장량을 줄이려고 가장자리 포트의 MAC 만 저장하고 포트당 개수에 상한을 둡니다. 상한을 넘긴 포트는 ‘일부만 저장’ 으로 표시합니다.</div>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"q":{"editor":"enum","options":["vm","ip","mac","srv","none"],"default":"vm"},"$preview":{"width":1440,"height":1070}}'>
+class Component extends DCLogic {
+renderVals() {
+const st = this.state || {};
+const key = st.q || this.props.q || 'vm';
+const MONO = "font-family: 'JetBrains Mono', ui-monospace, monospace;";
+const COLS = 'display: grid; grid-template-columns: 130px minmax(190px, 1.3fr) 80px 150px minmax(170px, 1fr); align-items: center;';
+const k = {
+head: COLS + ' background: #0f1626; color: #a9b6cc;',
+th: 'padding: 8px 10px; font-weight: 600; white-space: nowrap;',
+td: 'padding: 6px 10px; min-width: 0; overflow-wrap: anywhere; color: #c9d5e6;',
+tdm: 'padding: 6px 10px; min-width: 0; overflow-wrap: anywhere; ' + MONO,
+tdLink: 'padding: 6px 10px; min-width: 0; overflow-wrap: anywhere; font-weight: 600; color: #7dd3fc; ' + MONO
+};
+const pill = 'display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; ';
+const OK = pill + 'background: #16432a; border: 1px solid #22c55e; color: #eafff1;';
+const OLD = pill + 'background: #4a3208; border: 1px solid #f59e0b; color: #fff3d6;';
+const NONE = pill + 'background: #1a2236; border: 1px solid #64748b; color: #cbd5e1;';
+const step = (kind, name, sub, last, hi) => ({ kind: kind, name: name, sub: sub, style: 'flex: 1 1 170px; min-width: 0; display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 10px; background: #0f1626; border: 1px solid ' + (hi ? '#60a5fa' : '#1f2a40') + ';', arrow: last ? 'display: none;' : 'align-self: center; color: #a9b6cc; font-size: 16px;' });
+const row = (src, where, vlan, seen, kind, off) => ({ src: src, where: where, vlan: vlan, seen: seen, kind: kind, rowStyle: COLS + ' border-top: 1px solid #1f2a40; min-height: 38px;' + (off ? ' opacity: 0.6;' : '') });
+const vmEv = [
+row('MAC 주소 표', 'kr1-leaf-a03 Ethernet13', '120', '11-23 14:36', '가장자리 — 답'),
+row('MAC 주소 표', 'kr1-leaf-a04 Ethernet13', '120', '11-23 14:36', '가장자리 — 답(MLAG 짝)'),
+row('MAC 주소 표', 'kr1-spine-01 Ethernet3/1', '120', '11-23 14:36', '업링크 — 뺌', true),
+row('ARP 표', 'kr1-bleaf-01 Vlan120', '120', '11-23 14:31', 'IP 10.20.31.47 ↔ 이 MAC')
+];
+const vm = {
+title: 'web-kr1-023', state: '찾음 · 5분 전에 봄', pill: OK,
+summary: 'VM web-kr1-023 은 호스트 esx-kr1-07 에 있고, 그 호스트는 kr1-leaf-a03 · kr1-leaf-a04 의 Ethernet13 에 꽂혀 있습니다.',
+path: [step('VM', 'web-kr1-023', '00:50:56:9a:3c:11 · 10.20.31.47'), step('ESXi 호스트', 'esx-kr1-07', 'vmnic0 · vmnic2 (vCenter VC-KR1)'), step('스위치 포트', 'kr1-leaf-a03 Et13', '+ kr1-leaf-a04 Et13 (MLAG)', false, true), step('VLAN', '120', '대역 KR1-SVC-120', true)],
+ev: vmEv, evNote: '4곳에서 봤고 그중 가장자리 포트 2곳이 답입니다.',
+inv: [{ k: 'vCenter', v: 'VC-KR1 · VM web-kr1-023 · NIC 1' }, { k: '호스트', v: 'esx-kr1-07 (포트 구성도: 설명 · LLDP 일치)' }, { k: 'IP 관리', v: '10.20.31.47 · 대역 KR1-SVC-120' }],
+moves: [{ at: '11-18 03:12', text: 'kr1-leaf-a03 Ethernet9 → Ethernet13 (호스트 esx-kr1-05 → esx-kr1-07 로 옮겨짐)' }, { at: '11-02 22:40', text: '처음 봄 — kr1-leaf-a03 Ethernet9' }]
+};
+const R = {
+vm: Object.assign({ text: 'web-kr1-023' }, vm),
+ip: Object.assign({}, vm, { text: '10.20.31.47', title: '10.20.31.47', summary: 'ARP 표에서 이 IP 의 MAC 은 00:50:56:9a:3c:11 이고, vCenter 에서 VM web-kr1-023 의 NIC 입니다. 그 호스트는 kr1-leaf-a03 · a04 의 Ethernet13 에 꽂혀 있습니다.' }),
+mac: Object.assign({}, vm, { text: '00:50:56:9a:3c:11', title: '00:50:56:9a:3c:11' }),
+srv: {
+text: 'idrac-kr1-22', title: 'idrac-kr1-22', state: '마지막으로 본 것 · 2일 전', pill: OLD,
+summary: '지금은 MAC 표에 없습니다. 2일 전까지 kr1-mgmt-01 Ethernet39 에서 보였습니다 — 서버가 꺼져 있거나 케이블이 빠졌을 수 있습니다.',
+path: [step('서버(iDRAC)', 'idrac-kr1-22', 'd0:94:66:1b:7e:42 · 10.20.250.122'), step('스위치 포트', 'kr1-mgmt-01 Et39', '링크 없음 · 구리 1G', false, true), step('VLAN', '250', '대역 KR1-OOB', true)],
+ev: [row('MAC 주소 표', 'kr1-mgmt-01 Ethernet39', '250', '11-21 09:02', '가장자리 — 마지막 위치'), row('ARP 표', 'kr1-bleaf-01 Vlan250', '250', '11-21 09:00', 'IP 10.20.250.122 ↔ 이 MAC')],
+evNote: '지금 보이는 곳은 없습니다. 마지막 기록 2건입니다.',
+inv: [{ k: 'iDRAC 인벤토리', v: '서비스 태그 (가상) · 랙 서버' }, { k: '포트 설명', v: 'idrac-kr1-22 (포트 구성도: 확인 필요 — 설명 있음 · 링크 없음)' }, { k: 'IP 관리', v: '10.20.250.122 · 대역 KR1-OOB' }],
+moves: [{ at: '11-21 09:02', text: '마지막으로 봄 — kr1-mgmt-01 Ethernet39' }, { at: '10-25 이전', text: '기록 시작 전 — 알 수 없음' }]
+},
+none: {
+text: '10.20.99.200', title: '10.20.99.200', state: '찾지 못함', pill: NONE,
+summary: '저장된 MAC · ARP 기록에 없습니다. 없는 주소라는 뜻이 아닙니다 — 아래 이유 중 하나일 수 있습니다.',
+path: [step('가능한 이유', '기록이 없음', '보관 기간(설정값) 안에 통신한 적이 없음'), step('가능한 이유', '수집 밖', 'CVP 가 관리하지 않는 스위치 · 방화벽 뒤'), step('가능한 이유', '못 읽은 장비 2대', 'kr1-spine-02 · use-leaf-02 의 표를 읽지 못함', true)],
+ev: [], evNote: '근거 없음 — IP 관리의 대역 정보만 있습니다.',
+inv: [{ k: 'IP 관리', v: '10.20.99.200 · 대역 KR1-DMZ-99 · 미할당' }],
+moves: [{ at: '—', text: '기록 없음' }]
+}
+};
+const q = R[key] || R.vm;
+const chip = (on) => 'height: 30px; padding: 0 11px; border-radius: 999px; font: 500 12.5px ' + "'JetBrains Mono', ui-monospace, monospace" + '; cursor: pointer; white-space: nowrap; ' + (on ? 'border: 1px solid #2563eb; background: #1e3a8a; color: #ffffff;' : 'border: 1px solid #243049; background: #0f1626; color: #c9d5e6;');
+const examples = [['vm', 'web-kr1-023'], ['ip', '10.20.31.47'], ['mac', '00:50:56:9a:3c:11'], ['srv', 'idrac-kr1-22'], ['none', '10.20.99.200']].map((e) => ({ label: e[1], on: key === e[0], style: chip(key === e[0]), pick: () => this.setState({ q: e[0] }) }));
+return { k: k, q: q, examples: examples, yes: true };
+}
+}
+</script>
+</body>
+</html>

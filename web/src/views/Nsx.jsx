@@ -4,7 +4,8 @@ import { usePolling, fetchJson, toolAllowed } from '../api.js';
 import { Kpi, DataTable, Modal, Loading, ErrorBox, SearchBox, VmLink } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
 import BoldText from '../components/boldText.jsx';
-import { authStopInfo } from './tools/storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
+import { authStopInfo, authStopShort } from './tools/storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
+import { unreadMarkOf, registryEmptyText } from './settingsUnread.js';   // 133회차: 등록부를 못 읽은 동안의 빈 목록을 ‘등록 없음’ 으로 말하지 않는다
 import { nsxLimitNotes, dfwRulesCell, nsxCount, nsxAdd, nsxFailedShort } from './nsxLimitText.js'; // v2.599 C2599-05: 목록 절단·부분 집계 안내
 
 // v2.602(COL-2602-01): 'unknown' = 매니저는 응답했지만 클러스터 상태 조회가 실패 — 정상도 저하도 아니다(판정 보류).
@@ -84,12 +85,12 @@ export default function Nsx() {
         <STable>
           <thead><tr><th>NSX Manager</th><th>상태</th><th>버전</th><th>리전</th><th>vCenter</th><th className="right">T0/T1</th><th className="right">세그먼트</th><th className="right">노드</th><th className="right">DFW</th></tr></thead>
           <tbody>
-            {managers.length === 0 && <tr><td colSpan={9} className="center muted" style={{ padding: 24 }}>등록된 NSX Manager가 없습니다. 설정 → NSX 관리에서 추가하세요.</td></tr>}
+            {managers.length === 0 && <tr><td colSpan={9} className="center muted" style={{ padding: 24 }}>{registryEmptyText(unreadMarkOf(data), 'NSX Manager 등록부') || '등록된 NSX Manager가 없습니다. 설정 → NSX 관리에서 추가하세요.'}</td></tr>}
             {managers.map((m) => (
               <tr key={m.id} style={{ cursor: 'pointer', background: mgr === m.id ? 'rgba(99,102,241,.08)' : undefined }} onClick={() => setMgr(mgr === m.id ? '' : m.id)}>
                 <td><b>{m.name}</b><span className="muted" style={{ fontSize: 11 }}> · {m.id}</span></td>
                 <td><span className={`badge ${MGR_BADGE[m.status] || 'gray'}`} title={m.status === 'unknown' ? `클러스터 상태 조회 실패: ${m.listFailReasons?.clusterStatus || '사유 미상'}` : undefined}>{MGR_LABEL[m.status] || m.status}</span>
-                  {m.authStopped && <span className="badge red" style={{ marginLeft: 4, fontSize: 10, whiteSpace: 'nowrap' }} title={authStopInfo(m.authStopped, { what: '이 NSX Manager' })?.detail || ''}>인증 실패 정지</span>}</td>
+                  {m.authStopped && <span className="badge red" style={{ marginLeft: 4, fontSize: 10, whiteSpace: 'nowrap' }} title={authStopInfo(m.authStopped, { what: '이 NSX Manager' })?.detail || ''}>{authStopShort(m.authStopped)}</span>}</td>
                 <td className="muted">{m.version || '—'}</td>
                 <td><span className="badge blue">{m.region || '—'}</span></td>
                 <td className="muted">{m.vcenterId || '—'}</td>

@@ -17,6 +17,7 @@ import { resultLabel } from './veeamBadge.js';
 import { STEP_ICON, STEP_TONE, progressHint, progressCheckedText } from './veeamProgressText.js';
 import EdgeTokenApply from './EdgeTokenApply.jsx'; // v2.776 개별 토큰 자동 적용·진행·기록 // v2.773 단계별 진행 상태
 import BulkDeviceIo from './tools/BulkDeviceIo.jsx'; // v2.751 CSV·자유텍스트 대량 등록(스토리지·SAN·Horizon 과 같은 모달)
+import { VEEAM_BLANK_NOTE } from './tools/bulkBlankText.js';   // 결정(76~105 남긴 것 · 2026-11-20) A2: 빈 칸 = 비움 계약 안내
 import VeeamEmSettings from './VeeamEmSettings.jsx'; // v2.788 하위 탭 'Enterprise Manager'
 import { useHashTab } from '../hooks/useHashTab.js';
 
@@ -345,7 +346,7 @@ function VeeamBrServers() {
       )}
       <VeeamVcAccounts />
       {canCsv() && bulk && (
-        <BulkDeviceIo base="/admin/veeam" resource="servers" unitLabel="서버" typeCol={null} keyLabel="host:port"
+        <BulkDeviceIo base="/admin/veeam" resource="servers" unitLabel="서버" typeCol={null} keyLabel="host:port" blankNote={VEEAM_BLANK_NOTE}
           title="Veeam 백업 서버 대량 등록 — CSV · 자유텍스트"
           onClose={() => setBulk(false)} onDone={() => { setBulk(false); load(); }} />
       )}

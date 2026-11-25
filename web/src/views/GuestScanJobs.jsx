@@ -3,7 +3,8 @@ import { fetchJson, putJson, postJson, delJson, usePolling } from '../api.js';
 import { STable } from '../components/STable.jsx';
 import BoldText from '../components/boldText.jsx';
 import { ErrorBox } from '../components/ui.jsx';
-import { guestAuthLines } from './authSkipText.js'; // v2.591(감사 F2): 게스트 계정 인증 실패 정지·차단기
+import { guestAuthLines } from './authSkipText.js';
+import { authStopShort } from './tools/storageAuthText.js'; // 127회차: 배지 글자(못 읽음 정지는 인증 실패가 아니다) // v2.591(감사 F2): 게스트 계정 인증 실패 정지·차단기
 
 const fmtTime = (ts) => (ts ? new Date(ts).toLocaleString('ko-KR') : '—');
 const TYPE_LBL = { 'login-fails': '로그인 실패', 'net-issues': '네트워크 이슈' };
@@ -28,7 +29,7 @@ export default function GuestScanJobs({ type }) {
   const [form, setForm] = useState(null);
   const [loadErr, setLoadErr] = useState(null); // v2.620(WEB2620-09): 조회 실패를 '없습니다' 로 보이지 않는다 — 권한·시한 실패는 사유와 함께.
   const load = () => fetchJson('/admin/security/guest-scans').then((r) => { setLoadErr(null); setJobs((r.jobs || []).filter((j) => !type || j.type === type)); }).catch((e) => { setLoadErr(e); setJobs([]); });
-  useEffect(() => { load(); const t = setInterval(load, 30_000); return () => clearInterval(t); /* eslint-disable-next-line */ }, [type]);
+  useEffect(() => { load(); const t = setInterval(load, 30_000); return () => clearInterval(t); }, [type]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const blank = { name: '', type: type || 'login-fails', vcenterId: '', os: 'all', intervalMin: 60, days: 7, maxVms: 100, enabled: true, guestUser: '', guestPass: '' };
   // 점검 A5-09: 저장·실행·삭제·중지 실패를 삼키지 않는다 — 오류(던짐·ok:false)를 보이고, 저장 실패면 입력 창을 닫지 않는다.
@@ -67,7 +68,7 @@ export default function GuestScanJobs({ type }) {
               <td className="muted" style={{ fontSize: 11 }}>{fmtTime(j.lastRun)}{j.lastErr ? ` · ${j.lastErr.slice(0, 30)}` : ''}</td>
               <td style={{ textAlign: 'right' }}>{j.lastFound ?? '—'}</td>
               <td>{j.enabled ? <span className="badge green">동작</span> : <span className="badge gray">중지</span>}
-                {j.lastAuth?.jobStopped && <span className="badge red" style={{ marginLeft: 4, whiteSpace: 'nowrap' }}>인증 실패 정지</span>}</td>
+                {j.lastAuth?.jobStopped && <span className="badge red" style={{ marginLeft: 4, whiteSpace: 'nowrap' }}>{authStopShort(j.lastAuth.jobStopped)}</span>}</td>
               <td><div className="flex gap">
                 <button className="tab" style={{ padding: '3px 8px', fontSize: 11 }} disabled={busy || j.writable === false} title={roTitle(j)} onClick={() => run(j.id)}>지금</button>
                 <button className="tab" style={{ padding: '3px 8px', fontSize: 11 }} disabled={busy || j.writable === false} title={roTitle(j)} onClick={() => toggle(j)}>{j.enabled ? '중지' : '시작'}</button>

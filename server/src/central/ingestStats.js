@@ -5,6 +5,7 @@
  * 트래픽이 비정상적으로 높을 때 '무엇을 보내는지'를 화면에서 바로 확인하기 위함. 인메모리(재시작 시 초기화).
  */
 
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { capStr, capTrim } from '../util/capStr.js';
 
 const byAgent = new Map(); // agent -> { agent, firstAt, lastAt, pushes, wireBytes, byEndpoint: Map, last }
@@ -85,8 +86,8 @@ export function resetIngestStats() { byAgent.clear(); plainState.clear(); }
 // 판정은 상태전이 방식: 임계 크기 이상 무압축 push 가 '연속 N회(기본 3)'면 경고 1회(일시
 // gzip 폴백 오탐 방지), 이후 gzip push 관측 시 해소 1회. 소형 push(빈 엣지 등)는 무압축이어도
 // 실해가 없어 무시한다. 상태는 인메모리(재시작 시 초기화 — 무압축이 지속되면 재경고돼 무해).
-const PLAIN_WARN_BYTES = Number(process.env.INGEST_PLAIN_WARN_BYTES) || 512 * 1024; // 판정 최소 크기(와이어)
-const PLAIN_WARN_STREAK = Math.max(1, Number(process.env.INGEST_PLAIN_WARN_STREAK) || 3);
+const PLAIN_WARN_BYTES = envPositive(process.env.INGEST_PLAIN_WARN_BYTES, 512 * 1024); // 판정 최소 크기(와이어)
+const PLAIN_WARN_STREAK = Math.max(1, envPositive(process.env.INGEST_PLAIN_WARN_STREAK, 3));
 const plainState = new Map(); // agent -> { streak, warned, lastBytes }
 
 export function ingestPlainThresholds() { return { bytes: PLAIN_WARN_BYTES, streak: PLAIN_WARN_STREAK }; }

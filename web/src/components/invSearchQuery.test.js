@@ -1,8 +1,8 @@
 // v2.909 통합 장비 검색 — 화면 쪽 순수 모듈(접두 · 이동 주소 · 최근 항목 · 행 메타) 고정. 서버 판정과의 접두 대조는 server/test/invSearch2909.test.js.
 import { describe, it, expect } from 'vitest';
 import {
-  splitPrefix, withKindPrefix, focusPlan, listPlan, canFilter, HANDOFF_TARGETS, FOCUS_TARGETS, readRecent, pushRecent, clearRecent, RECENT_MAX, agoText, recentKeyFor,
-  highlightParts, metaParts, shownSerial, shownIp, statusTone, builtAgoText,
+  splitPrefix, withKindPrefix, focusPlan, listPlan, canFilter, HANDOFF_TARGETS, FOCUS_TARGETS, EXTRA_HANDOFF_TARGETS, readRecent, pushRecent, clearRecent, RECENT_MAX, agoText, recentKeyFor,
+  highlightParts, metaParts, shownSerial, shownIp, statusTone, builtAgoText, recentIdsParam, VIA_LABEL, RECENT_ID_MAX,
 } from './invSearchQuery.js';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -64,7 +64,7 @@ describe('이동 — 기존 상세 주소 · 검색어는 메모리 인계(URL �
     walk(root);
     const src = files.map((f) => fs.readFileSync(f, 'utf8')).join('\n');
     const app = fs.readFileSync(path.join(root, 'App.jsx'), 'utf8');
-    for (const t of [...HANDOFF_TARGETS, ...FOCUS_TARGETS]) {
+    for (const t of [...HANDOFF_TARGETS, ...FOCUS_TARGETS, ...EXTRA_HANDOFF_TARGETS]) {
       const viaHook = src.includes(`useSearchHandoff('${t}'`) || src.includes(`useFocusHandoff('${t}'`);
       const viaTake = src.includes(`takeSearch('${t}')`);
       const viaApp = new RegExp(`INV_FILTER_TABS = \\[[^\\]]*'${t}'`).test(app);
@@ -108,6 +108,27 @@ describe('최근 연 항목(localStorage 10개)', () => {
     expect(recentKeyFor('')).toBe(null);
     expect(pushRecent({ kind: 'vm', name: 'x', plan: { hash: '#/a' } }, st, 1, null)).toEqual([]);
     expect(readRecent(st, null)).toEqual([]);
+  });
+  it('v2.928(B4) 행 id 를 저장하고 recent= 파라미터로 만든다(10개 · 구분자 든 id 제외 · 중복 제거)', () => {
+    const st = mem();
+    pushRecent({ kind: 'vm', id: 'vc-1:vm-9', name: 'web-01', plan: { hash: '#/vcenters/vc-1/vm/vm-9', handoffs: [] } }, st, 1);
+    pushRecent({ kind: 'storage', name: 'no-id', plan: { hash: '#/tools/storage-mon/devices', handoffs: [['storage-mon', 'u']] } }, st, 2);
+    pushRecent({ kind: 'ip', id: 'a,b', name: 'comma', plan: { hash: '#/ipam', handoffs: [['ipam', '10.0.0.1']] } }, st, 3);
+    pushRecent({ kind: 'host', id: 'h'.repeat(400), name: 'long', plan: { hash: '#/vcenters/vc-1/host/h', handoffs: [] } }, st, 4);
+    const r = readRecent(st);
+    expect(r.find((x) => x.name === 'web-01').id).toBe('vc-1:vm-9');
+    expect(r.find((x) => x.name === 'no-id').id).toBeUndefined();
+    expect(r.find((x) => x.name === 'long').id).toHaveLength(RECENT_ID_MAX);
+    const p = recentIdsParam(r);
+    expect(p.split(',')).toEqual([`host|${'h'.repeat(RECENT_ID_MAX)}`, 'vm|vc-1:vm-9']);
+    expect(recentIdsParam([{ kind: 'vm', id: 'x' }, { kind: 'vm', id: 'x' }, { kind: 'vm|z', id: 'y' }, { kind: 'vm', id: 5 }, null])).toBe('vm|x');
+    expect(recentIdsParam(Array.from({ length: 15 }, (_, i) => ({ kind: 'vm', id: `v${i}` }))).split(',')).toHaveLength(RECENT_MAX);
+    expect(recentIdsParam(undefined)).toBe('');
+  });
+  it('v2.928 일치 표지 글자 — 서버 via 값과 같은 키', () => {
+    expect(Object.keys(VIA_LABEL).sort()).toEqual(['notes', 'recent', 'tag']);
+    const src = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../server/src/routes/api/invSearch.js'), 'utf8');
+    for (const k of Object.keys(VIA_LABEL)) expect(src).toContain(`'${k}'`);
   });
   it('agoText · builtAgoText', () => {
     expect(agoText(0)).toBe('');

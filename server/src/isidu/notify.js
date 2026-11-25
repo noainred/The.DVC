@@ -33,10 +33,10 @@
  *    화면 '다음 발송'(rows.js)도 같은 실효 since 로 계산한다(`targetMailNextSlots`).
  *  · 기록 code 는 `mailRules.TARGET_MAIL_CODES` 하나다(웹 문구 표와 1:1).
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 119회차: 읽기 오류 ≠ 손상(공용 읽기 — 30초 간격 재읽기)
 import { registerStateFile } from '../util/stateFiles.js';
 import { localStamp } from '../util/dayKey.js';
 import { sendPortalMail } from '../mail/service.js';
@@ -67,10 +67,23 @@ export const TARGET_MAIL_TICK_MS = 30_000;
 //             scanSentScanId·scanSentScanTs(v2.769 R4-D4-03 — 조사마다 모드에서 마지막으로 자동 발송한 조사),
 //             sinceFrom·sinceCap(시계가 뒤로 가 미래가 된 since 를 지금으로 잡은 기록 — 그 since 값일 때만 쓴다) }
 let _state = null; // { targets: { [id]: { … } } }
+/*
+ * 119회차(재현 — EIO): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 예전 catch 하나는 온전한 대상별 기록(마지막으로 보낸 조사 · 실패 알림 시각 · 처리한 정기 회차)을
+ *   .corrupt 로 옮기고 새로 시작해 같은 결과 · 같은 회차를 한 번 더 보내고 실패 알림 간격(lastFailAlertAt)을 잃었다. 읽기 단계는 공용 읽기: 원본을 두고 · 캐시하지 않고 ·
+ *   그동안 쓰지 않고 · **자동 발송(조사 결과 · 실패 알림 · 정기 회차)을 멈춘다**. 사람이 누른 '지금 보내기' 는 보낸다(그 기록은 남지 않는다). 읽히면 재시작 없이 이어 간다.
+ */
+const _stReader = makeJsonFileReader(() => FILE(), { parse: (t) => t, preserve: false, tag: 'isidu-mail' });
+let _stReadErr = '';
+/** 119회차: 대상별 메일 기록 파일 읽기 오류(원본 그대로)면 오류 코드, 아니면 ''. */
+export function isiduMailStateReadError() { state(); return _stReadErr; }
 function state() {
   if (_state) return _state;
+  const rr = _stReader.read();
+  if (rr.kind === 'read-error') { _stReadErr = String(rr.error?.code || 'read-error').slice(0, 32); return { targets: {} }; }   // 캐시하지 않는다 — save 가 쓰지 않고 자동 발송이 멈춘다
+  _stReadErr = '';
   try {
-    const raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
+    if (rr.kind === 'missing') throw Object.assign(new Error('없음'), { code: 'ENOENT' });
+    const raw = JSON.parse(rr.value);
     _state = { targets: raw && typeof raw.targets === 'object' && !Array.isArray(raw.targets) ? raw.targets : {} };
   } catch (e) {
     if (e?.code !== 'ENOENT') { preserveCorrupt(FILE(), e?.message); console.warn(`[isidu-mail] 상태 파일을 읽지 못해 새로 시작합니다(같은 결과를 한 번 더 보낼 수 있습니다): ${safeLoadText(e) || '사유 미상'}`); }
@@ -80,6 +93,7 @@ function state() {
 }
 function save() {
   const st = state();
+  if (_stReadErr) return;   // 119회차: 못 읽은 기록 위에 쓰지 않는다
   const ids = Object.keys(st.targets);
   if (ids.length > STATE_MAX) for (const id of ids.slice(0, ids.length - STATE_MAX)) delete st.targets[id];
   try { atomicWriteFileSync(FILE(), JSON.stringify(st), { mode: 0o600 }); }
@@ -107,6 +121,9 @@ export function isiduMailReady() {
 /** 대상별 마지막 메일 결과(화면용 — 주소 없음). */
 export function isiduMailStateOf(id) {
   const r = state().targets[String(id || '')];
+  // 124회차(119 반증 — 재현): 기록 파일을 못 읽는 동안 자동 발송(조사 결과 · 실패 알림 · 정기 회차)이 멈추는데 화면에는 '마지막 메일 기록 없음' 만 보였다(콘솔 한 줄뿐 — 무음 정지).
+  //   그 사실을 대상의 마지막 메일 상태로 말한다(화면 mailStateText 가 '보내지 않음 — 사유' 로 그린다). 기록이 아니라 지금 상태라 저장하지 않는다.
+  if (_stReadErr) return { at: Date.now(), kind: 'result', state: 'skipped', code: 'state-unreadable', readError: true, reason: `메일 기록 파일(${path.basename(FILE())})을 읽지 못해 자동 발송을 멈췄습니다 — 읽기 오류(${_stReadErr})이고 원본은 그대로 있습니다(30초마다 다시 읽고, 읽히면 이어 갑니다 · 밀린 메일을 몰아 보내지는 않습니다 · ‘지금 보내기’ 는 됩니다).` };
   return r?.last ? { ...r.last } : null;
 }
 
@@ -160,6 +177,8 @@ async function notifyInner({ targetId, scanId, ok, ts }) {
   const tm = targetMailOf(t);
   const rcpt = mailRecipients(s.mail?.commonTo, tm);
   if (!rcpt.to.length) return { state: 'no-recipients' };              // 메일을 고르지 않은 대상 — 기록하지 않는다
+  // 119회차: 기록을 못 읽은 동안에는 자동으로 보내지 않는다(마지막으로 보낸 조사 · 실패 알림 시각을 몰라 같은 메일 · 간격 없는 실패 알림이 나간다).
+  if (isiduMailStateReadError()) return { state: 'state-unreadable' };
   const r = rec(id);
   const sid = Number(scanId);
   const sts = Number(ts);
@@ -426,6 +445,8 @@ export async function targetMailTick(now = Date.now(), { bootAt = BOOT_AT } = {}
   if (_tickBusy) return { action: 'busy' };
   _tickBusy = true;
   try {
+    // 119회차: 기록을 못 읽은 동안에는 회차를 판정하지 않는다(읽히면 그 기록으로 다시 판정한다).
+    if (isiduMailStateReadError()) return { action: 'unreadable', readError: true };
     const s = loadSettings();
     const results = [];
     for (const t of s.targets) {
@@ -450,4 +471,4 @@ export function startIsiduTargetMail() {
   _tickTimer.unref?.();
 }
 
-export function _resetForTest() { _state = null; _chain = Promise.resolve(); _tickBusy = false; if (_tickTimer) { clearInterval(_tickTimer); _tickTimer = null; } }
+export function _resetForTest() { _state = null; _stReader.reset(); _stReadErr = ''; _chain = Promise.resolve(); _tickBusy = false; if (_tickTimer) { clearInterval(_tickTimer); _tickTimer = null; } }

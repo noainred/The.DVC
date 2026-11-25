@@ -14,8 +14,9 @@ import { isAdminReq, maskPollerStatus, scrubHosts } from '../../auth/addressMask
 import { logAudit } from '../../audit.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
 import { knownAgentNames } from '../../central/knownAgents.js';
-import { listServers, getServer, getServerWithSecret, saveServer, deleteServer, agentKeyEq } from '../../cvp/registry.js';
-import { loadSettings, saveSettings, LIMITS } from '../../cvp/settings.js';
+import { listServers, getServer, getServerWithSecret, saveServer, deleteServer, agentKeyEq, registryWriteRefusal, registryLoadError } from '../../cvp/registry.js';
+import { registryMark } from '../settingsUnreadMark.js';   // 128회차: 등록부를 못 읽은 동안의 빈 목록은 '등록 없음' 이 아니다
+import { loadSettings, saveSettings, cvpSettingsLoadError, LIMITS } from '../../cvp/settings.js';
 import { cvpPollerStatus, pollCvpOnce, isPollerBusy, testServerConnection } from '../../cvp/poller.js';
 import { getStatus, dropStatus } from '../../cvp/store.js';
 import * as cdb from '../../cvp/db.js';
@@ -32,6 +33,7 @@ import { buildCvpOverview, corpResolver, freshnessBounds, RECENT_EVENTS_MAX, row
 import { cvpDeviceConfirm, cvpPartsStaleReason } from '../../cvp/confirm.js';
 import { runCvpFaultScan, cvpFaultScanStatus } from '../../cvp/faultScan.js';   // v2.640 ③ 장애 전이 판정(중앙)
 import { previewParse, PREVIEW_KINDS, PREVIEW_TEXT_MAX } from '../../cvp/preview.js'; // v2.640 ② 파서 시험(왕복 0)
+import { buildPortMap, summaryRow } from '../../cvp/portmap.js'; // v3.37 포트 구성도(판정 코어 — 웹은 그리기만)
 import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { fileStamp, localStamp } from '../../util/dayKey.js';
 import { isMockMode } from '../../mock/demo/flags.js'; // v2.708 데모(mock 전용)
@@ -43,7 +45,7 @@ const csvPerm = requirePerm('data.csv');
  * v2.708: mock 모드에서 아직 이번 기동에 수집한 CVP 가 없으면 데모 시드 + 첫 수집을 바로 시작한다(폴러 첫 주기는 기동 45초 뒤).
  *   응답을 기다리게 하지 않는다 — 다음 새로고침부터 채워진다. 재진입은 pollCvpOnce 의 가드가 막는다.
  */
-function kickDemo() {
+export function kickDemo() {
   if (!isMockMode() || isPollerBusy()) return;
   const servers = listServers();
   if (servers.length && servers.some((x) => getStatus(x.id))) return;
@@ -54,6 +56,8 @@ const adminOnly = requireRole('admin');
 const writer = requireRole('admin', 'operator');
 const toolsPerm = requirePerm('tools');
 const fullScopeOnly = fullScopeOnlyWith('CVP 네트워크 스위치는 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다.');
+// 6회차 A1: 파서 시험(parse-preview)만 읽기성 POST — 본문만 파싱(왕복 0 · 저장 0 · 저장 비밀 0)하는 혼자 쓰이는 진단이라 쓰기 범위 판정에서 뺀다(예외 목록 security-api.md).
+const fullScopeReadPost = fullScopeOnlyWith('CVP 네트워크 스위치는 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다.', { readPost: true });
 const DEVICE_LIST_MAX = 5000;
 /** v2.641: CPU·메모리 '높음' 경계(%) — 웹 cvpText.SYS_HIGH_PCT 와 같은 값(테스트 대조). */
 export const SYS_HIGH_PCT = 80;
@@ -145,6 +149,8 @@ function pickStatus(st) {
     ...(st.samples && typeof st.samples === 'object' ? { samples: st.samples } : {}), // v2.640 ②: 원문 표본(라우트가 admin 에게만 싣는다)
     ...(Array.isArray(st.probes) ? { probes: st.probes } : {}), // v2.641: 경로 탐색 표본(admin 만 — stripSamples 가 뺀다)
     ...(Object.hasOwn(st, 'events') ? { events: st.events } : {}), // v2.641 ④: 이벤트 요약(null = 못 읽음)
+    // v2.940(C-③ 남긴 것 · 반증 M-1): EndpointLocation 주기 요약 — 수와 열거값뿐(주소 없음). 예전에는 이 화이트리스트에 없어 화면이 늘 '—' 였다.
+    ...(st.endpoints && typeof st.endpoints === 'object' ? { endpoints: st.endpoints } : {}),
   };
 }
 
@@ -289,6 +295,7 @@ api.get('/tools/cvp', toolsPerm, fullScopeOnly, async (req, res) => {
     collectDrops: recentCvpCollectDrops(),
     ...(unavailable ? { dbUnavailable: true } : {}),
     ...(admin ? { db: await cdb.dbStats() } : { addressHidden: true }),
+    ...registryMark(registryLoadError()),   // 128회차
   });
 });
 
@@ -412,6 +419,75 @@ api.get('/tools/cvp/device', toolsPerm, fullScopeOnly, async (req, res) => {
     // v2.640 ②: 그 CVP 의 종류별 원문 표본(첫 장비의 응답 앞부분) — admin 만. 장비마다 다르지 않다(표본은 CVP 단위).
     ...(admin ? { samples: st0.samples || null, probes: st0.probes || null } : { addressHidden: true, samplesHidden: true }),
   });
+});
+
+// ── v3.37 포트 구성도(docs/design/cvp-port-map) — 전면 배치 · 포트별 연결 장비(설명 + LLDP) · 사용/예비 ─────────────────
+/**
+ * 장비 한 대의 포트 구성도. 판정은 cvp/portmap.js 하나(분류 · 근거 · 배치표). 장비 · 엣지 왕복 0(중앙 DB 최신값 · v2.924 LLDP 표 · 일 롤업).
+ *   게이트는 형제 /tools/cvp/device 와 같다(tools + 전체 범위). 비-admin 은 설명 · LLDP 문자열의 주소를 가리고 chassisId(MAC)는 싣지 않는다.
+ */
+api.get('/tools/cvp/portmap', toolsPerm, fullScopeOnly, async (req, res) => {
+  kickDemo();
+  const admin = isAdminReq(req);
+  const cvpId = typeof req.query.cvpId === 'string' ? req.query.cvpId : '';
+  const key = typeof req.query.key === 'string' ? req.query.key : '';
+  const srv = cvpId ? getServer(cvpId) : null;
+  if (!srv || !key) return res.status(404).json({ ok: false, reason: '없는 장비입니다.' });
+  const agent = await agentFor(srv, cvpId, key);
+  if (agent === undefined) return res.status(404).json({ ok: false, reason: '수집된 장비 정보가 없습니다.' });
+  const det = await cdb.deviceDetail(agent, cvpId, key);
+  if (!det) return res.status(404).json({ ok: false, reason: '수집된 장비 정보가 없습니다.' });
+  const [ll, days, names] = await Promise.all([
+    cdb.lldpForDevice(agent, cvpId, key).catch(() => ({ rows: [], read: false, at: null, failing: false, unavailable: true })),
+    cdb.lastLinkDays(agent, cvpId, key).catch(() => ({ last: new Map(), since: null, unavailable: true })),
+    cdb.deviceNameIndex().catch(() => ({ rows: [] })),
+  ]);
+  const switchNames = new Set((names.rows || []).map((r) => String(r.hostname || '').toLowerCase().split('.')[0]).filter(Boolean));
+  const m = buildPortMap({ model: det.device.model, ports: det.ports, parts: det.device.partsList, lldp: ll.rows, lldpRead: ll.read, lastLink: days.last, switchNames });
+  const hosts = listServers().map((x) => x.host);
+  const mk = (v) => (admin || v == null ? v : maskErrText(v, hosts));
+  const corp = corpResolver(listServers(), dcList())(cvpId);
+  res.json({
+    device: { ...publicDevice(det.device, admin), corpId: corp.corpId, corpName: corp.corpName },
+    cvpName: srv.name || srv.id,
+    portsRead: m.portsRead, faceplate: m.faceplate, counts: m.counts, bySpeed: m.bySpeed,
+    ports: m.ports ? m.ports.map((p) => ({ ...p, desc: mk(p.desc), device: mk(p.device), lldp: p.lldp ? { ...p.lldp, sysName: mk(p.lldp.sysName), portDesc: mk(p.lldp.portDesc) } : null })) : null,
+    xcvrRead: !!m.xcvrRead, partsAt: det.device.partsAt ?? null, collectedAt: det.device.collectedAt ?? null,
+    lldp: { read: ll.read, at: ll.at, failing: !!ll.failing, ...(ll.unavailable ? { unavailable: true } : {}) },
+    linkHistory: { since: days.since, ...(days.unavailable ? { unavailable: true } : {}) },
+    ...(admin ? {} : { addressHidden: true }),
+  });
+});
+
+/** 전 스위치 포트 여유 — 장비마다 사용 · 예비 · 확인 필요 · 꺼짐(LLDP 없이 분류만). 화면은 마운트 1회 + 새로고침(폴링 없음). */
+  const PORTMAP_SUMMARY_PORTS_MAX = 200_000;
+api.get('/tools/cvp/portmap/summary', toolsPerm, fullScopeOnly, async (req, res) => {
+  kickDemo();
+  const admin = isAdminReq(req);
+  const servers = listServers();
+  const own = rowOwnerOf(servers);
+  const { rows, unavailable } = await cdb.listDeviceRows();
+  if (unavailable) return res.status(503).json({ ok: false, reason: '중앙 CVP DB 를 열지 못했습니다.' });
+  const devs = rows.filter(own);
+  const pr = await cdb.portLatestRows({ limit: PORTMAP_SUMMARY_PORTS_MAX });
+  if (pr.unavailable) return res.status(503).json({ ok: false, reason: '중앙 CVP DB 를 열지 못했습니다.' });
+  const byDev = new Map();
+  for (const r of pr.rows) {
+    const k = `${r.agent}\u0000${r.cvp_id}\u0000${r.device_key}`;
+    if (!byDev.has(k)) byDev.set(k, []);
+    byDev.get(k).push({ name: r.port, oper: r.oper || 'unknown', admin: r.admin || 'unknown', desc: r.descr == null ? null : r.descr, speedBps: r.speed_bps });
+  }
+  const corpOf = corpResolver(servers, dcList());
+  const byId = new Map(servers.map((x) => [x.id, x]));
+  const list = devs.map((d) => {
+    const ports = d.portsRead ? (byDev.get(`${d.agent}\u0000${d.cvpId}\u0000${d.key}`) || []) : null;
+    const s = summaryRow({ model: d.model, ports, parts: d.partsList });
+    const c = corpOf(d.cvpId);
+    return { cvpId: d.cvpId, key: d.key, hostname: d.hostname || d.key, model: d.model || '', corpId: c.corpId, corpName: c.corpName,
+      cvpName: byId.get(d.cvpId)?.name || d.cvpId, portsRead: s.portsRead, counts: s.counts, spareHigh: s.spareHigh, source: s.source || null };
+  });
+  // 여유 부족 기준(예비 이 개수 이하) — 화면에 숫자를 박지 않고 이 값을 쓴다.
+  res.json({ devices: list, lowSpareMax: 4, ...(pr.truncated ? { truncated: true, portsMax: PORTMAP_SUMMARY_PORTS_MAX } : {}), ...(admin ? {} : { addressHidden: true }) });
 });
 
 // ── v2.641 ③ CPU·메모리 추이 · ④ 이벤트 · ⑤ 포트 사용량 ──────────────────────────
@@ -712,7 +788,7 @@ api.post('/tools/cvp/faults/close', adminOnly, toolsPerm, fullScopeOnly, async (
  * v2.640 ② — 파서 시험(adminOnly): 관리자가 CVP 응답 원문을 붙여넣으면 이 포탈의 파서가 무엇을 읽는지 보여준다. **네트워크 왕복 0**,
  * 저장 0. 본문 상한은 express.json 기본(1MB) — 그보다 큰 응답은 앞부분만 붙여넣으라고 화면이 말한다(PREVIEW_TEXT_MAX 는 문자 기준).
  */
-api.post('/tools/cvp/parse-preview', adminOnly, toolsPerm, fullScopeOnly, (req, res) => {
+api.post('/tools/cvp/parse-preview', adminOnly, toolsPerm, fullScopeReadPost, (req, res) => {
   const b = req.body && typeof req.body === 'object' ? req.body : {};
   const kind = typeof b.kind === 'string' ? b.kind : '';
   if (!PREVIEW_KINDS.includes(kind)) return res.status(400).json({ ok: false, reason: `kind 는 ${PREVIEW_KINDS.join('·')} 중 하나여야 합니다.`, kinds: PREVIEW_KINDS });
@@ -789,7 +865,7 @@ api.post('/tools/cvp/collect', writer, toolsPerm, fullScopeOnly, async (req, res
 
 // ── 등록부(adminOnly — 자격증명) ────────────────────────────────────────────
 api.get('/tools/cvp/servers', adminOnly, toolsPerm, fullScopeOnly, (_req, res) => {
-  res.json({ servers: listServers(), agents: knownAgentNames(), datacenters: dcList() });
+  res.json({ servers: listServers(), agents: knownAgentNames(), datacenters: dcList(), ...registryMark(registryLoadError()) });   // 128회차: 표지
 });
 
 // DataCenter 목록 — 폼 드롭다운과 저장 검증이 같은 목록을 본다(v2.609).
@@ -798,6 +874,9 @@ function dcList() {
 }
 
 const saveRoute = (req, res) => {
+  // 결정(78 남긴 것 ①): 등록부 읽기 오류 중에는 409(원본은 그대로 — 읽히면 다시 열린다). 읽지 못한 빈 목록으로 agent · 법인을 고르지 않게 맨 앞에서.
+  const refused = registryWriteRefusal();
+  if (refused) return res.status(409).json(refused);
   try {
     const input = { ...(req.body && typeof req.body === 'object' ? req.body : {}), ...(req.params.id ? { id: req.params.id } : {}) };
     // 담당 엣지·DataCenter 는 기존 목록의 표기로 맞추고, 목록에 없는 새 값은 거부한다(오타 방지 — v2.609).
@@ -818,6 +897,8 @@ api.post('/tools/cvp/servers', adminOnly, toolsPerm, fullScopeOnly, (req, res) =
 api.put('/tools/cvp/servers/:id', adminOnly, toolsPerm, fullScopeOnly, (req, res) => saveRoute(req, res));
 
 api.delete('/tools/cvp/servers/:id', adminOnly, toolsPerm, fullScopeOnly, async (req, res) => {
+  const refused = registryWriteRefusal();   // 결정(78 남긴 것 ①): '없는 CVP 서버' 404 보다 먼저
+  if (refused) return res.status(409).json(refused);
   const srv = getServer(req.params.id);
   if (!deleteServer(req.params.id)) return res.status(404).json({ ok: false, reason: '없는 CVP 서버입니다.' });
   dropStatus(req.params.id);
@@ -857,9 +938,14 @@ api.post('/tools/cvp/servers/:id/test', adminOnly, toolsPerm, fullScopeOnly, asy
 
 // ── 설정(adminOnly) ──────────────────────────────────────────────────────────
 api.get('/tools/cvp/settings', adminOnly, toolsPerm, fullScopeOnly, (_req, res) => {
-  res.json({ settings: loadSettings(), limits: LIMITS });
+  const le = cvpSettingsLoadError();   // 25회차 F-2: 손상이면 밝힌다(화면의 값은 저장값이 아니라 기본값)
+  res.json({ settings: loadSettings(), limits: LIMITS, ...(le ? { loadError: { reason: String(le.reason || '').slice(0, 200) } } : {}) });
 });
 api.put('/tools/cvp/settings', adminOnly, toolsPerm, fullScopeOnly, (req, res) => {
+  // 25회차 F-2: 손상 중 저장은 받지 않는다 — 기본값(짧은 보존)을 굳히고 표지를 풀어 이력이 정리됐다. 서비스 점검 확정 · 보존본 복구로만.
+  // 103회차 F20: 읽기 오류는 원본이 그대로라 조치가 다르다(권한 · 디스크 — 확정 불가 · 재시작 불필요).
+  if (cvpSettingsLoadError()?.readError) return res.status(409).json({ ok: false, code: 'settings-unreadable', readError: true, reason: `CloudVision 수집 설정 파일을 읽지 못한 상태라 저장하지 않았습니다 — 읽기 오류이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 저장이 다시 열립니다).` });
+  if (cvpSettingsLoadError()) return res.status(409).json({ ok: false, code: 'settings-unreadable', reason: 'CloudVision 수집 설정 파일을 읽지 못한 상태라 저장하지 않았습니다 — 지금 저장하면 기본값(짧은 보존)이 굳습니다. 서비스 점검에서 기본값으로 확정하거나 손상 보존본을 되돌리고 재시작하세요.' });
   const before = loadSettings();
   const next = saveSettings(req.body && typeof req.body === 'object' ? req.body : {});
   logAudit({ user: req.user?.username, action: 'CVP 수집 설정 변경', target: 'cvp-settings', detail: JSON.stringify({ before, after: next }).slice(0, 500) });

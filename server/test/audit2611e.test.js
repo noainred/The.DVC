@@ -8,7 +8,7 @@
  *
  * ⚠ 옛 판본 함수는 아래에 **글자 그대로 복사**했다(캐시 두 줄만 뺐다). 성능 수정은 결과 동일성이 증거다(v2.602 규약).
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -17,9 +17,16 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { stripComments } from './_stripComments.js';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
-const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2611e-'));
+const CFG = tmpDir('audit2611e-');
 process.env.CONFIG_DIR = CFG;
 process.env.DATA_SOURCE = 'mock';
 process.env.IPAM_SCAN_WRITE_DEBOUNCE_MS = process.env.IPAM_SCAN_WRITE_DEBOUNCE_MS || '0';
@@ -29,7 +36,7 @@ const src = (p) => strip(fs.readFileSync(path.join(SRC, p), 'utf8'));
 
 function runChild(code, env = {}) {
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', code], {
-    env: { ...process.env, CONFIG_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'audit2611e-c-')), DATA_SOURCE: 'mock', AUTH_ENABLED: 'false', ...env },
+    env: { ...process.env, CONFIG_DIR: tmpDir('audit2611e-c-'), DATA_SOURCE: 'mock', AUTH_ENABLED: 'false', ...env },
     encoding: 'utf8', cwd: path.resolve(SRC, '..'), timeout: 120_000,
   });
   assert.equal(r.status, 0, `자식 프로세스 실패: ${(r.stderr || '').slice(-2000)}`);
@@ -150,7 +157,7 @@ test('AUTHZ2611-05: withRegistryRegion — 등록부 region 이 이기고 표시
 });
 
 test('AUTHZ2611-05: 점검중 vCenter 의 캐시 스냅샷 region 이 등록부와 다르면 등록부 값으로 병합된다', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2611e-m-'));
+  const dir = tmpDir('audit2611e-m-');
   fs.writeFileSync(path.join(dir, 'vcenters.json'), JSON.stringify({ vcenters: [
     { id: 'vc-m', name: 'M', host: 'https://10.0.0.9', maintenance: true, location: { city: 'Warsaw', region: 'EMEA', lat: 52, lon: 21 } },
   ] }));
@@ -453,7 +460,9 @@ test('PERF2611-01: buildIpamRows 결과가 옛 판본과 완전히 같다(무시
     const t2 = performance.now(); const b = ledger.buildIpamRows(snap2, vcenterId, allowed); const t3 = performance.now();
     // owner 는 스냅샷 객체 참조라 두 스냅샷이 다른 객체 — 내용이 같으면 deepStrictEqual 이 같다고 본다.
     // v2.638: 스캔 행의 데이터센터 귀속 필드와 그 요약은 이 판본 뒤에 **추가**된 것이다 — 뺀 나머지가 옛 판본과 같아야 한다.
-    const V2638 = ['scanAgent', 'datacenterId', 'datacenterName', 'dcSource'];
+    // v2.991: 호스트명 칸(netName…)도 이 판본 뒤에 **추가**된 것이다(ipam/hostNames.js netNameFields — 행에 붙이기만 하고 다른 칸은 바꾸지 않는다).
+    // v3.5.0(재설계 묶음 나): 관리상태 행의 용도 · 요청자 · 할당자(ipPurpose · requester · assigner)도 뒤에 **추가**된 칸이다 — 다른 칸은 바꾸지 않는다.
+    const V2638 = ['scanAgent', 'datacenterId', 'datacenterName', 'dcSource', 'netName', 'netNameSrc', 'netNameStale', 'netNameAt', 'nameMismatch', 'nameAlt', 'nameUnchecked', 'ipPurpose', 'requester', 'assigner'];
     const strip = (x) => ({ ...x, scanByDatacenter: undefined, rows: x.rows.map((r) => { const o = { ...r }; for (const k of V2638) delete o[k]; return o; }) });
     assert.deepStrictEqual(strip(b), strip(a), `${label}: 결과가 옛 판본과 다르다`);
     assert.ok(a.rows.length > minRows, `${label}: 입력이 충분히 커야 한다(${a.rows.length})`);

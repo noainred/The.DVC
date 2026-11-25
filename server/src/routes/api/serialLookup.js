@@ -53,6 +53,17 @@ export function maskSerialRow(x) {
   return out;
 }
 
+/**
+ * v2.974(사용자 요청 2026-11-11 'R3 시리얼 조회 UUID 도 관리자만'): 시스템 UUID 행은 관리자 판본(isAdminReq = isAdminDetailUser)만 —
+ * 하드웨어 내보내기(UUID adminOnly · v2.967)와 서버 상세 인벤토리(maskInventoryForViewer · v2.973)와 같은 기준. 비관리자에게는 행 자체를 빼고
+ * 개수(counts · total · uniqueSerials)도 뺀 행으로 센다(개수로 존재를 흘리지 않게). 색인(캐시)은 공용이라 응답에서 거른다.
+ */
+export const ADMIN_ONLY_SERIAL_TYPES = Object.freeze(['UUID']);
+export function serialRowsForViewer(rows, admin) {
+  if (admin) return rows;
+  return (Array.isArray(rows) ? rows : []).filter((r) => !(r && ADMIN_ONLY_SERIAL_TYPES.includes(r.serialType)));
+}
+
 export function registerSerialLookup(api) {
 
 /**
@@ -64,21 +75,22 @@ api.get('/tools/serial-lookup', toolsPerm, fullScopeOnly, (req, res) => {
   const kinds = String(req.query.kinds || '').split(',').map((s) => s.trim()).filter(Boolean);
   const idx = serialIndex(req, { force: req.query.refresh === '1' });
   const labelOf = new Map(KINDS.map((k) => [k.key, k.label]));
+  const admin = isAdminReq(req);
+  const all = serialRowsForViewer(idx.rows, admin);   // v2.974: 비관리자는 UUID 행 제외
 
   const counts = {};
-  for (const r of idx.rows) counts[r.kind] = (counts[r.kind] || 0) + 1;
+  for (const r of all) counts[r.kind] = (counts[r.kind] || 0) + 1;
   const base = {
     ok: true, kinds: KINDS, counts, sources: idx.sources,
-    total: idx.rows.length, builtAt: idx.at,
+    total: all.length, builtAt: idx.at,
     // 고유 시리얼 개수 — 같은 장비가 서비스태그/시리얼/자산태그로 여러 행을 만들기 때문에
     // '행 수 = 장비 수'가 아니다. 오해하지 않도록 둘 다 준다.
-    uniqueSerials: new Set(idx.rows.map((r) => r.key)).size,
+    uniqueSerials: new Set(all.map((r) => r.key)).size,
   };
-  const admin = isAdminReq(req);
-  if (!admin) base.addressHidden = true;
+  if (!admin) { base.addressHidden = true; base.uuidHidden = true; }   // v2.974: 화면이 'UUID 는 관리자만' 을 한 줄로 밝힌다
   if (!q) return res.json({ ...base, query: '', rows: [], matched: 0 });
 
-  const r = searchSerials(idx.rows, q, { kinds, limit: 500 });
+  const r = searchSerials(all, q, { kinds, limit: 500 });
   res.json({ ...base, query: q, matched: r.total, truncated: r.truncated,
     rows: r.rows.map((x) => {
       const row = { ...x, kindLabel: labelOf.get(x.kind) || x.kind };
@@ -93,9 +105,10 @@ api.get('/tools/serial-lookup/export.csv', csvPerm, toolsPerm, fullScopeOnly, (r
   const idx = serialIndex(req);
   const labelOf = new Map(KINDS.map((k) => [k.key, k.label]));
   const kindSet = kinds.length ? new Set(kinds) : null;
+  const all = serialRowsForViewer(idx.rows, isAdminReq(req));   // v2.974: 비관리자는 UUID 행 제외(화면과 같다)
   const rows = q
-    ? searchSerials(idx.rows, q, { kinds, limit: 100_000 }).rows
-    : idx.rows.filter((r) => !kindSet || kindSet.has(r.kind));
+    ? searchSerials(all, q, { kinds, limit: 100_000 }).rows
+    : all.filter((r) => !kindSet || kindSet.has(r.kind));
   logAudit({ user: req.user?.username, action: '시리얼 조회 CSV 내보내기',
     target: q ? `검색 '${q.length > 100 ? `${q.slice(0, 100)}…(잘림)` : q}'` : '전체', detail: `${rows.length}행` });   // v2.606 SEC2606-06: 형제(toolsCapacity v2.500 L-6)와 같은 100자
   // csvLine 은 수식 인젝션 가드(=,+,-,@ 로 시작하는 셀)를 포함한다 — 시리얼은 대개 안전하지만

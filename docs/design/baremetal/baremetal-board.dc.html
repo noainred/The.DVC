@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>물리 서버 — 상태 보드</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+button{font-family:inherit}
+.bm-tile{width:14px;height:14px;border-radius:3px;flex:none}
+.bm-tile:hover{outline:2px solid #e6edf6;outline-offset:1px}
+.bm-tab{height:36px;padding:0 14px;border-radius:8px;border:1px solid transparent;background:transparent;color:#8b9bb4;font-size:13px;font-weight:500;cursor:pointer;white-space:nowrap}
+.bm-tab[aria-current="page"]{background:#1a2740;border-color:#243049;color:#e6edf6}
+.bm-th{text-align:left;font-weight:500;font-size:12px;color:#8b9bb4;padding:9px 12px;border-bottom:1px solid #243049;background:#0f1626;white-space:nowrap;cursor:pointer}
+.bm-td{padding:9px 12px;border-bottom:1px solid #1f2a40;font-size:13px;color:#e6edf6;white-space:nowrap;vertical-align:middle}
+.bm-row:hover .bm-td{background:rgba(59,130,246,.08)}
+.bm-chip{display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:600;line-height:1}
+.bm-kpi{flex:1 1 150px;min-width:0;background:#141b2d;border:1px solid #243049;border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:6px}
+.bm-kpi[data-on="1"]{border-color:#3b82f6;box-shadow:0 0 0 1px #3b82f6 inset}
+.bm-btn{height:36px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font-size:13px;cursor:pointer;display:inline-flex;align-items:center;gap:8px;white-space:nowrap}
+.bm-btn[data-on="1"]{background:#1a2740;border-color:#3b82f6}
+.bm-input{height:36px;padding:0 12px 0 34px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font-size:13px;min-width:0;width:100%;box-sizing:border-box}
+.bm-input::placeholder{color:#8b9bb4}
+.bm-select{height:36px;padding:0 32px 0 12px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font-size:13px;appearance:none;-webkit-appearance:none}
+.bm-dens[data-dens="dense"] .bm-tile{width:10px;height:10px;border-radius:2px}
+.bm-dens[data-dens="dense"] .bm-grp{padding:10px 12px}
+</style>
+</helmet>
+
+<div class="bm-dens" data-dens="{{density}}" style="font-family: Inter, 'Noto Sans KR', -apple-system, 'Segoe UI', sans-serif; color: #e6edf6; background: #0a0e17; min-height: 100vh; box-sizing: border-box; padding: 18px 24px 40px; display: flex; flex-direction: column; gap: 14px; max-width: 1680px; margin: 0 auto">
+
+  <!-- 머리 -->
+  <div style="display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 24px">
+    <div style="display: flex; flex-direction: column; gap: 6px; min-width: 0">
+      <div style="font-size: 12px; color: #8b9bb4; display: flex; gap: 6px; align-items: center">
+        <span>서버</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+        <span style="color: #e6edf6">물리 서버</span>
+      </div>
+      <h1 style="margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.01em">물리 서버 <span style="font-size: 13px; font-weight: 500; color: #8b9bb4; margin-left: 8px">Baremetal(미가상화 물리) · 전체 법인</span></h1>
+      <div style="font-size: 12px; color: #8b9bb4; display: flex; gap: 14px; flex-wrap: wrap">
+        <span>인벤토리 수집 <b style="color: #e6edf6; font-weight: 600">11분 전</b> (30분 주기)</span>
+        <span>판정 기준 <b style="color: #e6edf6; font-weight: 600">iDRAC 부품 상태</b> — 못 읽은 장비는 정상에도 장애에도 넣지 않음</span>
+      </div>
+    </div>
+    <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center">
+      <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #8b9bb4">
+        <span>법인</span>
+        <span style="position: relative; display: inline-flex">
+          <select class="bm-select" aria-label="법인(DataCenter)">
+            <option>전체 (28 법인)</option>
+            <option>DaVinci KR</option>
+            <option>IRS Poland</option>
+          </select>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8b9bb4" stroke-width="2" aria-hidden="true" style="position: absolute; right: 10px; top: 11px; pointer-events: none"><path d="M6 9l6 6 6-6"/></svg>
+        </span>
+      </label>
+      <label style="position: relative; display: inline-flex; width: 240px; max-width: 100%">
+        <span style="position: absolute; left: 10px; top: 10px; pointer-events: none">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8b9bb4" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+        </span>
+        <input class="bm-input" type="search" placeholder="이름 · 서비스태그 · 주소 · 모델" aria-label="서버 검색">
+      </label>
+      <button class="bm-btn" type="button" data-on="{{denseOn}}" onClick="{{toggleDensity}}" aria-pressed="{{denseOn}}">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        {{densityLabel}}
+      </button>
+      <button class="bm-btn" type="button">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
+        새로고침
+      </button>
+    </div>
+  </div>
+
+  <!-- 하위 탭 (기존 7개 유지) -->
+  <nav aria-label="물리 서버 하위 탭" style="display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid #1f2a40; padding-bottom: 8px">
+    <a class="bm-tab" href="#board" aria-current="page">상태 보드</a>
+    <a class="bm-tab" href="#info">법인별 서버 정보</a>
+    <a class="bm-tab" href="#hw">하드웨어 집계</a>
+    <a class="bm-tab" href="#parts">파트 인벤토리</a>
+    <a class="bm-tab" href="#temp">법인별 온도</a>
+    <a class="bm-tab" href="#gpu">GPU 정보</a>
+    <a class="bm-tab" href="#fw">BIOS/iDRAC 버전 정보</a>
+    <a class="bm-tab" href="#unsupported">미지원 서버</a>
+  </nav>
+
+  <!-- KPI 띠 (클릭 = 호스트 맵·표 필터) -->
+  <div style="display: flex; flex-wrap: wrap; gap: 10px">
+    <sc-for list="{{kpis}}" as="k" hint-placeholder-count="6">
+      <button class="bm-kpi" type="button" data-on="{{k.on}}" onClick="{{k.pick}}" aria-pressed="{{k.on}}" style="text-align: left; cursor: pointer">
+        <span style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #8b9bb4">
+          <span style="width: 8px; height: 8px; border-radius: 2px; background: {{k.color}}; flex: none"></span>
+          {{k.label}}
+        </span>
+        <span style="font-size: 26px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1">{{k.value}}</span>
+        <span style="font-size: 11px; color: #8b9bb4">{{k.meta}}</span>
+      </button>
+    </sc-for>
+  </div>
+
+  <!-- 본문: 호스트 맵 + 우측 패널 -->
+  <div style="display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start">
+
+    <!-- 호스트 맵 -->
+    <section style="flex: 999 1 640px; min-width: 0; background: #141b2d; border: 1px solid #243049; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px">
+      <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px">
+        <div style="display: flex; align-items: baseline; gap: 10px">
+          <h2 style="margin: 0; font-size: 15px; font-weight: 600">호스트 맵</h2>
+          <span style="font-size: 12px; color: #8b9bb4">서버 1대 = 타일 1개 · 법인별 묶음 · {{filterText}}</span>
+        </div>
+        <div style="display: flex; flex-wrap: wrap; gap: 12px; font-size: 11px; color: #8b9bb4; align-items: center">
+          <span style="display: inline-flex; align-items: center; gap: 5px"><span class="bm-tile" style="background: #22c55e"></span>정상</span>
+          <span style="display: inline-flex; align-items: center; gap: 5px"><span class="bm-tile" style="background: #f59e0b"></span>경고</span>
+          <span style="display: inline-flex; align-items: center; gap: 5px"><span class="bm-tile" style="background: #ef4444"></span>장애</span>
+          <span style="display: inline-flex; align-items: center; gap: 5px"><span class="bm-tile" style="background: #3a4863"></span>판정 못함</span>
+          <span style="display: inline-flex; align-items: center; gap: 5px"><span class="bm-tile" style="background: repeating-linear-gradient(45deg, #22c55e 0 3px, #0f1626 3px 5px)"></span>오래됨(수집 2시간↑)</span>
+        </div>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px">
+        <sc-for list="{{groups}}" as="g" hint-placeholder-count="8">
+          <div class="bm-grp" style="background: #0f1626; border: 1px solid #1f2a40; border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; min-width: 0">
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; min-width: 0">
+              <a href="#info" style="font-size: 13px; font-weight: 600; color: #e6edf6; text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{g.name}}</a>
+              <span style="font-size: 12px; color: #8b9bb4; font-variant-numeric: tabular-nums; flex: none">{{g.count}}대</span>
+            </div>
+            <div style="display: flex; flex-wrap: wrap; gap: 3px">
+              <sc-for list="{{g.tiles}}" as="t" hint-placeholder-count="12">
+                <a class="bm-tile" href="#detail" style="background: {{t.bg}}; opacity: {{t.op}}" title="{{t.title}}" aria-label="{{t.title}}"></a>
+              </sc-for>
+            </div>
+            <div style="display: flex; gap: 8px; font-size: 11px; color: #8b9bb4; font-variant-numeric: tabular-nums; flex-wrap: wrap">
+              <span style="color: #fca5a5">장애 {{g.fault}}</span>
+              <span style="color: #fcd34d">경고 {{g.warn}}</span>
+              <span>못함 {{g.unknown}}</span>
+              <span>{{g.topModel}}</span>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+    </section>
+
+    <!-- 우측 패널 -->
+    <aside style="flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 14px">
+      <section style="background: #141b2d; border: 1px solid #243049; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 10px">
+        <div style="display: flex; justify-content: space-between; align-items: baseline">
+          <h2 style="margin: 0; font-size: 15px; font-weight: 600">주의 필요 서버</h2>
+          <span style="font-size: 12px; color: #8b9bb4">장애 5 · 경고 9 — 장애 먼저</span>
+        </div>
+        <ul style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column">
+          <sc-for list="{{attention}}" as="a" hint-placeholder-count="6">
+            <li style="border-top: 1px solid #1f2a40; padding: 9px 0; display: flex; gap: 10px; align-items: flex-start; min-width: 0">
+              <span style="width: 8px; height: 8px; border-radius: 999px; background: {{a.color}}; margin-top: 6px; flex: none"></span>
+              <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1">
+                <div style="display: flex; justify-content: space-between; gap: 8px; min-width: 0">
+                  <a href="#detail" style="font-size: 13px; font-weight: 600; color: #e6edf6; text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{a.name}}</a>
+                  <span style="font-size: 11px; color: #8b9bb4; flex: none">{{a.corp}}</span>
+                </div>
+                <div style="font-size: 12px; color: #8b9bb4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{a.detail}}</div>
+              </div>
+            </li>
+          </sc-for>
+        </ul>
+        <a href="#table" style="font-size: 12px; align-self: flex-start">14대 모두 표에서 보기</a>
+      </section>
+
+      <section style="background: #141b2d; border: 1px solid #243049; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 10px">
+        <div style="display: flex; justify-content: space-between; align-items: baseline">
+          <h2 style="margin: 0; font-size: 15px; font-weight: 600">모델 분포</h2>
+          <span style="font-size: 12px; color: #8b9bb4">11종 · 대수 많은 순</span>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 7px">
+          <sc-for list="{{models}}" as="m" hint-placeholder-count="6">
+            <div style="display: grid; grid-template-columns: 140px 1fr 36px; gap: 10px; align-items: center; font-size: 12px">
+              <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #e6edf6">{{m.name}}</span>
+              <span style="height: 8px; background: #0f1626; border-radius: 999px; overflow: hidden; display: block"><span style="display: block; height: 100%; width: {{m.pct}}%; background: #3b82f6; border-radius: 999px"></span></span>
+              <span style="text-align: right; color: #8b9bb4; font-variant-numeric: tabular-nums">{{m.n}}</span>
+            </div>
+          </sc-for>
+        </div>
+      </section>
+
+      <section style="background: #141b2d; border: 1px solid #243049; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 8px">
+        <h2 style="margin: 0; font-size: 15px; font-weight: 600">왜 판정을 못했나</h2>
+        <div style="display: flex; flex-direction: column; gap: 6px; font-size: 12px">
+          <div style="display: flex; justify-content: space-between"><span style="color: #8b9bb4">iDRAC 응답 없음</span><b style="font-variant-numeric: tabular-nums">7</b></div>
+          <div style="display: flex; justify-content: space-between"><span style="color: #8b9bb4">인벤토리 아직 없음(신규 등록)</span><b style="font-variant-numeric: tabular-nums">4</b></div>
+          <div style="display: flex; justify-content: space-between"><span style="color: #8b9bb4">엣지 판본 오래됨(상태 필드 없음)</span><b style="font-variant-numeric: tabular-nums">2</b></div>
+        </div>
+      </section>
+    </aside>
+  </div>
+
+  <!-- 서버 표 -->
+  <section id="table" style="background: #141b2d; border: 1px solid #243049; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0">
+    <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px">
+      <div style="display: flex; align-items: baseline; gap: 10px">
+        <h2 style="margin: 0; font-size: 15px; font-weight: 600">서버 목록</h2>
+        <span style="font-size: 12px; color: #8b9bb4">{{filterText}} · 214대 중 8대 표시 · 제목 클릭 정렬 · 행 클릭 = iDRAC 상세</span>
+      </div>
+      <div style="display: flex; gap: 8px; flex-wrap: wrap">
+        <button class="bm-btn" type="button">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 21h16"/></svg>
+          CSV
+        </button>
+      </div>
+    </div>
+    <div style="overflow-x: auto; border: 1px solid #1f2a40; border-radius: 8px">
+      <table style="border-collapse: collapse; width: 100%; min-width: 1080px">
+        <thead>
+          <tr>
+            <th class="bm-th" scope="col">상태</th>
+            <th class="bm-th" scope="col">서버</th>
+            <th class="bm-th" scope="col">서비스 태그</th>
+            <th class="bm-th" scope="col">법인</th>
+            <th class="bm-th" scope="col">모델</th>
+            <th class="bm-th" scope="col">부품 정상 / 경고 / 장애</th>
+            <th class="bm-th" scope="col">흡기 ℃</th>
+            <th class="bm-th" scope="col">BIOS</th>
+            <th class="bm-th" scope="col">iDRAC</th>
+            <th class="bm-th" scope="col">수집</th>
+          </tr>
+        </thead>
+        <tbody>
+          <sc-for list="{{rows}}" as="r" hint-placeholder-count="8">
+            <tr class="bm-row">
+              <td class="bm-td"><span class="bm-chip" style="background: {{r.chipBg}}; color: {{r.chipFg}}">{{r.state}}</span></td>
+              <td class="bm-td"><a href="#detail" style="color: #e6edf6; font-weight: 600; text-decoration: none">{{r.name}}</a><div style="font-size: 11px; color: #8b9bb4; font-family: 'JetBrains Mono', monospace">{{r.host}}</div></td>
+              <td class="bm-td" style="font-family: 'JetBrains Mono', monospace; font-size: 12px">{{r.tag}}</td>
+              <td class="bm-td">{{r.corp}}</td>
+              <td class="bm-td">{{r.model}}</td>
+              <td class="bm-td" style="font-variant-numeric: tabular-nums">{{r.parts}}</td>
+              <td class="bm-td" style="font-variant-numeric: tabular-nums"><span style="display: inline-flex; align-items: center; gap: 8px"><span style="width: 56px; height: 6px; background: #0f1626; border-radius: 999px; overflow: hidden; display: inline-block"><span style="display: block; height: 100%; width: {{r.tempPct}}%; background: {{r.tempColor}}"></span></span>{{r.temp}}</span></td>
+              <td class="bm-td" style="font-family: 'JetBrains Mono', monospace; font-size: 12px">{{r.bios}}</td>
+              <td class="bm-td" style="font-family: 'JetBrains Mono', monospace; font-size: 12px">{{r.idrac}}</td>
+              <td class="bm-td" style="color: {{r.ageColor}}">{{r.age}}</td>
+            </tr>
+          </sc-for>
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+</x-dc>
+
+<script type="text/x-dc" data-dc-script data-props='{"density":{"editor":"enum","options":["comfortable","dense"],"default":"comfortable","section":"보기"},"$preview":{"width":1440,"height":1640}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { filter: 'all', dense: null }; }
+  rnd(seed) { let s = seed >>> 0; return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; }
+  renderVals() {
+    const dense = this.state.dense == null ? (this.props.density ?? 'comfortable') === 'dense' : this.state.dense;
+    const density = dense ? 'dense' : 'comfortable';
+    const filter = this.state.filter;
+    const C = { ok: '#22c55e', warn: '#f59e0b', fault: '#ef4444', unknown: '#3a4863' };
+    const LABEL = { ok: '정상', warn: '경고', fault: '장애', unknown: '판정 못함' };
+    const corps = [
+      ['DaVinci KR', 38], ['IRS Poland', 26], ['DaVinci US-East', 22], ['IRS Germany', 19], ['DaVinci Japan', 17],
+      ['IRS Vietnam', 15], ['DaVinci China', 14], ['IRS Mexico', 12], ['DaVinci India', 11], ['IRS Türkiye', 10],
+      ['DaVinci Brazil', 9], ['IRS Czech', 8], ['DaVinci Thailand', 7], ['미지정(법인 없음)', 6],
+    ];
+    const models = ['PowerEdge R760', 'PowerEdge R750', 'PowerEdge R650', 'PowerEdge R7625', 'PowerEdge XE9680', 'PowerEdge R740xd', 'PowerEdge R6525', 'PowerEdge T560', 'PowerEdge R940', 'PowerEdge MX750c', 'PowerEdge R250'];
+    const modelW = [52, 41, 30, 24, 14, 13, 12, 9, 8, 6, 5];
+    const r = this.rnd(20261106);
+    const pickModel = () => { let x = r() * 214, i = 0; while (x > modelW[i] && i < modelW.length - 1) { x -= modelW[i]; i++; } return models[i]; };
+    const all = [];
+    const groups = corps.map(([name, n], gi) => {
+      const tiles = []; let fault = 0, warn = 0, unknown = 0; const mc = {};
+      for (let i = 0; i < n; i++) {
+        const x = r();
+        const st = x < 0.025 ? 'fault' : x < 0.07 ? 'warn' : x < 0.13 ? 'unknown' : 'ok';
+        const stale = st !== 'unknown' && r() < 0.05;
+        const model = pickModel(); mc[model] = (mc[model] || 0) + 1;
+        if (st === 'fault') fault++; else if (st === 'warn') warn++; else if (st === 'unknown') unknown++;
+        const srv = { name: name.slice(0, 3).toUpperCase().replace(/[^A-Z]/g, 'X') + '-BM-' + String(i + 1).padStart(2, '0'), corp: name, st, stale, model };
+        all.push(srv);
+        const dim = filter !== 'all' && filter !== st && !(filter === 'stale' && stale);
+        tiles.push({ bg: stale ? 'repeating-linear-gradient(45deg, ' + C[st] + ' 0 3px, #0f1626 3px 5px)' : C[st], op: dim ? 0.18 : 1, title: srv.name + ' · ' + model + ' · ' + LABEL[st] + (stale ? ' · 오래됨' : '') });
+      }
+      const top = Object.entries(mc).sort((a, b) => b[1] - a[1])[0];
+      return { name, count: n, tiles, fault, warn, unknown, topModel: top ? top[0].replace('PowerEdge ', '') + ' ' + top[1] : '' };
+    });
+    const tot = { ok: 0, warn: 0, fault: 0, unknown: 0, stale: 0 };
+    all.forEach((s) => { tot[s.st]++; if (s.stale) tot.stale++; });
+    const mk = (key, label, value, meta, color) => ({ key, label, value: String(value), meta, color, on: filter === key ? 1 : 0, pick: () => this.setState({ filter: filter === key ? 'all' : key }) });
+    const kpis = [
+      mk('all', '등록 서버', all.length, '법인 ' + (corps.length - 1) + '개 · 미지정 6', '#3b82f6'),
+      mk('ok', '정상', tot.ok, '부품 전부 OK', C.ok),
+      mk('warn', '경고', tot.warn, 'PSU·DIMM·디스크 경고', C.warn),
+      mk('fault', '장애', tot.fault, '즉시 확인', C.fault),
+      mk('unknown', '판정 못함', tot.unknown, '응답 없음 7 · 미수집 4 · 엣지 구판 2', '#8b9bb4'),
+      mk('stale', '오래됨', tot.stale, '수집 2시간 넘음(판정은 유지)', '#a855f7'),
+    ];
+    const filterText = filter === 'all' ? '전체' : (LABEL[filter] || '오래됨') + '만 강조';
+    const attention = [
+      { color: C.fault, name: 'DAV-BM-07', corp: 'DaVinci KR', detail: '디스크 Bay 3 Failed · PSU2 Critical' },
+      { color: C.fault, name: 'IRS-BM-12', corp: 'IRS Poland', detail: 'DIMM B4 Critical (ECC uncorrectable)' },
+      { color: C.fault, name: 'DAV-BM-03', corp: 'DaVinci US-East', detail: 'RAID 컨트롤러 Degraded' },
+      { color: C.warn, name: 'IRS-BM-02', corp: 'IRS Germany', detail: 'PSU1 Warning (입력 전압 변동)' },
+      { color: C.warn, name: 'DAV-BM-11', corp: 'DaVinci Japan', detail: '디스크 Bay 7 Predictive failure' },
+      { color: C.warn, name: 'IRS-BM-05', corp: 'IRS Vietnam', detail: 'NIC 포트 2 링크 다운(4포트 중)' },
+    ];
+    const total = modelW.reduce((a, b) => a + b, 0);
+    const modelList = models.slice(0, 7).map((m, i) => ({ name: m, n: modelW[i], pct: Math.round(modelW[i] / modelW[0] * 100) }));
+    const chip = (st) => st === 'ok' ? ['rgba(34,197,94,.18)', '#86efac'] : st === 'warn' ? ['rgba(245,158,11,.18)', '#fcd34d'] : st === 'fault' ? ['rgba(239,68,68,.2)', '#fca5a5'] : ['#243049', '#c7d2e1'];
+    const rowsSrc = [
+      ['DAV-BM-07', '10.21.4.17', '7XK2P93', 'DaVinci KR', 'PowerEdge R760', 'fault', '41 / 1 / 2', 24, '2.3.4', '7.10.70.00', '11분 전'],
+      ['IRS-BM-12', '10.88.1.42', 'C4H1Q82', 'IRS Poland', 'PowerEdge R750', 'fault', '38 / 0 / 1', 27, '1.14.1', '6.10.80.00', '14분 전'],
+      ['DAV-BM-03', '10.33.2.8', 'J9M4R71', 'DaVinci US-East', 'PowerEdge XE9680', 'fault', '96 / 0 / 1', 31, '2.1.3', '7.10.50.10', '12분 전'],
+      ['IRS-BM-02', '10.72.5.21', '5RT8W64', 'IRS Germany', 'PowerEdge R650', 'warn', '35 / 1 / 0', 22, '1.12.1', '6.10.80.00', '13분 전'],
+      ['DAV-BM-11', '10.21.4.31', '2LP6N55', 'DaVinci Japan', 'PowerEdge R7625', 'warn', '44 / 1 / 0', 26, '1.9.3', '7.00.60.00', '11분 전'],
+      ['DAV-BM-19', '10.21.4.52', '9QW3B18', 'DaVinci KR', 'PowerEdge R740xd', 'unknown', '— (응답 없음)', null, '—', '—', '3일 전'],
+      ['IRS-BM-08', '10.88.1.27', 'B7N2K40', 'IRS Poland', 'PowerEdge R760', 'ok', '42 / 0 / 0', 23, '2.3.4', '7.10.70.00', '2시간 40분 전'],
+      ['DAV-BM-01', '10.21.4.11', 'H3C9F27', 'DaVinci KR', 'PowerEdge R760', 'ok', '42 / 0 / 0', 21, '2.3.4', '7.10.70.00', '11분 전'],
+    ];
+    const rows = rowsSrc.map((x) => { const [bg, fg] = chip(x[5]); const t = x[7]; return {
+      name: x[0], host: x[1], tag: x[2], corp: x[3], model: x[4], state: LABEL[x[5]], chipBg: bg, chipFg: fg, parts: x[6],
+      temp: t == null ? '—' : t + '℃', tempPct: t == null ? 0 : Math.round((t - 10) / 30 * 100), tempColor: t == null ? '#3a4863' : t >= 30 ? '#f59e0b' : '#3b82f6',
+      bios: x[8], idrac: x[9], age: x[10], ageColor: /일|시간/.test(x[10]) ? '#c4b5fd' : '#8b9bb4',
+    }; });
+    return {
+      density, denseOn: dense ? 1 : 0, densityLabel: dense ? '촘촘히' : '여유', toggleDensity: () => this.setState({ dense: !dense }),
+      kpis, groups, filterText, attention, models: modelList, rows, total,
+    };
+  }
+}
+</script>
+</body>
+</html>

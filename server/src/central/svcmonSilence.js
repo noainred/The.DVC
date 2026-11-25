@@ -14,14 +14,16 @@
  * 보관하지 않으므로 재시작 직후 전 엣지가 '보고 없음'으로 시작한다).
  *
  * ## 명시적 한계
- * 이 감시는 **'엣지 무보고'만** 알린다. 개별 점검의 정상→실패 전이 알림은 아직 없다.
+ * 이 감시는 **'엣지 무보고'만** 알린다. 개별 점검의 정상→실패 · 복구 전이 알림은 별도 모듈(`svcmon/transitions.js` — v2.915, 기본 꺼짐)이 한다
+ *   (26회차 F13 정정 — 예전 문구 '전이 알림은 아직 없다' 는 v2.915 이후 사실이 아니었다).
  * '엣지 위임을 붙였으니 장애 감시가 완성됐다'가 아니다.
  */
 
 import { clampIntervalMs } from '../config.js';
 import { notify } from '../alerts.js';
 import { edgeSummary, noReportGraceMs, edgeStartedAt, _setEdgeStartedAt } from './svcmonEdge.js';
-import { listAssignments } from './svcmonAssign.js';
+import { listAssignments, svcmonAssignLoadError } from './svcmonAssign.js';
+import { capStr } from '../util/capStr.js';
 
 const envNum = (k, d) => { const n = Number(process.env[k]); return Number.isFinite(n) && n > 0 ? Math.round(n) : d; };
 
@@ -92,7 +94,14 @@ export async function checkSilenceOnce({ now: nowArg } = {}) {
     const graceByAgent = {};
     const noReport = [];
     let assignments = [];
-    try { assignments = listAssignments(); } catch (e) { assignments = []; lastAssignError = e?.message || String(e); }
+    // 18회차 B-4: 배정 파일을 못 읽으면 listAssignments 는 던지지 않고 **빈 목록**을 준다 — 그대로 두면 '기동 후 보고 없음' 감시가 조용히 꺼진다(무음 실패).
+    //   판정 보류로 남기고 사유를 상태에 싣는다(서비스 점검의 파일 손상과 별개로 이 감시가 멈췄다는 사실).
+    let assignHeld = false;
+    try {
+      const le = svcmonAssignLoadError();
+      if (le) { assignHeld = true; lastAssignError = `배정 파일을 읽지 못해 '기동 후 보고 없음' 판정을 보류합니다 — ${capStr(String(le.reason || '사유 미상'), 200)}`; }
+      else { assignments = listAssignments(); lastAssignError = ''; }
+    } catch (e) { assignments = []; lastAssignError = e?.message || String(e); }
     for (const a of assignments) {
       const name = String(a?.agent || '');
       if (!name || reported.has(name.toLowerCase())) continue;
@@ -116,7 +125,7 @@ export async function checkSilenceOnce({ now: nowArg } = {}) {
     // graceMs(단일 값)는 하위호환 — 엣지별 값의 최소(없으면 기본 주기 기준). 엣지별은 graceByAgent.
     const graces = Object.values(graceByAgent);
     const graceMs = graces.length ? Math.min(...graces) : noReportGraceMs(null);
-    lastCheck = { at: now, agents: known.size, fired, noReport, graceMs, graceByAgent, startedAt };
+    lastCheck = { at: now, agents: known.size, fired, noReport, graceMs, graceByAgent, startedAt, ...(assignHeld ? { noReportHeld: true } : {}) };
     return { ok: true, ...lastCheck };
   } finally {
     running = false;
@@ -135,7 +144,7 @@ export function silenceStatus() {
     startedAt: edgeStartedAt(),
     ...(lastAssignError ? { assignError: lastAssignError } : {}),
     lastCheck,
-    note: '엣지 무보고만 알립니다. 개별 점검의 정상→실패 전이 알림은 아직 없습니다.',
+    note: '이 감시는 엣지 무보고만 알립니다. 개별 점검의 실패 · 복구 알림은 성능점검 알림 설정에서 따로 켭니다.',
   };
 }
 

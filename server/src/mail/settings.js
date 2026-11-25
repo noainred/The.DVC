@@ -11,16 +11,18 @@
  *  - 검증은 순수 함수(`smtpIssue`·`validate`)로 분리 — 웹 테스트가 node 환경이라 화면 렌더
  *    테스트가 불가하므로 판정을 여기에 고정한다.
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, safeLoadText } from '../util/atomicWrite.js';
+import { makeJsonFileLoader } from '../util/jsonFileLoad.js';   // 결정(56~75 남긴 것) 73 ①
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js';
 import { normalizeAddresses } from '../util/smtp.js';
 import { KINDS, isKind } from './kinds.js';
 
 import { ssrfBlockReason } from '../collector/registry.js';   // v2.575 SEC-15
 import { clampSetting } from '../util/clampSetting.js';
+import { parseJsonObject } from '../util/jsonObject.js'; // v3.17.2: 객체가 아닌 JSON(수 · 글자 · 배열)은 깨진 JSON 과 같이 — 손상 보존 경로로
+import { accessMoved } from '../util/secretCarry.js';   // 98회차: 포트 · 계정도 접속 신원(저장 비밀 승계 판정은 하나)
 const FILE = path.join(config.configDir, 'mail.json');
 
 export const DEFAULTS = Object.freeze({
@@ -58,25 +60,36 @@ function normKinds(raw) {
   return out;
 }
 
+/*
+ * 결정(56~75 남긴 것) 73 ①(73회차 남긴 것): 로드 catch 가 읽기 오류(EACCES · EIO · EMFILE)도 손상으로 보고 원본(SMTP 계정 · 수신자)을 .corrupt 로 옮겼다.
+ *   이제 공용 로더 — 읽기 오류는 원본을 두고 기본값(발송 꺼짐)을 캐시하지 않으며(30초 간격 재읽기) · 손상은 예전처럼 보존 ·
+ *   둘 다 로드 오류(서비스 점검 등재 — 확정은 설정 소유자: 쓰기 라우트가 requireSettingsOwner) · 오류 중 저장은 409(saveRefusal).
+ *   parse 안의 openSecretsDeep 실패(봉인 손상)도 예전처럼 손상으로 본다.
+ */
+const _file = makeJsonFileLoader(() => FILE, { label: '메일 발송 설정(SMTP · 수신자 — mail.json) — 확정하면 기본값(발송 꺼짐 · SMTP · 수신자 없음)으로 저장됩니다', confirm: () => { atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep(defaultsOut()), null, 2), { mode: 0o600 }); cache = null; _file.saved(); }, ownerOnly: true, parse: (text) => openSecretsDeep(parseJsonObject(text)), tag: 'mail' });
+function defaultsOut() { const out = structuredClone(DEFAULTS); out.kinds = normKinds({}); return out; }
+/** 메일 설정 파일을 못 읽었으면 { reason, at, readError }, 아니면 null(GET /admin/mail 표지). */
+export function mailSettingsLoadError() { load(); return _file.marker(); }
+/** 저장 거절 응답(409) 또는 null — PUT /admin/mail 이 검증보다 먼저 본다. */
+export function mailSaveRefusal() { load(); return _file.refusal('메일 발송 설정'); }
+
 export function load() {
-  if (cache) return cache;
-  const out = structuredClone(DEFAULTS);
-  out.kinds = normKinds({});
-  try {
-    if (fs.existsSync(FILE)) {
-      const p = openSecretsDeep(JSON.parse(fs.readFileSync(FILE, 'utf8')) || {});
-      if (typeof p.enabled === 'boolean') out.enabled = p.enabled;
-      if (p.smtp && typeof p.smtp === 'object') out.smtp = { ...out.smtp, ...p.smtp };
-      out.defaultTo = normalizeAddresses(p.defaultTo).ok;
-      out.kinds = normKinds(p.kinds);
-      out.rateLimitPerHour = clamp(p.rateLimitPerHour, 0, 10000, DEFAULTS.rateLimitPerHour);
-      out.historyMax = clamp(p.historyMax, 20, 2000, DEFAULTS.historyMax);
-    }
-  } catch (e) {
-    // 손상 파일을 조용히 빈 설정으로 넘기면 다음 저장이 원본(수신자·SMTP 계정)을 지운다.
-    preserveCorrupt(FILE);
+  if (cache && !_file.recheckDue()) return cache;   // 결정 G2 반증 후속 ③: 오류 중에는 캐시를 믿지 않고 30초마다 다시 판정(보존본을 되돌리면 재시작 없이 풀린다)
+  const out = defaultsOut();
+  const r = _file.load();
+  if (r.kind === 'read-error') return out;   // 73 ①: 기본값(발송 꺼짐)을 캐시하지 않는다 — 간격 뒤 다시 읽는다
+  if (r.kind === 'ok') {
+    const p = r.value;
+    if (typeof p.enabled === 'boolean') out.enabled = p.enabled;
+    if (p.smtp && typeof p.smtp === 'object') out.smtp = { ...out.smtp, ...p.smtp };
+    out.defaultTo = normalizeAddresses(p.defaultTo).ok;
+    out.kinds = normKinds(p.kinds);
+    out.rateLimitPerHour = clamp(p.rateLimitPerHour, 0, 10000, DEFAULTS.rateLimitPerHour);
+    out.historyMax = clamp(p.historyMax, 20, 2000, DEFAULTS.historyMax);
+  } else if (r.kind === 'corrupt') {
+    // 손상 파일을 조용히 빈 설정으로 넘기면 다음 저장이 원본(수신자·SMTP 계정)을 지운다 — 로더가 보존했다.
     // v2.744(최종 검토 RG2744-02): 사유는 요약이다(원문은 SMTP 비밀번호 앞부분 같은 파일 조각을 싣는다 — 원문은 mail.json.corrupt.* 에 있다).
-    console.warn(`[mail] 설정 로드 실패 — 원본을 .corrupt 로 보존하고 기본값으로 시작합니다: ${safeLoadText(e) || '사유 미상'}`);
+    console.warn(`[mail] 설정 로드 실패 — 원본을 .corrupt 로 보존하고 기본값으로 시작합니다: ${safeLoadText(r.error) || '사유 미상'}`);
   }
   cache = out;
   return cache;
@@ -108,18 +121,28 @@ export function smtpHostIssue(host) {
  * '계정 있음 + 비밀번호 없음' 설정이 저장돼 자동 발송이 빈 비밀번호로 AUTH → 535 → 인증 정지로 이어졌다.
  *   · 빈 값 = 기존 유지. 지우려면 clearPassword 를 명시적으로 보낸다.
  *   · v2.480(3차 감사 S8): host 가 바뀌면 저장 비번 이월 금지(PDU S-1 규칙) — 새 SMTP 로 평문 자격증명 전송 방지.
- * @returns {{ password: string, dropped: 'cleared'|'hostChanged'|null }}
+ *   · 98회차(재현): **포트 · 계정도** 접속 신원이다(util/secretCarry.js accessMoved — 다른 저장소 · 연결 시험과 같은 판정). 예전에는 호스트만 보아
+ *     ① 같은 호스트의 다른 포트(그 호스트에서 일반 사용자가 열 수 있는 1024 이상 포트 — 예 2525)로 바꾸면 저장 비밀번호가 그 리스너로 AUTH 되었고
+ *     ② 계정명만 바꾸면 저장 비밀번호를 다른 계정명으로 보냈다(테스트 발송 · 자동 발송 모두 — 틀린 조합의 반복 AUTH 는 계정 잠금으로 이어진다).
+ *     포트 · 계정은 save 와 같은 정규화(빈 칸 = 이전 값)로 견준다.
+ * @returns {{ password: string, dropped: 'cleared'|'hostChanged'|'accessChanged'|null }}
  */
 export function nextSmtpPassword(s = {}, curSmtp = {}) {
   if (s?.clearPassword === true) return { password: '', dropped: curSmtp?.password ? 'cleared' : null };
   if (s?.password) return { password: String(s.password), dropped: null };
   const hostChanged = String(s?.host ?? curSmtp?.host ?? '').trim() !== String(curSmtp?.host || '').trim();
   if (hostChanged) return { password: '', dropped: curSmtp?.password ? 'hostChanged' : null };
+  const curPort = clamp(curSmtp?.port, 1, 65535, 25);
+  const prevId = { port: curPort, user: String(curSmtp?.user ?? '').trim() };
+  const nextId = { port: clamp(s?.port, 1, 65535, curPort), user: String(s?.user ?? curSmtp?.user ?? '').trim() };
+  if (accessMoved(prevId, nextId, ['port', 'user'])) return { password: '', dropped: curSmtp?.password ? 'accessChanged' : null };
   return { password: curSmtp?.password || '', dropped: null };
 }
 
 export function save(body = {}) {
   const cur = load();
+  // 73 ①: 읽지 못한 값(기본값) 위에 덮어쓰지 않는다 — 라우트가 먼저 409 로 막고, 다른 호출부를 위해 여기서도 던진다.
+  { const no = _file.refusal('메일 발송 설정'); if (no) throw Object.assign(new Error(no.reason), { status: 409, code: no.code }); }
   const next = structuredClone(cur);
   if (typeof body.enabled === 'boolean') next.enabled = body.enabled;
   if (body.smtp && typeof body.smtp === 'object') {
@@ -151,10 +174,26 @@ export function save(body = {}) {
 
   atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep(next), null, 2), { mode: 0o600 });
   cache = next;
+  _file.saved();
   return next;
 }
 
-export function invalidate() { cache = null; }
+export function invalidate() { cache = null; _file.resetRetry(); }
+
+/**
+ * 결정 G2 · G3 반증 후속 ①: 메일 주소 목록 가림 — GET /admin/mail(73 ③)과 같은 기준. 전체 범위 관리자(조회 ∧ 쓰기 무제한 — auth/scope.js isFullReadWriteScope)가
+ *   아니면 주소 대신 개수만 싣는다(통합 관리자 수신자를 보여 주는 도구 화면 — 스토리지 사용량 · 아이실론 종합 메일). 판정 결과(full)는 라우트가 넘긴다.
+ * @returns {{ list:string[], count:number, masked:boolean }}
+ */
+export function maskedMailList(list, full) {
+  const a = Array.isArray(list) ? list : [];
+  return full ? { list: a, count: a.length, masked: false } : { list: [], count: a.length, masked: true };
+}
+/** 후속 ①: SMTP 계정 이름 가림 — 전체 범위가 아니면 '' + 있음 표지(통신 점검 설정 링크의 facts.user 등). */
+export function maskedSmtpUser(user, full) {
+  const u = typeof user === 'string' ? user : '';
+  return full ? { user: u } : { user: '', hasUser: !!u, userMasked: true };
+}
 
 /** API 응답용 — 비밀 값을 제거하고 존재 여부만 남긴다. */
 export function redact(cfg = load()) {
@@ -179,6 +218,7 @@ export function smtpIssue(smtp, dropped = null) {
   //   통과한다) — 예전 '(이미 저장돼 있다면 비워 두세요)' 는 그 어느 경우에도 맞지 않는 안내였다. 사유별로 말한다.
   if (smtp?.user && !smtp?.password) {
     if (dropped === 'hostChanged') return 'SMTP 서버 주소가 바뀌어 저장된 비밀번호를 새 서버로 넘기지 않습니다 — 새 서버의 비밀번호를 다시 입력하세요(계정 없이 보내려면 계정을 비우세요).';
+    if (dropped === 'accessChanged') return 'SMTP 포트나 계정이 바뀌어 저장된 비밀번호를 넘기지 않습니다 — 비밀번호를 다시 입력하세요(계정 없이 보내려면 계정을 비우세요).';   // 98회차
     if (dropped === 'cleared') return '비밀번호를 지우려면 계정도 비우세요 — 계정을 쓰려면 새 비밀번호를 입력하세요.';
     return '계정을 입력했다면 비밀번호도 필요합니다(저장된 비밀번호가 없습니다).';
   }
@@ -204,6 +244,38 @@ export function validate(cfg, dropped = null) {
   }
   return out;
 }
+
+/**
+ * 73회차 F4(재현): 저장 본문의 받는 사람 주소 중 형식이 틀린 것 — 기본 수신자 · 종류별 받는 사람 · 참조.
+ *   save 는 `normalizeAddresses(...).ok` 만 남겨 **틀린 주소를 조용히 버렸다**('ops@corp' · 'a@b.com x@y.com' 같은 입력이 200 '저장되었습니다' 로
+ *   사라지고, 화면 입력칸은 그대로라 저장된 줄 알았다). 라우트가 저장 전에 이것으로 400 을 돌려준다.
+ * @returns {{ field: string, bad: string[] } | null}
+ */
+export function recipientIssue(body = {}) {
+  // 75회차(73회차 F4 반증 — 재현): 글자 · 수 · 그 배열만 주소로 읽는다 — `{toString:1}` 같은 객체는 normalizeAddresses 의 String() 이 던져
+  //   400 대신 500 이었다(72회차 F4 toolcats 와 같은 함정). 그런 값은 형식 오류(400)로 돌려준다.
+  const scalar = (x) => x == null || typeof x === 'string' || typeof x === 'number';
+  const check = (v, field) => {
+    if (v == null) return null;
+    if (!(Array.isArray(v) ? v.every(scalar) : scalar(v))) return { field, bad: ['(주소가 아닌 값)'] };
+    const { bad } = normalizeAddresses(v);
+    return bad.length ? { field, bad: bad.slice(0, 10) } : null;
+  };
+  const d = check(body?.defaultTo, 'defaultTo');
+  if (d) return d;
+  if (body?.kinds && typeof body.kinds === 'object') {
+    for (const k of KINDS) {
+      const v = body.kinds[k.id];
+      if (!v || typeof v !== 'object') continue;
+      const r = check(v.to, `kinds.${k.id}.to`) || check(v.cc, `kinds.${k.id}.cc`);
+      if (r) return r;
+    }
+  }
+  return null;
+}
+
+/** 저장될 종류별 설정(save 와 같은 정규화 — PUT 검증이 저장될 값으로 판정하게, 73회차 F4). */
+export function normalizeKinds(raw) { return normKinds(raw); }
 
 /** 알 수 없는 종류 id 를 저장하려는 시도를 걸러낸다(설정 파일 오염 방지). */
 export function unknownKinds(kinds) {

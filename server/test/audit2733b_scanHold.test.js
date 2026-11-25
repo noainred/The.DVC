@@ -13,13 +13,20 @@ import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
 import http from 'node:http';
+import { installFakePing } from './_fakePing.js';
+
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
 
 const TOKEN = 'tok-2733b-shared';
-const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'dvc-2733b-'));
-const BIN = fs.mkdtempSync(path.join(os.tmpdir(), 'dvc-2733b-bin-'));
-const PINGLOG = path.join(BIN, 'pids');
-// 가짜 ping: 자기 PID 를 남기고 sleep 으로 바뀐다 — 2단계(ping)에서 스캔을 시한까지 묶는다(1단계 TCP 생존은 이미 찾은 뒤).
-fs.writeFileSync(path.join(BIN, 'ping'), `#!/bin/sh\necho $$ >> "${PINGLOG}"\nexec sleep 30\n`, { mode: 0o755 });
+const CFG = tmpDir('dvc-2733b-');
+const BIN = tmpDir('dvc-2733b-bin-');
+// 가짜 ping: 자기 PID 를 남기고 sleep 으로 바뀐다 — 2단계(ping)에서 스캔을 시한까지 묶는다(1단계 TCP 생존은 이미 찾은 뒤). test/_fakePing.js(v3.8.1)
+const { killOwned } = installFakePing(BIN);
 process.env.PATH = `${BIN}:${process.env.PATH}`;
 process.env.CONFIG_DIR = CFG;
 process.env.CENTRAL_TOKEN = TOKEN;
@@ -35,7 +42,6 @@ const runner = await import('../src/ipam/scanRunner.js');
 const { config } = await import('../src/config.js');
 const LOCAL = ss.LOCAL;
 
-const pids = () => { try { return fs.readFileSync(PINGLOG, 'utf8').split('\n').map((x) => Number(x)).filter((n) => n > 0); } catch { return []; } };
 const listen = (handler) => new Promise((r) => { const s = (handler ? http.createServer(handler) : net.createServer((c) => c.end())); s.listen(0, '127.0.0.1', () => r(s)); });
 const quiet = async (fn) => { const w = console.warn; const l = console.log; console.warn = () => {}; console.log = () => {}; try { return await fn(); } finally { console.warn = w; console.log = l; } };
 const hold = (agent) => (ss.releaseHoldStatus?.()?.agents || []).find((a) => a.agent === agent) || null;
@@ -46,7 +52,7 @@ before(async () => { target = await listen(); tport = target.address().port; });
 after(() => {
   runner._setScanDeadlineOverrideForTest?.(null);
   target?.close();
-  for (const pid of pids()) { try { process.kill(pid, 'SIGKILL'); } catch { /* 이미 끝남 */ } }
+  killOwned(); // 이 파일이 띄운 sleep 만 — 로그의 PID 가 다른 프로세스에 재사용됐을 수 있다(test/_fakePing.js · v3.8.1)
   fs.rmSync(BIN, { recursive: true, force: true });
 });
 

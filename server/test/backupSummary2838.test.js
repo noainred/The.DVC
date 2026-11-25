@@ -404,3 +404,34 @@ test('⑤ 라우트 — 스케줄 · 에러 로그(Detail 거부 403 · 범위 �
     SA._resetForTest();
   }
 });
+
+test('전체 점검 9회차(V-21) — 계산기가 아직 모름(재시작 직후 골격 스냅샷)이면 보내지 않고 그날 차례 · 시도 횟수를 쓰지 않는다', async () => {
+  const mailCfg = await import('../src/mail/settings.js');
+  SA._resetForTest();
+  try { fs.rmSync(path.join(DIR, 'backup-stale-alert-state.json'), { force: true }); } catch { /* */ }
+  fs.writeFileSync(path.join(DIR, 'mail.json'), JSON.stringify({ enabled: true }));
+  mailCfg.invalidate();
+  SA.saveAlert({ enabled: true, time: '08:30', q: { n: 3 } }, { by: 'adm', now: T0 });
+  let calls = 0; let ready = false;
+  SA.setStaleProvider(async () => { calls++; return ready ? { q: { n: 3, unit: 'd' }, n: 0, never: 0, old: 0, unknown: 0, sites: 0, excluded: {}, total: 0, rows: [] } : { notReady: true, reason: '첫 수집 전' }; });
+  const at = (h, m = 0) => T0 + 2 * DAY + h * H + m * MIN;
+  const r = await SA.tick(at(9));
+  assert.equal(r.notReady, true); assert.equal(r.ok, false);
+  assert.equal(SA.alertStatus().tries, 0, '시도로 세지 않는다'); assert.equal(SA.alertStatus().ok, null, '그날 발송 기록을 남기지 않는다');
+  ready = true;
+  const r2 = await SA.tick(at(9, 1));
+  assert.equal(calls, 2, '다음 틱에 다시 계산한다(30분 재시도 간격을 걸지 않는다)'); assert.notEqual(r2, null);
+  // 라우트의 계산기 — 골격 스냅샷이면 notReady(소스)
+  const v = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '../src/routes/api/veeam.js'), 'utf8');
+  assert.match(v, /if \(snap0\?\.initial === true \|\| !\(Array\.isArray\(snap0\?\.vms\) && snap0\.vms\.length\)\) return \{ notReady: true,/);
+});
+
+test('전체 점검 9회차(V-22 · V-23) — EM 이력 기록 거부를 잡는다 · Summary 의 라이선스 · 저장소 합은 모르는 수를 함께 싣는다', () => {
+  const src = (p) => fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '../src', p), 'utf8');
+  assert.match(src('veeam/em/poller.js'), /Promise\.resolve\(\)\.then\(\(\) => recordRepoDaily\([^\n]*\n\s*\.catch\(/);
+  assert.doesNotMatch(src('veeam/em/poller.js'), /try \{ recordRepoDaily\(/);
+  const v = src('routes/api/veeam.js');
+  assert.match(v, /unknown: repoUnknown \}/); assert.match(v, /unknown: Number\(lt\.unknown\) \|\| 0, servers: Number\(lt\.servers\) \|\| 0 \}/);
+  const w = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '../../web/src/views/tools/BackupSummaryTool.jsx'), 'utf8');
+  assert.match(w, /em\.lic\.unknown \? ` \(모름 \$\{em\.lic\.unknown\}대 빼고\)` : ''/); assert.match(w, /용량 모름 \$\{em\.repo\.unknown\}곳 빼고/);
+});

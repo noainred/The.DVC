@@ -18,6 +18,7 @@
 import { getLogsDb } from '../logs/db.js';
 import { loadPowerChanges, loadRosterFirstSeen, loadOffSeen } from '../vmtrack/db.js';
 import { loadPowerOffSettings } from './powerOffSettings.js';
+import { numOrNull } from '../util/numOrNull.js';
 
 const DAY = 86_400_000;
 const HOUR = 3_600_000;
@@ -97,4 +98,40 @@ export async function poweredOffSinceFor(vms, { now = Date.now() } = {}) {
     }
   }
   return { rows, sources: { events: eventsOk, track: trackOk, observed: observedOk, observedIntervalHours: ps.intervalHours, observedEnabled: ps.enabled } };
+}
+
+/*
+ * v3.21.0 VM 분석 화면 요약 — 꺼진 지 구간. 경계 · 칸 이름은 웹 `views/tools/wasteViewText.js AGE_BUCKETS · ageBucketOf` 와 **같은 규칙**이어야 한다
+ *   (웹은 서버 소스를 import 할 수 없다 — 번들 경계). `server/test/vmInsightTools3210.test.js` 가 두 구현을 같은 입력으로 대조한다.
+ *   경계 7일 · 30일은 긴 쪽에 넣는다 · 꺼진 시점을 못 찾은 VM(offDays 없음 · 음수)은 'unknown' — 0일로 넣지 않는다.
+ */
+export const OFF_AGE_EDGES = Object.freeze([7, 30]);
+export function offAgeBucketOf(days) {
+  const d = numOrNull(days);
+  if (d == null || d < 0) return 'unknown';
+  if (d >= OFF_AGE_EDGES[1]) return 'ge30';
+  if (d >= OFF_AGE_EDGES[0]) return 'd7';
+  return 'lt7';
+}
+
+/**
+ * off-since 결과(poweredOffSinceFor 의 rows) → vCenter 별 { buckets: {ge30,d7,lt7,unknown}, oldest: 오래 꺼진 순 상위 n }.
+ * offVms = 판정한 꺼진 VM 목록(vcenterId · name · storageGB) — 행이 없는 VM 도 'unknown' 으로 센다(모자란 수를 지어내지 않는다).
+ */
+export function offSinceByVc(offVms, rows, n = 5) {
+  const byId = new Map((rows || []).map((r) => [r.id, r]));
+  const m = new Map();
+  for (const v of offVms || []) {
+    let e = m.get(v.vcenterId);
+    if (!e) { e = { buckets: { ge30: 0, d7: 0, lt7: 0, unknown: 0 }, known: [] }; m.set(v.vcenterId, e); }
+    const r = byId.get(v.id);
+    const b = offAgeBucketOf(r?.offDays);
+    e.buckets[b] += 1;
+    if (b !== 'unknown') e.known.push({ id: v.id, name: v.name, storageGB: v.storageGB ?? null, offSince: r.offSince, offDays: r.offDays, source: r.source, exact: !!r.exact, ...(r.granHours ? { granHours: r.granHours } : {}) });
+  }
+  for (const e of m.values()) {
+    e.oldest = e.known.sort((a, b) => b.offDays - a.offDays || String(a.name).localeCompare(String(b.name))).slice(0, n);
+    delete e.known;
+  }
+  return m;
 }

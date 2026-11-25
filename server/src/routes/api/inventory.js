@@ -2,21 +2,25 @@
 import { requirePerm, requireRole } from '../../auth/auth.js';
 import { userHasPermission } from '../../auth/permissions.js'; // v2.583: /top 의 inv.* 집행
 import { scopedVcenterIds, inUserScope, writeScopedVcenterIds } from '../../auth/scope.js';
-import { store, usageReadable, dsUsageReadable, dsUsedOf, dsUsageUnknownOf, hostCapacityKnown } from '../../store.js'; // v2.771(R6-F3-2) 용량 판정도 store 하나
+import { store, usageReadable, dsUsageReadable, dsUsedOf, dsUsageUnknownOf, hostCapacityKnown, siteInventoryStale } from '../../store.js'; // v2.771(R6-F3-2) 용량 판정도 store 하나 · v2.915 낡은 값 판정
+import { platformSummaryOf } from '../../inventory/platformSummary.js'; // v2.915 가상화 플랫폼 허브
 import { numOrNull } from '../../util/numOrNull.js';
+import { vmSumsOf, vmAllocOf, newVmSum, vmSumAdd } from '../../vcenter/vmSums.js'; // v3.19.0 /hosts 요약 VM 할당 합 — 점검 표 · 법인별 · 호스트 엑셀과 같은 판정 코어(v3.19.1 '전부 못 읽음' 도 그 모듈이 · v3.19.2 /summary 합도)
 import { clusterCountOf } from '../../clustercfg/analyze.js'; // v2.743 LEFT-07 — 클러스터 개수(묶음 키)
 const pctOrNullR = (u, t) => (t > 0 ? Math.round((u / t) * 100) : null);
 import { browseDatastore, onDemandErrorFields } from '../../vcenter/dsBrowse.js';
 import { listMutes, addMute, removeMute, muteCreateIssue, muteDeleteIssue, visibleMutes } from '../../alarm-mutes.js';
 import { auditMiddleware } from '../../audit.js'; // v2.478(감사 S15): 알람 음소거는 무기록이었다
 import { recordToolUse, getTopTools } from '../../tool-usage.js';
-import { memoJson, applyFilters, sortBy, scopeKey, osFamily } from './shared.js';
+import { memoJson, applyFilters, sortBy, scopeKey, osFamily, vcenterPickOf, vcenterPickKey } from './shared.js';
 import { isPagedRequest, prepareVmPage, buildVmPage } from '../../inventory/vmPaging.js'; // v2.730(I-02)
 import { parseVmFacets, passGpu, filterVmsByFacets, vmDistribution, VM_FACET_KEYS } from '../../inventory/vmDist.js'; // v2.746(VM 상세 C안)
 import { parseSignalQuery, filterVmsBySignal, signalCounts, signalContext, vmSignalsOf } from '../../inventory/vmSignals.js'; // v2.909 가상화 서버 허브
 import { vmTotals } from '../../inventory/vmTotals.js';
 import { vmByVcenter } from '../../inventory/vmByVcenter.js';
 import { loadVmHygieneSettings } from '../../vmhygiene/settings.js';
+import { vmInsightOf } from '../../inventory/vmInsight.js'; // v3.21.0 VM 탭 '분석' 보기
+import { createYielder } from '../../util/timeSlice.js';
 
 /**
  * 인벤토리 조회 권한 게이트(v2.536 — 인증·인가 전수 감사).
@@ -193,8 +197,10 @@ api.get('/summary', (req, res) => memoJson(req, res, 'summary', (snap) => {
   const dsUsageUnknownCount = datastores.filter(dsUsageUnknownOf).length;
 
   // VM allocation totals (what is provisioned, regardless of host capacity)
-  const vmVcpu = sum(vms, (v) => v.cpuCount);
-  const vmRamMB = sum(vms, (v) => v.memMB);
+  // v3.19.2: 합은 판정 코어(vcenter/vmSums.js) — 못 읽은 cpuCount · memMB(null · '')는 0 으로 더하지 않고 따로 센다(vcpuUnknown · ramUnknown).
+  //   VM 이 있는데 하나도 못 읽었으면 합은 0 이 아니라 null(vmAllocOf). 이 합은 **템플릿 포함**이다(전 VM 인벤토리 — 공개 API vmVcpu · vmRamMB 와 같은 값).
+  const vmAllSum = vmSumsOf(vms, { includeTemplates: true });
+  const { vcpu: vmVcpu, memMB: vmRamMB } = vmAllocOf(vmAllSum);
   // v2.771(점검 R6-F3-2): 용량(코어·CPU·메모리 총량)을 못 읽은 호스트(REST 폴백 — store.hostCapacityKnown)가 있으면 분모는 읽은 호스트만,
   //   분자는 전 VM 이라 vCPU:코어·RAM 오버커밋이 부푼다(실측 2:1·50% → 4·100%). 형제 /tools/capacity·compareMatrix(C2-06)와 같은 규칙 —
   //   비율은 null('—')이고 뺀 호스트 수를 hostsCapacityUnknown 으로 싣는다. 합계(cpuCores·memTotalGB)는 공개 API 대조 계약이라 그대로 둔다.
@@ -218,10 +224,9 @@ api.get('/summary', (req, res) => memoJson(req, res, 'summary', (snap) => {
   for (const v of osVms) {
     const f = osFamily(v.guestOS);
     osDist[f] = (osDist[f] || 0) + 1;
-    const a = osAlloc[f] || (osAlloc[f] = { name: f, vms: 0, vcpu: 0, ramMB: 0, diskGB: 0, storageUnknown: 0 });
+    const a = osAlloc[f] || (osAlloc[f] = { name: f, vms: 0, sum: newVmSum(), diskGB: 0, storageUnknown: 0 });
     a.vms += 1;
-    a.vcpu += v.cpuCount || 0;
-    a.ramMB += v.memMB || 0;
+    vmSumAdd(a.sum, v);                                // v3.19.2: 못 읽은 cpuCount · memMB 는 합에서 빼고 센다(템플릿은 위 kind 필터가 정한다)
     const sg = numOrNull(v.storageGB);                 // v2.727(C-01): null 은 합에서 빼고 센다
     if (sg == null) a.storageUnknown += 1; else a.diskGB += sg;
   }
@@ -232,15 +237,18 @@ api.get('/summary', (req, res) => memoJson(req, res, 'summary', (snap) => {
   // vCenter마다 hosts/vms/datastores 전체를 재필터하면 O(vCenter×N)이라 28×5,800으로 커진다.
   // 호스트/VM/DS를 vcenterId 기준으로 '1회' 그룹핑(O(N))한 뒤 누적한다(롤업 규칙).
   const acc = new Map(); // vcId -> { hosts, vms, vmsOn, cpuCores, memMB, dsCapGB, dsUnknown, vcpu, ramMB, provGB, powerW }
-  const bucket = (id) => { let b = acc.get(id); if (!b) { b = { hosts: 0, vms: 0, vmsOn: 0, cpuCores: 0, memMB: 0, dsCapGB: 0, dsCapAllGB: 0, dsUnknown: 0, vcpu: 0, ramMB: 0, provGB: 0, storageUnknown: 0, powerW: 0, powerN: 0 }; acc.set(id, b); } return b; };
-  for (const h of hosts) { const b = bucket(h.vcenterId); b.hosts++; b.cpuCores += h.cpuCores || 0; b.memMB += h.memTotalMB || 0; if (h.powerWatts > 0) { b.powerW += h.powerWatts; b.powerN++; } }
-  // v2.727(C-01): provGB 는 읽은 VM 만, 못 읽은 수는 storageUnknown.
-  for (const v of vms) { const b = bucket(v.vcenterId); b.vms++; if (v.powerState === 'POWERED_ON') b.vmsOn++; b.vcpu += v.cpuCount || 0; b.ramMB += v.memMB || 0; const sg = numOrNull(v.storageGB); if (sg == null) b.storageUnknown++; else b.provGB += sg; }
+  const bucket = (id) => { let b = acc.get(id); if (!b) { b = { hosts: 0, vms: 0, vmsOn: 0, cpuCores: 0, memMB: 0, dsCapGB: 0, dsCapAllGB: 0, dsUnknown: 0, vm: newVmSum(), provGB: 0, storageUnknown: 0, powerW: 0, powerN: 0, capUnknown: 0 }; acc.set(id, b); } return b; };
+  // 2차 공통 기능 점검 10회차: vCenter 별로도 전체 합계(v2.771 R6-F3-2 hostsCapacityUnknown)와 같은 판정으로 '용량을 못 읽은 호스트' 를 센다.
+  //   예전엔 그 수를 싣지 않아 Summary 의 vCenter 별 가상화율(할당 ÷ 물리)이 분모만 빠진 부분 합으로 부풀었다. 합(cpuCores · memTotalGB)은 예전 그대로(공개 API 대조 계약).
+  for (const h of hosts) { const b = bucket(h.vcenterId); b.hosts++; b.cpuCores += h.cpuCores || 0; b.memMB += h.memTotalMB || 0; if (!hostCapacityKnown(h)) b.capUnknown++; if (h.powerWatts > 0) { b.powerW += h.powerWatts; b.powerN++; } }
+  // v2.727(C-01): provGB 는 읽은 VM 만, 못 읽은 수는 storageUnknown. v3.19.2: vCPU · 메모리도 같은 규칙 — 코어 vmSumAdd(못 읽은 수는 b.vm.vcpuUnknown · memUnknown).
+  for (const v of vms) { const b = bucket(v.vcenterId); b.vms++; if (v.powerState === 'POWERED_ON') b.vmsOn++; vmSumAdd(b.vm, v); const sg = numOrNull(v.storageGB); if (sg == null) b.storageUnknown++; else b.provGB += sg; }
   // v2.631(AX2-01): vCenter 카드(롤업 storageTotalTB)와 같은 기준 — 사용량 미상 DS 는 용량에서 빼고 개수를 싣는다.
   //   v2.632(AX1-2632-04·WEB2632-01): 설치 용량 전체(미상 DS 포함)는 storageTotalTBAll 로 따로 싣는다 — 프로비저닝 비교는 그 값을 쓴다.
   for (const d of datastores) { const b = bucket(d.vcenterId); b.dsCapAllGB += d.capacityGB || 0; if (dsUsageReadable(d)) b.dsCapGB += d.capacityGB || 0; else if (dsUsageUnknownOf(d)) b.dsUnknown++; }
   const byVcenter = vcenters.map((vc) => {
     const b = acc.get(vc.id) || bucket(vc.id);
+    const vmAl = vmAllocOf(b.vm);                         // v3.19.2: VM 이 있는데 하나도 못 읽었으면 null(0 이 아니다)
     return {
       id: vc.id, name: vc.name, region: vc.location?.region, status: vc.status,
       hosts: b.hosts,
@@ -248,11 +256,14 @@ api.get('/summary', (req, res) => memoJson(req, res, 'summary', (snap) => {
       vmsPoweredOn: b.vmsOn,
       cpuCores: b.cpuCores,
       memTotalGB: round(b.memMB / 1024),
+      hostsCapacityUnknown: b.capUnknown,                 // 2차 공통 기능 점검 10회차: 용량을 못 읽어 cpuCores · memTotalGB 에서 뺀 호스트 수
       storageTotalTB: round(b.dsCapGB / 1024, 1),
       storageTotalTBAll: round(b.dsCapAllGB / 1024, 1),   // 미상 DS 포함 설치 용량(프로비저닝 비교용)
       datastoresUsageUnknown: b.dsUnknown,
-      vcpuAllocated: b.vcpu,
-      ramAllocatedGB: round(b.ramMB / 1024),
+      vcpuAllocated: vmAl.vcpu,                           // 읽은 VM 만의 합(vcpuUnknown > 0 이면 부분 합 — 최소값) · 전부 못 읽으면 null
+      ramAllocatedGB: vmAl.memMB == null ? null : round(vmAl.memMB / 1024),
+      vcpuUnknown: b.vm.vcpuUnknown,                      // v3.19.2: vCPU 를 못 읽어 vcpuAllocated 에서 뺀 VM 수(템플릿 포함)
+      ramUnknown: b.vm.memUnknown,                        // v3.19.2: 메모리를 못 읽어 ramAllocatedGB 에서 뺀 VM 수
       provisionedTB: round(b.provGB / 1024, 1),
       vmStorageUnknown: b.storageUnknown,                 // v2.727(C-01): 용량을 못 읽어 provisionedTB 에서 뺀 VM 수
       // v2.720(감사 B1-04): 전력을 보고한 호스트가 0대면 0 kW 가 아니라 null(측정 없음) — store.powerOf 와 같은 규칙.
@@ -315,26 +326,31 @@ api.get('/summary', (req, res) => memoJson(req, res, 'summary', (snap) => {
       annualMwh: round((powerWatts * 24 * 365) / 1e9, 1),
     },
     allocation: {
-      vcpuAllocated: vmVcpu,
-      ramAllocatedGB: round(vmRamMB / 1024),
+      vcpuAllocated: vmVcpu,                              // v3.19.2: 읽은 VM 만의 합 · VM 이 있는데 하나도 못 읽었으면 null
+      ramAllocatedGB: vmRamMB == null ? null : round(vmRamMB / 1024),
+      vcpuUnknown: vmAllSum.vcpuUnknown,                  // v3.19.2: vCPU 를 못 읽어 합에서 뺀 VM 수(공개 API vmVcpuUnknown 과 같은 수)
+      ramUnknown: vmAllSum.memUnknown,                    // v3.19.2: 메모리를 못 읽어 합에서 뺀 VM 수(공개 API vmRamUnknown)
       provisionedStorageTB: round(vmProvGB / 1024, 1),
       vmStorageUnknown,                                   // v2.727(C-01): 용량을 못 읽어 provisionedStorageTB 에서 뺀 VM 수
       // Overcommit: allocated vCPU / physical cores, allocated RAM / physical RAM
-      vcpuPerCore: hostsCapacityUnknown > 0 ? null : cpuCores > 0 ? round(vmVcpu / cpuCores, 2) : 0,
-      ramOvercommitPct: hostsCapacityUnknown > 0 ? null : memTotalMB > 0 ? Math.round((vmRamMB / memTotalMB) * 100) : 0,
+      //   v3.19.2: 분자(할당 합)를 하나도 못 읽었으면 비율도 null. 일부만 못 읽었으면 읽은 값으로 낸 최소값이다(화면이 vcpuUnknown · ramUnknown 으로 '≥' 를 붙인다).
+      vcpuPerCore: hostsCapacityUnknown > 0 || vmVcpu == null ? null : cpuCores > 0 ? round(vmVcpu / cpuCores, 2) : 0,
+      ramOvercommitPct: hostsCapacityUnknown > 0 || vmRamMB == null ? null : memTotalMB > 0 ? Math.round((vmRamMB / memTotalMB) * 100) : 0,
       hostsCapacityUnknown,                               // v2.771(R6-F3-2): 용량을 못 읽은 호스트 수(있으면 위 두 비율은 null)
       avgVmPerHost: hosts.length > 0 ? round(vms.length / hosts.length, 1) : 0,
     },
     osDistribution: Object.entries(osDist).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value),
-    osAllocation: Object.values(osAlloc).map((a) => ({
+    osAllocation: Object.values(osAlloc).map((a) => { const al = vmAllocOf(a.sum); return {
       name: a.name,
       vms: a.vms,
-      vcpu: a.vcpu,
-      ramGB: round(a.ramMB / 1024),
+      vcpu: al.vcpu,                                    // v3.19.2: 읽은 VM 만의 합 · 그 OS 의 VM 을 하나도 못 읽었으면 null
+      ramGB: al.memMB == null ? null : round(al.memMB / 1024),
+      vcpuUnknown: a.sum.vcpuUnknown,                   // v3.19.2: vCPU 를 못 읽어 vcpu 에서 뺀 VM 수
+      ramUnknown: a.sum.memUnknown,                     // v3.19.2: 메모리를 못 읽어 ramGB 에서 뺀 VM 수
       diskGB: a.diskGB,
       diskTB: round(a.diskGB / 1024, 1),
       storageUnknown: a.storageUnknown,                 // v2.727(C-01)
-    })).sort((a, b) => b.vcpu - a.vcpu),
+    }; }).sort((a, b) => (b.vcpu ?? -1) - (a.vcpu ?? -1)),   // 못 읽은 행(null)은 뒤로
     byVcenter,
   };
   // 본문은 applyFilters(req.user)로 스코프되지만 memoJson 캐시 키에 scope 서명이 없으면 무제한
@@ -359,12 +375,17 @@ api.get('/hosts', invHosts, (req, res) => memoJson(req, res, 'inv:hosts', (snap)
   // in-scope 호스트에 올라간 VM 만 한 번에 골라 vCPU·메모리 할당을 합산한다((vcenterId, host) 키 —
   // 동명 호스트가 여러 사이트에 있어도 섞이지 않게).
   const hostVms = snap.vms.filter((v) => hostKeys.has(`${v.vcenterId}\t${v.host}`));
-  const vcoreAllocated = hostVms.reduce((a, v) => a + (v.cpuCount || 0), 0);
-  const vmemAllocatedMB = hostVms.reduce((a, v) => a + (v.memMB || 0), 0);
+  // v3.19.0: 합은 점검 표 · 법인별 보기와 같은 판정 코어(vcenter/hostChecks.js vmSumsOf) — 템플릿은 세지 않고, 못 읽은
+  //   cpuCount · memMB 는 0 으로 더하지 않고 따로 센다(예전 `v.cpuCount || 0` 은 템플릿까지 더해 같은 범위의 vCore 비율이 화면마다 달랐다).
+  const vmSum = vmSumsOf(hostVms);
+  //   VM 이 있는데 하나도 못 읽었으면 0 이 아니라 모름(null) — 판정은 vmAllocOf 하나(v3.19.1 — 법인별 · 호스트 엑셀과 같은 함수).
+  const { vcpu: vcoreAllocated, memMB: vmemAllocatedMB } = vmAllocOf(vmSum);
   const verMap = {};
   for (const h of hosts) { const v = h.version || 'unknown'; verMap[v] = (verMap[v] || 0) + 1; }
   const physicalCores = sm((h) => h.cpuCores);
   const physicalMemMB = sm((h) => h.memTotalMB);
+  // 54회차(다른 세션 9 · 10회차 반증 — 재현): 용량을 못 읽은 호스트가 있으면 비율의 분모가 부분 합이다 — 알림 · Summary 와 같은 판정(hostCapacityKnown)으로 비율을 내지 않는다
+  const hostsCapacityUnknown = hosts.filter((h) => !hostCapacityKnown(h)).length;
   const summary = {
     total: hosts.length,
     connected: hosts.filter((h) => h.connectionState === 'CONNECTED').length,
@@ -375,17 +396,21 @@ api.get('/hosts', invHosts, (req, res) => memoJson(req, res, 'inv:hosts', (snap)
     poweredOff: hosts.filter((h) => h.powerState && h.powerState !== 'POWERED_ON').length,
     physicalCores,
     logicalCores: sm((h) => h.cpuThreads || h.cpuCores),
-    vcoreAllocated,
-    vcorePerCore: physicalCores > 0 ? Math.round((vcoreAllocated / physicalCores) * 100) / 100 : 0,
+    vcoreAllocated,                                     // 읽은 VM 만의 합(vcpuUnknown > 0 이면 부분 합 — 최소값)
+    vcpuUnknown: vmSum.vcpuUnknown,                      // v3.19.0: vCPU 를 못 읽어 vcoreAllocated 에서 뺀 VM 수(템플릿 제외)
+    vcorePerCore: hostsCapacityUnknown ? null : vcoreAllocated == null ? null : physicalCores > 0 ? Math.round((vcoreAllocated / physicalCores) * 100) / 100 : 0,
+    hostsCapacityUnknown,
     memTotalGB: Math.round(physicalMemMB / 1024),
     // 메모리 가상화율(오버커밋) = 할당된 VM 메모리 합 / 물리 호스트 메모리 합. 1.0 초과면 오버커밋.
-    vmemAllocatedGB: Math.round(vmemAllocatedMB / 1024),
-    memOvercommit: physicalMemMB > 0 ? Math.round((vmemAllocatedMB / physicalMemMB) * 100) / 100 : 0,
+    vmemAllocatedGB: vmemAllocatedMB == null ? null : Math.round(vmemAllocatedMB / 1024),
+    vmemUnknown: vmSum.memUnknown,                       // v3.19.0: 메모리를 못 읽어 vmemAllocatedGB · memOvercommit 에서 뺀 VM 수(호스트 메모리가 아니다)
+    memOvercommit: hostsCapacityUnknown ? null : vmemAllocatedMB == null ? null : physicalMemMB > 0 ? Math.round((vmemAllocatedMB / physicalMemMB) * 100) / 100 : 0,
     powerKw: Math.round(sm((h) => h.powerWatts) / 100) / 10,
     esxiVersions: Object.entries(verMap).map(([version, count]) => ({ version, count })).sort((a, b) => b.count - a.count),
   };
   return { total: hosts.length, items: hosts, summary };
-}, { extraKey: scopeKey(req.user, store.get()) }));
+  // v3.20.0: 고른 법인 목록(정규화)도 키에 — URL 이 이미 다르지만 '범위 · 고른 법인' 을 키에서 바로 읽게 한다.
+}, { extraKey: `${scopeKey(req.user, store.get())}|${vcenterPickKey(req.query, store.get())}` }));
 
 /** 요청의 원문 쿼리 문자열('?' 뒤) — 없으면 ''. 정규화기를 거치기 전 모양을 보기 위한 것이다. */
 function rawQueryOf(req) {
@@ -449,7 +474,7 @@ api.get('/vms', invVms, (req, res) => {
   const items = list.slice(0, limit);
   // 예전 응답에는 이어 받는 방법이 없다(nextCursor:null) — 나머지는 paged=1 로 다시 요청한다.
   return { total: list.length, items: withSig(items), totals, returned: items.length, hasMore: list.length > items.length, nextCursor: null, snapshotAt, ...extra };
-}, { extraKey: `${scopeKey(req.user, store.get())}${useSig ? `|h${sig.rev}` : ''}` });
+}, { extraKey: `${scopeKey(req.user, store.get())}|${vcenterPickKey(req.query, store.get())}${useSig ? `|h${sig.rev}` : ''}` });
 });
 
 // v2.909(가상화 서버 허브 · 시안 ③): 법인(vCenter)별 VM 집계. /vms 와 같은 범위·필터(matchVms — 패널·GPU·신호 선택은 빼고).
@@ -462,15 +487,35 @@ api.get('/vms/by-vcenter', invVms, (req, res) => {
     const q0 = { ...req.query };
     for (const k of [...FACET_STRIP_KEYS, 'signal', 'signals']) delete q0[k];
     const { vms } = matchVms(snap, q0, req.user);
-    const vcId = typeof req.query.vcenterId === 'string' && req.query.vcenterId ? req.query.vcenterId : null;
+    // v3.20.0: 고른 법인(vcenterId 하나 또는 vcenterIds 목록 — shared.js vcenterPickOf). 범위가 먼저 · 범위 밖만 고르면 0곳.
+    const pick = vcenterPickOf(req.query, snap);
     const region = typeof req.query.region === 'string' && req.query.region ? req.query.region : null;
     const vcenters = (snap.vcenters || [])
       .filter((v) => !allowed || allowed.has(v.id))
-      .filter((v) => !vcId || v.id === vcId)
+      .filter((v) => !pick || pick.has(v.id))
       .filter((v) => !region || v.location?.region === region);
     const narrowed = !!(req.query.q || req.query.powerState || req.query.os || req.query.host || req.query.toolsStatus);
     const r = vmByVcenter({ vcenters, vms, ctx: sig.ctx, dropEmpty: narrowed });
     return { ok: true, ...r, snapAgeDays: sig.ctx?.hygiene?.snapAgeDays ?? null, snapshotAt: snap.generatedAt ?? null, initial: snap.initial === true };
+  }, { ttlMs: 30_000, extraKey: `${scopeKey(req.user, store.get())}|${vcenterPickKey(req.query, store.get())}|h${sig.rev}` });
+});
+
+// v3.21.0 VM 탭 '분석' 보기(설계 docs/design/vm-insight · 집계 inventory/vmInsight.js) — 법인(vCenter)마다 한 줄 + 법인마다 상위 N.
+//   화면이 바로가기에서 고른 법인의 줄을 더한다(선택을 바꿀 때 서버 왕복이 없다) — 그래서 vcenterId · vcenterIds 는 **받지 않는다**(법인별 줄을 다 준다).
+//   범위(scope)가 먼저 · region 쿼리는 그 안에서 리전만 남긴다. 판정은 새로 하지 않는다(신호 · 스냅샷 기준은 VM 구성 점검 설정 — 캐시 키에 개정).
+//   상시 폴링 경로: memoJson + 범위 키(응답에 역할 · 권한에 따라 다른 칸이 없어 역할은 키에 넣지 않는다 — /vms/by-vcenter 와 같은 꼴) · VM 사이 시간 기준 양보.
+api.get('/vms/insight', invVms, (req, res) => {
+  const sig = vmSignalCtx();
+  return memoJson(req, res, 'inv:vms-insight', async (snap) => {
+    const allowed = scopedVcenterIds(req.user, snap);
+    const region = typeof req.query.region === 'string' && req.query.region ? req.query.region : null;
+    const vcenters = (snap.vcenters || [])
+      .filter((v) => v && (!allowed || allowed.has(v.id)))
+      .filter((v) => !region || v.location?.region === region);
+    const regionIds = region ? new Set(vcenters.map((v) => v.id)) : null;
+    const vms = (snap.vms || []).filter((v) => v && (!allowed || allowed.has(v.vcenterId)) && (!regionIds || regionIds.has(v.vcenterId)));
+    const r = await vmInsightOf({ vcenters, vms, ctx: sig.ctx, unlisted: !region, yielder: createYielder(15) });
+    return { ok: true, generatedAt: snap.generatedAt ?? null, initial: snap.initial === true, region, ...r };
   }, { ttlMs: 30_000, extraKey: `${scopeKey(req.user, store.get())}|h${sig.rev}` });
 });
 
@@ -502,7 +547,39 @@ api.get('/vms/lookup', invVms, (req, res) => {
     const n = String(name).toLowerCase();
     vm = vms.find((v) => (v.name || '').toLowerCase() === n) || vms.find((v) => (v.name || '').toLowerCase().includes(n));
   }
+  // v2.963: signals=1 — VM 상세 드로어가 목록 없이 열렸을 때(알람 · 탐색 · VmLink · 호스트 전체 페이지 …) 신호를 한 번에 받는다.
+  //   판정은 /vms 와 같은 vmSignalsOf + 같은 문맥(vm-hygiene 설정) — 새 기준 없음. 원본 스냅샷 객체는 바꾸지 않는다(사본에 싣는다).
+  if (vm && (req.query.signals === '1' || req.query.signals === 'true')) {
+    const sig = vmSignalCtx();
+    return res.json({ vm: { ...vm, signals: vmSignalsOf(vm, sig.ctx) }, snapAgeDays: sig.ctx?.hygiene?.snapAgeDays ?? null });
+  }
   res.json({ vm: vm || null });
+});
+
+// v2.915 '서버 › 가상화 플랫폼' 허브(설계 docs/design/virt-platform-menu) — 엔티티 탭 배지 · 바로가기 칩 숫자를 한 응답으로(inventory/platformSummary.js).
+//   범위(scope)가 먼저이고 요청 region · vcenterId 는 그 안에서 좁힐 뿐이다. 호스트 · VM 칸은 그 권한(inv.hosts · inv.vms)이 있을 때만 싣는다(없으면 null — 화면은 '—').
+//   캐시 키에 범위 · 두 권한 · VM 구성 점검 설정 개정(신호 판정)을 넣는다. 30초 — 탭 배지를 위해 무거운 집계를 15초마다 다시 돌리지 않는다.
+api.get('/platform/summary', (req, res) => {
+  const sig = vmSignalCtx();
+  const canHosts = userHasPermission(req.user, 'inv.hosts');
+  const canVms = userHasPermission(req.user, 'inv.vms');
+  return memoJson(req, res, 'platform:summary', (snap) => {
+    const allowed = scopedVcenterIds(req.user, snap);
+    // v3.20.0(허브 복수 법인): 칩 숫자를 위해 byVc 는 고른 법인과 무관하게 (범위 ∩ 리전) 의 전체 줄이고, totals 는 고른 법인
+    //   (vcenterId 하나 또는 vcenterIds 목록 — shared.js vcenterPickOf)의 합이다. 예전에는 하나를 고르면 byVc 도 그 줄만 남아 다른 칩 숫자가 사라졌다.
+    //   범위가 먼저다 — byVc 에 범위 밖 법인은 이름도 없고, 범위 밖 id 만 고르면 totals 는 0건(전체가 아니다).
+    const pick = vcenterPickOf(req.query, snap);
+    const region = typeof req.query.region === 'string' && req.query.region ? req.query.region : null;
+    // 법인 줄은 /vcenters 와 같은 롤업 사이트(metrics — 알람 수 · 상태 · 낡은 값)에서 — 없으면(첫 병합 전) 등록 목록
+    const vcenters = (Array.isArray(snap.rollups?.sites) && snap.rollups.sites.length ? snap.rollups.sites : (snap.vcenters || []))
+      .filter((v) => !allowed || allowed.has(v.id))
+      .filter((v) => !region || v.location?.region === region);
+    const ids = new Set(vcenters.map((v) => v.id));
+    const hosts = canHosts ? (snap.hosts || []).filter((h) => ids.has(h.vcenterId)) : null;
+    const vms = canVms ? (snap.vms || []).filter((v) => ids.has(v.vcenterId)) : null;
+    const r = platformSummaryOf({ vcenters, hosts, vms, ctx: sig.ctx, readable: usageReadable, staleOf: siteInventoryStale, pick });
+    return { ok: true, ...r, generatedAt: snap.generatedAt ?? null, initial: snap.initial === true, snapAgeDays: sig.ctx?.hygiene?.snapAgeDays ?? null };
+  }, { ttlMs: 30_000, extraKey: `${scopeKey(req.user, store.get())}|${vcenterPickKey(req.query, store.get())}|h${sig.rev}|p${canHosts ? 1 : 0}${canVms ? 1 : 0}` });
 });
 
 api.get('/datastores', invDs, (req, res) => memoJson(req, res, 'inv:datastores', (snap) => {
@@ -620,7 +697,7 @@ api.post('/alarm-mutes', requireRole('admin', 'operator'), requirePerm('inv.alar
   if (issue) return res.status(403).json({ error: 'forbidden', reason: issue });
   const result = addMute(body);
   if (result.ok) store.refresh().catch(() => {}); // re-apply immediately
-  return res.status(result.ok ? 200 : 400).json(result);
+  return res.status(result.ok ? 200 : result.status === 409 ? 409 : 400).json(result);   // 103회차 F13: 읽기 오류 중 409
 });
 api.delete('/alarm-mutes/:id', requireRole('admin', 'operator'), requirePerm('inv.alarms'), auditMiddleware, (req, res) => {
   // req.params.id는 Express가 이미 1회 URL 디코드한 값 — 추가 decodeURIComponent는 이중
@@ -630,7 +707,7 @@ api.delete('/alarm-mutes/:id', requireRole('admin', 'operator'), requirePerm('in
   if (issue) return res.status(403).json({ error: 'forbidden', reason: issue });
   const result = removeMute(req.params.id);
   if (result.ok) store.refresh().catch(() => {});
-  return res.status(result.ok ? 200 : 404).json(result);
+  return res.status(result.ok ? 200 : result.status === 409 ? 409 : 404).json(result);
 });
 
 // 특수 기능 사용 빈도 — 자주 쓰는 메뉴 자동 추천. 모든 로그인 사용자 합산 집계.

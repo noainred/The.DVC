@@ -9,12 +9,14 @@
  *  - stdin 은 닫는다(입력 대기로 매달리지 않게).
  *  - 환경: PATH 최소 + LANG=C(출력 파싱·표시 안정).
  */
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { spawn } from 'node:child_process';
+import { StringDecoder } from 'node:string_decoder';
 import net from 'node:net';
 import dgram from 'node:dgram';
 import os from 'node:os';
 
-export const DEFAULT_MAX_OUTPUT = Number(process.env.RMA_MAX_OUTPUT) || 256 * 1024;
+export const DEFAULT_MAX_OUTPUT = envPositive(process.env.RMA_MAX_OUTPUT, 256 * 1024);
 
 const SAFE_ENV = { PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', LANG: 'C', LC_ALL: 'C', HOME: process.env.HOME || '/tmp' };
 
@@ -49,10 +51,11 @@ export function tcpSend(host, port, data = '', timeoutMs = 10_000) {
   return new Promise((resolve) => {
     const sock = net.connect({ host, port: Number(port) });
     let out = ''; let done = false;
+    const dec = new StringDecoder('utf8');   // 157회차(재현): TCP 조각 경계에 걸린 여러 바이트 글자(한글 응답)가 조각마다 toString() 에서 깨졌다 — runCommand 와 같이 잇는다
     const fin = (ok, reason) => { if (done) return; done = true; try { sock.destroy(); } catch { /* */ } resolve({ ok, exitCode: ok ? 0 : 1, stdout: out, stderr: ok ? '' : `${reason}\n`, durationMs: Date.now() - t0, timedOut: false, truncated: false }); };
     sock.setTimeout(Math.max(500, timeoutMs));
     sock.once('connect', () => { if (data) sock.write(data.replace(/\\n/g, '\n').replace(/\\r/g, '\r')); setTimeout(() => fin(true), 2000).unref?.(); });
-    sock.on('data', (b) => { out += b.toString('utf8'); if (out.length > 4096) { out = out.slice(0, 4096); fin(true); } });
+    sock.on('data', (b) => { out += dec.write(b); if (out.length > 4096) { out = out.slice(0, 4096); fin(true); } });
     sock.once('end', () => fin(true));
     sock.once('timeout', () => fin(!!out, 'timeout')); sock.once('error', (e) => fin(false, e?.code || e?.message));
   });
@@ -121,14 +124,17 @@ export function runCommand(spec, { maxOutput = DEFAULT_MAX_OUTPUT } = {}) {
       return resolve({ ok: false, exitCode: null, signal: null, stdout: '', stderr: `spawn 실패: ${e.message}\n`, durationMs: Date.now() - t0, timedOut: false, truncated: false, reason: e.message });
     }
     let out = '', err = '', bytes = 0, truncated = false, timedOut = false, finished = false;
+    // 152회차(재현): 청크마다 toString() 하면 여러 바이트 글자(한글 폴더 이름 · 로그 글)가 파이프 청크 경계에 걸릴 때 깨진다(U+FFFD) —
+    //   du-top 2만 줄(1.2MB)에서 9줄의 폴더 이름이 깨져 폴더 사용량이 없는 이름을 기록했다(경계는 주기마다 달라진다). StringDecoder 로 잇는다.
+    const decOut = new StringDecoder('utf8'); const decErr = new StringDecoder('utf8');
     const killGroup = (sig) => { try { process.kill(-child.pid, sig); } catch { try { child.kill(sig); } catch { /* */ } } };
     const onData = (which) => (buf) => {
       bytes += buf.length;
       if (bytes > maxOutput) {
-        if (!truncated) { truncated = true; const room = Math.max(0, maxOutput - (bytes - buf.length)); if (which === 'out') out += buf.subarray(0, room).toString(); else err += buf.subarray(0, room).toString(); killGroup('SIGTERM'); }
+        if (!truncated) { truncated = true; const room = Math.max(0, maxOutput - (bytes - buf.length)); if (which === 'out') out += decOut.write(buf.subarray(0, room)); else err += decErr.write(buf.subarray(0, room)); killGroup('SIGTERM'); }
         return;
       }
-      if (which === 'out') out += buf.toString(); else err += buf.toString();
+      if (which === 'out') out += decOut.write(buf); else err += decErr.write(buf);
     };
     child.stdout.on('data', onData('out'));
     child.stderr.on('data', onData('err'));
@@ -136,6 +142,7 @@ export function runCommand(spec, { maxOutput = DEFAULT_MAX_OUTPUT } = {}) {
     const finish = (code, signal, spawnErr) => {
       if (finished) return; finished = true;
       clearTimeout(timer);
+      if (!truncated) { out += decOut.end(); err += decErr.end(); }   // 상한에서 자른 출력에는 끊긴 글자 조각을 붙이지 않는다
       const { text, clipped } = clipLines(out, spec.maxLines);
       const ok = !spawnErr && !timedOut && !truncated && code === 0;
       const reason = spawnErr ? `실행 실패: ${spawnErr.code === 'ENOENT' ? `'${spec.argv?.[0]}' 명령이 이 엣지에 없습니다` : spawnErr.message}`

@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>디스크 오류 이력 점검 — 목록 400px</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0}
+.muted{color:#8b9bb4}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.sm{font-size:11.5px;color:#8b9bb4}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:36px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+.btn.pri{background:#3b82f6;border-color:#3b82f6;color:#ffffff}
+.btn.sm{min-height:28px;padding:0 10px;font-size:12px;color:#e6edf6}
+.chip{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:0 10px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#aebbd0;font:inherit;font-size:12px;font-weight:700;white-space:nowrap}
+.chip.on{background:#e6edf6;border-color:#e6edf6;color:#0a0e17}
+.tag{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap;box-sizing:border-box}
+.tag.bad{background:rgba(239,68,68,.16);color:#fca5a5}
+.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}
+.tag.unk{background:rgba(139,155,180,.14);color:#aebbd0}
+.tag.run{background:rgba(59,130,246,.18);color:#93c5fd}
+.tag.fail{border:1px dashed #f87171;color:#fca5a5}
+table{border-collapse:collapse;width:100%}
+th{font-size:12px;font-weight:600;color:#8b9bb4;text-align:left;padding:9px 10px;background:#0f1626;border-bottom:1px solid #243049;white-space:nowrap}
+td{padding:9px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-space:nowrap;font-size:12.5px}
+th.r,td.r{text-align:right}
+td.num{font-variant-numeric:tabular-nums;font-weight:600}
+td.hot{color:#fca5a5;font-weight:800}
+td.amb{color:#fcd34d;font-weight:800}
+td.zero{color:#8b9bb4;font-weight:400}
+.kpi{padding:12px;display:flex;flex-direction:column;gap:3px;min-width:0}
+.kpi .big{font-size:22px;font-weight:800;line-height:1.15}
+input[type=checkbox]{width:15px;height:15px;accent-color:#3b82f6;margin:0;vertical-align:middle}
+</style>
+</helmet>
+<div style="width:400px;height:1340px;box-sizing:border-box;padding:14px 12px 24px;display:flex;flex-direction:column;gap:12px;background:#0a0e17;overflow:hidden">
+
+<nav aria-label="위치" class="sm" style="display:flex;gap:6px;flex-wrap:wrap"><a href="#tools" style="text-decoration:none">특수기능</a><span>›</span><span>서버</span></nav>
+
+<header style="display:flex;flex-direction:column;gap:6px">
+<h1 style="margin:0;font-size:19px;font-weight:800">디스크 오류 이력 점검</h1>
+<p class="muted" style="margin:0">RHEL 서버의 로그 · SMART · RAID 기록에서 매체 오류(배드 섹터) 흔적을 찾습니다. 서버에서는 읽기만 합니다.</p>
+</header>
+
+<div style="display:flex;gap:8px;flex-wrap:wrap">
+<button class="btn pri" type="button" style="flex:1 1 180px">선택한 서버 점검 (3)</button>
+<button class="btn" type="button" style="flex:1 1 150px">전 법인 점검 (12대)</button>
+<button class="btn" type="button" style="flex:1 1 120px">목록 내려받기</button>
+</div>
+
+<div role="group" aria-label="보기" style="display:flex;padding:3px;border-radius:10px;background:#0f1626;border:1px solid #243049;gap:2px">
+<a href="Corps.dc.html" style="flex:1 1 0;display:inline-flex;align-items:center;justify-content:center;min-height:34px;border-radius:7px;text-decoration:none;color:#aebbd0;font-weight:700">법인 요약</a>
+<a href="Main.dc.html" aria-current="page" style="flex:1 1 0;display:inline-flex;align-items:center;justify-content:center;min-height:34px;border-radius:7px;text-decoration:none;background:#3b82f6;color:#ffffff;font-weight:700">서버 목록</a>
+</div>
+
+<div class="card" style="padding:10px 12px;border-color:#2b4a86;background:rgba(59,130,246,.08);display:flex;flex-direction:column;gap:2px">
+<span style="font-weight:700">점검 중 1대 · 대기 1대</span>
+<span class="sm">in-erp-01 — RAID 컨트롤러 조회 · 2분 10초째</span>
+</div>
+
+<section aria-label="요약" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">
+<div class="card kpi"><span class="sm">점검 대상</span><span class="big">12대</span></div>
+<div class="card kpi" style="border-color:#5b2a33"><span class="sm">매체 오류 서버</span><span class="big" style="color:#fca5a5">3대</span></div>
+<div class="card kpi"><span class="sm">오류 디스크 장착 중</span><span class="big" style="color:#fca5a5">2개</span></div>
+<div class="card kpi"><span class="sm">포맷 후 재사용 추정</span><span class="big" style="color:#fcd34d">1개</span></div>
+<div class="card kpi" style="grid-column:1 / -1"><span class="sm">결과가 없는 서버</span><span class="big">3대 <span class="sm" style="font-weight:400">실패 2 · 안 함 1</span></span></div>
+</section>
+
+<section class="card" style="display:flex;flex-direction:column">
+<div style="display:flex;gap:6px;flex-wrap:wrap;padding:10px">
+<button class="chip on" type="button">전체 12</button>
+<button class="chip" type="button">매체 오류 3</button>
+<button class="chip" type="button">재할당 1</button>
+<button class="chip" type="button">I/O·경로 1</button>
+<button class="chip" type="button">미검출 2</button>
+<button class="chip" type="button">점검 중·대기 2</button>
+<button class="chip" type="button">실패·안 함 3</button>
+</div>
+<div style="padding:0 10px 10px;display:flex;gap:8px;flex-wrap:wrap">
+<select aria-label="법인" style="flex:1 1 120px;min-width:0;height:36px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit;font-size:12.5px;padding:0 10px"><option>전체 법인</option></select>
+<input type="search" aria-label="서버 검색" placeholder="서버 · 주소 · 시리얼" style="flex:2 1 160px;min-width:0;height:36px;box-sizing:border-box;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit;font-size:12.5px;padding:0 10px">
+</div>
+<div class="sm" style="padding:0 10px 6px">좁은 화면에서는 법인 탭이 고르기 상자로 바뀝니다 · 표는 옆으로 밀어 봅니다 →</div>
+<div style="overflow-x:auto;border-top:1px solid #1f2a40">
+<table style="min-width:860px">
+<thead><tr><th style="width:30px"><input type="checkbox" aria-label="모두 선택"></th><th>서버</th><th>판정</th><th class="r">매체</th><th class="r">재할당</th><th class="r">I/O</th><th>오류가 기록된 디스크</th><th class="r">누락</th><th>마지막 점검</th></tr></thead>
+<tbody>
+<tr><td><input type="checkbox" aria-label="kr-ora-db01 선택"></td><td><a href="Detail.dc.html" style="font-weight:700;text-decoration:none">kr-ora-db01</a><div class="sm">한국 본사</div></td><td><span class="tag bad">매체 오류</span></td><td class="r num hot">14</td><td class="r num amb">2</td><td class="r num">31</td><td>1개 · 장착 중</td><td class="r num">1</td><td>11-14 15:52</td></tr>
+<tr><td><input type="checkbox" aria-label="pl-bkp-sd01 선택"></td><td><a href="Detail.dc.html" style="font-weight:700;text-decoration:none">pl-bkp-sd01</a><div class="sm">폴란드</div></td><td><span class="tag bad">매체 오류</span></td><td class="r num hot">6</td><td class="r num zero">0</td><td class="r num">8</td><td>1개 · 장착 중</td><td class="r num zero">0</td><td>11-14 15:40</td></tr>
+<tr><td><input type="checkbox" aria-label="use-log-02 선택"></td><td><a href="Detail.dc.html" style="font-weight:700;text-decoration:none">use-log-02</a><div class="sm">미국 동부</div></td><td><span class="tag bad">매체 오류</span></td><td class="r num hot">3</td><td class="r num amb">1</td><td class="r num zero">0</td><td>1개 · 인벤토리에 없음</td><td class="r num">2</td><td>11-13 09:12</td></tr>
+<tr><td><input type="checkbox" aria-label="kr-nfs-02 선택"></td><td><a href="Detail.dc.html" style="font-weight:700;text-decoration:none">kr-nfs-02</a><div class="sm">한국 본사</div></td><td><span class="tag warn">재할당</span></td><td class="r num zero">0</td><td class="r num amb">2</td><td class="r num zero">0</td><td>1개 · 장착 중</td><td class="r num zero">0</td><td>11-14 15:47</td></tr>
+<tr><td><input type="checkbox" aria-label="vn-app-03 선택"></td><td><a href="Detail.dc.html" style="font-weight:700;text-decoration:none">vn-app-03</a><div class="sm">베트남</div></td><td><span class="tag warn">I/O·경로</span></td><td class="r num zero">0</td><td class="r num zero">0</td><td class="r num">12</td><td><span class="muted">디스크 특정 불가</span></td><td class="r num">1</td><td>11-12 18:30</td></tr>
+<tr><td><input type="checkbox" aria-label="kr-ora-db02 선택"></td><td><a href="Detail.dc.html" style="font-weight:700;text-decoration:none">kr-ora-db02</a><div class="sm">한국 본사</div></td><td><span class="tag unk">미검출</span></td><td class="r num zero">0</td><td class="r num zero">0</td><td class="r num zero">0</td><td><span class="muted">—</span></td><td class="r num zero">0</td><td>11-14 15:49</td></tr>
+<tr><td><input type="checkbox" checked aria-label="in-erp-01 선택"></td><td><span style="font-weight:700">in-erp-01</span><div class="sm">인도</div></td><td><span class="tag run">점검 중</span></td><td class="r muted">—</td><td class="r muted">—</td><td class="r muted">—</td><td><span class="muted">—</span></td><td class="r muted">—</td><td><span class="muted">—</span></td></tr>
+<tr><td><input type="checkbox" aria-label="use-log-01 선택"></td><td><span style="font-weight:700">use-log-01</span><div class="sm">미국 동부</div></td><td><span class="tag fail">점검 실패</span></td><td class="r muted">—</td><td class="r muted">—</td><td class="r muted">—</td><td><span class="muted">root 권한이 아님</span></td><td class="r muted">—</td><td>11-13 09:10</td></tr>
+</tbody>
+</table>
+</div>
+<div style="display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:10px">
+<span class="sm">12대 중 8대 표시</span>
+<button class="btn sm" type="button">4대 더 보기</button>
+</div>
+</section>
+
+<div class="sm" style="display:flex;flex-direction:column;gap:4px">
+<span>숫자는 기록 줄 수입니다 — 장애 횟수가 아닙니다.</span>
+<span>‘미검출’ 은 남아 있는 로그 · SMART 에서 못 찾았다는 뜻이며 ‘정상’ 이 아닙니다.</span>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":400,"height":1340}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

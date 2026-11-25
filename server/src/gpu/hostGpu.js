@@ -12,7 +12,7 @@
  */
 import { numOrNull } from '../util/numOrNull.js';
 import { gpuActivity, activityCounts } from './activity.js';
-import { vmVgpuAllocGB, vmGpuDevices } from './vgpuProfile.js';
+import { vmVgpuAllocGB, gpuDevicesOnHost, isGpuVmOnHost, gpuViewOnHost } from './vgpuProfile.js';
 import { inferGpuMemGB } from './gpuModelMem.js';
 
 const round1 = (n) => Math.round(n * 10) / 10;
@@ -44,15 +44,19 @@ export function summarizeHostGpu(host, vms, guestByVm, { now = Date.now() } = {}
   let vmsOn = 0; let vmsRead = 0;
   let gpuErrors = 0; // v2.769(점검 R4-D5-3): 켜진 VM 게스트에서 '응답 없음' 으로 센 GPU 장수 합
   for (const v of vms || []) {
+    // v2.939(개선 1 — v2.871 GPU 할당율 수정의 형제): 패스스루가 전부 NIC · HBA 인 VM 은 GPU VM 이 아니다 — 예전에는 'GPU VM' 으로 세고
+    //   패스스루 장수(passthroughOn)에도 넣었다. 판정은 vgpuProfile.gpuDevicesOnHost 하나(GPU 할당율과 같은 함수).
+    const dev = gpuDevicesOnHost(v.gpu, gpus);
+    if (!isGpuVmOnHost(dev)) continue;
     const on = v.powerState === 'POWERED_ON';
     const g = on ? (guestByVm && guestByVm.get(v.id)) || null : null;
     const alloc = vmVgpuAllocGB(v.gpu);
     if (on) {
       vmsOn++;
-      const dev = vmGpuDevices(v.gpu);
       if (dev.vgpu > 0) { if (alloc == null) allocUnknown++; else { allocGB += alloc; allocKnown++; } }
       passthroughOn += dev.passthrough;
     }
+    const view = gpuViewOnHost(v.gpu, dev);
     const act = on ? gpuActivity(g) : { state: 'off', reason: null, tempRead: false };
     if (on) acts.push(act.state);
     if (g) {
@@ -64,7 +68,7 @@ export function summarizeHostGpu(host, vms, guestByVm, { now = Date.now() } = {}
     }
     rows.push({
       id: v.id, name: v.name, powerState: v.powerState,
-      mode: v.gpu?.type || null, profile: v.gpu?.profile || '', devices: v.gpu?.count ?? null,
+      mode: view?.type || null, profile: v.gpu?.profile || '', devices: view?.count ?? null, nonGpuPassthrough: dev.other || 0,
       allocGB: alloc,
       utilPct: g ? g.utilPct ?? null : null, utilNA: g ? !!g.utilNA : false,
       memUsedMB: g ? numOrNull(g.memUsedMB) : null, memTotalMB: g ? numOrNull(g.memTotalMB) : null,

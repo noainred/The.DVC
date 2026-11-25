@@ -17,9 +17,14 @@ export default function NfsMounts() {
   const [form, setForm] = useState({ server: '', exportPath: '', options: '' });
   const [showTips, setShowTips] = useState(false);
 
-  const load = () => fetchJson('/admin/nfs-mounts').then((r) => { setD(r); setErr(null); }).catch((e) => setErr(e.message));
-  useEffect(() => { load(); const t = setInterval(load, 15_000); return () => clearInterval(t); }, []);
-  if (err && !d) return <ErrorBox message={err} />;
+  // v2.977(전체 점검): 403 · 404 는 다시 물어도 같다 — 폴링을 멈추고 오류 객체를 넘겨 ErrorBox 가 권한 안내로 그리게 한다(DirUsageSettings 와 같은 결).
+  const pollRef = React.useRef(null);
+  const load = () => fetchJson('/admin/nfs-mounts').then((r) => { setD(r); setErr(null); }).catch((e) => {
+    setErr(e);
+    if ((e?.status === 403 || e?.status === 404) && pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+  });
+  useEffect(() => { load(); pollRef.current = setInterval(load, 15_000); return () => { if (pollRef.current) clearInterval(pollRef.current); pollRef.current = null; }; }, []);
+  if (err && !d) return <ErrorBox error={err} />;
   if (!d) return <Loading />;
 
   const act = async (fn) => { setBusy(true); setMsg(null); try { await fn(); await load(); } catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(false); } };
@@ -42,6 +47,8 @@ export default function NfsMounts() {
         {d.platform !== 'linux' && <span style={{ color: 'var(--amber)' }}> ⚠ 현재 서버 OS({d.platform})에서는 마운트 실행이 지원되지 않습니다(Linux Edge 노드 전용) — 등록/조회만 가능합니다.</span>}
       </p>
 
+      {/* 96회차 ⓑ: 정의 파일 읽기 오류 — 빈 목록은 '없음' 이 아니다 */}
+      {d.loadError && <div className="banner warn" style={{ marginBottom: 12, whiteSpace: 'normal' }}>{String(d.loadError.reason || '정의 파일을 읽지 못했습니다.')}</div>}
       {/* 등록 폼 */}
       <div className="card" style={{ padding: 14, marginBottom: 12 }}>
         <div className="flex gap wrap" style={{ alignItems: 'flex-end' }}>
@@ -58,7 +65,7 @@ export default function NfsMounts() {
         <STable>
           <thead><tr><th>서버:경로</th><th>옵션</th><th>마운트 지점</th><th>상태</th><th className="right">작업</th></tr></thead>
           <tbody>
-            {d.mounts.length === 0 && <tr><td colSpan={5} className="center muted" style={{ padding: 18 }}>등록된 NFS 마운트가 없습니다.</td></tr>}
+            {d.mounts.length === 0 && <tr><td colSpan={5} className="center muted" style={{ padding: 18 }}>{d.loadError ? '정의 파일을 읽지 못해 목록을 보일 수 없습니다(없다는 뜻이 아닙니다).' : '등록된 NFS 마운트가 없습니다.'}</td></tr>}
             {d.mounts.map((m) => (
               <tr key={m.id}>
                 <td><b>{m.server}</b>:{m.exportPath}</td>

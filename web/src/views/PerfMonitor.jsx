@@ -10,6 +10,8 @@ import {
 import { unitText } from './unitText.js';
 import Select from '../components/Select.jsx';
 import { requireChanged } from './changeResult.js'; // v2.732 B5-03: 실패 본문을 성공으로 읽지 않는다
+import { unreadMarkOf, unreadKind, saveLockedByUnread, shouldReseed } from './settingsUnread.js';   // 128회차: 못 읽은 동안의 기본값 폼으로 저장하지 않는다(112회차 규약)
+import { SettingsUnreadBanner } from './SettingsUnreadBanner.jsx';
 
 /**
  * v2.732(점검 2회차 B5-03): hang 로그 비우기 응답 → 화면 문구. 서버 clearHangs 는 삭제 실패를 **200** {ok:false, reason} 으로
@@ -60,13 +62,14 @@ export default function PerfMonitor() {
   // v2.583: 요청 ID 찾기 — 로딩 화면에 보인 ID 로 느린 요청·hang·진행 중 목록을 거르고, 서버의 최근 완료 기록을 조회한다.
   const [ridQ, setRidQ] = useState('');
   const [ridHit, setRidHit] = useState(null);
-  const inited = useRef(false);
+  const seedKind = useRef(null);   // 128회차: 폼을 채운 조회의 상태(null = 아직 안 채움) — 못 읽은 값(기본값)으로 채운 폼은 다시 읽힌 조회에서 다시 채운다
 
   const load = async () => {
     try {
       const r = await fetchJson('/admin/perf');
       setD(r);
-      if (!inited.current) { inited.current = true; setForm({ ...r.settings }); }
+      const le = unreadMarkOf(r);
+      if (seedKind.current === null || shouldReseed(seedKind.current, le)) { seedKind.current = unreadKind(le); setForm({ ...r.settings }); }
       setError('');
     } catch (e) { setError(e.message || String(e)); }
   };
@@ -81,7 +84,12 @@ export default function PerfMonitor() {
   const note = loopNote({ monitorEnabled: d.loop?.monitorEnabled, windowCount: d.loop?.windowCount, windowMs: d.loop?.last?.windowMs || 30_000 });
 
   const NUMERIC = ['slowRequestMs', 'hangLagMs', 'clientStuckMs', 'clientDetailMs', 'keepSlow', 'keepHangs', 'retentionDays'];
+  // 128회차: 설정 파일 읽기 오류 동안의 settings 는 기본값(보존일은 최장 자리 표시)이다 — 폼을 한 번만 채우던 화면이라, 다시 읽힌 뒤의 ‘저장’ 한 번이
+  //   저장돼 있던 임계 · 보관 · 사용 여부를 그 기본값으로 덮었다(서버의 409 는 읽기 오류가 이어지는 동안만 막는다). 읽기 오류 동안은 저장을 잠근다.
+  const unread = unreadMarkOf(d);
+  const saveLocked = saveLockedByUnread(unread);
   const save = async () => {
+    if (saveLocked) return;
     setBusy('save'); setMsg(null);
     try {
       // 빈 칸은 **보내지 않는다** — 숫자 입력을 비운 상태로 저장하면 서버가 ''(→0)를 '범위 밖'
@@ -90,7 +98,7 @@ export default function PerfMonitor() {
       const body = { enabled: !!form.enabled };
       for (const k of NUMERIC) if (String(form[k] ?? '').trim() !== '') body[k] = form[k];
       const r = requireChanged(await putJson('/admin/perf/settings', body));
-      setForm({ ...r.settings });
+      seedKind.current = ''; setForm({ ...r.settings });
       setMsg({ ok: true, text: `저장됨 — 다음 요청·다음 창부터 적용${r.pruned?.trimmed ? ` (보존일 정리 ${r.pruned.trimmed}줄)` : ''}` });
       load();
     } catch (e) { setMsg({ ok: false, text: e.message }); } finally { setBusy(''); }
@@ -339,6 +347,7 @@ export default function PerfMonitor() {
       {tab === 'settings' && form && (
         <div className="card" style={{ padding: 14 }}>
           <div style={{ fontWeight: 700, marginBottom: 6 }}>계측 설정</div>
+          <SettingsUnreadBanner le={unread} what="서버 성능 측정 설정" save="저장" />
           <p className="muted" style={{ fontSize: 12.5, lineHeight: 1.6, margin: '0 0 10px' }}>
             계측은 요청당 Map 등록·카운터 증가만 하고(상시 O(1)), <b>임계를 넘은 것만</b> 기록합니다.
             임계를 낮추면 기록이 늘어 메모리·로그 파일이 커집니다. 재시작 없이 다음 요청부터 적용됩니다.
@@ -387,7 +396,7 @@ export default function PerfMonitor() {
               <input className="input" style={{ width: 90 }} type="number" min={lim.retentionDays?.min} max={lim.retentionDays?.max}
                 value={form.retentionDays} onChange={(e) => setForm({ ...form, retentionDays: e.target.value })} />
             </label>
-            <button className="login-btn" disabled={busy !== ''} onClick={save}>{busy === 'save' ? '저장 중…' : '저장'}</button>
+            <button className="login-btn" disabled={busy !== '' || saveLocked} onClick={save}>{busy === 'save' ? '저장 중…' : '저장'}</button>
           </div>
           <div className="muted" style={{ fontSize: 11.5, marginTop: 8, lineHeight: 1.6 }}>
             허용 범위 — 느린 요청 {lim.slowRequestMs?.min}~{lim.slowRequestMs?.max}ms · hang {lim.hangLagMs?.min}~{lim.hangLagMs?.max}ms ·

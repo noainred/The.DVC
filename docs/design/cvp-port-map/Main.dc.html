@@ -1,0 +1,460 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>CVP 포트 구성도 — 사용·예비·연결 장비</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="box-sizing: border-box; padding: clamp(12px, 2vw, 28px); background: #0a0e17; color: #e6edf6; font-family: 'Inter', 'Noto Sans KR', 'Apple SD Gothic Neo', sans-serif; font-size: 13px; line-height: 1.5; display: flex; flex-direction: column; gap: 14px;">
+
+<div style="display: flex; flex-direction: column; gap: 4px;">
+<div style="font-size: 12px; color: #8b9bb4;">네트워크 › Arista CVP</div>
+<h1 style="margin: 0; font-size: 20px; font-weight: 700;">Arista CVP</h1>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; gap: 6px;">
+<sc-for list="{{tabs}}" as="t" hint-placeholder-count="11">
+<button type="button" style="{{t.style}}">{{t.label}}</button>
+</sc-for>
+</div>
+
+<div style="background: #141b2d; border: 1px solid #1f2a40; border-radius: 14px; padding: clamp(12px, 1.4vw, 18px); min-width: 0; display: flex; flex-direction: column; gap: 8px;">
+<div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
+<b style="font-size: 14px;">포트 구성도</b>
+<div style="display: inline-flex; border: 1px solid #243049; border-radius: 8px; overflow: hidden;">
+<a href="Capacity.dc.html" style="display: inline-flex; align-items: center; height: 32px; padding: 0 12px; color: #a9b6cc; font-size: 12.5px; text-decoration: none; white-space: nowrap;">전 스위치 여유</a>
+<span aria-current="page" style="display: inline-flex; align-items: center; height: 32px; padding: 0 12px; background: #2563eb; color: #ffffff; font-size: 12.5px; font-weight: 600; white-space: nowrap;">스위치 1대</span>
+</div>
+<input type="search" aria-label="장비 검색" placeholder="장비 검색(호스트명·모델·법인)" style="box-sizing: border-box; height: 34px; padding: 0 10px; flex: 1 1 180px; max-width: 240px; min-width: 0; border-radius: 8px; border: 1px solid #243049; background: #0f1626; color: #e6edf6; font: inherit;">
+<select aria-label="장비 선택" style="box-sizing: border-box; height: 34px; padding: 0 10px; flex: 1 1 220px; max-width: 380px; min-width: 0; border-radius: 8px; border: 1px solid #243049; background: #0f1626; color: #e6edf6; font: inherit;">
+<option>kr1-leaf-a03 · DCS-7050SX3-48YC8 · KR1</option>
+<option>kr1-leaf-a04 · DCS-7050SX3-48YC8 · KR1</option>
+<option>kr1-spine-01 · DCS-7504N · KR1</option>
+</select>
+<button type="button" style="height: 34px; padding: 0 14px; border-radius: 8px; border: 1px solid #243049; background: #141b2d; color: #e6edf6; font: inherit; cursor: pointer;">새로고침</button>
+</div>
+<div style="font-size: 12px; color: #8b9bb4; overflow-wrap: anywhere;">kr1-leaf-a03 · DCS-7050SX3-48YC8 · EOS 4.31.2F · 법인 KR1 · CVP cvp-kr1</div>
+<div style="font-size: 12px; color: #8b9bb4; overflow-wrap: anywhere;">링크·속도·처리량은 매 수집 주기(마지막 23:31), 설명·LLDP 이웃·트랜시버는 부품 주기(마지막 23:05)에 읽습니다. 구성도는 이 모델(DCS-7050SX3-48YC8)의 전면 배치표대로 그립니다 — 배치표가 없는 모델은 포트 번호 규칙으로 그리고 그렇게 표시합니다.</div>
+</div>
+
+<div style="background: #141b2d; border: 1px solid #1f2a40; border-radius: 14px; padding: clamp(12px, 1.4vw, 18px); min-width: 0; display: flex; flex-direction: column; gap: 14px;">
+<div style="display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline;">
+<b style="font-size: 14px;">포트 사용 · 예비</b>
+<span style="font-size: 13px; color: #c9d5e6;">{{headline}}</span>
+<span style="font-size: 12px; color: #8b9bb4;">관리 포트(Management1)는 개수에서 뺍니다</span>
+</div>
+<div style="display: flex; height: 14px; border-radius: 7px; overflow: hidden; background: #0f1626;" role="img" aria-label="{{headline}}">
+<sc-for list="{{totalSegs}}" as="s" hint-placeholder-count="5">
+<div style="{{s.style}}" title="{{s.tip}}"></div>
+</sc-for>
+</div>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px;">
+<sc-for list="{{tiles}}" as="k" hint-placeholder-count="4">
+<div style="background: #0f1626; border: 1px solid #1f2a40; border-radius: 12px; padding: 12px 14px; min-width: 0; display: flex; flex-direction: column; gap: 4px;">
+<div style="display: flex; align-items: center; gap: 7px; font-size: 12px; color: #a9b6cc;"><span style="{{k.sw}}"></span>{{k.label}}</div>
+<div style="display: flex; align-items: baseline; gap: 8px;"><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 26px; font-weight: 600;">{{k.n}}</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #8b9bb4;">{{k.pct}}</span></div>
+<div style="font-size: 12px; color: #8b9bb4; overflow-wrap: anywhere;">{{k.meta}}</div>
+</div>
+</sc-for>
+</div>
+<div style="display: flex; flex-direction: column; gap: 8px;">
+<div style="font-size: 12px; color: #8b9bb4;">속도(포트 종류)별</div>
+<sc-for list="{{speedRows}}" as="r" hint-placeholder-count="2">
+<div style="display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center;">
+<div style="flex: 0 0 150px; font-weight: 600;">{{r.label}}</div>
+<div style="flex: 1 1 220px; min-width: 0; display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: #0f1626;">
+<sc-for list="{{r.segs}}" as="s" hint-placeholder-count="5">
+<div style="{{s.style}}"></div>
+</sc-for>
+</div>
+<div style="flex: 1 1 360px; min-width: 0; font-size: 12px; color: #c9d5e6; overflow-wrap: anywhere;">{{r.text}}</div>
+</div>
+</sc-for>
+</div>
+</div>
+
+<div style="background: #141b2d; border: 1px solid #1f2a40; border-radius: 14px; padding: clamp(12px, 1.4vw, 18px); min-width: 0; display: flex; flex-direction: column; gap: 12px;">
+<div style="display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center;">
+<b style="font-size: 14px;">전면 포트 구성</b>
+<span style="font-size: 12px; color: #8b9bb4;">색 기준</span>
+<div style="display: inline-flex; flex-wrap: wrap; border: 1px solid #243049; border-radius: 8px; overflow: hidden;">
+<sc-for list="{{modes}}" as="m" hint-placeholder-count="3">
+<button type="button" onClick="{{m.pick}}" aria-pressed="{{m.on}}" style="{{m.style}}">{{m.label}}</button>
+</sc-for>
+</div>
+<span style="font-size: 12px; color: #8b9bb4;">포트를 누르면 아래에 연결 장비와 근거가 나옵니다</span>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; gap: 14px 16px; align-items: stretch;">
+
+<div style="flex: 0 1 auto; min-width: 0; max-width: 100%; box-sizing: border-box; display: flex; flex-direction: column; gap: 10px; padding: 10px 14px 14px; background: #0b1120; border: 1px solid #3b4a68; border-radius: 8px;">
+<div style="display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; justify-content: space-between;">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;">
+<span style="font-size: 11px; color: #8b9bb4;">전면</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; font-weight: 600; color: #e6edf6;">7050SX3-48YC8</span>
+<span style="font-size: 11px; color: #8b9bb4;">모델 배치표대로 · 홀수 위 ▲ 짝수 아래 ▼</span>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 11px; color: #a9b6cc;" role="img" aria-label="상태 표시등: 상태 정상, 팬 정상, PS1 정상, PS2 정상">
+<span style="display: inline-flex; align-items: center; gap: 4px;"><span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #22c55e;"></span>상태</span>
+<span style="display: inline-flex; align-items: center; gap: 4px;"><span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #22c55e;"></span>팬</span>
+<span style="display: inline-flex; align-items: center; gap: 4px;"><span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #22c55e;"></span>PS1</span>
+<span style="display: inline-flex; align-items: center; gap: 4px;"><span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #22c55e;"></span>PS2</span>
+</div>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 12px 8px; align-items: flex-end;">
+<sc-for list="{{groups}}" as="g" hint-placeholder-count="5">
+<div style="display: flex; flex-direction: column; gap: 5px;">
+<div style="font-size: 11px; color: #8b9bb4; white-space: nowrap;">{{g.label}}</div>
+<div style="{{g.grid}}">
+<sc-for list="{{g.ports}}" as="p" hint-placeholder-count="12">
+<button type="button" onClick="{{p.pick}}" title="{{p.tip}}" aria-label="{{p.tip}}" style="{{p.cell}}">{{p.short}}<span aria-hidden="true" style="{{p.flag}}"></span></button>
+</sc-for>
+</div>
+</div>
+</sc-for>
+</div>
+</div>
+
+<div style="flex: 0 0 auto; box-sizing: border-box; display: flex; flex-direction: column; gap: 10px; padding: 10px 14px 14px; background: #0b1120; border: 1px solid #3b4a68; border-radius: 8px;">
+<div style="display: flex; align-items: baseline; gap: 8px;">
+<span style="font-size: 11px; color: #8b9bb4;">후면</span>
+<span style="font-size: 11px; color: #8b9bb4;">관리 포트</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 4px; margin-top: auto;">
+<sc-for list="{{rear}}" as="p" hint-placeholder-count="1">
+<button type="button" onClick="{{p.pick}}" title="{{p.tip}}" aria-label="{{p.tip}}" style="{{p.cell}}">{{p.short}}<span aria-hidden="true" style="{{p.flag}}"></span></button>
+</sc-for>
+<span style="box-sizing: border-box; width: 46px; height: 20px; display: flex; align-items: center; justify-content: center; border: 1px dashed #5d6b85; border-radius: 4px; font-size: 10.5px; color: #a9b6cc;">USB</span>
+<span style="box-sizing: border-box; width: 46px; height: 20px; display: flex; align-items: center; justify-content: center; border: 1px dashed #5d6b85; border-radius: 4px; font-size: 10.5px; color: #a9b6cc;">콘솔</span>
+</div>
+</div>
+
+</div>
+
+<div style="display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; font-size: 12px; color: #c9d5e6;">
+<sc-for list="{{legend}}" as="l" hint-placeholder-count="5">
+<span style="display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;"><span style="{{l.sw}}"></span>{{l.label}} <b style="font-family: 'JetBrains Mono', ui-monospace, monospace;">{{l.n}}</b></span>
+</sc-for>
+</div>
+<div style="font-size: 12px; color: #8b9bb4; overflow-wrap: anywhere;">{{modeNote}}</div>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start;">
+
+<div style="flex: 1 1 320px; min-width: 0; background: #141b2d; border: 1px solid #1f2a40; border-radius: 14px; padding: clamp(12px, 1.4vw, 18px); display: flex; flex-direction: column; gap: 12px;">
+<div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
+<b style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 16px;">{{d.name}}</b>
+<span style="{{d.clsBadge}}">{{d.clsLabel}}</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; background: #0f1626; border: 1px solid #1f2a40; border-radius: 12px;">
+<div style="font-size: 12px; color: #8b9bb4;">연결 장비</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 18px; font-weight: 600; overflow-wrap: anywhere;">{{d.dev}}</span>
+<span style="display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: 999px; border: 1px solid #243049; font-size: 12px; color: #c9d5e6; white-space: nowrap;">{{d.kindLabel}}</span>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
+<span style="font-size: 12px; color: #8b9bb4;">근거</span>
+<span style="{{d.evBadge}}">{{d.evLabel}}</span>
+</div>
+<div style="font-size: 12.5px; color: #c9d5e6; overflow-wrap: anywhere;">{{d.verdict}}</div>
+</div>
+<div style="display: flex; flex-direction: column;">
+<sc-for list="{{d.rows}}" as="r" hint-placeholder-count="8">
+<div style="display: flex; gap: 10px; padding: 7px 0; border-top: 1px solid #1f2a40;">
+<div style="flex: 0 0 118px; font-size: 12px; color: #8b9bb4;">{{r.k}}</div>
+<div style="flex: 1 1 0; min-width: 0; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; overflow-wrap: anywhere;">{{r.v}}</div>
+</div>
+</sc-for>
+</div>
+</div>
+
+<div style="flex: 999 1 620px; min-width: 0; background: #141b2d; border: 1px solid #1f2a40; border-radius: 14px; padding: clamp(12px, 1.4vw, 18px); display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
+<b style="font-size: 14px;">포트별 연결 장비</b>
+<div style="display: flex; flex-wrap: wrap; gap: 6px;">
+<sc-for list="{{chips}}" as="c" hint-placeholder-count="6">
+<button type="button" onClick="{{c.pick}}" aria-pressed="{{c.on}}" style="{{c.style}}">{{c.label}} <b style="font-family: 'JetBrains Mono', ui-monospace, monospace;">{{c.n}}</b></button>
+</sc-for>
+</div>
+</div>
+<div style="overflow: auto; max-height: 560px; border: 1px solid #1f2a40; border-radius: 10px;">
+<div role="table" aria-label="포트별 연결 장비" style="min-width: 960px; font-size: 12.5px;">
+<div role="row" style="display: grid; grid-template-columns: 108px 128px 108px 112px minmax(96px, 1.1fr) minmax(96px, 1fr) 116px 84px 116px; align-items: center; background: #0f1626; color: #a9b6cc;">
+<div role="columnheader" style="padding: 8px 10px; font-weight: 600; white-space: nowrap;">포트</div>
+<div role="columnheader" style="padding: 8px 10px; font-weight: 600; white-space: nowrap;">분류</div>
+<div role="columnheader" style="padding: 8px 10px; font-weight: 600; white-space: nowrap;">연결 장비</div>
+<div role="columnheader" style="padding: 8px 10px; font-weight: 600; white-space: nowrap;">근거</div>
+<div role="columnheader" style="padding: 8px 10px; font-weight: 600; white-space: nowrap;">설명(주석)</div>
+<div role="columnheader" style="padding: 8px 10px; font-weight: 600; white-space: nowrap;">LLDP 이웃</div>
+<div role="columnheader" style="padding: 8px 10px; font-weight: 600; white-space: nowrap;">트랜시버</div>
+<div role="columnheader" style="padding: 8px 10px; font-weight: 600; white-space: nowrap; text-align: right;">수신 / 송신</div>
+<div role="columnheader" style="padding: 8px 10px; font-weight: 600; white-space: nowrap;">마지막 링크</div>
+</div>
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="12">
+<div role="row" style="{{r.rowStyle}}">
+<div role="cell" style="padding: 3px 4px; min-width: 0;"><button type="button" onClick="{{r.pick}}" style="height: 28px; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; color: #7dd3fc; font: 600 12.5px 'JetBrains Mono', ui-monospace, monospace; cursor: pointer; white-space: nowrap;">{{r.name}}</button></div>
+<div role="cell" style="padding: 6px 10px; min-width: 0; white-space: nowrap; display: flex; align-items: center; gap: 6px;"><span style="{{r.sw}}"></span>{{r.clsLabel}}</div>
+<div role="cell" style="padding: 6px 10px; min-width: 0; font-family: 'JetBrains Mono', ui-monospace, monospace; overflow-wrap: anywhere;">{{r.dev}}</div>
+<div role="cell" style="padding: 6px 10px; min-width: 0;"><span style="{{r.evStyle}}">{{r.evLabel}}</span></div>
+<div role="cell" style="padding: 6px 10px; min-width: 0; font-family: 'JetBrains Mono', ui-monospace, monospace; color: #c9d5e6; overflow-wrap: anywhere;">{{r.desc}}</div>
+<div role="cell" style="padding: 6px 10px; min-width: 0; font-family: 'JetBrains Mono', ui-monospace, monospace; color: #c9d5e6; overflow-wrap: anywhere;">{{r.lldp}}</div>
+<div role="cell" style="padding: 6px 10px; min-width: 0; color: #c9d5e6; overflow-wrap: anywhere;">{{r.spx}}</div>
+<div role="cell" style="padding: 6px 10px; min-width: 0; white-space: nowrap; text-align: right; font-family: 'JetBrains Mono', ui-monospace, monospace;">{{r.util}}</div>
+<div role="cell" style="padding: 6px 10px; min-width: 0; white-space: nowrap; color: #c9d5e6;">{{r.last}}</div>
+</div>
+</sc-for>
+</div>
+</div>
+<div style="font-size: 12px; color: #8b9bb4;">{{rowsNote}}</div>
+</div>
+
+</div>
+
+<div style="background: #141b2d; border: 1px solid #1f2a40; border-radius: 14px; padding: clamp(12px, 1.4vw, 18px); min-width: 0; display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; color: #c9d5e6;">
+<b style="font-size: 13px; color: #e6edf6;">이 화면이 말하는 것 · 말하지 않는 것</b>
+<div style="overflow-wrap: anywhere;">· 연결 장비는 포트 설명(주석)과 LLDP 이웃, 두 가지로 판단합니다. 둘이 같으면 ‘일치’, 다르면 LLDP 쪽을 표시하고 ‘불일치’ 로 알립니다.</div>
+<div style="overflow-wrap: anywhere;">· LLDP 를 보내지 않는 상대(일부 스토리지 · LLDP 를 끈 서버)는 이웃이 비어 ‘설명만’ 이 됩니다 — 설명에 적힌 이름일 뿐 실제 연결을 확인한 것이 아닙니다.</div>
+<div style="overflow-wrap: anywhere;">· 예비 = 링크 없음 + 설명 없음 + 관리상 켜짐. 설명이 있는 링크 없는 포트는 예비가 아니라 ‘확인 필요’ 로, 관리상 꺼진 포트도 따로 셉니다.</div>
+<div style="overflow-wrap: anywhere;">· 구성도의 블록 순서(1–24 · 49–56 · 25–48)와 후면 관리 포트는 이 모델의 실물 배치입니다. 색 띠는 실물의 포트 번호 띠(SFP 청록 · QSFP 보라)를 따랐습니다.</div>
+<div style="overflow-wrap: anywhere;">· 못 읽은 값은 0 이나 ‘없음’ 으로 쓰지 않고 ‘확인 불가’ 로 따로 셉니다(이 장비는 0개).</div>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"mode":{"editor":"enum","options":["use","evidence","util"],"default":"use"},"sel":{"editor":"text","default":"Ethernet17"},"$preview":{"width":1440,"height":1840}}'>
+class Component extends DCLogic {
+ports() {
+const P = [];
+const add = (i, n, sp, sub, xc, desc, ls, lp, kind, inU, outU, lag, vlan, last, mgmt) => P.push({ i: i, n: n, sp: sp, sub: sub, xc: xc, desc: desc, ls: ls, lp: lp, kind: kind, inU: inU, outU: outU, lag: lag, vlan: vlan, last: last, mgmt: !!mgmt });
+const u = (i, k) => ((i * 37 + k * 13 + 11) % 34) + 4;
+for (let h = 1; h <= 9; h++) {
+const hn = 'esx-kr1-' + (h < 10 ? '0' + h : h);
+add(2 * h - 1, 'Ethernet' + (2 * h - 1), 25, 'use', '25GBASE-SR', hn + ' vmnic0', hn, 'vmnic0', 'esxi', u(h, 1), u(h, 2), '', 'trunk', '오늘');
+add(2 * h, 'Ethernet' + (2 * h), 25, 'use', '25GBASE-SR', hn + ' vmnic2', hn, 'vmnic2', 'esxi', u(h, 3), u(h, 4), '', 'trunk', '오늘');
+}
+add(19, 'Ethernet19', 25, 'use', '25GBASE-SR', 'esx-kr1-10 vmnic0', '', '', 'esxi', 17, 9, '', 'trunk', '오늘');
+add(20, 'Ethernet20', 25, 'use', '25GBASE-SR', 'esx-kr1-10 vmnic2', '', '', 'esxi', 14, 8, '', 'trunk', '오늘');
+add(21, 'Ethernet21', 25, 'use', '25GBASE-SR', 'esx-kr1-11 vmnic0', 'esx-kr1-14', 'vmnic0', 'esxi', 12, 6, '', 'trunk', '오늘');
+add(22, 'Ethernet22', 25, 'use', '25GBASE-SR', '', 'esx-kr1-11', 'vmnic2', 'esxi', 21, 15, '', 'trunk', '오늘');
+add(23, 'Ethernet23', 25, 'check', '25GBASE-SR', 'esx-kr1-12 vmnic0', '', '', 'esxi', null, null, '', 'trunk', '12일 전(11-08)');
+add(24, 'Ethernet24', 25, 'check', '25GBASE-SR', 'esx-kr1-12 vmnic2', '', '', 'esxi', null, null, '', 'trunk', '12일 전(11-08)');
+const sp = ['SPA eth2', 'SPA eth3', 'SPB eth2', 'SPB eth3'];
+for (let k = 0; k < 4; k++) add(25 + k, 'Ethernet' + (25 + k), 25, 'use', '25GBASE-SR', 'unity-kr1-a ' + sp[k], '', '', 'storage', 28 + k * 3, 19 + k * 2, '', '210', '오늘');
+add(29, 'Ethernet29', 25, 'use', '25GBASE-SR', 'bareos-kr1 bond0', 'bareos-kr1', 'ens1f0', 'server', 83, 12, 'Port-Channel12', '300', '오늘');
+add(30, 'Ethernet30', 25, 'use', '25GBASE-SR', 'bareos-kr1 bond0', 'bareos-kr1', 'ens1f1', 'server', 79, 11, 'Port-Channel12', '300', '오늘');
+add(31, 'Ethernet31', 25, 'use', '25GBASE-SR', 'gpu-kr1-01 p1', 'gpu-kr1-01', 'ens2f0', 'server', 56, 23, '', '120', '오늘');
+add(32, 'Ethernet32', 25, 'use', '25GBASE-CR', '', '', '', 'unknown', 2, 1, '', '1', '오늘');
+for (let n = 33; n <= 36; n++) add(n, 'Ethernet' + n, 25, 'spareX', '25GBASE-SR', '', '', '', '', null, null, '', '', n === 33 ? '43일 전(10-08)' : '기록 없음');
+for (let n = 37; n <= 44; n++) add(n, 'Ethernet' + n, 25, 'spareE', '', '', '', '', '', null, null, '', '', '기록 없음');
+add(45, 'Ethernet45', 25, 'off', '', 'RESERVED fw-kr1-02', '', '', 'unknown', null, null, '', '', '기록 없음');
+add(46, 'Ethernet46', 25, 'off', '', '', '', '', '', null, null, '', '', '기록 없음');
+add(47, 'Ethernet47', 25, 'use', '25GBASE-CR', 'MLAG peer kr1-leaf-a04 Et47', 'kr1-leaf-a04', 'Ethernet47', 'switch', 6, 7, 'Port-Channel1000', 'trunk', '오늘');
+add(48, 'Ethernet48', 25, 'use', '25GBASE-CR', 'MLAG peer kr1-leaf-a04 Et48', 'kr1-leaf-a04', 'Ethernet48', 'switch', 5, 6, 'Port-Channel1000', 'trunk', '오늘');
+add(49, 'Ethernet49/1', 100, 'use', '100GBASE-SR4', 'kr1-spine-01 Et3/1', 'kr1-spine-01', 'Ethernet3/1', 'switch', 41, 36, '', 'routed', '오늘');
+add(50, 'Ethernet50/1', 100, 'use', '100GBASE-SR4', 'kr1-spine-02 Et3/1', 'kr1-spine-02', 'Ethernet3/1', 'switch', 38, 33, '', 'routed', '오늘');
+add(51, 'Ethernet51/1', 100, 'use', '100GBASE-SR4', 'kr1-bleaf-01 Et49/1', 'kr1-bleaf-01', 'Ethernet49/1', 'switch', 9, 14, '', 'routed', '오늘');
+add(52, 'Ethernet52/1', 100, 'check', '100GBASE-SR4', 'kr1-bleaf-02 Et49/1', '', '', 'switch', null, null, '', 'routed', '3일 전(11-17)');
+add(53, 'Ethernet53/1', 100, 'spareX', '100GBASE-SR4', '', '', '', '', null, null, '', '', '기록 없음');
+for (let n = 54; n <= 56; n++) add(n, 'Ethernet' + n + '/1', 100, 'spareE', '', '', '', '', '', null, null, '', '', '기록 없음');
+add(99, 'Management1', 1, 'use', '1000BASE-T', 'oob-kr1-sw02 Gi0/14', 'oob-kr1-sw02', 'Gi0/14', 'switch', 1, 1, '', '—', '오늘', true);
+P.sort((a, b) => a.i - b.i);
+return P;
+}
+renderVals() {
+const st = this.state || {};
+const mode = st.mode || this.props.mode || 'use';
+const selName = st.sel || this.props.sel || 'Ethernet17';
+const filt = st.filt || 'all';
+const MONO = "'JetBrains Mono', ui-monospace, monospace";
+const GREEN = 'background: #16432a; border: 1px solid #22c55e; color: #eafff1;';
+const AMBER = 'background: #4a3208; border: 1px solid #f59e0b; color: #fff3d6;';
+const DASH = 'background: #0f1626; border: 1px dashed #5d6b85; color: #a9b6cc;';
+const CLS = {
+use: { label: '사용 중', paint: GREEN, dot: '#22c55e' },
+spareX: { label: '예비 · GBIC 꽂힘', paint: 'background: #172f5c; border: 1px solid #60a5fa; color: #e6f0ff;', dot: '#60a5fa' },
+spareE: { label: '예비 · 빈 케이지', paint: 'background: #0f1626; border: 1px dashed #60a5fa; color: #bfdbfe;', dot: '#1e40af' },
+check: { label: '확인 필요', paint: AMBER, dot: '#f59e0b' },
+off: { label: '관리상 꺼짐', paint: 'background: #2a3446; border: 1px solid #64748b; color: #cbd5e1; text-decoration: line-through;', dot: '#64748b' }
+};
+const EV = {
+match: { short: '일치', label: '설명·LLDP 일치', paint: GREEN, dot: '#22c55e' },
+lldp: { short: 'LLDP 만', label: 'LLDP 만(설명 없음)', paint: 'background: #0c3d47; border: 1px solid #22d3ee; color: #e3fbff;', dot: '#22d3ee' },
+desc: { short: '설명만', label: '설명만(LLDP 이웃 없음)', paint: 'background: #35205c; border: 1px solid #c084fc; color: #f1e6ff;', dot: '#c084fc' },
+mismatch: { short: '불일치', label: '설명·LLDP 불일치', paint: 'background: #5a1616; border: 1px solid #f87171; color: #ffe9e9;', dot: '#f87171' },
+none: { short: '근거 없음', label: '근거 없음(미확인 장비)', paint: AMBER, dot: '#f59e0b' },
+nolink: { short: '—', label: '링크 없음', paint: DASH, dot: '#5d6b85' }
+};
+const UT = {
+u0: { label: '20% 미만', paint: 'background: #12283f; border: 1px solid #2f5d8c; color: #d8e9fb;', dot: '#2f5d8c' },
+u20: { label: '20~50%', paint: 'background: #1d4ed8; border: 1px solid #93c5fd; color: #ffffff;', dot: '#3b82f6' },
+u50: { label: '50~80%', paint: 'background: #b45309; border: 1px solid #fbbf24; color: #ffffff;', dot: '#f59e0b' },
+u80: { label: '80% 이상', paint: 'background: #b91c1c; border: 1px solid #fca5a5; color: #ffffff;', dot: '#ef4444' },
+na: { label: '측정 없음(링크 없음)', paint: DASH, dot: '#5d6b85' }
+};
+const KIND = { esxi: 'ESXi 호스트', switch: '스위치', storage: '스토리지', server: '서버', unknown: '종류 미상' };
+const INV = { esxi: 'vCenter VC-KR1 · ESXi 호스트', switch: 'CVP 장비(스위치)', storage: '스토리지 모니터링 장비', server: 'iDRAC 인벤토리 서버' };
+const devFromDesc = (d) => { const m = /[a-z0-9]+(?:-[a-z0-9]+)+/i.exec(d || ''); return m ? m[0] : ''; };
+const P = this.ports().map((p) => {
+const linked = p.sub === 'use';
+let ev = 'nolink';
+if (linked) {
+if (p.desc && p.ls) ev = p.desc.toLowerCase().indexOf(p.ls.toLowerCase()) >= 0 ? 'match' : 'mismatch';
+else if (p.ls) ev = 'lldp';
+else if (p.desc) ev = 'desc';
+else ev = 'none';
+}
+const dev = p.ls || devFromDesc(p.desc);
+const util = linked ? Math.max(p.inU, p.outU) : null;
+const band = util == null ? 'na' : util >= 80 ? 'u80' : util >= 50 ? 'u50' : util >= 20 ? 'u20' : 'u0';
+return Object.assign({}, p, { linked: linked, ev: ev, dev: dev, util: util, band: band });
+});
+const sel = P.find((p) => p.n === selName) || P[0];
+const eth = P.filter((p) => !p.mgmt);
+const cnt = (list, f) => list.filter(f).length;
+const total = eth.length;
+const nUse = cnt(eth, (p) => p.sub === 'use');
+const nX = cnt(eth, (p) => p.sub === 'spareX');
+const nE = cnt(eth, (p) => p.sub === 'spareE');
+const nCheck = cnt(eth, (p) => p.sub === 'check');
+const nOff = cnt(eth, (p) => p.sub === 'off');
+const pct = (n, t) => (t ? Math.round((n / t) * 100) + '%' : '—');
+const seg = (n, color, tip) => ({ style: n ? 'flex: ' + n + ' 1 0; background: ' + color + '; border-right: 2px solid #141b2d;' : 'display: none;', tip: tip + ' ' + n });
+const segsOf = (list) => [
+seg(cnt(list, (p) => p.sub === 'use'), '#22c55e', '사용 중'),
+seg(cnt(list, (p) => p.sub === 'check'), '#f59e0b', '확인 필요'),
+seg(cnt(list, (p) => p.sub === 'spareX'), '#60a5fa', '예비 · GBIC 꽂힘'),
+seg(cnt(list, (p) => p.sub === 'spareE'), '#1e40af', '예비 · 빈 케이지'),
+seg(cnt(list, (p) => p.sub === 'off'), '#64748b', '관리상 꺼짐')
+];
+const swatch = (paint) => 'display: inline-block; box-sizing: border-box; width: 14px; height: 12px; border-radius: 3px; flex: 0 0 auto; ' + paint;
+const tiles = [
+{ label: '사용 중', n: nUse, pct: pct(nUse, total), meta: '링크가 올라온 포트', sw: swatch(CLS.use.paint) },
+{ label: '예비', n: nX + nE, pct: pct(nX + nE, total), meta: 'GBIC 꽂힘 ' + nX + ' · 빈 케이지 ' + nE, sw: swatch(CLS.spareX.paint) },
+{ label: '확인 필요', n: nCheck, pct: pct(nCheck, total), meta: '설명은 있는데 링크 없음', sw: swatch(CLS.check.paint) },
+{ label: '관리상 꺼짐', n: nOff, pct: pct(nOff, total), meta: 'shutdown — 예비에 넣지 않음', sw: swatch(CLS.off.paint) }
+];
+const speedRows = [[25, '25G · SFP28'], [100, '100G · QSFP28']].map((x) => {
+const l = eth.filter((p) => p.sp === x[0]);
+const c = (s) => cnt(l, (p) => p.sub === s);
+return { label: x[1] + ' ' + l.length + '포트', segs: segsOf(l), text: '사용 ' + c('use') + ' · 예비 ' + (c('spareX') + c('spareE')) + '(GBIC 꽂힘 ' + c('spareX') + ' · 빈 케이지 ' + c('spareE') + ') · 확인 필요 ' + c('check') + ' · 꺼짐 ' + c('off') };
+});
+const paintOf = (p) => (mode === 'evidence' ? EV[p.ev].paint : mode === 'util' ? UT[p.band].paint : CLS[p.sub].paint);
+const FLAG = { mismatch: '#f87171', none: '#fbbf24', lldp: '#22d3ee' };
+const pick = (n) => () => this.setState({ sel: n });
+const tipOf = (p) => p.n + ' — ' + CLS[p.sub].label + (p.dev ? ' · ' + p.dev : '') + (p.linked ? ' · ' + EV[p.ev].label : '');
+const cellOf = (p) => ({
+short: p.mgmt ? 'Ma1' : String(p.i),
+tip: tipOf(p),
+pick: pick(p.n),
+cell: 'position: relative; box-sizing: border-box; width: ' + (p.sp === 100 ? 46 : p.mgmt ? 46 : 34) + 'px; height: ' + (p.mgmt ? 24 : 32) + 'px; padding: 0; border-radius: 5px; font: 600 11px ' + MONO + '; cursor: pointer; display: flex; align-items: center; justify-content: center; ' + paintOf(p) + (p.n === sel.n ? ' outline: 2px solid #ffffff; outline-offset: 2px;' : ''),
+flag: mode === 'use' && FLAG[p.ev] ? 'position: absolute; top: -4px; right: -4px; width: 10px; height: 10px; box-sizing: border-box; border-radius: 50%; border: 2px solid #0b1120; background: ' + FLAG[p.ev] + ';' : 'display: none;'
+});
+const rng = (a, b) => eth.filter((p) => p.i >= a && p.i <= b).map(cellOf);
+const gridOf = (band) => 'display: grid; grid-template-rows: auto auto; grid-auto-flow: column; gap: 10px 4px; padding: 5px; border: 1px solid #243049; border-radius: 5px; background: linear-gradient(to bottom, #0f1626 calc(50% - 2px), ' + band + ' calc(50% - 2px), ' + band + ' calc(50% + 2px), #0f1626 calc(50% + 2px));';
+const SFP_BAND = '#0f766e'; const QSFP_BAND = '#5b4bc4';
+const groups = [
+{ label: '1–12 · SFP28', ports: rng(1, 12), grid: gridOf(SFP_BAND) },
+{ label: '13–24', ports: rng(13, 24), grid: gridOf(SFP_BAND) },
+{ label: '49–56 · QSFP28 100G', ports: rng(49, 56), grid: gridOf(QSFP_BAND) },
+{ label: '25–36', ports: rng(25, 36), grid: gridOf(SFP_BAND) },
+{ label: '37–48', ports: rng(37, 48), grid: gridOf(SFP_BAND) }
+];
+const rear = P.filter((p) => p.mgmt).map(cellOf);
+let legend; let modeNote;
+if (mode === 'evidence') {
+legend = ['match', 'lldp', 'desc', 'mismatch', 'none', 'nolink'].map((k) => ({ label: EV[k].label, sw: swatch(EV[k].paint), n: cnt(eth, (p) => p.ev === k) }));
+modeNote = '링크가 올라온 포트에 무엇이 붙어 있는지를 어떤 근거로 알았는지 보여 줍니다. LLDP 이웃은 링크가 있을 때만 있습니다.';
+} else if (mode === 'util') {
+legend = ['u0', 'u20', 'u50', 'u80', 'na'].map((k) => ({ label: UT[k].label, sw: swatch(UT[k].paint), n: cnt(eth, (p) => p.band === k) }));
+modeNote = '마지막 수집의 순간 사용률입니다(수신·송신 중 큰 쪽). 링크가 없는 포트는 0% 가 아니라 ‘측정 없음’ 입니다.';
+} else {
+legend = ['use', 'spareX', 'spareE', 'check', 'off'].map((k) => ({ label: CLS[k].label, sw: swatch(CLS[k].paint), n: cnt(eth, (p) => p.sub === k) }));
+legend.push({ label: '모서리 점 = 근거 확인할 것(불일치·미확인·설명 없음)', sw: 'display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #f87171; flex: 0 0 auto;', n: cnt(eth, (p) => !!FLAG[p.ev]) });
+modeNote = '예비는 링크·설명이 모두 없고 관리상 켜진 포트입니다. GBIC 가 꽂혀 있으면 케이블만으로, 빈 케이지면 GBIC 까지 있어야 쓸 수 있습니다.';
+}
+const segBtn = (on) => 'height: 32px; padding: 0 12px; border: 0; border-right: 1px solid #243049; font: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap; ' + (on ? 'background: #2563eb; color: #ffffff; font-weight: 600;' : 'background: transparent; color: #a9b6cc;');
+const modes = [['use', '사용 · 예비'], ['evidence', '연결 근거'], ['util', '트래픽 사용률']].map((m) => ({ label: m[1], on: mode === m[0], style: segBtn(mode === m[0]), pick: () => this.setState({ mode: m[0] }) }));
+const tabStyle = (on) => 'height: 32px; padding: 0 13px; border-radius: 8px; font: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap; ' + (on ? 'border: 1px solid #2563eb; background: #1a2236; color: #ffffff; font-weight: 600;' : 'border: 1px solid #243049; background: transparent; color: #a9b6cc;');
+const tabs = ['Overview', '장비', '모델', '트래픽', '인터페이스 세부 정보', '포트 구성도', '포트 사용량', '광신호', '전력', '이벤트', 'CVP 설정'].map((l) => ({ label: l, style: tabStyle(l === '포트 구성도') }));
+const pill = (paint) => 'display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; text-decoration: none; ' + paint.replace('text-decoration: line-through;', '');
+const VERDICT = {
+match: '포트 설명과 LLDP 이웃이 같은 장비를 가리킵니다.',
+lldp: '설명이 비어 있어 LLDP 이웃을 연결 장비로 표시합니다. 설명을 채워 두면 링크가 끊겨도 어디에 쓰던 포트인지 남습니다.',
+desc: 'LLDP 이웃이 없어(상대가 LLDP 를 보내지 않음) 설명에 적힌 이름을 표시합니다. 실제 연결은 확인하지 못했습니다.',
+none: '링크는 올라와 있는데 설명도 LLDP 이웃도 없습니다 — 무엇이 꽂혀 있는지 이 정보로는 알 수 없습니다.'
+};
+const SUBV = {
+check: '설명은 있는데 링크가 없습니다 — 연결이 끊겼거나, 연결 예정으로 잡아 둔 포트입니다. 설명에 적힌 이름을 표시합니다.',
+spareX: '링크·설명이 없고 GBIC 는 꽂혀 있습니다 — 케이블만 꽂으면 쓸 수 있는 예비입니다.',
+spareE: '링크·설명·GBIC 가 모두 없습니다 — GBIC 를 꽂아야 쓸 수 있는 예비입니다.',
+off: '관리상 꺼진(shutdown) 포트입니다 — 예비에 넣지 않고 따로 셉니다.'
+};
+const descDev = devFromDesc(sel.desc);
+const verdict = sel.linked ? (sel.ev === 'mismatch' ? '설명은 ' + descDev + ', LLDP 는 ' + sel.ls + ' 입니다 — 지금 붙어 있는 상대는 LLDP 쪽이고, 설명이 낡았을 수 있습니다.' : VERDICT[sel.ev]) : SUBV[sel.sub];
+const speedText = (p) => (p.sp === 1 ? '1 Gbps' : p.sp + ' Gbps');
+const d = {
+name: sel.n,
+clsLabel: CLS[sel.sub].label,
+clsBadge: pill(CLS[sel.sub].paint),
+dev: sel.dev || '—',
+kindLabel: sel.dev ? (KIND[sel.kind] || '종류 미상') : '연결 장비 없음',
+evLabel: sel.linked ? EV[sel.ev].label : (sel.desc ? '설명만 · 링크 없음' : '해당 없음(링크 없음)'),
+evBadge: pill(sel.linked ? EV[sel.ev].paint : DASH),
+verdict: verdict,
+rows: [
+{ k: '포트 설명(주석)', v: sel.desc || '(설명 없음)' },
+{ k: 'LLDP 이웃', v: sel.ls ? sel.ls + ' · ' + sel.lp : (sel.linked ? '이웃 없음' : '— (링크 없음)') },
+{ k: '포탈 인벤토리', v: sel.dev && INV[sel.kind] ? sel.dev + ' — ' + INV[sel.kind] : (sel.dev ? '같은 이름의 장비 없음' : '—') },
+{ k: '링크 · 관리', v: (sel.linked ? '연결됨' : '링크 없음') + ' · ' + (sel.sub === 'off' ? '꺼짐(shutdown)' : '켜짐') },
+{ k: '속도 · 트랜시버', v: speedText(sel) + ' · ' + (sel.xc || '빈 케이지') },
+{ k: 'VLAN · LAG', v: (sel.vlan || '—') + ' · ' + (sel.lag || 'LAG 아님') },
+{ k: '수신 / 송신', v: sel.linked ? sel.inU + '% / ' + sel.outU + '%' : '— (측정 없음)' },
+{ k: '마지막 링크 기록', v: sel.last }
+]
+};
+const FILT = {
+all: () => true,
+use: (p) => p.sub === 'use',
+spare: (p) => p.sub === 'spareX' || p.sub === 'spareE',
+check: (p) => p.sub === 'check',
+off: (p) => p.sub === 'off',
+ev: (p) => !!FLAG[p.ev]
+};
+const chipStyle = (on) => 'height: 30px; padding: 0 11px; border-radius: 999px; font: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap; ' + (on ? 'border: 1px solid #2563eb; background: #1e3a8a; color: #ffffff;' : 'border: 1px solid #243049; background: #0f1626; color: #c9d5e6;');
+const chips = [['all', '전체'], ['use', '사용 중'], ['spare', '예비'], ['check', '확인 필요'], ['off', '꺼짐'], ['ev', '근거 확인할 것']].map((c) => ({ label: c[1], n: cnt(eth, FILT[c[0]]), on: filt === c[0], style: chipStyle(filt === c[0]), pick: () => this.setState({ filt: c[0] }) }));
+const shown = P.filter((p) => (filt === 'all' ? true : !p.mgmt && FILT[filt](p)));
+const rows = shown.map((p) => ({
+name: p.n,
+pick: pick(p.n),
+rowStyle: 'display: grid; grid-template-columns: 108px 128px 108px 112px minmax(96px, 1.1fr) minmax(96px, 1fr) 116px 84px 116px; align-items: center; border-top: 1px solid #1f2a40;' + (p.n === sel.n ? ' background: #1a2a4a;' : ''),
+sw: swatch(CLS[p.sub].paint),
+clsLabel: CLS[p.sub].label,
+dev: p.dev || '—',
+evLabel: p.linked ? EV[p.ev].short : (p.desc ? '설명(링크 없음)' : '—'),
+evStyle: 'color: ' + (p.linked ? EV[p.ev].dot : '#a9b6cc') + (p.ev === 'mismatch' || p.ev === 'none' ? '; font-weight: 600' : '') + ';',
+desc: p.desc || '—',
+lldp: p.ls ? p.ls + ' · ' + p.lp : '—',
+spx: p.xc || '빈 케이지',
+util: p.linked ? p.inU + '% / ' + p.outU + '%' : '—',
+last: p.last
+}));
+return {
+tabs: tabs, modes: modes, groups: groups, rear: rear, legend: legend, modeNote: modeNote,
+headline: total + '포트 중 ' + nUse + ' 사용(' + pct(nUse, total) + ') · 바로 쓸 수 있는 예비 ' + (nX + nE) + '(' + pct(nX + nE, total) + ')',
+totalSegs: segsOf(eth), tiles: tiles, speedRows: speedRows,
+d: d, chips: chips, rows: rows,
+rowsNote: shown.length + '개 표시 · 포트 이름을 누르면 구성도에서 그 포트가 선택됩니다 · 실제 화면에서는 머리글을 눌러 정렬합니다'
+};
+}
+}
+</script>
+</body>
+</html>

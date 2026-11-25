@@ -39,6 +39,8 @@ import { waitDrain } from '../../util/waitDrain.js'; // v2.783(점검 Q5 — O-B
 import { config } from '../../config.js';
 import { getTarget, edgeTargetId } from '../../ping/store.js';
 import { windowOf, targetBoundsOf } from '../../ping/service.js';
+import { loadPingSettings } from '../../ping/settings.js';
+import { textFields } from '../../util/coercionTrap.js';   // 163회차: 본문 값이 객체 · 배열이면 String()/Number()/.trim() 이 던져 500 이었다 — 400
 
 const adminOnly = requireRole('admin');
 const csvPerm = requirePerm('data.csv');
@@ -324,7 +326,8 @@ api.get('/tools/xfer-speed/ping', adminOnly, fullScopeOnly, async (req, res) => 
   const points = pn == null ? PING_POINTS_DEFAULT : Math.max(60, Math.min(480, Math.floor(pn)));
   const base = {
     ok: true, agent: a.id, days, start: since, end, now, past, offsetMin: DAY_OFFSET_MIN,
-    monitorEnabled: !!config.ping.enabled, intervalMs: config.ping.pollIntervalMs, timeoutMs: config.ping.timeoutMs,
+    // v2.964: 주기는 Ping 측정 설정(화면 값 > env) — intervalMs = 요약(저장) 주기, probeIntervalMs = 연속 측정 간격.
+    monitorEnabled: !!config.ping.enabled, intervalMs: loadPingSettings().summaryIntervalMs, probeIntervalMs: loadPingSettings().probeIntervalMs, timeoutMs: loadPingSettings().timeoutMs,
     retentionDays: numOrNull(config.ping.retentionDays),
   };
   const tid = edgeTargetId(a.col || { id: a.id });
@@ -388,7 +391,7 @@ api.get('/tools/xfer-speed/log', adminOnly, fullScopeOnly, async (req, res) => {
 });
 
 /** 지금 측정 — 기다리지 않고 시작만 한다(한 주기가 수 분 걸린다). 화면은 메인 응답의 status.progress 로 진행을 본다. */
-api.post('/tools/xfer-speed/run', adminOnly, fullScopeOnly, async (req, res) => {
+api.post('/tools/xfer-speed/run', adminOnly, fullScopeOnly, textFields('agent'), async (req, res) => {
   const want = t(req.body?.agent);
   let only = '';
   if (want) {

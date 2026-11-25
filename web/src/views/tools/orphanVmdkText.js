@@ -14,8 +14,8 @@
  */
 
 export const VERDICT = {
-  orphan: { label: '소유 VM 없음', tone: 'red', desc: '이 vCenter 의 어떤 VM 도 이 파일을 쓰지 않습니다. 폴더에 .vmx 도 없습니다.' },
-  unregistered: { label: '미등록 VM 폴더', tone: 'amber', desc: '같은 폴더에 .vmx 가 있습니다 — 등록 해제된 VM 이거나 다른 vCenter 가 등록한 VM 일 수 있습니다.' },
+  orphan: { label: '소유 VM 없음', tone: 'red', desc: '이 vCenter 의 어떤 VM 도 이 파일을 쓰지 않습니다. 폴더에 .vmx(템플릿은 .vmtx)도 없습니다.' },
+  unregistered: { label: '미등록 VM 폴더', tone: 'amber', desc: '같은 폴더에 .vmx(템플릿은 .vmtx)가 있습니다 — 등록 해제된 VM · 템플릿이거나 다른 vCenter 가 등록한 것일 수 있습니다.' },
   hold: { label: '판정 보류', tone: 'blue', desc: '최근에 변경된 파일입니다 — 복제·마이그레이션·백업이 진행 중일 수 있습니다.' },
 };
 

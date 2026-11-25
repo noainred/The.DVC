@@ -23,7 +23,7 @@ parentPort.on('message', async (msg) => {
   try {
     // 받은 개수가 보낸 개수와 다르면 만들지 않는다 — 일부만 담긴 파일을 '전체' 로 내보내지 않는다.
     if (Number.isFinite(msg.total) && msg.total !== sheets.length) throw new Error(`받은 시트 ${sheets.length}개 · 보낸 시트 ${msg.total}개`);
-    const wb = await buildWorkbook(sheets, { created: msg.created });
+    const wb = await buildWorkbook(sheets, { created: msg.created, extra: msg.extra || null }); // v3.5.0: 요약 · 대역 목록 · 조치 필요 · 안내
     const buf = await wb.xlsx.writeBuffer();
     const b = Buffer.isBuffer(buf) ? buf : Buffer.from(buf);
     // 작은 Buffer 는 공용 풀의 조각일 수 있다 — 넘길 때는 그 바이트만 담은 ArrayBuffer 로(풀 전체를 넘기지 않게).

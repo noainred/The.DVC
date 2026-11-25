@@ -48,7 +48,10 @@ export function parseDuOutput(stdout, root) {
     if (!line.trim()) continue;
     const tab = line.indexOf('\t');
     if (tab <= 0) { if (/^du:/.test(line)) continue; skipped++; continue; }  // `du: cannot read ...` 는 경고
-    const bytes = Number(line.slice(0, tab).trim());
+    // 68회차 F3: 바이트 칸은 십진 정수일 때만 값이다 — Number('') === 0 · Number(' ') === 0 이라 빈 칸이 '0 바이트 폴더' 가 되고, 루트 행이면
+    //   합계 0 이 '루트 합계 행 있음'(judgeDuResult exit 1 성공 조건)으로 통과했다. du -b 는 십진 정수만 쓴다(1e3 · 0x10 · 12.5 도 받지 않는다).
+    const rawBytes = line.slice(0, tab).trim();
+    const bytes = /^\d{1,16}$/.test(rawBytes) ? Number(rawBytes) : NaN;
     const p = stripSlash(line.slice(tab + 1).trim());
     if (!Number.isFinite(bytes) || bytes < 0 || !p) { skipped++; continue; }
     if (p === rootNorm) { totalBytes = bytes; continue; }                    // 루트 자신 = 합계

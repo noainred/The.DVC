@@ -1,3 +1,4 @@
+import { envPositive, ENV_INT_MAX } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { Agent } from 'undici';
 import { constants as cryptoConstants } from 'node:crypto';
 import { config } from '../config.js';
@@ -82,7 +83,7 @@ const vcConnectOpts = withSsrfLookup(vcStrict
 export const vcDispatcher = new Agent({
   connect: deviceTlsConnect({ subsystem: 'vcenter', envKey: 'VC_TLS_REJECT_UNAUTHORIZED', envRaw: process.env.VC_TLS_REJECT_UNAUTHORIZED, mode: config.vcTlsVerifyMode, tls: vcConnectOpts }),
   connectTimeout: 15_000,
-  keepAliveTimeout: Number(process.env.VC_KEEPALIVE_MS) || 4_000,
+  keepAliveTimeout: envPositive(process.env.VC_KEEPALIVE_MS, 4_000, { max: ENV_INT_MAX }),
   keepAliveMaxTimeout: 10_000,
   pipelining: 1,
 });

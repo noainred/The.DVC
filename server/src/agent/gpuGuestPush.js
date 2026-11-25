@@ -10,6 +10,7 @@
  * 단방향 아웃바운드라 폐쇄망/NAT 사이트에 유리하다.
  */
 
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import zlib from 'node:zlib';
 import { promisify } from 'node:util';
 import { config } from '../config.js';
@@ -31,7 +32,7 @@ const PUSH_GZIP = process.env.AGENT_PUSH_GZIP !== 'false';
  * 첫 게스트 폴이 끝났는지 보지 않아, 재시작 직후 빈 목록(hosts:[] vms:[] diag:null)을 보내 중앙의 그 법인 GPU 사용률을 지웠다
  * (인벤토리 v2.600 EDGE2600-04 의 형제). 첫 폴(lastRun) 전에는 보내지 않는다 — 보류에는 시한을 둔다(v2.601 규약).
  */
-export const GPU_GUEST_PUSH_WITHHOLD_MAX_MS = Math.max(60_000, Number(process.env.AGENT_GPU_GUEST_WITHHOLD_MAX_MS) || 15 * 60_000);
+export const GPU_GUEST_PUSH_WITHHOLD_MAX_MS = Math.max(60_000, envPositive(process.env.AGENT_GPU_GUEST_WITHHOLD_MAX_MS, 15 * 60_000));
 let _withholdSince = null;
 let _pollerStatus = () => gpuGuestStatus();
 /** 첫 폴 전 보류 판정(순수). 반환 { withhold, since } */

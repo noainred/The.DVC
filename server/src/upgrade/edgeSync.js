@@ -29,10 +29,11 @@
  *     upgrade.js pushBundleToEdge(번들 **파일**)로 — 그래서 번들은 패키지 폴더에 보관된 파일 경로가 있어야 한다(없으면 그 엣지만 사유와 함께 실패).
  *  C. '지금 동기화' — routes/upgrade.js `POST /api/upgrade/edge-sync` 가 run() 을 부른다(단일 진행 — 주기 실행과 겹치면 같은 약속).
  *  D. 같은 엣지가 같은 대상 버전으로 **백오프 상한(6시간)에 닿을 만큼 연속 실패**하면 알림 채널(alerts.js notify)로 한 번 알리고, 그 뒤
- *     성공하면 '해소' 를 한 번 알린다(key `edgesync:<id>|<버전>` · 억제는 alerts.js 의 key 단위 창이 한다). 알린 사실은 메모리에만 — 재시작하면
- *     연속 실패 수가 0 부터 다시 세므로 같은 장애를 한 번 더 알릴 수 있다(정직 기록).
+ *     성공하면 '해소' 를 한 번 알린다(key `edgesync:<id>|<버전>` · 억제는 alerts.js 의 key 단위 창이 한다). v2.938: 알린 사실·연속 실패 수는
+ *     upgrade-status.json 의 edgeSyncState 로 재시작을 넘긴다(persistState·restoreState) — 같은 장애를 재시작마다 다시 알리지 않는다.
  */
 import { loadCollectors, ssrfBlockReason } from '../collector/registry.js';
+import { PUSH_HOLD_MAX_MS } from './pushDeferred.js';   // 51회차 #3
 import { getCollectorStatus } from '../collector/state.js';
 import { pushUpgradeToCollectors, pushConcurrencyOf } from '../collector/upgradePush.js';
 import { resolveBundleBytes, lastBundleReject } from './bundleSource.js';
@@ -181,6 +182,11 @@ export function planEdgeSync({ collectors = [], statusOf = () => null, attemptsO
         // v2.870 감사 A2-01: 성공이라 답한 push 를 같은 대상 버전으로 다시 밀었는데도(=효과 없음 noEffect 회) 뒤처져 있으면 settle 을 밑으로
         // settle × 2^n(상한 6시간)까지 기다린다. 예전에는 settle(30분)이 지나면 매번 'behind' 로 다시 밀어 번들 전송 + 엣지 재시작이 영구 반복됐다
         // (재현 — 엣지 설치 경로가 실행 경로와 다르거나 재시작 뒤 롤백). 성공이면 attempts 를 0 으로 돌리므로 실패 백오프가 걸리지 않았다.
+        if (a && a.target === cur && a.ok && Number.isFinite(a.holdUntil) && now < a.holdUntil + settleMs) {
+          // 51회차 #3: 엣지가 진행 중 작업을 기다리며 설치를 미뤘다 — 그 상한 + settle 까지 다시 밀지 않는다(반증 A5: '효과 없음' 판정보다 먼저)
+          state = 'waiting'; row.nextAt = a.holdUntil + settleMs; row.reason = '엣지가 진행 중 작업이 끝나기를 기다렸다가 설치합니다';
+        }
+        else {
         const ne = a && a.target === cur && a.ok ? Math.max(0, Math.floor(numOrNull(a.noEffect) ?? 0)) : 0;
         if (ne > 0) {
           const wait = noEffectWaitMs(ne, settleMs, maxBackoffMs);
@@ -190,6 +196,7 @@ export function planEdgeSync({ collectors = [], statusOf = () => null, attemptsO
         else if (a && a.target === cur && !a.ok) {
           const wait = backoffMs(a.attempts, intervalMs, maxBackoffMs);
           if (now - a.at < wait) { state = 'backoff'; row.nextAt = a.at + wait; row.reason = txt(a.reason, 300); }
+        }
         }
         if (!state) { state = 'behind'; push.push(id); }
       }
@@ -275,6 +282,23 @@ export class EdgeSyncRunner {
     return true;
   }
 
+  /**
+   * v2.938(제안 3번): 연속 실패 수(attempts)·알린 사실(alerted)을 상태 파일에 남긴다 — 예전에는 메모리뿐이라 재시작하면 연속 실패 수가 0 부터 다시 세어
+   *   같은 장애를 한 번 더 알렸고, 백오프도 처음부터 다시 시작했다(6시간 상한에 닿은 엣지에 재시작 직후 10분마다 다시 밀었다).
+   */
+  persistState() {
+    // 86회차 개선: 엣지 보류 시한(holdUntil — 51회차 #3)도 남긴다 — 빠지면 중앙이 재시작한 뒤 settle(30분)만 지나 보류 중인 엣지에 번들을 다시 올렸다(51회차 반증 A6 의 일부).
+    const attempts = [...this.attempts.entries()].slice(-500).map(([id, a]) => [id, { at: a.at, ok: !!a.ok, target: a.target, attempts: a.attempts || 0, reason: a.reason || null, ...(Number.isFinite(a.holdUntil) ? { holdUntil: a.holdUntil } : {}) }]);
+    return { attempts, alerted: [...this.alerted].slice(-500) };
+  }
+  /** 재시작 전 상태를 되살린다(이 프로세스가 이미 기록을 가졌으면 그 키는 덮지 않는다). */
+  restoreState(st) {
+    if (!st || typeof st !== 'object') return false;
+    for (const [id, a] of Array.isArray(st.attempts) ? st.attempts : []) if (!this.attempts.has(id)) this.attempts.set(id, { ...a });
+    for (const m of Array.isArray(st.alerted) ? st.alerted : []) this.alerted.add(m);
+    return true;
+  }
+
   /** 타이머를 (다시) 무장한다 — 설정 저장·기동 때. 꺼져 있으면 풀기만 하고 false. */
   arm() {
     this.disarm();
@@ -327,9 +351,14 @@ export class EdgeSyncRunner {
     //   예전에는 직전 기록이 성공일 때만 이어져, 성공 → (엣지 재시작 중) 실패 → 성공 … 이 반복되면 noEffect 가 매번 0 으로 돌아가
     //   다시 밀기 간격 상한 · '효과 없음' 알림에 끝내 닿지 않았다(실패 attempts 도 성공마다 0). 대상 버전이 바뀌면 처음부터.
     const same = !!prev && prev.target === cur;
-    const okSeen = (same ? Math.max(0, Math.floor(numOrNull(prev.okSeen) ?? 0)) : 0) + (ok ? 1 : 0);   // attempts 는 메모리 기록뿐(파일에 쓰지 않는다)
+    // 51회차 #3(사용자 결정): 엣지가 진행 중 작업을 기다리느라 설치를 미뤘다(deferred) — 그 성공은 '효과 없음' 으로 세지 않고(아직 설치 전),
+    //   남은 대기 시간(waitMs — 엣지가 정한 상한 안) 동안은 다시 밀지 않는다(holdUntil — planEdgeSync 가 그 뒤 settle 까지 'waiting').
+    const deferred = ok && r.deferred === true;
+    const okSeen = (same ? Math.max(0, Math.floor(numOrNull(prev.okSeen) ?? 0)) : 0) + (ok && !deferred ? 1 : 0);   // attempts 는 메모리 기록뿐(파일에 쓰지 않는다)
     const noEffect = Math.max(0, okSeen - 1);
-    this.attempts.set(r.id, { at: this.now(), ok, target: cur, attempts, reason, ...(okSeen ? { okSeen } : {}), ...(noEffect ? { noEffect } : {}) });
+    const now = this.now();
+    const holdMs = deferred ? Math.min(PUSH_HOLD_MAX_MS, Math.max(0, numOrNull(r.waitMs) ?? 0)) : 0;
+    this.attempts.set(r.id, { at: now, ok, target: cur, attempts, reason, ...(okSeen ? { okSeen } : {}), ...(noEffect ? { noEffect } : {}), ...(deferred ? { holdUntil: now + holdMs } : {}) });
     const row = rowsById.get(r.id) || {};
     const mark = `${r.id}|${cur}`;
     const base = this.intervalMs || this.fixedIntervalMs || edgeSyncIntervalMs();
@@ -423,7 +452,7 @@ export class EdgeSyncRunner {
                   const settled = await poolSettled(legacyPush, pushConcurrencyOf(), (e) => this.pushEdgeFn({ url: e.url, token: e.token }, bundle.path, { manifestText: bundle.manifest || undefined }));
                   settled.forEach((s, i) => {
                     const e = legacyPush[i];
-                    if (s.status === 'fulfilled' && s.value) results.push({ id: e.id, name: e.name, ok: s.value.ok === true, upToDate: s.value.upToDate === true, status: s.value.status, reason: s.value.reason, version: s.value.version });
+                    if (s.status === 'fulfilled' && s.value) results.push({ id: e.id, name: e.name, ok: s.value.ok === true, upToDate: s.value.upToDate === true, status: s.value.status, reason: s.value.reason, version: s.value.version, ...(s.value.deferred ? { deferred: true, waitMs: s.value.waitMs } : {}) });
                     else results.push({ id: e.id, name: e.name, ok: false, reason: String(s.reason?.message || s.reason || 'push 실패').slice(0, 300) });
                   });
                 }

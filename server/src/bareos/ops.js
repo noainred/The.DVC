@@ -110,7 +110,16 @@ export const OPS = Object.freeze({
     return out;
   },
 
-  runJob: (s, { job, level }) => runJob(s, { job, level }),
+  /**
+   * 단건 '지금 실행'. 전체 점검 3회차(B-3): `run job=… yes` 를 보낸 뒤 끊김(timeout · closed · protocol — jobid 없는 응답 포함)은 **결과 모름**이다 —
+   *   그룹 실행(runJobs · chunkErrorState)과 복원(v2.874 B5-01)은 이미 그렇게 다뤘는데 단건 실행만 확정 실패(502)로 보여, 사람이 다시 눌러 두 번 돌 수 있었다.
+   */
+  async runJob(s, { job, level }) {
+    try { return await runJob(s, { job, level }); } catch (e) {
+      if (MID_COMMAND_CODES.has(e?.code)) throw Object.assign(new Error(`백업 실행 명령을 보낸 뒤 응답이 끊겼습니다(${e.code}) — 시작됐는지 알 수 없습니다. Director 에서 확인하세요(포탈은 다시 보내지 않습니다).`), { code: 'unknown', unknown: true });
+      throw e;
+    }
+  },
 
   /**
    * v2.830 백업 그룹 실행 — 세션 하나로 순차(VM 마다 접속하지 않는다 — 고RTT 법인에서 TLS 왕복을 아낀다). 한 잡의 실패는 나머지를 막지 않고,

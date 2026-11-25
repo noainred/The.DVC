@@ -40,7 +40,7 @@ function load() {
     const obj = JSON.parse(fs.readFileSync(FILE, 'utf8'));
     if (obj && typeof obj === 'object') {
       for (const [u, rec] of Object.entries(obj)) {
-        if (rec && typeof rec.sid === 'string' && rec.sid) _map.set(u, { sid: rec.sid, at: Number(rec.at) || 0, ip: String(rec.ip || '') });
+        if (rec && typeof rec.sid === 'string' && rec.sid) _map.set(u, { sid: rec.sid, at: Number(rec.at) || 0, ip: String(rec.ip || ''), ...(typeof rec.user === 'string' && rec.user ? { user: rec.user.slice(0, 256) } : {}) });
       }
     }
   } catch { /* 부재/손상 → 빈 레지스트리(최악: 한 번 재로그인) */ }
@@ -61,15 +61,41 @@ function persist() {
 export function newSessionId() { return crypto.randomBytes(16).toString('hex'); }
 
 /** 로그인 성공 시 이 계정의 활성 세션을 이 sid 로 교체한다(이전 세션 무효화 — 최신 로그인 우선). */
-export function setActiveSession(username, sid, { at = Date.now(), ip = '' } = {}) {
+/*
+ * 157회차(재현): 등록 키는 로컬 계정이면 이름 그대로, AD 세션이면 호출부가 `key`(auth/ad.js adAccountKey — 표기 변형을 접은 키)를 준다.
+ *   예전에는 세션 이름이 곧 키라, 같은 AD 계정을 `kim` · `KIM` · `CORP\kim` 으로 따로 로그인하면 서로를 끊지 못했다(단일 세션 강제 — ID 공유 금지 — 우회).
+ *   `key` 를 준 기록은 실제 세션 이름을 `user` 에 둔다(폐기 이벤트 · 목록 표시). 업그레이드 전에 이름으로 등록된 AD 세션은 접은 키의 기록이 없을 때만 인정한다(전원 재로그인 방지).
+ */
+/*
+ * 162회차(157 B1 반증 — 재현): 걷는 범위가 '대소문자만 다른 이름' 뿐이라, 업그레이드 전에 `kim` 으로 등록된 세션은 새 판의 `CORP\kim`(또는 `kim@도메인`) 로그인에 끊긴 뒤
+ *   (접은 키의 기록이 생겨 무효) 그 새 세션이 **로그아웃하면 되살아났다**(접은 키의 기록이 사라져 이름 기록으로 떨어진다 — isActiveSession).
+ *   호출부가 `legacyKeyOf`(예전 이름 → 그 이름이 지금 쓸 키 · 로컬 계정이면 '')를 주면 **접은 키가 같은 예전 이름 기록을 전부** 걷고, 걷은 세션마다 폐기를 알린다.
+ */
+export function setActiveSession(username, sid, { at = Date.now(), ip = '', key = '', legacyKeyOf = null } = {}) {
   const u = String(username || '');
   if (!u || !sid) return;
-  const prev = load().get(u);
-  load().set(u, { sid: String(sid), at, ip: String(ip || '') });
+  const k = String(key || '') || u;
+  const replaced = [];
+  { const prev = load().get(k); if (prev) replaced.push({ name: prev.user || u, sid: prev.sid }); }
+  if (k !== u) {
+    // 예전 판이 이름 키로 등록한 이 계정의 기록(대소문자만 다른 표기 · 접은 키가 같은 표기)을 걷는다 — 남기면 새 세션이 로그아웃한 뒤 예전 토큰이 되살아난다.
+    //   접은 키의 기록(user 칸이 있다)은 건드리지 않는다. 같은 이름(대소문자 무시)의 로컬 계정이 있으면 AD 로그인 자체가 없다(authenticate — localNameTaken).
+    const lu = u.toLowerCase();
+    for (const [name, rec] of [...load().entries()]) {
+      if (name === k || rec.user) continue;
+      let same = name.toLowerCase() === lu;
+      if (!same && typeof legacyKeyOf === 'function') { try { same = legacyKeyOf(name) === k; } catch { same = false; } }
+      if (!same) continue;
+      replaced.push({ name, sid: rec.sid });
+      load().delete(name);
+    }
+  }
+  load().set(k, { sid: String(sid), at, ip: String(ip || ''), ...(k !== u ? { user: u } : {}) });
   persist();
   // 2026-10-09 검토 S-04: 덮어쓴 이전 세션은 HTTP 에서 이미 무효다(isActiveSession). 열린 장기 연결(SSH·RDP WS)도 즉시 닫게 알린다.
-  if (prev && prev.sid && prev.sid !== String(sid)) {
-    try { notifySessionRevoked({ scope: 'session', username: u, sid: prev.sid, reason: 'single-session-replaced' }); } catch { /* */ }
+  for (const r of replaced) {
+    if (!r.sid || r.sid === String(sid)) continue;
+    try { notifySessionRevoked({ scope: 'session', username: r.name, sid: r.sid, reason: 'single-session-replaced' }); } catch { /* */ }
   }
 }
 
@@ -78,9 +104,9 @@ export function setActiveSession(username, sid, { at = Date.now(), ip = '' } = {
  * 기록이 없거나(레지스트리에 없음) sid 가 다르면(다른 로그인이 덮어씀·구식 무 sid 토큰) false →
  * 그 토큰은 무효 처리된다(재로그인 필요).
  */
-export function isActiveSession(username, sid) {
+export function isActiveSession(username, sid, { key = '' } = {}) {
   if (!sid) return false; // sid 없는(기능 도입 전) 토큰은 강제 대상에서 유효로 인정하지 않는다
-  const rec = load().get(String(username || ''));
+  const rec = (key ? load().get(String(key)) : null) || load().get(String(username || ''));
   return !!rec && rec.sid === sid;
 }
 
@@ -90,16 +116,17 @@ export function clearActiveSession(username) {
 }
 
 /** 로그아웃(S-05) — 이 계정의 활성 세션이 바로 이 sid 일 때만 지운다(다른 기기의 최신 세션을 지우지 않는다). */
-export function clearActiveSessionIf(username, sid) {
-  const u = String(username || '');
-  const rec = load().get(u);
-  if (rec && sid && rec.sid === String(sid)) { load().delete(u); persist(); return true; }
+export function clearActiveSessionIf(username, sid, { key = '' } = {}) {
+  for (const u of [String(key || ''), String(username || '')]) {
+    const rec = u ? load().get(u) : null;
+    if (rec && sid && rec.sid === String(sid)) { load().delete(u); persist(); return true; }
+  }
   return false;
 }
 
 /** 관리/디버그용 — 현재 활성 세션 요약(sid 자체는 노출하지 않는다). */
 export function listActiveSessions() {
-  return [...load().entries()].map(([username, r]) => ({ username, at: r.at, ip: r.ip }));
+  return [...load().entries()].map(([username, r]) => ({ username: r.user || username, at: r.at, ip: r.ip }));
 }
 
 /** 테스트용 — 인메모리 캐시 리셋(파일에서 다시 로드하게). */

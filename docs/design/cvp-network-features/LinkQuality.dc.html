@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>CVP 링크 품질 — 불량 링크 · 플랩 순위</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="box-sizing: border-box; padding: clamp(12px, 2vw, 28px); background: #0a0e17; color: #e6edf6; font-family: 'Inter', 'Noto Sans KR', 'Apple SD Gothic Neo', sans-serif; font-size: 13px; line-height: 1.5; display: flex; flex-direction: column; gap: 14px;">
+
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<div style="font-size: 12px; color: #a9b6cc;">네트워크 › Arista CVP › 포트 · 링크</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center;">
+<h1 style="margin: 0; font-size: 20px; font-weight: 700;">링크 품질</h1>
+<span style="display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: 999px; font-size: 12px; font-weight: 600; background: #35205c; border: 1px solid #c084fc; color: #f1e6ff;">④ 오류 합계는 있음 · 종류 구분은 새 수집</span>
+<span style="display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: 999px; font-size: 12px; font-weight: 600; background: #4a3208; border: 1px solid #f59e0b; color: #fff3d6;">⑩ 플랩 횟수는 새 수집</span>
+</div>
+<div style="font-size: 12.5px; color: #a9b6cc; overflow-wrap: anywhere;">오류가 늘고 있는 링크와 자주 오르내리는 링크를 전 법인에서 골라, 광신호와 묶어 ‘무엇을 바꿔 볼지’ 까지 말합니다.</div>
+</div>
+
+<div style="{{k.card}}">
+<div style="display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center;">
+<label style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #a9b6cc;">법인
+<select style="height: 32px; padding: 0 8px; border-radius: 8px; border: 1px solid #243049; background: #0f1626; color: #e6edf6; font: inherit;"><option>전체(28)</option><option>KR1</option><option>PL-WRO</option><option>US-EAST</option></select></label>
+<span style="font-size: 12px; color: #a9b6cc;">기간</span>
+<div style="{{k.seg}}">
+<sc-for list="{{ranges}}" as="m" hint-placeholder-count="3"><button type="button" onClick="{{m.pick}}" aria-pressed="{{m.on}}" style="{{m.style}}">{{m.label}}</button></sc-for>
+</div>
+<span style="font-size: 12px; color: #a9b6cc;">순서</span>
+<div style="{{k.seg}}">
+<sc-for list="{{modes}}" as="m" hint-placeholder-count="2"><button type="button" onClick="{{m.pick}}" aria-pressed="{{m.on}}" style="{{m.style}}">{{m.label}}</button></sc-for>
+</div>
+</div>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px;">
+<sc-for list="{{tiles}}" as="t" hint-placeholder-count="4">
+<div style="background: #0f1626; border: 1px solid #1f2a40; border-radius: 12px; padding: 12px 14px; min-width: 0; display: flex; flex-direction: column; gap: 2px;">
+<div style="font-size: 12px; color: #a9b6cc;">{{t.label}}</div>
+<div style="{{t.val}}">{{t.n}}</div>
+<div style="font-size: 12px; color: #a9b6cc; overflow-wrap: anywhere;">{{t.meta}}</div>
+</div>
+</sc-for>
+</div>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start;">
+
+<div style="flex: 999 1 640px; min-width: 0; background: #141b2d; border: 1px solid #1f2a40; border-radius: 14px; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px;">
+<b style="font-size: 14px;">{{tableTitle}}</b>
+<div style="overflow-x: auto; border: 1px solid #1f2a40; border-radius: 10px;">
+<div role="table" aria-label="링크 품질 순위" style="min-width: 940px; font-size: 12.5px;">
+<div role="row" style="{{k.headRow}}">
+<div role="columnheader" style="{{k.th}}">스위치 · 포트</div>
+<div role="columnheader" style="{{k.th}}">연결 장비</div>
+<div role="columnheader" style="{{k.thr}}">오류(기간)</div>
+<div role="columnheader" style="{{k.th}}">14일 추이</div>
+<div role="columnheader" style="{{k.thr}}">수신 광량</div>
+<div role="columnheader" style="{{k.thr}}">플랩</div>
+<div role="columnheader" style="{{k.th}}">판정</div>
+</div>
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="8">
+<div role="row" style="{{r.rowStyle}}">
+<div role="cell" style="padding: 3px 4px; min-width: 0;"><button type="button" onClick="{{r.pick}}" style="min-height: 34px; padding: 2px 6px; border: 0; border-radius: 6px; background: transparent; color: #7dd3fc; font: 600 12.5px 'JetBrains Mono', ui-monospace, monospace; cursor: pointer; text-align: left;">{{r.sw}} {{r.port}}</button></div>
+<div role="cell" style="{{k.tdm}}">{{r.peer}}</div>
+<div role="cell" style="{{k.tdr}}">{{r.errText}}</div>
+<div role="cell" style="{{k.td}}"><div role="img" aria-label="{{r.sparkLabel}}" style="{{r.spark}}"></div></div>
+<div role="cell" style="{{r.rxStyle}}">{{r.rxText}}</div>
+<div role="cell" style="{{r.flapStyle}}">{{r.flapText}}</div>
+<div role="cell" style="{{k.td}}"><span style="{{r.vStyle}}">{{r.verdict}}</span></div>
+</div>
+</sc-for>
+</div>
+</div>
+<div style="font-size: 12px; color: #a9b6cc; overflow-wrap: anywhere;">오류 수는 누적 카운터의 차이입니다(카운터가 초기화된 구간은 뺍니다). 링크가 없는 포트와 카운터를 못 읽은 포트는 순위에 넣지 않고 ‘판정 못 함’ 으로 셉니다.</div>
+</div>
+
+<div style="flex: 1 1 320px; min-width: 0; background: #141b2d; border: 1px solid #1f2a40; border-radius: 14px; padding: 16px 18px; display: flex; flex-direction: column; gap: 12px;">
+<div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
+<b style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 15px;">{{d.title}}</b>
+<span style="{{d.vStyle}}">{{d.verdict}}</span>
+</div>
+<div style="font-size: 12.5px; color: #c9d5e6; overflow-wrap: anywhere;">{{d.why}}</div>
+<div style="display: flex; flex-direction: column; gap: 4px;">
+<div style="font-size: 12px; color: #a9b6cc;">하루 오류 수 — 최근 14일</div>
+<div style="display: flex; align-items: flex-end; gap: 4px; height: 84px; padding: 6px 8px; background: #0f1626; border: 1px solid #1f2a40; border-radius: 8px;" role="img" aria-label="{{d.barsLabel}}">
+<sc-for list="{{d.bars}}" as="b" hint-placeholder-count="14"><div style="{{b.style}}" title="{{b.tip}}"></div></sc-for>
+</div>
+<div style="display: flex; justify-content: space-between; font-size: 11px; color: #a9b6cc; font-family: 'JetBrains Mono', ui-monospace, monospace;"><span>11-10</span><span>11-16</span><span>11-23</span></div>
+</div>
+<div style="display: flex; flex-direction: column;">
+<sc-for list="{{d.rows}}" as="x" hint-placeholder-count="5">
+<div style="display: flex; gap: 10px; padding: 7px 0; border-top: 1px solid #1f2a40;">
+<div style="flex: 0 0 104px; font-size: 12px; color: #a9b6cc;">{{x.k}}</div>
+<div style="flex: 1 1 0; min-width: 0; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; overflow-wrap: anywhere;">{{x.v}}</div>
+</div>
+</sc-for>
+</div>
+</div>
+
+</div>
+
+<div style="{{k.card}}">
+<b style="font-size: 13px;">판정 규칙</b>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 8px 16px; font-size: 12.5px; color: #c9d5e6;">
+<div style="overflow-wrap: anywhere;"><b style="color: #fca5a5;">교체 후보</b> — 오류가 늘고 수신 광량이 임계 아래: GBIC · 광케이블부터</div>
+<div style="overflow-wrap: anywhere;"><b style="color: #fbbf24;">상대 확인</b> — 오류가 늘지만 광량은 정상: 상대 장비 · 속도 · Duplex</div>
+<div style="overflow-wrap: anywhere;"><b style="color: #c4b5fd;">플랩</b> — 기간 안에 여러 번 오르내림: 접촉 · 상대 NIC · 전원</div>
+<div style="overflow-wrap: anywhere;"><b style="color: #a9b6cc;">관찰</b> — 오류가 있으나 늘지 않음</div>
+</div>
+<div style="font-size: 12px; color: #a9b6cc; overflow-wrap: anywhere;">지금은 오류 합계만 읽습니다 — CRC · 폐기를 구분하려면 수집을 더해야 합니다. 플랩은 수집 주기 사이의 짧은 오르내림을 놓칠 수 있고, Syslog 를 붙이면 정확해집니다(2단계). 임계값(오류 증가 · 플랩 횟수)은 CVP 설정에서 바꿉니다.</div>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+renderVals() {
+const st = this.state || {};
+const mode = st.mode || 'err';
+const range = st.range || '7d';
+const MONO = "font-family: 'JetBrains Mono', ui-monospace, monospace;";
+const COLS = 'display: grid; grid-template-columns: 190px 150px 104px 136px 104px 70px minmax(150px, 1fr); align-items: center;';
+const k = {
+card: 'background: #141b2d; border: 1px solid #1f2a40; border-radius: 14px; padding: 16px 18px; min-width: 0; display: flex; flex-direction: column; gap: 12px;',
+seg: 'display: inline-flex; flex-wrap: wrap; border: 1px solid #243049; border-radius: 8px; overflow: hidden;',
+headRow: COLS + ' background: #0f1626; color: #a9b6cc;',
+th: 'padding: 8px 10px; font-weight: 600; white-space: nowrap;',
+thr: 'padding: 8px 10px; font-weight: 600; white-space: nowrap; text-align: right;',
+td: 'padding: 6px 10px; min-width: 0;',
+tdm: 'padding: 6px 10px; min-width: 0; overflow-wrap: anywhere; ' + MONO,
+tdr: 'padding: 6px 10px; min-width: 0; text-align: right; white-space: nowrap; ' + MONO
+};
+const segBtn = (on) => 'height: 32px; padding: 0 12px; border: 0; border-right: 1px solid #243049; font: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap; ' + (on ? 'background: #2563eb; color: #ffffff; font-weight: 600;' : 'background: transparent; color: #a9b6cc;');
+const modes = [['err', '오류 많은 순'], ['flap', '플랩 많은 순']].map((m) => ({ label: m[1], on: mode === m[0], style: segBtn(mode === m[0]), pick: () => this.setState({ mode: m[0] }) }));
+const ranges = [['24h', '24시간'], ['7d', '7일'], ['30d', '30일']].map((m) => ({ label: m[1], on: range === m[0], style: segBtn(range === m[0]), pick: () => this.setState({ range: m[0] }) }));
+const mul = range === '24h' ? 0.16 : range === '30d' ? 3.7 : 1;
+const V = {
+swap: ['교체 후보', 'background: #5a1616; border: 1px solid #f87171; color: #ffe9e9;', '#f87171'],
+peer: ['상대 확인', 'background: #4a3208; border: 1px solid #f59e0b; color: #fff3d6;', '#fbbf24'],
+flap: ['플랩', 'background: #35205c; border: 1px solid #c084fc; color: #f1e6ff;', '#c084fc'],
+watch: ['관찰', 'background: #1a2236; border: 1px solid #64748b; color: #cbd5e1;', '#94a3b8']
+};
+const pill = 'display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; ';
+const D = [
+['kr1-leaf-a03', 'Ethernet21', 'esx-kr1-14', 18420, -11.8, 0, 'swap', 'up', '오류가 9일 전부터 늘고 수신 광량이 주의 임계(−10 dBm) 아래입니다. GBIC 이나 광케이블을 먼저 바꿔 봅니다.'],
+['pl-leaf-01', 'Ethernet7', 'esx-pl-03', 9112, -13.6, 2, 'swap', 'up', '수신 광량이 장애 임계(−14 dBm)에 가깝고 오류가 함께 늘었습니다.'],
+['kr1-leaf-b01', 'Ethernet33', 'unity-kr1-b', 4310, -3.1, 0, 'peer', 'flat', '광량은 정상인데 오류가 꾸준합니다. 상대 장비 포트와 속도 · Duplex 설정을 확인합니다.'],
+['use-leaf-01', 'Ethernet12', 'esx-use-06', 2204, null, 0, 'peer', 'up', '구리 DAC 케이블이라 광량 값이 없습니다. 케이블과 상대 NIC 을 확인합니다.'],
+['kr1-spine-01', 'Ethernet3/17', 'kr1-leaf-b02', 640, -9.2, 3, 'watch', 'flat', '오류가 있지만 늘지 않습니다. 광량이 주의 임계에 가까워 추세만 봅니다.'],
+['kr1-mgmt-01', 'Ethernet39', 'idrac-kr1-22', 310, null, 6, 'flap', 'spike', '구리 포트가 하루에 여러 번 오르내립니다. 케이블 접촉이나 상대 장비 재시작을 확인합니다.'],
+['kr1-leaf-a04', 'Ethernet29', 'bareos-kr1', 12, -2.4, 14, 'flap', 'spike', '오류는 거의 없는데 14번 오르내렸습니다. 상대 NIC · 본딩 설정 · 케이블 접촉을 봅니다.'],
+['pl-leaf-02', 'Ethernet52/1', 'pl-spine-01', 0, -4.0, 9, 'flap', 'spike', '오류 없이 9번 오르내렸습니다. 양쪽 GBIC 접촉과 상대 스위치 이벤트를 확인합니다.']
+].map((r, i) => ({ i: i, sw: r[0], port: r[1], peer: r[2], err: Math.round(r[3] * mul), rx: r[4], flap: Math.max(0, Math.round(r[5] * (range === '24h' ? 0.4 : range === '30d' ? 3 : 1))), v: r[6], shape: r[7], why: r[8] }));
+const series = (r) => { const out = []; for (let d = 0; d < 14; d++) { const n = ((r.i * 31 + d * 17) % 11) / 10; let v; if (r.shape === 'up') v = d < 5 ? 0.12 + n * 0.1 : 0.2 + (d - 4) * 0.08 + n * 0.08; else if (r.shape === 'flat') v = 0.45 + n * 0.25; else v = (d % 4 === (r.i % 4) ? 0.85 : 0.08) + n * 0.1; out.push(Math.min(1, v)); } return out; };
+const band = (vals, w, h, t) => { const n = vals.length; const X = (i) => (i * (w / (n - 1))).toFixed(1); const up = vals.map((v, i) => X(i) + 'px ' + ((1 - v) * (h - t)).toFixed(1) + 'px'); const dn = vals.map((v, i) => X(i) + 'px ' + ((1 - v) * (h - t) + t).toFixed(1) + 'px').reverse(); return 'clip-path: polygon(' + up.concat(dn).join(', ') + ');'; };
+const sorted = D.slice().sort((a, b) => (mode === 'flap' ? b.flap - a.flap || b.err - a.err : b.err - a.err || b.flap - a.flap));
+const selKey = st.sel || (sorted[0].sw + sorted[0].port);
+const sel = D.find((r) => r.sw + r.port === selKey) || sorted[0];
+const fmt = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+const rxColor = (rx) => (rx == null ? '#a9b6cc' : rx <= -14 ? '#fca5a5' : rx <= -10 ? '#fbbf24' : '#e6edf6');
+const rows = sorted.map((r) => { const s = series(r); return {
+sw: r.sw, port: r.port, peer: r.peer, pick: () => this.setState({ sel: r.sw + r.port }),
+rowStyle: COLS + ' border-top: 1px solid #1f2a40; min-height: 42px;' + (r === sel ? ' background: #1a2a4a;' : ''),
+errText: fmt(r.err), spark: 'width: 116px; height: 26px; background: ' + V[r.v][2] + '; ' + band(s, 116, 26, 2), sparkLabel: r.sw + ' ' + r.port + ' 14일 오류 추이',
+rxText: r.rx == null ? '— (구리)' : r.rx.toFixed(1) + ' dBm', rxStyle: k.tdr + ' color: ' + rxColor(r.rx) + ';',
+flapText: r.flap ? r.flap + '회' : '0', flapStyle: k.tdr + (r.flap >= 3 ? ' color: #c4b5fd; font-weight: 600;' : ''),
+verdict: V[r.v][0], vStyle: pill + V[r.v][1]
+}; });
+const ss = series(sel);
+const d = {
+title: sel.sw + ' ' + sel.port, verdict: V[sel.v][0], vStyle: pill + V[sel.v][1], why: sel.why,
+bars: ss.map((v, i) => ({ style: 'flex: 1 1 0; border-radius: 2px 2px 0 0; background: ' + V[sel.v][2] + '; height: ' + Math.max(3, Math.round(v * 70)) + 'px;', tip: (i + 10) + '일' })),
+barsLabel: sel.sw + ' ' + sel.port + ' 최근 14일 하루 오류 수',
+rows: [
+{ k: '연결 장비', v: sel.peer },
+{ k: '오류(기간)', v: fmt(sel.err) + ' (수신 + 송신 합계)' },
+{ k: '수신 광량', v: sel.rx == null ? '구리 포트 — 값 없음' : sel.rx.toFixed(1) + ' dBm (주의 −10 · 장애 −14)' },
+{ k: '플랩(기간)', v: sel.flap + '회' },
+{ k: '바로 가기', v: '포트 구성도 · 광신호 · 이벤트' }
+]
+};
+const big = (c) => MONO + ' font-size: 24px; font-weight: 600; color: ' + c + ';';
+const tiles = [
+{ label: '오류가 늘고 있는 링크', n: D.filter((r) => r.shape === 'up').length, meta: '전 법인 · 링크 올라온 포트 기준', val: big('#e6edf6') },
+{ label: '교체 후보', n: D.filter((r) => r.v === 'swap').length, meta: '오류 증가 + 수신 광량 낮음', val: big('#fca5a5') },
+{ label: '플랩 포트', n: D.filter((r) => r.flap >= 3).length, meta: '기간 안에 3회 이상 오르내림', val: big('#c4b5fd') },
+{ label: '판정 못 함', n: 12, meta: '카운터를 못 읽은 포트 — 정상으로 세지 않음', val: big('#a9b6cc') }
+];
+return { k: k, modes: modes, ranges: ranges, tiles: tiles, rows: rows, d: d, tableTitle: mode === 'flap' ? '플랩 많은 순' : '오류 많은 순' };
+}
+}
+</script>
+</body>
+</html>

@@ -16,7 +16,7 @@
  * ⚠ 라우트는 **실제 라우터를 express 에 띄워** 역할·범위별 응답으로 본다(audit2599c 패턴 — config.js 싱글턴이라 자식 프로세스).
  *   NFS 는 **실제 runner 를 돌리고** vCenter 접점(vmclone/vsphere.js)·스냅샷 스토어·NFS 마운트만 가짜다(audit2741b 패턴).
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -24,7 +24,14 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2767a-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const TMP = tmpDir('audit2767a-');
 process.env.CONFIG_DIR = TMP;
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
@@ -35,7 +42,7 @@ const u = (p) => JSON.stringify(pathToFileURL(path.join(SRC, p)).href);
 /* ── 실제 라우터(B3-1·7·8·9) ─────────────────────────────────────────────── */
 
 function runLive(script) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'a2767a-'));
+  const dir = tmpDir('a2767a-');
   const boot = `
     const express = (await import('express')).default;
     const { store } = await import(${J('store.js')});
@@ -186,8 +193,8 @@ test('R2-B3-7: 잡 수정으로 대상 VM 을 바꾸면 400 — 한 VM 에 잡 �
 /* ── NFS 백업(B3-2·3·4) — 실제 runner ──────────────────────────────────── */
 
 function runNfs(body) {
-  const cfg = fs.mkdtempSync(path.join(os.tmpdir(), 'a2767a-nfs-cfg-'));
-  const mp = fs.mkdtempSync(path.join(os.tmpdir(), 'a2767a-nfs-mp-'));
+  const cfg = tmpDir('a2767a-nfs-cfg-');
+  const mp = tmpDir('a2767a-nfs-mp-');
   fs.writeFileSync(path.join(cfg, 'vcenters.json'), JSON.stringify({ vcenters: ['vcA', 'vcB', 'vcC', 'vcD'].map((id) => ({ id, host: 'https://127.0.0.1:1', username: 'u', password: 'p' })) }));
   const script = `
     import { mock } from 'node:test';
@@ -309,7 +316,7 @@ test('R2-B3-4: 두 데이터스토어의 동명 디스크가 서로 덮어쓰지
 
 test('R2-B3-2·3: pruneNfsBackups — 같은 폴더에 섞인 남의 백업(manifest 불일치)·불완전 폴더(manifest 없음)는 세지도 지우지도 않는다', async () => {
   const { pruneNfsBackups, pathSlug } = await import('../src/vmclone/runner.js');
-  const mp = fs.mkdtempSync(path.join(os.tmpdir(), 'a2767a-prune-'));
+  const mp = tmpDir('a2767a-prune-');
   try {
     const root = path.join(mp, 'vc_a', 'web01__vm-1');
     const mk = (name, man) => { fs.mkdirSync(path.join(root, name), { recursive: true }); if (man) fs.writeFileSync(path.join(root, name, 'manifest.json'), JSON.stringify(man)); };

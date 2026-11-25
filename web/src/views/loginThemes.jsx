@@ -583,7 +583,7 @@ export const THEMES_CSS = `
 .lt-card-body { padding: 26px 26px 22px; }
 .lt-title { margin: 0; font-size: 23px; font-weight: 700; color: var(--lt-title,#fff); letter-spacing: -.01em; }
 .lt-sub { margin-top: 8px; font-size: 12.5px; color: var(--lt-dim,#8ea0b5); }
-.lt-lab { display: block; margin: 20px 0 7px; font-size: 10.5px; letter-spacing: .22em; color: var(--lt-dim,#64748b); text-transform: uppercase; }
+.lt-lab { display: block; margin: 20px 0 7px; font-size: 10.5px; letter-spacing: .22em; color: var(--lt-dim,#64748b); }
 .lt-input { width: 100%; background: var(--lt-input,#0a1017); border: 1px solid var(--lt-border,#223140);
   border-radius: var(--lt-input-radius,6px); padding: 12px 14px; color: var(--lt-text,#e6edf3); font: inherit; font-size: 14px; }
 .lt-input::placeholder { color: var(--lt-ph,#3d4e60); }

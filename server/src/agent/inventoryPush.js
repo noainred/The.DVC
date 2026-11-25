@@ -22,6 +22,7 @@ import { agentNameHeader } from '../util/agentNameHeader.js'; // v2.620(RECENT26
 import { agentHostnameHeader } from './agentNameCarry.js'; // v2.681 R2F-01
 import { vcInfoForPush } from '../vcinfo/collect.js'; // v2.898
 import { centralStatusOnlySupport } from './centralStatusOnly.js';
+import { envPositive } from '../util/envNumber.js';   // 55회차: 양수 env 는 하나로
 /**
  * v2.898(반증 중-1): vcInfo(권한 목록 · 작업 사용자)를 아는 첫 중앙 버전. 그 전 중앙은 /inventory 의 vcenter 객체에서 **모르는 키를 남겨**
  *   저장하고 /api/vcenters 로 모든 인증 사용자에게 내보낸다 — 이 버전 미만 · 미상이면 붙이지 않는다(health-probe · 1시간 캐시 · fleetPush 와 같은 판단).
@@ -99,7 +100,7 @@ async function pushVcenter(snap, vc) {
  */
 export const UNREAD_STATUSES = Object.freeze(['unreachable', 'pending', 'maintenance']);
 /** 보류 상한 — store.js LASTGOOD_HOLD_MS·중앙 HOLD_MS 와 같은 값·같은 env(한 기준). */
-export const WITHHOLD_MAX_MS = Number(process.env.LASTGOOD_HOLD_MS) || 6 * 3_600_000;
+export const WITHHOLD_MAX_MS = envPositive(process.env.LASTGOOD_HOLD_MS, 21_600_000);   // 6시간 · 55회차 #4
 
 /** 이 vCenter 가 '수집 실패·대기인데 인벤토리가 비어 있는' 상태인가(보내면 중앙의 정상 목록을 지운다). */
 export function isUnreadEmpty(snap, vc) {
