@@ -36,7 +36,9 @@ import { isAdminReq, addressMatcher, extendMatcher, maskedNameLabel } from '../a
 
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
 import { newRid } from '../perf/requestId.js';   // 결정(56~75) 67 ①: 500 응답의 요청 id(index.js 가 붙이지 않은 경로 — 시험 mount 등)
-import { deviceContextOf, buildListCore, runCheck } from '../sanswitch/storagePerfCore.js';   // v2.953 — SAN 스토리지 성능 판정 코어(화면 · 알림 · 보고서와 같은 함수)
+import { deviceContextOf, buildListCore, runCheck } from '../sanswitch/storagePerfCore.js';
+import { pageQueryOf, pageOf, vcenterPickOf, hostRows, vmRows, networkRows, clusterRows, licenseRows, snapshotContext, snapshotRows,
+  gpuRows, powerSummary, backupRows } from './publicApiRows.js';   // v3.42.0 2차 경로의 행(내부 화면과 같은 판정 함수 — 그 파일 머리말)   // v2.953 — SAN 스토리지 성능 판정 코어(화면 · 알림 · 보고서와 같은 함수)
 export const API_VERSION = 'v1';
 /** 목록 응답 상한 — 넘치면 `meta.truncated`·`meta.omitted` 로 **밝힌다**. */
 const LIST_MAX = 5000;
@@ -648,6 +650,126 @@ v1.get('/san-storage/check', guarded('/san-storage/check', async ({ req, res, fi
   const c = capped(rows);
   return envelope(res, apiPath, projectAll(c.rows, fields), { ...scopeMeta, ...c.meta, summary: r.summary, itemLabels: Object.fromEntries((r.items || []).map((i) => [i.k, i.label])),
     note: "unknown 은 '확인 불가'(기준 없음 · 표본 없음 · 짝 없음) — 정상이 아닙니다. 항목 상태 ok · warn · bad · unknown · na." });
+}));
+
+/* ── v3.42.0 2차 — 자원 목록 · 점검/준수 · 백업 · 전력/GPU ─────────────────────────────────────────────────────
+ * 사용자 요청 '없는 API 추가해줘'(선택: 1차 핵심 조회 · 쓰기는 설계부터 · 전체 검증). 행은 routes/publicApiRows.js 가 내부 화면과 **같은 판정 함수**로 만들고,
+ * 여기서는 게이트(guarded) → ?vcenterId 해석 → 투사(project/projectAll) → 봉투만 한다(핸들러 본문이 3000자를 넘으면 api-doc 생성이 실패한다).
+ * 새 분류 넷(objects · compliance · backup · resources)은 관리자가 키마다 켜야 열린다 — 기존 분류 키로는 403 group-denied.
+ */
+
+/**
+ * ?vcenterId 해석 — 실패면 응답을 보내고 null(핸들러는 그대로 return). 범위 밖 · 없는 id 는 같은 404(존재를 흘리지 않는다).
+ * @returns {{ id: string|null, inPick: (vcId:string)=>boolean } | null}
+ */
+function pickedVcenter(req, res, snap, inScope, apiPath) {
+  const p = vcenterPickOf(req.query, inScope, knownVcenterIdsNow(snap));
+  if (!p.ok) {
+    res.status(p.status).json({ ok: false, error: p.code, code: p.code, reason: p.reason, endpoint: apiPath });
+    return null;
+  }
+  return { id: p.id, inPick: (vcId) => inScope(vcId) && (!p.id || vcId === p.id) };
+}
+
+/** 쿼리 형식 오류(400) — 조용히 기본값으로 바꾸지 않는다. */
+function badQuery(res, apiPath, field) {
+  return res.status(400).json({ ok: false, error: 'bad-query', code: 'bad-query', field, endpoint: apiPath,
+    reason: `${field} 형식이 틀렸습니다 — 0 이상의 정수만 받습니다(limit 은 1~${LIST_MAX}).` });
+}
+
+const OBJ_NOTE = '못 읽은 수치는 0 이 아니라 null 입니다.';
+
+v1.get('/objects/hosts', guarded('/objects/hosts', ({ req, res, snap, inScope, fields, scopeMeta, apiPath }) => {
+  const pick = pickedVcenter(req, res, snap, inScope, apiPath);
+  if (!pick) return undefined;
+  const rows = hostRows(snap, pick.inPick);
+  const c = capped(rows);
+  const nc = notCurrentMetaOf(snap, pick.inPick);
+  return envelope(res, apiPath, projectAll(c.rows, fields), { ...scopeMeta, ...c.meta, vcenterId: pick.id, ...nc,
+    usageUnknownCount: rows.filter((r) => r.usageUnknown).length,
+    note: `${OBJ_NOTE} 끊긴 호스트(DISCONNECTED · NOT_RESPONDING)의 사용률은 null 이고 usageUnknown:true 입니다.${NOT_CURRENT_NOTE(nc.notCurrentVcenters)}` });
+}));
+
+v1.get('/objects/vms', guarded('/objects/vms', ({ req, res, snap, inScope, fields, scopeMeta, apiPath }) => {
+  const pick = pickedVcenter(req, res, snap, inScope, apiPath);
+  if (!pick) return undefined;
+  const pq = pageQueryOf(req.query, LIST_MAX);
+  if (!pq.ok) return badQuery(res, apiPath, pq.field);
+  const pg = pageOf(vmRows(snap, pick.inPick), pq);
+  const nc = notCurrentMetaOf(snap, pick.inPick);
+  return envelope(res, apiPath, projectAll(pg.rows, fields), { ...scopeMeta, ...pg.meta, vcenterId: pick.id, snapshotAt: msOrNull(snap.generatedAt), ...nc,
+    note: `${OBJ_NOTE} id 순서이고 truncated:true 면 offset=nextOffset 으로 다음 쪽을 받습니다. 쪽 사이에 snapshotAt 이 바뀌면 순서가 밀릴 수 있으니 처음부터 다시 받으세요. ipAddresses:null 은 IP 를 읽지 못한 것이고 [] 는 보고된 IP 가 없는 것입니다.${NOT_CURRENT_NOTE(nc.notCurrentVcenters)}` });
+}));
+
+v1.get('/objects/networks', guarded('/objects/networks', ({ req, res, snap, inScope, fields, scopeMeta, apiPath }) => {
+  const pick = pickedVcenter(req, res, snap, inScope, apiPath);
+  if (!pick) return undefined;
+  const c = capped(networkRows(snap, pick.inPick));
+  const nc = notCurrentMetaOf(snap, pick.inPick);
+  return envelope(res, apiPath, projectAll(c.rows, fields), { ...scopeMeta, ...c.meta, vcenterId: pick.id, ...nc,
+    note: `${OBJ_NOTE}${NOT_CURRENT_NOTE(nc.notCurrentVcenters)}` });
+}));
+
+v1.get('/objects/clusters', guarded('/objects/clusters', ({ req, res, snap, inScope, fields, scopeMeta, apiPath }) => {
+  const pick = pickedVcenter(req, res, snap, inScope, apiPath);
+  if (!pick) return undefined;
+  const r = clusterRows(snap, req.user, pick.id);
+  const c = capped(r.rows);
+  const nc = notCurrentMetaOf(snap, pick.inPick);
+  return envelope(res, apiPath, projectAll(c.rows, fields), { ...scopeMeta, ...c.meta,
+    truncated: c.meta.truncated || r.omitted > 0, omitted: c.meta.omitted + r.omitted, vcenterId: pick.id, ...nc,
+    notCollected: numOrNull(r.coverage?.notCollected),
+    note: `구성을 아직 읽지 못한 클러스터(collected:false)의 HA · DRS · EVC 는 false 가 아니라 null 입니다. sameName 이 2 이상이면 이름만으로 구분할 수 없습니다(ref · vcDatacenter 로 가리세요).${NOT_CURRENT_NOTE(nc.notCurrentVcenters)}` });
+}));
+
+v1.get('/compliance/licenses', guarded('/compliance/licenses', ({ req, res, snap, inScope, fields, scopeMeta, apiPath }) => {
+  const pick = pickedVcenter(req, res, snap, inScope, apiPath);
+  if (!pick) return undefined;
+  const r = licenseRows(snap, pick.inPick);
+  const c = capped(r.rows);
+  return envelope(res, apiPath, projectAll(c.rows, fields), { ...scopeMeta, ...c.meta, vcenterId: pick.id,
+    vcentersUnread: r.unread.length, vcentersUnreadList: r.unread,
+    note: '라이선스 키 값은 주지 않습니다. NSX · Horizon 라이선스는 이 경로에 없습니다. 라이선스를 읽지 못한 vCenter(vcentersUnreadList — why 가 까닭)의 행이 없는 것은 0 개가 아니라 모르는 것입니다.' });
+}));
+
+v1.get('/compliance/snapshots', guarded('/compliance/snapshots', ({ req, res, snap, inScope, fields, scopeMeta, apiPath }) => {
+  const pick = pickedVcenter(req, res, snap, inScope, apiPath);
+  if (!pick) return undefined;
+  const r = snapshotRows(snap, snapshotContext(req.user, snap, pick.id));
+  const c = capped(r.rows);
+  const t = r.thresholds || {};
+  const nc = notCurrentMetaOf(snap, pick.inPick);
+  return envelope(res, apiPath, projectAll(c.rows, fields), { ...scopeMeta, ...c.meta, vcenterId: pick.id, ...nc,
+    thresholds: { snapAgeDays: numOrNull(t.snapAgeDays), snapCount: numOrNull(t.snapCount), snapSizeGB: numOrNull(t.snapSizeGB), settingsUnreadable: t.hygieneUnreadable === true },
+    snapshotUnknownVms: r.snapshotUnknownVms,
+    note: `기준(thresholds)은 포탈 'VM 구성 점검' 설정입니다. judged:false(템플릿 · 예외 · 보류 · 설정 없음 — skip 이 까닭)인 행의 overAge · overCount · overSize 는 null 입니다. 스냅샷 개수를 못 읽은 VM(snapshotUnknownVms)은 행이 없습니다 — 스냅샷이 없다는 뜻이 아닙니다.${NOT_CURRENT_NOTE(nc.notCurrentVcenters)}` });
+}));
+
+v1.get('/backup/summary', guarded('/backup/summary', async ({ req, res, snap, inScope, fields, scopeMeta, apiPath }) => {
+  const pick = pickedVcenter(req, res, snap, inScope, apiPath);
+  if (!pick) return undefined;
+  const r = await backupRows(req.user, snap);
+  const c = capped(r.rows.filter((x) => pick.inPick(x.vcenterId)));
+  const nc = notCurrentMetaOf(snap, pick.inPick);
+  return envelope(res, apiPath, projectAll(c.rows, fields), { ...scopeMeta, ...c.meta, vcenterId: pick.id, ...nc,
+    registryUnreadable: r.registryUnreadable, marksUnreadable: r.marksUnreadable, cacheTtlMs: 60_000,
+    note: `Backup › Summary 와 같은 집계입니다(전원 전체 · 템플릿 · vCLS 제외 · 최대 60초 전 값). policy:null 은 백업 방식 표시를 읽지 못한 것이고(marksUnreadable) 0 이 아닙니다. bareosUnknown:true 인 법인은 Bareos 결과를 모릅니다.${NOT_CURRENT_NOTE(nc.notCurrentVcenters)}` });
+}));
+
+v1.get('/resources/power', guarded('/resources/power', async ({ res, fields, apiPath }) => {
+  const p = await powerSummary();
+  return envelope(res, apiPath, project(p.row, fields), { ...p.errors, unit: 'watts', cacheTtlMs: 20_000,
+    note: 'Overview 카드 · 전체 소비 전력과 같은 합입니다. 읽은 장비가 하나도 없는 원천의 watts 와, 어느 원천도 못 읽었을 때의 totalWatts 는 0 이 아니라 null 입니다. measured 가 devices 보다 작으면 일부 장비만 더한 합입니다(unread · stale · noTime 이 빠진 수). errors 는 실패한 원천의 이름만 밝힙니다.' });
+}));
+
+v1.get('/resources/gpu', guarded('/resources/gpu', async ({ req, res, snap, inScope, fields, scopeMeta, apiPath }) => {
+  const pick = pickedVcenter(req, res, snap, inScope, apiPath);
+  if (!pick) return undefined;
+  const r = await gpuRows(snap, scopedVcenterIds(req.user, snap), pick.id);
+  const c = capped(r.rows);
+  const nc = notCurrentMetaOf(snap, pick.inPick);
+  return envelope(res, apiPath, projectAll(c.rows, fields), { ...scopeMeta, ...c.meta, vcenterId: pick.id, ...nc,
+    note: `GPU 인벤토리 화면과 같은 행입니다. utilPct 가 null 이면 사용률을 읽지 못한 것입니다(utilSource 가 출처 — esxi · guest). 할당 VM 이름은 주지 않습니다.${NOT_CURRENT_NOTE(nc.notCurrentVcenters)}` });
 }));
 
 /* ── 미선언 경로 ──────────────────────────────────────────────────────────── */

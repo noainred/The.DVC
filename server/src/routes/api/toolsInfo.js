@@ -19,7 +19,7 @@ import { visibleNsxManagers } from '../../nsx/scope.js';
 import { isAdminReq, scrubHosts } from '../../auth/addressMask.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
 import { isDemoGuest } from '../../auth/demoGuest.js';
-import { vcListUnread, vcListItems, LIST_UNREAD_TEXT } from '../../corelicense/analyze.js'; // v2.742(VC-06): 라이선스 목록을 읽었는가 — 판정 한 벌
+import { vcListUnread, vcListItems, LIST_UNREAD_TEXT, vcenterLicenseRows } from '../../corelicense/analyze.js'; // v2.742(VC-06): 라이선스 목록을 읽었는가 — 판정 한 벌
 import { TOOLS_IDS_MAX } from '../../inventory/vmToolsDist.js'; // 전체 점검 32회차 E1: 요청 VM 수 상한
 
 /** VM id → 스냅샷 VM 의 vcenterId(없으면 null). v2.598 VC2598-06 — id 를 첫 콜론에서 자르지 않는다. */
@@ -193,27 +193,12 @@ api.get('/tools/license-expiry', requirePerm('tools'), async (req, res) => {
   if (allowed) vcs = vcs.filter((v) => allowed.has(v.id));
   const scoped = Boolean(req.query.vcenterId);
   if (scoped) vcs = vcs.filter((v) => v.id === req.query.vcenterId);
-  const items = [];
   // v2.742(감사 VC-06): 라이선스를 읽지 못한 vCenter — 빈 목록을 '만료 키 없음' 으로 보이지 않게 collectionErrors 에 한 줄씩 싣는다(아래).
-  const vcUnread = [];
-  for (const vc of vcs) {
-    const u = vcListUnread(vc, 'licenses');
-    if (u) vcUnread.push({ vcenterId: vc.id, vcenterName: vc.name || vc.id, why: u.why, ...(isAdminReq(req) && u.error ? { error: u.error } : {}) });
-    for (const l of vcListItems(vc, 'licenses')) {
-      // eval 키('Evaluation Mode')는 total=0·만료 별도 표기 그대로 노출.
-      const ts = l.expires ? (Date.parse(l.expires) || null) : null;
-      const st = licenseExpiryStatus(ts);
-      items.push({
-        source: 'vCenter', where: vc.name || vc.id, vcenterId: vc.id,
-        name: l.name || l.edition || '(이름 없음)',
-        family: licenseFamilyOf(`${l.name} ${l.edition} ${l.product}`),
-        edition: l.edition || '', product: l.product || '', productVersion: l.productVersion || '',
-        key: l.key || '', total: l.total ?? null, used: l.used ?? null,
-        expires: dayKey(ts),
-        status: st.status, daysLeft: st.daysLeft,
-      });
-    }
-  }
+  // v3.42.0: 행 판정은 corelicense/analyze.js vcenterLicenseRows 하나(공개 API /compliance/licenses 와 같은 함수). 오류 원문은 관리자 판본에만.
+  const lic = vcenterLicenseRows(vcs);
+  const items = lic.items;
+  const admin = isAdminReq(req);
+  const vcUnread = lic.unread.map(({ error, ...u }) => ({ ...u, ...(admin && error ? { error } : {}) }));
   // v2.603 AUTHZ-2603-01: 예전에는 `scoped` 가 ?vcenterId 유무만 봐서 **범위 제한 계정**에도 전 함대 NSX 키·Horizon
   // 라이선스·오류(호스트명)가 나갔다. 사용자 범위(allowed)도 함께 본다 — NSX 는 형제 라우트(vcTools·health/network)와
   // 같은 visibleNsxManagers 로 거르고, Horizon 은 vCenter 귀속 축이 없으므로(v2.525) 범위 계정에는 싣지 않는다.

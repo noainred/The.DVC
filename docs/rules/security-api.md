@@ -206,6 +206,15 @@
     404·429·200 전 경로를 HTTP 로 돌렸고** 투사 계약·범위 403·내부 집계 대조(17항목)·평문
     미노출·Chromium 1440/400 을 실측했다. **실제 외부 포탈이 이 API 를 소비하는 것은 확인하지
     못했다** — 첫 연동에서 `GET /api/v1/` 카탈로그와 `openapi.json` 을 상대가 읽는지로 확인할 것.
+  - ⚠⚠ **v3.42.0 2차(경로 9개)의 규약 — 새 경로를 더할 때도 같다**(`test/publicApi3420.test.js`):
+    ① **새 경로는 기존 분류에 넣지 않는다** — 넣으면 이미 발급한 키가 관리자 조작 없이 더 민감한 데이터(이름 · IP)를 본다. 새 분류를 만들어 키마다 켜게 한다.
+    ② 행은 `routes/publicApiRows.js` 가 **내부 화면과 같은 판정 함수**로 만들고(라이선스 `vcenterLicenseRows` · 스냅샷 `snapshotToolView` · 백업 `backupSummaryRowsFor` ·
+       전력 `powerTotal`+`powerSummaryOf` · GPU `buildGpuInventory` · 클러스터 `analyzeClusters`) 테스트가 행 수를 대조한다. 그 파일은 routes/ 안에 둔다(원천이 라우트 파일 — 의존 방향 ①).
+    ③ `?vcenterId` 는 **범위 밖과 없는 id 를 같은 404**(`unknown-vcenter` — 응답이 글자까지 같다). 쿼리 형식 오류는 400 `bad-query`(조용히 기본값 금지).
+    ④ 5,000 행을 넘을 수 있는 목록은 `?offset=&limit=` 쪽 나눔(id 순 · `meta.nextOffset` · `snapshotAt`) — `capped()` 의 잘림 표기만으로 끝내지 않는다.
+    ⑤ 중첩 객체(policy · rpo · servers …)도 필드를 하나씩 고른다 — 투사(`project`)는 최상위 키만 본다.
+    ⑥ 못 읽은 값은 null — 화면이 '—' 로 보이는 경우와 같은 판정(전력 `powerRowOf` ↔ 웹 `powerCatKw/powerTotalKw` 대조).
+    ⑦ 손으로 쓴 문서(`docs/API-PUBLIC.md`)에 전체 라우트 수를 적지 않는다 — 820 · 686 이 v3.41 까지 낡은 채 남았다. 공개 경로 · 분류 수는 테스트가 카탈로그와 대조한다.
 
 - ⚠⚠ **무인증으로 열리는 면을 새로 만들지 말 것 — v2.564 의 공개 API 안내 페이지는 v2.565 에 철회됐다**
   (사용자 지시 "무인증으로 만드는 작업은 취소". 삭제된 것: `routes/publicDocs.js` ·

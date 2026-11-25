@@ -70,6 +70,10 @@ export function buildOpenApi({ groups = [], baseUrl = '/api/v1' } = {}) {
         summary: ep.summary,
         tags: [GROUP_BY_KEY[ep.group]?.label || ep.group],
         operationId: ep.path.replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_|_$/g, ''),
+        // v3.42.0: 쿼리 인자 — 카탈로그의 params 선언에서 만든다(손으로 쓴 스펙을 두지 않는다). 전부 선택 인자다.
+        ...(Array.isArray(ep.params) && ep.params.length ? { parameters: ep.params.map((p) => ({
+          name: p.name, in: 'query', required: false, description: p.desc, schema: { type: p.type === 'integer' ? 'integer' : 'string', ...(p.type === 'integer' ? { minimum: p.name === 'limit' ? 1 : 0 } : {}) },
+        })) } : {}),
         description: ep.requiresFullScope
           ? '⚠ vCenter 범위로 나눌 수 없는 자원입니다 — 범위를 지정한 키는 403(needs-full-scope) 입니다.'
           : (ep.scoped ? '키의 vCenter 범위가 적용됩니다(범위 미지정 = 전체).' : ''),
