@@ -126,7 +126,8 @@ function longestSub(L, empty) {
 /** 전환 한 줄의 글 */
 function transitionRow(t, precision) {
   const by = t.exact ? `vCenter 이벤트${t.user ? ` · ${t.user}` : ''}` : srcText(t.src, precision, windowOf(t));
-  const prev = `${STATE_LABEL[t.prevState]} ${t.prevFromStart ? `${durText(t.prevMs)} 이상` : durRangeText(t.prevMs, t.prevMaxMs)}`;
+  const hole = t.prevHoleMs > 0 ? `(목록에 없던 ${durText(t.prevHoleMs)} 포함)` : '';
+  const prev = `${STATE_LABEL[t.prevState]} ${t.prevFromStart ? `${durText(t.prevMs)} 이상` : durRangeText(t.prevMs, t.prevMaxMs)}${hole}`;
   return { when: whenText(t), to: STATE_LABEL[t.to], by: t.unknownWindow ? `${by} · 그 사이 기록 없음` : by, prev };
 }
 

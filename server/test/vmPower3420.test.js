@@ -215,11 +215,11 @@ test('★ 실제 DB — #1 범위 안 전환 · 잘림 표시 · #6 계정 가�
   assert.equal((await D.watchOf('vf')).lastTs, NOW, '지금으로 되돌림');
   const r2 = await W8.runPowerWatchOnce({ now: NOW + W, snap: { ...snap, generatedAt: new Date(NOW + W).toISOString() } });
   assert.equal(r2.held.length, 0, '다음 관측부터 정상');
-  // 2회차 N4 — 복구 문턱은 관측 간격 두 배(6시간 미만으로 튄 시계도 오래 멈추지 않는다)
+  // 3회차 R1 — 작은 역행(6시간 미만)은 데이터를 건드리지 않고 시계가 따라잡을 때까지 건너뛴다
   p.st.repairWatch.run(NOW + 3 * HOUR, 'vf');
   const r3 = await W8.runPowerWatchOnce({ now: NOW + 2 * W, snap: { ...snap, generatedAt: new Date(NOW + 2 * W).toISOString() } });
   assert.deepEqual(r3.held, [['vf', 'clock']]);
-  assert.equal((await D.watchOf('vf')).lastTs, NOW + 2 * W);
+  assert.equal((await D.watchOf('vf')).lastTs, NOW + 3 * HOUR, '되돌리지 않고 기다린다');
   // 방향별 건수는 실린 건수가 아니라 범위 안 전체
   assert.equal(recent.transitionsInRangeBy.on + recent.transitionsInRangeBy.off, recent.transitionsInRange);
   // 2회차 N6 — 정리 경계는 끝난 구간을 실제로 지운 vCenter 에만
@@ -240,4 +240,55 @@ test('#13 개체 보기 탭은 VM 이 바뀌면 상태를 새로(key) · 달력�
 test('2회차 N4 — 틱 게이트는 미래의 마지막 관측에서 멈추지 않는다', () => {
   const src = stripComments(fs.readFileSync(path.resolve(HERE, '../src/vmpower/watcher.js'), 'utf8'));
   assert.match(src, /const since = Date\.now\(\) - lastAt;\s*if \(since >= 0 && since < WATCH_EVERY_MS\) return;/);
+});
+
+test('3회차 R1 — 1시간 역행 · 2일 앞으로 튐 뒤에도 구간이 깨지지 않고 지금 상태가 맞다(실제 관측기 + DB)', async () => {
+  const D = await import('../src/vmpower/db.js');
+  if (!(await D.powerDb())) return;
+  const W8 = await import('../src/vmpower/watcher.js');
+  const H = await import('../src/vmpower/history.js');
+  const obs = (vc, ts, ps) => W8.runPowerWatchOnce({ now: ts, snap: { generatedAt: new Date(ts).toISOString(), vcenters: [{ id: vc, status: 'connected' }], vms: [{ id: `${vc}:a`, vcenterId: vc, name: `${vc}-a`, powerState: ps }] } });
+  const vmOf = (vc, ps) => ({ id: `${vc}:a`, vcenterId: vc, name: `${vc}-a`, powerState: ps });
+  const T0 = NOW - 10 * DAY;
+  // ① 0~60분 관측(40분에 끔) → 시계 1시간 뒤로 → 실제 80분에 다시 켬
+  for (const m of [0, 10, 20, 30]) await obs('vb', T0 + m * MIN, 'POWERED_ON');
+  for (const m of [40, 50, 60]) await obs('vb', T0 + m * MIN, 'POWERED_OFF');
+  const back = await obs('vb', T0 + 0 * MIN + 5 * MIN, 'POWERED_OFF');   // 시계가 1시간 뒤(실제 65분 → 표시 5분)
+  assert.deepEqual(back.held, [['vb', 'clock']]);
+  await obs('vb', T0 + 20 * MIN, 'POWERED_ON');                           // 실제 80분 — 아직 따라잡지 못함
+  await obs('vb', T0 + 70 * MIN, 'POWERED_ON');                           // 따라잡음
+  const sp = await D.spansOfVm('vb', 'vb:a');
+  for (const x of sp) { assert.ok(x.lo == null || x.lo <= x.start, '시작이 앞 끝보다 이르지 않다'); assert.ok(x.end == null || x.end >= x.start); }
+  const h1 = await H.vmPowerHistory(vmOf('vb', 'POWERED_ON'), { vms: [] }, { now: T0 + 71 * MIN });
+  assert.equal(h1.facts.current?.state, 'on');
+  assert.equal(h1.facts.gone, false);
+  // ② 2일 앞으로 튐(그 시각에 끔이 기록됨) → 시계 복귀 → 미래 구간을 지우고 다시 연다
+  const T1 = NOW - 5 * DAY;
+  await obs('vj', T1, 'POWERED_ON');
+  await obs('vj', T1 + W, 'POWERED_ON');
+  await obs('vj', T1 + 2 * DAY, 'POWERED_OFF');                            // 미래(튄 시계)
+  const rep = await obs('vj', T1 + 2 * W, 'POWERED_ON');                   // 복귀 — 복구만
+  assert.deepEqual(rep.held, [['vj', 'clock']]);
+  const after = await D.spansOfVm('vj', 'vj:a');
+  assert.ok(after.every((x) => x.start <= T1 + 2 * W), '미래에 시작한 구간이 없다');
+  assert.equal(after.filter((x) => x.end == null).length, 1, '열린 구간 하나');
+  await obs('vj', T1 + 3 * W, 'POWERED_ON');
+  const h2 = await H.vmPowerHistory(vmOf('vj', 'POWERED_ON'), { vms: [] }, { now: T1 + 3 * W + MIN });
+  assert.equal(h2.facts.current?.state, 'on');
+  assert.equal(h2.facts.gone, false);
+  assert.equal(h2.transitions.length, 0, '튄 시계의 꺼짐은 남지 않는다');
+});
+
+test('3회차 R2 — 전환 목록의 직전 길이는 사실과 같은 판정 · 빠진 시간을 밝힌다', () => {
+  const spans = [
+    { state: 'on', start: NOW - 10 * DAY, lo: NOW - 10 * DAY - W, end: NOW - 6 * DAY, src: 'appear' },
+    { state: 'on', start: NOW - 6 * DAY + 5 * HOUR, lo: NOW - 6 * DAY, end: NOW - 2 * DAY, src: 'appear' },
+    { state: 'off', start: NOW - 2 * DAY + W, lo: NOW - 2 * DAY, end: null, src: 'watch' },
+  ];
+  const t = buildTimeline({ spans, now: NOW, watchLast: NOW });
+  const x = t.transitions[0];
+  assert.equal(x.prevFromStart, true, '나타난 구간의 길이는 하한');
+  assert.equal(x.prevMaxMs, null);
+  assert.equal(x.prevHoleMs, 5 * HOUR);
+  assert.equal(t.facts.onCount, 0);
 });

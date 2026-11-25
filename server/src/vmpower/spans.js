@@ -225,7 +225,7 @@ export function buildTimeline({ spans = [], gaps = [], events = [], now, watchLa
   for (const s of raw) {
     const p = sp[sp.length - 1];
     if (p && p.state === s.state && p.end != null && s.start - p.end <= Math.max(gapMs, ABSENT_MERGE_MS)) {
-      if (s.start > p.end) holes.push({ a: p.end, b: s.start });
+      if (s.start > p.end) { holes.push({ a: p.end, b: s.start }); p.holeMs = (p.holeMs || 0) + (s.start - p.end); }
       p.end = s.end;
       continue;
     }
@@ -281,6 +281,8 @@ export function buildTimeline({ spans = [], gaps = [], events = [], now, watchLa
     return k < overs.length && overs[k].a < hi;
   };
 
+  // 목록에 나타난 구간(appear)은 그 상태로 '바뀐' 것이 아니다 — 시작 시각을 모른다(길이는 하한 · 꺼짐 횟수에 넣지 않음 — 2회차 N1).
+  const startKnown = (s, i) => !(s.lo == null && i === 0) && !(isAppearSrc(s.src) && !s.exact);
   // ⑤ 전환 목록(최신 먼저)
   const transitions = [];
   for (let i = 1; i < sp.length; i++) {
@@ -291,9 +293,12 @@ export function buildTimeline({ spans = [], gaps = [], events = [], now, watchLa
     transitions.push({
       to: s.state, ts: s.start, lo, exact: !!s.exact, src: s.exact ? 'event' : (isBackfillSrc(s.src) ? 'backfill' : 'watch'), user: s.user || '',
       unknownWindow: !s.exact && overlapsGap(lo, s.start),
-      prevState: p.state, prevMs: Math.max(0, (p.end ?? s.start) - p.start), prevFromStart: p.lo == null && i - 1 === 0,
-      // 직전 상태가 이어진 시간의 위 끝 — 앞 창의 시작(lo)부터 이 전환 창의 끝까지. 기록 시작 전부터면 위 끝을 모른다(null).
-      prevMaxMs: p.lo == null ? null : Math.max(0, s.start - p.lo),
+      // 직전 상태의 시작을 모르면(기록 시작 전 · 목록에 나타남) '… 이상' — 사실(facts)과 같은 startKnown 판정(3회차 R2).
+      prevState: p.state, prevMs: Math.max(0, (p.end ?? s.start) - p.start), prevFromStart: !startKnown(p, i - 1),
+      // 직전 상태가 이어진 시간의 위 끝 — 앞 창의 시작(lo)부터 이 전환 창의 끝까지. 시작을 모르면 위 끝도 모른다(null).
+      prevMaxMs: startKnown(p, i - 1) && p.lo != null ? Math.max(0, s.start - p.lo) : null,
+      // 그 길이 안에 목록에서 빠졌던 시간(이어 붙인 구간) — 화면이 '기록 없음 N 포함' 으로 밝힌다.
+      prevHoleMs: p.holeMs || 0,
     });
   }
   transitions.reverse();
@@ -305,8 +310,6 @@ export function buildTimeline({ spans = [], gaps = [], events = [], now, watchLa
     return { ts: s.start, lo: s.lo, exact: !!s.exact, src: s.exact ? 'event' : (isBackfillSrc(s.src) ? 'backfill' : 'watch'), user: s.user || '', ...(isAppearSrc(s.src) && !s.exact ? { appeared: true } : {}) };
   };
   const idxOf = (pred) => { for (let i = sp.length - 1; i >= 0; i--) if (pred(sp[i])) return i; return -1; };
-  // 목록에 나타난 구간(appear)은 그 상태로 '바뀐' 것이 아니다 — 시작 시각을 모른다(길이는 하한 · 꺼짐 횟수에 넣지 않음 — 2회차 N1).
-  const startKnown = (s, i) => !(s.lo == null && i === 0) && !(isAppearSrc(s.src) && !s.exact);
   const firstOnIdx = sp.findIndex((s) => s.state === 'on');
   const lastOnIdx = idxOf((s) => s.state === 'on');
   const lastOffIdx = idxOf((s) => s.state === 'off');

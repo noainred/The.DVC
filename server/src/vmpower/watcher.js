@@ -11,12 +11,14 @@ import { store } from '../store.js';
 import { samplingUnreadReasons } from '../metrics/sampler.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { WATCH_EVERY_MS, GAP_MS, powerStateOf, planObservation, planBackfill, backfillGaps } from './spans.js';
-import { powerDb, openSpansOf, watchOf, commitObservation, backfillSourceOf, commitBackfill, prunePower, lastWatchTs, repairWatch } from './db.js';
+import { powerDb, openSpansOf, watchOf, commitObservation, backfillSourceOf, commitBackfill, prunePower, lastWatchTs, repairFuture } from './db.js';
 
 const TICK_MS = 60_000;
 const PRUNE_EVERY = 144;   // 관측 144회(약 하루)마다
 /** 마지막 관측이 이만큼 넘게 미래면 시계가 앞으로 튀었다 돌아온 것 — 마지막 관측을 지금으로 되돌린다(재검토 #7). */
-const CLOCK_REPAIR_MS = 2 * WATCH_EVERY_MS;   // 2회차 N4: 6시간이면 그보다 작게 튀었다 돌아온 시계가 관측을 몇 시간 멈췄다
+//   이보다 작은 역행(NTP 보정 등)은 시계가 따라잡을 때까지 건너뛴다 — 데이터를 건드리지 않는다(3회차 R1: 20분으로 줄였더니 1시간 역행에 구간이 깨졌다).
+//   틱 게이트는 미래 관측에서도 매 틱 돌므로(2회차 N4) 따라잡는 즉시 관측이 이어진다.
+const CLOCK_REPAIR_MS = 6 * 3_600_000;
 /** 인벤토리를 아직 서빙하지 못하는 상태(VM 0 과 함께면 '모른다'). */
 const NOT_SERVING = new Set(['unreachable', 'pending', 'maintenance', 'disabled']);
 
@@ -91,7 +93,10 @@ async function runInner({ now, snap }) {
     }
     // 시계가 뒤로 갔다(직전 관측 ≥ 지금) — 이번 관측은 쓰지 않는다. 미래로 크게 앞선 기록은 지금으로 되돌린다(그 사이는 다음 관측 때 끊김).
     if (watch.lastTs >= now) {
-      if (watch.lastTs - now > CLOCK_REPAIR_MS) { await repairWatch(id, now); console.warn(`[vmpower] ${id}: 마지막 관측 시각이 미래(${new Date(watch.lastTs).toISOString()}) — 시계가 바뀐 것으로 보고 지금으로 되돌렸습니다`); }
+      if (watch.lastTs - now > CLOCK_REPAIR_MS) {
+        const rr = await repairFuture(id, now);
+        console.warn(`[vmpower] ${id}: 마지막 관측 시각이 미래(${new Date(watch.lastTs).toISOString()}) — 시계가 바뀐 것으로 보고 미래에 쓰인 구간 ${rr?.deleted ?? 0}개를 지우고 ${rr?.reopened ?? 0}개를 다시 열었습니다`);
+      }
       out.held.push([id, 'clock']);
       continue;
     }

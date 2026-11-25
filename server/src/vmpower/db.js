@@ -44,6 +44,12 @@ function ensure(x) {
     openOf: db.prepare('SELECT id, vm_id, state, start_ts FROM power_spans WHERE vcenter_id=? AND end_ts IS NULL'),
     watchOf: db.prepare('SELECT first_ts, last_ts, backfilled, pruned_to FROM power_watch WHERE vcenter_id=?'),
     repairWatch: db.prepare('UPDATE power_watch SET last_ts=? WHERE vcenter_id=?'),
+    futVms: db.prepare('SELECT DISTINCT vm_id FROM power_spans WHERE vcenter_id=? AND start_ts>?'),
+    futDelSpans: db.prepare('DELETE FROM power_spans WHERE vcenter_id=? AND start_ts>?'),
+    futReopenLast: db.prepare('UPDATE power_spans SET end_ts=NULL WHERE id=(SELECT id FROM power_spans WHERE vcenter_id=? AND vm_id=? ORDER BY start_ts DESC LIMIT 1)'),
+    futReopen: db.prepare('UPDATE power_spans SET end_ts=NULL WHERE vcenter_id=? AND end_ts>?'),
+    futDelGaps: db.prepare('DELETE FROM power_gaps WHERE vcenter_id=? AND from_ts>?'),
+    futCutGaps: db.prepare('UPDATE power_gaps SET to_ts=? WHERE vcenter_id=? AND to_ts>?'),
     markPruned: db.prepare('UPDATE power_watch SET pruned_to=MAX(COALESCE(pruned_to, 0), ?) WHERE vcenter_id=?'),
     prunableVcs: db.prepare('SELECT DISTINCT vcenter_id FROM power_spans WHERE end_ts IS NOT NULL AND end_ts<?'),
     staleWatchVcs: db.prepare('SELECT vcenter_id FROM power_watch WHERE last_ts<?'),
@@ -99,11 +105,27 @@ export async function lastWatchTs() {
 
 const SRC_OK = new Set(['watch', 'backfill', 'appear', 'backfill-appear']);
 
-/** 시계가 앞으로 튀었다 돌아온 경우 — 미래에 찍힌 마지막 관측을 지금으로 되돌린다(그 사이 관측은 건너뛴다 · 재검토 #7). */
-export async function repairWatch(vcenterId, ts) {
+/**
+ * 시계가 앞으로 크게 튀었다 돌아온 경우(재검토 #7 · 3회차 R1) — 미래 시각으로 쓰인 것을 지금 기준으로 되돌린다. 트랜잭션 하나:
+ *   ① 지금보다 뒤에 시작한 구간은 지우고, 그런 VM 은 남은 마지막 구간을 다시 연다(그 구간을 닫은 것은 미래의 관측이었다)
+ *   ② 지금보다 뒤에 닫힌 구간도 다시 연다(미래 관측에서 '사라짐' 으로 닫힌 것) — 다음 관측이 다시 판정한다
+ *   ③ 끊김도 같은 기준으로 자른다 ④ 마지막 관측 = 지금. (예전에는 ④만 해서 시작이 앞 끝보다 이른 구간 · '지금 목록에 없음' 이 남았다.)
+ */
+export async function repairFuture(vcenterId, ts) {
   const p = await powerDb();
-  if (!p) return;
-  p.st.repairWatch.run(ts, String(vcenterId));
+  if (!p) return { ok: false };
+  const vc = String(vcenterId);
+  return inTx(p.db, () => {
+    const vms = p.st.futVms.all(vc, ts).map((r) => r.vm_id);
+    const deleted = Number(p.st.futDelSpans.run(vc, ts).changes || 0);
+    let reopened = 0;
+    for (const vm of vms) reopened += Number(p.st.futReopenLast.run(vc, vm).changes || 0);
+    reopened += Number(p.st.futReopen.run(vc, ts).changes || 0);
+    p.st.futDelGaps.run(vc, ts);
+    p.st.futCutGaps.run(ts, vc, ts);
+    p.st.repairWatch.run(ts, vc);
+    return { ok: true, deleted, reopened };
+  });
 }
 
 function inTx(db, fn) {
