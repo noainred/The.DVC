@@ -565,7 +565,7 @@
     남은 결정: 풀기에 전제 조건 없음(목록을 받은 뒤 다른 관리자가 연장 · 다시 건 보류도 지운다 — 키마다 `at` 을 보내 409 로 할지) · 여러 건 감사에 이름이 10~15건까지만(건마다 줄을 남길지) · 기존 VM 줄의 보류 단추(v3.28.0)는 쓰기 범위를 보지 않는다(서버가 403).
   - 화면 `HoldList.jsx`: 못 읽은 보류 파일이면 목록은 보이고 풀기 · 연장을 잠근다 · 목록을 못 받으면 탭 수 ‘—’ · 연장 창은 표 밖(위)에(표 줄 사이에 끼우면 STable 정렬이 짝을 잃는다) · 720px 이하는 카드.
   - 720px 이하 법인 카드는 1열(`snapshots.css` — 2열이면 글자 자리 약 143px 라 이름 · 크기 줄이 말줄임). 회귀 `server/test/snapHolds3350.test.js` · `web/src/views/tools/snapshots/snapHolds3350.test.jsx`.
-- v3.39.0 — VM 전원 구간(켜짐 · 꺼짐 달력 · 드로어 '전원 상태' — 시안 `docs/design/vm-power-calendar` A안 · ⑤). 판정은 `server/src/vmpower/spans.js` 하나
+- v3.39.0(실제 릴리스 v3.40.0 — main 이 v3.39.0 을 먼저 써서 번호만 올렸다 · 코드 · 테스트 표지는 v3.39.0) — VM 전원 구간(켜짐 · 꺼짐 달력 · 드로어 '전원 상태' — 시안 `docs/design/vm-power-calendar` A안 · ⑤). 판정은 `server/src/vmpower/spans.js` 하나
   - 저장은 VM 추적 DB(vm-track.db) 같은 연결의 표 3개(`vmpower/db.js`): `power_spans`(VM 의 같은 상태 구간 한 행 — **전환이 있을 때만 행이 생긴다** · `start_lo` null = 기록 시작 전부터 그 상태) ·
     `power_watch`(vCenter 별 첫 · 마지막 관측) · `power_gaps`(관측이 `GAP_MS` 넘게 끊긴 구간). 10분마다 5,850 VM 을 갱신하지 않는다 — 관측 시각은 vCenter 당 한 행.
   - 관측기 `vmpower/watcher.js`: 60초 틱 · 10분마다 스냅샷만 읽음(vCenter 왕복 0) · 재진입 가드 · vCenter 하나당 트랜잭션 하나 + 양보. 못 읽은 vCenter 판정은 `samplingUnreadReasons` 하나(사본 금지 —
