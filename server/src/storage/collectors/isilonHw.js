@@ -16,13 +16,17 @@
  *
  * ── 비용 ─────────────────────────────────────────────────────────────────────
  *  시리얼은 바뀌지 않는다 — 장비당 **6시간에 한 번**만 묻고(성공 캐시), 실패하면 1시간 뒤에 다시 묻는다(지원하지 않는 계정·셸에서
- *  매 주기 45초를 쓰지 않게). 세션이 이미 오래 걸렸으면(장비 시한 180초 안쪽 예산) 시작하지 않고 사유를 남긴다.
+ *  매 주기 시한까지 기다리지 않게). 세션 예산이 바닥났으면 시작하지 않고 사유를 남긴다.
+ *  v3.39.0 · v3.41.1: 주기 수집에서 이 명령의 시한은 아래 45초가 아니라 **PowerScale SSH 명령 대기 설정값**(기본 3분 — `isilonSsh.js budgetedSh`)이고,
+ *   45초(`HW_CMD_TIMEOUT_MS`)는 연결 테스트(quick)에서만 쓰인다. 시작 여부는 호출부가 `budgetSkip` 으로 알려 준다 — `HW_START_BUDGET_MS` 의
+ *   경과 판정은 유일한 운영 호출부가 `sessionStartedAt: Date.now()` 를 넘겨 닿지 않는다(다른 호출부를 위해 남겨 둔 것).
+ *   예산이 시한을 줄여 끝까지 기다리지 못한 것(`SESSION_BUDGET`)은 실패로 기억하지 않는다.
  */
 
 export const ISI_HW_CMD = 'isi_for_array -s isi_hw_status -i';
 export const HW_OK_TTL_MS = 6 * 3_600_000;
 export const HW_FAIL_RETRY_MS = 3_600_000;
-/** 세션 안에서 이 시각(세션 시작 기준)이 지났으면 시작하지 않는다 — 장비 시한(기본 180초) 안에 끝나게. */
+/** 세션 안에서 이 시각(세션 시작 기준)이 지났으면 시작하지 않는다 — `sessionStartedAt` 을 실제 세션 시작으로 넘기는 호출부용(위 머리말 — 지금 운영 호출부는 `budgetSkip` 을 쓴다). */
 export const HW_START_BUDGET_MS = 100_000;
 export const HW_CMD_TIMEOUT_MS = 45_000;
 const CACHE_MAX = 1024;

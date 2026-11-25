@@ -134,12 +134,21 @@ describe('unsetNote — 선택 칸 아래 줄(v3.41.1)', () => {
     expect(src).not.toMatch(/'미지정\(엣지 로컬\)'/);          // 긴 첫 선택지가 열 폭을 정했다
     expect(src).toMatch(/const WRAP_TD = \{ whiteSpace: 'normal', wordBreak: 'keep-all'/);
     expect(src).toMatch(/const WRAP_TH = \{ whiteSpace: 'normal', wordBreak: 'keep-all'/);
-    // 고정(sticky) 칸은 불투명 배경 — 표 바탕 · 전역 행과 같은 변수여야 떠 보이지 않는다
-    expect(src).toMatch(/const TABLE_BG = \{ background: 'var\(--panel\)' \}/);
-    expect(src).toMatch(/const STICKY_TD = \{ \.\.\.WRAP_TD, position: 'sticky', left: 0, zIndex: 1, background: 'var\(--panel\)' \}/);
-    expect(src).toMatch(/const GLOBAL_ROW = \{ background: 'var\(--panel-2\)' \}/);
-    expect(src).toMatch(/const STICKY_TD_GLOBAL = \{ \.\.\.STICKY_TD, background: 'var\(--panel-2\)' \}/);
-    expect((src.match(/className="table-wrap" style=\{TABLE_BG\}/g) || []).length).toBe(2);
-    expect((src.match(/<tr style=\{GLOBAL_ROW\}>/g) || []).length).toBe(2);
+    // 고정(sticky) 칸은 CSS 클래스로 — 인라인 스타일은 행의 hover 색(tbody tr:hover)을 덮지 못해 그 칸만 다른 색으로 남았다(Chromium 판독).
+    expect((src.match(/className="table-wrap si-wrap"/g) || []).length).toBe(2);
+    expect((src.match(/<tr className="si-global">/g) || []).length).toBe(2);
+    expect((src.match(/<td className="si-sticky" title=\{/g) || []).length).toBe(4);     // 좁은 화면에서 숨는 설명은 title 로 남는다
+    expect((src.match(/className="muted si-hint"/g) || []).length).toBe(4);
+    expect(src).not.toMatch(/position: 'sticky'/);
+    const css = fs.readFileSync(new URL('../styles.css', import.meta.url), 'utf8');
+    // 불투명 배경: 표 바탕 · 고정 칸 = --panel, 전역 행 · 그 고정 칸 = --panel-2
+    expect(css).toMatch(/\.si-wrap \{ background: var\(--panel\); \}/);
+    expect(css).toMatch(/\.si-wrap \.si-sticky \{ position: sticky; left: 0; z-index: 1;[^}]*background: var\(--panel\);/);
+    expect(css).toMatch(/\.si-wrap tbody tr\.si-global, \.si-wrap tbody tr\.si-global \.si-sticky \{ background: var\(--panel-2\); \}/);
+    // hover: 고정 칸에도 행과 같은 옅은 색을 불투명 바탕 위에 겹친다(전역 행은 hover 색이 없으므로 고정 칸도 그대로)
+    expect(css).toMatch(/\.si-wrap tbody tr:hover \.si-sticky \{ background: linear-gradient\(rgba\(59,130,246,\.06\), rgba\(59,130,246,\.06\)\), var\(--panel\); \}/);
+    expect(css).toMatch(/\.si-wrap tbody tr\.si-global:hover \.si-sticky \{ background: var\(--panel-2\); \}/);
+    expect(css).toMatch(/tbody tr:hover \{ background: rgba\(59,130,246,\.06\); \}/);   // 위 숫자는 이 규칙과 같은 색이어야 한다
+    expect(css).toMatch(/@media \(max-width: 560px\) \{ \.si-wrap \.si-hint \{ display: none; \} \}/);
   });
 });

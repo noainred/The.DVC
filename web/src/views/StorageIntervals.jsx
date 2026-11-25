@@ -27,19 +27,15 @@ const CENTRAL_NA_KEYS = new Set(['pushMs', 'configPullMs']);
  *   영역 · 노드 부하 · 반영 지연 열이 가로 스크롤해야만 보였다. 400px 에서는 대상 칸 하나가 화면을 다 차지했다.
  *   · 대상 칸 · 머리글 · 반영 지연 칸은 줄바꿈한다(WRAP_TD · WRAP_TH).
  *   · 첫 선택지는 짧게(‘미지정’ · ‘상속’) — 무엇을 물려받는지는 칸 아래 줄이 말한다(unsetNote).
- *   · 대상 칸은 왼쪽에 고정한다(STICKY_TD) — 좁은 화면에서 가로로 밀어도 어느 행인지 보인다. 고정 칸은 **불투명 배경**이어야 한다(뒤 칸이 비친다).
+ *   · 대상 칸은 왼쪽에 고정한다(CSS `.si-sticky`) — 좁은 화면에서 가로로 밀어도 어느 행인지 보인다. 고정 칸은 **불투명 배경**이어야 한다(뒤 칸이 비친다).
  */
 // 줄바꿈은 **낱말 단위**(`word-break: keep-all`) — 기본값은 한글을 글자 사이 어디서나 끊어 ‘지연(최/대)’ · ‘1시간 5/분’ 이 됐다(Chromium 판독).
 const WRAP_TD = { whiteSpace: 'normal', wordBreak: 'keep-all', minWidth: 120 };
 const WRAP_TH = { whiteSpace: 'normal', wordBreak: 'keep-all', lineHeight: 1.35 };
 const CELL_TD = { paddingLeft: 8, paddingRight: 8 };
-// 고정 칸의 배경은 그 행의 배경과 **같은 불투명 색**이어야 한다 — 그래서 표 바탕(TABLE_BG)과 전역 행(GLOBAL_ROW)도 같은 변수로 못 박는다
-//   (표 바탕이 투명이면 고정 칸만 밝은 상자로 떠 보인다 — Chromium 판독).
-const TABLE_BG = { background: 'var(--panel)' };
-const GLOBAL_ROW = { background: 'var(--panel-2)' };
-const STICKY_TD = { ...WRAP_TD, position: 'sticky', left: 0, zIndex: 1, background: 'var(--panel)' };
-const STICKY_TD_GLOBAL = { ...STICKY_TD, background: 'var(--panel-2)' };
-const STICKY_TH = { ...WRAP_TH, minWidth: 120, left: 0, zIndex: 3 };
+// 대상 칸의 왼쪽 고정 · 불투명 배경 · hover 색 · 좁은 화면에서 설명 숨김은 **CSS 클래스**(styles.css `.si-wrap` · `.si-sticky` · `.si-global` · `.si-hint`)로 한다 —
+//   인라인 스타일은 `tbody tr:hover` 를 덮지 못해, 마우스를 올린 행에서 고정 칸만 다른 색으로 남았다(Chromium 판독).
+const GLOBAL_HINT = '모든 엣지 + 중앙에 적용(개별 지정이 우선)';
 /** 대기 시간 표 — 열이 둘뿐이라 대상 칸에 폭을 주어 선택 칸이 이름 바로 옆에 오게 한다(안 주면 선택 칸이 표 오른쪽 끝으로 밀린다). */
 const TIMEOUT_TARGET_W = { width: '38%' };
 function inheritTail(target) {
@@ -146,18 +142,18 @@ export default function StorageIntervals() {
         </div>
       </div>
 
-      <div className="table-wrap" style={TABLE_BG}>
+      <div className="table-wrap si-wrap">
         <STable>
           <thead>
             <tr>
-              <th style={STICKY_TH}>대상</th>
+              <th className="si-sticky" style={WRAP_TH}>대상</th>
               {timerSpec.map((s) => <th key={s.key} title={s.hint} style={WRAP_TH}>{s.label}</th>)}
               <th style={WRAP_TH} title="장비 수집 주기 + 중앙 전송(push) 주기 — 장비의 변화가 중앙 화면에 늦어도 이만큼 안에 보인다는 뜻.">중앙 반영 지연(최대)</th>
             </tr>
           </thead>
           <tbody>
-            <tr style={GLOBAL_ROW}>
-              <td style={STICKY_TD_GLOBAL}><b>전역 기본</b><div className="muted" style={{ fontSize: 11 }}>모든 엣지 + 중앙에 적용(개별 지정이 우선)</div></td>
+            <tr className="si-global">
+              <td className="si-sticky" title={GLOBAL_HINT}><b>전역 기본</b><div className="muted si-hint">{GLOBAL_HINT}</div></td>
               {timerSpec.map((s) => (
                 <td key={s.key} style={CELL_TD}>
                   <Cell target="__global__" form={globalForm} s={s} globalForm={globalForm} setCell={setCell} />
@@ -171,7 +167,7 @@ export default function StorageIntervals() {
               const eff = effectiveFor(globalForm, form);
               return (
                 <tr key={t.key || '__central__'}>
-                  <td style={STICKY_TD}><b>{t.label}</b><div className="muted" style={{ fontSize: 11 }}>{t.hint}</div></td>
+                  <td className="si-sticky" title={t.hint}><b>{t.label}</b><div className="muted si-hint">{t.hint}</div></td>
                   {timerSpec.map((s) => (t.key === '' && CENTRAL_NA_KEYS.has(s.key)
                     ? <td key={s.key} className="muted" style={{ ...CELL_TD, fontSize: 12 }} title="중앙은 자기 자신에게 push·설정 pull 을 하지 않습니다.">해당 없음</td>
                     : (
@@ -205,17 +201,17 @@ export default function StorageIntervals() {
               ))}
             </div>
           </div>
-          <div className="table-wrap" style={TABLE_BG}>
+          <div className="table-wrap si-wrap">
             <STable>
               <thead>
                 <tr>
-                  <th style={{ ...STICKY_TH, ...TIMEOUT_TARGET_W }}>대상</th>
+                  <th className="si-sticky" style={{ ...WRAP_TH, ...TIMEOUT_TARGET_W }}>대상</th>
                   {timeoutSpec.map((s) => <th key={s.key} title={s.hint} style={WRAP_TH}>{s.label}</th>)}
                 </tr>
               </thead>
               <tbody>
-                <tr style={GLOBAL_ROW}>
-                  <td style={STICKY_TD_GLOBAL}><b>전역 기본</b><div className="muted" style={{ fontSize: 11 }}>모든 엣지 + 중앙에 적용(개별 지정이 우선)</div></td>
+                <tr className="si-global">
+                  <td className="si-sticky" title={GLOBAL_HINT}><b>전역 기본</b><div className="muted si-hint">{GLOBAL_HINT}</div></td>
                   {timeoutSpec.map((s) => (
                     <td key={s.key} style={CELL_TD}>
                       <Cell target="__global__" form={globalForm} s={s} globalForm={globalForm} setCell={setCell} />
@@ -227,7 +223,7 @@ export default function StorageIntervals() {
                   const form = agentForms[t.key] || {};
                   return (
                     <tr key={t.key || '__central__'}>
-                      <td style={STICKY_TD}><b>{t.label}</b><div className="muted" style={{ fontSize: 11 }}>{t.hint}</div></td>
+                      <td className="si-sticky" title={t.hint}><b>{t.label}</b><div className="muted si-hint">{t.hint}</div></td>
                       {timeoutSpec.map((s) => (
                         <td key={s.key} style={CELL_TD}>
                           <Cell target={t.key} form={form} s={s} globalForm={globalForm} setCell={setCell} />

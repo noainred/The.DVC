@@ -400,7 +400,7 @@ export async function readIsiPowerSsh(sh, host, { expectedNodes = null } = {}) {
  *  · isi 명령 하나를 기다리는 시간은 이제 **설정값**이다(`storage/intervals.js isiCmdTimeoutMs` — 설정 › 수집 주기·임계 › 스토리지 수집 주기 ·
  *    중앙이 엣지에 배포 · 기본 3분 · 1~5분). 예전에는 SSH exec 기본 시한(60초)이었고 엣지 portal.env 상수였다.
  *  · **모든 isi 명령**에 적용한다(사용자 결정): 필수 `isi status` 는 설정값까지, 부가 명령도 설정값까지 기다리되 **남은 세션 예산
- *    안에서만**. 호출부가 넘기던 짧은 시한(통계·노드 부하·전원 20초 · 시리얼 45초)은 쓰지 않는다 — 느린 클러스터에서 정확 용량·버전이
+ *    안에서만**. 호출부가 넘기던 짧은 시한(통계·노드 부하·전원 20초 · 시리얼 45초)은 **주기 수집에서는** 쓰지 않는다(연결 테스트 `quick` 은 쓴다 — v3.41.1) — 느린 클러스터에서 정확 용량·버전이
  *    늘 빠지던 원인이다. ⚠ 대가: 한 명령이 설정값까지 매달리면 뒤 명령은 그 주기에 '예산 초과로 미수집' 이 된다(순서가 계약 — 아래).
  *  · 세션 예산·장비 시한은 **설정값에서 계산**한다(`storage/isiTimeouts.js` — 장비 시한 = max(기존, 명령 대기 + 2분) · 예산 = 장비 시한 − 여유).
  *    그래서 상수가 아니라 **함수**다 — 중앙이 값을 바꾸면 다음 수집부터 먹는다(모듈 로드 시 굳히지 말 것).
@@ -542,7 +542,7 @@ export async function collectViaSsh(device, { budgetMs = null, cmdTimeoutMs = nu
         : r.usersRaw ? '오류: users JSON 파싱 실패' : '오류: isi auth users list 실행 실패';
     }
     // v2.741(DEV-02): 예산으로 시작하지 않은 부가 명령 — 조용히 빼지 않는다. `cliSkipped` 는 Unity(unitySsh)와 같은 뜻·같은 모양(개수)이고
-    //   무엇을 뺐는지는 `cliSkippedCmds` 가 말한다.
+    //   무엇을 뺐는지는 `cliSkippedCmds` 가 말한다. v3.41.1: 시작했지만 예산이 시한을 줄여 **끝까지 기다리지 못한** 명령도 여기에 든다(budgetedSh).
     if (skipped.length) { const u = [...new Set(skipped)]; snap.extra = { ...(snap.extra || {}), cliSkipped: u.length, cliSkippedCmds: u, cliBudgetMs: budget }; }
     return snap;
   } catch (e) {

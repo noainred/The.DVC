@@ -335,8 +335,8 @@ export async function testDeviceConnection(device, { timeoutMs = 60_000 } = {}) 
   const timer = setTimeout(() => ac.abort(), effMs);
   try {
     const snap = await Promise.race([
-      // `_test` 는 수집기가 '연결 테스트' 를 구분하는 표시다 — v2.525: Unity SSH 는 이때만
-      // 전 명령의 원문(cliRaw)을 담는다(주기 수집에서는 실패한 명령만 — 대역폭).
+      // `_test` 는 수집기가 '연결 테스트' 를 구분하는 표시다. 지금 읽는 곳은 `collectors/isilon.js` 하나다(SSH 방식 — 부가 명령의 짧은 시한 + 바깥 시한에
+      //   맞춘 예산, v3.41.1). 예전 주석의 'Unity SSH 는 이때만 전 명령의 원문(cliRaw)을 담는다' 는 지금 코드와 맞지 않는다(Unity 수집기는 이 표시를 읽지 않는다).
       fn({ ...device, _signal: ac.signal, _test: true, _testTimeoutMs: effMs }, { signal: ac.signal }),   // v3.41.1: 바깥 시한을 알려 준다(Isilon SSH 가 예산을 그 안으로 잡는다)
       new Promise((_, reject) => ac.signal.addEventListener('abort', () => reject(new Error(`테스트 시간 초과(${Math.round(effMs / 1000)}초) — 방화벽/포트 또는 장비 응답 지연을 확인하세요.`)), { once: true })),
     ]);
