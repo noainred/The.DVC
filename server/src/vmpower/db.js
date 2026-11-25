@@ -37,12 +37,28 @@ function ensure(x) {
     );
     CREATE INDEX IF NOT EXISTS idx_pgaps_vc ON power_gaps (vcenter_id, to_ts);
     CREATE INDEX IF NOT EXISTS idx_pgaps_to ON power_gaps (to_ts);
+    -- 4회차 R4: 최근 관측 시각(vCenter 별 · 7일만) — 시계가 튀었다 돌아왔을 때 '튀기 직전 마지막 실제 관측' 을 정확히 찾는다.
+    CREATE TABLE IF NOT EXISTS power_obs (vcenter_id TEXT NOT NULL, ts INTEGER NOT NULL);
+    CREATE INDEX IF NOT EXISTS idx_pobs_vc ON power_obs (vcenter_id, ts);
+    CREATE INDEX IF NOT EXISTS idx_pobs_ts ON power_obs (ts);
   `);
   // v3.42.0(재검토 #10): 보존 정리로 그 앞 구간을 지운 시각 — 남은 첫 구간을 '처음 Power On' 으로 지어내지 않게.
-  addMissingColumns(db, 'power_watch', [['pruned_to', 'INTEGER']]);
+  addMissingColumns(db, 'power_watch', [['pruned_to', 'INTEGER'],
+    // 4회차 R3: 작은 시계 역행으로 관측을 건너뛰기 시작한 시각(지금 시계) — 다시 관측할 때 그 사이를 '기록 없음' 으로 남기고 지운다.
+    ['hold_from', 'INTEGER']]);
   const st = {
     openOf: db.prepare('SELECT id, vm_id, state, start_ts FROM power_spans WHERE vcenter_id=? AND end_ts IS NULL'),
-    watchOf: db.prepare('SELECT first_ts, last_ts, backfilled, pruned_to FROM power_watch WHERE vcenter_id=?'),
+    watchOf: db.prepare('SELECT first_ts, last_ts, backfilled, pruned_to, hold_from FROM power_watch WHERE vcenter_id=?'),
+    setHold: db.prepare('UPDATE power_watch SET hold_from=COALESCE(hold_from, ?) WHERE vcenter_id=?'),
+    clearHold: db.prepare('UPDATE power_watch SET hold_from=NULL WHERE vcenter_id=?'),
+    insObs: db.prepare('INSERT INTO power_obs (vcenter_id, ts) VALUES (?, ?)'),
+    futLastObs: db.prepare('SELECT MAX(ts) AS mx FROM power_obs WHERE vcenter_id=? AND ts<?'),
+    futDelObs: db.prepare('DELETE FROM power_obs WHERE vcenter_id=? AND ts>?'),
+    pruneObs: db.prepare('DELETE FROM power_obs WHERE rowid IN (SELECT rowid FROM power_obs WHERE ts<? LIMIT 5000)'),
+    dropObsOfVc: db.prepare('DELETE FROM power_obs WHERE vcenter_id=?'),
+    futLastOfVm: db.prepare('SELECT id, end_ts FROM power_spans WHERE vcenter_id=? AND vm_id=? ORDER BY start_ts DESC LIMIT 1'),
+    reopenId: db.prepare('UPDATE power_spans SET end_ts=NULL WHERE id=?'),
+    firstTsAtMost: db.prepare('UPDATE power_watch SET first_ts=MIN(first_ts, ?) WHERE vcenter_id=?'),
     repairWatch: db.prepare('UPDATE power_watch SET last_ts=? WHERE vcenter_id=?'),
     futVms: db.prepare('SELECT DISTINCT vm_id FROM power_spans WHERE vcenter_id=? AND start_ts>?'),
     futDelSpans: db.prepare('DELETE FROM power_spans WHERE vcenter_id=? AND start_ts>?'),
@@ -94,7 +110,7 @@ export async function watchOf(vcenterId) {
   const p = await powerDb();
   if (!p) return null;
   const r = p.st.watchOf.get(String(vcenterId));
-  return r ? { firstTs: Number(r.first_ts), lastTs: Number(r.last_ts), backfilled: !!r.backfilled, prunedTo: r.pruned_to == null ? null : Number(r.pruned_to) } : null;
+  return r ? { firstTs: Number(r.first_ts), lastTs: Number(r.last_ts), backfilled: !!r.backfilled, prunedTo: r.pruned_to == null ? null : Number(r.pruned_to), holdFrom: r.hold_from == null ? null : Number(r.hold_from) } : null;
 }
 
 export async function lastWatchTs() {
@@ -111,6 +127,13 @@ const SRC_OK = new Set(['watch', 'backfill', 'appear', 'backfill-appear']);
  *   ② 지금보다 뒤에 닫힌 구간도 다시 연다(미래 관측에서 '사라짐' 으로 닫힌 것) — 다음 관측이 다시 판정한다
  *   ③ 끊김도 같은 기준으로 자른다 ④ 마지막 관측 = 지금. (예전에는 ④만 해서 시작이 앞 끝보다 이른 구간 · '지금 목록에 없음' 이 남았다.)
  */
+/** 작은 시계 역행으로 관측을 건너뛰기 시작한 시각을 남긴다(처음 한 번만 · 4회차 R3). */
+export async function markHold(vcenterId, ts) {
+  const p = await powerDb();
+  if (!p) return;
+  p.st.setHold.run(ts, String(vcenterId));
+}
+
 export async function repairFuture(vcenterId, ts) {
   const p = await powerDb();
   if (!p) return { ok: false };
@@ -118,12 +141,21 @@ export async function repairFuture(vcenterId, ts) {
   return inTx(p.db, () => {
     const vms = p.st.futVms.all(vc, ts).map((r) => r.vm_id);
     const deleted = Number(p.st.futDelSpans.run(vc, ts).changes || 0);
+    // 튀기 직전 마지막 실제 관측 = 지금보다 앞선 마지막 관측 기록(power_obs · 7일). 미래 관측이 닫은 구간은 end = 그 시각이고,
+    //   그보다 앞서 닫힌 구간은 진짜로 사라진 VM 이다 — 다시 열지 않는다(4회차 R4: 사라진 VM 을 되살려 목록에 없던 시간을 켜짐으로 칠했다).
+    const lastReal = Number(p.st.futLastObs.get(vc, ts)?.mx || 0);
+    p.st.futDelObs.run(vc, ts);
     let reopened = 0;
-    for (const vm of vms) reopened += Number(p.st.futReopenLast.run(vc, vm).changes || 0);
+    for (const vm of vms) {
+      const r = p.st.futLastOfVm.get(vc, vm);
+      if (r && r.end_ts != null && Number(r.end_ts) >= lastReal) reopened += Number(p.st.reopenId.run(r.id).changes || 0);
+    }
     reopened += Number(p.st.futReopen.run(vc, ts).changes || 0);
     p.st.futDelGaps.run(vc, ts);
     p.st.futCutGaps.run(ts, vc, ts);
     p.st.repairWatch.run(ts, vc);
+    p.st.firstTsAtMost.run(ts, vc);   // 미래 기간에 처음 관측된 vCenter — 소급 끝(첫 관측)이 미래로 남지 않게
+    p.st.clearHold.run(vc);
     return { ok: true, deleted, reopened };
   });
 }
@@ -140,9 +172,11 @@ export async function commitObservation(vcenterId, plan, ts) {
   const vc = String(vcenterId);
   return inTx(p.db, () => {
     if (plan.gap) p.st.insGap.run(vc, plan.gap.from, plan.gap.to);
+    if (plan.holdGap) { p.st.insGap.run(vc, plan.holdGap.from, plan.holdGap.to); p.st.clearHold.run(vc); }
     for (const c of plan.close || []) p.st.closeSpan.run(c.end, c.id);
     for (const s of plan.insert || []) p.st.insSpan.run(vc, s.vmId, s.name || '', s.state, s.start, s.lo ?? null, null, SRC_OK.has(s.src) ? s.src : 'watch');
     p.st.upsertWatch.run(vc, ts, ts, 0);
+    p.st.insObs.run(vc, ts);
     return { ok: true, gap: !!plan.gap, closed: (plan.close || []).length, opened: (plan.insert || []).length };
   });
 }
@@ -175,6 +209,7 @@ export async function commitBackfill(vcenterId, rows, ts, gaps = []) {
     }
     for (const g of gaps || []) p.st.insGap.run(vc, g.from, g.to);   // 소급 기간 중 추적이 비었던 구간(재검토 #5)
     p.st.upsertWatch.run(vc, ts, ts, 1);
+    p.st.insObs.run(vc, ts);
     return { ok: true, inserted: n, backfill: bf };
   });
 }
@@ -207,7 +242,7 @@ export async function prunePower(cutTs) {
   const y = createYielder(15);
   let spans = 0; let gaps = 0; let vcs = 0;
   for (const r of p.st.staleWatchVcs.all(cutTs)) {
-    inTx(p.db, () => { spans += Number(p.st.dropOpenOfVc.run(r.vcenter_id).changes || 0); gaps += Number(p.st.dropGapsOfVc.run(r.vcenter_id).changes || 0); p.st.dropWatch.run(r.vcenter_id); });
+    inTx(p.db, () => { spans += Number(p.st.dropOpenOfVc.run(r.vcenter_id).changes || 0); gaps += Number(p.st.dropGapsOfVc.run(r.vcenter_id).changes || 0); p.st.dropObsOfVc.run(r.vcenter_id); p.st.dropWatch.run(r.vcenter_id); });
     vcs++;
     await y();
   }
@@ -221,5 +256,8 @@ export async function prunePower(cutTs) {
     await y();
   }
   for (const vc of touched) p.st.markPruned.run(cutTs, vc);
+  // 관측 시각 기록은 7일만(시계 복구용) — 보존 기간과 따로.
+  const obsCut = Date.now() - 7 * 86_400_000;
+  for (let i = 0; i < 100; i++) { if (!Number(p.st.pruneObs.run(obsCut).changes || 0)) break; await y(); }
   return { ok: true, spans, gaps, vcs };
 }

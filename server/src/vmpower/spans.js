@@ -233,6 +233,8 @@ export function buildTimeline({ spans = [], gaps = [], events = [], now, watchLa
   }
   const wl = numOrNull(watchLast);
   const tail = wl != null && now - wl > gapMs ? Math.min(wl, now) : now;   // 진행 중 구간을 어디까지 아는가
+  // 마지막 관측이 지금보다 뒤 — 서버 시계가 뒤로 바뀌어 관측을 건너뛰는 중이다. 지금 상태를 단정하지 않는다(4회차 R3).
+  const clockHeld = wl != null && wl > now;
 
   // ② 전환 창을 이벤트로 좁힌다(창 안의 같은 방향 이벤트 중 마지막) — 방향별 정렬 배열 + 이분 탐색.
   const evByType = { VmPoweredOnEvent: [], VmPoweredOffEvent: [] };
@@ -361,7 +363,7 @@ export function buildTimeline({ spans = [], gaps = [], events = [], now, watchLa
     sums,
     facts: {
       // 지금 상태 — 관측이 끊긴 채면 '마지막으로 본 상태'(seenTs · stale — 재검토 #4: 3일 끊겨도 '켜짐 · 20일째' 와 녹색 점이었다).
-      current: last && last.end == null ? { state: last.state, ...(fact(last, sp.length - 1) || {}), seenTs: tail, stale: tail < now, unknownMs: unknownSince(last.start) } : null,
+      current: last && last.end == null ? { state: last.state, ...(fact(last, sp.length - 1) || {}), seenTs: tail, stale: tail < now || clockHeld, ...(clockHeld ? { clockHeld: true } : {}), unknownMs: unknownSince(last.start) } : null,
       gone: !!(last && last.end != null),
       firstOn: truncatedHead && sp.length ? { before: sp[0].start, src: isBackfillSrc(sp[0].src) ? 'backfill' : 'watch' } : (firstOnIdx >= 0 ? fact(sp[firstOnIdx], firstOnIdx) : null),
       lastOn: lastOnIdx >= 0 ? fact(sp[lastOnIdx], lastOnIdx) : null,

@@ -11,7 +11,7 @@ import { store } from '../store.js';
 import { samplingUnreadReasons } from '../metrics/sampler.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { WATCH_EVERY_MS, GAP_MS, powerStateOf, planObservation, planBackfill, backfillGaps } from './spans.js';
-import { powerDb, openSpansOf, watchOf, commitObservation, backfillSourceOf, commitBackfill, prunePower, lastWatchTs, repairFuture } from './db.js';
+import { powerDb, openSpansOf, watchOf, commitObservation, backfillSourceOf, commitBackfill, prunePower, lastWatchTs, repairFuture, markHold } from './db.js';
 
 const TICK_MS = 60_000;
 const PRUNE_EVERY = 144;   // 관측 144회(약 하루)마다
@@ -96,6 +96,8 @@ async function runInner({ now, snap }) {
       if (watch.lastTs - now > CLOCK_REPAIR_MS) {
         const rr = await repairFuture(id, now);
         console.warn(`[vmpower] ${id}: 마지막 관측 시각이 미래(${new Date(watch.lastTs).toISOString()}) — 시계가 바뀐 것으로 보고 미래에 쓰인 구간 ${rr?.deleted ?? 0}개를 지우고 ${rr?.reopened ?? 0}개를 다시 열었습니다`);
+      } else {
+        await markHold(id, now);   // 건너뛰기 시작 — 다시 관측할 때 그 사이를 '기록 없음' 으로(4회차 R3)
       }
       out.held.push([id, 'clock']);
       continue;
@@ -104,6 +106,8 @@ async function runInner({ now, snap }) {
     // 열린 구간이 있는데 목록이 비었다 — 수집 이상(인벤토리 일시 누락)일 수 있다. 전부 '삭제됨' 으로 닫지 않는다.
     if (!list.length && open?.size) { out.held.push([id, 'empty']); continue; }
     const plan = planObservation({ open: open || new Map(), watchLast: watch.lastTs, vms: list, ts: now });
+    // 작은 시계 역행으로 건너뛴 동안은 관측하지 않았다 — 건너뛰기 시작(지금 시계) ~ 지금을 '기록 없음' 으로(시각 자체를 믿을 수 없어 앞선 기록과 겹쳐도 그렇게 칠한다).
+    if (!plan.skip && watch.holdFrom != null && watch.holdFrom < now) plan.holdGap = { from: watch.holdFrom, to: now };
     const c = await commitObservation(id, plan, now);
     out.opened += c?.opened || 0; out.closed += c?.closed || 0; if (c?.gap) out.gaps++;
     out.vcenters++;

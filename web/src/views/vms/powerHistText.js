@@ -183,6 +183,7 @@ export function currentText(facts, now) {
   if (!c) return facts?.gone ? { head: '지금 목록에 없음', since: '' } : { head: '기록 없음', since: '' };
   const label = STATE_LABEL[c.state] || c.state;
   // 관측이 끊긴 채면 지금 상태를 모른다 — '마지막으로 본 상태' 와 그 시각을 말한다(재검토 #4).
+  if (c.clockHeld) return { head: `마지막으로 본 상태 · ${label}`, since: '서버 시계가 뒤로 바뀌어 관측을 잠시 멈췄습니다(시계가 따라잡으면 다시 기록합니다)', stale: true };
   if (c.stale && numOrNull(c.seenTs) != null) return { head: `마지막으로 본 상태 · ${label}`, since: `${stampText(c.seenTs)} 이후 관측 없음(${durText(now - c.seenTs)})`, stale: true };
   // 그 사이 '기록 없음'(포탈 중지 · 못 읽음)이 끼어 있으면 길이가 그 시간을 포함한다는 것을 밝힌다(2회차 남은 것).
   const unk = numOrNull(c.unknownMs) > 0 ? ` · 그 사이 기록 없음 ${durText(c.unknownMs)} 포함` : '';
@@ -213,6 +214,7 @@ export function lastOffSub(f, now) {
   if (f.lastOff.appeared) return '꺼진 채 목록에 나타남 — 언제 꺼졌는지는 모릅니다';
   if (f.current?.state === 'off') {
     if (f.lastOff.before != null) return '기록 시작 전부터 꺼짐';
+    if (f.current.clockHeld) return '서버 시계 변경으로 관측을 멈춘 동안의 상태는 모릅니다';
     if (f.current.stale) return `꺼진 뒤 마지막 관측까지 ${durText(Math.max(0, f.current.seenTs - f.lastOff.ts))} — 그 뒤는 관측 없음`;
     return `꺼진 뒤 ${durText(Math.max(0, now - f.lastOff.ts))} 지남`;
   }
@@ -223,6 +225,7 @@ export function lastOffSub(f, now) {
 export function lastOnSub(f, lastOnFact, now) {
   const c = f.current;
   if (c?.state === 'on' && c.ts != null && !c.stale && !c.appeared && c.before == null) return `${durText(Math.max(0, now - c.ts))}째 켜져 있음`;
+  if (c?.state === 'on' && c.clockHeld) return '서버 시계 변경으로 관측을 멈춘 동안의 상태는 모릅니다';
   if (c?.state === 'on' && c.stale) return `마지막 관측(${stampText(c.seenTs)})까지 켜져 있었음`;
   return lastOnFact.sub;
 }

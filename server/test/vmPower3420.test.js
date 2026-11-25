@@ -292,3 +292,47 @@ test('3회차 R2 — 전환 목록의 직전 길이는 사실과 같은 판정 �
   assert.equal(x.prevHoleMs, 5 * HOUR);
   assert.equal(t.facts.onCount, 0);
 });
+
+test('4회차 R3 — 작은 역행으로 건너뛴 시간은 기록 없음 · 건너뛰는 동안 지금 상태를 단정하지 않는다', async () => {
+  const D = await import('../src/vmpower/db.js');
+  if (!(await D.powerDb())) return;
+  const W8 = await import('../src/vmpower/watcher.js');
+  const H = await import('../src/vmpower/history.js');
+  const obs = (ts, ps) => W8.runPowerWatchOnce({ now: ts, snap: { generatedAt: new Date(ts).toISOString(), vcenters: [{ id: 'vr', status: 'connected' }], vms: [{ id: 'vr:a', vcenterId: 'vr', name: 'vr-a', powerState: ps }] } });
+  const T0 = NOW - 20 * DAY;
+  for (const m of [0, 10, 20, 30]) await obs(T0 + m * MIN, 'POWERED_ON');
+  for (const m of [40, 55]) await obs(T0 + m * MIN, 'POWERED_OFF');
+  assert.deepEqual((await obs(T0 + 5 * MIN, 'POWERED_OFF')).held, [['vr', 'clock']]);   // 1시간 역행 — 건너뛰기 시작(5분)
+  const held = await H.vmPowerHistory({ id: 'vr:a', vcenterId: 'vr', name: 'vr-a', powerState: 'POWERED_OFF' }, { vms: [] }, { now: T0 + 6 * MIN });
+  assert.equal(held.facts.current.clockHeld, true);
+  assert.equal(held.facts.current.stale, true, '건너뛰는 동안 지금 상태를 단정하지 않는다');
+  await obs(T0 + 20 * MIN, 'POWERED_ON');                                                // 실제 80분 — 아직 건너뜀
+  await obs(T0 + 61 * MIN, 'POWERED_ON');                                                // 따라잡음
+  const gaps = await D.gapsOf('vr', 0);
+  assert.deepEqual(gaps, [{ from: T0 + 5 * MIN, to: T0 + 61 * MIN }], '건너뛰기 시작 ~ 다시 관측');
+  assert.equal((await D.watchOf('vr')).holdFrom, null, '다시 관측하면 지운다');
+  const h = await H.vmPowerHistory({ id: 'vr:a', vcenterId: 'vr', name: 'vr-a', powerState: 'POWERED_ON' }, { vms: [] }, { now: T0 + 62 * MIN });
+  assert.equal(h.transitions[0].unknownWindow, true, '켜진 시각의 창은 기록 없음과 겹친다');
+});
+
+test('4회차 R4 — 미래 구간 복구는 진짜로 사라진 VM 을 되살리지 않는다', async () => {
+  const D = await import('../src/vmpower/db.js');
+  if (!(await D.powerDb())) return;
+  const W8 = await import('../src/vmpower/watcher.js');
+  const obs = (ts, vms) => W8.runPowerWatchOnce({ now: ts, snap: { generatedAt: new Date(ts).toISOString(), vcenters: [{ id: 'vy', status: 'connected' }], vms } });
+  const A = (ps) => ({ id: 'vy:a', vcenterId: 'vy', name: 'a', powerState: ps });
+  const Y = (ps) => ({ id: 'vy:y', vcenterId: 'vy', name: 'y', powerState: ps });
+  const T0 = NOW - 15 * DAY;
+  await obs(T0, [A('POWERED_ON'), Y('POWERED_ON')]);
+  await obs(T0 + W, [A('POWERED_ON')]);                         // Y 실제로 사라짐(end = T0)
+  await obs(T0 + 2 * W, [A('POWERED_ON')]);
+  await obs(T0 + DAY, [A('POWERED_ON'), Y('POWERED_OFF')]);      // 시계 +1일 — 같은 id 가 꺼진 채 보임
+  const r = await obs(T0 + 3 * W, [A('POWERED_ON')]);            // 복귀 → 복구
+  assert.deepEqual(r.held, [['vy', 'clock']]);
+  const y = await D.spansOfVm('vy', 'vy:y');
+  assert.equal(y.length, 1);
+  assert.equal(y[0].end, T0, '진짜로 사라진 Y 는 닫힌 채로');
+  const a = await D.spansOfVm('vy', 'vy:a');
+  assert.equal(a[a.length - 1].end, null, '계속 있던 A 는 열린 채로');
+});
+
