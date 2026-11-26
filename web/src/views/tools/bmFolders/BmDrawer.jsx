@@ -20,6 +20,8 @@ import { osText, hwWhyText, OS_WHY } from './hwText.js';
 import { IdracConnect } from './IdracConnect.jsx';
 import { WarrantySection, FwBiosSections } from './CheckSections.jsx';   // v3.45 물리서버 점검(보증 · 펌웨어 기준선 · BIOS 편차)
 import { PeerSection } from './PeerSection.jsx';   // v3.48 같은 묶음 대비
+import { HealthSection, HwLogSection, CaseSection, AdvisorySection } from './OpsSections.jsx';   // v3.50 건강 점수 · 이벤트 로그 · 케이스 · 보안 권고
+import { ledText, LED_NOTE } from './opsText.js';
 import { useBoxWidth } from './useBoxWidth.js';
 import { unitText } from '../../unitText.js';
 import { usageTone, TONE_COLOR, TONE_TEXT } from '../../vms/vmHubText.js';
@@ -76,7 +78,7 @@ const modalAbove = () => typeof document !== 'undefined' && !!document.querySele
  * @param note  호출부의 쓰기 결과 알림({ ok, warn, text }) — 호출부는 본문 위 카드에 그리는데 그 자리는 가림막 뒤다(좁은 화면은 화면 밖).
  *              드로어가 열린 뒤 · 서버를 넘긴 뒤에 **새로 온 것만** 단추 줄 아래에 보인다(반증 A6 — 실패가 드로어 안에서 보이지 않았다).
  */
-export default function BmDrawer({ r, rows, corps, corpName, scoped, op, busy, onClose, onMove, note = null, admin = false, gen = '', onChanged = null }) {
+export default function BmDrawer({ r, rows, corps, corpName, scoped, op, busy, onClose, onMove, note = null, admin = false, gen = '', onChanged = null, healthRules = null }) {
   const rootRef = useRef(null);
   const backRef = useRef(null);
   const bodyRef = useRef(null);
@@ -222,8 +224,10 @@ export default function BmDrawer({ r, rows, corps, corpName, scoped, op, busy, o
         <div className="vmh-db bmd-db" ref={bodyRef}>
           <DrawerSections r={r} hw={hw} trend={trend} corpName={corpName} scoped={scoped} onClose={onClose}
             afterTrend={<PeerSection r={r} peer={peer} />}
+            afterGlance={<HealthSection r={r} rules={healthRules} />}
+            afterEnd={<><HwLogSection key={`hl:${r.key}`} r={r} /><CaseSection key={`cs:${r.key}`} r={r} /></>}
             afterIdent={<WarrantySection chk={chk} admin={admin && !scoped} />}
-            afterSpec={<FwBiosSections r={r} chk={chk} onBaseline={onBaseline} busy={baseBusy} baseNote={baseNote && baseNote.key === r.key ? baseNote : null} />} />
+            afterSpec={<><FwBiosSections r={r} chk={chk} onBaseline={onBaseline} busy={baseBusy} baseNote={baseNote && baseNote.key === r.key ? baseNote : null} /><AdvisorySection r={r} chk={chk} /></>} />
         </div>
 
         <nav className="vmh-df" aria-label="바로가기">
@@ -244,7 +248,7 @@ export default function BmDrawer({ r, rows, corps, corpName, scoped, op, busy, o
  * @param hw     { d, err } — /tools/bm-folders/hw(읽는 중이면 d null · err '')
  * @param trend  { d, err } — /tools/bm-folders/trend
  */
-export function DrawerSections({ r, hw, trend, corpName, scoped, onClose, now, afterTrend = null, afterIdent = null, afterSpec = null }) {
+export function DrawerSections({ r, hw, trend, corpName, scoped, onClose, now, afterTrend = null, afterIdent = null, afterSpec = null, afterGlance = null, afterEnd = null }) {
   const isBm = r.kind === 'bm';
   const at = now ?? Date.now();   // 나이 글자의 기준 시각(시험이 넣어 볼 수 있게 — 기본은 지금)
   const sigs = bmSignalRows(r, at);
@@ -298,6 +302,7 @@ export function DrawerSections({ r, hw, trend, corpName, scoped, onClose, now, a
         </div>
       </section>
 
+      {afterGlance}
       <section className="vmh-sec" aria-label="24시간 추이">
         <div className="sh"><h3>CPU · 메모리 — 지난 24시간</h3>{isBm ? <span className="muted">{trend.d?.via === 'edge' && trend.d.rows?.length ? '이 서버를 수집하는 엣지에서 받았습니다(구간 평균)' : '열 때 1회 조회 · 구간 평균'}</span> : null}</div>
         {!isBm ? <div className="muted bmd-note">{TREND_WHY.esxi}</div>
@@ -363,7 +368,10 @@ export function DrawerSections({ r, hw, trend, corpName, scoped, onClose, now, a
               <div><span>관리 NIC IPv4</span><b className="mono" style={det?.idrac?.ipv4 ? undefined : { color: 'var(--text-dim)' }}>{det?.idrac?.ipv4 || '—'}</b></div>
               <div><span>iDRAC 모델</span><b style={det?.idrac?.model ? undefined : { color: 'var(--text-dim)' }}>{det?.idrac?.model || '—'}</b></div>
               <div><span>iDRAC 펌웨어</span><b className="mono" style={sum?.fw || det?.idrac?.fw ? undefined : { color: 'var(--text-dim)' }}>{sum?.fw || det?.idrac?.fw || '—'}</b></div>
+              {/* v3.50 위치 LED 상태(이 포탈 · 수집 서버 인벤토리 또는 엣지 push) — 못 읽음은 꺼짐이 아니다 */}
+              <div><span>위치 LED</span><b style={(det?.idrac?.led || d?.led) ? undefined : { color: 'var(--text-dim)' }}>{d ? ledText(det?.idrac?.led ?? d.led ?? '') : '—'}</b></div>
             </div>
+            <div className="muted bmd-note">{LED_NOTE}</div>
             {hw.err ? <div className="bmd-note" style={{ color: 'var(--red)' }}>{hw.err}</div> : null}
           </section>
 
@@ -409,6 +417,7 @@ export function DrawerSections({ r, hw, trend, corpName, scoped, onClose, now, a
           </section>
         </>
       ) : null}
+      {afterEnd}
     </>
   );
 }

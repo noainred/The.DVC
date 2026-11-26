@@ -189,6 +189,8 @@ function prepare(db) {
     del: db.prepare('DELETE FROM part_state WHERE agent=? AND part_key=?'),
     openList: db.prepare('SELECT * FROM part_state ORDER BY first_seen DESC LIMIT ?'),
     openByScope: db.prepare('SELECT * FROM part_state WHERE scope=? ORDER BY first_seen DESC LIMIT ?'),
+    // v3.50 접수 자료 묶음 — 장비 한 대의 열린 장애(수집 주체 · 장비 키 대조는 SQL 에서 · 대소문자 무시). 전량을 JS 로 읽어 거르지 않는다(반증 A14)
+    openOfDevice: db.prepare("SELECT * FROM part_state WHERE scope=? AND LOWER(agent)=? AND ((?<>'' AND UPPER(device_key)=?) OR (?<>'' AND device_id=?)) ORDER BY first_seen DESC LIMIT ?"),
     openAll: db.prepare('SELECT * FROM part_state'),
     event: db.prepare(`INSERT INTO part_event
       (at,agent,part_key,scope,device_id,device_key,device_key_kind,device_name,kind,label,key_kind,event,state,prev_state,raw_state,close_reason)
@@ -295,6 +297,18 @@ export async function openFaults({ scope = '', limit = 20_000 } = {}) {
   if (!h) return [];
   const rows = scope ? h.st.openByScope.all(scope, limit) : h.st.openList.all(limit);
   return rows.map(rowToPart);
+}
+
+/**
+ * 장비 한 대의 열린 장애 — 수집 주체(agent, '' = 이 노드) · 서비스 태그(대소문자 무시) 또는 노드 로컬 id. 같은 태그가 다른 수집 주체(다른 법인 엣지)에
+ * 나타나도 그쪽 기록은 싣지 않는다(케이스 · 묶음의 법인 경계 — v3.50 반증 A2 와 같은 위협).
+ */
+export async function openFaultsOfDevice({ scope = 'idrac', agent = '', key = '', id = '', limit = 20 } = {}) {
+  const k = String(key || '').trim().toUpperCase(); const d = String(id || '').trim();
+  if (!k && !d) return [];
+  const h = await open();
+  if (!h) return [];
+  return h.st.openOfDevice.all(String(scope), String(agent || '').trim().toLowerCase(), k, k, d, d, Math.max(1, Math.min(200, Number(limit) || 20))).map(rowToPart);
 }
 
 function rowToPart(r) {

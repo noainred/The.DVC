@@ -30,6 +30,7 @@ import { getInventory } from '../idrac/invCache.js';
 import { hwSummaryOf, mgmtHostOf } from '../idrac/hwSummary.js'; // v3.3.0 물리서버 폴더 하드웨어 요약 · iDRAC 주소(중앙 central/fleet.js 정제와 짝)
 import { fwPushOf } from '../bmcheck/fw.js';       // v3.45 물리서버 점검 — 펌웨어 구성요소(중앙 central/fleet.js sanitizeFwPush 와 짝)
 import { biosPushOf } from '../bmcheck/bios.js';   // v3.45 물리서버 점검 — BIOS 설정(중앙 sanitizeBiosPush 와 짝)
+import { ledOfInv } from '../idrac/ledState.js';      // v3.50 위치 LED 상태(중앙 ledStateOf 로 다시 정제)
 
 /**
  * v2.604(감사 EDGE2604-01 — 재현): 이 엣지가 **직접 수집하는** vCenter 중 호스트를 아직 읽지 못한 것(순수 판정).
@@ -248,13 +249,14 @@ export async function pushFleetNow() {
     //   장비 주소 · 계정 · MAC 은 싣지 않는다(이름 끝의 MAC/WWN 은 fwLabelOf 가 뗀다).
     const fwOf = (i) => { try { return i ? fwPushOf(i) : undefined; } catch { return undefined; } };
     const biosOf = (i) => { try { return i ? biosPushOf(i) : undefined; } catch { return undefined; } };
+    const ledOf = (i) => { try { return i ? ledOfInv(i) : ''; } catch { return ''; } };   // 못 읽음('')은 키를 만들지 않는다
     let baremetal = (inv.bareMetal || []).map((b) => {
       const bi = invOfBm(b);
-      const hw = hwOf(bi); const mgmtHost = mgmtOf(b); const fw = fwOf(bi); const bios = biosOf(bi);
+      const hw = hwOf(bi); const mgmtHost = mgmtOf(b); const fw = fwOf(bi); const bios = biosOf(bi); const led = ledOf(bi);
       return {
         fleetId: b.fleetId, name: b.name, model: b.model, serviceTag: b.serviceTag,
         vcenterId: b.vcenterId, source: b.source, scanRangeId: scanIdOf(b), untaggedId: fleetUntaggedId(b),
-        ...(hw ? { hw } : {}), ...(mgmtHost ? { mgmtHost } : {}), ...(fw ? { fw } : {}), ...(bios ? { bios } : {}),
+        ...(hw ? { hw } : {}), ...(mgmtHost ? { mgmtHost } : {}), ...(fw ? { fw } : {}), ...(bios ? { bios } : {}), ...(led ? { led } : {}),
       };
     });
     let partialInfo = null;
