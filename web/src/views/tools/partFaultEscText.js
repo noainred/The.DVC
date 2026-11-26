@@ -28,7 +28,7 @@ export function escMarkView(esc, { canAck = false, enabled = false } = {}) {
   if (esc.paused === 'settings-unreadable') {
     // 정책을 모르므로 단계 수는 말하지 않고, 풀린 뒤는 멈춤 표지와 같은 두 경우로 말한다(디버깅 9회차 화면 U2)
     return { text: '설정 못 읽음', tone: 'gray', canAck: canAck && !!esc.ackId,
-      title: '단계 · 당직 설정을 읽지 못해 단계 알림을 보내지 않습니다(어느 정책 대상인지도 모릅니다) — 설정이 돌아오면 그 정책으로 이미 세던 장애는 그동안 시각이 지난 단계 가운데 가장 높은 단계를 바로 보내고, 돌아온 설정이 다시 켠 것이거나 새 정책이면 그때부터 1단계부터 셉니다. 확인하면 보내지 않습니다.' };
+      title: '단계 · 당직 설정을 읽지 못해 단계 알림을 보내지 않습니다(어느 정책 대상인지도 모릅니다) — 설정이 돌아오면 돌아온 설정대로 합니다: 꺼져 있으면 보내지 않고, 켜져 있으면 그 정책으로 이미 세던 장애는 그동안 시각이 지난 단계 가운데 가장 높은 단계를 바로 보내며, 다시 켠 것이거나 새 정책이면 그때부터 1단계부터 셉니다. 확인하면 보내지 않습니다.' };   // 꺼짐 경우(10회차 화면 D1)
   }
   const live = enabled && esc.covered === true;
   // 회차가 보내지 않는 상태 · 정비 창 보류 — ‘보냅니다’ 라고 약속하지 않는다(디버깅 1회차 화면 U7)
@@ -133,5 +133,6 @@ export function escRunText(run, tickMs = null) {
 export function escRunResults(run) {
   return (Array.isArray(run?.results) ? run.results : []).slice(0, 20).map((r, i) => ({
     key: `${i}`, text: `${String(r?.part || '—')} · ${int(r?.step) ? `${r.step}단계` : '—'}${Array.isArray(r?.skipped) && r.skipped.length ? `(${r.skipped.map((k) => int(k)).filter(Boolean).join(' · ')}단계 건너뜀)` : ''}${Array.isArray(r?.undelivered) && r.undelivered.length ? `(${r.undelivered.map((k) => int(k)).filter(Boolean).join(' · ')}단계 안 감)` : ''} · ${String(r?.result || '—')}`, ok: r?.delivered === true,   // 건너뛴 단계(8회차 화면 U2)
+    notSent: r?.notSent === true,   // 회차 도중 확인돼 보내지 않음 — 안 감으로 세지 않고 회색(10회차 화면 D5)
   }));
 }

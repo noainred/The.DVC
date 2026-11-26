@@ -8,7 +8,7 @@
  *  · 받는 곳 하나 이상에 ‘갔다’ 를 확인한 것만 ‘보냄’ — 메일 꺼짐 · 시간당 한도 · 채널 실패 · 당직 없음은 ‘안 감’ 으로 적고 다음 회차에 다시(ESC_RETRY_MAX 번까지 · 반증 A8 · B1).
  */
 import { config } from '../config.js';
-import { openFaultsOrNull, partFaultDbMissing } from './db.js';
+import { openFaultsOrNull, partFaultDbMissing, partFaultDbCreatedAt } from './db.js';
 import { alertOf } from './notify.js';
 import { notify as sendAlert, deliveryOutcome } from '../alerts.js';
 import { sendPortalMail } from '../mail/service.js';
@@ -48,8 +48,9 @@ export function escalationMessage(s, now = Date.now()) {
   // 건너뛴 단계 — 멈춘 동안(점검 꺼짐 · 데모 · 정비 창 · 회차 상한) 시각이 지나 보내지 않은 앞 단계를 밝힌다(화면 설명이 ‘결과에 밝힙니다’ 라고 약속한다 — 디버깅 8회차 화면 U2)
   const sk = (Array.isArray(s.skippedNote) ? s.skippedNote : Array.isArray(s.skipped) ? s.skipped : []).map((k) => k + 2);   // 다시 시도 회차도 밝힌다(9회차 화면 U3)
   if (sk.length) lines.push(`${sk.join(' · ')}단계는 시각이 지난 뒤 처음 본 회차라 보내지 않았습니다(건너뜀).`);
-  const ud = (Array.isArray(s.undeliveredNote) ? s.undeliveredNote : []).map((k) => k + 2);   // 보냈으나 받는 곳에 가지 않은 단계 — 건너뜀과 가른다(9회차 판정 #4)
-  if (ud.length) lines.push(`${ud.join(' · ')}단계는 보냈으나 받는 곳에 가지 않았습니다.`);
+  // 받는 곳에 가지 않은 단계 — 건너뜀과 가른다(9회차 판정 #4) · 보내지 않은 경우(당직 없음)도 있어 ‘보냈으나’ 라 하지 않고 기록의 사유를 싣는다(10회차 화면 D2)
+  const udIdx = Array.isArray(s.undeliveredNote) ? s.undeliveredNote : [];
+  if (udIdx.length) lines.push(`${udIdx.map((k) => `${k + 2}단계${s.undeliveredWhy?.[k] ? `(${s.undeliveredWhy[k]})` : ''}`).join(' · ')}는 받는 곳에 가지 않았습니다.`);
   if (oc) lines.push(`오늘 당직: ${oc.name || oc.email}${oc.agent === '*' ? '' : ` (${oc.agent || '이 포탈'} 당직표)`}`);
   else if (s.to.oncallWanted) lines.push('당직표에 오늘 당직이 없어 당직에게는 보내지 못했습니다.');
   const ag = String(s.part.agent || '').trim().toLowerCase();
@@ -98,6 +99,14 @@ const DEFAULT_DEPS = {
 let _deps = DEFAULT_DEPS;
 export function _setEscalationDepsForTest(d) { _deps = d ? { ...DEFAULT_DEPS, ...d } : DEFAULT_DEPS; }
 
+export const ESC_DB_GRACE_MS = 2 * 3600_000;   // 새로 시작된 DB 의 ‘열린 장애 없음’ 을 믿지 않는 시간(부품 장애 판정이 다시 잡을 때까지)
+async function keepOlderThanDb(prevItems, nextItems, now, deps) {
+  let created = null; try { created = await (deps.dbCreatedAt || partFaultDbCreatedAt)(); } catch { created = null; }
+  if (!Number.isFinite(created) || now - created >= ESC_DB_GRACE_MS) return 0;
+  let kept = 0;
+  for (const [k, v] of Object.entries(prevItems || {})) if (!Object.hasOwn(nextItems, k) && Number(v?.since) < created) { nextItems[k] = v; kept += 1; }
+  return kept;
+}
 /** 한 회차. @returns 마지막 결과(상태 화면이 쓴다) */
 export async function runEscalationNow() {
   if (_busy) return { skipped: 'busy' };
@@ -114,6 +123,7 @@ export async function runEscalationNow() {
         if (Array.isArray(o)) {
           const st = loadEscalationState(); const keys = new Set(o.map(partKeyOf)); const sigs = new Set(o.map(partSigOf));
           const kept = Object.fromEntries(Object.entries(st.items).filter(([k, v]) => keys.has(k) || (v?.sig && sigs.has(v.sig))));
+          await keepOlderThanDb(st.items, kept, now, deps);   // 새로 시작된 DB 보다 오래된 기록은 유예 동안 남긴다(10회차 보안 #1)
           if (Object.keys(kept).length !== Object.keys(st.items).length) saveEscalationState({ ...st, items: kept });
         }
       }
@@ -130,6 +140,10 @@ export async function runEscalationNow() {
     let hold = null; let keyOf = null;
     if (!why) { try { const h = await deps.hold(open, now); hold = h?.hold || null; keyOf = h?.keyOf || null; } catch { hold = null; } }
     const plan = escalationPlan({ settings: why ? { ...settings, enabled: false } : settings, state, open, now, maxSends: ESC_SENDS_PER_RUN, hold, holdKeyOf: keyOf });
+    // DB 가 기록보다 늦게 새로 시작됐으면(볼륨이 늦게 붙어 빈 DB 가 먼저 생김 · 스키마 재생성) 그 DB 의 ‘열린 장애 없음’ 은 닫힘이 아니다 —
+    //   그 DB 보다 오래된 기록은 유예 동안 지우지 않는다(같은 장애가 다시 잡히면 확인 · 보낸 단계를 이어 간다 — 디버깅 10회차 보안 #1).
+    //   DB 보다 뒤에 시작된 기록이 빠지면 진짜 닫힘이라 지운다(반증 A5 — 다시 열린 장애가 옛 확인을 물려받지 않게)
+    await keepOlderThanDb(state.items, plan.items, now, deps);
     _heldKeys = new Set(plan.heldKeys || []);
     const results = [];
     for (const s of plan.sends) {
@@ -158,7 +172,7 @@ export async function runEscalationNow() {
     const sentRes = results.filter((r) => !r.notSent);
     _last = { at: now, enabled: settings.enabled, ...(why ? { why } : {}), sent: sentRes.length, delivered: sentRes.filter((r) => r.delivered).length, failed: sentRes.filter((r) => !r.delivered).length,
       deferred: plan.deferred, overCap: plan.overCap, held: plan.held, errors: saved ? [] : ['진행 기록을 쓰지 못했습니다 — 다음 회차에 같은 단계를 다시 보낼 수 있습니다.'],
-      results: plan.sends.map((s, i) => ({ part: `${s.part.deviceName || s.part.deviceId || ''} · ${s.part.label || ''}`.slice(0, 120), step: s.step + 2, ...((s.skippedNote || s.skipped)?.length ? { skipped: (s.skippedNote || s.skipped).map((k) => k + 2) } : {}), ...(s.undeliveredNote?.length ? { undelivered: s.undeliveredNote.map((k) => k + 2) } : {}), result: results[i]?.text || '', delivered: !!results[i]?.delivered })).slice(0, 20) };
+      results: plan.sends.map((s, i) => ({ part: `${s.part.deviceName || s.part.deviceId || ''} · ${s.part.label || ''}`.slice(0, 120), step: s.step + 2, ...((s.skippedNote || s.skipped)?.length ? { skipped: (s.skippedNote || s.skipped).map((k) => k + 2) } : {}), ...(s.undeliveredNote?.length ? { undelivered: s.undeliveredNote.map((k) => k + 2) } : {}), result: results[i]?.text || '', delivered: !!results[i]?.delivered, ...(results[i]?.notSent ? { notSent: true } : {}) })).slice(0, 20) };   // notSent — 회차 도중 확인돼 보내지 않음(안 감 아님 · 10회차 화면 D5)
     return _last;
   } finally { _busy = false; }
 }

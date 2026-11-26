@@ -356,8 +356,10 @@ export function escalationPlan({ settings, state, open, now = Date.now(), maxSen
     const has = (i, k) => it.sent.some((e) => e[0] === i && e[3] === k && ofPol(e, pol.id));
     const before = pol.steps.map((_, i) => i).filter((i) => i < due && !has(i, 'ok'));
     const undeliveredNote = before.filter((i) => has(i, 'fail') || has(i, 'give'));
+    // 안 간 사유(그 단계의 마지막 fail · give 줄 글자) — 보내지 않은 경우(당직 없음 등)도 있어 ‘보냈으나’ 라고 말하지 않는다(10회차 화면 D2)
+    const undeliveredWhy = Object.fromEntries(undeliveredNote.map((i) => { const last = it.sent.filter((e) => e[0] === i && (e[3] === 'fail' || e[3] === 'give') && ofPol(e, pol.id)).at(-1); return [i, String(last?.[2] || '').slice(0, 60)]; }));
     const skippedNote = before.filter((i) => !undeliveredNote.includes(i) && (skipped.includes(i) || has(i, 'skip')));
-    sends.push({ key, part: p, policy: pol, step: due, attempt, skipped, skippedNote, undeliveredNote, since: psince, to: { emails: step.emails, channels: step.channels, oncall: oc, oncallWanted: step.oncall } });
+    sends.push({ key, part: p, policy: pol, step: due, attempt, skipped, skippedNote, undeliveredNote, undeliveredWhy, since: psince, to: { emails: step.emails, channels: step.channels, oncall: oc, oncallWanted: step.oncall } });
   }
   return { sends, items, enabledAt: enabled ? enabledAt : (numOrNull(state?.enabledAt) ?? null), deferred, overCap, held, heldKeys };
 }
@@ -409,14 +411,29 @@ export function ackEscalation(p, { by = '', now = Date.now() } = {}) {
  * run = 마지막 회차 { why, heldKeys:Set } — 회차가 보내지 않는 상태(데모 · 부품 장애 점검 꺼짐 · 진행 기록 못 읽음)면 paused 에 그 사유 · 정비 창 보류 장비면 held.
  *   행 표지가 ‘보냅니다’ 라고 약속하지 않게(디버깅 1회차 화면 U7).
  */
+// sig → 기록 색인 — 같은 items 객체(한 요청의 모든 행)에 한 번만 만든다(행마다 전부 훑으면 O(행 × 기록) — 5,000 × 5,000 에서 6초 동기 정지 · 10회차 보안 #2)
+//   후보는 엔진(escalationPlan staleBySig)과 같게 — **지금 열린 장애의 기록은 빼고** 같은 sig 가 여럿이면 마지막 것(10회차 화면 D3: 다른 열린 장애의 확인을 가져왔다)
+const _sigIdx = new WeakMap();
+function sigIndexOf(items, openKeys = null) {
+  const hit = _sigIdx.get(items);
+  if (hit && hit.openKeys === openKeys) return hit.m;
+  const m = new Map();
+  for (const [k, v] of Object.entries(items)) if (v?.sig && !(openKeys instanceof Set && openKeys.has(k))) m.set(v.sig, v);
+  _sigIdx.set(items, { openKeys, m });
+  return m;
+}
 export function escalationMarkOf(p, items, settings = null, run = null) {
   const it = items && Object.hasOwn(items, partKeyOf(p)) ? items[partKeyOf(p)] : null;
   // 설정을 못 읽은 동안은 정책 · 대상 여부를 모른다 — ‘꺼짐 · 정책 밖’ 이 아니라 그 사유로(확인은 된다 — 진행 기록은 읽힌다 · 디버깅 8회차 판정 #2)
   //   정책을 모르므로 ‘N단계까지 갔다’ 도 말하지 않는다(지난 회차 정책으로 세면 엔진 · 정상 표지와 다른 수가 됐다 — 디버깅 9회차 화면 U2)
   //   못 읽는 동안은 회차가 키 이전(같은 sig)을 하지 않으므로 표지가 sig 로도 찾는다 — 확인한 장애가 ‘확인 안 함’ 으로 보이지 않게(9회차 판정 #3ⓑ)
   if (run?.why === 'settings-unreadable') {
-    const sig = partSigOf(p);
-    const rec = it || (items ? Object.values(items).find((v) => v?.sig === sig) : null) || null;
+    let rec = it;
+    if (!rec && items) {
+      const idx = sigIndexOf(items, run?.openKeys || null); const sg = partSigOf(p);
+      rec = idx.get(sg) || null;
+      if (rec && run?.openKeys instanceof Set) idx.delete(sg);   // 후보 하나는 장애 하나에만(엔진 staleBySig.delete 와 같게 — 10회차 판정 #1) · 요청마다 새 색인(openKeys 가 요청마다 새 Set)
+    }
     return { ackId: ackIdOf(p), covered: false, step: null, acked: !!rec?.ackedAt, ...(rec?.ackedAt ? { ackedAt: rec.ackedAt, ackBy: rec.ackBy } : {}), paused: 'settings-unreadable' };
   }
   const curPol = (settings?.enabled ? policyFor(settings, p)?.id : '') || it?.pol || '';

@@ -62,12 +62,14 @@ export async function runPartFaultsNow({ notify = true, reason = 'timer' } = {})
       if (!next.manual && !partFaultEnabled().enabled) { r = { ok: false, skipped: true, reason: '파트 장애 기능이 꺼져 있습니다 — 다시 점검하지 않았습니다' }; break; }
       r = await runOnce({ notify: next.notify, reason: `${next.reason}+again` });
     }
-    if (_again) { _again = null; console.warn('[partfault] 다시 점검 요청이 5회 연속 겹쳤습니다 — 남은 요청은 다음 주기 점검이 처리합니다'); }
+    // 5회 상한을 넘은 요청은 버리지 않고 곧 판정으로 한 번 더 잡는다 — 버리면 그 장애 알림이 정규 주기(최대 10분)까지 늦었다(이벤트 묶음이 판정을 기다리지 않게 된 뒤 — 10회차 성능 #3)
+    if (_again) { const left = _again; _again = null; console.warn('[partfault] 다시 점검 요청이 5회 연속 겹쳤습니다 — 곧 판정으로 한 번 더 잡습니다'); setImmediate(() => { try { runPartFaultsSoon(`${left.reason}+cap`); } catch { /* 다음 주기 점검이 처리한다 */ } }); }
     return r;
   })().finally(() => { _busy = null; });
   return _busy;
 }
 
+let _lastJudgeCost = null;   // 마지막 runOnce 의 판정 몫 ms(알림 발송 제외)
 async function runOnce({ notify = true, reason = 'timer' } = {}) {
   const t0 = Date.now();
   try {
@@ -92,6 +94,7 @@ async function runOnce({ notify = true, reason = 'timer' } = {}) {
     try { maint = await (await import('../bmusage/maint/partfaultHold.js')).partfaultMaintHold([...observed, ...prev]); } catch { maint = null; }
     let tr = transition({ open: prev, observed, scan: { deviceOk, kindFailed, agentsReported, deviceReason: edge.deviceReason, scopeUnreadable, ...(maint?.hold?.size ? { maintHold: maint.hold } : {}) } });
     const saved = await applyTransition(tr);
+    _lastJudgeCost = Date.now() - t0;   // 판정 몫(스캔 · 전이 · 적용)만 — 뒤의 알림 발송 대기는 넣지 않는다(곧 판정 간격의 비용 · 10회차 성능 #2)
 
     // v2.880: 파트 장애 → 이슈 자동 등록(issues/autoCreate.js — 설정에서 켠 칸만). DB 에 쓴 뒤 · 알림 전에 한 번. 던지지 않는다.
     //   '파트 장애 알림 대신 이슈 알림만'(replaceNotify)이 켜져 있으면 이슈가 맡은 파트는 아래 파트 장애 알림에서 뺀다(두 통 방지).
@@ -160,11 +163,11 @@ export function runPartFaultsSoon(reason = 'edge-event') {
   if (_soonRunning) { _soonAgain = true; return true; }
   if (_soonTimer) return false;
   _soonTimer = setTimeout(() => {
-    _soonTimer = null; _soonRunning = true; const t0 = Date.now(); const elu0 = performance.eventLoopUtilization();
+    _soonTimer = null; _soonRunning = true; const t0 = Date.now(); _lastJudgeCost = null;
     runPartFaultsNow({ reason }).catch(() => {}).finally(() => {
-      // 비용은 벽시계가 아니라 그동안 이벤트 루프가 일한 시간 — 판정 안의 알림 보내기(네트워크 대기)가 들어가면 웹훅이 느릴 때 다음 곧 판정이 수십 초 · 10분 밀렸다(9회차 판정 #2)
-      let active = Date.now() - t0; try { active = Math.min(active, performance.eventLoopUtilization(elu0).active); } catch { /* 측정 못 하면 벽시계 — 상한 60초가 막는다 */ }
-      _soonRunning = false; _soonEnd = Date.now(); _soonDur = active;
+      // 비용은 판정 몫(runOnce 의 스캔 · 전이 · 적용)만 — 알림 발송(네트워크 대기)을 넣으면 웹훅이 느릴 때 다음 곧 판정이 수십 초 · 10분 밀렸고(9회차 판정 #2),
+      //   프로세스 전체 루프 시간(ELU)을 쓰면 그동안의 다른 일까지 셌다(10회차 성능 #2). 판정 몫을 모르면 벽시계(상한 60초가 막는다)
+      _soonRunning = false; _soonEnd = Date.now(); _soonDur = Number.isFinite(_lastJudgeCost) ? _lastJudgeCost : _soonEnd - t0;
       if (_soonAgain) { _soonAgain = false; runPartFaultsSoon(reason); }
     });
   }, soonWaitMs(Date.now(), _soonEnd, _soonDur));

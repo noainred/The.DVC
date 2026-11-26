@@ -150,9 +150,29 @@ export function edgesNow() {
  * open[] 은 maskPartRow 로 가리면서 같은 응답의 last.notify.results 로 원문이 나가던 형제 경로다(v2.601 AUTHZ-2601-02).
  * 비-admin 에는 결과 목록 대신 개수만 준다.
  */
+// 비관리자 판본은 오류 문구에 든 서버 절대 경로도 가린다(DB 오류 · 저장 사유 — ‘mkdir /…/dbdir’ 원문이 운영자 · 데모 응답에 실렸다 — 디버깅 10회차 보안 #3).
+//   길이를 먼저 자르고 겹치지 않는 문자 집합으로만 반복(선형 — ReDoS 없음)
+const PATH_RE = /(?:\/[^\s'"`/]+){2,}\/?|[A-Za-z]:\\[^\s'"`]+/g;
+export const hidePaths = (v) => (typeof v === 'string' ? v.slice(0, 400).replace(PATH_RE, '…') : v);
+// 바뀐 것만 복사한다(copy-on-write) — 바뀌지 않은 경로는 원본을 그대로 공유(관리자 응답과 같은 _last · maskRegistryUnreadable 과 같은 규약)
+function hidePathsDeep(v, depth = 0) {
+  if (typeof v === 'string') { const h = hidePaths(v); return h === v.slice(0, 400) && v.length <= 400 ? v : h; }
+  if (depth > 5 || !v || typeof v !== 'object') return v;
+  if (Array.isArray(v)) {
+    let changed = false;
+    const arr = v.map((x) => { const y = hidePathsDeep(x, depth + 1); if (y !== x) changed = true; return y; });
+    return changed ? arr : v;
+  }
+  let out = null;
+  for (const k of Object.keys(v)) {
+    const x = v[k]; const y = hidePathsDeep(x, depth + 1);
+    if (y !== x) { out ||= { ...v }; out[k] = y; }
+  }
+  return out || v;
+}
 export function lastView(last, isAdmin) {
   if (isAdmin || !last || typeof last !== 'object') return last ?? null;
-  const out = { ...last };
+  const out = { ...hidePathsDeep(last) };   // 바뀐 것이 없으면 hidePathsDeep 가 원본을 돌려준다 — 아래 notify 가림이 원본(_last)을 바꾸지 않게 얕은 복사
   if (out.notify && typeof out.notify === 'object') {
     const { results, ...rest } = out.notify;
     out.notify = { ...rest, resultsCount: Array.isArray(results) ? results.length : 0, resultsHidden: true };
@@ -207,7 +227,7 @@ function dbView(db, isAdmin) {
   if (!db) return null;
   if (isAdmin) return db;
   const { path: _p, ...rest } = db;
-  return { ...rest, redacted: ['path'] };
+  return { ...rest, ...(typeof rest.error === 'string' ? { error: hidePaths(rest.error) } : {}), redacted: ['path'] };
 }
 
 /**
@@ -345,7 +365,8 @@ api.get('/tools/part-faults', toolsPerm, fullScopeOnly, async (req, res) => {
   // v3.51 알림 단계 · 확인(⑪) — 가리기 전 원본 키로 표지를 만들고(확인 열쇠는 키를 싣지 않는 HMAC) 가린 행에 붙인다
   const escItems = loadEscalationState().items; const escSettings = escalationStore.get();
   const escRun = await escalationMarksNow().catch(() => null);
-  shown = shown.map((p, i) => ({ ...p, esc: escalationMarkOf(open[i], escItems, escSettings, escRun) }));
+  const escRunK = escRun ? { ...escRun, openKeys: new Set(open.map((p) => `${String(p.agent || '').trim().toLowerCase()}|${p.partKey}`)) } : null;   // 설정 못 읽음 표지의 키 이전 후보에서 열린 장애를 뺀다(10회차 화면 D3)
+  shown = shown.map((p, i) => ({ ...p, esc: escalationMarkOf(open[i], escItems, escSettings, escRunK) }));
   res.json({
     ok: true, role, version: currentVersion(),
     open: shown, summary: { ...summary, devices: devices.size },

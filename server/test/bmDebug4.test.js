@@ -144,3 +144,72 @@ test('9회차 화면 U3 — 첫 시도가 안 가 다시 보내는 회차의 본
   assert.deepEqual([pl.sends[0].step, pl.sends[0].skipped, pl.sends[0].skippedNote], [2, [], [0, 1]], '다시 시도 — 새로 적을 skip 은 없지만 밝힐 건너뜀은 그대로');
   assert.match(R.escalationMessage(pl.sends[0], 301 * MIN).detail, /2 · 3단계는 시각이 지난 뒤 처음 본 회차라 보내지 않았습니다/);
 });
+
+test('10회차 보안 #1 · #2 · #3 — 새로 시작된 DB 보다 오래된 기록은 유예 동안 지우지 않는다 · 설정 못 읽음 표지 sig 색인 · 비관리자 오류 문구의 절대 경로 가림', async () => {
+  const E = await import('../src/partfault/escalation.js');
+  const RUN = await import('../src/partfault/escalationRun.js');
+  const partB = { ...part, partKey: 'k2', partId: 'p2' };
+  const st0 = { v: 1, enabledAt: 1, items: {
+    '|k1': { since: 10 * MIN, sig: E.partSigOf(part), sent: [[0, 25 * MIN, 'x', 'ok', 'pf']], ackedAt: 30 * MIN, ackBy: 'oper', pol: 'pf', ps: { pf: 10 * MIN } },   // DB(50분)보다 오래된 기록
+    '|k2': { since: 55 * MIN, sig: E.partSigOf(partB), sent: [], ackedAt: null, ackBy: '', pol: 'pf', ps: { pf: 55 * MIN } } } };   // DB 뒤에 시작 — 빠지면 진짜 닫힘
+  fs.writeFileSync(STATE, JSON.stringify(st0));
+  fs.rmSync(SET, { recursive: true, force: true });
+  fs.writeFileSync(SET, JSON.stringify({ v: 1, enabled: true, enabledAt: 1, policies: [F], oncall: {}, at: 1, by: 'admin' }));
+  E._resetEscalationStateForTest(); E.escalationStore._resetForTest();
+  let now = 60 * MIN;
+  RUN._setEscalationDepsForTest({ now: () => now, open: async () => [], dbCreatedAt: async () => 50 * MIN, partFaultSwitch: async () => ({ enabled: true, source: '' }), hold: async () => ({ hold: null, keyOf: null }), mail: async () => ({ ok: true }), channels: async () => [] });
+  try {
+    await RUN.runEscalationNow();
+    assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(STATE, 'utf8')).items), ['|k1'], 'DB 보다 오래된 k1 은 남기고 · DB 뒤에 시작된 k2 는 닫힘으로 지운다');
+    now = 50 * MIN + RUN.ESC_DB_GRACE_MS + MIN;
+    await RUN.runEscalationNow();
+    assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(STATE, 'utf8')).items), [], '유예가 지나면 지운다');
+  } finally { RUN._setEscalationDepsForTest(null); }
+  // 설정 못 읽음 표지 — sig 색인(같은 items 에 한 번)
+  const items = {};
+  for (let i = 0; i < 4000; i += 1) items[`|old${i}`] = { since: 0, sig: `sig-${i}`, sent: [], ackedAt: i === 3999 ? 1 : null, ackBy: 'oper', pol: 'pf', ps: {} };
+  const rows = Array.from({ length: 4000 }, (_, i) => ({ ...part, partKey: `new${i}` }));
+  const t0 = Date.now();
+  let acked = 0;
+  for (const r of rows) if (E.escalationMarkOf(r, items, null, { why: 'settings-unreadable', heldKeys: new Set() }).acked) acked += 1;
+  assert.ok(Date.now() - t0 < 3000, `4,000 행 × 기록 4,000 이 O(행 + 기록)(${Date.now() - t0}ms)`);
+  assert.equal(acked, 0, 'sig 가 다르면 확인 아님');
+  const r1 = { ...part, partKey: 'zz' };
+  items['|zz-old'] = { since: 0, sig: E.partSigOf(r1), sent: [], ackedAt: 5, ackBy: 'oper' };
+  assert.equal(E.escalationMarkOf(r1, { ...items }, null, { why: 'settings-unreadable', heldKeys: new Set() }).acked, true, '키 이전 후보(같은 sig)의 확인을 찾는다');
+  // 비관리자 오류 문구 — 절대 경로 가림
+  const PF = await import('../src/routes/api/partFaults.js');
+  assert.equal(PF.hidePaths("EEXIST: file already exists, mkdir '/var/lib/synth-portal/dbdir'"), "EEXIST: file already exists, mkdir '…'");
+  assert.equal(PF.lastView({ saved: { reason: 'ELOOP: open /srv/synth/part-faults.db' } }, false).saved.reason, 'ELOOP: open …');
+  assert.equal(PF.lastView({ saved: { reason: '/srv/synth/x' } }, true).saved.reason, '/srv/synth/x', '관리자는 그대로');
+});
+
+test('10회차 화면 D2 · D3 · D5 — 안 간 단계는 사유와 함께(‘보냈으나’ 아님) · 설정 못 읽음 표지는 열린 장애의 기록을 가져오지 않음 · 그 사이 확인은 안 감이 아님', async () => {
+  const E = await import('../src/partfault/escalation.js');
+  const R = await import('../src/partfault/escalationRun.js');
+  const S = { enabled: true, enabledAt: 1, oncall: {}, policies: [F] };
+  const st = { items: { '|k1': { since: 0, sig: 'x', sent: [[0, 15 * MIN, '오늘 당직 없음', 'fail', 'pf'], [0, 16 * MIN, '오늘 당직 없음', 'fail', 'pf'], [0, 17 * MIN, '오늘 당직 없음', 'give', 'pf']], ackedAt: null, ackBy: '', pol: 'pf', ps: { pf: 0 } } }, enabledAt: 1 };
+  const pl = E.escalationPlan({ settings: S, state: st, open: [part], now: 70 * MIN });
+  const body = R.escalationMessage(pl.sends[0], 70 * MIN).detail;
+  assert.match(body, /2단계\(오늘 당직 없음\)는 받는 곳에 가지 않았습니다/);
+  assert.doesNotMatch(body, /보냈으나/);
+  // D3 — 같은 sig 인 다른 열린 장애의 확인 기록은 후보가 아니다
+  const pA = { ...part, partKey: 'ka' }; const pB = { ...part, partKey: 'kb' };   // 같은 sig(장비 키만 다름)
+  const items = { '|ka': { since: 0, sig: E.partSigOf(pA), sent: [], ackedAt: 9, ackBy: 'oper' } };
+  const run = { why: 'settings-unreadable', heldKeys: new Set(), openKeys: new Set(['|ka', '|kb']) };
+  assert.equal(E.escalationMarkOf(pB, items, null, run).acked, false, '열린 ka 의 확인을 kb 가 가져오지 않는다');
+  assert.equal(E.escalationMarkOf(pB, items, null, { ...run, openKeys: new Set(['|kb']) }).acked, true, 'ka 가 닫혔으면(이전 후보) 가져온다');
+  // D5 — 그 사이 확인돼 보내지 않은 줄은 안 감이 아니다
+  const W = await import('../../web/src/views/tools/partFaultEscText.js');
+  const rs = W.escRunResults({ results: [{ part: 'a', step: 2, result: '보내지 않음(그 사이 확인됨)', delivered: false, notSent: true }, { part: 'b', step: 2, result: '메일 안 감', delivered: false }] });
+  assert.deepEqual(rs.map((x) => [x.ok, x.notSent]), [[false, true], [false, false]]);
+});
+
+test('10회차 판정 #1 — 설정 못 읽음 표지의 키 이전 후보는 장애 하나에만(엔진과 같게)', async () => {
+  const E = await import('../src/partfault/escalation.js');
+  const pOld = { ...part, partKey: 'k-old' }; const pN1 = { ...part, partKey: 'k-n1' }; const pN2 = { ...part, partKey: 'k-n2' };
+  const items = { '|k-old': { since: 0, sig: E.partSigOf(pOld), sent: [], ackedAt: 9, ackBy: 'oper' } };
+  const run = { why: 'settings-unreadable', heldKeys: new Set(), openKeys: new Set(['|k-n1', '|k-n2']) };
+  const marks = [pN1, pN2].map((p) => E.escalationMarkOf(p, items, null, run).acked);
+  assert.deepEqual(marks, [true, false], '같은 sig 의 열린 장애 둘 가운데 하나만 이어받는다');
+});
