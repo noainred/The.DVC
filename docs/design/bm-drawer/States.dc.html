@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>물리서버 상세 드로어 — 상태 변형</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./pmd.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+body{margin:0}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.col{width:640px;display:flex;flex-direction:column;gap:10px;flex:none}
+.cap{display:flex;flex-direction:column;gap:2px;min-height:44px}
+.cap b{font-size:14px}
+.cap span{font-size:12px;color:#8b9bb4}
+.fr{border:1px solid #243049;box-shadow:none}
+</style>
+</helmet>
+<div style="width:2080px;height:1180px;box-sizing:border-box;padding:32px 40px;display:flex;gap:40px;background:#0a0e17">
+
+  <div class="col">
+    <div class="cap"><b>A. 값이 없는 서버 — 첨부하신 화면과 같은 상태</b><span>전원 모름 · 사용률 값 없음(엣지 값 없음) · 추이 수집 대상 아님. 빈 칸마다 사유를 그 자리에 씁니다.</span></div>
+    <aside class="dw fr" aria-label="서버 상세 — 값 없음">
+      <div class="dh">
+        <div class="ttl">
+          <span class="dot none" title="사용률 못 읽음"></span>
+          <h2>SELSBPDPS11</h2>
+          <button type="button" class="ib" aria-label="이전 서버">‹</button>
+          <button type="button" class="ib" aria-label="다음 서버">›</button>
+          <button type="button" class="ib" aria-label="닫기">×</button>
+        </div>
+        <div class="sigs"><span class="bd gray"><span class="dot" style="width:7px;height:7px;background:#ef4444"></span>사용률 값 없음 · 엣지 값 없음</span><span class="bd gray">전원 모름</span></div>
+        <div class="crumb">
+          <b>KR2</b><span aria-hidden="true">›</span><span>KR2_Service › SBP › DP › Airflow</span>
+          <span aria-hidden="true">·</span><span>베어메탈</span>
+          <span aria-hidden="true">·</span><span>PowerEdge R740xd</span>
+          <span aria-hidden="true">·</span><span class="mono">7XK4Q11</span>
+          <span class="pos">목록 5/9</span>
+        </div>
+      </div>
+      <div class="acts">
+        <button type="button" class="btn primary"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 17l6-5-6-5"></path><path d="M12 19h8"></path></svg>iDRAC 접속</button>
+        <span style="flex:1 1 12px"></span>
+        <span class="sel" style="width:210px"><span>옮길 폴더…</span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg></span>
+        <button type="button" class="btn" disabled>옮기기</button>
+        <button type="button" class="btn">폴더에서 빼기</button>
+      </div>
+      <div class="db">
+        <section class="sec" aria-label="한눈에">
+          <div class="sh"><h3>한눈에 · 지금 값</h3><span class="muted">못 읽은 값은 ‘—’ 와 사유</span></div>
+          <div class="tiles">
+            <div class="tile" style="grid-column:span 2">
+              <span class="lb">CPU · 메모리 사용률</span>
+              <span class="v muted">—</span>
+              <span><button type="button" class="why"><span class="dot" style="width:7px;height:7px;background:#ef4444"></span>엣지 값 없음</button></span>
+              <span class="s wrap">32코어 · 512 GB — 누르면 자세한 사유</span>
+            </div>
+            <div class="tile"><span class="lb">전력</span><span class="v">462<small>W</small></span><span class="s" style="margin-top:12px">전원 모름</span></div>
+            <div class="tile"><span class="lb">부품 장애</span><span class="v" style="font-family:inherit;font-size:16px">없음</span><span class="s" style="margin-top:14px">읽었고 0건</span></div>
+          </div>
+        </section>
+        <section class="sec" aria-label="24시간 추이">
+          <div class="sh"><h3>CPU · 메모리 — 지난 24시간</h3></div>
+          <div class="card" style="padding:12px">
+            <span class="muted" style="font-size:12px">베어메탈 사용률 수집 대상이 아닙니다(특수 기능 › 베어메탈 사용률에서 그 법인 수집을 켜야 추이가 쌓입니다).</span>
+          </div>
+        </section>
+        <section class="sec" aria-label="신호">
+          <div class="sh"><h3>신호 2 — 봐야 할 것</h3></div>
+          <div class="sigrow">
+            <span class="dot" style="background:#ef4444" aria-hidden="true"></span>
+            <div class="t"><b>사용률 값 없음 — 엣지 값 없음</b><span>엣지가 맡는 서버인데 중앙에 그 엣지의 값이 없습니다(엣지 수집 꺼짐 · 그 엣지에 이 서버 등록 없음 · 보관분 전송 전 · 연결 끊김 중 하나 — 어느 것인지는 여기서 모릅니다).</span><span>베어메탈 사용률 › 엣지 보관분에서 그 엣지 상태를 보십시오.</span></div>
+            <a class="btn" href="#">사용률</a>
+          </div>
+          <div class="sigrow">
+            <span class="dot none" aria-hidden="true"></span>
+            <div class="t"><b>전원 모름</b><span>전원 상태를 읽지 못했습니다 — 켜짐으로도 꺼짐으로도 세지 않습니다.</span></div>
+          </div>
+        </section>
+        <section class="sec" aria-label="식별 · 배치">
+          <div class="sh"><h3>식별 · 배치</h3></div>
+          <div class="kv">
+            <div><span>법인</span><b>KR2</b></div>
+            <div><span>종류</span><b>베어메탈</b></div>
+            <div class="full"><span>폴더</span><b>KR2_Service › SBP › DP › Airflow <span class="bd blue" style="margin-left:4px">손 등록</span></b></div>
+            <div><span>모델</span><b>PowerEdge R740xd</b></div>
+            <div><span>서비스 태그</span><b class="mono">7XK4Q11</b></div>
+            <div class="last"><span>전원</span><b class="muted">모름</b></div>
+            <div class="last"><span>받는 길</span><b><span class="bd teal">수집 서버</span> 수집 서버 KR2</b></div>
+          </div>
+        </section>
+      </div>
+      <nav class="df" aria-label="바로가기">
+        <span class="muted">바로가기:</span>
+        <a href="#">베어메탈 사용률(추이)</a><a href="#">물리 부품 장애</a><a href="#">통합 서버 인벤토리</a><a href="#">서비스 인벤토리</a>
+        <span class="keys">Esc 닫기 · ↑↓ 이전/다음</span>
+      </nav>
+    </aside>
+  </div>
+
+  <div class="col">
+    <div class="cap"><b>B. 엣지가 요약만 올린 서버</b><span>엣지는 부품별 목록을 중앙으로 보내지 않습니다 — 요약 5칸까지만 채우고 부품 목록 자리에 이유를 씁니다.</span></div>
+    <aside class="dw fr" aria-label="서버 상세 — 엣지 요약">
+      <div class="dh">
+        <div class="ttl">
+          <span class="dot" style="background:#22c55e" title="켜짐 · 장애 없음"></span>
+          <h2>WAWDBGP03</h2>
+          <button type="button" class="ib" aria-label="이전 서버">‹</button>
+          <button type="button" class="ib" aria-label="다음 서버">›</button>
+          <button type="button" class="ib" aria-label="닫기">×</button>
+        </div>
+        <div class="crumb">
+          <span class="bd green">켜짐</span>
+          <b>PL1</b><span aria-hidden="true">›</span><span>PL1_Service › DB › GPDB</span>
+          <span aria-hidden="true">·</span><span>베어메탈</span>
+          <span aria-hidden="true">·</span><span>PowerEdge R750</span>
+          <span aria-hidden="true">·</span><span class="mono">9HT2M04</span>
+          <span class="pos">목록 2/6</span>
+        </div>
+      </div>
+      <div class="acts">
+        <button type="button" class="btn primary"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 17l6-5-6-5"></path><path d="M12 19h8"></path></svg>iDRAC 접속</button>
+        <span style="flex:1 1 12px"></span>
+        <span class="sel" style="width:210px"><span>옮길 폴더…</span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg></span>
+        <button type="button" class="btn" disabled>옮기기</button>
+        <button type="button" class="btn">폴더에서 빼기</button>
+      </div>
+      <div class="db">
+        <section class="sec" aria-label="한눈에">
+          <div class="sh"><h3>한눈에 · 지금 값</h3><span class="muted">못 읽은 값은 ‘—’ 와 사유</span></div>
+          <div class="tiles">
+            <div class="tile"><span class="lb">CPU<span class="chip idrac">iDRAC</span></span><span class="v">18<small>%</small></span><span class="bar"><i style="width:18%;background:#5eead4"></i></span><span class="s">48코어 · 2×24C</span></div>
+            <div class="tile"><span class="lb">메모리<span class="chip idrac">iDRAC</span></span><span class="v">44<small>%</small></span><span class="bar"><i style="width:44%;background:#5eead4"></i></span><span class="s">768 GB</span></div>
+            <div class="tile"><span class="lb">전력</span><span class="v">388<small>W</small></span><span class="s" style="margin-top:12px">전원 켜짐</span></div>
+            <div class="tile"><span class="lb">부품 장애</span><span class="v" style="font-family:inherit;font-size:16px">없음</span><span class="s" style="margin-top:14px">읽었고 0건</span></div>
+          </div>
+        </section>
+        <section class="sec" aria-label="24시간 추이">
+          <div class="sh"><h3>CPU · 메모리 — 지난 24시간</h3><span class="muted">이 서버를 수집하는 엣지에서 받았습니다(구간 평균)</span></div>
+          <div class="card" style="padding:10px 12px 8px">
+            <svg viewBox="0 0 604 110" width="100%" height="110" role="img" aria-label="지난 24시간 CPU 마지막 18% · 메모리 마지막 44%">
+              <line x1="0" x2="560" y1="10" y2="10" stroke="#1f2a40"></line><line x1="0" x2="560" y1="50" y2="50" stroke="#1f2a40"></line><line x1="0" x2="560" y1="90" y2="90" stroke="#243049"></line>
+              <text x="566" y="13" font-size="10" fill="#8b9bb4">100%</text><text x="566" y="53" font-size="10" fill="#8b9bb4">50%</text><text x="566" y="93" font-size="10" fill="#8b9bb4">0%</text>
+              <path d="M0,54.8 L56,54.8 L112,54 L168,54.8 L224,55.6 L280,54.8 L336,54.8 L392,54 L448,54.8 L504,54.8 L552,54.8" fill="none" stroke="#22d3ee" stroke-width="1.5"></path>
+              <path d="M0,76.4 L56,77.2 L112,74 L168,70.8 L224,75.6 L280,78 L336,76.4 L392,72.4 L448,74.8 L504,76.4 L552,75.6" fill="none" stroke="#3b82f6" stroke-width="2"></path>
+              <text x="0" y="106" font-size="10" fill="#8b9bb4">어제 18시</text><text x="280" y="106" font-size="10" fill="#8b9bb4" text-anchor="middle">6시</text><text x="560" y="106" font-size="10" fill="#8b9bb4" text-anchor="end">지금</text>
+            </svg>
+            <div style="display:flex;flex-wrap:wrap;gap:4px 14px;font-size:11.5px;margin-top:2px">
+              <span class="lg"><i style="background:#3b82f6"></i>CPU 18%</span>
+              <span class="lg"><i style="background:#22d3ee"></i>메모리 44%</span>
+            </div>
+          </div>
+        </section>
+        <section class="sec" aria-label="신호">
+          <div class="sh"><h3>신호 0</h3></div>
+          <span class="muted" style="font-size:12px">신호 없음 — 부품 장애 · 사용률 값 없음 · 전원 꺼짐/모름 · 임시 키 모두 해당하지 않습니다.</span>
+        </section>
+        <section class="sec" aria-label="하드웨어 요약">
+          <div class="sh"><h3>하드웨어 요약</h3><span class="muted">엣지 요약 · 12분 전 읽음</span></div>
+          <div class="spec">
+            <div><span class="lb">CPU</span><span class="v">2×24C</span><span class="s">48코어</span></div>
+            <div><span class="lb">메모리</span><span class="v">768 GB</span><span class="s">DIMM 12개</span></div>
+            <div><span class="lb">디스크</span><span class="v">15.4 TB</span><span class="s">SSD 8</span></div>
+            <div><span class="lb">NIC</span><span class="v">25G×2</span><span class="s">1G×2</span></div>
+            <div><span class="lb">FC HBA</span><span class="v">FC 2</span><span class="s">4포트</span></div>
+          </div>
+        </section>
+        <section class="sec" aria-label="부품 목록">
+          <div class="sh"><h3>부품 목록</h3></div>
+          <div class="band info">엣지가 보낸 요약만 있습니다 — 엣지는 부품별 목록을 중앙으로 보내지 않습니다(부품별 목록은 그 엣지의 iDRAC 인벤토리 화면에서 봅니다).</div>
+        </section>
+      </div>
+      <nav class="df" aria-label="바로가기">
+        <span class="muted">바로가기:</span>
+        <a href="#">베어메탈 사용률(추이)</a><a href="#">물리 부품 장애</a><a href="#">통합 서버 인벤토리</a><a href="#">서비스 인벤토리</a>
+        <span class="keys">Esc 닫기 · ↑↓ 이전/다음</span>
+      </nav>
+    </aside>
+  </div>
+
+  <div class="col">
+    <div class="cap"><b>C. 범위 계정 판본 · 조회 전용 법인</b><span>서비스 태그 · 관리 주소 · 엣지 이름은 싣지 않습니다(지금과 같은 규칙). 쓰기 권한이 없으면 폴더 단추 대신 안내 한 줄.</span></div>
+    <aside class="dw fr" aria-label="서버 상세 — 범위 계정">
+      <div class="dh">
+        <div class="ttl">
+          <span class="dot" style="background:#22c55e" title="켜짐 · 장애 없음"></span>
+          <h2>USEAPPWEB14</h2>
+          <button type="button" class="ib" aria-label="이전 서버">‹</button>
+          <button type="button" class="ib" aria-label="다음 서버">›</button>
+          <button type="button" class="ib" aria-label="닫기">×</button>
+        </div>
+        <div class="crumb">
+          <span class="bd green">켜짐</span>
+          <b>US1</b><span aria-hidden="true">›</span><span>US1_Service › WEB</span>
+          <span aria-hidden="true">·</span><span>베어메탈</span>
+          <span aria-hidden="true">·</span><span>PowerEdge R650</span>
+          <span class="pos">목록 14/22</span>
+        </div>
+      </div>
+      <div class="acts">
+        <span class="muted" style="font-size:12px;line-height:34px">이 법인은 조회 전용입니다 — 폴더를 옮기거나 뺄 수 없습니다.</span>
+      </div>
+      <div class="db">
+        <section class="sec" aria-label="한눈에">
+          <div class="sh"><h3>한눈에 · 지금 값</h3></div>
+          <div class="tiles">
+            <div class="tile"><span class="lb">CPU<span class="chip os">OS</span></span><span class="v">71<small>%</small></span><span class="bar"><i style="width:71%;background:#3b82f6"></i></span><span class="s">32코어</span></div>
+            <div class="tile"><span class="lb">메모리<span class="chip os">OS</span></span><span class="v" style="color:#fcd34d">83<small>%</small></span><span class="bar"><i style="width:83%;background:#3b82f6"></i></span><span class="s">256 GB</span></div>
+            <div class="tile"><span class="lb">전력</span><span class="v">301<small>W</small></span><span class="s" style="margin-top:12px">전원 켜짐</span></div>
+            <div class="tile"><span class="lb">부품 장애</span><span class="v muted">—</span><span class="s" style="margin-top:12px">못 읽음 — 0건이 아닙니다</span></div>
+          </div>
+        </section>
+        <section class="sec" aria-label="식별 · 배치">
+          <div class="sh"><h3>식별 · 배치</h3></div>
+          <div class="kv">
+            <div><span>법인</span><b>US1</b></div>
+            <div><span>종류</span><b>베어메탈</b></div>
+            <div class="full"><span>폴더</span><b>US1_Service › WEB <span class="bd gray" style="margin-left:4px">자동 규칙</span></b></div>
+            <div><span>모델</span><b>PowerEdge R650</b></div>
+            <div><span>전원</span><b>켜짐</b></div>
+            <div class="last"><span>받는 길</span><b><span class="bd teal">엣지</span></b></div>
+            <div class="last"><span>iDRAC 주소</span><b class="muted">— 관리자 판본에서만</b></div>
+          </div>
+        </section>
+      </div>
+      <nav class="df" aria-label="바로가기">
+        <span class="muted">바로가기:</span>
+        <a href="#">베어메탈 사용률(추이)</a><a href="#">물리 부품 장애</a><a href="#">통합 서버 인벤토리</a><a href="#">서비스 인벤토리</a>
+        <span class="keys">Esc 닫기 · ↑↓ 이전/다음</span>
+      </nav>
+    </aside>
+    <div class="cap" style="margin-top:14px"><b>D. 폴더에 넣은 ESXi 호스트</b><span>하드웨어(iDRAC) 구역은 베어메탈에만 있습니다(지금과 같음). 추이 자리에는 호스트 화면 안내.</span></div>
+    <aside class="dw fr" aria-label="서버 상세 — ESXi 호스트">
+      <div class="dh">
+        <div class="ttl">
+          <span class="dot" style="background:#22c55e" title="켜짐 · 장애 없음"></span>
+          <h2>esx-kr2-07</h2>
+          <button type="button" class="ib" aria-label="이전 서버">‹</button>
+          <button type="button" class="ib" aria-label="다음 서버">›</button>
+          <button type="button" class="ib" aria-label="닫기">×</button>
+        </div>
+        <div class="crumb">
+          <span class="bd green">켜짐</span>
+          <b>KR2</b><span aria-hidden="true">›</span><span>KR2_Service › VDI</span>
+          <span aria-hidden="true">·</span><span>ESXi 호스트</span>
+          <span aria-hidden="true">·</span><span>PowerEdge R760</span>
+          <span class="pos">목록 1/4</span>
+        </div>
+      </div>
+      <div class="db">
+        <div class="tiles">
+          <div class="tile"><span class="lb">CPU<span class="chip" style="background:rgba(148,163,184,.18);color:#cbd5e1">vCenter</span></span><span class="v">52<small>%</small></span><span class="bar"><i style="width:52%;background:#94a3b8"></i></span><span class="s">64코어</span></div>
+          <div class="tile"><span class="lb">메모리<span class="chip" style="background:rgba(148,163,184,.18);color:#cbd5e1">vCenter</span></span><span class="v">68<small>%</small></span><span class="bar"><i style="width:68%;background:#94a3b8"></i></span><span class="s">1 TB</span></div>
+          <div class="tile"><span class="lb">전력</span><span class="v">540<small>W</small></span><span class="s" style="margin-top:12px">전원 켜짐</span></div>
+          <div class="tile"><span class="lb">부품 장애</span><span class="v" style="font-family:inherit;font-size:16px">없음</span><span class="s" style="margin-top:14px">읽었고 0건</span></div>
+        </div>
+        <span class="muted" style="font-size:12px">ESXi 호스트의 추이는 호스트 화면에서 봅니다.</span>
+      </div>
+    </aside>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":2080,"height":1180}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

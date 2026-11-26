@@ -22,10 +22,10 @@
 
 | 항목 | 값 |
 |---|---|
-| 엔드포인트 | **1626개** |
+| 엔드포인트 | **1635개** |
 | 마운트 그룹 | 14개 |
 | 라우트 파일 | 164개 |
-| GET | 857개 |
+| GET | 866개 |
 | POST | 517개 |
 | PUT | 162개 |
 | PATCH | 3개 |
@@ -44,7 +44,7 @@
 | [`/api/auth`](#apiauth) | 11 | 로그인·OTP·`/me`. **로그인 전** 호출되므로 `requireEnrolled` 를 타지 않는다(내부 admin 라우트는 스스로 게이트한다). |
 | [`/api/ping`](#apiping) | 16 | 네트워크 Ping 모니터링(조회=인증, 대상 관리=관리자). |
 | [`/metrics`](#metrics) | 1 | Prometheus/OTel 익스포터(선택 토큰). |
-| [`/api/v1`](#apiv1) | 12 | **외부 포탈용 공개 조회 API**(v2.562). 전용 API 키(`X-Api-Key`)로 인증하고 조회 전용이다. 상세는 [API-PUBLIC.md](API-PUBLIC.md). |
+| [`/api/v1`](#apiv1) | 21 | **외부 포탈용 공개 조회 API**(v2.562). 전용 API 키(`X-Api-Key`)로 인증하고 조회 전용이다. 상세는 [API-PUBLIC.md](API-PUBLIC.md). |
 | [`/api`](#api) | 982 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
 | [`/dl`](#dl) | 2 | 중앙 업그레이드 소스(`versions.json` + 번들). **공개**다. |
 
@@ -777,18 +777,27 @@ Prometheus/OTel 익스포터(선택 토큰).
 
 | 메서드 | 경로 | 게이트(공통 제외) | 소스 |
 |---|---|---|---|
-| GET | `/` | — | [server/src/routes/publicApi.js:208](../server/src/routes/publicApi.js#L208) |
-| GET | `/capacity/datastores` | `guarded` | [server/src/routes/publicApi.js:370](../server/src/routes/publicApi.js#L370) |
-| GET | `/capacity/storage` | `guarded` | [server/src/routes/publicApi.js:386](../server/src/routes/publicApi.js#L386) |
-| GET | `/capacity/storage-growth` | `guarded` | [server/src/routes/publicApi.js:508](../server/src/routes/publicApi.js#L508) |
-| GET | `/faults/alarms` | `guarded` | [server/src/routes/publicApi.js:555](../server/src/routes/publicApi.js#L555) |
-| GET | `/faults/parts` | `guarded` | [server/src/routes/publicApi.js:582](../server/src/routes/publicApi.js#L582) |
-| GET | `/inventory/collection` | `guarded` | [server/src/routes/publicApi.js:337](../server/src/routes/publicApi.js#L337) |
-| GET | `/inventory/summary` | `guarded` | [server/src/routes/publicApi.js:250](../server/src/routes/publicApi.js#L250) |
-| GET | `/inventory/vcenters` | `guarded` | [server/src/routes/publicApi.js:311](../server/src/routes/publicApi.js#L311) |
-| GET | `/openapi.json` | — | [server/src/routes/publicApi.js:230](../server/src/routes/publicApi.js#L230) |
-| GET | `/san-storage/arrays` | `guarded` | [server/src/routes/publicApi.js:623](../server/src/routes/publicApi.js#L623) |
-| GET | `/san-storage/check` | `guarded` | [server/src/routes/publicApi.js:639](../server/src/routes/publicApi.js#L639) |
+| GET | `/` | — | [server/src/routes/publicApi.js:218](../server/src/routes/publicApi.js#L218) |
+| GET | `/backup/summary` | `guarded` | [server/src/routes/publicApi.js:783](../server/src/routes/publicApi.js#L783) |
+| GET | `/capacity/datastores` | `guarded` | [server/src/routes/publicApi.js:383](../server/src/routes/publicApi.js#L383) |
+| GET | `/capacity/storage` | `guarded` | [server/src/routes/publicApi.js:399](../server/src/routes/publicApi.js#L399) |
+| GET | `/capacity/storage-growth` | `guarded` | [server/src/routes/publicApi.js:521](../server/src/routes/publicApi.js#L521) |
+| GET | `/compliance/licenses` | `guarded` | [server/src/routes/publicApi.js:757](../server/src/routes/publicApi.js#L757) |
+| GET | `/compliance/snapshots` | `guarded` | [server/src/routes/publicApi.js:769](../server/src/routes/publicApi.js#L769) |
+| GET | `/faults/alarms` | `guarded` | [server/src/routes/publicApi.js:568](../server/src/routes/publicApi.js#L568) |
+| GET | `/faults/parts` | `guarded` | [server/src/routes/publicApi.js:595](../server/src/routes/publicApi.js#L595) |
+| GET | `/inventory/collection` | `guarded` | [server/src/routes/publicApi.js:347](../server/src/routes/publicApi.js#L347) |
+| GET | `/inventory/summary` | `guarded` | [server/src/routes/publicApi.js:260](../server/src/routes/publicApi.js#L260) |
+| GET | `/inventory/vcenters` | `guarded` | [server/src/routes/publicApi.js:321](../server/src/routes/publicApi.js#L321) |
+| GET | `/objects/clusters` | `guarded` | [server/src/routes/publicApi.js:744](../server/src/routes/publicApi.js#L744) |
+| GET | `/objects/hosts` | `guarded` | [server/src/routes/publicApi.js:710](../server/src/routes/publicApi.js#L710) |
+| GET | `/objects/networks` | `guarded` | [server/src/routes/publicApi.js:734](../server/src/routes/publicApi.js#L734) |
+| GET | `/objects/vms` | `guarded` | [server/src/routes/publicApi.js:722](../server/src/routes/publicApi.js#L722) |
+| GET | `/openapi.json` | — | [server/src/routes/publicApi.js:240](../server/src/routes/publicApi.js#L240) |
+| GET | `/resources/gpu` | `guarded` | [server/src/routes/publicApi.js:801](../server/src/routes/publicApi.js#L801) |
+| GET | `/resources/power` | `guarded` | [server/src/routes/publicApi.js:795](../server/src/routes/publicApi.js#L795) |
+| GET | `/san-storage/arrays` | `guarded` | [server/src/routes/publicApi.js:636](../server/src/routes/publicApi.js#L636) |
+| GET | `/san-storage/check` | `guarded` | [server/src/routes/publicApi.js:652](../server/src/routes/publicApi.js#L652) |
 
 ## `/api`
 
@@ -895,8 +904,8 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/nsx` | 권한 `inv.nsx` | [server/src/routes/api/overviewNsx.js:260](../server/src/routes/api/overviewNsx.js#L260) |
 | GET | `/nsx/group-members` | 권한 `inv.nsx` | [server/src/routes/api/overviewNsx.js:296](../server/src/routes/api/overviewNsx.js#L296) |
 | GET | `/overview` | — | [server/src/routes/api/overviewNsx.js:211](../server/src/routes/api/overviewNsx.js#L211) |
-| GET | `/overview/cards` | — | [server/src/routes/api/overviewCards.js:155](../server/src/routes/api/overviewCards.js#L155) |
-| GET | `/overview/trend` | — | [server/src/routes/api/overviewCards.js:211](../server/src/routes/api/overviewCards.js#L211) |
+| GET | `/overview/cards` | — | [server/src/routes/api/overviewCards.js:169](../server/src/routes/api/overviewCards.js#L169) |
+| GET | `/overview/trend` | — | [server/src/routes/api/overviewCards.js:221](../server/src/routes/api/overviewCards.js#L221) |
 | GET | `/perf/client-config` | — | [server/src/routes/api/perfClient.js:117](../server/src/routes/api/perfClient.js#L117) |
 | POST | `/perf/client-stall` | — | [server/src/routes/api/perfClient.js:75](../server/src/routes/api/perfClient.js#L75) |
 | GET | `/perf/req-status` | — | [server/src/routes/api/perfClient.js:105](../server/src/routes/api/perfClient.js#L105) |
@@ -939,11 +948,11 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/summary` | — | [server/src/routes/api/inventory.js:167](../server/src/routes/api/inventory.js#L167) |
 | POST | `/tool-usage` | — | [server/src/routes/api/inventory.js:721](../server/src/routes/api/inventory.js#L721) |
 | GET | `/tool-usage/top` | — | [server/src/routes/api/inventory.js:717](../server/src/routes/api/inventory.js#L717) |
-| GET | `/tools/backup-detail` | 권한 `tools` | [server/src/routes/api/veeam.js:1454](../server/src/routes/api/veeam.js#L1454) |
-| GET | `/tools/backup-detail.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/veeam.js:1526](../server/src/routes/api/veeam.js#L1526) |
-| PUT | `/tools/backup-detail/marks` | 역할 `admin/operator` · 권한 `tools` · `textFields` | [server/src/routes/api/veeam.js:1469](../server/src/routes/api/veeam.js#L1469) |
-| GET | `/tools/backup-em` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/veeam.js:1415](../server/src/routes/api/veeam.js#L1415) |
-| GET | `/tools/backup-em/session` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/veeam.js:1424](../server/src/routes/api/veeam.js#L1424) |
+| GET | `/tools/backup-detail` | 권한 `tools` | [server/src/routes/api/veeam.js:1464](../server/src/routes/api/veeam.js#L1464) |
+| GET | `/tools/backup-detail.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/veeam.js:1536](../server/src/routes/api/veeam.js#L1536) |
+| PUT | `/tools/backup-detail/marks` | 역할 `admin/operator` · 권한 `tools` · `textFields` | [server/src/routes/api/veeam.js:1479](../server/src/routes/api/veeam.js#L1479) |
+| GET | `/tools/backup-em` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/veeam.js:1425](../server/src/routes/api/veeam.js#L1425) |
+| GET | `/tools/backup-em/session` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/veeam.js:1434](../server/src/routes/api/veeam.js#L1434) |
 | POST | `/tools/backup-run/backup` | 역할 `admin` · 권한 `tools` · `reauth` | [server/src/routes/api/backupRun.js:169](../server/src/routes/api/backupRun.js#L169) |
 | POST | `/tools/backup-run/plan` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/backupRun.js:161](../server/src/routes/api/backupRun.js#L161) |
 | GET | `/tools/backup-run/portal-vms` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/backupManage.js:93](../server/src/routes/api/backupManage.js#L93) |
@@ -959,15 +968,15 @@ Prometheus/OTel 익스포터(선택 토큰).
 | POST | `/tools/backup-run/vm/:vmId/points` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/backupManage.js:129](../server/src/routes/api/backupManage.js#L129) |
 | POST | `/tools/backup-run/vm/:vmId/restore` | 역할 `admin` · 권한 `tools` · `reauth` | [server/src/routes/api/backupManage.js:140](../server/src/routes/api/backupManage.js#L140) |
 | GET | `/tools/backup-run/vms` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/backupRun.js:130](../server/src/routes/api/backupRun.js#L130) |
-| GET | `/tools/backup-summary` | 권한 `tools` | [server/src/routes/api/veeam.js:1290](../server/src/routes/api/veeam.js#L1290) |
-| GET | `/tools/backup-summary.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/veeam.js:1502](../server/src/routes/api/veeam.js#L1502) |
-| GET | `/tools/backup-summary/alert` | 권한 `tools` | [server/src/routes/api/veeam.js:1349](../server/src/routes/api/veeam.js#L1349) |
-| PUT | `/tools/backup-summary/alert` | 역할 `admin` · 권한 `tools` · `alertFullScope` | [server/src/routes/api/veeam.js:1357](../server/src/routes/api/veeam.js#L1357) |
-| POST | `/tools/backup-summary/alert/send` | 역할 `admin` · 권한 `tools` · `alertFullScope` | [server/src/routes/api/veeam.js:1369](../server/src/routes/api/veeam.js#L1369) |
-| GET | `/tools/backup-summary/errors` | 권한 `tools` | [server/src/routes/api/veeam.js:1327](../server/src/routes/api/veeam.js#L1327) |
-| GET | `/tools/backup-summary/schedule` | 권한 `tools` | [server/src/routes/api/veeam.js:1319](../server/src/routes/api/veeam.js#L1319) |
-| GET | `/tools/backup-summary/stale` | 권한 `tools` | [server/src/routes/api/veeam.js:1303](../server/src/routes/api/veeam.js#L1303) |
-| GET | `/tools/backup-summary/stale.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/veeam.js:1381](../server/src/routes/api/veeam.js#L1381) |
+| GET | `/tools/backup-summary` | 권한 `tools` | [server/src/routes/api/veeam.js:1300](../server/src/routes/api/veeam.js#L1300) |
+| GET | `/tools/backup-summary.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/veeam.js:1512](../server/src/routes/api/veeam.js#L1512) |
+| GET | `/tools/backup-summary/alert` | 권한 `tools` | [server/src/routes/api/veeam.js:1359](../server/src/routes/api/veeam.js#L1359) |
+| PUT | `/tools/backup-summary/alert` | 역할 `admin` · 권한 `tools` · `alertFullScope` | [server/src/routes/api/veeam.js:1367](../server/src/routes/api/veeam.js#L1367) |
+| POST | `/tools/backup-summary/alert/send` | 역할 `admin` · 권한 `tools` · `alertFullScope` | [server/src/routes/api/veeam.js:1379](../server/src/routes/api/veeam.js#L1379) |
+| GET | `/tools/backup-summary/errors` | 권한 `tools` | [server/src/routes/api/veeam.js:1337](../server/src/routes/api/veeam.js#L1337) |
+| GET | `/tools/backup-summary/schedule` | 권한 `tools` | [server/src/routes/api/veeam.js:1329](../server/src/routes/api/veeam.js#L1329) |
+| GET | `/tools/backup-summary/stale` | 권한 `tools` | [server/src/routes/api/veeam.js:1313](../server/src/routes/api/veeam.js#L1313) |
+| GET | `/tools/backup-summary/stale.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/veeam.js:1391](../server/src/routes/api/veeam.js#L1391) |
 | GET | `/tools/bareos-backup` | 역할 `admin` | [server/src/routes/api/bareosBackup.js:441](../server/src/routes/api/bareosBackup.js#L441) |
 | GET | `/tools/bareos-backup/badges` | 권한 `tools` | [server/src/routes/api/bareosBackup.js:1785](../server/src/routes/api/bareosBackup.js#L1785) |
 | GET | `/tools/bareos-backup/digest` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/bareosBackup.js:1744](../server/src/routes/api/bareosBackup.js#L1744) |
@@ -1171,43 +1180,43 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/curuser/history` | 권한 `tools` | [server/src/routes/api/curUser.js:92](../server/src/routes/api/curUser.js#L92) |
 | GET | `/tools/curuser/settings` | 권한 `tools` | [server/src/routes/api/curUser.js:149](../server/src/routes/api/curUser.js#L149) |
 | PUT | `/tools/curuser/settings` | 역할 `admin` | [server/src/routes/api/curUser.js:191](../server/src/routes/api/curUser.js#L191) |
-| GET | `/tools/cvp` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:288](../server/src/routes/api/cvp.js#L288) |
-| POST | `/tools/cvp/collect` | 역할 `admin/operator` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:861](../server/src/routes/api/cvp.js#L861) |
-| GET | `/tools/cvp/compare` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvpNet.js:339](../server/src/routes/api/cvpNet.js#L339) |
-| GET | `/tools/cvp/compliance` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvpNet.js:256](../server/src/routes/api/cvpNet.js#L256) |
-| GET | `/tools/cvp/device` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:385](../server/src/routes/api/cvp.js#L385) |
-| GET | `/tools/cvp/device-series` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:516](../server/src/routes/api/cvp.js#L516) |
-| GET | `/tools/cvp/devices` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:318](../server/src/routes/api/cvp.js#L318) |
-| GET | `/tools/cvp/devices.csv` | 권한 `data.csv`, `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:821](../server/src/routes/api/cvp.js#L821) |
-| GET | `/tools/cvp/events` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:533](../server/src/routes/api/cvp.js#L533) |
-| GET | `/tools/cvp/faults` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:747](../server/src/routes/api/cvp.js#L747) |
-| POST | `/tools/cvp/faults/close` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:787](../server/src/routes/api/cvp.js#L787) |
-| POST | `/tools/cvp/faults/scan` | 역할 `admin/operator` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:775](../server/src/routes/api/cvp.js#L775) |
-| GET | `/tools/cvp/linkq` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvpNet.js:98](../server/src/routes/api/cvpNet.js#L98) |
-| GET | `/tools/cvp/locate` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvpNet.js:221](../server/src/routes/api/cvpNet.js#L221) |
-| GET | `/tools/cvp/optics` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:584](../server/src/routes/api/cvp.js#L584) |
-| GET | `/tools/cvp/optics/trend` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvpNet.js:180](../server/src/routes/api/cvpNet.js#L180) |
-| GET | `/tools/cvp/overview` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:341](../server/src/routes/api/cvp.js#L341) |
-| POST | `/tools/cvp/parse-preview` | 역할 `admin` · 권한 `tools` · `fullScopeReadPost` | [server/src/routes/api/cvp.js:808](../server/src/routes/api/cvp.js#L808) |
-| GET | `/tools/cvp/port-series` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:846](../server/src/routes/api/cvp.js#L846) |
-| GET | `/tools/cvp/port-usage` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:719](../server/src/routes/api/cvp.js#L719) |
-| GET | `/tools/cvp/portmap` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:445](../server/src/routes/api/cvp.js#L445) |
-| GET | `/tools/cvp/portmap/summary` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:480](../server/src/routes/api/cvp.js#L480) |
-| GET | `/tools/cvp/portplan/forecast` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvpNet.js:142](../server/src/routes/api/cvpNet.js#L142) |
-| GET | `/tools/cvp/portplan/reclaim` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvpNet.js:121](../server/src/routes/api/cvpNet.js#L121) |
-| GET | `/tools/cvp/power` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:653](../server/src/routes/api/cvp.js#L653) |
-| GET | `/tools/cvp/redundancy` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvpNet.js:267](../server/src/routes/api/cvpNet.js#L267) |
-| GET | `/tools/cvp/servers` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:884](../server/src/routes/api/cvp.js#L884) |
-| POST | `/tools/cvp/servers` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:913](../server/src/routes/api/cvp.js#L913) |
-| DELETE | `/tools/cvp/servers/:id` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:916](../server/src/routes/api/cvp.js#L916) |
-| PUT | `/tools/cvp/servers/:id` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:914](../server/src/routes/api/cvp.js#L914) |
-| POST | `/tools/cvp/servers/:id/test` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:929](../server/src/routes/api/cvp.js#L929) |
-| GET | `/tools/cvp/settings` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:957](../server/src/routes/api/cvp.js#L957) |
-| PUT | `/tools/cvp/settings` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:961](../server/src/routes/api/cvp.js#L961) |
-| GET | `/tools/cvp/snapshots` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvpNet.js:301](../server/src/routes/api/cvpNet.js#L301) |
-| POST | `/tools/cvp/snapshots` | 역할 `admin/operator` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvpNet.js:307](../server/src/routes/api/cvpNet.js#L307) |
-| DELETE | `/tools/cvp/snapshots/:id` | 역할 `admin/operator` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvpNet.js:328](../server/src/routes/api/cvpNet.js#L328) |
-| GET | `/tools/cvp/topology` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvpNet.js:199](../server/src/routes/api/cvpNet.js#L199) |
+| GET | `/tools/cvp` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:291](../server/src/routes/api/cvp.js#L291) |
+| POST | `/tools/cvp/collect` | 역할 `admin/operator` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:872](../server/src/routes/api/cvp.js#L872) |
+| GET | `/tools/cvp/compare` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvpNet.js:436](../server/src/routes/api/cvpNet.js#L436) |
+| GET | `/tools/cvp/compliance` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvpNet.js:338](../server/src/routes/api/cvpNet.js#L338) |
+| GET | `/tools/cvp/device` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:388](../server/src/routes/api/cvp.js#L388) |
+| GET | `/tools/cvp/device-series` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:526](../server/src/routes/api/cvp.js#L526) |
+| GET | `/tools/cvp/devices` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:321](../server/src/routes/api/cvp.js#L321) |
+| GET | `/tools/cvp/devices.csv` | 권한 `data.csv`, `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:832](../server/src/routes/api/cvp.js#L832) |
+| GET | `/tools/cvp/events` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:543](../server/src/routes/api/cvp.js#L543) |
+| GET | `/tools/cvp/faults` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:758](../server/src/routes/api/cvp.js#L758) |
+| POST | `/tools/cvp/faults/close` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:798](../server/src/routes/api/cvp.js#L798) |
+| POST | `/tools/cvp/faults/scan` | 역할 `admin/operator` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:786](../server/src/routes/api/cvp.js#L786) |
+| GET | `/tools/cvp/linkq` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvpNet.js:103](../server/src/routes/api/cvpNet.js#L103) |
+| GET | `/tools/cvp/locate` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvpNet.js:263](../server/src/routes/api/cvpNet.js#L263) |
+| GET | `/tools/cvp/optics` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:594](../server/src/routes/api/cvp.js#L594) |
+| GET | `/tools/cvp/optics/trend` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvpNet.js:211](../server/src/routes/api/cvpNet.js#L211) |
+| GET | `/tools/cvp/overview` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:344](../server/src/routes/api/cvp.js#L344) |
+| POST | `/tools/cvp/parse-preview` | 역할 `admin` · 권한 `tools` · `fullScopeReadPost` | [server/src/routes/api/cvp.js:819](../server/src/routes/api/cvp.js#L819) |
+| GET | `/tools/cvp/port-series` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:857](../server/src/routes/api/cvp.js#L857) |
+| GET | `/tools/cvp/port-usage` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:730](../server/src/routes/api/cvp.js#L730) |
+| GET | `/tools/cvp/portmap` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:448](../server/src/routes/api/cvp.js#L448) |
+| GET | `/tools/cvp/portmap/summary` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:483](../server/src/routes/api/cvp.js#L483) |
+| GET | `/tools/cvp/portplan/forecast` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvpNet.js:156](../server/src/routes/api/cvpNet.js#L156) |
+| GET | `/tools/cvp/portplan/reclaim` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvpNet.js:130](../server/src/routes/api/cvpNet.js#L130) |
+| GET | `/tools/cvp/power` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:664](../server/src/routes/api/cvp.js#L664) |
+| GET | `/tools/cvp/redundancy` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvpNet.js:349](../server/src/routes/api/cvpNet.js#L349) |
+| GET | `/tools/cvp/servers` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:895](../server/src/routes/api/cvp.js#L895) |
+| POST | `/tools/cvp/servers` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:924](../server/src/routes/api/cvp.js#L924) |
+| DELETE | `/tools/cvp/servers/:id` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:927](../server/src/routes/api/cvp.js#L927) |
+| PUT | `/tools/cvp/servers/:id` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:925](../server/src/routes/api/cvp.js#L925) |
+| POST | `/tools/cvp/servers/:id/test` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:940](../server/src/routes/api/cvp.js#L940) |
+| GET | `/tools/cvp/settings` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:968](../server/src/routes/api/cvp.js#L968) |
+| PUT | `/tools/cvp/settings` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:972](../server/src/routes/api/cvp.js#L972) |
+| GET | `/tools/cvp/snapshots` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvpNet.js:389](../server/src/routes/api/cvpNet.js#L389) |
+| POST | `/tools/cvp/snapshots` | 역할 `admin/operator` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvpNet.js:397](../server/src/routes/api/cvpNet.js#L397) |
+| DELETE | `/tools/cvp/snapshots/:id` | 역할 `admin/operator` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvpNet.js:422](../server/src/routes/api/cvpNet.js#L422) |
+| GET | `/tools/cvp/topology` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvpNet.js:237](../server/src/routes/api/cvpNet.js#L237) |
 | GET | `/tools/data-flow` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/dataFlow.js:64](../server/src/routes/api/dataFlow.js#L64) |
 | POST | `/tools/deep-search` | 권한 `tools` | [server/src/routes/api/checksLogs.js:200](../server/src/routes/api/checksLogs.js#L200) |
 | GET | `/tools/device-flow` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/deviceFlow.js:30](../server/src/routes/api/deviceFlow.js#L30) |
@@ -1434,7 +1443,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/portal-check/tokens` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/portalCheck.js:226](../server/src/routes/api/portalCheck.js#L226) |
 | POST | `/tools/portal-check/tokens/edge-pull` | 역할 `admin` · `fullScopeOnly` · `textFields` | [server/src/routes/api/portalCheck.js:295](../server/src/routes/api/portalCheck.js#L295) |
 | POST | `/tools/portal-check/tokens/probe` | 역할 `admin` · `fullScopeOnly` · `textFields` | [server/src/routes/api/portalCheck.js:259](../server/src/routes/api/portalCheck.js#L259) |
-| GET | `/tools/power-total` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/overviewCards.js:238](../server/src/routes/api/overviewCards.js#L238) |
+| GET | `/tools/power-total` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/overviewCards.js:248](../server/src/routes/api/overviewCards.js#L248) |
 | GET | `/tools/ps-inspect` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/psInspect.js:57](../server/src/routes/api/psInspect.js#L57) |
 | GET | `/tools/ps-inspect/catalog` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/psInspect.js:50](../server/src/routes/api/psInspect.js#L50) |
 | GET | `/tools/ps-inspect/devices/:id` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/psInspect.js:66](../server/src/routes/api/psInspect.js#L66) |
@@ -1710,8 +1719,8 @@ Prometheus/OTel 익스포터(선택 토큰).
 | POST | `/tools/xfer-speed/run` | 역할 `admin` · `fullScopeOnly` · `textFields` | [server/src/routes/api/xferSpeed.js:394](../server/src/routes/api/xferSpeed.js#L394) |
 | PUT | `/tools/xfer-speed/settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/xferSpeed.js:419](../server/src/routes/api/xferSpeed.js#L419) |
 | GET | `/top` | — | [server/src/routes/api/inventory.js:629](../server/src/routes/api/inventory.js#L629) |
-| GET | `/ui-settings` | — | [server/src/routes/api/toolsInfo.js:353](../server/src/routes/api/toolsInfo.js#L353) |
-| PUT | `/ui-settings` | 역할 `admin/operator` | [server/src/routes/api/toolsInfo.js:355](../server/src/routes/api/toolsInfo.js#L355) |
+| GET | `/ui-settings` | — | [server/src/routes/api/toolsInfo.js:338](../server/src/routes/api/toolsInfo.js#L338) |
+| PUT | `/ui-settings` | 역할 `admin/operator` | [server/src/routes/api/toolsInfo.js:340](../server/src/routes/api/toolsInfo.js#L340) |
 | POST | `/usage/track` | — | [server/src/routes/api/usage.js:15](../server/src/routes/api/usage.js#L15) |
 | DELETE | `/user-menu` | — | [server/src/routes/api/userMenu.js:90](../server/src/routes/api/userMenu.js#L90) |
 | GET | `/user-menu` | — | [server/src/routes/api/userMenu.js:62](../server/src/routes/api/userMenu.js#L62) |
@@ -1740,11 +1749,11 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/vms/:id/endpoint-locations` | 권한 `inv.vms` | [server/src/routes/api/hostSan.js:416](../server/src/routes/api/hostSan.js#L416) |
 | GET | `/vms/:id/metrics` | 권한 `inv.vms` | [server/src/routes/api/vmMetrics.js:168](../server/src/routes/api/vmMetrics.js#L168) |
 | GET | `/vms/:id/partitions` | 권한 `inv.vms` | [server/src/routes/api/toolsGuestPart.js:46](../server/src/routes/api/toolsGuestPart.js#L46) |
-| GET | `/vms/:id/power-history` | 권한 `inv.vms` | [server/src/routes/api/vmPower.js:10](../server/src/routes/api/vmPower.js#L10) |
+| GET | `/vms/:id/power-history` | 권한 `inv.vms` | [server/src/routes/api/vmPower.js:11](../server/src/routes/api/vmPower.js#L11) |
 | GET | `/vms/by-vcenter` | 권한 `inv.vms` | [server/src/routes/api/inventory.js:483](../server/src/routes/api/inventory.js#L483) |
 | GET | `/vms/insight` | 권한 `inv.vms` | [server/src/routes/api/inventory.js:507](../server/src/routes/api/inventory.js#L507) |
 | GET | `/vms/lookup` | 권한 `inv.vms` | [server/src/routes/api/inventory.js:523](../server/src/routes/api/inventory.js#L523) |
-| POST | `/vms/upgrade-tools` | 역할 `admin/operator` · 권한 `tools` · `auditMiddleware` | [server/src/routes/api/toolsInfo.js:301](../server/src/routes/api/toolsInfo.js#L301) |
+| POST | `/vms/upgrade-tools` | 역할 `admin/operator` · 권한 `tools` · `auditMiddleware` | [server/src/routes/api/toolsInfo.js:286](../server/src/routes/api/toolsInfo.js#L286) |
 | POST | `/vms/usage` | 권한 `inv.vms` · `textFields` | [server/src/routes/api/toolsCapacity.js:466](../server/src/routes/api/toolsCapacity.js#L466) |
 | GET | `/wiki/backrefs` | — | [server/src/routes/api/wiki.js:206](../server/src/routes/api/wiki.js#L206) |
 | GET | `/wiki/broken-links` | — | [server/src/routes/api/wiki.js:318](../server/src/routes/api/wiki.js#L318) |
@@ -1810,12 +1819,12 @@ Prometheus/OTel 익스포터(선택 토큰).
 | `fullWriteOnly` | 24 | **쓰기 범위도 무제한인 계정만**(v2.823 Bareos 설정 쓰기). 조회는 무제한이어도 수정 가능 vCenter(writeVcenters)가 지정된 계정은 403 — 전 법인 공용 쓰기라 쓰기 범위와 교집합할 수 없다. |
 | `fleetWideOnly` | 23 | **전체 범위 계정만**(v2.607 AUTHZ2607-03 — vCenter 등록·데이터 소스 전환·표시 순서). 범위 제한 계정은 403. |
 | `tokenFirst` | 21 | **수집 토큰 확인을 본문 해석보다 먼저** 한다(v2.741 — 토큰 없는 요청이 본문 파서·큰 본문 한도에 닿지 않게). 토큰이 없거나 틀리면 403, 수집 토큰 미설정이면 404. |
+| `guarded` | 19 | 공개 API 전용 래퍼 — 허용 목록 검사 + 스냅샷 준비 + async throw 안전 처리. 미들웨어가 아니라 핸들러를 감싼 것이다. |
 | `fullReadWriteScopeOnlyWith` | 14 | **조회 · 쓰기 모두 전체 범위인 계정만**(v2.935 — `routes/admin/shared.js` · `auth/scope.js isFullReadWriteScope`). 조회 범위 또는 쓰기 범위(writeVcenters)를 지정한 계정은 403 — 스위치 설정을 바꾸는 라우트(SAN 플로우 모니터)가 쓴다. |
 | `requireSuperAdmin` | 13 | **super_admin 전용**(v2.726 좌측 메뉴 배포·철회 · v2.740 아이실론 디렉터리 사용량 수집 대상 설정 — 조회·저장·일괄 변경·연결 시험·메일·SSH 키). 저장 역할이 super_admin 인 계정만(`req.user.superAdmin`). 역할 admin 은 403 `super-admin-only`(`requiredRole: ['super_admin']`). |
 | `fleetReadOnly` | 10 | **전체 범위 계정만**(v2.621 SEC-03 — 폴더 사용량 조회. 응답이 RMA 엣지 IP·호스트명·마운트 경로를 싣는다 · v2.622 SEC-03 — GPU 게스트 엣지 배포 설정·엣지 배포 사용자·수집 진단 조회). 범위 제한 계정은 403. |
 | `issueSettingsFleetOnly` | 10 | **전체 범위 계정만**(v2.871 — 이슈 설정: 자동 할당 규칙 · 알림 · 사람별 메일 주소. 전 법인 공용 설정이다). 범위 제한 계정은 403 · 핸들러가 관리자 판본(데모 제외)을 한 번 더 본다. |
 | `express.json` | 10 | 본문 파서(대용량 JSON 한도). ⚠ 게이트가 아니다 — 이 자리에 있는 이유는 **인증보다 먼저 파싱하지 않기 위해** 라우트 단위로 붙였기 때문이다(`util/bigJsonGate.js` 규약). |
-| `guarded` | 10 | 공개 API 전용 래퍼 — 허용 목록 검사 + 스냅샷 준비 + async throw 안전 처리. 미들웨어가 아니라 핸들러를 감싼 것이다. |
 | `fullScopeOnlyWith` | 10 | **전체 범위 계정만**(사유 문구를 받는 `fullScopeOnly` — v2.628 SEC2628-01 업그레이드 제어·SEC2628-05 리소스 적정성 진단 등). 범위 제한 계정은 403. |
 | `commenters` | 8 | **admin·operator 또는 권한 키 `issues.request`**(v2.881 위키 — 댓글 · 지켜보기. 데모 계정 제외 · 문서의 스페이스가 쓰기 범위 안이어야 한다 — 저장소 `addComment`). |
 | `authMiddleware` | 8 | 세션 토큰 검증(`resolveTokenUser`). 대부분의 `/api/*` 는 마운트에서 이미 걸리고, 여기 보이는 것은 **라우터가 따로 건** 경우다(`/api/auth` 안의 admin 라우트 등). |

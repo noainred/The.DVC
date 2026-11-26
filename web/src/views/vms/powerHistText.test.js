@@ -1,7 +1,7 @@
 // powerHistText.test.js — v3.39.0 VM 전원 이력 화면 문구 · 달력 계산(지역 시각 기준 — 시험도 지역 생성자로 만든다).
 import { describe, it, expect } from 'vitest';
 import {
-  durText, durRangeText, whenText, clipSegs, sumsOf, onRatio, pctText, dayBarStyle, ratioBarStyle, monthsBack, monthCells, sumsText, factText, currentText, defaultDayKey, dayKey,
+  durText, durRangeText, whenText, selectedDayKey, lastOffSub, lastOnSub, clipSegs, sumsOf, onRatio, pctText, dayBarStyle, ratioBarStyle, monthsBack, monthCells, sumsText, factText, currentText, defaultDayKey, dayKey,
 } from './powerHistText.js';
 import { normObjTab, POWER_TAB } from '../vcd/objTabs.js';
 
@@ -87,6 +87,15 @@ describe('달력', () => {
     expect(c.sums.off).toBe(now - at(2026, 3, 8, 19, 20));
     expect(c.days[7].aria).toContain('3월 8일');
   });
+  it('선택된 날 — 범위 끝(다음 달 1일 0시)은 포함하지 않는다', () => {
+    const to = at(2025, 12, 1);   // 이전 12개월 창의 끝 = 2025-12-01 0시
+    expect(selectedDayKey(null, [], { to, now: at(2026, 11, 26, 9) })).toBe('2025-11-30');
+    expect(selectedDayKey('2025-05-01', [], { to, now: at(2026, 11, 26) })).toBe('2025-05-01');
+    expect(selectedDayKey(null, [], { to: at(2026, 11, 26, 9), now: at(2026, 11, 26, 9) })).toBe('2026-11-26');
+  });
+  it('지금 글 — 기록이 아직 없으면 0 이 아니라 아직 없음', () => {
+    expect(currentText({ recordStart: null, current: null }, at(2026, 11, 26)).head).toBe('아직 기록 없음');
+  });
   it('기본 선택 날 — 최근 전환의 날 · 없으면 기준일', () => {
     expect(defaultDayKey([{ ts: at(2026, 11, 12, 8, 15) }], at(2026, 11, 25))).toBe('2026-11-12');
     expect(defaultDayKey([], at(2026, 11, 25, 9))).toBe(dayKey(at(2026, 11, 25)));
@@ -97,8 +106,28 @@ describe('사실 글 — 기록 시작 전은 날짜를 지어내지 않는다',
   it('factText', () => {
     expect(factText({ before: at(2025, 12, 1) }).main).toBe('기록 시작 전');
     expect(factText({ ts: at(2026, 2, 23, 14, 5), exact: true, user: 'VSPHERE.LOCAL\\ops' })).toEqual({ main: '2026-02-23 14:05', sub: 'vCenter 이벤트 · VSPHERE.LOCAL\\ops' });
-    expect(factText({ ts: at(2026, 2, 23, 14, 10), lo: at(2026, 2, 23, 14), src: 'watch' }, { watchMs: 600_000 }).sub).toBe('포탈 관측 · 정밀도 10분');
+    expect(factText({ ts: at(2026, 2, 23, 14, 10), lo: at(2026, 2, 23, 14), src: 'watch' }, { watchMs: 600_000 }).sub).toBe('포탈 관측 · 시각 오차 최대 10분');
     expect(factText(null).main).toBe('기록 없음');
+  });
+  it('관측이 끊겼으면 마지막으로 본 상태 · 목록에 나타난 것은 Power On 이 아니다 · 오차는 창 폭으로', () => {
+    const now = at(2026, 11, 26, 9);
+    const st = currentText({ recordStart: 1, current: { state: 'on', ts: at(2026, 11, 1), seenTs: at(2026, 11, 23, 9), stale: true } }, now);
+    expect(st.head).toBe('마지막으로 본 상태 · 켜짐');
+    expect(st.since).toBe('2026-11-23 09:00 이후 관측 없음(3일)');
+    expect(currentText({ recordStart: 1, current: { state: 'on', ts: at(2026, 11, 20), lo: at(2026, 11, 19, 23, 50), appeared: true } }, now).head).toBe('켜짐 · 6일 9시간 이상');
+    expect(factText({ ts: at(2026, 11, 20), lo: at(2026, 11, 19, 23, 50), appeared: true }).sub).toContain('목록에 처음 보인 시각');
+    expect(factText({ ts: at(2026, 11, 20, 12), lo: at(2026, 11, 19, 12), src: 'watch' }, { watchMs: 600_000 }).sub).toBe('포탈 관측 · 시각 오차 최대 1일');
+  });
+  it('카드 보조 문구는 머리글과 같은 판정 — 관측 끊김 · 목록에 나타남 · 끊김 포함 시간(2회차 N3)', () => {
+    const now = at(2026, 11, 26, 9);
+    const stale = { current: { state: 'on', ts: at(2026, 11, 1), seenTs: at(2026, 11, 23, 9), stale: true }, lastOn: { ts: at(2026, 11, 1) } };
+    expect(lastOnSub(stale, { sub: 'x' }, now)).toBe('마지막 관측(2026-11-23 09:00)까지 켜져 있었음');
+    expect(lastOnSub({ current: { state: 'on', ts: at(2026, 11, 20), appeared: true } }, { sub: '나타남' }, now)).toBe('나타남');
+    expect(lastOnSub({ current: { state: 'on', ts: at(2026, 11, 20) } }, { sub: 'x' }, now)).toBe('6일 9시간째 켜져 있음');
+    expect(lastOffSub({ lastOff: { ts: at(2026, 11, 20), appeared: true }, current: { state: 'off' } }, now)).toContain('꺼진 채 목록에 나타남');
+    expect(lastOffSub({ lastOff: { ts: at(2026, 11, 20) }, current: { state: 'off', stale: true, seenTs: at(2026, 11, 22) } }, now)).toBe('꺼진 뒤 마지막 관측까지 2일 — 그 뒤는 관측 없음');
+    expect(currentText({ recordStart: 1, current: { state: 'on', ts: at(2026, 11, 1), unknownMs: 5 * H } }, now).since).toContain('그 사이 기록 없음 5시간 포함');
+    expect(currentText({ recordStart: 1, current: { state: 'off', ts: now + 2 * D } }, now).head).toBe('꺼짐 · 0분째');
   });
   it('currentText — 진행 시간 · 시작을 모르면 이상', () => {
     const now = at(2026, 11, 25, 16);

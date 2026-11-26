@@ -508,6 +508,20 @@ tbody td { padding: 10px 14px; border-bottom: 1px solid rgba(36,48,73,.5); white
 tbody tr:hover { background: rgba(59,130,246,.06); }
 tbody tr:last-child td { border-bottom: none; }
 
+/* 스토리지 수집 주기 · 대기 시간 표(v3.41.1 — views/StorageIntervals.jsx). 대상 칸을 왼쪽에 고정한다(좁은 화면에서 가로로 밀어도 어느 행인지 보이게).
+   ⚠ 고정 칸은 **불투명 배경**이어야 한다(뒤 칸이 비친다) — 그래서 표 바탕 · 전역 행 · 고정 칸을 같은 변수로 못 박고, 행에 마우스를 올렸을 때의
+     옅은 파랑(tbody tr:hover)도 고정 칸에 **같은 색을 겹쳐** 입힌다. 인라인 스타일로 두면 hover 를 덮지 못해 그 칸만 어둡게 남았다(Chromium 판독).
+   · 고정 칸 오른쪽에 경계선(box-shadow) — 밀려 들어온 칸이 경계에서 잘린 것임을 보이게.
+   · 좁은 화면(≤560px)에서는 대상 설명 줄을 숨긴다(칸 폭 120px 에서 5~7줄로 접혀 행이 화면 절반을 차지했다) — 내용은 칸의 title 로 남는다. */
+.si-wrap { background: var(--panel); }
+.si-wrap .si-sticky { position: sticky; left: 0; z-index: 1; min-width: 120px; white-space: normal; word-break: keep-all; background: var(--panel); box-shadow: 1px 0 0 var(--border); }
+.si-wrap thead th.si-sticky { z-index: 3; background: var(--panel-2); }
+.si-wrap tbody tr.si-global, .si-wrap tbody tr.si-global .si-sticky { background: var(--panel-2); }
+.si-wrap tbody tr:hover .si-sticky { background: linear-gradient(rgba(59,130,246,.06), rgba(59,130,246,.06)), var(--panel); }
+.si-wrap tbody tr.si-global:hover .si-sticky { background: var(--panel-2); }
+.si-wrap .si-hint { font-size: 11px; }
+@media (max-width: 560px) { .si-wrap .si-hint { display: none; } }
+
 .badge { display: inline-block; padding: 2px 9px; border-radius: 20px; font-size: 11px; font-weight: 600; }
 .badge.green { background: rgba(34,197,94,.15); color: #4ade80; }
 .badge.amber { background: rgba(245,158,11,.15); color: #fbbf24; }
@@ -3273,7 +3287,7 @@ table.bmf-t tr.bmf-picked td { background: rgba(59, 130, 246, .08); }
 .bmf-why-b:hover, .bmf-why-b:focus-visible { color: var(--text); text-decoration: underline dotted; }
 .bmf-wd { width: 8px; height: 8px; border-radius: 50%; flex: none; display: inline-block; }
 .bmf-wd.unknown { border: 1.5px solid var(--text-faint); }
-.bmf-why-pop { position: fixed; z-index: 60; width: min(340px, 80vw); display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: 8px;
+.bmf-why-pop { position: fixed; z-index: 160; width: min(340px, 80vw); display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: 8px;
   background: var(--panel, var(--bg)); border: 1px solid var(--border); box-shadow: 0 8px 24px rgba(0,0,0,.35); white-space: normal; color: var(--text); font-size: 12px; }
 .bmf-why-a { color: var(--accent); }
 /* v3.3.0 물리서버 폴더 하드웨어(iDRAC) 칸 · iDRAC 접속 상자 */
@@ -3285,7 +3299,7 @@ table.bmf-t tr.bmf-picked td { background: rgba(59, 130, 246, .08); }
 .bmf-idc-b { background: none; border: 0; padding: 0; font-size: 12px; color: var(--accent); cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px; white-space: nowrap; }
 .bmf-idc-b.sm { font-size: 11px; }
 .bmf-idc-b:hover, .bmf-idc-b:focus-visible { text-decoration: underline; }
-.bmf-idc-pop { position: fixed; z-index: 60; display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: 8px;
+.bmf-idc-pop { position: fixed; z-index: 160; display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: 8px;
   background: var(--panel, var(--bg)); border: 1px solid var(--border); box-shadow: 0 8px 24px rgba(0,0,0,.35); white-space: normal; color: var(--text); font-size: 12px; text-align: left; }
 .bmf-idc-i { display: flex; flex-direction: column; gap: 1px; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--text); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; text-decoration: none; min-width: 0; }
 .bmf-idc-i span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -3296,9 +3310,6 @@ table.bmf-t tr.bmf-picked td { background: rgba(59, 130, 246, .08); }
 .bmf-idc-row .input { width: 96px; min-width: 0; padding: 3px 6px; font-size: 12px; }
 .bmf-idc-row .logout-btn { flex: none; padding: 3px 8px; font-size: 11.5px; }
 .bmf-idc-n { font-size: 11px; line-height: 1.4; }
-.bmf-hwsec { display: flex; flex-direction: column; gap: 6px; }
-.bmf-hwsec ul { margin: 0; padding-left: 16px; display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
-.bmf-hwsec li { overflow-wrap: anywhere; }
 .bmf-wband { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 14px; border-bottom: 1px solid var(--border); font-size: 12px; }
 .bmf-offbar { padding: 8px 14px; border: 1px solid rgba(245,158,11,.45); background: rgba(245,158,11,.08); border-radius: 8px; font-size: 12.5px; margin-bottom: 10px; }
 .bmf-tag { display: inline-flex; align-items: center; height: 20px; padding: 0 6px; border-radius: 5px; background: var(--border-soft); color: var(--text); font-size: 11px; font-family: var(--mono); white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
@@ -3313,11 +3324,58 @@ table.bmf-t tr.bmf-picked td { background: rgba(59, 130, 246, .08); }
 .bmf-facets { flex: 0 1 200px; min-width: 0; background: var(--panel-deep); border: 1px solid var(--border); border-radius: 10px; padding: 4px 10px 8px; max-height: 420px; overflow-y: auto; }
 .bmf-fc { display: flex; align-items: center; gap: 6px; min-height: 24px; font-size: 12.5px; min-width: 0; }
 .bmf-fc .n { margin-left: auto; color: var(--text-dim); font-size: 11.5px; font-variant-numeric: tabular-nums; }
-.bmf-drawer { position: fixed; right: 12px; top: 64px; bottom: 12px; width: min(400px, calc(100vw - 24px)); z-index: 40; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 12px; box-shadow: var(--shadow); border-color: #2f3e5e; }
-.bmf-kv { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 6px 10px; font-size: 13px; align-items: center; }
-.bmf-kv .k { color: var(--text-dim); }
+/* v3.44 물리서버 상세 드로어(시안 docs/design/bm-drawer) — 틀은 VM · 호스트 드로어(.vmh-drawer · views/vms/vmHub.css) 그대로이고 여기는 물리서버만의 조각이다.
+   예전 400px 옆 패널(.bmf-drawer · .bmf-kv · .bmf-links · .bmf-hwsec)은 지웠다. 좁은 화면 경계(719px)는 vmHub.css 와 같은 값. */
 .bmf-band { padding: 7px 10px; border-radius: 8px; font-size: 12.5px; }
-.bmf-links a { color: #93c5fd; }
+.vmh-acts.bmd-acts { align-items: center; }
+.vmh-acts > .bmd-grow { flex: 1 1 8px; min-width: 0; }
+.vmh-acts > .bmd-ro { flex: 1 1 220px; min-width: 0; font-size: 12px; line-height: 1.5; }
+.vmh-acts > .bmd-sel { flex: 0 1 220px; min-width: 0; width: 220px; max-width: 100%; }
+.bmd-btn { padding: 7px 12px; width: auto; margin: 0; white-space: nowrap; }
+/* margin: 0 — 공용 .login-btn 의 margin-top 4px 가 남아 옆 단추보다 2px 내려앉았다(이 단추는 span 안이라 .vmh-acts > .login-btn 규칙이 닿지 않는다 — 반증 B5) */
+.bmd-idc-btn { padding: 7px 14px; width: auto; margin: 0; white-space: nowrap; }
+.bmd-opnote { padding: 8px 18px; border-bottom: 1px solid var(--border-soft); font-size: 12.5px; line-height: 1.5; word-break: keep-all; overflow-wrap: anywhere; }
+.bmd-opnote.ok { color: var(--text); background: rgba(34, 197, 94, .10); }
+.bmd-opnote.bad { color: var(--text); background: rgba(239, 68, 68, .12); }
+.bmd-lb { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+.bmd-tile2 { grid-column: span 2; }
+.bmd-vtext { font-family: inherit !important; font-size: 16px !important; line-height: 1.25 !important; }
+.bmd-note { font-size: 12px; line-height: 1.55; word-break: keep-all; overflow-wrap: anywhere; }
+/* 한글 문장이 낱말 가운데서 꺾이지 않게(‘아닙니/다’ — 1440 · 400 Chromium 판독). 긴 영문 · 주소는 overflow-wrap 이 꺾는다 */
+.bmd-db .vmh-sigrow .t span, .bmd-db .vmh-dtile .s.wrap { word-break: keep-all; }
+.bmd-kvnote { display: block; font-size: 11px; font-weight: 400; color: var(--text-dim); margin-top: 2px; }
+.bmd-corp { color: var(--text); font-weight: 600; }
+.bmd-seg { white-space: nowrap; display: inline-flex; gap: 6px; align-items: center; max-width: 100%; }
+.bmd-seg > span:last-child, .bmd-seg > b:last-child { overflow: hidden; text-overflow: ellipsis; }
+.bmd-dot-none { background: transparent; border: 1.5px solid var(--text-dim); box-sizing: border-box; }
+.bmd-chart { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px 8px; min-width: 0; overflow: hidden; }
+.bmd-spec { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); background: var(--panel); border: 1px solid var(--border); border-radius: 10px; min-width: 0; }
+.bmd-spec > div { padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; min-width: 0; border-left: 1px solid var(--border-soft); }
+.bmd-spec > div:first-child { border-left: 0; }
+.bmd-spec .lb { font-size: 11px; font-weight: 600; color: var(--text-dim); }
+.bmd-spec .v { font-family: var(--mono); font-size: 15px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bmd-spec .v.plain { font-family: inherit; font-weight: 600; color: var(--text-dim); }
+.bmd-spec .s { font-size: 11px; line-height: 1.4; color: var(--text-dim); word-break: keep-all; overflow-wrap: anywhere; }
+.bmd-parts { display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 2px 12px; min-width: 0; }
+.bmd-pg { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border-soft); min-width: 0; }
+.bmd-pg:last-child { border-bottom: 0; }
+.bmd-pg > .k { font-size: 12px; font-weight: 600; color: var(--text-dim); word-break: keep-all; overflow-wrap: anywhere; }
+.bmd-pg > .rows { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.bmd-pr .m.none { font-weight: 400; color: var(--text-dim); }
+.bmd-pr { display: grid; grid-template-columns: 34px minmax(0, 1fr) minmax(0, auto); gap: 8px; align-items: baseline; font-size: 12.5px; min-width: 0; }
+.bmd-pr .n { font-family: var(--mono); font-size: 12px; color: var(--text-dim); text-align: right; white-space: nowrap; }
+.bmd-pr .m { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.bmd-pr .x { font-size: 11.5px; color: var(--text-dim); text-align: right; min-width: 0; max-width: 230px; overflow-wrap: anywhere; }
+@media (max-width: 719px) {
+  .vmh-acts > .bmd-sel { flex: 1 1 150px; width: auto; }
+  .bmd-spec { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .bmd-spec > div { border-left: 0; border-top: 1px solid var(--border-soft); }
+  .bmd-spec > div:nth-child(-n+2) { border-top: 0; }
+  .bmd-spec > div:nth-child(even) { border-left: 1px solid var(--border-soft); }
+  .bmd-pg { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .bmd-pr { grid-template-columns: 34px minmax(0, 1fr); }
+  .bmd-pr .x { grid-column: 2; text-align: left; max-width: none; }
+}
 /* v2.987 맵 보기(시안 ②) — 칸 하나 = 서버 한 대 · 색은 한 색상 밝기 5단 · 못 읽음 점선 · 꺼짐 회색 · 장애 빨간 테(색과 따로) */
 .bmf-map { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; min-width: 0; }
 .bmf-grp { border: 1px solid var(--border); border-radius: 10px; background: var(--panel-deep); padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 7px; min-width: 0; }
@@ -3346,8 +3404,6 @@ button.bmf-hx:focus-visible { outline: 2px solid var(--accent-2); outline-offset
 /* 배지는 줄지 않고 한 줄로 — 400px 에서 '1건' · '중앙' 이 글자마다 세로로 꺾였다(v2.987 Chromium 판독) */
 .bmf-card-body .l1 > .badge, .bmf-card-body .l1 > span:last-child { flex: none; white-space: nowrap; }
 .bmf-card-body .l2 { font-size: 12px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.bmf-links a:hover { color: #bfdbfe; }
-.bmf-band.red { background: rgba(239, 68, 68, .10); border: 1px solid rgba(239, 68, 68, .4); color: #fecaca; }
 table.bmf-t mark { background: rgba(250, 204, 21, .28); color: #fef08a; border-radius: 3px; padding: 0 1px; }
 /* v2.895 개체 보기(VM · ESXi 호스트 — 시안 docs/design/vcenter-tabs ⑧~⑪) — 경로 줄 · 개체 머리. 탭 줄은 .vcd-views 그대로. */
 .vcd-crumb { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; color: var(--text-dim); min-width: 0; }

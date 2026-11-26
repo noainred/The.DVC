@@ -81,6 +81,22 @@ export function sourceOf(key, global = {}, perTarget = {}) {
 }
 
 /**
+ * 선택 칸 아래 한 줄(v3.41.1) — 그 칸에 **실제로 무엇이 적용되는가**. 첫 선택지를 ‘미지정’ · ‘상속’ 으로 줄였으므로(열 폭) 이 줄이 뜻을 말한다.
+ *   지정함            → ‘→ 30분’
+ *   전역에서 물려받음  → ‘→ 30분(전역 기본)’
+ *   어디에도 없음      → 전역 행 ‘엣지 로컬 값 유지’ · 중앙 행 ‘중앙 기본(env)’ · 엣지 행 ‘엣지 로컬’
+ * @param {string} key 항목 키
+ * @param {string} target '__global__' | ''(중앙 직접 수집) | 엣지 이름
+ */
+export function unsetNote(key, target, global = {}, perTarget = {}) {
+  if (target === '__global__') return global?.[key] ? `→ ${msLabel(Number(global[key]))}` : '엣지 로컬 값 유지';
+  const src = sourceOf(key, global, perTarget);
+  if (src === 'target') return `→ ${msLabel(Number(perTarget[key]))}`;
+  if (src === 'global') return `→ ${msLabel(Number(global[key]))}(전역 기본)`;
+  return target === '' ? '중앙 기본(env)' : '엣지 로컬';
+}
+
+/**
  * 중앙 화면에 결과가 보이기까지의 **최악 지연**.
  *   엣지: 장비 수집 주기 + 중앙 push 주기 (수집 직후에 push 가 돌면 거의 0, 직전이면 합만큼)
  *   중앙 직접 수집: push 가 없으므로 수집 주기만.

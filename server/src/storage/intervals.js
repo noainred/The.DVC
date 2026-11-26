@@ -58,6 +58,10 @@ export const INTERVAL_SPEC = [
   //   · 세션 예산·장비 시한은 이 값에서 계산한다(`storage/isiTimeouts.js` — 사람이 세 값을 맞추게 두지 않는다).
   { key: 'isiCmdTimeoutMs', env: 'STORAGE_ISI_CMD_TIMEOUT_MS', def: ISI_CMD_TIMEOUT_DEF_MS, min: ISI_CMD_TIMEOUT_MIN_MS, max: ISI_CMD_TIMEOUT_MAX_MS,
     timer: false, presets: ISI_CMD_TIMEOUT_PRESETS,
+    // v3.41.1(점검 1회차): 예전에는 isi 명령이 SSH exec 기본 시한(`SSH_EXEC_TIMEOUT_MS`)을 썼다 — 그 값을 3분보다 길게 잡아 느린 클러스터를
+    //   넘기던 엣지는 업그레이드 뒤 대기가 3분으로 **줄어든다**. 이 항목의 env 가 없을 때 그 옛 env 가 기본값보다 길면 그것을 로컬 값으로 쓴다
+    //   (올리기만 한다 — 줄이지 않는다 · 상한 5분). 중앙 지정 · 이 항목의 env 가 있으면 그것이 우선이다.
+    legacyEnv: 'SSH_EXEC_TIMEOUT_MS',
     label: 'PowerScale SSH 명령 대기',
     hint: `주기가 아니라 시한 — PowerScale(Isilon) SSH 수집에서 isi 명령 하나의 응답을 기다리는 최대 시간. 응답이 느린 클러스터가 시간 초과로 수집에 실패하면 늘린다. 장비 한 대의 전체 수집 시한은 이 값 + ${Math.round(ISI_SESSION_EXTRA_MS / 60_000)}분으로 함께 늘어난다.` },
 ];
@@ -95,9 +99,23 @@ export function envIntervals() {
   const out = {};
   for (const s of INTERVAL_SPEC) {
     const n = Number(process.env[s.env]);
-    out[s.key] = Number.isFinite(n) && n > 0 ? Math.min(s.max || MAX_MS, Math.max(s.min, Math.round(n))) : s.def;
+    out[s.key] = Number.isFinite(n) && n > 0 ? Math.min(s.max || MAX_MS, Math.max(s.min, Math.round(n))) : (legacyEnvMs(s) ?? s.def);
   }
   return out;
+}
+
+/**
+ * 옛 env 가 이 항목의 로컬 기본값을 **올리는** 값(없으면 null). 사양의 `legacyEnv` 가 있고 · 그 값이 기본값보다 길 때만.
+ * 줄이는 방향으로는 쓰지 않는다(옛 env 의 기본 60초가 새 기본 3분을 깎으면 안 된다).
+ * 큰 값도 버리지 않고 이 항목의 상한으로 자른다 — `proxy/sshExec.js` 가 그 env 를 버리지 않고 30분으로 잘라 썼으므로(예전에 실제로 길게 기다렸다),
+ *   여기서만 버리면 그런 엣지의 대기가 업그레이드로 줄어든다(점검 2회차 N4 — 1회차는 30분 초과를 '단위 착오' 로 보고 무시했다).
+ */
+function legacyEnvMs(spec) {
+  if (!spec?.legacyEnv) return null;
+  const raw = process.env[spec.legacyEnv];
+  const l = typeof raw === 'string' && raw.trim() !== '' ? Number(raw) : NaN;
+  if (!Number.isFinite(l) || l <= spec.def) return null;
+  return Math.min(spec.max || MAX_MS, Math.round(l));
 }
 
 // ── 런타임(이 노드에서 실제로 쓰이는 값) ───────────────────────────────────────
@@ -119,7 +137,7 @@ export function runtimeIntervalSource() {
   const eff = runtimeIntervals();
   return INTERVAL_SPEC.map((s) => ({
     key: s.key, label: s.label, ms: eff[s.key],
-    from: !localPinned() && _override[s.key] ? 'central' : (process.env[s.env] ? 'env' : 'default'),
+    from: !localPinned() && _override[s.key] ? 'central' : (process.env[s.env] || legacyEnvMs(s) != null ? 'env' : 'default'),
   }));
 }
 

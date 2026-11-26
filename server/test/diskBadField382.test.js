@@ -409,7 +409,13 @@ test('#1 활성 로그가 담은 기간은 시간이 지나도 늘지 않는다 
   assert.ok(f.servers[0].logSpanMs <= 20 * HOUR);
   // 월별 '그 달 로그가 남은 서버 비율' 은 끊김 없이 본 구간으로 센다 — 못 본 틈이 있는 지난달을 봤다고 하지 않는다.
   const prevMonth = f.months[f.months.length - 2];
-  assert.equal(prevMonth.coveragePct, d.server.continuousSince <= Date.UTC(new Date(now).getUTCFullYear(), new Date(now).getUTCMonth(), 1) - 1 ? 100 : 0);
+  // v3.41.1(날짜 의존 실패 — 2026-11-26 07:5x KST 전량 실행에서 재현 · 단독으로도 재현): 지난달의 끝을 **UTC 달**로 계산하면, `now`(= 실행 시각 + 36일)가
+  //   달의 마지막 날 15~24시 UTC(= 포탈 시각으로는 이미 다음 달 1일 00~09시)일 때 제품(summary.js — 창을 포탈 시각의 달로 가른다)과 한 달 어긋나
+  //   '100 !== 0' 으로 실패했다(한 달에 한 번, 9시간 동안). 제품과 같은 시계(util/dayKey.js portalParts · portalMs)로 지난달의 끝을 구한다.
+  const { portalParts, portalMs } = await import('../src/util/dayKey.js');
+  const pNow = portalParts(now);
+  const prevMonthEnd = portalMs(pNow.y, pNow.mo, 1) - 1;   // 포탈 시각으로 이번 달 1일 0시 − 1ms
+  assert.equal(prevMonth.coveragePct, d.server.continuousSince <= prevMonthEnd ? 100 : 0);
   // 3.8.2 이전 엣지(진단 없음)는 첫 정상 점검 때의 범위로 — 이것도 늘지 않는다.
   const old = { complete: true, firstOkAt: NOW, coveredFrom: NOW - 20 * HOUR, readDiag: null };
   assert.equal(S.logSpanOf(old).ms, 20 * HOUR);

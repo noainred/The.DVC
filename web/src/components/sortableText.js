@@ -178,6 +178,38 @@ export function sortChildren(children, colIndex, dir = 'asc') {
   return items.map((it) => (React.isValidElement(it.node) && it.node.key == null ? React.cloneElement(it.node, { key: `s${it.i}` }) : it.node));
 }
 
+/**
+ * 이 표의 정렬 · 상한을 STable 이 맡는가(v3.44) — thead 의 **마지막 머리글 줄**이 있고, 그 줄에 자체 정렬 th(컴포넌트 th · onClick th)가 없을 때.
+ * 맡지 않는 표는 STable 이 children 을 그대로 그린다(정렬 · `limit` 둘 다 걸리지 않는다). 순수 — thead 는 React 엘리먼트.
+ */
+export function managesSort(thead) {
+  if (!React.isValidElement(thead)) return false;
+  const rows = React.Children.toArray(thead.props?.children).filter((x) => React.isValidElement(x) && x.type === 'tr');
+  const last = rows[rows.length - 1];
+  if (!last) return false;
+  return !React.Children.toArray(last.props?.children).some((t) => React.isValidElement(t) && (typeof t.type !== 'string' || t.props?.onClick));
+}
+
+/**
+ * 보이는 행의 `data-rowid` 를 위에서부터(v3.44 — STable `onOrder`). children = tbody 자식(원래 순서 또는 sortChildren 결과),
+ * cap > 0 이면 앞 cap 행만(표가 그리는 것과 같은 상한). `data-rowid` 가 없는 행(합계 줄 등)은 건너뛴다. 순수 — 원본을 고치지 않는다.
+ */
+export function rowIdsOf(children, cap = 0) {
+  // 표가 그리는 단위와 같게: 배열은 깊이에 상관없이 펴고(React.Children.toArray 와 같다) · 상한은 **id 를 거르기 전의 행 단위**에 건다
+  //   (id 없는 안내 행도 표의 상한에는 한 줄로 센다 — 거른 뒤에 자르면 표에 없는 행을 알린다: 반증 B3 M2).
+  const arr = (Array.isArray(children) ? children.flat(Infinity) : [children]).filter((c) => c != null && typeof c !== 'boolean');
+  const list = Number(cap) > 0 ? arr.slice(0, Math.floor(Number(cap))) : arr;
+  const ids = [];
+  // 한 단위(조각 Fragment 등) 안에 행이 여럿이면 전부 — 첫 행만 보면 조각으로 감싼 tbody 에서 1개만 알렸다(반증 B4)
+  const walk = (node) => {
+    if (!React.isValidElement(node)) return;
+    if (node.type === 'tr') { const id = node.props?.['data-rowid']; if (id != null && id !== '') ids.push(String(id)); return; }
+    for (const k of React.Children.toArray(node.props?.children || [])) walk(k);
+  };
+  for (const node of list) walk(node);
+  return ids;
+}
+
 /** 다음 정렬 상태: 같은 열이면 asc→desc→해제, 다른 열이면 asc. */
 export function nextSortState(cur, col) {
   if (!cur || cur.col !== col) return { col, dir: 'asc' };
