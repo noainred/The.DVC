@@ -82,7 +82,7 @@
 | `availability/` | 1 | 205 | `availability/analyze.js` (2) | availability/analyze.js — 특수 기능 'VM 가용성(SLA)'(도구 키 `vm-availability`, v2.707 — C6) 판정(순수). |
 | `backup/` | 5 | 1,785 | `backup/settings.js` (4) | 백업 설정 + 스케줄러 + 변경 감시. |
 | `bareos/` | 56 | 15,326 | `bareos/settings.js` (14) | bareos/settings.js — Bareos 연동 설정(v2.820 · v2.823 법인별 Director). 파일: CONFIG_DIR/bareos.json (0600 · 원자적 쓰기 · 비밀 봉인). |
-| `bmcheck/` | 9 | 1,276 | `bmcheck/fw.js` (3) | bmcheck/fw.js — 물리서버 **펌웨어 기준선 대조**의 판정 코어(v3.45 · 설계 docs/design/bm-feature-proposals ②). 순수 — 파일 · 네트워크 없음. |
+| `bmcheck/` | 9 | 1,279 | `bmcheck/fw.js` (3) | bmcheck/fw.js — 물리서버 **펌웨어 기준선 대조**의 판정 코어(v3.45 · 설계 docs/design/bm-feature-proposals ②). 순수 — 파일 · 네트워크 없음. |
 | `bmfolders/` | 7 | 1,021 | `bmfolders/build.js` (2) | bmfolders/build.js — 물리서버 폴더 판정 · 집계(순수 — DB · 네트워크 · 저장소를 읽지 않는다. v2.984). |
 | `bmstor/` | 16 | 3,242 | `bmstor/registry.js` (16) | bmstor/registry.js — 베어메탈 스토리지 서버 목록 + 설정(v2.340). |
 | `bmusage/` | 111 | 25,938 | `bmusage/poller.js` (19) | bmusage/poller.js — 베어메탈 사용률 주기 수집(v2.550). |
@@ -115,7 +115,7 @@
 | `horizon/` | 11 | 2,696 | `horizon/horizon.js` (4) | Horizon Connection Server 연동 — 등록부 · 공용 로그인 세션 · 연결 테스트 · 라이선스 만료일 조회. |
 | `hostaccess/` | 4 | 657 | `hostaccess/service.js` (2) | hostaccess/service.js — 호스트 접근 제어 실행 계층(v2.485): 상태 조회 · 계획 · 적용(런타임) · 확정 · 되돌림. |
 | `hostcfg/` | 6 | 1,172 | `hostcfg/parse.js` (4) | 호스트 구성·보안(v2.699 — A1 보안 하드닝 · A9 구성 드리프트 · A11 재부팅 필요·빌드 불일치 · A12 호스트 인증서 만료). |
-| `idrac/` | 47 | 10,067 | `idrac/registry.js` (32) | iDRAC registry — the managed list of Dell servers whose power draw we collect |
+| `idrac/` | 47 | 10,121 | `idrac/registry.js` (32) | iDRAC registry — the managed list of Dell servers whose power draw we collect |
 | `insights/` | 29 | 11,134 | `insights/analysisServers.js` (18) | 서버 분석 공용 — iDRAC 등록부(중앙) + 위임 법인의 원격 인벤토리 병합·법인 귀속·필터(v2.579 에 |
 | `intro/` | 5 | 1,967 | `intro/support.js` (0) | GENERATED from dc-runtime/src/*.ts — do not edit. Rebuild with `cd dc-runtime && bun run build`. |
 | `inventory/` | 13 | 1,962 | `inventory/osKind.js` (3) | VM 게스트 OS 문자열 → 'windows' \| 'linux' \| 'other' \| null (v2.834 — Bareos 백업 대상 OS 구분). |
@@ -133,7 +133,7 @@
 | `net/` | 4 | 789 | `net/captureHistory.js` (5) | 네트워크 캡처 이력 저장소 — 캡처 결과의 메타·요약·진단을 CONFIG_DIR/capture-history.json에 |
 | `nsx/` | 6 | 1,134 | `nsx/store.js` (10) | In-memory NSX aggregator + poller. Mirrors the vCenter store design: each |
 | `overview/` | 1 | 170 | `overview/trend.js` (1) | overview/trend.js — 경영 보기 Overview 핵심 지표 추이(v2.670, 순수 모듈). |
-| `partfault/` | 16 | 3,532 | `partfault/db.js` (10) | partfault/db.js — 파트 장애 이력 DB(v2.547, 스키마 v2 는 v2.548). 파일 `part-faults.db`. |
+| `partfault/` | 16 | 3,541 | `partfault/db.js` (10) | partfault/db.js — 파트 장애 이력 DB(v2.547, 스키마 v2 는 v2.548). 파일 `part-faults.db`. |
 | `pdu/` | 11 | 2,181 | `pdu/poller.js` (6) | pdu/poller.js — PDU 주기 수집. |
 | `perf/` | 6 | 1,242 | `perf/monitor.js` (13) | perf/monitor.js — 서버 성능 측정기(v2.498). 요청 지연·이벤트 루프 정체·진행 중 요청을 **상시 O(1)** |
 | `periodic/` | 13 | 2,582 | `periodic/providers.js` (3) | periodic/providers.js — 라우트 안에만 있는 조립(백업 Summary · 미보호 VM · VM DNS)을 정기 점검 리더가 **그대로** 쓰게 하는 등록부. |
@@ -151,7 +151,7 @@
 | `routes/` | 182 | 57,936 | `routes/bmEvents.js` (1) | routes/bmEvents.js — 물리서버 장애 바로 받기(v3.52 · ⑬) — 장비(iDRAC)가 보내는 Redfish 이벤트를 받는다. **사용자 인증이 없다**(index.js 가 authMiddleware 없이 단다). |
 | `sanswitch/` | 51 | 11,672 | `sanswitch/registry.js` (12) | sanswitch/registry.js — SAN 스위치 등록부(v2.410). |
 | `search/` | 4 | 944 | `search/deepSearch.js` (3) | 심층 검색 — 다조건으로 VM을 검색한다. 1차는 스냅샷 기반(즉시): 게이트웨이·IP/서브넷·OS·전원· |
-| `security/` | 20 | 5,223 | `security/secretVault.js` (38) | secretVault.js — 설정 파일 자격증명(비밀번호·SSH 키·토큰)의 저장 방식(평문/암호화) 중앙 모듈(v2.296). |
+| `security/` | 20 | 5,224 | `security/secretVault.js` (38) | secretVault.js — 설정 파일 자격증명(비밀번호·SSH 키·토큰)의 저장 방식(평문/암호화) 중앙 모듈(v2.296). |
 | `servercmd/` | 2 | 437 | `servercmd/presets.js` (1) | servercmd/presets.js — 기능 ‘서버 명령 실행’ 의 **프리셋 목록 · 값 검사 · 명령 만들기 · 출력 다듬기**(순수 · 의존 없음 · v3.30 · 설계 docs/design/server-cmd ② · D2 · D3 · D11… |
 | `serverinfo/` | 4 | 462 | `serverinfo/service.js` (1) | serverinfo/service.js — 기능 ‘서버 정보’(설계 docs/design/server-access §4.1 안 C — 별도 기능 · 공통 코어를 불러 쓴다 · §4.5 · D3). |
 | `servicemap/` | 4 | 1,075 | `servicemap/store.js` (5) | servicemap/store.js — 서비스 인벤토리 저장소(v2.887, docs/design/service-map/README.md 시안 A 3차 + 4차 검토). |
@@ -185,7 +185,7 @@
 | `winrm/` | 3 | 553 | `winrm/client.js` (2) | winrm/client.js — WinRM HTTPS(5986) + NTLMv2 로 PowerShell 하나를 돌리고 출력을 받는다(서버 접속 3단계 · 설계 docs/design/server-access ④). |
 | `xferspeed/` | 7 | 2,005 | `xferspeed/schedule.js` (7) | xferspeed/schedule.js — 전송 속도 측정의 **실행 일정**(순수 — 파일·타이머 없음, v2.735). |
 
-디렉터리 108개 · 파일 1598개 · 371,155줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
+디렉터리 108개 · 파일 1598개 · 371,222줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
 <!-- arch-doc:modules:end -->
 
 ### 3-3. 라우트 그룹 → 게이트
