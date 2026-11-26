@@ -348,6 +348,15 @@
     ② `readBodyPrefix` 의 스트림이 아닌 응답 폴백은 본문 전체를 읽는다(undici 응답은 스트림이라 실사용 경로는 아니라고 본다 — 추정)
     ③ `listAudit` 가 요청 경로에서 감사 파일을 동기로 통째 읽는다 ④ 사양 변경 창 1440px 라벨 줄바꿈 · Summary 가상화율 창 400px 가로 스크롤(외형)
     ⑤ 1차의 ②(상대시각 사본)는 그대로다.
+- **서버 시험은 실제 설정 폴더(`server/config`)에 쓰지 않는다 — `npm test` 는 시험 파일마다 임시 설정 폴더를 준다**(2026-11-26 사용자 요청 "테스트가 설정 폴더에 쓰는 것도 고쳐줘"):
+  `CONFIG_DIR` 을 잡지 않은 시험이 config.js 기본값(`server/config/`)에 시험 데이터 12종을 남겼고(gitignore 대상이라 눈에 띄지 않는다), 같은 체크아웃에서 다시 돌리면
+  그 잔여 파일을 읽어 `arch2582` BUG-2 가 **두 번째 실행부터** 실패했다(CI 는 새 체크아웃이라 드러나지 않는다 — v3.41.1). 이제 `server/package.json` 의 test 명령이
+  `--import ./test/_isolateConfig.js` 를 붙인다 — node 시험 실행기가 **시험 파일마다 자식 프로세스에서** 그 파일을 먼저 불러와 `CONFIG_DIR` 이 없으면 빈 임시 폴더를 잡고
+  끝날 때 지운다(있으면 건드리지 않는다). ⚠ 시험 파일 하나를 직접 돌릴 때도 붙일 것: `cd server && node --test --import ./test/_isolateConfig.js --experimental-sqlite test/<파일>`.
+  · 등록부처럼 **로드 시 경로를 굳히는 모듈**(`const FILE = path.join(config.configDir, …)`)은 나중에 `config.configDir` 를 바꿔도 따라오지 않는다 — 시험이 폴더를 바꾸려면
+    프로젝트 모듈을 하나라도 불러오기 **전에** `process.env.CONFIG_DIR` 을 잡는다. · 자식 프로세스는 `{ ...process.env }` 로 띄울 것(env 를 새로 짜면 이 보호 밖이다).
+  회귀 `test/isolateConfig.test.js`.
+
 - **테스트가 띄운 프로세스를 PID 로 정리할 때는 소유를 확인하고 죽인다**(2026-10-26 PR #779 → v3.8.1 이식): `npm test` 는 파일을 병렬로 돌리므로, 로그에 남긴 PID 의
   프로세스가 이미 끝났다면 그 번호가 다른 테스트 파일의 자식에 재사용됐을 수 있다(이 컨테이너 `pid_max` 32768). 로그된 PID 를 무조건
   `process.kill` 하지 말 것 — 가짜 `ping` 은 `test/_fakePing.js`(`installFakePing(dir)` → `killOwned()`: exec 된 sleep 환경의
