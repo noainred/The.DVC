@@ -117,6 +117,11 @@ export function fieldValue(field, v) {
   if (field === 'lag') return v === 'yes' ? '채널 소속' : '단독';
   return String(v);
 }
+/** v3.53(D-8): 노드 툴팁의 MLAG · 층 근거 — mlagBy 'status' = 장비가 알린 MLAG 상태로 확인한 피어 · layerBy 'mlag' = MLAG 쌍과 채널 구성으로 정한 층. */
+export function topoNodeBasis(n) {
+  const peer = n?.mlagBy === 'status' ? ' · MLAG 피어(장비 상태로 확인)' : n?.mlagPeer ? ' · MLAG 피어(연결 모양으로 추정)' : '';
+  return `${peer}${n?.layerBy === 'mlag' ? ' · 층은 MLAG 쌍과 채널 구성으로 판단' : ''}`;
+}
 /**
  * 양끝 비교를 하지 않은 링크의 안내(v3.47 D-6): 양쪽 설명이 서로를 가리켜 한 줄로 합친 링크(descPair)는 상대 포트를 설명으로 짝지은 것이라 추정이고 양끝 비교를 하지 않는다.
  */
@@ -151,7 +156,7 @@ export function layoutNodes(nodes, { width = 1100, perRow = 10, rowGap = 120, ce
   }
   return { pos, height: Math.max(120, y), bands };
 }
-export const TOPO_NOTE = '링크는 **LLDP 이웃**으로 그립니다. 양쪽이 서로 본 링크는 실선, 한쪽만 본 링크 · 포트 설명으로만 가리킨 링크는 점선(추정)입니다. 층(스파인 · 리프)은 이웃 구성으로 **자동 추정**한 것입니다. 스위치가 아닌 이웃(서버 등)은 장비 아래 개수로만 보입니다.';
+export const TOPO_NOTE = '링크는 **LLDP 이웃**으로 그립니다. 양쪽이 서로 본 링크는 실선, 한쪽만 본 링크 · 포트 설명으로만 가리킨 링크는 점선(추정)입니다. 층(스파인 · 리프)은 이웃 구성으로 **자동 추정**한 것입니다 — 장비가 알린 MLAG 상태(피어 링크로 직접 연결된 쌍)와 채널 구성으로 가를 수 있으면 그것을 먼저 씁니다(장비 위에 올리면 근거가 보입니다). 스위치가 아닌 이웃(서버 등)은 장비 아래 개수로만 보입니다.';
 export const MISMATCH_NOTE = '두 끝 포트를 모두 아는 링크만 비교합니다(속도 · MTU · Duplex · 관리 상태 · 포트 채널 소속 · 설명이 가리키는 상대). 한쪽 값을 못 읽었으면 다름이 아니라 **비교 못 함**입니다.';
 
 /* ── ① 위치 찾기 ───────────────────────────────────────────────────────────────────────────────────────── */

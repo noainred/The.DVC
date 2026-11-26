@@ -12,6 +12,7 @@
  *   한쪽 값을 못 읽었으면 '비교 못 함'(na)이다 — 다름으로 세지 않는다.
  */
 import { deviceNameFromDesc, deviceNamesFromDesc, descPortsOf, descTokens, descMentions, stripIfSuffix, shortOf } from './portmap.js';
+import { mlagRoleOf } from './redundancy.js';
 
 const devKey = (a, c, k) => `${a}\u0000${c}\u0000${k}`;
 const lc = (s) => String(s ?? '').trim().toLowerCase();
@@ -193,6 +194,73 @@ export function compareEnds(pa, pb, { aName = '', bName = '', isSwitch = null } 
  *   hostNames: 가상화 호스트 짧은 이름(소문자) — 스위치 아닌 이웃의 종류(ESXi)를 가른다.
  */
 /**
+ * v3.53(D-8 — 사용자 선택 2026-11-26 'MLAG 상태로 피어 · 층 확정'): 장비가 알린 MLAG 상태(info.mlagStatus — v3.41 부품 주기)로 피어를 확정한다.
+ *   쌍 = 둘 다 state 'active' · 도메인이 같거나(둘 다 있을 때) · **LLDP 로 직접 연결된 포트가 그 장비의 피어 링크 채널(peerLink) 멤버**(한쪽 끝이면 된다).
+ *   도메인 ID 는 쌍마다 같은 값을 다시 쓰는 일이 흔해(예: 모든 리프 쌍이 'mlag') 도메인만으로는 쌍을 정하지 않는다. 한 장비에 후보가 둘 이상이면 정하지 않는다.
+ * @returns {Map<string,string>} id → 피어 id(양쪽 다 싣는다)
+ */
+function mlagPairs(links, roleOf, mlagOf, portRow) {
+  const active = (id) => roleOf(id) === 'active';   // 이중화 판정과 같은 글자 규칙(redundancy.mlagRoleOf)
+  const plOf = (id) => { const v = mlagOf(id)?.peerLink; return v ? normPort(v) : null; };
+  const onPeerLink = (id, port) => { const pl = plOf(id); if (!pl || !port) return false; const lag = portRow.get(`${id}\u0000${port}`)?.lag; return !!lag && normPort(lag) === pl; };
+  const cands = new Map();
+  for (const l of links.values()) {
+    if (l.kind === 'desc' || !active(l.a) || !active(l.b)) continue;
+    const da = mlagOf(l.a)?.domain; const db = mlagOf(l.b)?.domain;
+    if (da && db && String(da) !== String(db)) continue;
+    if (!onPeerLink(l.a, l.aPort) && !onPeerLink(l.b, l.bPort)) continue;
+    for (const [x, y] of [[l.a, l.b], [l.b, l.a]]) { if (!cands.has(x)) cands.set(x, new Set()); cands.get(x).add(y); }
+  }
+  const out = new Map();
+  for (const [x, set] of cands) {
+    if (set.size !== 1) continue;
+    const y = [...set][0];
+    if (cands.get(y)?.size === 1 && cands.get(y).has(x)) out.set(x, y);
+  }
+  return out;
+}
+/**
+ * v3.53(D-8): 연결 모양만으로 **위아래가 뒤집힌** 리프-스파인 구성을 MLAG 상태로 바로잡는다(반증 F2 · F3 뒤 다시 설계 — 좁게).
+ *   고치는 것은 이 모양뿐: 확정 MLAG 쌍 P 가 예전 판정에서 '스파인' 이고, 그 이웃 N(LLDP 링크로 이어진 스위치)이 모두
+ *   MLAG 를 '끔' 으로 알렸고(상태를 읽었다) · 모양 추정 피어가 없고 · 서버 이웃이 없고 · 예전 판정이 스파인이 아니며 · **P 의 두 장비 모두와** 이어졌고,
+ *   그 링크의 양 끝 포트가 모두 채널 밖('' — 소속을 읽었다)일 때 → P = 리프 · N = 스파인(라우팅 업링크의 리프 MLAG 쌍 — Arista 리프-스파인의 기본 모양).
+ *   채널을 '위층' 근거로 쓰지 않는다(MLAG 쌍은 아래로 채널을 내주기도 위로 이중 업링크를 올리기도 하고, 장비 하나의 LACP 묶음도 채널이다 — 반증 F2 · F3).
+ *   양쪽 다 MLAG 쌍인 구성은 고치지 않는다(남은 한계).
+ * @returns {Map<string,'leaf'|'spine'>}
+ */
+function mlagLayerOf({ confirmed, linksByDev, peerOf, hostsOf, portRow, roleOf, baseLayer }) {
+  const lagOf = (id, port) => (port ? portRow.get(`${id}\u0000${port}`)?.lag : undefined);
+  const groups = [];
+  const seen = new Set();
+  for (const [x, y] of confirmed) {
+    const pk = x < y ? `${x}\u0002${y}` : `${y}\u0002${x}`;
+    if (seen.has(pk)) continue; seen.add(pk);
+    if (hostsOf(x) || hostsOf(y) || baseLayer(x) !== 'spine' || baseLayer(y) !== 'spine') continue;
+    const touch = new Map();   // n → Set(x|y)
+    let ok = true;
+    for (const me of [x, y]) {
+      for (const l of linksByDev.get(me) || []) {
+        if (l.kind === 'desc') continue;
+        const [myPort, other, otherPort] = l.a === me ? [l.aPort, l.b, l.bPort] : [l.bPort, l.a, l.aPort];
+        if (other === x || other === y) continue;
+        if (lagOf(me, myPort) !== '' || (otherPort && lagOf(other, otherPort) !== '')) { ok = false; break; }
+        if (!touch.has(other)) touch.set(other, new Set());
+        touch.get(other).add(me);
+      }
+      if (!ok) break;
+    }
+    if (!ok || !touch.size) continue;
+    const N = [...touch.keys()];
+    if (N.some((n) => touch.get(n).size !== 2 || confirmed.has(n) || peerOf.has(n) || roleOf(n) !== 'off' || hostsOf(n) || baseLayer(n) === 'spine')) continue;
+    groups.push({ leaf: [x, y], spine: N });
+  }
+  // 판정이 엇갈릴 수 없다: 리프로 정하는 것은 확정 쌍 장비뿐이고, 스파인으로 정하는 N 은 확정 쌍 장비를 받지 않는다(반증 F7 — 옛 규칙의 엇갈림은 이 설계에서 생기지 않는다).
+  const out = new Map();
+  for (const g of groups) { for (const id of g.leaf) out.set(id, 'leaf'); for (const id of g.spine) out.set(id, 'spine'); }
+  return out;
+}
+
+/**
  * v3.47(결정 D-6 — 사용자 선택): 두 스위치가 **서로를** 포트 설명으로 가리키면 한 줄로 합친다 — 단 **양쪽에 그런 포트가 하나씩만** 있을 때만.
  *   둘 이상이면(케이블 여러 가닥) 어느 포트끼리 이어졌는지 코드가 알 수 없어 짝을 지어내게 되므로 지금처럼 따로 둔다.
  *   합친 줄도 추정(kind 'desc' · descPair)이다 — 양끝 비교는 하지 않는다(LLDP 가 끝을 확인한 링크만 비교한다).
@@ -330,8 +398,24 @@ export function buildTopology({ devices = [], lldp = [], lldpMeta = new Map(), p
     const tops = c.filter((e) => e[1] === top);
     return tops.length === 1 ? tops[0][0] : null;
   };
-  const peerOf = new Map();
-  for (const u of cand.keys()) { const v = bestOf(u); if (v != null && bestOf(v) === u) peerOf.set(u, v); }
+  // v3.53(D-8 — MLAG 상태로 확정): 장비가 알린 MLAG 상태로 피어를 먼저 정한다(mlagPairs — 둘 다 active · 도메인 같음 · 피어 링크 채널 멤버 포트로 직접 연결).
+  //   MLAG 를 'disabled' 로 알린 장비는 모양 추정 피어에서도 뺀다(쓰지 않는다고 장비가 말했다). 나머지만 예전 모양 추정.
+  const mlagOf = (id) => { const ms = byId.get(id)?.info?.mlagStatus; return ms && typeof ms === 'object' ? ms : null; };
+  const roleOf = (id) => mlagRoleOf(mlagOf(id));
+  // 장비별 링크 색인(반증 F1: 쌍마다 전체 링크를 다시 훑어 1,500대에서 +131~414ms) — 한 번 만든다
+  const linksByDev = new Map();
+  for (const l of links.values()) for (const id of [l.a, l.b]) { if (!linksByDev.has(id)) linksByDev.set(id, []); linksByDev.get(id).push(l); }
+  const confirmed = mlagPairs(links, roleOf, mlagOf, portRow);
+  // 층 추정용 짝 = 확정 쌍 + 나머지는 **예전 모양 추정 그대로**(반증 F6: 'disabled' 장비를 층용 짝에서도 뺐더니 MLAG 를 안 쓰는 직접 연결 리프 쌍의 층이 바뀌었다 — 3,000 구성 중 429).
+  //   'disabled' 는 화면의 피어 표시(mlagPeer)에서만 뺀다.
+  const peerOf = new Map(confirmed);
+  for (const u of cand.keys()) {
+    if (confirmed.has(u)) continue;
+    const v = bestOf(u);
+    // 모양 추정 쌍은 양쪽에서 한 번씩 적힌다(u → v, 나중에 v → u) — 확정 쌍 장비와는 짝짓지 않는다
+    if (v != null && bestOf(v) === u && !confirmed.has(v)) peerOf.set(u, v);
+  }
+  const showPeer = (id) => confirmed.has(id) || (peerOf.has(id) && roleOf(id) !== 'off' && roleOf(peerOf.get(id)) !== 'off');
   const degFull = (id) => swNb.get(id)?.size || 0;
   const nbsOf = (id) => [...(swNb.get(id) || [])].filter((z) => z !== peerOf.get(id));
   const hostsOf = (id) => { const o = others.get(id); return o ? o.esxi + o.other : 0; };
@@ -346,14 +430,15 @@ export function buildTopology({ devices = [], lldp = [], lldpMeta = new Map(), p
     if (nbs.length && nbs.every((n) => spines.has(n) && degFull(n) > nbs.length)) return 'leaf';
     return spines.has(id) ? 'spine' : 'other';
   };
+  const mlagLayer = mlagLayerOf({ confirmed, linksByDev, peerOf, hostsOf, portRow, roleOf, baseLayer: layerOf });
   const nodes = devices.map((d) => {
     const id = devKey(d.agent, d.cvpId, d.key);
     const oth = others.get(id) || { esxi: 0, other: 0 };
     const m = lldpMeta.get(id);
-    const layer = layerOf(id);
+    const layer = mlagLayer.get(id) || layerOf(id);
     return { id, agent: d.agent, cvpId: d.cvpId, key: d.key, hostname: d.hostname || d.key, model: d.model || '', corpName: d.corpName || '',
       // v3.42(2회차 F6): 화면의 '스위치 이웃' 은 MLAG 피어를 포함한 실제 수(층 추정만 피어를 뺀 차수를 쓴다) · 피어는 따로 싣는다.
-      layer, switchNeighbors: swNb.get(id)?.size || 0, mlagPeer: peerOf.has(id), esxi: oth.esxi, otherNeighbors: oth.other, lldpRead: !!(m && m.at != null), lldpAt: m?.at ?? null, lldpFailing: !!m?.failing };
+      layer, ...(mlagLayer.has(id) ? { layerBy: 'mlag' } : {}), switchNeighbors: swNb.get(id)?.size || 0, mlagPeer: showPeer(id), ...(confirmed.has(id) ? { mlagBy: 'status' } : {}), esxi: oth.esxi, otherNeighbors: oth.other, lldpRead: !!(m && m.at != null), lldpAt: m?.at ?? null, lldpFailing: !!m?.failing };
   });
   // 링크 출력 + 불일치
   const out = [];
