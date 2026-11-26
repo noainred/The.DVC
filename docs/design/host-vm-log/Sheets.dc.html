@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>서버별 Excel 파일 — 시트마다 모습</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.5}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums}
+.muted{color:#8b9bb4}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.card h2{margin:0;font-size:15px;font-weight:700}
+/* 엑셀 창(밝은 면) */
+.book{background:#f8fafc;color:#0f172a;border-radius:8px;overflow:hidden;border:1px solid #243049;display:flex;flex-direction:column}
+.bar{padding:8px 12px;background:#1e293b;color:#e2e8f0;font-size:12px;display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center}
+.body{padding:14px;display:flex;flex-direction:column;gap:12px;min-height:820px}
+.ttl{font-size:16px;font-weight:800;color:#0f172a}
+.sub{font-size:12px;color:#334155}
+.nav{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:12px}
+.lnk{background:none;border:0;padding:0;font:inherit;color:#1d4ed8;text-decoration:underline;cursor:pointer}
+.lnk.dis{color:#475569;text-decoration:none;cursor:default}
+.xl{border-collapse:collapse;width:100%;font-size:12px}
+.xl th{background:#e2e8f0;color:#0f172a;font-weight:700;text-align:left;padding:5px 8px;border:1px solid #cbd5e1;white-space:nowrap}
+.xl td{padding:5px 8px;border:1px solid #d5dbe5;white-space:nowrap;color:#0f172a}
+.xl td.num,.xl th.num{text-align:right}
+.xl tr.sum td{font-weight:700;background:#eef2f7}
+.xl tr.offrow td{background:#f1f5f9;color:#334155}
+.xl td.bad{color:#b91c1c;font-weight:700}
+.xl td.warn{color:#92400e;font-weight:700}
+.kpi{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));border:1px solid #cbd5e1}
+.kpi div{padding:6px 10px;border-left:1px solid #cbd5e1;display:flex;flex-direction:column;gap:1px;min-width:0}
+.kpi div:first-child{border-left:0}
+.kpi .k{font-size:11px;color:#334155}
+.kpi .v{font-size:15px;font-weight:800;color:#0f172a}
+.kpi .v.bad{color:#b91c1c}
+.sec{font-size:12px;font-weight:700;color:#0f172a;margin-top:4px}
+.note{font-size:12px;color:#334155}
+.tabs{display:flex;flex-wrap:wrap;gap:2px;padding:6px 8px 0;background:#cbd5e1}
+.tab{height:30px;padding:0 11px;font:inherit;font-size:11.5px;border:0;border-radius:6px 6px 0 0;background:#e2e8f0;color:#334155;white-space:nowrap;cursor:pointer}
+.tab.on{background:#f8fafc;color:#0f172a;font-weight:700;box-shadow:inset 0 -2px 0 #1d4ed8}
+/* 오른쪽 목차 */
+.toc{border-collapse:collapse;width:100%;font-size:12.5px}
+.toc th{text-align:left;font-size:11.5px;color:#8b9bb4;font-weight:700;padding:6px 8px;border-bottom:1px solid #243049;white-space:nowrap}
+.toc td{padding:7px 8px;border-bottom:1px solid #1f2a40;vertical-align:top}
+.toc td.num,.toc th.num{text-align:right}
+.tocb{background:none;border:0;padding:0;font:inherit;color:#93c5fd;text-decoration:underline;cursor:pointer;text-align:left}
+.tocb.on{color:#e6edf6;font-weight:700;text-decoration:none}
+</style>
+</helmet>
+<div style="box-sizing:border-box;width:1440px;min-height:1320px;padding:28px;background:#0a0e17;display:flex;flex-direction:column;gap:16px">
+  <div style="display:flex;flex-direction:column;gap:4px">
+    <h1 style="margin:0;font-size:18px;font-weight:800">서버별 Excel 파일 — 시트마다 이렇게 보입니다</h1>
+    <div class="muted">아래 시트 탭(또는 오른쪽 목록)을 누르면 그 시트가 열립니다. 조건: 클러스터 PL-PROD-A 6대 · 기록 시각 11-26 14:00 · 꺼진 VM 포함 · ‘지금’ 열 포함.</div>
+  </div>
+
+  <div style="display:flex;gap:16px;align-items:flex-start">
+
+    <!-- 엑셀 창 -->
+    <div class="book" style="flex:1;min-width:0">
+      <div class="bar"><b class="mono">호스트별VM기록_PL-PROD-A_2026-11-26_1400.xlsx</b><span>시트 10장 · 첫 행 고정 · 자동 필터 · 수식 없음</span></div>
+
+      <div class="body">
+
+        <!-- 요약 -->
+        <sc-if value="{{ isSum }}" hint-placeholder-val="{{ false }}">
+          <div class="ttl">호스트별 VM 기록 — 요약</div>
+          <table class="xl" style="width:auto">
+            <tbody>
+              <tr><th>묶는 기준</th><td>서버별(호스트마다 한 장)</td></tr>
+              <tr><th>대상</th><td>VC-PL1 › PL-PROD-A · 호스트 6대</td></tr>
+              <tr><th>기록 시각</th><td>2026-11-26 14:00 (포탈 시각 · KST)</td></tr>
+              <tr><th>‘지금’ 열의 기준</th><td>2026-11-26 14:52 — 이 파일을 내려받은 순간. 그 뒤에 달라진 것은 담기지 않습니다</td></tr>
+              <tr><th>기록 없는 호스트</th><td>0</td></tr>
+              <tr><th>내려받은 사람</th><td>[계정 이름]</td></tr>
+            </tbody>
+          </table>
+          <div class="kpi">
+            <div><span class="k">호스트</span><span class="v">6</span></div>
+            <div><span class="k">그때 구동 VM</span><span class="v">{{ tOn }}</span></div>
+            <div><span class="k">그때 꺼진 VM</span><span class="v">{{ tOff }}</span></div>
+            <div><span class="k">vCPU 합</span><span class="v">{{ tCpu }}</span></div>
+            <div><span class="k">메모리 합(GB)</span><span class="v">{{ tMem }}</span></div>
+            <div><span class="k">지금 확인할 VM</span><span class="v bad">7</span></div>
+          </div>
+          <div class="sec">확인할 것 — 그때 구동 중이었는데 지금 구동 중이 아닌 VM (호스트 이름 = 그 시트로)</div>
+          <table class="xl">
+            <thead><tr><th>VM</th><th>그때 호스트</th><th>IP</th><th class="num">vCPU</th><th class="num">메모리(GB)</th><th>지금 위치</th><th>지금 상태</th></tr></thead>
+            <tbody>
+              <sc-for list="{{ checkRows }}" as="r" hint-placeholder-count="7">
+                <tr><td>{{ r.name }}</td><td><button type="button" class="lnk" onClick="{{ r.pick }}">esx-pl1-04</button></td><td>{{ r.ip }}</td><td class="num">{{ r.cpu }}</td><td class="num">{{ r.mem }}</td><td>{{ r.nowHost }}</td><td class="{{ r.nowCls }}">{{ r.now }}</td></tr>
+              </sc-for>
+            </tbody>
+          </table>
+        </sc-if>
+
+        <!-- 호스트 목록 -->
+        <sc-if value="{{ isList }}" hint-placeholder-val="{{ false }}">
+          <div class="ttl">호스트 목록</div>
+          <div class="sub">한 줄 = 호스트 1대 · 호스트 이름을 누르면 그 호스트 시트로 갑니다 · 기록 시각 2026-11-26 14:00</div>
+          <table class="xl">
+            <thead><tr><th>호스트</th><th>vCenter</th><th>클러스터</th><th>그때 상태</th><th class="num">구동 VM</th><th class="num">꺼진 VM</th><th class="num">vCPU 합</th><th class="num">메모리 합(GB)</th><th>지금 상태</th></tr></thead>
+            <tbody>
+              <sc-for list="{{ listRows }}" as="h" hint-placeholder-count="6">
+                <tr><td><button type="button" class="lnk" onClick="{{ h.pick }}">{{ h.name }}</button></td><td>VC-PL1</td><td>PL-PROD-A</td><td>연결됨</td><td class="num">{{ h.on }}</td><td class="num">{{ h.off }}</td><td class="num">{{ h.cpu }}</td><td class="num">{{ h.mem }}</td><td class="{{ h.nowCls }}">{{ h.now }}</td></tr>
+              </sc-for>
+              <tr class="sum"><td>합계</td><td></td><td></td><td></td><td class="num">{{ tOn }}</td><td class="num">{{ tOff }}</td><td class="num">{{ tCpu }}</td><td class="num">{{ tMem }}</td><td></td></tr>
+            </tbody>
+          </table>
+        </sc-if>
+
+        <!-- 호스트 시트 -->
+        <sc-if value="{{ isHost }}" hint-placeholder-val="{{ true }}">
+          <div class="nav">
+            <button type="button" class="lnk" onClick="{{ goList }}">← 호스트 목록</button>
+            <button type="button" class="lnk {{ prevCls }}" onClick="{{ goPrev }}">◀ 이전 {{ prevLabel }}</button>
+            <button type="button" class="lnk {{ nextCls }}" onClick="{{ goNext }}">다음 {{ nextLabel }} ▶</button>
+          </div>
+          <div>
+            <div class="ttl mono">{{ hostName }}</div>
+            <div class="sub">VC-PL1 › PL-PROD-A · 기록 시각 2026-11-26 14:00 · ‘지금’ 열 기준 2026-11-26 14:52</div>
+          </div>
+          <div class="kpi">
+            <div><span class="k">그때 상태</span><span class="v">연결됨</span></div>
+            <div><span class="k">구동 VM</span><span class="v">{{ hostOn }}</span></div>
+            <div><span class="k">꺼진 VM</span><span class="v">{{ hostOff }}</span></div>
+            <div><span class="k">vCPU 합(구동)</span><span class="v">{{ hostCpu }}</span></div>
+            <div><span class="k">메모리 합(구동 · GB)</span><span class="v">{{ hostMem }}</span></div>
+            <div><span class="k">지금 상태</span><span class="v {{ hostNowCls }}">{{ hostNow }}</span></div>
+          </div>
+          <table class="xl">
+            <thead><tr><th>VM</th><th>그때 전원</th><th>IP</th><th>게스트 OS</th><th class="num">vCPU</th><th class="num">메모리(GB)</th><th>이 호스트에 온 시각</th><th>지금 위치</th><th>지금 상태</th></tr></thead>
+            <tbody>
+              <sc-for list="{{ hostRows }}" as="r" hint-placeholder-count="18">
+                <tr class="{{ r.cls }}"><td>{{ r.name }}</td><td>{{ r.power }}</td><td>{{ r.ip }}</td><td>{{ r.os }}</td><td class="num">{{ r.cpu }}</td><td class="num">{{ r.mem }}</td><td>{{ r.since }}</td><td>{{ r.nowHost }}</td><td class="{{ r.nowCls }}">{{ r.now }}</td></tr>
+              </sc-for>
+            </tbody>
+          </table>
+          <div class="note">줄 순서: 지금 확인할 VM → 구동 중 → 그때 꺼져 있던 VM(회색 줄). 합계에는 구동 VM 만 셉니다.</div>
+        </sc-if>
+
+        <!-- 전체 목록 -->
+        <sc-if value="{{ isAll }}" hint-placeholder-val="{{ false }}">
+          <div class="ttl">전체 목록</div>
+          <div class="sub">모든 호스트의 VM 을 한 장에 — 호스트 열로 필터 · 피벗. CSV 로 받으면 이 표가 나옵니다</div>
+          <table class="xl">
+            <thead><tr><th>호스트</th><th>VM</th><th>그때 전원</th><th>IP</th><th>게스트 OS</th><th class="num">vCPU</th><th class="num">메모리(GB)</th><th>이 호스트에 온 시각</th><th>지금 위치</th><th>지금 상태</th></tr></thead>
+            <tbody>
+              <sc-for list="{{ allRows }}" as="r" hint-placeholder-count="16">
+                <tr class="{{ r.cls }}"><td>{{ r.host }}</td><td>{{ r.name }}</td><td>{{ r.power }}</td><td>{{ r.ip }}</td><td>{{ r.os }}</td><td class="num">{{ r.cpu }}</td><td class="num">{{ r.mem }}</td><td>{{ r.since }}</td><td>{{ r.nowHost }}</td><td class="{{ r.nowCls }}">{{ r.now }}</td></tr>
+              </sc-for>
+            </tbody>
+          </table>
+          <div class="note">… {{ allMore }}줄 더 · 모두 {{ allTotal }}줄(호스트 순서 → 호스트 시트와 같은 줄 순서)</div>
+        </sc-if>
+
+        <!-- 읽는 법 -->
+        <sc-if value="{{ isGuide }}" hint-placeholder-val="{{ false }}">
+          <div class="ttl">읽는 법</div>
+          <table class="xl">
+            <tbody>
+              <tr><th>시트</th><td>요약 · 호스트 목록 · 호스트마다 한 장 · 전체 목록 · 읽는 법</td></tr>
+              <tr><th>시트 이름</th><td>호스트 이름의 첫 마디(esx-pl1-04.corp.example → esx-pl1-04) · 겹치면 전체 이름 · 31자까지</td></tr>
+              <tr><th>이동</th><td>호스트 목록의 호스트 이름 · 요약 ‘확인할 것’ 의 호스트 = 그 시트로 · 호스트 시트 맨 위 ‘← 호스트 목록’ · ‘◀ 이전 / 다음 ▶’</td></tr>
+              <tr><th>기록 시각</th><td>매시 정각에 남긴 기록입니다. 정각과 정각 사이에 들어왔다 나간 VM 은 없습니다</td></tr>
+              <tr><th>그때 · 지금</th><td>‘그때’ 칸 = 기록 시각의 값 · ‘지금’ 칸 = 파일을 내려받은 순간의 값(요약에 그 시각)</td></tr>
+              <tr><th>지금 상태</th><td>구동 중 · 꺼짐 · 응답 없음(호스트가 끊긴 채 그 호스트에 남음) · 인벤토리에 없음 · 모름(vCenter 를 읽지 못함)</td></tr>
+              <tr><th>—</th><td>값을 읽지 못했습니다(0 으로 쓰지 않습니다)</td></tr>
+              <tr><th>기록 없는 호스트</th><td>그 시각 vCenter 를 읽지 못한 호스트는 시트를 만들되 ‘이 시각 기록 없음’ 한 줄만 적습니다(빈 표 = VM 0대 로 읽히지 않게)</td></tr>
+              <tr><th>색</th><td>빨강 글자 = 응답 없음 · 연결 끊김 / 회색 줄 = 그때 꺼져 있던 VM. 값은 그대로 두고 색만 입혔습니다</td></tr>
+            </tbody>
+          </table>
+        </sc-if>
+
+      </div>
+
+      <div class="tabs" role="group" aria-label="시트 탭">
+        <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="10">
+          <button type="button" class="tab {{ t.cls }}" onClick="{{ t.pick }}">{{ t.label }}</button>
+        </sc-for>
+      </div>
+    </div>
+
+    <!-- 시트 목차 -->
+    <aside class="card" style="flex:0 0 400px">
+      <h2>시트 10장</h2>
+      <table class="toc">
+        <thead><tr><th>시트</th><th>한 줄이 뜻하는 것</th><th class="num">줄 수</th></tr></thead>
+        <tbody>
+          <sc-for list="{{ tocRows }}" as="t" hint-placeholder-count="10">
+            <tr><td><button type="button" class="tocb {{ t.cls }}" onClick="{{ t.pick }}">{{ t.label }}</button></td><td class="muted">{{ t.desc }}</td><td class="num mono">{{ t.n }}</td></tr>
+          </sc-for>
+        </tbody>
+      </table>
+      <div class="muted" style="font-size:12.5px">호스트 시트 6장의 줄 수 합 = 전체 목록의 줄 수(같은 VM 을 두 가지 모양으로 싣습니다).</div>
+      <div class="muted" style="font-size:12.5px;border-top:1px solid #1f2a40;padding-top:10px">호스트가 많아 시트가 너무 늘어나는 조건이면 호스트 시트 대신 <b style="color:#e6edf6">클러스터마다 한 장</b>으로 바뀝니다 — 그때는 시트 안에 호스트 이름 띠로 구역을 나누고, 호스트 목록의 링크는 그 구역으로 갑니다.</div>
+      <div class="muted" style="font-size:12.5px">여러 날을 고르면 호스트 시트 안에 날짜 구역이 위에서 아래로 쌓입니다(하루 한 번 · 고른 시각).</div>
+    </aside>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1320}}'>
+class Component extends DCLogic {
+renderVals() {
+  var self = this;
+  var tab = (this.state && this.state.tab) || 'esx-pl1-04';
+  var go = function (k) { return function () { self.setState({ tab: k }); }; };
+  var noop = function () {};
+  var OS = ['Red Hat Enterprise Linux 8', 'Windows Server 2019', 'Rocky Linux 9', 'Ubuntu 22.04', 'Windows Server 2022', 'Oracle Linux 8'];
+  var PRE = ['web', 'app', 'db', 'api', 'batch', 'mq', 'cache', 'log', 'ci', 'file', 'mail', 'proxy', 'auth', 'rpt', 'etl', 'dev', 'qa', 'mon', 'sec'];
+  var SINCE = ['2026-11-02 09:00', '2026-11-02 09:00', '2026-11-09 14:00', '2026-11-02 09:00', '2026-11-18 03:00', '2026-11-22 21:00'];
+  var gen = function (no, cpus, mems, offN) {
+    var host = 'esx-pl1-0' + no, rows = [], i, j;
+    for (i = 0; i < cpus.length; i++) {
+      rows.push({ name: PRE[i] + '-pl1-' + no + (i < 9 ? '0' : '') + (i + 1), power: '켜짐', ip: '10.48.' + (10 + no) + '.' + (21 + i), os: OS[(i + no) % OS.length], cpu: cpus[i], mem: mems[i], since: SINCE[(i * 5 + no) % SINCE.length], nowHost: host, now: '구동 중', cls: '', nowCls: '' });
+    }
+    for (j = 0; j < offN; j++) {
+      rows.push({ name: 'old-pl1-' + no + '0' + (j + 1), power: '꺼짐', ip: '—', os: OS[(j + 2) % OS.length], cpu: 2, mem: 4, since: '2026-11-02 09:00', nowHost: host, now: '꺼짐', cls: 'offrow', nowCls: '' });
+    }
+    return rows;
+  };
+  var h4raw = [
+    ['db-pl1-ora01', '10.48.12.21', 'Oracle Linux 8', 16, 128, '2026-11-02 09:00', 'esx-pl1-04', '응답 없음', 'bad'],
+    ['db-pl1-ora02', '10.48.12.22', 'Oracle Linux 8', 16, 128, '2026-11-02 09:00', 'esx-pl1-04', '응답 없음', 'bad'],
+    ['mes-pl1-db01', '10.48.12.43', 'Red Hat Enterprise Linux 8', 8, 64, '2026-11-02 09:00', 'esx-pl1-04', '응답 없음', 'bad'],
+    ['bkp-pl1-proxy01', '10.48.30.21', 'Rocky Linux 9', 8, 16, '2026-11-02 09:00', 'esx-pl1-04', '응답 없음', 'bad'],
+    ['plc-pl1-gw01', '10.48.50.11', 'Windows 10', 4, 8, '2026-11-02 09:00', 'esx-pl1-04', '응답 없음', 'bad'],
+    ['print-pl1-01', '10.48.20.31', 'Windows Server 2016', 2, 8, '2026-11-02 09:00', 'esx-pl1-05', '꺼짐', 'warn'],
+    ['lab-pl1-test07', '—', 'Ubuntu 20.04', 2, 4, '2026-11-25 16:00', '—', '인벤토리에 없음', 'warn'],
+    ['erp-pl1-app01', '10.48.10.31', 'Windows Server 2019', 8, 32, '2026-11-19 22:00', 'esx-pl1-02', '구동 중', ''],
+    ['erp-pl1-app02', '10.48.10.32', 'Windows Server 2019', 8, 32, '2026-11-19 22:00', 'esx-pl1-03', '구동 중', ''],
+    ['mes-pl1-web01', '10.48.10.41', 'Red Hat Enterprise Linux 8', 4, 16, '2026-11-24 03:00', 'esx-pl1-02', '구동 중', ''],
+    ['mes-pl1-web02', '10.48.10.42', 'Red Hat Enterprise Linux 8', 4, 16, '2026-11-26 13:00', 'esx-pl1-05', '구동 중', ''],
+    ['ad-pl1-dc02', '10.48.1.12', 'Windows Server 2022', 4, 16, '2026-10-28 09:00', 'esx-pl1-06', '구동 중', ''],
+    ['file-pl1-01', '10.48.20.11', 'Windows Server 2019', 4, 16, '2026-11-02 09:00', 'esx-pl1-03', '구동 중', ''],
+    ['mon-pl1-zbx01', '10.48.1.51', 'Rocky Linux 9', 4, 8, '2026-11-11 14:00', 'esx-pl1-05', '구동 중', ''],
+    ['vdi-pl1-cs01', '10.48.40.11', 'Windows Server 2019', 4, 16, '2026-11-20 10:00', 'esx-pl1-02', '구동 중', ''],
+    ['vdi-pl1-uag01', '10.48.40.21', 'VMware Photon OS', 2, 4, '2026-11-20 10:00', 'esx-pl1-06', '구동 중', ''],
+    ['scm-pl1-git01', '10.48.10.61', 'Ubuntu 22.04', 4, 16, '2026-11-26 13:00', 'esx-pl1-03', '구동 중', ''],
+    ['wms-pl1-app01', '10.48.10.71', 'Red Hat Enterprise Linux 8', 8, 32, '2026-11-21 08:00', 'esx-pl1-02', '구동 중', '']
+  ];
+  var h4 = h4raw.map(function (x) { return { name: x[0], power: '켜짐', ip: x[1], os: x[2], cpu: x[3], mem: x[4], since: x[5], nowHost: x[6], now: x[7], nowCls: x[8], cls: '' }; });
+  ['old-pl1-erp-bak', 'tst-pl1-ci01', 'mig-pl1-file00'].forEach(function (n, i) {
+    h4.push({ name: n, power: '꺼짐', ip: '—', os: OS[(i + 1) % OS.length], cpu: 2, mem: 4, since: '2026-11-02 09:00', nowHost: 'esx-pl1-04', now: '응답 없음', nowCls: '', cls: 'offrow' });
+  });
+  var h5 = gen(5, [16, 8, 8, 8, 8, 8, 4, 4, 4, 4, 4, 2, 2, 2, 2], [64, 64, 64, 32, 32, 32, 16, 16, 16, 16, 8, 8, 8, 4, 4], 2);
+  h5[8].name = 'tst-pl1-ci03'; h5[8].since = '2026-11-26 13:00';
+  var hosts = [
+    { name: 'esx-pl1-01', now: '연결됨', nowCls: '', rows: gen(1, [16, 16, 8, 8, 8, 8, 4, 4, 4, 4, 4, 4, 2, 2, 2, 2], [128, 64, 64, 32, 32, 32, 16, 16, 16, 8, 8, 8, 8, 8, 4, 4], 2) },
+    { name: 'esx-pl1-02', now: '연결됨', nowCls: '', rows: gen(2, [16, 16, 8, 8, 8, 8, 8, 8, 4, 4, 4, 4, 4, 4, 4, 4, 2, 2, 2], [128, 64, 64, 32, 32, 32, 32, 16, 16, 16, 16, 16, 8, 8, 8, 8, 8, 4, 4], 1) },
+    { name: 'esx-pl1-03', now: '연결됨', nowCls: '', rows: gen(3, [16, 16, 8, 8, 8, 8, 8, 4, 4, 4, 4, 4, 2, 2, 2, 2, 2], [128, 64, 64, 64, 32, 32, 16, 16, 16, 8, 8, 8, 8, 4, 4, 4, 4], 0) },
+    { name: 'esx-pl1-04', now: '연결 끊김', nowCls: 'bad', rows: h4 },
+    { name: 'esx-pl1-05', now: '연결됨', nowCls: '', rows: h5 },
+    { name: 'esx-pl1-06', now: '연결됨', nowCls: '', rows: gen(6, [16, 8, 8, 8, 8, 4, 4, 4, 4, 4, 2, 2, 2, 2], [64, 64, 64, 32, 32, 32, 16, 16, 8, 8, 8, 4, 2, 2], 1) }
+  ];
+  var tOn = 0, tOff = 0, tCpu = 0, tMem = 0, all = [];
+  hosts.forEach(function (h) {
+    h.on = 0; h.off = 0; h.cpu = 0; h.mem = 0;
+    h.rows.forEach(function (r) {
+      if (r.power === '켜짐') { h.on += 1; h.cpu += r.cpu; h.mem += r.mem; } else { h.off += 1; }
+      all.push({ host: h.name, name: r.name, power: r.power, ip: r.ip, os: r.os, cpu: r.cpu, mem: r.mem, since: r.since, nowHost: r.nowHost, now: r.now, nowCls: r.nowCls, cls: r.cls });
+    });
+    tOn += h.on; tOff += h.off; tCpu += h.cpu; tMem += h.mem;
+  });
+  var idx = -1;
+  hosts.forEach(function (h, i) { if (h.name === tab) idx = i; });
+  var isHost = idx >= 0;
+  var cur = hosts[isHost ? idx : 3];
+  var prev = isHost && idx > 0 ? hosts[idx - 1] : null;
+  var next = isHost && idx < hosts.length - 1 ? hosts[idx + 1] : null;
+  var defs = [['sum', '요약', '조건 · 합계 · 확인할 것', '—'], ['list', '호스트 목록', '호스트 1대', String(hosts.length)]];
+  hosts.forEach(function (h) { defs.push([h.name, h.name, 'VM 1대(그 호스트)', String(h.rows.length)]); });
+  defs.push(['all', '전체 목록', 'VM 1대(호스트 열 포함)', String(all.length)]);
+  defs.push(['guide', '읽는 법', '표기 · 기준 시각 · 색', '—']);
+  var tabs = defs.map(function (d) { return { label: d[1], cls: d[0] === tab ? 'on' : '', pick: go(d[0]) }; });
+  var tocRows = defs.map(function (d) { return { label: d[1], desc: d[2], n: d[3], cls: d[0] === tab ? 'on' : '', pick: go(d[0]) }; });
+  var checkRows = h4.filter(function (r) { return r.power === '켜짐' && r.now !== '구동 중'; }).map(function (r) {
+    return { name: r.name, ip: r.ip, cpu: r.cpu, mem: r.mem, nowHost: r.nowHost, now: r.now, nowCls: r.nowCls, pick: go('esx-pl1-04') };
+  });
+  return {
+    tabs: tabs, tocRows: tocRows,
+    isSum: tab === 'sum', isList: tab === 'list', isHost: isHost, isAll: tab === 'all', isGuide: tab === 'guide',
+    tOn: tOn, tOff: tOff, tCpu: tCpu, tMem: tMem.toLocaleString('en-US'),
+    listRows: hosts.map(function (h) { return { name: h.name, on: h.on, off: h.off, cpu: h.cpu, mem: h.mem, now: h.now, nowCls: h.nowCls, pick: go(h.name) }; }),
+    checkRows: checkRows,
+    hostName: cur.name, hostOn: cur.on, hostOff: cur.off, hostCpu: cur.cpu, hostMem: cur.mem, hostNow: cur.now, hostNowCls: cur.nowCls, hostRows: cur.rows,
+    goList: go('list'),
+    prevLabel: prev ? prev.name : '없음', prevCls: prev ? '' : 'dis', goPrev: prev ? go(prev.name) : noop,
+    nextLabel: next ? next.name : '없음', nextCls: next ? '' : 'dis', goNext: next ? go(next.name) : noop,
+    allRows: all.slice(0, 16), allMore: all.length - 16, allTotal: all.length
+  };
+}
+}
+</script>
+</body>
+</html>
