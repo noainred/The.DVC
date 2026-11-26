@@ -18,7 +18,7 @@ const saveUser = (v) => { try { localStorage.setItem(SSH_USER_KEY, v); } catch {
 // v3.10.6: 손으로 적은 폴백 대신 공용 util/copyText.js 하나를 쓴다(같은 판정이 25곳에 흩어져 있었다).
 const copyText = (text) => copyToClipboard(text);
 
-export function IdracConnect({ addr, name, corp, small = false }) {
+export function IdracConnect({ addr, name, corp, small = false, button = false }) {
   const [pos, setPos] = useState(null);
   const [user, setUser] = useState(readUser);
   const [note, setNote] = useState('');
@@ -38,7 +38,8 @@ export function IdracConnect({ addr, name, corp, small = false }) {
     return () => { document.removeEventListener('keydown', key, true); document.removeEventListener('mousedown', click); window.removeEventListener('scroll', away, true); window.removeEventListener('resize', away); };
   }, [open]);
   if (!addr) return null;
-  if (!links) return <span className="mono muted" style={{ fontSize: small ? 11 : 12 }} title="접속 주소 형식이 아닙니다">{addr}</span>;
+  // v3.44(물리서버 상세 드로어 단추 줄): button 이면 주소 글자 대신 'iDRAC 접속' 단추로 같은 상자를 연다. 주소가 접속 형식이 아니면 단추를 그리지 않는다(주소는 값 줄에 그대로 보인다).
+  if (!links) return button ? null : <span className="mono muted" style={{ fontSize: small ? 11 : 12 }} title="접속 주소 형식이 아닙니다">{addr}</span>;
   const toggle = () => {
     if (open) { setPos(null); return; }
     setNote('');
@@ -54,8 +55,8 @@ export function IdracConnect({ addr, name, corp, small = false }) {
   const copy = async (text, what) => setNote((await copyText(text)) ? `${what} 복사했습니다.` : `${what} 복사하지 못했습니다 — 직접 선택해 복사하십시오: ${text}`);
   return (
     <span className="bmf-idc" ref={ref} onClick={(e) => e.stopPropagation()} role="presentation">
-      <button ref={btn} type="button" className={`bmf-idc-b mono${small ? ' sm' : ''}`} aria-expanded={open} aria-haspopup="dialog"
-        title="iDRAC 접속 — 웹 · SSH 고르기" onClick={(e) => { e.stopPropagation(); toggle(); }}>{addr}</button>
+      <button ref={btn} type="button" className={button ? 'login-btn bmd-idc-btn' : `bmf-idc-b mono${small ? ' sm' : ''}`} aria-expanded={open} aria-haspopup="dialog"
+        title={button ? `iDRAC 접속 — 웹 · SSH 고르기(${addr})` : 'iDRAC 접속 — 웹 · SSH 고르기'} onClick={(e) => { e.stopPropagation(); toggle(); }}>{button ? 'iDRAC 접속' : addr}</button>
       {open ? (
         <span className="bmf-idc-pop" role="dialog" aria-label={`iDRAC 접속 — ${addr}`} style={{ left: pos.left, top: pos.top, width: pos.width }}>
           <b>iDRAC 접속 <span className="mono" style={{ fontWeight: 400 }}>{addr}</span></b>

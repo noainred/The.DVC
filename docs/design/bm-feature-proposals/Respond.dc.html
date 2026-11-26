@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>물리서버 기능 제안 D — 알림 · 대응</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./fp.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+body{margin:0}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.st{display:grid;grid-template-columns:64px 130px minmax(0,1fr);gap:10px;align-items:baseline;padding:10px 12px;border-top:1px solid #1f2a40;font-size:12.5px}
+.st:first-child{border-top:0}
+.wk{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px}
+.wd{background:#141b2d;border:1px solid #243049;border-radius:8px;padding:6px 8px;display:flex;flex-direction:column;gap:2px;font-size:12px}
+.wd.on{border-color:#3b82f6;background:rgba(59,130,246,.14)}
+.wd .d{font-size:11px;color:#8b9bb4}
+.trk{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px}
+.tk{border-top:3px solid #243049;padding-top:6px;display:flex;flex-direction:column;gap:2px;font-size:12px}
+.tk.done{border-color:#22c55e}
+.tk.now{border-color:#3b82f6}
+.tk .d{font-size:11px;color:#8b9bb4}
+.flow{display:flex;align-items:stretch;gap:8px}
+.fb{flex:1 1 0;min-width:0;background:#141b2d;border:1px solid #243049;border-radius:10px;padding:8px 10px;display:flex;flex-direction:column;gap:2px;font-size:12px}
+.fa{display:flex;align-items:center;color:#8b9bb4;flex:none}
+</style>
+</helmet>
+<div class="board" style="width:2064px;height:700px">
+
+  <section class="pn" aria-label="알림 단계 올리기 · 당직">
+    <div class="ph"><span class="no">11</span><b>알림 단계 올리기 · 당직 일정</b><span class="at">설정 › 알림</span></div>
+    <div class="pb">
+      <div class="row" style="justify-content:space-between"><span style="font-size:12.5px"><b>규칙: 부품 장애 — 위험</b> <span class="muted">· 법인 KR2</span></span><span class="bd gray">확인하면 멈춤</span></div>
+      <div class="card">
+        <div class="st"><span class="bd blue">1단계</span><span class="mono muted">바로</span><span><b>담당자 [이름]</b> <span class="muted">· 메일</span></span></div>
+        <div class="st"><span class="bd blue">2단계</span><span class="muted">15분 확인 없음</span><span><b>[팀 이름] 전체</b> <span class="muted">· 메일</span></span></div>
+        <div class="st"><span class="bd blue">3단계</span><span class="muted">30분 확인 없음</span><span><b>이번 주 당직</b> <span class="muted">· 메일 + Teams</span></span></div>
+      </div>
+      <h3 class="sh">당직 — 이번 주<span>법인마다 따로</span></h3>
+      <div class="wk">
+        <div class="wd"><span class="d">월 23</span><b>[이름]</b></div>
+        <div class="wd"><span class="d">화 24</span><b>[이름]</b></div>
+        <div class="wd"><span class="d">수 25</span><b>[이름]</b></div>
+        <div class="wd on"><span class="d">목 26 · 오늘</span><b>[이름]</b></div>
+        <div class="wd"><span class="d">금 27</span><b>[이름]</b></div>
+        <div class="wd"><span class="d">토 28</span><b>[이름]</b></div>
+        <div class="wd"><span class="d">일 29</span><b>[이름]</b></div>
+      </div>
+      <span class="note">포탈의 알림은 지금 정한 수신자에게 한 번 갑니다. 아무도 확인하지 않을 때 다음 사람에게 넘기는 단계와 당직표는 없습니다. 채널은 지금 있는 것(메일 · Teams · Slack · 웹훅)을 그대로 씁니다. 단계 시간 · 수신자는 그림용 자리표시입니다.</span>
+    </div>
+  </section>
+
+  <section class="pn" aria-label="제조사 케이스 연동">
+    <div class="ph"><span class="no">12</span><b>제조사 지원 케이스 연동</b><span class="at">물리 부품 장애 · 이슈</span></div>
+    <div class="pb">
+      <div class="row" style="justify-content:space-between"><span style="font-size:12.5px"><b>디스크 Bay 4 장애</b> <span class="muted">— SELSBPDPS09 · <span class="mono">7XK4P93</span></span></span><span class="bd blue">케이스 접수됨</span></div>
+      <div class="trk">
+        <div class="tk done"><b>장애 감지</b><span class="d">11-21 14:40</span></div>
+        <div class="tk done"><b>접수 자료</b><span class="d">11-21 14:52</span></div>
+        <div class="tk now"><b>케이스 접수</b><span class="d">[케이스 번호]</span></div>
+        <div class="tk"><b class="muted">부품 도착</b><span class="d">—</span></div>
+        <div class="tk"><b class="muted">교체 확인</b><span class="d">시리얼이 바뀌면</span></div>
+      </div>
+      <h3 class="sh">접수 자료 묶음</h3>
+      <div class="kv">
+        <div><span>서버</span><b>PowerEdge R740xd · <span class="mono">7XK4P93</span></b></div>
+        <div><span>보증</span><b>2027-03-14 까지</b></div>
+        <div><span>장애 부품</span><b>디스크 Bay 4 · 4 TB HDD</b></div>
+        <div><span>부품 시리얼</span><b class="mono muted">[시리얼]</b></div>
+        <div class="last"><span>최근 이벤트</span><b>3건 포함</b></div>
+        <div class="last"><span>인벤토리 요약</span><b>포함</b></div>
+      </div>
+      <div class="row"><button type="button" class="btn primary">접수 자료 받기</button><button type="button" class="btn">문구 복사</button><span style="flex:1"></span><span class="inp" style="width:170px">케이스 번호 적기</span><button type="button" class="btn">저장</button></div>
+      <span class="note">기본안은 포탈이 제조사에 직접 접수하지 않습니다 — 접수에 필요한 자료를 한 번에 만들고, 번호를 적어 끝까지 따라갑니다. Dell · HPE 관리 제품은 자동 접수까지 하지만 제조사 계약과 인터넷 연결이 있어야 합니다.</span>
+    </div>
+  </section>
+
+  <section class="pn" aria-label="장애 바로 받기">
+    <div class="ph"><span class="no">13</span><b>장애 바로 받기 — 장비가 보내는 알림 구독</b><span class="at">설정 › iDRAC + 수집 상태</span></div>
+    <div class="pb">
+      <h3 class="sh">지금 — 주기마다 읽기</h3>
+      <div class="flow">
+        <div class="fb"><b>장애 발생</b><span class="muted">장비 안에서만 압니다</span></div><span class="fa" aria-hidden="true">→</span>
+        <div class="fb"><b>다음 주기에 읽음</b><span class="muted">그때까지 포탈은 모릅니다</span></div><span class="fa" aria-hidden="true">→</span>
+        <div class="fb"><b>화면 · 알림</b><span class="muted">주기만큼 늦습니다</span></div>
+      </div>
+      <h3 class="sh">제안 — 구독을 더합니다(주기 읽기는 그대로)</h3>
+      <div class="flow">
+        <div class="fb" style="border-color:rgba(59,130,246,.6)"><b>iDRAC 이 알림</b><span class="muted">장애가 난 순간</span></div><span class="fa" aria-hidden="true">→</span>
+        <div class="fb" style="border-color:rgba(59,130,246,.6)"><b>법인 엣지가 받음</b><span class="muted">그 서버만 바로 다시 읽습니다</span></div><span class="fa" aria-hidden="true">→</span>
+        <div class="fb" style="border-color:rgba(59,130,246,.6)"><b>중앙 화면 · 알림</b><span class="muted">판정은 지금과 같은 곳에서</span></div>
+      </div>
+      <div class="t">
+        <div class="r h" style="grid-template-columns:70px 1.4fr 1fr"><span>법인</span><span>구독</span><span>마지막 수신</span></div>
+        <div class="r" style="grid-template-columns:70px 1.4fr 1fr"><b>KR2</b><span>46 / 48대 <span class="bd amber" style="margin-left:4px">실패 2</span></span><span class="muted">2분 전</span></div>
+        <div class="r" style="grid-template-columns:70px 1.4fr 1fr"><b>PL1</b><span>12 / 12대</span><span class="muted">14분 전</span></div>
+        <div class="r" style="grid-template-columns:70px 1.4fr 1fr"><b>US1</b><span class="muted">엣지 없음 — 주기 읽기만</span><span class="muted">—</span></div>
+      </div>
+      <span class="note">받은 알림은 ‘그 서버를 지금 다시 읽어라’ 는 신호로만 쓰고, 장애 판정은 지금 판정 그대로 둡니다. 구독은 장비에 등록을 남기므로 관리자 결정이 필요하고, 구독이 끊겨도 놓치지 않게 주기 읽기는 끄지 않습니다. 수치는 그림용입니다.</span>
+    </div>
+  </section>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":2064,"height":700}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

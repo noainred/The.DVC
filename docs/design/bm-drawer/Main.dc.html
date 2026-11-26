@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Bare Metal Server — 서버를 누르면 열리는 드로어 (1440)</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./pmd.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+body{margin:0}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.shell{position:relative;width:1440px;height:900px;overflow:hidden;display:flex;background:#0a0e17}
+.side{width:236px;flex:none;background:#0f1626;border-right:1px solid #1f2a40;padding:18px 16px;display:flex;flex-direction:column;gap:14px;font-size:13px;color:#8b9bb4;box-sizing:border-box}
+.side .on{color:#e6edf6;font-weight:700}
+.page{flex:1;min-width:0;display:flex;flex-direction:column}
+.top{height:44px;flex:none;background:#0c111e;border-bottom:1px solid #1f2a40}
+.content{padding:16px 24px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.ghost{opacity:.5}
+.cols{display:flex;gap:12px;min-width:0}
+.tree{width:250px;flex:none;background:#141b2d;border:1px solid #243049;border-radius:12px;padding:8px;display:flex;flex-direction:column;gap:2px;box-sizing:border-box}
+.tn{padding:6px 10px;border-radius:8px;font-size:12.5px;color:#8b9bb4;display:flex;justify-content:space-between;gap:8px}
+.tn.on{background:rgba(59,130,246,.18);color:#e6edf6;font-weight:600}
+.tbl{flex:1;min-width:0;background:#141b2d;border:1px solid #243049;border-radius:12px;overflow:hidden}
+.tr{display:grid;grid-template-columns:200px 190px 150px 190px 110px 80px;gap:10px;padding:9px 14px;border-bottom:1px solid #1f2a40;font-size:12.5px;align-items:center}
+.tr.h{color:#8b9bb4;font-size:12px;font-weight:600;background:#0f1626}
+.tr.sel{background:rgba(59,130,246,.16);box-shadow:inset 2px 0 0 #3b82f6}
+.ovl{position:absolute;inset:0;background:rgba(5,8,15,.45)}
+.dwpos{position:absolute;top:0;right:0;bottom:0;display:flex}
+</style>
+</helmet>
+<div class="shell">
+  <div class="side ghost" aria-hidden="true">
+    <b style="color:#e6edf6;font-size:15px">THE DAVINCI</b>
+    <span>Overview</span><span>가상화 서버</span><span class="on">Physical Server</span><span style="padding-left:12px" class="on">Bare Metal Server</span><span style="padding-left:12px">베어메탈 사용률</span><span style="padding-left:12px">파트 장애(부품)</span><span>스토리지</span><span>네트워크</span><span>Backup</span><span>설정</span>
+  </div>
+  <div class="page">
+    <div class="top ghost" aria-hidden="true"></div>
+    <div class="content ghost" aria-hidden="true">
+      <div style="display:flex;align-items:baseline;gap:10px"><b style="font-size:17px">Bare Metal Server</b><span class="muted" style="font-size:12px">법인 › 폴더 · 행을 누르면 서버 상세</span></div>
+      <div class="cols">
+        <div class="tree">
+          <div class="tn"><span>KR2</span><span class="mono">48</span></div>
+          <div class="tn" style="padding-left:24px"><span>KR2_Service</span><span class="mono">31</span></div>
+          <div class="tn" style="padding-left:38px"><span>SBP</span><span class="mono">19</span></div>
+          <div class="tn" style="padding-left:52px"><span>DP</span><span class="mono">12</span></div>
+          <div class="tn on" style="padding-left:66px"><span>Airflow</span><span class="mono">9</span></div>
+          <div class="tn" style="padding-left:66px"><span>GPDB</span><span class="mono">3</span></div>
+          <div class="tn" style="padding-left:24px"><span>(미분류)</span><span class="mono">17</span></div>
+        </div>
+        <div class="tbl">
+          <div class="tr h"><span>이름</span><span>모델</span><span>하드웨어</span><span>받는 길</span><span>CPU · MEM</span><span>전력</span></div>
+          <div class="tr"><span>SELSBPDPS07</span><span>PowerEdge R740xd</span><span class="mono">2×16C · 512 GB</span><span>수집 서버 KR2</span><span class="mono">41% · 58%</span><span class="mono">455 W</span></div>
+          <div class="tr"><span>SELSBPDPS08</span><span>PowerEdge R740xd</span><span class="mono">2×16C · 512 GB</span><span>수집 서버 KR2</span><span class="mono">29% · 60%</span><span class="mono">448 W</span></div>
+          <div class="tr sel"><b>SELSBPDPS09</b><span>PowerEdge R740xd</span><span class="mono">2×16C · 512 GB</span><span>수집 서버 KR2</span><span class="mono">37% · 62%</span><span class="mono">462 W</span></div>
+          <div class="tr"><span>SELSBPDPS10</span><span>PowerEdge R740xd</span><span class="mono">2×16C · 512 GB</span><span>수집 서버 KR2</span><span class="mono">33% · 57%</span><span class="mono">451 W</span></div>
+          <div class="tr"><span>SELSBPDPS11</span><span>PowerEdge R740xd</span><span class="mono">2×16C · 512 GB</span><span>수집 서버 KR2</span><span class="mono">— · —</span><span class="mono">—</span></div>
+          <div class="tr"><span>SELSBPDPS12</span><span>PowerEdge R740xd</span><span class="mono">2×16C · 512 GB</span><span>수집 서버 KR2</span><span class="mono">44% · 66%</span><span class="mono">470 W</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="ovl" aria-hidden="true"></div>
+  <div class="dwpos">
+    <aside class="dw" aria-label="서버 상세 — SELSBPDPS09" style="height:900px">
+      <div class="dh">
+        <div class="ttl">
+          <span class="dot" style="background:#ef4444" title="부품 장애"></span>
+          <h2>SELSBPDPS09</h2>
+          <button type="button" class="ib" aria-label="이전 서버">‹</button>
+          <button type="button" class="ib" aria-label="다음 서버">›</button>
+          <button type="button" class="ib" aria-label="닫기">×</button>
+        </div>
+        <div class="sigs"><span class="bd red">부품 장애 1건</span></div>
+        <div class="crumb">
+          <span class="bd green">켜짐</span>
+          <b>KR2</b><span aria-hidden="true">›</span><span>KR2_Service › SBP › DP › Airflow</span>
+          <span aria-hidden="true">·</span><span>베어메탈</span>
+          <span aria-hidden="true">·</span><span>PowerEdge R740xd</span>
+          <span aria-hidden="true">·</span><span class="mono">7XK4P93</span>
+          <span class="pos">목록 3/9</span>
+        </div>
+      </div>
+      <div class="acts">
+        <button type="button" class="btn primary"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 17l6-5-6-5"></path><path d="M12 19h8"></path></svg>iDRAC 접속</button>
+        <span style="flex:1 1 12px"></span>
+        <span class="sel" style="width:210px"><span>옮길 폴더…</span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg></span>
+        <button type="button" class="btn" disabled>옮기기</button>
+        <button type="button" class="btn">폴더에서 빼기</button>
+      </div>
+      <div class="db" style="overflow:hidden">
+        <section class="sec" aria-label="한눈에">
+          <div class="sh"><h3>한눈에 · 지금 값</h3><span class="muted">못 읽은 값은 ‘—’ 와 사유</span></div>
+          <div class="tiles">
+            <div class="tile"><span class="lb">CPU<span class="chip os">OS</span></span><span class="v">37<small>%</small></span><span class="bar"><i style="width:37%;background:#3b82f6"></i></span><span class="s">32코어 · 2×16C</span></div>
+            <div class="tile"><span class="lb">메모리<span class="chip os">OS</span></span><span class="v">62<small>%</small></span><span class="bar"><i style="width:62%;background:#3b82f6"></i></span><span class="s">512 GB</span></div>
+            <div class="tile"><span class="lb">전력</span><span class="v">462<small>W</small></span><span class="s" style="margin-top:12px">전원 켜짐</span></div>
+            <div class="tile" style="border-color:rgba(239,68,68,.5)"><span class="lb">부품 장애</span><span class="v" style="color:#fca5a5">1<small>건</small></span><span class="s" style="margin-top:12px"><a href="#">물리 부품 장애에서 보기</a></span></div>
+          </div>
+        </section>
+        <section class="sec" aria-label="24시간 추이">
+          <div class="sh"><h3>CPU · 메모리 — 지난 24시간</h3><span class="muted">열 때 1회 조회 · 구간 평균</span></div>
+          <div class="card" style="padding:10px 12px 8px">
+            <svg viewBox="0 0 604 150" width="100%" height="150" role="img" aria-label="지난 24시간 CPU 마지막 37% · 메모리 마지막 62%">
+              <line x1="0" x2="560" y1="20" y2="20" stroke="#1f2a40"></line><line x1="0" x2="560" y1="75" y2="75" stroke="#1f2a40"></line><line x1="0" x2="560" y1="130" y2="130" stroke="#243049"></line>
+              <text x="566" y="23" font-size="10" fill="#8b9bb4">100%</text><text x="566" y="78" font-size="10" fill="#8b9bb4">50%</text><text x="566" y="133" font-size="10" fill="#8b9bb4">0%</text>
+              <rect x="264" y="20" width="72" height="110" fill="rgba(139,155,180,.10)"></rect>
+              <text x="300" y="34" font-size="10" fill="#8b9bb4" text-anchor="middle">못 읽음</text>
+              <path d="M0,62.9 L24,62.9 L48,61.8 L72,61.8 L96,61.8 L120,62.9 L144,62.9 L168,64 L192,64 L216,64 L240,62.9 L264,62.9 M336,61.8 L360,61.8 L384,61.8 L408,60.7 L432,60.7 L456,61.8 L480,61.8 L504,61.8 L528,61.8 L552,61.8" fill="none" stroke="#22d3ee" stroke-width="1.5"></path>
+              <path d="M0,92.6 L24,90.4 L48,93.7 L72,88.2 L96,84.9 L120,87.1 L144,91.5 L168,95.9 L192,99.2 L216,100.3 L240,98.1 L264,97 M336,93.7 L360,89.3 L384,81.6 L408,72.8 L432,77.2 L456,82.7 L480,86 L504,88.2 L528,90.4 L552,89.3" fill="none" stroke="#3b82f6" stroke-width="2"></path>
+              <text x="0" y="146" font-size="10" fill="#8b9bb4">어제 18시</text><text x="140" y="146" font-size="10" fill="#8b9bb4" text-anchor="middle">0시</text><text x="280" y="146" font-size="10" fill="#8b9bb4" text-anchor="middle">6시</text><text x="420" y="146" font-size="10" fill="#8b9bb4" text-anchor="middle">12시</text><text x="560" y="146" font-size="10" fill="#8b9bb4" text-anchor="end">지금</text>
+            </svg>
+            <div style="display:flex;flex-wrap:wrap;gap:4px 14px;font-size:11.5px;margin-top:2px">
+              <span class="lg"><i style="background:#3b82f6"></i>CPU 37%</span>
+              <span class="lg"><i style="background:#22d3ee"></i>메모리 62%</span>
+              <span class="muted">점 240개 · 못 읽은 구간은 선을 잇지 않습니다</span>
+            </div>
+          </div>
+        </section>
+        <section class="sec" aria-label="신호">
+          <div class="sh"><h3>신호 1 — 봐야 할 것</h3></div>
+          <div class="sigrow">
+            <span class="dot" style="background:#ef4444" aria-hidden="true"></span>
+            <div class="t"><b>부품 장애 1건</b><span>이 서버에 열린 부품 장애가 있습니다 — 어느 부품인지는 물리 부품 장애 화면에서 봅니다.</span></div>
+            <a class="btn" href="#">부품 장애</a>
+          </div>
+        </section>
+        <section class="sec" aria-label="식별 · 배치">
+          <div class="sh"><h3>식별 · 배치</h3></div>
+          <div class="kv">
+            <div><span>법인</span><b>KR2</b></div>
+            <div><span>종류</span><b>베어메탈</b></div>
+            <div class="full"><span>폴더</span><b>KR2_Service › SBP › DP › Airflow <span class="bd blue" style="margin-left:4px">손 등록</span></b></div>
+            <div><span>모델</span><b>PowerEdge R740xd</b></div>
+            <div><span>서비스 태그</span><b class="mono">7XK4P93</b></div>
+            <div class="full"><span>OS</span><b>Red Hat Enterprise Linux Server release 7.8 (Maipo)</b></div>
+            <div><span>받는 길</span><b><span class="bd teal">수집 서버</span> 수집 서버 KR2</b></div>
+            <div><span>전원</span><b>켜짐</b></div>
+          </div>
+        </section>
+      </div>
+      <nav class="df" aria-label="바로가기">
+        <span class="muted">바로가기:</span>
+        <a href="#">베어메탈 사용률(추이)</a><a href="#">물리 부품 장애</a><a href="#">통합 서버 인벤토리</a><a href="#">서비스 인벤토리</a>
+        <span class="keys">Esc 닫기 · ↑↓ 이전/다음</span>
+      </nav>
+    </aside>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
