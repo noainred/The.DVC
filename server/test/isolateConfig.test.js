@@ -33,7 +33,9 @@ test('① npm test 는 미리 불러오기(_isolateConfig.js)를 붙인다', () 
 test('① 이 시험 자체가 npm test 로 돌 때는 격리된 폴더를 받는다(직접 실행이면 건너뛴다)', { skip: !process.env.DVC_TEST_ISOLATED_CONFIG && '미리 불러오기 없이 직접 실행' }, () => {
   const dir = process.env.CONFIG_DIR;
   assert.equal(dir, process.env.DVC_TEST_ISOLATED_CONFIG);
-  assert.ok(dir.startsWith(os.tmpdir()), dir);
+  assert.ok(dir.startsWith(path.join(process.env.DVC_TEST_ORIG_TMPDIR, '')), dir);
+  // 임시 폴더(TMPDIR)도 같은 상자 안 — 시험이 os.tmpdir() 에 만든 폴더가 상자째 지워진다(전량 한 번에 /tmp 에 약 50개 남던 것)
+  assert.equal(path.dirname(os.tmpdir()), path.dirname(dir), `${os.tmpdir()} · ${dir}`);
   assert.ok(!path.resolve(dir).startsWith(path.join(SERVER, 'config')), '실제 설정 폴더가 아니다');
 });
 
@@ -53,6 +55,7 @@ console.log(JSON.stringify({ d, mark: process.env.DVC_TEST_ISOLATED_CONFIG, empt
   assert.ok(r.d && r.d.startsWith(path.join(os.tmpdir(), `dvc-test-cfg-${process.getuid()}`, '')), r.d);
   assert.equal(r.mark, r.d);
   assert.equal(fs.existsSync(r.d), false, '끝나면 하위 파일까지 지운다');
+  assert.equal(fs.existsSync(path.dirname(r.d)), false, '상자(설정 · 임시 폴더)째 지운다');
 });
 
 test('② 다른 exit 훅(종료 flush 레지스트리)이 뒤에 걸려 폴더에 써도 정리가 마지막에 돈다 — 폴더가 남지 않는다', () => {
@@ -140,9 +143,10 @@ test('hang', async () => { fs.writeFileSync(process.env.CONFIG_DIR + '/pid', Str
     const left = /CFG=(\S+)/.exec(out)?.[1];
     assert.ok(left, `자식이 설정 폴더를 알리지 않았다: ${out.slice(0, 400)}`);
     if (!fs.existsSync(left)) { t.skip('이 node 판은 시한 초과에도 exit 훅을 돌려 폴더가 남지 않는다(확인할 것 없음 — node 22.23 실측은 남는다)'); return; }
-    const old = (Date.now() - 20 * 60_000) / 1000; fs.utimesSync(left, old, old);
+    const boxOf = path.dirname(left);   // 상자(<pid>-XXXXXX) 안의 cfg — 청소는 상자의 시각을 본다
+    const old = (Date.now() - 20 * 60_000) / 1000; fs.utimesSync(boxOf, old, old);
     child({}, `console.log(JSON.stringify({ d: process.env.CONFIG_DIR }));`);
-    assert.equal(fs.existsSync(left), false, `죽은 자식이 남긴 폴더(${left})를 다음 실행이 지운다`);
+    assert.equal(fs.existsSync(boxOf), false, `죽은 자식이 남긴 상자(${boxOf})를 다음 실행이 지운다`);
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 });
 
@@ -162,7 +166,8 @@ test('⑤ 상위 폴더가 심링크면 따라가지 않는다 — 청소가 가
 });
 
 test('⑤ 상위 폴더를 다른 계정이 만들어 쓸 수 없어도 시험이 멈추지 않는다(예전처럼 /tmp 에 바로)', { skip: typeof process.getuid !== 'function' || process.getuid() !== 0 ? 'root 로 돌 때만(다른 계정으로 자식을 띄운다)' : false }, () => {
-  const box = fs.mkdtempSync(path.join(os.tmpdir(), 'dvc-isolate-acct-'));
+  // 다른 계정이 들어올 수 있는 곳에 — 이 프로세스의 os.tmpdir() 는 0700 상자 안이다(바꾸기 전 임시 폴더)
+  const box = fs.mkdtempSync(path.join(process.env.DVC_TEST_ORIG_TMPDIR || os.tmpdir(), 'dvc-isolate-acct-'));
   try {
     fs.chmodSync(box, 0o777);
     const tmp = path.join(box, 'tmp'); fs.mkdirSync(tmp, { mode: 0o1777 }); fs.chmodSync(tmp, 0o1777);

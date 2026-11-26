@@ -13,7 +13,9 @@
  *   · 시험 파일이 스스로 `CONFIG_DIR` 을 다시 잡는 것은 그대로 된다(이 파일은 그보다 먼저 돈다 — 기본값만 바꾼다).
  *   · 자식 프로세스를 `{ ...process.env }` 로 띄우는 시험은 같은 임시 폴더를 물려준다. env 를 통째로 새로 짜서 넘기는 시험은 이 보호 밖이다.
  *   · 프로세스가 끝날 때 지운다(exit 훅 — 시험이 만든 하위 파일까지 · 다른 exit 훅보다 **뒤에**). 지우지 못해도 시험 결과는 바꾸지 않는다.
- *   · 시험 실행기가 자식을 **죽이면**(파일 시한 초과 · Ctrl-C) exit 훅이 돌지 않아 폴더가 남는다 — 그래서 폴더를 `<tmp>/dvc-test-cfg-<uid>/<pid>-XXXXXX` 에 만들고,
+ *   · 임시 폴더(`TMPDIR`)도 같은 상자 안으로 돌린다 — 상자 `<pid>-XXXXXX` 안에 `cfg`(CONFIG_DIR) · `tmp`(TMPDIR). 시험이 os.tmpdir() 에 만든 폴더가 /tmp 에
+ *     남던 것(전량 한 번에 약 50개 — 2026-11-26 실측)을 파일마다 고치지 않고 상자째 지운다. 바꾸기 전 임시 폴더는 `DVC_TEST_ORIG_TMPDIR`(다른 계정으로 도는 시험용 — 상자는 0700).
+ *   · 시험 실행기가 자식을 **죽이면**(파일 시한 초과 · Ctrl-C) exit 훅이 돌지 않아 폴더가 남는다 — 그래서 상자를 `<tmp>/dvc-test-cfg-<uid>/<pid>-XXXXXX` 에 만들고,
  *     다음에 이 파일이 불릴 때 **프로세스가 없고(pid 확인) 10분 넘게 손대지 않은** 폴더를 지운다(같은 상위 폴더만 읽는다 — /tmp 전체를 훑지 않는다).
  *     상위 폴더는 계정마다 · 0700 · 심링크가 아닌 내 폴더일 때만 쓴다(아니면 예전처럼 /tmp 에 바로 — 청소 없음).
  *   · 남는 틈: exit 리스너를 붙인 같은 동기 틱 안에서 process.exit 를 부르면 정리를 뒤로 옮기기 전에 끝나 폴더가 남는다(실제 코드에서 그런 경로는 찾지 못했다 —
@@ -24,14 +26,24 @@
  *   (`.claude/skills/verify/SKILL.md`).
  */
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { makeOwnTmpDir } from './_tmpRoot.js';
 
 // 상위 폴더 · 청소 규칙은 `_tmpRoot.js` 하나(웹 vitest.globalSetup.js 와 같이 쓴다) — 계정마다 · 0700 · 심링크가 아닌 내 폴더일 때만 청소(2회차 재현 두 건).
 if (!process.env.CONFIG_DIR) {
-  const dir = makeOwnTmpDir('dvc-test-cfg');
+  // 한 프로세스 = 한 상자(`<pid>-XXXXXX`) — 안에 설정 폴더(cfg)와 임시 폴더(tmp). 임시 폴더도 돌리는 이유(2026-11-26 점검 — 실측): 시험 파일들이 os.tmpdir() 에
+  //   스스로 만든 폴더가 전량 한 번에 약 50개 /tmp 에 남았다(after() 를 안 두거나, 지운 뒤 종료 저장이 다시 만들거나). TMPDIR 을 상자 안으로 돌리면 os.tmpdir() ·
+  //   mktemp 를 쓰는 시험과 그 자식 프로세스의 폴더가 모두 상자째 지워진다(파일마다 고치지 않는다).
+  const origTmp = os.tmpdir();
+  const box = makeOwnTmpDir('dvc-test-cfg');
+  const dir = path.join(box, 'cfg'); const tmp = path.join(box, 'tmp');
+  fs.mkdirSync(dir, { mode: 0o700 }); fs.mkdirSync(tmp, { mode: 0o700 });
   process.env.CONFIG_DIR = dir;
   process.env.DVC_TEST_ISOLATED_CONFIG = dir;   // 시험이 '격리 중인가' 를 확인할 때 쓴다(isolateConfig.test.js)
-  const cleanup = () => { try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 20 }); } catch { /* 정리 실패는 시험 결과가 아니다 */ } };
+  if (!process.env.DVC_TEST_ORIG_TMPDIR) process.env.DVC_TEST_ORIG_TMPDIR = origTmp;   // 바꾸기 전 임시 폴더 — 다른 계정으로 도는 시험용(상자는 0700 이라 남이 못 들어온다)
+  process.env.TMPDIR = tmp;
+  const cleanup = () => { try { fs.rmSync(box, { recursive: true, force: true, maxRetries: 3, retryDelay: 20 }); } catch { /* 정리 실패는 시험 결과가 아니다 */ } };
   process.on('exit', cleanup);
   // 정리는 **마지막 exit 리스너**여야 한다 — 종료 flush 레지스트리(`src/util/exitFlush.js`)처럼 뒤에 걸린 exit 훅이 디바운스 저장을 쓰면서 폴더를 다시
   //   만든다(첫 전량 실행에서 sanswitch-activity.json · central-agent-sanswitch.json 을 담은 폴더 1개가 남았다 — 실측). exit 리스너가 새로 걸릴 때마다

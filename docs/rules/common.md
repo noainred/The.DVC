@@ -355,7 +355,7 @@
   끝날 때 지운다(있으면 건드리지 않는다). ⚠ 시험 파일 하나를 직접 돌릴 때도 붙일 것: `cd server && node --test --import ./test/_isolateConfig.js --experimental-sqlite test/<파일>`.
   · 등록부처럼 **로드 시 경로를 굳히는 모듈**(`const FILE = path.join(config.configDir, …)`)은 나중에 `config.configDir` 를 바꿔도 따라오지 않는다 — 시험이 폴더를 바꾸려면
     프로젝트 모듈을 하나라도 불러오기 **전에** `process.env.CONFIG_DIR` 을 잡는다. · 자식 프로세스는 `{ ...process.env }` 로 띄울 것(env 를 새로 짜면 이 보호 밖이다).
-  · 죽은 시험(파일 시한 초과 · Ctrl-C)은 exit 훅이 돌지 않아 폴더를 남긴다 — 폴더는 `<tmp>/dvc-test-cfg-<uid>/<pid>-…` 이고 다음 실행이 pid 가 없고 10분 넘은 것을 지운다.
+  · 죽은 시험(파일 시한 초과 · Ctrl-C)은 exit 훅이 돌지 않아 폴더를 남긴다 — 상자는 `<tmp>/dvc-test-cfg-<uid>/<pid>-…` 이고 다음 실행이 pid 가 없고 10분 넘은 것을 지운다.
     상위 폴더는 **계정마다 · 0700 · 심링크가 아닌 내 폴더일 때만** 쓴다(공용 이름 하나면 root 로 한 번 돈 뒤 다른 계정의 시험이 전부 EACCES · 심링크면 청소가 가리키는 곳을 지웠다 — 재현).
   · **웹 시험(vitest)도** 서버 모듈을 불러오면 같은 일이 생긴다(`bmStage6Text` 가 auth.js 를 거쳐 실제 server/config 에 `auth-secret` 을 만들었다 — A/B 재현) — `web/vitest.globalSetup.js` 가 임시 설정 폴더를 준다(`<tmp>/dvc-vitest-cfg-<uid>/<pid>-…` · 죽은 실행의 폴더 청소까지 서버와 같은 `server/test/_tmpRoot.js` 하나).
   회귀 `test/isolateConfig.test.js`.
@@ -367,8 +367,9 @@
     실제 시각이 KST 0시대(창 B) · 12시대(창 A)에 실패했다(`bmUsageLoop3` D1). 모듈 로드 때 잡은 기준 시각(T0)과 라우트의 실제 시각 사이 지연(정시 직전 시작이면 다음 시간)도
     경계 계산에 넣을 것 — '+ 7분' 으로 비켜 간 판이 정시 1~2초 전 시작에서 아직 실패했다. 지금은 방금 만료(판정이 만료 뒤 2 ~ 3시간 — 경계에서 멀다).
     (정정의 정정: 3회차 뒤 '12시대만' 으로 고쳐 적었던 것은 실측 스크립트가 창 하나만 본 탓에 틀렸다 — 4회차 지적.)
-  · **시험이 `CONFIG_DIR` 을 직접 잡을 때도 격리 폴더 안에**(`process.env.DVC_TEST_ISOLATED_CONFIG || os.tmpdir()` 아래 mkdtemp): `after()` 에서 지워도 프로세스 종료 저장
-    (`util/exitFlush.js` — ipam scanStore 등)이 그 폴더를 다시 만들어 실행마다 빈 폴더가 `/tmp` 에 남았다(`audit2603a` · `audit2744l` — 재현). 격리 폴더는 마지막 exit 리스너가 통째로 지운다.
+  · **임시 폴더(TMPDIR)도 같은 상자 안**(상자 `<pid>-…` 안에 `cfg` = CONFIG_DIR · `tmp` = TMPDIR): 시험이 `os.tmpdir()` 에 스스로 만든 폴더가 전량 한 번에 약 50개 `/tmp` 에
+    남았다(after() 가 없거나, 지운 뒤 프로세스 종료 저장 `util/exitFlush.js` 가 다시 만들거나 — `audit2603a` 재현). 상자째 지우므로 시험 파일은 예전처럼 `os.tmpdir()` 를 쓰면 된다.
+    다른 계정(uid)으로 자식을 띄우는 시험은 상자(0700) 밖 `DVC_TEST_ORIG_TMPDIR` 에 만든다(`isolateConfig` ⑤).
 
 - **테스트가 띄운 프로세스를 PID 로 정리할 때는 소유를 확인하고 죽인다**(2026-10-26 PR #779 → v3.8.1 이식): `npm test` 는 파일을 병렬로 돌리므로, 로그에 남긴 PID 의
   프로세스가 이미 끝났다면 그 번호가 다른 테스트 파일의 자식에 재사용됐을 수 있다(이 컨테이너 `pid_max` 32768). 로그된 PID 를 무조건
