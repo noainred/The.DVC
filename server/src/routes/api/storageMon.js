@@ -720,7 +720,7 @@ function ifaceThresholds() {
 }
 function ifaceSampleMs(dev, devs) {
   const si = sampleIntervalOf(dev, devs);
-  return dev && dev.collectMethod !== 'ssh' && dev.nodeLoadEnabled !== false ? si.nodeLoadMs : si.pollMs;
+  return dev && dev.nodeLoadEnabled !== false ? si.nodeLoadMs : si.pollMs;   // v3.46.0 SSH Unity 도 5분 표본
 }
 function ifaceDeviceOut(d, snap, view, admin) {
   const m = admin ? d : maskDeviceAddress(d);
@@ -728,7 +728,8 @@ function ifaceDeviceOut(d, snap, view, admin) {
   // v3.36.1: 표본 진단의 오류 원문(장비 주소가 들 수 있다 — 'connect ETIMEDOUT 10.x:443')은 관리자 판본만. 경로별 항목 수 · 단위 이름은 그대로.
   if (v && !admin && v.throughputDetail?.diag) {
     const dg = v.throughputDetail.diag;
-    v.throughputDetail = { ...v.throughputDetail, diag: { ...dg, error: dg.error ? '(관리자만 볼 수 있습니다)' : '', errors: (dg.errors || []).map(() => '(관리자만 볼 수 있습니다)') } };
+    v.throughputDetail = { ...v.throughputDetail, diag: { ...dg, error: dg.error ? '(관리자만 볼 수 있습니다)' : '', errors: (dg.errors || []).map(() => '(관리자만 볼 수 있습니다)'),
+      restError: dg.restError ? '(관리자만 볼 수 있습니다)' : '' } };   // v3.46.0 REST 실패 원문도
   }
   return { id: m.id, name: m.name, type: m.type, agent: m.agent || '', datacenterId: m.datacenterId || '', collectMethod: m.collectMethod || 'api',
     enabled: m.enabled !== false, nodeLoadEnabled: m.nodeLoadEnabled !== false,
@@ -771,7 +772,7 @@ api.get('/tools/storage/devices/:id/ifaces', toolsPerm, fullScopeOnly, async (re
   const pick = ports.find((p) => p.id === want)
     || [...ports].filter((p) => p.linkUp === true && p.peakPct != null).sort((a, b) => b.peakPct - a.peakPct)[0] || ports[0] || null;
   let series = null;
-  if (pick && dev.collectMethod !== 'ssh') {
+  if (pick && dev.nodeLoadEnabled !== false) {   // v3.46.0: SSH Unity 도 표본이 있다(REST 먼저 · 안 되면 uemcli) — 예전엔 SSH 를 빼 추이가 비었다
     const units = unitIdByPort(await nodeUnitsOf(id));
     const uid = units.get(portMatchKey(pick.id)) ?? units.get(portMatchKey(pick.name));
     if (uid != null) {
