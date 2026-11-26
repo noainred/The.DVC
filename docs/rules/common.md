@@ -357,12 +357,16 @@
     프로젝트 모듈을 하나라도 불러오기 **전에** `process.env.CONFIG_DIR` 을 잡는다. · 자식 프로세스는 `{ ...process.env }` 로 띄울 것(env 를 새로 짜면 이 보호 밖이다).
   · 죽은 시험(파일 시한 초과 · Ctrl-C)은 exit 훅이 돌지 않아 폴더를 남긴다 — 폴더는 `<tmp>/dvc-test-cfg-<uid>/<pid>-…` 이고 다음 실행이 pid 가 없고 10분 넘은 것을 지운다.
     상위 폴더는 **계정마다 · 0700 · 심링크가 아닌 내 폴더일 때만** 쓴다(공용 이름 하나면 root 로 한 번 돈 뒤 다른 계정의 시험이 전부 EACCES · 심링크면 청소가 가리키는 곳을 지웠다 — 재현).
-  · **웹 시험(vitest)도** 서버 모듈을 불러오면 같은 일이 생긴다(`bmStage6Text` 가 auth.js 를 거쳐 실제 server/config 에 `auth-secret` 을 만들었다 — A/B 재현) — `web/vitest.globalSetup.js` 가 임시 설정 폴더를 준다.
+  · **웹 시험(vitest)도** 서버 모듈을 불러오면 같은 일이 생긴다(`bmStage6Text` 가 auth.js 를 거쳐 실제 server/config 에 `auth-secret` 을 만들었다 — A/B 재현) — `web/vitest.globalSetup.js` 가 임시 설정 폴더를 준다(`<tmp>/dvc-vitest-cfg-<uid>/<pid>-…` · 죽은 실행의 폴더 청소까지 서버와 같은 `server/test/_tmpRoot.js` 하나).
   회귀 `test/isolateConfig.test.js`.
   · **같은 점검에서 찾은 날짜 의존 시험 3건**(가짜 시계 — `NODE_OPTIONS="--import <Date 만 미는 모듈>"` 로 시험 파일 하나를 실행 시각만 바꿔 돌려 찾았다. 셸 `date` · 파일 시각 · SQLite 현재 시각은
     밀리지 않는다): ① 포탈 달의 첫 시간(매달 마지막 날 16시대 UTC)엔 '끝난 정시 칸' 이 0개 — 기준 시각이 달의 첫 몇 시간이면 하루 앞으로(`dataAudit2977`) ② 반복 정비 창은 확인 뒤 92일에 만료 —
     '어떤 달에 맞닿는다' 는 단언은 그런 달이 92일 안에 들도록 판정 시각을 고른다(`bmMaint8aFix` ⑧) ③ 무작위 대조의 시각 목록에 실제 시각만 두지 말고 경계(시간대 전환 직후 등)를 고정 시각으로
     함께 둔다(`bmUsageLoop6y` — 실제 시각이 그 며칠에 걸릴 때만 드러난 **제품 결함**이 있었다). 저장소 안 경로(`server/tmp` 등)에 쓰는 시험도 OS 임시 폴더로(`ciWorkflow2558`).
+    ④ 판정 시각을 '만료 + 정확히 24시간' 처럼 설계 경계에 두지 말 것 — 만료된 반복 창 재확인은 만료 뒤 24 ~ 48시간에 열리고(확인 시각에 따라) 가장 이른 24시간에 판정이 닿으면
+    실제 시각이 KST 12시대일 때만 실패했다(`bmUsageLoop3` D1 — 확인 시각 정시 + 7분).
+  · **시험이 `CONFIG_DIR` 을 직접 잡을 때도 격리 폴더 안에**(`process.env.DVC_TEST_ISOLATED_CONFIG || os.tmpdir()` 아래 mkdtemp): `after()` 에서 지워도 프로세스 종료 저장
+    (`util/exitFlush.js` — ipam scanStore 등)이 그 폴더를 다시 만들어 실행마다 빈 폴더가 `/tmp` 에 남았다(`audit2603a` · `audit2744l` — 재현). 격리 폴더는 마지막 exit 리스너가 통째로 지운다.
 
 - **테스트가 띄운 프로세스를 PID 로 정리할 때는 소유를 확인하고 죽인다**(2026-10-26 PR #779 → v3.8.1 이식): `npm test` 는 파일을 병렬로 돌리므로, 로그에 남긴 PID 의
   프로세스가 이미 끝났다면 그 번호가 다른 테스트 파일의 자식에 재사용됐을 수 있다(이 컨테이너 `pid_max` 32768). 로그된 PID 를 무조건

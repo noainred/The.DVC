@@ -28,7 +28,8 @@ import { stripComments } from './_stripComments.js';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
 // 임시 폴더 기준: 환경변수(리드·그룹이 지정) → 없으면 OS 임시 폴더. 저장소 안에 만들지 않는다.
-const TMP_ROOT = process.env.AUDIT2744L_TMP && fs.existsSync(process.env.AUDIT2744L_TMP) ? process.env.AUDIT2744L_TMP : os.tmpdir();
+//   그다음은 격리 폴더(_isolateConfig.js) — 종료 저장이 after() 가 지운 폴더를 다시 만들어 실행마다 빈 폴더가 남았다(2026-11-26 재현).
+const TMP_ROOT = process.env.AUDIT2744L_TMP && fs.existsSync(process.env.AUDIT2744L_TMP) ? process.env.AUDIT2744L_TMP : (process.env.DVC_TEST_ISOLATED_CONFIG || os.tmpdir());
 const CFG = fs.mkdtempSync(path.join(TMP_ROOT, 'dvc-2744l-'));
 Object.assign(process.env, {
   CONFIG_DIR: CFG, DATA_SOURCE: 'mock', AUTH_ENABLED: 'true', AUTH_SECRET: 'z'.repeat(48), OTP_ROLE_ENFORCE: 'false',

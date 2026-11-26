@@ -12,7 +12,9 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const TOKEN = 'tok-2603a-shared';
-const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'dvc-2603a-'));
+// 격리 폴더(_isolateConfig.js) 안에 만든다 — 프로세스 종료 저장(exitFlush · ipam scanStore)이 after() 가 지운 폴더를 다시 만들어
+// 실행마다 빈 폴더가 /tmp 에 남았다(2026-11-26 재현). 격리 폴더는 마지막 exit 리스너가 통째로 지운다.
+const CFG = fs.mkdtempSync(path.join(process.env.DVC_TEST_ISOLATED_CONFIG || os.tmpdir(), 'dvc-2603a-'));
 process.env.CONFIG_DIR = CFG;
 process.env.CENTRAL_TOKEN = TOKEN;
 process.env.DATA_SOURCE = 'live';

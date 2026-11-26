@@ -8,6 +8,7 @@
  *  ① npm test 명령이 미리 불러오기를 붙인다(빠지면 이 보호가 통째로 사라진다).
  *  ② CONFIG_DIR 이 없으면 빈 임시 폴더를 잡고 · 있으면 건드리지 않는다 · 프로세스가 끝나면 지운다.
  *  ③ 시험 실행기는 시험 파일마다 자식 프로세스에서 이 파일을 불러온다 — 파일마다 다른 폴더(실측 고정: 부모에서만 돌면 이 보호는 성립하지 않는다).
+ *  ④ 죽은 실행이 남긴 폴더 청소 · ⑤ 상위 폴더가 심링크 · 남의 것이면 쓰지 않는다 · ⑥ 웹 vitest 전역 준비도 같은 규칙(`_tmpRoot.js` 하나).
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -15,7 +16,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.resolve(HERE, '..');
@@ -173,4 +174,29 @@ test('⑤ 상위 폴더를 다른 계정이 만들어 쓸 수 없어도 시험�
     const d = JSON.parse(out.trim().split('\n').pop()).d;
     assert.ok(d.startsWith(path.join(tmp, 'dvc-test-cfg-')) && !d.startsWith(path.join(tmp, 'dvc-test-cfg-65534', '')), `남의 폴더가 아니라 /tmp 에 바로: ${d}`);
   } finally { fs.rmSync(box, { recursive: true, force: true }); }
+});
+
+test('⑥ 웹 vitest 전역 준비도 같은 규칙 — 계정별 상위 폴더 · 정리 · 죽은 실행이 남긴 폴더는 다음 실행이 지운다(Ctrl-C · KILL 로 정리가 돌지 않던 것)', () => {
+  const SETUP = path.resolve(SERVER, '../web/vitest.globalSetup.js');
+  const ROOT = path.join(os.tmpdir(), `dvc-vitest-cfg-${process.getuid()}`);
+  fs.mkdirSync(ROOT, { recursive: true, mode: 0o700 });
+  const dead = fs.mkdtempSync(path.join(ROOT, '2147483000-'));
+  fs.writeFileSync(path.join(dead, 'auth-secret'), 'x');
+  const old = (Date.now() - 20 * 60_000) / 1000; fs.utimesSync(dead, old, old);
+  try {
+    const env = { ...process.env }; delete env.CONFIG_DIR; delete env.DVC_TEST_ISOLATED_CONFIG;
+    const out = execFileSync(process.execPath, ['--input-type=module', '-e',
+      `const m = await import(${JSON.stringify(pathToFileURL(SETUP).href)}); const fs = await import('node:fs');
+       const td = m.default(); const d = process.env.CONFIG_DIR; fs.writeFileSync(d + '/auth-secret', 'y'); const had = fs.existsSync(d); td();
+       console.log(JSON.stringify({ d, had, gone: !fs.existsSync(d) }));`], { env, encoding: 'utf8' });
+    const r = JSON.parse(out.trim().split('\n').at(-1));
+    assert.ok(r.d.startsWith(path.join(ROOT, '')), `계정별 상위 폴더 아래: ${r.d}`);
+    assert.equal(r.had, true); assert.equal(r.gone, true, '정리(teardown)가 지운다');
+    assert.equal(fs.existsSync(dead), false, '죽은 pid · 오래된 폴더는 다음 실행이 지운다');
+    // CONFIG_DIR 이 이미 있으면 건드리지 않는다
+    const keep = execFileSync(process.execPath, ['--input-type=module', '-e',
+      `const m = await import(${JSON.stringify(pathToFileURL(SETUP).href)}); console.log(String(m.default()) + '|' + process.env.CONFIG_DIR);`],
+    { env: { ...env, CONFIG_DIR: '/nonexistent-keep' }, encoding: 'utf8' }).trim();
+    assert.equal(keep, 'undefined|/nonexistent-keep');
+  } finally { fs.rmSync(dead, { recursive: true, force: true }); }
 });

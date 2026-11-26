@@ -24,46 +24,11 @@
  *   (`.claude/skills/verify/SKILL.md`).
  */
 import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
+import { makeOwnTmpDir } from './_tmpRoot.js';
 
-// 계정마다 따로(2026-11-26 점검 2회차 — 재현): 공용 이름 하나면 root 로 한 번 돌린 뒤 다른 계정의 실행이 그 폴더(0755)에 만들 수 없어 **모든 시험이 시작하자마자**
-//   EACCES 였다. 0700 · 내 소유 · 심링크가 아닌 진짜 폴더일 때만 쓰고 청소한다 — 심링크면 청소가 엉뚱한 폴더(가리키는 곳)의 하위를 지웠다(재현).
-//   조건이 맞지 않으면 예전처럼 OS 임시 폴더에 바로 만들고 청소는 하지 않는다(시험을 멈추게 하지 않는다).
-const UID = typeof process.getuid === 'function' ? process.getuid() : 'u';
-const ROOT = path.join(os.tmpdir(), `dvc-test-cfg-${UID}`);
-const STALE_MS = 10 * 60_000;
-
-/** ROOT 가 쓸 수 있는 내 폴더인가(없으면 0700 으로 만든다). 심링크 · 남의 소유 · 남이 쓸 수 있는 권한이면 false. */
-function rootIsMine() {
-  try { fs.mkdirSync(ROOT, { mode: 0o700 }); } catch (e) { if (e?.code !== 'EEXIST') return false; }
-  try {
-    const st = fs.lstatSync(ROOT);
-    if (!st.isDirectory() || st.isSymbolicLink()) return false;
-    if (typeof process.getuid === 'function' && st.uid !== process.getuid()) return false;
-    if ((st.mode & 0o022) !== 0) return false;
-    return true;
-  } catch { return false; }
-}
-
-/** 죽은 시험 프로세스가 남긴 폴더를 지운다 — 이름의 pid 가 없고(ESRCH) 10분 넘게 손대지 않은 진짜 폴더만(심링크는 따라가지 않는다). 실패는 시험 결과가 아니다. */
-function sweepStale() {
-  let names = [];
-  try { names = fs.readdirSync(ROOT); } catch { return; }
-  const now = Date.now();
-  for (const n of names) {
-    const m = /^(\d+)-/.exec(n);
-    if (!m || Number(m[1]) === process.pid) continue;
-    try { process.kill(Number(m[1]), 0); continue; } catch (e) { if (e?.code !== 'ESRCH') continue; }   // 살아 있다(EPERM 포함) — 건드리지 않는다
-    const p = path.join(ROOT, n);
-    try { const st = fs.lstatSync(p); if (st.isDirectory() && !st.isSymbolicLink() && now - st.mtimeMs > STALE_MS) fs.rmSync(p, { recursive: true, force: true }); } catch { /* */ }
-  }
-}
-
+// 상위 폴더 · 청소 규칙은 `_tmpRoot.js` 하나(웹 vitest.globalSetup.js 와 같이 쓴다) — 계정마다 · 0700 · 심링크가 아닌 내 폴더일 때만 청소(2회차 재현 두 건).
 if (!process.env.CONFIG_DIR) {
-  const mine = rootIsMine();
-  if (mine) sweepStale();
-  const dir = fs.mkdtempSync(mine ? path.join(ROOT, `${process.pid}-`) : path.join(os.tmpdir(), `dvc-test-cfg-${process.pid}-`));
+  const dir = makeOwnTmpDir('dvc-test-cfg');
   process.env.CONFIG_DIR = dir;
   process.env.DVC_TEST_ISOLATED_CONFIG = dir;   // 시험이 '격리 중인가' 를 확인할 때 쓴다(isolateConfig.test.js)
   const cleanup = () => { try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 20 }); } catch { /* 정리 실패는 시험 결과가 아니다 */ } };
