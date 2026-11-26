@@ -41,12 +41,15 @@ registry.importServers([   // 16진 글자뿐인 짧은 등록 주소 — 토큰
 const op = (body) => call('POST /tools/rack/op', { user: ADMIN, body });
 
 test('1 순수: 겹치는 키는 구간을 합쳐 통째로 가린다 · 색인 여럿을 한 번에', () => {
-  assert.equal(TM.stripTags('ZZSN12345678', TM.tagIndexOf(['ZZSN', 'SN12345678'])), '•••', '앞에서 시작한 짧은 키가 뒤 키의 앞부분을 먹어도 꼬리가 남지 않는다');
+  assert.equal(TM.stripTags('ZZSN1212345678', TM.tagIndexOf(['ZZSN12', 'SN1212345678'])), '•••', '앞에서 시작한 짧은 키가 뒤 키의 앞부분을 먹어도 꼬리가 남지 않는다');
+  // 2회차 반증 C2: 6자 미만 키는 낱말 통째일 때만 — 긴 키에 붙은 4자 키는 맞지 않고, 긴 키만 가린다
+  assert.equal(TM.stripTags('ZZSN12345678', TM.tagIndexOf(['ZZSN', 'SN12345678'])), 'ZZ•••');
   assert.equal(TM.stripTags('next to SN12345678', TM.tagIndexOf(['1234']), TM.tagIndexOf(['SN12345678'])), 'next to •••', '그 장비의 짧은 시리얼 + 법인의 긴 시리얼');
   assert.equal(TM.stripTags('a 1234 b SN12345678 c', TM.tagIndexOf(['1234']), TM.tagIndexOf(['SN12345678'])), 'a ••• b ••• c');
   assert.equal(TM.stripTags('abcd x efgh', TM.tagIndexOf(['abcd']), null, TM.tagIndexOf(['efgh'])), '••• x •••', '빈 색인을 섞어도 된다 · 떨어진 구간은 따로');
   assert.equal(TM.stripTags('abcd efgh', TM.tagIndexOf(['abcd']), TM.tagIndexOf(['efgh'])), '•••', '구분자만 사이에 둔 두 키는 한 구간(사영에서 맞닿는다)');
-  assert.equal(TM.stripTags('abcdefgh', TM.tagIndexOf(['abcd', 'efgh'])), '•••', '맞닿은 구간은 하나로');
+  assert.equal(TM.stripTags('abcdefghijkl', TM.tagIndexOf(['abcdef', 'ghijkl'])), '•••', '맞닿은 구간은 하나로');
+  assert.equal(TM.stripTags('abcdefgh', TM.tagIndexOf(['abcd', 'efgh'])), 'abcdefgh', '6자 미만 키는 붙여 쓴 글자 속에서 맞지 않는다');
   const hx = TM.needleIndexOf(['idrac1.mgmt', 'mgmt.example'], { min: 3 });
   assert.equal(TM.replaceNeedles('see idrac1.mgmt.example now', hx, '(X)'), 'see (X) now', '겹치는 등록 주소도 꼬리 없이');
 });
@@ -60,7 +63,14 @@ test('1 순수: 느린 기준 구현(키마다 모든 일치 구간의 합집합
     let proj = ''; const pos = [];
     for (let i = 0; i < text.length; i += 1) { if (isKeySep(text[i])) continue; const l = text[i].toLowerCase(); proj += l.length === 1 ? l : text[i]; pos.push(i); }
     const hit = new Array(proj.length).fill(false);
-    for (const k of keys) for (let a = proj.indexOf(k); a >= 0; a = proj.indexOf(k, a + 1)) for (let x = a; x < a + k.length; x += 1) hit[x] = true;
+    // 경계 규칙(2회차 반증 C2)을 구현과 다른 방식(원문 조각 + 정규식)으로 적는다: 6자 미만 = 붙여 쓴 낱말 통째 · 6자 이상 = 붙여 썼거나 양 끝이 낱말 경계
+    const ok = (a, k) => {
+      const first = pos[a]; const last = pos[a + k.length - 1];
+      const glued = text.slice(first, last + 1).length === k.length;
+      const edge = !/[\p{L}\p{N}]$/u.test(text.slice(0, first)) && !/^[\p{L}\p{N}]/u.test(text.slice(last + 1));
+      return k.length >= 6 ? (glued || edge) : (glued && edge);
+    };
+    for (const k of keys) for (let a = proj.indexOf(k); a >= 0; a = proj.indexOf(k, a + 1)) if (ok(a, k)) for (let x = a; x < a + k.length; x += 1) hit[x] = true;
     let out = ''; let from = 0; let a = 0;
     while (a < proj.length) {
       if (!hit[a]) { a += 1; continue; }

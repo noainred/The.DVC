@@ -162,6 +162,41 @@ export function changedFields(f0, f, keys) {
   return out;
 }
 
+/**
+ * 전산실 조회 실패를 화면 자료에 반영한다(순수 — 2회차 반증 B-3).
+ * 실패한 전산실의 직전 화면이 남아 있으면 ‘낡음’ 표시(staleErr)를 **그 자료에** 붙인다 — 그 전산실을 다시 불러오는 데 성공해 자료가 통째로 바뀔 때만 사라진다.
+ * 오류 상태 하나에 두면 다른 전산실을 눌렀다 곧바로 돌아올 때 표시만 지워져 낡은 화면이 잠금 없이 그려졌다.
+ *  · 다른 전산실의 자료 · 이 시도(seq)보다 **나중에** 받은 자료는 건드리지 않는다(늦게 온 옛 실패가 새 자료를 잠그지 않게).
+ *  · 없어진 전산실(404) · 권한 없음(403)이면 자료를 비운다(일시 실패 5xx · 네트워크는 직전 화면을 둔다).
+ */
+export function viewAfterLoadFail(view, roomId, seq, err) {
+  if (!view || view.room?.id !== roomId || (view.loadSeq || 0) > seq) return view;
+  if (err?.status === 404 || err?.status === 403) return null;
+  return { ...view, staleErr: err || true };
+}
+
+/** 쓰기를 시작한 자리(at)에서 사용자가 옮기지 않았는가(순수) — 법인 · 데이터센터 · 전산실이 같고, 열린 창이 없거나 그 쓰기를 시작한 창 그대로. */
+export function sameSpot(at, now) {
+  if (!at || !now) return false;
+  return now.corp === at.corp && now.site === at.site && now.room === at.room && (!now.modal || now.modal === at.modal);
+}
+
+/**
+ * 끌어 놓기 성공을 화면에 먼저 반영한다(순수) — 그 장비의 랙 · 시작 U 를 바꾸고, 랙을 건너 옮겼으면 두 랙의 머리 합계를 ‘낡음’(totalsStale)으로 표시한다
+ * (합계는 서버가 계산한 값이라 다시 불러올 때까지 옛 값이다 — 2회차 반증 C6). 다른 전산실의 자료 · 없는 장비는 그대로.
+ */
+export function viewAfterMove(view, roomId, placeId, rackId, uStart) {
+  if (!view || view.room?.id !== roomId) return view;
+  const cur = (view.places || []).find((p) => p.id === placeId);
+  if (!cur) return view;
+  const touched = cur.rackId !== rackId ? new Set([cur.rackId, rackId]) : null;
+  return {
+    ...view,
+    places: view.places.map((p) => (p.id === placeId ? { ...p, rackId, uStart } : p)),
+    racks: touched ? (view.racks || []).map((k) => (touched.has(k.id) ? { ...k, totalsStale: true } : k)) : view.racks,
+  };
+}
+
 /** 이력 action → 글자. */
 export const ACTION_LABEL = Object.freeze({
   'site.add': '데이터센터 추가', 'site.rename': '데이터센터 이름 변경', 'site.remove': '데이터센터 삭제',

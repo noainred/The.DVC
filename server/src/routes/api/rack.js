@@ -37,6 +37,8 @@ import { acquireExport } from '../../util/exportBusy.js';
 import { addressMatcher, hostVariants, maskedIdToken, maskedAddressName } from '../../auth/addressMask.js';
 import { tagIndexOf, stripTags, needleIndexOf, replaceNeedles } from '../../rack/textMask.js';
 import { todayStamp } from '../../util/dayKey.js';
+import { isIPv6 } from 'node:net';
+import { isPlaceholderTag } from '../../bmusage/commonTag.js';
 
 const toolsPerm = requirePerm('tools');
 const csvPerm = requirePerm('data.csv');
@@ -98,8 +100,12 @@ export const UNPLACED_MAX = 2000;   // 미배치 서버 목록에 싣는 최대 
 const HEALTH = { ok: 'ok', warning: 'warn', critical: 'crit' };
 const healthOf = (v) => HEALTH[String(v || '').toLowerCase()] || (v ? 'unknown' : '');
 
-/** 그 법인의 서버(범위로 먼저 자름) — 서비스 태그 키 → 서버. */
-function corpServers(req, corpId) {
+/**
+ * 그 법인의 서버(범위로 먼저 자름) — 서비스 태그 키 → 서버.
+ * `invTags` = 가림 재료에 **범위 밖 서버의 인벤토리 태그**도 넣는다(시리얼을 가리는 판본만 켠다 — 2회차 반증 B-1: 등록부 태그 칸이 비고 인벤토리에서만 읽힌
+ *   범위 밖 서버의 태그가 다른 장비 이름에 적혀 있으면 원문으로 나갔다). 인벤토리 조회는 메모리 캐시 한 번이다(`invCache.getInventory`).
+ */
+function corpServers(req, corpId, { invTags = false } = {}) {
   const assign = getDatacenterAssign() || {};
   const all = analysisServersWithRemote({ user: req.user, query: {} });
   // 가림 재료(주소 · 태그)는 **범위로 자르기 전** 등록부 전체에서 모은다(2회차 점검 1 — 원장은 법인 단위로 보이는데 재료를 조회자 범위 안 서버로만 만들면,
@@ -111,6 +117,10 @@ function corpServers(req, corpId) {
     //   서비스 태그 같은 id 까지 '주소' 로 넣으면 시리얼을 볼 수 있는 계정에게도 그 태그가 가려진다(3회차 점검 5).
     else if (s.id != null && /[.:]/.test(String(s.id))) hosts.push(String(s.id));
     if (typeof s.serviceTag === 'string' && s.serviceTag) allTags.push(s.serviceTag);
+    else if (invTags) {
+      let t = ''; try { t = invForServer(s)?.system?.serviceTag; } catch { t = ''; }
+      if (typeof t === 'string' && t) allTags.push(t);
+    }
   }
   const { servers } = scopeIdracServers(req, all);
   const byKey = new Map();
@@ -131,8 +141,11 @@ function corpServers(req, corpId) {
 
 /**
  * 비관리자 판본의 글자 가림(요청당 하나 — 1회차 점검 S1 · S2 · 2회차 점검 1~6). **가림은 이 함수 하나가 정한다**(순서 · 재료 · 판정):
- *  ① 주소 먼저: 등록부 **전체**의 관리 주소(대소문자 무시 · 글 속 어디든) → '(주소 가림)', 그다음 낱말 단위로 IP 리터럴(IPv4 가 든 낱말 · IPv6 리터럴 ·
- *     대괄호 + 포트)과 등록 주소와 같은 낱말 → 토큰. 판정은 다른 iDRAC 화면과 같은 `addressMatcher`.
+ *  ① 주소 먼저: 낱말 단위로 IP 리터럴(IPv4 가 든 낱말 · **엄격한** IPv6 리터럴 · 대괄호 + 포트)과 등록 주소와 같은 낱말 → 토큰,
+ *     그다음 등록부 **전체**의 관리 주소(대소문자 무시) → '(주소 가림)' — FQDN · IP 는 글 속 어디든, 점 없는 짧은 이름은 호스트 이름 낱말 통째일 때만
+ *     (`rack/textMask.js` 경계 규칙). ⚠ IPv6 는 다른 iDRAC 화면의 `addressMatcher`(콜론 2개 + 16진이면 주소 — 식별자 칸용)보다 **엄격하다**:
+ *     글에는 시각 '12:30:45' · 포트 '1:2:3' · 이력의 '이름: 랙' 이 흔하다(2회차 반증 C3 가) — '::' 가 있거나 콜론이 7개이고 `net.isIPv6` 가 참일 때만.
+ *  · 태그 재료에서 자리표시 값(`bmusage/commonTag.js isPlaceholderTag` — 'None' · 'Default string' · '0000000')은 뺀다(2회차 반증 C2 — 'phone-01 none' 이 지워졌다).
  *  ② 태그 나중: 시리얼을 가리는 판본(범위 비관리자)만 — 등록부 서비스 태그 + 그 법인 원장의 시리얼 + (그 행 · 그 장비의 시리얼)을 비교 키로 걷어 낸다.
  *     순서가 반대면 'idrac-<태그>.<도메인>' 에서 태그가 먼저 '•••' 가 되어 주소가 등록 주소와 맞지 않는다(2회차 점검 3).
  *  · `name(s, tags?)` = 이름 하나(표시 이름 · 등록부 이름 · 판 차이의 항목 이름) — 통째로 주소면 '이름 가림', 아니면 ① ②.
@@ -152,33 +165,57 @@ function wordCore(w) {
   while (b > a && CLOSE_P.has(w[b - 1])) b -= 1;
   return w.slice(a, b);
 }
-const IPV4_ONLY = /^\d{1,3}(?:\.\d{1,3}){3}$/;
+const LETTER_OR_DIGIT = /[\p{L}\p{N}]/u;
+const isLD = (ch) => ch !== undefined && LETTER_OR_DIGIT.test(ch);
+const realTags = (arr) => (arr || []).filter((t) => !isPlaceholderTag(t));
+/** 낱말 안에 IPv4 꼴(점으로 나뉜 1~3자리 숫자 묶음이 4개 이상 이어짐)이 있는가 — 'node.10.20.30.97' · '[BMC]10.20.31.11' · '10.20.30.99.' · 'Unity 5.3.0.0' 의 낱말. */
+function hasIpv4(w) {
+  for (const m of w.matchAll(/[0-9.]+/g)) {
+    if (m[0].length < 7) continue;
+    let n = 0;
+    for (const part of m[0].split('.')) { n = part.length >= 1 && part.length <= 3 ? n + 1 : 0; if (n >= 4) return true; }
+  }
+  return false;
+}
+/**
+ * 낱말 안에 IPv6 리터럴이 있는가(엄격) — 16진 · 콜론이 이어진 구간이 ① 앞뒤가 글자 · 숫자가 아니고('std::string' 의 'd::' 제외) ② 16진 숫자가 있고
+ * ③ '::' 가 있거나 콜론이 7개이며 ④ `net.isIPv6` 가 참. 끝 · 앞에 붙은 콜론 하나는 문장 부호로 보고 뗀다(이력 글 '이름: 랙').
+ * 'https://[2001:db8::a]/ui' · 'net 2001:db8::a/64' · 'ip=fe80::1%eth0' 는 주소, '12:30:45' · '1:2:3' · 'AB:CD:' 는 아니다.
+ * MAC(16진 두 자리 × 6 · 콜론)도 주소로 본다 — 예전 판정(콜론 2개 + 16진)이 가리던 것이라 엄격하게 바꾸며 다시 열지 않는다.
+ */
+const MAC_RE = /^[0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5}$/;
+function hasIpv6(w) {
+  for (const m of w.matchAll(/[0-9a-fA-F:]+/g)) {
+    let run = m[0];
+    if (run.length < 3 || run.length > 48 || !run.includes(':')) continue;
+    if (isLD(w[m.index - 1]) || isLD(w[m.index + run.length])) continue;
+    while (run.endsWith(':::')) run = run.slice(0, -1);
+    while (run.startsWith(':::')) run = run.slice(1);
+    if (run.endsWith(':') && !run.endsWith('::')) run = run.slice(0, -1);
+    if (run.startsWith(':') && !run.startsWith('::')) run = run.slice(1);
+    if (!/[0-9a-fA-F]/.test(run)) continue;
+    if (run.length === 17 && MAC_RE.test(run)) return true;
+    if (!run.includes('::') && run.split(':').length !== 8) continue;
+    if (isIPv6(run)) return true;
+  }
+  return false;
+}
 function textMaskOf({ admin, showSerial, hosts = [], tags = [] }) {
   if (admin) return PLAIN_MASK;
   const match = addressMatcher(hosts);
+  const hostEq = (v) => !!v && match.addressSet.has(v.trim().toLowerCase());
   const hostIdx = needleIndexOf(hosts.flatMap(hostVariants), { min: 3 });
-  const corpIdx = showSerial ? null : tagIndexOf(tags);
+  const corpIdx = showSerial ? null : tagIndexOf(realTags(tags));
   /**
    * 낱말 하나가 IP 리터럴(또는 등록 주소 그대로)을 품었는가.
-   *  · 문장 부호를 뗀 알맹이 · 낱말 통째를 공용 판정기에(IPv4 가 든 낱말 · IPv6 리터럴 · 등록 주소와 같은 낱말).
-   *  · 그래도 아니면 낱말 안에서 16진 · 콜론 · 점이 이어진 구간마다 다시 본다 — 문장 부호 · 다른 글자와 붙은 주소('[BMC]10.20.31.11' · 'https://[2001:db8::a]/ui' ·
-   *    'net 2001:db8::a/64' · 'ip=fe80::1%eth0' · 'node.10.20.30.97')가 알맹이 판정을 빠져나갔다(3회차 점검 1 · 4).
+   *  · 문장 부호를 뗀 알맹이 · 낱말 통째가 등록 주소와 같은가(대소문자 무시).
+   *  · 낱말 안의 IPv4 꼴 · 엄격한 IPv6 리터럴 — 문장 부호 · 다른 글자와 붙은 주소('[BMC]10.20.31.11' · 'https://[2001:db8::a]/ui' ·
+   *    'net 2001:db8::a/64' · 'ip=fe80::1%eth0' · 'node.10.20.30.97')도 잡는다(3회차 점검 1 · 4).
    */
   const ipWord = (w) => {
     const core = wordCore(w);
-    if ((core && match(core)) || match(w)) return true;
-    // IPv4: 숫자 · 점이 이어진 구간(앞뒤 점은 뗀다) — 'node.10.20.30.97' · '[BMC]10.20.31.11' · '10.20.30.99.'
-    for (const m of w.matchAll(/[0-9.]+/g)) {
-      let a = 0; let b = m[0].length;
-      while (a < b && m[0][a] === '.') a += 1;
-      while (b > a && m[0][b - 1] === '.') b -= 1;
-      if (b - a >= 7 && b - a <= 15 && IPV4_ONLY.test(m[0].slice(a, b))) return true;
-    }
-    // IPv6: 16진 · 콜론 · 점이 이어진 구간에 콜론이 둘 이상 — 'https://[2001:db8::a]/ui' · 'net 2001:db8::a/64' · 'ip=fe80::1%eth0'
-    for (const m of w.matchAll(/[0-9a-fA-F:.]+/g)) {
-      if (m[0].length >= 3 && m[0].length <= 64 && m[0].split(':').length > 2 && match(m[0])) return true;
-    }
-    return false;
+    if (hostEq(core) || hostEq(w)) return true;
+    return hasIpv4(w) || hasIpv6(w);
   };
   // 순서: ① IP 리터럴 낱말을 **원문 낱말에서 먼저** 토큰으로 ② 그다음 등록 주소를 글 속에서 치환.
   //   반대면 등록 IP '10.20.30.4' 가 다른 IP '10.20.30.45' 의 앞부분만 가려 '(주소 가림)5' 가 남는다(3회차 점검 2).
@@ -193,7 +230,7 @@ function textMaskOf({ admin, showSerial, hosts = [], tags = [] }) {
     }).join('');
   };
   // 그 행 · 그 장비의 시리얼(own)과 법인 색인을 **한 번에** 훑는다(따로 훑으면 짧은 own 이 다른 장비의 긴 시리얼을 깨뜨려 꼬리가 남는다 — 3회차 점검 정확성 1).
-  const tagsOut = (t, own) => (showSerial ? t : stripTags(t, own && own.length ? tagIndexOf(own) : null, corpIdx));
+  const tagsOut = (t, own) => (showSerial ? t : stripTags(t, own && own.length ? tagIndexOf(realTags(own)) : null, corpIdx));
   const text = (s, own) => (typeof s !== 'string' || !s ? s : tagsOut(addr(s), own));
   return {
     admin: false, match, text,
@@ -207,7 +244,7 @@ async function corpTextMask(req, corpId) {
   const admin = isAdminDetailUser(req.user);
   if (admin) return PLAIN_MASK;
   const showSerial = serialsVisible(req);
-  const { hosts, allTags } = corpServers(req, corpId);
+  const { hosts, allTags } = corpServers(req, corpId, { invTags: !showSerial });
   const tags = showSerial ? [] : [...allTags, ...(await R.corpSerials(corpId))];
   return textMaskOf({ admin, showSerial, hosts, tags });
 }
@@ -276,7 +313,7 @@ async function roomView(req, roomId) {
   const showSerial = serialsVisible(req);
   const corpId = await R.corpOf('room', roomId).then((x) => x?.corpId || '');
   if (!corpId || !canRead(acc, corpId)) return null;
-  const { byKey, list, hosts, allTags } = corpServers(req, corpId);
+  const { byKey, list, hosts, allTags } = corpServers(req, corpId, { invTags: !admin && !showSerial });
   // 1회차 점검 S1: 표시 이름(label)과 그 이름으로 만든 이력 글에도 주소 · 태그 가림(예전엔 link 만 가렸다 — 화면이 등록부 이름으로 채운 label 이 그대로 나갔다)
   const mask = textMaskOf({ admin, showSerial, hosts, tags: admin || showSerial ? [] : [...allTags, ...(await R.corpSerials(corpId))] });
   const data = await R.getRoom(roomId, { maskRow: admin ? null : mask.row });   // 이력 글은 db 층이 그 행의 tags 와 함께 가림 함수에 넘긴다(tags 는 돌려주지 않는다)
