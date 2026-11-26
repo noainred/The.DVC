@@ -20,7 +20,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -90,9 +91,12 @@ test('마커 파일명에 버전이 없다 — prune 이 지우면 이 변경이
 
   // 문자열 검사로 끝내지 않고 prune 을 실제로 실행한다.
   const versions = JSON.stringify({ versions: [{ version: '9.9.9' }] });
-  const vfile = join(ROOT, 'server', 'tmp', `prune-${process.pid}.json`);
-  execFileSync('mkdir', ['-p', dirname(vfile)]);
-  execFileSync('bash', ['-c', `cat > ${JSON.stringify(vfile)}`], { input: versions });
+  // 2026-11-26 시험 위생 점검: 예전에는 저장소 안 server/tmp(목 서버 설정 폴더로 안내되는 곳)에 쓰고 성공 경로에서만 지웠다 — 단언이 실패하면 남았다.
+  //   OS 임시 폴더에 쓰고 finally 로 지운다.
+  const vdir = mkdtempSync(join(tmpdir(), 'dvc-prune2558-'));
+  const vfile = join(vdir, 'versions.json');
+  try {
+  writeFileSync(vfile, versions);
 
   const assets = [
     name,                                       // 마커 — 유지돼야 한다
@@ -109,7 +113,7 @@ test('마커 파일명에 버전이 없다 — prune 이 지우면 이 변경이
   assert.ok(!out.includes('versions.json'));
   assert.ok(out.includes('uag-monitor-app-1.2.3-macos-arm64.tar.gz'),
     'prune 이 실제로 동작하는지(오래된 버전을 고르는지) 함께 확인한다 — 아무것도 안 고르면 위 단언이 무의미하다');
-  execFileSync('rm', ['-f', vfile]);
+  } finally { rmSync(vdir, { recursive: true, force: true }); }
 });
 
 /* ------------------- ③ Python 매트릭스 단일화 (v2.559) ------------------- */

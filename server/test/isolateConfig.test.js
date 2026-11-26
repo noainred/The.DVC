@@ -49,7 +49,7 @@ test('② CONFIG_DIR 이 없으면 빈 임시 폴더를 잡고, 프로세스가 
 const d = process.env.CONFIG_DIR;
 fs.writeFileSync(d + '/x.json', '{}'); fs.mkdirSync(d + '/sub'); fs.writeFileSync(d + '/sub/y.db', 'z');
 console.log(JSON.stringify({ d, mark: process.env.DVC_TEST_ISOLATED_CONFIG, empty: fs.readdirSync(d).length }));`);
-  assert.ok(r.d && r.d.startsWith(path.join(os.tmpdir(), 'dvc-test-cfg-')), r.d);
+  assert.ok(r.d && r.d.startsWith(path.join(os.tmpdir(), 'dvc-test-cfg', '')), r.d);
   assert.equal(r.mark, r.d);
   assert.equal(fs.existsSync(r.d), false, '끝나면 하위 파일까지 지운다');
 });
@@ -102,8 +102,45 @@ test('③ 시험 실행기는 시험 파일마다 자식 프로세스에서 미�
     assert.equal(dirs.length, 2, out);
     assert.notEqual(dirs[0], dirs[1], '파일마다 다른 임시 폴더');
     for (const d of dirs) {
-      assert.ok(d.startsWith(path.join(os.tmpdir(), 'dvc-test-cfg-')), d);
+      assert.ok(d.startsWith(path.join(os.tmpdir(), 'dvc-test-cfg', '')), d);
       assert.equal(fs.existsSync(d), false, '자식이 끝나면 지워진다');
     }
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+});
+
+test('④ 죽은 시험 프로세스(시한 초과 · Ctrl-C)가 남긴 폴더는 다음 실행이 지운다 — 살아 있는 프로세스 · 최근 폴더는 두고', () => {
+  const ROOT = path.join(os.tmpdir(), 'dvc-test-cfg');
+  fs.mkdirSync(ROOT, { recursive: true });
+  // 없는 pid(32비트 끝 근처 — pid_max 를 넘는다) · 오래됨 → 지운다
+  const dead = fs.mkdtempSync(path.join(ROOT, '2147483000-'));
+  fs.writeFileSync(path.join(dead, 'a.json'), '{}');
+  const old = (Date.now() - 20 * 60_000) / 1000; fs.utimesSync(dead, old, old);
+  // 없는 pid · 최근 → 둔다(다른 이름공간의 살아 있는 시험일 수 있다)
+  const fresh = fs.mkdtempSync(path.join(ROOT, '2147483001-'));
+  // 살아 있는 pid(이 프로세스) · 오래됨 → 둔다
+  const alive = fs.mkdtempSync(path.join(ROOT, `${process.pid}-`)); fs.utimesSync(alive, old, old);
+  try {
+    child({}, `console.log(JSON.stringify({ d: process.env.CONFIG_DIR }));`);
+    assert.equal(fs.existsSync(dead), false, '죽은 pid · 오래된 폴더는 지운다');
+    assert.equal(fs.existsSync(fresh), true, '최근 폴더는 둔다');
+    assert.equal(fs.existsSync(alive), true, '살아 있는 pid 의 폴더는 둔다');
+  } finally { for (const d of [dead, fresh, alive]) fs.rmSync(d, { recursive: true, force: true }); }
+});
+
+test('④ 시험 실행기가 자식을 시한 초과로 죽여도 다음 실행에서 지워진다(실제 실행기)', (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dvc-isolate-kill-'));
+  try {
+    fs.writeFileSync(path.join(tmp, 'hang.test.mjs'), `import { test } from 'node:test'; import fs from 'node:fs';
+test('hang', async () => { fs.writeFileSync(process.env.CONFIG_DIR + '/pid', String(process.pid)); console.log('CFG=' + process.env.CONFIG_DIR); await new Promise(() => setInterval(() => {}, 1000)); });\n`);
+    const env = { ...process.env }; delete env.CONFIG_DIR; delete env.DVC_TEST_ISOLATED_CONFIG; delete env.NODE_TEST_CONTEXT;
+    let out = '';
+    try { out = execFileSync(process.execPath, ['--test', '--test-timeout=1500', '--import', PRELOAD, 'hang.test.mjs'], { cwd: tmp, env, encoding: 'utf8', timeout: 60_000 }); }
+    catch (e) { out = String(e.stdout || ''); }
+    const left = /CFG=(\S+)/.exec(out)?.[1];
+    assert.ok(left, `자식이 설정 폴더를 알리지 않았다: ${out.slice(0, 400)}`);
+    if (!fs.existsSync(left)) { t.skip('이 node 판은 시한 초과에도 exit 훅을 돌려 폴더가 남지 않는다(확인할 것 없음 — node 22.23 실측은 남는다)'); return; }
+    const old = (Date.now() - 20 * 60_000) / 1000; fs.utimesSync(left, old, old);
+    child({}, `console.log(JSON.stringify({ d: process.env.CONFIG_DIR }));`);
+    assert.equal(fs.existsSync(left), false, `죽은 자식이 남긴 폴더(${left})를 다음 실행이 지운다`);
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 });

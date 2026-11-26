@@ -13,6 +13,10 @@
  *   · 시험 파일이 스스로 `CONFIG_DIR` 을 다시 잡는 것은 그대로 된다(이 파일은 그보다 먼저 돈다 — 기본값만 바꾼다).
  *   · 자식 프로세스를 `{ ...process.env }` 로 띄우는 시험은 같은 임시 폴더를 물려준다. env 를 통째로 새로 짜서 넘기는 시험은 이 보호 밖이다.
  *   · 프로세스가 끝날 때 지운다(exit 훅 — 시험이 만든 하위 파일까지 · 다른 exit 훅보다 **뒤에**). 지우지 못해도 시험 결과는 바꾸지 않는다.
+ *   · 시험 실행기가 자식을 **죽이면**(파일 시한 초과 · Ctrl-C) exit 훅이 돌지 않아 폴더가 남는다 — 그래서 폴더를 `<tmp>/dvc-test-cfg/<pid>-XXXXXX` 에 만들고,
+ *     다음에 이 파일이 불릴 때 **프로세스가 없고(pid 확인) 10분 넘게 손대지 않은** 폴더를 지운다(같은 상위 폴더만 읽는다 — /tmp 전체를 훑지 않는다).
+ *   · 남는 틈: exit 리스너를 붙인 같은 동기 틱 안에서 process.exit 를 부르면 정리를 뒤로 옮기기 전에 끝나 폴더가 남는다(실제 코드에서 그런 경로는 찾지 못했다 —
+ *     남으면 위 청소가 다음 실행에서 지운다).
  *   · vCenter 예제 템플릿 폴백은 `config.js` 가 설정 폴더가 아니라 **저장소의 config 폴더**에서 읽으므로 영향이 없다.
  *
  * ⚠ 시험 파일 하나만 직접 돌릴 때(`node --test test/x.test.js`)는 이 파일이 불리지 않는다 — `--import ./test/_isolateConfig.js` 를 붙인다
@@ -22,8 +26,27 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+const ROOT = path.join(os.tmpdir(), 'dvc-test-cfg');
+const STALE_MS = 10 * 60_000;
+
+/** 죽은 시험 프로세스가 남긴 폴더를 지운다 — 이름의 pid 가 없고(ESRCH) 10분 넘게 손대지 않은 것만. 실패는 시험 결과가 아니다. */
+function sweepStale() {
+  let names = [];
+  try { names = fs.readdirSync(ROOT); } catch { return; }
+  const now = Date.now();
+  for (const n of names) {
+    const m = /^(\d+)-/.exec(n);
+    if (!m || Number(m[1]) === process.pid) continue;
+    try { process.kill(Number(m[1]), 0); continue; } catch (e) { if (e?.code !== 'ESRCH') continue; }   // 살아 있다(EPERM 포함) — 건드리지 않는다
+    const p = path.join(ROOT, n);
+    try { if (now - fs.statSync(p).mtimeMs > STALE_MS) fs.rmSync(p, { recursive: true, force: true }); } catch { /* */ }
+  }
+}
+
 if (!process.env.CONFIG_DIR) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dvc-test-cfg-'));
+  sweepStale();
+  fs.mkdirSync(ROOT, { recursive: true });
+  const dir = fs.mkdtempSync(path.join(ROOT, `${process.pid}-`));
   process.env.CONFIG_DIR = dir;
   process.env.DVC_TEST_ISOLATED_CONFIG = dir;   // 시험이 '격리 중인가' 를 확인할 때 쓴다(isolateConfig.test.js)
   const cleanup = () => { try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 20 }); } catch { /* 정리 실패는 시험 결과가 아니다 */ } };

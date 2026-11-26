@@ -117,7 +117,7 @@ function* coverSteps(cand, all, now, { tagsOf = null, exact = false, memo = null
       const group = [cand, ...ps];
       const occ = (w, lo, hi) => effectiveOccurrences(w, lo, hi);
       for (const a of [...anchorsOf(cand), ...dstAnchors(cand, group, now, occ), ...ps.filter((w) => w.schedule?.kind !== 'weekly').flatMap(anchorsOf)]) {
-        if (windowOver(a, cand, group, occ, limit)) return true;
+        if (windowOver(a, cand, group, occ, limit, now - DAY)) return true;
       }
     }
     return false;
@@ -177,9 +177,9 @@ function* coverSteps(cand, all, now, { tagsOf = null, exact = false, memo = null
     const extra = dstAnchors(cand, group, now, occOf).filter((o) => !have.has(o.start) && have.add(o.start));
     for (const a of [...candAnchors, ...extra, ...ps.filter((w) => w.schedule?.kind !== 'weekly').flatMap(anchorsOf)]) {
       const lo = a.start - 2 * DAY; const hi = a.end + 2 * DAY;
-      if (!occOf(cand, lo, hi).length) continue;   // 그 둘레에 후보 발생이 없으면 동료를 세지 않는다(windowOver 와 같은 판단)
+      if (!occOf(cand, Math.max(lo, now - DAY), hi).length) continue;   // 그 둘레에 (지금 − 1일 뒤) 후보 발생이 없으면 동료를 세지 않는다(windowOver 와 같은 판단)
       for (const w of ps) if (warm(w, lo, hi)) yield;   // 동료 발생 조각을 새로 셌으면 양보 자리(R1 ④)
-      if (windowOver(a, cand, group, occOf, limit)) return true;
+      if (windowOver(a, cand, group, occOf, limit, now - DAY)) return true;
       yield;
     }
   }
@@ -212,10 +212,16 @@ function dstAnchors(cand, group, now, occOf) {
   for (const tz of tzs) for (const T of tzTransitions(tz, now, end + DST_BEFORE_MS)) pushAll(out, occOf(cand, Math.max(T - DST_BEFORE_MS, now - DAY), T + DST_AFTER_MS));
   return out;
 }
-/** 기준점 하나 둘레(앞뒤 2일)에서 후보 발생과 겹치는 24시간 창 중 덮임이 상한을 넘는 것이 있는가(순수 — 빠른 길 · 정확 경로가 같은 함수). */
-function windowOver(a, cand, group, occOf, limit) {
+/**
+ * 기준점 하나 둘레(앞뒤 2일)에서 후보 발생과 겹치는 24시간 창 중 덮임이 상한을 넘는 것이 있는가(순수 — 빠른 길 · 정확 경로가 같은 함수).
+ * 후보 발생은 **끝이 now − 1일 뒤인 것만**(기준점의 아래 끝과 같다 — `mineFloor`). 2026-11-26 시험 위생 점검(재현): 둘레를 앞으로 2일 넓히면서 지난 후보 발생까지 세어,
+ *   시간대 전환 직후 며칠은 **이미 지난 발생**(전환 전 오프셋)과 동료가 만든 덮임으로 '12시간 초과 → 소유자' 가 됐다 — 앞으로는 넘지 않는 창인데 운영자에게 403 이었다
+ *   (Y1 이 기준점에서 막으려던 것과 같은 꼴이 이 둘레에서 다시 열렸다 · 독립 격자 bruteCover 와 어긋남 — bmUsageLoop6y A3 가 2027-03-15 · 03-29 · 10-04 실행에서 실패).
+ *   동료 발생은 그대로 둘레 전체를 센다(지난 동료 발생이 지금의 후보 발생과 같은 24시간에 걸치면 그것은 센다).
+ */
+function windowOver(a, cand, group, occOf, limit, mineFloor) {
   const lo = a.start - 2 * DAY; const hi = a.end + 2 * DAY;
-  const mine = occOf(cand, lo, hi);
+  const mine = occOf(cand, Math.max(lo, mineFloor), hi);
   if (!mine.length) return false;
   const iv = group.flatMap((w) => occOf(w, lo, hi)).map((o) => ({ from: Math.max(lo, o.start), to: Math.min(hi, o.end) })).sort((x, y) => x.from - y.from);
   const m = [];
