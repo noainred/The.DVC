@@ -108,23 +108,36 @@ const BUSY = Symbol('idrac-poll-busy'); // v2.591(감사 P1): 재진입 가드�
 //   · 이벤트 읽기는 정규 주기가 지금 읽고 있는 **그 서버만** 끝나기를 기다렸다가 읽는다(건너뛰면 그 장비의 인벤토리를 정규 주기가 떠안아 주기가 간격을 넘겼다 — 5회차 성능 D1).
 //   · 정규 주기는 이벤트 읽기가 맡았거나 맡을 서버의 인벤토리는 읽지 않는다(이벤트 쪽이 읽는다) · 지금 읽고 있는 서버는 그 주기에 건너뛴다(eventBusy).
 //   · 두 쪽이 **동시 상한 하나**(pollConcurrency)를 함께 쓴다(각자 풀을 쓰면 세션이 상한의 두 배까지 갔다 — 5회차 성능 D2).
+//   · 자리가 나면 **정규 · 수동 주기 대기자에게 먼저** 넘긴다 — 이벤트 읽기(한 대에 인벤토리까지 요청 수 배)가 FIFO 로 번갈아 자리를 쥐면 상한이 작을 때
+//     느린 장비 하나의 이벤트만으로 함대 정규 수집이 밀렸다(6회차 성능 P1: 상한 1 에서 정규 4/12). 이벤트 읽기는 주기 사이 · 남는 자리에서 돈다.
 let _eventRunning = false;
 const _eventIds = new Set();      // 이벤트 읽기가 지금 읽는 서버
 const _eventPending = new Set();  // 지금 이벤트 묶음이 맡은 서버(아직 안 읽은 것 포함)
 const _cycleInflight = new Map(); // 정규 주기가 지금 읽고 있는 서버 → 끝나면 풀리는 약속
-const _slot = { n: 0, q: [] };    // 정규 · 이벤트가 함께 쓰는 동시 상한
-async function acquireSlot() {
+const _slot = { n: 0, q: [], qe: [] };    // 정규 · 이벤트가 함께 쓰는 동시 상한 · q = 정규 · 수동 대기 · qe = 이벤트 읽기 대기
+async function acquireSlot(kind = 'cycle') {
   const max = Math.max(1, Number(config.idrac.pollConcurrency) || 1);
-  if (_slot.n < max) { _slot.n += 1; return; }
-  await new Promise((r) => { _slot.q.push(r); });   // 풀어 주는 쪽이 자리를 그대로 넘긴다(n 그대로)
+  if (_slot.n < max && (kind !== 'event' || !_slot.q.length)) { _slot.n += 1; return; }
+  await new Promise((r) => { (kind === 'event' ? _slot.qe : _slot.q).push(r); });   // 풀어 주는 쪽이 자리를 그대로 넘긴다(n 그대로)
 }
-function releaseSlot() { const r = _slot.q.shift(); if (r) r(); else _slot.n -= 1; }
-async function pollOnce({ manual = false, only = null } = {}) {
+// 정규 대기자 먼저(6회차 성능 P1). 정규 작업자는 서버 하나를 끝내고 다음 서버 자리를 **다음 마이크로태스크에** 잡으므로, 정규 대기자가 없을 때
+//   이벤트 대기자에게는 한 틱(setImmediate) 늦게 넘긴다 — 바로 넘기면 주기 도중 자리를 이벤트가 가로챘다.
+function releaseSlot() {
+  const r = _slot.q.shift();
+  if (r) { r(); return; }
+  _slot.n -= 1;
+  if (_slot.qe.length) setImmediate(drainEventSlots);
+}
+function drainEventSlots() {
+  const max = Math.max(1, Number(config.idrac.pollConcurrency) || 1);
+  while (_slot.n < max && _slot.qe.length && !_slot.q.length) { _slot.n += 1; _slot.qe.shift()(); }
+}
+async function pollOnce({ manual = false, only = null, onRefreshed = null } = {}) {
   if (only) {
     if (_eventRunning) return BUSY;   // 이벤트 읽기는 한 번에 하나(eventSub 가 묶는다 — 겹치면 다시 잡는다)
     _eventRunning = true;   // 지금 읽는 서버 표시(_eventIds)는 서버를 실제로 읽기 시작할 때 넣고 다 읽으면 바로 뺀다(5회차 엣지 #2)
     for (const id of only) _eventPending.add(String(id));
-    try { return await withJob('idrac.poll.event', () => pollOnceInner({ manual, only })); } finally { for (const id of only) _eventPending.delete(String(id)); _eventRunning = false; }
+    try { return await withJob('idrac.poll.event', () => pollOnceInner({ manual, only, onRefreshed })); } finally { for (const id of only) _eventPending.delete(String(id)); _eventRunning = false; }
   }
   if (running) return BUSY; // 고RTT iDRAC 다수에서 한 주기가 간격을 넘겨 폴이 중첩되는 것 방지
   running = true;
@@ -146,15 +159,17 @@ async function pollOnce({ manual = false, only = null } = {}) {
  *   (한 대짜리 실행이 ‘마지막 주기 1대’ · ‘주기 0.3초’ 로 보이면 신선도 판정이 흔들린다). 파트 장애 훅도 부르지 않는다 — 호출부(eventSub)가 바로 판정한다(P5 — 두 번 돌지 않게).
  *   돌려주는 값 — 읽은 서버 수(servers)와 인벤토리를 다시 읽은 서버 수.
  */
-async function pollOnceInner({ manual = false, only = null } = {}) {
+async function pollOnceInner({ manual = false, only = null, onRefreshed = null } = {}) {
   // v2.583: 이 카운터는 v2.548 부터 **pollOnce() 안에** 선언돼 있었다 — 쓰는 곳은 이 함수라 실장비(목 모드가
   // 아닌) 폴마다 마지막 줄에서 ReferenceError 가 났고, pollNow 가 잡아 `[idrac] pollNow 실패: invRefreshed is
   // not defined` 를 **폴마다** 찍었다. 그 결과 v2.548 F7(인벤토리 갱신 즉시 파트 장애 판정) 훅은 한 번도 돌지
   // 않았다(목 모드는 위에서 먼저 return 해 드러나지 않았다). 선언을 쓰는 함수로 옮긴다.
   let invRefreshed = 0; // 이번 폴에서 인벤토리를 갱신한 서버 수 → 0 이 아니면 파트 장애 훅
   let evRefreshed = 0;
+  const invRead = new Set();   // 이벤트 읽기에서 인벤토리를 실제로 다시 읽은 서버(나머지는 unread — 인증 정지 · 장비 오류)
   const skippedForCycle = [];   // 이벤트 읽기에서 정규 주기와 겹쳐 뺀 서버(호출부가 다시 잡는다)  // 그 가운데 장비 이벤트로 다시 읽기 표시가 된 서버(바쁨 재시도 소진 · 묶음 상한으로 미룬 것) — 훅이 urgent 로 보낸다
-  if (only && (isStopped() || isMockMode())) return { servers: 0, invRefreshed: 0 };   // 이벤트 읽기는 긴급중단 · 데모에서 주기 상태를 바꾸지 않는다
+  // 이벤트 읽기는 긴급중단 · 데모에서 주기 상태를 바꾸지 않는다 · 긴급중단이면 읽지 못한 서버(unread)를 돌려 호출부가 재읽기 표지를 세운다(해제 뒤 첫 주기가 다시 읽고 urgent — 디버깅 6회차 보안 #2)
+  if (only && (isStopped() || isMockMode())) return { servers: 0, invRefreshed: 0, skipped: [], unread: isStopped() ? [...only] : [] };
   if (isStopped()) { lastRun = { at: Date.now(), ok: 0, failed: 0, skipped: '긴급중단', results: [] }; return; }
   // mock 데모: 실제 Redfish 폴 대신 합성 전력 샘플 적재(전력 화면이 비지 않게). live/auto엔 무영향.
   if (isMockMode()) {
@@ -206,10 +221,11 @@ async function pollOnceInner({ manual = false, only = null } = {}) {
     const sid = String(s.id);
     // 서버마다 읽기 직전에 확인하고 표시한다(같은 틱 안의 확인 · 표시라 둘이 같은 서버를 함께 잡지 않는다)
     if (only) {
-      // 정규 주기가 지금 읽는 서버 — 그 서버만 끝나기를 기다린다(5회차 성능 D1). 정규 주기는 _eventPending 의 인벤토리를 읽지 않으므로 짧다
+      // 정규 주기가 지금 읽는 서버 — 그 서버만 끝나기를 기다린다(5회차 성능 D1). 정규 주기는 _eventPending 의 인벤토리를 새로 읽기 시작하지 않는다 —
+      //   다만 이미 읽고 있던 인벤토리는 끝까지 기다리므로 느린 장비면 길다(6회차 엣지 #2). 그래서 판정은 묶음 끝이 아니라 서버마다(eventSub judgeLoop)
       for (let i = 0; i < 4 && _cycleInflight.has(sid); i += 1) await _cycleInflight.get(sid);
       if (_cycleInflight.has(sid)) { skippedForCycle.push(sid); return; }   // 그래도 겹치면(새 주기가 다시 잡음) 이벤트 쪽이 다시 시도한다(5회차 엣지 #1)
-      await acquireSlot();
+      await acquireSlot('event');
       if (_cycleInflight.has(sid)) { releaseSlot(); skippedForCycle.push(sid); return; }
       _eventIds.add(sid);
       try { await pollServer(s); } finally { _eventIds.delete(sid); _eventPending.delete(sid); releaseSlot(); }
@@ -302,6 +318,7 @@ async function pollOnceInner({ manual = false, only = null } = {}) {
             if (inv.collections && typeof inv.collections === 'object') inv.collections.fans = sensorFans?.length ? 'ok' : (sensorErr ? 'failed' : 'ok');
             setInventory(s.id, inv, { mark });
             invRefreshed += 1;
+            if (only) { invRead.add(String(s.id)); if (onRefreshed) { try { onRefreshed(String(s.id)); } catch { /* 판정 고리 실패가 읽기를 막지 않는다 */ } } }   // 서버마다 판정을 깨운다(6회차 엣지 #2)
             if (forced) evRefreshed += 1;
             // v2.611(감사 COL2611-01): v2.610 스캔이 HPE 의 제품번호(SKU)를 서비스태그로 등록했으면 시리얼로 1회 교정한다.
             if (inv.system?.hpe) { try { correctHpeServiceTag(s.id, { sku: inv.system.sku, serial: inv.system.serialNumber }); } catch { /* 교정 실패가 수집을 막지 않는다 */ } }
@@ -337,7 +354,10 @@ async function pollOnceInner({ manual = false, only = null } = {}) {
   // 모든 서버 폴 후 한 트랜잭션으로 배치 적재(insertMany 없으면 개별 insert 폴백).
   try { if (db.insertMany) db.insertMany(samples); else for (const sm of samples) db.insert(sm.serverId, sm.watts, sm.ts); }
   catch (e) { console.warn('[idrac] 전력 적재 실패:', e.message); }
-  if (only) return { servers: servers.length - skippedForCycle.length, invRefreshed, skipped: skippedForCycle };   // 이벤트 읽기 — 주기 상태 · prune · 훅은 건드리지 않는다(위 주석)
+  if (only) {   // 이벤트 읽기 — 주기 상태 · prune · 훅은 건드리지 않는다(위 주석)
+    const unread = servers.map((s) => String(s.id)).filter((id) => !invRead.has(id) && !skippedForCycle.includes(id));   // 인증 정지 · 장비 오류로 못 읽은 서버 — 호출부가 재읽기 표지를 세운다(6회차 보안 #2)
+    return { servers: servers.length - skippedForCycle.length, invRefreshed, skipped: skippedForCycle, unread };
+  }
   // Retention pruning — 매 폴 DELETE 스캔 금지(store.js/metrics 샘플러와 동일 스로틀 패턴).
   if (config.idrac.retentionDays > 0 && (++pruneTick % 10 === 0)) {
     try {
@@ -360,7 +380,8 @@ async function pollOnceInner({ manual = false, only = null } = {}) {
     console.warn(`[idrac] poll: 한 주기가 ${Math.round(durationMs / 1000)}초 걸렸습니다(대상 ${servers.length}대 · 주기 ${Math.round(config.idrac.pollIntervalMs / 1000)}초 · 동시 ${config.idrac.pollConcurrency}) — 그동안 다음 주기는 건너뜁니다`);
   }
   lastRun = { at: ts, startedAt: ts, finishedAt, durationMs, servers: servers.length, ok: okCount, failed, results, notPolled, authStopped: results.filter((r) => r.authStopped).length, authSkipped, manual,
-    powerPartial: results.filter((r) => r.powerPartial).length };   // v2.602: 부분 합이라 적재하지 않은 서버 수
+    powerPartial: results.filter((r) => r.powerPartial).length,   // v2.602: 부분 합이라 적재하지 않은 서버 수
+    eventBusy: results.filter((r) => r.eventBusy).length };   // 이벤트 읽기가 그때 읽던 서버라 이 주기에 건너뛴 수 — 화면이 ‘성공 · 실패’ 밖으로 따로 말한다(디버깅 6회차 화면 G3)
   if (lastRun.powerPartial) console.warn(`[idrac] poll: 섀시 일부의 Power 조회 실패로 부분 합이 된 서버 ${lastRun.powerPartial}대 — 전력 적재를 건너뛰었습니다`);
   if (failed) console.warn(`[idrac] poll: ${okCount}/${results.length} 성공${authSkipped ? ` · 인증 실패 정지로 건너뜀 ${authSkipped}` : ''}`);
   // v2.548 F7: 인벤토리가 하나라도 갱신됐으면 파트 장애 판정(중앙)/push(엣지)를 즉시 트리거한다 —
@@ -405,13 +426,13 @@ export async function pollNow({ manual = false } = {}) {
  * v3.52 ⑬ 장애 바로 받기 — 이벤트를 받은 뒤 한 주기를 바로(수동이 아님 — 인증 정지 서버는 그대로 건너뛴다 · 재진입 가드 그대로).
  * @returns {Promise<{ busy:boolean }>} busy = 다른 주기가 진행 중이라 이번에는 돌지 않았다(호출부가 다시 잡는다)
  */
-export async function pollNowForEvent(ids = []) {
+export async function pollNowForEvent(ids = [], { onRefreshed = null } = {}) {
   const only = new Set((Array.isArray(ids) ? ids : []).map(String));
   if (!only.size) return { busy: false, servers: 0, invRefreshed: 0 };
   let r;
-  try { r = await pollOnce({ manual: false, only }); } catch (err) { console.error('[idrac] 이벤트 뒤 수집 실패:', err.message); }
+  try { r = await pollOnce({ manual: false, only, onRefreshed: typeof onRefreshed === 'function' ? onRefreshed : null }); } catch (err) { console.error('[idrac] 이벤트 뒤 수집 실패:', err.message); }
   if (r === BUSY) return { busy: true };
-  return { busy: false, servers: Number(r?.servers) || 0, invRefreshed: Number(r?.invRefreshed) || 0, skipped: Array.isArray(r?.skipped) ? r.skipped : [] };
+  return { busy: false, servers: Number(r?.servers) || 0, invRefreshed: Number(r?.invRefreshed) || 0, skipped: Array.isArray(r?.skipped) ? r.skipped : [], unread: Array.isArray(r?.unread) ? r.unread : [] };
 }
 
 export async function pollNowManual() {

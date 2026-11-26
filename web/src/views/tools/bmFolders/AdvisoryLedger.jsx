@@ -83,7 +83,7 @@ export default function AdvisoryLedger({ meta, models = [], onClose, onChanged }
         </div>
         {res?.unmatched?.n && checked ? (
           <div className="muted bmd-note" role="status">
-            지금 목록의 어떤 서버 모델에도 맞지 않는 줄 {res.unmatched.n}개 — 모델 칸을 확인하십시오(적용은 됩니다 · 장비가 알려 주는 모델 글자는 예를 들어 ‘PowerEdge R750’ · ‘ProLiant DL380 Gen10’ 꼴입니다).
+            지금 목록의 어떤 서버 모델에도 맞지 않는 줄 {res.unmatched.n}개 — 모델 칸을 확인하십시오({errN ? '' : '이 알림만으로는 적용을 막지 않습니다 · '}장비가 알려 주는 모델 글자는 예를 들어 ‘PowerEdge R750’ · ‘ProLiant DL380 Gen10’ 꼴입니다).
             {' '}{res.unmatched.rows.slice(0, 20).map((x) => `${x.id}(${x.model})`).join(' · ')}{res.unmatched.n > 20 ? ` 외 ${res.unmatched.n - 20}개` : ''}
           </div>
         ) : null}

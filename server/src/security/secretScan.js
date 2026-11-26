@@ -22,6 +22,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { SECRET_FIELDS, FILE_EXTRA_SECRET_FIELDS, isSealed } from './secretVault.js';
+import { safeLoadText } from '../util/atomicWrite.js';   // 빠져 있어 손상 파일 하나로 점검 전체가 500 이었다(디버깅 6회차 보안 #1)
 
 const yieldLoop = () => new Promise((r) => setImmediate(r));
 const MASK = '***';

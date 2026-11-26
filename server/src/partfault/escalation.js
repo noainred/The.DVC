@@ -305,7 +305,8 @@ export function escalationPlan({ settings, state, open, now = Date.now(), maxSen
     const sig = partSigOf(p);
     let cur = Object.hasOwn(prev, key) ? prev[key] : null;
     if (!cur && staleBySig.has(sig)) { cur = staleBySig.get(sig); staleBySig.delete(sig); }   // 키 이전 — 기록 · 확인을 이어받는다
-    if (cur && reEnabled && !cur.ackedAt) cur = { ...cur, since: now, sent: [], ps: {} };
+    // 다시 켜면 그때 정책(lp)도 놓는다 — 보낸 줄을 비웠으니 넘겨받을 것이 없다(남기면 lp 정책이 ‘켠 때’ 부터 세어 앞 단계를 건너뛰었다 — 디버깅 6회차 판정 #2)
+    if (cur && reEnabled && !cur.ackedAt) { const { lp: _lp, ...rest } = cur; cur = { ...rest, since: now, sent: [], ps: {}, pol: rest.pol || '-' }; }
     const pol = enabled ? policyFor(settings, p) : null;
     // 다른 정책으로 넘어감(예: 주의 → 이상 — 받는 곳이 다른 팀): 보낸 단계는 정책별로 세므로(stepDone) 새 정책의 단계는 아직 안 간 것이다(디버깅 1회차 판정 #3).
     //   진행(since · 보낸 줄)은 지우지 않는다 — 1회차처럼 지우면 정책이 오가는 장애는 단계가 영영 가지 않았다(디버깅 2회차 판정 #1)
@@ -313,7 +314,10 @@ export function escalationPlan({ settings, state, open, now = Date.now(), maxSen
     if (!pol) {
       // 옛 기록(정책 열 · ps 없음)이 정책 밖에서 처음 보이면 ‘넘겨받지 않음’(-)으로 굳힌다 — 나중에 생긴 정책이 옛 since · 보낸 줄을 물려받아 가장 높은 단계로 바로 가지 않게(디버깅 4회차 판정 #1)
       //   멈춘 회차(꺼짐 · 데모 · 점검 꺼짐 — enabled false)에서는 굳히지 않는다 · 굳힐 때 그때 있던 정책(lp)을 기억해 그 정책으로 돌아오면 이어받는다(디버깅 5회차 판정 #1)
-      if (enabled && cur && !cur.pol && !Object.keys(cur.ps || {}).length) cur = { ...cur, pol: '-', lp: (settings?.policies || []).map((x) => String(x?.id || '')).filter(Boolean).slice(0, ESC_POLICIES_MAX), sent: cur.sent.map((e) => (e[4] ? e : [e[0], e[1], e[2], e[3], '-'])) };
+      //   그때 정책(lp)은 처음 본 회차에 멈춤과 관계없이 적는다 — 멈춘 동안 새로 만든 정책이 옛 since · 보낸 줄을 넘겨받지 않게(디버깅 6회차 판정 #1)
+      const isLeg = cur && !cur.pol && !Object.keys(cur.ps || {}).length;
+      if (isLeg && !Array.isArray(cur.lp)) cur = { ...cur, lp: (settings?.policies || []).map((x) => String(x?.id || '')).filter(Boolean).slice(0, ESC_POLICIES_MAX) };
+      if (enabled && isLeg) cur = { ...cur, pol: '-', sent: cur.sent.map((e) => (e[4] ? e : [e[0], e[1], e[2], e[3], '-'])) };
       if (cur) {
         // 정책 밖으로 이어받은 기록도 새 열쇠라 자리를 쓴다(디버깅 3회차 판정 #8)
         if (!Object.hasOwn(prev, key)) { if (newCount + reserved >= ESC_ITEMS_MAX) continue; newCount += 1; }
@@ -326,10 +330,13 @@ export function escalationPlan({ settings, state, open, now = Date.now(), maxSen
     if (!Object.hasOwn(prev, key)) { if (newCount + reserved >= ESC_ITEMS_MAX) { overCap += 1; continue; } newCount += 1; }
     // 정책별 시작 시각 — 처음 그 정책 대상이 된 때부터 센다(다른 정책에서 오래 열려 있던 장애가 새 정책의 가장 높은 단계로 바로 가지 않게 — 3회차 판정 #1).
     //   돌아온 정책은 그 시각을 그대로(오가도 진행을 잃지 않는다 — 2회차 판정 #1). 옛 기록(정책 열 없음)은 처음 보는 정책이 since · 보낸 줄을 넘겨받는다(업그레이드 연속 — 3회차 판정 #2)
-    const legacy = cur && ((!cur.pol && !Object.keys(cur.ps || {}).length) || (cur.pol === '-' && Array.isArray(cur.lp) && cur.lp.includes(pol.id) && cur.ps?.[pol.id] == null));
+    //   넘겨받기는 정책 열(pol)과 떼어 본다 — lp 에 있고 · 그 정책 시작 시각이 없고 · 아직 아무도 가져가지 않은 ‘-’ 줄이 있으면(사이에 lp 밖 정책이 한 번 덮어도 — 디버깅 6회차 판정 #3).
+    //   lp 밖 정책은 지금부터 세고 옛 줄(‘’)은 ‘-’ 로 바꿔 둔다(뒤에 오는 lp 정책이 가져가게 — 6회차 판정 #1)
+    const inLp = cur && Array.isArray(cur.lp) && cur.lp.includes(pol.id) && cur.ps?.[pol.id] == null;
+    const legacy = cur && ((!cur.pol && !Object.keys(cur.ps || {}).length && (!Array.isArray(cur.lp) || cur.lp.includes(pol.id))) || (cur.pol === '-' && inLp) || (inLp && cur.sent.some((e) => e[4] === '-')));
     const ps = { ...(cur?.ps || {}) };
     if (ps[pol.id] == null) ps[pol.id] = legacy ? cur.since : now;
-    const sent0 = cur ? (legacy ? cur.sent.map((e) => (e[4] && e[4] !== '-' ? e : [e[0], e[1], e[2], e[3], pol.id])) : [...cur.sent]) : [];
+    const sent0 = cur ? (legacy ? cur.sent.map((e) => (e[4] && e[4] !== '-' ? e : [e[0], e[1], e[2], e[3], pol.id])) : cur.sent.map((e) => (e[4] ? e : [e[0], e[1], e[2], e[3], '-']))) : [];
     const it = cur ? { ...cur, sig, sent: sent0, pol: pol.id, ps } : { since: now, sig, sent: [], ackedAt: null, ackBy: '', pol: pol.id, ps };
     items[key] = it;
     if (it.ackedAt) continue;
@@ -400,7 +407,9 @@ export function escalationMarkOf(p, items, settings = null, run = null) {
   const it = items && Object.hasOwn(items, partKeyOf(p)) ? items[partKeyOf(p)] : null;
   const curPol = (settings?.enabled ? policyFor(settings, p)?.id : '') || it?.pol || '';
   // 지금 정책의 단계만 — 다른 정책에 간 단계를 이 정책의 진행으로 말하지 않는다(디버깅 2회차 판정 #1). 정책 열이 없는 옛 줄은 첫 회차가 넘겨받기 전까지 지금 정책 것으로 보인다(4회차 화면 E1)
-  const mine = (it?.sent || []).filter((e) => ofPol(e, curPol) || !e[4] || (e[4] === '-' && Array.isArray(it?.lp) && it.lp.includes(curPol)));
+  //   옛 줄 · ‘-’ 줄은 엔진이 넘겨줄 정책(lp 에 있고 아직 시작 시각이 없는 정책 · lp 가 없으면 어느 정책이든)에만 센다 — 표지와 엔진이 같은 조건(디버깅 6회차 판정 #1 · #3)
+  const lpHas = Array.isArray(it?.lp) && it.lp.includes(curPol) && it?.ps?.[curPol] == null;
+  const mine = (it?.sent || []).filter((e) => ofPol(e, curPol) || (!e[4] && (!Array.isArray(it?.lp) || lpHas)) || (e[4] === '-' && lpHas));
   const ok = mine.filter((e) => e[3] === 'ok').map((e) => e[0]);
   const bad = mine.filter((e) => e[3] === 'fail' || e[3] === 'give').map((e) => e[0]);
   const step = ok.length ? Math.max(...ok) + 2 : null;

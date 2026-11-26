@@ -104,5 +104,14 @@ describe('디버깅 1회차 화면', () => {
     expect(a).toContain('지금 목록의 어떤 서버 모델에도 맞지 않는 줄');
     expect(read('../BmFolders.jsx')).toMatch(/<AdvisoryLedger meta=\{d\.check\?\.advisories\} models=\{/);
   });
+  it('6회차 화면 — 오류 행이 있어 적용이 잠기면 ‘맞지 않는 줄’ 안내가 적용된다고 말하지 않음(G1) · 수동 수집은 이벤트 읽기로 건너뛴 서버를 따로 센다(G3)', async () => {
+    const a = read('./AdvisoryLedger.jsx');
+    expect(a).toContain("모델 칸을 확인하십시오({errN ? '' : '이 알림만으로는 적용을 막지 않습니다 · '}장비가 알려 주는");
+    expect(a).not.toContain('적용은 됩니다');
+    const { manualPollMessage } = await import('../../idrac/manualPollText.js');
+    const m = manualPollMessage({ lastRun: { ok: 3, failed: 0, eventBusy: 1 } });
+    expect(m).toMatchObject({ ok: true, tone: 'green', text: '수동 1회 수집 — 성공 3 · 실패 0 · 이벤트 읽기 중이라 건너뜀 1' });
+    expect(manualPollMessage({ lastRun: { ok: 3, failed: 0 } }).text).toBe('수동 1회 수집 — 성공 3 · 실패 0');   // 구버전 서버(필드 없음)는 예전 문구
+  });
 });
 

@@ -33,6 +33,7 @@ export const EVT_RING = 200;
 export const EVT_DEBOUNCE_MS = 30_000;
 export const SUB_TIMEOUT_MS = 30_000;
 export const SUB_CONCURRENCY = 4;
+export const EVT_JUDGE_GAP_MS = 2_000;   // 한 묶음 안에서 판정 시작 사이 최소 간격(서버가 다시 읽힐 때마다 판정하되 이 간격으로 묶는다 — 디버깅 6회차 엣지 #2)
 export const EVT_BATCH_MAX = 500;   // 한 번 ‘바로 점검’ 에서 다시 읽는 서버 상한(넘친 것은 정규 주기 — deferred 로 센다)
 export const SUB_SERVERS_MAX = 2000;
 // 글자 · 수만(객체 · 배열은 '' — String({toString:1}) 이 던지던 길 · 반증 A6)
@@ -158,22 +159,54 @@ const _deferredIds = new Set(); // 묶음 상한을 넘어 정규 주기로 미�
 const DEFAULT_DEPS = {
   now: () => Date.now(),
   debounceMs: EVT_DEBOUNCE_MS,
+  judgeGapMs: EVT_JUDGE_GAP_MS,
+  /** 부품 장애 판정(중앙) · push(엣지) — 진행 중이면 각 모듈이 끝난 뒤 한 번 더로 합친다. */
+  judge: async (reason) => {
+    if (config.agent.centralUrl) await (await import('../partfault/push.js')).pushPartFaultsNow({ reason });
+    else await (await import('../partfault/poller.js')).runPartFaultsNow({ reason });
+  },
   /** 바로 점검 — ① 그 서버들의 인벤토리를 다음 폴링에서 다시 읽게 표시하고 ② iDRAC 폴링을 한 번 바로 돌려 **장비를 다시 읽은 뒤** ③ 부품 장애를 판정(중앙) · push(엣지).
    *  캐시만 다시 판정하면(최대 30분 묵은 인벤토리) 빨라지지 않는다(반증 A2). 폴링이 다른 주기로 진행 중이면 busy — 묶음을 다시 잡는다. */
   runCheck: async (reason, ids) => {
     // 강제 재읽기 표지는 **포기할 때만** 세운다(scheduleCheck — 다시 시도를 다 쓴 서버) — 미리 세우면 느린 장비의 인벤토리 읽기가 늘 정규 주기로 넘어갔다(디버깅 5회차 엣지 #3)
     const P = await import('./poller.js');
+    // 판정은 서버가 다시 읽힐 때마다 부른다(겹치면 한 번으로 · 시작 사이 judgeGapMs) — 묶음 끝에 한 번이면 느린 서버 하나가 같은 묶음의 빠른 서버 판정 · urgent push 를
+    //   그 서버가 끝날 때까지 붙잡았다(디버깅 6회차 엣지 #2: 지연 200~500ms 장비에서 6.6~16.4초). 다시 읽은 것이 없으면 판정하지 않는다(판정할 새 값이 없다)
+    const J = judgeLoop(reason);
     // 그 서버들만 읽는다 — 함대 전체 주기를 돌리지 않는다(v3.52 디버깅 1회차 성능 P2: 이벤트 1건에 50대 전부 · 요청 368건이었다)
-    const r = await P.pollNowForEvent(ids);
-    if (r?.busy) return { busy: true };
+    const r = await P.pollNowForEvent(ids, { onRefreshed: J.kick });
+    if (r?.busy) { await J.settle(); return { busy: true }; }
     const retry = Array.isArray(r?.skipped) ? r.skipped : [];   // 정규 주기가 그때 읽고 있던 서버 — 그 서버만 다시 잡는다(5회차 엣지 #1)
-    // 판정은 여기서 한 번 — 이벤트 읽기는 폴러의 파트 장애 훅을 부르지 않는다(성능 P5: 두 번 돌고 엣지는 WAN push 두 번이었다). 다시 읽은 것이 없으면 판정할 새 값이 없다
-    if (!(Number(r?.invRefreshed) > 0)) return { busy: false, refreshed: 0, retry };
-    if (config.agent.centralUrl) await (await import('../partfault/push.js')).pushPartFaultsNow({ reason });
-    else await (await import('../partfault/poller.js')).runPartFaultsNow({ reason });
-    return { busy: false, refreshed: Number(r.invRefreshed), retry };
+    // 읽지 못한 서버(긴급중단 · 인증 정지 · 장비 오류) — 다시 시도로는 풀리지 않는다. 바로 재읽기 표지를 세워 풀린 뒤 첫 주기가 다시 읽고 urgent 로 보내게(디버깅 6회차 보안 #2 — 표지 없이 버려져 30분 나이 기준까지 밀렸다)
+    const unread = Array.isArray(r?.unread) ? r.unread : [];
+    if (unread.length) { try { const C = await import('./invCache.js'); for (const id of unread) C.markInventoryStale(id, { event: true }); } catch { /* 표시 실패가 점검을 막지 않는다 */ } }
+    // 이벤트 읽기는 폴러의 파트 장애 훅을 부르지 않는다(성능 P5: 두 번 돌고 엣지는 WAN push 두 번이었다) — 판정은 위 judgeLoop 하나. 마지막 판정이 끝날 때까지 기다린다
+    await J.settle();
+    return { busy: false, refreshed: Number(r?.invRefreshed) || 0, retry };
   },
 };
+/**
+ * 묶음 안 판정 고리 — kick() 은 서버 하나를 다시 읽을 때마다. 판정이 돌고 있으면 끝난 뒤 한 번 더(몇 번 kick 해도 한 번) ·
+ *   시작 사이는 judgeGapMs 이상(500대 묶음이 판정을 쉬지 않고 돌리지 않게). settle() 은 남은 판정까지 끝난 뒤 돌아온다.
+ */
+function judgeLoop(reason) {
+  let dirty = false; let loop = null; let lastStart = -Infinity;
+  const kick = () => {
+    dirty = true;
+    if (loop) return;
+    loop = (async () => {
+      try {
+        while (dirty) {
+          const wait = lastStart + _deps.judgeGapMs - _deps.now();
+          if (wait > 0) await new Promise((res) => { setTimeout(res, wait).unref?.(); });
+          dirty = false; lastStart = _deps.now();
+          try { await _deps.judge(reason); } catch (e) { console.warn(`[bm-events] 판정 실패 — ${String(e?.message || e).slice(0, 160)}`); }
+        }
+      } finally { loop = null; }
+    })();
+  };
+  return { kick, settle: async () => { while (loop) await loop; } };
+}
 let _deps = DEFAULT_DEPS;
 export function _setEventDepsForTest(d) { _deps = d ? { ...DEFAULT_DEPS, ...d } : DEFAULT_DEPS; }
 export function _resetEventsForTest() { _ring.length = 0; _staleIds.clear(); _deferredIds.clear(); _busyRetries = 0; Object.assign(_stat, { received: 0, rejected: 0, dropped: 0, deferred: 0, checks: 0, rxAt: null, checkedAt: null, running: false }); if (_timer) clearTimeout(_timer); _timer = null; _pendingReason = ''; }

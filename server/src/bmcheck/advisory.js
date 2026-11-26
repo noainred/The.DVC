@@ -36,6 +36,9 @@ const VARIANT = /^(?:plus|v\d{1,2}|gen\d{1,2}|g\d{1,2}|m\d{1,2}|xd\d?|xa|xs|xe|x
 function modelMatch(serverRaw, serverCore, needCore, needRaw) {
   // 제품군 낱말뿐인 줄 — 제조사 이름은 Model 글자에 없으므로 제품군 낱말로만 본다(‘HPE ProLiant’ 줄이 어느 서버에도 안 맞던 것 — 디버깅 4회차 판정 #2). 제조사 이름뿐인 줄은 올릴 때 거절한다
   if (!needCore.length) { const fam = needRaw.filter((w) => FAMILY.has(w)); return fam.length > 0 && fam.every((w) => famHit(w, serverRaw)); }
+  // 제품군 + 세대 · 판 낱말뿐인 줄(‘ProLiant Gen10’ · ‘PRIMERGY M5’ · ‘UCS M5’) — 남은 세대 낱말만으로 보면 다른 제조사의 같은 세대(‘System x3650 M5’)에 맞는다.
+  //   이때는 그 제품군 낱말도 서버 모델에 있어야 한다(디버깅 6회차 판정 #4). 제품군 글자가 Model 에 없는 장비(Huawei ‘2288H V5’)는 맞지 않음으로 남고 CSV 검증이 알린다
+  { const fam = needRaw.filter((w) => FAMILY.has(w)); if (fam.length && needCore.every((w) => VARIANT.test(w)) && !fam.every((w) => famHit(w, serverRaw))) return false; }
   if (!needCore.every((w) => serverCore.has(w))) return false;
   for (const w of serverCore) if (!needCore.includes(w) && VARIANT.test(w)) return false;
   return true;
