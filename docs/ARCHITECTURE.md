@@ -88,7 +88,7 @@
 | `bmusage/` | 110 | 25,785 | `bmusage/poller.js` (19) | bmusage/poller.js — 베어메탈 사용률 주기 수집(v2.550). |
 | `bulletin/` | 1 | 851 | `bulletin/store.js` (4) | bulletin/store.js — 접속 공지(팝업)와 게시판 글 저장소(v2.722). |
 | `capacity/` | 4 | 860 | `capacity/sampler.js` (4) | Capacity Advisor 샘플러 — 운영 중인 포탈 프로세스 안에서 30초마다 자기 호스트를 실측한다 |
-| `central/` | 60 | 11,810 | `central/bmUsageEdgePull.js` (19) | central/bmUsageEdgePull.js — 중앙이 엣지에서 베어메탈 사용률을 **당긴다**(v2.554). |
+| `central/` | 60 | 11,814 | `central/bmUsageEdgePull.js` (19) | central/bmUsageEdgePull.js — 중앙이 엣지에서 베어메탈 사용률을 **당긴다**(v2.554). |
 | `clustercfg/` | 4 | 582 | `clustercfg/analyze.js` (13) | clustercfg/analyze.js — 특수 기능 '클러스터 HA·DRS 점검'(도구 키 `cluster-check`, v2.701) 판정(순수). |
 | `collector/` | 11 | 2,527 | `collector/registry.js` (82) | Collector registry — the list of remote collector agents (one per datacenter) |
 | `commmap/` | 2 | 461 | `commmap/demoMask.js` (3) | commmap/demoMask.js — 통신 지도·데이터 흐름 지도·3단 지도의 **데모 계정 판본** 입력 가림(v2.768 점검 R3-C2-2). |
@@ -97,7 +97,7 @@
 | `corpusage/` | 1 | 332 | `corpusage/build.js` (3) | corpusage/build.js — 법인별 서버 CPU·메모리 사용량 합계(순수, v2.625). |
 | `cost/` | 2 | 234 | `cost/analyze.js` (1) | cost/analyze.js — 특수 기능 '비용 배분(쇼백)'(도구 키 `cost-showback`, v2.707 — C11) 계산(순수). |
 | `curuser/` | 12 | 1,951 | `curuser/aggregate.js` (4) | curuser/aggregate.js — '현재 사용자' 집계(v2.520, 순수 모듈). |
-| `cvp/` | 31 | 8,811 | `cvp/registry.js` (11) | cvp/registry.js — Arista CloudVision(CVP) 서버 등록부(v2.608). |
+| `cvp/` | 32 | 9,447 | `cvp/registry.js` (11) | cvp/registry.js — Arista CloudVision(CVP) 서버 등록부(v2.608). |
 | `datacenter/` | 1 | 228 | `datacenter/store.js` (52) | DataCenter(법인) 레지스트리 — vCenter의 '상위 개념'. |
 | `dataflow/` | 1 | 307 | `dataflow/build.js` (3) | dataflow/build.js — '데이터 흐름 지도' 의 판정(v2.587, 순수 함수). |
 | `devflow/` | 1 | 204 | `devflow/build.js` (1) | devflow/build.js — 특수기능 '3단 지도(장비 → 엣지 → 메인)' 조립기(v2.588, 순수). |
@@ -129,7 +129,7 @@
 | `mail/` | 3 | 557 | `mail/settings.js` (23) | mail/settings.js — 포탈 공용 메일(SMTP) 설정 (`mail.json`, v2.454). |
 | `metrics/` | 8 | 2,233 | `metrics/unreadVcenters.js` (19) | metrics/unreadVcenters.js — '지금 값' 으로 쓰지 않는 vCenter 와 그 사유(순수 leaf — import 0). |
 | `migration/` | 1 | 140 | `migration/analyze.js` (1) | migration/analyze.js — 특수 기능 'VM 이전 준비도'(도구 키 `migration-readiness`, v2.707 — C7) 판정(순수). |
-| `mock/` | 29 | 8,199 | `mock/demo/flags.js` (65) | mock/demo/flags.js — 데모(DATA_SOURCE=mock) 모드 공용 판정(v2.708). |
+| `mock/` | 29 | 8,200 | `mock/demo/flags.js` (65) | mock/demo/flags.js — 데모(DATA_SOURCE=mock) 모드 공용 판정(v2.708). |
 | `net/` | 4 | 789 | `net/captureHistory.js` (5) | 네트워크 캡처 이력 저장소 — 캡처 결과의 메타·요약·진단을 CONFIG_DIR/capture-history.json에 |
 | `nsx/` | 6 | 1,134 | `nsx/store.js` (10) | In-memory NSX aggregator + poller. Mirrors the vCenter store design: each |
 | `overview/` | 1 | 170 | `overview/trend.js` (1) | overview/trend.js — 경영 보기 Overview 핵심 지표 추이(v2.670, 순수 모듈). |
@@ -141,14 +141,14 @@
 | `portalcheck/` | 8 | 2,641 | `portalcheck/archScan.js` (2) | portalcheck/archScan.js — 특수 기능 › 포탈 점검 › **아키텍처 점검**(v2.614) 판정 코어. |
 | `power/` | 1 | 181 | `power/total.js` (2) | power/total.js — 전체 소비 전력 합산(v2.664, **순수 모듈** — 테스트로 고정). |
 | `provision/` | 7 | 1,452 | `provision/jobs.js` (2) | VM provisioning job engine. Holds deployment jobs in memory and runs them |
-| `proxy/` | 13 | 3,162 | `proxy/sshExec.js` (49) | Small SSH helper built on ssh2: connect, run commands, and upload files via |
+| `proxy/` | 13 | 3,162 | `proxy/sshExec.js` (48) | Small SSH helper built on ssh2: connect, run commands, and upload files via |
 | `publicapi/` | 5 | 941 | `publicapi/time.js` (4) | 공개 API 의 **시각 표기 단일 소유자** (v2.562) — 순수 모듈. |
 | `rack/` | 3 | 1,014 | `rack/db.js` (1) | rack/db.js — 랙 실장도 **원장**(중앙 한 곳 · 2026-11-20 사용자 결정 '원장 위치는 중앙에 한곳'). |
 | `relaycheck/` | 5 | 568 | `relaycheck/poller.js` (5) | relaycheck/poller.js — HAProxy 경로 주기 점검(v2.429). CLAUDE.md 폴러 규약: 재진입 가드 + 동시 점검 제한 + 대상당 타임아웃 + |
 | `relaytopo/` | 4 | 757 | `relaytopo/store.js` (4) | relaytopo/store.js — 중계 토폴로지(Main – Edge DVC – IRS) 저장(v2.431, 사용자 요구 '첨부한 표처럼 Main-Edge1-Edge2 구조의 |
 | `reports/` | 8 | 1,050 | `reports/compliance.js` (6) | 버전/패치 준수 리포트 — VMware Tools 상태·VM 하드웨어 버전·ESXi 버전 분포를 스냅샷만으로 |
 | `rma/` | 14 | 2,917 | `rma/jobs.js` (8) | RMA 원격 명령 잡 큐(중앙, 인메모리) — claim→ack 2단계 확인응답(captureJobs.js 패턴 이식) |
-| `routes/` | 181 | 56,815 | `routes/capacity.js` (1) | Capacity Advisor API — 포탈/엣지 호스트 리소스 실측·평가·권고 조회. |
+| `routes/` | 181 | 56,976 | `routes/capacity.js` (1) | Capacity Advisor API — 포탈/엣지 호스트 리소스 실측·평가·권고 조회. |
 | `sanswitch/` | 51 | 11,672 | `sanswitch/registry.js` (12) | sanswitch/registry.js — SAN 스위치 등록부(v2.410). |
 | `search/` | 4 | 944 | `search/deepSearch.js` (3) | 심층 검색 — 다조건으로 VM을 검색한다. 1차는 스냅샷 기반(즉시): 게이트웨이·IP/서브넷·OS·전원· |
 | `security/` | 20 | 5,221 | `security/secretVault.js` (37) | secretVault.js — 설정 파일 자격증명(비밀번호·SSH 키·토큰)의 저장 방식(평문/암호화) 중앙 모듈(v2.296). |
@@ -158,7 +158,7 @@
 | `settingsStatus/` | 2 | 288 | `settingsStatus/sources.js` (3) | 설정 메뉴 상태 배지 — 사실 수집(v2.916). 판정은 grade.js 하나. |
 | `snaphist/` | 6 | 1,068 | `snaphist/poller.js` (2) | snaphist/poller.js — VM 별 스냅샷 이력 기록 폴러(v3.26.0 · 설계 docs/design/snapshots §5 · §8 ⑧ 기본값 ‘하루 1번(새벽)’). |
 | `sshaccess/` | 12 | 2,452 | `sshaccess/loginMark.js` (5) | sshaccess/loginMark.js — ‘로그인은 됐다’ 표시(점검 1회차 R2 · T4 · 2회차 상태 Q1(b)). |
-| `storage/` | 73 | 16,486 | `storage/registry.js` (23) | storage/registry.js — 스토리지 장비 등록부(v2.302). |
+| `storage/` | 71 | 16,224 | `storage/registry.js` (23) | storage/registry.js — 스토리지 장비 등록부(v2.302). |
 | `storpath/` | 4 | 391 | `storpath/cache.js` (2) | ESXi 경로 카운터 캐시(v2.935 C-①) — vCenter 별 · 호스트 moref 별 최근 표본 요약(storpath/parse.js summarizeHostPaths). 인메모리다. |
 | `svcmon/` | 22 | 8,235 | `svcmon/store.js` (16) | 성능점검 대상/폴더 저장소 — `CONFIG_DIR/svcmon.json` 전용 파일(포탈 코어와 분리). |
 | `system/` | 2 | 336 | `system/nfsMounts.js` (4) | system/nfsMounts.js — Edge 노드 NFS 마운트 관리(v2.299). |
@@ -185,7 +185,7 @@
 | `winrm/` | 3 | 553 | `winrm/client.js` (2) | winrm/client.js — WinRM HTTPS(5986) + NTLMv2 로 PowerShell 하나를 돌리고 출력을 받는다(서버 접속 3단계 · 설계 docs/design/server-access ④). |
 | `xferspeed/` | 7 | 2,005 | `xferspeed/schedule.js` (7) | xferspeed/schedule.js — 전송 속도 측정의 **실행 일정**(순수 — 파일·타이머 없음, v2.735). |
 
-디렉터리 108개 · 파일 1580개 · 366,427줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
+디렉터리 108개 · 파일 1579개 · 366,967줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
 <!-- arch-doc:modules:end -->
 
 ### 3-3. 라우트 그룹 → 게이트

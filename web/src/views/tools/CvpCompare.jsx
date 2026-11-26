@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import BoldText from '../../components/boldText.jsx';
 import { fetchJson, postJson, delJson, getCurrentUser } from '../../api.js';
+import { fetchHeavy } from './cvpHeavy.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
@@ -32,13 +33,18 @@ export default function CvpCompareView({ servers = [] }) {
   const [kind, setKind] = useState('all');
   const [showNa, setShowNa] = useState(false);   // 바뀐 것 없이 '비교 못 함' 만 있는 장비는 기본으로 접는다(v3.38 판독: 데모 123대 중 대부분이 그 줄이라 바뀐 장비가 묻혔다)
   const seq = useRef(0);
+  const cmpAc = useRef(null);
+  useEffect(() => () => { cmpAc.current?.abort(); }, []);   // 화면을 떠나면 진행 중 비교 취소
+  const listSeq = useRef(0);
   const load = useCallback(() => {
     setListErr(null);
+    const my = ++listSeq.current;   // v3.42(2회차 A5 추정): 찍기 · 지우기가 겹치면 늦게 온 옛 목록이 새 선택을 되돌렸다 — 마지막 요청만 반영
     fetchJson('/tools/cvp/snapshots').then((x) => {
+      if (my !== listSeq.current) return;
       setList(x);
       const done = (x.snapshots || []).filter((s) => s.done);
       setA((cur) => (cur && done.some((s) => String(s.id) === cur) ? cur : done[0] ? String(done[0].id) : ''));
-    }).catch((e) => setListErr(e));
+    }).catch((e) => { if (my === listSeq.current) setListErr(e); });
   }, []);
   useEffect(() => { load(); }, [load]);
   const take = async () => {
@@ -46,7 +52,9 @@ export default function CvpCompareView({ servers = [] }) {
     try {
       const x = await postJson('/tools/cvp/snapshots', { label, ...(cvpId ? { cvpId } : {}) });
       if (!x || x.ok === false) { setWriteErr(new Error((x && x.reason) || '스냅샷을 저장하지 못했습니다.')); return; }   // 409(다른 저장 중 · 장비 0)는 던지지 않고 본문으로 온다
-      setMsg(`스냅샷 #${x.id} 저장 — 장비 ${x.devices}대 · ${bytesText(x.bytes)}${x.truncated ? ' · ⚠ 상한을 넘어 일부 장비만' : ''}`); setLabel(''); load(); }
+      setMsg(`스냅샷 #${x.id} 저장 — 장비 ${x.devices}대 · ${bytesText(x.bytes)}${x.truncated ? ' · ⚠ 상한을 넘어 일부 장비만' : ''}`); setLabel('');
+      if (x.id != null) { setA(String(x.id)); setB('now'); }   // v3.42(D13 · 2회차 F11): 방금 찍은 것을 '전', '후' 는 지금으로(후가 옛 스냅샷이면 새 → 옛 역방향 비교가 됐다)
+      load(); }
     catch (e) { setWriteErr(e); }
     finally { setBusy(false); }
   };
@@ -64,12 +72,17 @@ export default function CvpCompareView({ servers = [] }) {
     if (!a) return;
     const my = ++seq.current;
     setCmpBusy(true); setResErr(null);
-    try { const x = await fetchJson('/tools/cvp/compare', { a, b }); if (my === seq.current) { setRes(x); setKind('all'); } }
+    cmpAc.current?.abort();   // v3.42(3회차 A5-F1): 앞 비교는 취소(서버 줄에서 뺀다)
+    const ac = new AbortController(); cmpAc.current = ac;
+    try { const x = await fetchHeavy('/tools/cvp/compare', { a, b: bGone ? 'now' : b }, ac.signal); if (my === seq.current) { setRes(x); setKind('all'); } }
     catch (e) { if (my === seq.current) { setResErr(e); setRes(null); } }
     finally { if (my === seq.current) setCmpBusy(false); }
   };
   const snaps = list && Array.isArray(list.snapshots) ? list.snapshots : [];
   const done = snaps.filter((s) => s.done);
+  // v3.42(버그 점검 1회차 D2): '후' 가 선택지에서 빠지면(전과 같아짐 · 지워짐) '지금' 으로 되돌린다 — 그대로 두면 화면은 다른 선택지를 보이는데 비교는 옛 값(같은 스냅샷끼리 · 404)으로 했다.
+  const bGone = b !== 'now' && (b === a || !done.some((s) => String(s.id) === b));
+  useEffect(() => { if (list && bGone) setB('now'); }, [list, bGone]);
   const c = res?.counts || {};
   const devs = res && Array.isArray(res.devices) ? res.devices : [];
   const naOnly = devs.filter((d) => d.state === 'na').length;
@@ -118,13 +131,13 @@ export default function CvpCompareView({ servers = [] }) {
       <div className="card" style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div style={ROW}>
           <b>비교</b>
-          <Select className="input" value={a} onChange={(e) => setA(e.target.value)} aria-label="전(기준)" style={{ maxWidth: 260 }}>
+          <Select sort={false} className="input" value={a} onChange={(e) => setA(e.target.value)} aria-label="전(기준)" style={{ maxWidth: 260 }}>
             {!done.length && <option value="">스냅샷 없음</option>}
             {done.map((s) => <option key={s.id} value={String(s.id)}>#{s.id} {tsText(s.at)}{s.label ? ` · ${s.label}` : ''}</option>)}
           </Select>
           <span style={NOTE}>→</span>
-          <Select className="input" value={b} onChange={(e) => setB(e.target.value)} aria-label="후" style={{ maxWidth: 260 }}>
-            <option value="now">지금(중앙 DB 최신값)</option>
+          <Select sort={false} className="input" value={bGone ? 'now' : b} onChange={(e) => setB(e.target.value)} aria-label="후" style={{ maxWidth: 260 }}>
+            <option value="now" data-pin>지금(중앙 DB 최신값)</option>
             {done.filter((s) => String(s.id) !== a).map((s) => <option key={s.id} value={String(s.id)}>#{s.id} {tsText(s.at)}{s.label ? ` · ${s.label}` : ''}</option>)}
           </Select>
           <button type="button" className="btn" onClick={compare} disabled={!a || cmpBusy}>{cmpBusy ? '비교 중…' : '비교'}</button>
