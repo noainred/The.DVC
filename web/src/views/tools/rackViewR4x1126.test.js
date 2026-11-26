@@ -117,4 +117,12 @@ describe('RackTool.jsx 배선 — 컴포넌트가 위 판정을 실제로 쓴다
     expect(src).toMatch(/onFailed=\{\(text, forCorp\) =>/); expect(src.match(/onFailed\?\.\(/g)?.length).toBe(2);
     expect(src).toMatch(/rack\.totalsStale \? `— \/ \$\{H\}U`/); expect(src).toMatch(/sum\.usedStale \?/);
   });
+  it('저장 중 줄은 busy · slowSave · 창 없음이 함께일 때만 · 다시 불러오는 중 표시는 자리를 차지하는 줄이 아니다(5회차 화면 1 · 2)', () => {
+    expect(src).toMatch(/\{busy && slowSave && !modal \? <div role="status"/);
+    expect(src).not.toMatch(/\{slowSave && !modal \?/);
+    expect(src).not.toMatch(/\{loadingRoom \? <div/);
+    expect(src).toMatch(/minWidth: 112 \}\} aria-busy=\{loadingRoom && !!view\}/);
+    expect(src.match(/error=\{roomChangedText \|\| shownModalErr\}/g)?.length).toBe(2);
+    expect(src).toMatch(/const shownModalErr = modalErr === ROOM_CHANGED_TEXT \? '' : modalErr;/);
+  });
 });

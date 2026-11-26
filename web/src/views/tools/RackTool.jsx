@@ -493,6 +493,7 @@ export default function RackTool() {
   const [busy, setBusy] = useState(false);
   const [busyModal, setBusyModal] = useState(null);   // 지금 가고 있는 저장을 시작한 창(끌어 놓기면 null)
   // '저장 중' 한 줄은 저장이 SLOW_SAVE_MS 넘게 걸릴 때만 보인다 — 바로 끝나는 저장(끌어 놓기)마다 줄이 생겼다 사라져 랙 그림이 한 번 내려갔다 올라왔다(4회차 점검 화면 제안 1 · 실측 29px).
+  //   줄 조건에는 busy 도 함께 본다 — slowSave 는 effect 에서야 꺼지므로, 저장이 끝나 창이 닫히는 렌더에 줄이 잠깐 비쳤다(5회차 점검 화면 1 · 재현).
   const [slowSave, setSlowSave] = useState(false);
   useEffect(() => {
     if (!busy) { setSlowSave(false); return undefined; }
@@ -683,6 +684,8 @@ export default function RackTool() {
   const ROOM_CHANGED_TEXT = '이 창을 연 뒤 보고 있는 전산실이 바뀌었습니다 — 창을 닫고 다시 여세요.';
   // 전산실이 바뀐 창은 저장을 누르기 전에도 알린다(그 창의 '랙' 칸에는 지금 보고 있는 다른 전산실의 랙이 보인다 — 4회차 점검 화면 제안 3).
   const roomChangedText = lostViewReason(view, modal) === 'roomChanged' ? ROOM_CHANGED_TEXT : '';
+  // 저장을 눌러 남은 '전산실이 바뀌었습니다' 문구는, 원래 전산실로 돌아와 더는 해당하지 않으면 보이지 않는다(그때는 저장도 된다 — 5회차 점검 화면 관찰).
+  const shownModalErr = modalErr === ROOM_CHANGED_TEXT ? '' : modalErr;
   const lostView = () => {
     const why = lostViewReason(view, modal);
     if (why === 'noView') setModalErr('전산실을 다시 불러오지 못했습니다 — 창을 닫고 새로 고친 뒤 다시 하세요.');
@@ -751,7 +754,8 @@ export default function RackTool() {
         </span>
         <Seg label="면" items={[['front', '전면'], ['rear', '후면']]} value={face} onChange={setFace} />
         <SearchBox value={q} onChange={setQ} placeholder="이름 · 모델 · 시리얼 · 호스트 이름 찾기" style={{ flex: '1 1 240px', minWidth: 200 }} />
-        <button type="button" style={btn} onClick={() => { loadTree(); loadRoom(roomId); }}>새로 고침</button>
+        {/* 다시 불러오는 중 표시는 이 버튼의 글자로(폭 고정) — 랙 카드 안에 줄로 두면 끌어 놓을 때마다 랙 그림이 27px 내려갔다 올라왔다(5회차 점검 화면 2 · 실측) */}
+        <button type="button" style={{ ...btn, minWidth: 112 }} aria-busy={loadingRoom && !!view} onClick={() => { loadTree(); loadRoom(roomId); }}>{loadingRoom && view ? '불러오는 중…' : '새로 고침'}</button>
         {view && canCsv() ? <button type="button" style={off(btn, exporting)} disabled={exporting} onClick={exportXlsx}>{exporting ? '내보내는 중…' : '엑셀 내보내기'}</button> : null}
         {corpId ? <button type="button" style={btn} onClick={() => setModal({ kind: 'versions' })}>판 기록</button> : null}
         {tree.canEditTypes ? <button type="button" style={btn} onClick={() => { setModalErr(''); setModal({ kind: 'types' }); }}>랙 종류</button> : null}
@@ -774,7 +778,7 @@ export default function RackTool() {
 
       {treeErr && tree ? <StaleBanner what="목록을" error={treeErr} onRetry={() => { loadTree(); loadRoom(roomIdRef.current); }} /> : null}
       {/* 저장 중 창을 닫았거나 끌어 놓은 직후 — 저장이 아직 가고 있음을 밝힌다(응답이 늦으면 다른 저장이 막히는 이유가 화면에 없었다 — 3회차 점검 화면 제안 1) */}
-      {slowSave && !modal ? <div role="status" style={{ fontSize: 12, color: 'var(--text-dim)', padding: '0 2px' }}>변경을 저장하는 중입니다… 끝날 때까지 다른 저장은 기다립니다.</div> : null}
+      {busy && slowSave && !modal ? <div role="status" style={{ fontSize: 12, color: 'var(--text-dim)', padding: '0 2px' }}>변경을 저장하는 중입니다… 끝날 때까지 다른 저장은 기다립니다.</div> : null}
       {note ? (
         <div role={note.tone === 'err' ? 'alert' : 'status'} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '8px 12px', borderRadius: 8, fontSize: 12,
           border: `1px solid ${note.tone === 'ok' ? 'var(--green)' : note.tone === 'warn' ? 'var(--amber)' : 'var(--red)'}`,
@@ -804,7 +808,6 @@ export default function RackTool() {
 
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'flex-start' }}>
             <div style={{ ...card, flex: '999 1 560px' }}>
-              {loadingRoom ? <div style={{ padding: '6px 14px', fontSize: 11, color: 'var(--text-dim)' }}>불러오는 중…</div> : null}
               {view.staleErr ? <div style={{ padding: '6px 14px' }}><StaleBanner what="전산실을" error={view.staleErr} locked onRetry={() => loadRoom(roomIdRef.current)} /></div> : null}
               {!racks.length ? (
                 <div style={{ padding: 18, fontSize: 13, color: 'var(--text-dim)' }}>이 전산실에 랙이 없습니다.{canEdit ? ' ‘배치 편집’ › ‘+ 랙’ 으로 추가하세요.' : ''}</div>
@@ -884,7 +887,7 @@ export default function RackTool() {
       )}
 
       {modal?.kind === 'place' ? (
-        <PlaceModal init={modal.init} racks={racks} busy={busy} saving={busy && busyModal === modal} error={modalErr || roomChangedText} onClose={closeModal} onSave={savePlace}
+        <PlaceModal init={modal.init} racks={racks} busy={busy} saving={busy && busyModal === modal} error={roomChangedText || shownModalErr} onClose={closeModal} onSave={savePlace}
           onRemove={async () => {
             if (lostView()) return;
             if (!window.confirm(`‘${modal.init.label || modal.init.serial || '이름 없음'}’ 을(를) 랙에서 뺄까요? 판 기록에서 되돌릴 수 있습니다.`)) return;
@@ -892,7 +895,7 @@ export default function RackTool() {
           }} />
       ) : null}
       {modal?.kind === 'rack' ? (
-        <RackModal init={modal.init} types={types} busy={busy} saving={busy && busyModal === modal} error={modalErr || roomChangedText} onClose={closeModal}
+        <RackModal init={modal.init} types={types} busy={busy} saving={busy && busyModal === modal} error={roomChangedText || shownModalErr} onClose={closeModal}
           onSave={async (f, f0) => {
             if (lostView()) return;
             let r;
