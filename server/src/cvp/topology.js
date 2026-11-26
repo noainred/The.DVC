@@ -59,7 +59,10 @@ export function switchIndex(devices = []) {
       const fc = full.get(f) || [];
       // 3회차 A1-F4: 도메인까지 쓴 이름(spine1.us.corp)은 **도메인이 다른 FQDN 장비**(spine1.kr.corp)의 짧은 이름으로 맞추지 않는다 —
       //   짧은 이름 후보는 장비 쪽 이름에 도메인이 없을 때만(CVP 는 'spine1', LLDP 는 FQDN 인 흔한 경우).
-      const sc = (s.length >= 3 ? (short.get(s) || []) : []).filter((c) => f === s || fullOf.get(c) === f || fullOf.get(c) === shortOf(fullOf.get(c)));
+      //   4회차 A1-F1: '도메인이 없을 때만' 으로는 호스트 이름 자체에 점이 든 장비(CVP 'leaf1.dc1' ↔ LLDP 'leaf1.dc1.corp.com')가 스위치 아님이 됐다 —
+      //   한쪽이 다른 쪽의 **라벨 단위 접두**면 같은 이름으로 본다('spine1.kr.corp' ↔ 'spine1.us.corp' 는 접두가 아니다).
+      const labelPrefix = (a, b) => a === b || b.startsWith(`${a}.`);
+      const sc = (s.length >= 3 ? (short.get(s) || []) : []).filter((c) => { const cf = fullOf.get(c) || ''; return labelPrefix(cf, f) || labelPrefix(f, cf); });
       if (!fc.length && !sc.length) return null;
       // 2회차 반증 R5: 도메인까지 쓴 이름(spine1.us.corp)은 정확한 전체 이름이 같은 CVP 의 짧은 이름(spine1.kr.corp)보다 강하다.
       //   짧은 이름(spine1)으로 온 경우만 같은 CVP 의 짧은 이름 후보를 다른 CVP 의 전체 이름보다 먼저 본다(A1-F3).
@@ -249,9 +252,13 @@ export function buildTopology({ devices = [], lldp = [], lldpMeta = new Map(), p
     const aId = devKey(p.agent, p.cvpId, p.key);
     const np = normPort(p.port);
     if (isMgmtPort(np) || nb.get(aId)?.has(np)) continue;
-    const named = deviceNameFromDesc(p.desc);
-    const bId = named ? idx.find(named, aId) : null;
-    if (!bId || bId === aId || bId === AMBIG) continue;
+    // 4회차 A1-N2: 첫 이름만 보면 자기 이름으로 시작하는 설명('leaf1:Et49 <-> spine1:Et1')에서 추정 선이 빠졌다 — 낱말 가운데 다른 알려진 스위치를 찾는다.
+    let bId = null;
+    for (const t of descTokens(p.desc).flatMap((x) => { const u = stripIfSuffix(x); return u === x ? [x] : [x, u]; })) {
+      const id = idx.find(t, aId);
+      if (id && id !== aId && id !== AMBIG) { bId = id; break; }
+    }
+    if (!bId) continue;
     if (usedEnds.has(`${aId}\u0000${np}`)) continue;
     usedEnds.add(`${aId}\u0000${np}`);
     // 양쪽 설명이 서로를 가리켜도 합치지 않는다(반증 판정 D-6 — 두 장비 사이 케이블이 여럿이면 어느 포트끼리인지 코드가 알 수 없어 짝을 지어내게 된다).

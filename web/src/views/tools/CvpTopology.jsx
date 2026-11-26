@@ -45,7 +45,7 @@ function TopoMap({ nodes, links, sel, onSel, problemsOnly }) {
           return (
             <g key={n.id} transform={`translate(${p.x - BOX_W / 2}, ${p.y - BOX_H / 2})`} onClick={() => onSel(on ? null : n.id)}
               role="button" tabIndex={0} aria-pressed={on} aria-label={`${n.hostname} — ${LAYER_DEFS[n.layer]?.label || n.layer}`}
-              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSel(on ? null : n.id); } }}
+              onKeyDown={(e) => { setFocusId(n.id); if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSel(on ? null : n.id); } }}
               onFocus={(e) => { let kb = true; try { kb = e.currentTarget.matches(':focus-visible'); } catch { /* 구형 브라우저 — 표시한다 */ } if (kb) setFocusId(n.id); }}
               onBlur={() => setFocusId((x) => (x === n.id ? null : x))} onMouseDown={() => setFocusId(null)} style={{ cursor: 'pointer', outline: 'none' }}>
               <title>{`${n.hostname} — ${LAYER_DEFS[n.layer]?.label || n.layer} · 스위치 이웃 ${n.switchNeighbors}${n.esxi + n.otherNeighbors ? ` · 서버 등 ${n.esxi + n.otherNeighbors}` : ''}${n.lldpRead ? '' : ' · LLDP 못 읽음'}${n.lldpFailing ? ' · LLDP 마지막 읽기 실패 — 이전 이웃으로 그렸습니다' : ''}${n.lldpAt ? ` · LLDP 읽은 시각 ${new Date(n.lldpAt).toLocaleString()}` : ''}`}</title>

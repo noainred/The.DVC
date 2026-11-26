@@ -284,14 +284,19 @@ export function registerCvpNet(api) {
       ]);
       hx.check();
       if (l2.unavailable) return { status: 503, body: DB_DOWN };
-      const fdbRows = (fdb.rows || []).filter(own); const epRows = (ep.rows || []).filter(own);
+      const fdbAll = (fdb.rows || []).filter(own); const epAll = (ep.rows || []).filter(own);
       // 답에 나온 장비(FDB · CVP 위치 행이 있는 장비)만: LLDP(업링크 · 호스트 포트) + 채널 소속
-      const ans = new Map([...fdbRows, ...epRows].map((r) => [devKey(r.agent, r.cvpId, r.key), { agent: r.agent, cvpId: r.cvpId, key: r.key }]));
+      const ansAll = new Map([...fdbAll, ...epAll].map((r) => [devKey(r.agent, r.cvpId, r.key), { agent: r.agent, cvpId: r.cvpId, key: r.key }]));
+      // v3.42(4회차 A3-F4 · A4-F2 · A5-F1): 답 장비가 상한을 넘으면 **상한 안 장비의 행만 판정해 싣는다**(LLDP · 채널 · MAC 수를 모두 같은 집합으로 읽는다).
+      //   예전에는 상한 밖 장비의 업링크가 근거 'LLDP 못 읽음' 의 '가장자리' 로 나왔고, LLDP 를 읽는 집합과 채널을 읽는 집합이 서로 달랐다. 뺀 장비 수는 devicesOmitted.
+      const ans = new Map([...ansAll].slice(0, LOCATE_DEVS_MAX));
+      const inAns = (r) => ans.has(devKey(r.agent, r.cvpId, r.key));
+      const fdbRows = ansAll.size > ans.size ? fdbAll.filter(inAns) : fdbAll; const epRows = ansAll.size > ans.size ? epAll.filter(inAns) : epAll;
       const idx = switchIndex(b.devices);
       const hostNames = hostNamesOf(snap);
       const ups = new Map(); const hostPorts = new Map();
       const yv = createYielder(15);
-      for (const [dk, d] of [...ans].slice(0, LOCATE_DEVS_MAX)) {
+      for (const [dk, d] of ans) {
         const l = await cdb.lldpForDevice(d.agent, d.cvpId, d.key);
         if (l.unavailable) return { status: 503, body: DB_DOWN };
         if (!l.read) continue;   // LLDP 를 못 읽은 장비 — 업링크를 모른다(placeRows 가 basis 'nolldp' 로 둔다)
@@ -302,11 +307,11 @@ export function registerCvpNet(api) {
         await yv(); hx.check();
       }
       const devs = [...new Map(fdbRows.map((r) => [devKey(r.agent, r.cvpId, r.key), { agent: r.agent, cvpId: r.cvpId, key: r.key }])).values()];
-      const macCount = devs.length ? await cdb.fdbPortTotals(devs) : new Map();
+      const macCount = devs.length ? await cdb.fdbPortTotals(devs, { max: LOCATE_DEVS_MAX }) : new Map();
       hx.check();
       // MAC 은 포트 채널 이름으로 배울 수 있다(2회차 A1-F10 · 3회차 A1-F6) — ESXi 물리 포트의 채널은 호스트 포트로, 업링크 물리 포트의 채널은 업링크로.
       if (ans.size) {
-        const pr = await cdb.portRowsOf(b.devices.filter((d) => ans.has(devKey(d.agent, d.cvpId, d.key))).slice(0, LOCATE_DEVS_MAX), { limit: 200_000 });
+        const pr = await cdb.portRowsOf(b.devices.filter((d) => ans.has(devKey(d.agent, d.cvpId, d.key))), { limit: 400_000 });
         hx.check();
         for (const r of pr.rows || []) {
           if (!r.lag) continue;
@@ -324,7 +329,7 @@ export function registerCvpNet(api) {
         subjects: subj.subjects.map((x) => ({ ...x, vcenterName: vcName.get(x.vcenterId) || x.vcenterId || '' })), subjectsTruncated: subj.truncated,
         macs, edge: placed.edge.map(withCorp), transit: placed.transit.map(withCorp), manyMacs: MANY_MACS,
         l2: { devices: b.devices.length, fdbDevices: l2.fdbDevices ?? 0, fdbFailing: l2.fdbFailing ?? 0, lastAt: l2.lastAt ?? null },
-        ...(fdb.truncated ? { fdbTruncated: true } : {}), ...(ans.size > LOCATE_DEVS_MAX ? { devicesTruncated: true } : {}),
+        ...(fdb.truncated ? { fdbTruncated: true } : {}), ...(ansAll.size > ans.size ? { devicesTruncated: true, devicesOmitted: ansAll.size - ans.size, devicesMax: LOCATE_DEVS_MAX } : {}),
       } };
     }, { lane: 'light' });
   });

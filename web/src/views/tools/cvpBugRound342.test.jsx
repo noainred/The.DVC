@@ -146,4 +146,18 @@ describe('v3.42 CVP 버그 점검 1회차 — 웹', () => {
     // A1-F3 · A5-F6: 비교 못 함 문구
     expect(naText(['portState'])).toContain('일부 포트의 링크 상태'); expect(naText(['broken'])).toContain('스냅샷 본문 손상');
   });
+  it('4회차 웹 — 위치 찾기 상한 안내 · 포트 상태 모름의 측정 시각 · 지도 노드 키보드 초점', async () => {
+    // A5-F1: 답 장비가 상한을 넘어 뺀 대수를 밝힌다(값은 응답에서 — 화면에 숫자를 박지 않는다)
+    const lc = src('CvpLocate.jsx');
+    expect(lc).toMatch(/r\.devicesTruncated && <div style=\{NOTE\}>/);
+    expect(lc).toMatch(/\{r\.devicesMax \?\? '상한'\}/); expect(lc).toMatch(/\{r\.devicesOmitted \?\? '일부'\}/);
+    // A5 관찰: 일부 목록에서 빠져 '모름' 이 된 포트의 rateTs 는 모름이 된 시각이다 — '측정 n분 전' 으로 보이지 않게
+    const { default: HostNetCvp } = await import('../HostNetCvp.jsx');
+    const up = (oper) => ({ cvpId: 'c', key: 'k', port: 'Ethernet1', hostname: 'sw1', oper, basis: 'lldp', rateTs: Date.now() - 120_000, ts: Date.now() - 600_000 });
+    const html = (oper) => renderToStaticMarkup(React.createElement(HostNetCvp, { data: { uplinks: [up(oper)] }, nics: [] }));
+    expect(html('unknown')).toContain('측정 없음(포트 상태 모름)');
+    expect(html('up')).not.toContain('측정 없음'); expect(html('up')).toMatch(/측정 [^<]*전/);
+    // A5 관찰: 마우스로 누른 뒤 키보드로 고르면 초점 고리가 다시 보인다
+    expect(src('CvpTopology.jsx')).toMatch(/onKeyDown=\{\(e\) => \{ setFocusId\(n\.id\);/);
+  });
 });

@@ -204,6 +204,9 @@ async function openInner() {
         WHERE agent=? AND cvp_id=? AND device_key=? AND ts < ? AND oper <> 'unknown'`),
       selPortsGoingStale: conn.prepare("SELECT port FROM port_latest WHERE agent=? AND cvp_id=? AND device_key=? AND ts < ? AND oper='up'"),
       delPortsStaleOld: conn.prepare("DELETE FROM port_latest WHERE agent=? AND cvp_id=? AND device_key=? AND ts < ? AND oper='unknown' AND IFNULL(rate_ts, ts) < ?"),
+      //   4회차 A2-F2: 장비가 원래 'unknown' 으로 보고하던 포트(rate_ts 가 '모름이 된 시각' 이 아니다 — 비었거나 행 시각 이하)가 목록에서 빠지면 지금을 그 시각으로 적는다.
+      //   안 그러면 오래 조용하던 장비의 첫 일부 목록에서 그 행이 유예 없이 바로 지워졌다(192 → 186행).
+      stampNativeUnknown: conn.prepare("UPDATE port_latest SET rate_ts=? WHERE agent=? AND cvp_id=? AND device_key=? AND ts < ? AND oper='unknown' AND IFNULL(rate_ts, ts) <= ts"),
       selDevTs: conn.prepare('SELECT ts FROM device_latest WHERE agent=? AND cvp_id=? AND device_key=?'),
       insSample: conn.prepare('INSERT OR IGNORE INTO port_sample (agent,cvp_id,device_key,port,ts,in_bps,out_bps,in_util,out_util,in_err,out_err,in_drop,out_drop) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)'),
       upDaily: conn.prepare(`INSERT INTO port_daily (agent,cvp_id,device_key,port,day,samples,in_bps_sum,in_bps_n,in_bps_max,out_bps_sum,out_bps_n,out_bps_max,
@@ -236,7 +239,7 @@ async function openInner() {
         ON CONFLICT(agent,cvp_id,device_key,port) DO UPDATE SET day=excluded.day WHERE excluded.day > port_lastlink.day`),
       upFirstDay: conn.prepare(`INSERT INTO dev_linkhist (agent,cvp_id,device_key,first_day) VALUES (?,?,?,?)
         ON CONFLICT(agent,cvp_id,device_key) DO UPDATE SET first_day=excluded.first_day WHERE excluded.first_day < dev_linkhist.first_day`),
-      selPortOper: conn.prepare('SELECT port, oper FROM port_latest WHERE agent=? AND cvp_id=? AND device_key=?'),
+      selPortOper: conn.prepare('SELECT port, oper, rate_ts FROM port_latest WHERE agent=? AND cvp_id=? AND device_key=?'),
       upFlap: conn.prepare(`INSERT INTO port_flap_daily (agent,cvp_id,device_key,port,day,downs) VALUES (?,?,?,?,?,1)
         ON CONFLICT(agent,cvp_id,device_key,port,day) DO UPDATE SET downs=port_flap_daily.downs+1`),
       upDevPort: conn.prepare(`INSERT INTO dev_port_daily (agent,cvp_id,device_key,day,total,used_max,used_last) VALUES (?,?,?,?,?,?,?)
@@ -443,8 +446,10 @@ export async function saveDevices({ agent = LOCAL_AGENT, cvpId, devices = [], sa
         if (Array.isArray(d.ports)) {
           if (olderRecord) stalePorts++;
           // v3.38 ⑩ · ⑨: 직전 oper(플랩 — up → down/nolink 만 센다) · 장비 포트 수 일 기록. 옛 레코드는 건너뛴다(순서 뒤바뀜을 플랩으로 세지 않게).
-          const prevOper = !olderRecord && prevTs != null ? new Map(st.selPortOper.all(agent, cvpId, key).map((r) => [r.port, r.oper])) : null;
-          if (!olderRecord) recordDevPorts(st, agent, cvpId, key, ts, d.ports, prevOper, d.portsPartial === true);
+          const prevRows = !olderRecord && prevTs != null ? st.selPortOper.all(agent, cvpId, key) : null;
+          const prevOper = prevRows ? new Map(prevRows.map((r) => [r.port, r.oper])) : null;
+          const prevRate = prevRows ? new Map(prevRows.map((r) => [r.port, r.rate_ts])) : null;   // '모름' 행의 rate_ts = 모름이 된 시각
+          if (!olderRecord) recordDevPorts(st, agent, cvpId, key, ts, d.ports, prevOper, d.portsPartial === true, prevRate);
           for (const p of d.ports) {
             const name = txt(p?.name, 64);
             if (!name) continue;
@@ -466,8 +471,9 @@ export async function saveDevices({ agent = LOCAL_AGENT, cvpId, devices = [], sa
             if (d.portsPartial === true) {
               // 먼저 시한 지난 '모름' 행(모름이 된 지 PARTIAL_STALE_KEEP_MS 넘음)을 지우고, 이번에 빠진 행을 '모름' 으로 적는다 — 순서가 반대면 방금 표시한 행이
               //   마지막으로 본 때(ts)가 오래됐다는 이유로 바로 지워진다(3회차 반증 R6: 8일 넘게 조용하던 장비의 첫 목록이 일부면 192 → 160행).
+              st.stampNativeUnknown.run(ts, agent, cvpId, key, ts);
               st.delPortsStaleOld.run(agent, cvpId, key, ts, ts - PARTIAL_STALE_KEEP_MS);
-              for (const r of st.selPortsGoingStale.all(agent, cvpId, key, ts)) noteStaleWasUp(agent, cvpId, key, r.port);
+              for (const r of st.selPortsGoingStale.all(agent, cvpId, key, ts)) noteStaleWasUp(agent, cvpId, key, r.port, ts);
               st.markPortsStale.run(ts, agent, cvpId, key, ts);
             }
             else st.delPortsOld.run(agent, cvpId, key, ts);
@@ -486,15 +492,24 @@ export async function saveDevices({ agent = LOCAL_AGENT, cvpId, devices = [], sa
  *   다시 목록에 보이면 꺼내 쓴다(takeStaleWasUp 이 지운다). 상한을 넘으면 통째로 비운다.
  */
 const STALE_WAS_UP_MAX = 200_000;
-let _staleWasUp = new Set();
+let _staleWasUp = new Map();   // 포트 키 → 모름으로 적은 시각(그 행의 rate_ts)
 const staleKey = (agent, cvpId, key, port) => `${agent}\u0000${cvpId}\u0000${key}\u0000${port}`;
-function noteStaleWasUp(agent, cvpId, key, port) { if (_staleWasUp.size >= STALE_WAS_UP_MAX) _staleWasUp.clear(); _staleWasUp.add(staleKey(agent, cvpId, key, port)); }
-function takeStaleWasUp(agent, cvpId, key, port) { return _staleWasUp.delete(staleKey(agent, cvpId, key, port)); }
+function noteStaleWasUp(agent, cvpId, key, port, at) { if (_staleWasUp.size >= STALE_WAS_UP_MAX) _staleWasUp.clear(); _staleWasUp.set(staleKey(agent, cvpId, key, port), at); }
+/**
+ * 기억을 꺼낸다 — **그 행이 기억할 때 적은 바로 그 '모름' 행일 때만**(행의 rate_ts = 기억한 시각) 참.
+ *   4회차 A2-F1: 기억이 행이 지워지는 경로(온전한 목록에서 사라짐 · 시한 삭제 · 장비 정리 · ROLLBACK)에서 안 지워져, 나중에 같은 포트가 내려간 채 빠졌다가
+ *   다시 보이면 링크 내려감을 한 번 더 셌다. 시각으로 대조하면 지우는 경로를 일일이 따라가지 않아도 된다.
+ */
+function takeStaleWasUp(agent, cvpId, key, port, rowRateTs) {
+  const k = staleKey(agent, cvpId, key, port); const at = _staleWasUp.get(k);
+  _staleWasUp.delete(k);
+  return at != null && rowRateTs != null && Number(rowRateTs) === Number(at);
+}
 
 /** v3.38: 링크 내려감으로 세는 oper(관리상 꺼짐은 플랩이 아니다 — 호출자가 admin 을 본다). */
 const FLAP_DOWN = new Set(['down', 'nolink']);
 /** v3.38 ⑩ · ⑨: 플랩(직전 up → 지금 down/nolink · 관리상 켜짐) + 장비 포트 수 일 기록. */
-function recordDevPorts(st, agent, cvpId, key, ts, ports, prevOper, partial = false) {
+function recordDevPorts(st, agent, cvpId, key, ts, ports, prevOper, partial = false, prevRate = null) {
   const day = dayIndex(ts);
   let total = 0; let used = 0;
   for (const p of ports) {
@@ -507,7 +522,7 @@ function recordDevPorts(st, agent, cvpId, key, ts, ports, prevOper, partial = fa
     if (oper === 'up') { if (!mgmt) used++; markLinkDay(st, agent, cvpId, key, name, day); }   // v3.42(A1-14): 카운터 표본이 없는 포트도 링크가 올라와 있으면 그날 쓴 것이다
     // 3회차 반증 R4: 일부 목록에서 빠져 '모름' 으로 적힌 포트가 그 전에 올라와 있었으면(기억 — _staleWasUp) 다시 보였을 때 내려가 있는 것은 플랩이다.
     const prev = prevOper ? prevOper.get(name) : undefined;
-    const wasUp = prev === 'up' || (prev === 'unknown' && takeStaleWasUp(agent, cvpId, key, name));
+    const wasUp = prev === 'up' || (prev === 'unknown' && takeStaleWasUp(agent, cvpId, key, name, prevRate ? prevRate.get(name) : null));
     if (wasUp && FLAP_DOWN.has(oper) && txt(p.admin, 16) !== 'down') st.upFlap.run(agent, cvpId, key, name, day);
   }
   // v3.42(2회차 A2-F2): 일부 목록(portsPartial)이면 포트 수를 적지 않는다 — 192포트 장비가 total 160 으로 적혀 고갈 예측이 틀렸다(링크 날 · 플랩은 본 포트만이라 그대로).
@@ -1458,7 +1473,7 @@ export function _resetForTest() {
   _db = null; _opening = null; _counts = null; _pruneTick = 0; pruneFlight.reset(); lockRetry.ok();
   _adopted.clear(); _adopting.clear(); _lostUnsent = { total: 0, last: 0, at: null };
   _linkDayMemo = { day: null, set: new Set() };
-  _staleWasUp = new Set();
+  _staleWasUp = new Map();
 }
 
 /**
@@ -1622,13 +1637,16 @@ export async function fdbByMacs(macs = [], { limit = 2000 } = {}) {
   return { rows, ...(truncated ? { truncated: true } : {}) };
 }
 /** 장비들의 포트별 학습 MAC 수(장비마다 한 문장 · 집계 함수 하나). key: `${agent}\u0000${cvpId}\u0000${key}` → Map(port → n). */
-export async function fdbPortTotals(devices = []) {
+export async function fdbPortTotals(devices = [], { max = 64 } = {}) {
   const out = new Map();
   const db = await open();
   if (!db) return out;
   const q = db.conn.prepare('SELECT port, COUNT(*) AS n FROM l2_fdb WHERE agent=? AND cvp_id=? AND device_key=? GROUP BY port');
-  for (const d of (Array.isArray(devices) ? devices : []).slice(0, 64)) {
+  // v3.42(4회차 A1-N1): 예전에는 앞 64대만 읽고 표지가 없어 65번째 장비부터 'MAC 많음 = 지나는 곳' 규칙이 듣지 않았다 — 상한을 인자로(기본 64 — 호스트 업링크 화면 그대로 · 위치 찾기는 답 장비 상한을 넘긴다) 두고 양보하며 읽는다.
+  const y = createYielder(15);
+  for (const d of (Array.isArray(devices) ? devices : []).slice(0, max)) {
     out.set(`${d.agent ?? ''}\u0000${d.cvpId}\u0000${d.key}`, new Map(q.all(String(d.agent ?? ''), String(d.cvpId), String(d.key)).map((r) => [r.port, Number(r.n)])));
+    await y();
   }
   return out;
 }

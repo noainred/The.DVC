@@ -104,6 +104,8 @@ export default function CvpLocateView({ onOpen }) {
             </STable>
           </>)}
           {r.fdbTruncated && <div style={NOTE}>⚠ MAC 테이블 결과가 상한을 넘어 일부만 봤습니다.</div>}
+          {/* v3.42(4회차 A5-F1): 답 장비가 상한을 넘으면 뒤 장비는 판정하지 않고 뺐다는 것을 밝힌다 */}
+          {r.devicesTruncated && <div style={NOTE}>⚠ 이 MAC 을 배운 스위치가 {r.devicesMax ?? '상한'}대를 넘어, 뒤 {r.devicesOmitted ?? '일부'}대의 포트는 판정하지 않고 뺐습니다(가장자리 · 지나는 곳 목록에 없습니다).</div>}
         </div>
       </>)}
     </div>

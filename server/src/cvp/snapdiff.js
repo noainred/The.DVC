@@ -40,10 +40,11 @@ export function diffDevice(a, b) {
   if (a.p == null || b.p == null) na.push('ports');
   else {
     const am = new Map(a.p.map((r) => [r[0], r])); const bm = new Map(b.p.map((r) => [r[0], r]));
-    let portStateNa = false;
+    let portStateNa = false; const partial = a.pp === 1 || b.pp === 1;
     for (const [name, ra] of am) {
       const rb = bm.get(name);
-      if (!rb) { push('port', name, 'removed', null, null); continue; }
+      // 4회차 A1-F2: 한쪽이 일부 목록(pp)이면 목록에 없는 포트가 사라진 것인지 알 수 없다 — 세지 않는다(아래 portState 로 '비교 못 함').
+      if (!rb) { if (!partial) push('port', name, 'removed', null, null); continue; }
       for (const [i, f] of PORT_FIELDS) {
         // 한쪽 못 읽음 — 이 칸은 비교하지 않는다(옛 스냅샷의 'unknown' 포함). 링크 상태를 **한쪽만** 못 읽은 포트가 있으면 '비교 못 함(포트 상태 일부)' 로 따로 센다
         //   (3회차 A1-F3: 일부 목록으로 32포트를 비교 못 한 장비가 '그대로 1대' 로 셌다). 양쪽 다 모르는 포트(늘 모름)는 세지 않는다 — 잃은 비교가 없다.
@@ -51,7 +52,7 @@ export function diffDevice(a, b) {
         if (ra[i] !== rb[i]) push('port', name, f, ra[i], rb[i]);
       }
     }
-    for (const name of bm.keys()) if (!am.has(name)) push('port', name, 'added', null, null);
+    if (!partial) for (const name of bm.keys()) if (!am.has(name)) push('port', name, 'added', null, null);
     if (portStateNa || a.pp === 1 || b.pp === 1) na.push('portState');
   }
   // BGP
