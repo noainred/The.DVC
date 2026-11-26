@@ -33,6 +33,9 @@ import { runPartFaultsNow, partFaultStatus } from '../../partfault/poller.js';
 import { partFaultPushStatus, pushPartFaultsNow } from '../../partfault/push.js';
 import { loadPartFaultSettings, savePartFaultSettings, partFaultEnabled, settingsForAgent, partFaultSettingsWriteRefusal } from '../../partfault/settings.js';
 import { hookStatus } from '../../partfault/hooks.js';
+import { escalationStore, loadEscalationState, escalationStateError, escalationMarkOf, partOfAckId, ackEscalation, agentKeyOf, ESC_POLICIES_MAX, ESC_STEPS_MAX, ESC_EMAILS_MAX, ESC_AFTER_MIN, ESC_AFTER_MAX, ESC_DAYS, ESC_RETRY_MAX } from '../../partfault/escalation.js';   // v3.51 알림 단계 · 당직(⑪)
+import { escalationRunStatus, ESC_TICK_MS } from '../../partfault/escalationRun.js';
+import { isDemoGuest } from '../../auth/demoGuest.js';
 import { mergeEdgeReports } from '../../central/partFaultEdge.js';
 import { listCollectors } from '../../collector/registry.js';
 import { allCollectorStatus } from '../../collector/state.js';
@@ -338,6 +341,9 @@ api.get('/tools/part-faults', toolsPerm, fullScopeOnly, async (req, res) => {
     const match = addressMatcher(hosts);
     shown = open.map((p) => maskPartRow(p, match, hosts));
   }
+  // v3.51 알림 단계 · 확인(⑪) — 가리기 전 원본 키로 표지를 만들고(확인 열쇠는 키를 싣지 않는 HMAC) 가린 행에 붙인다
+  const escItems = loadEscalationState().items; const escSettings = escalationStore.get();
+  shown = shown.map((p, i) => ({ ...p, esc: escalationMarkOf(open[i], escItems, escSettings) }));
   res.json({
     ok: true, role, version: currentVersion(),
     open: shown, summary: { ...summary, devices: devices.size },
@@ -350,6 +356,8 @@ api.get('/tools/part-faults', toolsPerm, fullScopeOnly, async (req, res) => {
     push: role === 'edge' ? pushView(partFaultPushStatus(), isAdmin) : null,
     hook: hookStatus(),
     settings: isAdmin ? loadPartFaultSettings() : null,
+    escalation: { enabled: escalationStore.get().enabled, ...(escalationStateError() ? { stateError: escalationStateError() } : {}) },
+    canAck: ['admin', 'operator'].includes(req.user?.role) && !isDemoGuest(req.user),   // 확인 단추 — 집행은 ack 라우트(writeRole)
     // 96회차(93회차 F4 화면): 설정 파일 읽기 오류면 위 settings 는 기본값(꺼짐)이다 — 관리자가 끈 것이 아니다. 고정 문구 사유만(파일 조각 없음).
     ...(isAdmin && partFaultSettingsWriteRefusal() ? { settingsUnreadable: { reason: String(partFaultSettingsWriteRefusal().reason || '').slice(0, 300) } } : {}),
   });
@@ -470,6 +478,37 @@ api.post('/tools/part-faults/close', adminOnly, fullScopeOnly, textFields('agent
   const r = await applyTransition({ opened: [], updated: [], closed: [{ ...row, rawState: note || row.rawState, closedAt: now, closeReason: 'manual' }], held: [] }, { now });
   logAudit({ user: req.user?.username, action: '파트 장애 수동 닫기', detail: `${agent || '중앙'}|${partKey} · ${row.deviceName || row.deviceId} · ${note || '(사유 없음)'}` });
   res.json({ ok: r.saved !== false, saved: r.saved, closeReason: 'manual', reason: r.saved === false ? r.reason : undefined });
+});
+
+/**
+ * v3.51 알림 단계 올리기 확인(⑪) — 그 장애의 단계 알림을 멈춘다. 전체 범위 · 운영자 이상(쓰기) · 감사. 행의 확인 열쇠(ackId — 키를 싣지 않는 HMAC)로 찾는다
+ *   (비관리자 판본은 파트 키를 가린다 — 가린 행에서도 확인할 수 있게). 열린 장애가 아니면 404.
+ */
+api.post('/tools/part-faults/ack', toolsPerm, writeRole, fullScopeOnly, textFields('ackId'), async (req, res) => {
+  const p = partOfAckId(await openFaults().catch(() => []), String(req.body?.ackId || ''));
+  // 확인 열쇠는 포탈 프로세스마다 새로 만든다 — 다시 시작한 뒤 열려 있던 화면의 열쇠는 맞지 않는다(사유에 밝힌다 · 반증 S3)
+  if (!p) return res.status(404).json({ ok: false, reason: '열린 장애가 아니거나 화면이 오래됐습니다(이미 닫혔거나 포탈이 다시 시작됐을 수 있습니다) — 목록을 새로 고친 뒤 다시 누르십시오.' });
+  const r = ackEscalation(p, { by: req.user?.username || '' });
+  if (!r.ok) return res.status(500).json({ ok: false, reason: r.reason });
+  if (r.changed) logAudit({ user: req.user?.username, action: '파트 장애 알림 확인(단계 올리기 멈춤)', target: `${p.deviceName || ''} · ${p.label || ''}`.slice(0, 120), ip: req.ip });
+  res.json({ ok: true, changed: !!r.changed });
+});
+
+/** v3.51 알림 단계 · 당직 설정(⑪) — 읽기 · 쓰기 모두 전체 범위 관리자(쓰기는 조회 ∧ 쓰기 전체 — 공용 게이트). 수집 주체 후보는 이 포탈 + 등록된 엣지. */
+api.get('/tools/part-faults/escalation', adminOnly, fullScopeOnly, async (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const err = escalationStore.loadError();
+  // 엣지 이름은 trim 만 한 글자라(collector/registry.js) 같은 판정(agentKeyOf)으로만 거른다 — 한글 · 공백 이름도 후보에(반증 A18)
+  const agents = [...new Set(listCollectors().map((c) => agentKeyOf(String(c.name || c.id || ''))).filter((x) => x && x !== '*'))].sort();
+  res.json({ ok: true, settings: escalationStore.get(), ...(err ? { unreadable: true } : {}), agents, run: escalationRunStatus(), ...(escalationStateError() ? { stateError: escalationStateError() } : {}),
+    tickMs: ESC_TICK_MS, limits: { policies: ESC_POLICIES_MAX, steps: ESC_STEPS_MAX, emails: ESC_EMAILS_MAX, afterMin: ESC_AFTER_MIN, afterMax: ESC_AFTER_MAX, days: ESC_DAYS, retries: ESC_RETRY_MAX } });
+});
+api.put('/tools/part-faults/escalation', adminOnly, fullScopeOnly, async (req, res) => {
+  const b = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+  const r = escalationStore.save(b, { by: req.user?.username || '' });
+  if (!r.ok) return res.status(r.status || 400).json({ ok: false, reason: r.reason });
+  logAudit({ user: req.user?.username, action: '파트 장애 알림 단계 · 당직 설정 저장', detail: `${r.value.enabled ? '켜짐' : '꺼짐'} · 정책 ${r.value.policies.length} · 당직표 ${Object.keys(r.value.oncall).length}${r.turnedOn ? ' · 이번에 켬' : r.turnedOff ? ' · 이번에 끔' : ''}`, ip: req.ip });
+  res.json({ ok: true, settings: r.value });
 });
 
 /** 키 체계 변경으로 이력을 새로 시작했는지(v2.548 스키마 v2) — 화면 배지 근거. */

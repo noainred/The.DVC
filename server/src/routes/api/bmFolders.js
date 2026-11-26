@@ -46,6 +46,7 @@ import { scopeSig } from '../../util/scopeSig.js';
 import { bmCheckFor, chkRowOf } from '../../bmcheck/state.js';
 import { healthRowOf, HEALTH_RULES, HEALTH_BANDS, HEALTH_MIN } from '../../bmcheck/health.js';   // v3.50 건강 점수(⑩)
 import { maskHwLogText, readHwLog, demoHwLog } from '../../idrac/hwLog.js';   // v3.50 하드웨어 이벤트 로그(⑤) — 판본에 따른 가림   // v3.45 물리서버 점검(보증 · 펌웨어 기준선 · BIOS 편차)
+import { memCeOf } from '../../idrac/partLife.js';   // v3.51 부품 수명(⑧) — 메모리 교정 오류 경고 슬롯별 수
 import { assetStore, fwBaselineStore, adminBaselineLookup, advisoryStore, caseStore, upsertCase, removeCase, casesOfTag, CASE_STATUSES } from '../../bmcheck/store.js';
 import { WARRANTY_SOON_DAYS } from '../../bmcheck/warranty.js';
 import { judgePeerGroup, avgValueOf, PEER_MIN, PEER_GROUP_MAX, PEER_AVG_MIN_SAMPLES, PEER_AVG_MIN_COVERAGE } from '../../bmcheck/peer.js';   // v3.48 같은 묶음 대비
@@ -768,26 +769,30 @@ export function registerBmFolders(api) {
       if (m.kind !== 'bm') return res.json({ ok: true, why: 'esxi' });
       const D = await trendDeps();
       const full = admin && !hide;
-      const finish = (via, r) => {
+      const finish = async (via, r) => {
         if (!r || r.ok !== true) return res.json({ ok: true, via, why: r?.kind === 'old-version' ? 'old-version' : r?.kind === 'not-found' ? 'not-found' : 'edge-fail', ...(full && r?.reason ? { reason: String(r.reason).slice(0, 200) } : {}) });
         const rows = (Array.isArray(r.rows) ? r.rows : []).map((x) => (full ? x : { ...x, msg: maskHwLogText(x.msg, { tag: m.serviceTag }) }));
-        return res.json({ ok: true, via, at: r.at ?? null, status: r.status, read: r.read ?? rows.length, total: r.total ?? null, stopped: r.stopped || '', gap: r.gap || 0, counts: r.counts, rows, ...(r.demo ? { demo: true } : {}) });
+        // v3.51 부품 수명(⑧): 메모리 교정 오류 경고 — 가리기 전 원문에서 슬롯별로 센다(슬롯 이름은 주소 · 계정이 아니다). DIMM 목록은 이 노드 인벤토리가 있을 때만(0 인 슬롯도 줄로)
+        let dimms = [];
+        if (via === 'local' || via === 'demo') { try { const hx = (await hwLookupFactory())(m); dimms = Array.isArray(hx?.inv?.memoryDimms) ? hx.inv.memoryDimms.map((d) => d?.locator) : []; } catch { dimms = []; } }
+        const memCe = memCeOf(r, { now: Date.now(), dimms });
+        return res.json({ ok: true, via, at: r.at ?? null, status: r.status, read: r.read ?? rows.length, total: r.total ?? null, stopped: r.stopped || '', gap: r.gap || 0, counts: r.counts, rows, ...(memCe ? { memCe } : {}), ...(r.demo ? { demo: true } : {}) });
       };
       // 데모(mock) — 장비 없이 합성 기록(화면이 ‘데모’ 를 밝힌다)
       const demo = typeof D.hwLogDemo === 'function' ? await D.hwLogDemo(m.key).catch(() => null) : null;
-      if (demo) return finish('demo', demo);
+      if (demo) return await finish('demo', demo);
       const src = hwLogSourceOf(m);
       if (!src) return res.json({ ok: true, why: 'no-source' });
       if (src.via !== 'local') {
         const qk = src.q.k ? `k|${src.q.k}` : `id|${src.q.id}`;
         const r = await trendOnce(`hwlog|${src.agent}|${qk}`, () => D.hwLogEdge(src.agent, src.q).then((x) => (x?.ok ? { ok: true, ...x.body } : x)));
-        return finish(src.via, r);
+        return await finish(src.via, r);
       }
       const sid = src.id;
       const entry = sid ? await D.hwLogEntry(sid).catch(() => null) : null;
       if (!entry) return res.json({ ok: true, why: 'no-source' });   // 이 노드 iDRAC 등록부 밖(OME · 꺼진 등록 등) — 읽을 길이 없다
       const r = await trendOnce(`hwlog||id|${sid}`, () => D.hwLogLocal(entry));
-      return finish('local', r);
+      return await finish('local', r);
     } catch (e) { if (!res.headersSent) res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); }
   });
 

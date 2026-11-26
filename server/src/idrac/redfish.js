@@ -32,6 +32,7 @@ import { partHealthRollup } from './invView.js'; // v2.731 A2-02: 하위 시스�
 import { trustedRedirect } from '../util/resilientFetch.js'; // v2.612 SEC2612-03
 import { ssrfBlockReason } from '../util/ssrfBlock.js'; // v2.612 SEC2612-03
 import { BIOS_KEYS } from './biosKeys.js'; // v2.973: 엣지 축약 인벤토리 · 중앙 수신 정제와 같은 목록
+import { lifePctOf } from './partLife.js';   // v3.51 부품 수명(⑧) — SSD 잔여 수명 판정 하나
 /** 라이선스 항목 문자열 상한(v2.607 SEC2607-03). */
 export const LICENSE_FIELD_MAX = 256;
 
@@ -799,6 +800,8 @@ export async function fetchInventory(entry) {
               // 디스크 배드 섹터 이력(과거 기록 읽기 1단계): 장비가 이 디스크의 누적 오류 값(DriveMetrics) 링크를 알려 주면 받아 둔다 —
               //   같은 응답에 이미 있다(추가 HTTP 0회). 없으면 ''(그 장비에는 묻지 않는다). 쓰는 쪽이 꼴을 다시 검사한다(diskbad/diskvals.js metricsPathOf).
               metricsPath: typeof drive.Metrics?.['@odata.id'] === 'string' ? drive.Metrics['@odata.id'].slice(0, 300) : '',
+              // v3.51 부품 수명(⑧): SSD 잔여 수명(Redfish 표준 PredictedMediaLifeLeftPercent) — 같은 응답(추가 HTTP 0회). 없으면 null(0 이 아니다 · idrac/partLife.js)
+              lifeLeftPct: lifePctOf(drive.PredictedMediaLifeLeftPercent),
             });
           } catch { /* skip drive */ }
         }

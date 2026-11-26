@@ -20,7 +20,7 @@ import { osText, hwWhyText, OS_WHY } from './hwText.js';
 import { IdracConnect } from './IdracConnect.jsx';
 import { WarrantySection, FwBiosSections } from './CheckSections.jsx';   // v3.45 물리서버 점검(보증 · 펌웨어 기준선 · BIOS 편차)
 import { PeerSection } from './PeerSection.jsx';   // v3.48 같은 묶음 대비
-import { HealthSection, HwLogSection, CaseSection, AdvisorySection } from './OpsSections.jsx';   // v3.50 건강 점수 · 이벤트 로그 · 케이스 · 보안 권고
+import { HealthSection, HwLogSection, CaseSection, AdvisorySection, LifeSection } from './OpsSections.jsx';   // v3.50 건강 점수 · 이벤트 로그 · 케이스 · 보안 권고 · v3.51 부품 수명
 import { ledText, LED_NOTE } from './opsText.js';
 import { useBoxWidth } from './useBoxWidth.js';
 import { unitText } from '../../unitText.js';
@@ -227,7 +227,7 @@ export default function BmDrawer({ r, rows, corps, corpName, scoped, op, busy, o
             afterGlance={<HealthSection r={r} rules={healthRules} />}
             afterEnd={<><HwLogSection key={`hl:${r.key}`} r={r} /><CaseSection key={`cs:${r.key}`} r={r} /></>}
             afterIdent={<WarrantySection chk={chk} admin={admin && !scoped} />}
-            afterSpec={<><FwBiosSections r={r} chk={chk} onBaseline={onBaseline} busy={baseBusy} baseNote={baseNote && baseNote.key === r.key ? baseNote : null} /><AdvisorySection r={r} chk={chk} /></>} />
+            afterSpec={<><FwBiosSections r={r} chk={chk} onBaseline={onBaseline} busy={baseBusy} baseNote={baseNote && baseNote.key === r.key ? baseNote : null} /><AdvisorySection r={r} chk={chk} /><LifeSection r={r} hw={hw} /></>} />
         </div>
 
         <nav className="vmh-df" aria-label="바로가기">
