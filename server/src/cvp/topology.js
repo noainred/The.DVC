@@ -150,8 +150,9 @@ export function compareEnds(pa, pb, { aName = '', bName = '', isSwitch = null } 
     if (p.desc == null) continue;
     const named = deviceNameFromDesc(p.desc);
     if (!named || !peerName) continue;
-    // v3.42(2회차 A1-F11): 뽑은 낱말이 알려진 스위치 이름일 때만 비교한다 — 'MLAG-PEER-LINK' · 'UPLINK_TO_CORE' 같은 낱말을 상대 이름으로 보고 '다름' 을 셌다.
-    if (typeof isSwitch === 'function' && !isSwitch(named)) continue;
+    // v3.42(2회차 A1-F11): 뽑은 낱말이 알려진 스위치 이름이거나 숫자를 품을 때만 비교한다 — 'MLAG-PEER-LINK' · 'UPLINK_TO_CORE' 같은 낱말을 상대 이름으로 보고
+    //   '다름' 을 셌다. 숫자 든 이름(kr-leaf-09 — CVP 밖 · 철거된 장비)은 낡은 설명일 수 있어 그대로 비교한다.
+    if (typeof isSwitch === 'function' && !isSwitch(named) && !/\d/.test(named)) continue;
     const ok = lc(named) === lc(peerName) || shortOf(named) === shortOf(peerName);
     if (!ok) out.push({ field: side === 'a' ? 'descA' : 'descB', a: side === 'a' ? named : peerName, b: side === 'a' ? peerName : named, state: 'diff' });
   }

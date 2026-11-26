@@ -67,6 +67,8 @@ describe('v3.42 CVP 버그 점검 1회차 — 웹', () => {
     expect(downMembersText({ members: [{ port: 'Ethernet1', oper: 'up', admin: 'up' }, { port: 'Ethernet2', oper: 'down', admin: 'up' }, { port: 'Ethernet3', oper: 'down', admin: 'down' }] })).toBe('Et2 내려감 · Et3 꺼짐');
     expect(downMembersText({ members: Array.from({ length: 6 }, (_, i) => ({ port: `Ethernet${i}`, oper: 'down', admin: 'up' })) })).toMatch(/외 2$/);
     expect(downMembersText({ members: [] })).toBe('');
+    // 2회차 A5-F4: 못 읽음(unknown) · 링크 없음(nolink) 을 '내려감' 으로 단정하지 않는다
+    expect(downMembersText({ members: [{ port: 'Ethernet1', oper: 'unknown', admin: 'up' }, { port: 'Ethernet2', oper: 'nolink', admin: 'up' }] })).toBe('Et1 모름 · Et2 링크 없음');
     const s = src('CvpTopology.jsx');
     expect(s).toMatch(/role="button" tabIndex=\{0\}/);
     expect(s).toMatch(/onKeyDown=/);
@@ -96,5 +98,21 @@ describe('v3.42 CVP 버그 점검 1회차 — 웹', () => {
     const html = renderToStaticMarkup(React.createElement(Pending, { err: new Error('x'), onRetry: () => {} }));
     expect(html).toContain('새로고침');
     expect(src('CvpOptics.jsx')).not.toMatch(/<CvpOpticsTrendView key=/);
+  });
+  it('2회차 웹 — 끊긴 기록 · 확인 불가 · 버전별 · LAG 못 읽음 · Tab 순서 · 역방향 비교 · 늦은 목록', () => {
+    expect(src('CvpPortPlan.jsx')).toMatch(/x\.used == null \? \(x\.total == null \? '—' : `— \/ \$\{x\.total\}`\)/);   // F1
+    const rd = src('CvpRedundancy.jsx');
+    expect(rd).toMatch(/const unk = \(x\) => x\.mlag\.state === 'unknown'/); expect(rd).toMatch(/확인 불가 <b/);   // F2
+    expect(rd).toMatch(/포트 목록 \$\{rows\.filter\(\(x\) => !x\.portsRead\)\.length\}대/);   // F10
+    expect(src('CvpCompliance.jsx')).toMatch(/v\.bugNoRecord/); expect(src('CvpCompliance.jsx')).toMatch(/v\.lifeUnread/);   // F5
+    expect(src('CvpPortMap.jsx')).toMatch(/cfgReadAt\?\.lag && !data\.device\.info\.cfgReadAt\.lagPartial \? 'LAG 아님' : '소속 못 읽음'/);   // F7
+    const tp = src('CvpTopology.jsx');
+    expect(tp).toMatch(/drawOrder\.map\(\(n\) =>/); expect(tp).toMatch(/onFocus=\{\(\) => setFocusId\(n\.id\)\}/);   // F8 · 포커스
+    expect(tp).toMatch(/마지막 읽기가 실패함/);   // F9
+    const cp = src('CvpCompare.jsx');
+    expect(cp).toMatch(/setA\(String\(x\.id\)\); setB\('now'\);/); expect(cp).toMatch(/if \(my !== listSeq\.current\) return;/);   // F11 · 늦은 목록
+    const ot = src('CvpOpticsTrend.jsx');
+    expect(ot).toMatch(/x\.state === 'stale' && x\.lastRx != null && th\.warnDbm != null && x\.lastRx <= th\.warnDbm/);   // A1-F9
+    expect(src('CvpPortPlan.jsx')).toMatch(/sat\.seriesUnread/);   // A4-F6
   });
 });

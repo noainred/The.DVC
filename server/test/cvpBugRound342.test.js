@@ -60,7 +60,8 @@ test('① 토폴로지', () => {
   // 법인(CVP) 간 같은 이름 — 보고한 장비와 같은 CVP 후보를 고른다(A1-06)
   const two = [D('SA', 'spine1', 'cA', 'eA'), D('LA', 'leaf1', 'cA', 'eA'), D('SB', 'spine1', 'cB', 'eB'), D('LB', 'leaf1', 'cB', 'eB')];
   const idx = TP.switchIndex(two);
-  assert.equal(idx.find('spine1'), null, '어느 CVP 인지 모르면 맞추지 않는다');
+  assert.equal(idx.find('spine1'), TP.AMBIG, '어느 CVP 인지 모르면 맞추지 않는다(스위치 이름이라 기타 이웃도 아니다 — 2회차 A1-F1)');
+  assert.equal(idx.find('not-a-switch'), null);
   assert.equal(idx.find('spine1', 'eB\u0000cB\u0000LB'), 'eB\u0000cB\u0000SB');
   assert.equal(idx.find('spine1.kr.corp', 'eA\u0000cA\u0000LA'), 'eA\u0000cA\u0000SA', '짧은 이름 충돌도 같은 CVP 로');
   const t2 = TP.buildTopology({ devices: two, lldp: [L('LB', 'Ethernet49', 'spine1', 'Ethernet1', 'cB', 'eB'), L('SB', 'Ethernet1', 'leaf1', 'Ethernet49', 'cB', 'eB')] });
@@ -246,4 +247,131 @@ test('⑦ 실제 라우터', async () => {
   who = { username: 'adm', role: 'admin', scope: null };
   ({ j } = await get(`/tools/cvp/redundancy?cvpId=${cvpId}`));
   assert.ok(JSON.stringify(j).includes('10.77.1.1'), '대조: admin 은 원문');
+});
+
+/* ── 2회차(5축) 확정분 ─────────────────────────────────────────────────────────────────────────────────────── */
+test('⑧ 2회차 — 토폴로지 · 포트 구성도 · 판정', () => {
+  const link = (ll, a, ap, b, bp) => { ll.push(L(a, ap, b, bp)); ll.push(L(b, bp, a, ap)); };
+  // A1-F1: 같은 CVP 안 동명 2대(RMA 뒤 남은 옛 장비) — 스트리밍 중인 쪽을 고르고, 못 고르면 '기타 이웃' 으로 세지 않는다
+  // (키 = 호스트 이름 — 단 leaf3 는 새 장비 'leaf3new'(스트리밍) · 옛 장비 'leaf3old'(비활성) 두 행)
+  const devs = [D('spine1', 'spine1'), D('spine2', 'spine2'), D('leaf1', 'leaf1'), D('leaf2', 'leaf2'), { ...D('leaf3new', 'leaf3'), streaming: true }, { ...D('leaf3old', 'leaf3'), streaming: false }];
+  const ll = [];
+  for (const [key, host] of [['leaf1', 'leaf1'], ['leaf2', 'leaf2'], ['leaf3new', 'leaf3']]) {
+    for (const [sp, up] of [['spine1', 'Ethernet49/1'], ['spine2', 'Ethernet50/1']]) { ll.push(L(key, up, sp, `Ethernet${host}`)); ll.push(L(sp, `Ethernet${host}`, host, up)); }
+  }
+  const t = TP.buildTopology({ devices: devs, lldp: ll });
+  assert.deepEqual([layers(t).spine1, layers(t).spine2, layers(t).leaf1], ['spine', 'spine', 'leaf']);
+  assert.equal(t.nodes.find((n) => n.key === 'spine1').otherNeighbors, 0, '동명 이웃을 기타로 세지 않는다');
+  assert.equal(t.links.filter((l) => l.kind === 'both').length, 6, '스트리밍 중인 새 장비로 링크');
+  const amb = TP.switchIndex([D('X', 'dup'), D('Y', 'dup')]);
+  assert.equal(amb.find('dup', '\u0000c1\u0000Z'), TP.AMBIG);
+  // A1-F4: 스파인 MLAG 쌍 + 리프 2(서버 LLDP 없음)
+  const m = []; link(m, 's1', 'E9', 's2', 'E9'); for (const lf of ['l1', 'l2']) { link(m, lf, 'E49', 's1', `E${lf}`); link(m, lf, 'E50', 's2', `E${lf}`); }
+  assert.deepEqual(layers(TP.buildTopology({ devices: ['s1', 's2', 'l1', 'l2'].map((k) => D(k, k)), lldp: m })), { s1: 'spine', s2: 'spine', l1: 'leaf', l2: 'leaf' });
+  // A1-F5: 리프 MLAG 쌍 · 업링크 하나 내려감
+  const u = [];
+  ['lf1', 'lf2', 'lf3', 'lf4'].forEach((lf, i) => { if (lf !== 'lf1') link(u, lf, 'E49', 'sp1', `E${i}`); link(u, lf, 'E50', 'sp2', `E${i}`); });
+  link(u, 'lf1', 'E47', 'lf2', 'E47'); link(u, 'lf3', 'E47', 'lf4', 'E47');
+  const lu = layers(TP.buildTopology({ devices: ['sp1', 'sp2', 'lf1', 'lf2', 'lf3', 'lf4'].map((k) => D(k, k)), lldp: u }));
+  assert.deepEqual([lu.sp1, lu.sp2, lu.lf1, lu.lf2, lu.lf3, lu.lf4], ['spine', 'spine', 'leaf', 'leaf', 'leaf', 'leaf']);
+  // A1-F6 · A5-F6: 화면의 스위치 이웃 수는 피어 포함
+  const tp = TP.buildTopology({ devices: ['s1', 's2', 'l1', 'l2'].map((k) => D(k, k)), lldp: m });
+  assert.equal(tp.nodes.find((n) => n.key === 's1').switchNeighbors, 3);
+  // A1-F2: CVP 안 OOB 관리 스위치 — 상대 끝이 Management 여도 링크 · 업링크가 아니다
+  const ob = []; for (const k of ['s1', 's2']) link(ob, 'oob', `Ethernet${k}`, k, 'Management1');
+  const tob = TP.buildTopology({ devices: ['s1', 's2', 'oob'].map((k) => D(k, k)), lldp: ob });
+  assert.equal(tob.links.length, 0);
+  assert.equal(TP.uplinkPortsOf(ob, TP.switchIndex(['s1', 's2', 'oob'].map((k) => D(k, k)))).size, 0);
+  // A1-F3: 다른 CVP 의 전체 이름 하나보다 같은 CVP 의 짧은 이름이 먼저
+  const two = [D('SA', 'spine1.kr.corp', 'cA', 'eA'), D('LA', 'leaf1', 'cA', 'eA'), D('SB', 'spine1', 'cB', 'eB')];
+  assert.equal(TP.switchIndex(two).find('spine1', 'eA\u0000cA\u0000LA'), 'eA\u0000cA\u0000SA');
+  // A1-F11: 설명 낱말이 스위치 이름이 아니고 숫자도 없으면 비교하지 않는다
+  const isSw = (n) => n === 'leaf2';
+  assert.equal(TP.compareEnds({ desc: 'MLAG-PEER-LINK' }, { desc: '' }, { aName: 'leaf1', bName: 'leaf2', isSwitch: isSw }).some((x) => x.field === 'descA'), false);
+  assert.equal(TP.compareEnds({ desc: 'to kr-leaf-09' }, { desc: '' }, { aName: 'leaf1', bName: 'leaf2', isSwitch: isSw }).some((x) => x.field === 'descA'), true, '숫자 든 이름(낡은 설명)은 비교');
+  // A3-F2: IP 이름은 통째로
+  assert.equal(TP.shortOf('192.168.10.5'), '192.168.10.5'); assert.equal(TP.shortOf('esx-01.corp'), 'esx-01');
+  // A1-F7: 리눅스 NIC 예측 이름은 인터페이스
+  for (const t2 of ['ens1f0', 'eno1np0', 'enp59s0f0np0']) assert.equal(PM.deviceNameFromDesc(`${t2} x`), '', t2);
+  assert.equal(PM.deviceNameFromDesc('esx01-ens1f0'), 'esx01');
+  // A1-E1: 브레이크아웃 레인 일부만 올라오면 Rx 판정 안 함(링크 없음도 아님 — 재고는 링크 있음)
+  const part = [{ kind: 'xcvr', name: 'xcvr › Ethernet49', state: 'ok', dom: { rxPower: -30 } }];
+  const j = P.judgeOptics(part, [{ name: 'Ethernet49/1', oper: 'up' }, { name: 'Ethernet49/2', oper: 'nolink' }], {});
+  assert.deepEqual([j[0].optic.linked, j[0].optic.lanesPartial, j[0].optic.judged], [false, true, false]);
+  assert.equal(OT.opticInventory([{ partsList: j, ports: [] }]).totals.linked, 1);
+  assert.equal(E.cleanDevice({ key: 'k', ts: NOW - 1000, parts: j, partsAt: NOW - 1000 }, NOW).parts[0].optic.lanesPartial, true, '엣지 정제 화이트리스트');
+  // A1-F9: 끊긴 GBIC 도 마지막 값 · 임계 이하면 위험 쪽 정렬
+  const k = '\u0000c1\u0000S1\u0000Ethernet1';
+  const ot = OT.opticTrends({ series: new Map([[k, Array.from({ length: 20 }, (_, i) => [NOW - (10 + 20 - i) * DAY, -16])]]), now: NOW, warnDbm: -10, faultDbm: -14 });
+  assert.deepEqual([ot.rows[0].state, ot.rows[0].lastRx], ['stale', -16]);
+  // A4-F9 · A5-F3: 고갈 예측 점 상한 · 포화 끊긴 행 마지막 날
+  const devs300 = Array.from({ length: PP.SAT_POINTS_ROWS + 3 }, (_, i) => ({ agent: '', cvpId: 'c1', key: `D${i}`, hostname: `d${i}` }));
+  const ser = new Map(devs300.map((d) => [`\u0000c1\u0000${d.key}`, Array.from({ length: 10 }, (_, i) => [NOW - (9 - i) * DAY, 48, 20])]));
+  const ex = PP.exhaustForecast({ devices: devs300, series: ser, now: NOW });
+  assert.equal(ex.rows.filter((r) => r.points == null).length, 3);
+  const sat = PP.saturationForecast({ uplinks: [{ agent: '', cvpId: 'c1', key: 'S1', hostname: 's1', port: 'E1' }], series: new Map([['\u0000c1\u0000S1\u0000E1', [[NOW - 20 * DAY, 50]]]]), now: NOW });
+  assert.equal(sat.rows[0].lastAt, NOW - 20 * DAY);
+  // A5-F5: 버전별 보기 — 기록 없음 · 수명주기 못 읽음
+  const cf = CP.complianceFleet([{ agent: '', cvpId: 'c', key: 'a', hostname: 'a', eosVersion: '4.30', info: { readKinds: ['bugs'] } }], { now: NOW });
+  assert.deepEqual([cf.versions[0].bugNoRecord, cf.versions[0].lifeUnread], [1, 1]);
+});
+
+test('⑨ 2회차 — 가림 · 무거운 조회 동시 상한', async () => {
+  const { maskErrText } = await import('../src/routes/api/cvp.js');
+  assert.equal(maskErrText('peer 10.1.1.1.'), 'peer (주소 가림).', '문장 끝 마침표가 붙어도 가린다(A3-F1)');
+  assert.equal(maskErrText('v4.27.4.1.2'), 'v4.27.4.1.2', '대조: 다섯 마디 판 표기는 주소가 아니다');
+  const G = await import('../src/cvp/heavyGate.js');
+  G._resetHeavyGate();
+  const { EventEmitter } = await import('node:events');
+  const mk = () => { const res = new EventEmitter(); res.writableEnded = false; res.destroyed = false; res.statusCode = 200; res.status = (c) => { res.statusCode = c; return res; }; res.json = (b) => { res.body = b; res.writableEnded = true; res.emit('finish'); }; return res; };
+  const ran = [];
+  const reqs = Array.from({ length: G.HEAVY_MAX + G.HEAVY_QUEUE_MAX + 1 }, () => ({ req: { destroyed: false }, res: mk() }));
+  reqs.forEach((x, i) => G.heavyGate(x.req, x.res, () => ran.push(i)));
+  assert.equal(ran.length, G.HEAVY_MAX, '동시에는 HEAVY_MAX 건만');
+  assert.equal(reqs.at(-1).res.statusCode, 503, '줄이 차면 503');
+  reqs[0].res.json({}); assert.equal(ran.length, G.HEAVY_MAX + 1, '끝나면 다음이 돈다');
+  reqs[2].req.destroyed = true;   // 기다리는 사이 끊긴 요청은 건너뛴다
+  reqs[1].res.json({}); assert.equal(ran.includes(2), false); assert.equal(ran.at(-1), 3);
+  G._resetHeavyGate();
+});
+
+test('⑩ 2회차 DB — 이름 변형 합치기 · 일부 목록 · 링크 날 기억', async () => {
+  if (!(await cdb.available())) return;
+  const { dayIndex } = await import('../src/util/dayKey.js');
+  const today = dayIndex(NOW);
+  // A2-F1: 변형 이름의 기록 시작 날 · 같은 날 플랩은 합친다
+  await cdb.importNetHistory('Edge-Z', { firstDay: [['cz', 'sw1', today - 200]], flap: [['cz', 'sw1', 'Ethernet5', today, 3]] });
+  await cdb.saveDevices({ agent: 'Edge-Z', cvpId: 'cz', devices: [{ key: 'sw1', ts: NOW - 3600_000, hostname: 'sw1', ports: [{ name: 'Ethernet5', oper: 'down', admin: 'up' }] }] });
+  await cdb.importNetHistory('edge-z', { firstDay: [['cz', 'sw1', today]], flap: [['cz', 'sw1', 'Ethernet5', today, 1]] });
+  await cdb.adoptAgentVariants('edge-z', { wait: true });
+  const ll = await cdb.lastLinkAll();
+  const { dayStartMs } = await import('../src/util/dayKey.js');
+  assert.equal(ll.first.get('edge-z\u0000cz\u0000sw1'), dayStartMs(today - 200), '기록 시작 날은 더 이른 쪽');
+  const fl = await cdb.flapWindow({ days: 1, now: NOW });
+  assert.equal(fl.map.get('edge-z\u0000cz\u0000sw1\u0000Ethernet5')?.downs, 4, '같은 날 플랩은 합');
+  // A2-F2 · F3: 일부 목록이면 포트 수를 적지 않고, 남긴 옛 행은 '모름' · 엣지 레코드는 일부 표지
+  const t0 = Date.now() - 60_000;
+  const port = (name, oper = 'up') => ({ name, oper, admin: 'up', desc: '', speedBps: 25e9 });
+  await cdb.saveDevices({ agent: '', cvpId: 'dq', devices: [{ key: 'Q', ts: t0, hostname: 'q', ports: [port('Ethernet1'), port('Ethernet2'), port('Ethernet3')] }] });
+  await cdb.saveDevices({ agent: '', cvpId: 'dq', devices: [{ key: 'Q', ts: t0 + 1000, hostname: 'q', portsPartial: true, ports: [port('Ethernet1')] }] });
+  const dp = await cdb.devPortSeries({ days: 1 });
+  assert.equal(dp.map.get('\u0000dq\u0000Q').at(-1)[1], 3, '일부 목록(1개)으로 포트 수를 덮어쓰지 않는다');
+  const pr = await cdb.portRowsOf([{ agent: '', cvpId: 'dq', key: 'Q', portsRead: true }]);
+  assert.deepEqual(pr.rows.map((r) => [r.port, r.oper]).sort(), [['Ethernet1', 'up'], ['Ethernet2', 'unknown'], ['Ethernet3', 'unknown']]);
+  const recs = await cdb.deviceRecordsFor('', 'dq');
+  assert.equal(recs[0].portsPartial, true); assert.equal(recs[0].ports.find((p) => p.name === 'Ethernet2').oper, 'unknown');
+  // A2-F4: 장비 정리 뒤 같은 날 다시 적재하면 링크 날을 다시 적는다(기억이 막지 않는다)
+  await cdb.pruneDevices('', { dq: [] }, { cvpIds: ['dq'] });
+  await cdb.saveDevices({ agent: '', cvpId: 'dq', devices: [{ key: 'Q', ts: t0 + 2000, hostname: 'q', ports: [port('Ethernet1')] }] });
+  const l2 = await cdb.lastLinkAll();
+  assert.ok(l2.last.get('\u0000dq\u0000Q\u0000Ethernet1') != null);
+});
+
+test('⑪ 2회차 라우터 — 스냅샷 범위 입력 형식', async () => {
+  if (!(await cdb.available())) return;
+  who = { username: 'adm', role: 'admin', scope: null };
+  for (const bad of [[cvpId], 5, { a: 1 }]) {
+    const r = await fetch(`${base}/tools/cvp/snapshots`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ cvpId: bad }) });
+    assert.equal(r.status, 400, JSON.stringify(bad));
+  }
 });
