@@ -2,7 +2,7 @@
  * test/sanStorage2955.test.js — v2.955 'SAN 스토리지 성능' 3차(남은 작업 일괄 · 설계 README §8.4).
  *  ① storageCheckHistory(순수): shouldRecord(첫 · 바뀜 · 1시간 · 같음) · lastChangeOf(1시간 반복 기록 뒤에서도 실제 변화를 찾는다)
  *  ② PowerMax 포트 파서(순수): FEPort keys(중복 · 상한) · metrics(포트 이름 IOs/MBs/ResponseTime · 디렉터 이름으로 와도 · 마지막 점)
- *  ③ CSV nodeLoad 칸: 아이실론 · REST 어레이 true|false · SSH 변형 빈칸 · 모르는 타입 빈칸
+ *  ③ CSV nodeLoad 칸: 아이실론 · REST 어레이 · SSH Unity(v3.46.0) true|false · 다른 SSH 변형 빈칸 · 모르는 타입 빈칸
  *  ④ 데모: 어레이 측 hbps 자릿수 · 수식 데모(demoPerfSynth)의 이상치 창 — 해시로 고른 어레이만 · 지금 기준 최근 24시간 · KST 10~12시 ×2.4 · 이틀 전 · 창 밖은 1
  *  ⑤ 실제 라우트(mock · 인증 끔 · node:sqlite): /array ports[].wwn · /check 가 이력을 적는다 · /check/history(목록 · 어레이별 · 전이 worse) · 알림 틱 → alerts.notify → 가짜 SMTP 메일 · 월간 보고서 '지금 보내기' → SMTP 메일 + HTML 첨부 파일명
  *  ⑥ edgelog spec — 알림 · 보고서 상태가 모두 등재되고 인자 없이 불린다
@@ -110,7 +110,9 @@ test('③ CSV nodeLoad 칸 — 표본을 낼 수 있는 장비만', () => {
   assert.equal(CSV.exportedNodeLoad({ type: 'unity480' }), 'true', 'REST 기본');
   assert.equal(CSV.exportedNodeLoad({ type: 'powerstore', collectMethod: 'api', nodeLoadEnabled: false }), 'false');
   assert.equal(CSV.exportedNodeLoad({ type: 'powermax' }), 'true'); assert.equal(CSV.exportedNodeLoad({ type: 'vmax' }), 'true');
-  assert.equal(CSV.exportedNodeLoad({ type: 'unity480', collectMethod: 'ssh' }), '', 'SSH 변형은 성능 경로가 없다 — 빈칸');
+  // v3.46.0: SSH 로 등록한 Unity 도 표본(REST 먼저 · 안 되면 uemcli — unityMetricsSsh) — 토글 칸이 생긴다. 다른 SSH 어레이는 그대로 빈칸.
+  assert.equal(CSV.exportedNodeLoad({ type: 'unity480', collectMethod: 'ssh' }), 'true', 'SSH Unity 도 표본');
+  assert.equal(CSV.exportedNodeLoad({ type: 'powerstore', collectMethod: 'ssh' }), '', 'SSH PowerStore 는 성능 경로가 없다 — 빈칸');
   assert.equal(CSV.exportedNodeLoad({ type: 'netapp' }), ''); assert.equal(CSV.exportedNodeLoad(null), '');
   assert.match(CSV.devicesToCsv([{ type: 'unity480', name: 'U', host: '10.0.0.9', username: 'u' }]), /,true,/);
 });
