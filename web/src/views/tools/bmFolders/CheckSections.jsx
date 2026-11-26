@@ -7,6 +7,7 @@
 import React from 'react';
 import { STable } from '../../../components/STable.jsx';
 import { warrantyView, fwView, biosView } from './checkText.js';
+import { ageText } from '../bmFoldersText.js';
 
 const Why = ({ text }) => (text ? <div className="muted bmd-note">{text}</div> : null);
 const Head = ({ title, badge, sub }) => (
@@ -62,19 +63,22 @@ export function WarrantySection({ chk, admin = false }) {
  * 펌웨어 기준선 · BIOS 설정 편차 구역(베어메탈만). 응답을 받기 전 · 조회 실패에는 그리지 않는다(위 보증 구역이 말한다).
  * @param r    목록 행(kind)
  * @param onBaseline (row, version) => void — 기준 지정('' = 해제). 없으면 단추를 그리지 않는다
- * @param busy  기준 저장 중 · baseNote 기준 저장 결과({ ok, text })
+ * @param busy  기준 저장 중 · baseNote 기준 저장 결과({ ok, text }) · now 나이 글자의 기준 시각(시험이 넣는다 — 기본은 지금)
  */
-export function FwBiosSections({ r, chk, onBaseline = null, busy = false, baseNote = null }) {
+export function FwBiosSections({ r, chk, onBaseline = null, busy = false, baseNote = null, now }) {
   const d = chk?.d || null;
   if (r.kind !== 'bm' || !d || chk?.err) return null;
-  const fw = fwView(d.fw, { noHw: !!d.noHw, baselineUnreadable: !!d.baselineUnreadable });
+  const fw = fwView(d.fw, { noHw: !!d.noHw, baselineUnreadable: !!d.baselineUnreadable, invAt: d.invAt });
+  // 판정에 쓴 인벤토리를 언제 읽었는가 — 오래된 값을 지금 값처럼 보이지 않게 두 구역 머리에 쓴다(시각이 없으면 쓰지 않는다)
+  const readAt = fw.invAt != null ? `인벤토리 ${ageText(fw.invAt, now ?? Date.now())} 읽음` : '';
+  const sub = (head) => [head, readAt].filter(Boolean).join(' · ');
   const bios = biosView(d.bios, { noHw: !!d.noHw, path: d.path, model: d.model });
   const canBase = !!d.canBaseline && typeof onBaseline === 'function';
   return (
     <>
       {fw ? (
         <section className="vmh-sec" aria-label="펌웨어 기준선">
-          <Head title="펌웨어 기준선" badge={fw.badge} sub={fw.head} />
+          <Head title="펌웨어 기준선" badge={fw.badge} sub={sub(fw.head)} />
           {fw.rows.length ? (
             <STable className="table bmd-ct" minWidth={320}>
               {/* 세 열 — 400px 드로어에서도 상태가 가로 스크롤 밖으로 밀리지 않게(기준 · 근거는 버전 칸의 아래 줄 · 기준 지정 단추는 상태 칸 아래) */}
@@ -107,7 +111,7 @@ export function FwBiosSections({ r, chk, onBaseline = null, busy = false, baseNo
 
       {bios ? (
         <section className="vmh-sec" aria-label="BIOS 설정 편차">
-          <Head title="BIOS 설정 편차" badge={bios.badge} sub={bios.head} />
+          <Head title="BIOS 설정 편차" badge={bios.badge} sub={sub(bios.head)} />
           {bios.rows.length ? (
             <STable className="table bmd-ct" minWidth={320}>
               <thead><tr><th>설정</th><th>이 서버 · 다수 값</th><th>비교</th></tr></thead>

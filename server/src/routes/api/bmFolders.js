@@ -493,7 +493,8 @@ export function registerBmFolders(api) {
         //   못 읽은 저장소(unreadable — 그 판정은 하지 않았다) · 찾기를 만들지 못함(noHw — 펌웨어 · BIOS 판정 없음).
         check: {
           soonDays: WARRANTY_SOON_DAYS,
-          assets: ci.assetsErr ? { unreadable: true } : { n: ci.assetsMeta?.n ?? 0, at: ci.assetsMeta?.at ?? null, ...(admin && !hide ? { by: ci.assetsMeta?.by || '' } : {}) },
+          // 원장 줄 수 · 올린 시각은 전 법인 값이다 — 범위 계정에는 싣지 않는다(함대 전체 개수를 싣지 않는 규칙 — 반증 A8). 올린 사람은 전체 범위 관리자 판본만
+          assets: ci.assetsErr ? { unreadable: true } : hide ? {} : { n: ci.assetsMeta?.n ?? 0, at: ci.assetsMeta?.at ?? null, ...(admin ? { by: ci.assetsMeta?.by || '' } : {}) },
           ...(ci.baseErr ? { baselineUnreadable: true } : {}), ...(!hxOf || !chk ? { noHw: true } : {}),
         },
         settings: { autoRules: b.autoRules },
@@ -585,9 +586,14 @@ export function registerBmFolders(api) {
 
   // v3.45 물리서버 점검 상세 — 드로어가 열릴 때 1건(목록에는 상태 요약만). 보증 · 계약(자산 원장) · 펌웨어 기준선 대조 · BIOS 설정 편차.
   //   범위 밖 · 없는 키는 404(존재 은닉 — /hw 와 같은 노출 규칙). 판정은 이 계정에 보이는 구성원만으로(묶음이 법인을 넘지 않는다).
-  //   계약 번호 · 비고는 관리자 판본만(원장은 전체 범위 관리자가 올린 자유 글자다). 서비스 태그 · 주소는 싣지 않는다.
+  //   계약 번호 · 비고는 **전체 범위 관리자 판본만**(원장은 전 법인 자산을 서비스 태그 하나로 찾는다 — 엣지가 남의 태그를 자기 서버로 올리면 범위 관리자에게
+  //   다른 법인 자산의 계약 번호 · 비고가 보였다: 반증 A4. 날짜 · 종류는 판본 구분 없이). 서비스 태그 · 주소는 싣지 않는다.
+  //   엣지 포탈에서는 답하지 않는다(원장 · 기준 · 폴더 저장소는 중앙에 있다 — 엣지의 빈 로컬 저장소로 ‘원장에 없음’ · ‘미분류’ 라 하지 않는다: 반증 A11).
   api.get('/tools/bm-folders/check', toolsPerm, async (req, res) => {
     try {
+      if (isEdgeNode()) return res.status(404).json({ ok: false, error: 'central-only', reason: '물리서버 점검(보증 · 펌웨어 기준선 · BIOS 편차)은 중앙 포탈에서 봅니다.' });
+      // 폴더 저장소를 못 읽었으면 목록과 같이 503 — 못 읽은 배치를 ‘미분류’ 로 판정하지 않는다(반증 A10)
+      if (storeLoadError()) return res.status(503).json({ ok: false, error: 'registryUnreadable', reason: '물리서버 폴더 저장소를 읽지 못해 점검을 판정하지 않았습니다.' });
       const snap = store.get();
       const { members, allowed, b } = await stateFor(req, snap);
       const hide = !!allowed;
@@ -600,13 +606,17 @@ export function registerBmFolders(api) {
       let hxOf = null;
       try { hxOf = await hwLookupFactory(); } catch { hxOf = null; }
       const ci = checkInputs();
-      const c = bmCheckFor({ members: visible, placeOf: b.placeOf, hxOf, assets: ci.assets, adminBase: ci.adminBase, today: todayStamp() }).ofMember(m);
-      const w = c.warranty ? (admin ? c.warranty : { ...c.warranty, contract: '', note: '' }) : null;
+      // 한 대의 판정에는 **그 법인의 서버만** 넣는다 — 묶음이 법인을 넘지 않아 결과가 같고, 드로어를 열 때마다 함대 전체를 다시 판정하지 않는다
+      //   (반증 A6 실측: 658대 전체를 넣으면 한 번에 83ms 동기 — /hw 는 2ms). 법인이 없는 서버는 묶음이 없으므로 자기만.
+      const peersOf = m.corp ? visible.filter((x) => x.corp === m.corp) : [m];
+      const c = bmCheckFor({ members: peersOf, placeOf: b.placeOf, hxOf, assets: ci.assets, adminBase: ci.adminBase, today: todayStamp() }).ofMember(m);
+      const w = c.warranty ? (admin && !hide ? c.warranty : { ...c.warranty, contract: '', note: '' }) : null;
       const place = b.placeOf.get(m.key);
       return res.json({
         ok: true, kind: m.kind, soonDays: WARRANTY_SOON_DAYS,
         warranty: w, ...(ci.assetsErr ? { assetsUnreadable: true } : {}),
-        ...(m.kind === 'bm' ? { fw: c.fw || null, bios: c.bios || null, model: m.model || '', path: place?.src ? place.path : '',
+        // invAt = 판정에 쓴 인벤토리를 읽은 시각(없으면 null) — 화면이 ‘언제 값인가’ 를 보인다(반증 A7)
+        ...(m.kind === 'bm' ? { fw: c.fw || null, bios: c.bios || null, invAt: c.invAt ?? null, model: m.model || '', path: place?.src ? place.path : '',
           ...(ci.baseErr ? { baselineUnreadable: true } : {}), ...(!hxOf ? { noHw: true } : {}),
           // 기준 지정(전 법인 공통)은 조회 ∧ 쓰기 무제한 관리자만 — 단추를 그릴지의 표지(집행은 관리 라우트)
           canBaseline: fleetAdmin(req.user, snap) && !!m.model && !ci.baseErr } : {}),

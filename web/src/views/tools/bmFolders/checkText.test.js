@@ -3,7 +3,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   daysText, monthsText, chkQuickMatch, CHK_QUICK, chkCounts, chkChips, chkAsideText, chkSignals, warrantyView, fwView, biosView, biosLabel,
-  importSummaryText, IMPORT_ACTION, WTY_TEXT, FW_TEXT, FW_ROW_TEXT, BIOS_TEXT, BIOS_ROW_TEXT,
+  importSummaryText, importRowNote, IMPORT_ACTION, WTY_TEXT, FW_TEXT, FW_ROW_TEXT, BIOS_TEXT, BIOS_ROW_TEXT,
 } from './checkText.js';
 import { filterRows, cleanView } from '../bmFoldersText.js';
 import { bmSignalRows, noSignalText } from './drawerText.js';
@@ -45,8 +45,13 @@ describe('목록 — 거르기 · 요약', () => {
     const c = chkCounts(rows);
     expect(c.n).toBe(7); expect(c.bm).toBe(6);
     expect(c.w).toEqual({ expired: 1, soon: 1, ok: 2, unknown: 2, na: 1 });
-    expect(c.fw).toEqual({ behind: 1, ok: 1, none: 1, unread: 1, unsent: 1, na: 1 });
-    expect(c.bios).toEqual({ diff: 1, ok: 1, none: 1, unread: 0, unsent: 1, unplaced: 1, na: 1 });
+    expect(c.fw).toEqual({ behind: 1, ok: 1, split: 0, none: 1, unread: 1, unsent: 1, na: 1 });
+    expect(c.bios).toEqual({ diff: 1, ok: 1, split: 0, none: 1, unread: 0, unsent: 1, unplaced: 1, na: 1 });
+    // 갈림(split)은 뒤처짐 · 다름에도, 정상에도 넣지 않고 따로 센다
+    const sp = chkCounts([row({ w: 'ok', fw: 'split', bios: 'split' }), row({ w: 'ok', fw: 'ok', bios: 'ok' })]);
+    expect([sp.fw.split, sp.fw.ok, sp.fw.behind, sp.bios.split, sp.bios.ok, sp.bios.diff]).toEqual([1, 1, 0, 1, 1, 0]);
+    expect(chkAsideText(sp)).toBe('펌웨어 갈림(판정 못 함) 1 / BIOS 갈림(다수 없음) 1');
+    expect(filterRows([row({ fw: 'split', bios: 'split' })], '', 'fw:behind')).toEqual([]);   // 갈림은 뒤처짐 거르기에 잡히지 않는다
     expect(chkCounts(null)).toMatchObject({ n: 0, bm: 0 });
     // 상태 글자 'na' 가 서버에서 와도 그 칸을 올리지 않는다(자기 이름과 겹치는 값)
     expect(chkCounts([row({ w: 'na', fw: 'na', bios: 'na' })]).w).toEqual({ expired: 0, soon: 0, ok: 0, unknown: 0, na: 1 });
@@ -62,7 +67,7 @@ describe('목록 — 거르기 · 요약', () => {
     expect(chkChips(chkCounts([]), 90)).toEqual([]);
   });
   it('따로 센 것 — 못 읽음 · 보내지 않음 · 기준 없음 · 미분류', () => {
-    expect(chkAsideText(chkCounts(rows))).toBe('펌웨어 못 읽음 1 · 엣지가 보내지 않음 1 / 펌웨어 기준 없음 1 / BIOS 못 읽음 0 · 엣지가 보내지 않음 1 / BIOS 미분류(판정 안 함) 1');
+    expect(chkAsideText(chkCounts(rows))).toBe('펌웨어 못 읽음 1 · 엣지에서 받지 못함 1 / 펌웨어 기준 없음 1 / BIOS 못 읽음 0 · 엣지에서 받지 못함 1 / BIOS 미분류(판정 안 함) 1');
     expect(chkAsideText(chkCounts([row({ w: 'ok', fw: 'ok', bios: 'ok' })]))).toBe('');
     expect(chkAsideText(null)).toBe('');
   });
@@ -79,6 +84,7 @@ describe('드로어 신호', () => {
     expect(chkSignals(row({ w: 'unknown', fw: 'unread', bios: 'unplaced' }))).toEqual([]);
     expect(chkSignals(row({ w: 'ok', fw: 'ok', bios: 'ok' }))).toEqual([]);
     expect(chkSignals(row({ fw: 'none', bios: 'unsent' }))).toEqual([]);
+    expect(chkSignals(row({ fw: 'split', bios: 'split' }))).toEqual([]);   // 갈림은 ‘판정하지 못함’ 이다 — 봐야 할 것으로 올리지 않는다(구역 · 따로 센 것 줄이 말한다)
     expect(chkSignals(row(undefined))).toEqual([]); expect(chkSignals(null)).toEqual([]);
     expect(new Set(s.map((x) => x.kind)).size).toBe(s.length);   // React key
   });
@@ -89,6 +95,7 @@ describe('드로어 신호', () => {
     // 보증 모름 · 펌웨어 기준 없음 · BIOS 미분류는 '본 것' 이 아니다
     expect(noSignalText(row({ w: 'unknown', fw: 'none', bios: 'unplaced' }))).toBe('신호 없음 — 부품 장애 · 사용률 값 없음(CPU · 메모리 둘 다) · 전원 꺼짐 · 임시 키에 해당하는 것이 없습니다.');
     expect(noSignalText(row({ fw: 'unread', bios: 'unsent' }))).not.toMatch(/펌웨어|BIOS|보증/);
+    expect(noSignalText(row({ w: 'ok', fw: 'split', bios: 'split' }))).toBe('신호 없음 — 부품 장애 · 사용률 값 없음(CPU · 메모리 둘 다) · 전원 꺼짐 · 임시 키 · 보증 만료에 해당하는 것이 없습니다.');
   });
 });
 
@@ -145,7 +152,16 @@ describe('펌웨어 기준선 구역', () => {
   it('못 읽음 · 보내지 않음 · 기준 없음은 이유를 쓰고 같음에도 뒤처짐에도 넣지 않는다', () => {
     const u = fwView({ state: 'unread', rows: [], behind: 0 });
     expect(u.badge).toEqual({ label: '못 읽음', color: 'gray' }); expect(u.rows).toEqual([]); expect(u.why).toMatch(/같음에도 뒤처짐에도 넣지 않습니다/); expect(u.note).toBe('');
-    expect(fwView({ state: 'unsent', rows: [] }).why).toMatch(/엣지가 펌웨어 목록을 보내지 않았습니다/);
+    // ‘엣지가 보내지 않았다’ 고 단정하지 않는다 — 중앙이 그 엣지 이름을 확인하지 못해 받지 않은 경우도 같은 상태다(반증 A19)
+    expect(fwView({ state: 'unsent', rows: [] }).why).toMatch(/엣지에서 펌웨어 목록을 받지 못했습니다\(엣지 판이 낮거나 · 그 엣지가 아직 읽지 못했거나 · 중앙이 그 엣지의 이름을 확인하지 못했습니다\)/);
+    expect(fwView({ state: 'unsent', rows: [] }).badge).toEqual({ label: '엣지에서 받지 못함', color: 'gray' });
+    // 갈림: 뒤처진 것 없음이라 하지 않는다 · 판정하지 못한 수를 쓴다(수가 없으면 수 없이)
+    const sp = fwView({ state: 'split', behind: 0, open: 2, rows: [FW.rows[3], FW.rows[4]] });
+    expect(sp.badge).toEqual({ label: '갈림 — 판정 못 함', color: 'gray' }); expect(sp.head).toBe('판정하지 못한 구성요소 2개');
+    expect(sp.why).toBe('뒤처진 구성요소는 없지만, 같은 모델 서버끼리 버전이 갈려 다수가 없거나 이 서버 안에서 버전이 섞인 구성요소가 2개 있습니다 — ‘뒤처진 것 없음’ 으로 보지 않습니다.');
+    expect(fwView({ state: 'split', rows: [] }).why).toMatch(/구성요소가 있습니다/); expect(fwView({ state: 'split', rows: [] }).head).toBe('판정하지 못한 구성요소 —개');
+    // 인벤토리 읽은 시각을 그대로 넘긴다(없으면 null — 0 으로 만들지 않는다)
+    expect(fwView(FW, { invAt: 123 }).invAt).toBe(123); expect(fwView(FW, { invAt: '' }).invAt).toBeNull(); expect(fwView(FW).invAt).toBeNull(); expect(fwView(null, { invAt: 5 }).invAt).toBeNull();
     expect(fwView({ state: 'none', rows: [FW.rows[4]] }).why).toMatch(/대조할 기준이 없습니다/);
     expect(fwView(null).why).toBe('펌웨어 대조 값을 받지 못했습니다.'); expect(fwView(null, { noHw: true }).why).toMatch(/하드웨어 정보를 찾지 못해/);
     expect(fwView(null).badge).toBeNull();
@@ -175,7 +191,9 @@ describe('BIOS 설정 편차 구역', () => {
     const u = biosView({ state: 'unplaced', rows: [], diff: 0, group: { size: 0, known: 0 } });
     expect(u.badge).toEqual({ label: '미분류 — 판정 안 함', color: 'gray' }); expect(u.head).toBe(''); expect(u.why).toMatch(/폴더에 넣으면/); expect(u.note).toBe('');
     expect(biosView({ state: 'unread', rows: [], group: { size: 3, known: 2 } }).why).toMatch(/같음에도 다름에도 넣지 않습니다/);
-    expect(biosView({ state: 'unsent', rows: [] }).why).toMatch(/엣지가 BIOS 설정을 보내지 않았습니다/);
+    expect(biosView({ state: 'unsent', rows: [] }).why).toMatch(/엣지에서 BIOS 설정을 받지 못했습니다/);
+    const sp = biosView({ state: 'split', diff: 0, open: 3, rows: [B.rows[0], B.rows[4]], group: { size: 2, known: 2 } });
+    expect(sp.badge).toEqual({ label: '갈림 — 다수 없음', color: 'gray' }); expect(sp.why).toMatch(/‘다른 설정 없음’ 으로 보지 않습니다/);
     expect(biosView({ state: 'none', rows: [B.rows[4]], group: { size: 1, known: 1 } }).why).toMatch(/2대 이상/);
     expect(biosView({ state: 'ok', rows: [B.rows[0]], diff: 0, group: { size: 2, known: 2 } }).badge).toEqual({ label: '다른 설정 없음', color: 'green' });
     expect(biosView(null).why).toBe('BIOS 설정 값을 받지 못했습니다.'); expect(biosView(null, { noHw: true }).why).toMatch(/하드웨어 정보를 찾지 못해/);
@@ -188,6 +206,12 @@ describe('자산 원장 올리기 글자 · 상태 표', () => {
     expect(importSummaryText({ add: 1, update: 2, same: 3, error: 4, remove: 5 }, { replace: true })).toBe('더함 1 · 바꿈 2 · 같음 3 · 오류 4 · 지움 5');
     expect(importSummaryText(null)).toBe('');
     expect(Object.keys(IMPORT_ACTION)).toEqual(['add', 'update', 'same', 'error']);
+  });
+  it('결과 표의 사유 칸 — 오류 사유, 또는 바뀌는 칸(지워지는 칸은 그렇게 밝힌다)', () => {
+    expect(importRowNote({ action: 'error', reason: '서비스 태그가 비어 있습니다.' })).toBe('서비스 태그가 비어 있습니다.');
+    expect(importRowNote({ action: 'update', fields: ['보증 만료일', '계약 번호'], cleared: ['계약 번호'] })).toBe('바뀌는 칸: 보증 만료일 · 계약 번호(지움)');
+    expect(importRowNote({ action: 'update', fields: ['비고'], cleared: [] })).toBe('바뀌는 칸: 비고');
+    expect(importRowNote({ action: 'update' })).toBe(''); expect(importRowNote({ action: 'add' })).toBe(''); expect(importRowNote({ action: 'same', fields: ['x'] })).toBe(''); expect(importRowNote(null)).toBe('');
   });
   it('상태마다 글자와 배지 색이 있다(색만으로 가르지 않는다) · 문구에 백틱이 없다', () => {
     for (const t of [WTY_TEXT, FW_TEXT, FW_ROW_TEXT, BIOS_TEXT, BIOS_ROW_TEXT, IMPORT_ACTION]) for (const v of Object.values(t)) { expect(v.label).toBeTruthy(); expect(v.badge).toMatch(/^(red|amber|green|gray|blue)$/); expect(v.label).not.toContain('`'); }

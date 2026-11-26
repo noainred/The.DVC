@@ -16,9 +16,12 @@ export const WTY_TEXT = Object.freeze({
 export const FW_TEXT = Object.freeze({
   ok: { label: '뒤처진 것 없음', badge: 'green' },
   behind: { label: '뒤처짐', badge: 'amber' },
+  // 뒤처진 줄은 없지만 버전이 갈려 다수가 없거나 한 서버 안에서 섞인 구성요소가 있다 — ‘뒤처진 것 없음’ 이라 하지 않는다
+  split: { label: '갈림 — 판정 못 함', badge: 'gray' },
   none: { label: '기준 없음', badge: 'gray' },
   unread: { label: '못 읽음', badge: 'gray' },
-  unsent: { label: '엣지가 보내지 않음', badge: 'gray' },
+  // 엣지가 안 보냈는지 · 중앙이 그 엣지 이름을 확인하지 못해 안 받았는지 화면은 모른다 — ‘보내지 않음’ 이라고 단정하지 않는다
+  unsent: { label: '엣지에서 받지 못함', badge: 'gray' },
 });
 /** 펌웨어 구성요소 줄 상태. */
 export const FW_ROW_TEXT = Object.freeze({
@@ -33,9 +36,11 @@ export const FW_ROW_TEXT = Object.freeze({
 export const BIOS_TEXT = Object.freeze({
   ok: { label: '다른 설정 없음', badge: 'green' },
   diff: { label: '다른 설정', badge: 'amber' },
+  // 다수와 다른 설정은 없지만 값이 갈려 다수가 없는 설정이 있다 — ‘다른 설정 없음’ 이라 하지 않는다
+  split: { label: '갈림 — 다수 없음', badge: 'gray' },
   none: { label: '견줄 서버 없음', badge: 'gray' },
   unread: { label: '못 읽음', badge: 'gray' },
-  unsent: { label: '엣지가 보내지 않음', badge: 'gray' },
+  unsent: { label: '엣지에서 받지 못함', badge: 'gray' },
   unplaced: { label: '미분류 — 판정 안 함', badge: 'gray' },
 });
 export const BIOS_ROW_TEXT = Object.freeze({
@@ -88,8 +93,8 @@ export function chkQuickMatch(r, quick) {
  */
 export function chkCounts(rows = []) {
   const w = { expired: 0, soon: 0, ok: 0, unknown: 0, na: 0 };
-  const fw = { behind: 0, ok: 0, none: 0, unread: 0, unsent: 0, na: 0 };
-  const bios = { diff: 0, ok: 0, none: 0, unread: 0, unsent: 0, unplaced: 0, na: 0 };
+  const fw = { behind: 0, ok: 0, split: 0, none: 0, unread: 0, unsent: 0, na: 0 };
+  const bios = { diff: 0, ok: 0, split: 0, none: 0, unread: 0, unsent: 0, unplaced: 0, na: 0 };
   let bm = 0;
   for (const r of Array.isArray(rows) ? rows : []) {
     const c = r?.chk || {};
@@ -121,10 +126,12 @@ export function chkAsideText(counts) {
   const c = counts || chkCounts([]);
   const p = [];
   const fwNo = c.fw.unread + c.fw.unsent;
-  if (fwNo) p.push(`펌웨어 못 읽음 ${c.fw.unread} · 엣지가 보내지 않음 ${c.fw.unsent}`);
+  if (fwNo) p.push(`펌웨어 못 읽음 ${c.fw.unread} · 엣지에서 받지 못함 ${c.fw.unsent}`);
   if (c.fw.none) p.push(`펌웨어 기준 없음 ${c.fw.none}`);
+  if (c.fw.split) p.push(`펌웨어 갈림(판정 못 함) ${c.fw.split}`);
   const bNo = c.bios.unread + c.bios.unsent;
-  if (bNo) p.push(`BIOS 못 읽음 ${c.bios.unread} · 엣지가 보내지 않음 ${c.bios.unsent}`);
+  if (bNo) p.push(`BIOS 못 읽음 ${c.bios.unread} · 엣지에서 받지 못함 ${c.bios.unsent}`);
+  if (c.bios.split) p.push(`BIOS 갈림(다수 없음) ${c.bios.split}`);
   if (c.bios.unplaced) p.push(`BIOS 미분류(판정 안 함) ${c.bios.unplaced}`);
   return p.join(' / ');
 }
@@ -176,8 +183,8 @@ const basisText = (row) => (row.basis === 'admin' ? '관리자 지정' : row.bas
  * 펌웨어 기준선 구역 값.
  * @returns {{ state:string, badge:{label,color}|null, head:string, rows:object[], note:string, why:string }}
  */
-export function fwView(fw, { noHw = false, baselineUnreadable = false } = {}) {
-  if (!fw) return { state: 'na', badge: null, head: '', rows: [], note: '', why: noHw ? '하드웨어 정보를 찾지 못해 펌웨어를 대조하지 않았습니다.' : '펌웨어 대조 값을 받지 못했습니다.' };
+export function fwView(fw, { noHw = false, baselineUnreadable = false, invAt = null } = {}) {
+  if (!fw) return { state: 'na', badge: null, head: '', rows: [], note: '', why: noHw ? '하드웨어 정보를 찾지 못해 펌웨어를 대조하지 않았습니다.' : '펌웨어 대조 값을 받지 못했습니다.', invAt: null };
   const t = FW_TEXT[fw.state] || FW_TEXT.none;
   const rows = (Array.isArray(fw.rows) ? fw.rows : []).map((r) => {
     const st = FW_ROW_TEXT[r.state] || FW_ROW_TEXT.none;
@@ -188,15 +195,19 @@ export function fwView(fw, { noHw = false, baselineUnreadable = false } = {}) {
   });
   let why = '';
   if (fw.state === 'unread') why = '이 서버의 펌웨어 목록이 없습니다(인벤토리를 아직 읽지 못했거나 장비가 목록을 주지 않았습니다) — 같음에도 뒤처짐에도 넣지 않습니다.';
-  else if (fw.state === 'unsent') why = '이 서버를 수집하는 엣지가 펌웨어 목록을 보내지 않았습니다(엣지 판이 낮거나 그 엣지가 아직 읽지 못했습니다) — 같음에도 뒤처짐에도 넣지 않습니다.';
+  else if (fw.state === 'unsent') why = '이 서버를 수집하는 엣지에서 펌웨어 목록을 받지 못했습니다(엣지 판이 낮거나 · 그 엣지가 아직 읽지 못했거나 · 중앙이 그 엣지의 이름을 확인하지 못했습니다) — 같음에도 뒤처짐에도 넣지 않습니다.';
+  else if (fw.state === 'split') {
+    const n = numOrNull(fw.open);
+    why = `뒤처진 구성요소는 없지만, 같은 모델 서버끼리 버전이 갈려 다수가 없거나 이 서버 안에서 버전이 섞인 구성요소가 ${n != null ? `${n}개 ` : ''}있습니다 — ‘뒤처진 것 없음’ 으로 보지 않습니다.`;
+  }
   else if (fw.state === 'none') why = '대조할 기준이 없습니다 — 같은 법인에 같은 모델 서버가 2대 이상 같은 버전을 쓰거나 관리자가 기준을 지정해야 합니다.';
   const peers = numOrNull(fw.peers);
-  const head = fw.state === 'behind' ? `기준과 다른 구성요소 ${fw.behind}개` : fw.state === 'ok' ? '기준과 다른 구성요소 없음' : '';
+  const head = fw.state === 'behind' ? `기준과 다른 구성요소 ${fw.behind}개` : fw.state === 'ok' ? '기준과 다른 구성요소 없음' : fw.state === 'split' ? `판정하지 못한 구성요소 ${numOrNull(fw.open) ?? '—'}개` : '';
   const notes = ['‘뒤처짐’ 은 기준과 다르다는 뜻이고 올려야 한다는 판정이 아닙니다.'];
   if (peers != null && peers > 0) notes.push(`다수 버전은 같은 법인 · 같은 모델에서 펌웨어를 읽은 ${peers}대로 냅니다.`);
   if (numOrNull(fw.skipped) > 0) notes.push(`디스크 · 진단 등 ${fw.skipped}개는 대조하지 않습니다(같은 것끼리 묶을 수 없습니다).`);
   if (baselineUnreadable) notes.push('관리자 지정 기준 파일을 읽지 못해 다수 버전으로만 대조했습니다.');
-  return { state: fw.state, badge: { label: fw.state === 'behind' ? `뒤처짐 ${fw.behind}` : t.label, color: t.badge }, head, rows, note: rows.length ? notes.join(' ') : '', why };
+  return { state: fw.state, badge: { label: fw.state === 'behind' ? `뒤처짐 ${fw.behind}` : t.label, color: t.badge }, head, rows, note: rows.length ? notes.join(' ') : '', why, invAt: numOrNull(invAt) };
 }
 
 /**
@@ -216,7 +227,8 @@ export function biosView(bios, { noHw = false, path = '', model = '' } = {}) {
   let why = '';
   if (bios.state === 'unplaced') why = '미분류 서버는 견주지 않습니다 — 폴더에 넣으면 같은 폴더 · 같은 모델 서버와 견줍니다(모델이 같다는 것만으로 같은 일을 한다고 보지 않습니다).';
   else if (bios.state === 'unread') why = '이 서버의 BIOS 설정을 읽지 못했습니다 — 같음에도 다름에도 넣지 않습니다.';
-  else if (bios.state === 'unsent') why = '이 서버를 수집하는 엣지가 BIOS 설정을 보내지 않았습니다(엣지 판이 낮거나 그 엣지가 아직 읽지 못했습니다) — 같음에도 다름에도 넣지 않습니다.';
+  else if (bios.state === 'unsent') why = '이 서버를 수집하는 엣지에서 BIOS 설정을 받지 못했습니다(엣지 판이 낮거나 · 그 엣지가 아직 읽지 못했거나 · 중앙이 그 엣지의 이름을 확인하지 못했습니다) — 같음에도 다름에도 넣지 않습니다.';
+  else if (bios.state === 'split') why = '다수 값과 다른 설정은 없지만, 같은 묶음 서버끼리 값이 갈려 다수가 없는 설정이 있습니다 — ‘다른 설정 없음’ 으로 보지 않습니다(어느 쪽이 옳다고도 하지 않습니다).';
   else if (bios.state === 'none') why = '견줄 서버가 없습니다 — 같은 폴더에 같은 모델 서버가 2대 이상 있어야 다수 값이 생깁니다.';
   const head = size != null && size > 0 ? `같은 폴더 · 같은 모델 ${size}대와 견줌${known != null && known < size ? ` — 설정을 읽은 ${known}대` : ''}` : '';
   return { state: bios.state, badge: { label: bios.state === 'diff' ? `다른 설정 ${bios.diff}` : t.label, color: t.badge }, head, rows, path, model,
@@ -224,6 +236,14 @@ export function biosView(bios, { noHw = false, path = '', model = '' } = {}) {
 }
 
 /** 자산 원장 올리기 결과 글자(드라이런 · 커밋 공용). */
+/** 올리기 결과 표의 사유 칸 — 오류 사유, 또는 바뀌는 칸(지워지는 칸은 그렇게 밝힌다). */
+export function importRowNote(x) {
+  if (!x) return '';
+  if (x.reason) return String(x.reason);
+  if (x.action !== 'update' || !Array.isArray(x.fields) || !x.fields.length) return '';
+  const cleared = new Set(Array.isArray(x.cleared) ? x.cleared : []);
+  return `바뀌는 칸: ${x.fields.map((f) => (cleared.has(f) ? `${f}(지움)` : f)).join(' · ')}`;
+}
 export function importSummaryText(s, { replace = false } = {}) {
   if (!s) return '';
   const p = [`더함 ${s.add}`, `바꿈 ${s.update}`, `같음 ${s.same}`, `오류 ${s.error}`];

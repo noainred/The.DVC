@@ -54,19 +54,31 @@ test('① 다수 값 — 유일한 최다 값 · 2대 이상일 때만 · 모르
 });
 
 // ───────── ② 펌웨어 ─────────
-test('② 이름 정규화 — 끝의 MAC/WWN · 슬롯 번호를 걷어 내고 모델 글자 안의 숫자는 그대로', () => {
+test('② 이름 정규화 — 끝의 MAC/WWN 만 걷어 낸다 · 숫자는 건드리지 않는다(모델을 가르는 숫자일 수 있다 — 반증 A5)', () => {
   assert.equal(F.fwLabelOf('Intel(R) Ethernet 10G 2P X710 Adapter - 24:6E:96:00:11:22'), 'Intel(R) Ethernet 10G 2P X710 Adapter');
   assert.equal(F.fwLabelOf('QLogic QLE2772 - 20:00:00:24:FF:00:11:22'), 'QLogic QLE2772', 'WWN 8 마디도');
-  assert.equal(F.fwLabelOf('Power Supply.Slot.1'), 'Power Supply.Slot.#');
-  assert.equal(F.fwLabelOf('Backplane 1'), 'Backplane #');
+  assert.equal(F.fwLabelOf('QLogic QLE2692 16Gb FC Adapter - 21000024FF7A1B2C'), 'QLogic QLE2692 16Gb FC Adapter', '구분자 없는 WWN(16자)도 — 주소가 이름에 남아 응답 · push 에 실리지 않게');
+  assert.equal(F.fwLabelOf('Synth NIC - 246E96001122'), 'Synth NIC', '구분자 없는 MAC(12자)');
+  assert.equal(F.fwLabelOf('Synth NIC - 24-6E-96-00-11-22'), 'Synth NIC');
+  // 첫 판본은 3자리 이하 숫자 토큰을 '#' 으로 바꿔 서로 다른 부품을 한 열쇠로 합쳤다
+  assert.notEqual(F.fwLabelOf('Dell HBA 330 Adapter'), F.fwLabelOf('Dell HBA 355 Adapter'));
+  assert.notEqual(F.fwLabelOf('Synth 10 Gb Ethernet BCM57810'), F.fwLabelOf('Synth 1 Gb Ethernet BCM57810'));
+  assert.equal(F.fwLabelOf('Power Supply.Slot.1'), 'Power Supply.Slot.1'); assert.equal(F.fwLabelOf('Backplane 1'), 'Backplane 1');
   assert.equal(F.fwLabelOf('BRCM GbE 4P 5720-t rNDC'), 'BRCM GbE 4P 5720-t rNDC');
-  assert.equal(F.fwLabelOf('PERC H730P Mini'), 'PERC H730P Mini');
   assert.equal(F.fwLabelOf('Name - not:a:mac'), 'Name - not:a:mac', 'MAC 꼴이 아니면 떼지 않는다');
+  assert.equal(F.fwLabelOf('Name - 12345'), 'Name - 12345', '16진 12 · 16자가 아니면 떼지 않는다');
   assert.equal(F.fwLabelOf('A  \t B\u0000C'), 'A B C', '제어 문자 · 겹친 공백');
   assert.equal(F.fwLabelOf(''), ''); assert.equal(F.fwLabelOf(null), ''); assert.equal(F.fwLabelOf({}), '');
   assert.ok(F.fwLabelOf('x'.repeat(5000)).length <= F.FW_LABEL_MAX, '길이 상한');
-  assert.equal(F.isDiskLabel('Disk # in Backplane # of Integrated RAID Controller #'), true);
+  assert.equal(F.isDiskLabel('Disk 0 in Backplane 1 of Integrated RAID Controller 1'), true);
   assert.equal(F.isDiskLabel('PERC H755 Front'), false);
+  // 전원 공급 장치는 대조하지 않는다(같은 서버 모델에 제조사 · 용량이 다른 PSU 가 들어간다 — 이름에 모델이 없다)
+  assert.ok(!F.FW_TYPES.includes('PSU'));
+  const psu = F.fwComponentsOf([{ type: 'BIOS', name: 'BIOS', version: '1.0' }, { type: 'PSU', name: 'Power Supply.Slot.1', version: '00.1D.7D' }, { type: 'PSU', name: 'Power Supply.Slot.2', version: '00.3D.67' }]);
+  assert.deepEqual([psu.comps.map((x) => x.key), psu.skipped], [['BIOS|bios'], 2]);
+  // 슬롯이 다른 같은 이름은 다른 열쇠 — 한 서버의 Backplane 1 · 2 가 서로 달라도 ‘섞임’ 이 아니다
+  const bp = F.fwComponentsOf([{ type: 'Storage', name: 'Backplane 1', version: '4.35' }, { type: 'Storage', name: 'Backplane 2', version: '2.52' }]);
+  assert.deepEqual(bp.comps.map((x) => [x.key, x.version, x.mixed]), [['Storage|backplane 1', '4.35', false], ['Storage|backplane 2', '2.52', false]]);
 });
 
 const FWL = (bios = '2.19.1', extra = []) => [
@@ -121,9 +133,27 @@ test('② 함대 판정 — 같은 법인 · 같은 모델의 다수 버전 · �
   assert.equal(r.get('x1').state, 'ok', '다른 법인은 그 법인 안에서 판정한다');
   // 같은 모델이 혼자면 기준이 없다 → 판정 안 함
   assert.equal(r.get('m1').state, 'none'); assert.equal(r.get('m1').rows[0].state, 'none'); assert.equal(r.get('m1').rows[0].baseline, null);
-  // 동률(1:1)이면 기준 없음 + tie 표지
+  // 동률(1:1)이면 기준 없음 + tie 표지 — 서버 상태는 ‘ok(뒤처진 것 없음)’ 가 아니라 ‘split(갈림)’ 이다(반증 A2: 실제로 다른데 녹색이었다)
   const t2 = F.judgeFirmware([srv('a', '1.0.0'), srv('b', '2.0.0')]);
   assert.equal(t2.get('a').rows[0].state, 'none'); assert.equal(t2.get('a').rows[0].tie, true);
+  assert.deepEqual([t2.get('a').state, t2.get('a').open, t2.get('a').behind, t2.get('a').judged], ['split', 1, 0, 2], 'BIOS 는 갈림 · iDRAC/NIC 은 같음');
+  // 한 서버 안에서 섞인 부품이 있어도 ok 가 아니다
+  const mx = (id) => ({ id, corp: 'c', model: 'M', fw: F.fwComponentsOf([{ type: 'BIOS', name: 'BIOS', version: '1.0' }, { type: 'NIC', name: 'N - 24:6E:96:00:11:22', version: '1.0' }, { type: 'NIC', name: 'N - 24:6E:96:00:11:23', version: '2.0' }]) });
+  assert.deepEqual([F.judgeFirmware([mx('a'), mx('b')]).get('a').state, F.judgeFirmware([mx('a'), mx('b')]).get('a').open], ['split', 1]);
+  // 뒤처진 줄이 있으면 갈림보다 뒤처짐이 먼저
+  const bh = F.judgeFirmware([{ ...mx('a'), fw: F.fwComponentsOf([{ type: 'BIOS', name: 'BIOS', version: '0.9' }, { type: 'NIC', name: 'N - 24:6E:96:00:11:22', version: '1.0' }, { type: 'NIC', name: 'N - 24:6E:96:00:11:23', version: '2.0' }]) }, mx('b'), mx('c')]);
+  assert.equal(bh.get('a').state, 'behind');
+  // 혼자인 서버(같은 모델 1대)는 갈림이 아니라 기준 없음
+  assert.deepEqual([r.get('m1').state, r.get('m1').open], ['none', 0]);
+  // 묶음 열쇠의 구분자가 값에 들어 있어도 다른 묶음과 섞이지 않는다(반증 A13: ‘|’ 구분자) · 법인 id 는 대소문자를 가른다
+  const sep = F.judgeFirmware([srv('a1', '9.9.9', { corp: 'vc', model: 'a|PowerEdge R750' }), srv('a2', '9.9.9', { corp: 'vc', model: 'a|PowerEdge R750' }), srv('a3', '9.9.9', { corp: 'vc', model: 'a|PowerEdge R750' }),
+    srv('b1', '1.0.0', { corp: 'vc|a', model: 'PowerEdge R750' }), srv('b2', '1.0.0', { corp: 'vc|a', model: 'PowerEdge R750' })]);
+  assert.deepEqual([sep.get('b1').state, sep.get('b1').peers], ['ok', 2]);
+  const cc = F.judgeFirmware([srv('a', '1.0.0', { corp: 'VC' }), srv('b', '2.0.0', { corp: 'vc' }), srv('c', '2.0.0', { corp: 'vc' })]);
+  assert.equal(cc.get('a').state, 'none', '법인 id 가 대소문자만 다르면 다른 법인이다');
+  // 저장본이 손으로 바뀌어 형식이 아닌 구성요소가 섞여도 던지지 않는다(반증 A14)
+  const bad = F.judgeFirmware([{ id: 'x', corp: 'c', model: 'M', fw: { comps: [null, 'x', { key: 5 }, { key: 'BIOS|bios', type: 'BIOS', label: 'BIOS', version: 2191 }, { key: 'BIOS|bios', type: 'BIOS', label: 'BIOS', version: '1.0', mixed: false }], skipped: 0 } }]);
+  assert.equal(bad.get('x').rows.length, 2);
   // 법인 · 모델이 없으면 묶음을 만들지 않는다(빈 글자끼리 한 묶음이 되지 않는다)
   const nm = F.judgeFirmware([srv('a', '1.0.0', { model: '' }), srv('b', '1.0.0', { model: '' }), srv('c', '1.0.0', { corp: '' }), srv('d', '1.0.0', { corp: '' })]);
   for (const id of ['a', 'b', 'c', 'd']) { assert.equal(nm.get(id).state, 'none', id); assert.equal(nm.get(id).peers, 0); }
@@ -135,7 +165,7 @@ test('② 관리자 지정 기준이 다수보다 먼저 · 기준보다 높은 
   for (const id of ['a', 'b', 'c']) { const row = r.get(id).rows[0]; assert.equal(row.basis, 'admin'); assert.equal(row.baseline, '2.22.0'); assert.equal(row.state, 'behind', id); assert.equal(row.peers, undefined, '지정 기준에는 다수 대수가 없다'); }
   assert.equal(r.get('d').rows[0].state, 'ahead'); assert.equal(r.get('d').state, 'ok'); assert.equal(r.get('d').ahead, 1);
   // 숫자 꼴이 아닌 버전이 기준과 다르면 differ → 서버는 behind 로 센다(같다고 하지 않는다)
-  const p = (id, v) => ({ id, corp: 'c', model: 'M', fw: F.fwComponentsOf([{ type: 'PSU', name: 'PS1 Power Supply', version: v }]) });
+  const p = (id, v) => ({ id, corp: 'c', model: 'M', fw: F.fwComponentsOf([{ type: 'NIC', name: 'Synth NIC', version: v }]) });
   const d = F.judgeFirmware([p('a', '00.1D.7D'), p('b', '00.1D.7E'), p('c', '00.1D.7E')]);
   assert.equal(d.get('a').rows[0].state, 'differ'); assert.equal(d.get('a').state, 'behind'); assert.equal(d.get('a').behind, 1);
   // 다수 값의 대소문자: 처음 본 글자 그대로 보인다(소문자로 바꿔 보이지 않는다)
@@ -150,12 +180,22 @@ test('② 엣지 정제 — 아는 종류만 · 이름 다시 정규화 · 상�
   assert.deepEqual(F.sanitizeFwPush(push), F.fwComponentsOf(FWL()), '보낸 것을 정제하면 중앙이 직접 만든 것과 같다');
   // 엣지가 정규화하지 않은 이름 · 모르는 종류 · 디스크 · 객체가 아닌 값 · 수 버전 · 중복 열쇠
   const s = F.sanitizeFwPush({ c: [{ t: 'NIC', n: 'Card - 24:6E:96:00:11:22', v: '1.0', extra: 'x' }, { t: 'Evil', n: 'x', v: '1' }, { t: 'Storage', n: 'Disk 0 in Backplane 1', v: '1' },
-    'str', null, [1], { t: 'BIOS', n: 'BIOS', v: 2.5 }, { t: 'NIC', n: 'card', v: '9.9' }, { t: 'PSU', n: 'PS1', x: 1 }], s: '7', other: 1 });
-  assert.deepEqual(s, { comps: [{ key: 'NIC|card', type: 'NIC', label: 'Card', version: '1.0', mixed: false }, { key: 'PSU|ps1', type: 'PSU', label: 'PS1', version: null, mixed: true }], skipped: 0 });
+    'str', null, [1], { t: 'BIOS', n: 'BIOS', v: 2.5 }, { t: 'NIC', n: 'card', v: '9.9' }, { t: 'HBA', n: 'H1', x: 1 }, { t: 'PSU', n: 'PS1', v: '1' }], s: '7', other: 1 });
+  assert.deepEqual(s, { comps: [{ key: 'NIC|card', type: 'NIC', label: 'Card', version: '1.0', mixed: false }, { key: 'HBA|h1', type: 'HBA', label: 'H1', version: null, mixed: true }], skipped: 0 }, 'PSU 는 받지 않는다');
   for (const bad of [null, undefined, 'x', 3, [], { c: 'x' }, { c: [] }, { c: [{ t: 'Evil', n: 'x', v: '1' }] }]) assert.equal(F.sanitizeFwPush(bad), undefined, JSON.stringify(bad));
   const big = F.sanitizeFwPush({ c: Array.from({ length: 500 }, (_, i) => ({ t: 'NIC', n: `card model${i}x`, v: 'v'.repeat(500) })), s: 1e9 });
   assert.equal(big.comps.length, F.FW_PER_SERVER_MAX); assert.ok(big.comps[0].version.length <= F.FW_VER_MAX); assert.equal(big.skipped, 400);
   assert.equal(F.sanitizeFwPush({ c: [{ t: 'BIOS', n: 'BIOS', v: '1' }], s: -3 }).skipped, 0); assert.equal(F.sanitizeFwPush({ c: [{ t: 'BIOS', n: 'BIOS', v: '1' }], s: Infinity }).skipped, 0);
+  // 훑는 줄 수에도 상한(서버당 80) — 앞의 80줄이 전부 버려지는 값이면 뒤의 정상 줄은 보지 않는다(큰 본문으로 CPU 를 쓰게 하지 못한다)
+  assert.equal(F.sanitizeFwPush({ c: [...Array.from({ length: 80 }, () => ({ t: 'Evil', n: 'x', v: '1' })), { t: 'BIOS', n: 'BIOS', v: '1' }] }), undefined);
+  // 저장본 다시 확인(재시작 뒤 central-fleet.json — 반증 A14): 형식이 아니면 받지 못한 것으로 · 수 버전 · null 줄은 버린다 · 같은 객체는 한 번만 훑는다
+  const stored = { comps: [null, { key: 'x', type: 'BIOS', label: 'BIOS', version: 2191 }, { key: 'x', type: 'BIOS', label: 'BIOS', version: '2.19.1', mixed: false }, { type: 'PSU', label: 'PS1', version: '1' }], skipped: 3 };
+  assert.deepEqual(F.fwStoredOf(stored), { comps: [{ key: 'BIOS|bios', type: 'BIOS', label: 'BIOS', version: '2.19.1', mixed: false }], skipped: 3 });
+  assert.equal(F.fwStoredOf(stored), F.fwStoredOf(stored), '메모');
+  for (const badv of [null, undefined, 'x', [], { comps: 'x' }, { comps: [null] }, { comps: [{ type: 'Evil', label: 'x', version: '1' }] }]) assert.equal(F.fwStoredOf(badv), undefined, JSON.stringify(badv));
+  // 인벤토리 객체 메모 — 같은 객체는 같은 결과를 돌려준다(주기마다 · 요청마다 다시 훑지 않는다)
+  const invObj = { firmware: FWL() };
+  assert.equal(F.fwComponentsOfInv(invObj), F.fwComponentsOfInv(invObj)); assert.equal(F.fwComponentsOfInv(null), null); assert.equal(F.fwComponentsOfInv({}), null);
 });
 
 // ───────── ③ BIOS ─────────
@@ -190,12 +230,19 @@ test('③ 함대 판정 — 같은 법인 · 같은 폴더 · 같은 모델의 �
   assert.equal(r.get('p').state, 'ok'); assert.equal(r.get('p').diff, 0);
   // 동률(1:1) — 어느 쪽이 옳다고 말하지 않는다
   const t2 = B.judgeBios([bsrv('a', 'Enabled'), bsrv('b', 'Disabled')]);
-  assert.deepEqual(t2.get('a').rows.map((x) => x.state), ['same', 'tie']); assert.equal(t2.get('a').diff, 0); assert.equal(t2.get('a').state, 'ok');
+  assert.deepEqual(t2.get('a').rows.map((x) => x.state), ['same', 'tie']); assert.equal(t2.get('a').diff, 0);
+  // …그리고 ‘다른 설정 없음(ok)’ 이라고도 하지 않는다 — 값이 갈린 설정이 있다(split · 반증 A2: 2대의 설정 3개가 달라도 녹색이었다)
+  assert.deepEqual([t2.get('a').state, t2.get('a').open], ['split', 1]);
+  assert.deepEqual([r.get('x').state, r.get('x').open], ['none', 0], '혼자라 다수가 없는 것은 갈림이 아니다');
+  assert.deepEqual([r.get('a').state, r.get('a').open], ['diff', 0], '다수와 다른 설정이 있으면 다름이 먼저');
   // 모델이 없으면 묶음이 없다
   assert.equal(B.judgeBios([bsrv('a', 'Enabled', { model: '' }), bsrv('b', 'Enabled', { model: '' })]).get('a').state, 'unplaced');
-  // 폴더 · 모델 대소문자는 같은 묶음
-  const cs = B.judgeBios([bsrv('a', 'Enabled'), bsrv('b', 'Enabled', { path: 'svc\\db', model: 'poweredge r750' })]);
+  // 모델은 대소문자를 가르지 않는다 · **폴더 경로와 법인 id 는 가른다**(저장소가 대소문자가 다른 폴더를 다른 폴더로 둔다 — 반증 A12)
+  const cs = B.judgeBios([bsrv('a', 'Enabled'), bsrv('b', 'Enabled', { model: 'poweredge r750' })]);
   assert.deepEqual(cs.get('a').group, { size: 2, known: 2 });
+  const cp = B.judgeBios([bsrv('a', 'Enabled'), bsrv('b', 'Disabled', { path: 'svc\\db' }), bsrv('c', 'Disabled', { path: 'svc\\db' })]);
+  assert.deepEqual([cp.get('a').state, cp.get('a').group], ['none', { size: 1, known: 1 }], '다른 폴더의 다수 값으로 다름을 만들지 않는다');
+  assert.deepEqual(B.judgeBios([bsrv('a', 'Enabled'), bsrv('b', 'Enabled', { corp: 'VC-A' })]).get('a').group, { size: 1, known: 1 });
 });
 
 // ───────── ④ 보증 ─────────
@@ -265,6 +312,32 @@ test('⑤ 가져오기 판정 — 더함 · 바꿈 · 같음 · 오류 줄(못 �
   assert.match(C.entryOfRow({ service_tag: 'T', warranty_end: '2027-01-01', note: 'n'.repeat(121) }).error, /너무 깁니다/);
 });
 
+test('⑤ 파일에 없는 열은 원장 값을 건드리지 않는다 · 있는 열의 빈 칸은 지운다 · 미리보기가 바뀌는 칸을 밝힌다(반증 A1)', () => {
+  const cur = { synth01: { tag: 'SYNTH01', end: '2027-03-14', type: 'ProSupport', purchase: '2022-03-15', contract: 'SYNTH-C1', eos: '2029-03-31', note: '담당' } };
+  // 만료일만 든 파일 — 첫 판본은 나머지 다섯 칸을 지웠다
+  const p1 = C.parseAssetCsv('service_tag,warranty_end\nSYNTH01,2028-03-14\nSYNTH02,2030-01-01');
+  assert.deepEqual(p1.present, ['warranty_end']);
+  const a1 = C.analyzeAssetImport(p1.rows, cur, { present: p1.present });
+  assert.deepEqual(a1.next.synth01, { tag: 'SYNTH01', end: '2028-03-14', type: 'ProSupport', purchase: '2022-03-15', contract: 'SYNTH-C1', eos: '2029-03-31', note: '담당' });
+  assert.deepEqual(a1.report[0], { line: 2, tag: 'SYNTH01', action: 'update', fields: ['보증 만료일'], cleared: [] });
+  assert.deepEqual(a1.next.synth02, { tag: 'SYNTH02', end: '2030-01-01', type: '', purchase: '', contract: '', eos: '', note: '' }, '새 줄의 없는 열은 빈 값');
+  // 열이 있고 칸이 비어 있으면 지운다 — 미리보기에 지워지는 칸으로 밝힌다
+  const p2 = C.parseAssetCsv('service_tag,warranty_end,contract_no,note\nSYNTH01,2027-03-14,,새 비고');
+  const a2 = C.analyzeAssetImport(p2.rows, cur, { present: p2.present });
+  assert.deepEqual(a2.report[0], { line: 2, tag: 'SYNTH01', action: 'update', fields: ['계약 번호', '비고'], cleared: ['계약 번호'] });
+  assert.equal(a2.next.synth01.contract, ''); assert.equal(a2.next.synth01.type, 'ProSupport');
+  // 같은 값이면 같음(없는 열 때문에 바뀜으로 세지 않는다)
+  const p3 = C.parseAssetCsv('service_tag,warranty_end\nsynth01,2027-03-14');
+  assert.deepEqual(C.analyzeAssetImport(p3.rows, cur, { present: p3.present }).summary, { add: 0, update: 0, same: 1, error: 0, remove: 0 });
+  // 파일로 바꾸기에서도 없는 **열**은 그대로(지우는 것은 파일에 없는 **줄**)
+  const a4 = C.analyzeAssetImport(p1.rows, { ...cur, synth09: { tag: 'SYNTH09', end: '2026-01-01' } }, { replace: true, present: p1.present });
+  assert.equal(a4.next.synth01.contract, 'SYNTH-C1'); assert.equal(a4.summary.remove, 1); assert.deepEqual(Object.keys(a4.next).sort(), ['synth01', 'synth02']);
+  // 태그 열만 있는 파일 — 새 줄은 값이 없어 오류 · 있던 줄은 같음
+  const p5 = C.parseAssetCsv('service_tag\nSYNTH01\nSYNTH03');
+  assert.deepEqual(C.analyzeAssetImport(p5.rows, cur, { present: p5.present }).report.map((x) => x.action), ['same', 'error']);
+  assert.ok(C.ASSET_ROWS_MAX <= 10_000, '줄 상한은 본문 한도(1MB) 안에 들어가는 크기');
+});
+
 test('⑤ 내보내기 — 태그 순 · 수식 주입 가드 · 다시 읽으면 같은 값 · 샘플은 스스로 통과한다', () => {
   const entries = { b: { tag: 'SYNTH02', end: '2028-01-01', type: '=cmd', purchase: '', contract: 'C,1', eos: '', note: '' }, a: { tag: 'SYNTH01', end: '2027-03-14', type: 'Basic', purchase: '2022-03-15', contract: '', eos: '', note: '"q"' } };
   const csv = C.assetsToCsv(entries);
@@ -297,6 +370,27 @@ test('⑥ 저장소 — 없으면 빈 값 · 저장하면 세대가 오른다 ·
     assert.equal(r.ok, false); assert.equal(r.status, 409);
     const ci = checkInputs();
     assert.deepEqual([ci.assets, ci.assetsErr], [null, true], '못 읽었으면 보증 판정을 하지 않는다(빈 원장으로 보고 전부 모름이라 하지 않는다)');
+  } finally { console.error = w; console.warn = ww; }
+  resetStores();
+});
+
+test('⑥ 모르는 꼴의 파일은 손상이다 — 빈 원장으로 읽지 않는다(반증 A18)', () => {
+  const w = console.error; const ww = console.warn; console.error = () => {}; console.warn = () => {};
+  try {
+    for (const body of ['null', '{"rows":[1,2]}', '{"v":2,"assets":{"a":{"tag":"A"}}}', '{"v":2,"rows":{}}', '"x"', '[]']) {
+      resetStores(); fs.writeFileSync(path.join(tmp, 'bm-assets.json'), body);
+      assert.ok(S.assetStore.loadError(), `원장 ${body}`);
+      assert.equal(S.assetStore.save({ v: 1, rows: {} }).status, 409, `쓰기 거절 ${body}`);
+    }
+    for (const body of ['null', '{"models":[]}', '{"v":3,"models":{}}']) {
+      resetStores(); fs.writeFileSync(path.join(tmp, 'bm-fw-baseline.json'), body);
+      assert.ok(S.fwBaselineStore.loadError(), `기준 ${body}`);
+      const ci = checkInputs();
+      assert.deepEqual([ci.adminBase, ci.baseErr], [null, true], '기준을 못 읽었으면 표지를 세운다(지정 기준이 없다고 하지 않는다)');
+    }
+    // 판 번호가 없는 옛 꼴({ rows }) · v:1 은 읽는다
+    resetStores(); fs.writeFileSync(path.join(tmp, 'bm-assets.json'), '{"rows":{"synth01":{"tag":"SYNTH01","end":"2030-01-01"}}}');
+    assert.equal(S.assetStore.loadError(), null); assert.deepEqual(Object.keys(S.assetStore.get().rows), ['synth01']);
   } finally { console.error = w; console.warn = ww; }
   resetStores();
 });
@@ -349,6 +443,14 @@ test('⑦ 입력 모으기 — 엣지는 정제본 그대로(없으면 보내지
   assert.deepEqual(ST.chkRowOf(a), { w: 'expired', wd: -329, fw: 'behind', fwn: 1, bios: 'diff', biosn: 1 });
   assert.deepEqual(ST.chkRowOf(chk.ofMember(members[2])), { w: 'unknown', fw: 'ok', bios: 'ok' }, '0 은 싣지 않는다 · 모름에는 남은 일수가 없다');
   assert.equal(ST.chkRowOf(null), undefined); assert.equal(ST.chkRowOf({}), undefined);
+  assert.deepEqual(ST.chkRowOf({ warranty: { state: 'soon', daysLeft: 0 } }), { w: 'soon', wd: 0 }, '만료일 당일의 0 은 값이다(빼지 않는다)');
+  assert.deepEqual(ST.chkRowOf({ fw: { state: 'split', behind: 0 }, bios: { state: 'split', diff: 0 } }), { fw: 'split', bios: 'split' });
+  // 판정에 쓴 인벤토리를 읽은 시각 — 로컬은 인벤토리 · 엣지는 요약의 시각 · 없으면 null(반증 A7)
+  const at = ST.bmCheckFor({ members: members.slice(0, 3), placeOf, hxOf: (m) => (m.key === 'st:a' ? { inv: { ...inv('1.0.0', 'Enabled'), collectedAt: 111 }, via: 'local' } : m.key === 'st:b' ? { inv: null, via: 'edge', hw: { at: 222 }, fw: F.fwComponentsOf([{ type: 'BIOS', name: 'BIOS', version: '1.0.0' }]) } : { inv: null, via: '' }), assets, adminBase: null, today: '2026-11-26' });
+  assert.deepEqual([at.ofMember(members[0]).invAt, at.ofMember(members[1]).invAt, at.ofMember(members[2]).invAt], [111, 222, null]);
+  // 엣지 저장본이 형식이 아니면 받지 못한 것으로(던지지 않는다)
+  const eb = ST.bmCheckFor({ members: [members[0]], placeOf, hxOf: () => ({ inv: null, via: 'edge', fw: { comps: [null] }, bios: [1] }), assets, adminBase: null, today: '2026-11-26' });
+  assert.deepEqual([eb.ofMember(members[0]).fw.state, eb.ofMember(members[0]).bios.state], ['unsent', 'unsent']);
   // 미분류(src 없음)는 BIOS 판정 밖
   const un = ST.bmCheckFor({ members, placeOf: new Map(), hxOf, assets, adminBase: null, today: '2026-11-26' });
   assert.equal(un.ofMember(members[0]).bios.state, 'unplaced');
@@ -364,12 +466,17 @@ test('⑦ 입력 모으기 — 엣지는 정제본 그대로(없으면 보내지
   // 태그가 객체의 내장 이름과 같아도 그것을 원장 줄로 읽지 않는다
   const pr = ST.bmCheckFor({ members: [{ key: 'st:x', kind: 'bm', corp: 'vc-a', model: 'M', serviceTag: 'constructor' }, { key: 'st:y', kind: 'bm', corp: 'vc-a', model: 'M', serviceTag: 'toString' }], placeOf, hxOf: null, assets, adminBase: null, today: '2026-11-26' });
   assert.deepEqual([pr.of('st:x').warranty.why, pr.of('st:y').warranty.why], ['no-entry', 'no-entry']);
+  // '__proto__' 태그: 객체의 원형(Object.prototype — 객체다)을 원장 줄로 읽으면 '만료일 없는 줄' 이 된다 → 자기 열쇠만 봐야 '원장에 없음'
+  const pp = ST.bmCheckFor({ members: [{ key: 'st:p', kind: 'bm', corp: 'vc-a', model: 'M', serviceTag: '__proto__' }], placeOf, hxOf: null, assets, adminBase: null, today: '2026-11-26' });
+  assert.equal(pp.of('st:p').warranty.why, 'no-entry');
   // 관리자 지정 기준이 판정에 들어간다
   const ad = ST.bmCheckFor({ members, placeOf, hxOf, assets, adminBase: (model, key) => (key === 'BIOS|bios' ? '1.0.0' : ''), today: '2026-11-26' });
   assert.equal(ad.ofMember(members[0]).fw.state, 'ok'); assert.equal(ad.ofMember(members[1]).fw.rows[0].state, 'ahead');
 });
 
 // ───────── ⑧ 중앙 fleet 정제 ─────────
+// ‘검증된 이름’ = routes/central.js 의 verified(개별 토큰 **또는 공유 토큰 + 중앙이 아는 엣지 이름**) — hw · mgmtHost 와 같은 기존 신뢰 모델이다.
+//   공유 토큰을 가진 쪽은 아는 엣지 이름으로 그 엣지의 목록을 통째로 바꿀 수 있다(예전부터 · CENTRAL_REQUIRE_AGENT_TOKEN=true 로 막는다) — 여기서 막는 것은 **모르는 이름**이다(반증 A3: 첫 문구는 ‘개별 토큰만’ 이라고 잘못 적었다).
 test('⑧ 중앙 fleet — 검증된 이름만 펌웨어 · BIOS 를 받고 정제한다 · 형식이 아니면 키가 없다 · 요약만 바뀌면 fleet rev 그대로', async () => {
   const { fleetRev } = await import('../src/insights/fleetRev.js');
   fleet.resetEdgeFleet();
@@ -389,7 +496,7 @@ test('⑧ 중앙 fleet — 검증된 이름만 펌웨어 · BIOS 를 받고 정�
   const w = console.warn; console.warn = () => {};
   try { fleet.setEdgeFleet('synth-unverified', [{ ...row, fleetId: 'synth-u1', serviceTag: 'SYNTHU1', fw, bios: { BootMode: 'Uefi' } }], 'gu', { verified: false }); } finally { console.warn = w; }
   const u = fleet.getEdgeFleetServers().find((x) => x.serviceTag === 'SYNTHU1');
-  assert.deepEqual([u?.fw, u?.bios], [undefined, undefined], '공유 토큰의 이름 주장으로 판정 입력을 심지 못한다');
+  assert.deepEqual([u?.fw, u?.bios], [undefined, undefined], '중앙이 확인하지 못한 이름의 판정 입력은 받지 않는다');
   fleet.resetEdgeFleet();
 });
 
@@ -441,6 +548,9 @@ test('⑨ 목록 chk · /check — 보증(원장) · 펌웨어(법인 안 다수
     const list = (await call('GET /tools/bm-folders')).body;
     assert.equal(list.ok, true, JSON.stringify(list).slice(0, 300));
     assert.deepEqual(list.check, { soonDays: 90, assets: { n: 1, at: 7, by: 'admin' } });
+    // 범위 계정에는 전 법인 원장의 줄 수 · 올린 시각 · 올린 사람을 싣지 않는다(반증 A8 — 함대 전체 개수 규칙) · 조회 계정은 줄 수만
+    assert.deepEqual((await call('GET /tools/bm-folders', { user: SCOPED_A })).body.check.assets, {});
+    assert.deepEqual((await call('GET /tools/bm-folders', { user: VIEWER })).body.check.assets, { n: 1, at: 7 });
     const by = (n) => list.servers.find((x) => x.name === n);
     const r1 = by('synth-db-s1'); const r2 = by('synth-db-s2'); const r4 = by('synth-db-s4');
     assert.ok(r1 && r2 && r4, JSON.stringify(list.servers.map((x) => x.name)));
@@ -461,6 +571,13 @@ test('⑨ 목록 chk · /check — 보증(원장) · 펌웨어(법인 안 다수
     const d = (await call('GET /tools/bm-folders/check', { query: { key: r1.key } })).body;
     assert.equal(d.ok, true, JSON.stringify(d).slice(0, 300));
     assert.equal(d.soonDays, 90); assert.equal(d.model, 'PowerEdge R750'); assert.equal(d.path, 'SVC\\DB'); assert.equal(d.canBaseline, true);
+    // 상세(그 법인 서버만 넣어 판정)와 목록(보이는 서버 전부를 넣어 판정)의 결과가 같다 — 묶음이 법인을 넘지 않는다
+    for (const row of list.servers.filter((x) => x.kind === 'bm')) {
+      const one = (await call('GET /tools/bm-folders/check', { query: { key: row.key } })).body;
+      assert.deepEqual([one.fw?.state, one.bios?.state, one.warranty?.state], [row.chk.fw, row.chk.bios, row.chk.w], row.name);
+    }
+    assert.equal(d.invAt, 1_790_000_000_000, '판정에 쓴 인벤토리를 읽은 시각(반증 A7 — 오래된 값을 지금 값처럼 말하지 않게)');
+    assert.equal((await call('GET /tools/bm-folders/check', { query: { key: r1.key } })).headers['Cache-Control'], 'no-store');
     assert.equal(d.warranty.state, 'expired'); assert.equal(d.warranty.contract, 'SYNTH-CONTRACT-1'); assert.equal(d.warranty.note, '비고');
     assert.equal(d.fw.state, 'behind'); assert.deepEqual(d.fw.rows.find((x) => x.type === 'BIOS'), { key: 'BIOS|bios', type: 'BIOS', label: 'BIOS', installed: '2.19.1', mixed: false, baseline: '2.21.2', basis: 'majority', state: 'behind', peers: 2, known: 3 });
     assert.equal(d.bios.state, 'diff'); assert.deepEqual(d.bios.group, { size: 3, known: 3 });
@@ -478,19 +595,61 @@ test('⑨ 목록 chk · /check — 보증(원장) · 펌웨어(법인 안 다수
     const sk = sa.servers.find((x) => x.chk?.fw === 'behind').key;
     const sd = (await call('GET /tools/bm-folders/check', { user: SCOPED_A, query: { key: sk } })).body;
     assert.deepEqual([sd.fw.state, sd.bios.state, sd.canBaseline], ['behind', 'diff', false]);
+    // 범위 **관리자**에게도 계약 번호 · 비고를 싣지 않는다(반증 A4 — 원장은 태그 하나로 찾는다: 엣지가 남의 태그를 자기 서버로 올리면 다른 법인 자산의 줄이 보였다)
+    assert.deepEqual([sd.warranty.state, sd.warranty.contract, sd.warranty.note], ['expired', '', '']);
+    assert.ok(!JSON.stringify(sd).includes('SYNTH-CONTRACT'));
     assert.equal((await call('GET /tools/bm-folders/check', { user: SCOPED_B, query: { key: sk } })).statusCode, 404);
     assert.equal((await call('GET /tools/bm-folders/check', { user: SCOPED_B, query: { key: r1.key } })).statusCode, 404, '원문 키로도 범위 밖은 404');
     assert.equal((await call('GET /tools/bm-folders/check', { query: { key: 'st:nope' } })).statusCode, 404);
     assert.equal((await call('GET /tools/bm-folders/check', { query: {} })).statusCode, 404);
   });
-  // 관리자 지정 기준 → 목록 · 상세에 반영(응답 캐시 열쇠에 기준 세대가 들어 있다)
-  assert.deepEqual(S.setAdminBaseline({ model: 'PowerEdge R750', key: 'BIOS|bios', label: 'BIOS', type: 'BIOS', version: '2.19.1', by: 'admin' }), { ok: true, changed: true });
+  // 관리자 지정 기준 → 목록 · 상세에 반영. **같은 스냅샷 · 같은 주소**로 두 번 물어 응답 캐시 열쇠에 기준 세대가 들어 있는지 본다
+  //   (열쇠에 없으면 기준을 바꿔도 캐시된 예전 판정이 나온다 — 변이 64).
+  await withSnap(async () => {
+    const before = (await call('GET /tools/bm-folders')).body.servers.find((x) => x.name === 'synth-db-s1');
+    assert.equal(before.chk.fw, 'behind');
+    assert.deepEqual(S.setAdminBaseline({ model: 'PowerEdge R750', key: 'BIOS|bios', label: 'BIOS', type: 'BIOS', version: '2.19.1', by: 'admin' }), { ok: true, changed: true });
+    const after = (await call('GET /tools/bm-folders')).body.servers.find((x) => x.name === 'synth-db-s1');
+    assert.equal(after.chk.fw, 'ok', '기준을 바꾸면 같은 스냅샷의 다음 응답에 바로 보인다');
+    // 원장도 같다
+    assert.equal(after.chk.w, 'expired');
+    S.assetStore.save({ v: 1, at: 8, by: 'admin', rows: { synth01: { tag: 'SYNTH01', end: '2099-01-01' } } });
+    assert.equal((await call('GET /tools/bm-folders')).body.servers.find((x) => x.name === 'synth-db-s1').chk.w, 'ok');
+    S.assetStore.save({ v: 1, at: 7, by: 'admin', rows: { synth01: { tag: 'SYNTH01', end: '2020-01-01', type: 'Basic', contract: 'SYNTH-CONTRACT-1', note: '비고' } } });
+  });
   await withSnap(async () => {
     const list = (await call('GET /tools/bm-folders')).body;
     const r1 = list.servers.find((x) => x.name === 'synth-db-s1'); const r2 = list.servers.find((x) => x.name === 'synth-db-s2');
     assert.equal(r1.chk.fw, 'ok', '지정 기준과 같다'); assert.equal(r2.chk.fw, 'ok', '기준보다 높은 것은 뒤처짐이 아니다');
     const d = (await call('GET /tools/bm-folders/check', { query: { key: r2.key } })).body;
     assert.deepEqual([d.fw.rows[0].basis, d.fw.rows[0].baseline, d.fw.rows[0].state], ['admin', '2.19.1', 'ahead']);
+  });
+  reset();
+});
+
+test('⑨ 폴더 저장소를 못 읽으면 503(못 읽은 배치를 미분류로 판정하지 않는다) · 엣지 포탈에서는 답하지 않는다 · 기준 파일을 못 읽으면 표지', async (t) => {
+  reset();
+  let key = '';
+  await withSnap(async () => { key = (await call('GET /tools/bm-folders')).body.servers.find((x) => x.name === 'synth-db-s1').key; });
+  const w = console.error; const ww = console.warn; console.error = () => {}; console.warn = () => {};
+  t.after(() => { console.error = w; console.warn = ww; });
+  // 기준 파일 손상 → 다수 버전으로만 대조했다고 밝힌다 · 기준 지정 단추 표지는 내린다
+  S.fwBaselineStore._resetForTest(); fs.writeFileSync(path.join(tmp, 'bm-fw-baseline.json'), '{oops');
+  await withSnap(async () => {
+    const d = (await call('GET /tools/bm-folders/check', { query: { key } })).body;
+    assert.deepEqual([d.ok, d.baselineUnreadable, d.canBaseline, d.fw.state], [true, true, false, 'behind']);
+    assert.equal((await call('GET /tools/bm-folders')).body.check.baselineUnreadable, true);
+  });
+  // 엣지 포탈(CENTRAL_URL 설정) — 원장 · 기준 · 폴더 저장소는 중앙에 있다
+  const { config } = await import('../src/config.js');
+  const prev = config.agent.centralUrl; config.agent.centralUrl = 'https://central.example.test';
+  try { await withSnap(async () => { const r = await call('GET /tools/bm-folders/check', { query: { key } }); assert.deepEqual([r.statusCode, r.body.error], [404, 'central-only']); }); } finally { config.agent.centralUrl = prev; }
+  // 폴더 등록 파일 손상
+  bs._resetForTest(); fs.writeFileSync(path.join(tmp, 'bm-folders-assign.json'), '{oops');
+  await withSnap(async () => {
+    assert.equal((await call('GET /tools/bm-folders')).statusCode, 503);
+    const r = await call('GET /tools/bm-folders/check', { query: { key } });
+    assert.deepEqual([r.statusCode, r.body.error], [503, 'registryUnreadable']);
   });
   reset();
 });
@@ -515,12 +674,17 @@ test('⑨ 원장을 못 읽으면 보증을 판정하지 않는다(전부 모름
 test('⑨ 관리 라우트 — 게이트(관리자 · 조회 ∧ 쓰기 전체 범위) · 드라이런은 쓰지 않는다 · 커밋 · 바꾸기는 오류가 있으면 멈춘다 · 기준 지정 검증', async () => {
   reset();
   assert.equal(BM_ASSET_GATES.length, 2);
+  // CSV 가져오기 · 내보내기 · 샘플은 data.csv 권한 게이트도 갖는다(전체 라우터 스택 스윕 superAdmin2643 과 같은 규칙 — 여기서는 처리기 수로)
+  for (const key of ['POST /bm-assets/import', 'GET /bm-assets.csv', 'GET /bm-assets/sample.csv']) assert.ok(routes.get(key).length >= 4, `${key} 게이트 수`);
   for (const key of ['GET /bm-assets', 'POST /bm-assets/import', 'GET /bm-fw-baseline', 'POST /bm-fw-baseline', 'GET /bm-assets/sample.csv']) {
     const hs = routes.get(key);
     assert.ok(hs.includes(BM_ASSET_GATES[0]) && hs.includes(BM_ASSET_GATES[1]), `${key} 게이트`);
     assert.ok(hs.indexOf(BM_ASSET_GATES[0]) < hs.length - 1 && hs.indexOf(BM_ASSET_GATES[1]) < hs.length - 1, `${key} 게이트가 처리기 앞`);
   }
-  assert.ok(routes.get('GET /bm-assets.csv').includes(BM_ASSET_GATES[1]));
+  // 원장 내려받기: 관리자 · 전체 범위 · CSV 권한 셋 다(반증 — fleetOnly 만 보던 단정은 adminOnly · csvPerm 을 빼도 통과했다)
+  { const hs = routes.get('GET /bm-assets.csv'); assert.ok(hs.includes(BM_ASSET_GATES[0]) && hs.includes(BM_ASSET_GATES[1])); assert.equal(hs.length, 4, 'csvPerm + adminOnly + fleetOnly + 처리기'); assert.notEqual(hs[0], BM_ASSET_GATES[0]); }
+  // 데모 계정은 이 관리 화면을 읽지 못한다(서비스 태그 · 계약 번호 · 올린 사람 — 반증 A9)
+  { const { READ_DENY } = await import('../src/auth/demoGuest.js'); for (const pth of ['/api/admin/bm-assets', '/api/admin/bm-assets.csv', '/api/admin/bm-fw-baseline']) assert.ok(READ_DENY.includes(pth), pth); }
   await withSnap(async () => {
     // 비관리자 · 범위 관리자 · 쓰기 범위만 제한된 관리자는 못 쓴다
     for (const user of [VIEWER, SCOPED_A, WRITE_SCOPED]) {
@@ -535,8 +699,25 @@ test('⑨ 관리 라우트 — 게이트(관리자 · 조회 ∧ 쓰기 전체 �
     assert.deepEqual(S.assetStore.get().rows, {}, '드라이런은 쓰지 않는다');
     const rep = await callGated('POST /bm-assets/import', { body: { csv, replace: true } });
     assert.equal(rep.statusCode, 400); assert.deepEqual(S.assetStore.get().rows, {}, '바꾸기 + 오류 줄 → 아무것도 쓰지 않는다');
-    const ok = await callGated('POST /bm-assets/import', { body: { csv } });
+    // dryRun · replace 는 참 · 거짓만 — 'true' · 1 을 거짓으로 읽어 미리보기 요청이 적용되지 않게(반증 A15)
+    for (const bad of ['true', 1, 'yes', null]) { const r = await callGated('POST /bm-assets/import', { body: { csv, dryRun: bad } }); assert.equal(r.statusCode, 400, `dryRun=${JSON.stringify(bad)}`); }
+    assert.equal((await callGated('POST /bm-assets/import', { body: { csv, replace: 'true' } })).statusCode, 400);
+    assert.deepEqual(S.assetStore.get().rows, {});
+    assert.deepEqual(dry.body.base, { n: 0, at: null }); assert.deepEqual(dry.body.present, ['warranty_end', 'warranty_type']);
+    const ok = await callGated('POST /bm-assets/import', { body: { csv, expect: dry.body.base } });
     assert.equal(ok.body.ok, true); assert.equal(ok.body.changed, true);
+    // 미리본 뒤 원장이 바뀌었으면 409 — 다시 검증(반증 A17: 지워지는 줄 수가 미리보기와 달라졌다)
+    const stale = await callGated('POST /bm-assets/import', { body: { csv: 'service_tag,warranty_end\nSYNTH05,2030-01-01', expect: dry.body.base } });
+    assert.deepEqual([stale.statusCode, stale.body.error], [409, 'changed']); assert.deepEqual(Object.keys(S.assetStore.get().rows), ['synth01']);
+    // ‘파일로 바꾸기’ 는 미리보기(expect) 없이 적용할 수 없다 · 지우기만 있는 바꾸기도 쓴다
+    const only = 'service_tag,warranty_end,warranty_type\nSYNTH01,2027-03-14,Basic';
+    S.assetStore.save({ v: 1, at: 9, by: 'admin', rows: { ...S.assetStore.get().rows, synth09: { tag: 'SYNTH09', end: '2026-01-01' } } });
+    assert.equal((await callGated('POST /bm-assets/import', { body: { csv: only, replace: true } })).statusCode, 400);
+    const rdry = await callGated('POST /bm-assets/import', { body: { csv: only, replace: true, dryRun: true } });
+    assert.deepEqual(rdry.body.summary, { add: 0, update: 0, same: 1, error: 0, remove: 1 });
+    const rok = await callGated('POST /bm-assets/import', { body: { csv: only, replace: true, expect: rdry.body.base } });
+    assert.deepEqual([rok.body.ok, rok.body.changed], [true, true], '더하거나 바꾼 줄이 없어도 지울 줄이 있으면 쓴다');
+    assert.deepEqual(Object.keys(S.assetStore.get().rows), ['synth01']);
     assert.deepEqual(Object.keys(S.assetStore.get().rows), ['synth01']); assert.equal(S.assetStore.get().by, 'admin');
     const same = await callGated('POST /bm-assets/import', { body: { csv: 'service_tag,warranty_end,warranty_type\nSYNTH01,2027-03-14,Basic' } });
     assert.equal(same.body.changed, false, '바뀐 것이 없으면 쓰지 않는다');
@@ -607,7 +788,7 @@ test('⑩ 엣지 pushFleetNow 가 펌웨어 구성요소 · BIOS 설정을 싣�
   const members = servers.filter((x) => ['SYNTH01', 'SYNTH02', 'SYNTH03'].includes(x.serviceTag)).map((x) => ({ key: `st:${x.serviceTag}`, kind: 'bm', corp: 'vc-a', model: x.model || 'PowerEdge R750', serviceTag: x.serviceTag, _e: x }));
   const chk = ST.bmCheckFor({ members, placeOf: new Map(members.map((m) => [m.key, { path: 'SVC', src: 'manual' }])), hxOf: (m) => ({ inv: null, via: 'edge', fw: m._e.fw, bios: m._e.bios }), assets: {}, adminBase: null, today: todayStamp() });
   const of = (tag) => chk.ofMember(members.find((m) => m.serviceTag === tag));
-  assert.equal(of('SYNTH01').fw.state, 'ok', '읽은 서버가 둘(2.19.1 · 2.21.2)이면 동률 — 기준 없음이지만 같은 구성요소는 같다'); assert.equal(of('SYNTH01').fw.rows.find((x) => x.type === 'BIOS').state, 'none');
+  assert.equal(of('SYNTH01').fw.state, 'split', '읽은 서버가 둘(2.19.1 · 2.21.2)이면 BIOS 는 동률 — 뒤처진 것 없음이 아니라 갈림'); assert.equal(of('SYNTH01').fw.rows.find((x) => x.type === 'BIOS').state, 'none');
   assert.deepEqual([of('SYNTH03').fw.state, of('SYNTH03').bios.state], ['unsent', 'unsent'], '보내지 않은 서버는 같음에도 다름에도 없다');
   fleet.resetEdgeFleet(); reset();
 });

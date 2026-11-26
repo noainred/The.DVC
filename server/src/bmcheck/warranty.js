@@ -25,7 +25,6 @@ export function parseDay(v) {
     const p = s.split(/[-/.]/);
     if (p.length !== 3 || !p.every((x) => /^[0-9]{1,4}$/.test(x.trim()))) return '';
     y = Number(p[0].trim()); m = Number(p[1].trim()); d = Number(p[2].trim());
-    if (p[0].trim().length !== 4) return '';
   }
   if (!(y >= 1990 && y <= 2100) || !(m >= 1 && m <= 12) || !(d >= 1 && d <= 31)) return '';
   const t = new Date(Date.UTC(y, m - 1, d));

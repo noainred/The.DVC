@@ -55,6 +55,12 @@ describe('펌웨어 기준선 · BIOS 설정 편차 구역', () => {
       'BIOS 설정 편차', '다른 설정 1', '같은 폴더 · 같은 모델 3대와 견줌', '다수 값이 옳다는 뜻은 아닙니다']) expect(t).toContain(s);
     expect(t.indexOf('Turbo Mode')).toBeLessThan(t.indexOf('Boot Mode'));   // 다른 설정이 먼저
     expect(t.indexOf('Turbo Mode')).toBeGreaterThan(0);
+    // 판정에 쓴 인벤토리를 읽은 시각 — 두 구역 머리에(없으면 쓰지 않는다 · 0 을 지어내지 않는다)
+    const NOW = 1_800_000_000_000;
+    const aged = text(await fwbios({ chk: { d: D({ invAt: NOW - 3 * 86_400_000 }), err: '' }, now: NOW }));
+    expect((aged.match(/인벤토리 3일 전 읽음/g) || []).length).toBe(2);
+    expect(aged).toContain('기준과 다른 구성요소 1개 · 인벤토리 3일 전 읽음');
+    expect(t).not.toContain('인벤토리'); expect(text(await fwbios({ chk: { d: D({ invAt: null }), err: '' }, now: NOW }))).not.toContain('읽음');
     expect(html).not.toContain('기준으로 지정'); expect(html).not.toContain('지정 해제');   // 허용받지 않은 계정에는 단추가 없다
     expect((html.match(/<th[ >]/g) || []).length).toBe(6);   // 표마다 세 열 — 400px 드로어에서 상태가 가로 스크롤 밖으로 밀리지 않게
     expect((html.match(/<table/g) || []).length).toBe(2);
@@ -74,10 +80,16 @@ describe('펌웨어 기준선 · BIOS 설정 편차 구역', () => {
     const html = await fwbios({ chk: { d: D({ fw: { state: 'unsent', rows: [], behind: 0 }, bios: { state: 'unplaced', rows: [], diff: 0, group: { size: 0, known: 0 } } }), err: '' } });
     const t = text(html);
     expect(html).not.toContain('<table');
-    for (const s of ['엣지가 보내지 않음', '엣지가 펌웨어 목록을 보내지 않았습니다', '미분류 — 판정 안 함', '미분류 서버는 견주지 않습니다']) expect(t).toContain(s);
+    for (const s of ['엣지에서 받지 못함', '엣지에서 펌웨어 목록을 받지 못했습니다', '미분류 — 판정 안 함', '미분류 서버는 견주지 않습니다']) expect(t).toContain(s);
     expect(t).not.toContain('올려야 한다는 판정');   // 표가 없으면 표 설명도 없다
     const nohw = text(await fwbios({ chk: { d: D({ fw: null, bios: null, noHw: true }), err: '' } }));
     expect(nohw).toContain('하드웨어 정보를 찾지 못해 펌웨어를 대조하지 않았습니다.'); expect(nohw).toContain('하드웨어 정보를 찾지 못해 BIOS 설정을 견주지 않았습니다.');
+    // 갈림 — ‘뒤처진 것 없음’ · ‘다른 설정 없음’ 이라고 쓰지 않는다
+    const spHtml = await fwbios({ chk: { d: D({ fw: { ...FW, state: 'split', behind: 0, open: 1, rows: [FW.rows[2]] }, bios: { ...BIOS, state: 'split', diff: 0, open: 1, rows: [{ k: 'ProcTurboMode', v: 'Enabled', major: null, majorN: 0, known: 2, state: 'tie' }] } }), err: '' } });
+    const sp = text(spHtml);
+    for (const s of ['갈림 — 판정 못 함', '판정하지 못한 구성요소 1개', '갈림 — 다수 없음', '다수 없음']) expect(sp).toContain(s);
+    // 배지가 녹색 ‘없음’ 이 아니다(설명 글에는 그 낱말이 ‘…으로 보지 않습니다’ 로 나온다 — 배지만 본다)
+    expect(spHtml).not.toContain('>뒤처진 것 없음<'); expect(spHtml).not.toContain('>다른 설정 없음<'); expect(spHtml).not.toContain('badge green');
     expect(await fwbios({ chk: { d: null, err: '' } })).toBe('');
     expect(await fwbios({ chk: { d: null, err: 'x' } })).toBe('');
     expect(await fwbios({ r: { ...R, kind: 'esxi' }, chk: { d: D(), err: '' } })).toBe('');
@@ -90,7 +102,7 @@ describe('자산 원장 올리기 창', () => {
     const html = renderToStaticMarkup(React.createElement(AssetLedger, { meta: { n: 12, at: null }, onClose: () => {}, onChanged: () => {} }));
     const t = text(html);
     for (const s of ['자산 원장(보증 · 계약) 올리기', '포탈은 제조사에 조회하지 않습니다', '지금 원장: 12줄 · 아직 올린 적 없음', '파일 고르기', '고른 파일 없음', '샘플 CSV', '지금 원장 내려받기',
-      '원장을 이 파일로 바꾸기 — 파일에 없는 서버를 원장에서 지웁니다']) expect(t).toContain(s);
+      '원장을 이 파일로 바꾸기 — 파일에 없는 서버를 원장에서 지웁니다', '파일에 없는 열은 원장의 값을 그대로 두고, 열이 있는데 칸이 비어 있으면 그 값을 지웁니다']) expect(t).toContain(s);
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*>검증<\/button>/); expect(html).toMatch(/<button[^>]*disabled=""[^>]*>적용<\/button>/);
     const un = text(renderToStaticMarkup(React.createElement(AssetLedger, { meta: { unreadable: true }, onClose: () => {} })));
     expect(un).toContain('파일을 읽지 못했습니다(서비스 점검에서 확인 — 올리기가 막힙니다)');
@@ -123,6 +135,13 @@ describe('소스 스윕 — 연결 · 규약', () => {
     // 훅(chkN)은 조기 return 위
     const first = s.indexOf('const chkN = useMemo('); const ret = s.search(/\n {2}if \((?:err|!d)[^\n]*\) return /);
     expect(first).toBeGreaterThan(0); expect(ret).toBeGreaterThan(0); expect(first).toBeLessThan(ret);
+  });
+  it('자산 원장 창 — 적용은 미리본 원장(base)을 함께 보낸다 · CSV 권한이 없으면 단추를 잠그고 이유를 쓴다', () => {
+    const s = read('./AssetLedger.jsx');
+    expect(s).toMatch(/postJson\('\/admin\/bm-assets\/import', \{ csv: text, dryRun, replace, \.\.\.\(dryRun \? \{\} : \{ expect: res\?\.base \}\) \}\)/);
+    expect(s).toMatch(/const checked = !!res && res\.sig === sig;/);   // 검증한 글자 · 바꾸기 선택과 같을 때만 적용이 열린다
+    expect(s).toMatch(/disabled=\{busy \|\| !csvOk \|\| !checked \|\| blocked/);
+    expect(s).toMatch(/\{csvOk \? null : <div className="muted bmd-note" role="status">\{CSV_DENIED_NOTE\}<\/div>\}/);
   });
   it('표는 공용 STable · 문구에 백틱 없음 · 대문자 변환 없음 · 숫자 기준을 화면에 박지 않는다', () => {
     for (const f of ['./CheckSections.jsx', './AssetLedger.jsx']) {

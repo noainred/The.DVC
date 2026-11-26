@@ -2,7 +2,7 @@
  * routes/admin/bmAssets.js — 물리서버 점검의 관리 라우트(v3.45 · 설계 docs/design/bm-feature-proposals ① ②).
  *   자산 원장(보증 · 계약) CSV 올리기 · 내려받기 · 샘플, 펌웨어 기준(관리자 지정) 지정 · 해제.
  * 게이트: **관리자 + 전체 범위**(원장 · 지정 기준은 전 법인에 걸친 값이다 — 범위 지정 관리자가 다른 법인 서버의 보증 · 기준을 바꾸지 못하게).
- *   원장 내려받기는 CSV 내보내기 권한(data.csv)도 본다. 쓰기는 감사 로그를 남긴다(무엇을 · 몇 줄 — 계약 번호 원문은 싣지 않는다).
+ *   원장 올리기 · 내려받기 · 샘플은 CSV 권한(data.csv)도 본다(이 포탈의 CSV 가져오기 · 내보내기 라우트 공통 규칙 — superAdmin2643 이 실제 라우터 스택으로 고정). 쓰기는 감사 로그를 남긴다(무엇을 · 몇 줄 — 계약 번호 원문은 싣지 않는다).
  * 판정 코어는 bmcheck/assetCsv.js(드라이런과 커밋이 같은 함수) · 저장은 bmcheck/store.js(손상이면 쓰기 거절 409).
  */
 import { requirePerm } from '../../auth/auth.js';
@@ -40,7 +40,7 @@ export function registerBmAssets(adminRouter, { D = {} } = {}) {
     res.send(assetsToCsv(d.rows));
   });
 
-  adminRouter.get('/bm-assets/sample.csv', adminOnly, fleetOnly, (_req, res) => {
+  adminRouter.get('/bm-assets/sample.csv', csvPerm, adminOnly, fleetOnly, (_req, res) => {
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="bm-assets-sample.csv"');
     res.send(sampleAssetCsv());
@@ -48,17 +48,27 @@ export function registerBmAssets(adminRouter, { D = {} } = {}) {
 
   // 올리기 — body { csv, dryRun?, replace? }. 드라이런이 먼저(무엇이 더해지고 · 바뀌고 · 지워지는지), 커밋은 같은 판정으로.
   //   replace = 파일에 없는 줄을 원장에서 지운다 — 오류 줄이 하나라도 있으면 아무것도 쓰지 않는다(오류 줄의 서버가 원장에서 사라지지 않게).
-  adminRouter.post('/bm-assets/import', adminOnly, fleetOnly, textFields('csv'), (req, res) => {
+  adminRouter.post('/bm-assets/import', csvPerm, adminOnly, fleetOnly, textFields('csv'), (req, res) => {
     const refused = A.refusal();
     if (refused) return res.status(409).json({ ok: false, ...refused });
-    const { rows, error } = parseAssetCsv(String(req.body?.csv || ''));
+    // dryRun · replace 는 참 · 거짓만 — 'true' · 1 같은 값을 거짓으로 읽으면 미리보기를 청한 요청이 적용된다(반증 A15)
+    for (const k of ['dryRun', 'replace']) { const v = req.body?.[k]; if (v !== undefined && typeof v !== 'boolean') return res.status(400).json({ ok: false, reason: `‘${k}’ 는 true 또는 false 여야 합니다.`, field: k }); }
+    const { rows, present, error } = parseAssetCsv(String(req.body?.csv || ''));
     if (error) return res.status(400).json({ ok: false, reason: error });
     if (!rows.length) return res.status(400).json({ ok: false, reason: '가져올 데이터 줄이 없습니다.' });
     const replace = req.body?.replace === true;
     const cur = A.get();
-    const { report, summary, next } = analyzeAssetImport(rows, cur.rows, { replace });
-    const view = { total: rows.length, summary, report: report.filter((r) => r.action === 'error').concat(report.filter((r) => r.action !== 'error')).slice(0, REPORT_MAX), ...(report.length > REPORT_MAX ? { reportOmitted: report.length - REPORT_MAX } : {}) };
+    const base = { n: Object.keys(cur.rows).length, at: cur.at ?? null };
+    const { report, summary, next } = analyzeAssetImport(rows, cur.rows, { replace, present });
+    const view = { total: rows.length, summary, base, present, report: report.filter((r) => r.action === 'error').concat(report.filter((r) => r.action !== 'error')).slice(0, REPORT_MAX), ...(report.length > REPORT_MAX ? { reportOmitted: report.length - REPORT_MAX } : {}) };
     if (req.body?.dryRun === true) return res.json({ ok: true, dryRun: true, replace, ...view });
+    // 미리본 원장과 지금 원장이 같은지(expect = 미리보기의 base) — 그 사이 다른 관리자가 바꿨으면 지워지는 줄 수가 미리보기와 달라진다(반증 A17).
+    //   ‘파일로 바꾸기’ 는 미리보기 없이 적용할 수 없다. 합치기는 expect 를 주면 대조한다.
+    const ex = req.body?.expect;
+    if (replace && (!ex || typeof ex !== 'object')) return res.status(400).json({ ok: false, reason: '‘원장을 파일로 바꾸기’ 는 먼저 검증한 뒤에 적용할 수 있습니다.' });
+    if (ex && typeof ex === 'object' && (ex.n !== base.n || (ex.at ?? null) !== base.at)) {
+      return res.status(409).json({ ok: false, error: 'changed', reason: '검증한 뒤에 원장이 바뀌었습니다 — 다시 검증하십시오(지워지거나 바뀌는 줄이 미리보기와 다를 수 있습니다).', ...view });
+    }
     if (!next) return res.status(400).json({ ok: false, reason: `오류 줄이 ${summary.error}개 있어 ‘원장을 파일로 바꾸기’ 를 하지 않았습니다 — 오류 줄의 서버가 원장에서 사라지지 않게 전부 멈췄습니다. 오류를 고친 뒤 다시 올리십시오.`, ...view });
     if (!summary.add && !summary.update && !summary.remove) return res.json({ ok: true, changed: false, replace, ...view });
     const saved = A.save({ v: 1, at: Date.now(), by: String(req.user?.username || '').slice(0, 80), rows: next });

@@ -19,11 +19,12 @@ import { isReservedKey } from './assetCsv.js';
 const ASSET_FILE = () => path.join(config.configDir, 'bm-assets.json');
 const BASELINE_FILE = () => path.join(config.configDir, 'bm-fw-baseline.json');
 
-function docStore({ file, label, what, empty, shape }) {
-  const name = path.basename(file());
+/**
+ * @param L 공용 로더(makeJsonFileLoader — 아래에서 파일마다 **글자 그대로의 label · confirm 과 함께** 만든다: 서비스 점검 등재 스윕 audit2633 이 그 줄을 본다)
+ */
+function docStore({ file, L, what, empty, shape }) {
   let cache = null; let rev = 0;
   const write = (doc) => { fs.mkdirSync(path.dirname(file()), { recursive: true }); atomicWriteFileSync(file(), JSON.stringify(doc, null, 2)); };
-  const L = makeJsonFileLoader(file, { label, tag: name, confirm: () => { write(empty()); cache = null; L.saved(); rev += 1; } });
   const load = () => {
     if (cache && !L.recheckDue()) return cache;
     const hadErr = !!L.loadError();
@@ -48,6 +49,8 @@ function docStore({ file, label, what, empty, shape }) {
       cache = next; rev += 1; L.saved();
       return { ok: true };
     },
+    /** 서비스 점검의 ‘기본값으로 확정’ — 손상 보존본을 두고 빈 값으로 시작한다. */
+    _confirm() { write(empty()); cache = null; L.saved(); rev += 1; },
     _resetForTest() { cache = null; rev = 0; L.resetRetry(); },
   };
 }
@@ -81,10 +84,22 @@ const baselineShape = (d) => {
   return { v: 1, models };
 };
 
+/**
+ * 파일 꼴 검사 — **모르는 꼴은 손상**이다(빈 값으로 읽지 않는다). 첫 판본은 `null` · `{"rows":[…]}` · `{"v":2,"assets":{…}}` 를 오류 없이 빈 원장으로 읽어
+ *   전 서버가 ‘원장에 없음’ 이 되고 다음 올리기가 그 위에 덮어썼다(반증 A18).
+ */
+const parseDoc = (field) => (text) => {
+  const v = JSON.parse(text);
+  if (!isObj(v) || !isObj(v[field])) throw new Error(`형식이 아닙니다(객체 · ${field} 객체가 있어야 합니다)`);
+  if (v.v !== undefined && v.v !== 1) throw new Error('이 판이 모르는 파일 판 번호입니다');
+  return v;
+};
+const _assetFile = makeJsonFileLoader(ASSET_FILE, { label: '물리서버 자산 원장(보증 · 계약)', tag: 'bm-assets', parse: parseDoc('rows'), confirm: () => assetStore._confirm() });
+const _baselineFile = makeJsonFileLoader(BASELINE_FILE, { label: '물리서버 펌웨어 기준(관리자 지정)', tag: 'bm-fw-baseline', parse: parseDoc('models'), confirm: () => fwBaselineStore._confirm() });
 /** 자산 원장(보증 · 계약). */
-export const assetStore = docStore({ file: ASSET_FILE, label: '물리서버 자산 원장(보증 · 계약)', what: '물리서버 자산 원장', empty: () => assetShape(null), shape: assetShape });
+export const assetStore = docStore({ file: ASSET_FILE, L: _assetFile, what: '물리서버 자산 원장', empty: () => assetShape(null), shape: assetShape });
 /** 관리자 지정 펌웨어 기준. */
-export const fwBaselineStore = docStore({ file: BASELINE_FILE, label: '물리서버 펌웨어 기준(관리자 지정)', what: '물리서버 펌웨어 기준', empty: () => baselineShape(null), shape: baselineShape });
+export const fwBaselineStore = docStore({ file: BASELINE_FILE, L: _baselineFile, what: '물리서버 펌웨어 기준', empty: () => baselineShape(null), shape: baselineShape });
 
 export const BASELINE_MODELS_MAX = 400;
 export const BASELINE_COMPS_MAX = 60;

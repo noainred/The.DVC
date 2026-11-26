@@ -6,11 +6,19 @@
  *    범위 계정의 판정에 다른 법인 서버의 값이 들어가지 않는다(가림).
  *  · 서버(kind 'bm')만 펌웨어 · BIOS 를 본다. 보증은 서비스 태그가 있는 모든 행(ESXi 호스트 포함 — 같은 물리 박스다).
  */
-import { fwComponentsOf, judgeFirmware } from './fw.js';
+import { fwComponentsOfInv, fwStoredOf, judgeFirmware } from './fw.js';
 import { biosAttrsOf, judgeBios } from './bios.js';
+import { numOrNull } from '../util/numOrNull.js';
 import { warrantyOf } from './warranty.js';
 
 const lc = (v) => (typeof v === 'string' ? v.trim().toLowerCase() : '');
+const _biosMemo = new WeakMap();   // 인벤토리 · 정제본 객체 → BIOS 설정(요청마다 같은 객체를 다시 훑지 않는다 — 반증 A6)
+function biosOfObj(owner, attrs) {
+  if (!owner || typeof owner !== 'object') return biosAttrsOf(attrs);
+  let b = _biosMemo.get(owner);
+  if (b === undefined) { b = biosAttrsOf(attrs); _biosMemo.set(owner, b); }
+  return b;
+}
 
 /**
  * @param {{ members: object[], placeOf: Map<string, {path?:string, src?:string}>|null, hxOf: ((m:object)=>object|null)|null,
@@ -21,7 +29,7 @@ const lc = (v) => (typeof v === 'string' ? v.trim().toLowerCase() : '');
  */
 export function bmCheckFor({ members, placeOf, hxOf, assets, adminBase, today } = {}) {
   const list = Array.isArray(members) ? members : [];
-  const fwIn = []; const biosIn = [];
+  const fwIn = []; const biosIn = []; const atOf = new Map();
   if (typeof hxOf === 'function') {
     for (const m of list) {
       if (m?.kind !== 'bm') continue;
@@ -30,9 +38,15 @@ export function bmCheckFor({ members, placeOf, hxOf, assets, adminBase, today } 
       const p = placeOf?.get?.(m.key);
       const path = p?.src ? String(p.path || '') : '';
       let fw; let bios;
-      if (hx?.via === 'edge') { fw = hx.fw; bios = hx.bios; }   // 정제본 그대로 — 없으면 undefined(보내지 않음)
-      else if (hx?.inv) { fw = fwComponentsOf(hx.inv.firmware); bios = biosAttrsOf(hx.inv.bios?.attributes); }
-      else { fw = null; bios = null; }                           // 인벤토리 없음 = 못 읽음
+      if (hx?.via === 'edge') {
+        // 정제본 — 쓰기 직전에 형식을 다시 본다(재시작 뒤 저장본은 다시 정제되지 않는다: 반증 A14). 없으면 undefined(받지 못함)
+        fw = fwStoredOf(hx.fw);
+        bios = hx.bios && typeof hx.bios === 'object' && !Array.isArray(hx.bios) ? (biosOfObj(hx.bios, hx.bios) || undefined) : undefined;
+        atOf.set(m.key, numOrNull(hx.hw?.at));   // 엣지는 요약의 읽은 시각(같은 인벤토리)
+      } else if (hx?.inv) {
+        fw = fwComponentsOfInv(hx.inv); bios = biosOfObj(hx.inv, hx.inv.bios?.attributes);
+        atOf.set(m.key, numOrNull(hx.inv.collectedAt));
+      } else { fw = null; bios = null; }                         // 인벤토리 없음 = 못 읽음
       fwIn.push({ id: m.key, corp: m.corp, model: m.model, fw });
       biosIn.push({ id: m.key, corp: m.corp, path, model: m.model, bios });
     }
@@ -51,6 +65,8 @@ export function bmCheckFor({ members, placeOf, hxOf, assets, adminBase, today } 
       else if (assets) out.warranty = warrantyOf(null, today);
       if (m.kind === 'bm' && fwOf) out.fw = fwOf.get(m.key);
       if (m.kind === 'bm' && biosOf) out.bios = biosOf.get(m.key);
+      // 판정에 쓴 인벤토리를 읽은 시각(없으면 null) — 화면이 ‘언제 값인가’ 를 보인다. 오래된 값을 지금 값처럼 말하지 않게(반증 A7)
+      if (m.kind === 'bm' && fwOf) out.invAt = atOf.get(m.key) ?? null;
       return out;
     },
   };
