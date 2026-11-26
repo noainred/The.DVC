@@ -357,7 +357,7 @@ api.get('/tools/part-faults', toolsPerm, fullScopeOnly, async (req, res) => {
     push: role === 'edge' ? pushView(partFaultPushStatus(), isAdmin) : null,
     hook: hookStatus(),
     settings: isAdmin ? loadPartFaultSettings() : null,
-    escalation: { enabled: escalationStore.get().enabled, ...(escalationStateError() ? { stateError: escalationStateError() } : {}) },
+    escalation: { enabled: escalationStore.get().enabled, ...(escalationStore.loadError() ? { settingsUnreadable: true } : {}), ...(escalationStateError() ? { stateError: escalationStateError() } : {}) },   // 설정을 못 읽으면 ‘꺼짐’ 이 아니다(8회차 판정 #2)
     canAck: ['admin', 'operator'].includes(req.user?.role) && !isDemoGuest(req.user),   // 확인 단추 — 집행은 ack 라우트(writeRole)
     // 96회차(93회차 F4 화면): 설정 파일 읽기 오류면 위 settings 는 기본값(꺼짐)이다 — 관리자가 끈 것이 아니다. 고정 문구 사유만(파일 조각 없음).
     ...(isAdmin && partFaultSettingsWriteRefusal() ? { settingsUnreadable: { reason: String(partFaultSettingsWriteRefusal().reason || '').slice(0, 300) } } : {}),

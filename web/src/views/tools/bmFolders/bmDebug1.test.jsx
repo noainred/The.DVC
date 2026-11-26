@@ -114,5 +114,12 @@ describe('디버깅 1회차 화면', () => {
     expect(m).toMatchObject({ ok: true, tone: 'green', text: '수동 1회 수집 — 성공 3 · 실패 0 · 이벤트 읽기 중이라 건너뜀 1' });
     expect(manualPollMessage({ lastRun: { ok: 3, failed: 0 } }).text).toBe('수동 1회 수집 — 성공 3 · 실패 0');   // 구버전 서버(필드 없음)는 예전 문구
   });
+  it('8회차 화면 — 단계 · 당직 설정을 못 읽으면 행은 ‘설정 못 읽음’(꺼짐 · 정책 밖 아님) · 확인은 된다 · 목록 머리도 ‘꺼짐’ 이 아니다', () => {
+    const v = escMarkView({ ackId: 'a', covered: false, step: 3, acked: false, paused: 'settings-unreadable' }, { enabled: false, canAck: true });
+    expect(v).toMatchObject({ text: '설정 못 읽음', tone: 'gray', canAck: true });
+    expect(v.title).toContain('3단계까지는 갔습니다');
+    expect(v.title).not.toContain('꺼짐 · 정책 밖');
+    expect(read('../PartFaults.jsx')).toContain("data?.escalation?.settingsUnreadable ? '설정 못 읽음(꺼짐 아님");
+  });
 });
 

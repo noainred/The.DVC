@@ -110,7 +110,7 @@ export async function pushPartFaultsNow({ reason = 'timer' } = {}) {
     // urgent 가 실패한 push 에 실렸으면 다음 push(주기 포함)에 다시 싣는다 — 성공할 때까지(7회차 엣지 #3: 중앙 재시작 · 끊김 뒤 표지가 사라져 알림이 다음 중앙 주기까지 늦었다)
     let r; let why = reason; let rounds = 0; let urgent = reason === 'event' || _urgentCarry;
     do { _again = false; r = await pushOnce(why, { urgent }); if (urgent) _urgentCarry = !r?.ok; urgent = _urgentAgain || _urgentCarry; _urgentAgain = false; why = `${reason}+again`; rounds++; } while (_again && rounds < 5);
-    if (_again) { _again = false; console.warn('[partfault-push] 재전송 요청이 5회 연속 겹쳤습니다 — 남은 요청은 다음 주기 push 에 실립니다'); }
+    if (_again) { _again = false; if (urgent) _urgentCarry = true; console.warn('[partfault-push] 재전송 요청이 5회 연속 겹쳤습니다 — 남은 요청은 다음 주기 push 에 실립니다'); }   // 그 요청이 urgent 였으면 다음 push 에 싣는다(디버깅 8회차 엣지 #1)
     return r;
   })().finally(() => { _busy = null; });
   return _busy;

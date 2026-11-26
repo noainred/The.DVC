@@ -238,7 +238,7 @@ test('성능 — 이벤트는 그 서버만 읽는다(함대 주기 아님 · �
   // 판정 한 번 — 다시 읽은 인벤토리가 없으면 판정하지 않는다 · 이벤트 읽기는 폴러 훅을 부르지 않는다
   const es = src('../src/idrac/eventSub.js');
   assert.match(es, /const r = await P\.pollNowForEvent\(ids, \{ onRefreshed: J\.kick \}\);/);   // 6회차 엣지 #2 — 판정은 서버마다 깨우고 겹치면 한 번(동작은 bmDebug3)
-  assert.match(es, /await J\.settle\(\);\n    return \{ busy: false, refreshed: Number\(r\?\.invRefreshed\) \|\| 0, retry \};/);
+  assert.match(es, /if \(config\.agent\.centralUrl\) J\.settle\(\)\.catch\(\(\) => \{\}\); else await J\.settle\(\);\n    return \{ busy: false, refreshed: Number\(r\?\.invRefreshed\) \|\| 0, retry \};/);   // 8회차 엣지 #2 — 엣지는 마지막 push 를 기다리지 않는다(동작은 bmDebug5)
   const ps = src('../src/idrac/poller.js');
   const ia = ps.indexOf('return { servers: servers.length - skippedForCycle.length, invRefreshed, skipped: skippedForCycle, unread };');   // 6회차 보안 #2 — 못 읽은 서버도 돌려준다
   assert.ok(ia > 0 && ia < ps.indexOf("onSnapshotRefreshed('idrac'") && ia < ps.indexOf('lastRun = { at: ts, startedAt: ts'), '이벤트 읽기는 훅 · 주기 상태 앞에서 돌아간다');

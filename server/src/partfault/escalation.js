@@ -405,6 +405,11 @@ export function ackEscalation(p, { by = '', now = Date.now() } = {}) {
  */
 export function escalationMarkOf(p, items, settings = null, run = null) {
   const it = items && Object.hasOwn(items, partKeyOf(p)) ? items[partKeyOf(p)] : null;
+  // 설정을 못 읽은 동안은 정책 · 대상 여부를 모른다 — ‘꺼짐 · 정책 밖’ 이 아니라 그 사유로(확인은 된다 — 진행 기록은 읽힌다 · 디버깅 8회차 판정 #2)
+  if (run?.why === 'settings-unreadable') {
+    const okSteps = (it?.sent || []).filter((e) => e[3] === 'ok' && (!e[4] || e[4] === it?.pol || e[4] === '-')).map((e) => e[0]);
+    return { ackId: ackIdOf(p), covered: false, step: okSteps.length ? Math.max(...okSteps) + 2 : null, acked: !!it?.ackedAt, ...(it?.ackedAt ? { ackedAt: it.ackedAt, ackBy: it.ackBy } : {}), paused: 'settings-unreadable' };
+  }
   const curPol = (settings?.enabled ? policyFor(settings, p)?.id : '') || it?.pol || '';
   // 지금 정책의 단계만 — 다른 정책에 간 단계를 이 정책의 진행으로 말하지 않는다(디버깅 2회차 판정 #1). 정책 열이 없는 옛 줄은 첫 회차가 넘겨받기 전까지 지금 정책 것으로 보인다(4회차 화면 E1)
   //   옛 줄 · ‘-’ 줄은 엔진이 넘겨줄 정책(lp 에 있고 아직 시작 시각이 없는 정책 · lp 가 없으면 어느 정책이든)에만 센다 — 표지와 엔진이 같은 조건(디버깅 6회차 판정 #1 · #3)

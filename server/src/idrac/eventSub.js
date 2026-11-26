@@ -182,8 +182,10 @@ const DEFAULT_DEPS = {
     // 읽지 못한 서버(긴급중단 · 인증 정지 · 장비 오류) — 다시 시도로는 풀리지 않는다. 바로 재읽기 표지를 세워 풀린 뒤 첫 주기가 다시 읽고 urgent 로 보내게(디버깅 6회차 보안 #2 — 표지 없이 버려져 30분 나이 기준까지 밀렸다)
     const unread = Array.isArray(r?.unread) ? r.unread : [];
     if (unread.length) { try { const C = await import('./invCache.js'); for (const id of unread) C.markInventoryStale(id, { event: true }); } catch { /* 표시 실패가 점검을 막지 않는다 */ } }
-    // 이벤트 읽기는 폴러의 파트 장애 훅을 부르지 않는다(성능 P5: 두 번 돌고 엣지는 WAN push 두 번이었다) — 판정은 위 judgeLoop 하나. 마지막 판정이 끝날 때까지 기다린다
-    await J.settle();
+    // 이벤트 읽기는 폴러의 파트 장애 훅을 부르지 않는다(성능 P5: 두 번 돌고 엣지는 WAN push 두 번이었다) — 판정은 위 judgeLoop 하나.
+    //   중앙(로컬 판정)은 마지막 판정이 끝날 때까지 기다린다 · 엣지는 마지막 push(WAN)를 기다리지 않고 묶음을 끝낸다 — 중앙이 끊긴 동안 push 재시도 고리를 기다리느라
+    //   다른 서버의 이벤트 읽기(엣지 로컬)가 분 단위로 밀렸다(디버깅 8회차 엣지 #2). push 는 push.js 의 재진입 합치기가 묶는다
+    if (config.agent.centralUrl) J.settle().catch(() => {}); else await J.settle();
     return { busy: false, refreshed: Number(r?.invRefreshed) || 0, retry };
   },
 };

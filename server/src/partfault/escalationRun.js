@@ -8,11 +8,11 @@
  *  · 받는 곳 하나 이상에 ‘갔다’ 를 확인한 것만 ‘보냄’ — 메일 꺼짐 · 시간당 한도 · 채널 실패 · 당직 없음은 ‘안 감’ 으로 적고 다음 회차에 다시(ESC_RETRY_MAX 번까지 · 반증 A8 · B1).
  */
 import { config } from '../config.js';
-import { openFaultsOrNull } from './db.js';
+import { openFaultsOrNull, partFaultDbExists } from './db.js';
 import { alertOf } from './notify.js';
 import { notify as sendAlert, deliveryOutcome } from '../alerts.js';
 import { sendPortalMail } from '../mail/service.js';
-import { escalationStore, loadEscalationState, saveEscalationState, escalationStateUnreadable, escalationPlan, recordSends, ESC_SENDS_PER_RUN } from './escalation.js';
+import { escalationStore, loadEscalationState, saveEscalationState, escalationStateUnreadable, escalationPlan, recordSends, ESC_SENDS_PER_RUN, partKeyOf, partSigOf } from './escalation.js';
 
 export const ESC_TICK_MS = 60_000;   // 회차 주기 — 화면은 API 값(tickMs)으로 쓴다(숫자를 화면에 박지 않는다 — 반증 B10)
 const TICK_MS = ESC_TICK_MS;
@@ -27,6 +27,7 @@ export const escalationRunMarks = () => (_last ? { why: _last.why || '', heldKey
 export async function escalationMarksNow() {
   let why = '';
   if (escalationStateUnreadable()) why = 'state-unreadable';
+  else if (escalationStore.loadError()) why = 'settings-unreadable';   // 설정을 못 읽으면 정책을 모른다 — 행이 ‘꺼짐 · 정책 밖’ 으로 보이지 않게(디버깅 8회차 판정 #2)
   else {
     let sw = { enabled: true, source: '' };
     try { sw = (await _deps.partFaultSwitch()) || sw; } catch { /* 모르면 막지 않는다 */ }
@@ -44,6 +45,9 @@ export function escalationMessage(s, now = Date.now()) {
   const oc = s.to.oncall;
   const lines = [a.detail, '',
     `아무도 확인하지 않아 ${stepNo}단계로 올렸습니다(정책: ${s.policy.name}${mins ? ` · ${mins}분째` : ''}). 부품 장애 화면에서 ‘확인’ 을 누르면 단계 올리기가 멈춥니다.`];
+  // 건너뛴 단계 — 멈춘 동안(점검 꺼짐 · 데모 · 정비 창 · 회차 상한) 시각이 지나 보내지 않은 앞 단계를 밝힌다(화면 설명이 ‘결과에 밝힙니다’ 라고 약속한다 — 디버깅 8회차 화면 U2)
+  const sk = Array.isArray(s.skipped) ? s.skipped.map((k) => k + 2) : [];
+  if (sk.length) lines.push(`${sk.join(' · ')}단계는 시각이 지난 뒤 처음 본 회차라 보내지 않았습니다(건너뜀).`);
   if (oc) lines.push(`오늘 당직: ${oc.name || oc.email}${oc.agent === '*' ? '' : ` (${oc.agent || '이 포탈'} 당직표)`}`);
   else if (s.to.oncallWanted) lines.push('당직표에 오늘 당직이 없어 당직에게는 보내지 못했습니다.');
   const ag = String(s.part.agent || '').trim().toLowerCase();
@@ -78,7 +82,8 @@ async function sendOne(s, deps, now) {
 
 const DEFAULT_DEPS = {
   // DB 를 못 열면 ‘열린 장애 0건’ 이 아니다 — 그 회차를 건너뛴다(빈 목록으로 계획하면 진행 · 확인 기록이 전부 지워지고 DB 가 돌아오면 확인한 장애에도 단계가 다시 갔다 — 디버깅 7회차 판정 #3)
-  open: async () => { const r = await openFaultsOrNull(); if (!r) throw new Error('부품 장애 DB 를 열지 못했습니다'); return r; }, mail: (o) => sendPortalMail(o), channels: (a) => sendAlert(a), now: () => Date.now(),
+  // DB 파일이 없는 노드(부품 장애 점검을 켠 적 없음)에는 파일을 만들지 않는다 — 열린 장애도 없다(만들면 ‘수집 안 함’ 이 ‘읽었고 0건’ 으로 바뀌었다 — 디버깅 8회차 판정 #3)
+  open: async () => { if (!partFaultDbExists()) return []; const r = await openFaultsOrNull(); if (!r) throw new Error('부품 장애 DB 를 열지 못했습니다'); return r; }, mail: (o) => sendPortalMail(o), channels: (a) => sendAlert(a), now: () => Date.now(),
   partFaultSwitch: async () => (await import('./settings.js')).partFaultEnabled(),
   hold: async (open, now) => {
     const M = await import('../bmusage/maint/partfaultHold.js');
@@ -98,7 +103,18 @@ export async function runEscalationNow() {
     const now = deps.now();
     const settings = escalationStore.get();
     // 단계 · 당직 설정을 못 읽은 회차는 계획 · 저장을 하지 않는다 — 빈 설정(꺼짐)으로 돌면 옛 기록의 그때 정책(lp)이 빈 목록으로 굳어 설정이 돌아온 뒤 같은 단계를 다시 보냈다(디버깅 7회차 판정 #1)
-    if (escalationStore.loadError()) { _heldKeys = new Set(); _last = { at: now, enabled: false, sent: 0, delivered: 0, failed: 0, deferred: 0, why: 'settings-unreadable', errors: ['단계 · 당직 설정을 읽지 못해 이번 회차를 건너뛰었습니다(빈 설정으로 진행 기록을 바꾸지 않습니다).'] }; return _last; }
+    if (escalationStore.loadError()) {
+      // 계획 · lp 는 쓰지 않되 **닫힌 장애의 기록은 정리한다**(반증 A5 — 다시 열린 장애가 옛 확인 · 보낸 단계를 물려받지 않게). 키 이전 후보(같은 sig)는 남긴다(디버깅 8회차 판정 #1)
+      if (!escalationStateUnreadable()) {
+        let o = null; try { o = await deps.open(); } catch { o = null; }
+        if (Array.isArray(o)) {
+          const st = loadEscalationState(); const keys = new Set(o.map(partKeyOf)); const sigs = new Set(o.map(partSigOf));
+          const kept = Object.fromEntries(Object.entries(st.items).filter(([k, v]) => keys.has(k) || (v?.sig && sigs.has(v.sig))));
+          if (Object.keys(kept).length !== Object.keys(st.items).length) saveEscalationState({ ...st, items: kept });
+        }
+      }
+      _heldKeys = new Set(); _last = { at: now, enabled: false, sent: 0, delivered: 0, failed: 0, deferred: 0, why: 'settings-unreadable', errors: ['단계 · 당직 설정을 읽지 못해 이번 회차를 건너뛰었습니다(빈 설정으로 진행 기록을 바꾸지 않습니다).'] }; return _last;
+    }
     if (escalationStateUnreadable()) { _heldKeys = new Set(); _last = { at: now, enabled: settings.enabled, sent: 0, delivered: 0, failed: 0, deferred: 0, why: 'state-unreadable', errors: ['진행 기록을 읽지 못해 보내지 않았습니다(보낸 단계를 모르는 채 보내지 않는다).'] }; return _last; }
     const state = loadEscalationState();
     let open = [];
@@ -138,7 +154,7 @@ export async function runEscalationNow() {
     const sentRes = results.filter((r) => !r.notSent);
     _last = { at: now, enabled: settings.enabled, ...(why ? { why } : {}), sent: sentRes.length, delivered: sentRes.filter((r) => r.delivered).length, failed: sentRes.filter((r) => !r.delivered).length,
       deferred: plan.deferred, overCap: plan.overCap, held: plan.held, errors: saved ? [] : ['진행 기록을 쓰지 못했습니다 — 다음 회차에 같은 단계를 다시 보낼 수 있습니다.'],
-      results: plan.sends.map((s, i) => ({ part: `${s.part.deviceName || s.part.deviceId || ''} · ${s.part.label || ''}`.slice(0, 120), step: s.step + 2, result: results[i]?.text || '', delivered: !!results[i]?.delivered })).slice(0, 20) };
+      results: plan.sends.map((s, i) => ({ part: `${s.part.deviceName || s.part.deviceId || ''} · ${s.part.label || ''}`.slice(0, 120), step: s.step + 2, ...(s.skipped?.length ? { skipped: s.skipped.map((k) => k + 2) } : {}), result: results[i]?.text || '', delivered: !!results[i]?.delivered })).slice(0, 20) };
     return _last;
   } finally { _busy = false; }
 }

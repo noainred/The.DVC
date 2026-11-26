@@ -145,16 +145,27 @@ async function runOnce({ notify = true, reason = 'timer' } = {}) {
  * 중앙 주기(기본 10분)를 기다리면 엣지의 ‘바로 받기’ 가 화면 · 알림에 늦게 닿았다(디버깅 1회차 엣지 #5).
  * 묶음은 5초 — 엣지는 이벤트 묶음 안에서 서버를 다시 읽을 때마다 보고하므로(6회차 judgeLoop · 시작 사이 2초) 30초로 묶으면 둘째 보고부터 30초 뒤에 판정했다(7회차 엣지 #1).
  */
-let _soonTimer = null; let _soonAt = 0;
+let _soonTimer = null; let _soonRunning = false; let _soonAgain = false; let _soonEnd = 0; let _soonDur = 0;
 export const PART_FAULT_SOON_MS = 5_000;
+export const PART_FAULT_SOON_COST_X = 20;   // 다음 ‘곧 판정’ 은 앞 판정이 끝난 뒤 max(5초, 20 × 앞 판정 길이) — 판정이 통째로 동기라 큰 함대에서 루프 정지 비율을 ~5% 안으로(디버깅 8회차 성능 P1)
+/** 다음 ‘곧 판정’ 까지 기다릴 ms(순수 — 시험이 고정). 조용한 뒤 첫 보고는 0(바로 — 7회차 엣지 #1). */
+export const soonWaitMs = (now, lastEnd, lastDur) => Math.max(0, Math.max(PART_FAULT_SOON_MS, PART_FAULT_SOON_COST_X * Math.max(0, Number(lastDur) || 0)) - (now - (Number(lastEnd) || 0)));
 export function runPartFaultsSoon(reason = 'edge-event') {
-  if (isEdge() || _soonTimer) return false;
-  const wait = Math.max(0, PART_FAULT_SOON_MS - (Date.now() - _soonAt));
-  _soonTimer = setTimeout(() => { _soonTimer = null; _soonAt = Date.now(); runPartFaultsNow({ reason }).catch(() => {}); }, wait);
+  if (isEdge()) return false;
+  // 판정 중에 온 보고는 끝난 뒤 한 번 더(잃지 않는다 — 그 보고의 값은 지금 판정이 못 봤을 수 있다) · 이미 예약돼 있으면 그 판정이 이 보고를 본다
+  if (_soonRunning) { _soonAgain = true; return true; }
+  if (_soonTimer) return false;
+  _soonTimer = setTimeout(() => {
+    _soonTimer = null; _soonRunning = true; const t0 = Date.now();
+    runPartFaultsNow({ reason }).catch(() => {}).finally(() => {
+      _soonRunning = false; _soonEnd = Date.now(); _soonDur = _soonEnd - t0;
+      if (_soonAgain) { _soonAgain = false; runPartFaultsSoon(reason); }
+    });
+  }, soonWaitMs(Date.now(), _soonEnd, _soonDur));
   _soonTimer.unref?.();
   return true;
 }
-export function _resetSoonForTest() { if (_soonTimer) clearTimeout(_soonTimer); _soonTimer = null; _soonAt = 0; }
+export function _resetSoonForTest() { if (_soonTimer) clearTimeout(_soonTimer); _soonTimer = null; _soonRunning = false; _soonAgain = false; _soonEnd = 0; _soonDur = 0; }
 
 export function startPartFaultPoller() {
   if (_timer) return;

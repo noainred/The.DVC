@@ -24,6 +24,11 @@ export function escMarkView(esc, { canAck = false, enabled = false } = {}) {
     return { text: `확인함${who}`, title: `${when ? `${when} ` : ''}확인${who} — 단계 올리기를 멈췄습니다`, tone: 'gray', canAck: false };
   }
   const step = int(esc.step); const tried = int(esc.tried);
+  // 단계 · 당직 설정을 못 읽음 — 정책 · 대상 여부를 모른다(‘꺼짐 · 정책 밖’ 으로 말하지 않는다). 확인은 된다(진행 기록은 읽힌다 — 디버깅 8회차 판정 #2)
+  if (esc.paused === 'settings-unreadable') {
+    return { text: '설정 못 읽음', tone: 'gray', canAck: canAck && !!esc.ackId,
+      title: `단계 · 당직 설정을 읽지 못해 단계 알림을 보내지 않습니다 — 설정이 돌아오면 이미 세던 장애는 그동안 시각이 지난 단계 가운데 가장 높은 단계를 바로 보냅니다(확인하면 보내지 않습니다)${step ? ` · ${step}단계까지는 갔습니다` : ''}` };
+  }
   const live = enabled && esc.covered === true;
   // 회차가 보내지 않는 상태 · 정비 창 보류 — ‘보냅니다’ 라고 약속하지 않는다(디버깅 1회차 화면 U7)
   if (live && esc.paused === 'state-unreadable') {
@@ -126,6 +131,6 @@ export function escRunText(run, tickMs = null) {
 /** 마지막 회차의 보낸 결과 줄(최대 20) — 어디에 갔고 어디에 가지 않았는지(반증 B1). */
 export function escRunResults(run) {
   return (Array.isArray(run?.results) ? run.results : []).slice(0, 20).map((r, i) => ({
-    key: `${i}`, text: `${String(r?.part || '—')} · ${int(r?.step) ? `${r.step}단계` : '—'} · ${String(r?.result || '—')}`, ok: r?.delivered === true,
+    key: `${i}`, text: `${String(r?.part || '—')} · ${int(r?.step) ? `${r.step}단계` : '—'}${Array.isArray(r?.skipped) && r.skipped.length ? `(${r.skipped.map((k) => int(k)).filter(Boolean).join(' · ')}단계 건너뜀)` : ''} · ${String(r?.result || '—')}`, ok: r?.delivered === true,   // 건너뛴 단계(8회차 화면 U2)
   }));
 }
