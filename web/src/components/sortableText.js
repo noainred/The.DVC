@@ -178,6 +178,21 @@ export function sortChildren(children, colIndex, dir = 'asc') {
   return items.map((it) => (React.isValidElement(it.node) && it.node.key == null ? React.cloneElement(it.node, { key: `s${it.i}` }) : it.node));
 }
 
+/**
+ * 보이는 행의 `data-rowid` 를 위에서부터(v3.44 — STable `onOrder`). children = tbody 자식(원래 순서 또는 sortChildren 결과),
+ * cap > 0 이면 앞 cap 행만(표가 그리는 것과 같은 상한). `data-rowid` 가 없는 행(합계 줄 등)은 건너뛴다. 순수 — 원본을 고치지 않는다.
+ */
+export function rowIdsOf(children, cap = 0) {
+  const arr = (Array.isArray(children) ? children.flat(3) : [children]).filter((c) => c != null && typeof c !== 'boolean');
+  const list = Number(cap) > 0 ? arr.slice(0, Math.floor(Number(cap))) : arr;
+  const ids = [];
+  for (const node of list) {
+    const id = firstTr(node)?.props?.['data-rowid'];
+    if (id != null && id !== '') ids.push(String(id));
+  }
+  return ids;
+}
+
 /** 다음 정렬 상태: 같은 열이면 asc→desc→해제, 다른 열이면 asc. */
 export function nextSortState(cur, col) {
   if (!cur || cur.col !== col) return { col, dir: 'asc' };

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import React from 'react';
-import { textOf, sortKeyOf, compareKeys, sortChildren, nextSortState, headerSortable, cellText } from './sortableText.js';
+import { textOf, sortKeyOf, compareKeys, sortChildren, nextSortState, headerSortable, cellText, rowIdsOf } from './sortableText.js';
 
 const h = React.createElement;
 
@@ -106,5 +106,30 @@ describe('compareCellValues(DataTable 원값 정렬)', () => {
     expect(sortBy(['vc-10', 'vc-2', 'vc-1'])).toEqual(['vc-1', 'vc-2', 'vc-10']);
     expect(isEmptyCellValue(0)).toBe(false);
     expect(sortBy([0, -1, 5])).toEqual([-1, 0, 5]);
+  });
+});
+
+// v3.44 — STable onOrder: 보이는 행 순서(data-rowid)를 정렬 · 상한 뒤 그대로 알린다(물리서버 상세 드로어의 ‹ › 순서).
+describe('rowIdsOf — 보이는 행의 data-rowid', () => {
+  const tr = (id, name, v) => h('tr', { key: id, 'data-rowid': id }, h('td', null, name), h('td', null, v));
+  const rows = [tr('st:B', 'b', '2'), tr('st:A', 'a', '10'), tr('st:C', 'c', '1')];
+
+  it('원래 순서 · 정렬한 순서를 그대로 돌려준다(키의 콜론 · 접두가 바뀌지 않는다)', () => {
+    expect(rowIdsOf(rows)).toEqual(['st:B', 'st:A', 'st:C']);
+    expect(rowIdsOf(sortChildren(rows, 0, 'asc'))).toEqual(['st:A', 'st:B', 'st:C']);
+    expect(rowIdsOf(sortChildren(rows, 1, 'desc'))).toEqual(['st:A', 'st:B', 'st:C']);   // 숫자 열 내림차순: 10 · 2 · 1
+  });
+  it('상한은 정렬한 뒤 앞에서부터(표가 그리는 행과 같다)', () => {
+    expect(rowIdsOf(sortChildren(rows, 0, 'asc'), 2)).toEqual(['st:A', 'st:B']);
+    expect(rowIdsOf(rows, 0)).toHaveLength(3);
+  });
+  it('data-rowid 가 없는 행 · 빈 값 · null 자식은 건너뛴다(지어내지 않는다)', () => {
+    const mixed = [rows[0], null, false, h('tr', { key: 'sum' }, h('td', null, '합계')), h('tr', { key: 'e', 'data-rowid': '' }, h('td', null, 'x')), rows[2]];
+    expect(rowIdsOf(mixed)).toEqual(['st:B', 'st:C']);
+    expect(rowIdsOf(undefined)).toEqual([]);
+    expect(rowIdsOf([])).toEqual([]);
+  });
+  it('중첩 배열(조각으로 나눠 그린 tbody)도 편다', () => {
+    expect(rowIdsOf([[rows[0]], [rows[1], [rows[2]]]])).toEqual(['st:B', 'st:A', 'st:C']);
   });
 });

@@ -450,3 +450,7 @@
 - **확인하지 못한 것**: 실제 iDRAC 에서 `ServerOS` 속성 경로 · `$select` 지원(가짜 Redfish 서버로만 시험 — Dell 문서 기준의 추정) · 운영 서버 중 iSM 설치 비율 ·
   실제 엣지 ↔ 중앙 왕복 · 운영 데이터(긴 이름 · 모델)로 1440px 표 폭.
 
+
+## 21. 옆 패널 → 드로어(v3.44.0)
+
+서버를 누르면 열리던 400px 옆 패널(`SidePanel.jsx` · `HwPanel.jsx` · `.bmf-drawer`)은 v3.44.0 에 VM · 호스트와 같은 640px 드로어(`bmFolders/BmDrawer.jsx`)로 바뀌었다 — 설계 · 구현 기록은 `docs/design/bm-drawer/README.md`. 이 문서 앞쪽의 ‘옆 패널’ 은 그 드로어를 가리킨다(값 · 동작은 그대로 옮겼다).

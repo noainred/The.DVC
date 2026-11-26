@@ -24,13 +24,13 @@
  * 정렬은 화면(엘리먼트) 재배열이라 서버·상태를 건드리지 않고, 데이터가 갱신돼도 마지막 정렬이 유지된다.
  * 셀에 컴포넌트가 있으면 텍스트 자식 → value/pct/label 순으로 값을 찾고, 정확한 값을 원하면 td 에 `data-sort` 를 준다.
  */
-import React, { useMemo, useState } from 'react';
-import { headerSortable, sortChildren, nextSortState } from './sortableText.js';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { headerSortable, sortChildren, nextSortState, rowIdsOf } from './sortableText.js';
 import { onPressKey } from './pressable.js';   // v3.13.2 정렬 머리 키보드(Enter/Space) — 역할(columnheader)은 그대로
 
 const ARROW = { asc: '▲', desc: '▼' };
 
-export function STable({ sortable = true, limit = 0, minWidth = 0, wrap, children, ...rest }) {
+export function STable({ sortable = true, limit = 0, minWidth = 0, wrap, onOrder, children, ...rest }) {
   const [sort, setSort] = useState(null); // { col, dir } | null
   // ⚠ Children.toArray 는 호출마다 새 엘리먼트(키 접두)를 만들므로 **한 번만** 호출해 그 배열 안에서 동일성 비교한다.
   const kids = React.Children.toArray(children);
@@ -59,6 +59,20 @@ export function STable({ sortable = true, limit = 0, minWidth = 0, wrap, childre
   // 상한은 정렬 결과에 적용한다. 정렬 전(초기 렌더)이면 원래 순서의 앞 N — 호출부가 먼저
   // 자르던 예전 동작과 같고, 열을 누른 순간부터 '전체를 정렬한 상위 N' 이 된다.
   const cap = Number(limit) > 0 ? Math.floor(Number(limit)) : 0;
+
+  /**
+   * v3.44 `onOrder`(선택): **지금 보이는 행의 순서**를 알린다 — 행(`<tr>`)의 `data-rowid` 를 위에서부터(정렬 · 상한을 거친 뒤).
+   * 쓰는 곳: 표 옆 드로어의 ‹ › · ↑↓ 가 '표에 보이는 순서' 로 넘어가게(물리서버 상세 드로어 — 정렬은 이 컴포넌트 안에서 일어나
+   * 호출부는 순서를 모른다). 순서가 실제로 바뀔 때만 부른다(같은 순서의 리렌더에는 부르지 않는다 — 호출부가 setState 해도 돌지 않게).
+   * `onOrder` 를 주지 않으면 아무 계산도 하지 않는다(다른 표의 비용 0). ⚠ 훅이라 조기 return 위에 둔다(위 주석과 같은 이유).
+   */
+  const orderKey = useMemo(() => {
+    if (!onOrder || tbodyKids === undefined) return null;
+    return rowIdsOf(sort ? sortedKids : tbodyKids, cap).join('\u0000');
+  }, [onOrder, sort, sortedKids, tbodyKids, cap]);
+  const onOrderRef = useRef(onOrder);
+  onOrderRef.current = onOrder;
+  useEffect(() => { if (orderKey != null) onOrderRef.current?.(orderKey === '' ? [] : orderKey.split('\u0000')); }, [orderKey]);
   const capKids = (kids2) => (cap > 0 ? React.Children.toArray(kids2).slice(0, cap) : kids2);
 
   // minWidth 를 주면 표에 최소폭을 걸고 **가로 스크롤 래퍼까지 함께** 만든다(짝을 놓칠 수 없게).

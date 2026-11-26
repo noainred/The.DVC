@@ -41,7 +41,7 @@ export default function MapView({ rows, groupBy, setGroupBy, colorBy, setColorBy
           <span className="bmf-lg"><i className="bmf-hx off" />꺼짐</span>
           <span className="bmf-lg"><i className="bmf-hx u2 bad" />부품 장애</span>
         </span>
-        <span className="muted" style={{ fontSize: 12, marginLeft: 'auto' }}>칸 하나 = 서버 한 대 · 누르면 옆 패널</span>
+        <span className="muted" style={{ fontSize: 12, marginLeft: 'auto' }}>칸 하나 = 서버 한 대 · 누르면 서버 상세</span>
       </div>
       {!rows.length ? <div className="muted" style={{ padding: 16 }}>서버가 없습니다.</div> : (
         <div className="bmf-map">
