@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>통신 경로 · 손실 구간 — 서버 상세 (1440)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.5}
+a{color:#7dd3fc}a:hover{color:#bae6fd}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums}
+.card{background:#141b2d;border:1px solid #1f2a40;border-radius:14px;min-width:0}
+.btn{height:34px;padding:0 14px;border-radius:8px;border:1px solid #243049;background:#141b2d;color:#e6edf6;font:inherit;font-size:13px;cursor:pointer;white-space:nowrap}
+.btn.primary{border-color:#1d4ed8;background:#2563eb;color:#fff;font-weight:600}
+.seg{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden}
+.seg button{height:32px;padding:0 12px;border:0;border-left:1px solid #243049;background:transparent;color:#8b9bb4;font:inherit;font-size:12.5px;cursor:pointer;white-space:nowrap}
+.seg button:first-child{border-left:0}
+.seg button.on{background:#1a2236;color:#e6edf6;font-weight:600}
+.chip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 9px;border-radius:999px;border:1px solid #243049;background:#0f1626;font-size:12px;color:#aab8cf;white-space:nowrap}
+.stat{background:#141b2d;border:1px solid #1f2a40;border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:4px;min-width:0;flex:1 1 220px}
+.stat .k{font-size:12px;color:#8b9bb4}
+.stat .v{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:20px;font-weight:600}
+.stat .s{font-size:12px;color:#8b9bb4}
+table{border-collapse:collapse;width:100%}
+th{font-size:12px;font-weight:600;color:#8b9bb4;text-align:left;padding:8px 10px;background:#0f1626;border-bottom:1px solid #1f2a40;white-space:nowrap}
+td{padding:8px 10px;border-bottom:1px solid #1f2a40;vertical-align:top}
+tr:last-child td{border-bottom:0}
+td.n,th.n{text-align:right}
+.tag{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:6px;font-size:12px;font-weight:600;white-space:nowrap}
+.tag.ok{background:#12301f;color:#86efac}
+.tag.bad{background:#3b1518;color:#fca5a5}
+.tag.warn{background:#3a2a0b;color:#fcd34d}
+.tag.na{background:transparent;border:1px dashed #3a4a68;color:#aab8cf}
+.dim{color:#8b9bb4}
+.note{font-size:12px;color:#8b9bb4;overflow-wrap:anywhere}
+.hop{width:24px;height:24px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-family:"JetBrains Mono",monospace;font-size:12px;font-weight:600;background:#1a2236;border:1px solid #2c3a57;color:#e6edf6;flex:none}
+.hop.bad{background:#7f1d1d;border-color:#ef4444}
+.hop.warn{background:#5a3d07;border-color:#f59e0b}
+.hop.na{background:transparent;border-style:dashed;color:#aab8cf}
+.heatrow{display:flex;align-items:center;gap:10px;min-width:0}
+.heatrow .lab{flex:0 0 232px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.heatrow .cells{flex:1 1 auto;display:flex;gap:2px;min-width:0}
+.cell{flex:1 1 0;height:16px;border-radius:2px;min-width:0}
+</style>
+</helmet>
+
+<div style="box-sizing:border-box;min-height:1560px;padding:22px 28px 36px;display:flex;flex-direction:column;gap:16px;max-width:1680px;margin:0 auto">
+
+  <!-- 머리 -->
+  <div style="display:flex;flex-wrap:wrap;gap:12px 16px;align-items:flex-end;justify-content:space-between">
+    <div style="display:flex;flex-direction:column;gap:6px;min-width:0">
+      <div class="note"><a href="Fleet.dc.html">통신 경로 · 손실 구간</a> › KR1 법인 › 서버</div>
+      <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">
+        <h1 class="mono" style="margin:0;font-size:22px;font-weight:600">erp-app-kr1-03</h1>
+        <span class="chip">VM · Rocky Linux 9</span>
+        <span class="chip mono">10.21.3.41</span>
+        <span class="chip">호스트 <b class="mono" style="color:#e6edf6;font-weight:500">esx-kr1-07</b></span>
+        <span class="chip">포트그룹 <b class="mono" style="color:#e6edf6;font-weight:500">PG-ERP-APP</b></span>
+      </div>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+      <div class="seg" aria-label="기간">
+        <button type="button">1시간</button><button type="button">6시간</button><button type="button" class="on">24시간</button><button type="button">7일</button>
+      </div>
+      <button type="button" class="btn">지금 다시 읽기</button>
+      <button type="button" class="btn primary">양쪽 캡처로 확인</button>
+    </div>
+  </div>
+
+  <!-- 요약 4칸 -->
+  <div style="display:flex;flex-wrap:wrap;gap:12px">
+    <div class="stat"><span class="k">통신 상대</span><span class="v">14곳</span><span class="s">게스트 연결 표 · 표본 288회 중 286회 읽음</span></div>
+    <div class="stat"><span class="k">재전송이 오른 상대</span><span class="v" style="color:#67e8f9">2곳</span><span class="s">erp-db-kr1-01 · sap-gw-pl-01</span></div>
+    <div class="stat"><span class="k">드롭이 늘어난 구간</span><span class="v" style="color:#fca5a5">2곳</span><span class="s">호스트 pNIC vmnic3 · 스위치 포트 Ethernet17</span></div>
+    <div class="stat"><span class="k">읽은 구간</span><span class="v">8 / 10</span><span class="s">카운터 없음 1 · 수집하지 않음 1</span></div>
+  </div>
+
+  <!-- 본문 2단 -->
+  <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start">
+
+    <!-- 통신 상대 -->
+    <section class="card" style="flex:1 1 470px;display:flex;flex-direction:column">
+      <div style="padding:14px 16px 10px;display:flex;flex-wrap:wrap;gap:8px;align-items:baseline;justify-content:space-between">
+        <h2 style="margin:0;font-size:15px;font-weight:700">통신 상대</h2>
+        <span class="note">상대를 누르면 오른쪽에 그 경로가 나옵니다</span>
+      </div>
+      <div style="overflow-x:auto">
+        <table style="min-width:440px">
+          <thead><tr><th>상대</th><th>포트</th><th>방향</th><th class="n">연결</th><th class="n">재전송</th></tr></thead>
+          <tbody>
+            <tr style="background:#172544">
+              <td><b class="mono" style="font-weight:600">erp-db-kr1-01</b><div class="note">베어메탈 · 10.21.4.11</div></td>
+              <td class="mono">1521/tcp</td><td>나감</td><td class="n mono">24</td>
+              <td class="n mono" style="color:#67e8f9;font-weight:600">2.4%</td>
+            </tr>
+            <tr>
+              <td><span class="mono">sap-gw-pl-01</span><div class="note">다른 법인(PL-WRO) · 10.48.2.20</div></td>
+              <td class="mono">3300/tcp</td><td>나감</td><td class="n mono">6</td>
+              <td class="n mono" style="color:#67e8f9;font-weight:600">0.8%</td>
+            </tr>
+            <tr>
+              <td><span class="mono">lb-kr1-vip</span><div class="note">VM · 10.21.3.10</div></td>
+              <td class="mono">8443/tcp</td><td>들어옴</td><td class="n mono">118</td><td class="n mono">0.0%</td>
+            </tr>
+            <tr>
+              <td><span class="mono">file-kr1-02</span><div class="note">VM · 10.21.4.15</div></td>
+              <td class="mono">445/tcp</td><td>나감</td><td class="n mono">3</td><td class="n mono">0.0%</td>
+            </tr>
+            <tr>
+              <td><span class="mono">ad-kr1-01</span><div class="note">VM · 10.21.1.5</div></td>
+              <td class="mono">389 · 88/tcp</td><td>나감</td><td class="n mono">2</td><td class="n mono">0.0%</td>
+            </tr>
+            <tr>
+              <td><span class="mono">bareos-kr1</span><div class="note">백업 서버 · 10.21.9.2</div></td>
+              <td class="mono">9102/tcp</td><td>들어옴</td><td class="n mono">1</td><td class="n mono">0.1%</td>
+            </tr>
+            <tr>
+              <td><span class="mono">203.0.113.24</span><div class="note">등록되지 않은 주소</div></td>
+              <td class="mono">443/tcp</td><td>나감</td><td class="n mono">2</td><td class="n mono">0.3%</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div style="padding:10px 16px 14px;display:flex;flex-direction:column;gap:8px">
+        <button type="button" class="btn" style="align-self:flex-start">나머지 7곳 더 보기</button>
+        <p class="note" style="margin:0">게스트 OS 의 연결 표를 주기적으로 읽은 표본입니다. 표본 사이에 열렸다 닫힌 짧은 연결과 UDP 는 빠질 수 있습니다. 재전송은 리눅스의 연결별 TCP 통계에서 계산하며, Windows 게스트는 연결별 값을 주지 않아 ‘—’ 로 나옵니다.</p>
+      </div>
+    </section>
+
+    <!-- 경로 구간 -->
+    <section class="card" style="flex:999 1 720px;display:flex;flex-direction:column">
+      <div style="padding:14px 16px 12px;display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;justify-content:space-between;border-bottom:1px solid #1f2a40">
+        <h2 style="margin:0;font-size:15px;font-weight:700">경로 구간 <span class="mono" style="font-weight:500;color:#aab8cf">erp-app-kr1-03 → erp-db-kr1-01 · 1521/tcp</span></h2>
+        <span class="tag bad">드롭이 늘어난 구간 2곳</span>
+      </div>
+
+      <!-- 한 줄 요약 띠 -->
+      <div style="padding:14px 16px 6px;display:flex;align-items:center;gap:0;overflow-x:auto">
+        <span class="hop">1</span><span style="flex:1 1 18px;min-width:14px;height:2px;background:#2c3a57"></span>
+        <span class="hop">2</span><span style="flex:1 1 18px;min-width:14px;height:2px;background:#2c3a57"></span>
+        <span class="hop na">3</span><span style="flex:1 1 18px;min-width:14px;height:2px;background:#2c3a57"></span>
+        <span class="hop bad">4</span><span style="flex:1 1 18px;min-width:14px;height:2px;background:#2c3a57"></span>
+        <span class="hop warn">5</span><span style="flex:1 1 18px;min-width:14px;border-top:2px dashed #3a4a68"></span>
+        <span class="hop na">6</span><span style="flex:1 1 18px;min-width:14px;border-top:2px dashed #3a4a68"></span>
+        <span class="hop">7</span><span style="flex:1 1 18px;min-width:14px;height:2px;background:#2c3a57"></span>
+        <span class="hop">8</span>
+      </div>
+      <div class="note" style="padding:0 16px 10px;display:flex;justify-content:space-between;gap:12px"><span>이 서버(게스트)</span><span>상대 서버</span></div>
+
+      <div style="overflow-x:auto">
+        <table style="min-width:760px">
+          <thead><tr><th style="width:34px">#</th><th>구간</th><th>장비 · 인터페이스</th><th class="n">수신 드롭</th><th class="n">송신 드롭</th><th class="n">에러</th><th>판정</th><th>읽은 곳</th></tr></thead>
+          <tbody>
+            <tr><td><span class="hop">1</span></td><td>게스트 NIC</td><td class="mono">erp-app-kr1-03 · ens192</td><td class="n mono">+0</td><td class="n mono">+0</td><td class="n mono">+0</td><td><span class="tag ok">증가 없음</span></td><td class="note">게스트 조사 · 14:52</td></tr>
+            <tr><td><span class="hop">2</span></td><td>가상 NIC</td><td class="mono">네트워크 어댑터 1 · vmxnet3</td><td class="n mono">+0</td><td class="n mono">+0</td><td class="n mono dim">—</td><td><span class="tag ok">증가 없음</span></td><td class="note">vCenter 실시간 통계 · 14:55</td></tr>
+            <tr><td><span class="hop na">3</span></td><td>포트그룹</td><td class="mono">PG-ERP-APP · VLAN 213 · dvs-kr1-prod</td><td class="n mono dim">—</td><td class="n mono dim">—</td><td class="n mono dim">—</td><td><span class="tag na">카운터 없음</span></td><td class="note">구성 정보만</td></tr>
+            <tr><td><span class="hop">4</span></td><td>호스트 pNIC</td><td class="mono">esx-kr1-07 · vmnic2 · 10G</td><td class="n mono">+0</td><td class="n mono">+0</td><td class="n mono">+0</td><td><span class="tag ok">증가 없음</span></td><td class="note">vCenter 실시간 통계 · 14:55</td></tr>
+            <tr style="background:#2a1418"><td><span class="hop bad">4</span></td><td><b>호스트 pNIC</b></td><td class="mono"><b style="font-weight:600">esx-kr1-07 · vmnic3 · 10G</b></td><td class="n mono" style="color:#fca5a5;font-weight:600">+1,284</td><td class="n mono">+0</td><td class="n mono">+0</td><td><span class="tag bad">드롭 증가</span></td><td class="note">vCenter 실시간 통계 · 14:55</td></tr>
+            <tr style="background:#241c0d"><td><span class="hop warn">5</span></td><td><b>스위치 포트</b></td><td class="mono"><b style="font-weight:600">leaf-kr1-a03 · Ethernet17</b> <span class="dim">↔ vmnic3</span></td><td class="n mono">+0</td><td class="n mono" style="color:#fcd34d;font-weight:600">+37</td><td class="n mono">+0</td><td><span class="tag warn">드롭 증가(소량)</span></td><td class="note">CVP · 14:54</td></tr>
+            <tr><td><span class="hop">5</span></td><td>스위치 포트</td><td class="mono">leaf-kr1-b03 · Ethernet17 <span class="dim">↔ vmnic2</span></td><td class="n mono">+0</td><td class="n mono">+0</td><td class="n mono">+0</td><td><span class="tag ok">증가 없음</span></td><td class="note">CVP · 14:54</td></tr>
+            <tr><td><span class="hop na">6</span></td><td>스위치 사이</td><td class="mono">leaf-kr1-a03 ⇄ leaf-kr1-b02</td><td class="n mono dim">—</td><td class="n mono dim">—</td><td class="n mono dim">—</td><td><span class="tag na">수집하지 않음</span></td><td class="note">이 포탈이 경로를 모릅니다</td></tr>
+            <tr><td><span class="hop">7</span></td><td>스위치 포트</td><td class="mono">leaf-kr1-b02 · Ethernet9</td><td class="n mono">+0</td><td class="n mono">+0</td><td class="n mono">+0</td><td><span class="tag ok">증가 없음</span></td><td class="note">CVP · 14:54</td></tr>
+            <tr><td><span class="hop">8</span></td><td>서버 NIC</td><td class="mono">erp-db-kr1-01 · eno1</td><td class="n mono">+0</td><td class="n mono">+0</td><td class="n mono">+0</td><td><span class="tag ok">증가 없음</span></td><td class="note">OS SSH · 14:53</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="note" style="margin:0;padding:10px 16px 14px">숫자는 고른 기간(24시간) 동안 누적 카운터가 늘어난 양입니다. 이 VM 이 팀의 어느 업링크로 나가는지는 vCenter 가 알려 주지 않아 vmnic2 · vmnic3 을 함께 봅니다. 가상 NIC 의 에러 수는 vCenter 가 주지 않습니다.</p>
+    </section>
+  </div>
+
+  <!-- 판정 근거 -->
+  <section class="card" style="padding:16px;display:flex;flex-wrap:wrap;gap:14px 24px;align-items:flex-start">
+    <div style="flex:1 1 420px;min-width:0;display:flex;flex-direction:column;gap:8px">
+      <h2 style="margin:0;font-size:15px;font-weight:700">드롭이 관측된 곳</h2>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+        <span class="tag bad">호스트 pNIC</span><b class="mono" style="font-weight:600">esx-kr1-07 · vmnic3</b><span class="mono">수신 드롭 +1,284</span><span class="dim mono">13:30 ~ 14:55</span>
+      </div>
+      <p style="margin:0">같은 시각에 이 서버의 1521/tcp 재전송이 <b class="mono">0.1% → 2.4%</b> 로 올랐고, 맞은편 스위치 포트 Ethernet17 의 송신 폐기도 +37 늘었습니다.</p>
+    </div>
+    <div style="flex:1 1 420px;min-width:0;display:flex;flex-direction:column;gap:8px">
+      <h2 style="margin:0;font-size:15px;font-weight:700">이 화면이 말하지 못하는 것</h2>
+      <p style="margin:0" class="dim">카운터는 ‘그 인터페이스가 버린 패킷 수’ 입니다. 버려진 패킷이 이 연결의 것인지는 알 수 없습니다. 시각이 겹친다는 사실로 좁힌 추정이며, 확정하려면 두 서버에서 동시에 캡처해 비교합니다.</p>
+      <div style="display:flex;flex-wrap:wrap;gap:8px">
+        <button type="button" class="btn">양쪽 캡처로 확인</button>
+        <button type="button" class="btn">esx-kr1-07 의 다른 VM 보기</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 시각 대조 -->
+  <section class="card" style="padding:16px;display:flex;flex-direction:column;gap:10px">
+    <div style="display:flex;flex-wrap:wrap;gap:8px 16px;align-items:baseline;justify-content:space-between">
+      <h2 style="margin:0;font-size:15px;font-weight:700">24시간 시각 대조 <span class="note" style="font-weight:400">칸 하나 = 30분</span></h2>
+      <div style="display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center" class="note">
+        <span style="display:inline-flex;align-items:center;gap:5px">재전송 <i style="width:14px;height:10px;background:#0e4a5c;border-radius:2px;display:inline-block"></i><i style="width:14px;height:10px;background:#1590b0;border-radius:2px;display:inline-block"></i><i style="width:14px;height:10px;background:#67e8f9;border-radius:2px;display:inline-block"></i></span>
+        <span style="display:inline-flex;align-items:center;gap:5px">드롭 <i style="width:14px;height:10px;background:#6b4a0e;border-radius:2px;display:inline-block"></i><i style="width:14px;height:10px;background:#b7770f;border-radius:2px;display:inline-block"></i><i style="width:14px;height:10px;background:#fcd34d;border-radius:2px;display:inline-block"></i></span>
+        <span style="display:inline-flex;align-items:center;gap:5px"><i style="width:14px;height:10px;background:#1a2236;border-radius:2px;display:inline-block"></i> 0</span>
+        <span style="display:inline-flex;align-items:center;gap:5px"><i style="width:13px;height:9px;border:1px dashed #3a4a68;border-radius:2px;display:inline-block"></i> 못 읽음</span>
+      </div>
+    </div>
+    <div style="overflow-x:auto">
+      <div style="min-width:720px;display:flex;flex-direction:column;gap:5px">
+        <sc-for list="{{rows}}" as="row" hint-placeholder-count="10">
+          <div class="heatrow">
+            <span class="lab" style="color: {{row.color}}">{{row.label}}</span>
+            <div class="cells">
+              <sc-for list="{{row.cells}}" as="c" hint-placeholder-count="48">
+                <i class="cell" style="background: {{c.bg}}; border: {{c.bd}}"></i>
+              </sc-for>
+            </div>
+          </div>
+        </sc-for>
+        <div class="heatrow">
+          <span class="lab"></span>
+          <div class="cells mono note" style="justify-content:space-between"><span>어제 15:00</span><span>21:00</span><span>03:00</span><span>09:00</span><span>오늘 15:00</span></div>
+        </div>
+      </div>
+    </div>
+    <p class="note" style="margin:0">맨 윗줄(이 연결의 재전송)과 같은 시각에 색이 켜진 구간이 손실 후보입니다. 09:30 의 vmnic3 드롭은 재전송과 겹치지 않아 이 연결과 무관한 것으로 봅니다.</p>
+  </section>
+
+  <p class="note" style="margin:0">시안 · 서버 이름과 수치는 모두 가상입니다.</p>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1560}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var N = 48;
+    var RT = ['#1a2236', '#0e4a5c', '#1590b0', '#67e8f9'];
+    var DR = ['#1a2236', '#6b4a0e', '#b7770f', '#fcd34d'];
+    function mk(label, pal, levels, color, unread) {
+      var cells = [];
+      for (var i = 0; i < N; i++) {
+        var miss = unread === 'all' || (unread && unread.indexOf(i) >= 0);
+        var lv = levels[i] || 0;
+        cells.push({ bg: miss ? 'transparent' : pal[lv], bd: miss ? '1px dashed #3a4a68' : '0' });
+      }
+      return { label: label, cells: cells, color: color || '#aab8cf' };
+    }
+    // 사건 구간: 오늘 13:30 ~ 지금(15:00) = 마지막 3칸(45~47) · 37 = 09:30 의 무관한 드롭
+    var retr = {}; retr[45] = 2; retr[46] = 3; retr[47] = 3;
+    var pn3 = {}; pn3[45] = 2; pn3[46] = 3; pn3[47] = 3; pn3[37] = 1;
+    var sw17 = {}; sw17[46] = 1; sw17[47] = 1;
+    return {
+      rows: [
+        mk('이 연결의 재전송 (1521/tcp)', RT, retr, '#67e8f9', [12, 13]),
+        mk('1 게스트 NIC ens192', DR, {}, null, [12, 13]),
+        mk('2 가상 NIC', DR, {}),
+        mk('4 호스트 pNIC vmnic2', DR, {}),
+        mk('4 호스트 pNIC vmnic3', DR, pn3, '#fca5a5'),
+        mk('5 스위치 포트 a03 Ethernet17', DR, sw17, '#fcd34d'),
+        mk('5 스위치 포트 b03 Ethernet17', DR, {}),
+        mk('6 스위치 사이', DR, {}, null, 'all'),
+        mk('7 스위치 포트 b02 Ethernet9', DR, {}),
+        mk('8 서버 NIC eno1', DR, {}, null, [30])
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>
