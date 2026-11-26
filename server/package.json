@@ -1,6 +1,6 @@
 {
   "name": "vmware-portal-server",
-  "version": "3.51.0",
+  "version": "3.51.1",
   "private": true,
   "type": "module",
   "engines": {
@@ -12,7 +12,7 @@
     "dev": "node --watch src/index.js",
     "start": "node src/index.js",
     "otp-enroll": "node src/tools/otp-enroll.js",
-    "test": "node --test --experimental-sqlite --test-timeout=120000 --test-reporter=spec test/*.test.js"
+    "test": "node --test --import ./test/_isolateConfig.js --experimental-sqlite --test-timeout=120000 --test-reporter=spec test/*.test.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
