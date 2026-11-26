@@ -3895,3 +3895,6 @@ th[aria-sort]:focus-visible { outline: 2px solid var(--accent); outline-offset: 
 thead th[data-nosort] { cursor: default; }
 /* v3.13.5 누르는 배지(필터 칩 — pressable)의 키보드 포커스 */
 .badge[role="button"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* 랙 실장도 — 장비 버튼의 키보드 초점 표시(고른 장비 · 검색 강조는 안쪽 그림자라 이 테두리와 겹치지 않는다) */
+.rk-place:focus-visible { outline: 3px solid #38bdf8; outline-offset: 1px; z-index: 2; }

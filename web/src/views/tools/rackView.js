@@ -112,6 +112,7 @@ export function roomSummary(view) {
     racks: racks.length,
     heightsText: [...heights].sort((a, b) => b[0] - a[0]).map(([h, n]) => `${h}U ${n}`).join(' · '),
     totalU, usedU, freeU: Math.max(0, totalU - usedU), usePct: totalU ? Math.round((usedU / totalU) * 100) : null,
+    usedStale: racks.some((r) => r.totalsStale),   // 끌어 놓기를 먼저 반영한 랙이 있다 — 사용 U 합은 다시 불러올 때까지 옛 값(화면이 숫자 대신 밝힌다)
     devices: places.length,
     manual: places.filter((p) => p.kind !== 'server').length,
     servers: servers.length,
@@ -126,6 +127,123 @@ export function matchPlace(p, q) {
   if (!s) return null;
   const hay = [p.label, p.model, p.serial, ...(p.extraSerials || []), p.link?.hostname, p.link?.name, p.note].filter(Boolean).join(' ').toLowerCase();
   return hay.includes(s);
+}
+
+/** 미배치 서버 목록 한 번에 그리는 수(‘더 보기’ 로 늘린다). */
+export const UNPLACED_PAGE = 100;
+/** 미배치 서버가 검색어와 맞는가(이름 · 호스트 이름 · 모델 · 서비스 태그 — 대소문자 무시 부분 일치). 빈 검색어는 전부 보인다(true). */
+export function matchUnplaced(u, q) {
+  const s = String(q || '').trim().toLowerCase().slice(0, 64);
+  if (!s) return true;
+  return [u?.name, u?.hostname, u?.model, u?.serviceTag].filter(Boolean).join(' ').toLowerCase().includes(s);
+}
+
+/**
+ * 미배치 서버를 놓을 때 입력 창에 채울 표시 이름 — 등록부 이름이 **주소 꼴**(IP 로 등록한 서버는 이름이 곧 관리 주소)이거나 서비스 태그 그대로면 비운다.
+ * 표시 이름은 조회 계정 모두에게 보이는 이름이라 관리 주소 · 태그를 기본값으로 넣지 않는다(1회차 점검 S1 — 서버도 비관리자 판본에서 다시 가린다).
+ */
+export function defaultLabelOf(u) {
+  const name = String(u?.name || '').trim();
+  if (!name) return '';
+  // IPv4 리터럴(포트 포함) 또는 IPv6 리터럴(콜론 2개 이상 · 대괄호 · 포트 포함)만 — 16진 글자와 점으로 된 호스트 이름('ad01.dc1')은 이름이다(1회차 반증 C-4).
+  if (/^\d{1,3}(\.\d{1,3}){3}(:\d{1,5})?$/.test(name)) return '';
+  if (name.length <= 64 && /^\[?[0-9a-f:.]+\]?(:\d{1,5})?$/i.test(name) && name.split(':').length > 2) return '';
+  if (u?.serviceTag && name.toLowerCase() === String(u.serviceTag).trim().toLowerCase()) return '';
+  return name;
+}
+
+/**
+ * 고치기 창에서 **달라진 칸만** 추린다(f0 = 창을 연 때의 값, f = 지금 값 — 앞뒤 공백 · 숫자/글자 차이는 같은 것으로 본다).
+ * 건드리지 않은 칸은 보내지 않는다 — 창을 연 뒤 바뀐 값(내 직전 옮기기 · 다른 관리자의 변경)을 옛 값으로 덮지 않게.
+ */
+export function changedFields(f0, f, keys) {
+  const norm = (v) => String(v ?? '').trim();
+  const out = {};
+  for (const k of keys || []) if (norm(f?.[k]) !== norm(f0?.[k])) out[k] = f[k];
+  return out;
+}
+
+/**
+ * 전산실 조회 실패를 화면 자료에 반영한다(순수 — 2회차 반증 B-3).
+ * 실패한 전산실의 직전 화면이 남아 있으면 ‘낡음’ 표시(staleErr)를 **그 자료에** 붙인다 — 그 전산실을 다시 불러오는 데 성공해 자료가 통째로 바뀔 때만 사라진다.
+ * 오류 상태 하나에 두면 다른 전산실을 눌렀다 곧바로 돌아올 때 표시만 지워져 낡은 화면이 잠금 없이 그려졌다.
+ *  · 다른 전산실의 자료 · 이 시도(seq)보다 **나중에** 받은 자료는 건드리지 않는다(늦게 온 옛 실패가 새 자료를 잠그지 않게).
+ *  · 없어진 전산실(404) · 권한 없음(403)이면 자료를 비운다(일시 실패 5xx · 네트워크는 직전 화면을 둔다).
+ */
+export function viewAfterLoadFail(view, roomId, seq, err) {
+  if (!view || view.room?.id !== roomId || (view.loadSeq || 0) > seq) return view;
+  if (err?.status === 404 || err?.status === 403) return null;
+  return { ...view, staleErr: err || true };
+}
+
+/** 쓰기를 시작한 자리(at)에서 사용자가 옮기지 않았는가(순수) — 법인 · 데이터센터 · 전산실이 같고, 열린 창이 없거나 그 쓰기를 시작한 창 그대로. */
+export function sameSpot(at, now) {
+  if (!at || !now) return false;
+  return now.corp === at.corp && now.site === at.site && now.room === at.room && (!now.modal || now.modal === at.modal);
+}
+
+/**
+ * 쓰기의 대상 자리(target — 전산실 · 데이터센터 · 법인 중 그 쓰기가 정한 것)를 지금도 보고 있는가(순수). 정하지 않은 칸은 따지지 않는다.
+ * 저장 중에도 창을 닫을 수 있어, 응답이 왔을 때 다른 법인 · 전산실 화면에 ‘추가했습니다’ 가 뜨지 않게 알림 앞에서 본다(2회차 반증 C5 · 3회차 점검 화면 2).
+ */
+export function spotVisible(target, now) {
+  const t = target || {}; const n = now || {};
+  return (!t.room || t.room === n.room) && (!t.site || t.site === n.site) && (!t.corp || t.corp === n.corp);
+}
+
+/**
+ * 장비 · 랙 창의 저장을 막을 까닭(순수) — '' 저장해도 됨 · 'noView' 화면 자료가 없음 · 'roomChanged' 창을 연 전산실이 지금 자료의 전산실과 다름
+ * (늦게 온 응답 · 목록 변화로 선택 전산실이 바뀐 뒤 그 창으로 다른 전산실의 rev · 랙에 쓰지 않게 — 3회차 점검 화면 1).
+ */
+export function lostViewReason(view, modal) {
+  if (!view) return 'noView';
+  if (modal?.roomId && modal.roomId !== view.room?.id) return 'roomChanged';
+  return '';
+}
+
+/** 장비 · 랙 창에는 연 때의 전산실을 담는다(순수 — 이미 담겼으면 그대로 · 다른 창은 그대로). */
+export function modalWithRoom(m, roomId) {
+  return m && (m.kind === 'place' || m.kind === 'rack') && !m.roomId ? { ...m, roomId } : m;
+}
+
+/**
+ * 충돌(409 revConflict) 뒤 안내의 갈래(순수) — 'fresh' 최신을 불러왔다(다시 저장하면 반영) · 'gone' 전산실이 없어졌거나 권한이 없다(404 · 403 — 닫고 새로 고침) ·
+ * 'stale' 일시 실패(잠시 뒤 다시).
+ */
+export function conflictHint(fresh, lastErr) {
+  if (fresh) return 'fresh';
+  return lastErr?.status === 404 || lastErr?.status === 403 ? 'gone' : 'stale';
+}
+
+/**
+ * 이름 창(추가 · 이름 바꾸기 · 지우기)이 쓸 대상(순수) — **창을 연 때 담은 대상**이 먼저이고, 없을 때만 지금 자리.
+ * 지금 고른 항목으로 쓰면, 늦게 온 추가 응답이 선택을 바꾼 뒤 새 항목이 지워지거나 이름이 바뀐다(3회차 점검 화면 1 · 재현).
+ *  · 'site'(데이터센터 추가) → { corpId } · 'room'(전산실 추가) → { siteId } · 'site-edit' · 'room-edit' → { id }(창에 담긴 것만 — 없으면 '' 로 두어 쓰지 않게)
+ */
+export function nameTarget(modal, at) {
+  const m = modal || {}; const a = at || {};
+  if (m.kind === 'site') return { corpId: m.corpId || a.corp || '' };
+  if (m.kind === 'room') return { siteId: m.siteId || a.site || '' };
+  if (m.kind === 'site-edit' || m.kind === 'room-edit') return { id: m.id || '' };
+  return {};
+}
+
+/**
+ * 끌어 놓기 성공을 화면에 먼저 반영한다(순수) — 그 장비의 랙 · 시작 U 를 바꾸고, 랙을 건너 옮겼으면 두 랙의 머리 합계를 ‘낡음’(totalsStale)으로 표시한다
+ * (합계는 서버가 계산한 값이라 다시 불러올 때까지 옛 값이다 — 2회차 반증 C6). 같은 랙 안이면 그 랙에 반깊이 장비가 있을 때만 표시한다. 다른 전산실의 자료 · 없는 장비는 그대로.
+ */
+export function viewAfterMove(view, roomId, placeId, rackId, uStart) {
+  if (!view || view.room?.id !== roomId) return view;
+  const cur = (view.places || []).find((p) => p.id === placeId);
+  if (!cur) return view;
+  // 같은 랙 안에서 옮겨도, 그 랙에 반깊이(앞 · 뒤) 장비가 있으면 사용 U 가 바뀔 수 있다(앞 · 뒤가 같은 U 면 한 번만 센다 — 4회차 점검 정확성 3).
+  const halfIn = (view.places || []).some((p) => p.rackId === rackId && (p.face || 'full') !== 'full');
+  const touched = cur.rackId !== rackId ? new Set([cur.rackId, rackId]) : (halfIn ? new Set([rackId]) : null);
+  return {
+    ...view,
+    places: view.places.map((p) => (p.id === placeId ? { ...p, rackId, uStart } : p)),
+    racks: touched ? (view.racks || []).map((k) => (touched.has(k.id) ? { ...k, totalsStale: true } : k)) : view.racks,
+  };
 }
 
 /** 이력 action → 글자. */

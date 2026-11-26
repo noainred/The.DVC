@@ -33,11 +33,25 @@ export const LIMITS = Object.freeze({
   maxPlacesPerRack: 120,
 });
 
-const CTRL = /[\u0000-\u001f\u007f]/g;
-/** 한 줄 문자열 정리 — 제어 문자 제거 · 앞뒤 공백 · 길이 상한. 문자열이 아니면 ''(숫자는 문자열로). */
+// 1회차 점검 S3: C0 만 지우면 양방향(U+202A~202E · 2066~2069) · 폭 없는(U+200B~200F · 2060~2064 · FEFF) · C1(U+0080~009F) 문자가 이름에 남아
+//   눈으로 같은 이름이 둘 생기고(중복 검사 통과) 이력 · 감사 화면의 글자 순서가 뒤집힌다 — 다른 입력 정리(bmusage/annotations.js 등)와 같은 문자 집합.
+//   2회차: 보이지 않는 채움 문자(소프트 하이픈 U+00AD · 아랍 문자 표식 U+061C · 한글 채움 U+115F/1160/3164/FFA0 · 몽골 모음 분리 U+180E · 줄/문단 분리 U+2028/2029)도.
+//   4회차 점검 보안 4: 손으로 적은 구간 목록이라 변형 선택자(U+FE00~FE0F · U+E0100~) · 태그 문자(U+E0000~) · U+034F · U+206A~206F 등 4천여 자가 남았다 —
+//   눈으로 같은 이름이 중복 검사를 통과하고, 그 글자를 끼운 주소 · 시리얼이 가림을 비켜 갔다. 목록 대신 **유니코드 속성**으로 본다:
+//   제어(Cc) · 서식(Cf) · 줄/문단 분리(Zl · Zp) · 기본 무시(Default_Ignorable_Code_Point — 한글 채움 · 변형 선택자 · 태그 문자 포함).
+//   짝 잃은 서로게이트(Cs)도 지운다 — 남으면 자르는 자리에 따라 결과가 달라져 다시 저장할 때 '바뀐 것' 으로 판정된다(3회차 반증 B 3).
+const CTRL = /[\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}]/gu;
+/** 보이지 않는 글자를 지운 글(가림 판정 앞에서 쓴다 — 이 정리가 생기기 전에 저장된 이름에도 같은 눈으로). */
+export const dropInvisible = (s) => (typeof s === 'string' ? s.replace(CTRL, '') : s);
+/** 한 줄 문자열 정리 — 제어 · 양방향 · 폭 없는 문자 제거 · 앞뒤 공백 · 길이 상한. 문자열이 아니면 ''(숫자는 문자열로). */
 export function cleanText(v, max) {
   const s = typeof v === 'string' ? v : (typeof v === 'number' && Number.isFinite(v) ? String(v) : '');
-  return s.slice(0, max * 4).replace(CTRL, ' ').trim().slice(0, max);
+  let t = s.slice(0, max * 4).replace(CTRL, ' ').trim().slice(0, max);
+  // 3회차 점검 정확성 3: 자른 자리가 공백이면 끝 공백이 남았다(눈으로 같은 이름이 중복 검사를 통과 · 다시 저장하면 '바뀐 것' 으로 판정) — 자른 뒤 한 번 더 다듬는다.
+  //   서로게이트 쌍의 앞 반쪽에서 잘렸으면 그 반쪽도 뺀다(깨진 글자 U+FFFD 로 저장되지 않게).
+  const last = t.charCodeAt(t.length - 1);
+  if (last >= 0xd800 && last <= 0xdbff) t = t.slice(0, -1);
+  return t.trimEnd();
 }
 
 /** 정수(범위 안) — 못 읽으면 null. 소수 · 빈칸 · 범위 밖은 null(0 으로 접지 않는다). */
