@@ -955,3 +955,12 @@
   경로별 항목 수 · 오류 · 단위 종류 · FC 경로. 로컬 폴러와 중앙 수신에서 기록 · 메모리) + 표본 쪽 포트 이름 · 짝 없는 구성 포트(각 8개) ③ 화면은 사유를 **표 위에** 사유별로 묶고
   비-admin 에는 진단 오류 원문을 가린다 ④ FC 처리량 `fibreChannel.target.*` 가 비면 `fibreChannel.fePort.*` 를 한 번 더(실장비 미확인 — probe.fcPath 가 밝힘)
   ⑤ WWN 은 포트 WWN(뒤 8바이트) 전체 — 노드 WWN 꼬리가 같아 모든 포트가 같아 보였다. 회귀 `unityIface3350` ⑪~⑬ · 웹 `ifaceText.test.js`.
+  ⚠ **v3.46.0(실제 릴리스 v3.47.0 — 다른 세션이 3.46.0 을 먼저 써서 번호만 올렸다 · 코드 · 테스트 표지는 v3.46.0) — SSH 로 등록한 Unity 도 사용량을 읽는다**(사용자 요청 "SSH 장비도 사용량은 REST 로 읽게 해줘, 안되면 SSH 로 진행" · 선택 'SSH 계정 그대로' · 표준 검증):
+  ① 표본 대상 판정은 `arrayPerf.sampleCapableOf` **하나**(등록부 토글 · CSV `nodeLoad` 칸 · 폴러 `sampleTargets` · 등록 화면 — 예전 네 곳 복제). SSH PowerStore 등 다른 SSH 어레이는 그대로 제외.
+  ② `collectors/unityMetricsSsh.js sampleUnityAny`: REST(Unisphere `metricValue` — REST 장비와 같은 `sampleUnity`)를 **SSH 계정 그대로** 먼저, 실패하면 이번 주기는 SSH(`uemcli /metrics/value/hist … -interval 60 -count N` → 같은 조립).
+  ③ **REST 인증 거절은 그 장비의 REST 표본만 멈춘다**(`storage/restSampleGate.js` — 자격증명 지문이 바뀔 때까지 · 시한 없음). 장비 인증 정지(`authGuard`)는 **걸지 않는다**(걸면 SSH 용량 · 상태 수집까지 멈춘다 —
+  그 계정은 SSH 로는 맞는 계정이다). 비인증 실패는 1시간만 건너뛴다. 메모리 기록이라 재시작당 실패 로그인 최대 1회(정직 기록). SSH 인증 실패는 예전처럼 장비 인증 정지.
+  ④ 두 경로 모두 실패하면 REST 사유를 덧붙이되 **SSH 인증 판정은 원래 SSH 오류로만**(덧붙인 REST 글의 'authentication' 은 'auth' 로 줄인다 — 'Authentication failed' 가 `isSshAuthError` 정규식에 걸려
+  SSH 수집까지 멈추는 것을 막는다 · level 은 그대로 옮긴다). 변이 5건(줄이기 제거 · level 누락 · REST 인증 거절 재던짐 · 인증 멈춤에 시한 · 지문 무시)을 `unityMetricsSsh3460` 이 잡는다.
+  ⑤ 진단(`sampleDiag`)에 via(rest|ssh) · restSkip(auth|other) · restError — 화면 사유 카드 · 장비 화면이 보인다(비-admin 은 restError 가림). 이유 판정의 'ssh' 사유는 없어졌다(옛 엣지는 no-samples).
+  ⚠ uemcli 지표 명령의 옵션 · 출력 모양은 **실장비 미확인**(레코드 · 표 두 모양을 받는다 · 못 읽으면 표본 없음 + 원문 앞부분이 probe.errors). SSH 표본은 5분마다 장비 로그인 1~2회.
