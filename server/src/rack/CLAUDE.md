@@ -1,6 +1,6 @@
 # 랙 실장도(`server/src/rack/` · 라우트 `routes/api/rack.js` · 화면 `web/src/views/tools/RackTool.jsx`) 불변조건
 
-설계: `docs/design/rack-elevation/README.md`. 회귀: `test/rackLedger.test.js` · `test/rackRoutes.test.js` · `test/rackVersions.test.js` · `test/rackAudit1124.test.js`(2026-11-24 점검) · `web/src/views/tools/rackView.test.js`.
+설계: `docs/design/rack-elevation/README.md`. 회귀: `test/rackLedger.test.js` · `test/rackRoutes.test.js` · `test/rackVersions.test.js` · `test/rackAudit1124.test.js`(2026-11-24 점검) · `test/rackPerf1126.test.js`(개선 1 · 2) · `web/src/views/tools/rackView.test.js`.
 
 - **원장은 중앙 한 곳**(2026-11-20 사용자 결정). 사람이 정한 위치만 저장한다 — 상태 · 온도 · 전력 측정값은 넣지 않고 화면을 그릴 때 수집 모듈에서 잇는다.
   계층은 법인(`datacenter/store.js` DataCenter = 법인 묶음) → 데이터센터(site · 물리) → 전산실 → 랙 → 배치. 법인 하나에 데이터센터가 여럿일 수 있다.
@@ -24,3 +24,10 @@
   전산실 삭제도 이력을 지우지 않는다 · 전산실 없는 이력도 법인마다 2,000건 · 엑셀은 랙 `RACKS_PER_SHEET` 대씩 시트를 나누고 랙마다 양보(ExcelJS 병합이 시트마다 제곱 — 300랙 21초 정지 실측) ·
   감사 상세는 서버가 만든 id. 화면: 보이는 전산실 = **지금 고른 전산실의 응답만**(늦은 응답으로 보이지 않는 원장에 쓰지 않게) · 성공한 쓰기의 rev 즉시 반영 + 저장 중 놓기 거절 ·
   rev 충돌이면 창을 닫지 않는다 · 지우기는 확인 · 데이터가 있으면 새로 고침 실패는 배너.
+- **판 저장 조각 캐시 · 시리얼 키 색인(2026-11-26 사용자 요청 '개선 제안 1, 2, 3')**: 판 재료는 `(전산실 id, rev)` 조각 캐시에서 — **랙 · 장비를 바꾸는 쓰기는 반드시 그 전산실 rev 를 올린다**
+  (roomWrite · 되돌리기 — rev 를 올리지 않고 바꾸는 경로를 만들면 틀린 판이 저장된다) · 조각은 **COMMIT 뒤에만** 캐시에(`tx` — ROLLBACK 된 내용이 같은 rev 로 남지 않게) ·
+  핸들을 열 때 · 닫을 때 비운다 · 판 모양은 여전히 `buildSnapshot` 하나. 시리얼 중복 · 놓인 키 집합은 `rack_place_key(key, place_id)` 색인에서 — 장비 행을 쓰는 곳
+  (놓기 · 고치기 · 빼기 · 되돌리기)이 같은 트랜잭션에서 `setPlaceKeys` 로 맞추고, 색인이 없던 원장은 열 때 한 번 채운다(`rack_meta placeKeys`). 새 장비 쓰기 경로(엑셀 가져오기 등)도 `setPlaceKeys` 를 부를 것.
+  자기 점검 `RACK_SELF_CHECK=1`(랙 테스트 전부가 켠다)은 캐시로 만든 판 · 색인 판정을 원장 훑기와 매번 대조해 다르면 던진다 — SQL 로 원장을 직접 고친 테스트는 `_resyncForTest()`.
+  실측(장비 5,100대 법인 · 4 vCPU 컨테이너 · 중앙값): 전산실 10곳이면 옮기기 33 → 12ms · 시리얼 고치기 45 → 10ms, **전산실 1곳에 다 있으면** 36 → 32ms · 46 → 32ms(그 전산실을 통째로 다시 읽는다) ·
+  판 크기 67 → 72KB(gzip 1단계) · `placedSerialKeys` 는 5ms 그대로. 미배치 서버 목록은 법인당 `UNPLACED_MAX` 대까지 싣고 화면이 검색어로 거른다(`rackView.js matchUnplaced`).

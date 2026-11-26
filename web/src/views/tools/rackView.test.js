@@ -81,6 +81,19 @@ describe('rackView — 화면 계산', () => {
     expect(V.matchPlace(p, '  ')).toBe(null);
   });
 
+  it('matchUnplaced: 이름 · 호스트 이름 · 모델 · 서비스 태그 부분 일치 · 빈 검색어는 전부 · 가려진 필드(없음)는 맞지 않는다', () => {
+    const u = { name: 'esxi-kr-01', hostname: 'KR-ESX-01.corp', model: 'PowerEdge R750', serviceTag: 'ABC1234' };
+    expect(V.matchUnplaced(u, '')).toBe(true);
+    expect(V.matchUnplaced(u, '   ')).toBe(true);
+    expect(V.matchUnplaced(u, 'r750')).toBe(true);
+    expect(V.matchUnplaced(u, 'abc12')).toBe(true);
+    expect(V.matchUnplaced(u, 'kr-esx')).toBe(true);
+    expect(V.matchUnplaced(u, 'zzz')).toBe(false);
+    expect(V.matchUnplaced({ name: 'masked-1a2b (이름 가림)' }, 'abc12')).toBe(false);
+    expect(V.matchUnplaced(null, 'x')).toBe(false);
+    expect(V.UNPLACED_PAGE).toBeGreaterThan(0);
+  });
+
   it('diffCountText: 0 인 항목은 빼고, 바뀐 것이 없으면 그렇게 말한다', () => {
     expect(V.diffCountText({ placeAdd: 2, placeMove: 1, rackRemove: 1 })).toBe('랙 삭제 1 / 장비 추가 2 · 이동 1');
     expect(V.diffCountText({ placeAdd: 0 })).toBe('바뀐 것 없음');

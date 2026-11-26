@@ -15,7 +15,7 @@ import { downloadFailText } from '../downloadFailText.js';
 import {
   U_PX, KIND_LABEL, FACE_LABEL, colorOf, legendOf, fmtU, placesForFace, placementIssue, dropStartU, boxOf, wattText,
   roomSummary, matchPlace, ACTION_LABEL, partChips, chipColor, statusKeyOf,
-  diffCountText, DIFF_OP_LABEL, DIFF_TYPE_LABEL, fieldsText,
+  diffCountText, DIFF_OP_LABEL, DIFF_TYPE_LABEL, fieldsText, matchUnplaced, UNPLACED_PAGE,
 } from './rackView.js';
 
 const card = { background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 12, minWidth: 0 };
@@ -522,6 +522,10 @@ export default function RackTool() {
   const selected = (view?.places || []).find((p) => p.id === selId) || null;
   const selRack = selected ? (view?.racks || []).find((r) => r.id === selected.rackId) : null;
   const sum = useMemo(() => roomSummary(view), [view]);
+  // 개선 3: 미배치 서버는 검색어로 거르고(랙 강조와 같은 검색 칸), 한 번에 UNPLACED_PAGE 대씩 그린다(예전엔 앞 50대만 끌 수 있었다).
+  const [unplacedShow, setUnplacedShow] = useState(UNPLACED_PAGE);
+  const unplacedHit = useMemo(() => (view?.unplaced || []).filter((u) => matchUnplaced(u, q)), [view, q]);
+  useEffect(() => { setUnplacedShow(UNPLACED_PAGE); }, [q, roomId]);
 
   const say = (tone, text) => setNote({ tone, text });
 
@@ -714,11 +718,11 @@ export default function RackTool() {
               </div>
               <div style={card}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px' }}>
-                  <strong>미배치 서버</strong><span style={{ color: 'var(--text-dim)' }}>{view.unplacedTotal}</span>
+                  <strong>미배치 서버</strong><span style={{ color: 'var(--text-dim)' }}>{q.trim() ? `${unplacedHit.length} / ${view.unplacedTotal}` : view.unplacedTotal}</span>
                   <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-dim)' }}>{edit && canEdit ? '랙으로 끌어 놓기' : 'iDRAC 등록 · 원장에 없음'}</span>
                 </div>
                 <div style={{ maxHeight: 360, overflowY: 'auto' }}>
-                {(view.unplaced || []).slice(0, 50).map((u) => (
+                {unplacedHit.slice(0, unplacedShow).map((u) => (
                   <div key={u.serverId}
                     draggable={edit && canEdit}
                     onDragStart={edit && canEdit ? (e) => { try { e.dataTransfer.setData('text/plain', u.serverId); } catch { /* */ } setDragInfo({ type: 'server', size: 1, face: 'full', ...u }); } : undefined}
@@ -733,7 +737,14 @@ export default function RackTool() {
                   </div>
                 ))}
                 </div>
-                {view.unplacedTotal > Math.min(50, (view.unplaced || []).length) ? <div style={{ padding: '8px 14px', fontSize: 11, color: 'var(--text-dim)', borderTop: '1px solid var(--border-soft)' }}>앞 {Math.min(50, (view.unplaced || []).length)}대만 보여 줍니다(전체 {view.unplacedTotal}대).</div> : null}
+                {q.trim() && !unplacedHit.length && (view.unplaced || []).length ? <div style={{ padding: '8px 14px', fontSize: 12, color: 'var(--text-dim)', borderTop: '1px solid var(--border-soft)' }}>검색어와 맞는 미배치 서버가 없습니다.</div> : null}
+                {unplacedHit.length > unplacedShow ? (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', padding: '8px 14px', fontSize: 11, color: 'var(--text-dim)', borderTop: '1px solid var(--border-soft)' }}>
+                    <span style={{ flex: 1, minWidth: 0 }}>{unplacedShow}대를 보여 줍니다({unplacedHit.length - unplacedShow}대 더 있음) — 검색 칸에 이름 · 모델 · 서비스 태그를 넣어 좁힐 수 있습니다.</span>
+                    <button type="button" style={{ ...btn, height: 26 }} onClick={() => setUnplacedShow((n) => n + UNPLACED_PAGE)}>더 보기</button>
+                  </div>
+                ) : null}
+                {view.unplacedTotal > (view.unplaced || []).length ? <div style={{ padding: '8px 14px', fontSize: 11, color: 'var(--text-dim)', borderTop: '1px solid var(--border-soft)' }}>서버가 많아 앞 {(view.unplaced || []).length}대만 받았습니다(전체 {view.unplacedTotal}대) — 검색은 받은 목록 안에서만 됩니다.</div> : null}
                 {view.serversNoTag ? <div style={{ padding: '8px 14px', fontSize: 11, color: 'var(--text-dim)', borderTop: '1px solid var(--border-soft)' }}>서비스 태그를 못 읽은 서버 {view.serversNoTag}대는 미배치로 셀 수 없어 뺐습니다.</div> : null}
               </div>
               <div style={card}>

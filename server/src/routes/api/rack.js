@@ -95,6 +95,7 @@ function sendErr(res, e) {
 
 // ───────────────────────── 연결(서버 — 서비스 태그) ─────────────────────────
 
+export const UNPLACED_MAX = 2000;   // 미배치 서버 목록에 싣는 최대 대수(법인 하나) — 넘으면 unplacedTotal 이 더 크고 화면이 밝힌다
 const HEALTH = { ok: 'ok', warning: 'warn', critical: 'crit' };
 const healthOf = (v) => HEALTH[String(v || '').toLowerCase()] || (v ? 'unknown' : '');
 
@@ -199,7 +200,8 @@ async function roomView(req, roomId) {
   const racks = data.racks.map((r) => ({ ...r, totals: rackTotals(r, placesByRack.get(r.id) || []) }));
   // 미배치 = 이 법인 서버 중 원장 어디에도(이 법인 전 데이터센터) 서비스 태그가 없는 것.
   const unplacedAll = list.filter((x) => x.key && !placedKeys.has(x.key));
-  const unplaced = unplacedAll.slice(0, 300).map((x) => maskServerIdentity({
+  // 개선 3(2026-11-26): 화면이 검색어로 걸러 끌어 놓으므로 앞 300대로 자르지 않는다(법인 하나의 서버 수 — 상한은 응답 크기 보호용).
+  const unplaced = unplacedAll.slice(0, UNPLACED_MAX).map((x) => maskServerIdentity({
     serverId: String(x.s.id), name: x.s.name || x.inv?.system?.hostName || '', model: x.inv?.system?.model || x.s.model || '',
     hostname: x.inv?.system?.hostName || '', ...(showSerial ? { serviceTag: x.tag } : {}),
   }, x, { admin, showSerial }));

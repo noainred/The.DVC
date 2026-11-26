@@ -92,7 +92,14 @@ async function openInner() {
       );
       CREATE INDEX IF NOT EXISTS ix_rack_version_corp ON rack_version(corp_id, id);
       CREATE TABLE IF NOT EXISTS rack_meta (k TEXT PRIMARY KEY, v INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS rack_place_key (
+        key TEXT NOT NULL, place_id TEXT NOT NULL, PRIMARY KEY (key, place_id)
+      ) WITHOUT ROWID;
+      CREATE INDEX IF NOT EXISTS ix_rack_place_key_place ON rack_place_key(place_id);
     `);
+    dropRoomFrags();   // 새 핸들 — 앞 핸들에서 읽은 조각을 믿지 않는다
+    // 시리얼 키 색인(rack_place_key)은 한 번만 채운다 — 이 표가 없던 원장(업그레이드 전)에서 올라온 경우.
+    try { if (metaGet(conn, PLACE_KEYS_META) !== PLACE_KEYS_VER) tx(conn, () => rebuildPlaceKeys(conn)); } catch (e) { console.warn('[rack-db] 시리얼 키 색인을 만들지 못했습니다:', e.message); }
     // 판 기능 이전에 쌓인 원장 — 판이 하나도 없는 법인은 지금 모습을 '기준 판' 으로 남긴다(첫 변경 전 상태로 되돌릴 수 있게).
     try {
       const corps = conn.prepare('SELECT DISTINCT corp_id AS c FROM rack_site').all().map((r) => r.c);
@@ -113,7 +120,9 @@ async function openInner() {
 }
 
 /** 테스트 전용 — 핸들을 닫고 다음 호출이 다시 열게 한다. */
-export function _closeForTest() { try { _db?.close(); } catch { /* */ } _db = null; _initError = ''; }
+export function _closeForTest() { try { _db?.close(); } catch { /* */ } _db = null; _initError = ''; dropRoomFrags(); }
+/** 테스트 전용 — SQL 로 원장을 직접 고친 뒤(전산실 rev 를 올리지 않는 변경) 조각 캐시와 시리얼 키 색인을 원장에 맞춘다. */
+export async function _resyncForTest() { const db = await need(); dropRoomFrags(); tx(db, () => rebuildPlaceKeys(db)); }
 
 async function need() {
   const db = await openRackDb();
@@ -121,9 +130,19 @@ async function need() {
   return db;
 }
 
+/**
+ * 한 트랜잭션. 그 안에서 새로 읽은 전산실 조각(판 재료)은 **COMMIT 이 끝난 뒤에만** 캐시에 넣는다 — ROLLBACK 된 내용이 (전산실, rev) 로 남으면
+ * 다음 쓰기가 같은 rev 로 다른 내용을 만들 때 틀린 판이 저장된다(fn 은 동기라 _pending 이 다른 트랜잭션과 섞이지 않는다).
+ */
 function tx(db, fn) {
   db.exec('BEGIN IMMEDIATE');
-  try { const r = fn(); db.exec('COMMIT'); return r; } catch (e) { try { db.exec('ROLLBACK'); } catch { /* */ } throw e; }
+  const prev = _pending; const mine = new Map(); _pending = mine;
+  try {
+    const r = fn(); db.exec('COMMIT');
+    _pending = prev;
+    for (const f of mine.values()) putRoomFrag(f);
+    return r;
+  } catch (e) { _pending = prev; try { db.exec('ROLLBACK'); } catch { /* */ } throw e; }
 }
 
 const siteRow = (r) => r && ({ id: r.id, corpId: r.corp_id, name: r.name, sort: r.sort });
@@ -155,7 +174,61 @@ function corpRows(db, corpId) {
     JOIN rack_site s ON s.id = m.site_id WHERE s.corp_id = ?`).all(corpId).map(placeRow);
   return { sites, rooms, racks, places };
 }
-const packSnap = (snap) => zlib.gzipSync(Buffer.from(JSON.stringify(snap)), { level: 6 });
+/**
+ * 전산실 조각 캐시(개선 1 — 2026-11-26 사용자 요청): 판 하나는 법인 원장 전체라 쓰기 1건마다 법인의 랙 · 장비를 전부 읽었다(장비 5,000대 법인 약 22ms).
+ * 랙 · 장비를 바꾸는 쓰기는 반드시 그 전산실 rev 를 올리므로(roomWrite · 되돌리기), (전산실 id, rev) 가 같으면 그 전산실의 랙 · 장비 행은 같다 —
+ * 바뀐 전산실만 다시 읽고 나머지는 앞에 읽은 행을 쓴다. 판 모양은 예전과 같은 `buildSnapshot` 하나가 만든다(행이 같으면 글자도 같다).
+ *  · 캐시는 핸들 수명 — 열 때 · 닫을 때 비운다 · COMMIT 된 내용만 넣는다(tx) · 장비 수 합이 상한을 넘으면 오래된 전산실부터 버린다.
+ *  · ⚠ 전산실 rev 를 올리지 않고 랙 · 장비를 바꾸는 코드를 만들지 말 것(이 캐시와 편집 화면의 충돌 판정이 함께 틀린다). 자기 점검: RACK_SELF_CHECK=1.
+ */
+const ROOM_FRAG = new Map();            // roomId → { roomId, rev, racks: rackRow[], places: placeRow[] }
+const FRAG_MAX_PLACES = 200_000;        // 캐시에 두는 장비 행 수 상한(전 법인 합)
+let _fragPlaces = 0;
+let _pending = null;                    // 트랜잭션 안에서 새로 읽은 조각(roomId → 조각) — COMMIT 뒤에 캐시로
+const SELF_CHECK = () => process.env.RACK_SELF_CHECK === '1';
+function dropRoomFrags() { ROOM_FRAG.clear(); _fragPlaces = 0; }
+function putRoomFrag(f) {
+  const old = ROOM_FRAG.get(f.roomId);
+  if (old) { _fragPlaces -= old.places.length; ROOM_FRAG.delete(f.roomId); }
+  ROOM_FRAG.set(f.roomId, f); _fragPlaces += f.places.length;
+  for (const [id, x] of ROOM_FRAG) {   // 오래 안 바뀐 전산실부터(넣은 순서)
+    if (_fragPlaces <= FRAG_MAX_PLACES || id === f.roomId) break;
+    ROOM_FRAG.delete(id); _fragPlaces -= x.places.length;
+  }
+}
+function roomFrag(db, roomId, rev) {
+  const hit = _pending?.get(roomId) || ROOM_FRAG.get(roomId);
+  if (hit && hit.rev === rev) return hit;
+  const f = {
+    roomId, rev,
+    racks: db.prepare('SELECT * FROM rack_rack WHERE room_id = ?').all(roomId).map(rackRow),
+    places: db.prepare('SELECT p.* FROM rack_place p JOIN rack_rack r ON r.id = p.rack_id WHERE r.room_id = ?').all(roomId).map(placeRow),
+  };
+  if (_pending) _pending.set(roomId, f); else putRoomFrag(f);   // 트랜잭션 밖(읽기 경로)에서 읽은 것은 이미 확정된 내용
+  return f;
+}
+/** corpRows 와 같은 결과 — 바뀌지 않은 전산실은 조각 캐시에서. */
+function corpRowsFast(db, corpId) {
+  const sites = db.prepare('SELECT * FROM rack_site WHERE corp_id = ?').all(corpId).map(siteRow);
+  const rooms = db.prepare('SELECT m.* FROM rack_room m JOIN rack_site s ON s.id = m.site_id WHERE s.corp_id = ?').all(corpId).map(roomRow);
+  const racks = []; const places = [];
+  for (const m of rooms) {
+    const f = roomFrag(db, m.id, m.rev);
+    for (const r of f.racks) racks.push(r);
+    for (const p of f.places) places.push(p);
+  }
+  return { sites, rooms, racks, places };
+}
+/** 법인 원장의 지금 모습을 판으로. 자기 점검 모드면 캐시 없이 만든 판과 글자까지 대조한다(다르면 던진다 — 테스트가 켠다). */
+function currentSnapshot(db, corpId) {
+  const snap = buildSnapshot(corpId, corpRowsFast(db, corpId));
+  if (SELF_CHECK() && JSON.stringify(snap) !== JSON.stringify(buildSnapshot(corpId, corpRows(db, corpId)))) {
+    throw new Error('[rack-db] 자기 점검: 전산실 조각 캐시로 만든 판이 원장과 다릅니다');
+  }
+  return snap;
+}
+// gzip 1단계(개선 1): 판 30개 × 법인이라 크기보다 쓰기마다 걸리는 시간이 문제다 — 6단계 대비 압축 시간이 절반쯤이고 크기는 조금 는다(실측은 rack/CLAUDE.md).
+const packSnap = (snap) => zlib.gzipSync(Buffer.from(JSON.stringify(snap)), { level: 1 });
 /** 판 하나를 풀 때 허용하는 최대 크기(반증 L-1 — 압축 해제에는 예외 없이 maxOutputLength · docs/rules/security-api.md). 장비 50만 대 판도 이 안이다(추정). */
 export const SNAP_MAX_BYTES = 256 * 1024 * 1024;
 function unpackSnap(blob, corpId) {
@@ -194,7 +267,7 @@ function bumpRevFloor(db, rev) {
  */
 const CAP_LABEL = { sites: '데이터센터', rooms: '전산실', racks: '랙', places: '장비' };
 function saveVersion(db, corpId, { user, action, detail }) {
-  const snap = buildSnapshot(corpId, corpRows(db, corpId));
+  const snap = currentSnapshot(db, corpId);
   // 점검 C8: 판으로 되살릴 수 없는 크기가 되는 변경은 받지 않는다(같은 트랜잭션이라 변경도 취소된다 — 판 검사와 같은 상한).
   const over = capExceeded(countsOf(snap));
   if (over) fail(409, `이 법인의 ${CAP_LABEL[over]} 수가 상한을 넘어 저장하지 않았습니다(판으로 되돌릴 수 있는 크기까지만).`, { code: 'corpCap' });
@@ -272,13 +345,9 @@ export async function corpOf(kind, id) {
 /** 한 법인 원장에 이미 놓인 시리얼 키(미배치 계산용). */
 export async function placedSerialKeys(corpId) {
   const db = await need();
-  const rows = db.prepare(`SELECT p.serial_key AS k, p.extra_serials AS x FROM rack_place p JOIN rack_rack r ON r.id = p.rack_id
-    JOIN rack_room m ON m.id = r.room_id JOIN rack_site s ON s.id = m.site_id WHERE s.corp_id = ?`).all(String(corpId || ''));
   const out = new Set();
-  for (const r of rows) {
-    if (r.k) out.add(r.k);
-    try { for (const x of JSON.parse(r.x || '[]')) { const k = serialKeyOf(x); if (k) out.add(k); } } catch { /* */ }
-  }
+  for (const r of db.prepare(`SELECT k.key AS k FROM rack_place_key k JOIN rack_place p ON p.id = k.place_id JOIN rack_rack r ON r.id = p.rack_id
+    JOIN rack_room m ON m.id = r.room_id JOIN rack_site s ON s.id = m.site_id WHERE s.corp_id = ?`).all(String(corpId || ''))) out.add(r.k);
   return out;
 }
 
@@ -476,6 +545,26 @@ const where = (p) => `U${p.uStart}${p.uSize > 1 ? `–${p.uStart + p.uSize - 1}`
 const nameOf = (p) => p.label || '이름 없는 장비';
 
 /** 이 배치의 시리얼 키(본 시리얼 + 추가 시리얼). */
+// ── 시리얼 키 색인(개선 2 — 2026-11-26 사용자 요청) ──
+//   예전 중복 검사는 쓰기마다 법인 장비 전부를 읽고 행마다 추가 시리얼 JSON 을 풀었다(5,000대 법인 약 10ms · 전산실 조회의 placedSerialKeys 도 같은 훑기).
+//   rack_place_key(key, place_id) 에 장비마다 비교 키(주 시리얼 + 추가 시리얼 · serialKeyOf)를 둔다 — 장비 행을 쓰는 곳(놓기 · 고치기 · 빼기 · 되돌리기)이
+//   같은 트랜잭션에서 `setPlaceKeys` 로 맞춘다. 색인이 없던 원장은 열 때 한 번 채운다(rack_meta placeKeys).
+const PLACE_KEYS_META = 'placeKeys'; const PLACE_KEYS_VER = 1;
+function setPlaceKeys(db, placeId, keys) {
+  db.prepare('DELETE FROM rack_place_key WHERE place_id = ?').run(placeId);
+  if (!keys || !keys.size) return;
+  const ins = db.prepare('INSERT OR IGNORE INTO rack_place_key (key, place_id) VALUES (?, ?)');
+  for (const k of keys) ins.run(k, placeId);
+}
+function rebuildPlaceKeys(db) {
+  db.exec('DELETE FROM rack_place_key');
+  const ins = db.prepare('INSERT OR IGNORE INTO rack_place_key (key, place_id) VALUES (?, ?)');
+  for (const r of db.prepare("SELECT id, serial, extra_serials FROM rack_place WHERE serial_key <> '' OR extra_serials <> '[]'").all()) {
+    for (const k of keysOf(placeRow({ ...r, serial_key: '' }))) ins.run(k, r.id);
+  }
+  db.prepare('INSERT INTO rack_meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v').run(PLACE_KEYS_META, PLACE_KEYS_VER);
+}
+
 function keysOf(p) {
   const out = new Set();
   const k = serialKeyOf(p.serial); if (k) out.add(k);
@@ -488,6 +577,16 @@ function keysOf(p) {
  */
 function serialClash(db, corpId, keys, ignoreId = '') {
   if (!keys.size) return null;
+  const q = db.prepare(`SELECT p.id, p.label, r.name AS rack, m.name AS room FROM rack_place_key k JOIN rack_place p ON p.id = k.place_id
+    JOIN rack_rack r ON r.id = p.rack_id JOIN rack_room m ON m.id = r.room_id JOIN rack_site s ON s.id = m.site_id
+    WHERE k.key = ? AND s.corp_id = ? AND k.place_id <> ? LIMIT 1`);
+  let hit = null;
+  for (const k of keys) { const r = q.get(k, corpId, ignoreId); if (r) { hit = { id: r.id, where: `${r.room} › ${r.rack}`, label: r.label || '이름 없는 장비' }; break; } }
+  if (SELF_CHECK() && !!hit !== !!serialClashScan(db, corpId, keys, ignoreId)) throw new Error('[rack-db] 자기 점검: 시리얼 키 색인의 중복 판정이 원장 훑기와 다릅니다');
+  return hit;
+}
+/** 색인 없이 원장을 훑는 예전 판정 — 자기 점검(RACK_SELF_CHECK=1)에서만 색인 결과와 대조한다. */
+function serialClashScan(db, corpId, keys, ignoreId = '') {
   const rows = db.prepare(`SELECT p.id, p.label, p.serial_key AS k, p.extra_serials AS x, r.name AS rack, m.name AS room FROM rack_place p
     JOIN rack_rack r ON r.id = p.rack_id JOIN rack_room m ON m.id = r.room_id JOIN rack_site s ON s.id = m.site_id WHERE s.corp_id = ?`).all(corpId);
   for (const r of rows) {
@@ -514,6 +613,7 @@ export function addPlace({ roomId, rev, user, rackId, input }) {
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
       .run(id, rackId, input.face, input.uStart, input.uSize, input.kind, input.label || '', input.model || '', input.serial || '',
         serialKeyOf(input.serial), JSON.stringify(input.extraSerials || []), input.note || '', input.ratedW ?? null, input.opW ?? null, input.weightKg ?? null, Date.now());
+    setPlaceKeys(db, id, keysOf(input));
     return { result: { id }, action: 'place.add', detail: `${nameOf(input)} → ${rack.name} ${where(input)}` };
   });
 }
@@ -543,6 +643,7 @@ export function updatePlace({ roomId, rev, user, id, rackId = '', input }) {
       rated_w=?, op_w=?, weight_kg=?, updated_at=? WHERE id=?`)
       .run(toRackId, next.face, next.uStart, next.uSize, next.kind, next.label || '', next.model || '', next.serial || '', serialKeyOf(next.serial),
         JSON.stringify(next.extraSerials || []), next.note || '', next.ratedW ?? null, next.opW ?? null, next.weightKg ?? null, Date.now(), id);
+    if ('serial' in input || 'extraSerials' in input) setPlaceKeys(db, id, keysOf(next));
     const moved = toRackId !== cur.rackId || next.uStart !== cur.uStart || next.face !== cur.face || next.uSize !== cur.uSize;
     const fromRack = racksById.get(cur.rackId);
     return {
@@ -558,6 +659,7 @@ export function removePlace({ roomId, rev, user, id }) {
     const cur = placeRow(db.prepare('SELECT * FROM rack_place WHERE id = ?').get(id));
     if (!cur || !racksById.has(cur.rackId)) fail(404, '장비를 찾지 못했습니다.');
     db.prepare('DELETE FROM rack_place WHERE id = ?').run(id);
+    setPlaceKeys(db, id, null);
     return { result: { id }, action: 'place.remove', detail: `${nameOf(cur)} ← ${racksById.get(cur.rackId)?.name || ''} ${where(cur)}` };
   });
 }
@@ -595,7 +697,7 @@ function versionDetailRaw(db, corpId, versionId) {
   if (!snap) return { version: head, readable: false };
   const prev = db.prepare('SELECT data FROM rack_version WHERE corp_id = ? AND id < ? ORDER BY id DESC LIMIT 1').get(String(corpId), v.id);
   const prevSnap = prev ? unpackSnap(prev.data, corpId) : null;
-  const now = validateSnapshot(buildSnapshot(corpId, corpRows(db, corpId)), corpId);
+  const now = validateSnapshot(currentSnapshot(db, corpId), corpId);
   const typeOk = db.prepare('SELECT 1 AS x FROM rack_type WHERE id = ?');
   const target = restorableSnapshot(snap, (id) => !!typeOk.get(id));   // 되돌리면 실제로 들어갈 모습(점검 C10)
   return {
@@ -642,7 +744,8 @@ export async function restoreVersion({ corpId, versionId, expectLatestId, user }
     const newRev = Math.max(metaGet(db, 'revFloor'), maxNow) + 1;
     // 지금 원장 지우기(이 법인 것만). 반증 L-3: 이력(rack_log)은 지우지 않는다 — 그 전산실이 다시 되돌려지면 이력도 함께 보인다(전산실마다 2,000건 상한은 그대로).
     const del = { place: db.prepare('DELETE FROM rack_place WHERE id = ?'), rack: db.prepare('DELETE FROM rack_rack WHERE id = ?'), room: db.prepare('DELETE FROM rack_room WHERE id = ?'), site: db.prepare('DELETE FROM rack_site WHERE id = ?') };
-    for (const p of cur.places) del.place.run(p.id);
+    const delKeys = db.prepare('DELETE FROM rack_place_key WHERE place_id = ?');
+    for (const p of cur.places) { del.place.run(p.id); delKeys.run(p.id); }
     for (const r of cur.racks) del.rack.run(r.id);
     for (const r of cur.rooms) del.room.run(r.id);
     for (const s of cur.sites) del.site.run(s.id);
@@ -661,6 +764,7 @@ export async function restoreVersion({ corpId, versionId, expectLatestId, user }
     for (const r of restorableSnapshot(snap, (id) => !!typeOk.get(id)).racks) ins.rack.run(r.id, r.roomId, r.name, r.row, r.typeId, r.heightU, r.role, r.pduA, r.pduB, r.sort);
     for (const p of snap.places) {
       ins.place.run(p.id, p.rackId, p.face, p.uStart, p.uSize, p.kind, p.label, p.model, p.serial, serialKeyOf(p.serial), JSON.stringify(p.extraSerials), p.note, p.ratedW, p.opW, p.weightKg, now);
+      setPlaceKeys(db, p.id, keysOf(p));
     }
     const detail = `판 #${v.id} 으로 되돌림`;
     for (const r of snap.rooms) log(db, { user, corpId, roomId: r.id, action: 'version.restore', detail, version: false });

@@ -128,6 +128,15 @@ export function matchPlace(p, q) {
   return hay.includes(s);
 }
 
+/** 미배치 서버 목록 한 번에 그리는 수(‘더 보기’ 로 늘린다). */
+export const UNPLACED_PAGE = 100;
+/** 미배치 서버가 검색어와 맞는가(이름 · 호스트 이름 · 모델 · 서비스 태그 — 대소문자 무시 부분 일치). 빈 검색어는 전부 보인다(true). */
+export function matchUnplaced(u, q) {
+  const s = String(q || '').trim().toLowerCase().slice(0, 64);
+  if (!s) return true;
+  return [u?.name, u?.hostname, u?.model, u?.serviceTag].filter(Boolean).join(' ').toLowerCase().includes(s);
+}
+
 /** 이력 action → 글자. */
 export const ACTION_LABEL = Object.freeze({
   'site.add': '데이터센터 추가', 'site.rename': '데이터센터 이름 변경', 'site.remove': '데이터센터 삭제',
