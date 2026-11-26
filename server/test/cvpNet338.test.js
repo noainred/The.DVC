@@ -90,7 +90,7 @@ test('③ 회수 · 예측', () => {
 
 test('④ 토폴로지 · 양끝 불일치', () => {
   const D = (key, hostname) => ({ agent: '', cvpId: 'c1', key, hostname, model: 'DCS-7050SX3-48YC8' });
-  const devices = [D('L1', 'kr-leaf-01.corp'), D('L2', 'kr-leaf-02'), D('S1', 'kr-spine-01'), D('S2', 'kr-spine-02'), D('X1', 'dup-01'), { ...D('X2', 'dup-01.b'), cvpId: 'c2' }];
+  const devices = [D('L1', 'kr-leaf-01.corp'), D('L2', 'kr-leaf-02'), D('S1', 'kr-spine-01'), D('S2', 'kr-spine-02'), D('X1', 'dup-01'), D('X2', 'dup-01')];   // v3.42: 같은 CVP 안에 같은 이름 장비가 둘(둘 다 스트리밍) — 못 고른다. 도메인이 다른 FQDN 장비('dup-01.b')는 3회차 A1-F4 로 후보에서 빠진다(cvpBugRound342 ⑭)
   const L = (key, port, sysName, portId) => ({ agent: '', cvpId: 'c1', key, port, sysName, portId });
   const lldp = [
     L('L1', 'Ethernet49/1', 'kr-spine-01', 'Ethernet1'), L('S1', 'Ethernet1', 'kr-leaf-01.corp', 'Ethernet49/1'),   // both
@@ -101,7 +101,7 @@ test('④ 토폴로지 · 양끝 불일치', () => {
   ];
   const meta = new Map(['L1', 'L2', 'S1'].map((k) => [`\u0000c1\u0000${k}`, { at: NOW }]));
   const P = (key, port, x = {}) => ({ agent: '', cvpId: 'c1', key, port, oper: 'up', admin: 'up', speedBps: 100e9, mtu: 9214, duplex: 'duplexFull', lag: '', desc: '', ...x });
-  const ports = [P('L1', 'Ethernet49/1', { mtu: 1500 }), P('S1', 'Ethernet1'), P('L2', 'Ethernet49/1', { mtu: null }), P('S1', 'Ethernet2', { desc: 'to kr-leaf-09' }),
+  const ports = [P('L1', 'Ethernet49/1', { mtu: 1500 }), P('S1', 'Ethernet1'), P('L2', 'Ethernet49/1', { mtu: null }), P('S1', 'Ethernet2', { desc: 'to kr-leaf-01.corp' })   /* v3.42: 설명 비교는 알려진 스위치 이름만(2회차 반증 R10) */,
     P('L1', 'Ethernet50/1'), P('L2', 'Ethernet48', { desc: 'peer kr-leaf-01' })];
   const t = TP.buildTopology({ devices, lldp, lldpMeta: meta, ports, hostNames: new Set(['esx-01']) });
   const k = (a, b) => t.links.find((l) => [l.aName, l.bName].sort().join('|') === [a, b].sort().join('|'));

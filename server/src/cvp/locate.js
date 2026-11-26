@@ -61,15 +61,17 @@ export function subjectsOf(query, snap = {}) {
 /**
  * MAC 테이블 · CVP 위치 행 → 가장자리 답 / 지나는 곳.
  * @param {{ fdb:Array<{agent,cvpId,key,hostname,mac,vlan,port,ts}>, ep:Array<{agent,cvpId,key,hostname,mac,port,vlan,at,likelihood}>,
- *   uplinks:Map<string,Set<string>>, macCount:Map<string,Map<string,number>> }} a  uplinks/macCount 키 = agent␀cvp␀key
+ *   uplinks:Map<string,Set<string>>, macCount:Map<string,Map<string,number>>, hostPorts?:Map<string,Set<string>> }} a  uplinks/macCount/hostPorts 키 = agent␀cvp␀key
  */
-export function placeRows({ fdb = [], ep = [], uplinks = new Map(), macCount = new Map(), manyMacs = MANY_MACS } = {}) {
+export function placeRows({ fdb = [], ep = [], uplinks = new Map(), macCount = new Map(), manyMacs = MANY_MACS, hostPorts = new Map() } = {}) {
   const edge = []; const transit = [];
   const seen = new Map();   // 키 → 행(같은 포트 · MAC 을 두 근거가 보면 근거만 더한다)
   const classify = (r) => {
     const dk = `${r.agent}\u0000${r.cvpId}\u0000${r.key}`;
     if (uplinks.get(dk)?.has(normPort(r.port))) return { up: true, basis: 'lldp' };
     const n = macCount.get(dk)?.get(r.port);
+    // v3.42(A1-13): LLDP 이웃이 가상화 호스트인 포트는 MAC 이 많아도 가장자리(VM 이 많은 호스트)
+    if (hostPorts.get(dk)?.has(normPort(r.port))) return { up: false, basis: 'lldp', macs: n ?? null };
     if (n != null && n >= manyMacs) return { up: true, basis: 'macs', macs: n };
     return { up: false, basis: uplinks.has(dk) ? 'lldp' : 'nolldp', macs: n ?? null };
   };

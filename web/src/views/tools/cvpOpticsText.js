@@ -32,6 +32,8 @@ export function opticRowState(o) {
   if (r.judged && r.rxState === 'fault') return { tone: 'bad', label: '약함(장애)' };
   if (r.judged && r.rxState === 'warn') return { tone: 'warn', label: '낮음(주의)' };
   if (r.judged && r.rxState === 'ok') return { tone: 'ok', label: '정상' };
+  // v3.42(2회차 반증 R7): 브레이크아웃 레인 일부만 링크면 '링크 없음' 이 아니다(재고는 '링크 있음' 으로 센다)
+  if (r.lanesPartial === true) return { tone: 'muted', label: '판정 안 함(레인 일부만 링크)' };
   if (r.linked === false) return { tone: 'muted', label: '판정 안 함(링크 없음)' };
   if (r.rx == null) return { tone: 'muted', label: '광량 값 없음' };
   return { tone: 'muted', label: '판정 안 함' };
@@ -51,7 +53,9 @@ export function opticsKpis(counts, thresholds) {
     { key: 'fault', label: '광량 약함(장애)', value: countText(n('fault')), accent: n('fault') > 0 ? 'var(--red)' : undefined, meta: `기준 ${dbmText(t.faultDbm)} 이하(장비 임계가 없을 때)` },
     { key: 'warn', label: '광량 낮음(주의)', value: countText(n('warn')), accent: n('warn') > 0 ? 'var(--amber)' : undefined, meta: `기준 ${dbmText(t.warnDbm)} 이하` },
     { key: 'ok', label: '정상', value: countText(n('ok')), meta: `판정 ${countText(n('judged'))}개` },
-    { key: 'notLinked', label: '판정 안 함', value: countText(n('notLinked')), meta: '링크 없는 포트(바닥이 정상)' },
+    // v3.42(3회차 A5-F4): 브레이크아웃 레인 일부만 링크인 칸(lanesPartial)도 '판정 안 함' 에 더하고 따로 밝힌다 — 서버가 새로 세는 수를 어느 칸도 안 보여 타일 합이 장착 수보다 모자랐다.
+    { key: 'notLinked', label: '판정 안 함', value: countText(n('notLinked') == null && n('lanesPartial') == null ? null : (n('notLinked') ?? 0) + (n('lanesPartial') ?? 0)),
+      meta: n('lanesPartial') > 0 ? `링크 없는 포트 ${countText(n('notLinked'))} · 레인 일부만 링크 ${countText(n('lanesPartial'))}` : '링크 없는 포트(바닥이 정상)' },
     { key: 'noDom', label: '광량 값 없음', value: countText(n('noDom')), meta: `장착 ${countText(n('present'))} · 빈 슬롯 ${countText(n('absent'))}` },
     // v2.732(감사 B2-03): 판정에서 뺀 트랜시버(장비 부품 값이 지금 값이 아님). 서버가 필드를 주지 않으면(구버전) '—'.
     { key: 'stale', label: '오래된 값(판정 제외)', value: countText(n('staleXcvr')), accent: n('staleXcvr') > 0 ? 'var(--amber)' : undefined,
