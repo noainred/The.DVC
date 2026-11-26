@@ -122,7 +122,7 @@ async function pollOnce({ manual = false, only = null } = {}) {
  * only(v3.52 디버깅 1회차 성능 P2) — 장비 이벤트를 보낸 서버들만 한 번 읽는다(Set<id>). 함대 전체 주기를 돌리지 않는다.
  *   그 서버들의 전력 · 센서 · 인벤토리는 정규 주기와 같은 코드로 읽고, **주기 상태**(lastRun · 주기 소요 · 센서 주기 시작 · prune)는 건드리지 않는다
  *   (한 대짜리 실행이 ‘마지막 주기 1대’ · ‘주기 0.3초’ 로 보이면 신선도 판정이 흔들린다). 파트 장애 훅도 부르지 않는다 — 호출부(eventSub)가 바로 판정한다(P5 — 두 번 돌지 않게).
- *   돌려주는 값 { servers, invRefreshed }.
+ *   돌려주는 값 — 읽은 서버 수(servers)와 인벤토리를 다시 읽은 서버 수.
  */
 async function pollOnceInner({ manual = false, only = null } = {}) {
   // v2.583: 이 카운터는 v2.548 부터 **pollOnce() 안에** 선언돼 있었다 — 쓰는 곳은 이 함수라 실장비(목 모드가
