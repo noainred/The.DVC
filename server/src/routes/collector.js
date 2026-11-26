@@ -321,7 +321,7 @@ collectorRouter.get('/bm-usage/baseline', tokenFirst('bm-usage-baseline'), (req,
 collectorRouter.get('/bm-usage/compare', tokenFirst('bm-usage-compare'), (req, res) => bmPerfOpsCollector(req, res, 'compare'));
 // 6단계 서버 비교 — 엣지 위임 서버 1대의 지표 여러 개 계열 통계(요청 1개 · 보관 없음 · central/bmComparePull.js). 대상 목록 밖 키는 404.
 collectorRouter.get('/bm-usage/compare-series', tokenFirst('bm-usage-compare-series'), (req, res) => bmPerfOpsCollector(req, res, 'compare-series'));
-// v3.47 물리서버 ‘같은 묶음 대비’ — 이 엣지가 수집하는 서버 **여러 대**의 구간 평균(CPU · 메모리) · 지금 값(전력 · 흡기 온도)을 요청 1개로(central/bmPeerPull.js).
+// v3.48 물리서버 ‘같은 묶음 대비’ — 이 엣지가 수집하는 서버 **여러 대**의 구간 평균(CPU · 메모리) · 지금 값(전력 · 흡기 온도)을 요청 1개로(central/bmPeerPull.js).
 //   읽기 요청이다(엣지 상태를 바꾸지 않는다) — 키 목록이 길어 POST 본문으로 받는다(키 80개 × 256자 — 한글 키도 들어가게 80KB 상한 · 반증 A13). 대상 목록 밖 키는 건너뛰고 수를 밝힌다(존재를 가르지 않는다). 보관 없음.
 collectorRouter.post('/bm-usage/peer-avg', tokenFirst('bm-usage-peer-avg'), express.json({ limit: '80kb' }), async (req, res) => {
   try {

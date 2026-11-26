@@ -1,5 +1,5 @@
 /**
- * central/bmPeerPull.js — 물리서버 ‘같은 묶음 대비’(v3.47)의 **엣지 대행**: 엣지 위임 서버 여러 대의 구간 평균(CPU · 메모리 · 전력) · 지금 값(흡기 온도)을
+ * central/bmPeerPull.js — 물리서버 ‘같은 묶음 대비’(v3.48)의 **엣지 대행**: 엣지 위임 서버 여러 대의 구간 평균(CPU · 메모리 · 전력) · 지금 값(흡기 온도)을
  *   그 엣지에서 **요청 1개로** 당긴다(`POST /api/collector/bm-usage/peer-avg` — 서버마다 WAN 을 왕복하지 않는다 · 루트 CLAUDE.md ‘작업 하나를 법인 쪽에’).
  *
  * 규약(bmComparePull 과 같다 — edge.md):

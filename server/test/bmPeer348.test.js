@@ -1,4 +1,4 @@
-// 물리서버 ‘같은 묶음 대비’(v3.47 — 설계 docs/design/bm-feature-proposals ⑨ · 사용자 '① ② ③ ⑨ 먼저 구현' · 범위 '엣지 서버까지').
+// 물리서버 ‘같은 묶음 대비’(v3.48 — 설계 docs/design/bm-feature-proposals ⑨ · 사용자 '① ② ③ ⑨ 먼저 구현' · 범위 '엣지 서버까지').
 //   ① 분위 · 한 지표 판정(폭 = 사분위 울타리 + 바닥값) · 값 없는 서버는 빼고 센다 · 모자라면 판정하지 않는다 ② 묶음 판정(네 지표 · 기준 표지)
 //   ③ 24시간 평균의 조건(표본 수 + 구간 비율) ④ 요청 키 정리 ⑤ 수집 노드의 묶음 평균(peerAvgFor — CPU · 메모리 · 전력 · 모르는 키는 건너뛰고 센다 · 못 읽은 값은 null)
 //   ⑥ 엣지 응답 정제(청한 키만 · 수로 · 시각 자르기) ⑦ 라우트(/tools/bm-folders/peer): 묶음 = 법인 · 폴더 · 모델 · 엣지마다 요청 1개 · 다른 서버 이름을 싣지 않는다 ·
@@ -16,7 +16,7 @@ const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), pre
 const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다 */ } } };
 after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
 
-const tmp = tmpDir('bmpeer347-');
+const tmp = tmpDir('bmpeer348-');
 process.env.CONFIG_DIR = tmp;
 const here = path.dirname(fileURLToPath(import.meta.url));
 

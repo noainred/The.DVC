@@ -45,7 +45,7 @@ import { scopeSig } from '../../util/scopeSig.js';
 import { bmCheckFor, chkRowOf } from '../../bmcheck/state.js';   // v3.45 물리서버 점검(보증 · 펌웨어 기준선 · BIOS 편차)
 import { assetStore, fwBaselineStore, adminBaselineLookup } from '../../bmcheck/store.js';
 import { WARRANTY_SOON_DAYS } from '../../bmcheck/warranty.js';
-import { judgePeerGroup, avgValueOf, PEER_MIN, PEER_GROUP_MAX, PEER_AVG_MIN_SAMPLES, PEER_AVG_MIN_COVERAGE } from '../../bmcheck/peer.js';   // v3.47 같은 묶음 대비
+import { judgePeerGroup, avgValueOf, PEER_MIN, PEER_GROUP_MAX, PEER_AVG_MIN_SAMPLES, PEER_AVG_MIN_COVERAGE } from '../../bmcheck/peer.js';   // v3.48 같은 묶음 대비
 
 const toolsPerm = requirePerm('tools');
 const csvPerm = requirePerm('data.csv');
@@ -289,7 +289,7 @@ async function trendDeps() {
     },
     localSeries: async (o) => (await import('../../bmusage/perfOpsView.js')).localPerfOps('compare-series', o),
     edgeSeries: async (agent, o) => (await import('../../central/bmComparePull.js')).pullEdgeCompareSeries(agent, o),
-    // v3.47 같은 묶음 대비 — 이 노드 서버 여러 대 · 엣지마다 요청 1개(서버마다 WAN 을 왕복하지 않는다)
+    // v3.48 같은 묶음 대비 — 이 노드 서버 여러 대 · 엣지마다 요청 1개(서버마다 WAN 을 왕복하지 않는다)
     localPeer: async (o) => (await import('../../bmusage/peerAvg.js')).peerAvgFor(o),
     edgePeer: async (agent, o) => (await import('../../central/bmPeerPull.js')).pullEdgePeerAvg(agent, o),
     // 수집 서버(pull) 출처 서버를 맡은 엣지 — 구성원에는 collectorId 만 있다(반증 A2). 조회는 등록부 하나(findCollectorByName — id 가 먼저 맞는다).
@@ -631,7 +631,7 @@ export function registerBmFolders(api) {
     } catch (e) { if (!res.headersSent) res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); }
   });
 
-  // v3.47 같은 묶음 대비(시안 ⑨) — 드로어가 열릴 때 1건. 묶음 = 같은 법인 · 같은 폴더 · 같은 모델(BIOS 편차와 같은 묶음 — 폴더에 넣은 서버만).
+  // v3.48 같은 묶음 대비(시안 ⑨) — 드로어가 열릴 때 1건. 묶음 = 같은 법인 · 같은 폴더 · 같은 모델(BIOS 편차와 같은 묶음 — 폴더에 넣은 서버만).
   //   CPU · 메모리 · 전력 = 지난 24시간 평균 / 흡기 온도 = 지금 값. 값은 그 서버를 수집하는 노드가 낸다: 이 노드 서버는 로컬, 엣지 위임 서버는 **엣지마다 요청 1개**
   //   (같은 (엣지, 키 묶음)은 60초 동안 한 번 — trendOnce). 판정은 bmcheck/peer.js 하나. 응답에는 다른 서버의 이름 · 키를 싣지 않는다(값 점만 — 묶음은 같은 법인이다).
   //   범위 밖 · 없는 키 404(/hw 와 같은 노출 규칙) · 엣지 실패 사유(주소가 들어갈 수 있다)는 전체 범위 관리자 판본만.

@@ -1,5 +1,5 @@
 /**
- * 물리서버 상세 드로어 ‘같은 묶음 대비’ 구역의 글자 · 그림 좌표(v3.47 · 시안 docs/design/bm-feature-proposals ⑨). 순수.
+ * 물리서버 상세 드로어 ‘같은 묶음 대비’ 구역의 글자 · 그림 좌표(v3.48 · 시안 docs/design/bm-feature-proposals ⑨). 순수.
  *
  *  · 판정은 서버(bmcheck/peer.js)가 한다 — 여기는 응답(`/tools/bm-folders/peer`)을 읽어 글자와 좌표로 옮길 뿐이다(판정 복제 없음).
  *  · 기준(지난 N시간 평균 · 지금 값)과 시간 수는 **응답의 값으로** 쓴다(지표마다 `basis` · 응답 `hours`) — 여기서 정하지 않는다(반증 B2).

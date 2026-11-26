@@ -36,7 +36,7 @@
 - 판정에 쓴 인벤토리를 읽은 시각(`invAt`)을 상세 응답에 싣는다 — **오래됨을 따로 세지는 않는다**(시각만 보인다 · 인벤토리 캐시에 만료가 없다). 목록 응답 캐시는 스냅샷 세대가 바뀔 때 풀린다(hw 요약과 같은 구조 — 그 사이 인벤토리만 바뀌면 목록 `chk` 는 낡은 값).
 - **아직 없는 것(다음 판)**: 묶음 대비의 폴더 화면 요약(‘묶음 밖 N’ — 시안에는 있다. 목록을 열 때마다 함대 전체의 24시간 평균을 계산하게 된다) · 원장의 태그가 지금 목록에 없는 서버인지 알려 주기 · 법인별 펌웨어 요약 화면.
 
-## 같은 묶음 대비(v3.47 — `peer.js` · `bmusage/peerAvg.js` · `central/bmPeerPull.js` · `GET /tools/bm-folders/peer`)
+## 같은 묶음 대비(v3.48 — `peer.js` · `bmusage/peerAvg.js` · `central/bmPeerPull.js` · `GET /tools/bm-folders/peer`)
 
 - **묻는 것이 다르다**: 기존 이상 탐지(`insights/anomaly.js`)는 ‘그 장비의 평소 값’, 이것은 ‘같은 일을 하는 다른 서버’. 묶음 = **같은 법인 · 같은 폴더 · 같은 모델**
   (BIOS 편차와 같은 묶음 — 폴더에 넣은 베어메탈만 · 모델은 인벤토리 값: 모르면 `no-model` · ESXi 행 · 미분류 · 5대 미만은 견주지 않는다).
@@ -56,11 +56,11 @@
   **아직 안 되는 것**: 태그 없는 엣지 서버(중앙 키 ≠ 엣지 키 — 추정 · 반증 A2-b) · `host:` · `remote:` id 서버의 전력 · os-registry 위임 서버.
 - 흡기 ‘지금 값’ 의 신선도 상한은 `PEER_INLET_FRESH_MS`(30분 — 사용률 수집 주기에 묶지 않는다: 주기 6시간이면 17시간 전 표본이 실렸다 · 반증 A6).
 - **묶음 상한을 넘으면 표본은 원문 키 순서**로 고른다(보이는 순서는 판본마다 달라 같은 서버가 관리자에게는 ‘안’ · 운영자에게는 ‘밖’ 이었다 — 반증 A1).
-- **엣지 계약(v3.47)**: 중앙은 **엣지마다 요청 1개**(`POST /api/collector/bm-usage/peer-avg` — 읽기 요청 · 토큰이 본문보다 먼저 · 키 `PEER_KEYS_MAX` = `PEER_GROUP_MAX`).
+- **엣지 계약(v3.48)**: 중앙은 **엣지마다 요청 1개**(`POST /api/collector/bm-usage/peer-avg` — 읽기 요청 · 토큰이 본문보다 먼저 · 키 `PEER_KEYS_MAX` = `PEER_GROUP_MAX`).
   엣지는 자기 목록의 키만 답하고 밖의 키는 수(`unknown`)만 · 줄에는 키와 수뿐(이름 · 주소 · 계정 없음). 중앙 정제 `sanitizePeerAvg`(청한 키만 · 수 ·
   **지표가 가질 수 없는 값은 null**(`PEER_RANGE` — 끝으로 잘라 그럴듯한 값을 만들지 않는다 · 반증 A3) · 비율 0~1 · 시각 자르기). 본문 상한 80KB(한글 키 80개).
   구버전 엣지 = `old-version`(최소 버전 = 릴리스 노트 제목 `PEER_TITLE_RE` ‘물리서버 — 같은 묶음 대비’ — **그 문구를 릴리스 제목에서 지우지 말 것**) · 재시도 0 ·
   같은 (엣지, 키 묶음)은 60초에 한 번(`trendOnce`). 필드를 더하면 수집 노드 · 중앙 정제 · 라우트 세 곳을 함께 고친다.
 - **가림**: 응답에 다른 서버의 이름 · 키 · 태그를 싣지 않는다(정렬한 값 점만 — 묶음은 같은 법인). 엣지 실패 사유(주소가 들어갈 수 있다)는 전체 범위 관리자만.
   범위 밖 · 없는 키 404 · 폴더 저장소 못 읽음 503 · 엣지 포탈 404. 목록 · 칩에는 싣지 않는다(드로어를 열 때 1건).
-- 회귀: `server/test/bmPeer347.test.js` · `bmPeerEdgeRoundTrip347.test.js`(실제 collector ↔ 실제 pull ↔ 실제 전력 DB) · 웹 `bmFolders/bmPeer347.test.jsx`.
+- 회귀: `server/test/bmPeer348.test.js` · `bmPeerEdgeRoundTrip348.test.js`(실제 collector ↔ 실제 pull ↔ 실제 전력 DB) · 웹 `bmFolders/bmPeer348.test.jsx`.

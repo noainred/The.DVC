@@ -19,7 +19,7 @@ import { SRC_COLOR } from './usageSrc.js';
 import { osText, hwWhyText, OS_WHY } from './hwText.js';
 import { IdracConnect } from './IdracConnect.jsx';
 import { WarrantySection, FwBiosSections } from './CheckSections.jsx';   // v3.45 물리서버 점검(보증 · 펌웨어 기준선 · BIOS 편차)
-import { PeerSection } from './PeerSection.jsx';   // v3.47 같은 묶음 대비
+import { PeerSection } from './PeerSection.jsx';   // v3.48 같은 묶음 대비
 import { useBoxWidth } from './useBoxWidth.js';
 import { unitText } from '../../unitText.js';
 import { usageTone, TONE_COLOR, TONE_TEXT } from '../../vms/vmHubText.js';
@@ -98,7 +98,7 @@ export default function BmDrawer({ r, rows, corps, corpName, scoped, op, busy, o
   //   g = 목록의 세대(호출부가 준다) — 드로어에서 폴더에 넣기 · 빼기를 하면 목록이 다시 읽히고, 그때 점검도 다시 묻는다
   //   (반증 B1: 폴더에 넣은 뒤에도 BIOS 구역이 ‘미분류 — 판정 안 함’ 그대로였다. 묶음은 배치로 정해진다).
   const chk = useOnce('/tools/bm-folders/check', r?.key || '', { n: chkRev, g: gen }, !!r);
-  // v3.47 같은 묶음 대비 — 열 때 1건(베어메탈 행만). 묶음은 배치(폴더)로 정해지므로 목록 세대가 바뀌면 다시 묻는다(점검과 같은 이유)
+  // v3.48 같은 묶음 대비 — 열 때 1건(베어메탈 행만). 묶음은 배치(폴더)로 정해지므로 목록 세대가 바뀌면 다시 묻는다(점검과 같은 이유)
   const peer = useOnce('/tools/bm-folders/peer', r?.key || '', { g: gen }, !!r && isBm);
   // 열 때 포커스를 드로어로(키보드 ↑↓ · Esc) · 닫을 때 원래 자리로
   useEffect(() => {
