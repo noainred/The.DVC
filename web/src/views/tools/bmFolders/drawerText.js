@@ -7,6 +7,7 @@
 import { numOrNull } from '../../../numOrNull.js';
 import { PLACE_LABEL, pathText } from '../bmFoldersText.js';
 import { whyOf, whyShort } from './whyText.js';
+import { chkSignals } from './checkText.js';
 import { cpuText, memText, memSizeText, diskSizeText, nicSpeedParts, speedText } from './hwText.js';
 
 /** 임시 키(서비스 태그를 아직 못 읽음) 설명 — 표의 '태그 없음' 배지와 드로어 신호가 같은 글자를 쓴다. */
@@ -43,7 +44,10 @@ export function bmUnknowns(r) {
 }
 /** 신호가 없을 때의 글자 — **실제로 본 것만** 나열한다(값이 없던 것을 '해당 없음' 이라 하지 않는다). */
 export function noSignalText(r) {
-  const seen = [numOrNull(r?.faults) != null ? '부품 장애' : '', '사용률 값 없음(CPU · 메모리 둘 다)', r?.powered === true || r?.powered === false ? '전원 꺼짐' : '', '임시 키'].filter(Boolean);
+  // v3.45 물리서버 점검: 판정이 선 것만 '본 것' 이다(보증 모름 · 펌웨어 기준 없음 · BIOS 미분류는 본 것이 아니다 — 그 구역이 따로 말한다)
+  const c = r?.chk || {};
+  const seen = [numOrNull(r?.faults) != null ? '부품 장애' : '', '사용률 값 없음(CPU · 메모리 둘 다)', r?.powered === true || r?.powered === false ? '전원 꺼짐' : '', '임시 키',
+    c.w === 'ok' || c.w === 'soon' || c.w === 'expired' ? '보증 만료' : '', c.fw === 'ok' || c.fw === 'behind' ? '펌웨어 뒤처짐' : '', c.bios === 'ok' || c.bios === 'diff' ? 'BIOS 다름' : ''].filter(Boolean);
   return `신호 없음 — ${seen.join(' · ')}에 해당하는 것이 없습니다.`;
 }
 
@@ -77,6 +81,8 @@ export function bmSignalRows(r, now = Date.now()) {
   }
   if (off) out.push({ kind: 'off', tone: 'info', badge: '전원 꺼짐', label: '전원 꺼짐', fact: '서버 전원이 꺼져 있습니다.' });
   if (r?.tmpKey) out.push({ kind: 'tmpkey', tone: 'info', badge: '태그 없음', label: '서비스 태그를 아직 읽지 못함', fact: TMPKEY_NOTE });
+  // v3.45 물리서버 점검(보증 끝남 · 곧 끝남 · 펌웨어 뒤처짐 · BIOS 다름) — 목록 행의 chk 로(판정은 서버). 모름 · 못 읽음은 신호가 아니다(구역에서 따로 말한다)
+  for (const s of chkSignals(r)) out.push(s);
   return out;
 }
 

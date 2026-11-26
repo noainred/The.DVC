@@ -42,6 +42,9 @@ import {
   LIMITS, newRuleId, underPath, ancestorsOf, isMemberKey,
 } from '../../bmfolders/store.js';
 import { scopeSig } from '../../util/scopeSig.js';
+import { bmCheckFor, chkRowOf } from '../../bmcheck/state.js';   // v3.45 물리서버 점검(보증 · 펌웨어 기준선 · BIOS 편차)
+import { assetStore, fwBaselineStore, adminBaselineLookup } from '../../bmcheck/store.js';
+import { WARRANTY_SOON_DAYS } from '../../bmcheck/warranty.js';
 
 const toolsPerm = requirePerm('tools');
 const csvPerm = requirePerm('data.csv');
@@ -201,7 +204,8 @@ export async function hwLookupFactory(D = {}) {
     const sid = t(m.serverId);
     if (t(m.source) === 'edge' || sid.startsWith('edge:')) {
       const e = edgeById.get(sid);
-      return { inv: null, hw: e?.hw || null, mgmt: mgmtHostOf(e?.mgmtHost), via: 'edge' };
+      // v3.45: 엣지가 보낸 펌웨어 구성요소 · BIOS 설정(정제본 — 없으면 undefined = 보내지 않음). 물리서버 점검(bmcheck/state.js)이 쓴다
+      return { inv: null, hw: e?.hw || null, mgmt: mgmtHostOf(e?.mgmtHost), via: 'edge', fw: e?.fw, bios: e?.bios };
     }
     let r = { inv: null, via: '' };
     try { r = invOf({ serverId: sid, serviceTag: m.serviceTag }); } catch { r = { inv: null, via: '' }; }
@@ -214,7 +218,21 @@ function hwView(hw, admin, hide, tag) {
   return { ...hw, host: admin && hw.host ? (hide ? stripTag(hw.host, tag) : hw.host) : '' };
 }
 
-function serverRow(m, p, admin, hide, ix, hx) {
+/**
+ * v3.45 물리서버 점검의 저장소 입력 — 원장 · 기준 파일을 **못 읽었으면 그 판정만 뺀다**(빈 원장으로 보고 전부 '모름' 이라 하지 않는다 · 지정 기준이 없다고 하지 않는다).
+ *   assets null = 보증 판정 안 함(assetsErr) · adminBase null + baseErr = 다수 버전으로만 대조했다고 밝힌다.
+ */
+export function checkInputs(D = {}) {
+  const A = D.assetStore || assetStore; const B = D.fwBaselineStore || fwBaselineStore;
+  let assets = null; let assetsErr = false; let assetsMeta = null; let adminBase = null; let baseErr = false;
+  try { if (A.loadError()) assetsErr = true; else { const d = A.get(); assets = d.rows; assetsMeta = { n: Object.keys(d.rows).length, at: d.at, by: d.by }; } } catch { assetsErr = true; assets = null; }
+  try { if (B.loadError()) baseErr = true; else adminBase = adminBaselineLookup(B.get()); } catch { baseErr = true; adminBase = null; }
+  return { assets, assetsErr, assetsMeta, adminBase, baseErr };
+}
+/** 응답 캐시 열쇠 조각 — 원장 · 기준 세대 + 오늘(보증 남은 일수는 날이 바뀌면 달라진다). */
+const checkRevKey = () => { try { return `${assetStore.rev()}.${fwBaselineStore.rev()}.${todayStamp()}`; } catch { return 'x'; } };
+
+function serverRow(m, p, admin, hide, ix, hx, chk) {
   const mgmt = t(m.mgmtHost) || t(hx?.mgmt);
   return {
     key: pubKey(m.key, hide), kind: m.kind, corp: m.corp, name: nameOf(m, admin, hide), serviceTag: hide ? undefined : m.serviceTag, model: m.model,
@@ -234,6 +252,9 @@ function serverRow(m, p, admin, hide, ix, hx) {
     addr: admin && mgmt ? (hide ? stripTag(mgmt, m.serviceTag) : mgmt) : undefined,
     // v3.3.0: 하드웨어(iDRAC) 요약 — 베어메탈만(ESXi 행은 undefined). 인벤토리가 없으면 null(화면 '—' + hwWhy)
     ...(m.kind === 'bm' && hx !== undefined ? { hw: hwView(hx?.hw || null, admin, hide, m.serviceTag), hwVia: hx?.via || '' } : {}),
+    // v3.45 물리서버 점검 요약 — { w 보증 상태 · wd 남은 일수 · fw 펌웨어 상태 · fwn 뒤처진 구성요소 수 · bios 편차 상태 · biosn 다른 설정 수 }.
+    //   상태 글자와 수뿐이다(태그 · 주소 · 계약 번호 없음). 판정하지 못한 항목은 키가 없다(화면이 정상으로 읽지 않는다).
+    chk: chk || undefined,
   };
 }
 
@@ -430,7 +451,7 @@ export function registerBmFolders(api) {
     // 서비스 인벤토리 저장소 세대도 넣는다(svcLinks — 그쪽 규칙을 바꾸면 이 응답도 새로)
     // 서비스 인벤토리 도구 접근(svcLinks 를 싣는가)도 열쇠에 — 빠지면 접근 있는 계정의 응답이 캐시로 샌다
     const svcOk = userToolAllowed(req.user, 'svc-inventory');
-    const extraKey = `${scopeKey(req.user, snap)}|w${writeKeyOf(req.user, snap)}|${admin ? 'a' : 'u'}|v${svcOk ? 1 : 0}|r${storeRev()}|s${(() => { try { return smStoreRev(); } catch { return 'x'; } })()}|i${sharedInputRev()}`;
+    const extraKey = `${scopeKey(req.user, snap)}|w${writeKeyOf(req.user, snap)}|${admin ? 'a' : 'u'}|v${svcOk ? 1 : 0}|r${storeRev()}|s${(() => { try { return smStoreRev(); } catch { return 'x'; } })()}|i${sharedInputRev()}|c${checkRevKey()}`;
     await memoJson(req, res, 'bm-folders', async (s) => {
       const { g, members, dupKeys, allowed, b } = await stateFor(req, s);
       const hide = !!allowed;
@@ -446,18 +467,36 @@ export function registerBmFolders(api) {
       // v3.3.0: 하드웨어(iDRAC) 요약 — 찾기를 못 만들면 요약 없이(화면 '—') 목록은 그대로
       let hxOf = null;
       try { hxOf = await hwLookupFactory(); } catch { hxOf = null; }
+      const shown = [];
       for (const m of members) {
         if (!m.corp ? hide || m.kind !== 'bm' : !(allowed ? allowed.has(m.corp) : true)) continue;
         const p = b.placeOf.get(m.key);
         if (m.kind !== 'bm' && !p?.src) continue;   // ESXi 는 폴더에 넣은 것만
+        shown.push([m, p]);
+      }
+      // v3.45 물리서버 점검: 이 응답에 싣는 구성원만으로 판정한다(묶음이 법인을 넘지 않아 결과가 같다 — bmcheck/state.js). 실패해도 목록은 그대로(요약만 빠진다)
+      const ci = checkInputs();
+      let chk = null;
+      try { chk = bmCheckFor({ members: shown.map((x) => x[0]), placeOf: b.placeOf, hxOf, assets: ci.assets, adminBase: ci.adminBase, today: todayStamp() }); } catch { chk = null; }
+      for (const [m, p] of shown) {
         // 찾기를 못 만들었으면 hx = undefined → 행에 hw 키를 싣지 않는다(화면이 '인벤토리 없음' 으로 단정하지 않고 '요약을 만들지 못함' 으로 — 반증 F11)
         let hx;
         if (hxOf) { try { hx = hxOf(m); } catch { hx = null; } }
-        servers.push(serverRow(m, p, admin, hide, ix, hx));
+        let c;
+        if (chk) { try { c = chkRowOf(chk.ofMember(m)); } catch { c = undefined; } }
+        servers.push(serverRow(m, p, admin, hide, ix, hx, c));
       }
       return {
         ok: true, at: g.at, rev: storeRev(), scoped: hide, admin, canWrite: writerOk(req.user), canFleet: full,
         usageOff: !!ix?.off,   // v2.994: 이 노드의 베어메탈 사용률 수집이 꺼져 있다(화면 위 띠 — 칸마다 같은 이유를 보지 않게)
+        // v3.45 물리서버 점검 표지 — 보증 '곧' 의 기준 일수(화면이 숫자를 박지 않게) · 자산 원장 상태(줄 수 · 올린 시각 — 올린 사람은 관리자 판본만) ·
+        //   못 읽은 저장소(unreadable — 그 판정은 하지 않았다) · 찾기를 만들지 못함(noHw — 펌웨어 · BIOS 판정 없음).
+        check: {
+          soonDays: WARRANTY_SOON_DAYS,
+          // 원장 줄 수 · 올린 시각은 전 법인 값이다 — 범위 계정에는 싣지 않는다(함대 전체 개수를 싣지 않는 규칙 — 반증 A8). 올린 사람은 전체 범위 관리자 판본만
+          assets: ci.assetsErr ? { unreadable: true } : hide ? {} : { n: ci.assetsMeta?.n ?? 0, at: ci.assetsMeta?.at ?? null, ...(admin ? { by: ci.assetsMeta?.by || '' } : {}) },
+          ...(ci.baseErr ? { baselineUnreadable: true } : {}), ...(!hxOf || !chk ? { noHw: true } : {}),
+        },
         settings: { autoRules: b.autoRules },
         corps: b.corps.map((c) => ({
           ...c, name: g.corpNames?.get(c.vcenterId) || c.vcenterId, writable: writableOf(req.user, s, c.vcenterId),
@@ -542,6 +581,46 @@ export function registerBmFolders(api) {
       }
       if (hx.hw) return res.json({ ok: true, kind: 'bm', via: hx.via, addr, summary: hwView(hx.hw, admin, hide, m.serviceTag), why: 'summary-only' });
       return res.json({ ok: true, kind: 'bm', via: hx.via, addr, why: hx.via === 'edge' ? 'edge-none' : 'no-inv' });
+    } catch (e) { if (!res.headersSent) res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); }
+  });
+
+  // v3.45 물리서버 점검 상세 — 드로어가 열릴 때 1건(목록에는 상태 요약만). 보증 · 계약(자산 원장) · 펌웨어 기준선 대조 · BIOS 설정 편차.
+  //   범위 밖 · 없는 키는 404(존재 은닉 — /hw 와 같은 노출 규칙). 판정은 이 계정에 보이는 구성원만으로(묶음이 법인을 넘지 않는다).
+  //   계약 번호 · 비고는 **전체 범위 관리자 판본만**(원장은 전 법인 자산을 서비스 태그 하나로 찾는다 — 엣지가 남의 태그를 자기 서버로 올리면 범위 관리자에게
+  //   다른 법인 자산의 계약 번호 · 비고가 보였다: 반증 A4. 날짜 · 종류는 판본 구분 없이). 서비스 태그 · 주소는 싣지 않는다.
+  //   엣지 포탈에서는 답하지 않는다(원장 · 기준 · 폴더 저장소는 중앙에 있다 — 엣지의 빈 로컬 저장소로 ‘원장에 없음’ · ‘미분류’ 라 하지 않는다: 반증 A11).
+  api.get('/tools/bm-folders/check', toolsPerm, async (req, res) => {
+    try {
+      if (isEdgeNode()) return res.status(404).json({ ok: false, error: 'central-only', reason: '물리서버 점검(보증 · 펌웨어 기준선 · BIOS 편차)은 중앙 포탈에서 봅니다.' });
+      // 폴더 저장소를 못 읽었으면 목록과 같이 503 — 못 읽은 배치를 ‘미분류’ 로 판정하지 않는다(반증 A10)
+      if (storeLoadError()) return res.status(503).json({ ok: false, error: 'registryUnreadable', reason: '물리서버 폴더 저장소를 읽지 못해 점검을 판정하지 않았습니다.' });
+      const snap = store.get();
+      const { members, allowed, b } = await stateFor(req, snap);
+      const hide = !!allowed;
+      const admin = isAdminDetailUser(req.user);
+      const visible = members.filter((m) => (m.corp ? (!allowed || allowed.has(m.corp)) : (!hide && m.kind === 'bm')));
+      const k = keyResolverFor(hide, visible.map((m) => m.key))(typeof req.query.key === 'string' ? req.query.key.slice(0, 200) : '');
+      const m = k ? visible.find((x) => x.key === k) : null;
+      if (!m) return res.status(404).json({ ok: false, error: 'not_found', reason: '서버를 찾지 못했습니다.' });
+      res.set('Cache-Control', 'no-store');
+      let hxOf = null;
+      try { hxOf = await hwLookupFactory(); } catch { hxOf = null; }
+      const ci = checkInputs();
+      // 한 대의 판정에는 **그 법인의 서버만** 넣는다 — 묶음이 법인을 넘지 않아 결과가 같고, 드로어를 열 때마다 함대 전체를 다시 판정하지 않는다
+      //   (반증 A6 실측: 658대 전체를 넣으면 한 번에 83ms 동기 — /hw 는 2ms). 법인이 없는 서버는 묶음이 없으므로 자기만.
+      const peersOf = m.corp ? visible.filter((x) => x.corp === m.corp) : [m];
+      const c = bmCheckFor({ members: peersOf, placeOf: b.placeOf, hxOf, assets: ci.assets, adminBase: ci.adminBase, today: todayStamp() }).ofMember(m);
+      const w = c.warranty ? (admin && !hide ? c.warranty : { ...c.warranty, contract: '', note: '' }) : null;
+      const place = b.placeOf.get(m.key);
+      return res.json({
+        ok: true, kind: m.kind, soonDays: WARRANTY_SOON_DAYS,
+        warranty: w, ...(ci.assetsErr ? { assetsUnreadable: true } : {}),
+        // invAt = 판정에 쓴 인벤토리를 읽은 시각(없으면 null) — 화면이 ‘언제 값인가’ 를 보인다(반증 A7)
+        ...(m.kind === 'bm' ? { fw: c.fw || null, bios: c.bios || null, invAt: c.invAt ?? null, model: m.model || '', path: place?.src ? place.path : '',
+          ...(ci.baseErr ? { baselineUnreadable: true } : {}), ...(!hxOf ? { noHw: true } : {}),
+          // 기준 지정(전 법인 공통)은 조회 ∧ 쓰기 무제한 관리자만 — 단추를 그릴지의 표지(집행은 관리 라우트)
+          canBaseline: fleetAdmin(req.user, snap) && !!m.model && !ci.baseErr } : {}),
+      });
     } catch (e) { if (!res.headersSent) res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); }
   });
 

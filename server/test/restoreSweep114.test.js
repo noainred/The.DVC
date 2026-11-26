@@ -104,7 +104,7 @@ const EXCLUDE = ['session-state.json', 'upgrade-signature-override.json', 'bareo
 const ASIS = {
   '설정 — 사람이 고치는 값(되돌리는 것이 복원의 목적 · 본인 OTP 로만 바꾸는 값이 아니다)': [
     'agent-assignments.json', 'alarm-mutes.json', 'alerts.json', 'attach-settings.json', 'backup-stale-alert.json', 'backup.json', 'bareos-bundle-source.json', 'bareos-digest.json',
-    'bareos-health.json', 'bm-capacity.json', 'bm-folders.json', 'bm-idle.json', 'bm-key-decisions.json', 'bm-perf-compare-sets.json', 'bm-perf-rules.json', 'bm-perf-slo.json',
+    'bareos-health.json', 'bm-assets.json', 'bm-capacity.json', 'bm-folders.json', 'bm-fw-baseline.json', 'bm-idle.json', 'bm-key-decisions.json', 'bm-perf-compare-sets.json', 'bm-perf-rules.json', 'bm-perf-slo.json',
     'bmusage-distribute.json', 'bmusage-portmap.json', 'bmusage-settings.json', 'bmusage-tuning.json', 'cost-rates.json', 'curuser-settings.json', 'cvp-settings.json', 'datacenters.json',
     'db-location.json', 'dirusage.json', 'disk-bad-settings.json', 'finops.json', 'fleet-assign.json', 'fleet-tags.json', 'focusmon-alert-rules.json', 'guest-disk.json', 'guest-partition.json',
     'horizon-sessions.json', 'hw-export-prefs.json', 'idrac-scan-settings.json', 'ipam-annotations.json', 'ipam-overrides.json', 'ipam-range-policies.json', 'ipam-report.json', 'ipam-scan.json',
