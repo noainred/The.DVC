@@ -1436,17 +1436,17 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/network-check` | 권한 `tools` | [server/src/routes/api/checksLogs.js:257](../server/src/routes/api/checksLogs.js#L257) |
 | GET | `/tools/orphan-vmdk` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:2002](../server/src/routes/api/toolsCapacity.js#L2002) |
 | GET | `/tools/orphan-vmdk/datastores` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1966](../server/src/routes/api/toolsCapacity.js#L1966) |
-| GET | `/tools/part-faults` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/partFaults.js:328](../server/src/routes/api/partFaults.js#L328) |
-| POST | `/tools/part-faults/ack` | 역할 `admin/operator` · 권한 `tools` · `fullScopeOnly` · `textFields` | [server/src/routes/api/partFaults.js:488](../server/src/routes/api/partFaults.js#L488) |
-| POST | `/tools/part-faults/close` | 역할 `admin` · `fullScopeOnly` · `textFields` | [server/src/routes/api/partFaults.js:470](../server/src/routes/api/partFaults.js#L470) |
-| GET | `/tools/part-faults/escalation` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/partFaults.js:499](../server/src/routes/api/partFaults.js#L499) |
-| PUT | `/tools/part-faults/escalation` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/partFaults.js:507](../server/src/routes/api/partFaults.js#L507) |
-| GET | `/tools/part-faults/events` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/partFaults.js:368](../server/src/routes/api/partFaults.js#L368) |
-| GET | `/tools/part-faults/incidents` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/partFaults.js:404](../server/src/routes/api/partFaults.js#L404) |
-| GET | `/tools/part-faults/reset` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/partFaults.js:517](../server/src/routes/api/partFaults.js#L517) |
-| POST | `/tools/part-faults/scan` | 역할 `admin/operator` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/partFaults.js:435](../server/src/routes/api/partFaults.js#L435) |
-| PUT | `/tools/part-faults/settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/partFaults.js:455](../server/src/routes/api/partFaults.js#L455) |
-| GET | `/tools/part-faults/status` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/partFaults.js:445](../server/src/routes/api/partFaults.js#L445) |
+| GET | `/tools/part-faults` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/partFaults.js:329](../server/src/routes/api/partFaults.js#L329) |
+| POST | `/tools/part-faults/ack` | 역할 `admin/operator` · 권한 `tools` · `fullScopeOnly` · `textFields` | [server/src/routes/api/partFaults.js:490](../server/src/routes/api/partFaults.js#L490) |
+| POST | `/tools/part-faults/close` | 역할 `admin` · `fullScopeOnly` · `textFields` | [server/src/routes/api/partFaults.js:472](../server/src/routes/api/partFaults.js#L472) |
+| GET | `/tools/part-faults/escalation` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/partFaults.js:501](../server/src/routes/api/partFaults.js#L501) |
+| PUT | `/tools/part-faults/escalation` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/partFaults.js:509](../server/src/routes/api/partFaults.js#L509) |
+| GET | `/tools/part-faults/events` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/partFaults.js:370](../server/src/routes/api/partFaults.js#L370) |
+| GET | `/tools/part-faults/incidents` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/partFaults.js:406](../server/src/routes/api/partFaults.js#L406) |
+| GET | `/tools/part-faults/reset` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/partFaults.js:519](../server/src/routes/api/partFaults.js#L519) |
+| POST | `/tools/part-faults/scan` | 역할 `admin/operator` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/partFaults.js:437](../server/src/routes/api/partFaults.js#L437) |
+| PUT | `/tools/part-faults/settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/partFaults.js:457](../server/src/routes/api/partFaults.js#L457) |
+| GET | `/tools/part-faults/status` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/partFaults.js:447](../server/src/routes/api/partFaults.js#L447) |
 | GET | `/tools/pdu` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/pdu.js:79](../server/src/routes/api/pdu.js#L79) |
 | GET | `/tools/pdu/:id` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/pdu.js:168](../server/src/routes/api/pdu.js#L168) |
 | POST | `/tools/pdu/collect-all` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/pdu.js:355](../server/src/routes/api/pdu.js#L355) |
