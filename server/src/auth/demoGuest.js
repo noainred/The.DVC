@@ -35,6 +35,8 @@ export const READ_DENY = [
   '/api/admin/portal-db', '/api/admin/status', '/api/admin/emergency-stop', '/api/admin/net', '/api/admin/dir-usage',
   '/api/admin/os-scan', '/api/admin/idrac/scan-ranges', '/api/admin/veeam', '/api/admin/report', '/api/admin/logs',
   '/api/auth/ad-config', '/api/upgrade', '/api/tools/credentials', '/api/remote',
+  // v3.45: 물리서버 자산 원장(서비스 태그 · 계약 번호 · 올린 사람) · 펌웨어 기준(지정한 사람) — 전체 범위 관리자의 관리 화면이다
+  '/api/admin/bm-assets', '/api/admin/bm-assets.csv', '/api/admin/bm-fw-baseline',
   // v2.719(감사 R1-08): /api/tools 아래 보안 화면 — 설정 파일 평문 비밀 개수·탐지 위치(secret-scan)와
   //   전 엣지 주소·토큰 지문·길이(portal-check/tokens). 접두가 /api/admin/security 뿐이라 빠져 있었다.
   '/api/tools/secret-scan', '/api/tools/portal-check/tokens',
