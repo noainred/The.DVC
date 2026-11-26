@@ -218,11 +218,11 @@ async function treeView(req) {
 
 async function roomView(req, roomId) {
   const acc = accessOf(req);
-  const data = await R.getRoom(roomId);
-  if (!data || !canRead(acc, data.site.corpId)) return null;
-  const corpId = data.site.corpId;
   const admin = isAdminDetailUser(req.user);
   const showSerial = serialsVisible(req);
+  const data = await R.getRoom(roomId, { hideTags: !showSerial });   // 시리얼을 가리는 판본은 이력 글 속 시리얼을 db 층에서 걷어 낸다(행마다 그 장비의 시리얼로)
+  if (!data || !canRead(acc, data.site.corpId)) return null;
+  const corpId = data.site.corpId;
   const { byKey, list, hosts } = corpServers(req, corpId);
   const placedKeys = await R.placedSerialKeys(corpId);
   // 1회차 점검 S1: 표시 이름(label)과 그 이름으로 만든 이력 글에도 주소 · 태그 가림(예전엔 link 만 가렸다 — 화면이 등록부 이름으로 채운 label 이 그대로 나갔다)
@@ -517,7 +517,7 @@ export function registerRack(api) {
       if (!corpId || !canRead(acc, corpId)) return res.status(404).json({ ok: false, reason: '법인을 찾지 못했습니다.' });
       const admin = isAdminDetailUser(req.user);
       const mask = await corpTextMask(req, corpId);
-      const versions = (await R.listVersions(corpId)).map((v) => ({ ...v, user: admin ? v.user : '', detail: mask.text(v.detail) }));
+      const versions = (await R.listVersions(corpId, { hideTags: !serialsVisible(req) })).map((v) => ({ ...v, user: admin ? v.user : '', detail: mask.text(v.detail) }));
       return res.json({ ok: true, corpId, versions, latestId: versions[0]?.id ?? null, keep: VERSION_KEEP, canRestore: canWrite(acc, corpId) });
     } catch (e) { return sendErr(res, e); }
   });

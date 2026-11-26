@@ -1444,12 +1444,12 @@ Prometheus/OTel 익스포터(선택 토큰).
 | POST | `/tools/ps-inspect/run` | 역할 `admin` · `fullRwOnly` | [server/src/routes/api/psInspect.js:108](../server/src/routes/api/psInspect.js#L108) |
 | PUT | `/tools/ps-inspect/settings` | 역할 `admin` · `fullRwOnly` | [server/src/routes/api/psInspect.js:117](../server/src/routes/api/psInspect.js#L117) |
 | GET | `/tools/ps-inspect/top-nodes` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/psInspect.js:77](../server/src/routes/api/psInspect.js#L77) |
-| GET | `/tools/rack` | 권한 `tools` | [server/src/routes/api/rack.js:457](../server/src/routes/api/rack.js#L457) |
-| POST | `/tools/rack/op` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/rack.js:516](../server/src/routes/api/rack.js#L516) |
-| GET | `/tools/rack/room/:id` | 권한 `tools` | [server/src/routes/api/rack.js:491](../server/src/routes/api/rack.js#L491) |
-| GET | `/tools/rack/room/:id/xlsx` | 권한 `tools`, `data.csv` | [server/src/routes/api/rack.js:499](../server/src/routes/api/rack.js#L499) |
-| GET | `/tools/rack/versions` | 권한 `tools` | [server/src/routes/api/rack.js:470](../server/src/routes/api/rack.js#L470) |
-| GET | `/tools/rack/versions/:vid` | 권한 `tools` | [server/src/routes/api/rack.js:480](../server/src/routes/api/rack.js#L480) |
+| GET | `/tools/rack` | 권한 `tools` | [server/src/routes/api/rack.js:500](../server/src/routes/api/rack.js#L500) |
+| POST | `/tools/rack/op` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/rack.js:565](../server/src/routes/api/rack.js#L565) |
+| GET | `/tools/rack/room/:id` | 권한 `tools` | [server/src/routes/api/rack.js:540](../server/src/routes/api/rack.js#L540) |
+| GET | `/tools/rack/room/:id/xlsx` | 권한 `tools`, `data.csv` | [server/src/routes/api/rack.js:548](../server/src/routes/api/rack.js#L548) |
+| GET | `/tools/rack/versions` | 권한 `tools` | [server/src/routes/api/rack.js:513](../server/src/routes/api/rack.js#L513) |
+| GET | `/tools/rack/versions/:vid` | 권한 `tools` | [server/src/routes/api/rack.js:524](../server/src/routes/api/rack.js#L524) |
 | GET | `/tools/relaycheck` | 권한 `tools` | [server/src/routes/api/relaycheck.js:20](../server/src/routes/api/relaycheck.js#L20) |
 | POST | `/tools/relaycheck/run` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/relaycheck.js:47](../server/src/routes/api/relaycheck.js#L47) |
 | PUT | `/tools/relaycheck/settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/relaycheck.js:40](../server/src/routes/api/relaycheck.js#L40) |

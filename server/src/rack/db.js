@@ -98,6 +98,11 @@ async function openInner() {
       ) WITHOUT ROWID;
       CREATE INDEX IF NOT EXISTS ix_rack_place_key_place ON rack_place_key(place_id);
     `);
+    // 이력 · 판 글(detail)은 장비 표시 이름으로 만든다 — 그 이름에 든 시리얼을 가리려면 그 행이 말하는 장비의 시리얼을 알아야 한다(1회차 점검: 원장에서 뺀 장비의
+    //   시리얼은 '지금 원장' 에 없어 옛 글에서 가려지지 않았다). 행마다 tags(JSON 배열 — 응답에 싣지 않는다)를 둔다. NULL = 이 칸이 생기기 전의 행(알 수 없음).
+    for (const t of ['rack_log', 'rack_version']) {
+      if (!conn.prepare(`PRAGMA table_info(${t})`).all().some((c) => c.name === 'tags')) conn.exec(`ALTER TABLE ${t} ADD COLUMN tags TEXT`);
+    }
     dropRoomFrags();   // 새 핸들 — 앞 핸들에서 읽은 조각을 믿지 않는다
     // 시리얼 키 색인(rack_place_key)은 한 번만 채운다 — 이 표가 없던 원장(업그레이드 전)에서 올라온 경우.
     _keysReady = false;
@@ -268,21 +273,35 @@ function bumpRevFloor(db, rev) {
  * 오래된 판은 지운다(2026-11-20 사용자 선택 '지운다' — 감사 로그에는 남는다).
  */
 const CAP_LABEL = { sites: '데이터센터', rooms: '전산실', racks: '랙', places: '장비' };
-function saveVersion(db, corpId, { user, action, detail }) {
+function saveVersion(db, corpId, { user, action, detail, tags = [] }) {
   const snap = currentSnapshot(db, corpId);
   // 점검 C8: 판으로 되살릴 수 없는 크기가 되는 변경은 받지 않는다(같은 트랜잭션이라 변경도 취소된다 — 판 검사와 같은 상한).
   const over = capExceeded(countsOf(snap));
   if (over) fail(409, `이 법인의 ${CAP_LABEL[over]} 수가 상한을 넘어 저장하지 않았습니다(판으로 되돌릴 수 있는 크기까지만).`, { code: 'corpCap' });
-  db.prepare('INSERT INTO rack_version (corp_id,ts,user,action,detail,counts,data) VALUES (?,?,?,?,?,?,?)')
-    .run(corpId, Date.now(), String(user || '').slice(0, 64), action, String(detail || '').slice(0, 500), JSON.stringify(countsOf(snap)), packSnap(snap));
+  db.prepare('INSERT INTO rack_version (corp_id,ts,user,action,detail,counts,data,tags) VALUES (?,?,?,?,?,?,?,?)')
+    .run(corpId, Date.now(), String(user || '').slice(0, 64), action, String(detail || '').slice(0, 500), JSON.stringify(countsOf(snap)), packSnap(snap), tagsJson(tags));
   const cut = db.prepare('SELECT id FROM rack_version WHERE corp_id = ? ORDER BY id DESC LIMIT 1 OFFSET ?').get(corpId, VERSION_KEEP);
   if (cut) db.prepare('DELETE FROM rack_version WHERE corp_id = ? AND id <= ?').run(corpId, cut.id);
 }
 
-function log(db, { user, corpId, roomId = '', action, detail = '', version = true }) {
-  if (version && corpId) saveVersion(db, corpId, { user, action, detail });
-  db.prepare('INSERT INTO rack_log (ts,user,corp_id,room_id,action,detail) VALUES (?,?,?,?,?,?)')
-    .run(Date.now(), String(user || '').slice(0, 64), corpId, roomId, action, String(detail).slice(0, 500));
+/** 행의 tags 칸에 넣을 글 — 그 글(detail)이 말하는 장비의 시리얼 원문(주 + 추가 · 중복 제거 · 상한). */
+const tagsJson = (tags) => JSON.stringify([...new Set((tags || []).filter((t) => typeof t === 'string' && t))].slice(0, 64));
+const serialsOf = (...ps) => ps.flatMap((p) => (p ? [p.serial, ...(p.extraSerials || [])] : [])).filter(Boolean);
+export const LEGACY_DETAIL_HIDDEN = '(옛 기록 — 장비 이름은 이 계정에 보이지 않습니다)';
+/**
+ * 시리얼을 가리는 판본에 줄 detail — 그 행의 tags(그 글이 말하는 장비의 시리얼)를 글에서 걷어 낸다.
+ * tags 가 NULL(이 칸이 생기기 전에 쓴 행)이고 장비 글이면 어떤 시리얼이 들었는지 알 수 없으므로 통째로 가린다(조용히 내보내지 않는다).
+ */
+function detailForHidden(row) {
+  if (row.tags == null) return /^place\./.test(String(row.action || '')) ? LEGACY_DETAIL_HIDDEN : row.detail;
+  let tags = []; try { const v = JSON.parse(row.tags); if (Array.isArray(v)) tags = v.filter((x) => typeof x === 'string'); } catch { return /^place\./.test(String(row.action || '')) ? LEGACY_DETAIL_HIDDEN : row.detail; }
+  return tags.length ? stripTags(row.detail, tagIndexOf(tags.flatMap((t) => [t, serialKeyOf(t)]))) : row.detail;
+}
+
+function log(db, { user, corpId, roomId = '', action, detail = '', version = true, tags = [] }) {
+  if (version && corpId) saveVersion(db, corpId, { user, action, detail, tags });
+  db.prepare('INSERT INTO rack_log (ts,user,corp_id,room_id,action,detail,tags) VALUES (?,?,?,?,?,?,?)')
+    .run(Date.now(), String(user || '').slice(0, 64), corpId, roomId, action, String(detail).slice(0, 500), tagsJson(tags));
   if (!roomId && corpId) {
     // 점검 C12: 전산실이 없는 이력(데이터센터 추가 · 이름 · 삭제, 전산실 삭제)도 법인마다 같은 수만 남긴다(예전엔 끝없이 쌓였다).
     const cut = db.prepare("SELECT id FROM rack_log WHERE room_id = '' AND corp_id = ? ORDER BY id DESC LIMIT 1 OFFSET ?").get(corpId, LOG_KEEP_PER_ROOM);
@@ -318,7 +337,7 @@ export async function listTypes() {
 }
 
 /** 전산실 하나 — 소속(데이터센터 · 법인) · 랙 · 배치 · 최근 이력. 없으면 null. */
-export async function getRoom(roomId, { logLimit = 100 } = {}) {
+export async function getRoom(roomId, { logLimit = 100, hideTags = false } = {}) {
   const db = await need();
   const room = roomRow(db.prepare('SELECT * FROM rack_room WHERE id = ?').get(String(roomId || '')));
   if (!room) return null;
@@ -326,7 +345,9 @@ export async function getRoom(roomId, { logLimit = 100 } = {}) {
   if (!site) return null;
   const racks = db.prepare('SELECT * FROM rack_rack WHERE room_id = ? ORDER BY sort, row_name, name').all(room.id).map(rackRow);
   const places = db.prepare('SELECT p.* FROM rack_place p JOIN rack_rack r ON r.id = p.rack_id WHERE r.room_id = ? ORDER BY p.rack_id, p.u_start DESC').all(room.id).map(placeRow);
-  const logs = db.prepare('SELECT ts, user, action, detail FROM rack_log WHERE room_id = ? ORDER BY id DESC LIMIT ?').all(room.id, Math.max(1, Math.min(500, logLimit)));
+  // tags 는 가림에만 쓰고 돌려주지 않는다(시리얼 원문이다).
+  const logs = db.prepare('SELECT ts, user, action, detail, tags FROM rack_log WHERE room_id = ? ORDER BY id DESC LIMIT ?').all(room.id, Math.max(1, Math.min(500, logLimit)))
+    .map((r) => ({ ts: r.ts, user: r.user, action: r.action, detail: hideTags ? detailForHidden(r) : r.detail }));
   return { room, site, racks, places, logs };
 }
 
@@ -507,7 +528,7 @@ async function roomWrite(roomId, rev, user, fn) {
     if (out.noop) return { ...(out.result || {}), rev: room.rev, unchanged: true };
     const next = room.rev + 1;
     db.prepare('UPDATE rack_room SET rev = ?, updated_at = ? WHERE id = ?').run(next, Date.now(), room.id);
-    log(db, { user, corpId: site?.corpId || '', roomId: room.id, action: out.action, detail: out.detail });
+    log(db, { user, corpId: site?.corpId || '', roomId: room.id, action: out.action, detail: out.detail, tags: out.tags });
     return { ...(out.result || {}), rev: next };
   });
 }
@@ -657,7 +678,7 @@ export function addPlace({ roomId, rev, user, rackId, input }) {
       .run(id, rackId, input.face, input.uStart, input.uSize, input.kind, input.label || '', input.model || '', input.serial || '',
         serialKeyOf(input.serial), JSON.stringify(input.extraSerials || []), input.note || '', input.ratedW ?? null, input.opW ?? null, input.weightKg ?? null, Date.now());
     setPlaceKeys(db, id, keysOf(input));
-    return { result: { id }, action: 'place.add', detail: `${nameOf(input)} → ${rack.name} ${where(input)}` };
+    return { result: { id }, action: 'place.add', detail: `${nameOf(input)} → ${rack.name} ${where(input)}`, tags: serialsOf(input) };
   });
 }
 
@@ -698,6 +719,7 @@ export function updatePlace({ roomId, rev, user, id, rackId = '', input }) {
       result: { id },
       action: moved ? 'place.move' : 'place.update',
       detail: moved ? `${nameOf(next)}: ${fromRack?.name || ''} ${where(cur)} → ${rack.name} ${where(next)}` : `${nameOf(next)} 정보 수정`,
+      tags: serialsOf(cur, next),
     };
   });
 }
@@ -708,18 +730,18 @@ export function removePlace({ roomId, rev, user, id }) {
     if (!cur || !racksById.has(cur.rackId)) fail(404, '장비를 찾지 못했습니다.');
     db.prepare('DELETE FROM rack_place WHERE id = ?').run(id);
     setPlaceKeys(db, id, null);
-    return { result: { id }, action: 'place.remove', detail: `${nameOf(cur)} ← ${racksById.get(cur.rackId)?.name || ''} ${where(cur)}` };
+    return { result: { id }, action: 'place.remove', detail: `${nameOf(cur)} ← ${racksById.get(cur.rackId)?.name || ''} ${where(cur)}`, tags: serialsOf(cur) };
   });
 }
 
 // ───────────────────────── 판 조회 · 되돌리기 ─────────────────────────
 
 /** 한 법인의 판 목록(최신 먼저 · 최대 VERSION_KEEP 개). */
-export async function listVersions(corpId) {
+export async function listVersions(corpId, { hideTags = false } = {}) {
   const db = await need();
-  return db.prepare('SELECT id, ts, user, action, detail, counts FROM rack_version WHERE corp_id = ? ORDER BY id DESC LIMIT ?')
+  return db.prepare('SELECT id, ts, user, action, detail, counts, tags FROM rack_version WHERE corp_id = ? ORDER BY id DESC LIMIT ?')
     .all(String(corpId || ''), VERSION_KEEP)
-    .map((r) => { let c = {}; try { c = JSON.parse(r.counts || '{}'); } catch { c = {}; } return { id: r.id, ts: r.ts, user: r.user, action: r.action, detail: r.detail, counts: c }; });
+    .map((r) => { let c = {}; try { c = JSON.parse(r.counts || '{}'); } catch { c = {}; } return { id: r.id, ts: r.ts, user: r.user, action: r.action, detail: hideTags ? detailForHidden(r) : r.detail, counts: c }; });
 }
 
 /**
@@ -738,10 +760,10 @@ export async function versionDetail(corpId, versionId, { hideTags = false } = {}
   return out ? structuredClone(out) : out;
 }
 function versionDetailRaw(db, corpId, versionId, { hideTags = false } = {}) {
-  const v = db.prepare('SELECT id, ts, user, action, detail, data FROM rack_version WHERE id = ? AND corp_id = ?').get(Number(versionId), String(corpId));
+  const v = db.prepare('SELECT id, ts, user, action, detail, data, tags FROM rack_version WHERE id = ? AND corp_id = ?').get(Number(versionId), String(corpId));
   if (!v) return null;
   const snap = unpackSnap(v.data, corpId);
-  const head = { id: v.id, ts: v.ts, user: v.user, action: v.action, detail: v.detail };
+  const head = { id: v.id, ts: v.ts, user: v.user, action: v.action, detail: hideTags ? detailForHidden(v) : v.detail };
   if (!snap) return { version: head, readable: false };
   const prev = db.prepare('SELECT data FROM rack_version WHERE corp_id = ? AND id < ? ORDER BY id DESC LIMIT 1').get(String(corpId), v.id);
   const prevSnap = prev ? unpackSnap(prev.data, corpId) : null;
