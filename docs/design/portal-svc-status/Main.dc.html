@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>포탈 서비스 상태 모니터링 — 메인</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#7fb2ff}a:hover{color:#b3d1ff}
+button{font-family:inherit}
+</style>
+</helmet>
+<div style="min-height: 1500px; box-sizing: border-box; background: #0a0e17; color: #e6edf6; font-family: system-ui, 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif; font-size: 14px; padding: 24px 28px 40px">
+<div style="max-width: 1384px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px">
+
+<div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; justify-content: space-between">
+<div style="display: flex; flex-direction: column; gap: 6px; min-width: 0">
+<div style="font-size: 12px; color: #8b9bb4">특수기능 › 네트워크 · 통신</div>
+<h1 style="margin: 0; font-size: 22px; font-weight: 700">포탈 서비스 상태 모니터링</h1>
+<div style="font-size: 13px; color: #8b9bb4; max-width: 860px; line-height: 1.55">포탈에 등록된 엣지 · vCenter · CVP · 스토리지를 자동으로 대상에 올리고, 등록된 주소:포트로 TCP 연결을 재서 상태를 봅니다. 장비 자체의 건강 상태가 아니라 ‘포탈이 그 포트에 닿는가’ 입니다.</div>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center">
+<div style="font-size: 12px; color: #8b9bb4; font-family: 'JetBrains Mono', monospace">마지막 측정 09:47:12 · 주기 60초</div>
+<button type="button" style="height: 36px; padding: 0 14px; border-radius: 8px; border: 1px solid #243049; background: #141b2d; color: #e6edf6; font-size: 13px; cursor: pointer">지금 측정</button>
+<a href="Settings.dc.html" style="height: 36px; padding: 0 14px; border-radius: 8px; border: 1px solid #243049; background: #141b2d; color: #e6edf6; font-size: 13px; display: inline-flex; align-items: center; text-decoration: none">자동 등록 · 설정</a>
+</div>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px">
+<sc-for list="{{ tiles }}" as="t" hint-placeholder-count="5">
+<button type="button" onClick="{{ t.pick }}" style="text-align: left; background: #141b2d; border: 1px solid {{ t.border }}; border-radius: 12px; padding: 14px 16px; color: #e6edf6; cursor: pointer; display: flex; flex-direction: column; gap: 6px; min-width: 0">
+<span style="font-size: 12px; color: #8b9bb4; display: flex; gap: 6px; align-items: center"><span style="color: {{ t.color }}" aria-hidden="true">{{ t.mark }}</span>{{ t.label }}</span>
+<span style="font-size: 28px; font-weight: 700; font-family: 'JetBrains Mono', monospace; color: {{ t.color }}">{{ t.n }}</span>
+<span style="font-size: 12px; color: #8b9bb4">{{ t.sub }}</span>
+</button>
+</sc-for>
+</div>
+
+<div style="background: #141b2d; border: 1px solid #243049; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; justify-content: space-between">
+<div style="font-size: 14px; font-weight: 600">법인 × 종류</div>
+<div style="font-size: 12px; color: #8b9bb4">칸 하나 = 그 법인의 그 종류 대상 중 가장 나쁜 상태 · 빈 칸은 등록된 대상 없음</div>
+</div>
+<div style="overflow-x: auto">
+<div style="display: grid; grid-template-columns: 92px repeat(8, minmax(96px, 1fr)); gap: 6px; min-width: 900px; font-size: 12px">
+<div></div>
+<sc-for list="{{ corps }}" as="c" hint-placeholder-count="8"><div style="color: #8b9bb4; font-family: 'JetBrains Mono', monospace; padding: 2px 4px">{{ c }}</div></sc-for>
+<sc-for list="{{ matrix }}" as="m" hint-placeholder-count="4">
+<div style="color: #c8d6e8; padding: 6px 4px">{{ m.label }}</div>
+<sc-for list="{{ m.cells }}" as="x" hint-placeholder-count="8">
+<div style="height: 28px; border-radius: 6px; background: {{ x.bg }}; border: 1px solid {{ x.bd }}; color: {{ x.fg }}; display: flex; align-items: center; justify-content: center; gap: 5px; font-size: 12px"><span aria-hidden="true">{{ x.mark }}</span>{{ x.text }}</div>
+</sc-for>
+</sc-for>
+</div>
+</div>
+</div>
+
+<div style="background: #141b2d; border: 1px solid #243049; border-radius: 12px; overflow: hidden">
+<div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid #1f2a40">
+<div style="display: flex; flex-wrap: wrap; gap: 6px">
+<sc-for list="{{ tabs }}" as="tab" hint-placeholder-count="5">
+<button type="button" onClick="{{ tab.pick }}" style="height: 34px; padding: 0 14px; border-radius: 8px; border: 1px solid {{ tab.bd }}; background: {{ tab.bg }}; color: {{ tab.fg }}; font-size: 13px; cursor: pointer">{{ tab.label }} <span style="font-family: 'JetBrains Mono', monospace; color: {{ tab.nfg }}">{{ tab.n }}</span></button>
+</sc-for>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center">
+<label style="font-size: 12px; color: #8b9bb4" for="psm-q">찾기</label>
+<input id="psm-q" type="text" placeholder="법인 · 이름 · 주소" style="height: 34px; width: 220px; box-sizing: border-box; padding: 0 10px; border-radius: 8px; border: 1px solid #243049; background: #0f1626; color: #e6edf6; font-size: 13px">
+<div style="font-size: 12px; color: #8b9bb4">{{ shown }}개 표시 · 나쁜 상태가 위</div>
+</div>
+</div>
+<div style="overflow-x: auto">
+<table style="width: 100%; min-width: 1240px; border-collapse: collapse; font-size: 13px">
+<thead>
+<tr style="background: #0f1626; color: #8b9bb4; text-align: left; font-size: 12px">
+<th style="padding: 9px 12px; font-weight: 600">상태 ↕</th>
+<th style="padding: 9px 12px; font-weight: 600">종류 ↕</th>
+<th style="padding: 9px 12px; font-weight: 600">법인 ↕</th>
+<th style="padding: 9px 12px; font-weight: 600">이름 ↕</th>
+<th style="padding: 9px 12px; font-weight: 600">접속처(등록된 주소:포트) ↕</th>
+<th style="padding: 9px 12px; font-weight: 600">측정 ↕</th>
+<th style="padding: 9px 12px; font-weight: 600; text-align: right">연결 시간 ↕</th>
+<th style="padding: 9px 12px; font-weight: 600; text-align: right">평소 ↕</th>
+<th style="padding: 9px 12px; font-weight: 600; text-align: right">24시간 성공률 ↕</th>
+<th style="padding: 9px 12px; font-weight: 600">24시간(30분 칸)</th>
+<th style="padding: 9px 12px; font-weight: 600">상태가 바뀐 때 ↕</th>
+</tr>
+</thead>
+<tbody>
+<sc-for list="{{ rows }}" as="r" hint-placeholder-count="12">
+<tr style="border-top: 1px solid #1f2a40">
+<td style="padding: 9px 12px; white-space: nowrap"><span style="display: inline-flex; gap: 6px; align-items: center; padding: 3px 9px; border-radius: 999px; background: {{ r.sbg }}; color: {{ r.sfg }}; font-size: 12px; font-weight: 600"><span aria-hidden="true">{{ r.mark }}</span>{{ r.slabel }}</span></td>
+<td style="padding: 9px 12px; color: #c8d6e8; white-space: nowrap">{{ r.kindLabel }}</td>
+<td style="padding: 9px 12px; font-family: 'JetBrains Mono', monospace; white-space: nowrap">{{ r.corp }}</td>
+<td style="padding: 9px 12px"><a href="Detail.dc.html" style="text-decoration: none">{{ r.name }}</a><div style="font-size: 12px; color: #8b9bb4">{{ r.sub }}</div></td>
+<td style="padding: 9px 12px; white-space: nowrap"><span style="font-family: 'JetBrains Mono', monospace">{{ r.addr }}</span><sc-if value="{{ r.nonstd }}" hint-placeholder-val="{{ false }}"><span style="margin-left: 8px; padding: 2px 7px; border-radius: 6px; border: 1px solid #4b6a9b; color: #9fcaff; font-size: 11px">기본 포트 아님</span></sc-if></td>
+<td style="padding: 9px 12px; color: {{ r.byFg }}; white-space: nowrap">{{ r.by }}</td>
+<td style="padding: 9px 12px; text-align: right; font-family: 'JetBrains Mono', monospace; color: {{ r.rttFg }}; white-space: nowrap">{{ r.rtt }}</td>
+<td style="padding: 9px 12px; text-align: right; font-family: 'JetBrains Mono', monospace; color: #8b9bb4; white-space: nowrap">{{ r.base }}</td>
+<td style="padding: 9px 12px; text-align: right; font-family: 'JetBrains Mono', monospace; white-space: nowrap">{{ r.avail }}</td>
+<td style="padding: 9px 12px"><div style="display: flex; gap: 1px; width: 216px" role="img" aria-label="{{ r.stripLabel }}"><sc-for list="{{ r.cells }}" as="c" hint-placeholder-count="48"><span style="flex: 1; height: 18px; border-radius: 1px; background: {{ c }}"></span></sc-for></div></td>
+<td style="padding: 9px 12px; color: #c8d6e8; white-space: nowrap">{{ r.since }}<div style="font-size: 12px; color: #8b9bb4">{{ r.why }}</div></td>
+</tr>
+</sc-for>
+</tbody>
+</table>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 14px; padding: 10px 16px; border-top: 1px solid #1f2a40; font-size: 12px; color: #8b9bb4">
+<span><span style="color: #22c55e" aria-hidden="true">●</span> 정상 — 연결됨</span>
+<span><span style="color: #f59e0b" aria-hidden="true">▲</span> 지연 — 연결되지만 평소의 2배 초과</span>
+<span><span style="color: #ff6b6b" aria-hidden="true">■</span> 끊김 — 연속 3회 연결 실패</span>
+<span><span style="color: #9fb4cc" aria-hidden="true">○</span> 못 잼 — 측정값이 오지 않음(정상에도 끊김에도 세지 않음)</span>
+<span>30분 칸 색은 그 칸의 가장 나쁜 상태</span>
+</div>
+</div>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1500}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { kind: 'all', st: 'all' }; }
+  renderVals() {
+    var S = {
+      ok:   { label: '정상', mark: '●', fg: '#4ade80', bg: 'rgba(34,197,94,0.14)', cell: '#22c55e', ord: 3 },
+      slow: { label: '지연', mark: '▲', fg: '#fbbf24', bg: 'rgba(245,158,11,0.16)', cell: '#f59e0b', ord: 1 },
+      down: { label: '끊김', mark: '■', fg: '#ff8585', bg: 'rgba(239,68,68,0.18)', cell: '#ef4444', ord: 0 },
+      unk:  { label: '못 잼', mark: '○', fg: '#9fb4cc', bg: 'rgba(139,155,180,0.14)', cell: '#3a4760', ord: 2 }
+    };
+    var K = { edge: '엣지 포탈', vcenter: 'vCenter', cvp: 'CVP', storage: '스토리지' };
+    var D = [
+      ['down','edge','VN-HAN','edge-vn-han','수집 서버 등록부','10.40.1.20:443',false,'c','—','38 ms','97.6 %','09:12 부터 35분째','연속 35회 실패 · 연결 시간 초과',35],
+      ['slow','vcenter','US-EAST','vc-use-01','vCenter 등록부 · 직접 수집','198.51.100.24:20444',true,'c','1,930 ms','820 ms','100 %','09:31 부터 16분째','평소의 2.4배',16],
+      ['unk','storage','VN-HAN','unity-han-01','스토리지 등록부 · Unity','10.40.3.40:443',false,'e','—','4 ms','—','09:12 부터','엣지 보고가 끊김(엣지 포탈 끊김과 같은 시각)',35],
+      ['unk','vcenter','DE-FRA','vc-fra-01','vCenter 등록부 · 엣지 수집','10.30.1.10:443',false,'e','—','—','—','측정 기록 없음','엣지 버전이 낮아 이 측정을 보내지 않음',0],
+      ['ok','edge','KR-SEL','edge-kr-sel','수집 서버 등록부','10.10.1.20:443',false,'c','12 ms','11 ms','100 %','11일째 정상','',-1],
+      ['ok','edge','PL-WRO','edge-pl-wro','수집 서버 등록부','172.20.5.11:443',false,'c','842 ms','835 ms','99.9 %','3일째 정상','',-1],
+      ['ok','edge','US-EAST','edge-us-east','수집 서버 등록부','198.51.100.24:20443',true,'c','815 ms','818 ms','100 %','27일째 정상','',-1],
+      ['ok','vcenter','KR-SEL','vc-sel-01','vCenter 등록부 · 직접 수집','10.10.1.10:443',false,'c','9 ms','9 ms','100 %','11일째 정상','',-1],
+      ['ok','vcenter','PL-WRO','vc-wro-01','vCenter 등록부 · 엣지 수집','172.20.5.10:443',false,'e','3 ms','3 ms','100 %','3일째 정상','',-1],
+      ['ok','cvp','KR-SEL','cvp-sel','CVP 등록부','10.10.2.30:443',false,'c','11 ms','10 ms','100 %','11일째 정상','',-1],
+      ['ok','cvp','US-EAST','cvp-use','CVP 등록부','198.51.100.24:20445',true,'c','818 ms','821 ms','100 %','27일째 정상','',-1],
+      ['ok','storage','KR-SEL','unity-sel-01','스토리지 등록부 · Unity','10.10.3.40:443',false,'c','10 ms','10 ms','100 %','11일째 정상','',-1],
+      ['ok','storage','KR-SEL','pmax-sel-01','스토리지 등록부 · PowerMax','10.10.3.50:8443',false,'c','13 ms','12 ms','100 %','11일째 정상','',-1],
+      ['ok','storage','PL-WRO','isilon-wro','스토리지 등록부 · Isilon','172.20.6.40:8080',false,'e','5 ms','5 ms','100 %','3일째 정상','',-1],
+      ['ok','storage','MX-MTY','pstore-mty','스토리지 등록부 · PowerStore(SSH)','10.60.3.41:22',false,'e','2 ms','2 ms','99.3 %','어제 22:40 부터 정상','10분 끊겼다 복구',-1]
+    ];
+    var self = this, st = this.state;
+    var all = D.map(function (d, i) {
+      var s = S[d[0]], cells = [];
+      for (var k = 0; k < 48; k++) {
+        var c = S.ok.cell;
+        if (d[0] === 'down' && k >= 47 - Math.floor(d[13] / 30)) c = S.down.cell;
+        if (d[0] === 'down' && i === 0 && k === 9) c = S.down.cell;
+        if (d[0] === 'slow' && k >= 47) c = S.slow.cell;
+        if (d[0] === 'unk') c = (d[13] > 0 && k < 46) ? S.ok.cell : S.unk.cell;
+        if (d[2] === 'MX-MTY' && k === 21) c = S.down.cell;
+        if (d[2] === 'PL-WRO' && d[1] === 'edge' && k === 30) c = S.slow.cell;
+        cells.push(c);
+      }
+      return {
+        st: d[0], kind: d[1], slabel: s.label, mark: s.mark, sfg: s.fg, sbg: s.bg, ord: s.ord,
+        kindLabel: K[d[1]], corp: d[2], name: d[3], sub: d[4], addr: d[5], nonstd: d[6],
+        by: d[7] === 'c' ? '중앙' : '엣지(' + d[2] + ')', byFg: d[7] === 'c' ? '#c8d6e8' : '#67e8f9',
+        rtt: d[8], rttFg: d[0] === 'slow' ? '#fbbf24' : '#e6edf6', base: d[9], avail: d[10], since: d[11], why: d[12],
+        cells: cells, stripLabel: d[3] + ' 최근 24시간 상태 띠'
+      };
+    });
+    var rows = all.filter(function (r) { return (st.kind === 'all' || r.kind === st.kind) && (st.st === 'all' || r.st === st.st); })
+      .sort(function (a, b) { return a.ord - b.ord; });
+    var cnt = function (f) { return all.filter(f).length; };
+    var tile = function (key, label, sub) {
+      var s = S[key] || { mark: '◆', fg: '#e6edf6' }, on = st.st === key;
+      return { label: label, mark: s.mark, color: s.fg, sub: sub, border: on ? s.fg : '#243049',
+        n: key === 'all' ? all.length : cnt(function (r) { return r.st === key; }),
+        pick: function () { self.setState({ st: on ? 'all' : key }); } };
+    };
+    var tabs = [['all', '전체']].concat(Object.keys(K).map(function (k) { return [k, K[k]]; })).map(function (t) {
+      var on = st.kind === t[0];
+      return { label: t[1], n: t[0] === 'all' ? all.length : cnt(function (r) { return r.kind === t[0]; }),
+        bg: on ? '#1668d8' : '#0f1626', bd: on ? '#4b9bff' : '#243049', fg: on ? '#ffffff' : '#c8d6e8', nfg: on ? '#dbeafe' : '#8b9bb4',
+        pick: function () { self.setState({ kind: t[0] }); } };
+    });
+    var corps = ['KR-SEL', 'PL-WRO', 'US-EAST', 'VN-HAN', 'DE-FRA', 'MX-MTY', 'IN-CHE', 'CN-TSN'];
+    var matrix = Object.keys(K).map(function (k) {
+      return { label: K[k], cells: corps.map(function (c) {
+        var hit = all.filter(function (r) { return r.kind === k && r.corp === c; }).sort(function (a, b) { return a.ord - b.ord; })[0];
+        if (!hit) return { bg: 'transparent', bd: '#1f2a40', fg: '#8b9bb4', mark: '', text: '' };
+        return { bg: hit.sbg, bd: 'transparent', fg: hit.sfg, mark: hit.mark, text: hit.slabel };
+      }) };
+    });
+    return {
+      rows: rows, shown: rows.length, tabs: tabs, corps: corps, matrix: matrix,
+      tiles: [tile('all', '전체 대상', '등록부 4종에서 자동 등록'), tile('ok', '정상', '연결됨'), tile('slow', '지연', '평소의 2배 초과'), tile('down', '끊김', '연속 3회 실패'), tile('unk', '못 잼', '따로 셉니다')]
+    };
+  }
+}
+</script>
+</body>
+</html>
