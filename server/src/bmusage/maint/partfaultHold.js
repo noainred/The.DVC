@@ -94,3 +94,17 @@ export async function partfaultMaintHold(devices = [], { now = Date.now(), deps 
     return { ...r, ...(audit ? { audit: { checked: audit.checked, leak: audit.leak } } : {}) };
   } catch (e) { return { hold: new Set(), byDevice: new Map(), error: String(e?.message || e).slice(0, 160) }; }
 }
+
+/**
+ * v3.51 부품 장애 알림 단계 올리기(partfault/escalationRun.js)용 — **들여다보기만** 하는 보류 집합(계수 · 점검 기록 · 적용 표지를 남기지 않는다).
+ *   같은 판정(maintJudge + holdSetFor)을 쓰되 partfaultMaintHold 의 부수 효과(noteApplied · countSuppression · auditCycle)는 하지 않는다 — 1분마다 불러도
+ *   ‘보류 n대’ 계수가 부풀지 않게. 열쇠는 holdSetFor 와 같다(dkey(수집 주체, deviceId)). 실패하면 빈 집합(보류 없음 — 단계 알림은 평소대로).
+ */
+export async function partfaultMaintHoldPeek(devices = [], { now = Date.now() } = {}) {
+  try {
+    const judge = await maintJudge({ now });
+    if (!judge.windows.some((w) => w.scopes?.hold && !w.deleted)) return { hold: new Set() };
+    return { hold: holdSetFor(devices, await centralTargets(), judge, now).hold };
+  } catch (e) { return { hold: new Set(), error: String(e?.message || e).slice(0, 160) }; }
+}
+export const maintHoldKeyOf = (agent, deviceId) => dkey(String(agent || '').trim().toLowerCase(), deviceId);

@@ -2110,3 +2110,39 @@
 - 회귀: `server/test/bmOps350.test.js` · `server/test/bmHwLogRoundTrip350.test.js`(실제 collector ↔ pull 왕복 · 끝쪽 읽기) · 웹 `bmFolders/bmOps350.test.jsx`(구역은 `initial` 로 응답별 렌더).
   반증 2인(A 서버 15건 · B 화면 17건) 결과와 반영은 `docs/rules/audits.md` ‘v3.50 물리서버 운영 반증’.
 
+### v3.51 부품 수명 지표 · 알림 단계 올리기(설계 docs/design/bm-feature-proposals ⑧ ⑪ · 구현 기록 §13)
+
+- **⑧ SSD 잔여 수명**(`server/src/idrac/partLife.js` — 판정 코어 하나): Redfish Drive 표준 속성 `PredictedMediaLifeLeftPercent`(인벤토리가 디스크마다 이미 GET 하는 응답 — **추가 요청 0**).
+  0~100 의 수만(아니면 null — 0 이 아니다). SSD 판정은 `mediaKindOf` · `isSsd` 하나(하드웨어 요약도 이것 — 두 벌이면 요약의 ssd 수와 수명 n 이 어긋났다: 반증 A14).
+  **매체 빈칸 디스크는 SSD 로도 HDD 로도 세지 않는다**(화면은 ‘SSD 없음’ 대신 ‘SSD 로 확인한 디스크 없음 · 매체를 모르는 디스크 N개’).
+  표지: 낮음 = `LIFE_LOW_PCT`(10) 이하 · 같은 서버 · 같은 모델 SSD 가운데값보다 `LIFE_PEER_GAP`(20)%p 이상 낮음(비교할 다른 SSD 가 `LIFE_PEER_MIN`(2)개 이상일 때만). 90일 추세는 이력 저장소가 없어 내지 않는다.
+  요약 `disk.life {n, read, min}` 는 **줄 상한과 관계없이 전부에서** 센다(반증 A15) · 중앙 정제는 read ≤ n · 범위 밖 min null · 구버전 엣지는 키 없음.
+  **엣지 축약 ↔ 중앙 정제 화이트리스트 짝**(`collector/compactInv.js` ↔ `remoteInventory.js INV_SHAPE.disks` 의 `lifeLeftPct`): 읽었으나 값 없음은 null 로 싣고, **읽기 전 판 인벤토리(키 없음)는 싣지 않는다** —
+  상세 줄의 `stale` 이 ‘수명 값을 읽기 전 판의 인벤토리’ 와 ‘장비가 값을 주지 않음’ 을 가른다(반증 B7).
+- **⑧ 메모리 교정 오류 경고**(`memCeOf` · `/hwlog` 응답 `memCe`): 장비가 DIMM 별 교정 오류 **건수**를 주는지 확인하지 못해, SEL 의 **교정 오류 경고 기록 수**를 슬롯별로 센다(오류 건수 자체가 아니다 — 화면이 밝힌다).
+  문구는 ‘correctable · corrected’ **바로 뒤에** (memory)(ECC) error 가 와야 한다(설정 문구 ‘… error corrected after reboot’ 를 세지 않게 — 반증 A19) · ‘uncorrect’ 는 뺀다.
+  슬롯: Dell `DIMM_B3` · `DIMM.Socket.B3` → B3 · HPE ‘Processor 1, Memory Module 3’ → P1-M3 · 모르면 `unknownSlot`(슬롯 상한 64 를 넘은 것도 거기로 — 반증 S4).
+  **`covered`(지난 30일을 다 셌다)는 장비가 준 것을 다 읽었고(멈춤 · 건너뜀 없음 · 전체 수 ≤ 읽은 수) 화면 줄이 기간을 덮을 때만** — 일부만 읽었으면 0 을 ‘없음’ 으로, 건수를 ‘30일 건수’ 로 쓰지 않는다(반증 A9 · B8).
+  세기는 가리기 전 원문에서 · 이 노드 서버는 인벤토리 DIMM 위치로 0 인 슬롯도 줄로.
+- **⑪ 알림 단계 올리기 · 당직**(판정 순수 `server/src/partfault/escalation.js` · 실행 `escalationRun.js` · 설정 `partfault-escalation.json` · 진행 기록 `partfault-escalation-state.json`):
+  **기본 꺼짐 · 중앙만**(엣지는 부품 장애를 판정하지 않는다 · `centralUrl` 이면 시작하지 않는다) · 회차 주기는 `ESC_TICK_MS`(화면은 API `tickMs` 로 — 숫자를 박지 않는다: 반증 B10) · 재진입 가드 · 보내기는 순차.
+  **시간은 그 장애를 정책 대상으로 처음 본 때부터 센다**(장애 시각이 아니다 — 켜기 · 정책 수정 · 상태가 정책 안으로 들어옴 · 다시 켬 직후 오래된 장애에 한꺼번에 보내지 않게: 반증 A2 · A5).
+  열려 있는 동안은 정책 밖이어도 기록을 둔다(이상 ↔ 주의 왕복에 보낸 단계를 다시 보내지 않게 — 반증 A3) · 장비 키만 바뀐 같은 장애(같은 수집 주체 · 장비 id · 종류 · 부품)는 기록 · 확인을 이어받는다(반증 A4) ·
+  꺼져 있어도 닫힌 장애의 기록은 지운다(다시 열린 장애가 옛 확인을 물려받지 않게).
+  한 회차에 **가장 높은 지난 단계 하나**만 보낸다(낮은 단계는 ‘건너뜀’ 으로 적는다) · 한 회차 `ESC_SENDS_PER_RUN`(20)건 · 넘으면 다음 회차 · 기록 상한 `ESC_ITEMS_MAX`(5,000)을 넘는 장애에는 보내지 않는다(기록 못 하면 매 회차 다시 보내므로 — 반증 A7).
+  **‘보냄’ 은 받는 곳 하나 이상에 갔다고 확인한 것만**(메일 `ok` · 채널 `deliveryOutcome === 'delivered'`) — 메일 꺼짐 · 시간당 한도 · 채널 실패 · 켜진 채널 없음 · 오늘 당직 없음은 ‘안 감’(fail)으로 적고 다음 회차에 다시,
+  `ESC_RETRY_MAX`(3)번째면 그만둔다(give). 행 표지는 간 단계(`step`)와 안 간 단계(`tried` · `gaveUp`)를 가른다(반증 A8 · B1).
+  **보내지 않는 경우**: 꺼짐 · 부품 장애 점검 꺼짐 · **데모(mock)로만 켜진 점검**(합성 장애가 실제 채널로 — 반증 S1 · poller.js v2.708 규칙) · 진행 기록 손상(보존 뒤 지금부터 셈)이나 **읽기 오류**(보낸 단계를 모르는 채 보내지 않는다) ·
+  정비 창 보류 장비(`partfaultMaintHoldPeek`) · 확인함. 보내기 직전에 그 사이 확인됐는지 다시 보고, 회차 끝 저장은 그 사이 들어온 확인을 덮지 않는다(반증 A1).
+  채널 억제 열쇠에 수집 주체를 넣는다(두 엣지의 같은 파트 키가 서로를 억제하지 않게 — 반증 A17).
+- **⑪ 확인**(`POST /tools/part-faults/ack`): 도구 권한 · 운영자 이상(`writeRole`) · **전체 범위**(`fullScopeOnly`) · 데모 계정 아님(`canAck`) · 감사. 열쇠 `ackId` 는 키를 싣지 않는 HMAC(프로세스마다 비밀 — 재시작 뒤 옛 화면은 404, 사유가 재시작 가능성을 밝힌다)
+  이고 입력에 수집 주체가 들어간다(다른 법인 같은 파트 키와 갈린다). **표지는 가리기 전 원본 행으로 만든다**(IP 로 등록한 장비의 비관리자 판본에서 열쇠가 어긋나 404 — 반증 P06).
+- **⑪ 설정**(`GET/PUT /tools/part-faults/escalation` — 관리자 · 전체 범위 · 감사 · 데모 READ_DENY): 저장은 엄격 검증(조용히 고치지 않고 사유 — ‘정책 N · K단계’ · 한글 요일 · 메일 CR/LF · 공백 거절 ·
+  수집 주체 이름에 쉼표 · 세미콜론 · 제어 문자 · 원형 이름 거절 · 64개 · 중복 메일은 지운 뒤 센다). 손상 · 모르는 판은 꺼짐으로 읽고 쓰기 409(보존). `enabledAt` 은 켜는 순간만 바뀐다.
+  당직: 수집 주체(이 포탈 = '' · 엣지 이름 · 모두 = '*')마다 요일별 — **그 주체 표의 그 요일이 비면 ‘모두’ 표의 그 요일**(요일은 포탈 서버 시각 · 법인 현지 시각이 아니다).
+  진행 기록은 상태 파일(`registerStateFile` · 복원은 지금 것 유지 `RESTORE_KEEP_CURRENT`).
+- **⑪ 화면**: 1단계(지금 부품 장애 알림)가 나갔다고 단정하지 않는다(‘2단계 대기’ — 즉시 알림은 데모 · 상한으로 안 나갈 수 있다: 반증 B6) · 같은 수집 주체의 당직표가 겹치면 저장을 막는다(반증 B2) ·
+  저장하면 부모 목록을 다시 읽는다(반증 B3) · 확인 결과는 그 행에(반증 B4) · 긴 확인자 이름은 말줄임(반증 B5) · 고친 칸은 지난 거절 사유를 지운다 · 저장 중 칸 잠금 · 바뀐 칸이 있으면 닫기 전에 묻는다.
+- 회귀: `server/test/bmLife351.test.js` · `server/test/partFaultEscalation351.test.js` · 웹 `bmFolders/bmLife351.test.jsx` · `partFaultEsc351.test.jsx`(클릭 동작은 jsdom 이 없어 소스 꼴 + Chromium).
+  반증 2인(A 서버 20건 · B 화면 15건 + 서버 4건) 결과와 반영은 `docs/rules/audits.md` ‘v3.51 부품 수명 · 알림 단계 반증’.
+

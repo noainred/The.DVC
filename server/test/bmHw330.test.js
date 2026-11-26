@@ -68,7 +68,8 @@ test('① 요약 — CPU · 메모리 · 디스크 · NIC(FC 제외) · FC HBA �
   const h = H.hwSummaryOf(INV());
   assert.deepEqual(h.cpu, { sockets: 2, cores: 48, threads: 96, model: 'Synth Xeon 6342' });
   assert.deepEqual(h.mem, { gib: 512, dimms: 16 });
-  assert.deepEqual(h.disk, { n: 4, gb: 13760, ssd: 3, hdd: 1, nvme: 1 });
+  // v3.51: SSD 가 있으면 수명 요약(life) — 이 픽스처는 수명 값이 없어 read 0 · min null(0 이 아니다)
+  assert.deepEqual(h.disk, { n: 4, gb: 13760, ssd: 3, hdd: 1, nvme: 1, life: { n: 3, read: 0, min: null } });
   assert.deepEqual(h.nic, { ports: 4, up: 3, maxGbps: 25, speeds: [[25, 2], [1, 2]] }, 'FC 어댑터 포트는 NIC 에 넣지 않는다');
   assert.deepEqual(h.hba, { n: 1, ports: 2 }, 'SAS HBA(HBA355i)는 FC HBA 가 아니다 · 포트 수는 같은 모델 NetworkAdapter 에서');
   assert.deepEqual(h.os, { name: 'Red Hat Enterprise Linux', ver: '9.2' });
@@ -86,7 +87,7 @@ test('① 못 읽은 컬렉션은 0 이 아니라 null · 부분 합은 null(개
   assert.equal(failed.nic, null, 'NIC 빈 배열 = 못 읽음(표식 없는 컬렉션)');
   assert.equal(failed.hba, null, 'PCIe 실패 + NIC 못 읽음 → HBA 모름(0 이 아니다)');
   const partial = H.hwSummaryOf(INV({ disks: [{ capacityGB: 960, media: 'SSD' }, { media: 'HDD' }] }));
-  assert.deepEqual(partial.disk, { n: 2, gb: null, ssd: 1, hdd: 1, nvme: 0 }, '용량 하나를 못 읽으면 합은 null');
+  assert.deepEqual(partial.disk, { n: 2, gb: null, ssd: 1, hdd: 1, nvme: 0, life: { n: 1, read: 0, min: null } }, '용량 하나를 못 읽으면 합은 null');
   const none = H.hwSummaryOf(INV({ disks: [], pcie: [], nics: [{ model: 'Broadcom 25Gb', ports: [{ id: '1', link: 'Up', speedMbps: 25000 }] }] }));
   assert.deepEqual(none.disk, { n: 0, gb: 0, ssd: 0, hdd: 0, nvme: 0 }, '읽었고 디스크 없음');
   assert.deepEqual(none.hba, { n: 0, ports: 0 }, '읽었고 FC 없음');
