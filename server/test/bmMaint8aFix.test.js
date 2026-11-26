@@ -198,9 +198,20 @@ test('⑧ F5 — 합친 덮임 규칙(순수): 같은 서버를 덮는 창 합(�
   const o2 = win({ id: 'mw-o2000001', target: { kind: 'server', keys: ['S1'] }, schedule: { kind: 'once', start: loc(s0 + 12 * HOUR), end: loc(s0 + 24 * HOUR) } });
   assert.equal(ST.coverNeedsOwner(o2, [o1], NOW), true);
   // 매월(마지막 일요일 12h) + 매월 첫 월요일 00:00 12h — 달마다 맞닿는 달이 다르다(400일 기준점)
-  const lastSun = win({ id: 'mw-ls000001', target: { kind: 'server', keys: ['S1'] }, schedule: { kind: 'monthly', nth: 5, weekday: 0, time: '12:00', durMin: 720 } });
-  const firstMon = win({ id: 'mw-fm000001', target: { kind: 'server', keys: ['S1'] }, schedule: { kind: 'monthly', nth: 1, weekday: 1, time: '00:00', durMin: 720 } });
-  assert.equal(ST.coverNeedsOwner(firstMon, [lastSun], NOW), true, '마지막 일요일 다음 날이 첫 월요일인 달');
+  // 2026-11-26 시험 위생 점검(재현): 예전에는 판정 시각 · 확인 시각을 실제 시각(NOW)으로 두었다 — 반복 창은 확인 뒤 RECUR_CONFIRM_DAYS(92일)에 만료되므로
+  //   실제로 보는 범위는 92일이고, 그 안에 '1일이 월요일인 달' 이 없으면(2027-03-02 ~ 07-31 · 2027-11-02 ~ 2028-01-29 · 2028-05-02 ~ 09-30 실행) 거짓이었다.
+  //   판정 시각을 그런 달의 1일(서울) 30일 전으로 정한다 — 실제 시각에서 가장 가까운 다음 그런 달(규칙 자체는 그대로 · 시험 시각만 고정).
+  const FM = (() => {
+    const p = new Date(NOW + 9 * HOUR);   // 서울 달력
+    for (let i = 1; i <= 24; i += 1) {
+      const y = p.getUTCFullYear(); const m = p.getUTCMonth() + i;
+      if (new Date(Date.UTC(y, m, 1)).getUTCDay() === 1) return Date.UTC(y, m, 1) - 9 * HOUR - 30 * DAY;
+    }
+    throw new Error('24달 안에 1일이 월요일인 달이 없다(불가능)');
+  })();
+  const lastSun = win({ id: 'mw-ls000001', target: { kind: 'server', keys: ['S1'] }, schedule: { kind: 'monthly', nth: 5, weekday: 0, time: '12:00', durMin: 720 }, at: FM, confirmedAt: FM });
+  const firstMon = win({ id: 'mw-fm000001', target: { kind: 'server', keys: ['S1'] }, schedule: { kind: 'monthly', nth: 1, weekday: 1, time: '00:00', durMin: 720 }, at: FM, confirmedAt: FM });
+  assert.equal(ST.coverNeedsOwner(firstMon, [lastSun], FM), true, '마지막 일요일 다음 날이 첫 월요일인 달');
   // 24시간 창의 끝을 후보 발생 끝에 맞춰야 드러나는 합(이 규칙 전에 만든 비소유자 창 둘이 22시간 이어짐 + 5시간 뒤 6시간 후보 → [9h, 33h) 에 19시간)
   const t1 = NOW + 2 * HOUR;
   const l1 = win({ id: 'mw-l1000001', target: { kind: 'server', keys: ['S9'] }, schedule: { kind: 'once', start: loc(t1), end: loc(t1 + 11 * HOUR) } });

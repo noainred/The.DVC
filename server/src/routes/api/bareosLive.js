@@ -20,6 +20,7 @@ import { nextSlot } from '../../bareos/groupSchedule.js';
 import { rateNowOf, jobFdState } from '../../bareos/liveParse.js';
 import { isFinalStatus } from '../../bareos/names.js';
 import { numOrNull } from '../../util/numOrNull.js';
+import { dayIndex, dayStartMs } from '../../util/dayKey.js';
 import { memoJson, scopeKey } from './shared.js';
 import { relayLimits } from '../../bareos/edgeOps.js';
 import { scopeSig } from '../../util/scopeSig.js';
@@ -33,7 +34,11 @@ export const STUCK_AFTER_MS = 3 * 3_600_000;
 /** Director 가 '아직 시작하지 않았다' 고 보는 사유 — 원장이 실행 중이어도 대기로 센다. */
 const NOT_STARTED = new Set(['maxjobs', 'created', 'priority', 'starttime']);
 const DAY = 86_400_000;
-const startOfToday = (now) => { const d = new Date(now); d.setHours(0, 0, 0, 0); return d.getTime(); };
+// '오늘' 은 포탈 시각(기본 KST — util/dayKey.js)의 자정부터다. 2026-11-26 시험 위생 점검: 예전에는 프로세스 시간대(setHours)로 잘라, 서버 시간대가 UTC 인 설치본은
+//   '오늘 합계' 가 한국 시각 09:00 에 다시 0 부터 셌다(Bareos 다른 화면 · 일일 집계는 dayKey 를 쓴다 — 판정 코어 하나).
+const startOfToday = (now) => dayStartMs(dayIndex(now));
+/** 시험 전용 — '오늘' 경계(todayBoundary.test.js). */
+export const _startOfTodayForTest = startOfToday;
 const median = (xs) => { if (!xs.length) return null; const s = [...xs].sort((a, b) => a - b); const m = s.length >> 1; return s.length % 2 ? s[m] : Math.round((s[m - 1] + s[m]) / 2); };
 /** 끝난 성공(T·W) 실행 한 줄의 평균 속도(바이트 ÷ 소요) — 값을 다 읽었을 때만(못 읽은 값으로 지어내지 않는다). */
 export function rateOfRun(r) {

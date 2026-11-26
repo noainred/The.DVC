@@ -27,7 +27,9 @@ const NB = { uid: idOf(['-u', 'nobody']) || 65534, gid: idOf(['-g', 'nobody']) |
 const OTHER_UID = 4242;   // 두 번째 비-root 계정(등록부에 없어도 chown 은 숫자로 된다)
 const NODE = process.execPath;
 
-const base = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2744vb-'));
+// 다른 계정(uid 65534)이 들어와 실행하는 픽스처라 바꾸기 전 임시 폴더에 — 시험 프로세스의 os.tmpdir() 는 0700 격리 상자 안이다(_isolateConfig.js · 2026-11-26)
+const ORIG_TMP = process.env.DVC_TEST_ORIG_TMPDIR || os.tmpdir();
+const base = fs.mkdtempSync(path.join(ORIG_TMP, 'audit2744vb-'));
 fs.chmodSync(base, 0o755);
 const fifos = [];
 after(() => {
@@ -97,7 +99,7 @@ test('VERIFY-01 ⓪ vp_path_controllers — 길 전체(폴더·링크·링크 �
   assert.equal(pc(path.join(d, 'missing')), `NO[stat:${path.join(d, 'missing')}]`, '확인 실패는 root 가 아니라 판정 불가(예전 || echo 0)');
   assert.match(pc(path.join(d, 'r/loop1')), /^NO\[loop:/);
   assert.equal(pc('relative/x'), 'NO[relative]');
-  assert.equal(pc(os.tmpdir()), 'OK[]', 'sticky /tmp 는 남의 항목을 바꿀 수 없어 허용');
+  assert.equal(pc(ORIG_TMP), 'OK[]', 'sticky /tmp 는 남의 항목을 바꿀 수 없어 허용');
 });
 
 /* ── VERIFY-01 · 02 ──────────────────────────────────────────────────────────────────────────────────────── */

@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { dayIndex as _dayIndex, dayStartMs as _dayStartMs } from '../src/util/dayKey.js';   // 가져오는 것이 없는 순수 모듈 — 설정 폴더를 읽지 않아 정적 가져오기가 안전하다
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bareoslive-'));
 process.env.CONFIG_DIR = tmp;
@@ -100,7 +101,8 @@ test('② 엣지 회신 정제 — 음수·문자열 숫자는 null · jobid 없
 /* ───────── 원장 · 폴러 · 라우트(가짜 Director) ───────── */
 const NOW = Date.now();
 // v2.840: '오늘 합계' 시험의 끝난 실행 — 지금 30·40분 전이 자정을 넘으면(00:00~00:40) 어제가 되어 시험이 깨졌다(실측 00:19). 오늘 0시 아래로 내려가지 않게 자른다.
-const TODAY0 = (() => { const d = new Date(NOW); d.setHours(0, 0, 0, 0); return d.getTime(); })();
+// 2026-11-26: 제품의 '오늘' 이 포탈 시각(util/dayKey.js)의 자정이 됐다 — 시험도 같은 시계로(예전 setHours 는 프로세스 시간대라 둘이 같은 방식으로 틀렸다).
+const TODAY0 = _dayStartMs(_dayIndex(NOW));
 const AGO = (m) => Math.max(NOW - m * 60_000, TODAY0);
 const MIN = 60_000;
 const DIR_TEXT = [
