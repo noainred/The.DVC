@@ -10,6 +10,7 @@ import path from 'node:path';
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rack-'));
 process.env.RACK_DB = path.join(dir, 'rack.db');
+process.env.RACK_SELF_CHECK = '1';   // 조각 캐시로 만든 판 · 시리얼 키 색인 판정을 원장 훑기와 매번 대조한다(다르면 던진다)
 
 const L = await import('../src/rack/layout.js');
 const D = await import('../src/rack/db.js');
