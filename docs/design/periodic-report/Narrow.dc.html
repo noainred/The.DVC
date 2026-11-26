@@ -56,7 +56,7 @@ td.num{text-align:right;font-family:"JetBrains Mono",monospace}
 .sel{min-height:40px;border:1px solid #243049;border-radius:8px;background:#0a0e17;color:#e6edf6;font:inherit;font-size:13px;padding:0 10px;box-sizing:border-box;display:flex;align-items:center;gap:8px;flex:1 1 150px}
 </style>
 </helmet>
-<div style="display:flex;flex-direction:column;min-height:1900px;max-width:100%">
+<div style="display:flex;flex-direction:column;min-height:2410px;max-width:100%">
   <div class="tb">
     <button class="btn" type="button" aria-label="메뉴" style="min-height:36px;width:36px;padding:0"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
     <span class="logo"><span class="v">D</span>THE DVC</span>
@@ -108,22 +108,41 @@ td.num{text-align:right;font-family:"JetBrains Mono",monospace}
     <div>
       <div class="muted" style="font-size:11.5px"><a href="#">보관함</a> › <span class="mono">M-2026-10</span></div>
       <h2 style="margin:4px 0 6px;font-size:17px;font-weight:800">월간 점검 보고서 — 2026년 10월</h2>
-      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center"><span class="st warn" style="height:26px;font-size:13px"><span class="g">!</span>종합 주의</span><span class="muted" style="font-size:11.5px">기간 10-01 ~ 10-31 · 생성 11-01 09:00 · 기준 08:55 · 법인 28/28</span></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center"><span class="st crit" style="height:26px;font-size:13px"><span class="g">×</span>종합 이상</span><span class="muted" style="font-size:11.5px">기간 10-01 ~ 10-31 · 생성 11-01 09:00 · 기준 08:55 · 법인 27/28</span></div>
     </div>
-    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px"><button class="btn" type="button">XLSX</button><button class="btn" type="button">PDF 저장</button><button class="btn" type="button">메일 다시 보내기</button><button class="btn" type="button">◀ 9월</button></div>
-    <div class="cnts"><span class="n"><span class="st ok"><span class="g">✓</span></span><b>36</b></span><span class="n"><span class="st warn"><span class="g">!</span></span><b>7</b></span><span class="n"><span class="st crit"><span class="g">×</span></span><b>1</b></span><span class="n"><span class="st unk"><span class="g">?</span></span><b>3</b></span><span class="n">조치 <b style="color:#f59e0b">6</b></span></div>
+    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px"><button class="btn" type="button">XLSX</button><button class="btn" type="button">HTML 보고서</button><button class="btn" type="button">다시 보내기</button><button class="btn" type="button">◀ 9월</button></div>
+    <div class="cnts"><span class="n"><span class="st ok"><span class="g">✓</span></span><b>30</b></span><span class="n"><span class="st warn"><span class="g">!</span></span><b>6</b></span><span class="n"><span class="st crit"><span class="g">×</span></span><b>2</b></span><span class="n"><span class="st unk"><span class="g">?</span></span><b>3</b></span><span class="n">조치 <b style="color:#f59e0b">10</b></span></div>
     <section class="axis" style="display:flex;flex-direction:column;gap:8px">
-      <div class="card a"><div class="t"><span class="sw" style="background:#3b82f6"></span>인프라 <span class="muted" style="font-weight:600;font-size:11.5px">22</span><span class="st crit" style="margin-left:auto"><span class="g">×</span>이상 1</span></div><div class="cnts"><span class="n">정상 <b>17</b></span><span class="n" style="color:#f59e0b">주의 <b>3</b></span><span class="n" style="color:#f87171">이상 <b>1</b></span><span class="n" style="color:#9aa4b2">불가 <b>1</b></span></div><div class="muted" style="font-size:11.5px">CN2 데이터스토어 96% · 인증서(PL1) · 증가량(KR1) · 스냅샷(DE1)</div></div>
-      <div class="card a"><div class="t"><span class="sw" style="background:#d97706"></span>서비스 <span class="muted" style="font-weight:600;font-size:11.5px">13</span><span class="st warn" style="margin-left:auto"><span class="g">!</span>주의 2</span></div><div class="cnts"><span class="n">정상 <b>10</b></span><span class="n" style="color:#f59e0b">주의 <b>2</b></span><span class="n">이상 <b>0</b></span><span class="n" style="color:#9aa4b2">불가 <b>1</b></span></div><div class="muted" style="font-size:11.5px">Veeam RPO(JP1) · 엣지 보고(PL1) · 통신 점검 꺼짐</div></div>
-      <div class="card a"><div class="t"><span class="sw" style="background:#0891b2"></span>설비 <span class="muted" style="font-weight:600;font-size:11.5px">12</span><span class="st warn" style="margin-left:auto"><span class="g">!</span>주의 2</span></div><div class="cnts"><span class="n">정상 <b>9</b></span><span class="n" style="color:#f59e0b">주의 <b>2</b></span><span class="n">이상 <b>0</b></span><span class="n" style="color:#9aa4b2">불가 <b>1</b></span></div><div class="muted" style="font-size:11.5px">흡기 온도(US-E) · 게스트 파티션(TH1) · 베어메탈 사용률 opt-in 없음</div></div>
+      <div class="card a"><div class="t"><span class="sw" style="background:#3b82f6"></span>인프라 <span class="muted" style="font-weight:600;font-size:11.5px">22</span><span class="st crit" style="margin-left:auto"><span class="g">×</span>이상 1</span></div><div class="cnts"><span class="n">정상 <b>15</b></span><span class="n" style="color:#f59e0b">주의 <b>3</b></span><span class="n" style="color:#f87171">이상 <b>1</b></span><span class="n" style="color:#9aa4b2">불가 <b>0</b></span></div><div class="muted" style="font-size:11.5px">CN2 데이터스토어 96% · 인증서(PL1) · 증가량(KR1) · 스냅샷(DE1)</div></div>
+      <div class="card a"><div class="t"><span class="sw" style="background:#d97706"></span>서비스 <span class="muted" style="font-weight:600;font-size:11.5px">13</span><span class="st crit" style="margin-left:auto"><span class="g">×</span>이상 1</span></div><div class="cnts"><span class="n">정상 <b>8</b></span><span class="n" style="color:#f59e0b">주의 <b>1</b></span><span class="n" style="color:#f87171">이상 <b>1</b></span><span class="n" style="color:#9aa4b2">불가 <b>2</b></span></div><div class="muted" style="font-size:11.5px">Veeam 백업(JP1 · CN2 · KR1) · 엣지 보고(PL1) · 통신 점검 꺼짐</div></div>
+      <div class="card a"><div class="t"><span class="sw" style="background:#0891b2"></span>설비 <span class="muted" style="font-weight:600;font-size:11.5px">12</span><span class="st warn" style="margin-left:auto"><span class="g">!</span>주의 2</span></div><div class="cnts"><span class="n">정상 <b>7</b></span><span class="n" style="color:#f59e0b">주의 <b>2</b></span><span class="n">이상 <b>0</b></span><span class="n" style="color:#9aa4b2">불가 <b>1</b></span></div><div class="muted" style="font-size:11.5px">흡기 온도(US-E) · 게스트 파티션(TH1) · 베어메탈 사용률 수집 꺼짐</div></div>
     </section>
+    <div class="card" style="padding:10px 12px;display:flex;flex-direction:column;gap:8px;border-color:#22d3ee">
+      <div style="display:flex;align-items:center;gap:8px;font-weight:800;font-size:13px">백업 성공 · 실패 <span class="muted" style="font-weight:600;font-size:11.5px">10월 · VM 단위</span><span class="st crit" style="margin-left:auto"><span class="g">×</span>지금 실패 7대</span></div>
+      <div class="kpi">
+        <div class="k" style="padding:0"><div class="l">끝난 백업</div><div class="v" style="font-size:18px">150,761</div></div>
+        <div class="k" style="padding:0"><div class="l">성공률</div><div class="v" style="font-size:18px">99.73%<small>9월 99.79%</small></div></div>
+        <div class="k" style="padding:0"><div class="l">실패</div><div class="v" style="font-size:18px;color:#f87171">412<small>9월 318</small></div></div>
+        <div class="k" style="padding:0"><div class="l">확인 불가</div><div class="v" style="font-size:18px;color:#9aa4b2">3일<small>PL1</small></div></div>
+      </div>
+      <div class="cnts"><span class="n">Veeam <b style="color:#f87171">287</b></span><span class="n">Bareos <b style="color:#f87171">96</b></span><span class="n">VM 백업 <b style="color:#f87171">29</b></span></div>
+      <div style="overflow-x:auto"><table style="min-width:420px">
+        <thead><tr><th>법인</th><th style="text-align:right">실패</th><th style="text-align:right">성공률</th><th style="text-align:right">지금 실패</th></tr></thead>
+        <tbody>
+          <tr><td>KR1</td><td class="num" style="color:#f87171">71</td><td class="num">99.71%</td><td class="num" style="color:#f87171">2</td></tr>
+          <tr><td>CN1</td><td class="num" style="color:#f87171">48</td><td class="num">99.38%</td><td class="num">0</td></tr>
+          <tr><td>CN2</td><td class="num" style="color:#f87171">38</td><td class="num">99.53%</td><td class="num" style="color:#f87171">2</td></tr>
+          <tr><td>JP1</td><td class="num" style="color:#f87171">36</td><td class="num">99.70%</td><td class="num" style="color:#f87171">3</td></tr>
+        </tbody></table></div>
+      <div class="muted" style="font-size:11.5px">날짜별 막대는 좁은 화면에서 주 단위 4칸으로 묶습니다 · 법인 표는 가로로 넘깁니다</div>
+    </div>
     <div class="card" style="overflow:hidden">
-      <div style="padding:10px 12px;font-weight:800;border-bottom:1px solid #1f2a40">조치 필요 6</div>
+      <div style="padding:10px 12px;font-weight:800;border-bottom:1px solid #1f2a40">조치 필요 10</div>
       <div style="overflow-x:auto"><table style="min-width:620px">
         <thead><tr><th>우선</th><th>판정</th><th>법인</th><th>항목</th><th>근거</th></tr></thead>
         <tbody>
           <tr><td class="mono">1</td><td><span class="st crit"><span class="g">×</span>이상</span></td><td>CN2</td><td>데이터스토어 사용률</td><td>ds-cn2-prod-03 96.2%</td></tr>
-          <tr><td class="mono">2</td><td><span class="st warn"><span class="g">!</span>주의</span></td><td>JP1</td><td>Veeam 백업 판정</td><td>RPO 7일 초과 3대</td></tr>
+          <tr><td class="mono">2</td><td><span class="st crit"><span class="g">×</span>이상</span></td><td>JP1</td><td>Veeam 백업 판정</td><td>지금 실패 3대 · 10-23 부터</td></tr>
           <tr><td class="mono">3</td><td><span class="st warn"><span class="g">!</span>주의</span></td><td>KR1</td><td>스토리지 증가량</td><td>KR1-PS01 83% · 8주 뒤 90%</td></tr>
         </tbody></table></div>
     </div>
@@ -131,7 +150,7 @@ td.num{text-align:right;font-family:"JetBrains Mono",monospace}
   </main>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":400,"height":1900}}'>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":400,"height":2410}}'>
 class Component extends DCLogic {
   renderVals() { return {}; }
 }

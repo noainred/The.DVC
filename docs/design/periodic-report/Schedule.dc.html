@@ -57,9 +57,9 @@ a{color:#93c5fd;text-decoration:none}a:hover{color:#bfdbfe}
 .chip{display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:6px;font-size:11.5px;font-weight:700;background:#0f1626;border:1px solid #243049;color:#c7d2e3}
 </style>
 </helmet>
-<div style="display:flex;flex-direction:column;min-height:1700px">
+<div style="display:flex;flex-direction:column;min-height:1620px">
   <div class="tb">
-    <span class="logo"><span class="v">D</span>THE DVC <span class="ver">v2.915</span></span>
+    <span class="logo"><span class="v">D</span>THE DVC <span class="ver">v3.41</span></span>
     <span style="margin-left:auto;color:#8b9bb4;font-size:12px">admin · 전체 범위 · 설정 소유자</span>
   </div>
   <div style="display:flex;flex-wrap:wrap;flex:1">
@@ -89,7 +89,7 @@ a{color:#93c5fd;text-decoration:none}a:hover{color:#bfdbfe}
             <div class="b">
               <div class="row"><span class="lbl">실행 시각</span><span class="in mono">08:00</span><span class="chk"><span class="bx off"></span>주말은 건너뛰기</span></div>
               <div class="row"><span class="lbl">대상 기간</span><span>지난 하루(어제 00:00 ~ 24:00) + 지금 상태</span></div>
-              <dl class="kv" style="margin:0"><dt>다음 실행</dt><dd class="mono">11-08 (일) 08:00</dd><dt>마지막 실행</dt><dd><span class="mono">11-07 08:00</span> · <span class="st warn"><span class="g">!</span>주의</span> · 12초 · 법인 27/28 · 메일 3 · 채널 1</dd></dl>
+              <dl class="kv" style="margin:0"><dt>다음 실행</dt><dd class="mono">11-08 (일) 08:00</dd><dt>마지막 실행</dt><dd><span class="mono">11-07 08:00</span> · <span class="st crit"><span class="g">×</span>이상</span> · 12초 · 법인 27/28 · 메일 3 · 채널 1</dd></dl>
               <div class="row"><button class="btn sm" type="button">지금 만들기(미리보기 — 보관 · 전달 안 함)</button><button class="btn sm" type="button">지금 만들어 보내기</button></div>
             </div>
           </div>
@@ -98,7 +98,7 @@ a{color:#93c5fd;text-decoration:none}a:hover{color:#bfdbfe}
             <div class="b">
               <div class="row"><span class="lbl">실행</span><span class="in">월요일</span><span class="in mono">08:30</span></div>
               <div class="row"><span class="lbl">대상 기간</span><span>지난 ISO 주(월 ~ 일) — 스토리지 사용량 보고와 같은 주 정의</span></div>
-              <dl class="kv" style="margin:0"><dt>다음 실행</dt><dd class="mono">11-10 (월) 08:30</dd><dt>마지막 실행</dt><dd><span class="mono">11-03 08:30</span> · <span class="st warn"><span class="g">!</span>주의</span> · 27초 · 법인 28/28 · 메일 3 · 채널 1 · 게시판</dd></dl>
+              <dl class="kv" style="margin:0"><dt>다음 실행</dt><dd class="mono">11-09 (월) 08:30</dd><dt>마지막 실행</dt><dd><span class="mono">11-02 08:30</span> · <span class="st crit"><span class="g">×</span>이상</span> · 27초 · 법인 27/28 · 메일 3 · 채널 1 · 공지</dd></dl>
               <div class="row"><button class="btn sm" type="button">지금 만들기(미리보기)</button><button class="btn sm" type="button">지금 만들어 보내기</button></div>
             </div>
           </div>
@@ -107,7 +107,7 @@ a{color:#93c5fd;text-decoration:none}a:hover{color:#bfdbfe}
             <div class="b">
               <div class="row"><span class="lbl">실행</span><span class="in">매월 1일</span><span class="in mono">09:00</span><span class="muted" style="font-size:12px">그 달에 없는 날은 말일에</span></div>
               <div class="row"><span class="lbl">대상 기간</span><span>지난 달 1일 ~ 말일 · SAN 월간 점검 · 증가량 · 라이선스 · 버전 준수 포함</span></div>
-              <dl class="kv" style="margin:0"><dt>다음 실행</dt><dd class="mono">12-01 (화) 09:00</dd><dt>마지막 실행</dt><dd><span class="mono">11-01 09:00</span> · <span class="st warn"><span class="g">!</span>주의</span> · 41초 · 법인 28/28 · 메일 5 · 채널 1 · 게시판</dd></dl>
+              <dl class="kv" style="margin:0"><dt>다음 실행</dt><dd class="mono">12-01 (화) 09:00</dd><dt>마지막 실행</dt><dd><span class="mono">11-01 09:00</span> · <span class="st crit"><span class="g">×</span>이상</span> · 41초 · 법인 27/28 · 메일 5 · 채널 1 · 공지</dd></dl>
               <div class="row"><button class="btn sm" type="button">지금 만들기(미리보기)</button><button class="btn sm" type="button">지금 만들어 보내기</button></div>
             </div>
           </div>
@@ -116,7 +116,7 @@ a{color:#93c5fd;text-decoration:none}a:hover{color:#bfdbfe}
             <div class="b">
               <div class="row"><span class="lbl">실행</span><span class="in">1 · 4 · 7 · 10월 1일</span><span class="in mono">09:30</span></div>
               <div class="row"><span class="lbl">대상 기간</span><span>지난 분기(3개월) — 추이 · 용량 고갈 · 만료 90일 전망 · 코어 라이선스 · 인벤토리 변동</span></div>
-              <dl class="kv" style="margin:0"><dt>다음 실행</dt><dd class="mono">2027-01-01 (금) 09:30</dd><dt>마지막 실행</dt><dd><span class="mono">10-01 09:30</span> · <span class="st warn"><span class="g">!</span>주의</span> · 58초 · 법인 28/28 · 메일 6 · 게시판</dd></dl>
+              <dl class="kv" style="margin:0"><dt>다음 실행</dt><dd class="mono">2027-01-01 (금) 09:30</dd><dt>마지막 실행</dt><dd><span class="mono">10-01 09:30</span> · <span class="st warn"><span class="g">!</span>주의</span> · 58초 · 법인 28/28 · 메일 6 · 공지</dd></dl>
               <div class="row"><button class="btn sm" type="button">지금 만들기(미리보기)</button><button class="btn sm" type="button">지금 만들어 보내기</button></div>
             </div>
           </div>
@@ -133,8 +133,8 @@ a{color:#93c5fd;text-decoration:none}a:hover{color:#bfdbfe}
               <div class="row"><span class="lbl">받는 사람</span><span class="in" style="flex:1 1 200px">통합 관리자(기본 받는 사람) + noc-report@example.com</span></div>
               <div class="chk"><span class="bx">✓</span>법인 담당자에게 <b>자기 법인 분량만</b> 보내기 — vCenter 별 담당자 주소(게스트 파티션 메일과 같은 목록) · 전 법인 합계 · 포탈 자체 항목은 빠집니다</div>
               <div class="row"><span class="lbl">주기</span><span class="chk"><span class="bx">✓</span>일일</span><span class="chk"><span class="bx">✓</span>주간</span><span class="chk"><span class="bx">✓</span>월간</span><span class="chk"><span class="bx">✓</span>분기</span></div>
-              <div class="row"><span class="lbl">첨부</span><span class="chk"><span class="bx">✓</span>XLSX(법인별 시트)</span><span class="chk"><span class="bx off"></span>PDF — 서버 생성(2단계 · 컨펌 항목)</span></div>
-              <div class="muted" style="font-size:12px">본문은 종합 판정 · 축별 요약 · 조치 필요 · ‘포탈에서 열기’ 링크입니다. 첨부가 5MB 를 넘으면 첨부 대신 링크만 싣습니다(메일 첨부 상한).</div>
+              <div class="row"><span class="lbl">첨부</span><span class="chk"><span class="bx">✓</span>HTML 보고서(브라우저에서 열어 PDF 로 저장)</span></div>
+              <div class="muted" style="font-size:12px">본문은 종합 판정 · 축별 요약 · <b style="color:#67e8f9">백업 성공 · 실패 한 단락</b> · 조치 필요입니다. 첨부가 메일 첨부 상한을 넘으면 첨부 없이 보냅니다.</div>
             </div>
           </div>
           <div class="card">
@@ -142,14 +142,25 @@ a{color:#93c5fd;text-decoration:none}a:hover{color:#bfdbfe}
             <div class="b">
               <div class="row"><span class="chk"><span class="bx">✓</span>Slack #noc</span><span class="chk"><span class="bx">✓</span>Teams 운영채널</span><span class="chk"><span class="bx off"></span>웹훅</span></div>
               <div class="row"><span class="lbl">주기</span><span class="chk"><span class="bx">✓</span>일일</span><span class="chk"><span class="bx">✓</span>주간</span><span class="chk"><span class="bx">✓</span>월간</span><span class="chk"><span class="bx off"></span>분기</span></div>
-              <div class="muted" style="font-size:12px">보내는 것 — 종합 판정 · 정상/주의/이상/확인 불가 수 · 조치 필요 상위 5 · 열기 링크(텍스트).</div>
+              <div class="muted" style="font-size:12px">보내는 것 — 종합 판정 · 정상/주의/이상/확인 불가 수 · <b style="color:#67e8f9">백업 실패 수 · 성공률 한 줄</b> · 조치 필요 상위 5.</div>
             </div>
           </div>
           <div class="card">
-            <div class="h"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 4h16v12H7l-3 3z"/></svg>게시판 · 이슈</div>
+            <div class="h"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 4h16v12H7l-3 3z"/></svg>공지 · 이슈</div>
             <div class="b">
-              <div class="chk"><span class="bx">✓</span>공지로 올리기 — 주간 · 월간 · 분기 (작성자 시스템 계정 ‘periodic-report’ · 본문 5천 자 상한이라 요약 + 열기 링크 · 첨부 없음)</div>
-              <div class="chk"><span class="bx off"></span>조치 필요 중 <b>이상</b> 항목을 이슈로 자동 등록 — 파트 장애 자동 등록과 같은 방식(origin 으로 중복 방지 · 하루 상한)</div>
+              <div class="chk"><span class="bx">✓</span>공지 하나를 갱신 — 주간 · 월간 · 분기 (판정 · 법인 이름 · 백업 수치 없이 ‘보고서가 만들어졌다’ 만 — 공지는 모든 계정에 보입니다)</div>
+              <div class="chk"><span class="bx off"></span>조치 필요 중 <b>이상</b> 항목을 이슈로 자동 등록(같은 항목 · 법인은 한 번 · 하루 상한)</div>
+            </div>
+          </div>
+          <div class="card" style="border-color:#22d3ee">
+            <div class="h"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 19h16"/></svg>백업 성공 · 실패 현황 <span class="chip" style="margin-left:4px;color:#67e8f9;border-color:#22d3ee">새로 더한 것</span></div>
+            <div class="b">
+              <div class="row"><span class="lbl">보고서에 싣기</span><span class="chk"><span class="bx">✓</span>일일</span><span class="chk"><span class="bx">✓</span>주간</span><span class="chk"><span class="bx">✓</span>월간</span><span class="chk"><span class="bx">✓</span>분기</span></div>
+              <div class="row"><span class="lbl">대상</span><span class="chk"><span class="bx">✓</span>Veeam</span><span class="chk"><span class="bx">✓</span>Bareos</span><span class="chk"><span class="bx">✓</span>VM 백업(복제)</span></div>
+              <div class="chk"><span class="bx">✓</span>하루 치 적재 — 날마다 그날의 백업 결과를 한 번 쌓아 주간 · 월간 · 분기 합계와 추이에 씁니다(일일 보고서를 꺼도 쌓습니다)</div>
+              <div class="row"><span class="lbl">적재 보관</span><span class="in mono" style="width:80px">400</span><span class="muted">일</span><span class="muted" style="font-size:12px">분기 보고서 4번 치 + 여유</span></div>
+              <dl class="kv" style="margin:0"><dt>적재 상태</dt><dd><span class="st ok"><span class="g">✓</span>동작</span> 마지막 <span class="mono">11-07 00:20</span> · 84줄(28법인 × 3) · 시작 <span class="mono">08-14</span> · 놓친 날 0</dd></dl>
+              <div class="muted" style="font-size:12px">포탈이 꺼져 있어 놓친 날은 채우지 않고 ‘적재 전’ 으로 남깁니다. 저장된 결과만 읽으므로 Veeam · Director · 법인 엣지를 부르지 않습니다.</div>
             </div>
           </div>
           <div class="card">
@@ -157,7 +168,7 @@ a{color:#93c5fd;text-decoration:none}a:hover{color:#bfdbfe}
             <div class="b">
               <div class="row"><span class="lbl">일일</span><span class="in mono" style="width:80px">90</span><span class="muted">일</span><span class="lbl" style="width:60px">주간</span><span class="in mono" style="width:80px">365</span><span class="muted">일</span></div>
               <div class="row"><span class="lbl">월간</span><span class="in mono" style="width:80px">1095</span><span class="muted">일</span><span class="lbl" style="width:60px">분기</span><span class="in mono" style="width:80px">1825</span><span class="muted">일</span></div>
-              <div class="muted" style="font-size:12px">보고서 JSON(SQLite periodic.db · 회차 표 + 항목 표)과 XLSX 파일을 같은 기간 둡니다. 정리는 하루 1회 청크로(기동 첫 틱 제외). 지금 — DB 18.4 MB · 파일 212 MB · 회차 1,204개.</div>
+              <div class="muted" style="font-size:12px">보고서는 정기 점검 보고 DB 에 회차마다 한 건으로 둡니다(XLSX · HTML 은 내려받을 때 만듭니다). 지금 — DB 18.4 MB · 회차 1,204개 · 백업 적재 7,140줄.</div>
             </div>
           </div>
           <div class="card">
@@ -166,7 +177,7 @@ a{color:#93c5fd;text-decoration:none}a:hover{color:#bfdbfe}
               <dl class="kv" style="margin:0">
                 <dt>스케줄러</dt><dd><span class="st ok"><span class="g">✓</span>동작</span> 마지막 틱 <span class="mono">09:12:30</span> · 1분 틱</dd>
                 <dt>진행 중</dt><dd>없음 (동시 1건 · 지난 회차 최장 58초)</dd>
-                <dt>재시도 대기</dt><dd><span class="st warn"><span class="g">!</span>1건</span> D-2026-11-02 메일 — SMTP 연결 실패 · 다음 <span class="mono">09:15</span> (2회째)</dd>
+                <dt>재시도 대기</dt><dd><span class="st warn"><span class="g">!</span>1건</span> D-2026-11-01 메일 — SMTP 연결 실패 · 다음 <span class="mono">09:15</span> (2회째)</dd>
                 <dt>놓친 회차</dt><dd>최근 30일 0 · 마지막 놓침 10-12 08:00(포탈 업그레이드 재시작)</dd>
               </dl>
             </div>
@@ -186,7 +197,7 @@ a{color:#93c5fd;text-decoration:none}a:hover{color:#bfdbfe}
   </div>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1700}}'>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1620}}'>
 class Component extends DCLogic {
   renderVals() { return {}; }
 }

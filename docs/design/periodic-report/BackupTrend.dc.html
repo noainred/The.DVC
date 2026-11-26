@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>정기 점검 보고 — 백업 현황 주간 변형 · 데이터 출처</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#93c5fd;text-decoration:none}a:hover{color:#bfdbfe}
+.tb{display:flex;align-items:center;gap:14px;height:44px;padding:0 16px;background:#0f1626;border-bottom:1px solid #243049}
+.logo{display:inline-flex;align-items:center;gap:8px;font-weight:800;font-size:14px}
+.logo .v{width:26px;height:26px;border-radius:7px;background:#3b82f6;display:inline-flex;align-items:center;justify-content:center;font-size:13px;color:#fff}
+.ver{font-size:11px;font-weight:700;color:#5eead4;border:1px solid #2dd4bf;border-radius:6px;padding:1px 6px}
+.sb{width:236px;flex:none;background:#0f1626;border-right:1px solid #243049;padding:12px 10px;display:flex;flex-direction:column;gap:2px}
+.sb a{display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:8px;color:#e6edf6;font-weight:600;font-size:13px}
+.sb a.sub{padding:6px 12px 6px 30px;color:#8b9bb4;font-weight:500;font-size:12.5px}
+.sb a.on{background:#1a2236;color:#22d3ee}
+.sb a.grp.on{background:transparent;color:#e6edf6;box-shadow:inset 3px 0 0 #22d3ee}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.muted{color:#8b9bb4}
+.mono{font-family:"JetBrains Mono",monospace;font-size:12px}
+.st{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:999px;font-size:11.5px;font-weight:700;border:1px solid transparent;white-space:nowrap}
+.st .g{font-family:"JetBrains Mono",monospace;font-size:11px}
+.st.ok{color:#22c55e;background:rgba(34,197,94,.12);border-color:rgba(34,197,94,.35)}
+.st.warn{color:#f59e0b;background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.4)}
+.st.crit{color:#f87171;background:rgba(239,68,68,.14);border-color:rgba(239,68,68,.45)}
+.st.unk{color:#9aa4b2;background:repeating-linear-gradient(135deg,rgba(139,155,180,.22) 0 4px,rgba(139,155,180,.06) 4px 8px);border-color:rgba(139,155,180,.4)}
+.st.new{color:#22d3ee;background:rgba(34,211,238,.12);border-color:rgba(34,211,238,.4)}
+table{border-collapse:collapse;width:100%;font-size:12.5px}
+th{text-align:left;font-weight:700;color:#8b9bb4;font-size:11.5px;padding:8px 10px;background:#0f1626;border-bottom:1px solid #243049;white-space:nowrap;cursor:pointer}
+th .c{margin-left:4px;color:#5d6b85;font-size:10px}
+th.sorted{color:#e6edf6}th.sorted .c{color:#22d3ee}
+th.r{text-align:right}th.ctr{text-align:center}
+td{padding:7px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle}
+td.num{text-align:right;font-family:"JetBrains Mono",monospace;font-size:12px;white-space:nowrap}
+td.ctr{text-align:center}
+tr.sum td{background:#0f1626;font-weight:700}
+.f{color:#f87171}.w{color:#f59e0b}.u{color:#9aa4b2}.g2{color:#22c55e}
+.sec{display:flex;flex-direction:column}
+.sec .h{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid #1f2a40;flex-wrap:wrap}
+.sec .h h2{margin:0;font-size:15px;font-weight:800}
+.sub{display:flex;align-items:baseline;gap:10px;padding:12px 14px 8px;flex-wrap:wrap}
+.sub h3{margin:0;font-size:13.5px;font-weight:800}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(168px,100%),1fr));gap:12px}
+.tile{padding:12px 14px;display:flex;flex-direction:column;gap:3px;min-width:0;background:#0f1626;border:1px solid #243049;border-radius:10px}
+.tile .l{font-size:11.5px;color:#8b9bb4;font-weight:600}
+.tile .v{font-size:24px;font-weight:800;letter-spacing:-.01em;word-break:keep-all;font-family:"JetBrains Mono",monospace}
+.tile .d{font-size:11.5px;color:#8b9bb4}
+.days{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:10px}
+.day{display:flex;flex-direction:column;gap:6px;min-width:0;padding:10px 10px 8px;background:#0f1626;border:1px solid #243049;border-radius:10px}
+.day .top{display:flex;align-items:baseline;justify-content:space-between;gap:6px;font-size:12px;font-weight:700}
+.day .plot{display:flex;align-items:flex-end;height:84px;border-bottom:1px solid #243049}
+.day .plot i{display:block;width:100%;border-radius:4px 4px 0 0;background:#f87171}
+.day .n{font-family:"JetBrains Mono",monospace;font-size:20px;font-weight:800}
+.day .d{font-size:11.5px;color:#8b9bb4}
+.hc{display:inline-flex;align-items:center;justify-content:center;min-width:34px;height:24px;border-radius:6px;font-family:"JetBrains Mono",monospace;font-size:12px;font-weight:700;border:1px solid #243049;background:#0f1626;color:#5d6b85}
+.hc.f1{color:#fca5a5;background:rgba(239,68,68,.12);border-color:rgba(239,68,68,.35)}
+.hc.f2{color:#fee2e2;background:rgba(239,68,68,.34);border-color:rgba(239,68,68,.6)}
+.hc.q{color:#9aa4b2;background:repeating-linear-gradient(135deg,rgba(139,155,180,.28) 0 4px,rgba(139,155,180,.06) 4px 8px);border-color:rgba(139,155,180,.4)}
+.dd{display:inline-flex;gap:3px}
+.dd span{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:5px;font-family:"JetBrains Mono",monospace;font-size:11px;font-weight:700;border:1px solid #243049;background:#0f1626;color:#5d6b85}
+.dd span.x{color:#f87171;border-color:rgba(239,68,68,.45);background:rgba(239,68,68,.14)}
+.dd span.o{color:#22c55e}
+.strip{display:grid;grid-template-columns:repeat(31,minmax(0,1fr));gap:3px}
+.strip span{display:flex;align-items:center;justify-content:center;height:28px;border-radius:5px;font-family:"JetBrains Mono",monospace;font-size:10.5px;font-weight:700;border:1px solid #243049;background:#0f1626;color:#c7d2e3}
+.strip span.pre{border-style:dashed;color:#5d6b85;background:transparent}
+.strip span.hot{color:#fee2e2;background:rgba(239,68,68,.34);border-color:rgba(239,68,68,.6)}
+.note{font-size:12px;color:#8b9bb4;padding:10px 14px;border-top:1px solid #1f2a40}
+.msg{font-family:"JetBrains Mono",monospace;font-size:12px;line-height:1.6;white-space:pre-wrap;background:#0a0e17;border:1px solid #243049;border-radius:8px;padding:10px 12px;color:#c7d2e3}
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(420px,100%),1fr));gap:14px}
+.ask{display:flex;flex-direction:column;gap:8px;margin:0;padding:12px 14px 14px 34px;font-size:12.5px}
+.ask li b{color:#e6edf6}
+</style>
+</helmet>
+<div style="display:flex;flex-direction:column;min-height:2270px">
+  <div class="tb">
+    <span class="logo"><span class="v">D</span>THE DVC <span class="ver">v3.41</span></span>
+    <span style="margin-left:auto;color:#8b9bb4;font-size:12px">admin · 전체 범위</span>
+  </div>
+  <div style="display:flex;flex-wrap:wrap;flex:1">
+    <nav class="sb" aria-label="주 메뉴">
+      <a href="#dash">대시보드</a><a href="#ov">Overview</a><a href="#vc">vCenter</a><a href="#vms">가상화 서버</a><a href="#stor">스토리지</a><a href="#net">네트워크</a>
+      <a href="#tools" class="grp on">특수 기능</a>
+      <a href="#tools-report" class="sub">리포트 · 점검</a>
+      <a href="Main.dc.html" class="sub on" aria-current="page">정기 점검 보고</a>
+      <a href="#ins">인사이트</a><a href="#ipam">IP관리</a><a href="#set">설정</a>
+    </nav>
+    <main style="flex:999 1 560px;min-width:0;padding:18px 22px 28px;display:flex;flex-direction:column;gap:14px">
+      <div>
+        <div class="muted" style="font-size:12px"><a href="Main.dc.html">정기 점검 보고</a> › <a href="Main.dc.html">보관함</a> › <span class="mono">W-2026-44</span> › 3절</div>
+        <h1 style="margin:4px 0 2px;font-size:22px;font-weight:800">백업 성공 · 실패 현황 — 주간 보고서에서</h1>
+        <div class="muted">일일은 하루 치 표, 주간부터는 하루 치를 쌓아 둔 적재분으로 날짜별 추이와 되풀이되는 실패를 봅니다. 월간 예시는 ④ 보고서 열람에 있습니다.</div>
+      </div>
+
+      <section class="card sec">
+        <div class="h"><h2>3. 백업 성공 · 실패 현황</h2><span class="muted" style="font-size:12px">주간 W-2026-44 · 10-26 (월) ~ 11-01 (일) · 하루에 VM 하나당 한 건(그날 마지막 결과) · 적재 7 / 7일</span></div>
+        <div style="padding:12px 14px;display:flex;flex-direction:column;gap:12px">
+          <div class="tiles">
+            <div class="tile"><div class="l">끝난 백업</div><div class="v">33,367</div><div class="d">7일 합 · 대상 4,930 VM</div></div>
+            <div class="tile"><div class="l">성공</div><div class="v g2">32,923</div><div class="d">성공률 <b style="color:#e6edf6">99.82%</b> · 전주 99.69%</div></div>
+            <div class="tile"><div class="l">경고</div><div class="v w">384</div><div class="d">복원 지점은 생김</div></div>
+            <div class="tile"><div class="l">실패</div><div class="v f">60</div><div class="d">전주 103 · <b style="color:#e6edf6">−43</b></div></div>
+            <div class="tile"><div class="l">실패한 VM</div><div class="v">36</div><div class="d">2일 이상 되풀이 6대</div></div>
+            <div class="tile"><div class="l">확인 불가</div><div class="v u">4일</div><div class="d">PL1 — 10-29 부터 보고 없음</div></div>
+          </div>
+
+          <div>
+            <div style="font-weight:800;font-size:13.5px;margin-bottom:8px">날짜별 실패 <span class="muted" style="font-weight:500;font-size:12px">막대 = 그날 실패한 VM 수 · 아래 줄은 경고 · 끝난 백업</span></div>
+            <div class="days" role="img" aria-label="날짜별 실패 — 월 9 · 화 7 · 수 14 · 목 11 · 금 8 · 토 6 · 일 5">
+              <div class="day"><div class="top"><span>10-26 월</span><span class="n f">9</span></div><div class="plot"><i style="height:54px"></i></div><div class="d">경고 58 · 끝남 4,842</div></div>
+              <div class="day"><div class="top"><span>10-27 화</span><span class="n f">7</span></div><div class="plot"><i style="height:42px"></i></div><div class="d">경고 61 · 끝남 4,839</div></div>
+              <div class="day"><div class="top"><span>10-28 수</span><span class="n f">14</span></div><div class="plot"><i style="height:84px"></i></div><div class="d">경고 55 · 끝남 4,845</div></div>
+              <div class="day"><div class="top"><span>10-29 목</span><span class="n f">11</span></div><div class="plot"><i style="height:66px"></i></div><div class="d">경고 60 · 끝남 4,828 · <span class="u">PL1 ?</span></div></div>
+              <div class="day"><div class="top"><span>10-30 금</span><span class="n f">8</span></div><div class="plot"><i style="height:48px"></i></div><div class="d">경고 57 · 끝남 4,811 · <span class="u">PL1 ?</span></div></div>
+              <div class="day"><div class="top"><span>10-31 토</span><span class="n f">6</span></div><div class="plot"><i style="height:36px"></i></div><div class="d">경고 49 · 끝남 4,604 · <span class="u">PL1 ?</span></div></div>
+              <div class="day"><div class="top"><span>11-01 일</span><span class="n f">5</span></div><div class="plot"><i style="height:30px"></i></div><div class="d">경고 44 · 끝남 4,598 · <span class="u">PL1 ?</span></div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="sub" style="border-top:1px solid #1f2a40"><h3>법인 × 날짜 — 실패한 VM 수</h3><span class="muted" style="font-size:12px">숫자가 값입니다(색은 보조) · ‘?’ 는 그날 그 법인 결과를 읽지 못함 · ‘·’ 은 실패 0</span></div>
+        <div style="overflow-x:auto"><table style="min-width:900px">
+          <thead><tr><th>법인 <span class="c">⇅</span></th><th class="ctr">월</th><th class="ctr">화</th><th class="ctr">수</th><th class="ctr">목</th><th class="ctr">금</th><th class="ctr">토</th><th class="ctr">일</th><th class="r sorted">실패 합 <span class="c">▼</span></th><th class="r">성공률 <span class="c">⇅</span></th><th class="r">전주 <span class="c">⇅</span></th><th>눈에 띄는 것</th></tr></thead>
+          <tbody>
+            <tr><td><b>JP1</b></td><td class="ctr"><span class="hc f2">3</span></td><td class="ctr"><span class="hc f2">3</span></td><td class="ctr"><span class="hc f2">3</span></td><td class="ctr"><span class="hc f2">3</span></td><td class="ctr"><span class="hc f2">3</span></td><td class="ctr"><span class="hc f2">3</span></td><td class="ctr"><span class="hc f2">3</span></td><td class="num f"><b>21</b></td><td class="num">99.22%</td><td class="num">12</td><td>같은 VM 3대가 매일 실패 — 저장소 여유 부족</td></tr>
+            <tr><td><b>KR1</b> 본사</td><td class="ctr"><span class="hc f1">2</span></td><td class="ctr"><span class="hc f1">1</span></td><td class="ctr"><span class="hc f2">3</span></td><td class="ctr"><span class="hc f1">2</span></td><td class="ctr"><span class="hc f1">1</span></td><td class="ctr"><span class="hc f1">1</span></td><td class="ctr"><span class="hc f1">1</span></td><td class="num f"><b>11</b></td><td class="num">99.80%</td><td class="num">31</td><td>kr-bi-02 3일 · 나머지는 한 번씩</td></tr>
+            <tr><td><b>CN2</b></td><td class="ctr"><span class="hc f1">1</span></td><td class="ctr"><span class="hc">·</span></td><td class="ctr"><span class="hc f1">2</span></td><td class="ctr"><span class="hc f1">1</span></td><td class="ctr"><span class="hc f1">1</span></td><td class="ctr"><span class="hc">·</span></td><td class="ctr"><span class="hc">·</span></td><td class="num f"><b>5</b></td><td class="num">99.73%</td><td class="num">9</td><td>cn-web-07 2일</td></tr>
+            <tr><td><b>US-E</b></td><td class="ctr"><span class="hc f1">1</span></td><td class="ctr"><span class="hc">·</span></td><td class="ctr"><span class="hc f1">1</span></td><td class="ctr"><span class="hc f1">1</span></td><td class="ctr"><span class="hc f1">1</span></td><td class="ctr"><span class="hc">·</span></td><td class="ctr"><span class="hc f1">1</span></td><td class="num f"><b>5</b></td><td class="num">99.82%</td><td class="num">8</td><td class="muted">전부 한 번씩</td></tr>
+            <tr><td><b>KR2</b></td><td class="ctr"><span class="hc f1">1</span></td><td class="ctr"><span class="hc f1">1</span></td><td class="ctr"><span class="hc f1">1</span></td><td class="ctr"><span class="hc f1">1</span></td><td class="ctr"><span class="hc">·</span></td><td class="ctr"><span class="hc">·</span></td><td class="ctr"><span class="hc">·</span></td><td class="num f"><b>4</b></td><td class="num">99.81%</td><td class="num">6</td><td>kr2-git-01 나흘 연속(Bareos)</td></tr>
+            <tr><td><b>DE1</b></td><td class="ctr"><span class="hc">·</span></td><td class="ctr"><span class="hc">·</span></td><td class="ctr"><span class="hc f1">1</span></td><td class="ctr"><span class="hc f1">1</span></td><td class="ctr"><span class="hc f1">1</span></td><td class="ctr"><span class="hc">·</span></td><td class="ctr"><span class="hc">·</span></td><td class="num f"><b>3</b></td><td class="num">99.81%</td><td class="num">5</td><td class="muted">전부 한 번씩</td></tr>
+            <tr><td><b>TH1</b></td><td class="ctr"><span class="hc">·</span></td><td class="ctr"><span class="hc f1">1</span></td><td class="ctr"><span class="hc f1">1</span></td><td class="ctr"><span class="hc">·</span></td><td class="ctr"><span class="hc">·</span></td><td class="ctr"><span class="hc f1">1</span></td><td class="ctr"><span class="hc">·</span></td><td class="num f"><b>3</b></td><td class="num">99.64%</td><td class="num">4</td><td class="muted">전부 한 번씩</td></tr>
+            <tr><td><b>PL1</b></td><td class="ctr"><span class="hc">·</span></td><td class="ctr"><span class="hc">·</span></td><td class="ctr"><span class="hc">·</span></td><td class="ctr"><span class="hc q">?</span></td><td class="ctr"><span class="hc q">?</span></td><td class="ctr"><span class="hc q">?</span></td><td class="ctr"><span class="hc q">?</span></td><td class="num">0</td><td class="num">100% <span class="u">(3일 치)</span></td><td class="num">1</td><td class="u">확인 불가 4일 — 성공으로 세지 않음</td></tr>
+            <tr><td>그 밖 20곳</td><td class="ctr"><span class="hc f1">1</span></td><td class="ctr"><span class="hc f1">1</span></td><td class="ctr"><span class="hc f1">2</span></td><td class="ctr"><span class="hc f1">2</span></td><td class="ctr"><span class="hc f1">1</span></td><td class="ctr"><span class="hc f1">1</span></td><td class="ctr"><span class="hc">·</span></td><td class="num f"><b>8</b></td><td class="num">99.94%</td><td class="num">27</td><td class="muted">화면에서는 법인마다 한 줄</td></tr>
+            <tr class="sum"><td>합계</td><td class="ctr mono">9</td><td class="ctr mono">7</td><td class="ctr mono">14</td><td class="ctr mono">11</td><td class="ctr mono">8</td><td class="ctr mono">6</td><td class="ctr mono">5</td><td class="num f">60</td><td class="num">99.82%</td><td class="num">103</td><td></td></tr>
+          </tbody></table></div>
+
+        <div class="sub"><h3>되풀이되는 실패</h3><span class="muted" style="font-size:12px">7일 가운데 2일 이상 실패한 VM · 요일 칸은 × 실패 · ✓ 성공 · – 실행 없음</span></div>
+        <div style="overflow-x:auto"><table style="min-width:900px">
+          <thead><tr><th>VM <span class="c">⇅</span></th><th>법인 <span class="c">⇅</span></th><th>백업 <span class="c">⇅</span></th><th class="sorted">실패한 날 <span class="c">▼</span></th><th>월 ~ 일</th><th>마지막 성공 <span class="c">⇅</span></th><th>마지막 사유</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">jp-erp-02</td><td>JP1</td><td>Veeam</td><td class="mono f"><b>7 / 7</b></td><td><span class="dd"><span class="x">×</span><span class="x">×</span><span class="x">×</span><span class="x">×</span><span class="x">×</span><span class="x">×</span><span class="x">×</span></span></td><td class="mono" style="color:#f59e0b">10-22</td><td>스냅샷을 만들지 못함 — 디스크 통합이 필요한 VM</td></tr>
+            <tr><td class="mono">jp-db-11</td><td>JP1</td><td>Veeam</td><td class="mono f"><b>7 / 7</b></td><td><span class="dd"><span class="x">×</span><span class="x">×</span><span class="x">×</span><span class="x">×</span><span class="x">×</span><span class="x">×</span><span class="x">×</span></span></td><td class="mono" style="color:#f59e0b">10-22</td><td>백업 저장소 여유 부족(jp-repo-01)</td></tr>
+            <tr><td class="mono">jp-file-01</td><td>JP1</td><td>Veeam</td><td class="mono f"><b>7 / 7</b></td><td><span class="dd"><span class="x">×</span><span class="x">×</span><span class="x">×</span><span class="x">×</span><span class="x">×</span><span class="x">×</span><span class="x">×</span></span></td><td class="mono" style="color:#f59e0b">10-22</td><td>백업 저장소 여유 부족(jp-repo-01)</td></tr>
+            <tr><td class="mono">kr2-git-01</td><td>KR2</td><td>Bareos</td><td class="mono f"><b>4 / 7</b></td><td><span class="dd"><span class="x">×</span><span class="x">×</span><span class="x">×</span><span class="x">×</span><span class="o">✓</span><span class="o">✓</span><span class="o">✓</span></span></td><td class="mono">11-01</td><td class="muted">오류 줄 없음(작업 로그)</td></tr>
+            <tr><td class="mono">kr-bi-02</td><td>KR1</td><td>Veeam</td><td class="mono f"><b>3 / 7</b></td><td><span class="dd"><span class="o">✓</span><span class="o">✓</span><span class="x">×</span><span class="x">×</span><span class="o">✓</span><span class="o">✓</span><span class="x">×</span></span></td><td class="mono">10-31</td><td>게스트 처리(VSS) 실패</td></tr>
+            <tr><td class="mono">cn-web-07</td><td>CN2</td><td>Veeam</td><td class="mono f"><b>2 / 7</b></td><td><span class="dd"><span class="o">✓</span><span>–</span><span class="x">×</span><span class="x">×</span><span class="o">✓</span><span class="o">✓</span><span class="o">✓</span></span></td><td class="mono">11-01</td><td>게스트 처리(VSS) 실패</td></tr>
+          </tbody></table></div>
+        <div class="note">한 번만 실패하고 다음 실행에서 성공한 VM 은 30대입니다 — 목록은 XLSX 의 ‘백업 실패’ 시트에 전부 있습니다. 주간 · 월간에서 먼저 볼 것은 실패 건수보다 <b style="color:#e6edf6">되풀이되는 VM</b>과 <b style="color:#e6edf6">확인하지 못한 날</b>입니다.</div>
+      </section>
+
+      <section class="card sec">
+        <div class="h"><h2>하루 치 적재 — 처음 켠 달의 모습</h2><span class="st new">새로 필요한 것</span><span class="muted" style="font-size:12px">월간 M-2026-08 예 · 적재를 08-14 에 시작한 경우</span></div>
+        <div style="padding:12px 14px;display:flex;flex-direction:column;gap:10px">
+          <div class="strip" role="img" aria-label="8월 31일 가운데 13일까지는 적재 전, 14일부터 날짜별 실패 수">
+            <span class="pre">1</span><span class="pre">2</span><span class="pre">3</span><span class="pre">4</span><span class="pre">5</span><span class="pre">6</span><span class="pre">7</span><span class="pre">8</span><span class="pre">9</span><span class="pre">10</span><span class="pre">11</span><span class="pre">12</span><span class="pre">13</span><span>11</span><span>6</span><span>5</span><span>13</span><span>9</span><span class="hot">27</span><span>12</span><span>10</span><span>7</span><span>4</span><span>12</span><span>14</span><span>9</span><span>11</span><span>8</span><span>6</span><span>5</span><span>13</span>
+          </div>
+          <div class="muted" style="font-size:12px">점선 칸(1 ~ 13일)은 <b style="color:#e6edf6">적재 전</b>입니다 — 성공으로도 실패로도 세지 않고, 합계 옆에 ‘적재 18 / 31일’ 을 적습니다. 지난 날짜를 소급해 채우지 않습니다(원천에 그날 결과가 남아 있지 않습니다). 일일 회차가 꺼져 있어도 적재는 하루 한 번 돕니다.</div>
+        </div>
+      </section>
+
+      <section class="card sec">
+        <div class="h"><h2>데이터 출처 — 지금 되는 것과 새로 필요한 것</h2><span class="muted" style="font-size:12px">전부 포탈에 이미 저장된 값입니다 · 보고서를 만들려고 Veeam · Director · 법인 엣지를 부르지 않습니다</span></div>
+        <div style="overflow-x:auto"><table style="min-width:980px">
+          <thead><tr><th>백업</th><th>읽는 곳(저장된 값)</th><th>엣지 법인</th><th>지금 되는 것</th><th>새로 필요한 것</th></tr></thead>
+          <tbody>
+            <tr><td><b>Veeam</b></td><td>VM 별 마지막 결과(성공 · 경고 · 실패) · 끝난 시각 · RPO</td><td>엣지가 올린 결과를 중앙이 보관</td><td>최근 24시간 · 7일 결과 · 지금 실패 상태인 VM<br><span class="muted">Backup 현황 Summary 가 이미 세는 값</span></td><td>기간 합계 · 날짜별 추이 — <b>하루 치 적재</b><br><span class="muted">VM 마다 마지막 결과 하나뿐이라 지난 날은 남지 않음</span></td></tr>
+            <tr><td><b>Bareos</b></td><td>백업 원장 — 마지막 실행 + 끝난 실행 최근 10회</td><td>엣지 대행 결과가 원장에 반영</td><td>최근 24시간 VM 단위 결과<br><span class="muted">일일 요약 메일과 같은 계산</span></td><td>10회를 넘는 기간(월 · 분기) — <b>하루 치 적재</b><br>실패를 항목 판정에 넣기(컨펌 ④)</td></tr>
+            <tr><td><b>VM 백업(복제)</b></td><td>잡마다 실행 기록 최근 30회</td><td>법인 엣지가 실행하고 기록을 보고</td><td>기간 안 실행의 성공 · 실패(30회 안)</td><td>분기 — <b>하루 치 적재</b><br>실패를 항목 판정에 넣기(컨펌 ④)</td></tr>
+            <tr><td><b>하루 치 적재</b> <span class="st new">신설</span></td><td>정기 점검 보고 DB 에 날짜 · 백업 · 법인마다 한 줄<br><span class="muted">끝남 · 성공 · 경고 · 실패 · 실행 없음 · 확인 불가</span></td><td>—</td><td>—</td><td>하루 한 번 위 세 원천을 읽어 적재(한 트랜잭션) · 보관 기간은 설정 · 28법인 × 3 = 하루 84줄</td></tr>
+          </tbody></table></div>
+      </section>
+
+      <div class="two">
+        <section class="card sec">
+          <div class="h"><h2>전달 문구</h2><span class="muted" style="font-size:12px">일일 D-2026-11-06 예</span></div>
+          <div style="padding:12px 14px;display:flex;flex-direction:column;gap:10px">
+            <div><div class="muted" style="font-size:11.5px;font-weight:700;margin-bottom:4px">메일 본문 — 종합 아래 한 단락</div><div class="msg">백업(11-06) 끝난 백업 4,833 · 성공 4,759 · 경고 62 · 실패 12 · 확인 불가 1곳(PL1)
+실패 — KR1 3 · JP1 3 · CN2 2 · KR2 1 · DE1 1 · TH1 1 · US-E 1
+15일째 실패 3대(JP1) — 목록은 첨부 보고서 3절</div></div>
+            <div><div class="muted" style="font-size:11.5px;font-weight:700;margin-bottom:4px">알림 채널 — 한 줄</div><div class="msg">백업 실패 12(전일 9) · 성공률 99.75% · 확인 불가 PL1</div></div>
+            <div class="muted" style="font-size:12px">법인 담당자에게 가는 메일은 자기 법인 줄만 싣습니다. 공지에는 백업 수치를 싣지 않습니다(공지는 모든 계정에 보여 판정 · 법인 이름을 넣지 않는 규칙 그대로).</div>
+          </div>
+        </section>
+        <section class="card sec">
+          <div class="h"><h2>컨펌 항목</h2><span class="muted" style="font-size:12px">정해 주시면 그대로 구현합니다</span></div>
+          <ol class="ask">
+            <li><b>위치</b> — 보고서 3절(조치 필요 다음). 권장: 예.</li>
+            <li><b>세는 단위</b> — VM(그날 마지막 결과) · 경고는 성공 쪽 · 취소는 실패 쪽. 권장: Backup 현황 Summary 와 같게.</li>
+            <li><b>하루 치 적재 신설</b> — 주간 · 월간 · 분기 합계와 추이에 필요. 보관 400일. 권장: 예.</li>
+            <li><b>Bareos · VM 백업 실패를 판정에 넣기</b> — 지금은 Bareos 는 사전 점검, VM 백업은 RPO 만 판정합니다.</li>
+            <li><b>이상 기준</b> — 지금은 Veeam 실패 VM 이 하나라도 있으면 이상이라 큰 환경은 매일 이상이 됩니다. 안: 연속 2회 이상 실패 또는 RPO 7일 넘음만 이상, 한 번 실패는 주의.</li>
+            <li><b>실패 목록 상한</b> — 화면 30건 + 전부 보기 · 메일 본문은 법인별 수만 · XLSX 는 전부.</li>
+          </ol>
+        </section>
+      </div>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2270}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
