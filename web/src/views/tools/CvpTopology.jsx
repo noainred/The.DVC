@@ -4,7 +4,7 @@ import { fetchHeavy } from './cvpHeavy.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { NOTE, MONO, ROW, GRID1, LINKBTN, Seg, Tiles, CvpSelect, Pill } from './CvpNetParts.jsx';
-import { LAYER_DEFS, LINK_DEFS, FIELD_LABEL, fieldValue, linkCheckState, layoutNodes, TOPO_NOTE, MISMATCH_NOTE, speedText, TONE, descLinkNote } from './cvpNetText.js';
+import { LAYER_DEFS, LINK_DEFS, FIELD_LABEL, fieldValue, linkCheckState, layoutNodes, TOPO_NOTE, MISMATCH_NOTE, speedText, TONE, descLinkNote, topoNodeBasis } from './cvpNetText.js';
 
 /**
  * CVP › 토폴로지(v3.38 ⑥ 자동 지도 · ⑦ 양끝 불일치). `/tools/cvp/topology` 마운트 1회 + 새로고침(폴링 없음).
@@ -48,7 +48,7 @@ function TopoMap({ nodes, links, sel, onSel, problemsOnly }) {
               onKeyDown={(e) => { setFocusId(n.id); if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSel(on ? null : n.id); } }}
               onFocus={(e) => { let kb = true; try { kb = e.currentTarget.matches(':focus-visible'); } catch { /* 구형 브라우저 — 표시한다 */ } if (kb) setFocusId(n.id); }}
               onBlur={() => setFocusId((x) => (x === n.id ? null : x))} onMouseDown={() => setFocusId(null)} style={{ cursor: 'pointer', outline: 'none' }}>
-              <title>{`${n.hostname} — ${LAYER_DEFS[n.layer]?.label || n.layer} · 스위치 이웃 ${n.switchNeighbors}${n.esxi + n.otherNeighbors ? ` · 서버 등 ${n.esxi + n.otherNeighbors}` : ''}${n.lldpRead ? '' : ' · LLDP 못 읽음'}${n.lldpFailing ? ' · LLDP 마지막 읽기 실패 — 이전 이웃으로 그렸습니다' : ''}${n.lldpAt ? ` · LLDP 읽은 시각 ${new Date(n.lldpAt).toLocaleString()}` : ''}`}</title>
+              <title>{`${n.hostname} — ${LAYER_DEFS[n.layer]?.label || n.layer}${topoNodeBasis(n)} · 스위치 이웃 ${n.switchNeighbors}${n.esxi + n.otherNeighbors ? ` · 서버 등 ${n.esxi + n.otherNeighbors}` : ''}${n.lldpRead ? '' : ' · LLDP 못 읽음'}${n.lldpFailing ? ' · LLDP 마지막 읽기 실패 — 이전 이웃으로 그렸습니다' : ''}${n.lldpAt ? ` · LLDP 읽은 시각 ${new Date(n.lldpAt).toLocaleString()}` : ''}`}</title>
               <rect width={BOX_W} height={BOX_H} rx="6" fill={on ? '#1e3a8a' : '#16213a'} stroke={on ? '#93c5fd' : n.lldpRead && !n.lldpFailing ? '#3b4b6b' : '#b45309'} strokeDasharray={n.lldpRead && !n.lldpFailing ? undefined : '4 3'} strokeWidth={on ? 2 : 1} />
               {focusId === n.id ? <rect x={-3} y={-3} width={BOX_W + 6} height={BOX_H + 6} rx="8" fill="none" stroke="#fbbf24" strokeWidth="2" /> : null}
               <text x={BOX_W / 2} y="15" textAnchor="middle" fill="#e5edf9" fontSize="11" fontFamily="var(--mono)">{name}</text>

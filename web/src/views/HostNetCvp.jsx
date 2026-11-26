@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { postJson } from '../api.js';
 import { basisOf, bpsText, errText, dropText, daySumText, speedText, portLabel, uplinkSummary, uplinkTotals, SEVERITY_BADGE, eventTimeText, ageText, L2_STALE_MS, epStatusText, epLocateText, epDisagreeText } from './hostNetText.js';
 import { agoText } from './tools/relTime.js';
+import { LLDP_NAME_AMBIGUOUS_NOTE } from './hostNetText.js';
 
 export default function HostNetCvp({ data, nics = [], hostId = null, onReload = null }) {
   const [loc, setLoc] = useState({ busy: false, text: '', error: '' });   // v2.935(C-③) 지금 조회
@@ -26,6 +27,8 @@ export default function HostNetCvp({ data, nics = [], hostId = null, onReload = 
         <span className="muted" style={{ fontSize: 11 }}>방향은 스위치 포트 기준 — In = 서버 송신 · Out = 서버 수신</span>
       </div>
       {s.note && <div className="muted hd-note" style={{ marginTop: 4 }}>{s.note}</div>}
+      {/* v3.53(사용자 결정): 같은 법인에 짧은 이름이 같은 다른 호스트가 있으면 짧은 이름 LLDP 근거를 쓰지 않는다 — 왜 LLDP 근거가 없는지 밝힌다 */}
+      {data.lldpNameAmbiguous && <div className="muted hd-note" style={{ marginTop: 4 }}>{LLDP_NAME_AMBIGUOUS_NOTE}</div>}
       {data.ep && (
         <div className="flex wrap" style={{ alignItems: 'center', gap: '4px 10px', marginTop: 4, fontSize: 11.5 }}>
           <span className="muted" style={{ minWidth: 0 }}>{epStatusText(data.ep)}</span>

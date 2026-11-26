@@ -182,4 +182,16 @@ describe('v3.42 CVP 버그 점검 1회차 — 웹', () => {
     expect(src('CvpPortPlan.jsx')).toMatch(/c\.young != null \? \[\['아직 판단 못 함', c\.young/);
     expect(src('CvpOpticsTrend.jsx')).toMatch(/refLine=\{rowLow\(x\)\}/);
   });
+  it('v3.53 — 토폴로지 노드 MLAG · 층 근거 · 호스트 업링크 이름 겹침 안내', async () => {
+    const { topoNodeBasis } = await import('./cvpNetText.js');
+    expect(topoNodeBasis({ mlagPeer: true, mlagBy: 'status', layerBy: 'mlag' })).toBe(' · MLAG 피어(장비 상태로 확인) · 층은 MLAG 쌍과 채널 구성으로 판단');
+    expect(topoNodeBasis({ mlagPeer: true })).toBe(' · MLAG 피어(연결 모양으로 추정)');
+    expect(topoNodeBasis({ mlagPeer: false })).toBe('');
+    expect(src('CvpTopology.jsx')).toMatch(/\$\{topoNodeBasis\(n\)\}/);
+    const { default: HostNetCvp } = await import('../HostNetCvp.jsx');
+    const { LLDP_NAME_AMBIGUOUS_NOTE } = await import('../hostNetText.js');
+    const html = renderToStaticMarkup(React.createElement(HostNetCvp, { data: { uplinks: [], lldpNameAmbiguous: true }, nics: [] }));
+    expect(html).toContain(LLDP_NAME_AMBIGUOUS_NOTE.slice(0, 20));
+    expect(renderToStaticMarkup(React.createElement(HostNetCvp, { data: { uplinks: [] }, nics: [] }))).not.toContain(LLDP_NAME_AMBIGUOUS_NOTE.slice(0, 20));
+  });
 });
