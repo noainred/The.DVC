@@ -67,12 +67,23 @@ test('1: 자리표시 시리얼로 놓은 장비는 아무 서버에도 이어�
 
 test('2: usableTag — 자리표시는 거르고, 비 ASCII 글자가 든 값은 거르지 않는다', () => {
   for (const t of ['None', 'To Be Filled By O.E.M.', 'Default string', '0000000', '1234567', 'AB1', '', null, undefined, 7]) assert.equal(RT.usableTag(t), false, String(t));
-  for (const t of ['SVA0001', 'AB12', '자산1234', '본사-0000', '서울A1', '자산가나다라', 'ＮＯＮＥ']) assert.equal(RT.usableTag(t), true, t);
+  for (const t of ['SVA0001', 'AB12', '자산1234', '본사-0000', '서울A1', '자산가나다라', 'ÿÿÿÿÿÿÿÿ', 'Ω-0000', '默认字符串']) assert.equal(RT.usableTag(t), true, t);
+  // 4회차 반증 B-2 · C-2: 비 ASCII 예외는 호환 정규화 뒤에도 남는 글자 · 숫자에만 — 전각 · NBSP · 폭 없는 글자 · 기호가 낀 자리표시 값은 여전히 자리표시
+  for (const t of ['ＮＯＮＥ', '０００００００', 'Default\u00a0string', 'To\u2009Be Filled By O.E.M.', 'None\u200b', '0000–0000', 'N/A·', '１２３４５６７']) assert.equal(RT.usableTag(t), false, JSON.stringify(t));
   // 긴 값(기억하지 않는 갈래 — 5회차 점검 성능 2)도 판정은 같다 · 같은 값을 다시 물어도 같다
   for (let i = 0; i < 2; i += 1) {
     assert.equal(RT.usableTag('0'.repeat(100)), false); assert.equal(RT.usableTag(`${'A'.repeat(40)}${'7'.repeat(40)}`), true);
     assert.equal(RT.usableTag(`To Be Filled By O.E.M.${' '.repeat(60)}`.trim()), false); assert.equal(RT.usableTag('S'.repeat(64) + '1'), true); assert.equal(RT.usableTag('SVA0001'), true);
   }
+});
+
+test('2 라우트(4회차 반증 C-2): NBSP 가 낀 자리표시 태그는 가림 재료가 아니다 — 평범한 글자를 지우지 않는다', async () => {
+  registry.importServers([srv('ph1', 'ph-one', 'https://192.0.2.31', 'Default\u00a0string'), srv('ph2', 'ph-two', 'https://192.0.2.32', 'ＮＯＮＥ')], 'merge');
+  await place({ uStart: 30, kind: 'other', label: 'spare default string unit' }); await place({ uStart: 31, kind: 'other', label: 'phone-02 none' });
+  const labels = (await room(OP_A)).places.map((p) => p.label);
+  assert.ok(labels.includes('spare default string unit') && labels.includes('phone-02 none'), JSON.stringify(labels));
+  const v = await room(ADMIN);
+  assert.ok(!v.unplaced.some((u) => u.serverId === 'ph1' || u.serverId === 'ph2'), '그런 태그의 서버는 연결 키가 없다(미배치가 아니라 serversNoTag)');
 });
 
 test('2 라우트: 한글 시리얼이 든 다른 장비 이름 — 시리얼을 가리는 판본에서 가려진다(자리표시로 빠지지 않는다)', async () => {

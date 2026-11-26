@@ -99,10 +99,12 @@ function sendErr(res, e) {
 /**
  * 식별자로 쓸 수 있는 서비스 태그 · 시리얼인가 — 자리표시 값('To Be Filled By O.E.M.' · 'None' · '0000000' · 영숫자 4자 미만 — `bmusage/commonTag.js isPlaceholderTag` ·
  * 다른 기능이 '서비스 태그를 열쇠로 써도 되는가' 에 쓰는 그 판정)이 아니어야 한다. **가림 재료**(2회차 반증 C2 — 'phone-01 none' 이 지워졌다)와 **연결 키**(corpServers)가 같이 쓴다.
- * 그 판정은 ASCII 영숫자만 남겨서 보므로 **비 ASCII 글자가 든 값은 자리표시로 보지 않는다**(4회차 점검 보안 1 · 정확성 2: 시리얼 '자산1234' · '본사-0000' 이
- * '1234' · '0000' 으로 읽혀 가림 재료에서 빠졌다).
+ * 그 판정은 ASCII 영숫자만 남겨서 보므로 **비 ASCII 글자 · 숫자가 든 값은 자리표시로 보지 않는다**(4회차 점검 보안 1 · 정확성 2: 시리얼 '자산1234' · '본사-0000' 이
+ * '1234' · '0000' 으로 읽혀 가림 재료에서 빠졌다). 예외는 **호환 정규화(NFKC) 뒤에도 남는 글자 · 숫자**에만 준다 — 전각('Ｎｏｎｅ' · '０００００００') · NBSP 가 낀
+ * 'Default string' · 기호가 낀 값은 그 판정이 이미 자리표시로 잡는 변형이다(4회차 반증 B-2 · C-2: 그런 값이 진짜 태그가 되어 'spare default string unit' 이 지워졌다).
  */
-const NON_ASCII = /[^\u0000-\u007f]/;
+const NON_ASCII_WORD = /(?![\u0000-\u007f])[\p{L}\p{N}]/u;
+const NON_ASCII = { test: (t) => NON_ASCII_WORD.test(t.normalize('NFKC')) };
 // 판정은 글자만으로 정해진다 — 같은 태그를 요청마다 다시 판정하지 않는다(범위 계정 요청 하나에 태그 2만여 개 · 약 10ms 실측 — 4회차 점검 성능). 상한을 넘으면 통째로 비운다.
 const TAG_OK = new Map(); const TAG_OK_MAX = 200_000; const TAG_OK_KEY_MAX = 64;
 export const usableTag = (t) => {
