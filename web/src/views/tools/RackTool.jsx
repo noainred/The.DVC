@@ -890,7 +890,7 @@ export default function RackTool() {
       ) : null}
       {modal?.kind === 'room-edit' ? (
         <NameModal title="전산실 이름 · 삭제" init={view?.room?.name || ''} busy={busy} saving={busy && busyModal === modal} error={modalErr} onClose={closeModal}
-          onSave={async (name) => { if (await run({ op: 'room.rename', id: roomId, name })) { await loadTree(); await loadRoom(roomId); } }}
+          onSave={async (name) => { if (await run({ op: 'room.rename', id: roomId, name })) await Promise.all([loadTree(), loadRoom(roomIdRef.current)]); }}
           onRemove={async () => { if (!window.confirm('이 전산실을 지울까요? 판 기록에서 되돌릴 수 있습니다.')) return; if (await run({ op: 'room.remove', id: roomId }, { okText: '전산실을 지웠습니다.' })) await loadTree(); }} removeLabel="전산실 지우기(랙이 없을 때만)" />
       ) : null}
       {modal?.kind === 'versions' ? (

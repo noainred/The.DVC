@@ -109,7 +109,7 @@ async function openInner() {
     // 시리얼 키 색인(rack_place_key)은 한 번만 채운다 — 이 표가 없던 원장(업그레이드 전)에서 올라온 경우.
     // 법인별 '한 번이라도 원장에 있었던 시리얼'(rack_serial_seen)은 한 번만 채운다 — 지금 원장 + 남아 있는 판(법인마다 최대 30개)의 시리얼.
     try { if (metaGet(conn, SEEN_META) !== 1) tx(conn, () => backfillSeen(conn)); } catch (e) { console.warn('[rack-db] 시리얼 기록(가림 재료)을 채우지 못했습니다:', e.message); }
-    _keysReady = false;
+    _keysReady = false; _keysRetryAt = 0;
     try { if (metaGet(conn, PLACE_KEYS_META) !== PLACE_KEYS_VER) tx(conn, () => rebuildPlaceKeys(conn)); _keysReady = true; } catch (e) { console.warn('[rack-db] 시리얼 키 색인을 만들지 못했습니다(다음 조회 · 쓰기에서 다시 시도):', e.message); }
     // 판 기능 이전에 쌓인 원장 — 판이 하나도 없는 법인은 지금 모습을 '기준 판' 으로 남긴다(첫 변경 전 상태로 되돌릴 수 있게).
     try {
@@ -131,7 +131,9 @@ async function openInner() {
 }
 
 /** 테스트 전용 — 핸들을 닫고 다음 호출이 다시 열게 한다. */
-export function _closeForTest() { try { _db?.close(); } catch { /* */ } _db = null; _initError = ''; dropRoomFrags(); _keysReady = false; }
+export function _closeForTest() { try { _db?.close(); } catch { /* */ } _db = null; _initError = ''; dropRoomFrags(); _keysReady = false; _keysRetryAt = 0; }
+/** 테스트 전용 — 색인 다시 채우기의 재시도 대기를 없앤다(대기 시간을 기다리지 않고 '다음 시도' 를 보려고). */
+export function _keysRetryNowForTest() { _keysRetryAt = 0; }
 /** 테스트 전용 — SQL 로 원장을 직접 고친 뒤(전산실 rev 를 올리지 않는 변경) 조각 캐시와 시리얼 키 색인을 원장에 맞춘다. */
 export async function _resyncForTest() { const db = await need(); dropRoomFrags(); tx(db, () => rebuildPlaceKeys(db)); _keysReady = true; }
 
@@ -634,12 +636,17 @@ function backfillSeen(db) {
 //   같은 트랜잭션에서 `setPlaceKeys` 로 맞춘다. 색인이 없던 원장은 열 때 한 번 채운다(rack_meta placeKeys).
 const PLACE_KEYS_META = 'placeKeys'; const PLACE_KEYS_VER = 1;
 let _keysReady = false;   // 이 핸들에서 색인이 원장과 맞춰졌는가(열 때 채우기에 실패했으면 false — 1회차 점검 정확성 4)
+let _keysRetryAt = 0;     // 다시 채우기가 실패했으면 이 시각까지는 다시 시도하지 않는다(그동안은 원장 훑기로 판정)
+const KEYS_RETRY_MS = 30_000;
 /**
  * 색인을 쓸 수 있는가. 열 때 채우지 못했으면(잠금 · 디스크 오류) 여기서 다시 채운다 — 그래도 못 하면 false 를 돌려주고 부르는 쪽이 원장 훑기로 판정한다
  * (예전엔 빈 색인으로 계속 돌아 놓인 서버가 미배치로 보이고 같은 시리얼이 두 자리에 들어갔다). `inTx` = 이미 쓰기 트랜잭션 안(SAVEPOINT 로 감싼다).
  */
 function keysUsable(db, inTx) {
   if (_keysReady) return true;
+  // 2회차 점검 성능 5: 실패가 이어지는 동안(다른 연결의 잠금 · 고장 난 색인 표) 요청마다 다시 시도하면 조회 1회가 잠금 대기 3초를 통째로 물고 경고가 줄줄이 찍혔다 —
+  //   한 번 실패하면 KEYS_RETRY_MS 동안은 훑기로만 답한다(경고도 그때 한 번).
+  if (Date.now() < _keysRetryAt) return false;
   try {
     if (inTx) {
       db.exec('SAVEPOINT rack_keys');
@@ -649,8 +656,9 @@ function keysUsable(db, inTx) {
   } catch (e) {
     // 1회차 반증 C-1: 디스크 가득 · I/O 오류는 SQLite 가 **쓰기 트랜잭션 전체**를 스스로 되돌린다 — 그 상태로 쓰기를 이어 가면 변경이 트랜잭션 밖에서 하나씩 확정된다
     //   (재현: places · rev · 판 · 이력이 늘고 응답은 500). 트랜잭션이 사라졌으면 훑기로 넘어가지 않고 오류를 올려 이 쓰기를 멈춘다.
+    _keysRetryAt = Date.now() + KEYS_RETRY_MS;
     if (inTx && db.isTransaction === false) throw e;
-    console.warn('[rack-db] 시리얼 키 색인을 다시 만들지 못했습니다 — 이번 판정은 원장을 훑습니다:', e.message);
+    console.warn(`[rack-db] 시리얼 키 색인을 다시 만들지 못했습니다 — ${Math.round(KEYS_RETRY_MS / 1000)}초 동안 원장을 훑어 판정합니다:`, e.message);
   }
   return _keysReady;
 }

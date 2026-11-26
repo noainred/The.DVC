@@ -86,6 +86,7 @@ test('B-3: 색인을 못 채운 핸들 — 첫 쓰기가 색인을 다시 채운
   const warn = console.warn; console.warn = () => {};
   try { db = await R.openRackDb(); } finally { console.warn = warn; }
   db.exec('DROP TRIGGER k_fail');
+  R._keysRetryNowForTest();   // 재시도 대기가 걸려 있지 않게 한다(이 테스트는 '쓰기 안에서 다시 채운 뒤 ROLLBACK' 을 본다)
   const tryDup = async () => op({ op: 'place.add', rackId, rev: await rev(), place: P(5, 'dup', { serial: 'tag 0001' }) });
   const a = await tryDup(); assert.equal(a.statusCode, 409); assert.equal(a.body.code, 'serialDup');
   const b = await tryDup(); assert.equal(b.statusCode, 409, '둘째 시도도 거절(예전엔 준비 표식만 남아 빈 색인을 믿고 통과했다)'); assert.equal(b.body.code, 'serialDup');
@@ -106,6 +107,7 @@ test('C-1: 색인 다시 채우기 중 쓰기 트랜잭션 전체가 되돌려�
     db = await R.openRackDb();
     db.exec('DROP TRIGGER k_fail');
     db.exec("CREATE TRIGGER k_fail BEFORE INSERT ON rack_place_key BEGIN SELECT RAISE(ROLLBACK, 'disk full'); END;");
+    R._keysRetryNowForTest();
     const count = () => ({
       places: db.prepare('SELECT COUNT(*) AS n FROM rack_place').get().n, rev: db.prepare('SELECT rev FROM rack_room WHERE id = ?').get(roomId).rev,
       versions: db.prepare('SELECT COUNT(*) AS n FROM rack_version').get().n, logs: db.prepare('SELECT COUNT(*) AS n FROM rack_log').get().n,
@@ -115,6 +117,7 @@ test('C-1: 색인 다시 채우기 중 쓰기 트랜잭션 전체가 되돌려�
     assert.ok(r.statusCode >= 500, `쓰기는 실패로 답한다(${r.statusCode})`);
     assert.deepEqual(count(), before, '아무것도 확정되지 않았다');
     db.exec('DROP TRIGGER k_fail');
+    R._keysRetryNowForTest();   // 재시도 대기(30초)가 지났다고 본다
     const ok = await op({ op: 'place.add', rackId, rev: before.rev, place: P(30, 'c1', { serial: 'C1-SERIAL' }) });
     assert.equal(ok.statusCode, 200, '원인이 사라지면 같은 쓰기가 된다');
     assert.ok(db.prepare("SELECT 1 AS x FROM rack_place_key WHERE key = 'c1serial'").get(), '색인도 다시 채워졌다');

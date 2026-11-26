@@ -137,6 +137,10 @@ test('탐침 H08~H11: 색인을 열 때 못 채웠으면 원장 훑기로 판정
     const ok = await R.addPlace({ roomId: kr.r1, rev: await rev(kr.r1), user: 'a', rackId: kr.a1, input: { face: 'full', uStart: 21, uSize: 1, kind: 'other', label: 'k2', serial: 'KEY-0002', extraSerials: [] } });
     assert.ok(ok.id, 'H08 색인이 준비되지 않았으면 조각을 넣으려 하지 않는다(쓰기는 된다)');
   } finally { db.exec('DROP TRIGGER rk_fail'); console.warn = warn; }
+  // 실패한 뒤 재시도 대기(30초) 동안은 원인이 사라져도 훑기로만 답한다 — 색인은 아직 비어 있고 판정은 맞다
+  assert.ok((await R.placedSerialKeys('kr')).has('key0002'), '대기 중에도 놓인 키 집합은 원장에서');
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM rack_place_key WHERE key LIKE 'key000%'").get().n, 0, '대기 중에는 다시 채우지 않는다(요청마다 잠금 대기 · 경고를 되풀이하지 않게)');
+  R._keysRetryNowForTest();   // 대기 시간이 지났다고 본다
   assert.ok((await R.placedSerialKeys('kr')).has('key0002'));
   assert.deepEqual(db.prepare("SELECT key FROM rack_place_key WHERE key LIKE 'key000%' ORDER BY key").all().map((r) => r.key), ['key0001', 'key0002'], '다음 조회에서 색인을 통째로 다시 채웠다');
 });
