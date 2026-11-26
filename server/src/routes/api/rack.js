@@ -183,21 +183,17 @@ function textMaskOf({ admin, showSerial, hosts = [], tags = [] }) {
   // 순서: ① IP 리터럴 낱말을 **원문 낱말에서 먼저** 토큰으로 ② 그다음 등록 주소를 글 속에서 치환.
   //   반대면 등록 IP '10.20.30.4' 가 다른 IP '10.20.30.45' 의 앞부분만 가려 '(주소 가림)5' 가 남는다(3회차 점검 2).
   const addr = (s) => {
-    let t = s;
-    if (/[\d:]/.test(t)) {
-      t = t.split(/(\s+)/).map((w) => {
-        if (!w || !/[\d:]/.test(w)) return w;
-        if (w.length > 300) return maskedIdToken(w.slice(0, 300));   // 이렇게 긴 낱말은 살피지 않고 통째로(숫자 · 콜론이 든 것만)
-        return ipWord(w) ? maskedIdToken(wordCore(w) || w) : w;
-      }).join('');
-    }
-    return replaceNeedles(t, hostIdx, HIDDEN_ADDR);
+    if (!/[\d:]/.test(s)) return replaceNeedles(s, hostIdx, HIDDEN_ADDR);   // 숫자 · 콜론이 없으면 IP 리터럴도 없다
+    // 낱말마다: IP 리터럴이면 토큰, 아니면 그 낱말 안의 등록 주소를 치환(토큰으로 바꾼 낱말은 다시 훑지 않는다 — 토큰의 16진 글자를 짧은 등록 주소가 건드리지 않게).
+    return s.split(/(\s+)/).map((w) => {
+      if (!w || /^\s/.test(w)) return w;
+      if (!/[\d:]/.test(w)) return replaceNeedles(w, hostIdx, HIDDEN_ADDR);
+      if (w.length > 300) return maskedIdToken(w.slice(0, 300));   // 이렇게 긴 낱말은 살피지 않고 통째로(숫자 · 콜론이 든 것만)
+      return ipWord(w) ? maskedIdToken(wordCore(w) || w) : replaceNeedles(w, hostIdx, HIDDEN_ADDR);
+    }).join('');
   };
-  const tagsOut = (t, own) => {
-    if (showSerial) return t;
-    const u = own && own.length ? stripTags(t, tagIndexOf(own)) : t;
-    return stripTags(u, corpIdx);
-  };
+  // 그 행 · 그 장비의 시리얼(own)과 법인 색인을 **한 번에** 훑는다(따로 훑으면 짧은 own 이 다른 장비의 긴 시리얼을 깨뜨려 꼬리가 남는다 — 3회차 점검 정확성 1).
+  const tagsOut = (t, own) => (showSerial ? t : stripTags(t, own && own.length ? tagIndexOf(own) : null, corpIdx));
   const text = (s, own) => (typeof s !== 'string' || !s ? s : tagsOut(addr(s), own));
   return {
     admin: false, match, text,

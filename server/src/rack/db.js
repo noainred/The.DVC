@@ -108,7 +108,9 @@ async function openInner() {
     dropRoomFrags();   // 새 핸들 — 앞 핸들에서 읽은 조각을 믿지 않는다
     // 시리얼 키 색인(rack_place_key)은 한 번만 채운다 — 이 표가 없던 원장(업그레이드 전)에서 올라온 경우.
     // 법인별 '한 번이라도 원장에 있었던 시리얼'(rack_serial_seen)은 한 번만 채운다 — 지금 원장 + 남아 있는 판(법인마다 최대 30개)의 시리얼.
-    try { if (metaGet(conn, SEEN_META) !== 1) tx(conn, () => backfillSeen(conn)); } catch (e) { console.warn('[rack-db] 시리얼 기록(가림 재료)을 채우지 못했습니다:', e.message); }
+    _seenReady = false; _seenRetryAt = 0;
+    try { if (metaGet(conn, SEEN_META) !== 1) tx(conn, () => backfillSeen(conn)); _seenReady = true; } catch (e) { console.warn('[rack-db] 시리얼 기록(가림 재료)을 채우지 못했습니다(가림 재료를 읽을 때 다시 시도):', e.message); }
+    DETAIL_CACHE.clear();   // 새 핸들 — 다른 원장의 같은 (법인, 판) 키가 섞이지 않게
     _keysReady = false; _keysRetryAt = 0;
     try { if (metaGet(conn, PLACE_KEYS_META) !== PLACE_KEYS_VER) tx(conn, () => rebuildPlaceKeys(conn)); _keysReady = true; } catch (e) { console.warn('[rack-db] 시리얼 키 색인을 만들지 못했습니다(다음 조회 · 쓰기에서 다시 시도):', e.message); }
     // 판 기능 이전에 쌓인 원장 — 판이 하나도 없는 법인은 지금 모습을 '기준 판' 으로 남긴다(첫 변경 전 상태로 되돌릴 수 있게).
@@ -131,7 +133,7 @@ async function openInner() {
 }
 
 /** 테스트 전용 — 핸들을 닫고 다음 호출이 다시 열게 한다. */
-export function _closeForTest() { try { _db?.close(); } catch { /* */ } _db = null; _initError = ''; dropRoomFrags(); _keysReady = false; _keysRetryAt = 0; }
+export function _closeForTest() { try { _db?.close(); } catch { /* */ } _db = null; _initError = ''; dropRoomFrags(); _keysReady = false; _keysRetryAt = 0; _seenReady = false; _seenRetryAt = 0; DETAIL_CACHE.clear(); }
 /** 테스트 전용 — 색인 다시 채우기의 재시도 대기를 없앤다(대기 시간을 기다리지 않고 '다음 시도' 를 보려고). */
 export function _keysRetryNowForTest() { _keysRetryAt = 0; }
 /** 테스트 전용 — SQL 로 원장을 직접 고친 뒤(전산실 rev 를 올리지 않는 변경) 조각 캐시와 시리얼 키 색인을 원장에 맞춘다. */
@@ -390,6 +392,9 @@ export async function corpSerials(corpId) {
     try { for (const x of JSON.parse(r.x || '[]')) if (typeof x === 'string' && x) out.push(x); } catch { /* */ }
   }
   // + 한 번이라도 이 법인 원장에 있었던 시리얼의 비교 키(뺀 장비 · 나중에 넣은 시리얼의 옛 글까지 가리려고 — rack_serial_seen)
+  if (!_seenReady && Date.now() >= _seenRetryAt) {   // 열 때 채우지 못했으면 여기서 다시(실패하면 KEYS_RETRY_MS 뒤에)
+    try { tx(db, () => backfillSeen(db)); _seenReady = true; } catch (e) { _seenRetryAt = Date.now() + KEYS_RETRY_MS; console.warn('[rack-db] 시리얼 기록(가림 재료)을 채우지 못했습니다:', e.message); }
+  }
   for (const r of db.prepare('SELECT key FROM rack_serial_seen WHERE corp_id = ?').all(String(corpId || ''))) out.push(r.key);
   return out;
 }
@@ -428,10 +433,10 @@ export async function renameSite({ id, name, user }) {
   return tx(db, () => {
     const s = siteRow(db.prepare('SELECT * FROM rack_site WHERE id = ?').get(id));
     if (!s) fail(404, '데이터센터를 찾지 못했습니다.');
+    if (name === s.name) return { id, unchanged: true };   // 같은 이름 — 판 · 이력(기준 판 포함)을 만들지 않는다
     ensureBaseline(db, s.corpId);
     const dup = db.prepare('SELECT id FROM rack_site WHERE corp_id = ? AND name = ? AND id <> ?').get(s.corpId, name, id);
     if (dup) fail(409, '같은 이름의 데이터센터가 이 법인에 이미 있습니다.');
-    if (name === s.name) return { id, unchanged: true };   // 같은 이름 — 판 · 이력을 만들지 않는다
     db.prepare('UPDATE rack_site SET name = ? WHERE id = ?').run(name, id);
     log(db, { user, corpId: s.corpId, action: 'site.rename', detail: `${s.name} → ${name}` });
     return { id };
@@ -612,6 +617,8 @@ const nameOf = (p) => p.label || '이름 없는 장비';
 //   ① 원장에서 뺀 장비 ② 글이 쓰인 **뒤에** 시리얼을 넣은 장비(놓을 때는 빈칸)의 옛 글이 가려지지 않는다 — 한 번이라도 원장에 있었던 시리얼의 비교 키를 법인별로 남긴다.
 //   (장비 수만큼만 는다 · 지우지 않는다 · 응답에 싣지 않는다)
 const SEEN_META = 'seenKeys';
+let _seenReady = false;   // 이 핸들에서 시리얼 기록 채우기가 끝났는가(열 때 실패했으면 false — corpSerials 가 다시 시도한다)
+let _seenRetryAt = 0;
 function seeSerials(db, corpId, keys) {
   if (!corpId || !keys || !keys.size) return;
   const ins = db.prepare('INSERT OR IGNORE INTO rack_serial_seen (corp_id, key) VALUES (?, ?)');
@@ -650,14 +657,19 @@ function keysUsable(db, inTx) {
   try {
     if (inTx) {
       db.exec('SAVEPOINT rack_keys');
-      try { rebuildPlaceKeys(db); db.exec('RELEASE rack_keys'); } catch (e) { try { db.exec('ROLLBACK TO rack_keys'); db.exec('RELEASE rack_keys'); } catch { /* */ } throw e; }
+      try { rebuildPlaceKeys(db); db.exec('RELEASE rack_keys'); } catch (e) {
+        // SAVEPOINT 로 되돌리지 못하면(‘no such savepoint’) 바깥 쓰기 트랜잭션이 통째로 사라진 것이다 — 표식을 달아 올린다.
+        //   `db.isTransaction` 은 Node 22.16 에 생긴 속성이라 그 전 버전(engines 는 22.5 부터)에서는 undefined 다(3회차 점검 정확성 2).
+        try { db.exec('ROLLBACK TO rack_keys'); db.exec('RELEASE rack_keys'); } catch { e.rackTxLost = true; }
+        throw e;
+      }
     } else tx(db, () => rebuildPlaceKeys(db));
     _keysReady = true;
   } catch (e) {
     // 1회차 반증 C-1: 디스크 가득 · I/O 오류는 SQLite 가 **쓰기 트랜잭션 전체**를 스스로 되돌린다 — 그 상태로 쓰기를 이어 가면 변경이 트랜잭션 밖에서 하나씩 확정된다
     //   (재현: places · rev · 판 · 이력이 늘고 응답은 500). 트랜잭션이 사라졌으면 훑기로 넘어가지 않고 오류를 올려 이 쓰기를 멈춘다.
     _keysRetryAt = Date.now() + KEYS_RETRY_MS;
-    if (inTx && db.isTransaction === false) throw e;
+    if (inTx && (e?.rackTxLost === true || db.isTransaction === false)) throw e;
     console.warn(`[rack-db] 시리얼 키 색인을 다시 만들지 못했습니다 — ${Math.round(KEYS_RETRY_MS / 1000)}초 동안 원장을 훑어 판정합니다:`, e.message);
   }
   return _keysReady;
@@ -892,6 +904,7 @@ export async function restoreVersion({ corpId, versionId, expectLatestId, user }
     //   (1회차 점검 성능 축 — 실측: 장비마다 setPlaceKeys 를 부르면 문장 준비 때문에 5,100대 되돌리기가 145 → 225ms).
     const delKeys = _keysReady ? db.prepare('DELETE FROM rack_place_key WHERE place_id = ?') : null;
     const insKey = _keysReady ? db.prepare('INSERT OR IGNORE INTO rack_place_key (key, place_id) VALUES (?, ?)') : null;
+    const insSeen = db.prepare('INSERT OR IGNORE INTO rack_serial_seen (corp_id, key) VALUES (?, ?)');
     for (const p of cur.places) { del.place.run(p.id); if (delKeys) delKeys.run(p.id); }
     for (const r of cur.racks) del.rack.run(r.id);
     for (const r of cur.rooms) del.room.run(r.id);
@@ -911,8 +924,9 @@ export async function restoreVersion({ corpId, versionId, expectLatestId, user }
     for (const r of restorableSnapshot(snap, (id) => !!typeOk.get(id)).racks) ins.rack.run(r.id, r.roomId, r.name, r.row, r.typeId, r.heightU, r.role, r.pduA, r.pduB, r.sort);
     for (const p of snap.places) {
       ins.place.run(p.id, p.rackId, p.face, p.uStart, p.uSize, p.kind, p.label, p.model, p.serial, serialKeyOf(p.serial), JSON.stringify(p.extraSerials), p.note, p.ratedW, p.opW, p.weightKg, now);
-      if (insKey) for (const k of keysOf(p)) insKey.run(k, p.id);
-      seeSerials(db, corpId, keysOf(p));
+      const ks = keysOf(p);
+      if (insKey) for (const k of ks) insKey.run(k, p.id);
+      for (const k of ks) insSeen.run(corpId, k);
     }
     const detail = `판 #${v.id} 으로 되돌림`;
     for (const r of snap.rooms) log(db, { user, corpId, roomId: r.id, action: 'version.restore', detail, version: false });

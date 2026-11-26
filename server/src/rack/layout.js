@@ -40,7 +40,12 @@ const CTRL = new RegExp('[\\u0000-\\u001f\\u007f-\\u009f\\u00ad\\u061c\\u115f\\u
 /** 한 줄 문자열 정리 — 제어 · 양방향 · 폭 없는 문자 제거 · 앞뒤 공백 · 길이 상한. 문자열이 아니면 ''(숫자는 문자열로). */
 export function cleanText(v, max) {
   const s = typeof v === 'string' ? v : (typeof v === 'number' && Number.isFinite(v) ? String(v) : '');
-  return s.slice(0, max * 4).replace(CTRL, ' ').trim().slice(0, max);
+  let t = s.slice(0, max * 4).replace(CTRL, ' ').trim().slice(0, max);
+  // 3회차 점검 정확성 3: 자른 자리가 공백이면 끝 공백이 남았다(눈으로 같은 이름이 중복 검사를 통과 · 다시 저장하면 '바뀐 것' 으로 판정) — 자른 뒤 한 번 더 다듬는다.
+  //   서로게이트 쌍의 앞 반쪽에서 잘렸으면 그 반쪽도 뺀다(깨진 글자 U+FFFD 로 저장되지 않게).
+  const last = t.charCodeAt(t.length - 1);
+  if (last >= 0xd800 && last <= 0xdbff) t = t.slice(0, -1);
+  return t.trimEnd();
 }
 
 /** 정수(범위 안) — 못 읽으면 null. 소수 · 빈칸 · 범위 밖은 null(0 으로 접지 않는다). */

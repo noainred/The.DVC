@@ -28,9 +28,35 @@ export function tagIndexOf(tags) {
   return { set, lens: lensOf(set) };
 }
 
-/** 글자 속 태그를 '•••' 로(비교 키 기준 — 대소문자 · 구분자 무시 · 부분 일치). 색인이 비었거나 글자가 아니면 그대로. */
-export function stripTags(text, index) {
-  if (typeof text !== 'string' || !text || !index || !index.set.size) return text;
+/**
+ * 사영 `proj` 에서 색인들의 키가 맞는 구간을 **전부** 찾아 합친다([시작, 끝) — 사영 위치 · 겹치거나 맞닿으면 하나로).
+ * 위치마다 색인별로 가장 긴 일치를 표시하고 건너뛰지 않는다 — 앞에서 시작한 짧은 키가 뒤 키의 앞부분을 먹어 꼬리가 남던 것을 막는다
+ * (3회차 점검 정확성 1: 시리얼 '1234' 인 장비 이름 'next to SN12345678' → 'next to SN•••5678' 로 다른 장비 시리얼의 일부가 남았다).
+ */
+function matchSpans(proj, indexes) {
+  const spans = [];
+  for (let a = 0; a < proj.length; a += 1) {
+    let end = 0;
+    for (const index of indexes) {
+      if (!index || !index.set.size) continue;
+      for (const len of index.lens) {
+        if (a + len <= end) break;   // 이 색인의 남은 길이는 더 짧다 — 이미 표시한 구간 안
+        if (a + len <= proj.length && index.set.has(proj.slice(a, a + len))) { end = a + len; break; }
+      }
+    }
+    if (!end) continue;
+    const last = spans[spans.length - 1];
+    if (last && a <= last[1]) { if (end > last[1]) last[1] = end; } else spans.push([a, end]);
+  }
+  return spans;
+}
+
+/**
+ * 글자 속 태그를 '•••' 로(비교 키 기준 — 대소문자 · 구분자 무시 · 부분 일치). 색인을 여럿 주면 **한 번에** 훑는다(그 장비의 시리얼 + 법인 전체 — 따로 훑으면
+ * 먼저 걷어 낸 짧은 키가 긴 키를 깨뜨린다). 색인이 비었거나 글자가 아니면 그대로.
+ */
+export function stripTags(text, ...indexes) {
+  if (typeof text !== 'string' || !text || !indexes.some((x) => x && x.set.size)) return text;
   let proj = ''; const pos = [];   // 구분자를 뺀 사영과, 사영의 글자마다 원문 위치
   for (let i = 0; i < text.length; i += 1) {
     const ch = text[i];
@@ -38,15 +64,11 @@ export function stripTags(text, index) {
     const l = ch.toLowerCase();
     proj += l.length === 1 ? l : ch; pos.push(i);
   }
-  let out = ''; let from = 0; let a = 0; let any = false;
-  while (a < proj.length) {
-    let hit = 0;
-    for (const len of index.lens) {
-      if (a + len <= proj.length && index.set.has(proj.slice(a, a + len))) { hit = len; break; }
-    }
-    if (hit) { out += `${text.slice(from, pos[a])}•••`; from = pos[a + hit - 1] + 1; a += hit; any = true; } else a += 1;
-  }
-  return any ? out + text.slice(from) : text;
+  const spans = matchSpans(proj, indexes);
+  if (!spans.length) return text;
+  let out = ''; let from = 0;
+  for (const [a, b] of spans) { out += `${text.slice(from, pos[a])}•••`; from = pos[b - 1] + 1; }
+  return out + text.slice(from);
 }
 
 /** 글자 그대로 찾을 목록(주소 원문) → 색인. 대소문자만 무시한다. `min` 자 미만은 뺀다. */
@@ -59,17 +81,13 @@ export function needleIndexOf(strings, { min = 1, max = 255 } = {}) {
   return { set, lens: lensOf(set) };
 }
 
-/** 글자 속 목록 항목을 `repl` 로(대소문자 무시 · 부분 일치 · 긴 것 먼저). */
+/** 글자 속 목록 항목을 `repl` 로(대소문자 무시 · 부분 일치). 겹치는 항목은 구간을 합쳐 한 번에 바꾼다(앞 항목이 뒤 항목의 앞부분만 먹어 꼬리가 남지 않게). */
 export function replaceNeedles(text, index, repl) {
   if (typeof text !== 'string' || !text || !index || !index.set.size) return text;
   const low = lowSameLen(text);   // 글자마다 같은 길이 — 색인이 원문과 어긋나지 않는다
-  let out = ''; let from = 0; let i = 0; let any = false;
-  while (i < low.length) {
-    let hit = 0;
-    for (const len of index.lens) {
-      if (i + len <= low.length && index.set.has(low.slice(i, i + len))) { hit = len; break; }
-    }
-    if (hit) { out += text.slice(from, i) + repl; i += hit; from = i; any = true; } else i += 1;
-  }
-  return any ? out + text.slice(from) : text;
+  const spans = matchSpans(low, [index]);
+  if (!spans.length) return text;
+  let out = ''; let from = 0;
+  for (const [a, b] of spans) { out += text.slice(from, a) + repl; from = b; }
+  return out + text.slice(from);
 }

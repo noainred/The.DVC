@@ -1,6 +1,6 @@
 # 랙 실장도(`server/src/rack/` · 라우트 `routes/api/rack.js` · 화면 `web/src/views/tools/RackTool.jsx`) 불변조건
 
-설계: `docs/design/rack-elevation/README.md`. 회귀: `test/rackLedger.test.js` · `test/rackRoutes.test.js` · `test/rackVersions.test.js` · `test/rackAudit1124.test.js`(2026-11-24 점검) · `test/rackPerf1126.test.js`(개선 1 · 2) · `test/rackGaps{Pure,Db,Routes,Head,Leak,R2x,R2sec,Refute,R3x}1126.test.js` · `test/rackMaskMatrix1126.test.js`(가림 표기 행렬 × 응답 4경로 — **가림 판정을 고치면 이 표에 표기를 더할 것**)(2026-11-26 점검 1~3회차) · `web/src/views/tools/{rackView,rackViewGaps1126}.test.js`.
+설계: `docs/design/rack-elevation/README.md`. 회귀: `test/rackLedger.test.js` · `test/rackRoutes.test.js` · `test/rackVersions.test.js` · `test/rackAudit1124.test.js`(2026-11-24 점검) · `test/rackPerf1126.test.js`(개선 1 · 2) · `test/rackGaps{Pure,Db,Routes,Head,Leak,R2x,R2sec,Refute,R3x}1126.test.js` · `test/rackGapsR3fix1126.test.js`(가림 순수 함수를 느린 기준 구현과 무작위 대조 포함) · `test/rackMaskMatrix1126.test.js`(가림 표기 행렬 × 응답 경로 — **가림 판정을 고치면 이 표에 표기를 더할 것**)(2026-11-26 점검 1~3회차) · `web/src/views/tools/{rackView,rackViewGaps1126}.test.js`.
 
 - **원장은 중앙 한 곳**(2026-11-20 사용자 결정). 사람이 정한 위치만 저장한다 — 상태 · 온도 · 전력 측정값은 넣지 않고 화면을 그릴 때 수집 모듈에서 잇는다.
   계층은 법인(`datacenter/store.js` DataCenter = 법인 묶음) → 데이터센터(site · 물리) → 전산실 → 랙 → 배치. 법인 하나에 데이터센터가 여럿일 수 있다.
@@ -34,14 +34,14 @@
 - **2026-11-26 점검 1회차에서 고정한 것**(5축 — 보안 3 · 정확성 4 · 화면 11 · 동시성/성능 6 · 테스트 공백 173변이):
   **표시 이름(label)은 관리자가 공개한 이름**이다 — 비관리자에게도 보이되 ① 주소와 ② (시리얼을 가리는 판본에서) 시리얼 · 서비스 태그를 가린다. **가림은 `routes/api/rack.js textMaskOf` 하나가 정한다**:
   **주소 먼저**(① 낱말 단위 IP 리터럴 — 알맹이 · 낱말 통째 · 낱말 안의 숫자/점 구간(IPv4) · 16진/콜론 구간(IPv6) → 토큰 · 판정은 `addressMatcher` ② 그다음 등록부 **전체**의 관리 주소 — 범위로 자르기 전 · 대소문자 무시 · 글 속 어디든 → '(주소 가림)'. ① 이 먼저여야 등록 IP 가 다른 IP 의 앞부분만 가리지 않는다)
-  → **태그 나중**(등록부 서비스 태그 + 그 법인의 시리얼 기록 + 그 행 · 그 장비의 시리얼을 **비교 키**(`normKey` — 구분자 · 대소문자 무시 · 구분자 정의는 `serialKey.js isKeySep` 하나)로 · `rack/textMask.js stripTags`). 순서를 바꾸면
+  → **태그 나중**(등록부 서비스 태그 + 그 법인의 시리얼 기록 + 그 행 · 그 장비의 시리얼을 **비교 키**(`normKey` — 구분자 · 대소문자 무시 · 구분자 정의는 `serialKey.js isKeySep` 하나)로 · `rack/textMask.js stripTags` — 그 행 · 그 장비의 시리얼과 법인 색인을 **한 번에** 훑고 일치 구간을 전부 합쳐 가린다(따로 훑으면 짧은 키가 긴 키를 깨뜨려 꼬리가 남는다)). 순서를 바꾸면
   'idrac-<태그>.<도메인>' 의 주소가 맞지 않는다. 이름이 낱말 하나이고 주소면 통째로 '이름 가림'. 호스트 이름처럼 보이는 표시 이름은 그대로 둔다(가리면 조회 계정에게 랙 그림의 장비 이름이 빈다 — 자동으로 잇는
   `link.hostname` · `hw.host` 만 관리자 전용). 같은 가림이 `places[].label` · `link.name` · `unplaced[].name` · 이력 · 판 목록 · 판 글 · 판 차이 이름에 닿는다. 이력 · 판 행의 `tags` 칸(그 글이 말하는 장비의 시리얼)과
   판 차이 항목의 `_tags` 는 db 층이 가림 함수(`maskRow` · `maskItem`)에 넘겨줄 뿐 **응답으로 돌려주지 않는다**(`versionDetail` 이 유일한 출구 — 캐시에는 가리지 않은 결과). `tags` 를 모르는(NULL · 깨진) 옛 장비 글은
   시리얼을 가리는 판본에 통째로 가린다(`LEGACY_DETAIL_HIDDEN`). 법인의 시리얼 기록 = `rack_serial_seen`(한 번이라도 원장에 있었던 시리얼의 비교 키 — 놓기 · 고치기 · 되돌리기가 넣고 지우지 않는다 · 없던 원장은 열 때
   지금 원장 + 남은 판에서 한 번 채운다): 원장에서 뺀 장비 · 글이 쓰인 뒤에 시리얼을 넣은 장비의 옛 글도 가려진다. 한계: 표시 이름을 그대로 두고 시리얼만 **다른 값으로 바꾸면** 옛 시리얼도 기록에 남아 계속 가려진다(되레 넓게 가림) ·
   주소가 아닌 4마디 숫자('5.3.0.0')도 낱말 단위로 가려진다.
-  서버 id 는 비관리자면 항상 토큰 · 이름 정리(`cleanText`)는 양방향 · 폭 없는 · C1 문자도 지운다 · **바뀐 것이 없는 저장은 rev · 판 · 이력 · 감사를 만들지 않는다**(`unchanged: true` — 판 30개가 제자리 저장으로 밀리지 않게) ·
+  서버 id 는 비관리자면 항상 토큰 · 이름 정리(`cleanText`)는 양방향 · 폭 없는 · C1 · 보이지 않는 채움 문자도 지우고 **자른 뒤 한 번 더 다듬는다**(끝 공백 · 서로게이트 반쪽) · **바뀐 것이 없는 저장은 rev · 판 · 이력 · 감사를 만들지 않는다**(`unchanged: true` — 판 30개가 제자리 저장으로 밀리지 않게) ·
   시리얼 키 색인을 못 채운 핸들(`_keysReady` false)은 쓰기 · 조회 때 다시 채우고 그동안은 원장 훑기로 판정한다(트랜잭션 안에서 채운 뒤 ROLLBACK 되면 표식도 되돌린다 · 채우다 SQLite 가 트랜잭션 전체를 되돌렸으면 쓰기를 멈춘다 · 다시 채우기에 실패하면 30초 동안은 다시 시도하지 않고 훑기로 답한다) · 엑셀의 전면 칸과 후면 줄은 같은 `placeIdLine`.
   화면: **끌어 놓기는 랙 id 를 항상 보낸다**(낡은 화면의 위치로 '같은 랙' · '제자리' 를 판단하지 않는다 — 제자리는 서버가 unchanged) · **고치기 창은 연 때의 값과 달라진 칸만 보낸다**(`rackView.js changedFields` — 그 사이 바뀐 값을 옛 값으로 덮지 않게) · rev 즉시 반영 · 창 닫기 · 알림은 **그 쓰기를 시작한 전산실 · 창일 때만** ·
   저장 중에도 창은 닫을 수 있다(응답이 안 오면 갇힌다 — 늦은 응답은 그 저장을 시작한 창일 때만 창을 닫고 오류를 싣는다) · 잠긴 버튼은 흐리게(`off`) · 창을 닫으면 연 자리로 초점을 되돌린다 · 알림 줄은 사용자가 법인 · 데이터센터 · 전산실을 고를 때만 지운다 · 전산실 다시 불러오기가 일시 실패하면 직전 화면 + 한 줄 안내 + 편집 잠금(404 · 403 만 비운다 · 잠금은 다시 불러오기가 **성공할 때** 풀린다) · 선택 · 검색 강조는 안쪽 그림자, 키보드 초점은 outline(`styles.css .rk-place:focus-visible`) ·
