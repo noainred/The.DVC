@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>랙 가림 재설계 — 계정별 판본</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.dim{color:#9aa9c2}
+.col{background:#141b2d;border:1px solid #243049;border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:12px;min-width:0;box-sizing:border-box}
+.col h2{margin:0;font-size:15px}
+.who{font-size:11.5px;color:#9aa9c2;line-height:1.5}
+.sec{background:#0f1626;border:1px solid #243049;border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:8px}
+.sec h3{margin:0;font-size:11px;color:#9aa9c2;font-weight:700}
+dl{margin:0;display:grid;grid-template-columns:84px minmax(0,1fr);gap:6px 10px;font-size:12.5px}
+dt{color:#9aa9c2}
+dd{margin:0;overflow-wrap:anywhere}
+.none{color:#7f8fa9}
+.log{font-size:12.5px;line-height:1.55;display:flex;flex-direction:column;gap:2px;padding:6px 0;border-top:1px solid #1f2a40}
+.log:first-of-type{border-top:0;padding-top:0}
+.log small{font-size:11px;color:#9aa9c2}
+.tag{display:inline-block;border-radius:6px;padding:1px 7px;font-size:11px;font-weight:700;white-space:nowrap}
+.t-amber{background:rgba(245,158,11,.18);color:#fde68a;border:1px solid #b45309}
+.t-gray{background:#0f1626;color:#aebbd0;border:1px dashed #3a4866}
+.rule{background:#141b2d;border:1px solid #1d6fb8;border-radius:12px;padding:14px 16px;font-size:12.5px;line-height:1.65;color:#dbe4f2}
+</style>
+</helmet>
+<div style="min-height:1040px;box-sizing:border-box;padding:28px;display:flex;flex-direction:column;gap:14px;max-width:1440px;margin:0 auto">
+
+  <div style="display:flex;flex-wrap:wrap;gap:8px 16px;align-items:baseline">
+    <h1 style="margin:0;font-size:20px;font-weight:800">같은 장비 · 같은 이력을 세 계정이 볼 때</h1>
+    <span class="dim" style="font-size:12.5px">장비 상세와 변경 이력 · 값은 그림용 가상값</span>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:16px;align-items:start">
+
+    <div class="col">
+      <div><h2>관리자</h2><div class="who">전부 봅니다. 관리 메모와 ‘숨겨짐’ 표시는 이 판본에만 있습니다.</div></div>
+      <div class="sec">
+        <h3>장비 상세</h3>
+        <dl>
+          <dt>표시 이름</dt><dd>DB 1호기</dd>
+          <dt>모델</dt><dd>PowerEdge R760</dd>
+          <dt>시리얼</dt><dd class="mono">QX713K9Z</dd>
+          <dt>등록 서버</dt><dd class="mono">kr2-db-01 · 10.20.30.4</dd>
+          <dt>관리 메모</dt><dd>bmc 10.20.30.4 · 콘솔 케이블 B-12</dd>
+        </dl>
+      </div>
+      <div class="sec">
+        <h3>이름이 숨겨진 다른 장비</h3>
+        <dl>
+          <dt>표시 이름</dt><dd><span class="mono">idrac-kr2-014 예비</span> <span class="tag t-amber">조회 계정에 숨겨짐</span></dd>
+          <dt>모델</dt><dd>PowerEdge R660</dd>
+        </dl>
+      </div>
+      <div class="sec">
+        <h3>변경 이력</h3>
+        <div class="log"><span>DB 1호기: A1 U5 → A2 U22</span><small>장비 옮기기 · admin · 11-27 10:02</small></div>
+        <div class="log"><span>idrac-kr2-014 예비 → A2 U30</span><small>장비 놓기 · admin · 11-27 09:51</small></div>
+        <div class="log"><span>bmc 10.20.31.9 rear ← A1 U12</span><small>장비 빼기 · admin · 11-21 14:10 · 옛 기록(글로 저장됨)</small></div>
+      </div>
+    </div>
+
+    <div class="col">
+      <div><h2>전체 범위 운영자</h2><div class="who">관리 주소는 못 보고 시리얼은 봅니다(지금 규칙 그대로).</div></div>
+      <div class="sec">
+        <h3>장비 상세</h3>
+        <dl>
+          <dt>표시 이름</dt><dd>DB 1호기</dd>
+          <dt>모델</dt><dd>PowerEdge R760</dd>
+          <dt>시리얼</dt><dd class="mono">QX713K9Z</dd>
+          <dt>등록 서버</dt><dd class="none">이 계정에는 없는 칸</dd>
+          <dt>관리 메모</dt><dd class="none">이 계정에는 없는 칸</dd>
+        </dl>
+      </div>
+      <div class="sec">
+        <h3>이름이 숨겨진 다른 장비</h3>
+        <dl>
+          <dt>표시 이름</dt><dd>서버 · PowerEdge R660 <span class="tag t-gray">이름 숨김</span></dd>
+          <dt>모델</dt><dd>PowerEdge R660</dd>
+        </dl>
+      </div>
+      <div class="sec">
+        <h3>변경 이력</h3>
+        <div class="log"><span>DB 1호기: A1 U5 → A2 U22</span><small>장비 옮기기 · 11-27 10:02</small></div>
+        <div class="log"><span>서버 · PowerEdge R660(이름 숨김) → A2 U30</span><small>장비 놓기 · 11-27 09:51</small></div>
+        <div class="log"><span class="none">옛 기록 — 내용은 이 계정에 보이지 않습니다</span><small>장비 빼기 · 11-21 14:10</small></div>
+      </div>
+    </div>
+
+    <div class="col">
+      <div><h2>범위 운영자</h2><div class="who">관리 주소도 시리얼도 못 봅니다(지금 규칙 그대로).</div></div>
+      <div class="sec">
+        <h3>장비 상세</h3>
+        <dl>
+          <dt>표시 이름</dt><dd>DB 1호기</dd>
+          <dt>모델</dt><dd>PowerEdge R760</dd>
+          <dt>시리얼</dt><dd class="none">이 계정에는 보이지 않습니다</dd>
+          <dt>등록 서버</dt><dd class="none">이 계정에는 없는 칸</dd>
+          <dt>관리 메모</dt><dd class="none">이 계정에는 없는 칸</dd>
+        </dl>
+      </div>
+      <div class="sec">
+        <h3>이름이 숨겨진 다른 장비</h3>
+        <dl>
+          <dt>표시 이름</dt><dd>서버 · PowerEdge R660 <span class="tag t-gray">이름 숨김</span></dd>
+          <dt>모델</dt><dd>PowerEdge R660</dd>
+        </dl>
+      </div>
+      <div class="sec">
+        <h3>변경 이력</h3>
+        <div class="log"><span>DB 1호기: A1 U5 → A2 U22</span><small>장비 옮기기 · 11-27 10:02</small></div>
+        <div class="log"><span>서버 · PowerEdge R660(이름 숨김) → A2 U30</span><small>장비 놓기 · 11-27 09:51</small></div>
+        <div class="log"><span class="none">옛 기록 — 내용은 이 계정에 보이지 않습니다</span><small>장비 빼기 · 11-21 14:10</small></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="rule">
+    <b>조회 계정 응답을 만드는 규칙.</b> 칸 목록에 적힌 칸만 싣고, 원장의 글은 하나씩 ‘보이는가’ 를 지납니다 — 보이면 원문 그대로, 아니면 대체 표시(장비는 ‘종류 · 모델’, 전산실 · 랙은 ‘전산실 #3’ 같은 번호). 글 일부만 지우는 일은 없습니다.
+    관리 메모 · 등록 서버의 이름과 주소 · 미배치 서버 목록 · ‘되돌리면 바뀌는 것’ 은 조회 계정 응답에 아예 싣지 않습니다.
+    새 이력은 ‘어느 장비가 어디에서 어디로’ 와 그때의 이름을 구조로 저장해 두고 이름마다 같은 판정을 지납니다. 이미 글 한 덩어리로 저장된 옛 이력은 이름만 안전하게 떼어 낼 수 없어, 조회 계정에는 동작과 시각만 보입니다.
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1040}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

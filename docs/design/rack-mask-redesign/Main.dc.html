@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>랙 가림 재설계 — 구조 비교</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.dim{color:#9aa9c2}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;padding:16px;min-width:0;display:flex;flex-direction:column;gap:10px;box-sizing:border-box}
+.stage{border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:6px;background:#0f1626;border:1px solid #243049}
+.stage h3{margin:0;font-size:12px;font-weight:700;color:#aebbd0;display:flex;gap:8px;align-items:center}
+.stage p{margin:0;font-size:12.5px;line-height:1.6;color:#dbe4f2}
+.num{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;border:1px solid #3a4866;font-size:11px;color:#aebbd0;flex:0 0 auto}
+.bad{border-color:#b45309;background:rgba(245,158,11,.10)}
+.good{border-color:#1d6fb8;background:rgba(56,189,248,.08)}
+.tag{display:inline-block;border-radius:6px;padding:1px 7px;font-size:11px;font-weight:700}
+.t-amber{background:rgba(245,158,11,.18);color:#fde68a;border:1px solid #b45309}
+.t-blue{background:rgba(56,189,248,.14);color:#bae6fd;border:1px solid #1d6fb8}
+.fact{flex:1 1 200px;min-width:0;background:#0f1626;border:1px solid #243049;border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:4px}
+.fact b{font-size:20px;font-weight:800;letter-spacing:-.01em}
+.fact span{font-size:12px;color:#9aa9c2;line-height:1.5}
+.fact.warn{border-color:#b45309;background:rgba(245,158,11,.10)}
+.inv{display:flex;gap:10px;align-items:flex-start;font-size:12.5px;line-height:1.6;color:#dbe4f2}
+.inv b{flex:0 0 auto;color:#bae6fd}
+.opt{flex:1 1 300px;min-width:0;background:#0f1626;border:1px solid #243049;border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:4px;font-size:12.5px;line-height:1.6}
+.opt b{font-size:13px}
+.opt span{color:#9aa9c2}
+</style>
+</helmet>
+<div style="min-height:1080px;box-sizing:border-box;padding:28px;display:flex;flex-direction:column;gap:16px;max-width:1440px;margin:0 auto">
+
+  <div style="display:flex;flex-wrap:wrap;gap:8px 16px;align-items:baseline">
+    <h1 style="margin:0;font-size:22px;font-weight:800">랙 실장도 — 조회 계정에 무엇을 보일지 어디서 정하는가</h1>
+    <span class="dim" style="font-size:12.5px">시안 2판(반증 반영) · 컨펌 전 · 값은 그림용 가상값(‘점검에서 본 것’ 의 수치만 실측)</span>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:16px;align-items:start">
+
+    <div class="card">
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <h2 style="margin:0;font-size:16px">지금 — 읽을 때 글자에서 찾아 지운다</h2>
+        <span class="tag t-amber">v3.49.0</span>
+      </div>
+      <div class="stage bad">
+        <h3><span class="num">1</span>가릴 칸을 하나씩 지정한다</h3>
+        <p>지정한 칸(표시 이름 · 이력 글)만 가림을 거치고, 나머지는 응답에 그대로 실립니다. 잊은 칸은 원문으로 나갑니다.</p>
+      </div>
+      <div class="stage bad">
+        <h3><span class="num">2</span>글을 고쳐 쓴다</h3>
+        <p>글에서 IP · 등록 주소 · 시리얼처럼 <b>보이는 글자</b>를 찾아 지웁니다. 표기가 조금 다르면 빠지고(못 가림), 넓히면 평범한 낱말이 지워집니다(과잉 가림).</p>
+      </div>
+      <div class="stage bad">
+        <h3><span class="num">3</span>재료가 비면 가림도 빈다</h3>
+        <p>무엇이 주소 · 태그인지는 그 순간의 등록부로 정합니다. 엣지가 올린 서버 목록은 메모리에만 있어, 재시작 직후나 수집 서버를 끈 뒤에는 그 서버들의 이름이 가려지지 않습니다.</p>
+      </div>
+      <div class="stage">
+        <h3><span class="num">4</span>관리자는 모른다</h3>
+        <p class="dim">관리자는 원문을 봅니다. 가림이 틀려도 조회 계정 화면에서만 드러나고, 바로잡을 손잡이가 없습니다.</p>
+      </div>
+    </div>
+
+    <div class="card" style="border-color:#1d6fb8">
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <h2 style="margin:0;font-size:16px">제안 — 통째로 판정하고, 사람의 결정만 저장한다</h2>
+        <span class="tag t-blue">안 B′</span>
+      </div>
+      <div class="stage good">
+        <h3><span class="num">1</span>실을 칸을 적어 둔다</h3>
+        <p>조회 계정 응답은 <b>칸 목록에 적힌 칸만</b> 싣습니다. 새 칸은 등급을 주기 전에는 나가지 않습니다.</p>
+      </div>
+      <div class="stage good">
+        <h3><span class="num">2</span>글마다 보이거나, 안 보이거나</h3>
+        <p>원장의 글은 ‘보이는가’ 판정 하나를 지납니다. 보이면 원문 그대로, 아니면 ‘종류 · 모델’ 같은 대체 표시. <b>글을 고쳐 쓰지 않습니다.</b></p>
+      </div>
+      <div class="stage good">
+        <h3><span class="num">3</span>재료는 줄지 않는다</h3>
+        <p>한 번 본 주소 · 태그는 원장 옆에 남습니다. 판정은 저장하지 않고 지금 재료로 계산하므로 낡은 판정이 없습니다.</p>
+      </div>
+      <div class="stage good">
+        <h3><span class="num">4</span>사람이 보고 정한다</h3>
+        <p>저장하면 창이 ‘조회 계정에 숨겨졌습니다’ 를 알립니다. 잘못 숨겨진 글은 승인하고, 검사가 놓친 글은 ‘공개 글 전체 보기’ 에서 찾아 숨깁니다. 저장하는 것은 이 결정들뿐입니다.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin:0;font-size:14px">점검에서 본 것 — 2026-11-26 다섯 회차 · 11-27 실측</h2>
+    <div style="display:flex;flex-wrap:wrap;gap:12px">
+      <div class="fact warn"><b>빠진 칸 10종</b><span>메모 · 모델 · 랙의 이름 · 줄 · 용도 · 전산실 · 데이터센터 이름 · 랙 종류 이름 · 판 차이의 위치 글 · 시리얼 칸에 적힌 주소가 지금 가림 없이 나갑니다</span></div>
+      <div class="fact warn"><b>재료가 비면 원문</b><span>엣지 서버 목록을 비우자 ‘kvm masked-… •••’ 가 ‘kvm idrac-r1.edge.example RMT0001’ 로 나갔습니다(재현)</span></div>
+      <div class="fact"><b class="mono">3 · 6 · 5 · 5 · 1</b><span>보안 축이 회차마다 찾은 결함 수(합 20) — 전부 이 가림 코드. 여럿이 앞 회차 수정이 만든 회귀</span></div>
+      <div class="fact"><b class="mono">350줄 · 14 / 20</b><span>가림 코드(판정 188 + 라우트 162줄)와, 랙 시험 파일 20개 중 가림을 다루는 14개</span></div>
+      <div class="fact"><b>요청마다</b><span>등록부 전체로 가림 재료를 새로 만듭니다 — 성능 축이 2~5회차 네 번 연속 같은 개선을 제안</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin:0;font-size:14px">제안의 불변조건 — 시험이 고정할 것</h2>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:8px 24px">
+      <div class="inv"><b>J1</b><span>조회 계정 응답은 칸 목록에 적힌 칸만 싣는다. 객체를 펼쳐 싣지 않는다.</span></div>
+      <div class="inv"><b>J2</b><span>원장의 자유 글은 ‘보이는가’ 하나를 지난다 — 원문 그대로이거나 대체 표시. 고쳐 쓰지 않는다.</span></div>
+      <div class="inv"><b>J3</b><span>기계 판정은 저장하지 않는다. 읽을 때 지금 재료로 계산하고, 저장은 사람의 결정뿐.</span></div>
+      <div class="inv"><b>J4</b><span>재료는 줄지 않는다 — 재시작 · 엣지 끊김 · 서버 삭제로 가림이 풀리지 않는다.</span></div>
+      <div class="inv"><b>J5</b><span>승인은 그때 걸린 키에 묶인다. 새 키가 걸리면 다시 숨겨진다.</span></div>
+      <div class="inv"><b>J6</b><span>새 이력은 글이 아니라 구조로 저장하고, 그 안의 이름마다 J2 를 지난다.</span></div>
+      <div class="inv"><b>J7</b><span>공개가 아닌 모든 칸에 표식 글자를 심고, 조회 계정의 모든 응답에 표식이 없음을 시험한다.</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin:0;font-size:14px">먼저 정해 주실 것 — 조회 계정이 랙 도구에서 장비를 이름으로 봐야 합니까</h2>
+    <div style="display:flex;flex-wrap:wrap;gap:12px">
+      <div class="opt" style="border-color:#1d6fb8"><b>봐야 한다 → 안 B′(위 제안)</b><span>이름이 보이되 걸린 이름은 승인 전까지 ‘종류 · 모델’ 로 보입니다. 여러 릴리스가 걸립니다.</span></div>
+      <div class="opt"><b>필요 없다 → 안 D</b><span>조회 계정에는 종류 · 위치 · 상태만 줍니다. 판정할 글이 데이터센터 · 전산실 · 랙 이름뿐이라 더 단순하고 강합니다. 장비를 이름으로 찾지는 못합니다.</span></div>
+      <div class="opt"><b>재설계하지 않는다 → 안 A</b><span>빠진 칸에 지금 가림을 걸고 끝냅니다. 왼쪽의 네 가지가 그대로 남습니다.</span></div>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1080}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
