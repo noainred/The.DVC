@@ -20,6 +20,7 @@ fs.writeFileSync(path.join(DIR, 'permissions.json'), JSON.stringify({ schemaVers
 delete process.env.CENTRAL_URL;
 test.after(() => fs.rmSync(DIR, { recursive: true, force: true }));
 const all7 = [0, 1, 2, 3, 4, 5, 6];
+const HOUR = 3_600_000; const DAY = 86_400_000;
 const ST = await import('../src/bmusage/maint/store.js');
 const R = await import('../src/bmusage/maint/runtime.js');
 function resetAll() {
@@ -113,4 +114,41 @@ test('고치기도 같은 줄 — 동시에 늘리는 둘 중 하나만 통과�
     call('opA', 'PUT', `/${b.id}`, { rev: b.rev, schedule: { kind: 'weekly', days: all7, time: '06:00', durMin: 360 } }),
   ]);
   assert.deepEqual([e1.status, e2.status].sort(), [200, 403], JSON.stringify([e1.body, e2.body]));
+});
+
+test('재확인도 같은 줄 — 오래전 만료된 이어 붙은 12시간 창 둘을 동시에 재확인하면 하나만 통과한다(4회차 결함 2 — 재확인 경로를 지키는 시험이 없었다)', async (t) => {
+  resetAll();
+  const { call } = await setup(t);
+  // 100일 전 확인 → 8일 전 만료(지난 발생은 합 규칙의 하루 창 밖) — 하나만 되살리면 12시간 · 둘 다면 24시간 상시 억제
+  const mk = (name, time) => ST.addWindow(srvWin('MTAGA1', name, { kind: 'weekly', days: all7, time, durMin: 720 }), { by: 'opa', now: Date.now() - 100 * DAY });
+  const A = await mk('가', '00:00'); const B = await mk('나', '12:00');
+  const [ra, rb] = await Promise.all([call('opA', 'POST', `/${A.id}/confirm`, { rev: A.rev }), call('opA', 'POST', `/${B.id}/confirm`, { rev: B.rev })]);
+  assert.deepEqual([ra.status, rb.status].sort(), [200, 403], JSON.stringify([ra.body, rb.body]));
+  assert.equal((ra.status === 403 ? ra : rb).body.code, 'owner-required');
+});
+
+test('판정에 쓴 판으로만 저장한다 — 재확인과 함께 보낸 고치기가 다음 rev 를 미리 넣어도 409(4회차 결함 1 — 재확인 전 수명으로 판정 · 92일 수명에 저장되던 것)', async (t) => {
+  resetAll();
+  const { call } = await setup(t);
+  const now = Date.now();
+  const kstDay0 = Math.floor((now + 9 * HOUR) / DAY) * DAY - 9 * HOUR;
+  const loc = (ms) => new Date(ms + 9 * HOUR).toISOString().slice(0, 16);   // KST 벽시계 'YYYY-MM-DDTHH:MM'
+  // 동료 P — 소유자 일회 창(20일 뒤 KST 00:00~12:00) · 운영자 W — 매일 06:00 1시간(P 안쪽) · 85일 전 확인(7일 뒤 만료)
+  const P = await ST.addWindow({ ...srvWin('MTAGA1', 'P', null), schedule: { kind: 'once', start: loc(kstDay0 + 20 * DAY), end: loc(kstDay0 + 20 * DAY + 12 * HOUR) } }, { by: 'own', approvedBy: 'own', now });
+  assert.ok(P.id);
+  const W = await ST.addWindow(srvWin('MTAGA1', 'W', { kind: 'weekly', days: all7, time: '06:00', durMin: 60 }), { by: 'opa', now: now - 85 * DAY });
+  const longer = { kind: 'weekly', days: all7, time: '12:00', durMin: 720 };   // P 와 이어 붙음 — 재확인 뒤 수명이면 20일 뒤 24시간(소유자 필요)
+  const pc = call('opA', 'POST', `/${W.id}/confirm`, { rev: W.rev });
+  await new Promise((r) => { setTimeout(r, 5); });   // 재확인이 먼저 줄에 서게
+  const pe = call('opA', 'PUT', `/${W.id}`, { rev: W.rev + 1, schedule: longer });   // 다음 판을 미리 넣는다
+  const [rc, re] = await Promise.all([pc, pe]);
+  assert.equal(rc.status, 200, JSON.stringify(rc.body));
+  assert.equal(re.status, 409, `예전: 200(재확인 전 수명으로 판정) — ${JSON.stringify(re.body)}`);
+  assert.equal(re.body.code, 'rev-changed');
+  ST._resetMaintStoreForTest();
+  const w = ST.getWindow(W.id);
+  assert.equal(w.schedule.time, '06:00'); assert.equal(w.schedule.durMin, 60);
+  // 차례대로(재확인 뒤 판으로) 고치면 지금 수명으로 판정해 403
+  const re2 = await call('opA', 'PUT', `/${W.id}`, { rev: rc.body.rev, schedule: longer });
+  assert.equal(re2.status, 403, JSON.stringify(re2.body)); assert.equal(re2.body.code, 'owner-required');
 });

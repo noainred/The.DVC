@@ -285,6 +285,17 @@ function gateSerial(fn) {
   _gateChain = run.catch(() => {});
   return run;
 }
+/**
+ * 판정에 쓴 판(cur.rev)으로만 저장한다(4회차 결함 1 — 재현): 줄 앞에서 읽은 cur 로 판정하고 저장은 보낸 rev 로만 대조했는데, rev 는 쓰기마다 1씩
+ * 늘어 **다음 판을 미리 넣을 수 있었다** — 재확인과 '다음 rev' 를 넣은 고치기를 함께 보내면 고치기는 재확인 전 수명(곧 만료)으로 판정받고, 앞에 줄 선
+ * 재확인이 저장된 뒤 rev 가 맞아 새 일정이 92일 수명에 저장됐다(200 · 200 — 차례대로면 403). 보낸 rev 는 cur.rev 와 같아야 하고(아니면 저장과 같은 409),
+ * 저장은 cur.rev 로 대조한다 — 판정과 저장 사이에 어떤 쓰기(줄 밖 끝내기 · 지우기 포함)가 끼면 409. 없으면 그대로 넘겨 저장이 rev-required 409.
+ */
+function judgedRev(ST, cur, rev) {
+  if (rev == null || rev === '') return rev;
+  ST.revCheck(cur, rev);
+  return cur.rev;
+}
 
 async function create(req, res, D) {
   try {
@@ -321,12 +332,13 @@ async function edit(req, res, D) {
     //   이제 고치기는 confirmedAt 을 바꾸지 않는다 — 후보도 저장될 값 그대로(next.confirmedAt = 지금 값)로 본다. 시한 연장은 재확인 라우트 하나.
     const coverChanged = ['target', 'tz', 'schedule', 'scopes'].some((k) => JSON.stringify(next[k]) !== JSON.stringify(cur[k]));
     const by = String(req.user?.username || '');
-    // (cur 는 줄 앞에서 읽었다 — 그 사이 다른 쓰기가 있었으면 rev 가 달라 저장이 409 로 막는다)
+    // cur 는 줄 앞에서 읽었다 — 저장은 판정에 쓴 판(cur.rev)으로 대조한다(그 사이 다른 쓰기가 있었으면 409 · 다음 판을 미리 넣어도 409)
+    const rev = judgedRev(ST, cur, b.rev ?? null);
     const rec = await gateSerial(async () => {
       await ownerGate(req, D, [cur, next], { combined: coverChanged ? { ...next, id: cur.id } : null, now });
       const owner = !!(await D.ownerTier(req));
       return ST.editWindow(cur.id, { name: next.name, reason: next.reason, tz: next.tz, schedule: next.schedule, scopes: next.scopes, target: next.target, vcenterId: next.vcenterId },
-        { by, approvedBy: owner ? by : '', rev: b.rev ?? null, now });
+        { by, approvedBy: owner ? by : '', rev, now });
     });
     D.audit({ user: by, action: 'bm-perf.maintenance', target: rec.id, ip: req.ip || '', detail: auditOf('edit', rec, { fields: rec.edits?.at(-1)?.fields || [] }) });
     res.json({ ok: true, id: rec.id, rev: rec.rev });
@@ -341,7 +353,8 @@ async function change(req, res, D, op) {
     const by = String(req.user?.username || '');
     const now = D.now();
     const fn = { end: ST.endWindowNow, confirm: ST.confirmWindow, delete: ST.deleteWindow }[op];
-    const write = () => fn(cur.id, { by, rev: b.rev ?? req.query?.rev ?? null, now });
+    const rev = judgedRev(ST, cur, b.rev ?? req.query?.rev ?? null);   // 판정에 쓴 판으로만(재확인 — 위 judgedRev)
+    const write = () => fn(cur.id, { by, rev, now });
     // 재확인은 억제를 늘린다 — 만들 때와 같은 등급(합 규칙 포함) · 같은 줄
     const rec = op === 'confirm'
       ? await gateSerial(async () => { await ownerGate(req, D, [cur], { combined: { ...cur, confirmedAt: now }, now }); return write(); })

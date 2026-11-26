@@ -405,8 +405,8 @@ function pruneOld(all, now) {
   all.items = all.items.filter((w) => keptPast(w, now));
 }
 
-/** rev 검사 — 없으면 409(마지막 쓰기 승리 금지 · 웹은 항상 보낸다) · 다르면 409. */
-function revCheck(cur, rev) {
+/** rev 검사 — 없으면 409(마지막 쓰기 승리 금지 · 웹은 항상 보낸다) · 다르면 409. 라우트도 판정에 쓴 판을 이것으로 대조한다(`bmMaint.js judgedRev`). */
+export function revCheck(cur, rev) {
   if (rev == null || rev === '') throw fail(409, 'rev-required', '고칠 때는 지금 판(rev)을 함께 보내야 합니다 — 다시 불러온 뒤 고치세요.');
   if (Number(rev) !== cur.rev) throw fail(409, 'rev-changed', '그 사이 다른 사람이 이 창을 바꿨습니다 — 다시 불러온 뒤 고치세요.');
 }
