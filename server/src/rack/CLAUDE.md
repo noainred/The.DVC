@@ -1,6 +1,6 @@
 # 랙 실장도(`server/src/rack/` · 라우트 `routes/api/rack.js` · 화면 `web/src/views/tools/RackTool.jsx`) 불변조건
 
-설계: `docs/design/rack-elevation/README.md`. 회귀: `test/rackLedger.test.js` · `test/rackRoutes.test.js` · `test/rackVersions.test.js` · `test/rackAudit1124.test.js`(2026-11-24 점검) · `test/rackPerf1126.test.js`(개선 1 · 2) · `test/rackGaps{Pure,Db,Routes,Head,Leak,R2x,R2sec,Refute}1126.test.js`(2026-11-26 점검 1 · 2회차 — 살아남은 변이 · 수정 · 반증) · `web/src/views/tools/{rackView,rackViewGaps1126}.test.js`.
+설계: `docs/design/rack-elevation/README.md`. 회귀: `test/rackLedger.test.js` · `test/rackRoutes.test.js` · `test/rackVersions.test.js` · `test/rackAudit1124.test.js`(2026-11-24 점검) · `test/rackPerf1126.test.js`(개선 1 · 2) · `test/rackGaps{Pure,Db,Routes,Head,Leak,R2x,R2sec,Refute,R3x}1126.test.js` · `test/rackMaskMatrix1126.test.js`(가림 표기 행렬 × 응답 4경로 — **가림 판정을 고치면 이 표에 표기를 더할 것**)(2026-11-26 점검 1~3회차) · `web/src/views/tools/{rackView,rackViewGaps1126}.test.js`.
 
 - **원장은 중앙 한 곳**(2026-11-20 사용자 결정). 사람이 정한 위치만 저장한다 — 상태 · 온도 · 전력 측정값은 넣지 않고 화면을 그릴 때 수집 모듈에서 잇는다.
   계층은 법인(`datacenter/store.js` DataCenter = 법인 묶음) → 데이터센터(site · 물리) → 전산실 → 랙 → 배치. 법인 하나에 데이터센터가 여럿일 수 있다.
@@ -33,8 +33,8 @@
   판 크기 67 → 72KB(gzip 1단계) · `placedSerialKeys` 는 5ms 그대로. 미배치 서버 목록은 법인당 `UNPLACED_MAX` 대까지 싣고 화면이 검색어로 거른다(`rackView.js matchUnplaced`).
 - **2026-11-26 점검 1회차에서 고정한 것**(5축 — 보안 3 · 정확성 4 · 화면 11 · 동시성/성능 6 · 테스트 공백 173변이):
   **표시 이름(label)은 관리자가 공개한 이름**이다 — 비관리자에게도 보이되 ① 주소와 ② (시리얼을 가리는 판본에서) 시리얼 · 서비스 태그를 가린다. **가림은 `routes/api/rack.js textMaskOf` 하나가 정한다**:
-  **주소 먼저**(등록부 **전체**의 관리 주소 — 범위로 자르기 전 · 대소문자 무시 · 글 속 어디든 → '(주소 가림)', 그다음 낱말 단위 IP 리터럴 · 등록 주소와 같은 낱말 → 토큰 · 판정은 `addressMatcher`)
-  → **태그 나중**(등록부 서비스 태그 + 그 법인의 시리얼 기록 + 그 행 · 그 장비의 시리얼을 **비교 키**(`normKey` — 구분자 · 대소문자 무시)로 · `rack/textMask.js stripTags`). 순서를 바꾸면
+  **주소 먼저**(① 낱말 단위 IP 리터럴 — 알맹이 · 낱말 통째 · 낱말 안의 숫자/점 구간(IPv4) · 16진/콜론 구간(IPv6) → 토큰 · 판정은 `addressMatcher` ② 그다음 등록부 **전체**의 관리 주소 — 범위로 자르기 전 · 대소문자 무시 · 글 속 어디든 → '(주소 가림)'. ① 이 먼저여야 등록 IP 가 다른 IP 의 앞부분만 가리지 않는다)
+  → **태그 나중**(등록부 서비스 태그 + 그 법인의 시리얼 기록 + 그 행 · 그 장비의 시리얼을 **비교 키**(`normKey` — 구분자 · 대소문자 무시 · 구분자 정의는 `serialKey.js isKeySep` 하나)로 · `rack/textMask.js stripTags`). 순서를 바꾸면
   'idrac-<태그>.<도메인>' 의 주소가 맞지 않는다. 이름이 낱말 하나이고 주소면 통째로 '이름 가림'. 호스트 이름처럼 보이는 표시 이름은 그대로 둔다(가리면 조회 계정에게 랙 그림의 장비 이름이 빈다 — 자동으로 잇는
   `link.hostname` · `hw.host` 만 관리자 전용). 같은 가림이 `places[].label` · `link.name` · `unplaced[].name` · 이력 · 판 목록 · 판 글 · 판 차이 이름에 닿는다. 이력 · 판 행의 `tags` 칸(그 글이 말하는 장비의 시리얼)과
   판 차이 항목의 `_tags` 는 db 층이 가림 함수(`maskRow` · `maskItem`)에 넘겨줄 뿐 **응답으로 돌려주지 않는다**(`versionDetail` 이 유일한 출구 — 캐시에는 가리지 않은 결과). `tags` 를 모르는(NULL · 깨진) 옛 장비 글은

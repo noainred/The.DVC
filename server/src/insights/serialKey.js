@@ -5,3 +5,5 @@
  * 순수 판정만 이 파일로 뺐다(판정 코어 하나 — 사본을 만들지 말 것).
  */
 export const normKey = (v) => String(v ?? '').toLowerCase().replace(/[\s:_.-]/g, '');
+/** 글자 하나가 비교 키에서 지워지는 구분자인가 — normKey 와 **같은 문자 집합**(공백류 `\s` 전부 · `:` `_` `.` `-`). 랙 실장도의 시리얼 가림(rack/textMask.js)이 글자 사영에 쓴다. */
+export const isKeySep = (ch) => /[\s:_.-]/.test(ch);

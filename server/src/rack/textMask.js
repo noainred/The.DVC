@@ -11,10 +11,11 @@
  * 둘 다 '위치마다 길이 종류만큼만 잘라 집합에서 찾는다'(글자 길이 × 길이 종류 수) — 목록이 수천 개여도 글 하나에 드는 일은 같다.
  */
 import { lowSameLen, TAG_MASK_MIN } from '../util/ruleName.js';
-import { normKey } from '../insights/serialKey.js';
+import { normKey, isKeySep } from '../insights/serialKey.js';
 
 const KEY_MAX = 64;
-const isSep = (ch) => ch === ' ' || ch === ':' || ch === '_' || ch === '.' || ch === '-' || ch === '\t' || ch === '\n' || ch === '\r' || ch === ' ' || ch === '　';
+// 구분자는 normKey 와 같은 정의 하나(3회차 점검 3: 손으로 적은 목록이라 유니코드 공백 14종 — U+2009 등 — 이 빠져, 비교 키는 같은데 가림은 못 찾았다).
+const isSep = isKeySep;
 const lensOf = (set) => { const l = new Set(); for (const s of set) l.add(s.length); return [...l].sort((a, b) => b - a); };   // 긴 것 먼저(짧은 것이 긴 것의 앞부분만 먹지 않게)
 
 /** 태그 · 시리얼 원문 목록 → 찾기 색인(비교 키). 키가 TAG_MASK_MIN 자 미만이면 뺀다(흔한 글자 조각까지 가리지 않게). */

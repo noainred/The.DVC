@@ -107,7 +107,9 @@ function corpServers(req, corpId) {
   const hosts = []; const allTags = [];
   for (const s of all) {
     if (typeof s.host === 'string' && s.host) hosts.push(s.host);
-    else if (s.id != null && String(s.id)) hosts.push(String(s.id));   // host 없이 올라온 원격 서버는 id 가 관리 주소일 수 있다(2회차 점검 6)
+    // host 없이 올라온 원격 서버는 id 가 관리 주소일 수 있다(2회차 점검 6) — 주소처럼 보이는 id(점 · 콜론이 든 것)만 넣는다.
+    //   서비스 태그 같은 id 까지 '주소' 로 넣으면 시리얼을 볼 수 있는 계정에게도 그 태그가 가려진다(3회차 점검 5).
+    else if (s.id != null && /[.:]/.test(String(s.id))) hosts.push(String(s.id));
     if (typeof s.serviceTag === 'string' && s.serviceTag) allTags.push(s.serviceTag);
   }
   const { servers } = scopeIdracServers(req, all);
@@ -150,19 +152,46 @@ function wordCore(w) {
   while (b > a && CLOSE_P.has(w[b - 1])) b -= 1;
   return w.slice(a, b);
 }
+const IPV4_ONLY = /^\d{1,3}(?:\.\d{1,3}){3}$/;
 function textMaskOf({ admin, showSerial, hosts = [], tags = [] }) {
   if (admin) return PLAIN_MASK;
   const match = addressMatcher(hosts);
   const hostIdx = needleIndexOf(hosts.flatMap(hostVariants), { min: 3 });
   const corpIdx = showSerial ? null : tagIndexOf(tags);
+  /**
+   * 낱말 하나가 IP 리터럴(또는 등록 주소 그대로)을 품었는가.
+   *  · 문장 부호를 뗀 알맹이 · 낱말 통째를 공용 판정기에(IPv4 가 든 낱말 · IPv6 리터럴 · 등록 주소와 같은 낱말).
+   *  · 그래도 아니면 낱말 안에서 16진 · 콜론 · 점이 이어진 구간마다 다시 본다 — 문장 부호 · 다른 글자와 붙은 주소('[BMC]10.20.31.11' · 'https://[2001:db8::a]/ui' ·
+   *    'net 2001:db8::a/64' · 'ip=fe80::1%eth0' · 'node.10.20.30.97')가 알맹이 판정을 빠져나갔다(3회차 점검 1 · 4).
+   */
+  const ipWord = (w) => {
+    const core = wordCore(w);
+    if ((core && match(core)) || match(w)) return true;
+    // IPv4: 숫자 · 점이 이어진 구간(앞뒤 점은 뗀다) — 'node.10.20.30.97' · '[BMC]10.20.31.11' · '10.20.30.99.'
+    for (const m of w.matchAll(/[0-9.]+/g)) {
+      let a = 0; let b = m[0].length;
+      while (a < b && m[0][a] === '.') a += 1;
+      while (b > a && m[0][b - 1] === '.') b -= 1;
+      if (b - a >= 7 && b - a <= 15 && IPV4_ONLY.test(m[0].slice(a, b))) return true;
+    }
+    // IPv6: 16진 · 콜론 · 점이 이어진 구간에 콜론이 둘 이상 — 'https://[2001:db8::a]/ui' · 'net 2001:db8::a/64' · 'ip=fe80::1%eth0'
+    for (const m of w.matchAll(/[0-9a-fA-F:.]+/g)) {
+      if (m[0].length >= 3 && m[0].length <= 64 && m[0].split(':').length > 2 && match(m[0])) return true;
+    }
+    return false;
+  };
+  // 순서: ① IP 리터럴 낱말을 **원문 낱말에서 먼저** 토큰으로 ② 그다음 등록 주소를 글 속에서 치환.
+  //   반대면 등록 IP '10.20.30.4' 가 다른 IP '10.20.30.45' 의 앞부분만 가려 '(주소 가림)5' 가 남는다(3회차 점검 2).
   const addr = (s) => {
-    const t = replaceNeedles(s, hostIdx, HIDDEN_ADDR);
-    if (!/[\d:]/.test(t)) return t;   // 숫자 · 콜론이 없으면 IP 리터럴도 없다
-    return t.split(/(\s+)/).map((w) => {
-      if (!w || w.length > 300 || !/[\d:]/.test(w)) return w;
-      const core = wordCore(w);
-      return core && match(core) ? maskedIdToken(core) : w;
-    }).join('');
+    let t = s;
+    if (/[\d:]/.test(t)) {
+      t = t.split(/(\s+)/).map((w) => {
+        if (!w || !/[\d:]/.test(w)) return w;
+        if (w.length > 300) return maskedIdToken(w.slice(0, 300));   // 이렇게 긴 낱말은 살피지 않고 통째로(숫자 · 콜론이 든 것만)
+        return ipWord(w) ? maskedIdToken(wordCore(w) || w) : w;
+      }).join('');
+    }
+    return replaceNeedles(t, hostIdx, HIDDEN_ADDR);
   };
   const tagsOut = (t, own) => {
     if (showSerial) return t;
@@ -173,7 +202,7 @@ function textMaskOf({ admin, showSerial, hosts = [], tags = [] }) {
   return {
     admin: false, match, text,
     // 이름이 **낱말 하나**이고 그것이 주소면 통째로 '이름 가림'. 여러 낱말이면 주소인 낱말만 가린다('Unity 5.3.0.0 array' 를 통째로 지우지 않는다 — 1회차 반증 판단 2).
-    name: (s, own) => (typeof s !== 'string' || !s ? s : (!/\s/.test(s.trim()) && match(wordCore(s.trim()) || s.trim())) ? maskedAddressName(s.trim()) : text(s, own)),
+    name: (s, own) => (typeof s !== 'string' || !s ? s : (!/\s/.test(s.trim()) && s.trim().length <= 300 && ipWord(s.trim())) ? maskedAddressName(s.trim()) : text(s, own)),
     row: (detail, own, action) => (!showSerial && own == null && /^place\./.test(String(action || '')) ? R.LEGACY_DETAIL_HIDDEN : text(detail, own || [])),
   };
 }
