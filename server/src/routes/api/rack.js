@@ -145,7 +145,9 @@ function corpServers(req, corpId, { invTags = false } = {}) {
     const dc = String(s.datacenterId || assign[String(s.vcenterId || s.mappedVcenterId || '')] || '');
     if (dc !== corpId) continue;
     let inv = null; try { inv = invForServer(s); } catch { inv = null; }
-    const tag = String(s.serviceTag || inv?.system?.serviceTag || '').trim();
+    // 등록부 칸이 자리표시 값('None' 등)이면 인벤토리의 진짜 태그로 넘어간다(5회차 점검 정확성 관찰 4 — 진짜 태그가 있는데도 잇지 못하는 서버가 됐다).
+    const regTag = String(s.serviceTag || '').trim(); const invTag = String(inv?.system?.serviceTag || '').trim();
+    const tag = usableTag(regTag) ? regTag : usableTag(invTag) ? invTag : (regTag || invTag);
     // 자리표시 태그('To Be Filled By O.E.M.' 같은 화이트박스 기본값 · 'None' · '0000000')는 **연결 키가 아니다**(4회차 점검 정확성 4 — 재현): 서로 다른 서버 여러 대가 같은 값이라,
     //   키로 쓰면 원장의 장비가 그중 먼저 온 서버에 이어져 남의 상태를 보이고, 한 대를 놓는 순간 나머지가 미배치 목록에서 사라졌다. 태그를 못 읽은 서버와 함께 센다(serversNoTag).
     //   ⚠ 진짜 태그가 둘인 것(중앙 등록 + 엣지가 올린 같은 서버)은 그대로 먼저 온 서버에 잇는다 — 같은 장비다.
@@ -163,7 +165,8 @@ function corpServers(req, corpId, { invTags = false } = {}) {
  *  ① 주소 먼저: 낱말 단위로 IP 리터럴(IPv4 가 든 낱말 · **엄격한** IPv6 리터럴 · 대괄호 + 포트)과 등록 주소와 같은 낱말 → 토큰,
  *     그다음 등록부 **전체**의 관리 주소(대소문자 무시) → '(주소 가림)' — FQDN · IP 는 글 속 어디든, 점 없는 짧은 이름은 호스트 이름 낱말 통째일 때만
  *     (`rack/textMask.js` 경계 규칙). ⚠ IPv6 는 다른 iDRAC 화면의 `addressMatcher`(콜론 2개 + 16진이면 주소 — 식별자 칸용)보다 **엄격하다**:
- *     글에는 시각 '12:30:45' · 포트 '1:2:3' · 이력의 '이름: 랙' 이 흔하다(2회차 반증 C3 가) — '::' 가 있거나 콜론이 7개이고 `net.isIPv6` 가 참일 때만.
+ *     글에는 시각 '12:30:45' · 포트 '1:2:3' · 이력의 '이름: 랙' 이 흔하다(2회차 반증 C3 가) — 16진 · 콜론 구간의 마디 묶음이 유효한 IPv6('::' 또는 8마디) · MAC 일 때만(`hasIpv6`).
+ *  · 판정 앞에서 글과 **재료 양쪽**의 보이지 않는 글자를 지운다(`layout.js dropInvisible` — 한쪽만 지우면 어긋난다).
  *  · 태그 재료에서 자리표시 값(`bmusage/commonTag.js isPlaceholderTag` — 'None' · 'Default string' · '0000000')은 뺀다(2회차 반증 C2 — 'phone-01 none' 이 지워졌다).
  *  ② 태그 나중: 시리얼을 가리는 판본(범위 비관리자)만 — 등록부 서비스 태그 + 그 법인 원장의 시리얼 + (그 행 · 그 장비의 시리얼)을 비교 키로 걷어 낸다.
  *     순서가 반대면 'idrac-<태그>.<도메인>' 에서 태그가 먼저 '•••' 가 되어 주소가 등록 주소와 맞지 않는다(2회차 점검 3).
@@ -190,7 +193,9 @@ function coreSpan(w) {
 const wordCore = (w) => { const { a, b } = coreSpan(w); return w.slice(a, b); };
 // 낱말 안에서 16진 구간의 이웃이 '이어지는 글자' 인가 — 라틴 글자 · 숫자만(한글 조사 'fe80::1에' · 문장 부호는 경계 — textMask.js 의 글자 갈래와 같은 기준).
 const isLatinLD = (ch) => charKind(ch) === 1;
-const realTags = (arr) => (arr || []).filter(usableTag);
+// 가림 재료도 판정 대상 글과 **같은 눈으로** 본다 — 글에서만 보이지 않는 글자를 지우면, 그런 글자가 시리얼과 이름 양쪽에 든 옛 값이 서로 어긋나 가려지지 않았다(5회차 점검 정확성 1 · 재현).
+const cleanTag = (t) => (typeof t === 'string' ? dropInvisible(t).trim() : t);
+const realTags = (arr) => (arr || []).map(cleanTag).filter(usableTag);
 /** 가린 낱말의 토큰 — 공용 함수는 'masked-' 로 시작하는 값을 이미 토큰으로 보고 그대로 돌려준다. 글에서는 그런 낱말도 원문이므로 한 번 감싼다(4회차 점검 보안 5). */
 const textToken = (v) => maskedIdToken(v.startsWith(MASK_TOKEN_PREFIX) ? `text:${v}` : v);
 /** 낱말 안에 IPv4 꼴(점으로 나뉜 1~3자리 숫자 묶음이 4개 이상 이어짐)이 있는가 — 'node.10.20.30.97' · '[BMC]10.20.31.11' · '10.20.30.99.' · 'Unity 5.3.0.0' 의 낱말. */
@@ -234,6 +239,7 @@ function hasIpv6(w) {
 }
 function textMaskOf({ admin, showSerial, hosts = [], tags = [] }) {
   if (admin) return PLAIN_MASK;
+  hosts = hosts.map(cleanTag).filter((h) => typeof h === 'string' && h);   // 등록 주소도 같은 눈으로(위 cleanTag)
   const match = addressMatcher(hosts);
   const hostEq = (v) => !!v && match.addressSet.has(v.trim().toLowerCase());
   const hostIdx = needleIndexOf(hosts.flatMap(hostVariants), { min: 3 });

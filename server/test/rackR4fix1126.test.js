@@ -120,6 +120,29 @@ test('3 라우트: 같은 이름에 보이지 않는 글자를 붙인 랙은 중
   assert.ok((await room(OP_A)).places.some((p) => p.label === 'node ••• spare'), '보이지 않는 글자로 끊은 시리얼');
 });
 
+test('3 라우트(5회차 정확성 1): 보이지 않는 글자가 시리얼과 이름 **양쪽**에 든 옛 값 — 재료도 같은 눈으로 봐서 가린다 · 등록부가 자리표시면 인벤토리의 진짜 태그로 잇는다', async () => {
+  const a = await place({ uStart: 20, kind: 'storage', label: 'legacy-c', serial: 'SNX778899' });
+  const { DatabaseSync } = await import('node:sqlite');
+  const raw = new DatabaseSync(process.env.RACK_DB);
+  raw.prepare('UPDATE rack_place SET label = ?, serial = ?, serial_key = ? WHERE id = ?').run('node SN\ufe0f778899 box', 'SN\ufe0f778899', 'sn\ufe0f778899', a);
+  raw.close();
+  await R._resyncForTest();
+  const scoped = await room(OP_A);
+  assert.ok(scoped.places.some((p) => p.label === 'node ••• box'), JSON.stringify(scoped.places.map((p) => p.label)));
+  assert.ok(!JSON.stringify(scoped.places.map((p) => p.label)).replace(/\ufe0f/g, '').includes('SN778899'));
+  assert.ok((await room(OP_ALL)).places.some((p) => p.label === 'node SN778899 box'), '시리얼을 보는 계정은 (보이지 않는 글자만 빠진) 이름 그대로');
+  // 등록부 태그 칸이 자리표시('None')이고 인벤토리에 진짜 태그가 있는 서버 — 인벤토리 태그로 미배치에 나오고 그 시리얼로 놓으면 이어진다
+  const invCache = await import(`${S}/idrac/invCache.js`);
+  registry.importServers([srv('inv9', 'inv-nine', 'https://192.0.2.19', 'None')], 'merge');
+  invCache.setInventory('inv9', { collectedAt: Date.now(), system: { serviceTag: 'INVREAL9' } });
+  let v = await room(ADMIN);
+  assert.ok(v.unplaced.some((u) => u.serverId === 'inv9' && u.serviceTag === 'INVREAL9'), JSON.stringify(v.unplaced));
+  const p9 = await place({ uStart: 21, label: 'nine', serial: 'INVREAL9' });
+  v = await room(ADMIN);
+  assert.equal(v.places.find((x) => x.id === p9).link?.serverId, 'inv9');
+  invCache.removeInventory('inv9');
+});
+
 test('4 순수: 낱말 경계 = 글자 갈래가 바뀌는 자리 — 한글 조사는 경계 · 같은 갈래는 이어진 낱말', () => {
   assert.equal(TM.charKind('a'), 1); assert.equal(TM.charKind('Z'), 1); assert.equal(TM.charKind('7'), 1); assert.equal(TM.charKind('é'), 1);
   assert.equal(TM.charKind('가'), 2); assert.equal(TM.charKind('日'), 2); assert.equal(TM.charKind('ア'), 2);
