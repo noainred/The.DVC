@@ -35,7 +35,7 @@ import { buildCvpOverview, corpResolver, freshnessBounds, RECENT_EVENTS_MAX, row
 import { cvpDeviceConfirm, cvpPartsStaleReason } from '../../cvp/confirm.js';
 import { runCvpFaultScan, cvpFaultScanStatus } from '../../cvp/faultScan.js';   // v2.640 ③ 장애 전이 판정(중앙)
 import { previewParse, PREVIEW_KINDS, PREVIEW_TEXT_MAX } from '../../cvp/preview.js'; // v2.640 ② 파서 시험(왕복 0)
-import { buildPortMap, summaryRow } from '../../cvp/portmap.js'; // v3.37 포트 구성도(판정 코어 — 웹은 그리기만)
+import { buildPortMap, summaryRow, shortOf } from '../../cvp/portmap.js'; // v3.37 포트 구성도(판정 코어 — 웹은 그리기만)
 import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { fileStamp, localStamp } from '../../util/dayKey.js';
 import { isMockMode } from '../../mock/demo/flags.js'; // v2.708 데모(mock 전용)
@@ -461,7 +461,7 @@ api.get('/tools/cvp/portmap', toolsPerm, fullScopeOnly, async (req, res) => {
     cdb.lastLinkDays(agent, cvpId, key).catch(() => ({ last: new Map(), since: null, unavailable: true })),
     cdb.deviceNameIndex().catch(() => ({ rows: [] })),
   ]);
-  const switchNames = new Set((names.rows || []).map((r) => String(r.hostname || '').toLowerCase().split('.')[0]).filter(Boolean));
+  const switchNames = new Set((names.rows || []).map((r) => shortOf(r.hostname)).filter(Boolean));   // v3.42(3회차 반증 R8): 짧은 이름은 portmap.shortOf 하나(IP 이름은 통째로)
   const m = buildPortMap({ model: det.device.model, ports: det.ports, parts: det.device.partsList, lldp: ll.rows, lldpRead: ll.read, lastLink: days.last, switchNames });
   const hosts = listServers().map((x) => x.host);
   const mk = (v) => (admin || v == null ? v : maskErrText(v, hosts));
@@ -485,12 +485,14 @@ api.get('/tools/cvp/portmap/summary', toolsPerm, fullScopeOnly, async (req, res)
   const admin = isAdminReq(req);
   const servers = listServers();
   const own = rowOwnerOf(servers);
-  return heavyJson(req, res, heavyKey('portmap-summary', admin), async () => {
+  return heavyJson(req, res, heavyKey('portmap-summary', admin), async (hx) => {
     const { rows, unavailable } = await cdb.listDeviceRows();
+    hx.check();
     if (unavailable) return { status: 503, body: { ok: false, reason: '중앙 CVP DB 를 열지 못했습니다.' } };
     const devs = rows.filter(own);
     // v3.42(반증 C5): 포트 전량 한 번의 동기 조회 대신 장비별 PK 조회 + 시간 기준 양보(cdb.portRowsOf — 새 화면 라우트와 같은 함수 · 포트를 못 읽은 장비는 뺀다).
     const pr = await cdb.portRowsOf(devs, { limit: PORTMAP_SUMMARY_PORTS_MAX });
+    hx.check();
     if (pr.unavailable) return { status: 503, body: { ok: false, reason: '중앙 CVP DB 를 열지 못했습니다.' } };
     const byDev = new Map();
     for (const r of pr.rows) {

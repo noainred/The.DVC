@@ -189,18 +189,21 @@ async function openInner() {
         WHERE excluded.ts > port_latest.ts`),
       // 원시 표본이 오면 그 포트의 마지막 처리량도 갱신한다(엣지는 구성이 바뀌지 않은 장비 레코드를 매번 보내지 않는다 — push.js).
       rateFromSample: conn.prepare(`UPDATE port_latest SET in_bps=?, out_bps=?, in_util=?, out_util=?, in_err=?, out_err=?, in_drop=?, out_drop=?, rate_ts=?
-        WHERE agent=? AND cvp_id=? AND device_key=? AND port=? AND IFNULL(rate_ts,0) < ?`),
+        WHERE agent=? AND cvp_id=? AND device_key=? AND port=? AND IFNULL(rate_ts,0) < ? AND IFNULL(oper,'') <> 'unknown'`),   // v3.42(3회차 반증 R5): '모름' 행은 채우지 않는다
       // v2.922(반증 D3): 구 엣지 10칸 표본(드롭 칸 자체가 없다)은 port_latest 의 드롭을 **덮지 않는다** — 장비 레코드가 준 값이 null 로 지워졌다.
       rateFromSampleNoDrop: conn.prepare(`UPDATE port_latest SET in_bps=?, out_bps=?, in_util=?, out_util=?, in_err=?, out_err=?, rate_ts=?
-        WHERE agent=? AND cvp_id=? AND device_key=? AND port=? AND IFNULL(rate_ts,0) < ?`),
+        WHERE agent=? AND cvp_id=? AND device_key=? AND port=? AND IFNULL(rate_ts,0) < ? AND IFNULL(oper,'') <> 'unknown'`),   // v3.42(3회차 반증 R5): '모름' 행은 채우지 않는다
       // v2.611(EDGE2611-04): 행이 **있으면** 센다(ts 는 더 클 때만 오른다) — changes 가 '중앙에 그 장비 행이 있는가' 를 말해야
       //   엣지가 없는 행을 touch 로만 보내는 것을 알아채고 레코드를 다시 보낸다(예전 `AND ts < ?` 는 같은 ts 재전송을 0 으로 셌다).
       touchDevice: conn.prepare('UPDATE device_latest SET ts=MAX(ts, ?) WHERE agent=? AND cvp_id=? AND device_key=?'),
       delPortsOld: conn.prepare('DELETE FROM port_latest WHERE agent=? AND cvp_id=? AND device_key=? AND ts < ?'),
       // v3.42(버그 점검 3회차 — 일부 목록 다시 설계): 일부 목록(portsPartial)에서 빠진 옛 행은 **저장할 때** '모름' 으로 적는다(처리량 · 오류도 비운다 — 지금 값이 아니다).
       //   읽는 쪽은 아무것도 보정하지 않는다(2회차의 '읽을 때 보정' 은 경로 4곳이 빠지고 엣지 · 중앙이 어긋났다). 이미 '모름' 인 행은 다시 쓰지 않는다.
-      markPortsStale: conn.prepare(`UPDATE port_latest SET oper='unknown', in_bps=NULL, out_bps=NULL, in_util=NULL, out_util=NULL, in_err=NULL, out_err=NULL, in_drop=NULL, out_drop=NULL
+      //   3회차 반증 R6: 표시한 때를 rate_ts 에 적는다('모름' 행의 rate_ts = 모름이 된 시각 — 처리량은 비웠으니 다른 뜻이 없다). 시한 삭제는 이 시각 기준이다.
+      markPortsStale: conn.prepare(`UPDATE port_latest SET oper='unknown', in_bps=NULL, out_bps=NULL, in_util=NULL, out_util=NULL, in_err=NULL, out_err=NULL, in_drop=NULL, out_drop=NULL, rate_ts=?
         WHERE agent=? AND cvp_id=? AND device_key=? AND ts < ? AND oper <> 'unknown'`),
+      selPortsGoingStale: conn.prepare("SELECT port FROM port_latest WHERE agent=? AND cvp_id=? AND device_key=? AND ts < ? AND oper='up'"),
+      delPortsStaleOld: conn.prepare("DELETE FROM port_latest WHERE agent=? AND cvp_id=? AND device_key=? AND ts < ? AND oper='unknown' AND IFNULL(rate_ts, ts) < ?"),
       selDevTs: conn.prepare('SELECT ts FROM device_latest WHERE agent=? AND cvp_id=? AND device_key=?'),
       insSample: conn.prepare('INSERT OR IGNORE INTO port_sample (agent,cvp_id,device_key,port,ts,in_bps,out_bps,in_util,out_util,in_err,out_err,in_drop,out_drop) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)'),
       upDaily: conn.prepare(`INSERT INTO port_daily (agent,cvp_id,device_key,port,day,samples,in_bps_sum,in_bps_n,in_bps_max,out_bps_sum,out_bps_n,out_bps_max,
@@ -460,7 +463,13 @@ export async function saveDevices({ agent = LOCAL_AGENT, cvpId, devices = [], sa
           //   v3.42(반증 A2-P1): 목록이 일부(portsPartial — 포인터 추종 · 상한에 잘림)면 지우지 않는다 — 빠진 포트는 장비에서 사라진 것이 아니다.
           //   일부 목록이면: 빠진 행을 '모름' 으로 적고, PARTIAL_STALE_KEEP_MS 넘게 목록에 없던 행은 지운다(보류에는 시한 — 늘 잘리는 장비에서 실제로 사라진 포트가 영원히 남았다).
           if (!olderRecord) {
-            if (d.portsPartial === true) { st.markPortsStale.run(agent, cvpId, key, ts); st.delPortsOld.run(agent, cvpId, key, ts - PARTIAL_STALE_KEEP_MS); }
+            if (d.portsPartial === true) {
+              // 먼저 시한 지난 '모름' 행(모름이 된 지 PARTIAL_STALE_KEEP_MS 넘음)을 지우고, 이번에 빠진 행을 '모름' 으로 적는다 — 순서가 반대면 방금 표시한 행이
+              //   마지막으로 본 때(ts)가 오래됐다는 이유로 바로 지워진다(3회차 반증 R6: 8일 넘게 조용하던 장비의 첫 목록이 일부면 192 → 160행).
+              st.delPortsStaleOld.run(agent, cvpId, key, ts, ts - PARTIAL_STALE_KEEP_MS);
+              for (const r of st.selPortsGoingStale.all(agent, cvpId, key, ts)) noteStaleWasUp(agent, cvpId, key, r.port);
+              st.markPortsStale.run(ts, agent, cvpId, key, ts);
+            }
             else st.delPortsOld.run(agent, cvpId, key, ts);
           }
         }
@@ -471,6 +480,16 @@ export async function saveDevices({ agent = LOCAL_AGENT, cvpId, devices = [], sa
   if (nd || ns) _counts = null;
   return { devices: nd, ports: np, samples: ns, duplicates: dup, ...(stalePorts ? { stalePorts } : {}) };
 }
+
+/*
+ * 일부 목록에서 빠지기 직전에 올라와 있던 포트의 기억(프로세스 메모리 — 재시작하면 잊는다: 그 사이의 플랩 한 번을 못 셀 뿐 틀린 값을 만들지 않는다).
+ *   다시 목록에 보이면 꺼내 쓴다(takeStaleWasUp 이 지운다). 상한을 넘으면 통째로 비운다.
+ */
+const STALE_WAS_UP_MAX = 200_000;
+let _staleWasUp = new Set();
+const staleKey = (agent, cvpId, key, port) => `${agent}\u0000${cvpId}\u0000${key}\u0000${port}`;
+function noteStaleWasUp(agent, cvpId, key, port) { if (_staleWasUp.size >= STALE_WAS_UP_MAX) _staleWasUp.clear(); _staleWasUp.add(staleKey(agent, cvpId, key, port)); }
+function takeStaleWasUp(agent, cvpId, key, port) { return _staleWasUp.delete(staleKey(agent, cvpId, key, port)); }
 
 /** v3.38: 링크 내려감으로 세는 oper(관리상 꺼짐은 플랩이 아니다 — 호출자가 admin 을 본다). */
 const FLAP_DOWN = new Set(['down', 'nolink']);
@@ -486,7 +505,10 @@ function recordDevPorts(st, agent, cvpId, key, ts, ports, prevOper, partial = fa
     if (!mgmt) total++;
     const oper = txt(p.oper, 16);
     if (oper === 'up') { if (!mgmt) used++; markLinkDay(st, agent, cvpId, key, name, day); }   // v3.42(A1-14): 카운터 표본이 없는 포트도 링크가 올라와 있으면 그날 쓴 것이다
-    if (prevOper && prevOper.get(name) === 'up' && FLAP_DOWN.has(oper) && txt(p.admin, 16) !== 'down') st.upFlap.run(agent, cvpId, key, name, day);
+    // 3회차 반증 R4: 일부 목록에서 빠져 '모름' 으로 적힌 포트가 그 전에 올라와 있었으면(기억 — _staleWasUp) 다시 보였을 때 내려가 있는 것은 플랩이다.
+    const prev = prevOper ? prevOper.get(name) : undefined;
+    const wasUp = prev === 'up' || (prev === 'unknown' && takeStaleWasUp(agent, cvpId, key, name));
+    if (wasUp && FLAP_DOWN.has(oper) && txt(p.admin, 16) !== 'down') st.upFlap.run(agent, cvpId, key, name, day);
   }
   // v3.42(2회차 A2-F2): 일부 목록(portsPartial)이면 포트 수를 적지 않는다 — 192포트 장비가 total 160 으로 적혀 고갈 예측이 틀렸다(링크 날 · 플랩은 본 포트만이라 그대로).
   if (total > 0 && !partial) st.upDevPort.run(agent, cvpId, key, day, total, used, used);
@@ -1436,6 +1458,7 @@ export function _resetForTest() {
   _db = null; _opening = null; _counts = null; _pruneTick = 0; pruneFlight.reset(); lockRetry.ok();
   _adopted.clear(); _adopting.clear(); _lostUnsent = { total: 0, last: 0, at: null };
   _linkDayMemo = { day: null, set: new Set() };
+  _staleWasUp = new Set();
 }
 
 /**
@@ -1899,7 +1922,9 @@ export async function lastLinkAll() {
 
 /** 날 하나씩 묻고 양보하는 공용 루프 — fn(row) 를 행마다 부른다. */
 const EACH_DAY_PAGE = 4000;
-async function eachDay(sql, fromDay, toDay, fn) {
+/** 호출자가 그만두라고 했을 때(stop() === true) 던지는 표지 — 무거운 조회 상한(cvp/heavyGate.js)이 기다리는 요청이 없는 계산을 멈출 때 쓴다. */
+const stopErr = () => Object.assign(new Error('조회를 멈췄습니다(기다리는 요청 없음)'), { code: 'HEAVY_ABANDONED' });
+async function eachDay(sql, fromDay, toDay, fn, stop = null) {
   const db = await open();
   if (!db) return { unavailable: true };
   /*
@@ -1919,8 +1944,10 @@ async function eachDay(sql, fromDay, toDay, fn) {
       if (page.length < EACH_DAY_PAGE) break;
       after = Number(page[page.length - 1]._rid);
       await y();
+      if (stop && stop()) throw stopErr();
     }
     await y();
+    if (stop && stop()) throw stopErr();
   }
   return { rows };
 }
@@ -1928,7 +1955,7 @@ async function eachDay(sql, fromDay, toDay, fn) {
  * ④ 링크 품질 — 기간(최근 days 일, 오늘 포함)의 포트별 오류 · 드롭 합(일 롤업 — 카운터 차이의 합이라 리셋 구간은 이미 빠졌다) + 읽은 날 수.
  * @returns {Promise<{ map: Map<string, {inErr:number|null,outErr:number|null,inDrop:number|null,outDrop:number|null,errDays:number,days:number}>, unavailable?:true }>}
  */
-export async function errWindow({ days = 7, now = Date.now() } = {}) {
+export async function errWindow({ days = 7, now = Date.now(), stop = null } = {}) {
   const map = new Map();
   const to = dayIndex(now); const from = to - Math.max(1, Math.min(90, Math.floor(days))) + 1;
   const add = (a, k, v) => { const n = numOrNull(v); if (n != null) a[k] = (a[k] ?? 0) + n; };
@@ -1941,11 +1968,11 @@ export async function errWindow({ days = 7, now = Date.now() } = {}) {
     if (Number(row.in_err_n) > 0) add(a, 'inErr', row.in_err_sum);
     if (Number(row.out_err_n) > 0) add(a, 'outErr', row.out_err_sum);
     add(a, 'inDrop', row.in_drop_sum); add(a, 'outDrop', row.out_drop_sum);
-  });
+  }, stop);
   return { map, from: dayStartMs(from), ...(r.unavailable ? { unavailable: true } : {}) };
 }
 /** ⑩ 플랩 — 기간의 포트별 '링크 내려감' 횟수 합 + 그날별 값(최근 14일 막대용). */
-export async function flapWindow({ days = 7, now = Date.now() } = {}) {
+export async function flapWindow({ days = 7, now = Date.now(), stop = null } = {}) {
   const map = new Map();
   const to = dayIndex(now); const from = to - Math.max(1, Math.min(90, Math.floor(days))) + 1;
   const r = await eachDay('SELECT agent, cvp_id, device_key, port, downs FROM port_flap_daily WHERE day = ?', from, to, (row, d) => {
@@ -1954,7 +1981,7 @@ export async function flapWindow({ days = 7, now = Date.now() } = {}) {
     if (!a) { a = { downs: 0, byDay: [] }; map.set(k, a); }
     a.downs += Number(row.downs) || 0;
     a.byDay.push([dayStartMs(d), Number(row.downs) || 0]);
-  });
+  }, stop);
   // 플랩 기록이 언제부터 있나(장비별이 아니라 전체 — 기록 시작 전은 0 이 아니라 '기록 없음').
   const db = await open();
   const first = db ? db.conn.prepare('SELECT MIN(day) AS d FROM port_flap_daily').get()?.d : null;
@@ -1963,18 +1990,18 @@ export async function flapWindow({ days = 7, now = Date.now() } = {}) {
     ...(r.unavailable ? { unavailable: true } : {}) };
 }
 /** ⑨ 장비별 포트 수 일 기록(기간) — 키 → [[dayMs, total, usedMax]] (날 오름차순). */
-export async function devPortSeries({ days = 180, now = Date.now() } = {}) {
+export async function devPortSeries({ days = 180, now = Date.now(), stop = null } = {}) {
   const map = new Map();
   const to = dayIndex(now); const from = to - Math.max(1, Math.min(730, Math.floor(days))) + 1;
   const r = await eachDay('SELECT agent, cvp_id, device_key, total, used_max FROM dev_port_daily WHERE day = ?', from, to, (row, d) => {
     const k = devKeyOf(row.agent, row.cvp_id, row.device_key);
     if (!map.has(k)) map.set(k, []);
     map.get(k).push([dayStartMs(d), Number(row.total), Number(row.used_max)]);
-  });
+  }, stop);
   return { map, ...(r.unavailable ? { unavailable: true } : {}) };
 }
 /** ⑮ 트랜시버 일 최저 광량(기간) — 키(agent␀cvp␀key␀intf) → [[dayMs, rxMin, txMin]] (날 오름차순). */
-export async function xcvrSeries({ days = 90, now = Date.now(), keep = null } = {}) {
+export async function xcvrSeries({ days = 90, now = Date.now(), keep = null, stop = null } = {}) {
   const map = new Map();
   const to = dayIndex(now); const from = to - Math.max(1, Math.min(730, Math.floor(days))) + 1;
   // v3.42(2회차 A4-F2): 범위 밖 장비는 담지 않고(keep — 장비 id 판정) · 점은 [일, Rx] 두 칸만(Tx 는 쓰는 곳이 없다) — 요청 한 건 힙 +295MB 였다.
@@ -1984,7 +2011,7 @@ export async function xcvrSeries({ days = 90, now = Date.now(), keep = null } = 
     const k = `${dk}\u0000${row.intf}`;
     if (!map.has(k)) map.set(k, []);
     map.get(k).push([dayStartMs(d), row.rx_min ?? null]);
-  });
+  }, stop);
   return { map, ...(r.unavailable ? { unavailable: true } : {}) };
 }
 /**
@@ -1993,7 +2020,7 @@ export async function xcvrSeries({ days = 90, now = Date.now(), keep = null } = 
  */
 // v3.42(2회차 A4-F6): 업링크는 양끝에서 세어 500대면 5천 개 가까이 된다 — 2,000 에서 6,000 으로(포트마다 PK 조회 + 양보 · 5천 포트 1~2초 추정).
 export const UPLINK_SERIES_MAX = 6000;
-export async function utilMaxSeries(ports = [], { days = 180, now = Date.now() } = {}) {
+export async function utilMaxSeries(ports = [], { days = 180, now = Date.now(), stop = null } = {}) {
   const map = new Map();
   const db = await open();
   if (!db) return { map, unavailable: true };
@@ -2009,12 +2036,13 @@ export async function utilMaxSeries(ports = [], { days = 180, now = Date.now() }
     }
     map.set(`${devKeyOf(p.agent ?? '', p.cvpId, p.key)}\u0000${p.port}`, pts);
     await y();
+    if (stop && stop()) throw stopErr();
   }
   return { map, ...(list.length > UPLINK_SERIES_MAX ? { truncated: true } : {}) };
 }
 /** ⑥ ⑦ 토폴로지 — 전 장비 LLDP 행 + 장비별 읽음 상태(메타는 장비 수만큼). */
 export const LLDP_ALL_MAX = 200_000;
-export async function lldpAll() {
+export async function lldpAll({ stop = null } = {}) {
   const db = await open();
   if (!db) return { rows: [], meta: new Map(), unavailable: true };
   // v3.42(반증 C5 · 2회차 A2-F5): 장비마다 한 번에 읽고(.all) 장비 사이에서만 양보한다 — 커서를 연 채 양보하면 그 사이 saveL2 가 이웃을 바꿨을 때
@@ -2025,6 +2053,7 @@ export async function lldpAll() {
     for (const r of devQ.all(d.agent, d.cvp_id, d.device_key)) rows.push(r);
     if (rows.length > LLDP_ALL_MAX) break;
     await y();
+    if (stop && stop()) throw stopErr();
   }
   const meta = new Map(db.conn.prepare('SELECT agent, cvp_id, device_key, lldp_at, lldp_fail_at FROM l2_meta LIMIT 20000').all()
     .map((m) => [devKeyOf(m.agent, m.cvp_id, m.device_key), { at: m.lldp_at == null ? null : Number(m.lldp_at), failing: m.lldp_fail_at != null && (m.lldp_at == null || Number(m.lldp_fail_at) > Number(m.lldp_at)) }]));

@@ -364,19 +364,55 @@ test('⑨ 2회차 — 가림 · 무거운 조회 동시 상한', async () => {
   for (const k of [...gates.keys()]) gates.get(k)({ body: {} });
   await assert.rejects(pb, /boom/); await tick(); await tick();
   assert.ok(G.heavyState().running <= before);
-  // 계정당 상한 · 줄 상한은 429(자동 재시도 대상이 아닌 4xx) + Retry-After
+  // 계정당 상한은 줄이 절반 넘게 찼을 때만(3회차 반증 R11: 줄이 비어도 4번째 조회를 429 로 돌려보냈다)
   G._resetHeavyGate(); gates.clear();
-  const mine = Array.from({ length: G.HEAVY_PER_USER_MAX }, (_, i) => call(`M${i}`, 'same')); await tick();
+  const drain = async (ps) => { const all = Promise.all(ps); let done = false; all.then(() => { done = true; });
+    for (let i = 0; i < 200 && !done; i++) { for (const [k, g] of [...gates]) { g({ body: {} }); gates.delete(k); } await tick(); await tick(); }
+    await all; };
+  const mine = Array.from({ length: G.HEAVY_PER_USER_MAX + 1 }, (_, i) => call(`M${i}`, 'same')); await tick();
+  assert.ok(mine.every((x) => x.res.statusCode === 200), '줄이 한가하면 같은 계정의 4번째 조회도 받는다');
+  const fill = Array.from({ length: G.HEAVY_QUEUE_MAX / 2 }, (_, i) => call(`F${i}`, `filler${i}`)); await tick();
   const over = call('M-over', 'same'); await Promise.race([over.p, tick().then(tick)]);   // 상한이 듣지 않으면 줄에 서서 끝나지 않는다 — 기다리지 않고 아래 단언으로 잡는다
-  assert.deepEqual([over.res.statusCode, over.res.body.busy, over.res.headers['Retry-After']], [429, true, String(G.HEAVY_RETRY_AFTER_S)]);
+  assert.deepEqual([over.res.statusCode, over.res.body?.busy, over.res.headers['Retry-After']], [429, true, String(G.HEAVY_RETRY_AFTER_S)], '줄이 밀리면 한 계정이 더 채우지 못한다');
   const other = call('O1', 'other'); await tick();
   assert.equal(other.res.statusCode, 200, '다른 계정은 줄을 설 수 있다');
-  // 줄에 있던 계산은 앞 계산이 끝난 뒤에야 시작한다 — 시작하는 대로 끝내 준다
-  const all = Promise.all([...mine.map((x) => x.p), other.p]);
-  let settled = false; all.then(() => { settled = true; });
-  for (let i = 0; i < 50 && !settled; i++) { for (const [k, g] of [...gates]) { g({ body: {} }); gates.delete(k); } await tick(); await tick(); }
-  await all;
+  await drain([...mine.map((x) => x.p), ...fill.map((x) => x.p), other.p]);
   assert.equal(other.res.body && typeof other.res.body, 'object');
+  // 줄이 꽉 차면 누구든 429
+  G._resetHeavyGate(); gates.clear();
+  const many = Array.from({ length: G.HEAVY_MAX + G.HEAVY_QUEUE_MAX }, (_, i) => call(`Q${i}`, `q${i}`)); await tick();
+  const full = call('Q-over', 'someone'); await Promise.race([full.p, tick().then(tick)]);
+  assert.equal(full.res.statusCode, 429);
+  await drain(many.map((x) => x.p));
+  // 3회차 반증 R2: 기다리는 요청이 없으면 돌던 계산이 다음 확인 지점에서 멈추고 자리를 돌려준다(탭을 넘기며 취소한 계산이 끝까지 돌지 않게)
+  G._resetHeavyGate(); gates.clear();
+  let steps = 0; let release;
+  const slow = mk('u1');
+  const ps = G.heavyJson(slow.req, slow.res, 'SLOW', async (hx) => { steps++; await new Promise((r) => { release = r; }); hx.check(); steps++; return { body: {} }; });
+  await tick();
+  slow.res.emit('close'); await tick();
+  release(); await ps; await tick(); await tick();
+  assert.equal(steps, 1, '확인 지점에서 멈췄다(뒤 단계를 돌지 않는다)');
+  assert.deepEqual([G.heavyState().running, G.heavyState().flights], [0, 0], '자리 · 합류 표를 돌려준다');
+  const again = mk('u2'); let ran2 = 0;
+  await G.heavyJson(again.req, again.res, 'SLOW', async () => { ran2++; return { body: { fresh: true } }; });
+  assert.deepEqual([ran2, again.res.body], [1, { fresh: true }], '멈춘 뒤 같은 조회는 새 계산을 받는다');
+  // 대조: 떠났다가 계산이 끝나기 전에 같은 조회가 다시 오면 돌던 계산에 붙는다(버리지 않는다)
+  let steps2 = 0; let release2;
+  const s1 = mk('u1');
+  const p1 = G.heavyJson(s1.req, s1.res, 'SLOW2', async (hx) => { steps2++; await new Promise((r) => { release2 = r; }); hx.check(); steps2++; return { body: { v: 2 } }; });
+  await tick(); s1.res.emit('close'); await tick();
+  const s2 = mk('u2'); const p2 = G.heavyJson(s2.req, s2.res, 'SLOW2', async () => { throw new Error('새 계산이 돌면 안 된다'); });
+  release2(); await p1; await p2;
+  assert.deepEqual([steps2, s2.res.body], [2, { v: 2 }]);
+  // 가벼운 줄(위치 찾기)은 무거운 줄과 따로 — 무거운 줄이 차 있어도 바로 돈다 · 동시 LIGHT_MAX 건
+  G._resetHeavyGate(); gates.clear(); runs = 0;
+  const hv = Array.from({ length: G.HEAVY_MAX + 1 }, (_, i) => call(`H${i}`, `h${i}`)); await tick();
+  const lightRuns = [];
+  const lt = Array.from({ length: G.LIGHT_MAX + 1 }, (_, i) => { const x = mk(`l${i}`); x.p = G.heavyJson(x.req, x.res, `L${i}`, () => { lightRuns.push(i); return new Promise((r) => gates.set(`L${i}`, r)); }, { lane: 'light' }); return x; });
+  await tick();
+  assert.equal(lightRuns.length, G.LIGHT_MAX, '무거운 줄과 무관하게 돌고, 동시에는 LIGHT_MAX 건만');
+  await drain([...hv.map((x) => x.p), ...lt.map((x) => x.p)]);
   } finally { G._resetHeavyGate(); }
 });
 
@@ -576,4 +612,49 @@ test('⑯ 3회차 라우터 — 줄이 차면 429 · 검증이 먼저 · 위치 
   assert.deepEqual([a.j.edge.length, a.j.transit.map((x) => x.port)], [0, ['Port-Channel100']], JSON.stringify(a.j.edge));
   const e = await get('/tools/cvp/locate?q=00:aa:bb:cc:dd:02');
   assert.deepEqual(e.j.edge.map((x) => x.port), ['Ethernet5'], '대조: 서버 포트는 가장자리');
+});
+
+/* ── 3회차 반증 — 수정 검토 결함(R1~R14) ──────────────────────────────────────────────────────────────────── */
+test('⑰ 3회차 반증 — 플랩 기억 · 밀린 표본 · 시한 기준 · 양끝 비교 · 일부 표지 · 검증 순서', async () => {
+  // R7: '이름-인터페이스' 낱말(spine2-Et1)도 다른 스위치를 가리키는 것으로 본다
+  const isSw = (n) => ['leaf1', 'spine1', 'spine2'].includes(n);
+  assert.equal(TP.compareEnds({ desc: 'spine2-Et1' }, { desc: '' }, { aName: 'leaf1', bName: 'spine1', isSwitch: isSw }).some((x) => x.field === 'descA'), true);
+  assert.equal(TP.compareEnds({ desc: 'spine1-Et1' }, { desc: '' }, { aName: 'leaf1', bName: 'spine1', isSwitch: isSw }).some((x) => x.field === 'descA'), false);
+  // R9: 양쪽 다 일부 목록이면(본문 표지 pp) '비교 못 함(포트 상태)' — '그대로' 로 세지 않는다
+  const pb = (partial) => SD.snapshotBody({ device: { hostname: 'x', portsRead: true, info: partial ? { portsPartial: true } : null }, ports: [{ port: 'E1', oper: 'unknown', admin: 'up' }] });
+  assert.ok(SD.diffDevice(pb(true), pb(true)).na.includes('portState'));
+  assert.equal(SD.diffDevice(pb(false), pb(false)).na.includes('portState'), false, '대조: 일부 목록이 아니면(늘 모르는 포트) 세지 않는다');
+  // R8: 포트 구성도 라우트의 스위치 이름 집합도 짧은 이름 함수 하나
+  const { stripComments } = await import('./_stripComments.js').catch(() => ({ stripComments: (x) => x }));
+  const routeSrc = stripComments(fs.readFileSync(new URL('../src/routes/api/cvp.js', import.meta.url), 'utf8'));
+  assert.ok(/const switchNames = new Set\(\(names\.rows \|\| \[\]\)\.map\(\(r\) => shortOf\(r\.hostname\)\)/.test(routeSrc));
+  if (!(await cdb.available())) return;
+  const { DatabaseSync } = await import('node:sqlite');
+  const raw = new DatabaseSync(path.join(tmp, 'cvp.db'));
+  const t0 = Date.now() - 3_600_000;
+  const port = (name, oper, x = {}) => ({ name, oper, admin: 'up', desc: '', speedBps: 25e9, ...x });
+  // R4: 올라와 있다가 일부 목록에서 빠지고, 다시 보였을 때 내려가 있으면 플랩 1(로컬 · 엣지 이름 둘 다)
+  for (const agent of ['', 'edge-f']) {
+    await cdb.saveDevices({ agent, cvpId: 'df', devices: [{ key: 'F', ts: t0, hostname: 'f', ports: [port('Ethernet1', 'up'), port('Ethernet2', 'up')] }] });
+    await cdb.saveDevices({ agent, cvpId: 'df', devices: [{ key: 'F', ts: t0 + 1000, hostname: 'f', portsPartial: true, ports: [port('Ethernet1', 'up')] }] });
+    await cdb.saveDevices({ agent, cvpId: 'df', devices: [{ key: 'F', ts: t0 + 2000, hostname: 'f', ports: [port('Ethernet1', 'up'), port('Ethernet2', 'down')] }] });
+    assert.equal(raw.prepare('SELECT downs FROM port_flap_daily WHERE agent=? AND cvp_id=? AND port=?').get(agent, 'df', 'Ethernet2')?.downs, 1, `플랩 ${agent || '로컬'}`);
+  }
+  // R5: 밀린 표본이 '모름' 행의 처리량을 다시 채우지 않는다
+  await cdb.saveDevices({ agent: 'edge-g', cvpId: 'dg', devices: [{ key: 'G', ts: t0, hostname: 'g', ports: [port('Ethernet1', 'up'), port('Ethernet2', 'up')] }] });
+  await cdb.saveDevices({ agent: 'edge-g', cvpId: 'dg', devices: [{ key: 'G', ts: t0 + 1000, hostname: 'g', portsPartial: true, ports: [port('Ethernet1', 'up')] }] });
+  await cdb.importSamples('edge-g', [['dg', 'G', 'Ethernet2', t0 + 5000, 100, 100, 91, 91, 0, 0, 0, 0]]);
+  assert.deepEqual(Object.values(raw.prepare("SELECT oper, in_util FROM port_latest WHERE agent='edge-g' AND port='Ethernet2'").get()), ['unknown', null]);
+  // R6: 오래 조용하던 장비의 첫 목록이 일부여도 빠진 포트를 바로 지우지 않는다('모름' 으로 적고 그때부터 시한)
+  const old = t0 - 9 * 86_400_000;
+  await cdb.saveDevices({ agent: '', cvpId: 'dh', devices: [{ key: 'H', ts: old, hostname: 'h', ports: [port('Ethernet1', 'up'), port('Ethernet2', 'up')] }] });
+  await cdb.saveDevices({ agent: '', cvpId: 'dh', devices: [{ key: 'H', ts: t0, hostname: 'h', portsPartial: true, ports: [port('Ethernet1', 'up')] }] });
+  assert.deepEqual(raw.prepare("SELECT port, oper FROM port_latest WHERE cvp_id='dh' ORDER BY port").all().map((r) => [r.port, r.oper]), [['Ethernet1', 'up'], ['Ethernet2', 'unknown']]);
+  await cdb.saveDevices({ agent: '', cvpId: 'dh', devices: [{ key: 'H', ts: t0 + cdb.PARTIAL_STALE_KEEP_MS + 60_000, hostname: 'h', portsPartial: true, ports: [port('Ethernet1', 'up')] }] });
+  assert.equal(raw.prepare("SELECT COUNT(*) AS n FROM port_latest WHERE cvp_id='dh'").get().n, 1, '모름이 된 지 시한이 지나면 지운다');
+  raw.close();
+  // R10: 비교 대상(b) 형식 오류는 줄을 서기 전에 400
+  who = { username: 'adm', role: 'admin', scope: null };
+  const r = await fetch(`${base}/tools/cvp/compare?a=1&b=abc`);
+  assert.equal(r.status, 400);
 });

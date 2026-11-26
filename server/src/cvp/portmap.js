@@ -221,7 +221,7 @@ export function deviceNameFromDesc(desc) {
 const IPV4_NAME = /^\d{1,3}(?:\.\d{1,3}){3}$/;
 export const shortOf = (s) => { const v = String(s ?? '').trim().toLowerCase(); return IPV4_NAME.test(v) ? v : v.split('.')[0]; };
 /** v3.42(A1-10): 'esx01-vmnic0' · 'svr-01_eth1' 처럼 장비 이름 뒤에 인터페이스를 붙인 낱말 → 'esx01' · 'svr-01'(뒤 조각이 인터페이스 이름일 때만). */
-function stripIfSuffix(t) {
+export function stripIfSuffix(t) {
   const m = /^(.{3,64}?)[-_]([a-z][a-z0-9/.:]{0,30})$/i.exec(t);
   return m && IFNAME.test(m[2]) ? m[1] : t;
 }

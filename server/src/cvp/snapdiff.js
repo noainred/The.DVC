@@ -18,6 +18,8 @@ export function snapshotBody({ device = {}, ports = null, lldp = null } = {}) {
   const x = Array.isArray(device.partsList) ? device.partsList.filter((p) => p && p.kind === 'xcvr') : null;
   return {
     h: s(device.hostname, 128), m: s(device.model, 64), v: s(device.eosVersion, 64), at: num(device.collectedAt),
+    // v3.42(3회차 반증 R9): 포트 목록이 일부였던 장비(info.portsPartial) 표지 — 양쪽 다 일부면 '한쪽만 모름' 규칙으로는 안 잡혀 '그대로' 로 셌다.
+    ...(device.info && device.info.portsPartial === true ? { pp: 1 } : {}),
     p: device.portsRead && Array.isArray(ports) ? ports.map((p) => [s(p.port ?? p.name, 64), linkWord(p.oper), linkWord(p.admin), num(p.speedBps ?? p.speed_bps), s(p.vlan, 32), p.lag == null ? null : s(p.lag, 64), p.desc === undefined ? s(p.descr) : s(p.desc), num(p.mtu)]) : null,
     b: Array.isArray(device.bgpPeers) ? device.bgpPeers.slice(0, 512).map((b) => [s(b.peer ?? b.peerAddress, 64), s(b.vrf, 64) || 'default', s(b.state, 32)]) : null,
     x: x && x.length ? x.slice(0, 512).map((p) => [intfOfPartName(p.name) || s(p.name, 96), p.state === 'absent' ? 0 : 1, s(p.media, 48)]) : null,
@@ -50,7 +52,7 @@ export function diffDevice(a, b) {
       }
     }
     for (const name of bm.keys()) if (!am.has(name)) push('port', name, 'added', null, null);
-    if (portStateNa) na.push('portState');
+    if (portStateNa || a.pp === 1 || b.pp === 1) na.push('portState');
   }
   // BGP
   if (a.b == null || b.b == null) na.push('bgp');

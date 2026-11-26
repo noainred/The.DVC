@@ -11,7 +11,7 @@
  * 양끝 불일치는 **두 끝 포트를 다 아는 링크**(both · one 중 상대 포트를 LLDP portId 로 아는 것)만 — 속도 · MTU · Duplex · 관리 상태 · 포트 채널 소속 · 설명이 가리키는 상대.
  *   한쪽 값을 못 읽었으면 '비교 못 함'(na)이다 — 다름으로 세지 않는다.
  */
-import { deviceNameFromDesc, descTokens, descMentions, shortOf } from './portmap.js';
+import { deviceNameFromDesc, descTokens, descMentions, stripIfSuffix, shortOf } from './portmap.js';
 
 const devKey = (a, c, k) => `${a}\u0000${c}\u0000${k}`;
 const lc = (s) => String(s ?? '').trim().toLowerCase();
@@ -87,16 +87,17 @@ const isMgmtPort = (np) => /^ma/.test(np);
  * @param {Array} lldpRows @param {Set<string>} hostNames 짧은 이름(소문자)
  * @returns {Map<string, Set<string>>} 장비 id → 정규화 포트 집합
  */
+function hostPortRow(out, r, hostNames) {
+  const np = normPort(r.port);
+  if (isMgmtPort(np) || !hostNames.has(shortOf(r.sysName))) return;
+  const self = devKey(r.agent, r.cvpId, r.key);
+  if (!out.has(self)) out.set(self, new Set());
+  out.get(self).add(np);
+}
 export function hostPortsOf(lldpRows, hostNames = new Set()) {
   const out = new Map();
   if (!hostNames || !hostNames.size) return out;
-  for (const r of Array.isArray(lldpRows) ? lldpRows : []) {
-    const np = normPort(r.port);
-    if (isMgmtPort(np) || !hostNames.has(shortOf(r.sysName))) continue;
-    const self = devKey(r.agent, r.cvpId, r.key);
-    if (!out.has(self)) out.set(self, new Set());
-    out.get(self).add(np);
-  }
+  for (const r of Array.isArray(lldpRows) ? lldpRows : []) hostPortRow(out, r, hostNames);
   return out;
 }
 
@@ -118,17 +119,33 @@ function lldpByDev(rows) {
  * 장비별 업링크 포트(이웃이 CVP 스위치인 포트) — 위치 찾기 · 포트 계획이 같은 판정을 쓴다.
  * @returns {Map<string, Set<string>>} 장비 id → 정규화 포트 집합
  */
+function uplinkRow(out, r, idx) {
+  const self = devKey(r.agent, r.cvpId, r.key);
+  if (isMgmtPort(normPort(r.port)) || (r.portId && isMgmtPort(normPort(r.portId)))) return;   // 2회차 A1-F2: 상대 끝이 관리 포트(OOB 스위치 데이터 포트 ↔ 장비 Management1)여도 업링크 아님
+  const peer = idx.find(r.sysName, self);
+  if (!peer || peer === self) return;   // AMBIG 는 스위치 이름이라 업링크로 둔다
+  if (!out.has(self)) out.set(self, new Set());
+  out.get(self).add(normPort(r.port));
+}
 export function uplinkPortsOf(lldpRows, idx) {
   const out = new Map();
-  for (const r of Array.isArray(lldpRows) ? lldpRows : []) {
-    const self = devKey(r.agent, r.cvpId, r.key);
-    if (isMgmtPort(normPort(r.port)) || (r.portId && isMgmtPort(normPort(r.portId)))) continue;   // 2회차 A1-F2: 상대 끝이 관리 포트(OOB 스위치 데이터 포트 ↔ 장비 Management1)여도 업링크 아님
-    const peer = idx.find(r.sysName, self);
-    if (!peer || peer === self) continue;   // AMBIG 는 스위치 이름이라 업링크로 둔다
-    if (!out.has(self)) out.set(self, new Set());
-    out.get(self).add(normPort(r.port));
-  }
+  for (const r of Array.isArray(lldpRows) ? lldpRows : []) uplinkRow(out, r, idx);
   return out;
+}
+/**
+ * 요청 경로용 — 전 LLDP 행을 한 번 훑어 업링크 · 호스트 포트를 함께 만들고 행마다 시간 기준 양보(yielder = createYielder(…)).
+ *   v3.42(3회차 반증 R1 · R12): 위치 찾기 · 예측이 이 구간을 한 덩어리(60~100ms)로 돌았다. keep(r) 로 범위 밖 행을 거른다. 결과는 동기판과 같다.
+ */
+export async function lldpPortSetsAsync(lldpRows, idx, { hostNames = null, keep = null, yielder = null } = {}) {
+  const uplinks = new Map(); const hostPorts = new Map();
+  const hn = hostNames && hostNames.size ? hostNames : null;
+  for (const r of Array.isArray(lldpRows) ? lldpRows : []) {
+    if (yielder) await yielder();
+    if (keep && !keep(r)) continue;
+    uplinkRow(uplinks, r, idx);
+    if (hn) hostPortRow(hostPorts, r, hn);
+  }
+  return { uplinks, hostPorts };
 }
 
 // v3.42(A1-11): 'unknown' · 'auto' 류는 못 읽은 값이다('full' 과 '다름' 이 아니다).
@@ -159,7 +176,8 @@ export function compareEnds(pa, pb, { aName = '', bName = '', isSwitch = null } 
     if (descMentions(p.desc, peerName)) continue;
     // 상대 이름이 없으면: 설명이 가리키는 **다른 알려진 스위치**(자기 자신 제외)가 있을 때만 다름. 'MLAG-PEER-1' · 'ISL-1' 같은 관례 낱말 · CVP 밖 이름은 비교하지 않는다(2회차 A1-F11 · R10).
     let named;
-    if (typeof isSwitch === 'function') named = descTokens(p.desc).find((t) => !descMentions(t, selfName) && isSwitch(t));
+    // 낱말 그대로 + 인터페이스 접미를 뗀 꼴('spine2-et1' → 'spine2' — 3회차 반증 R7) 둘 다 본다
+    if (typeof isSwitch === 'function') named = descTokens(p.desc).flatMap((t) => { const u = stripIfSuffix(t); return u === t ? [t] : [t, u]; }).find((t) => !descMentions(t, selfName) && isSwitch(t));
     else { named = deviceNameFromDesc(p.desc); if (named && selfName && descMentions(named, selfName)) named = ''; }   // isSwitch 없이 부르면(단위 테스트) 뽑은 첫 이름으로
     if (!named) continue;
     out.push({ field: side === 'a' ? 'descA' : 'descB', a: side === 'a' ? named : peerName, b: side === 'a' ? peerName : named, state: 'diff' });

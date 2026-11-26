@@ -30,7 +30,7 @@ import { reclaimCandidates, exhaustForecast, saturationForecastAsync, IDLE_CHOIC
 import { opticTrendsAsync, opticInventory, TREND_DAYS, TREND_MIN_DAYS } from '../../cvp/opticstrend.js';
 import { HORIZON_DAYS } from '../../cvp/trend.js';
 import { heavyJson, heavyKey } from '../../cvp/heavyGate.js';   // v3.42: 무거운 조회 동시 상한 + 같은 조회 합류(3회차 다시 설계)
-import { buildTopology, switchIndex, uplinkPortsOf, hostPortsOf, normPort, shortOf } from '../../cvp/topology.js';
+import { buildTopology, switchIndex, uplinkPortsOf, hostPortsOf, lldpPortSetsAsync, normPort, shortOf } from '../../cvp/topology.js';
 import { parseQuery, subjectsOf, placeRows, MANY_MACS } from '../../cvp/locate.js';
 import { snapshotBody, diffSnapshots } from '../../cvp/snapdiff.js';
 import { complianceFleet } from '../../cvp/compliance.js';     // v3.41 ③
@@ -95,6 +95,9 @@ async function baseOfInner({ cvpId = null, withPorts = true } = {}) {
 const cvpIdOf = (req) => (typeof req.query.cvpId === 'string' && req.query.cvpId ? req.query.cvpId : null);
 const unknownCvp = (id) => id && !listServers().some((x) => String(x.id) === id);
 
+/** 위치 찾기가 LLDP · 채널을 읽는 답 장비 수 상한(MAC 하나가 L2 영역의 스위치마다 배워진다 — 넘으면 devicesTruncated). */
+const LOCATE_DEVS_MAX = 1000;
+
 export function registerCvpNet(api) {
   // ── ④ ⑩ 링크 품질 ──────────────────────────────────────────────────────────────────────────────────────────
   api.get('/tools/cvp/linkq', toolsPerm, fullScopeOnly, async (req, res) => {
@@ -103,10 +106,12 @@ export function registerCvpNet(api) {
     const cvpId = cvpIdOf(req);
     if (unknownCvp(cvpId)) return res.status(404).json({ ok: false, reason: '없는 CVP 서버입니다.' });
     const days = [1, 7, 30].includes(Number(req.query.days)) ? Number(req.query.days) : 7;
-    return heavyJson(req, res, heavyKey('linkq', admin, cvpId, days), async () => {
+    return heavyJson(req, res, heavyKey('linkq', admin, cvpId, days), async (hx) => {
       const b = await baseOf({ cvpId });
+      hx.check();
       if (!b) return { status: 503, body: DB_DOWN };
-      const [err, flap] = await Promise.all([cdb.errWindow({ days }), cdb.flapWindow({ days })]);
+      const [err, flap] = await Promise.all([cdb.errWindow({ days, stop: hx.stop }), cdb.flapWindow({ days, stop: hx.stop })]);
+      hx.check();
       if (err.unavailable || flap.unavailable) return { status: 503, body: DB_DOWN };
       const s = loadSettings();
       const devMap = new Map(b.devices.map((d) => [devKey(d.agent, d.cvpId, d.key), { parts: d.partsList }]));
@@ -128,13 +133,16 @@ export function registerCvpNet(api) {
     const cvpId = cvpIdOf(req);
     if (unknownCvp(cvpId)) return res.status(404).json({ ok: false, reason: '없는 CVP 서버입니다.' });
     const idle = IDLE_CHOICES.includes(Number(req.query.idle)) ? Number(req.query.idle) : 90;
-    return heavyJson(req, res, heavyKey('reclaim', admin, cvpId, idle), async () => {
+    return heavyJson(req, res, heavyKey('reclaim', admin, cvpId, idle), async (hx) => {
       const b = await baseOf({ cvpId });
+      hx.check();
       if (!b) return { status: 503, body: DB_DOWN };
       // v3.38 이전 기록의 마지막 링크 날을 옮기는 일은 처음 한 번 — 기다리지 않는다(끝나면 다음 조회부터 반영 · 화면이 '정리 중' 을 밝힌다).
       const done = await cdb.lastLinkBackfilled();
+      hx.check();
       if (!done) cdb.backfillLastLink();
       const ll = await cdb.lastLinkAll();
+      hx.check();
       if (ll.unavailable) return { status: 503, body: DB_DOWN };
       const r = reclaimCandidates({ ports: b.ports, last: ll.last, first: ll.first, idleDays: idle });
       const hosts = hostsOf();
@@ -150,20 +158,26 @@ export function registerCvpNet(api) {
     const admin = isAdminReq(req);
     const cvpId = cvpIdOf(req);
     if (unknownCvp(cvpId)) return res.status(404).json({ ok: false, reason: '없는 CVP 서버입니다.' });
-    return heavyJson(req, res, heavyKey('forecast', admin, cvpId), async () => {
+    return heavyJson(req, res, heavyKey('forecast', admin, cvpId), async (hx) => {
       const b = await baseOf({ cvpId });
+      hx.check();
       if (!b) return { status: 503, body: DB_DOWN };
-      const [ser, lldp] = await Promise.all([cdb.devPortSeries({ days: FORECAST_WINDOW_DAYS }), cdb.lldpAll()]);
+      const [ser, lldp] = await Promise.all([cdb.devPortSeries({ days: FORECAST_WINDOW_DAYS, stop: hx.stop }), cdb.lldpAll({ stop: hx.stop })]);
+      hx.check();
       if (ser.unavailable || lldp.unavailable) return { status: 503, body: DB_DOWN };
+      // v3.42(3회차 A4-F4 · 반증 R12): 고갈 예측 → 이름 색인 → 전 LLDP 행 → 전 포트가 양보 없이 이어져 한 덩어리 97~148ms 였다 — 단계 사이 · 행마다 시간 기준 양보.
+      const yv = createYielder(15);
       const ex = exhaustForecast({ devices: b.devices, series: ser.map });
+      await new Promise((r) => setImmediate(r));
+      hx.check();
       // 업링크 = LLDP 이웃이 CVP 스위치인 포트(링크가 올라온 것). LLDP 를 읽지 못한 장비는 40G 이상 · 링크 있음 포트를 업링크로 본다(basis 'speed' — 추정).
       const idx = switchIndex(b.devices);
-      const lrows = lldp.rows.filter((r) => b.keys.has(devKey(r.agent, r.cvpId, r.key)));
-      const ups = uplinkPortsOf(lrows, idx);
-      // v3.42(3회차 A4-F4): 이 구간(전 LLDP 행 · 전 포트)이 예측 라우트의 가장 긴 한 덩어리(97~148ms)였다 — 시간 기준 양보.
-      const yv = createYielder(15);
+      await new Promise((r) => setImmediate(r));
+      const keepRow = (r) => b.keys.has(devKey(r.agent, r.cvpId, r.key));
+      const { uplinks: ups } = await lldpPortSetsAsync(lldp.rows, idx, { keep: keepRow, yielder: yv });
+      hx.check();
       const peerOf = new Map();
-      for (const r of lrows) { peerOf.set(`${devKey(r.agent, r.cvpId, r.key)}\u0000${normPort(r.port)}`, r.sysName); await yv(); }
+      for (const r of lldp.rows) { await yv(); if (keepRow(r)) peerOf.set(`${devKey(r.agent, r.cvpId, r.key)}\u0000${normPort(r.port)}`, r.sysName); }
       const uplinks = [];
       for (const p of b.ports) {
         await yv();
@@ -177,9 +191,11 @@ export function registerCvpNet(api) {
       // v3.42(2회차 A4-F6): 상한 밖 업링크는 계열을 못 읽은 것 — '기록 부족' 으로 세지 않고 빼서 따로 센다(seriesUnread). LLDP 로 확인한 업링크를 먼저 · 추정(속도)은 뒤.
       uplinks.sort((x, y) => (x.basis === 'lldp' ? 0 : 1) - (y.basis === 'lldp' ? 0 : 1));
       const looked = uplinks.slice(0, cdb.UPLINK_SERIES_MAX);
-      const us = await cdb.utilMaxSeries(looked, { days: FORECAST_WINDOW_DAYS });
+      const us = await cdb.utilMaxSeries(looked, { days: FORECAST_WINDOW_DAYS, stop: hx.stop });
+      hx.check();
       if (us.unavailable) return { status: 503, body: DB_DOWN };
       const sat = await saturationForecastAsync({ uplinks: looked, series: us.map });
+      hx.check();
       const hosts = hostsOf();
       const corp = new Map(b.devices.map((d) => [devKey(d.agent, d.cvpId, d.key), d.corpName]));
       return { body: {
@@ -196,16 +212,19 @@ export function registerCvpNet(api) {
     kickDemo();
     const cvpId = cvpIdOf(req);
     if (unknownCvp(cvpId)) return res.status(404).json({ ok: false, reason: '없는 CVP 서버입니다.' });
-    return heavyJson(req, res, heavyKey('optics-trend', false, cvpId), async () => {
+    return heavyJson(req, res, heavyKey('optics-trend', false, cvpId), async (hx) => {
       const b = await baseOf({ cvpId, withPorts: false });
+      hx.check();
       if (!b) return { status: 503, body: DB_DOWN };
       // v3.42(버그 점검 1회차 A4-F2): 회귀는 최근 TREND_DAYS 일만 쓴다 — 90일(135만 행 · 힙 +260MB)을 읽지 않는다. 7일 더 읽어 막 끊긴 GBIC 은 '오래됨' 으로 보인다.
-      const xs = await cdb.xcvrSeries({ days: TREND_DAYS + 7, keep: (dk) => b.keys.has(dk) });
+      const xs = await cdb.xcvrSeries({ days: TREND_DAYS + 7, keep: (dk) => b.keys.has(dk), stop: hx.stop });
+      hx.check();
       if (xs.unavailable) return { status: 503, body: DB_DOWN };
       const own = xs.map;
       const s = loadSettings();
       const names = new Map(b.devices.map((d) => [devKey(d.agent, d.cvpId, d.key), { hostname: d.hostname || d.key, cvpId: d.cvpId, corpName: d.corpName }]));
       const t = await opticTrendsAsync({ series: own, names, warnDbm: s.xcvrRxWarnDbm, faultDbm: s.xcvrRxFaultDbm });
+      hx.check();
       const inv = opticInventory(b.devices);
       return { body: { trend: t, inventory: inv, trendDays: TREND_DAYS, minDays: TREND_MIN_DAYS, horizonDays: HORIZON_DAYS } };
     });
@@ -220,10 +239,12 @@ export function registerCvpNet(api) {
     const admin = isAdminReq(req);
     const cvpId = cvpIdOf(req);
     if (unknownCvp(cvpId)) return res.status(404).json({ ok: false, reason: '없는 CVP 서버입니다.' });
-    return heavyJson(req, res, heavyKey('topology', admin, cvpId), async () => {
+    return heavyJson(req, res, heavyKey('topology', admin, cvpId), async (hx) => {
       const b = await baseOf({ cvpId });
+      hx.check();
       if (!b) return { status: 503, body: DB_DOWN };
-      const lldp = await cdb.lldpAll();
+      const lldp = await cdb.lldpAll({ stop: hx.stop });
+      hx.check();
       if (lldp.unavailable) return { status: 503, body: DB_DOWN };
       const snap = store.get() || {};
       const hostNames = hostNamesOf(snap);
@@ -243,49 +264,69 @@ export function registerCvpNet(api) {
     const q = parseQuery(typeof req.query.q === 'string' ? req.query.q : '');
     if (q.kind === 'empty') return res.status(400).json({ ok: false, reason: 'MAC · IP · 이름 중 하나를 넣어 주세요.' });
     if (q.kind === 'bad') return res.status(400).json({ ok: false, reason: q.reason });
-    const b = await baseOf({ withPorts: false });
-    if (!b) return res.status(503).json(DB_DOWN);
-    const snap = store.get() || {};
-    const subj = subjectsOf(q, snap);
-    const macs = [...new Set([...(q.kind === 'mac' ? [q.mac] : []), ...subj.subjects.flatMap((x) => x.macs)])].slice(0, 256);
-    const owners = b.servers.map((sv) => ({ agent: String(sv.agent ?? '').trim() ? sv.agent : '', cvpId: sv.id }));
-    const own = (r) => b.keys.has(devKey(r.agent, r.cvpId, r.key));
-    const [fdb, ep, lldp, l2] = await Promise.all([
-      macs.length ? cdb.fdbByMacs(macs) : { rows: [] }, macs.length ? cdb.endpointsByMacs(macs, { owners }) : { rows: [] }, cdb.lldpAll(), cdb.l2Status(owners),
-    ]);
-    if (lldp.unavailable) return res.status(503).json(DB_DOWN);
-    const fdbRows = (fdb.rows || []).filter(own); const epRows = (ep.rows || []).filter(own);
-    const ups = uplinkPortsOf(lldp.rows.filter(own), switchIndex(b.devices));
-    for (const d of b.devices) { const dk = devKey(d.agent, d.cvpId, d.key); if (lldp.meta.get(dk)?.at != null && !ups.has(dk)) ups.set(dk, new Set()); }
-    const devs = [...new Map(fdbRows.map((r) => [devKey(r.agent, r.cvpId, r.key), { agent: r.agent, cvpId: r.cvpId, key: r.key }])).values()];
-    const macCount = devs.length ? await cdb.fdbPortTotals(devs) : new Map();
-    const hostNames = hostNamesOf(snap);
-    const hostPorts = hostPortsOf(lldp.rows.filter(own), hostNames);
-    // v3.42(2회차 A1-F10 · 3회차 A1-F6 · A3-F6 · A4-F5): MAC 은 포트 채널 이름으로 배울 수 있다 — 답에 나온 장비(FDB · CVP 위치 행이 있는 장비)의 채널 소속만 읽어
-    //   ESXi 물리 포트의 채널은 호스트 포트로, 업링크 물리 포트의 채널은 업링크로 본다. 예전(2회차)에는 호스트가 붙은 전 장비를 검색마다 읽었고(5만 행 상한 밖은 조용히 빠짐),
-    //   업링크 채널은 '가장자리' 로 답했다.
-    const ansDevs = [...new Map([...fdbRows, ...epRows].map((r) => [devKey(r.agent, r.cvpId, r.key), r])).keys()];
-    const ansSet = new Set(ansDevs);
-    if (ansSet.size) {
-      const pr = await cdb.portRowsOf(b.devices.filter((d) => ansSet.has(devKey(d.agent, d.cvpId, d.key))), { limit: 50_000 });
-      for (const r of pr.rows || []) {
-        if (!r.lag) continue;
-        const dk = devKey(r.agent, r.cvpId, r.key); const np = normPort(r.port); const po = normPort(r.lag);
-        if (hostPorts.get(dk)?.has(np)) hostPorts.get(dk).add(po);
-        if (ups.get(dk)?.has(np)) ups.get(dk).add(po);
+    const qv = q.kind === 'mac' ? q.mac : q.kind === 'ip' ? q.ip : q.name;
+    /*
+     * v3.42(3회차 반증 R1): 가벼운 줄(lane 'light' — 동시 LIGHT_MAX 건 · 같은 검색은 합류). 2회차는 무거운 조회와 한 줄이라 0.4 → 4.5초 기다렸고,
+     *   3회차에 줄 밖으로 빼자 동시 12건이 정지 0.7초를 쌓았다. 그리고 **답에 나온 장비의 LLDP 만** 읽는다 — 예전에는 검색마다 전 장비 LLDP(수만 행)를 읽어
+     *   한 건이 60~90ms 를 한 덩어리로 썼다.
+     */
+    return heavyJson(req, res, heavyKey('locate', false, q.kind, qv), async (hx) => {
+      const b = await baseOf({ withPorts: false });
+      hx.check();
+      if (!b) return { status: 503, body: DB_DOWN };
+      const snap = store.get() || {};
+      const subj = subjectsOf(q, snap);
+      const macs = [...new Set([...(q.kind === 'mac' ? [q.mac] : []), ...subj.subjects.flatMap((x) => x.macs)])].slice(0, 256);
+      const owners = b.servers.map((sv) => ({ agent: String(sv.agent ?? '').trim() ? sv.agent : '', cvpId: sv.id }));
+      const own = (r) => b.keys.has(devKey(r.agent, r.cvpId, r.key));
+      const [fdb, ep, l2] = await Promise.all([
+        macs.length ? cdb.fdbByMacs(macs) : { rows: [] }, macs.length ? cdb.endpointsByMacs(macs, { owners }) : { rows: [] }, cdb.l2Status(owners),
+      ]);
+      hx.check();
+      if (l2.unavailable) return { status: 503, body: DB_DOWN };
+      const fdbRows = (fdb.rows || []).filter(own); const epRows = (ep.rows || []).filter(own);
+      // 답에 나온 장비(FDB · CVP 위치 행이 있는 장비)만: LLDP(업링크 · 호스트 포트) + 채널 소속
+      const ans = new Map([...fdbRows, ...epRows].map((r) => [devKey(r.agent, r.cvpId, r.key), { agent: r.agent, cvpId: r.cvpId, key: r.key }]));
+      const idx = switchIndex(b.devices);
+      const hostNames = hostNamesOf(snap);
+      const ups = new Map(); const hostPorts = new Map();
+      const yv = createYielder(15);
+      for (const [dk, d] of [...ans].slice(0, LOCATE_DEVS_MAX)) {
+        const l = await cdb.lldpForDevice(d.agent, d.cvpId, d.key);
+        if (l.unavailable) return { status: 503, body: DB_DOWN };
+        if (!l.read) continue;   // LLDP 를 못 읽은 장비 — 업링크를 모른다(placeRows 가 basis 'nolldp' 로 둔다)
+        const rows = l.rows.map((r) => ({ ...r, agent: d.agent, cvpId: d.cvpId, key: d.key }));
+        ups.set(dk, uplinkPortsOf(rows, idx).get(dk) || new Set());
+        const hp = hostPortsOf(rows, hostNames).get(dk);
+        if (hp) hostPorts.set(dk, hp);
+        await yv(); hx.check();
       }
-    }
-    const placed = placeRows({ fdb: fdbRows, ep: epRows, uplinks: ups, macCount, hostPorts });
-    const corp = new Map(b.devices.map((d) => [devKey(d.agent, d.cvpId, d.key), d.corpName]));
-    const withCorp = (x) => ({ ...x, corpName: corp.get(devKey(x.agent, x.cvpId, x.key)) || '' });
-    const vcName = new Map((snap.vcenters || []).map((v) => [v.id, v.name || v.id]));
-    res.json({
-      query: { kind: q.kind, value: q.kind === 'mac' ? q.mac : q.kind === 'ip' ? q.ip : q.name },
-      subjects: subj.subjects.map((x) => ({ ...x, vcenterName: vcName.get(x.vcenterId) || x.vcenterId || '' })), subjectsTruncated: subj.truncated,
-      macs, edge: placed.edge.map(withCorp), transit: placed.transit.map(withCorp), manyMacs: MANY_MACS,
-      l2: { devices: b.devices.length, fdbDevices: l2.fdbDevices ?? 0, fdbFailing: l2.fdbFailing ?? 0, lastAt: l2.lastAt ?? null, ...(l2.unavailable ? { unavailable: true } : {}) },
-      ...(fdb.truncated ? { fdbTruncated: true } : {}),
-    });
+      const devs = [...new Map(fdbRows.map((r) => [devKey(r.agent, r.cvpId, r.key), { agent: r.agent, cvpId: r.cvpId, key: r.key }])).values()];
+      const macCount = devs.length ? await cdb.fdbPortTotals(devs) : new Map();
+      hx.check();
+      // MAC 은 포트 채널 이름으로 배울 수 있다(2회차 A1-F10 · 3회차 A1-F6) — ESXi 물리 포트의 채널은 호스트 포트로, 업링크 물리 포트의 채널은 업링크로.
+      if (ans.size) {
+        const pr = await cdb.portRowsOf(b.devices.filter((d) => ans.has(devKey(d.agent, d.cvpId, d.key))).slice(0, LOCATE_DEVS_MAX), { limit: 200_000 });
+        hx.check();
+        for (const r of pr.rows || []) {
+          if (!r.lag) continue;
+          const dk = devKey(r.agent, r.cvpId, r.key); const np = normPort(r.port); const po = normPort(r.lag);
+          if (hostPorts.get(dk)?.has(np)) hostPorts.get(dk).add(po);
+          if (ups.get(dk)?.has(np)) ups.get(dk).add(po);
+        }
+      }
+      const placed = placeRows({ fdb: fdbRows, ep: epRows, uplinks: ups, macCount, hostPorts });
+      const corp = new Map(b.devices.map((d) => [devKey(d.agent, d.cvpId, d.key), d.corpName]));
+      const withCorp = (x) => ({ ...x, corpName: corp.get(devKey(x.agent, x.cvpId, x.key)) || '' });
+      const vcName = new Map((snap.vcenters || []).map((v) => [v.id, v.name || v.id]));
+      return { body: {
+        query: { kind: q.kind, value: qv },
+        subjects: subj.subjects.map((x) => ({ ...x, vcenterName: vcName.get(x.vcenterId) || x.vcenterId || '' })), subjectsTruncated: subj.truncated,
+        macs, edge: placed.edge.map(withCorp), transit: placed.transit.map(withCorp), manyMacs: MANY_MACS,
+        l2: { devices: b.devices.length, fdbDevices: l2.fdbDevices ?? 0, fdbFailing: l2.fdbFailing ?? 0, lastAt: l2.lastAt ?? null },
+        ...(fdb.truncated ? { fdbTruncated: true } : {}), ...(ans.size > LOCATE_DEVS_MAX ? { devicesTruncated: true } : {}),
+      } };
+    }, { lane: 'light' });
   });
 
   // ── ③ 버전 준수(v3.41) — CVP 가 준 준수 · 버그/CVE · 수명주기를 그대로(포탈이 판정하지 않는다). 새 수집 없음(v2.641 CVP 단위 항목). ──
@@ -305,8 +346,9 @@ export function registerCvpNet(api) {
     const cvpId = cvpIdOf(req);
     if (unknownCvp(cvpId)) return res.status(404).json({ ok: false, reason: '없는 CVP 서버입니다.' });
     const admin = isAdminReq(req);
-    return heavyJson(req, res, heavyKey('redundancy', admin, cvpId), async () => {
+    return heavyJson(req, res, heavyKey('redundancy', admin, cvpId), async (hx) => {
       const b = await baseOf({ cvpId });
+      hx.check();
       if (!b) return { status: 503, body: DB_DOWN };
       const portsByDev = new Map();
       for (const p of b.ports) { const k = devKey(p.agent, p.cvpId, p.key); if (!portsByDev.has(k)) portsByDev.set(k, []); portsByDev.get(k).push(p); }
@@ -393,8 +435,11 @@ export function registerCvpNet(api) {
     const cvpId = cvpIdOf(req);
     if (aId == null) return res.status(400).json({ ok: false, reason: '비교할 스냅샷(a)을 고르세요.' });
     if (unknownCvp(cvpId)) return res.status(404).json({ ok: false, reason: '없는 CVP 서버입니다.' });
-    return heavyJson(req, res, heavyKey('compare', admin, cvpId, aId, bRaw), async () => {
+    // v3.42(3회차 반증 R10): b 형식 검증도 줄 앞에서(자리가 찬 동안 400 이 기다렸다)
+    if (bRaw !== 'now' && numOrNull(bRaw) == null) return res.status(400).json({ ok: false, reason: '비교 대상(b)이 올바르지 않습니다.' });
+    return heavyJson(req, res, heavyKey('compare', admin, cvpId, aId, bRaw), async (hx) => {
       const A = await cdb.readSnap(aId);
+      hx.check();
       if (A && A.unavailable) return { status: 503, body: DB_DOWN };
       if (!A) return { status: 404, body: { ok: false, reason: '없는 스냅샷이거나 저장이 끝나지 않았습니다.' } };
       // v3.42(A3-F2): 범위가 다른 것끼리는 비교하지 않는다 — 'X 전체 ↔ Y 만' 은 X 의 장비 전부를 '사라짐' 으로 지어냈다.
@@ -403,6 +448,7 @@ export function registerCvpNet(api) {
       let B; let bHead; let bBroken = new Set();
       if (bRaw === 'now') {
         const cur = await currentBodies(cvpId || A.head.cvpId);
+        hx.check();
         if (!cur) return { status: 503, body: DB_DOWN };
         B = new Map(cur.bodies.map((x) => [devKey(x.agent, x.cvpId, x.key), x.body]));
         bHead = { id: null, at: Date.now(), label: '지금', now: true };
@@ -410,6 +456,7 @@ export function registerCvpNet(api) {
         const bId = numOrNull(bRaw);
         if (bId == null) return { status: 400, body: { ok: false, reason: '비교 대상(b)이 올바르지 않습니다.' } };
         const Bs = await cdb.readSnap(bId);
+        hx.check();
         if (Bs && Bs.unavailable) return { status: 503, body: DB_DOWN };
         if (!Bs) return { status: 404, body: { ok: false, reason: '없는 스냅샷이거나 저장이 끝나지 않았습니다.' } };
         if ((Bs.head.cvpId ?? null) !== (A.head.cvpId ?? null)) return { status: 400, body: { ok: false, reason: '두 스냅샷의 범위(CVP)가 다릅니다 — 같은 범위끼리 비교하세요.' } };
