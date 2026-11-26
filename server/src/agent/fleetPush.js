@@ -30,7 +30,7 @@ import { getInventory } from '../idrac/invCache.js';
 import { hwSummaryOf, mgmtHostOf } from '../idrac/hwSummary.js'; // v3.3.0 물리서버 폴더 하드웨어 요약 · iDRAC 주소(중앙 central/fleet.js 정제와 짝)
 import { fwPushOf } from '../bmcheck/fw.js';       // v3.45 물리서버 점검 — 펌웨어 구성요소(중앙 central/fleet.js sanitizeFwPush 와 짝)
 import { biosPushOf } from '../bmcheck/bios.js';   // v3.45 물리서버 점검 — BIOS 설정(중앙 sanitizeBiosPush 와 짝)
-import { ledOfInv } from '../idrac/ledState.js';      // v3.49 위치 LED 상태(중앙 ledStateOf 로 다시 정제)
+import { ledOfInv } from '../idrac/ledState.js';      // v3.50 위치 LED 상태(중앙 ledStateOf 로 다시 정제)
 
 /**
  * v2.604(감사 EDGE2604-01 — 재현): 이 엣지가 **직접 수집하는** vCenter 중 호스트를 아직 읽지 못한 것(순수 판정).

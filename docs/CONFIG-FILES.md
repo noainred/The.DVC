@@ -55,10 +55,10 @@
 | `bareos-rehearsal-state.json` | 설정 | Bareos 복원 검증 회차 · 마지막 검증 시각 · 최근 회차 20건(상태, v2.862) | ✅ | ✅ | ✅ | bareos/rehearsal.js |
 | `bareos-rehearsal.json` | 설정 | Bareos 복원 검증(리허설) 정책(v2.862 — 켜기 · 요일 · 시각 · 법인마다 대수 · 성공한 검증용 VM 지우기 · 법인별 데이터스토어. 비밀 없음) | ✅ | ✅ | ✅ | bareos/rehearsal.js |
 | `bareos.json` | 설정 | Bareos 연동 설정(v2.820 · v2.823 법인별 Director). 파일: CONFIG_DIR/bareos.json (0600 · 원자적 쓰기 · 비밀 봉인). | ✅ | ✅ | ✅ | bareos/settings.js |
-| `bm-advisories.json` | 설정 | 물리서버 펌웨어 보안 권고 표(v3.49 — 사람이 확인해 올린 권고 번호 · 종류 · 고친 버전. 비밀 없음) | ✅ |  |  | bmcheck/store.js |
+| `bm-advisories.json` | 설정 | 물리서버 펌웨어 보안 권고 표(v3.50 — 사람이 확인해 올린 권고 번호 · 종류 · 고친 버전. 비밀 없음) | ✅ |  |  | bmcheck/store.js |
 | `bm-assets.json` | 설정 | 물리서버 자산 원장(보증 · 계약 — v3.45. 서비스 태그별 보증 만료일 · 종류 · 구매일 · 계약 번호 · 지원 종료일. 비밀 없음) | ✅ |  |  | bmcheck/store.js |
 | `bm-capacity.json` | 설정 | 리눅스 성능 8a단계 **용량 소진 예측**(설계 PROFILES §20 ⑱ · 아트보드 Capacity). 판정이 아니라 ‘참고’ 다(ML 없음 · 선형만). | ✅ |  | ✅ | bmusage/capacity.js |
-| `bm-cases.json` | 설정 | 물리서버 제조사 케이스 기록(v3.49 — 서비스 태그별 케이스 번호 · 진행 상태 · 이력. 비밀 없음) | ✅ |  |  | bmcheck/store.js |
+| `bm-cases.json` | 설정 | 물리서버 제조사 케이스 기록(v3.50 — 서비스 태그별 케이스 번호 · 진행 상태 · 이력. 비밀 없음) | ✅ |  |  | bmcheck/store.js |
 | `bm-folders-assign.json` | 설정 | 물리서버 폴더 저장소(v2.984, 설계 docs/design/bm-folders/README.md · 사용자 '기본값대로 구현'). | ✅ | ✅ |  | bmfolders/store.js |
 | `bm-folders-central.json` | 설정 | 엣지의 **중앙 폴더 사본**(v2.996 · 설계 docs/design/bm-folders §11 — 묶음 D). 파일 `bm-folders-central.json`(설정 변경 감시 밖 — bac | ✅ | ✅ |  | bmfolders/edgeCopy.js |
 | `bm-folders.json` | 설정 | 물리서버 폴더 저장소(v2.984, 설계 docs/design/bm-folders/README.md · 사용자 '기본값대로 구현'). | ✅ | ✅ |  | bmfolders/store.js |

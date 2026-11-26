@@ -1,4 +1,4 @@
-// v3.49 — 물리서버 운영 화면(⑩ 건강 점수 · ⑥ 위치 LED · ⑤ 하드웨어 이벤트 로그 · ⑫ 제조사 케이스 · ④ 보안 권고): 글자 · 렌더 · 소스 스윕.
+// v3.50 — 물리서버 운영 화면(⑩ 건강 점수 · ⑥ 위치 LED · ⑤ 하드웨어 이벤트 로그 · ⑫ 제조사 케이스 · ④ 보안 권고): 글자 · 렌더 · 소스 스윕.
 //   점수만 보이지 않고 사유를 늘 같이 · 못 읽은 항목은 따로(못 읽어서 100 점처럼 보이지 않게) · LED 못 읽음은 꺼짐이 아니다 ·
 //   이벤트 로그는 단추로 읽는다(넘길 때마다 장비에 묻지 않게) · 권고 표가 비면 ‘대조하지 않음’(‘걸린 것 없음’ 이 아니다) · 문구에 백틱 없음.
 import { describe, it, expect, vi } from 'vitest';
@@ -36,7 +36,7 @@ describe('⑩ 건강 점수 글자', () => {
     expect(v.ruleText).toContain('부품 장애 건당 12(최대 36)');
     expect(healthView({ kind: 'bm', faults: null, chk: {}, hs: { b: 'none', u: 4, uk: ['fault', 'warranty', 'fw', 'bios'] } }).unknownText.length).toBe(4);
     expect(healthView({ kind: 'esxi', faults: 0, chk: { w: 'ok' }, hs: { s: 100, b: 'ok', u: 0, uk: [], z: [['fault'], ['warranty', 'ok']] } }).unknownText).toEqual([], 'ESXi 행은 펌웨어 · BIOS 를 모름으로 세지 않는다');
-    // 견줌 · 모름은 서버 값(z · uk)만 — 웹이 chk 로 다시 판정하지 않는다(견준 줄 0 인 갈림은 서버가 uk 에 넣는다 · v3.49 반증 A1)
+    // 견줌 · 모름은 서버 값(z · uk)만 — 웹이 chk 로 다시 판정하지 않는다(견준 줄 0 인 갈림은 서버가 uk 에 넣는다 · v3.50 반증 A1)
     const sp = healthView({ kind: 'bm', faults: 0, chk: { w: 'ok', fw: 'split', fwj: 0, bios: 'split', biosj: 2 }, hs: { s: 100, b: 'ok', u: 1, uk: ['fw'], z: [['fault'], ['warranty', 'ok'], ['bios', 'split']] } });
     expect(sp.judged).toEqual(['0 부품 장애 없음', '0 보증 안', '0 BIOS 설정(값이 갈려 감점하지 않음)']);
     expect(sp.unknownText).toEqual(['펌웨어(기준 없음 · 못 읽음)']);
@@ -83,7 +83,7 @@ describe('⑥ · ⑤ · ⑫ · ④ 글자', () => {
   });
 });
 
-describe('v3.49 반증 반영 — 순수', () => {
+describe('v3.50 반증 반영 — 순수', () => {
   it('권고 표 창 적용 단추 — 검증 전 · 오류 행 · 0줄(표 비우기) · 바쁨 · CSV 권한', () => {
     expect(ledgerApplyState({ checked: false, rows: 3 })).toMatchObject({ disabled: true, label: '적용' });
     expect(ledgerApplyState({ checked: true, errors: 1, rows: 3 })).toMatchObject({ disabled: true, title: '오류 행을 고친 뒤 다시 검증하십시오' });

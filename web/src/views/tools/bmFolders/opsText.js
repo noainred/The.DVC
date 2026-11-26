@@ -1,5 +1,5 @@
 /**
- * 물리서버 운영 기능 화면 글자(v3.49 · 시안 docs/design/bm-feature-proposals ⑩ ⑥ ⑤ ⑫ ④). 순수 — 판정은 서버가 한다.
+ * 물리서버 운영 기능 화면 글자(v3.50 · 시안 docs/design/bm-feature-proposals ⑩ ⑥ ⑤ ⑫ ④). 순수 — 판정은 서버가 한다.
  *  · ⑩ 건강 점수: 서버가 낸 점수 · 감점 항목 · 못 읽은 수를 글자로. 규칙 · 경계는 목록 응답(check.health)의 값(숫자를 박지 않는다).
  *  · ⑥ 위치 LED: on · blink · off · ''(못 읽음 — 꺼짐이 아니다).
  *  · ⑤ 이벤트 로그: 상태 · 등급 · 찾기. ⑫ 케이스: 상태 글자. ④ 권고: 상태 · 심각도.
@@ -102,7 +102,7 @@ export const CASE_NOTE = '포탈은 제조사에 직접 접수하지 않습니�
 
 /**
  * 권고 표 창의 적용 단추 상태(순수 — 시험이 고정). 검증한 결과가 지금 파일과 같고(checked) 오류 행이 없어야 열린다.
- * 권고 0줄(머리글만)은 ‘표 비우기’(v3.49 반증 B14 — 한 번 올린 표를 비울 길이 없었다).
+ * 권고 0줄(머리글만)은 ‘표 비우기’(v3.50 반증 B14 — 한 번 올린 표를 비울 길이 없었다).
  */
 export function ledgerApplyState({ checked = false, errors = 0, rows = 0, csvOk = true, busy = false } = {}) {
   const disabled = busy || !csvOk || !checked || errors > 0;

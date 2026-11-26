@@ -9,7 +9,7 @@ import express from 'express';
 import os from 'node:os';
 import { config, currentVersion } from '../config.js';
 import { buildExport } from '../collector/agent.js';
-import { registryLoadError as idracRegistryLoadError, loadRegistry as loadIdracRegistry } from '../idrac/registry.js'; // v2.743(감사 EDGE-01) · v3.49 하드웨어 이벤트 로그(등록부에서 서버 찾기)
+import { registryLoadError as idracRegistryLoadError, loadRegistry as loadIdracRegistry } from '../idrac/registry.js'; // v2.743(감사 EDGE-01) · v3.50 하드웨어 이벤트 로그(등록부에서 서버 찾기)
 import { summarizeRegistryError } from '../util/registryCore.js'; // v2.744(리드 후속 RY): 503 사유는 요약(원문 없음)
 import { upgradeManager } from '../upgrade/manager.js';
 import { holdPushIfBusy, clearPushHold } from '../upgrade/pushHold.js';   // 51회차 #3
@@ -321,7 +321,7 @@ collectorRouter.get('/bm-usage/baseline', tokenFirst('bm-usage-baseline'), (req,
 collectorRouter.get('/bm-usage/compare', tokenFirst('bm-usage-compare'), (req, res) => bmPerfOpsCollector(req, res, 'compare'));
 // 6단계 서버 비교 — 엣지 위임 서버 1대의 지표 여러 개 계열 통계(요청 1개 · 보관 없음 · central/bmComparePull.js). 대상 목록 밖 키는 404.
 collectorRouter.get('/bm-usage/compare-series', tokenFirst('bm-usage-compare-series'), (req, res) => bmPerfOpsCollector(req, res, 'compare-series'));
-// v3.49 물리서버 ‘하드웨어 이벤트 로그’(SEL) — 이 엣지에 등록된 iDRAC 서버 한 대의 SEL 을 읽어 돌려준다(central/bmHwLogPull.js).
+// v3.50 물리서버 ‘하드웨어 이벤트 로그’(SEL) — 이 엣지에 등록된 iDRAC 서버 한 대의 SEL 을 읽어 돌려준다(central/bmHwLogPull.js).
 //   읽기만(GET) · 장비 상태를 바꾸지 않는다 · 서버는 등록부 id(id) 또는 중앙이 아는 열쇠(k — 엣지가 함대 push 에 실은 fleetId = 태그 · 등록 id 소문자)로 찾는다.
 //   같은 서버는 60초에 한 번만 장비에 묻는다(진행 중이면 함께 기다린다 — 드로어를 빠르게 여닫아도 iDRAC 를 두드리지 않게). 계정 · 주소는 싣지 않는다.
 const _hwlogMemo = new Map();

@@ -10,7 +10,7 @@ import { fwComponentsOfInv, fwStoredOf, judgeFirmware } from './fw.js';
 import { biosAttrsOf, judgeBios } from './bios.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { warrantyOf } from './warranty.js';
-import { advisoriesFor } from './advisory.js';   // v3.49 펌웨어 보안 권고 대조(④)
+import { advisoriesFor } from './advisory.js';   // v3.50 펌웨어 보안 권고 대조(④)
 
 const lc = (v) => (typeof v === 'string' ? v.trim().toLowerCase() : '');
 const _biosMemo = new WeakMap();   // 인벤토리 · 정제본 객체 → BIOS 설정(요청마다 같은 객체를 다시 훑지 않는다 — 반증 A6)
@@ -26,7 +26,7 @@ function biosOfObj(owner, attrs) {
  *           assets: Record<string, object>|null, adminBase: ((model:string,key:string)=>string)|null, today: string }} input
  *        hxOf 가 null 이면(찾기를 만들지 못함) 펌웨어 · BIOS 는 판정하지 않는다(fw · bios = undefined — 화면이 '판정하지 못함' 으로).
  *        assets 가 null 이면(원장을 읽지 못함) 보증도 판정하지 않는다(warranty = undefined).
- *        advisories(v3.49) 가 null 이면(권고 표를 읽지 못함) 권고 대조를 하지 않는다(adv = undefined) · 빈 목록이면 adv.state = 'no-table'.
+ *        advisories(v3.50) 가 null 이면(권고 표를 읽지 못함) 권고 대조를 하지 않는다(adv = undefined) · 빈 목록이면 adv.state = 'no-table'.
  * @returns {{ of: (key:string) => { warranty?:object, fw?:object, bios?:object } }}
  */
 export function bmCheckFor({ members, placeOf, hxOf, assets, adminBase, today, advisories = null } = {}) {
@@ -69,7 +69,7 @@ export function bmCheckFor({ members, placeOf, hxOf, assets, adminBase, today, a
       if (m.kind === 'bm' && biosOf) out.bios = biosOf.get(m.key);
       // 판정에 쓴 인벤토리를 읽은 시각(없으면 null) — 화면이 ‘언제 값인가’ 를 보인다. 오래된 값을 지금 값처럼 말하지 않게(반증 A7)
       if (m.kind === 'bm' && fwOf) out.invAt = atOf.get(m.key) ?? null;
-      // v3.49 권고 대조 — 펌웨어 판정 줄(설치 버전)과 권고 표. 펌웨어를 못 읽었으면 no-fw(걸린 것 없음이 아니다)
+      // v3.50 권고 대조 — 펌웨어 판정 줄(설치 버전)과 권고 표. 펌웨어를 못 읽었으면 no-fw(걸린 것 없음이 아니다)
       if (m.kind === 'bm' && fwOf && Array.isArray(advisories)) {
         const f = out.fw;
         out.adv = advisoriesFor({ model: m.model, rows: f && Array.isArray(f.rows) && !['unread', 'unsent'].includes(f.state) ? f.rows : null }, advisories);
@@ -84,10 +84,10 @@ export function chkRowOf(c) {
   if (!c) return undefined;
   const o = {};
   if (c.warranty) { o.w = c.warranty.state; if (c.warranty.daysLeft != null) o.wd = c.warranty.daysLeft; }
-  // 갈림(split)은 견준 줄 수(fwj · biosj)를 함께 싣는다 — 견준 줄이 0 인 갈림(구성요소가 모두 섞임 · 1:1 갈림)은 건강 점수에서 ‘모름’ 이다(v3.49 반증 A1)
+  // 갈림(split)은 견준 줄 수(fwj · biosj)를 함께 싣는다 — 견준 줄이 0 인 갈림(구성요소가 모두 섞임 · 1:1 갈림)은 건강 점수에서 ‘모름’ 이다(v3.50 반증 A1)
   if (c.fw) { o.fw = c.fw.state; if (c.fw.behind) o.fwn = c.fw.behind; if (c.fw.differ) o.fwd = c.fw.differ; if (c.fw.state === 'split') o.fwj = Number(c.fw.judged) || 0; }
   if (c.bios) { o.bios = c.bios.state; if (c.bios.diff) o.biosn = c.bios.diff; if (c.bios.state === 'split') o.biosj = Number(c.bios.judged) || 0; }
-  // v3.49 권고: 걸림 수(adv) · 가장 높은 심각도(advs). 표가 비었거나 펌웨어를 못 읽었으면 상태 글자만(adv 수 없음 — 0 으로 읽히지 않게)
+  // v3.50 권고: 걸림 수(adv) · 가장 높은 심각도(advs). 표가 비었거나 펌웨어를 못 읽었으면 상태 글자만(adv 수 없음 — 0 으로 읽히지 않게)
   if (c.adv) { o.adva = c.adv.state; if (c.adv.state === 'hit') { o.adv = Number.isFinite(c.adv.total) ? c.adv.total : c.adv.hits.length; o.advs = c.adv.hits[0]?.sev || ''; } }
   return Object.keys(o).length ? o : undefined;
 }

@@ -91,7 +91,7 @@ test('① 설정 로드 오류를 만드는 모든 모듈이 label + confirm 을
   // 90회차 F3(51개): Horizon 실시간 사용자 수집 설정(horizon/sessionSettings.js)을 공용 로더로 옮기며 새로 등재 — 예전에는 읽기 오류도 손상으로 보고
   //   원본을 옮겼고 손상 · 읽기 오류가 아무 표지 없이 기본값(꺼짐)이었다. 엣지에 배포하는 설정이 아니라 아래 FILES(⑤) 에는 넣지 않는다.
   // v3.45(53개): 물리서버 점검의 자산 원장(bm-assets.json) · 펌웨어 기준(bm-fw-baseline.json — bmcheck/store.js). 엣지에 배포하는 설정이 아니라 FILES(⑤) 에는 넣지 않는다.
-  // v3.49(55개): 물리서버 제조사 케이스 기록(bm-cases.json) · 보안 권고 표(bm-advisories.json — bmcheck/store.js).
+  // v3.50(55개): 물리서버 제조사 케이스 기록(bm-cases.json) · 보안 권고 표(bm-advisories.json — bmcheck/store.js).
   assert.equal(calls.length, 55, `등록 수가 바뀌었다 — 테스트의 FILES 목록도 갱신할 것: ${calls.map((c) => c.f).join(', ')}`);
   for (const c of calls) assert.ok(/label:\s*'[^']+'/.test(c.line) && /confirm:/.test(c.line), `${c.f}: label·confirm 이 없다 — ${c.line}`);
 });

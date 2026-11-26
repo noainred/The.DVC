@@ -1,5 +1,5 @@
 /**
- * idrac/hwLog.js — 물리서버 **하드웨어 이벤트 로그(SEL)** 보기(v3.49 · 설계 docs/design/bm-feature-proposals ⑤).
+ * idrac/hwLog.js — 물리서버 **하드웨어 이벤트 로그(SEL)** 보기(v3.50 · 설계 docs/design/bm-feature-proposals ⑤).
  *
  *  · 드로어를 열 때 1회 — 그 서버를 **수집하는 노드**가 읽는다(이 노드 서버는 이 노드가 · 엣지 서버는 엣지가 `GET /api/collector/bm-hwlog` 로).
  *    백업 데이터처럼 법인 쪽에서 읽고 결과만 중앙으로 — 중앙이 법인 iDRAC 에 WAN 으로 직접 붙지 않는다(루트 CLAUDE.md ‘작업 하나를 법인 쪽에’).
@@ -49,7 +49,7 @@ export function countsOf(rows) {
  */
 export async function readHwLog(entry, { getJson = null, now = Date.now, timeoutMs = HWLOG_TIMEOUT_MS, budgetMs = HWLOG_BUDGET_MS, authStopped = null } = {}) {
   // 주 iDRAC 폴러가 인증 실패로 멈춘 서버는 장비에 묻지 않는다 — 틀린 비밀번호로 ‘기록 읽기’ 마다 로그인을 보내지 않게(계정 잠금 · authGuard 규칙.
-  //   디스크 배드 섹터 분석 수동 점검과 같은 판정 — v3.49 반증 A13). 판정을 못 하면(모듈 없음) 막지 않는다.
+  //   디스크 배드 섹터 분석 수동 점검과 같은 판정 — v3.50 반증 A13). 판정을 못 하면(모듈 없음) 막지 않는다.
   let stopped = false;
   try {
     stopped = typeof authStopped === 'function' ? !!(await authStopped(entry)) : !!(await import('./poller.js')).idracAuthStopFor(entry);
@@ -94,7 +94,7 @@ export function sanitizeHwLog(b, now = Date.now()) {
 
 /**
  * 내용 글자의 장비 주소 · 계정 단서를 가린다(판본에 따라 — 화면은 전체 범위 관리자 판본만 원문, 접수 자료 묶음은 늘 가린다).
- * 가리는 꼴(v3.49 반증 A3 · A9 로 넓힘): IPv4(앞뒤가 낱말 글자여도) · IPv6 · MAC(콜론 · 대시) · 점 둘 이상의 호스트 이름(FQDN — 글자가 든 것만,
+ * 가리는 꼴(v3.50 반증 A3 · A9 로 넓힘): IPv4(앞뒤가 낱말 글자여도) · IPv6 · MAC(콜론 · 대시) · 점 둘 이상의 호스트 이름(FQDN — 글자가 든 것만,
  * ‘2.19.1’ 같은 버전은 그대로) · ‘for/using/user 계정 from’ 꼴의 계정 이름(Dell 로그인 기록 꼴) · 이 서버의 서비스 태그(대소문자 무시).
  * 모든 꼴을 보장하지는 않는다(알려진 꼴만 — 문서에 그렇게 적는다). 길이는 먼저 HWLOG_MSG_MAX 로 자르고, 정규식은 낱말 하나 · 길이가 정해진 반복만 쓴다(선형).
  */

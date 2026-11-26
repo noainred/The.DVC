@@ -20,7 +20,7 @@ import { osText, hwWhyText, OS_WHY } from './hwText.js';
 import { IdracConnect } from './IdracConnect.jsx';
 import { WarrantySection, FwBiosSections } from './CheckSections.jsx';   // v3.45 물리서버 점검(보증 · 펌웨어 기준선 · BIOS 편차)
 import { PeerSection } from './PeerSection.jsx';   // v3.48 같은 묶음 대비
-import { HealthSection, HwLogSection, CaseSection, AdvisorySection } from './OpsSections.jsx';   // v3.49 건강 점수 · 이벤트 로그 · 케이스 · 보안 권고
+import { HealthSection, HwLogSection, CaseSection, AdvisorySection } from './OpsSections.jsx';   // v3.50 건강 점수 · 이벤트 로그 · 케이스 · 보안 권고
 import { ledText, LED_NOTE } from './opsText.js';
 import { useBoxWidth } from './useBoxWidth.js';
 import { unitText } from '../../unitText.js';
@@ -368,7 +368,7 @@ export function DrawerSections({ r, hw, trend, corpName, scoped, onClose, now, a
               <div><span>관리 NIC IPv4</span><b className="mono" style={det?.idrac?.ipv4 ? undefined : { color: 'var(--text-dim)' }}>{det?.idrac?.ipv4 || '—'}</b></div>
               <div><span>iDRAC 모델</span><b style={det?.idrac?.model ? undefined : { color: 'var(--text-dim)' }}>{det?.idrac?.model || '—'}</b></div>
               <div><span>iDRAC 펌웨어</span><b className="mono" style={sum?.fw || det?.idrac?.fw ? undefined : { color: 'var(--text-dim)' }}>{sum?.fw || det?.idrac?.fw || '—'}</b></div>
-              {/* v3.49 위치 LED 상태(이 포탈 · 수집 서버 인벤토리 또는 엣지 push) — 못 읽음은 꺼짐이 아니다 */}
+              {/* v3.50 위치 LED 상태(이 포탈 · 수집 서버 인벤토리 또는 엣지 push) — 못 읽음은 꺼짐이 아니다 */}
               <div><span>위치 LED</span><b style={(det?.idrac?.led || d?.led) ? undefined : { color: 'var(--text-dim)' }}>{d ? ledText(det?.idrac?.led ?? d.led ?? '') : '—'}</b></div>
             </div>
             <div className="muted bmd-note">{LED_NOTE}</div>

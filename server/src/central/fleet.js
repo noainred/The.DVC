@@ -21,7 +21,7 @@ import { numOrNull } from '../util/numOrNull.js';
 import { sanitizeHwSummary, mgmtHostOf } from '../idrac/hwSummary.js'; // v3.3.0 엣지 하드웨어 요약 · iDRAC 주소 정제(엣지 agent/fleetPush.js 와 짝)
 import { sanitizeFwPush } from '../bmcheck/fw.js';       // v3.45 물리서버 점검 — 엣지가 보낸 펌웨어 구성요소 정제
 import { sanitizeBiosPush } from '../bmcheck/bios.js';   // v3.45 물리서버 점검 — 엣지가 보낸 BIOS 설정 정제
-import { ledStateOf } from '../idrac/ledState.js';           // v3.49 위치 LED 상태 — 아는 값(on · blink · off)만
+import { ledStateOf } from '../idrac/ledState.js';           // v3.50 위치 LED 상태 — 아는 값(on · blink · off)만
 import { summarizeRegistryError, REGISTRY_ERROR_LABEL } from '../util/registryCore.js'; // v2.744(회귀 검토 GD-R1)
 import { envPositive } from '../util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
 import { logAudit } from '../audit.js';   // 결정(76~105 남긴 것 · 2026-11-20) A6: 읽기 오류 창을 합칠 때의 기록

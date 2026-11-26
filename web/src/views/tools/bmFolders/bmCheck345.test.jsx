@@ -127,7 +127,7 @@ describe('소스 스윕 — 연결 · 규약', () => {
       const i = s.indexOf(hook); expect(i, hook).toBeGreaterThan(0); expect(i, hook).toBeLessThan(early);
     }
     expect(s).toMatch(/afterIdent=\{<WarrantySection chk=\{chk\} admin=\{admin && !scoped\} \/>\}/);
-    // v3.49: 같은 자리에 보안 권고 구역이 붙었다(afterSpec={<><FwBiosSections … /><AdvisorySection … /></>})
+    // v3.50: 같은 자리에 보안 권고 구역이 붙었다(afterSpec={<><FwBiosSections … /><AdvisorySection … /></>})
     expect(s).toMatch(/afterSpec=\{<><FwBiosSections r=\{r\} chk=\{chk\} onBaseline=\{onBaseline\} busy=\{baseBusy\} baseNote=\{baseNote && baseNote\.key === r\.key \? baseNote : null\} \/>/);
     // 구역 순서: 식별 · 배치 → (보증) → iDRAC · 관리 → 하드웨어 요약 → (펌웨어 · BIOS) → 부품 목록
     const at = (x) => { const i = s.indexOf(x); expect(i, x).toBeGreaterThan(0); return i; };

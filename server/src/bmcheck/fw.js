@@ -211,7 +211,7 @@ export function judgeFirmware(servers, { admin = null } = {}) {
       const basis = adminVer ? 'admin' : majorVer ? 'majority' : null;
       const state = fwRowState(c.version, baseline, c.mixed);
       if (state === 'behind' || state === 'differ') behind += 1;
-      if (state === 'differ') differ += 1;   // v3.49: behind 안의 ‘순서를 모름’ 수 — 건강 점수는 이것을 감점하지 않는다(반증 B8)
+      if (state === 'differ') differ += 1;   // v3.50: behind 안의 ‘순서를 모름’ 수 — 건강 점수는 이것을 감점하지 않는다(반증 B8)
       if (state === 'ahead') ahead += 1;
       if (state !== 'none' && state !== 'mixed') judged += 1;
       // 판정하지 못했는데 ‘같다’ 고도 할 수 없는 줄 — 버전이 갈려 다수가 없다(tie) · 한 서버 안에서 섞였다(mixed)

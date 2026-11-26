@@ -84,7 +84,7 @@ export function chkQuickMatch(r, quick) {
   if (quick === 'wty:soon') return c.w === 'soon';
   if (quick === 'wty:unknown') return c.w === 'unknown';
   if (quick === 'fw:behind') return c.fw === 'behind';
-  if (quick === 'adv:hit') return c.adva === 'hit';   // v3.49 펌웨어 보안 권고에 걸린 서버(시안 ④ ‘해당 서버 N대’ — 반증 B3)
+  if (quick === 'adv:hit') return c.adva === 'hit';   // v3.50 펌웨어 보안 권고에 걸린 서버(시안 ④ ‘해당 서버 N대’ — 반증 B3)
   return c.bios === 'diff';
 }
 

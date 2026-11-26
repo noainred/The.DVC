@@ -12,7 +12,7 @@ import { fileStamp } from '../../util/dayKey.js';
 import { adminOnly, fullReadWriteScopeOnlyWith } from './shared.js';
 import { parseAssetCsv, analyzeAssetImport, assetsToCsv, sampleAssetCsv, ASSET_COLUMNS, ASSET_ROWS_MAX } from '../../bmcheck/assetCsv.js';
 import { assetStore, fwBaselineStore, setAdminBaseline, advisoryStore } from '../../bmcheck/store.js';
-import { parseAdvisoryCsv, advisoriesToCsv, sampleAdvisoryCsv, ADVISORY_COLUMNS } from '../../bmcheck/advisory.js';   // v3.49 펌웨어 보안 권고 표(④)
+import { parseAdvisoryCsv, advisoriesToCsv, sampleAdvisoryCsv, ADVISORY_COLUMNS } from '../../bmcheck/advisory.js';   // v3.50 펌웨어 보안 권고 표(④)
 import { FW_TYPES, FW_LABEL_MAX, FW_VER_MAX } from '../../bmcheck/fw.js';
 
 const csvPerm = requirePerm('data.csv');
@@ -25,7 +25,7 @@ const REPORT_MAX = 500;
 export function registerBmAssets(adminRouter, { D = {} } = {}) {
   const A = D.assetStore || assetStore; const B = D.fwBaselineStore || fwBaselineStore; const V = D.advisoryStore || advisoryStore;
 
-  // ── v3.49 펌웨어 보안 권고 표(④) — 사람이 확인한 권고를 CSV 로 통째로 올린다(포탈은 인터넷에서 가져오지 않는다 · 권고 번호를 지어내지 않는다).
+  // ── v3.50 펌웨어 보안 권고 표(④) — 사람이 확인한 권고를 CSV 로 통째로 올린다(포탈은 인터넷에서 가져오지 않는다 · 권고 번호를 지어내지 않는다).
   //   게이트는 자산 원장과 같다(관리자 + 조회 ∧ 쓰기 전체 범위 + CSV 권한). 올리기는 **표를 파일로 바꾼다** — 오류 줄이 하나라도 있으면 아무것도 쓰지 않는다 ·
   //   검증(dryRun)과 적용이 같은 판정(parseAdvisoryCsv) · 미리본 표와 지금 표가 다르면 409.
   adminRouter.get('/bm-advisories', adminOnly, fleetOnly, (_req, res) => {

@@ -1,5 +1,5 @@
 /**
- * bmcheck/advisory.js — 물리서버 **펌웨어 보안 권고 대조**(v3.49 · 설계 docs/design/bm-feature-proposals ④). 순수.
+ * bmcheck/advisory.js — 물리서버 **펌웨어 보안 권고 대조**(v3.50 · 설계 docs/design/bm-feature-proposals ④). 순수.
  *
  *  · 권고 표는 **사람이 확인해 올린 것**이다(bm-advisories.json — 전체 범위 관리자가 CSV 로). 포탈은 인터넷에서 가져오지 않고, 권고 번호 · 고친 버전을
  *    코드에 박아 두지 않는다(지어내지 않는다 — 시안도 비워 두었다). 표가 비어 있으면 **대조하지 않았다**고 말한다(‘해당 없음’ 이 아니다).
@@ -22,7 +22,7 @@ const ALIAS = Object.freeze({
 const SEV_ALIAS = Object.freeze({ critical: 'critical', 위험: 'critical', 긴급: 'critical', high: 'high', 높음: 'high', medium: 'medium', moderate: 'medium', 보통: 'medium', low: 'low', 낮음: 'low' });
 const TYPE_OF = Object.freeze(Object.fromEntries(FW_TYPES.map((t) => [t.toLowerCase(), t])));
 const cell = (v, n) => unguardCell(String(v ?? '')).trim().slice(0, n);
-// 표 조회는 자기 열쇠만 — ‘constructor’ · ‘__proto__’ 같은 칸이 객체 원형 값으로 참이 되지 않게(v3.49 반증 A8)
+// 표 조회는 자기 열쇠만 — ‘constructor’ · ‘__proto__’ 같은 칸이 객체 원형 값으로 참이 되지 않게(v3.50 반증 A8)
 const own = (map, k) => (Object.hasOwn(map, k) ? map[k] : '');
 
 /**

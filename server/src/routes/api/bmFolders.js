@@ -30,7 +30,7 @@ import { store } from '../../store.js';
 import { config } from '../../config.js'; // v2.996: 엣지 포탈 판정(CENTRAL_URL)
 import { memoJson, scopeKey } from './shared.js';
 import { logAudit } from '../../audit.js';
-import { textFields } from '../../util/coercionTrap.js';   // v3.49 케이스 적기 — 글자 칸만
+import { textFields } from '../../util/coercionTrap.js';   // v3.50 케이스 적기 — 글자 칸만
 import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { pushAll } from '../../util/pushAll.js';   // 큰 배열 스프레드 push 금지(스윕 audit2603a)
 import { numOrNull } from '../../util/numOrNull.js';
@@ -44,8 +44,8 @@ import {
 } from '../../bmfolders/store.js';
 import { scopeSig } from '../../util/scopeSig.js';
 import { bmCheckFor, chkRowOf } from '../../bmcheck/state.js';
-import { healthRowOf, HEALTH_RULES, HEALTH_BANDS, HEALTH_MIN } from '../../bmcheck/health.js';   // v3.49 건강 점수(⑩)
-import { maskHwLogText, readHwLog, demoHwLog } from '../../idrac/hwLog.js';   // v3.49 하드웨어 이벤트 로그(⑤) — 판본에 따른 가림   // v3.45 물리서버 점검(보증 · 펌웨어 기준선 · BIOS 편차)
+import { healthRowOf, HEALTH_RULES, HEALTH_BANDS, HEALTH_MIN } from '../../bmcheck/health.js';   // v3.50 건강 점수(⑩)
+import { maskHwLogText, readHwLog, demoHwLog } from '../../idrac/hwLog.js';   // v3.50 하드웨어 이벤트 로그(⑤) — 판본에 따른 가림   // v3.45 물리서버 점검(보증 · 펌웨어 기준선 · BIOS 편차)
 import { assetStore, fwBaselineStore, adminBaselineLookup, advisoryStore, caseStore, upsertCase, removeCase, casesOfTag, CASE_STATUSES } from '../../bmcheck/store.js';
 import { WARRANTY_SOON_DAYS } from '../../bmcheck/warranty.js';
 import { judgePeerGroup, avgValueOf, PEER_MIN, PEER_GROUP_MAX, PEER_AVG_MIN_SAMPLES, PEER_AVG_MIN_COVERAGE } from '../../bmcheck/peer.js';   // v3.48 같은 묶음 대비
@@ -217,7 +217,7 @@ export async function hwLookupFactory(D = {}) {
   };
 }
 /**
- * v3.49 하드웨어 이벤트 로그를 **누가 읽는가**(순수 — 시험이 고정). 구성원의 serverId 꼴로 정한다:
+ * v3.50 하드웨어 이벤트 로그를 **누가 읽는가**(순수 — 시험이 고정). 구성원의 serverId 꼴로 정한다:
  *   edge:<엣지>:<열쇠>        → 그 엣지(remoteAgent 와 같은 이름일 때만)가 열쇠(k)로 — 엣지가 함대 push 에 실은 fleetId(태그 · 등록 id 소문자)
  *   remote:<수집 서버>:<id>    → 그 수집 서버가 등록부 id 로
  *   그 밖(빈 값 제외)          → 이 노드가 등록부 id 로(등록부에 없으면 라우트가 ‘읽을 길 없음’)
@@ -284,7 +284,7 @@ function serverRow(m, p, admin, hide, ix, hx, chk) {
     // v3.45 물리서버 점검 요약 — { w 보증 상태 · wd 남은 일수 · fw 펌웨어 상태 · fwn 뒤처진 구성요소 수 · bios 편차 상태 · biosn 다른 설정 수 }.
     //   상태 글자와 수뿐이다(태그 · 주소 · 계약 번호 없음). 판정하지 못한 항목은 키가 없다(화면이 정상으로 읽지 않는다).
     chk: chk || undefined,
-    // v3.49 건강 점수(⑩) — 이 행이 가진 판정(부품 장애 수 · chk)만으로. 못 읽은 항목 수(u)를 늘 함께 싣는다(못 읽어서 100 점처럼 보이지 않게).
+    // v3.50 건강 점수(⑩) — 이 행이 가진 판정(부품 장애 수 · chk)만으로. 못 읽은 항목 수(u)를 늘 함께 싣는다(못 읽어서 100 점처럼 보이지 않게).
     hs: healthRowOf({ faults: m.faults ?? null, chk, kind: m.kind }),
   };
 }
@@ -322,7 +322,7 @@ async function trendDeps() {
     // v3.48 같은 묶음 대비 — 이 노드 서버 여러 대 · 엣지마다 요청 1개(서버마다 WAN 을 왕복하지 않는다)
     localPeer: async (o) => (await import('../../bmusage/peerAvg.js')).peerAvgFor(o),
     edgePeer: async (agent, o) => (await import('../../central/bmPeerPull.js')).pullEdgePeerAvg(agent, o),
-    // v3.49 하드웨어 이벤트 로그(⑤) — 이 노드 서버는 등록부 항목으로 직접 · 엣지 · 수집 서버 서버는 그쪽이 읽는다
+    // v3.50 하드웨어 이벤트 로그(⑤) — 이 노드 서버는 등록부 항목으로 직접 · 엣지 · 수집 서버 서버는 그쪽이 읽는다
     hwLogEntry: async (id) => { const { loadRegistry } = await import('../../idrac/registry.js'); const e = loadRegistry().find((x) => String(x.id) === String(id)); return e && e.enabled !== false && e.host ? e : null; },
     hwLogLocal: async (entry) => readHwLog(entry),
     hwLogEdge: async (agent, q) => (await import('../../central/bmHwLogPull.js')).pullEdgeHwLog(agent, q),
@@ -538,9 +538,9 @@ export function registerBmFolders(api) {
           // 원장 줄 수 · 올린 시각은 전 법인 값이다 — 범위 계정에는 싣지 않는다(함대 전체 개수를 싣지 않는 규칙 — 반증 A8). 올린 사람은 전체 범위 관리자 판본만
           assets: ci.assetsErr ? { unreadable: true } : hide ? {} : { n: ci.assetsMeta?.n ?? 0, at: ci.assetsMeta?.at ?? null, ...(admin ? { by: ci.assetsMeta?.by || '' } : {}) },
           ...(ci.baseErr ? { baselineUnreadable: true } : {}), ...(!hxOf || !chk ? { noHw: true } : {}),
-          // v3.49 건강 점수의 감점 규칙 · 경계(화면이 숫자를 박지 않게 — 같은 상수 하나)
+          // v3.50 건강 점수의 감점 규칙 · 경계(화면이 숫자를 박지 않게 — 같은 상수 하나)
           health: { rules: HEALTH_RULES, bands: HEALTH_BANDS, min: HEALTH_MIN },
-          // v3.49 보안 권고 표 — 줄 수 · 올린 시각(전 법인 값이라 범위 계정에는 싣지 않는다) · 못 읽음
+          // v3.50 보안 권고 표 — 줄 수 · 올린 시각(전 법인 값이라 범위 계정에는 싣지 않는다) · 못 읽음
           advisories: ci.advErr ? { unreadable: true } : hide ? {} : { n: ci.advMeta?.n ?? 0, at: ci.advMeta?.at ?? null },
         },
         settings: { autoRules: b.autoRules },
@@ -631,8 +631,8 @@ export function registerBmFolders(api) {
     } catch (e) { if (!res.headersSent) res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); }
   });
 
-  // v3.49 제조사 케이스(시안 ⑫) — 포탈은 제조사에 직접 접수하지 않는다. 접수 자료 묶음을 만들고 케이스 번호 · 진행 상태를 적어 따라간다.
-  //   케이스는 서비스 태그 + 법인으로 묶는다(태그를 모르는 서버는 적지 않는다 · 같은 태그가 다른 법인 서버로 나타나도 남의 법인 케이스를 읽거나 고치지 못한다 — v3.49 반증 A2). 읽기는 /hw 와 같은 노출 규칙 · 쓰기는 그 서버 법인의 쓰기 범위(조회 밖 404 → 쓰기 밖 403) ·
+  // v3.50 제조사 케이스(시안 ⑫) — 포탈은 제조사에 직접 접수하지 않는다. 접수 자료 묶음을 만들고 케이스 번호 · 진행 상태를 적어 따라간다.
+  //   케이스는 서비스 태그 + 법인으로 묶는다(태그를 모르는 서버는 적지 않는다 · 같은 태그가 다른 법인 서버로 나타나도 남의 법인 케이스를 읽거나 고치지 못한다 — v3.50 반증 A2). 읽기는 /hw 와 같은 노출 규칙 · 쓰기는 그 서버 법인의 쓰기 범위(조회 밖 404 → 쓰기 밖 403) ·
   //   admin/operator · 데모 계정 아님 · 감사 로그. 엣지 포탈에서는 답하지 않는다(기록은 중앙에 있다).
   const caseMember = async (req, res) => {
     if (isEdgeNode()) { res.status(404).json({ ok: false, error: 'central-only', reason: '케이스 기록은 중앙 포탈에 있습니다.' }); return null; }
@@ -675,7 +675,7 @@ export function registerBmFolders(api) {
       return res.json({ ok: true, id: r.id, changed: !!r.changed });
     } catch (e) { if (!res.headersSent) res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); }
   });
-  // 끝난 케이스 지우기(v3.49 — 상한이 차면 새 케이스를 막는데 지울 길이 없었다: 반증 A11). 쓰기 게이트 · 감사는 적기와 같다. 진행 중인 케이스는 지우지 않는다.
+  // 끝난 케이스 지우기(v3.50 — 상한이 차면 새 케이스를 막는데 지울 길이 없었다: 반증 A11). 쓰기 게이트 · 감사는 적기와 같다. 진행 중인 케이스는 지우지 않는다.
   api.post('/tools/bm-folders/cases/delete', toolsPerm, textFields('key', 'id'), async (req, res) => {
     try {
       if (!writerOk(req.user)) return res.status(403).json({ ok: false, reason: '케이스를 지우려면 운영자 이상 권한이 필요합니다.' });
@@ -695,7 +695,7 @@ export function registerBmFolders(api) {
   // 접수 자료 묶음(JSON 내려받기) — 서버 · 보증 · 열린 부품 장애 · 뒤처진 펌웨어 · 최근 위험 · 주의 기록(인벤토리 주기에 읽은 것) · 하드웨어 요약.
   //   서비스 태그 · 계약 번호는 그것을 볼 수 있는 판본에만(태그: 범위 판본이 아님 · 계약: 전체 범위 관리자).
   //   묶음은 제조사에 붙여 보내는 파일이다 — 기록 글자는 **판본과 관계없이 늘 가린다**(IPv4 · IPv6 · MAC · 호스트 이름 · ‘for 계정 from’ 꼴 계정 · 태그 —
-  //   maskHwLogText 의 알려진 꼴. 인벤토리 기록은 SEL 이 비면 Lifecycle 로그에서 오고 로그인 실패 문구에 계정 · 주소가 든다: v3.49 반증 A3).
+  //   maskHwLogText 의 알려진 꼴. 인벤토리 기록은 SEL 이 비면 Lifecycle 로그에서 오고 로그인 실패 문구에 계정 · 주소가 든다: v3.50 반증 A3).
   //   부품 장애는 그 서버의 수집 주체 · 태그로 SQL 에서 고른다(다른 법인 엣지의 같은 태그 기록을 싣지 않는다 · 전량을 JS 로 읽지 않는다 — 반증 A14).
   api.get('/tools/bm-folders/case-bundle', toolsPerm, async (req, res) => {
     try {
@@ -750,7 +750,7 @@ export function registerBmFolders(api) {
     } catch (e) { if (!res.headersSent) res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); }
   });
 
-  // v3.49 하드웨어 이벤트 로그(시안 ⑤) — 드로어에서 ‘읽기’ 를 누를 때 1건. 그 서버를 수집하는 노드가 SEL 을 읽는다:
+  // v3.50 하드웨어 이벤트 로그(시안 ⑤) — 드로어에서 ‘읽기’ 를 누를 때 1건. 그 서버를 수집하는 노드가 SEL 을 읽는다:
   //   이 노드 등록부 서버 → 이 노드가 · 엣지가 올린 서버(edge:<엣지>:<열쇠>) → 그 엣지가 · 수집 서버(pull) 서버(remote:<수집 서버>:<id>) → 그 수집 서버가.
   //   같은 서버는 60초에 한 번만(진행 중이면 함께 기다린다 — trendOnce). /hw 와 같은 노출 규칙(범위 밖 · 없는 키 404).
   //   내용 글자의 IPv4 주소 · 서비스 태그는 전체 범위 관리자 판본에만 그대로(장비 주소를 싣지 않는 규칙 — maskHwLogText). 엣지 실패 사유도 그 판본만.

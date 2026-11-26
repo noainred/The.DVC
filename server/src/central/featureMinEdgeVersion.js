@@ -27,7 +27,7 @@ export const POWER_ALERT_TITLE_RE = /베어메탈 사용률 — 전력 알림 �
 
 /** 물리서버 ‘같은 묶음 대비’(엣지 대행 POST /bm-usage/peer-avg — v3.48) 표지 — 릴리스 노트 제목에 이 문구를 그대로 넣는다. */
 export const PEER_TITLE_RE = /물리서버 — 같은 묶음 대비/;
-/** 물리서버 ‘하드웨어 이벤트 로그’(엣지 대행 GET /bm-hwlog — v3.49) 표지 — 릴리스 노트 제목에 이 문구를 그대로 넣는다. */
+/** 물리서버 ‘하드웨어 이벤트 로그’(엣지 대행 GET /bm-hwlog — v3.50) 표지 — 릴리스 노트 제목에 이 문구를 그대로 넣는다. */
 export const HWLOG_TITLE_RE = /물리서버 — 하드웨어 이벤트 로그/;
 
 const verCmp = (a, b) => { const x = String(a).split('.').map(Number); const y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0); return 0; };

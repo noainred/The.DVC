@@ -49,7 +49,7 @@ export function compactInv(inv) {
       ...optS('manufacturer', inv.system.manufacturer), ...optS('powerState', inv.system.powerState, 32), ...optS('assetTag', inv.system.assetTag), ...optS('uuid', inv.system.uuid),
       // v3.3.0: OS 이름 · 버전(iDRAC ServerOS 속성 · HPE HostOS — 물리서버 폴더 'OS' 칸). 중앙 remoteInventory INV_SHAPE.system 과 짝.
       ...optS('osName', inv.system.osName, 128), ...optS('osVersion', inv.system.osVersion, 64),
-      // v3.49: 위치 LED 상태(Lit · Blinking · Off — 물리서버 상세 ‘위치 LED’). 중앙 remoteInventory INV_SHAPE.system 과 짝(반증 A5 — 빠져 수집 서버 서버는 늘 ‘못 읽음’ 이었다)
+      // v3.50: 위치 LED 상태(Lit · Blinking · Off — 물리서버 상세 ‘위치 LED’). 중앙 remoteInventory INV_SHAPE.system 과 짝(반증 A5 — 빠져 수집 서버 서버는 늘 ‘못 읽음’ 이었다)
       ...optS('indicatorLED', inv.system.indicatorLED, 16),
     } : undefined,
     cpu: inv.cpu ? { model: inv.cpu.model, count: inv.cpu.count, cores: inv.cpu.cores, health: cs(inv.cpu.health, 32), ...optN('threads', inv.cpu.threads) } : undefined,

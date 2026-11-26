@@ -1,5 +1,5 @@
 /**
- * central/bmHwLogPull.js — 물리서버 ‘하드웨어 이벤트 로그’(v3.49)의 **엣지 대행**: 엣지 · 수집 서버가 맡은 서버 한 대의 SEL 을 그 엣지가 읽어 돌려준다
+ * central/bmHwLogPull.js — 물리서버 ‘하드웨어 이벤트 로그’(v3.50)의 **엣지 대행**: 엣지 · 수집 서버가 맡은 서버 한 대의 SEL 을 그 엣지가 읽어 돌려준다
  *   (`GET /api/collector/bm-hwlog` — 중앙이 법인 iDRAC 에 WAN 으로 직접 붙지 않는다 · 루트 CLAUDE.md ‘작업 하나를 법인 쪽에’).
  *
  * 규약(bmPeerPull · bmComparePull 과 같다 — edge.md):

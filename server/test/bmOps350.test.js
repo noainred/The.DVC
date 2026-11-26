@@ -1,4 +1,4 @@
-// 물리서버 운영 기능(v3.49 — 설계 docs/design/bm-feature-proposals ⑩ 건강 점수 · ⑥ 위치 LED 상태 · ⑤ 하드웨어 이벤트 로그 · ⑫ 제조사 케이스 · ④ 보안 권고 대조).
+// 물리서버 운영 기능(v3.50 — 설계 docs/design/bm-feature-proposals ⑩ 건강 점수 · ⑥ 위치 LED 상태 · ⑤ 하드웨어 이벤트 로그 · ⑫ 제조사 케이스 · ④ 보안 권고 대조).
 //   ⑩ 감점 합산 · 못 읽음은 따로 · 견준 것이 없으면 점수 없음 ⑥ LED 값 대응 · 엣지 push · 중앙 정제 ⑤ SEL 줄 · 정제 · 가림 · 읽기(가짜 장비) · 라우트(이 노드 · 엣지 · 수집 서버 · 데모)
 //   ⑫ 저장 · 이력 · 라우트 게이트(조회 밖 404 · 쓰기 밖 403 · 조회 계정 403) · 접수 자료 묶음 가림 ④ CSV · 대조 · 관리 라우트 · 목록 요약.
 //   픽스처 식별자는 전부 합성(SYNTH · 192.0.2.x — 공개 저장소 규약).
@@ -13,7 +13,7 @@ const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), pre
 const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다 */ } } };
 after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
 
-const tmp = tmpDir('bmops349-');
+const tmp = tmpDir('bmops350-');
 process.env.CONFIG_DIR = tmp;
 process.env.DATA_SOURCE = 'live';
 
@@ -68,7 +68,7 @@ test('⑩ 건강 점수 — 100 에서 감점 합산 · 항목별 상한 · 못 
   assert.equal(H.healthOf({ faults: 0, chk: {} }).items[0].pts, 0, '0건은 견준 것(감점 0)');
   // 견준 것이 하나도 없으면 점수 없음(못 읽어서 100 점이 되지 않는다)
   assert.deepEqual(H.healthOf({ faults: null, chk: { w: 'unknown', fw: 'none', bios: 'unsent' } }), { score: null, band: 'none', items: [], unknown: ['fault', 'warranty', 'fw', 'bios'], judged: 0 });
-  // 갈림(split)은 견준 줄이 있을 때만 감점 없이 견준 것 · 견준 줄 0(fwj · biosj 가 0 · 없음)은 모름(v3.49 반증 A1) · ESXi 행은 펌웨어 · BIOS 를 보지 않는다
+  // 갈림(split)은 견준 줄이 있을 때만 감점 없이 견준 것 · 견준 줄 0(fwj · biosj 가 0 · 없음)은 모름(v3.50 반증 A1) · ESXi 행은 펌웨어 · BIOS 를 보지 않는다
   const sp = H.healthOf({ faults: 0, chk: { w: 'ok', fw: 'split', fwj: 3, bios: 'split', biosj: 1 } });
   assert.deepEqual([sp.score, sp.unknown, sp.judged], [100, [], 4], '견준 줄이 있는 갈림은 견준 것');
   const sp0 = H.healthOf({ faults: 0, chk: { w: 'ok', fw: 'split', fwj: 0, bios: 'split' } });
@@ -449,7 +449,7 @@ test('④ 관리 라우트 · 목록 · /check — 검증 뒤 적용 · 오류 �
   } finally { console.error = w; console.warn = ww; reset(); }
 });
 
-// ───────── v3.49 반증 반영 — 라우트 단(반증 A4 의 생존 변이 M3 · M4 · M11 · M15 · M17 · M24 · M30 · M31 · M32 · M33 · M34) ─────────
+// ───────── v3.50 반증 반영 — 라우트 단(반증 A4 의 생존 변이 M3 · M4 · M11 · M15 · M17 · M24 · M30 · M31 · M32 · M33 · M34) ─────────
 const auditLines = () => { try { return fs.readFileSync(path.join(tmp, 'audit.ndjson'), 'utf8').split('\n').filter(Boolean).map((x) => JSON.parse(x)); } catch { return []; } };
 
 test('⑫ 케이스 — 범위 계정은 남의 토큰으로도 404(읽기 · 쓰기 · 묶음 · 지우기) · 같은 태그라도 다른 법인 케이스는 읽지도 고치지도 못한다 · 끝난 케이스 지우기 · 감사', async () => {

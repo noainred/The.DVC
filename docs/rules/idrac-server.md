@@ -2081,7 +2081,7 @@
     엣지 대행 대상은 공개 대상 판정 `snapshotPublicPathIssue`(demoOs · paths · `osAuthUnresolved` — publicTarget 이 osHost.authError 로 만드는 참 · 거짓 · 사유 글은 싣지 않는다) — 시험이 `snapshotPublicPathIssue(publicTarget(x)) === snapshotOsPathIssue(x)` 를 대조.
     게이트(`snapRunGateOf`)에는 판정 사본을 두지 않는다(라우트가 두 함수를 넘긴다). (b) 엣지 대행 GET 보관분에 `pathBasis { via:'edge', at: 보관분 snapAt }` — 화면이 ‘실행 칸은 엣지 보관분(시각) 기준 · 엣지에서 OS 계정을 바꿨다면 ‘지금 가져오기’ 뒤에 맞습니다’ 를 한 줄로.
 
-### v3.49 물리서버 운영(설계 docs/design/bm-feature-proposals ⑩ ⑥ ⑤ ⑫ ④ · 구현 기록 §12)
+### v3.50 물리서버 운영(설계 docs/design/bm-feature-proposals ⑩ ⑥ ⑤ ⑫ ④ · 구현 기록 §12)
 
 - **⑩ 건강 점수**(`server/src/bmcheck/health.js` — 판정 코어 하나): 100 에서 **감점 합산**(시안대로 · Dell 의 ‘가장 큰 감점 하나’ 방식이 아니다 — 사용자가 바꿀 수 있는 결정). 입력은 목록이 이미 가진 판정뿐(부품 장애 수 · v3.45 `chk`) — 새 수집 없음.
   **못 읽은 항목은 감점하지 않고 따로 센다**(`u` · `uk`). **점수는 견준 항목이 `HEALTH_MIN.judged`(2)개 이상이고 볼 항목의 절반 이상일 때만** — 아니면 ‘판정 못 함’ + 견준 사실(`d` · `z`)만
@@ -2107,6 +2107,6 @@
   **unmatched**(맞는 권고 줄 없음 — 안전하다는 뜻이 아니다) · **unknown**(맞는 줄이 모두 순서 모름) · clear · hit(반증 B2). 섞인 줄은 ‘모름’ 으로 센다(반증 A6) · 걸린 수는 자르기 전 `total`(반증 A7) ·
   CSV 의 심각도 · 종류 · 머리글은 `Object.hasOwn` 조회(원형 열쇠가 오류 줄이 되지 않던 것 — 반증 A8) · 오류 번호는 **표의 행 번호**(반증 A12). 올리기 = 검증 → 적용(같은 판정 · 미리본 표와 다르면 409 ·
   실패 뒤 다시 검증) · 머리글만 있는 파일은 ‘표 비우기’(묻고 적용). 목록에 ‘보안 권고 N’ 빠른 거르기(표가 있을 때만 — 반증 B3).
-- 회귀: `server/test/bmOps349.test.js` · `server/test/bmHwLogRoundTrip349.test.js`(실제 collector ↔ pull 왕복 · 끝쪽 읽기) · 웹 `bmFolders/bmOps349.test.jsx`(구역은 `initial` 로 응답별 렌더).
-  반증 2인(A 서버 15건 · B 화면 17건) 결과와 반영은 `docs/rules/audits.md` ‘v3.49 물리서버 운영 반증’.
+- 회귀: `server/test/bmOps350.test.js` · `server/test/bmHwLogRoundTrip350.test.js`(실제 collector ↔ pull 왕복 · 끝쪽 읽기) · 웹 `bmFolders/bmOps350.test.jsx`(구역은 `initial` 로 응답별 렌더).
+  반증 2인(A 서버 15건 · B 화면 17건) 결과와 반영은 `docs/rules/audits.md` ‘v3.50 물리서버 운영 반증’.
 

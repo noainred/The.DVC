@@ -140,7 +140,7 @@ export function setAdminBaseline({ model, key, label = '', type = '', version = 
   return r.ok ? { ok: true, changed: true } : r;
 }
 
-// ───────── v3.49 — 제조사 케이스(⑫) · 보안 권고 표(④) ─────────
+// ───────── v3.50 — 제조사 케이스(⑫) · 보안 권고 표(④) ─────────
 //   CONFIG_DIR/bm-cases.json       케이스 기록 — { v:1, cases: { <id>: { id, tag, part, caseNo, status, note, by, at, created, hist:[…] } } }
 //   CONFIG_DIR/bm-advisories.json  보안 권고 표(사람이 확인해 올린 것) — { v:1, at, by, rows: [ { id, sev, type, model, comp, fixed, title, url } ] }
 //   같은 공용 로더 규약(손상이면 쓰기 거절 · 서비스 점검 등재). 권고 표는 포탈이 인터넷에서 가져오지 않는다 — 비어 있으면 대조하지 않는다.
@@ -190,7 +190,7 @@ export const advisoryStore = docStore({ file: ADVISORY_FILE, L: _advisoryFile, w
 
 /**
  * 케이스 하나를 더하거나 고친다(id 가 없으면 새로). 상태 · 번호가 바뀌면 이력에 한 줄. 넘침은 거절.
- * 케이스는 **서비스 태그 + 법인**으로 묶는다(v3.49 반증 A2 — 같은 태그가 다른 법인 서버로 나타나도 그 법인 계정이 남의 법인 케이스를 읽거나 고치지 못하게).
+ * 케이스는 **서비스 태그 + 법인**으로 묶는다(v3.50 반증 A2 — 같은 태그가 다른 법인 서버로 나타나도 그 법인 계정이 남의 법인 케이스를 읽거나 고치지 못하게).
  * 다른 법인 · 다른 서버의 케이스 id 는 ‘찾지 못함’(404 — 있음을 드러내지 않는다).
  * @returns {{ ok:boolean, status?:number, reason?:string, id?:string, changed?:boolean }}
  */
@@ -215,7 +215,7 @@ export function upsertCase({ id = '', tag, corp = '', part = '', caseNo = '', st
   return r.ok ? { ok: true, id: nid, changed: true } : r;
 }
 /**
- * 끝난(closed) 케이스 하나를 지운다(v3.49 — 상한 5,000 건이 차면 새 케이스를 막는데 지울 길이 없었다: 반증 A11). 진행 중인 케이스는 지우지 않는다.
+ * 끝난(closed) 케이스 하나를 지운다(v3.50 — 상한 5,000 건이 차면 새 케이스를 막는데 지울 길이 없었다: 반증 A11). 진행 중인 케이스는 지우지 않는다.
  * 다른 서버(태그) · 다른 법인의 id 는 ‘찾지 못함’(404 — 있음을 드러내지 않는다).
  */
 export function removeCase({ id = '', tag, corp = '' } = {}) {

@@ -1,5 +1,5 @@
 /**
- * bmcheck/health.js — 물리서버 **건강 점수**(v3.49 · 설계 docs/design/bm-feature-proposals ⑩). 순수.
+ * bmcheck/health.js — 물리서버 **건강 점수**(v3.50 · 설계 docs/design/bm-feature-proposals ⑩). 순수.
  *
  *  · 100 에서 시작해 **확인된 문제만큼 뺀다**(감점 합산 — 시안 그대로. Dell 은 가장 큰 감점 하나만 뺀다고 하나 시안은 합산 · 결정 기록 README §12).
  *  · 입력은 목록이 이미 가진 판정뿐이다(새 수집 없음): 부품 장애 수 · 보증(자산 원장) · 펌웨어 뒤처짐 · BIOS 설정 편차(v3.45 점검 요약 `chk`).
@@ -25,7 +25,7 @@ export const HEALTH_BANDS = Object.freeze([
   Object.freeze({ band: 'bad', min: 0 }),
 ]);
 /**
- * 점수를 내는 조건(v3.49 반증 B1 — 못 읽어서 ‘100 · 양호’ 인 서버가 생기지 않게): 견준 항목이 **minJudged 개 이상**이고
+ * 점수를 내는 조건(v3.50 반증 B1 — 못 읽어서 ‘100 · 양호’ 인 서버가 생기지 않게): 견준 항목이 **minJudged 개 이상**이고
  * **볼 항목의 절반 이상**(judged ≥ unknown)이어야 한다. 아니면 점수 없이 ‘판정 못 함’ — 견준 항목의 사실(감점 · 0)은 그대로 보인다.
  */
 export const HEALTH_MIN = Object.freeze({ judged: 2, share: 0.5 });
@@ -37,7 +37,7 @@ export const bandOf = (score) => {
 };
 const pts = (rule, n) => Math.min(rule.cap, rule.per * n);
 // 갈림(split)은 견준 줄이 하나라도 있을 때만 ‘견준 것’ — 판정 함수는 견준 줄이 0 이어도 열린 줄이 있으면 split 을 낸다(fw.js · bios.js).
-// 수가 없거나(구버전 행) 0 이면 모름(못 읽은 값은 0 점 감점의 ‘견줌’ 이 아니다 — v3.49 반증 A1)
+// 수가 없거나(구버전 행) 0 이면 모름(못 읽은 값은 0 점 감점의 ‘견줌’ 이 아니다 — v3.50 반증 A1)
 const splitJudged = (n) => (numOrNull(n) ?? 0) > 0;
 
 /**

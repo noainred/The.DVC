@@ -1,5 +1,5 @@
 /**
- * idrac/ledState.js — 물리서버 **위치 LED 상태**(v3.49 · 설계 ⑥ — 이번 판은 보이기만). 순수.
+ * idrac/ledState.js — 물리서버 **위치 LED 상태**(v3.50 · 설계 ⑥ — 이번 판은 보이기만). 순수.
  *
  *  · 주 iDRAC 폴러가 이미 읽는 값(Redfish System `IndicatorLED` — `idrac/redfish.js` inv.system.indicatorLED)을 화면에 보인다. 새 수집 없음.
  *  · 값: on(켜짐 · Lit) · blink(깜빡임 · Blinking) · off(꺼짐 · Off). 그 밖(빈 값 · Unknown · 모르는 글자)은 '' — 못 읽음(꺼짐이 아니다).

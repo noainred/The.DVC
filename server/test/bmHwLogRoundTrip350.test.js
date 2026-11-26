@@ -1,5 +1,5 @@
 /**
- * 물리서버 ‘하드웨어 이벤트 로그’(v3.49) 엣지 대행 — **실제 왕복**. 실제 collector 라우터(같은 프로세스가 엣지 역할) + 가짜 iDRAC(Redfish SEL)를 같은 express 에 띄우고,
+ * 물리서버 ‘하드웨어 이벤트 로그’(v3.50) 엣지 대행 — **실제 왕복**. 실제 collector 라우터(같은 프로세스가 엣지 역할) + 가짜 iDRAC(Redfish SEL)를 같은 express 에 띄우고,
  *   실제 수집 서버 등록부에 그 주소를 올린 뒤 중앙의 **실제 pull 함수**(central/bmHwLogPull.js pullEdgeHwLog)로 받는다(bmPeerEdgeRoundTrip 과 같은 틀 — 의존 주입 없이).
  *   반증 A4(변이 M3 · M4 · M5 · M6 · M7 생존)를 닫는다: 꺼진 등록 · 없는 서버는 not-found(구버전과 가른다) · 경로 없는 엣지는 old-version · 같은 서버 60초 메모 · 열쇠(k) 대조.
  *   반증 A10: 장비가 오래된 것부터 주고 쪽 상한을 넘으면 끝쪽(가장 새 기록)부터 읽고 건너뛴 수를 밝힌다.
