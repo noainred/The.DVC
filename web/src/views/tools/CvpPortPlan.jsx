@@ -44,6 +44,8 @@ export function ReclaimView({ onOpen }) {
         [`${idle}일 넘게 미사용`, c.idle ?? 0, '마지막 사용일이 있는 포트', '#fbbf24'],
         ['기록 시작 뒤 사용 없음', c.never ?? 0, '일수로 세지 않습니다', '#93c5fd'],
         ['장비 기록 없음', c.noHistory ?? 0, '일 기록이 아직 없는 장비의 포트(후보 아님)', 'var(--text-dim)'],
+        // v3.47(D-5): 링크 기록이 없고 지켜본 날이 아직 기준보다 짧은 포트 — 후보도 '쓰는 포트' 도 아니다(옛 서버 응답에는 없다)
+        ...(c.young != null ? [['아직 판단 못 함', c.young, `처음 본 지 ${idle}일이 안 됐고 링크 기록이 없는 포트`, 'var(--text-dim)']] : []),
         ...Object.entries(c.byIdle || {}).map(([d, n]) => [`${d}일 넘음`, n, '마지막 사용일 기준', 'var(--text)']),
       ]} />
       <div className="card" style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>

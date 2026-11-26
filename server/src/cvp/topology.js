@@ -11,7 +11,7 @@
  * 양끝 불일치는 **두 끝 포트를 다 아는 링크**(both · one 중 상대 포트를 LLDP portId 로 아는 것)만 — 속도 · MTU · Duplex · 관리 상태 · 포트 채널 소속 · 설명이 가리키는 상대.
  *   한쪽 값을 못 읽었으면 '비교 못 함'(na)이다 — 다름으로 세지 않는다.
  */
-import { deviceNameFromDesc, deviceNamesFromDesc, descTokens, descMentions, stripIfSuffix, shortOf } from './portmap.js';
+import { deviceNameFromDesc, deviceNamesFromDesc, descPortsOf, descTokens, descMentions, stripIfSuffix, shortOf } from './portmap.js';
 
 const devKey = (a, c, k) => `${a}\u0000${c}\u0000${k}`;
 const lc = (s) => String(s ?? '').trim().toLowerCase();
@@ -192,6 +192,36 @@ export function compareEnds(pa, pb, { aName = '', bName = '', isSwitch = null } 
  * @param {{ devices:Array<{agent,cvpId,key,hostname,model,corpName?}>, lldp:Array, lldpMeta:Map<string,{at,failing}>, ports:Array<{agent,cvpId,key,port,oper,admin,speedBps,mtu,duplex,lag,desc}>, hostNames?:Set<string> }} a
  *   hostNames: 가상화 호스트 짧은 이름(소문자) — 스위치 아닌 이웃의 종류(ESXi)를 가른다.
  */
+/**
+ * v3.47(결정 D-6 — 사용자 선택): 두 스위치가 **서로를** 포트 설명으로 가리키면 한 줄로 합친다 — 단 **양쪽에 그런 포트가 하나씩만** 있을 때만.
+ *   둘 이상이면(케이블 여러 가닥) 어느 포트끼리 이어졌는지 코드가 알 수 없어 짝을 지어내게 되므로 지금처럼 따로 둔다.
+ *   합친 줄도 추정(kind 'desc' · descPair)이다 — 양끝 비교는 하지 않는다(LLDP 가 끝을 확인한 링크만 비교한다).
+ *   5회차 A1-2: 설명에 **상대 포트가 적혀 있는데** 짝 포트와 다르면 합치지 않는다(케이블 두 가닥에 설명이 한쪽씩만 있으면 두 설명 모두와 어긋난 짝이 나왔다).
+ *   자기 포트 이름은 상대 포트로 보지 않는다('leaf1:Et49 <-> spine1:Et1').
+ */
+function mergeDescPairs(links, portRow = new Map()) {
+  // 수정 검토 V2: 대조는 물리 포트 이름만(포트 채널 · VLAN · 서버 NIC 은 '상대 포트' 가 아니다) · 'Eth1' 은 'Et1' 과 같다
+  const nz = (x) => normPort(x).replace(/^eth(?=\d)/, 'et');
+  const PHYS = /^(?:et|gi|te|fa|hu)\d/;
+  const otherPorts = (id, ownPort) => descPortsOf(portRow.get(`${id}\u0000${ownPort}`)?.desc).map(nz).filter((x) => PHYS.test(x) && x !== nz(ownPort));
+  const agrees = (id, ownPort, peerPort) => { const m = otherPorts(id, ownPort); return !m.length || m.includes(nz(peerPort)); };
+  const byPair = new Map();   // 'x\u0002y'(x < y) → { xy:[키], yx:[키] }
+  for (const [k, l] of links) {
+    if (l.kind !== 'desc') continue;
+    const [x, y] = l.a < l.b ? [l.a, l.b] : [l.b, l.a];
+    const pk = `${x}\u0002${y}`;
+    if (!byPair.has(pk)) byPair.set(pk, { xy: [], yx: [] });
+    byPair.get(pk)[l.a === x ? 'xy' : 'yx'].push(k);
+  }
+  for (const { xy, yx } of byPair.values()) {
+    if (xy.length !== 1 || yx.length !== 1) continue;
+    const l1 = links.get(xy[0]); const l2 = links.get(yx[0]);
+    if (!agrees(l1.a, l1.aPort, l2.aPort) || !agrees(l2.a, l2.aPort, l1.aPort)) continue;
+    links.delete(yx[0]);
+    links.set(xy[0], { ...l1, bPort: l2.aPort, descPair: true });
+  }
+}
+
 export function buildTopology({ devices = [], lldp = [], lldpMeta = new Map(), ports = [], hostNames = new Set() } = {}) {
   const idx = switchIndex(devices);
   const byId = new Map(devices.map((d) => [devKey(d.agent, d.cvpId, d.key), d]));
@@ -265,9 +295,9 @@ export function buildTopology({ devices = [], lldp = [], lldpMeta = new Map(), p
     if (!bId) continue;
     if (usedEnds.has(`${aId}\u0000${np}`)) continue;
     usedEnds.add(`${aId}\u0000${np}`);
-    // 양쪽 설명이 서로를 가리켜도 합치지 않는다(반증 판정 D-6 — 두 장비 사이 케이블이 여럿이면 어느 포트끼리인지 코드가 알 수 없어 짝을 지어내게 된다).
     links.set(`${aId}\u0000${np}\u0001desc\u0000${bId}`, { a: aId, aPort: np, b: bId, bPort: null, kind: 'desc', bLldpRead: !!(lldpMeta.get(bId)?.at != null) });
   }
+  mergeDescPairs(links, portRow);
   // 층 추정(v3.42 버그 점검 1회차 A1-04 · 2회차 A1-F4 · F5): 스파인 후보는 **전체** 스위치 이웃 수로 고르고, 리프 판정에서만 MLAG 피어를 뺀다 —
   //   '피어를 뺀 내 이웃이 전부 스파인 후보이고 그들의 전체 이웃 수가 내 (피어 뺀) 이웃 수보다 많으면 리프'. 1회차는 피어를 차수에서도 빼서
   //   스파인 MLAG 쌍 + 리프 2대가 전부 스파인이 됐다(2회차 F4). 피어 판정은 '직접 연결 + 나머지 이웃 대부분 공유'(업링크 하나가 내려가도 쌍 — F5).
@@ -341,7 +371,7 @@ export function buildTopology({ devices = [], lldp = [], lldpMeta = new Map(), p
       else if (items.some((x) => x.state === 'na')) counts.na++;
     }
     out.push({ a: l.a, b: l.b, aName: da?.hostname || '', bName: db?.hostname || '', aPort: pa?.port || l.aPort, bPort: pb?.port || l.bPort || null,
-      kind: l.kind, bLldpRead: l.bLldpRead, oper: pa ? pa.oper : null, speedBps: pa ? (pa.speedBps ?? null) : null, items });
+      kind: l.kind, ...(l.descPair ? { descPair: true } : {}), bLldpRead: l.bLldpRead, oper: pa ? pa.oper : null, speedBps: pa ? (pa.speedBps ?? null) : null, items });
   }
   out.sort((x, y) => (x.aName + x.aPort).localeCompare(y.aName + y.aPort));
   return { nodes, links: out, counts, lldpReadDevices: nodes.filter((n) => n.lldpRead).length };

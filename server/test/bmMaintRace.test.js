@@ -47,7 +47,14 @@ async function setup(t) {
   // 실제 정비 창 라우터 — 양보 함수만 '매 단계 양보' 로 바꿔 두 요청이 판정 도중에 서로 끼어들게 한다(운영 기본은 15ms 마다 — 큰 창 목록이면 같은 일이 생긴다).
   const { registerBmMaint } = await import('../src/routes/api/bmMaint.js');
   const api = express.Router();
-  registerBmMaint(api, { yielder: () => async () => { await new Promise((r) => { setImmediate(r); }); return true; } });
+  registerBmMaint(api, { yielder: () => {
+    // 걸어 둔 정지(gateHold)는 그다음에 만들어지는 판정 하나만 잡는다 — 그 판정의 첫 양보에서 멈추고 놓아 줄 때까지 기다린다(시험이 순서를 정한다).
+    const h = gateHold; gateHold = null; let first = true;
+    return async () => {
+      if (h && first) { first = false; h.reached(); await h.released; }
+      await new Promise((r) => { setImmediate(r); }); return true;
+    };
+  } });
   const USERS = { opA: { username: 'opa', role: 'operator', scope: { vcenters: ['vcA'] } }, own: { username: 'own', role: 'admin', scope: null } };
   const app = express();
   app.use(express.json());
@@ -59,6 +66,19 @@ async function setup(t) {
   const call = async (u, method, p, body) => { const r = await fetch(`${base}${p}`, { method, headers: { 'x-u': u, 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) }); return { status: r.status, body: await r.json() }; };
   return { call };
 }
+// 줄 안 판정을 원하는 자리에서 멈춰 두는 장치(2026-11-26 — 아래 '판정에 쓴 판으로만' 시험이 전량 실행에서만 403 으로 실패하던 것).
+//   그 시험은 '고치기가 재확인 저장보다 먼저 cur 를 읽는다' 는 순서를 setTimeout(5) 하나로 기대했다 — 로컬 실측 여유는 약 13ms(재확인 82~100ms ·
+//   고치기 도착 70~86ms)였고, 고치기를 100ms 늦게 보내면 고치기가 재확인 저장 뒤에 도착해 rev 가 맞고 재확인 뒤 수명으로 판정받아 403(소유자 필요)이 났다
+//   (전량 실행 · CI 에서 본 실패와 같은 신호 — 제품 결함이 아니라 시험의 순서 의존). 이제 재확인을 판정 첫 양보에서 붙잡아 둔 채 고치기를 보낸다.
+let gateHold = null;
+function holdNextGate() {
+  let reached; let release;
+  const atGate = new Promise((r) => { reached = r; });
+  const released = new Promise((r) => { release = r; });
+  gateHold = { reached, released };
+  return { atGate, release };
+}
+const within = (p, ms, why) => { let tm; return Promise.race([p, new Promise((_, rej) => { tm = setTimeout(() => rej(new Error(why)), ms); })]).finally(() => clearTimeout(tm)); };
 const srvWin = (key, name, schedule) => ({ name, reason: '정비', tz: 'Asia/Seoul', target: { kind: 'server', keys: [key] }, vcenterId: 'vcA', schedule, scopes: { alerts: true, hold: true, focus: true } });
 
 test('동시에 만든 운영자 창 둘(각자는 12시간 이하 · 합치면 13시간)은 하나만 통과한다 — 판정 도중 끼어들어 둘 다 200 이던 것', async (t) => {
@@ -138,10 +158,17 @@ test('판정에 쓴 판으로만 저장한다 — 재확인과 함께 보낸 고
   assert.ok(P.id);
   const W = await ST.addWindow(srvWin('MTAGA1', 'W', { kind: 'weekly', days: all7, time: '06:00', durMin: 60 }), { by: 'opa', now: now - 85 * DAY });
   const longer = { kind: 'weekly', days: all7, time: '12:00', durMin: 720 };   // P 와 이어 붙음 — 재확인 뒤 수명이면 20일 뒤 24시간(소유자 필요)
+  // 재확인을 줄 안 판정 도중(첫 양보)에 붙잡아 둔다 — 아직 저장 전이다. 그 상태에서 '다음 rev' 를 넣은 고치기를 보낸다(차례는 시험이 정한다 — 시각에 기대지 않는다).
+  const hold = holdNextGate();
   const pc = call('opA', 'POST', `/${W.id}/confirm`, { rev: W.rev });
-  await new Promise((r) => { setTimeout(r, 5); });   // 재확인이 먼저 줄에 서게
-  const pe = call('opA', 'PUT', `/${W.id}`, { rev: W.rev + 1, schedule: longer });   // 다음 판을 미리 넣는다
+  await within(hold.atGate, 10_000, '재확인이 판정 중 양보하지 않았다 — 시험 전제(동료 창 P 가 있어 단계마다 양보)가 깨졌다');
+  // 지금 코드는 고치기가 줄 앞에서 409 로 끝나므로 그 응답을 받으면 재확인을 놓아 준다. 예전 코드(줄 앞 판정 없음)는 고치기가 재확인 뒤 줄에 서서
+  //   응답이 오지 않으므로 10초 뒤에 놓아 준다 — 그러면 재확인 전 수명으로 판정받은 고치기가 200 으로 저장돼 아래 단언이 실패한다(멈추지 않고 실패).
+  //   지금 코드에서 이 시한이 먼저 닿으려면 고치기가 localhost 요청을 보내고 cur 를 읽는 데 10초가 걸려야 한다(예전 여유는 약 13ms).
+  const fallback = setTimeout(hold.release, 10_000);
+  const pe = call('opA', 'PUT', `/${W.id}`, { rev: W.rev + 1, schedule: longer }).finally(() => hold.release());   // 다음 판을 미리 넣는다
   const [rc, re] = await Promise.all([pc, pe]);
+  clearTimeout(fallback);
   assert.equal(rc.status, 200, JSON.stringify(rc.body));
   assert.equal(re.status, 409, `예전: 200(재확인 전 수명으로 판정) — ${JSON.stringify(re.body)}`);
   assert.equal(re.body.code, 'rev-changed');
