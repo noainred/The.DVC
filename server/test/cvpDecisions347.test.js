@@ -127,14 +127,25 @@ test('D-5 회수 기준 = 포트를 처음 본 날', async () => {
   assert.equal(ll.portFirst.get('\u0000cf\u0000F\u0000Ethernet3'), dayStartMs(dayIndex(NOW - 10 * DAY)), '새 포트는 처음 본 날');
   assert.equal(ll.portFirst.get('\u0000cf\u0000F\u0000Ethernet2'), dayStartMs(dayIndex(NOW - 120 * DAY)));
   assert.equal(ll.portFirst.has('\u0000cf\u0000F\u0000Management1'), false, '관리 포트는 적지 않는다');
-  // 업그레이드 전부터 있던 포트(처음 본 날 행이 없다)는 첫 저장 때 장비 기록 시작일로 — 예전 판정 그대로
+  // 업그레이드 전부터 있던 포트(처음 본 날 행이 없다)는 첫 저장 때 **seed**(장비 기록 시작일을 따른다) — 날짜로 굳히지 않는다
+  //   (5회차 A1-1 · A2-F1: 첫 저장 순간의 장비 시작일로 굳혔더니 그 뒤 백필이 시작일을 앞당겨도 따라가지 않아 예전 후보가 '아직 판단 못 함' 으로 빠졌다)
   const { DatabaseSync } = await import('node:sqlite');
   const raw = new DatabaseSync(path.join(tmp, 'cvp.db'));
   raw.prepare("DELETE FROM port_firstseen WHERE cvp_id='cf'").run();
+  raw.prepare("UPDATE dev_linkhist SET first_day=? WHERE cvp_id='cf'").run(dayIndex(NOW - 3 * DAY));   // 백필 전 — 장비 기록 시작일이 아직 3일 전
   cdb._resetForTest();
   await save(NOW - 9 * DAY, [pt('Ethernet1', 'up'), pt('Ethernet2', 'down'), pt('Ethernet3', 'down')]);
-  const fd = () => Object.fromEntries(raw.prepare("SELECT port, first_day FROM port_firstseen WHERE cvp_id='cf'").all().map((r) => [r.port, dayIndex(NOW) - Number(r.first_day)]));
-  assert.deepEqual(fd(), { Ethernet1: 120, Ethernet2: 120, Ethernet3: 120 });
+  const seeds = () => Object.fromEntries(raw.prepare("SELECT port, seed FROM port_firstseen WHERE cvp_id='cf'").all().map((r) => [r.port, Number(r.seed)]));
+  assert.deepEqual(seeds(), { Ethernet1: 1, Ethernet2: 1, Ethernet3: 1 });
+  let l2 = await cdb.lastLinkAll();
+  assert.equal(l2.portFirst.has('\u0000cf\u0000F\u0000Ethernet2'), false, 'seed 행은 portFirst 에 싣지 않는다(장비 기록 시작일로 떨어진다)');
+  // 백필이 장비 기록 시작일을 앞당기면 회수 판정이 따라간다
+  raw.prepare("UPDATE dev_linkhist SET first_day=? WHERE cvp_id='cf'").run(dayIndex(NOW - 200 * DAY));
+  l2 = await cdb.lastLinkAll();
+  const ports2 = [{ agent: '', cvpId: 'cf', key: 'F', port: 'Ethernet2', oper: 'down', hostname: 'f' }];
+  const rc = PP.reclaimCandidates({ ports: ports2, last: l2.last, first: l2.first, portFirst: l2.portFirst, idleDays: 90, now: NOW });
+  assert.deepEqual([rc.counts.never, rc.counts.young], [1, 0], '예전 판정 그대로(장비 기록 시작일 200일 전)');
+  const fd = () => Object.fromEntries(raw.prepare("SELECT port, first_day FROM port_firstseen WHERE cvp_id='cf' AND seed=0").all().map((r) => [r.port, dayIndex(NOW) - Number(r.first_day)]));
   // 장비에서 사라진 포트는 지우고, 다시 나타나면 그날부터
   await save(NOW - 8 * DAY, [pt('Ethernet1', 'up'), pt('Ethernet3', 'down')]);
   assert.equal(fd().Ethernet2, undefined);

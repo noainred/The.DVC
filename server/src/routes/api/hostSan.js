@@ -11,7 +11,7 @@
 //   기간 바이트는 perfDb.portBytesMulti(heavyQuery — 기억·합류·감시). 응답에 스위치·스토리지 관리 주소는 싣지 않는다(이름·id 뿐 — 비-admin 은 이름=주소 가림).
 import { requirePerm, toolActorOf } from '../../auth/auth.js';
 import { inUserScope, inUserWriteScope, scopedVcenterIds } from '../../auth/scope.js';
-import { maskErrText } from './cvp.js';
+import { maskErrText, maskForeignMacs } from './cvp.js';
 import { hostFlowOut, FLOW_SHOWN_STATES, staleMsOf } from '../../sanswitch/flowView.js';
 import { listFlows, SHOW_EVERY_MS as FLOW_SHOW_EVERY_MS } from '../../sanswitch/flowJobs.js';
 import { loadSettings as loadCvpSettings } from '../../cvp/settings.js';
@@ -356,10 +356,14 @@ export function registerHostSan(api) {
     const admin = isAdminReq(req);
     const cvpHosts = admin ? [] : listCvpServers().map((x) => x.host).filter(Boolean);
     const mk = (v) => (admin || v == null ? v : maskErrText(String(v), cvpHosts));
+    // v3.47(5회차 A3-F3): 근거 문구의 MAC 은 **이 호스트 NIC MAC 일 때만** 그대로(같은 화면 NIC 표가 보인다) — 짧은 이름이 겹친 다른 호스트(범위 밖일 수 있다)의
+    //   LLDP 행이 근거로 붙으면 그 호스트 NIC MAC 이 범위 계정에 나갔다. 이름 겹침 자체(귀속이 틀림)는 v2.924 부터의 매칭 문제라 따로 남긴다.
+    const ownMacs = new Set((terms.macs || []).map((x) => String(x).toLowerCase()));
+    const mkS = (x) => maskForeignMacs(mk(x), ownMacs);
     const mkEv = (v) => {   // 근거는 문구(LLDP 이웃 이름 · MAC 테이블 요약)이거나 객체 — 글자 칸만 가린다
       if (admin || v == null) return v;
-      if (typeof v === 'string') return mk(v);
-      return typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, typeof x === 'string' ? mk(x) : x])) : v;
+      if (typeof v === 'string') return mkS(v);
+      return typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, typeof x === 'string' ? mkS(x) : x])) : v;
     };
     if (!admin) events = events.map((e) => ({ ...e, title: mk(e.title), desc: mk(e.desc) }));
     res.set('Cache-Control', 'no-store').json({

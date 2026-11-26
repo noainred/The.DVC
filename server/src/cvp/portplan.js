@@ -20,10 +20,22 @@ const devKey = (a, c, k) => `${a}\u0000${c}\u0000${k}`;
 /**
  * @param {{ ports:Array<{agent,cvpId,key,hostname,port,oper,admin,desc,speedBps}>, last:Map<string,number>, first:Map<string,number>, idleDays:number, now?:number }} a
  */
-export function reclaimCandidates({ ports = [], last = new Map(), first = new Map(), portFirst = null, idleDays = 90, now = Date.now() } = {}) {
+export function reclaimCandidates(opts = {}) {
+  const g = reclaimGen(opts); let r;
+  while (!(r = g.next()).done) { /* 동기 */ }
+  return r.value;
+}
+/** 요청 경로용 — 포트마다 시간 기준 양보(5회차 A4 관찰: 1,500대에서 한 덩어리 87~98ms). 결과는 reclaimCandidates 와 같다. */
+export async function reclaimCandidatesAsync(opts = {}) {
+  const y = createYielder(15); const g = reclaimGen(opts); let r;
+  while (!(r = g.next()).done) await y();
+  return r.value;
+}
+function* reclaimGen({ ports = [], last = new Map(), first = new Map(), portFirst = null, idleDays = 90, now = Date.now() } = {}) {
   const counts = { idle: 0, never: 0, noHistory: 0, young: 0, down: 0, byIdle: Object.fromEntries(IDLE_CHOICES.map((d) => [d, 0])) };
   const rows = [];
   for (const p of Array.isArray(ports) ? ports : []) {
+    yield;
     if (!p || /^management/i.test(String(p.port))) continue;
     if (p.oper !== 'down' && p.oper !== 'nolink') continue;
     counts.down++;

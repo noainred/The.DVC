@@ -39,7 +39,7 @@ export const VERDICT_ORDER = Object.freeze(['replace', 'flap', 'peer', 'observe'
  * v3.47(D-7): GBIC 추세 기준 안내 — 장비가 Rx 임계를 준 광모듈은 그 임계, 나머지는 포탈 임계(CVP 설정). 장비 임계 수는 응답 deviceBasis(옛 서버는 없음).
  */
 export function trendBasisText(th, deviceBasis) {
-  const portal = `주의 ${th?.warnDbm ?? '—'} dBm · 장애 ${th?.faultDbm ?? '—'} dBm(CVP 설정)`;
+  const portal = `주의 ${dbmText(th?.warnDbm)} · 장애 ${dbmText(th?.faultDbm)}(CVP 설정)`;   // 값이 없으면 단위 없이 '—'(5회차 A5 관찰)
   return Number(deviceBasis) > 0 ? `장비가 Rx 임계를 준 ${numText(deviceBasis)}개는 그 임계, 나머지는 ${portal}` : portal;
 }
 /** 근거 한 줄. v3.47(D-7): Rx 비교 기준은 행의 rxLowDbm(그 광모듈의 장비 임계 먼저) — 옛 서버 응답이면 화면 공통 warnDbm. */
@@ -85,7 +85,13 @@ export const FORECAST_NOTE = '최근 기록의 **직선 추세**입니다. 기�
 export function opticTrendText(r, { minDays, now = Date.now(), horizonDays } = {}) {
   if (r.state === 'alreadyFault') return '이미 장애 임계 이하';
   if (r.state === 'already') return '이미 주의 임계 이하';
-  return forecastText({ ...r, eta: r.warnEta }, { minDays, now, horizonDays });
+  // v3.47(5회차 A1-3 · A5-F1): 장비가 장애 임계(LowAlarm)만 준 광모듈은 장애 임계 도달로 예측한다(target 'fault')
+  if (r.target === 'fault') {
+    const t = forecastText({ ...r, eta: r.faultEta }, { minDays, now, horizonDays });
+    return r.state === 'eta' ? `장애 임계 ${t}` : r.state === 'flat' ? '내려가지 않음 — 예측 없음' : t;
+  }
+  const t = forecastText({ ...r, eta: r.warnEta }, { minDays, now, horizonDays });
+  return r.state === 'flat' ? '내려가지 않음 — 예측 없음' : t;   // 광량은 '늘지 않음' 이 아니라 '내려가지 않음'(5회차 A5 관찰)
 }
 export const OPTIC_TREND_NOTE = '트랜시버마다 **링크가 올라온 날의 최저 수신 광량**을 쌓아 최근 직선 추세로 주의 임계 도달을 예상합니다. 하루 사이 크게 오르면(교체 · 청소) 그날부터 다시 봅니다. 링크 없는 날은 기록이 없습니다. 브레이크아웃 칸에서 레인 일부만 링크인 날도 기록하지 않습니다(칸 단위 값이 어느 레인 것인지 몰라서).';
 

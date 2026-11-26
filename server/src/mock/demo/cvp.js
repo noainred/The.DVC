@@ -501,7 +501,7 @@ async function backfillCvp(servers, now = Date.now()) {
 async function demoNetHistory(servers, db, P, optics, now) {
   // v3.42(버그 점검 1회차 A4-F11): 적재 · 조회와 같은 날 기준(dayIndex — 현지 날짜). 예전 UTC 나눗셈은 KST 00~09시에 시드하면 하루 어긋났다.
   const today = dayIndex(now);
-  const devPort = []; const xcvr = []; const flap = []; const lastLink = []; const firstDay = []; const util = [];
+  const devPort = []; const xcvr = []; const flap = []; const lastLink = []; const firstDay = []; const util = []; const portFirst = [];
   for (const srv of servers) {
     for (const sw of demoSwitchSpecs(srv)) {
       await new Promise((r) => setImmediate(r));
@@ -514,6 +514,9 @@ async function demoNetHistory(servers, db, P, optics, now) {
       if (total > 0) for (let i = 179; i >= 0; i--) devPort.push([srv.id, sw.key, today - i, total, Math.max(0, Math.round(usedNow - per * i))]);
       firstDay.push([srv.id, sw.key, today - 300]);
       ports.forEach((p, k) => {
+        // v3.47(D-5 · 5회차 A2-F2): 포트 처음 본 날 — 대부분은 '기록 시작 전부터 있던 포트'(seed — 장비 기록 시작일 300일 전을 따른다),
+        //   일부(아홉째마다)는 20일 전에 단 포트(링크 기록이 없으면 '아직 판단 못 함'). 예전 시드는 장비 레코드를 먼저 적어 모든 포트가 3일 전이 됐다.
+        if (!/^management/i.test(p.name)) portFirst.push(k % 9 === 4 ? [srv.id, sw.key, p.name, today - 20, 0] : [srv.id, sw.key, p.name, today - 300, 1]);
         if (p.oper === 'up') { lastLink.push([srv.id, sw.key, p.name, today]); return; }
         const r = demoHash(`ll|${sw.key}|${p.name}`) % 4;
         if (r === 0) lastLink.push([srv.id, sw.key, p.name, today - 200 - (k % 60)]);
@@ -543,7 +546,7 @@ async function demoNetHistory(servers, db, P, optics, now) {
       }
     }
   }
-  return db.importNetHistory(db.LOCAL_AGENT, { devPort, xcvr, flap, lastLink, firstDay, util });
+  return db.importNetHistory(db.LOCAL_AGENT, { devPort, xcvr, flap, lastLink, firstDay, util, portFirst });
 }
 
 export function _resetForTest() { _seeded = false; _seeding = null; }

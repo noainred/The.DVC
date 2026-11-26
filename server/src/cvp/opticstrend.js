@@ -7,6 +7,7 @@
  */
 import { forecast, sinceLastRecovery } from './trend.js';
 import { createYielder } from '../util/timeSlice.js';
+import { numOrNull } from '../util/numOrNull.js';
 
 export const TREND_DAYS = 30;
 export const TREND_MIN_DAYS = 14;
@@ -21,9 +22,13 @@ const devKey = (a, c, k) => `${a}\u0000${c}\u0000${k}`;
  * @returns {{ basis:'device'|'portal', warnDbm:number|null, faultDbm:number|null }}
  */
 export function rxLimitsOf(optic, { warnDbm = -10, faultDbm = -14 } = {}) {
-  const ok = (v) => (v != null && Number.isFinite(Number(v)) && Number(v) >= -60 && Number(v) <= 15 ? Number(v) : null);
-  const w = optic && typeof optic === 'object' ? ok(optic.devWarnDbm) : null;
-  const f = optic && typeof optic === 'object' ? ok(optic.devFaultDbm) : null;
+  // '못 읽은 값은 0 이 아니다' — numOrNull 로(5회차 A1 참고: Number('') 가 0 이 됐다).
+  const ok = (v) => { const n = numOrNull(v); return n != null && n >= -60 && n <= 15 ? n : null; };
+  let w = optic && typeof optic === 'object' ? ok(optic.devWarnDbm) : null;
+  let f = optic && typeof optic === 'object' ? ok(optic.devFaultDbm) : null;
+  // 5회차 A1-4: 뒤집혀 오면(LowWarn < LowAlarm) 실시간 판정(parse judgeVal — 장애 LowAlarm 을 먼저 본다)과 같게: 장애 = LowAlarm 하나, 주의는 없다
+  //   (LowAlarm 이하는 모두 장애이고 그보다 낮은 LowWarn 에는 닿을 수 없다). 주의가 없으면 추세는 장애 예측으로 상태를 정한다(faultOnly).
+  if (w != null && f != null && w < f) w = null;
   if (w != null || f != null) return { basis: 'device', warnDbm: w, faultDbm: f };
   return { basis: 'portal', warnDbm, faultDbm };
 }
@@ -60,15 +65,18 @@ function trendRow(ctx, k, pts0) {
   const { points, resetAt } = sinceLastRecovery(all.filter((x) => x[0] >= from), RECOVER_DB);
   const fw = forecast(points, { target: warnDbm, dir: 'down', minDays, now });
   const ff = forecast(points, { target: faultDbm, dir: 'down', minDays, now });
-  const state = ff.state === 'already' ? 'alreadyFault' : (fw.state === 'stale' || (!points.length && all.length)) ? 'stale' : fw.state;
+  // 5회차 A1-3 · A5-F1: 주의 임계가 없고 장애 임계만 있으면(장비가 LowAlarm 만 줌) 상태를 장애 예측으로 정한다 — 주의 예측(목표 없음)으로 정하면 하강 중인 광모듈이 늘 '안정' 이었다.
+  const faultOnly = warnDbm == null && faultDbm != null;
+  const main = faultOnly ? ff : fw;
+  const state = ff.state === 'already' ? 'alreadyFault' : (main.state === 'stale' || (!points.length && all.length)) ? 'stale' : main.state;
   counts[state] = (counts[state] || 0) + 1;
   const n = names.get(devKey(agent, cvpId, key)) || {};
   // v3.42(2회차 A1-F9): 끊긴(stale) 행도 마지막으로 잰 값(lastRx)을 싣는다 — 장애 수준 Rx 로 링크가 끊긴 광모듈이 3일 뒤 '위험만 보기' 에서 사라졌다(화면이 lastRx 로 위험에 넣는다).
   let lastRx = null;
   for (let i = all.length - 1; i >= 0; i--) if (all[i][1] != null) { lastRx = all[i][1]; break; }
-  rows.push({ agent, cvpId, key, hostname: n.hostname || key, corpName: n.corpName || '', intf, state, days: fw.days, current: state === 'stale' ? null : fw.current,
-    lastAt: all.length ? all[all.length - 1][0] : null, lastRx, perMonth: fw.slopePerDay == null ? null : fw.slopePerDay * 30, warnEta: fw.eta, faultEta: ff.eta, resetAt,
-    basis: lim.basis, warnDbm, faultDbm, _all: all });
+  rows.push({ agent, cvpId, key, hostname: n.hostname || key, corpName: n.corpName || '', intf, state, days: main.days, current: state === 'stale' ? null : main.current,
+    lastAt: all.length ? all[all.length - 1][0] : null, lastRx, perMonth: main.slopePerDay == null ? null : main.slopePerDay * 30, warnEta: faultOnly ? null : fw.eta, faultEta: ff.eta, resetAt,
+    basis: lim.basis, warnDbm, faultDbm, ...(faultOnly ? { target: 'fault' } : {}), _all: all });
 }
 function trendFinish(ctx) {
   const { rows, counts, from, warnDbm, faultDbm } = ctx;
@@ -76,7 +84,8 @@ function trendFinish(ctx) {
   // 끊긴 행 중 마지막 값이 그 광모듈의 임계 이하인 것은 위험 행 바로 뒤(정렬 상한 TREND_ROWS_MAX 에 잘리지 않게)
   const low = (r) => (r.warnDbm != null ? r.warnDbm : r.faultDbm);
   const ord = (r) => (r.state === 'stale' && r.lastRx != null && low(r) != null && r.lastRx <= low(r) ? 2.5 : order[r.state]);
-  rows.sort((a, b) => (ord(a) - ord(b)) || ((a.warnEta ?? Infinity) - (b.warnEta ?? Infinity)) || ((a.current ?? a.lastRx ?? 99) - (b.current ?? b.lastRx ?? 99)));
+  const etaOf = (r) => (r.target === 'fault' ? r.faultEta : r.warnEta) ?? Infinity;
+  rows.sort((a, b) => (ord(a) - ord(b)) || (etaOf(a) - etaOf(b)) || ((a.current ?? a.lastRx ?? 99) - (b.current ?? b.lastRx ?? 99)));
   // v3.42(A4-F2): 점 배열은 내보내는 행에만 만든다(1.5만 계열 전부에 90점을 만들어 한 덩어리 268ms · 응답 4.4MB 였다).
   const shown = rows.slice(0, TREND_ROWS_MAX).map(({ _all, ...r }) => ({ ...r, points: _all.filter((x) => x[0] >= from) }));
   return { rows: shown, counts, omitted: Math.max(0, rows.length - TREND_ROWS_MAX), thresholds: { warnDbm, faultDbm }, deviceBasis: ctx.deviceBasis };

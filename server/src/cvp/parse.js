@@ -527,9 +527,15 @@ export function judgeOptics(parts, ports, { warnDbm = -10, faultDbm = -14 } = {}
     // v2.656: 링크가 내려간 것을 '확인한' 포트 — Rx 에 더해 Tx·바이어스도 판정하지 않는다(온도·전압만). 포트 상태를 모르면 예전 판정 그대로.
     const linkDown = portsKnown && known && !linked && !lanesPartial;
     const other = linkDown ? (p.domJudge?.envState ?? null) : (p.domJudge?.otherState ?? null);
-    const basis = p.domJudge?.rxDevice ? 'device' : 'portal';
+    // 5회차 A1-6: 장비가 Rx **높은 쪽** 임계만 주면 낮은 쪽은 포탈 임계로 본다(예전: basis 'device' 로 낮은 Rx 를 '정상' 이라 했다 — 추세 · 링크 품질은 포탈 기준으로 장애였다).
+    //   낮은 쪽 장비 임계(rxLow)가 있으면 예전 그대로 장비 판정. 기준은 opticstrend.rxLimitsOf 와 같은 순서.
+    const hasLow = !!(p.domJudge?.rxLow && (p.domJudge.rxLow.warnDbm != null || p.domJudge.rxLow.faultDbm != null));
+    const basis = hasLow ? 'device' : 'portal';
     let rxState = null;
-    if (rx != null && linked) rxState = p.domJudge?.rxDevice || (rx <= faultDbm ? 'fault' : rx <= warnDbm ? 'warn' : 'ok');
+    if (rx != null && linked) {
+      const portalLow = rx <= faultDbm ? 'fault' : rx <= warnDbm ? 'warn' : 'ok';
+      rxState = hasLow ? (p.domJudge.rxDevice || portalLow) : (worse(p.domJudge?.rxDevice ?? null, portalLow) || portalLow);
+    }
     const judged = rxState != null || other != null;
     let state = p.state;
     if (p.state !== 'absent' && judged) state = worse(other, rxState) || p.state;

@@ -25,8 +25,8 @@ import { listServers } from '../../cvp/registry.js';
 import { loadSettings } from '../../cvp/settings.js';
 import * as cdb from '../../cvp/db.js';
 import { corpResolver, rowOwnerOf } from '../../cvp/overview.js';
-import { rankLinks, FLAP_MIN_DEFAULT } from '../../cvp/linkq.js';
-import { reclaimCandidates, exhaustForecast, saturationForecastAsync, IDLE_CHOICES, FORECAST_MIN_DAYS, FORECAST_WINDOW_DAYS, UPLINK_SAT_PCT } from '../../cvp/portplan.js';
+import { rankLinksAsync, FLAP_MIN_DEFAULT } from '../../cvp/linkq.js';
+import { reclaimCandidatesAsync, exhaustForecast, saturationForecastAsync, IDLE_CHOICES, FORECAST_MIN_DAYS, FORECAST_WINDOW_DAYS, UPLINK_SAT_PCT } from '../../cvp/portplan.js';
 import { opticTrendsAsync, opticInventory, deviceRxLimits, TREND_DAYS, TREND_MIN_DAYS } from '../../cvp/opticstrend.js';
 import { HORIZON_DAYS } from '../../cvp/trend.js';
 import { heavyJson, heavyKey } from '../../cvp/heavyGate.js';   // v3.42: 무거운 조회 동시 상한 + 같은 조회 합류(3회차 다시 설계)
@@ -39,7 +39,7 @@ import { store } from '../../store.js';
 import { capStr } from '../../util/capStr.js';
 import { numOrNull } from '../../util/numOrNull.js';
 import { createYielder } from '../../util/timeSlice.js';
-import { kickDemo, maskErrText, maskMlag, maskMacText } from './cvp.js';
+import { kickDemo, maskErrText, maskMlag, maskLldpText } from './cvp.js';
 import { listDatacenters } from '../../datacenter/store.js';
 
 const writer = requireRole('admin', 'operator');
@@ -115,7 +115,7 @@ export function registerCvpNet(api) {
       if (err.unavailable || flap.unavailable) return { status: 503, body: DB_DOWN };
       const s = loadSettings();
       const devMap = new Map(b.devices.map((d) => [devKey(d.agent, d.cvpId, d.key), { parts: d.partsList }]));
-      const r = rankLinks({ ports: b.ports, devices: devMap, err: err.map, flap: flap.map, warnDbm: s.xcvrRxWarnDbm, faultDbm: s.xcvrRxFaultDbm, flapMin: FLAP_MIN_DEFAULT });
+      const r = await rankLinksAsync({ ports: b.ports, devices: devMap, err: err.map, flap: flap.map, warnDbm: s.xcvrRxWarnDbm, faultDbm: s.xcvrRxFaultDbm, flapMin: FLAP_MIN_DEFAULT });
       const hosts = hostsOf();
       const corp = new Map(b.devices.map((d) => [devKey(d.agent, d.cvpId, d.key), d.corpName]));
       return { body: {
@@ -144,7 +144,7 @@ export function registerCvpNet(api) {
       const ll = await cdb.lastLinkAll();
       hx.check();
       if (ll.unavailable) return { status: 503, body: DB_DOWN };
-      const r = reclaimCandidates({ ports: b.ports, last: ll.last, first: ll.first, portFirst: ll.portFirst, idleDays: idle });
+      const r = await reclaimCandidatesAsync({ ports: b.ports, last: ll.last, first: ll.first, portFirst: ll.portFirst, idleDays: idle });
       const hosts = hostsOf();
       const corp = new Map(b.devices.map((d) => [devKey(d.agent, d.cvpId, d.key), d.corpName]));
       return { body: { idle, choices: IDLE_CHOICES, rows: r.rows.map((x) => ({ ...x, corpName: corp.get(devKey(x.agent, x.cvpId, x.key)) || '', desc: admin ? x.desc : maskErrText(x.desc, hosts) })),
@@ -256,7 +256,7 @@ export function registerCvpNet(api) {
       return { body: {
         nodes: t.nodes, counts: t.counts, lldpReadDevices: t.lldpReadDevices, devices: b.devices.length,
         // v3.47(D-1): 상대 포트(LLDP 포트 ID 에서 온 값)가 MAC 모양이면 비-admin 에 가린다
-        links: t.links.map((l) => ({ ...l, ...(admin ? {} : { aPort: maskMacText(l.aPort), bPort: maskMacText(l.bPort) }),
+        links: t.links.map((l) => ({ ...l, ...(admin ? {} : { aPort: maskLldpText(l.aPort, hosts), bPort: maskLldpText(l.bPort, hosts) }),
           items: l.items ? l.items.map((x) => (x.field.startsWith('desc') ? { ...x, a: mk(x.a), b: mk(x.b) } : x)) : null })),
         ...(lldp.truncated ? { lldpTruncated: true } : {}), ...(b.portsUnread ? { portsUnread: b.portsUnread } : {}), ...(b.truncated ? { truncated: true } : {}), ...(admin ? {} : { addressHidden: true }),
       } };
@@ -485,7 +485,11 @@ export function registerCvpNet(api) {
         if (c.kind === 'bgp') return { ...c, item: `${mk(String(c.item).split('|')[0])}|(주소 가림)` };
         if (c.kind === 'port' && c.field === 'desc') return { ...c, before: mk(c.before), after: mk(c.after) };
         // v3.47(D-1): LLDP 이웃 문자열은 '시스템 이름 포트 ID' — MAC 모양 포트 ID 도 가린다(주소 가림 뒤에)
-        if (c.kind === 'lldp') return { ...c, before: maskMacText(mk(c.before)), after: maskMacText(mk(c.after)) };
+        if (c.kind === 'lldp') {
+          const b0 = maskLldpText(c.before, hosts); const a0 = maskLldpText(c.after, hosts);
+          // 5회차 A5-F2: 가린 부분만 바뀌었으면 전 · 후가 같은 글자가 된다 — 바뀌었다는 사실은 밝힌다(값은 가린 채)
+          return { ...c, before: b0, after: b0 === a0 && c.before !== c.after ? `${a0 ?? ''} (가린 값이 바뀜)` : a0 };
+        }
         return c;
       }) }));
       return { body: { a: A.head, b: bHead, scopeCvpId: only, devices, counts: d.counts, unchanged: d.unchanged, omitted: d.omitted, ...(admin ? {} : { addressHidden: true }) } };

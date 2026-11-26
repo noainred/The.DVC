@@ -230,10 +230,28 @@ export function maskErrText(v, hosts = []) {
  *   호스트 상세 업링크 근거(hostSan net-uplinks)도 쓰지 않는다 — 같은 화면 NIC 표가 그 호스트 NIC MAC 을 이미 보인다(같은 사용자 · 같은 값).
  *   모든 반복에 상한(콜론 · 하이픈 6마디 · 점 3마디 · 맨 12자리) — 선형. 글자 길이도 먼저 자른다.
  */
-const MAC_TOKEN = /(?<![0-9a-f][:.-])\b(?:(?:[0-9a-f]{2}[:-]){5}[0-9a-f]{2}|(?:[0-9a-f]{4}\.){2}[0-9a-f]{4}|[0-9a-f]{12})\b(?![:.-][0-9a-f])/gi;   // 앞뒤로 마디가 더 붙은 것(8바이트 WWN 등)은 MAC 이 아니다
+// 5회차 A3(추정 → 반영): 4-4-4 하이픈(화웨이 · H3C · HPE Comware) · 콜론의 앞자리 0 생략(0:50:56:a:bb:cc)도 MAC 이다. 하이픈 2자리 표기는 앞자리 생략을 받지 않는다(판 번호 '4-27-4-1-2-3' 류를 가리지 않게).
+const MAC_TOKEN = /(?<![0-9a-f][:.-])\b(?:(?:[0-9a-f]{1,2}:){5}[0-9a-f]{1,2}|(?:[0-9a-f]{2}-){5}[0-9a-f]{2}|(?:[0-9a-f]{4}\.){2}[0-9a-f]{4}|(?:[0-9a-f]{4}-){2}[0-9a-f]{4}|[0-9a-f]{12})\b(?![:.-][0-9a-f])/gi;   // 앞뒤로 마디가 더 붙은 것(8바이트 WWN 등)은 MAC 이 아니다
 export function maskMacText(v) {
   if (typeof v !== 'string' || !v) return v;
   return v.slice(0, 4000).replace(MAC_TOKEN, '(MAC 가림)');
+}
+/**
+ * 5회차 A3-F1 · F2: LLDP 에서 온 글자(시스템 이름 · 포트 ID · 포트 설명)는 **주소 가림 + MAC 가림** 둘 다 — 화면마다 따로 걸어 포트 구성도 · 토폴로지는 IP 모양 포트 ID 를,
+ *   포트 구성도는 MAC 모양 시스템 이름을 원문으로 냈다(전후 비교만 둘 다 걸었다). LLDP 글자를 싣는 응답은 이 함수 하나로.
+ */
+export function maskLldpText(v, hosts = []) {
+  if (typeof v !== 'string' || !v) return v;
+  return maskMacText(maskErrText(v, hosts));
+}
+/** 5회차 A3-F3: 글자 안의 MAC 가운데 own(12자리 소문자 집합)에 없는 것만 가린다 — 호스트 업링크 근거에서 그 호스트 NIC 가 아닌 MAC(이름이 겹친 다른 호스트)을 숨긴다. */
+export function maskForeignMacs(v, own = new Set()) {
+  if (typeof v !== 'string' || !v) return v;
+  return v.slice(0, 4000).replace(MAC_TOKEN, (m) => {
+    const parts = m.toLowerCase().split(/[:.-]/);
+    const hex = parts.length === 6 ? parts.map((x) => x.padStart(2, '0')).join('') : parts.join('');
+    return own.has(hex) ? m : '(MAC 가림)';
+  });
 }
 
 /**
@@ -477,12 +495,14 @@ api.get('/tools/cvp/portmap', toolsPerm, fullScopeOnly, async (req, res) => {
   const m = buildPortMap({ model: det.device.model, ports: det.ports, parts: det.device.partsList, lldp: ll.rows, lldpRead: ll.read, lastLink: days.last, switchNames });
   const hosts = listServers().map((x) => x.host);
   const mk = (v) => (admin || v == null ? v : maskErrText(v, hosts));
+  const mkL = (v) => (admin || v == null ? v : maskLldpText(v, hosts));
   const corp = corpResolver(listServers(), dcList())(cvpId);
   res.json({
     device: { ...publicDevice(det.device, admin), corpId: corp.corpId, corpName: corp.corpName },
     cvpName: srv.name || srv.id,
     portsRead: m.portsRead, faceplate: m.faceplate, counts: m.counts, bySpeed: m.bySpeed,
-    ports: m.ports ? m.ports.map((p) => ({ ...p, desc: mk(p.desc), device: mk(p.device), lldp: p.lldp ? { ...p.lldp, sysName: mk(p.lldp.sysName), portDesc: mk(p.lldp.portDesc), portId: admin ? p.lldp.portId : maskMacText(p.lldp.portId) } : null })) : null,
+    // 5회차 A3-F1 · F2: LLDP 에서 온 글자는 maskLldpText 하나(주소 + MAC) — 연결 장비 이름(device)도 LLDP 시스템 이름에서 올 수 있다.
+    ports: m.ports ? m.ports.map((p) => ({ ...p, desc: mk(p.desc), device: mkL(p.device), lldp: p.lldp ? { ...p.lldp, sysName: mkL(p.lldp.sysName), portDesc: mkL(p.lldp.portDesc), portId: mkL(p.lldp.portId) } : null })) : null,
     xcvrRead: !!m.xcvrRead, partsAt: det.device.partsAt ?? null, collectedAt: det.device.collectedAt ?? null,
     lldp: { read: ll.read, at: ll.at, failing: !!ll.failing, ...(ll.unavailable ? { unavailable: true } : {}) },
     linkHistory: { since: days.since, ...(days.unavailable ? { unavailable: true } : {}) },
