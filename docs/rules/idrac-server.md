@@ -2192,3 +2192,22 @@
 - 화면: 전원 구역 진행 중 · 결과는 모듈 상태 + **구독형 다시 그리기**(`_subs` · `notify`) · 등급 · 케이스 상태 정렬은 순위(HWLOG_SEV_ORDER · CASE_STATUS_ORDER) · 구역 머리 배지 nowrap · 권고 오류는 `errorCount` 로 전체 수 ·
   상한 숫자는 API `limits`(perPost · batch) · 원장 · 권고 창은 적용 중 닫히지 않는다.
 - 회귀: `server/test/bmDebug1.test.js` · 웹 `bmFolders/bmDebug1.test.jsx`.
+
+### v3.52 디버깅 2회차 반영(2026-11-26 — 기록은 `docs/rules/audits.md` ‘v3.52 물리서버 기능 디버깅 2회차’)
+
+- **엣지 전원 상한은 검사할 때 자리를 잡는다**(collector.js — `slot` · `release`): 데모 · 서버 없음 · busy · bad-args · auth-stopped 처럼 장비에 닿기 전에 끝난 것만 돌려준다. 장비를 조회한 뒤 보내지 않은 것(태그 다름 · 허용 안 함)은 센다.
+- 엣지 서버 찾기: 장비가 지금 말하는 태그(인벤토리) → 등록 id → 등록부 태그. **등록부 태그가 k 인데 장비 태그가 다른 등록은 낡은 것**이라 id · 등록부 태그 단계에서 뺀다(id 만 같은 등록은 빼지 않는다 — id 가 태그가 아닐 수 있다).
+- 전원 태그 대조는 공통 자리표시 태그(`bmusage/commonTag.js isPlaceholderTag`)를 쓰지 않는다(tagChecked:false) · 조회 단계 시한은 `error` + sent:false(‘모름’ 잠금 없음).
+- `scrubEventPath` 는 api 바로 앞 빗금에서 시작하는 선형 정규식 + 4KB 자르기(인증 전 모든 요청의 기록 단계 — 정규식 규칙). 데모 판정 `normApiPath` 는 겹친 빗금을 합친다.
+- 구독 ‘내 것’ = 같은 받는 주소 앞 **또는** Context 가 이 포탈 열쇠로 맞는 것(받는 주소를 바꾼 뒤의 옛 구독). 등록부를 못 읽으면 이벤트 수신 503 · 구독 걸기 실패 · 중앙 이벤트 로그 why 'registry-unreadable' · 전원 503.
+- 정규 · 수동 주기는 진행 중인 **이벤트 읽기**(`pollNowForEvent`)를 기다렸다가 돈다(건너뛰지 않는다). 이벤트 읽기는 주기가 돌면 BUSY. 정규 주기가 이벤트 표시 서버를 다시 읽으면 부품 장애 훅이 urgent 로 보낸다(`onSnapshotRefreshed(src, { urgent })`) · push 합류도 urgent 유지.
+- 알림 단계: 보낸 줄은 `[단계, 시각, 글, 종류, 정책 id]` — `stepDone(sent, i, pol)` 은 그 정책의 줄만(정책 없는 옛 줄은 기록의 pol) · 정책이 바뀌어도 since · 보낸 줄을 지우지 않는다 · 채널 열쇠 `partfault-esc:<수집 주체>|<파트 키>:<정책>:<since>:<단계>:<시도>` ·
+  상한 셈은 열쇠 기준(이어받은 기록 포함) · 행 표지 사유는 `escalationMarksNow()`(지금 상태 — 첫 회차 전에도) + 마지막 회차의 정비 창 보류 열쇠.
+- 정비 창 보류: 엣지 장비가 중앙 로컬 대상으로 넘어가는 것은 그 엣지가 맡은 법인(`edgeCorpsSource`)의 대상만 · 엣지 이름은 `diskbad/agentKey.js agentKeyOf`(수집 서버 등록 id)로 맞춰 견준다.
+- 권고 모델 = 제조사 · 제품군 낱말(dell · poweredge · hpe · proliant · lenovo · thinksystem …)을 뺀 **낱말 집합이 같을 때만**. 서명 기억은 sha1 열쇠 · 2,048.
+- 케이스 파일 상한은 **커지는 쓰기만** 413(줄이는 편집 · 끝남으로 바꾸기 · 지우기는 된다) · 자산 원장 · 펌웨어 기준 · 케이스 파일은 백업 상한(`USER_DOC_FILES`)에 등재.
+- 교정 오류: 시각 모름 경고는 `untimed` · 슬롯별 `uslots` — `covered` 는 기간 덮음 그대로(다 읽었으면 ‘다 읽지 못함’ 이라 쓰지 않는다). SSD 같은 모델 대비는 한 번 정렬 · 자리 계산. 엣지 수명 요약은 read>0 인데 min 이 없으면 싣지 않는다.
+- 이벤트 로그 장비 읽기는 노드마다 동시 `BM_HWLOG_CONCURRENCY`(기본 4 · 1~16) — 넘치면 장비에 묻지 않고 why 'busy'(엣지는 429 code busy → 중앙 edge-busy). 합치기 기억은 밀려날 때 해제 타이머도 지운다.
+- 화면: 이 노드 서버의 수명 요약은 `detail.summary` · 띠 글자도 행과 같은 자리수 · 구독 결과 · 원장 결과 열은 순위 정렬(`EVT_SYNC_ORDER` · `IMPORT_ACTION_ORDER`) · 이벤트 구독 표 minWidth 300 · 정책 칸은 당직표 표기(‘이 포탈(중앙 수집)’ · ‘모두’)도 받는다.
+- 회귀: `server/test/bmDebug2.test.js` · 웹 `bmFolders/bmDebug1.test.jsx`(2회차 절).
+

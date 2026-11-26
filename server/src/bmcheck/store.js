@@ -197,6 +197,8 @@ const _advisoryFile = makeJsonFileLoader(ADVISORY_FILE, { label: '물리서버 �
  */
 export const CASES_FILE_MAX_BYTES = 16 * 1024 * 1024;   // 건수 상한(5,000)으로는 글자를 꽉 채우면 60MB 를 넘을 수 있다 — 파일 크기로도 묶는다(이슈 · 게시판과 같은 16MB)
 export const casesMaxBytes = () => CASES_FILE_MAX_BYTES;
+/** 자산 원장 · 펌웨어 기준 파일의 백업 상한 기준(줄 · 글자 상한을 꽉 채우면 계산상 12.6MB · 10.5MB — 8MB 를 넘어 백업에서 빠졌다: 디버깅 2회차 성능 Q9). */
+export const ledgerMaxBytes = () => 16 * 1024 * 1024;
 /** 제조사 케이스 기록(⑫). */
 export const caseStore = docStore({ file: CASES_FILE, L: _casesFile, what: '물리서버 제조사 케이스 기록', empty: () => caseShape(null), shape: caseShape, maxBytes: casesMaxBytes });
 /** 펌웨어 보안 권고 표(④). */

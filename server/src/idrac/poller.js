@@ -103,13 +103,19 @@ export function pruneSensorPathCache(registry, now = Date.now()) {
 }
 const BUSY = Symbol('idrac-poll-busy'); // v2.591(감사 P1): 재진입 가드에 막혔다는 표지(수동 응답이 말하게)
 
+let _runningEventP = null;   // 진행 중인 이벤트 읽기(그 서버들만 — 짧다)
 async function pollOnce({ manual = false, only = null } = {}) {
+  // 정규 · 수동 주기는 진행 중인 **이벤트 읽기**를 기다렸다가 돈다 — 건너뛰면 이벤트를 계속 보내는 장비 한 대가 함대 전체 수집을 밀어냈다(디버깅 2회차 성능 Q1).
+  //   이벤트 읽기 쪽은 주기가 돌고 있으면 BUSY(호출부가 다시 잡는다 · 강제 재읽기 표지는 정규 주기가 읽는다). 같은 iDRAC 에 세션이 겹치지 않는 것은 그대로.
+  if (running && !only && _runningEventP) { try { await _runningEventP; } catch { /* 결과는 이벤트 쪽이 다룬다 */ } }
   if (running) return BUSY; // 고RTT iDRAC 다수에서 한 주기가 간격을 넘겨 폴이 중첩되는 것 방지
   running = true;
   try {
-    return await withJob(only ? 'idrac.poll.event' : 'idrac.poll', () => pollOnceInner({ manual, only }));
+    const p = withJob(only ? 'idrac.poll.event' : 'idrac.poll', () => pollOnceInner({ manual, only }));
+    if (only) _runningEventP = p;
+    return await p;
   } finally {
-    running = false;
+    running = false; _runningEventP = null;
     // 주기가 도중에 던졌으면 끝을 알리지 못했다 — 경과를 소요로 남겨 '영원히 도는 주기' 로 보이지 않게 한다.
     if (_runningSince != null) {
       try { setSensorPollCycle({ durationMs: Date.now() - _runningSince, intervalMs: config.idrac.pollIntervalMs }); } catch { /* */ }

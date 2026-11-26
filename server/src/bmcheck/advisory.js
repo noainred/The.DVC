@@ -8,6 +8,7 @@
  *  · 모델 칸은 **제조사 · 제품군 낱말을 뺀 모델 낱말이 서버 모델과 같을 때만**(R740xd 줄이 R740xd2 · DL380 Gen10 줄이 DL380 Gen10 Plus · SR650 줄이 SR650 V2 에 걸리지 않게 —
  *    디버깅 1 · 2회차 판정 #6 · #8). 구성요소 칸은 소문자 일부 일치. 둘 다 비우면 전부. 글자는 이미 길이가 잘려 있다(store.js · 선형 includes).
  */
+import crypto from 'node:crypto';
 import { cmpVersion, parseVersion, cmpParsed } from '../util/cmpVersion.js';
 import { FW_TYPES } from './fw.js';
 import { parseCsvRows, csvLine, unguardCell, CSV_BOM } from '../util/csv.js';
@@ -90,7 +91,7 @@ export const sampleAdvisoryCsv = () => CSV_BOM + csvLine(ADVISORY_COLUMNS) + '\r
 //     (표가 바뀌면 새 배열이라 기억도 새로 — WeakMap). 결과 객체는 여러 서버가 함께 쓰므로 얼린다(받는 쪽은 읽기만).
 const SEV_ORDER = Object.freeze({ critical: 0, high: 1, medium: 2, low: 3 });
 const COLL = new Intl.Collator();
-export const ADVISORY_MEMO_MAX = 4096;
+export const ADVISORY_MEMO_MAX = 2048;   // 서명은 해시로 담는다(긴 서명 글자 4,096개가 힙 33~44MB 를 붙잡았다 — 디버깅 2회차 성능 Q8)
 const _tableIx = new WeakMap();
 function tableIndex(list) {
   let ix = _tableIx.get(list);
@@ -107,7 +108,7 @@ export function advisoriesFor(server, table) {
   if (!fw || !fw.length) return { state: 'no-fw', hits: [], total: 0, unknown: 0, checked: 0 };
   const model = String(server?.model || '').toLowerCase();
   const ix = tableIndex(list);
-  const sig = `${model}\u0001${fw.map((r) => (r ? `${r.type}\u0002${r.label}\u0002${r.installed}\u0002${r.mixed ? 1 : 0}` : '')).join('\u0003')}`;
+  const sig = crypto.createHash('sha1').update(`${model}\u0001${fw.map((r) => (r ? `${r.type}\u0002${r.label}\u0002${r.installed}\u0002${r.mixed ? 1 : 0}` : '')).join('\u0003')}`).digest('base64');
   const memo = ix.memo.get(sig);
   if (memo) return memo;
   // 펌웨어 줄을 종류별로 한 번 묶고(소문자 이름 · 설치 버전 파싱도 한 번) — 표 순서 × 그 종류 줄 순서로 도는 것은 예전과 같다

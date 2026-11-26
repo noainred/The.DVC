@@ -365,11 +365,14 @@ collectorRouter.get('/bm-hwlog', tokenFirst('bm-hwlog'), async (req, res) => {
     const key = String(entry.id);
     const hit = _hwlogMemo.get(key);
     if (hit && (hit.pending || Date.now() - hit.at < 60_000)) return res.json(await hit.p);
+    if (L.hwLogBusy()) return res.status(429).json({ ok: false, code: 'busy', reason: '이 엣지에서 다른 이벤트 로그 읽기가 상한만큼 진행 중입니다 — 잠시 뒤 다시.' });   // 엣지 노드 동시 상한(성능 Q10)
     const ent = { at: Date.now(), pending: true, p: null };
     // 기한(60초)이 지나면 결과를 놓는다 — 개수(256)로만 밀어내면 묵은 결과를 붙잡고 있었다(v3.52 디버깅 1회차 성능 P9)
-    ent.p = L.readHwLog(entry).finally(() => { ent.pending = false; ent.at = Date.now(); setTimeout(() => { if (_hwlogMemo.get(key) === ent) _hwlogMemo.delete(key); }, 60_000).unref?.(); });
-    _hwlogMemo.set(key, ent);
-    while (_hwlogMemo.size > 256) _hwlogMemo.delete(_hwlogMemo.keys().next().value);
+    ent.p = L.readHwLogLimited(entry).finally(() => { ent.pending = false; ent.at = Date.now(); ent.timer = setTimeout(() => { if (_hwlogMemo.get(key) === ent) _hwlogMemo.delete(key); }, 60_000); ent.timer.unref?.(); });
+    // 밀려난 항목의 해제 타이머도 지운다(타이머가 결과를 60초 쥐고 있었다 — 디버깅 2회차 성능 Q6)
+    const drop = (k2) => { const old = _hwlogMemo.get(k2); if (old?.timer) clearTimeout(old.timer); _hwlogMemo.delete(k2); };
+    drop(key); _hwlogMemo.set(key, ent);
+    while (_hwlogMemo.size > 256) drop(_hwlogMemo.keys().next().value);
     res.json(await ent.p);
   } catch (err) { res.status(500).json({ ok: false, reason: String(err?.message || err).slice(0, 300) }); }
 });

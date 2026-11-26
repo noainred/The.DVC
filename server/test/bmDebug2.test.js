@@ -157,3 +157,31 @@ test('화면 — 행 표지 사유는 지금 상태로(재시작 뒤 첫 회차 
   } finally { R._setEscalationDepsForTest(null); }
   assert.match(src('../src/routes/api/partFaults.js'), /const escRun = await escalationMarksNow\(\)\.catch\(\(\) => null\);/);
 });
+
+test('성능 — 정규 주기는 이벤트 읽기를 기다렸다 돈다(건너뛰지 않음) · 밀려난 기억은 타이머도 지움 · 같은 모델 대비는 자리 계산 · 서명은 해시 · 원장 백업 상한 · 이벤트 로그 동시 상한', async () => {
+  const ps = src('../src/idrac/poller.js');
+  assert.match(ps, /if \(running && !only && _runningEventP\) \{ try \{ await _runningEventP; \}/);
+  assert.match(src('../src/routes/api/bmFolders.js'), /const drop = \(k\) => \{ const old = _trendMemo\.get\(k\); if \(old\?\.timer\) clearTimeout\(old\.timer\);/);
+  assert.match(src('../src/routes/collector.js'), /const drop = \(k2\) => \{ const old = _hwlogMemo\.get\(k2\); if \(old\?\.timer\) clearTimeout\(old\.timer\);/);
+  const L = await import('../src/idrac/partLife.js');
+  const disks = Array.from({ length: 1024 }, (_, i) => ({ name: `Disk ${i}`, model: 'SYNTH', media: 'SSD', capacityGB: 960, lifeLeftPct: i === 5 ? 40 : 90 + (i % 5) }));
+  const t0 = performance.now(); const rows = L.ssdLifeRows(disks);
+  assert.ok(performance.now() - t0 < 60, `SSD 1,024개 ${Math.round(performance.now() - t0)}ms`);
+  assert.ok(rows.some((r) => r.name === 'Disk 5' && r.gap != null), '혼자 닳은 SSD 는 표지');
+  // 자기를 뺀 가운데값이 예전 계산(나머지 정렬)과 같다
+  const vals = Array.from({ length: 41 }, (_, i) => (i === 3 ? 55 : i === 17 ? 61 : 80 + ((i * 7) % 15)));
+  const few = vals.map((v, i) => ({ name: `d${i}`, model: 'M', media: 'SSD', lifeLeftPct: v }));
+  const med = (xs) => { const a = [...xs].sort((x, y) => x - y); const m = a.length >> 1; return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2; };
+  const want = vals.map((v, i) => { const g = Math.round((med(vals.filter((_, j) => j !== i)) - v) * 10) / 10; return g >= L.LIFE_PEER_GAP ? g : null; });
+  assert.deepEqual(L.ssdLifeRows(few).map((r) => r.gap), want);
+  assert.ok(want.filter((x) => x != null).length >= 2, '시험이 공허하지 않다');
+  assert.match(src('../src/bmcheck/advisory.js'), /crypto\.createHash\('sha1'\)/);
+  const B = await import('../src/backup/service.js');
+  for (const f of ['bm-assets.json', 'bm-fw-baseline.json', 'bm-cases.json']) assert.ok(B.fileCapFor(f) > 16 * 1024 * 1024, f);
+  const H = await import('../src/idrac/hwLog.js');
+  assert.ok(H.HWLOG_CONCURRENCY >= 1 && H.HWLOG_CONCURRENCY <= 16);
+  let open = 0; let peak = 0;
+  const slow = async () => { open += 1; peak = Math.max(peak, open); await new Promise((r) => setTimeout(r, 50)); open -= 1; return { ok: true, status: 'ok', rows: [] }; };
+  const rs = await Promise.all(Array.from({ length: 10 }, (_, i) => H.readHwLogLimited({ id: `h${i}`, host: 'x' }, { getJson: async () => { await slow(); return { Members: [] }; } })));
+  assert.equal(rs.filter((r) => r.kind === 'busy').length, 10 - H.HWLOG_CONCURRENCY, '상한을 넘은 요청은 장비에 묻지 않는다');
+});

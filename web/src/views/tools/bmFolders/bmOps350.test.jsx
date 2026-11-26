@@ -58,7 +58,7 @@ describe('⑥ · ⑤ · ⑫ · ④ 글자', () => {
     expect(hwLogHead({ rows: [1, 2], read: 1000, total: 1500, stopped: 'max' })).toBe('최근 2건 · 읽은 1000건 · 장비 전체 1500건 — 읽을 쪽 수 상한에 닿아 일부만 읽었습니다(장비가 정렬을 알려 주지 않으면 가장 새 기록이 빠졌을 수 있습니다).');
     expect(hwLogHead({ rows: [1], read: 1, total: 1, stopped: '' })).toBe('최근 1건 · 읽은 1건');
     expect(hwLogHead({ why: 'esxi' })).toBe('');
-    expect(Object.keys(HWLOG_WHY)).toEqual(['esxi', 'no-source', 'old-version', 'not-found', 'edge-fail', 'edge-ambiguous', 'edge-registry', 'registry-unreadable']);   // 디버깅 2회차 엣지 #5 · #6
+    expect(Object.keys(HWLOG_WHY)).toEqual(['esxi', 'no-source', 'old-version', 'not-found', 'edge-fail', 'edge-ambiguous', 'edge-registry', 'registry-unreadable', 'busy']);   // 디버깅 2회차 엣지 #5 · #6
     expect(HWLOG_STATUS.auth).toContain('자동으로 다시 시도하지 않습니다');
   });
   it('케이스 상태 · 권고 — 표가 비면 대조하지 않음(걸린 것 없음이 아니다) · 못 읽음 · 걸림(심각도 색)', () => {

@@ -46,7 +46,7 @@ import { scopeSig } from '../../util/scopeSig.js';
 import { bmCheckFor, bmCheckForAsync, chkRowOf } from '../../bmcheck/state.js';
 import { createYielder } from '../../util/timeSlice.js';
 import { healthRowOf, HEALTH_RULES, HEALTH_BANDS, HEALTH_MIN } from '../../bmcheck/health.js';   // v3.50 건강 점수(⑩)
-import { maskHwLogText, readHwLog, demoHwLog } from '../../idrac/hwLog.js';   // v3.50 하드웨어 이벤트 로그(⑤) — 판본에 따른 가림   // v3.45 물리서버 점검(보증 · 펌웨어 기준선 · BIOS 편차)
+import { maskHwLogText, readHwLogLimited, demoHwLog } from '../../idrac/hwLog.js';   // v3.50 하드웨어 이벤트 로그(⑤) — 판본에 따른 가림   // v3.45 물리서버 점검(보증 · 펌웨어 기준선 · BIOS 편차)
 import { memCeOf } from '../../idrac/partLife.js';   // v3.51 부품 수명(⑧) — 메모리 교정 오류 경고 슬롯별 수
 import { POWER_ACTIONS, LED_WANTS, runDeviceAction, powerGapIssue } from '../../idrac/power.js';   // v3.52 원격 전원 · LED(⑦ ⑥)
 import { remotePower } from '../../idrac/remotePowerSettings.js';
@@ -306,10 +306,13 @@ async function trendOnce(key, fn, now = Date.now()) {
     .finally(() => {
       ent.pending = false; ent.at = Date.now();
       // 기한이 지나면 결과를 놓는다 — 개수로만 밀어내면 묵은 결과(한 벌 수백 KB)를 붙잡고 있었다(v3.52 디버깅 1회차 성능 P9)
-      setTimeout(() => { if (_trendMemo.get(key) === ent) _trendMemo.delete(key); }, ent.ok ? TREND_OK_MS : TREND_FAIL_MS).unref?.();
+      ent.timer = setTimeout(() => { if (_trendMemo.get(key) === ent) _trendMemo.delete(key); }, ent.ok ? TREND_OK_MS : TREND_FAIL_MS);
+      ent.timer.unref?.();
     });
-  _trendMemo.delete(key); _trendMemo.set(key, ent);
-  while (_trendMemo.size > TREND_MAX) _trendMemo.delete(_trendMemo.keys().next().value);
+  // 밀려난 항목의 해제 타이머도 지운다 — 타이머가 결과를 쥐고 있어 개수 상한으로 밀려난 것이 60초 동안 남았다(디버깅 2회차 성능 Q6)
+  const drop = (k) => { const old = _trendMemo.get(k); if (old?.timer) clearTimeout(old.timer); _trendMemo.delete(k); };
+  drop(key); _trendMemo.set(key, ent);
+  while (_trendMemo.size > TREND_MAX) drop(_trendMemo.keys().next().value);
   return ent.p;
 }
 /** 추이 의존(서버 비교와 같은 함수들 — 시험에서 갈아 끼운다). */
@@ -333,7 +336,7 @@ async function trendDeps() {
     // v3.50 하드웨어 이벤트 로그(⑤) — 이 노드 서버는 등록부 항목으로 직접 · 엣지 · 수집 서버 서버는 그쪽이 읽는다
     // 등록부를 못 읽으면 던진다(호출부가 ‘등록부 밖’ 과 가른다 — 디버깅 2회차 엣지 #5)
     hwLogEntry: async (id) => { const R = await import('../../idrac/registry.js'); if (R.registryLoadError()) throw Object.assign(new Error('registry-unreadable'), { code: 'registry-unreadable' }); const e = R.loadRegistry().find((x) => String(x.id) === String(id)); return e && e.enabled !== false && e.host ? e : null; },
-    hwLogLocal: async (entry) => readHwLog(entry),
+    hwLogLocal: async (entry) => readHwLogLimited(entry),   // 노드 동시 상한(디버깅 2회차 성능 Q10)
     hwLogEdge: async (agent, q) => (await import('../../central/bmHwLogPull.js')).pullEdgeHwLog(agent, q),
     hwLogDemo: async (key) => { const { isMockMode } = await import('../../mock/demo/flags.js'); return isMockMode() ? demoHwLog(key) : null; },
     // v3.52 원격 전원 조작 · 위치 LED(⑦ ⑥) — 이 노드 서버는 등록부 항목으로 직접 · 엣지 · 수집 서버 서버는 그쪽이 보낸다 · 데모는 장비에 보내지 않는다
@@ -887,7 +890,7 @@ export function registerBmFolders(api) {
       const full = admin && !hide;
       const finish = async (via, r) => {
         // 엣지가 가른 사유(겹침 · 등록부 못 읽음)는 그대로 — ‘잠시 뒤 다시’ 로 뭉개지 않는다(디버깅 2회차 엣지 #6)
-        const WHY_OF = { 'old-version': 'old-version', 'not-found': 'not-found', 'edge-ambiguous': 'edge-ambiguous', 'edge-registry': 'edge-registry' };
+        const WHY_OF = { 'old-version': 'old-version', 'not-found': 'not-found', 'edge-ambiguous': 'edge-ambiguous', 'edge-registry': 'edge-registry', busy: 'busy', 'edge-busy': 'busy' };
         if (!r || r.ok !== true) return res.json({ ok: true, via, why: WHY_OF[r?.kind] || 'edge-fail', ...(full && r?.reason ? { reason: String(r.reason).slice(0, 200) } : {}) });
         const rows = (Array.isArray(r.rows) ? r.rows : []).map((x) => (full ? x : { ...x, msg: maskHwLogText(x.msg, { tag: m.serviceTag }) }));
         // v3.51 부품 수명(⑧): 메모리 교정 오류 경고 — 가리기 전 원문에서 슬롯별로 센다(슬롯 이름은 주소 · 계정이 아니다). DIMM 목록은 이 노드 인벤토리가 있을 때만(0 인 슬롯도 줄로)

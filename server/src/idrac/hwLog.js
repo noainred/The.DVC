@@ -48,6 +48,16 @@ export function countsOf(rows) {
  * @returns {Promise<{ ok:true, at:number, status:string, read:number, total:number|null, pages:number, stopped:string, rows:Array, counts:object }>}
  *   status: ok · empty · absent(경로 없음) · forbidden · auth(인증 실패) · auth-stopped(주 폴러가 인증 실패로 멈춤 — 장비에 묻지 않음) · timeout · error
  */
+// 이 노드에서 동시에 장비를 읽는 이벤트 로그 수 상한 — 계정 하나가 여러 서버를 동시에 부르면 그 수만큼 iDRAC 세션이 열렸다(디버깅 2회차 성능 Q10)
+export const HWLOG_CONCURRENCY = (() => { const n = Number(String(process.env.BM_HWLOG_CONCURRENCY ?? '').trim()); return Number.isInteger(n) && n >= 1 && n <= 16 ? n : 4; })();
+let _hwActive = 0;
+export const hwLogBusy = () => _hwActive >= HWLOG_CONCURRENCY;
+/** 상한 안에서 읽기 — 넘치면 장비에 묻지 않고 { ok:false, kind:'busy' }. */
+export async function readHwLogLimited(entry, opts) {
+  if (_hwActive >= HWLOG_CONCURRENCY) return { ok: false, kind: 'busy', reason: `다른 이벤트 로그 읽기 ${HWLOG_CONCURRENCY}건이 진행 중입니다 — 잠시 뒤 다시 읽으십시오.` };
+  _hwActive += 1;
+  try { return await readHwLog(entry, opts); } finally { _hwActive -= 1; }
+}
 export async function readHwLog(entry, { getJson = null, now = Date.now, timeoutMs = HWLOG_TIMEOUT_MS, budgetMs = HWLOG_BUDGET_MS, authStopped = null } = {}) {
   // 주 iDRAC 폴러가 인증 실패로 멈춘 서버는 장비에 묻지 않는다 — 틀린 비밀번호로 ‘기록 읽기’ 마다 로그인을 보내지 않게(계정 잠금 · authGuard 규칙.
   //   디스크 배드 섹터 분석 수동 점검과 같은 판정 — v3.50 반증 A13). 판정을 못 하면(모듈 없음) 막지 않는다.

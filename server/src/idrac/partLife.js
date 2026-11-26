@@ -37,7 +37,6 @@ export function mediaKindOf(d) {
   return '';
 }
 export const isSsd = (d) => mediaKindOf(d) === 'ssd' || /nvme/i.test(s(d?.protocol));
-const median = (xs) => { const a = [...xs].sort((x, y) => x - y); const m = a.length >> 1; return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2; };
 
 /**
  * 인벤토리 디스크 목록 → SSD 수명 줄. 디스크를 못 읽었으면(배열이 아님) null · SSD 가 없으면 [].
@@ -57,13 +56,18 @@ export function ssdLifeRows(disks) {
   });
   const byModel = new Map();
   for (const r of rows) if (r.life != null && r.model) { const g = byModel.get(r.model) || []; g.push(r); byModel.set(r.model, g); }
+  // 자기를 뺀 가운데값 — 한 번 정렬하고 자리 계산으로(예전에는 줄마다 나머지를 다시 정렬해 SSD 1,024개에 O(n² log n) · 113ms — 디버깅 2회차 성능 Q7)
   for (const g of byModel.values()) {
     if (g.length < LIFE_PEER_MIN + 1) continue;
-    for (const r of g) {
-      const others = g.filter((x) => x !== r).map((x) => x.life);
-      const gap = Math.round((median(others) - r.life) * 10) / 10;
+    const sorted = g.map((r, j) => [r.life, j]).sort((a, b) => a[0] - b[0]);
+    const pos = new Array(g.length); sorted.forEach((x, k) => { pos[x[1]] = k; });
+    const m = g.length - 1;   // 자기를 뺀 수
+    g.forEach((r, j) => {
+      const i = pos[j]; const at = (k) => sorted[k < i ? k : k + 1][0];
+      const med = m % 2 ? at(m >> 1) : (at(m / 2 - 1) + at(m / 2)) / 2;
+      const gap = Math.round((med - r.life) * 10) / 10;
       if (gap >= LIFE_PEER_GAP) r.gap = gap;
-    }
+    });
   }
   if (rows.length <= LIFE_ROWS_MAX) return rows;
   const rank = (r) => (r.low ? 0 : r.gap != null ? 1 : r.life != null ? 2 : 3);
