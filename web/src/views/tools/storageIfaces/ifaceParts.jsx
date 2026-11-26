@@ -77,12 +77,14 @@ export function WhyDetail({ why, detail }) {
       {dg && (
         <span className="muted">
           마지막 표본 시도 {timeText(dg.at)} · {dg.source === 'edge' ? '엣지가 올린 표본' : '이 포탈에서 수집'} · {dg.ok ? '성공' : '실패'}
+          {dg.via ? ` · 읽은 경로 ${dg.via === 'rest' ? 'REST' : 'SSH(uemcli)'}` : ''}
           {dg.fcPath ? ` · FC 경로 ${dg.fcPath}` : ''}
           {Object.keys(dg.kinds || {}).length > 0 && ` · 단위 ${Object.entries(dg.kinds).map(([k, n]) => `${k} ${n}`).join(' · ')}`}
         </span>
       )}
       {paths.length > 0 && <span className="muted" style={{ fontFamily: 'var(--mono)', overflowWrap: 'anywhere' }}>경로별 항목 수: {paths.map(([k, n]) => `${k} ${n}`).join(' · ')}</span>}
       {dg?.error && <span style={{ color: 'var(--amber)', overflowWrap: 'anywhere' }}>오류: {dg.error}</span>}
+      {dg?.restSkip && <span className="muted" style={{ overflowWrap: 'anywhere' }}>REST 를 쓰지 않은 이유: {dg.restSkip === 'auth' ? '이 계정으로 REST 로그인이 거절돼 멈췄습니다(계정 잠금 방지 — 장비 등록의 계정 · 비밀번호를 바꾸면 다시 시도합니다)' : 'REST 가 실패해 1시간 동안 SSH 로 읽습니다'}{dg.restError ? ` — ${dg.restError}` : ''}</span>}
       {(dg?.errors || []).map((e, i) => <span key={i} className="muted" style={{ overflowWrap: 'anywhere' }}>· {e}</span>)}
       {dg?.counterNote && <span className="muted">{dg.counterNote}</span>}
       {why === 'no-match' && (

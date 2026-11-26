@@ -28,6 +28,14 @@ import { envPort } from '../../util/envNumber.js'; // 결정(56~75 남긴 것) 5
 /** 어레이 측 표본을 읽는 장비 타입(REST 수집 방식만 — SSH(uemcli · pstcli) 변형은 성능 경로가 없다). registry · 폴러 · 화면이 같이 쓴다. */
 export const FE_PERF_TYPES = Object.freeze(['powermax', 'vmax', 'powerstore', 'unity480']);
 export const isFePerfType = (type) => FE_PERF_TYPES.includes(String(type || ''));
+/**
+ * v3.46.0 — 5분 표본을 읽는 장비인가(판정 하나 — 등록부 토글 · CSV · 폴러 대상이 같이 쓴다. 예전엔 세 곳 + 화면에 같은 조건이 복제돼 있었다).
+ * 아이실론(SSH · REST) · REST 어레이 · **SSH 로 등록한 Unity**(사용자 요청 'SSH 장비도 사용량은 REST 로, 안 되면 SSH 로' — unityMetricsSsh.sampleUnityAny).
+ */
+export function sampleCapableOf(type, collectMethod) {
+  const t = String(type || ''); const m = String(collectMethod || 'api');
+  return t === 'isilon' || t === 'unity480' || (isFePerfType(t) && m === 'api');
+}
 /** 표본 열(노드 부하 표의 fe 묶음과 같은 순서). */
 export const FE_KEYS = Object.freeze(['busy', 'cpu', 'iops', 'lat', 'hbps', 'queue']);
 /** PowerMax FE 디렉터 지표 — 전체 묶음이 거부되면(지원하지 않는 지표 · 400) 핵심 3개로 한 번 더. */
