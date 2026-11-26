@@ -104,9 +104,12 @@ function sendErr(res, e) {
  */
 const NON_ASCII = /[^\u0000-\u007f]/;
 // 판정은 글자만으로 정해진다 — 같은 태그를 요청마다 다시 판정하지 않는다(범위 계정 요청 하나에 태그 2만여 개 · 약 10ms 실측 — 4회차 점검 성능). 상한을 넘으면 통째로 비운다.
-const TAG_OK = new Map(); const TAG_OK_MAX = 200_000;
+const TAG_OK = new Map(); const TAG_OK_MAX = 200_000; const TAG_OK_KEY_MAX = 64;
 export const usableTag = (t) => {
   if (typeof t !== 'string' || !t) return false;
+  // 긴 값은 기억하지 않는다 — 엣지가 올린 과대 serviceTag 는 잘린 문자열이 원문(수십 KB)을 붙든 채 키가 되어 Map 이 그 원문을 놓지 않았다
+  //   (5회차 점검 성능 2 재현: 서버 1,000대 × 50KB 태그가 수집마다 다르면 5회에 239MB). 진짜 태그는 이보다 훨씬 짧다(가림 색인의 키 상한도 64).
+  if (t.length > TAG_OK_KEY_MAX) return NON_ASCII.test(t) || !isPlaceholderTag(t);
   let ok = TAG_OK.get(t);
   if (ok === undefined) { ok = NON_ASCII.test(t) || !isPlaceholderTag(t); if (TAG_OK.size >= TAG_OK_MAX) TAG_OK.clear(); TAG_OK.set(t, ok); }
   return ok;
@@ -223,6 +226,7 @@ function hasIpv6(w) {
   for (const m of w.matchAll(/[0-9a-fA-F:]+/g)) {
     const run = m[0];
     if (run.length < 3 || run.length > IPV6_RUN_MAX || !run.includes(':')) continue;
+    if (!/[0-9a-fA-F]/.test(run)) continue;   // 콜론뿐인 구간은 묶음을 만들어 보지 않는다(':' × 80 에 89µs 였다 — 5회차 점검 성능 관찰)
     const parts = run.split(':');
     const n = parts.length;
     const leftOpen = !isLatinLD(w[m.index - 1]); const rightOpen = !isLatinLD(w[m.index + run.length]);

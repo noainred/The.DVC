@@ -68,6 +68,11 @@ test('1: 자리표시 시리얼로 놓은 장비는 아무 서버에도 이어�
 test('2: usableTag — 자리표시는 거르고, 비 ASCII 글자가 든 값은 거르지 않는다', () => {
   for (const t of ['None', 'To Be Filled By O.E.M.', 'Default string', '0000000', '1234567', 'AB1', '', null, undefined, 7]) assert.equal(RT.usableTag(t), false, String(t));
   for (const t of ['SVA0001', 'AB12', '자산1234', '본사-0000', '서울A1', '자산가나다라', 'ＮＯＮＥ']) assert.equal(RT.usableTag(t), true, t);
+  // 긴 값(기억하지 않는 갈래 — 5회차 점검 성능 2)도 판정은 같다 · 같은 값을 다시 물어도 같다
+  for (let i = 0; i < 2; i += 1) {
+    assert.equal(RT.usableTag('0'.repeat(100)), false); assert.equal(RT.usableTag(`${'A'.repeat(40)}${'7'.repeat(40)}`), true);
+    assert.equal(RT.usableTag(`To Be Filled By O.E.M.${' '.repeat(60)}`.trim()), false); assert.equal(RT.usableTag('S'.repeat(64) + '1'), true); assert.equal(RT.usableTag('SVA0001'), true);
+  }
 });
 
 test('2 라우트: 한글 시리얼이 든 다른 장비 이름 — 시리얼을 가리는 판본에서 가려진다(자리표시로 빠지지 않는다)', async () => {

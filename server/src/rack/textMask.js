@@ -110,7 +110,7 @@ function matchSpans(proj, indexes, accept) {
   const spans = [];
   for (let a = 0; a < proj.length; a += 1) {
     // 이미 표시한 구간 안이면 그 구간을 **넘는** 일치만 본다(구간 안에서 끝나는 일치는 결과를 바꾸지 않는다 — 시리얼이 든 이름에서 위치마다 길이 종류를 전부 다시 자르던 비용 · 4회차 점검 성능 관찰).
-    const prev = spans[spans.length - 1];
+    const prev = spans.length ? spans[spans.length - 1] : undefined;   // 빈 배열의 [-1] 읽기는 느리다(위치마다 60ns — 일치 없는 글에서 +45~80% · 5회차 점검 성능 1 실측)
     const floor = prev && a < prev[1] ? prev[1] : 0;
     let end = floor;
     for (const index of indexes) {
