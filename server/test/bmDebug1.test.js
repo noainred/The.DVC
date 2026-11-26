@@ -238,9 +238,9 @@ test('성능 — 이벤트는 그 서버만 읽는다(함대 주기 아님 · �
   // 판정 한 번 — 다시 읽은 인벤토리가 없으면 판정하지 않는다 · 이벤트 읽기는 폴러 훅을 부르지 않는다
   const es = src('../src/idrac/eventSub.js');
   assert.match(es, /const r = await P\.pollNowForEvent\(ids\);/);
-  assert.match(es, /if \(!\(Number\(r\?\.invRefreshed\) > 0\)\) return \{ busy: false, refreshed: 0 \};/);
+  assert.match(es, /if \(!\(Number\(r\?\.invRefreshed\) > 0\)\) return \{ busy: false, refreshed: 0, retry \};/);
   const ps = src('../src/idrac/poller.js');
-  const ia = ps.indexOf('if (only) return { servers: servers.length, invRefreshed };');
+  const ia = ps.indexOf('if (only) return { servers: servers.length - skippedForCycle.length, invRefreshed, skipped: skippedForCycle };');
   assert.ok(ia > 0 && ia < ps.indexOf("onSnapshotRefreshed('idrac'") && ia < ps.indexOf('lastRun = { at: ts, startedAt: ts'), '이벤트 읽기는 훅 · 주기 상태 앞에서 돌아간다');
   // 넘친 서버 — 세고 정규 주기가 읽게 표시
   const E = await import('../src/idrac/eventSub.js');

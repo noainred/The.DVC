@@ -400,7 +400,7 @@ export default function BmFolders() {
       </div>
       {panelRow ? <BmDrawer r={panelRow} rows={drawerRows} corps={corps} corpName={corpName} scoped={!!d.scoped} op={op} busy={busy} onClose={() => setPanel('')} onMove={setPanel} note={note} admin={!!d.admin} gen={`${d.rev ?? ''}:${d.at ?? ''}`} onChanged={() => load()}  healthRules={d.check?.health?.rules ? { ...d.check.health.rules, min: d.check.health.min || null } : null} /> : null}
       {ledger ? <AssetLedger meta={d.check?.assets} onClose={() => setLedger(false)} onChanged={() => load()} /> : null}
-      {advLedger ? <AdvisoryLedger meta={d.check?.advisories} onClose={() => setAdvLedger(false)} onChanged={() => load()} /> : null}
+      {advLedger ? <AdvisoryLedger meta={d.check?.advisories} models={[...new Set((d.servers || []).filter((x) => x.kind === 'bm' && x.model).map((x) => String(x.model)))].slice(0, 500)} onClose={() => setAdvLedger(false)} onChanged={() => load()} /> : null}
       {powerCfg ? <RemotePowerSettings onClose={() => setPowerCfg(false)} /> : null}
       {evtCfg ? <EventSubSettings onClose={() => setEvtCfg(false)} /> : null}
       {bulk ? <BulkAdd init={bulk} d={d} corpName={corpName} op={op} busy={busy} onClose={() => setBulk(null)} /> : null}

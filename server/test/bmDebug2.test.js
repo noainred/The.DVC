@@ -162,8 +162,12 @@ test('화면 — 행 표지 사유는 지금 상태로(재시작 뒤 첫 회차 
 test('성능 — 정규 주기는 이벤트 읽기를 기다렸다 돈다(건너뛰지 않음) · 밀려난 기억은 타이머도 지움 · 같은 모델 대비는 자리 계산 · 서명은 해시 · 원장 백업 상한 · 이벤트 로그 동시 상한', async () => {
   const ps = src('../src/idrac/poller.js');
   // 4회차: 이벤트 읽기와 정규 주기는 서로 기다리지 않고 서버 단위로만 겹침을 피한다
-  assert.match(ps, /if \(_eventIds\.has\(sid\)\) \{ results\.push\(\{ id: s\.id, name: s\.name, type: s\.type \|\| 'idrac', eventBusy: true \}\); return; \}/);
-  assert.match(ps, /only\.has\(String\(s\.id\)\) && s\.type !== 'ome' && !_cycleInflight\.has\(String\(s\.id\)\)/);
+  assert.match(ps, /if \(_eventIds\.has\(sid\)\) \{ releaseSlot\(\); results\.push\(\{ id: s\.id, name: s\.name, type: s\.type \|\| 'idrac', eventBusy: true \}\); return; \}/);
+  // 5회차 성능: 이벤트 읽기는 그 서버만 기다린다 · 정규 주기는 이벤트가 맡은 서버의 인벤토리를 넘긴다 · 동시 상한 하나
+  assert.match(ps, /for \(let i = 0; i < 4 && _cycleInflight\.has\(sid\); i \+= 1\) await _cycleInflight\.get\(sid\);/);
+  assert.match(ps, /inventoryStale\(s\.id, INVENTORY_MAX_AGE_MS\) && !_eventPending\.has\(String\(s\.id\)\)/);
+  assert.equal((ps.match(/await acquireSlot\(\);/g) || []).length, 2, '정규 · 이벤트 둘 다 같은 상한');
+  assert.match(ps, /if \(_cycleInflight\.has\(sid\)\) \{ skippedForCycle\.push\(sid\); return; \}/, '이벤트 읽기는 정규 주기가 읽는 서버를 빼고 돌려준다(5회차 엣지 #1)');
   assert.doesNotMatch(ps, /_runningEventP|_cycleWaiting/);
   assert.match(src('../src/routes/api/bmFolders.js'), /const drop = \(k\) => \{ const old = _trendMemo\.get\(k\); if \(old\?\.timer\) clearTimeout\(old\.timer\);/);
   assert.match(src('../src/routes/collector.js'), /const drop = \(k2\) => \{ const old = _hwlogMemo\.get\(k2\); if \(old\?\.timer\) clearTimeout\(old\.timer\);/);
@@ -342,5 +346,65 @@ test('4회차 판정 — 옛 기록이 정책 밖에서 처음 보이면 넘겨�
   const csv = 'advisory_id,component_type,model,fixed_version\nDSA-1,BIOS,Dell,2.1\nDSA-2,BIOS,Dell PowerEdge,2.1\nDSA-3,BIOS,R740xd,2.1\n';
   const r = A.parseAdvisoryCsv(csv);
   assert.deepEqual([r.rows.map((x) => x.id), r.errors.map((e) => e.line)], [['DSA-2', 'DSA-3'], [2]], '제조사 이름뿐인 줄만 오류');
+});
+
+
+test('5회차 — 이벤트 구독 파일은 비밀 금고 목록(추가 필드 셋 · 평문 점검) · 옛 기록은 멈춘 회차에 굳히지 않고 그때 있던 정책은 이어받음 · 권고 맞지 않는 줄 알림', async () => {
+  const V = await import('../src/security/secretVault.js');
+  assert.ok(V.SECRET_FILES.includes('bm-events.json'));
+  assert.deepEqual([...V.FILE_EXTRA_SECRET_FIELDS['bm-events.json']].sort(), ['ctxKey', 'prevCtxKey', 'secret']);
+  assert.match(src('../src/security/secretScan.js'), /\}, '', FILE_EXTRA_SECRET_FIELDS\[name\] \|\| null\);/);
+  assert.match(fs.readFileSync(new URL('../../.gitignore', import.meta.url), 'utf8'), /^server\/config\/bm-events\.json$/m);
+  const X = await import('../src/partfault/escalation.js');
+  const POL = (id) => ({ id, name: id, agents: [], states: ['fault'], steps: [{ afterMin: 15, emails: ['a1@example.test'], channels: false, oncall: false }, { afterMin: 60, emails: ['mgr@example.test'], channels: false, oncall: false }] });
+  const part = (state) => ({ agent: '', partKey: 'k9', scope: 'idrac', kind: 'psu', partId: 'p', deviceId: 'SYNTH09', state });
+  const MIN = 60_000;
+  const legacy = () => ({ items: { '|k9': { since: 0, sig: 'x', sent: [[0, 1, 'x', 'ok'], [1, 2, 'x', 'ok']], ackedAt: null, ackBy: '' } }, enabledAt: 1 });
+  // 멈춘 회차(enabled false)에서는 굳히지 않는다
+  let pl = X.escalationPlan({ settings: { enabled: false, policies: [POL('pa')], oncall: {} }, state: legacy(), open: [part('fault')], now: 100 * MIN });
+  assert.ok(!pl.items['|k9'].pol, '멈춘 회차는 옛 기록을 그대로 둔다(굳히지 않음)');
+  // 정책 밖에서 처음 봄 → 굳히되 그때 있던 정책(pa)을 기억 → pa 로 돌아오면 이어받는다(이미 간 단계를 다시 보내지 않음)
+  pl = X.escalationPlan({ settings: { enabled: true, enabledAt: 1, policies: [POL('pa')], oncall: {} }, state: legacy(), open: [part('warn')], now: 100 * MIN });
+  assert.deepEqual([pl.items['|k9'].pol, pl.items['|k9'].lp], ['-', ['pa']]);
+  const st = { items: pl.items, enabledAt: pl.enabledAt };
+  pl = X.escalationPlan({ settings: { enabled: true, enabledAt: 1, policies: [POL('pa')], oncall: {} }, state: st, open: [part('fault')], now: 120 * MIN });
+  assert.deepEqual([pl.sends.length, pl.items['|k9'].ps.pa], [0, 0], '그때 있던 정책은 since · 보낸 단계를 이어받는다');
+  // 나중에 생긴 정책(pb)은 지금부터
+  pl = X.escalationPlan({ settings: { enabled: true, enabledAt: 1, policies: [POL('pb')], oncall: {} }, state: st, open: [part('fault')], now: 120 * MIN });
+  assert.deepEqual([pl.sends.length, pl.items['|k9'].ps.pb], [0, 120 * MIN]);
+  const A = await import('../src/bmcheck/advisory.js');
+  assert.equal(A.modelTokensMatch('UCSC-C240-M5SX', 'Cisco UCS'), true, '제품군 앞머리(ucs → ucsc)');
+  assert.equal(A.modelTokensMatch('ProLiant DL380 Gen10', 'Hewlett Packard Enterprise ProLiant Servers'), true, '제조사 전체 이름 · 복수형은 뺀다');
+  assert.match(src('../src/routes/admin/bmAssets.js'), /unmatched = \{ n: um\.length, rows: um\.slice\(0, 200\)/);
+});
+
+test('5회차 엣지 — 읽는 도중 다시 선 표지는 남는다(순번) · 정규 주기가 읽는 서버는 이벤트가 다시 잡는다', async () => {
+  const C = await import('../src/idrac/invCache.js');
+  C.markInventoryStale('m-1', { event: true });
+  const mark = C.staleMarkOf('m-1');              // 읽기 시작
+  C.markInventoryStale('m-1', { event: true });   // 읽는 도중 새 이벤트
+  C.setInventory('m-1', { collectedAt: Date.now() }, { mark });
+  assert.deepEqual([C.inventoryStale('m-1', 1e12), C.isForcedStale('m-1')], [true, true], '읽기 시작 뒤에 선 표지는 지우지 않는다');
+  C.setInventory('m-1', { collectedAt: Date.now() }, { mark: C.staleMarkOf('m-1') });
+  assert.deepEqual([C.inventoryStale('m-1', 1e12), C.isForcedStale('m-1')], [false, false]);
+  C.removeInventory('m-1');
+  const E = await import('../src/idrac/eventSub.js');
+  E._resetEventsForTest();
+  const runs = [];
+  E._setEventDepsForTest({ debounceMs: 20, runCheck: async (_r, ids) => { runs.push([...ids]); return runs.length === 1 ? { busy: false, refreshed: 1, retry: ['m-2'] } : { busy: false, refreshed: 1, retry: [] }; } });
+  try {
+    const s = { enabled: true, base: 'https://portal.example.test', secret: 'E'.repeat(43), ctxKey: 'F'.repeat(43) };
+    E.acceptEvents(s, { context: E.contextOf(s, 'm-2'), events: [{ sev: 'critical' }] });
+    E.acceptEvents(s, { context: E.contextOf(s, 'm-3'), events: [{ sev: 'critical' }] });
+    for (let i = 0; i < 50 && runs.length < 2; i += 1) await new Promise((r) => setTimeout(r, 20));
+    assert.deepEqual(runs.map((x) => x.sort()), [['m-2', 'm-3'], ['m-2']], '정규 주기와 겹쳐 뺀 서버만 다시 잡는다');
+  } finally { E._setEventDepsForTest(null); E._resetEventsForTest(); }
+});
+
+test('5회차 화면 — 권고 모델 칸 오류 사유를 가른다(모델 글자 없음 · 제조사 이름뿐) · 멈춘 회차는 옛 기록을 굳히지 않는다', async () => {
+  const A = await import('../src/bmcheck/advisory.js');
+  const r = A.parseAdvisoryCsv('advisory_id,component_type,model,fixed_version\nD1,BIOS,-,2.1\nD2,BIOS,전체,2.1\nD3,BIOS,Dell EMC,2.1\n');
+  assert.deepEqual(r.errors.map((e) => /모델 이름이 없습니다/.test(e.reason) ? 'none' : /제조사 이름뿐/.test(e.reason) ? 'maker' : '?'), ['none', 'none', 'maker']);
+  assert.match(src('../src/partfault/escalation.js'), /if \(enabled && cur && !cur\.pol && !Object\.keys\(cur\.ps \|\| \{\}\)\.length\) cur = \{ \.\.\.cur, pol: '-'/);
 });
 

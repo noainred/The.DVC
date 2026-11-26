@@ -16,7 +16,7 @@ import { decodeCsvBytes } from '../csvDecode.js';
 const FILE_MAX = 1024 * 1024;
 const sigOf = (t) => { let h = 0; for (let i = 0; i < t.length; i += 1) h = (h * 31 + t.charCodeAt(i)) >>> 0; return `${t.length}:${h}`; };
 
-export default function AdvisoryLedger({ meta, onClose, onChanged }) {
+export default function AdvisoryLedger({ meta, models = [], onClose, onChanged }) {
   const fileRef = useRef(null);
   const [text, setText] = useState('');
   const [name, setName] = useState('');
@@ -42,7 +42,8 @@ export default function AdvisoryLedger({ meta, onClose, onChanged }) {
     if (!dryRun && !res?.rows && !window.confirm('권고 표를 비웁니다 — 모든 서버가 ‘대조 안 함’ 으로 바뀝니다. 계속할까요?')) return;
     setBusy(true); setMsg(null);
     try {
-      const r = await postJson('/admin/bm-advisories/import', { csv: text, dryRun, ...(dryRun ? {} : { expect: res?.base }) });
+      // 검증 때 지금 목록의 서버 모델을 함께 보낸다 — 어떤 서버에도 맞지 않는 줄을 서버가 같은 판정으로 알려 준다(디버깅 5회차 판정 #2)
+      const r = await postJson('/admin/bm-advisories/import', { csv: text, dryRun, ...(dryRun ? { models } : { expect: res?.base }) });
       if (!r || r.ok === false) throw new Error(r?.reason || '요청을 처리하지 못했습니다.');
       if (dryRun) setRes({ ...r, sig });
       else { setRes({ ...r, sig: '', applied: true }); setMsg({ ok: true, text: r.rows ? `권고 표를 ${r.rows}줄로 바꿨습니다.` : '권고 표를 비웠습니다 — 이제 대조하지 않습니다.' }); onChanged?.(); }
@@ -80,6 +81,12 @@ export default function AdvisoryLedger({ meta, onClose, onChanged }) {
           <button type="button" className="login-btn bmd-btn" disabled={ap.disabled} onClick={() => run(false)} title={ap.title}>{ap.label}</button>
           {res && (checked || res.applied) ? <span className="muted">권고 {res.rows}줄 · 오류 {errN}행{errN > errs.length ? `(표에는 앞 ${errs.length}행)` : ''}{ap.empty ? ' — 머리글만 있는 파일은 표를 비웁니다' : ''}</span> : null}
         </div>
+        {res?.unmatched?.n && checked ? (
+          <div className="muted bmd-note" role="status">
+            지금 목록의 어떤 서버 모델에도 맞지 않는 줄 {res.unmatched.n}개 — 모델 칸을 확인하십시오(적용은 됩니다 · 장비가 알려 주는 모델 글자는 예를 들어 ‘PowerEdge R750’ · ‘ProLiant DL380 Gen10’ 꼴입니다).
+            {' '}{res.unmatched.rows.slice(0, 20).map((x) => `${x.id}(${x.model})`).join(' · ')}{res.unmatched.n > 20 ? ` 외 ${res.unmatched.n - 20}개` : ''}
+          </div>
+        ) : null}
         {msg ? <div className={`bmd-opnote ${msg.ok ? 'ok' : 'bad'}`} role={msg.ok ? 'status' : 'alert'} style={{ borderRadius: 8, borderBottom: 0 }}>{msg.text}</div> : null}
         {errs.length && checked ? (
           <STable className="table bmd-ct" minWidth={300} limit={200}>

@@ -403,15 +403,15 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | GET | `/bm-advisories.csv` | 역할 `admin` · 권한 `data.csv` · `fleetOnly` | [server/src/routes/admin/bmAssets.js:39](../server/src/routes/admin/bmAssets.js#L39) |
 | POST | `/bm-advisories/import` | 역할 `admin` · 권한 `data.csv` · `fleetOnly` · `textFields` | [server/src/routes/admin/bmAssets.js:115](../server/src/routes/admin/bmAssets.js#L115) |
 | GET | `/bm-advisories/sample.csv` | 역할 `admin` · 권한 `data.csv` · `fleetOnly` | [server/src/routes/admin/bmAssets.js:47](../server/src/routes/admin/bmAssets.js#L47) |
-| GET | `/bm-assets` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/bmAssets.js:136](../server/src/routes/admin/bmAssets.js#L136) |
-| GET | `/bm-assets.csv` | 역할 `admin` · 권한 `data.csv` · `fleetOnly` | [server/src/routes/admin/bmAssets.js:143](../server/src/routes/admin/bmAssets.js#L143) |
-| POST | `/bm-assets/import` | 역할 `admin` · 권한 `data.csv` · `fleetOnly` · `textFields` | [server/src/routes/admin/bmAssets.js:160](../server/src/routes/admin/bmAssets.js#L160) |
-| GET | `/bm-assets/sample.csv` | 역할 `admin` · 권한 `data.csv` · `fleetOnly` | [server/src/routes/admin/bmAssets.js:152](../server/src/routes/admin/bmAssets.js#L152) |
+| GET | `/bm-assets` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/bmAssets.js:142](../server/src/routes/admin/bmAssets.js#L142) |
+| GET | `/bm-assets.csv` | 역할 `admin` · 권한 `data.csv` · `fleetOnly` | [server/src/routes/admin/bmAssets.js:149](../server/src/routes/admin/bmAssets.js#L149) |
+| POST | `/bm-assets/import` | 역할 `admin` · 권한 `data.csv` · `fleetOnly` · `textFields` | [server/src/routes/admin/bmAssets.js:166](../server/src/routes/admin/bmAssets.js#L166) |
+| GET | `/bm-assets/sample.csv` | 역할 `admin` · 권한 `data.csv` · `fleetOnly` | [server/src/routes/admin/bmAssets.js:158](../server/src/routes/admin/bmAssets.js#L158) |
 | GET | `/bm-events` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/bmAssets.js:76](../server/src/routes/admin/bmAssets.js#L76) |
 | PUT | `/bm-events` | 역할 `admin` · `fleetOnly` · `textFields` | [server/src/routes/admin/bmAssets.js:84](../server/src/routes/admin/bmAssets.js#L84) |
 | POST | `/bm-events/sync` | 역할 `admin` · `fleetOnly` · `textFields` · `syncBodyOk` · `ownOtpGate` | [server/src/routes/admin/bmAssets.js:102](../server/src/routes/admin/bmAssets.js#L102) |
-| GET | `/bm-fw-baseline` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/bmAssets.js:189](../server/src/routes/admin/bmAssets.js#L189) |
-| POST | `/bm-fw-baseline` | 역할 `admin` · `fleetOnly` · `textFields` | [server/src/routes/admin/bmAssets.js:199](../server/src/routes/admin/bmAssets.js#L199) |
+| GET | `/bm-fw-baseline` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/bmAssets.js:195](../server/src/routes/admin/bmAssets.js#L195) |
+| POST | `/bm-fw-baseline` | 역할 `admin` · `fleetOnly` · `textFields` | [server/src/routes/admin/bmAssets.js:205](../server/src/routes/admin/bmAssets.js#L205) |
 | GET | `/bm-power` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/bmAssets.js:53](../server/src/routes/admin/bmAssets.js#L53) |
 | PUT | `/bm-power` | 역할 `admin` · `fleetOnly` · `textFields` · `powerBodyOk` · `ownOtpGate` | [server/src/routes/admin/bmAssets.js:65](../server/src/routes/admin/bmAssets.js#L65) |
 | GET | `/central-token` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/centralTokens.js:27](../server/src/routes/admin/centralTokens.js#L27) |

@@ -161,17 +161,17 @@ const DEFAULT_DEPS = {
   /** 바로 점검 — ① 그 서버들의 인벤토리를 다음 폴링에서 다시 읽게 표시하고 ② iDRAC 폴링을 한 번 바로 돌려 **장비를 다시 읽은 뒤** ③ 부품 장애를 판정(중앙) · push(엣지).
    *  캐시만 다시 판정하면(최대 30분 묵은 인벤토리) 빨라지지 않는다(반증 A2). 폴링이 다른 주기로 진행 중이면 busy — 묶음을 다시 잡는다. */
   runCheck: async (reason, ids) => {
-    const C = await import('./invCache.js');
-    for (const id of ids) C.markInventoryStale(id, { event: true });   // 폴링이 바빠 못 읽으면 다음 정규 주기가 읽는다(잃지 않음 · urgent 표지)
+    // 강제 재읽기 표지는 **포기할 때만** 세운다(scheduleCheck — 다시 시도를 다 쓴 서버) — 미리 세우면 느린 장비의 인벤토리 읽기가 늘 정규 주기로 넘어갔다(디버깅 5회차 엣지 #3)
     const P = await import('./poller.js');
     // 그 서버들만 읽는다 — 함대 전체 주기를 돌리지 않는다(v3.52 디버깅 1회차 성능 P2: 이벤트 1건에 50대 전부 · 요청 368건이었다)
     const r = await P.pollNowForEvent(ids);
     if (r?.busy) return { busy: true };
+    const retry = Array.isArray(r?.skipped) ? r.skipped : [];   // 정규 주기가 그때 읽고 있던 서버 — 그 서버만 다시 잡는다(5회차 엣지 #1)
     // 판정은 여기서 한 번 — 이벤트 읽기는 폴러의 파트 장애 훅을 부르지 않는다(성능 P5: 두 번 돌고 엣지는 WAN push 두 번이었다). 다시 읽은 것이 없으면 판정할 새 값이 없다
-    if (!(Number(r?.invRefreshed) > 0)) return { busy: false, refreshed: 0 };
+    if (!(Number(r?.invRefreshed) > 0)) return { busy: false, refreshed: 0, retry };
     if (config.agent.centralUrl) await (await import('../partfault/push.js')).pushPartFaultsNow({ reason });
     else await (await import('../partfault/poller.js')).runPartFaultsNow({ reason });
-    return { busy: false, refreshed: Number(r.invRefreshed) };
+    return { busy: false, refreshed: Number(r.invRefreshed), retry };
   },
 };
 let _deps = DEFAULT_DEPS;
@@ -193,8 +193,11 @@ function scheduleCheck(reason) {
   _timer = setTimeout(() => {
     _timer = null; _stat.running = true; _stat.checks += 1;
     const ids = [..._staleIds]; _staleIds.clear();   // 미룬 서버 집합은 비우지 않는다 — 다음 묶음에서 또 넘쳐도 한 대로(화면 ‘미룬 서버 N대’ — 다시 시작하면 0 부터: 디버깅 3회차 화면 R3)
-    Promise.resolve().then(() => _deps.runCheck(_pendingReason || 'event', ids)).then((r) => {
-      if (r?.busy && _busyRetries < BUSY_RETRY_MAX) { _busyRetries += 1; for (const id of ids) _staleIds.add(id); return true; }
+    Promise.resolve().then(() => _deps.runCheck(_pendingReason || 'event', ids)).then(async (r) => {
+      const left = r?.busy ? ids : (Array.isArray(r?.retry) ? r.retry : []);
+      if (left.length && _busyRetries < BUSY_RETRY_MAX) { _busyRetries += 1; for (const id of left) _staleIds.add(id); return true; }
+      // 다시 시도를 다 썼다 — 그 서버들은 다음 정규 주기가 인벤토리를 다시 읽게 표시한다(잃지 않음 · urgent 표지)
+      if (left.length) { try { const C = await import('./invCache.js'); for (const id of left) C.markInventoryStale(id, { event: true }); } catch { /* 표시 실패가 점검을 막지 않는다 */ } }
       _busyRetries = 0; return false;
     }, (e) => { console.warn(`[bm-events] 바로 점검 실패 — ${String(e?.message || e).slice(0, 160)}`); return false; }).then((again) => {
       _stat.running = false; _stat.checkedAt = _deps.now();

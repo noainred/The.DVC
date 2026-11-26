@@ -12,7 +12,7 @@ import { fileStamp } from '../../util/dayKey.js';
 import { adminOnly, fullReadWriteScopeOnlyWith } from './shared.js';
 import { parseAssetCsv, analyzeAssetImport, assetsToCsv, sampleAssetCsv, ASSET_COLUMNS, ASSET_ROWS_MAX } from '../../bmcheck/assetCsv.js';
 import { assetStore, fwBaselineStore, setAdminBaseline, advisoryStore } from '../../bmcheck/store.js';
-import { parseAdvisoryCsv, advisoriesToCsv, sampleAdvisoryCsv, ADVISORY_COLUMNS } from '../../bmcheck/advisory.js';   // v3.50 펌웨어 보안 권고 표(④)
+import { parseAdvisoryCsv, advisoriesToCsv, sampleAdvisoryCsv, ADVISORY_COLUMNS, modelTokensMatch } from '../../bmcheck/advisory.js';   // v3.50 펌웨어 보안 권고 표(④)
 import { FW_TYPES, FW_LABEL_MAX, FW_VER_MAX } from '../../bmcheck/fw.js';
 import { remotePower } from '../../idrac/remotePowerSettings.js';   // v3.52 원격 전원 · LED 켜기 스위치(⑦ ⑥)
 import { ownOtpGate } from '../api/reauth.js';
@@ -122,7 +122,13 @@ export function registerBmAssets(adminRouter, { D = {} } = {}) {
     const base = { n: cur.rows.length, at: cur.at ?? null };
     // 오류는 앞 200행만 싣고 전체 수를 따로 — 화면이 ‘오류 200행’ 으로 줄여 말하지 않게(디버깅 1회차 화면 U4)
     const view = { total: rows.length + errors.length, ok: true, rows: rows.length, errors: errors.slice(0, 200), errorCount: errors.length, base };
-    if (dry === true) return res.json({ ...view, dryRun: true });
+    // 검증 때 화면이 보낸 지금 목록의 서버 모델(최대 500)로 줄마다 맞는지 본다 — 맞는 서버가 없는 줄은 알린다(모델 글자 꼴을 다 알 수 없다 · 디버깅 5회차 판정 #2). 적용은 막지 않는다
+    if (dry === true) {
+      const sm = Array.isArray(req.body?.models) ? req.body.models.filter((x) => typeof x === 'string' && x.trim()).slice(0, 500).map((x) => x.slice(0, 120)) : null;
+      let unmatched = null;
+      if (sm && sm.length) { const um = rows.filter((r) => r.model && !sm.some((m) => modelTokensMatch(m, r.model))); unmatched = { n: um.length, rows: um.slice(0, 200).map((r) => ({ id: r.id, model: r.model })) }; }
+      return res.json({ ...view, dryRun: true, ...(unmatched ? { unmatched } : {}) });
+    }
     if (errors.length) return res.status(400).json({ ...view, ok: false, reason: `오류 행이 ${errors.length}개 있어 표를 바꾸지 않았습니다 — 고친 뒤 다시 검증하십시오.` });
     const ex = req.body?.expect;
     if (!ex || typeof ex !== 'object') return res.status(400).json({ ok: false, reason: '권고 표는 먼저 검증한 뒤에 적용할 수 있습니다.' });

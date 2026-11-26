@@ -98,5 +98,11 @@ describe('디버깅 1회차 화면', () => {
     expect((t.match(/보내지 않았습니다/g) || []).length).toBe(1);
     expect(read('./EventSubSettings.jsx')).toContain('구독 설정 · 등록부를 못 읽어 다시 보내게 한 것');
   });
+  it('5회차 화면 — 권고 검증 때 지금 목록의 모델을 보내고 맞지 않는 줄을 알린다', () => {
+    const a = read('./AdvisoryLedger.jsx');
+    expect(a).toContain("...(dryRun ? { models } : { expect: res?.base })");
+    expect(a).toContain('지금 목록의 어떤 서버 모델에도 맞지 않는 줄');
+    expect(read('../BmFolders.jsx')).toMatch(/<AdvisoryLedger meta=\{d\.check\?\.advisories\} models=\{/);
+  });
 });
 

@@ -16,8 +16,13 @@ import { parseCsvRows, csvLine, unguardCell, CSV_BOM } from '../util/csv.js';
 import { ADVISORY_SEVS, ADVISORY_ROWS_MAX } from './store.js';
 /** 모델 낱말(글자 · 숫자 덩어리) — 제조사 · 제품군 낱말은 뺀다(‘PowerEdge R740xd’ = ‘R740xd’). */
 // 제조사 이름(장비 Model 글자에 보통 없다 — Redfish Model 은 ‘PowerEdge R740xd’ · ‘ProLiant DL380 Gen10’ 꼴) · 제품군 낱말(Model 글자에 있다)
-const MAKERS = new Set(['dell', 'emc', 'hpe', 'hp', 'lenovo', 'supermicro', 'cisco', 'fujitsu', 'inspur', 'huawei', 'server', 'system', 'inc', 'technologies', 'enterprise']);
+//   제조사 전체 이름(Hewlett Packard Enterprise · Super Micro Computer …)과 복수형(Servers)도 뺀다(디버깅 5회차 판정 #2). 그래도 실장비 글자 꼴을 다 알 수는 없다 —
+//   CSV 검증이 ‘지금 목록의 어떤 모델에도 맞지 않는 줄’ 을 알린다(routes/admin/bmAssets.js).
+const MAKERS = new Set(['dell', 'emc', 'hpe', 'hp', 'hewlett', 'packard', 'lenovo', 'supermicro', 'super', 'micro', 'computer', 'cisco', 'fujitsu', 'inspur', 'huawei',
+  'server', 'servers', 'system', 'systems', 'inc', 'corp', 'corporation', 'co', 'ltd', 'technology', 'technologies', 'solutions', 'enterprise', 'international']);
 const FAMILY = new Set(['poweredge', 'proliant', 'thinksystem', 'thinkserver', 'superserver', 'ucs', 'primergy', 'fusionserver']);
+// 제품군 낱말이 모델 글자에 붙어 나오는 꼴(UCS → ‘UCSC-C240-M5SX’ 의 ucsc) — 앞머리로 본다
+const famHit = (w, serverRaw) => serverRaw.has(w) || [...serverRaw].some((x) => x.length > w.length && x.startsWith(w));
 const MODEL_NOISE = new Set([...MAKERS, ...FAMILY]);
 const rawToks = (x) => [...new Set(String(x || '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean))];
 const toks = (x) => rawToks(x).filter((w) => !MODEL_NOISE.has(w));
@@ -30,7 +35,7 @@ const VARIANT = /^(?:plus|v\d{1,2}|gen\d{1,2}|g\d{1,2}|m\d{1,2}|xd\d?|xa|xs|xe|x
  */
 function modelMatch(serverRaw, serverCore, needCore, needRaw) {
   // 제품군 낱말뿐인 줄 — 제조사 이름은 Model 글자에 없으므로 제품군 낱말로만 본다(‘HPE ProLiant’ 줄이 어느 서버에도 안 맞던 것 — 디버깅 4회차 판정 #2). 제조사 이름뿐인 줄은 올릴 때 거절한다
-  if (!needCore.length) { const fam = needRaw.filter((w) => FAMILY.has(w)); return fam.length > 0 && fam.every((w) => serverRaw.has(w)); }
+  if (!needCore.length) { const fam = needRaw.filter((w) => FAMILY.has(w)); return fam.length > 0 && fam.every((w) => famHit(w, serverRaw)); }
   if (!needCore.every((w) => serverCore.has(w))) return false;
   for (const w of serverCore) if (!needCore.includes(w) && VARIANT.test(w)) return false;
   return true;
@@ -75,7 +80,12 @@ export function parseAdvisoryCsv(text) {
     const sev = sevRaw ? own(SEV_ALIAS, sevRaw) : 'medium';
     const url = cell(at(r, 'url'), 300);
     if (!id) { errors.push({ line, reason: '권고 번호가 비었습니다.' }); continue; }
-    { const mr = cell(at(r, 'model'), 120); if (mr && !toks(mr).length && !rawToks(mr).some((w) => FAMILY.has(w))) { errors.push({ line, reason: '모델 칸이 제조사 이름뿐이라 대조할 수 없습니다 — 모델(예: R740xd) · 제품군(예: PowerEdge)을 적거나 칸을 비우십시오(비우면 그 종류의 모든 서버).' }); continue; } }
+    {
+      const mr = cell(at(r, 'model'), 120);
+      // 사유를 가른다 — 영문 · 숫자 모델 글자가 없음(‘-’ · ‘전체’) / 제조사 이름뿐(디버깅 5회차 화면 F2)
+      if (mr && !rawToks(mr).length) { errors.push({ line, reason: '모델 칸에 영문 · 숫자 모델 이름이 없습니다 — 모든 모델이면 칸을 비우십시오.' }); continue; }
+      if (mr && !toks(mr).length && !rawToks(mr).some((w) => FAMILY.has(w))) { errors.push({ line, reason: '모델 칸이 제조사 이름뿐이라 대조할 수 없습니다 — 모델(예: R740xd) · 제품군(예: PowerEdge)을 적거나 칸을 비우십시오(비우면 그 종류의 모든 서버).' }); continue; }
+    }
     if (!type) { errors.push({ line, reason: `종류는 ${FW_TYPES.join(' · ')} 중 하나여야 합니다.` }); continue; }
     if (!fixed || cmpVersion(fixed, fixed) == null) { errors.push({ line, reason: '고친 버전이 숫자 . 꼴이 아닙니다(순서를 정할 수 없습니다).' }); continue; }
     if (!sev) { errors.push({ line, reason: `심각도는 ${ADVISORY_SEVS.join(' · ')} 중 하나여야 합니다.` }); continue; }

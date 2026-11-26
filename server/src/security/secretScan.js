@@ -21,7 +21,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { SECRET_FIELDS, isSealed } from './secretVault.js';
+import { SECRET_FIELDS, FILE_EXTRA_SECRET_FIELDS, isSealed } from './secretVault.js';
 
 const yieldLoop = () => new Promise((r) => setImmediate(r));
 const MASK = '***';
@@ -33,12 +33,13 @@ const maskLen = (v) => `${MASK}(${String(v).length}자)`;
 
 const CONFIG_JSON_MAX = 5 * 1024 * 1024; // 5MB 초과 JSON(대형 스캔 결과 등)은 건너뛰고 사유 보고
 
-function walkFields(obj, cb, trail = '') {
-  if (Array.isArray(obj)) { obj.forEach((v, i) => walkFields(v, cb, `${trail}[${i}]`)); return; }
+function walkFields(obj, cb, trail = '', extra = null) {
+  if (Array.isArray(obj)) { obj.forEach((v, i) => walkFields(v, cb, `${trail}[${i}]`, extra)); return; }
   if (obj && typeof obj === 'object') {
     for (const [k, v] of Object.entries(obj)) {
-      if (typeof v === 'string' && SECRET_FIELDS.has(k)) cb(`${trail ? `${trail}.` : ''}${k}`, k, v);
-      else walkFields(v, cb, `${trail ? `${trail}.` : ''}${k}`);
+      // 파일 한정 추가 필드(alerts.json url · bm-events.json 비밀 셋)도 본다 — 금고와 같은 목록(디버깅 5회차 보안 #1)
+      if (typeof v === 'string' && (SECRET_FIELDS.has(k) || extra?.has(k))) cb(`${trail ? `${trail}.` : ''}${k}`, k, v);
+      else walkFields(v, cb, `${trail ? `${trail}.` : ''}${k}`, extra);
     }
   }
 }
@@ -69,7 +70,7 @@ async function scanConfigFiles() {
         row[state] += 1;
         // 위치·필드·상태·길이만 — 값 자체는 어떤 상태여도 싣지 않는다.
         if (state !== 'empty' && row.items.length < 200) row.items.push({ path: pathStr, field, state, len: v.length });
-      });
+      }, '', FILE_EXTRA_SECRET_FIELDS[name] || null);
     } catch (e) { row.note = `파싱 실패(${safeLoadText(e, 60) || '사유 미상'})`; }   // 21회차 L-5: 원문(파일 조각 — 비밀번호 끝 글자)이 아니라 요약
     // 비밀 필드가 하나도 없는 파일은 목록 소음이라 제외(권한 이상 파일은 유지해 경고).
     if (row.plain || row.sealed || row.empty || row.note || row.wide) out.push(row);
