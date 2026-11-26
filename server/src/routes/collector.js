@@ -10,6 +10,7 @@ import os from 'node:os';
 import { config, currentVersion } from '../config.js';
 import { buildExport } from '../collector/agent.js';
 import { registryLoadError as idracRegistryLoadError, loadRegistry as loadIdracRegistry } from '../idrac/registry.js'; // v2.743(감사 EDGE-01) · v3.50 하드웨어 이벤트 로그(등록부에서 서버 찾기)
+import { reqTimeoutMs } from '../util/envTimeout.js';   // v3.52 원격 전원 엣지 상한(BM_POWER_EDGE_MAX — 범위 닫힌 수 해석)
 import { summarizeRegistryError } from '../util/registryCore.js'; // v2.744(리드 후속 RY): 503 사유는 요약(원문 없음)
 import { upgradeManager } from '../upgrade/manager.js';
 import { holdPushIfBusy, clearPushHold } from '../upgrade/pushHold.js';   // 51회차 #3
@@ -348,6 +349,47 @@ collectorRouter.get('/bm-hwlog', tokenFirst('bm-hwlog'), async (req, res) => {
     while (_hwlogMemo.size > 256) _hwlogMemo.delete(_hwlogMemo.keys().next().value);
     res.json(await ent.p);
   } catch (err) { res.status(500).json({ ok: false, reason: String(err?.message || err).slice(0, 300) }); }
+});
+// v3.52 물리서버 원격 전원 조작 · 위치 LED(⑦ ⑥) — 중앙이 판단(권한 · OTP · 켜기 스위치 · 감사)해 보낸 한 건을 이 엣지가 자기 등록부의 iDRAC 에 보낸다(central/bmPowerPull.js).
+//   **상태를 바꾸는 요청** — 토큰이 먼저 · 다시 보내지 않는다 · 같은 서버 60초 간격(idrac/power.js).
+//   **엣지가 스스로 켜야 보낸다**(반증 A1): 토큰만으로는 장비를 끌 수 없게 — env BM_POWER_EDGE_ENABLE=true 가 없으면 403(code disabled) ·
+//   강제 재시작 · 강제 끄기는 BM_POWER_EDGE_FORCE=true 도 있어야(403 code force-off) · 이 엣지 전체로 10분에 BM_POWER_EDGE_MAX(기본 30)건까지(429 code rate).
+//   법인 엣지 운영자가 그 법인 장비에 대한 최종 결정을 갖는다(백업 · 수집과 같은 ‘법인 로컬’ 원칙). 옛 env BM_POWER_EDGE_DISABLE=true 도 막는다.
+//   엣지에도 감사 로그를 남긴다(받기 전 · 결과 — 중앙이 알려 준 사용자 이름 · 사유). 서버 찾기는 /bm-hwlog 와 같은 규칙(id 또는 열쇠 k · 꺼진 등록은 404).
+const EDGE_POWER_WINDOW_MS = 10 * 60_000;
+const _edgePowerHits = [];
+collectorRouter.post('/bm-power', tokenFirst('bm-power'), express.json({ limit: '4kb' }), async (req, res) => {
+  try {
+    if (process.env.BM_POWER_EDGE_ENABLE !== 'true' || process.env.BM_POWER_EDGE_DISABLE === 'true') return res.status(403).json({ ok: false, code: 'disabled', reason: '이 엣지는 원격 전원 · LED 요청을 켜지 않았습니다(엣지 env BM_POWER_EDGE_ENABLE=true 가 필요합니다).' });
+    const b = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+    const str = (v, n) => (typeof v === 'string' ? v.trim().slice(0, n) : '');
+    const id = str(b.id, 128); const k = str(b.k, 128).toLowerCase();
+    const kind = b.kind === 'led' ? 'led' : b.kind === 'power' ? 'power' : '';
+    const action = str(b.action, 32);
+    if ((!id && !k) || !kind || !action) return res.status(400).json({ ok: false, reason: 'id 또는 k · kind · action 이 필요합니다.' });
+    const P = await import('../idrac/power.js');
+    if (kind === 'power' && P.POWER_ACTIONS[action]?.force === true && process.env.BM_POWER_EDGE_FORCE !== 'true') return res.status(403).json({ ok: false, code: 'force-off', status: 'force-off', reason: '이 엣지는 강제 재시작 · 강제 끄기를 허용하지 않았습니다(엣지 env BM_POWER_EDGE_FORCE=true).' });
+    // 이 엣지 전체 상한(10분 창) — 토큰이 새도 한꺼번에 많은 장비를 끄지 못하게
+    const nowMs = Date.now(); while (_edgePowerHits.length && nowMs - _edgePowerHits[0] > EDGE_POWER_WINDOW_MS) _edgePowerHits.shift();
+    const max = reqTimeoutMs(process.env.BM_POWER_EDGE_MAX, 30, { min: 1, max: 500 });
+    if (_edgePowerHits.length >= max) return res.status(429).json({ ok: false, code: 'rate', status: 'rate', reason: `이 엣지는 10분에 ${max}건까지만 보냅니다 — 잠시 뒤 다시.` });
+    _edgePowerHits.push(nowMs);
+    const { isMockMode } = await import('../mock/demo/flags.js');
+    if (isMockMode()) return res.json({ ok: true, status: 'accepted', http: 204, message: '데모 — 장비에 보내지 않았습니다.' });
+    const { getInventory } = await import('../idrac/invCache.js');
+    const lc = (v) => String(v ?? '').trim().toLowerCase();
+    const reg = loadIdracRegistry();
+    const entry = id ? reg.find((e) => String(e.id) === id)
+      : reg.find((e) => lc(e.id) === k || lc(e.serviceTag) === k || (() => { try { return lc(getInventory(String(e.id))?.system?.serviceTag) === k; } catch { return false; } })());
+    if (!entry || entry.enabled === false || !entry.host) return res.status(404).json({ ok: false, code: 'not-found', reason: '이 엣지에 등록된 iDRAC 서버가 아닙니다.' });
+    const who = `중앙:${str(b.by, 80) || '?'}`; const tgt = String(entry.name || entry.id).slice(0, 120);
+    logAudit({ user: who, action: kind === 'power' ? '물리서버 원격 전원 조작 요청(중앙)' : '물리서버 위치 LED 요청(중앙)', target: tgt, detail: `${action}${str(b.reason, 200) ? ` · 사유 ${str(b.reason, 200)}` : ''}`.slice(0, 300), ip: req.ip });   // 보내기 전에도 남긴다(반증 A12)
+    const invTag = (() => { try { return String(getInventory(String(entry.id))?.system?.serviceTag || ''); } catch { return ''; } })();
+    const r = await P.runDeviceAction(entry, { kind, action, expectTag: entry.serviceTag || invTag });
+    logAudit({ user: who, action: kind === 'power' ? '물리서버 원격 전원 조작(중앙 요청)' : '물리서버 위치 LED(중앙 요청)', target: tgt,
+      detail: `${action} · ${r.status}${r.reset ? ` · ${r.reset}` : ''}${str(b.reason, 200) ? ` · 사유 ${str(b.reason, 200)}` : ''}`.slice(0, 300), ip: req.ip });
+    res.json(r);
+  } catch (err) { res.status(500).json({ ok: false, status: 'error', reason: String(err?.message || err).slice(0, 300) }); }
 });
 // v3.48 물리서버 ‘같은 묶음 대비’ — 이 엣지가 수집하는 서버 **여러 대**의 구간 평균(CPU · 메모리) · 지금 값(전력 · 흡기 온도)을 요청 1개로(central/bmPeerPull.js).
 //   읽기 요청이다(엣지 상태를 바꾸지 않는다) — 키 목록이 길어 POST 본문으로 받는다(키 80개 × 256자 — 한글 키도 들어가게 80KB 상한 · 반증 A13). 대상 목록 밖 키는 건너뛰고 수를 밝힌다(존재를 가르지 않는다). 보관 없음.

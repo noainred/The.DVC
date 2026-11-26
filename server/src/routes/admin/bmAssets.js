@@ -14,6 +14,9 @@ import { parseAssetCsv, analyzeAssetImport, assetsToCsv, sampleAssetCsv, ASSET_C
 import { assetStore, fwBaselineStore, setAdminBaseline, advisoryStore } from '../../bmcheck/store.js';
 import { parseAdvisoryCsv, advisoriesToCsv, sampleAdvisoryCsv, ADVISORY_COLUMNS } from '../../bmcheck/advisory.js';   // v3.50 펌웨어 보안 권고 표(④)
 import { FW_TYPES, FW_LABEL_MAX, FW_VER_MAX } from '../../bmcheck/fw.js';
+import { remotePower } from '../../idrac/remotePowerSettings.js';   // v3.52 원격 전원 · LED 켜기 스위치(⑦ ⑥)
+import { ownOtpGate } from '../api/reauth.js';
+import { config } from '../../config.js';   // v3.52 OTP 필요 여부(인증 켜짐) — 화면이 OTP 칸을 보일지 정한다
 
 const csvPerm = requirePerm('data.csv');
 // 조회 ∧ 쓰기 무제한(물리서버 폴더의 fleetAdmin 과 같은 뜻) — 조회 범위만 보면 writeVcenters 관리자가 통과한다(server/CLAUDE.md v2.733 · v2.904)
@@ -46,6 +49,53 @@ export function registerBmAssets(adminRouter, { D = {} } = {}) {
     res.setHeader('Content-Disposition', 'attachment; filename="bm-advisories-sample.csv"');
     res.send(sampleAdvisoryCsv());
   });
+  // v3.52 원격 전원 조작 · 위치 LED 켜기 스위치 — 읽기 = 관리자 · 전체 범위, 바꾸기 = + 본인 OTP · 감사. 기본 꺼짐 · 강제 동작은 따로.
+  adminRouter.get('/bm-power', adminOnly, fleetOnly, (_req, res) => {
+    res.set('Cache-Control', 'no-store');
+    res.json({ ok: true, settings: remotePower.get(), otpRequired: !!config.auth.enabled, ...(remotePower.loadError() ? { unreadable: true } : {}) });
+  });
+  adminRouter.put('/bm-power', adminOnly, fleetOnly, ownOtpGate('물리서버 원격 전원 조작 켜기 · 끄기'), (req, res) => {
+    const b = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+    const before = remotePower.get();
+    const r = remotePower.save({ enabled: b.enabled, allowForce: b.allowForce }, { by: req.user?.username || '' });
+    if (!r.ok) return res.status(r.status || 400).json({ ok: false, reason: r.reason });
+    logAudit({ user: req.user?.username, action: '물리서버 원격 전원 · LED 설정 저장', detail: `켜기 ${before.enabled ? '켜짐' : '꺼짐'}→${r.value.enabled ? '켜짐' : '꺼짐'} · 강제 동작 ${before.allowForce ? '허용' : '막음'}→${r.value.allowForce ? '허용' : '막음'}`, ip: req.ip });
+    res.json({ ok: true, settings: r.value });
+  });
+
+  // v3.52 물리서버 장애 바로 받기(Redfish 이벤트 구독 · ⑬) — 이 노드 등록부의 iDRAC 에 구독을 건다. 읽기 · 설정 = 관리자 · 전체 범위 · 감사,
+  //   구독 걸기 · 지우기(장비 설정을 바꾼다) = + 본인 OTP · 감사. 비밀은 응답에 싣지 않는다(있는지만). 받은 것은 메모리 고리만.
+  adminRouter.get('/bm-events', adminOnly, fleetOnly, async (_req, res) => {
+    const E = await import('../../idrac/eventSub.js');
+    res.set('Cache-Control', 'no-store');
+    const st = E.eventSubStore.get();
+    res.json({ ok: true, settings: E.eventSubPublic(st), destinationPreview: st.base ? `${st.base}${E.EVT_PATH}…` : '', otpRequired: !!config.auth.enabled,
+      ...(E.eventSubStore.loadError() ? { unreadable: true } : {}), status: E.eventStatus(), sync: E.syncStatus(), edge: !!config.agent.centralUrl,
+      limits: { debounceMs: E.EVT_DEBOUNCE_MS, perPost: E.EVT_PER_POST, ring: E.EVT_RING, concurrency: E.SUB_CONCURRENCY } });
+  });
+  adminRouter.put('/bm-events', adminOnly, fleetOnly, textFields('base'), async (req, res) => {
+    const E = await import('../../idrac/eventSub.js');
+    const b = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+    const before = E.eventSubStore.get();
+    const r = E.eventSubStore.save({ enabled: b.enabled, base: b.base, rotate: b.rotate === undefined ? false : b.rotate }, { by: req.user?.username || '' });
+    if (!r.ok) return res.status(r.status || 400).json({ ok: false, reason: r.reason });
+    if (r.rotated) E.clearSyncResults();
+    logAudit({ user: req.user?.username, action: '물리서버 이벤트 구독 설정 저장', detail: `켜기 ${before.enabled ? '켜짐' : '꺼짐'}→${r.value.enabled ? '켜짐' : '꺼짐'} · 받는 주소 ${r.value.base || '(없음)'}${r.rotated ? ' · 비밀 새로 만듦(다시 구독해야 받습니다)' : ''}`.slice(0, 300), ip: req.ip });
+    res.json({ ok: true, settings: E.eventSubPublic(r.value), rotated: !!r.rotated });
+  });
+  adminRouter.post('/bm-events/sync', adminOnly, fleetOnly, ownOtpGate('물리서버 이벤트 구독 걸기 · 지우기'), async (req, res) => {
+    const E = await import('../../idrac/eventSub.js');
+    const unsubscribe = req.body?.unsubscribe === true;
+    const user = req.user?.username; const ip = req.ip;
+    const r = E.startSync({ unsubscribe, by: user || '', onDone: (x) => {
+      const n = (x.results || []).reduce((a, y) => { a[y.status] = (a[y.status] || 0) + 1; return a; }, {});
+      const bad = (x.results || []).filter((y) => !['subscribed', 'removed', 'none', 'demo'].includes(y.status)).slice(0, 8).map((y) => `${y.name || y.id}:${y.status}`);   // 장비별 실패도 남긴다(반증 A12)
+      logAudit({ user, action: unsubscribe ? '물리서버 이벤트 구독 지우기' : '물리서버 이벤트 구독 걸기', detail: (x.error ? `실패 — ${x.error}` : `${Object.entries(n).map(([k, v]) => `${k} ${v}`).join(' · ') || '대상 없음'}${bad.length ? ` · 실패 ${bad.join(', ')}` : ''}`).slice(0, 300), ip });
+    } });
+    if (!r.ok) return res.status(r.busy ? 409 : 400).json({ ok: false, reason: r.reason });
+    res.status(202).json({ ok: true, started: true });
+  });
+
   adminRouter.post('/bm-advisories/import', csvPerm, adminOnly, fleetOnly, textFields('csv'), (req, res) => {
     const refused = V.refusal();
     if (refused) return res.status(409).json({ ok: false, ...refused });

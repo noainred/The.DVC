@@ -62,7 +62,7 @@ export function healthView(r, rules = null) {
 // ───────── ⑥ 위치 LED ─────────
 export const LED_TEXT = Object.freeze({ on: '켜짐', blink: '깜빡임', off: '꺼짐', '': '못 읽음' });
 export const ledText = (v) => LED_TEXT[typeof v === 'string' && Object.hasOwn(LED_TEXT, v) ? v : ''];
-export const LED_NOTE = '위치 LED 상태만 보입니다 — 켜기 · 끄기는 장비 상태를 바꾸는 동작이라 이 화면에서 하지 않습니다.';
+export const LED_NOTE = '위치 LED 상태입니다(못 읽음은 꺼짐이 아닙니다). 켜기 · 끄기는 장비 상태를 바꾸는 동작이라, 관리자가 원격 전원 설정을 켠 포탈에서 그 법인의 쓰기 권한이 있는 계정이 ‘원격 전원 · 위치 LED’ 구역에서 합니다.';
 
 // ───────── ⑤ 하드웨어 이벤트 로그 ─────────
 export const HWLOG_SEV = Object.freeze({ critical: { label: '위험', color: 'red' }, warning: { label: '주의', color: 'amber' }, ok: { label: '정보', color: 'gray' }, '': { label: '모름', color: 'gray' } });

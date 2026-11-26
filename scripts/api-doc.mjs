@@ -349,6 +349,7 @@ const GROUP_NOTE = {
  *   그 사실을 밝히도록 생성 시 목록으로 남긴다(조용히 넘어가지 않는다).
  */
 const GUARD_NOTE = {
+  ownOtpGate: '**본인 OTP**(`routes/api/reauth.js` — `ownOtpGate(작업 이름)` 이 만든다): 인증이 켜진 포탈이면 요청한 계정이 OTP 를 등록했고 본문 `otp` 가 맞아야 통과(아니면 403 · `needEnroll` / `needOtp`). 인증이 꺼진 포탈은 통과. v3.52 물리서버 원격 전원 · 원격 전원 설정에 쓴다.',
   requireCentral: '**central 게이트**(v2.613 DEPS2613-09) — 공유 `CENTRAL_TOKEN`·엣지별 개별 토큰이 하나도 설정돼 있지 않으면 404, 토큰이 맞지 않으면 403. 51개 `/api/central/*` 라우트가 같은 미들웨어를 쓴다(예전의 인라인 2줄 게이트 쌍을 하나로).',
   fullScopeOnly: '**전체 범위 계정만**. vCenter 범위를 지정한 계정은 403 — 그 자원에 법인 축이 없어 교집합할 수 없기 때문이다(빈 목록을 주면 \'장비 0대\' 라는 거짓이 된다).',
   fullWriteOnly: '**쓰기 범위도 무제한인 계정만**(v2.823 Bareos 설정 쓰기). 조회는 무제한이어도 수정 가능 vCenter(writeVcenters)가 지정된 계정은 403 — 전 법인 공용 쓰기라 쓰기 범위와 교집합할 수 없다.',

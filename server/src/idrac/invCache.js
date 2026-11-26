@@ -36,10 +36,14 @@ function persistSoon() {
 }
 registerExitFlush('idrac/invCache', () => { if (!persistTimer) return; clearTimeout(persistTimer); persistTimer = null; atomicWriteFileSync(FILE, JSON.stringify(Object.fromEntries(cache)), { mode: 0o600 }); });
 
+const _forceStale = new Set();   // v3.52 ⑬ — 이벤트를 받은 서버는 다음 폴링에서 인벤토리를 다시 읽는다(메모리만 · 상한)
 export function setInventory(serverId, inv) {
   cache.set(serverId, inv);
+  _forceStale.delete(serverId);
   persistSoon();
 }
+/** 다음 폴링에서 이 서버의 인벤토리를 다시 읽게 한다(장비 이벤트 — idrac/eventSub.js). 상한 2,000. */
+export function markInventoryStale(serverId) { if (_forceStale.size < 2000) _forceStale.add(String(serverId)); }
 
 export function getInventory(serverId) {
   return cache.get(serverId) || null;
@@ -47,6 +51,7 @@ export function getInventory(serverId) {
 
 /** True if inventory for this server is missing or older than maxAgeMs. */
 export function inventoryStale(serverId, maxAgeMs) {
+  if (_forceStale.has(String(serverId))) return true;
   const inv = cache.get(serverId);
   return !inv || (Date.now() - (inv.collectedAt || 0)) > maxAgeMs;
 }

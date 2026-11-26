@@ -2091,7 +2091,7 @@
   감점 크기 · 경계 · 조건(`HEALTH_RULES` · `HEALTH_BANDS` · `HEALTH_MIN`)은 목록 응답 `check.health` 로 화면에 준다. 1440px 표는 ‘부품 장애’ 칸 아래 줄 · 400px 카드는 점수가 있을 때 배지.
 - **⑥ 위치 LED**(`server/src/idrac/ledState.js`): 보이기만 — on · blink · off · ''(못 읽음 — 꺼짐이 아니다). 이 노드는 인벤토리 `system.indicatorLED`, 수집 서버 서버는 축약 · 정제 화이트리스트 짝
   (`collector/compactInv.js` ↔ `remoteInventory.js INV_SHAPE.system` — 빠져 늘 못 읽음이었다: 반증 A5), 엣지 서버는 함대 push `led`(중앙 `ledStateOf` 로 다시 정제 · 검증된 이름만 · `/hw` 는 요약이 없어도 싣는다).
-  **켜기 · 끄기는 없다**(화면 문구도 출시 약속을 하지 않는다). 의존 방향: `idrac/*` 는 `bmcheck/*` 를 가져오지 않는다.
+  **켜기 · 끄기는 없다**(화면 문구도 출시 약속을 하지 않는다). → **v3.52 정정**: 원격 전원 설정을 켠 포탈에서는 ‘원격 전원 · 위치 LED’ 구역에서 켜기 · 깜빡임 · 끄기를 한다(아래 v3.52 절). 의존 방향: `idrac/*` 는 `bmcheck/*` 를 가져오지 않는다.
 - **⑤ 하드웨어 이벤트 로그**(`server/src/idrac/hwLog.js` · 라우트 `GET /tools/bm-folders/hwlog` · 엣지 `GET /api/collector/bm-hwlog` · 중앙 `central/bmHwLogPull.js`):
   SEL 만. 읽기는 디스크 분석의 `readSel` 을 고르기만 바꿔 다시 쓴다(`pick` · `eventsMax` · `pagesMax` · **`tailFirst`** — 기본값은 그대로). 쪽 상한(1,000건)을 넘고 장비가 **오래된 것부터** 주면
   첫 쪽 뒤 끝쪽(가장 새 기록)으로 건너뛰고 건너뛴 수를 `gap` 으로 밝힌다(반증 A10 — 정렬을 모르면 건너뛰지 않고 ‘가장 새 기록이 빠졌을 수 있다’ 고 쓴다). 장비 시한 30초는 세션을 끊는다.
@@ -2145,4 +2145,33 @@
   저장하면 부모 목록을 다시 읽는다(반증 B3) · 확인 결과는 그 행에(반증 B4) · 긴 확인자 이름은 말줄임(반증 B5) · 고친 칸은 지난 거절 사유를 지운다 · 저장 중 칸 잠금 · 바뀐 칸이 있으면 닫기 전에 묻는다.
 - 회귀: `server/test/bmLife351.test.js` · `server/test/partFaultEscalation351.test.js` · 웹 `bmFolders/bmLife351.test.jsx` · `partFaultEsc351.test.jsx`(클릭 동작은 jsdom 이 없어 소스 꼴 + Chromium).
   반증 2인(A 서버 20건 · B 화면 15건 + 서버 4건) 결과와 반영은 `docs/rules/audits.md` ‘v3.51 부품 수명 · 알림 단계 반증’.
+
+### v3.52 원격 전원 조작 · 위치 LED 켜기/끄기 · 장애 바로 받기(설계 docs/design/bm-feature-proposals ⑦ ⑥ ⑬ · 구현 기록 §14)
+
+- **⑦ ⑥ 장비 상태를 바꾼다 — 기본 꺼짐**(`server/src/idrac/remotePowerSettings.js` · `bm-power.json`): 켜기 · 강제 동작 허용(강제 재시작 · 강제 끄기)을 따로 연다(켜기를 끄면 강제도 꺼진다).
+  바꾸기 = 관리자 · 전체 범위 · **본인 OTP**(`ownOtpGate` — 인증이 꺼진 포탈은 통과) · 감사. 손상 · 모르는 판은 꺼짐 + 쓰기 409. **복원은 지금 것 유지**(`RESTORE_KEEP_CURRENT` KEEP_SWITCH — 백업이 OTP 없이 다시 켜지 않게).
+- **⑦ 게이트 순서**(`routes/api/bmFolders.js` powerGate — 시험이 고정): 전원은 **전체 범위(조회 ∧ 쓰기) 관리자**(`fleetAdmin` — 설계 ⑦) · LED 는 운영자 이상 · 데모 아님 → 조회 밖 404 → 미분류 서버는 전체 범위 관리자만(반증 A13) → 그 서버 법인의 쓰기 범위 밖 403 → 꺼짐 403(`remote-power-off`) → 강제 동작은 허용 때만(`force-off`) →
+  사유 4자 → **서버 이름을 그대로**(`confirm`) → 보낼 길 · 이 노드 진행 중(409) → OTP. 거절될 요청이 OTP 를 소모하지 않게 OTP 는 맨 끝(반증 A11). LED 는 OTP 없음(위치 표시만 바꾼다 · 같은 스위치 · 감사).
+  감사는 **보내기 전**(‘… 요청’)과 결과 둘 다(반증 A12). 화면의 진행 중 잠금 · 마지막 결과는 서버 열쇠마다 모듈에 둔다(↑↓ 로 오가도 풀리지 않게 — 반증 B8).
+- **⑦ 실행**(`idrac/power.js` runDeviceAction — 판정 하나): **그 서버를 수집하는 노드가 보낸다**(`hwLogSourceOf` — 이 노드 · 엣지 `POST /api/collector/bm-power` · 중앙이 법인 iDRAC 에 WAN 으로 붙지 않는다).
+  장비가 알려 준 `ResetType@Redfish.AllowableValues` 안에서만(강제 재시작은 ForceRestart → PowerCycle) · 장비가 준 대상 경로도 꼴을 본다 · LED 는 `LocationIndicatorActive`(새 표준 — 깜빡임은 켜짐으로 · 밝힌다) 없으면 `IndicatorLED`(If-Match etag).
+  **다시 보내지 않는다**(redfishSend 재시도 0 · 401 그대로 · 엣지 당김 재시도 0) · 장비 시한 `BM_POWER_DEVICE_TIMEOUT_MS`(5~30초 · 공용 `reqTimeoutMs`) < 엣지 당김 45초(최소 35초) < 브라우저 75초.
+  시한 · 끊김 · 엣지 실패는 **‘닿았는지 모름’**(성공 · 실패로 단정하지 않는다) — 상태를 바꾸는 요청을 내보낸 뒤의 오류는 원인과 관계없이 ‘모름’(반증 A3) · 화면은 그 서버를 잠시 잠근다.
+  **보내기 전에 장비가 알려 준 서비스 태그(Dell SKU · HPE SerialNumber)를 등록과 대조**해 다르면 보내지 않는다(`tag-mismatch` — 주소 재배정 · 반증 A5). 경로는 끝 슬래시(iLO 꼴)도 받는다(반증 A4). ‘받음’(2xx)은 끝남이 아니다(화면이 밝힌다). 같은 서버 · 같은 종류 60초에 한 번 · 진행 중 거절. 인증 실패로 멈춘 서버는 장비에 묻지 않는다.
+  엣지 응답은 `sanitizeDeviceAction`(아는 필드 · 아는 상태) · 구버전 엣지는 old-version(최소 판은 릴리스 제목 표지 `REMOTE_POWER_TITLE_RE` — **제목에 ‘물리서버 — 원격 전원 조작’**).
+  **엣지는 스스로 켜야 보낸다**(반증 A1 — 토큰만으로는 장비를 끌 수 없게): env `BM_POWER_EDGE_ENABLE=true` 없으면 403(disabled) · 강제 동작은 `BM_POWER_EDGE_FORCE=true` 도 · 엣지 전체 10분 `BM_POWER_EDGE_MAX`(기본 30)건 · 옛 `BM_POWER_EDGE_DISABLE=true` 도 막는다.
+  장비 오류 글자는 전체 범위 관리자 판본만 원문(그 밖은 `maskHwLogText`) · 감사는 성공 · 실패 모두(엣지도 자기 감사 로그 — 중앙이 알려 준 사용자 · 사유). 데모(mock)는 장비에 보내지 않는다.
+- **⑬ 장애 바로 받기**(`idrac/eventSub.js` · `routes/bmEvents.js` · `bm-events.json` 0600 · 기본 꺼짐): 노드마다 **자기 등록부의 iDRAC 에만** Redfish 이벤트 구독을 건다(엣지 서버는 그 엣지 포탈에서).
+  위험 · 주의 이벤트를 받으면 **그 서버의 인벤토리를 다시 읽게 표시**(`invCache.markInventoryStale`) → **iDRAC 폴링을 한 번 바로**(`pollNowForEvent` — 수동이 아님 · 인증 정지 서버는 건너뜀) → 부품 장애 판정(중앙 `runPartFaultsNow` · 엣지 `pushPartFaultsNow`).
+  캐시(최대 30분)만 다시 판정하면 빨라지지 않는다(반증 A2). 이벤트 글자로 장애를 판정하지 않는다(이벤트는 신호).
+  `EVT_DEBOUNCE_MS`(30초)에 한 번으로 묶고 간격은 **앞 점검이 끝난 때부터** 잰다(반증 A14) · 폴링이 바쁘면 같은 서버로 다시(최대 5번).
+- **⑬ 받는 주소는 사용자 인증이 없다**(index.js 가 `authMiddleware` 없이 **전역 JSON 파서 앞에** 단다 — ⚠ 되돌리지 말 것):
+  ① 주소의 노드 비밀(32바이트 · `timingSafeEqual`) — 꺼짐 · 틀린 비밀은 **본문을 읽기 전에** 404 ② 구독 Context = `dvc:<서버 id>:<HMAC>` — **HMAC 열쇠(ctxKey)는 받는 주소 비밀과 따로**(장비에 주지 않는다 — 장비 하나가 다른 서버 Context 를 만들지 못하게 · 반증 A9) · 틀리거나 **등록부 밖 id** 면 404 ③ 본문 64KB · 한 번에 32건(넘은 수는 셈) · 글자 · 수만(객체는 '' — 반증 A6) · 글자 상한 · 제어 문자 제거 · 라우트는 예외를 잡아 답한다 ·
+  ④ 받은 것은 메모리 고리(최근 200건)만 — 파일에 쓰지 않는다 ⑤ **비밀은 응답 · 감사 · 요청 기록 · 성능 표 · 처리 안 된 오류 기록 · 구독 결과 글자에 싣지 않는다**(`scrubEventPath` — 대소문자 무시 · 절대 꼴 요청 대상도 · index.js 두 곳 · `scrubSecret` — 반증 A7 · A8) · 화면은 ‘있음’ 만.
+  ⑥ 파일의 두 비밀은 비밀 금고 정책대로 봉인(`sealSecret` · 0600 — 반증 A16).
+  비밀이 새면 ‘다시 보라’ 신호만 보낼 수 있다 — 설정에서 새로 만들고 다시 구독한다. 첫 저장의 비밀 생성은 ‘새로 만듦’ 이 아니다(다시 구독하라고 하지 않는다).
+- **⑬ 구독 걸기 · 지우기**(장비 설정을 바꾼다 — 관리자 · 전체 범위 · 본인 OTP · 감사 · **뒤에서** 돈다 · 진행 중 409): 장비마다 시한 30초 · 동시 4대 · 인증 정지 서버 건너뜀 ·
+  **이 포탈 꼴(…/api/bm-events/in/)의 구독만 지운다**(다른 도구의 구독은 건드리지 않는다) · 이미 같은 것(주소 · Context)이 있으면 그대로 · 데모는 보내지 않는다. 장비 응답 꼴(iDRAC 9 · iLO)은 실장비로 확인하지 못했다 — 거절하면 사유를 그대로.
+  `redfishSend` 의 DELETE 는 본문 · Content-Type 없이.
+- 회귀: `server/test/bmPower352.test.js` · `server/test/bmEvents352.test.js` · 웹 `bmFolders/bmPower352.test.jsx`. 반증 결과와 반영은 `docs/rules/audits.md` ‘v3.52 원격 전원 · 이벤트 구독 반증’.
 

@@ -349,6 +349,34 @@ export async function redfishGetCapped(entry, pathname, { signal = null, maxByte
 }
 
 /**
+ * v3.52 물리서버 원격 전원 · 위치 LED(⑦ ⑥) 전용 — **상태를 바꾸는** Redfish 요청(POST · PATCH) 한 번.
+ *  · 인증 방식은 바로 앞의 GET(rawGet)이 세운 것(Basic · Digest · 세션 토큰 — AUTH_CACHE)을 그대로 쓴다. 호출부가 먼저 같은 장비에 GET 을 한다
+ *    (System 자원을 읽어 허용 값을 확인한다) — 그래서 여기서는 인증 방식을 새로 찾는 왕복을 하지 않는다.
+ *  · **다시 보내지 않는다**: 401 이면 그대로 돌려준다(요청이 장비에 닿지 않았는지 알 수 없으니 같은 동작을 두 번 일으키지 않게 — 계정 잠금도 피한다).
+ *    시한 초과 · 연결 끊김도 던진다(호출부가 ‘장비가 받았는지 모름’ 으로 밝힌다).
+ *  · 응답 본문은 앞 16KB 까지만 읽는다(오류 메시지용).
+ * @returns {Promise<{ status:number, ok:boolean, text:string }>}
+ */
+export async function redfishSend(entry, method, pathname, body, { signal = null, timeoutMs = 30_000, headers = {} } = {}) {
+  if (!['POST', 'PATCH', 'DELETE'].includes(method)) throw new Error('redfishSend: POST · PATCH · DELETE 만');   // DELETE — v3.52 이벤트 구독 지우기(⑬)
+  const base = String(entry?.host || '').replace(/\/+$/, '');
+  const { username, password } = entry || {};
+  const key = `${base}\0${username}\0${pwFingerprint(password)}`;
+  const cached = AUTH_CACHE.get(key);
+  const auth = cached && Date.now() - cached.at < AUTH_TTL_MS && cached.mode === 'session' && cached.token ? { 'X-Auth-Token': cached.token }
+    : cached && cached.mode === 'digest' && cached.challenge ? { Authorization: buildDigestHeader({ username, password, method, uri: pathname, challenge: cached.challenge }) }
+      : { Authorization: basicHeader(username, password) };
+  const sig = signal ? AbortSignal.any([AbortSignal.timeout(timeoutMs), signal]) : AbortSignal.timeout(timeoutMs);
+  const res = await bmcFetch(`${base}${pathname}`, {
+    method, signal: sig, dispatcher,
+    headers: { Accept: 'application/json', ...(method === 'DELETE' ? {} : { 'Content-Type': 'application/json' }), ...headers, ...auth },
+    ...(method === 'DELETE' ? {} : { body: JSON.stringify(body ?? {}) }),
+  });
+  const pre = await readBodyPrefix(res, AUTH_BODY_MAX_BYTES).catch(() => ({ text: '', capped: false }));
+  return { status: res.status, ok: res.ok, text: pre.capped ? '' : pre.text };
+}
+
+/**
  * Redfish NIC 포트의 '설치된 카드 속도'(Mbps)를 추출한다. 정격/최고(SupportedLinkCapabilities·
  * MaxSpeedGbps)를 현재 링크속도보다 우선해, 포트가 다운(current=0)이어도 10G/25G 카드를 식별한다.
  * ⚠️ 과거 버그: `num(current) ?? caps` 는 current=0에서 0으로 단락돼 정격 폴백이 무시됐다.

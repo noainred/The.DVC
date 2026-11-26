@@ -87,6 +87,7 @@ export const RESTORE_EXCLUDE = new Map([
 const KEEP_LEDGER = '보낸 회차 · 알린 사건 기록 — 되돌리면 이미 보낸 알림을 다시 보낸다';
 const KEEP_RUN = '실행 회차 · 실행 기록 — 되돌리면 이미 돈 작업을 다시 돌리거나 진행 중인 실행의 추적을 잃는다';
 const KEEP_CURSOR = '읽은 위치 · 기준선 — 되돌리면 이미 처리한 구간을 다시 처리한다';
+const KEEP_SWITCH = '본인 OTP 로 켜는 장비 조작 스위치 · 장비에 건 받는 주소 비밀 — 되돌리면 OTP 없이 원격 전원이 다시 켜지거나 장비 구독의 비밀과 어긋난다(v3.52)';
 export const RESTORE_KEEP_CURRENT = new Map([
   // 메일 · 알림 발송 기록
   ...['alerts-state.json', 'backup-stale-alert-state.json', 'bareos-digest-state.json', 'bareos-health-state.json', 'bareos-mail-state.json',
@@ -103,6 +104,8 @@ export const RESTORE_KEEP_CURRENT = new Map([
   // 수집 커서 · 증분 기준선
   ...['diskbad-cursors.json', 'vcenter-logs-cursor.json', 'cvp-push.json', 'isidu-push.json', 'sanswitch-perf-push.json', 'net-issues-state.json', 'ipam-change-baseline.json',
   ].map((n) => [n, KEEP_CURSOR]),
+  // v3.52 물리서버 원격 전원 · LED 켜기(⑦ ⑥) · 이벤트 구독(⑬)
+  ...['bm-power.json', 'bm-events.json'].map((n) => [n, KEEP_SWITCH]),
 ]);
 /** 114회차: 인증 실패 정지 기록(util/authGuard.js createAuthGuard 의 파일 — 도구마다 `<도구>-auth-stops.json`). reconcileAuthStopsText 가 합친다. */
 export const AUTH_STOPS_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,80}-auth-stops\.json$/;

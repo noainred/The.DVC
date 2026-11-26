@@ -47,6 +47,9 @@ import { bmCheckFor, chkRowOf } from '../../bmcheck/state.js';
 import { healthRowOf, HEALTH_RULES, HEALTH_BANDS, HEALTH_MIN } from '../../bmcheck/health.js';   // v3.50 건강 점수(⑩)
 import { maskHwLogText, readHwLog, demoHwLog } from '../../idrac/hwLog.js';   // v3.50 하드웨어 이벤트 로그(⑤) — 판본에 따른 가림   // v3.45 물리서버 점검(보증 · 펌웨어 기준선 · BIOS 편차)
 import { memCeOf } from '../../idrac/partLife.js';   // v3.51 부품 수명(⑧) — 메모리 교정 오류 경고 슬롯별 수
+import { POWER_ACTIONS, LED_WANTS, runDeviceAction, powerGapIssue } from '../../idrac/power.js';   // v3.52 원격 전원 · LED(⑦ ⑥)
+import { remotePower } from '../../idrac/remotePowerSettings.js';
+import { ownOtpGate } from './reauth.js';
 import { assetStore, fwBaselineStore, adminBaselineLookup, advisoryStore, caseStore, upsertCase, removeCase, casesOfTag, CASE_STATUSES } from '../../bmcheck/store.js';
 import { WARRANTY_SOON_DAYS } from '../../bmcheck/warranty.js';
 import { judgePeerGroup, avgValueOf, PEER_MIN, PEER_GROUP_MAX, PEER_AVG_MIN_SAMPLES, PEER_AVG_MIN_COVERAGE } from '../../bmcheck/peer.js';   // v3.48 같은 묶음 대비
@@ -67,8 +70,7 @@ const inSnap = (snap, vc) => (snap?.vcenters || []).some((v) => t(v.id) === t(vc
 const writableOf = (user, snap, vc) => writerOk(user) && inSnap(snap, vc) && inUserWriteScope(user, snap, vc);
 /** 전 법인 설정 — 조회 ∧ 쓰기 무제한 관리자만(server/CLAUDE.md v2.733 · v2.904 — 조회 범위만 보면 writeVcenters 관리자가 통과한다). */
 const fleetAdmin = (user, snap) => {
-  if (!isAdminDetailUser(user) || scopedVcenterIds(user, snap)) return false;
-  try { return !writeScopedVcenterIds(user, snap); } catch { return false; }
+  try { return isAdminDetailUser(user) && !scopedVcenterIds(user, snap) && !writeScopedVcenterIds(user, snap); } catch { return false; }   // 판정이 던지면 거절(500 이 아니라 — 반증 A 후속)
 };
 const unreadable = (res) => res.status(503).json({ ok: false, error: 'registryUnreadable', reason: '물리서버 폴더 저장소를 읽지 못했습니다 — 빈 트리로 시작하지 않습니다(백업에서 복원하거나 전체 범위 관리자가 초기화).' });
 
@@ -328,6 +330,10 @@ async function trendDeps() {
     hwLogLocal: async (entry) => readHwLog(entry),
     hwLogEdge: async (agent, q) => (await import('../../central/bmHwLogPull.js')).pullEdgeHwLog(agent, q),
     hwLogDemo: async (key) => { const { isMockMode } = await import('../../mock/demo/flags.js'); return isMockMode() ? demoHwLog(key) : null; },
+    // v3.52 원격 전원 조작 · 위치 LED(⑦ ⑥) — 이 노드 서버는 등록부 항목으로 직접 · 엣지 · 수집 서버 서버는 그쪽이 보낸다 · 데모는 장비에 보내지 않는다
+    powerLocal: async (entry, o) => runDeviceAction(entry, o),
+    powerEdge: async (agent, q) => (await import('../../central/bmPowerPull.js')).pullEdgePower(agent, q),
+    powerDemo: async () => { const { isMockMode } = await import('../../mock/demo/flags.js'); return isMockMode() ? { ok: true, status: 'accepted', http: 204, message: '데모 — 장비에 보내지 않았습니다.' } : null; },
     // 수집 서버(pull) 출처 서버를 맡은 엣지 — 구성원에는 collectorId 만 있다(반증 A2). 조회는 등록부 하나(findCollectorByName — id 가 먼저 맞는다).
     //   돌려주는 것은 등록 **id**(표시 이름은 겹칠 수 있다 — pullFromEdge 는 id 로도 찾는다).
     collectorName: async (id) => { const c = (await import('../../collector/registry.js')).findCollectorByName(id); return c && typeof c.id === 'string' ? c.id : ''; },
@@ -452,7 +458,7 @@ export async function edgeViewFor(req, snap, D = {}) {
   let pull = null;
   try { pull = (D.pullStatus || (await import('../../agent/bmFoldersPull.js')).bmFoldersPullStatus)(); } catch { pull = null; }
   return {
-    ok: true, edge: true, scoped: hide, admin, canPull: writerOk(req.user), usageOff: !!ix?.off,
+    ok: true, edge: true, scoped: hide, admin, canPull: writerOk(req.user), canFleet: fleetAdmin(req.user, snap), usageOff: !!ix?.off,   // canFleet — 엣지 포탈의 이벤트 구독 창(v3.52 반증 B1)
     copy: copy ? { rev: copy.rev, savedAt: copy.savedAt, at: copy.at } : null, ...(error ? { copyError: error } : {}),
     pull: pull ? { intervalMs: pull.intervalMs, last: pull.last ? { at: pull.last.at, ok: !!pull.last.ok, ...(admin && !hide ? { error: pull.last.error || pull.last.note || undefined } : {}) } : null, running: !!pull.running } : null,
     corps, servers,
@@ -693,6 +699,98 @@ export function registerBmFolders(api) {
       return res.json({ ok: true });
     } catch (e) { if (!res.headersSent) res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); }
   });
+  // v3.52 원격 전원 조작 · 위치 LED 켜기/끄기(시안 ⑦ ⑥) — **장비 상태를 바꾼다**. 기본 꺼짐(remotePowerSettings — 전체 범위 관리자 + OTP 로 켠다).
+  //   게이트: 운영자 이상 · 데모 아님 → 조회 밖 404 → 그 서버 법인의 쓰기 범위 밖 403 → 켜기 스위치 → (전원) 본인 OTP · 서버 이름을 그대로 입력 · 사유 4자 이상 ·
+  //   강제 동작은 따로 허용될 때만. 그 서버를 수집하는 노드가 보낸다(hwLogSourceOf — 이 노드 · 엣지 · 수집 서버). 다시 보내지 않는다 · 감사(성공 · 실패 모두).
+  //   결과 ‘받음’ 은 장비가 요청을 받았다는 뜻이지 끝났다는 뜻이 아니다(화면이 밝힌다). 장비 오류 글자는 전체 범위 관리자 판본만 원문.
+  const powerGate = async (req, res, kind) => {
+    if (!writerOk(req.user)) { res.status(403).json({ ok: false, reason: '원격 전원 · LED 는 운영자 이상 권한이 필요합니다.' }); return null; }
+    const x = await caseMember(req, res); if (!x) return null;
+    const fleet = fleetAdmin(req.user, x.snap);
+    // 전원은 전체 범위(조회 ∧ 쓰기) 관리자만 — 설계 ⑦(‘전체 범위 관리자 · OTP · 이름 재입력’). LED 는 운영자 이상 · 그 법인 쓰기 범위.
+    if (kind === 'power' && !fleet) { res.status(403).json({ ok: false, code: 'power-admin', reason: '원격 전원 조작은 전체 범위 관리자만 할 수 있습니다.' }); return null; }
+    if (x.m.kind !== 'bm') { res.status(400).json({ ok: false, reason: 'ESXi 호스트 행은 이 화면에서 전원을 다루지 않습니다.' }); return null; }
+    // 법인 귀속이 없는 서버(미분류) — 법인 쓰기 범위로 가를 수 없다: 전체 범위 관리자만(반증 A13 — 전에는 관리자에게도 ‘법인 없음’ 404)
+    if (!x.m.corp) { if (!fleet) { res.status(404).json({ ok: false, error: 'not_found', reason: '서버를 찾지 못했습니다.' }); return null; } }
+    else {
+      const w = corpWriteAccess(req.user, x.snap, x.m.corp);
+      if (w) { res.status(w.status).json({ ok: false, reason: w.reason }); return null; }
+    }
+    const st = remotePower.get();
+    if (!st.enabled) { res.status(403).json({ ok: false, code: 'remote-power-off', reason: '원격 전원 · LED 가 꺼져 있습니다(전체 범위 관리자가 Bare Metal Server › 원격 전원 설정에서 켭니다).' }); return null; }
+    return { ...x, st, kind };
+  };
+  /** 보낼 길 — OTP 앞에서 정한다(길이 없거나 이 노드에서 진행 중이면 OTP 를 쓰기 전에 거절 — 반증 A11). @returns {{via, demo?, agent?, q?, entry?}} 또는 응답을 보낸 뒤 null */
+  const powerRoute = async (res, D, x, kind) => {
+    const demo = await D.powerDemo?.().catch(() => null);
+    if (demo) return { via: 'demo', demo };
+    const src = hwLogSourceOf(x.m);
+    const noWay = () => { res.status(400).json({ ok: false, reason: '이 포탈이 보낼 길이 없는 서버입니다(iDRAC 등록부 밖 · 꺼진 등록 등).' }); return null; };
+    if (!src) return noWay();
+    if (src.via !== 'local') return { via: src.via, agent: src.agent, q: src.q };
+    const entry = await D.hwLogEntry(src.id).catch(() => null);
+    if (!entry) return noWay();
+    const busy = powerGapIssue(`${kind}|${String(entry.id ?? entry.host ?? '')}`);
+    if (busy) { res.status(409).json({ ok: false, status: 'busy', reason: busy }); return null; }
+    return { via: 'local', entry };
+  };
+  const powerRun = async (req, res, x, kind, action, reason, route, D) => {
+    const { m } = x;
+    const full = isAdminDetailUser(req.user) && !x.hide;
+    const finish = (via, r) => {
+      const ok = r?.ok === true && r.status === 'accepted';
+      const message = r?.message ? (full ? String(r.message) : maskHwLogText(String(r.message), { tag: m.serviceTag })).slice(0, 300) : '';
+      logAudit({ user: req.user?.username, action: kind === 'power' ? '물리서버 원격 전원 조작' : '물리서버 위치 LED', target: `${m.name || ''}`.slice(0, 120),
+        detail: `${action} · ${via === 'demo' ? '데모(장비에 보내지 않음)' : ok ? '장비가 받음' : r?.status || r?.kind || '실패'}${r?.reset ? ` · ${r.reset}` : ''} · ${via}${reason ? ` · 사유 ${reason}` : ''}`.slice(0, 300), ip: req.ip });   // 데모는 ‘받음’ 이라 적지 않는다(반증 B6)
+      return res.json({ ok, via, status: r?.status || (r?.kind === 'old-version' ? 'old-version' : r?.kind === 'not-found' ? 'not-found' : r?.kind === 'edge-disabled' ? 'edge-disabled' : r?.kind === 'edge-force-off' ? 'force-off' : r?.kind === 'edge-rate' ? 'rate' : 'edge-fail'),
+        ...(r?.http ? { http: r.http } : {}), ...(r?.reset ? { reset: r.reset } : {}), ...(r?.prop ? { prop: r.prop } : {}), ...(r?.before ? { before: r.before } : {}), ...(message ? { message } : {}),
+        ...(typeof r?.tagChecked === 'boolean' ? { tagChecked: r.tagChecked } : {}), ...(full && !r?.ok && r?.reason ? { reason: String(r.reason).slice(0, 200) } : {}) });
+    };
+    if (route.via === 'demo') return finish('demo', route.demo);
+    // 보내기 전에도 감사(요청 도중 재시작되면 결과 기록이 없다 — 반증 A12)
+    logAudit({ user: req.user?.username, action: kind === 'power' ? '물리서버 원격 전원 조작 요청' : '물리서버 위치 LED 요청', target: `${m.name || ''}`.slice(0, 120), detail: `${action} · ${route.via}${reason ? ` · 사유 ${reason}` : ''}`.slice(0, 300), ip: req.ip });
+    if (route.via !== 'local') {
+      const r = await D.powerEdge(route.agent, { ...route.q, kind, action, by: req.user?.username || '', reason });
+      return finish(route.via, r?.ok ? r.body : r);
+    }
+    return finish('local', await D.powerLocal(route.entry, { kind, action, expectTag: m.serviceTag || route.entry.serviceTag || '' }));
+  };
+  api.post('/tools/bm-folders/power', toolsPerm, textFields('key', 'action', 'reason', 'confirm', 'otp'), async (req, res, next) => {
+    // 게이트(권한 · 범위 · 스위치 · 입력 · 보낼 길)를 OTP 보다 먼저 — 범위 밖 계정 · 보낼 수 없는 요청이 OTP 를 소모하지 않게(조회 밖 404 → 쓰기 밖 403 → 꺼짐 403 → OTP)
+    try {
+      const x = await powerGate(req, res, 'power'); if (!x) return;
+      const b = req.body || {};
+      const action = String(b.action || '');
+      if (!Object.hasOwn(POWER_ACTIONS, action)) return res.status(400).json({ ok: false, reason: '모르는 전원 동작입니다.' });
+      if (POWER_ACTIONS[action].force && !x.st.allowForce) return res.status(403).json({ ok: false, code: 'force-off', reason: '강제 재시작 · 강제 끄기는 허용되지 않았습니다(원격 전원 설정에서 따로 엽니다).' });
+      const reason = String(b.reason || '').trim().slice(0, 200);
+      if (reason.length < 4) return res.status(400).json({ ok: false, reason: '사유를 4자 이상 적으십시오(감사 로그에 남습니다).' });
+      if (String(b.confirm || '').trim() !== String(x.m.name || '').trim() || !String(x.m.name || '').trim()) return res.status(400).json({ ok: false, code: 'confirm', reason: '확인을 위해 서버 이름을 그대로 입력하십시오.' });
+      const D = await trendDeps();
+      const route = await powerRoute(res, D, x, 'power'); if (!route) return;
+      req._power = { x, action, reason, route, D };
+      return next();
+    } catch (e) { if (!res.headersSent) res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); return undefined; }
+  }, ownOtpGate('물리서버 원격 전원 조작'), async (req, res) => {
+    try { const { x, action, reason, route, D } = req._power; return await powerRun(req, res, x, 'power', action, reason, route, D); } catch (e) { if (!res.headersSent) res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); return undefined; }
+  });
+  api.post('/tools/bm-folders/led', toolsPerm, textFields('key', 'state'), async (req, res) => {
+    try {
+      const x = await powerGate(req, res, 'led'); if (!x) return;
+      const state = String(req.body?.state || '');
+      if (!LED_WANTS.includes(state)) return res.status(400).json({ ok: false, reason: 'LED 상태는 on · blink · off 가운데 하나입니다.' });
+      const D = await trendDeps();
+      const route = await powerRoute(res, D, x, 'led'); if (!route) return;
+      return await powerRun(req, res, x, 'led', state, '', route, D);
+    } catch (e) { if (!res.headersSent) res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); return undefined; }
+  });
+  // 화면용 — 켜기 스위치 · 강제 허용 · 이 계정이 쓸 수 있는가(서버 집행과 같은 판정의 앞부분 — 범위는 서버마다 라우트가 다시 본다)
+  api.get('/tools/bm-folders/power-state', toolsPerm, (req, res) => {
+    const st = remotePower.get();
+    res.set('Cache-Control', 'no-store');
+    res.json({ ok: true, enabled: st.enabled, allowForce: st.allowForce, canUse: writerOk(req.user), canPower: fleetAdmin(req.user, store.get()), otpRequired: !!config.auth.enabled, ...(remotePower.loadError() ? { unreadable: true } : {}), actions: Object.fromEntries(Object.entries(POWER_ACTIONS).map(([k, v]) => [k, { label: v.label, force: v.force }])) });
+  });
+
   // 접수 자료 묶음(JSON 내려받기) — 서버 · 보증 · 열린 부품 장애 · 뒤처진 펌웨어 · 최근 위험 · 주의 기록(인벤토리 주기에 읽은 것) · 하드웨어 요약.
   //   서비스 태그 · 계약 번호는 그것을 볼 수 있는 판본에만(태그: 범위 판본이 아님 · 계약: 전체 범위 관리자).
   //   묶음은 제조사에 붙여 보내는 파일이다 — 기록 글자는 **판본과 관계없이 늘 가린다**(IPv4 · IPv6 · MAC · 호스트 이름 · ‘for 계정 from’ 꼴 계정 · 태그 —

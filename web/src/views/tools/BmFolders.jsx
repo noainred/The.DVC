@@ -15,6 +15,8 @@ import BulkAdd from './bmFolders/BulkAdd.jsx';
 import BmDrawer from './bmFolders/BmDrawer.jsx';
 import AssetLedger from './bmFolders/AssetLedger.jsx';   // v3.45 자산 원장(보증 · 계약) 올리기 — 전체 범위 관리자
 import AdvisoryLedger from './bmFolders/AdvisoryLedger.jsx';   // v3.50 펌웨어 보안 권고 표 올리기 — 전체 범위 관리자
+import RemotePowerSettings from './bmFolders/RemotePowerSettings.jsx';   // v3.52 원격 전원 · LED 켜기 설정 — 전체 범위 관리자
+import EventSubSettings from './bmFolders/EventSubSettings.jsx';   // v3.52 장애 바로 받기(이벤트 구독) — 전체 범위 관리자
 import { healthCell } from './bmFolders/opsText.js';   // v3.50 건강 점수 칸
 import { chkCounts, chkChips, chkAsideText, chkNotices, CHK_QUICK } from './bmFolders/checkText.js'; // v3.44: 서버 상세 드로어(예전 400px 옆 패널 SidePanel · HwPanel 을 바꿈)
 import { rowTone, rowDotTitle, orderRows, TMPKEY_NOTE } from './bmFolders/drawerText.js';
@@ -56,7 +58,9 @@ export default function BmFolders() {
   // v3.44: 표가 정렬한 '보이는 순서'(STable onOrder) — 드로어의 ‹ › · ↑↓ 가 이 순서를 따른다. 표가 그려지지 않으면(맵 · 좁은 화면 카드) 쓰지 않는다.
   const [order, setOrder] = useState(null);
   const [ledger, setLedger] = useState(false);   // v3.45 자산 원장 올리기 창
-  const [advLedger, setAdvLedger] = useState(false);   // v3.50 보안 권고 표 올리기 창
+  const [advLedger, setAdvLedger] = useState(false);
+  const [powerCfg, setPowerCfg] = useState(false);   // v3.52 원격 전원 설정 창
+  const [evtCfg, setEvtCfg] = useState(false);   // v3.52 이벤트 구독 창   // v3.50 보안 권고 표 올리기 창
   const [bulk, setBulk] = useState(null);
   // v2.987 맵 보기 · 저장한 보기(브라우저 저장 — 이 사람의 편의만. 못 읽으면 빈 목록) · 입력 다시 읽기 진행 중
   const [view, setView] = useState('list');
@@ -191,6 +195,8 @@ export default function BmFolders() {
           {/* v3.45: 자산 원장(보증 · 계약) 올리기 — 전 법인에 걸친 값이라 전체 범위 관리자만(서버 게이트와 같은 표지 canFleet) */}
           {d.canFleet ? <button type="button" className="logout-btn" style={btn} onClick={() => setLedger(true)} title="서비스 태그별 보증 만료일 · 계약을 CSV 로 올립니다">자산 원장</button> : null}
           {d.canFleet ? <button type="button" className="logout-btn" style={btn} onClick={() => setAdvLedger(true)} title="확인한 제조사 펌웨어 보안 권고를 CSV 로 올립니다(포탈은 인터넷에서 가져오지 않습니다)">보안 권고 표</button> : null}
+          {d.canFleet ? <button type="button" className="logout-btn" style={btn} onClick={() => setPowerCfg(true)} title="서버 상세의 원격 전원 · 위치 LED 조작을 켜거나 끕니다(기본 꺼짐 · 인증을 켠 포탈은 본인 OTP)">원격 전원 설정</button> : null}
+          {d.canFleet ? <button type="button" className="logout-btn" style={btn} onClick={() => setEvtCfg(true)} title="장비가 장애 경고를 이 포탈로 바로 보내게 구독을 겁니다(기본 꺼짐)">이벤트 구독</button> : null}
           {d.canWrite ? <button type="button" className="logout-btn" style={btn} disabled={freshBusy} title="새로 넣은 iDRAC 서버 · 법인 귀속 변경을 다음 인벤토리 주기 전에 지금 다시 읽습니다(포탈 전체에 상한 하나 — 서비스 인벤토리와 함께 씁니다)" onClick={readFresh}>{freshBusy ? '다시 읽는 중…' : '입력 다시 읽기'}</button> : null}
           <button type="button" className="logout-btn" style={btn} onClick={() => load()}>새로고침</button>
         </div>
@@ -395,6 +401,8 @@ export default function BmFolders() {
       {panelRow ? <BmDrawer r={panelRow} rows={drawerRows} corps={corps} corpName={corpName} scoped={!!d.scoped} op={op} busy={busy} onClose={() => setPanel('')} onMove={setPanel} note={note} admin={!!d.admin} gen={`${d.rev ?? ''}:${d.at ?? ''}`} onChanged={() => load()}  healthRules={d.check?.health?.rules ? { ...d.check.health.rules, min: d.check.health.min || null } : null} /> : null}
       {ledger ? <AssetLedger meta={d.check?.assets} onClose={() => setLedger(false)} onChanged={() => load()} /> : null}
       {advLedger ? <AdvisoryLedger meta={d.check?.advisories} onClose={() => setAdvLedger(false)} onChanged={() => load()} /> : null}
+      {powerCfg ? <RemotePowerSettings onClose={() => setPowerCfg(false)} /> : null}
+      {evtCfg ? <EventSubSettings onClose={() => setEvtCfg(false)} /> : null}
       {bulk ? <BulkAdd init={bulk} d={d} corpName={corpName} op={op} busy={busy} onClose={() => setBulk(null)} /> : null}
     </div>
   );

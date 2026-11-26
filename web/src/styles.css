@@ -3939,3 +3939,17 @@ thead th[data-nosort] { cursor: default; }
 .pfe-step > .pfe-min { width: 64px; flex: 0 0 64px; }
 .pfe-step > .pfe-mail { width: auto; flex: 1 1 180px; }
 .pfe-dl { font-size: 12px; text-align: center; }
+/* v3.52 원격 전원 조작 · 위치 LED(⑦ ⑥) — 드로어 구역 · 확인 칸 */
+.bmd-pw-row { gap: 6px; margin-top: 4px; min-width: 0; }
+.bmd-pw-lb { font-size: 12px; min-width: 56px; }
+.logout-btn.bmd-pw-force { border-color: var(--red); color: var(--red); }
+.bmd-pw-confirm { display: grid; gap: 6px; margin-top: 8px; padding: 10px; border: 1px solid var(--border); border-radius: 8px; min-width: 0; }
+.bmd-pw-confirm.force { border-color: var(--red); }
+.bmd-pw-h { font-size: 13px; overflow-wrap: anywhere; }
+.bmd-pw-warn { font-size: 12px; color: var(--red); overflow-wrap: anywhere; }
+.bmd-pw-f { display: grid; gap: 3px; font-size: 12px; min-width: 0; }
+.bmd-pw-f > .input { width: 100%; max-width: 360px; min-width: 0; box-sizing: border-box; }
+.login-btn.bmd-pw-go-force { background: var(--red); border-color: var(--red); }
+.bmd-pw-bad { color: var(--red); overflow-wrap: anywhere; }
+.pfe-on.bmd-wrapline { white-space: normal; align-items: flex-start; min-width: 0; overflow-wrap: anywhere; }   /* 긴 체크 글자가 창 격자를 넓히지 않게(400px — 반증 B2) */
+.pfe-on.bmd-wrapline > input { flex: none; margin-top: 2px; }

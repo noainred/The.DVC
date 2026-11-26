@@ -347,6 +347,16 @@ export async function pollNow({ manual = false } = {}) {
  *   busy — 다른 수집(주기 또는 다른 사람의 수동)이 진행 중이라 이번 요청은 **실행하지 않았다**(lastRun 은 직전 것)
  *   stopped — 긴급중단 중이라 수집하지 않았다
  */
+/**
+ * v3.52 ⑬ 장애 바로 받기 — 이벤트를 받은 뒤 한 주기를 바로(수동이 아님 — 인증 정지 서버는 그대로 건너뛴다 · 재진입 가드 그대로).
+ * @returns {Promise<{ busy:boolean }>} busy = 다른 주기가 진행 중이라 이번에는 돌지 않았다(호출부가 다시 잡는다)
+ */
+export async function pollNowForEvent() {
+  let r;
+  try { r = await pollOnce({ manual: false }); } catch (err) { console.error('[idrac] 이벤트 뒤 수집 실패:', err.message); }
+  return { busy: r === BUSY };
+}
+
 export async function pollNowManual() {
   let r;
   try { r = await pollOnce({ manual: true }); } catch (err) { console.error('[idrac] 수동 수집 실패:', err.message); }
