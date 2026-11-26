@@ -10,13 +10,25 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
-import { isSecretKey, redactDeep, redactLogLine, MASK } from '../src/edgelog/redact.js';
-import { STATUS_SPEC, STATUS_KEYS, GROUP_LABEL } from '../src/edgelog/spec.js';
-import { collectEdgeLog, DEFAULT_LOG_LIMIT, MAX_LOG_LIMIT } from '../src/edgelog/collect.js';
-import * as store from '../src/central/edgeLogStore.js';
-import * as jobs from '../src/central/edgeLogJobs.js';
-import { buildEdgeRows, cmpVersion } from '../src/routes/api/edgeLog.js';
+// 2026-11-26: 프로젝트 모듈을 불러오기 **전에** 설정 폴더를 임시 폴더로 잡는다. 잡지 않아 설정이 실제 `server/config` 로 풀려
+//   auth-secret · vcenter-logs.db 를 남겼다(같은 체크아웃의 다음 실행이 그것을 읽는다). 정적 import 는 호이스팅돼 아래 대입보다 먼저 돌므로
+//   src 모듈은 동적 import 로 부른다(v3.41.1 arch2582 와 같은 꼴 · 고정: test/configDirIsolation.test.js ③).
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+test.after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+process.env.CONFIG_DIR = tmpDir('dvc-edgelog2549-cfg-');
+
+const { isSecretKey, redactDeep, redactLogLine, MASK } = await import('../src/edgelog/redact.js');
+const { STATUS_SPEC, STATUS_KEYS, GROUP_LABEL } = await import('../src/edgelog/spec.js');
+const { collectEdgeLog, DEFAULT_LOG_LIMIT, MAX_LOG_LIMIT } = await import('../src/edgelog/collect.js');
+const store = await import('../src/central/edgeLogStore.js');
+const jobs = await import('../src/central/edgeLogJobs.js');
+const { buildEdgeRows, cmpVersion } = await import('../src/routes/api/edgeLog.js');
 
 test('가릴 키와 가리면 안 되는 키를 구분한다', () => {
   for (const k of ['password', 'token', 'centralToken', 'collectorToken', 'privateKey', 'passphrase',

@@ -19,6 +19,7 @@
 - (원래 3227행) 의존 방향은 한쪽이다 — routes/ 는 index.js 만 import 하고, util/ 은 도메인을 모른다
 - 시간 비율(ReDoS · 선형 시간) 테스트는 크기 차이를 크게(8배) 두고 작은 쪽 · 큰 쪽을 번갈아 잰다
 - 공용 모듈은 `docs/COMMON.md`(생성물)에서 먼저 찾는다 — 새 헬퍼를 만들기 전에
+- 시험은 실제 설정 폴더(`server/config`)에 쓰지 않는다 — src 를 부르기 전에 `CONFIG_DIR` 을 임시 폴더로 · `npm test` 는 preload 로 파일마다 따로
 
 ## 본문
 
@@ -359,3 +360,15 @@
   (진짜 ssh2 채널은 스트림이라 버퍼에 둔다 — 가짜만의 결함). 주 명령 출력은 `head -c` 를 지나 4KB 묶음으로 나오므로 DF 앞 출력이 4KB 를 넘는 러너(디스크 · NIC 가 많은 CI)에서
   부하로 부모가 밀리면 첫 묶음(STAT · MEM)만 버려져 'ok 인데 CPU · 메모리 없음' 이 됐다 — 이 컨테이너는 3.7KB 라 재현되지 않았다. 재현 · 회귀는 `bmTop8bBudget` ④
   (`BUD_STALL_MS` 로 spawn 직후 부모를 멈춘다 — 예전 하네스는 약 9KB 유실). 같은 형태의 `bmUsageLoop1` 도 고쳤다. 새 가짜 스트림은 이 형태를 따르거나 `PassThrough` 를 쓸 것.
+
+- **시험은 실제 설정 폴더(`server/config`)에 쓰지 않는다 — 프로젝트 모듈을 부르기 전에 `CONFIG_DIR` 을 임시 폴더로 잡는다**(2026-11-26):
+  전량 실행 뒤 `server/config` 에 시험 데이터 12종(auth-secret · datacenters.json · ping-monitor.db …)이 남았고 같은 체크아웃의 다음 실행이 그것을 읽었다
+  (v3.41.1 arch2582 BUG-2 는 그래서 두 번째 실행부터 실패했다 — CI 는 새 체크아웃이라 드러나지 않는다). 원인은 시험 12개가 `CONFIG_DIR` 없이 src 를 부른 것 —
+  `config.js` 와 `FILE = path.join(config.configDir, …)` 꼴 모듈은 **로드 때 경로를 굳히므로** 뒤에 바꿔도 따라오지 않고, **정적 import 는 호이스팅돼** 파일 본문의
+  대입보다 먼저 돈다(`gpuGuestIpOverride` 는 대입이 있었는데도 샜다). 규칙: 설정에 쓰는 시험은 파일 맨 위에서 `tmpDir` · `rmTmpDirs`(tmpCleanup3188 꼴)로
+  `process.env.CONFIG_DIR` 을 잡고 src 는 그 뒤 **동적 import** 로 부른다(`process.env.CONFIG_DIR || …` 로 물려받지 말 것 — 셸의 실제 설치본 폴더를 이어받는다).
+  재발 방지: `npm test` 는 `--import ./test/_isolateConfigDir.js` 로 **시험 파일 프로세스마다 새 임시 폴더**를 준다(밖에서 준 값도 바꾼다 · 시험이 잡은 값은 이긴다 ·
+  exit 에서 지운다). npm 스크립트에 공용 폴더 하나를 주는 방식은 쓰지 않았다 — `CONFIG_DIR ||` 꼴 시험 15개가 병렬 실행 중 같은 폴더를 나눠 쓰게 된다.
+  ⚠ preload 는 `node --test test/x.test.js` 직접 실행에는 걸리지 않는다 — 위 파일별 규칙이 여전히 필요하다. 고정 `test/configDirIsolation.test.js`(① 스크립트 ② preload 동작 ③ 고친 12개).
+  귀속 방법(다음에 또 남으면): fs 쓰기 함수와 `node:sqlite` `DatabaseSync` 를 감싸 경로가 `server/config` 아래면 `process.argv` 의 시험 파일 이름과 함께 기록하는 preload 를
+  `NODE_OPTIONS=--import=…` 로 걸고 전량을 돌린다(병렬이어도 파일별로 귀속된다) → 후보를 하나씩 깨끗한 폴더에서 단독 실행해 확정. 환경을 비우고 띄운 자식 프로세스는 이 방법으로 보이지 않는다.

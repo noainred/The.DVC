@@ -59,7 +59,8 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
 - **화면**: `BoldText` 는 `**강조**` 만 해석한다 — 문구에 **백틱 금지**(값 인용은 ‘ ’) · `text-transform: uppercase` 금지 · 표는 `STable`(+ `minWidth`·`limit` 은 정렬 뒤) ·
   그리드·플렉스 자식 `min-width:0` · 버튼 여러 개 행은 `flexWrap` · React 훅은 조기 return 위 · 403 은 `ErrorBox` 가 권한 안내로. 화면이 바뀌면 **Chromium 1440/400 으로 직접 본다**.
 - **테스트**: 기준 시각은 실제 시각에서 정시 경계로 떨어뜨려 고정(`Date.now()` 직접·고정 epoch 둘 다 깨진다 — `docs/rules/common.md`) · 주석 제거는 `test/_stripComments.js` ·
-  ReDoS 회귀는 비율로 · push/pull 진입 함수는 실제로 호출하는 테스트를 둔다 · 변이 검증의 '수정 전' 판본은 감사 기준 커밋으로.
+  ReDoS 회귀는 비율로 · push/pull 진입 함수는 실제로 호출하는 테스트를 둔다 · 변이 검증의 '수정 전' 판본은 감사 기준 커밋으로 ·
+  설정에 쓰는 시험은 src 를 부르기 **전에** `CONFIG_DIR` 을 임시 폴더로(정적 import 는 호이스팅 — 동적 import · `docs/rules/common.md`).
 - **정규식**: 외부 입력(장비 출력 포함)에 앵커 없는 무제한 반복·`/\s+$/`·`/\/+$/` 금지(O(n²)) — 길이를 먼저 자르고 선형으로.
 - **문서의 '남아 있다'·'별건' 은 다음 점검의 첫 후보**이고, 고친 뒤에는 그 줄을 반드시 정정한다. 반증 기록에는 근거를 적는다.
 

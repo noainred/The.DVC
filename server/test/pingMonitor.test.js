@@ -1,11 +1,24 @@
-import { test, beforeEach } from 'node:test';
+import { test, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
-import {
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+// 2026-11-26: 프로젝트 모듈을 불러오기 **전에** 설정 폴더를 임시 폴더로 잡는다. 잡지 않아 설정이 실제 `server/config` 로 풀려
+//   ping-targets.json · ping-monitor.db 를 남겼다(같은 체크아웃의 다음 실행이 그것을 읽는다). 정적 import 는 호이스팅돼 아래 대입보다 먼저 돌므로
+//   src 모듈은 동적 import 로 부른다(v3.41.1 arch2582 와 같은 꼴 · 고정: test/configDirIsolation.test.js ③).
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+process.env.CONFIG_DIR = tmpDir('dvc-pingmon-cfg-');
+
+const {
   listTargets, addTarget, updateTarget, removeTarget, getTarget, enabledTargets, resetTargets, seedVcenterTargets,
   seedEdgeTargets, getVcPorts, setVcPorts, syncVcPortTargets,
-} from '../src/ping/store.js';
-import { getPingDb } from '../src/ping/db.js';
-import { statusAll, seriesOf } from '../src/ping/service.js';
+} = await import('../src/ping/store.js');
+const { getPingDb } = await import('../src/ping/db.js');
+const { statusAll, seriesOf } = await import('../src/ping/service.js');
 
 beforeEach(() => resetTargets());
 

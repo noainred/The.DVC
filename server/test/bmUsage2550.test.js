@@ -12,19 +12,29 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-
-import { perSecond, cpuPctFromJiffies, busyPct, linkPct, maxOrNull, sumStrict, MAX_SPAN_MS } from '../src/bmusage/rates.js';
-import { splitSections, parseProcStat, parseMemInfo, parseDiskstats, parseNetDev, parseNetInfo, parseFcHosts, isWholeDisk } from '../src/bmusage/parse/linuxProc.js';
-import { parseWinPerf, parseKv } from '../src/bmusage/parse/winPerf.js';
-import { resolveTargets, publicTarget, indexOsHosts, hostKey, NO_PATH_REASON } from '../src/bmusage/targets.js';
-import { buildUsage } from '../src/bmusage/usage.js';
-import { normalizeSettings, DEFAULTS } from '../src/bmusage/settings.js';
-import { linuxCommand, winCommand, shapeLinux, WIN_PS } from '../src/bmusage/collectors/osSsh.js';
-import { dayKey, METRICS } from '../src/bmusage/db.js';
-import { applyScope } from '../src/routes/api/bmUsage.js';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { stripComments } from './_stripComments.js';
+
+// 2026-11-26: 프로젝트 모듈을 불러오기 **전에** 설정 폴더를 임시 폴더로 잡는다. 잡지 않아 설정이 실제 `server/config` 로 풀려
+//   auth-secret · bm-usage.db 를 남겼다(같은 체크아웃의 다음 실행이 그것을 읽는다). 정적 import 는 호이스팅돼 아래 대입보다 먼저 돌므로
+//   src 모듈은 동적 import 로 부른다(v3.41.1 arch2582 와 같은 꼴 · 고정: test/configDirIsolation.test.js ③).
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+test.after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+process.env.CONFIG_DIR = tmpDir('dvc-bmusage2550-cfg-');
+
+const { perSecond, cpuPctFromJiffies, busyPct, linkPct, maxOrNull, sumStrict, MAX_SPAN_MS } = await import('../src/bmusage/rates.js');
+const { splitSections, parseProcStat, parseMemInfo, parseDiskstats, parseNetDev, parseNetInfo, parseFcHosts, isWholeDisk } = await import('../src/bmusage/parse/linuxProc.js');
+const { parseWinPerf, parseKv } = await import('../src/bmusage/parse/winPerf.js');
+const { resolveTargets, publicTarget, indexOsHosts, hostKey, NO_PATH_REASON } = await import('../src/bmusage/targets.js');
+const { buildUsage } = await import('../src/bmusage/usage.js');
+const { normalizeSettings, DEFAULTS } = await import('../src/bmusage/settings.js');
+const { linuxCommand, winCommand, shapeLinux, WIN_PS } = await import('../src/bmusage/collectors/osSsh.js');
+const { dayKey, METRICS } = await import('../src/bmusage/db.js');
+const { applyScope } = await import('../src/routes/api/bmUsage.js');
 
 // ── 환산 코어 ────────────────────────────────────────────────────────────────
 test('첫 표본·리셋·간격 비정상은 0 이 아니라 null', () => {

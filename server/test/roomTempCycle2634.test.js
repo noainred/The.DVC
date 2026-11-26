@@ -2,20 +2,31 @@
 // 원인 두 겹: ① iDRAC 폴러가 표본 시각을 **주기 시작 시각** 하나로 찍었다 ② 신선도 경계(15분)가 한 주기가
 // 얼마나 걸리는지를 몰랐다. 주기가 15분을 넘는 현장(대상이 많거나 불통 iDRAC 이 많다)에서는 정상 서버가
 // 전부 '미갱신' 으로 빠졌다. 이 테스트가 두 수정과 '주기 정보가 없으면 예전 경계' 를 함께 고정한다.
-import { test, beforeEach } from 'node:test';
+import { test, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-
-import {
-  roomTempReport, effectiveMaxAgeMs, sampleMaxAgeMs, cycleOfSample, DEFAULT_MAX_AGE_MS, STALE_CYCLE_CAP_MS,
-} from '../src/idrac/roomTemp.js';
-import {
-  sensorPollCycle, setSensorPollCycle, markSensorPollStart, _resetSensorPollCycleForTest,
-} from '../src/idrac/sensorStore.js';
-import { sampleStaleReason, buildServerTempRows } from '../src/idrac/serverTempSeries.js';
-import { buildServerTempReport } from '../src/tools/serverTemp.js';
-import { sanitizeRemoteSensors } from '../src/collector/remoteInventory.js';
+import os from 'node:os';
+import path from 'node:path';
 import { stripComments } from './_stripComments.js';
+
+// 2026-11-26: 프로젝트 모듈을 불러오기 **전에** 설정 폴더를 임시 폴더로 잡는다. 잡지 않아 설정이 실제 `server/config` 로 풀려
+//   part-faults.db · vcenter-logs.db 를 남겼다(같은 체크아웃의 다음 실행이 그것을 읽는다). 정적 import 는 호이스팅돼 아래 대입보다 먼저 돌므로
+//   src 모듈은 동적 import 로 부른다(v3.41.1 arch2582 와 같은 꼴 · 고정: test/configDirIsolation.test.js ③).
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+process.env.CONFIG_DIR = tmpDir('dvc-roomtemp2634-cfg-');
+
+const {
+  roomTempReport, effectiveMaxAgeMs, sampleMaxAgeMs, cycleOfSample, DEFAULT_MAX_AGE_MS, STALE_CYCLE_CAP_MS,
+} = await import('../src/idrac/roomTemp.js');
+const {
+  sensorPollCycle, setSensorPollCycle, markSensorPollStart, _resetSensorPollCycleForTest,
+} = await import('../src/idrac/sensorStore.js');
+const { sampleStaleReason, buildServerTempRows } = await import('../src/idrac/serverTempSeries.js');
+const { buildServerTempReport } = await import('../src/tools/serverTemp.js');
+const { sanitizeRemoteSensors } = await import('../src/collector/remoteInventory.js');
 
 const NOW = 1_700_000_000_000;
 const MIN = 60_000;
