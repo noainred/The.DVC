@@ -24,6 +24,7 @@ const btnPri = { ...btn, background: 'var(--accent)', borderColor: 'var(--accent
 const lab = { fontSize: 11, color: 'var(--text-dim)', fontWeight: 600 };
 const sel = { height: 32, padding: '0 8px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--panel-deep)', color: 'var(--text)', minWidth: 0 };
 const mono = { fontFamily: 'var(--mono)' };
+const grp = { display: 'inline-flex', alignItems: 'center', gap: 8, minWidth: 0, maxWidth: '100%' };   // 이름표 + 칸을 한 묶음으로(좁은 화면에서 서로 다른 줄로 갈라지지 않게)
 const segBtn = (on) => ({ height: 30, padding: '0 12px', border: 0, background: on ? 'rgba(59,130,246,.22)' : 'transparent', color: on ? 'var(--text)' : '#aebbd0', fontWeight: 600, fontSize: 12, cursor: 'pointer' });
 const seg = { display: 'inline-flex', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', background: 'var(--panel-deep)' };
 
@@ -57,7 +58,7 @@ function Tile({ k, n, s, color }) {
 }
 
 /** 랙 하나(정면도). 편집 모드면 끌어 놓기 대상. */
-function RackColumn({ rack, places, mode, face, q, selId, onPick, edit, drag, onDragOverRack, onDropRack, preview }) {
+function RackColumn({ rack, places, mode, face, q, selId, onPick, edit, drag, onDragOverRack, onDropRack, onDragLeaveRack, preview }) {
   const H = rack.heightU;
   const shown = placesForFace(places, face);
   const us = useMemo(() => Array.from({ length: H }, (_, i) => H - i), [H]);
@@ -81,19 +82,21 @@ function RackColumn({ rack, places, mode, face, q, selId, onPick, edit, drag, on
           {Array.from({ length: rack.pduA }, (_, i) => <div key={i} title={`PDU A${i + 1}`} style={{ flex: 1, width: 6, borderRadius: 2, border: '1px solid #3a4866', background: 'var(--panel)' }} />)}
         </div>
         <div style={{ flex: '0 0 18px', display: 'flex', flexDirection: 'column' }} aria-hidden="true">
-          {us.map((u) => <span key={u} style={{ height: U_PX, lineHeight: `${U_PX}px`, fontSize: 9, color: 'var(--text-faint)', textAlign: 'right', ...mono }}>{u}</span>)}
+          {us.map((u) => <span key={u} style={{ height: U_PX, lineHeight: `${U_PX}px`, fontSize: 9, color: 'var(--text-dim)', textAlign: 'right', ...mono }}>{u}</span>)}
         </div>
         <div
           ref={slotsRef}
           style={{ position: 'relative', flex: 1, minWidth: 0, height: H * U_PX, background: `repeating-linear-gradient(to bottom,var(--panel-deep) 0 ${U_PX - 1}px,var(--border-soft) ${U_PX - 1}px ${U_PX}px)` }}
           onDragOver={edit ? (e) => { e.preventDefault(); onDragOverRack(rack, yOf(e)); } : undefined}
           onDrop={edit ? (e) => { e.preventDefault(); onDropRack(rack, yOf(e)); } : undefined}
+          onDragLeave={edit ? (e) => { if (!e.currentTarget.contains(e.relatedTarget)) onDragLeaveRack(rack); } : undefined}
         >
           {shown.map((p) => {
             const c = colorOf(p, mode);
             const b = boxOf(p);
             const m = matchPlace(p, q);
-            const back = face === 'rear' && p.face === 'full';
+            const rearOfFull = face === 'rear' && p.face === 'full';
+            const back = rearOfFull && mode !== 'status';   // 상태 보기에서는 뒷면이어도 상태 색을 그대로(장애가 회색에 묻히지 않게)
             const isSel = p.id === selId;
             const dragging = drag?.type === 'place' && drag.id === p.id;
             return (
@@ -105,6 +108,7 @@ function RackColumn({ rack, places, mode, face, q, selId, onPick, edit, drag, on
                 onDragEnd={edit ? () => drag.end() : undefined}
                 onClick={() => onPick(p.id)}
                 title={`${p.label || p.serial || '이름 없음'} — ${rack.name} ${fmtU(p)} · ${FACE_LABEL[p.face] || ''}`}
+                aria-label={`${p.label || p.serial || '이름 없음'}, ${rack.name} ${fmtU(p)}, ${back ? '뒷면' : c.val}`}
                 style={{
                   position: 'absolute', left: 1, right: 1, bottom: b.bottom, height: b.height, boxSizing: 'border-box', borderRadius: 3,
                   display: 'flex', alignItems: 'center', gap: 6, padding: '0 6px', fontSize: 10, lineHeight: 1, textAlign: 'left', overflow: 'hidden', whiteSpace: 'nowrap',
@@ -115,7 +119,7 @@ function RackColumn({ rack, places, mode, face, q, selId, onPick, edit, drag, on
                 }}
               >
                 <span style={{ ...mono, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0, flex: 1 }}>{p.label || p.serial || '이름 없음'}</span>
-                <span style={{ fontWeight: 700, flex: '0 0 auto' }}>{back ? '뒷면' : c.val}</span>
+                <span style={{ fontWeight: 700, flex: '0 0 auto' }}>{back ? '뒷면' : rearOfFull ? `뒷면 · ${c.val}` : c.val}</span>
               </button>
             );
           })}
@@ -124,7 +128,7 @@ function RackColumn({ rack, places, mode, face, q, selId, onPick, edit, drag, on
               position: 'absolute', left: 1, right: 1, bottom: (pv.uStart - 1) * U_PX, height: pv.uSize * U_PX - 1, boxSizing: 'border-box', borderRadius: 3, pointerEvents: 'none',
               border: `2px dashed ${pv.ok ? 'var(--green)' : 'var(--red)'}`, background: pv.ok ? 'rgba(34,197,94,.2)' : 'rgba(239,68,68,.3)',
               display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, color: pv.ok ? '#bbf7d0' : '#ffffff',
-            }}>{pv.ok ? `U${pv.uStart}${pv.uSize > 1 ? `–${pv.uStart + pv.uSize - 1}` : ''} 에 놓기` : pv.reason}</div>
+            }}>{pv.ok ? (pv.sizeUnknown ? `U${pv.uStart} 부터(높이는 다음 창에서)` : `U${pv.uStart}${pv.uSize > 1 ? `–${pv.uStart + pv.uSize - 1}` : ''} 에 놓기`) : pv.reason}</div>
           ) : null}
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }} aria-hidden="true">
@@ -356,7 +360,7 @@ function VersionsModal({ corpId, corpName, onClose, onRestored }) {
       }
       await load();
       setSelVid(null);
-      onRestored(`판 #${r.restoredFrom} 으로 되돌렸습니다(새 판 #${r.latestId} 로 남김 — 다시 되돌릴 수 있습니다).`);
+      onRestored(`판 #${r.restoredFrom} 상태로 되돌렸습니다(되돌린 결과는 새 판 #${r.latestId} — 다시 되돌릴 수 있습니다).`);
     } catch (e) { setMsg(e?.serverReason || e?.message || '되돌리지 못했습니다.'); } finally { setBusy(false); }
   };
   const versions = list?.versions || [];
@@ -523,6 +527,7 @@ export default function RackTool() {
   const selRack = selected ? (view?.racks || []).find((r) => r.id === selected.rackId) : null;
   const sum = useMemo(() => roomSummary(view), [view]);
   // 개선 3: 미배치 서버는 검색어로 거르고(랙 강조와 같은 검색 칸), 한 번에 UNPLACED_PAGE 대씩 그린다(예전엔 앞 50대만 끌 수 있었다).
+  const [exporting, setExporting] = useState(false);
   const [unplacedShow, setUnplacedShow] = useState(UNPLACED_PAGE);
   const unplacedHit = useMemo(() => (view?.unplaced || []).filter((u) => matchUnplaced(u, q)), [view, q]);
   useEffect(() => { setUnplacedShow(UNPLACED_PAGE); }, [q, roomId]);
@@ -570,23 +575,25 @@ export default function RackTool() {
     if (!dragInfo) return null;
     const size = dragInfo.size || 1;
     const uStart = dropStartU(y, rack.heightU, size);
-    if (uStart == null) return { rackId: rack.id, uStart: 1, uSize: size, ok: false, reason: '랙보다 큽니다' };
+    const sizeUnknown = dragInfo.type === 'server';   // 미배치 서버는 높이를 모른다 — 가리킨 U 를 시작 U 로 창에 채우고 겹침은 높이를 넣은 뒤 서버가 판정한다
+    if (uStart == null) return { rackId: rack.id, uStart: 1, uSize: size, ok: false, reason: '랙보다 큼', sizeUnknown };
     const issue = placementIssue(rack, placesByRack.get(rack.id) || [], { face: dragInfo.face || 'full', uStart, uSize: size }, dragInfo.type === 'place' ? dragInfo.id : '');
-    return { rackId: rack.id, uStart, uSize: size, ok: !issue, reason: issue?.code === 'overlap' ? '다른 장비와 겹침 — 놓을 수 없음' : issue ? '놓을 수 없음' : '' };
+    return { rackId: rack.id, uStart, uSize: size, ok: !issue, reason: issue?.code === 'overlap' ? '다른 장비와 겹침' : issue ? '놓을 수 없는 자리' : '', sizeUnknown };
   };
   const onDragOverRack = (rack, y) => {
     const c = candOf(rack, y);
     if (c && (!preview || preview.rackId !== c.rackId || preview.uStart !== c.uStart || preview.ok !== c.ok)) setPreview(c);
   };
+  const onDragLeaveRack = (rack) => { setPreview((pv) => (pv && pv.rackId === rack.id ? null : pv)); };
   const onDropRack = async (rack, y) => {
     const c = candOf(rack, y);
     const d = dragInfo;
     setDragInfo(null); setPreview(null);
     if (!c || !d) return;
     if (busy) { say('warn', '앞 변경을 저장하는 중입니다 — 끝난 뒤 다시 놓으세요.'); return; }
-    if (!c.ok) { say('err', `${rack.name} U${c.uStart} 에는 놓을 수 없습니다 — ${c.reason}.`); return; }
+    if (!c.ok) { say('err', `${rack.name} U${c.uStart} 자리에는 놓을 수 없습니다(${c.reason}).`); return; }
     if (d.type === 'place') {
-      afterRoomWrite(await run({ op: 'place.update', id: d.id, rackId: rack.id, rev: view.rev, place: { uStart: c.uStart } }, { okText: `${rack.name} U${c.uStart} 로 옮겼습니다.` }));
+      afterRoomWrite(await run({ op: 'place.update', id: d.id, rackId: rack.id, rev: view.rev, place: { uStart: c.uStart } }, { okText: `${rack.name} U${c.uStart} 자리로 옮겼습니다.` }));
     } else if (d.type === 'server') {
       // 미배치 서버 — 높이를 모르므로 1U 로 가정하지 않고 입력 창을 연다(위치는 놓은 자리로 채운다).
       setModalErr('');
@@ -608,8 +615,11 @@ export default function RackTool() {
   };
 
   const exportXlsx = async () => {
-    try { await downloadFile(`/tools/rack/room/${encodeURIComponent(roomId)}/xlsx`, `rack-${view?.room?.name || 'room'}.xlsx`); }
+    if (exporting || !view?.room?.id) return;
+    setExporting(true);   // 내보내기는 서버에서 동시 1건 — 끝날 때까지 이 버튼만 잠근다
+    try { await downloadFile(`/tools/rack/room/${encodeURIComponent(view.room.id)}/xlsx`, `rack-${view.room.name || 'room'}.xlsx`); }
     catch (e) { say('err', downloadFailText ? downloadFailText(e) : (e?.message || '내려받지 못했습니다.')); }
+    finally { setExporting(false); }
   };
 
   if (treeErr && !tree) return <ErrorBox error={treeErr} />;
@@ -623,24 +633,32 @@ export default function RackTool() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10 }}>
-        <label style={lab} htmlFor="rk-corp">법인</label>
-        <Select id="rk-corp" style={sel} value={corpId} onChange={(e) => setCorpId(e.target.value)}>
-          {!corps.length ? <option value="">볼 수 있는 법인이 없습니다</option> : null}
-          {corps.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </Select>
-        <label style={lab} htmlFor="rk-site">데이터센터</label>
-        <Select id="rk-site" style={sel} value={siteId} onChange={(e) => setSiteId(e.target.value)}>
-          {!sites.length ? <option value="">등록된 데이터센터 없음</option> : null}
-          {sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-        </Select>
-        <span style={lab}>전산실</span>
-        {rooms.length ? <Seg label="전산실" wrap items={rooms.map((r) => [r.id, `${r.name} · 랙 ${r.racks}`])} value={roomId} onChange={setRoomId} /> : <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>없음</span>}
-        <span style={lab}>겹쳐 보기</span>
-        <Seg label="겹쳐 보기" items={[['kind', '종류'], ['status', '상태']]} value={mode} onChange={setMode} />
+        <span style={grp}>
+          <label style={lab} htmlFor="rk-corp">법인</label>
+          <Select id="rk-corp" style={sel} value={corpId} onChange={(e) => setCorpId(e.target.value)}>
+            {!corps.length ? <option value="">볼 수 있는 법인이 없습니다</option> : null}
+            {corps.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </Select>
+        </span>
+        <span style={grp}>
+          <label style={lab} htmlFor="rk-site">데이터센터</label>
+          <Select id="rk-site" style={sel} value={siteId} onChange={(e) => setSiteId(e.target.value)}>
+            {!sites.length ? <option value="">등록된 데이터센터 없음</option> : null}
+            {sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </Select>
+        </span>
+        <span style={{ ...grp, flexWrap: 'wrap' }}>
+          <span style={lab}>전산실</span>
+          {rooms.length ? <Seg label="전산실" wrap items={rooms.map((r) => [r.id, `${r.name} · 랙 ${r.racks}`])} value={roomId} onChange={setRoomId} /> : <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>없음</span>}
+        </span>
+        <span style={grp}>
+          <span style={lab}>겹쳐 보기</span>
+          <Seg label="겹쳐 보기" items={[['kind', '종류'], ['status', '상태']]} value={mode} onChange={setMode} />
+        </span>
         <Seg label="면" items={[['front', '전면'], ['rear', '후면']]} value={face} onChange={setFace} />
-        <SearchBox value={q} onChange={setQ} placeholder="이름 · 시리얼 · 호스트 이름 찾기" style={{ flex: '1 1 160px', minWidth: 120 }} />
+        <SearchBox value={q} onChange={setQ} placeholder="이름 · 시리얼 · 호스트 이름 찾기" style={{ flex: '1 1 240px', minWidth: 200 }} />
         <button type="button" style={btn} onClick={() => { loadTree(); loadRoom(roomId); }}>새로 고침</button>
-        {view && canCsv() ? <button type="button" style={btn} onClick={exportXlsx}>엑셀 내보내기</button> : null}
+        {view && canCsv() ? <button type="button" style={btn} disabled={exporting} onClick={exportXlsx}>{exporting ? '내보내는 중…' : '엑셀 내보내기'}</button> : null}
         {corpId ? <button type="button" style={btn} onClick={() => setModal({ kind: 'versions' })}>판 기록</button> : null}
         {tree.canEditTypes ? <button type="button" style={btn} onClick={() => { setModalErr(''); setModal({ kind: 'types' }); }}>랙 종류</button> : null}
         {(canEdit || corpWritable) ? <button type="button" style={edit ? btn : btnPri} aria-pressed={edit} onClick={() => setEdit((x) => !x)}>{edit ? '편집 끝내기' : '배치 편집'}</button> : null}
@@ -699,7 +717,7 @@ export default function RackTool() {
                   {racks.map((r) => (
                     <div key={r.id} style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: '0 0 auto' }}>
                       <RackColumn rack={r} places={placesByRack.get(r.id) || []} mode={mode} face={face} q={q} selId={selId} onPick={setSelId}
-                        edit={edit && canEdit} drag={{ ...drag, ...(dragInfo || {}) }} onDragOverRack={onDragOverRack} onDropRack={onDropRack} preview={preview} />
+                        edit={edit && canEdit} drag={{ ...drag, ...(dragInfo || {}) }} onDragOverRack={onDragOverRack} onDropRack={onDropRack} onDragLeaveRack={onDragLeaveRack} preview={preview} />
                       {edit && canEdit ? <button type="button" style={{ ...btn, height: 26, alignSelf: 'flex-start' }} onClick={() => { setModalErr(''); setModal({ kind: 'rack', init: r }); }}>랙 고치기</button> : null}
                     </div>
                   ))}
@@ -708,7 +726,7 @@ export default function RackTool() {
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, padding: '8px 14px', borderTop: '1px solid var(--border-soft)', fontSize: 11.5, color: '#aebbd0' }}>
                 {legend.map((l) => <span key={l.k} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span style={{ width: 18, height: 12, borderRadius: 3, background: l.bg, border: `1px solid ${l.bd}` }} />{l.label}</span>)}
                 {face === 'rear' ? <span>후면 보기 — 회색 = 앞에서 꽂은 전체 깊이 장비의 뒷면</span> : null}
-                <span>랙 옆 세로 띠 = 세로 PDU(A · B 계통 수 — 측정값 연결은 다음 차수)</span>
+                <span>랙 옆 세로 띠 = 세로 PDU(A · B 계통 수 — 전력 측정값은 표시하지 않습니다)</span>
               </div>
             </div>
 
