@@ -90,4 +90,13 @@ describe('디버깅 1회차 화면', () => {
     expect(read('../../../styles.css')).toMatch(/\.vmh-sec > \.sh:has\(> \.bmd-sh-sub\) > h3 \{ flex-shrink: 0;/);
     expect(read('./peerText.js')).toContain('spanText: ok && vMin != null && vMax != null ? `값 범위 ${pv(vMin)} ~ ${pv(vMax)}`');
   });
+  it('4회차 화면 — not-found · 등록부 503 문구를 두 번 쓰지 않음 · 503 으로 돌려보낸 수', async () => {
+    const { powerResultText, powerFailText } = await import('./powerText.js');
+    const nf = powerResultText({ ok: false, status: 'not-found', message: '그 엣지의 등록부에서 이 서버를 찾지 못했습니다.' }, 'LED 켜기');
+    expect((nf.text.match(/찾지 못했|없습니다/g) || []).length).toBeLessThanOrEqual(1);
+    const t = powerFailText({ status: 503, body: { error: 'registryUnreadable', reason: '이 포탈의 iDRAC 등록부를 읽지 못했습니다 — 보내지 않았습니다(서비스 점검에서 등록부를 확인).' } }, 'LED 켜기').text;
+    expect((t.match(/보내지 않았습니다/g) || []).length).toBe(1);
+    expect(read('./EventSubSettings.jsx')).toContain('구독 설정 · 등록부를 못 읽어 다시 보내게 한 것');
+  });
 });
+

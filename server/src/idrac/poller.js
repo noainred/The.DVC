@@ -103,26 +103,26 @@ export function pruneSensorPathCache(registry, now = Date.now()) {
 }
 const BUSY = Symbol('idrac-poll-busy'); // v2.591(감사 P1): 재진입 가드에 막혔다는 표지(수동 응답이 말하게)
 
-let _runningEventP = null;   // 진행 중인 이벤트 읽기(그 서버들만 — 짧다)
-let _cycleWaiting = false;   // 정규 주기가 이벤트 읽기를 기다리는 중(그동안 새 이벤트 읽기는 양보)
+// 이벤트 읽기(그 서버들만)와 정규 · 수동 주기는 **서로 기다리지 않는다** — 겹침은 서버 단위로만 피한다(같은 iDRAC 에 세션이 겹치지 않게).
+//   전역 가드를 나눠 쓰면 이벤트를 계속 보내는 느린 장비가 함대 수집을 밀어냈고(2회차 Q1), 기다리게 하면 굶었으며(3회차 R2), 양보 분기는 걸리지 않았다(4회차 엣지 #1).
+//   · 이벤트 읽기는 정규 주기가 지금 읽고 있는 서버를 건너뛴다(강제 재읽기 표지가 남아 그 주기 · 다음 주기가 인벤토리를 읽는다).
+//   · 정규 주기는 이벤트 읽기가 지금 읽고 있는 서버를 이번 주기에 건너뛴다(그 서버는 방금 읽힌다 — 결과에 eventBusy).
+let _eventRunning = false;
+const _eventIds = new Set();      // 이벤트 읽기가 맡은 서버
+const _cycleInflight = new Set(); // 정규 주기가 지금 읽고 있는 서버
 async function pollOnce({ manual = false, only = null } = {}) {
-  // 정규 · 수동 주기는 진행 중인 **이벤트 읽기**를 기다렸다가 돈다 — 건너뛰면 이벤트를 계속 보내는 장비 한 대가 함대 전체 수집을 밀어냈다(디버깅 2회차 성능 Q1).
-  //   이벤트 읽기 쪽은 주기가 돌고 있으면 BUSY(호출부가 다시 잡는다 · 강제 재읽기 표지는 정규 주기가 읽는다). 같은 iDRAC 에 세션이 겹치지 않는 것은 그대로.
-  //   수동 ‘지금 수집’ 은 기다리지 않고 바로 busy(기다리는 사이 정규 타이머가 먼저 잡으면 15초 뒤 busy 였다 — 디버깅 3회차 엣지 #3)
-  //   기다리는 정규 주기가 있으면 새 이벤트 읽기는 BUSY 로 양보한다 — 느린 장비가 이벤트를 계속 보내도 정규 주기가 한 번의 이벤트 읽기보다 오래 밀리지 않게(디버깅 3회차 성능 R2)
-  if (only && _cycleWaiting) return BUSY;
-  if (running && !only && !manual && _runningEventP) {
-    _cycleWaiting = true;
-    try { await _runningEventP; } catch { /* 결과는 이벤트 쪽이 다룬다 */ } finally { _cycleWaiting = false; }
+  if (only) {
+    if (_eventRunning) return BUSY;   // 이벤트 읽기는 한 번에 하나(eventSub 가 묶는다 — 겹치면 다시 잡는다)
+    _eventRunning = true;
+    for (const id of only) _eventIds.add(String(id));
+    try { return await withJob('idrac.poll.event', () => pollOnceInner({ manual, only })); } finally { for (const id of only) _eventIds.delete(String(id)); _eventRunning = false; }
   }
   if (running) return BUSY; // 고RTT iDRAC 다수에서 한 주기가 간격을 넘겨 폴이 중첩되는 것 방지
   running = true;
   try {
-    const p = withJob(only ? 'idrac.poll.event' : 'idrac.poll', () => pollOnceInner({ manual, only }));
-    if (only) _runningEventP = p;
-    return await p;
+    return await withJob('idrac.poll', () => pollOnceInner({ manual, only }));
   } finally {
-    running = false; _runningEventP = null;
+    running = false;
     // 주기가 도중에 던졌으면 끝을 알리지 못했다 — 경과를 소요로 남겨 '영원히 도는 주기' 로 보이지 않게 한다.
     if (_runningSince != null) {
       try { setSensorPollCycle({ durationMs: Date.now() - _runningSince, intervalMs: config.idrac.pollIntervalMs }); } catch { /* */ }
@@ -167,7 +167,7 @@ async function pollOnceInner({ manual = false, only = null } = {}) {
     try { pruneSensorPathCache(registry); } catch { /* 캐시 정리 실패가 폴을 막지 않는다 */ }
   }
   const servers = registry.filter((s) => s.enabled !== false && s.host && s.username && s.password && !String(s.id).startsWith('mock-')
-    && (!only || (only.has(String(s.id)) && s.type !== 'ome')));
+    && (!only || (only.has(String(s.id)) && s.type !== 'ome' && !_cycleInflight.has(String(s.id)))));
   // v2.493: 폴 대상에서 제외된 서버를 **이유와 함께** 기록한다. 이전에는 조용히 빠져 lastRun 에
   // 흔적조차 없었다 — 비밀번호 미저장·비활성 서버가 '수집이 멈춘 것' 으로 오해되고, 화면·로그
   // 어디에도 구분 단서가 없었다(2026-09-12 신고 진단 중 확인).
@@ -193,6 +193,14 @@ async function pollOnceInner({ manual = false, only = null } = {}) {
   // 동시성 상한 — 무제한 Promise.all은 수백 대에 동시 TLS를 열어 CPU 스파이크/소켓 고갈.
   let authSkipped = 0; // v2.590: 인증 실패 정지로 이번 주기에 건너뛴 서버 수(실패로 세지 않는다 — 새 장애처럼 보인다)
   await poolSettled(servers, config.idrac.pollConcurrency, async (s) => {
+    const sid = String(s.id);
+    if (!only) {
+      if (_eventIds.has(sid)) { results.push({ id: s.id, name: s.name, type: s.type || 'idrac', eventBusy: true }); return; }   // 이벤트 읽기가 지금 읽는 서버 — 이번 주기는 건너뛴다
+      _cycleInflight.add(sid);
+    }
+    try { await pollServer(s); } finally { if (!only) _cycleInflight.delete(sid); }
+  });
+  async function pollServer(s) {
     // v2.590: **주기 수집만** 인증 실패 정지 서버를 건너뛴다. 수동 '지금 폴' 은 사람이 1회 누르는 것이라
     // 잠금 위험이 없고, 비밀번호를 고친 뒤 확인할 길을 없애면 안 된다(authGuard 규칙 3).
     const stopped = manual ? null : authGuard.authStopFor(s);
@@ -304,7 +312,7 @@ async function pollOnceInner({ manual = false, only = null } = {}) {
       }
       results.push({ id: s.id, name: s.name, type: s.type || 'idrac', error: d.message });
     }
-  });
+  }
   // 모든 서버 폴 후 한 트랜잭션으로 배치 적재(insertMany 없으면 개별 insert 폴백).
   try { if (db.insertMany) db.insertMany(samples); else for (const sm of samples) db.insert(sm.serverId, sm.watts, sm.ts); }
   catch (e) { console.warn('[idrac] 전력 적재 실패:', e.message); }
@@ -320,7 +328,7 @@ async function pollOnceInner({ manual = false, only = null } = {}) {
   }
   const failed = results.filter((r) => r.error).length;
   // ok 는 '성공' 만 센다 — 정지로 건너뛴 서버(authStopped·error 없음)를 성공으로 세면 거짓이다(v2.590).
-  const okCount = results.filter((r) => !r.error && !r.authStopped).length;
+  const okCount = results.filter((r) => !r.error && !r.authStopped && !r.eventBusy).length;
   const finishedAt = Date.now();
   const durationMs = finishedAt - ts;
   _runningSince = null;

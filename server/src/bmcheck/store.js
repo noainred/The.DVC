@@ -228,7 +228,7 @@ export function upsertCase({ id = '', tag, corp = '', part = '', caseNo = '', st
   if (cur && cur.part === next.part && cur.caseNo === next.caseNo && cur.status === next.status && cur.note === next.note) return { ok: true, id: nid, changed: false };
   cases[nid] = next;
   // 있던 케이스를 ‘끝남’ 으로 바꾸는 쓰기는 상한으로 막지 않는다 — 이력 한 줄만큼 커져도 그 뒤 지우기로 자리를 만드는 길이다(디버깅 3회차 판정 #7). 새 케이스 · 다른 고치기는 상한을 지킨다
-  const r = caseStore.save({ v: 1, cases }, { shrinking: !!cur && next.status === 'closed' });
+  const r = caseStore.save({ v: 1, cases }, { shrinking: !!cur && cur.status !== 'closed' && next.status === 'closed' });   // ‘끝남’ 으로 **바뀌는** 쓰기만(끝난 케이스의 메모 고치기는 상한 안 — 4회차 성능 N1)
   return r.ok ? { ok: true, id: nid, changed: true } : r;
 }
 /**

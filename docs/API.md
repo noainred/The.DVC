@@ -1069,22 +1069,22 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/bareos-summary/policy` | 권한 `tools` | [server/src/routes/api/bareosPolicy.js:44](../server/src/routes/api/bareosPolicy.js#L44) |
 | GET | `/tools/bareos-summary/pools` | 권한 `tools` | [server/src/routes/api/bareosPolicy.js:70](../server/src/routes/api/bareosPolicy.js#L70) |
 | GET | `/tools/bm-folders` | 권한 `tools` | [server/src/routes/api/bmFolders.js:494](../server/src/routes/api/bmFolders.js#L494) |
-| GET | `/tools/bm-folders.csv` | 권한 `tools`, `data.csv` | [server/src/routes/api/bmFolders.js:1091](../server/src/routes/api/bmFolders.js#L1091) |
+| GET | `/tools/bm-folders.csv` | 권한 `tools`, `data.csv` | [server/src/routes/api/bmFolders.js:1092](../server/src/routes/api/bmFolders.js#L1092) |
 | GET | `/tools/bm-folders/case-bundle` | 권한 `tools` | [server/src/routes/api/bmFolders.js:822](../server/src/routes/api/bmFolders.js#L822) |
 | GET | `/tools/bm-folders/cases` | 권한 `tools` | [server/src/routes/api/bmFolders.js:672](../server/src/routes/api/bmFolders.js#L672) |
 | POST | `/tools/bm-folders/cases` | 권한 `tools` · `textFields` | [server/src/routes/api/bmFolders.js:682](../server/src/routes/api/bmFolders.js#L682) |
 | POST | `/tools/bm-folders/cases/delete` | 권한 `tools` · `textFields` | [server/src/routes/api/bmFolders.js:700](../server/src/routes/api/bmFolders.js#L700) |
-| GET | `/tools/bm-folders/check` | 권한 `tools` | [server/src/routes/api/bmFolders.js:931](../server/src/routes/api/bmFolders.js#L931) |
+| GET | `/tools/bm-folders/check` | 권한 `tools` | [server/src/routes/api/bmFolders.js:932](../server/src/routes/api/bmFolders.js#L932) |
 | POST | `/tools/bm-folders/edge/pull` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmFolders.js:484](../server/src/routes/api/bmFolders.js#L484) |
 | GET | `/tools/bm-folders/hw` | 권한 `tools` | [server/src/routes/api/bmFolders.js:628](../server/src/routes/api/bmFolders.js#L628) |
 | GET | `/tools/bm-folders/hwlog` | 권한 `tools` | [server/src/routes/api/bmFolders.js:879](../server/src/routes/api/bmFolders.js#L879) |
 | POST | `/tools/bm-folders/led` | 권한 `tools` · `textFields` | [server/src/routes/api/bmFolders.js:800](../server/src/routes/api/bmFolders.js#L800) |
-| POST | `/tools/bm-folders/op` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmFolders.js:1117](../server/src/routes/api/bmFolders.js#L1117) |
-| GET | `/tools/bm-folders/peer` | 권한 `tools` | [server/src/routes/api/bmFolders.js:971](../server/src/routes/api/bmFolders.js#L971) |
+| POST | `/tools/bm-folders/op` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmFolders.js:1118](../server/src/routes/api/bmFolders.js#L1118) |
+| GET | `/tools/bm-folders/peer` | 권한 `tools` | [server/src/routes/api/bmFolders.js:972](../server/src/routes/api/bmFolders.js#L972) |
 | POST | `/tools/bm-folders/power` | 권한 `tools` · `textFields` | [server/src/routes/api/bmFolders.js:781](../server/src/routes/api/bmFolders.js#L781) |
 | GET | `/tools/bm-folders/power-state` | 권한 `tools` | [server/src/routes/api/bmFolders.js:811](../server/src/routes/api/bmFolders.js#L811) |
 | GET | `/tools/bm-folders/search` | 권한 `tools` | [server/src/routes/api/bmFolders.js:595](../server/src/routes/api/bmFolders.js#L595) |
-| GET | `/tools/bm-folders/trend` | 권한 `tools` | [server/src/routes/api/bmFolders.js:1056](../server/src/routes/api/bmFolders.js#L1056) |
+| GET | `/tools/bm-folders/trend` | 권한 `tools` | [server/src/routes/api/bmFolders.js:1057](../server/src/routes/api/bmFolders.js#L1057) |
 | GET | `/tools/bm-storage` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/bmstor.js:131](../server/src/routes/api/bmstor.js#L131) |
 | GET | `/tools/bm-storage/auth-choices` | 역할 `admin` · `fullScopeOnly` · `requireSettingsOwner` | [server/src/routes/api/bmstor.js:576](../server/src/routes/api/bmstor.js#L576) |
 | POST | `/tools/bm-storage/collect` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/bmstor.js:680](../server/src/routes/api/bmstor.js#L680) |

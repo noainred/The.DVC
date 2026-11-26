@@ -310,6 +310,8 @@ export function escalationPlan({ settings, state, open, now = Date.now(), maxSen
     //   진행(since · 보낸 줄)은 지우지 않는다 — 1회차처럼 지우면 정책이 오가는 장애는 단계가 영영 가지 않았다(디버깅 2회차 판정 #1)
     // 정책 밖(꺼짐 · 맞는 정책 없음 · 상태가 바뀜)이어도 열려 있는 동안은 기록을 둔다 — 상태가 오가도 보낸 단계를 다시 보내지 않게(반증 A3)
     if (!pol) {
+      // 옛 기록(정책 열 · ps 없음)이 정책 밖에서 처음 보이면 ‘넘겨받지 않음’(-)으로 굳힌다 — 나중에 생긴 정책이 옛 since · 보낸 줄을 물려받아 가장 높은 단계로 바로 가지 않게(디버깅 4회차 판정 #1)
+      if (cur && !cur.pol && !Object.keys(cur.ps || {}).length) cur = { ...cur, pol: '-', sent: cur.sent.map((e) => (e[4] ? e : [e[0], e[1], e[2], e[3], '-'])) };
       if (cur) {
         // 정책 밖으로 이어받은 기록도 새 열쇠라 자리를 쓴다(디버깅 3회차 판정 #8)
         if (!Object.hasOwn(prev, key)) { if (newCount + reserved >= ESC_ITEMS_MAX) continue; newCount += 1; }
@@ -395,7 +397,8 @@ export function ackEscalation(p, { by = '', now = Date.now() } = {}) {
 export function escalationMarkOf(p, items, settings = null, run = null) {
   const it = items && Object.hasOwn(items, partKeyOf(p)) ? items[partKeyOf(p)] : null;
   const curPol = (settings?.enabled ? policyFor(settings, p)?.id : '') || it?.pol || '';
-  const mine = (it?.sent || []).filter((e) => ofPol(e, curPol));   // 지금 정책의 단계만 — 다른 정책에 간 단계를 이 정책의 진행으로 말하지 않는다(디버깅 2회차 판정 #1)
+  // 지금 정책의 단계만 — 다른 정책에 간 단계를 이 정책의 진행으로 말하지 않는다(디버깅 2회차 판정 #1). 정책 열이 없는 옛 줄은 첫 회차가 넘겨받기 전까지 지금 정책 것으로 보인다(4회차 화면 E1)
+  const mine = (it?.sent || []).filter((e) => ofPol(e, curPol) || !e[4]);
   const ok = mine.filter((e) => e[3] === 'ok').map((e) => e[0]);
   const bad = mine.filter((e) => e[3] === 'fail' || e[3] === 'give').map((e) => e[0]);
   const step = ok.length ? Math.max(...ok) + 2 : null;

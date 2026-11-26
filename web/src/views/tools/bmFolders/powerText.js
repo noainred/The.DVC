@@ -48,7 +48,7 @@ export function confirmIssue(f, name, otpRequired) {
 
 /** 결과(서버 응답 또는 오류) → { ok, text }. 서버가 준 장비 글자(message)는 뒤에 붙인다. */
 // 상태 글자가 장비 · 엣지 메시지와 같은 말을 하는 상태 — 메시지를 덧붙이지 않는다(같은 문장이 두 번 나오지 않게 — 반증 B7)
-const SELF_EXPLAINED = new Set(['timeout', 'busy', 'auth', 'auth-stopped', 'edge-disabled', 'disabled', 'rate', 'force-off']);
+const SELF_EXPLAINED = new Set(['timeout', 'busy', 'auth', 'auth-stopped', 'edge-disabled', 'disabled', 'rate', 'force-off', 'not-found']);   // not-found 도 문구가 스스로 말한다(4회차 화면 E2)
 export function powerResultText(r, label = '') {
   if (!r || typeof r !== 'object') return { ok: false, text: POWER_STATUS.error };
   const head = (t) => (label ? `${label} — ${t}` : t);
@@ -75,7 +75,7 @@ export function powerFailText(err, label = '') {
   const head = (t) => (label ? `${label} — ${t}` : t);
   if (st >= 400 && st < 500 && err?.body && typeof err.body === 'object') return { unknown: false, text: head(`보내지 않았습니다 — ${reason}`) };
   // 등록부를 못 읽어 보내지 않았다고 서버가 밝힌 503 은 ‘닿았는지 모름’ 이 아니다(잠그지 않는다 — 디버깅 3회차 화면 N5)
-  if (st === 503 && err?.body && typeof err.body === 'object' && err.body.error === 'registryUnreadable') return { unknown: false, text: head(`보내지 않았습니다 — ${reason}`) };
+  if (st === 503 && err?.body && typeof err.body === 'object' && err.body.error === 'registryUnreadable') return { unknown: false, text: head(reason || '등록부를 읽지 못해 보내지 않았습니다.') };   // 서버 사유가 이미 ‘보내지 않았습니다’ 를 말한다(4회차 화면 E3)
   return { unknown: true, text: head(`응답을 받지 못했습니다(${st ? `HTTP ${st}` : '연결 끊김 · 시한'}) — 요청이 장비에 닿았는지 모릅니다. 다시 누르기 전에 다음 수집에서 상태를 확인하십시오.`) };
 }
 

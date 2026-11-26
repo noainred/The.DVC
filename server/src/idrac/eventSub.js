@@ -53,7 +53,7 @@ export function normalizeBase(v) {
   if (/^\.|\.\.|\.$|^-|-$/.test(m[1])) return { ok: false, reason: '호스트 이름이 틀렸습니다.' };
   return { ok: true, value: `https://${m[1].toLowerCase()}${m[2] ? `:${Number(m[2])}` : ''}` };
 }
-export const emptyEventSub = () => ({ v: 1, enabled: false, base: '', secret: '', ctxKey: '', at: null, by: '' });
+export const emptyEventSub = () => ({ v: 1, enabled: false, base: '', secret: '', ctxKey: '', prevCtxKey: '', at: null, by: '' });
 const KEY_RE = /^[A-Za-z0-9_-]{32,64}$/;
 // 비밀 둘: secret(받는 주소 — 장비가 평문으로 갖는다) · ctxKey(Context HMAC 열쇠 — 장비에 주지 않는다: 장비 하나가 다른 서버 Context 를 만들지 못하게 · 반증 A9).
 //   파일에는 비밀 금고 정책대로 봉인해 쓴다(sealSecret — 반증 A16). 못 열거나 꼴이 아니면 '' → 꺼짐.
@@ -61,8 +61,8 @@ const keyOf = (v) => { const x = typeof v === 'string' ? openSecret(v) : ''; ret
 const shape = (d) => {
   if (!isObj(d)) return emptyEventSub();
   const b = normalizeBase(d.base);
-  const secret = keyOf(d.secret); const ctxKey = keyOf(d.ctxKey);
-  return { v: 1, enabled: d.enabled === true && b.ok && !!b.value && !!secret && !!ctxKey, base: b.ok ? b.value : '', secret, ctxKey, at: numOrNull(d.at), by: typeof d.by === 'string' ? d.by.slice(0, 80) : '' };
+  const secret = keyOf(d.secret); const ctxKey = keyOf(d.ctxKey); const prevCtxKey = keyOf(d.prevCtxKey);
+  return { v: 1, enabled: d.enabled === true && b.ok && !!b.value && !!secret && !!ctxKey, base: b.ok ? b.value : '', secret, ctxKey, prevCtxKey, at: numOrNull(d.at), by: typeof d.by === 'string' ? d.by.slice(0, 80) : '' };
 };
 const parse = (text) => { const v = JSON.parse(text); if (!isObj(v)) throw new Error('형식이 아닙니다(객체여야 합니다)'); if (v.v !== undefined && v.v !== 1) throw new Error('이 판이 모르는 파일 판 번호입니다'); return v; };
 const _file = makeJsonFileLoader(FILE, { label: '물리서버 이벤트 구독 설정', tag: 'bm-events', parse, confirm: () => eventSubStore._confirm() });
@@ -87,12 +87,13 @@ export const eventSubStore = {
     if (enabled && !b.value) return { ok: false, status: 400, reason: '켜려면 받는 주소가 있어야 합니다.' };
     const cur = eventSubStore.get();
     const fresh = rotate || !cur.secret || !cur.ctxKey;
-    // 비밀을 새로 만들어도 Context 열쇠는 그대로 둔다 — 받는 주소 · 비밀을 한 번에 바꾼 뒤에도 옛 구독을 ‘이 포탈 것’ 으로 알아보고 지울 수 있게(디버깅 3회차 보안 #3).
-    //   Context 열쇠는 장비에 주지 않는다(HMAC 결과만) — 새는 것은 받는 주소의 비밀이고, 그것은 새로 만든다.
-    const next = { v: 1, enabled, base: b.value, secret: fresh ? newSecret() : cur.secret, ctxKey: cur.ctxKey || newSecret(), at: now, by: String(by).slice(0, 80) };
+    // 비밀을 새로 만들면 Context 열쇠도 새로 만든다(구독 한 벌에 둘이 함께 있어 함께 샌다 — 옛 Context 를 받지 않게).
+    //   직전 열쇠(prevCtxKey)는 구독 걸기 · 지우기의 ‘이 포탈 것’ 판정에만 쓴다 — 받는 주소 · 비밀을 한 번에 바꾼 뒤에도 옛 구독을 지울 수 있게(디버깅 3회차 보안 #3 · 4회차 설계 보완).
+    const rotating = fresh && !!cur.ctxKey;
+    const next = { v: 1, enabled, base: b.value, secret: fresh ? newSecret() : cur.secret, ctxKey: fresh ? newSecret() : cur.ctxKey, prevCtxKey: rotating ? cur.ctxKey : (cur.prevCtxKey || ''), at: now, by: String(by).slice(0, 80) };
     try {
       fs.mkdirSync(path.dirname(FILE()), { recursive: true });
-      atomicWriteFileSync(FILE(), JSON.stringify({ ...next, secret: sealSecret(next.secret), ctxKey: sealSecret(next.ctxKey) }, null, 2), { mode: 0o600 });
+      atomicWriteFileSync(FILE(), JSON.stringify({ ...next, secret: sealSecret(next.secret), ctxKey: sealSecret(next.ctxKey), prevCtxKey: next.prevCtxKey ? sealSecret(next.prevCtxKey) : '' }, null, 2), { mode: 0o600 });
     } catch (e) { return { ok: false, status: 500, reason: `설정 파일을 쓰지 못했습니다 — ${String(e?.code || e?.message || e).slice(0, 120)}` }; }
     _cache = shape(next); _file.saved();
     return { ok: true, value: _cache, rotated: !!cur.secret && next.secret !== cur.secret };   // 처음 만든 비밀은 ‘새로 만듦’ 이 아니다(다시 구독하라고 하지 않게)
@@ -109,7 +110,8 @@ export const eventSubPublic = (s = eventSubStore.get()) => ({ enabled: s.enabled
 //   빗금이 겹친 꼴(‘/api/bm-events//in/…’ · ‘/in//…’)도 — express 가 받는 꼴이면 기록에서도 지운다(디버깅 1회차 보안 #5).
 // 겹친 빗금(//api//bm-events//in//…)도 지운다. 맞춤은 ‘api 바로 앞 빗금 하나’ 에서 시작한다 — 앞에 \/+ 를 두면 빗금만 긴 경로에서 시작점마다 되짚어 O(n²) 였다
 //   (디버깅 2회차 보안 #3 · 엣지 #1: 빗금 16,000개에 110~134ms — 인증 전 모든 요청의 기록 단계). 길이도 먼저 자른다(기록에 4KB 넘는 경로를 싣지 않는다).
-export const scrubEventPath = (p) => String(p ?? '').slice(0, 4096).replace(/(\/api\/+bm-events\/+in\/+)[^/?#\s]*/gi, '$1…');
+//   백슬래시 꼴(/api\bm-events\in\<비밀> — express 가 / 로 받는다)도 빗금으로 보고 지운다(디버깅 4회차 보안 #2)
+export const scrubEventPath = (p) => String(p ?? '').slice(0, 4096).replace(/\\/g, '/').replace(/(\/api\/+bm-events\/+in\/+)[^/?#\s]*/gi, '$1…');
 export const destinationOf = (s) => (s?.base && s?.secret ? `${s.base}${EVT_PATH}${s.secret}` : '');
 const hmac = (key, id) => crypto.createHmac('sha256', String(key)).update(String(id)).digest('base64url').slice(0, 16);
 /** 구독 Context — `dvc:<서버 id>:<HMAC(ctxKey)>`(장비가 이벤트마다 돌려준다). id 는 등록부 id(길이 상한). */
@@ -237,7 +239,7 @@ export const eventStatus = () => ({ ..._stat, ringSize: _ring.length, recent: _r
  * @returns {Promise<{ id, status:'subscribed'|'removed'|'none'|'auth-stopped'|'auth'|'timeout'|'error'|'not-supported', removed:number, message?:string }>}
  */
 /** 장비 오류 글자가 받는 주소를 되돌려 주면 비밀이 결과 · 화면에 실린다 — 지운다(반증 A8). */
-export const scrubSecret = (msg, s) => { let m = String(msg ?? ''); for (const k of [s?.secret, s?.ctxKey]) if (k) m = m.split(k).join('…'); return scrubEventPath(m); };
+export const scrubSecret = (msg, s) => { let m = String(msg ?? ''); for (const k of [s?.secret, s?.ctxKey, s?.prevCtxKey]) if (k) m = m.split(k).join('…'); return scrubEventPath(m); };
 export async function syncOne(entry, s, { unsubscribe = false, getJson = null, send = null, authStopped = null, timeoutMs = SUB_TIMEOUT_MS } = {}) {
   const id = String(entry?.id ?? '');
   let stopped = false;
@@ -260,7 +262,8 @@ export async function syncOne(entry, s, { unsubscribe = false, getJson = null, s
         const dest = String(sub?.Destination ?? '');
         // 이 포탈이 건 것만 — 같은 받는 주소 앞이거나, 받는 주소를 바꾼 뒤의 옛 구독(Context 가 이 포탈의 열쇠로 맞는다 — 디버깅 2회차 보안 #4).
         //   다른 도구 · 다른 포탈의 구독은 건드리지 않는다(디버깅 1회차 보안 #6 — 다른 포탈은 Context 열쇠가 다르다)
-        const mine = (s.base && dest.startsWith(`${s.base}${EVT_PATH}`)) || (dest.includes(EVT_PATH) && idOfContext(s, sub?.Context) === String(id));
+        const ctxMine = idOfContext(s, sub?.Context) === String(id) || (!!s.prevCtxKey && idOfContext({ ctxKey: s.prevCtxKey }, sub?.Context) === String(id));
+        const mine = (s.base && dest.startsWith(`${s.base}${EVT_PATH}`)) || (dest.includes(EVT_PATH) && ctxMine);
         if (!mine) continue;
         if (!unsubscribe && s.base && dest === destinationOf(s) && String(sub?.Context ?? '') === contextOf(s, id)) continue;   // 이미 같은 것 — 둔다
         // eslint-disable-next-line no-await-in-loop
@@ -295,6 +298,7 @@ let _syncBusy = false;
 /** 이 노드 등록부의 켜진 iDRAC 전부(동시 SUB_CONCURRENCY). 진행 중이면 거절. */
 export async function syncAll({ unsubscribe = false, entries = null, one = syncOne } = {}) {
   if (_syncBusy) return { ok: false, busy: true, reason: '구독 걸기 · 지우기가 이미 진행 중입니다.' };
+  if (!entries && eventSubStore.loadError()) return { ok: false, reason: '구독 설정 파일(bm-events.json)을 읽지 못했습니다 — 이 포탈이 건 구독을 알아볼 수 없어 걸거나 지우지 않았습니다(서비스 점검에서 확인).' };
   const s = eventSubStore.get();
   if (!unsubscribe && (!s.enabled || !destinationOf(s))) return { ok: false, reason: '켜고 받는 주소를 저장한 뒤 구독을 거십시오.' };
   _syncBusy = true;
@@ -326,6 +330,8 @@ let _sync = null;   // { running, startedAt, doneAt, unsubscribe, by, results?, 
 /** 시작 전 판정(라우트가 OTP 앞에서 부른다) — null 이면 시작할 수 있다. */
 export function syncPrecheck({ unsubscribe = false } = {}) {
   if (_sync?.running || _syncBusy) return { busy: true, reason: '구독 걸기 · 지우기가 이미 진행 중입니다.' };
+  // 설정을 못 읽으면 지우기도 시작하지 않는다 — 빈 설정으로는 이 포탈 구독을 알아보지 못해 ‘지울 것 없음’ 으로 끝나고 OTP · 장비 조회만 썼다(디버깅 4회차 엣지 #3)
+  if (eventSubStore.loadError()) return { busy: false, reason: '구독 설정 파일(bm-events.json)을 읽지 못했습니다 — 이 포탈이 건 구독을 알아볼 수 없어 걸거나 지우지 않았습니다(서비스 점검에서 확인).' };
   const s = eventSubStore.get();
   if (!unsubscribe && (!s.enabled || !destinationOf(s))) return { busy: false, reason: '켜고 받는 주소를 저장한 뒤 구독을 거십시오.' };
   return null;

@@ -302,7 +302,7 @@ async function trendOnce(key, fn, now = Date.now()) {
   const hit = _trendMemo.get(key);
   if (hit && (hit.pending || now - hit.at < (hit.ok ? TREND_OK_MS : TREND_FAIL_MS))) return hit.p;
   const ent = { at: now, ok: false, pending: true, p: null };
-  ent.p = Promise.resolve().then(fn).then((r) => { ent.ok = !!r?.ok; ent.busy = r?.kind === 'busy'; return r; }, (e) => ({ ok: false, kind: 'error', reason: String(e?.message || e).slice(0, 160) }))
+  ent.p = Promise.resolve().then(fn).then((r) => { ent.ok = !!r?.ok; ent.busy = r?.kind === 'busy' || r?.kind === 'edge-busy'; return r; }, (e) => ({ ok: false, kind: 'error', reason: String(e?.message || e).slice(0, 160) }))
     .finally(() => {
       ent.pending = false; ent.at = Date.now();
       if (_trendMemo.get(key) !== ent) return;   // 진행 중에 밀려난 항목 — 해제 타이머로 결과를 쥐지 않는다(디버깅 3회차 성능 R4)
@@ -895,7 +895,8 @@ export function registerBmFolders(api) {
         const WHY_OF = { 'old-version': 'old-version', 'not-found': 'not-found', 'edge-ambiguous': 'edge-ambiguous', 'edge-registry': 'edge-registry', busy: 'busy', 'edge-busy': 'busy' };
         // 서버 사유는 뭉뚱그린 ‘edge-fail’ 에만 싣는다 — 따로 문구가 있는 why 에 덧붙이면 같은 문장이 두 번 보였다(디버깅 3회차 화면 N4)
         const why = WHY_OF[r?.kind] || 'edge-fail';
-        if (!r || r.ok !== true) return res.json({ ok: true, via, why, ...(full && why === 'edge-fail' && r?.reason ? { reason: String(r.reason).slice(0, 200) } : {}) });
+        //   구버전 사유(판 번호 등)는 문구와 겹치지 않아 그대로 싣는다
+        if (!r || r.ok !== true) return res.json({ ok: true, via, why, ...(full && (why === 'edge-fail' || why === 'old-version') && r?.reason ? { reason: String(r.reason).slice(0, 200) } : {}) });
         const rows = (Array.isArray(r.rows) ? r.rows : []).map((x) => (full ? x : { ...x, msg: maskHwLogText(x.msg, { tag: m.serviceTag }) }));
         // v3.51 부품 수명(⑧): 메모리 교정 오류 경고 — 가리기 전 원문에서 슬롯별로 센다(슬롯 이름은 주소 · 계정이 아니다). DIMM 목록은 이 노드 인벤토리가 있을 때만(0 인 슬롯도 줄로)
         let dimms = [];

@@ -22,7 +22,8 @@ test('보안 — 데모 차단은 겹친 빗금으로 우회되지 않는다 · 
   assert.equal(E.scrubEventPath('/api/bm-events/in/SECRETSECRET'), '/api/bm-events/in/…');
   // 선형 — 시작이 ‘api 바로 앞 빗금 하나’ 이고(앞 \/+ 없음) 입력은 4KB 로 자른다(시간 단언 대신 꼴로 — TESTDOC2613-02)
   assert.ok(E.scrubEventPath(`/${'/'.repeat(16_000)}x`).length <= 4096, '4KB 로 자른다');
-  assert.match(src('../src/idrac/eventSub.js'), /\.slice\(0, 4096\)\.replace\(\/\(\\\/api\\\/\+bm-events/);
+  const es0 = src('../src/idrac/eventSub.js');
+  assert.ok(es0.includes(".slice(0, 4096).replace(") && es0.includes("replace(/(\\/api\\/+bm-events\\/+in\\/+)"), '4KB 자르기 · api 바로 앞 빗금에서 시작');
   // 받는 주소를 바꾼 뒤 — 옛 주소의 구독(Context 가 이 포탈 열쇠로 맞음)은 지우고, 다른 포탈(다른 열쇠)의 것은 둔다
   const s = { enabled: true, base: 'https://portal-new.example.test', secret: 'A'.repeat(43), ctxKey: 'B'.repeat(43) };
   const other = { ...s, ctxKey: 'C'.repeat(43) };
@@ -160,8 +161,10 @@ test('화면 — 행 표지 사유는 지금 상태로(재시작 뒤 첫 회차 
 
 test('성능 — 정규 주기는 이벤트 읽기를 기다렸다 돈다(건너뛰지 않음) · 밀려난 기억은 타이머도 지움 · 같은 모델 대비는 자리 계산 · 서명은 해시 · 원장 백업 상한 · 이벤트 로그 동시 상한', async () => {
   const ps = src('../src/idrac/poller.js');
-  assert.match(ps, /if \(only && _cycleWaiting\) return BUSY;/, '기다리는 정규 주기가 있으면 새 이벤트 읽기는 양보(3회차 성능 R2)');
-  assert.match(ps, /if \(running && !only && !manual && _runningEventP\) \{\n\s*_cycleWaiting = true;\n\s*try \{ await _runningEventP; \}/);
+  // 4회차: 이벤트 읽기와 정규 주기는 서로 기다리지 않고 서버 단위로만 겹침을 피한다
+  assert.match(ps, /if \(_eventIds\.has\(sid\)\) \{ results\.push\(\{ id: s\.id, name: s\.name, type: s\.type \|\| 'idrac', eventBusy: true \}\); return; \}/);
+  assert.match(ps, /only\.has\(String\(s\.id\)\) && s\.type !== 'ome' && !_cycleInflight\.has\(String\(s\.id\)\)/);
+  assert.doesNotMatch(ps, /_runningEventP|_cycleWaiting/);
   assert.match(src('../src/routes/api/bmFolders.js'), /const drop = \(k\) => \{ const old = _trendMemo\.get\(k\); if \(old\?\.timer\) clearTimeout\(old\.timer\);/);
   assert.match(src('../src/routes/collector.js'), /const drop = \(k2\) => \{ const old = _hwlogMemo\.get\(k2\); if \(old\?\.timer\) clearTimeout\(old\.timer\);/);
   const L = await import('../src/idrac/partLife.js');
@@ -199,7 +202,17 @@ test('3회차 보안 — 절대 꼴 요청 대상도 데모 차단 · 돌려주�
   const k1 = E.eventSubStore.get().ctxKey; const s1 = E.eventSubStore.get().secret;
   E.eventSubStore.save({ enabled: true, base: 'https://portal-b.example.test', rotate: true }, { by: 't' });
   assert.notEqual(E.eventSubStore.get().secret, s1, '받는 주소 비밀은 새로');
-  assert.equal(E.eventSubStore.get().ctxKey, k1, 'Context 열쇠는 그대로 — 옛 구독을 알아본다');
+  // 4회차: Context 열쇠도 새로 만들고(함께 샌다) 직전 열쇠는 ‘이 포탈 것’ 판정에만
+  assert.notEqual(E.eventSubStore.get().ctxKey, k1, 'Context 열쇠도 새로');
+  assert.equal(E.eventSubStore.get().prevCtxKey, k1, '직전 열쇠를 남긴다');
+  const s2 = E.eventSubStore.get();
+  assert.equal(E.idOfContext(s2, E.contextOf({ ctxKey: k1 }, 'srv-9')), '', '옛 Context 로 받지 않는다');
+  const subs = { 1: { Destination: `https://portal-a.example.test/api/bm-events/in/${s1}`, Context: E.contextOf({ ctxKey: k1 }, 'srv-9') } };
+  const calls = [];
+  const out = await E.syncOne({ id: 'srv-9' }, s2, { unsubscribe: true, authStopped: () => false,
+    getJson: async (_e, p) => (p === '/redfish/v1/EventService/Subscriptions' ? { Members: [{ '@odata.id': '/redfish/v1/EventService/Subscriptions/1' }] } : subs[p.split('/').pop()]),
+    send: async (_e, m, p) => { calls.push(p); return { status: 204, ok: true, text: '' }; } });
+  assert.deepEqual([out.removed, calls.length], [1, 1], '받는 주소 · 비밀을 한 번에 바꾼 뒤에도 옛 구독을 지운다');
 });
 
 test('3회차 판정 — 새 정책은 그 정책 대상이 된 때부터(1선 팀을 건너뛰지 않음) · 옛 기록은 처음 보는 정책이 넘겨받음 · 권고 모델(제품군 낱말뿐 · 기계 유형 꼬리) · 끝남으로 바꾸기는 상한 밖', async () => {
@@ -218,11 +231,12 @@ test('3회차 판정 — 새 정책은 그 정책 대상이 된 때부터(1선 �
   assert.deepEqual([pl.sends.length, pl.items['|k3'].sent[0][4], pl.items['|k3'].ps['team-b']], [0, 'team-b', 0], '이미 간 2단계를 다시 보내지 않고 since 를 잇는다');
   const A = await import('../src/bmcheck/advisory.js');
   assert.equal(A.modelTokensMatch('PowerEdge R740xd', 'PowerEdge'), true, '제품군 낱말뿐인 줄은 그 제품군 전부');
-  assert.equal(A.modelTokensMatch('ProLiant DL380 Gen10', 'HPE ProLiant'), false, '없는 제조사 낱말(hpe)이 있으면 아님');
+  assert.equal(A.modelTokensMatch('ProLiant DL380 Gen10', 'HPE ProLiant'), true, '제조사 이름은 Model 글자에 없다 — 제품군 낱말로 본다(4회차 판정 #2)');
+  assert.equal(A.modelTokensMatch('PowerEdge R740xd', 'HPE ProLiant'), false);
   assert.equal(A.modelTokensMatch('ThinkSystem SR650 V2 -[7Z73CTO1WW]-', 'SR650 V2'), true, '긴 기계 유형 꼬리는 판이 아니다');
   assert.equal(A.modelTokensMatch('ProLiant DL380 Gen10 Plus', 'DL380 Gen10'), false);
   assert.equal(A.modelTokensMatch('ThinkSystem SR650 V2', 'SR650'), false);
-  assert.match(src('../src/bmcheck/store.js'), /caseStore\.save\(\{ v: 1, cases \}, \{ shrinking: !!cur && next\.status === 'closed' \}\);/);
+  assert.match(src('../src/bmcheck/store.js'), /caseStore\.save\(\{ v: 1, cases \}, \{ shrinking: !!cur && cur\.status !== 'closed' && next\.status === 'closed' \}\);/);
 });
 
 test('3회차 엣지 — 이름 맞춤은 목록을 한 번만 · 이벤트 표지만 urgent(LED 는 아님) · 수동 수집은 기다리지 않음 · 구독 설정을 못 읽으면 503', async () => {
@@ -239,7 +253,7 @@ test('3회차 엣지 — 이름 맞춤은 목록을 한 번만 · 이벤트 표�
   C.markInventoryStale('led-1'); C.markInventoryStale('ev-1', { event: true });
   assert.deepEqual([C.isForcedStale('led-1'), C.isForcedStale('ev-1'), C.inventoryStale('led-1', 1e12)], [false, true, true], 'LED 는 다시 읽되 urgent 표지는 아니다');
   C.removeInventory('led-1'); C.removeInventory('ev-1');
-  assert.match(src('../src/idrac/poller.js'), /if \(running && !only && !manual && _runningEventP\)/);
+  assert.match(src('../src/idrac/poller.js'), /if \(only\) \{\n\s*if \(_eventRunning\) return BUSY;/, '수동 · 정규는 이벤트 읽기를 기다리지 않는다');
   assert.match(src('../src/routes/bmEvents.js'), /if \(eventSubStore\.loadError\(\)\) \{ noteUnreadable\(\); return res\.status\(503\)\.end\(\); \}/);
 });
 
@@ -247,7 +261,7 @@ test('3회차 화면 · 성능 — 등록부 못 읽음 503 은 ‘모름’ 잠
   const bf = src('../src/routes/api/bmFolders.js');
   assert.match(bf, /if \(_trendMemo\.get\(key\) !== ent\) return;/);
   assert.match(bf, /if \(ent\.busy\) \{ _trendMemo\.delete\(key\); return; \}/);
-  assert.match(bf, /\.\.\.\(full && why === 'edge-fail' && r\?\.reason \?/, '따로 문구가 있는 why 에 서버 사유를 덧붙이지 않는다(화면 N4)');
+  assert.match(bf, /\.\.\.\(full && \(why === 'edge-fail' \|\| why === 'old-version'\) && r\?\.reason \?/, '따로 문구가 있는 why 에 서버 사유를 덧붙이지 않는다(화면 N4)');
   assert.match(src('../src/routes/collector.js'), /if \(_hwlogMemo\.get\(key\) !== ent\) return;\n\s*if \(ent\.busy\) \{ _hwlogMemo\.delete\(key\); return; \}/);
   assert.match(src('../src/bmcheck/advisory.js'), /while \(ix\.memo\.size >= ADVISORY_MEMO_MAX\) ix\.memo\.delete\(ix\.memo\.keys\(\)\.next\(\)\.value\);/);
   const ev = src('../src/routes/bmEvents.js');
@@ -263,3 +277,70 @@ test('3회차 화면 · 성능 — 등록부 못 읽음 503 은 ‘모름’ 잠
     assert.equal(E.eventStatus().deferred, 1);
   } finally { E._setEventDepsForTest(null); E._resetEventsForTest(); }
 });
+
+test('4회차 보안 — 데모는 평범한 꼴 주소만(긴 scheme · 4KB authority · 백슬래시 · // 시작) · 기록 지우기는 백슬래시도', async () => {
+  const G = await import('../src/auth/demoGuest.js');
+  const long = `${'a'.repeat(20)}://h/api/admin/users`;
+  for (const u of [long, `http://${'h'.repeat(5000)}/api/admin/users`, '/api\\admin/users#x', 'http://h/api/tools\\network-check', '//h/api/admin/users']) assert.ok(G.demoGuestDenial('GET', u), u.slice(0, 60));
+  assert.equal(G.demoGuestDenial('GET', '/api/tools/bm-folders?x=1'), null);
+  const E = await import('../src/idrac/eventSub.js');
+  assert.equal(E.scrubEventPath('/api\\bm-events\\in\\SECRETSECRET#x'), '/api/bm-events/in/…#x');
+  assert.equal(E.scrubEventPath('http://h/api/bm-events\\in\\SECRETSECRET').includes('SECRETSECRET'), false);
+});
+
+
+test('4회차 — 이벤트 읽기와 정규 · 수동 주기는 서로 기다리지 않는다(동작) · 이벤트가 읽는 서버는 그 주기에 eventBusy', async (t) => {
+  const express = (await import('express')).default;
+  let slowGate = null; const slowStarted = new Promise((r) => { slowGate = r; });
+  let release = null; const held = new Promise((r) => { release = r; });
+  const app = express();
+  app.use('/bmc-slow', async (req, res) => { slowGate(); await held; res.status(404).end(); });   // 이벤트 읽기가 붙잡힌 장비
+  app.use('/bmc-fast', (req, res) => res.status(404).end());
+  const srv = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
+  t.after(() => { release(); srv.closeAllConnections?.(); srv.close(); });
+  const base = `http://127.0.0.1:${srv.address().port}`;
+  const registry = await import('../src/idrac/registry.js');
+  registry.importServers([{ id: 'w-slow', name: 'synth-slow', host: `${base}/bmc-slow`, username: 'u', password: 'p', serviceTag: 'SYNTHW1' },
+    { id: 'w-fast', name: 'synth-fast', host: `${base}/bmc-fast`, username: 'u', password: 'p', serviceTag: 'SYNTHW2' }], 'replace');
+  const P = await import('../src/idrac/poller.js');
+  const ev = P.pollNowForEvent(['w-slow']);
+  await slowStarted;   // 이벤트 읽기가 느린 장비에 붙잡혔다
+  let evDone = false; ev.then(() => { evDone = true; });
+  const m = await P.pollNowManual();   // 수동 주기 — 이벤트 읽기를 기다리지 않고 돈다
+  assert.equal(m.ran, true, '이벤트 읽기 중에도 수동 주기가 돈다');
+  assert.equal(evDone, false, '이벤트 읽기가 끝나기 전에 주기가 끝났다(기다리지 않음)');
+  const rs = m.lastRun?.results || [];
+  assert.deepEqual([rs.find((x) => x.id === 'w-slow')?.eventBusy, !!rs.find((x) => x.id === 'w-fast')], [true, true], '이벤트가 읽는 서버는 건너뛰고 나머지는 읽는다');
+  release(); await ev;
+});
+
+test('4회차 화면 — 정책 열이 없는 옛 기록의 보낸 단계도 첫 회차 전 행 표지에 보인다', async () => {
+  const X = await import('../src/partfault/escalation.js');
+  const S = { enabled: true, policies: [{ id: 'p', name: 'p', agents: [], states: ['fault'], steps: [{ afterMin: 15, emails: ['a@example.test'], channels: false, oncall: false }, { afterMin: 60, emails: ['b@example.test'], channels: false, oncall: false }] }], oncall: {} };
+  const p = { agent: '', partKey: 'k7', scope: 'idrac', kind: 'psu', partId: 'p', deviceId: 'SYNTH07', state: 'fault' };
+  const items = { '|k7': { since: 0, sig: 'x', sent: [[0, 1, 'x', 'ok', ''], [1, 2, 'x', 'ok', '']], ackedAt: null, ackBy: '', pol: '', ps: {} } };
+  assert.equal(X.escalationMarkOf(p, items, S, null).step, 3, '옛 줄(정책 열 없음)도 지금 정책의 진행으로 보인다');
+});
+
+test('4회차 판정 — 옛 기록이 정책 밖에서 처음 보이면 넘겨받지 않음(나중 정책은 지금부터) · 제조사 이름뿐인 권고 줄은 올릴 때 거절', async () => {
+  const X = await import('../src/partfault/escalation.js');
+  const POL = { id: 'pnew', name: 'p', agents: [], states: ['fault'], steps: [{ afterMin: 15, emails: ['a1@example.test'], channels: false, oncall: false }, { afterMin: 60, emails: ['mgr@example.test'], channels: false, oncall: false }] };
+  const part = { agent: '', partKey: 'k8', scope: 'idrac', kind: 'psu', partId: 'p', deviceId: 'SYNTH08', state: 'fault' };
+  const MIN = 60_000;
+  let st = { items: { '|k8': { since: 0, sig: 'x', sent: [[0, 1, 'x', 'ok'], [1, 2, 'x', 'ok']], ackedAt: null, ackBy: '' } }, enabledAt: 1 };
+  // 첫 회차 — 정책 없음(정책 밖)
+  let pl = X.escalationPlan({ settings: { enabled: true, enabledAt: 1, policies: [], oncall: {} }, state: st, open: [part], now: 500 * MIN });
+  st = { items: pl.items, enabledAt: pl.enabledAt };
+  assert.equal(st.items['|k8'].pol, '-', '넘겨받지 않음으로 굳힌다');
+  // 나중에 정책이 생김 — 지금부터 센다(1선이 먼저)
+  pl = X.escalationPlan({ settings: { enabled: true, enabledAt: 1, policies: [POL], oncall: {} }, state: st, open: [part], now: 600 * MIN });
+  assert.equal(pl.sends.length, 0, '옛 since 로 가장 높은 단계가 바로 가지 않는다');
+  st = { items: pl.items, enabledAt: pl.enabledAt };
+  pl = X.escalationPlan({ settings: { enabled: true, enabledAt: 1, policies: [POL], oncall: {} }, state: st, open: [part], now: 616 * MIN });
+  assert.deepEqual(pl.sends.map((x) => [x.step, x.to.emails[0]]), [[0, 'a1@example.test']]);
+  const A = await import('../src/bmcheck/advisory.js');
+  const csv = 'advisory_id,component_type,model,fixed_version\nDSA-1,BIOS,Dell,2.1\nDSA-2,BIOS,Dell PowerEdge,2.1\nDSA-3,BIOS,R740xd,2.1\n';
+  const r = A.parseAdvisoryCsv(csv);
+  assert.deepEqual([r.rows.map((x) => x.id), r.errors.map((e) => e.line)], [['DSA-2', 'DSA-3'], [2]], '제조사 이름뿐인 줄만 오류');
+});
+

@@ -146,6 +146,10 @@ export function isAdminDetailUser(user) {
  */
 export function demoGuestDenial(method, originalUrl) {
   const m = String(method || 'GET').toUpperCase();
+  // 데모 계정은 평범한 꼴(‘/’ 로 시작 · 백슬래시 없음 · ‘//’ 로 시작하지 않음 · 4KB 이하)의 요청 주소만 — express 의 경로 해석(옛 url.parse: 절대 꼴 · \ → /)을
+  //   흉내 내지 않고 이상한 꼴은 통째로 거절한다(긴 scheme · 4KB 넘는 authority · 백슬래시로 차단 목록을 비켜 갔다 — 디버깅 4회차 보안 #1)
+  const raw = String(originalUrl ?? '');
+  if (raw.length > 4096 || !raw.startsWith('/') || raw.startsWith('//') || raw.includes('\\')) return '데모 계정은 이 꼴의 요청 주소를 쓸 수 없습니다.';
   const p = normApiPath(originalUrl);
   const denied = READ_DENY.some((d) => p === d || p.startsWith(`${d}/`));
   if (m === 'GET' || m === 'HEAD') {
