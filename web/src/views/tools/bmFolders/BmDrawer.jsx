@@ -10,7 +10,7 @@
  * ⚠ 훅은 전부 조기 return 위(React #310 사고 규약).
  */
 import React, { useEffect, useRef, useState } from 'react';
-import { fetchJson } from '../../../api.js';
+import { fetchJson, postJson } from '../../../api.js';
 import Select from '../../../components/Select.jsx';
 import EscClose from '../../../components/EscClose.jsx';
 import { StatusDot, SrcBadge, SrcChip, WhyTip } from './parts.jsx';
@@ -18,6 +18,7 @@ import { pathText, opErrorText, ageText } from '../bmFoldersText.js';
 import { SRC_COLOR } from './usageSrc.js';
 import { osText, hwWhyText, OS_WHY } from './hwText.js';
 import { IdracConnect } from './IdracConnect.jsx';
+import { WarrantySection, FwBiosSections } from './CheckSections.jsx';   // v3.45 물리서버 점검(보증 · 펌웨어 기준선 · BIOS 편차)
 import { unitText } from '../../unitText.js';
 import { usageTone, TONE_COLOR, TONE_TEXT } from '../../vms/vmHubText.js';
 import {
@@ -88,7 +89,7 @@ const modalAbove = () => typeof document !== 'undefined' && !!document.querySele
  * @param note  호출부의 쓰기 결과 알림({ ok, warn, text }) — 호출부는 본문 위 카드에 그리는데 그 자리는 가림막 뒤다(좁은 화면은 화면 밖).
  *              드로어가 열린 뒤 · 서버를 넘긴 뒤에 **새로 온 것만** 단추 줄 아래에 보인다(반증 A6 — 실패가 드로어 안에서 보이지 않았다).
  */
-export default function BmDrawer({ r, rows, corps, corpName, scoped, op, busy, onClose, onMove, note = null }) {
+export default function BmDrawer({ r, rows, corps, corpName, scoped, op, busy, onClose, onMove, note = null, admin = false }) {
   const rootRef = useRef(null);
   const backRef = useRef(null);
   const bodyRef = useRef(null);
@@ -103,6 +104,11 @@ export default function BmDrawer({ r, rows, corps, corpName, scoped, op, busy, o
   const isBm = r?.kind === 'bm';
   const hw = useOnce('/tools/bm-folders/hw', r?.key || '', null, !!r && isBm);
   const trend = useOnce('/tools/bm-folders/trend', r?.key || '', { hours: 24 }, !!r && isBm);
+  // v3.45 물리서버 점검(보증 · 펌웨어 기준선 · BIOS 편차) — 열 때 1건. 보증은 ESXi 행에도 있다(같은 물리 박스). 기준을 지정하면 n 을 올려 다시 묻는다
+  const [chkRev, setChkRev] = useState(0);
+  const [baseBusy, setBaseBusy] = useState(false);
+  const [baseNote, setBaseNote] = useState(null);   // { key(서버), ok, text } — 그 서버의 결과만 보인다
+  const chk = useOnce('/tools/bm-folders/check', r?.key || '', { n: chkRev }, !!r);
   // 열 때 포커스를 드로어로(키보드 ↑↓ · Esc) · 닫을 때 원래 자리로
   useEffect(() => {
     backRef.current = typeof document !== 'undefined' ? document.activeElement : null;
@@ -136,6 +142,19 @@ export default function BmDrawer({ r, rows, corps, corpName, scoped, op, busy, o
   const addr = hw.d?.addr || r.addr || '';
   const opNote = freshNote(note, seen.current.note);
   const move = (x) => { if (x) onMove(x.key); };
+  // 펌웨어 기준 지정 · 해제 — 전 법인의 같은 모델에 적용되는 값이다(서버가 조회 ∧ 쓰기 전체 범위 관리자만 받는다). 성공하면 점검을 다시 묻는다
+  const onBaseline = async (row, version) => {
+    const model = chk.d?.model || '';
+    if (!model || !row?.key) return;
+    setBaseBusy(true); setBaseNote(null);
+    try {
+      const x = await postJson('/admin/bm-fw-baseline', { model, key: row.key, label: row.label, type: row.type, version });
+      if (!x || x.ok === false) throw new Error(x?.reason || '요청을 처리하지 못했습니다.');
+      setBaseNote({ key: r.key, ok: true, text: version ? `‘${row.label}’ 기준을 ${version} 로 지정했습니다(모델 ${model}).` : `‘${row.label}’ 기준 지정을 해제했습니다 — 다수 버전으로 다시 대조합니다.` });
+      setChkRev((n) => n + 1);
+    } catch (e) { setBaseNote({ key: r.key, ok: false, text: opErrorText(e) }); }
+    finally { setBaseBusy(false); }
+  };
   const onKey = (e) => {
     if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
     if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
@@ -208,7 +227,9 @@ export default function BmDrawer({ r, rows, corps, corpName, scoped, op, busy, o
         {opNote ? <div className={`bmd-opnote${opNote.ok && !opNote.warn ? ' ok' : ' bad'}`} role={opNote.ok ? 'status' : 'alert'}>{opNote.text}</div> : null}
 
         <div className="vmh-db bmd-db" ref={bodyRef}>
-          <DrawerSections r={r} hw={hw} trend={trend} corpName={corpName} scoped={scoped} onClose={onClose} />
+          <DrawerSections r={r} hw={hw} trend={trend} corpName={corpName} scoped={scoped} onClose={onClose}
+            afterIdent={<WarrantySection chk={chk} admin={admin && !scoped} />}
+            afterSpec={<FwBiosSections r={r} chk={chk} onBaseline={onBaseline} busy={baseBusy} baseNote={baseNote && baseNote.key === r.key ? baseNote : null} />} />
         </div>
 
         <nav className="vmh-df" aria-label="바로가기">
@@ -229,7 +250,7 @@ export default function BmDrawer({ r, rows, corps, corpName, scoped, op, busy, o
  * @param hw     { d, err } — /tools/bm-folders/hw(읽는 중이면 d null · err '')
  * @param trend  { d, err } — /tools/bm-folders/trend
  */
-export function DrawerSections({ r, hw, trend, corpName, scoped, onClose, now }) {
+export function DrawerSections({ r, hw, trend, corpName, scoped, onClose, now, afterIdent = null, afterSpec = null }) {
   const isBm = r.kind === 'bm';
   const at = now ?? Date.now();   // 나이 글자의 기준 시각(시험이 넣어 볼 수 있게 — 기본은 지금)
   const sigs = bmSignalRows(r, at);
@@ -332,6 +353,8 @@ export function DrawerSections({ r, hw, trend, corpName, scoped, onClose, now })
         {isBm && !os.full && sum ? <div className="muted bmd-note">{OS_WHY}</div> : null}
       </section>
 
+      {afterIdent}
+
       {isBm ? (
         <>
           <section className="vmh-sec" aria-label="iDRAC · 관리">
@@ -365,6 +388,8 @@ export function DrawerSections({ r, hw, trend, corpName, scoped, onClose, now })
               : !d ? <div className="muted bmd-note">읽는 중…</div>
                 : <div className="muted bmd-note">{HW_WHY[d.why] || hwWhyText({ hwVia: d.via })}</div>}
           </section>
+
+          {afterSpec}
 
           <section className="vmh-sec" aria-label="부품 목록">
             <div className="sh"><h3>부품 목록</h3>{groups ? <span className="muted">같은 부품은 묶어 개수로</span> : null}</div>

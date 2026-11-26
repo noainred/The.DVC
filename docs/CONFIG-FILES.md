@@ -1,9 +1,9 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **338개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **340개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
-- 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-11-20)
+- 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-11-26)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이다. 설명 보완은 `scripts/config-doc.mjs` 의 `NOTES` 에 추가한다.
 - 열 의미: **원자적** = 쓰기 도중 크래시에도 파일이 깨지지 않음(`atomicWriteFileSync`) · **손상보존** = 읽기 실패 시 원본을 `.corrupt.<ts>` 로 보존 · **0600** = 소유자만 읽기
 
@@ -55,10 +55,12 @@
 | `bareos-rehearsal-state.json` | 설정 | Bareos 복원 검증 회차 · 마지막 검증 시각 · 최근 회차 20건(상태, v2.862) | ✅ | ✅ | ✅ | bareos/rehearsal.js |
 | `bareos-rehearsal.json` | 설정 | Bareos 복원 검증(리허설) 정책(v2.862 — 켜기 · 요일 · 시각 · 법인마다 대수 · 성공한 검증용 VM 지우기 · 법인별 데이터스토어. 비밀 없음) | ✅ | ✅ | ✅ | bareos/rehearsal.js |
 | `bareos.json` | 설정 | Bareos 연동 설정(v2.820 · v2.823 법인별 Director). 파일: CONFIG_DIR/bareos.json (0600 · 원자적 쓰기 · 비밀 봉인). | ✅ | ✅ | ✅ | bareos/settings.js |
+| `bm-assets.json` | 설정 | 물리서버 자산 원장(보증 · 계약 — v3.45. 서비스 태그별 보증 만료일 · 종류 · 구매일 · 계약 번호 · 지원 종료일. 비밀 없음) | ✅ |  |  | bmcheck/store.js |
 | `bm-capacity.json` | 설정 | 리눅스 성능 8a단계 **용량 소진 예측**(설계 PROFILES §20 ⑱ · 아트보드 Capacity). 판정이 아니라 ‘참고’ 다(ML 없음 · 선형만). | ✅ |  | ✅ | bmusage/capacity.js |
 | `bm-folders-assign.json` | 설정 | 물리서버 폴더 저장소(v2.984, 설계 docs/design/bm-folders/README.md · 사용자 '기본값대로 구현'). | ✅ | ✅ |  | bmfolders/store.js |
 | `bm-folders-central.json` | 설정 | 엣지의 **중앙 폴더 사본**(v2.996 · 설계 docs/design/bm-folders §11 — 묶음 D). 파일 `bm-folders-central.json`(설정 변경 감시 밖 — bac | ✅ | ✅ |  | bmfolders/edgeCopy.js |
 | `bm-folders.json` | 설정 | 물리서버 폴더 저장소(v2.984, 설계 docs/design/bm-folders/README.md · 사용자 '기본값대로 구현'). | ✅ | ✅ |  | bmfolders/store.js |
+| `bm-fw-baseline.json` | 설정 | 물리서버 펌웨어 기준(관리자 지정 — v3.45. 모델 · 구성요소별 기준 버전. 비밀 없음) | ✅ |  |  | bmcheck/store.js |
 | `bm-idle.json` | 설정 | 리눅스 성능 8b단계 **저활용 서버 찾기**(설계 PROFILES §20 ㉑ · 아트보드 Idle). 판정이 아니라 **후보 표시**다(‘저활용 ≠ 불필요’ — 사람이 확인하고 남긴다). | ✅ |  | ✅ | bmusage/idle.js |
 | `bm-key-decisions.json` | 설정 | 다음 점검 ①(2차 · 사용자 결정 2026-11-08) **식별 키가 겹치는 서버의 수집 여부 결정** 저장소(`bm-key-decisions.json`). | ✅ | ✅ | ✅ | bmusage/keyDecisions.js |
 | `bm-onboard-applied.json` | 설정 | 엣지가 중앙의 **배포 목록**을 자기 등록부에 적용한다(7b단계 · 엣지 쪽). | ✅ | ✅ | ✅ | bmusage/onboard/edgeApply.js |
@@ -374,6 +376,8 @@
 - **`scan-journal.json`** — 상태 파일(백업 감시 제외). 아이실론 du·iDRAC 대역·IP 스캔이 시작할 때 적고 끝나면 지운다 — 업그레이드·재시작으로 남은 항목은 다음 기동 2분 뒤(SCAN_RESUME_DELAY_MS) 자동으로 다시 시작한다(사슬마다 최대 2번). 비밀은 적지 않는다(대상 id·대역 id·원격 작업 id). 지우면 끊긴 스캔이 다음 주기까지 다시 돌지 않을 뿐 다른 영향은 없다
 - **`upgrade-status.json`** — 상태 파일(백업 감시 제외). 서버 프로세스만 쓴다. 자동 업그레이드로 재시작한 뒤에도 업그레이드 화면이 '언제 무엇을 했는지' 를 보이기 위한 것 — 지우면 그 표시가 다음 확인까지 비고, 업그레이드 동작에는 영향이 없다
 - **`upgrade-kept-bundles.json`** — 상태 파일(백업 감시 제외). 중앙이 자기 업그레이드를 적용한 번들(+서명 manifest)을 패키지 폴더(packages)에 복사해 두고 그 이름을 적는다 — 엣지 자동 업그레이드(뒤처진 엣지에 다시 push)와 /dl(엣지 자체 확인)이 그 번들을 쓴다. 여기 적힌 파일만 UPGRADE_KEEP_BUNDLES(기본 3)개를 넘으면 오래된 것부터 지운다(관리자가 내려받은 패키지는 건드리지 않는다). 지우면 정리 대상에서 빠질 뿐 동작에는 영향이 없다
+- **`bm-assets.json`** — 전체 범위 관리자가 CSV 로 올린다(특수 기능 › Bare Metal Server › 자산 원장). 지우면 모든 서버의 보증이 ‘모름’ 이 된다 — 같은 CSV 를 다시 올리면 복구된다. 손상이면 보존하고 쓰기(409)를 막는다
+- **`bm-fw-baseline.json`** — 지우면 지정 기준이 사라지고 같은 법인 · 같은 모델의 다수 버전으로만 대조한다. 손상이면 보존하고 쓰기(409)를 막으며 다수 버전으로만 대조했다고 화면에 밝힌다
 - **`bareos-rehearsal.json`** — 기본은 꺼짐(검증은 VM 을 만들고 데이터스토어를 쓴다 — 전체 범위 관리자 + 본인 OTP 로 켠다). 손상이면 보존하고 검증 · 저장을 멈춘다. 지우면 꺼진 기본값
 - **`bareos-rehearsal-state.json`** — 상태 파일(백업 감시 제외). 회차는 보내기 전에 적는다(같은 날 다시 돌지 않게). 지우면 오늘 차례가 지난 법인이 한 번 더 돌 수 있고 돌아가며 고르는 순서가 처음부터 다시 시작한다
 - **`bareos-digest.json`** — 기본은 켬 08:30(사용자 결정). 손상이면 보존하고 발송 · 저장을 멈춘다. 지우면 기본값

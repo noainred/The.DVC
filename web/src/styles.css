@@ -3337,6 +3337,20 @@ table.bmf-t tr.bmf-picked td { background: rgba(59, 130, 246, .08); }
 .bmd-opnote { padding: 8px 18px; border-bottom: 1px solid var(--border-soft); font-size: 12.5px; line-height: 1.5; word-break: keep-all; overflow-wrap: anywhere; }
 .bmd-opnote.ok { color: var(--text); background: rgba(34, 197, 94, .10); }
 .bmd-opnote.bad { color: var(--text); background: rgba(239, 68, 68, .12); }
+/* v3.45 물리서버 점검(보증 · 펌웨어 기준선 · BIOS 편차) — 드로어 안 표 · 자산 원장 창 */
+.bmd-ct { width: 100%; font-size: 12.5px; }
+/* white-space: normal — 전역 tbody td 가 nowrap 이라, 두지 않으면 긴 구성요소 이름이 한 줄로 버텨 400px 드로어에서 상태 열이 화면 밖으로 밀린다(스크린샷 판독) */
+.bmd-ct th, .bmd-ct td { padding: 6px 8px; vertical-align: top; white-space: normal; }
+.bmd-ct td { word-break: keep-all; overflow-wrap: anywhere; }
+.bmd-ct-nm { display: block; font-weight: 600; }
+.bmd-ct-sub { display: block; font-size: 11px; margin-top: 1px; }
+.bmd-ct-btn { display: block; margin-top: 4px; padding: 3px 8px; font-size: 11.5px; white-space: nowrap; }
+/* 구역 머리의 오른쪽 글자 — 좁은 드로어에서 낱말 가운데서 꺾이지 않게(‘견/줌’) */
+.bmd-sh-sub { min-width: 0; text-align: right; word-break: keep-all; overflow-wrap: anywhere; }
+.bmd-chk-aside { padding: 4px 14px 6px; font-size: 12px; line-height: 1.5; word-break: keep-all; overflow-wrap: anywhere; }
+.bmd-al { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.bmd-al-chk { display: flex; gap: 8px; align-items: flex-start; font-size: 12.5px; line-height: 1.5; word-break: keep-all; }
+.bmd-al-chk input { margin-top: 3px; flex: 0 0 auto; }
 .bmd-lb { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
 .bmd-tile2 { grid-column: span 2; }
 .bmd-vtext { font-family: inherit !important; font-size: 16px !important; line-height: 1.25 !important; }

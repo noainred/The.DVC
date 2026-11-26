@@ -22,11 +22,11 @@
 
 | 항목 | 값 |
 |---|---|
-| 엔드포인트 | **1635개** |
+| 엔드포인트 | **1642개** |
 | 마운트 그룹 | 14개 |
-| 라우트 파일 | 164개 |
-| GET | 866개 |
-| POST | 517개 |
+| 라우트 파일 | 165개 |
+| GET | 871개 |
+| POST | 519개 |
 | PUT | 162개 |
 | PATCH | 3개 |
 | DELETE | 87개 |
@@ -40,12 +40,12 @@
 | [`/api/upgrade`](#apiupgrade) | 10 | 자동 업그레이드 제어(번들 수신·적용). |
 | [`/api/remote`](#apiremote) | 20 | 원격 접속(HAProxy/SSH/RDP 중계). |
 | [`/api/svcmon`](#apisvcmon) | 70 | 성능점검(서비스 모니터링). 마운트에서 `requirePerm('svcmon')` — v2.506 에 추가된 게이트다. |
-| [`/api/admin`](#apiadmin) | 378 | 설정·관리. `authMiddleware + requireEnrolled + auditMiddleware` 뒤에 있고 대부분 `adminOnly`, 비밀을 다루는 것은 `requireSettingsOwner` 가 추가된다. |
+| [`/api/admin`](#apiadmin) | 384 | 설정·관리. `authMiddleware + requireEnrolled + auditMiddleware` 뒤에 있고 대부분 `adminOnly`, 비밀을 다루는 것은 `requireSettingsOwner` 가 추가된다. |
 | [`/api/auth`](#apiauth) | 11 | 로그인·OTP·`/me`. **로그인 전** 호출되므로 `requireEnrolled` 를 타지 않는다(내부 admin 라우트는 스스로 게이트한다). |
 | [`/api/ping`](#apiping) | 16 | 네트워크 Ping 모니터링(조회=인증, 대상 관리=관리자). |
 | [`/metrics`](#metrics) | 1 | Prometheus/OTel 익스포터(선택 토큰). |
 | [`/api/v1`](#apiv1) | 21 | **외부 포탈용 공개 조회 API**(v2.562). 전용 API 키(`X-Api-Key`)로 인증하고 조회 전용이다. 상세는 [API-PUBLIC.md](API-PUBLIC.md). |
-| [`/api`](#api) | 982 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
+| [`/api`](#api) | 983 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
 | [`/dl`](#dl) | 2 | 중앙 업그레이드 소스(`versions.json` + 번들). **공개**다. |
 
 ---
@@ -389,6 +389,12 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | PUT | `/backup/settings` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/backupNetSec.js:171](../server/src/routes/admin/backupNetSec.js#L171) |
 | GET | `/backup/status` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/backupNetSec.js:168](../server/src/routes/admin/backupNetSec.js#L168) |
 | GET | `/backup/view/:name` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/backupNetSec.js:194](../server/src/routes/admin/backupNetSec.js#L194) |
+| GET | `/bm-assets` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/bmAssets.js:27](../server/src/routes/admin/bmAssets.js#L27) |
+| GET | `/bm-assets.csv` | 역할 `admin` · 권한 `data.csv` · `fleetOnly` | [server/src/routes/admin/bmAssets.js:34](../server/src/routes/admin/bmAssets.js#L34) |
+| POST | `/bm-assets/import` | 역할 `admin` · `fleetOnly` · `textFields` | [server/src/routes/admin/bmAssets.js:51](../server/src/routes/admin/bmAssets.js#L51) |
+| GET | `/bm-assets/sample.csv` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/bmAssets.js:43](../server/src/routes/admin/bmAssets.js#L43) |
+| GET | `/bm-fw-baseline` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/bmAssets.js:70](../server/src/routes/admin/bmAssets.js#L70) |
+| POST | `/bm-fw-baseline` | 역할 `admin` · `fleetOnly` · `textFields` | [server/src/routes/admin/bmAssets.js:80](../server/src/routes/admin/bmAssets.js#L80) |
 | GET | `/central-token` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/centralTokens.js:27](../server/src/routes/admin/centralTokens.js#L27) |
 | PUT | `/central-token` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/centralTokens.js:60](../server/src/routes/admin/centralTokens.js#L60) |
 | POST | `/central-token/generate` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/centralTokens.js:51](../server/src/routes/admin/centralTokens.js#L51) |
@@ -1043,13 +1049,14 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/bareos-summary.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/bareosViews.js:206](../server/src/routes/api/bareosViews.js#L206) |
 | GET | `/tools/bareos-summary/policy` | 권한 `tools` | [server/src/routes/api/bareosPolicy.js:44](../server/src/routes/api/bareosPolicy.js#L44) |
 | GET | `/tools/bareos-summary/pools` | 권한 `tools` | [server/src/routes/api/bareosPolicy.js:70](../server/src/routes/api/bareosPolicy.js#L70) |
-| GET | `/tools/bm-folders` | 권한 `tools` | [server/src/routes/api/bmFolders.js:413](../server/src/routes/api/bmFolders.js#L413) |
-| GET | `/tools/bm-folders.csv` | 권한 `tools`, `data.csv` | [server/src/routes/api/bmFolders.js:583](../server/src/routes/api/bmFolders.js#L583) |
-| POST | `/tools/bm-folders/edge/pull` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmFolders.js:403](../server/src/routes/api/bmFolders.js#L403) |
-| GET | `/tools/bm-folders/hw` | 권한 `tools` | [server/src/routes/api/bmFolders.js:522](../server/src/routes/api/bmFolders.js#L522) |
-| POST | `/tools/bm-folders/op` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmFolders.js:609](../server/src/routes/api/bmFolders.js#L609) |
-| GET | `/tools/bm-folders/search` | 권한 `tools` | [server/src/routes/api/bmFolders.js:489](../server/src/routes/api/bmFolders.js#L489) |
-| GET | `/tools/bm-folders/trend` | 권한 `tools` | [server/src/routes/api/bmFolders.js:548](../server/src/routes/api/bmFolders.js#L548) |
+| GET | `/tools/bm-folders` | 권한 `tools` | [server/src/routes/api/bmFolders.js:434](../server/src/routes/api/bmFolders.js#L434) |
+| GET | `/tools/bm-folders.csv` | 권한 `tools`, `data.csv` | [server/src/routes/api/bmFolders.js:652](../server/src/routes/api/bmFolders.js#L652) |
+| GET | `/tools/bm-folders/check` | 권한 `tools` | [server/src/routes/api/bmFolders.js:589](../server/src/routes/api/bmFolders.js#L589) |
+| POST | `/tools/bm-folders/edge/pull` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmFolders.js:424](../server/src/routes/api/bmFolders.js#L424) |
+| GET | `/tools/bm-folders/hw` | 권한 `tools` | [server/src/routes/api/bmFolders.js:560](../server/src/routes/api/bmFolders.js#L560) |
+| POST | `/tools/bm-folders/op` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmFolders.js:678](../server/src/routes/api/bmFolders.js#L678) |
+| GET | `/tools/bm-folders/search` | 권한 `tools` | [server/src/routes/api/bmFolders.js:527](../server/src/routes/api/bmFolders.js#L527) |
+| GET | `/tools/bm-folders/trend` | 권한 `tools` | [server/src/routes/api/bmFolders.js:617](../server/src/routes/api/bmFolders.js#L617) |
 | GET | `/tools/bm-storage` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/bmstor.js:131](../server/src/routes/api/bmstor.js#L131) |
 | GET | `/tools/bm-storage/auth-choices` | 역할 `admin` · `fullScopeOnly` · `requireSettingsOwner` | [server/src/routes/api/bmstor.js:576](../server/src/routes/api/bmstor.js#L576) |
 | POST | `/tools/bm-storage/collect` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/bmstor.js:680](../server/src/routes/api/bmstor.js#L680) |
@@ -1808,8 +1815,8 @@ Prometheus/OTel 익스포터(선택 토큰).
 | 이름 | 붙은 라우트 | 뜻 |
 |---|---:|---|
 | `fullScopeOnly` | 359 | **전체 범위 계정만**. vCenter 범위를 지정한 계정은 403 — 그 자원에 법인 축이 없어 교집합할 수 없기 때문이다(빈 목록을 주면 '장비 0대' 라는 거짓이 된다). |
-| `fleetOnly` | 212 | **전체 범위 계정만**(v2.607 AUTHZ2607-04·07 — 중앙 IPAM 스캔·중앙 인벤토리·감사 로그처럼 전 법인에 걸친 데이터·동작). 범위 제한 계정은 403. |
-| `textFields` | 121 | 본문 모양 검사(163회차 — `util/coercionTrap.js`): 이름을 준 칸이 객체 · 배열이면 **400**(code `not-text`) — `String()` · `Number()` · `.trim()` 이 던져 500 이던 자리. 권한 게이트가 아니다(빠진 값 · 글자 · 수 · 불리언은 그대로 통과). |
+| `fleetOnly` | 218 | **전체 범위 계정만**(v2.607 AUTHZ2607-04·07 — 중앙 IPAM 스캔·중앙 인벤토리·감사 로그처럼 전 법인에 걸친 데이터·동작). 범위 제한 계정은 403. |
+| `textFields` | 123 | 본문 모양 검사(163회차 — `util/coercionTrap.js`): 이름을 준 칸이 객체 · 배열이면 **400**(code `not-text`) — `String()` · `Number()` · `.trim()` 이 던져 500 이던 자리. 권한 게이트가 아니다(빠진 값 · 글자 · 수 · 불리언은 그대로 통과). |
 | `requireSettingsOwner` | 88 | **설정 소유 계정**(`settings-owners.txt`·`SETTINGS_OWNERS`·중앙 배포 admin). admin 이라도 소유자가 아니면 403. 그리고 **소유자이면서 전체 범위(vCenter 제한 없음) 계정만** 통과한다 — 범위가 지정된 소유자는 403(v2.744 AUTHZ-02). 백업 아카이브·중앙 토큰 배달 등 **비밀을 다루는 경로**에 붙는다. |
 | `requireCentral` | 70 | **central 게이트**(v2.613 DEPS2613-09) — 공유 `CENTRAL_TOKEN`·엣지별 개별 토큰이 하나도 설정돼 있지 않으면 404, 토큰이 맞지 않으면 403. 51개 `/api/central/*` 라우트가 같은 미들웨어를 쓴다(예전의 인라인 2줄 게이트 쌍을 하나로). |
 | `fullRwOnly` | 56 | **조회 · 쓰기 모두 전체 범위인 계정만**(v2.935 — `fullReadWriteScopeOnlyWith` 의 산물 · SAN 스위치 등록 · 수집 · 설정 변경 라우트). 쓰기 범위만 줄인 관리자도 403. |

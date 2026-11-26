@@ -3,6 +3,7 @@
  * 여기는 서버가 준 행을 고른 노드로 거르고 합치는 것만 한다(노드 test 로 고정 — bmFoldersText.test.js).
  * ⚠ 문구에 백틱 금지(BoldText 는 **강조** 만 해석한다 — 값 인용은 ‘ ’).
  */
+import { chkQuickMatch, CHK_QUICK } from './bmFolders/checkText.js';
 import { numOrNull } from '../../numOrNull.js';
 
 export const INTRO = '가상화 서버는 vCenter 가 클러스터로 나눠 주지만 물리서버(베어메탈)에는 그런 구조가 없습니다. iDRAC 으로 인식된 물리서버를 **법인 › 폴더**에 등록해 서비스별로 묶어 봅니다. '
@@ -101,6 +102,8 @@ export function filterRows(rows = [], q = '', quick = '') {
     if (quick === 'fault' && !(numOrNull(r.faults) > 0)) return false;
     if (quick === 'unread' && !(numOrNull(r.cpu) == null && numOrNull(r.mem) == null)) return false;
     if (quick === 'off' && r.powered !== false) return false;
+    // v3.45 물리서버 점검 거르기(보증 끝남 · 곧 · 모름 · 펌웨어 뒤처짐 · BIOS 다름) — 판정은 서버가 한 행의 chk
+    if (chkQuickMatch(r, quick) === false) return false;
     // v2.994: 값 없음 사유 묶음 띠를 누르면 그 사유의 서버만(값이 없는 행만 — 사유는 값이 없을 때만 실린다)
     if (typeof quick === 'string' && quick.startsWith('why:') && !(r.why?.code === quick.slice(4) && numOrNull(r.cpu) == null && numOrNull(r.mem) == null)) return false;
     if (!toks.length) return true;
@@ -272,7 +275,7 @@ export function cleanView(v) {
     name,
     state: {
       sel, view: pick(s.view, ['list', 'map'], 'list'), treeMode: pick(s.treeMode, ['corp', 'name'], 'corp'),
-      q: String(s.q ?? '').slice(0, 200), quick: pick(s.quick, ['', 'fault', 'unread', 'off'], ''), sub: s.sub !== false,
+      q: String(s.q ?? '').slice(0, 200), quick: pick(s.quick, ['', 'fault', 'unread', 'off', ...CHK_QUICK], ''), sub: s.sub !== false,
       groupBy: pick(s.groupBy, ['folder', 'corp', 'model'], 'folder'), colorBy: pick(s.colorBy, ['cpu', 'mem', 'watts', 'fault'], 'cpu'),
     },
   };

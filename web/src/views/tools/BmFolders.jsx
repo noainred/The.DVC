@@ -12,7 +12,9 @@ import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import BoldText from '../../components/boldText.jsx';
 import BulkAdd from './bmFolders/BulkAdd.jsx';
-import BmDrawer from './bmFolders/BmDrawer.jsx'; // v3.44: 서버 상세 드로어(예전 400px 옆 패널 SidePanel · HwPanel 을 바꿈)
+import BmDrawer from './bmFolders/BmDrawer.jsx';
+import AssetLedger from './bmFolders/AssetLedger.jsx';   // v3.45 자산 원장(보증 · 계약) 올리기 — 전체 범위 관리자
+import { chkCounts, chkChips, chkAsideText } from './bmFolders/checkText.js'; // v3.44: 서버 상세 드로어(예전 400px 옆 패널 SidePanel · HwPanel 을 바꿈)
 import { rowTone, rowDotTitle, orderRows, TMPKEY_NOTE } from './bmFolders/drawerText.js';
 import MapView from './bmFolders/MapView.jsx';
 import EdgeView from './bmFolders/EdgeView.jsx'; // v2.996: 엣지 포탈 화면
@@ -51,6 +53,7 @@ export default function BmFolders() {
   const [panel, setPanel] = useState('');
   // v3.44: 표가 정렬한 '보이는 순서'(STable onOrder) — 드로어의 ‹ › · ↑↓ 가 이 순서를 따른다. 표가 그려지지 않으면(맵 · 좁은 화면 카드) 쓰지 않는다.
   const [order, setOrder] = useState(null);
+  const [ledger, setLedger] = useState(false);   // v3.45 자산 원장 올리기 창
   const [bulk, setBulk] = useState(null);
   // v2.987 맵 보기 · 저장한 보기(브라우저 저장 — 이 사람의 편의만. 못 읽으면 빈 목록) · 입력 다시 읽기 진행 중
   const [view, setView] = useState('list');
@@ -97,6 +100,7 @@ export default function BmFolders() {
   const baseRows = useMemo(() => rowsOf(servers, sel, { sub }), [servers, sel, sub]);
   const rows = useMemo(() => filterRows(baseRows, q, quick), [baseRows, q, quick]);
   const agg = useMemo(() => aggregate(baseRows), [baseRows]);
+  const chkN = useMemo(() => chkCounts(baseRows), [baseRows]);   // v3.45 물리서버 점검 요약(보증 · 펌웨어 · BIOS — 판정은 서버가 한 행의 chk)
   const byName = useMemo(() => foldersByName(corps), [corps]);
   const selKey = `${sel.type}|${sel.corp || ''}|${sel.path || ''}`;
   // 저장한 보기를 고르면 노드가 바뀌어 거르기가 비워진다 — 그 보기의 거르기는 이 효과가 넣는다(같은 틀에서 순서를 보장)
@@ -178,6 +182,8 @@ export default function BmFolders() {
           <span style={{ flex: 1 }} />
           {d.canWrite ? <button type="button" className="login-btn" style={btn} disabled={busy} onClick={() => openBulk({ corp: sel.corp || '', path: sel.type === 'folder' ? sel.path : '' })}>서버 찾아 등록</button> : null}
           {canCsv() ? <button type="button" className="logout-btn" style={btn} onClick={() => downloadFile('/tools/bm-folders.csv', csvNameOf()).catch((e) => setNote({ ok: false, text: opErrorText(e) }))}>CSV</button> : null}
+          {/* v3.45: 자산 원장(보증 · 계약) 올리기 — 전 법인에 걸친 값이라 전체 범위 관리자만(서버 게이트와 같은 표지 canFleet) */}
+          {d.canFleet ? <button type="button" className="logout-btn" style={btn} onClick={() => setLedger(true)} title="서비스 태그별 보증 만료일 · 계약을 CSV 로 올립니다">자산 원장</button> : null}
           {d.canWrite ? <button type="button" className="logout-btn" style={btn} disabled={freshBusy} title="새로 넣은 iDRAC 서버 · 법인 귀속 변경을 다음 인벤토리 주기 전에 지금 다시 읽습니다(포탈 전체에 상한 하나 — 서비스 인벤토리와 함께 씁니다)" onClick={readFresh}>{freshBusy ? '다시 읽는 중…' : '입력 다시 읽기'}</button> : null}
           <button type="button" className="logout-btn" style={btn} onClick={() => load()}>새로고침</button>
         </div>
@@ -306,8 +312,12 @@ export default function BmFolders() {
                   {[['fault', '장애', baseRows.filter((r) => r.faults > 0).length], ['unread', '못 읽음', baseRows.filter((r) => r.cpu == null && r.mem == null).length], ['off', '꺼짐', baseRows.filter((r) => r.powered === false).length]].map(([k, lb, n]) => (
                     <button key={k} type="button" className={`bmf-chip${quick === k ? ' on' : ''}`} aria-pressed={quick === k} onClick={() => setQuick(quick === k ? '' : k)}>{lb} {n}</button>
                   ))}
+                  {chkChips(chkN, d.check?.soonDays).map(([k, lb, n, tip]) => (
+                    <button key={k} type="button" className={`bmf-chip${quick === k ? ' on' : ''}`} aria-pressed={quick === k} title={tip} onClick={() => setQuick(quick === k ? '' : k)}>{lb} {n}</button>
+                  ))}
                   {sel.type === 'folder' || sel.type === 'name' ? <label style={{ fontSize: 12, display: 'inline-flex', gap: 4, alignItems: 'center' }}><input type="checkbox" checked={sub} onChange={(e) => setSub(e.target.checked)} /> 하위 폴더 포함</label> : null}
                 </div>
+                {chkAsideText(chkN) ? <div className="muted bmd-chk-aside" title="정상에도 문제에도 넣지 않고 따로 센 것입니다">따로 센 것 — {chkAsideText(chkN)}</div> : null}
                 <SrcSummary rows={baseRows} />
                 <WhyBand rows={baseRows} quick={quick} setQuick={setQuick} />
                 {writable && picked.size ? (
@@ -374,7 +384,8 @@ export default function BmFolders() {
           )}
         </div>
       </div>
-      {panelRow ? <BmDrawer r={panelRow} rows={drawerRows} corps={corps} corpName={corpName} scoped={!!d.scoped} op={op} busy={busy} onClose={() => setPanel('')} onMove={setPanel} note={note} /> : null}
+      {panelRow ? <BmDrawer r={panelRow} rows={drawerRows} corps={corps} corpName={corpName} scoped={!!d.scoped} op={op} busy={busy} onClose={() => setPanel('')} onMove={setPanel} note={note} admin={!!d.admin} /> : null}
+      {ledger ? <AssetLedger meta={d.check?.assets} onClose={() => setLedger(false)} onChanged={() => load()} /> : null}
       {bulk ? <BulkAdd init={bulk} d={d} corpName={corpName} op={op} busy={busy} onClose={() => setBulk(null)} /> : null}
     </div>
   );
