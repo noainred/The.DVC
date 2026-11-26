@@ -19,7 +19,21 @@ const TICK_MS = ESC_TICK_MS;
 let _timer = null; let _busy = false;
 let _last = null;
 let _heldKeys = new Set();   // 마지막 회차에서 정비 창 보류로 보내지 않은 장애 열쇠(행 표지용 — 화면 U7)
-export const escalationRunMarks = () => (_last ? { why: _last.why || '', heldKeys: _heldKeys } : null);   // { at, enabled, sent, delivered, failed, deferred, overCap, held, why?, errors:[], results:[] }
+export const escalationRunMarks = () => (_last ? { why: _last.why || '', heldKeys: _heldKeys } : null);
+/**
+ * 행 표지용 — **지금** 보내지 않는 사유(진행 기록 못 읽음 · 부품 장애 점검 꺼짐 · 데모) + 마지막 회차의 정비 창 보류 열쇠.
+ *   마지막 회차만 보면 재시작 뒤 첫 회차 전(1~2분)에 ‘보냅니다’ 로 보였다(디버깅 2회차 화면 D2). 단계 올리기 꺼짐은 행마다 말하지 않는다(대상 밖).
+ */
+export async function escalationMarksNow() {
+  let why = '';
+  if (escalationStateUnreadable()) why = 'state-unreadable';
+  else {
+    let sw = { enabled: true, source: '' };
+    try { sw = (await _deps.partFaultSwitch()) || sw; } catch { /* 모르면 막지 않는다 */ }
+    why = !sw.enabled ? 'partfault-off' : sw.source === 'demo' ? 'demo' : '';
+  }
+  return { why, heldKeys: _heldKeys };
+}   // { at, enabled, sent, delivered, failed, deferred, overCap, held, why?, errors:[], results:[] }
 
 /** 단계 알림 한 건의 제목 · 본문(순수 — 시험이 고정). 채널 억제 열쇠에 수집 주체를 넣는다(두 엣지의 같은 파트 키가 서로를 억제하지 않게 — 반증 A17). */
 export function escalationMessage(s, now = Date.now()) {
@@ -33,7 +47,9 @@ export function escalationMessage(s, now = Date.now()) {
   if (oc) lines.push(`오늘 당직: ${oc.name || oc.email}${oc.agent === '*' ? '' : ` (${oc.agent || '이 포탈'} 당직표)`}`);
   else if (s.to.oncallWanted) lines.push('당직표에 오늘 당직이 없어 당직에게는 보내지 못했습니다.');
   const ag = String(s.part.agent || '').trim().toLowerCase();
-  return { key: `partfault-esc:${ag}|${s.part.partKey}:${s.step}:${Number.isInteger(s.attempt) ? s.attempt : 1}`, severity: a.severity, title, detail: lines.join('\n') };   // 다시 시도마다 다른 열쇠(판정 #2)
+  // 열쇠 = 장애 · 정책 · 세대(since — 다시 켜면 바뀐다) · 단계 · 다시 시도 번호. 정책이 바뀌거나 다시 켠 뒤 옛 열쇠가 억제 창에 걸려 새 단계가 막히지 않게(디버깅 2회차 판정 #3) · 다시 시도마다 다른 열쇠(1회차 판정 #2)
+  const gen = Number.isFinite(Number(s.since)) ? Number(s.since) : 0;
+  return { key: `partfault-esc:${ag}|${s.part.partKey}:${String(s.policy?.id || '')}:${gen}:${s.step}:${Number.isInteger(s.attempt) ? s.attempt : 1}`, severity: a.severity, title, detail: lines.join('\n') };
 }
 
 /** 한 건 보내기 — { text, delivered }. 던지지 않는다. */

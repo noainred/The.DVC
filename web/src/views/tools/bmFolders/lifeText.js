@@ -37,11 +37,14 @@ export function lifeView(d) {
     });
     const vals = rows.map((x) => x.life).filter((x) => x != null);
     // 줄은 서버가 상한까지만 싣는다(넘치면 가장 닳은 것부터) — 머리는 같은 응답의 전체 요약으로 센다(디버깅 1회차 화면 U5)
-    const all = d.summary?.disk?.life && typeof d.summary.disk.life === 'object' ? d.summary.disk.life : null;
+    // 이 노드 서버 응답은 요약을 detail.summary 에 둔다(엣지 · 요약만 받은 서버는 최상위 summary — 디버깅 2회차 화면 D1)
+    const sm = det.summary && typeof det.summary === 'object' ? det.summary : d.summary;
+    const all = sm?.disk?.life && typeof sm.disk.life === 'object' ? sm.disk.life : null;
     const n = numOrNull(all?.n);
     if (n != null && n > rows.length) {
       const read = numOrNull(all.read) ?? 0; const min = numOrNull(all.min);
-      const head = `SSD ${n}개${read < n ? ` 중 ${read}개 읽음` : ''} · 가장 낮은 값 ${pct(min)} · 표에는 가장 닳은 ${rows.length}개`;
+      // 값을 못 읽은 SSD 가 있으면 ‘가장 닳은’ 이라 단정하지 않는다(디버깅 2회차 판정 #7) — 서버는 낮은 값부터 고르고 값 없는 것은 뒤로 둔다
+      const head = `SSD ${n}개${read < n ? ` 중 ${read}개 읽음` : ''} · 가장 낮은 값 ${pct(min)} · 표에는 낮은 값부터 ${rows.length}개${read < n ? '(값 없는 SSD 는 뒤)' : ''}`;
       return { kind: 'rows', rows, head };
     }
     const head = vals.length ? `SSD ${rows.length}개 · 가장 낮은 값 ${Math.min(...vals)}%${vals.length < rows.length ? ` · 값 없음 ${rows.length - vals.length}` : ''}` : `SSD ${rows.length}개 · 값 없음`;
@@ -72,13 +75,19 @@ export function memCeView(m) {
   if (!m || typeof m !== 'object' || !Array.isArray(m.slots)) return null;
   const days = numOrNull(m.days) ?? 30;
   const total = numOrNull(m.total) ?? 0;
-  const slots = m.slots.filter((x) => Array.isArray(x) && typeof x[0] === 'string').slice(0, 64).map((x) => ({ slot: x[0], n: numOrNull(x[1]) ?? 0 }));
+  // 시각을 못 읽은 경고의 슬롯 수(u) — 그 슬롯을 0 으로만 보이지 않게(디버깅 2회차 판정 #6)
+  const us = new Map((Array.isArray(m.uslots) ? m.uslots : []).filter((x) => Array.isArray(x) && typeof x[0] === 'string').slice(0, 64).map((x) => [x[0], numOrNull(x[1]) ?? 0]));
+  const slots = m.slots.filter((x) => Array.isArray(x) && typeof x[0] === 'string').slice(0, 64).map((x) => ({ slot: x[0], n: numOrNull(x[1]) ?? 0, u: us.get(x[0]) || 0 }));
+  for (const [k, u] of us) if (!slots.some((x) => x.slot === k) && slots.length < 64) slots.push({ slot: k, n: 0, u });
   const covered = m.covered === true;
   const unknown = numOrNull(m.unknownSlot) ?? 0;
   // 다 덮지 못했으면 건수도 ‘읽은 기록 안’ 의 것이다 — 30일 전체 건수처럼 쓰지 않는다(반증 B8)
-  const head = covered ? (total ? `지난 ${days}일 경고 기록 ${total}건` : `지난 ${days}일 경고 기록 없음`)
-    : (total ? `읽은 기록 안 경고 기록 ${total}건(지난 ${days}일을 다 읽지 못함)` : '읽은 기록 안에는 경고 기록 없음');
   const untimed = numOrNull(m.untimed) ?? 0;
-  const note = covered ? '' : untimed ? `시각을 읽지 못한 교정 오류 경고 기록 ${untimed}건은 기간 안인지 몰라 세지 않았습니다 — 건수 · 0 은 ‘없음’ 이 아닙니다.` : `읽은 기록이 지난 ${days}일을 다 덮지 못했습니다 — 건수는 읽은 범위 안의 것이고, 0 은 ‘읽은 범위 안에 없음’ 이지 ‘없음’ 이 아닙니다.`;   // 판정 #7
+  // 시각 모름 경고만 있으면 ‘없음’ 이라 하지 않는다(판정 #6)
+  const um = untimed ? ` · 시각 모름 ${untimed}건` : '';
+  const head = covered ? (total ? `지난 ${days}일 경고 기록 ${total}건${um}` : untimed ? `지난 ${days}일 시각을 읽은 경고 기록 없음${um}(기간 안인지 모름)` : `지난 ${days}일 경고 기록 없음`)
+    : total ? `읽은 기록 안 경고 기록 ${total}건(지난 ${days}일을 다 읽지 못함)${um}`
+      : untimed ? `시각을 읽지 못한 경고 기록 ${untimed}건(기간 안인지 모름)` : '읽은 기록 안에는 경고 기록 없음';
+  const note = untimed ? `시각을 읽지 못한 교정 오류 경고 기록 ${untimed}건은 기간 안인지 몰라 세지 않았습니다 — 건수 · 0 은 ‘없음’ 이 아닙니다.` : covered ? '' : `읽은 기록이 지난 ${days}일을 다 덮지 못했습니다 — 건수는 읽은 범위 안의 것이고, 0 은 ‘읽은 범위 안에 없음’ 이지 ‘없음’ 이 아닙니다.`;   // 판정 #7
   return { head, slots, unknown, covered, note };
 }

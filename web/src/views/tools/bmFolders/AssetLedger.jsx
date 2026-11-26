@@ -10,7 +10,7 @@ import { Modal } from '../../../components/Modal.jsx';
 import { STable } from '../../../components/STable.jsx';
 import { postJson, downloadFile, canCsv, CSV_DENIED_NOTE } from '../../../api.js';
 import { opErrorText } from '../bmFoldersText.js';
-import { importSummaryText, importRowNote, IMPORT_ACTION } from './checkText.js';
+import { importSummaryText, importRowNote, IMPORT_ACTION, IMPORT_ACTION_ORDER } from './checkText.js';
 import { decodeCsvBytes } from '../csvDecode.js';   // UTF-8 로 못 읽으면 EUC-KR(한국어 엑셀의 ‘CSV(쉼표로 분리)’) · UTF-16
 
 const FILE_MAX = 900 * 1024;   // 서버 본문 한도(1MB) 안 — 일곱 열을 채운 줄로 약 1만 줄(서버 줄 상한과 같은 크기)
@@ -104,7 +104,7 @@ export default function AssetLedger({ meta, onClose, onChanged }) {
                     <tr key={`${x.line}:${i}`}>
                       <td data-sort={x.line ?? ''}>{x.line ?? '—'}</td>
                       <td className="mono" data-sort={x.tag || ''}>{x.tag || '—'}</td>
-                      <td data-sort={a.label}><span className={`badge ${a.badge}`}>{a.label}</span></td>
+                      <td data-sort={IMPORT_ACTION_ORDER[x.action] ?? 9}><span className={`badge ${a.badge}`}>{a.label}</span></td>
                       <td data-sort={importRowNote(x)} style={{ overflowWrap: 'anywhere' }}>{importRowNote(x)}</td>
                     </tr>
                   );

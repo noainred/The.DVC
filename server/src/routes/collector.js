@@ -337,8 +337,13 @@ function findEdgeIdrac(id, k, getInventory) {
   const notFound = { status: 404, body: { ok: false, code: 'not-found', reason: '이 엣지에 등록된(켜진) iDRAC 서버가 아닙니다.' } };
   if (id) { const e = reg.find((x) => String(x.id) === id); return e ? { entry: e } : notFound; }
   const invTag = (e) => { try { return lc(getInventory(String(e.id))?.system?.serviceTag); } catch { return ''; } };
-  for (const pick of [(e) => lc(e.id) === k, (e) => invTag(e) === k, (e) => lc(e.serviceTag) === k]) {
-    const hits = reg.filter(pick);
+  // 장비가 지금 말하는 태그(인벤토리)가 먼저 · 그다음 등록 id · 등록부 태그(디버깅 2회차 엣지 #3).
+  //   등록부 태그가 k 인데 장비는 다른 태그를 말하면 그 등록은 낡은 것(주소가 다른 장비로 재배정)이다 — id · 등록부 태그 단계에서 뺀다.
+  //   id 만 k 와 같은 등록은 빼지 않는다(id 가 태그가 아닐 수 있다 — 인벤토리 태그가 달라도 정상).
+  const stale = (e) => { const it = invTag(e); return !!it && it !== k && lc(e.serviceTag) === k; };
+  const live = reg.filter((e) => !stale(e));
+  for (const [pick, pool] of [[(e) => invTag(e) === k, reg], [(e) => lc(e.id) === k, live], [(e) => lc(e.serviceTag) === k, live]]) {
+    const hits = pool.filter(pick);
     if (hits.length === 1) return { entry: hits[0] };
     if (hits.length > 1) return { status: 409, body: { ok: false, code: 'ambiguous', reason: '이 열쇠에 맞는 켜진 등록이 둘 이상입니다(같은 서비스 태그) — 어느 장비인지 몰라 처리하지 않았습니다.' } };
   }
@@ -393,18 +398,22 @@ collectorRouter.post('/bm-power', tokenFirst('bm-power'), express.json({ limit: 
     const rawMax = String(process.env.BM_POWER_EDGE_MAX ?? '').trim();
     const max = /^-|^0+(\.0*)?$/.test(rawMax) ? 0 : reqTimeoutMs(rawMax, 30, { min: 1, max: 500 });
     if (_edgePowerHits.length >= max) return res.status(429).json({ ok: false, code: 'rate', status: 'rate', reason: `이 엣지는 10분에 ${max}건까지만 보냅니다 — 잠시 뒤 다시.` });
+    // 자리를 **검사할 때 먼저** 잡고, 장비에 닿지 않고 끝나면 돌려준다 — 장비 응답 뒤에 세면 동시 요청이 모두 검사를 통과했다(디버깅 2회차 보안 #2 · 엣지 #2 — 1회차 수정의 회귀).
+    //   장비를 조회한 뒤 보내지 않은 것(태그 다름 · 허용 안 함)은 돌려주지 않는다 — 조회 · 감사를 상한 없이 되풀이하지 못하게.
+    const slot = nowMs; _edgePowerHits.push(slot);
+    const release = () => { const i = _edgePowerHits.lastIndexOf(slot); if (i >= 0) _edgePowerHits.splice(i, 1); };
     const { isMockMode } = await import('../mock/demo/flags.js');
-    if (isMockMode()) return res.json({ ok: true, status: 'accepted', http: 204, message: '데모 — 장비에 보내지 않았습니다.' });
+    if (isMockMode()) { release(); return res.json({ ok: true, status: 'accepted', http: 204, message: '데모 — 장비에 보내지 않았습니다.' }); }
     const { getInventory } = await import('../idrac/invCache.js');
     const fx = findEdgeIdrac(id, k, getInventory);
-    if (!fx.entry) return res.status(fx.status).json(fx.body);
+    if (!fx.entry) { release(); return res.status(fx.status).json(fx.body); }
     const entry = fx.entry;
     const who = `중앙:${str(b.by, 80) || '?'}`; const tgt = String(entry.name || entry.id).slice(0, 120);
     logAudit({ user: who, action: kind === 'power' ? '물리서버 원격 전원 조작 요청(중앙)' : '물리서버 위치 LED 요청(중앙)', target: tgt, detail: `${action}${str(b.reason, 200) ? ` · 사유 ${str(b.reason, 200)}` : ''}`.slice(0, 300), ip: req.ip });   // 보내기 전에도 남긴다(반증 A12)
     const invTag = (() => { try { return String(getInventory(String(entry.id))?.system?.serviceTag || ''); } catch { return ''; } })();
     const r = await P.runDeviceAction(entry, { kind, action, expectTag: entry.serviceTag || invTag });
     if (kind === 'led' && r?.ok) { try { (await import('../idrac/invCache.js')).markInventoryStale(String(entry.id)); } catch { /* */ } }   // LED 상태 다시 읽기(판정 #9)
-    if (r?.sent) _edgePowerHits.push(nowMs);   // 장비에 실제로 보낸 것만 센다(없는 서버 · 진행 중 · 태그 다름은 세지 않는다 — 엣지 #3)
+    if (!r?.sent && ['busy', 'bad-args', 'auth-stopped'].includes(r?.status)) release();   // 장비에 닿기 전에 끝난 것만 돌려준다(엣지 #3)
     logAudit({ user: who, action: kind === 'power' ? '물리서버 원격 전원 조작(중앙 요청)' : '물리서버 위치 LED(중앙 요청)', target: tgt,
       detail: `${action} · ${r.status}${r.reset ? ` · ${r.reset}` : ''}${str(b.reason, 200) ? ` · 사유 ${str(b.reason, 200)}` : ''}`.slice(0, 300), ip: req.ip });
     res.json(r);

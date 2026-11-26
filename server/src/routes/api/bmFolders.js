@@ -331,7 +331,8 @@ async function trendDeps() {
     localPeer: async (o) => (await import('../../bmusage/peerAvg.js')).peerAvgFor(o),
     edgePeer: async (agent, o) => (await import('../../central/bmPeerPull.js')).pullEdgePeerAvg(agent, o),
     // v3.50 하드웨어 이벤트 로그(⑤) — 이 노드 서버는 등록부 항목으로 직접 · 엣지 · 수집 서버 서버는 그쪽이 읽는다
-    hwLogEntry: async (id) => { const { loadRegistry } = await import('../../idrac/registry.js'); const e = loadRegistry().find((x) => String(x.id) === String(id)); return e && e.enabled !== false && e.host ? e : null; },
+    // 등록부를 못 읽으면 던진다(호출부가 ‘등록부 밖’ 과 가른다 — 디버깅 2회차 엣지 #5)
+    hwLogEntry: async (id) => { const R = await import('../../idrac/registry.js'); if (R.registryLoadError()) throw Object.assign(new Error('registry-unreadable'), { code: 'registry-unreadable' }); const e = R.loadRegistry().find((x) => String(x.id) === String(id)); return e && e.enabled !== false && e.host ? e : null; },
     hwLogLocal: async (entry) => readHwLog(entry),
     hwLogEdge: async (agent, q) => (await import('../../central/bmHwLogPull.js')).pullEdgeHwLog(agent, q),
     hwLogDemo: async (key) => { const { isMockMode } = await import('../../mock/demo/flags.js'); return isMockMode() ? demoHwLog(key) : null; },
@@ -736,7 +737,9 @@ export function registerBmFolders(api) {
     const noWay = () => { res.status(400).json({ ok: false, reason: '이 포탈이 보낼 길이 없는 서버입니다(iDRAC 등록부 밖 · 꺼진 등록 등).' }); return null; };
     if (!src) return noWay();
     if (src.via !== 'local') return { via: src.via, agent: src.agent, q: src.q };
-    const entry = await D.hwLogEntry(src.id).catch(() => null);
+    let regErr = false;
+    const entry = await D.hwLogEntry(src.id).catch((e) => { regErr = e?.code === 'registry-unreadable'; return null; });
+    if (regErr) { res.status(503).json({ ok: false, error: 'registryUnreadable', reason: '이 포탈의 iDRAC 등록부를 읽지 못했습니다 — 보내지 않았습니다(서비스 점검에서 등록부를 확인).' }); return null; }
     if (!entry) return noWay();
     const busy = powerGapIssue(`${kind}|${String(entry.id ?? entry.host ?? '')}`);
     if (busy) { res.status(409).json({ ok: false, status: 'busy', reason: busy }); return null; }
@@ -883,7 +886,9 @@ export function registerBmFolders(api) {
       const D = await trendDeps();
       const full = admin && !hide;
       const finish = async (via, r) => {
-        if (!r || r.ok !== true) return res.json({ ok: true, via, why: r?.kind === 'old-version' ? 'old-version' : r?.kind === 'not-found' ? 'not-found' : 'edge-fail', ...(full && r?.reason ? { reason: String(r.reason).slice(0, 200) } : {}) });
+        // 엣지가 가른 사유(겹침 · 등록부 못 읽음)는 그대로 — ‘잠시 뒤 다시’ 로 뭉개지 않는다(디버깅 2회차 엣지 #6)
+        const WHY_OF = { 'old-version': 'old-version', 'not-found': 'not-found', 'edge-ambiguous': 'edge-ambiguous', 'edge-registry': 'edge-registry' };
+        if (!r || r.ok !== true) return res.json({ ok: true, via, why: WHY_OF[r?.kind] || 'edge-fail', ...(full && r?.reason ? { reason: String(r.reason).slice(0, 200) } : {}) });
         const rows = (Array.isArray(r.rows) ? r.rows : []).map((x) => (full ? x : { ...x, msg: maskHwLogText(x.msg, { tag: m.serviceTag }) }));
         // v3.51 부품 수명(⑧): 메모리 교정 오류 경고 — 가리기 전 원문에서 슬롯별로 센다(슬롯 이름은 주소 · 계정이 아니다). DIMM 목록은 이 노드 인벤토리가 있을 때만(0 인 슬롯도 줄로)
         let dimms = [];
@@ -902,7 +907,9 @@ export function registerBmFolders(api) {
         return await finish(src.via, r);
       }
       const sid = src.id;
-      const entry = sid ? await D.hwLogEntry(sid).catch(() => null) : null;
+      let regErr = false;
+      const entry = sid ? await D.hwLogEntry(sid).catch((e) => { regErr = e?.code === 'registry-unreadable'; return null; }) : null;
+      if (regErr) return res.json({ ok: true, why: 'registry-unreadable' });
       if (!entry) return res.json({ ok: true, why: 'no-source' });   // 이 노드 iDRAC 등록부 밖(OME · 꺼진 등록 등) — 읽을 길이 없다
       const r = await trendOnce(`hwlog||id|${sid}`, () => D.hwLogLocal(entry));
       return await finish('local', r);

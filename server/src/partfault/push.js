@@ -103,24 +103,26 @@ export async function pushPartFaultsNow({ reason = 'timer' } = {}) {
   if (_busy) { // 재진입 가드(CLAUDE.md 필수) — 거절하지 않고 끝난 뒤 한 번 더
     if (!_again) console.log(`[partfault-push] ${reason} — 이전 push 진행 중, 끝난 뒤 한 번 더 스캔·전송합니다`);
     _again = true;
+    if (reason === 'event') _urgentAgain = true;   // 진행 중인 push 에 합류한 이벤트 보고도 다음 전송에 urgent 를 싣는다(디버깅 2회차 엣지 #4)
     return _busy;
   }
   _busy = (async () => {
-    let r; let why = reason; let rounds = 0;
-    do { _again = false; r = await pushOnce(why); why = `${reason}+again`; rounds++; } while (_again && rounds < 5);
+    let r; let why = reason; let rounds = 0; let urgent = reason === 'event';
+    do { _again = false; r = await pushOnce(why, { urgent }); urgent = _urgentAgain; _urgentAgain = false; why = `${reason}+again`; rounds++; } while (_again && rounds < 5);
     if (_again) { _again = false; console.warn('[partfault-push] 재전송 요청이 5회 연속 겹쳤습니다 — 남은 요청은 다음 주기 push 에 실립니다'); }
     return r;
   })().finally(() => { _busy = null; });
   return _busy;
 }
 
-async function pushOnce(reason) {
+let _urgentAgain = false;
+async function pushOnce(reason, { urgent = reason === 'event' } = {}) {
   if (!partFaultEnabled().enabled) return { ok: false, reason: '파트 장애 기능이 꺼져 있습니다' }; // 재전송 사이에 꺼졌을 수 있다
   const t0 = Date.now();
   try {
     const scan = await runScan();
     const payload = buildPayload(scan);
-    if (reason === 'event') payload.urgent = true;   // v3.52 ⑬ — 장비 이벤트 뒤 push: 중앙이 다음 주기를 기다리지 않고 바로 판정하게(디버깅 1회차 엣지 #5)
+    if (urgent) payload.urgent = true;   // v3.52 ⑬ — 장비 이벤트 뒤 push: 중앙이 다음 주기를 기다리지 않고 바로 판정하게(디버깅 1회차 엣지 #5)
     const json = JSON.stringify(payload);
     const hdrs = { 'Content-Type': 'application/json', 'X-Central-Token': config.agent.centralToken, ...agentHeaders(config.agent.name) };
     let body = json;

@@ -11,6 +11,7 @@
  */
 import { numOrNull } from '../util/numOrNull.js';
 import { reqTimeoutMs } from '../util/envTimeout.js';
+import { isPlaceholderTag } from '../bmusage/commonTag.js';   // 화이트박스 공통 태그(‘To Be Filled By O.E.M.’ 등)는 대조로 서버를 가르지 못한다(디버깅 2회차 엣지 #8)
 
 export const POWER_ACTIONS = Object.freeze({
   on: { reset: ['On'], label: '켜기', force: false },
@@ -74,7 +75,8 @@ export async function runDeviceAction(entry, { kind, action, getJson = null, sen
     if (prev) _last.set(key, prev); else _last.delete(key);   // 보내지 않았다 — 간격을 세지 않는다
     return { ok: false, status: 'auth-stopped', message: 'iDRAC 인증 실패로 이 서버의 주기 수집이 멈춰 있어 장비에 보내지 않았습니다(등록 계정을 고친 뒤 다시).' };
   }
-  const want = String(expectTag === undefined ? entry?.serviceTag ?? '' : expectTag ?? '').trim().toUpperCase().slice(0, 64);
+  const want0 = String(expectTag === undefined ? entry?.serviceTag ?? '' : expectTag ?? '').trim().toUpperCase().slice(0, 64);
+  const want = isPlaceholderTag(want0) ? '' : want0;   // 공통 자리표시 태그로는 대조하지 않는다(대조했다고 말하지 않게 — tagChecked:false)
   let sending = false;   // 장비에 상태를 바꾸는 요청을 내보내기 시작했는가 — 그 뒤의 끊김 · 오류는 ‘모름’(반증 A3)
   const [{ withDeadline }, rf] = await Promise.all([import('../util/deadline.js'), import('./redfish.js')]);
   const G = getJson || rf.redfishGetCapped;
@@ -89,7 +91,7 @@ export async function runDeviceAction(entry, { kind, action, getJson = null, sen
       const before = t(sys?.PowerState, 32);
       // 등록의 서비스 태그와 장비가 말하는 태그(Dell SKU · HPE SerialNumber)가 다르면 보내지 않는다 — 주소가 다른 서버로 재배정된 경우(반증 A5).
       //   장비가 태그를 주지 않거나 등록에 태그가 없으면 대조하지 못한다(그대로 보낸다 — tagChecked:false).
-      const got = [sys?.SKU, sys?.SerialNumber].map((v) => (typeof v === 'string' ? v.trim().toUpperCase() : '')).filter(Boolean);
+      const got = [sys?.SKU, sys?.SerialNumber].map((v) => (typeof v === 'string' ? v.trim().toUpperCase() : '')).filter((v) => v && !isPlaceholderTag(v));
       // 문구에 태그를 넣지 않는다(다른 서버의 태그가 범위 판본에 드러나지 않게 — 디버깅 1회차 보안 #4) · 장비 태그는 따로(라우트가 관리자 판본에만)
       if (want && got.length && !got.includes(want)) return { ok: false, status: 'tag-mismatch', before, gotTag: got[0].slice(0, 32), message: '장비가 알려 준 서비스 태그가 등록과 다릅니다 — 다른 서버일 수 있어 보내지 않았습니다.' };
       const tagChecked = !!(want && got.length);
@@ -121,7 +123,9 @@ export async function runDeviceAction(entry, { kind, action, getJson = null, sen
     if (!sending && (e?.status === 401 || e?.authFailed)) return { ok: false, status: 'auth', http: 401, message: AUTH_MSG, sent: false };
     // 시한 · 끊김 — 장비가 받았는지 모른다(다시 보내지 않는다 · 화면이 다음 수집에서 보라고 말한다).
     //   상태를 바꾸는 요청을 내보낸 뒤의 오류는 원인과 관계없이 ‘모름’ 이다 — 받은 뒤 연결이 끊긴 경우를 ‘보내지 못함’ 으로 단정하지 않는다(반증 A3)
-    if (sending || /시한 초과|timeout|abort/i.test(msg)) return { ok: false, status: 'timeout', message: '장비가 시한 안에 답하지 않았습니다 — 요청이 장비에 닿았는지 모릅니다(다시 보내지 않았습니다). 다음 수집에서 상태를 확인하십시오.', sent: sending };
+    if (sending) return { ok: false, status: 'timeout', message: '장비가 시한 안에 답하지 않았습니다 — 요청이 장비에 닿았는지 모릅니다(다시 보내지 않았습니다). 다음 수집에서 상태를 확인하십시오.', sent: true };
+    // 보내기 전(조회 단계)의 시한은 ‘모름’ 이 아니다 — 상태를 바꾸는 요청은 나가지 않았다(디버깅 2회차 엣지 #9: 화면이 60초 잠겼다)
+    if (/시한 초과|timeout|abort/i.test(msg)) return { ok: false, status: 'error', message: '장비 조회가 시한을 넘었습니다 — 요청을 보내지 않았습니다(장비 상태는 바뀌지 않았습니다).', sent: false };
     return { ok: false, status: 'error', message: `장비에 보내지 못했습니다 — ${t(msg, 160)}`, sent: false };
   } finally {
     // 장비에 보내지 않고 끝났으면(태그 다름 · 허용 안 함 · 경로 없음) 간격을 세지 않는다 — 다음 요청이 ‘60초에 한 번’ 으로 막히지 않게(디버깅 1회차 판정 #8)

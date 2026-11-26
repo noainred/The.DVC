@@ -290,3 +290,5 @@ export function importSummaryText(s, { replace = false } = {}) {
   return p.join(' · ');
 }
 export const IMPORT_ACTION = Object.freeze({ add: { label: '더함', badge: 'green' }, update: { label: '바꿈', badge: 'blue' }, same: { label: '같음', badge: 'gray' }, error: { label: '오류', badge: 'red' } });
+/** 원장 결과 정렬 — 오류 먼저(한글 이름 순이면 섞였다 — 디버깅 2회차 화면 D10). */
+export const IMPORT_ACTION_ORDER = Object.freeze({ error: 0, add: 1, update: 2, same: 3 });

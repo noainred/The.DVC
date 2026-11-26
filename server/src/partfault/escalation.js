@@ -9,7 +9,7 @@
  *    엔진이 꺼져 있던 동안 여러 단계가 지났으면 **가장 높은 단계 하나만** 보낸다(낮은 단계는 건너뜀으로 적는다).
  *  · 한 번 도는 동안 보내는 수에 상한(ESC_SENDS_PER_RUN) — 넘친 것은 다음 회차로(조용히 버리지 않는다 · 수를 남긴다).
  *  · 법인 축은 **수집 주체**(부품 장애의 agent — '' = 이 포탈 · 엣지 이름)다. 부품 장애에는 vCenter 법인이 없다(설계와 다른 점 — README §13 에 적는다).
- *  · 요일은 **이 포탈 서버의 시각**으로 정한다(법인 현지 시각이 아니다 — 화면이 밝힌다).
+ *  · 요일은 **포탈 지역 시계**(util/dayKey.js localClock — DAY_OFFSET_MIN · 기본 한국 시각)로 정한다(프로세스 시간대 · 법인 현지 시각이 아니다 — 화면이 밝힌다).
  *
  * 파일: partfault-escalation.json(설정 — 백업 · 복원 그대로) · partfault-escalation-state.json(진행 기록 — 복원 때 지금 것 유지: 되돌리면 보낸 단계를 다시 보낸다).
  */
@@ -190,15 +190,19 @@ export const escalationStore = {
 //   since = 엔진이 그 장애를 **정책 대상으로 처음 본 때**(켠 때 · 정책을 고친 때 · 상태가 바뀐 때 옛 장애에 쏟아지지 않게 — 반증 A2).
 //   sig = 수집 주체|장비군|장비 id|종류|부품 id — 장비 키만 바뀐 같은 장애(migratedFrom)가 기록 · 확인을 이어받게(반증 A4).
 export const ESC_RETRY_MAX = 3;
+const ESC_SENT_MAX = ESC_STEPS_MAX * (ESC_RETRY_MAX + 2) * 3;   // 기록 한 건의 보낸 줄 상한(정책이 오가는 장애도 담게 — 최근 것을 남긴다)
 let _state = null; let _stateErr = ''; let _stateReadError = false;
 const KINDS = ['ok', 'fail', 'skip', 'give'];
 const itemShape = (x) => {
   if (!isObj(x)) return null;
   const since = numOrNull(x.since);
   if (since == null) return null;
-  const sent = (Array.isArray(x.sent) ? x.sent : []).filter((e) => Array.isArray(e) && Number.isInteger(e[0]) && e[0] >= 0 && e[0] < ESC_STEPS_MAX).slice(0, ESC_STEPS_MAX * (ESC_RETRY_MAX + 2))
-    .map((e) => [e[0], numOrNull(e[1]), typeof e[2] === 'string' ? e[2].slice(0, 120) : '', KINDS.includes(e[3]) ? e[3] : 'ok']);
-  return { since, sig: str(x.sig, 400), sent, ackedAt: numOrNull(x.ackedAt), ackBy: str(x.ackBy, 80), pol: str(x.pol, 40) };
+  // 보낸 단계는 **정책별로** 적는다(e[4] = 정책 id) — 정책이 오가도 진행을 지우지 않고, 다른 정책의 단계를 ‘보냄’ 으로 세지 않는다(디버깅 2회차 판정 #1).
+  //   정책을 적지 않은 옛 줄은 그 기록의 정책(pol)으로 본다. 최근 것을 남긴다(앞에서 자르면 새 줄을 잃는다).
+  const pol = str(x.pol, 40);
+  const sent = (Array.isArray(x.sent) ? x.sent : []).filter((e) => Array.isArray(e) && Number.isInteger(e[0]) && e[0] >= 0 && e[0] < ESC_STEPS_MAX).slice(-ESC_SENT_MAX)
+    .map((e) => [e[0], numOrNull(e[1]), typeof e[2] === 'string' ? e[2].slice(0, 120) : '', KINDS.includes(e[3]) ? e[3] : 'ok', typeof e[4] === 'string' ? e[4].slice(0, 40) : pol]);
+  return { since, sig: str(x.sig, 400), sent, ackedAt: numOrNull(x.ackedAt), ackBy: str(x.ackBy, 80), pol };
 };
 // 읽기 오류는 캐시하지 않는다 — 파일을 고치면 다음 재읽기(30초 간격)에 풀린다(v3.52 디버깅 1회차 성능 P4: 예전에는 재시작 전까지 멈췄다)
 export const ESC_STATE_RETRY_MS = 30_000;
@@ -251,7 +255,7 @@ export function policyFor(settings, p) {
   }
   return null;
 }
-/** 그 수집 주체의 오늘 당직(이 포탈 서버 시각의 요일) — 수집 주체 표 → ‘모두’ 표. 없으면 null. */
+/** 그 수집 주체의 오늘 당직(포탈 지역 시계의 요일) — 수집 주체 표 → ‘모두’ 표. 없으면 null. */
 export function oncallFor(settings, agent, now = Date.now()) {
   // 요일은 포탈 지역 시계(DAY_OFFSET — 프로세스 TZ 가 아니다: 패키지 유닛은 TZ 를 정하지 않는다 · perf-db ‘스케줄은 localClock’ — 디버깅 1회차 판정 #1)
   const lc = localClock(now);
@@ -267,7 +271,8 @@ export function oncallFor(settings, agent, now = Date.now()) {
   return null;
 }
 /** 그 단계가 끝났는가 — 갔음 · 건너뜀 · 다시 시도 끝(안 간 것은 ESC_RETRY_MAX 번까지 다시). */
-const stepDone = (sent, i) => sent.some((e) => e[0] === i && e[3] !== 'fail') || sent.filter((e) => e[0] === i && e[3] === 'fail').length >= ESC_RETRY_MAX;
+const ofPol = (e, pol) => !pol || !e[4] || e[4] === pol;
+const stepDone = (sent, i, pol = '') => sent.some((e) => e[0] === i && e[3] !== 'fail' && ofPol(e, pol)) || sent.filter((e) => e[0] === i && e[3] === 'fail' && ofPol(e, pol)).length >= ESC_RETRY_MAX;
 
 /**
  * 이번 회차에 보낼 것(순수).
@@ -297,25 +302,26 @@ export function escalationPlan({ settings, state, open, now = Date.now(), maxSen
     if (!cur && staleBySig.has(sig)) { cur = staleBySig.get(sig); staleBySig.delete(sig); }   // 키 이전 — 기록 · 확인을 이어받는다
     if (cur && reEnabled && !cur.ackedAt) cur = { ...cur, since: now, sent: [] };
     const pol = enabled ? policyFor(settings, p) : null;
-    // 다른 정책으로 넘어감(예: 주의 → 이상 — 받는 곳이 다른 팀) — 그 정책의 단계는 아직 하나도 가지 않았다: 지금부터 다시 센다(디버깅 1회차 판정 #3)
-    if (pol && cur && !cur.ackedAt && cur.pol && cur.pol !== pol.id) cur = { ...cur, since: now, sent: [], pol: pol.id };
+    // 다른 정책으로 넘어감(예: 주의 → 이상 — 받는 곳이 다른 팀): 보낸 단계는 정책별로 세므로(stepDone) 새 정책의 단계는 아직 안 간 것이다(디버깅 1회차 판정 #3).
+    //   진행(since · 보낸 줄)은 지우지 않는다 — 1회차처럼 지우면 정책이 오가는 장애는 단계가 영영 가지 않았다(디버깅 2회차 판정 #1)
     // 정책 밖(꺼짐 · 맞는 정책 없음 · 상태가 바뀜)이어도 열려 있는 동안은 기록을 둔다 — 상태가 오가도 보낸 단계를 다시 보내지 않게(반증 A3)
     if (!pol) { if (cur) items[key] = { ...cur, sig }; continue; }
     // 상한 — 기록할 수 없는 장애에는 보내지 않는다(반증 A7). 이미 기록이 있는 열린 장애 수를 먼저 떼어 두고 새 것만 센다(O(N) — 판정 #13)
-    if (!cur) { if (newCount + reserved >= ESC_ITEMS_MAX) { overCap += 1; continue; } newCount += 1; }
+    // 키만 바뀐 장애(이어받은 기록)도 새 열쇠라 자리를 하나 더 쓴다 — 기록 수로 센다(디버깅 2회차 판정 #9: 7,000 > 5,000 이 됐다)
+    if (!Object.hasOwn(prev, key)) { if (newCount + reserved >= ESC_ITEMS_MAX) { overCap += 1; continue; } newCount += 1; }
     const it = cur ? { ...cur, sig, sent: [...cur.sent], pol: pol.id } : { since: now, sig, sent: [], ackedAt: null, ackBy: '', pol: pol.id };
     items[key] = it;
     if (it.ackedAt) continue;
     if (hold && holdKeyOf && hold.has(holdKeyOf(p.agent, p.deviceId))) { held += 1; heldKeys.push(key); continue; }
     const mins = (now - it.since) / 60_000;
     let due = -1;
-    pol.steps.forEach((s, i) => { if (mins >= s.afterMin && !stepDone(it.sent, i)) due = i; });
+    pol.steps.forEach((s, i) => { if (mins >= s.afterMin && !stepDone(it.sent, i, pol.id)) due = i; });
     if (due < 0) continue;
     if (sends.length >= maxSends) { deferred += 1; continue; }
-    const skipped = pol.steps.map((_, i) => i).filter((i) => i < due && !stepDone(it.sent, i));
+    const skipped = pol.steps.map((_, i) => i).filter((i) => i < due && !stepDone(it.sent, i, pol.id));
     const step = pol.steps[due];
     const oc = step.oncall ? oncallFor(settings, p.agent, now) : null;
-    const attempt = it.sent.filter((e) => e[0] === due && e[3] === 'fail').length + 1;   // 다시 시도 번호 — 채널 억제 열쇠에 넣는다(같은 열쇠면 억제 창에 막혀 다시 시도가 0번이었다 — 판정 #2)
+    const attempt = it.sent.filter((e) => e[0] === due && e[3] === 'fail' && ofPol(e, pol.id)).length + 1;   // 다시 시도 번호 — 채널 억제 열쇠에 넣는다(같은 열쇠면 억제 창에 막혀 다시 시도가 0번이었다 — 판정 #2)
     sends.push({ key, part: p, policy: pol, step: due, attempt, skipped, to: { emails: step.emails, channels: step.channels, oncall: oc, oncallWanted: step.oncall } });
   }
   return { sends, items, enabledAt: enabled ? enabledAt : (numOrNull(state?.enabledAt) ?? null), deferred, overCap, held, heldKeys };
@@ -331,9 +337,10 @@ export function recordSends(items, sends, results, now = Date.now()) {
     const r = results[i] || {};
     if (r.notSent) return;   // 보내기 직전에 확인됨 — 적지 않는다
     const sent = [...it.sent];
-    for (const k of s.skipped) sent.push([k, now, '건너뜀(이 단계 시각이 지난 뒤 처음 본 회차라 더 높은 단계를 보냄)', 'skip']);   // 엔진 정지 · 회차 상한 미룸 모두(반증 B · S2)
-    const fails = sent.filter((e) => e[0] === s.step && e[3] === 'fail').length;
-    sent.push([s.step, now, String(r.text || '').slice(0, 120), r.delivered ? 'ok' : fails + 1 >= ESC_RETRY_MAX ? 'give' : 'fail']);
+    const pol = String(s.policy?.id || '').slice(0, 40);
+    for (const k of s.skipped) sent.push([k, now, '건너뜀(이 단계 시각이 지난 뒤 처음 본 회차라 더 높은 단계를 보냄)', 'skip', pol]);   // 엔진 정지 · 회차 상한 미룸 모두(반증 B · S2)
+    const fails = sent.filter((e) => e[0] === s.step && e[3] === 'fail' && ofPol(e, pol)).length;
+    sent.push([s.step, now, String(r.text || '').slice(0, 120), r.delivered ? 'ok' : fails + 1 >= ESC_RETRY_MAX ? 'give' : 'fail', pol]);
     out[s.key] = { ...it, sent };
   });
   return out;
@@ -369,12 +376,14 @@ export function ackEscalation(p, { by = '', now = Date.now() } = {}) {
  */
 export function escalationMarkOf(p, items, settings = null, run = null) {
   const it = items && Object.hasOwn(items, partKeyOf(p)) ? items[partKeyOf(p)] : null;
-  const ok = (it?.sent || []).filter((e) => e[3] === 'ok').map((e) => e[0]);
-  const bad = (it?.sent || []).filter((e) => e[3] === 'fail' || e[3] === 'give').map((e) => e[0]);
+  const curPol = (settings?.enabled ? policyFor(settings, p)?.id : '') || it?.pol || '';
+  const mine = (it?.sent || []).filter((e) => ofPol(e, curPol));   // 지금 정책의 단계만 — 다른 정책에 간 단계를 이 정책의 진행으로 말하지 않는다(디버깅 2회차 판정 #1)
+  const ok = mine.filter((e) => e[3] === 'ok').map((e) => e[0]);
+  const bad = mine.filter((e) => e[3] === 'fail' || e[3] === 'give').map((e) => e[0]);
   const step = ok.length ? Math.max(...ok) + 2 : null;
   const tried = bad.length && Math.max(...bad) + 2 > (step ?? 1) ? Math.max(...bad) + 2 : null;
   // 그 단계를 그만뒀는가(다시 시도 상한) — 화면이 ‘다시 시도 중’ 과 ‘그만둠’ 을 가른다(반증 B1)
-  const gaveUp = tried != null && (it?.sent || []).some((e) => e[0] === tried - 2 && e[3] === 'give');
+  const gaveUp = tried != null && mine.some((e) => e[0] === tried - 2 && e[3] === 'give');
   const covered = !!(settings?.enabled && policyFor(settings, p));
   const why = covered && typeof run?.why === 'string' && run.why && run.why !== 'off' ? run.why : '';
   const held = covered && !why && run?.heldKeys instanceof Set && run.heldKeys.has(partKeyOf(p));

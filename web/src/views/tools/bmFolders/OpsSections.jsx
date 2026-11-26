@@ -237,7 +237,7 @@ export function MemCeBlock({ m }) {
       <div className="bmd-memce-h"><b>메모리 교정 오류 경고</b> <span className="muted">— {v.head}</span></div>
       {v.slots.length ? (
         <div className="bmd-memce-grid">
-          {v.slots.map((x) => <span key={x.slot} className={`bmd-memce-c${x.n ? ' hot' : ''}`} title={`${x.slot} — 경고 기록 ${x.n}건`}><span className="mono">{x.slot}</span> <b>{x.n}</b></span>)}
+          {v.slots.map((x) => <span key={x.slot} className={`bmd-memce-c${x.n || x.u ? ' hot' : ''}`} title={`${x.slot} — 경고 기록 ${x.n}건${x.u ? ` · 시각 모름 ${x.u}건` : ''}`}><span className="mono">{x.slot}</span> <b>{x.n}</b>{x.u ? <span className="muted" style={{ fontSize: 11 }}> + 시각 모름 {x.u}</span> : null}</span>)}
         </div>
       ) : null}
       {v.unknown ? <div className="muted bmd-note">슬롯을 알 수 없는 경고 기록 {v.unknown}건</div> : null}

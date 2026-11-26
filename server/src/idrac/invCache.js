@@ -44,6 +44,8 @@ export function setInventory(serverId, inv) {
 }
 /** 다음 폴링에서 이 서버의 인벤토리를 다시 읽게 한다(장비 이벤트 — idrac/eventSub.js). 상한 2,000. */
 export function markInventoryStale(serverId) { if (_forceStale.size < 2000) _forceStale.add(String(serverId)); }
+/** 장비 이벤트로 다시 읽기 표시가 된 서버인가(정규 주기가 그 서버를 다시 읽으면 부품 장애 보고를 urgent 로 — 디버깅 2회차 엣지 #4). */
+export const isForcedStale = (serverId) => _forceStale.has(String(serverId));
 
 export function getInventory(serverId) {
   return cache.get(serverId) || null;

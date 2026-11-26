@@ -122,7 +122,10 @@ export function peerStrip(id, m, W = 420) {
   }
   // 끝에 붙은 대수 글자는 안쪽으로 정렬(그림 밖으로 나가지 않게)
   for (const c of counts) c.anchor = c.x < padL + 12 ? 'start' : c.x > w - padR - 12 ? 'end' : 'middle';
-  const label = `이 서버 ${peerVal(id, value)}`;
+  // 행 글자와 같은 자리수 — 반올림하면 폭 끝과 같아 보이는데 서버가 높음 · 낮음으로 판정했으면 한 자리 더(디버깅 2회차 화면 D4 — 1회차 판정 #4 의 띠 쪽)
+  const edgeV = m.state === 'high' ? hi : m.state === 'low' ? lo : null;
+  const fineV = edgeV != null && peerVal(id, value) === peerVal(id, edgeV) && value !== edgeV;
+  const label = `이 서버 ${fineV ? peerValFine(id, value) : peerVal(id, value)}`;
   const anchor = sx < 64 ? 'start' : sx > w - 64 ? 'end' : 'middle';
   return {
     w, h: STRIP_H, mid: STRIP_MID, padL, padR,

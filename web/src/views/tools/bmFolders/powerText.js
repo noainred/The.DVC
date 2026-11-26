@@ -23,7 +23,7 @@ export const POWER_STATUS = Object.freeze({
   rate: '그 엣지의 10분 상한에 걸렸습니다 — 잠시 뒤 다시.',
   'tag-mismatch': '장비가 알려 준 서비스 태그가 등록과 달라 보내지 않았습니다 — 다른 서버일 수 있습니다(등록 주소를 확인하십시오).',
   'edge-disabled': '이 서버를 맡은 엣지가 원격 전원 · LED 요청을 켜지 않았습니다(엣지 env BM_POWER_EDGE_ENABLE=true).',
-  'edge-refused': '이 서버를 맡은 엣지 · 중앙이 요청을 장비에 보내기 전에 멈췄습니다 — 장비에 보내지 않았습니다(사유를 확인한 뒤 다시).',
+  'edge-refused': '이 서버를 맡은 엣지 · 중앙이 요청을 장비에 보내기 전에 멈췄습니다 — 장비에 보내지 않았고 상태는 바뀌지 않았습니다.',
   'edge-fail': '이 서버를 맡은 엣지에 닿지 못했거나 엣지가 답하지 않았습니다 — 요청이 장비에 닿았는지 모릅니다. 다시 누르기 전에 상태를 확인하십시오.',
   'bad-args': '잘못된 요청입니다.',
   error: '장비에 보내지 못했습니다.',
@@ -85,7 +85,9 @@ export const EVT_SYNC_STATUS = Object.freeze({
   timeout: { label: '시한 초과', tone: 'red' }, error: { label: '실패', tone: 'red' }, demo: { label: '데모(보내지 않음)', tone: 'gray' },
 });
 const SEV_LABEL = { critical: '위험', warning: '주의', ok: '정보', '': '모름' };
-export const EVT_SEV_ORDER = Object.freeze({ critical: 0, warning: 1, ok: 2, '': 3 });   // 정렬 — 위험 → 주의 → 정보 → 모름(반증 B12)
+export const EVT_SEV_ORDER = Object.freeze({ critical: 0, warning: 1, ok: 2, '': 3 });
+/** 구독 결과 정렬 — 실패가 먼저(영문 열쇠 순이면 실패 · 성공이 섞였다 — 디버깅 2회차 화면 D10). */
+export const EVT_SYNC_ORDER = Object.freeze({ auth: 0, timeout: 1, error: 2, 'auth-stopped': 3, 'not-supported': 4, subscribed: 5, removed: 6, none: 7, demo: 8 });   // 정렬 — 위험 → 주의 → 정보 → 모름(반증 B12)
 export const evtSevLabel = (v) => SEV_LABEL[typeof v === 'string' && Object.hasOwn(SEV_LABEL, v) ? v : ''];
 /** 장비별 결과 → 한 줄(상태별 수). */
 export function syncSummary(results) {

@@ -5,15 +5,19 @@
  *    코드에 박아 두지 않는다(지어내지 않는다 — 시안도 비워 두었다). 표가 비어 있으면 **대조하지 않았다**고 말한다(‘해당 없음’ 이 아니다).
  *  · 대조 = 이미 읽는 펌웨어 목록(v3.45 `judgeFirmware` 의 줄 — 종류 · 이름 · 설치 버전) × 권고 줄(종류 · 모델 일부 · 구성요소 이름 일부 · 고친 버전).
  *    설치 버전 < 고친 버전이면 ‘걸림’. 숫자 . 꼴이 아닌 버전은 순서를 지어내지 않는다 — ‘모름’ 으로 따로 센다(util/cmpVersion → null).
- *  · 모델 · 구성요소 칸은 **소문자 일부 일치**(비우면 전부). 글자는 이미 길이가 잘려 있다(store.js · 선형 includes).
+ *  · 모델 칸은 **제조사 · 제품군 낱말을 뺀 모델 낱말이 서버 모델과 같을 때만**(R740xd 줄이 R740xd2 · DL380 Gen10 줄이 DL380 Gen10 Plus · SR650 줄이 SR650 V2 에 걸리지 않게 —
+ *    디버깅 1 · 2회차 판정 #6 · #8). 구성요소 칸은 소문자 일부 일치. 둘 다 비우면 전부. 글자는 이미 길이가 잘려 있다(store.js · 선형 includes).
  */
 import { cmpVersion, parseVersion, cmpParsed } from '../util/cmpVersion.js';
 import { FW_TYPES } from './fw.js';
 import { parseCsvRows, csvLine, unguardCell, CSV_BOM } from '../util/csv.js';
 import { ADVISORY_SEVS, ADVISORY_ROWS_MAX } from './store.js';
-/** 권고 줄의 모델 낱말이 모두 서버 모델 낱말에 있는가(글자 · 숫자 덩어리 단위 — 부분 일치가 아니다). */
-const toks = (x) => String(x || '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
-export function modelTokensMatch(serverModel, rowModel) { const have = new Set(toks(serverModel)); const need = toks(rowModel); return need.length > 0 && need.every((w) => have.has(w)); }
+/** 모델 낱말(글자 · 숫자 덩어리) — 제조사 · 제품군 낱말은 뺀다(‘PowerEdge R740xd’ = ‘R740xd’). */
+const MODEL_NOISE = new Set(['dell', 'emc', 'poweredge', 'hpe', 'hp', 'proliant', 'lenovo', 'thinksystem', 'supermicro', 'server', 'system', 'inc', 'technologies', 'enterprise']);
+const toks = (x) => [...new Set(String(x || '').toLowerCase().split(/[^a-z0-9]+/).filter((w) => w && !MODEL_NOISE.has(w)))];
+/** 권고 줄의 모델 낱말 집합이 서버 모델 낱말 집합과 **같은가**(부분 집합이 아니다 — Gen10 줄이 Gen10 Plus 에 걸리지 않게). */
+const sameModel = (have, need) => need.length > 0 && need.length === have.size && need.every((w) => have.has(w));
+export function modelTokensMatch(serverModel, rowModel) { return sameModel(new Set(toks(serverModel)), toks(rowModel)); }
 
 
 export const ADVISORY_COLUMNS = Object.freeze(['advisory_id', 'severity', 'component_type', 'model', 'component', 'fixed_version', 'title', 'url']);
@@ -117,8 +121,8 @@ export function advisoriesFor(server, table) {
   const have = new Set(toks(model));
   const hits = []; let unknown = 0; let checked = 0;
   for (const { a, need, fixed } of ix.rows) {
-    // 모델은 낱말 단위로 대조한다 — ‘R740xd’ 줄이 ‘R740xd2’ 에 걸리지 않게(디버깅 1회차 판정 #6 · modelTokensMatch 와 같은 규칙)
-    if (a.model && !(need.length > 0 && need.every((w) => have.has(w)))) continue;
+    // 모델은 낱말 집합이 같을 때만 — modelTokensMatch 와 같은 규칙(디버깅 1 · 2회차 판정 #6 · #8)
+    if (a.model && !sameModel(have, need)) continue;
     const cand = byType.get(a.type);
     if (!cand) continue;
     for (const { r, lc, ver } of cand) {

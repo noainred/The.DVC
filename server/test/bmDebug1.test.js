@@ -46,8 +46,12 @@ test('보안 — 데모 READ_DENY · OTP 앞 본문 검증 · 태그 다름 문�
   const devs = [{ agent: 'edge-a', deviceId: 'dev-a1', deviceKey: 'SYNTHTAG', scope: 'idrac' }];
   const { hold } = H.holdSetFor(devs, [{ agent: 'edge-b', key: 'w-b', serviceTag: 'SYNTHTAG' }], judge);
   assert.equal(hold.size, 0, '다른 엣지의 대상');
-  const { hold: h2 } = H.holdSetFor(devs, [{ agent: '', key: 'w-b', serviceTag: 'SYNTHTAG' }], judge);
-  assert.equal(h2.size, 1, '중앙 로컬 대상은 받는다');
+  const corpsOf = (ag) => (ag === 'edge-a' ? ['vc-a'] : []);
+  const { hold: h2 } = H.holdSetFor(devs, [{ agent: '', key: 'w-b', serviceTag: 'SYNTHTAG', vcenterId: 'vc-a' }], judge, Date.now(), { corpsOf });
+  assert.equal(h2.size, 1, '그 엣지가 맡은 법인의 중앙 로컬 대상은 받는다');
+  const { hold: h3 } = H.holdSetFor(devs, [{ agent: '', key: 'w-b', serviceTag: 'SYNTHTAG', vcenterId: 'vc-b' }], judge, Date.now(), { corpsOf });
+  assert.equal(h3.size, 0, '다른 법인의 중앙 로컬 대상은 받지 않는다(2회차 보안 #5)');
+  assert.equal(H.holdSetFor(devs, [{ agent: '', key: 'w-b', serviceTag: 'SYNTHTAG', vcenterId: 'vc-a' }], judge).hold.size, 0, '엣지 법인을 모르면 넘어가지 않는다');
 });
 
 test('판정 — 당직 요일은 포탈 지역 시계 · 다시 시도마다 다른 열쇠 · 정책이 바뀌면 지금부터 · ‘*’ 와 이름 함께 거절 · 당직표 대소문자 겹침 거절 · 상한 O(N)', async () => {
@@ -68,8 +72,10 @@ test('판정 — 당직 요일은 포탈 지역 시계 · 다시 시도마다 �
   };
   step(part('warn'), 0);
   assert.deepEqual(step(part('warn'), 16 * MIN).map((x) => x.to.emails), [['b@example.test']]);
-  step(part('fault'), 17 * MIN);   // 주의 → 이상(다른 정책) — 지금부터 다시
-  assert.deepEqual(step(part('fault'), 33 * MIN).map((x) => x.to.emails), [['a@example.test']], '더 심각해진 장애의 받는 곳에 단계가 간다(판정 #3)');
+  // 주의 → 이상(다른 정책): 다른 정책에 간 단계를 이 정책의 ‘보냄’ 으로 세지 않는다(1회차 판정 #3) — 진행은 지우지 않는다(2회차 판정 #1)
+  assert.deepEqual(step(part('fault'), 17 * MIN).map((x) => x.to.emails), [['a@example.test']], '더 심각해진 장애의 받는 곳에 단계가 간다');
+  assert.deepEqual(step(part('warn'), 20 * MIN), [], '앞의 정책으로 돌아와도 이미 간 단계를 다시 보내지 않는다');
+  assert.deepEqual(step(part('fault'), 25 * MIN), [], '오가도 같은 단계를 두 번 보내지 않는다');
   // 다시 시도마다 다른 채널 열쇠(억제 창에 막히지 않게 — 판정 #2)
   st = { items: {}, enabledAt: 1 };
   step(part('fault'), 0);
@@ -100,7 +106,8 @@ test('판정 — 권고 모델은 낱말 단위 · 교정 오류 시각 못 읽�
   const L = await import('../src/idrac/partLife.js');
   const now = Date.UTC(2026, 10, 26);
   const m = L.memCeOf({ status: 'ok', total: 2, read: 2, stopped: '', gap: 0, rows: [{ at: null, msg: 'Correctable memory error rate exceeded for DIMM_A1.' }, { at: now - 3600_000, msg: 'x' }] }, { now });
-  assert.deepEqual([m.covered, m.untimed, m.total], [false, 1, 0]);
+  // 덮음은 기간 덮음 그대로 · 시각 모름은 untimed 로 따로(화면이 ‘없음’ 이라 하지 않는다 — 2회차 화면 D5 로 바꿈)
+  assert.deepEqual([m.covered, m.untimed, m.total], [true, 1, 0]);
   const H = await import('../src/idrac/hwLog.js');
   const t = H.maskHwLogText('alert sent to ops.team@example.test via https://mail.example.test:8443/api?x=1 from 192.0.2.5');
   assert.ok(!/example\.test|192\.0\.2\.5/.test(t), t);
@@ -162,7 +169,10 @@ test('엣지 — 서버 찾기(꺼진 등록 제외 · 인벤토리 태그 먼�
   assert.match(src('../src/central/bmHwLogPull.js'), /\{ min: 35_000, max: 55_000 \}/);
   assert.match(src('../src/central/bmPowerPull.js'), /\{ min: 35_000, max: 70_000 \}/);
   // 엣지 보고 urgent → 중앙 곧 판정 · 엣지에서 단계 설정 저장 409
-  assert.match(src('../src/partfault/push.js'), /if \(reason === 'event'\) payload\.urgent = true;/);
+  const pu = src('../src/partfault/push.js');
+  assert.match(pu, /if \(urgent\) payload\.urgent = true;/);
+  assert.match(pu, /if \(reason === 'event'\) _urgentAgain = true;/, '진행 중인 push 에 합류한 이벤트 보고도 urgent(2회차 엣지 #4)');
+  assert.match(src('../src/partfault/hooks.js'), /reason: ev \? 'event' : `hook:\$\{source\}`/);
   assert.match(src('../src/routes/central/storageRoutes.js'), /if \(req\.body\?\.urgent === true\) \{ try \{ \(await import\('\.\.\/\.\.\/partfault\/poller\.js'\)\)\.runPartFaultsSoon\('edge-event'\)/);
   assert.match(src('../src/routes/api/partFaults.js'), /api\.put\('\/tools\/part-faults\/escalation'[^\n]*\n\s*if \(config\.agent\.centralUrl\) return res\.status\(409\)/);
 });
@@ -229,7 +239,7 @@ test('성능 — 이벤트는 그 서버만 읽는다(함대 주기 아님 · �
   assert.match(es, /if \(!\(Number\(r\?\.invRefreshed\) > 0\)\) return \{ busy: false, refreshed: 0 \};/);
   const ps = src('../src/idrac/poller.js');
   const ia = ps.indexOf('if (only) return { servers: servers.length, invRefreshed };');
-  assert.ok(ia > 0 && ia < ps.indexOf("onSnapshotRefreshed('idrac')") && ia < ps.indexOf('lastRun = { at: ts, startedAt: ts'), '이벤트 읽기는 훅 · 주기 상태 앞에서 돌아간다');
+  assert.ok(ia > 0 && ia < ps.indexOf("onSnapshotRefreshed('idrac'") && ia < ps.indexOf('lastRun = { at: ts, startedAt: ts'), '이벤트 읽기는 훅 · 주기 상태 앞에서 돌아간다');
   // 넘친 서버 — 세고 정규 주기가 읽게 표시
   const E = await import('../src/idrac/eventSub.js');
   const C = await import('../src/idrac/invCache.js');

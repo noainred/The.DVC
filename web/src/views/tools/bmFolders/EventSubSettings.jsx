@@ -11,7 +11,7 @@ import { Modal } from '../../../components/Modal.jsx';
 import { STable } from '../../../components/STable.jsx';
 import { fetchJson, putJson, postJson } from '../../../api.js';
 import { opErrorText } from '../bmFoldersText.js';
-import { EVT_NOTE, EVT_SYNC_STATUS, EVT_SEV_ORDER, evtSevLabel, syncSummary } from './powerText.js';
+import { EVT_NOTE, EVT_SYNC_STATUS, EVT_SEV_ORDER, EVT_SYNC_ORDER, evtSevLabel, syncSummary } from './powerText.js';
 
 export default function EventSubSettings({ onClose, initial = null }) {
   const [d, setD] = useState(initial);
@@ -89,13 +89,13 @@ export default function EventSubSettings({ onClose, initial = null }) {
                     <b>{sy.unsubscribe ? '구독 지우기' : '구독 걸기'}</b> — {sy.running ? '진행 중…' : sy.error ? <span style={{ color: 'var(--red)' }}>{sy.error}</span> : syncSummary(sy.results)}
                     {!sy.running && Array.isArray(sy.results) && sy.results.length > 200 ? <div className="muted" style={{ fontSize: 12 }}>표는 앞 200대만 보입니다 — 나머지 {sy.results.length - 200}대는 위 줄의 상태별 수에 들어 있습니다.</div> : null}
                     {!sy.running && Array.isArray(sy.results) && sy.results.length ? (
-                      <STable className="table bmd-ct" minWidth={420} limit={200}>
+                      <STable className="table bmd-ct" minWidth={300} limit={200}>
                         <thead><tr><th>서버</th><th>결과</th><th>내용</th></tr></thead>
                         <tbody>
                           {sy.results.map((x, i) => (
                             <tr key={`${x.id}:${i}`}>
                               <td style={{ overflowWrap: 'anywhere' }}>{x.name || x.id}</td>
-                              <td data-sort={x.status}><span className={`badge ${EVT_SYNC_STATUS[x.status]?.tone || 'gray'}`}>{EVT_SYNC_STATUS[x.status]?.label || x.status}</span></td>
+                              <td data-sort={EVT_SYNC_ORDER[x.status] ?? 9}><span className={`badge ${EVT_SYNC_STATUS[x.status]?.tone || 'gray'}`}>{EVT_SYNC_STATUS[x.status]?.label || x.status}</span></td>
                               <td style={{ overflowWrap: 'anywhere', fontSize: 12 }}>{[x.removed ? `옛 구독 ${x.removed}개 지움` : '', x.message || ''].filter(Boolean).join(' · ') || '—'}</td>
                             </tr>
                           ))}
@@ -106,7 +106,7 @@ export default function EventSubSettings({ onClose, initial = null }) {
                 ) : null}
                 <div className="bmd-note"><b>받은 이벤트</b> — {st ? `${st.received}건 받음 · 거절 ${st.rejected}건${st.dropped ? ` · 한 번에 ${d?.limits?.perPost ?? '정한 수'}건이 넘어 버림 ${st.dropped}건` : ''}${st.deferred ? ` · 바로 읽기 상한(${d?.limits?.batch ?? '정한 수'}대)을 넘어 다음 정규 수집으로 미룬 서버 ${st.deferred}대` : ''} · 바로 점검 ${st.checks}번${st.rxAt ? ` · 마지막 ${new Date(st.rxAt).toLocaleString('ko-KR')}` : ''}(이 포탈이 다시 시작하면 0 부터 — 기록은 메모리에만)` : '—'}</div>
                 {st?.recent?.length ? (
-                  <STable className="table bmd-ct" minWidth={420} limit={200}>
+                  <STable className="table bmd-ct" minWidth={300} limit={200}>
                     <thead><tr><th>받은 시각</th><th>서버</th><th>등급</th><th>내용</th></tr></thead>
                     <tbody>
                       {st.recent.map((x, i) => (

@@ -126,12 +126,17 @@ export function memCeOf(log, { now = Date.now(), dimms = [] } = {}) {
   const covered = log.status === 'empty' || (complete && (read <= rows.length || (oldest != null && oldest < from)));
   const counts = new Map();
   for (const k of (Array.isArray(dimms) ? dimms : []).map(dimmLocatorKey).filter(Boolean).slice(0, MEMCE_SLOTS_MAX)) counts.set(k, 0);
-  let unknownSlot = 0; let total = 0; let untimed = 0;
+  let unknownSlot = 0; let total = 0; let untimed = 0; const uslots = new Map();   // 시각 모름 경고의 슬롯(그 슬롯이 0 으로 보이지 않게 — 디버깅 2회차 판정 #6)
   for (const r of rows) {
     const at = numOrNull(r?.at);
     if (!isMemCeRow(r)) continue;
     // 시각을 못 읽은 경고(빈 시각 · 1970 등)는 기간 안인지 모른다 — 세지는 않되 ‘다 셌다’ 고 하지 않는다(디버깅 1회차 판정 #7)
-    if (at == null || at < 946_684_800_000) { untimed += 1; continue; }
+    if (at == null || at < 946_684_800_000) {
+      untimed += 1;
+      const uk = dimmSlotOf(r.msg);
+      if (uk && (uslots.size < MEMCE_SLOTS_MAX || uslots.has(uk))) uslots.set(uk, (uslots.get(uk) || 0) + 1);
+      continue;
+    }
     if (at < from) continue;
     total += 1;
     const k = dimmSlotOf(r.msg);
@@ -140,5 +145,6 @@ export function memCeOf(log, { now = Date.now(), dimms = [] } = {}) {
     else unknownSlot += 1;   // 슬롯 상한을 넘은 것도 어딘가엔 센다(반증 S4)
   }
   const slots = [...counts].sort((a, b) => a[0].localeCompare(b[0], 'en', { numeric: true }));
-  return { covered: covered && untimed === 0, days: MEMCE_DAYS, total, slots, unknownSlot, oldest, ...(untimed ? { untimed } : {}) };
+  // covered = 기록이 기간을 덮었는가(시각 모름 경고와 따로 — 다 읽었는데 ‘다 읽지 못함’ 이라 쓰지 않게: 디버깅 2회차 화면 D5). 시각 모름은 untimed 로 — 화면이 ‘없음’ 이라 하지 않는다
+  return { covered, days: MEMCE_DAYS, total, slots, unknownSlot, oldest, ...(untimed ? { untimed } : {}), ...(uslots.size ? { uslots: [...uslots] } : {}) };
 }

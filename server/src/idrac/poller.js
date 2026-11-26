@@ -14,7 +14,7 @@ import { pushSensorSample, setSensorPollCycle, markSensorPollStart } from './sen
 import { fetchOmeDevices } from './ome.js';
 import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스(예전 ome.eachLimited 와 같은 격리 의미)
 import { setOmeDevices, dbKey } from './omeCache.js';
-import { setInventory, inventoryStale } from './invCache.js';
+import { setInventory, inventoryStale, isForcedStale } from './invCache.js';
 import { getDb } from './db.js';
 import { describeError } from '../util/errors.js';
 import { isStopped } from '../security/emergencyStop.js';
@@ -130,6 +130,7 @@ async function pollOnceInner({ manual = false, only = null } = {}) {
   // not defined` 를 **폴마다** 찍었다. 그 결과 v2.548 F7(인벤토리 갱신 즉시 파트 장애 판정) 훅은 한 번도 돌지
   // 않았다(목 모드는 위에서 먼저 return 해 드러나지 않았다). 선언을 쓰는 함수로 옮긴다.
   let invRefreshed = 0; // 이번 폴에서 인벤토리를 갱신한 서버 수 → 0 이 아니면 파트 장애 훅
+  let evRefreshed = 0;  // 그 가운데 장비 이벤트로 다시 읽기 표시가 된 서버(바쁨 재시도 소진 · 묶음 상한으로 미룬 것) — 훅이 urgent 로 보낸다
   if (only && (isStopped() || isMockMode())) return { servers: 0, invRefreshed: 0 };   // 이벤트 읽기는 긴급중단 · 데모에서 주기 상태를 바꾸지 않는다
   if (isStopped()) { lastRun = { at: Date.now(), ok: 0, failed: 0, skipped: '긴급중단', results: [] }; return; }
   // mock 데모: 실제 Redfish 폴 대신 합성 전력 샘플 적재(전력 화면이 비지 않게). live/auto엔 무영향.
@@ -250,6 +251,7 @@ async function pollOnceInner({ manual = false, only = null } = {}) {
         }
         // Refresh rich inventory on a slow cadence (best-effort, non-blocking).
         if (only || inventoryStale(s.id, INVENTORY_MAX_AGE_MS)) {   // 이벤트를 보낸 서버는 인벤토리를 늘 다시 읽는다(그것이 이유다 — 강제 표지 상한과 무관)
+          const forced = isForcedStale(s.id);
           try {
             const inv = await fetchInventory(s);
             // 팬 파트 정보 — Thermal 은 fetchSensors 가 방금 받았으므로 재호출 없이 이관(추가 HTTP 0회).
@@ -258,6 +260,7 @@ async function pollOnceInner({ manual = false, only = null } = {}) {
             if (inv.collections && typeof inv.collections === 'object') inv.collections.fans = sensorFans?.length ? 'ok' : (sensorErr ? 'failed' : 'ok');
             setInventory(s.id, inv);
             invRefreshed += 1;
+            if (forced) evRefreshed += 1;
             // v2.611(감사 COL2611-01): v2.610 스캔이 HPE 의 제품번호(SKU)를 서비스태그로 등록했으면 시리얼로 1회 교정한다.
             if (inv.system?.hpe) { try { correctHpeServiceTag(s.id, { sku: inv.system.sku, serial: inv.system.serialNumber }); } catch { /* 교정 실패가 수집을 막지 않는다 */ } }
           } catch { /* keep last */ }
@@ -320,7 +323,7 @@ async function pollOnceInner({ manual = false, only = null } = {}) {
   if (failed) console.warn(`[idrac] poll: ${okCount}/${results.length} 성공${authSkipped ? ` · 인증 실패 정지로 건너뜀 ${authSkipped}` : ''}`);
   // v2.548 F7: 인벤토리가 하나라도 갱신됐으면 파트 장애 판정(중앙)/push(엣지)를 즉시 트리거한다 —
   //   탐지 지연을 '인벤토리 주기 + 몇 초' 로 줄인다(v2.547 은 최대 ~50분). 디바운스는 훅이 한다.
-  if (invRefreshed > 0) { try { onSnapshotRefreshed('idrac'); } catch { /* 훅 실패가 폴을 막지 않는다 */ } }
+  if (invRefreshed > 0) { try { onSnapshotRefreshed('idrac', { urgent: evRefreshed > 0 }); } catch { /* 훅 실패가 폴을 막지 않는다 */ } }
 }
 
 export function getPollerStatus() {

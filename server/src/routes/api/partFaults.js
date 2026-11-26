@@ -34,7 +34,7 @@ import { partFaultPushStatus, pushPartFaultsNow } from '../../partfault/push.js'
 import { loadPartFaultSettings, savePartFaultSettings, partFaultEnabled, settingsForAgent, partFaultSettingsWriteRefusal } from '../../partfault/settings.js';
 import { hookStatus } from '../../partfault/hooks.js';
 import { escalationStore, loadEscalationState, escalationStateError, escalationMarkOf, partOfAckId, ackEscalation, agentKeyOf, ESC_POLICIES_MAX, ESC_STEPS_MAX, ESC_EMAILS_MAX, ESC_AFTER_MIN, ESC_AFTER_MAX, ESC_DAYS, ESC_RETRY_MAX } from '../../partfault/escalation.js';   // v3.51 알림 단계 · 당직(⑪)
-import { escalationRunStatus, escalationRunMarks, ESC_TICK_MS } from '../../partfault/escalationRun.js';
+import { escalationRunStatus, escalationMarksNow, ESC_TICK_MS } from '../../partfault/escalationRun.js';
 import { isDemoGuest } from '../../auth/demoGuest.js';
 import { mergeEdgeReports } from '../../central/partFaultEdge.js';
 import { listCollectors } from '../../collector/registry.js';
@@ -343,7 +343,7 @@ api.get('/tools/part-faults', toolsPerm, fullScopeOnly, async (req, res) => {
   }
   // v3.51 알림 단계 · 확인(⑪) — 가리기 전 원본 키로 표지를 만들고(확인 열쇠는 키를 싣지 않는 HMAC) 가린 행에 붙인다
   const escItems = loadEscalationState().items; const escSettings = escalationStore.get();
-  const escRun = escalationRunMarks();
+  const escRun = await escalationMarksNow().catch(() => null);
   shown = shown.map((p, i) => ({ ...p, esc: escalationMarkOf(open[i], escItems, escSettings, escRun) }));
   res.json({
     ok: true, role, version: currentVersion(),

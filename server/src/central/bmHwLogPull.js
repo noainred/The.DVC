@@ -32,6 +32,9 @@ export async function pullEdgeHwLog(agent, { id = '', k = '' } = {}) {
   if (!r.ok) {
     // 엣지가 ‘이 엣지의 서버가 아님’ 이라 답했으면(404 + code) 구버전과 가른다
     if (r.kind !== 'old-version' && isObj(r.body) && r.body.code === 'not-found') return { ok: false, kind: 'not-found', reason: '그 엣지의 등록부에서 이 서버를 찾지 못했습니다.' };
+    // 겹침(409) · 등록부 못 읽음(503)은 전원 당김과 같은 갈래로(디버깅 2회차 엣지 #6)
+    if (r.kind !== 'old-version' && isObj(r.body) && r.body.code === 'ambiguous') return { ok: false, kind: 'edge-ambiguous', reason: '그 엣지에 이 서버로 보이는 켜진 등록이 둘 이상입니다(같은 서비스 태그) — 어느 장비인지 몰라 읽지 않았습니다.' };
+    if (r.kind !== 'old-version' && isObj(r.body) && r.body.code === 'registry-unreadable') return { ok: false, kind: 'edge-registry', reason: '그 엣지가 iDRAC 등록부를 읽지 못했습니다.' };
     return { ok: false, kind: r.kind, reason: r.reason };
   }
   const body = sanitizeHwLog(r.body);

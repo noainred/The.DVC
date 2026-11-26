@@ -287,7 +287,7 @@ test('경계 — OTP 게이트(인증 켠 포탈) · 설정 라우트 게이트 
   const pull = stripComments(fs.readFileSync(new URL('../src/central/bmPowerPull.js', import.meta.url), 'utf8'));
   assert.match(pull, /retries: 0,/); assert.match(pull, /missing401: true/);
   const col = stripComments(fs.readFileSync(new URL('../src/routes/collector.js', import.meta.url), 'utf8'));
-  assert.match(col, /if \(isMockMode\(\)\) return res\.json\(\{ ok: true, status: 'accepted'/);
+  assert.match(col, /if \(isMockMode\(\)\) \{ release\(\); return res\.json\(\{ ok: true, status: 'accepted'/);   // 데모는 상한 자리를 돌려준다(디버깅 2회차 보안 #2)
   // 설정 라우트(PUT /admin/bm-power) — 관리자 · 전체 범위 · OTP(변이 M51 · M52)
   const { registerBmAssets } = await import('../src/routes/admin/bmAssets.js');
   const routes = new Map();

@@ -12,8 +12,13 @@ import { eventSubStore, secretOk, parseEventBody, acceptEvents, noteRejected, id
 export const bmEventsRouter = express.Router();
 wrapAsyncRouter(bmEventsRouter);   // async 처리기 예외가 응답 없이 매달리지 않게(asyncHang2574 스윕)
 /** 등록부의 켜진 서버 이름 — 없으면 null(등록부에 없는 id 는 받지 않는다 — 반증 A9). */
+// 등록부를 못 읽으면 undefined(‘없음’ 이 아니다 — 503 · 거절로 세지 않는다: 디버깅 2회차 엣지 #5) · 없으면 null
 const nameOf = async (id) => {
-  try { const { loadRegistry } = await import('../idrac/registry.js'); const e = loadRegistry().find((x) => String(x.id) === id && x.enabled !== false); return e ? String(e.name || e.id) : null; } catch { return null; }
+  try {
+    const R = await import('../idrac/registry.js');
+    if (R.registryLoadError()) return undefined;
+    const e = R.loadRegistry().find((x) => String(x.id) === id && x.enabled !== false); return e ? String(e.name || e.id) : null;
+  } catch { return undefined; }
 };
 bmEventsRouter.post('/in/:secret', (req, res, next) => {
   const s = eventSubStore.get();
@@ -27,6 +32,7 @@ bmEventsRouter.post('/in/:secret', (req, res, next) => {
     if (!p) { noteRejected(); return res.status(400).end(); }
     const id = idOfContext(s, p.context);
     const name = id ? await nameOf(id) : null;
+    if (id && name === undefined) return res.status(503).end();   // 등록부를 못 읽음 — 장비는 다시 보낸다(Redfish 이벤트 재전송)
     if (!id || name == null) { noteRejected(); return res.status(404).end(); }
     const r = acceptEvents(s, p, { name });
     return res.status(r.ok ? 202 : 404).end();

@@ -105,7 +105,9 @@ export const eventSubPublic = (s = eventSubStore.get()) => ({ enabled: s.enabled
 /** 로그 · 성능 표에 싣는 경로에서 받는 주소의 비밀을 지운다(요청 기록 · 처리 안 된 오류 기록 — index.js). 대소문자 무시(express 라우팅과 같게). */
 //   절대 꼴 요청 대상(‘POST http://host/api/bm-events/in/…’)도 지운다 — 앞에 고정하지 않는다(반증 A7).
 //   빗금이 겹친 꼴(‘/api/bm-events//in/…’ · ‘/in//…’)도 — express 가 받는 꼴이면 기록에서도 지운다(디버깅 1회차 보안 #5).
-export const scrubEventPath = (p) => String(p ?? '').replace(/(\/+api\/+bm-events\/+in\/+)[^/?#\s]*/gi, '$1…');
+// 겹친 빗금(//api//bm-events//in//…)도 지운다. 맞춤은 ‘api 바로 앞 빗금 하나’ 에서 시작한다 — 앞에 \/+ 를 두면 빗금만 긴 경로에서 시작점마다 되짚어 O(n²) 였다
+//   (디버깅 2회차 보안 #3 · 엣지 #1: 빗금 16,000개에 110~134ms — 인증 전 모든 요청의 기록 단계). 길이도 먼저 자른다(기록에 4KB 넘는 경로를 싣지 않는다).
+export const scrubEventPath = (p) => String(p ?? '').slice(0, 4096).replace(/(\/api\/+bm-events\/+in\/+)[^/?#\s]*/gi, '$1…');
 export const destinationOf = (s) => (s?.base && s?.secret ? `${s.base}${EVT_PATH}${s.secret}` : '');
 const hmac = (key, id) => crypto.createHmac('sha256', String(key)).update(String(id)).digest('base64url').slice(0, 16);
 /** 구독 Context — `dvc:<서버 id>:<HMAC(ctxKey)>`(장비가 이벤트마다 돌려준다). id 는 등록부 id(길이 상한). */
@@ -148,6 +150,7 @@ const _ring = [];
 const _stat = { received: 0, rejected: 0, dropped: 0, deferred: 0, checks: 0, rxAt: null, checkedAt: null, running: false };   // deferred — 바로 읽기 상한을 넘어 다음 정규 주기로 미룬 서버(P7)   // dropped — 한 번에 32건을 넘어 버린 수(반증 B13)
 let _timer = null; let _pendingReason = ''; let _busyRetries = 0;
 const _staleIds = new Set();   // 이번 묶음에서 다시 읽을 서버(위험 · 주의를 보낸 서버)
+const _deferredIds = new Set(); // 묶음 상한을 넘어 정규 주기로 미룬 서버(묶음마다 비운다 — 같은 서버를 두 번 세지 않게)
 const DEFAULT_DEPS = {
   now: () => Date.now(),
   debounceMs: EVT_DEBOUNCE_MS,
@@ -169,7 +172,7 @@ const DEFAULT_DEPS = {
 };
 let _deps = DEFAULT_DEPS;
 export function _setEventDepsForTest(d) { _deps = d ? { ...DEFAULT_DEPS, ...d } : DEFAULT_DEPS; }
-export function _resetEventsForTest() { _ring.length = 0; _staleIds.clear(); _busyRetries = 0; Object.assign(_stat, { received: 0, rejected: 0, dropped: 0, deferred: 0, checks: 0, rxAt: null, checkedAt: null, running: false }); if (_timer) clearTimeout(_timer); _timer = null; _pendingReason = ''; }
+export function _resetEventsForTest() { _ring.length = 0; _staleIds.clear(); _deferredIds.clear(); _busyRetries = 0; Object.assign(_stat, { received: 0, rejected: 0, dropped: 0, deferred: 0, checks: 0, rxAt: null, checkedAt: null, running: false }); if (_timer) clearTimeout(_timer); _timer = null; _pendingReason = ''; }
 export const noteRejected = () => { _stat.rejected += 1; };
 const BUSY_RETRY_MAX = 5;
 /**
@@ -184,7 +187,7 @@ function scheduleCheck(reason) {
   const wait = since >= gap ? 0 : gap - since;
   _timer = setTimeout(() => {
     _timer = null; _stat.running = true; _stat.checks += 1;
-    const ids = [..._staleIds]; _staleIds.clear();
+    const ids = [..._staleIds]; _staleIds.clear(); _deferredIds.clear();
     Promise.resolve().then(() => _deps.runCheck(_pendingReason || 'event', ids)).then((r) => {
       if (r?.busy && _busyRetries < BUSY_RETRY_MAX) { _busyRetries += 1; for (const id of ids) _staleIds.add(id); return true; }
       _busyRetries = 0; return false;
@@ -213,7 +216,11 @@ export function acceptEvents(s, parsed, { name = '' } = {}) {
   if (check) {
     // 한 묶음에 바로 읽는 서버는 EVT_BATCH_MAX 대까지 — 넘친 서버는 버리지 않고 **다음 정규 주기(1분)** 가 인벤토리를 다시 읽게 표시하고 센다(v3.52 디버깅 1회차 성능 P7)
     if (_staleIds.has(id) || _staleIds.size < EVT_BATCH_MAX) _staleIds.add(id);
-    else { _stat.deferred += 1; import('./invCache.js').then((C) => C.markInventoryStale(id), () => {}); }
+    else {
+      // 같은 서버가 여러 번 보내도 한 대로 센다(디버깅 2회차 엣지 #10 — 화면이 ‘미룬 서버 N대’ 라고 말한다)
+      if (!_deferredIds.has(id) && _deferredIds.size < 5000) { _deferredIds.add(id); _stat.deferred += 1; }
+      import('./invCache.js').then((C) => C.markInventoryStale(id), () => {});
+    }
     scheduleCheck('event');
   }
   return { ok: true, accepted: parsed.events.length, check };
@@ -248,7 +255,10 @@ export async function syncOne(entry, s, { unsubscribe = false, getJson = null, s
         // eslint-disable-next-line no-await-in-loop
         const sub = await G(entry, p, { signal }).catch(() => null);
         const dest = String(sub?.Destination ?? '');
-        if (!s.base || !dest.startsWith(`${s.base}${EVT_PATH}`)) continue;   // 이 포탈(같은 받는 주소 앞)이 건 것만 — 다른 도구 · 다른 포탈의 구독은 건드리지 않는다(디버깅 1회차 보안 #6)
+        // 이 포탈이 건 것만 — 같은 받는 주소 앞이거나, 받는 주소를 바꾼 뒤의 옛 구독(Context 가 이 포탈의 열쇠로 맞는다 — 디버깅 2회차 보안 #4).
+        //   다른 도구 · 다른 포탈의 구독은 건드리지 않는다(디버깅 1회차 보안 #6 — 다른 포탈은 Context 열쇠가 다르다)
+        const mine = (s.base && dest.startsWith(`${s.base}${EVT_PATH}`)) || (dest.includes(EVT_PATH) && idOfContext(s, sub?.Context) === String(id));
+        if (!mine) continue;
         if (!unsubscribe && s.base && dest === destinationOf(s) && String(sub?.Context ?? '') === contextOf(s, id)) continue;   // 이미 같은 것 — 둔다
         // eslint-disable-next-line no-await-in-loop
         const r = await S(entry, 'DELETE', p, null, { signal });
@@ -286,7 +296,13 @@ export async function syncAll({ unsubscribe = false, entries = null, one = syncO
   if (!unsubscribe && (!s.enabled || !destinationOf(s))) return { ok: false, reason: '켜고 받는 주소를 저장한 뒤 구독을 거십시오.' };
   _syncBusy = true;
   try {
-    const list = (entries || (await import('./registry.js')).loadRegistry()).filter((e) => e && e.enabled !== false && e.host).slice(0, SUB_SERVERS_MAX);
+    let regList = entries;
+    if (!regList) {
+      const R = await import('./registry.js');
+      if (R.registryLoadError()) return { ok: false, reason: 'iDRAC 등록부를 읽지 못했습니다 — 대상 서버를 모르는 채 걸지 않았습니다(서비스 점검에서 등록부를 확인).' };   // ‘대상 0대’ 로 끝내지 않는다(디버깅 2회차 엣지 #5)
+      regList = R.loadRegistry();
+    }
+    const list = regList.filter((e) => e && e.enabled !== false && e.host).slice(0, SUB_SERVERS_MAX);
     // 데모(mock) — 장비에 보내지 않는다(합성 등록부의 주소로 나가지 않게 · 전원과 같은 규칙)
     if (!entries && (await import('../mock/demo/flags.js')).isMockMode()) return { ok: true, results: list.map((e) => ({ id: String(e.id), name: String(e.name || e.id).slice(0, 128), status: 'demo', removed: 0, message: '데모 — 장비에 보내지 않았습니다.' })) };
     // 동시 SUB_CONCURRENCY 대 — 묶음(4대씩 끝날 때까지 기다림)이 아니라 풀: 한 대가 시한까지 가도 나머지 자리가 놀지 않는다(v3.52 디버깅 1회차 성능 P6 · util/pool.js 하나)

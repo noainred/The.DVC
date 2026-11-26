@@ -48,8 +48,11 @@ function docStore({ file, L, what, empty, shape, maxBytes = null }) {
       const next = shape(doc);
       const text = JSON.stringify(next);
       // 파일 크기 상한(있으면) — 넘으면 쓰지 않는다(백업 파일 상한 안에 머물게 · 성능 P8)
-      const lim = !shrinking && typeof maxBytes === 'function' ? maxBytes() : null;   // 지우기(줄어드는 쓰기)는 상한으로 막지 않는다 — 자리를 만드는 길이다
-      if (lim && Buffer.byteLength(text, 'utf8') > lim) return { ok: false, status: 413, reason: `${what} 파일이 상한(${Math.round(lim / 1048576)}MB)에 닿았습니다 — 끝난 항목을 지워 자리를 만든 뒤 다시 하십시오.` };
+      // 상한은 **커지는 쓰기**만 막는다 — 지우기 · ‘끝남’ 으로 바꾸기 · 줄이는 편집은 상한을 넘은 파일에서도 된다(자리를 만드는 길 — 디버깅 2회차 판정 #10)
+      const lim = !shrinking && typeof maxBytes === 'function' ? maxBytes() : null;
+      const bytes = lim ? Buffer.byteLength(text, 'utf8') : 0;
+      const curBytes = lim && bytes > lim ? (() => { try { return fs.statSync(file()).size; } catch { return 0; } })() : 0;
+      if (lim && bytes > lim && bytes > curBytes) return { ok: false, status: 413, reason: `${what} 파일이 상한(${Math.round(lim / 1048576)}MB)에 닿았습니다 — 끝난 항목을 지워 자리를 만든 뒤 다시 하십시오.` };
       try { write(next, text); } catch (e) { return { ok: false, status: 500, reason: `${what} 파일을 쓰지 못했습니다 — ${String(e?.code || e?.message || e).slice(0, 120)}` }; }
       cache = next; rev += 1; L.saved();
       return { ok: true };
