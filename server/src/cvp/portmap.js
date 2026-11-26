@@ -205,18 +205,25 @@ export function descTokens(desc) {
   }
   return out.slice(0, 24);
 }
-/** 설명에서 장비 이름처럼 보이는 첫 낱말 — 하이픈 · 점 · 숫자를 품고, 인터페이스 이름(Et47 · vmnic0)은 아닌 것. 없으면 ''. */
-export function deviceNameFromDesc(desc) {
+/**
+ * 설명에서 장비 이름처럼 보이는 낱말들(나온 순서 · 최대 max 개) — 하이픈 · 점 · 숫자를 품고, 인터페이스 이름(Et47 · vmnic0)은 아닌 것.
+ *   v3.42(4회차 수정 검토 F1): 토폴로지의 설명 링크가 '첫 이름이 자기 자신이면 다음 이름' 을 보려고 쓴다 — 판정(낱말 규칙)은 이 함수 하나.
+ */
+export function deviceNamesFromDesc(desc, max = 4) {
+  const out = [];
   const raw = String(desc ?? '').slice(0, 200).split(/[\s,;|()[\]<>"'=:]+/);
   for (const t of raw) {
     if (t.length < 3 || t.length > 64) continue;
     if (!/^[a-z][a-z0-9_.-]*$/i.test(t)) continue;
     if (!/[-_.\d]/.test(t)) continue;
     if (IFNAME.test(t)) continue;
-    return stripIfSuffix(t);
+    out.push(stripIfSuffix(t));
+    if (out.length >= max) break;
   }
-  return '';
+  return out;
 }
+/** 설명에서 장비 이름처럼 보이는 첫 낱말. 없으면 ''. */
+export function deviceNameFromDesc(desc) { return deviceNamesFromDesc(desc, 1)[0] || ''; }
 // v3.42(2회차 A3-F2 · 3회차 A1-F5): 짧은 이름은 이 함수 하나(topology.js 도 이것을 쓴다) — IPv4 이름은 통째로(첫 옥텟 '10' 으로 줄이면 다른 주소가 '일치', 같은 주소가 '불일치' 가 됐다).
 const IPV4_NAME = /^\d{1,3}(?:\.\d{1,3}){3}$/;
 export const shortOf = (s) => { const v = String(s ?? '').trim().toLowerCase(); return IPV4_NAME.test(v) ? v : v.split('.')[0]; };

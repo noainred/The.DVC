@@ -17,7 +17,8 @@
  *    초당 16건 되풀이하면 끊긴 계산의 첫 구간(baseOf 약 0.17초)만으로 자리 둘이 내내 차고 포탈 전체의 새 연결 수락이 밀렸다 — 지연 중앙값 5초).
  *    돌고 있는 계산에 합류하는 것은 세지 않는다. 계정 이름이 없으면(인증 꺼짐 — 모두가 한 계정) 4배.
  *  · 차례는 **계정 간 공평하게** — 줄에서 다음 계산을 고를 때 지금 돌고 있는 계산이 가장 적은 계정의 것부터(4회차 A3-F2: 한 계정이 실행 2 + 대기 8 을 채우면
- *    다른 사용자의 0.2초 조회가 15초 걸렸다). 한 계정이 줄의 절반 넘게 차지하지 못한다.
+ *    다른 사용자의 0.2초 조회가 15초 걸렸다). 한 계정이 줄의 절반 넘게 차지하지 못한다(계정 이름이 없으면 따지지 않는다).
+ *    줄에 섰다가 **계산을 시작하지 못하고** 빠진 요청은 시작 횟수를 돌려받는다(자리가 찬 동안 탭을 넘겨도 횟수가 줄지 않게).
  *  · 계산은 **다음 매크로태스크에서** 시작한다(4회차 A4-F1: 양보 없이 끝나는 짧은 계산이 마이크로태스크로 이어 붙어 12건이 한 덩어리로 돌았다 — 합류도 안 됐다).
  *  · 줄이 차면 **429 + Retry-After**. 503 이면 웹 공용 오류 상자가 '업그레이드 중' 으로 바꾼다. 웹은 이 조회들을 `fetchHeavy`(자동 재시도 0)로 부른다 —
  *    공용 fetchJson 기본값은 429 도 두 번 더 보내므로(api.js isTransientFront) 다른 호출자는 재시도를 꺼야 한다.
@@ -63,8 +64,8 @@ function pump(L) {
       /** 계산 단계 사이에서 부른다 — 기다리는 요청이 없으면 던져서 멈춘다. */
       check() { if (ctx.stop()) throw new HeavyAbandoned(); },
     };
-    // 다음 매크로태스크에서 시작한다 — 시작 전에 이미 떠났으면 돌리지 않는다(ctx.check).
-    new Promise((r) => setImmediate(r)).then(() => { ctx.check(); return f.compute(ctx); }).then(f.resolve, f.reject).finally(() => {
+    // 다음 매크로태스크에서 시작한다 — 시작 전에 이미 떠났으면 돌리지 않고 시작 횟수를 돌려준다.
+    new Promise((r) => setImmediate(r)).then(() => { if (ctx.stop()) { refundStart(f.owner); throw new HeavyAbandoned(); } return f.compute(ctx); }).then(f.resolve, f.reject).finally(() => {
       f.state = 'done'; L.running = Math.max(0, L.running - 1); active.delete(f); drop();
       pump(L);
     });
@@ -81,10 +82,16 @@ function takeStart(user, now = Date.now()) {
     if (buckets.size >= BUCKETS_MAX) buckets.clear();   // 계정 수 규모라 닿을 일이 드물다 — 넘으면 통째로 비운다(모두의 횟수가 다시 찬다)
     b = { n: cap, at: now }; buckets.set(user, b);
   }
+  if (now < b.at) b.at = now;   // 수정 검토 F6: 시각이 뒤로 가면(시각 조정) 그 폭만큼 회복이 멈췄다 — 기준을 지금으로 당긴다
   const gained = Math.floor((now - b.at) / refill);
   if (gained > 0) { b.n = Math.min(cap, b.n + gained); b.at += gained * refill; }
   if (b.n <= 0) return false;
   b.n--; return true;
+}
+/** 시작하지 못한 계산의 횟수를 돌려준다(수정 검토 F5: 줄에 섰다가 계산을 시작도 못 하고 취소된 요청 — 자리가 찬 동안 탭을 넘기면 실제로 돈 계산이 0건인데 429 가 났다). 계산이 돌기 시작한 뒤 끊는 것은 돌려주지 않는다. */
+function refundStart(user) {
+  const b = buckets.get(user);
+  if (b) b.n = Math.min(user ? START_BURST : START_BURST * ANON_FACTOR, b.n + 1);
 }
 function queuedBy(L, user) { let n = 0; for (const f of L.queue) if (f.state === 'queued' && f.owner === user) n++; return n; }
 function busy(res, reason) {
@@ -111,7 +118,8 @@ export async function heavyJson(req, res, key, compute, { lane = 'heavy' } = {})
   if (!f) {
     const full = L.running >= L.max && L.queue.length >= HEAVY_QUEUE_MAX;
     if (full) return busy(res, 'CVP 조회가 많이 밀려 있습니다 — 잠시 뒤 다시 시도하세요.');
-    if (queuedBy(L, user) >= HEAVY_QUEUE_MAX / 2) return busy(res, '이 계정의 CVP 조회가 이미 여러 건 줄을 서 있습니다 — 끝난 뒤 다시 시도하세요.');
+    // 수정 검토 F4: 계정 이름이 없으면(인증 꺼짐 — 모두가 한 계정) 계정 몫을 따지지 않는다 — 줄이 절반 비었는데 429 가 났다.
+    if (user && queuedBy(L, user) >= HEAVY_QUEUE_MAX / 2) return busy(res, '이 계정의 CVP 조회가 이미 여러 건 줄을 서 있습니다 — 끝난 뒤 다시 시도하세요.');
     if (!takeStart(user)) return busy(res, '이 계정의 CVP 조회 요청이 너무 잦습니다 — 잠시 뒤 다시 시도하세요.');
     f = { key, lane: L, compute, state: 'queued', users: new Map(), waiters: 0, owner: user };
     f.promise = new Promise((resolve, reject) => { f.resolve = resolve; f.reject = reject; });
@@ -130,6 +138,7 @@ export async function heavyJson(req, res, key, compute, { lane = 'heavy' } = {})
       f.state = 'done';
       const i = f.lane.queue.indexOf(f); if (i >= 0) f.lane.queue.splice(i, 1);
       if (flights.get(key) === f) flights.delete(key);
+      refundStart(f.owner);
       f.resolve(null);
     }
   };

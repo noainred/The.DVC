@@ -157,6 +157,11 @@ describe('v3.42 CVP 버그 점검 1회차 — 웹', () => {
     const html = (oper) => renderToStaticMarkup(React.createElement(HostNetCvp, { data: { uplinks: [up(oper)] }, nics: [] }));
     expect(html('unknown')).toContain('측정 없음(포트 상태 모름)');
     expect(html('up')).not.toContain('측정 없음'); expect(html('up')).toMatch(/측정 [^<]*전/);
+    // 수정 검토: 장비가 원래 '모름' 으로 보고하지만 처리량 값은 있는 포트 — 값과 '측정 없음' 을 한 카드에 함께 내지 않는다
+    const withRate = renderToStaticMarkup(React.createElement(HostNetCvp, { data: { uplinks: [{ ...up('unknown'), inBps: 1200, outBps: 800 }] }, nics: [] }));
+    expect(withRate).not.toContain('측정 없음');
+    // 수정 검토: 위치 찾기는 줄이 차서 온 429 를 자동으로 다시 보내지 않는다
+    expect(lc).toMatch(/fetchJson\('\/tools\/cvp\/locate', \{ q: v \}, undefined, \{ retries: 0 \}\)/);
     // A5 관찰: 마우스로 누른 뒤 키보드로 고르면 초점 고리가 다시 보인다
     expect(src('CvpTopology.jsx')).toMatch(/onKeyDown=\{\(e\) => \{ setFocusId\(n\.id\);/);
   });

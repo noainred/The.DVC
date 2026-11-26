@@ -400,12 +400,34 @@ test('⑨ 2회차 — 가림 · 무거운 조회 동시 상한', async (t) => {
     t.mock.timers.tick(G.START_REFILL_MS);
     assert.equal((await quick('B-again', 'burst')).res.statusCode, 200, 'START_REFILL_MS 뒤 1건 회복');
     assert.equal((await quick('B-again2', 'burst')).res.statusCode, 429, '회복은 한 건씩');
+    // 수정 검토 F6: 시각이 뒤로 가도(시각 조정) 회복이 그 폭만큼 멈추지 않는다
+    t.mock.timers.setTime(Date.now() - 3_600_000);
+    assert.equal((await quick('B-back0', 'burst')).res.statusCode, 429, '뒤로 간 직후에는 아직 0건(기준만 지금으로 당긴다)');
+    t.mock.timers.tick(G.START_REFILL_MS);
+    assert.equal((await quick('B-back', 'burst')).res.statusCode, 200, '시각이 한 시간 뒤로 간 뒤에도 START_REFILL_MS 면 1건 회복');
   } finally { t.mock.timers.reset(); }
+  // 수정 검토 F4: 계정 이름이 없으면(인증 꺼짐 — 모두가 한 계정) 계정 줄 상한을 적용하지 않는다(줄이 절반 비었는데 429 가 났다)
+  G._resetHeavyGate(); gates.clear();
+  const anon = Array.from({ length: G.HEAVY_MAX + G.HEAVY_QUEUE_MAX / 2 }, (_, i) => call(`AN${i}`, '')); await tick();
+  const anonMore = call('AN-more', ''); await Promise.race([anonMore.p, tick().then(tick)]);
+  assert.equal(anonMore.res.statusCode, 200, '이름 없는 요청은 줄이 다 찰 때까지 받는다');
+  await drain([...anon.map((x) => x.p), anonMore.p]);
+  // 수정 검토 F5: 줄에 섰다가 계산을 시작하지 못하고 떠난 요청은 시작 횟수를 쓰지 않는다(자리가 찬 동안 탭을 넘겨도 429 가 나지 않는다)
+  G._resetHeavyGate(); gates.clear();
+  const holders = Array.from({ length: G.HEAVY_MAX }, (_, i) => call(`HD${i}`, `holder${i}`)); await tick();
+  let tabBusy = 0;
+  for (let i = 0; i < G.START_BURST + 8; i++) { const x = call(`TAB${i}`, 'tabber'); await tick(); if (x.res.statusCode === 429) tabBusy++; x.res.emit('close'); await x.p; }
+  assert.equal(tabBusy, 0, '돌지 않은 계산은 횟수로 세지 않는다');
+  await drain(holders.map((x) => x.p));
   // 4회차 A3-F1: 시작 전에 떠난 요청의 계산은 돌리지 않는다(보내고 바로 끊기를 되풀이해도 계산의 첫 구간이 돌지 않는다)
   G._resetHeavyGate(); let ranGone = 0;
   const g1 = mk('u1'); const pg = G.heavyJson(g1.req, g1.res, 'GONE', async () => { ranGone++; return { body: {} }; });
   g1.res.emit('close'); await pg; await tick(); await tick();
   assert.deepEqual([ranGone, G.heavyState().running, G.heavyState().flights], [0, 0, 0], '떠난 요청의 계산은 시작하지 않고 자리를 돌려준다');
+  // 수정 검토 F5: 시작 전에 떠난 요청은 시작 횟수도 돌려받는다(돌지 않은 계산을 세지 않는다)
+  for (let i = 0; i < G.START_BURST + 3; i++) { const x = mk('goner'); const p = G.heavyJson(x.req, x.res, `GN${i}`, async () => ({ body: {} })); x.res.emit('close'); await p; await tick(); }
+  const afterGone = mk('goner'); await G.heavyJson(afterGone.req, afterGone.res, 'GN-ok', async () => ({ body: { ok: 1 } }));
+  assert.deepEqual([afterGone.res.statusCode, afterGone.res.body], [200, { ok: 1 }]);
   // 4회차 A4-F1: 양보 없이 끝나는 짧은 계산도 한 덩어리로 이어 붙지 않는다 — 한 틱에는 동시 상한만큼만
   G._resetHeavyGate(); let quickRuns = 0;
   const qs = Array.from({ length: 6 }, (_, i) => { const x = mk(`qq${i}`); x.p = G.heavyJson(x.req, x.res, `QK${i}`, () => { quickRuns++; return { body: {} }; }); return x; });
@@ -715,6 +737,12 @@ test('⑱ 4회차 — 이름 색인(점이 든 이름) · 일부 목록의 사�
   const dl = (desc) => TP.buildTopology({ devices: [D('A', 'leaf1'), D('B', 'spine1')], lldp: [], ports: [{ agent: '', cvpId: 'c1', key: 'A', port: 'Ethernet49', oper: 'up', desc }] }).links.map((l) => l.kind);
   assert.deepEqual(dl('leaf1:Et49 <-> spine1:Et1'), ['desc']);
   assert.deepEqual(dl('leaf1 uplink'), [], '대조: 자기 이름뿐이면 선이 없다');
+  // 수정 검토 F1: 첫 장비 이름꼴 낱말이 상대다 — 서버 포트 설명에 **언급만 된** 스위치로 선을 긋지 않는다(그 선이 층 추정까지 뒤집었다)
+  assert.deepEqual(dl('esx01 vmnic2 (moved from spine1 Et10)'), [], '서버 포트 — 뒤에 나온 스위치 이름은 상대가 아니다');
+  assert.deepEqual(dl('fw01:port3 (old: spine1)'), []);
+  assert.deepEqual(dl('uplink to spine1-et7'), ['desc'], '대조: 평범한 낱말 뒤 첫 장비 이름이 스위치');
+  assert.deepEqual(PM.deviceNamesFromDesc('leaf1:Et49 <-> spine1:Et1 via fw-01 and sw-9 x-1'), ['leaf1', 'spine1', 'fw-01', 'sw-9'], '이름꼴 낱말을 순서대로(상한 4)');
+  assert.equal(PM.deviceNameFromDesc('to spine1 Et1'), 'spine1');
   if (!(await cdb.available())) return;
   const { DatabaseSync } = await import('node:sqlite');
   const raw = new DatabaseSync(path.join(tmp, 'cvp.db'));

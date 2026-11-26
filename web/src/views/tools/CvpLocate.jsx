@@ -23,7 +23,8 @@ export default function CvpLocateView({ onOpen }) {
     if (!v) return;
     const my = ++seq.current;
     setBusy(true); setErr(null);
-    try { const x = await fetchJson('/tools/cvp/locate', { q: v }); if (my === seq.current) setR(x); }
+    // v3.42(4회차 수정 검토): 줄이 차서 온 429 를 자동으로 다시 보내지 않는다(서버 cvp/heavyGate.js 머리말 — 공용 fetchJson 기본값은 429 도 두 번 더 보낸다)
+    try { const x = await fetchJson('/tools/cvp/locate', { q: v }, undefined, { retries: 0 }); if (my === seq.current) setR(x); }
     catch (e) { if (my === seq.current) { setErr(e); setR(null); } }
     finally { if (my === seq.current) setBusy(false); }
   };

@@ -32,10 +32,10 @@ const srv = http.createServer((req, res) => {
     try { body = JSON.parse(Buffer.concat(parts).toString('utf8')); } catch { /* 빈 본문 */ }
     const chunk = Number(body.chunk || 0); const chunks = Number(body.chunks || 1);
     const fail = failLast && chunks > 1 && chunk === chunks - 1;
-    seen.push({ chunk, chunks, devices: (body.devices || []).map((d) => d.key), touch: (body.touch || []).length, fail });
+    seen.push({ chunk, chunks, devices: (body.devices || []).map((d) => d.key), l2: (body.l2 || []).length, touch: (body.touch || []).length, fail });
     res.setHeader('Content-Type', 'application/json');
     if (fail) { res.statusCode = 503; return res.end(JSON.stringify({ ok: false, reason: '큰 본문 처리 혼잡(시험)' })); }
-    res.end(JSON.stringify({ ok: true, saved: { touched: (body.touch || []).length } }));
+    res.end(JSON.stringify({ ok: true, saved: { touched: (body.touch || []).length, l2: (body.l2 || []).length } }));
   });
 });
 await new Promise((r) => srv.listen(0, '127.0.0.1', r));
@@ -54,13 +54,18 @@ test('뒤 청크만 실패한 push 뒤 — 상태가 예전에 보낸 것과 같
     const devices = Array.from({ length: N }, (_, i) => ({ key: `sw${i}`, ts: t0 + m * 60_000, hostname: `sw${i}`,
       ports: Array.from({ length: 64 }, (_, n) => ({ name: `Ethernet${n + 1}`, oper: n + 1 === 5 ? e5 : 'up', admin: 'up', speedBps: 1e10, desc: `server-${n + 1}-uplink-description-padding-padding-padding-padding` })) }));
     await db.saveDevices({ agent: '', cvpId: cvp.id, devices });
+    // LLDP 이웃 · MAC 테이블도 상태를 따라 바뀐다(수정 검토 F3 — L2 레코드의 같은 틈)
+    const nb = e5 === 'up' ? 'spine-a' : 'spine-b';
+    await db.saveL2('', cvp.id, devices.map((d, i) => ({ key: d.key, ts: d.ts, lldp: [{ port: 'Ethernet49', idx: '1', sysName: nb, portId: 'Ethernet1' }],
+      fdb: Array.from({ length: 300 }, (_, n) => ({ mac: `00aa${String(i).padStart(2, '0')}${String(n + (e5 === 'up' ? 0 : 1000)).padStart(6, '0')}`, vlan: 10, port: 'Ethernet5' })) })));
   };
-  const doPush = async () => { seen = []; const r = await push.pushCvpNow(); return { r, records: seen.filter((x) => !x.fail).reduce((a, x) => a + x.devices.length, 0), touch: seen[0]?.touch ?? 0, chunks: seen.length }; };
+  const doPush = async () => { seen = []; const r = await push.pushCvpNow(); const ok = seen.filter((x) => !x.fail);
+    return { r, records: ok.reduce((a, x) => a + x.devices.length, 0), l2: ok.reduce((a, x) => a + x.l2, 0), touch: seen[0]?.touch ?? 0, chunks: seen.length }; };
 
   await save('up');
   const p1 = await doPush();
   assert.equal(p1.r.ok, true, JSON.stringify(p1.r));
-  assert.equal(p1.records, N); assert.ok(p1.chunks >= 2, `여러 청크여야 재현된다(청크 ${p1.chunks})`);
+  assert.equal(p1.records, N); assert.equal(p1.l2, N); assert.ok(p1.chunks >= 2, `여러 청크여야 재현된다(청크 ${p1.chunks})`);
 
   // 상태가 바뀐 push — 마지막 청크만 503. 앞 청크의 레코드는 중앙에 들어갔다
   await save('down');
@@ -68,16 +73,18 @@ test('뒤 청크만 실패한 push 뒤 — 상태가 예전에 보낸 것과 같
   const p2 = await doPush();
   failLast = false;
   assert.equal(p2.r.ok, false);
-  assert.ok(p2.records > 0 && p2.records < N, `앞 청크만 적재(레코드 ${p2.records}/${N})`);
+  assert.ok(p2.records + p2.l2 > 0 && p2.records + p2.l2 < 2 * N, `앞 청크만 적재(레코드 ${p2.records}/${N} · L2 ${p2.l2}/${N})`);
+  assert.ok(p2.l2 > 0, `바뀐 L2 일부가 중앙에 들어간 상태여야 한다(L2 ${p2.l2})`);
 
   // 상태가 처음(①에서 보낸 것)과 같아졌다 — 그래도 레코드를 다시 보낸다(예전: 전부 touch — 중앙은 down 으로 남는다)
   await save('up');
   const p3 = await doPush();
   assert.equal(p3.r.ok, true, JSON.stringify(p3.r));
   assert.deepEqual([p3.records, p3.touch], [N, 0], '실패한 push 에 실었던 장비는 해시가 같아도 다시 보낸다');
+  assert.equal(p3.l2, N, 'LLDP · MAC 테이블 레코드도 다시 보낸다(수정 검토 F3)');
 
   // 대조: 성공한 뒤 바뀐 것이 없으면 touch 만 간다(매 주기 전량을 다시 보내지 않는다)
   await save('up');
   const p4 = await doPush();
-  assert.deepEqual([p4.r.ok, p4.records, p4.touch], [true, 0, N]);
+  assert.deepEqual([p4.r.ok, p4.records, p4.l2, p4.touch], [true, 0, 0, N]);
 });

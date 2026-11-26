@@ -54,7 +54,7 @@ export default function HostNetCvp({ data, nics = [], hostId = null, onReload = 
                   {u.evidence ? <div className="muted" style={{ fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={[u.evidence, ...(u.also || []).map((x) => `${x.label} — ${x.evidence || ''}`)].join('\n')}>근거 {u.evidence}{u.also?.length ? ` 외 ${u.also.length}` : ''}{u.l2At ? ` · ${ageText(u.l2At)}` : ''}{u.l2At && Date.now() - u.l2At > L2_STALE_MS ? <span style={{ color: 'var(--amber)' }}> · 오래됨</span> : null}</div> : null}
                   <div className="muted" style={{ fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.nic ? `${u.nic} · ` : 'NIC 미확정 · '}{u.oper === 'up' ? 'Up' : u.oper === 'down' ? 'Down' : u.oper || '—'} · {speedText(u.speedBps)}{u.lag ? ` · ${u.lag}` : ''}</div>
                   <div style={{ marginTop: 4 }}>송신 <b>{bpsText(u.inBps)}</b> · 수신 <b>{bpsText(u.outBps)}</b></div>
-                  <div className="muted" style={{ fontSize: 11 }}>에러 in/out {errText(u)} · 드롭 in/out {dropText(u)} · {u.oper === 'unknown' ? '측정 없음(포트 상태 모름)' : `측정 ${agoText(u.rateTs ?? u.ts)}`}</div>
+                  <div className="muted" style={{ fontSize: 11 }}>에러 in/out {errText(u)} · 드롭 in/out {dropText(u)} · {u.oper === 'unknown' && u.inBps == null && u.outBps == null ? '측정 없음(포트 상태 모름)' : `측정 ${agoText(u.rateTs ?? u.ts)}`}</div>
                   <div className="muted" style={{ fontSize: 11 }} title="최근 24시간 원시 표본 합 — 값이 있는 표본만 더했습니다(첫 주기·간격 비정상·카운터 리셋·드롭 수집 전은 빠짐)">24시간 에러 {daySumText(u.day, 'err')} · 드롭 {daySumText(u.day)}</div>
                 </div>
               );

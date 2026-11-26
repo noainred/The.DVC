@@ -11,7 +11,7 @@
  * 양끝 불일치는 **두 끝 포트를 다 아는 링크**(both · one 중 상대 포트를 LLDP portId 로 아는 것)만 — 속도 · MTU · Duplex · 관리 상태 · 포트 채널 소속 · 설명이 가리키는 상대.
  *   한쪽 값을 못 읽었으면 '비교 못 함'(na)이다 — 다름으로 세지 않는다.
  */
-import { deviceNameFromDesc, descTokens, descMentions, stripIfSuffix, shortOf } from './portmap.js';
+import { deviceNameFromDesc, deviceNamesFromDesc, descTokens, descMentions, stripIfSuffix, shortOf } from './portmap.js';
 
 const devKey = (a, c, k) => `${a}\u0000${c}\u0000${k}`;
 const lc = (s) => String(s ?? '').trim().toLowerCase();
@@ -252,11 +252,15 @@ export function buildTopology({ devices = [], lldp = [], lldpMeta = new Map(), p
     const aId = devKey(p.agent, p.cvpId, p.key);
     const np = normPort(p.port);
     if (isMgmtPort(np) || nb.get(aId)?.has(np)) continue;
-    // 4회차 A1-N2: 첫 이름만 보면 자기 이름으로 시작하는 설명('leaf1:Et49 <-> spine1:Et1')에서 추정 선이 빠졌다 — 낱말 가운데 다른 알려진 스위치를 찾는다.
+    // 4회차 A1-N2 → 수정 검토 F1 · F2: 설명의 **첫 장비 이름꼴 낱말**이 상대다(예전 그대로). 그 낱말이 자기 자신일 때만('leaf1:Et49 <-> spine1:Et1') 다음 낱말로 넘어간다.
+    //   낱말 전부에서 스위치를 찾았더니(4회차 첫 수정) 서버 포트 설명에 **언급만 된** 스위치('esx01 vmnic2 (moved from leaf2 Et10)')로 거짓 선을 긋고,
+    //   그 선이 층 추정까지 뒤집었다(리프 셋이 모두 스파인) · 포트마다 낱말 전부를 찾아 한 덩어리 시간도 두 배였다.
     let bId = null;
-    for (const t of descTokens(p.desc).flatMap((x) => { const u = stripIfSuffix(x); return u === x ? [x] : [x, u]; })) {
-      const id = idx.find(t, aId);
-      if (id && id !== aId && id !== AMBIG) { bId = id; break; }
+    for (const name of deviceNamesFromDesc(p.desc)) {
+      const id = idx.find(name, aId);
+      if (id === aId) continue;             // 자기 이름 — 다음 장비 이름꼴 낱말을 본다
+      if (id && id !== AMBIG) bId = id;
+      break;                                // 스위치가 아닌 장비(서버 · 방화벽) · 못 고른 이름이면 이 포트의 상대는 그것이다 — 거기서 멈춘다
     }
     if (!bId) continue;
     if (usedEnds.has(`${aId}\u0000${np}`)) continue;
