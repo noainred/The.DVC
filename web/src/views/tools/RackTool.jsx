@@ -15,7 +15,7 @@ import { downloadFailText } from '../downloadFailText.js';
 import {
   U_PX, KIND_LABEL, FACE_LABEL, colorOf, legendOf, fmtU, placesForFace, placementIssue, dropStartU, boxOf, wattText,
   roomSummary, matchPlace, ACTION_LABEL, partChips, chipColor, statusKeyOf,
-  diffCountText, DIFF_OP_LABEL, DIFF_TYPE_LABEL, fieldsText, matchUnplaced, UNPLACED_PAGE, defaultLabelOf,
+  diffCountText, DIFF_OP_LABEL, DIFF_TYPE_LABEL, fieldsText, matchUnplaced, UNPLACED_PAGE, defaultLabelOf, changedFields,
 } from './rackView.js';
 
 const card = { background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 12, minWidth: 0 };
@@ -200,7 +200,8 @@ function Detail({ p, rack, onEdit, edit }) {
 const EMPTY_PLACE = { face: 'full', uStart: '', uSize: '', kind: 'server', label: '', model: '', serial: '', extraSerials: '', note: '', opW: '', ratedW: '', weightKg: '' };
 
 function PlaceModal({ init, racks, onClose, onSave, onRemove, busy, error }) {
-  const [f, setF] = useState(() => ({ ...EMPTY_PLACE, ...init, extraSerials: Array.isArray(init.extraSerials) ? init.extraSerials.join(' / ') : (init.extraSerials || '') }));
+  const [f0] = useState(() => ({ ...EMPTY_PLACE, ...init, extraSerials: Array.isArray(init.extraSerials) ? init.extraSerials.join(' / ') : (init.extraSerials || '') }));
+  const [f, setF] = useState(f0);   // f0 = 창을 연 때의 값 — 고치기는 달라진 칸만 보낸다(onSave 가 대조)
   const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.value }));
   const row = { display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, flex: '1 1 140px' };
   const inp = { ...sel, width: '100%', boxSizing: 'border-box' };
@@ -237,7 +238,7 @@ function PlaceModal({ init, racks, onClose, onSave, onRemove, busy, error }) {
           {init.id ? <button type="button" style={{ ...btn, color: '#fecaca' }} disabled={busy} onClick={onRemove}>장비 빼기</button> : null}
           <span style={{ flex: 1 }} />
           <button type="button" style={btn} disabled={busy} onClick={onClose}>취소</button>
-          <button type="button" style={btnPri} disabled={busy} onClick={() => onSave(f)}>{busy ? '저장 중…' : '저장'}</button>
+          <button type="button" style={btnPri} disabled={busy} onClick={() => onSave(f, f0)}>{busy ? '저장 중…' : '저장'}</button>
         </div>
       </div>
     </Modal>
@@ -245,7 +246,8 @@ function PlaceModal({ init, racks, onClose, onSave, onRemove, busy, error }) {
 }
 
 function RackModal({ init, types, onClose, onSave, onRemove, busy, error }) {
-  const [f, setF] = useState(() => ({ name: '', row: '', role: '', typeId: '', heightU: 42, pduA: 2, pduB: 2, ...init }));
+  const [f0] = useState(() => ({ name: '', row: '', role: '', typeId: '', heightU: 42, pduA: 2, pduB: 2, ...init }));
+  const [f, setF] = useState(f0);   // f0 = 창을 연 때의 값 — 고치기는 달라진 칸만 보낸다
   const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.value }));
   const row = { display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, flex: '1 1 140px' };
   const inp = { ...sel, width: '100%', boxSizing: 'border-box' };
@@ -272,7 +274,7 @@ function RackModal({ init, types, onClose, onSave, onRemove, busy, error }) {
           {init.id ? <button type="button" style={{ ...btn, color: '#fecaca' }} disabled={busy} onClick={onRemove}>랙 지우기(빈 랙만)</button> : null}
           <span style={{ flex: 1 }} />
           <button type="button" style={btn} disabled={busy} onClick={onClose}>취소</button>
-          <button type="button" style={btnPri} disabled={busy} onClick={() => onSave(f)}>{busy ? '저장 중…' : '저장'}</button>
+          <button type="button" style={btnPri} disabled={busy} onClick={() => onSave(f, f0)}>{busy ? '저장 중…' : '저장'}</button>
         </div>
       </div>
     </Modal>
@@ -465,6 +467,8 @@ export default function RackTool() {
   const [edit, setEdit] = useState(false);
   const [selId, setSelId] = useState('');
   const [modal, setModal] = useState(null);   // { kind, ... }
+  const modalRef = useRef(null);
+  modalRef.current = modal;
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
   busyRef.current = busy;
@@ -547,7 +551,11 @@ export default function RackTool() {
   const say = (tone, text) => setNote({ tone, text });
 
   /** 쓰기 연산 하나 — 409(충돌 · 겹침)는 사유를 그대로 보여 주고, 판이 바뀌었으면 최신을 다시 불러온다. */
-  const run = useCallback(async (body, { okText = '저장했습니다.', closeModal = true } = {}) => {
+  const run = useCallback(async (body, { okText = '저장했습니다.', closeModal = true, roomId: writeRoom = '' } = {}) => {
+    // 1회차 점검 성능 축: 응답이 늦는 동안 전산실을 바꾸거나 다른 창을 열 수 있다 — 이 쓰기를 시작한 전산실 · 창일 때만 rev 반영 · 창 닫기 · 알림을 한다.
+    const modalAtStart = modalRef.current;
+    const sameModal = () => modalRef.current === modalAtStart;
+    const sameRoom = () => !writeRoom || writeRoom === roomIdRef.current;
     setBusy(true); setModalErr('');
     try {
       const r = await postJson('/tools/rack/op', body);
@@ -556,21 +564,24 @@ export default function RackTool() {
         if (r.code === 'revConflict') {
           await loadRoom(roomIdRef.current);
           // 창을 닫지 않는다(입력 유지 — 점검 C20). 서버 사유가 이미 '최신 배치를 불러온 뒤 다시 하세요' 라 덧붙이지 않는다(Chromium 확인에서 같은 말이 두 번 나왔다).
-          setModalErr(`${why} 입력은 그대로 두었습니다.`);
-          say('warn', why);
+          if (sameModal()) setModalErr(`${why} 고친 칸은 그대로 두었습니다 — 다시 저장하면 고친 칸만 반영합니다.`);
+          if (sameRoom()) say('warn', why);
           return null;
         }
-        setModalErr(why); say('err', why);
+        if (sameModal()) setModalErr(why);
+        if (sameRoom()) say('err', why);
         return null;
       }
       // 이 화면의 rev 로 쓴 변경이 성공했으면 새 rev 를 바로 반영한다 — 다시 불러오기 전에 이어서 끌어 놓아도 자기 변경과 충돌하지 않게(점검 C19).
-      if (Number.isInteger(r?.rev) && Number.isInteger(body?.rev)) setView((v) => (v && v.rev === body.rev ? { ...v, rev: r.rev } : v));
-      if (closeModal) setModal(null);
-      say('ok', r?.unchanged ? '바뀐 것이 없어 저장하지 않았습니다.' : okText);
+      //   같은 전산실일 때만(rev 숫자는 전산실끼리 같을 수 있다 — 되돌리기는 법인의 전산실 전부에 같은 rev 를 준다).
+      if (Number.isInteger(r?.rev) && Number.isInteger(body?.rev) && writeRoom) setView((v) => (v && v.room?.id === writeRoom && v.rev === body.rev ? { ...v, rev: r.rev } : v));
+      if (closeModal && sameModal()) setModal(null);
+      if (sameRoom()) say('ok', r?.unchanged ? '바뀐 것이 없어 저장하지 않았습니다.' : okText);
       return r;
     } catch (e) {
       const why = e?.serverReason || e?.message || '저장하지 못했습니다.';
-      setModalErr(why); say('err', why);
+      if (sameModal()) setModalErr(why);
+      if (sameRoom()) say('err', why);
       return null;
     } finally { setBusy(false); }
   }, [loadRoom]);
@@ -608,7 +619,8 @@ export default function RackTool() {
       const cur = (view?.places || []).find((p) => p.id === d.id);
       if (cur && cur.rackId === rack.id && cur.uStart === c.uStart) return;   // 제자리 — 바뀐 것이 없다(1회차 점검 정확성 1)
       if (!view) return;
-      afterRoomWrite(await run({ op: 'place.update', id: d.id, rackId: rack.id, rev: view.rev, place: { uStart: c.uStart } }, { okText: `${rack.name} U${c.uStart} 자리로 옮겼습니다.` }));
+      afterRoomWrite(await run({ op: 'place.update', id: d.id, ...(cur && cur.rackId === rack.id ? {} : { rackId: rack.id }), rev: view.rev, place: { uStart: c.uStart } },
+        { okText: `${rack.name} U${c.uStart} 자리로 옮겼습니다.`, closeModal: false, roomId: view.room.id }));
     } else if (d.type === 'server') {
       // 미배치 서버 — 높이를 모르므로 1U 로 가정하지 않고 입력 창을 연다(위치는 놓은 자리로 채운다).
       setModalErr('');
@@ -617,16 +629,21 @@ export default function RackTool() {
   };
 
   const lostView = () => { if (view) return false; setModalErr('전산실을 다시 불러오지 못했습니다 — 창을 닫고 새로 고친 뒤 다시 하세요.'); return true; };
-  const savePlace = async (f) => {
+  const nothingChanged = () => { setModal(null); say('ok', '바뀐 것이 없어 저장하지 않았습니다.'); };
+  const savePlace = async (f, f0) => {
     if (lostView()) return;
-    const body = {
-      face: f.face, uStart: f.uStart, uSize: f.uSize, kind: f.kind, label: f.label, model: f.model, note: f.note,
-      opW: f.opW, ratedW: f.ratedW, weightKg: f.weightKg,
-      ...(modal.init.serialHidden ? {} : { serial: f.serial, extraSerials: f.extraSerials }),
-    };
-    const r = modal.init.id
-      ? await run({ op: 'place.update', id: modal.init.id, rackId: f.rackId, rev: view.rev, place: body })
-      : await run({ op: 'place.add', rackId: f.rackId, rev: view.rev, place: body }, { okText: '장비를 놓았습니다.' });
+    const keys = ['face', 'uStart', 'uSize', 'kind', 'label', 'model', 'note', 'opW', 'ratedW', 'weightKg', ...(modal.init.serialHidden ? [] : ['serial', 'extraSerials'])];
+    let r;
+    if (modal.init.id) {
+      // 1회차 점검 성능 축(MEDIUM · 재현): 창을 연 때의 값을 전부 보내면, 그 사이 바뀐 값(내 직전 옮기기 · 다른 관리자의 변경)을 옛 값으로 조용히 되돌린다 — 달라진 칸만 보낸다.
+      const place = changedFields(f0, f, keys);
+      const moved = String(f.rackId ?? '') !== String(f0?.rackId ?? '');
+      if (!Object.keys(place).length && !moved) { nothingChanged(); return; }
+      r = await run({ op: 'place.update', id: modal.init.id, ...(moved ? { rackId: f.rackId } : {}), rev: view.rev, place }, { roomId: view.room.id });
+    } else {
+      const place = Object.fromEntries(keys.map((k) => [k, f[k]]));
+      r = await run({ op: 'place.add', rackId: f.rackId, rev: view.rev, place }, { okText: '장비를 놓았습니다.', roomId: view.room.id });
+    }
     if (r?.id) setSelId(r.id);
     afterRoomWrite(r);
   };
@@ -809,21 +826,30 @@ export default function RackTool() {
           onRemove={async () => {
             if (lostView()) return;
             if (!window.confirm(`‘${modal.init.label || modal.init.serial || '이름 없음'}’ 을(를) 랙에서 뺄까요? 판 기록에서 되돌릴 수 있습니다.`)) return;
-            const r = await run({ op: 'place.remove', id: modal.init.id, rev: view.rev }, { okText: '장비를 뺐습니다.' }); if (r) setSelId(''); afterRoomWrite(r);
+            const r = await run({ op: 'place.remove', id: modal.init.id, rev: view.rev }, { okText: '장비를 뺐습니다.', roomId: view.room.id }); if (r) setSelId(''); afterRoomWrite(r);
           }} />
       ) : null}
       {modal?.kind === 'rack' ? (
         <RackModal init={modal.init} types={types} busy={busy} error={modalErr} onClose={closeModal}
-          onSave={async (f) => {
+          onSave={async (f, f0) => {
             if (lostView()) return;
-            const rack = { name: f.name, row: f.row, role: f.role, pduA: f.pduA, pduB: f.pduB, typeId: f.typeId, ...(f.typeId ? {} : { heightU: f.heightU }) };
-            const r = modal.init.id ? await run({ op: 'rack.update', id: modal.init.id, rev: view.rev, rack }) : await run({ op: 'rack.add', roomId: view.room.id, rev: view.rev, rack }, { okText: '랙을 추가했습니다.' });
+            let r;
+            if (modal.init.id) {   // 고치기는 달라진 칸만(장비 고치기와 같은 이유)
+              const rack = changedFields(f0, f, ['name', 'row', 'role', 'pduA', 'pduB']);
+              if (String(f.typeId || '') !== String(f0?.typeId || '')) { rack.typeId = f.typeId; if (!f.typeId) rack.heightU = f.heightU; }
+              else if (!f.typeId && String(f.heightU ?? '').trim() !== String(f0?.heightU ?? '').trim()) rack.heightU = f.heightU;
+              if (!Object.keys(rack).length) { nothingChanged(); return; }
+              r = await run({ op: 'rack.update', id: modal.init.id, rev: view.rev, rack }, { roomId: view.room.id });
+            } else {
+              const rack = { name: f.name, row: f.row, role: f.role, pduA: f.pduA, pduB: f.pduB, typeId: f.typeId, ...(f.typeId ? {} : { heightU: f.heightU }) };
+              r = await run({ op: 'rack.add', roomId: view.room.id, rev: view.rev, rack }, { okText: '랙을 추가했습니다.', roomId: view.room.id });
+            }
             afterRoomWrite(r);
           }}
           onRemove={async () => {
             if (lostView()) return;
             if (!window.confirm(`랙 ‘${modal.init.name || ''}’ 을(를) 지울까요? 판 기록에서 되돌릴 수 있습니다.`)) return;
-            afterRoomWrite(await run({ op: 'rack.remove', id: modal.init.id, rev: view.rev }, { okText: '랙을 지웠습니다.' }));
+            afterRoomWrite(await run({ op: 'rack.remove', id: modal.init.id, rev: view.rev }, { okText: '랙을 지웠습니다.', roomId: view.room.id }));
           }} />
       ) : null}
       {modal?.kind === 'site' ? (

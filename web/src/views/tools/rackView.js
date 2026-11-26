@@ -149,6 +149,17 @@ export function defaultLabelOf(u) {
   return name;
 }
 
+/**
+ * 고치기 창에서 **달라진 칸만** 추린다(f0 = 창을 연 때의 값, f = 지금 값 — 앞뒤 공백 · 숫자/글자 차이는 같은 것으로 본다).
+ * 건드리지 않은 칸은 보내지 않는다 — 창을 연 뒤 바뀐 값(내 직전 옮기기 · 다른 관리자의 변경)을 옛 값으로 덮지 않게.
+ */
+export function changedFields(f0, f, keys) {
+  const norm = (v) => String(v ?? '').trim();
+  const out = {};
+  for (const k of keys || []) if (norm(f?.[k]) !== norm(f0?.[k])) out[k] = f[k];
+  return out;
+}
+
 /** 이력 action → 글자. */
 export const ACTION_LABEL = Object.freeze({
   'site.add': '데이터센터 추가', 'site.rename': '데이터센터 이름 변경', 'site.remove': '데이터센터 삭제',

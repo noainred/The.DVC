@@ -81,7 +81,7 @@ async function openInner() {
         note TEXT NOT NULL DEFAULT '', rated_w REAL, op_w REAL, weight_kg REAL, updated_at INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS ix_rack_place_rack ON rack_place(rack_id);
-      CREATE INDEX IF NOT EXISTS ix_rack_place_key ON rack_place(serial_key);
+      DROP INDEX IF EXISTS ix_rack_place_key;
       CREATE TABLE IF NOT EXISTS rack_log (
         id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, user TEXT NOT NULL, corp_id TEXT NOT NULL,
         room_id TEXT NOT NULL DEFAULT '', action TEXT NOT NULL, detail TEXT NOT NULL DEFAULT ''
@@ -800,8 +800,11 @@ export async function restoreVersion({ corpId, versionId, expectLatestId, user }
     const newRev = Math.max(metaGet(db, 'revFloor'), maxNow) + 1;
     // 지금 원장 지우기(이 법인 것만). 반증 L-3: 이력(rack_log)은 지우지 않는다 — 그 전산실이 다시 되돌려지면 이력도 함께 보인다(전산실마다 2,000건 상한은 그대로).
     const del = { place: db.prepare('DELETE FROM rack_place WHERE id = ?'), rack: db.prepare('DELETE FROM rack_rack WHERE id = ?'), room: db.prepare('DELETE FROM rack_room WHERE id = ?'), site: db.prepare('DELETE FROM rack_site WHERE id = ?') };
-    const delKeys = db.prepare('DELETE FROM rack_place_key WHERE place_id = ?');
-    for (const p of cur.places) { del.place.run(p.id); delKeys.run(p.id); }
+    // 시리얼 키 색인도 함께(색인을 아직 못 채운 핸들이면 건너뛴다 — 다음 keysUsable 이 원장에서 통째로 다시 만든다). 문장은 반복문 밖에서 한 번만 준비한다
+    //   (1회차 점검 성능 축 — 실측: 장비마다 setPlaceKeys 를 부르면 문장 준비 때문에 5,100대 되돌리기가 145 → 225ms).
+    const delKeys = _keysReady ? db.prepare('DELETE FROM rack_place_key WHERE place_id = ?') : null;
+    const insKey = _keysReady ? db.prepare('INSERT OR IGNORE INTO rack_place_key (key, place_id) VALUES (?, ?)') : null;
+    for (const p of cur.places) { del.place.run(p.id); if (delKeys) delKeys.run(p.id); }
     for (const r of cur.racks) del.rack.run(r.id);
     for (const r of cur.rooms) del.room.run(r.id);
     for (const s of cur.sites) del.site.run(s.id);
@@ -820,7 +823,7 @@ export async function restoreVersion({ corpId, versionId, expectLatestId, user }
     for (const r of restorableSnapshot(snap, (id) => !!typeOk.get(id)).racks) ins.rack.run(r.id, r.roomId, r.name, r.row, r.typeId, r.heightU, r.role, r.pduA, r.pduB, r.sort);
     for (const p of snap.places) {
       ins.place.run(p.id, p.rackId, p.face, p.uStart, p.uSize, p.kind, p.label, p.model, p.serial, serialKeyOf(p.serial), JSON.stringify(p.extraSerials), p.note, p.ratedW, p.opW, p.weightKg, now);
-      setPlaceKeys(db, p.id, keysOf(p));
+      if (insKey) for (const k of keysOf(p)) insKey.run(k, p.id);
     }
     const detail = `판 #${v.id} 으로 되돌림`;
     for (const r of snap.rooms) log(db, { user, corpId, roomId: r.id, action: 'version.restore', detail, version: false });
