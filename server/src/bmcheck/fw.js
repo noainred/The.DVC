@@ -167,7 +167,8 @@ export function fwRowState(installed, baseline, mixed = false) {
  * @param {Array<{ id:string, corp:string, model:string, fw: {comps:object[],skipped:number}|null|undefined }>} servers
  *        fw: 객체 = 읽음 · null = 못 읽음(인벤토리는 있는데 목록 없음 · 인벤토리 없음) · undefined = 보내지 않음(엣지 구버전)
  * @param {{ admin?: (model:string, key:string) => string|'' }} opt  관리자 지정 기준(모델 · 구성요소 열쇠 → 버전)
- * @returns {Map<string, { state:'ok'|'behind'|'split'|'none'|'unread'|'unsent', rows:object[], behind:number, ahead:number, judged:number, open:number, skipped:number, peers:number }>}
+ * @returns {Map<string, { state:'ok'|'behind'|'split'|'none'|'unread'|'unsent', rows:object[], behind:number, differ:number, ahead:number, judged:number, open:number, skipped:number, peers:number }>}
+ *   behind 는 differ(다른데 순서를 모름)를 포함한다(점검 화면의 ‘기준과 다름’) · differ 는 그 안의 수
  *   peers = 같은 법인 · 같은 모델에서 펌웨어를 읽은 서버 수(이 서버 포함) · open = 갈림 · 섞임으로 판정하지 못한 줄 수
  */
 export function judgeFirmware(servers, { admin = null } = {}) {
@@ -200,7 +201,7 @@ export function judgeFirmware(servers, { admin = null } = {}) {
     if (s.fw === undefined) { out.set(s.id, { state: 'unsent', rows: [], behind: 0, ahead: 0, judged: 0, open: 0, skipped: 0, peers: 0 }); continue; }
     if (!s.fw || !Array.isArray(s.fw.comps)) { out.set(s.id, { state: 'unread', rows: [], behind: 0, ahead: 0, judged: 0, open: 0, skipped: 0, peers: 0 }); continue; }
     const g = groupOf(s);
-    let behind = 0; let ahead = 0; let judged = 0; let open = 0;
+    let behind = 0; let ahead = 0; let judged = 0; let open = 0; let differ = 0;
     const rows = s.fw.comps.filter((c) => c && typeof c === 'object' && typeof c.key === 'string').map((c) => {
       const adminVer = typeof admin === 'function' ? String(admin(s.model, c.key) || '') : '';
       const mj = g ? majority.get(`${g}\u0000${c.key}`) : null;
@@ -210,6 +211,7 @@ export function judgeFirmware(servers, { admin = null } = {}) {
       const basis = adminVer ? 'admin' : majorVer ? 'majority' : null;
       const state = fwRowState(c.version, baseline, c.mixed);
       if (state === 'behind' || state === 'differ') behind += 1;
+      if (state === 'differ') differ += 1;   // v3.50: behind 안의 ‘순서를 모름’ 수 — 건강 점수는 이것을 감점하지 않는다(반증 B8)
       if (state === 'ahead') ahead += 1;
       if (state !== 'none' && state !== 'mixed') judged += 1;
       // 판정하지 못했는데 ‘같다’ 고도 할 수 없는 줄 — 버전이 갈려 다수가 없다(tie) · 한 서버 안에서 섞였다(mixed)
@@ -217,7 +219,7 @@ export function judgeFirmware(servers, { admin = null } = {}) {
       return { key: c.key, type: c.type, label: c.label, installed: c.version, mixed: !!c.mixed, baseline: baseline || null, basis, state,
         ...(basis === 'majority' ? { peers: mj.count, known: mj.known } : {}), ...(mj && !mj.value && mj.tie ? { tie: true } : {}) };
     });
-    out.set(s.id, { state: behind ? 'behind' : open ? 'split' : judged ? 'ok' : 'none', rows, behind, ahead, judged, open, skipped: Number(s.fw.skipped) || 0, peers: g ? groupN.get(g) || 0 : 0 });
+    out.set(s.id, { state: behind ? 'behind' : open ? 'split' : judged ? 'ok' : 'none', rows, behind, differ, ahead, judged, open, skipped: Number(s.fw.skipped) || 0, peers: g ? groupN.get(g) || 0 : 0 });
   }
   return out;
 }

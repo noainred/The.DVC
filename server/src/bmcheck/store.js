@@ -139,3 +139,99 @@ export function setAdminBaseline({ model, key, label = '', type = '', version = 
   const r = fwBaselineStore.save({ v: 1, models });
   return r.ok ? { ok: true, changed: true } : r;
 }
+
+// ───────── v3.50 — 제조사 케이스(⑫) · 보안 권고 표(④) ─────────
+//   CONFIG_DIR/bm-cases.json       케이스 기록 — { v:1, cases: { <id>: { id, tag, part, caseNo, status, note, by, at, created, hist:[…] } } }
+//   CONFIG_DIR/bm-advisories.json  보안 권고 표(사람이 확인해 올린 것) — { v:1, at, by, rows: [ { id, sev, type, model, comp, fixed, title, url } ] }
+//   같은 공용 로더 규약(손상이면 쓰기 거절 · 서비스 점검 등재). 권고 표는 포탈이 인터넷에서 가져오지 않는다 — 비어 있으면 대조하지 않는다.
+const CASES_FILE = () => path.join(config.configDir, 'bm-cases.json');
+const ADVISORY_FILE = () => path.join(config.configDir, 'bm-advisories.json');
+export const CASE_STATUSES = Object.freeze(['open', 'parts', 'replaced', 'closed']);
+export const CASES_MAX = 5_000;
+export const CASE_HIST_MAX = 20;
+export const ADVISORY_ROWS_MAX = 2_000;
+export const ADVISORY_SEVS = Object.freeze(['critical', 'high', 'medium', 'low']);
+const caseShape = (d) => {
+  const cases = {};
+  if (isObj(d) && isObj(d.cases)) {
+    for (const [k, c] of Object.entries(d.cases)) {
+      const id = String(k).slice(0, 40);
+      if (!isObj(c) || isReservedKey(id) || !/^[a-z0-9-]{4,40}$/.test(id) || !str(c.tag, 64)) continue;
+      const hist = Array.isArray(c.hist) ? c.hist.filter(isObj).slice(-CASE_HIST_MAX).map((h) => ({ at: Number.isFinite(h.at) ? h.at : null, by: str(h.by, 80), status: CASE_STATUSES.includes(h.status) ? h.status : '', caseNo: str(h.caseNo, 64) })) : [];
+      cases[id] = { id, tag: str(c.tag, 64).toLowerCase(), corp: str(c.corp, 128), part: str(c.part, 120), caseNo: str(c.caseNo, 64), status: CASE_STATUSES.includes(c.status) ? c.status : 'open', note: str(c.note, 500),
+        by: str(c.by, 80), at: Number.isFinite(c.at) ? c.at : null, created: Number.isFinite(c.created) ? c.created : null, hist };
+    }
+  }
+  return { v: 1, cases };
+};
+const advisoryShape = (d) => {
+  const rows = [];
+  if (isObj(d) && Array.isArray(d.rows)) {
+    for (const r of d.rows.slice(0, ADVISORY_ROWS_MAX)) {
+      if (!isObj(r) || !str(r.id, 64).trim() || !str(r.fixed, 48).trim() || !str(r.type, 16)) continue;
+      rows.push({ id: str(r.id, 64).trim(), sev: ADVISORY_SEVS.includes(r.sev) ? r.sev : 'medium', type: str(r.type, 16), model: str(r.model, 120).trim().toLowerCase(), comp: str(r.comp, 120).trim().toLowerCase(),
+        fixed: str(r.fixed, 48).trim(), title: str(r.title, 200), url: /^https?:\/\//i.test(str(r.url, 300)) ? str(r.url, 300) : '' });
+    }
+  }
+  return { v: 1, at: isObj(d) && Number.isFinite(d.at) ? d.at : null, by: isObj(d) ? str(d.by, 80) : '', rows };
+};
+const parseList = (field) => (text) => {
+  const v = JSON.parse(text);
+  if (!isObj(v) || !Array.isArray(v[field])) throw new Error(`형식이 아닙니다(객체 · ${field} 목록이 있어야 합니다)`);
+  if (v.v !== undefined && v.v !== 1) throw new Error('이 판이 모르는 파일 판 번호입니다');
+  return v;
+};
+const _casesFile = makeJsonFileLoader(CASES_FILE, { label: '물리서버 제조사 케이스 기록', tag: 'bm-cases', parse: parseDoc('cases'), confirm: () => caseStore._confirm() });
+const _advisoryFile = makeJsonFileLoader(ADVISORY_FILE, { label: '물리서버 펌웨어 보안 권고 표', tag: 'bm-advisories', parse: parseList('rows'), confirm: () => advisoryStore._confirm() });
+/** 제조사 케이스 기록(⑫). */
+export const caseStore = docStore({ file: CASES_FILE, L: _casesFile, what: '물리서버 제조사 케이스 기록', empty: () => caseShape(null), shape: caseShape });
+/** 펌웨어 보안 권고 표(④). */
+export const advisoryStore = docStore({ file: ADVISORY_FILE, L: _advisoryFile, what: '물리서버 펌웨어 보안 권고 표', empty: () => advisoryShape(null), shape: advisoryShape });
+
+/**
+ * 케이스 하나를 더하거나 고친다(id 가 없으면 새로). 상태 · 번호가 바뀌면 이력에 한 줄. 넘침은 거절.
+ * 케이스는 **서비스 태그 + 법인**으로 묶는다(v3.50 반증 A2 — 같은 태그가 다른 법인 서버로 나타나도 그 법인 계정이 남의 법인 케이스를 읽거나 고치지 못하게).
+ * 다른 법인 · 다른 서버의 케이스 id 는 ‘찾지 못함’(404 — 있음을 드러내지 않는다).
+ * @returns {{ ok:boolean, status?:number, reason?:string, id?:string, changed?:boolean }}
+ */
+export function upsertCase({ id = '', tag, corp = '', part = '', caseNo = '', status = 'open', note = '', by = '', now = Date.now(), newId = null } = {}) {
+  const tg = String(tag || '').trim().toLowerCase().slice(0, 64);
+  const cp = String(corp || '').slice(0, 128);
+  if (!tg) return { ok: false, status: 400, reason: '서비스 태그를 모르는 서버에는 케이스를 적을 수 없습니다.' };
+  if (!CASE_STATUSES.includes(status)) return { ok: false, status: 400, reason: '모르는 상태입니다.' };
+  const doc = caseStore.get();
+  const cases = { ...doc.cases };
+  const cid = String(id || '').trim();
+  const cur = cid ? (Object.hasOwn(cases, cid) ? cases[cid] : null) : null;
+  if ((cid && !cur) || (cur && (cur.tag !== tg || cur.corp !== cp))) return { ok: false, status: 404, reason: '케이스를 찾지 못했습니다(다른 사람이 지웠을 수 있습니다).' };
+  if (!cur && Object.keys(cases).length >= CASES_MAX) return { ok: false, status: 400, reason: `케이스 기록이 너무 많습니다(최대 ${CASES_MAX}건) — 끝난 케이스를 지워 자리를 만드십시오(서버 상세 › 제조사 케이스 › 지우기).` };
+  const nid = cur ? cid : (newId || `c-${now.toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
+  const next = { id: nid, tag: tg, corp: cp, part: String(part).slice(0, 120), caseNo: String(caseNo).trim().slice(0, 64), status, note: String(note).slice(0, 500), by: String(by).slice(0, 80), at: now,
+    created: cur?.created ?? now, hist: [...(cur?.hist || [])] };
+  if (!cur || cur.status !== next.status || cur.caseNo !== next.caseNo) next.hist = [...next.hist, { at: now, by: next.by, status: next.status, caseNo: next.caseNo }].slice(-CASE_HIST_MAX);
+  if (cur && cur.part === next.part && cur.caseNo === next.caseNo && cur.status === next.status && cur.note === next.note) return { ok: true, id: nid, changed: false };
+  cases[nid] = next;
+  const r = caseStore.save({ v: 1, cases });
+  return r.ok ? { ok: true, id: nid, changed: true } : r;
+}
+/**
+ * 끝난(closed) 케이스 하나를 지운다(v3.50 — 상한 5,000 건이 차면 새 케이스를 막는데 지울 길이 없었다: 반증 A11). 진행 중인 케이스는 지우지 않는다.
+ * 다른 서버(태그) · 다른 법인의 id 는 ‘찾지 못함’(404 — 있음을 드러내지 않는다).
+ */
+export function removeCase({ id = '', tag, corp = '' } = {}) {
+  const tg = String(tag || '').trim().toLowerCase().slice(0, 64); const cp = String(corp || '').slice(0, 128); const cid = String(id || '').trim();
+  const doc = caseStore.get();
+  const cur = cid && Object.hasOwn(doc.cases, cid) ? doc.cases[cid] : null;
+  if (!cur || cur.tag !== tg || cur.corp !== cp) return { ok: false, status: 404, reason: '케이스를 찾지 못했습니다(다른 사람이 지웠을 수 있습니다).' };
+  if (cur.status !== 'closed') return { ok: false, status: 400, reason: '끝난 케이스만 지울 수 있습니다(상태를 ‘끝남’ 으로 바꾼 뒤 지우십시오).' };
+  const cases = { ...doc.cases }; delete cases[cid];
+  const r = caseStore.save({ v: 1, cases });
+  return r.ok ? { ok: true, removed: cur } : r;
+}
+/** 서버(태그 + 법인)의 케이스 — 새로 고친 것부터. 법인이 다른 케이스는 싣지 않는다(반증 A2). */
+export function casesOfTag(tag, { corp = '', doc = caseStore.get() } = {}) {
+  const tg = String(tag || '').trim().toLowerCase();
+  const cp = String(corp || '').slice(0, 128);
+  if (!tg) return [];
+  return Object.values(doc?.cases || {}).filter((c) => c.tag === tg && c.corp === cp).sort((a, b) => (b.at ?? 0) - (a.at ?? 0));
+}

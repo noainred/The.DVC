@@ -27,6 +27,8 @@ export const POWER_ALERT_TITLE_RE = /베어메탈 사용률 — 전력 알림 �
 
 /** 물리서버 ‘같은 묶음 대비’(엣지 대행 POST /bm-usage/peer-avg — v3.48) 표지 — 릴리스 노트 제목에 이 문구를 그대로 넣는다. */
 export const PEER_TITLE_RE = /물리서버 — 같은 묶음 대비/;
+/** 물리서버 ‘하드웨어 이벤트 로그’(엣지 대행 GET /bm-hwlog — v3.50) 표지 — 릴리스 노트 제목에 이 문구를 그대로 넣는다. */
+export const HWLOG_TITLE_RE = /물리서버 — 하드웨어 이벤트 로그/;
 
 const verCmp = (a, b) => { const x = String(a).split('.').map(Number); const y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0); return 0; };
 const _memo = new Map();   // re.source → 버전
@@ -55,6 +57,8 @@ export function featureMinEdgeVersion(titleRe, { notesFile = new URL('../release
 export const stage6MinEdgeVersion = (o) => featureMinEdgeVersion(STAGE6_TITLE_RE, o);
 /** 물리서버 ‘같은 묶음 대비’ 를 답하는 엣지의 최소 버전 — 숫자를 박지 않는다(릴리스 노트의 그 제목 첫 번호 · 없으면 지금 버전). */
 export const peerMinEdgeVersion = (o) => featureMinEdgeVersion(PEER_TITLE_RE, o);
+/** 물리서버 ‘하드웨어 이벤트 로그’ 를 답하는 엣지의 최소 버전. */
+export const hwlogMinEdgeVersion = (o) => featureMinEdgeVersion(HWLOG_TITLE_RE, o);
 /** 7a단계(로그 분석 봉투 · 엣지 대행) 최소 엣지 버전. */
 export const stage7aMinEdgeVersion = (o) => featureMinEdgeVersion(STAGE7A_TITLE_RE, o);
 /** 7b단계(서버 등록 배포를 받는 엣지) 최소 엣지 버전 — 숫자를 박지 않는다(릴리스 노트의 7b단계 첫 번호 · 없으면 지금 버전). */

@@ -75,7 +75,7 @@ export function monthsText(m) {
 }
 
 /** 목록 빠른 거르기 열쇠(저장한 보기의 허용 값이기도 하다). */
-export const CHK_QUICK = Object.freeze(['wty:expired', 'wty:soon', 'wty:unknown', 'fw:behind', 'bios:diff']);
+export const CHK_QUICK = Object.freeze(['wty:expired', 'wty:soon', 'wty:unknown', 'fw:behind', 'bios:diff', 'adv:hit']);
 /** 그 행이 빠른 거르기에 맞는가. 점검 열쇠가 아니면 null(다른 거르기가 본다). */
 export function chkQuickMatch(r, quick) {
   if (!CHK_QUICK.includes(quick)) return null;
@@ -84,6 +84,7 @@ export function chkQuickMatch(r, quick) {
   if (quick === 'wty:soon') return c.w === 'soon';
   if (quick === 'wty:unknown') return c.w === 'unknown';
   if (quick === 'fw:behind') return c.fw === 'behind';
+  if (quick === 'adv:hit') return c.adva === 'hit';   // v3.50 펌웨어 보안 권고에 걸린 서버(시안 ④ ‘해당 서버 N대’ — 반증 B3)
   return c.bios === 'diff';
 }
 
@@ -95,6 +96,7 @@ export function chkCounts(rows = []) {
   const w = { expired: 0, soon: 0, ok: 0, unknown: 0, na: 0 };
   const fw = { behind: 0, ok: 0, split: 0, none: 0, unread: 0, unsent: 0, na: 0 };
   const bios = { diff: 0, ok: 0, split: 0, none: 0, unread: 0, unsent: 0, unplaced: 0, na: 0 };
+  const adv = { hit: 0, clear: 0, unmatched: 0, unknown: 0, 'no-fw': 0, 'no-table': 0, na: 0 };
   let bm = 0;
   for (const r of Array.isArray(rows) ? rows : []) {
     const c = r?.chk || {};
@@ -103,8 +105,9 @@ export function chkCounts(rows = []) {
     bm += 1;
     if (c.fw in fw && c.fw !== 'na') fw[c.fw] += 1; else fw.na += 1;
     if (c.bios in bios && c.bios !== 'na') bios[c.bios] += 1; else bios.na += 1;
+    if (typeof c.adva === 'string' && Object.hasOwn(adv, c.adva) && c.adva !== 'na') adv[c.adva] += 1; else adv.na += 1;
   }
-  return { n: (Array.isArray(rows) ? rows : []).length, bm, w, fw, bios };
+  return { n: (Array.isArray(rows) ? rows : []).length, bm, w, fw, bios, adv };
 }
 
 /** 빠른 거르기 칩 — [열쇠, 글자, 개수, 설명]. 개수가 0 이어도 칩은 보인다(0 이라는 사실이 정보다) — 판정 자체가 없으면(전부 na) 뺀다. */
@@ -119,6 +122,9 @@ export function chkChips(counts, soonDays) {
   }
   if (c.bm && c.fw.na < c.bm) out.push(['fw:behind', '펌웨어 뒤처짐', c.fw.behind, '기준(관리자 지정 또는 같은 법인 · 같은 모델의 다수 버전)과 다른 구성요소가 있는 서버']);
   if (c.bm && c.bios.na < c.bm) out.push(['bios:diff', 'BIOS 다름', c.bios.diff, '같은 폴더 · 같은 모델 서버의 다수 값과 다른 BIOS 설정이 있는 서버']);
+  // 권고 표가 있을 때만(비었으면 대조하지 않았다 — 0 대로 보이지 않게)
+  const a = c.adv || { na: c.bm, 'no-table': 0 };
+  if (c.bm && a.na + (a['no-table'] || 0) < c.bm) out.push(['adv:hit', '보안 권고', a.hit || 0, '관리자가 올린 보안 권고 표와 대조해 설치 버전이 고친 버전보다 낮은 구성요소가 있는 서버(건강 점수에는 넣지 않습니다)']);
   return out;
 }
 /** 요약 줄의 ‘따로 센 것’ 글자 — 못 읽음 · 보내지 않음 · 판정 안 함. 없으면 ''. */
@@ -134,6 +140,8 @@ export function chkAsideText(counts) {
   if (c.bios.split) p.push(`BIOS 갈림(다수 없음) ${c.bios.split}`);
   if (c.bios.none) p.push(`BIOS 견줄 서버 없음 ${c.bios.none}`);
   if (c.bios.unplaced) p.push(`BIOS 미분류(판정 안 함) ${c.bios.unplaced}`);
+  if (c.adv?.unknown) p.push(`보안 권고 판정 못 함 ${c.adv.unknown}`);
+  if (c.adv?.['no-fw']) p.push(`보안 권고 대조 못 함(펌웨어 못 읽음) ${c.adv['no-fw']}`);
   return p.join(' / ');
 }
 
