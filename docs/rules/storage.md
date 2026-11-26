@@ -955,7 +955,7 @@
   경로별 항목 수 · 오류 · 단위 종류 · FC 경로. 로컬 폴러와 중앙 수신에서 기록 · 메모리) + 표본 쪽 포트 이름 · 짝 없는 구성 포트(각 8개) ③ 화면은 사유를 **표 위에** 사유별로 묶고
   비-admin 에는 진단 오류 원문을 가린다 ④ FC 처리량 `fibreChannel.target.*` 가 비면 `fibreChannel.fePort.*` 를 한 번 더(실장비 미확인 — probe.fcPath 가 밝힘)
   ⑤ WWN 은 포트 WWN(뒤 8바이트) 전체 — 노드 WWN 꼬리가 같아 모든 포트가 같아 보였다. 회귀 `unityIface3350` ⑪~⑬ · 웹 `ifaceText.test.js`.
-  ⚠ **v3.46.0 — SSH 로 등록한 Unity 도 사용량을 읽는다**(사용자 요청 "SSH 장비도 사용량은 REST 로 읽게 해줘, 안되면 SSH 로 진행" · 선택 'SSH 계정 그대로' · 표준 검증):
+  ⚠ **v3.46.0(실제 릴리스 v3.47.0 — 다른 세션이 3.46.0 을 먼저 써서 번호만 올렸다 · 코드 · 테스트 표지는 v3.46.0) — SSH 로 등록한 Unity 도 사용량을 읽는다**(사용자 요청 "SSH 장비도 사용량은 REST 로 읽게 해줘, 안되면 SSH 로 진행" · 선택 'SSH 계정 그대로' · 표준 검증):
   ① 표본 대상 판정은 `arrayPerf.sampleCapableOf` **하나**(등록부 토글 · CSV `nodeLoad` 칸 · 폴러 `sampleTargets` · 등록 화면 — 예전 네 곳 복제). SSH PowerStore 등 다른 SSH 어레이는 그대로 제외.
   ② `collectors/unityMetricsSsh.js sampleUnityAny`: REST(Unisphere `metricValue` — REST 장비와 같은 `sampleUnity`)를 **SSH 계정 그대로** 먼저, 실패하면 이번 주기는 SSH(`uemcli /metrics/value/hist … -interval 60 -count N` → 같은 조립).
   ③ **REST 인증 거절은 그 장비의 REST 표본만 멈춘다**(`storage/restSampleGate.js` — 자격증명 지문이 바뀔 때까지 · 시한 없음). 장비 인증 정지(`authGuard`)는 **걸지 않는다**(걸면 SSH 용량 · 상태 수집까지 멈춘다 —
