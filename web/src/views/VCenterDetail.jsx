@@ -45,7 +45,7 @@ import ConfigureTab from './vcd/ConfigureTab.jsx';
 import { DatacenterTab, ExtensionsTab, PermsTab, LinkedTab, UpdatesTab } from './vcd/InventoryTabs.jsx';
 // v2.895(사용자 요청 '폴더에서 VM 을 vCenter 처럼 — 별도 버튼 · ESXi 호스트도'): 개체 보기 — 주소 #/vcenters/<vc>/vm|host/<id>[/<탭>] (승인 시안 ⑧~⑪ · 기본값 8~10).
 import { parseVcRoute, vcHash, currentHash, goHash, replaceHash, onHashChange } from './vcd/vcdRoute.js';
-import { normObjTab, TUNING_TAB } from './vcd/objTabs.js';
+import { normObjTab, TUNING_TAB, POWER_TAB } from './vcd/objTabs.js';
 import { VmTuning, HostTuning } from './vcd/TuningTabs.jsx'; // v2.895 성능 튜닝 탭(승인 시안 ⑫⑬ · 기본값 11~13)
 import VmObject from './vcd/VmObject.jsx';
 import HostObject from './vcd/HostObject.jsx';
@@ -617,7 +617,7 @@ export default function VCenterDetail({ site, onBack, siblings = null, onOpen = 
       {obj && obj.type === 'vm' && (
         <VmObject site={site} vcenterId={vcenterId} vm={vms.find((v) => v.id === obj.id) || null} vmsOk={vmsOk} gate={gateEl(vmsPart, 'VM 목록')}
           datastores={datastores} hosts={hosts} networks={networks} tab={normObjTab('vm', obj.tab)} onTab={setObjTab} onBack={closeObj}
-          onOpenHost={(id) => openObj('host', id)} extraTabs={[TUNING_TAB]} sigCounts={vmsD?.signalCounts || null}
+          onOpenHost={(id) => openObj('host', id)} extraTabs={[POWER_TAB, TUNING_TAB]} sigCounts={vmsD?.signalCounts || null}
           extra={normObjTab('vm', obj.tab) === 'tuning' && vms.find((v) => v.id === obj.id) ? <VmTuning vm={vms.find((v) => v.id === obj.id)} vms={vms} datastores={datastores} /> : null} />
       )}
       {obj && obj.type === 'host' && (

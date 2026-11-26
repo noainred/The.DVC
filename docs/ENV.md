@@ -3,7 +3,7 @@
 `server/src` 가 실제로 읽는 환경변수 **761개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
-- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-11-25)
+- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-11-26)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다.
 - `portal.env.example` 에 예시가 있는 키는 ✅, 없는 키는 빈칸으로 표시한다.
 - 기본값 칸이 비어 있으면 코드에서 한 줄로 추출하지 못한 것이다(해당 파일을 참조).
@@ -734,7 +734,7 @@
 |---|---|---|---|
 | `VMTRACK_DB_PATH` |  |  | vmtrack/db.js |
 | `VMTRACK_DS_DELTA_MIN_GB` | `1` |  | vmtrack/diff.js |
-| `VMTRACK_RETENTION_DAYS` | `1095` |  | vmtrack/db.js |
+| `VMTRACK_RETENTION_DAYS` | `1095` |  | vmpower/watcher.js, vmtrack/db.js |
 
 ## 헬스체크 (1)
 

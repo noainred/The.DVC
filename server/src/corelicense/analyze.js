@@ -12,6 +12,8 @@
  */
 import { numOrNull } from '../util/numOrNull.js';   // v2.727(감사 C-02)
 import { unreadVcenterReasons } from '../metrics/unreadVcenters.js';   // v2.744(감사 VC-03): '지금 값으로 쓰지 않는 vCenter' 판정 한 벌
+import { licenseFamilyOf, licenseExpiryStatus } from '../util/licenseExpiry.js';   // v3.42.0: 만료 행 판정(vcenterLicenseRows) — 특수 기능 · 공개 API 한 벌
+import { dayKey } from '../util/dayKey.js';
 
 /**
  * v2.744(감사 VC-03): 리포트(코어 라이선스·비용 배분·이전 준비도)가 **읽지 못한 vCenter** — 인벤토리(호스트·VM)가 하나도 없는데 상태가
@@ -119,6 +121,41 @@ export const LIST_UNREAD_TEXT = Object.freeze({
 
 /** 읽은 목록의 객체 원소만(엣지가 보낸 모양이 틀려도 글자 단위 항목·null 원소로 던지지 않게). 못 읽었으면 빈 배열. */
 export const vcListItems = (vc, field) => (Array.isArray(vc?.[field]) ? vc[field].filter((x) => x && typeof x === 'object' && !Array.isArray(x)) : []);
+
+/**
+ * v3.42.0: vCenter 라이선스 만료 행 — 특수 기능 '라이선스 만료일 확인'(routes/api/toolsInfo.js)과 공개 API /compliance/licenses 가
+ *   **같은 함수**를 쓴다(예전에는 라우트 안에만 있었다 — 공개 API 가 사본을 만들면 두 경로의 상태 · 남은 일수가 갈린다).
+ *   eval 키('Evaluation Mode')는 total=0 · 만료 별도 표기 그대로. 키 값(key)은 행에 있지만 **공개 API 는 투사에서 뺀다**(내부 화면 전용).
+ * @param {object[]} vcs 이미 범위로 거른 vCenter 목록
+ * @returns {{ items: object[], unread: { vcenterId:string, vcenterName:string, why:string, error:string }[] }}
+ *   unread[].error 는 원문(주소가 들어갈 수 있다 — 관리자 판본에만 싣는 것은 부르는 쪽 책임 · vcListUnread 와 같은 규약)
+ */
+/** 이름 · 에디션을 못 읽은 라이선스의 화면용 자리표시 — 공개 API 는 이 글자를 null 로 바꾼다(값이 아니다). */
+export const LICENSE_NAME_PLACEHOLDER = '(이름 없음)';
+
+export function vcenterLicenseRows(vcs) {
+  const items = [];
+  const unread = [];
+  for (const vc of Array.isArray(vcs) ? vcs : []) {
+    if (!vc) continue;
+    const u = vcListUnread(vc, 'licenses');
+    if (u) unread.push({ vcenterId: vc.id, vcenterName: vc.name || vc.id, why: u.why, error: u.error || '' });
+    for (const l of vcListItems(vc, 'licenses')) {
+      const ts = l.expires ? (Date.parse(l.expires) || null) : null;
+      const st = licenseExpiryStatus(ts);
+      items.push({
+        source: 'vCenter', where: vc.name || vc.id, vcenterId: vc.id,
+        name: l.name || l.edition || LICENSE_NAME_PLACEHOLDER,
+        family: licenseFamilyOf(`${l.name} ${l.edition} ${l.product}`),
+        edition: l.edition || '', product: l.product || '', productVersion: l.productVersion || '',
+        key: l.key || '', total: l.total ?? null, used: l.used ?? null,
+        expires: dayKey(ts),
+        status: st.status, daysLeft: st.daysLeft,
+      });
+    }
+  }
+  return { items, unread };
+}
 
 export const MIN_CORES_PER_SOCKET = 16;
 export const VSAN_TIB_PER_CORE = Object.freeze({ none: 0, vvf: 0.25, vcf: 1 });

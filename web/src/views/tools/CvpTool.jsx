@@ -20,7 +20,9 @@ import CvpLinkQualityView from './CvpLinkQuality.jsx';   // v3.38 ④ ⑩ 링크
 import CvpTopologyView from './CvpTopology.jsx';         // v3.38 ⑥ ⑦ 토폴로지 · 양끝 불일치
 import CvpLocateView from './CvpLocate.jsx';             // v3.38 ① 위치 찾기
 import CvpCompareView from './CvpCompare.jsx';           // v3.38 ⑬ 작업 전후 비교
-import { TAB_GROUPS, TAB_KEYS } from './cvpNetText.js';
+import { TAB_GROUPS, TAB_KEYS, emptyColumnNotes } from './cvpNetText.js';
+import CvpComplianceView from './CvpCompliance.jsx';     // v3.41 ③ 버전 준수
+import CvpRedundancyView from './CvpRedundancy.jsx';     // v3.41 ⑧ 이중화
 import { descCell, byIntfName } from './cvpIntfText.js';
 import {
   facetRowsOf, corpNameFn, modelLabel, eosVersionOf, versionLabel, cvpServerVersionMap, cvpServerVersionOf, cvpVersionLabel, cvpVersionChips, eventCorpChips, eventSevChips, deviceSummaryTiles, historyNotes, CORP_NOTE, corpLabel,
@@ -228,6 +230,8 @@ export default function CvpTool() {
       {view === 'topology' && <CvpTopologyView servers={servers} onOpen={(t) => setDetailKey(t)} />}
       {view === 'locate' && <CvpLocateView onOpen={(t) => setDetailKey({ ...t, tab: 'ports' })} />}
       {view === 'compare' && <CvpCompareView servers={servers} />}
+      {view === 'compliance' && <CvpComplianceView servers={servers} onOpen={(t) => setDetailKey(t)} />}
+      {view === 'redundancy' && <CvpRedundancyView servers={servers} onOpen={(t) => setDetailKey({ ...t, tab: 'ports' })} />}
 
       {view === 'devices' && (<>
       <div className="card" style={{ minWidth: 0 }}>
@@ -487,6 +491,7 @@ function DeviceModal({ target, onClose, onIntf }) {
                 <span>포트 이름을 누르면 사용률 추이를 봅니다. 사용률은 인터페이스 속도를 알 때만 방향별로 계산합니다. 설명은 부품 주기(기본 30분)마다 읽습니다.</span>
                 {onIntf && <button type="button" className="btn" style={{ padding: '2px 8px' }} onClick={() => onIntf(`${target.cvpId}|${target.key}`)}>인터페이스 세부 정보로 보기</button>}
               </div>
+              <EmptyColsNote ports={ports} d={d} />
               <STable minWidth={1060} limit={1024}>
                 <thead><tr><th>포트</th><th>설명</th><th>속도</th><th>상태</th><th>관리</th><th>VLAN</th><th>LAG</th><th>수신</th><th>송신</th><th>수신 %</th><th>송신 %</th><th>오류(수/송)</th><th title="스위치 discards 직전 주기 델타 — 텔레메트리 필드 이름은 실장비 미확인 추정">드롭(수/송)</th></tr></thead>
                 <tbody>
@@ -603,6 +608,19 @@ function HistoryView({ h, addressHidden }) {
         )}
       </div>
       {addressHidden && <div style={NOTE}>🔒 장애 대상·상세·이벤트 본문의 주소는 가렸습니다.</div>}
+    </div>
+  );
+}
+
+/** v3.41: 포트 표에서 모든 행이 빈 칸의 이유(사용자 실장비 캡처 — 속도 · VLAN · LAG · 처리량이 전부 '—'). 판정 문장은 cvpNetText.emptyColumnNotes 하나. */
+function EmptyColsNote({ ports, d }) {
+  const notes = emptyColumnNotes(ports, { usedPaths: d.usedPaths || {}, missing: d.missing || {}, seenFields: d.seenFields || {} });
+  if (!notes.length) return null;
+  return (
+    <div className="banner" style={{ display: 'grid', gap: 4, minWidth: 0 }}>
+      <b style={{ fontSize: 13 }}>모든 포트가 비어 있는 칸 — 이유</b>
+      {notes.map((n) => <div key={n.col} style={{ fontSize: 12.5, overflowWrap: 'anywhere' }}><b>{n.col}</b>: {n.text}</div>)}
+      <div style={{ ...NOTE, fontSize: 12 }}>근거는 이 CVP 의 수집 상태입니다(장비별이 아닙니다). 관리자는 ‘읽은 경로’ 탭에서 원문 표본을 볼 수 있습니다.</div>
     </div>
   );
 }

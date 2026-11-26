@@ -159,6 +159,7 @@ export const STATUS_SPEC = Object.freeze([
   { key: 'collect.idrac', label: 'iDRAC 수집', group: 'collect', mod: '../idrac/poller.js', fn: 'getPollerStatus' },
   { key: 'collect.idracScanLocal', label: 'iDRAC 스캔(로컬)', group: 'collect', mod: '../idrac/scanPoller.js', fn: 'idracScanStatus' },
   { key: 'collect.powerOff', label: '전원 꺼짐 점검', group: 'collect', mod: '../tools/powerOffPoller.js', fn: 'powerOffPollerStatus' },
+  { key: 'collect.powerWatch', label: 'VM 전원 구간 관측', group: 'collect', mod: '../vmpower/watcher.js', fn: 'powerWatchStatus' },
   { key: 'collect.vmClone', label: 'VM 복제 스케줄러', group: 'collect', mod: '../vmclone/scheduler.js', fn: 'schedulerStatus' },
   /*
    * ⚠ v2.613(CONTRACT2613-06 · RUNTIME2613-02) — 아래 셋은 `index.js` 가 **조건 없이 시작**하는데 표에 없었다.

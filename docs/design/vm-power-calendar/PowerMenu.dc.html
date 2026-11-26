@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>VM 상세 드로어 — 전원 상태 보기(요약 → 상세)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.muted{color:#8b9bb4}
+.cap{font-size:14px;font-weight:700;color:#aebbd0;margin:0 0 10px}
+.drawer{width:600px;box-sizing:border-box;background:#0f1626;border:1px solid #243049;border-radius:12px;overflow:hidden;display:flex;flex-direction:column}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.btn.pwr{border-color:#22d3ee;color:#67e8f9;background:rgba(34,211,238,.10)}
+.btn.icon{width:34px;padding:0;justify-content:center}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}.tag.new{background:rgba(34,211,238,.16);color:#67e8f9}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;flex:none}
+.dh{padding:14px 18px 10px;border-bottom:1px solid #1f2a40;display:flex;flex-direction:column;gap:8px}
+.dh b.nm{font-size:18px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.crumb{font-size:12px;color:#8b9bb4;display:flex;flex-wrap:wrap;gap:2px 6px;align-items:center}
+.crumb a{text-decoration:none}
+.acts{display:flex;flex-wrap:wrap;gap:6px;padding:10px 18px;border-bottom:1px solid #1f2a40;background:#141b2d}
+.body{padding:14px 18px 18px;display:flex;flex-direction:column;gap:14px}
+.sh{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:8px}
+.sh h3{margin:0;font-size:12.5px;font-weight:700;color:#8b9bb4;display:flex;align-items:center;gap:8px}
+.tiles{display:grid;grid-template-columns:repeat(4, minmax(0, 1fr));gap:8px}
+.tile{background:#141b2d;border:1px solid #243049;border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:5px;min-width:0}
+.tile span{font-size:11px;color:#8b9bb4;font-weight:600}
+.tile b{font-size:20px;font-weight:800;line-height:1}
+.tile small{font-size:11px;color:#8b9bb4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ph{height:60px;border-radius:10px;border:1px dashed #243049;display:flex;align-items:center;justify-content:center;color:#7483a0;font-size:12px}
+.pcard{display:flex;flex-direction:column;gap:12px;width:100%;box-sizing:border-box;padding:12px 14px;background:#141b2d;border:1px solid #243049;border-radius:10px;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.pcard:hover{border-color:#3b82f6}
+.now{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px}
+.now b{font-size:17px;font-weight:800}
+.now .go{margin-left:auto;font-size:12px;font-weight:600;color:#93c5fd;white-space:nowrap}
+.kv4{display:grid;grid-template-columns:repeat(2, minmax(0, 1fr));gap:10px 16px}
+.kv4 > span{display:flex;flex-direction:column;gap:3px;min-width:0}
+.kv4 i{font-style:normal;font-size:11px;color:#8b9bb4;font-weight:600}
+.kv4 b{font-size:13.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kv4 small{font-size:11.5px;color:#8b9bb4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mstrip{display:grid;grid-template-columns:repeat(12, minmax(0, 1fr));gap:4px}
+.mstrip > span{display:flex;flex-direction:column;gap:3px;min-width:0}
+.mstrip i{display:block;height:8px;border-radius:3px}
+.mstrip em{font-style:normal;font-size:10px;color:#8b9bb4;text-align:center}
+.sub{display:flex;align-items:center;gap:10px;padding:10px 18px;border-bottom:1px solid #1f2a40;background:#141b2d}
+.sub b{font-size:13px;font-weight:700}
+.banner{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;padding:12px 14px;background:#141b2d;border:1px solid #243049;border-radius:10px}
+.banner b{font-size:20px;font-weight:800}
+.kv{display:flex;flex-direction:column;background:#141b2d;border:1px solid #243049;border-radius:10px;padding:2px 14px}
+.kv div{display:grid;grid-template-columns:150px minmax(0, 1fr);gap:12px;padding:8px 0;border-bottom:1px solid #1f2a40;font-size:12.5px;align-items:baseline}
+.kv div:last-child{border-bottom:0}
+.kv span{color:#8b9bb4}
+.kv b{font-weight:600}
+.kv small{display:block;font-size:11.5px;color:#8b9bb4;font-weight:400;margin-top:2px}
+.spans{display:flex;flex-direction:column;background:#141b2d;border:1px solid #243049;border-radius:10px;padding:2px 14px}
+.spans div{display:grid;grid-template-columns:14px minmax(0, 1fr) auto;gap:2px 10px;padding:8px 0;border-bottom:1px solid #1f2a40;font-size:12.5px;align-items:baseline}
+.spans div:last-child{border-bottom:0}
+.spans small{grid-column:2 / -1;font-size:11.5px;color:#8b9bb4}
+.sw{display:inline-block;width:11px;height:11px;border-radius:3px;flex:none}
+.legend{display:flex;flex-wrap:wrap;gap:5px 12px;font-size:11px;color:#8b9bb4;align-items:center}
+.legend span{display:inline-flex;align-items:center;gap:5px}
+.df{padding:10px 18px;border-top:1px solid #1f2a40;background:#141b2d;display:flex;flex-wrap:wrap;gap:4px 12px;font-size:12px;align-items:center}
+.df a{text-decoration:none}
+</style>
+</helmet>
+
+<div style="width:1944px;box-sizing:border-box;min-height:1240px;padding:28px 32px 36px;background:#0a0e17;display:flex;gap:40px;align-items:flex-start">
+  <sc-for list="{{vms}}" as="v" hint-placeholder-count="2">
+    <div>
+      <p class="cap">{{v.cap}}</p>
+      <aside class="drawer" aria-label="VM 상세">
+        <div class="dh">
+          <div style="display:flex;align-items:center;gap:10px;min-width:0">
+            <b class="nm">{{v.name}}</b>
+            <span style="flex:1"></span>
+            <button class="btn icon" type="button" aria-label="이전 VM">‹</button>
+            <button class="btn icon" type="button" aria-label="다음 VM">›</button>
+            <button class="btn icon" type="button" aria-label="닫기">×</button>
+          </div>
+          <div class="crumb"><span class="tag" style="{{v.tagStyle}}">{{v.tag}}</span><a href="#">VC-KR1</a><span>›</span><a href="#">KR1-Admin</a><span>›</span><a href="#">{{v.host}}</a><span>·</span><span>리소스 풀 Resources</span><span style="flex:1"></span><span class="mono">목록 {{v.pos}}</span></div>
+        </div>
+        <div class="acts">
+          <button class="btn primary" type="button">⤢ 개체 보기</button>
+          <button class="btn" type="button">원격 콘솔</button>
+          <button class="btn" type="button">원격 접속</button>
+          <button class="btn" type="button">사양 변경</button>
+          <button class="btn primary" type="button">성능 그래프 보기</button>
+          <button class="btn" type="button">축소 근거 리포트</button>
+          <button class="btn pwr" type="button" onClick="{{v.pick}}" aria-pressed="{{v.on}}">전원 상태 보기 <span class="tag new">새 버튼</span></button>
+        </div>
+        <div class="body">
+          <section>
+            <div class="sh"><h3>한눈에 · 24시간 추이는 열 때 1회 조회</h3></div>
+            <div class="tiles">
+              <div class="tile"><span>CPU</span><b class="mono">{{v.cpu}}</b><small>{{v.cpuSub}}</small></div>
+              <div class="tile"><span>메모리</span><b class="mono">{{v.mem}}</b><small>{{v.memSub}}</small></div>
+              <div class="tile"><span>디스크</span><b class="mono">{{v.disk}}</b><small>{{v.diskSub}}</small></div>
+              <div class="tile"><span>네트워크 · 게스트</span><b class="mono">{{v.ip}}</b><small>{{v.ipSub}}</small></div>
+            </div>
+          </section>
+
+          <section>
+            <div class="sh"><h3>전원 상태 <span class="tag new">새 섹션</span></h3><span class="muted" style="font-size:11.5px">누르면 구간별 기록이 열립니다</span></div>
+            <button class="pcard" type="button" onClick="{{v.pick}}" aria-label="{{v.aria}}" style="{{v.cardStyle}}">
+              <span class="now">
+                <span class="dot" style="{{v.dot}}"></span>
+                <b>{{v.head}}</b>
+                <span class="mono muted">{{v.since}}</span>
+                <span class="go">자세히 ›</span>
+              </span>
+              <span class="kv4">
+                <span><i>처음 Power On</i><b class="mono">{{v.firstOn}}</b><small>{{v.firstOnSub}}</small></span>
+                <span><i>마지막 Power On</i><b class="mono">{{v.lastOn}}</b><small>{{v.lastOnSub}}</small></span>
+                <span><i>마지막 Power Off</i><b class="mono">{{v.lastOff}}</b><small>{{v.lastOffSub}}</small></span>
+                <span><i>기록된 기간의 켜짐 비율</i><b class="mono">{{v.ratio}}</b><small>{{v.ratioSub}}</small></span>
+              </span>
+              <span class="mstrip" role="img" aria-label="{{v.stripAria}}">
+                <sc-for list="{{v.months}}" as="m" hint-placeholder-count="12"><span><i style="{{m.bar}}"></i><em>{{m.t}}</em></span></sc-for>
+              </span>
+            </button>
+          </section>
+
+          <section><div class="sh"><h3>신호 · 구성 · 배치 · IP · 핑 · 이동 · 구성 변경</h3></div><div class="ph">아래 섹션은 지금 그대로</div></section>
+        </div>
+        <div class="df"><span class="muted">개체 보기:</span><a href="#">요약</a><a href="#">모니터</a><a href="#">구성</a><a href="#">사용 권한</a><a href="#">데이터스토어</a><a href="#">네트워크</a><a href="#">스냅샷</a><a href="#">업데이트</a><a href="Main.dc.html">전원 이력</a></div>
+      </aside>
+    </div>
+  </sc-for>
+
+  <div>
+    <p class="cap">③ 누르면 열리는 상세 — {{d.name}}</p>
+    <aside class="drawer" aria-label="전원 상태 상세">
+      <div class="dh">
+        <div style="display:flex;align-items:center;gap:10px;min-width:0">
+          <b class="nm">{{d.name}}</b>
+          <span style="flex:1"></span>
+          <button class="btn icon" type="button" aria-label="이전 VM">‹</button>
+          <button class="btn icon" type="button" aria-label="다음 VM">›</button>
+          <button class="btn icon" type="button" aria-label="닫기">×</button>
+        </div>
+      </div>
+      <div class="sub">
+        <button class="btn" type="button">← VM 상세</button>
+        <b>전원 상태</b>
+        <span style="flex:1"></span>
+        <a href="Main.dc.html" class="btn">전원 달력 열기 →</a>
+      </div>
+      <div class="body">
+        <div class="banner">
+          <span class="dot" style="{{d.dot}}"></span>
+          <b>{{d.head}}</b>
+          <span class="mono muted">{{d.since}}</span>
+        </div>
+
+        <section>
+          <div class="sh"><h3>날짜</h3></div>
+          <div class="kv">
+            <sc-for list="{{d.rows}}" as="r" hint-placeholder-count="10">
+              <div><span>{{r.k}}</span><b><span class="mono">{{r.v}}</span><small>{{r.s}}</small></b></div>
+            </sc-for>
+          </div>
+        </section>
+
+        <section>
+          <div class="sh"><h3>최근 12개월 · 월별 켜짐 비율</h3>
+            <div class="legend" aria-label="범례"><span><i class="sw" style="background:#22c55e"></i>켜짐</span><span><i class="sw" style="background:#64748b"></i>꺼짐</span><span><i class="sw" style="background:repeating-linear-gradient(135deg,#33415c 0 2px,#111a2c 2px 5px)"></i>판정 못함</span><span><i class="sw" style="border:1px dashed #33415c;box-sizing:border-box"></i>기록 전</span></div>
+          </div>
+          <div class="mstrip" style="padding:12px 14px;background:#141b2d;border:1px solid #243049;border-radius:10px" role="img" aria-label="{{d.stripAria}}">
+            <sc-for list="{{d.months}}" as="m" hint-placeholder-count="12"><span><i style="{{m.barTall}}"></i><em>{{m.t}}</em></span></sc-for>
+          </div>
+        </section>
+
+        <section>
+          <div class="sh"><h3>전원 구간 · 최신 {{d.shown}}개 / 전체 {{d.total}}개</h3><span class="muted" style="font-size:11.5px">꺼짐 구간에는 누가 · 어떤 기록으로 알았는지</span></div>
+          <div class="spans">
+            <sc-for list="{{d.spans}}" as="s" hint-placeholder-count="8">
+              <div><span class="dot" style="{{s.dot}}"></span><b style="font-weight:600">{{s.state}} · <span class="mono">{{s.dur}}</span></b><span class="muted" style="font-size:11.5px;white-space:nowrap">{{s.note}}</span><small class="mono">{{s.range}}</small></div>
+            </sc-for>
+          </div>
+          <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:8px;align-items:center"><button class="btn" type="button">이전 구간 더 보기</button><span class="muted" style="font-size:11.5px">시각을 정확히 모르는 전환은 ‘두 관측 사이’ 로 적습니다</span></div>
+        </section>
+      </div>
+    </aside>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1944,"height":1240}}'>
+class Component extends DCLogic {
+  build() {
+    if (this._d) return this._d;
+    var H = 3600000, D = 24 * H;
+    function T(y, m, d, h, mi) { return Date.UTC(y, m - 1, d, h || 0, mi || 0); }
+    function p2(n) { return (n < 10 ? '0' : '') + n; }
+    function ymd(t) { var x = new Date(t); return x.getUTCFullYear() + '-' + p2(x.getUTCMonth() + 1) + '-' + p2(x.getUTCDate()); }
+    function hm(t) { var x = new Date(t); return p2(x.getUTCHours()) + ':' + p2(x.getUTCMinutes()); }
+    function full(t) { return ymd(t) + ' ' + hm(t); }
+    function dur(ms) {
+      var m = Math.round(ms / 60000), d = Math.floor(m / 1440), h = Math.floor((m % 1440) / 60), mi = m % 60;
+      if (d > 0) return d + '일' + (h ? ' ' + h + '시간' : '');
+      if (h > 0) return h + '시간' + (mi ? ' ' + mi + '분' : '');
+      return mi + '분';
+    }
+    // 가상 데이터 — 시각은 KST 벽시계를 그대로 쓴다.
+    var NOW = T(2026, 11, 25, 16, 0), GRAN = { event: 0, check: 6 * H };
+    var HATCH = 'repeating-linear-gradient(135deg,#33415c 0 2px,transparent 2px 5px)';
+    var a = { id: 'a', name: 'console-kr1-001', host: 'esx-kr1-03', pos: '1/195', created: T(2026, 2, 23, 13, 40), recStart: T(2026, 2, 23, 14, 5), firstOn: T(2026, 2, 23, 14, 5), offs: [],
+      cpu: '1%', cpuSub: '24시간 최대 1.7% · 16 vCPU', mem: '4%', memSub: '24시간 최대 9.5% · 64 GB', disk: '100%', diskSub: '사용 592 GB / 592 GB', ip: '3 IP', ipSub: 'Tools 12452' };
+    a.offs.push({ a: T(2026, 3, 8, 19, 20), b: T(2026, 3, 21, 9, 5), src: 'event', by: 'kr\\ops.lee' });
+    for (var i = 0; i < 13; i++) { var f = T(2026, 4, 3, 20, 0) + i * 7 * D; a.offs.push({ a: f, b: f + 2 * D + 11.5 * H, src: 'event', by: 'svc-scheduler' }); }
+    a.offs.push({ a: T(2026, 9, 2, 12, 0), b: T(2026, 9, 2, 18, 0), src: 'check', by: '' });
+    a.offs.push({ a: T(2026, 10, 28, 23, 40), b: T(2026, 11, 12, 8, 15), src: 'event', by: 'kr\\ops.park' });
+    var b = { id: 'b', name: 'test-kr1-207', host: 'esx-kr1-08', pos: '37/195', created: T(2024, 8, 19, 9, 30), recStart: T(2025, 12, 1), firstOn: null, offs: [
+      { a: T(2026, 2, 10, 18, 0), b: T(2026, 2, 11, 9, 10), src: 'event', by: 'kr\\dev.kim' },
+      { a: T(2026, 5, 2, 10, 0), b: T(2026, 5, 6, 9, 0), src: 'event', by: 'kr\\dev.kim' },
+      { a: T(2026, 10, 29, 18, 30), b: null, src: 'event', by: 'kr\\dev.kim' }],
+      cpu: '—', cpuSub: '꺼져 있어 값이 없습니다', mem: '—', memSub: '할당 16 GB', disk: '—', diskSub: '할당 200 GB', ip: '—', ipSub: 'Tools 실행 안 됨' };
+    function derive(vm) {
+      var offs = vm.offs, last = offs[offs.length - 1], isOff = last && last.b === null;
+      var marks = [];
+      offs.forEach(function (o) {
+        var g = GRAN[o.src], e = o.b === null ? NOW : o.b;
+        if (g) marks.push({ a: o.a - g, b: o.a, st: 'est' });
+        marks.push({ a: o.a, b: e, st: 'off' });
+        if (g) marks.push({ a: e, b: e + g, st: 'est' });
+      });
+      var segs = [], cur = vm.recStart;
+      marks.forEach(function (m) { if (m.a > cur) segs.push({ a: cur, b: m.a, st: 'on' }); segs.push(m); cur = m.b; });
+      if (cur < NOW) segs.push({ a: cur, b: NOW, st: 'on' });
+      function sumOf(x, y) {
+        var s = { on: 0, off: 0, est: 0 };
+        for (var k = 0; k < segs.length; k++) { var g = segs[k]; if (g.b <= x || g.a >= y) continue; s[g.st] += Math.min(y, g.b) - Math.max(x, g.a); }
+        return s;
+      }
+      var tot = sumOf(vm.recStart, NOW), known = tot.on + tot.off;
+      var months = [];
+      for (var n = 0; n < 12; n++) {
+        var y = 2025 + Math.floor((11 + n) / 12), mo = (11 + n) % 12 + 1;
+        var m0 = T(y, mo, 1), m1 = mo === 12 ? T(y + 1, 1, 1) : T(y, mo + 1, 1), s = sumOf(m0, Math.min(m1, NOW)), all = s.on + s.off + s.est, bg;
+        if (!all) bg = 'background:transparent;border:1px dashed #33415c;box-sizing:border-box';
+        else { var p = (s.on / all * 100).toFixed(1), q = ((s.on + s.off) / all * 100).toFixed(1); bg = 'background:linear-gradient(90deg,#22c55e 0 ' + p + '%,#64748b ' + p + '% ' + q + '%,transparent ' + q + '% 100%),' + HATCH + ',#111a2c'; }
+        months.push({ t: mo + '월', bar: bg, barTall: bg + ';height:14px' });
+      }
+      // 구간 목록(최신순)
+      var spans = [], prev = vm.recStart, longest = null;
+      offs.forEach(function (o, idx) {
+        var g = GRAN[o.src];
+        spans.push({ on: true, a: prev, b: o.a, first: idx === 0 });
+        spans.push({ on: false, a: o.a, b: o.b, src: o.src, by: o.by, g: g });
+        if (o.b !== null) { prev = o.b; if (!longest || o.b - o.a > longest.b - longest.a) longest = o; }
+      });
+      if (!isOff) spans.push({ on: true, a: prev, b: null, first: offs.length === 0 });
+      var rows = spans.slice().reverse().map(function (s) {
+        var from = s.on && s.first && vm.firstOn === null ? '기록 시작 전' : full(s.a), to = s.b === null ? '지금' : full(s.b), e = s.b === null ? NOW : s.b;
+        var note = s.on ? '' : (s.src === 'check' ? '주기 점검 · 시각은 두 관측 사이' : 'vCenter 이벤트' + (s.by ? ' · ' + s.by : ''));
+        var dtxt = s.on && s.first && vm.firstOn === null ? dur(e - s.a) + ' 이상' : (s.g ? dur(e - s.a) + ' 이상' : dur(e - s.a));
+        return { state: s.on ? '켜짐' : '꺼짐', dot: 'background:' + (s.on ? '#22c55e' : '#64748b'), dur: dtxt, range: from + ' → ' + to, note: note };
+      });
+      var lastOnTs = isOff ? (offs.length > 1 ? offs[offs.length - 2].b : vm.firstOn) : (last ? last.b : vm.firstOn);
+      var lastDone = isOff ? last : last;
+      var ratio = known ? (tot.on / known * 100).toFixed(1) + '%' : '—';
+      var v = {
+        id: vm.id, name: vm.name, host: vm.host, pos: vm.pos, cpu: vm.cpu, cpuSub: vm.cpuSub, mem: vm.mem, memSub: vm.memSub, disk: vm.disk, diskSub: vm.diskSub, ip: vm.ip, ipSub: vm.ipSub,
+        tag: isOff ? 'Off' : 'On', tagStyle: isOff ? 'background:rgba(139,155,180,.14);color:#aebbd0' : 'background:rgba(34,197,94,.14);color:#86efac',
+        dot: 'width:11px;height:11px;background:' + (isOff ? '#64748b' : '#22c55e'),
+        head: isOff ? '꺼짐 · ' + dur(NOW - last.a) + '째' : '켜짐 · ' + dur(NOW - lastOnTs) + '째',
+        since: isOff ? full(last.a) + ' 부터' : full(lastOnTs) + ' 부터',
+        firstOn: vm.firstOn === null ? '기록 시작 전' : full(vm.firstOn),
+        firstOnSub: vm.firstOn === null ? ymd(vm.recStart) + ' 이전 · VM 생성 ' + ymd(vm.created) : 'VM 생성 ' + ymd(vm.created) + ' · vCenter 이벤트',
+        lastOn: lastOnTs === null ? '기록 시작 전' : full(lastOnTs),
+        lastOnSub: isOff ? '그 뒤 ' + dur(last.a - lastOnTs) + ' 켜져 있었음' : dur(NOW - lastOnTs) + '째 켜져 있음',
+        lastOff: last ? full(last.a) : '기록 없음',
+        lastOffSub: isOff ? '꺼진 뒤 ' + dur(NOW - last.a) + ' 지남' : (last ? dur(last.b - last.a) + ' 동안 꺼져 있었음' : '기록된 기간에 꺼진 적 없음'),
+        ratio: ratio, ratioSub: '꺼짐 ' + offs.length + '번 · 기록 시작 ' + ymd(vm.recStart),
+        months: months, stripAria: '최근 12개월 월별 켜짐 비율 — 기록된 기간 전체 ' + ratio
+      };
+      v.aria = vm.name + ' 전원 상태 — ' + v.head + ' · 자세히 보기';
+      v.detail = {
+        name: vm.name, dot: v.dot, head: v.head, since: v.since, months: months, stripAria: v.stripAria,
+        shown: Math.min(8, rows.length), total: rows.length, spans: rows.slice(0, 8),
+        rows: [
+          { k: 'VM 생성', v: full(vm.created), s: 'vCenter 생성일' },
+          { k: '처음 Power On', v: v.firstOn, s: vm.firstOn === null ? '포탈이 기록을 시작한 ' + ymd(vm.recStart) + ' 에 이미 켜져 있었습니다' : 'vCenter 이벤트 · 생성 뒤 ' + dur(vm.firstOn - vm.created) },
+          { k: '마지막 Power On', v: v.lastOn, s: v.lastOnSub },
+          { k: '마지막 Power Off', v: v.lastOff, s: v.lastOffSub + (last && last.by ? ' · 수행 ' + last.by : '') },
+          { k: '가장 길게 꺼짐', v: longest ? dur(longest.b - longest.a) : '—', s: longest ? ymd(longest.a) + ' ~ ' + ymd(longest.b) : '끝난 꺼짐 구간이 없습니다' },
+          { k: '전원 전환', v: (offs.length * 2 - (isOff ? 1 : 0)) + '회', s: '꺼짐 ' + offs.length + ' · 켜짐 ' + (offs.length - (isOff ? 1 : 0)) + ' (기록 시작 ' + ymd(vm.recStart) + ' 부터)' },
+          { k: '켜진 시간 합', v: dur(tot.on), s: '판정된 시간의 ' + ratio },
+          { k: '꺼진 시간 합', v: dur(tot.off), s: known ? '판정된 시간의 ' + (tot.off / known * 100).toFixed(1) + '%' : '' },
+          { k: '판정하지 못한 시간', v: tot.est ? dur(tot.est) : '없음', s: tot.est ? '경계 불확실 — 위 비율에서 뺐습니다' : '' }
+        ]
+      };
+      return v;
+    }
+    this._d = [derive(a), derive(b)];
+    return this._d;
+  }
+  renderVals() {
+    var list = this.build(), self = this, sel = (this.state && this.state.sel) || 'a';
+    var CAP = { a: '① 켜진 VM — 드로어에 ‘전원 상태’ 가 들어간 모습', b: '② 꺼진 VM — Power Off 뒤 지난 날이 먼저 보입니다' };
+    var vms = list.map(function (v) {
+      var on = v.id === sel, o = {};
+      for (var k in v) if (k !== 'detail') o[k] = v[k];
+      o.cap = CAP[v.id]; o.on = on;
+      o.cardStyle = on ? 'border-color:#3b82f6;box-shadow:0 0 0 1px #3b82f6' : '';
+      o.pick = function () { self.setState({ sel: v.id }); };
+      return o;
+    });
+    return { vms: vms, d: list.filter(function (v) { return v.id === sel; })[0].detail };
+  }
+}
+</script>
+</body>
+</html>
