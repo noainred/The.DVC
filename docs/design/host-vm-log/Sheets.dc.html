@@ -19,7 +19,7 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
 /* 엑셀 창(밝은 면) */
 .book{background:#f8fafc;color:#0f172a;border-radius:8px;overflow:hidden;border:1px solid #243049;display:flex;flex-direction:column}
 .bar{padding:8px 12px;background:#1e293b;color:#e2e8f0;font-size:12px;display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center}
-.body{padding:14px;display:flex;flex-direction:column;gap:12px;min-height:820px}
+.body{padding:14px;display:flex;flex-direction:column;gap:12px;min-height:820px;overflow-x:auto}
 .ttl{font-size:16px;font-weight:800;color:#0f172a}
 .sub{font-size:12px;color:#334155}
 .nav{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:12px}
@@ -63,7 +63,7 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
 
     <!-- 엑셀 창 -->
     <div class="book" style="flex:1;min-width:0">
-      <div class="bar"><b class="mono">호스트별VM기록_PL-PROD-A_2026-11-26_1400.xlsx</b><span>시트 10장 · 첫 행 고정 · 자동 필터 · 수식 없음</span></div>
+      <div class="bar"><b class="mono">호스트별VM기록_PL-PROD-A_2026-11-26_1400.xlsx</b><span>시트 11장 · 첫 행 · 첫 열 고정 · 자동 필터 · 수식 없음</span></div>
 
       <div class="body">
 
@@ -134,14 +134,14 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
             <div><span class="k">지금 상태</span><span class="v {{ hostNowCls }}">{{ hostNow }}</span></div>
           </div>
           <table class="xl">
-            <thead><tr><th>VM</th><th>그때 전원</th><th>IP</th><th>게스트 OS</th><th class="num">vCPU</th><th class="num">메모리(GB)</th><th>이 호스트에 온 시각</th><th>지금 위치</th><th>지금 상태</th></tr></thead>
+            <thead><tr><th>VM</th><th>서비스</th><th>그때 전원</th><th>IP</th><th class="num">vCPU</th><th class="num">메모리(GB)</th><th>규칙</th><th>HA 결과</th><th>지금 위치</th><th>지금 상태</th><th>이 호스트에 온 시각</th><th>게스트 OS</th><th>vmx 경로</th></tr></thead>
             <tbody>
               <sc-for list="{{ hostRows }}" as="r" hint-placeholder-count="18">
-                <tr class="{{ r.cls }}"><td>{{ r.name }}</td><td>{{ r.power }}</td><td>{{ r.ip }}</td><td>{{ r.os }}</td><td class="num">{{ r.cpu }}</td><td class="num">{{ r.mem }}</td><td>{{ r.since }}</td><td>{{ r.nowHost }}</td><td class="{{ r.nowCls }}">{{ r.now }}</td></tr>
+                <tr class="{{ r.cls }}"><td>{{ r.name }}</td><td>{{ r.svc }}</td><td>{{ r.power }}</td><td>{{ r.ip }}</td><td class="num">{{ r.cpu }}</td><td class="num">{{ r.mem }}</td><td>{{ r.rule }}</td><td>{{ r.ha }}</td><td>{{ r.nowHost }}</td><td class="{{ r.nowCls }}">{{ r.now }}</td><td>{{ r.since }}</td><td>{{ r.os }}</td><td>{{ r.vmx }}</td></tr>
               </sc-for>
             </tbody>
           </table>
-          <div class="note">줄 순서: 지금 확인할 VM → 구동 중 → 그때 꺼져 있던 VM(회색 줄). 합계에는 구동 VM 만 셉니다.</div>
+          <div class="note">줄 순서: 지금 확인할 VM → 구동 중 → 그때 꺼져 있던 VM(회색 줄). 합계에는 구동 VM 만 셉니다. 오른쪽으로 더 있는 열: 이 호스트에 온 시각 · 게스트 OS · vmx 경로(수동 복구용). HA 결과는 이 호스트가 멈춘 경우에만 채워집니다.</div>
         </sc-if>
 
         <!-- 전체 목록 -->
@@ -149,14 +149,52 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
           <div class="ttl">전체 목록</div>
           <div class="sub">모든 호스트의 VM 을 한 장에 — 호스트 열로 필터 · 피벗. CSV 로 받으면 이 표가 나옵니다</div>
           <table class="xl">
-            <thead><tr><th>호스트</th><th>VM</th><th>그때 전원</th><th>IP</th><th>게스트 OS</th><th class="num">vCPU</th><th class="num">메모리(GB)</th><th>이 호스트에 온 시각</th><th>지금 위치</th><th>지금 상태</th></tr></thead>
+            <thead><tr><th>호스트</th><th>VM</th><th>서비스</th><th>그때 전원</th><th>IP</th><th class="num">vCPU</th><th class="num">메모리(GB)</th><th>규칙</th><th>HA 결과</th><th>지금 위치</th><th>지금 상태</th><th>이 호스트에 온 시각</th><th>게스트 OS</th><th>vmx 경로</th></tr></thead>
             <tbody>
               <sc-for list="{{ allRows }}" as="r" hint-placeholder-count="16">
-                <tr class="{{ r.cls }}"><td>{{ r.host }}</td><td>{{ r.name }}</td><td>{{ r.power }}</td><td>{{ r.ip }}</td><td>{{ r.os }}</td><td class="num">{{ r.cpu }}</td><td class="num">{{ r.mem }}</td><td>{{ r.since }}</td><td>{{ r.nowHost }}</td><td class="{{ r.nowCls }}">{{ r.now }}</td></tr>
+                <tr class="{{ r.cls }}"><td>{{ r.host }}</td><td>{{ r.name }}</td><td>{{ r.svc }}</td><td>{{ r.power }}</td><td>{{ r.ip }}</td><td class="num">{{ r.cpu }}</td><td class="num">{{ r.mem }}</td><td>{{ r.rule }}</td><td>{{ r.ha }}</td><td>{{ r.nowHost }}</td><td class="{{ r.nowCls }}">{{ r.now }}</td><td>{{ r.since }}</td><td>{{ r.os }}</td><td>{{ r.vmx }}</td></tr>
               </sc-for>
             </tbody>
           </table>
           <div class="note">… {{ allMore }}줄 더 · 모두 {{ allTotal }}줄(호스트 순서 → 호스트 시트와 같은 줄 순서)</div>
+        </sc-if>
+
+        <!-- 장애 보고 -->
+        <sc-if value="{{ isIncident }}" hint-placeholder-val="{{ false }}">
+          <div class="ttl">장애 보고 — <span class="mono">esx-pl1-04</span></div>
+          <div class="sub">VC-PL1 › PL-PROD-A · 연결 끊김을 처음 본 시각 2026-11-26 14:37 · 이 파일을 만든 시각 14:52 · 호스트 복귀: 아직</div>
+          <div class="kpi">
+            <div><span class="k">끊김 직전 구동 VM</span><span class="v">17</span></div>
+            <div><span class="k">HA 가 다시 켬</span><span class="v">10</span></div>
+            <div><span class="k">재시작 기록 없음</span><span class="v bad">5</span></div>
+            <div><span class="k">켜기 실패</span><span class="v">1</span></div>
+            <div><span class="k">인벤토리에 없음</span><span class="v">1</span></div>
+            <div><span class="k">아직 멈춘 서비스</span><span class="v bad">5</span></div>
+          </div>
+          <div class="sec">타임라인</div>
+          <table class="xl">
+            <thead><tr><th>시각</th><th>구분</th><th>내용</th></tr></thead>
+            <tbody>
+              <tr><td>2026-11-26 14:00</td><td>정각 기록</td><td>구동 VM 18대</td></tr>
+              <tr><td>2026-11-26 14:21</td><td>이동</td><td>scm-pl1-git01 → esx-pl1-03 (장애 전 · HA 아님)</td></tr>
+              <tr><td>2026-11-26 14:36</td><td>끊김 직전 기록</td><td>구동 VM 17대 — 마지막으로 정상 수집한 목록</td></tr>
+              <tr><td>2026-11-26 14:37</td><td>연결 끊김</td><td class="bad">유지보수 모드 진입 · 종료 요청 없음 → 예기치 않은 정지 후보</td></tr>
+              <tr><td>2026-11-26 14:38 ~ 14:41</td><td>HA 재시작</td><td>10대 다시 켜짐 · 켜기 실패 1대(print-pl1-01)</td></tr>
+              <tr><td>2026-11-26 14:52</td><td>지금</td><td>응답 없음 5 · 꺼짐 1 · 인벤토리에 없음 1</td></tr>
+            </tbody>
+          </table>
+          <div class="sec">아직 멈춘 서비스</div>
+          <table class="xl">
+            <thead><tr><th>서비스</th><th>재시작 우선순위</th><th>VM</th><th>상태</th></tr></thead>
+            <tbody>
+              <tr><td>Oracle DB</td><td>높음</td><td>db-pl1-ora01 · db-pl1-ora02</td><td class="bad">2대 중 2대 응답 없음</td></tr>
+              <tr><td>MES</td><td>사용 안 함 · 보통</td><td>mes-pl1-db01</td><td class="bad">3대 중 1대 응답 없음</td></tr>
+              <tr><td>설비 연동</td><td>보통</td><td>plc-pl1-gw01</td><td class="bad">1대 중 1대 응답 없음</td></tr>
+              <tr><td>백업</td><td>낮음</td><td>bkp-pl1-proxy01</td><td class="bad">1대 중 1대 응답 없음</td></tr>
+              <tr><td>출력</td><td>낮음</td><td>print-pl1-01</td><td class="warn">꺼짐(켜기 실패)</td></tr>
+            </tbody>
+          </table>
+          <div class="note">이 아래로 영향 VM 17줄이 이어집니다(호스트 시트와 같은 열 — 규칙 · HA 결과 · vmx 경로 포함). 그 시각에 멈춘 호스트가 없으면 이 시트는 만들지 않습니다.</div>
         </sc-if>
 
         <!-- 읽는 법 -->
@@ -164,7 +202,9 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
           <div class="ttl">읽는 법</div>
           <table class="xl">
             <tbody>
-              <tr><th>시트</th><td>요약 · 호스트 목록 · 호스트마다 한 장 · 전체 목록 · 읽는 법</td></tr>
+              <tr><th>시트</th><td>요약 · 호스트 목록 · 호스트마다 한 장 · 전체 목록 · 장애 보고(멈춘 호스트가 있을 때) · 읽는 법</td></tr>
+              <tr><th>규칙</th><td>분리 = 서로 다른 호스트에 두는 규칙 · 함께 = 같은 호스트에 두는 규칙 · 호스트 필수 = 정해진 호스트에서만 도는 규칙. 괄호 = 그때 · 지금 지켜졌는지</td></tr>
+              <tr><th>HA 결과</th><td>vCenter 의 HA 재시작 이벤트가 있으면 시각 → 다시 켜진 호스트 · 없으면 ‘재시작 기록 없음’(까닭은 적지 않습니다) · — = 호스트가 멈추지 않아 해당 없음</td></tr>
               <tr><th>시트 이름</th><td>호스트 이름의 첫 마디(esx-pl1-04.corp.example → esx-pl1-04) · 겹치면 전체 이름 · 31자까지</td></tr>
               <tr><th>이동</th><td>호스트 목록의 호스트 이름 · 요약 ‘확인할 것’ 의 호스트 = 그 시트로 · 호스트 시트 맨 위 ‘← 호스트 목록’ · ‘◀ 이전 / 다음 ▶’</td></tr>
               <tr><th>기록 시각</th><td>매시 정각에 남긴 기록입니다. 정각과 정각 사이에 들어왔다 나간 VM 은 없습니다</td></tr>
@@ -188,7 +228,7 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
 
     <!-- 시트 목차 -->
     <aside class="card" style="flex:0 0 400px">
-      <h2>시트 10장</h2>
+      <h2>시트 11장</h2>
       <table class="toc">
         <thead><tr><th>시트</th><th>한 줄이 뜻하는 것</th><th class="num">줄 수</th></tr></thead>
         <tbody>
@@ -213,6 +253,7 @@ renderVals() {
   var noop = function () {};
   var OS = ['Red Hat Enterprise Linux 8', 'Windows Server 2019', 'Rocky Linux 9', 'Ubuntu 22.04', 'Windows Server 2022', 'Oracle Linux 8'];
   var PRE = ['web', 'app', 'db', 'api', 'batch', 'mq', 'cache', 'log', 'ci', 'file', 'mail', 'proxy', 'auth', 'rpt', 'etl', 'dev', 'qa', 'mon', 'sec'];
+  var SVCN = ['포털', '업무', 'DB', 'API', '배치', '메시지', '캐시', '로그', 'CI', '파일', '메일', '프록시', '인증', '리포트', 'ETL', '개발', 'QA', '모니터링', '보안'];
   var SINCE = ['2026-11-02 09:00', '2026-11-02 09:00', '2026-11-09 14:00', '2026-11-02 09:00', '2026-11-18 03:00', '2026-11-22 21:00'];
   var gen = function (no, cpus, mems, offN) {
     var host = 'esx-pl1-0' + no, rows = [], i, j;
@@ -222,6 +263,7 @@ renderVals() {
     for (j = 0; j < offN; j++) {
       rows.push({ name: 'old-pl1-' + no + '0' + (j + 1), power: '꺼짐', ip: '—', os: OS[(j + 2) % OS.length], cpu: 2, mem: 4, since: '2026-11-02 09:00', nowHost: host, now: '꺼짐', cls: 'offrow', nowCls: '' });
     }
+    rows.forEach(function (r, k) { r.svc = k < cpus.length ? SVCN[k] : '—'; r.rule = '—'; r.ha = '—'; r.vmx = '[PL-DS-0' + no + '] ' + r.name + '/' + r.name + '.vmx'; });
     return rows;
   };
   var h4raw = [
@@ -244,12 +286,33 @@ renderVals() {
     ['scm-pl1-git01', '10.48.10.61', 'Ubuntu 22.04', 4, 16, '2026-11-26 13:00', 'esx-pl1-03', '구동 중', ''],
     ['wms-pl1-app01', '10.48.10.71', 'Red Hat Enterprise Linux 8', 8, 32, '2026-11-21 08:00', 'esx-pl1-02', '구동 중', '']
   ];
-  var h4 = h4raw.map(function (x) { return { name: x[0], power: '켜짐', ip: x[1], os: x[2], cpu: x[3], mem: x[4], since: x[5], nowHost: x[6], now: x[7], nowCls: x[8], cls: '' }; });
+  var HA = function (t, h) { return t + ' HA 재시작 → ' + h; }, NOHA = '재시작 기록 없음';
+  var EX = {
+    'db-pl1-ora01': ['Oracle DB', '호스트 필수 ORA-LICENSE · 분리 ORA-SEPARATE(그때 위반)', NOHA, '07'],
+    'db-pl1-ora02': ['Oracle DB', '호스트 필수 ORA-LICENSE · 분리 ORA-SEPARATE(그때 위반)', NOHA, '07'],
+    'mes-pl1-db01': ['MES', '함께 MES-TOGETHER(지금 떨어짐)', NOHA, '03'],
+    'bkp-pl1-proxy01': ['백업', '—', NOHA, '05'],
+    'plc-pl1-gw01': ['설비 연동', '—', NOHA, '05'],
+    'print-pl1-01': ['출력', '—', '14:41 켜기 실패 → esx-pl1-05', '02'],
+    'lab-pl1-test07': ['(소속 없음)', '—', NOHA, '02'],
+    'erp-pl1-app01': ['ERP', '분리 ERP-APP-SEPARATE(그때 위반 · 지금 지킴)', HA('14:39', 'esx-pl1-02'), '01'],
+    'erp-pl1-app02': ['ERP', '분리 ERP-APP-SEPARATE(그때 위반 · 지금 지킴)', HA('14:39', 'esx-pl1-03'), '01'],
+    'mes-pl1-web01': ['MES', '함께 MES-TOGETHER(지금 떨어짐)', HA('14:40', 'esx-pl1-02'), '03'],
+    'mes-pl1-web02': ['MES', '—', HA('14:40', 'esx-pl1-05'), '03'],
+    'ad-pl1-dc02': ['AD', '분리 DC-SEPARATE(지킴)', HA('14:38', 'esx-pl1-06'), '01'],
+    'file-pl1-01': ['파일', '—', HA('14:41', 'esx-pl1-03'), '04'],
+    'mon-pl1-zbx01': ['모니터링', '—', HA('14:41', 'esx-pl1-05'), '04'],
+    'vdi-pl1-cs01': ['VDI', '—', HA('14:40', 'esx-pl1-02'), '06'],
+    'vdi-pl1-uag01': ['VDI', '분리 UAG-SEPARATE(지킴)', HA('14:40', 'esx-pl1-06'), '06'],
+    'scm-pl1-git01': ['개발', '—', '14:21 이동(장애 전 · HA 아님)', '04'],
+    'wms-pl1-app01': ['WMS', '—', HA('14:41', 'esx-pl1-02'), '04']
+  };
+  var h4 = h4raw.map(function (x) { var e = EX[x[0]]; return { name: x[0], power: '켜짐', ip: x[1], os: x[2], cpu: x[3], mem: x[4], since: x[5], nowHost: x[6], now: x[7], nowCls: x[8], cls: '', svc: e[0], rule: e[1], ha: e[2], vmx: '[PL-DS-' + e[3] + '] ' + x[0] + '/' + x[0] + '.vmx' }; });
   ['old-pl1-erp-bak', 'tst-pl1-ci01', 'mig-pl1-file00'].forEach(function (n, i) {
-    h4.push({ name: n, power: '꺼짐', ip: '—', os: OS[(i + 1) % OS.length], cpu: 2, mem: 4, since: '2026-11-02 09:00', nowHost: 'esx-pl1-04', now: '응답 없음', nowCls: '', cls: 'offrow' });
+    h4.push({ name: n, power: '꺼짐', ip: '—', os: OS[(i + 1) % OS.length], cpu: 2, mem: 4, since: '2026-11-02 09:00', nowHost: 'esx-pl1-04', now: '응답 없음', nowCls: '', cls: 'offrow', svc: '—', rule: '—', ha: '꺼져 있던 VM — HA 대상 아님', vmx: '[PL-DS-02] ' + n + '/' + n + '.vmx' });
   });
   var h5 = gen(5, [16, 8, 8, 8, 8, 8, 4, 4, 4, 4, 4, 2, 2, 2, 2], [64, 64, 64, 32, 32, 32, 16, 16, 16, 16, 8, 8, 8, 4, 4], 2);
-  h5[8].name = 'tst-pl1-ci03'; h5[8].since = '2026-11-26 13:00';
+  h5[8].name = 'tst-pl1-ci03'; h5[8].since = '2026-11-26 13:00'; h5[8].vmx = '[PL-DS-05] tst-pl1-ci03/tst-pl1-ci03.vmx';
   var hosts = [
     { name: 'esx-pl1-01', now: '연결됨', nowCls: '', rows: gen(1, [16, 16, 8, 8, 8, 8, 4, 4, 4, 4, 4, 4, 2, 2, 2, 2], [128, 64, 64, 32, 32, 32, 16, 16, 16, 8, 8, 8, 8, 8, 4, 4], 2) },
     { name: 'esx-pl1-02', now: '연결됨', nowCls: '', rows: gen(2, [16, 16, 8, 8, 8, 8, 8, 8, 4, 4, 4, 4, 4, 4, 4, 4, 2, 2, 2], [128, 64, 64, 32, 32, 32, 32, 16, 16, 16, 16, 16, 8, 8, 8, 8, 8, 4, 4], 1) },
@@ -263,7 +326,7 @@ renderVals() {
     h.on = 0; h.off = 0; h.cpu = 0; h.mem = 0;
     h.rows.forEach(function (r) {
       if (r.power === '켜짐') { h.on += 1; h.cpu += r.cpu; h.mem += r.mem; } else { h.off += 1; }
-      all.push({ host: h.name, name: r.name, power: r.power, ip: r.ip, os: r.os, cpu: r.cpu, mem: r.mem, since: r.since, nowHost: r.nowHost, now: r.now, nowCls: r.nowCls, cls: r.cls });
+      all.push({ host: h.name, name: r.name, power: r.power, ip: r.ip, os: r.os, cpu: r.cpu, mem: r.mem, since: r.since, nowHost: r.nowHost, now: r.now, nowCls: r.nowCls, cls: r.cls, svc: r.svc, rule: r.rule, ha: r.ha, vmx: r.vmx });
     });
     tOn += h.on; tOff += h.off; tCpu += h.cpu; tMem += h.mem;
   });
@@ -276,6 +339,7 @@ renderVals() {
   var defs = [['sum', '요약', '조건 · 합계 · 확인할 것', '—'], ['list', '호스트 목록', '호스트 1대', String(hosts.length)]];
   hosts.forEach(function (h) { defs.push([h.name, h.name, 'VM 1대(그 호스트)', String(h.rows.length)]); });
   defs.push(['all', '전체 목록', 'VM 1대(호스트 열 포함)', String(all.length)]);
+  defs.push(['incident', '장애 보고', '멈춘 호스트 1건 — 타임라인 · 멈춘 서비스 · 영향 VM', '17']);
   defs.push(['guide', '읽는 법', '표기 · 기준 시각 · 색', '—']);
   var tabs = defs.map(function (d) { return { label: d[1], cls: d[0] === tab ? 'on' : '', pick: go(d[0]) }; });
   var tocRows = defs.map(function (d) { return { label: d[1], desc: d[2], n: d[3], cls: d[0] === tab ? 'on' : '', pick: go(d[0]) }; });
@@ -284,7 +348,7 @@ renderVals() {
   });
   return {
     tabs: tabs, tocRows: tocRows,
-    isSum: tab === 'sum', isList: tab === 'list', isHost: isHost, isAll: tab === 'all', isGuide: tab === 'guide',
+    isSum: tab === 'sum', isList: tab === 'list', isHost: isHost, isAll: tab === 'all', isGuide: tab === 'guide', isIncident: tab === 'incident',
     tOn: tOn, tOff: tOff, tCpu: tCpu, tMem: tMem.toLocaleString('en-US'),
     listRows: hosts.map(function (h) { return { name: h.name, on: h.on, off: h.off, cpu: h.cpu, mem: h.mem, now: h.now, nowCls: h.nowCls, pick: go(h.name) }; }),
     checkRows: checkRows,

@@ -93,6 +93,9 @@ legend{padding:0;font-size:11.5px;font-weight:700;color:#8b9bb4;margin-bottom:6p
         <legend>4. 넣을 것</legend>
         <label style="display:flex;gap:8px;align-items:center;font-size:12.5px"><input type="checkbox" checked> 그때 꺼져 있던 VM</label>
         <label style="display:flex;gap:8px;align-items:center;font-size:12.5px"><input type="checkbox" checked> 지금 위치 · 지금 상태 <span class="muted">(내려받는 순간 기준)</span></label>
+        <label style="display:flex;gap:8px;align-items:center;font-size:12.5px"><input type="checkbox" checked> 서비스 · 규칙 · HA 재시작 결과</label>
+        <label style="display:flex;gap:8px;align-items:center;font-size:12.5px"><input type="checkbox" checked> vmx 경로 <span class="muted">(수동 복구용)</span></label>
+        <label style="display:flex;gap:8px;align-items:center;font-size:12.5px"><input type="checkbox" checked> 장애 보고 시트 <span class="muted">(멈춘 호스트가 있을 때)</span></label>
         <span class="muted" style="font-size:11.5px">기록이 없는 시각의 목록은 끌 수 없이 항상 들어갑니다.</span>
       </fieldset>
 
@@ -106,7 +109,7 @@ legend{padding:0;font-size:11.5px;font-weight:700;color:#8b9bb4;margin-bottom:6p
 
       <div class="out" aria-label="만들어질 파일">
         <div><b>만들어질 파일</b> <span class="tag blue">서버별 · Excel</span></div>
-        <div>시트 10장 — 요약 · 호스트 목록 · 호스트 6장 · 전체 목록 · 읽는 법</div>
+        <div>시트 11장 — 요약 · 호스트 목록 · 호스트 6장 · 전체 목록 · 장애 보고 · 읽는 법</div>
         <div>VM <span class="mono">108</span>줄 <span class="muted">(구동 99 + 꺼짐 9)</span> · 기록 없는 시각 <span class="mono">0</span></div>
         <div class="mono" style="overflow-wrap:anywhere">호스트별VM기록_PL-PROD-A_2026-11-26_1400.xlsx</div>
       </div>
@@ -149,12 +152,13 @@ legend{padding:0;font-size:11.5px;font-weight:700;color:#8b9bb4;margin-bottom:6p
               <tr><td colspan="9" style="color:#475569">… 17줄 더(조치 필요 → 꺼짐 → 없음 → 구동 중 순서 · 화면의 표와 같은 순서)</td></tr>
             </tbody>
           </table>
-          <div class="tabs"><span>요약</span><span class="on">호스트 목록</span><span>esx-pl1-01</span><span>esx-pl1-02</span><span>esx-pl1-03</span><span>esx-pl1-04</span><span>esx-pl1-05</span><span>esx-pl1-06</span><span>전체 목록</span><span>읽는 법</span></div>
+          <div class="tabs"><span>요약</span><span class="on">호스트 목록</span><span>esx-pl1-01</span><span>esx-pl1-02</span><span>esx-pl1-03</span><span>esx-pl1-04</span><span>esx-pl1-05</span><span>esx-pl1-06</span><span>전체 목록</span><span>장애 보고</span><span>읽는 법</span></div>
         </div>
         <div class="desc muted">
           <span><b>요약</b> — 내보낸 조건 · 호스트 수 · VM 합계 · 조치 필요 VM 목록(호스트 시트로 링크)</span>
           <span><b>전체 목록</b> — 호스트 열을 붙여 한 장에 전부(필터 · 피벗용 · CSV 는 이 표)</span>
           <span><b>호스트가 많을 때</b> — 호스트 시트 대신 클러스터마다 한 장으로 바뀌고, 창이 미리 그렇게 알려 줍니다</span>
+          <span><b>장애 보고</b> — 멈춘 호스트의 타임라인 · 멈춘 서비스 · 영향 VM(HA 결과 · 규칙 · vmx 경로)</span>
           <span><b>읽는 법</b> — 기록 시각의 뜻 · ‘지금’ 열의 기준 시각 · 빠진 것과 사유</span>
         </div>
       </section>
