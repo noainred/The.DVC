@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>호스트별 VM 기록 — 들어오는 길과 기록 설정</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.5}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums}
+.muted{color:#8b9bb4}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.no{font-size:11.5px;font-weight:700;color:#8b9bb4}
+.card h2{margin:0;font-size:14.5px;font-weight:700}
+.box{border:1px solid #243049;border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:8px;background:#0f1626}
+.btn{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+.tag{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}
+.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}
+.tag.blue{background:rgba(59,130,246,.18);color:#93c5fd}
+.tag.new{background:rgba(34,211,238,.16);color:#67e8f9}
+.newline{border:1px solid #155e75;background:rgba(34,211,238,.07);border-radius:8px;padding:8px 10px;display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:12.5px}
+.why{font-size:12px;color:#8b9bb4;border-top:1px solid #1f2a40;padding-top:8px}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:10px 0;border-top:1px solid #1f2a40}
+.row:first-of-type{border-top:0}
+.row .l{flex:1 1 300px;min-width:0;display:flex;flex-direction:column;gap:2px}
+.row .l b{font-size:13px}
+select{height:32px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;padding:0 8px;font:inherit;font-size:12.5px}
+</style>
+</helmet>
+<div style="box-sizing:border-box;width:1440px;min-height:980px;padding:28px;background:#0a0e17;display:flex;flex-direction:column;gap:16px">
+  <div style="display:flex;flex-direction:column;gap:4px">
+    <h1 style="margin:0;font-size:18px;font-weight:800">들어오는 길 3곳 · 기록 설정</h1>
+    <div class="muted">청록색 줄이 새로 생기는 부분이고, 나머지는 지금 있는 화면입니다.</div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px">
+    <section class="card">
+      <span class="no">길 1 · 알림</span>
+      <h2>‘호스트 연결 끊김’ 알림에서 바로</h2>
+      <div class="box">
+        <div style="display:flex;align-items:center;gap:8px"><span class="tag warn">경고</span><b>호스트 연결 끊김: esx-pl1-04</b></div>
+        <div class="muted" style="font-size:12.5px">VC-PL1 / PL-PROD-A · 14:37</div>
+        <div class="newline"><span class="tag new">새로</span><span>직전 기록 <span class="mono">14:00</span> · 구동 VM 18대</span><a href="Main.dc.html">VM 목록 보기 ›</a></div>
+      </div>
+      <div class="why">장애를 알게 되는 첫 자리에서 한 번에 넘어갑니다.</div>
+    </section>
+
+    <section class="card">
+      <span class="no">길 2 · 호스트 개체 보기</span>
+      <h2>호스트 › VM 탭 위에 한 줄</h2>
+      <div class="box">
+        <div class="muted" style="font-size:12px">vCenter › VC-PL1 › esx-pl1-04 › VM</div>
+        <div class="newline"><span class="tag new">새로</span><span>이 호스트의 지난 기록 — 매시 정각 · 마지막 <span class="mono">14:00</span></span><a href="Main.dc.html">시각별 기록 보기 ›</a></div>
+        <div class="muted" style="font-size:12.5px">지금 이 호스트의 VM 0대 · (아래는 지금 있는 VM 표)</div>
+      </div>
+      <div class="why">호스트가 멈추면 이 탭의 ‘지금’ 표는 비거나 달라집니다 — 그때 지난 기록으로 가는 길입니다. 호스트 빠른 확인(오른쪽 드로어)의 ‘VM 보기’ 옆에도 같은 링크를 둡니다.</div>
+    </section>
+
+    <section class="card">
+      <span class="no">길 3 · 메뉴</span>
+      <h2>서버 › Hypervisor 메뉴 · 특수 기능 목록</h2>
+      <div class="box">
+        <div class="newline" style="align-items:flex-start;flex-direction:column;gap:4px">
+          <div style="display:flex;align-items:center;gap:8px"><span class="tag new">새로</span><b>호스트별 VM 기록</b></div>
+          <span class="muted" style="font-size:12px">가상화 호스트마다 매시 정각에 구동 중이던 VM 을 남긴다 · 호스트 장애 때 직전 기록으로 영향 받은 VM 과 지금 위치 확인 · CSV</span>
+        </div>
+        <div class="muted" style="font-size:12.5px">주소 <span class="mono" style="color:#e6edf6">#/tools/host-vm-log</span> · 호스트를 고르면 <span class="mono" style="color:#e6edf6">…/host-vm-log/&lt;호스트&gt;</span> 로 바뀌어 주소를 그대로 공유할 수 있습니다.</div>
+      </div>
+      <div class="why">Hypervisor 메뉴의 도구(호스트 구성 점검 · 클러스터 점검) 옆에 둡니다. 조회 전용이라 운영 작업 묶음이 아닙니다.</div>
+    </section>
+  </div>
+
+  <section class="card">
+    <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px">
+      <h2>기록 설정 <span class="muted" style="font-weight:500;font-size:12.5px">— 화면 머리의 ‘보관 90일’ 알약을 누르면 열립니다 · 전체 범위 관리자만</span></h2>
+    </div>
+    <div>
+      <div class="row">
+        <div class="l"><b>기록 주기</b><span class="muted" style="font-size:12.5px">매시 정각(포탈 시각). 포탈이 정각에 꺼져 있었으면 켜진 뒤 그 시각 칸을 늦게 채웁니다.</span></div>
+        <span class="tag blue">1시간 · 고정</span>
+      </div>
+      <div class="row">
+        <div class="l"><b>보관 기간</b><span class="muted" style="font-size:12.5px">지난 기록을 얼마나 남길지. 달라진 것만 저장하므로 기간을 늘려도 용량은 VM 이동 횟수만큼만 늘어납니다.</span></div>
+        <label class="muted" style="font-size:12.5px;display:inline-flex;align-items:center;gap:8px">보관 <select><option>30일</option><option selected>90일</option><option>180일</option><option>1년</option></select></label>
+      </div>
+      <div class="row">
+        <div class="l"><b>끊김을 본 순간의 기록 <span class="tag new">제안 · 질문 2</span></b><span class="muted" style="font-size:12.5px">호스트가 ‘연결됨 → 끊김’ 으로 바뀐 것을 본 순간, 그 직전 수집에서 그 호스트에 있던 VM 목록을 한 번 더 남깁니다. 정각 기록은 최대 59분 전 것이지만 이 기록은 수집 한 주기 전 것입니다.</span></div>
+        <label style="display:inline-flex;align-items:center;gap:8px;font-size:12.5px"><input type="checkbox" checked> 남기기</label>
+      </div>
+      <div class="row">
+        <div class="l"><b>끊김 알림 메일에 VM 이름 <span class="tag new">제안 · 질문 3</span></b><span class="muted" style="font-size:12.5px">‘호스트 연결 끊김’ 알림 메일 본문에 직전 기록의 VM 이름을 넣습니다. 끄면 화면 링크만 붙습니다.</span></div>
+        <label style="display:inline-flex;align-items:center;gap:8px;font-size:12.5px"><input type="checkbox"> 넣기</label>
+      </div>
+      <div class="row">
+        <div class="l"><b>저장 현황</b><span class="muted" style="font-size:12.5px">기록 DB 크기 · 행 수 · 마지막 정리 시각을 실제 값으로 보여 줍니다(시안에는 숫자를 적지 않았습니다 — 구현 뒤 실측).</span></div>
+        <button class="btn" type="button">지금 기록</button>
+      </div>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":980}}'>
+class Component extends DCLogic {
+renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

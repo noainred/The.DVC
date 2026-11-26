@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>호스트별 VM 기록 — 상태 6종</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.5}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums}
+.muted{color:#8b9bb4}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.no{font-size:11.5px;font-weight:700;color:#8b9bb4}
+.card h2{margin:0;font-size:14.5px;font-weight:700}
+.box{border:1px dashed #33415f;border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:8px;background:#0f1626}
+.btn{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.tag{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}
+.tag.crit{background:rgba(239,68,68,.18);color:#fca5a5}
+.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}
+.tag.blue{background:rgba(59,130,246,.18);color:#93c5fd}
+.why{font-size:12px;color:#8b9bb4;border-top:1px solid #1f2a40;padding-top:8px}
+.kv{display:flex;justify-content:space-between;gap:12px;font-size:12.5px}
+</style>
+</helmet>
+<div style="box-sizing:border-box;width:1440px;min-height:980px;padding:28px;background:#0a0e17;display:flex;flex-direction:column;gap:16px">
+  <div style="display:flex;flex-direction:column;gap:4px">
+    <h1 style="margin:0;font-size:18px;font-weight:800">기록이 없거나 지금 상태를 모를 때 — 화면이 하는 말</h1>
+    <div class="muted">못 읽은 것을 0대로 보이지 않고, 모르는 것은 모른다고 적습니다. 값이 없는 칸은 ‘—’.</div>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px">
+
+    <section class="card">
+      <span class="no">상태 1 · 그 시각 기록 없음</span>
+      <h2>고른 시각에 vCenter 를 읽지 못했을 때</h2>
+      <div class="box">
+        <div><span class="tag gray">11-26 03:00</span> <b>이 시각에는 기록이 없습니다</b></div>
+        <div class="muted" style="font-size:12.5px">그 시각 VC-PL1 을 읽지 못했습니다(연결 실패). VM 이 0대였다는 뜻이 아닙니다.</div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px"><button class="btn primary" type="button">앞 기록 02:00 보기</button><button class="btn" type="button">뒤 기록 04:00 보기</button></div>
+      </div>
+      <div class="why">읽지 못한 vCenter 는 그 시각을 건너뜁니다 — 빈 목록을 적으면 ‘VM 이 전부 사라졌다’ 로 읽히기 때문입니다.</div>
+    </section>
+
+    <section class="card">
+      <span class="no">상태 2 · 지금 상태 모름</span>
+      <h2>vCenter 자체에 지금 연결할 수 없을 때</h2>
+      <div class="box">
+        <div class="kv"><span>그때(14:00) 구동 중</span><b class="mono">18</b></div>
+        <div class="kv"><span>지금 위치 · 상태</span><span class="tag warn">모름 18</span></div>
+        <div class="muted" style="font-size:12.5px">VC-PL1 에 지금 연결할 수 없어 ‘지금’ 열은 비워 둡니다. 그때 기록은 포탈에 저장돼 있어 그대로 볼 수 있습니다.</div>
+      </div>
+      <div class="why">vCenter 가 그 호스트 위에서 돌다가 같이 멈춘 경우에도 VM 목록 · IP 는 남아 있습니다 — 이 기능이 가장 필요한 때입니다.</div>
+    </section>
+
+    <section class="card">
+      <span class="no">상태 3 · 그 시각 호스트 없음</span>
+      <h2>고른 시각에 이 호스트가 인벤토리에 없었을 때</h2>
+      <div class="box">
+        <div><span class="tag gray">11-01 09:00</span> <b>이 시각에는 이 호스트가 없었습니다</b></div>
+        <div class="muted" style="font-size:12.5px">esx-pl1-04 는 <span class="mono" style="color:#e6edf6">11-02 09:00</span> 기록부터 보입니다.</div>
+        <div><button class="btn" type="button">첫 기록 11-02 09:00 보기</button></div>
+      </div>
+      <div class="why">호스트가 새로 들어왔거나 이름이 바뀐 경우입니다. 이름이 바뀐 호스트는 vCenter 의 호스트 식별자로 이어 봅니다.</div>
+    </section>
+
+    <section class="card">
+      <span class="no">상태 4 · 첫 기록 전</span>
+      <h2>기능을 켠 직후 — 아직 기록이 한 번도 없을 때</h2>
+      <div class="box">
+        <div><b>아직 기록이 없습니다</b></div>
+        <div class="muted" style="font-size:12.5px">다음 정각 <span class="mono" style="color:#e6edf6">15:00</span> 에 첫 기록이 남습니다. 관리자는 지금 한 번 기록할 수 있습니다.</div>
+        <div><button class="btn" type="button">지금 기록</button> <span class="muted" style="font-size:12px">관리자 · 전체 범위 계정만</span></div>
+      </div>
+      <div class="why">업그레이드 직후에는 과거 기록이 없습니다 — 지난 시각을 지어내 채우지 않습니다.</div>
+    </section>
+
+    <section class="card">
+      <span class="no">상태 5 · 범위 계정</span>
+      <h2>법인 범위가 정해진 계정으로 볼 때</h2>
+      <div class="box">
+        <div class="kv"><span>호스트 목록</span><b>내 범위 법인의 호스트만</b></div>
+        <div class="kv"><span>범위 밖 호스트 주소로 들어옴</span><span class="tag gray">찾을 수 없음</span></div>
+        <div class="kv"><span>지금 기록 · 보관 설정</span><span class="tag gray">보이지 않음</span></div>
+      </div>
+      <div class="why">VM 수량 추이와 같은 규칙입니다 — 조회는 범위 안만, 전 법인에 걸친 동작은 전체 범위 관리자만.</div>
+    </section>
+
+    <section class="card">
+      <span class="no">상태 6 · 저장소 사용 불가</span>
+      <h2>기록 DB 를 열 수 없을 때</h2>
+      <div class="box" style="border-color:#7f1d1d">
+        <div><span class="tag crit">기록 중지</span> <b>기록 저장소를 열 수 없습니다</b></div>
+        <div class="muted" style="font-size:12.5px">마지막으로 남긴 기록 <span class="mono" style="color:#e6edf6">11-26 11:00</span> · 그 뒤 3번의 정각 기록이 빠졌습니다. 사유는 관리자에게만 보입니다.</div>
+      </div>
+      <div class="why">기록이 조용히 멈추지 않게 — 화면 머리의 ‘마지막 기록’ 이 2시간 넘게 지나면 같은 경고를 띄웁니다.</div>
+    </section>
+
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":980}}'>
+class Component extends DCLogic {
+renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

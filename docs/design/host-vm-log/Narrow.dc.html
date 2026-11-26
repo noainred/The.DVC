@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>호스트별 VM 기록 — 400px</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums}
+.muted{color:#8b9bb4}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;padding:0 14px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none;box-sizing:border-box}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.ok{background:rgba(34,197,94,.14);color:#86efac}
+.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}
+.tag.crit{background:rgba(239,68,68,.18);color:#fca5a5}
+.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}
+.tag.blue{background:rgba(59,130,246,.18);color:#93c5fd}
+.tl{display:flex;gap:4px;overflow-x:auto;padding-bottom:6px}
+.tc{flex:0 0 46px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;height:56px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit;padding:0}
+.tc .n{font-size:14px;font-weight:700}
+.tc .h{font-size:10.5px;color:#8b9bb4}
+.tc.sel{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.tc.sel .h{color:#dbeafe}
+.tc.none{border-style:dashed;background:transparent;color:#8b9bb4}
+.tc.chg{box-shadow:inset 0 -3px 0 #22d3ee}
+.tile{min-width:0;padding:10px 12px;border-radius:10px;border:1px solid #243049;background:#0f1626;display:flex;flex-direction:column;gap:3px;text-align:left;font:inherit;color:#e6edf6;min-height:44px}
+.tile .k{font-size:11.5px;color:#8b9bb4;font-weight:600}
+.tile .v{font-size:22px;font-weight:800;line-height:1.1}
+.tile.act{border-color:#ef4444;background:rgba(239,68,68,.08)}
+.vm{display:flex;flex-direction:column;gap:4px;padding:10px 12px;border-top:1px solid #1f2a40}
+.vm.need{background:rgba(239,68,68,.06)}
+.vm .l1{display:flex;align-items:center;gap:8px;min-width:0}
+.vm .l1 a{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.vm .l2{font-size:11.5px;color:#8b9bb4;overflow-wrap:anywhere}
+</style>
+</helmet>
+<div style="width:400px;min-height:2060px;box-sizing:border-box;background:#0a0e17;padding:12px;display:flex;flex-direction:column;gap:12px">
+
+  <header style="display:flex;flex-direction:column;gap:4px">
+    <div class="muted" style="font-size:11.5px">서버 › Hypervisor</div>
+    <h1 style="margin:0;font-size:18px;font-weight:800">호스트별 VM 기록</h1>
+    <div class="muted" style="font-size:12px">마지막 기록 <span class="mono" style="color:#e6edf6">11-26 14:00</span> · 기록한 vCenter <span class="mono" style="color:#e6edf6">28 / 28</span> · 보관 90일</div>
+  </header>
+
+  <section class="card" aria-label="지금 연결이 끊긴 호스트" style="border-color:#7f1d1d;background:rgba(239,68,68,.07);padding:12px;display:flex;flex-direction:column;gap:8px">
+    <div style="font-weight:700">지금 연결이 끊긴 호스트 1대</div>
+    <div style="font-size:12.5px"><span class="mono">esx-pl1-04</span> <span class="muted">· VC-PL1 › PL-PROD-A</span></div>
+    <div class="muted" style="font-size:12.5px">끊김을 처음 본 시각 <span class="mono" style="color:#e6edf6">14:37</span> · 직전 기록 <span class="mono" style="color:#e6edf6">14:00</span> 에 구동 VM <b style="color:#e6edf6">18대</b> · <b style="color:#fca5a5">5대는 아직 응답 없음</b></div>
+    <a class="btn primary" href="#detail">직전 기록 보기</a>
+  </section>
+
+  <label style="display:flex;flex-direction:column;gap:6px;font-size:11.5px;font-weight:700;color:#8b9bb4">호스트 찾기
+    <input type="search" value="esx-pl1-04" style="height:44px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;padding:0 12px;font:inherit;font-size:13px;box-sizing:border-box">
+  </label>
+
+  <section id="detail" class="card" style="padding:12px;display:flex;flex-direction:column;gap:10px">
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px">
+      <h2 class="mono" style="margin:0;font-size:16px;font-weight:700">esx-pl1-04</h2>
+      <span class="tag crit">지금 연결 끊김</span>
+    </div>
+    <div class="muted" style="font-size:12px">VC-PL1 › PL-PROD-A · 10.48.0.14</div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <b style="font-size:12.5px;flex:1">기록 시각</b>
+      <span class="muted" style="font-size:11.5px">옆으로 밀어 이전 시각</span>
+    </div>
+    <div class="tl" role="group" aria-label="시각별 기록">
+      <sc-for list="{{ slots }}" as="c" hint-placeholder-count="8">
+        <button type="button" class="tc {{ c.cls }}" aria-label="{{ c.aria }}"><span class="n mono">{{ c.n }}</span><span class="h mono">{{ c.h }}</span></button>
+      </sc-for>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px">
+      <button class="btn" type="button" style="flex:1 1 120px">◀ 이전 24시간</button>
+      <button class="btn" type="button" style="flex:1 1 120px">날짜로 이동</button>
+    </div>
+    <div class="muted" style="font-size:11.5px">— 는 그 시각 vCenter 를 읽지 못해 기록이 없는 칸입니다(0대가 아님).</div>
+  </section>
+
+  <section class="card" style="padding:12px 0 0;display:flex;flex-direction:column;gap:10px;overflow:hidden">
+    <div style="padding:0 12px;display:flex;flex-direction:column;gap:2px">
+      <h3 style="margin:0;font-size:14px;font-weight:700">11-26 14:00 기록 — 이 호스트의 VM</h3>
+      <span class="muted" style="font-size:11.5px">지금 값은 14:52 에 읽은 인벤토리와 맞춰 본 것</span>
+    </div>
+    <div style="padding:0 12px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">
+      <div class="tile"><span class="k">그때 구동 중</span><span class="v mono">18</span></div>
+      <div class="tile"><span class="k">그때 할당 합</span><span class="mono" style="font-size:13px;font-weight:700">110 vCPU · 560 GB</span></div>
+      <button type="button" class="tile act"><span class="k" style="color:#fca5a5">지금 · 응답 없음</span><span class="v mono" style="color:#fca5a5">5</span></button>
+      <button type="button" class="tile"><span class="k">지금 · 다른 호스트 구동</span><span class="v mono" style="color:#86efac">11</span></button>
+      <button type="button" class="tile"><span class="k">지금 · 꺼짐</span><span class="v mono" style="color:#fcd34d">1</span></button>
+      <button type="button" class="tile"><span class="k">지금 · 인벤토리에 없음</span><span class="v mono">1</span></button>
+    </div>
+    <div style="padding:0 12px;display:flex;flex-wrap:wrap;gap:8px">
+      <button class="btn" type="button" style="flex:1 1 120px">VM 이름 복사</button>
+      <button class="btn" type="button" style="flex:1 1 120px">CSV 내려받기</button>
+    </div>
+    <div>
+      <sc-for list="{{ rows }}" as="r" hint-placeholder-count="9">
+        <div class="vm {{ r.cls }}">
+          <div class="l1"><a href="#" class="mono">{{ r.name }}</a><span class="tag {{ r.tagCls }}">{{ r.nowText }}</span></div>
+          <div class="l2 mono">{{ r.line }}</div>
+          <div class="l2">{{ r.since }} · 지금 위치 <span class="mono" style="color:#e6edf6">{{ r.nowHost }}</span></div>
+        </div>
+      </sc-for>
+      <div class="vm"><div class="l2">… 구동 중 9대 더(목록은 조치 필요 → 꺼짐 → 없음 → 구동 중 순서)</div></div>
+    </div>
+  </section>
+
+  <div class="muted" style="font-size:11.5px;padding:0 4px">정각 기록이라 14:00 ~ 14:37 사이에 들어오거나 나간 VM 은 이 목록과 다를 수 있습니다.</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":400,"height":2060}}'>
+class Component extends DCLogic {
+renderVals() {
+  var hrs = ['07', '08', '09', '10', '11', '12', '13', '14'];
+  var slots = hrs.map(function (h) {
+    var n = (h === '13' || h === '14') ? '18' : '17';
+    var cls = h === '14' ? 'sel' : (h === '13' ? 'chg' : '');
+    return { h: h + ':00', n: n, cls: cls, aria: h + '시 기록 구동 VM ' + n + '대' };
+  });
+  var NEED = ['crit', '응답 없음', 'need'], ON = ['ok', '구동 중', ''], OFF = ['warn', '꺼짐', ''], GONE = ['gray', '없음', ''];
+  var raw = [
+    ['db-pl1-ora01', '10.48.12.21 · 16 vCPU · 128 GB · Oracle Linux 8', '11-02 09:00 부터', 'esx-pl1-04', NEED],
+    ['db-pl1-ora02', '10.48.12.22 · 16 vCPU · 128 GB · Oracle Linux 8', '11-02 09:00 부터', 'esx-pl1-04', NEED],
+    ['mes-pl1-db01', '10.48.12.43 · 8 vCPU · 64 GB · RHEL 8', '11-02 09:00 부터', 'esx-pl1-04', NEED],
+    ['bkp-pl1-proxy01', '10.48.30.21 · 8 vCPU · 16 GB · Rocky Linux 9', '11-02 09:00 부터', 'esx-pl1-04', NEED],
+    ['plc-pl1-gw01', '10.48.50.11 · 4 vCPU · 8 GB · Windows 10', '11-02 09:00 부터', 'esx-pl1-04', NEED],
+    ['print-pl1-01', '10.48.20.31 · 2 vCPU · 8 GB · Windows Server 2016', '11-02 09:00 부터', 'esx-pl1-05', OFF],
+    ['lab-pl1-test07', 'IP — · 2 vCPU · 4 GB · Ubuntu 20.04', '11-25 16:00 부터', '—', GONE],
+    ['erp-pl1-app01', '10.48.10.31 · 8 vCPU · 32 GB · Windows Server 2019', '11-19 22:00 부터', 'esx-pl1-02', ON],
+    ['erp-pl1-app02', '10.48.10.32 · 8 vCPU · 32 GB · Windows Server 2019', '11-19 22:00 부터', 'esx-pl1-03', ON]
+  ];
+  var rows = raw.map(function (x) { return { name: x[0], line: x[1], since: x[2], nowHost: x[3], tagCls: x[4][0], nowText: x[4][1], cls: x[4][2] }; });
+  return { slots: slots, rows: rows };
+}
+}
+</script>
+</body>
+</html>
