@@ -258,7 +258,14 @@ export async function collect(device, { signal = null } = {}) {
   if (signal && !device?._signal) device = { ...device, _signal: signal };
   // 수집 방식 분기(v2.304): 기본 ssh(isi status 파싱 — isilonSsh.js), 'api' 선택 시 아래 REST 경로.
   if (device.collectMethod !== 'api') {
-    const { collectViaSsh } = await import('./isilonSsh.js');
+    const { collectViaSsh, ISI_DEADLINE_MARGIN_MS } = await import('./isilonSsh.js');
+    // v3.41.1(점검 1회차 — 재현): 연결 테스트(`_test` · 바깥 시한 60초)는 **그 시한에 맞춘 예산 + 부가 명령의 짧은 시한**으로 돈다.
+    //   v3.39.0 이 부가 명령을 설정값(3분)까지 기다리게 하면서 이 경로를 빠뜨려, 부가 명령 하나가 응답하지 않으면 테스트가 통째로
+    //   '시간 초과(방화벽·포트 확인)' 였다 — `isi status` 는 이미 받았는데도. 예산은 바깥 시한 − 여유(폴러가 `_testTimeoutMs` 로 알려 준다).
+    if (device._test) {
+      const outer = Number(device._testTimeoutMs) > 0 ? Number(device._testTimeoutMs) : 60_000;
+      return collectViaSsh(device, { quick: true, budgetMs: Math.max(5_000, outer - ISI_DEADLINE_MARGIN_MS) });
+    }
     return collectViaSsh(device);
   }
   const raw = { config: null, stats: null, nodes: null, nodeStats: null, users: null, pools: null, events: null };

@@ -4,7 +4,7 @@
  * 각 법인이 portal.env 로 잡아 둔 현장 설정을 통째로 덮어쓴다.
  */
 import { describe, it, expect } from 'vitest';
-import { effectiveFor, sourceOf, worstCaseLagMs, lagText, toBody, presetsFor, presetsForSpec, rangeText, timeoutSpecs, timerSpecs, msLabel } from './storageIntervals.js';
+import { effectiveFor, sourceOf, worstCaseLagMs, lagText, toBody, presetsFor, presetsForSpec, rangeText, timeoutSpecs, timerSpecs, unsetNote, msLabel } from './storageIntervals.js';
 import fs from 'node:fs';
 
 describe('effectiveFor', () => {
@@ -111,5 +111,44 @@ describe('presetsForSpec / rangeText / timeoutSpecs (v3.39.0)', () => {
     // 이름 뒤에 조사를 붙이지 않는다(‘명령 대기은’ — 이름은 서버 사양에서 오므로 받침을 알 수 없다)
     expect(src).not.toMatch(/\{s\.label\}<\/b>[은는이가을를]/);
     expect(src).not.toMatch(/300_?000|180_?000/);
+  });
+});
+
+// v3.41.1 — 주기 표가 1440px 에서도 본문 폭을 넘던 것(대상 칸 설명 한 줄 471px · 긴 첫 선택지). 첫 선택지를 줄이고 칸 아래 줄이 뜻을 말한다.
+describe('unsetNote — 선택 칸 아래 줄(v3.41.1)', () => {
+  it('전역 행: 지정하면 그 값, 아니면 엣지 로컬 값을 그대로 둔다고 말한다', () => {
+    expect(unsetNote('pollMs', '__global__', { pollMs: '1800000' }, {})).toBe('→ 30분');
+    expect(unsetNote('pollMs', '__global__', {}, {})).toBe('엣지 로컬 값 유지');
+    expect(unsetNote('pollMs', '__global__', { pollMs: '' }, {})).toBe('엣지 로컬 값 유지');
+  });
+  it('대상 행: 지정 > 전역(물려받았다고 밝힌다) > 로컬(중앙은 env · 엣지는 엣지 로컬)', () => {
+    expect(unsetNote('pollMs', 'NJ', { pollMs: '1800000' }, { pollMs: '600000' })).toBe('→ 10분');
+    expect(unsetNote('pollMs', 'NJ', { pollMs: '1800000' }, {})).toBe('→ 30분(전역 기본)');
+    expect(unsetNote('pollMs', 'NJ', {}, {})).toBe('엣지 로컬');
+    expect(unsetNote('pollMs', '', {}, {})).toBe('중앙 기본(env)');
+    expect(unsetNote('isiCmdTimeoutMs', '', { isiCmdTimeoutMs: '120000' }, { isiCmdTimeoutMs: '300000' })).toBe('→ 5분');
+  });
+  it('화면: 첫 선택지는 짧고(열 폭) · 줄바꿈은 낱말 단위 · 고정 칸 배경은 행 배경과 같은 변수', () => {
+    const src = fs.readFileSync(new URL('./StorageIntervals.jsx', import.meta.url), 'utf8');
+    expect(src).toMatch(/\{target === '__global__' \? '미지정' : '상속'\}/);
+    expect(src).not.toMatch(/'미지정\(엣지 로컬\)'/);          // 긴 첫 선택지가 열 폭을 정했다
+    expect(src).toMatch(/const WRAP_TD = \{ whiteSpace: 'normal', wordBreak: 'keep-all'/);
+    expect(src).toMatch(/const WRAP_TH = \{ whiteSpace: 'normal', wordBreak: 'keep-all'/);
+    // 고정(sticky) 칸은 CSS 클래스로 — 인라인 스타일은 행의 hover 색(tbody tr:hover)을 덮지 못해 그 칸만 다른 색으로 남았다(Chromium 판독).
+    expect((src.match(/className="table-wrap si-wrap"/g) || []).length).toBe(2);
+    expect((src.match(/<tr className="si-global">/g) || []).length).toBe(2);
+    expect((src.match(/<td className="si-sticky" title=\{/g) || []).length).toBe(4);     // 좁은 화면에서 숨는 설명은 title 로 남는다
+    expect((src.match(/className="muted si-hint"/g) || []).length).toBe(4);
+    expect(src).not.toMatch(/position: 'sticky'/);
+    const css = fs.readFileSync(new URL('../styles.css', import.meta.url), 'utf8');
+    // 불투명 배경: 표 바탕 · 고정 칸 = --panel, 전역 행 · 그 고정 칸 = --panel-2
+    expect(css).toMatch(/\.si-wrap \{ background: var\(--panel\); \}/);
+    expect(css).toMatch(/\.si-wrap \.si-sticky \{ position: sticky; left: 0; z-index: 1;[^}]*background: var\(--panel\);/);
+    expect(css).toMatch(/\.si-wrap tbody tr\.si-global, \.si-wrap tbody tr\.si-global \.si-sticky \{ background: var\(--panel-2\); \}/);
+    // hover: 고정 칸에도 행과 같은 옅은 색을 불투명 바탕 위에 겹친다(전역 행은 hover 색이 없으므로 고정 칸도 그대로)
+    expect(css).toMatch(/\.si-wrap tbody tr:hover \.si-sticky \{ background: linear-gradient\(rgba\(59,130,246,\.06\), rgba\(59,130,246,\.06\)\), var\(--panel\); \}/);
+    expect(css).toMatch(/\.si-wrap tbody tr\.si-global:hover \.si-sticky \{ background: var\(--panel-2\); \}/);
+    expect(css).toMatch(/tbody tr:hover \{ background: rgba\(59,130,246,\.06\); \}/);   // 위 숫자는 이 규칙과 같은 색이어야 한다
+    expect(css).toMatch(/@media \(max-width: 560px\) \{ \.si-wrap \.si-hint \{ display: none; \} \}/);
   });
 });
