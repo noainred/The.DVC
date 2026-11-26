@@ -79,9 +79,11 @@ test('② 호스트 업링크 — 짧은 이름이 겹치면 짧은 이름 LLDP 
   const fq = { ...host, name: 'esx01.a.corp' };
   assert.equal(HM.matchL2({ host: fq, lldpRows: [row('esx01.a.corp')], shortAmbiguous: true }).uplinks.length, 1, '전체 이름이 맞으면 근거');
   const r = stripComments(fs.readFileSync(new URL('../src/routes/api/hostSan.js', import.meta.url), 'utf8'));
-  assert.match(r, /shortAmbiguous = myShort\.length >= 3 && \(snap\.hosts \|\| \[\]\)\.some\(\(x\) => x\.id !== h\.id && shortOfName\(x\.name\) === myShort/);
-  assert.match(r, /anyUnassigned \|\| !hostCorp \|\| String\(datacenterOfVcenter\(x\.vcenterId\) \|\| ''\) === hostCorp/);
-  assert.match(r, /\.\.\.\(shortAmbiguous \? \{ lldpNameAmbiguous: true \} : \{\}\)/);
+  // 반증 F8 · F9 · F10: 법인을 모르는 호스트도 센다 · IP 이름은 통째로 · 화면 표지는 그 계정이 볼 수 있는 호스트와 겹칠 때만
+  assert.match(r, /const myShort = cvpShortOf\(h\.name\);/);
+  assert.match(r, /anyUnassigned \|\| !hostCorp \|\| !String\(datacenterOfVcenter\(x\.vcenterId\) \|\| ''\) \|\| String\(datacenterOfVcenter\(x\.vcenterId\) \|\| ''\) === hostCorp/);
+  assert.match(r, /ambiguousShown = collide\.some\(\(x\) => inUserScope\(req\.user, snap, x\.vcenterId\)\);/);
+  assert.match(r, /\.\.\.\(ambiguousShown \? \{ lldpNameAmbiguous: true \} : \{\}\)/);
 });
 
 test('① D-8 — 경계: 모양으로 못 잡는 쌍 · 후보 둘 · 한쪽만 disabled · 소속 일부 모름 · 양쪽 MLAG', () => {
@@ -109,4 +111,67 @@ test('① D-8 — 경계: 모양으로 못 잡는 쌍 · 후보 둘 · 한쪽만
   const both = topo([D('s1', ms('sp')), D('s2', ms('sp')), D('l1', ms('lf')), D('l2', ms('lf'))], [...sym, ['s1', 's2', 'peer']],
     (a, b, k) => (k === 'peer' ? 'Port-Channel1000' : a.startsWith('s') ? 'Port-Channel20' : ''));
   assert.ok(Object.values(both).every((n) => n.layerBy == null));
+});
+
+/* ── 반증 1인(F1~F10) — 뒤집힌 리프-스파인 모양만 바로잡는다 ─────────────────────────────────────────────────── */
+test('① D-8 반증 — 채널 업링크 · 3단 · 설명 링크 · disabled 는 예전 판정 그대로 · 엇갈린 판정은 통째로 버림', () => {
+  const sp = ['s1', 's2']; const lf = ['l1', 'l2', 'l3', 'l4'];
+  const e = []; for (const l of lf) for (const s of sp) e.push([l, s, 'up']); e.push(['l1', 'l2', 'peer'], ['l3', 'l4', 'peer']);
+  // F2: 리프 쌍이 스파인마다 라우팅 포트 채널(로컬 LACP)로 올라간다 — '채널 = 위층' 으로 뒤집지 않는다
+  const lacp = (me, other, kind) => (kind === 'peer' ? 'Port-Channel1000' : `Port-Channel${me}${other}`);
+  const old = layers(topo([...sp, ...lf].map((k) => D(k)), e, lacp));
+  const now = topo([...sp.map((k) => D(k, ms(null, 'disabled'))), ...lf.map((k) => D(k, ms('m')))], e, lacp);
+  assert.deepEqual(layers(now), old); assert.ok(Object.values(now).every((n) => n.layerBy == null));
+  // F3: 3단(단독 코어 c ↔ 분배 MLAG 쌍(채널) ↔ 접속) — 코어를 리프로 내리지 않는다
+  const t3 = [['c', 'd1', 'up'], ['c', 'd2', 'up'], ['d1', 'd2', 'peer'], ['d1', 'a1', 'up'], ['d2', 'a1', 'up'], ['d1', 'a2', 'up'], ['d2', 'a2', 'up']];
+  const ch = (me, other, kind) => (kind === 'peer' ? 'Port-Channel1000' : 'Port-Channel10');
+  const o3 = layers(topo(['c', 'd1', 'd2', 'a1', 'a2'].map((k) => D(k)), t3, ch));
+  assert.deepEqual(layers(topo([D('c', ms(null, 'disabled')), D('d1', ms('d')), D('d2', ms('d')), D('a1', ms(null, 'disabled')), D('a2', ms(null, 'disabled'))], t3, ch)), o3);
+  // F6: 전부 MLAG 'disabled' 면 층은 MLAG 정보가 없을 때와 같다(피어 표시만 뺀다) — 작은 무작위 구성 300개
+  let seed = 7; const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+  for (let c = 0; c < 300; c++) {
+    const n = 3 + Math.floor(rnd() * 6); const ks = Array.from({ length: n }, (_, i) => `k${i}`);
+    const ed = []; for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) if (rnd() < 0.45) ed.push([ks[i], ks[j], 'up']);
+    const a0 = layers(topo(ks.map((k) => D(k)), ed, routed));
+    const a1 = topo(ks.map((k) => D(k, ms(null, 'disabled'))), ed, routed);
+    assert.deepEqual(layers(a1), a0, JSON.stringify(ed));
+    assert.ok(Object.values(a1).every((x) => x.mlagPeer === false && x.layerBy == null));
+  }
+});
+
+test('① D-8 반증 — 설명으로만 이어진 장비 · 범위 밖 판정 · 링크 색인', () => {
+  // F5: 리프 쌍의 포트 설명으로만 가리킨 접속 스위치는 이웃(N)이 아니다 — 스파인으로 올리지 않는다
+  const sym = [['l1', 's1', 'up'], ['l1', 's2', 'up'], ['l2', 's1', 'up'], ['l2', 's2', 'up'], ['l1', 'l2', 'peer']];
+  const devices = [D('s1', ms(null, 'disabled')), D('s2', ms(null, 'disabled')), D('l1', ms('m')), D('l2', ms('m')), D('acc1', ms(null, 'disabled'))];
+  const lldp = []; const ports = []; const pn = new Map();
+  const next = (k) => { const n = (pn.get(k) || 0) + 1; pn.set(k, n); return `Ethernet${n}`; };
+  for (const [a, b, kind] of sym) {
+    const pa = next(a); const pb = next(b);
+    lldp.push({ agent: '', cvpId: 'c1', key: a, port: pa, sysName: b, portId: pb }, { agent: '', cvpId: 'c1', key: b, port: pb, sysName: a, portId: pa });
+    ports.push({ agent: '', cvpId: 'c1', key: a, port: pa, oper: 'up', desc: '', lag: kind === 'peer' ? 'Port-Channel1000' : '' }, { agent: '', cvpId: 'c1', key: b, port: pb, oper: 'up', desc: '', lag: kind === 'peer' ? 'Port-Channel1000' : '' });
+  }
+  ports.push({ agent: '', cvpId: 'c1', key: 'l1', port: 'Ethernet40', oper: 'up', desc: 'acc1 Et49', lag: 'Port-Channel40' });
+  const t = Object.fromEntries(TP.buildTopology({ devices, lldp, ports }).nodes.map((n) => [n.hostname, n]));
+  assert.deepEqual([t.l1.layer, t.s1.layer, t.acc1.layer, t.acc1.layerBy], ['leaf', 'spine', 'leaf', undefined]);
+  // F1: 쌍마다 전체 링크를 훑지 않는다(장비별 링크 색인)
+  const src = stripComments(fs.readFileSync(new URL('../src/cvp/topology.js', import.meta.url), 'utf8'));
+  assert.match(src, /for \(const l of linksByDev\.get\(me\) \|\| \[\]\)/);
+  assert.match(src, /import \{ mlagRoleOf \} from '\.\/redundancy\.js';/, '이중화 판정과 같은 MLAG 상태 글자 규칙');
+});
+
+test('① D-8 반증 — 고치는 것은 뒤집힌 모양뿐(이미 맞으면 손대지 않음 · 이웃 상태 모름 · 한쪽만 이어진 이웃)', () => {
+  // 스파인 2 · 리프 쌍 3 — 예전 판정이 이미 맞다: MLAG 로 덮지 않는다(layerBy 없음)
+  const sp = ['s1', 's2']; const lf = ['l1', 'l2', 'l3', 'l4', 'l5', 'l6'];
+  const e = []; for (const l of lf) for (const s of sp) e.push([l, s, 'up']); e.push(['l1', 'l2', 'peer'], ['l3', 'l4', 'peer'], ['l5', 'l6', 'peer']);
+  const ok3 = topo([...sp.map((k) => D(k, ms(null, 'disabled'))), ...lf.map((k) => D(k, ms('m')))], e, routed);
+  assert.deepEqual([ok3.s1.layer, ok3.l1.layer, ok3.s1.layerBy, ok3.l1.layerBy], ['spine', 'leaf', undefined, undefined]);
+  // 뒤집힌 모양이어도 이웃(스파인)의 MLAG 상태를 읽지 못했으면 고치지 않는다
+  const sp4 = ['s1', 's2', 's3', 's4']; const lf4 = ['l1', 'l2', 'l3', 'l4'];
+  const e4 = []; for (const l of lf4) for (const s of sp4) e4.push([l, s, 'up']); e4.push(['l1', 'l2', 'peer'], ['l3', 'l4', 'peer']);
+  const unread = topo([...sp4.map((k) => D(k)), ...lf4.map((k) => D(k, ms('m')))], e4, routed);
+  assert.ok(Object.values(unread).every((n) => n.layerBy == null));
+  // 쌍의 한 장비에만 이어진 이웃이 있으면 그 쌍은 고치지 않는다
+  const e5 = [...e4, ['l1', 's5', 'up']];
+  const one = topo([...[...sp4, 's5'].map((k) => D(k, ms(null, 'disabled'))), ...lf4.map((k) => D(k, ms('m')))], e5, routed);
+  assert.deepEqual([one.l1.layerBy, one.l2.layerBy, one.l3.layerBy], [undefined, undefined, 'mlag'], '대조: 다른 쌍(l3 · l4)은 고친다');
 });
