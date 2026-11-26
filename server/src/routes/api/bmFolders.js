@@ -45,6 +45,7 @@ import { scopeSig } from '../../util/scopeSig.js';
 import { bmCheckFor, chkRowOf } from '../../bmcheck/state.js';   // v3.45 물리서버 점검(보증 · 펌웨어 기준선 · BIOS 편차)
 import { assetStore, fwBaselineStore, adminBaselineLookup } from '../../bmcheck/store.js';
 import { WARRANTY_SOON_DAYS } from '../../bmcheck/warranty.js';
+import { judgePeerGroup, avgValueOf, PEER_MIN, PEER_GROUP_MAX, PEER_AVG_MIN_SAMPLES, PEER_AVG_MIN_COVERAGE } from '../../bmcheck/peer.js';   // v3.48 같은 묶음 대비
 
 const toolsPerm = requirePerm('tools');
 const csvPerm = requirePerm('data.csv');
@@ -288,6 +289,12 @@ async function trendDeps() {
     },
     localSeries: async (o) => (await import('../../bmusage/perfOpsView.js')).localPerfOps('compare-series', o),
     edgeSeries: async (agent, o) => (await import('../../central/bmComparePull.js')).pullEdgeCompareSeries(agent, o),
+    // v3.48 같은 묶음 대비 — 이 노드 서버 여러 대 · 엣지마다 요청 1개(서버마다 WAN 을 왕복하지 않는다)
+    localPeer: async (o) => (await import('../../bmusage/peerAvg.js')).peerAvgFor(o),
+    edgePeer: async (agent, o) => (await import('../../central/bmPeerPull.js')).pullEdgePeerAvg(agent, o),
+    // 수집 서버(pull) 출처 서버를 맡은 엣지 — 구성원에는 collectorId 만 있다(반증 A2). 조회는 등록부 하나(findCollectorByName — id 가 먼저 맞는다).
+    //   돌려주는 것은 등록 **id**(표시 이름은 겹칠 수 있다 — pullFromEdge 는 id 로도 찾는다).
+    collectorName: async (id) => { const c = (await import('../../collector/registry.js')).findCollectorByName(id); return c && typeof c.id === 'string' ? c.id : ''; },
   };
 }
 /** 비교 계열 응답(metrics.<col>.spark = [[t, 평균, 최고]…]) → 시각순 [{ ts, cpu, mem }]. 못 읽은 칸은 null 그대로. */
@@ -620,6 +627,95 @@ export function registerBmFolders(api) {
           ...(ci.baseErr ? { baselineUnreadable: true } : {}), ...(!hxOf ? { noHw: true } : {}),
           // 기준 지정(전 법인 공통)은 조회 ∧ 쓰기 무제한 관리자만 — 단추를 그릴지의 표지(집행은 관리 라우트)
           canBaseline: fleetAdmin(req.user, snap) && !!m.model && !ci.baseErr } : {}),
+      });
+    } catch (e) { if (!res.headersSent) res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); }
+  });
+
+  // v3.48 같은 묶음 대비(시안 ⑨) — 드로어가 열릴 때 1건. 묶음 = 같은 법인 · 같은 폴더 · 같은 모델(BIOS 편차와 같은 묶음 — 폴더에 넣은 서버만).
+  //   CPU · 메모리 · 전력 = 지난 24시간 평균 / 흡기 온도 = 지금 값. 값은 그 서버를 수집하는 노드가 낸다: 이 노드 서버는 로컬, 엣지 위임 서버는 **엣지마다 요청 1개**
+  //   (같은 (엣지, 키 묶음)은 60초 동안 한 번 — trendOnce). 판정은 bmcheck/peer.js 하나. 응답에는 다른 서버의 이름 · 키를 싣지 않는다(값 점만 — 묶음은 같은 법인이다).
+  //   범위 밖 · 없는 키 404(/hw 와 같은 노출 규칙) · 엣지 실패 사유(주소가 들어갈 수 있다)는 전체 범위 관리자 판본만.
+  api.get('/tools/bm-folders/peer', toolsPerm, async (req, res) => {
+    try {
+      if (isEdgeNode()) return res.status(404).json({ ok: false, error: 'central-only', reason: '같은 묶음 대비는 중앙 포탈에서 봅니다.' });
+      if (storeLoadError()) return res.status(503).json({ ok: false, error: 'registryUnreadable', reason: '물리서버 폴더 저장소를 읽지 못해 묶음을 정하지 못했습니다.' });
+      const snap = store.get();
+      const { members, allowed, b } = await stateFor(req, snap);
+      const hide = !!allowed;
+      const admin = isAdminDetailUser(req.user);
+      const visible = members.filter((m) => (m.corp ? (!allowed || allowed.has(m.corp)) : (!hide && m.kind === 'bm')));
+      const k = keyResolverFor(hide, visible.map((m) => m.key))(typeof req.query.key === 'string' ? req.query.key.slice(0, 200) : '');
+      const me = k ? visible.find((x) => x.key === k) : null;
+      if (!me) return res.status(404).json({ ok: false, error: 'not_found', reason: '서버를 찾지 못했습니다.' });
+      res.set('Cache-Control', 'no-store');
+      const hours = 24;
+      const base = { ok: true, hours, min: PEER_MIN, minSamples: PEER_AVG_MIN_SAMPLES, minCoverage: PEER_AVG_MIN_COVERAGE };
+      if (me.kind !== 'bm') return res.json({ ...base, why: 'esxi' });
+      const place = b.placeOf.get(me.key);
+      if (!place?.src || !me.corp) return res.json({ ...base, why: 'unplaced' });
+      if (!t(me.model)) return res.json({ ...base, why: 'no-model' });
+      const model = lc(me.model);
+      const all = visible.filter((x) => x.kind === 'bm' && x.corp === me.corp && lc(x.model) === model && (() => { const p = b.placeOf.get(x.key); return !!p?.src && p.path === place.path; })());
+      const group = { path: place.path, model: me.model, size: all.length };
+      if (all.length < PEER_MIN) return res.json({ ...base, why: 'few', group });
+      // 상한 — 이 서버는 반드시 넣는다(넘친 수를 밝힌다). 나머지는 **원문 키 순서**로 고른다 — 보이는 순서(판본마다 다르다)로 고르면
+      //   같은 서버가 관리자에게는 ‘묶음 안’ · 운영자에게는 ‘묶음 밖’ 이었다(반증 A1).
+      const others = all.filter((x) => x.key !== me.key).sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+      const used = [me, ...others.slice(0, PEER_GROUP_MAX - 1)];
+      if (all.length > used.length) group.truncated = all.length - used.length;
+      const to = Date.now(); const from = to - hours * 3_600_000;
+      const D = await trendDeps();
+      // 대상 해석은 추이와 같은 함수 하나(resolvePerfTarget — (법인, 키) 쌍). 대상 목록 두 조회는 이 요청 동안 한 번만 만든다(서버 수만큼 다시 만들지 않는다).
+      const onceOf = (fn) => { let p = null; return () => (p ||= Promise.resolve().then(() => (typeof fn === 'function' ? fn() : null))); };
+      const T = { currentTargets: onceOf(D.targets?.currentTargets), listEdgeBmUsage: onceOf(D.targets?.listEdgeBmUsage) };
+      const local = []; const byAgent = new Map(); const targetOf = new Map(); let noTarget = 0;
+      for (const m of used) {
+        if (!m.usageKey) { noTarget += 1; continue; }
+        let found = null;
+        try { found = await D.resolvePerfTarget(req, T, { allowed, isAdmin: admin, key: m.usageKey, vcenterId: m.corp }); } catch { found = null; }
+        // 사용률 수집 대상이 아니다(그 법인 수집 꺼짐 등) — CPU · 메모리는 없다. 전력 · 흡기 온도는 그 서버를 수집하는 노드가 iDRAC 값으로 답한다(사용률 수집과 무관):
+        //   엣지가 올린 서버(remoteAgent — 인증된 엣지 이름)는 그 엣지에, 그 밖은 이 노드에 같은 키로 묻는다(그 노드의 목록에 없으면 값 없음으로 돌아온다).
+        if (!found || D.perfTargetFail(found)) {
+          noTarget += 1;
+          const ag = t(m.remoteAgent) || (t(m.collectorId) && typeof D.collectorName === 'function' ? await D.collectorName(t(m.collectorId)).catch(() => '') : '');
+          found = ag ? { via: 'edge', agent: ag, realKey: m.usageKey } : { via: 'local', agent: '', realKey: m.usageKey };
+        }
+        targetOf.set(m.key, found);
+        if (found.via === 'local') local.push(found.realKey);
+        else { const a = byAgent.get(found.agent) || []; a.push(found.realKey); byAgent.set(found.agent, a); }
+      }
+      const got = new Map();   // `${agent}\u0000${realKey}` → 값 줄
+      const put = (agent, rows) => { for (const r of Array.isArray(rows) ? rows : []) if (r && typeof r.key === 'string') got.set(`${agent}\u0000${r.key}`, r); };
+      const fails = [];
+      const jobs = [];
+      let unknown = 0;   // 수집 노드가 자기 목록에 없다고 답한 서버 수(값 없음의 이유 — 반증 A8)
+      // 이 노드 계산에는 이 요청에서 만든 대상 목록을 넘긴다(대상 목록을 두 번 만들지 않는다 — 반증 A7)
+      if (local.length) jobs.push((async () => { const r = await D.localPeer({ keys: local, from, to, deps: { targets: T.currentTargets } }).catch((e) => ({ ok: false, reason: String(e?.message || e).slice(0, 160) })); if (r?.ok) { put('', r.rows); unknown += numOrNull(r.unknown) || 0; } else fails.push({ agent: '', kind: 'local', reason: r?.reason || '' }); })());
+      for (const [agent, keys] of byAgent) {
+        jobs.push((async () => {
+          // 합치는 열쇠 = (엣지, 구간, 키 묶음) — 키 묶음은 JSON 으로(글자 join 은 구분자가 든 키에서 다른 묶음과 겹친다)
+          const sig = JSON.stringify([...keys].sort());
+          const r = await trendOnce(`peer|${agent}|${hours}|${sig}`, () => D.edgePeer(agent, { keys, from, to }));
+          if (r?.ok) { put(agent, r.body?.rows); unknown += numOrNull(r.body?.unknown) || 0; } else fails.push({ agent, kind: r?.kind === 'old-version' ? 'old-version' : 'edge-fail', reason: r?.reason || '' });
+        })());
+      }
+      await Promise.all(jobs);
+      // 24시간 평균은 표본 수 · 구간 비율이 모두 될 때만 값으로 본다(avgValueOf — 최근 1시간의 점들을 하루 평균이라 하지 않는다).
+      //   전력도 수집 노드의 24시간 평균이다 — 목록 행의 ‘지금 전력’ 으로 대신 채우지 않는다(기준이 다른 값을 한 지표에 섞지 않는다).
+      let self = null;
+      const cut = (s) => (s && typeof s === 'object' ? { n: numOrNull(s.n), cov: numOrNull(s.cov) } : null);
+      const rows = used.map((x) => {
+        const f = targetOf.get(x.key);
+        const v = f ? got.get(`${f.via === 'local' ? '' : f.agent}\u0000${f.realKey}`) : null;
+        if (x.key === me.key && v) self = { cpu: cut(v.cpu), mem: cut(v.mem), power: cut(v.power) };
+        return { id: x.key, cpu: avgValueOf(v?.cpu), mem: avgValueOf(v?.mem), power: avgValueOf(v?.power), inlet: numOrNull(v?.inletC) };
+      });
+      const j = judgePeerGroup(rows, me.key);
+      const oldEdge = fails.filter((f) => f.kind === 'old-version').length; const edgeFail = fails.filter((f) => f.kind === 'edge-fail').length; const localFail = fails.filter((f) => f.kind === 'local').length;
+      return res.json({
+        ...base, group: { ...group, used: used.length }, metrics: j.metrics, out: j.out, judged: j.judged, ...(self ? { self } : {}),
+        notes: { ...(noTarget ? { noTarget } : {}), ...(unknown ? { unknown } : {}), ...(oldEdge ? { oldEdge } : {}), ...(edgeFail ? { edgeFail } : {}), ...(localFail ? { localFail } : {}) },
+        ...(admin && !hide && fails.length ? { reasons: fails.map((f) => String(f.reason || '').slice(0, 200)).filter(Boolean).slice(0, 5) } : {}),
       });
     } catch (e) { if (!res.headersSent) res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); }
   });

@@ -3349,6 +3349,21 @@ table.bmf-t tr.bmf-picked td { background: rgba(59, 130, 246, .08); }
 .bmd-ct-btn { display: block; margin-top: 4px; padding: 3px 8px; font-size: 11.5px; white-space: nowrap; }
 /* 구역 머리의 오른쪽 글자 — 좁은 드로어에서 낱말 가운데서 꺾이지 않게(‘견/줌’) */
 .bmd-sh-sub { min-width: 0; text-align: right; word-break: keep-all; overflow-wrap: anywhere; }
+/* v3.48 같은 묶음 대비 — 지표마다 한 줄(왼쪽 이름 · 기준 · 상태 / 오른쪽 띠 그림 + 설명). 좁은 화면에서는 위아래로 */
+.bmd-peer-head { font-size: 12.5px; font-weight: 600; margin: 0 0 8px; word-break: keep-all; overflow-wrap: anywhere; }
+.bmd-peer { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 4px 12px 10px; min-width: 0; }
+.bmd-peer-row { display: grid; grid-template-columns: 124px minmax(0, 1fr); gap: 4px 12px; padding: 10px 0; border-bottom: 1px solid var(--border-soft); align-items: start; min-width: 0; }
+.bmd-peer-l { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; font-size: 12.5px; }
+.bmd-peer-l .muted { font-size: 11px; }
+.bmd-peer-l .badge { white-space: nowrap; }
+.bmd-peer-s { min-width: 0; }
+.bmd-peer-cap { font-size: 11.5px; line-height: 1.5; word-break: keep-all; overflow-wrap: anywhere; }
+.bmd-peer-why { font-size: 11.5px; line-height: 1.5; word-break: keep-all; overflow-wrap: anywhere; padding: 6px 0 2px; }
+.bmd-peer-lg { gap: 4px 14px; font-size: 11.5px; margin-top: 10px; }
+.bmd-peer-notes { margin: 6px 0 0; padding-left: 18px; font-size: 12px; line-height: 1.55; word-break: keep-all; overflow-wrap: anywhere; }
+.bmd-peer-why-more { margin-top: 4px; font-size: 12px; }
+.bmd-peer-why-more > summary { cursor: pointer; }
+@media (max-width: 520px) { .bmd-peer-row { grid-template-columns: minmax(0, 1fr); } .bmd-peer-l { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 4px 8px; } }
 .bmd-chk-aside { padding: 4px 14px 6px; font-size: 12px; line-height: 1.5; word-break: keep-all; overflow-wrap: anywhere; }
 .bmd-al { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .bmd-al-chk { display: flex; gap: 8px; align-items: flex-start; font-size: 12.5px; line-height: 1.5; word-break: keep-all; }
