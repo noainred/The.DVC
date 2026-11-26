@@ -78,7 +78,12 @@ export function forecastText(r, { minDays, now = Date.now(), horizonDays } = {})
   }
 }
 export const FORECAST_TONE = Object.freeze({ already: TONE.red, eta: TONE.amber, far: TONE.blue, flat: TONE.dim, short: TONE.dim, none: TONE.dim, stale: TONE.dim, alreadyFault: TONE.red });
-export const perMonthText = (v, unit) => { const n = numOrNull(v); return n == null ? '—' : `${n >= 0 ? '+' : ''}${n.toFixed(Math.abs(n) < 1 ? 2 : 1)}${unit}/월`; };
+// v3.47(Chromium 재판독): 보이는 자릿수로 반올림해 0 이면 부호를 붙이지 않는다 — '-0.00 dB/월' 이 보였다(아주 작은 음수 기울기).
+export const perMonthText = (v, unit) => {
+  const n = numOrNull(v); if (n == null) return '—';
+  const d = Math.abs(n) < 1 ? 2 : 1; const t = n.toFixed(d);
+  return Number(t) === 0 ? `${(0).toFixed(d)}${unit}/월` : `${n > 0 ? '+' : ''}${t}${unit}/월`;
+};
 export const FORECAST_NOTE = '최근 기록의 **직선 추세**입니다. 기록이 모자라면 ‘기록 부족’, 늘지 않으면 ‘예측 없음’ 으로 두고 날짜를 지어내지 않습니다. 업링크는 **일 최대 사용률** 기준(95 백분위 아님)이고, LLDP 를 못 읽은 장비는 40G 이상 · 링크 있는 포트를 업링크로 봅니다(추정).';
 
 /* ── ⑮ GBIC 추세 ───────────────────────────────────────────────────────────────────────────────────────── */

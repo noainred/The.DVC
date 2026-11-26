@@ -171,6 +171,8 @@ describe('v3.42 CVP 버그 점검 1회차 — 웹', () => {
     expect(opticTrendText({ state: 'eta', target: 'fault', faultEta: now + 16 * 86_400_000 }, { now, horizonDays: 365 })).toMatch(/^장애 임계 /);
     expect(opticTrendText({ state: 'eta', warnEta: now + 10 * 86_400_000 }, { now, horizonDays: 365 })).not.toMatch(/장애/);
     expect(opticTrendText({ state: 'flat' }, { now })).toBe('내려가지 않음 — 예측 없음');
+    const { perMonthText } = await import('./cvpNetText.js');
+    expect(perMonthText(-0.0004, ' dB')).toBe('0.00 dB/월'); expect(perMonthText(-0.2, ' dB')).toBe('-0.20 dB/월'); expect(perMonthText(1.5, '')).toBe('+1.5/월');
     expect(trendBasisText({ warnDbm: -10, faultDbm: -14 }, 3)).toContain('장비가 Rx 임계를 준 3개는 그 임계');
     expect(trendBasisText({}, 0)).not.toMatch(/— dBm/);
     expect(descLinkNote({ kind: 'desc', descPair: true })).toContain('양쪽 설명이 서로를 가리킴');
