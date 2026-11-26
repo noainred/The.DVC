@@ -225,6 +225,18 @@ export function maskErrText(v, hosts = []) {
 }
 
 /**
+ * v3.47(결정 D-1 — 사용자 선택 '권고'): LLDP 이웃 포트 ID 가 **MAC 모양**이면(서버 NIC MAC — 스위치는 인터페이스 이름을 준다) 비-admin 에게 가린다.
+ *   장비 MAC · chassisId 와 같은 등급. 인터페이스 이름(Ethernet1 · vmnic0 · eth0)은 그대로. 위치 찾기의 VM · 호스트 MAC 은 검색 대상이라 일부러 보인다(이 함수를 쓰지 않는다).
+ *   호스트 상세 업링크 근거(hostSan net-uplinks)도 쓰지 않는다 — 같은 화면 NIC 표가 그 호스트 NIC MAC 을 이미 보인다(같은 사용자 · 같은 값).
+ *   모든 반복에 상한(콜론 · 하이픈 6마디 · 점 3마디 · 맨 12자리) — 선형. 글자 길이도 먼저 자른다.
+ */
+const MAC_TOKEN = /(?<![0-9a-f][:.-])\b(?:(?:[0-9a-f]{2}[:-]){5}[0-9a-f]{2}|(?:[0-9a-f]{4}\.){2}[0-9a-f]{4}|[0-9a-f]{12})\b(?![:.-][0-9a-f])/gi;   // 앞뒤로 마디가 더 붙은 것(8바이트 WWN 등)은 MAC 이 아니다
+export function maskMacText(v) {
+  if (typeof v !== 'string' || !v) return v;
+  return v.slice(0, 4000).replace(MAC_TOKEN, '(MAC 가림)');
+}
+
+/**
  * v2.769(점검 R4-D5-2): IPv6 리터럴 후보 — 앞뒤가 영숫자·밑줄·콜론(앞은 점도)이 아닌 곳에서 시작·끝나는 '16진수 0~4자 + 콜론' 2~7회 + 16진수 0~4자.
  * 모든 반복에 상한이 있고 lookbehind 가 영숫자·콜론 연속의 **첫 글자**에서만 시작을 허용하므로 시작점마다 상수 시도(선형 — 정규식 규약).
  * 시각('12:30:45')·MAC 은 후보가 될 수 있어 isIpv6Like 로 '::' 축약이 있거나 콜론 7개(완전 표기)인 것만 가린다.
@@ -443,7 +455,7 @@ api.get('/tools/cvp/device', toolsPerm, fullScopeOnly, async (req, res) => {
 // ── v3.37 포트 구성도(docs/design/cvp-port-map) — 전면 배치 · 포트별 연결 장비(설명 + LLDP) · 사용/예비 ─────────────────
 /**
  * 장비 한 대의 포트 구성도. 판정은 cvp/portmap.js 하나(분류 · 근거 · 배치표). 장비 · 엣지 왕복 0(중앙 DB 최신값 · v2.924 LLDP 표 · 일 롤업).
- *   게이트는 형제 /tools/cvp/device 와 같다(tools + 전체 범위). 비-admin 은 설명 · LLDP 문자열의 주소를 가리고 chassisId(MAC)는 싣지 않는다.
+ *   게이트는 형제 /tools/cvp/device 와 같다(tools + 전체 범위). 비-admin 은 설명 · LLDP 문자열의 주소를 가리고 chassisId(MAC)는 싣지 않는다 · MAC 모양 포트 ID 는 가린다(v3.47 D-1).
  */
 api.get('/tools/cvp/portmap', toolsPerm, fullScopeOnly, async (req, res) => {
   kickDemo();
@@ -470,7 +482,7 @@ api.get('/tools/cvp/portmap', toolsPerm, fullScopeOnly, async (req, res) => {
     device: { ...publicDevice(det.device, admin), corpId: corp.corpId, corpName: corp.corpName },
     cvpName: srv.name || srv.id,
     portsRead: m.portsRead, faceplate: m.faceplate, counts: m.counts, bySpeed: m.bySpeed,
-    ports: m.ports ? m.ports.map((p) => ({ ...p, desc: mk(p.desc), device: mk(p.device), lldp: p.lldp ? { ...p.lldp, sysName: mk(p.lldp.sysName), portDesc: mk(p.lldp.portDesc) } : null })) : null,
+    ports: m.ports ? m.ports.map((p) => ({ ...p, desc: mk(p.desc), device: mk(p.device), lldp: p.lldp ? { ...p.lldp, sysName: mk(p.lldp.sysName), portDesc: mk(p.lldp.portDesc), portId: admin ? p.lldp.portId : maskMacText(p.lldp.portId) } : null })) : null,
     xcvrRead: !!m.xcvrRead, partsAt: det.device.partsAt ?? null, collectedAt: det.device.collectedAt ?? null,
     lldp: { read: ll.read, at: ll.at, failing: !!ll.failing, ...(ll.unavailable ? { unavailable: true } : {}) },
     linkHistory: { since: days.since, ...(days.unavailable ? { unavailable: true } : {}) },

@@ -112,7 +112,7 @@ describe('v3.42 CVP 버그 점검 1회차 — 웹', () => {
     const cp = src('CvpCompare.jsx');
     expect(cp).toMatch(/setA\(String\(x\.id\)\); setB\('now'\);/); expect(cp).toMatch(/if \(my !== listSeq\.current\) return;/);   // F11 · 늦은 목록
     const ot = src('CvpOpticsTrend.jsx');
-    expect(ot).toMatch(/x\.state === 'stale' && x\.lastRx != null && th\.warnDbm != null && x\.lastRx <= th\.warnDbm/);   // A1-F9
+    expect(ot).toMatch(/x\.state === 'stale' && x\.lastRx != null && rowLow\(x\) != null && x\.lastRx <= rowLow\(x\)/);   // A1-F9 → v3.47 D-7: 행마다 그 광모듈의 기준
     expect(src('CvpPortPlan.jsx')).toMatch(/sat\.seriesUnread/);   // A4-F6
   });
   it('2회차 반증 R7 · R12 · R13', async () => {

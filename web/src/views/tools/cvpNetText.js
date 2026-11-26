@@ -35,12 +35,20 @@ export const VERDICT_DEFS = Object.freeze({
   observe: { label: '관찰', color: TONE.blue, hint: '링크가 한두 번 내려감' },
 });
 export const VERDICT_ORDER = Object.freeze(['replace', 'flap', 'peer', 'observe']);
-/** 근거 한 줄. */
+/**
+ * v3.47(D-7): GBIC 추세 기준 안내 — 장비가 Rx 임계를 준 광모듈은 그 임계, 나머지는 포탈 임계(CVP 설정). 장비 임계 수는 응답 deviceBasis(옛 서버는 없음).
+ */
+export function trendBasisText(th, deviceBasis) {
+  const portal = `주의 ${th?.warnDbm ?? '—'} dBm · 장애 ${th?.faultDbm ?? '—'} dBm(CVP 설정)`;
+  return Number(deviceBasis) > 0 ? `장비가 Rx 임계를 준 ${numText(deviceBasis)}개는 그 임계, 나머지는 ${portal}` : portal;
+}
+/** 근거 한 줄. v3.47(D-7): Rx 비교 기준은 행의 rxLowDbm(그 광모듈의 장비 임계 먼저) — 옛 서버 응답이면 화면 공통 warnDbm. */
 export function linkqBasis(r, warnDbm) {
   const out = [];
   if (r.errs != null && r.errs > 0) out.push(`오류 ${numText(r.errs)}건(${r.errDays}/${r.days}일)`);
   if (r.downs > 0) out.push(`링크 내려감 ${r.downs}회`);
-  if (r.rx != null) out.push(`Rx ${dbmText(r.rx)}${warnDbm != null && r.rx <= warnDbm ? ` ≤ 주의 ${warnDbm}` : ''}`);
+  const low = r.rxLowDbm !== undefined ? r.rxLowDbm : warnDbm;
+  if (r.rx != null) out.push(`Rx ${dbmText(r.rx)}${low != null && r.rx <= low ? ` ≤ ${r.rxBasis === 'device' ? '장비 임계' : '주의'} ${low}` : ''}`);
   else if (r.copper) out.push('구리(광량 없음)');
   else if (r.errs != null && r.errs > 0) out.push(r.xcvrRead ? '광량 못 읽음' : '트랜시버 목록 못 읽음');
   return out.join(' · ');
@@ -52,7 +60,7 @@ export function idleText(r) {
   if (r.never) return `기록 시작(${dateText(r.since)}) 뒤 사용 없음`;
   return r.idleDays == null ? '—' : `${r.idleDays}일 전`;
 }
-export const RECLAIM_NOTE = '마지막 사용일은 링크가 올라온 날의 일 기록에서 옵니다. 기록 시작 전은 알 수 없어 **일수로 세지 않고** ‘기록 시작 뒤 사용 없음’ 으로 따로 둡니다. 포탈은 포트를 바꾸지 않습니다 — 회수는 현장에서 판단하세요.';
+export const RECLAIM_NOTE = '마지막 사용일은 링크가 올라온 날의 일 기록에서 옵니다. 기록 시작 전은 알 수 없어 **일수로 세지 않고** ‘기록 시작 뒤 사용 없음’ 으로 따로 둡니다 — 기준은 **그 포트를 처음 본 날**이라 나중에 단 포트(새 카드 · 브레이크아웃)는 그날부터 셉니다. 포탈은 포트를 바꾸지 않습니다 — 회수는 현장에서 판단하세요.';
 /** 예측 상태 문장. */
 /** 예측 지평선(일) → '1년' · '180일'(v3.42 D11 — 응답 값. 없으면 '예측 기간'). */
 export const horizonText = (d) => { const n = numOrNull(d); return n == null || n <= 0 ? '예측 기간' : n % 365 === 0 ? `${n / 365}년` : `${n}일`; };
@@ -97,6 +105,13 @@ export function fieldValue(field, v) {
   if (field === 'admin') return v === 'up' ? '켜짐' : v === 'down' ? '꺼짐' : String(v);
   if (field === 'lag') return v === 'yes' ? '채널 소속' : '단독';
   return String(v);
+}
+/**
+ * 양끝 비교를 하지 않은 링크의 안내(v3.47 D-6): 양쪽 설명이 서로를 가리켜 한 줄로 합친 링크(descPair)는 상대 포트를 설명으로 짝지은 것이라 추정이고 양끝 비교를 하지 않는다.
+ */
+export function descLinkNote(l) {
+  if (l?.kind !== 'desc') return '상대 포트 모름';
+  return l.descPair ? '양쪽 설명이 서로를 가리킴(추정) — 양끝 비교는 LLDP 로 확인한 링크만' : '설명으로만 찾은 링크 — 상대 포트 모름';
 }
 /** 링크의 불일치 상태 — diff · na · ok · none(비교 대상 아님). */
 export function linkCheckState(l) {

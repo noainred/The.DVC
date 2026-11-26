@@ -4,7 +4,7 @@ import { fetchHeavy } from './cvpHeavy.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { NOTE, MONO, ROW, GRID1, LINKBTN, Seg, Tiles, CvpSelect, Pill } from './CvpNetParts.jsx';
-import { LAYER_DEFS, LINK_DEFS, FIELD_LABEL, fieldValue, linkCheckState, layoutNodes, TOPO_NOTE, MISMATCH_NOTE, speedText, TONE } from './cvpNetText.js';
+import { LAYER_DEFS, LINK_DEFS, FIELD_LABEL, fieldValue, linkCheckState, layoutNodes, TOPO_NOTE, MISMATCH_NOTE, speedText, TONE, descLinkNote } from './cvpNetText.js';
 
 /**
  * CVP › 토폴로지(v3.38 ⑥ 자동 지도 · ⑦ 양끝 불일치). `/tools/cvp/topology` 마운트 1회 + 새로고침(폴링 없음).
@@ -81,7 +81,7 @@ function LinkTable({ links, onlyCheck }) {
                 <td style={{ whiteSpace: 'normal', minWidth: 240, fontSize: 12.5 }}>
                   {items.length ? items.map((x, k) => (
                     <div key={k} style={{ color: x.state === 'diff' ? '#fca5a5' : '#fcd34d' }}>{FIELD_LABEL[x.field] || x.field}: {fieldValue(x.field, x.a)} ↔ {fieldValue(x.field, x.b)}</div>
-                  )) : st === 'none' ? <span style={NOTE}>{l.kind === 'desc' ? '설명으로만 찾은 링크 — 상대 포트 모름' : '상대 포트 모름'}</span> : '—'}
+                  )) : st === 'none' ? <span style={NOTE}>{descLinkNote(l)}</span> : '—'}
                 </td>
               </tr>
             );

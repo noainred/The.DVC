@@ -11,6 +11,7 @@
  * 플랩은 수집 주기마다 oper 가 up → down/nolink 로 바뀐 횟수라 주기보다 짧은 플랩은 놓친다(화면이 밝힌다).
  */
 import { intfOfPartName } from './portmap.js';
+import { rxLimitsOf } from './opticstrend.js';
 
 export const VERDICTS = Object.freeze(['replace', 'flap', 'peer', 'observe']);
 export const FLAP_MIN_DEFAULT = 3;
@@ -28,7 +29,7 @@ export function opticMapOf(parts) {
     const intf = (o && typeof o.intf === 'string' && o.intf) || intfOfPartName(p.name);
     if (!intf || m.has(intf)) continue;
     const rx = o?.rx ?? p.dom?.rxPower ?? null;
-    m.set(intf, { present: p.state !== 'absent', rx: rx == null || !Number.isFinite(Number(rx)) ? null : Number(rx) });
+    m.set(intf, { present: p.state !== 'absent', rx: rx == null || !Number.isFinite(Number(rx)) ? null : Number(rx), optic: o });
   }
   return m;
 }
@@ -44,7 +45,7 @@ const opticOf = (om, port) => {
  *   err:Map<string,{inErr,outErr,inDrop,outDrop,errDays,days}>, flap:Map<string,{downs:number,byDay:Array}>, warnDbm:number, flapMin?:number }} a
  * @returns {{ rows:object[], counts:object, omitted:number }}
  */
-export function rankLinks({ ports = [], devices = new Map(), err = new Map(), flap = new Map(), warnDbm = -10, flapMin = FLAP_MIN_DEFAULT } = {}) {
+export function rankLinks({ ports = [], devices = new Map(), err = new Map(), flap = new Map(), warnDbm = -10, faultDbm = -14, flapMin = FLAP_MIN_DEFAULT } = {}) {
   const counts = { replace: 0, flap: 0, peer: 0, observe: 0, judged: 0, noData: 0, up: 0 };
   const rows = [];
   const omCache = new Map();
@@ -69,7 +70,10 @@ export function rankLinks({ ports = [], devices = new Map(), err = new Map(), fl
     const rx = o && o.present ? o.rx : null;
     const copper = om != null && o === null;   // 트랜시버 목록을 읽었는데 그 포트가 없다 = 구리(또는 목록에 없는 포트)
     let verdict;
-    if (hasErr && rx != null && rx <= warnDbm) verdict = 'replace';
+    // v3.47(D-7): 교체 판정의 Rx 기준은 그 광모듈의 장비 임계(LowWarn — 없으면 LowAlarm)가 먼저, 없으면 포탈 주의 임계(실시간 GBIC 판정과 같은 순서)
+    const lim = o && o.present ? rxLimitsOf(o.optic, { warnDbm, faultDbm }) : null;
+    const rxLow = lim ? (lim.warnDbm ?? lim.faultDbm) : null;
+    if (hasErr && rx != null && rxLow != null && rx <= rxLow) verdict = 'replace';
     else if (downs >= flapMin) verdict = 'flap';
     else if (hasErr) verdict = 'peer';
     else verdict = 'observe';
@@ -79,7 +83,7 @@ export function rankLinks({ ports = [], devices = new Map(), err = new Map(), fl
       oper: p.oper || 'unknown', admin: p.admin || 'unknown', verdict,
       errs: up ? errs : null, inErr: e?.inErr ?? null, outErr: e?.outErr ?? null, drops: e && (e.inDrop != null || e.outDrop != null) ? (e.inDrop ?? 0) + (e.outDrop ?? 0) : null,
       errDays: e?.errDays ?? 0, days: e?.days ?? 0, downs, flapDays: f ? f.byDay : [],
-      rx, rxRead: rx != null, copper, xcvrRead: om != null,
+      rx, rxRead: rx != null, copper, xcvrRead: om != null, ...(lim ? { rxBasis: lim.basis, rxLowDbm: rxLow } : {}),
     });
   }
   const pri = Object.fromEntries(VERDICTS.map((v, i) => [v, i]));

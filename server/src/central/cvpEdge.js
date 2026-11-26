@@ -59,11 +59,14 @@ function opticOf(p) {
       linked: o.linked === true, ...(o.lanesPartial === true ? { lanesPartial: true } : {}), portKnown: o.portKnown === true, judged: o.judged === true,   // v3.42(2회차): 새 엣지 필드는 화이트리스트에도
       rxState: OPTIC_STATES.has(o.rxState) ? o.rxState : null, basis: o.basis === 'device' || o.basis === 'portal' ? o.basis : null,
       ...(numOrNull(o.warnDbm) != null ? { warnDbm: numOrNull(o.warnDbm) } : {}), ...(numOrNull(o.faultDbm) != null ? { faultDbm: numOrNull(o.faultDbm) } : {}),
+      // v3.47(D-7): 장비 Rx 낮은 쪽 임계 — dBm 범위(-60 ~ +15) 밖이면 버린다(표식 값 · 단위 오류).
+      ...(dbmOrNull(o.devWarnDbm) != null ? { devWarnDbm: dbmOrNull(o.devWarnDbm) } : {}), ...(dbmOrNull(o.devFaultDbm) != null ? { devFaultDbm: dbmOrNull(o.devFaultDbm) } : {}),
     };
   }
   return out;
 }
 
+const dbmOrNull = (v) => { const n = numOrNull(v); return n != null && n >= -60 && n <= 15 ? n : null; };
 export const MIN_CVP_EDGE_VERSION = '2.608.0';
 /** 보고가 없는 위임 CVP 의 분류 — 화면(`cvpText.serverState`)이 kind 별 문구를 갖는다(테스트가 1:1 대조). */
 export const CVP_EDGE_KINDS = Object.freeze(['old-version', 'unknown-version', 'silent', 'waiting']);

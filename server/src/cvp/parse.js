@@ -407,7 +407,9 @@ export function parseParts(text, kind, { max = PART_MAX } = {}) {
       }
       if (x.text) detailBits.push(x.text);
       // 최종 판정(광량 포함)은 judgeOptics 가 포트 링크 상태를 보고 한다 — 여기서는 재료만 싣는다.
-      if (dom) domJudge = { otherState: x.otherState, envState: x.envState, rxDevice: x.rxDevice };
+      // v3.47(결정 D-7): Rx **낮은 쪽** 장비 임계(LowWarn · LowAlarm)도 싣는다 — GBIC 추세 · 링크 품질이 실시간 판정과 같은 기준을 쓰게(opticstrend.rxLimitsOf).
+      const lw = x.rxThresholds ? numOrNull(x.rxThresholds.loW) : null; const la = x.rxThresholds ? numOrNull(x.rxThresholds.loA) : null;
+      if (dom) domJudge = { otherState: x.otherState, envState: x.envState, rxDevice: x.rxDevice, ...(lw != null || la != null ? { rxLow: { warnDbm: lw, faultDbm: la } } : {}) };
       media = xcvrTypeText(unwrap(pick(f, ['mediaTypeString', 'mediaType', 'xcvrMediaType', 'media', 'xcvrType', 'transceiverType'])));
     }
     parts.push({ kind, name: str(name, 128), state: st, detail: str(detailBits.join(' · '), 200), ...(dom ? { dom, domJudge } : {}), ...(pw ? { power: pw } : {}), ...(media ? { media } : {}) });
@@ -534,6 +536,8 @@ export function judgeOptics(parts, ports, { warnDbm = -10, faultDbm = -14 } = {}
     const optic = {
       intf, rx, tx: numOrNull(p.dom.txPower), linked, ...(lanesPartial ? { lanesPartial: true } : {}), portKnown: portsKnown && known, judged: rxState != null, rxState, basis: rxState != null ? basis : null,
       ...(basis === 'portal' && rxState != null ? { warnDbm, faultDbm } : {}),
+      // v3.47(D-7): 장비가 준 Rx 낮은 쪽 임계(링크 상태와 무관 — 추세는 링크가 내려간 날에도 그 광모듈의 기준을 안다). 엣지 정제 화이트리스트에도.
+      ...(p.domJudge?.rxLow?.warnDbm != null ? { devWarnDbm: p.domJudge.rxLow.warnDbm } : {}), ...(p.domJudge?.rxLow?.faultDbm != null ? { devFaultDbm: p.domJudge.rxLow.faultDbm } : {}),
     };
     let detail = p.detail || '';
     if (linkDown) detail = `${detail}${detail ? ' · ' : ''}링크 없음 — 광량·Tx·바이어스 판정 안 함`;

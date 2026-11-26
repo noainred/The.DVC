@@ -20,15 +20,17 @@ const devKey = (a, c, k) => `${a}\u0000${c}\u0000${k}`;
 /**
  * @param {{ ports:Array<{agent,cvpId,key,hostname,port,oper,admin,desc,speedBps}>, last:Map<string,number>, first:Map<string,number>, idleDays:number, now?:number }} a
  */
-export function reclaimCandidates({ ports = [], last = new Map(), first = new Map(), idleDays = 90, now = Date.now() } = {}) {
-  const counts = { idle: 0, never: 0, noHistory: 0, down: 0, byIdle: Object.fromEntries(IDLE_CHOICES.map((d) => [d, 0])) };
+export function reclaimCandidates({ ports = [], last = new Map(), first = new Map(), portFirst = null, idleDays = 90, now = Date.now() } = {}) {
+  const counts = { idle: 0, never: 0, noHistory: 0, young: 0, down: 0, byIdle: Object.fromEntries(IDLE_CHOICES.map((d) => [d, 0])) };
   const rows = [];
   for (const p of Array.isArray(ports) ? ports : []) {
     if (!p || /^management/i.test(String(p.port))) continue;
     if (p.oper !== 'down' && p.oper !== 'nolink') continue;
     counts.down++;
     const dk = devKey(p.agent, p.cvpId, p.key);
-    const since = first.get(dk) ?? null;
+    // v3.47(결정 D-5): 기준은 **포트를 처음 본 날**(없으면 장비 기록 시작일 — 예전 판정). 장비가 나중에 단 포트가 장비 기록 시작일부터 세어 바로 후보가 되던 것.
+    const pf = portFirst ? portFirst.get(`${dk}\u0000${p.port}`) ?? null : null;
+    const since = pf ?? first.get(dk) ?? null;
     if (since == null) { counts.noHistory++; continue; }
     const ll = last.get(`${dk}\u0000${p.port}`) ?? null;
     const idle = ll != null ? Math.floor((now - ll) / DAY_MS) : null;
@@ -36,6 +38,8 @@ export function reclaimCandidates({ ports = [], last = new Map(), first = new Ma
     if (ll != null) for (const d of IDLE_CHOICES) if (idle >= d) counts.byIdle[d]++;
     const isIdle = ll != null && idle >= idleDays;
     const isNever = ll == null && recorded >= idleDays;
+    // 링크 기록이 없고 지켜본 날이 아직 기준보다 짧다 — 후보도 아니고 '쓴다' 도 아니다(따로 센다 — 화면이 '아직 판단 못 함' 으로 밝힌다)
+    if (ll == null && !isNever) counts.young++;
     if (!isIdle && !isNever) continue;
     counts[isIdle ? 'idle' : 'never']++;
     rows.push({ agent: p.agent, cvpId: p.cvpId, key: p.key, hostname: p.hostname || p.key, port: p.port, desc: p.desc ?? null, speedBps: p.speedBps ?? null,
