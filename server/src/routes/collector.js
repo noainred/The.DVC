@@ -321,6 +321,18 @@ collectorRouter.get('/bm-usage/baseline', tokenFirst('bm-usage-baseline'), (req,
 collectorRouter.get('/bm-usage/compare', tokenFirst('bm-usage-compare'), (req, res) => bmPerfOpsCollector(req, res, 'compare'));
 // 6단계 서버 비교 — 엣지 위임 서버 1대의 지표 여러 개 계열 통계(요청 1개 · 보관 없음 · central/bmComparePull.js). 대상 목록 밖 키는 404.
 collectorRouter.get('/bm-usage/compare-series', tokenFirst('bm-usage-compare-series'), (req, res) => bmPerfOpsCollector(req, res, 'compare-series'));
+// v3.48 물리서버 ‘같은 묶음 대비’ — 이 엣지가 수집하는 서버 **여러 대**의 구간 평균(CPU · 메모리) · 지금 값(전력 · 흡기 온도)을 요청 1개로(central/bmPeerPull.js).
+//   읽기 요청이다(엣지 상태를 바꾸지 않는다) — 키 목록이 길어 POST 본문으로 받는다(키 80개 × 256자 — 한글 키도 들어가게 80KB 상한 · 반증 A13). 대상 목록 밖 키는 건너뛰고 수를 밝힌다(존재를 가르지 않는다). 보관 없음.
+collectorRouter.post('/bm-usage/peer-avg', tokenFirst('bm-usage-peer-avg'), express.json({ limit: '80kb' }), async (req, res) => {
+  try {
+    const b = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+    if (!Array.isArray(b.keys)) return res.status(400).json({ ok: false, reason: 'keys 는 목록이어야 합니다.' });
+    const P = await import('../bmusage/peerAvg.js');
+    const r = await P.peerAvgFor({ keys: b.keys, from: b.from, to: b.to });
+    if (r && r.__status) { const { __status, ...rest } = r; return res.status(__status).json(rest); }
+    res.json(r);
+  } catch (err) { res.status(500).json({ ok: false, reason: String(err?.message || err).slice(0, 300) }); }
+});
 /**
  * 7a단계 — 로그 분석 엣지 대행(central/bmLogsPull.js pullEdgeLogs). 같은 url · 같은 토큰(새 포트 · 새 인증 없음) · 이 엣지가 수집하는 서버만(대상 밖 키는 404).
  *   집계 · 가린 표본 · 보안 상위만 돌려준다(원문 전체는 보관하지 않으므로 내줄 것이 없다). 보안 상위의 IP · 계정 가림은 중앙 라우트가 사람(관리자 판본 판정)에 맞춰 한다.
