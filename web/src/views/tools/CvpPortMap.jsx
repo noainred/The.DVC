@@ -151,7 +151,8 @@ function Detail({ p, data }) {
     ['LLDP 이웃', lldpText(p)],
     ['링크 · 관리', `${p.oper === 'up' ? '연결됨' : p.oper === 'unknown' ? '모름' : '링크 없음'} · ${p.admin === 'down' ? '꺼짐(shutdown)' : p.admin === 'up' ? '켜짐' : '모름'}`],
     ['속도 · 트랜시버', `${speedText(p)} · ${xcvrText(p)}`],
-    ['VLAN · LAG', `${p.vlan || '—'} · ${p.lag || 'LAG 아님'}`],
+    // v3.42(2회차 F7): 채널 소속을 읽은 장비만 '' 를 'LAG 아님' 으로(못 읽었으면 '못 읽음' — 서버가 NULL 과 '' 를 둘 다 '' 로 준다)
+    ['VLAN · LAG', `${p.vlan || '—'} · ${p.lag || (data?.device?.info?.cfgReadAt?.lag && !data.device.info.cfgReadAt.lagPartial ? 'LAG 아님' : '소속 못 읽음')}`],
     ['수신 / 송신', utilText(p)],
     ['마지막 링크', lastLinkText(p, data.linkHistory?.since, Date.now(), !!data.linkHistory?.unavailable)],
   ];

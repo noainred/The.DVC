@@ -79,11 +79,13 @@ export function complianceFleet(devices = [], { now = Date.now() } = {}) {
     counts.devices++; counts.config[c.state]++; counts.bugs[b.state]++; counts.life[l.state]++;
     if ((b.cveCount ?? 0) > 0) counts.cveDevices++;
     const ver = String(d.eosVersion || '').trim();
-    if (!byVer.has(ver)) byVer.set(ver, { version: ver, devices: 0, models: new Set(), bugHigh: 0, cveDevices: 0, lifePassed: 0, lifeSoon: 0, bugUnread: 0 });
+    if (!byVer.has(ver)) byVer.set(ver, { version: ver, devices: 0, models: new Set(), bugHigh: 0, cveDevices: 0, lifePassed: 0, lifeSoon: 0, bugUnread: 0, bugNoRecord: 0, lifeUnread: 0 });
     const v = byVer.get(ver);
     v.devices++; v.models.add(String(d.model || '').trim());
     if (b.state === 'high') v.bugHigh++;
     if (b.state === 'unread') v.bugUnread++;
+    if (b.state === 'norecord') v.bugNoRecord++;   // v3.42(2회차 F5 · A2-L1): 기록 없음 · 수명주기 못 읽음도 버전별로 센다(깨끗해 보이지 않게)
+    if (l.state === 'unread') v.lifeUnread++;
     if ((b.cveCount ?? 0) > 0) v.cveDevices++;
     if (l.state === 'passed') v.lifePassed++;
     if (l.state === 'soon') v.lifeSoon++;

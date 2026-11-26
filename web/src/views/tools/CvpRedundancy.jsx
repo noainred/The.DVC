@@ -20,6 +20,7 @@ export default function CvpRedundancyView({ servers = [], onOpen }) {
   const [err, setErr] = useState(null);
   const [reload, setReload] = useState(0);
   const [onlyBad, setOnlyBad] = useState(true);
+  const [unkOnly, setUnkOnly] = useState(false);
   useEffect(() => {
     let active = true;
     setErr(null); setR(null);
@@ -28,14 +29,18 @@ export default function CvpRedundancyView({ servers = [], onOpen }) {
   }, [cvpId, reload]);
   const rows = r && Array.isArray(r.rows) ? r.rows : [];
   const bad = (x) => BAD_MLAG.has(x.mlag.state) || x.channels.some((ch) => BAD_CH.has(ch.state));
-  const shown = onlyBad ? rows.filter(bad) : rows;
+  // v3.42(2회차 F2): '확인 불가'(MLAG · 채널을 다 읽지 못함)는 문제 목록과 따로 — 기본 보기가 '문제 없음' 으로 단정하지 않게 칩 · 문구를 둔다.
+  const unk = (x) => x.mlag.state === 'unknown' || x.channels.some((ch) => ch.state === 'unknown');
+  const shown = unkOnly ? rows.filter(unk) : onlyBad ? rows.filter(bad) : rows;
+  const unkN = rows.filter(unk).length;
   const c = r?.counts || { ch: {}, mlag: {} };
   return (
     <div style={GRID1}>
       <div className="card" style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
         <div style={ROW}>
           <b style={{ fontSize: 15 }}>이중화</b>
-          <button type="button" className={`tab${onlyBad ? ' active' : ''}`} aria-pressed={onlyBad} onClick={() => setOnlyBad((x) => !x)}>문제 있는 장비만 <b style={MONO}>{rows.filter(bad).length}</b></button>
+          <button type="button" className={`tab${onlyBad && !unkOnly ? ' active' : ''}`} aria-pressed={onlyBad && !unkOnly} onClick={() => { setOnlyBad((x) => (unkOnly ? true : !x)); setUnkOnly(false); }}>문제 있는 장비만 <b style={MONO}>{rows.filter(bad).length}</b></button>
+          {unkN > 0 && <button type="button" className={`tab${unkOnly ? ' active' : ''}`} aria-pressed={unkOnly} onClick={() => setUnkOnly((x) => !x)}>확인 불가 <b style={MONO}>{unkN}</b></button>}
           <CvpSelect servers={servers} value={cvpId} onChange={setCvpId} />
           <button type="button" className="btn" style={{ marginLeft: 'auto' }} onClick={() => setReload((x) => x + 1)}>새로고침</button>
         </div>
@@ -50,7 +55,7 @@ export default function CvpRedundancyView({ servers = [], onOpen }) {
           ['MLAG 문제', (c.mlag.peerDown ?? 0) + (c.mlag.notConnected ?? 0) + (c.mlag.inactive ?? 0), `피어 링크 ${c.mlag.peerDown ?? 0} · 협상 ${c.mlag.notConnected ?? 0} · 비활성 ${c.mlag.inactive ?? 0}`, TONE.red],
           ['MLAG 정상', c.mlag.ok ?? 0, `안 씀 ${c.mlag.off ?? 0}`, TONE.green],
           // v3.42(D12): 한 장비가 MLAG · 채널 소속을 둘 다 못 읽어도 한 대로 센다(예전 합은 두 번 셌다).
-          ['못 읽음', rows.filter((x) => x.mlag.state === 'unread' || x.lagUnread || !x.portsRead).length, `MLAG 상태 ${c.mlag.unread ?? 0}대 · 채널 소속 ${c.lagUnread ?? 0}대 · 확인 불가 MLAG ${c.mlag.unknown ?? 0} · 채널 ${c.ch.unknown ?? 0}`, 'var(--text-dim)'],
+          ['못 읽음', rows.filter((x) => x.mlag.state === 'unread' || x.lagUnread || !x.portsRead).length, `MLAG 상태 ${c.mlag.unread ?? 0}대 · 채널 소속 ${c.lagUnread ?? 0}대 · 포트 목록 ${rows.filter((x) => !x.portsRead).length}대 · 확인 불가 MLAG ${c.mlag.unknown ?? 0} · 채널 ${c.ch.unknown ?? 0}`, 'var(--text-dim)'],
         ]} />
         <div className="card" style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
           <STable className="v3-table" minWidth={940} limit={400}>
@@ -72,7 +77,7 @@ export default function CvpRedundancyView({ servers = [], onOpen }) {
                       {x.lagUnread ? <span style={NOTE}>채널 소속 못 읽음</span> : !x.portsRead ? <span style={NOTE}>포트 목록 못 읽음(채널 없음이 아님)</span> : !x.channels.length ? <span style={NOTE}>포트 채널 없음</span> : (
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                           {x.channels.map((ch) => (
-                            <span key={ch.po} title={ch.members.map((m) => `${m.port} ${m.admin === 'down' ? '꺼짐' : m.oper}`).join('\n')}
+                            <span key={ch.po} title={ch.members.map((m) => `${m.port} ${m.admin === 'down' ? '꺼짐' : (m.oper ?? 'up')}`).join('\n')}
                               style={{ display: 'inline-flex', gap: 6, alignItems: 'center', padding: '2px 8px', borderRadius: 6, border: `1px solid ${CHANNEL_DEFS[ch.state][1]}`, fontSize: 12 }}>
                               <span style={MONO}>{ch.po.replace(/^Port-Channel/i, 'Po')}</span><b style={{ ...MONO, color: CHANNEL_DEFS[ch.state][1] }}>{channelText(ch)}</b>
                               {/* v3.42(D10): 문제 채널은 내려간 멤버를 글자로도(마우스 올림 · title 만이면 터치 · 키보드로 볼 수 없다) */}
@@ -87,7 +92,7 @@ export default function CvpRedundancyView({ servers = [], onOpen }) {
               })}
             </tbody>
           </STable>
-          {!shown.length && <div style={NOTE}>{onlyBad ? '문제 있는 장비가 없습니다.' : '장비가 없습니다.'}</div>}
+          {!shown.length && <div style={NOTE}>{unkOnly ? '확인 불가 장비가 없습니다.' : onlyBad ? (unkN ? `확인된 문제는 없습니다 — 다만 ${unkN}대는 상태를 다 읽지 못해 확인 불가입니다(‘확인 불가’ 칩).` : '문제 있는 장비가 없습니다.') : '장비가 없습니다.'}</div>}
           <div style={NOTE}>채널 칸에 마우스를 올리면 멤버 포트와 상태가 보입니다(문제 채널은 내려간 멤버를 칸 안에 적습니다). {shown.length > 400 ? `${shown.length}대 중 정렬 순서 앞 400대 표시. ` : ''}{r.truncated ? '⚠ 포트 행이 상한을 넘어 일부만 봤습니다.' : ''}</div>
         </div>
       </>)}

@@ -66,7 +66,8 @@ export function exhaustForecast({ devices = [], series = new Map(), now = Date.n
   }
   const order = { already: 0, eta: 1, far: 2, flat: 3, short: 4, stale: 5, none: 6 };
   rows.sort((a, b) => (order[a.state] - order[b.state]) || ((a.eta ?? Infinity) - (b.eta ?? Infinity)) || String(a.hostname).localeCompare(String(b.hostname)));
-  return { rows, counts };
+  // v3.42(2회차 A4-F9): 점은 위험한 순서 앞쪽 행에만(장비마다 180점 — 응답 3.1MB 였다). 포화 예측과 같은 규칙.
+  return { rows: rows.map((r, i) => (i < SAT_POINTS_ROWS ? r : { ...r, points: null })), counts, pointsRows: SAT_POINTS_ROWS };
 }
 
 /**
@@ -84,7 +85,9 @@ export function saturationForecast({ uplinks = [], series = new Map(), now = Dat
     counts[f.state] = (counts[f.state] || 0) + 1;
     // v3.42(A5-D11): '최근 30일 최대' 는 날짜로 자른다(예전 slice(-30) 은 값이 있는 기록 30개라 빠진 날이 있으면 30일보다 길었다).
     const last30 = s.filter((x) => x[1] != null && x[0] >= now - 30 * DAY_MS);
-    rows.push({ agent: u.agent, cvpId: u.cvpId, key: u.key, hostname: u.hostname, port: u.port, peer: u.peer || '', speedBps: u.speedBps ?? null, basis: u.basis || 'lldp',
+    let lastAt = null;   // v3.42(2회차 A5-F3): 끊긴 행이 '기록 끊김(마지막 —)' 이 되지 않게 마지막 값 있는 날을 싣는다
+    for (let i = s.length - 1; i >= 0; i--) if (s[i][1] != null) { lastAt = s[i][0]; break; }
+    rows.push({ lastAt, agent: u.agent, cvpId: u.cvpId, key: u.key, hostname: u.hostname, port: u.port, peer: u.peer || '', speedBps: u.speedBps ?? null, basis: u.basis || 'lldp',
       state: f.state, days: f.days, current: f.state === 'stale' ? null : f.current, max30: last30.length ? Math.max(...last30.map((x) => x[1])) : null, eta: f.eta,
       perMonth: f.slopePerDay == null ? null : f.slopePerDay * 30, _s: s });
   }

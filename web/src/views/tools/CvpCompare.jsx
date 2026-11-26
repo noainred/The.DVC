@@ -32,13 +32,16 @@ export default function CvpCompareView({ servers = [] }) {
   const [kind, setKind] = useState('all');
   const [showNa, setShowNa] = useState(false);   // 바뀐 것 없이 '비교 못 함' 만 있는 장비는 기본으로 접는다(v3.38 판독: 데모 123대 중 대부분이 그 줄이라 바뀐 장비가 묻혔다)
   const seq = useRef(0);
+  const listSeq = useRef(0);
   const load = useCallback(() => {
     setListErr(null);
+    const my = ++listSeq.current;   // v3.42(2회차 A5 추정): 찍기 · 지우기가 겹치면 늦게 온 옛 목록이 새 선택을 되돌렸다 — 마지막 요청만 반영
     fetchJson('/tools/cvp/snapshots').then((x) => {
+      if (my !== listSeq.current) return;
       setList(x);
       const done = (x.snapshots || []).filter((s) => s.done);
       setA((cur) => (cur && done.some((s) => String(s.id) === cur) ? cur : done[0] ? String(done[0].id) : ''));
-    }).catch((e) => setListErr(e));
+    }).catch((e) => { if (my === listSeq.current) setListErr(e); });
   }, []);
   useEffect(() => { load(); }, [load]);
   const take = async () => {
@@ -47,7 +50,7 @@ export default function CvpCompareView({ servers = [] }) {
       const x = await postJson('/tools/cvp/snapshots', { label, ...(cvpId ? { cvpId } : {}) });
       if (!x || x.ok === false) { setWriteErr(new Error((x && x.reason) || '스냅샷을 저장하지 못했습니다.')); return; }   // 409(다른 저장 중 · 장비 0)는 던지지 않고 본문으로 온다
       setMsg(`스냅샷 #${x.id} 저장 — 장비 ${x.devices}대 · ${bytesText(x.bytes)}${x.truncated ? ' · ⚠ 상한을 넘어 일부 장비만' : ''}`); setLabel('');
-      if (x.id != null) setA(String(x.id));   // v3.42(D13): 방금 찍은 것을 '전' 으로(작업 전 찍고 → 작업 뒤 지금과 비교)
+      if (x.id != null) { setA(String(x.id)); setB('now'); }   // v3.42(D13 · 2회차 F11): 방금 찍은 것을 '전', '후' 는 지금으로(후가 옛 스냅샷이면 새 → 옛 역방향 비교가 됐다)
       load(); }
     catch (e) { setWriteErr(e); }
     finally { setBusy(false); }

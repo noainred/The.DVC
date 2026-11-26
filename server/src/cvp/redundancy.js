@@ -7,6 +7,9 @@
  * MLAG: 상태 노드(…/Sysdb/mlag/status — 경로 · 필드 이름 추정) — active + connected + 피어 링크 up = ok. disabled = MLAG 안 씀(off).
  *   상태를 못 읽었으면 unread(인벤토리의 'MLAG 켜짐' 여부만 함께 싣는다 — 켜짐인데 못 읽음은 따로 보인다). 장애로 열지 않는다(화면만 — 시안 §6-5 기본값).
  */
+/** v3.42(2회차 A4-F3): 비교마다 localeCompare(…, 옵션) 는 Collator 를 새로 만든다(500대 320~415ms) — 하나를 재사용한다(perf-db 'Collator 재사용'). */
+const NAT = new Intl.Collator('en', { numeric: true });
+
 export const CHANNEL_STATES = Object.freeze(['degraded', 'down', 'unknown', 'ok', 'off']);
 export const MLAG_STATES = Object.freeze(['peerDown', 'notConnected', 'inactive', 'unknown', 'ok', 'off', 'unread']);
 const PO = /^port-?channel\s?\d+$/i;
@@ -33,10 +36,10 @@ export function channelsOf(ports = []) {
     // 반증 F4: 내려간 멤버가 하나라도 확인되면 이중화 상실이다(모르는 멤버가 섞여도 — 예전에는 unknown 으로 가려졌다). 전부 확인된 내려감만 down.
     else if (knownDown > 0) state = up === 0 && unk === 0 ? 'down' : 'degraded';
     else state = 'unknown';
-    c.members.sort((a, b) => a.port.localeCompare(b.port, 'en', { numeric: true }));
+    c.members.sort((a, b) => NAT.compare(a.port, b.port));
     out.push({ ...c, total: c.members.length, expected: want.length, up, state });
   }
-  return out.sort((a, b) => a.po.localeCompare(b.po, 'en', { numeric: true }));
+  return out.sort((a, b) => NAT.compare(a.po, b.po));
 }
 
 /** MLAG 판정. ms = info.mlagStatus(없으면 null) · enabled = info.mlag(인벤토리 — true/false/undefined). */
@@ -80,7 +83,7 @@ export function redundancyFleet({ devices = [], portsByDev = new Map() } = {}) {
     rows.push({ agent: d.agent, cvpId: d.cvpId, key: d.key, hostname: d.hostname || d.key, model: d.model || '', corpName: d.corpName || '',
       mlag, channels: chans, lagRead, lagUnread, lagPartial: !!(info.cfgReadAt && info.cfgReadAt.lagPartial), portsRead: d.portsRead !== false, worst: worstOf(chans, mlag) });
   }
-  rows.sort((a, b) => a.worst - b.worst || String(a.hostname).localeCompare(String(b.hostname)));
+  rows.sort((a, b) => a.worst - b.worst || NAT.compare(String(a.hostname), String(b.hostname)));
   return { rows, counts };
 }
 /** 장비 하나의 가장 나쁜 상태 순위(작을수록 나쁨) — 정렬용. */

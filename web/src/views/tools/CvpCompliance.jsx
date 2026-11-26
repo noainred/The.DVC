@@ -77,7 +77,7 @@ export default function CvpComplianceView({ servers = [], onOpen }) {
             <div style={NOTE}>{shown.length > 500 ? `${shown.length}대 중 정렬 순서 앞 500대 표시 · ` : ''}준수 코드의 뜻은 CVP 가 정합니다 — 이 화면은 ‘0000’ 만 준수로 읽고 그 밖의 코드는 그대로 보입니다.</div>
           </>) : (<>
             <STable className="v3-table" minWidth={760}>
-              <thead><tr><th>EOS 버전</th><th>장비</th><th>모델</th><th>버그 · CVE 높음</th><th>CVE 노출</th><th>지원 종료 지남</th><th>곧 종료</th><th>버그 못 읽음</th></tr></thead>
+              <thead><tr><th>EOS 버전</th><th>장비</th><th>모델</th><th>버그 · CVE 높음</th><th>CVE 노출</th><th>지원 종료 지남</th><th>곧 종료</th><th>버그 못 읽음 · 기록 없음</th><th>수명주기 못 읽음</th></tr></thead>
               <tbody>
                 {(r.versions || []).map((v) => (
                   <tr key={v.version || '-'}>
@@ -88,7 +88,8 @@ export default function CvpComplianceView({ servers = [], onOpen }) {
                     <td style={{ ...MONO, textAlign: 'right' }}>{v.cveDevices}</td>
                     <td style={{ ...MONO, textAlign: 'right', color: v.lifePassed ? TONE.red : undefined }}>{v.lifePassed}</td>
                     <td style={{ ...MONO, textAlign: 'right', color: v.lifeSoon ? TONE.amber : undefined }}>{v.lifeSoon}</td>
-                    <td style={{ ...MONO, textAlign: 'right' }}>{v.bugUnread}</td>
+                    <td data-sort={(v.bugUnread ?? 0) + (v.bugNoRecord ?? 0)} style={{ ...MONO, textAlign: 'right' }}>{v.bugUnread} · {v.bugNoRecord ?? 0}</td>
+                    <td style={{ ...MONO, textAlign: 'right' }}>{v.lifeUnread ?? 0}</td>
                   </tr>
                 ))}
               </tbody>

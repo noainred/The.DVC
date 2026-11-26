@@ -56,7 +56,7 @@ function opticOf(p) {
   if (o) {
     out.optic = {
       intf: typeof o.intf === 'string' ? o.intf.slice(0, 64) : null, rx: numOrNull(o.rx), tx: numOrNull(o.tx),
-      linked: o.linked === true, portKnown: o.portKnown === true, judged: o.judged === true,
+      linked: o.linked === true, ...(o.lanesPartial === true ? { lanesPartial: true } : {}), portKnown: o.portKnown === true, judged: o.judged === true,   // v3.42(2회차): 새 엣지 필드는 화이트리스트에도
       rxState: OPTIC_STATES.has(o.rxState) ? o.rxState : null, basis: o.basis === 'device' || o.basis === 'portal' ? o.basis : null,
       ...(numOrNull(o.warnDbm) != null ? { warnDbm: numOrNull(o.warnDbm) } : {}), ...(numOrNull(o.faultDbm) != null ? { faultDbm: numOrNull(o.faultDbm) } : {}),
     };

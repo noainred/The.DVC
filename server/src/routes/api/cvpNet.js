@@ -27,9 +27,10 @@ import * as cdb from '../../cvp/db.js';
 import { corpResolver, rowOwnerOf } from '../../cvp/overview.js';
 import { rankLinks, FLAP_MIN_DEFAULT } from '../../cvp/linkq.js';
 import { reclaimCandidates, exhaustForecast, saturationForecast, IDLE_CHOICES, FORECAST_MIN_DAYS, FORECAST_WINDOW_DAYS, UPLINK_SAT_PCT } from '../../cvp/portplan.js';
-import { opticTrends, opticInventory, TREND_DAYS, TREND_MIN_DAYS } from '../../cvp/opticstrend.js';
+import { opticTrendsAsync, opticInventory, TREND_DAYS, TREND_MIN_DAYS } from '../../cvp/opticstrend.js';
 import { HORIZON_DAYS } from '../../cvp/trend.js';
-import { buildTopology, switchIndex, uplinkPortsOf, hostPortsOf, normPort } from '../../cvp/topology.js';
+import { heavyGate } from '../../cvp/heavyGate.js';   // v3.42(2회차 A4-F5): 무거운 조회 동시 상한
+import { buildTopology, switchIndex, uplinkPortsOf, hostPortsOf, normPort, shortOf } from '../../cvp/topology.js';
 import { parseQuery, subjectsOf, placeRows, MANY_MACS } from '../../cvp/locate.js';
 import { snapshotBody, diffSnapshots } from '../../cvp/snapdiff.js';
 import { complianceFleet } from '../../cvp/compliance.js';     // v3.41 ③
@@ -95,7 +96,7 @@ const unknownCvp = (id) => id && !listServers().some((x) => String(x.id) === id)
 
 export function registerCvpNet(api) {
   // ── ④ ⑩ 링크 품질 ──────────────────────────────────────────────────────────────────────────────────────────
-  api.get('/tools/cvp/linkq', toolsPerm, fullScopeOnly, async (req, res) => {
+  api.get('/tools/cvp/linkq', toolsPerm, fullScopeOnly, heavyGate, async (req, res) => {
     kickDemo();
     const admin = isAdminReq(req);
     const cvpId = cvpIdOf(req);
@@ -118,7 +119,7 @@ export function registerCvpNet(api) {
   });
 
   // ── ⑤ 미사용 포트 회수 ──────────────────────────────────────────────────────────────────────────────────────
-  api.get('/tools/cvp/portplan/reclaim', toolsPerm, fullScopeOnly, async (req, res) => {
+  api.get('/tools/cvp/portplan/reclaim', toolsPerm, fullScopeOnly, heavyGate, async (req, res) => {
     kickDemo();
     const admin = isAdminReq(req);
     const cvpId = cvpIdOf(req);
@@ -139,7 +140,7 @@ export function registerCvpNet(api) {
   });
 
   // ── ⑨ 포트 고갈 · 업링크 포화 예측 ──────────────────────────────────────────────────────────────────────────
-  api.get('/tools/cvp/portplan/forecast', toolsPerm, fullScopeOnly, async (req, res) => {
+  api.get('/tools/cvp/portplan/forecast', toolsPerm, fullScopeOnly, heavyGate, async (req, res) => {
     kickDemo();
     const admin = isAdminReq(req);
     const cvpId = cvpIdOf(req);
@@ -163,40 +164,45 @@ export function registerCvpNet(api) {
       if (ups.get(dk)?.has(np)) uplinks.push({ ...p, peer: peerOf.get(`${dk}\u0000${np}`) || '', basis: 'lldp' });
       else if (!read && numOrNull(p.speedBps) != null && p.speedBps >= 40e9) uplinks.push({ ...p, peer: '', basis: 'speed' });
     }
-    const us = await cdb.utilMaxSeries(uplinks, { days: FORECAST_WINDOW_DAYS });
+    // v3.42(2회차 A4-F6): 상한 밖 업링크는 계열을 못 읽은 것 — '기록 부족' 으로 세지 않고 빼서 따로 센다(seriesUnread). LLDP 로 확인한 업링크를 먼저 · 추정(속도)은 뒤.
+    uplinks.sort((x, y) => (x.basis === 'lldp' ? 0 : 1) - (y.basis === 'lldp' ? 0 : 1));
+    const looked = uplinks.slice(0, cdb.UPLINK_SERIES_MAX);
+    const us = await cdb.utilMaxSeries(looked, { days: FORECAST_WINDOW_DAYS });
     if (us.unavailable) return res.status(503).json(DB_DOWN);
-    const sat = saturationForecast({ uplinks, series: us.map });
+    const sat = saturationForecast({ uplinks: looked, series: us.map });
     const hosts = hostsOf();
     const corp = new Map(b.devices.map((d) => [devKey(d.agent, d.cvpId, d.key), d.corpName]));
     res.json({
-      exhaust: { rows: ex.rows, counts: ex.counts },
+      exhaust: { rows: ex.rows, counts: ex.counts, pointsRows: ex.pointsRows },
       saturation: { rows: sat.rows.map((x) => ({ ...x, corpName: corp.get(devKey(x.agent, x.cvpId, x.key)) || '', peer: admin ? x.peer : maskErrText(x.peer, hosts) })), counts: sat.counts, satPct: UPLINK_SAT_PCT,
-        omitted: sat.omitted || 0, pointsRows: sat.pointsRows, ...(us.truncated ? { truncated: true } : {}) },
+        omitted: sat.omitted || 0, pointsRows: sat.pointsRows, ...(uplinks.length > looked.length ? { truncated: true, seriesUnread: uplinks.length - looked.length } : {}) },
       minDays: FORECAST_MIN_DAYS, windowDays: FORECAST_WINDOW_DAYS, horizonDays: HORIZON_DAYS, ...(b.portsUnread ? { portsUnread: b.portsUnread } : {}), ...(b.truncated ? { truncated: true } : {}), ...(admin ? {} : { addressHidden: true }),
     });
   });
 
   // ── ⑮ GBIC 열화 추세 · 재고 ─────────────────────────────────────────────────────────────────────────────────
-  api.get('/tools/cvp/optics/trend', toolsPerm, fullScopeOnly, async (req, res) => {
+  api.get('/tools/cvp/optics/trend', toolsPerm, fullScopeOnly, heavyGate, async (req, res) => {
     kickDemo();
     const cvpId = cvpIdOf(req);
     if (unknownCvp(cvpId)) return res.status(404).json({ ok: false, reason: '없는 CVP 서버입니다.' });
     const b = await baseOf({ cvpId, withPorts: false });
     if (!b) return res.status(503).json(DB_DOWN);
     // v3.42(버그 점검 1회차 A4-F2): 회귀는 최근 TREND_DAYS 일만 쓴다 — 90일(135만 행 · 힙 +260MB)을 읽지 않는다. 7일 더 읽어 막 끊긴 GBIC 은 '오래됨' 으로 보인다.
-    const xs = await cdb.xcvrSeries({ days: TREND_DAYS + 7 });
+    const xs = await cdb.xcvrSeries({ days: TREND_DAYS + 7, keep: (dk) => b.keys.has(dk) });
     if (xs.unavailable) return res.status(503).json(DB_DOWN);
-    const own = new Map();
-    for (const [k, v] of xs.map) { const [a, c, d] = k.split('\u0000'); if (b.keys.has(devKey(a, c, d))) own.set(k, v); }
+    const own = xs.map;
     const s = loadSettings();
     const names = new Map(b.devices.map((d) => [devKey(d.agent, d.cvpId, d.key), { hostname: d.hostname || d.key, cvpId: d.cvpId, corpName: d.corpName }]));
-    const t = opticTrends({ series: own, names, warnDbm: s.xcvrRxWarnDbm, faultDbm: s.xcvrRxFaultDbm });
+    const t = await opticTrendsAsync({ series: own, names, warnDbm: s.xcvrRxWarnDbm, faultDbm: s.xcvrRxFaultDbm });
     const inv = opticInventory(b.devices);
     res.json({ trend: t, inventory: inv, trendDays: TREND_DAYS, minDays: TREND_MIN_DAYS, horizonDays: HORIZON_DAYS });
   });
 
+  /** 가상화 호스트 짧은 이름(소문자 · IP 이름은 통째로) — 토폴로지 · 위치 찾기가 같은 함수를 쓴다(v3.42 2회차 A3-F2: 사본 두 벌이 IP 이름을 첫 옥텟으로 줄였다). */
+  const hostNamesOf = (snap) => new Set((snap.hosts || []).map((h) => shortOf(h?.name || '')).filter((n) => n.length >= 3));
+
   // ── ⑥ ⑦ 토폴로지 · 양끝 불일치 ──────────────────────────────────────────────────────────────────────────────
-  api.get('/tools/cvp/topology', toolsPerm, fullScopeOnly, async (req, res) => {
+  api.get('/tools/cvp/topology', toolsPerm, fullScopeOnly, heavyGate, async (req, res) => {
     kickDemo();
     const admin = isAdminReq(req);
     const cvpId = cvpIdOf(req);
@@ -206,7 +212,7 @@ export function registerCvpNet(api) {
     const lldp = await cdb.lldpAll();
     if (lldp.unavailable) return res.status(503).json(DB_DOWN);
     const snap = store.get() || {};
-    const hostNames = new Set((snap.hosts || []).map((h) => String(h?.name || '').toLowerCase().split('.')[0]).filter((n) => n.length >= 3));
+    const hostNames = hostNamesOf(snap);
     const t = buildTopology({ devices: b.devices, lldp: lldp.rows.filter((r) => b.keys.has(devKey(r.agent, r.cvpId, r.key))), lldpMeta: lldp.meta, ports: b.ports, hostNames });
     const hosts = hostsOf();
     const mk = (v) => (admin || v == null ? v : maskErrText(String(v), hosts));
@@ -218,7 +224,7 @@ export function registerCvpNet(api) {
   });
 
   // ── ① 위치 찾기 ────────────────────────────────────────────────────────────────────────────────────────────
-  api.get('/tools/cvp/locate', toolsPerm, fullScopeOnly, async (req, res) => {
+  api.get('/tools/cvp/locate', toolsPerm, fullScopeOnly, heavyGate, async (req, res) => {
     const q = parseQuery(typeof req.query.q === 'string' ? req.query.q : '');
     if (q.kind === 'empty') return res.status(400).json({ ok: false, reason: 'MAC · IP · 이름 중 하나를 넣어 주세요.' });
     if (q.kind === 'bad') return res.status(400).json({ ok: false, reason: q.reason });
@@ -238,8 +244,18 @@ export function registerCvpNet(api) {
     for (const d of b.devices) { const dk = devKey(d.agent, d.cvpId, d.key); if (lldp.meta.get(dk)?.at != null && !ups.has(dk)) ups.set(dk, new Set()); }
     const devs = [...new Map(fdbRows.map((r) => [devKey(r.agent, r.cvpId, r.key), { agent: r.agent, cvpId: r.cvpId, key: r.key }])).values()];
     const macCount = devs.length ? await cdb.fdbPortTotals(devs) : new Map();
-    const hostNames = new Set((snap.hosts || []).map((h) => String(h?.name || '').toLowerCase().split('.')[0]).filter((n) => n.length >= 3));
-    const placed = placeRows({ fdb: fdbRows, ep: epRows, uplinks: ups, macCount, hostPorts: hostPortsOf(lldp.rows.filter(own), hostNames) });
+    const hostNames = hostNamesOf(snap);
+    const hostPorts = hostPortsOf(lldp.rows.filter(own), hostNames);
+    // v3.42(2회차 A1-F10): ESXi 가 포트 채널(LACP)로 붙으면 MAC 은 채널 이름으로 배운다 — 그 물리 포트의 채널도 호스트 포트로(채널 소속만 읽는 가벼운 조회 · 그 장비들만).
+    if (hostPorts.size) {
+      const hpDevs = b.devices.filter((d) => hostPorts.has(devKey(d.agent, d.cvpId, d.key)));
+      const pr = await cdb.portRowsOf(hpDevs, { limit: 50_000 });
+      for (const r of pr.rows || []) {
+        const set = hostPorts.get(devKey(r.agent, r.cvpId, r.key));
+        if (set && r.lag && set.has(normPort(r.port))) set.add(normPort(r.lag));
+      }
+    }
+    const placed = placeRows({ fdb: fdbRows, ep: epRows, uplinks: ups, macCount, hostPorts });
     const corp = new Map(b.devices.map((d) => [devKey(d.agent, d.cvpId, d.key), d.corpName]));
     const withCorp = (x) => ({ ...x, corpName: corp.get(devKey(x.agent, x.cvpId, x.key)) || '' });
     const vcName = new Map((snap.vcenters || []).map((v) => [v.id, v.name || v.id]));
@@ -264,7 +280,7 @@ export function registerCvpNet(api) {
   });
 
   // ── ⑧ MLAG · 포트 채널 이중화(v3.41) — 채널 = 포트 행의 lag · oper(새로 읽는 채널 소속) · MLAG = info.mlagStatus(새로 읽는 상태 노드). 장애로 열지 않는다(화면만). ──
-  api.get('/tools/cvp/redundancy', toolsPerm, fullScopeOnly, async (req, res) => {
+  api.get('/tools/cvp/redundancy', toolsPerm, fullScopeOnly, heavyGate, async (req, res) => {
     kickDemo();
     const cvpId = cvpIdOf(req);
     if (unknownCvp(cvpId)) return res.status(404).json({ ok: false, reason: '없는 CVP 서버입니다.' });
@@ -276,7 +292,9 @@ export function registerCvpNet(api) {
     // 반증 E8: MLAG 도메인 · 피어 링크는 장비가 준 자유 문자열 — 비관리자에는 형제 라우트처럼 주소를 가린다.
     const admin = isAdminReq(req);
     const hosts = hostsOf();
-    res.json({ ...r, rows: admin ? r.rows : r.rows.map((x) => ({ ...x, mlag: maskMlag(x.mlag, false, hosts) })), portsUnread: b.portsUnread,
+    // v3.42(2회차 A4-F9): 정상 · 꺼진 채널의 멤버는 포트 이름만(관리상 꺼짐 표지만 남긴다) — 전 채널 · 멤버 전부를 실어 응답이 3.5~3.8MB 였다.
+    const slim = (x) => ({ ...x, channels: x.channels.map((ch) => (ch.state === 'ok' || ch.state === 'off' ? { ...ch, members: ch.members.map((m) => (m.admin === 'down' ? { port: m.port, admin: 'down' } : { port: m.port })) } : ch)) });
+    res.json({ ...r, rows: r.rows.map((x) => slim(admin ? x : { ...x, mlag: maskMlag(x.mlag, false, hosts) })), portsUnread: b.portsUnread,
       ...(b.truncated ? { truncated: true } : {}), ...(admin ? {} : { addressHidden: true }) });
   });
 
@@ -306,6 +324,9 @@ export function registerCvpNet(api) {
   });
   api.post('/tools/cvp/snapshots', writer, toolsPerm, fullScopeOnly, async (req, res) => {
     const body = req.body && typeof req.body === 'object' ? req.body : {};
+    // v3.42(2회차 A3-F3): 범위 입력이 글자가 아니면(배열 · 숫자 · 객체) 400 — 조용히 '모든 CVP' 로 넓히지 않는다. 없음 · null · '' 만 모든 CVP.
+    if (body.cvpId != null && typeof body.cvpId !== 'string') return res.status(400).json({ ok: false, reason: 'cvpId 는 글자여야 합니다.' });
+    if (body.label != null && typeof body.label !== 'string') return res.status(400).json({ ok: false, reason: 'label 은 글자여야 합니다.' });
     const cvpId = typeof body.cvpId === 'string' && body.cvpId ? body.cvpId : null;
     if (unknownCvp(cvpId)) return res.status(404).json({ ok: false, reason: '없는 CVP 서버입니다.' });
     const label = capStr(typeof body.label === 'string' ? body.label.trim() : '', 120);
@@ -336,7 +357,7 @@ export function registerCvpNet(api) {
     logAudit({ user: req.user?.username, action: 'CVP 스냅샷 삭제', target: `cvp-snapshot/${id}`, detail: '' });
     res.json({ ok: true });
   });
-  api.get('/tools/cvp/compare', toolsPerm, fullScopeOnly, async (req, res) => {
+  api.get('/tools/cvp/compare', toolsPerm, fullScopeOnly, heavyGate, async (req, res) => {
     const admin = isAdminReq(req);
     const aId = numOrNull(req.query.a);
     const bRaw = typeof req.query.b === 'string' ? req.query.b : 'now';
@@ -367,7 +388,9 @@ export function registerCvpNet(api) {
     // 범위를 맞춘다: 한쪽이 한 CVP 만 찍었으면 다른 쪽도 그 CVP 만(나머지를 '사라짐 · 새로 생김' 으로 지어내지 않게). 요청 cvpId 가 있으면 그것.
     const only = cvpId || A.head.cvpId || bHead.cvpId || null;
     const keep = (m) => (only ? new Map([...m].filter(([k]) => k.split('\u0000')[1] === String(only))) : m);
-    const d = diffSnapshots(keep(A.devices), keep(B), { broken: new Set([...(A.broken || []), ...bBroken]) });
+    // v3.42(2회차 A1-F8): 깨진 행 목록도 범위로 거른다(범위 밖 장비가 이름 없는 '비교 못 함' 행으로 나왔다).
+    const inScope = (k) => !only || String(k).split('\u0000')[1] === String(only);
+    const d = diffSnapshots(keep(A.devices), keep(B), { broken: new Set([...(A.broken || []), ...bBroken].filter(inScope)) });
     const hosts = hostsOf();
     const mk = (v) => (admin || v == null ? v : maskErrText(String(v), hosts));
     const devices = d.devices.map((x) => ({ ...x, changes: x.changes.map((c) => {

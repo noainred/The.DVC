@@ -508,9 +508,12 @@ export function judgeOptics(parts, ports, { warnDbm = -10, faultDbm = -14 } = {}
     const lanes = intf && !port ? (lanesOf.get(intf) || []) : [];
     const known = !!port || lanes.length > 0;
     const rx = numOrNull(p.dom.rxPower);
-    const linked = port ? port.oper === 'up' : lanes.some((l) => l.oper === 'up');
+    // v3.42(2회차 A1-E1): 레인이 둘 이상(브레이크아웃)이면 **모든 레인이 올라왔을 때만** 링크 있음 — 칸 단위 DOM 값이 어두운 레인의 값일 수 있어
+    //   하나만 올라온 칸을 Rx 로 판정하면 거짓 GBIC 장애가 될 수 있다(실장비 미확인 — 안전한 쪽). 레인 하나(100G 단일 포트)는 그 레인.
+    const linked = port ? port.oper === 'up' : lanes.length > 0 && lanes.every((l) => l.oper === 'up');
+    const lanesPartial = !port && lanes.length > 1 && !linked && lanes.some((l) => l.oper === 'up');   // 일부 레인만 링크 — 링크 없음이 아니다(재고는 '링크 있음')
     // v2.656: 링크가 내려간 것을 '확인한' 포트 — Rx 에 더해 Tx·바이어스도 판정하지 않는다(온도·전압만). 포트 상태를 모르면 예전 판정 그대로.
-    const linkDown = portsKnown && known && !linked;
+    const linkDown = portsKnown && known && !linked && !lanesPartial;
     const other = linkDown ? (p.domJudge?.envState ?? null) : (p.domJudge?.otherState ?? null);
     const basis = p.domJudge?.rxDevice ? 'device' : 'portal';
     let rxState = null;
@@ -519,11 +522,12 @@ export function judgeOptics(parts, ports, { warnDbm = -10, faultDbm = -14 } = {}
     let state = p.state;
     if (p.state !== 'absent' && judged) state = worse(other, rxState) || p.state;
     const optic = {
-      intf, rx, tx: numOrNull(p.dom.txPower), linked, portKnown: portsKnown && known, judged: rxState != null, rxState, basis: rxState != null ? basis : null,
+      intf, rx, tx: numOrNull(p.dom.txPower), linked, ...(lanesPartial ? { lanesPartial: true } : {}), portKnown: portsKnown && known, judged: rxState != null, rxState, basis: rxState != null ? basis : null,
       ...(basis === 'portal' && rxState != null ? { warnDbm, faultDbm } : {}),
     };
     let detail = p.detail || '';
     if (linkDown) detail = `${detail}${detail ? ' · ' : ''}링크 없음 — 광량·Tx·바이어스 판정 안 함`;
+    else if (lanesPartial) detail = `${detail}${detail ? ' · ' : ''}브레이크아웃 레인 일부만 링크 — 광량 판정 안 함(칸 단위 값이 어느 레인 것인지 모름)`;
     else if (rx != null && !linked) detail = `${detail}${detail ? ' · ' : ''}포트 상태 모름 — 광량 판정 안 함`;
     if (rxState === 'fault' || rxState === 'warn') detail = `${detail}${detail ? ' · ' : ''}수신 광량 ${rxState === 'fault' ? '약함(장애)' : '낮음(주의)'}`;
     const { domJudge, ...rest } = p; // 내부 판정 재료는 저장하지 않는다

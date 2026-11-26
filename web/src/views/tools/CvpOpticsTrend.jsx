@@ -23,7 +23,9 @@ export default function CvpOpticsTrendView({ part = 'trend', onOpen }) {
   const t = r.trend || { rows: [], counts: {}, thresholds: {} };
   const th = t.thresholds || {};
   const risk = new Set(['alreadyFault', 'already', 'eta']);
-  const rows = (t.rows || []).filter((x) => !onlyRisk || risk.has(x.state));
+  // v3.42(2회차 A1-F9): 기록이 끊긴 행도 마지막 값이 주의 임계 이하면 위험으로(장애 수준 Rx 로 링크가 끊긴 광모듈이 사라지지 않게)
+  const isRisk = (x) => risk.has(x.state) || (x.state === 'stale' && x.lastRx != null && th.warnDbm != null && x.lastRx <= th.warnDbm);
+  const rows = (t.rows || []).filter((x) => !onlyRisk || isRisk(x));
   const c = t.counts || {};
   const inv = r.inventory || { rows: [], totals: {} };
   if (part === 'stock') {
@@ -84,7 +86,7 @@ export default function CvpOpticsTrendView({ part = 'trend', onOpen }) {
                 <td>{x.corpName || '법인 미지정'}</td>
                 <td data-sort={x.hostname}><button type="button" style={LINKBTN} onClick={() => onOpen && onOpen(x)}>{x.hostname}</button></td>
                 <td style={MONO}>{x.intf}</td>
-                <td data-sort={x.current ?? ''} style={MONO}>{dbmText(x.current)}</td>
+                <td data-sort={x.current ?? x.lastRx ?? ''} style={MONO}>{x.current == null && x.lastRx != null ? <span title="기록이 끊겨 지금 값이 아닙니다">{`마지막 ${dbmText(x.lastRx)}`}</span> : dbmText(x.current)}</td>
                 <td><Spark points={x.points} refLine={th.warnDbm} color={x.state === 'eta' || x.state.startsWith('already') ? '#fbbf24' : '#60a5fa'} title="일 최저 수신 광량" /></td>
                 <td data-sort={x.perMonth ?? ''} style={MONO}>{perMonthText(x.perMonth, ' dB')}{x.resetAt ? <span style={{ ...NOTE, marginLeft: 6 }}>({dateText(x.resetAt)}부터 다시)</span> : null}</td>
                 <td data-sort={x.state === 'alreadyFault' ? 0 : x.state === 'already' ? 1 : (x.warnEta ?? '')}><Pill color={FORECAST_TONE[x.state] || 'var(--text-dim)'}>{opticTrendText(x, { minDays: r.minDays, horizonDays: r.horizonDays })}</Pill></td>

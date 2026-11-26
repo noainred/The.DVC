@@ -268,6 +268,8 @@ export function devListText(state) {
 export function downMembersText(ch) {
   const bad = (Array.isArray(ch?.members) ? ch.members : []).filter((m) => m && (m.admin === 'down' || m.oper !== 'up'));
   if (!bad.length) return '';
-  const head = bad.slice(0, 4).map((m) => `${String(m.port || '').replace(/^Ethernet/i, 'Et')} ${m.admin === 'down' ? '꺼짐' : m.oper == null ? '모름' : '내려감'}`);
+  // v3.42(2회차 F4): 서버는 못 읽은 oper 를 'unknown' 문자열로 준다 — '내려감' 으로 단정하지 않는다. nolink 는 '링크 없음'.
+  const word = (m) => (m.admin === 'down' ? '꺼짐' : m.oper == null || m.oper === 'unknown' ? '모름' : m.oper === 'nolink' ? '링크 없음' : '내려감');
+  const head = bad.slice(0, 4).map((m) => `${String(m.port || '').replace(/^Ethernet/i, 'Et')} ${word(m)}`);
   return `${head.join(' · ')}${bad.length > 4 ? ` 외 ${bad.length - 4}` : ''}`;
 }

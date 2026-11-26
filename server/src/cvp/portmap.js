@@ -192,7 +192,8 @@ export function classifyPort(p, { xcvr, copper = false } = {}) {
 
 // v3.42(버그 점검 1회차 A1-10): 끝까지 앵커 — 접두 뒤가 숫자(· / . :)뿐일 때만 인터페이스. 예전 '^(접두)\d*' 는 TESTDB01 · HUB01 · POD1LEAF01 같은
 //   호스트 이름을 인터페이스로 보고 뒤 낱말(vlan100 등)을 장비로 골랐다. 'port-channel10' 은 하이픈 때문에 장비 이름으로 새던 것도 막는다.
-const IFNAME = /^(?:(?:et|eth|ethernet|gi|te|fa|hu|po|port-channel|vmnic|ens|eno|bond|nic|vlan)[\d/.:]+|enp\d+s\d+(?:f\d+)?|p\d+p\d+)$/i;
+//   v3.42(2회차 A1-F7): 리눅스 NIC 예측 이름(ens1f0 · eno1np0 · enp59s0f0np0 · ens2f1d1)도 인터페이스로 — 끝 앵커가 그 꼴을 놓쳐 장비 이름으로 봤다.
+const IFNAME = /^(?:(?:et|eth|ethernet|gi|te|fa|hu|po|port-channel|vmnic|bond|nic|vlan)[\d/.:]+|(?:ens|eno|enp)\d+(?:s\d+)?(?:f\d+)?(?:np\d+|d\d+)?|p\d+p\d+)$/i;
 /** 설명을 낱말로(소문자) — 길이를 먼저 자르고 문자 하나짜리 구분자로 나눈다(선형). */
 export function descTokens(desc) {
   // v3.42(A1-10): '/' 로도 나누고(spine1/Et1), '_' 가 든 낱말은 조각도 더한다(svr-01_eth0 → svr-01).
@@ -219,7 +220,7 @@ export function deviceNameFromDesc(desc) {
 const shortOf = (s) => String(s ?? '').toLowerCase().split('.')[0];
 /** v3.42(A1-10): 'esx01-vmnic0' · 'svr-01_eth1' 처럼 장비 이름 뒤에 인터페이스를 붙인 낱말 → 'esx01' · 'svr-01'(뒤 조각이 인터페이스 이름일 때만). */
 function stripIfSuffix(t) {
-  const m = /^(.{3,64}?)[-_]([a-z]+[\d/.:]+)$/i.exec(t);
+  const m = /^(.{3,64}?)[-_]([a-z][a-z0-9/.:]{0,30})$/i.exec(t);
   return m && IFNAME.test(m[2]) ? m[1] : t;
 }
 
