@@ -64,3 +64,4 @@
 - **가림**: 응답에 다른 서버의 이름 · 키 · 태그를 싣지 않는다(정렬한 값 점만 — 묶음은 같은 법인). 엣지 실패 사유(주소가 들어갈 수 있다)는 전체 범위 관리자만.
   범위 밖 · 없는 키 404 · 폴더 저장소 못 읽음 503 · 엣지 포탈 404. 목록 · 칩에는 싣지 않는다(드로어를 열 때 1건).
 - 회귀: `server/test/bmPeer348.test.js` · `bmPeerEdgeRoundTrip348.test.js`(실제 collector ↔ 실제 pull ↔ 실제 전력 DB) · 웹 `bmFolders/bmPeer348.test.jsx`.
+- v3.49 건강 점수(`health.js`) · 권고 대조(`advisory.js`) · 케이스 기록 — 규칙은 `docs/rules/idrac-server.md` ‘v3.49 물리서버 운영’ 절.

@@ -14,6 +14,7 @@
 import { numOrNull } from '../util/numOrNull.js';
 import { capacityOfInventory } from './physicalCapacity.js';
 import { dedupNics, nicLinkState } from './nicPorts.js';
+import { ledOfInv as ledOfInvLocal } from './ledState.js';   // v3.49 위치 LED 상태
 
 const s = (v) => (v == null ? '' : String(v).trim());
 const pos = (v) => { const x = numOrNull(v); return x != null && x > 0 ? x : null; };
@@ -175,6 +176,8 @@ export function hwDetailOf(inv, { admin = false } = {}) {
     os: { name: s(inv.system?.osName).slice(0, 128), ver: s(inv.system?.osVersion).slice(0, 64), host: s(inv.system?.hostName).slice(0, 255) },
     idrac: {
       fw: s(inv.idrac?.firmwareVersion).slice(0, 64), model: s(inv.idrac?.model).slice(0, 64),
+      // v3.49 위치 LED 상태(on · blink · off — 못 읽음은 ''. idrac/ledState.js)
+      led: ledOfInvLocal(inv),
       ...(admin ? { ipv4: s(net.find((e) => s(e.ipv4))?.ipv4).slice(0, 64) } : {}),
     },
     at: pos(inv.collectedAt),

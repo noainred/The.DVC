@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **761개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **762개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-11-26)
@@ -665,10 +665,11 @@
 | `RELAYTOPO_CONCURRENCY` | `4` | ✅ | relaytopo/ops.js |
 | `RELAYTOPO_SSH_TIMEOUT_MS` | `45000` | ✅ | relaytopo/ops.js |
 
-## 중앙(위임 수집) (58)
+## 중앙(위임 수집) (59)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
+| `BM_HWLOG_PULL_TIMEOUT_MS` | `40000` |  | central/bmHwLogPull.js |
 | `BMUSAGE_PULL_STALE_MS` | `1800000` |  | central/bmUsageEdgePull.js |
 | `BMUSAGE_PULL_TIMEOUT_MS` | `20000` |  | central/bmCapacityPull.js, central/bmComparePull.js 외 6 |
 | `CAPTURE_ACK_GRACE_MS` | `60000` |  | central/captureJobs.js |
@@ -950,4 +951,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 761
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 762

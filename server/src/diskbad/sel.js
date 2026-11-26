@@ -59,11 +59,13 @@ export function selDriveEvent(e) {
 /**
  * 서버 한 대의 SEL. 401 은 던진다(호출자가 인증 정지로).
  * @param {object} entry 등록부 항목
- * @param {{mgr:string, signal?:AbortSignal|null, getJson?:Function, now?:Function, budgetMs?:number}} o  mgr = Lifecycle 로그를 읽은 관리자 경로(lclog.js 가 검사한 값)
+ * @param {{mgr:string, signal?:AbortSignal|null, getJson?:Function, now?:Function, budgetMs?:number, pick?:Function, eventsMax?:number, pagesMax?:number}} o
+ *   mgr = Lifecycle 로그를 읽은 관리자 경로(lclog.js 가 검사한 값) · pick = 남길 항목 고르기(기본 디스크 항목 — v3.49 물리서버 이벤트 로그는 모든 항목을 고른다) ·
+ *   eventsMax = 결과에 싣는 항목 수(가장 새 것부터) · pagesMax = 읽을 쪽 수 상한
  * @returns {Promise<{at:number, status:string, read:number, total:number|null, pages:number, stopped:string, oldest:number|null, newest:number|null, kinds:object, events:Array}>}
  *   status: ok · empty(항목 없음) · absent(404 — SEL 경로 없음) · forbidden · error
  */
-export async function readSel(entry, { mgr, signal = null, getJson = redfishGetCapped, now = Date.now, budgetMs = 60_000 } = {}) {
+export async function readSel(entry, { mgr, signal = null, getJson = redfishGetCapped, now = Date.now, budgetMs = 60_000, pick = selDriveEvent, eventsMax = SEL_EVENTS_MAX, pagesMax = SEL_PAGES_MAX, tailFirst = false } = {}) {
   const t0 = now();
   const out = { at: t0, status: 'ok', read: 0, total: null, pages: 0, stopped: '', oldest: null, newest: null, kinds: {}, events: [] };
   const base = `${mgr}/LogServices/Sel/Entries`;
@@ -71,7 +73,7 @@ export async function readSel(entry, { mgr, signal = null, getJson = redfishGetC
   let skip = 0;
   let firstIds = null;
   try {
-    while (out.pages < SEL_PAGES_MAX) {
+    while (out.pages < pagesMax) {
       if (now() - t0 > budgetMs) { out.stopped = 'budget'; break; }
       // eslint-disable-next-line no-await-in-loop
       const j = await getJson(entry, skip ? `${base}?$skip=${skip}` : base, { signal });
@@ -92,14 +94,24 @@ export async function readSel(entry, { mgr, signal = null, getJson = redfishGetC
           if (out.oldest == null || c < out.oldest) out.oldest = c;
           if (out.newest == null || c > out.newest) out.newest = c;
         }
-        const ev = selDriveEvent(e);
+        const ev = pick(e);
         if (ev) { events.push(ev); out.kinds[ev.kind] = (out.kinds[ev.kind] || 0) + 1; }
       }
       skip += mem.length;
+      // tailFirst(v3.49 하드웨어 이벤트 로그 — 반증 A10): 쪽 상한 안에 다 못 읽고 장비가 **오래된 것부터** 주면(첫 쪽의 첫 항목이 끝 항목보다 이르다)
+      //   가운데를 건너뛰고 끝쪽(가장 새 기록)부터 읽는다 — 건너뛴 수는 gap 으로 밝힌다. 정렬을 모르면(시각 없음) 건너뛰지 않는다. 기본은 꺼짐(디스크 배드 섹터 분석은 그대로).
+      if (tailFirst && out.pages === 1 && out.total != null && mem.length > 0 && pagesMax > 1) {
+        const rest = (pagesMax - 1) * mem.length;
+        const c0 = Date.parse(t(mem[0]?.Created, 40)); const c1 = Date.parse(t(mem[mem.length - 1]?.Created, 40));
+        if (out.total - skip > rest && Number.isFinite(c0) && Number.isFinite(c1) && c0 < c1) {
+          const to = out.total - rest;
+          out.gap = to - skip; skip = to;
+        }
+      }
       const hasNext = typeof j['Members@odata.nextLink'] === 'string';
       if (!mem.length) { if (out.total != null && skip < out.total) out.stopped = 'short'; break; }
       if (!hasNext && (out.total == null || skip >= out.total)) break;
-      if (out.pages >= SEL_PAGES_MAX) out.stopped = 'max';
+      if (out.pages >= pagesMax) out.stopped = 'max';
     }
   } catch (e) {
     if (e?.status === 401 || e?.authFailed === true) throw e;
@@ -111,6 +123,6 @@ export async function readSel(entry, { mgr, signal = null, getJson = redfishGetC
     out.stopped = out.stopped || (timedOut ? 'timeout' : 'error');   // 읽은 데까지는 남긴다
   }
   if (out.status === 'ok' && !out.read) out.status = 'empty';
-  out.events = events.sort((a, b) => (b.created ?? -Infinity) - (a.created ?? -Infinity)).slice(0, SEL_EVENTS_MAX);
+  out.events = events.sort((a, b) => (b.created ?? -Infinity) - (a.created ?? -Infinity)).slice(0, eventsMax);
   return out;
 }

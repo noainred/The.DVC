@@ -447,12 +447,17 @@ test('라우트 — 사용/중지 · 시험은 canEdit + 전체 범위 · 입력
 test('라우트 — 개요 감시 범위는 관리자(전체 범위)에게만 · 캐시 본문에 섞이지 않는다', async () => {
   const R = await import('../src/routes/svcmon/settingsSync.js');
   R._dashStateForTest({ reset: true });
+  // 캐시 열쇠는 30초 구간(라우트 `Math.floor(now / 30_000)`) — 느린 전량 실행에서 세 요청이 구간 경계를 넘으면 계산이 한 번 더 되는 것이 맞다.
+  //   그래서 ‘지나간 구간 수’ 만큼까지 허용한다(공유하지 않으면 3 이 되어 여전히 잡힌다 · 2026-11-26 전량 실행에서 2 !== 1 로 한 번 흔들렸다).
+  const w0 = Math.floor(Date.now() / 30_000);
   const a = await call('GET', '/overview', ADMIN);
   assert.equal(a.status, 200); assert.equal('coverage' in a.json, true);
   const o = await call('GET', '/overview', OPER);
   assert.equal('coverage' in o.json, false, 'operator 에게는 싣지 않는다(카탈로그 게이트와 같은 기준)');
   assert.equal('coverage' in (await call('GET', '/overview', SCOPED_ADMIN)).json, false, '범위 admin 도 싣지 않는다');
-  assert.equal(R._dashStateForTest().builds, 1, '같은 캐시를 쓰되 감시 범위는 응답마다 붙인다');
+  const spans = Math.floor(Date.now() / 30_000) - w0 + 1;
+  assert.ok(R._dashStateForTest().builds <= Math.min(spans, 2), `같은 캐시를 쓰되 감시 범위는 응답마다 붙인다(계산 ${R._dashStateForTest().builds}회 · 지난 30초 구간 ${spans}개)`);
+  assert.ok(R._dashStateForTest().builds >= 1);
 });
 
 test('설정 연동 적용 라우트는 법인 엣지 옵션을 넘긴다 · 추가된 대상 id 를 돌려준다(소스 대조)', () => {

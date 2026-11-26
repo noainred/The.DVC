@@ -86,7 +86,7 @@ export function judgeBios(servers) {
       if (state === 'tie' && m.tie) open += 1;   // 값이 갈려 다수가 없다(혼자라 다수가 없는 것은 아니다)
       rows.push({ k, v: v || null, major: m.value, majorN: m.count, known: m.known, state });
     }
-    out.set(s.id, { state: diff ? 'diff' : open ? 'split' : judged ? 'ok' : 'none', rows, diff, open, group });
+    out.set(s.id, { state: diff ? 'diff' : open ? 'split' : judged ? 'ok' : 'none', rows, diff, judged, open, group });
   }
   return out;
 }

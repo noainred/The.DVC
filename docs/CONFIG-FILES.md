@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **340개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **342개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-11-26)
@@ -55,8 +55,10 @@
 | `bareos-rehearsal-state.json` | 설정 | Bareos 복원 검증 회차 · 마지막 검증 시각 · 최근 회차 20건(상태, v2.862) | ✅ | ✅ | ✅ | bareos/rehearsal.js |
 | `bareos-rehearsal.json` | 설정 | Bareos 복원 검증(리허설) 정책(v2.862 — 켜기 · 요일 · 시각 · 법인마다 대수 · 성공한 검증용 VM 지우기 · 법인별 데이터스토어. 비밀 없음) | ✅ | ✅ | ✅ | bareos/rehearsal.js |
 | `bareos.json` | 설정 | Bareos 연동 설정(v2.820 · v2.823 법인별 Director). 파일: CONFIG_DIR/bareos.json (0600 · 원자적 쓰기 · 비밀 봉인). | ✅ | ✅ | ✅ | bareos/settings.js |
+| `bm-advisories.json` | 설정 | 물리서버 펌웨어 보안 권고 표(v3.49 — 사람이 확인해 올린 권고 번호 · 종류 · 고친 버전. 비밀 없음) | ✅ |  |  | bmcheck/store.js |
 | `bm-assets.json` | 설정 | 물리서버 자산 원장(보증 · 계약 — v3.45. 서비스 태그별 보증 만료일 · 종류 · 구매일 · 계약 번호 · 지원 종료일. 비밀 없음) | ✅ |  |  | bmcheck/store.js |
 | `bm-capacity.json` | 설정 | 리눅스 성능 8a단계 **용량 소진 예측**(설계 PROFILES §20 ⑱ · 아트보드 Capacity). 판정이 아니라 ‘참고’ 다(ML 없음 · 선형만). | ✅ |  | ✅ | bmusage/capacity.js |
+| `bm-cases.json` | 설정 | 물리서버 제조사 케이스 기록(v3.49 — 서비스 태그별 케이스 번호 · 진행 상태 · 이력. 비밀 없음) | ✅ |  |  | bmcheck/store.js |
 | `bm-folders-assign.json` | 설정 | 물리서버 폴더 저장소(v2.984, 설계 docs/design/bm-folders/README.md · 사용자 '기본값대로 구현'). | ✅ | ✅ |  | bmfolders/store.js |
 | `bm-folders-central.json` | 설정 | 엣지의 **중앙 폴더 사본**(v2.996 · 설계 docs/design/bm-folders §11 — 묶음 D). 파일 `bm-folders-central.json`(설정 변경 감시 밖 — bac | ✅ | ✅ |  | bmfolders/edgeCopy.js |
 | `bm-folders.json` | 설정 | 물리서버 폴더 저장소(v2.984, 설계 docs/design/bm-folders/README.md · 사용자 '기본값대로 구현'). | ✅ | ✅ |  | bmfolders/store.js |
@@ -378,6 +380,8 @@
 - **`upgrade-kept-bundles.json`** — 상태 파일(백업 감시 제외). 중앙이 자기 업그레이드를 적용한 번들(+서명 manifest)을 패키지 폴더(packages)에 복사해 두고 그 이름을 적는다 — 엣지 자동 업그레이드(뒤처진 엣지에 다시 push)와 /dl(엣지 자체 확인)이 그 번들을 쓴다. 여기 적힌 파일만 UPGRADE_KEEP_BUNDLES(기본 3)개를 넘으면 오래된 것부터 지운다(관리자가 내려받은 패키지는 건드리지 않는다). 지우면 정리 대상에서 빠질 뿐 동작에는 영향이 없다
 - **`bm-assets.json`** — 전체 범위 관리자가 CSV 로 올린다(특수 기능 › Bare Metal Server › 자산 원장). 지우면 모든 서버의 보증이 ‘모름’ 이 된다 — 같은 CSV 를 다시 올리면 복구된다. 손상이면 보존하고 쓰기(409)를 막는다
 - **`bm-fw-baseline.json`** — 지우면 지정 기준이 사라지고 같은 법인 · 같은 모델의 다수 버전으로만 대조한다. 손상이면 보존하고 쓰기(409)를 막으며 다수 버전으로만 대조했다고 화면에 밝힌다
+- **`bm-cases.json`** — 지우면 케이스 기록이 사라진다(제조사 쪽 케이스는 그대로). 손상이면 쓰기를 막는다(서비스 점검).
+- **`bm-advisories.json`** — 지우면 권고 대조를 하지 않는다(‘대조하지 않았음’ 으로 보인다). 손상이면 쓰기를 막는다.
 - **`bareos-rehearsal.json`** — 기본은 꺼짐(검증은 VM 을 만들고 데이터스토어를 쓴다 — 전체 범위 관리자 + 본인 OTP 로 켠다). 손상이면 보존하고 검증 · 저장을 멈춘다. 지우면 꺼진 기본값
 - **`bareos-rehearsal-state.json`** — 상태 파일(백업 감시 제외). 회차는 보내기 전에 적는다(같은 날 다시 돌지 않게). 지우면 오늘 차례가 지난 법인이 한 번 더 돌 수 있고 돌아가며 고르는 순서가 처음부터 다시 시작한다
 - **`bareos-digest.json`** — 기본은 켬 08:30(사용자 결정). 손상이면 보존하고 발송 · 저장을 멈춘다. 지우면 기본값

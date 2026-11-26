@@ -444,7 +444,9 @@ test('⑦ 입력 모으기 — 엣지는 정제본 그대로(없으면 보내지
   assert.deepEqual(ST.chkRowOf(chk.ofMember(members[2])), { w: 'unknown', fw: 'ok', bios: 'ok' }, '0 은 싣지 않는다 · 모름에는 남은 일수가 없다');
   assert.equal(ST.chkRowOf(null), undefined); assert.equal(ST.chkRowOf({}), undefined);
   assert.deepEqual(ST.chkRowOf({ warranty: { state: 'soon', daysLeft: 0 } }), { w: 'soon', wd: 0 }, '만료일 당일의 0 은 값이다(빼지 않는다)');
-  assert.deepEqual(ST.chkRowOf({ fw: { state: 'split', behind: 0 }, bios: { state: 'split', diff: 0 } }), { fw: 'split', bios: 'split' });
+  // v3.49: 갈림(split)은 견준 줄 수를 함께 싣는다(fwj · biosj — 없으면 0) — 건강 점수가 견준 줄 0 인 갈림을 ‘견줌’ 으로 세지 않게(반증 A1)
+  assert.deepEqual(ST.chkRowOf({ fw: { state: 'split', behind: 0 }, bios: { state: 'split', diff: 0 } }), { fw: 'split', fwj: 0, bios: 'split', biosj: 0 });
+  assert.deepEqual(ST.chkRowOf({ fw: { state: 'split', behind: 0, judged: 3 }, bios: { state: 'split', diff: 0, judged: 1 } }), { fw: 'split', fwj: 3, bios: 'split', biosj: 1 });
   // 판정에 쓴 인벤토리를 읽은 시각 — 로컬은 인벤토리 · 엣지는 요약의 시각 · 없으면 null(반증 A7)
   const at = ST.bmCheckFor({ members: members.slice(0, 3), placeOf, hxOf: (m) => (m.key === 'st:a' ? { inv: { ...inv('1.0.0', 'Enabled'), collectedAt: 111 }, via: 'local' } : m.key === 'st:b' ? { inv: null, via: 'edge', hw: { at: 222 }, fw: F.fwComponentsOf([{ type: 'BIOS', name: 'BIOS', version: '1.0.0' }]) } : { inv: null, via: '' }), assets, adminBase: null, today: '2026-11-26' });
   assert.deepEqual([at.ofMember(members[0]).invAt, at.ofMember(members[1]).invAt, at.ofMember(members[2]).invAt], [111, 222, null]);
@@ -547,7 +549,8 @@ test('⑨ 목록 chk · /check — 보증(원장) · 펌웨어(법인 안 다수
   await withSnap(async () => {
     const list = (await call('GET /tools/bm-folders')).body;
     assert.equal(list.ok, true, JSON.stringify(list).slice(0, 300));
-    assert.deepEqual(list.check, { soonDays: 90, assets: { n: 1, at: 7, by: 'admin' } });
+    // v3.49(릴리스 3): check 에 건강 점수 규칙(health) · 보안 권고 표 상태(advisories)가 더해졌다 — 여기서는 v3.45 의 두 칸만 본다
+    assert.deepEqual({ soonDays: list.check.soonDays, assets: list.check.assets }, { soonDays: 90, assets: { n: 1, at: 7, by: 'admin' } });
     // 범위 계정에는 전 법인 원장의 줄 수 · 올린 시각 · 올린 사람을 싣지 않는다(반증 A8 — 함대 전체 개수 규칙) · 조회 계정은 줄 수만
     assert.deepEqual((await call('GET /tools/bm-folders', { user: SCOPED_A })).body.check.assets, {});
     assert.deepEqual((await call('GET /tools/bm-folders', { user: VIEWER })).body.check.assets, { n: 1, at: 7 });
@@ -556,7 +559,7 @@ test('⑨ 목록 chk · /check — 보증(원장) · 펌웨어(법인 안 다수
     assert.ok(r1 && r2 && r4, JSON.stringify(list.servers.map((x) => x.name)));
     assert.equal(r1.chk.w, 'expired'); assert.ok(r1.chk.wd < 0); assert.equal(r1.chk.fw, 'behind'); assert.equal(r1.chk.fwn, 1);
     assert.equal(r1.chk.bios, 'unplaced', '폴더에 넣기 전에는 BIOS 를 견주지 않는다');
-    assert.deepEqual(r2.chk, { w: 'unknown', fw: 'ok', bios: 'unplaced' }, '원장에 없는 서버는 모름');
+    assert.deepEqual(r2.chk, { w: 'unknown', fw: 'ok', bios: 'unplaced', adva: 'no-table' }, '원장에 없는 서버는 모름 · 권고 표가 비면 대조 안 함(v3.49)');
     assert.equal(r4.chk.fw, 'none', '다른 법인의 같은 모델은 묶음이 아니다(혼자 — 기준 없음)');
     // 폴더에 넣으면 BIOS 를 견준다
     for (const k of [r1.key, r2.key, by('synth-db-s3').key]) {

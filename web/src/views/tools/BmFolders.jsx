@@ -14,6 +14,8 @@ import BoldText from '../../components/boldText.jsx';
 import BulkAdd from './bmFolders/BulkAdd.jsx';
 import BmDrawer from './bmFolders/BmDrawer.jsx';
 import AssetLedger from './bmFolders/AssetLedger.jsx';   // v3.45 자산 원장(보증 · 계약) 올리기 — 전체 범위 관리자
+import AdvisoryLedger from './bmFolders/AdvisoryLedger.jsx';   // v3.49 펌웨어 보안 권고 표 올리기 — 전체 범위 관리자
+import { healthCell } from './bmFolders/opsText.js';   // v3.49 건강 점수 칸
 import { chkCounts, chkChips, chkAsideText, chkNotices, CHK_QUICK } from './bmFolders/checkText.js'; // v3.44: 서버 상세 드로어(예전 400px 옆 패널 SidePanel · HwPanel 을 바꿈)
 import { rowTone, rowDotTitle, orderRows, TMPKEY_NOTE } from './bmFolders/drawerText.js';
 import MapView from './bmFolders/MapView.jsx';
@@ -54,6 +56,7 @@ export default function BmFolders() {
   // v3.44: 표가 정렬한 '보이는 순서'(STable onOrder) — 드로어의 ‹ › · ↑↓ 가 이 순서를 따른다. 표가 그려지지 않으면(맵 · 좁은 화면 카드) 쓰지 않는다.
   const [order, setOrder] = useState(null);
   const [ledger, setLedger] = useState(false);   // v3.45 자산 원장 올리기 창
+  const [advLedger, setAdvLedger] = useState(false);   // v3.49 보안 권고 표 올리기 창
   const [bulk, setBulk] = useState(null);
   // v2.987 맵 보기 · 저장한 보기(브라우저 저장 — 이 사람의 편의만. 못 읽으면 빈 목록) · 입력 다시 읽기 진행 중
   const [view, setView] = useState('list');
@@ -187,6 +190,7 @@ export default function BmFolders() {
           {canCsv() ? <button type="button" className="logout-btn" style={btn} onClick={() => downloadFile('/tools/bm-folders.csv', csvNameOf()).catch((e) => setNote({ ok: false, text: opErrorText(e) }))}>CSV</button> : null}
           {/* v3.45: 자산 원장(보증 · 계약) 올리기 — 전 법인에 걸친 값이라 전체 범위 관리자만(서버 게이트와 같은 표지 canFleet) */}
           {d.canFleet ? <button type="button" className="logout-btn" style={btn} onClick={() => setLedger(true)} title="서비스 태그별 보증 만료일 · 계약을 CSV 로 올립니다">자산 원장</button> : null}
+          {d.canFleet ? <button type="button" className="logout-btn" style={btn} onClick={() => setAdvLedger(true)} title="확인한 제조사 펌웨어 보안 권고를 CSV 로 올립니다(포탈은 인터넷에서 가져오지 않습니다)">보안 권고 표</button> : null}
           {d.canWrite ? <button type="button" className="logout-btn" style={btn} disabled={freshBusy} title="새로 넣은 iDRAC 서버 · 법인 귀속 변경을 다음 인벤토리 주기 전에 지금 다시 읽습니다(포탈 전체에 상한 하나 — 서비스 인벤토리와 함께 씁니다)" onClick={readFresh}>{freshBusy ? '다시 읽는 중…' : '입력 다시 읽기'}</button> : null}
           <button type="button" className="logout-btn" style={btn} onClick={() => load()}>새로고침</button>
         </div>
@@ -339,7 +343,7 @@ export default function BmFolders() {
                         {/* v3.3.0: 긴 머리글은 접히게(STable 기본 nowrap) — 하드웨어 열을 더한 뒤 1440px 에서 표가 영역보다 넓어 '전력' 이 가로 스크롤 뒤로 숨었다(실측) */}
                         <th style={HEAD_WRAP}>{d.scoped ? '모델' : '모델 · 서비스 태그'}</th>
                         <th style={HW_HEAD} title={`iDRAC 인벤토리 요약 — CPU · 메모리 / 디스크 / NIC · FC HBA${d.scoped ? '' : ' / iDRAC 주소(누르면 웹 · SSH 접속 — 관리자 판본)'} · 정렬은 코어 수`}>하드웨어</th>
-                        <th>받는 길</th><th style={HEAD_WRAP}>부품 장애</th><th title="CPU · 메모리 사용률">사용률</th><th>전력</th>
+                        <th>받는 길</th><th style={HEAD_WRAP} title="부품 장애 수(정렬 기준) · 그 아래 건강 점수 — 100 에서 확인된 문제(부품 장애 · 보증 · 펌웨어 · BIOS)만큼 뺀 점수. 못 읽은 항목은 넣지 않고 그 수를 함께 씁니다">부품 장애 · 건강</th><th title="CPU · 메모리 사용률">사용률</th><th>전력</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -354,7 +358,7 @@ export default function BmFolders() {
                           <td data-sort={hwSortKey(r.hw) ?? ''}><HwCell r={r} />
                             {r.addr ? <div title="관리 주소(iDRAC) — 관리자 판본">{d.scoped ? <span className="muted mono" style={{ fontSize: 11 }}>{r.addr}</span> : <IdracConnect addr={r.addr} name={r.name} corp={r.corp} small />}</div> : null}</td>
                           <td><SrcBadge src={r.src} />{r.agent ? <div className="muted mono" style={{ fontSize: 11 }}>{r.agent}</div> : null}</td>
-                          <td data-sort={r.faults ?? ''}>{r.faults == null ? <span className="muted">—</span> : r.faults > 0 ? <span className="badge red">{r.faults}건</span> : <span className="muted">없음</span>}</td>
+                          <td data-sort={r.faults ?? ''}>{r.faults == null ? <span className="muted">—</span> : r.faults > 0 ? <span className="badge red">{r.faults}건</span> : <span className="muted">없음</span>}<div className="bmf-hs-row">{/* v3.49 건강 점수 — 1440px 에 열을 더할 자리가 없어 이 칸 아래 줄에(Chromium 판독: 열을 더하면 전력 열이 밀려 잘렸다) */}{(() => { const h = healthCell(r.hs); return !h ? <span className="muted">—</span> : <span title={h.title} className="bmf-hs">{h.score == null ? <span className="muted">—</span> : <span className={`badge ${h.color}`}>{h.label}</span>}{h.unknown ? <span className="muted bmf-hs-u">못 읽음 {h.unknown}</span> : null}</span>; })()}</div></td>
                           <td data-sort={r.cpu ?? ''}><UsagePair cpu={r.cpu} mem={r.mem} usrc={r.usrc} why={r.why} /></td>
                           <td data-sort={r.watts ?? ''} style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{wattsText(r.watts)}</td>
                         </tr>
@@ -388,8 +392,9 @@ export default function BmFolders() {
           )}
         </div>
       </div>
-      {panelRow ? <BmDrawer r={panelRow} rows={drawerRows} corps={corps} corpName={corpName} scoped={!!d.scoped} op={op} busy={busy} onClose={() => setPanel('')} onMove={setPanel} note={note} admin={!!d.admin} gen={`${d.rev ?? ''}:${d.at ?? ''}`} onChanged={() => load()} /> : null}
+      {panelRow ? <BmDrawer r={panelRow} rows={drawerRows} corps={corps} corpName={corpName} scoped={!!d.scoped} op={op} busy={busy} onClose={() => setPanel('')} onMove={setPanel} note={note} admin={!!d.admin} gen={`${d.rev ?? ''}:${d.at ?? ''}`} onChanged={() => load()}  healthRules={d.check?.health?.rules ? { ...d.check.health.rules, min: d.check.health.min || null } : null} /> : null}
       {ledger ? <AssetLedger meta={d.check?.assets} onClose={() => setLedger(false)} onChanged={() => load()} /> : null}
+      {advLedger ? <AdvisoryLedger meta={d.check?.advisories} onClose={() => setAdvLedger(false)} onChanged={() => load()} /> : null}
       {bulk ? <BulkAdd init={bulk} d={d} corpName={corpName} op={op} busy={busy} onClose={() => setBulk(null)} /> : null}
     </div>
   );
@@ -776,6 +781,8 @@ function NarrowList({ rows, writable, picked, setPicked, onOpen, scoped }) {
             <span className="l2">{[r.place ? pathText(r.path) : '(미분류)', r.model, !scoped ? r.serviceTag : ''].filter(Boolean).join(' · ')}</span>
             <span className="l2">{r.cpu == null && r.mem == null && r.why?.code ? `사용률 — ${whyShort(r.why)}` : <>CPU {pctText(r.cpu)} · 메모리 {pctText(r.mem)}</>} · {wattsText(r.watts)}{SRC_SHORT[rowSrcClass(r)] ? ` · ${SRC_SHORT[rowSrcClass(r)]}` : ''}</span>
             {r.hw ? <span className="l2">{hwCardText(r.hw)}</span> : null}
+            {/* v3.49 건강 점수 — 400px 카드에도(반증 B13). 이름 줄에 두면 서버 이름이 잘려(Chromium 판독) 아랫줄에 · 점수가 없으면 그리지 않는다 */}
+            {(() => { const h = healthCell(r.hs); return h && h.score != null ? <span className="l2" title={h.title}><span className={`badge ${h.color}`}>건강 {h.label}</span>{h.unknown ? <span className="muted"> 못 읽음 {h.unknown}</span> : null}</span> : null; })()}
           </button>
         </div>
       ))}
