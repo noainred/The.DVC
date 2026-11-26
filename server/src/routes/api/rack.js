@@ -277,6 +277,8 @@ export function sheetNameOf(name) {
 }
 
 const fmtU = (p) => `U${p.uStart}${p.uSize > 1 ? `–${p.uStart + p.uSize - 1}` : ''}`;
+/** 엑셀 장비 칸의 식별 줄(모델 / 시리얼 / 추가 시리얼 / 호스트 이름) — 전면 칸과 후면 줄이 같은 함수를 쓴다(1회차 점검 정확성 3: 후면 줄에 추가 시리얼이 빠졌다). */
+const placeIdLine = (p) => [p.model, p.serial, ...(p.extraSerials || []), p.link?.hostname || ''].filter(Boolean).join(' / ');
 
 /**
  * 시트 하나에 그리는 랙 수(점검 C4 — 측정): ExcelJS 의 mergeCells 는 병합마다 그 시트의 기존 병합 전부와 겹침을 검사해 비용이 병합 수의 제곱이다.
@@ -336,7 +338,7 @@ export async function buildRoomXlsx(view) {
       const top = rowOfU(p.uStart + p.uSize - 1); const bot = rowOfU(p.uStart);
       const cells = [c0 + 1, c0 + 2, c0 + 3, c0 + 4];
       if (bot > top) for (const c of cells) ws.mergeCells(top, c, bot, c);
-      const lines = [p.label || '', [p.model, p.serial, ...(p.extraSerials || []), p.link?.hostname || ''].filter(Boolean).join(' / ')].filter(Boolean);
+      const lines = [p.label || '', placeIdLine(p)].filter(Boolean);
       const cell = ws.getCell(top, c0 + 1);
       cell.value = `${lines.join('\n')}${p.face === 'front' ? ' (앞 반깊이)' : ''}`;
       cell.alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
@@ -362,7 +364,7 @@ export async function buildRoomXlsx(view) {
     const rear = mine.filter((p) => p.face === 'rear');
     for (const p of rear) {
       const vals = [p.weightKg != null ? `${p.weightKg} kg` : '', p.opW != null ? `운전 ${p.opW} W` : '', p.ratedW != null ? `정격 ${p.ratedW} W` : ''].filter(Boolean).join(' · ');
-      sumRow(`후면 ${fmtU(p)}`, [[p.label, p.model, p.serial].filter(Boolean).join(' / '), vals].filter(Boolean).join(' — '));
+      sumRow(`후면 ${fmtU(p)}`, [[p.label, placeIdLine(p)].filter(Boolean).join(' / '), vals].filter(Boolean).join(' — '));
     }
   }
   if (!ws) {   // 랙이 없는 전산실도 제목 시트 하나는 남긴다(예전 동작)
@@ -412,7 +414,7 @@ async function runOp(req, res) {
         const g = await gate(req, res, 'site', b.id); if (!g) return undefined;
         if (op === 'site.rename' && !name) return res.status(400).json({ ok: false, reason: '이름이 비어 있습니다.' });
         const r = op === 'site.rename' ? await R.renameSite({ id: b.id, name, user }) : await R.removeSite({ id: b.id, user });
-        audit(req, `rack.${op}`, g.corpId, name || b.id);
+        if (!r?.unchanged) audit(req, `rack.${op}`, g.corpId, name || b.id);   // 바뀐 것이 없는 저장은 감사에도 남기지 않는다
         return res.json({ ok: true, ...r });
       }
       case 'room.add': {
@@ -426,7 +428,7 @@ async function runOp(req, res) {
         const g = await gate(req, res, 'room', b.id); if (!g) return undefined;
         if (op === 'room.rename' && !name) return res.status(400).json({ ok: false, reason: '이름이 비어 있습니다.' });
         const r = op === 'room.rename' ? await R.renameRoom({ id: b.id, name, user }) : await R.removeRoom({ id: b.id, user });
-        audit(req, `rack.${op}`, g.corpId, name || b.id);
+        if (!r?.unchanged) audit(req, `rack.${op}`, g.corpId, name || b.id);   // 바뀐 것이 없는 저장은 감사에도 남기지 않는다
         return res.json({ ok: true, ...r });
       }
       case 'version.restore': {
@@ -469,7 +471,7 @@ async function runOp(req, res) {
           if (c.value.typeId && !isId(c.value.typeId)) return res.status(400).json({ ok: false, reason: '랙 종류 id 가 올바르지 않습니다.' });
           r = op === 'rack.add' ? await R.addRack({ roomId: g.roomId, rev, user, input: c.value }) : await R.updateRack({ roomId: g.roomId, rev, user, id: b.id, input: c.value });
         }
-        audit(req, `rack.${op}`, g.corpId, String(op === 'rack.add' ? (r?.id || '') : b.id));
+        if (!r?.unchanged) audit(req, `rack.${op}`, g.corpId, String(op === 'rack.add' ? (r?.id || '') : b.id));
         return res.json({ ok: true, ...r });
       }
       case 'place.add': case 'place.update': case 'place.remove': {
@@ -485,7 +487,7 @@ async function runOp(req, res) {
             r = await R.updatePlace({ roomId: g.roomId, rev, user, id: b.id, rackId: b.rackId || '', input: c.value });
           }
         }
-        audit(req, `rack.${op}`, g.corpId, String(op === 'place.add' ? (r?.id || '') : b.id));
+        if (!r?.unchanged) audit(req, `rack.${op}`, g.corpId, String(op === 'place.add' ? (r?.id || '') : b.id));
         return res.json({ ok: true, ...r });
       }
       default:

@@ -493,7 +493,11 @@ export default function RackTool() {
       setView(v); setViewErr(null);
       return v;
     } catch (e) {
-      if (my === seq.current) { setViewErr(e); setView(null); }
+      if (my === seq.current && id === roomIdRef.current) {
+        setViewErr(e);
+        // 1회차 점검 정확성 2: 일시 실패(5xx · 네트워크)에 직전 화면까지 지우지 않는다 — 없어진 전산실(404) · 권한 없음(403)일 때만 비운다.
+        if (e?.status === 404 || e?.status === 403) setView(null);
+      }
       return null;
     } finally { if (my === seq.current) setLoadingRoom(false); }
   }, []);
@@ -514,7 +518,7 @@ export default function RackTool() {
   useEffect(() => { setSelId(''); setPreview(null); setNote(null); loadRoom(roomId); }, [roomId, loadRoom]);
 
   const corp = (tree?.corps || []).find((c) => c.id === corpId);
-  const canEdit = !!view?.canEdit;
+  const canEdit = !!view?.canEdit && !viewErr;   // 다시 불러오지 못한(낡은) 화면에서는 편집을 잠근다 — ‘다시 시도’ 로 최신을 받은 뒤에
   const corpWritable = !!corp?.writable;
   useEffect(() => { if (!canEdit && !corpWritable) setEdit(false); }, [canEdit, corpWritable]);
 
@@ -554,7 +558,7 @@ export default function RackTool() {
       // 이 화면의 rev 로 쓴 변경이 성공했으면 새 rev 를 바로 반영한다 — 다시 불러오기 전에 이어서 끌어 놓아도 자기 변경과 충돌하지 않게(점검 C19).
       if (Number.isInteger(r?.rev) && Number.isInteger(body?.rev)) setView((v) => (v && v.rev === body.rev ? { ...v, rev: r.rev } : v));
       if (closeModal) setModal(null);
-      say('ok', okText);
+      say('ok', r?.unchanged ? '바뀐 것이 없어 저장하지 않았습니다.' : okText);
       return r;
     } catch (e) {
       const why = e?.serverReason || e?.message || '저장하지 못했습니다.';
@@ -593,6 +597,9 @@ export default function RackTool() {
     if (busy) { say('warn', '앞 변경을 저장하는 중입니다 — 끝난 뒤 다시 놓으세요.'); return; }
     if (!c.ok) { say('err', `${rack.name} U${c.uStart} 자리에는 놓을 수 없습니다(${c.reason}).`); return; }
     if (d.type === 'place') {
+      const cur = (view?.places || []).find((p) => p.id === d.id);
+      if (cur && cur.rackId === rack.id && cur.uStart === c.uStart) return;   // 제자리 — 바뀐 것이 없다(1회차 점검 정확성 1)
+      if (!view) return;
       afterRoomWrite(await run({ op: 'place.update', id: d.id, rackId: rack.id, rev: view.rev, place: { uStart: c.uStart } }, { okText: `${rack.name} U${c.uStart} 자리로 옮겼습니다.` }));
     } else if (d.type === 'server') {
       // 미배치 서버 — 높이를 모르므로 1U 로 가정하지 않고 입력 창을 연다(위치는 놓은 자리로 채운다).
@@ -601,7 +608,9 @@ export default function RackTool() {
     }
   };
 
+  const lostView = () => { if (view) return false; setModalErr('전산실을 다시 불러오지 못했습니다 — 창을 닫고 새로 고친 뒤 다시 하세요.'); return true; };
   const savePlace = async (f) => {
+    if (lostView()) return;
     const body = {
       face: f.face, uStart: f.uStart, uSize: f.uSize, kind: f.kind, label: f.label, model: f.model, note: f.note,
       opW: f.opW, ratedW: f.ratedW, weightKg: f.weightKg,
@@ -790,6 +799,7 @@ export default function RackTool() {
       {modal?.kind === 'place' ? (
         <PlaceModal init={modal.init} racks={racks} busy={busy} error={modalErr} onClose={() => setModal(null)} onSave={savePlace}
           onRemove={async () => {
+            if (lostView()) return;
             if (!window.confirm(`‘${modal.init.label || modal.init.serial || '이름 없음'}’ 을(를) 랙에서 뺄까요? 판 기록에서 되돌릴 수 있습니다.`)) return;
             const r = await run({ op: 'place.remove', id: modal.init.id, rev: view.rev }, { okText: '장비를 뺐습니다.' }); if (r) setSelId(''); afterRoomWrite(r);
           }} />
@@ -797,11 +807,13 @@ export default function RackTool() {
       {modal?.kind === 'rack' ? (
         <RackModal init={modal.init} types={types} busy={busy} error={modalErr} onClose={() => setModal(null)}
           onSave={async (f) => {
+            if (lostView()) return;
             const rack = { name: f.name, row: f.row, role: f.role, pduA: f.pduA, pduB: f.pduB, typeId: f.typeId, ...(f.typeId ? {} : { heightU: f.heightU }) };
             const r = modal.init.id ? await run({ op: 'rack.update', id: modal.init.id, rev: view.rev, rack }) : await run({ op: 'rack.add', roomId: view.room.id, rev: view.rev, rack }, { okText: '랙을 추가했습니다.' });
             afterRoomWrite(r);
           }}
           onRemove={async () => {
+            if (lostView()) return;
             if (!window.confirm(`랙 ‘${modal.init.name || ''}’ 을(를) 지울까요? 판 기록에서 되돌릴 수 있습니다.`)) return;
             afterRoomWrite(await run({ op: 'rack.remove', id: modal.init.id, rev: view.rev }, { okText: '랙을 지웠습니다.' }));
           }} />
