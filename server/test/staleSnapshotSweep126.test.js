@@ -343,6 +343,7 @@ const TABLE = {
   'routes/api/vmMetrics.js': ['display', ''],
   'routes/metricsExport.js': ['shared', '122 R3'],
   'routes/publicApi.js': ['shared', '126 F4 — meta.notCurrentVcenters · 점검중 행 stale'],
+  'routes/publicApiRows.js': ['own', 'v3.42.0 공개 API 2차 행(도우미) — 공용 판정은 이 행을 싣는 핸들러(routes/publicApi.js notCurrentMetaOf → meta.notCurrentVcenters)가 붙인다 · 스냅샷 행은 snapshotToolView 의 stale 표지 · 끊긴 호스트 사용률 null(usageReadable)'],
   'search/deepSearch.js': ['display', ''],
   'search/inventoryIndex.js': ['display', ''],
   'store.js': ['shared', '롤업 · 전력 적재(vcSkip)'],

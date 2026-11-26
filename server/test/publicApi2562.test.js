@@ -140,8 +140,9 @@ test('거부 기본값 — 키 없음 401 · 분류 없음 403 · 다른 분류 
 
 test('투사 계약 — 응답 키 집합이 선언 fields 와 정확히 같다(내부 필드 유출 0)', () => {
   const r = runLive(`
-    const k = keys.issueApiKey({ name: 'all', groups: ['inventory', 'capacity', 'faults', 'san'] }).plaintext;   // v2.950: san 분류(SAN 스토리지 성능)
-    const { ENDPOINTS } = await import(${JSON.stringify(path.join(SRC, 'publicapi/allowlist.js'))});
+    // v2.950: san 분류 · v3.42.0: 2차 분류 넷 — 분류 목록을 손으로 적지 않고 GROUP_KEYS 전부로 발급한다(새 분류의 경로가 403 으로 건너뛰어지지 않게).
+    const { ENDPOINTS, GROUP_KEYS } = await import(${JSON.stringify(path.join(SRC, 'publicapi/allowlist.js'))});
+    const k = keys.issueApiKey({ name: 'all', groups: [...GROUP_KEYS] }).plaintext;
     const out = {};
     for (const ep of ENDPOINTS) {
       const res = await call(ep.path, k);
@@ -375,9 +376,10 @@ test('시각 필드는 numOrNull 이 아니라 msOrNull 을 쓴다 — 실제 �
 
 /* ── ⑩ 고르지 않은 분류를 만들지 않았다 ─────────────────────────────────── */
 
-test('허용 분류는 넷(1차 셋 + v2.953 san) — 고르지 않은 포탈 자체 상태를 함께 싣지 않았다', async () => {
+test('허용 분류는 여덟(1차 셋 + v2.953 san + v3.42.0 2차 넷) — 고르지 않은 포탈 자체 상태를 함께 싣지 않았다', async () => {
   const { GROUP_KEYS, ENDPOINTS } = await import('../src/publicapi/allowlist.js');
-  assert.deepEqual([...GROUP_KEYS].sort(), ['capacity', 'faults', 'inventory', 'san'],
+  // v2.562 1차 셋 · v2.950 san · v3.42.0 2차 넷(사용자 선택 '1차 핵심 조회' — objects · compliance · backup · resources). 포탈 자체 상태는 여전히 없다.
+  assert.deepEqual([...GROUP_KEYS].sort(), ['backup', 'capacity', 'compliance', 'faults', 'inventory', 'objects', 'resources', 'san'],
     `허용 분류가 바뀌었습니다: ${GROUP_KEYS.join(',')}`);
   assert.deepEqual(ENDPOINTS.filter((e) => !GROUP_KEYS.includes(e.group)), [],
     '선언된 분류에 없는 엔드포인트가 있습니다');

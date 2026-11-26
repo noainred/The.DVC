@@ -113,7 +113,8 @@ async function cvpItems() {
   return { unavailable: !!r.unavailable, rows: (r.rows || []).filter(own).map((d) => ({ ...d, corp: corp(d.cvpId) })), servers: servers.length };
 }
 
-async function powerTotal() {
+// v3.42.0: 공개 API /resources/power(routes/publicApiRows.js powerSummary)가 같은 합을 쓴다 — 사본을 만들지 않게 내보낸다.
+export async function powerTotal() {
   const snap = store.get() || {};
   const assign = getDatacenterAssign();
   const dcName = new Map(listDatacenters().map((d) => [String(d.id), d.name || String(d.id)]));
@@ -134,6 +135,19 @@ async function powerTotal() {
   } catch (e) { errors.serversRegistry = e?.message || String(e); }
   const out = buildPowerTotal({ servers, network, storage, dcOfVc: (vc) => String(assign[vc] || ''), dcName, serversRegistered });
   return { ...out, errors, serverHosts };
+}
+
+/**
+ * v3.42.0: 전력 합 요약 — Overview 카드와 공개 API /resources/power 가 **같은 모양**을 쓴다(v2.682 R3D-01: 못 읽음 · 오래됨 · 일부만 읽음을 함께 싣는다 —
+ *   measured 만 실으면 부분 합이 전체처럼 보인다). 오류(원문)는 넣지 않는다 — 판본에 따라 cardErrorsFor 로 부르는 쪽이 붙인다.
+ */
+export function powerSummaryOf(p) {
+  return {
+    totalWatts: p.totalWatts,
+    servers: { watts: p.servers.watts, measured: p.servers.measured, devices: p.servers.devices, unread: p.servers.unread, ome: p.servers.ome, excludedVcenter: p.servers.excludedVcenter },
+    network: { watts: p.network.watts, measured: p.network.measured, partial: p.network.partial, devices: p.network.devices, unread: p.network.unread, stale: p.network.stale, noTime: p.network.noTime, outputOnly: p.network.outputOnly }, // v2.727(감사 C-06): 시각 없음은 오래됨과 다른 사유
+    storage: { watts: p.storage.watts, measured: p.storage.measured, partial: p.storage.partial, devices: p.storage.devices, unsupported: p.storage.unsupported, unread: p.storage.unread, stale: p.storage.stale, noTime: p.storage.noTime },
+  };
 }
 
 /**
@@ -178,11 +192,7 @@ export function registerOverviewCards(api) {
         catch (e) { network = { count: null, ...(admin ? { error: e?.message || String(e) } : { errorHidden: true }) }; }
         const p = await powerTotal();
         // v2.682 R3D-01: 카드도 못 읽음·오래됨·일부만 읽음을 싣는다 — 예전에는 measured 만 실어 부분 합을 전체처럼 보였다.
-        power = { totalWatts: p.totalWatts,
-          servers: { watts: p.servers.watts, measured: p.servers.measured, devices: p.servers.devices, unread: p.servers.unread, ome: p.servers.ome, excludedVcenter: p.servers.excludedVcenter },
-          network: { watts: p.network.watts, measured: p.network.measured, partial: p.network.partial, devices: p.network.devices, unread: p.network.unread, stale: p.network.stale, noTime: p.network.noTime, outputOnly: p.network.outputOnly }, // v2.727(감사 C-06): 시각 없음은 오래됨과 다른 사유
-          storage: { watts: p.storage.watts, measured: p.storage.measured, partial: p.storage.partial, devices: p.storage.devices, unsupported: p.storage.unsupported, unread: p.storage.unread, stale: p.storage.stale, noTime: p.storage.noTime },
-          ...cardErrorsFor(p.errors, admin) };
+        power = { ...powerSummaryOf(p), ...cardErrorsFor(p.errors, admin) };   // v3.42.0: 모양은 powerSummaryOf 하나(공개 API /resources/power 와 같다)
       }
       return {
         ok: true, scoped: !full,

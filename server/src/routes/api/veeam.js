@@ -769,7 +769,7 @@ async function summaryData(req, snap, scope, region = '') {
   for (const vm of snap?.vms || []) { const a = vmsBy.get(vm.vcenterId); if (a) a.push(vm); else vmsBy.set(vm.vcenterId, [vm]); }
   const maybeYield = createYielder(15);
   const rows = []; const jobs = [];
-  const marks = getMarks(); const now = Date.now(); let prio = []; const prioOk = detailToolOk(req);
+  const marks = getMarks(); const now = Date.now(); let prio = []; const prioOk = req.publicApi !== true && detailToolOk(req);   // v3.42.0 공개 API(backupSummaryRowsFor)는 우선순위 VM(VM 이름)을 계산하지 않는다
   const marksBad = marksUnreadable();
   let bset = null; try { bset = bareosEffectiveSettings(); } catch { bset = null; }   // v2.837 — 못 읽으면 Bareos 매핑·대행 표시는 모름(null)
   for (const vc of vcs) {
@@ -811,6 +811,16 @@ async function summaryData(req, snap, scope, region = '') {
   try { if (bset) bareosPolicy = bareosPolicySummary(bset, regionSet, bareosRegistryLoadError() ? [] : bareosJobDigests(), { now, demo: bareosIsDemoActive() }); } catch { bareosPolicy = null; }
   return { ok: true, at: Date.now(), scope, region, regions: regionsOf(vcsAll), rows, totals, bareosGroups: bareosGroupCounts(new Set(vcs.map((v) => v.id)), now), bareosPolicy, directors: bareosDirectorHealth(rows, bset), em, emFleetWide: !!(em && region), priority: prioOk ? { items: prio, total: prioTotal, truncated: prioTotal > prio.length || undefined } : { withheld: 'detail-tool' }, ...(admin ? { runningJobs: jobs } : {}), registryUnreadable: registryBroken() || undefined,
     marksUnreadable: unreadable || undefined, marksCorruptKept: (!unreadable && marksCorruptKept()) || undefined };
+}
+
+/**
+ * v3.42.0 공개 API /backup/summary(routes/publicApiRows.js backupRows) — Summary 와 **같은 법인 줄 집계**(summaryData)를 키의 합성 사용자
+ *   (role viewer · 키의 vCenter 범위 — publicapi/auth.js)로 돈다. 범위 교집합 · 관리자 판본 판정은 summaryData 안의 같은 함수가 한다.
+ *   우선순위 VM(VM 이름 — Detail 데이터)은 계산하지 않고(req.publicApi — summaryData 의 시그니처는 그대로 둔다: backupSummaryRegion31017 소스 계약), 전원 'all' · 템플릿·vCLS 제외 켬(화면 기본값 — scopeOf({}) 와 같다).
+ *   쓰는 쪽은 rows[].pa(법인 집계)와 서버 상태 수만 투사한다 — 이 객체를 그대로 내보내지 말 것.
+ */
+export async function backupSummaryRowsFor(user, snap) {
+  return summaryData({ user, query: {}, headers: {}, publicApi: true }, snap, scopeOf({ query: {} }), '');
 }
 
 async function detailData(req, snap, t, scope) {
