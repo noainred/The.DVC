@@ -7,6 +7,7 @@
  * 예측: 최근 기록 직선 추세(trend.forecast) · 기록 minDays 미만이면 '기록 부족' · 늘지 않으면 '예측 없음'.
  *   포트 고갈 = 사용 포트(일 최대) → 전체 포트 · 업링크 포화 = 일 최대 사용률(%) → satPct. 일 최대값 기준이다(95 백분위 아님 — 화면이 밝힌다).
  */
+import { createYielder } from '../util/timeSlice.js';
 import { forecast, DAY_MS } from './trend.js';
 
 export const IDLE_CHOICES = Object.freeze([30, 90, 180]);
@@ -76,25 +77,39 @@ export function exhaustForecast({ devices = [], series = new Map(), now = Date.n
  */
 export const SAT_ROWS_MAX = 1000;
 export const SAT_POINTS_ROWS = 300;
-export function saturationForecast({ uplinks = [], series = new Map(), now = Date.now(), minDays = FORECAST_MIN_DAYS, satPct = UPLINK_SAT_PCT } = {}) {
-  const rows = [];
+function satRow(u, series, now, minDays, satPct) {
+  const s = series.get(`${devKey(u.agent, u.cvpId, u.key)}\u0000${u.port}`) || [];
+  const f = forecast(s, { target: satPct, dir: 'up', minDays, now });
+  // v3.42(A5-D11): '최근 30일 최대' 는 날짜로 자른다(예전 slice(-30) 은 값이 있는 기록 30개라 빠진 날이 있으면 30일보다 길었다).
+  const last30 = s.filter((x) => x[1] != null && x[0] >= now - 30 * DAY_MS);
+  let lastAt = null;   // v3.42(2회차 A5-F3): 끊긴 행이 '기록 끊김(마지막 —)' 이 되지 않게 마지막 값 있는 날을 싣는다
+  for (let i = s.length - 1; i >= 0; i--) if (s[i][1] != null) { lastAt = s[i][0]; break; }
+  return { lastAt, agent: u.agent, cvpId: u.cvpId, key: u.key, hostname: u.hostname, port: u.port, peer: u.peer || '', speedBps: u.speedBps ?? null, basis: u.basis || 'lldp',
+    state: f.state, days: f.days, current: f.state === 'stale' ? null : f.current, max30: last30.length ? Math.max(...last30.map((x) => x[1])) : null, eta: f.eta,
+    perMonth: f.slopePerDay == null ? null : f.slopePerDay * 30, _s: s };
+}
+function satFinish(rows, satPct) {
   const counts = { short: 0, flat: 0, eta: 0, far: 0, already: 0, stale: 0 };
-  for (const u of Array.isArray(uplinks) ? uplinks : []) {
-    const s = series.get(`${devKey(u.agent, u.cvpId, u.key)}\u0000${u.port}`) || [];
-    const f = forecast(s, { target: satPct, dir: 'up', minDays, now });
-    counts[f.state] = (counts[f.state] || 0) + 1;
-    // v3.42(A5-D11): '최근 30일 최대' 는 날짜로 자른다(예전 slice(-30) 은 값이 있는 기록 30개라 빠진 날이 있으면 30일보다 길었다).
-    const last30 = s.filter((x) => x[1] != null && x[0] >= now - 30 * DAY_MS);
-    let lastAt = null;   // v3.42(2회차 A5-F3): 끊긴 행이 '기록 끊김(마지막 —)' 이 되지 않게 마지막 값 있는 날을 싣는다
-    for (let i = s.length - 1; i >= 0; i--) if (s[i][1] != null) { lastAt = s[i][0]; break; }
-    rows.push({ lastAt, agent: u.agent, cvpId: u.cvpId, key: u.key, hostname: u.hostname, port: u.port, peer: u.peer || '', speedBps: u.speedBps ?? null, basis: u.basis || 'lldp',
-      state: f.state, days: f.days, current: f.state === 'stale' ? null : f.current, max30: last30.length ? Math.max(...last30.map((x) => x[1])) : null, eta: f.eta,
-      perMonth: f.slopePerDay == null ? null : f.slopePerDay * 30, _s: s });
-  }
+  for (const r of rows) counts[r.state] = (counts[r.state] || 0) + 1;
   const order = { already: 0, eta: 1, far: 2, flat: 3, short: 4, stale: 5 };
   rows.sort((a, b) => (order[a.state] - order[b.state]) || ((a.eta ?? Infinity) - (b.eta ?? Infinity)) || ((b.current ?? -1) - (a.current ?? -1)));
   // v3.42(A4-F4): 행 상한 · 점은 앞쪽 행에만(15,000행 × 180점 = 12MB 응답 · 동기 직렬화 89ms 였다).
   const out = rows.slice(0, SAT_ROWS_MAX).map(({ _s, ...r }, i) => ({ ...r, points: i < SAT_POINTS_ROWS ? _s.slice(-FORECAST_WINDOW_DAYS) : null }));
   return { rows: out, counts, satPct, omitted: Math.max(0, rows.length - SAT_ROWS_MAX), pointsRows: SAT_POINTS_ROWS };
+}
+/**
+ * 업링크 포화 예측 — 포트마다(일 최대 사용률).
+ * @param {{ uplinks:Array<{agent,cvpId,key,hostname,port,peer,speedBps}>, series:Map<string, Array<[number, number|null]>> }} a
+ */
+export function saturationForecast({ uplinks = [], series = new Map(), now = Date.now(), minDays = FORECAST_MIN_DAYS, satPct = UPLINK_SAT_PCT } = {}) {
+  const rows = [];
+  for (const u of Array.isArray(uplinks) ? uplinks : []) rows.push(satRow(u, series, now, minDays, satPct));
+  return satFinish(rows, satPct);
+}
+/** 요청 경로용 — 업링크마다 시간 기준 양보(2회차 반증 R6: 상한 6,000 이면 한 덩어리 106~119ms). 결과는 saturationForecast 와 같다. */
+export async function saturationForecastAsync({ uplinks = [], series = new Map(), now = Date.now(), minDays = FORECAST_MIN_DAYS, satPct = UPLINK_SAT_PCT } = {}) {
+  const rows = []; const y = createYielder(15);
+  for (const u of Array.isArray(uplinks) ? uplinks : []) { rows.push(satRow(u, series, now, minDays, satPct)); await y(); }
+  return satFinish(rows, satPct);
 }
 const pick = (d) => ({ agent: d.agent, cvpId: d.cvpId, key: d.key, hostname: d.hostname || d.key, model: d.model || '', corpName: d.corpName || '' });

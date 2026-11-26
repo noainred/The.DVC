@@ -26,7 +26,7 @@ import { loadSettings } from '../../cvp/settings.js';
 import * as cdb from '../../cvp/db.js';
 import { corpResolver, rowOwnerOf } from '../../cvp/overview.js';
 import { rankLinks, FLAP_MIN_DEFAULT } from '../../cvp/linkq.js';
-import { reclaimCandidates, exhaustForecast, saturationForecast, IDLE_CHOICES, FORECAST_MIN_DAYS, FORECAST_WINDOW_DAYS, UPLINK_SAT_PCT } from '../../cvp/portplan.js';
+import { reclaimCandidates, exhaustForecast, saturationForecastAsync, IDLE_CHOICES, FORECAST_MIN_DAYS, FORECAST_WINDOW_DAYS, UPLINK_SAT_PCT } from '../../cvp/portplan.js';
 import { opticTrendsAsync, opticInventory, TREND_DAYS, TREND_MIN_DAYS } from '../../cvp/opticstrend.js';
 import { HORIZON_DAYS } from '../../cvp/trend.js';
 import { heavyGate } from '../../cvp/heavyGate.js';   // v3.42(2회차 A4-F5): 무거운 조회 동시 상한
@@ -169,7 +169,7 @@ export function registerCvpNet(api) {
     const looked = uplinks.slice(0, cdb.UPLINK_SERIES_MAX);
     const us = await cdb.utilMaxSeries(looked, { days: FORECAST_WINDOW_DAYS });
     if (us.unavailable) return res.status(503).json(DB_DOWN);
-    const sat = saturationForecast({ uplinks: looked, series: us.map });
+    const sat = await saturationForecastAsync({ uplinks: looked, series: us.map });
     const hosts = hostsOf();
     const corp = new Map(b.devices.map((d) => [devKey(d.agent, d.cvpId, d.key), d.corpName]));
     res.json({
@@ -317,6 +317,8 @@ export function registerCvpNet(api) {
   }
   let snapBusy = false;
   api.get('/tools/cvp/snapshots', toolsPerm, fullScopeOnly, async (req, res) => {
+    // v3.42(2회차 반증 — 주석과 코드 불일치): 끝나지 않은 채 1시간 넘은 스냅샷 · 보존일 밖은 목록을 볼 때도 정리한다(예전에는 새 스냅샷 저장이 성공할 때만 돌았다).
+    if (!snapBusy) await cdb.pruneSnaps().catch((e) => console.warn(`[cvp-net] 스냅샷 정리 실패: ${e.message}`));
     const r = await cdb.listSnaps();
     if (r.unavailable) return res.status(503).json(DB_DOWN);
     const nameOf = new Map(listServers().map((x) => [String(x.id), x.name || x.id]));

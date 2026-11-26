@@ -18,13 +18,15 @@ export function snapshotBody({ device = {}, ports = null, lldp = null } = {}) {
   const x = Array.isArray(device.partsList) ? device.partsList.filter((p) => p && p.kind === 'xcvr') : null;
   return {
     h: s(device.hostname, 128), m: s(device.model, 64), v: s(device.eosVersion, 64), at: num(device.collectedAt),
-    p: device.portsRead && Array.isArray(ports) ? ports.map((p) => [s(p.port ?? p.name, 64), s(p.oper, 16), s(p.admin, 16), num(p.speedBps ?? p.speed_bps), s(p.vlan, 32), p.lag == null ? null : s(p.lag, 64), p.desc === undefined ? s(p.descr) : s(p.desc), num(p.mtu)]) : null,
+    p: device.portsRead && Array.isArray(ports) ? ports.map((p) => [s(p.port ?? p.name, 64), linkWord(p.oper), linkWord(p.admin), num(p.speedBps ?? p.speed_bps), s(p.vlan, 32), p.lag == null ? null : s(p.lag, 64), p.desc === undefined ? s(p.descr) : s(p.desc), num(p.mtu)]) : null,
     b: Array.isArray(device.bgpPeers) ? device.bgpPeers.slice(0, 512).map((b) => [s(b.peer ?? b.peerAddress, 64), s(b.vrf, 64) || 'default', s(b.state, 32)]) : null,
     x: x && x.length ? x.slice(0, 512).map((p) => [intfOfPartName(p.name) || s(p.name, 96), p.state === 'absent' ? 0 : 1, s(p.media, 48)]) : null,
     l: lldp && lldp.read ? (lldp.rows || []).slice(0, 512).map((r) => [s(r.port, 64), s(r.sysName, 128), s(r.portId, 64)]) : null,
   };
 }
 
+/** v3.42(2회차 반증 R2): 'unknown'(못 읽음 — 일부 목록이 남긴 옛 행 등)은 값이 아니다 — null 로 둬 비교에서 뺀다(예전: 'up → unknown' 이 거짓 '바뀜' 32건). */
+function linkWord(v) { const w = s(v, 16); return w === 'unknown' ? null : w; }
 const PORT_FIELDS = Object.freeze([[1, 'oper'], [2, 'admin'], [3, 'speed'], [4, 'vlan'], [5, 'lag'], [6, 'desc'], [7, 'mtu']]);
 /** 장비 하나 비교 → { changes:[{ kind, item, field, before, after }], na:[묶음] } */
 export function diffDevice(a, b) {
@@ -39,7 +41,7 @@ export function diffDevice(a, b) {
       const rb = bm.get(name);
       if (!rb) { push('port', name, 'removed', null, null); continue; }
       for (const [i, f] of PORT_FIELDS) {
-        if (ra[i] == null || rb[i] == null) continue;   // 한쪽 못 읽음 — 이 칸은 비교하지 않는다
+        if (ra[i] == null || rb[i] == null || ra[i] === 'unknown' || rb[i] === 'unknown') continue;   // 한쪽 못 읽음(옛 스냅샷의 'unknown' 포함) — 이 칸은 비교하지 않는다
         if (ra[i] !== rb[i]) push('port', name, f, ra[i], rb[i]);
       }
     }

@@ -31,16 +31,17 @@ export default function CvpRedundancyView({ servers = [], onOpen }) {
   const bad = (x) => BAD_MLAG.has(x.mlag.state) || x.channels.some((ch) => BAD_CH.has(ch.state));
   // v3.42(2회차 F2): '확인 불가'(MLAG · 채널을 다 읽지 못함)는 문제 목록과 따로 — 기본 보기가 '문제 없음' 으로 단정하지 않게 칩 · 문구를 둔다.
   const unk = (x) => x.mlag.state === 'unknown' || x.channels.some((ch) => ch.state === 'unknown');
-  const shown = unkOnly ? rows.filter(unk) : onlyBad ? rows.filter(bad) : rows;
   const unkN = rows.filter(unk).length;
+  const unkOn = unkOnly && unkN > 0;   // 2회차 반증 R13: CVP 를 바꿔 칩이 사라지면 선택도 풀린다(빈 표에 남지 않게)
+  const shown = unkOn ? rows.filter(unk) : onlyBad ? rows.filter(bad) : rows;
   const c = r?.counts || { ch: {}, mlag: {} };
   return (
     <div style={GRID1}>
       <div className="card" style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
         <div style={ROW}>
           <b style={{ fontSize: 15 }}>이중화</b>
-          <button type="button" className={`tab${onlyBad && !unkOnly ? ' active' : ''}`} aria-pressed={onlyBad && !unkOnly} onClick={() => { setOnlyBad((x) => (unkOnly ? true : !x)); setUnkOnly(false); }}>문제 있는 장비만 <b style={MONO}>{rows.filter(bad).length}</b></button>
-          {unkN > 0 && <button type="button" className={`tab${unkOnly ? ' active' : ''}`} aria-pressed={unkOnly} onClick={() => setUnkOnly((x) => !x)}>확인 불가 <b style={MONO}>{unkN}</b></button>}
+          <button type="button" className={`tab${onlyBad && !unkOn ? ' active' : ''}`} aria-pressed={onlyBad && !unkOn} onClick={() => { setOnlyBad((x) => (unkOn ? true : !x)); setUnkOnly(false); }}>문제 있는 장비만 <b style={MONO}>{rows.filter(bad).length}</b></button>
+          {unkN > 0 && <button type="button" className={`tab${unkOn ? ' active' : ''}`} aria-pressed={unkOn} onClick={() => setUnkOnly((x) => !x)}>확인 불가 <b style={MONO}>{unkN}</b></button>}
           <CvpSelect servers={servers} value={cvpId} onChange={setCvpId} />
           <button type="button" className="btn" style={{ marginLeft: 'auto' }} onClick={() => setReload((x) => x + 1)}>새로고침</button>
         </div>
@@ -92,7 +93,7 @@ export default function CvpRedundancyView({ servers = [], onOpen }) {
               })}
             </tbody>
           </STable>
-          {!shown.length && <div style={NOTE}>{unkOnly ? '확인 불가 장비가 없습니다.' : onlyBad ? (unkN ? `확인된 문제는 없습니다 — 다만 ${unkN}대는 상태를 다 읽지 못해 확인 불가입니다(‘확인 불가’ 칩).` : '문제 있는 장비가 없습니다.') : '장비가 없습니다.'}</div>}
+          {!shown.length && <div style={NOTE}>{unkOn ? '확인 불가 장비가 없습니다.' : onlyBad ? (unkN ? `확인된 문제는 없습니다 — 다만 ${unkN}대는 상태를 다 읽지 못해 확인 불가입니다(‘확인 불가’ 칩).` : '문제 있는 장비가 없습니다.') : '장비가 없습니다.'}</div>}
           <div style={NOTE}>채널 칸에 마우스를 올리면 멤버 포트와 상태가 보입니다(문제 채널은 내려간 멤버를 칸 안에 적습니다). {shown.length > 400 ? `${shown.length}대 중 정렬 순서 앞 400대 표시. ` : ''}{r.truncated ? '⚠ 포트 행이 상한을 넘어 일부만 봤습니다.' : ''}</div>
         </div>
       </>)}

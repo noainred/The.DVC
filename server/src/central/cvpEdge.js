@@ -244,7 +244,7 @@ export function cleanDevice(x, now = Date.now(), cnt = { ports: 0 }) {
   };
   if (Array.isArray(x.ports) && x.ports.length > PORT_MAX) cnt.ports += x.ports.length - PORT_MAX;
   // v3.42(반증 A2-P1): 목록이 일부면(엣지 수집 잘림 · 여기 상한) 중앙이 '목록에 없는 포트' 를 지우지 않게 표지를 옮긴다.
-  if (Array.isArray(d.ports) && (x.portsPartial === true || x.ports.length > PORT_MAX)) d.portsPartial = true;
+  if (Array.isArray(d.ports) && (x.portsPartial === true || x.info?.portsPartial === true || x.ports.length > PORT_MAX)) d.portsPartial = true;
   // parts: 없음(undefined)=이번에 읽지 않음 · null=못 읽음 · 배열 — 셋을 구분해 옮긴다.
   if (Object.hasOwn(x, 'parts')) {
     d.parts = x.parts === null ? null : listOf(x.parts, PART_MAX, (p) => ({
@@ -273,7 +273,7 @@ export function cleanInfo(v, now = Date.now()) {
     bootAt: tsClamp(v.bootAt, now) ?? undefined, status: s(v.status, 32) || undefined,
     complianceCode: s(v.complianceCode, 32) || undefined, complianceIndication: s(v.complianceIndication, 32) || undefined,
     container: s(v.container, 128) || undefined, ztpMode: bool(v.ztpMode), mlag: bool(v.mlag), internalVersion: s(v.internalVersion, 64) || undefined,
-    portsEmpty: v.portsEmpty === true || undefined, bgpEmpty: v.bgpEmpty === true || undefined,
+    portsEmpty: v.portsEmpty === true || undefined, bgpEmpty: v.bgpEmpty === true || undefined, portsPartial: v.portsPartial === true || undefined,   // v3.42(2회차 반증 R9)
     // v3.42(A3-F5): 중복 제거(최대 3개) — 개수 상한이 없어 20만 개가 오면 info 가 64KB 를 넘어 통째로 null 로 저장됐다(수명주기 · MLAG 까지 잃음).
     readKinds: Array.isArray(v.readKinds) ? [...new Set(v.readKinds.slice(0, 64).filter((k) => ['enrich', 'lifecycle', 'bugs'].includes(k)))] : undefined,
   };

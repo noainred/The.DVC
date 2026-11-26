@@ -115,4 +115,11 @@ describe('v3.42 CVP 버그 점검 1회차 — 웹', () => {
     expect(ot).toMatch(/x\.state === 'stale' && x\.lastRx != null && th\.warnDbm != null && x\.lastRx <= th\.warnDbm/);   // A1-F9
     expect(src('CvpPortPlan.jsx')).toMatch(/sat\.seriesUnread/);   // A4-F6
   });
+  it('2회차 반증 R7 · R12 · R13', async () => {
+    const { rxStateLabel } = await import('./cvpOpticsText.js').then((m) => ({ rxStateLabel: Object.values(m).find((f) => typeof f === 'function' && /레인 일부만 링크/.test(String(f))) }));
+    expect(typeof rxStateLabel).toBe('function');
+    expect(rxStateLabel({ linked: false, lanesPartial: true }).label).toBe('판정 안 함(레인 일부만 링크)');   // R7
+    expect(src('CvpPortPlan.jsx')).toMatch(/ex\.pointsRows && ex\.rows\.length > ex\.pointsRows/);   // R12
+    expect(src('CvpRedundancy.jsx')).toMatch(/const unkOn = unkOnly && unkN > 0;/);   // R13
+  });
 });

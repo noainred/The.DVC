@@ -632,13 +632,14 @@ api.get('/tools/cvp/optics', toolsPerm, fullScopeOnly, async (req, res) => {
       if (!p.dom && !o) { counts.noDom++; continue; }
       counts.withDom++;
       if (o && o.judged) { counts.judged++; if (o.rxState && Object.hasOwn(counts, o.rxState)) counts[o.rxState]++; }
+      else if (o && o.lanesPartial === true) counts.lanesPartial = (counts.lanesPartial || 0) + 1;   // v3.42(2회차 반증 R7): 링크 없음과 따로
       else if (o && !o.linked) counts.notLinked++;
       const c = corpOf(d.cvpId);
       list.push({
         cvpId: d.cvpId, cvpName: nameOf.get(String(d.cvpId)) || d.cvpId, key: d.key, hostname: d.hostname || '', corpId: c.corpId, corpName: c.corpName,
         intf: o?.intf || null, part: p.name, state: p.state, rx: o?.rx ?? p.dom?.rxPower ?? null, tx: o?.tx ?? p.dom?.txPower ?? null,
         temperature: p.dom?.temperature ?? null, voltage: p.dom?.voltage ?? null, txBias: p.dom?.txBias ?? null,
-        linked: o ? o.linked : null, judged: !!o?.judged, rxState: o?.rxState || null, basis: o?.basis || null, partsAt: d.partsAt, stale: false,
+        linked: o ? o.linked : null, ...(o?.lanesPartial === true ? { lanesPartial: true } : {}), judged: !!o?.judged, rxState: o?.rxState || null, basis: o?.basis || null, partsAt: d.partsAt, stale: false,
       });
     }
   }

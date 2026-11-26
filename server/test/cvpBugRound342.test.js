@@ -288,7 +288,8 @@ test('⑧ 2회차 — 토폴로지 · 포트 구성도 · 판정', () => {
   // A1-F11: 설명 낱말이 스위치 이름이 아니고 숫자도 없으면 비교하지 않는다
   const isSw = (n) => n === 'leaf2';
   assert.equal(TP.compareEnds({ desc: 'MLAG-PEER-LINK' }, { desc: '' }, { aName: 'leaf1', bName: 'leaf2', isSwitch: isSw }).some((x) => x.field === 'descA'), false);
-  assert.equal(TP.compareEnds({ desc: 'to kr-leaf-09' }, { desc: '' }, { aName: 'leaf1', bName: 'leaf2', isSwitch: isSw }).some((x) => x.field === 'descA'), true, '숫자 든 이름(낡은 설명)은 비교');
+  assert.equal(TP.compareEnds({ desc: 'MLAG-PEER-1' }, { desc: '' }, { aName: 'leaf1', bName: 'leaf2', isSwitch: isSw }).some((x) => x.field === 'descA'), false, '숫자 든 관례 낱말도 스위치가 아니면 비교하지 않는다(반증 R10)');
+  assert.equal(TP.compareEnds({ desc: 'to leaf3' }, { desc: '' }, { aName: 'leaf1', bName: 'leaf2', isSwitch: (n) => ['leaf2', 'leaf3'].includes(n) }).some((x) => x.field === 'descA'), true, '알려진 다른 스위치를 가리키면 다름');
   // A3-F2: IP 이름은 통째로
   assert.equal(TP.shortOf('192.168.10.5'), '192.168.10.5'); assert.equal(TP.shortOf('esx-01.corp'), 'esx-01');
   // A1-F7: 리눅스 NIC 예측 이름은 인터페이스
@@ -323,7 +324,7 @@ test('⑨ 2회차 — 가림 · 무거운 조회 동시 상한', async () => {
   const G = await import('../src/cvp/heavyGate.js');
   G._resetHeavyGate();
   const { EventEmitter } = await import('node:events');
-  const mk = () => { const res = new EventEmitter(); res.writableEnded = false; res.destroyed = false; res.statusCode = 200; res.status = (c) => { res.statusCode = c; return res; }; res.json = (b) => { res.body = b; res.writableEnded = true; res.emit('finish'); }; return res; };
+  const mk = () => { const res = new EventEmitter(); res.writableEnded = false; res.destroyed = false; res.statusCode = 200; res.status = (c) => { res.statusCode = c; return res; }; res.end = function end() { this.writableEnded = true; this.emit('finish'); }; res.json = (b) => { res.body = b; res.end(); }; return res; };
   const ran = [];
   const reqs = Array.from({ length: G.HEAVY_MAX + G.HEAVY_QUEUE_MAX + 1 }, () => ({ req: { destroyed: false }, res: mk() }));
   reqs.forEach((x, i) => G.heavyGate(x.req, x.res, () => ran.push(i)));
@@ -332,6 +333,11 @@ test('⑨ 2회차 — 가림 · 무거운 조회 동시 상한', async () => {
   reqs[0].res.json({}); assert.equal(ran.length, G.HEAVY_MAX + 1, '끝나면 다음이 돈다');
   reqs[2].req.destroyed = true;   // 기다리는 사이 끊긴 요청은 건너뛴다
   reqs[1].res.json({}); assert.equal(ran.includes(2), false); assert.equal(ran.at(-1), 3);
+  // 반증 R1: 연결이 끊겨도(close) 처리기가 응답을 끝낼 때까지 자리를 쥔다 — 끊김마다 새 계산이 겹쳐 돌던 것
+  const before = G.heavyState().running;
+  reqs[3].res.emit('close');
+  assert.equal(ran.includes(4), false, '끊김만으로는 다음이 돌지 않는다'); assert.equal(G.heavyState().running, before);
+  reqs[3].res.json({}); assert.equal(ran.includes(4), true, '처리기가 끝내면 다음');
   G._resetHeavyGate();
 });
 
@@ -374,4 +380,48 @@ test('⑪ 2회차 라우터 — 스냅샷 범위 입력 형식', async () => {
     const r = await fetch(`${base}/tools/cvp/snapshots`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ cvpId: bad }) });
     assert.equal(r.status, 400, JSON.stringify(bad));
   }
+});
+
+/* ── 2회차 반증 — 수정 검토 결함(R1~R13) ──────────────────────────────────────────────────────────────────── */
+test('⑫ 2회차 반증 R2 · R3 · R5 · R6 · R11', async () => {
+  // R2: 'unknown'(옛 행) 은 전후 비교에서 바뀜이 아니다 — 새 본문 · 옛 스냅샷의 'unknown' 모두
+  const b = (oper) => SD.snapshotBody({ device: { hostname: 'x', portsRead: true }, ports: [{ port: 'Ethernet1', oper, admin: 'up' }] });
+  assert.equal(SD.diffDevice(b('up'), b('unknown')).changes.length, 0);
+  const old = b('up'); old.p[0][1] = 'unknown';
+  assert.equal(SD.diffDevice(old, b('down')).changes.length, 0);
+  assert.equal(SD.diffDevice(b('up'), b('down')).changes.length, 1, '대조: 실제 변화는 센다');
+  // R3: 삼각형(코어 1 + 접속 쌍) — 피어를 키 순서로 정하지 않는다(키를 바꿔도 같은 층)
+  const tri = (k) => { const ll = []; const lk = (a, ap, c, cp) => { ll.push(L(a, ap, c, cp)); ll.push(L(c, cp, a, ap)); };
+    lk(k.core, 'E1', k.a, 'E49'); lk(k.core, 'E2', k.b, 'E49'); lk(k.a, 'E47', k.b, 'E47');
+    return layers(TP.buildTopology({ devices: [k.core, k.a, k.b].map((x) => D(x, x)), lldp: ll })); };
+  const t1 = tri({ core: 'core', a: 'acc1', b: 'acc2' }); const t2 = tri({ core: 'zcore', a: 'acc1', b: 'acc2' });
+  assert.equal(t1.core, t2.zcore, '장비 키 순서가 층을 바꾸지 않는다');
+  // R5: 도메인까지 쓴 이름은 정확한 전체 이름이 같은 CVP 의 짧은 이름보다 먼저
+  const idx = TP.switchIndex([D('KA', 'spine1.kr.corp', 'cA', 'eA'), D('LA', 'leaf1', 'cA', 'eA'), D('UB', 'spine1.us.corp', 'cB', 'eB')]);
+  assert.equal(idx.find('spine1.us.corp', 'eA\u0000cA\u0000LA'), 'eB\u0000cB\u0000UB');
+  assert.equal(idx.find('spine1', 'eA\u0000cA\u0000LA'), 'eA\u0000cA\u0000KA', '짧은 이름이면 같은 CVP 먼저(A1-F3)');
+  // R6: 비동기 포화 예측 = 동기판
+  const ups = Array.from({ length: 50 }, (_, i) => ({ agent: '', cvpId: 'c1', key: 'S1', hostname: 's1', port: `E${i}` }));
+  const ser = new Map(ups.map((u, i) => [`\u0000c1\u0000S1\u0000${u.port}`, Array.from({ length: 100 }, (_, d) => [NOW - (99 - d) * DAY, (i % 7) * 10 + d * 0.1])]));
+  assert.deepEqual(await PP.saturationForecastAsync({ uplinks: ups, series: ser, now: NOW }), PP.saturationForecast({ uplinks: ups, series: ser, now: NOW }));
+  // R11: VLAN 하위 인터페이스
+  assert.equal(PM.deviceNameFromDesc('eno1.100 trunk'), '');
+});
+
+test('⑬ 2회차 반증 R8 · R9 — 옛 행 처리 경로 · 일부 표지 보존', async () => {
+  if (!(await cdb.available())) return;
+  const t0 = Date.now() - 60_000;
+  const port = (name, oper) => ({ name, oper, admin: 'up', desc: '', speedBps: 25e9 });
+  await cdb.saveDevices({ agent: '', cvpId: 'dr', devices: [{ key: 'R', ts: t0, hostname: 'r', ports: [port('Ethernet1', 'up'), port('Ethernet2', 'down'), port('Ethernet3', 'down')] }] });
+  await cdb.saveDevices({ agent: '', cvpId: 'dr', devices: [{ key: 'R', ts: t0 + 1000, hostname: 'r', portsPartial: true, ports: [port('Ethernet1', 'up')] }] });
+  // R8: 장애 판정 입력 · 장비 목록 요약도 옛 행은 모름
+  const ps = await cdb.portStateRows({ cvpId: 'dr' });
+  assert.deepEqual(ps.rows.map((r) => r.oper).sort(), ['unknown', 'unknown', 'up']);
+  const lr = (await cdb.listDeviceRows({ cvpId: 'dr' })).rows.find((d) => d.key === 'R');
+  assert.equal(lr.ports.down, 0, '목록 요약에 옛 down 을 세지 않는다');
+  // R9: 일부 표지는 장비 info 에 남고 엣지 레코드에 실린다(옛 행이 없어도 — 처음부터 같은 자리에서 잘리는 장비)
+  await cdb.saveDevices({ agent: '', cvpId: 'ds', devices: [{ key: 'S', ts: t0, hostname: 's', portsPartial: true, ports: [port('Ethernet1', 'up')] }] });
+  const rec = (await cdb.deviceRecordsFor('', 'ds'))[0];
+  assert.equal(rec.portsPartial, true); assert.equal(rec.info?.portsPartial, true);
+  assert.equal(E.cleanDevice(rec, Date.now()).portsPartial, true, '중앙 정제도 표지를 옮긴다');
 });

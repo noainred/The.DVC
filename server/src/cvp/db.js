@@ -370,7 +370,8 @@ const pctOrNull = (v) => { const n = numOrNull(v); return n == null || n < 0 || 
  * v2.641 ②: 장비 개요 — 아는 필드만 저장(엣지가 보낸 값도 cvpEdge.cleanDevice 가 먼저 좁힌다). 없으면 null(행의 개요를 지운다 —
  *   이번 주기에 못 읽었다는 뜻이다. '예전 값' 을 지금 값처럼 두지 않는다).
  */
-export const INFO_KEYS = Object.freeze(['mac', 'fqdn', 'hwRevision', 'bootAt', 'status', 'complianceCode', 'complianceIndication', 'container', 'ztpMode', 'mlag', 'internalVersion', 'lifecycle', 'bugs', 'readKinds', 'portsEmpty', 'bgpEmpty', 'mlagStatus', 'cfgReadAt']);
+// v3.42(2회차 반증 R9): portsPartial(마지막 포트 목록이 일부)도 장비 info 에 남긴다 — 엣지 DB 에 남지 않아, 늘 같은 자리에서 잘리는 장비는 중앙이 포트 수 160 을 적었다.
+export const INFO_KEYS = Object.freeze(['mac', 'fqdn', 'hwRevision', 'bootAt', 'status', 'complianceCode', 'complianceIndication', 'container', 'ztpMode', 'mlag', 'internalVersion', 'lifecycle', 'bugs', 'readKinds', 'portsEmpty', 'bgpEmpty', 'mlagStatus', 'cfgReadAt', 'portsPartial']);
 function infoOf(d) {
   const src = d && typeof d.info === 'object' && d.info ? d.info : {};
   const out = {};
@@ -817,7 +818,17 @@ export async function listDeviceRows({ agent = null, cvpId = null } = {}) {
   const pmap = new Map(ports.map((r) => [`${r.agent}\u0000${r.cvp_id}\u0000${r.device_key}`, { total: Number(r.total), up: Number(r.up || 0), down: Number(r.down || 0), ...(Number(r.nolink) > 0 ? { noLink: Number(r.nolink) } : {}) }]));
   // v3.42(2회차 A4-F8): 장비마다 parts_json 을 푸는 변환(500대 35~95ms)을 시간 기준 양보로 나눈다.
   const out = []; const y = createYielder(15);
-  for (const r of rows) { out.push(rowToDevice(r, pmap.get(`${r.agent}\u0000${r.cvp_id}\u0000${r.device_key}`))); await y(); }
+  // v3.42(2회차 반증 R8): 마지막 목록이 일부였던 장비(info.portsPartial)는 옛 행을 뺀 요약으로 다시 센다 — 목록 down 42 · 상세 down 10 으로 갈렸다(드물어 그 장비만 다시 읽는다).
+  const devPorts = db.conn.prepare('SELECT oper, admin, ts FROM port_latest WHERE agent=? AND cvp_id=? AND device_key=?');
+  for (const r of rows) {
+    let sum = pmap.get(`${r.agent}\u0000${r.cvp_id}\u0000${r.device_key}`);
+    if (r.ports_read === 1 && parseJsonCached(`info|${r.agent}|${r.cvp_id}|${r.device_key}`, r.info_json)?.portsPartial === true) {
+      const ps = devPorts.all(r.agent, r.cvp_id, r.device_key);
+      staleOperFix(ps, (p) => p.ts, (p) => { p.oper = 'unknown'; });
+      sum = portsSummary(ps.map((p) => ({ oper: p.oper || 'unknown', admin: p.admin || 'unknown' })));
+    }
+    out.push(rowToDevice(r, sum)); await y();
+  }
   return { rows: out };
 }
 
@@ -990,7 +1001,7 @@ export async function deviceRecordsFor(agent, cvpId) {
       parts: r.parts_at == null ? undefined : parseJson(r.parts_json), partsAt: r.parts_at == null ? null : Number(r.parts_at),
       ...(Array.isArray(x.partsMissingKinds) ? { partsMissingKinds: x.partsMissingKinds } : {}),
       bgp: parseJson(r.bgp_json), ports: r.ports_read === 1 ? (portsBy.get(r.device_key) || []) : null,
-      ...(r.ports_read === 1 && partialBy.has(r.device_key) ? { portsPartial: true } : {}),
+      ...(r.ports_read === 1 && (partialBy.has(r.device_key) || parseJson(r.info_json)?.portsPartial === true) ? { portsPartial: true } : {}),
       info: parseJson(r.info_json) || null,
       sysAt: r.sys_ts == null ? null : Number(r.sys_ts), cpuPct: r.cpu_pct ?? null, memPct: r.mem_pct ?? null, memTotal: r.mem_total ?? null,
     };
@@ -1077,7 +1088,11 @@ export async function portStateRows({ agent = null, cvpId = null } = {}) {
   const where = []; const args = [];
   if (agent != null) { where.push('agent=?'); args.push(agent); }
   if (cvpId != null) { where.push('cvp_id=?'); args.push(cvpId); }
-  const rows = db.conn.prepare(`SELECT agent, cvp_id, device_key, port, oper, admin, descr FROM port_latest ${where.length ? `WHERE ${where.join(' AND ')}` : ''}`).all(...args);
+  const rows = db.conn.prepare(`SELECT agent, cvp_id, device_key, port, oper, admin, descr, ts FROM port_latest ${where.length ? `WHERE ${where.join(' AND ')}` : ''}`).all(...args);
+  // v3.42(2회차 반증 R8): 장애 판정 입력에도 일부 목록이 남긴 옛 행은 '모름'(옛 down 이 열린 장애를 붙잡지 않게) — 장비별로 묶어 가장 새 ts 보다 오래된 행.
+  const byDev = new Map();
+  for (const r of rows) { const k = `${r.agent}\u0000${r.cvp_id}\u0000${r.device_key}`; if (!byDev.has(k)) byDev.set(k, []); byDev.get(k).push(r); }
+  for (const list of byDev.values()) staleOperFix(list, (r) => r.ts, (r) => { r.oper = 'unknown'; });
   return { rows: rows.map((r) => ({ agent: r.agent, cvpId: r.cvp_id, key: r.device_key, port: r.port, oper: r.oper || 'unknown', admin: r.admin || 'unknown', desc: r.descr || '' })) };
 }
 

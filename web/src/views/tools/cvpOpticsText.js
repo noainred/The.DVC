@@ -32,6 +32,8 @@ export function opticRowState(o) {
   if (r.judged && r.rxState === 'fault') return { tone: 'bad', label: '약함(장애)' };
   if (r.judged && r.rxState === 'warn') return { tone: 'warn', label: '낮음(주의)' };
   if (r.judged && r.rxState === 'ok') return { tone: 'ok', label: '정상' };
+  // v3.42(2회차 반증 R7): 브레이크아웃 레인 일부만 링크면 '링크 없음' 이 아니다(재고는 '링크 있음' 으로 센다)
+  if (r.lanesPartial === true) return { tone: 'muted', label: '판정 안 함(레인 일부만 링크)' };
   if (r.linked === false) return { tone: 'muted', label: '판정 안 함(링크 없음)' };
   if (r.rx == null) return { tone: 'muted', label: '광량 값 없음' };
   return { tone: 'muted', label: '판정 안 함' };

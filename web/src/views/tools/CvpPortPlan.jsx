@@ -140,7 +140,7 @@ export function ForecastView({ onOpen }) {
         )}
         {cur.rows.length > SHOW_MAX && <div style={NOTE}>{cur.rows.length}개 중 정렬 순서 앞 {SHOW_MAX}개 표시(제목을 눌러 정렬을 바꾸면 그 순서로 자릅니다)</div>}
         {!cur.rows.length && <div style={NOTE}>{part === 'exhaust' ? '장비가 없습니다.' : '업링크를 찾지 못했습니다(LLDP 이웃이 CVP 스위치인 포트 · LLDP 를 못 읽은 장비의 40G 이상 포트).'}</div>}
-        <div style={NOTE}>예상 날짜는 직선 추세의 추정이며 오늘 {dateText(Date.now())} 기준입니다{sat.truncated ? ` · ⚠ 업링크가 상한을 넘어 ${sat.seriesUnread ? `${sat.seriesUnread}개는 기록을 읽지 않았습니다(예측에서 뺌 — 기록 부족이 아님)` : '일부만 봤습니다'}` : ''}{sat.omitted ? ` · 업링크 ${sat.omitted}개는 응답 상한을 넘어 뺐습니다(위험한 순서로 앞부분만)` : ''}{sat.pointsRows && sat.rows.length > sat.pointsRows ? ` · 추이 그림은 위험한 순서 앞 ${sat.pointsRows}개만 싣습니다(그 뒤는 ‘—’)` : ''}{r.portsUnread ? ` · 포트 목록을 못 읽은 장비 ${r.portsUnread}대는 업링크에서 뺐습니다` : ''}.</div>
+        <div style={NOTE}>예상 날짜는 직선 추세의 추정이며 오늘 {dateText(Date.now())} 기준입니다{part === 'exhaust' && ex.pointsRows && ex.rows.length > ex.pointsRows ? ` · 추이 그림은 위험한 순서 앞 ${ex.pointsRows}대만 싣습니다(그 뒤는 ‘—’)` : ''}{sat.truncated ? ` · ⚠ 업링크가 상한을 넘어 ${sat.seriesUnread ? `${sat.seriesUnread}개는 기록을 읽지 않았습니다(예측에서 뺌 — 기록 부족이 아님)` : '일부만 봤습니다'}` : ''}{sat.omitted ? ` · 업링크 ${sat.omitted}개는 응답 상한을 넘어 뺐습니다(위험한 순서로 앞부분만)` : ''}{sat.pointsRows && sat.rows.length > sat.pointsRows ? ` · 추이 그림은 위험한 순서 앞 ${sat.pointsRows}개만 싣습니다(그 뒤는 ‘—’)` : ''}{r.portsUnread ? ` · 포트 목록을 못 읽은 장비 ${r.portsUnread}대는 업링크에서 뺐습니다` : ''}.</div>
       </div>
     </div>
   );

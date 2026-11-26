@@ -59,10 +59,14 @@ export function switchIndex(devices = []) {
       const s = shortOf(name);
       const fc = full.get(f) || []; const sc = s.length >= 3 ? (short.get(s) || []) : [];
       if (!fc.length && !sc.length) return null;
+      // 2회차 반증 R5: 도메인까지 쓴 이름(spine1.us.corp)은 정확한 전체 이름이 같은 CVP 의 짧은 이름(spine1.kr.corp)보다 강하다.
+      //   짧은 이름(spine1)으로 온 경우만 같은 CVP 의 짧은 이름 후보를 다른 CVP 의 전체 이름보다 먼저 본다(A1-F3).
+      const qualified = f !== s;
       if (from) {
         const pre = from.slice(0, from.lastIndexOf('\u0000') + 1);   // agent␀cvp␀
         const sf = fc.filter((c) => c.startsWith(pre));
         if (sf.length) return choose(sf);
+        if (qualified && fc.length) return choose(fc);
         const ss = sc.filter((c) => c.startsWith(pre));
         if (ss.length) return choose(ss);
       }
@@ -150,9 +154,9 @@ export function compareEnds(pa, pb, { aName = '', bName = '', isSwitch = null } 
     if (p.desc == null) continue;
     const named = deviceNameFromDesc(p.desc);
     if (!named || !peerName) continue;
-    // v3.42(2회차 A1-F11): 뽑은 낱말이 알려진 스위치 이름이거나 숫자를 품을 때만 비교한다 — 'MLAG-PEER-LINK' · 'UPLINK_TO_CORE' 같은 낱말을 상대 이름으로 보고
-    //   '다름' 을 셌다. 숫자 든 이름(kr-leaf-09 — CVP 밖 · 철거된 장비)은 낡은 설명일 수 있어 그대로 비교한다.
-    if (typeof isSwitch === 'function' && !isSwitch(named) && !/\d/.test(named)) continue;
+    // v3.42(2회차 A1-F11 · 반증 R10): 뽑은 낱말이 **알려진 스위치 이름**일 때만 비교한다 — 'MLAG-PEER-LINK' · 'MLAG-PEER-1' · 'ISL-1' · 'uplink-100G' 같은
+    //   관례 낱말을 상대 이름으로 보고 '다름' 을 셌다. CVP 밖 이름(철거된 장비 등)은 맞는지 확인할 수 없어 비교하지 않는다.
+    if (typeof isSwitch === 'function' && !isSwitch(named)) continue;
     const ok = lc(named) === lc(peerName) || shortOf(named) === shortOf(peerName);
     if (!ok) out.push({ field: side === 'a' ? 'descA' : 'descB', a: side === 'a' ? named : peerName, b: side === 'a' ? peerName : named, state: 'diff' });
   }
@@ -238,22 +242,30 @@ export function buildTopology({ devices = [], lldp = [], lldpMeta = new Map(), p
   for (const l of links.values()) {
     for (const [x, y] of [[l.a, l.b], [l.b, l.a]]) { if (!swNb.has(x)) swNb.set(x, new Set()); swNb.get(x).add(y); }
   }
-  const peerOf = new Map(); const peerScore = new Map();
+  // 피어 후보 점수(공유 이웃 수) — 서로의 **유일한 최고** 후보일 때만 쌍으로 본다(2회차 반증 R3: 동점이면 먼저 본 쌍을 골라
+  //   삼각형 — 코어 1 + 접속 MLAG 쌍 — 의 층이 장비 키 순서로 정해졌다). 동점이면 쌍을 정하지 않는다(결정적).
+  const cand = new Map();
   for (const [x, set] of swNb) {
     for (const y of set) {
       if (x >= y) continue;
       // 2회차 A4-F4: 공유 수는 작은 쪽 이웃 수를 넘지 못한다 — 크기만 보고 먼저 거른다(스파인 ↔ 리프 쌍마다 배열을 만들어 링크 수의 제곱이 됐다).
       const nx = set.size - 1; const ny = (swNb.get(y)?.size || 1) - 1;
       if (nx < 1 || ny < 1 || 2 * Math.min(nx, ny) < Math.max(nx, ny)) continue;
-      const ox = [...set].filter((z) => z !== y);
-      const oy = new Set([...(swNb.get(y) || [])].filter((z) => z !== x));
-      const common = ox.filter((z) => oy.has(z)).length;
-      if (common < 1 || common * 2 < Math.max(ox.length, oy.size)) continue;
-      // 한 장비에 후보가 여럿이면 공유 이웃이 많은 쪽
-      if ((peerScore.get(x) ?? -1) >= common || (peerScore.get(y) ?? -1) >= common) continue;
-      for (const [u, v] of [[x, y], [y, x]]) { const old = peerOf.get(u); if (old != null) { peerOf.delete(old); peerScore.delete(old); } peerOf.set(u, v); peerScore.set(u, common); }
+      const oy = swNb.get(y);
+      let common = 0;
+      for (const z of set) if (z !== y && oy.has(z)) common++;
+      if (common < 1 || common * 2 < Math.max(nx, ny)) continue;
+      for (const [u, v] of [[x, y], [y, x]]) { if (!cand.has(u)) cand.set(u, []); cand.get(u).push([v, common]); }
     }
   }
+  const bestOf = (u) => {
+    const c = cand.get(u); if (!c) return null;
+    const top = Math.max(...c.map((e) => e[1]));
+    const tops = c.filter((e) => e[1] === top);
+    return tops.length === 1 ? tops[0][0] : null;
+  };
+  const peerOf = new Map();
+  for (const u of cand.keys()) { const v = bestOf(u); if (v != null && bestOf(v) === u) peerOf.set(u, v); }
   const degFull = (id) => swNb.get(id)?.size || 0;
   const nbsOf = (id) => [...(swNb.get(id) || [])].filter((z) => z !== peerOf.get(id));
   const hostsOf = (id) => { const o = others.get(id); return o ? o.esxi + o.other : 0; };

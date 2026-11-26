@@ -4,10 +4,14 @@
  * 링크 품질 · 회수 · 예측 · GBIC 추세 · 토폴로지 · 위치 찾기 · 이중화 · 전후 비교 · 전 스위치 여유는 요청마다 수백 ms 동기 계산과
  * 수백 MB 메모리를 쓴다. 동시에 여러 건이 오면 정지 · 메모리가 요청 수만큼 쌓였다(실측: 동시 4건 최장 정지 1.17~1.69초,
  * GBIC 추세 3건 힙 875MB). 한 번에 HEAVY_MAX 건만 돌리고 나머지는 줄을 세운다 — 줄이 HEAVY_QUEUE_MAX 를 넘으면 503(다시 시도).
- * 끝(응답 finish) 또는 연결 끊김(close) 때 자리를 돌려준다. 줄에서 기다리던 요청의 연결이 이미 끊겼으면 돌리지 않고 다음으로 넘긴다.
+ *
+ * 자리는 **처리기가 응답을 끝냈을 때**(res.end 호출) 돌려준다 — 2회차 반증 R1: 예전에는 연결이 끊기면(close) 바로 돌려줘
+ *   계산은 계속 도는데 다음 요청이 들어와, 새로고침 5번에 무거운 계산 6개가 동시에 돌았다. 처리기가 끝내 응답하지 않는 경우를 대비해
+ *   HEAVY_HOLD_MAX_MS 뒤에는 돌려준다(영구 잠금 금지). 줄에서 기다리던 요청의 연결이 이미 끊겼으면 돌리지 않고 다음으로 넘긴다.
  */
 export const HEAVY_MAX = 1;
 export const HEAVY_QUEUE_MAX = 8;
+export const HEAVY_HOLD_MAX_MS = 120_000;
 let running = 0;
 const queue = [];
 
@@ -24,8 +28,11 @@ export function heavyGate(req, res, next) {
   const start = () => {
     if (res.writableEnded || res.destroyed || req.destroyed) return false;   // 기다리는 사이 끊긴 요청은 돌리지 않는다
     let done = false;
-    const rel = () => { if (done) return; done = true; release(); };
-    res.once('finish', rel); res.once('close', rel);
+    const rel = () => { if (done) return; done = true; clearTimeout(timer); release(); };
+    const timer = setTimeout(rel, HEAVY_HOLD_MAX_MS);
+    timer.unref?.();
+    const end = res.end;
+    res.end = function patchedEnd(...args) { rel(); return end.apply(this, args); };
     next();
     return true;
   };
