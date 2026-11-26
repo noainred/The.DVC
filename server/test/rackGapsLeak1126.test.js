@@ -59,7 +59,7 @@ test('원장에서 뺀 · 시리얼을 바꾼 장비의 시리얼이 든 이름 
   const j2 = JSON.stringify(room2).toLowerCase();
   assert.ok(!j2.includes('oldser77') && !j2.includes('newser88'), '바꾸기 전 · 후 시리얼 모두(놓을 때의 글은 그때 시리얼로, 고친 글은 앞뒤 시리얼로 걷어 낸다)');
   // ⚠ 표시 이름을 그대로 두고 시리얼만 바꾸면, 이름에 남은 옛 시리얼 글자는 더는 어느 장비의 시리얼도 아니다 — 그 글자는 가리지 않는다(관리자가 표시 이름을 고친다).
-  //   이 한계는 server/src/rack/CLAUDE.md 에 적어 둔다.
+  //   이 한계는 docs/rules/rack.md(1회차 절)에 적어 둔다.
   // tags 칸이 없던 때의 행(NULL)은 어떤 시리얼이 들었는지 알 수 없다 — 장비 글은 통째로 가린다(조용히 내보내지 않는다)
   const db = await R.openRackDb();
   db.prepare("UPDATE rack_log SET tags = NULL WHERE action LIKE 'place.%'").run();
