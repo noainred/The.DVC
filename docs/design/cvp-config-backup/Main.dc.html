@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>CVP 설정 백업 — 장비별 비교</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="box-sizing: border-box; padding: clamp(12px, 2vw, 28px); background: #0a0e17; color: #e6edf6; font-family: 'Inter', 'Noto Sans KR', 'Apple SD Gothic Neo', sans-serif; font-size: 13px; line-height: 1.5; display: flex; flex-direction: column; gap: 14px;">
+
+<div style="display: flex; flex-direction: column; gap: 8px;">
+<div style="font-size: 12px; color: #a9b6cc;">네트워크 › Arista CloudVision (CVP)</div>
+<div role="group" aria-label="변경 · 준수" style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0;">
+<span style="font-size: 12px; color: #a9b6cc; padding-right: 4px;">변경 · 준수</span>
+<button type="button" style="min-height: 34px; padding: 0 14px; border-radius: 8px; border: 1px solid transparent; background: transparent; color: #c9d5e6; font: inherit; font-weight: 600; cursor: pointer;">작업 전후 비교</button>
+<button type="button" aria-pressed="true" style="min-height: 34px; padding: 0 14px; border-radius: 8px; border: 1px solid #3b82f6; background: #2563eb; color: #ffffff; font: inherit; font-weight: 600; cursor: pointer;">설정 백업</button>
+<button type="button" style="min-height: 34px; padding: 0 14px; border-radius: 8px; border: 1px solid transparent; background: transparent; color: #c9d5e6; font: inherit; font-weight: 600; cursor: pointer;">버전 준수</button>
+<span style="font-size: 12px; color: #a9b6cc; overflow-wrap: anywhere;">— 새 탭 하나. 다른 묶음(현황 · 포트·링크 · 연결)은 지금과 같습니다</span>
+</div>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<div style="display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center;">
+<h1 style="margin: 0; font-size: 20px; font-weight: 700;">설정 백업</h1>
+<span style="display: inline-flex; align-items: center; min-height: 22px; padding: 0 9px; border-radius: 999px; font-size: 12px; font-weight: 600; background: #1a2236; border: 1px solid #64748b; color: #cbd5e1;">관리자 전용</span>
+<span style="display: inline-flex; align-items: center; min-height: 22px; padding: 0 9px; border-radius: 999px; font-size: 12px; font-weight: 600; background: #1a2236; border: 1px solid #64748b; color: #cbd5e1;">읽기 전용 — 장비 설정을 고치거나 되돌리지 않습니다</span>
+</div>
+<div style="font-size: 12.5px; color: #a9b6cc; overflow-wrap: anywhere;">스위치 실행 설정을 하루 한 번 받아 두고, 바뀌면 무엇이 바뀌었는지 줄 단위로 보여 줍니다. 비밀 줄은 법인 안에서 값을 지운 뒤에 올라옵니다.</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding-top: 4px;">
+<span style="font-size: 12px; color: #a9b6cc;">보기</span>
+<div style="display: inline-flex; flex-wrap: wrap; border: 1px solid #243049; border-radius: 8px; overflow: hidden;">
+<span aria-current="page" style="display: inline-flex; align-items: center; min-height: 34px; padding: 0 14px; background: #2563eb; color: #ffffff; font-weight: 600; font-size: 12.5px; border-right: 1px solid #243049;">장비별</span>
+<a href="Feed.dc.html" style="display: inline-flex; align-items: center; min-height: 34px; padding: 0 14px; color: #c9d5e6; font-size: 12.5px; text-decoration: none; border-right: 1px solid #243049;">변경 흐름</a>
+<a href="Search.dc.html" style="display: inline-flex; align-items: center; min-height: 34px; padding: 0 14px; color: #c9d5e6; font-size: 12.5px; text-decoration: none;">설정에서 찾기</a>
+</div>
+</div>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px;">
+<sc-for list="{{tiles}}" as="t" hint-placeholder-count="5">
+<div style="background: #141b2d; border: 1px solid #1f2a40; border-radius: 12px; padding: 12px 14px; min-width: 0; display: flex; flex-direction: column; gap: 2px;">
+<div style="font-size: 12px; color: #a9b6cc;">{{t.label}}</div>
+<div style="{{t.val}}">{{t.n}}</div>
+<div style="font-size: 12px; color: #a9b6cc; overflow-wrap: anywhere;">{{t.meta}}</div>
+</div>
+</sc-for>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start;">
+
+<div style="flex: 1 1 500px; min-width: 0; background: #141b2d; border: 1px solid #1f2a40; border-radius: 14px; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center;">
+<b style="font-size: 14px;">장비</b>
+<label style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #a9b6cc;">법인
+<select aria-label="법인" style="height: 34px; padding: 0 8px; border-radius: 8px; border: 1px solid #243049; background: #0b1120; color: #e6edf6; font: inherit;">
+<option>전 법인</option>
+<option>서울 1</option>
+<option>폴란드 1</option>
+<option>미국 동부 1</option>
+</select>
+</label>
+</div>
+<div role="group" aria-label="상태로 거르기" style="display: flex; flex-wrap: wrap; gap: 6px;">
+<sc-for list="{{chips}}" as="c" hint-placeholder-count="5"><button type="button" onClick="{{c.pick}}" aria-pressed="{{c.on}}" style="{{c.style}}">{{c.label}}</button></sc-for>
+</div>
+<div style="overflow-x: auto; border: 1px solid #1f2a40; border-radius: 10px;">
+<div role="table" aria-label="장비별 설정 백업 상태" style="min-width: 600px; font-size: 12.5px;">
+<div role="row" style="{{k.head}}">
+<div role="columnheader" style="{{k.th}}">장비</div>
+<div role="columnheader" style="{{k.th}}">법인</div>
+<div role="columnheader" style="{{k.th}}">마지막 백업</div>
+<div role="columnheader" style="{{k.th}}">마지막 변경</div>
+<div role="columnheader" style="{{k.th}}">기준 대비</div>
+</div>
+<sc-for list="{{devs}}" as="r" hint-placeholder-count="8">
+<div role="row" style="{{r.rowStyle}}">
+<div role="cell" style="padding: 3px 4px; min-width: 0;"><button type="button" onClick="{{r.pick}}" style="min-height: 34px; padding: 2px 6px; border: 0; border-radius: 6px; background: transparent; color: #7dd3fc; font: 600 12.5px 'JetBrains Mono', ui-monospace, monospace; cursor: pointer; text-align: left;">{{r.name}}</button></div>
+<div role="cell" style="{{k.td}}">{{r.corp}}</div>
+<div role="cell" style="{{k.tdm}}">{{r.backup}}</div>
+<div role="cell" style="{{k.tdm}}">{{r.changed}}</div>
+<div role="cell" style="{{k.td}}"><span style="{{r.pill}}">{{r.diff}}</span></div>
+</div>
+</sc-for>
+</div>
+</div>
+<div style="font-size: 12px; color: #a9b6cc; overflow-wrap: anywhere;">표 제목을 누르면 정렬됩니다(포탈 공용 표). 받지 못한 장비는 ‘같음’ 으로 쓰지 않고 마지막으로 받은 시각을 보입니다. 시안에는 173대 중 8대만 그렸습니다.</div>
+</div>
+
+<div style="flex: 999 1 620px; min-width: 0; background: #141b2d; border: 1px solid #1f2a40; border-radius: 14px; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center;">
+<b style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 15px;">{{d.name}}</b>
+<span style="font-size: 12px; color: #a9b6cc;">{{d.model}}</span>
+<div style="display: inline-flex; flex-wrap: wrap; border: 1px solid #243049; border-radius: 8px; overflow: hidden;">
+<sc-for list="{{bases}}" as="m" hint-placeholder-count="2"><button type="button" onClick="{{m.pick}}" aria-pressed="{{m.on}}" style="{{m.style}}">{{m.label}}</button></sc-for>
+</div>
+</div>
+<div style="font-size: 12px; color: #a9b6cc; overflow-wrap: anywhere; font-family: 'JetBrains Mono', ui-monospace, monospace;">{{d.pair}}</div>
+<div style="border: 1px solid #1f2a40; border-radius: 10px; background: #0b1120; overflow-x: auto;">
+<div style="min-width: 520px; padding: 8px 0; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; line-height: 1.7;">
+<sc-for list="{{d.lines}}" as="l" hint-placeholder-count="14">
+<div style="{{l.style}}"><span style="display: inline-block; width: 22px; color: #a9b6cc;">{{l.sign}}</span>{{l.text}}</div>
+</sc-for>
+</div>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: #a9b6cc;">
+<span style="overflow-wrap: anywhere; color: #c9d5e6;">{{d.note}}</span>
+<span>+ 더해진 줄</span><span>− 빠진 줄</span><span>~ 비밀 줄(값 없이 ‘바뀜’ 만)</span>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px;">
+<button type="button" style="min-height: 34px; padding: 0 14px; border-radius: 8px; border: 1px solid #243049; background: #141b2d; color: #e6edf6; font: inherit; cursor: pointer;">지금 받기</button>
+<button type="button" style="min-height: 34px; padding: 0 14px; border-radius: 8px; border: 1px solid #243049; background: #141b2d; color: #e6edf6; font: inherit; cursor: pointer;">지금 판을 기준으로 삼기</button>
+<button type="button" style="min-height: 34px; padding: 0 14px; border-radius: 8px; border: 1px solid #243049; background: #141b2d; color: #e6edf6; font: inherit; cursor: pointer;">판 전체 보기</button>
+<button type="button" style="min-height: 34px; padding: 0 14px; border-radius: 8px; border: 1px solid #243049; background: #141b2d; color: #e6edf6; font: inherit; cursor: pointer;">가린 판 내려받기</button>
+</div>
+<div style="display: flex; flex-direction: column;">
+<div style="display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; padding-bottom: 6px;">
+<b style="font-size: 13px;">변경 이력</b>
+<span style="font-size: 12px; color: #a9b6cc; overflow-wrap: anywhere;">{{d.histMeta}}</span>
+</div>
+<sc-for list="{{d.hist}}" as="h" hint-placeholder-count="4">
+<div style="display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; padding: 7px 0; border-top: 1px solid #1f2a40; font-size: 12.5px;">
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; color: #a9b6cc;">{{h.at}}</span>
+<span style="{{h.tag}}">{{h.delta}}</span>
+<span style="color: #c9d5e6; overflow-wrap: anywhere; flex: 1 1 240px; min-width: 0;">{{h.text}}</span>
+</div>
+</sc-for>
+</div>
+</div>
+
+</div>
+
+<div style="background: #141b2d; border: 1px solid #1f2a40; border-radius: 14px; padding: 16px 18px; min-width: 0; display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; color: #c9d5e6;">
+<b style="font-size: 13px; color: #e6edf6;">이 화면이 하는 일과 하지 않는 일</b>
+<div style="overflow-wrap: anywhere;">· 비밀번호 해시 · SNMP 커뮤니티 · 키가 든 줄은 법인 엣지에서 값을 지우고 보냅니다. 중앙에는 가린 판과, 값이 바뀌었는지만 아는 지문이 있습니다.</div>
+<div style="overflow-wrap: anywhere;">· 그래서 이 백업으로 장비를 통째로 복구할 수는 없습니다. 복구용 원본은 CVP 가 가진 것을 씁니다 — 이 화면의 목적은 ‘무엇이 바뀌었나’ 입니다.</div>
+<div style="overflow-wrap: anywhere;">· 기준 판을 바꾸는 것과 내려받기는 감사 기록에 남깁니다. ‘누가 바꿨나’ 는 CVP 감사 기록을 읽을 수 있을 때만 붙이고, 못 읽으면 비워 둡니다.</div>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1340}}'>
+class Component extends DCLogic {
+renderVals() {
+const st = this.state || {};
+const base = st.base || 'base';
+const filt = st.filt || 'all';
+const MONO = "font-family: 'JetBrains Mono', ui-monospace, monospace;";
+const COLS = 'display: grid; grid-template-columns: minmax(130px, 1.2fr) 92px 112px 112px 132px; align-items: center;';
+const k = {
+head: COLS + ' background: #0f1626; color: #a9b6cc;',
+th: 'padding: 8px 10px; font-weight: 600; white-space: nowrap;',
+td: 'padding: 6px 10px; min-width: 0; overflow-wrap: anywhere; color: #c9d5e6;',
+tdm: 'padding: 6px 10px; min-width: 0; overflow-wrap: anywhere; color: #c9d5e6; font-size: 12px; ' + MONO
+};
+const pill = 'display: inline-flex; align-items: center; min-height: 22px; padding: 0 9px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; ';
+const P = {
+diff: pill + 'background: #4a3208; border: 1px solid #f59e0b; color: #fff3d6;',
+same: pill + 'background: #16432a; border: 1px solid #22c55e; color: #eafff1;',
+fail: pill + 'background: #5a1616; border: 1px solid #f87171; color: #ffe9e9;',
+nobase: pill + 'background: #1a2236; border: 1px solid #64748b; color: #cbd5e1;'
+};
+const D = [
+['kr1-leaf-b01', '서울 1', '11-26 02:10', '11-26 02:10', 'diff', '+4 −2 · 비밀 1', true, '7050X3 · EOS 4.30.5M'],
+['kr1-leaf-b02', '서울 1', '11-26 02:10', '11-26 02:10', 'diff', '+1 −1', true, '7050X3 · EOS 4.30.5M'],
+['pl1-leaf-03', '폴란드 1', '11-26 02:40', '11-26 02:40', 'diff', '+2 −0', true, '7280R3 · EOS 4.29.7M'],
+['kr1-leaf-a03', '서울 1', '11-26 02:11', '10-08 02:05', 'same', '같음', false, '7050X3 · EOS 4.30.5M'],
+['kr1-bleaf-01', '서울 1', '11-26 02:11', '09-30 02:04', 'same', '같음', false, '7280R3 · EOS 4.30.5M'],
+['us2-leaf-11', '미국 동부 1', '11-26 03:05', '08-14 02:31', 'same', '같음', false, '7050X3 · EOS 4.28.9M'],
+['kr1-spine-01', '서울 1', '11-26 02:12', '11-24 02:09', 'nobase', '기준 없음', false, '7500R3 · EOS 4.30.5M'],
+['kr1-spine-02', '서울 1', '11-23 02:12 (3일 전)', '—', 'fail', '받지 못함', false, '7500R3 · EOS 4.30.5M']
+];
+const match = (r) => filt === 'all' || (filt === 'recent' ? r[6] : r[4] === filt);
+const shown = D.filter(match);
+const selName = (shown.find((r) => r[0] === st.sel) || shown[0] || D[0])[0];
+const devs = shown.map((r) => ({ name: r[0], corp: r[1], backup: r[2], changed: r[3], diff: r[5], pill: P[r[4]], pick: () => this.setState({ sel: r[0] }), rowStyle: COLS + ' border-top: 1px solid #1f2a40; min-height: 40px;' + (r[0] === selName ? ' background: #1a2a4a;' : '') }));
+const chipStyle = (on) => 'min-height: 34px; padding: 0 12px; border-radius: 999px; font: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap; ' + (on ? 'border: 1px solid #3b82f6; background: #172f5c; color: #e6f0ff; font-weight: 600;' : 'border: 1px solid #243049; background: transparent; color: #c9d5e6;');
+const chips = [['all', '전체 173'], ['diff', '기준과 다름 9'], ['recent', '24시간 안에 바뀜 4'], ['fail', '받지 못함 2'], ['nobase', '기준 없음 12']].map((c) => ({ label: c[1], on: filt === c[0], style: chipStyle(filt === c[0]), pick: () => this.setState({ filt: c[0] }) }));
+const ln = (sign, text) => ({ sign: sign, text: text, style: 'padding: 0 14px; white-space: pre; ' + (sign === '+' ? 'background: #12331f; color: #bbf7d0;' : sign === '−' ? 'background: #3f1717; color: #fecaca;' : sign === '@' ? 'color: #93c5fd; background: #101a30;' : sign === '~' ? 'background: #2a1d4a; color: #e9d5ff;' : 'color: #c9d5e6;') });
+const MTU = [ln('@', 'interface Ethernet49/1'), ln(' ', '   description kr1-spine-01 Et3/17'), ln('−', '   mtu 9214'), ln('+', '   mtu 1500'), ln(' ', '   no switchport'), ln(' ', '!')];
+const L1 = [
+ln('@', 'interface Ethernet40'), ln('−', '   shutdown'), ln('+', '   description esx-kr1-24 vmnic0'), ln('+', '   switchport trunk allowed vlan 120,210'), ln('+', '   switchport mode trunk'), ln(' ', '!')
+].concat(MTU, [ln('@', 'username admin'), ln('~', '   secret sha512 (가림) — 값이 바뀜'), ln(' ', '!')]);
+const NTP = [ln('@', 'ntp'), ln(' ', 'ntp local-interface Management1'), ln('+', 'ntp server 10.9.0.5 prefer'), ln('+', 'ntp server 10.9.0.6'), ln(' ', '!')];
+const SNMP = [ln('@', 'snmp-server'), ln('~', 'snmp-server community (가림) ro — 값이 바뀜'), ln(' ', 'snmp-server host 10.9.0.20 version 2c (가림)'), ln(' ', '!')];
+const msg = (t) => [ln(' ', t)];
+const row = D.find((r) => r[0] === selName) || D[0];
+const kind = row[4];
+let lines; let note;
+if (kind === 'same') { lines = msg(base === 'base' ? '(기준과 같습니다 — 차이 0줄)' : '(직전 판과 같습니다 — 차이 0줄)'); note = '차이 없음'; }
+else if (kind === 'fail') { lines = msg('(설정을 받지 못했습니다 — CVP 응답 시간 초과, 3번 이어서. 마지막으로 받은 11-23 02:12 판은 ‘판 전체 보기’ 로 볼 수 있습니다)'); note = '받지 못함 — 같음 · 다름 어디에도 세지 않습니다'; }
+else if (kind === 'nobase' && base === 'base') { lines = msg('(기준으로 삼은 판이 없습니다 — ‘지금 판을 기준으로 삼기’ 를 누르면 다음부터 기준과 비교합니다)'); note = '기준 없음'; }
+else if (kind === 'nobase') { lines = SNMP; note = '비밀 줄 1개 — 값 없이 ‘바뀜’ 만 표시'; }
+else if (selName === 'kr1-leaf-b01' && base === 'base') { lines = L1; note = '+4 −2 줄 · 바뀐 곳 3군데 · 비밀 줄 1개'; }
+else if (selName === 'pl1-leaf-03') { lines = NTP; note = '+2 −0 줄 · 바뀐 곳 1군데 · 같은 변경이 폴란드 1 법인 12대에 있습니다'; }
+else { lines = MTU; note = '+1 −1 줄 · 바뀐 곳 1군데'; }
+const cur = row[2].split(' (')[0];
+const pairs = { base: '기준 11-01 02:07 판(월간 점검)  ↔  지금 ' + cur + ' 판', prev: '직전에 바뀐 판  ↔  지금 ' + cur + ' 판' };
+const tag = (tone) => MONO + ' font-size: 12px; padding: 1px 8px; border-radius: 6px; white-space: nowrap; ' + (tone === 'base' ? 'background: #172f5c; color: #e6f0ff;' : tone === 'sec' ? 'background: #2a1d4a; color: #e9d5ff;' : 'background: #1a2236; color: #e6edf6;');
+const H = {
+'kr1-leaf-b01': [['11-26 02:10', '+1 −1', 'n', 'interface — Ethernet49/1 MTU 9214 → 1500'], ['11-12 02:08', '+3 −1', 'n', 'interface — Ethernet40 켬 · 트렁크 설정'], ['11-05 02:09', '비밀 1', 'sec', '관리 — username admin 의 비밀 값이 바뀜(값은 저장하지 않음)'], ['11-01 02:07', '기준', 'base', '기준으로 삼음 — 관리자 kim · 메모 ‘월간 점검’']],
+'pl1-leaf-03': [['11-26 02:40', '+2 −0', 'n', '관리 — ntp server 2줄 더함'], ['09-02 02:36', '기준', 'base', '기준으로 삼음 — 관리자 kim']],
+'kr1-spine-01': [['11-24 02:09', '비밀 1', 'sec', '관리 — snmp-server community 값이 바뀜'], ['10-30 02:10', '첫 판', 'n', '첫 판 — 비교할 직전 판 없음']]
+};
+const hist = (H[selName] || [['' + row[3], kind === 'fail' ? '—' : '+1 −1', 'n', kind === 'fail' ? '이 장비는 11-23 뒤로 받지 못했습니다' : 'interface — Ethernet49/1 MTU 9214 → 1500'], ['11-01 02:07', '기준', 'base', '기준으로 삼음 — 관리자 kim · 메모 ‘월간 점검’']]).map((h) => ({ at: h[0], delta: h[1], tag: tag(h[2]), text: h[3] }));
+const d = { name: selName, model: row[7], pair: pairs[base], lines: lines, note: note, hist: hist, histMeta: '바뀐 판만 저장합니다 · 이 장비 28판 · 가장 오래된 판 2026-02-11' };
+const segBtn = (on) => 'min-height: 34px; padding: 0 12px; border: 0; border-right: 1px solid #243049; font: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap; ' + (on ? 'background: #2563eb; color: #ffffff; font-weight: 600;' : 'background: transparent; color: #c9d5e6;');
+const bases = [['base', '기준 대비'], ['prev', '직전 대비']].map((m) => ({ label: m[1], on: base === m[0], style: segBtn(base === m[0]), pick: () => this.setState({ base: m[0] }) }));
+const big = (c) => MONO + ' font-size: 24px; font-weight: 600; color: ' + c + ';';
+const tiles = [
+{ label: '백업한 장비', n: '171 / 173', meta: '오늘 새벽 판 · 전 법인', val: big('#e6edf6') },
+{ label: '기준과 다른 장비', n: '9', meta: '기준 판을 정한 161대 중', val: big('#fbbf24') },
+{ label: '24시간 안에 바뀐 장비', n: '4', meta: '직전 판과 다름', val: big('#93c5fd') },
+{ label: '받지 못함', n: '2', meta: '같음으로 세지 않음', val: big('#fca5a5') },
+{ label: '기준 없음', n: '12', meta: '기준 판을 아직 정하지 않음', val: big('#cbd5e1') }
+];
+return { k: k, devs: devs, d: d, bases: bases, tiles: tiles, chips: chips };
+}
+}
+</script>
+</body>
+</html>

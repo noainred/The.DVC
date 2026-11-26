@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>CVP 설정 백업 — 설정에서 찾기</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="box-sizing: border-box; padding: clamp(12px, 2vw, 28px); background: #0a0e17; color: #e6edf6; font-family: 'Inter', 'Noto Sans KR', 'Apple SD Gothic Neo', sans-serif; font-size: 13px; line-height: 1.5; display: flex; flex-direction: column; gap: 14px;">
+
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<div style="font-size: 12px; color: #a9b6cc;">네트워크 › Arista CloudVision (CVP) › 변경 · 준수 › 설정 백업</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center;">
+<h1 style="margin: 0; font-size: 20px; font-weight: 700;">설정에서 찾기</h1>
+<span style="font-size: 12.5px; color: #a9b6cc; overflow-wrap: anywhere;">어떤 설정 줄이 어느 장비에 있는지, 어느 장비에 빠져 있는지 한 번에 봅니다(가장 최근 판 기준).</span>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding-top: 4px;">
+<span style="font-size: 12px; color: #a9b6cc;">보기</span>
+<div style="display: inline-flex; flex-wrap: wrap; border: 1px solid #243049; border-radius: 8px; overflow: hidden;">
+<a href="Main.dc.html" style="display: inline-flex; align-items: center; min-height: 34px; padding: 0 14px; color: #c9d5e6; font-size: 12.5px; text-decoration: none; border-right: 1px solid #243049;">장비별</a>
+<a href="Feed.dc.html" style="display: inline-flex; align-items: center; min-height: 34px; padding: 0 14px; color: #c9d5e6; font-size: 12.5px; text-decoration: none; border-right: 1px solid #243049;">변경 흐름</a>
+<span aria-current="page" style="display: inline-flex; align-items: center; min-height: 34px; padding: 0 14px; background: #2563eb; color: #ffffff; font-weight: 600; font-size: 12.5px;">설정에서 찾기</span>
+</div>
+</div>
+</div>
+
+<div style="background: #141b2d; border: 1px solid #1f2a40; border-radius: 14px; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; min-width: 0;">
+<div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
+<label for="cfgq" style="font-size: 12px; color: #a9b6cc;">찾을 글자</label>
+<input id="cfgq" type="text" value="{{q}}" readonly style="flex: 1 1 260px; min-width: 0; height: 36px; padding: 0 12px; border-radius: 8px; border: 1px solid #243049; background: #0b1120; color: #e6edf6; font: 500 13px 'JetBrains Mono', ui-monospace, monospace;">
+<button type="button" style="min-height: 36px; padding: 0 16px; border-radius: 8px; border: 1px solid #3b82f6; background: #2563eb; color: #ffffff; font: inherit; font-weight: 600; cursor: pointer;">찾기</button>
+</div>
+<div role="group" aria-label="예시" style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center;">
+<span style="font-size: 12px; color: #a9b6cc;">예</span>
+<sc-for list="{{examples}}" as="x" hint-placeholder-count="4"><button type="button" onClick="{{x.pick}}" aria-pressed="{{x.on}}" style="{{x.style}}">{{x.label}}</button></sc-for>
+</div>
+<div style="font-size: 12px; color: #a9b6cc; overflow-wrap: anywhere;">글자 그대로 찾습니다(정규식 아님 · 대소문자 구분 없음 · 3글자 이상). 비밀 값은 저장하지 않아 값으로는 찾을 수 없고, 그 줄이 있는지만 봅니다.</div>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px;">
+<sc-for list="{{tiles}}" as="t" hint-placeholder-count="4">
+<div style="background: #141b2d; border: 1px solid #1f2a40; border-radius: 12px; padding: 12px 14px; min-width: 0; display: flex; flex-direction: column; gap: 2px;">
+<div style="font-size: 12px; color: #a9b6cc;">{{t.label}}</div>
+<div style="{{t.val}}">{{t.n}}</div>
+<div style="font-size: 12px; color: #a9b6cc; overflow-wrap: anywhere;">{{t.meta}}</div>
+</div>
+</sc-for>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start;">
+
+<div style="flex: 1 1 420px; min-width: 0; background: #141b2d; border: 1px solid #1f2a40; border-radius: 14px; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline;">
+<b style="font-size: 14px;">줄 모양별</b>
+<span style="font-size: 12px; color: #a9b6cc;">같은 줄을 가진 장비끼리 묶음 · 누르면 오른쪽 표가 그 줄로 좁혀집니다</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<sc-for list="{{groups}}" as="g" hint-placeholder-count="4">
+<button type="button" onClick="{{g.pick}}" aria-pressed="{{g.on}}" style="{{g.style}}">
+<span style="flex: 1 1 200px; min-width: 0; overflow-wrap: anywhere; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; text-align: left;">{{g.line}}</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; font-weight: 600; white-space: nowrap;">{{g.count}}</span>
+</button>
+</sc-for>
+</div>
+<div style="font-size: 12px; color: #a9b6cc; overflow-wrap: anywhere;">{{groupNote}}</div>
+</div>
+
+<div style="flex: 999 1 600px; min-width: 0; background: #141b2d; border: 1px solid #1f2a40; border-radius: 14px; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center;">
+<b style="font-size: 14px;">장비</b>
+<div style="display: inline-flex; flex-wrap: wrap; border: 1px solid #243049; border-radius: 8px; overflow: hidden;">
+<sc-for list="{{modes}}" as="m" hint-placeholder-count="3"><button type="button" onClick="{{m.pick}}" aria-pressed="{{m.on}}" style="{{m.style}}">{{m.label}}</button></sc-for>
+</div>
+<button type="button" style="min-height: 34px; padding: 0 14px; border-radius: 8px; border: 1px solid #243049; background: #141b2d; color: #e6edf6; font: inherit; cursor: pointer;">표 내려받기(CSV)</button>
+</div>
+<div style="overflow-x: auto; border: 1px solid #1f2a40; border-radius: 10px;">
+<div role="table" aria-label="찾은 결과" style="min-width: 560px; font-size: 12.5px;">
+<div role="row" style="{{k.head}}">
+<div role="columnheader" style="{{k.th}}">장비</div>
+<div role="columnheader" style="{{k.th}}">법인</div>
+<div role="columnheader" style="{{k.th}}">{{col3}}</div>
+<div role="columnheader" style="{{k.th}}">판</div>
+</div>
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="7">
+<div role="row" style="{{k.row}}">
+<div role="cell" style="{{k.name}}">{{r.name}}</div>
+<div role="cell" style="{{k.td}}">{{r.corp}}</div>
+<div role="cell" style="{{k.tdm}}">{{r.line}}</div>
+<div role="cell" style="{{k.tdm}}">{{r.ver}}</div>
+</div>
+</sc-for>
+</div>
+</div>
+<div style="font-size: 12px; color: #a9b6cc; overflow-wrap: anywhere;">{{rowNote}}</div>
+</div>
+
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1020}}'>
+class Component extends DCLogic {
+renderVals() {
+const st = this.state || {};
+const q = st.q || 'ntp server';
+const mode = st.mode || 'has';
+const MONO = "font-family: 'JetBrains Mono', ui-monospace, monospace;";
+const COLS = 'display: grid; grid-template-columns: minmax(120px, 1fr) 92px minmax(200px, 2.2fr) 104px; align-items: center;';
+const k = {
+head: COLS + ' background: #0f1626; color: #a9b6cc;',
+row: COLS + ' border-top: 1px solid #1f2a40; min-height: 38px;',
+th: 'padding: 8px 10px; font-weight: 600; white-space: nowrap;',
+td: 'padding: 6px 10px; min-width: 0; overflow-wrap: anywhere; color: #c9d5e6;',
+tdm: 'padding: 6px 10px; min-width: 0; overflow-wrap: anywhere; color: #c9d5e6; font-size: 12px; ' + MONO,
+name: 'padding: 6px 10px; min-width: 0; overflow-wrap: anywhere; color: #7dd3fc; font-weight: 600; ' + MONO
+};
+const Q = {
+'ntp server': {
+t: ['168', '3', '2'],
+groups: [['ntp server 10.9.0.5 prefer', '165대'], ['ntp server 10.9.0.6', '165대'], ['ntp server 10.1.1.9', '3대'], ['ntp server 10.1.1.10', '3대']],
+gNote: '10.1.1.9 · 10.1.1.10 은 3대에만 남아 있습니다 — 다른 165대와 줄이 다릅니다.',
+has: [['kr1-leaf-b01', '서울 1', 'ntp server 10.9.0.5 prefer', '11-26 02:10'], ['kr1-leaf-b02', '서울 1', 'ntp server 10.9.0.5 prefer', '11-26 02:10'], ['pl1-leaf-03', '폴란드 1', 'ntp server 10.9.0.5 prefer', '11-26 02:40'], ['us2-leaf-11', '미국 동부 1', 'ntp server 10.1.1.9', '11-26 03:05'], ['us2-leaf-12', '미국 동부 1', 'ntp server 10.1.1.9', '11-26 03:05'], ['us2-bleaf-02', '미국 동부 1', 'ntp server 10.1.1.9', '11-26 03:06']],
+no: [['kr1-oob-01', '서울 1', '줄 없음 — ntp 구획 자체가 없음', '11-26 02:13'], ['kr1-oob-02', '서울 1', '줄 없음 — ntp 구획 자체가 없음', '11-26 02:13'], ['pl1-oob-01', '폴란드 1', '줄 없음 — ntp 구획 자체가 없음', '11-26 02:41']]
+},
+'logging host': {
+t: ['171', '0', '2'],
+groups: [['logging host 10.9.0.20', '171대']],
+gNote: '받은 171대가 모두 같은 줄을 가지고 있습니다.',
+has: [['kr1-leaf-b01', '서울 1', 'logging host 10.9.0.20', '11-26 02:10'], ['kr1-spine-01', '서울 1', 'logging host 10.9.0.20', '11-26 02:12'], ['pl1-leaf-03', '폴란드 1', 'logging host 10.9.0.20', '11-26 02:40'], ['us2-leaf-11', '미국 동부 1', 'logging host 10.9.0.20', '11-26 03:05']],
+no: []
+},
+'ip helper-address': {
+t: ['24', '147', '2'],
+groups: [['ip helper-address 10.9.1.10', '24대'], ['ip helper-address 10.9.1.11', '22대']],
+gNote: '보조 서버(10.9.1.11) 줄이 없는 장비가 2대 있습니다.',
+has: [['kr1-bleaf-01', '서울 1', 'ip helper-address 10.9.1.10', '11-26 02:11'], ['kr1-bleaf-02', '서울 1', 'ip helper-address 10.9.1.10', '11-26 02:11'], ['us2-bleaf-02', '미국 동부 1', 'ip helper-address 10.9.1.10', '11-26 03:06']],
+no: [['kr1-leaf-b01', '서울 1', '줄 없음', '11-26 02:10'], ['kr1-leaf-b02', '서울 1', '줄 없음', '11-26 02:10'], ['kr1-spine-01', '서울 1', '줄 없음', '11-26 02:12']]
+},
+'snmp-server community': {
+t: ['171', '0', '2'],
+groups: [['snmp-server community (가림) ro', '171대'], ['snmp-server community (가림) rw', '2대']],
+gNote: '쓰기(rw) 커뮤니티 줄이 2대에 있습니다. 값은 가려져 있어 같은 값인지는 알 수 없습니다.',
+has: [['kr1-leaf-b01', '서울 1', 'snmp-server community (가림) ro', '11-26 02:10'], ['kr1-spine-01', '서울 1', 'snmp-server community (가림) ro', '11-26 02:12'], ['us2-leaf-11', '미국 동부 1', 'snmp-server community (가림) rw', '11-26 03:05'], ['us2-leaf-12', '미국 동부 1', 'snmp-server community (가림) rw', '11-26 03:05']],
+no: []
+}
+};
+const cur = Q[q];
+const gsel = st.g && st.gq === q ? st.g : '';
+const FAIL = [['kr1-spine-02', '서울 1', '알 수 없음 — 11-23 뒤로 받지 못함', '11-23 02:12'], ['us2-leaf-07', '미국 동부 1', '알 수 없음 — 한 번도 받지 못함', '—']];
+let rows = mode === 'has' ? cur.has : mode === 'no' ? cur.no : FAIL;
+if (mode === 'has' && gsel) rows = rows.filter((r) => r[2] === gsel);
+const empty = rows.length === 0;
+if (empty) rows = [['—', '—', mode === 'no' ? '이 줄이 없는 장비가 없습니다(받은 171대 기준)' : '이 줄 모양을 가진 장비를 시안 표에는 그리지 않았습니다', '—']];
+const chipStyle = (on) => 'min-height: 34px; padding: 0 12px; border-radius: 999px; font: 500 12.5px ' + "'JetBrains Mono', ui-monospace, monospace" + '; cursor: pointer; white-space: nowrap; ' + (on ? 'border: 1px solid #3b82f6; background: #172f5c; color: #e6f0ff;' : 'border: 1px solid #243049; background: transparent; color: #c9d5e6;');
+const examples = Object.keys(Q).map((x) => ({ label: x, on: q === x, style: chipStyle(q === x), pick: () => this.setState({ q: x, mode: 'has', g: '', gq: x }) }));
+const gStyle = (on) => 'display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; width: 100%; min-height: 40px; padding: 6px 12px; border-radius: 8px; cursor: pointer; font: inherit; ' + (on ? 'border: 1px solid #3b82f6; background: #172f5c; color: #e6f0ff;' : 'border: 1px solid #243049; background: #0b1120; color: #e6edf6;');
+const groups = cur.groups.map((g) => ({ line: g[0], count: g[1], on: gsel === g[0], style: gStyle(gsel === g[0]), pick: () => this.setState({ g: gsel === g[0] ? '' : g[0], gq: q, mode: 'has' }) }));
+const segBtn = (on) => 'min-height: 34px; padding: 0 12px; border: 0; border-right: 1px solid #243049; font: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap; ' + (on ? 'background: #2563eb; color: #ffffff; font-weight: 600;' : 'background: transparent; color: #c9d5e6;');
+const modes = [['has', '있는 장비 ' + cur.t[0]], ['no', '없는 장비 ' + cur.t[1]], ['unk', '알 수 없음 ' + cur.t[2]]].map((m) => ({ label: m[1], on: mode === m[0], style: segBtn(mode === m[0]), pick: () => this.setState({ mode: m[0] }) }));
+const big = (c) => MONO + ' font-size: 24px; font-weight: 600; color: ' + c + ';';
+const tiles = [
+{ label: '찾은 대상', n: '171 / 173', meta: '가장 최근 판을 받은 장비', val: big('#e6edf6') },
+{ label: '이 줄이 있는 장비', n: cur.t[0], meta: '줄 모양 ' + cur.groups.length + '가지', val: big('#86efac') },
+{ label: '이 줄이 없는 장비', n: cur.t[1], meta: '받은 판에 줄이 없음', val: big('#fbbf24') },
+{ label: '알 수 없음', n: cur.t[2], meta: '받지 못해 ‘없음’ 으로 세지 않음', val: big('#fca5a5') }
+];
+const rowNote = mode === 'unk' ? '설정을 받지 못한 장비입니다. 줄이 있다고도 없다고도 말하지 않습니다.' : (gsel ? '줄 모양 하나로 좁힌 상태입니다 — 같은 줄을 다시 누르면 풀립니다. ' : '') + '시안에는 일부 행만 그렸습니다. 장비 이름을 누르면 장비별 비교로 갑니다.';
+return { q: q, k: k, examples: examples, groups: groups, groupNote: cur.gNote, modes: modes, rows: rows.map((r) => ({ name: r[0], corp: r[1], line: r[2], ver: r[3] })), tiles: tiles, col3: mode === 'has' ? '찾은 줄' : '상태', rowNote: rowNote };
+}
+}
+</script>
+</body>
+</html>
