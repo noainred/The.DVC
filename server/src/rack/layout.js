@@ -35,7 +35,8 @@ export const LIMITS = Object.freeze({
 
 // 1회차 점검 S3: C0 만 지우면 양방향(U+202A~202E · 2066~2069) · 폭 없는(U+200B~200F · 2060~2064 · FEFF) · C1(U+0080~009F) 문자가 이름에 남아
 //   눈으로 같은 이름이 둘 생기고(중복 검사 통과) 이력 · 감사 화면의 글자 순서가 뒤집힌다 — 다른 입력 정리(bmusage/annotations.js 등)와 같은 문자 집합.
-const CTRL = new RegExp('[\\u0000-\\u001f\\u007f-\\u009f\\u200b-\\u200f\\u202a-\\u202e\\u2060-\\u2069\\ufeff]', 'g');
+//   2회차: 보이지 않는 채움 문자(소프트 하이픈 U+00AD · 아랍 문자 표식 U+061C · 한글 채움 U+115F/1160/3164/FFA0 · 몽골 모음 분리 U+180E · 줄/문단 분리 U+2028/2029)도.
+const CTRL = new RegExp('[\\u0000-\\u001f\\u007f-\\u009f\\u00ad\\u061c\\u115f\\u1160\\u180e\\u200b-\\u200f\\u2028-\\u202e\\u2060-\\u2069\\u3164\\ufeff\\uffa0]', 'g');
 /** 한 줄 문자열 정리 — 제어 · 양방향 · 폭 없는 문자 제거 · 앞뒤 공백 · 길이 상한. 문자열이 아니면 ''(숫자는 문자열로). */
 export function cleanText(v, max) {
   const s = typeof v === 'string' ? v : (typeof v === 'number' && Number.isFinite(v) ? String(v) : '');

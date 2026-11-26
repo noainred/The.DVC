@@ -144,7 +144,9 @@ export function matchUnplaced(u, q) {
 export function defaultLabelOf(u) {
   const name = String(u?.name || '').trim();
   if (!name) return '';
-  if (/^\[?[0-9a-f:.]+\]?(:\d+)?$/i.test(name) && /[.:]/.test(name) && /\d/.test(name)) return '';   // IPv4 · IPv6 리터럴(포트 포함)
+  // IPv4 리터럴(포트 포함) 또는 IPv6 리터럴(콜론 2개 이상 · 대괄호 · 포트 포함)만 — 16진 글자와 점으로 된 호스트 이름('ad01.dc1')은 이름이다(1회차 반증 C-4).
+  if (/^\d{1,3}(\.\d{1,3}){3}(:\d{1,5})?$/.test(name)) return '';
+  if (name.length <= 64 && /^\[?[0-9a-f:.]+\]?(:\d{1,5})?$/i.test(name) && name.split(':').length > 2) return '';
   if (u?.serviceTag && name.toLowerCase() === String(u.serviceTag).trim().toLowerCase()) return '';
   return name;
 }

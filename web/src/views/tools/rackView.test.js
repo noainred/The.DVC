@@ -104,6 +104,9 @@ describe('rackView — 화면 계산', () => {
     expect(V.defaultLabelOf({ name: 'face', serviceTag: 'X' })).toBe('face');       // 16진 글자뿐이어도 . : 가 없으면 이름
     expect(V.defaultLabelOf({ name: 'idrac-ABC1234', serviceTag: 'ABC1234' })).toBe('idrac-ABC1234');   // 태그가 든 이름은 서버가 가림 판본에서 걷어 낸다
     expect(V.defaultLabelOf({ name: 'r1.dc' })).toBe('r1.dc');
+    for (const n of ['ad01.dc1', 'db1.c2', 'fab1.dc', 'cafe.01', 'db1.ac', 'a1.b2']) expect(V.defaultLabelOf({ name: n })).toBe(n);   // 16진 글자 + 점뿐인 호스트 이름은 이름
+    expect(V.defaultLabelOf({ name: '::1' })).toBe('');
+    expect(V.defaultLabelOf({ name: '1.2.3' })).toBe('1.2.3');
     expect(V.defaultLabelOf(null)).toBe('');
   });
 

@@ -385,7 +385,7 @@ function VersionsModal({ corpId, corpName, onClose, onRestored }) {
     </ul>
   );
   return (
-    <Modal title={`판 기록 — ${corpName}`} onClose={onClose} width={980}>
+    <Modal title={`판 기록 — ${corpName}`} onClose={() => { if (!busy) onClose(); }} width={980}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>
           변경이 저장될 때마다 이 법인의 랙 실장도 전체(데이터센터 · 전산실 · 랙 · 장비 배치)를 한 판으로 남깁니다. 법인마다 {list?.keep != null ? `최근 ${list.keep}개만` : '정해진 개수의 최근 판만'} 남고 더 오래된 판은 지워집니다.
@@ -396,7 +396,7 @@ function VersionsModal({ corpId, corpName, onClose, onRestored }) {
             <ul style={{ listStyle: 'none', margin: 0, padding: 0, flex: '1 1 300px', minWidth: 0, maxHeight: 460, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}>
               {versions.map((v, i) => (
                 <li key={v.id}>
-                  <button type="button" onClick={() => setSelVid(v.id)} aria-pressed={v.id === selVid}
+                  <button type="button" onClick={() => setSelVid(v.id)} aria-pressed={v.id === selVid} autoFocus={i === 0}
                     style={{ width: '100%', textAlign: 'left', padding: '8px 12px', border: 0, borderBottom: '1px solid var(--border-soft)', cursor: 'pointer', background: v.id === selVid ? 'rgba(59,130,246,.16)' : 'transparent', color: 'var(--text)', display: 'flex', flexDirection: 'column', gap: 2, minHeight: 44 }}>
                     <span style={{ display: 'flex', gap: 8, flexWrap: 'wrap', fontSize: 11, color: 'var(--text-dim)' }}>
                       <span style={mono}>#{v.id}</span><span style={mono}>{new Date(v.ts).toLocaleString()}</span>
@@ -527,7 +527,6 @@ export default function RackTool() {
   useEffect(() => { if (tree && !rooms.some((r) => r.id === roomId)) setRoomId(rooms[0]?.id || ''); }, [tree, rooms, roomId]);
   // 전산실을 바꾸면 고른 장비 · 미리 보기 · 앞 전산실의 알림 줄을 지운다(다른 전산실 작업 결과가 남아 보이지 않게).
   useEffect(() => { setSelId(''); setPreview(null); setNote(null); loadRoom(roomId); }, [roomId, loadRoom]);
-  useEffect(() => { setNote(null); }, [corpId, siteId]);
 
   const corp = (tree?.corps || []).find((c) => c.id === corpId);
   const canEdit = !!view?.canEdit && !viewErr;   // 다시 불러오지 못한(낡은) 화면에서는 편집을 잠근다 — ‘다시 시도’ 로 최신을 받은 뒤에
@@ -616,11 +615,15 @@ export default function RackTool() {
     if (busy) { say('warn', '앞 변경을 저장하는 중입니다 — 끝난 뒤 다시 놓으세요.'); return; }
     if (!c.ok) { say('err', `${rack.name} U${c.uStart} 자리에는 놓을 수 없습니다(${c.reason}).`); return; }
     if (d.type === 'place') {
-      const cur = (view?.places || []).find((p) => p.id === d.id);
-      if (cur && cur.rackId === rack.id && cur.uStart === c.uStart) return;   // 제자리 — 바뀐 것이 없다(1회차 점검 정확성 1)
       if (!view) return;
-      afterRoomWrite(await run({ op: 'place.update', id: d.id, ...(cur && cur.rackId === rack.id ? {} : { rackId: rack.id }), rev: view.rev, place: { uStart: c.uStart } },
-        { okText: `${rack.name} U${c.uStart} 자리로 옮겼습니다.`, closeModal: false, roomId: view.room.id }));
+      // 랙 id 는 항상 보낸다 — 쓰기 직후 재조회가 오기 전의 화면은 장비 위치가 옛 값이라, 화면의 위치로 '같은 랙' · '제자리' 를 판단하면 서버가 다른 랙 안에서 옮긴다
+      //   (2회차 점검 정확성 2 · 재현). 제자리면 서버가 unchanged 로 답한다.
+      const writeRoom = view.room.id;
+      const r = await run({ op: 'place.update', id: d.id, rackId: rack.id, rev: view.rev, place: { uStart: c.uStart } },
+        { okText: `${rack.name} U${c.uStart} 자리로 옮겼습니다.`, closeModal: false, roomId: writeRoom });
+      // 내 옮기기를 화면에 바로 반영한다(재조회가 끝날 때까지 낡은 위치 + 새 rev 로 남지 않게).
+      if (r && !r.unchanged) setView((v) => (v && v.room?.id === writeRoom ? { ...v, places: (v.places || []).map((p) => (p.id === d.id ? { ...p, rackId: rack.id, uStart: c.uStart } : p)) } : v));
+      afterRoomWrite(r);
     } else if (d.type === 'server') {
       // 미배치 서버 — 높이를 모르므로 1U 로 가정하지 않고 입력 창을 연다(위치는 놓은 자리로 채운다).
       setModalErr('');
@@ -669,14 +672,14 @@ export default function RackTool() {
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10 }}>
         <span style={grp}>
           <label style={lab} htmlFor="rk-corp">법인</label>
-          <Select id="rk-corp" style={sel} value={corpId} onChange={(e) => setCorpId(e.target.value)}>
+          <Select id="rk-corp" style={sel} value={corpId} onChange={(e) => { setNote(null); setCorpId(e.target.value); }}>
             {!corps.length ? <option value="">볼 수 있는 법인이 없습니다</option> : null}
             {corps.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </Select>
         </span>
         <span style={grp}>
           <label style={lab} htmlFor="rk-site">데이터센터</label>
-          <Select id="rk-site" style={sel} value={siteId} onChange={(e) => setSiteId(e.target.value)}>
+          <Select id="rk-site" style={sel} value={siteId} onChange={(e) => { setNote(null); setSiteId(e.target.value); }}>
             {!sites.length ? <option value="">등록된 데이터센터 없음</option> : null}
             {sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </Select>
@@ -872,7 +875,7 @@ export default function RackTool() {
       ) : null}
       {modal?.kind === 'versions' ? (
         <VersionsModal corpId={corpId} corpName={corp?.name || corpId} onClose={closeModal}
-          onRestored={async (text) => { setModal(null); say('ok', text); await loadTree(); await loadRoom(roomId); }} />
+          onRestored={async (text) => { if (modalRef.current?.kind === 'versions') setModal(null); say('ok', text); await Promise.all([loadTree(), loadRoom(roomIdRef.current)]); }} />
       ) : null}
       {modal?.kind === 'types' ? (
         <TypesModal types={types} busy={busy} error={modalErr} onClose={closeModal}

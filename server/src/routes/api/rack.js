@@ -34,10 +34,8 @@ import { cleanText, cleanPlaceInput, cleanRackInput, intIn, rackTotals, serialKe
 import * as R from '../../rack/db.js';
 import { VERSION_KEEP } from '../../rack/versions.js';
 import { acquireExport } from '../../util/exportBusy.js';
-import { addressMatcher, makeScrubber, maskedIdToken, maskedAddressName } from '../../auth/addressMask.js';
-import { tagIndexOf, stripTags } from '../../rack/textMask.js';
-import { stripTag } from './svcInventory.js';
-import { TAG_MASK_MIN } from '../../util/ruleName.js';
+import { addressMatcher, hostVariants, maskedIdToken, maskedAddressName } from '../../auth/addressMask.js';
+import { tagIndexOf, stripTags, needleIndexOf, replaceNeedles } from '../../rack/textMask.js';
 import { todayStamp } from '../../util/dayKey.js';
 
 const toolsPerm = requirePerm('tools');
@@ -103,12 +101,19 @@ const healthOf = (v) => HEALTH[String(v || '').toLowerCase()] || (v ? 'unknown' 
 /** 그 법인의 서버(범위로 먼저 자름) — 서비스 태그 키 → 서버. */
 function corpServers(req, corpId) {
   const assign = getDatacenterAssign() || {};
-  const { servers } = scopeIdracServers(req, analysisServersWithRemote({ user: req.user, query: {} }));
+  const all = analysisServersWithRemote({ user: req.user, query: {} });
+  // 가림 재료(주소 · 태그)는 **범위로 자르기 전** 등록부 전체에서 모은다(2회차 점검 1 — 원장은 법인 단위로 보이는데 재료를 조회자 범위 안 서버로만 만들면,
+  //   같은 법인의 다른 vCenter 서버 · 귀속 없는 베어메탈의 관리 주소가 든 표시 이름이 범위 계정에게만 원문으로 나갔다). 연결 · 미배치 목록은 지금처럼 범위로 자른다.
+  const hosts = []; const allTags = [];
+  for (const s of all) {
+    if (typeof s.host === 'string' && s.host) hosts.push(s.host);
+    else if (s.id != null && String(s.id)) hosts.push(String(s.id));   // host 없이 올라온 원격 서버는 id 가 관리 주소일 수 있다(2회차 점검 6)
+    if (typeof s.serviceTag === 'string' && s.serviceTag) allTags.push(s.serviceTag);
+  }
+  const { servers } = scopeIdracServers(req, all);
   const byKey = new Map();
   const list = [];
-  const hosts = [];   // 범위 안 서버 전체의 관리 주소(이 법인 밖 포함) — 비관리자 판본의 주소 판정기 · 치환기 재료
   for (const s of servers) {
-    if (typeof s.host === 'string' && s.host) hosts.push(s.host);
     const dc = String(s.datacenterId || assign[String(s.vcenterId || s.mappedVcenterId || '')] || '');
     if (dc !== corpId) continue;
     let inv = null; try { inv = invForServer(s); } catch { inv = null; }
@@ -118,30 +123,58 @@ function corpServers(req, corpId) {
     list.push(row);
     if (key && !byKey.has(key)) byKey.set(key, row);
   }
-  return { byKey, list, hosts };
+  for (const x of list) if (x.tag) allTags.push(x.tag);   // 인벤토리에서만 읽힌 태그(등록부 칸이 빈 서버)
+  return { byKey, list, hosts, allTags };
 }
 
 /**
- * 비관리자 판본의 글자 가림(요청당 하나 — 1회차 점검 S1 · S2):
- *  · 주소: 범위 안 **등록부 전체의 관리 주소** 로 판정기 · 치환기를 만든다(다른 iDRAC 화면과 같은 구성 — 예전엔 행마다 [자기 host, 자기 id] 라
- *    이름이 다른 서버의 관리 주소와 같으면 그대로 나갔고, 이름이 id 와 같기만 해도 주소가 아닌데 가렸다).
- *  · 태그: 시리얼을 가리는 판본(범위 비관리자)은 등록부 서비스 태그 + 그 법인 원장의 시리얼을 글자에서 걷어 낸다.
- *  · `name`  = 이름 하나(원장 표시 이름 · 등록부 이름) — 통째로 주소면 '이름 가림', 아니면 속의 주소 · 태그만.
- *  · `text`  = 글 한 줄(이력 · 판 목록의 detail) — 속의 주소 · 태그만.
+ * 비관리자 판본의 글자 가림(요청당 하나 — 1회차 점검 S1 · S2 · 2회차 점검 1~6). **가림은 이 함수 하나가 정한다**(순서 · 재료 · 판정):
+ *  ① 주소 먼저: 등록부 **전체**의 관리 주소(대소문자 무시 · 글 속 어디든) → '(주소 가림)', 그다음 낱말 단위로 IP 리터럴(IPv4 가 든 낱말 · IPv6 리터럴 ·
+ *     대괄호 + 포트)과 등록 주소와 같은 낱말 → 토큰. 판정은 다른 iDRAC 화면과 같은 `addressMatcher`.
+ *  ② 태그 나중: 시리얼을 가리는 판본(범위 비관리자)만 — 등록부 서비스 태그 + 그 법인 원장의 시리얼 + (그 행 · 그 장비의 시리얼)을 비교 키로 걷어 낸다.
+ *     순서가 반대면 'idrac-<태그>.<도메인>' 에서 태그가 먼저 '•••' 가 되어 주소가 등록 주소와 맞지 않는다(2회차 점검 3).
+ *  · `name(s, tags?)` = 이름 하나(표시 이름 · 등록부 이름 · 판 차이의 항목 이름) — 통째로 주소면 '이름 가림', 아니면 ① ②.
+ *  · `text(s, tags?)` = 글 한 줄 — ① ②.
+ *  · `row(detail, tags, action)` = 이력 · 판 행(db 층이 그 행의 tags 를 넘겨준다) — tags 를 모르는(null) 옛 장비 글은 시리얼을 가리는 판본에 통째로 가린다.
  * ⚠ 원장 표시 이름(label)은 관리자가 공개한 이름으로 본다 — 주소와 (가림 판본의) 태그만 가리고, 호스트 이름처럼 보이는 이름은 그대로 둔다(랙 그림의 장비 이름이 비면 조회 계정에게 쓸모가 없다).
  */
-const IPV4_G = /(?<![\d.])\d{1,3}(?:\.\d{1,3}){3}(?![\d.])/g;
-const PLAIN_MASK = Object.freeze({ admin: true, name: (s) => s, text: (s) => s, match: () => false });
+const HIDDEN_ADDR = '(주소 가림)';
+const PLAIN_MASK = Object.freeze({ admin: true, name: (s) => s, text: (s) => s, row: (s) => s, match: () => false });
+const OPEN_P = new Set(['(', '[', '{', '<', '"', "'", '‘', '“']);
+const CLOSE_P = new Set([')', ']', '}', '>', '"', "'", '’', '”', ',', ';', '.']);
+/** 낱말의 앞뒤 문장 부호를 뗀 알맹이(정규식의 `+$` 를 쓰지 않는다 — 긴 입력에서 O(n²)). 대괄호 IPv6(+ 포트)는 주소만. */
+function wordCore(w) {
+  let a = 0; let b = w.length;
+  if (w[a] === '[') { const k = w.indexOf(']'); if (k > 1) return w.slice(1, k); }
+  while (a < b && OPEN_P.has(w[a])) a += 1;
+  while (b > a && CLOSE_P.has(w[b - 1])) b -= 1;
+  return w.slice(a, b);
+}
 function textMaskOf({ admin, showSerial, hosts = [], tags = [] }) {
   if (admin) return PLAIN_MASK;
   const match = addressMatcher(hosts);
-  const scrub = makeScrubber(hosts);
-  const idx = showSerial ? null : tagIndexOf(tags.flatMap((t) => [t, serialKeyOf(t)]));
-  const inner = (s) => { const t = scrub(s).replace(IPV4_G, (ip) => maskedIdToken(ip)); return idx ? stripTags(t, idx) : t; };
+  const hostIdx = needleIndexOf(hosts.flatMap(hostVariants), { min: 3 });
+  const corpIdx = showSerial ? null : tagIndexOf(tags);
+  const addr = (s) => {
+    const t = replaceNeedles(s, hostIdx, HIDDEN_ADDR);
+    if (!/[\d:]/.test(t)) return t;   // 숫자 · 콜론이 없으면 IP 리터럴도 없다
+    return t.split(/(\s+)/).map((w) => {
+      if (!w || w.length > 300 || !/[\d:]/.test(w)) return w;
+      const core = wordCore(w);
+      return core && match(core) ? maskedIdToken(core) : w;
+    }).join('');
+  };
+  const tagsOut = (t, own) => {
+    if (showSerial) return t;
+    const u = own && own.length ? stripTags(t, tagIndexOf(own)) : t;
+    return stripTags(u, corpIdx);
+  };
+  const text = (s, own) => (typeof s !== 'string' || !s ? s : tagsOut(addr(s), own));
   return {
-    admin: false, match,
-    name: (s) => (typeof s !== 'string' || !s ? s : match(s) ? maskedAddressName(s) : inner(s)),
-    text: (s) => (typeof s !== 'string' || !s ? s : inner(s)),
+    admin: false, match, text,
+    // 이름이 **낱말 하나**이고 그것이 주소면 통째로 '이름 가림'. 여러 낱말이면 주소인 낱말만 가린다('Unity 5.3.0.0 array' 를 통째로 지우지 않는다 — 1회차 반증 판단 2).
+    name: (s, own) => (typeof s !== 'string' || !s ? s : (!/\s/.test(s.trim()) && match(wordCore(s.trim()) || s.trim())) ? maskedAddressName(s.trim()) : text(s, own)),
+    row: (detail, own, action) => (!showSerial && own == null && /^place\./.test(String(action || '')) ? R.LEGACY_DETAIL_HIDDEN : text(detail, own || [])),
   };
 }
 /** 판 목록 · 판 차이 라우트용 — 그 법인의 가림 재료(비관리자일 때만 등록부 · 원장을 읽는다). */
@@ -149,8 +182,8 @@ async function corpTextMask(req, corpId) {
   const admin = isAdminDetailUser(req.user);
   if (admin) return PLAIN_MASK;
   const showSerial = serialsVisible(req);
-  const { list, hosts } = corpServers(req, corpId);
-  const tags = showSerial ? [] : [...list.map((x) => x.tag).filter(Boolean), ...(await R.corpSerials(corpId))];
+  const { hosts, allTags } = corpServers(req, corpId);
+  const tags = showSerial ? [] : [...allTags, ...(await R.corpSerials(corpId))];
   return textMaskOf({ admin, showSerial, hosts, tags });
 }
 
@@ -163,19 +196,15 @@ async function corpTextMask(req, corpId) {
 function maskServerIdentity(obj, row, { admin, showSerial, mask }) {
   if (admin) return obj;
   const out = { ...obj, serverId: maskedIdToken(String(obj.serverId ?? '')) };
-  const isAddr = mask?.match || addressMatcher([row.s?.host].filter(Boolean));
-  for (const f of ['name', 'hostname']) if (isAddr(out[f])) out[f] = maskedAddressName(out[f]);
-  // OS 호스트 이름은 관리자 판본만(반증 추가 1 — 물리서버 폴더 hwView 와 같은 기준). 등록 이름이 없어 호스트 이름으로 떨어진 이름도 비운다.
+  // OS 호스트 이름은 관리자 판본만(반증 추가 1 — 물리서버 폴더 hwView 와 같은 기준). 등록 이름이 없어 호스트 이름으로 떨어진 이름도 비운다(가림보다 먼저 본다).
   const osHost = String(row.inv?.system?.hostName || '');
-  if ('hostname' in out) out.hostname = '';
   if (osHost && !row.s?.name && out.name === osHost) out.name = '';
+  if ('hostname' in out) out.hostname = '';
   if (out.hw?.host) out.hw = { ...out.hw, host: '' };
   if (out.hw?.os?.host) out.hw = { ...out.hw, os: { ...out.hw.os, host: '' } };
-  if (!showSerial && String(row.tag || '').length >= TAG_MASK_MIN) {
-    for (const f of ['name', 'hostname']) if (out[f]) out[f] = stripTag(out[f], row.tag);
-    if (out.hw?.host) out.hw = { ...out.hw, host: stripTag(out.hw.host, row.tag) };
-    if (out.hw?.os?.host) out.hw = { ...out.hw, os: { ...out.hw.os, host: stripTag(out.hw.os.host, row.tag) } };
-  }
+  // 이름은 표시 이름과 같은 가림(2회차 점검 4 — 통째 일치만 보면 'host:443' · URL 꼴 · 글 속 주소 · 다른 서버의 태그가 든 이름이 그대로 나갔다)
+  const m = mask || textMaskOf({ admin, showSerial, hosts: [row.s?.host].filter(Boolean), tags: [row.tag].filter(Boolean) });
+  if (out.name) out.name = m.name(out.name, [row.tag].filter(Boolean));
   return out;
 }
 
@@ -220,16 +249,17 @@ async function roomView(req, roomId) {
   const acc = accessOf(req);
   const admin = isAdminDetailUser(req.user);
   const showSerial = serialsVisible(req);
-  const data = await R.getRoom(roomId, { hideTags: !showSerial });   // 시리얼을 가리는 판본은 이력 글 속 시리얼을 db 층에서 걷어 낸다(행마다 그 장비의 시리얼로)
-  if (!data || !canRead(acc, data.site.corpId)) return null;
-  const corpId = data.site.corpId;
-  const { byKey, list, hosts } = corpServers(req, corpId);
-  const placedKeys = await R.placedSerialKeys(corpId);
+  const corpId = await R.corpOf('room', roomId).then((x) => x?.corpId || '');
+  if (!corpId || !canRead(acc, corpId)) return null;
+  const { byKey, list, hosts, allTags } = corpServers(req, corpId);
   // 1회차 점검 S1: 표시 이름(label)과 그 이름으로 만든 이력 글에도 주소 · 태그 가림(예전엔 link 만 가렸다 — 화면이 등록부 이름으로 채운 label 이 그대로 나갔다)
-  const mask = textMaskOf({ admin, showSerial, hosts, tags: admin || showSerial ? [] : [...list.map((x) => x.tag).filter(Boolean), ...(await R.corpSerials(corpId))] });
+  const mask = textMaskOf({ admin, showSerial, hosts, tags: admin || showSerial ? [] : [...allTags, ...(await R.corpSerials(corpId))] });
+  const data = await R.getRoom(roomId, { maskRow: admin ? null : mask.row });   // 이력 글은 db 층이 그 행의 tags 와 함께 가림 함수에 넘긴다(tags 는 돌려주지 않는다)
+  if (!data || data.site.corpId !== corpId) return null;
+  const placedKeys = await R.placedSerialKeys(corpId);
   const places = data.places.map((p) => {
     const row = p.kind === 'server' && p.serialKey ? byKey.get(p.serialKey) : null;
-    const out = { ...p, label: mask.name(p.label), link: row ? linkView(row, { admin, showSerial, mask }) : null, linkState: p.kind !== 'server' ? 'n/a' : !p.serialKey ? 'no-serial' : row ? 'linked' : 'not-found' };
+    const out = { ...p, label: mask.name(p.label, [p.serial, ...(p.extraSerials || [])].filter(Boolean)), link: row ? linkView(row, { admin, showSerial, mask }) : null, linkState: p.kind !== 'server' ? 'n/a' : !p.serialKey ? 'no-serial' : row ? 'linked' : 'not-found' };
     delete out.serialKey;
     if (!showSerial) { out.serial = ''; out.extraSerials = []; out.serialHidden = true; }
     return out;
@@ -254,7 +284,7 @@ async function roomView(req, roomId) {
     site: data.site, room: data.room, rev: data.room.rev,
     racks, places,
     unplaced, unplacedTotal: unplacedAll.length, serversNoTag: noTag,
-    logs: data.logs.map((l) => ({ ...l, user: admin ? l.user : '', detail: mask.text(l.detail) })),
+    logs: data.logs.map((l) => ({ ...l, user: admin ? l.user : '' })),   // detail 은 getRoom 이 이미 가렸다(maskRow)
     canEdit: canWrite(acc, corpId),
     serialsHidden: !showSerial,
     limits: LIMITS,
@@ -517,7 +547,7 @@ export function registerRack(api) {
       if (!corpId || !canRead(acc, corpId)) return res.status(404).json({ ok: false, reason: '법인을 찾지 못했습니다.' });
       const admin = isAdminDetailUser(req.user);
       const mask = await corpTextMask(req, corpId);
-      const versions = (await R.listVersions(corpId, { hideTags: !serialsVisible(req) })).map((v) => ({ ...v, user: admin ? v.user : '', detail: mask.text(v.detail) }));
+      const versions = (await R.listVersions(corpId, { maskRow: admin ? null : mask.row })).map((v) => ({ ...v, user: admin ? v.user : '' }));
       return res.json({ ok: true, corpId, versions, latestId: versions[0]?.id ?? null, keep: VERSION_KEEP, canRestore: canWrite(acc, corpId) });
     } catch (e) { return sendErr(res, e); }
   });
@@ -526,14 +556,10 @@ export function registerRack(api) {
       const corpId = cleanText(req.query?.corp, 64);
       const acc = accessOf(req);
       if (!corpId || !canRead(acc, corpId) || !/^\d{1,12}$/.test(String(req.params.vid))) return res.status(404).json({ ok: false, reason: '판을 찾지 못했습니다.' });
-      const d = await R.versionDetail(corpId, Number(req.params.vid), { hideTags: !serialsVisible(req) });
+      const mask = await corpTextMask(req, corpId);
+      const d = await R.versionDetail(corpId, Number(req.params.vid), mask.admin ? {} : { maskRow: mask.row, maskItem: mask.name });
       if (!d) return res.status(404).json({ ok: false, reason: '판을 찾지 못했습니다.' });
-      if (!isAdminDetailUser(req.user)) {
-        d.version.user = '';
-        const mask = await corpTextMask(req, corpId);
-        d.version.detail = mask.text(d.version.detail);
-        for (const part of [d.changes, d.restore]) if (part?.items) for (const it of part.items) it.name = mask.name(it.name);
-      }
+      if (!isAdminDetailUser(req.user)) d.version.user = '';
       return res.json({ ok: true, ...d });
     } catch (e) { return sendErr(res, e); }
   });
