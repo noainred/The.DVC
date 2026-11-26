@@ -117,9 +117,9 @@ function corpServers(req, corpId, { invTags = false } = {}) {
     //   서비스 태그 같은 id 까지 '주소' 로 넣으면 시리얼을 볼 수 있는 계정에게도 그 태그가 가려진다(3회차 점검 5).
     else if (s.id != null && /[.:]/.test(String(s.id))) hosts.push(String(s.id));
     if (typeof s.serviceTag === 'string' && s.serviceTag) allTags.push(s.serviceTag);
-    else if (invTags) {
+    if (invTags) {   // 등록부 칸이 있어도 인벤토리 값이 다를 수 있다(손으로 적은 태그 ≠ 장비가 답한 태그) — 둘 다 재료로
       let t = ''; try { t = invForServer(s)?.system?.serviceTag; } catch { t = ''; }
-      if (typeof t === 'string' && t) allTags.push(t);
+      if (typeof t === 'string' && t && t !== s.serviceTag) allTags.push(t);
     }
   }
   const { servers } = scopeIdracServers(req, all);
