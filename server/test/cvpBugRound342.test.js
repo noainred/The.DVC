@@ -95,9 +95,13 @@ test('② 포트 구성도', () => {
   assert.equal(PM.deviceNameFromDesc('te-sw01 trunk'), 'te-sw01');
   // ReDoS 가드: 긴 입력도 선형(길이를 먼저 자른다)
   // ReDoS 가드는 비율로(루트 CLAUDE.md — 절대 시간은 CPU 에 따라 깨진다): 입력 10배에 시간이 초선형으로 늘지 않는다(앞에서 200자로 자른다).
+  // 2026-11-26 시험 위생 점검 2회차(재현 — 부하 아래 5회 중 1회 31.6ms 로 실패): 한 번씩 재면 큰 쪽 한 번의 GC · CPU 경합이 20ms 여유를 넘는다.
+  //   docs/rules/common.md '시간 비율' 규약대로 8배 크기 · 작은 쪽과 큰 쪽을 번갈아 5회 · 각자 최솟값 · 기준 24배(선형 약 8배 · 제곱 약 64배).
   const tm = (n) => { const t = performance.now(); for (let i = 0; i < 50; i++) { PM.deviceNameFromDesc(`${'a-'.repeat(n)}vmnic1`); PM.descTokens('x_'.repeat(n)); } return performance.now() - t; };
-  tm(500); const small = tm(500); const big = tm(5000);
-  assert.ok(big < small * 30 + 20, `5,000 → ${big.toFixed(1)}ms · 500 → ${small.toFixed(1)}ms(선형이면 10배 이하)`);
+  tm(600); tm(4_800);
+  let small = Infinity; let big = Infinity;
+  for (let r = 0; r < 5; r += 1) { small = Math.min(small, tm(600)); big = Math.min(big, tm(4_800)); }
+  assert.ok(big < Math.max(small, 0.05) * 24, `4,800 → ${big.toFixed(2)}ms · 600 → ${small.toFixed(2)}ms(선형이면 8배 이하 · 앞에서 200자로 자르므로 거의 같다)`);
   // 속도를 못 읽은 예비가 있으면 '40G 이상 예비' 를 0 으로 단정하지 않는다(A2-F4)
   const s = PM.summaryRow({ model: 'DCS-7050SX3-48YC8', ports: [{ name: 'Ethernet1', oper: 'nolink', admin: 'up', desc: '', speedBps: null }, { name: 'Ethernet2', oper: 'nolink', admin: 'up', desc: '', speedBps: null }] });
   assert.equal(s.spareHigh, null); assert.equal(s.spareSpeedUnknown, 2);

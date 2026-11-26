@@ -49,7 +49,7 @@ test('② CONFIG_DIR 이 없으면 빈 임시 폴더를 잡고, 프로세스가 
 const d = process.env.CONFIG_DIR;
 fs.writeFileSync(d + '/x.json', '{}'); fs.mkdirSync(d + '/sub'); fs.writeFileSync(d + '/sub/y.db', 'z');
 console.log(JSON.stringify({ d, mark: process.env.DVC_TEST_ISOLATED_CONFIG, empty: fs.readdirSync(d).length }));`);
-  assert.ok(r.d && r.d.startsWith(path.join(os.tmpdir(), 'dvc-test-cfg', '')), r.d);
+  assert.ok(r.d && r.d.startsWith(path.join(os.tmpdir(), `dvc-test-cfg-${process.getuid()}`, '')), r.d);
   assert.equal(r.mark, r.d);
   assert.equal(fs.existsSync(r.d), false, '끝나면 하위 파일까지 지운다');
 });
@@ -102,14 +102,14 @@ test('③ 시험 실행기는 시험 파일마다 자식 프로세스에서 미�
     assert.equal(dirs.length, 2, out);
     assert.notEqual(dirs[0], dirs[1], '파일마다 다른 임시 폴더');
     for (const d of dirs) {
-      assert.ok(d.startsWith(path.join(os.tmpdir(), 'dvc-test-cfg', '')), d);
+      assert.ok(d.startsWith(path.join(os.tmpdir(), `dvc-test-cfg-${process.getuid()}`, '')), d);
       assert.equal(fs.existsSync(d), false, '자식이 끝나면 지워진다');
     }
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 });
 
 test('④ 죽은 시험 프로세스(시한 초과 · Ctrl-C)가 남긴 폴더는 다음 실행이 지운다 — 살아 있는 프로세스 · 최근 폴더는 두고', () => {
-  const ROOT = path.join(os.tmpdir(), 'dvc-test-cfg');
+  const ROOT = path.join(os.tmpdir(), `dvc-test-cfg-${process.getuid()}`);
   fs.mkdirSync(ROOT, { recursive: true });
   // 없는 pid(32비트 끝 근처 — pid_max 를 넘는다) · 오래됨 → 지운다
   const dead = fs.mkdtempSync(path.join(ROOT, '2147483000-'));
@@ -143,4 +143,34 @@ test('hang', async () => { fs.writeFileSync(process.env.CONFIG_DIR + '/pid', Str
     child({}, `console.log(JSON.stringify({ d: process.env.CONFIG_DIR }));`);
     assert.equal(fs.existsSync(left), false, `죽은 자식이 남긴 폴더(${left})를 다음 실행이 지운다`);
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+});
+
+test('⑤ 상위 폴더가 심링크면 따라가지 않는다 — 청소가 가리키는 곳의 하위를 지우지 않고, 예전처럼 /tmp 에 바로 만든다(2026-11-26 점검 2회차 재현)', () => {
+  const box = fs.mkdtempSync(path.join(os.tmpdir(), 'dvc-isolate-link-'));
+  try {
+    const victim = path.join(box, 'victim'); fs.mkdirSync(victim);
+    const keep = fs.mkdtempSync(path.join(victim, '2019-'));   // 이름이 '<숫자>-' 꼴 · 오래됨 — 청소 대상처럼 보이는 남의 폴더
+    const old = (Date.now() - 20 * 60_000) / 1000; fs.utimesSync(keep, old, old);
+    const tmp = path.join(box, 'tmp'); fs.mkdirSync(tmp);
+    fs.symlinkSync(victim, path.join(tmp, `dvc-test-cfg-${process.getuid()}`));
+    const r = child({ TMPDIR: tmp }, `console.log(JSON.stringify({ d: process.env.CONFIG_DIR }));`);
+    assert.equal(fs.existsSync(keep), true, '심링크를 따라가 남의 폴더를 지우면 안 된다');
+    assert.ok(r.d.startsWith(path.join(tmp, 'dvc-test-cfg-')) && !r.d.startsWith(path.join(tmp, `dvc-test-cfg-${process.getuid()}`, '')), `예전처럼 /tmp 에 바로: ${r.d}`);
+    assert.equal(fs.readdirSync(victim).length, 1, '가리키는 곳에 새 폴더를 만들지 않는다');
+  } finally { fs.rmSync(box, { recursive: true, force: true }); }
+});
+
+test('⑤ 상위 폴더를 다른 계정이 만들어 쓸 수 없어도 시험이 멈추지 않는다(예전처럼 /tmp 에 바로)', { skip: typeof process.getuid !== 'function' || process.getuid() !== 0 ? 'root 로 돌 때만(다른 계정으로 자식을 띄운다)' : false }, () => {
+  const box = fs.mkdtempSync(path.join(os.tmpdir(), 'dvc-isolate-acct-'));
+  try {
+    fs.chmodSync(box, 0o777);
+    const tmp = path.join(box, 'tmp'); fs.mkdirSync(tmp, { mode: 0o1777 }); fs.chmodSync(tmp, 0o1777);
+    // root 가 먼저 만든 계정별 폴더는 다른 계정 이름이라 겹치지 않는다 — 같은 이름을 남이 만든 경우를 흉내 내려고 nobody 의 이름으로 root 가 만든다
+    fs.mkdirSync(path.join(tmp, 'dvc-test-cfg-65534'), { mode: 0o755 });
+    const env = { ...process.env, TMPDIR: tmp }; delete env.CONFIG_DIR; delete env.DVC_TEST_ISOLATED_CONFIG;
+    const out = execFileSync(process.execPath, ['--import', PRELOAD, '--input-type=module', '-e', 'console.log(JSON.stringify({ d: process.env.CONFIG_DIR }))'],
+      { env, encoding: 'utf8', timeout: 30_000, uid: 65534, gid: 65534 });
+    const d = JSON.parse(out.trim().split('\n').pop()).d;
+    assert.ok(d.startsWith(path.join(tmp, 'dvc-test-cfg-')) && !d.startsWith(path.join(tmp, 'dvc-test-cfg-65534', '')), `남의 폴더가 아니라 /tmp 에 바로: ${d}`);
+  } finally { fs.rmSync(box, { recursive: true, force: true }); }
 });

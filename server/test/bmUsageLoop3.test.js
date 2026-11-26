@@ -77,8 +77,12 @@ test('D1 — 이름 · 사유만 고치기는 재확인이 아니다(만료 그�
   resetAll();
   const { call } = await setup(t);
   // 규칙 전에 만든 운영자 창 둘(매일 00:00 · 12:00 각 12시간 — 93일 전 확인 → 둘 다 만료)
-  const A = await ST.addWindow(srvWin('MTAGA1', '옛 오전', { kind: 'weekly', days: all7, time: '00:00', durMin: 720 }), { by: 'opa', now: T0 - 93 * DAY });
-  const B = await ST.addWindow(srvWin('MTAGA1', '옛 오후', { kind: 'weekly', days: all7, time: '12:00', durMin: 720 }), { by: 'opa', now: T0 - 93 * DAY });
+  // 확인 시각은 정시 + 7분(CONFIRMED) — 2026-11-26 시험 위생 점검 2회차(재현): 정시(T0)로 두면 매일 KST 0시대 · 12시대에 만료 시각(T0 − 1일)이 한 창의
+  //   발생 시작과 **같은 밀리초**가 되어 그 발생이 빠지고, 남는 '두 창 합 24시간' 이 지금 − 1일 보다 앞의 지난 발생끼리라 합 규칙(후보 발생은 끝이 now − 1일 뒤 —
+  //   bmUsageLoop6y 'A3 지난 후보 발생')이 세지 않는다 — 그 한 시간만 재확인이 열렸다. 창 시작과 겹치지 않는 확인 시각이면 어느 시간에도 같은 답이다.
+  const CONFIRMED = T0 - 93 * DAY + 7 * MIN;
+  const A = await ST.addWindow(srvWin('MTAGA1', '옛 오전', { kind: 'weekly', days: all7, time: '00:00', durMin: 720 }), { by: 'opa', now: CONFIRMED });
+  const B = await ST.addWindow(srvWin('MTAGA1', '옛 오후', { kind: 'weekly', days: all7, time: '12:00', durMin: 720 }), { by: 'opa', now: CONFIRMED });
   assert.equal(await coveredSlots('MTAGA1'), 0, '둘 다 만료 — 억제 없음');
   // 목록 — 재확인 버튼은 재확인 라우트와 같은 판정(합 규칙: 두 창 합 24시간)
   const l0 = await call('opA', 'GET', '');
@@ -93,8 +97,8 @@ test('D1 — 이름 · 사유만 고치기는 재확인이 아니다(만료 그�
   const e2 = await call('opA', 'PUT', `/${B.id}`, { rev: B.rev, reason: '사유 고침' });
   assert.equal(e2.status, 200, JSON.stringify(e2.body));
   ST._resetMaintStoreForTest();
-  assert.equal(ST.getWindow(A.id).confirmedAt, T0 - 93 * DAY, 'confirmedAt 그대로(예전: 지금으로 — 92일 연장)');
-  assert.equal(ST.getWindow(B.id).confirmedAt, T0 - 93 * DAY);
+  assert.equal(ST.getWindow(A.id).confirmedAt, CONFIRMED, 'confirmedAt 그대로(예전: 지금으로 — 92일 연장)');
+  assert.equal(ST.getWindow(B.id).confirmedAt, CONFIRMED);
   assert.equal(await coveredSlots('MTAGA1'), 0, '재현 r3 — 예전 336/336(24시간 상시 억제)');
   const l1 = await call('opA', 'GET', '');
   assert.deepEqual([row(l1, A.id).status, row(l1, B.id).status], ['expired', 'expired'], '만료 그대로');

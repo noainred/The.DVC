@@ -355,7 +355,9 @@
   끝날 때 지운다(있으면 건드리지 않는다). ⚠ 시험 파일 하나를 직접 돌릴 때도 붙일 것: `cd server && node --test --import ./test/_isolateConfig.js --experimental-sqlite test/<파일>`.
   · 등록부처럼 **로드 시 경로를 굳히는 모듈**(`const FILE = path.join(config.configDir, …)`)은 나중에 `config.configDir` 를 바꿔도 따라오지 않는다 — 시험이 폴더를 바꾸려면
     프로젝트 모듈을 하나라도 불러오기 **전에** `process.env.CONFIG_DIR` 을 잡는다. · 자식 프로세스는 `{ ...process.env }` 로 띄울 것(env 를 새로 짜면 이 보호 밖이다).
-  · 죽은 시험(파일 시한 초과 · Ctrl-C)은 exit 훅이 돌지 않아 폴더를 남긴다 — 폴더는 `<tmp>/dvc-test-cfg/<pid>-…` 이고 다음 실행이 pid 가 없고 10분 넘은 것을 지운다.
+  · 죽은 시험(파일 시한 초과 · Ctrl-C)은 exit 훅이 돌지 않아 폴더를 남긴다 — 폴더는 `<tmp>/dvc-test-cfg-<uid>/<pid>-…` 이고 다음 실행이 pid 가 없고 10분 넘은 것을 지운다.
+    상위 폴더는 **계정마다 · 0700 · 심링크가 아닌 내 폴더일 때만** 쓴다(공용 이름 하나면 root 로 한 번 돈 뒤 다른 계정의 시험이 전부 EACCES · 심링크면 청소가 가리키는 곳을 지웠다 — 재현).
+  · **웹 시험(vitest)도** 서버 모듈을 불러오면 같은 일이 생긴다(`bmStage6Text` 가 auth.js 를 거쳐 실제 server/config 에 `auth-secret` 을 만들었다 — A/B 재현) — `web/vitest.globalSetup.js` 가 임시 설정 폴더를 준다.
   회귀 `test/isolateConfig.test.js`.
   · **같은 점검에서 찾은 날짜 의존 시험 3건**(가짜 시계 — `NODE_OPTIONS="--import <Date 만 미는 모듈>"` 로 시험 파일 하나를 실행 시각만 바꿔 돌려 찾았다. 셸 `date` · 파일 시각 · SQLite 현재 시각은
     밀리지 않는다): ① 포탈 달의 첫 시간(매달 마지막 날 16시대 UTC)엔 '끝난 정시 칸' 이 0개 — 기준 시각이 달의 첫 몇 시간이면 하루 앞으로(`dataAudit2977`) ② 반복 정비 창은 확인 뒤 92일에 만료 —
