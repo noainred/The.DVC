@@ -112,7 +112,7 @@ describe('v3.42 CVP 버그 점검 1회차 — 웹', () => {
     const cp = src('CvpCompare.jsx');
     expect(cp).toMatch(/setA\(String\(x\.id\)\); setB\('now'\);/); expect(cp).toMatch(/if \(my !== listSeq\.current\) return;/);   // F11 · 늦은 목록
     const ot = src('CvpOpticsTrend.jsx');
-    expect(ot).toMatch(/x\.state === 'stale' && x\.lastRx != null && th\.warnDbm != null && x\.lastRx <= th\.warnDbm/);   // A1-F9
+    expect(ot).toMatch(/x\.state === 'stale' && x\.lastRx != null && rowLow\(x\) != null && x\.lastRx <= rowLow\(x\)/);   // A1-F9 → v3.47 D-7: 행마다 그 광모듈의 기준
     expect(src('CvpPortPlan.jsx')).toMatch(/sat\.seriesUnread/);   // A4-F6
   });
   it('2회차 반증 R7 · R12 · R13', async () => {
@@ -164,5 +164,22 @@ describe('v3.42 CVP 버그 점검 1회차 — 웹', () => {
     expect(lc).toMatch(/fetchJson\('\/tools\/cvp\/locate', \{ q: v \}, undefined, \{ retries: 0 \}\)/);
     // A5 관찰: 마우스로 누른 뒤 키보드로 고르면 초점 고리가 다시 보인다
     expect(src('CvpTopology.jsx')).toMatch(/onKeyDown=\{\(e\) => \{ setFocusId\(n\.id\);/);
+  });
+  it('v3.47 결정 · 5회차 웹 — 장애 임계 예측 문구 · 기준 안내 · 설명 링크 안내 · 회수 타일', async () => {
+    const { opticTrendText, trendBasisText, descLinkNote, linkqBasis } = await import('./cvpNetText.js');
+    const now = Date.UTC(2026, 10, 26, 3);
+    expect(opticTrendText({ state: 'eta', target: 'fault', faultEta: now + 16 * 86_400_000 }, { now, horizonDays: 365 })).toMatch(/^장애 임계 /);
+    expect(opticTrendText({ state: 'eta', warnEta: now + 10 * 86_400_000 }, { now, horizonDays: 365 })).not.toMatch(/장애/);
+    expect(opticTrendText({ state: 'flat' }, { now })).toBe('내려가지 않음 — 예측 없음');
+    const { perMonthText } = await import('./cvpNetText.js');
+    expect(perMonthText(-0.0004, ' dB')).toBe('0.00 dB/월'); expect(perMonthText(-0.2, ' dB')).toBe('-0.20 dB/월'); expect(perMonthText(1.5, '')).toBe('+1.5/월');
+    expect(trendBasisText({ warnDbm: -10, faultDbm: -14 }, 3)).toContain('장비가 Rx 임계를 준 3개는 그 임계');
+    expect(trendBasisText({}, 0)).not.toMatch(/— dBm/);
+    expect(descLinkNote({ kind: 'desc', descPair: true })).toContain('양쪽 설명이 서로를 가리킴');
+    expect(descLinkNote({ kind: 'desc' })).toContain('상대 포트 모름');
+    expect(linkqBasis({ rx: -18, rxLowDbm: -20, rxBasis: 'device' }, -10)).not.toContain('≤');
+    expect(linkqBasis({ rx: -21, rxLowDbm: -20, rxBasis: 'device' }, -10)).toContain('≤ 장비 임계 -20');
+    expect(src('CvpPortPlan.jsx')).toMatch(/c\.young != null \? \[\['아직 판단 못 함', c\.young/);
+    expect(src('CvpOpticsTrend.jsx')).toMatch(/refLine=\{rowLow\(x\)\}/);
   });
 });

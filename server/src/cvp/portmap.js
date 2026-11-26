@@ -222,6 +222,20 @@ export function deviceNamesFromDesc(desc, max = 4) {
   }
   return out;
 }
+/**
+ * v3.47(5회차 A1-2): 설명에 적힌 **인터페이스 이름들**(나온 순서 · 최대 8개 — 'spine1:Ethernet1' · 'Et49' · 'esx01-vmnic2' 의 뒤 조각). 원문 글자 그대로(정규화는 호출자).
+ *   토폴로지가 양쪽 설명 링크를 합칠 때 '설명에 적힌 상대 포트' 와 짝이 맞는지 본다.
+ */
+export function descPortsOf(desc, max = 8) {
+  const out = [];
+  for (const t of String(desc ?? '').slice(0, 200).split(/[\s,;|()[\]<>"'=:]+/)) {
+    if (!t || t.length > 64) continue;
+    const u = stripIfSuffix(t);
+    const cand = IFNAME.test(t) ? t : (u !== t && IFNAME.test(t.slice(u.length + 1)) ? t.slice(u.length + 1) : null);
+    if (cand) { out.push(cand); if (out.length >= max) break; }
+  }
+  return out;
+}
 /** 설명에서 장비 이름처럼 보이는 첫 낱말. 없으면 ''. */
 export function deviceNameFromDesc(desc) { return deviceNamesFromDesc(desc, 1)[0] || ''; }
 // v3.42(2회차 A3-F2 · 3회차 A1-F5): 짧은 이름은 이 함수 하나(topology.js 도 이것을 쓴다) — IPv4 이름은 통째로(첫 옥텟 '10' 으로 줄이면 다른 주소가 '일치', 같은 주소가 '불일치' 가 됐다).
