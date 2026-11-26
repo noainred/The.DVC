@@ -71,7 +71,7 @@ function RackColumn({ rack, places, mode, face, q, selId, onPick, edit, drag, on
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, padding: '0 2px 4px', whiteSpace: 'nowrap', overflow: 'hidden' }}>
         <strong style={{ ...mono, fontSize: 14 }}>{rack.name}</strong>
         <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>{t.usedU ?? 0} / {H}U{t.usePct != null ? ` · ${t.usePct}%` : ''}</span>
-        <span style={{ fontSize: 11, color: 'var(--text-dim)', marginLeft: 'auto', overflow: 'hidden', textOverflow: 'ellipsis' }}>{[rack.row && `${rack.row} 줄`, rack.role].filter(Boolean).join(' · ')}</span>
+        <span title={[rack.row && `${rack.row} 줄`, rack.role].filter(Boolean).join(' · ') || undefined} style={{ fontSize: 11, color: 'var(--text-dim)', marginLeft: 'auto', overflow: 'hidden', textOverflow: 'ellipsis' }}>{[rack.row && `${rack.row} 줄`, rack.role].filter(Boolean).join(' · ')}</span>
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 8px', fontSize: 10.5, color: 'var(--text-dim)', padding: '0 2px 6px' }}>
         <span>운전 {wattText(t.opW, t.opRead, t.devices)}</span>
@@ -108,25 +108,27 @@ function RackColumn({ rack, places, mode, face, q, selId, onPick, edit, drag, on
                 onDragEnd={edit ? () => drag.end() : undefined}
                 onClick={() => onPick(p.id)}
                 title={`${p.label || p.serial || '이름 없음'} — ${rack.name} ${fmtU(p)} · ${FACE_LABEL[p.face] || ''}`}
-                aria-label={`${p.label || p.serial || '이름 없음'}, ${rack.name} ${fmtU(p)}, ${back ? '뒷면' : c.val}`}
+                aria-label={`${p.label || p.serial || '이름 없음'}, ${rack.name} ${fmtU(p)}, ${rearOfFull ? `뒷면${back ? '' : `, ${c.val}`}` : c.val}`}
+                className="rk-place"
                 style={{
                   position: 'absolute', left: 1, right: 1, bottom: b.bottom, height: b.height, boxSizing: 'border-box', borderRadius: 3,
                   display: 'flex', alignItems: 'center', gap: 6, padding: '0 6px', fontSize: 10, lineHeight: 1, textAlign: 'left', overflow: 'hidden', whiteSpace: 'nowrap',
                   cursor: edit ? 'grab' : 'pointer',
-                  background: back ? 'var(--panel)' : c.bg, border: `1px solid ${back ? '#3a4866' : c.bd}`, color: back ? 'var(--text-dim)' : c.fg,
-                  ...(isSel ? { outline: '2px solid #ffffff', outlineOffset: 0 } : m ? { outline: '2px solid #fcd34d', outlineOffset: -1 } : {}),
+                  background: back ? 'var(--panel)' : c.bg, border: `1px ${rearOfFull && !back ? 'dashed' : 'solid'} ${back ? '#3a4866' : c.bd}`, color: back ? 'var(--text-dim)' : c.fg,
+                  // 고른 장비 · 검색에 걸린 장비는 안쪽 그림자로 — outline 은 키보드 초점 표시 전용(styles.css .rk-place:focus-visible)이라 서로 가리지 않는다
+                  boxShadow: isSel ? 'inset 0 0 0 2px #ffffff' : m ? 'inset 0 0 0 2px #fcd34d' : 'none',
                   opacity: dragging ? 0.35 : (m === false ? 0.35 : 1),
                 }}
               >
                 <span style={{ ...mono, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0, flex: 1 }}>{p.label || p.serial || '이름 없음'}</span>
-                <span style={{ fontWeight: 700, flex: '0 0 auto' }}>{back ? '뒷면' : rearOfFull ? `뒷면 · ${c.val}` : c.val}</span>
+                <span style={{ fontWeight: 700, flex: '0 0 auto' }}>{back ? '뒷면' : c.val}</span>
               </button>
             );
           })}
           {pv ? (
             <div aria-hidden="true" style={{
-              position: 'absolute', left: 1, right: 1, bottom: (pv.uStart - 1) * U_PX, height: pv.uSize * U_PX - 1, boxSizing: 'border-box', borderRadius: 3, pointerEvents: 'none',
-              border: `2px dashed ${pv.ok ? 'var(--green)' : 'var(--red)'}`, background: pv.ok ? 'rgba(34,197,94,.2)' : 'rgba(239,68,68,.3)',
+              position: 'absolute', left: 1, right: 1, bottom: (pv.uStart - 1) * U_PX, height: Math.max(1, Math.min(pv.uSize, H - pv.uStart + 1)) * U_PX - 1, boxSizing: 'border-box', borderRadius: 3, pointerEvents: 'none',
+              border: `2px dashed ${pv.ok ? 'var(--green)' : 'var(--red)'}`, background: pv.ok ? 'rgba(34,197,94,.2)' : 'rgba(127,29,29,.94)', overflow: 'hidden', whiteSpace: 'nowrap',
               display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, color: pv.ok ? '#bbf7d0' : '#ffffff',
             }}>{pv.ok ? (pv.sizeUnknown ? `U${pv.uStart} 부터(높이는 다음 창에서)` : `U${pv.uStart}${pv.uSize > 1 ? `–${pv.uStart + pv.uSize - 1}` : ''} 에 놓기`) : pv.reason}</div>
           ) : null}
@@ -209,15 +211,15 @@ function PlaceModal({ init, racks, onClose, onSave, onRemove, busy, error }) {
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
           <label style={row}><span style={lab}>랙</span>
             <Select style={inp} value={f.rackId} onChange={set('rackId')}>{racks.map((r) => <option key={r.id} value={r.id}>{r.name} ({r.heightU}U)</option>)}</Select></label>
-          <label style={row}><span style={lab}>시작 U(아래가 1)</span><input style={inp} inputMode="numeric" value={f.uStart} onChange={set('uStart')} /></label>
-          <label style={row}><span style={lab}>높이(U) — 1U 로 가정하지 않습니다</span><input style={inp} inputMode="numeric" value={f.uSize} onChange={set('uSize')} /></label>
+          <label style={row}><span style={lab}>시작 U(아래가 1)</span><input style={inp} inputMode="numeric" value={f.uStart} onChange={set('uStart')} autoFocus={init.uStart === '' || init.uStart == null} /></label>
+          <label style={row}><span style={lab}>높이(U)</span><input style={inp} inputMode="numeric" value={f.uSize} onChange={set('uSize')} placeholder="입력 필수" autoFocus={!(init.uStart === '' || init.uStart == null) && (init.uSize === '' || init.uSize == null)} /></label>
           <label style={row}><span style={lab}>면</span>
             <Select sort={false} style={inp} value={f.face} onChange={set('face')}>{Object.entries(FACE_LABEL).map(([k, t]) => <option key={k} value={k}>{t}</option>)}</Select></label>
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
           <label style={row}><span style={lab}>종류</span>
             <Select sort={false} style={inp} value={f.kind} onChange={set('kind')}>{Object.entries(KIND_LABEL).map(([k, t]) => <option key={k} value={k}>{t}</option>)}</Select></label>
-          <label style={{ ...row, flex: '2 1 220px' }}><span style={lab}>표시 이름</span><input style={inp} value={f.label} onChange={set('label')} placeholder="예: 가상화서버 #16" /></label>
+          <label style={{ ...row, flex: '2 1 220px' }}><span style={lab}>표시 이름</span><input style={inp} value={f.label} onChange={set('label')} placeholder="예: 가상화서버 #16" autoFocus={!!init.id} /></label>
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
           <label style={row}><span style={lab}>모델</span><input style={inp} value={f.model} onChange={set('model')} placeholder="예: PowerEdge R740" /></label>
@@ -234,7 +236,7 @@ function PlaceModal({ init, racks, onClose, onSave, onRemove, busy, error }) {
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
           {init.id ? <button type="button" style={{ ...btn, color: '#fecaca' }} disabled={busy} onClick={onRemove}>장비 빼기</button> : null}
           <span style={{ flex: 1 }} />
-          <button type="button" style={btn} onClick={onClose}>취소</button>
+          <button type="button" style={btn} disabled={busy} onClick={onClose}>취소</button>
           <button type="button" style={btnPri} disabled={busy} onClick={() => onSave(f)}>{busy ? '저장 중…' : '저장'}</button>
         </div>
       </div>
@@ -251,7 +253,7 @@ function RackModal({ init, types, onClose, onSave, onRemove, busy, error }) {
     <Modal title={init.id ? '랙 고치기' : '랙 추가'} onClose={onClose} width={560}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-          <label style={row}><span style={lab}>랙 이름</span><input style={inp} value={f.name} onChange={set('name')} placeholder="예: A4" /></label>
+          <label style={row}><span style={lab}>랙 이름</span><input style={inp} value={f.name} onChange={set('name')} placeholder="예: A4" autoFocus /></label>
           <label style={row}><span style={lab}>줄</span><input style={inp} value={f.row} onChange={set('row')} placeholder="예: A" /></label>
           <label style={row}><span style={lab}>용도</span><input style={inp} value={f.role} onChange={set('role')} placeholder="예: DVC SERVER(ESX2)" /></label>
         </div>
@@ -269,7 +271,7 @@ function RackModal({ init, types, onClose, onSave, onRemove, busy, error }) {
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
           {init.id ? <button type="button" style={{ ...btn, color: '#fecaca' }} disabled={busy} onClick={onRemove}>랙 지우기(빈 랙만)</button> : null}
           <span style={{ flex: 1 }} />
-          <button type="button" style={btn} onClick={onClose}>취소</button>
+          <button type="button" style={btn} disabled={busy} onClick={onClose}>취소</button>
           <button type="button" style={btnPri} disabled={busy} onClick={() => onSave(f)}>{busy ? '저장 중…' : '저장'}</button>
         </div>
       </div>
@@ -283,13 +285,14 @@ function NameModal({ title, init = '', extra = null, onClose, onSave, onRemove, 
     <Modal title={title} onClose={onClose} width={440}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}><span style={lab}>이름</span>
-          <input style={{ ...sel, width: '100%', boxSizing: 'border-box' }} value={v} onChange={(e) => setV(e.target.value)} autoFocus /></label>
+          <input style={{ ...sel, width: '100%', boxSizing: 'border-box' }} value={v} onChange={(e) => setV(e.target.value)} autoFocus
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent?.isComposing && !busy && v.trim()) onSave(v); }} /></label>
         {extra}
         {error ? <div role="alert" style={{ fontSize: 12, color: '#fecaca' }}>{error}</div> : null}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
           {onRemove ? <button type="button" style={{ ...btn, color: '#fecaca' }} disabled={busy} onClick={onRemove}>{removeLabel}</button> : null}
           <span style={{ flex: 1 }} />
-          <button type="button" style={btn} onClick={onClose}>취소</button>
+          <button type="button" style={btn} disabled={busy} onClick={onClose}>취소</button>
           <button type="button" style={btnPri} disabled={busy || !v.trim()} onClick={() => onSave(v)}>{busy ? '저장 중…' : '저장'}</button>
         </div>
       </div>
@@ -311,7 +314,7 @@ function TypesModal({ types, onClose, onAdd, onRemove, busy, error }) {
         </STable>
         {!types.length ? <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>아직 랙 종류가 없습니다. 랙을 추가할 때 높이를 직접 넣어도 됩니다.</div> : null}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-end' }}>
-          <label style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: '2 1 160px' }}><span style={lab}>이름</span><input style={sel} value={name} onChange={(e) => setName(e.target.value)} placeholder="예: 스토리지 랙 40U" /></label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: '2 1 160px' }}><span style={lab}>이름</span><input style={sel} value={name} onChange={(e) => setName(e.target.value)} placeholder="예: 스토리지 랙 40U" autoFocus /></label>
           <label style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: '1 1 80px' }}><span style={lab}>높이(U)</span><input style={sel} inputMode="numeric" value={h} onChange={(e) => setH(e.target.value)} /></label>
           <button type="button" style={btnPri} disabled={busy || !name.trim()} onClick={() => onAdd(name, h).then((ok) => { if (ok) setName(''); })}>추가</button>
         </div>
@@ -355,7 +358,7 @@ function VersionsModal({ corpId, corpName, onClose, onRestored }) {
       const r = await postJson('/tools/rack/op', { op: 'version.restore', corpId, versionId: selVid, expectLatestId: list?.latestId });
       if (r?.ok === false) {
         setMsg(r.reason || '되돌리지 못했습니다.');
-        if (r.code === 'versionConflict') { await load(); setConfirm(false); setDetailTick((x) => x + 1); }
+        if (r.code === 'versionConflict') { const fresh = await load(); setConfirm(false); setDetailTick((x) => x + 1); if (fresh) setMsg(`${r.reason || '그 사이 원장이 바뀌었습니다.'} 판 목록을 다시 불러왔습니다.`); }
         return;
       }
       await load();
@@ -385,7 +388,8 @@ function VersionsModal({ corpId, corpName, onClose, onRestored }) {
         <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>
           변경이 저장될 때마다 이 법인의 랙 실장도 전체(데이터센터 · 전산실 · 랙 · 장비 배치)를 한 판으로 남깁니다. 법인마다 {list?.keep != null ? `최근 ${list.keep}개만` : '정해진 개수의 최근 판만'} 남고 더 오래된 판은 지워집니다.
         </span>
-        {err ? <ErrorBox error={err} /> : !list ? <Loading label="판 기록" /> : (
+        {err && list ? <StaleBanner what="판 목록을" error={err} onRetry={load} /> : null}
+        {err && !list ? <ErrorBox error={err} /> : !list ? <Loading label="판 기록" /> : (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-start' }}>
             <ul style={{ listStyle: 'none', margin: 0, padding: 0, flex: '1 1 300px', minWidth: 0, maxHeight: 460, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}>
               {versions.map((v, i) => (
@@ -399,14 +403,14 @@ function VersionsModal({ corpId, corpName, onClose, onRestored }) {
                     </span>
                     <span style={{ fontSize: 12, fontWeight: 600 }}>{ACTION_LABEL[v.action] || v.action}</span>
                     <span style={{ fontSize: 11.5, color: 'var(--text-dim)', overflowWrap: 'anywhere' }}>{v.detail}</span>
-                    <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>랙 {v.counts?.racks ?? '—'} · 장비 {v.counts?.places ?? '—'}</span>
+                    <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>랙 {v.counts?.racks ?? '—'} · 장비 {v.counts?.places ?? '—'}</span>
                   </button>
                 </li>
               ))}
               {!versions.length ? <li style={{ padding: 12, fontSize: 12, color: 'var(--text-dim)' }}>아직 저장된 판이 없습니다.</li> : null}
             </ul>
             <div style={{ flex: '2 1 420px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {selVid == null ? <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>왼쪽에서 판을 고르면 무엇이 바뀌었는지 보여 줍니다.</span> : null}
+              {selVid == null && versions.length ? <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>목록에서 판을 고르면 무엇이 바뀌었는지 보여 줍니다.</span> : null}
               {detailErr ? <div role="alert" style={{ fontSize: 12, color: '#fecaca' }}>{detailErr}</div> : null}
               {selVid != null && !detail && !detailErr ? <Loading label="판" /> : null}
               {detail && !detail.readable ? <div role="alert" style={{ fontSize: 12, color: '#fecaca' }}>이 판을 읽지 못했습니다(손상) — 보거나 되돌릴 수 없습니다.</div> : null}
@@ -462,6 +466,9 @@ export default function RackTool() {
   const [selId, setSelId] = useState('');
   const [modal, setModal] = useState(null);   // { kind, ... }
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
+  busyRef.current = busy;
+  const closeModal = useCallback(() => { if (!busyRef.current) setModal(null); }, []);
   const [modalErr, setModalErr] = useState('');
   const [note, setNote] = useState(null);     // { tone, text }
   const [dragInfo, setDragInfo] = useState(null);
@@ -516,6 +523,7 @@ export default function RackTool() {
   useEffect(() => { if (tree && !rooms.some((r) => r.id === roomId)) setRoomId(rooms[0]?.id || ''); }, [tree, rooms, roomId]);
   // 전산실을 바꾸면 고른 장비 · 미리 보기 · 앞 전산실의 알림 줄을 지운다(다른 전산실 작업 결과가 남아 보이지 않게).
   useEffect(() => { setSelId(''); setPreview(null); setNote(null); loadRoom(roomId); }, [roomId, loadRoom]);
+  useEffect(() => { setNote(null); }, [corpId, siteId]);
 
   const corp = (tree?.corps || []).find((c) => c.id === corpId);
   const canEdit = !!view?.canEdit && !viewErr;   // 다시 불러오지 못한(낡은) 화면에서는 편집을 잠근다 — ‘다시 시도’ 로 최신을 받은 뒤에
@@ -665,7 +673,7 @@ export default function RackTool() {
           <Seg label="겹쳐 보기" items={[['kind', '종류'], ['status', '상태']]} value={mode} onChange={setMode} />
         </span>
         <Seg label="면" items={[['front', '전면'], ['rear', '후면']]} value={face} onChange={setFace} />
-        <SearchBox value={q} onChange={setQ} placeholder="이름 · 시리얼 · 호스트 이름 찾기" style={{ flex: '1 1 240px', minWidth: 200 }} />
+        <SearchBox value={q} onChange={setQ} placeholder="이름 · 모델 · 시리얼 · 호스트 이름 찾기" style={{ flex: '1 1 240px', minWidth: 200 }} />
         <button type="button" style={btn} onClick={() => { loadTree(); loadRoom(roomId); }}>새로 고침</button>
         {view && canCsv() ? <button type="button" style={btn} disabled={exporting} onClick={exportXlsx}>{exporting ? '내보내는 중…' : '엑셀 내보내기'}</button> : null}
         {corpId ? <button type="button" style={btn} onClick={() => setModal({ kind: 'versions' })}>판 기록</button> : null}
@@ -727,14 +735,14 @@ export default function RackTool() {
                     <div key={r.id} style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: '0 0 auto' }}>
                       <RackColumn rack={r} places={placesByRack.get(r.id) || []} mode={mode} face={face} q={q} selId={selId} onPick={setSelId}
                         edit={edit && canEdit} drag={{ ...drag, ...(dragInfo || {}) }} onDragOverRack={onDragOverRack} onDropRack={onDropRack} onDragLeaveRack={onDragLeaveRack} preview={preview} />
-                      {edit && canEdit ? <button type="button" style={{ ...btn, height: 26, alignSelf: 'flex-start' }} onClick={() => { setModalErr(''); setModal({ kind: 'rack', init: r }); }}>랙 고치기</button> : null}
+                      {edit && canEdit ? <button type="button" style={{ ...btn, height: 26, alignSelf: 'flex-start' }} aria-label={`랙 ${r.name} 고치기`} onClick={() => { setModalErr(''); setModal({ kind: 'rack', init: r }); }}>랙 고치기</button> : null}
                     </div>
                   ))}
                 </div>
               )}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, padding: '8px 14px', borderTop: '1px solid var(--border-soft)', fontSize: 11.5, color: '#aebbd0' }}>
                 {legend.map((l) => <span key={l.k} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span style={{ width: 18, height: 12, borderRadius: 3, background: l.bg, border: `1px solid ${l.bd}` }} />{l.label}</span>)}
-                {face === 'rear' ? <span>후면 보기 — 회색 = 앞에서 꽂은 전체 깊이 장비의 뒷면</span> : null}
+                {face === 'rear' ? <span>{mode === 'status' ? '후면 보기 — 점선 테두리 = 앞에서 꽂은 전체 깊이 장비의 뒷면(색은 상태)' : '후면 보기 — 회색 = 앞에서 꽂은 전체 깊이 장비의 뒷면'}</span> : null}
                 <span>랙 옆 세로 띠 = 세로 PDU(A · B 계통 수 — 전력 측정값은 표시하지 않습니다)</span>
               </div>
             </div>
@@ -760,7 +768,7 @@ export default function RackTool() {
                       <div style={{ ...mono, fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{u.name || u.hostname || u.serverId}</div>
                       <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>{[u.model, u.serviceTag].filter(Boolean).join(' · ') || '—'}</div>
                     </div>
-                    {edit && canEdit && racks.length ? <button type="button" style={{ ...btn, height: 26 }} onClick={() => { setModalErr(''); setModal({ kind: 'place', init: { rackId: racks[0].id, kind: 'server', label: defaultLabelOf(u), model: u.model || '', serial: u.serviceTag || '' } }); }}>놓기</button> : null}
+                    {edit && canEdit && racks.length ? <button type="button" style={{ ...btn, height: 26 }} aria-label={`${u.name || u.hostname || '서버'} 놓기`} onClick={() => { setModalErr(''); setModal({ kind: 'place', init: { rackId: racks[0].id, kind: 'server', label: defaultLabelOf(u), model: u.model || '', serial: u.serviceTag || '' } }); }}>놓기</button> : null}
                   </div>
                 ))}
                 </div>
@@ -797,7 +805,7 @@ export default function RackTool() {
       )}
 
       {modal?.kind === 'place' ? (
-        <PlaceModal init={modal.init} racks={racks} busy={busy} error={modalErr} onClose={() => setModal(null)} onSave={savePlace}
+        <PlaceModal init={modal.init} racks={racks} busy={busy} error={modalErr} onClose={closeModal} onSave={savePlace}
           onRemove={async () => {
             if (lostView()) return;
             if (!window.confirm(`‘${modal.init.label || modal.init.serial || '이름 없음'}’ 을(를) 랙에서 뺄까요? 판 기록에서 되돌릴 수 있습니다.`)) return;
@@ -805,7 +813,7 @@ export default function RackTool() {
           }} />
       ) : null}
       {modal?.kind === 'rack' ? (
-        <RackModal init={modal.init} types={types} busy={busy} error={modalErr} onClose={() => setModal(null)}
+        <RackModal init={modal.init} types={types} busy={busy} error={modalErr} onClose={closeModal}
           onSave={async (f) => {
             if (lostView()) return;
             const rack = { name: f.name, row: f.row, role: f.role, pduA: f.pduA, pduB: f.pduB, typeId: f.typeId, ...(f.typeId ? {} : { heightU: f.heightU }) };
@@ -819,29 +827,29 @@ export default function RackTool() {
           }} />
       ) : null}
       {modal?.kind === 'site' ? (
-        <NameModal title={`데이터센터 추가 — ${corp?.name || ''}`} busy={busy} error={modalErr} onClose={() => setModal(null)}
+        <NameModal title={`데이터센터 추가 — ${corp?.name || ''}`} busy={busy} error={modalErr} onClose={closeModal}
           onSave={async (name) => { const r = await run({ op: 'site.add', corpId, name }, { okText: '데이터센터를 추가했습니다.' }); if (r) { await loadTree(); setSiteId(r.id); } }} />
       ) : null}
       {modal?.kind === 'site-edit' ? (
-        <NameModal title="데이터센터 이름 · 삭제" init={sites.find((s) => s.id === siteId)?.name || ''} busy={busy} error={modalErr} onClose={() => setModal(null)}
+        <NameModal title="데이터센터 이름 · 삭제" init={sites.find((s) => s.id === siteId)?.name || ''} busy={busy} error={modalErr} onClose={closeModal}
           onSave={async (name) => { if (await run({ op: 'site.rename', id: siteId, name })) await loadTree(); }}
           onRemove={async () => { if (!window.confirm('이 데이터센터를 지울까요? 판 기록에서 되돌릴 수 있습니다.')) return; if (await run({ op: 'site.remove', id: siteId }, { okText: '데이터센터를 지웠습니다.' })) await loadTree(); }} removeLabel="데이터센터 지우기(전산실이 없을 때만)" />
       ) : null}
       {modal?.kind === 'room' ? (
-        <NameModal title="전산실 추가" busy={busy} error={modalErr} onClose={() => setModal(null)}
+        <NameModal title="전산실 추가" busy={busy} error={modalErr} onClose={closeModal}
           onSave={async (name) => { const r = await run({ op: 'room.add', siteId, name }, { okText: '전산실을 추가했습니다.' }); if (r) { await loadTree(); setRoomId(r.id); } }} />
       ) : null}
       {modal?.kind === 'room-edit' ? (
-        <NameModal title="전산실 이름 · 삭제" init={view?.room?.name || ''} busy={busy} error={modalErr} onClose={() => setModal(null)}
+        <NameModal title="전산실 이름 · 삭제" init={view?.room?.name || ''} busy={busy} error={modalErr} onClose={closeModal}
           onSave={async (name) => { if (await run({ op: 'room.rename', id: roomId, name })) { await loadTree(); await loadRoom(roomId); } }}
           onRemove={async () => { if (!window.confirm('이 전산실을 지울까요? 판 기록에서 되돌릴 수 있습니다.')) return; if (await run({ op: 'room.remove', id: roomId }, { okText: '전산실을 지웠습니다.' })) await loadTree(); }} removeLabel="전산실 지우기(랙이 없을 때만)" />
       ) : null}
       {modal?.kind === 'versions' ? (
-        <VersionsModal corpId={corpId} corpName={corp?.name || corpId} onClose={() => setModal(null)}
+        <VersionsModal corpId={corpId} corpName={corp?.name || corpId} onClose={closeModal}
           onRestored={async (text) => { setModal(null); say('ok', text); await loadTree(); await loadRoom(roomId); }} />
       ) : null}
       {modal?.kind === 'types' ? (
-        <TypesModal types={types} busy={busy} error={modalErr} onClose={() => setModal(null)}
+        <TypesModal types={types} busy={busy} error={modalErr} onClose={closeModal}
           onAdd={async (name, heightU) => { const r = await run({ op: 'type.add', name, heightU }, { okText: '랙 종류를 추가했습니다.', closeModal: false }); if (r) await loadTree(); return !!r; }}
           onRemove={async (id) => { if (!window.confirm(`랙 종류 ‘${types.find((t) => t.id === id)?.name || ''}’ 을(를) 지울까요?`)) return; if (await run({ op: 'type.remove', id }, { okText: '랙 종류를 지웠습니다.', closeModal: false })) await loadTree(); }} />
       ) : null}
