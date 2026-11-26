@@ -56,7 +56,8 @@ test('준비', async () => {
     srv('inv3', 'kr-inv-03', 'https://192.0.2.52', 'INV0003'),
     srv('srv-dns', 'bmc-kr-09.corp.example', 'https://bmc-kr-09.corp.example', 'DNS0001'),
     srv('bmc-kr-10.corp.example', 'KR 서버 10', 'https://192.0.2.70', 'DNS0002'),
-    srv('short1', 'lab1-server', 'https://192.0.2.71', 'AB1'),
+    // 임계(TAG_MASK_MIN) 미만 태그 — ASCII 영숫자 4자 미만은 자리표시라 연결 키가 아니므로(4회차 점검 정확성 4), 비 ASCII 글자가 든 3자 태그로 본다
+    srv('short1', 'lab-가B1-server', 'https://192.0.2.71', '가B1'),
     srv('sto1', 'kr-sto-01', 'https://192.0.2.72', 'STO0001'),
     srv('notag', 'no-tag-server', 'https://192.0.2.73', ''),
   ], 'replace');
@@ -107,8 +108,8 @@ test('탐침 K01 · K02: 가림 판정기는 host 와 id 를 모두 본다(이�
 });
 
 test('탐침 K07: 짧은 서비스 태그(임계 미만)는 이름에서 걷어 내지 않는다', async () => {
-  const p = await place(kr.a1, kr.r1, { uStart: 8, serial: 'AB1' });
-  assert.equal((await room(OP_A, kr.r1)).places.find((x) => x.id === p).link.name, 'lab1-server');
+  const p = await place(kr.a1, kr.r1, { uStart: 8, serial: '가B1' });
+  assert.equal((await room(OP_A, kr.r1)).places.find((x) => x.id === p).link.name, 'lab-가B1-server');
 });
 
 test('탐침 K12 · K18: 서버만 서비스 태그로 잇는다 · 시리얼 없는 서버는 no-serial', async () => {

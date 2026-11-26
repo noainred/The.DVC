@@ -56,6 +56,13 @@ const ADDR_ROWS = [
   ['v6 2001:db8:0:0:0:0:0:a23 full', '2001:db8'], ['bmc fe80::a24: note', 'fe80::a24'], ['nic 0a:1b:2c:3d:4e:5f up', '0a:1b:2c'],
   // 점 없는 짧은 등록 주소는 호스트 이름 낱말 통째일 때 가린다(C3 나)
   ['ssh bm9x now', 'bm9x'], ['(bm9x)', 'bm9x'], ['down: bm9x.', 'bm9x'], ['see bm9x.mgmt.corp', 'bm9x'], ['root@bm9x:22', 'bm9x'],
+  // 4회차 점검 보안 2 · 정확성 1: 이름표 · 포트가 콜론으로 붙은 IPv6 · MAC(구간의 마디 묶음으로 판정)
+  ['ip:2001:db8::a31', '2001:db8::a31'], ['bmc mgmt:fe80::a32 rear', 'fe80::a32'], ['mac:0c:42:a1:dd:ee:01', '42:a1:dd'], ['nic MAC:0a:1b:2c:3d:4e:6f', '1b:2c:3d'],
+  ['v6 2001:db8:0:0:0:0:0:a33:8443 port', '2001:db8:0'], ['fe80::a34:end', 'fe80::a34'], ['주소:2001:db8::a3b', '2001:db8::a3b'],
+  // 4회차 점검 보안 3: 한글 조사 · 접미가 붙어도 낱말 경계다(글자 갈래가 바뀌는 자리)
+  ['bmc fe80::a35에 연결', 'fe80::a35'], ['bm9x에 연결된 스위치', 'bm9x'], ['idrac-a1.mgmt.example의 예비', 'idrac-a1'], ['10.20.30.61번 장비', '10.20.30.61'],
+  // 4회차 점검 보안 5: 'masked-' 로 시작하는 낱말도 원문이다
+  ['masked-10.20.30.62 rear', '10.20.30.62'], ['masked-10.20.30.63', '10.20.30.63'],
 ];
 const KEEP_ROWS = ['가상화서버 #2 (12U)', '점검 12:30 예정', 'fw 1.2.3', 'Unity array (예비)', 'face cafe deadbeef',   // 그대로 보여야 하는 이름
   // 2회차 반증 C3 가: 시각 · 포트 · 콜론이 든 이름은 IPv6 가 아니다
@@ -67,6 +74,8 @@ const KEEP_ROWS = ['가상화서버 #2 (12U)', '점검 12:30 예정', 'fw 1.2.3'
 const SHORT_SERIALS = [['short-one', 'AB12'], ['short-two', '4210'], ['short-three', '1001'], ['short-four', 'A1U1']];
 const SER_ROWS = [   // [표시 이름, 시리얼] — 시리얼을 가리는 판본에만 해당
   ['node QX7 13 K9Z', 'QX713K9Z'], ['node RT5 44　ZZ9', 'RT544ZZ9'], ['node AB-CD_EF.GH:12', 'ABCDEFGH12'], ['pair of abcdefgh12', 'ZZ-FILL-01'],
+  // 4회차 점검 보안 3: 한글 조사 · 접미가 붙은 시리얼(구분자로 띄운 것 · 5자 짧은 키) · 보안 1: 비 ASCII 글자가 든 시리얼은 자리표시가 아니다
+  ['QK7-13Z9번 서버', 'QK713Z9'], ['RR5ZK의 예비', 'RR5ZK'], ['spare 자산9234 box', '자산9234'], ['랙 자산가나다라', '자산가나다라'], ['본사-0000 예비', '본사-0000'],
 ];
 
 let roomId; let rev;
@@ -148,7 +157,10 @@ test('짧은 시리얼 · 자리표시 태그 · 이력의 ‘이름:’ — 낱
   for (const user of [OP_ALL, OP_A]) {
     const logs = paths(await views(user))['전산실 이력'];
     assert.match(logs, /AB:CD: A[12] U\d+ → A[12] U\d+/, `${user.username}: 옮긴 이력의 이름이 그대로`);
-    assert.ok(!logs.includes('fe80::a24') && /masked-[0-9a-f]{12} note: A[12] U/.test(logs), `${user.username}: IPv6 이름은 옮긴 이력에서도 토큰 — ${logs.slice(0, 300)}`);
+    // 주소 뒤의 문장 부호(콜론)는 남는다 — 같은 주소는 놓기 · 옮기기 이력에서 같은 토큰(4회차 점검 관찰)
+    assert.ok(!logs.includes('fe80::a24') && /bmc (masked-[0-9a-f]{12}): note: A[12] U\d+ → /.test(logs), `${user.username}: IPv6 이름은 옮긴 이력에서도 토큰 — ${logs.slice(0, 300)}`);
+    const tok = /bmc (masked-[0-9a-f]{12}): note: A[12] U\d+ → /.exec(logs)[1];
+    assert.ok(logs.includes(`bmc ${tok}: note → `), `${user.username}: 놓기 이력도 같은 토큰`);
   }
 });
 

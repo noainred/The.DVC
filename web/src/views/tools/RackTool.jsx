@@ -16,7 +16,7 @@ import {
   U_PX, KIND_LABEL, FACE_LABEL, colorOf, legendOf, fmtU, placesForFace, placementIssue, dropStartU, boxOf, wattText,
   roomSummary, matchPlace, ACTION_LABEL, partChips, chipColor, statusKeyOf,
   diffCountText, DIFF_OP_LABEL, DIFF_TYPE_LABEL, fieldsText, matchUnplaced, UNPLACED_PAGE, defaultLabelOf, changedFields,
-  viewAfterLoadFail, sameSpot, viewAfterMove,
+  viewAfterLoadFail, sameSpot, viewAfterMove, spotVisible, lostViewReason, modalWithRoom, conflictHint, nameTarget,
 } from './rackView.js';
 
 const card = { background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 12, minWidth: 0 };
@@ -482,7 +482,7 @@ export default function RackTool() {
   const setModal = useCallback((m) => {
     if (m && !modalRef.current && typeof document !== 'undefined') lastFocus.current = document.activeElement;
     // 장비 · 랙 창은 **연 때의 전산실**을 담아 둔다 — 늦게 온 응답이 선택을 바꾼 뒤 그 창으로 다른 전산실에 쓰지 않게(3회차 점검 화면 1 · savePlace 등의 wrongRoom).
-    setModalRaw(m && (m.kind === 'place' || m.kind === 'rack') && !m.roomId ? { ...m, roomId: roomIdRef.current } : m);
+    setModalRaw(modalWithRoom(m, roomIdRef.current));
   }, []);
   useEffect(() => {
     if (modal) return;
@@ -591,7 +591,7 @@ export default function RackTool() {
     // 1회차 점검 성능 축: 응답이 늦는 동안 전산실을 바꾸거나 다른 창을 열 수 있다 — 이 쓰기를 시작한 전산실 · 창일 때만 rev 반영 · 창 닫기 · 알림을 한다.
     const modalAtStart = modalRef.current;
     const sameModal = () => modalRef.current === modalAtStart;
-    const sameRoom = () => (!writeRoom || writeRoom === roomIdRef.current) && (!writeSite || writeSite === siteIdRef.current) && (!writeCorp || writeCorp === corpIdRef.current);
+    const sameRoom = () => spotVisible({ room: writeRoom, site: writeSite, corp: writeCorp }, { room: roomIdRef.current, site: siteIdRef.current, corp: corpIdRef.current });
     setBusy(true); setBusyModal(modalAtStart); setModalErr('');
     try {
       const r = await postJson('/tools/rack/op', body);
@@ -601,8 +601,8 @@ export default function RackTool() {
           const fresh = await loadRoom(roomIdRef.current);
           // 창을 닫지 않는다(입력 유지 — 점검 C20). 최신 배치를 못 불러왔으면 그렇게 말한다(불러온 것처럼 '다시 저장하면 반영' 이라 하지 않는다 — 2회차 점검 화면 5).
           //   전산실이 없어졌거나 권한이 없어졌으면(404 · 403) 다시 저장해도 되지 않는다 — 처음부터 닫고 새로 고치라고 말한다.
-          const gone = !fresh && (lastRoomErr.current?.status === 404 || lastRoomErr.current?.status === 403);
-          if (sameModal()) setModalErr(fresh ? `${why} 고친 칸은 그대로 두었습니다 — 다시 저장하면 고친 칸만 반영합니다.` : gone ? `${why} 그런데 이 전산실을 더 불러올 수 없습니다 — 창을 닫고 새로 고친 뒤 다시 하세요.` : `${why} 그런데 최신 배치를 불러오지 못했습니다 — 잠시 뒤 다시 저장하세요(고친 칸은 그대로 두었습니다).`);
+          const hint = conflictHint(fresh, lastRoomErr.current);
+          if (sameModal()) setModalErr(hint === 'fresh' ? `${why} 고친 칸은 그대로 두었습니다 — 다시 저장하면 고친 칸만 반영합니다.` : hint === 'gone' ? `${why} 그런데 이 전산실을 더 불러올 수 없습니다 — 창을 닫고 새로 고친 뒤 다시 하세요.` : `${why} 그런데 최신 배치를 불러오지 못했습니다 — 잠시 뒤 다시 저장하세요(고친 칸은 그대로 두었습니다).`);
           if (sameRoom()) say('warn', why);
           return null;
         }
@@ -673,9 +673,10 @@ export default function RackTool() {
 
   // 장비 · 랙 창의 저장 전 확인: 화면 자료가 있고, 그 창을 연 전산실을 지금도 보고 있는가(아니면 다른 전산실의 rev · 랙으로 쓰게 된다 — 3회차 점검 화면 1).
   const lostView = () => {
-    if (!view) { setModalErr('전산실을 다시 불러오지 못했습니다 — 창을 닫고 새로 고친 뒤 다시 하세요.'); return true; }
-    if (modal?.roomId && modal.roomId !== view.room?.id) { setModalErr('이 창을 연 뒤 보고 있는 전산실이 바뀌었습니다 — 창을 닫고 다시 여세요.'); return true; }
-    return false;
+    const why = lostViewReason(view, modal);
+    if (why === 'noView') setModalErr('전산실을 다시 불러오지 못했습니다 — 창을 닫고 새로 고친 뒤 다시 하세요.');
+    else if (why === 'roomChanged') setModalErr('이 창을 연 뒤 보고 있는 전산실이 바뀌었습니다 — 창을 닫고 다시 여세요.');
+    return !!why;
   };
   const nothingChanged = () => { setModal(null); say('ok', '바뀐 것이 없어 저장하지 않았습니다.'); };
   const savePlace = async (f, f0) => {
@@ -784,7 +785,7 @@ export default function RackTool() {
         <>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 10 }}>
             <Tile k="랙" n={sum.racks} s={sum.heightsText || '—'} />
-            <Tile k="사용 U" n={`${sum.usedU} / ${sum.totalU}U`} s={sum.usePct == null ? '—' : `${sum.usePct}% · 빈 자리 ${sum.freeU}U`} />
+            <Tile k="사용 U" n={sum.usedStale ? `— / ${sum.totalU}U` : `${sum.usedU} / ${sum.totalU}U`} s={sum.usedStale ? '다시 불러오는 중…' : sum.usePct == null ? '—' : `${sum.usePct}% · 빈 자리 ${sum.freeU}U`} />
             <Tile k="배치된 장비" n={sum.devices} s={`서버 ${sum.servers} · 그 밖 ${sum.manual}`} />
             <Tile k="미배치 서버" n={sum.unplaced} s="iDRAC 등록 · 원장에 없음" color={sum.unplaced ? '#fcd34d' : undefined} />
             <Tile k="서버 장애 · 경고" n={`${sum.crit} · ${sum.warn}`} s={`못 읽음 ${sum.unknown} · 연결 안 됨 ${sum.nolink}`} color={sum.crit ? '#fca5a5' : undefined} />
@@ -847,7 +848,7 @@ export default function RackTool() {
                   </div>
                 ) : null}
                 {view.unplacedTotal > (view.unplaced || []).length ? <div style={{ padding: '8px 14px', fontSize: 11, color: 'var(--text-dim)', borderTop: '1px solid var(--border-soft)' }}>서버가 많아 앞 {(view.unplaced || []).length}대만 받았습니다(전체 {view.unplacedTotal}대) — 검색은 받은 목록 안에서만 됩니다.</div> : null}
-                {view.serversNoTag ? <div style={{ padding: '8px 14px', fontSize: 11, color: 'var(--text-dim)', borderTop: '1px solid var(--border-soft)' }}>서비스 태그를 못 읽은 서버 {view.serversNoTag}대는 미배치로 셀 수 없어 뺐습니다.</div> : null}
+                {view.serversNoTag ? <div style={{ padding: '8px 14px', fontSize: 11, color: 'var(--text-dim)', borderTop: '1px solid var(--border-soft)' }}>서비스 태그를 못 읽었거나 태그가 공통 기본값(여러 서버가 같은 값)인 서버 {view.serversNoTag}대는 태그로 이을 수 없어 미배치에서 뺐습니다.</div> : null}
               </div>
               <div style={card}>
                 <div style={{ padding: '10px 14px', display: 'flex', gap: 8, alignItems: 'center' }}><strong>변경 이력</strong><span style={{ fontSize: 11, color: 'var(--text-dim)' }}>최근 {view.logs.length}건</span></div>
@@ -907,28 +908,28 @@ export default function RackTool() {
       {modal?.kind === 'site' ? (
         <NameModal title={`데이터센터 추가 — ${(corps.find((c) => c.id === modal.corpId) || corp)?.name || ''}`} busy={busy} saving={busy && busyModal === modal} error={modalErr} onClose={closeModal}
           onSave={async (name) => {
-            const at = whereNow(); const target = modal.corpId || at.corp;
+            const at = whereNow(); const target = nameTarget(modal, at).corpId;
             const r = await run({ op: 'site.add', corpId: target, name }, { okText: '데이터센터를 추가했습니다.', corpId: target });
             if (r) { await loadTree(); if (unmoved(at)) setSiteId(r.id); }
           }} />
       ) : null}
       {modal?.kind === 'site-edit' ? (
         <NameModal title={`데이터센터 이름 · 삭제 — ${modal.name || ''}`} init={modal.name || ''} busy={busy} saving={busy && busyModal === modal} error={modalErr} onClose={closeModal}
-          onSave={async (name) => { if (await run({ op: 'site.rename', id: modal.id, name }, { siteId: modal.id })) await loadTree(); }}
-          onRemove={async () => { if (!window.confirm(`데이터센터 ‘${modal.name || ''}’ 을(를) 지울까요? 판 기록에서 되돌릴 수 있습니다.`)) return; if (await run({ op: 'site.remove', id: modal.id }, { okText: '데이터센터를 지웠습니다.', siteId: modal.id })) await loadTree(); }} removeLabel="데이터센터 지우기(전산실이 없을 때만)" />
+          onSave={async (name) => { const { id } = nameTarget(modal); if (await run({ op: 'site.rename', id, name }, { siteId: id })) await loadTree(); }}
+          onRemove={async () => { const { id } = nameTarget(modal); if (!window.confirm(`데이터센터 ‘${modal.name || ''}’ 을(를) 지울까요? 판 기록에서 되돌릴 수 있습니다.`)) return; if (await run({ op: 'site.remove', id }, { okText: '데이터센터를 지웠습니다.', siteId: id })) await loadTree(); }} removeLabel="데이터센터 지우기(전산실이 없을 때만)" />
       ) : null}
       {modal?.kind === 'room' ? (
         <NameModal title={`전산실 추가${modal.siteName ? ` — ${modal.siteName}` : ''}`} busy={busy} saving={busy && busyModal === modal} error={modalErr} onClose={closeModal}
           onSave={async (name) => {
-            const at = whereNow(); const target = modal.siteId || at.site;
+            const at = whereNow(); const target = nameTarget(modal, at).siteId;
             const r = await run({ op: 'room.add', siteId: target, name }, { okText: '전산실을 추가했습니다.', siteId: target });
             if (r) { await loadTree(); if (unmoved(at)) setRoomId(r.id); }
           }} />
       ) : null}
       {modal?.kind === 'room-edit' ? (
         <NameModal title={`전산실 이름 · 삭제 — ${modal.name || ''}`} init={modal.name || ''} busy={busy} saving={busy && busyModal === modal} error={modalErr} onClose={closeModal}
-          onSave={async (name) => { if (await run({ op: 'room.rename', id: modal.id, name }, { roomId: modal.id })) await Promise.all([loadTree(), loadRoom(roomIdRef.current)]); }}
-          onRemove={async () => { if (!window.confirm(`전산실 ‘${modal.name || ''}’ 을(를) 지울까요? 판 기록에서 되돌릴 수 있습니다.`)) return; if (await run({ op: 'room.remove', id: modal.id }, { okText: '전산실을 지웠습니다.', roomId: modal.id })) await loadTree(); }} removeLabel="전산실 지우기(랙이 없을 때만)" />
+          onSave={async (name) => { const { id } = nameTarget(modal); if (await run({ op: 'room.rename', id, name }, { roomId: id })) await Promise.all([loadTree(), loadRoom(roomIdRef.current)]); }}
+          onRemove={async () => { const { id } = nameTarget(modal); if (!window.confirm(`전산실 ‘${modal.name || ''}’ 을(를) 지울까요? 판 기록에서 되돌릴 수 있습니다.`)) return; if (await run({ op: 'room.remove', id }, { okText: '전산실을 지웠습니다.', roomId: id })) await loadTree(); }} removeLabel="전산실 지우기(랙이 없을 때만)" />
       ) : null}
       {modal?.kind === 'versions' ? (
         <VersionsModal corpId={corpId} corpName={corp?.name || corpId} onClose={closeModal}
@@ -940,7 +941,7 @@ export default function RackTool() {
           }}
           onFailed={(text, forCorp) => {
             // 창이 아직 열려 있으면 창 안 문구로 충분하다 — 닫았을 때만(그리고 그 법인을 보고 있을 때만) 알림 줄에 올린다.
-            if (modalRef.current !== modal && forCorp === corpIdRef.current) say('err', `판 되돌리기를 하지 못했습니다 — ${text}`);
+            if (modalRef.current !== modal && spotVisible({ corp: forCorp }, { corp: corpIdRef.current })) say('err', `판 되돌리기를 하지 못했습니다 — ${text}`);
           }} />
       ) : null}
       {modal?.kind === 'types' ? (

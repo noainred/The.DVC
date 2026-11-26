@@ -56,7 +56,9 @@ test('1 순수: 겹치는 키는 구간을 합쳐 통째로 가린다 · 색인 
 
 test('1 순수: 느린 기준 구현(키마다 모든 일치 구간의 합집합)과 무작위 대조', () => {
   let seed = 20261126;
-  const rnd = (n) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % n; };
+  // 난수는 32비트 정수 곱(Math.imul)으로 — `seed * 1103515245` 는 2^53 을 넘어 아래 비트가 사라지고 `% n` 이 한쪽으로 쏠린다
+  //   (4회차 점검 테스트 축 T-1 실측: rnd(8) 의 99.6% 가 0 — 점 · 콜론이 든 항목 · 긴 항목이 거의 나오지 않아 경계 규칙을 시험하지 못했다).
+  const rnd = (n) => { seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) % n; };
   const ALPHA = 'ab12XY'; const SEPS = [' ', '-', '_', '.', ':', ' ', ' '];
   const word = (n) => Array.from({ length: n }, () => ALPHA[rnd(ALPHA.length)]).join('');
   const slow = (text, keys) => {

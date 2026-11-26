@@ -112,6 +112,7 @@ export function roomSummary(view) {
     racks: racks.length,
     heightsText: [...heights].sort((a, b) => b[0] - a[0]).map(([h, n]) => `${h}U ${n}`).join(' · '),
     totalU, usedU, freeU: Math.max(0, totalU - usedU), usePct: totalU ? Math.round((usedU / totalU) * 100) : null,
+    usedStale: racks.some((r) => r.totalsStale),   // 끌어 놓기를 먼저 반영한 랙이 있다 — 사용 U 합은 다시 불러올 때까지 옛 값(화면이 숫자 대신 밝힌다)
     devices: places.length,
     manual: places.filter((p) => p.kind !== 'server').length,
     servers: servers.length,
@@ -182,14 +183,62 @@ export function sameSpot(at, now) {
 }
 
 /**
+ * 쓰기의 대상 자리(target — 전산실 · 데이터센터 · 법인 중 그 쓰기가 정한 것)를 지금도 보고 있는가(순수). 정하지 않은 칸은 따지지 않는다.
+ * 저장 중에도 창을 닫을 수 있어, 응답이 왔을 때 다른 법인 · 전산실 화면에 ‘추가했습니다’ 가 뜨지 않게 알림 앞에서 본다(2회차 반증 C5 · 3회차 점검 화면 2).
+ */
+export function spotVisible(target, now) {
+  const t = target || {}; const n = now || {};
+  return (!t.room || t.room === n.room) && (!t.site || t.site === n.site) && (!t.corp || t.corp === n.corp);
+}
+
+/**
+ * 장비 · 랙 창의 저장을 막을 까닭(순수) — '' 저장해도 됨 · 'noView' 화면 자료가 없음 · 'roomChanged' 창을 연 전산실이 지금 자료의 전산실과 다름
+ * (늦게 온 응답 · 목록 변화로 선택 전산실이 바뀐 뒤 그 창으로 다른 전산실의 rev · 랙에 쓰지 않게 — 3회차 점검 화면 1).
+ */
+export function lostViewReason(view, modal) {
+  if (!view) return 'noView';
+  if (modal?.roomId && modal.roomId !== view.room?.id) return 'roomChanged';
+  return '';
+}
+
+/** 장비 · 랙 창에는 연 때의 전산실을 담는다(순수 — 이미 담겼으면 그대로 · 다른 창은 그대로). */
+export function modalWithRoom(m, roomId) {
+  return m && (m.kind === 'place' || m.kind === 'rack') && !m.roomId ? { ...m, roomId } : m;
+}
+
+/**
+ * 충돌(409 revConflict) 뒤 안내의 갈래(순수) — 'fresh' 최신을 불러왔다(다시 저장하면 반영) · 'gone' 전산실이 없어졌거나 권한이 없다(404 · 403 — 닫고 새로 고침) ·
+ * 'stale' 일시 실패(잠시 뒤 다시).
+ */
+export function conflictHint(fresh, lastErr) {
+  if (fresh) return 'fresh';
+  return lastErr?.status === 404 || lastErr?.status === 403 ? 'gone' : 'stale';
+}
+
+/**
+ * 이름 창(추가 · 이름 바꾸기 · 지우기)이 쓸 대상(순수) — **창을 연 때 담은 대상**이 먼저이고, 없을 때만 지금 자리.
+ * 지금 고른 항목으로 쓰면, 늦게 온 추가 응답이 선택을 바꾼 뒤 새 항목이 지워지거나 이름이 바뀐다(3회차 점검 화면 1 · 재현).
+ *  · 'site'(데이터센터 추가) → { corpId } · 'room'(전산실 추가) → { siteId } · 'site-edit' · 'room-edit' → { id }(창에 담긴 것만 — 없으면 '' 로 두어 쓰지 않게)
+ */
+export function nameTarget(modal, at) {
+  const m = modal || {}; const a = at || {};
+  if (m.kind === 'site') return { corpId: m.corpId || a.corp || '' };
+  if (m.kind === 'room') return { siteId: m.siteId || a.site || '' };
+  if (m.kind === 'site-edit' || m.kind === 'room-edit') return { id: m.id || '' };
+  return {};
+}
+
+/**
  * 끌어 놓기 성공을 화면에 먼저 반영한다(순수) — 그 장비의 랙 · 시작 U 를 바꾸고, 랙을 건너 옮겼으면 두 랙의 머리 합계를 ‘낡음’(totalsStale)으로 표시한다
- * (합계는 서버가 계산한 값이라 다시 불러올 때까지 옛 값이다 — 2회차 반증 C6). 다른 전산실의 자료 · 없는 장비는 그대로.
+ * (합계는 서버가 계산한 값이라 다시 불러올 때까지 옛 값이다 — 2회차 반증 C6). 같은 랙 안이면 그 랙에 반깊이 장비가 있을 때만 표시한다. 다른 전산실의 자료 · 없는 장비는 그대로.
  */
 export function viewAfterMove(view, roomId, placeId, rackId, uStart) {
   if (!view || view.room?.id !== roomId) return view;
   const cur = (view.places || []).find((p) => p.id === placeId);
   if (!cur) return view;
-  const touched = cur.rackId !== rackId ? new Set([cur.rackId, rackId]) : null;
+  // 같은 랙 안에서 옮겨도, 그 랙에 반깊이(앞 · 뒤) 장비가 있으면 사용 U 가 바뀔 수 있다(앞 · 뒤가 같은 U 면 한 번만 센다 — 4회차 점검 정확성 3).
+  const halfIn = (view.places || []).some((p) => p.rackId === rackId && (p.face || 'full') !== 'full');
+  const touched = cur.rackId !== rackId ? new Set([cur.rackId, rackId]) : (halfIn ? new Set([rackId]) : null);
   return {
     ...view,
     places: view.places.map((p) => (p.id === placeId ? { ...p, rackId, uStart } : p)),

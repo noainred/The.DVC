@@ -28,7 +28,9 @@ const slow = (text, needles, repl) => {
 
 test('앞머리 색인: 느린 기준 구현과 무작위 대조(짧은 항목 · 점 든 항목 · 겹침 · 맞닿음)', () => {
   let seed = 1126003;
-  const rnd = (n) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % n; };
+  // 난수는 32비트 정수 곱(Math.imul)으로 — `seed * 1103515245` 는 2^53 을 넘어 아래 비트가 사라지고 `% n` 이 한쪽으로 쏠린다
+  //   (4회차 점검 테스트 축 T-1 실측: rnd(8) 의 99.6% 가 0 — 점 · 콜론이 든 항목 · 긴 항목이 거의 나오지 않아 경계 규칙을 시험하지 못했다).
+  const rnd = (n) => { seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) % n; };
   const ALPHA = 'ab1.-:'; const GLUE = [' ', '-', '.', ':', '/', '(', ')', 'x', ''];
   const word = (n) => Array.from({ length: n }, () => ALPHA[rnd(ALPHA.length)]).join('');
   for (const min of [1, 3]) {

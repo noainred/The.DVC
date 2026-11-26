@@ -12,37 +12,77 @@
  *
  * ── 과잉 가림을 막는 경계 규칙(2회차 반증 C2 · C3 나 — 가림을 넓히다 정상 글자를 지웠다) ──
  *  · 시리얼 키가 `TAG_FREE_MIN`(6)자 미만이면 **낱말 통째**로 맞을 때만 가린다(붙여 쓴 그대로 · 앞뒤가 글자 · 숫자가 아님).
+ *    단, 시리얼 **원문에 구분자가 있으면**('A-101' · 'AB-12') 같은 자리에 구분자를 둔 꼴도 맞는다 — 적힌 그대로 쓴 이름이 가려지지 않았다(3회차 반증 C2).
+ *    원문에 없던 구분자로 띄운 것('XY56' 을 'XY-56' 으로)은 여전히 맞지 않는다(날짜 '11-26' 이 시리얼 '1126' 에 걸리지 않게).
  *    4~5자 키는 평범한 글자 조각과 구별할 수 없다 — 시리얼 'AB12' 가 'lab 12 switch' 를 'l••• switch' 로, 'TEST' 가 'latest' 를 'la•••' 로 지웠다.
  *  · 6자 이상 키는 지금처럼 글 속 어디든 맞고(붙여 쓴 부분 일치), **구분자를 건넌 일치**는 양 끝이 낱말 경계일 때만 인정한다
  *    ('XY_56_ZW78' · 'TAG 9876' 은 가리고, 우연히 낱말들에 걸친 조각은 가리지 않는다).
  *  · 등록 주소는 점 · 콜론이 든 6자 이상(FQDN · IP)만 글 속 어디든 맞고, 그 밖(점 없는 짧은 이름)은 **호스트 이름 낱말 통째**일 때만 가린다 —
  *    등록 주소 'kr1' 이 랙 이름 'KR1-A02' 를 '(주소 가림)-A02' 로 바꿨다. 낱말 글자 = 글자 · 숫자 · '_' · '-'(점은 경계 — 'kr1.mgmt.example' 의 'kr1' 은 가린다).
- * ⚠ 대가(결정 기록 — rack/CLAUDE.md): 4~5자 시리얼을 다른 글자에 붙여 쓴 이름('SNAB12')과, 점 없는 등록 주소를 다른 이름 안에 넣은 이름('x-esx-07')은 가려지지 않는다.
+ *  · **낱말 경계 = 글자 체계가 바뀌는 자리**(4회차 점검 보안 3): 이웃 글자가 맞은 구간의 끝 글자와 **같은 갈래**(라틴 글자 · 숫자 / 그 밖의 글자 — 한글 · 한자 · 가나 등)일 때만
+ *    낱말이 이어진 것으로 본다. 한글 조사 · 접미는 라틴 글자 값에 그대로 붙는다 — 'esx-07에 연결' · 'TAG-9874번 서버' · 'A1B2J번 장비' 가 글자(`\p{L}`) 이웃이라는 이유로 가려지지 않았다.
+ * ⚠ 대가(결정 기록 — rack/CLAUDE.md): 4~5자 시리얼을 다른 **라틴 글자 · 숫자**에 붙여 쓴 이름('SNAB12')과, 점 없는 등록 주소를 다른 이름 안에 넣은 이름('x-esx-07')은 가려지지 않는다.
  */
 import { lowSameLen, TAG_MASK_MIN } from '../util/ruleName.js';
-import { normKey, isKeySep } from '../insights/serialKey.js';
+import { isKeySep } from '../insights/serialKey.js';
 
 const KEY_MAX = 64;
 /** 이 길이 미만의 시리얼 키는 낱말 통째로 맞을 때만 가린다(위 '경계 규칙'). */
 export const TAG_FREE_MIN = 6;
 /** 이 길이 미만이거나 점 · 콜론이 없는 등록 주소는 호스트 이름 낱말 통째로 맞을 때만 가린다. */
 export const NEEDLE_FREE_MIN = 6;
-const WORD_CH = /[\p{L}\p{N}]/u;
-const HOST_CH = /[\p{L}\p{N}_-]/u;
-const isWordCh = (ch) => ch !== undefined && WORD_CH.test(ch);
-const isHostCh = (ch) => ch !== undefined && HOST_CH.test(ch);
+const LATIN_CH = /[\p{Script=Latin}\p{Nd}]/u;
+const OTHER_CH = /[\p{L}\p{N}]/u;
+/** 글자의 갈래 — 1 라틴 글자 · 숫자 / 2 그 밖의 글자(한글 · 한자 · 가나 …) / 0 글자가 아님(없음 포함). */
+export const charKind = (ch) => (ch === undefined || ch === '' ? 0 : LATIN_CH.test(ch) ? 1 : OTHER_CH.test(ch) ? 2 : 0);
+/**
+ * 이웃 글자 `nb` 가 끝 글자 `edge` 와 한 낱말로 이어지는가 — 이웃이 글자 · 숫자이고, 끝 글자와 **갈래가 다르지 않을** 때.
+ * 끝 글자가 글자 · 숫자가 아니면(문장 부호로 끝나는 값) 이웃이 글자이기만 하면 이어진 것으로 본다(경계로 인정하는 것은 '라틴 ↔ 그 밖의 글자' 가 맞닿은 자리뿐).
+ */
+const joins = (edge, nb) => { const k = charKind(nb); if (k === 0) return false; const e = charKind(edge); return e === 0 || e === k; };
+/** 호스트 이름 낱말로 이어지는가 — `_` · `-` 는 늘 이어지고, 글자는 같은 갈래일 때만. */
+const hostJoins = (edge, nb) => nb === '_' || nb === '-' || joins(edge, nb);
+
+/** 글 → 구분자를 뺀 사영(글자마다 소문자 — 길이가 달라지는 글자는 그대로)과 사영 글자마다의 원문 위치. 태그 색인의 키도 **같은 함수**로 만든다. */
+function projOf(text) {
+  let proj = ''; const pos = [];
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (isSep(ch)) continue;
+    const l = ch.toLowerCase();
+    proj += l.length === 1 ? l : ch; pos.push(i);
+  }
+  return { proj, pos };
+}
 // 구분자는 normKey 와 같은 정의 하나(3회차 점검 3: 손으로 적은 목록이라 유니코드 공백 14종 — U+2009 등 — 이 빠져, 비교 키는 같은데 가림은 못 찾았다).
 const isSep = isKeySep;
 const lensOf = (set) => { const l = new Set(); for (const s of set) l.add(s.length); return [...l].sort((a, b) => b - a); };   // 긴 것 먼저(짧은 것이 긴 것의 앞부분만 먹지 않게)
 
-/** 태그 · 시리얼 원문 목록 → 찾기 색인(비교 키). 키가 TAG_MASK_MIN 자 미만이면 뺀다(흔한 글자 조각까지 가리지 않게). */
+/** 사영 구간 [a, b) 의 '구분자 자리 모양' — 키 글자 사이에 구분자가 끼어 있는 자리(키 안의 위치)를 쉼표로 이은 글자. 붙여 쓴 것은 ''. */
+function shapeOf(pos, a, b) {
+  let sh = '';
+  for (let i = a + 1; i < b; i += 1) if (pos[i] !== pos[i - 1] + 1) sh += `${i - a},`;
+  return sh;
+}
+
+/**
+ * 태그 · 시리얼 원문 목록 → 찾기 색인(비교 키). 키가 TAG_MASK_MIN 자 미만이면 뺀다(흔한 글자 조각까지 가리지 않게).
+ * 키는 글의 사영과 **같은 함수**(`projOf`)로 만든다 — ASCII 에서는 `normKey` 와 같고, 문자열 통째 소문자화가 글자마다 소문자화와 다른 글자
+ * (낱말 끝 그리스 시그마 · 'İ')에서도 글과 키가 어긋나지 않는다(4회차 점검 보안 관찰 2).
+ */
 export function tagIndexOf(tags) {
-  const set = new Set();
+  const set = new Set(); const shapes = new Map();   // shapes: 짧은 키 → 원문에 구분자가 있던 자리 모양들(머리말 '경계 규칙')
   for (const t of tags || []) {
-    const k = normKey(t);
-    if (k.length >= TAG_MASK_MIN && k.length <= KEY_MAX) set.add(k);
+    const { proj: k, pos } = projOf(String(t ?? ''));
+    if (k.length < TAG_MASK_MIN || k.length > KEY_MAX) continue;
+    set.add(k);
+    if (k.length >= TAG_FREE_MIN) continue;
+    const sh = shapeOf(pos, 0, k.length);
+    if (!sh) continue;
+    let g = shapes.get(k); if (!g) { g = new Set(); shapes.set(k, g); }
+    g.add(sh);
   }
-  return { set, lens: lensOf(set) };
+  return { set, lens: lensOf(set), shapes };
 }
 
 /**
@@ -78,20 +118,17 @@ function matchSpans(proj, indexes, accept) {
  */
 export function stripTags(text, ...indexes) {
   if (typeof text !== 'string' || !text || !indexes.some((x) => x && x.set.size)) return text;
-  let proj = ''; const pos = [];   // 구분자를 뺀 사영과, 사영의 글자마다 원문 위치
-  for (let i = 0; i < text.length; i += 1) {
-    const ch = text[i];
-    if (isSep(ch)) continue;
-    const l = ch.toLowerCase();
-    proj += l.length === 1 ? l : ch; pos.push(i);
-  }
+  const { proj, pos } = projOf(text);   // 구분자를 뺀 사영과, 사영의 글자마다 원문 위치
   // 경계 규칙(머리말): 짧은 키는 낱말 통째 · 구분자를 건넌 일치는 양 끝이 낱말 경계일 때만.
   const accept = (a, b) => {
     const first = pos[a]; const last = pos[b - 1];
     const crossed = last - first !== b - a - 1;
     if (b - a >= TAG_FREE_MIN && !crossed) return true;
-    const bounded = !isWordCh(text[first - 1]) && !isWordCh(text[last + 1]);
-    return b - a >= TAG_FREE_MIN ? bounded : (!crossed && bounded);
+    if (joins(text[first], text[first - 1]) || joins(text[last], text[last + 1])) return false;
+    if (b - a >= TAG_FREE_MIN || !crossed) return true;
+    // 짧은 키가 구분자를 건넜다 — 그 시리얼의 원문이 같은 자리에 구분자를 둔 꼴일 때만
+    const sh = shapeOf(pos, a, b); const key = proj.slice(a, b);
+    return indexes.some((x) => !!x && !!x.shapes && !!x.shapes.get(key)?.has(sh));
   };
   const spans = matchSpans(proj, indexes, accept);
   if (!spans.length) return text;
@@ -131,7 +168,7 @@ export function replaceNeedles(text, index, repl) {
   const low = lowSameLen(text);   // 글자마다 같은 길이 — 색인이 원문과 어긋나지 않는다
   const accept = (a, b) => {
     if (b - a >= NEEDLE_FREE_MIN) { for (let i = a; i < b; i += 1) if (low[i] === '.' || low[i] === ':') return true; }
-    return !isHostCh(low[a - 1]) && !isHostCh(low[b]);
+    return !hostJoins(low[a], low[a - 1]) && !hostJoins(low[b - 1], low[b]);
   };
   const spans = matchSpans(low, [index], accept);
   if (!spans.length) return text;

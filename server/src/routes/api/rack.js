@@ -30,12 +30,12 @@ import { analysisServersWithRemote, invForServer } from '../../insights/analysis
 import { scopeIdracServers } from '../admin/idracCore.js';
 import { hwSummaryOf, mgmtHostOf } from '../../idrac/hwSummary.js';
 import { partHealthRollup } from '../../idrac/invView.js';
-import { cleanText, cleanPlaceInput, cleanRackInput, intIn, rackTotals, serialKeyOf, LIMITS, KIND_LABEL } from '../../rack/layout.js';
+import { cleanText, cleanPlaceInput, cleanRackInput, intIn, rackTotals, serialKeyOf, dropInvisible, LIMITS, KIND_LABEL } from '../../rack/layout.js';
 import * as R from '../../rack/db.js';
 import { VERSION_KEEP } from '../../rack/versions.js';
 import { acquireExport } from '../../util/exportBusy.js';
-import { addressMatcher, hostVariants, maskedIdToken, maskedAddressName } from '../../auth/addressMask.js';
-import { tagIndexOf, stripTags, needleIndexOf, replaceNeedles } from '../../rack/textMask.js';
+import { addressMatcher, hostVariants, maskedIdToken, MASK_TOKEN_PREFIX } from '../../auth/addressMask.js';
+import { tagIndexOf, stripTags, needleIndexOf, replaceNeedles, charKind } from '../../rack/textMask.js';
 import { todayStamp } from '../../util/dayKey.js';
 import { isIPv6 } from 'node:net';
 import { isPlaceholderTag } from '../../bmusage/commonTag.js';
@@ -96,6 +96,15 @@ function sendErr(res, e) {
 
 // ───────────────────────── 연결(서버 — 서비스 태그) ─────────────────────────
 
+/**
+ * 식별자로 쓸 수 있는 서비스 태그 · 시리얼인가 — 자리표시 값('To Be Filled By O.E.M.' · 'None' · '0000000' · 영숫자 4자 미만 — `bmusage/commonTag.js isPlaceholderTag` ·
+ * 다른 기능이 '서비스 태그를 열쇠로 써도 되는가' 에 쓰는 그 판정)이 아니어야 한다. **가림 재료**(2회차 반증 C2 — 'phone-01 none' 이 지워졌다)와 **연결 키**(corpServers)가 같이 쓴다.
+ * 그 판정은 ASCII 영숫자만 남겨서 보므로 **비 ASCII 글자가 든 값은 자리표시로 보지 않는다**(4회차 점검 보안 1 · 정확성 2: 시리얼 '자산1234' · '본사-0000' 이
+ * '1234' · '0000' 으로 읽혀 가림 재료에서 빠졌다).
+ */
+const NON_ASCII = /[^\u0000-\u007f]/;
+export const usableTag = (t) => typeof t === 'string' && !!t && (NON_ASCII.test(t) || !isPlaceholderTag(t));
+
 export const UNPLACED_MAX = 2000;   // 미배치 서버 목록에 싣는 최대 대수(법인 하나) — 넘으면 unplacedTotal 이 더 크고 화면이 밝힌다
 const HEALTH = { ok: 'ok', warning: 'warn', critical: 'crit' };
 const healthOf = (v) => HEALTH[String(v || '').toLowerCase()] || (v ? 'unknown' : '');
@@ -130,7 +139,10 @@ function corpServers(req, corpId, { invTags = false } = {}) {
     if (dc !== corpId) continue;
     let inv = null; try { inv = invForServer(s); } catch { inv = null; }
     const tag = String(s.serviceTag || inv?.system?.serviceTag || '').trim();
-    const key = serialKeyOf(tag);
+    // 자리표시 태그('To Be Filled By O.E.M.' 같은 화이트박스 기본값 · 'None' · '0000000')는 **연결 키가 아니다**(4회차 점검 정확성 4 — 재현): 서로 다른 서버 여러 대가 같은 값이라,
+    //   키로 쓰면 원장의 장비가 그중 먼저 온 서버에 이어져 남의 상태를 보이고, 한 대를 놓는 순간 나머지가 미배치 목록에서 사라졌다. 태그를 못 읽은 서버와 함께 센다(serversNoTag).
+    //   ⚠ 진짜 태그가 둘인 것(중앙 등록 + 엣지가 올린 같은 서버)은 그대로 먼저 온 서버에 잇는다 — 같은 장비다.
+    const key = usableTag(tag) ? serialKeyOf(tag) : '';
     const row = { s, inv, tag, key };
     list.push(row);
     if (key && !byKey.has(key)) byKey.set(key, row);
@@ -156,18 +168,24 @@ function corpServers(req, corpId, { invTags = false } = {}) {
 const HIDDEN_ADDR = '(주소 가림)';
 const PLAIN_MASK = Object.freeze({ admin: true, name: (s) => s, text: (s) => s, row: (s) => s, match: () => false });
 const OPEN_P = new Set(['(', '[', '{', '<', '"', "'", '‘', '“']);
-const CLOSE_P = new Set([')', ']', '}', '>', '"', "'", '’', '”', ',', ';', '.']);
-/** 낱말의 앞뒤 문장 부호를 뗀 알맹이(정규식의 `+$` 를 쓰지 않는다 — 긴 입력에서 O(n²)). 대괄호 IPv6(+ 포트)는 주소만. */
-function wordCore(w) {
+const CLOSE_P = new Set([')', ']', '}', '>', '"', "'", '’', '”', ',', ';', '.', ':']);   // ':' = 이력 글의 '이름: 랙'
+/**
+ * 낱말의 앞뒤 문장 부호를 뗀 알맹이의 구간 [a, b)(정규식의 `+$` 를 쓰지 않는다 — 긴 입력에서 O(n²)). 대괄호 IPv6(+ 포트)는 대괄호 안.
+ * `plain` = 뗀 것이 문장 부호뿐인가(대괄호 지름길이 아니다 — 그때는 앞뒤 조각을 그대로 붙여도 된다).
+ */
+function coreSpan(w) {
   let a = 0; let b = w.length;
-  if (w[a] === '[') { const k = w.indexOf(']'); if (k > 1) return w.slice(1, k); }
+  if (w[a] === '[') { const k = w.indexOf(']'); if (k > 1) return { a: 1, b: k, plain: false }; }
   while (a < b && OPEN_P.has(w[a])) a += 1;
   while (b > a && CLOSE_P.has(w[b - 1])) b -= 1;
-  return w.slice(a, b);
+  return { a, b, plain: true };
 }
-const LETTER_OR_DIGIT = /[\p{L}\p{N}]/u;
-const isLD = (ch) => ch !== undefined && LETTER_OR_DIGIT.test(ch);
-const realTags = (arr) => (arr || []).filter((t) => !isPlaceholderTag(t));
+const wordCore = (w) => { const { a, b } = coreSpan(w); return w.slice(a, b); };
+// 낱말 안에서 16진 구간의 이웃이 '이어지는 글자' 인가 — 라틴 글자 · 숫자만(한글 조사 'fe80::1에' · 문장 부호는 경계 — textMask.js 의 글자 갈래와 같은 기준).
+const isLatinLD = (ch) => charKind(ch) === 1;
+const realTags = (arr) => (arr || []).filter(usableTag);
+/** 가린 낱말의 토큰 — 공용 함수는 'masked-' 로 시작하는 값을 이미 토큰으로 보고 그대로 돌려준다. 글에서는 그런 낱말도 원문이므로 한 번 감싼다(4회차 점검 보안 5). */
+const textToken = (v) => maskedIdToken(v.startsWith(MASK_TOKEN_PREFIX) ? `text:${v}` : v);
 /** 낱말 안에 IPv4 꼴(점으로 나뉜 1~3자리 숫자 묶음이 4개 이상 이어짐)이 있는가 — 'node.10.20.30.97' · '[BMC]10.20.31.11' · '10.20.30.99.' · 'Unity 5.3.0.0' 의 낱말. */
 function hasIpv4(w) {
   for (const m of w.matchAll(/[0-9.]+/g)) {
@@ -177,26 +195,33 @@ function hasIpv4(w) {
   }
   return false;
 }
-/**
- * 낱말 안에 IPv6 리터럴이 있는가(엄격) — 16진 · 콜론이 이어진 구간이 ① 앞뒤가 글자 · 숫자가 아니고('std::string' 의 'd::' 제외) ② 16진 숫자가 있고
- * ③ '::' 가 있거나 콜론이 7개이며 ④ `net.isIPv6` 가 참. 끝 · 앞에 붙은 콜론 하나는 문장 부호로 보고 뗀다(이력 글 '이름: 랙').
- * 'https://[2001:db8::a]/ui' · 'net 2001:db8::a/64' · 'ip=fe80::1%eth0' 는 주소, '12:30:45' · '1:2:3' · 'AB:CD:' 는 아니다.
- * MAC(16진 두 자리 × 6 · 콜론)도 주소로 본다 — 예전 판정(콜론 2개 + 16진)이 가리던 것이라 엄격하게 바꾸며 다시 열지 않는다.
- */
 const MAC_RE = /^[0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5}$/;
+const IPV6_RUN_MAX = 80;      // 이보다 긴 16진 · 콜론 구간은 주소가 아니다(IPv6 는 39자 · 뒤에 포트 · 이름표가 붙어도 이 안)
+/**
+ * 낱말 안에 IPv6 리터럴 · MAC 이 있는가(엄격). 16진 · 콜론이 이어진 구간을 콜론으로 나눈 **마디의 연속 묶음** 가운데 하나라도
+ *   ① 통째로 유효한 IPv6 이고(`net.isIPv6`) '::' 가 있거나 8마디이거나 ② MAC(두 자리 × 6)이면 주소다.
+ * 묶음이 구간의 처음(끝)에서 시작하면(끝나면) 그 앞(뒤) 글자가 라틴 글자 · 숫자가 아니어야 한다('std::string' 의 'd::' · 'xfe80::1' 제외) —
+ *   구간 안쪽의 묶음은 콜론이 경계다. 그래서 이름표나 포트가 콜론으로 붙은 꼴도 잡는다: 'ip:2001:db8::a1' · 'MAC:0a:1b:2c:3d:4e:5f' · 'fe80::77:end' ·
+ *   '1:2:3:4:5:6:7:8:8443' · 이력의 '이름: 랙'(4회차 점검 보안 2 · 정확성 1 — 예전엔 앞뒤 글자 검사가 콜론을 떼는 것보다 먼저라 주석과 달랐다).
+ * 'https://[2001:db8::a]/ui' · 'net 2001:db8::a/64' · 'ip=fe80::1%eth0' 는 주소, '12:30:45' · '1:2:3' · 'AB:CD:' 는 아니다.
+ */
 function hasIpv6(w) {
   for (const m of w.matchAll(/[0-9a-fA-F:]+/g)) {
-    let run = m[0];
-    if (run.length < 3 || run.length > 48 || !run.includes(':')) continue;
-    if (isLD(w[m.index - 1]) || isLD(w[m.index + run.length])) continue;
-    while (run.endsWith(':::')) run = run.slice(0, -1);
-    while (run.startsWith(':::')) run = run.slice(1);
-    if (run.endsWith(':') && !run.endsWith('::')) run = run.slice(0, -1);
-    if (run.startsWith(':') && !run.startsWith('::')) run = run.slice(1);
-    if (!/[0-9a-fA-F]/.test(run)) continue;
-    if (run.length === 17 && MAC_RE.test(run)) return true;
-    if (!run.includes('::') && run.split(':').length !== 8) continue;
-    if (isIPv6(run)) return true;
+    const run = m[0];
+    if (run.length < 3 || run.length > IPV6_RUN_MAX || !run.includes(':')) continue;
+    const parts = run.split(':');
+    const n = parts.length;
+    const leftOpen = !isLatinLD(w[m.index - 1]); const rightOpen = !isLatinLD(w[m.index + run.length]);
+    for (let i = 0; i < n; i += 1) {
+      if (i === 0 && !leftOpen) continue;
+      // IPv6 는 많아야 8마디 + '::' 의 빈 마디 — 묶음 길이는 9 까지만 본다(구간이 길어도 일은 '마디 수 × 9').
+      for (let j = Math.min(n - 1, i + 8); j > i; j -= 1) {
+        if (j === n - 1 && !rightOpen) continue;
+        const cand = parts.slice(i, j + 1).join(':');
+        if (cand.length === 17 && MAC_RE.test(cand)) return true;
+        if ((j - i === 7 || cand.includes('::')) && /[0-9a-fA-F]/.test(cand) && isIPv6(cand)) return true;
+      }
+    }
   }
   return false;
 }
@@ -217,6 +242,16 @@ function textMaskOf({ admin, showSerial, hosts = [], tags = [] }) {
     if (hostEq(core) || hostEq(w)) return true;
     return hasIpv4(w) || hasIpv6(w);
   };
+  /**
+   * IP 낱말 하나를 토큰으로. 알맹이가 주소이고 뗀 것이 문장 부호뿐이면 부호는 남긴다('(10.9.8.201):' → '(masked-…):' — 같은 주소는 어느 글에서나 같은 토큰).
+   * 그 밖에는(주소가 알맹이 밖에 걸친 '[BMC]10.20.31.11' · 대괄호 + 포트) 낱말 통째를 토큰 하나로 — 주소 조각을 남기지 않는다.
+   */
+  const maskWord = (w) => {
+    const { a, b, plain } = coreSpan(w);
+    const core = w.slice(a, b);
+    if (plain && core && (hostEq(core) || hasIpv4(core) || hasIpv6(core))) return w.slice(0, a) + textToken(core) + w.slice(b);
+    return textToken(w);
+  };
   // 순서: ① IP 리터럴 낱말을 **원문 낱말에서 먼저** 토큰으로 ② 그다음 등록 주소를 글 속에서 치환.
   //   반대면 등록 IP '10.20.30.4' 가 다른 IP '10.20.30.45' 의 앞부분만 가려 '(주소 가림)5' 가 남는다(3회차 점검 2).
   const addr = (s) => {
@@ -225,17 +260,23 @@ function textMaskOf({ admin, showSerial, hosts = [], tags = [] }) {
     return s.split(/(\s+)/).map((w) => {
       if (!w || /^\s/.test(w)) return w;
       if (!/[\d:]/.test(w)) return replaceNeedles(w, hostIdx, HIDDEN_ADDR);
-      if (w.length > 300) return maskedIdToken(w.slice(0, 300));   // 이렇게 긴 낱말은 살피지 않고 통째로(숫자 · 콜론이 든 것만)
-      return ipWord(w) ? maskedIdToken(wordCore(w) || w) : replaceNeedles(w, hostIdx, HIDDEN_ADDR);
+      if (w.length > 300) return textToken(w.slice(0, 300));   // 이렇게 긴 낱말은 살피지 않고 통째로(숫자 · 콜론이 든 것만)
+      return ipWord(w) ? maskWord(w) : replaceNeedles(w, hostIdx, HIDDEN_ADDR);
     }).join('');
   };
   // 그 행 · 그 장비의 시리얼(own)과 법인 색인을 **한 번에** 훑는다(따로 훑으면 짧은 own 이 다른 장비의 긴 시리얼을 깨뜨려 꼬리가 남는다 — 3회차 점검 정확성 1).
   const tagsOut = (t, own) => (showSerial ? t : stripTags(t, own && own.length ? tagIndexOf(realTags(own)) : null, corpIdx));
-  const text = (s, own) => (typeof s !== 'string' || !s ? s : tagsOut(addr(s), own));
+  // 판정 앞에서 보이지 않는 글자를 지운다(4회차 점검 보안 4 — '10.20<U+FE0F>.31.5' 는 화면에 주소로 보이는데 판정은 비켜 갔다. 새 입력은 cleanText 가 이미 지운다).
+  const text = (s0, own) => { const s = dropInvisible(s0); return typeof s !== 'string' || !s ? s : tagsOut(addr(s), own); };
   return {
     admin: false, match, text,
     // 이름이 **낱말 하나**이고 그것이 주소면 통째로 '이름 가림'. 여러 낱말이면 주소인 낱말만 가린다('Unity 5.3.0.0 array' 를 통째로 지우지 않는다 — 1회차 반증 판단 2).
-    name: (s, own) => (typeof s !== 'string' || !s ? s : (!/\s/.test(s.trim()) && s.trim().length <= 300 && ipWord(s.trim())) ? maskedAddressName(s.trim()) : text(s, own)),
+    name: (s0, own) => {
+      const s = dropInvisible(s0);
+      if (typeof s !== 'string' || !s) return s;
+      const one = s.trim();
+      return !/\s/.test(one) && one.length <= 300 && ipWord(one) ? `${textToken(one)} (이름 가림)` : text(s, own);
+    },
     row: (detail, own, action) => (!showSerial && own == null && /^place\./.test(String(action || '')) ? R.LEGACY_DETAIL_HIDDEN : text(detail, own || [])),
   };
 }
@@ -338,7 +379,7 @@ async function roomView(req, roomId) {
     serverId: String(x.s.id), name: x.s.name || x.inv?.system?.hostName || '', model: x.inv?.system?.model || x.s.model || '',
     hostname: x.inv?.system?.hostName || '', ...(showSerial ? { serviceTag: x.tag } : {}),
   }, x, { admin, showSerial, mask }));
-  const noTag = list.filter((x) => !x.key).length;
+  const noTag = list.filter((x) => !x.key).length;   // 태그를 못 읽었거나 자리표시 값인 서버
   const corp = listDatacenters().find((d) => String(d.id) === corpId);
   return {
     ok: true,
