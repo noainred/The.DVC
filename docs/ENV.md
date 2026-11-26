@@ -670,7 +670,7 @@
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `BMUSAGE_PULL_STALE_MS` | `1800000` |  | central/bmUsageEdgePull.js |
-| `BMUSAGE_PULL_TIMEOUT_MS` | `20000` |  | central/bmCapacityPull.js, central/bmComparePull.js 외 5 |
+| `BMUSAGE_PULL_TIMEOUT_MS` | `20000` |  | central/bmCapacityPull.js, central/bmComparePull.js 외 6 |
 | `CAPTURE_ACK_GRACE_MS` | `60000` |  | central/captureJobs.js |
 | `CENTRAL_AGENT_CONFIG_MAX_BYTES` | `33554432` |  | central/agentConfig.js |
 | `CENTRAL_AGENT_IDENTITY_MAX` | `2000` |  | central/agentIdentity.js |

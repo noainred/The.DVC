@@ -326,7 +326,7 @@ describe('소스 스윕 — 틀 · 순서 · 훅 · 겹침', () => {
     expect(s).not.toMatch(/setInterval|usePolling/);
     expect(s).toMatch(/const delay = first\.current \? 0 : FETCH_DELAY_MS;/);
     expect(s).toMatch(/return \(\) => \{ alive = false; clearTimeout\(t\); \};/);       // 넘어가면 이전 요청의 응답을 버린다
-    expect(s).toMatch(/return st\.key === key \? st : \{ key, d: null, err: '' \};/);   // 다른 서버의 응답을 이 서버 것으로 그리지 않는다
+    expect(s).toMatch(/return st\.key === key \? \{ \.\.\.st, stale: st\.sig !== sig \} : \{ key, d: null, err: '', stale: false \};/);   // 다른 서버의 응답을 이 서버 것으로 그리지 않는다 · 같은 서버를 다시 묻는 중은 stale(v3.47 반증 B3)
     // 입력 칸에서 누른 ↑↓ 는 서버를 넘기지 않는다
     expect(s).toMatch(/if \(tag === 'input' \|\| tag === 'textarea' \|\| tag === 'select'\) return;/);
   });
