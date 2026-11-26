@@ -54,7 +54,7 @@ export default function PartFaultEscalation({ initial = null, onSaved = null, on
       </div>
       {results.length ? (
         <details className="pfe-res">
-          <summary>마지막 회차 보낸 결과 {results.length}건 · 안 감 {results.filter((x) => !x.ok && !x.notSent).length}{results.some((x) => x.notSent) ? ` · 그 사이 확인돼 보내지 않음 ${results.filter((x) => x.notSent).length}` : ''}</summary>
+          <summary>마지막 회차 보낸 결과 {results.filter((x) => !x.notSent).length}건 · 안 감 {results.filter((x) => !x.ok && !x.notSent).length}{results.some((x) => x.notSent) ? ` · 그 사이 확인돼 보내지 않음 ${results.filter((x) => x.notSent).length}` : ''}</summary>
           <ul>{results.map((x) => <li key={x.key} className={x.ok || x.notSent ? (x.notSent ? 'muted' : '') : 'pfe-bad'}>{x.text}</li>)}</ul>
         </details>
       ) : null}

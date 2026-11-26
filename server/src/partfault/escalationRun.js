@@ -8,7 +8,7 @@
  *  · 받는 곳 하나 이상에 ‘갔다’ 를 확인한 것만 ‘보냄’ — 메일 꺼짐 · 시간당 한도 · 채널 실패 · 당직 없음은 ‘안 감’ 으로 적고 다음 회차에 다시(ESC_RETRY_MAX 번까지 · 반증 A8 · B1).
  */
 import { config } from '../config.js';
-import { openFaultsOrNull, partFaultDbMissing, partFaultDbCreatedAt } from './db.js';
+import { openFaultsOrNull, partFaultDbMissing, partFaultDbHasHistory } from './db.js';
 import { alertOf } from './notify.js';
 import { notify as sendAlert, deliveryOutcome } from '../alerts.js';
 import { sendPortalMail } from '../mail/service.js';
@@ -88,7 +88,15 @@ const DEFAULT_DEPS = {
   // DB 파일이 없는 노드(부품 장애 점검을 켠 적 없음)에는 파일을 만들지 않는다 — 열린 장애도 없다(만들면 ‘수집 안 함’ 이 ‘읽었고 0건’ 으로 바뀌었다 — 디버깅 8회차 판정 #3).
   //   ‘없음’ 은 ENOENT 만 — 권한 · 링크 고리 · 디스크 오류는 열기로 넘겨 회차를 건너뛴다(9회차 보안 #1)
   //   진행 기록이 있는데 DB 파일이 없으면 ‘0건’ 이 아니라 못 읽음이다(볼륨이 아직 안 붙음 · 경로가 바뀜 — 지우면 확인한 장애에도 단계가 다시 갔다 · 9회차 판정 #1)
-  open: async () => { if (partFaultDbMissing()) { if (Object.keys(loadEscalationState().items || {}).length) throw new Error('부품 장애 DB 파일이 없습니다(진행 기록은 있음 — 볼륨 · 경로 확인)'); return []; } const r = await openFaultsOrNull(); if (!r) throw new Error('부품 장애 DB 를 열지 못했습니다'); return r; }, mail: (o) => sendPortalMail(o), channels: (a) => sendAlert(a), now: () => Date.now(),
+  //   열었는데 0건이고 이 DB 에 기록이 한 번도 없으면(새로 만들어진 빈 DB) 진행 기록이 있는 동안은 닫힘이 아니다 — 못 읽음으로 건너뛴다(10회차 보안 #1).
+  //   부품 장애 판정이 장애를 다시 잡으면 DB 에 기록이 생겨 보통 회차로 돌아간다(그때 빠진 장애는 진짜 닫힘 — 반증 A5)
+  open: async () => {
+    const hasItems = () => Object.keys(loadEscalationState().items || {}).length > 0;
+    if (partFaultDbMissing()) { if (hasItems()) throw new Error('부품 장애 DB 파일이 없습니다(진행 기록은 있음 — 볼륨 · 경로 확인)'); return []; }
+    const r = await openFaultsOrNull(); if (!r) throw new Error('부품 장애 DB 를 열지 못했습니다');
+    if (!r.length && hasItems() && (await partFaultDbHasHistory()) === false) throw new Error('부품 장애 DB 가 비어 있습니다(새로 만들어짐 — 장애를 다시 잡을 때까지 진행 기록을 지우지 않습니다)');
+    return r;
+  }, mail: (o) => sendPortalMail(o), channels: (a) => sendAlert(a), now: () => Date.now(),
   partFaultSwitch: async () => (await import('./settings.js')).partFaultEnabled(),
   hold: async (open, now) => {
     const M = await import('../bmusage/maint/partfaultHold.js');
@@ -99,14 +107,6 @@ const DEFAULT_DEPS = {
 let _deps = DEFAULT_DEPS;
 export function _setEscalationDepsForTest(d) { _deps = d ? { ...DEFAULT_DEPS, ...d } : DEFAULT_DEPS; }
 
-export const ESC_DB_GRACE_MS = 2 * 3600_000;   // 새로 시작된 DB 의 ‘열린 장애 없음’ 을 믿지 않는 시간(부품 장애 판정이 다시 잡을 때까지)
-async function keepOlderThanDb(prevItems, nextItems, now, deps) {
-  let created = null; try { created = await (deps.dbCreatedAt || partFaultDbCreatedAt)(); } catch { created = null; }
-  if (!Number.isFinite(created) || now - created >= ESC_DB_GRACE_MS) return 0;
-  let kept = 0;
-  for (const [k, v] of Object.entries(prevItems || {})) if (!Object.hasOwn(nextItems, k) && Number(v?.since) < created) { nextItems[k] = v; kept += 1; }
-  return kept;
-}
 /** 한 회차. @returns 마지막 결과(상태 화면이 쓴다) */
 export async function runEscalationNow() {
   if (_busy) return { skipped: 'busy' };
@@ -123,7 +123,6 @@ export async function runEscalationNow() {
         if (Array.isArray(o)) {
           const st = loadEscalationState(); const keys = new Set(o.map(partKeyOf)); const sigs = new Set(o.map(partSigOf));
           const kept = Object.fromEntries(Object.entries(st.items).filter(([k, v]) => keys.has(k) || (v?.sig && sigs.has(v.sig))));
-          await keepOlderThanDb(st.items, kept, now, deps);   // 새로 시작된 DB 보다 오래된 기록은 유예 동안 남긴다(10회차 보안 #1)
           if (Object.keys(kept).length !== Object.keys(st.items).length) saveEscalationState({ ...st, items: kept });
         }
       }
@@ -140,10 +139,6 @@ export async function runEscalationNow() {
     let hold = null; let keyOf = null;
     if (!why) { try { const h = await deps.hold(open, now); hold = h?.hold || null; keyOf = h?.keyOf || null; } catch { hold = null; } }
     const plan = escalationPlan({ settings: why ? { ...settings, enabled: false } : settings, state, open, now, maxSends: ESC_SENDS_PER_RUN, hold, holdKeyOf: keyOf });
-    // DB 가 기록보다 늦게 새로 시작됐으면(볼륨이 늦게 붙어 빈 DB 가 먼저 생김 · 스키마 재생성) 그 DB 의 ‘열린 장애 없음’ 은 닫힘이 아니다 —
-    //   그 DB 보다 오래된 기록은 유예 동안 지우지 않는다(같은 장애가 다시 잡히면 확인 · 보낸 단계를 이어 간다 — 디버깅 10회차 보안 #1).
-    //   DB 보다 뒤에 시작된 기록이 빠지면 진짜 닫힘이라 지운다(반증 A5 — 다시 열린 장애가 옛 확인을 물려받지 않게)
-    await keepOlderThanDb(state.items, plan.items, now, deps);
     _heldKeys = new Set(plan.heldKeys || []);
     const results = [];
     for (const s of plan.sends) {
@@ -172,7 +167,8 @@ export async function runEscalationNow() {
     const sentRes = results.filter((r) => !r.notSent);
     _last = { at: now, enabled: settings.enabled, ...(why ? { why } : {}), sent: sentRes.length, delivered: sentRes.filter((r) => r.delivered).length, failed: sentRes.filter((r) => !r.delivered).length,
       deferred: plan.deferred, overCap: plan.overCap, held: plan.held, errors: saved ? [] : ['진행 기록을 쓰지 못했습니다 — 다음 회차에 같은 단계를 다시 보낼 수 있습니다.'],
-      results: plan.sends.map((s, i) => ({ part: `${s.part.deviceName || s.part.deviceId || ''} · ${s.part.label || ''}`.slice(0, 120), step: s.step + 2, ...((s.skippedNote || s.skipped)?.length ? { skipped: (s.skippedNote || s.skipped).map((k) => k + 2) } : {}), ...(s.undeliveredNote?.length ? { undelivered: s.undeliveredNote.map((k) => k + 2) } : {}), result: results[i]?.text || '', delivered: !!results[i]?.delivered, ...(results[i]?.notSent ? { notSent: true } : {}) })).slice(0, 20) };   // notSent — 회차 도중 확인돼 보내지 않음(안 감 아님 · 10회차 화면 D5)
+      // 보내지 않은 줄(그 사이 확인)은 건너뜀 · 안 감을 말하지 않는다(그 회차는 skip 을 적지 않았다 — 11회차 판정 관찰)
+      results: plan.sends.map((s, i) => ({ part: `${s.part.deviceName || s.part.deviceId || ''} · ${s.part.label || ''}`.slice(0, 120), step: s.step + 2, ...(!results[i]?.notSent && (s.skippedNote || s.skipped)?.length ? { skipped: (s.skippedNote || s.skipped).map((k) => k + 2) } : {}), ...(!results[i]?.notSent && s.undeliveredNote?.length ? { undelivered: s.undeliveredNote.map((k) => k + 2) } : {}), result: results[i]?.text || '', delivered: !!results[i]?.delivered, ...(results[i]?.notSent ? { notSent: true } : {}) })).slice(0, 20) };   // notSent — 회차 도중 확인돼 보내지 않음(안 감 아님 · 10회차 화면 D5)
     return _last;
   } finally { _busy = false; }
 }

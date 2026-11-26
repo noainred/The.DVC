@@ -145,26 +145,8 @@ test('9회차 화면 U3 — 첫 시도가 안 가 다시 보내는 회차의 본
   assert.match(R.escalationMessage(pl.sends[0], 301 * MIN).detail, /2 · 3단계는 시각이 지난 뒤 처음 본 회차라 보내지 않았습니다/);
 });
 
-test('10회차 보안 #1 · #2 · #3 — 새로 시작된 DB 보다 오래된 기록은 유예 동안 지우지 않는다 · 설정 못 읽음 표지 sig 색인 · 비관리자 오류 문구의 절대 경로 가림', async () => {
+test('10회차 보안 #2 · #3 — 설정 못 읽음 표지 sig 색인 · 비관리자 경로 가림(빈 새 DB 규칙은 bmDebug8 — DB 열기 실패를 기억하지 않는 새 프로세스)', async () => {
   const E = await import('../src/partfault/escalation.js');
-  const RUN = await import('../src/partfault/escalationRun.js');
-  const partB = { ...part, partKey: 'k2', partId: 'p2' };
-  const st0 = { v: 1, enabledAt: 1, items: {
-    '|k1': { since: 10 * MIN, sig: E.partSigOf(part), sent: [[0, 25 * MIN, 'x', 'ok', 'pf']], ackedAt: 30 * MIN, ackBy: 'oper', pol: 'pf', ps: { pf: 10 * MIN } },   // DB(50분)보다 오래된 기록
-    '|k2': { since: 55 * MIN, sig: E.partSigOf(partB), sent: [], ackedAt: null, ackBy: '', pol: 'pf', ps: { pf: 55 * MIN } } } };   // DB 뒤에 시작 — 빠지면 진짜 닫힘
-  fs.writeFileSync(STATE, JSON.stringify(st0));
-  fs.rmSync(SET, { recursive: true, force: true });
-  fs.writeFileSync(SET, JSON.stringify({ v: 1, enabled: true, enabledAt: 1, policies: [F], oncall: {}, at: 1, by: 'admin' }));
-  E._resetEscalationStateForTest(); E.escalationStore._resetForTest();
-  let now = 60 * MIN;
-  RUN._setEscalationDepsForTest({ now: () => now, open: async () => [], dbCreatedAt: async () => 50 * MIN, partFaultSwitch: async () => ({ enabled: true, source: '' }), hold: async () => ({ hold: null, keyOf: null }), mail: async () => ({ ok: true }), channels: async () => [] });
-  try {
-    await RUN.runEscalationNow();
-    assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(STATE, 'utf8')).items), ['|k1'], 'DB 보다 오래된 k1 은 남기고 · DB 뒤에 시작된 k2 는 닫힘으로 지운다');
-    now = 50 * MIN + RUN.ESC_DB_GRACE_MS + MIN;
-    await RUN.runEscalationNow();
-    assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(STATE, 'utf8')).items), [], '유예가 지나면 지운다');
-  } finally { RUN._setEscalationDepsForTest(null); }
   // 설정 못 읽음 표지 — sig 색인(같은 items 에 한 번)
   const items = {};
   for (let i = 0; i < 4000; i += 1) items[`|old${i}`] = { since: 0, sig: `sig-${i}`, sent: [], ackedAt: i === 3999 ? 1 : null, ackBy: 'oper', pol: 'pf', ps: {} };
@@ -212,4 +194,22 @@ test('10회차 판정 #1 — 설정 못 읽음 표지의 키 이전 후보는 �
   const run = { why: 'settings-unreadable', heldKeys: new Set(), openKeys: new Set(['|k-n1', '|k-n2']) };
   const marks = [pN1, pN2].map((p) => E.escalationMarkOf(p, items, null, run).acked);
   assert.deepEqual(marks, [true, false], '같은 sig 의 열린 장애 둘 가운데 하나만 이어받는다');
+});
+
+test('11회차 보안 #4 — 훅 상태의 마지막 결과도 비관리자 판본에서 last 와 같이 가린다(IP 파트 키 · 경로)', async () => {
+  const PF = await import('../src/routes/api/partFaults.js');
+  const h = { debounceMs: 1000, pending: 0, last: { at: 1, source: 'idrac', result: { notify: { sent: 1, results: [{ partKey: 'idrac:192.0.2.41:psu:1' }] }, saved: { reason: "ELOOP: open '/srv/synth/part-faults.db'" } } } };
+  const before = structuredClone(h);
+  const v = PF.hookView(h, false);
+  assert.deepEqual(h, before, '원본은 바꾸지 않는다');
+  assert.equal(v.last.result.notify.resultsHidden, true);
+  assert.equal(JSON.stringify(v).includes('192.0.2.41'), false, '파트 키 원문이 없다');
+  assert.equal(v.last.result.saved.reason, "ELOOP: open '…'");
+  assert.equal(PF.hookView(h, true), h, '관리자는 그대로');
+});
+
+test('11회차 화면 E2 — 안 간 사유는 짧은 분류(낱말 중간에서 끊기거나 괄호 짝이 어긋나지 않음)', async () => {
+  const E = await import('../src/partfault/escalation.js');
+  assert.deepEqual(['메일 안 감(SMTP 인증 실패로 3회 거부 — 설정 › 메일)', '채널 실패(slack:500 · teams:timeout)', '오늘 당직 없음', 'x'.repeat(40)].map(E.shortWhy),
+    ['메일 안 감', '채널 실패', '오늘 당직 없음', `${'x'.repeat(24)}…`]);
 });

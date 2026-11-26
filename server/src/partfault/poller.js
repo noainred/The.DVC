@@ -63,7 +63,7 @@ export async function runPartFaultsNow({ notify = true, reason = 'timer' } = {})
       r = await runOnce({ notify: next.notify, reason: `${next.reason}+again` });
     }
     // 5회 상한을 넘은 요청은 버리지 않고 곧 판정으로 한 번 더 잡는다 — 버리면 그 장애 알림이 정규 주기(최대 10분)까지 늦었다(이벤트 묶음이 판정을 기다리지 않게 된 뒤 — 10회차 성능 #3)
-    if (_again) { const left = _again; _again = null; console.warn('[partfault] 다시 점검 요청이 5회 연속 겹쳤습니다 — 곧 판정으로 한 번 더 잡습니다'); setImmediate(() => { try { runPartFaultsSoon(`${left.reason}+cap`); } catch { /* 다음 주기 점검이 처리한다 */ } }); }
+    if (_again) { const left = _again; _again = null; console.warn('[partfault] 다시 점검 요청이 5회 연속 겹쳤습니다 — 곧 판정으로 한 번 더 잡습니다'); setImmediate(() => { try { runPartFaultsSoon(`${String(left.reason || '').replace(/(?:\+cap)+$/, '').slice(0, 60)}+cap`); } catch { /* 다음 주기 점검이 처리한다 */ } }); }
     return r;
   })().finally(() => { _busy = null; });
   return _busy;
@@ -163,11 +163,11 @@ export function runPartFaultsSoon(reason = 'edge-event') {
   if (_soonRunning) { _soonAgain = true; return true; }
   if (_soonTimer) return false;
   _soonTimer = setTimeout(() => {
-    _soonTimer = null; _soonRunning = true; const t0 = Date.now(); _lastJudgeCost = null;
+    _soonTimer = null; _soonRunning = true;   // 판정 몫은 지우지 않는다 — 이 곧 판정이 진행 중 판정에 합류만 하면 새 runOnce 가 없어 벽시계(알림 대기)로 떨어졌다(11회차 엣지 #1). 마지막 runOnce 의 값을 쓴다
     runPartFaultsNow({ reason }).catch(() => {}).finally(() => {
       // 비용은 판정 몫(runOnce 의 스캔 · 전이 · 적용)만 — 알림 발송(네트워크 대기)을 넣으면 웹훅이 느릴 때 다음 곧 판정이 수십 초 · 10분 밀렸고(9회차 판정 #2),
-      //   프로세스 전체 루프 시간(ELU)을 쓰면 그동안의 다른 일까지 셌다(10회차 성능 #2). 판정 몫을 모르면 벽시계(상한 60초가 막는다)
-      _soonRunning = false; _soonEnd = Date.now(); _soonDur = Number.isFinite(_lastJudgeCost) ? _lastJudgeCost : _soonEnd - t0;
+      //   프로세스 전체 루프 시간(ELU)을 쓰면 그동안의 다른 일까지 셌다(10회차 성능 #2).
+      _soonRunning = false; _soonEnd = Date.now(); _soonDur = Number.isFinite(_lastJudgeCost) ? _lastJudgeCost : 0;   // 판정 몫을 아직 모르면 0(5초 바닥)
       if (_soonAgain) { _soonAgain = false; runPartFaultsSoon(reason); }
     });
   }, soonWaitMs(Date.now(), _soonEnd, _soonDur));

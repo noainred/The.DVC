@@ -285,6 +285,12 @@ const stepDone = (sent, i, pol = '') => sent.some((e) => e[0] === i && e[3] !== 
  *   hold = 정비 창 보류 장비 열쇠(holdKeyOf(수집 주체, deviceId)) — 그 장비의 장애는 이번 회차에 보내지 않는다(기록은 둔다)
  * @returns {{ sends:Array<{ key, part, policy, step, to, skipped:number[] }>, items:object, enabledAt:number|null, deferred:number, overCap:number, held:number }}
  */
+// 안 간 사유의 짧은 분류 — 결과 글자(‘메일 안 감(SMTP …)’ · ‘채널 실패(slack:500 …)’)를 그대로 자르면 낱말 중간에서 끊기고 괄호 짝이 어긋났다(11회차 화면 E2).
+//   첫 괄호 · 줄표 · 빗금 앞까지만 · 24자 넘으면 ‘…’
+export function shortWhy(t) {
+  const head = String(t || '').split(/[(/—]/)[0].replace(/\s+/g, ' ').trim();
+  return head.length > 24 ? `${head.slice(0, 24)}…` : head;
+}
 export function escalationPlan({ settings, state, open, now = Date.now(), maxSends = ESC_SENDS_PER_RUN, hold = null, holdKeyOf = null }) {
   const items = {};
   const sends = []; let deferred = 0; let overCap = 0; let held = 0; const heldKeys = [];
@@ -357,7 +363,7 @@ export function escalationPlan({ settings, state, open, now = Date.now(), maxSen
     const before = pol.steps.map((_, i) => i).filter((i) => i < due && !has(i, 'ok'));
     const undeliveredNote = before.filter((i) => has(i, 'fail') || has(i, 'give'));
     // 안 간 사유(그 단계의 마지막 fail · give 줄 글자) — 보내지 않은 경우(당직 없음 등)도 있어 ‘보냈으나’ 라고 말하지 않는다(10회차 화면 D2)
-    const undeliveredWhy = Object.fromEntries(undeliveredNote.map((i) => { const last = it.sent.filter((e) => e[0] === i && (e[3] === 'fail' || e[3] === 'give') && ofPol(e, pol.id)).at(-1); return [i, String(last?.[2] || '').slice(0, 60)]; }));
+    const undeliveredWhy = Object.fromEntries(undeliveredNote.map((i) => { const last = it.sent.filter((e) => e[0] === i && (e[3] === 'fail' || e[3] === 'give') && ofPol(e, pol.id)).at(-1); return [i, shortWhy(last?.[2])]; }));
     const skippedNote = before.filter((i) => !undeliveredNote.includes(i) && (skipped.includes(i) || has(i, 'skip')));
     sends.push({ key, part: p, policy: pol, step: due, attempt, skipped, skippedNote, undeliveredNote, undeliveredWhy, since: psince, to: { emails: step.emails, channels: step.channels, oncall: oc, oncallWanted: step.oncall } });
   }

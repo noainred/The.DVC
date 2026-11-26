@@ -161,7 +161,6 @@ function migrate(db, p, now) {
       db.exec(DDL);
       metaSet.run('schema_version', String(SCHEMA_VERSION));
       metaSet.run('reset', JSON.stringify({ at: now, from, to: SCHEMA_VERSION, reason: RESET_REASON, rows }));
-      metaSet.run('created_at', String(now));   // 내용이 새로 시작된 때 — 알림 단계 회차가 ‘이 DB 보다 오래된 기록’ 을 가른다(10회차 보안 #1)
       db.exec('COMMIT');
     } catch (e) { try { db.exec('ROLLBACK'); } catch { /* */ } throw e; }
     console.warn(`[partfault] ${p}: 스키마 v${from} → v${SCHEMA_VERSION} — 파트 상태 ${rows.states}행·이벤트 ${rows.events}행을 지우고 새로 시작합니다(${RESET_REASON})`);
@@ -169,8 +168,6 @@ function migrate(db, p, now) {
   }
   db.exec(DDL);
   if (!verRow) metaSet.run('schema_version', String(SCHEMA_VERSION));
-  // 새 파일이면 만든 때를 적는다 — 있던 파일(옛 판)은 모름(적지 않음 = 오래된 DB 로 본다)(10회차 보안 #1)
-  if (!existed && !metaGet.get('created_at')) metaSet.run('created_at', String(now));
 }
 
 function prepare(db) {
@@ -300,11 +297,15 @@ export function partFaultDbExists() {
  */
 export function partFaultDbMissing() { if (x) return false; return fileMissing(DB_PATH()); }
 
-/** DB 내용이 새로 시작된 때(새 파일 · 스키마 재생성) — 모르면(옛 파일) null. */
-export async function partFaultDbCreatedAt() {
+/**
+ * 이 DB 에 부품 장애 기록이 한 번이라도 있었는가(상태 · 이벤트 행). 알림 단계 회차가 ‘열린 장애 0건’ 을 닫힘으로 믿어도 되는지 가른다 —
+ *   빈 DB(볼륨이 늦게 붙어 새로 만들어짐 · 스키마 재생성)의 0건은 닫힘이 아니다(10회차 보안 #1 · 11회차 보안 #1~#3 — 만든 시각 유예는 진짜 닫힘까지 덮어 되돌렸다).
+ *   DB 를 열지 못하면 null.
+ */
+export async function partFaultDbHasHistory() {
   const h = await open();
   if (!h) return null;
-  try { const r = h.st.metaGet.get('created_at'); const n = r ? Number(r.v) : NaN; return Number.isFinite(n) && n > 0 ? n : null; } catch { return null; }
+  try { return !!(h.db.prepare('SELECT 1 FROM part_state LIMIT 1').get() || h.db.prepare('SELECT 1 FROM part_event LIMIT 1').get()); } catch { return null; }
 }
 /** openFaults 와 같되 DB 를 못 열면 null(‘열린 장애 0건’ 과 가른다 — 알림 단계 회차가 빈 목록으로 기록을 지우지 않게 · 디버깅 7회차 판정 #3). */
 export async function openFaultsOrNull(o = {}) { const h = await open(); return h ? openFaults(o) : null; }

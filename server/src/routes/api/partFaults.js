@@ -218,6 +218,13 @@ export function maskRegistryUnreadable(v, depth = 0) {
   }
   return out || v;
 }
+/** 파트 장애 훅 상태 — 마지막 결과(result)는 판정 결과 그대로라 last 와 같은 가림을 한다(같은 응답의 형제 경로 — 11회차 보안 #4: IP 파트 키 · 경로 · 등록부 상세). */
+export function hookView(h, isAdmin) {
+  if (isAdmin || !h || typeof h !== 'object' || !h.last || typeof h.last !== 'object') return h ?? null;
+  const last = { ...hidePathsDeep(h.last) };
+  if (last.result && typeof last.result === 'object') last.result = lastView(last.result, false);
+  return { ...h, last };
+}
 /** 엣지 push 상태(엣지 노드의 GET /tools/part-faults · /status) — 비-admin 은 등록부 손상 사유를 분류 문구로만(RG2744-05). */
 export function pushView(st, isAdmin) {
   return isAdmin ? st : maskRegistryUnreadable(st);
@@ -350,6 +357,7 @@ api.get('/tools/part-faults', toolsPerm, fullScopeOnly, async (req, res) => {
   const scope = t(req.query.scope);
   const isAdmin = isAdminReq(req);
   const [open, st] = await Promise.all([openFaults({ scope }).catch(() => []), partFaultStatus().catch(() => null)]);
+  const dbOrder = open.slice();   // 엔진(escalationRun)이 보는 순서(DB 순서) — 설정 못 읽음 표지의 키 이전 후보를 그 순서로 나눈다(11회차 판정 #5)
   open.sort((a, b) => (STATE_RANK[a.state] ?? 9) - (STATE_RANK[b.state] ?? 9) || (b.firstSeenAt || 0) - (a.firstSeenAt || 0));
   const summary = { fault: 0, warn: 0 };
   const devices = new Set();
@@ -366,7 +374,9 @@ api.get('/tools/part-faults', toolsPerm, fullScopeOnly, async (req, res) => {
   const escItems = loadEscalationState().items; const escSettings = escalationStore.get();
   const escRun = await escalationMarksNow().catch(() => null);
   const escRunK = escRun ? { ...escRun, openKeys: new Set(open.map((p) => `${String(p.agent || '').trim().toLowerCase()}|${p.partKey}`)) } : null;   // 설정 못 읽음 표지의 키 이전 후보에서 열린 장애를 뺀다(10회차 화면 D3)
-  shown = shown.map((p, i) => ({ ...p, esc: escalationMarkOf(open[i], escItems, escSettings, escRunK) }));
+  const keyOfP = (p) => `${String(p.agent || '').trim().toLowerCase()}|${p.partKey}`;
+  const markByKey = new Map(dbOrder.map((p) => [keyOfP(p), escalationMarkOf(p, escItems, escSettings, escRunK)]));   // DB 순서로 계산 · 화면 순서로 붙인다
+  shown = shown.map((p, i) => ({ ...p, esc: markByKey.get(keyOfP(open[i])) || escalationMarkOf(open[i], escItems, escSettings, escRunK) }));
   res.json({
     ok: true, role, version: currentVersion(),
     open: shown, summary: { ...summary, devices: devices.size },
@@ -377,7 +387,7 @@ api.get('/tools/part-faults', toolsPerm, fullScopeOnly, async (req, res) => {
     reset: st?.reset || null,
     edges: role === 'central' ? edgesNow() : null,
     push: role === 'edge' ? pushView(partFaultPushStatus(), isAdmin) : null,
-    hook: hookStatus(),
+    hook: hookView(hookStatus(), isAdmin),   // 11회차 보안 #4
     settings: isAdmin ? loadPartFaultSettings() : null,
     escalation: { enabled: escalationStore.get().enabled, ...(escalationStore.loadError() ? { settingsUnreadable: true } : {}), ...(escalationStateError() ? { stateError: escalationStateError() } : {}) },   // 설정을 못 읽으면 ‘꺼짐’ 이 아니다(8회차 판정 #2)
     // 확인 단추 — 확인 라우트와 같은 판정(쓰기 역할 ∧ 조회 · 쓰기 모두 전체 범위 ∧ 데모 아님). 쓰기 범위가 일부인 계정에 단추를 띄우면 누를 때 403 이었다(디버깅 9회차 보안 #2)
@@ -468,7 +478,7 @@ api.post('/tools/part-faults/scan', writeRole, toolsPerm, fullScopeOnly, async (
 api.get('/tools/part-faults/status', toolsPerm, fullScopeOnly, async (req, res) => {
   const st = await partFaultStatus().catch((e) => ({ error: String(e.message || e).slice(0, 200) }));
   res.json({ ok: true, ...st, last: lastView(st.last, isAdminReq(req)), db: dbView(st.db, isAdminReq(req)), version: currentVersion(),
-    push: config.agent.centralUrl ? pushView(partFaultPushStatus(), isAdminReq(req)) : null, edges: config.agent.centralUrl ? null : edgesNow(), hook: hookStatus() });
+    push: config.agent.centralUrl ? pushView(partFaultPushStatus(), isAdminReq(req)) : null, edges: config.agent.centralUrl ? null : edgesNow(), hook: hookView(hookStatus(), isAdminReq(req)) });
 });
 
 /**
