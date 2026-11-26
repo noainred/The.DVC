@@ -11,6 +11,7 @@ export const DAY_LABEL = Object.freeze({ mon: '월', tue: '화', wed: '수', thu
 const DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 const int = (v) => (Number.isInteger(v) ? v : null);
 
+const WHY = Object.freeze({ off: '꺼짐', 'partfault-off': '부품 장애 점검이 꺼져 있어 보내지 않음', demo: '데모 점검이라 보내지 않음', 'state-unreadable': '진행 기록을 읽지 못해 보내지 않음' });
 /**
  * 행의 esc 표지 → { text, title, tone, canAck }. 표지가 없으면(구버전 응답 · 대상 아님 · 아무 단계도 없음) null.
  *  · step = 받는 곳에 간 가장 높은 단계 · tried = 그보다 높은데 가지 않은 단계(gaveUp = 다시 시도를 그만둠).
@@ -24,6 +25,11 @@ export function escMarkView(esc, { canAck = false, enabled = false } = {}) {
   }
   const step = int(esc.step); const tried = int(esc.tried);
   const live = enabled && esc.covered === true;
+  // 회차가 보내지 않는 상태 · 정비 창 보류 — ‘보냅니다’ 라고 약속하지 않는다(디버깅 1회차 화면 U7)
+  if (live && (esc.paused || esc.held)) {
+    const why = esc.held ? '정비 창 보류 중인 장비라 단계 알림을 보내지 않습니다(창이 끝나면 다시 셉니다)' : `${WHY[esc.paused] || '지금은 단계 알림을 보내지 않습니다'} — 사유가 풀리면 정책대로 다시 셉니다`;
+    return { text: esc.held ? '정비 창 보류' : '보내지 않음', tone: 'gray', canAck: live && canAck && !!esc.ackId, title: `${why}${step ? ` · ${step}단계까지는 갔습니다` : ''}` };
+  }
   const ack = live && canAck && !!esc.ackId;
   if (tried) {
     return { text: `${tried}단계 안 감`, tone: 'red', canAck: ack,
@@ -34,6 +40,8 @@ export function escMarkView(esc, { canAck = false, enabled = false } = {}) {
   return { text: '2단계 대기', tone: 'gray', canAck: ack, title: '아무도 확인하지 않으면 정책의 2단계 시각에 보냅니다' };
 }
 
+/** 정책 수집 주체 칸에서 ‘이 포탈(중앙 수집)’ 을 나타내는 글자(서버 값 ''). */
+export const LOCAL_AGENT = '이 포탈';
 const splitEmails = (t) => String(t ?? '').split(/[\s,;]+/).map((x) => x.trim()).filter(Boolean).slice(0, 100);   // 개수 상한은 서버가 거절 사유로(조용히 자르지 않는다)
 /** 서버 설정 → 편집 칸. */
 export function escToForm(s) {
@@ -41,7 +49,7 @@ export function escToForm(s) {
   return {
     enabled: st.enabled === true,
     policies: (Array.isArray(st.policies) ? st.policies : []).map((p) => ({
-      id: p.id, name: p.name || '', agentsText: (p.agents || []).join(', '), states: { fault: (p.states || []).includes('fault'), warn: (p.states || []).includes('warn') },
+      id: p.id, name: p.name || '', agentsText: (p.agents || []).map((a) => (a === '' ? LOCAL_AGENT : a)).join(', '), states: { fault: (p.states || []).includes('fault'), warn: (p.states || []).includes('warn') },
       steps: (p.steps || []).map((x) => ({ afterMin: String(x.afterMin ?? ''), emailsText: (x.emails || []).join(', '), channels: !!x.channels, oncall: !!x.oncall })),
     })),
     oncall: Object.entries(st.oncall && typeof st.oncall === 'object' ? st.oncall : {}).map(([agent, v]) => ({ agent, days: DAYS.map((_, i) => ({ name: v?.days?.[i]?.name || '', email: v?.days?.[i]?.email || '' })) })),
@@ -71,7 +79,7 @@ export function formToEsc(f) {
     enabled: x.enabled === true,
     policies: (Array.isArray(x.policies) ? x.policies : []).map((p) => ({
       id: p.id, name: String(p.name ?? '').trim(),
-      agents: String(p.agentsText ?? '').split(/[,;\n]+/).map((a) => a.trim().toLowerCase()).filter(Boolean),
+      agents: String(p.agentsText ?? '').split(/[,;\n]+/).map((a) => a.trim()).filter(Boolean).map((a) => (a === LOCAL_AGENT ? '' : a.toLowerCase())),   // ‘이 포탈’ = ''(저장 · 다시 읽기에서 빠지지 않게 — 판정 #11)
       states: ['fault', 'warn'].filter((k) => p.states?.[k]),
       steps: (Array.isArray(p.steps) ? p.steps : []).map((s) => ({ afterMin: Number(String(s.afterMin ?? '').trim()), emails: splitEmails(s.emailsText), channels: !!s.channels, oncall: !!s.oncall })),
     })),
@@ -88,7 +96,6 @@ export function nextOncallAgent(f, agents) {
 }
 /** 당직표의 수집 주체 이름 글자. */
 export const agentLabel = (a) => (a === '*' ? '모두' : a === '' ? '이 포탈(중앙 수집)' : a);
-const WHY = Object.freeze({ off: '꺼짐', 'partfault-off': '부품 장애 점검이 꺼져 있어 보내지 않음', demo: '데모 점검이라 보내지 않음', 'state-unreadable': '진행 기록을 읽지 못해 보내지 않음' });
 /** 마지막 회차 상태 한 줄. tickMs = API 의 회차 주기(없으면 숫자를 말하지 않는다). */
 export function escRunText(run, tickMs = null) {
   if (!run || typeof run !== 'object') {

@@ -43,7 +43,8 @@ import {
   LIMITS, newRuleId, underPath, ancestorsOf, isMemberKey,
 } from '../../bmfolders/store.js';
 import { scopeSig } from '../../util/scopeSig.js';
-import { bmCheckFor, chkRowOf } from '../../bmcheck/state.js';
+import { bmCheckFor, bmCheckForAsync, chkRowOf } from '../../bmcheck/state.js';
+import { createYielder } from '../../util/timeSlice.js';
 import { healthRowOf, HEALTH_RULES, HEALTH_BANDS, HEALTH_MIN } from '../../bmcheck/health.js';   // v3.50 건강 점수(⑩)
 import { maskHwLogText, readHwLog, demoHwLog } from '../../idrac/hwLog.js';   // v3.50 하드웨어 이벤트 로그(⑤) — 판본에 따른 가림   // v3.45 물리서버 점검(보증 · 펌웨어 기준선 · BIOS 편차)
 import { memCeOf } from '../../idrac/partLife.js';   // v3.51 부품 수명(⑧) — 메모리 교정 오류 경고 슬롯별 수
@@ -302,7 +303,11 @@ async function trendOnce(key, fn, now = Date.now()) {
   if (hit && (hit.pending || now - hit.at < (hit.ok ? TREND_OK_MS : TREND_FAIL_MS))) return hit.p;
   const ent = { at: now, ok: false, pending: true, p: null };
   ent.p = Promise.resolve().then(fn).then((r) => { ent.ok = !!r?.ok; return r; }, (e) => ({ ok: false, kind: 'error', reason: String(e?.message || e).slice(0, 160) }))
-    .finally(() => { ent.pending = false; ent.at = Date.now(); });
+    .finally(() => {
+      ent.pending = false; ent.at = Date.now();
+      // 기한이 지나면 결과를 놓는다 — 개수로만 밀어내면 묵은 결과(한 벌 수백 KB)를 붙잡고 있었다(v3.52 디버깅 1회차 성능 P9)
+      setTimeout(() => { if (_trendMemo.get(key) === ent) _trendMemo.delete(key); }, ent.ok ? TREND_OK_MS : TREND_FAIL_MS).unref?.();
+    });
   _trendMemo.delete(key); _trendMemo.set(key, ent);
   while (_trendMemo.size > TREND_MAX) _trendMemo.delete(_trendMemo.keys().next().value);
   return ent.p;
@@ -526,8 +531,11 @@ export function registerBmFolders(api) {
       // v3.45 물리서버 점검: 이 응답에 싣는 구성원만으로 판정한다(묶음이 법인을 넘지 않아 결과가 같다 — bmcheck/state.js). 실패해도 목록은 그대로(요약만 빠진다)
       const ci = checkInputs();
       let chk = null;
-      try { chk = bmCheckFor({ members: shown.map((x) => x[0]), placeOf: b.placeOf, hxOf, assets: ci.assets, adminBase: ci.adminBase, today: todayStamp(), advisories: ci.advisories }); } catch { chk = null; }
+      // 1,000대 목록은 입력 모으기 · 행 만들기가 수백 ms 한 덩어리였다 — 시간 기준 양보(v3.52 디버깅 1회차 성능 P10). 판정 결과는 같다
+      const y = createYielder(15);
+      try { chk = await bmCheckForAsync({ members: shown.map((x) => x[0]), placeOf: b.placeOf, hxOf, assets: ci.assets, adminBase: ci.adminBase, today: todayStamp(), advisories: ci.advisories }, y); } catch { chk = null; }
       for (const [m, p] of shown) {
+        await y();
         // 찾기를 못 만들었으면 hx = undefined → 행에 hw 키를 싣지 않는다(화면이 '인벤토리 없음' 으로 단정하지 않고 '요약을 만들지 못함' 으로 — 반증 F11)
         let hx;
         if (hxOf) { try { hx = hxOf(m); } catch { hx = null; } }
@@ -742,9 +750,13 @@ export function registerBmFolders(api) {
       const message = r?.message ? (full ? String(r.message) : maskHwLogText(String(r.message), { tag: m.serviceTag })).slice(0, 300) : '';
       logAudit({ user: req.user?.username, action: kind === 'power' ? '물리서버 원격 전원 조작' : '물리서버 위치 LED', target: `${m.name || ''}`.slice(0, 120),
         detail: `${action} · ${via === 'demo' ? '데모(장비에 보내지 않음)' : ok ? '장비가 받음' : r?.status || r?.kind || '실패'}${r?.reset ? ` · ${r.reset}` : ''} · ${via}${reason ? ` · 사유 ${reason}` : ''}`.slice(0, 300), ip: req.ip });   // 데모는 ‘받음’ 이라 적지 않는다(반증 B6)
-      return res.json({ ok, via, status: r?.status || (r?.kind === 'old-version' ? 'old-version' : r?.kind === 'not-found' ? 'not-found' : r?.kind === 'edge-disabled' ? 'edge-disabled' : r?.kind === 'edge-force-off' ? 'force-off' : r?.kind === 'edge-rate' ? 'rate' : 'edge-fail'),
+      // 엣지 대행 실패 — 요청이 장비에 가기 전에 멈춘 것이 확실하면 ‘보내지 않음’(edge-refused), 아니면 ‘모름’(edge-fail · 디버깅 1회차 엣지 #4)
+      const refusedKinds = ['not-registered', 'ambiguous', 'disabled', 'disabled-central', 'no-url', 'auth', 'bad-args', 'edge-ambiguous', 'edge-registry'];
+      const kindStatus = r?.kind === 'old-version' ? 'old-version' : r?.kind === 'not-found' ? 'not-found' : r?.kind === 'edge-disabled' ? 'edge-disabled' : r?.kind === 'edge-force-off' ? 'force-off' : r?.kind === 'edge-rate' ? 'rate'
+        : refusedKinds.includes(r?.kind) || (r?.kind === 'http' && r?.body?.sent === false) ? 'edge-refused' : 'edge-fail';
+      return res.json({ ok, via, status: r?.status || kindStatus,
         ...(r?.http ? { http: r.http } : {}), ...(r?.reset ? { reset: r.reset } : {}), ...(r?.prop ? { prop: r.prop } : {}), ...(r?.before ? { before: r.before } : {}), ...(message ? { message } : {}),
-        ...(typeof r?.tagChecked === 'boolean' ? { tagChecked: r.tagChecked } : {}), ...(full && !r?.ok && r?.reason ? { reason: String(r.reason).slice(0, 200) } : {}) });
+        ...(typeof r?.tagChecked === 'boolean' ? { tagChecked: r.tagChecked } : {}), ...(full && typeof r?.gotTag === 'string' ? { gotTag: r.gotTag } : {}), ...(full && !r?.ok && r?.reason ? { reason: String(r.reason).slice(0, 200) } : {}), ...(!full && !r?.ok && ['edge-ambiguous', 'edge-registry', 'not-registered', 'disabled-central'].includes(r?.kind) && r?.reason ? { reason: String(r.reason).slice(0, 200) } : {}) });
     };
     if (route.via === 'demo') return finish('demo', route.demo);
     // 보내기 전에도 감사(요청 도중 재시작되면 결과 기록이 없다 — 반증 A12)
@@ -753,7 +765,10 @@ export function registerBmFolders(api) {
       const r = await D.powerEdge(route.agent, { ...route.q, kind, action, by: req.user?.username || '', reason });
       return finish(route.via, r?.ok ? r.body : r);
     }
-    return finish('local', await D.powerLocal(route.entry, { kind, action, expectTag: m.serviceTag || route.entry.serviceTag || '' }));
+    const rl = await D.powerLocal(route.entry, { kind, action, expectTag: m.serviceTag || route.entry.serviceTag || '' });
+    // LED 를 바꿨으면 다음 폴링에서 인벤토리를 다시 읽게 — 드로어의 LED 상태가 30분 옛 값으로 남지 않게(디버깅 1회차 판정 #9)
+    if (kind === 'led' && rl?.ok) { try { (await import('../../idrac/invCache.js')).markInventoryStale(String(route.entry.id)); } catch { /* 표시 실패가 결과를 막지 않는다 */ } }
+    return finish('local', rl);
   };
   api.post('/tools/bm-folders/power', toolsPerm, textFields('key', 'action', 'reason', 'confirm', 'otp'), async (req, res, next) => {
     // 게이트(권한 · 범위 · 스위치 · 입력 · 보낼 길)를 OTP 보다 먼저 — 범위 밖 계정 · 보낼 수 없는 요청이 OTP 를 소모하지 않게(조회 밖 404 → 쓰기 밖 403 → 꺼짐 403 → OTP)

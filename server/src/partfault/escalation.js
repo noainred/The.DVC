@@ -22,6 +22,7 @@ import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { readJsonFile } from '../util/jsonFileRead.js';
 import { registerStateFile } from '../util/stateFiles.js';
 import { numOrNull } from '../util/numOrNull.js';
+import { localClock } from '../util/dayKey.js';
 
 export const ESC_POLICIES_MAX = 20;
 export const ESC_STEPS_MAX = 4;
@@ -97,7 +98,8 @@ export function normalizeEscalation(body, { lenient = false } = {}) {
     for (const a of agentSrc.slice(0, 64)) {
       const k = agentKeyOf(a);
       if (k == null) { if (lenient) continue; return fail(`${where}: 수집 주체 이름이 틀렸습니다(64자 · 쉼표 · 세미콜론 · 제어 문자 없이).`); }
-      if (k !== ESC_ALL && !agents.includes(k)) agents.push(k);
+      if (k === ESC_ALL) { if (!lenient && agentSrc.length > 1) return fail(`${where}: ‘모두(*)’ 는 다른 수집 주체와 함께 줄 수 없습니다(비우면 모두).`); continue; }   // 조용히 버리지 않는다(디버깅 1회차 판정 #11)
+      if (!agents.includes(k)) agents.push(k);
     }
     const stateSrc = Array.isArray(p.states) ? p.states : [];
     if (!lenient && stateSrc.some((x) => !ESC_STATES.includes(x))) return fail(`${where}: 모르는 대상 상태가 있습니다(이상 · 주의만).`);
@@ -137,6 +139,7 @@ export function normalizeEscalation(body, { lenient = false } = {}) {
   for (const [k, v] of Object.entries(oc).slice(0, 128)) {
     const ak = agentKeyOf(k);
     if (ak == null || !isObj(v) || !Array.isArray(v.days)) { if (lenient) continue; return fail(`당직표: 수집 주체 ‘${String(k).slice(0, 40)}’ 의 형식이 틀렸습니다.`); }
+    if (!lenient && Object.hasOwn(oncall, ak)) return fail(`당직표: 수집 주체 ‘${ak === ESC_ALL ? '모두' : ak || '이 포탈'}’ 의 표가 둘 이상입니다(대소문자만 다른 이름 포함).`);   // 뒤 것만 남기지 않는다(판정 #11)
     const days = [];
     for (let i = 0; i < 7; i += 1) {
       const d = isObj(v.days[i]) ? v.days[i] : {};
@@ -195,19 +198,29 @@ const itemShape = (x) => {
   if (since == null) return null;
   const sent = (Array.isArray(x.sent) ? x.sent : []).filter((e) => Array.isArray(e) && Number.isInteger(e[0]) && e[0] >= 0 && e[0] < ESC_STEPS_MAX).slice(0, ESC_STEPS_MAX * (ESC_RETRY_MAX + 2))
     .map((e) => [e[0], numOrNull(e[1]), typeof e[2] === 'string' ? e[2].slice(0, 120) : '', KINDS.includes(e[3]) ? e[3] : 'ok']);
-  return { since, sig: str(x.sig, 400), sent, ackedAt: numOrNull(x.ackedAt), ackBy: str(x.ackBy, 80) };
+  return { since, sig: str(x.sig, 400), sent, ackedAt: numOrNull(x.ackedAt), ackBy: str(x.ackBy, 80), pol: str(x.pol, 40) };
 };
-export function loadEscalationState() {
+// 읽기 오류는 캐시하지 않는다 — 파일을 고치면 다음 재읽기(30초 간격)에 풀린다(v3.52 디버깅 1회차 성능 P4: 예전에는 재시작 전까지 멈췄다)
+export const ESC_STATE_RETRY_MS = 30_000;
+let _stateRetryAt = 0; let _stateErrUntil = 0;
+export const ESC_STATE_NOTE_MS = 24 * 3600_000;
+export function loadEscalationState(now = Date.now()) {
   if (_state) return _state;
+  if (_stateReadError && now < _stateRetryAt) return { v: 1, items: {}, enabledAt: null };
   const items = {}; let enabledAt = null;
   // 읽기는 공용 판정(util/jsonFileRead.js) — 없음 · 읽기 오류 · 손상(보존은 공용이 한다)을 가른다(97회차 스윕)
   const r = readJsonFile(STATE_FILE(), { parse: (text) => { const d = JSON.parse(text); if (!isObj(d) || !isObj(d.items)) throw new Error('진행 기록 꼴이 아닙니다'); return d; } });
   if (r.kind === 'read-error') {
     // 읽기 오류(권한 등 — 없음이 아님)는 보내지도 쓰지도 않는다: 보낸 단계를 모르는 채 쓰면 원본을 덮고, 보내면 같은 단계를 매 회차 다시 보낸다(반증 A6)
-    _stateReadError = true; _stateErr = `진행 기록을 읽지 못해(${String(r.error?.code || 'error')}) 단계 알림을 멈췄습니다 — 파일 권한을 확인하십시오.`;
-  } else if (r.kind === 'corrupt') {
+    _stateReadError = true; _stateRetryAt = now + ESC_STATE_RETRY_MS;
+    _stateErr = `진행 기록을 읽지 못해(${String(r.error?.code || 'error')}) 단계 알림을 멈췄습니다 — 파일 권한을 확인하십시오(고치면 ${ESC_STATE_RETRY_MS / 1000}초 안에 다시 읽습니다).`;
+    return { v: 1, items: {}, enabledAt: null };
+  }
+  if (_stateReadError) { _stateReadError = false; _stateErr = ''; }   // 다시 읽혔다 — 멈춤 안내를 지운다
+  if (r.kind === 'corrupt') {
     // 손상 — 공용이 옆으로 보존했다. 빈 기록으로 시작한다(새 기록은 since = 지금이라 열린 장애에 바로 쏟아지지 않는다 — 정한 분이 지난 뒤 2단계부터 다시)
     _stateErr = '진행 기록이 손상돼 보존본을 남기고 새로 시작했습니다 — 열린 장애는 지금부터 다시 셉니다(이미 보낸 2단계가 한 번 더 갈 수 있습니다).';
+    _stateErrUntil = now + ESC_STATE_NOTE_MS;   // 손상 안내는 하루 보인다 — 재시작 전까지 남지 않게(성능 P4 ②) · 바로 지우면 아무도 못 본다
   } else if (r.kind === 'ok') {
     enabledAt = numOrNull(r.value.enabledAt);
     for (const [k, v] of Object.entries(r.value.items).slice(0, ESC_ITEMS_MAX)) { const it = itemShape(v); if (it && typeof k === 'string' && k.length <= 600) items[k] = it; }
@@ -220,9 +233,9 @@ export function saveEscalationState(st) {
   _state = st;
   try { fs.mkdirSync(path.dirname(STATE_FILE()), { recursive: true }); atomicWriteFileSync(STATE_FILE(), JSON.stringify(st)); return true; } catch { return false; }
 }
-export const escalationStateError = () => _stateErr;
+export const escalationStateError = (now = Date.now()) => (_stateErr && (_stateReadError || now < _stateErrUntil) ? _stateErr : '');
 export const escalationStateUnreadable = () => { loadEscalationState(); return _stateReadError; };
-export function _resetEscalationStateForTest() { _state = null; _stateErr = ''; _stateReadError = false; }
+export function _resetEscalationStateForTest() { _state = null; _stateErr = ''; _stateReadError = false; _stateRetryAt = 0; _stateErrUntil = 0; }
 export { STATE_NAME as ESC_STATE_FILE_NAME };
 
 // ───────── 판정(순수) ─────────
@@ -240,7 +253,10 @@ export function policyFor(settings, p) {
 }
 /** 그 수집 주체의 오늘 당직(이 포탈 서버 시각의 요일) — 수집 주체 표 → ‘모두’ 표. 없으면 null. */
 export function oncallFor(settings, agent, now = Date.now()) {
-  const dow = (new Date(now).getDay() + 6) % 7;   // 월=0 … 일=6
+  // 요일은 포탈 지역 시계(DAY_OFFSET — 프로세스 TZ 가 아니다: 패키지 유닛은 TZ 를 정하지 않는다 · perf-db ‘스케줄은 localClock’ — 디버깅 1회차 판정 #1)
+  const lc = localClock(now);
+  if (!lc.day) return null;
+  const dow = (new Date(`${lc.day}T00:00:00Z`).getUTCDay() + 6) % 7;   // 월=0 … 일=6
   const ag = String(agent || '').trim().toLowerCase();
   const oc = settings?.oncall;
   for (const k of [ag, ESC_ALL]) {
@@ -261,7 +277,7 @@ const stepDone = (sent, i) => sent.some((e) => e[0] === i && e[3] !== 'fail') ||
  */
 export function escalationPlan({ settings, state, open, now = Date.now(), maxSends = ESC_SENDS_PER_RUN, hold = null, holdKeyOf = null }) {
   const items = {};
-  const sends = []; let deferred = 0; let overCap = 0; let held = 0;
+  const sends = []; let deferred = 0; let overCap = 0; let held = 0; const heldKeys = [];
   const prev = state?.items || {};
   const list = Array.isArray(open) ? open : [];
   const openKeys = new Set(list.map(partKeyOf));
@@ -272,6 +288,8 @@ export function escalationPlan({ settings, state, open, now = Date.now(), maxSen
   const enabledAt = numOrNull(settings?.enabledAt);
   // 다시 켰다(켠 시각이 바뀌었다) — 확인하지 않은 기록은 지금부터 다시 센다(옛 since 로 켜자마자 높은 단계가 가지 않게 — 반증 A5)
   const reEnabled = enabled && (numOrNull(state?.enabledAt) ?? null) !== enabledAt;
+  const reserved = list.reduce((n, p) => n + (Object.hasOwn(prev, partKeyOf(p)) ? 1 : 0), 0);   // 이미 기록이 있는 열린 장애(자리를 먼저 둔다)
+  let newCount = 0;
   for (const p of list) {
     const key = partKeyOf(p);
     const sig = partSigOf(p);
@@ -279,13 +297,16 @@ export function escalationPlan({ settings, state, open, now = Date.now(), maxSen
     if (!cur && staleBySig.has(sig)) { cur = staleBySig.get(sig); staleBySig.delete(sig); }   // 키 이전 — 기록 · 확인을 이어받는다
     if (cur && reEnabled && !cur.ackedAt) cur = { ...cur, since: now, sent: [] };
     const pol = enabled ? policyFor(settings, p) : null;
+    // 다른 정책으로 넘어감(예: 주의 → 이상 — 받는 곳이 다른 팀) — 그 정책의 단계는 아직 하나도 가지 않았다: 지금부터 다시 센다(디버깅 1회차 판정 #3)
+    if (pol && cur && !cur.ackedAt && cur.pol && cur.pol !== pol.id) cur = { ...cur, since: now, sent: [], pol: pol.id };
     // 정책 밖(꺼짐 · 맞는 정책 없음 · 상태가 바뀜)이어도 열려 있는 동안은 기록을 둔다 — 상태가 오가도 보낸 단계를 다시 보내지 않게(반증 A3)
     if (!pol) { if (cur) items[key] = { ...cur, sig }; continue; }
-    if (!cur && Object.keys(items).length + Object.keys(prev).filter((k) => openKeys.has(k) && !Object.hasOwn(items, k)).length >= ESC_ITEMS_MAX) { overCap += 1; continue; }   // 상한 — 기록할 수 없는 장애에는 보내지 않는다(반증 A7)
-    const it = cur ? { ...cur, sig, sent: [...cur.sent] } : { since: now, sig, sent: [], ackedAt: null, ackBy: '' };
+    // 상한 — 기록할 수 없는 장애에는 보내지 않는다(반증 A7). 이미 기록이 있는 열린 장애 수를 먼저 떼어 두고 새 것만 센다(O(N) — 판정 #13)
+    if (!cur) { if (newCount + reserved >= ESC_ITEMS_MAX) { overCap += 1; continue; } newCount += 1; }
+    const it = cur ? { ...cur, sig, sent: [...cur.sent], pol: pol.id } : { since: now, sig, sent: [], ackedAt: null, ackBy: '', pol: pol.id };
     items[key] = it;
     if (it.ackedAt) continue;
-    if (hold && holdKeyOf && hold.has(holdKeyOf(p.agent, p.deviceId))) { held += 1; continue; }
+    if (hold && holdKeyOf && hold.has(holdKeyOf(p.agent, p.deviceId))) { held += 1; heldKeys.push(key); continue; }
     const mins = (now - it.since) / 60_000;
     let due = -1;
     pol.steps.forEach((s, i) => { if (mins >= s.afterMin && !stepDone(it.sent, i)) due = i; });
@@ -294,9 +315,10 @@ export function escalationPlan({ settings, state, open, now = Date.now(), maxSen
     const skipped = pol.steps.map((_, i) => i).filter((i) => i < due && !stepDone(it.sent, i));
     const step = pol.steps[due];
     const oc = step.oncall ? oncallFor(settings, p.agent, now) : null;
-    sends.push({ key, part: p, policy: pol, step: due, skipped, to: { emails: step.emails, channels: step.channels, oncall: oc, oncallWanted: step.oncall } });
+    const attempt = it.sent.filter((e) => e[0] === due && e[3] === 'fail').length + 1;   // 다시 시도 번호 — 채널 억제 열쇠에 넣는다(같은 열쇠면 억제 창에 막혀 다시 시도가 0번이었다 — 판정 #2)
+    sends.push({ key, part: p, policy: pol, step: due, attempt, skipped, to: { emails: step.emails, channels: step.channels, oncall: oc, oncallWanted: step.oncall } });
   }
-  return { sends, items, enabledAt: enabled ? enabledAt : (numOrNull(state?.enabledAt) ?? null), deferred, overCap, held };
+  return { sends, items, enabledAt: enabled ? enabledAt : (numOrNull(state?.enabledAt) ?? null), deferred, overCap, held, heldKeys };
 }
 /**
  * 보낸 결과를 기록에 적는다(순수 — 새 items). results[i] = { text, delivered:boolean }.
@@ -341,7 +363,11 @@ export function ackEscalation(p, { by = '', now = Date.now() } = {}) {
  *   tried(시도했으나 안 간 가장 높은 화면 단계 — step 보다 높을 때만), acked, ackBy?, ackedAt? }.
  *   정책 밖 장애에 ‘1단계(바로)’ · 확인 단추를 붙이지 않게(화면 판독 — 다음 단계가 없는 장애였다).
  */
-export function escalationMarkOf(p, items, settings = null) {
+/**
+ * run = 마지막 회차 { why, heldKeys:Set } — 회차가 보내지 않는 상태(데모 · 부품 장애 점검 꺼짐 · 진행 기록 못 읽음)면 paused 에 그 사유 · 정비 창 보류 장비면 held.
+ *   행 표지가 ‘보냅니다’ 라고 약속하지 않게(디버깅 1회차 화면 U7).
+ */
+export function escalationMarkOf(p, items, settings = null, run = null) {
   const it = items && Object.hasOwn(items, partKeyOf(p)) ? items[partKeyOf(p)] : null;
   const ok = (it?.sent || []).filter((e) => e[3] === 'ok').map((e) => e[0]);
   const bad = (it?.sent || []).filter((e) => e[3] === 'fail' || e[3] === 'give').map((e) => e[0]);
@@ -349,5 +375,9 @@ export function escalationMarkOf(p, items, settings = null) {
   const tried = bad.length && Math.max(...bad) + 2 > (step ?? 1) ? Math.max(...bad) + 2 : null;
   // 그 단계를 그만뒀는가(다시 시도 상한) — 화면이 ‘다시 시도 중’ 과 ‘그만둠’ 을 가른다(반증 B1)
   const gaveUp = tried != null && (it?.sent || []).some((e) => e[0] === tried - 2 && e[3] === 'give');
-  return { ackId: ackIdOf(p), covered: !!(settings?.enabled && policyFor(settings, p)), step, ...(tried ? { tried, ...(gaveUp ? { gaveUp: true } : {}) } : {}), acked: !!it?.ackedAt, ...(it?.ackedAt ? { ackedAt: it.ackedAt, ackBy: it.ackBy } : {}) };
+  const covered = !!(settings?.enabled && policyFor(settings, p));
+  const why = covered && typeof run?.why === 'string' && run.why && run.why !== 'off' ? run.why : '';
+  const held = covered && !why && run?.heldKeys instanceof Set && run.heldKeys.has(partKeyOf(p));
+  return { ackId: ackIdOf(p), covered, step, ...(tried ? { tried, ...(gaveUp ? { gaveUp: true } : {}) } : {}), acked: !!it?.ackedAt, ...(it?.ackedAt ? { ackedAt: it.ackedAt, ackBy: it.ackBy } : {}),
+    ...(why ? { paused: why } : {}), ...(held ? { held: true } : {}) };
 }

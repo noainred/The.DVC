@@ -7,10 +7,14 @@
  *    설치 버전 < 고친 버전이면 ‘걸림’. 숫자 . 꼴이 아닌 버전은 순서를 지어내지 않는다 — ‘모름’ 으로 따로 센다(util/cmpVersion → null).
  *  · 모델 · 구성요소 칸은 **소문자 일부 일치**(비우면 전부). 글자는 이미 길이가 잘려 있다(store.js · 선형 includes).
  */
-import { cmpVersion } from '../util/cmpVersion.js';
+import { cmpVersion, parseVersion, cmpParsed } from '../util/cmpVersion.js';
 import { FW_TYPES } from './fw.js';
 import { parseCsvRows, csvLine, unguardCell, CSV_BOM } from '../util/csv.js';
 import { ADVISORY_SEVS, ADVISORY_ROWS_MAX } from './store.js';
+/** 권고 줄의 모델 낱말이 모두 서버 모델 낱말에 있는가(글자 · 숫자 덩어리 단위 — 부분 일치가 아니다). */
+const toks = (x) => String(x || '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+export function modelTokensMatch(serverModel, rowModel) { const have = new Set(toks(serverModel)); const need = toks(rowModel); return need.length > 0 && need.every((w) => have.has(w)); }
+
 
 export const ADVISORY_COLUMNS = Object.freeze(['advisory_id', 'severity', 'component_type', 'model', 'component', 'fixed_version', 'title', 'url']);
 const ALIAS = Object.freeze({
@@ -77,28 +81,60 @@ export const sampleAdvisoryCsv = () => CSV_BOM + csvLine(ADVISORY_COLUMNS) + '\r
  *   unknown = 맞는 줄은 있으나 모두 순서를 정할 수 없음 · clear = 견준 줄이 있고 걸린 것 없음(checked − unknown 줄) · hit = 걸린 것 있음
  *   hits 는 앞 50개까지 · total = 자르기 전 걸린 수(반증 A7) · unknown = 순서를 정할 수 없는 줄(숫자 꼴이 아닌 버전 · 한 서버 안에서 섞인 구성요소 — 반증 A6)
  */
+//   성능(v3.52 디버깅 1회차 성능 P1): 목록 한 번에 서버 1,000대 × 권고 2,000줄 × 펌웨어 40줄을 훑으며 같은 버전을 매번 다시 파싱해 5~6초 멈췄다.
+//   → 권고 표(배열 — 저장소 캐시가 같은 동안 같은 객체)마다 한 번 색인(모델 낱말 · 고친 버전 파싱)하고, 같은 (모델, 펌웨어 줄) 서명의 결과를 기억한다
+//     (표가 바뀌면 새 배열이라 기억도 새로 — WeakMap). 결과 객체는 여러 서버가 함께 쓰므로 얼린다(받는 쪽은 읽기만).
+const SEV_ORDER = Object.freeze({ critical: 0, high: 1, medium: 2, low: 3 });
+const COLL = new Intl.Collator();
+export const ADVISORY_MEMO_MAX = 4096;
+const _tableIx = new WeakMap();
+function tableIndex(list) {
+  let ix = _tableIx.get(list);
+  if (ix) return ix;
+  ix = { rows: list.map((a) => ({ a, need: a.model ? toks(a.model) : null, fixed: parseVersion(a.fixed) })), memo: new Map() };
+  _tableIx.set(list, ix);
+  return ix;
+}
+const deepFreeze = (o) => { for (const h of o.hits) Object.freeze(h); Object.freeze(o.hits); return Object.freeze(o); };
 export function advisoriesFor(server, table) {
   const list = Array.isArray(table) ? table : [];
   if (!list.length) return { state: 'no-table', hits: [], total: 0, unknown: 0, checked: 0 };
   const fw = Array.isArray(server?.rows) ? server.rows : null;
   if (!fw || !fw.length) return { state: 'no-fw', hits: [], total: 0, unknown: 0, checked: 0 };
   const model = String(server?.model || '').toLowerCase();
+  const ix = tableIndex(list);
+  const sig = `${model}\u0001${fw.map((r) => (r ? `${r.type}\u0002${r.label}\u0002${r.installed}\u0002${r.mixed ? 1 : 0}` : '')).join('\u0003')}`;
+  const memo = ix.memo.get(sig);
+  if (memo) return memo;
+  // 펌웨어 줄을 종류별로 한 번 묶고(소문자 이름 · 설치 버전 파싱도 한 번) — 표 순서 × 그 종류 줄 순서로 도는 것은 예전과 같다
+  const byType = new Map();
+  for (const r of fw) {
+    if (!r) continue;
+    let arr = byType.get(r.type);
+    if (!arr) { arr = []; byType.set(r.type, arr); }
+    arr.push({ r, lc: String(r.label || '').toLowerCase(), ver: r.mixed ? null : parseVersion(r.installed) });
+  }
+  const have = new Set(toks(model));
   const hits = []; let unknown = 0; let checked = 0;
-  for (const a of list) {
-    if (a.model && !model.includes(a.model)) continue;
-    for (const r of fw) {
-      if (!r || r.type !== a.type) continue;
-      if (a.comp && !String(r.label || '').toLowerCase().includes(a.comp)) continue;
+  for (const { a, need, fixed } of ix.rows) {
+    // 모델은 낱말 단위로 대조한다 — ‘R740xd’ 줄이 ‘R740xd2’ 에 걸리지 않게(디버깅 1회차 판정 #6 · modelTokensMatch 와 같은 규칙)
+    if (a.model && !(need.length > 0 && need.every((w) => have.has(w)))) continue;
+    const cand = byType.get(a.type);
+    if (!cand) continue;
+    for (const { r, lc, ver } of cand) {
+      if (a.comp && !lc.includes(a.comp)) continue;
       checked += 1;
       if (r.mixed) { unknown += 1; continue; }   // 같은 구성요소가 서버 안에서 버전이 섞였다 — 어느 것이 걸리는지 모른다(‘걸린 것 없음’ 이 아니다)
-      const c = cmpVersion(r.installed, a.fixed);
+      const c = cmpParsed(ver, fixed);
       if (c == null) { unknown += 1; continue; }
       if (c < 0) hits.push({ id: a.id, sev: a.sev, type: r.type, label: r.label, installed: r.installed, fixed: a.fixed, title: a.title, url: a.url });
     }
   }
-  const order = { critical: 0, high: 1, medium: 2, low: 3 };
-  hits.sort((x, y) => (order[x.sev] ?? 9) - (order[y.sev] ?? 9) || String(x.id).localeCompare(String(y.id)));
+  hits.sort((x, y) => (SEV_ORDER[x.sev] ?? 9) - (SEV_ORDER[y.sev] ?? 9) || COLL.compare(String(x.id), String(y.id)));
   // clear 는 실제로 견준 줄이 있을 때만 — 맞는 권고 줄이 없으면 unmatched(이 모델 · 구성요소에 해당하는 권고 없음), 모두 ‘모름’ 이면 unknown(반증 B2)
   const state = hits.length ? 'hit' : checked === 0 ? 'unmatched' : checked - unknown <= 0 ? 'unknown' : 'clear';
-  return { state, hits: hits.slice(0, 50), total: hits.length, unknown, checked };
+  const out = deepFreeze({ state, hits: hits.slice(0, 50), total: hits.length, unknown, checked });
+  if (ix.memo.size >= ADVISORY_MEMO_MAX) ix.memo.clear();
+  ix.memo.set(sig, out);
+  return out;
 }

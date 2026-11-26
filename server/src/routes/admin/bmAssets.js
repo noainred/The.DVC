@@ -54,7 +54,15 @@ export function registerBmAssets(adminRouter, { D = {} } = {}) {
     res.set('Cache-Control', 'no-store');
     res.json({ ok: true, settings: remotePower.get(), otpRequired: !!config.auth.enabled, ...(remotePower.loadError() ? { unreadable: true } : {}) });
   });
-  adminRouter.put('/bm-power', adminOnly, fleetOnly, ownOtpGate('물리서버 원격 전원 조작 켜기 · 끄기'), (req, res) => {
+  // 본문 검증 · 파일 거절을 OTP 보다 먼저(거절될 요청이 OTP 를 소모하지 않게 · otp 가 글자가 아니면 400 — 디버깅 1회차 보안 #2)
+  const powerBodyOk = (req, res, next) => {
+    const b = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+    if (typeof b.enabled !== 'boolean' || (b.allowForce !== undefined && typeof b.allowForce !== 'boolean')) return res.status(400).json({ ok: false, reason: 'enabled · allowForce 는 참/거짓이어야 합니다.' });
+    const refused = remotePower.refusal();
+    if (refused) return res.status(409).json({ ok: false, ...refused });
+    return next();
+  };
+  adminRouter.put('/bm-power', adminOnly, fleetOnly, textFields('otp'), powerBodyOk, ownOtpGate('물리서버 원격 전원 조작 켜기 · 끄기'), (req, res) => {
     const b = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
     const before = remotePower.get();
     const r = remotePower.save({ enabled: b.enabled, allowForce: b.allowForce }, { by: req.user?.username || '' });
@@ -71,7 +79,7 @@ export function registerBmAssets(adminRouter, { D = {} } = {}) {
     const st = E.eventSubStore.get();
     res.json({ ok: true, settings: E.eventSubPublic(st), destinationPreview: st.base ? `${st.base}${E.EVT_PATH}…` : '', otpRequired: !!config.auth.enabled,
       ...(E.eventSubStore.loadError() ? { unreadable: true } : {}), status: E.eventStatus(), sync: E.syncStatus(), edge: !!config.agent.centralUrl,
-      limits: { debounceMs: E.EVT_DEBOUNCE_MS, perPost: E.EVT_PER_POST, ring: E.EVT_RING, concurrency: E.SUB_CONCURRENCY } });
+      limits: { debounceMs: E.EVT_DEBOUNCE_MS, perPost: E.EVT_PER_POST, ring: E.EVT_RING, concurrency: E.SUB_CONCURRENCY, batch: E.EVT_BATCH_MAX } });
   });
   adminRouter.put('/bm-events', adminOnly, fleetOnly, textFields('base'), async (req, res) => {
     const E = await import('../../idrac/eventSub.js');
@@ -83,7 +91,15 @@ export function registerBmAssets(adminRouter, { D = {} } = {}) {
     logAudit({ user: req.user?.username, action: '물리서버 이벤트 구독 설정 저장', detail: `켜기 ${before.enabled ? '켜짐' : '꺼짐'}→${r.value.enabled ? '켜짐' : '꺼짐'} · 받는 주소 ${r.value.base || '(없음)'}${r.rotated ? ' · 비밀 새로 만듦(다시 구독해야 받습니다)' : ''}`.slice(0, 300), ip: req.ip });
     res.json({ ok: true, settings: E.eventSubPublic(r.value), rotated: !!r.rotated });
   });
-  adminRouter.post('/bm-events/sync', adminOnly, fleetOnly, ownOtpGate('물리서버 이벤트 구독 걸기 · 지우기'), async (req, res) => {
+  const syncBodyOk = async (req, res, next) => {
+    const b = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+    if (b.unsubscribe !== undefined && typeof b.unsubscribe !== 'boolean') return res.status(400).json({ ok: false, reason: 'unsubscribe 는 참/거짓이어야 합니다.' });
+    const E = await import('../../idrac/eventSub.js');
+    const why = E.syncPrecheck({ unsubscribe: b.unsubscribe === true });   // 진행 중 · 꺼짐을 OTP 앞에서(디버깅 1회차 보안 #2)
+    if (why) return res.status(why.busy ? 409 : 400).json({ ok: false, reason: why.reason });
+    return next();
+  };
+  adminRouter.post('/bm-events/sync', adminOnly, fleetOnly, textFields('otp'), syncBodyOk, ownOtpGate('물리서버 이벤트 구독 걸기 · 지우기'), async (req, res) => {
     const E = await import('../../idrac/eventSub.js');
     const unsubscribe = req.body?.unsubscribe === true;
     const user = req.user?.username; const ip = req.ip;
@@ -104,7 +120,8 @@ export function registerBmAssets(adminRouter, { D = {} } = {}) {
     const { rows, errors } = parseAdvisoryCsv(String(req.body?.csv || ''));
     const cur = V.get();
     const base = { n: cur.rows.length, at: cur.at ?? null };
-    const view = { total: rows.length + errors.length, ok: true, rows: rows.length, errors: errors.slice(0, 200), base };
+    // 오류는 앞 200행만 싣고 전체 수를 따로 — 화면이 ‘오류 200행’ 으로 줄여 말하지 않게(디버깅 1회차 화면 U4)
+    const view = { total: rows.length + errors.length, ok: true, rows: rows.length, errors: errors.slice(0, 200), errorCount: errors.length, base };
     if (dry === true) return res.json({ ...view, dryRun: true });
     if (errors.length) return res.status(400).json({ ...view, ok: false, reason: `오류 행이 ${errors.length}개 있어 표를 바꾸지 않았습니다 — 고친 뒤 다시 검증하십시오.` });
     const ex = req.body?.expect;

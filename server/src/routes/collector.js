@@ -325,6 +325,25 @@ collectorRouter.get('/bm-usage/compare-series', tokenFirst('bm-usage-compare-ser
 // v3.50 물리서버 ‘하드웨어 이벤트 로그’(SEL) — 이 엣지에 등록된 iDRAC 서버 한 대의 SEL 을 읽어 돌려준다(central/bmHwLogPull.js).
 //   읽기만(GET) · 장비 상태를 바꾸지 않는다 · 서버는 등록부 id(id) 또는 중앙이 아는 열쇠(k — 엣지가 함대 push 에 실은 fleetId = 태그 · 등록 id 소문자)로 찾는다.
 //   같은 서버는 60초에 한 번만 장비에 묻는다(진행 중이면 함께 기다린다 — 드로어를 빠르게 여닫아도 iDRAC 를 두드리지 않게). 계정 · 주소는 싣지 않는다.
+/**
+ * 엣지 등록부에서 중앙이 말한 서버를 찾는다(bm-hwlog · bm-power 공용 — 디버깅 1회차 엣지 #1 · #2).
+ *  · 꺼진 등록 · 주소 없는 등록은 후보에서 뺀다 · 등록부를 못 읽었으면 503(‘없다’ 고 단정하지 않는다).
+ *  · 열쇠 k 의 순위: 등록 id → **인벤토리 태그**(엣지 fleetId 가 이것을 먼저 쓴다) → 등록부 태그. 한 순위에 켜진 후보가 둘 이상이면 409(어느 장비인지 몰라 보내지 않는다).
+ */
+function findEdgeIdrac(id, k, getInventory) {
+  if (idracRegistryLoadError()) return { status: 503, body: { ok: false, error: 'registryUnreadable', code: 'registry-unreadable', reason: '이 엣지의 iDRAC 등록부를 읽지 못했습니다 — 등록부에 없다고 단정하지 않습니다.' } };
+  const lc = (v) => String(v ?? '').trim().toLowerCase();
+  const reg = loadIdracRegistry().filter((e) => e && e.enabled !== false && e.host);
+  const notFound = { status: 404, body: { ok: false, code: 'not-found', reason: '이 엣지에 등록된(켜진) iDRAC 서버가 아닙니다.' } };
+  if (id) { const e = reg.find((x) => String(x.id) === id); return e ? { entry: e } : notFound; }
+  const invTag = (e) => { try { return lc(getInventory(String(e.id))?.system?.serviceTag); } catch { return ''; } };
+  for (const pick of [(e) => lc(e.id) === k, (e) => invTag(e) === k, (e) => lc(e.serviceTag) === k]) {
+    const hits = reg.filter(pick);
+    if (hits.length === 1) return { entry: hits[0] };
+    if (hits.length > 1) return { status: 409, body: { ok: false, code: 'ambiguous', reason: '이 열쇠에 맞는 켜진 등록이 둘 이상입니다(같은 서비스 태그) — 어느 장비인지 몰라 처리하지 않았습니다.' } };
+  }
+  return notFound;
+}
 const _hwlogMemo = new Map();
 collectorRouter.get('/bm-hwlog', tokenFirst('bm-hwlog'), async (req, res) => {
   try {
@@ -335,16 +354,15 @@ collectorRouter.get('/bm-hwlog', tokenFirst('bm-hwlog'), async (req, res) => {
     const { isMockMode } = await import('../mock/demo/flags.js');
     if (isMockMode()) return res.json(L.demoHwLog(id || k));
     const { getInventory } = await import('../idrac/invCache.js');
-    const lc = (v) => String(v ?? '').trim().toLowerCase();
-    const reg = loadIdracRegistry();
-    const entry = id ? reg.find((e) => String(e.id) === id)
-      : reg.find((e) => lc(e.id) === k || lc(e.serviceTag) === k || (() => { try { return lc(getInventory(String(e.id))?.system?.serviceTag) === k; } catch { return false; } })());
-    if (!entry || entry.enabled === false || !entry.host) return res.status(404).json({ ok: false, code: 'not-found', reason: '이 엣지에 등록된 iDRAC 서버가 아닙니다.' });
+    const fx = findEdgeIdrac(id, k, getInventory);
+    if (!fx.entry) return res.status(fx.status).json(fx.body);
+    const entry = fx.entry;
     const key = String(entry.id);
     const hit = _hwlogMemo.get(key);
     if (hit && (hit.pending || Date.now() - hit.at < 60_000)) return res.json(await hit.p);
     const ent = { at: Date.now(), pending: true, p: null };
-    ent.p = L.readHwLog(entry).finally(() => { ent.pending = false; ent.at = Date.now(); });
+    // 기한(60초)이 지나면 결과를 놓는다 — 개수(256)로만 밀어내면 묵은 결과를 붙잡고 있었다(v3.52 디버깅 1회차 성능 P9)
+    ent.p = L.readHwLog(entry).finally(() => { ent.pending = false; ent.at = Date.now(); setTimeout(() => { if (_hwlogMemo.get(key) === ent) _hwlogMemo.delete(key); }, 60_000).unref?.(); });
     _hwlogMemo.set(key, ent);
     while (_hwlogMemo.size > 256) _hwlogMemo.delete(_hwlogMemo.keys().next().value);
     res.json(await ent.p);
@@ -371,21 +389,22 @@ collectorRouter.post('/bm-power', tokenFirst('bm-power'), express.json({ limit: 
     if (kind === 'power' && P.POWER_ACTIONS[action]?.force === true && process.env.BM_POWER_EDGE_FORCE !== 'true') return res.status(403).json({ ok: false, code: 'force-off', status: 'force-off', reason: '이 엣지는 강제 재시작 · 강제 끄기를 허용하지 않았습니다(엣지 env BM_POWER_EDGE_FORCE=true).' });
     // 이 엣지 전체 상한(10분 창) — 토큰이 새도 한꺼번에 많은 장비를 끄지 못하게
     const nowMs = Date.now(); while (_edgePowerHits.length && nowMs - _edgePowerHits[0] > EDGE_POWER_WINDOW_MS) _edgePowerHits.shift();
-    const max = reqTimeoutMs(process.env.BM_POWER_EDGE_MAX, 30, { min: 1, max: 500 });
+    // 0 · 음수는 ‘막음’(기본값 30 으로 느슨해지지 않게 — 디버깅 1회차 엣지 #3)
+    const rawMax = String(process.env.BM_POWER_EDGE_MAX ?? '').trim();
+    const max = /^-|^0+(\.0*)?$/.test(rawMax) ? 0 : reqTimeoutMs(rawMax, 30, { min: 1, max: 500 });
     if (_edgePowerHits.length >= max) return res.status(429).json({ ok: false, code: 'rate', status: 'rate', reason: `이 엣지는 10분에 ${max}건까지만 보냅니다 — 잠시 뒤 다시.` });
-    _edgePowerHits.push(nowMs);
     const { isMockMode } = await import('../mock/demo/flags.js');
     if (isMockMode()) return res.json({ ok: true, status: 'accepted', http: 204, message: '데모 — 장비에 보내지 않았습니다.' });
     const { getInventory } = await import('../idrac/invCache.js');
-    const lc = (v) => String(v ?? '').trim().toLowerCase();
-    const reg = loadIdracRegistry();
-    const entry = id ? reg.find((e) => String(e.id) === id)
-      : reg.find((e) => lc(e.id) === k || lc(e.serviceTag) === k || (() => { try { return lc(getInventory(String(e.id))?.system?.serviceTag) === k; } catch { return false; } })());
-    if (!entry || entry.enabled === false || !entry.host) return res.status(404).json({ ok: false, code: 'not-found', reason: '이 엣지에 등록된 iDRAC 서버가 아닙니다.' });
+    const fx = findEdgeIdrac(id, k, getInventory);
+    if (!fx.entry) return res.status(fx.status).json(fx.body);
+    const entry = fx.entry;
     const who = `중앙:${str(b.by, 80) || '?'}`; const tgt = String(entry.name || entry.id).slice(0, 120);
     logAudit({ user: who, action: kind === 'power' ? '물리서버 원격 전원 조작 요청(중앙)' : '물리서버 위치 LED 요청(중앙)', target: tgt, detail: `${action}${str(b.reason, 200) ? ` · 사유 ${str(b.reason, 200)}` : ''}`.slice(0, 300), ip: req.ip });   // 보내기 전에도 남긴다(반증 A12)
     const invTag = (() => { try { return String(getInventory(String(entry.id))?.system?.serviceTag || ''); } catch { return ''; } })();
     const r = await P.runDeviceAction(entry, { kind, action, expectTag: entry.serviceTag || invTag });
+    if (kind === 'led' && r?.ok) { try { (await import('../idrac/invCache.js')).markInventoryStale(String(entry.id)); } catch { /* */ } }   // LED 상태 다시 읽기(판정 #9)
+    if (r?.sent) _edgePowerHits.push(nowMs);   // 장비에 실제로 보낸 것만 센다(없는 서버 · 진행 중 · 태그 다름은 세지 않는다 — 엣지 #3)
     logAudit({ user: who, action: kind === 'power' ? '물리서버 원격 전원 조작(중앙 요청)' : '물리서버 위치 LED(중앙 요청)', target: tgt,
       detail: `${action} · ${r.status}${r.reset ? ` · ${r.reset}` : ''}${str(b.reason, 200) ? ` · 사유 ${str(b.reason, 200)}` : ''}`.slice(0, 300), ip: req.ip });
     res.json(r);

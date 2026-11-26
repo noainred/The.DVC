@@ -17,7 +17,9 @@ import { escalationStore, loadEscalationState, saveEscalationState, escalationSt
 export const ESC_TICK_MS = 60_000;   // 회차 주기 — 화면은 API 값(tickMs)으로 쓴다(숫자를 화면에 박지 않는다 — 반증 B10)
 const TICK_MS = ESC_TICK_MS;
 let _timer = null; let _busy = false;
-let _last = null;   // { at, enabled, sent, delivered, failed, deferred, overCap, held, why?, errors:[], results:[] }
+let _last = null;
+let _heldKeys = new Set();   // 마지막 회차에서 정비 창 보류로 보내지 않은 장애 열쇠(행 표지용 — 화면 U7)
+export const escalationRunMarks = () => (_last ? { why: _last.why || '', heldKeys: _heldKeys } : null);   // { at, enabled, sent, delivered, failed, deferred, overCap, held, why?, errors:[], results:[] }
 
 /** 단계 알림 한 건의 제목 · 본문(순수 — 시험이 고정). 채널 억제 열쇠에 수집 주체를 넣는다(두 엣지의 같은 파트 키가 서로를 억제하지 않게 — 반증 A17). */
 export function escalationMessage(s, now = Date.now()) {
@@ -31,7 +33,7 @@ export function escalationMessage(s, now = Date.now()) {
   if (oc) lines.push(`오늘 당직: ${oc.name || oc.email}${oc.agent === '*' ? '' : ` (${oc.agent || '이 포탈'} 당직표)`}`);
   else if (s.to.oncallWanted) lines.push('당직표에 오늘 당직이 없어 당직에게는 보내지 못했습니다.');
   const ag = String(s.part.agent || '').trim().toLowerCase();
-  return { key: `partfault-esc:${ag}|${s.part.partKey}:${s.step}`, severity: a.severity, title, detail: lines.join('\n') };
+  return { key: `partfault-esc:${ag}|${s.part.partKey}:${s.step}:${Number.isInteger(s.attempt) ? s.attempt : 1}`, severity: a.severity, title, detail: lines.join('\n') };   // 다시 시도마다 다른 열쇠(판정 #2)
 }
 
 /** 한 건 보내기 — { text, delivered }. 던지지 않는다. */
@@ -54,7 +56,7 @@ async function sendOne(s, deps, now) {
       out.push(`채널 ${outcome === 'delivered' ? '감' : outcome === 'failed' ? '실패' : '안 감'}(${lines.join(' · ').slice(0, 50) || '켜진 채널 없음'})`);
     } catch (e) { out.push(`채널 오류(${String(e?.message || e).slice(0, 60)})`); }
   }
-  if (!out.length) out.push('받는 곳 없음(당직표에 오늘 당직이 없음)');
+  if (!out.length) out.push(s.to.oncall && !s.to.oncall.email ? `받는 곳 없음(오늘 당직 ${String(s.to.oncall.name || '').slice(0, 30)} 의 메일 주소가 당직표에 없음)` : '받는 곳 없음(당직표에 오늘 당직이 없음)');   // 원인을 가른다(판정 #10)
   return { text: out.join(' / '), delivered };
 }
 
@@ -78,7 +80,7 @@ export async function runEscalationNow() {
     const deps = _deps;
     const now = deps.now();
     const settings = escalationStore.get();
-    if (escalationStateUnreadable()) { _last = { at: now, enabled: settings.enabled, sent: 0, delivered: 0, failed: 0, deferred: 0, why: 'state-unreadable', errors: ['진행 기록을 읽지 못해 보내지 않았습니다(보낸 단계를 모르는 채 보내지 않는다).'] }; return _last; }
+    if (escalationStateUnreadable()) { _heldKeys = new Set(); _last = { at: now, enabled: settings.enabled, sent: 0, delivered: 0, failed: 0, deferred: 0, why: 'state-unreadable', errors: ['진행 기록을 읽지 못해 보내지 않았습니다(보낸 단계를 모르는 채 보내지 않는다).'] }; return _last; }
     const state = loadEscalationState();
     let open = [];
     try { open = await deps.open(); } catch (e) { _last = { at: now, enabled: settings.enabled, sent: 0, delivered: 0, failed: 0, deferred: 0, errors: [`열린 장애를 읽지 못했습니다(${String(e?.message || e).slice(0, 80)})`] }; return _last; }
@@ -89,6 +91,7 @@ export async function runEscalationNow() {
     let hold = null; let keyOf = null;
     if (!why) { try { const h = await deps.hold(open, now); hold = h?.hold || null; keyOf = h?.keyOf || null; } catch { hold = null; } }
     const plan = escalationPlan({ settings: why ? { ...settings, enabled: false } : settings, state, open, now, maxSends: ESC_SENDS_PER_RUN, hold, holdKeyOf: keyOf });
+    _heldKeys = new Set(plan.heldKeys || []);
     const results = [];
     for (const s of plan.sends) {
       // 보내기 직전 — 그 사이 확인됐으면 보내지 않는다(확인 라우트가 메모리 기록을 바꾼다)
@@ -99,10 +102,16 @@ export async function runEscalationNow() {
     let items = recordSends(plan.items, plan.sends, results, now);
     // 회차 동안 들어온 확인을 덮지 않는다 — 최신 기록의 확인을 키별로 합친다(확인 쪽 우선 · 반증 A1)
     const latest = loadEscalationState().items;
+    // 열린 장애 열쇠는 한 번만 만들고 · 기록 사본도 한 번만 — 확인이 많을 때 매번 전부를 훑거나 복사하지 않게(v3.52 디버깅 1회차 성능 P3 — O(N²))
+    let openKeys = null; let copied = false;
+    const put = (k, v) => { if (!copied) { items = { ...items }; copied = true; } items[k] = v; };
     for (const [k, v] of Object.entries(latest)) {
       if (!v?.ackedAt) continue;
-      if (Object.hasOwn(items, k)) { if (!items[k].ackedAt) items = { ...items, [k]: { ...items[k], ackedAt: v.ackedAt, ackBy: v.ackBy } }; }
-      else if (open.some((p) => `${String(p.agent || '').trim().toLowerCase()}|${p.partKey}` === k)) items = { ...items, [k]: v };
+      if (Object.hasOwn(items, k)) { if (!items[k].ackedAt) put(k, { ...items[k], ackedAt: v.ackedAt, ackBy: v.ackBy }); }
+      else {
+        if (!openKeys) openKeys = new Set(open.map((p) => `${String(p.agent || '').trim().toLowerCase()}|${p.partKey}`));
+        if (openKeys.has(k)) put(k, v);
+      }
     }
     const next = { v: 1, items, enabledAt: plan.enabledAt };
     const changed = JSON.stringify(next) !== JSON.stringify({ v: 1, items: latest, enabledAt: loadEscalationState().enabledAt ?? null });

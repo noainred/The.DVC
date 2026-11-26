@@ -98,6 +98,9 @@ export function hwLogHead(d) {
 // ───────── ⑫ 케이스 ─────────
 export const CASE_STATUS = Object.freeze({ open: { label: '접수', color: 'amber' }, parts: { label: '부품 오는 중', color: 'amber' }, replaced: { label: '교체함', color: 'blue' }, closed: { label: '끝남', color: 'gray' } });
 export const caseStatusText = (s) => (CASE_STATUS[s] ? CASE_STATUS[s].label : '모름');
+/** 정렬 순위 — 글자 순이 아니라 진행 순서 · 심각도 순(디버깅 1회차 화면 U2 — 반증 B12 의 다른 경로). */
+export const CASE_STATUS_ORDER = Object.freeze({ open: 0, parts: 1, replaced: 2, closed: 3 });
+export const HWLOG_SEV_ORDER = Object.freeze({ critical: 0, warning: 1, ok: 2, '': 3 });
 export const CASE_NOTE = '포탈은 제조사에 직접 접수하지 않습니다 — 접수 자료를 받아 제조사 창구에 붙이고, 받은 케이스 번호를 여기 적어 끝까지 따라갑니다.';
 
 /**

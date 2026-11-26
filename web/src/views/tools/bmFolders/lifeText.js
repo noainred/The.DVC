@@ -36,6 +36,14 @@ export function lifeView(d) {
       return { key: `${x?.name || ''}:${i}`, name: String(x?.name || '—'), model: String(x?.model || ''), gb: numOrNull(x?.gb), life, lifeText: pct(life), tone, note };
     });
     const vals = rows.map((x) => x.life).filter((x) => x != null);
+    // 줄은 서버가 상한까지만 싣는다(넘치면 가장 닳은 것부터) — 머리는 같은 응답의 전체 요약으로 센다(디버깅 1회차 화면 U5)
+    const all = d.summary?.disk?.life && typeof d.summary.disk.life === 'object' ? d.summary.disk.life : null;
+    const n = numOrNull(all?.n);
+    if (n != null && n > rows.length) {
+      const read = numOrNull(all.read) ?? 0; const min = numOrNull(all.min);
+      const head = `SSD ${n}개${read < n ? ` 중 ${read}개 읽음` : ''} · 가장 낮은 값 ${pct(min)} · 표에는 가장 닳은 ${rows.length}개`;
+      return { kind: 'rows', rows, head };
+    }
     const head = vals.length ? `SSD ${rows.length}개 · 가장 낮은 값 ${Math.min(...vals)}%${vals.length < rows.length ? ` · 값 없음 ${rows.length - vals.length}` : ''}` : `SSD ${rows.length}개 · 값 없음`;
     return { kind: 'rows', rows, head };
   }
@@ -70,6 +78,7 @@ export function memCeView(m) {
   // 다 덮지 못했으면 건수도 ‘읽은 기록 안’ 의 것이다 — 30일 전체 건수처럼 쓰지 않는다(반증 B8)
   const head = covered ? (total ? `지난 ${days}일 경고 기록 ${total}건` : `지난 ${days}일 경고 기록 없음`)
     : (total ? `읽은 기록 안 경고 기록 ${total}건(지난 ${days}일을 다 읽지 못함)` : '읽은 기록 안에는 경고 기록 없음');
-  const note = covered ? '' : `읽은 기록이 지난 ${days}일을 다 덮지 못했습니다 — 건수는 읽은 범위 안의 것이고, 0 은 ‘읽은 범위 안에 없음’ 이지 ‘없음’ 이 아닙니다.`;
+  const untimed = numOrNull(m.untimed) ?? 0;
+  const note = covered ? '' : untimed ? `시각을 읽지 못한 교정 오류 경고 기록 ${untimed}건은 기간 안인지 몰라 세지 않았습니다 — 건수 · 0 은 ‘없음’ 이 아닙니다.` : `읽은 기록이 지난 ${days}일을 다 덮지 못했습니다 — 건수는 읽은 범위 안의 것이고, 0 은 ‘읽은 범위 안에 없음’ 이지 ‘없음’ 이 아닙니다.`;   // 판정 #7
   return { head, slots, unknown, covered, note };
 }

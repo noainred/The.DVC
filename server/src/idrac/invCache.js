@@ -39,7 +39,7 @@ registerExitFlush('idrac/invCache', () => { if (!persistTimer) return; clearTime
 const _forceStale = new Set();   // v3.52 ⑬ — 이벤트를 받은 서버는 다음 폴링에서 인벤토리를 다시 읽는다(메모리만 · 상한)
 export function setInventory(serverId, inv) {
   cache.set(serverId, inv);
-  _forceStale.delete(serverId);
+  _forceStale.delete(String(serverId));
   persistSoon();
 }
 /** 다음 폴링에서 이 서버의 인벤토리를 다시 읽게 한다(장비 이벤트 — idrac/eventSub.js). 상한 2,000. */
@@ -57,5 +57,6 @@ export function inventoryStale(serverId, maxAgeMs) {
 }
 
 export function removeInventory(serverId) {
+  _forceStale.delete(String(serverId));   // 지운 서버의 강제 표지가 상한을 먹지 않게(v3.52 디버깅 1회차 성능 P7)
   if (cache.delete(serverId)) persistSoon();
 }

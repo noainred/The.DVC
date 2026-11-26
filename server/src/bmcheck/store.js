@@ -22,9 +22,10 @@ const BASELINE_FILE = () => path.join(config.configDir, 'bm-fw-baseline.json');
 /**
  * @param L 공용 로더(makeJsonFileLoader — 아래에서 파일마다 **글자 그대로의 label · confirm 과 함께** 만든다: 서비스 점검 등재 스윕 audit2633 이 그 줄을 본다)
  */
-function docStore({ file, L, what, empty, shape }) {
+function docStore({ file, L, what, empty, shape, maxBytes = null }) {
   let cache = null; let rev = 0;
-  const write = (doc) => { fs.mkdirSync(path.dirname(file()), { recursive: true }); atomicWriteFileSync(file(), JSON.stringify(doc, null, 2)); };
+  // 들여쓰기 없이 쓴다 — 케이스 5,000건이 들여쓰기로 25MB · 한 건 저장 0.3~0.46초였다(v3.52 디버깅 1회차 성능 P8). 읽는 쪽은 JSON.parse 라 같다
+  const write = (doc, text = JSON.stringify(doc)) => { fs.mkdirSync(path.dirname(file()), { recursive: true }); atomicWriteFileSync(file(), text); };
   const load = () => {
     if (cache && !L.recheckDue()) return cache;
     const hadErr = !!L.loadError();
@@ -41,11 +42,15 @@ function docStore({ file, L, what, empty, shape }) {
     loadError: () => { load(); return L.loadError(); },
     refusal: () => { load(); return L.refusal(what); },
     /** 통째로 바꾼다. 로드 오류면 { ok:false, status:409, ... }. */
-    save(doc) {
+    save(doc, { shrinking = false } = {}) {
       const refused = this.refusal();
       if (refused) return { ok: false, status: 409, ...refused };
       const next = shape(doc);
-      try { write(next); } catch (e) { return { ok: false, status: 500, reason: `${what} 파일을 쓰지 못했습니다 — ${String(e?.code || e?.message || e).slice(0, 120)}` }; }
+      const text = JSON.stringify(next);
+      // 파일 크기 상한(있으면) — 넘으면 쓰지 않는다(백업 파일 상한 안에 머물게 · 성능 P8)
+      const lim = !shrinking && typeof maxBytes === 'function' ? maxBytes() : null;   // 지우기(줄어드는 쓰기)는 상한으로 막지 않는다 — 자리를 만드는 길이다
+      if (lim && Buffer.byteLength(text, 'utf8') > lim) return { ok: false, status: 413, reason: `${what} 파일이 상한(${Math.round(lim / 1048576)}MB)에 닿았습니다 — 끝난 항목을 지워 자리를 만든 뒤 다시 하십시오.` };
+      try { write(next, text); } catch (e) { return { ok: false, status: 500, reason: `${what} 파일을 쓰지 못했습니다 — ${String(e?.code || e?.message || e).slice(0, 120)}` }; }
       cache = next; rev += 1; L.saved();
       return { ok: true };
     },
@@ -183,8 +188,14 @@ const parseList = (field) => (text) => {
 };
 const _casesFile = makeJsonFileLoader(CASES_FILE, { label: '물리서버 제조사 케이스 기록', tag: 'bm-cases', parse: parseDoc('cases'), confirm: () => caseStore._confirm() });
 const _advisoryFile = makeJsonFileLoader(ADVISORY_FILE, { label: '물리서버 펌웨어 보안 권고 표', tag: 'bm-advisories', parse: parseList('rows'), confirm: () => advisoryStore._confirm() });
+/**
+ * 케이스 기록 파일이 가질 수 있는 가장 큰 크기(바이트) — 백업 파일 상한(backup/service.js fileCapFor)이 이 값을 쓴다(v3.52 디버깅 1회차 성능 P8:
+ * 메모 · 이력을 채운 케이스가 약 1,700건을 넘으면 8MB 를 넘어 백업에서 빠졌다 — v2.901 이슈 · 게시판 · 위키와 같은 꼴). 꼴의 글자 상한 × 3바이트(한글)로 센다.
+ */
+export const CASES_FILE_MAX_BYTES = 16 * 1024 * 1024;   // 건수 상한(5,000)으로는 글자를 꽉 채우면 60MB 를 넘을 수 있다 — 파일 크기로도 묶는다(이슈 · 게시판과 같은 16MB)
+export const casesMaxBytes = () => CASES_FILE_MAX_BYTES;
 /** 제조사 케이스 기록(⑫). */
-export const caseStore = docStore({ file: CASES_FILE, L: _casesFile, what: '물리서버 제조사 케이스 기록', empty: () => caseShape(null), shape: caseShape });
+export const caseStore = docStore({ file: CASES_FILE, L: _casesFile, what: '물리서버 제조사 케이스 기록', empty: () => caseShape(null), shape: caseShape, maxBytes: casesMaxBytes });
 /** 펌웨어 보안 권고 표(④). */
 export const advisoryStore = docStore({ file: ADVISORY_FILE, L: _advisoryFile, what: '물리서버 펌웨어 보안 권고 표', empty: () => advisoryShape(null), shape: advisoryShape });
 
@@ -225,7 +236,7 @@ export function removeCase({ id = '', tag, corp = '' } = {}) {
   if (!cur || cur.tag !== tg || cur.corp !== cp) return { ok: false, status: 404, reason: '케이스를 찾지 못했습니다(다른 사람이 지웠을 수 있습니다).' };
   if (cur.status !== 'closed') return { ok: false, status: 400, reason: '끝난 케이스만 지울 수 있습니다(상태를 ‘끝남’ 으로 바꾼 뒤 지우십시오).' };
   const cases = { ...doc.cases }; delete cases[cid];
-  const r = caseStore.save({ v: 1, cases });
+  const r = caseStore.save({ v: 1, cases }, { shrinking: true });
   return r.ok ? { ok: true, removed: cur } : r;
 }
 /** 서버(태그 + 법인)의 케이스 — 새로 고친 것부터. 법인이 다른 케이스는 싣지 않는다(반증 A2). */

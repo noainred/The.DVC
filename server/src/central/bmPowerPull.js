@@ -15,7 +15,7 @@ import { sanitizeDeviceAction } from '../idrac/power.js';
 import { capStr } from '../util/capStr.js';   // 상주 문자열 절단은 capStr 하나(TIM2607-01)
 
 const isObj = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
-const TIMEOUT_MS = reqTimeoutMs(process.env.BM_POWER_PULL_TIMEOUT_MS, 45_000, { min: 35_000 });
+const TIMEOUT_MS = reqTimeoutMs(process.env.BM_POWER_PULL_TIMEOUT_MS, 45_000, { min: 35_000, max: 70_000 });   // 브라우저(75초)보다 짧게(디버깅 1회차 엣지 #8)
 export const powerBodyOk = (b) => isObj(b) && typeof b.ok === 'boolean' && typeof b.status === 'string';
 
 /**
@@ -33,6 +33,8 @@ export async function pullEdgePower(agent, { id = '', k = '', kind, action, by =
     if (r.kind !== 'old-version' && isObj(r.body) && r.body.code === 'disabled') return { ok: false, kind: 'edge-disabled', reason: '그 엣지가 원격 전원 · LED 요청을 켜지 않았습니다(엣지 env BM_POWER_EDGE_ENABLE=true).' };
     if (r.kind !== 'old-version' && isObj(r.body) && r.body.code === 'force-off') return { ok: false, kind: 'edge-force-off', reason: '그 엣지가 강제 재시작 · 강제 끄기를 허용하지 않았습니다(엣지 env BM_POWER_EDGE_FORCE=true).' };
     if (r.kind !== 'old-version' && isObj(r.body) && r.body.code === 'rate') return { ok: false, kind: 'edge-rate', reason: '그 엣지의 10분 상한에 걸렸습니다 — 잠시 뒤 다시.' };
+    if (r.kind !== 'old-version' && isObj(r.body) && r.body.code === 'ambiguous') return { ok: false, kind: 'edge-ambiguous', reason: '그 엣지에 이 서버로 보이는 켜진 등록이 둘 이상입니다(같은 서비스 태그) — 어느 장비인지 몰라 보내지 않았습니다.' };
+    if (r.kind !== 'old-version' && isObj(r.body) && r.body.code === 'registry-unreadable') return { ok: false, kind: 'edge-registry', reason: '그 엣지가 iDRAC 등록부를 읽지 못했습니다 — 보내지 않았습니다.' };
     return { ok: false, kind: r.kind, reason: r.reason };
   }
   const body = sanitizeDeviceAction(r.body);

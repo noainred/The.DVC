@@ -103,11 +103,11 @@ export function pruneSensorPathCache(registry, now = Date.now()) {
 }
 const BUSY = Symbol('idrac-poll-busy'); // v2.591(감사 P1): 재진입 가드에 막혔다는 표지(수동 응답이 말하게)
 
-async function pollOnce({ manual = false } = {}) {
+async function pollOnce({ manual = false, only = null } = {}) {
   if (running) return BUSY; // 고RTT iDRAC 다수에서 한 주기가 간격을 넘겨 폴이 중첩되는 것 방지
   running = true;
   try {
-    return await withJob('idrac.poll', () => pollOnceInner({ manual }));
+    return await withJob(only ? 'idrac.poll.event' : 'idrac.poll', () => pollOnceInner({ manual, only }));
   } finally {
     running = false;
     // 주기가 도중에 던졌으면 끝을 알리지 못했다 — 경과를 소요로 남겨 '영원히 도는 주기' 로 보이지 않게 한다.
@@ -118,12 +118,19 @@ async function pollOnce({ manual = false } = {}) {
   }
 }
 
-async function pollOnceInner({ manual = false } = {}) {
+/**
+ * only(v3.52 디버깅 1회차 성능 P2) — 장비 이벤트를 보낸 서버들만 한 번 읽는다(Set<id>). 함대 전체 주기를 돌리지 않는다.
+ *   그 서버들의 전력 · 센서 · 인벤토리는 정규 주기와 같은 코드로 읽고, **주기 상태**(lastRun · 주기 소요 · 센서 주기 시작 · prune)는 건드리지 않는다
+ *   (한 대짜리 실행이 ‘마지막 주기 1대’ · ‘주기 0.3초’ 로 보이면 신선도 판정이 흔들린다). 파트 장애 훅도 부르지 않는다 — 호출부(eventSub)가 바로 판정한다(P5 — 두 번 돌지 않게).
+ *   돌려주는 값 { servers, invRefreshed }.
+ */
+async function pollOnceInner({ manual = false, only = null } = {}) {
   // v2.583: 이 카운터는 v2.548 부터 **pollOnce() 안에** 선언돼 있었다 — 쓰는 곳은 이 함수라 실장비(목 모드가
   // 아닌) 폴마다 마지막 줄에서 ReferenceError 가 났고, pollNow 가 잡아 `[idrac] pollNow 실패: invRefreshed is
   // not defined` 를 **폴마다** 찍었다. 그 결과 v2.548 F7(인벤토리 갱신 즉시 파트 장애 판정) 훅은 한 번도 돌지
   // 않았다(목 모드는 위에서 먼저 return 해 드러나지 않았다). 선언을 쓰는 함수로 옮긴다.
   let invRefreshed = 0; // 이번 폴에서 인벤토리를 갱신한 서버 수 → 0 이 아니면 파트 장애 훅
+  if (only && (isStopped() || isMockMode())) return { servers: 0, invRefreshed: 0 };   // 이벤트 읽기는 긴급중단 · 데모에서 주기 상태를 바꾸지 않는다
   if (isStopped()) { lastRun = { at: Date.now(), ok: 0, failed: 0, skipped: '긴급중단', results: [] }; return; }
   // mock 데모: 실제 Redfish 폴 대신 합성 전력 샘플 적재(전력 화면이 비지 않게). live/auto엔 무영향.
   if (isMockMode()) {
@@ -141,11 +148,12 @@ async function pollOnceInner({ manual = false } = {}) {
   }
   // live/auto: mock 데모 잔존 항목(id 'mock-')은 실제 폴 대상에서 제외(가짜 주소 폴 잡음 방지).
   const registry = loadRegistry();
-  if (Date.now() - _sensorPathPruneAt >= INVENTORY_MAX_AGE_MS) {
+  if (!only && Date.now() - _sensorPathPruneAt >= INVENTORY_MAX_AGE_MS) {
     _sensorPathPruneAt = Date.now();
     try { pruneSensorPathCache(registry); } catch { /* 캐시 정리 실패가 폴을 막지 않는다 */ }
   }
-  const servers = registry.filter((s) => s.enabled !== false && s.host && s.username && s.password && !String(s.id).startsWith('mock-'));
+  const servers = registry.filter((s) => s.enabled !== false && s.host && s.username && s.password && !String(s.id).startsWith('mock-')
+    && (!only || (only.has(String(s.id)) && s.type !== 'ome')));
   // v2.493: 폴 대상에서 제외된 서버를 **이유와 함께** 기록한다. 이전에는 조용히 빠져 lastRun 에
   // 흔적조차 없었다 — 비밀번호 미저장·비활성 서버가 '수집이 멈춘 것' 으로 오해되고, 화면·로그
   // 어디에도 구분 단서가 없었다(2026-09-12 신고 진단 중 확인).
@@ -157,6 +165,7 @@ async function pollOnceInner({ manual = false } = {}) {
   // 필드명은 notPolled — 긴급중단 경로가 `skipped` 를 문자열로 쓰고 있어(위 isStopped 분기) 타입이 섞이면
   // 화면이 둘을 구분할 수 없다.
   const notPolled = registry.filter((s) => !servers.includes(s)).map((s) => ({ id: s.id, name: s.name, reason: skipReason(s) }));
+  if (only && !servers.length) return { servers: 0, invRefreshed: 0 };
   if (!servers.length) { lastRun = { at: Date.now(), ok: 0, failed: 0, results: [], notPolled }; return; }
   const db = await getDb();
   // v2.634: ts 는 **주기 시작 시각**이다(prune·lastRun.startedAt 용). 표본 시각에는 쓰지 않는다 — 한 주기가
@@ -164,8 +173,7 @@ async function pollOnceInner({ manual = false } = {}) {
   //   법인 전산실 온도가 통째로 비었다(2026-09-28 사용자 신고 0/980). 표본은 그 서버를 **실제로 읽은 시각**이다
   //   (v2.550.3 bmusage 와 같은 규약).
   const ts = Date.now();
-  _runningSince = ts;
-  markSensorPollStart(ts);
+  if (!only) { _runningSince = ts; markSensorPollStart(ts); }
   const results = [];
   const samples = []; // 전력 샘플을 모아 폴 종료 후 단일 트랜잭션으로 적재(서버 수만큼 fsync 방지).
   // 동시성 상한 — 무제한 Promise.all은 수백 대에 동시 TLS를 열어 CPU 스파이크/소켓 고갈.
@@ -241,7 +249,7 @@ async function pollOnceInner({ manual = false } = {}) {
           }
         }
         // Refresh rich inventory on a slow cadence (best-effort, non-blocking).
-        if (inventoryStale(s.id, INVENTORY_MAX_AGE_MS)) {
+        if (only || inventoryStale(s.id, INVENTORY_MAX_AGE_MS)) {   // 이벤트를 보낸 서버는 인벤토리를 늘 다시 읽는다(그것이 이유다 — 강제 표지 상한과 무관)
           try {
             const inv = await fetchInventory(s);
             // 팬 파트 정보 — Thermal 은 fetchSensors 가 방금 받았으므로 재호출 없이 이관(추가 HTTP 0회).
@@ -284,6 +292,7 @@ async function pollOnceInner({ manual = false } = {}) {
   // 모든 서버 폴 후 한 트랜잭션으로 배치 적재(insertMany 없으면 개별 insert 폴백).
   try { if (db.insertMany) db.insertMany(samples); else for (const sm of samples) db.insert(sm.serverId, sm.watts, sm.ts); }
   catch (e) { console.warn('[idrac] 전력 적재 실패:', e.message); }
+  if (only) return { servers: servers.length, invRefreshed };   // 이벤트 읽기 — 주기 상태 · prune · 훅은 건드리지 않는다(위 주석)
   // Retention pruning — 매 폴 DELETE 스캔 금지(store.js/metrics 샘플러와 동일 스로틀 패턴).
   if (config.idrac.retentionDays > 0 && (++pruneTick % 10 === 0)) {
     try {
@@ -351,10 +360,13 @@ export async function pollNow({ manual = false } = {}) {
  * v3.52 ⑬ 장애 바로 받기 — 이벤트를 받은 뒤 한 주기를 바로(수동이 아님 — 인증 정지 서버는 그대로 건너뛴다 · 재진입 가드 그대로).
  * @returns {Promise<{ busy:boolean }>} busy = 다른 주기가 진행 중이라 이번에는 돌지 않았다(호출부가 다시 잡는다)
  */
-export async function pollNowForEvent() {
+export async function pollNowForEvent(ids = []) {
+  const only = new Set((Array.isArray(ids) ? ids : []).map(String));
+  if (!only.size) return { busy: false, servers: 0, invRefreshed: 0 };
   let r;
-  try { r = await pollOnce({ manual: false }); } catch (err) { console.error('[idrac] 이벤트 뒤 수집 실패:', err.message); }
-  return { busy: r === BUSY };
+  try { r = await pollOnce({ manual: false, only }); } catch (err) { console.error('[idrac] 이벤트 뒤 수집 실패:', err.message); }
+  if (r === BUSY) return { busy: true };
+  return { busy: false, servers: Number(r?.servers) || 0, invRefreshed: Number(r?.invRefreshed) || 0 };
 }
 
 export async function pollNowManual() {

@@ -15,7 +15,8 @@ import { sanitizeHwLog } from '../idrac/hwLog.js';
 import { capStr } from '../util/capStr.js';   // 상주 문자열 절단은 capStr 하나(TIM2607-01)
 
 const isObj = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
-const TIMEOUT_MS = reqTimeoutMs(process.env.BM_HWLOG_PULL_TIMEOUT_MS, 40_000, { min: 10_000 });
+// 장비 시한(30초) < 당김 < 브라우저(60초) — 범위를 그 사이로 닫는다(디버깅 1회차 엣지 #8)
+const TIMEOUT_MS = reqTimeoutMs(process.env.BM_HWLOG_PULL_TIMEOUT_MS, 40_000, { min: 35_000, max: 55_000 });
 export const hwLogBodyOk = (b) => isObj(b) && b.ok === true && Array.isArray(b.rows);
 
 /**

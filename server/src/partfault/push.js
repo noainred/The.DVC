@@ -120,6 +120,7 @@ async function pushOnce(reason) {
   try {
     const scan = await runScan();
     const payload = buildPayload(scan);
+    if (reason === 'event') payload.urgent = true;   // v3.52 ⑬ — 장비 이벤트 뒤 push: 중앙이 다음 주기를 기다리지 않고 바로 판정하게(디버깅 1회차 엣지 #5)
     const json = JSON.stringify(payload);
     const hdrs = { 'Content-Type': 'application/json', 'X-Central-Token': config.agent.centralToken, ...agentHeaders(config.agent.name) };
     let body = json;

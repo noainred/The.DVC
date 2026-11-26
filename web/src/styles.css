@@ -3349,6 +3349,8 @@ table.bmf-t tr.bmf-picked td { background: rgba(59, 130, 246, .08); }
 .bmd-ct-btn { display: block; margin-top: 4px; padding: 3px 8px; font-size: 11.5px; white-space: nowrap; }
 /* 구역 머리의 오른쪽 글자 — 좁은 드로어에서 낱말 가운데서 꺾이지 않게(‘견/줌’) */
 .bmd-sh-sub { min-width: 0; text-align: right; word-break: keep-all; overflow-wrap: anywhere; }
+/* 구역 머리 배지는 글자 중간에서 접지 않는다 — 400px 에서 ‘88 · 주’ / ‘의’ 로 갈렸다(디버깅 1회차 화면 U3) */
+.vmh-sec .sh h3 .badge { white-space: nowrap; }
 /* v3.48 같은 묶음 대비 — 지표마다 한 줄(왼쪽 이름 · 기준 · 상태 / 오른쪽 띠 그림 + 설명). 좁은 화면에서는 위아래로 */
 .bmf-hs-row { margin-top: 3px; }
 .bmf-hs { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 2px; }

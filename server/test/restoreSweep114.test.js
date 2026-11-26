@@ -216,9 +216,12 @@ test('분류표 ↔ 코드 — 제외 · 지금 것 유지 · 합침이 실제 �
     assert.equal(rc.keep, undefined, n);
   }
   // 지금 것 유지: 있으면 쓰지 않고(사유) · 없으면 백업 그대로
+  //   예외(v3.52): 장비 조작 스위치 · 받는 주소 비밀은 지금 파일이 없어도 백업에서 되살리지 않는다(OTP 없이 켜지지 않게)
+  assert.deepEqual([...SR.RESTORE_NEVER_FROM_BACKUP].sort(), ['bm-events.json', 'bm-power.json']);
   for (const [n, why] of SR.RESTORE_KEEP_CURRENT) {
     const d = mk();
-    assert.deepEqual(SR.reconcileForApply(n, '{"bak":1}', d), { content: '{"bak":1}' }, `${n} — 지금 파일이 없으면 백업 그대로(재해 복구)`);
+    if (SR.RESTORE_NEVER_FROM_BACKUP.has(n)) assert.deepEqual(SR.reconcileForApply(n, '{"bak":1}', d), { keep: why }, `${n} — 없어도 백업에서 되살리지 않는다`);
+    else assert.deepEqual(SR.reconcileForApply(n, '{"bak":1}', d), { content: '{"bak":1}' }, `${n} — 지금 파일이 없으면 백업 그대로(재해 복구)`);
     w(d, n, '{"now":1}');
     assert.deepEqual(SR.reconcileForApply(n, '{"bak":1}', d), { keep: why }, n);
   }

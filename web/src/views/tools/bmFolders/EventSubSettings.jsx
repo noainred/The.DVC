@@ -104,7 +104,7 @@ export default function EventSubSettings({ onClose, initial = null }) {
                     ) : null}
                   </div>
                 ) : null}
-                <div className="bmd-note"><b>받은 이벤트</b> — {st ? `${st.received}건 받음 · 거절 ${st.rejected}건${st.dropped ? ` · 한 번에 32건이 넘어 버림 ${st.dropped}건` : ''} · 바로 점검 ${st.checks}번${st.lastAt ? ` · 마지막 ${new Date(st.lastAt).toLocaleString('ko-KR')}` : ''}(이 포탈이 다시 시작하면 0 부터 — 기록은 메모리에만)` : '—'}</div>
+                <div className="bmd-note"><b>받은 이벤트</b> — {st ? `${st.received}건 받음 · 거절 ${st.rejected}건${st.dropped ? ` · 한 번에 ${d?.limits?.perPost ?? '정한 수'}건이 넘어 버림 ${st.dropped}건` : ''}${st.deferred ? ` · 바로 읽기 상한(${d?.limits?.batch ?? '정한 수'}대)을 넘어 다음 정규 수집으로 미룬 서버 ${st.deferred}대` : ''} · 바로 점검 ${st.checks}번${st.rxAt ? ` · 마지막 ${new Date(st.rxAt).toLocaleString('ko-KR')}` : ''}(이 포탈이 다시 시작하면 0 부터 — 기록은 메모리에만)` : '—'}</div>
                 {st?.recent?.length ? (
                   <STable className="table bmd-ct" minWidth={420} limit={200}>
                     <thead><tr><th>받은 시각</th><th>서버</th><th>등급</th><th>내용</th></tr></thead>

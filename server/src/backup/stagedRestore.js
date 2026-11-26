@@ -107,6 +107,8 @@ export const RESTORE_KEEP_CURRENT = new Map([
   // v3.52 물리서버 원격 전원 · LED 켜기(⑦ ⑥) · 이벤트 구독(⑬)
   ...['bm-power.json', 'bm-events.json'].map((n) => [n, KEEP_SWITCH]),
 ]);
+/** v3.52 지금 파일이 없어도 백업에서 되살리지 않는 것(KEEP_SWITCH — 재해 복구의 ‘없으면 백업 그대로’ 예외 · 시험이 고정). */
+export const RESTORE_NEVER_FROM_BACKUP = new Set([...RESTORE_KEEP_CURRENT].filter(([, why]) => why === KEEP_SWITCH).map(([n]) => n));
 /** 114회차: 인증 실패 정지 기록(util/authGuard.js createAuthGuard 의 파일 — 도구마다 `<도구>-auth-stops.json`). reconcileAuthStopsText 가 합친다. */
 export const AUTH_STOPS_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,80}-auth-stops\.json$/;
 /**
@@ -654,6 +656,8 @@ function readCurrentOrThrow(configDir, name, what) {
 function keepCurrentReason(configDir, name) {
   const why = RESTORE_KEEP_CURRENT.get(name);
   if (!why) return null;
+  // v3.52 장비 조작 스위치 · 받는 주소 비밀 — 지금 파일이 없어도(새 설치 · 손상 보존) 백업 판본을 쓰지 않는다: OTP 없이 켜짐 · 옛 비밀이 되살아나지 않게(디버깅 1회차 보안 #3)
+  if (RESTORE_NEVER_FROM_BACKUP.has(name)) return why;
   try { fs.lstatSync(path.join(configDir, name)); return why; } catch (e) { return e?.code === 'ENOENT' ? null : why; }
 }
 

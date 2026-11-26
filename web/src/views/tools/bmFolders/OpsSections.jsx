@@ -12,7 +12,7 @@ import { fetchJson, postJson, downloadFile } from '../../../api.js';
 import { opErrorText } from '../bmFoldersText.js';
 import {
   healthView, HWLOG_SEV, HWLOG_STATUS, HWLOG_WHY, HWLOG_SCOPE_NOTE, filterHwLog, hwLogHead,
-  CASE_STATUS, caseStatusText, CASE_NOTE, advisoryView,
+  CASE_STATUS, caseStatusText, CASE_NOTE, advisoryView, CASE_STATUS_ORDER, HWLOG_SEV_ORDER,
 } from './opsText.js';
 import { lifeView, memCeView, LIFE_NOTE, MEMCE_NOTE } from './lifeText.js';
 
@@ -87,7 +87,7 @@ export function HwLogSection({ r, initial = null }) {
                             return (
                               <tr key={`${x.at}:${i}`}>
                                 <td data-sort={x.at ?? ''} style={{ whiteSpace: 'nowrap' }}>{when(x.at)}</td>
-                                <td data-sort={s.label}><span className={`badge ${s.color}`}>{s.label}</span></td>
+                                <td data-sort={HWLOG_SEV_ORDER[x.sev] ?? 9}><span className={`badge ${s.color}`}>{s.label}</span></td>
                                 <td data-sort={x.msg || ''} style={{ overflowWrap: 'anywhere' }}>{x.sensor ? <b>{x.sensor} — </b> : null}{x.msg || '—'}{x.code ? <span className="muted mono" style={{ marginLeft: 6, fontSize: 11 }}>{x.code}</span> : null}</td>
                               </tr>
                             );
@@ -168,7 +168,7 @@ export function CaseSection({ r, initial = null }) {
                       {d.cases.map((c) => (
                         <tr key={c.id}>
                           <td data-sort={c.part || ''} style={{ overflowWrap: 'anywhere' }}>{c.part || '—'}{c.caseNo ? <div className="mono muted" style={{ fontSize: 11 }}>{c.caseNo}</div> : null}{c.note ? <div className="muted" style={{ fontSize: 11 }}>{c.note}</div> : null}</td>
-                          <td data-sort={caseStatusText(c.status)}><span className={`badge ${(CASE_STATUS[c.status] || CASE_STATUS.open).color}`}>{caseStatusText(c.status)}</span></td>
+                          <td data-sort={CASE_STATUS_ORDER[c.status] ?? 9}><span className={`badge ${(CASE_STATUS[c.status] || CASE_STATUS.open).color}`}>{caseStatusText(c.status)}</span></td>
                           <td data-sort={c.at ?? ''}><span style={{ whiteSpace: 'nowrap' }}>{when(c.at)}</span>{c.by ? <div className="muted" style={{ fontSize: 11 }}>{c.by}</div> : null}
                             {/* 단추를 따로 열에 두면 400px 에서 ‘고/치/기’ 로 세로로 접히고 표가 칸을 넘었다(반증 B4) — 시각 칸 아래 줄에 */}
                             {d.canWrite ? <div className="bmd-case-acts"><button type="button" className="logout-btn" disabled={busy} onClick={() => edit(c)}>고치기</button>{c.status === 'closed' ? <button type="button" className="logout-btn" disabled={busy} onClick={() => remove(c)}>지우기</button> : null}</div> : null}

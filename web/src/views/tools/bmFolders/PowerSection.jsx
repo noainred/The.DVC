@@ -18,6 +18,8 @@ const WAIT = { timeoutMs: 75_000, retries: 0 };   // 엣지 당김 시한(45초)
 const _inflight = new Set();       // 서버 열쇠 — 보내는 중
 const _results = new Map();        // 서버 열쇠 → 마지막 결과 { ok, text, at }
 const _holdUntil = new Map();      // 서버 열쇠 → ‘모름’ 뒤 잠금 끝 시각
+const _subs = new Set();           // 지금 그려진 구역들의 다시 그리기 — 요청을 시작한 구역이 ↑↓ 로 사라져도 새로 그려진 구역이 끝을 안다(디버깅 1회차 화면 U1)
+const notify = () => { for (const f of [..._subs]) { try { f(); } catch { /* 한 구역의 실패가 다른 구역을 막지 않는다 */ } } };
 export function _resetPowerUiForTest() { _inflight.clear(); _results.clear(); _holdUntil.clear(); }
 
 export default function PowerSection({ r, writable = false, initial = null, initialPick = null, initialForm = null }) {
@@ -28,6 +30,7 @@ export default function PowerSection({ r, writable = false, initial = null, init
   const [pick, setPick] = useState(initialPick);   // 고른 전원 동작 { k, label, force }
   const [f, setF] = useState(initialForm || { confirm: '', reason: '', otp: '' });
   const [, bump] = useState(0);
+  useEffect(() => { const f = () => bump((x) => x + 1); _subs.add(f); return () => { _subs.delete(f); }; }, []);
   const busy = _inflight.has(key);
   const res = _results.get(key) || null;
   const held = (_holdUntil.get(key) || 0) > Date.now();
@@ -54,7 +57,7 @@ export default function PowerSection({ r, writable = false, initial = null, init
   const escOnly = (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); e.nativeEvent?.stopPropagation?.(); closeConfirm(); } };
   const send = async (kind, body, label) => {
     if (_inflight.has(key)) return;
-    _inflight.add(key); _results.delete(key); bump((x) => x + 1);
+    _inflight.add(key); _results.delete(key); notify();
     try {
       const d = await postJson(`/tools/bm-folders/${kind}`, { key, ...body }, WAIT);
       _results.set(key, { ...powerResultText(d, label), at: Date.now() });
@@ -66,7 +69,7 @@ export default function PowerSection({ r, writable = false, initial = null, init
       _results.set(key, { ok: false, text: ft.text, at: Date.now() });
       if (ft.unknown) _holdUntil.set(key, Date.now() + POWER_UNKNOWN_HOLD_MS);
       if (kind === 'power') setF((x) => ({ ...x, otp: '' }));   // 틀린 OTP(403)도 비운다(반증 B11)
-    } finally { _inflight.delete(key); bump((x) => x + 1); }
+    } finally { _inflight.delete(key); notify(); }
   };
   return (
     <section className="vmh-sec" aria-label="원격 전원 · 위치 LED">
@@ -101,6 +104,7 @@ export default function PowerSection({ r, writable = false, initial = null, init
         </div>
       ) : null}
       {res ? <div className={`bmd-note ${res.ok ? '' : 'bmd-pw-bad'}`} role={res.ok ? 'status' : 'alert'}>{res.text}</div> : null}
+      {busy && !pick ? <div className="muted bmd-note" role="status">이 서버에 보낸 요청이 아직 끝나지 않았습니다 — 끝나면 결과가 여기에 보입니다.</div> : null}
       {held ? <div className="muted bmd-note">결과를 모르는 요청 뒤라 이 서버의 단추를 잠시 잠갔습니다 — 상태를 확인하는 동안 같은 동작이 두 번 나가지 않게.</div> : null}
       <div className="muted bmd-note">{POWER_NOTE}</div>
     </section>

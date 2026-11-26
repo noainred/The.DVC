@@ -21,6 +21,8 @@ import { makeJsonFileLoader } from '../util/jsonFileLoad.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { sealSecret, openSecret } from '../security/secretVault.js';
+import { pushAll } from '../util/pushAll.js';
+import { poolSettled } from '../util/pool.js';
 
 const FILE = () => path.join(config.configDir, 'bm-events.json');
 const isObj = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
@@ -31,6 +33,7 @@ export const EVT_RING = 200;
 export const EVT_DEBOUNCE_MS = 30_000;
 export const SUB_TIMEOUT_MS = 30_000;
 export const SUB_CONCURRENCY = 4;
+export const EVT_BATCH_MAX = 500;   // 한 번 ‘바로 점검’ 에서 다시 읽는 서버 상한(넘친 것은 정규 주기 — deferred 로 센다)
 export const SUB_SERVERS_MAX = 2000;
 // 글자 · 수만(객체 · 배열은 '' — String({toString:1}) 이 던지던 길 · 반증 A6)
 const t = (v, n) => (typeof v === 'string' || typeof v === 'number' ? String(v) : '').replace(/[\u0000-\u001f\u007f]+/g, ' ').slice(0, n);
@@ -101,7 +104,8 @@ export const eventSubPublic = (s = eventSubStore.get()) => ({ enabled: s.enabled
 // ───────── 받는 주소 · Context(순수) ─────────
 /** 로그 · 성능 표에 싣는 경로에서 받는 주소의 비밀을 지운다(요청 기록 · 처리 안 된 오류 기록 — index.js). 대소문자 무시(express 라우팅과 같게). */
 //   절대 꼴 요청 대상(‘POST http://host/api/bm-events/in/…’)도 지운다 — 앞에 고정하지 않는다(반증 A7).
-export const scrubEventPath = (p) => String(p ?? '').replace(/(\/api\/bm-events\/in\/)[^/?#\s]*/gi, '$1…');
+//   빗금이 겹친 꼴(‘/api/bm-events//in/…’ · ‘/in//…’)도 — express 가 받는 꼴이면 기록에서도 지운다(디버깅 1회차 보안 #5).
+export const scrubEventPath = (p) => String(p ?? '').replace(/(\/+api\/+bm-events\/+in\/+)[^/?#\s]*/gi, '$1…');
 export const destinationOf = (s) => (s?.base && s?.secret ? `${s.base}${EVT_PATH}${s.secret}` : '');
 const hmac = (key, id) => crypto.createHmac('sha256', String(key)).update(String(id)).digest('base64url').slice(0, 16);
 /** 구독 Context — `dvc:<서버 id>:<HMAC(ctxKey)>`(장비가 이벤트마다 돌려준다). id 는 등록부 id(길이 상한). */
@@ -141,7 +145,7 @@ export const wantsCheck = (events) => events.some((e) => e.sev === 'critical' ||
 
 // ───────── 받은 기록(메모리) · 바로 점검 ─────────
 const _ring = [];
-const _stat = { received: 0, rejected: 0, dropped: 0, checks: 0, lastAt: null, lastCheckAt: null, running: false };   // dropped — 한 번에 32건을 넘어 버린 수(반증 B13)
+const _stat = { received: 0, rejected: 0, dropped: 0, deferred: 0, checks: 0, rxAt: null, checkedAt: null, running: false };   // deferred — 바로 읽기 상한을 넘어 다음 정규 주기로 미룬 서버(P7)   // dropped — 한 번에 32건을 넘어 버린 수(반증 B13)
 let _timer = null; let _pendingReason = ''; let _busyRetries = 0;
 const _staleIds = new Set();   // 이번 묶음에서 다시 읽을 서버(위험 · 주의를 보낸 서버)
 const DEFAULT_DEPS = {
@@ -151,18 +155,21 @@ const DEFAULT_DEPS = {
    *  캐시만 다시 판정하면(최대 30분 묵은 인벤토리) 빨라지지 않는다(반증 A2). 폴링이 다른 주기로 진행 중이면 busy — 묶음을 다시 잡는다. */
   runCheck: async (reason, ids) => {
     const C = await import('./invCache.js');
-    for (const id of ids) C.markInventoryStale(id);
+    for (const id of ids) C.markInventoryStale(id);   // 폴링이 바빠 못 읽으면 다음 정규 주기가 읽는다(잃지 않음)
     const P = await import('./poller.js');
-    const r = await P.pollNowForEvent();
+    // 그 서버들만 읽는다 — 함대 전체 주기를 돌리지 않는다(v3.52 디버깅 1회차 성능 P2: 이벤트 1건에 50대 전부 · 요청 368건이었다)
+    const r = await P.pollNowForEvent(ids);
     if (r?.busy) return { busy: true };
+    // 판정은 여기서 한 번 — 이벤트 읽기는 폴러의 파트 장애 훅을 부르지 않는다(성능 P5: 두 번 돌고 엣지는 WAN push 두 번이었다). 다시 읽은 것이 없으면 판정할 새 값이 없다
+    if (!(Number(r?.invRefreshed) > 0)) return { busy: false, refreshed: 0 };
     if (config.agent.centralUrl) await (await import('../partfault/push.js')).pushPartFaultsNow({ reason });
     else await (await import('../partfault/poller.js')).runPartFaultsNow({ reason });
-    return { busy: false };
+    return { busy: false, refreshed: Number(r.invRefreshed) };
   },
 };
 let _deps = DEFAULT_DEPS;
 export function _setEventDepsForTest(d) { _deps = d ? { ...DEFAULT_DEPS, ...d } : DEFAULT_DEPS; }
-export function _resetEventsForTest() { _ring.length = 0; _staleIds.clear(); _busyRetries = 0; Object.assign(_stat, { received: 0, rejected: 0, dropped: 0, checks: 0, lastAt: null, lastCheckAt: null, running: false }); if (_timer) clearTimeout(_timer); _timer = null; _pendingReason = ''; }
+export function _resetEventsForTest() { _ring.length = 0; _staleIds.clear(); _busyRetries = 0; Object.assign(_stat, { received: 0, rejected: 0, dropped: 0, deferred: 0, checks: 0, rxAt: null, checkedAt: null, running: false }); if (_timer) clearTimeout(_timer); _timer = null; _pendingReason = ''; }
 export const noteRejected = () => { _stat.rejected += 1; };
 const BUSY_RETRY_MAX = 5;
 /**
@@ -173,7 +180,7 @@ function scheduleCheck(reason) {
   _pendingReason = reason;
   if (_timer || _stat.running) return false;
   const gap = _deps.debounceMs;
-  const since = _stat.lastCheckAt == null ? Infinity : _deps.now() - _stat.lastCheckAt;
+  const since = _stat.checkedAt == null ? Infinity : _deps.now() - _stat.checkedAt;
   const wait = since >= gap ? 0 : gap - since;
   _timer = setTimeout(() => {
     _timer = null; _stat.running = true; _stat.checks += 1;
@@ -182,7 +189,7 @@ function scheduleCheck(reason) {
       if (r?.busy && _busyRetries < BUSY_RETRY_MAX) { _busyRetries += 1; for (const id of ids) _staleIds.add(id); return true; }
       _busyRetries = 0; return false;
     }, (e) => { console.warn(`[bm-events] 바로 점검 실패 — ${String(e?.message || e).slice(0, 160)}`); return false; }).then((again) => {
-      _stat.running = false; _stat.lastCheckAt = _deps.now();
+      _stat.running = false; _stat.checkedAt = _deps.now();
       if (again || _staleIds.size) scheduleCheck(_pendingReason || 'event');
     });
   }, wait);
@@ -201,9 +208,14 @@ export function acceptEvents(s, parsed, { name = '' } = {}) {
     _ring.push({ id, name: String(name || id).slice(0, 128), ...e, rx: now });
     if (_ring.length > EVT_RING) _ring.splice(0, _ring.length - EVT_RING);
   }
-  _stat.received += parsed.events.length; _stat.dropped += Math.max(0, Number(parsed.dropped) || 0); _stat.lastAt = now;
+  _stat.received += parsed.events.length; _stat.dropped += Math.max(0, Number(parsed.dropped) || 0); _stat.rxAt = now;
   const check = wantsCheck(parsed.events);
-  if (check) { if (_staleIds.size < 500) _staleIds.add(id); scheduleCheck('event'); }
+  if (check) {
+    // 한 묶음에 바로 읽는 서버는 EVT_BATCH_MAX 대까지 — 넘친 서버는 버리지 않고 **다음 정규 주기(1분)** 가 인벤토리를 다시 읽게 표시하고 센다(v3.52 디버깅 1회차 성능 P7)
+    if (_staleIds.has(id) || _staleIds.size < EVT_BATCH_MAX) _staleIds.add(id);
+    else { _stat.deferred += 1; import('./invCache.js').then((C) => C.markInventoryStale(id), () => {}); }
+    scheduleCheck('event');
+  }
   return { ok: true, accepted: parsed.events.length, check };
 }
 /** 화면용 — 최근 받은 것(새 것부터) · 셈 · 고리 길이(상한 확인용). 서버 이름은 라우트가 판본에 맞게 가린다. */
@@ -236,7 +248,7 @@ export async function syncOne(entry, s, { unsubscribe = false, getJson = null, s
         // eslint-disable-next-line no-await-in-loop
         const sub = await G(entry, p, { signal }).catch(() => null);
         const dest = String(sub?.Destination ?? '');
-        if (!dest.includes(EVT_PATH)) continue;   // 이 포탈이 건 꼴만 지운다(다른 도구의 구독은 건드리지 않는다)
+        if (!s.base || !dest.startsWith(`${s.base}${EVT_PATH}`)) continue;   // 이 포탈(같은 받는 주소 앞)이 건 것만 — 다른 도구 · 다른 포탈의 구독은 건드리지 않는다(디버깅 1회차 보안 #6)
         if (!unsubscribe && s.base && dest === destinationOf(s) && String(sub?.Context ?? '') === contextOf(s, id)) continue;   // 이미 같은 것 — 둔다
         // eslint-disable-next-line no-await-in-loop
         const r = await S(entry, 'DELETE', p, null, { signal });
@@ -277,12 +289,14 @@ export async function syncAll({ unsubscribe = false, entries = null, one = syncO
     const list = (entries || (await import('./registry.js')).loadRegistry()).filter((e) => e && e.enabled !== false && e.host).slice(0, SUB_SERVERS_MAX);
     // 데모(mock) — 장비에 보내지 않는다(합성 등록부의 주소로 나가지 않게 · 전원과 같은 규칙)
     if (!entries && (await import('../mock/demo/flags.js')).isMockMode()) return { ok: true, results: list.map((e) => ({ id: String(e.id), name: String(e.name || e.id).slice(0, 128), status: 'demo', removed: 0, message: '데모 — 장비에 보내지 않았습니다.' })) };
+    // 동시 SUB_CONCURRENCY 대 — 묶음(4대씩 끝날 때까지 기다림)이 아니라 풀: 한 대가 시한까지 가도 나머지 자리가 놀지 않는다(v3.52 디버깅 1회차 성능 P6 · util/pool.js 하나)
+    const settled = await poolSettled(list, SUB_CONCURRENCY, (e) => one(e, s, { unsubscribe }));
     const out = [];
-    for (let i = 0; i < list.length; i += SUB_CONCURRENCY) {
-      // eslint-disable-next-line no-await-in-loop
-      const part = await Promise.all(list.slice(i, i + SUB_CONCURRENCY).map((e) => one(e, s, { unsubscribe }).then((r) => ({ ...r, name: String(e.name || e.id).slice(0, 128), ...(r.message ? { message: scrubSecret(r.message, s) } : {}) }))));
-      out.push(...part);
-    }
+    pushAll(out, settled.map((x, i) => {
+      const e = list[i];
+      const r = x.status === 'fulfilled' && x.value && typeof x.value === 'object' ? x.value : { id: String(e.id), status: 'error', removed: 0, message: String(x.reason?.message || x.reason || '알 수 없는 오류').slice(0, 300) };
+      return { ...r, name: String(e.name || e.id).slice(0, 128), ...(r.message ? { message: scrubSecret(r.message, s) } : {}) };
+    }));   // 인벤토리 규모 배열 — 펼침 push 금지(audit2603a)
     return { ok: true, results: out };
   } finally { _syncBusy = false; }
 }
@@ -290,6 +304,13 @@ export async function syncAll({ unsubscribe = false, entries = null, one = syncO
 // ───────── 뒤에서 돌리기(장비가 많으면 수 분 — 요청을 붙잡지 않는다) ─────────
 let _sync = null;   // { running, startedAt, doneAt, unsubscribe, by, results?, error? }
 /** 구독 걸기 · 지우기를 뒤에서 시작. 진행 중이면 거절. onDone(결과) — 라우트가 감사를 남긴다. */
+/** 시작 전 판정(라우트가 OTP 앞에서 부른다) — null 이면 시작할 수 있다. */
+export function syncPrecheck({ unsubscribe = false } = {}) {
+  if (_sync?.running || _syncBusy) return { busy: true, reason: '구독 걸기 · 지우기가 이미 진행 중입니다.' };
+  const s = eventSubStore.get();
+  if (!unsubscribe && (!s.enabled || !destinationOf(s))) return { busy: false, reason: '켜고 받는 주소를 저장한 뒤 구독을 거십시오.' };
+  return null;
+}
 export function startSync({ unsubscribe = false, by = '', onDone = null, run = syncAll } = {}) {
   if (_sync?.running) return { ok: false, busy: true, reason: '구독 걸기 · 지우기가 이미 진행 중입니다.' };
   const s = eventSubStore.get();

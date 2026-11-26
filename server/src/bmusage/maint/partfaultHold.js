@@ -25,10 +25,13 @@ const dkey = (agent, deviceId) => `${t(agent)}|${t(deviceId)}`;
  * @returns {{ hold:Set<string>, byDevice:Map<string,{ids:string[],until:number,key:string}> }}
  */
 export function holdSetFor(devices = [], targets = [], judge, now = Date.now(), { knownAgents = null, blindAgent = null } = {}) {
+  // 태그 대응은 **같은 수집 주체** 먼저, 없으면 중앙 로컬(agent '')만 — 다른 법인 엣지의 같은 태그 대상이 이 장비를 보류하지 않게(v3.52 디버깅 1회차 보안 #7)
   const byTag = new Map(); const byReg = new Map();
+  const agOf = (x) => String(x?.agent || '').trim().toLowerCase();
   for (const x of targets) {
     const tag = t(x.serviceTag).toUpperCase();
-    if (tag && !byTag.has(tag)) byTag.set(tag, x);
+    const k = `${agOf(x)}|${tag}`;
+    if (tag && !byTag.has(k)) byTag.set(k, x);
     if (!t(x.agent) && t(x.regId) && !byReg.has(t(x.regId))) byReg.set(t(x.regId), x);
   }
   const hold = new Set(); const byDevice = new Map(); const seen = new Set();
@@ -39,7 +42,8 @@ export function holdSetFor(devices = [], targets = [], judge, now = Date.now(), 
     const k = dkey(ag, d.deviceId);
     if (seen.has(k)) continue;
     seen.add(k);
-    const tg = byTag.get(t(d.deviceKey).toUpperCase()) || (!t(d.agent) ? byReg.get(t(d.deviceId)) : null);
+    const dtag = t(d.deviceKey).toUpperCase();
+    const tg = (dtag && (byTag.get(`${ag}|${dtag}`) || byTag.get(`|${dtag}`))) || (!t(d.agent) ? byReg.get(t(d.deviceId)) : null);
     if (!tg) {
       if (ag && knownAgents && !knownAgents.has(ag) && (!blindAgent || blindAgent(ag))) unknown.set(ag, (unknown.get(ag) || 0) + 1);
       continue;

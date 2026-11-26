@@ -110,11 +110,12 @@ describe('구역 · 창 렌더', () => {
     const { default: S } = await import('./EventSubSettings.jsx');
     const many = Array.from({ length: 230 }, (_, i) => ({ id: `s${i}`, name: `synth-db-${i}`, status: 'subscribed', removed: 0 }));
     const d = { ok: true, settings: { enabled: true, base: 'https://portal.example.test:8443', hasSecret: true }, destinationPreview: 'https://portal.example.test:8443/api/bm-events/in/…', otpRequired: true, edge: true,
-      status: { received: 3, rejected: 1, dropped: 5, checks: 1, lastAt: 1, recent: [{ rx: 1, id: 's1', name: 'synth-db-01', sev: 'critical', msgId: 'PSU0003', msg: 'PSU 1 lost' }] },
+      limits: { perPost: 32, batch: 500 },
+      status: { received: 3, rejected: 1, dropped: 5, deferred: 7, checks: 1, rxAt: 1, recent: [{ rx: 1, id: 's1', name: 'synth-db-01', sev: 'critical', msgId: 'PSU0003', msg: 'PSU 1 lost' }] },
       sync: { running: false, unsubscribe: false, results: [{ id: 's1', name: 'synth-db-01', status: 'subscribed', removed: 1 }, { id: 's2', name: 'synth-db-02', status: 'not-supported', removed: 0, message: '장비가 이벤트 구독(EventService)을 알려 주지 않았습니다.' }] } };
     const html = renderToStaticMarkup(React.createElement(S, { onClose: () => {}, initial: d }));
     const t = text(html);
-    for (const s of ['/api/bm-events/in/…', '비밀 새로 만들기', '2대 — 걸림 1 · 지원 안 함 1', '옛 구독 1개 지움', 'PSU0003 — PSU 1 lost', '위험', '3건 받음 · 거절 1건', '32건이 넘어 버림 5건', '법인 엣지']) expect(t).toContain(s);
+    for (const s of ['/api/bm-events/in/…', '비밀 새로 만들기', '2대 — 걸림 1 · 지원 안 함 1', '옛 구독 1개 지움', 'PSU0003 — PSU 1 lost', '위험', '3건 받음 · 거절 1건', '32건이 넘어 버림 5건', '바로 읽기 상한(500대)을 넘어 다음 정규 수집으로 미룬 서버 7대', '법인 엣지']) expect(t).toContain(s);
     expect(html).toContain('aria-label="OTP"');
     expect((html.match(/pfe-on bmd-wrapline/g) || []).length).toBe(2);
     expect(html).toMatch(/data-sort="0">위험/);

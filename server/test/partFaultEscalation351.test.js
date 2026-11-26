@@ -209,7 +209,7 @@ test('실행 — 순차 · 받는 곳에 간 것만 보냄 · 회차 중 확인�
     // 채널 억제 열쇠에 수집 주체(반증 A17)
     now = 31 * MIN;
     await RUN.runEscalationNow();
-    assert.equal(chans.at(-1).key, `partfault-esc:|${PART().partKey}:1`);
+    assert.equal(chans.at(-1).key, `partfault-esc:|${PART().partKey}:1:1`, '수집 주체 · 단계 · 시도 번호');
     // 진행 기록 파일 — 다음 기동(메모리 비움)에도 다시 보내지 않는다
     E._resetEscalationStateForTest(); now = 60 * MIN;
     assert.equal((await RUN.runEscalationNow()).sent, 0);

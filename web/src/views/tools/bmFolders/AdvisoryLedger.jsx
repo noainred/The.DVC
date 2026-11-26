@@ -54,9 +54,10 @@ export default function AdvisoryLedger({ meta, onClose, onChanged }) {
   };
   const dl = (path, file) => downloadFile(path, file).catch((e) => setMsg({ ok: false, text: opErrorText(e) }));
   const errs = res?.errors || [];
-  const ap = ledgerApplyState({ checked, errors: errs.length, rows: res?.rows ?? 0, csvOk, busy });
+  const errN = Number.isInteger(res?.errorCount) ? res.errorCount : errs.length;   // 서버가 앞 200행만 싣는다 — 전체 수는 따로(U4)
+  const ap = ledgerApplyState({ checked, errors: errN, rows: res?.rows ?? 0, csvOk, busy });
   return (
-    <Modal title="펌웨어 보안 권고 표 올리기" onClose={onClose} width={720}>
+    <Modal title="펌웨어 보안 권고 표 올리기" onClose={() => { if (!busy) onClose(); }} width={720}>
       <div className="bmd-al">
         <div className="muted bmd-note">
           제조사가 낸 보안 권고(권고 번호 · 종류 · 모델 · 구성요소 · 고친 버전)를 확인해 CSV 로 올립니다. 포탈은 인터넷에서 권고를 가져오지 않습니다 — 올린 표로만 대조합니다.
@@ -77,7 +78,7 @@ export default function AdvisoryLedger({ meta, onClose, onChanged }) {
         <div className="flex wrap gap" style={{ alignItems: 'center' }}>
           <button type="button" className="login-btn bmd-btn" disabled={busy || !text || !csvOk} onClick={() => run(true)}>검증</button>
           <button type="button" className="login-btn bmd-btn" disabled={ap.disabled} onClick={() => run(false)} title={ap.title}>{ap.label}</button>
-          {res && (checked || res.applied) ? <span className="muted">권고 {res.rows}줄 · 오류 {errs.length}행{ap.empty ? ' — 머리글만 있는 파일은 표를 비웁니다' : ''}</span> : null}
+          {res && (checked || res.applied) ? <span className="muted">권고 {res.rows}줄 · 오류 {errN}행{errN > errs.length ? `(표에는 앞 ${errs.length}행)` : ''}{ap.empty ? ' — 머리글만 있는 파일은 표를 비웁니다' : ''}</span> : null}
         </div>
         {msg ? <div className={`bmd-opnote ${msg.ok ? 'ok' : 'bad'}`} role={msg.ok ? 'status' : 'alert'} style={{ borderRadius: 8, borderBottom: 0 }}>{msg.text}</div> : null}
         {errs.length && checked ? (

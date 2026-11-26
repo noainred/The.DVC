@@ -69,7 +69,7 @@ export default function PartFaultEscalation({ initial = null, onSaved = null, on
               {['fault', 'warn'].map((k) => <label key={k} className="pfe-chk"><input type="checkbox" checked={!!p.states[k]} onChange={(e) => setP(i, { states: { ...p.states, [k]: e.target.checked } })} /> {ESC_STATE_LABEL[k]}</label>)}
               <button type="button" className="logout-btn" onClick={() => setForm({ ...form, policies: form.policies.filter((_, j) => j !== i) })}>정책 지우기</button>
             </div>
-            <input className="input pfe-wide" value={p.agentsText} placeholder="수집 주체(엣지 이름 — 쉼표로 · 비우면 모두)" onChange={(e) => setP(i, { agentsText: e.target.value })} aria-label={`정책 ${i + 1} 수집 주체`} />
+            <input className="input pfe-wide" value={p.agentsText} placeholder="수집 주체(엣지 이름 · ‘이 포탈’ — 쉼표로 · 비우면 모두)" onChange={(e) => setP(i, { agentsText: e.target.value })} aria-label={`정책 ${i + 1} 수집 주체`} />
             <div className="muted pfe-note">1단계 — 지금 부품 장애 알림(장애가 열릴 때)</div>
             {p.steps.map((s, k) => (
               <div key={k} className="pfe-step">

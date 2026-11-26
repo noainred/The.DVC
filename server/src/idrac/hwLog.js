@@ -19,7 +19,8 @@ export const HWLOG_TIMEOUT_MS = 30_000;  // 장비 시한(세션을 끊는다)
 export const HWLOG_MSG_MAX = 300;
 export const HWLOG_SEVS = Object.freeze(['critical', 'warning', 'ok']);
 const MIN_VALID_TIME = Date.UTC(2000, 0, 1);
-const clean = (v, n) => String(v ?? '').slice(0, n).replace(/[\u0000-\u001f\u007f]+/g, ' ').trim();   // 길이를 먼저 자른 뒤 · 문자 클래스 한 번(선형)
+// 글자 · 수만(객체 · 배열을 ‘[object Object]’ · ‘X,Y’ 로 지어내지 않는다 — 디버깅 1회차 엣지 #7) · 길이를 먼저 자른 뒤 · 문자 클래스 한 번(선형)
+const clean = (v, n) => (typeof v === 'string' || typeof v === 'number' ? String(v) : '').slice(0, n).replace(/[\u0000-\u001f\u007f]+/g, ' ').trim();
 
 /** Redfish Severity → critical · warning · ok · ''(모름). */
 export function sevOf(v) {
@@ -86,7 +87,7 @@ export function sanitizeHwLog(b, now = Date.now()) {
   const STATUSES = ['ok', 'empty', 'absent', 'forbidden', 'auth', 'auth-stopped', 'timeout', 'error'];
   const cnt = (v) => { const x = numOrNull(v); return x != null && x >= 0 && x <= 10_000_000 ? Math.floor(x) : null; };
   return {
-    ok: true, at: clampEdgeTs(numOrNull(b.at), now), status: STATUSES.includes(b.status) ? b.status : 'error',
+    ok: true, at: (() => { const a = numOrNull(b.at); return a != null && a >= MIN_VALID_TIME ? clampEdgeTs(a, now) : null; })(), status: STATUSES.includes(b.status) ? b.status : 'error',
     read: cnt(b.read) ?? rows.length, total: cnt(b.total), pages: cnt(b.pages) ?? 0, gap: cnt(b.gap) ?? 0,
     stopped: ['', 'budget', 'max', 'skip', 'short', 'timeout', 'error'].includes(b.stopped) ? b.stopped : '', rows, counts: countsOf(rows),
   };
@@ -114,6 +115,10 @@ function maskToken(tok0) {
   const bare = tok.replace(/^[[(]+|[\]).,;:]+$/g, '');
   if (bare.split(':').length >= 3 && HEXCOLON.test(bare.replace(/%[\w.-]{1,32}$/, ''))) return tok.replace(bare, MASK);
   if (MAC_DASH.test(bare)) return tok.replace(bare, MASK);
+  // 메일 주소 · URL 의 호스트(디버깅 1회차 판정 #12 — 접수 자료에도 실린다). 낱말 길이는 위에서 300 으로 잘려 선형
+  if (/^[^\s@]{1,64}@[a-z0-9-]{1,63}(?:\.[a-z0-9-]{1,63}){1,8}$/i.test(bare)) return tok.replace(bare, MASK);
+  const u = /^([a-z][a-z0-9+.-]{1,15}:\/\/)([^/\s?#]{1,255})(.*)$/i.exec(bare);
+  if (u) return tok.replace(bare, `${u[1]}${MASK}${u[3].replace(IPV4_IN, MASK)}`);
   if (FQDN.test(bare) && /[a-z]/i.test(bare.replace(/\.$/, '').split('.').pop())) return tok.replace(bare, MASK);
   return tok.replace(IPV4_IN, MASK);
 }

@@ -226,7 +226,7 @@ export function fwView(fw, { noHw = false, baselineUnreadable = false, invAt = n
   else if (fw.state === 'none') {
     // 이유는 상황마다 다르다(반증 B9): 대조하는 구성요소가 아예 없다 · 같은 모델이 이 서버뿐이다 · 그 밖(버전이 다 달라 다수가 없다 등)
     if (!rows.length) why = '이 서버의 펌웨어 목록에 대조하는 구성요소(BIOS · iDRAC · NIC · 저장장치 컨트롤러 · HBA)가 없습니다 — 판정하지 않습니다.';
-    else if (numOrNull(fw.peers) != null && fw.peers <= 1) why = '같은 법인에 같은 모델 서버가 이 서버뿐이라 다수 버전이 없습니다 — 관리자가 기준을 지정하면 대조합니다.';
+    else if (numOrNull(fw.peers) != null && fw.peers <= 1) why = '같은 법인 · 같은 모델에서 펌웨어를 읽은 서버가 이 서버뿐이라 다수 버전이 없습니다(모델을 모르거나 다른 서버의 펌웨어를 아직 못 읽었을 수 있습니다) — 관리자가 기준을 지정하면 대조합니다.';   // peers 는 읽은 서버 수(디버깅 1회차 판정 #5)
     else why = '대조할 기준이 없습니다 — 같은 법인의 같은 모델 서버 2대 이상이 같은 버전을 쓰거나 관리자가 기준을 지정해야 합니다.';
   }
   const peers = numOrNull(fw.peers);

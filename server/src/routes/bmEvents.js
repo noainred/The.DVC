@@ -6,9 +6,11 @@
  *  · 경로의 비밀은 요청 기록 · 오류 기록에 싣지 않는다(index.js scrubEventPath).
  */
 import express from 'express';
+import { wrapAsyncRouter } from '../util/asyncRoute.js';
 import { eventSubStore, secretOk, parseEventBody, acceptEvents, noteRejected, idOfContext, EVT_BODY_MAX } from '../idrac/eventSub.js';
 
 export const bmEventsRouter = express.Router();
+wrapAsyncRouter(bmEventsRouter);   // async 처리기 예외가 응답 없이 매달리지 않게(asyncHang2574 스윕)
 /** 등록부의 켜진 서버 이름 — 없으면 null(등록부에 없는 id 는 받지 않는다 — 반증 A9). */
 const nameOf = async (id) => {
   try { const { loadRegistry } = await import('../idrac/registry.js'); const e = loadRegistry().find((x) => String(x.id) === id && x.enabled !== false); return e ? String(e.name || e.id) : null; } catch { return null; }
