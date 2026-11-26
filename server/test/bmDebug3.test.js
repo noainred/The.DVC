@@ -147,6 +147,8 @@ test('6회차 엣지 #2 — 느린 서버가 든 묶음에서도 빠른 서버�
     E.acceptEvents(s, { context: E.contextOf(s, 'j-f'), events: [{ sev: 'critical' }] });
     for (let i = 0; i < 1500 && !(E.eventStatus().checkedAt && !E.eventStatus().running); i += 1) await new Promise((r) => setTimeout(r, 10));
     assert.ok(E.eventStatus().checkedAt, '묶음이 끝났다');
+    // 9회차 — 묶음은 마지막 판정을 기다리지 않고 끝난다(판정은 뒤에서 끝까지) — 마지막 판정까지 기다린다
+    for (let i = 0; i < 300 && !(judged.length && judged.at(-1)[1] === 'Critical'); i += 1) await new Promise((r) => setTimeout(r, 10));
     assert.deepEqual(judged[0], ['Critical', 'OK'], '첫 판정은 빠른 서버를 다시 읽은 직후 — 느린 서버는 아직 읽는 중');
     assert.deepEqual(judged.at(-1), ['Critical', 'Critical'], '마지막 판정은 느린 서버까지 본다');
     assert.ok(judged.length <= 3, `판정은 겹치면 한 번으로 묶는다(${judged.length}회)`);

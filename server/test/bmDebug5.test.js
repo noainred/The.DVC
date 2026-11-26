@@ -53,6 +53,8 @@ test('7회차 엣지 #1 — 중앙 ‘곧 판정’ 묶음은 5초(엣지가 묶
   assert.equal(PF.soonWaitMs(T + 1_000, T, 100), 4_000, '짧은 판정 — 5초 바닥');
   assert.equal(PF.soonWaitMs(T + 1_000, T, 400), 7_000, '400ms 판정 — 8초(20배)');
   assert.equal(PF.soonWaitMs(T + 9_000, T, 400), 0);
+  assert.equal(PF.soonWaitMs(T - 3_600_000, T, 100), 5_000, '9회차 — 시계가 뒤로 가도 간격만큼만');
+  assert.equal(PF.soonWaitMs(T, T, 30_000), 60_000, '9회차 — 판정이 길어도(알림 I/O) 상한 60초');
 });
 
 test('7회차 엣지 #4 — 동시 상한 2 이상이면 이벤트 읽기에 자리 몫: 함대가 상한보다 커도 주기 꼬리까지 기다리지 않는다', async (t) => {

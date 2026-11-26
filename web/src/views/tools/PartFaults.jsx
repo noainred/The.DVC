@@ -338,7 +338,7 @@ export function PartFaults() {
           {tab === 'open' && !isEdge && settings ? (
             <div className="flex wrap gap" style={{ alignItems: 'center' }}>
               <button type="button" className="btn btn-sm" aria-expanded={escOpen} onClick={toggleEsc}>{escOpen ? '알림 단계 · 당직 닫기' : '알림 단계 · 당직'}</button>
-              <span className="muted" style={{ fontSize: 12 }}>단계 올리기 {data?.escalation?.settingsUnreadable ? '설정 못 읽음(꺼짐 아님 — 알림 단계 · 당직에서 확인)' : data?.escalation?.enabled ? '켜짐' : '꺼짐'}{data?.escalation?.stateError ? ` · ${data.escalation.stateError}` : ''}</span>
+              <span className="muted" style={{ fontSize: 12 }}>단계 올리기 {data?.escalation?.settingsUnreadable ? '설정 못 읽음(켜짐 · 꺼짐을 모릅니다 — 읽을 때까지 보내지 않습니다)' : data?.escalation?.enabled ? '켜짐' : '꺼짐'}{data?.escalation?.stateError ? ` · ${data.escalation.stateError}` : ''}</span>
             </div>
           ) : null}
           {tab === 'open' && !isEdge && settings && escOpen ? <PartFaultEscalation onSaved={load} onDirty={(v) => { escDirty.current = v; }} /> : null}

@@ -23,6 +23,7 @@
 import { fullScopeOnlyWith } from '../admin/shared.js';
 import { requireRole, requirePerm } from '../../auth/auth.js';
 import { store } from '../../store.js';
+import { isFullReadWriteScope } from '../../auth/scope.js';
 import { logAudit } from '../../audit.js';
 import { PART_STATE_LABEL, PART_STATE_TONE, PART_KIND_LABEL, SCOPE_LABEL, SCOPES_OUT_OF_RANGE,
   KEY_KIND_LABEL, KEY_KIND_NOTE, DEVICE_KEY_KIND_LABEL, DEVICE_KEY_KIND_NOTE, HOLD_REASON, PUSH_PROTOCOL } from '../../partfault/types.js';
@@ -358,7 +359,8 @@ api.get('/tools/part-faults', toolsPerm, fullScopeOnly, async (req, res) => {
     hook: hookStatus(),
     settings: isAdmin ? loadPartFaultSettings() : null,
     escalation: { enabled: escalationStore.get().enabled, ...(escalationStore.loadError() ? { settingsUnreadable: true } : {}), ...(escalationStateError() ? { stateError: escalationStateError() } : {}) },   // 설정을 못 읽으면 ‘꺼짐’ 이 아니다(8회차 판정 #2)
-    canAck: ['admin', 'operator'].includes(req.user?.role) && !isDemoGuest(req.user),   // 확인 단추 — 집행은 ack 라우트(writeRole)
+    // 확인 단추 — 확인 라우트와 같은 판정(쓰기 역할 ∧ 조회 · 쓰기 모두 전체 범위 ∧ 데모 아님). 쓰기 범위가 일부인 계정에 단추를 띄우면 누를 때 403 이었다(디버깅 9회차 보안 #2)
+    canAck: ['admin', 'operator'].includes(req.user?.role) && !isDemoGuest(req.user) && (() => { try { return isFullReadWriteScope(req.user, store.get()); } catch { return false; } })(),
     // 96회차(93회차 F4 화면): 설정 파일 읽기 오류면 위 settings 는 기본값(꺼짐)이다 — 관리자가 끈 것이 아니다. 고정 문구 사유만(파일 조각 없음).
     ...(isAdmin && partFaultSettingsWriteRefusal() ? { settingsUnreadable: { reason: String(partFaultSettingsWriteRefusal().reason || '').slice(0, 300) } } : {}),
   });

@@ -8,7 +8,7 @@
  *  · 받는 곳 하나 이상에 ‘갔다’ 를 확인한 것만 ‘보냄’ — 메일 꺼짐 · 시간당 한도 · 채널 실패 · 당직 없음은 ‘안 감’ 으로 적고 다음 회차에 다시(ESC_RETRY_MAX 번까지 · 반증 A8 · B1).
  */
 import { config } from '../config.js';
-import { openFaultsOrNull, partFaultDbExists } from './db.js';
+import { openFaultsOrNull, partFaultDbMissing } from './db.js';
 import { alertOf } from './notify.js';
 import { notify as sendAlert, deliveryOutcome } from '../alerts.js';
 import { sendPortalMail } from '../mail/service.js';
@@ -46,8 +46,10 @@ export function escalationMessage(s, now = Date.now()) {
   const lines = [a.detail, '',
     `아무도 확인하지 않아 ${stepNo}단계로 올렸습니다(정책: ${s.policy.name}${mins ? ` · ${mins}분째` : ''}). 부품 장애 화면에서 ‘확인’ 을 누르면 단계 올리기가 멈춥니다.`];
   // 건너뛴 단계 — 멈춘 동안(점검 꺼짐 · 데모 · 정비 창 · 회차 상한) 시각이 지나 보내지 않은 앞 단계를 밝힌다(화면 설명이 ‘결과에 밝힙니다’ 라고 약속한다 — 디버깅 8회차 화면 U2)
-  const sk = Array.isArray(s.skipped) ? s.skipped.map((k) => k + 2) : [];
+  const sk = (Array.isArray(s.skippedNote) ? s.skippedNote : Array.isArray(s.skipped) ? s.skipped : []).map((k) => k + 2);   // 다시 시도 회차도 밝힌다(9회차 화면 U3)
   if (sk.length) lines.push(`${sk.join(' · ')}단계는 시각이 지난 뒤 처음 본 회차라 보내지 않았습니다(건너뜀).`);
+  const ud = (Array.isArray(s.undeliveredNote) ? s.undeliveredNote : []).map((k) => k + 2);   // 보냈으나 받는 곳에 가지 않은 단계 — 건너뜀과 가른다(9회차 판정 #4)
+  if (ud.length) lines.push(`${ud.join(' · ')}단계는 보냈으나 받는 곳에 가지 않았습니다.`);
   if (oc) lines.push(`오늘 당직: ${oc.name || oc.email}${oc.agent === '*' ? '' : ` (${oc.agent || '이 포탈'} 당직표)`}`);
   else if (s.to.oncallWanted) lines.push('당직표에 오늘 당직이 없어 당직에게는 보내지 못했습니다.');
   const ag = String(s.part.agent || '').trim().toLowerCase();
@@ -82,8 +84,10 @@ async function sendOne(s, deps, now) {
 
 const DEFAULT_DEPS = {
   // DB 를 못 열면 ‘열린 장애 0건’ 이 아니다 — 그 회차를 건너뛴다(빈 목록으로 계획하면 진행 · 확인 기록이 전부 지워지고 DB 가 돌아오면 확인한 장애에도 단계가 다시 갔다 — 디버깅 7회차 판정 #3)
-  // DB 파일이 없는 노드(부품 장애 점검을 켠 적 없음)에는 파일을 만들지 않는다 — 열린 장애도 없다(만들면 ‘수집 안 함’ 이 ‘읽었고 0건’ 으로 바뀌었다 — 디버깅 8회차 판정 #3)
-  open: async () => { if (!partFaultDbExists()) return []; const r = await openFaultsOrNull(); if (!r) throw new Error('부품 장애 DB 를 열지 못했습니다'); return r; }, mail: (o) => sendPortalMail(o), channels: (a) => sendAlert(a), now: () => Date.now(),
+  // DB 파일이 없는 노드(부품 장애 점검을 켠 적 없음)에는 파일을 만들지 않는다 — 열린 장애도 없다(만들면 ‘수집 안 함’ 이 ‘읽었고 0건’ 으로 바뀌었다 — 디버깅 8회차 판정 #3).
+  //   ‘없음’ 은 ENOENT 만 — 권한 · 링크 고리 · 디스크 오류는 열기로 넘겨 회차를 건너뛴다(9회차 보안 #1)
+  //   진행 기록이 있는데 DB 파일이 없으면 ‘0건’ 이 아니라 못 읽음이다(볼륨이 아직 안 붙음 · 경로가 바뀜 — 지우면 확인한 장애에도 단계가 다시 갔다 · 9회차 판정 #1)
+  open: async () => { if (partFaultDbMissing()) { if (Object.keys(loadEscalationState().items || {}).length) throw new Error('부품 장애 DB 파일이 없습니다(진행 기록은 있음 — 볼륨 · 경로 확인)'); return []; } const r = await openFaultsOrNull(); if (!r) throw new Error('부품 장애 DB 를 열지 못했습니다'); return r; }, mail: (o) => sendPortalMail(o), channels: (a) => sendAlert(a), now: () => Date.now(),
   partFaultSwitch: async () => (await import('./settings.js')).partFaultEnabled(),
   hold: async (open, now) => {
     const M = await import('../bmusage/maint/partfaultHold.js');
@@ -154,7 +158,7 @@ export async function runEscalationNow() {
     const sentRes = results.filter((r) => !r.notSent);
     _last = { at: now, enabled: settings.enabled, ...(why ? { why } : {}), sent: sentRes.length, delivered: sentRes.filter((r) => r.delivered).length, failed: sentRes.filter((r) => !r.delivered).length,
       deferred: plan.deferred, overCap: plan.overCap, held: plan.held, errors: saved ? [] : ['진행 기록을 쓰지 못했습니다 — 다음 회차에 같은 단계를 다시 보낼 수 있습니다.'],
-      results: plan.sends.map((s, i) => ({ part: `${s.part.deviceName || s.part.deviceId || ''} · ${s.part.label || ''}`.slice(0, 120), step: s.step + 2, ...(s.skipped?.length ? { skipped: s.skipped.map((k) => k + 2) } : {}), result: results[i]?.text || '', delivered: !!results[i]?.delivered })).slice(0, 20) };
+      results: plan.sends.map((s, i) => ({ part: `${s.part.deviceName || s.part.deviceId || ''} · ${s.part.label || ''}`.slice(0, 120), step: s.step + 2, ...((s.skippedNote || s.skipped)?.length ? { skipped: (s.skippedNote || s.skipped).map((k) => k + 2) } : {}), ...(s.undeliveredNote?.length ? { undelivered: s.undeliveredNote.map((k) => k + 2) } : {}), result: results[i]?.text || '', delivered: !!results[i]?.delivered })).slice(0, 20) };
     return _last;
   } finally { _busy = false; }
 }

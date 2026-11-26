@@ -149,16 +149,22 @@ let _soonTimer = null; let _soonRunning = false; let _soonAgain = false; let _so
 export const PART_FAULT_SOON_MS = 5_000;
 export const PART_FAULT_SOON_COST_X = 20;   // 다음 ‘곧 판정’ 은 앞 판정이 끝난 뒤 max(5초, 20 × 앞 판정 길이) — 판정이 통째로 동기라 큰 함대에서 루프 정지 비율을 ~5% 안으로(디버깅 8회차 성능 P1)
 /** 다음 ‘곧 판정’ 까지 기다릴 ms(순수 — 시험이 고정). 조용한 뒤 첫 보고는 0(바로 — 7회차 엣지 #1). */
-export const soonWaitMs = (now, lastEnd, lastDur) => Math.max(0, Math.max(PART_FAULT_SOON_MS, PART_FAULT_SOON_COST_X * Math.max(0, Number(lastDur) || 0)) - (now - (Number(lastEnd) || 0)));
+export const PART_FAULT_SOON_MAX_MS = 60_000;   // 간격 상한 — 판정 길이에 알림 I/O 대기가 들어가 30초면 10분을 기다렸다 · 시계가 뒤로 가면 한 시간을 기다렸다(9회차 보안 관찰)
+export const soonWaitMs = (now, lastEnd, lastDur) => {
+  const gap = Math.min(PART_FAULT_SOON_MAX_MS, Math.max(PART_FAULT_SOON_MS, PART_FAULT_SOON_COST_X * Math.max(0, Number(lastDur) || 0)));
+  return Math.max(0, gap - Math.max(0, now - (Number(lastEnd) || 0)));   // 시계가 뒤로 가면 지난 시간을 0 으로(간격만큼만 기다린다)
+};
 export function runPartFaultsSoon(reason = 'edge-event') {
   if (isEdge()) return false;
   // 판정 중에 온 보고는 끝난 뒤 한 번 더(잃지 않는다 — 그 보고의 값은 지금 판정이 못 봤을 수 있다) · 이미 예약돼 있으면 그 판정이 이 보고를 본다
   if (_soonRunning) { _soonAgain = true; return true; }
   if (_soonTimer) return false;
   _soonTimer = setTimeout(() => {
-    _soonTimer = null; _soonRunning = true; const t0 = Date.now();
+    _soonTimer = null; _soonRunning = true; const t0 = Date.now(); const elu0 = performance.eventLoopUtilization();
     runPartFaultsNow({ reason }).catch(() => {}).finally(() => {
-      _soonRunning = false; _soonEnd = Date.now(); _soonDur = _soonEnd - t0;
+      // 비용은 벽시계가 아니라 그동안 이벤트 루프가 일한 시간 — 판정 안의 알림 보내기(네트워크 대기)가 들어가면 웹훅이 느릴 때 다음 곧 판정이 수십 초 · 10분 밀렸다(9회차 판정 #2)
+      let active = Date.now() - t0; try { active = Math.min(active, performance.eventLoopUtilization(elu0).active); } catch { /* 측정 못 하면 벽시계 — 상한 60초가 막는다 */ }
+      _soonRunning = false; _soonEnd = Date.now(); _soonDur = active;
       if (_soonAgain) { _soonAgain = false; runPartFaultsSoon(reason); }
     });
   }, soonWaitMs(Date.now(), _soonEnd, _soonDur));

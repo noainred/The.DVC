@@ -351,7 +351,13 @@ export function escalationPlan({ settings, state, open, now = Date.now(), maxSen
     const step = pol.steps[due];
     const oc = step.oncall ? oncallFor(settings, p.agent, now) : null;
     const attempt = it.sent.filter((e) => e[0] === due && e[3] === 'fail' && ofPol(e, pol.id)).length + 1;   // 다시 시도 번호 — 채널 억제 열쇠에 넣는다(같은 열쇠면 억제 창에 막혀 다시 시도가 0번이었다 — 판정 #2)
-    sends.push({ key, part: p, policy: pol, step: due, attempt, skipped, since: psince, to: { emails: step.emails, channels: step.channels, oncall: oc, oncallWanted: step.oncall } });
+    // 알림 본문 · 결과 줄에 밝힐 건너뛴 단계 — 이번에 적을 skip(skipped)과, 첫 시도가 안 가 다시 보내는 회차라면 이미 적힌 skip 줄(받는 곳에 간 적 없음)까지(디버깅 9회차 화면 U3)
+    //   보냈으나 받는 곳에 가지 않은 단계(fail · give)는 ‘건너뜀’ 이 아니다 — 따로 밝힌다(9회차 판정 #4)
+    const has = (i, k) => it.sent.some((e) => e[0] === i && e[3] === k && ofPol(e, pol.id));
+    const before = pol.steps.map((_, i) => i).filter((i) => i < due && !has(i, 'ok'));
+    const undeliveredNote = before.filter((i) => has(i, 'fail') || has(i, 'give'));
+    const skippedNote = before.filter((i) => !undeliveredNote.includes(i) && (skipped.includes(i) || has(i, 'skip')));
+    sends.push({ key, part: p, policy: pol, step: due, attempt, skipped, skippedNote, undeliveredNote, since: psince, to: { emails: step.emails, channels: step.channels, oncall: oc, oncallWanted: step.oncall } });
   }
   return { sends, items, enabledAt: enabled ? enabledAt : (numOrNull(state?.enabledAt) ?? null), deferred, overCap, held, heldKeys };
 }
@@ -406,9 +412,12 @@ export function ackEscalation(p, { by = '', now = Date.now() } = {}) {
 export function escalationMarkOf(p, items, settings = null, run = null) {
   const it = items && Object.hasOwn(items, partKeyOf(p)) ? items[partKeyOf(p)] : null;
   // 설정을 못 읽은 동안은 정책 · 대상 여부를 모른다 — ‘꺼짐 · 정책 밖’ 이 아니라 그 사유로(확인은 된다 — 진행 기록은 읽힌다 · 디버깅 8회차 판정 #2)
+  //   정책을 모르므로 ‘N단계까지 갔다’ 도 말하지 않는다(지난 회차 정책으로 세면 엔진 · 정상 표지와 다른 수가 됐다 — 디버깅 9회차 화면 U2)
+  //   못 읽는 동안은 회차가 키 이전(같은 sig)을 하지 않으므로 표지가 sig 로도 찾는다 — 확인한 장애가 ‘확인 안 함’ 으로 보이지 않게(9회차 판정 #3ⓑ)
   if (run?.why === 'settings-unreadable') {
-    const okSteps = (it?.sent || []).filter((e) => e[3] === 'ok' && (!e[4] || e[4] === it?.pol || e[4] === '-')).map((e) => e[0]);
-    return { ackId: ackIdOf(p), covered: false, step: okSteps.length ? Math.max(...okSteps) + 2 : null, acked: !!it?.ackedAt, ...(it?.ackedAt ? { ackedAt: it.ackedAt, ackBy: it.ackBy } : {}), paused: 'settings-unreadable' };
+    const sig = partSigOf(p);
+    const rec = it || (items ? Object.values(items).find((v) => v?.sig === sig) : null) || null;
+    return { ackId: ackIdOf(p), covered: false, step: null, acked: !!rec?.ackedAt, ...(rec?.ackedAt ? { ackedAt: rec.ackedAt, ackBy: rec.ackBy } : {}), paused: 'settings-unreadable' };
   }
   const curPol = (settings?.enabled ? policyFor(settings, p)?.id : '') || it?.pol || '';
   // 지금 정책의 단계만 — 다른 정책에 간 단계를 이 정책의 진행으로 말하지 않는다(디버깅 2회차 판정 #1). 정책 열이 없는 옛 줄은 첫 회차가 넘겨받기 전까지 지금 정책 것으로 보인다(4회차 화면 E1)

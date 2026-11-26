@@ -115,11 +115,14 @@ describe('디버깅 1회차 화면', () => {
     expect(manualPollMessage({ lastRun: { ok: 3, failed: 0 } }).text).toBe('수동 1회 수집 — 성공 3 · 실패 0');   // 구버전 서버(필드 없음)는 예전 문구
   });
   it('8회차 화면 — 단계 · 당직 설정을 못 읽으면 행은 ‘설정 못 읽음’(꺼짐 · 정책 밖 아님) · 확인은 된다 · 목록 머리도 ‘꺼짐’ 이 아니다', () => {
-    const v = escMarkView({ ackId: 'a', covered: false, step: 3, acked: false, paused: 'settings-unreadable' }, { enabled: false, canAck: true });
+    const v = escMarkView({ ackId: 'a', covered: false, step: null, acked: false, paused: 'settings-unreadable' }, { enabled: false, canAck: true });
     expect(v).toMatchObject({ text: '설정 못 읽음', tone: 'gray', canAck: true });
-    expect(v.title).toContain('3단계까지는 갔습니다');
     expect(v.title).not.toContain('꺼짐 · 정책 밖');
-    expect(read('../PartFaults.jsx')).toContain("data?.escalation?.settingsUnreadable ? '설정 못 읽음(꺼짐 아님");
+    expect(v.title).not.toMatch(/\d단계까지는 갔습니다/);   // 9회차 U2 — 정책을 모르므로 단계 수를 말하지 않는다
+    expect(v.title).toContain('다시 켠 것이거나 새 정책이면 그때부터 1단계부터 셉니다');
+    expect(read('../PartFaults.jsx')).toContain("data?.escalation?.settingsUnreadable ? '설정 못 읽음(켜짐 · 꺼짐을 모릅니다");   // 9회차 U1 — ‘꺼짐 아님’ 이라 단정하지 않는다
+    expect(read('../PartFaults.jsx')).not.toContain('꺼짐 아님');
+    expect(read('../partFaultEscText.js')).toContain('건너뛴 단계는 그 알림 본문에 밝힙니다');   // 9회차 U4
   });
 });
 

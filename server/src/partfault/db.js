@@ -47,6 +47,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { openSqlite, withOpenCleanup, createLockRetry } from '../util/sqliteOpen.js';
+import { fileMissing } from '../util/fileMissing.js';
 import { partFaultRetention } from './settings.js'; // v2.613 PERSIST2613-06
 
 /*
@@ -290,6 +291,11 @@ export function partFaultDbExists() {
   if (x) return true;
   try { return fs.existsSync(DB_PATH()); } catch { return false; }
 }
+/**
+ * DB 파일이 **정말 없는가**(ENOENT 만 — util/fileMissing.js). 알림 단계 회차가 ‘열린 장애 0건’ 으로 기록을 지울지 가르는 자리라 existsSync 를 쓰지 않는다:
+ *   폴더 권한(EACCES) · 링크 고리(ELOOP) · 디스크(EIO)도 false 라 ‘없음’ 으로 떨어져 확인 · 보낸 단계 기록을 지웠다(디버깅 9회차 보안 #1). 그 밖의 실패는 열기로 넘겨 회차를 건너뛴다.
+ */
+export function partFaultDbMissing() { if (x) return false; return fileMissing(DB_PATH()); }
 
 /** openFaults 와 같되 DB 를 못 열면 null(‘열린 장애 0건’ 과 가른다 — 알림 단계 회차가 빈 목록으로 기록을 지우지 않게 · 디버깅 7회차 판정 #3). */
 export async function openFaultsOrNull(o = {}) { const h = await open(); return h ? openFaults(o) : null; }

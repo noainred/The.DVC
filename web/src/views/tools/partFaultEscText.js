@@ -26,8 +26,9 @@ export function escMarkView(esc, { canAck = false, enabled = false } = {}) {
   const step = int(esc.step); const tried = int(esc.tried);
   // 단계 · 당직 설정을 못 읽음 — 정책 · 대상 여부를 모른다(‘꺼짐 · 정책 밖’ 으로 말하지 않는다). 확인은 된다(진행 기록은 읽힌다 — 디버깅 8회차 판정 #2)
   if (esc.paused === 'settings-unreadable') {
+    // 정책을 모르므로 단계 수는 말하지 않고, 풀린 뒤는 멈춤 표지와 같은 두 경우로 말한다(디버깅 9회차 화면 U2)
     return { text: '설정 못 읽음', tone: 'gray', canAck: canAck && !!esc.ackId,
-      title: `단계 · 당직 설정을 읽지 못해 단계 알림을 보내지 않습니다 — 설정이 돌아오면 이미 세던 장애는 그동안 시각이 지난 단계 가운데 가장 높은 단계를 바로 보냅니다(확인하면 보내지 않습니다)${step ? ` · ${step}단계까지는 갔습니다` : ''}` };
+      title: '단계 · 당직 설정을 읽지 못해 단계 알림을 보내지 않습니다(어느 정책 대상인지도 모릅니다) — 설정이 돌아오면 그 정책으로 이미 세던 장애는 그동안 시각이 지난 단계 가운데 가장 높은 단계를 바로 보내고, 돌아온 설정이 다시 켠 것이거나 새 정책이면 그때부터 1단계부터 셉니다. 확인하면 보내지 않습니다.' };
   }
   const live = enabled && esc.covered === true;
   // 회차가 보내지 않는 상태 · 정비 창 보류 — ‘보냅니다’ 라고 약속하지 않는다(디버깅 1회차 화면 U7)
@@ -37,7 +38,7 @@ export function escMarkView(esc, { canAck = false, enabled = false } = {}) {
   }
   if (live && (esc.paused || esc.held)) {
     // 풀리면 ‘다시 세는’ 것이 아니라 그동안 시각이 지난 단계 가운데 가장 높은 것을 그 회차에 바로 보낸다(건너뛴 단계는 결과에 밝힘 — 디버깅 2회차 판정 #4)
-    const LATER = '그동안 시각이 지난 단계 가운데 가장 높은 단계를 바로 보냅니다(건너뛴 단계는 결과에 밝힙니다)';
+    const LATER = '그동안 시각이 지난 단계 가운데 가장 높은 단계를 바로 보냅니다(건너뛴 단계는 그 알림 본문에 밝힙니다)';   // ‘결과’ 는 관리자 패널의 마지막 회차 줄뿐이라 다음 회차에 비었다(9회차 화면 U4)
     // 멈춘 회차(점검 꺼짐 · 데모 · 설정 못 읽음)는 다시 켜기 · 새 정책의 시작 시각을 적지 않는다 — 풀린 첫 회차가 그것을 한다. 그래서 ‘바로 보냄’ 은 이 정책으로 이미 세던 장애만이고,
     //   멈춘 동안 단계 알림을 켰거나(다시 켬 포함) 새 정책이 걸렸으면 풀린 때부터 1단계부터 센다(디버깅 7회차 화면 H1 — 문구가 늘 ‘바로 보냄’ 이라 말했다)
     const why = esc.held ? `정비 창 보류 중인 장비라 단계 알림을 보내지 않습니다 — 창이 끝나면 ${LATER}`
@@ -131,6 +132,6 @@ export function escRunText(run, tickMs = null) {
 /** 마지막 회차의 보낸 결과 줄(최대 20) — 어디에 갔고 어디에 가지 않았는지(반증 B1). */
 export function escRunResults(run) {
   return (Array.isArray(run?.results) ? run.results : []).slice(0, 20).map((r, i) => ({
-    key: `${i}`, text: `${String(r?.part || '—')} · ${int(r?.step) ? `${r.step}단계` : '—'}${Array.isArray(r?.skipped) && r.skipped.length ? `(${r.skipped.map((k) => int(k)).filter(Boolean).join(' · ')}단계 건너뜀)` : ''} · ${String(r?.result || '—')}`, ok: r?.delivered === true,   // 건너뛴 단계(8회차 화면 U2)
+    key: `${i}`, text: `${String(r?.part || '—')} · ${int(r?.step) ? `${r.step}단계` : '—'}${Array.isArray(r?.skipped) && r.skipped.length ? `(${r.skipped.map((k) => int(k)).filter(Boolean).join(' · ')}단계 건너뜀)` : ''}${Array.isArray(r?.undelivered) && r.undelivered.length ? `(${r.undelivered.map((k) => int(k)).filter(Boolean).join(' · ')}단계 안 감)` : ''} · ${String(r?.result || '—')}`, ok: r?.delivered === true,   // 건너뛴 단계(8회차 화면 U2)
   }));
 }
