@@ -1749,7 +1749,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/vms/:id/endpoint-locations` | 권한 `inv.vms` | [server/src/routes/api/hostSan.js:416](../server/src/routes/api/hostSan.js#L416) |
 | GET | `/vms/:id/metrics` | 권한 `inv.vms` | [server/src/routes/api/vmMetrics.js:168](../server/src/routes/api/vmMetrics.js#L168) |
 | GET | `/vms/:id/partitions` | 권한 `inv.vms` | [server/src/routes/api/toolsGuestPart.js:46](../server/src/routes/api/toolsGuestPart.js#L46) |
-| GET | `/vms/:id/power-history` | 권한 `inv.vms` | [server/src/routes/api/vmPower.js:10](../server/src/routes/api/vmPower.js#L10) |
+| GET | `/vms/:id/power-history` | 권한 `inv.vms` | [server/src/routes/api/vmPower.js:11](../server/src/routes/api/vmPower.js#L11) |
 | GET | `/vms/by-vcenter` | 권한 `inv.vms` | [server/src/routes/api/inventory.js:483](../server/src/routes/api/inventory.js#L483) |
 | GET | `/vms/insight` | 권한 `inv.vms` | [server/src/routes/api/inventory.js:507](../server/src/routes/api/inventory.js#L507) |
 | GET | `/vms/lookup` | 권한 `inv.vms` | [server/src/routes/api/inventory.js:523](../server/src/routes/api/inventory.js#L523) |

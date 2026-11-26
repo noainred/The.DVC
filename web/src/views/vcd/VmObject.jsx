@@ -282,7 +282,7 @@ export default function VmObject({ site, vcenterId, vm, vmsOk, gate, datastores,
         </div>
       )}
 
-      {tab === 'power' && <PowerCalendarTab vm={vm} />}
+      {tab === 'power' && <PowerCalendarTab key={vm.id} vm={vm} />}
 
       {extra}
     </ObjectShell>

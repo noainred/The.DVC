@@ -62,11 +62,15 @@ export function whenText({ ts, lo, exact } = {}) {
 }
 
 /** 출처 글. */
-export function srcText(src, precision = {}) {
+export function srcText(src, precision = {}, win = null) {
   if (src === 'event') return 'vCenter 이벤트';
-  if (src === 'backfill') return `VM 추적 소급${precision.backfillMs ? ` · 정밀도 ${durText(precision.backfillMs)}` : ''}`;
-  return `포탈 관측${precision.watchMs ? ` · 정밀도 ${durText(precision.watchMs)}` : ''}`;
+  // 오차는 그 전환의 실제 창 폭으로 말한다 — 고정 간격(10분 · 12시간)이 아니다(소급 직후 · 끊김 뒤 창은 훨씬 넓다 — 재검토 #9).
+  const w = numOrNull(win);
+  const tail = w != null && w > 0 ? ` · 시각 오차 최대 ${durText(w)}` : (src === 'backfill' && precision.backfillMs ? ` · 정밀도 ${durText(precision.backfillMs)}` : precision.watchMs ? ` · 정밀도 ${durText(precision.watchMs)}` : '');
+  return `${src === 'backfill' ? 'VM 추적 소급' : '포탈 관측'}${tail}`;
 }
+/** 사실 · 전환의 창 폭(ts - lo) — 정확하거나 모르면 null. */
+export const windowOf = (x) => (x && !x.exact && numOrNull(x.lo) != null && numOrNull(x.ts) != null ? x.ts - x.lo : null);
 
 /** 조각들을 [a, b) 로 자른 것(시간순). */
 export function clipSegs(segments, a, b) {
@@ -167,20 +171,61 @@ export function sumsText(s) {
 export function factText(f, precision = {}) {
   if (!f) return { main: '기록 없음', sub: '' };
   if (f.before != null) return { main: '기록 시작 전', sub: `${stampText(f.before).slice(0, 10)} 기록 시작 때 이미 이 상태` };
-  return { main: whenText(f), sub: f.exact ? `vCenter 이벤트${f.user ? ` · ${f.user}` : ''}` : srcText(f.src, precision) };
+  // 목록에 나타난 구간 — 전원이 켜진 시각이 아니다(생성 · 다른 vCenter 에서 이동 · 다시 등록 — 재검토 #11).
+  if (f.appeared) return { main: whenText(f), sub: '이 vCenter 목록에 처음 보인 시각 — 그 전 전원 상태는 모릅니다' };
+  return { main: whenText(f), sub: f.exact ? `vCenter 이벤트${f.user ? ` · ${f.user}` : ''}` : srcText(f.src, precision, windowOf(f)) };
 }
 
 /** 지금 상태 머리글 — '켜짐 · 13일 7시간째' / '꺼짐 · 26일째' · 시작을 모르면 '… 이상'. */
 export function currentText(facts, now) {
+  if (facts && facts.recordStart === null) return { head: '아직 기록 없음', since: '다음 관측부터 기록합니다' };
   const c = facts?.current;
   if (!c) return facts?.gone ? { head: '지금 목록에 없음', since: '' } : { head: '기록 없음', since: '' };
   const label = STATE_LABEL[c.state] || c.state;
-  if (c.before != null) return { head: `${label} · ${durText(now - c.before)} 이상`, since: `기록 시작(${stampText(c.before).slice(0, 10)}) 전부터` };
-  return { head: `${label} · ${durText(now - c.ts)}째`, since: `${whenText(c)} 부터` };
+  // 관측이 끊긴 채면 지금 상태를 모른다 — '마지막으로 본 상태' 와 그 시각을 말한다(재검토 #4).
+  if (c.clockHeld) return { head: `마지막으로 본 상태 · ${label}`, since: '서버 시계가 뒤로 바뀌어 관측을 잠시 멈췄습니다(시계가 따라잡으면 다시 기록합니다)', stale: true };
+  if (c.stale && numOrNull(c.seenTs) != null) return { head: `마지막으로 본 상태 · ${label}`, since: `${stampText(c.seenTs)} 이후 관측 없음(${durText(now - c.seenTs)})`, stale: true };
+  // 그 사이 '기록 없음'(포탈 중지 · 못 읽음)이 끼어 있으면 길이가 그 시간을 포함한다는 것을 밝힌다(2회차 남은 것).
+  const unk = numOrNull(c.unknownMs) > 0 ? ` · 그 사이 기록 없음 ${durText(c.unknownMs)} 포함` : '';
+  if (c.before != null) return { head: `${label} · ${durText(Math.max(0, now - c.before))} 이상`, since: `기록 시작(${stampText(c.before).slice(0, 10)}) 전부터${unk}` };
+  if (c.appeared) return { head: `${label} · ${durText(Math.max(0, now - c.ts))} 이상`, since: `${whenText(c)} 목록에 나타남 — 그 전 상태는 모름${unk}` };
+  return { head: `${label} · ${durText(Math.max(0, now - c.ts))}째`, since: `${whenText(c)} 부터${unk}` };
+}
+
+/**
+ * 달력에서 선택된 날 — 사용자가 고른 날이 있으면 그 날, 없으면 이 기간의 최근 전환 날, 그것도 없으면 기간의 마지막 날.
+ *   to 는 범위 끝(다음 달 1일 0시 — **포함하지 않음**)이라 1ms 앞을 쓴다(그대로 쓰면 기간 밖의 날이 골라졌다 — v3.42.0 점검).
+ */
+export function selectedDayKey(sel, transitionsInRange, { to, now }) {
+  if (sel) return sel;
+  const end = Math.min(numOrNull(to) ?? now, now);
+  return defaultDayKey(transitionsInRange, end - 1);
 }
 
 /** 선택할 기본 날 — 최근에 전원이 바뀐 날(없으면 오늘). */
 export function defaultDayKey(transitions, now) {
   const t = (transitions || [])[0];
   return t && numOrNull(t.ts) != null ? dayKey(t.ts) : dayKey(now);
+}
+
+/** 마지막 Power Off 아래 글 — 관측 끊김 · 목록에 나타남을 머리글과 같은 판정으로(2회차 N3: 머리글은 '마지막으로 본 상태' 인데 이 칸은 단정했다). */
+export function lastOffSub(f, now) {
+  if (!f.lastOff) return '기록된 기간에 꺼진 적 없음';
+  if (f.lastOff.appeared) return '꺼진 채 목록에 나타남 — 언제 꺼졌는지는 모릅니다';
+  if (f.current?.state === 'off') {
+    if (f.lastOff.before != null) return '기록 시작 전부터 꺼짐';
+    if (f.current.clockHeld) return '서버 시계 변경으로 관측을 멈춘 동안의 상태는 모릅니다';
+    if (f.current.stale) return `꺼진 뒤 마지막 관측까지 ${durText(Math.max(0, f.current.seenTs - f.lastOff.ts))} — 그 뒤는 관측 없음`;
+    return `꺼진 뒤 ${durText(Math.max(0, now - f.lastOff.ts))} 지남`;
+  }
+  if (f.lastOffDur) return `${durRangeText(f.lastOffDur.minMs, f.lastOffDur.maxMs)} 동안 꺼져 있었음`;
+  return '';
+}
+/** 마지막 Power On 아래 글 — 지금 켜져 있고 관측이 이어질 때만 'N째 켜져 있음'. */
+export function lastOnSub(f, lastOnFact, now) {
+  const c = f.current;
+  if (c?.state === 'on' && c.ts != null && !c.stale && !c.appeared && c.before == null) return `${durText(Math.max(0, now - c.ts))}째 켜져 있음`;
+  if (c?.state === 'on' && c.clockHeld) return '서버 시계 변경으로 관측을 멈춘 동안의 상태는 모릅니다';
+  if (c?.state === 'on' && c.stale) return `마지막 관측(${stampText(c.seenTs)})까지 켜져 있었음`;
+  return lastOnFact.sub;
 }

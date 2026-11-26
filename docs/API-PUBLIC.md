@@ -2,7 +2,8 @@
 
 > 다른 포탈·대시보드가 **이 포탈의 조회 데이터를 읽어 가는** API 입니다.
 > 전 엔드포인트 목록(개수 · 게이트는 그 문서의 '요약' — 소스에서 생성)은 [API.md](API.md), 이 문서는 **외부에 공개된 19개**만 자세히 다룹니다.
-> 도입 릴리스: **v2.562.0** · SAN 분류 v2.953 · 2차(자원 목록 · 점검/준수 · 백업 · 전력/GPU 9개) **v3.42.0**
+> 도입 릴리스: **v2.562.0** · SAN 분류 v2.953 · 2차(자원 목록 · 점검/준수 · 백업 · 전력/GPU 9개) **v3.43.0**
+> (2차의 코드 · 테스트 표지는 `v3.42.0` 입니다 — main 이 3.42.0 을 먼저 써서 릴리스 번호만 3.43.0 으로 올렸습니다.)
 
 ---
 
@@ -135,8 +136,8 @@ ISO 문자열이 섞여 나오지 않습니다.
 4. **첫 수집이 끝나지 않았으면 빈 배열이 아니라 `503 not-collected`** 입니다.
    '데이터가 없다' 와 '아직 못 모았다' 는 조치가 다르므로 구분합니다. 이 503 은 **vCenter 인벤토리가 원천인 경로**(범위 적용 경로)에만 걸리고,
    스토리지 · SAN · 부품 장애 · 전력은 vCenter 수집과 무관해 그대로 답합니다. 진행 상황은 `GET /inventory/collection` 이 답합니다(`firstCollectionDone`).
-   (v3.42.0 정정: v2.675 부터 포탈이 첫 수집 전에 '골격' 상태를 먼저 띄우면서 이 503 이 사실상 사라져 첫 수집 동안 0 · 빈 배열이 나갔습니다 — 다시 503 입니다.)
-   첫 수집이 끝난 뒤에도 **새로 등록했거나 엣지 보고를 기다리는 vCenter** 는 `meta.pendingVcenters` · `pendingVcenterIds`(v3.42.0 목록 경로)로 밝힙니다 — 그 vCenter 의 행이 없는 것은 0 개가 아닙니다.
+   (v3.43.0 정정: v2.675 부터 포탈이 첫 수집 전에 '골격' 상태를 먼저 띄우면서 이 503 이 사실상 사라져 첫 수집 동안 0 · 빈 배열이 나갔습니다 — 다시 503 입니다.)
+   첫 수집이 끝난 뒤에도 **새로 등록했거나 엣지 보고를 기다리는 vCenter** 는 `meta.pendingVcenters` · `pendingVcenterIds`(v3.43.0 목록 경로)로 밝힙니다 — 그 vCenter 의 행이 없는 것은 0 개가 아닙니다.
 5. **분당 상한을 넘기면 `429`** 이고 `Retry-After` 헤더(초)가 옵니다. 그 시간 뒤에 재시도하세요.
 6. **응답은 `Cache-Control: no-store`** 입니다. 키마다 보이는 범위가 다르므로 중간 캐시가
    섞으면 **남의 법인 데이터가 갑니다.** 프록시를 두더라도 이 응답은 캐시하지 마세요.
@@ -162,14 +163,14 @@ ISO 문자열이 섞여 나오지 않습니다.
 | `capacity` | 용량 · 사용량 추이 | medium | 데이터스토어 사용률, 스토리지 장비 용량·증가량. **장비명·법인**이 들어갑니다 |
 | `faults` | 장애 · 알람 현황 | medium | vCenter 알람, 물리 부품 장애. **장비·엔티티 이름**이 들어갑니다 |
 | `san` | SAN 스토리지 성능 | medium | SAN 스위치가 본 **스토리지 어레이별** 처리량 · 회선 사용률 · 편중 · 성능 점검 판정(v2.953). **어레이 이름 · 시리얼 · 법인**이 들어갑니다. vCenter 범위로 나눌 수 없어 범위 지정 키는 403 `needs-full-scope` |
-| `objects` | 자원 목록 (이름 · IP) | **high** | 호스트 · VM · 네트워크 · 클러스터의 **개별 목록**(v3.42.0). **이름 · IP · 서비스태그 · 호스트 배치**가 들어가 민감도가 가장 높습니다 |
-| `compliance` | 점검 · 준수 | medium | vCenter 라이선스 만료와 VM 스냅샷 나이(v3.42.0). 스냅샷 목록에 **VM 이름 · 호스트 · 클러스터**가 들어갑니다(IP 는 없음). 라이선스 **키 값**과 스냅샷 **이름 · 설명**은 주지 않습니다 |
-| `backup` | 백업 현황 | medium | 법인(vCenter)별 백업 정책 · 최근 결과 · RPO 집계(v3.42.0). **VM 이름은 주지 않습니다** |
-| `resources` | 전력 · GPU | medium | 전체 소비 전력 합(서버 · 네트워크 · 스토리지)과 GPU 장착 호스트(v3.42.0). GPU 목록에 **호스트 이름 · 클러스터**가 들어갑니다(할당 VM 이름은 없음). 전력은 vCenter 범위로 나눌 수 없어 범위 지정 키는 403 `needs-full-scope` |
+| `objects` | 자원 목록 (이름 · IP) | **high** | 호스트 · VM · 네트워크 · 클러스터의 **개별 목록**(v3.43.0). **이름 · IP · 서비스태그 · 호스트 배치**가 들어가 민감도가 가장 높습니다 |
+| `compliance` | 점검 · 준수 | medium | vCenter 라이선스 만료와 VM 스냅샷 나이(v3.43.0). 스냅샷 목록에 **VM 이름 · 호스트 · 클러스터**가 들어갑니다(IP 는 없음). 라이선스 **키 값**과 스냅샷 **이름 · 설명**은 주지 않습니다 |
+| `backup` | 백업 현황 | medium | 법인(vCenter)별 백업 정책 · 최근 결과 · RPO 집계(v3.43.0). **VM 이름은 주지 않습니다** |
+| `resources` | 전력 · GPU | medium | 전체 소비 전력 합(서버 · 네트워크 · 스토리지)과 GPU 장착 호스트(v3.43.0). GPU 목록에 **호스트 이름 · 클러스터**가 들어갑니다(할당 VM 이름은 없음). 전력은 vCenter 범위로 나눌 수 없어 범위 지정 키는 403 `needs-full-scope` |
 
 > 포탈 자신의 상태(엣지 주소·내부 IP·버전)는 **공개하지 않습니다.**
 >
-> ⚠ v3.42.0 의 네 분류는 **기존 분류에 넣지 않고 새로 만들었습니다.** 기존 분류에 넣으면 이미 발급한 키(예: `capacity` 만 켠 키)가
+> ⚠ v3.43.0 의 네 분류는 **기존 분류에 넣지 않고 새로 만들었습니다.** 기존 분류에 넣으면 이미 발급한 키(예: `capacity` 만 켠 키)가
 > 관리자 조작 없이 호스트 · VM 이름 · IP 를 보게 되기 때문입니다. 쓰려면 관리자가 키마다 켜야 합니다.
 
 ---
@@ -193,7 +194,7 @@ ISO 문자열이 섞여 나오지 않습니다.
 | `storageCapacityGB` `storageUsedGB` | 데이터스토어 합계 — **사용량을 읽은 데이터스토어만**(v2.632: 내부 `/summary` 와 같은 기준. 사용량 미상 데이터스토어가 있으면 예전 값과 달라진다) |
 | `storageCapacityAllGB` | 사용량 미상 데이터스토어를 포함한 설치 용량(v2.632) |
 | `datastoresUsageUnknown` | 사용량을 읽지 못해 위 두 합계에서 뺀 데이터스토어 수(v2.632) |
-| `vmVcpu` `vmRamMB` `vmProvisionedGB` | `vmVcpu` · `vmRamMB` 는 VM 에 **할당된** 양(실제 사용량이 아닙니다). `vmProvisionedGB` 는 이름과 달리 VM 이 데이터스토어에서 **차지한** 용량(실수집 `summary.storage.committed` — thin 디스크는 프로비저닝 크기보다 작습니다)의 합이고, 그 값을 읽은 VM 만 더합니다(v2.727 · v3.42.0 문서 정정) |
+| `vmVcpu` `vmRamMB` `vmProvisionedGB` | `vmVcpu` · `vmRamMB` 는 VM 에 **할당된** 양(실제 사용량이 아닙니다). `vmProvisionedGB` 는 이름과 달리 VM 이 데이터스토어에서 **차지한** 용량(실수집 `summary.storage.committed` — thin 디스크는 프로비저닝 크기보다 작습니다)의 합이고, 그 값을 읽은 VM 만 더합니다(v2.727 · v3.43.0 문서 정정) |
 | `vmVcpuUnknown` `vmRamUnknown` | vCPU 수 · 메모리 크기를 읽지 못해 `vmVcpu` · `vmRamMB` 에서 뺀 VM 수(v3.20.1 — 0 으로 채우지 않습니다). 0 보다 크면 그 합은 **읽은 VM 만의 부분 합(최소값)** 이고, `vms` 와 같으면 하나도 읽지 못한 것이라 합 `0` 은 '할당 없음' 이 아니라 **모름**입니다 |
 | `vmStorageUnknown` | 스토리지 용량(`summary.storage.committed`)을 읽지 못해 `vmProvisionedGB` 에서 뺀 VM 수(v2.727 — 0 으로 채우지 않습니다) |
 
@@ -265,7 +266,7 @@ ISO 문자열이 섞여 나오지 않습니다.
 
 ### 7-3. `GET /inventory/collection` — 수집 상태
 
-> 첫 수집 중(포탈 재기동 직후)에도 503 이 아니라 답하는 vCenter 경로입니다(v3.42.0). **`firstCollectionDone: true` 가 되면 다른 vCenter 범위 경로가 열립니다** —
+> 첫 수집 중(포탈 재기동 직후)에도 503 이 아니라 답하는 vCenter 경로입니다(v3.43.0). **`firstCollectionDone: true` 가 되면 다른 vCenter 범위 경로가 열립니다** —
 > `pending` 이 0 이 되기를 기다리지 마세요. 첫 수집이 끝난 뒤에도 새로 등록했거나 엣지 보고를 기다리는 vCenter 는 pending 으로 남습니다
 > (그 vCenter 는 각 목록 경로의 `meta.pendingVcenters` 가 밝힙니다). 필드 목록에 `firstCollectionDone`(불리언)이 더해졌습니다.
 
@@ -500,7 +501,7 @@ ISO 문자열이 섞여 나오지 않습니다.
 
 ---
 
-### 7-11. `GET /objects/hosts` — ESXi 호스트 목록(v3.42.0)
+### 7-11. `GET /objects/hosts` — ESXi 호스트 목록(v3.43.0)
 
 분류 `objects` · 범위 적용 · 배열 · `?vcenterId=` 로 vCenter 하나만 고를 수 있습니다(키의 범위 밖이거나 없는 id 는 404 `unknown-vcenter`)
 
@@ -516,7 +517,7 @@ ISO 문자열이 섞여 나오지 않습니다.
 
 ---
 
-### 7-12. `GET /objects/vms` — VM 목록(v3.42.0, 쪽 나눔)
+### 7-12. `GET /objects/vms` — VM 목록(v3.43.0, 쪽 나눔)
 
 분류 `objects` · 범위 적용 · 배열 · `?vcenterId=` · **`?offset=` `?limit=`**(정수 · limit 1~5000 · **기본 1000**)
 
@@ -544,7 +545,7 @@ ISO 문자열이 섞여 나오지 않습니다.
 
 ---
 
-### 7-13. `GET /objects/networks` — 가상화 네트워크(포트그룹)(v3.42.0)
+### 7-13. `GET /objects/networks` — 가상화 네트워크(포트그룹)(v3.43.0)
 
 분류 `objects` · 범위 적용 · 배열 · `?vcenterId=`
 
@@ -554,7 +555,7 @@ ISO 문자열이 섞여 나오지 않습니다.
 
 ---
 
-### 7-14. `GET /objects/clusters` — 클러스터(v3.42.0)
+### 7-14. `GET /objects/clusters` — 클러스터(v3.43.0)
 
 분류 `objects` · 범위 적용 · 배열 · `?vcenterId=` · 특수 기능 '클러스터 HA·DRS 점검' 과 **같은 행**입니다
 
@@ -571,7 +572,7 @@ ISO 문자열이 섞여 나오지 않습니다.
 
 ---
 
-### 7-15. `GET /compliance/licenses` — vCenter 라이선스 만료(v3.42.0)
+### 7-15. `GET /compliance/licenses` — vCenter 라이선스 만료(v3.43.0)
 
 분류 `compliance` · 범위 적용 · 배열 · `?vcenterId=` · 특수 기능 '라이선스 만료일 확인' 과 **같은 판정 함수**(`corelicense/analyze.js vcenterLicenseRows`)
 
@@ -587,7 +588,7 @@ ISO 문자열이 섞여 나오지 않습니다.
 
 ---
 
-### 7-16. `GET /compliance/snapshots` — 스냅샷이 있는 VM(v3.42.0)
+### 7-16. `GET /compliance/snapshots` — 스냅샷이 있는 VM(v3.43.0)
 
 분류 `compliance` · 범위 적용 · 배열 · `?vcenterId=` · 특수 기능 '스냅샷 있는 VM' 과 **같은 판정**(`snaphist/view.js snapshotToolView` · 최대 20초 전 값 — 보류 · 기준 설정 변경은 그 안에 반영)
 
@@ -604,7 +605,7 @@ ISO 문자열이 섞여 나오지 않습니다.
 
 ---
 
-### 7-17. `GET /backup/summary` — 법인(vCenter)별 백업 집계(v3.42.0)
+### 7-17. `GET /backup/summary` — 법인(vCenter)별 백업 집계(v3.43.0)
 
 분류 `backup` · 범위 적용 · 배열 · `?vcenterId=` · Backup › Summary 의 법인 줄과 **같은 집계**(전원 전체 · 템플릿 · vCLS 제외 · 최대 60초 전 값)
 
@@ -626,7 +627,7 @@ VM 이름 · 잡 이름은 싣지 않습니다. `meta.marksUnreadable`(백업 �
 
 ---
 
-### 7-18. `GET /resources/power` — 전체 소비 전력 합(v3.42.0)
+### 7-18. `GET /resources/power` — 전체 소비 전력 합(v3.43.0)
 
 분류 `resources` · **범위 적용 안 함(범위 지정 키는 403 `needs-full-scope`)** · 단건 · Overview 카드 · '전체 소비 전력' 과 **같은 합**(최대 20초 전 값)
 
@@ -640,7 +641,7 @@ VM 이름 · 잡 이름은 싣지 않습니다. `meta.marksUnreadable`(백업 �
 
 ---
 
-### 7-19. `GET /resources/gpu` — GPU 장착 호스트(v3.42.0)
+### 7-19. `GET /resources/gpu` — GPU 장착 호스트(v3.43.0)
 
 분류 `resources` · 범위 적용 · 배열 · `?vcenterId=` · 'GPU 인벤토리' 화면과 **같은 행**
 
@@ -655,7 +656,7 @@ VM 이름 · 잡 이름은 싣지 않습니다. `meta.marksUnreadable`(백업 �
 
 키에 vCenter 범위를 지정하면:
 
-- **범위가 있는 자원**(인벤토리·데이터스토어·알람 · v3.42.0 의 자원 목록 · 라이선스 · 스냅샷 · 백업 · GPU) → 그 vCenter 것만 나오고
+- **범위가 있는 자원**(인벤토리·데이터스토어·알람 · v3.43.0 의 자원 목록 · 라이선스 · 스냅샷 · 백업 · GPU) → 그 vCenter 것만 나오고
   `meta.scopedToVcenters` 에 개수가 찍힙니다.
 - **범위가 없는 자원**(`/capacity/storage`·`/capacity/storage-growth`·`/faults/parts`·`/san-storage/*`·`/resources/power`) → **403 `needs-full-scope`**
 
@@ -672,10 +673,10 @@ VM 이름 · 잡 이름은 싣지 않습니다. `meta.marksUnreadable`(백업 �
 그래서 "할 수 없다" 고 말합니다. 포탈 내부 화면도 같은 이유로 같은 정책입니다.
 
 > ⚠ **키 범위의 vCenter id 오타** — 범위의 id 가 **전부** 등록돼 있지 않으면 403 `scope-empty`(v2.601) 이고,
-> **일부만** 없으면 200 + `meta.scopeUnknownVcenters`(없는 id 수) 입니다. (v3.42.0 정정: 이 절은 v2.601 이전의
+> **일부만** 없으면 200 + `meta.scopeUnknownVcenters`(없는 id 수) 입니다. (v3.43.0 정정: 이 절은 v2.601 이전의
 > '조용히 0건' 동작을 그대로 적고 있었습니다.) 연동 첫 호출에서 `GET /api/v1/inventory/vcenters` 로 **실제 id 를 확인**하세요.
 >
-> ⚠ **`?vcenterId=` 쿼리**(v3.42.0 목록 경로) — 키의 범위 밖 vCenter 와 없는 id 는 **같은 404 `unknown-vcenter`** 입니다
+> ⚠ **`?vcenterId=` 쿼리**(v3.43.0 목록 경로) — 키의 범위 밖 vCenter 와 없는 id 는 **같은 404 `unknown-vcenter`** 입니다
 > (응답이 글자까지 같아 범위 밖 vCenter 가 있는지 알 수 없게 했습니다).
 
 ---
@@ -694,9 +695,9 @@ VM 이름 · 잡 이름은 싣지 않습니다. `meta.marksUnreadable`(백업 �
 | 403 | `group-denied` | 그 경로의 분류가 이 키에 없음 | 관리자가 그 분류를 켜야 합니다 |
 | 403 | `needs-full-scope` | 범위로 나눌 수 없는 자원(§8) | 범위 없는 키를 쓰거나 그 경로를 포기 |
 | 403 | `scope-empty` | 키의 vCenter 범위가 전부 등록되지 않은(삭제된) vCenter 다(v2.601) — 일부만 없으면 200 + `meta.scopeUnknownVcenters` | 설정 › 연동 키에서 범위를 고친다 |
-| 400 | `bad-query` | 쿼리 인자 형식 오류(v3.42.0 — `offset` · `limit` 은 정수만, `vcenterId` 는 200자 이하의 값 하나). `field` 가 어느 인자인지 밝힙니다(`offset` · `limit` · `vcenterId`) | 인자를 고쳐 다시 |
+| 400 | `bad-query` | 쿼리 인자 형식 오류(v3.43.0 — `offset` · `limit` 은 정수만, `vcenterId` 는 200자 이하의 값 하나). `field` 가 어느 인자인지 밝힙니다(`offset` · `limit` · `vcenterId`) | 인자를 고쳐 다시 |
 | 404 | `unknown-endpoint` | 공개되지 않은 경로 | `GET /api/v1/` 로 목록 확인 |
-| 404 | `unknown-vcenter` | `?vcenterId` 가 키의 범위 밖이거나 없는 id(v3.42.0 — 둘을 구분하지 않습니다) | `GET /api/v1/inventory/vcenters` 로 id 확인 |
+| 404 | `unknown-vcenter` | `?vcenterId` 가 키의 범위 밖이거나 없는 id(v3.43.0 — 둘을 구분하지 않습니다) | `GET /api/v1/inventory/vcenters` 로 id 확인 |
 | 429 | `rate-limited` | 분당 상한 초과 | `Retry-After` 초 뒤 재시도 |
 | 503 | `not-collected` | 첫 수집 미완료 | **잠시 뒤 재시도**(장애가 아닙니다) |
 | 503 | `unavailable` | 그 기능 모듈을 불러올 수 없음 | 포탈 관리자에게 문의 |
@@ -709,7 +710,7 @@ VM 이름 · 잡 이름은 싣지 않습니다. `meta.marksUnreadable`(백업 �
   "reason": "X-Api-Key 헤더가 없습니다. 설정 › 연동 키에서 발급한 값을 넣으세요." }
 ```
 
-> ⚠ 같은 인자를 여러 번 주거나(`?vcenterId=a&vcenterId=b`) 객체 모양(`?limit[a]=1`)으로 주면 400 `bad-query` 입니다(v3.42.0) — 마지막 값 · 기본값으로 바꾸지 않습니다. 인자가 1,000개를 넘어 뒤쪽 인자가 해석되지 않은 경우도 400 입니다. 그 경로가 받지 않는 인자는 보지 않습니다.
+> ⚠ 같은 인자를 여러 번 주거나(`?vcenterId=a&vcenterId=b`) 객체 모양(`?limit[a]=1`)으로 주면 400 `bad-query` 입니다(v3.43.0) — 마지막 값 · 기본값으로 바꾸지 않습니다. 인자가 1,000개를 넘어 뒤쪽 인자가 해석되지 않은 경우도 400 입니다. 그 경로가 받지 않는 인자는 보지 않습니다.
 > ⚠ **`no-groups` 는 401 이 아니라 403 입니다.** 키 자체는 유효하고 인가가 비어 있는
 > 상태입니다 — 401 로 처리하면 멀쩡한 키를 재발급하게 됩니다.
 > ⚠ **404 는 경로 목록을 알려주지 않습니다**(열거 단서가 되므로). 목록은 카탈로그(`GET /api/v1/`)
@@ -799,7 +800,7 @@ const usedPct = sum.data.memTotalMB ? (sum.data.memUsedMB / sum.data.memTotalMB)
   빈 배열로만 확인했습니다.** 필드 계약은 테스트가 고정하지만, 실제 값이 들어찬 응답은
   운영 환경에서 처음 보게 됩니다.
 - **레이트리밋은 프로세스 재시작으로 초기화**됩니다(인메모리).
-- **v3.42.0 의 9개 경로도 목 데이터로만 확인했습니다**(범위 절단 · 쪽 나눔 · 내부 함수와의 행 수 대조 · 키 값 미노출은
+- **v3.43.0 의 9개 경로도 목 데이터로만 확인했습니다**(범위 절단 · 쪽 나눔 · 내부 함수와의 행 수 대조 · 키 값 미노출은
   `server/test/publicApi3420.test.js` 가 고정). 특히 `/backup/summary`(Veeam · Bareos 실연동)와 `/resources/power`(iDRAC · CVP ·
   스토리지 전력)는 목 데이터에 실측 원천이 거의 없어(전력은 측정 장비 0대 — 그래서 `totalWatts: null`) **실제 값이 들어찬 응답은 운영에서 처음 봅니다.**
 - 이 API 는 **지금은 읽기 전용입니다.** 쓰기(백업 실행 · 알람 음소거 등)는 사용자 결정(2026-11-26 '쓰기도 설계부터')에 따라

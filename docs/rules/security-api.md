@@ -206,7 +206,7 @@
     404·429·200 전 경로를 HTTP 로 돌렸고** 투사 계약·범위 403·내부 집계 대조(17항목)·평문
     미노출·Chromium 1440/400 을 실측했다. **실제 외부 포탈이 이 API 를 소비하는 것은 확인하지
     못했다** — 첫 연동에서 `GET /api/v1/` 카탈로그와 `openapi.json` 을 상대가 읽는지로 확인할 것.
-  - ⚠⚠ **v3.42.0 2차(경로 9개)의 규약 — 새 경로를 더할 때도 같다**(`test/publicApi3420.test.js`):
+  - ⚠⚠ **v3.42.0 2차(경로 9개 — 실제 릴리스 v3.43.0 · 코드 · 테스트 표지는 v3.42.0)의 규약 — 새 경로를 더할 때도 같다**(`test/publicApi3420.test.js`):
     ① **새 경로는 기존 분류에 넣지 않는다** — 넣으면 이미 발급한 키가 관리자 조작 없이 더 민감한 데이터(이름 · IP)를 본다. 새 분류를 만들어 키마다 켜게 한다.
     ② 행은 `routes/publicApiRows.js` 가 **내부 화면과 같은 판정 함수**로 만들고(라이선스 `vcenterLicenseRows` · 스냅샷 `snapshotToolView` · 백업 `backupSummaryRowsFor` ·
        전력 `powerTotal`+`powerSummaryOf` · GPU `buildGpuInventory` · 클러스터 `analyzeClusters`) 테스트가 행 수를 대조한다. 그 파일은 routes/ 안에 둔다(원천이 라우트 파일 — 의존 방향 ①).
