@@ -244,7 +244,8 @@ async function openInner() {
       insPortFirst: conn.prepare('INSERT OR IGNORE INTO port_firstseen (agent,cvp_id,device_key,port,first_day,seed) VALUES (?,?,?,?,?,?)'),
       selPortFirstOf: conn.prepare('SELECT port FROM port_firstseen WHERE agent=? AND cvp_id=? AND device_key=?'),
       upPortFirst: conn.prepare(`INSERT INTO port_firstseen (agent,cvp_id,device_key,port,first_day,seed) VALUES (?,?,?,?,?,?)
-        ON CONFLICT(agent,cvp_id,device_key,port) DO UPDATE SET first_day=MIN(port_firstseen.first_day, excluded.first_day), seed=MAX(port_firstseen.seed, excluded.seed)`),
+        ON CONFLICT(agent,cvp_id,device_key,port) DO UPDATE SET first_day=MIN(port_firstseen.first_day, excluded.first_day),
+          seed=CASE WHEN excluded.first_day < port_firstseen.first_day THEN excluded.seed WHEN excluded.first_day > port_firstseen.first_day THEN port_firstseen.seed ELSE MAX(port_firstseen.seed, excluded.seed) END`),
       delPortFirstGone: conn.prepare(`DELETE FROM port_firstseen WHERE agent=? AND cvp_id=? AND device_key=?
         AND port NOT IN (SELECT port FROM port_latest WHERE agent=? AND cvp_id=? AND device_key=?)`),
       upFlap: conn.prepare(`INSERT INTO port_flap_daily (agent,cvp_id,device_key,port,day,downs) VALUES (?,?,?,?,?,1)
@@ -794,9 +795,12 @@ function dailyMergeSql() {
  *   기록 시작 날 = 더 이른 날 · 플랩 = 합 · 포트 수 = 사용 최대는 큰 쪽(전체 · 마지막은 저장 키 쪽 — 최신 레코드) · GBIC 최저 = 작은 쪽 · 표본 수 = 합.
  */
 const nnMin = (t, c) => `${c}=CASE WHEN v.${c} IS NULL THEN ${t}.${c} WHEN ${t}.${c} IS NULL THEN v.${c} ELSE MIN(${t}.${c}, v.${c}) END`;
+const PF_SEED_MERGE = (t, v) => `CASE WHEN ${v}.first_day < ${t}.first_day THEN ${v}.seed WHEN ${v}.first_day > ${t}.first_day THEN ${t}.seed ELSE MAX(${t}.seed, ${v}.seed) END`;
 const NET_MERGE = {
   dev_linkhist: () => 'first_day=MIN(dev_linkhist.first_day, v.first_day)',
-  port_firstseen: () => 'first_day=MIN(port_firstseen.first_day, v.first_day), seed=MAX(port_firstseen.seed, v.seed)',   // 한쪽이라도 "업그레이드 전부터" 면 장비 기록 시작일을 따른다
+  // 처음 본 날은 이른 쪽 · seed 도 **이른 쪽 행의 값**(같은 날이면 MAX) — 수정 검토 V1: MAX 만 보면 모으기 도중 새 이름 첫 저장이 만든 seed 행(오늘)이
+  //   옛 이름의 seed 0 행(업그레이드 뒤 새로 단 포트 · 20일 전)을 seed 로 바꿔 거짓 'never' 후보를 냈다. SQLite 의 SET 식은 모두 갱신 전 값으로 계산한다.
+  port_firstseen: () => `first_day=MIN(port_firstseen.first_day, v.first_day), seed=${PF_SEED_MERGE('port_firstseen', 'v')}`,
   port_flap_daily: () => 'downs=port_flap_daily.downs+v.downs',
   dev_port_daily: () => 'used_max=MAX(dev_port_daily.used_max, v.used_max)',
   xcvr_daily: () => `${nnMin('xcvr_daily', 'rx_min')}, ${nnMin('xcvr_daily', 'tx_min')}, n=xcvr_daily.n+v.n`,

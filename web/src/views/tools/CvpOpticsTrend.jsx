@@ -76,7 +76,8 @@ export default function CvpOpticsTrendView({ part = 'trend', onOpen }) {
       <Tiles tiles={[
         ['장애 임계 이하', c.alreadyFault ?? 0, '', FORECAST_TONE.alreadyFault],
         ['주의 임계 이하', c.already ?? 0, '', FORECAST_TONE.already],
-        [`${horizonText(r.horizonDays)} 안 주의 도달`, c.eta ?? 0, '하강 추세', FORECAST_TONE.eta],
+        // 수정 검토 V3: 장애 임계만 있는 광모듈(target 'fault')은 장애 임계 도달로 센다 — 타일 이름은 '임계 도달'
+        [`${horizonText(r.horizonDays)} 안 임계 도달`, c.eta ?? 0, '하강 추세(장애 임계만 있는 광모듈은 장애 임계)', FORECAST_TONE.eta],
         ['안정', (c.flat ?? 0) + (c.far ?? 0), `내려가지 않거나 ${horizonText(r.horizonDays)} 넘게`, 'var(--text)'],
         ['기록 부족 · 끊김', (c.short ?? 0) + (c.stale ?? 0), `기록 부족 ${c.short ?? 0} · 최근 기록 끊김 ${c.stale ?? 0}`, 'var(--text-dim)'],
       ]} />
@@ -92,7 +93,7 @@ export default function CvpOpticsTrendView({ part = 'trend', onOpen }) {
                 <td data-sort={x.current ?? x.lastRx ?? ''} style={MONO}>{x.current == null && x.lastRx != null ? <span title="기록이 끊겨 지금 값이 아닙니다">{`마지막 ${dbmText(x.lastRx)}`}</span> : dbmText(x.current)}</td>
                 <td title={x.basis === 'device' ? `장비 임계 — 주의 ${dbmText(x.warnDbm)} · 장애 ${dbmText(x.faultDbm)}` : undefined}><Spark points={x.points} refLine={rowLow(x)} color={x.state === 'eta' || x.state.startsWith('already') ? '#fbbf24' : '#60a5fa'} title="일 최저 수신 광량" /></td>
                 <td data-sort={x.perMonth ?? ''} style={MONO}>{perMonthText(x.perMonth, ' dB')}{x.resetAt ? <span style={{ ...NOTE, marginLeft: 6 }}>({dateText(x.resetAt)}부터 다시)</span> : null}</td>
-                <td data-sort={x.state === 'alreadyFault' ? 0 : x.state === 'already' ? 1 : (x.warnEta ?? '')}><Pill color={FORECAST_TONE[x.state] || 'var(--text-dim)'}>{opticTrendText(x, { minDays: r.minDays, horizonDays: r.horizonDays })}</Pill></td>
+                <td data-sort={x.state === 'alreadyFault' ? 0 : x.state === 'already' ? 1 : ((x.target === 'fault' ? x.faultEta : x.warnEta) ?? '')}><Pill color={FORECAST_TONE[x.state] || 'var(--text-dim)'}>{opticTrendText(x, { minDays: r.minDays, horizonDays: r.horizonDays })}</Pill></td>
               </tr>
             ))}
           </tbody>

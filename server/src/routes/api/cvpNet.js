@@ -115,7 +115,7 @@ export function registerCvpNet(api) {
       if (err.unavailable || flap.unavailable) return { status: 503, body: DB_DOWN };
       const s = loadSettings();
       const devMap = new Map(b.devices.map((d) => [devKey(d.agent, d.cvpId, d.key), { parts: d.partsList }]));
-      const r = await rankLinksAsync({ ports: b.ports, devices: devMap, err: err.map, flap: flap.map, warnDbm: s.xcvrRxWarnDbm, faultDbm: s.xcvrRxFaultDbm, flapMin: FLAP_MIN_DEFAULT });
+      const r = await rankLinksAsync({ ports: b.ports, devices: devMap, err: err.map, flap: flap.map, warnDbm: s.xcvrRxWarnDbm, faultDbm: s.xcvrRxFaultDbm, flapMin: FLAP_MIN_DEFAULT }, { check: hx.check });
       const hosts = hostsOf();
       const corp = new Map(b.devices.map((d) => [devKey(d.agent, d.cvpId, d.key), d.corpName]));
       return { body: {
@@ -144,7 +144,7 @@ export function registerCvpNet(api) {
       const ll = await cdb.lastLinkAll();
       hx.check();
       if (ll.unavailable) return { status: 503, body: DB_DOWN };
-      const r = await reclaimCandidatesAsync({ ports: b.ports, last: ll.last, first: ll.first, portFirst: ll.portFirst, idleDays: idle });
+      const r = await reclaimCandidatesAsync({ ports: b.ports, last: ll.last, first: ll.first, portFirst: ll.portFirst, idleDays: idle }, { check: hx.check });
       const hosts = hostsOf();
       const corp = new Map(b.devices.map((d) => [devKey(d.agent, d.cvpId, d.key), d.corpName]));
       return { body: { idle, choices: IDLE_CHOICES, rows: r.rows.map((x) => ({ ...x, corpName: corp.get(devKey(x.agent, x.cvpId, x.key)) || '', desc: admin ? x.desc : maskErrText(x.desc, hosts) })),

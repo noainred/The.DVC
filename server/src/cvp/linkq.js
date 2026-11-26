@@ -55,9 +55,10 @@ export function rankLinks(opts = {}) {
   return r.value;
 }
 /** 요청 경로용 — 포트마다 시간 기준 양보(5회차 A4 관찰: 1,500대 · 오류 포트 수천에서 한 덩어리 35~140ms). 결과는 rankLinks 와 같다. */
-export async function rankLinksAsync(opts = {}) {
+export async function rankLinksAsync(opts = {}, { check = null } = {}) {
   const y = createYielder(15); const g = rankGen(opts); let r;
-  while (!(r = g.next()).done) await y();
+  // 수정 검토(미확인 → 반영): 기다리는 요청이 없으면 멈춘다(heavyGate ctx.check — 버려진 계산이 끝까지 돌지 않게)
+  while (!(r = g.next()).done) { await y(); if (check) check(); }
   return r.value;
 }
 function* rankGen({ ports = [], devices = new Map(), err = new Map(), flap = new Map(), warnDbm = -10, faultDbm = -14, flapMin = FLAP_MIN_DEFAULT } = {}) {

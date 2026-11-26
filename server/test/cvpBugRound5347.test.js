@@ -168,3 +168,49 @@ test('⑤ 링크 품질 · 회수 판정 — 요청 경로는 양보판(결과�
   assert.match(route, /await rankLinksAsync\(\{ ports: b\.ports,/);
   assert.match(route, /await reclaimCandidatesAsync\(\{ ports: b\.ports,/);
 });
+
+/* ── 5회차 수정 검토(반증 1인) V1~V7 ─────────────────────────────────────────────────────────────────────── */
+test('⑥ 수정 검토 — seed 합치기 · 설명 포트 표기 · 과잉 가림 · 임계 범위 · 확인 지점 · 데모', async () => {
+  // V2: 'Eth1' 은 'Et1' 과 같고, 포트 채널 · VLAN 언급은 상대 포트가 아니다
+  const D = (key, hostname) => ({ agent: '', cvpId: 'c1', key, hostname });
+  const Pt = (key, port, desc) => ({ agent: '', cvpId: 'c1', key, port, oper: 'up', desc });
+  const run = (da, db) => TP.buildTopology({ devices: [D('A', 'leaf1'), D('B', 'spine1')], lldp: [], ports: [Pt('A', 'Ethernet49', da), Pt('B', 'Ethernet1', db)] }).links.length;
+  assert.equal(run('spine1-Eth1', 'leaf1-Eth49'), 1);
+  assert.equal(run('spine1 Po10 member', 'leaf1 Po10 member'), 1);
+  assert.equal(run('spine1 vlan100 trunk', 'leaf1'), 1);
+  assert.equal(run('spine1:Ethernet2', 'leaf1'), 2, '대조: 다른 물리 포트가 적혀 있으면 합치지 않는다');
+  assert.equal(run('spine1-Eth2', 'leaf1'), 2, "'Eth2' 도 물리 포트 — 짝(Ethernet1)과 다르면 합치지 않는다");
+  // V5: 십진수만인 4-4-4 · 한 자리 마디 십진 콜론은 MAC 이 아니다
+  const C = await import('../src/routes/api/cvp.js');
+  for (const v of ['1588-1234-5678', '2026-1126-0930', 'slot 1:1:1:1:1:1']) assert.equal(C.maskMacText(v), v, v);
+  for (const v of ['dc01-a001-b002', '0050-56aa-bb01', '00:00:00:00:00:01']) assert.match(C.maskMacText(v), /MAC 가림/, v);
+  // V6: 실시간 낮은 쪽 판정은 추세 · 링크 품질과 같은 함수(범위 밖 임계는 버리고 포탈로)
+  const x = P.xcvrDom({ rxPower: -11, rxPowerLowWarn: 16, rxPowerLowAlarm: -12 });
+  assert.equal(x.rxHigh, 'ok', '높은 쪽 임계가 없으면 높은 쪽은 정상');
+  const j = (dj, rx) => P.judgeOptics([{ kind: 'xcvr', name: 'Ethernet1', state: 'ok', dom: { rxPower: rx }, domJudge: dj }], [{ name: 'Ethernet1', oper: 'up' }], { warnDbm: -10, faultDbm: -14 })[0].optic;
+  assert.deepEqual([j({ rxHigh: null, rxLow: { warnDbm: null, faultDbm: -12 } }, -11).rxState, OT.rxLimitsOf({ devFaultDbm: -12 }).warnDbm], ['ok', null], '주의 없음 · 장애 -12 — -11 은 정상(추세와 같다)');
+  assert.equal(j({ rxHigh: 'warn', rxLow: { warnDbm: -16, faultDbm: -20 } }, 3).rxState, 'warn', '높은 쪽 장비 임계는 그대로');
+  assert.match(src('../src/cvp/parse.js'), /const lim = rxLimitsOf\(p\.domJudge\?\.rxLow \?/);
+  // 확인 지점: 기다리는 요청이 없으면 양보판이 멈춘다
+  const ports = Array.from({ length: 5000 }, (_, i) => ({ agent: '', cvpId: 'c', key: 'k', port: `Ethernet${i}`, oper: 'down', hostname: 'k' }));
+  let n = 0; const stop = () => { if (++n > 0) throw Object.assign(new Error('멈춤'), { code: 'HEAVY_ABANDONED' }); };
+  const slow = { first: new Map([['\u0000c\u0000k', NOW - 200 * DAY]]), now: NOW, ports };
+  await assert.rejects(PP.reclaimCandidatesAsync(slow, { check: stop }), /멈춤/);
+  await assert.rejects(LQ.rankLinksAsync({ ports: ports.map((p) => ({ ...p, oper: 'up' })) }, { check: stop }), /멈춤/);
+  assert.equal((await PP.reclaimCandidatesAsync(slow)).counts.down, 5000, '대조: 확인 함수가 없으면 끝까지');
+  assert.match(src('../src/routes/api/cvpNet.js'), /portFirst: ll\.portFirst, idleDays: idle \}, \{ check: hx\.check \}\)/);
+  // V4 · V7: 업링크 설명에도 남의 MAC 가림 · 데모의 '20일 전에 단 포트' 에 이른 링크 날 없음(소스)
+  assert.match(src('../src/routes/api/hostSan.js'), /desc: admin \? \(u\.desc \?\? ''\) : mkS\(u\.desc \?\? ''\)/);
+  assert.match(src('../src/mock/demo/cvp.js'), /if \(young\) return;/);
+  // V1: 모으기 — seed 는 이른 쪽 행의 값(옛 이름의 seed 0 · 20일 전 행이 새 이름 seed 행(오늘)에 덮이지 않는다)
+  if (!(await cdb.available())) return;
+  const { dayIndex } = await import('../src/util/dayKey.js');
+  const pt = (name, oper) => ({ name, oper, admin: 'up', desc: '' });
+  await cdb.saveDevices({ agent: 'Edge-W', cvpId: 'm5w', devices: [{ key: 'W', ts: NOW - 20 * DAY, hostname: 'w', ports: [pt('Ethernet9', 'down')] }] });
+  await cdb.importNetHistory('edge-w', { portFirst: [['m5w', 'W', 'Ethernet9', dayIndex(NOW), 1]] });
+  await cdb.adoptAgentVariants('edge-w', { wait: true });
+  const { DatabaseSync } = await import('node:sqlite');
+  const raw = new DatabaseSync(path.join(tmp, 'cvp.db'));
+  assert.deepEqual(raw.prepare("SELECT agent, first_day, seed FROM port_firstseen WHERE cvp_id='m5w'").all().map((r) => [r.agent, dayIndex(NOW) - Number(r.first_day), Number(r.seed)]), [['edge-w', 20, 0]]);
+  raw.close();
+});

@@ -368,7 +368,8 @@ export function registerHostSan(api) {
     if (!admin) events = events.map((e) => ({ ...e, title: mk(e.title), desc: mk(e.desc) }));
     res.set('Cache-Control', 'no-store').json({
       ok: true, host: { id: h.id, name: h.name, vcenterId: h.vcenterId },
-      uplinks: m.uplinks.map((u) => ({ cvpId: u.cvpId, agent: u.agent, key: u.key, hostname: u.hostname, port: u.port, desc: mk(u.desc ?? ''), nic: u.nic, basis: u.basis, basisLabel: BASIS_LABEL[u.basis] || null,
+      // v3.47(5회차 수정 검토 V4): 포트 설명(desc)에도 남의 MAC 가림(mkS) — 근거(evidence)만 가리면 같은 행 설명에 그 MAC 이 원문으로 남았다
+      uplinks: m.uplinks.map((u) => ({ cvpId: u.cvpId, agent: u.agent, key: u.key, hostname: u.hostname, port: u.port, desc: admin ? (u.desc ?? '') : mkS(u.desc ?? ''), nic: u.nic, basis: u.basis, basisLabel: BASIS_LABEL[u.basis] || null,
         evidence: mkEv(u.evidence || null), l2At: u.l2At ?? null, also: (u.also || []).slice(0, 4).map((x) => ({ basis: x.basis, label: BASIS_LABEL[x.basis]?.label || '', evidence: mkEv(x.evidence || null) })),
         oper: u.oper, admin: u.admin, speedBps: u.speedBps, vlan: u.vlan, lag: u.lag, inBps: u.inBps, outBps: u.outBps, inUtil: u.inUtil, outUtil: u.outUtil, inErr: u.inErr, outErr: u.outErr,
         inDrop: u.inDrop ?? null, outDrop: u.outDrop ?? null, day: dayOf(u), hour: hourOf(u), rateTs: u.rateTs, ts: u.ts })),

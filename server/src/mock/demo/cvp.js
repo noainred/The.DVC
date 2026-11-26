@@ -516,8 +516,10 @@ async function demoNetHistory(servers, db, P, optics, now) {
       ports.forEach((p, k) => {
         // v3.47(D-5 · 5회차 A2-F2): 포트 처음 본 날 — 대부분은 '기록 시작 전부터 있던 포트'(seed — 장비 기록 시작일 300일 전을 따른다),
         //   일부(아홉째마다)는 20일 전에 단 포트(링크 기록이 없으면 '아직 판단 못 함'). 예전 시드는 장비 레코드를 먼저 적어 모든 포트가 3일 전이 됐다.
-        if (!/^management/i.test(p.name)) portFirst.push(k % 9 === 4 ? [srv.id, sw.key, p.name, today - 20, 0] : [srv.id, sw.key, p.name, today - 300, 1]);
+        const young = k % 9 === 4;
+        if (!/^management/i.test(p.name)) portFirst.push(young ? [srv.id, sw.key, p.name, today - 20, 0] : [srv.id, sw.key, p.name, today - 300, 1]);
         if (p.oper === 'up') { lastLink.push([srv.id, sw.key, p.name, today]); return; }
+        if (young) return;   // 수정 검토 V7: 20일 전에 단 포트에 그보다 이른 마지막 링크 날을 주지 않는다
         const r = demoHash(`ll|${sw.key}|${p.name}`) % 4;
         if (r === 0) lastLink.push([srv.id, sw.key, p.name, today - 200 - (k % 60)]);
         else if (r === 1) lastLink.push([srv.id, sw.key, p.name, today - 40 - (k % 20)]);

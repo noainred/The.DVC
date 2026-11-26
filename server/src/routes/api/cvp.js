@@ -232,9 +232,18 @@ export function maskErrText(v, hosts = []) {
  */
 // 5회차 A3(추정 → 반영): 4-4-4 하이픈(화웨이 · H3C · HPE Comware) · 콜론의 앞자리 0 생략(0:50:56:a:bb:cc)도 MAC 이다. 하이픈 2자리 표기는 앞자리 생략을 받지 않는다(판 번호 '4-27-4-1-2-3' 류를 가리지 않게).
 const MAC_TOKEN = /(?<![0-9a-f][:.-])\b(?:(?:[0-9a-f]{1,2}:){5}[0-9a-f]{1,2}|(?:[0-9a-f]{2}-){5}[0-9a-f]{2}|(?:[0-9a-f]{4}\.){2}[0-9a-f]{4}|(?:[0-9a-f]{4}-){2}[0-9a-f]{4}|[0-9a-f]{12})\b(?![:.-][0-9a-f])/gi;   // 앞뒤로 마디가 더 붙은 것(8바이트 WWN 등)은 MAC 이 아니다
+/**
+ * 수정 검토 V5: 새 표기(4-4-4 하이픈 · 콜론 앞자리 생략)는 MAC 아닌 값과 겹친다 — 십진수만인 4-4-4('1588-1234-5678' 전화 · 날짜 꼴)와
+ *   십진수만이면서 한 자리 마디가 있는 콜론 표기('1:1:1:1:1:1' 슬롯 경로)는 MAC 으로 보지 않는다. 16진 글자가 섞인 4-4-4('dc01-a001-b002')는 MAC 과 구별할 수 없어 가린다(가리는 쪽).
+ */
+function looksMac(m) {
+  if (/^\d{4}-\d{4}-\d{4}$/.test(m)) return false;
+  if (/^[\d:]+$/.test(m) && m.includes(':') && m.split(':').some((x) => x.length === 1)) return false;
+  return true;
+}
 export function maskMacText(v) {
   if (typeof v !== 'string' || !v) return v;
-  return v.slice(0, 4000).replace(MAC_TOKEN, '(MAC 가림)');
+  return v.slice(0, 4000).replace(MAC_TOKEN, (m) => (looksMac(m) ? '(MAC 가림)' : m));
 }
 /**
  * 5회차 A3-F1 · F2: LLDP 에서 온 글자(시스템 이름 · 포트 ID · 포트 설명)는 **주소 가림 + MAC 가림** 둘 다 — 화면마다 따로 걸어 포트 구성도 · 토폴로지는 IP 모양 포트 ID 를,
@@ -248,6 +257,7 @@ export function maskLldpText(v, hosts = []) {
 export function maskForeignMacs(v, own = new Set()) {
   if (typeof v !== 'string' || !v) return v;
   return v.slice(0, 4000).replace(MAC_TOKEN, (m) => {
+    if (!looksMac(m)) return m;
     const parts = m.toLowerCase().split(/[:.-]/);
     const hex = parts.length === 6 ? parts.map((x) => x.padStart(2, '0')).join('') : parts.join('');
     return own.has(hex) ? m : '(MAC 가림)';

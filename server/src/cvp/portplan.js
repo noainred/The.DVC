@@ -26,9 +26,10 @@ export function reclaimCandidates(opts = {}) {
   return r.value;
 }
 /** 요청 경로용 — 포트마다 시간 기준 양보(5회차 A4 관찰: 1,500대에서 한 덩어리 87~98ms). 결과는 reclaimCandidates 와 같다. */
-export async function reclaimCandidatesAsync(opts = {}) {
+export async function reclaimCandidatesAsync(opts = {}, { check = null } = {}) {
   const y = createYielder(15); const g = reclaimGen(opts); let r;
-  while (!(r = g.next()).done) await y();
+  // 수정 검토(미확인 → 반영): 기다리는 요청이 없으면 멈춘다(heavyGate ctx.check — 버려진 계산이 끝까지 돌지 않게)
+  while (!(r = g.next()).done) { await y(); if (check) check(); }
   return r.value;
 }
 function* reclaimGen({ ports = [], last = new Map(), first = new Map(), portFirst = null, idleDays = 90, now = Date.now() } = {}) {

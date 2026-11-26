@@ -200,8 +200,11 @@ export function compareEnds(pa, pb, { aName = '', bName = '', isSwitch = null } 
  *   자기 포트 이름은 상대 포트로 보지 않는다('leaf1:Et49 <-> spine1:Et1').
  */
 function mergeDescPairs(links, portRow = new Map()) {
-  const otherPorts = (id, ownPort) => descPortsOf(portRow.get(`${id}\u0000${ownPort}`)?.desc).map(normPort).filter((x) => x !== ownPort);
-  const agrees = (id, ownPort, peerPort) => { const m = otherPorts(id, ownPort); return !m.length || m.includes(peerPort); };
+  // 수정 검토 V2: 대조는 물리 포트 이름만(포트 채널 · VLAN · 서버 NIC 은 '상대 포트' 가 아니다) · 'Eth1' 은 'Et1' 과 같다
+  const nz = (x) => normPort(x).replace(/^eth(?=\d)/, 'et');
+  const PHYS = /^(?:et|gi|te|fa|hu)\d/;
+  const otherPorts = (id, ownPort) => descPortsOf(portRow.get(`${id}\u0000${ownPort}`)?.desc).map(nz).filter((x) => PHYS.test(x) && x !== nz(ownPort));
+  const agrees = (id, ownPort, peerPort) => { const m = otherPorts(id, ownPort); return !m.length || m.includes(nz(peerPort)); };
   const byPair = new Map();   // 'x\u0002y'(x < y) → { xy:[키], yx:[키] }
   for (const [k, l] of links) {
     if (l.kind !== 'desc') continue;
