@@ -1,5 +1,6 @@
 import React from 'react';
 import Select from '../../components/Select.jsx';
+import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { sparkPath } from './cvpNetText.js';
 
 /**
@@ -10,6 +11,16 @@ export const NOTE = { fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.6 };
 export const MONO = { fontFamily: 'var(--mono)' };
 export const ROW = { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' };
 export const GRID1 = { display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 14, minWidth: 0 };
+
+/** v3.42(버그 점검 1회차 D14): 응답 전 · 오류 — 새로고침 줄은 남긴다(오류 상자가 조작 줄까지 대신하면 다시 시도하려고 보기를 오가야 했다). */
+export function Pending({ err, onRetry }) {
+  return (
+    <div style={GRID1}>
+      <div style={ROW}><button type="button" className="btn" onClick={onRetry}>새로고침</button></div>
+      {err ? <ErrorBox error={err} /> : <Loading />}
+    </div>
+  );
+}
 export const LINKBTN = { background: 'none', border: 0, padding: 0, color: 'var(--accent-2)', cursor: 'pointer', fontFamily: 'var(--mono)', fontWeight: 600, textAlign: 'left' };
 
 export function Seg({ items, value, onChange, label }) {
@@ -61,7 +72,7 @@ export function Spark({ points, w = 120, h = 28, color = '#60a5fa', min = null, 
 export function CvpSelect({ servers = [], value, onChange }) {
   if (!Array.isArray(servers) || servers.length < 2) return null;
   return (
-    <Select className="input" value={value} onChange={(e) => onChange(e.target.value)} style={{ maxWidth: 220 }}>
+    <Select className="input" value={value} onChange={(e) => onChange(e.target.value)} aria-label="CVP 서버" style={{ maxWidth: 220 }}>
       <option value="">모든 CVP</option>
       {servers.map((s) => <option key={s.id} value={String(s.id)}>{s.name || s.id}</option>)}
     </Select>

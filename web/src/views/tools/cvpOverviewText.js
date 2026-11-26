@@ -81,7 +81,7 @@ export function overviewKpis(ov) {
       sub: `경고 ${countText(ev.warning)}${ev.truncated ? ' · 최근 2,000건만 셌습니다' : ''}`, go: 'events' },
     { key: 'eol', label: '지원 종료 지남', value: n(t.lifecycleRead) > 0 ? countText(t.swEolPassed) : '—', unit: n(t.lifecycleRead) > 0 ? '대' : '',
       tone: tone(t.swEolPassed, 'warn'),
-      sub: n(t.lifecycleRead) > 0 ? `수명주기 정보를 읽은 ${countText(t.lifecycleRead)}대 기준(EOS 지원 종료)` : '수명주기 정보를 읽은 장비가 없습니다 — 지원 상태를 지어내지 않습니다', go: 'models' },
+      sub: n(t.lifecycleRead) > 0 ? `수명주기 정보를 읽은 ${countText(t.lifecycleRead)}대 기준(소프트웨어 · 하드웨어 지원 종료 중 이른 날 — 버전 준수 화면과 같은 기준)` : '수명주기 정보를 읽은 장비가 없습니다 — 지원 상태를 지어내지 않습니다', go: 'models' },
   ];
 }
 

@@ -230,6 +230,8 @@ export function demoInventory(server, p, now = Date.now(), { watts = null } = {}
       model: boss ? 'MTFDDAV480TDS' : 'KPM6XRUG3T84', serial: `S${String(demoHash(`d${i}|${id}`)).slice(0, 9)}`,
       capacityGB: boss ? 480 : 3840, media: 'SSD', protocol: boss ? 'SATA' : 'SAS',
       health: pf ? 'Warning' : 'OK', state: 'Enabled', predictiveFailure: !!pf, rpm: null,
+      // v3.51 부품 수명(⑧) 데모 — 키로 정해지는 합성 값(실장비 값이 아니다). 몇 서버는 한 SSD 만 빨리 닳게(같은 모델 대비 비교를 화면에서 볼 수 있게)
+      lifeLeftPct: Math.max(1, 98 - (demoHash(`life${i}|${id}`) % 9) - (i === diskN - 2 && demoHash(`fast|${id}`) % 4 === 0 ? 55 : 0)),
     };
   });
   const dimmGB = 64;

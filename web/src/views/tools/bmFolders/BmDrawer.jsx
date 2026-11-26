@@ -10,7 +10,7 @@
  * ⚠ 훅은 전부 조기 return 위(React #310 사고 규약).
  */
 import React, { useEffect, useRef, useState } from 'react';
-import { fetchJson } from '../../../api.js';
+import { fetchJson, postJson } from '../../../api.js';
 import Select from '../../../components/Select.jsx';
 import EscClose from '../../../components/EscClose.jsx';
 import { StatusDot, SrcBadge, SrcChip, WhyTip } from './parts.jsx';
@@ -18,6 +18,11 @@ import { pathText, opErrorText, ageText } from '../bmFoldersText.js';
 import { SRC_COLOR } from './usageSrc.js';
 import { osText, hwWhyText, OS_WHY } from './hwText.js';
 import { IdracConnect } from './IdracConnect.jsx';
+import { WarrantySection, FwBiosSections } from './CheckSections.jsx';   // v3.45 물리서버 점검(보증 · 펌웨어 기준선 · BIOS 편차)
+import { PeerSection } from './PeerSection.jsx';   // v3.48 같은 묶음 대비
+import { HealthSection, HwLogSection, CaseSection, AdvisorySection, LifeSection } from './OpsSections.jsx';   // v3.50 건강 점수 · 이벤트 로그 · 케이스 · 보안 권고 · v3.51 부품 수명
+import { ledText, LED_NOTE } from './opsText.js';
+import { useBoxWidth } from './useBoxWidth.js';
 import { unitText } from '../../unitText.js';
 import { usageTone, TONE_COLOR, TONE_TEXT } from '../../vms/vmHubText.js';
 import {
@@ -44,10 +49,11 @@ const VIA_TEXT = { edge: '엣지 요약', remote: '수집 서버' };
 
 /**
  * 서버 한 대에 딸린 조회 1건 — 키가 바뀌면 다시 묻되, 넘기는 동안은 잠깐 기다린다. 응답은 물은 키에만 넣는다(늦게 온 이전 응답 버림).
- * @returns {{ d: object|null, err: string }} d 가 null 이고 err 가 '' 이면 읽는 중
+ * @returns {{ d: object|null, err: string, stale: boolean }} d 가 null 이고 err 가 '' 이면 읽는 중 ·
+ *   stale = 같은 서버인데 묻는 값(params — 목록 세대 등)이 바뀌어 다시 묻는 중(d 는 이전 값 — 쓰는 쪽이 보일지 정한다. 반증 B3)
  */
 function useOnce(path, key, params, enabled) {
-  const [st, setSt] = useState({ key: '', d: null, err: '' });
+  const [st, setSt] = useState({ key: '', sig: '', d: null, err: '' });
   const first = useRef(true);
   const sig = JSON.stringify(params || {});
   useEffect(() => {
@@ -57,28 +63,12 @@ function useOnce(path, key, params, enabled) {
     first.current = false;
     const t = setTimeout(() => {
       fetchJson(path, { key, ...JSON.parse(sig) })
-        .then((x) => { if (alive) setSt({ key, d: x, err: '' }); })
-        .catch((e) => { if (alive) setSt({ key, d: null, err: opErrorText(e) }); });
+        .then((x) => { if (alive) setSt({ key, sig, d: x, err: '' }); })
+        .catch((e) => { if (alive) setSt({ key, sig, d: null, err: opErrorText(e) }); });
     }, delay);
     return () => { alive = false; clearTimeout(t); };
   }, [path, key, sig, enabled]);
-  return st.key === key ? st : { key, d: null, err: '' };
-}
-
-/** 그림 폭 = 그 칸의 실제 폭(글자를 늘이거나 줄이지 않게). 재기 전 · 서버 렌더는 기본값. */
-function useBoxWidth(ref, fallback) {
-  const [w, setW] = useState(fallback);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return undefined;
-    const read = () => { const n = Math.floor(el.clientWidth); if (n > 0) setW(n); };
-    read();
-    if (typeof ResizeObserver !== 'function') return undefined;
-    const ro = new ResizeObserver(read);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [ref]);
-  return w;
+  return st.key === key ? { ...st, stale: st.sig !== sig } : { key, d: null, err: '', stale: false };
 }
 
 /** 드로어 위에 모달(포탈 공용 Modal — 웹 SSH 창)이 떠 있는가. 그동안 드로어는 키 · 포커스를 가져가지 않는다. */
@@ -88,7 +78,7 @@ const modalAbove = () => typeof document !== 'undefined' && !!document.querySele
  * @param note  호출부의 쓰기 결과 알림({ ok, warn, text }) — 호출부는 본문 위 카드에 그리는데 그 자리는 가림막 뒤다(좁은 화면은 화면 밖).
  *              드로어가 열린 뒤 · 서버를 넘긴 뒤에 **새로 온 것만** 단추 줄 아래에 보인다(반증 A6 — 실패가 드로어 안에서 보이지 않았다).
  */
-export default function BmDrawer({ r, rows, corps, corpName, scoped, op, busy, onClose, onMove, note = null }) {
+export default function BmDrawer({ r, rows, corps, corpName, scoped, op, busy, onClose, onMove, note = null, admin = false, gen = '', onChanged = null, healthRules = null }) {
   const rootRef = useRef(null);
   const backRef = useRef(null);
   const bodyRef = useRef(null);
@@ -103,6 +93,15 @@ export default function BmDrawer({ r, rows, corps, corpName, scoped, op, busy, o
   const isBm = r?.kind === 'bm';
   const hw = useOnce('/tools/bm-folders/hw', r?.key || '', null, !!r && isBm);
   const trend = useOnce('/tools/bm-folders/trend', r?.key || '', { hours: 24 }, !!r && isBm);
+  // v3.45 물리서버 점검(보증 · 펌웨어 기준선 · BIOS 편차) — 열 때 1건. 보증은 ESXi 행에도 있다(같은 물리 박스). 기준을 지정하면 n 을 올려 다시 묻는다
+  const [chkRev, setChkRev] = useState(0);
+  const [baseBusy, setBaseBusy] = useState(false);
+  const [baseNote, setBaseNote] = useState(null);   // { key(서버), ok, text } — 그 서버의 결과만 보인다
+  //   g = 목록의 세대(호출부가 준다) — 드로어에서 폴더에 넣기 · 빼기를 하면 목록이 다시 읽히고, 그때 점검도 다시 묻는다
+  //   (반증 B1: 폴더에 넣은 뒤에도 BIOS 구역이 ‘미분류 — 판정 안 함’ 그대로였다. 묶음은 배치로 정해진다).
+  const chk = useOnce('/tools/bm-folders/check', r?.key || '', { n: chkRev, g: gen }, !!r);
+  // v3.48 같은 묶음 대비 — 열 때 1건(베어메탈 행만). 묶음은 배치(폴더)로 정해지므로 목록 세대가 바뀌면 다시 묻는다(점검과 같은 이유)
+  const peer = useOnce('/tools/bm-folders/peer', r?.key || '', { g: gen }, !!r && isBm);
   // 열 때 포커스를 드로어로(키보드 ↑↓ · Esc) · 닫을 때 원래 자리로
   useEffect(() => {
     backRef.current = typeof document !== 'undefined' ? document.activeElement : null;
@@ -136,6 +135,21 @@ export default function BmDrawer({ r, rows, corps, corpName, scoped, op, busy, o
   const addr = hw.d?.addr || r.addr || '';
   const opNote = freshNote(note, seen.current.note);
   const move = (x) => { if (x) onMove(x.key); };
+  // 펌웨어 기준 지정 · 해제 — 전 법인의 같은 모델에 적용되는 값이다(서버가 조회 ∧ 쓰기 전체 범위 관리자만 받는다). 성공하면 점검을 다시 묻는다
+  const onBaseline = async (row, version) => {
+    const model = chk.d?.model || '';
+    if (!model || !row?.key) return;
+    setBaseBusy(true); setBaseNote(null);
+    try {
+      const x = await postJson('/admin/bm-fw-baseline', { model, key: row.key, label: row.label, type: row.type, version });
+      if (!x || x.ok === false) throw new Error(x?.reason || '요청을 처리하지 못했습니다.');
+      setBaseNote({ key: r.key, ok: true, text: version ? `‘${row.label}’ 기준을 ${version} 로 지정했습니다(모델 ${model}).` : `‘${row.label}’ 기준 지정을 해제했습니다 — 다수 버전으로 다시 대조합니다.` });
+      setChkRev((n) => n + 1);
+      // 기준은 전 법인의 같은 모델에 걸린다 — 목록(칩 · 머리 배지 · 신호가 쓰는 행 값)도 다시 읽는다(반증 B2: 구역은 ‘뒤처진 것 없음’ 인데 머리 배지는 ‘펌웨어 뒤처짐 1’ 이었다)
+      try { onChanged?.(); } catch { /* 목록 다시 읽기 실패는 호출부가 알린다 */ }
+    } catch (e) { setBaseNote({ key: r.key, ok: false, text: opErrorText(e) }); }
+    finally { setBaseBusy(false); }
+  };
   const onKey = (e) => {
     if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
     if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
@@ -208,7 +222,12 @@ export default function BmDrawer({ r, rows, corps, corpName, scoped, op, busy, o
         {opNote ? <div className={`bmd-opnote${opNote.ok && !opNote.warn ? ' ok' : ' bad'}`} role={opNote.ok ? 'status' : 'alert'}>{opNote.text}</div> : null}
 
         <div className="vmh-db bmd-db" ref={bodyRef}>
-          <DrawerSections r={r} hw={hw} trend={trend} corpName={corpName} scoped={scoped} onClose={onClose} />
+          <DrawerSections r={r} hw={hw} trend={trend} corpName={corpName} scoped={scoped} onClose={onClose}
+            afterTrend={<PeerSection r={r} peer={peer} />}
+            afterGlance={<HealthSection r={r} rules={healthRules} />}
+            afterEnd={<><HwLogSection key={`hl:${r.key}`} r={r} /><CaseSection key={`cs:${r.key}`} r={r} /></>}
+            afterIdent={<WarrantySection chk={chk} admin={admin && !scoped} />}
+            afterSpec={<><FwBiosSections r={r} chk={chk} onBaseline={onBaseline} busy={baseBusy} baseNote={baseNote && baseNote.key === r.key ? baseNote : null} /><AdvisorySection r={r} chk={chk} /><LifeSection r={r} hw={hw} /></>} />
         </div>
 
         <nav className="vmh-df" aria-label="바로가기">
@@ -229,7 +248,7 @@ export default function BmDrawer({ r, rows, corps, corpName, scoped, op, busy, o
  * @param hw     { d, err } — /tools/bm-folders/hw(읽는 중이면 d null · err '')
  * @param trend  { d, err } — /tools/bm-folders/trend
  */
-export function DrawerSections({ r, hw, trend, corpName, scoped, onClose, now }) {
+export function DrawerSections({ r, hw, trend, corpName, scoped, onClose, now, afterTrend = null, afterIdent = null, afterSpec = null, afterGlance = null, afterEnd = null }) {
   const isBm = r.kind === 'bm';
   const at = now ?? Date.now();   // 나이 글자의 기준 시각(시험이 넣어 볼 수 있게 — 기본은 지금)
   const sigs = bmSignalRows(r, at);
@@ -283,6 +302,7 @@ export function DrawerSections({ r, hw, trend, corpName, scoped, onClose, now })
         </div>
       </section>
 
+      {afterGlance}
       <section className="vmh-sec" aria-label="24시간 추이">
         <div className="sh"><h3>CPU · 메모리 — 지난 24시간</h3>{isBm ? <span className="muted">{trend.d?.via === 'edge' && trend.d.rows?.length ? '이 서버를 수집하는 엣지에서 받았습니다(구간 평균)' : '열 때 1회 조회 · 구간 평균'}</span> : null}</div>
         {!isBm ? <div className="muted bmd-note">{TREND_WHY.esxi}</div>
@@ -291,6 +311,7 @@ export function DrawerSections({ r, hw, trend, corpName, scoped, onClose, now })
               : !trend.d.rows?.length || trend.d.why === 'none' ? <div className="muted bmd-note">{TREND_WHY[trend.d.why] || TREND_WHY.none}{trend.d.reason ? ` — ${trend.d.reason}` : ''}</div>
                 : <TrendChart rows={trend.d.rows} />}
       </section>
+      {afterTrend}
 
       <section className="vmh-sec" aria-label="신호">
         <div className="sh"><h3>신호 {sigs.length}{sigs.length ? ' — 봐야 할 것' : ''}</h3></div>
@@ -332,6 +353,8 @@ export function DrawerSections({ r, hw, trend, corpName, scoped, onClose, now })
         {isBm && !os.full && sum ? <div className="muted bmd-note">{OS_WHY}</div> : null}
       </section>
 
+      {afterIdent}
+
       {isBm ? (
         <>
           <section className="vmh-sec" aria-label="iDRAC · 관리">
@@ -345,7 +368,10 @@ export function DrawerSections({ r, hw, trend, corpName, scoped, onClose, now })
               <div><span>관리 NIC IPv4</span><b className="mono" style={det?.idrac?.ipv4 ? undefined : { color: 'var(--text-dim)' }}>{det?.idrac?.ipv4 || '—'}</b></div>
               <div><span>iDRAC 모델</span><b style={det?.idrac?.model ? undefined : { color: 'var(--text-dim)' }}>{det?.idrac?.model || '—'}</b></div>
               <div><span>iDRAC 펌웨어</span><b className="mono" style={sum?.fw || det?.idrac?.fw ? undefined : { color: 'var(--text-dim)' }}>{sum?.fw || det?.idrac?.fw || '—'}</b></div>
+              {/* v3.50 위치 LED 상태(이 포탈 · 수집 서버 인벤토리 또는 엣지 push) — 못 읽음은 꺼짐이 아니다 */}
+              <div><span>위치 LED</span><b style={(det?.idrac?.led || d?.led) ? undefined : { color: 'var(--text-dim)' }}>{d ? ledText(det?.idrac?.led ?? d.led ?? '') : '—'}</b></div>
             </div>
+            <div className="muted bmd-note">{LED_NOTE}</div>
             {hw.err ? <div className="bmd-note" style={{ color: 'var(--red)' }}>{hw.err}</div> : null}
           </section>
 
@@ -365,6 +391,8 @@ export function DrawerSections({ r, hw, trend, corpName, scoped, onClose, now })
               : !d ? <div className="muted bmd-note">읽는 중…</div>
                 : <div className="muted bmd-note">{HW_WHY[d.why] || hwWhyText({ hwVia: d.via })}</div>}
           </section>
+
+          {afterSpec}
 
           <section className="vmh-sec" aria-label="부품 목록">
             <div className="sh"><h3>부품 목록</h3>{groups ? <span className="muted">같은 부품은 묶어 개수로</span> : null}</div>
@@ -389,6 +417,7 @@ export function DrawerSections({ r, hw, trend, corpName, scoped, onClose, now })
           </section>
         </>
       ) : null}
+      {afterEnd}
     </>
   );
 }

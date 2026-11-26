@@ -3337,6 +3337,62 @@ table.bmf-t tr.bmf-picked td { background: rgba(59, 130, 246, .08); }
 .bmd-opnote { padding: 8px 18px; border-bottom: 1px solid var(--border-soft); font-size: 12.5px; line-height: 1.5; word-break: keep-all; overflow-wrap: anywhere; }
 .bmd-opnote.ok { color: var(--text); background: rgba(34, 197, 94, .10); }
 .bmd-opnote.bad { color: var(--text); background: rgba(239, 68, 68, .12); }
+/* v3.45 물리서버 점검(보증 · 펌웨어 기준선 · BIOS 편차) — 드로어 안 표 · 자산 원장 창 */
+.bmd-ct { width: 100%; font-size: 12.5px; }
+/* white-space: normal — 전역 tbody td 가 nowrap 이라, 두지 않으면 긴 구성요소 이름이 한 줄로 버텨 400px 드로어에서 상태 열이 화면 밖으로 밀린다(스크린샷 판독) */
+.bmd-ct th, .bmd-ct td { padding: 6px 8px; vertical-align: top; white-space: normal; }
+.bmd-ct td { word-break: keep-all; overflow-wrap: anywhere; }
+/* 배지는 한 줄로 — 옆 칸이 길면 배지 칸이 좁아져 ‘오/류’ · ‘같/음’ 처럼 글자마다 꺾였다(반증 B4) */
+.bmd-ct .badge { white-space: nowrap; }
+.bmd-ct-nm { display: block; font-weight: 600; }
+.bmd-ct-sub { display: block; font-size: 11px; margin-top: 1px; }
+.bmd-ct-btn { display: block; margin-top: 4px; padding: 3px 8px; font-size: 11.5px; white-space: nowrap; }
+/* 구역 머리의 오른쪽 글자 — 좁은 드로어에서 낱말 가운데서 꺾이지 않게(‘견/줌’) */
+.bmd-sh-sub { min-width: 0; text-align: right; word-break: keep-all; overflow-wrap: anywhere; }
+/* v3.48 같은 묶음 대비 — 지표마다 한 줄(왼쪽 이름 · 기준 · 상태 / 오른쪽 띠 그림 + 설명). 좁은 화면에서는 위아래로 */
+.bmf-hs-row { margin-top: 3px; }
+.bmf-hs { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.bmf-hs-u { font-size: 10.5px; white-space: nowrap; }
+.bmd-hs-list { margin: 0 0 6px; padding-left: 18px; font-size: 12.5px; line-height: 1.6; word-break: keep-all; overflow-wrap: anywhere; }
+/* v3.50 운영 구역 — 건강 점수 감점 줄 · 이벤트 로그 거르기 줄 · 케이스 적기 칸 */
+.bmd-hs-minus { color: var(--text); }
+.bmd-hl-bar { gap: 6px 8px; align-items: center; margin-bottom: 6px; min-width: 0; }
+.bmd-hl-q { width: 100%; max-width: 100%; margin-bottom: 6px; box-sizing: border-box; }
+.bmd-case-form { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px 8px; margin-top: 8px; min-width: 0; }
+.bmd-case-form > * { min-width: 0; }
+.bmd-case-form > .flex { grid-column: 1 / -1; }
+.bmd-case-form > .bmd-note { grid-column: 1 / -1; margin: 0; }
+.bmd-case-acts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.bmd-case-acts > button { white-space: nowrap; padding: 2px 8px; font-size: 12px; }
+/* v3.51 부품 수명 지표 — SSD 잔여 수명 막대 · 메모리 교정 오류 경고 슬롯 칸 */
+.bmd-life-bar { display: inline-block; vertical-align: middle; width: 64px; height: 6px; margin-left: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }
+.bmd-life-bar > span { display: block; height: 100%; background: var(--green); }
+.bmd-life-bar > span.amber { background: var(--amber); }
+.bmd-life-bar > span.red { background: var(--red); }
+.bmd-memce { margin-top: 10px; min-width: 0; }
+.bmd-memce-h { font-size: 12.5px; margin-bottom: 4px; word-break: keep-all; overflow-wrap: anywhere; }
+.bmd-memce-grid { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 4px; }
+.bmd-memce-c { font-size: 11.5px; padding: 1px 6px; border: 1px solid var(--border); border-radius: 6px; white-space: nowrap; }
+.bmd-memce-c.hot { border-color: var(--amber); color: var(--amber); }
+@media (max-width: 520px) { .bmd-case-form { grid-template-columns: minmax(0, 1fr); } }
+.bmd-peer-head { font-size: 12.5px; font-weight: 600; margin: 0 0 8px; word-break: keep-all; overflow-wrap: anywhere; }
+.bmd-peer { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 4px 12px 10px; min-width: 0; }
+.bmd-peer-row { display: grid; grid-template-columns: 124px minmax(0, 1fr); gap: 4px 12px; padding: 10px 0; border-bottom: 1px solid var(--border-soft); align-items: start; min-width: 0; }
+.bmd-peer-l { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; font-size: 12.5px; }
+.bmd-peer-l .muted { font-size: 11px; }
+.bmd-peer-l .badge { white-space: nowrap; }
+.bmd-peer-s { min-width: 0; }
+.bmd-peer-cap { font-size: 11.5px; line-height: 1.5; word-break: keep-all; overflow-wrap: anywhere; }
+.bmd-peer-why { font-size: 11.5px; line-height: 1.5; word-break: keep-all; overflow-wrap: anywhere; padding: 6px 0 2px; }
+.bmd-peer-lg { gap: 4px 14px; font-size: 11.5px; margin-top: 10px; }
+.bmd-peer-notes { margin: 6px 0 0; padding-left: 18px; font-size: 12px; line-height: 1.55; word-break: keep-all; overflow-wrap: anywhere; }
+.bmd-peer-why-more { margin-top: 4px; font-size: 12px; }
+.bmd-peer-why-more > summary { cursor: pointer; }
+@media (max-width: 520px) { .bmd-peer-row { grid-template-columns: minmax(0, 1fr); } .bmd-peer-l { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 4px 8px; } }
+.bmd-chk-aside { padding: 4px 14px 6px; font-size: 12px; line-height: 1.5; word-break: keep-all; overflow-wrap: anywhere; }
+.bmd-al { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.bmd-al-chk { display: flex; gap: 8px; align-items: flex-start; font-size: 12.5px; line-height: 1.5; word-break: keep-all; }
+.bmd-al-chk input { margin-top: 3px; flex: 0 0 auto; }
 .bmd-lb { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
 .bmd-tile2 { grid-column: span 2; }
 .bmd-vtext { font-family: inherit !important; font-size: 16px !important; line-height: 1.25 !important; }
@@ -3849,3 +3905,37 @@ th[aria-sort]:focus-visible { outline: 2px solid var(--accent); outline-offset: 
 thead th[data-nosort] { cursor: default; }
 /* v3.13.5 누르는 배지(필터 칩 — pressable)의 키보드 포커스 */
 .badge[role="button"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* 랙 실장도 — 장비 버튼의 키보드 초점 표시(고른 장비 · 검색 강조는 안쪽 그림자라 이 테두리와 겹치지 않는다) */
+.rk-place:focus-visible { outline: 3px solid #38bdf8; outline-offset: 1px; z-index: 2; }
+/* v3.51 부품 장애 알림 단계 올리기 · 당직(⑪) — 행 표지 · 확인 단추 · 관리자 설정 패널 */
+.pf-esc { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 3px; }
+.pf-esc-t { display: inline-block; vertical-align: bottom; font-size: 11px; white-space: nowrap; color: var(--text-faint); max-width: 120px; overflow: hidden; text-overflow: ellipsis; }   /* 긴 확인자 이름이 상태 열을 넓히지 않게(반증 B5 — 전체는 title) */
+.pf-esc-t.amber { color: var(--amber); }
+.pf-esc-t.red { color: var(--red); font-weight: 600; }
+.pf-esc-msg { flex-basis: 100%; font-size: 11px; color: var(--text-faint); white-space: normal; overflow-wrap: anywhere; max-width: 130px; }   /* 확인 결과가 상태 열을 넓히지 않게 */
+.pf-esc-msg.bad { color: var(--red); }
+.pfe { display: grid; gap: 8px; }
+.pfe > .pfe-add, .pfe-fs > .pfe-add, .pfe-pol > .pfe-add { justify-self: start; }   /* 더하기 단추가 가로 전체로 늘어나지 않게(반증 B13) */
+.pfe-fs { display: grid; gap: 8px; border: 0; padding: 0; margin: 0; min-width: 0; }   /* 저장 중 칸 잠금용 묶음 — 테두리 없음 */
+.pfe-res { font-size: 12px; min-width: 0; }
+.pfe-res ul { margin: 4px 0 0; padding-left: 18px; }
+.pfe-res li { overflow-wrap: anywhere; }
+.pfe-on, .pfe-chk { display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; white-space: nowrap; }
+.pfe-note { font-size: 12px; word-break: keep-all; overflow-wrap: anywhere; }
+.pfe-warn { font-size: 12px; color: var(--amber); }
+.pfe-bad { font-size: 12.5px; color: var(--red); overflow-wrap: anywhere; }
+.pfe-pol { display: grid; gap: 6px; padding: 8px; border: 1px solid var(--border); border-radius: 8px; min-width: 0; }
+.pfe-wide { width: 100%; max-width: 100%; box-sizing: border-box; }
+.pfe-step { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.pfe-no { font-size: 12px; font-weight: 600; white-space: nowrap; }
+.pfe-min { width: 64px; min-width: 0; }
+.pfe-mail { flex: 1 1 180px; min-width: 0; }
+.pfe-h { font-weight: 600; margin-top: 6px; }
+.pfe-oc { display: grid; gap: 6px; padding: 8px; border: 1px solid var(--border); border-radius: 8px; min-width: 0; }
+.pfe-days { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 6px; }
+.pfe-day { display: grid; grid-template-columns: 22px minmax(0, 1fr) minmax(0, 1.4fr); gap: 4px; align-items: center; min-width: 0; }
+.pfe-day > .input, .pfe-step > .input, .pfe-pol .input { width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; }
+.pfe-step > .pfe-min { width: 64px; flex: 0 0 64px; }
+.pfe-step > .pfe-mail { width: auto; flex: 1 1 180px; }
+.pfe-dl { font-size: 12px; text-align: center; }

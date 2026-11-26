@@ -25,11 +25,12 @@ import { buildEdgeBundle, edgeSyncOf } from '../../bmfolders/edgeBundle.js'; // 
 import { hwSummaryOf, hwDetailOf, mgmtHostOf } from '../../idrac/hwSummary.js'; // v3.3.0: 하드웨어(iDRAC) 요약 · 상세 · 관리 주소
 import { scopedVcenterIds, inUserScope, inUserWriteScope, writeScopedVcenterIds } from '../../auth/scope.js';
 import { isDemoGuest, isAdminDetailUser } from '../../auth/demoGuest.js';
-import { todayStamp } from '../../util/dayKey.js';
+import { todayStamp, fileStamp as fileStampOf } from '../../util/dayKey.js';
 import { store } from '../../store.js';
 import { config } from '../../config.js'; // v2.996: 엣지 포탈 판정(CENTRAL_URL)
 import { memoJson, scopeKey } from './shared.js';
 import { logAudit } from '../../audit.js';
+import { textFields } from '../../util/coercionTrap.js';   // v3.50 케이스 적기 — 글자 칸만
 import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { pushAll } from '../../util/pushAll.js';   // 큰 배열 스프레드 push 금지(스윕 audit2603a)
 import { numOrNull } from '../../util/numOrNull.js';
@@ -42,6 +43,13 @@ import {
   LIMITS, newRuleId, underPath, ancestorsOf, isMemberKey,
 } from '../../bmfolders/store.js';
 import { scopeSig } from '../../util/scopeSig.js';
+import { bmCheckFor, chkRowOf } from '../../bmcheck/state.js';
+import { healthRowOf, HEALTH_RULES, HEALTH_BANDS, HEALTH_MIN } from '../../bmcheck/health.js';   // v3.50 건강 점수(⑩)
+import { maskHwLogText, readHwLog, demoHwLog } from '../../idrac/hwLog.js';   // v3.50 하드웨어 이벤트 로그(⑤) — 판본에 따른 가림   // v3.45 물리서버 점검(보증 · 펌웨어 기준선 · BIOS 편차)
+import { memCeOf } from '../../idrac/partLife.js';   // v3.51 부품 수명(⑧) — 메모리 교정 오류 경고 슬롯별 수
+import { assetStore, fwBaselineStore, adminBaselineLookup, advisoryStore, caseStore, upsertCase, removeCase, casesOfTag, CASE_STATUSES } from '../../bmcheck/store.js';
+import { WARRANTY_SOON_DAYS } from '../../bmcheck/warranty.js';
+import { judgePeerGroup, avgValueOf, PEER_MIN, PEER_GROUP_MAX, PEER_AVG_MIN_SAMPLES, PEER_AVG_MIN_COVERAGE } from '../../bmcheck/peer.js';   // v3.48 같은 묶음 대비
 
 const toolsPerm = requirePerm('tools');
 const csvPerm = requirePerm('data.csv');
@@ -201,12 +209,36 @@ export async function hwLookupFactory(D = {}) {
     const sid = t(m.serverId);
     if (t(m.source) === 'edge' || sid.startsWith('edge:')) {
       const e = edgeById.get(sid);
-      return { inv: null, hw: e?.hw || null, mgmt: mgmtHostOf(e?.mgmtHost), via: 'edge' };
+      // v3.45: 엣지가 보낸 펌웨어 구성요소 · BIOS 설정(정제본 — 없으면 undefined = 보내지 않음). 물리서버 점검(bmcheck/state.js)이 쓴다
+      return { inv: null, hw: e?.hw || null, mgmt: mgmtHostOf(e?.mgmtHost), via: 'edge', fw: e?.fw, bios: e?.bios, led: e?.led || '' };
     }
     let r = { inv: null, via: '' };
     try { r = invOf({ serverId: sid, serviceTag: m.serviceTag }); } catch { r = { inv: null, via: '' }; }
     return { inv: r.inv, hw: hwOfInv(r.inv), mgmt: t(m.mgmtHost) || mgmtHostOf(remById.get(sid)?.host), via: r.via };
   };
+}
+/**
+ * v3.50 하드웨어 이벤트 로그를 **누가 읽는가**(순수 — 시험이 고정). 구성원의 serverId 꼴로 정한다:
+ *   edge:<엣지>:<열쇠>        → 그 엣지(remoteAgent 와 같은 이름일 때만)가 열쇠(k)로 — 엣지가 함대 push 에 실은 fleetId(태그 · 등록 id 소문자)
+ *   remote:<수집 서버>:<id>    → 그 수집 서버가 등록부 id 로
+ *   그 밖(빈 값 제외)          → 이 노드가 등록부 id 로(등록부에 없으면 라우트가 ‘읽을 길 없음’)
+ * @returns {{ via:'edge'|'remote', agent:string, q:{k?:string, id?:string} } | { via:'local', id:string } | null}
+ */
+export function hwLogSourceOf(m) {
+  const sid = t(m?.serverId); const ag = t(m?.remoteAgent);
+  if (!sid) return null;
+  if (sid.startsWith('edge:')) {
+    if (!ag || !sid.startsWith(`edge:${ag}:`)) return null;
+    const k = sid.slice(`edge:${ag}:`.length);
+    return k ? { via: 'edge', agent: ag, q: { k } } : null;
+  }
+  if (sid.startsWith('remote:')) {
+    const rest = sid.slice('remote:'.length); const i = rest.indexOf(':');
+    const cid = i > 0 ? rest.slice(0, i) : ''; const rid = i > 0 ? rest.slice(i + 1) : '';
+    return cid && rid ? { via: 'remote', agent: cid, q: { id: rid } } : null;
+  }
+  if (sid.startsWith('host:')) return null;   // vCenter 호스트 꼴 — 등록부 id 가 아니다
+  return { via: 'local', id: sid };
 }
 /** 화면용 요약 — OS 호스트명은 관리자 판본만(범위 판본은 태그를 가린다 — 이 파일 주소 가림과 같은 규칙). */
 function hwView(hw, admin, hide, tag) {
@@ -214,7 +246,23 @@ function hwView(hw, admin, hide, tag) {
   return { ...hw, host: admin && hw.host ? (hide ? stripTag(hw.host, tag) : hw.host) : '' };
 }
 
-function serverRow(m, p, admin, hide, ix, hx) {
+/**
+ * v3.45 물리서버 점검의 저장소 입력 — 원장 · 기준 파일을 **못 읽었으면 그 판정만 뺀다**(빈 원장으로 보고 전부 '모름' 이라 하지 않는다 · 지정 기준이 없다고 하지 않는다).
+ *   assets null = 보증 판정 안 함(assetsErr) · adminBase null + baseErr = 다수 버전으로만 대조했다고 밝힌다.
+ */
+export function checkInputs(D = {}) {
+  const A = D.assetStore || assetStore; const B = D.fwBaselineStore || fwBaselineStore;
+  let assets = null; let assetsErr = false; let assetsMeta = null; let adminBase = null; let baseErr = false; let advisories = null; let advErr = false; let advMeta = null;
+  const V = D.advisoryStore || advisoryStore;
+  try { if (V.loadError()) advErr = true; else { const d = V.get(); advisories = d.rows; advMeta = { n: d.rows.length, at: d.at }; } } catch { advErr = true; advisories = null; }
+  try { if (A.loadError()) assetsErr = true; else { const d = A.get(); assets = d.rows; assetsMeta = { n: Object.keys(d.rows).length, at: d.at, by: d.by }; } } catch { assetsErr = true; assets = null; }
+  try { if (B.loadError()) baseErr = true; else adminBase = adminBaselineLookup(B.get()); } catch { baseErr = true; adminBase = null; }
+  return { assets, assetsErr, assetsMeta, adminBase, baseErr, advisories, advErr, advMeta };
+}
+/** 응답 캐시 열쇠 조각 — 원장 · 기준 세대 + 오늘(보증 남은 일수는 날이 바뀌면 달라진다). */
+const checkRevKey = () => { try { return `${assetStore.rev()}.${fwBaselineStore.rev()}.${advisoryStore.rev()}.${todayStamp()}`; } catch { return 'x'; } };
+
+function serverRow(m, p, admin, hide, ix, hx, chk) {
   const mgmt = t(m.mgmtHost) || t(hx?.mgmt);
   return {
     key: pubKey(m.key, hide), kind: m.kind, corp: m.corp, name: nameOf(m, admin, hide), serviceTag: hide ? undefined : m.serviceTag, model: m.model,
@@ -234,6 +282,11 @@ function serverRow(m, p, admin, hide, ix, hx) {
     addr: admin && mgmt ? (hide ? stripTag(mgmt, m.serviceTag) : mgmt) : undefined,
     // v3.3.0: 하드웨어(iDRAC) 요약 — 베어메탈만(ESXi 행은 undefined). 인벤토리가 없으면 null(화면 '—' + hwWhy)
     ...(m.kind === 'bm' && hx !== undefined ? { hw: hwView(hx?.hw || null, admin, hide, m.serviceTag), hwVia: hx?.via || '' } : {}),
+    // v3.45 물리서버 점검 요약 — { w 보증 상태 · wd 남은 일수 · fw 펌웨어 상태 · fwn 뒤처진 구성요소 수 · bios 편차 상태 · biosn 다른 설정 수 }.
+    //   상태 글자와 수뿐이다(태그 · 주소 · 계약 번호 없음). 판정하지 못한 항목은 키가 없다(화면이 정상으로 읽지 않는다).
+    chk: chk || undefined,
+    // v3.50 건강 점수(⑩) — 이 행이 가진 판정(부품 장애 수 · chk)만으로. 못 읽은 항목 수(u)를 늘 함께 싣는다(못 읽어서 100 점처럼 보이지 않게).
+    hs: healthRowOf({ faults: m.faults ?? null, chk, kind: m.kind }),
   };
 }
 
@@ -267,6 +320,17 @@ async function trendDeps() {
     },
     localSeries: async (o) => (await import('../../bmusage/perfOpsView.js')).localPerfOps('compare-series', o),
     edgeSeries: async (agent, o) => (await import('../../central/bmComparePull.js')).pullEdgeCompareSeries(agent, o),
+    // v3.48 같은 묶음 대비 — 이 노드 서버 여러 대 · 엣지마다 요청 1개(서버마다 WAN 을 왕복하지 않는다)
+    localPeer: async (o) => (await import('../../bmusage/peerAvg.js')).peerAvgFor(o),
+    edgePeer: async (agent, o) => (await import('../../central/bmPeerPull.js')).pullEdgePeerAvg(agent, o),
+    // v3.50 하드웨어 이벤트 로그(⑤) — 이 노드 서버는 등록부 항목으로 직접 · 엣지 · 수집 서버 서버는 그쪽이 읽는다
+    hwLogEntry: async (id) => { const { loadRegistry } = await import('../../idrac/registry.js'); const e = loadRegistry().find((x) => String(x.id) === String(id)); return e && e.enabled !== false && e.host ? e : null; },
+    hwLogLocal: async (entry) => readHwLog(entry),
+    hwLogEdge: async (agent, q) => (await import('../../central/bmHwLogPull.js')).pullEdgeHwLog(agent, q),
+    hwLogDemo: async (key) => { const { isMockMode } = await import('../../mock/demo/flags.js'); return isMockMode() ? demoHwLog(key) : null; },
+    // 수집 서버(pull) 출처 서버를 맡은 엣지 — 구성원에는 collectorId 만 있다(반증 A2). 조회는 등록부 하나(findCollectorByName — id 가 먼저 맞는다).
+    //   돌려주는 것은 등록 **id**(표시 이름은 겹칠 수 있다 — pullFromEdge 는 id 로도 찾는다).
+    collectorName: async (id) => { const c = (await import('../../collector/registry.js')).findCollectorByName(id); return c && typeof c.id === 'string' ? c.id : ''; },
   };
 }
 /** 비교 계열 응답(metrics.<col>.spark = [[t, 평균, 최고]…]) → 시각순 [{ ts, cpu, mem }]. 못 읽은 칸은 null 그대로. */
@@ -430,7 +494,7 @@ export function registerBmFolders(api) {
     // 서비스 인벤토리 저장소 세대도 넣는다(svcLinks — 그쪽 규칙을 바꾸면 이 응답도 새로)
     // 서비스 인벤토리 도구 접근(svcLinks 를 싣는가)도 열쇠에 — 빠지면 접근 있는 계정의 응답이 캐시로 샌다
     const svcOk = userToolAllowed(req.user, 'svc-inventory');
-    const extraKey = `${scopeKey(req.user, snap)}|w${writeKeyOf(req.user, snap)}|${admin ? 'a' : 'u'}|v${svcOk ? 1 : 0}|r${storeRev()}|s${(() => { try { return smStoreRev(); } catch { return 'x'; } })()}|i${sharedInputRev()}`;
+    const extraKey = `${scopeKey(req.user, snap)}|w${writeKeyOf(req.user, snap)}|${admin ? 'a' : 'u'}|v${svcOk ? 1 : 0}|r${storeRev()}|s${(() => { try { return smStoreRev(); } catch { return 'x'; } })()}|i${sharedInputRev()}|c${checkRevKey()}`;
     await memoJson(req, res, 'bm-folders', async (s) => {
       const { g, members, dupKeys, allowed, b } = await stateFor(req, s);
       const hide = !!allowed;
@@ -446,18 +510,40 @@ export function registerBmFolders(api) {
       // v3.3.0: 하드웨어(iDRAC) 요약 — 찾기를 못 만들면 요약 없이(화면 '—') 목록은 그대로
       let hxOf = null;
       try { hxOf = await hwLookupFactory(); } catch { hxOf = null; }
+      const shown = [];
       for (const m of members) {
         if (!m.corp ? hide || m.kind !== 'bm' : !(allowed ? allowed.has(m.corp) : true)) continue;
         const p = b.placeOf.get(m.key);
         if (m.kind !== 'bm' && !p?.src) continue;   // ESXi 는 폴더에 넣은 것만
+        shown.push([m, p]);
+      }
+      // v3.45 물리서버 점검: 이 응답에 싣는 구성원만으로 판정한다(묶음이 법인을 넘지 않아 결과가 같다 — bmcheck/state.js). 실패해도 목록은 그대로(요약만 빠진다)
+      const ci = checkInputs();
+      let chk = null;
+      try { chk = bmCheckFor({ members: shown.map((x) => x[0]), placeOf: b.placeOf, hxOf, assets: ci.assets, adminBase: ci.adminBase, today: todayStamp(), advisories: ci.advisories }); } catch { chk = null; }
+      for (const [m, p] of shown) {
         // 찾기를 못 만들었으면 hx = undefined → 행에 hw 키를 싣지 않는다(화면이 '인벤토리 없음' 으로 단정하지 않고 '요약을 만들지 못함' 으로 — 반증 F11)
         let hx;
         if (hxOf) { try { hx = hxOf(m); } catch { hx = null; } }
-        servers.push(serverRow(m, p, admin, hide, ix, hx));
+        let c;
+        if (chk) { try { c = chkRowOf(chk.ofMember(m)); } catch { c = undefined; } }
+        servers.push(serverRow(m, p, admin, hide, ix, hx, c));
       }
       return {
         ok: true, at: g.at, rev: storeRev(), scoped: hide, admin, canWrite: writerOk(req.user), canFleet: full,
         usageOff: !!ix?.off,   // v2.994: 이 노드의 베어메탈 사용률 수집이 꺼져 있다(화면 위 띠 — 칸마다 같은 이유를 보지 않게)
+        // v3.45 물리서버 점검 표지 — 보증 '곧' 의 기준 일수(화면이 숫자를 박지 않게) · 자산 원장 상태(줄 수 · 올린 시각 — 올린 사람은 관리자 판본만) ·
+        //   못 읽은 저장소(unreadable — 그 판정은 하지 않았다) · 찾기를 만들지 못함(noHw — 펌웨어 · BIOS 판정 없음).
+        check: {
+          soonDays: WARRANTY_SOON_DAYS,
+          // 원장 줄 수 · 올린 시각은 전 법인 값이다 — 범위 계정에는 싣지 않는다(함대 전체 개수를 싣지 않는 규칙 — 반증 A8). 올린 사람은 전체 범위 관리자 판본만
+          assets: ci.assetsErr ? { unreadable: true } : hide ? {} : { n: ci.assetsMeta?.n ?? 0, at: ci.assetsMeta?.at ?? null, ...(admin ? { by: ci.assetsMeta?.by || '' } : {}) },
+          ...(ci.baseErr ? { baselineUnreadable: true } : {}), ...(!hxOf || !chk ? { noHw: true } : {}),
+          // v3.50 건강 점수의 감점 규칙 · 경계(화면이 숫자를 박지 않게 — 같은 상수 하나)
+          health: { rules: HEALTH_RULES, bands: HEALTH_BANDS, min: HEALTH_MIN },
+          // v3.50 보안 권고 표 — 줄 수 · 올린 시각(전 법인 값이라 범위 계정에는 싣지 않는다) · 못 읽음
+          advisories: ci.advErr ? { unreadable: true } : hide ? {} : { n: ci.advMeta?.n ?? 0, at: ci.advMeta?.at ?? null },
+        },
         settings: { autoRules: b.autoRules },
         corps: b.corps.map((c) => ({
           ...c, name: g.corpNames?.get(c.vcenterId) || c.vcenterId, writable: writableOf(req.user, s, c.vcenterId),
@@ -540,8 +626,303 @@ export function registerBmFolders(api) {
         const os = { ...d.os, host: admin && d.os.host ? (hide ? stripTag(d.os.host, m.serviceTag) : d.os.host) : '' };
         return res.json({ ok: true, kind: 'bm', via: hx.via, addr, detail: { ...d, summary: hwView(d.summary, admin, hide, m.serviceTag), os } });
       }
-      if (hx.hw) return res.json({ ok: true, kind: 'bm', via: hx.via, addr, summary: hwView(hx.hw, admin, hide, m.serviceTag), why: 'summary-only' });
-      return res.json({ ok: true, kind: 'bm', via: hx.via, addr, why: hx.via === 'edge' ? 'edge-none' : 'no-inv' });
+      if (hx.hw) return res.json({ ok: true, kind: 'bm', via: hx.via, addr, summary: hwView(hx.hw, admin, hide, m.serviceTag), why: 'summary-only', ...(hx.led ? { led: hx.led } : {}) });
+      // 요약이 없어도 엣지가 실은 LED 상태는 싣는다(반증 A15 — 같은 인벤토리에서 오므로 드물다)
+      return res.json({ ok: true, kind: 'bm', via: hx.via, addr, why: hx.via === 'edge' ? 'edge-none' : 'no-inv', ...(hx.led ? { led: hx.led } : {}) });
+    } catch (e) { if (!res.headersSent) res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); }
+  });
+
+  // v3.50 제조사 케이스(시안 ⑫) — 포탈은 제조사에 직접 접수하지 않는다. 접수 자료 묶음을 만들고 케이스 번호 · 진행 상태를 적어 따라간다.
+  //   케이스는 서비스 태그 + 법인으로 묶는다(태그를 모르는 서버는 적지 않는다 · 같은 태그가 다른 법인 서버로 나타나도 남의 법인 케이스를 읽거나 고치지 못한다 — v3.50 반증 A2). 읽기는 /hw 와 같은 노출 규칙 · 쓰기는 그 서버 법인의 쓰기 범위(조회 밖 404 → 쓰기 밖 403) ·
+  //   admin/operator · 데모 계정 아님 · 감사 로그. 엣지 포탈에서는 답하지 않는다(기록은 중앙에 있다).
+  const caseMember = async (req, res) => {
+    if (isEdgeNode()) { res.status(404).json({ ok: false, error: 'central-only', reason: '케이스 기록은 중앙 포탈에 있습니다.' }); return null; }
+    const snap = store.get();
+    const st = await stateFor(req, snap);
+    const { members, allowed } = st;
+    const hide = !!allowed;
+    const visible = members.filter((m) => (m.corp ? (!allowed || allowed.has(m.corp)) : (!hide && m.kind === 'bm')));
+    const raw = typeof req.query.key === 'string' ? req.query.key : typeof req.body?.key === 'string' ? req.body.key : '';
+    const k = keyResolverFor(hide, visible.map((m) => m.key))(raw.slice(0, 200));
+    const m = k ? visible.find((x) => x.key === k) : null;
+    if (!m) { res.status(404).json({ ok: false, error: 'not_found', reason: '서버를 찾지 못했습니다.' }); return null; }
+    return { m, snap, hide, members, allowed, b: st.b };
+  };
+  const caseView = (c) => ({ id: c.id, part: c.part, caseNo: c.caseNo, status: c.status, note: c.note, by: c.by, at: c.at, created: c.created, hist: c.hist });
+  api.get('/tools/bm-folders/cases', toolsPerm, async (req, res) => {
+    try {
+      const x = await caseMember(req, res); if (!x) return;
+      res.set('Cache-Control', 'no-store');
+      if (caseStore.loadError()) return res.status(503).json({ ok: false, error: 'registryUnreadable', reason: '물리서버 케이스 기록(bm-cases.json)을 읽지 못했습니다.' });
+      const tag = t(x.m.serviceTag);
+      const w = corpWriteAccess(req.user, x.snap, x.m.corp);
+      return res.json({ ok: true, ...(tag ? {} : { why: 'no-tag' }), cases: tag ? casesOfTag(tag, { corp: t(x.m.corp) }).slice(0, 50).map(caseView) : [], canWrite: !!tag && writerOk(req.user) && !w, statuses: CASE_STATUSES });
+    } catch (e) { if (!res.headersSent) res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); }
+  });
+  api.post('/tools/bm-folders/cases', toolsPerm, textFields('key', 'id', 'part', 'caseNo', 'status', 'note'), async (req, res) => {
+    try {
+      if (!writerOk(req.user)) return res.status(403).json({ ok: false, reason: '케이스를 적으려면 운영자 이상 권한이 필요합니다.' });
+      const x = await caseMember(req, res); if (!x) return;
+      const w = corpWriteAccess(req.user, x.snap, x.m.corp);
+      if (w) return res.status(w.status).json({ ok: false, reason: w.reason });
+      const tag = t(x.m.serviceTag);
+      if (!tag) return res.status(400).json({ ok: false, reason: '서비스 태그를 모르는 서버에는 케이스를 적을 수 없습니다.' });
+      const refused = caseStore.refusal();
+      if (refused) return res.status(409).json({ ok: false, ...refused });
+      const b = req.body || {};
+      const r = upsertCase({ id: String(b.id || ''), tag, corp: t(x.m.corp), part: String(b.part || '').trim(), caseNo: String(b.caseNo || '').trim(), status: String(b.status || 'open'), note: String(b.note || ''), by: String(req.user?.username || '') });
+      if (!r.ok) return res.status(r.status || 500).json({ ok: false, reason: r.reason || '저장하지 못했습니다.' });
+      if (r.changed) logAudit({ user: req.user?.username, action: b.id ? '물리서버 제조사 케이스 고침' : '물리서버 제조사 케이스 적음', target: `${x.m.name || ''}`.slice(0, 120), detail: `상태 ${String(b.status || 'open')}${b.caseNo ? ` · 케이스 ${String(b.caseNo).slice(0, 64)}` : ''}`, ip: req.ip });
+      return res.json({ ok: true, id: r.id, changed: !!r.changed });
+    } catch (e) { if (!res.headersSent) res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); }
+  });
+  // 끝난 케이스 지우기(v3.50 — 상한이 차면 새 케이스를 막는데 지울 길이 없었다: 반증 A11). 쓰기 게이트 · 감사는 적기와 같다. 진행 중인 케이스는 지우지 않는다.
+  api.post('/tools/bm-folders/cases/delete', toolsPerm, textFields('key', 'id'), async (req, res) => {
+    try {
+      if (!writerOk(req.user)) return res.status(403).json({ ok: false, reason: '케이스를 지우려면 운영자 이상 권한이 필요합니다.' });
+      const x = await caseMember(req, res); if (!x) return;
+      const w = corpWriteAccess(req.user, x.snap, x.m.corp);
+      if (w) return res.status(w.status).json({ ok: false, reason: w.reason });
+      const tag = t(x.m.serviceTag);
+      if (!tag) return res.status(404).json({ ok: false, reason: '케이스를 찾지 못했습니다.' });
+      const refused = caseStore.refusal();
+      if (refused) return res.status(409).json({ ok: false, ...refused });
+      const r = removeCase({ id: String(req.body?.id || ''), tag, corp: t(x.m.corp) });
+      if (!r.ok) return res.status(r.status || 500).json({ ok: false, reason: r.reason || '지우지 못했습니다.' });
+      logAudit({ user: req.user?.username, action: '물리서버 제조사 케이스 지움', target: `${x.m.name || ''}`.slice(0, 120), detail: `끝난 케이스${r.removed.caseNo ? ` ${r.removed.caseNo}` : ''}`.slice(0, 120), ip: req.ip });
+      return res.json({ ok: true });
+    } catch (e) { if (!res.headersSent) res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); }
+  });
+  // 접수 자료 묶음(JSON 내려받기) — 서버 · 보증 · 열린 부품 장애 · 뒤처진 펌웨어 · 최근 위험 · 주의 기록(인벤토리 주기에 읽은 것) · 하드웨어 요약.
+  //   서비스 태그 · 계약 번호는 그것을 볼 수 있는 판본에만(태그: 범위 판본이 아님 · 계약: 전체 범위 관리자).
+  //   묶음은 제조사에 붙여 보내는 파일이다 — 기록 글자는 **판본과 관계없이 늘 가린다**(IPv4 · IPv6 · MAC · 호스트 이름 · ‘for 계정 from’ 꼴 계정 · 태그 —
+  //   maskHwLogText 의 알려진 꼴. 인벤토리 기록은 SEL 이 비면 Lifecycle 로그에서 오고 로그인 실패 문구에 계정 · 주소가 든다: v3.50 반증 A3).
+  //   부품 장애는 그 서버의 수집 주체 · 태그로 SQL 에서 고른다(다른 법인 엣지의 같은 태그 기록을 싣지 않는다 · 전량을 JS 로 읽지 않는다 — 반증 A14).
+  api.get('/tools/bm-folders/case-bundle', toolsPerm, async (req, res) => {
+    try {
+      const x = await caseMember(req, res); if (!x) return;
+      const { m, hide, members, allowed, b } = x;
+      if (m.kind !== 'bm') return res.status(400).json({ ok: false, reason: 'ESXi 호스트 행은 물리서버 화면에서 접수 자료를 만들지 않습니다.' });
+      const admin = isAdminDetailUser(req.user);
+      let hxOf = null; try { hxOf = await hwLookupFactory(); } catch { hxOf = null; }
+      const hx = (hxOf && hxOf(m)) || { inv: null, hw: null };
+      const ci = checkInputs();
+      const peersOf = members.filter((y) => y.corp === m.corp && (!allowed || allowed.has(y.corp)));
+      const c = bmCheckFor({ members: peersOf, placeOf: b.placeOf, hxOf, assets: ci.assets, adminBase: ci.adminBase, today: todayStamp(), advisories: ci.advisories }).ofMember(m);
+      // 못 읽은 것은 null(빈 목록 [] = 읽었고 없음) — ‘없음’ 으로 읽히지 않게 unread 에 이유를 함께 싣는다(반증 B6)
+      const unread = [];
+      let faults = null;
+      try {
+        const pf = await import('../../partfault/db.js');
+        if (!pf.partFaultDbExists()) unread.push('faults: 부품 장애 기록이 없습니다(이 포탈에서 부품 장애 수집을 쓰지 않음)');
+        else {
+          const src = hwLogSourceOf(m);
+          const rows = await pf.openFaultsOfDevice({ scope: 'idrac', agent: src?.via === 'edge' ? src.agent : '', key: t(m.serviceTag), id: src?.via === 'local' ? src.id : '', limit: 20 });
+          faults = rows.map((f) => ({ part: t(f.label) || t(f.partId), kind: t(f.kind), state: t(f.state), since: f.firstSeenAt ?? null, detail: maskHwLogText(t(f.detail), { tag: m.serviceTag }) }));
+        }
+      } catch { faults = null; unread.push('faults: 부품 장애 기록을 읽지 못했습니다'); }
+      const evOk = hx.inv?.collections?.events === 'ok' && Array.isArray(hx.inv?.events);
+      if (!evOk) unread.push(hx.inv ? 'recentEvents: 인벤토리 주기에 이벤트 로그를 읽지 못했습니다' : 'recentEvents: 이 서버의 인벤토리가 이 포탈에 없습니다(엣지 · 수집 서버 서버는 요약만 받습니다)');
+      const events = evOk ? hx.inv.events.slice(0, 3).map((e) => ({ sev: t(e.severity), at: t(e.created), msg: maskHwLogText(t(e.message), { tag: m.serviceTag }) })) : null;
+      if (!c.fw || !['ok', 'behind', 'split'].includes(c.fw.state)) unread.push(`firmwareBehind: 펌웨어를 기준과 견주지 못했습니다(${c.fw?.state === 'none' ? '기준 없음' : c.fw?.state === 'unsent' ? '엣지에서 받지 못함' : '못 읽음'})`);
+      if (!hx.hw) unread.push('hardware: 하드웨어 요약이 없습니다');
+      const w = c.warranty || null;
+      const out = {
+        kind: 'bm-support-bundle', v: 1, at: new Date().toISOString(),
+        server: { name: nameOf(m, admin, hide), model: m.model || '', ...(hide ? {} : { serviceTag: m.serviceTag || '' }), corp: m.corp || '' },
+        warranty: w ? { state: w.state, end: w.end || '', type: w.type || '', ...(admin && !hide && w.contract ? { contract: w.contract } : {}) } : null,
+        faults,
+        // 펌웨어: 기준과 견준 서버만 목록([] = 견줬고 뒤처진 것 없음) · 못 읽음 · 기준 없음은 null. differ 는 ‘순서 모름’ 으로 표시
+        firmwareBehind: c.fw && ['ok', 'behind', 'split'].includes(c.fw.state) && Array.isArray(c.fw.rows)
+          ? c.fw.rows.filter((r) => r.state === 'behind' || r.state === 'differ').slice(0, 20).map((r) => ({ type: r.type, label: r.label, installed: r.installed, baseline: r.baseline, ...(r.state === 'differ' ? { order: 'unknown' } : {}) })) : null,
+        // 권고: 대조 상태를 함께(no-table · no-fw · unmatched · unknown · clear · hit) — 걸린 것만 목록
+        advisoryCheck: c.adv ? c.adv.state : null,
+        advisories: c.adv && c.adv.state === 'hit' ? c.adv.hits.slice(0, 10).map((h) => ({ id: h.id, sev: h.sev, label: h.label, installed: h.installed, fixed: h.fixed })) : c.adv && ['clear', 'unmatched'].includes(c.adv.state) ? [] : null,
+        recentEvents: events,
+        hardware: hx.hw ? { cpu: hx.hw.cpu || null, mem: hx.hw.mem || null, disk: hx.hw.disk || null, at: hx.hw.at ?? null } : null,
+        unread,
+        note: '포탈은 제조사에 직접 접수하지 않습니다 — 이 자료를 제조사 지원 창구에 붙여 접수하고, 받은 케이스 번호를 포탈에 적으십시오.',
+      };
+      logAudit({ user: req.user?.username, action: '물리서버 접수 자료 묶음 내려받기', target: `${m.name || ''}`.slice(0, 120), ip: req.ip });
+      res.set('Cache-Control', 'no-store');
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="bm-support-${fileStampOf()}.json"`);
+      return res.send(JSON.stringify(out, null, 2));
+    } catch (e) { if (!res.headersSent) res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); }
+  });
+
+  // v3.50 하드웨어 이벤트 로그(시안 ⑤) — 드로어에서 ‘읽기’ 를 누를 때 1건. 그 서버를 수집하는 노드가 SEL 을 읽는다:
+  //   이 노드 등록부 서버 → 이 노드가 · 엣지가 올린 서버(edge:<엣지>:<열쇠>) → 그 엣지가 · 수집 서버(pull) 서버(remote:<수집 서버>:<id>) → 그 수집 서버가.
+  //   같은 서버는 60초에 한 번만(진행 중이면 함께 기다린다 — trendOnce). /hw 와 같은 노출 규칙(범위 밖 · 없는 키 404).
+  //   내용 글자의 IPv4 주소 · 서비스 태그는 전체 범위 관리자 판본에만 그대로(장비 주소를 싣지 않는 규칙 — maskHwLogText). 엣지 실패 사유도 그 판본만.
+  api.get('/tools/bm-folders/hwlog', toolsPerm, async (req, res) => {
+    try {
+      const snap = store.get();
+      const { members, allowed } = await stateFor(req, snap);
+      const hide = !!allowed;
+      const admin = isAdminDetailUser(req.user);
+      const visible = members.filter((m) => (m.corp ? (!allowed || allowed.has(m.corp)) : (!hide && m.kind === 'bm')));
+      const k = keyResolverFor(hide, visible.map((m) => m.key))(typeof req.query.key === 'string' ? req.query.key.slice(0, 200) : '');
+      const m = k ? visible.find((x) => x.key === k) : null;
+      if (!m) return res.status(404).json({ ok: false, error: 'not_found', reason: '서버를 찾지 못했습니다.' });
+      res.set('Cache-Control', 'no-store');
+      if (m.kind !== 'bm') return res.json({ ok: true, why: 'esxi' });
+      const D = await trendDeps();
+      const full = admin && !hide;
+      const finish = async (via, r) => {
+        if (!r || r.ok !== true) return res.json({ ok: true, via, why: r?.kind === 'old-version' ? 'old-version' : r?.kind === 'not-found' ? 'not-found' : 'edge-fail', ...(full && r?.reason ? { reason: String(r.reason).slice(0, 200) } : {}) });
+        const rows = (Array.isArray(r.rows) ? r.rows : []).map((x) => (full ? x : { ...x, msg: maskHwLogText(x.msg, { tag: m.serviceTag }) }));
+        // v3.51 부품 수명(⑧): 메모리 교정 오류 경고 — 가리기 전 원문에서 슬롯별로 센다(슬롯 이름은 주소 · 계정이 아니다). DIMM 목록은 이 노드 인벤토리가 있을 때만(0 인 슬롯도 줄로)
+        let dimms = [];
+        if (via === 'local' || via === 'demo') { try { const hx = (await hwLookupFactory())(m); dimms = Array.isArray(hx?.inv?.memoryDimms) ? hx.inv.memoryDimms.map((d) => d?.locator) : []; } catch { dimms = []; } }
+        const memCe = memCeOf(r, { now: Date.now(), dimms });
+        return res.json({ ok: true, via, at: r.at ?? null, status: r.status, read: r.read ?? rows.length, total: r.total ?? null, stopped: r.stopped || '', gap: r.gap || 0, counts: r.counts, rows, ...(memCe ? { memCe } : {}), ...(r.demo ? { demo: true } : {}) });
+      };
+      // 데모(mock) — 장비 없이 합성 기록(화면이 ‘데모’ 를 밝힌다)
+      const demo = typeof D.hwLogDemo === 'function' ? await D.hwLogDemo(m.key).catch(() => null) : null;
+      if (demo) return await finish('demo', demo);
+      const src = hwLogSourceOf(m);
+      if (!src) return res.json({ ok: true, why: 'no-source' });
+      if (src.via !== 'local') {
+        const qk = src.q.k ? `k|${src.q.k}` : `id|${src.q.id}`;
+        const r = await trendOnce(`hwlog|${src.agent}|${qk}`, () => D.hwLogEdge(src.agent, src.q).then((x) => (x?.ok ? { ok: true, ...x.body } : x)));
+        return await finish(src.via, r);
+      }
+      const sid = src.id;
+      const entry = sid ? await D.hwLogEntry(sid).catch(() => null) : null;
+      if (!entry) return res.json({ ok: true, why: 'no-source' });   // 이 노드 iDRAC 등록부 밖(OME · 꺼진 등록 등) — 읽을 길이 없다
+      const r = await trendOnce(`hwlog||id|${sid}`, () => D.hwLogLocal(entry));
+      return await finish('local', r);
+    } catch (e) { if (!res.headersSent) res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); }
+  });
+
+  // v3.45 물리서버 점검 상세 — 드로어가 열릴 때 1건(목록에는 상태 요약만). 보증 · 계약(자산 원장) · 펌웨어 기준선 대조 · BIOS 설정 편차.
+  //   범위 밖 · 없는 키는 404(존재 은닉 — /hw 와 같은 노출 규칙). 판정은 이 계정에 보이는 구성원만으로(묶음이 법인을 넘지 않는다).
+  //   계약 번호 · 비고는 **전체 범위 관리자 판본만**(원장은 전 법인 자산을 서비스 태그 하나로 찾는다 — 엣지가 남의 태그를 자기 서버로 올리면 범위 관리자에게
+  //   다른 법인 자산의 계약 번호 · 비고가 보였다: 반증 A4. 날짜 · 종류는 판본 구분 없이). 서비스 태그 · 주소는 싣지 않는다.
+  //   엣지 포탈에서는 답하지 않는다(원장 · 기준 · 폴더 저장소는 중앙에 있다 — 엣지의 빈 로컬 저장소로 ‘원장에 없음’ · ‘미분류’ 라 하지 않는다: 반증 A11).
+  api.get('/tools/bm-folders/check', toolsPerm, async (req, res) => {
+    try {
+      if (isEdgeNode()) return res.status(404).json({ ok: false, error: 'central-only', reason: '물리서버 점검(보증 · 펌웨어 기준선 · BIOS 편차)은 중앙 포탈에서 봅니다.' });
+      // 폴더 저장소를 못 읽었으면 목록과 같이 503 — 못 읽은 배치를 ‘미분류’ 로 판정하지 않는다(반증 A10)
+      if (storeLoadError()) return res.status(503).json({ ok: false, error: 'registryUnreadable', reason: '물리서버 폴더 저장소를 읽지 못해 점검을 판정하지 않았습니다.' });
+      const snap = store.get();
+      const { members, allowed, b } = await stateFor(req, snap);
+      const hide = !!allowed;
+      const admin = isAdminDetailUser(req.user);
+      const visible = members.filter((m) => (m.corp ? (!allowed || allowed.has(m.corp)) : (!hide && m.kind === 'bm')));
+      const k = keyResolverFor(hide, visible.map((m) => m.key))(typeof req.query.key === 'string' ? req.query.key.slice(0, 200) : '');
+      const m = k ? visible.find((x) => x.key === k) : null;
+      if (!m) return res.status(404).json({ ok: false, error: 'not_found', reason: '서버를 찾지 못했습니다.' });
+      res.set('Cache-Control', 'no-store');
+      let hxOf = null;
+      try { hxOf = await hwLookupFactory(); } catch { hxOf = null; }
+      const ci = checkInputs();
+      // 한 대의 판정에는 **그 법인의 서버만** 넣는다 — 묶음이 법인을 넘지 않아 결과가 같고, 드로어를 열 때마다 함대 전체를 다시 판정하지 않는다
+      //   (반증 A6 실측: 658대 전체를 넣으면 한 번에 83ms 동기 — /hw 는 2ms). 법인이 없는 서버는 묶음이 없으므로 자기만.
+      const peersOf = m.corp ? visible.filter((x) => x.corp === m.corp) : [m];
+      const c = bmCheckFor({ members: peersOf, placeOf: b.placeOf, hxOf, assets: ci.assets, adminBase: ci.adminBase, today: todayStamp(), advisories: ci.advisories }).ofMember(m);
+      const w = c.warranty ? (admin && !hide ? c.warranty : { ...c.warranty, contract: '', note: '' }) : null;
+      const place = b.placeOf.get(m.key);
+      return res.json({
+        ok: true, kind: m.kind, soonDays: WARRANTY_SOON_DAYS,
+        warranty: w, ...(ci.assetsErr ? { assetsUnreadable: true } : {}),
+        // invAt = 판정에 쓴 인벤토리를 읽은 시각(없으면 null) — 화면이 ‘언제 값인가’ 를 보인다(반증 A7)
+        ...(m.kind === 'bm' ? { adv: c.adv || null, ...(ci.advErr ? { advUnreadable: true } : {}) } : {}),
+        ...(m.kind === 'bm' ? { fw: c.fw || null, bios: c.bios || null, invAt: c.invAt ?? null, model: m.model || '', path: place?.src ? place.path : '',
+          ...(ci.baseErr ? { baselineUnreadable: true } : {}), ...(!hxOf ? { noHw: true } : {}),
+          // 기준 지정(전 법인 공통)은 조회 ∧ 쓰기 무제한 관리자만 — 단추를 그릴지의 표지(집행은 관리 라우트)
+          canBaseline: fleetAdmin(req.user, snap) && !!m.model && !ci.baseErr } : {}),
+      });
+    } catch (e) { if (!res.headersSent) res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); }
+  });
+
+  // v3.48 같은 묶음 대비(시안 ⑨) — 드로어가 열릴 때 1건. 묶음 = 같은 법인 · 같은 폴더 · 같은 모델(BIOS 편차와 같은 묶음 — 폴더에 넣은 서버만).
+  //   CPU · 메모리 · 전력 = 지난 24시간 평균 / 흡기 온도 = 지금 값. 값은 그 서버를 수집하는 노드가 낸다: 이 노드 서버는 로컬, 엣지 위임 서버는 **엣지마다 요청 1개**
+  //   (같은 (엣지, 키 묶음)은 60초 동안 한 번 — trendOnce). 판정은 bmcheck/peer.js 하나. 응답에는 다른 서버의 이름 · 키를 싣지 않는다(값 점만 — 묶음은 같은 법인이다).
+  //   범위 밖 · 없는 키 404(/hw 와 같은 노출 규칙) · 엣지 실패 사유(주소가 들어갈 수 있다)는 전체 범위 관리자 판본만.
+  api.get('/tools/bm-folders/peer', toolsPerm, async (req, res) => {
+    try {
+      if (isEdgeNode()) return res.status(404).json({ ok: false, error: 'central-only', reason: '같은 묶음 대비는 중앙 포탈에서 봅니다.' });
+      if (storeLoadError()) return res.status(503).json({ ok: false, error: 'registryUnreadable', reason: '물리서버 폴더 저장소를 읽지 못해 묶음을 정하지 못했습니다.' });
+      const snap = store.get();
+      const { members, allowed, b } = await stateFor(req, snap);
+      const hide = !!allowed;
+      const admin = isAdminDetailUser(req.user);
+      const visible = members.filter((m) => (m.corp ? (!allowed || allowed.has(m.corp)) : (!hide && m.kind === 'bm')));
+      const k = keyResolverFor(hide, visible.map((m) => m.key))(typeof req.query.key === 'string' ? req.query.key.slice(0, 200) : '');
+      const me = k ? visible.find((x) => x.key === k) : null;
+      if (!me) return res.status(404).json({ ok: false, error: 'not_found', reason: '서버를 찾지 못했습니다.' });
+      res.set('Cache-Control', 'no-store');
+      const hours = 24;
+      const base = { ok: true, hours, min: PEER_MIN, minSamples: PEER_AVG_MIN_SAMPLES, minCoverage: PEER_AVG_MIN_COVERAGE };
+      if (me.kind !== 'bm') return res.json({ ...base, why: 'esxi' });
+      const place = b.placeOf.get(me.key);
+      if (!place?.src || !me.corp) return res.json({ ...base, why: 'unplaced' });
+      if (!t(me.model)) return res.json({ ...base, why: 'no-model' });
+      const model = lc(me.model);
+      const all = visible.filter((x) => x.kind === 'bm' && x.corp === me.corp && lc(x.model) === model && (() => { const p = b.placeOf.get(x.key); return !!p?.src && p.path === place.path; })());
+      const group = { path: place.path, model: me.model, size: all.length };
+      if (all.length < PEER_MIN) return res.json({ ...base, why: 'few', group });
+      // 상한 — 이 서버는 반드시 넣는다(넘친 수를 밝힌다). 나머지는 **원문 키 순서**로 고른다 — 보이는 순서(판본마다 다르다)로 고르면
+      //   같은 서버가 관리자에게는 ‘묶음 안’ · 운영자에게는 ‘묶음 밖’ 이었다(반증 A1).
+      const others = all.filter((x) => x.key !== me.key).sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+      const used = [me, ...others.slice(0, PEER_GROUP_MAX - 1)];
+      if (all.length > used.length) group.truncated = all.length - used.length;
+      const to = Date.now(); const from = to - hours * 3_600_000;
+      const D = await trendDeps();
+      // 대상 해석은 추이와 같은 함수 하나(resolvePerfTarget — (법인, 키) 쌍). 대상 목록 두 조회는 이 요청 동안 한 번만 만든다(서버 수만큼 다시 만들지 않는다).
+      const onceOf = (fn) => { let p = null; return () => (p ||= Promise.resolve().then(() => (typeof fn === 'function' ? fn() : null))); };
+      const T = { currentTargets: onceOf(D.targets?.currentTargets), listEdgeBmUsage: onceOf(D.targets?.listEdgeBmUsage) };
+      const local = []; const byAgent = new Map(); const targetOf = new Map(); let noTarget = 0;
+      for (const m of used) {
+        if (!m.usageKey) { noTarget += 1; continue; }
+        let found = null;
+        try { found = await D.resolvePerfTarget(req, T, { allowed, isAdmin: admin, key: m.usageKey, vcenterId: m.corp }); } catch { found = null; }
+        // 사용률 수집 대상이 아니다(그 법인 수집 꺼짐 등) — CPU · 메모리는 없다. 전력 · 흡기 온도는 그 서버를 수집하는 노드가 iDRAC 값으로 답한다(사용률 수집과 무관):
+        //   엣지가 올린 서버(remoteAgent — 인증된 엣지 이름)는 그 엣지에, 그 밖은 이 노드에 같은 키로 묻는다(그 노드의 목록에 없으면 값 없음으로 돌아온다).
+        if (!found || D.perfTargetFail(found)) {
+          noTarget += 1;
+          const ag = t(m.remoteAgent) || (t(m.collectorId) && typeof D.collectorName === 'function' ? await D.collectorName(t(m.collectorId)).catch(() => '') : '');
+          found = ag ? { via: 'edge', agent: ag, realKey: m.usageKey } : { via: 'local', agent: '', realKey: m.usageKey };
+        }
+        targetOf.set(m.key, found);
+        if (found.via === 'local') local.push(found.realKey);
+        else { const a = byAgent.get(found.agent) || []; a.push(found.realKey); byAgent.set(found.agent, a); }
+      }
+      const got = new Map();   // `${agent}\u0000${realKey}` → 값 줄
+      const put = (agent, rows) => { for (const r of Array.isArray(rows) ? rows : []) if (r && typeof r.key === 'string') got.set(`${agent}\u0000${r.key}`, r); };
+      const fails = [];
+      const jobs = [];
+      let unknown = 0;   // 수집 노드가 자기 목록에 없다고 답한 서버 수(값 없음의 이유 — 반증 A8)
+      // 이 노드 계산에는 이 요청에서 만든 대상 목록을 넘긴다(대상 목록을 두 번 만들지 않는다 — 반증 A7)
+      if (local.length) jobs.push((async () => { const r = await D.localPeer({ keys: local, from, to, deps: { targets: T.currentTargets } }).catch((e) => ({ ok: false, reason: String(e?.message || e).slice(0, 160) })); if (r?.ok) { put('', r.rows); unknown += numOrNull(r.unknown) || 0; } else fails.push({ agent: '', kind: 'local', reason: r?.reason || '' }); })());
+      for (const [agent, keys] of byAgent) {
+        jobs.push((async () => {
+          // 합치는 열쇠 = (엣지, 구간, 키 묶음) — 키 묶음은 JSON 으로(글자 join 은 구분자가 든 키에서 다른 묶음과 겹친다)
+          const sig = JSON.stringify([...keys].sort());
+          const r = await trendOnce(`peer|${agent}|${hours}|${sig}`, () => D.edgePeer(agent, { keys, from, to }));
+          if (r?.ok) { put(agent, r.body?.rows); unknown += numOrNull(r.body?.unknown) || 0; } else fails.push({ agent, kind: r?.kind === 'old-version' ? 'old-version' : 'edge-fail', reason: r?.reason || '' });
+        })());
+      }
+      await Promise.all(jobs);
+      // 24시간 평균은 표본 수 · 구간 비율이 모두 될 때만 값으로 본다(avgValueOf — 최근 1시간의 점들을 하루 평균이라 하지 않는다).
+      //   전력도 수집 노드의 24시간 평균이다 — 목록 행의 ‘지금 전력’ 으로 대신 채우지 않는다(기준이 다른 값을 한 지표에 섞지 않는다).
+      let self = null;
+      const cut = (s) => (s && typeof s === 'object' ? { n: numOrNull(s.n), cov: numOrNull(s.cov) } : null);
+      const rows = used.map((x) => {
+        const f = targetOf.get(x.key);
+        const v = f ? got.get(`${f.via === 'local' ? '' : f.agent}\u0000${f.realKey}`) : null;
+        if (x.key === me.key && v) self = { cpu: cut(v.cpu), mem: cut(v.mem), power: cut(v.power) };
+        return { id: x.key, cpu: avgValueOf(v?.cpu), mem: avgValueOf(v?.mem), power: avgValueOf(v?.power), inlet: numOrNull(v?.inletC) };
+      });
+      const j = judgePeerGroup(rows, me.key);
+      const oldEdge = fails.filter((f) => f.kind === 'old-version').length; const edgeFail = fails.filter((f) => f.kind === 'edge-fail').length; const localFail = fails.filter((f) => f.kind === 'local').length;
+      return res.json({
+        ...base, group: { ...group, used: used.length }, metrics: j.metrics, out: j.out, judged: j.judged, ...(self ? { self } : {}),
+        notes: { ...(noTarget ? { noTarget } : {}), ...(unknown ? { unknown } : {}), ...(oldEdge ? { oldEdge } : {}), ...(edgeFail ? { edgeFail } : {}), ...(localFail ? { localFail } : {}) },
+        ...(admin && !hide && fails.length ? { reasons: fails.map((f) => String(f.reason || '').slice(0, 200)).filter(Boolean).slice(0, 5) } : {}),
+      });
     } catch (e) { if (!res.headersSent) res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); }
   });
 

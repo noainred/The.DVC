@@ -149,6 +149,8 @@ export function startPartFaultPoller() {
   _timer = setInterval(() => { if (partFaultEnabled().enabled) runPartFaultsNow().catch(() => {}); }, intervalMs());
   _timer.unref?.();
   setTimeout(() => { if (partFaultEnabled().enabled) runPartFaultsNow({ reason: 'boot' }).catch(() => {}); }, 90_000).unref?.();
+  // v3.51 알림 단계 올리기(⑪) — 중앙만 · 60초마다(꺼져 있으면 보내지 않는다 — 설정을 매 회차 다시 본다)
+  import('./escalationRun.js').then((m) => m.startEscalation()).catch((e) => console.warn(`[partfault] 알림 단계 올리기를 시작하지 못했습니다: ${String(e?.message || e).slice(0, 120)}`));
 }
 
 export async function partFaultStatus() {

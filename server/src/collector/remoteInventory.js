@@ -48,7 +48,7 @@ const scalar = (v) => (typeof v === 'boolean' ? v : (typeof v === 'number' ? (Nu
 const ST = ['health', 'state'];
 const INV_SHAPE = {
   // v2.973(A1~A14): 엣지 compactInv 가 새로 싣는 값 — **짝**(한쪽만 넓히면 버려진다). bios.attributes 는 아래 sanitizeRemoteInv 가 따로(목록 키만).
-  system: ['o', ['model', 'serviceTag', 'biosVersion', 'hostName', 'health', 'manufacturer', 'powerState', 'assetTag', 'uuid', 'osName', 'osVersion']],   // v3.3.0: osName · osVersion(엣지 compactInv 와 짝)
+  system: ['o', ['model', 'serviceTag', 'biosVersion', 'hostName', 'health', 'manufacturer', 'powerState', 'assetTag', 'uuid', 'osName', 'osVersion', 'indicatorLED']],   // v3.3.0: osName · osVersion · v3.50 indicatorLED(엣지 compactInv 와 짝)
   cpu: ['o', ['model', 'count', 'cores', 'health', 'threads']],
   memory: ['o', ['totalGiB', 'health']],
   gpus: ['a', ['model', 'name', 'memoryMiB', ...ST, 'manufacturer']],
@@ -60,7 +60,7 @@ const INV_SHAPE = {
   firmware: ['a', ['type', 'version', 'name']],
   nics: ['a', ['name', 'model', 'firmware'], { ports: ['id', 'link', 'speedMbps', 'mac'] }], // v2.682(R3E-01): mac — 엣지 compactInv 와 짝
   cpus: ['a', ['socket', 'model', 'cores', ...ST, 'threads', 'maxSpeedMHz', 'manufacturer']],
-  disks: ['a', ['name', 'model', 'capacityGB', 'media', 'protocol', ...ST, 'predictiveFailure', 'rpm']],
+  disks: ['a', ['name', 'model', 'capacityGB', 'media', 'protocol', ...ST, 'predictiveFailure', 'rpm', 'lifeLeftPct']],   // v3.51 lifeLeftPct(엣지 compactInv 와 짝)
   psus: ['a', ['name', 'model', 'manufacturer', 'capacityWatts', 'inputWatts', 'outputWatts', 'lineInputVoltage', ...ST, 'firmware']],
   memoryDimms: ['a', ['locator', 'sizeGB', 'type', 'speedMHz', 'manufacturer', 'partNumber', ...ST, 'rank']],
   storageControllers: ['a', ['name', 'model', 'firmware', 'health', 'speedGbps'], null, ['protocols']],

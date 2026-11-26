@@ -125,7 +125,8 @@ export async function deviceIfaces(dev, snap, { range = '24h', now = Date.now(),
   const off = DAY_OFFSET_MIN * 60_000;
   const from = Math.floor((now + off) / bucketMs) * bucketMs - off - (IFACE_CELLS - 1) * bucketMs;
   const staleMs = Math.max(15 * 60_000, sampleMs * 3);
-  const restSample = dev.collectMethod !== 'ssh' && dev.nodeLoadEnabled !== false;
+  // v3.46.0: SSH 로 등록한 Unity 도 5분 표본이 있다(REST 먼저 · 안 되면 uemcli — collectors/unityMetricsSsh.js).
+  const restSample = dev.nodeLoadEnabled !== false;
   let unitMap = new Map(); let stats = new Map(); let lasts = new Map(); let states = new Map(); let db = true; let allUnits = [];
   let statesKnown = true;
   try { const st = await ifaceStatesOf(dev.id); if (st) states = st; else statesKnown = false; } catch { statesKnown = false; }
@@ -172,7 +173,7 @@ const kindCounts = (units) => { const o = {}; for (const u of units || []) { con
  * v3.36.1(사용자 신고 '사용량이 보이지 않음' — 실제 현장 496 포트 전부 '못 읽음'): 처리량이 비는 **이유 판정**(순수 — 한 곳).
  * 예전에는 표본은 있는데 포트 이름이 짝지어지지 않으면 사유가 빈 글자('')였고, SP 값만 있고 포트 단위가 없으면 '아직 표본이 없습니다' 로 틀리게 말했다.
  * 순서가 곧 우선순위다(앞이 더 근본 원인). '' = 사유 없음(읽힌 포트가 있다 — 일부만 비면 partial 은 화면이 따로 센다).
- *  · no-config / collect-failed — 구성(포트 목록)이 없다          · ssh — SSH 수집 장비(사용자 결정 — 처리량은 REST 장비만)
+ *  · no-config / collect-failed — 구성(포트 목록)이 없다          · (ssh — v3.46.0 에 없앴다: SSH 장비도 REST 먼저 · 안 되면 uemcli 로 표본을 읽는다)
  *  · sample-off — 표본 수집 꺼짐                                  · db-unavailable — DB 를 못 열었다
  *  · sample-failed — 표본이 하나도 없고 마지막 시도가 실패했다(진단 오류 문구가 근거)
  *  · no-samples — 표본이 하나도 없다(첫 표본 전 · 엣지에서 실패해 중앙에 안 왔을 수 있다)
@@ -182,7 +183,7 @@ const kindCounts = (units) => { const o = {}; for (const u of units || []) { con
  */
 export function throughputWhyOf({ ports = 0, snapFailed = false, method = 'api', sampleOff = false, db = true, units = 0, portUnits = 0, upPorts = 0, unmatched = 0, withData = 0, diag = null } = {}) {
   if (!ports) return snapFailed ? 'collect-failed' : 'no-config';
-  if (method === 'ssh') return 'ssh';
+  // v3.46.0: SSH 장비도 표본을 읽으므로 'ssh' 는 사유가 아니다(엣지가 아직 옛 판이면 표본이 없어 no-samples 로 말한다).
   if (sampleOff) return 'sample-off';
   if (!db) return 'db-unavailable';
   if (!units) return diag && diag.ok === false ? 'sample-failed' : 'no-samples';

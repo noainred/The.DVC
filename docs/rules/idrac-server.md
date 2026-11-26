@@ -2080,3 +2080,69 @@
     웹은 ‘SSH 오류’ 문장에 사유를 숨겼다) · 결과 사유 줄을 보인다 · 중앙의 엣지 스냅샷 정제 code 표를 `SNAPSHOT_CODES` 하나로(예전 사본에 auth-unresolved 가 없어 ssh-error 로 바뀌었다).
     엣지 대행 대상은 공개 대상 판정 `snapshotPublicPathIssue`(demoOs · paths · `osAuthUnresolved` — publicTarget 이 osHost.authError 로 만드는 참 · 거짓 · 사유 글은 싣지 않는다) — 시험이 `snapshotPublicPathIssue(publicTarget(x)) === snapshotOsPathIssue(x)` 를 대조.
     게이트(`snapRunGateOf`)에는 판정 사본을 두지 않는다(라우트가 두 함수를 넘긴다). (b) 엣지 대행 GET 보관분에 `pathBasis { via:'edge', at: 보관분 snapAt }` — 화면이 ‘실행 칸은 엣지 보관분(시각) 기준 · 엣지에서 OS 계정을 바꿨다면 ‘지금 가져오기’ 뒤에 맞습니다’ 를 한 줄로.
+
+### v3.50 물리서버 운영(설계 docs/design/bm-feature-proposals ⑩ ⑥ ⑤ ⑫ ④ · 구현 기록 §12)
+
+- **⑩ 건강 점수**(`server/src/bmcheck/health.js` — 판정 코어 하나): 100 에서 **감점 합산**(시안대로 · Dell 의 ‘가장 큰 감점 하나’ 방식이 아니다 — 사용자가 바꿀 수 있는 결정). 입력은 목록이 이미 가진 판정뿐(부품 장애 수 · v3.45 `chk`) — 새 수집 없음.
+  **못 읽은 항목은 감점하지 않고 따로 센다**(`u` · `uk`). **점수는 견준 항목이 `HEALTH_MIN.judged`(2)개 이상이고 볼 항목의 절반 이상일 때만** — 아니면 ‘판정 못 함’ + 견준 사실(`d` · `z`)만
+  (반증 B1: 부품 장애 0건 하나만 견준 서버가 목 550대 중 469대 ‘100 · 양호’ 였다). 갈림(split)은 **견준 줄이 있을 때만**(`fwj` · `biosj` > 0) 견준 것(반증 A1 — 판정 함수는 견준 줄 0 이어도 split 을 낸다).
+  펌웨어 감점은 **뒤처짐만** — 순서를 모르는 ‘다름’(`differ` · `fwd`)은 감점하지 않는다(점검 화면은 ‘다름’ 그대로 · 반증 B8). 보증 감점 줄은 상태(끝남 · 곧 끝남)를 싣는다.
+  **보안 권고는 점수에 넣지 않는다**(따로 보인다 — 화면 머리 문구가 밝힌다). 화면은 견줌 · 모름을 서버 값(`hs.z` · `hs.uk`)으로만 그린다(웹에서 다시 판정하지 않는다).
+  감점 크기 · 경계 · 조건(`HEALTH_RULES` · `HEALTH_BANDS` · `HEALTH_MIN`)은 목록 응답 `check.health` 로 화면에 준다. 1440px 표는 ‘부품 장애’ 칸 아래 줄 · 400px 카드는 점수가 있을 때 배지.
+- **⑥ 위치 LED**(`server/src/idrac/ledState.js`): 보이기만 — on · blink · off · ''(못 읽음 — 꺼짐이 아니다). 이 노드는 인벤토리 `system.indicatorLED`, 수집 서버 서버는 축약 · 정제 화이트리스트 짝
+  (`collector/compactInv.js` ↔ `remoteInventory.js INV_SHAPE.system` — 빠져 늘 못 읽음이었다: 반증 A5), 엣지 서버는 함대 push `led`(중앙 `ledStateOf` 로 다시 정제 · 검증된 이름만 · `/hw` 는 요약이 없어도 싣는다).
+  **켜기 · 끄기는 없다**(화면 문구도 출시 약속을 하지 않는다). 의존 방향: `idrac/*` 는 `bmcheck/*` 를 가져오지 않는다.
+- **⑤ 하드웨어 이벤트 로그**(`server/src/idrac/hwLog.js` · 라우트 `GET /tools/bm-folders/hwlog` · 엣지 `GET /api/collector/bm-hwlog` · 중앙 `central/bmHwLogPull.js`):
+  SEL 만. 읽기는 디스크 분석의 `readSel` 을 고르기만 바꿔 다시 쓴다(`pick` · `eventsMax` · `pagesMax` · **`tailFirst`** — 기본값은 그대로). 쪽 상한(1,000건)을 넘고 장비가 **오래된 것부터** 주면
+  첫 쪽 뒤 끝쪽(가장 새 기록)으로 건너뛰고 건너뛴 수를 `gap` 으로 밝힌다(반증 A10 — 정렬을 모르면 건너뛰지 않고 ‘가장 새 기록이 빠졌을 수 있다’ 고 쓴다). 장비 시한 30초는 세션을 끊는다.
+  **주 iDRAC 폴러가 인증 실패로 멈춘 서버는 장비에 묻지 않는다**(`auth-stopped` · `idracAuthStopFor` — 디스크 분석 수동 점검과 같은 판정 · 반증 A13).
+  **그 서버를 수집하는 노드가 읽는다**(`hwLogSourceOf` 순수 함수). 같은 서버는 잠깐 합친다(중앙 `trendOnce` · 엣지 `_hwlogMemo` — 화면 문구에 주기 숫자를 박지 않는다). 브라우저 요청은 60초 · 재시도 0(서버 시한보다 길게).
+  화면은 **단추로 읽는다**. 가림(`maskHwLogText`)은 알려진 꼴만: IPv4(낱말에 붙어도 · 옥텟 0~255 · 앞자리 0 없음 — ‘7.00.00.00’ 판 번호는 그대로) · IPv6(대괄호 · 영역 포함) · MAC · 글자가 든 FQDN ·
+  ‘for/using/user 계정 from’ 꼴 계정 · 서비스 태그(원문 위 대소문자 무시 정규식 — `İ` 같은 글자로 위치가 어긋나지 않게). 화면은 전체 범위 관리자 판본만 원문 · 엣지 실패 사유도 그 판본만.
+- **⑫ 제조사 케이스**(`bm-cases.json` · `bmcheck/store.js upsertCase` · `removeCase`): 포탈은 접수하지 않는다. **서비스 태그 + 법인**으로 묶는다(같은 태그가 다른 법인 서버로 나타나도 남의 법인 케이스를 읽거나 고치지 못한다 —
+  다른 법인 · 다른 서버의 id 는 404 · 반증 A2). 쓰기 · **끝난 케이스 지우기**(`POST /tools/bm-folders/cases/delete` — 상한 5,000 건이 차면 지울 길이 없었다: 반증 A11) = admin/operator · 데모 아님 ·
+  그 법인 쓰기 범위(조회 밖 404 → 쓰기 밖 403) · 감사. **접수 자료 묶음은 제조사에 보내는 파일이라 기록 글자를 판본과 관계없이 가린다**(LC 로그 로그인 실패 문구에 계정 · 주소 — 반증 A3) ·
+  계약 번호는 전체 범위 관리자만 · **못 읽은 것은 null + `unread` 이유**(빈 목록 = 읽었고 없음 — 반증 B6) · 부품 장애는 수집 주체(agent) · 태그로 SQL 에서 고른다(`partfault/db.js openFaultsOfDevice` — 반증 A14).
+- **④ 보안 권고**(`bm-advisories.json` · `bmcheck/advisory.js`): 표는 **사람이 확인해 올린 것**(포탈은 인터넷에서 가져오지 않는다 · 권고 번호를 코드에 박지 않는다). 상태: no-table(대조 안 함) · no-fw ·
+  **unmatched**(맞는 권고 줄 없음 — 안전하다는 뜻이 아니다) · **unknown**(맞는 줄이 모두 순서 모름) · clear · hit(반증 B2). 섞인 줄은 ‘모름’ 으로 센다(반증 A6) · 걸린 수는 자르기 전 `total`(반증 A7) ·
+  CSV 의 심각도 · 종류 · 머리글은 `Object.hasOwn` 조회(원형 열쇠가 오류 줄이 되지 않던 것 — 반증 A8) · 오류 번호는 **표의 행 번호**(반증 A12). 올리기 = 검증 → 적용(같은 판정 · 미리본 표와 다르면 409 ·
+  실패 뒤 다시 검증) · 머리글만 있는 파일은 ‘표 비우기’(묻고 적용). 목록에 ‘보안 권고 N’ 빠른 거르기(표가 있을 때만 — 반증 B3).
+- 회귀: `server/test/bmOps350.test.js` · `server/test/bmHwLogRoundTrip350.test.js`(실제 collector ↔ pull 왕복 · 끝쪽 읽기) · 웹 `bmFolders/bmOps350.test.jsx`(구역은 `initial` 로 응답별 렌더).
+  반증 2인(A 서버 15건 · B 화면 17건) 결과와 반영은 `docs/rules/audits.md` ‘v3.50 물리서버 운영 반증’.
+
+### v3.51 부품 수명 지표 · 알림 단계 올리기(설계 docs/design/bm-feature-proposals ⑧ ⑪ · 구현 기록 §13)
+
+- **⑧ SSD 잔여 수명**(`server/src/idrac/partLife.js` — 판정 코어 하나): Redfish Drive 표준 속성 `PredictedMediaLifeLeftPercent`(인벤토리가 디스크마다 이미 GET 하는 응답 — **추가 요청 0**).
+  0~100 의 수만(아니면 null — 0 이 아니다). SSD 판정은 `mediaKindOf` · `isSsd` 하나(하드웨어 요약도 이것 — 두 벌이면 요약의 ssd 수와 수명 n 이 어긋났다: 반증 A14).
+  **매체 빈칸 디스크는 SSD 로도 HDD 로도 세지 않는다**(화면은 ‘SSD 없음’ 대신 ‘SSD 로 확인한 디스크 없음 · 매체를 모르는 디스크 N개’).
+  표지: 낮음 = `LIFE_LOW_PCT`(10) 이하 · 같은 서버 · 같은 모델 SSD 가운데값보다 `LIFE_PEER_GAP`(20)%p 이상 낮음(비교할 다른 SSD 가 `LIFE_PEER_MIN`(2)개 이상일 때만). 90일 추세는 이력 저장소가 없어 내지 않는다.
+  요약 `disk.life {n, read, min}` 는 **줄 상한과 관계없이 전부에서** 센다(반증 A15) · 중앙 정제는 read ≤ n · 범위 밖 min null · 구버전 엣지는 키 없음.
+  **엣지 축약 ↔ 중앙 정제 화이트리스트 짝**(`collector/compactInv.js` ↔ `remoteInventory.js INV_SHAPE.disks` 의 `lifeLeftPct`): 읽었으나 값 없음은 null 로 싣고, **읽기 전 판 인벤토리(키 없음)는 싣지 않는다** —
+  상세 줄의 `stale` 이 ‘수명 값을 읽기 전 판의 인벤토리’ 와 ‘장비가 값을 주지 않음’ 을 가른다(반증 B7).
+- **⑧ 메모리 교정 오류 경고**(`memCeOf` · `/hwlog` 응답 `memCe`): 장비가 DIMM 별 교정 오류 **건수**를 주는지 확인하지 못해, SEL 의 **교정 오류 경고 기록 수**를 슬롯별로 센다(오류 건수 자체가 아니다 — 화면이 밝힌다).
+  문구는 ‘correctable · corrected’ **바로 뒤에** (memory)(ECC) error 가 와야 한다(설정 문구 ‘… error corrected after reboot’ 를 세지 않게 — 반증 A19) · ‘uncorrect’ 는 뺀다.
+  슬롯: Dell `DIMM_B3` · `DIMM.Socket.B3` → B3 · HPE ‘Processor 1, Memory Module 3’ → P1-M3 · 모르면 `unknownSlot`(슬롯 상한 64 를 넘은 것도 거기로 — 반증 S4).
+  **`covered`(지난 30일을 다 셌다)는 장비가 준 것을 다 읽었고(멈춤 · 건너뜀 없음 · 전체 수 ≤ 읽은 수) 화면 줄이 기간을 덮을 때만** — 일부만 읽었으면 0 을 ‘없음’ 으로, 건수를 ‘30일 건수’ 로 쓰지 않는다(반증 A9 · B8).
+  세기는 가리기 전 원문에서 · 이 노드 서버는 인벤토리 DIMM 위치로 0 인 슬롯도 줄로.
+- **⑪ 알림 단계 올리기 · 당직**(판정 순수 `server/src/partfault/escalation.js` · 실행 `escalationRun.js` · 설정 `partfault-escalation.json` · 진행 기록 `partfault-escalation-state.json`):
+  **기본 꺼짐 · 중앙만**(엣지는 부품 장애를 판정하지 않는다 · `centralUrl` 이면 시작하지 않는다) · 회차 주기는 `ESC_TICK_MS`(화면은 API `tickMs` 로 — 숫자를 박지 않는다: 반증 B10) · 재진입 가드 · 보내기는 순차.
+  **시간은 그 장애를 정책 대상으로 처음 본 때부터 센다**(장애 시각이 아니다 — 켜기 · 정책 수정 · 상태가 정책 안으로 들어옴 · 다시 켬 직후 오래된 장애에 한꺼번에 보내지 않게: 반증 A2 · A5).
+  열려 있는 동안은 정책 밖이어도 기록을 둔다(이상 ↔ 주의 왕복에 보낸 단계를 다시 보내지 않게 — 반증 A3) · 장비 키만 바뀐 같은 장애(같은 수집 주체 · 장비 id · 종류 · 부품)는 기록 · 확인을 이어받는다(반증 A4) ·
+  꺼져 있어도 닫힌 장애의 기록은 지운다(다시 열린 장애가 옛 확인을 물려받지 않게).
+  한 회차에 **가장 높은 지난 단계 하나**만 보낸다(낮은 단계는 ‘건너뜀’ 으로 적는다) · 한 회차 `ESC_SENDS_PER_RUN`(20)건 · 넘으면 다음 회차 · 기록 상한 `ESC_ITEMS_MAX`(5,000)을 넘는 장애에는 보내지 않는다(기록 못 하면 매 회차 다시 보내므로 — 반증 A7).
+  **‘보냄’ 은 받는 곳 하나 이상에 갔다고 확인한 것만**(메일 `ok` · 채널 `deliveryOutcome === 'delivered'`) — 메일 꺼짐 · 시간당 한도 · 채널 실패 · 켜진 채널 없음 · 오늘 당직 없음은 ‘안 감’(fail)으로 적고 다음 회차에 다시,
+  `ESC_RETRY_MAX`(3)번째면 그만둔다(give). 행 표지는 간 단계(`step`)와 안 간 단계(`tried` · `gaveUp`)를 가른다(반증 A8 · B1).
+  **보내지 않는 경우**: 꺼짐 · 부품 장애 점검 꺼짐 · **데모(mock)로만 켜진 점검**(합성 장애가 실제 채널로 — 반증 S1 · poller.js v2.708 규칙) · 진행 기록 손상(보존 뒤 지금부터 셈)이나 **읽기 오류**(보낸 단계를 모르는 채 보내지 않는다) ·
+  정비 창 보류 장비(`partfaultMaintHoldPeek`) · 확인함. 보내기 직전에 그 사이 확인됐는지 다시 보고, 회차 끝 저장은 그 사이 들어온 확인을 덮지 않는다(반증 A1).
+  채널 억제 열쇠에 수집 주체를 넣는다(두 엣지의 같은 파트 키가 서로를 억제하지 않게 — 반증 A17).
+- **⑪ 확인**(`POST /tools/part-faults/ack`): 도구 권한 · 운영자 이상(`writeRole`) · **전체 범위**(`fullScopeOnly`) · 데모 계정 아님(`canAck`) · 감사. 열쇠 `ackId` 는 키를 싣지 않는 HMAC(프로세스마다 비밀 — 재시작 뒤 옛 화면은 404, 사유가 재시작 가능성을 밝힌다)
+  이고 입력에 수집 주체가 들어간다(다른 법인 같은 파트 키와 갈린다). **표지는 가리기 전 원본 행으로 만든다**(IP 로 등록한 장비의 비관리자 판본에서 열쇠가 어긋나 404 — 반증 P06).
+- **⑪ 설정**(`GET/PUT /tools/part-faults/escalation` — 관리자 · 전체 범위 · 감사 · 데모 READ_DENY): 저장은 엄격 검증(조용히 고치지 않고 사유 — ‘정책 N · K단계’ · 한글 요일 · 메일 CR/LF · 공백 거절 ·
+  수집 주체 이름에 쉼표 · 세미콜론 · 제어 문자 · 원형 이름 거절 · 64개 · 중복 메일은 지운 뒤 센다). 손상 · 모르는 판은 꺼짐으로 읽고 쓰기 409(보존). `enabledAt` 은 켜는 순간만 바뀐다.
+  당직: 수집 주체(이 포탈 = '' · 엣지 이름 · 모두 = '*')마다 요일별 — **그 주체 표의 그 요일이 비면 ‘모두’ 표의 그 요일**(요일은 포탈 서버 시각 · 법인 현지 시각이 아니다).
+  진행 기록은 상태 파일(`registerStateFile` · 복원은 지금 것 유지 `RESTORE_KEEP_CURRENT`).
+- **⑪ 화면**: 1단계(지금 부품 장애 알림)가 나갔다고 단정하지 않는다(‘2단계 대기’ — 즉시 알림은 데모 · 상한으로 안 나갈 수 있다: 반증 B6) · 같은 수집 주체의 당직표가 겹치면 저장을 막는다(반증 B2) ·
+  저장하면 부모 목록을 다시 읽는다(반증 B3) · 확인 결과는 그 행에(반증 B4) · 긴 확인자 이름은 말줄임(반증 B5) · 고친 칸은 지난 거절 사유를 지운다 · 저장 중 칸 잠금 · 바뀐 칸이 있으면 닫기 전에 묻는다.
+- 회귀: `server/test/bmLife351.test.js` · `server/test/partFaultEscalation351.test.js` · 웹 `bmFolders/bmLife351.test.jsx` · `partFaultEsc351.test.jsx`(클릭 동작은 jsdom 이 없어 소스 꼴 + Chromium).
+  반증 2인(A 서버 20건 · B 화면 15건 + 서버 4건) 결과와 반영은 `docs/rules/audits.md` ‘v3.51 부품 수명 · 알림 단계 반증’.
+

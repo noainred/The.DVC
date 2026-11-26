@@ -19,6 +19,9 @@ import { inRetryWindow } from '../util/jsonFileRead.js';   // 128회차: 재읽�
 import { capStr, capTrim } from '../util/capStr.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { sanitizeHwSummary, mgmtHostOf } from '../idrac/hwSummary.js'; // v3.3.0 엣지 하드웨어 요약 · iDRAC 주소 정제(엣지 agent/fleetPush.js 와 짝)
+import { sanitizeFwPush } from '../bmcheck/fw.js';       // v3.45 물리서버 점검 — 엣지가 보낸 펌웨어 구성요소 정제
+import { sanitizeBiosPush } from '../bmcheck/bios.js';   // v3.45 물리서버 점검 — 엣지가 보낸 BIOS 설정 정제
+import { ledStateOf } from '../idrac/ledState.js';           // v3.50 위치 LED 상태 — 아는 값(on · blink · off)만
 import { summarizeRegistryError, REGISTRY_ERROR_LABEL } from '../util/registryCore.js'; // v2.744(회귀 검토 GD-R1)
 import { envPositive } from '../util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
 import { logAudit } from '../audit.js';   // 결정(76~105 남긴 것 · 2026-11-20) A6: 읽기 오류 창을 합칠 때의 기록
@@ -215,6 +218,12 @@ export function setEdgeFleet(agent, baremetal, generatedAt, { verified = true, v
     //   **검증된 이름(개별 토큰)만** 받는다(반증 F10 — 주소는 중앙 관리자가 누르는 링크 · SSH 대상이 된다. 공유 토큰의 이름 주장으로 남의 주소를 심지 못하게).
     ...(verified ? (() => { const hw = sanitizeHwSummary(b.hw, { now: Date.now() }); return hw ? { hw } : {}; })() : {}),
     ...(verified ? (() => { const h = mgmtHostOf(b.mgmtHost); return h ? { mgmtHost: h } : {}; })() : {}),
+    // v3.45(물리서버 점검): 펌웨어 구성요소(아는 종류만 · 이름은 다시 정규화 · 서버당 40 · 글자 상한) · BIOS 설정(아는 키만 · 글자 64자).
+    //   없거나 형식이 아니면 키를 만들지 않는다(= 보내지 않음 — 판정은 '엣지가 보내지 않음' 으로 따로 센다). hw 와 같은 이유로 **검증된 이름만** 받고
+    //   분류 서명(hashList)에는 넣지 않는다. 다른 법인 서버의 '다수 값' 을 흔들 수 없다 — 판정 묶음은 법인 안이고 법인 귀속(vcenterId)은 위 vcOf 가 소유를 본다.
+    ...(verified ? (() => { const fw = sanitizeFwPush(b.fw); return fw ? { fw } : {}; })() : {}),
+    ...(verified ? (() => { const bios = sanitizeBiosPush(b.bios); return bios ? { bios } : {}; })() : {}),
+    ...(verified ? (() => { const led = ledStateOf(b.led); return led ? { led } : {}; })() : {}),
   }));
   if (omitted) console.warn(`[central-fleet] '${a}' 베어메탈 ${valid.length}대 중 ${omitted}대를 상한으로 받지 않았습니다(에이전트당 ${PER_AGENT_MAX} · 전체 ${TOTAL_MAX}${verified ? '' : ` · 미검증 이름 합 ${UNVERIFIED_TOTAL_MAX}`}).`);
   if (vcenterBlanked) console.warn(`[central-fleet] '${a}' 가 소유하지 않은 vCenter 로 귀속된 베어메탈 ${vcenterBlanked}대 — 귀속(vcenterId)을 비웠습니다.`);
@@ -322,6 +331,8 @@ export function getEdgeFleetServers() {
         untaggedServerId: typeof b.untaggedId === 'string' && b.untaggedId ? `edge:${agent}:${b.untaggedId}` : null,
         // v3.3.0: 엣지가 보낸 하드웨어 요약 · iDRAC 주소(정제본) — 물리서버 폴더만 쓴다(관리 주소는 관리자 판본만 화면에)
         hw: b.hw || null, mgmtHost: b.mgmtHost || '',
+        // v3.45: 엣지가 보낸 펌웨어 구성요소 · BIOS 설정(정제본) — 물리서버 점검만 쓴다. 없으면 undefined(보내지 않음 — 구버전 엣지 · 인벤토리 없음)
+        fw: b.fw || undefined, bios: b.bios || undefined, led: ledStateOf(b.led) || undefined,
       });
     }
   }

@@ -325,7 +325,8 @@ test('v3.36.1 ⑪ 이유 판정(throughputWhyOf) — 짝 실패 · 포트 단위
   assert.equal(S.throughputWhyOf({ ...base, units: 0, portUnits: 0, withData: 0, diag: { ok: false } }), 'sample-failed');
   assert.equal(S.throughputWhyOf({ ...base, units: 0, portUnits: 0, withData: 0, diag: null }), 'no-samples');
   assert.equal(S.throughputWhyOf({ ...base, withData: 0 }), 'no-recent');
-  assert.equal(S.throughputWhyOf({ ...base, method: 'ssh' }), 'ssh', 'SSH 는 결정대로 먼저');
+  // v3.46.0(사용자 요청 'SSH 장비도 사용량은 REST 로, 안 되면 SSH 로'): SSH 장비도 표본을 읽으므로 'ssh' 사유는 없어졌다.
+  assert.equal(S.throughputWhyOf({ ...base, method: 'ssh' }), '', 'SSH 장비도 표본이 있으면 사유 없음');
   assert.equal(S.throughputWhyOf({ ...base, ports: 0, snapFailed: true }), 'collect-failed');
 });
 

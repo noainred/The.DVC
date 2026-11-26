@@ -5,6 +5,8 @@
  *   값이 null 인 날은 점으로 넣지 않는다(못 읽은 값은 0 이 아니다). 도달 날짜는 지금보다 앞이면 '이미 넘음'(already).
  */
 export const DAY_MS = 86_400_000;
+/** 예측 지평선(일) — 화면은 이 값을 응답으로 받아 '○년 안 · ○년 넘게' 를 쓴다(v3.42 D11 — 화면에 박지 않는다). */
+export const HORIZON_DAYS = 365;
 
 /**
  * 최소제곱 직선. points: [[ms, y], …] (y null 은 버린다).
@@ -34,10 +36,13 @@ export const dayCount = (points) => new Set((Array.isArray(points) ? points : []
  * @returns {{ state:'short'|'flat'|'already'|'eta'|'far', days:number, slopePerDay:number|null, eta:number|null, current:number|null }}
  *   short = 기록 부족 · flat = 목표 쪽으로 늘지(줄지) 않음 · already = 지금 값이 이미 목표를 넘음 · eta = horizon 안 도달 예상 · far = horizon 밖
  */
-export function forecast(points, { target, dir = 'up', minDays = 90, now = Date.now(), horizonDays = 365, minSlopePerDay = 0 } = {}) {
+export function forecast(points, { target, dir = 'up', minDays = 90, now = Date.now(), horizonDays = HORIZON_DAYS, minSlopePerDay = 0, staleDays = 3 } = {}) {
   const days = dayCount(points);
   const valid = (Array.isArray(points) ? points : []).filter((p) => p && p[1] != null);
   const current = valid.length ? Number(valid[valid.length - 1][1]) : null;
+  // v3.42(버그 점검 1회차 A2-F3): 마지막 기록이 오래됐으면 '지금 값' · '이미 넘음' 으로 쓰지 않는다(120일 전 값이 '이미 넘음' 으로 나왔다).
+  const lastAt = valid.length ? valid[valid.length - 1][0] : null;
+  if (lastAt != null && Number.isFinite(staleDays) && now - lastAt > staleDays * DAY_MS) return { state: 'stale', days, slopePerDay: null, eta: null, current, lastAt };
   if (current != null && Number.isFinite(target) && (dir === 'up' ? current >= target : current <= target)) return { state: 'already', days, slopePerDay: null, eta: null, current };
   if (days < minDays) return { state: 'short', days, slopePerDay: null, eta: null, current };
   const f = linFit(valid);

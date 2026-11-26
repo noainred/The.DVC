@@ -9,7 +9,7 @@ import express from 'express';
 import os from 'node:os';
 import { config, currentVersion } from '../config.js';
 import { buildExport } from '../collector/agent.js';
-import { registryLoadError as idracRegistryLoadError } from '../idrac/registry.js'; // v2.743(감사 EDGE-01)
+import { registryLoadError as idracRegistryLoadError, loadRegistry as loadIdracRegistry } from '../idrac/registry.js'; // v2.743(감사 EDGE-01) · v3.50 하드웨어 이벤트 로그(등록부에서 서버 찾기)
 import { summarizeRegistryError } from '../util/registryCore.js'; // v2.744(리드 후속 RY): 503 사유는 요약(원문 없음)
 import { upgradeManager } from '../upgrade/manager.js';
 import { holdPushIfBusy, clearPushHold } from '../upgrade/pushHold.js';   // 51회차 #3
@@ -321,6 +321,46 @@ collectorRouter.get('/bm-usage/baseline', tokenFirst('bm-usage-baseline'), (req,
 collectorRouter.get('/bm-usage/compare', tokenFirst('bm-usage-compare'), (req, res) => bmPerfOpsCollector(req, res, 'compare'));
 // 6단계 서버 비교 — 엣지 위임 서버 1대의 지표 여러 개 계열 통계(요청 1개 · 보관 없음 · central/bmComparePull.js). 대상 목록 밖 키는 404.
 collectorRouter.get('/bm-usage/compare-series', tokenFirst('bm-usage-compare-series'), (req, res) => bmPerfOpsCollector(req, res, 'compare-series'));
+// v3.50 물리서버 ‘하드웨어 이벤트 로그’(SEL) — 이 엣지에 등록된 iDRAC 서버 한 대의 SEL 을 읽어 돌려준다(central/bmHwLogPull.js).
+//   읽기만(GET) · 장비 상태를 바꾸지 않는다 · 서버는 등록부 id(id) 또는 중앙이 아는 열쇠(k — 엣지가 함대 push 에 실은 fleetId = 태그 · 등록 id 소문자)로 찾는다.
+//   같은 서버는 60초에 한 번만 장비에 묻는다(진행 중이면 함께 기다린다 — 드로어를 빠르게 여닫아도 iDRAC 를 두드리지 않게). 계정 · 주소는 싣지 않는다.
+const _hwlogMemo = new Map();
+collectorRouter.get('/bm-hwlog', tokenFirst('bm-hwlog'), async (req, res) => {
+  try {
+    const id = typeof req.query.id === 'string' ? req.query.id.trim().slice(0, 128) : '';
+    const k = typeof req.query.k === 'string' ? req.query.k.trim().slice(0, 128).toLowerCase() : '';
+    if (!id && !k) return res.status(400).json({ ok: false, reason: 'id 또는 k 가 필요합니다.' });
+    const L = await import('../idrac/hwLog.js');
+    const { isMockMode } = await import('../mock/demo/flags.js');
+    if (isMockMode()) return res.json(L.demoHwLog(id || k));
+    const { getInventory } = await import('../idrac/invCache.js');
+    const lc = (v) => String(v ?? '').trim().toLowerCase();
+    const reg = loadIdracRegistry();
+    const entry = id ? reg.find((e) => String(e.id) === id)
+      : reg.find((e) => lc(e.id) === k || lc(e.serviceTag) === k || (() => { try { return lc(getInventory(String(e.id))?.system?.serviceTag) === k; } catch { return false; } })());
+    if (!entry || entry.enabled === false || !entry.host) return res.status(404).json({ ok: false, code: 'not-found', reason: '이 엣지에 등록된 iDRAC 서버가 아닙니다.' });
+    const key = String(entry.id);
+    const hit = _hwlogMemo.get(key);
+    if (hit && (hit.pending || Date.now() - hit.at < 60_000)) return res.json(await hit.p);
+    const ent = { at: Date.now(), pending: true, p: null };
+    ent.p = L.readHwLog(entry).finally(() => { ent.pending = false; ent.at = Date.now(); });
+    _hwlogMemo.set(key, ent);
+    while (_hwlogMemo.size > 256) _hwlogMemo.delete(_hwlogMemo.keys().next().value);
+    res.json(await ent.p);
+  } catch (err) { res.status(500).json({ ok: false, reason: String(err?.message || err).slice(0, 300) }); }
+});
+// v3.48 물리서버 ‘같은 묶음 대비’ — 이 엣지가 수집하는 서버 **여러 대**의 구간 평균(CPU · 메모리) · 지금 값(전력 · 흡기 온도)을 요청 1개로(central/bmPeerPull.js).
+//   읽기 요청이다(엣지 상태를 바꾸지 않는다) — 키 목록이 길어 POST 본문으로 받는다(키 80개 × 256자 — 한글 키도 들어가게 80KB 상한 · 반증 A13). 대상 목록 밖 키는 건너뛰고 수를 밝힌다(존재를 가르지 않는다). 보관 없음.
+collectorRouter.post('/bm-usage/peer-avg', tokenFirst('bm-usage-peer-avg'), express.json({ limit: '80kb' }), async (req, res) => {
+  try {
+    const b = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+    if (!Array.isArray(b.keys)) return res.status(400).json({ ok: false, reason: 'keys 는 목록이어야 합니다.' });
+    const P = await import('../bmusage/peerAvg.js');
+    const r = await P.peerAvgFor({ keys: b.keys, from: b.from, to: b.to });
+    if (r && r.__status) { const { __status, ...rest } = r; return res.status(__status).json(rest); }
+    res.json(r);
+  } catch (err) { res.status(500).json({ ok: false, reason: String(err?.message || err).slice(0, 300) }); }
+});
 /**
  * 7a단계 — 로그 분석 엣지 대행(central/bmLogsPull.js pullEdgeLogs). 같은 url · 같은 토큰(새 포트 · 새 인증 없음) · 이 엣지가 수집하는 서버만(대상 밖 키는 404).
  *   집계 · 가린 표본 · 보안 상위만 돌려준다(원문 전체는 보관하지 않으므로 내줄 것이 없다). 보안 상위의 IP · 계정 가림은 중앙 라우트가 사람(관리자 판본 판정)에 맞춰 한다.

@@ -50,7 +50,8 @@ export default function CvpComplianceView({ servers = [], onOpen }) {
           [`${r.soonDays}일 안 종료`, c.life?.soon ?? 0, '', TONE.amber],
           ['버그 · CVE 높음', c.bugs?.high ?? 0, `CVE 노출 장비 ${c.cveDevices ?? 0}대`, TONE.red],
           ['설정 불일치 · 오류', (c.config?.warn ?? 0) + (c.config?.bad ?? 0), 'CVP 준수 코드 기준', TONE.amber],
-          ['못 읽음', Math.max(c.bugs?.unread ?? 0, c.life?.unread ?? 0), `버그 ${c.bugs?.unread ?? 0} · 수명주기 ${c.life?.unread ?? 0} · 준수 ${c.config?.unread ?? 0}`, 'var(--text-dim)'],
+          // v3.42(D12 · A2-L1): 아래 칩 '못 읽음'(셋 중 하나라도) 과 같은 수 — 예전 타일은 max(버그, 수명주기) 라 준수 못 읽음이 빠졌다.
+          ['못 읽음', pick(rows, 'unread').length, `버그 ${c.bugs?.unread ?? 0} · 수명주기 ${c.life?.unread ?? 0} · 준수 ${c.config?.unread ?? 0}${c.bugs?.norecord ? ` · 버그 기록 없음 ${c.bugs.norecord}` : ''}`, 'var(--text-dim)'],
         ]} />
         <div className="card" style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
           {view === 'devices' ? (<>
@@ -65,7 +66,7 @@ export default function CvpComplianceView({ servers = [], onOpen }) {
                     <td style={MONO}>{x.version || '—'}</td>
                     <td data-sort={['passed', 'soon', 'ok', 'none', 'unread'].indexOf(x.life.state)}><Pill color={LIFE_DEFS[x.life.state][1]}>{LIFE_DEFS[x.life.state][0]}</Pill></td>
                     <td style={{ whiteSpace: 'normal', minWidth: 160, fontSize: 12.5 }}>{lifeText(x.life)}</td>
-                    <td data-sort={['high', 'low', 'none', 'unread'].indexOf(x.bugs.state)}><Pill color={BUG_DEFS[x.bugs.state][1]}>{BUG_DEFS[x.bugs.state][0]}</Pill></td>
+                    <td data-sort={['high', 'low', 'none', 'norecord', 'unread'].indexOf(x.bugs.state)}><Pill color={BUG_DEFS[x.bugs.state][1]}>{BUG_DEFS[x.bugs.state][0]}</Pill></td>
                     <td style={{ fontSize: 12.5 }}>{bugText(x.bugs)}</td>
                     <td data-sort={['bad', 'warn', 'unknown', 'ok', 'unread'].indexOf(x.config.state)}><Pill color={CONFIG_DEFS[x.config.state][1]}>{CONFIG_DEFS[x.config.state][0]}</Pill>{x.config.code && x.config.code !== '0000' ? <span style={{ ...NOTE, marginLeft: 6 }}>코드 {x.config.code}</span> : null}</td>
                   </tr>
@@ -76,7 +77,7 @@ export default function CvpComplianceView({ servers = [], onOpen }) {
             <div style={NOTE}>{shown.length > 500 ? `${shown.length}대 중 정렬 순서 앞 500대 표시 · ` : ''}준수 코드의 뜻은 CVP 가 정합니다 — 이 화면은 ‘0000’ 만 준수로 읽고 그 밖의 코드는 그대로 보입니다.</div>
           </>) : (<>
             <STable className="v3-table" minWidth={760}>
-              <thead><tr><th>EOS 버전</th><th>장비</th><th>모델</th><th>버그 · CVE 높음</th><th>CVE 노출</th><th>지원 종료 지남</th><th>곧 종료</th><th>버그 못 읽음</th></tr></thead>
+              <thead><tr><th>EOS 버전</th><th>장비</th><th>모델</th><th>버그 · CVE 높음</th><th>CVE 노출</th><th>지원 종료 지남</th><th>곧 종료</th><th>버그 못 읽음 · 기록 없음</th><th>수명주기 못 읽음</th></tr></thead>
               <tbody>
                 {(r.versions || []).map((v) => (
                   <tr key={v.version || '-'}>
@@ -87,7 +88,8 @@ export default function CvpComplianceView({ servers = [], onOpen }) {
                     <td style={{ ...MONO, textAlign: 'right' }}>{v.cveDevices}</td>
                     <td style={{ ...MONO, textAlign: 'right', color: v.lifePassed ? TONE.red : undefined }}>{v.lifePassed}</td>
                     <td style={{ ...MONO, textAlign: 'right', color: v.lifeSoon ? TONE.amber : undefined }}>{v.lifeSoon}</td>
-                    <td style={{ ...MONO, textAlign: 'right' }}>{v.bugUnread}</td>
+                    <td data-sort={(v.bugUnread ?? 0) + (v.bugNoRecord ?? 0)} style={{ ...MONO, textAlign: 'right' }}>{v.bugUnread} · {v.bugNoRecord ?? 0}</td>
+                    <td style={{ ...MONO, textAlign: 'right' }}>{v.lifeUnread ?? 0}</td>
                   </tr>
                 ))}
               </tbody>

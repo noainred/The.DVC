@@ -277,7 +277,7 @@ describe('소스 스윕 — 틀 · 순서 · 훅 · 겹침', () => {
     expect(fs.existsSync(new URL('./SidePanel.jsx', import.meta.url))).toBe(false);
     expect(fs.existsSync(new URL('./HwPanel.jsx', import.meta.url))).toBe(false);
     // note = 쓰기 결과 알림 — 호출부의 카드는 가림막 뒤라(좁은 화면은 화면 밖) 드로어 안에도 보인다(반증 A6)
-    expect(s).toMatch(/<BmDrawer r=\{panelRow\} rows=\{drawerRows\}[^>]*onClose=\{\(\) => setPanel\(''\)\} onMove=\{setPanel\} note=\{note\} \/>/);
+    expect(s).toMatch(/<BmDrawer r=\{panelRow\} rows=\{drawerRows\}[^>]*onClose=\{\(\) => setPanel\(''\)\} onMove=\{setPanel\} note=\{note\} admin=\{!!d\.admin\} gen=\{[^\n]*?\} onChanged=\{\(\) => load\(\)\}[^\n]*?\/>/);   // v3.50: 뒤에 healthRules 가 붙는다
     // 표 행 · 맵 · 좁은 화면 카드 — 여는 곳은 setPanel 하나(설계 §5 결정 6)
     expect((s.match(/onPick=\{setPanel\}/g) || []).length).toBe(2);
     expect(s).toMatch(/onOpen=\{setPanel\}/);
@@ -326,7 +326,7 @@ describe('소스 스윕 — 틀 · 순서 · 훅 · 겹침', () => {
     expect(s).not.toMatch(/setInterval|usePolling/);
     expect(s).toMatch(/const delay = first\.current \? 0 : FETCH_DELAY_MS;/);
     expect(s).toMatch(/return \(\) => \{ alive = false; clearTimeout\(t\); \};/);       // 넘어가면 이전 요청의 응답을 버린다
-    expect(s).toMatch(/return st\.key === key \? st : \{ key, d: null, err: '' \};/);   // 다른 서버의 응답을 이 서버 것으로 그리지 않는다
+    expect(s).toMatch(/return st\.key === key \? \{ \.\.\.st, stale: st\.sig !== sig \} : \{ key, d: null, err: '', stale: false \};/);   // 다른 서버의 응답을 이 서버 것으로 그리지 않는다 · 같은 서버를 다시 묻는 중은 stale(v3.48 반증 B3)
     // 입력 칸에서 누른 ↑↓ 는 서버를 넘기지 않는다
     expect(s).toMatch(/if \(tag === 'input' \|\| tag === 'textarea' \|\| tag === 'select'\) return;/);
   });

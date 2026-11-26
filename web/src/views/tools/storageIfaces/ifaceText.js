@@ -128,7 +128,8 @@ export function kpisOf(devices = [], rows = []) {
 
 /** 처리량을 못 읽은 이유(장비 단위 — 서버 throughputWhy · 판정은 storage/ifaceSummary.js throughputWhyOf 하나). 단정하지 않고 근거(throughputDetail)를 함께 보인다. */
 export const WHY_TEXT = Object.freeze({
-  ssh: 'SSH(uemcli) 로 수집하는 장비라 사용량을 읽지 않습니다 — 속도 · 상태만 보입니다. 사용량은 REST 로 등록한 장비만 5분 표본으로 읽습니다.',
+  // v3.46.0: SSH 장비도 표본을 읽으므로 서버가 더는 이 사유를 내지 않는다(옛 서버 응답을 받을 때만 쓰인다).
+  ssh: 'SSH(uemcli) 로 수집하는 장비라 이 포탈 판에서는 사용량을 읽지 않습니다 — 포탈을 최신 판으로 올리면 같은 계정으로 REST 먼저, 안 되면 SSH 로 읽습니다.',
   'sample-off': '이 장비는 성능 표본 수집이 꺼져 있습니다(장비 등록 › 디렉터 · 노드 · SP 성능 표본).',
   'db-unavailable': '이 포탈의 저장소(DB)를 열지 못해 사용량을 읽지 못했습니다.',
   'no-samples': '이 포탈에 이 장비의 5분 표본이 하나도 없습니다 — 첫 표본 전이거나, 엣지 수집 장비면 엣지에서 표본이 실패해 올라오지 않았을 수 있습니다(엣지 로그 확인).',

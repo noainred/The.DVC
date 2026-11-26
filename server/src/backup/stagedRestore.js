@@ -93,6 +93,7 @@ export const RESTORE_KEEP_CURRENT = new Map([
     'bm-perf-alert-state.json', 'bmusage-alert-state.json', 'focusmon-alert-state.json', 'guestpart-mail-state.json', 'ipam-report-state.json',
     'isidu-digest-state.json', 'isidu-mail-state.json', 'issue-filter-mail-state.json', 'issue-notify-state.json', 'san-storage-notify-state.json',
     'san-storage-report-state.json', 'storage-usage-mail-state.json', 'veeam-license-alert-state.json', 'vm-backup-mail-state.json', 'vm-hygiene-state.json',
+    'partfault-escalation-state.json',   // v3.51 부품 장애 알림 단계 올리기 — 보낸 단계 · 확인 기록
   ].map((n) => [n, KEEP_LEDGER]),
   // 예약 실행 회차 · 실행 기록(작업 원장)
   ...['bareos-rehearsal-state.json', 'storage-inspect-state.json', 'xfer-speed-schedule-state.json', 'ipscan-agent-state.json', 'periodic-report-state.json',

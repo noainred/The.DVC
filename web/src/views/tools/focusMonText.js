@@ -707,19 +707,8 @@ export function csvChangeText(row) {
   }).join(' · ');
 }
 
-/**
- * CSV 파일 바이트 → 글자. 한국어 엑셀의 ‘CSV(쉼표로 분리)’ 는 CP949(EUC-KR)로 저장한다 — UTF-8 로 읽어 깨지면 EUC-KR 로 다시 읽는다.
- * @param {ArrayBuffer|Uint8Array} buf
- * @returns {{text:string, encoding:'utf-8'|'euc-kr'|'utf-16'}}
- */
-export function decodeCsvBytes(buf) {
-  const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
-  // 엑셀 ‘유니코드 텍스트’ 저장본은 UTF-16(BOM FF FE · FE FF) — 탭 구분이다(서버 파서가 탭을 읽는다)
-  if (u8[0] === 0xff && u8[1] === 0xfe) return { text: new TextDecoder('utf-16le').decode(u8.subarray(2)), encoding: 'utf-16' };
-  if (u8[0] === 0xfe && u8[1] === 0xff) return { text: new TextDecoder('utf-16be').decode(u8.subarray(2)), encoding: 'utf-16' };
-  try { return { text: new TextDecoder('utf-8', { fatal: true }).decode(u8), encoding: 'utf-8' }; }
-  catch { return { text: new TextDecoder('euc-kr').decode(u8), encoding: 'euc-kr' }; }
-}
+// CSV 파일 바이트 → 글자(decodeCsvBytes)는 공용 파일로 옮겼다(v3.45 — 물리서버 자산 원장도 같은 판별을 쓴다). 여기서는 다시 내보낸다(기존 import 유지).
+export { decodeCsvBytes } from './csvDecode.js';
 
 /** 깨우기 결과(서버 edgePull kind + 'ok' · 'error'). hint 는 못 닿았을 때 무엇을 볼지. */
 export const WAKE_TEXT = Object.freeze({

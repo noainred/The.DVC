@@ -49,6 +49,8 @@ export function compactInv(inv) {
       ...optS('manufacturer', inv.system.manufacturer), ...optS('powerState', inv.system.powerState, 32), ...optS('assetTag', inv.system.assetTag), ...optS('uuid', inv.system.uuid),
       // v3.3.0: OS 이름 · 버전(iDRAC ServerOS 속성 · HPE HostOS — 물리서버 폴더 'OS' 칸). 중앙 remoteInventory INV_SHAPE.system 과 짝.
       ...optS('osName', inv.system.osName, 128), ...optS('osVersion', inv.system.osVersion, 64),
+      // v3.50: 위치 LED 상태(Lit · Blinking · Off — 물리서버 상세 ‘위치 LED’). 중앙 remoteInventory INV_SHAPE.system 과 짝(반증 A5 — 빠져 수집 서버 서버는 늘 ‘못 읽음’ 이었다)
+      ...optS('indicatorLED', inv.system.indicatorLED, 16),
     } : undefined,
     cpu: inv.cpu ? { model: inv.cpu.model, count: inv.cpu.count, cores: inv.cpu.cores, health: cs(inv.cpu.health, 32), ...optN('threads', inv.cpu.threads) } : undefined,
     memory: inv.memory ? { totalGiB: inv.memory.totalGiB, health: cs(inv.memory.health, 32) } : undefined,
@@ -77,7 +79,7 @@ export function compactInv(inv) {
     // 동일한 회귀 패턴 — test/compactInv.test.js 가 고정).
     // v2.973 A3 · A5: CPU 스레드 · 최대 클럭 · 제조사, 디스크 회전수
     cpus: Array.isArray(inv.cpus) ? inv.cpus.map((c) => ({ socket: c.socket, model: c.model, cores: c.cores, ...st(c), ...optN('threads', c.threads), ...optN('maxSpeedMHz', c.maxSpeedMHz), ...optS('manufacturer', c.manufacturer) })) : [],
-    disks: Array.isArray(inv.disks) ? inv.disks.map((d) => ({ name: cs(d.name, 128), model: d.model, capacityGB: d.capacityGB, media: d.media, protocol: d.protocol, ...st(d), predictiveFailure: cb(d.predictiveFailure), ...optN('rpm', d.rpm) })) : [],
+    disks: Array.isArray(inv.disks) ? inv.disks.map((d) => ({ name: cs(d.name, 128), model: d.model, capacityGB: d.capacityGB, media: d.media, protocol: d.protocol, ...st(d), predictiveFailure: cb(d.predictiveFailure), ...optN('rpm', d.rpm), ...(d.lifeLeftPct === undefined ? {} : { lifeLeftPct: cn(d.lifeLeftPct) }) })) : [],   // v3.51 SSD 잔여 수명(중앙 INV_SHAPE.disks 와 짝) — 읽었으나 값 없음은 null 로 싣고, 읽기 전 판 인벤토리(키 없음)는 싣지 않는다: 중앙이 둘을 가른다(반증 B7)
     psus: Array.isArray(inv.psus) ? inv.psus.map((p) => ({
       name: cs(p.name, 128), model: p.model, manufacturer: p.manufacturer, capacityWatts: p.capacityWatts,
       inputWatts: cn(p.inputWatts), outputWatts: cn(p.outputWatts), lineInputVoltage: cn(p.lineInputVoltage), ...st(p),

@@ -12,6 +12,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rackv-'));
 after(() => { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* */ } });
 process.env.CONFIG_DIR = tmp;
 process.env.RACK_DB = path.join(tmp, 'rack.db');
+process.env.RACK_SELF_CHECK = '1';   // 조각 캐시로 만든 판 · 시리얼 키 색인 판정을 원장 훑기와 매번 대조한다(다르면 던진다)
 
 const V = await import('../src/rack/versions.js');
 const R = await import('../src/rack/db.js');

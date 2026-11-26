@@ -15,6 +15,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rackaudit-'));
 after(() => { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* */ } });
 process.env.CONFIG_DIR = tmp;
 process.env.RACK_DB = path.join(tmp, 'rack.db');
+process.env.RACK_SELF_CHECK = '1';   // 조각 캐시로 만든 판 · 시리얼 키 색인 판정을 원장 훑기와 매번 대조한다(다르면 던진다)
 
 const dc = await import(`${S}/datacenter/store.js`);
 const { store } = await import(`${S}/store.js`);
@@ -162,6 +163,7 @@ test('공백 D09/D15/D20: 상한 — 전산실 랙 400 · 랙 장비 120(놓기 
   const insR = db.prepare('INSERT INTO rack_rack (id,room_id,name,height_u) VALUES (?,?,?,42)');
   for (let i = 0; i < 398; i += 1) insR.run(hex(), rid, `R${i}`);
   await assert.rejects(R.addRack({ roomId: rid, rev: mv.rev, user: 'a', input: { name: 'over', heightU: 42 } }), /400개까지/);
+  await R._resyncForTest();   // 위에서 SQL 로 랙 · 장비를 직접 넣었다(전산실 rev 를 올리지 않는 변경) — 조각 캐시 · 시리얼 키 색인을 원장에 맞춘다
 });
 
 test('공백 xlsx R22/R23/R24: 부분 합 표기 · 없는 합은 — · 후면 장비는 후면 줄에만', async () => {

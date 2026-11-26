@@ -31,6 +31,8 @@ export function diagOf({ at = Date.now(), ok = false, error = '', sample = null,
   return {
     at: numOrNull(at) ?? Date.now(), ok: !!ok, source: s(source, 16), error: s(error, 200), kinds, paths, errors,
     counterNote: s(p.counterNote, 160), fcPath: s(p.fcPath, 40),
+    // v3.46.0: SSH 로 등록한 Unity — 어느 경로로 읽었는지(rest · ssh) · REST 를 건너뛴 이유(auth = 인증 거절로 멈춤 · other = 1시간 건너뜀) · 그 오류.
+    via: s(p.via, 8), restSkip: s(p.restSkip, 8), restError: s(p.restError, 160),
   };
 }
 export function noteSampleDiag(deviceId, d) {

@@ -17,7 +17,7 @@
  *  ④ 모델·버전은 **장비가 보고한 문자열 그대로** 묶는다. 벤더 지원 상태(권장·지원 종료)는 지어내지 않는다 — 수명주기 조회
  *     결과(info.lifecycle)가 있는 장비만 '지원 종료 지남' 을 센다.
  */
-import { lifeMs } from './compliance.js';   // v3.41 수명주기 날짜 읽기 하나
+import { lifeState } from './compliance.js';   // v3.41 수명주기 날짜 읽기 · v3.42 지원 종료 판정도 하나
 import { partsSummary, bgpSummary } from './parse.js';
 import { TELEMETRY_OK, partsFresh } from './faults.js';
 import { agentKeyEq } from './registry.js';
@@ -198,8 +198,9 @@ export function buildCvpOverview(i = {}) {
       totals.lifecycleRead++;
       // v3.41(점검 — '지원 종료 지남' 이 늘 0): 수명주기 날짜는 수집(parse.tsOf) · 엣지 정제(cleanInfo) 모두 **epoch ms 숫자**인데 Date.parse(숫자)는 NaN 이라
       //   한 번도 세지 못했다. 날짜 읽기는 cvp/compliance.js lifeMs 하나(문자열 날짜도 받는다).
-      const eos = lifeMs(lc.swEndOfSupport);
-      if (eos != null && eos < now) totals.swEolPassed++;
+      // v3.42(반증 N4): '지원 종료 지남' 은 버전 준수 화면과 같은 판정(compliance.lifeState — 소프트웨어 · 하드웨어 중 이른 날). 예전에는 소프트웨어만 봐
+      //   같은 제목의 두 숫자가 달랐다. 필드 이름(swEolPassed)은 화면 · 테스트 호환으로 그대로 둔다.
+      if (lifeState({ ...d.info, lifecycle: lc }, now).state === 'passed') totals.swEolPassed++;
     }
   }
 

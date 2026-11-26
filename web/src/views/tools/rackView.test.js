@@ -81,6 +81,45 @@ describe('rackView — 화면 계산', () => {
     expect(V.matchPlace(p, '  ')).toBe(null);
   });
 
+  it('matchUnplaced: 이름 · 호스트 이름 · 모델 · 서비스 태그 부분 일치 · 빈 검색어는 전부 · 가려진 필드(없음)는 맞지 않는다', () => {
+    const u = { name: 'esxi-kr-01', hostname: 'KR-ESX-01.corp', model: 'PowerEdge R750', serviceTag: 'ABC1234' };
+    expect(V.matchUnplaced(u, '')).toBe(true);
+    expect(V.matchUnplaced(u, '   ')).toBe(true);
+    expect(V.matchUnplaced(u, 'r750')).toBe(true);
+    expect(V.matchUnplaced(u, 'abc12')).toBe(true);
+    expect(V.matchUnplaced(u, 'kr-esx')).toBe(true);
+    expect(V.matchUnplaced(u, 'zzz')).toBe(false);
+    expect(V.matchUnplaced({ name: 'masked-1a2b (이름 가림)' }, 'abc12')).toBe(false);
+    expect(V.matchUnplaced(null, 'x')).toBe(false);
+    expect(V.UNPLACED_PAGE).toBeGreaterThan(0);
+  });
+
+  it('defaultLabelOf: 주소 꼴 · 서비스 태그 그대로인 이름은 기본 표시 이름으로 채우지 않는다', () => {
+    expect(V.defaultLabelOf({ name: 'kr-esx-01', serviceTag: 'ABC1234' })).toBe('kr-esx-01');
+    expect(V.defaultLabelOf({ name: '10.20.30.41', serviceTag: 'ABC1234' })).toBe('');
+    expect(V.defaultLabelOf({ name: '10.20.30.41:443' })).toBe('');
+    expect(V.defaultLabelOf({ name: 'fd00::1' })).toBe('');
+    expect(V.defaultLabelOf({ name: '[fd00::1]:443' })).toBe('');
+    expect(V.defaultLabelOf({ name: 'abc1234', serviceTag: 'ABC1234' })).toBe('');
+    expect(V.defaultLabelOf({ name: 'face', serviceTag: 'X' })).toBe('face');       // 16진 글자뿐이어도 . : 가 없으면 이름
+    expect(V.defaultLabelOf({ name: 'idrac-ABC1234', serviceTag: 'ABC1234' })).toBe('idrac-ABC1234');   // 태그가 든 이름은 서버가 가림 판본에서 걷어 낸다
+    expect(V.defaultLabelOf({ name: 'r1.dc' })).toBe('r1.dc');
+    for (const n of ['ad01.dc1', 'db1.c2', 'fab1.dc', 'cafe.01', 'db1.ac', 'a1.b2']) expect(V.defaultLabelOf({ name: n })).toBe(n);   // 16진 글자 + 점뿐인 호스트 이름은 이름
+    expect(V.defaultLabelOf({ name: '::1' })).toBe('');
+    expect(V.defaultLabelOf({ name: '1.2.3' })).toBe('1.2.3');
+    expect(V.defaultLabelOf(null)).toBe('');
+  });
+
+  it('changedFields: 달라진 칸만 · 숫자와 글자 · 앞뒤 공백은 같은 값 · 비운 칸은 달라진 것', () => {
+    const f0 = { uStart: 10, uSize: 2, label: '가상화서버 #1', note: '', opW: null, serial: 'ABC1234' };
+    expect(V.changedFields(f0, { ...f0, uStart: '10', label: ' 가상화서버 #1 ' }, Object.keys(f0))).toEqual({});
+    expect(V.changedFields(f0, { ...f0, note: '점검 예정' }, Object.keys(f0))).toEqual({ note: '점검 예정' });
+    expect(V.changedFields(f0, { ...f0, uStart: '12', serial: '' }, Object.keys(f0))).toEqual({ uStart: '12', serial: '' });
+    expect(V.changedFields(f0, { ...f0, opW: '0' }, Object.keys(f0))).toEqual({ opW: '0' });      // 빈 값 → 0 은 달라진 것(못 읽은 값은 0 이 아니다)
+    expect(V.changedFields(f0, { ...f0, label: 'x' }, ['uStart'])).toEqual({});                    // 본 칸만
+    expect(V.changedFields(null, { a: 1 }, ['a'])).toEqual({ a: 1 });
+  });
+
   it('diffCountText: 0 인 항목은 빼고, 바뀐 것이 없으면 그렇게 말한다', () => {
     expect(V.diffCountText({ placeAdd: 2, placeMove: 1, rackRemove: 1 })).toBe('랙 삭제 1 / 장비 추가 2 · 이동 1');
     expect(V.diffCountText({ placeAdd: 0 })).toBe('바뀐 것 없음');

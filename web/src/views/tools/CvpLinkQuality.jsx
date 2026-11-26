@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import BoldText from '../../components/boldText.jsx';
-import { fetchJson } from '../../api.js';
+import { fetchHeavy } from './cvpHeavy.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { NOTE, MONO, ROW, GRID1, LINKBTN, Seg, Tiles, CvpSelect, Pill } from './CvpNetParts.jsx';
@@ -20,8 +20,9 @@ export default function CvpLinkQualityView({ servers = [], onOpen }) {
   useEffect(() => {
     let active = true;
     setErr(null); setR(null);
-    fetchJson('/tools/cvp/linkq', { days, ...(cvpId ? { cvpId } : {}) }).then((x) => { if (active) setR(x); }).catch((e) => { if (active) setErr(e); });
-    return () => { active = false; };
+    const ac = new AbortController();   // v3.42(3회차 A5-F1): 화면이 버린 무거운 조회는 취소한다(서버 줄을 끝까지 차지하지 않게)
+    fetchHeavy('/tools/cvp/linkq', { days, ...(cvpId ? { cvpId } : {}) }, ac.signal).then((x) => { if (active) setR(x); }).catch((e) => { if (active) setErr(e); });
+    return () => { active = false; ac.abort(); };
   }, [cvpId, days, reload]);
   const rows = r && Array.isArray(r.rows) ? r.rows : [];
   const shown = only === 'all' ? rows : rows.filter((x) => x.verdict === only);
@@ -68,11 +69,12 @@ export default function CvpLinkQualityView({ servers = [], onOpen }) {
               ))}
             </tbody>
           </STable>
-          {!shown.length && <div style={NOTE}>{rows.length ? '이 판정에 해당하는 포트가 없습니다.' : '기간 안에 오류가 늘거나 링크가 내려간 포트가 없습니다.'}</div>}
+          {/* v3.42(A2-L3): 판정 못 한 포트가 있으면 '없습니다' 로 단정하지 않는다 */}
+          {!shown.length && <div style={NOTE}>{rows.length ? '이 판정에 해당하는 포트가 없습니다.' : (c.noData ?? 0) > 0 ? `판정한 포트 ${numText(c.judged ?? 0)}개 중에는 오류가 늘거나 링크가 내려간 포트가 없습니다 — ${numText(c.noData)}개는 오류 카운터를 못 읽어 판정하지 못했습니다.` : '기간 안에 오류가 늘거나 링크가 내려간 포트가 없습니다.'}</div>}
           <div style={NOTE}>
             {shown.length > 300 ? `${shown.length}개 중 정렬 순서 앞 300개 표시 · ` : ''}기간 {dateText(r.from)} ~ 오늘 · 수신 광량 주의 임계 {r.warnDbm} dBm(CVP 설정) · 플랩은 {r.flapMin}회 이상
-            {r.flapRecordSince ? ` · 링크 내려감 기록은 ${dateText(r.flapRecordSince)}부터` : ' · 링크 내려감 기록이 아직 없습니다(이번 버전부터 쌓습니다)'}
-            {r.omitted ? ` · ⚠ 상위 ${rows.length}개만 표시(${r.omitted}개 생략)` : ''}{r.truncated ? ' · ⚠ 포트 행이 상한을 넘어 일부만 봤습니다' : ''}
+            {r.flapRecordSince ? ` · 링크 내려감 기록은 가장 이른 장비 기준 ${dateText(r.flapRecordSince)}부터(나중에 붙은 장비는 그 뒤부터)` : ' · 링크 내려감 기록이 아직 없습니다(이번 버전부터 쌓습니다)'}
+            {r.omitted ? ` · ⚠ 상위 ${rows.length}개만 표시(${r.omitted}개 생략)` : ''}{r.truncated ? ' · ⚠ 포트 행이 상한을 넘어 일부만 봤습니다' : ''}{r.portsUnread ? ` · 포트 목록을 못 읽은 장비 ${r.portsUnread}대는 빠졌습니다` : ''}
           </div>
         </div>
       </>)}

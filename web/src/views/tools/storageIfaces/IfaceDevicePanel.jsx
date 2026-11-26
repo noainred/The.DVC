@@ -5,7 +5,7 @@ import { Loading, ErrorBox } from '../../../components/ui.jsx';
 import { STable } from '../../../components/STable.jsx';
 import { Seg, Strip, StateCell, SpeedCell, WhyDetail } from './ifaceParts.jsx';
 import {
-  RANGES, UNITS, levelColor, rateText, pctText, speedText, timeText, hourText, KIND_LABEL, portKindOf, WHY_TEXT, PROBE_STATE, sortVal, bucketText,
+  RANGES, UNITS, levelColor, rateText, pctText, speedText, timeText, hourText, KIND_LABEL, portKindOf, PROBE_STATE, sortVal, bucketText,
 } from './ifaceText.js';
 import { numOrNull } from '../../../numOrNull.js';
 
@@ -181,7 +181,7 @@ export default function IfaceDevicePanel({ deviceId, range, onRange, unit, onUni
               <div className="card kpi"><div className="label">기간 평균</div><div className="value" style={{ fontSize: 18 }}>{pctText(sel.avgPct)}</div></div>
               {busyTime && <div className="card kpi"><div className="label">{pctText(d.busyPct)} 이상이던 시간</div><div className="value" style={{ fontSize: 18 }}>{busyTime.min}분</div><div className="muted" style={{ fontSize: 11.5 }}>결측 {busyTime.missing} / {busyTime.total} 칸</div></div>}
             </div>
-            {!s ? <div className="muted" style={{ fontSize: 12.5 }}>{dev.collectMethod === 'ssh' ? WHY_TEXT.ssh : '이 포트의 처리량 표본이 없습니다.'}</div> : (
+            {!s ? <div className="muted" style={{ fontSize: 12.5 }}>{'이 포트의 처리량 표본이 없습니다 — 이유는 위 ‘사용량을 못 읽는 이유’ 를 보세요.'}</div> : (
               <>
                 <div style={{ width: '100%', height: 260, minWidth: 0 }}>
                   <ResponsiveContainer>
