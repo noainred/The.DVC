@@ -302,9 +302,11 @@ async function trendOnce(key, fn, now = Date.now()) {
   const hit = _trendMemo.get(key);
   if (hit && (hit.pending || now - hit.at < (hit.ok ? TREND_OK_MS : TREND_FAIL_MS))) return hit.p;
   const ent = { at: now, ok: false, pending: true, p: null };
-  ent.p = Promise.resolve().then(fn).then((r) => { ent.ok = !!r?.ok; return r; }, (e) => ({ ok: false, kind: 'error', reason: String(e?.message || e).slice(0, 160) }))
+  ent.p = Promise.resolve().then(fn).then((r) => { ent.ok = !!r?.ok; ent.busy = r?.kind === 'busy'; return r; }, (e) => ({ ok: false, kind: 'error', reason: String(e?.message || e).slice(0, 160) }))
     .finally(() => {
       ent.pending = false; ent.at = Date.now();
+      if (_trendMemo.get(key) !== ent) return;   // 진행 중에 밀려난 항목 — 해제 타이머로 결과를 쥐지 않는다(디버깅 3회차 성능 R4)
+      if (ent.busy) { _trendMemo.delete(key); return; }   // 동시 상한 busy 는 기억하지 않는다 — 자리가 비면 바로 다시 읽게(3회차 성능 R3)
       // 기한이 지나면 결과를 놓는다 — 개수로만 밀어내면 묵은 결과(한 벌 수백 KB)를 붙잡고 있었다(v3.52 디버깅 1회차 성능 P9)
       ent.timer = setTimeout(() => { if (_trendMemo.get(key) === ent) _trendMemo.delete(key); }, ent.ok ? TREND_OK_MS : TREND_FAIL_MS);
       ent.timer.unref?.();
@@ -891,7 +893,9 @@ export function registerBmFolders(api) {
       const finish = async (via, r) => {
         // 엣지가 가른 사유(겹침 · 등록부 못 읽음)는 그대로 — ‘잠시 뒤 다시’ 로 뭉개지 않는다(디버깅 2회차 엣지 #6)
         const WHY_OF = { 'old-version': 'old-version', 'not-found': 'not-found', 'edge-ambiguous': 'edge-ambiguous', 'edge-registry': 'edge-registry', busy: 'busy', 'edge-busy': 'busy' };
-        if (!r || r.ok !== true) return res.json({ ok: true, via, why: WHY_OF[r?.kind] || 'edge-fail', ...(full && r?.reason ? { reason: String(r.reason).slice(0, 200) } : {}) });
+        // 서버 사유는 뭉뚱그린 ‘edge-fail’ 에만 싣는다 — 따로 문구가 있는 why 에 덧붙이면 같은 문장이 두 번 보였다(디버깅 3회차 화면 N4)
+        const why = WHY_OF[r?.kind] || 'edge-fail';
+        if (!r || r.ok !== true) return res.json({ ok: true, via, why, ...(full && why === 'edge-fail' && r?.reason ? { reason: String(r.reason).slice(0, 200) } : {}) });
         const rows = (Array.isArray(r.rows) ? r.rows : []).map((x) => (full ? x : { ...x, msg: maskHwLogText(x.msg, { tag: m.serviceTag }) }));
         // v3.51 부품 수명(⑧): 메모리 교정 오류 경고 — 가리기 전 원문에서 슬롯별로 센다(슬롯 이름은 주소 · 계정이 아니다). DIMM 목록은 이 노드 인벤토리가 있을 때만(0 인 슬롯도 줄로)
         let dimms = [];

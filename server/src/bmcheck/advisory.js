@@ -5,8 +5,9 @@
  *    코드에 박아 두지 않는다(지어내지 않는다 — 시안도 비워 두었다). 표가 비어 있으면 **대조하지 않았다**고 말한다(‘해당 없음’ 이 아니다).
  *  · 대조 = 이미 읽는 펌웨어 목록(v3.45 `judgeFirmware` 의 줄 — 종류 · 이름 · 설치 버전) × 권고 줄(종류 · 모델 일부 · 구성요소 이름 일부 · 고친 버전).
  *    설치 버전 < 고친 버전이면 ‘걸림’. 숫자 . 꼴이 아닌 버전은 순서를 지어내지 않는다 — ‘모름’ 으로 따로 센다(util/cmpVersion → null).
- *  · 모델 칸은 **제조사 · 제품군 낱말을 뺀 모델 낱말이 서버 모델과 같을 때만**(R740xd 줄이 R740xd2 · DL380 Gen10 줄이 DL380 Gen10 Plus · SR650 줄이 SR650 V2 에 걸리지 않게 —
- *    디버깅 1 · 2회차 판정 #6 · #8). 구성요소 칸은 소문자 일부 일치. 둘 다 비우면 전부. 글자는 이미 길이가 잘려 있다(store.js · 선형 includes).
+ *  · 모델 칸은 **낱말 단위**(제조사 · 제품군 낱말은 뺌) — 줄의 낱말이 모두 서버 모델에 있고, 서버에만 있는 판 낱말(Plus · V2 · Gen10 …)이 없을 때(R740xd 줄이 R740xd2 ·
+ *    DL380 Gen10 줄이 DL380 Gen10 Plus · SR650 줄이 SR650 V2 에 걸리지 않게 · 긴 기계 유형 꼬리는 판으로 보지 않는다 · 제품군 낱말뿐인 줄은 그 제품군 전부 — 디버깅 1~3회차).
+ *    구성요소 칸은 소문자 일부 일치. 둘 다 비우면 전부. 글자는 이미 길이가 잘려 있다(store.js · 선형 includes).
  */
 import crypto from 'node:crypto';
 import { cmpVersion, parseVersion, cmpParsed } from '../util/cmpVersion.js';
@@ -14,11 +15,23 @@ import { FW_TYPES } from './fw.js';
 import { parseCsvRows, csvLine, unguardCell, CSV_BOM } from '../util/csv.js';
 import { ADVISORY_SEVS, ADVISORY_ROWS_MAX } from './store.js';
 /** 모델 낱말(글자 · 숫자 덩어리) — 제조사 · 제품군 낱말은 뺀다(‘PowerEdge R740xd’ = ‘R740xd’). */
-const MODEL_NOISE = new Set(['dell', 'emc', 'poweredge', 'hpe', 'hp', 'proliant', 'lenovo', 'thinksystem', 'supermicro', 'server', 'system', 'inc', 'technologies', 'enterprise']);
-const toks = (x) => [...new Set(String(x || '').toLowerCase().split(/[^a-z0-9]+/).filter((w) => w && !MODEL_NOISE.has(w)))];
-/** 권고 줄의 모델 낱말 집합이 서버 모델 낱말 집합과 **같은가**(부분 집합이 아니다 — Gen10 줄이 Gen10 Plus 에 걸리지 않게). */
-const sameModel = (have, need) => need.length > 0 && need.length === have.size && need.every((w) => have.has(w));
-export function modelTokensMatch(serverModel, rowModel) { return sameModel(new Set(toks(serverModel)), toks(rowModel)); }
+const MODEL_NOISE = new Set(['dell', 'emc', 'poweredge', 'hpe', 'hp', 'proliant', 'lenovo', 'thinksystem', 'thinkserver', 'supermicro', 'superserver', 'cisco', 'ucs', 'fujitsu', 'primergy', 'inspur', 'huawei', 'fusionserver', 'server', 'system', 'inc', 'technologies', 'enterprise']);
+const rawToks = (x) => [...new Set(String(x || '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean))];
+const toks = (x) => rawToks(x).filter((w) => !MODEL_NOISE.has(w));
+// 모델 판(변형)을 가르는 짧은 낱말 — 서버 모델에만 있으면 다른 모델이다(DL380 Gen10 줄이 Gen10 Plus · SR650 줄이 SR650 V2 에 걸리지 않게 — 디버깅 2회차 판정 #8)
+const VARIANT = /^(?:plus|v\d{1,2}|gen\d{1,2}|g\d{1,2}|m\d{1,2}|xd\d?|xa|xs|xe|xl)$/;
+/**
+ * 권고 줄의 모델이 서버 모델에 맞는가(디버깅 3회차 판정 #3).
+ *  · 줄의 모델 낱말(제조사 낱말 뺌)이 모두 서버에 있고, 서버에만 있는 낱말 가운데 판을 가르는 짧은 낱말이 없을 때. 긴 꼬리(Lenovo 기계 유형 ‘7Z73CTO1WW’ 같은 것)는 판으로 보지 않는다.
+ *  · 줄이 제조사 · 제품군 낱말뿐이면(‘PowerEdge’ · ‘HPE ProLiant’) 그 낱말이 모두 서버 모델에 있을 때(그 제품군 전부).
+ */
+function modelMatch(serverRaw, serverCore, needCore, needRaw) {
+  if (!needCore.length) return needRaw.length > 0 && needRaw.every((w) => serverRaw.has(w));
+  if (!needCore.every((w) => serverCore.has(w))) return false;
+  for (const w of serverCore) if (!needCore.includes(w) && VARIANT.test(w)) return false;
+  return true;
+}
+export function modelTokensMatch(serverModel, rowModel) { return modelMatch(new Set(rawToks(serverModel)), new Set(toks(serverModel)), toks(rowModel), rawToks(rowModel)); }
 
 
 export const ADVISORY_COLUMNS = Object.freeze(['advisory_id', 'severity', 'component_type', 'model', 'component', 'fixed_version', 'title', 'url']);
@@ -91,12 +104,12 @@ export const sampleAdvisoryCsv = () => CSV_BOM + csvLine(ADVISORY_COLUMNS) + '\r
 //     (표가 바뀌면 새 배열이라 기억도 새로 — WeakMap). 결과 객체는 여러 서버가 함께 쓰므로 얼린다(받는 쪽은 읽기만).
 const SEV_ORDER = Object.freeze({ critical: 0, high: 1, medium: 2, low: 3 });
 const COLL = new Intl.Collator();
-export const ADVISORY_MEMO_MAX = 2048;   // 서명은 해시로 담는다(긴 서명 글자 4,096개가 힙 33~44MB 를 붙잡았다 — 디버깅 2회차 성능 Q8)
+export const ADVISORY_MEMO_MAX = 8192;   // 서명은 해시로 담는다(긴 서명 글자 4,096개가 힙 33~44MB 를 붙잡았다 — 디버깅 2회차 성능 Q8) · 넘치면 오래된 것부터(통째로 비우면 목록마다 다시 계산 — 3회차 성능 R6)
 const _tableIx = new WeakMap();
 function tableIndex(list) {
   let ix = _tableIx.get(list);
   if (ix) return ix;
-  ix = { rows: list.map((a) => ({ a, need: a.model ? toks(a.model) : null, fixed: parseVersion(a.fixed) })), memo: new Map() };
+  ix = { rows: list.map((a) => ({ a, need: a.model ? toks(a.model) : null, needRaw: a.model ? rawToks(a.model) : null, fixed: parseVersion(a.fixed) })), memo: new Map() };
   _tableIx.set(list, ix);
   return ix;
 }
@@ -119,11 +132,11 @@ export function advisoriesFor(server, table) {
     if (!arr) { arr = []; byType.set(r.type, arr); }
     arr.push({ r, lc: String(r.label || '').toLowerCase(), ver: r.mixed ? null : parseVersion(r.installed) });
   }
-  const have = new Set(toks(model));
+  const have = new Set(toks(model)); const haveRaw = new Set(rawToks(model));
   const hits = []; let unknown = 0; let checked = 0;
-  for (const { a, need, fixed } of ix.rows) {
+  for (const { a, need, needRaw, fixed } of ix.rows) {
     // 모델은 낱말 집합이 같을 때만 — modelTokensMatch 와 같은 규칙(디버깅 1 · 2회차 판정 #6 · #8)
-    if (a.model && !sameModel(have, need)) continue;
+    if (a.model && !modelMatch(haveRaw, have, need, needRaw)) continue;
     const cand = byType.get(a.type);
     if (!cand) continue;
     for (const { r, lc, ver } of cand) {
@@ -139,7 +152,7 @@ export function advisoriesFor(server, table) {
   // clear 는 실제로 견준 줄이 있을 때만 — 맞는 권고 줄이 없으면 unmatched(이 모델 · 구성요소에 해당하는 권고 없음), 모두 ‘모름’ 이면 unknown(반증 B2)
   const state = hits.length ? 'hit' : checked === 0 ? 'unmatched' : checked - unknown <= 0 ? 'unknown' : 'clear';
   const out = deepFreeze({ state, hits: hits.slice(0, 50), total: hits.length, unknown, checked });
-  if (ix.memo.size >= ADVISORY_MEMO_MAX) ix.memo.clear();
+  while (ix.memo.size >= ADVISORY_MEMO_MAX) ix.memo.delete(ix.memo.keys().next().value);
   ix.memo.set(sig, out);
   return out;
 }

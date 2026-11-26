@@ -133,7 +133,7 @@ test('받기 — 서버 모름은 거절 · 고리 200(내부 길이) · 위험 
   const { stripComments } = await import('./_stripComments.js');
   const src = stripComments(fs.readFileSync(new URL('../src/idrac/eventSub.js', import.meta.url), 'utf8'));
   const body = src.slice(src.indexOf('runCheck: async (reason, ids) => {'), src.indexOf('let _deps = DEFAULT_DEPS;'));
-  assert.ok(body.indexOf('markInventoryStale(id)') > 0 && body.indexOf('markInventoryStale(id)') < body.indexOf('pollNowForEvent(ids)') && body.indexOf('pollNowForEvent(ids)') < body.indexOf('runPartFaultsNow'), '다시 읽기 → 그 서버만 폴링 → 판정 순서(디버깅 1회차 성능 P2)');
+  assert.ok(body.indexOf('markInventoryStale(id') > 0 && body.indexOf('markInventoryStale(id') < body.indexOf('pollNowForEvent(ids)') && body.indexOf('pollNowForEvent(ids)') < body.indexOf('runPartFaultsNow'), '다시 읽기 → 그 서버만 폴링 → 판정 순서(디버깅 1회차 성능 P2)');
   const C = await import('../src/idrac/invCache.js');
   C.setInventory('srv-st', { collectedAt: Date.now() });
   assert.equal(C.inventoryStale('srv-st', 3600_000), false);

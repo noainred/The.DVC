@@ -20,9 +20,9 @@ test('보안 — 데모 차단은 겹친 빗금으로 우회되지 않는다 · 
   const E = await import('../src/idrac/eventSub.js');
   assert.equal(E.scrubEventPath('//api//bm-events//in//SECRETSECRET?x=1'), '//api//bm-events//in//…?x=1');
   assert.equal(E.scrubEventPath('/api/bm-events/in/SECRETSECRET'), '/api/bm-events/in/…');
-  const long = `/${'/'.repeat(16_000)}x`;
-  const t0 = performance.now(); E.scrubEventPath(long); E.scrubEventPath(`/api${'/'.repeat(16_000)}bm-events`);
-  assert.ok(performance.now() - t0 < 30, `빗금 16,000개 ${Math.round(performance.now() - t0)}ms`);
+  // 선형 — 시작이 ‘api 바로 앞 빗금 하나’ 이고(앞 \/+ 없음) 입력은 4KB 로 자른다(시간 단언 대신 꼴로 — TESTDOC2613-02)
+  assert.ok(E.scrubEventPath(`/${'/'.repeat(16_000)}x`).length <= 4096, '4KB 로 자른다');
+  assert.match(src('../src/idrac/eventSub.js'), /\.slice\(0, 4096\)\.replace\(\/\(\\\/api\\\/\+bm-events/);
   // 받는 주소를 바꾼 뒤 — 옛 주소의 구독(Context 가 이 포탈 열쇠로 맞음)은 지우고, 다른 포탈(다른 열쇠)의 것은 둔다
   const s = { enabled: true, base: 'https://portal-new.example.test', secret: 'A'.repeat(43), ctxKey: 'B'.repeat(43) };
   const other = { ...s, ctxKey: 'C'.repeat(43) };
@@ -135,7 +135,7 @@ test('저장 · 엣지 — 상한을 넘은 케이스 파일도 줄이는 편집
     for (let j = 0; j < 3; j += 1) E.acceptEvents(s, { context: E.contextOf(s, 'd-over'), events: [{ sev: 'critical' }] });
     assert.equal(E.eventStatus().deferred, 1, '같은 서버가 세 번 보내도 한 대');
   } finally { E._setEventDepsForTest(null); E._resetEventsForTest(); }
-  assert.match(src('../src/routes/bmEvents.js'), /if \(id && name === undefined\) return res\.status\(503\)\.end\(\);/);
+  assert.match(src('../src/routes/bmEvents.js'), /if \(id && name === undefined\) \{ noteUnreadable\(\); return res\.status\(503\)\.end\(\); \}/);
   assert.match(src('../src/idrac/eventSub.js'), /if \(R\.registryLoadError\(\)\) return \{ ok: false, reason: 'iDRAC 등록부를 읽지 못했습니다/);
   assert.match(src('../src/routes/api/bmFolders.js'), /if \(regErr\) return res\.json\(\{ ok: true, why: 'registry-unreadable' \}\);/);
   const hp = src('../src/central/bmHwLogPull.js');
@@ -160,13 +160,14 @@ test('화면 — 행 표지 사유는 지금 상태로(재시작 뒤 첫 회차 
 
 test('성능 — 정규 주기는 이벤트 읽기를 기다렸다 돈다(건너뛰지 않음) · 밀려난 기억은 타이머도 지움 · 같은 모델 대비는 자리 계산 · 서명은 해시 · 원장 백업 상한 · 이벤트 로그 동시 상한', async () => {
   const ps = src('../src/idrac/poller.js');
-  assert.match(ps, /if \(running && !only && _runningEventP\) \{ try \{ await _runningEventP; \}/);
+  assert.match(ps, /if \(only && _cycleWaiting\) return BUSY;/, '기다리는 정규 주기가 있으면 새 이벤트 읽기는 양보(3회차 성능 R2)');
+  assert.match(ps, /if \(running && !only && !manual && _runningEventP\) \{\n\s*_cycleWaiting = true;\n\s*try \{ await _runningEventP; \}/);
   assert.match(src('../src/routes/api/bmFolders.js'), /const drop = \(k\) => \{ const old = _trendMemo\.get\(k\); if \(old\?\.timer\) clearTimeout\(old\.timer\);/);
   assert.match(src('../src/routes/collector.js'), /const drop = \(k2\) => \{ const old = _hwlogMemo\.get\(k2\); if \(old\?\.timer\) clearTimeout\(old\.timer\);/);
   const L = await import('../src/idrac/partLife.js');
   const disks = Array.from({ length: 1024 }, (_, i) => ({ name: `Disk ${i}`, model: 'SYNTH', media: 'SSD', capacityGB: 960, lifeLeftPct: i === 5 ? 40 : 90 + (i % 5) }));
-  const t0 = performance.now(); const rows = L.ssdLifeRows(disks);
-  assert.ok(performance.now() - t0 < 60, `SSD 1,024개 ${Math.round(performance.now() - t0)}ms`);
+  const rows = L.ssdLifeRows(disks);
+  assert.doesNotMatch(src('../src/idrac/partLife.js'), /g\.filter\(\(x\) => x !== r\)/, '줄마다 나머지를 다시 정렬하지 않는다(O(n² log n))');
   assert.ok(rows.some((r) => r.name === 'Disk 5' && r.gap != null), '혼자 닳은 SSD 는 표지');
   // 자기를 뺀 가운데값이 예전 계산(나머지 정렬)과 같다
   const vals = Array.from({ length: 41 }, (_, i) => (i === 3 ? 55 : i === 17 ? 61 : 80 + ((i * 7) % 15)));
@@ -184,4 +185,81 @@ test('성능 — 정규 주기는 이벤트 읽기를 기다렸다 돈다(건너
   const slow = async () => { open += 1; peak = Math.max(peak, open); await new Promise((r) => setTimeout(r, 50)); open -= 1; return { ok: true, status: 'ok', rows: [] }; };
   const rs = await Promise.all(Array.from({ length: 10 }, (_, i) => H.readHwLogLimited({ id: `h${i}`, host: 'x' }, { getJson: async () => { await slow(); return { Members: [] }; } })));
   assert.equal(rs.filter((r) => r.kind === 'busy').length, 10 - H.HWLOG_CONCURRENCY, '상한을 넘은 요청은 장비에 묻지 않는다');
+});
+
+test('3회차 보안 — 절대 꼴 요청 대상도 데모 차단 · 돌려주는 요청은 감사 줄 없이 · 비밀을 새로 만들어도 Context 열쇠는 그대로', async () => {
+  const G = await import('../src/auth/demoGuest.js');
+  for (const u of ['http://h.example.test/api/admin/users', 'HTTPS://h.example.test:8443/api/admin//bm-power?x=1', 'http://h/api/admin/audit']) assert.ok(G.demoGuestDenial('GET', u), u);
+  assert.equal(G.normApiPath('http://h.example.test/api/tools/x'), '/api/tools/x');
+  const col = src('../src/routes/collector.js');
+  const ia = col.indexOf("if (gap) { release(); return res.json({ ok: false, status: 'busy'");
+  assert.ok(ia > 0 && ia < col.indexOf("action: kind === 'power' ? '물리서버 원격 전원 조작 요청(중앙)'"), '간격 거르기가 감사 줄보다 앞');
+  const E = await import('../src/idrac/eventSub.js');
+  E.eventSubStore.save({ enabled: true, base: 'https://portal-a.example.test', rotate: false }, { by: 't' });
+  const k1 = E.eventSubStore.get().ctxKey; const s1 = E.eventSubStore.get().secret;
+  E.eventSubStore.save({ enabled: true, base: 'https://portal-b.example.test', rotate: true }, { by: 't' });
+  assert.notEqual(E.eventSubStore.get().secret, s1, '받는 주소 비밀은 새로');
+  assert.equal(E.eventSubStore.get().ctxKey, k1, 'Context 열쇠는 그대로 — 옛 구독을 알아본다');
+});
+
+test('3회차 판정 — 새 정책은 그 정책 대상이 된 때부터(1선 팀을 건너뛰지 않음) · 옛 기록은 처음 보는 정책이 넘겨받음 · 권고 모델(제품군 낱말뿐 · 기계 유형 꼬리) · 끝남으로 바꾸기는 상한 밖', async () => {
+  const X = await import('../src/partfault/escalation.js');
+  const POL = (id, states, e1, e2) => ({ id, name: id, agents: [], states, steps: [{ afterMin: 15, emails: [e1], channels: false, oncall: false }, { afterMin: 60, emails: [e2], channels: false, oncall: false }] });
+  const S = { enabled: true, enabledAt: 1, policies: [POL('team-a', ['fault'], 'a1@example.test', 'amgr@example.test'), POL('team-b', ['warn'], 'b1@example.test', 'bmgr@example.test')], oncall: {} };
+  const part = (state) => ({ agent: '', partKey: 'k3', scope: 'idrac', kind: 'psu', partId: 'p1', deviceId: 'SYNTH03', deviceName: 'synth-db-03', label: 'PSU 1', state });
+  const MIN = 60_000; let st = { items: {}, enabledAt: 1 }; const got = [];
+  const run = (state, m) => { const pl = X.escalationPlan({ settings: S, state: st, open: [part(state)], now: m * MIN }); for (const s of pl.sends) got.push(`${m}:${s.to.emails[0]}${s.skipped.length ? `(건너뜀 ${s.skipped.length})` : ''}`); st = { items: X.recordSends(pl.items, pl.sends, pl.sends.map(() => ({ text: 'x', delivered: true })), m * MIN), enabledAt: pl.enabledAt }; };
+  run('warn', 0); run('warn', 20); run('warn', 70); run('warn', 180);   // 주의 3시간
+  run('fault', 181); run('fault', 190); run('fault', 197); run('fault', 242);
+  assert.deepEqual(got, ['20:b1@example.test', '70:bmgr@example.test', '197:a1@example.test', '242:amgr@example.test'], '이상 정책은 181분부터 — 1선(a1)이 먼저');
+  // 옛 기록(v3.51 — 정책 열 · ps 없음)은 처음 보는 정책이 넘겨받는다
+  st = { items: { '|k3': { since: 0, sig: 'x', sent: [[0, 5 * MIN, 'x', 'ok']], ackedAt: null, ackBy: '' } }, enabledAt: 1 };
+  const pl = X.escalationPlan({ settings: S, state: st, open: [part('warn')], now: 30 * MIN });
+  assert.deepEqual([pl.sends.length, pl.items['|k3'].sent[0][4], pl.items['|k3'].ps['team-b']], [0, 'team-b', 0], '이미 간 2단계를 다시 보내지 않고 since 를 잇는다');
+  const A = await import('../src/bmcheck/advisory.js');
+  assert.equal(A.modelTokensMatch('PowerEdge R740xd', 'PowerEdge'), true, '제품군 낱말뿐인 줄은 그 제품군 전부');
+  assert.equal(A.modelTokensMatch('ProLiant DL380 Gen10', 'HPE ProLiant'), false, '없는 제조사 낱말(hpe)이 있으면 아님');
+  assert.equal(A.modelTokensMatch('ThinkSystem SR650 V2 -[7Z73CTO1WW]-', 'SR650 V2'), true, '긴 기계 유형 꼬리는 판이 아니다');
+  assert.equal(A.modelTokensMatch('ProLiant DL380 Gen10 Plus', 'DL380 Gen10'), false);
+  assert.equal(A.modelTokensMatch('ThinkSystem SR650 V2', 'SR650'), false);
+  assert.match(src('../src/bmcheck/store.js'), /caseStore\.save\(\{ v: 1, cases \}, \{ shrinking: !!cur && next\.status === 'closed' \}\);/);
+});
+
+test('3회차 엣지 — 이름 맞춤은 목록을 한 번만 · 이벤트 표지만 urgent(LED 는 아님) · 수동 수집은 기다리지 않음 · 구독 설정을 못 읽으면 503', async () => {
+  const H = await import('../src/bmusage/maint/partfaultHold.js');
+  let calls = 0;
+  const judge = { stateFor: () => ({ scopes: { hold: true }, windows: [{ id: 'w', scopes: ['hold'], start: 0, end: 1 }], until: { hold: 1 } }) };
+  const devs = Array.from({ length: 200 }, (_, i) => ({ agent: 'edge-a', deviceId: `d${i}`, deviceKey: `SYNTHT${i}`, scope: 'idrac' }));
+  const tgs = Array.from({ length: 300 }, (_, i) => ({ agent: 'edge-a', key: `t${i}`, serviceTag: `SYNTHT${i}` }));
+  const r = H.holdSetFor(devs, tgs, judge, Date.now(), { agentKey: (a) => { calls += 1; return a; } });
+  assert.equal(r.hold.size, 200);
+  assert.equal(calls, 1, '같은 이름은 한 번만 맞춘다');
+  assert.match(src('../src/bmusage/maint/partfaultHold.js'), /return \(a\) => agentKeyOf\(a, rows\);/);
+  const C = await import('../src/idrac/invCache.js');
+  C.markInventoryStale('led-1'); C.markInventoryStale('ev-1', { event: true });
+  assert.deepEqual([C.isForcedStale('led-1'), C.isForcedStale('ev-1'), C.inventoryStale('led-1', 1e12)], [false, true, true], 'LED 는 다시 읽되 urgent 표지는 아니다');
+  C.removeInventory('led-1'); C.removeInventory('ev-1');
+  assert.match(src('../src/idrac/poller.js'), /if \(running && !only && !manual && _runningEventP\)/);
+  assert.match(src('../src/routes/bmEvents.js'), /if \(eventSubStore\.loadError\(\)\) \{ noteUnreadable\(\); return res\.status\(503\)\.end\(\); \}/);
+});
+
+test('3회차 화면 · 성능 — 등록부 못 읽음 503 은 ‘모름’ 잠금이 아님 · busy · 밀려난 기억은 쥐지 않음 · 권고 기억은 오래된 것부터 · 이벤트 받기는 등록부 사본 한 번', async () => {
+  const bf = src('../src/routes/api/bmFolders.js');
+  assert.match(bf, /if \(_trendMemo\.get\(key\) !== ent\) return;/);
+  assert.match(bf, /if \(ent\.busy\) \{ _trendMemo\.delete\(key\); return; \}/);
+  assert.match(bf, /\.\.\.\(full && why === 'edge-fail' && r\?\.reason \?/, '따로 문구가 있는 why 에 서버 사유를 덧붙이지 않는다(화면 N4)');
+  assert.match(src('../src/routes/collector.js'), /if \(_hwlogMemo\.get\(key\) !== ent\) return;\n\s*if \(ent\.busy\) \{ _hwlogMemo\.delete\(key\); return; \}/);
+  assert.match(src('../src/bmcheck/advisory.js'), /while \(ix\.memo\.size >= ADVISORY_MEMO_MAX\) ix\.memo\.delete\(ix\.memo\.keys\(\)\.next\(\)\.value\);/);
+  const ev = src('../src/routes/bmEvents.js');
+  assert.ok(ev.indexOf('R.loadRegistry().find(') < ev.indexOf('R.registryLoadError()'), '찾은 뒤에만 오류 판정');
+  const E = await import('../src/idrac/eventSub.js');
+  E._resetEventsForTest();
+  E._setEventDepsForTest({ debounceMs: 60_000, runCheck: async () => ({ busy: false }) });
+  try {
+    const s = { enabled: true, base: 'https://portal.example.test', secret: 'E'.repeat(43), ctxKey: 'F'.repeat(43) };
+    for (let i = 0; i < E.EVT_BATCH_MAX; i += 1) E.acceptEvents(s, { context: E.contextOf(s, `q-${i}`), events: [{ sev: 'critical' }] });
+    E.acceptEvents(s, { context: E.contextOf(s, 'q-over'), events: [{ sev: 'critical' }] });
+    assert.match(src('../src/idrac/eventSub.js'), /const ids = \[\.\.\._staleIds\]; _staleIds\.clear\(\);   /, '묶음마다 미룬 서버 집합을 비우지 않는다(화면 R3)');
+    assert.equal(E.eventStatus().deferred, 1);
+  } finally { E._setEventDepsForTest(null); E._resetEventsForTest(); }
 });

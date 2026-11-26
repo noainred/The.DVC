@@ -26,6 +26,10 @@ export function escMarkView(esc, { canAck = false, enabled = false } = {}) {
   const step = int(esc.step); const tried = int(esc.tried);
   const live = enabled && esc.covered === true;
   // 회차가 보내지 않는 상태 · 정비 창 보류 — ‘보냅니다’ 라고 약속하지 않는다(디버깅 1회차 화면 U7)
+  if (live && esc.paused === 'state-unreadable') {
+    // 진행 기록을 못 읽으면 확인 여부 · 보낸 단계를 모른다 — 확인 단추도 두지 않는다(저장할 수 없다 — 디버깅 3회차 화면 R1)
+    return { text: '기록 못 읽음', tone: 'gray', canAck: false, title: '진행 기록을 읽지 못해 확인 여부 · 보낸 단계를 모릅니다 — 단계 알림을 보내지 않습니다(파일을 고치면 곧 다시 읽습니다).' };
+  }
   if (live && (esc.paused || esc.held)) {
     // 풀리면 ‘다시 세는’ 것이 아니라 그동안 시각이 지난 단계 가운데 가장 높은 것을 그 회차에 바로 보낸다(건너뛴 단계는 결과에 밝힘 — 디버깅 2회차 판정 #4)
     const LATER = '그동안 시각이 지난 단계 가운데 가장 높은 단계를 바로 보냅니다(건너뛴 단계는 결과에 밝힙니다)';

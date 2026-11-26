@@ -104,10 +104,17 @@ export function pruneSensorPathCache(registry, now = Date.now()) {
 const BUSY = Symbol('idrac-poll-busy'); // v2.591(감사 P1): 재진입 가드에 막혔다는 표지(수동 응답이 말하게)
 
 let _runningEventP = null;   // 진행 중인 이벤트 읽기(그 서버들만 — 짧다)
+let _cycleWaiting = false;   // 정규 주기가 이벤트 읽기를 기다리는 중(그동안 새 이벤트 읽기는 양보)
 async function pollOnce({ manual = false, only = null } = {}) {
   // 정규 · 수동 주기는 진행 중인 **이벤트 읽기**를 기다렸다가 돈다 — 건너뛰면 이벤트를 계속 보내는 장비 한 대가 함대 전체 수집을 밀어냈다(디버깅 2회차 성능 Q1).
   //   이벤트 읽기 쪽은 주기가 돌고 있으면 BUSY(호출부가 다시 잡는다 · 강제 재읽기 표지는 정규 주기가 읽는다). 같은 iDRAC 에 세션이 겹치지 않는 것은 그대로.
-  if (running && !only && _runningEventP) { try { await _runningEventP; } catch { /* 결과는 이벤트 쪽이 다룬다 */ } }
+  //   수동 ‘지금 수집’ 은 기다리지 않고 바로 busy(기다리는 사이 정규 타이머가 먼저 잡으면 15초 뒤 busy 였다 — 디버깅 3회차 엣지 #3)
+  //   기다리는 정규 주기가 있으면 새 이벤트 읽기는 BUSY 로 양보한다 — 느린 장비가 이벤트를 계속 보내도 정규 주기가 한 번의 이벤트 읽기보다 오래 밀리지 않게(디버깅 3회차 성능 R2)
+  if (only && _cycleWaiting) return BUSY;
+  if (running && !only && !manual && _runningEventP) {
+    _cycleWaiting = true;
+    try { await _runningEventP; } catch { /* 결과는 이벤트 쪽이 다룬다 */ } finally { _cycleWaiting = false; }
+  }
   if (running) return BUSY; // 고RTT iDRAC 다수에서 한 주기가 간격을 넘겨 폴이 중첩되는 것 방지
   running = true;
   try {

@@ -7,7 +7,7 @@
  */
 import express from 'express';
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
-import { eventSubStore, secretOk, parseEventBody, acceptEvents, noteRejected, idOfContext, EVT_BODY_MAX } from '../idrac/eventSub.js';
+import { eventSubStore, secretOk, parseEventBody, acceptEvents, noteRejected, noteUnreadable, idOfContext, EVT_BODY_MAX } from '../idrac/eventSub.js';
 
 export const bmEventsRouter = express.Router();
 wrapAsyncRouter(bmEventsRouter);   // async 처리기 예외가 응답 없이 매달리지 않게(asyncHang2574 스윕)
@@ -16,11 +16,15 @@ wrapAsyncRouter(bmEventsRouter);   // async 처리기 예외가 응답 없이 �
 const nameOf = async (id) => {
   try {
     const R = await import('../idrac/registry.js');
-    if (R.registryLoadError()) return undefined;
-    const e = R.loadRegistry().find((x) => String(x.id) === id && x.enabled !== false); return e ? String(e.name || e.id) : null;
+    // 사본은 한 번 — 찾으면 오류 판정을 하지 않는다(registryLoadError 도 등록부를 다시 복사했다: 디버깅 3회차 성능 R8)
+    const e = R.loadRegistry().find((x) => String(x.id) === id && x.enabled !== false);
+    if (e) return String(e.name || e.id);
+    return R.registryLoadError() ? undefined : null;
   } catch { return undefined; }
 };
 bmEventsRouter.post('/in/:secret', (req, res, next) => {
+  // 구독 설정 파일을 못 읽으면 503(거절로 세지 않는다 — 설정을 못 읽었으면 ‘없음’ 으로 답하지 않는 규칙 · 디버깅 3회차 엣지 #4). 받는 주소가 있는지는 드러나지만 비밀은 아니다
+  if (eventSubStore.loadError()) { noteUnreadable(); return res.status(503).end(); }
   const s = eventSubStore.get();
   if (!secretOk(s, req.params.secret)) { noteRejected(); return res.status(404).end(); }
   req._evSettings = s;
@@ -32,7 +36,7 @@ bmEventsRouter.post('/in/:secret', (req, res, next) => {
     if (!p) { noteRejected(); return res.status(400).end(); }
     const id = idOfContext(s, p.context);
     const name = id ? await nameOf(id) : null;
-    if (id && name === undefined) return res.status(503).end();   // 등록부를 못 읽음 — 장비는 다시 보낸다(Redfish 이벤트 재전송)
+    if (id && name === undefined) { noteUnreadable(); return res.status(503).end(); }   // 등록부를 못 읽음 — 장비는 다시 보낸다(Redfish 이벤트 재전송)
     if (!id || name == null) { noteRejected(); return res.status(404).end(); }
     const r = acceptEvents(s, p, { name });
     return res.status(r.ok ? 202 : 404).end();

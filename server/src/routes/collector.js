@@ -368,7 +368,13 @@ collectorRouter.get('/bm-hwlog', tokenFirst('bm-hwlog'), async (req, res) => {
     if (L.hwLogBusy()) return res.status(429).json({ ok: false, code: 'busy', reason: '이 엣지에서 다른 이벤트 로그 읽기가 상한만큼 진행 중입니다 — 잠시 뒤 다시.' });   // 엣지 노드 동시 상한(성능 Q10)
     const ent = { at: Date.now(), pending: true, p: null };
     // 기한(60초)이 지나면 결과를 놓는다 — 개수(256)로만 밀어내면 묵은 결과를 붙잡고 있었다(v3.52 디버깅 1회차 성능 P9)
-    ent.p = L.readHwLogLimited(entry).finally(() => { ent.pending = false; ent.at = Date.now(); ent.timer = setTimeout(() => { if (_hwlogMemo.get(key) === ent) _hwlogMemo.delete(key); }, 60_000); ent.timer.unref?.(); });
+    // 진행 중에 밀려난 항목 · 동시 상한 busy 는 해제 타이머 · 기억을 남기지 않는다(디버깅 3회차 성능 R3 · R4)
+    ent.p = L.readHwLogLimited(entry).then((r) => { ent.busy = r?.kind === 'busy'; return r; }).finally(() => {
+      ent.pending = false; ent.at = Date.now();
+      if (_hwlogMemo.get(key) !== ent) return;
+      if (ent.busy) { _hwlogMemo.delete(key); return; }
+      ent.timer = setTimeout(() => { if (_hwlogMemo.get(key) === ent) _hwlogMemo.delete(key); }, 60_000); ent.timer.unref?.();
+    });
     // 밀려난 항목의 해제 타이머도 지운다(타이머가 결과를 60초 쥐고 있었다 — 디버깅 2회차 성능 Q6)
     const drop = (k2) => { const old = _hwlogMemo.get(k2); if (old?.timer) clearTimeout(old.timer); _hwlogMemo.delete(k2); };
     drop(key); _hwlogMemo.set(key, ent);
@@ -411,12 +417,17 @@ collectorRouter.post('/bm-power', tokenFirst('bm-power'), express.json({ limit: 
     const fx = findEdgeIdrac(id, k, getInventory);
     if (!fx.entry) { release(); return res.status(fx.status).json(fx.body); }
     const entry = fx.entry;
+    // 모르는 동작 · 같은 서버 간격(진행 중)은 감사 줄을 남기기 전에 거르고 자리를 돌려준다 — 돌려준 자리로 감사 로그를 상한 없이 채우지 못하게(디버깅 3회차 보안 #2)
+    //   응답 꼴은 장비 동작 결과(runDeviceAction)와 같다 — 중앙이 지금처럼 status 로 가른다(계약 유지)
+    if (kind === 'power' ? !Object.hasOwn(P.POWER_ACTIONS, action) : !P.LED_WANTS.includes(action)) { release(); return res.json({ ok: false, status: 'bad-args', message: '모르는 동작입니다.', sent: false }); }
+    const gap = P.powerGapIssue(`${kind}|${String(entry.id ?? entry.host ?? '')}`);
+    if (gap) { release(); return res.json({ ok: false, status: 'busy', message: gap, sent: false }); }
     const who = `중앙:${str(b.by, 80) || '?'}`; const tgt = String(entry.name || entry.id).slice(0, 120);
     logAudit({ user: who, action: kind === 'power' ? '물리서버 원격 전원 조작 요청(중앙)' : '물리서버 위치 LED 요청(중앙)', target: tgt, detail: `${action}${str(b.reason, 200) ? ` · 사유 ${str(b.reason, 200)}` : ''}`.slice(0, 300), ip: req.ip });   // 보내기 전에도 남긴다(반증 A12)
     const invTag = (() => { try { return String(getInventory(String(entry.id))?.system?.serviceTag || ''); } catch { return ''; } })();
     const r = await P.runDeviceAction(entry, { kind, action, expectTag: entry.serviceTag || invTag });
     if (kind === 'led' && r?.ok) { try { (await import('../idrac/invCache.js')).markInventoryStale(String(entry.id)); } catch { /* */ } }   // LED 상태 다시 읽기(판정 #9)
-    if (!r?.sent && ['busy', 'bad-args', 'auth-stopped'].includes(r?.status)) release();   // 장비에 닿기 전에 끝난 것만 돌려준다(엣지 #3)
+    // 감사 줄을 남긴 뒤에는 돌려주지 않는다(인증 정지 · 사이에 끼어든 진행 중도 센다 — 3회차 보안 #2). 앞의 거르기가 흔한 경우를 감사 없이 돌려준다
     logAudit({ user: who, action: kind === 'power' ? '물리서버 원격 전원 조작(중앙 요청)' : '물리서버 위치 LED(중앙 요청)', target: tgt,
       detail: `${action} · ${r.status}${r.reset ? ` · ${r.reset}` : ''}${str(b.reason, 200) ? ` · 사유 ${str(b.reason, 200)}` : ''}`.slice(0, 300), ip: req.ip });
     res.json(r);

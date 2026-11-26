@@ -73,9 +73,11 @@ test('판정 — 당직 요일은 포탈 지역 시계 · 다시 시도마다 �
   step(part('warn'), 0);
   assert.deepEqual(step(part('warn'), 16 * MIN).map((x) => x.to.emails), [['b@example.test']]);
   // 주의 → 이상(다른 정책): 다른 정책에 간 단계를 이 정책의 ‘보냄’ 으로 세지 않는다(1회차 판정 #3) — 진행은 지우지 않는다(2회차 판정 #1)
-  assert.deepEqual(step(part('fault'), 17 * MIN).map((x) => x.to.emails), [['a@example.test']], '더 심각해진 장애의 받는 곳에 단계가 간다');
-  assert.deepEqual(step(part('warn'), 20 * MIN), [], '앞의 정책으로 돌아와도 이미 간 단계를 다시 보내지 않는다');
-  assert.deepEqual(step(part('fault'), 25 * MIN), [], '오가도 같은 단계를 두 번 보내지 않는다');
+  // 새 정책은 그 정책 대상이 된 때부터 센다(3회차 판정 #1 — 오래 열린 장애가 새 정책의 높은 단계로 바로 가지 않게) · 돌아온 정책은 이미 간 단계를 다시 보내지 않는다
+  assert.deepEqual(step(part('fault'), 17 * MIN), [], '새 정책은 지금부터');
+  assert.deepEqual(step(part('fault'), 33 * MIN).map((x) => x.to.emails), [['a@example.test']], '더 심각해진 장애의 받는 곳에 그 정책의 시각에 간다');
+  assert.deepEqual(step(part('warn'), 40 * MIN), [], '앞의 정책으로 돌아와도 이미 간 단계를 다시 보내지 않는다');
+  assert.deepEqual(step(part('fault'), 50 * MIN), [], '오가도 같은 단계를 두 번 보내지 않는다');
   // 다시 시도마다 다른 채널 열쇠(억제 창에 막히지 않게 — 판정 #2)
   st = { items: {}, enabledAt: 1 };
   step(part('fault'), 0);
@@ -258,11 +260,17 @@ test('성능 — 이벤트는 그 서버만 읽는다(함대 주기 아님 · �
 test('성능 — 구독 걸기는 풀(한 대가 늦어도 자리가 놀지 않음 · 던져도 그 서버만 오류) · 진행 기록 읽기 오류는 다시 읽는다 · 손상 안내는 하루 · 케이스 파일 상한', async () => {
   const E = await import('../src/idrac/eventSub.js');
   E.eventSubStore.save({ enabled: true, base: 'https://portal.example.test', rotate: true }, { by: 't' });
-  const starts = []; const t0 = Date.now();
+  // 시간이 아니라 순서로 — 첫 서버가 끝나기 전에 몇 대가 시작했는가(묶음이면 4대 · 풀이면 9대 모두)
+  let p0Done = false; let startedBeforeP0 = 0;
   const list = Array.from({ length: 9 }, (_, i) => ({ id: `p${i}`, name: `synth-p${i}`, host: 'h', enabled: true }));
-  const out = await E.syncAll({ entries: list, one: async (e) => { starts.push([e.id, Date.now() - t0]); if (e.id === 'p3') throw new Error('boom'); await new Promise((r) => setTimeout(r, e.id === 'p0' ? 400 : 40)); return { id: e.id, status: 'subscribed', removed: 0 }; } });
-  const at = Object.fromEntries(starts);
-  assert.ok(at.p5 < 250, `다섯째 서버가 첫 서버(400ms)를 기다리지 않는다 — ${at.p5}ms`);
+  const out = await E.syncAll({ entries: list, one: async (e) => {
+    if (!p0Done) startedBeforeP0 += 1;
+    if (e.id === 'p3') throw new Error('boom');
+    await new Promise((r) => setTimeout(r, e.id === 'p0' ? 400 : 10));
+    if (e.id === 'p0') p0Done = true;
+    return { id: e.id, status: 'subscribed', removed: 0 };
+  } });
+  assert.equal(startedBeforeP0, 9, '첫 서버(느림)가 끝나기 전에 나머지 자리가 모두 돌았다(묶음이 아니라 풀)');
   assert.equal(out.results.length, 9);
   assert.deepEqual([out.results[3].status, out.results[3].message], ['error', 'boom']);
   // 진행 기록 — 읽기 오류(디렉터리)는 고치면 다시 읽는다
@@ -298,8 +306,8 @@ test('성능 — 구독 걸기는 풀(한 대가 늦어도 자리가 놀지 않�
   const B = await import('../src/backup/service.js');
   assert.ok(B.fileCapFor('bm-cases.json') > S.CASES_FILE_MAX_BYTES * 1.2);
   // 합치기 기억은 기한 뒤 결과를 놓는다(P9)
-  assert.match(src('../src/routes/collector.js'), /setTimeout\(\(\) => \{ if \(_hwlogMemo\.get\(key\) === ent\) _hwlogMemo\.delete\(key\); \}, 60_000\)\.unref/);
-  assert.match(src('../src/routes/api/bmFolders.js'), /setTimeout\(\(\) => \{ if \(_trendMemo\.get\(key\) === ent\) _trendMemo\.delete\(key\); \}/);
+  assert.match(src('../src/routes/collector.js'), /ent\.timer = setTimeout\(\(\) => \{ if \(_hwlogMemo\.get\(key\) === ent\) _hwlogMemo\.delete\(key\); \}, 60_000\);/);
+  assert.match(src('../src/routes/api/bmFolders.js'), /ent\.timer = setTimeout\(\(\) => \{ if \(_trendMemo\.get\(key\) === ent\) _trendMemo\.delete\(key\); \}/);
 });
 
 test('화면 — SSD 64개를 넘으면 가장 닳은 것부터 줄에 · 권고 오류 전체 수 · 행 표지는 보내지 않는 상태를 말한다', async () => {

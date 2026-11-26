@@ -39,13 +39,18 @@ registerExitFlush('idrac/invCache', () => { if (!persistTimer) return; clearTime
 const _forceStale = new Set();   // v3.52 ⑬ — 이벤트를 받은 서버는 다음 폴링에서 인벤토리를 다시 읽는다(메모리만 · 상한)
 export function setInventory(serverId, inv) {
   cache.set(serverId, inv);
-  _forceStale.delete(String(serverId));
+  _forceStale.delete(String(serverId)); _eventStale.delete(String(serverId));
   persistSoon();
 }
 /** 다음 폴링에서 이 서버의 인벤토리를 다시 읽게 한다(장비 이벤트 — idrac/eventSub.js). 상한 2,000. */
-export function markInventoryStale(serverId) { if (_forceStale.size < 2000) _forceStale.add(String(serverId)); }
+const _eventStale = new Set();   // 그 가운데 장비 이벤트로 표시된 것(LED 조작은 아니다 — urgent 는 이것만 본다: 디버깅 3회차 엣지 #2)
+export function markInventoryStale(serverId, { event = false } = {}) {
+  const k = String(serverId);
+  if (_forceStale.size < 2000) _forceStale.add(k);
+  if (event && _eventStale.size < 2000) _eventStale.add(k);
+}
 /** 장비 이벤트로 다시 읽기 표시가 된 서버인가(정규 주기가 그 서버를 다시 읽으면 부품 장애 보고를 urgent 로 — 디버깅 2회차 엣지 #4). */
-export const isForcedStale = (serverId) => _forceStale.has(String(serverId));
+export const isForcedStale = (serverId) => _eventStale.has(String(serverId));
 
 export function getInventory(serverId) {
   return cache.get(serverId) || null;
@@ -59,6 +64,6 @@ export function inventoryStale(serverId, maxAgeMs) {
 }
 
 export function removeInventory(serverId) {
-  _forceStale.delete(String(serverId));   // 지운 서버의 강제 표지가 상한을 먹지 않게(v3.52 디버깅 1회차 성능 P7)
+  _forceStale.delete(String(serverId)); _eventStale.delete(String(serverId));   // 지운 서버의 강제 표지가 상한을 먹지 않게(v3.52 디버깅 1회차 성능 P7)
   if (cache.delete(serverId)) persistSoon();
 }

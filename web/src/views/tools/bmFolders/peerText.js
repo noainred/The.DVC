@@ -191,7 +191,7 @@ export function peerView(d) {
       id, label: PEER_LABEL[id], basis: basisText(m.basis, hours), state: m.state, badge: { label: st.label, color: st.color },
       valueText: pv(m.value), judged: ok,
       medianText: ok ? `가운데값 ${peerVal(id, m.median)}` : '',
-      spanText: ok && vMin != null && vMax != null ? `값 범위 ${peerVal(id, vMin)} ~ ${peerVal(id, vMax)}` : '',
+      spanText: ok && vMin != null && vMax != null ? `값 범위 ${pv(vMin)} ~ ${pv(vMax)}` : '',   // 같은 자리수(디버깅 3회차 판정 #6 — ‘40.4% · 값 범위 30% ~ 40%’ 였다)
       rangeText: ok ? `묶음의 폭 ${pv(m.lo)} ~ ${pv(m.hi)}` : '',
       countText: `값 있는 서버 ${n}대${missing > 0 ? ` · 값 없는 ${missing}대 제외` : ''}`,
       note,

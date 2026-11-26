@@ -113,7 +113,7 @@ export async function runEscalationNow() {
       // 보내기 직전 — 그 사이 확인됐으면 보내지 않는다(확인 라우트가 메모리 기록을 바꾼다)
       if (loadEscalationState().items[s.key]?.ackedAt) { results.push({ notSent: true, text: '보내지 않음(그 사이 확인됨)' }); continue; }
       // eslint-disable-next-line no-await-in-loop
-      results.push(await sendOne({ ...s, since: plan.items[s.key]?.since }, deps, now));
+      results.push(await sendOne({ ...s, since: s.since ?? plan.items[s.key]?.since }, deps, now));   // 그 정책의 시작 시각(3회차 판정 #1)
     }
     let items = recordSends(plan.items, plan.sends, results, now);
     // 회차 동안 들어온 확인을 덮지 않는다 — 최신 기록의 확인을 키별로 합친다(확인 쪽 우선 · 반증 A1)

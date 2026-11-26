@@ -87,7 +87,9 @@ export const eventSubStore = {
     if (enabled && !b.value) return { ok: false, status: 400, reason: '켜려면 받는 주소가 있어야 합니다.' };
     const cur = eventSubStore.get();
     const fresh = rotate || !cur.secret || !cur.ctxKey;
-    const next = { v: 1, enabled, base: b.value, secret: fresh ? newSecret() : cur.secret, ctxKey: fresh ? newSecret() : cur.ctxKey, at: now, by: String(by).slice(0, 80) };
+    // 비밀을 새로 만들어도 Context 열쇠는 그대로 둔다 — 받는 주소 · 비밀을 한 번에 바꾼 뒤에도 옛 구독을 ‘이 포탈 것’ 으로 알아보고 지울 수 있게(디버깅 3회차 보안 #3).
+    //   Context 열쇠는 장비에 주지 않는다(HMAC 결과만) — 새는 것은 받는 주소의 비밀이고, 그것은 새로 만든다.
+    const next = { v: 1, enabled, base: b.value, secret: fresh ? newSecret() : cur.secret, ctxKey: cur.ctxKey || newSecret(), at: now, by: String(by).slice(0, 80) };
     try {
       fs.mkdirSync(path.dirname(FILE()), { recursive: true });
       atomicWriteFileSync(FILE(), JSON.stringify({ ...next, secret: sealSecret(next.secret), ctxKey: sealSecret(next.ctxKey) }, null, 2), { mode: 0o600 });
@@ -150,7 +152,7 @@ const _ring = [];
 const _stat = { received: 0, rejected: 0, dropped: 0, deferred: 0, checks: 0, rxAt: null, checkedAt: null, running: false };   // deferred — 바로 읽기 상한을 넘어 다음 정규 주기로 미룬 서버(P7)   // dropped — 한 번에 32건을 넘어 버린 수(반증 B13)
 let _timer = null; let _pendingReason = ''; let _busyRetries = 0;
 const _staleIds = new Set();   // 이번 묶음에서 다시 읽을 서버(위험 · 주의를 보낸 서버)
-const _deferredIds = new Set(); // 묶음 상한을 넘어 정규 주기로 미룬 서버(묶음마다 비운다 — 같은 서버를 두 번 세지 않게)
+const _deferredIds = new Set(); // 묶음 상한을 넘어 정규 주기로 미룬 서버(다시 시작 전까지 한 대로 센다 · 상한 5,000)
 const DEFAULT_DEPS = {
   now: () => Date.now(),
   debounceMs: EVT_DEBOUNCE_MS,
@@ -158,7 +160,7 @@ const DEFAULT_DEPS = {
    *  캐시만 다시 판정하면(최대 30분 묵은 인벤토리) 빨라지지 않는다(반증 A2). 폴링이 다른 주기로 진행 중이면 busy — 묶음을 다시 잡는다. */
   runCheck: async (reason, ids) => {
     const C = await import('./invCache.js');
-    for (const id of ids) C.markInventoryStale(id);   // 폴링이 바빠 못 읽으면 다음 정규 주기가 읽는다(잃지 않음)
+    for (const id of ids) C.markInventoryStale(id, { event: true });   // 폴링이 바빠 못 읽으면 다음 정규 주기가 읽는다(잃지 않음 · urgent 표지)
     const P = await import('./poller.js');
     // 그 서버들만 읽는다 — 함대 전체 주기를 돌리지 않는다(v3.52 디버깅 1회차 성능 P2: 이벤트 1건에 50대 전부 · 요청 368건이었다)
     const r = await P.pollNowForEvent(ids);
@@ -174,6 +176,7 @@ let _deps = DEFAULT_DEPS;
 export function _setEventDepsForTest(d) { _deps = d ? { ...DEFAULT_DEPS, ...d } : DEFAULT_DEPS; }
 export function _resetEventsForTest() { _ring.length = 0; _staleIds.clear(); _deferredIds.clear(); _busyRetries = 0; Object.assign(_stat, { received: 0, rejected: 0, dropped: 0, deferred: 0, checks: 0, rxAt: null, checkedAt: null, running: false }); if (_timer) clearTimeout(_timer); _timer = null; _pendingReason = ''; }
 export const noteRejected = () => { _stat.rejected += 1; };
+export const noteUnreadable = () => { _stat.unreadable = (_stat.unreadable || 0) + 1; };   // 설정 · 등록부를 못 읽어 503 으로 답한 수(거절과 따로)
 const BUSY_RETRY_MAX = 5;
 /**
  * 바로 점검 — 묶음 간격(debounceMs) 안에 여러 번 와도 한 번. 간격은 **앞 점검이 끝난 때부터** 잰다(점검이 길어도 쉬지 않고 연달아 돌지 않게 — 반증 A14).
@@ -187,7 +190,7 @@ function scheduleCheck(reason) {
   const wait = since >= gap ? 0 : gap - since;
   _timer = setTimeout(() => {
     _timer = null; _stat.running = true; _stat.checks += 1;
-    const ids = [..._staleIds]; _staleIds.clear(); _deferredIds.clear();
+    const ids = [..._staleIds]; _staleIds.clear();   // 미룬 서버 집합은 비우지 않는다 — 다음 묶음에서 또 넘쳐도 한 대로(화면 ‘미룬 서버 N대’ — 다시 시작하면 0 부터: 디버깅 3회차 화면 R3)
     Promise.resolve().then(() => _deps.runCheck(_pendingReason || 'event', ids)).then((r) => {
       if (r?.busy && _busyRetries < BUSY_RETRY_MAX) { _busyRetries += 1; for (const id of ids) _staleIds.add(id); return true; }
       _busyRetries = 0; return false;
@@ -219,7 +222,7 @@ export function acceptEvents(s, parsed, { name = '' } = {}) {
     else {
       // 같은 서버가 여러 번 보내도 한 대로 센다(디버깅 2회차 엣지 #10 — 화면이 ‘미룬 서버 N대’ 라고 말한다)
       if (!_deferredIds.has(id) && _deferredIds.size < 5000) { _deferredIds.add(id); _stat.deferred += 1; }
-      import('./invCache.js').then((C) => C.markInventoryStale(id), () => {});
+      import('./invCache.js').then((C) => C.markInventoryStale(id, { event: true }), () => {});
     }
     scheduleCheck('event');
   }

@@ -20,7 +20,9 @@ import { auditSkipped } from '../audit.js';
 /** 경로 정규화 — 쿼리 제거·소문자·겹친 빗금 합치기·끝 슬래시 제거(express 는 대소문자·끝 슬래시를 구분하지 않고 겹친 빗금도 같은 라우트로 보낸다). */
 export function normApiPath(url) {
   // 겹친 빗금은 하나로 — express 는 ‘/api/admin//bm-power’ 를 ‘/bm-power’ 라우트로 보낸다(디버깅 2회차 보안 #1: 데모 차단 목록 우회). 선형 치환
-  let p = String(url || '').slice(0, 4096).split('?')[0].split('#')[0].toLowerCase().replace(/\/{2,}/g, '/');
+  // 절대 꼴 요청 대상(GET http://h/api/admin/users — express 는 pathname 으로 라우팅한다)도 경로만 본다(디버깅 3회차 보안 #1). 앵커가 있는 선형 치환
+  let p = String(url || '').slice(0, 4096).split('?')[0].split('#')[0].toLowerCase().replace(/^[a-z][a-z0-9+.-]{0,15}:\/\/[^/]*/, '').replace(/\/{2,}/g, '/');
+  if (!p.startsWith('/')) p = `/${p}`;
   while (p.length > 1 && p.endsWith('/')) p = p.slice(0, -1);
   return p;
 }

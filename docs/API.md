@@ -55,7 +55,7 @@
 
 | 메서드 | 경로 | 게이트(공통 제외) | 소스 |
 |---|---|---|---|
-| POST | `/in/:secret` | — | [server/src/routes/bmEvents.js:23](../server/src/routes/bmEvents.js#L23) |
+| POST | `/in/:secret` | — | [server/src/routes/bmEvents.js:25](../server/src/routes/bmEvents.js#L25) |
 
 ## `/api/collector`
 
@@ -64,10 +64,10 @@
 | 메서드 | 경로 | 게이트(공통 제외) | 소스 |
 |---|---|---|---|
 | GET | `/bm-hwlog` | `tokenFirst` | [server/src/routes/collector.js:353](../server/src/routes/collector.js#L353) |
-| POST | `/bm-power` | `tokenFirst` · `express.json` | [server/src/routes/collector.js:387](../server/src/routes/collector.js#L387) |
+| POST | `/bm-power` | `tokenFirst` · `express.json` | [server/src/routes/collector.js:393](../server/src/routes/collector.js#L393) |
 | GET | `/bm-usage` | — | [server/src/routes/collector.js:165](../server/src/routes/collector.js#L165) |
 | GET | `/bm-usage/baseline` | `tokenFirst` | [server/src/routes/collector.js:321](../server/src/routes/collector.js#L321) |
-| GET | `/bm-usage/capacity` | `tokenFirst` | [server/src/routes/collector.js:456](../server/src/routes/collector.js#L456) |
+| GET | `/bm-usage/capacity` | `tokenFirst` | [server/src/routes/collector.js:467](../server/src/routes/collector.js#L467) |
 | GET | `/bm-usage/changes` | `tokenFirst` | [server/src/routes/collector.js:320](../server/src/routes/collector.js#L320) |
 | GET | `/bm-usage/compare` | `tokenFirst` | [server/src/routes/collector.js:322](../server/src/routes/collector.js#L322) |
 | GET | `/bm-usage/compare-series` | `tokenFirst` | [server/src/routes/collector.js:324](../server/src/routes/collector.js#L324) |
@@ -75,29 +75,29 @@
 | GET | `/bm-usage/focus` | `tokenFirst` | [server/src/routes/collector.js:300](../server/src/routes/collector.js#L300) |
 | POST | `/bm-usage/focus` | `tokenFirst` · `express.json` | [server/src/routes/collector.js:272](../server/src/routes/collector.js#L272) |
 | POST | `/bm-usage/focus/stop` | `tokenFirst` · `express.json` | [server/src/routes/collector.js:289](../server/src/routes/collector.js#L289) |
-| GET | `/bm-usage/logs` | `tokenFirst` | [server/src/routes/collector.js:441](../server/src/routes/collector.js#L441) |
+| GET | `/bm-usage/logs` | `tokenFirst` | [server/src/routes/collector.js:452](../server/src/routes/collector.js#L452) |
 | GET | `/bm-usage/nics` | — | [server/src/routes/collector.js:204](../server/src/routes/collector.js#L204) |
-| POST | `/bm-usage/peer-avg` | `tokenFirst` · `express.json` | [server/src/routes/collector.js:427](../server/src/routes/collector.js#L427) |
+| POST | `/bm-usage/peer-avg` | `tokenFirst` · `express.json` | [server/src/routes/collector.js:438](../server/src/routes/collector.js#L438) |
 | GET | `/bm-usage/snapshot` | `tokenFirst` | [server/src/routes/collector.js:247](../server/src/routes/collector.js#L247) |
 | POST | `/bm-usage/snapshot` | `tokenFirst` · `express.json` | [server/src/routes/collector.js:219](../server/src/routes/collector.js#L219) |
 | GET | `/bm-usage/snapshots` | `tokenFirst` | [server/src/routes/collector.js:238](../server/src/routes/collector.js#L238) |
-| GET | `/bm-usage/top` | `tokenFirst` | [server/src/routes/collector.js:473](../server/src/routes/collector.js#L473) |
-| GET | `/bm-usage/top/band` | `tokenFirst` | [server/src/routes/collector.js:485](../server/src/routes/collector.js#L485) |
+| GET | `/bm-usage/top` | `tokenFirst` | [server/src/routes/collector.js:484](../server/src/routes/collector.js#L484) |
+| GET | `/bm-usage/top/band` | `tokenFirst` | [server/src/routes/collector.js:496](../server/src/routes/collector.js#L496) |
 | GET | `/bm-usage/trend` | — | [server/src/routes/collector.js:202](../server/src/routes/collector.js#L202) |
-| POST | `/bmstor-collect` | `tokenFirst` · `express.json` | [server/src/routes/collector.js:627](../server/src/routes/collector.js#L627) |
-| POST | `/central-token` | `tokenFirst` · `express.json` | [server/src/routes/collector.js:566](../server/src/routes/collector.js#L566) |
+| POST | `/bmstor-collect` | `tokenFirst` · `express.json` | [server/src/routes/collector.js:638](../server/src/routes/collector.js#L638) |
+| POST | `/central-token` | `tokenFirst` · `express.json` | [server/src/routes/collector.js:577](../server/src/routes/collector.js#L577) |
 | GET | `/edge-log` | — | [server/src/routes/collector.js:136](../server/src/routes/collector.js#L136) |
 | GET | `/export` | — | [server/src/routes/collector.js:65](../server/src/routes/collector.js#L65) |
 | POST | `/focus-mon/wake` | `tokenFirst` · `express.json` | [server/src/routes/collector.js:268](../server/src/routes/collector.js#L268) |
-| POST | `/idrac-scan` | `tokenFirst` · `express.json` | [server/src/routes/collector.js:581](../server/src/routes/collector.js#L581) |
-| POST | `/isidu-run` | `tokenFirst` · `express.json` | [server/src/routes/collector.js:613](../server/src/routes/collector.js#L613) |
-| POST | `/isidu-test` | `tokenFirst` · `express.json` | [server/src/routes/collector.js:616](../server/src/routes/collector.js#L616) |
+| POST | `/idrac-scan` | `tokenFirst` · `express.json` | [server/src/routes/collector.js:592](../server/src/routes/collector.js#L592) |
+| POST | `/isidu-run` | `tokenFirst` · `express.json` | [server/src/routes/collector.js:624](../server/src/routes/collector.js#L624) |
+| POST | `/isidu-test` | `tokenFirst` · `express.json` | [server/src/routes/collector.js:627](../server/src/routes/collector.js#L627) |
 | GET | `/ping` | — | [server/src/routes/collector.js:117](../server/src/routes/collector.js#L117) |
-| POST | `/set-password` | `tokenFirst` · `express.json` | [server/src/routes/collector.js:548](../server/src/routes/collector.js#L548) |
-| GET | `/token-check` | — | [server/src/routes/collector.js:511](../server/src/routes/collector.js#L511) |
-| POST | `/upgrade` | `express.raw` | [server/src/routes/collector.js:651](../server/src/routes/collector.js#L651) |
-| GET | `/xfer-test` | — | [server/src/routes/collector.js:533](../server/src/routes/collector.js#L533) |
-| POST | `/xfer-test` | — | [server/src/routes/collector.js:539](../server/src/routes/collector.js#L539) |
+| POST | `/set-password` | `tokenFirst` · `express.json` | [server/src/routes/collector.js:559](../server/src/routes/collector.js#L559) |
+| GET | `/token-check` | — | [server/src/routes/collector.js:522](../server/src/routes/collector.js#L522) |
+| POST | `/upgrade` | `express.raw` | [server/src/routes/collector.js:662](../server/src/routes/collector.js#L662) |
+| GET | `/xfer-test` | — | [server/src/routes/collector.js:544](../server/src/routes/collector.js#L544) |
+| POST | `/xfer-test` | — | [server/src/routes/collector.js:550](../server/src/routes/collector.js#L550) |
 
 ## `/api/capacity`
 
@@ -1068,23 +1068,23 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/bareos-summary.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/bareosViews.js:206](../server/src/routes/api/bareosViews.js#L206) |
 | GET | `/tools/bareos-summary/policy` | 권한 `tools` | [server/src/routes/api/bareosPolicy.js:44](../server/src/routes/api/bareosPolicy.js#L44) |
 | GET | `/tools/bareos-summary/pools` | 권한 `tools` | [server/src/routes/api/bareosPolicy.js:70](../server/src/routes/api/bareosPolicy.js#L70) |
-| GET | `/tools/bm-folders` | 권한 `tools` | [server/src/routes/api/bmFolders.js:492](../server/src/routes/api/bmFolders.js#L492) |
-| GET | `/tools/bm-folders.csv` | 권한 `tools`, `data.csv` | [server/src/routes/api/bmFolders.js:1087](../server/src/routes/api/bmFolders.js#L1087) |
-| GET | `/tools/bm-folders/case-bundle` | 권한 `tools` | [server/src/routes/api/bmFolders.js:820](../server/src/routes/api/bmFolders.js#L820) |
-| GET | `/tools/bm-folders/cases` | 권한 `tools` | [server/src/routes/api/bmFolders.js:670](../server/src/routes/api/bmFolders.js#L670) |
-| POST | `/tools/bm-folders/cases` | 권한 `tools` · `textFields` | [server/src/routes/api/bmFolders.js:680](../server/src/routes/api/bmFolders.js#L680) |
-| POST | `/tools/bm-folders/cases/delete` | 권한 `tools` · `textFields` | [server/src/routes/api/bmFolders.js:698](../server/src/routes/api/bmFolders.js#L698) |
-| GET | `/tools/bm-folders/check` | 권한 `tools` | [server/src/routes/api/bmFolders.js:927](../server/src/routes/api/bmFolders.js#L927) |
-| POST | `/tools/bm-folders/edge/pull` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmFolders.js:482](../server/src/routes/api/bmFolders.js#L482) |
-| GET | `/tools/bm-folders/hw` | 권한 `tools` | [server/src/routes/api/bmFolders.js:626](../server/src/routes/api/bmFolders.js#L626) |
-| GET | `/tools/bm-folders/hwlog` | 권한 `tools` | [server/src/routes/api/bmFolders.js:877](../server/src/routes/api/bmFolders.js#L877) |
-| POST | `/tools/bm-folders/led` | 권한 `tools` · `textFields` | [server/src/routes/api/bmFolders.js:798](../server/src/routes/api/bmFolders.js#L798) |
-| POST | `/tools/bm-folders/op` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmFolders.js:1113](../server/src/routes/api/bmFolders.js#L1113) |
-| GET | `/tools/bm-folders/peer` | 권한 `tools` | [server/src/routes/api/bmFolders.js:967](../server/src/routes/api/bmFolders.js#L967) |
-| POST | `/tools/bm-folders/power` | 권한 `tools` · `textFields` | [server/src/routes/api/bmFolders.js:779](../server/src/routes/api/bmFolders.js#L779) |
-| GET | `/tools/bm-folders/power-state` | 권한 `tools` | [server/src/routes/api/bmFolders.js:809](../server/src/routes/api/bmFolders.js#L809) |
-| GET | `/tools/bm-folders/search` | 권한 `tools` | [server/src/routes/api/bmFolders.js:593](../server/src/routes/api/bmFolders.js#L593) |
-| GET | `/tools/bm-folders/trend` | 권한 `tools` | [server/src/routes/api/bmFolders.js:1052](../server/src/routes/api/bmFolders.js#L1052) |
+| GET | `/tools/bm-folders` | 권한 `tools` | [server/src/routes/api/bmFolders.js:494](../server/src/routes/api/bmFolders.js#L494) |
+| GET | `/tools/bm-folders.csv` | 권한 `tools`, `data.csv` | [server/src/routes/api/bmFolders.js:1091](../server/src/routes/api/bmFolders.js#L1091) |
+| GET | `/tools/bm-folders/case-bundle` | 권한 `tools` | [server/src/routes/api/bmFolders.js:822](../server/src/routes/api/bmFolders.js#L822) |
+| GET | `/tools/bm-folders/cases` | 권한 `tools` | [server/src/routes/api/bmFolders.js:672](../server/src/routes/api/bmFolders.js#L672) |
+| POST | `/tools/bm-folders/cases` | 권한 `tools` · `textFields` | [server/src/routes/api/bmFolders.js:682](../server/src/routes/api/bmFolders.js#L682) |
+| POST | `/tools/bm-folders/cases/delete` | 권한 `tools` · `textFields` | [server/src/routes/api/bmFolders.js:700](../server/src/routes/api/bmFolders.js#L700) |
+| GET | `/tools/bm-folders/check` | 권한 `tools` | [server/src/routes/api/bmFolders.js:931](../server/src/routes/api/bmFolders.js#L931) |
+| POST | `/tools/bm-folders/edge/pull` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmFolders.js:484](../server/src/routes/api/bmFolders.js#L484) |
+| GET | `/tools/bm-folders/hw` | 권한 `tools` | [server/src/routes/api/bmFolders.js:628](../server/src/routes/api/bmFolders.js#L628) |
+| GET | `/tools/bm-folders/hwlog` | 권한 `tools` | [server/src/routes/api/bmFolders.js:879](../server/src/routes/api/bmFolders.js#L879) |
+| POST | `/tools/bm-folders/led` | 권한 `tools` · `textFields` | [server/src/routes/api/bmFolders.js:800](../server/src/routes/api/bmFolders.js#L800) |
+| POST | `/tools/bm-folders/op` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmFolders.js:1117](../server/src/routes/api/bmFolders.js#L1117) |
+| GET | `/tools/bm-folders/peer` | 권한 `tools` | [server/src/routes/api/bmFolders.js:971](../server/src/routes/api/bmFolders.js#L971) |
+| POST | `/tools/bm-folders/power` | 권한 `tools` · `textFields` | [server/src/routes/api/bmFolders.js:781](../server/src/routes/api/bmFolders.js#L781) |
+| GET | `/tools/bm-folders/power-state` | 권한 `tools` | [server/src/routes/api/bmFolders.js:811](../server/src/routes/api/bmFolders.js#L811) |
+| GET | `/tools/bm-folders/search` | 권한 `tools` | [server/src/routes/api/bmFolders.js:595](../server/src/routes/api/bmFolders.js#L595) |
+| GET | `/tools/bm-folders/trend` | 권한 `tools` | [server/src/routes/api/bmFolders.js:1056](../server/src/routes/api/bmFolders.js#L1056) |
 | GET | `/tools/bm-storage` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/bmstor.js:131](../server/src/routes/api/bmstor.js#L131) |
 | GET | `/tools/bm-storage/auth-choices` | 역할 `admin` · `fullScopeOnly` · `requireSettingsOwner` | [server/src/routes/api/bmstor.js:576](../server/src/routes/api/bmstor.js#L576) |
 | POST | `/tools/bm-storage/collect` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/bmstor.js:680](../server/src/routes/api/bmstor.js#L680) |
@@ -1892,8 +1892,8 @@ Prometheus/OTel 익스포터(선택 토큰).
 | `togglePrecheck` | 2 | SAN 플로우 비활성화 · 다시 켜기의 **사전 확인**(v2.940 반증 L-4) — 스위치 · dvc_ 이름 · 포탈 기록 · 지금 상태 · 엣지 버전을 OTP 재인증 **전에** 본다(거부할 요청이 OTP 를 써 버리지 않게). 404 · 400 · 409. |
 | `vaultFirst` | 2 | **새 로그인 키 저장 방식 검사**(v3.9.0 SSH 공용 접속 — 키 등록 · 받는 곳 승인). 자격증명 저장 방식이 암호화가 아니면 409 `keys-need-encryption`, 정책을 못 읽으면 503 `SECRETS_POLICY_UNAVAILABLE` — **OTP(`reauth`) 앞에** 두어 거절될 요청이 1회 비밀번호를 쓰지 않게 한다. 판정은 `keyStore.keyVaultIssue` 하나(저장 함수도 다시 본다). |
 | `alertFullScope` | 2 | **전체 범위 계정만**(v2.838 Backup › Summary 백업 안 된 VM 일일 메일 저장 · 지금 보내기 — `fullScopeOnlyWith` 의 산물 · 전 법인 자료를 메일로 보낸다). 범위 제한 계정은 403 · 핸들러가 관리자 판본(데모 제외)을 한 번 더 본다. |
-| `powerBodyOk` | 1 | ⚠ **이 생성기가 뜻을 모르는 이름입니다** — 소스를 열어 확인하고 `scripts/api-doc.mjs` 의 `GUARD_NOTE` 에 추가하세요. |
-| `syncBodyOk` | 1 | ⚠ **이 생성기가 뜻을 모르는 이름입니다** — 소스를 열어 확인하고 `scripts/api-doc.mjs` 의 `GUARD_NOTE` 에 추가하세요. |
+| `powerBodyOk` | 1 | 물리서버 원격 전원 · LED 켜기 스위치 저장 본문 검사(v3.52 — `routes/admin/bmAssets.js`): enabled · allowForce 가 참/거짓이 아니면 **400** — 본인 OTP 를 쓰기 **전에** 거절한다(틀린 본문으로 OTP 를 헛쓰지 않게 · 디버깅 1회차 보안 #2). |
+| `syncBodyOk` | 1 | 이벤트 구독 걸기 · 지우기 본문 검사 + 진행 중 · 꺼짐 판정(v3.52 — `routes/admin/bmAssets.js` · `idrac/eventSub.js syncPrecheck`): 본인 OTP 를 쓰기 **전에** 400 · 409 로 거절한다(디버깅 1회차 보안 #2). |
 | `rawIpFleetOnly` | 1 | **전체 범위 계정만**(v2.621 SEC-02 — 요청 본문 IP 로 직접 SSH 접속하는 테스트. 정규형 IPv4·차단 대역 검사가 뒤따른다). 범위 제한 계정은 403. |
 | `liveFleetOnly` | 1 | **전체 범위 계정만**(v2.629 A6-02 — iDRAC 에 실시간 로그인하는 GPU 조사). 범위 제한 계정은 403. |
 | `auditFullScope` | 1 | **전체 범위 계정만**(v2.932 점검 C1-04 — 감사 로그 `/admin/audit` · `fullScopeOnlyWith` 의 산물). 범위 제한 관리자는 403 — 본문에 `requiredOwner` 를 싣지 않는다(소유 계정 등록 안내가 틀린 조치가 되지 않게). |
@@ -1908,8 +1908,6 @@ Prometheus/OTel 익스포터(선택 토큰).
 | `dangerRunGate` | 1 | 원격 명령 실행 중 **위험 동작일 때만** 소유자 등급 + 본인 OTP(`ownerOtpThen`) — 자유 명령 · 서비스 제어 · kill · 재부팅 · ssh-exec · tcp/udp-send · 본문 있는 http-request(판정 `commands.js presetDanger`). 읽기 프리셋은 admin + 전체 범위 그대로(v3.18.8). |
 | `pwVaultFirst` | 1 | **새 공통 비밀번호 저장 방식 검사**(v3.24 서버 접속 — 공통 계정 저장). 새 비밀번호가 있으면 자격증명 저장 방식이 암호화가 아닐 때 409 `passwords-need-encryption`, 정책을 못 읽으면 503 — **OTP(`reauth`) 앞에** 둔다(`vaultFirst` 와 같은 규칙 · 판정 `keyStore.keyVaultIssue`). |
 | `csvPermUnlessJson` | 1 | `csvPerm` 과 같되 **format=json(화면의 표·붙여넣기 등록)은 통과**(v2.643 — 성능점검 대상 등록 마법사). |
-
-> ⚠ 뜻을 모르는 게이트 **2개**: `powerBodyOk`, `syncBodyOk` — 문서가 이 사실을 숨기지 않습니다.
 
 ---
 

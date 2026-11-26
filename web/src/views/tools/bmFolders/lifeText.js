@@ -44,7 +44,9 @@ export function lifeView(d) {
     if (n != null && n > rows.length) {
       const read = numOrNull(all.read) ?? 0; const min = numOrNull(all.min);
       // 값을 못 읽은 SSD 가 있으면 ‘가장 닳은’ 이라 단정하지 않는다(디버깅 2회차 판정 #7) — 서버는 낮은 값부터 고르고 값 없는 것은 뒤로 둔다
-      const head = `SSD ${n}개${read < n ? ` 중 ${read}개 읽음` : ''} · 가장 낮은 값 ${pct(min)} · 표에는 낮은 값부터 ${rows.length}개${read < n ? '(값 없는 SSD 는 뒤)' : ''}`;
+      // 서버의 고르기 순서 그대로 말한다 — 낮음 · 같은 모델 대비 낮음 표지 먼저, 그다음 낮은 값(디버깅 3회차 판정 #5)
+      // 표는 인벤토리 순서다(머리글로 정렬) — 순서가 아니라 고른 기준을 말한다(디버깅 3회차 화면 N2)
+      const head = `SSD ${n}개${read < n ? ` 중 ${read}개 읽음` : ''} · 가장 낮은 값 ${pct(min)} · 표에는 ${rows.length}개만 — 표지 있는 것 · 낮은 값을 골라 실었습니다${read < n ? '(값 없는 SSD 는 남은 자리에만)' : ''}`;
       return { kind: 'rows', rows, head };
     }
     const head = vals.length ? `SSD ${rows.length}개 · 가장 낮은 값 ${Math.min(...vals)}%${vals.length < rows.length ? ` · 값 없음 ${rows.length - vals.length}` : ''}` : `SSD ${rows.length}개 · 값 없음`;
@@ -87,7 +89,9 @@ export function memCeView(m) {
   const um = untimed ? ` · 시각 모름 ${untimed}건` : '';
   const head = covered ? (total ? `지난 ${days}일 경고 기록 ${total}건${um}` : untimed ? `지난 ${days}일 시각을 읽은 경고 기록 없음${um}(기간 안인지 모름)` : `지난 ${days}일 경고 기록 없음`)
     : total ? `읽은 기록 안 경고 기록 ${total}건(지난 ${days}일을 다 읽지 못함)${um}`
-      : untimed ? `시각을 읽지 못한 경고 기록 ${untimed}건(기간 안인지 모름)` : '읽은 기록 안에는 경고 기록 없음';
-  const note = untimed ? `시각을 읽지 못한 교정 오류 경고 기록 ${untimed}건은 기간 안인지 몰라 세지 않았습니다 — 건수 · 0 은 ‘없음’ 이 아닙니다.` : covered ? '' : `읽은 기록이 지난 ${days}일을 다 덮지 못했습니다 — 건수는 읽은 범위 안의 것이고, 0 은 ‘읽은 범위 안에 없음’ 이지 ‘없음’ 이 아닙니다.`;   // 판정 #7
+      : untimed ? `읽은 기록 안 시각을 읽은 경고 없음 · 시각 모름 ${untimed}건(지난 ${days}일을 다 읽지 못함)` : '읽은 기록 안에는 경고 기록 없음';
+  const partialNote = `읽은 기록이 지난 ${days}일을 다 덮지 못했습니다 — 건수는 읽은 범위 안의 것이고, 0 은 ‘읽은 범위 안에 없음’ 이지 ‘없음’ 이 아닙니다.`;
+  // 시각 모름과 일부만 읽음이 함께면 둘 다 밝힌다(디버깅 3회차 판정 #4)
+  const note = untimed ? `시각을 읽지 못한 교정 오류 경고 기록 ${untimed}건은 기간 안인지 몰라 세지 않았습니다 — 건수 · 0 은 ‘없음’ 이 아닙니다.${covered ? '' : ` ${partialNote}`}` : covered ? '' : partialNote;   // 판정 #7
   return { head, slots, unknown, covered, note };
 }
