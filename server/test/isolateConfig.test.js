@@ -54,6 +54,24 @@ console.log(JSON.stringify({ d, mark: process.env.DVC_TEST_ISOLATED_CONFIG, empt
   assert.equal(fs.existsSync(r.d), false, '끝나면 하위 파일까지 지운다');
 });
 
+test('② 다른 exit 훅(종료 flush 레지스트리)이 뒤에 걸려 폴더에 써도 정리가 마지막에 돈다 — 폴더가 남지 않는다', () => {
+  // 첫 전량 실행에서 sanswitch 활동 기록 · 엣지 사본을 담은 폴더 1개가 남았다: 정리(exit)가 먼저 돌고, 그 뒤 exitFlush 의 exit 훅이 디바운스 저장을 써 폴더를 다시 만들었다.
+  const r = child({}, `import fs from 'node:fs';
+const { registerExitFlush } = await import(${JSON.stringify(new URL('../src/util/exitFlush.js', import.meta.url).href)});
+const d = process.env.CONFIG_DIR;
+registerExitFlush('late-writer', () => { fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(d + '/late.json', '{}'); });
+process.once('exit', () => { fs.mkdirSync(d + '/x', { recursive: true }); fs.writeFileSync(d + '/x/late2.json', '{}'); });
+console.log(JSON.stringify({ d }));`);
+  assert.equal(fs.existsSync(r.d), false, `뒤에 걸린 exit 훅이 쓴 뒤에도 폴더가 지워져야 한다: ${r.d}`);
+});
+
+test('② process.exit() 로 끝나도 지운다', () => {
+  const r = child({}, `import fs from 'node:fs';
+const d = process.env.CONFIG_DIR; fs.writeFileSync(d + '/a.json', '{}');
+console.log(JSON.stringify({ d })); process.exit(0);`);
+  assert.equal(fs.existsSync(r.d), false);
+});
+
 test('② CONFIG_DIR 이 이미 있으면 건드리지 않는다(현장 · CI · 상위 셸 지정)', () => {
   const mine = fs.mkdtempSync(path.join(os.tmpdir(), 'dvc-isolate-keep-'));
   try {

@@ -12,7 +12,7 @@
  *   · `CONFIG_DIR` 이 이미 있으면(현장이나 CI 가 정했거나, 상위 셸에서 지정) 건드리지 않는다.
  *   · 시험 파일이 스스로 `CONFIG_DIR` 을 다시 잡는 것은 그대로 된다(이 파일은 그보다 먼저 돈다 — 기본값만 바꾼다).
  *   · 자식 프로세스를 `{ ...process.env }` 로 띄우는 시험은 같은 임시 폴더를 물려준다. env 를 통째로 새로 짜서 넘기는 시험은 이 보호 밖이다.
- *   · 프로세스가 끝날 때 지운다(exit 훅 — 시험이 만든 하위 파일까지). 지우지 못해도 시험 결과는 바꾸지 않는다.
+ *   · 프로세스가 끝날 때 지운다(exit 훅 — 시험이 만든 하위 파일까지 · 다른 exit 훅보다 **뒤에**). 지우지 못해도 시험 결과는 바꾸지 않는다.
  *   · vCenter 예제 템플릿 폴백은 `config.js` 가 설정 폴더가 아니라 **저장소의 config 폴더**에서 읽으므로 영향이 없다.
  *
  * ⚠ 시험 파일 하나만 직접 돌릴 때(`node --test test/x.test.js`)는 이 파일이 불리지 않는다 — `--import ./test/_isolateConfig.js` 를 붙인다
@@ -26,5 +26,13 @@ if (!process.env.CONFIG_DIR) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dvc-test-cfg-'));
   process.env.CONFIG_DIR = dir;
   process.env.DVC_TEST_ISOLATED_CONFIG = dir;   // 시험이 '격리 중인가' 를 확인할 때 쓴다(isolateConfig.test.js)
-  process.once('exit', () => { try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 20 }); } catch { /* 정리 실패는 시험 결과가 아니다 */ } });
+  const cleanup = () => { try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 20 }); } catch { /* 정리 실패는 시험 결과가 아니다 */ } };
+  process.on('exit', cleanup);
+  // 정리는 **마지막 exit 리스너**여야 한다 — 종료 flush 레지스트리(`src/util/exitFlush.js`)처럼 뒤에 걸린 exit 훅이 디바운스 저장을 쓰면서 폴더를 다시
+  //   만든다(첫 전량 실행에서 sanswitch-activity.json · central-agent-sanswitch.json 을 담은 폴더 1개가 남았다 — 실측). exit 리스너가 새로 걸릴 때마다
+  //   정리를 맨 뒤로 옮긴다. newListener 는 리스너가 붙기 **전에** 불리므로, 붙은 뒤(마이크로태스크)에 옮긴다.
+  process.on('newListener', (ev, fn) => {
+    if (ev !== 'exit' || fn === cleanup) return;
+    queueMicrotask(() => { process.removeListener('exit', cleanup); process.on('exit', cleanup); });
+  });
 }
