@@ -774,15 +774,7 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
         if (failedKinds.length && anyRead) dev.partsMissingKinds = failedKinds;
       }
       /*
-       * v3.41: VLAN · 포트 채널 소속 · MLAG — 부품 주기에 읽고(이번에 못 읽으면 직전 값), 그 사이 주기에는 직전에 읽은 값을 쓴다(L2CFG_TTL_MS 안에서만).
-       *   반증 E2: 카운터 · BGP 뒤에 둔다(포인터 컬렉션이면 요청이 많아 앞에 두면 고RTT 직접 수집에서 처리량이 예산에 밀릴 수 있다).
-       *   v3.42(버그 점검 1회차 A4-F5 · 2회차 A2-E1): 부품(전원 · 팬 · 온도 · 광 — 장애 판정) **뒤**, LLDP · FDB **앞** — 앞에 있으면 경로 추정이 틀린 CVP 에서
-       *   후보 6개 빈 응답이 부품 읽기 예산을 먹었다. 예산이 모자라 앞에서 돌아가는 경로도 직전 값은 얹는다(read:false).
-       *   '빈 응답 N대면 멈춤' 은 넣지 않았다 — 채널 · MLAG 를 안 쓰는 장비가 앞에 몰리면 쓰는 장비를 영영 못 읽는다(BGP 와 같은 이유).
-       */
-      await readL2Cfg(dev, serial, server.id);
-      /*
-       * v2.924(B-②): LLDP 이웃 · MAC 테이블 — 부품 주기에만. 값: 배열 = 읽음(빈 배열 = 이웃/학습 없음) · null = 시도했지만 못 읽음 · undefined = 이번에 안 읽음.
+       * v2.924(B-②): LLDP 이웃 · MAC 테이블 — 부품 주기에만. 순서: 부품 → LLDP · MAC 테이블 → VLAN · 채널 · MLAG(v3.47 D-9). 값: 배열 = 읽음(빈 배열 = 이웃/학습 없음) · null = 시도했지만 못 읽음 · undefined = 이번에 안 읽음.
        *   저장소는 배열일 때만 그 장비의 이전 목록을 바꾸고, null·undefined 면 이전 목록을 그대로 둔다(시각으로 오래됨을 말한다).
        *   LLDP 는 링크가 올라온 포트만 따라간다(counters 와 같은 keep).
        */
@@ -797,6 +789,16 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
         }
         if (dev.lldp !== undefined || dev.fdb !== undefined) dev.l2At = now();
       }
+      /*
+       * v3.41: VLAN · 포트 채널 소속 · MLAG — 부품 주기에 읽고(이번에 못 읽으면 직전 값), 그 사이 주기에는 직전에 읽은 값을 쓴다(L2CFG_TTL_MS 안에서만).
+       *   반증 E2: 카운터 · BGP 뒤에 둔다(포인터 컬렉션이면 요청이 많아 앞에 두면 고RTT 직접 수집에서 처리량이 예산에 밀릴 수 있다).
+       *   v3.42(버그 점검 1회차 A4-F5 · 2회차 A2-E1): 부품(전원 · 팬 · 온도 · 광 — 장애 판정) **뒤** — 앞에 있으면 경로 추정이 틀린 CVP 에서
+       *   후보 6개 빈 응답이 부품 읽기 예산을 먹었다. 예산이 모자라 앞에서 돌아가는 경로도 직전 값은 얹는다(read:false).
+       *   v3.47(결정 D-9 — 사용자 선택): LLDP · MAC 테이블 **뒤**로 옮겼다 — 예산이 모자라면 VLAN · 채널 · MLAG(직전 값을 부품 주기 3배 동안 쓴다)가 먼저 굶고,
+       *   위치 찾기 · 토폴로지 · 호스트 업링크가 쓰는 LLDP · MAC 테이블(직전 값은 시각으로 오래됨만 말한다)을 먼저 읽는다.
+       *   '빈 응답 N대면 멈춤' 은 넣지 않았다 — 채널 · MLAG 를 안 쓰는 장비가 앞에 몰리면 쓰는 장비를 영영 못 읽는다(BGP 와 같은 이유).
+       */
+      await readL2Cfg(dev, serial, server.id);
       // v2.641: 전부 빈 응답이면 'failed' 가 아니라 'empty'(경로는 열려 있고 값이 없다 — 조치가 다르다: 경로 후보를 봐야 한다).
       dev.telemetry = intf.value || cnt.value || bgp.value ? 'ok' : (intf.empty && bgp.empty) ? 'empty' : 'failed';
     });

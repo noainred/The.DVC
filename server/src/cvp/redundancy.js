@@ -43,6 +43,19 @@ export function channelsOf(ports = []) {
 }
 
 /** MLAG 판정. ms = info.mlagStatus(없으면 null) · enabled = info.mlag(인벤토리 — true/false/undefined). */
+/**
+ * v3.53(D-8 · 반증 미확인 의심 반영): MLAG 상태 글자 → 'off' | 'inactive' | 'active' | null(모름). 이중화 판정(mlagJudge)과 토폴로지 피어 확정이
+ *   같은 글자 규칙을 쓴다(판정 코어 하나 — 토폴로지만 /^active$/ 로 따로 보면 접두가 남은 값에서 두 화면이 달랐다).
+ */
+export function mlagRoleOf(ms) {
+  if (!ms || typeof ms !== 'object') return null;
+  const st = String(ms.state || '');
+  if (!st) return null;
+  if (/disabled|notconfigured|^off$/.test(st)) return 'off';
+  if (/inactive|primaryonly|secondaryonly/.test(st)) return 'inactive';
+  if (/active/.test(st)) return 'active';
+  return null;
+}
 export function mlagJudge(ms, enabled = undefined) {
   if (!ms || typeof ms !== 'object') return { state: enabled === false ? 'off' : 'unread', enabled: enabled ?? null };
   const st = String(ms.state || '');

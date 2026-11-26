@@ -156,3 +156,5 @@ export function epDisagreeText(list = []) {
   return (Array.isArray(list) ? list : []).map((x) => `${x.nic}: LLDP 는 ${x.lldp?.hostname || '?'} ${x.lldp?.port || ''} · CVP 위치는 ${x.endpoint?.hostname || '?'} ${x.endpoint?.port || ''}`);
 }
 
+/** v3.53(사용자 결정 2026-11-26): 같은 법인에 짧은 이름이 같은 다른 호스트가 있어 LLDP 이웃 이름(짧은 이름) 근거를 쓰지 않았을 때의 안내. */
+export const LLDP_NAME_AMBIGUOUS_NOTE = '같은 법인에 이름(첫 점 앞)이 같은 다른 호스트가 있어, LLDP 이웃 이름이 짧은 이름으로만 맞는 포트는 근거로 쓰지 않았습니다(전체 이름 · 섀시 MAC 이 맞는 포트와 MAC 테이블 · 설명 근거는 그대로).';
