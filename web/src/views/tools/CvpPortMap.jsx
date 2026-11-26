@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import BoldText from '../../components/boldText.jsx';
 import { fetchJson } from '../../api.js';
+import { fetchHeavy } from './cvpHeavy.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
@@ -322,8 +323,9 @@ function Fleet({ onOpen }) {
   useEffect(() => {
     let active = true;
     setErr(null);
-    fetchJson('/tools/cvp/portmap/summary').then((x) => { if (active) setR(x); }).catch((e) => { if (active) setErr(e); });
-    return () => { active = false; };
+    const ac = new AbortController();   // v3.42(3회차 A5-F1): 화면이 버린 무거운 조회는 취소한다(서버 줄을 끝까지 차지하지 않게)
+    fetchHeavy('/tools/cvp/portmap/summary', {}, ac.signal).then((x) => { if (active) setR(x); }).catch((e) => { if (active) setErr(e); });
+    return () => { active = false; ac.abort(); };
   }, [reload]);
   // v3.42(D14): 오류여도 새로고침 줄은 남긴다(예전에는 오류 상자가 조작 줄까지 대신해 다시 시도하려면 보기를 오가야 했다).
   if (err || !r) return (

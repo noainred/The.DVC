@@ -26,6 +26,7 @@ export function snapshotBody({ device = {}, ports = null, lldp = null } = {}) {
 }
 
 /** v3.42(2회차 반증 R2): 'unknown'(못 읽음 — 일부 목록이 남긴 옛 행 등)은 값이 아니다 — null 로 둬 비교에서 뺀다(예전: 'up → unknown' 이 거짓 '바뀜' 32건). */
+const unk = (v) => v == null || v === 'unknown';
 function linkWord(v) { const w = s(v, 16); return w === 'unknown' ? null : w; }
 const PORT_FIELDS = Object.freeze([[1, 'oper'], [2, 'admin'], [3, 'speed'], [4, 'vlan'], [5, 'lag'], [6, 'desc'], [7, 'mtu']]);
 /** 장비 하나 비교 → { changes:[{ kind, item, field, before, after }], na:[묶음] } */
@@ -37,15 +38,19 @@ export function diffDevice(a, b) {
   if (a.p == null || b.p == null) na.push('ports');
   else {
     const am = new Map(a.p.map((r) => [r[0], r])); const bm = new Map(b.p.map((r) => [r[0], r]));
+    let portStateNa = false;
     for (const [name, ra] of am) {
       const rb = bm.get(name);
       if (!rb) { push('port', name, 'removed', null, null); continue; }
       for (const [i, f] of PORT_FIELDS) {
-        if (ra[i] == null || rb[i] == null || ra[i] === 'unknown' || rb[i] === 'unknown') continue;   // 한쪽 못 읽음(옛 스냅샷의 'unknown' 포함) — 이 칸은 비교하지 않는다
+        // 한쪽 못 읽음 — 이 칸은 비교하지 않는다(옛 스냅샷의 'unknown' 포함). 링크 상태를 **한쪽만** 못 읽은 포트가 있으면 '비교 못 함(포트 상태 일부)' 로 따로 센다
+        //   (3회차 A1-F3: 일부 목록으로 32포트를 비교 못 한 장비가 '그대로 1대' 로 셌다). 양쪽 다 모르는 포트(늘 모름)는 세지 않는다 — 잃은 비교가 없다.
+        if (unk(ra[i]) || unk(rb[i])) { if (i === 1 && unk(ra[i]) !== unk(rb[i])) portStateNa = true; continue; }
         if (ra[i] !== rb[i]) push('port', name, f, ra[i], rb[i]);
       }
     }
     for (const name of bm.keys()) if (!am.has(name)) push('port', name, 'added', null, null);
+    if (portStateNa) na.push('portState');
   }
   // BGP
   if (a.b == null || b.b == null) na.push('bgp');

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import BoldText from '../../components/boldText.jsx';
-import { fetchJson } from '../../api.js';
+import { fetchHeavy } from './cvpHeavy.js';
 import { STable } from '../../components/STable.jsx';
 import { NOTE, MONO, ROW, GRID1, LINKBTN, Tiles, Spark, Pill, Pending } from './CvpNetParts.jsx';
 import { opticTrendText, OPTIC_TREND_NOTE, FORECAST_TONE, perMonthText, dbmText, dateText, rowKey, numText, horizonText } from './cvpNetText.js';
@@ -16,8 +16,9 @@ export default function CvpOpticsTrendView({ part = 'trend', onOpen }) {
   useEffect(() => {
     let active = true;
     setErr(null); setR(null);
-    fetchJson('/tools/cvp/optics/trend').then((x) => { if (active) setR(x); }).catch((e) => { if (active) setErr(e); });
-    return () => { active = false; };
+    const ac = new AbortController();   // v3.42(3회차 A5-F1): 화면이 버린 무거운 조회는 취소한다(서버 줄을 끝까지 차지하지 않게)
+    fetchHeavy('/tools/cvp/optics/trend', {}, ac.signal).then((x) => { if (active) setR(x); }).catch((e) => { if (active) setErr(e); });
+    return () => { active = false; ac.abort(); };
   }, [reload]);
   if (err || !r) return <Pending err={err} onRetry={() => setReload((x) => x + 1)} />;
   const t = r.trend || { rows: [], counts: {}, thresholds: {} };

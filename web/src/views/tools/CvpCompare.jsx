@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import BoldText from '../../components/boldText.jsx';
 import { fetchJson, postJson, delJson, getCurrentUser } from '../../api.js';
+import { fetchHeavy } from './cvpHeavy.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
@@ -32,6 +33,8 @@ export default function CvpCompareView({ servers = [] }) {
   const [kind, setKind] = useState('all');
   const [showNa, setShowNa] = useState(false);   // 바뀐 것 없이 '비교 못 함' 만 있는 장비는 기본으로 접는다(v3.38 판독: 데모 123대 중 대부분이 그 줄이라 바뀐 장비가 묻혔다)
   const seq = useRef(0);
+  const cmpAc = useRef(null);
+  useEffect(() => () => { cmpAc.current?.abort(); }, []);   // 화면을 떠나면 진행 중 비교 취소
   const listSeq = useRef(0);
   const load = useCallback(() => {
     setListErr(null);
@@ -69,7 +72,9 @@ export default function CvpCompareView({ servers = [] }) {
     if (!a) return;
     const my = ++seq.current;
     setCmpBusy(true); setResErr(null);
-    try { const x = await fetchJson('/tools/cvp/compare', { a, b: bGone ? 'now' : b }); if (my === seq.current) { setRes(x); setKind('all'); } }
+    cmpAc.current?.abort();   // v3.42(3회차 A5-F1): 앞 비교는 취소(서버 줄에서 뺀다)
+    const ac = new AbortController(); cmpAc.current = ac;
+    try { const x = await fetchHeavy('/tools/cvp/compare', { a, b: bGone ? 'now' : b }, ac.signal); if (my === seq.current) { setRes(x); setKind('all'); } }
     catch (e) { if (my === seq.current) { setResErr(e); setRes(null); } }
     finally { if (my === seq.current) setCmpBusy(false); }
   };

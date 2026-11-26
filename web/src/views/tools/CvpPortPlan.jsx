@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import BoldText from '../../components/boldText.jsx';
-import { fetchJson } from '../../api.js';
+import { fetchHeavy } from './cvpHeavy.js';
 import { STable } from '../../components/STable.jsx';
 import { NOTE, MONO, ROW, GRID1, LINKBTN, Seg, Tiles, Spark, Pill, Pending } from './CvpNetParts.jsx';
 import { idleText, RECLAIM_NOTE, forecastText, FORECAST_TONE, FORECAST_NOTE, perMonthText, speedText, pctText, dateText, rowKey, horizonText } from './cvpNetText.js';
@@ -20,8 +20,9 @@ export function ReclaimView({ onOpen }) {
   useEffect(() => {
     let active = true;
     setErr(null); setR(null);
-    fetchJson('/tools/cvp/portplan/reclaim', { idle }).then((x) => { if (active) setR(x); }).catch((e) => { if (active) setErr(e); });
-    return () => { active = false; };
+    const ac = new AbortController();   // v3.42(3회차 A5-F1): 화면이 버린 무거운 조회는 취소한다(서버 줄을 끝까지 차지하지 않게)
+    fetchHeavy('/tools/cvp/portplan/reclaim', { idle }, ac.signal).then((x) => { if (active) setR(x); }).catch((e) => { if (active) setErr(e); });
+    return () => { active = false; ac.abort(); };
   }, [idle, reload]);
   if (err || !r) return <Pending err={err} onRetry={() => setReload((x) => x + 1)} />;
   const rows = (Array.isArray(r.rows) ? r.rows : []).filter((x) => never || !x.never);
@@ -69,6 +70,19 @@ export function ReclaimView({ onOpen }) {
   );
 }
 
+/** 예측 표 각주 — 보고 있는 표(part)의 것만. */
+function forecastNotes(part, ex, sat, r) {
+  const out = [];
+  if (part === 'exhaust') {
+    if (ex.pointsRows && ex.rows.length > ex.pointsRows) out.push(`추이 그림은 위험한 순서 앞 ${ex.pointsRows}대만 싣습니다(그 뒤는 ‘—’)`);
+  } else {
+    if (sat.truncated) out.push(`⚠ 업링크가 상한을 넘어 ${sat.seriesUnread ? `${sat.seriesUnread}개는 기록을 읽지 않았습니다(예측에서 뺌 — 기록 부족이 아님)` : '일부만 봤습니다'}`);
+    if (sat.omitted) out.push(`업링크 ${sat.omitted}개는 응답 상한을 넘어 뺐습니다(위험한 순서로 앞부분만)`);
+    if (sat.pointsRows && sat.rows.length > sat.pointsRows) out.push(`추이 그림은 위험한 순서 앞 ${sat.pointsRows}개만 싣습니다(그 뒤는 ‘—’)`);
+    if (r.portsUnread) out.push(`포트 목록을 못 읽은 장비 ${r.portsUnread}대는 업링크에서 뺐습니다`);
+  }
+  return out.length ? ` · ${out.join(' · ')}` : '';
+}
 export function ForecastView({ onOpen }) {
   const [r, setR] = useState(null);
   const [err, setErr] = useState(null);
@@ -77,8 +91,9 @@ export function ForecastView({ onOpen }) {
   useEffect(() => {
     let active = true;
     setErr(null); setR(null);
-    fetchJson('/tools/cvp/portplan/forecast').then((x) => { if (active) setR(x); }).catch((e) => { if (active) setErr(e); });
-    return () => { active = false; };
+    const ac = new AbortController();   // v3.42(3회차 A5-F1): 화면이 버린 무거운 조회는 취소한다(서버 줄을 끝까지 차지하지 않게)
+    fetchHeavy('/tools/cvp/portplan/forecast', {}, ac.signal).then((x) => { if (active) setR(x); }).catch((e) => { if (active) setErr(e); });
+    return () => { active = false; ac.abort(); };
   }, [reload]);
   if (err || !r) return <Pending err={err} onRetry={() => setReload((x) => x + 1)} />;
   const ex = r.exhaust || { rows: [], counts: {} }; const sat = r.saturation || { rows: [], counts: {} };
@@ -140,7 +155,8 @@ export function ForecastView({ onOpen }) {
         )}
         {cur.rows.length > SHOW_MAX && <div style={NOTE}>{cur.rows.length}개 중 정렬 순서 앞 {SHOW_MAX}개 표시(제목을 눌러 정렬을 바꾸면 그 순서로 자릅니다)</div>}
         {!cur.rows.length && <div style={NOTE}>{part === 'exhaust' ? '장비가 없습니다.' : '업링크를 찾지 못했습니다(LLDP 이웃이 CVP 스위치인 포트 · LLDP 를 못 읽은 장비의 40G 이상 포트).'}</div>}
-        <div style={NOTE}>예상 날짜는 직선 추세의 추정이며 오늘 {dateText(Date.now())} 기준입니다{part === 'exhaust' && ex.pointsRows && ex.rows.length > ex.pointsRows ? ` · 추이 그림은 위험한 순서 앞 ${ex.pointsRows}대만 싣습니다(그 뒤는 ‘—’)` : ''}{sat.truncated ? ` · ⚠ 업링크가 상한을 넘어 ${sat.seriesUnread ? `${sat.seriesUnread}개는 기록을 읽지 않았습니다(예측에서 뺌 — 기록 부족이 아님)` : '일부만 봤습니다'}` : ''}{sat.omitted ? ` · 업링크 ${sat.omitted}개는 응답 상한을 넘어 뺐습니다(위험한 순서로 앞부분만)` : ''}{sat.pointsRows && sat.rows.length > sat.pointsRows ? ` · 추이 그림은 위험한 순서 앞 ${sat.pointsRows}개만 싣습니다(그 뒤는 ‘—’)` : ''}{r.portsUnread ? ` · 포트 목록을 못 읽은 장비 ${r.portsUnread}대는 업링크에서 뺐습니다` : ''}.</div>
+        {/* v3.42(3회차 A5-F3): 각주는 보고 있는 표의 것만 — 포화 표 각주가 고갈 탭에도 나오고 '추이 그림은 …' 이 두 번 나왔다 */}
+        <div style={NOTE}>예상 날짜는 직선 추세의 추정이며 오늘 {dateText(Date.now())} 기준입니다{forecastNotes(part, ex, sat, r)}.</div>
       </div>
     </div>
   );

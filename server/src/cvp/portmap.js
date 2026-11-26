@@ -217,12 +217,22 @@ export function deviceNameFromDesc(desc) {
   }
   return '';
 }
-const shortOf = (s) => String(s ?? '').toLowerCase().split('.')[0];
+// v3.42(2회차 A3-F2 · 3회차 A1-F5): 짧은 이름은 이 함수 하나(topology.js 도 이것을 쓴다) — IPv4 이름은 통째로(첫 옥텟 '10' 으로 줄이면 다른 주소가 '일치', 같은 주소가 '불일치' 가 됐다).
+const IPV4_NAME = /^\d{1,3}(?:\.\d{1,3}){3}$/;
+export const shortOf = (s) => { const v = String(s ?? '').trim().toLowerCase(); return IPV4_NAME.test(v) ? v : v.split('.')[0]; };
 /** v3.42(A1-10): 'esx01-vmnic0' · 'svr-01_eth1' 처럼 장비 이름 뒤에 인터페이스를 붙인 낱말 → 'esx01' · 'svr-01'(뒤 조각이 인터페이스 이름일 때만). */
 function stripIfSuffix(t) {
   const m = /^(.{3,64}?)[-_]([a-z][a-z0-9/.:]{0,30})$/i.exec(t);
   return m && IFNAME.test(m[2]) ? m[1] : t;
 }
+
+/** 설명 낱말들이 그 장비 이름을 가리키는가 — 포트 구성도(연결 근거)와 토폴로지 양끝 비교가 같은 판정을 쓴다(3회차 A1-F7: 두 화면이 같은 설명을 다르게 봤다). */
+export function tokensMention(toks, name) {
+  const lc = String(name ?? '').trim().toLowerCase(); const sh = shortOf(name);
+  if (sh.length < 3) return false;
+  return (Array.isArray(toks) ? toks : []).some((t) => { const u = stripIfSuffix(t); return t === lc || t === sh || shortOf(t) === sh || u === lc || shortOf(u) === sh; });
+}
+export const descMentions = (desc, name) => tokensMention(descTokens(desc), name);
 
 export const EV_KEYS = Object.freeze(['match', 'mismatch', 'lldp', 'desc', 'none', 'nolink']);
 /**
@@ -242,7 +252,7 @@ export function evidenceOf(p, neighbors = [], lldpRead = false) {
     if (!hasDesc) return { ev: 'lldp', device: lldpDev, lldpUnread: false };
     const toks = descTokens(p.desc);
     // v3.42(A1-09): 이웃이 여럿이면(허브 · 가상 스위치 뒤) 하나라도 설명과 맞으면 일치 — 그 이웃을 보여 준다.
-    const hitName = names.find((nm) => { const lc = nm.toLowerCase(); const sh = shortOf(nm); return sh.length >= 3 && toks.some((t) => { const u = stripIfSuffix(t); return t === lc || t === sh || shortOf(t) === sh || u === lc || shortOf(u) === sh; }); });
+    const hitName = names.find((nm) => tokensMention(toks, nm));
     return { ev: hitName ? 'match' : 'mismatch', device: hitName || lldpDev, lldpUnread: false };
   }
   if (hasDesc) return { ev: 'desc', device: descDev, lldpUnread: !lldpRead };

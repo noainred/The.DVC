@@ -90,7 +90,7 @@ test('③ 회수 · 예측', () => {
 
 test('④ 토폴로지 · 양끝 불일치', () => {
   const D = (key, hostname) => ({ agent: '', cvpId: 'c1', key, hostname, model: 'DCS-7050SX3-48YC8' });
-  const devices = [D('L1', 'kr-leaf-01.corp'), D('L2', 'kr-leaf-02'), D('S1', 'kr-spine-01'), D('S2', 'kr-spine-02'), D('X1', 'dup-01'), D('X2', 'dup-01.b')];   // v3.42: 같은 CVP 안에서 짧은 이름이 둘(다른 CVP 후보는 같은 CVP 쪽을 고른다 — cvpBugRound342)
+  const devices = [D('L1', 'kr-leaf-01.corp'), D('L2', 'kr-leaf-02'), D('S1', 'kr-spine-01'), D('S2', 'kr-spine-02'), D('X1', 'dup-01'), D('X2', 'dup-01')];   // v3.42: 같은 CVP 안에 같은 이름 장비가 둘(둘 다 스트리밍) — 못 고른다. 도메인이 다른 FQDN 장비('dup-01.b')는 3회차 A1-F4 로 후보에서 빠진다(cvpBugRound342 ⑭)
   const L = (key, port, sysName, portId) => ({ agent: '', cvpId: 'c1', key, port, sysName, portId });
   const lldp = [
     L('L1', 'Ethernet49/1', 'kr-spine-01', 'Ethernet1'), L('S1', 'Ethernet1', 'kr-leaf-01.corp', 'Ethernet49/1'),   // both

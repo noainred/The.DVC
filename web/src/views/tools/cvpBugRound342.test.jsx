@@ -107,7 +107,7 @@ describe('v3.42 CVP 버그 점검 1회차 — 웹', () => {
     expect(src('CvpCompliance.jsx')).toMatch(/v\.bugNoRecord/); expect(src('CvpCompliance.jsx')).toMatch(/v\.lifeUnread/);   // F5
     expect(src('CvpPortMap.jsx')).toMatch(/cfgReadAt\?\.lag && !data\.device\.info\.cfgReadAt\.lagPartial \? 'LAG 아님' : '소속 못 읽음'/);   // F7
     const tp = src('CvpTopology.jsx');
-    expect(tp).toMatch(/drawOrder\.map\(\(n\) =>/); expect(tp).toMatch(/onFocus=\{\(\) => setFocusId\(n\.id\)\}/);   // F8 · 포커스
+    expect(tp).toMatch(/drawOrder\.map\(\(n\) =>/); expect(tp).toMatch(/matches\(':focus-visible'\)/); expect(tp).toMatch(/onMouseDown=\{\(\) => setFocusId\(null\)\}/);   // F8 · 포커스
     expect(tp).toMatch(/마지막 읽기가 실패함/);   // F9
     const cp = src('CvpCompare.jsx');
     expect(cp).toMatch(/setA\(String\(x\.id\)\); setB\('now'\);/); expect(cp).toMatch(/if \(my !== listSeq\.current\) return;/);   // F11 · 늦은 목록
@@ -121,5 +121,29 @@ describe('v3.42 CVP 버그 점검 1회차 — 웹', () => {
     expect(rxStateLabel({ linked: false, lanesPartial: true }).label).toBe('판정 안 함(레인 일부만 링크)');   // R7
     expect(src('CvpPortPlan.jsx')).toMatch(/ex\.pointsRows && ex\.rows\.length > ex\.pointsRows/);   // R12
     expect(src('CvpRedundancy.jsx')).toMatch(/const unkOn = unkOnly && unkN > 0;/);   // R13
+  });
+  it('3회차 웹 — 버린 무거운 조회 취소 · 각주 · GBIC 타일 · 이중화 문구 · 비교 못 함 문구', async () => {
+    // A5-F1: 무거운 조회 8곳은 fetchHeavy(재시도 없음 · 긴 시한) + effect 정리에서 취소
+    for (const [f, n] of [['CvpLinkQuality.jsx', 1], ['CvpOpticsTrend.jsx', 1], ['CvpPortPlan.jsx', 2], ['CvpRedundancy.jsx', 1], ['CvpTopology.jsx', 1], ['CvpPortMap.jsx', 1]]) {
+      const t = src(f);
+      expect((t.match(/fetchHeavy\('\/tools\/cvp\//g) || []).length, f).toBe(n);
+      expect((t.match(/active = false; ac\.abort\(\);/g) || []).length, f).toBe(n);
+    }
+    expect(src('CvpCompare.jsx')).toMatch(/cmpAc\.current\?\.abort\(\);/);
+    const hv = src('cvpHeavy.js');
+    expect(hv).toMatch(/retries: 0/); expect(hv).toMatch(/timeoutMs: HEAVY_TIMEOUT_MS/);
+    // A5-F3: 예측 각주는 보고 있는 표의 것만
+    expect(src('CvpPortPlan.jsx')).toMatch(/function forecastNotes\(part, ex, sat, r\)/);
+    // A5-F4: 레인 일부만 링크인 칸을 '판정 안 함' 에 더한다
+    const { opticsKpis } = await import('./cvpOpticsText.js');
+    const k = opticsKpis({ notLinked: 3, lanesPartial: 2, present: 10, absent: 1 }, {}).find((x) => x.key === 'notLinked');
+    expect(k.value).toBe('5'); expect(k.meta).toContain('레인 일부만 링크 2');
+    expect(opticsKpis({ notLinked: 3 }, {}).find((x) => x.key === 'notLinked').value).toBe('3');
+    // A5-F5: 못 읽은 장비가 있으면 '문제 없음' 으로 단정하지 않는다
+    const { noProblemText, naText } = await import('./cvpNetText.js');
+    expect(noProblemText(0, 0)).toBe('문제 있는 장비가 없습니다.');
+    expect(noProblemText(0, 4)).toContain('4대는 MLAG'); expect(noProblemText(2, 0)).toContain('확인 불가');
+    // A1-F3 · A5-F6: 비교 못 함 문구
+    expect(naText(['portState'])).toContain('일부 포트의 링크 상태'); expect(naText(['broken'])).toContain('스냅샷 본문 손상');
   });
 });

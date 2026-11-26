@@ -79,7 +79,7 @@ export function opticTrendText(r, { minDays, now = Date.now(), horizonDays } = {
   if (r.state === 'already') return '이미 주의 임계 이하';
   return forecastText({ ...r, eta: r.warnEta }, { minDays, now, horizonDays });
 }
-export const OPTIC_TREND_NOTE = '트랜시버마다 **링크가 올라온 날의 최저 수신 광량**을 쌓아 최근 직선 추세로 주의 임계 도달을 예상합니다. 하루 사이 크게 오르면(교체 · 청소) 그날부터 다시 봅니다. 링크 없는 날은 기록이 없습니다.';
+export const OPTIC_TREND_NOTE = '트랜시버마다 **링크가 올라온 날의 최저 수신 광량**을 쌓아 최근 직선 추세로 주의 임계 도달을 예상합니다. 하루 사이 크게 오르면(교체 · 청소) 그날부터 다시 봅니다. 링크 없는 날은 기록이 없습니다. 브레이크아웃 칸에서 레인 일부만 링크인 날도 기록하지 않습니다(칸 단위 값이 어느 레인 것인지 몰라서).';
 
 /* ── ⑥ ⑦ 토폴로지 ──────────────────────────────────────────────────────────────────────────────────────── */
 export const LAYER_DEFS = Object.freeze({
@@ -148,7 +148,7 @@ export const LOCATE_NOTE = 'MAC 은 스위치 **MAC 테이블**과 **CVP 위치(
 /* ── ⑬ 작업 전후 비교 ──────────────────────────────────────────────────────────────────────────────────── */
 export const CHANGE_KIND = Object.freeze({ device: '장비', port: '포트', bgp: 'BGP', xcvr: '트랜시버', lldp: 'LLDP 이웃' });
 const PORT_FIELD = Object.freeze({ oper: '링크', admin: '관리 상태', speed: '속도', vlan: 'VLAN', lag: '포트 채널', desc: '설명', mtu: 'MTU', added: '새로 생김', removed: '사라짐' });
-const NA_TEXT = Object.freeze({ ports: '포트', bgp: 'BGP', xcvr: '트랜시버', lldp: 'LLDP' });
+const NA_TEXT = Object.freeze({ ports: '포트', bgp: 'BGP', xcvr: '트랜시버', lldp: 'LLDP', portState: '일부 포트의 링크 상태', broken: '스냅샷 본문 손상' });
 export function changeLabel(c) {
   if (c.kind === 'device') return c.field === 'version' ? 'EOS 버전' : c.field;
   if (c.kind === 'port') return `${c.item} · ${PORT_FIELD[c.field] || c.field}`;
@@ -272,4 +272,12 @@ export function downMembersText(ch) {
   const word = (m) => (m.admin === 'down' ? '꺼짐' : m.oper == null || m.oper === 'unknown' ? '모름' : m.oper === 'nolink' ? '링크 없음' : '내려감');
   const head = bad.slice(0, 4).map((m) => `${String(m.port || '').replace(/^Ethernet/i, 'Et')} ${word(m)}`);
   return `${head.join(' · ')}${bad.length > 4 ? ` 외 ${bad.length - 4}` : ''}`;
+}
+
+/** v3.42(2회차 A5-F2 · 3회차 A5-F5): 이중화 '문제 있는 장비만' 이 비었을 때 문구 — 확인 불가 · 못 읽은 장비가 있으면 '문제 없음' 으로 단정하지 않는다. */
+export function noProblemText(unknownN, unreadN) {
+  const parts = [];
+  if (unknownN > 0) parts.push(`${unknownN}대는 상태를 다 읽지 못해 확인 불가(‘확인 불가’ 칩)`);
+  if (unreadN > 0) parts.push(`${unreadN}대는 MLAG · 채널 소속 · 포트 목록 중 못 읽은 것이 있습니다(‘문제 있는 장비만’ 을 끄면 보입니다)`);
+  return parts.length ? `확인된 문제는 없습니다 — 다만 ${parts.join(' · ')}.` : '문제 있는 장비가 없습니다.';
 }

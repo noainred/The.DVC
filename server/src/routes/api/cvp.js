@@ -8,7 +8,7 @@
  *  - 등록부 CRUD·연결 테스트·설정: adminOnly(자격증명) + 감사로그(비밀 미기재).
  *  - 연결 테스트가 저장 비밀을 물려받으면 **host·계정·인증 방식을 저장값으로 고정**한다(v2.480 — 저장 비밀이 요청자 호스트로 가지 않게).
  */
-import { heavyGate } from '../../cvp/heavyGate.js';   // v3.42(2회차 A4-F5)
+import { heavyJson, heavyKey } from '../../cvp/heavyGate.js';   // v3.42: 무거운 조회 동시 상한 + 같은 조회 합류
 import { createYielder } from '../../util/timeSlice.js';
 import { isDemoGuest } from '../../auth/demoGuest.js';
 import { requireRole, requirePerm } from '../../auth/auth.js';
@@ -480,37 +480,39 @@ api.get('/tools/cvp/portmap', toolsPerm, fullScopeOnly, async (req, res) => {
 
 /** 전 스위치 포트 여유 — 장비마다 사용 · 예비 · 확인 필요 · 꺼짐(LLDP 없이 분류만). 화면은 마운트 1회 + 새로고침(폴링 없음). */
   const PORTMAP_SUMMARY_PORTS_MAX = 200_000;
-api.get('/tools/cvp/portmap/summary', toolsPerm, fullScopeOnly, heavyGate, async (req, res) => {
+api.get('/tools/cvp/portmap/summary', toolsPerm, fullScopeOnly, async (req, res) => {
   kickDemo();
   const admin = isAdminReq(req);
   const servers = listServers();
   const own = rowOwnerOf(servers);
-  const { rows, unavailable } = await cdb.listDeviceRows();
-  if (unavailable) return res.status(503).json({ ok: false, reason: '중앙 CVP DB 를 열지 못했습니다.' });
-  const devs = rows.filter(own);
-  // v3.42(반증 C5): 포트 전량 한 번의 동기 조회 대신 장비별 PK 조회 + 시간 기준 양보(cdb.portRowsOf — 새 화면 라우트와 같은 함수 · 포트를 못 읽은 장비는 뺀다).
-  const pr = await cdb.portRowsOf(devs, { limit: PORTMAP_SUMMARY_PORTS_MAX });
-  if (pr.unavailable) return res.status(503).json({ ok: false, reason: '중앙 CVP DB 를 열지 못했습니다.' });
-  const byDev = new Map();
-  for (const r of pr.rows) {
-    const k = `${r.agent}\u0000${r.cvpId}\u0000${r.key}`;
-    if (!byDev.has(k)) byDev.set(k, []);
-    byDev.get(k).push({ name: r.port, oper: r.oper, admin: r.admin, desc: r.desc, speedBps: r.speedBps });
-  }
-  const corpOf = corpResolver(servers, dcList());
-  const byId = new Map(servers.map((x) => [x.id, x]));
-  // v3.42(2회차 A4-F8): 장비마다 구성도 분류(summaryRow — 500대 45~100ms)를 시간 기준 양보로 나눈다.
-  const list = []; const y = createYielder(15);
-  for (const d of devs) {
-    const ports = d.portsRead ? (byDev.get(`${d.agent}\u0000${d.cvpId}\u0000${d.key}`) || []) : null;
-    const s = summaryRow({ model: d.model, ports, parts: d.partsList });
-    const c = corpOf(d.cvpId);
-    list.push({ cvpId: d.cvpId, key: d.key, hostname: d.hostname || d.key, model: d.model || '', corpId: c.corpId, corpName: c.corpName,
-      cvpName: byId.get(d.cvpId)?.name || d.cvpId, portsRead: s.portsRead, counts: s.counts, spareHigh: s.spareHigh, spareSpeedUnknown: s.spareSpeedUnknown || 0, source: s.source || null });
-    await y();
-  }
-  // 여유 부족 기준(예비 이 개수 이하) — 화면에 숫자를 박지 않고 이 값을 쓴다.
-  res.json({ devices: list, lowSpareMax: 4, ...(pr.truncated ? { truncated: true, portsMax: PORTMAP_SUMMARY_PORTS_MAX } : {}), ...(admin ? {} : { addressHidden: true }) });
+  return heavyJson(req, res, heavyKey('portmap-summary', admin), async () => {
+    const { rows, unavailable } = await cdb.listDeviceRows();
+    if (unavailable) return { status: 503, body: { ok: false, reason: '중앙 CVP DB 를 열지 못했습니다.' } };
+    const devs = rows.filter(own);
+    // v3.42(반증 C5): 포트 전량 한 번의 동기 조회 대신 장비별 PK 조회 + 시간 기준 양보(cdb.portRowsOf — 새 화면 라우트와 같은 함수 · 포트를 못 읽은 장비는 뺀다).
+    const pr = await cdb.portRowsOf(devs, { limit: PORTMAP_SUMMARY_PORTS_MAX });
+    if (pr.unavailable) return { status: 503, body: { ok: false, reason: '중앙 CVP DB 를 열지 못했습니다.' } };
+    const byDev = new Map();
+    for (const r of pr.rows) {
+      const k = `${r.agent}\u0000${r.cvpId}\u0000${r.key}`;
+      if (!byDev.has(k)) byDev.set(k, []);
+      byDev.get(k).push({ name: r.port, oper: r.oper, admin: r.admin, desc: r.desc, speedBps: r.speedBps });
+    }
+    const corpOf = corpResolver(servers, dcList());
+    const byId = new Map(servers.map((x) => [x.id, x]));
+    // v3.42(2회차 A4-F8): 장비마다 구성도 분류(summaryRow — 500대 45~100ms)를 시간 기준 양보로 나눈다.
+    const list = []; const y = createYielder(15);
+    for (const d of devs) {
+      const ports = d.portsRead ? (byDev.get(`${d.agent}\u0000${d.cvpId}\u0000${d.key}`) || []) : null;
+      const s = summaryRow({ model: d.model, ports, parts: d.partsList });
+      const c = corpOf(d.cvpId);
+      list.push({ cvpId: d.cvpId, key: d.key, hostname: d.hostname || d.key, model: d.model || '', corpId: c.corpId, corpName: c.corpName,
+        cvpName: byId.get(d.cvpId)?.name || d.cvpId, portsRead: s.portsRead, counts: s.counts, spareHigh: s.spareHigh, spareSpeedUnknown: s.spareSpeedUnknown || 0, source: s.source || null });
+      await y();
+    }
+    // 여유 부족 기준(예비 이 개수 이하) — 화면에 숫자를 박지 않고 이 값을 쓴다.
+    return { body: { devices: list, lowSpareMax: 4, ...(pr.truncated ? { truncated: true, portsMax: PORTMAP_SUMMARY_PORTS_MAX } : {}), ...(admin ? {} : { addressHidden: true }) } };
+  });
 });
 
 // ── v2.641 ③ CPU·메모리 추이 · ④ 이벤트 · ⑤ 포트 사용량 ──────────────────────────

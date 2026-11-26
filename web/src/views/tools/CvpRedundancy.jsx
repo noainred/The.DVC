@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import BoldText from '../../components/boldText.jsx';
-import { fetchJson } from '../../api.js';
+import { fetchHeavy } from './cvpHeavy.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { NOTE, MONO, ROW, GRID1, LINKBTN, Tiles, CvpSelect, Pill } from './CvpNetParts.jsx';
-import { CHANNEL_DEFS, MLAG_DEFS, REDUNDANCY_NOTE, channelText, downMembersText, rowKey, TONE } from './cvpNetText.js';
+import { CHANNEL_DEFS, MLAG_DEFS, REDUNDANCY_NOTE, channelText, downMembersText, noProblemText, rowKey, TONE } from './cvpNetText.js';
 import { agoText } from './cvpText.js';
 
 /**
@@ -24,14 +24,16 @@ export default function CvpRedundancyView({ servers = [], onOpen }) {
   useEffect(() => {
     let active = true;
     setErr(null); setR(null);
-    fetchJson('/tools/cvp/redundancy', cvpId ? { cvpId } : {}).then((x) => { if (active) setR(x); }).catch((e) => { if (active) setErr(e); });
-    return () => { active = false; };
+    const ac = new AbortController();   // v3.42(3회차 A5-F1): 화면이 버린 무거운 조회는 취소한다(서버 줄을 끝까지 차지하지 않게)
+    fetchHeavy('/tools/cvp/redundancy', cvpId ? { cvpId } : {}, ac.signal).then((x) => { if (active) setR(x); }).catch((e) => { if (active) setErr(e); });
+    return () => { active = false; ac.abort(); };
   }, [cvpId, reload]);
   const rows = r && Array.isArray(r.rows) ? r.rows : [];
   const bad = (x) => BAD_MLAG.has(x.mlag.state) || x.channels.some((ch) => BAD_CH.has(ch.state));
   // v3.42(2회차 F2): '확인 불가'(MLAG · 채널을 다 읽지 못함)는 문제 목록과 따로 — 기본 보기가 '문제 없음' 으로 단정하지 않게 칩 · 문구를 둔다.
   const unk = (x) => x.mlag.state === 'unknown' || x.channels.some((ch) => ch.state === 'unknown');
   const unkN = rows.filter(unk).length;
+  const unreadN = rows.filter((x) => x.mlag.state === 'unread' || x.lagUnread || !x.portsRead).length;
   const unkOn = unkOnly && unkN > 0;   // 2회차 반증 R13: CVP 를 바꿔 칩이 사라지면 선택도 풀린다(빈 표에 남지 않게)
   const shown = unkOn ? rows.filter(unk) : onlyBad ? rows.filter(bad) : rows;
   const c = r?.counts || { ch: {}, mlag: {} };
@@ -72,7 +74,7 @@ export default function CvpRedundancyView({ servers = [], onOpen }) {
                       {x.mlag.raw ? `상태 ${x.mlag.raw.state || '—'} · 협상 ${x.mlag.raw.negotiation || '—'} · 피어 링크 ${x.mlag.peerLink || ''} ${x.mlag.raw.peerLinkState || '—'}` : '—'}
                       {x.mlag.at ? <div style={{ ...NOTE, fontSize: 11.5 }}>읽은 시각 {agoText(x.mlag.at)}{x.mlag.domain ? ` · 도메인 ${x.mlag.domain}` : ''}</div> : null}
                     </td>
-                    <td data-sort={x.lagUnread || !x.portsRead ? '' : badCh.length} style={{ ...MONO, textAlign: 'right' }}>{x.lagUnread || !x.portsRead ? '—' : badCh.length}</td>
+                    <td data-sort={x.lagUnread || !x.portsRead ? '' : badCh.length} style={{ ...MONO, textAlign: 'right' }}>{x.lagUnread || !x.portsRead ? '—' : badCh.length}{!x.lagUnread && x.portsRead && x.channels.some((ch) => ch.state === 'unknown') ? <span style={{ ...NOTE, marginLeft: 4 }}>(확인 불가 {x.channels.filter((ch) => ch.state === 'unknown').length})</span> : null}</td>
                     <td style={{ whiteSpace: 'normal', minWidth: 300 }}>
                       {x.lagPartial ? <div style={{ ...NOTE, color: TONE.amber }}>채널 소속을 일부만 읽었습니다 — 빠진 멤버가 있을 수 있습니다</div> : null}
                       {x.lagUnread ? <span style={NOTE}>채널 소속 못 읽음</span> : !x.portsRead ? <span style={NOTE}>포트 목록 못 읽음(채널 없음이 아님)</span> : !x.channels.length ? <span style={NOTE}>포트 채널 없음</span> : (
@@ -93,7 +95,8 @@ export default function CvpRedundancyView({ servers = [], onOpen }) {
               })}
             </tbody>
           </STable>
-          {!shown.length && <div style={NOTE}>{unkOn ? '확인 불가 장비가 없습니다.' : onlyBad ? (unkN ? `확인된 문제는 없습니다 — 다만 ${unkN}대는 상태를 다 읽지 못해 확인 불가입니다(‘확인 불가’ 칩).` : '문제 있는 장비가 없습니다.') : '장비가 없습니다.'}</div>}
+          {/* v3.42(3회차 A5-F5): 못 읽은 장비(MLAG 못 읽음 · 채널 소속 · 포트 목록)가 있으면 '문제 없음' 으로 단정하지 않는다 */}
+          {!shown.length && <div style={NOTE}>{unkOn ? '확인 불가 장비가 없습니다.' : onlyBad ? noProblemText(unkN, unreadN) : '장비가 없습니다.'}</div>}
           <div style={NOTE}>채널 칸에 마우스를 올리면 멤버 포트와 상태가 보입니다(문제 채널은 내려간 멤버를 칸 안에 적습니다). {shown.length > 400 ? `${shown.length}대 중 정렬 순서 앞 400대 표시. ` : ''}{r.truncated ? '⚠ 포트 행이 상한을 넘어 일부만 봤습니다.' : ''}</div>
         </div>
       </>)}

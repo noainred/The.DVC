@@ -508,10 +508,20 @@ export function judgeOptics(parts, ports, { warnDbm = -10, faultDbm = -14 } = {}
     const lanes = intf && !port ? (lanesOf.get(intf) || []) : [];
     const known = !!port || lanes.length > 0;
     const rx = numOrNull(p.dom.rxPower);
-    // v3.42(2회차 A1-E1): 레인이 둘 이상(브레이크아웃)이면 **모든 레인이 올라왔을 때만** 링크 있음 — 칸 단위 DOM 값이 어두운 레인의 값일 수 있어
-    //   하나만 올라온 칸을 Rx 로 판정하면 거짓 GBIC 장애가 될 수 있다(실장비 미확인 — 안전한 쪽). 레인 하나(100G 단일 포트)는 그 레인.
-    const linked = port ? port.oper === 'up' : lanes.length > 0 && lanes.every((l) => l.oper === 'up');
-    const lanesPartial = !port && lanes.length > 1 && !linked && lanes.some((l) => l.oper === 'up');   // 일부 레인만 링크 — 링크 없음이 아니다(재고는 '링크 있음')
+    /*
+     * 레인으로 링크를 보는 규칙(v3.42 — 2회차 A1-E1 → 3회차 A1-F2 로 고침):
+     *  · 레인 행이 하나거나 모두 올라옴 → 링크 있음.
+     *  · **첫 레인(/1)만 올라왔고 그 속도가 40G 이상이거나 모름** → 단일 포트 모드(40G/100G — /2~/4 는 비활성 레인) → 링크 있음.
+     *    2회차는 '모든 레인이 올라와야 링크' 라서 이 흔한 구성이 전부 '레인 일부' 가 되어 Rx 판정 · 일 기록이 사라졌다(1회차 C3 무효).
+     *  · 그 밖에 일부만 올라옴(브레이크아웃 — 첫 레인 속도 25G 이하 · 다른 레인이 올라옴) → lanesPartial: 칸 단위 DOM 값이 어두운 레인의 값일 수 있어
+     *    Rx 를 판정하지 않는다(실장비 미확인 — 안전한 쪽). 링크 없음도 아니다(재고는 '링크 있음').
+     */
+    const upLanes = lanes.filter((l) => l.oper === 'up');
+    const first = lanes.find((l) => /\/1$/.test(String(l.name))) || null;
+    const firstSpeed = first ? numOrNull(first.speedBps) : null;
+    const singleMode = upLanes.length === 1 && upLanes[0] === first && (firstSpeed == null || firstSpeed >= 40e9);
+    const linked = port ? port.oper === 'up' : lanes.length > 0 && (upLanes.length === lanes.length || singleMode);
+    const lanesPartial = !port && lanes.length > 1 && !linked && upLanes.length > 0;
     // v2.656: 링크가 내려간 것을 '확인한' 포트 — Rx 에 더해 Tx·바이어스도 판정하지 않는다(온도·전압만). 포트 상태를 모르면 예전 판정 그대로.
     const linkDown = portsKnown && known && !linked && !lanesPartial;
     const other = linkDown ? (p.domJudge?.envState ?? null) : (p.domJudge?.otherState ?? null);

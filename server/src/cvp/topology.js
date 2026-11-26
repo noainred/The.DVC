@@ -11,13 +11,11 @@
  * 양끝 불일치는 **두 끝 포트를 다 아는 링크**(both · one 중 상대 포트를 LLDP portId 로 아는 것)만 — 속도 · MTU · Duplex · 관리 상태 · 포트 채널 소속 · 설명이 가리키는 상대.
  *   한쪽 값을 못 읽었으면 '비교 못 함'(na)이다 — 다름으로 세지 않는다.
  */
-import { deviceNameFromDesc } from './portmap.js';
+import { deviceNameFromDesc, descTokens, descMentions, shortOf } from './portmap.js';
 
 const devKey = (a, c, k) => `${a}\u0000${c}\u0000${k}`;
 const lc = (s) => String(s ?? '').trim().toLowerCase();
-// v3.42(2회차 A3-F2): IPv4 이름은 통째로(첫 옥텟 '192' 로 줄이면 IP 로 등록된 장비끼리 모두 같은 이름이 됐다).
-const IPV4_NAME = /^\d{1,3}(?:\.\d{1,3}){3}$/;
-export const shortOf = (s) => { const v = lc(s); return IPV4_NAME.test(v) ? v : v.split('.')[0]; };
+export { shortOf };   // 짧은 이름은 portmap.js 하나(IP 이름은 통째로 — 2회차 A3-F2 · 3회차 A1-F5)
 
 /** 인터페이스 이름 정규화 — 'Ethernet1/1' = 'Et1/1' = 'ethernet 1/1'. 포트 채널 'Port-Channel10' = 'Po10'. */
 export function normPort(s) {
@@ -36,12 +34,13 @@ export const AMBIG = '\u0001ambig';
  * @param {Array<{agent,cvpId,key,hostname,streaming?}>} devices
  */
 export function switchIndex(devices = []) {
-  const full = new Map(); const short = new Map(); const live = new Map();
+  const full = new Map(); const short = new Map(); const live = new Map(); const fullOf = new Map();
   const add = (m, k, id) => { if (!m.has(k)) m.set(k, []); const a = m.get(k); if (!a.includes(id)) a.push(id); };
   for (const d of Array.isArray(devices) ? devices : []) {
     const id = devKey(d.agent, d.cvpId, d.key);
     live.set(id, d.streaming !== false);
     const f = lc(d.hostname);
+    fullOf.set(id, f);
     if (f) add(full, f, id);
     const s = shortOf(d.hostname);
     if (s.length >= 3) add(short, s, id);
@@ -57,7 +56,10 @@ export function switchIndex(devices = []) {
       const f = lc(name);
       if (!f) return null;
       const s = shortOf(name);
-      const fc = full.get(f) || []; const sc = s.length >= 3 ? (short.get(s) || []) : [];
+      const fc = full.get(f) || [];
+      // 3회차 A1-F4: 도메인까지 쓴 이름(spine1.us.corp)은 **도메인이 다른 FQDN 장비**(spine1.kr.corp)의 짧은 이름으로 맞추지 않는다 —
+      //   짧은 이름 후보는 장비 쪽 이름에 도메인이 없을 때만(CVP 는 'spine1', LLDP 는 FQDN 인 흔한 경우).
+      const sc = (s.length >= 3 ? (short.get(s) || []) : []).filter((c) => f === s || fullOf.get(c) === f || fullOf.get(c) === shortOf(fullOf.get(c)));
       if (!fc.length && !sc.length) return null;
       // 2회차 반증 R5: 도메인까지 쓴 이름(spine1.us.corp)은 정확한 전체 이름이 같은 CVP 의 짧은 이름(spine1.kr.corp)보다 강하다.
       //   짧은 이름(spine1)으로 온 경우만 같은 CVP 의 짧은 이름 후보를 다른 CVP 의 전체 이름보다 먼저 본다(A1-F3).
@@ -150,15 +152,17 @@ export function compareEnds(pa, pb, { aName = '', bName = '', isSwitch = null } 
   const inLag = (p) => (p.lag == null ? null : String(p.lag).trim() ? 'yes' : 'no');
   cmp('lag', inLag(pa), inLag(pb));
   // 설명이 가리키는 상대: 설명에서 뽑은 장비 이름이 있고, 그것이 실제 상대(B) 이름과 다르면 다름. 이름을 못 뽑으면 비교하지 않는다(na 도 아님).
-  for (const [side, p, peerName] of [['a', pa, bName], ['b', pb, aName]]) {
-    if (p.desc == null) continue;
-    const named = deviceNameFromDesc(p.desc);
-    if (!named || !peerName) continue;
-    // v3.42(2회차 A1-F11 · 반증 R10): 뽑은 낱말이 **알려진 스위치 이름**일 때만 비교한다 — 'MLAG-PEER-LINK' · 'MLAG-PEER-1' · 'ISL-1' · 'uplink-100G' 같은
-    //   관례 낱말을 상대 이름으로 보고 '다름' 을 셌다. CVP 밖 이름(철거된 장비 등)은 맞는지 확인할 수 없어 비교하지 않는다.
-    if (typeof isSwitch === 'function' && !isSwitch(named)) continue;
-    const ok = lc(named) === lc(peerName) || shortOf(named) === shortOf(peerName);
-    if (!ok) out.push({ field: side === 'a' ? 'descA' : 'descB', a: side === 'a' ? named : peerName, b: side === 'a' ? peerName : named, state: 'diff' });
+  for (const [side, p, peerName, selfName] of [['a', pa, bName, aName], ['b', pb, aName, bName]]) {
+    if (p.desc == null || !peerName) continue;
+    // v3.42(3회차 A1-F7): 설명 어디에든 상대 이름이 있으면 같음(포트 구성도 연결 근거와 같은 판정 — portmap.descMentions). 예전에는 첫 낱말만 봐
+    //   자기 이름으로 시작하는 설명('leaf1:Et49 <-> spine1:Et1')이 거짓 '다름' 이었다.
+    if (descMentions(p.desc, peerName)) continue;
+    // 상대 이름이 없으면: 설명이 가리키는 **다른 알려진 스위치**(자기 자신 제외)가 있을 때만 다름. 'MLAG-PEER-1' · 'ISL-1' 같은 관례 낱말 · CVP 밖 이름은 비교하지 않는다(2회차 A1-F11 · R10).
+    let named;
+    if (typeof isSwitch === 'function') named = descTokens(p.desc).find((t) => !descMentions(t, selfName) && isSwitch(t));
+    else { named = deviceNameFromDesc(p.desc); if (named && selfName && descMentions(named, selfName)) named = ''; }   // isSwitch 없이 부르면(단위 테스트) 뽑은 첫 이름으로
+    if (!named) continue;
+    out.push({ field: side === 'a' ? 'descA' : 'descB', a: side === 'a' ? named : peerName, b: side === 'a' ? peerName : named, state: 'diff' });
   }
   return out;
 }
@@ -255,7 +259,10 @@ export function buildTopology({ devices = [], lldp = [], lldpMeta = new Map(), p
       let common = 0;
       for (const z of set) if (z !== y && oy.has(z)) common++;
       if (common < 1 || common * 2 < Math.max(nx, ny)) continue;
-      for (const [u, v] of [[x, y], [y, x]]) { if (!cand.has(u)) cand.set(u, []); cand.get(u).push([v, common]); }
+      // 3회차 A1-F1: 점수 = 공유 비율(공유 ÷ 큰 쪽 이웃 수) 먼저 · 같으면 공유 수 — 공유 수만 보면 스파인 MLAG 쌍이 있을 때 리프 ↔ 스파인(2/4)이
+      //   진짜 피어(2/2)와 동점이 되어 리프 쌍이 사라졌다(리프가 전부 스파인).
+      const score = (common / Math.max(nx, ny)) * 1e6 + common;
+      for (const [u, v] of [[x, y], [y, x]]) { if (!cand.has(u)) cand.set(u, []); cand.get(u).push([v, score]); }
     }
   }
   const bestOf = (u) => {

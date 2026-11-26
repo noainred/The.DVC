@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import BoldText from '../../components/boldText.jsx';
-import { fetchJson } from '../../api.js';
+import { fetchHeavy } from './cvpHeavy.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { NOTE, MONO, ROW, GRID1, LINKBTN, Seg, Tiles, CvpSelect, Pill } from './CvpNetParts.jsx';
@@ -46,7 +46,8 @@ function TopoMap({ nodes, links, sel, onSel, problemsOnly }) {
             <g key={n.id} transform={`translate(${p.x - BOX_W / 2}, ${p.y - BOX_H / 2})`} onClick={() => onSel(on ? null : n.id)}
               role="button" tabIndex={0} aria-pressed={on} aria-label={`${n.hostname} — ${LAYER_DEFS[n.layer]?.label || n.layer}`}
               onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSel(on ? null : n.id); } }}
-              onFocus={() => setFocusId(n.id)} onBlur={() => setFocusId((x) => (x === n.id ? null : x))} style={{ cursor: 'pointer', outline: 'none' }}>
+              onFocus={(e) => { let kb = true; try { kb = e.currentTarget.matches(':focus-visible'); } catch { /* 구형 브라우저 — 표시한다 */ } if (kb) setFocusId(n.id); }}
+              onBlur={() => setFocusId((x) => (x === n.id ? null : x))} onMouseDown={() => setFocusId(null)} style={{ cursor: 'pointer', outline: 'none' }}>
               <title>{`${n.hostname} — ${LAYER_DEFS[n.layer]?.label || n.layer} · 스위치 이웃 ${n.switchNeighbors}${n.esxi + n.otherNeighbors ? ` · 서버 등 ${n.esxi + n.otherNeighbors}` : ''}${n.lldpRead ? '' : ' · LLDP 못 읽음'}${n.lldpFailing ? ' · LLDP 마지막 읽기 실패 — 이전 이웃으로 그렸습니다' : ''}${n.lldpAt ? ` · LLDP 읽은 시각 ${new Date(n.lldpAt).toLocaleString()}` : ''}`}</title>
               <rect width={BOX_W} height={BOX_H} rx="6" fill={on ? '#1e3a8a' : '#16213a'} stroke={on ? '#93c5fd' : n.lldpRead && !n.lldpFailing ? '#3b4b6b' : '#b45309'} strokeDasharray={n.lldpRead && !n.lldpFailing ? undefined : '4 3'} strokeWidth={on ? 2 : 1} />
               {focusId === n.id ? <rect x={-3} y={-3} width={BOX_W + 6} height={BOX_H + 6} rx="8" fill="none" stroke="#fbbf24" strokeWidth="2" /> : null}
@@ -104,8 +105,9 @@ export default function CvpTopologyView({ servers = [], onOpen }) {
   useEffect(() => {
     let active = true;
     setErr(null); setR(null); setSel(null);
-    fetchJson('/tools/cvp/topology', cvpId ? { cvpId } : {}).then((x) => { if (active) setR(x); }).catch((e) => { if (active) setErr(e); });
-    return () => { active = false; };
+    const ac = new AbortController();   // v3.42(3회차 A5-F1): 화면이 버린 무거운 조회는 취소한다(서버 줄을 끝까지 차지하지 않게)
+    fetchHeavy('/tools/cvp/topology', cvpId ? { cvpId } : {}, ac.signal).then((x) => { if (active) setR(x); }).catch((e) => { if (active) setErr(e); });
+    return () => { active = false; ac.abort(); };
   }, [cvpId, reload]);
   const nodesAll = useMemo(() => (r && Array.isArray(r.nodes) ? r.nodes : []), [r]);
   const corps = useMemo(() => {

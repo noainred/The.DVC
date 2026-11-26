@@ -297,8 +297,16 @@ test('⑧ 2회차 — 토폴로지 · 포트 구성도 · 판정', () => {
   assert.equal(PM.deviceNameFromDesc('esx01-ens1f0'), 'esx01');
   // A1-E1: 브레이크아웃 레인 일부만 올라오면 Rx 판정 안 함(링크 없음도 아님 — 재고는 링크 있음)
   const part = [{ kind: 'xcvr', name: 'xcvr › Ethernet49', state: 'ok', dom: { rxPower: -30 } }];
-  const j = P.judgeOptics(part, [{ name: 'Ethernet49/1', oper: 'up' }, { name: 'Ethernet49/2', oper: 'nolink' }], {});
+  const j = P.judgeOptics(part, [{ name: 'Ethernet49/1', oper: 'up', speedBps: 25e9 }, { name: 'Ethernet49/2', oper: 'nolink', speedBps: 25e9 }], {});
   assert.deepEqual([j[0].optic.linked, j[0].optic.lanesPartial, j[0].optic.judged], [false, true, false]);
+  // 3회차 A1-F2: 단일 포트 모드(40G/100G — /1 만 올라오고 /2~/4 는 비활성 레인)는 링크 있음 · Rx 판정한다(속도를 못 읽어도)
+  const lanes4 = (sp) => [{ name: 'Ethernet49/1', oper: 'up', speedBps: sp }, ...[2, 3, 4].map((n) => ({ name: `Ethernet49/${n}`, oper: 'nolink', speedBps: null }))];
+  for (const sp of [100e9, 40e9, null]) {
+    const n1 = P.judgeOptics(part, lanes4(sp), {});
+    assert.deepEqual([n1[0].optic.linked, n1[0].optic.lanesPartial, n1[0].optic.judged, n1[0].optic.rxState], [true, undefined, true, 'fault'], `단일 포트 ${sp}`);
+  }
+  const n2 = P.judgeOptics(part, [{ name: 'Ethernet49/1', oper: 'nolink' }, { name: 'Ethernet49/2', oper: 'up' }], {});
+  assert.equal(n2[0].optic.lanesPartial, true, '첫 레인이 아닌 레인만 올라오면 브레이크아웃 일부');
   assert.equal(OT.opticInventory([{ partsList: j, ports: [] }]).totals.linked, 1);
   assert.equal(E.cleanDevice({ key: 'k', ts: NOW - 1000, parts: j, partsAt: NOW - 1000 }, NOW).parts[0].optic.lanesPartial, true, '엣지 정제 화이트리스트');
   // A1-F9: 끊긴 GBIC 도 마지막 값 · 임계 이하면 위험 쪽 정렬
@@ -321,24 +329,55 @@ test('⑨ 2회차 — 가림 · 무거운 조회 동시 상한', async () => {
   const { maskErrText } = await import('../src/routes/api/cvp.js');
   assert.equal(maskErrText('peer 10.1.1.1.'), 'peer (주소 가림).', '문장 끝 마침표가 붙어도 가린다(A3-F1)');
   assert.equal(maskErrText('v4.27.4.1.2'), 'v4.27.4.1.2', '대조: 다섯 마디 판 표기는 주소가 아니다');
+  // 무거운 조회 상한 + 합류(3회차 다시 설계 — 2회차 판은 전역 한 줄이라 가벼운 조회가 기다리고 같은 조회가 합류하지 않았다)
   const G = await import('../src/cvp/heavyGate.js');
   G._resetHeavyGate();
+  try {   // 단언이 깨져도 상한 상태를 비운다(남으면 뒤 라우터 테스트가 줄에서 멈춘다)
   const { EventEmitter } = await import('node:events');
-  const mk = () => { const res = new EventEmitter(); res.writableEnded = false; res.destroyed = false; res.statusCode = 200; res.status = (c) => { res.statusCode = c; return res; }; res.end = function end() { this.writableEnded = true; this.emit('finish'); }; res.json = (b) => { res.body = b; res.end(); }; return res; };
-  const ran = [];
-  const reqs = Array.from({ length: G.HEAVY_MAX + G.HEAVY_QUEUE_MAX + 1 }, () => ({ req: { destroyed: false }, res: mk() }));
-  reqs.forEach((x, i) => G.heavyGate(x.req, x.res, () => ran.push(i)));
-  assert.equal(ran.length, G.HEAVY_MAX, '동시에는 HEAVY_MAX 건만');
-  assert.equal(reqs.at(-1).res.statusCode, 503, '줄이 차면 503');
-  reqs[0].res.json({}); assert.equal(ran.length, G.HEAVY_MAX + 1, '끝나면 다음이 돈다');
-  reqs[2].req.destroyed = true;   // 기다리는 사이 끊긴 요청은 건너뛴다
-  reqs[1].res.json({}); assert.equal(ran.includes(2), false); assert.equal(ran.at(-1), 3);
-  // 반증 R1: 연결이 끊겨도(close) 처리기가 응답을 끝낼 때까지 자리를 쥔다 — 끊김마다 새 계산이 겹쳐 돌던 것
+  const mk = (user = 'u1') => { const res = new EventEmitter(); res.writableEnded = false; res.statusCode = 200; res.headers = {};
+    res.set = (k, v) => { res.headers[k] = v; }; res.status = (c) => { res.statusCode = c; return res; }; res.json = (b) => { res.body = b; res.writableEnded = true; };
+    return { req: { user: { username: user } }, res }; };
+  const tick = () => new Promise((r) => setImmediate(r));
+  const gates = new Map(); let runs = 0;
+  const comp = (k) => () => { runs++; return new Promise((resolve) => gates.set(k, resolve)); };
+  const call = (k, user) => { const x = mk(user); x.p = G.heavyJson(x.req, x.res, k, comp(k)); return x; };
+  // 같은 키는 계산 하나를 함께 기다린다
+  const a1 = call('A', 'u1'); const a2 = call('A', 'u2'); await tick();
+  assert.equal(runs, 1, '같은 조회는 합류');
+  gates.get('A')({ body: { v: 1 } }); await Promise.all([a1.p, a2.p]);
+  assert.deepEqual([a1.res.body, a2.res.body, a1.res.statusCode], [{ v: 1 }, { v: 1 }, 200]);
+  // 동시 HEAVY_MAX 건 · 나머지는 줄
+  runs = 0;
+  const xs = Array.from({ length: G.HEAVY_MAX + 2 }, (_, i) => call(`K${i}`, `user${i}`)); await tick();
+  assert.equal(runs, G.HEAVY_MAX); assert.equal(G.heavyState().queued, 2);
+  // 줄에서 기다리던 요청이 끊기면 줄에서 뺀다(계산을 시작하지 않는다)
+  xs[G.HEAVY_MAX].res.emit('close'); await tick();
+  assert.equal(G.heavyState().queued, 1, '끊긴 요청은 줄 칸을 차지하지 않는다');
+  // 돌고 있는 계산의 요청이 끊겨도 자리는 계산이 끝날 때 돌아온다(끊김마다 새 계산이 겹쳐 돌지 않는다)
+  xs[0].res.emit('close'); await tick();
+  assert.equal(runs, G.HEAVY_MAX, '끊김만으로는 다음이 돌지 않는다');
+  gates.get('K0')({ body: {} }); await tick(); await tick();
+  assert.equal(runs, G.HEAVY_MAX + 1, '계산이 끝나면 다음'); assert.equal(xs[0].res.body, undefined, '끊긴 요청에는 응답하지 않는다');
+  // 계산이 던져도 자리를 돌려준다(영구 잠금 없음)
   const before = G.heavyState().running;
-  reqs[3].res.emit('close');
-  assert.equal(ran.includes(4), false, '끊김만으로는 다음이 돌지 않는다'); assert.equal(G.heavyState().running, before);
-  reqs[3].res.json({}); assert.equal(ran.includes(4), true, '처리기가 끝내면 다음');
-  G._resetHeavyGate();
+  const bad = mk('ux'); const pb = G.heavyJson(bad.req, bad.res, 'BAD', () => { throw new Error('boom'); });
+  for (const k of [...gates.keys()]) gates.get(k)({ body: {} });
+  await assert.rejects(pb, /boom/); await tick(); await tick();
+  assert.ok(G.heavyState().running <= before);
+  // 계정당 상한 · 줄 상한은 429(자동 재시도 대상이 아닌 4xx) + Retry-After
+  G._resetHeavyGate(); gates.clear();
+  const mine = Array.from({ length: G.HEAVY_PER_USER_MAX }, (_, i) => call(`M${i}`, 'same')); await tick();
+  const over = call('M-over', 'same'); await Promise.race([over.p, tick().then(tick)]);   // 상한이 듣지 않으면 줄에 서서 끝나지 않는다 — 기다리지 않고 아래 단언으로 잡는다
+  assert.deepEqual([over.res.statusCode, over.res.body.busy, over.res.headers['Retry-After']], [429, true, String(G.HEAVY_RETRY_AFTER_S)]);
+  const other = call('O1', 'other'); await tick();
+  assert.equal(other.res.statusCode, 200, '다른 계정은 줄을 설 수 있다');
+  // 줄에 있던 계산은 앞 계산이 끝난 뒤에야 시작한다 — 시작하는 대로 끝내 준다
+  const all = Promise.all([...mine.map((x) => x.p), other.p]);
+  let settled = false; all.then(() => { settled = true; });
+  for (let i = 0; i < 50 && !settled; i++) { for (const [k, g] of [...gates]) { g({ body: {} }); gates.delete(k); } await tick(); await tick(); }
+  await all;
+  assert.equal(other.res.body && typeof other.res.body, 'object');
+  } finally { G._resetHeavyGate(); }
 });
 
 test('⑩ 2회차 DB — 이름 변형 합치기 · 일부 목록 · 링크 날 기억', async () => {
@@ -365,7 +404,18 @@ test('⑩ 2회차 DB — 이름 변형 합치기 · 일부 목록 · 링크 날 
   const pr = await cdb.portRowsOf([{ agent: '', cvpId: 'dq', key: 'Q', portsRead: true }]);
   assert.deepEqual(pr.rows.map((r) => [r.port, r.oper]).sort(), [['Ethernet1', 'up'], ['Ethernet2', 'unknown'], ['Ethernet3', 'unknown']]);
   const recs = await cdb.deviceRecordsFor('', 'dq');
-  assert.equal(recs[0].portsPartial, true); assert.equal(recs[0].ports.find((p) => p.name === 'Ethernet2').oper, 'unknown');
+  // 3회차 다시 설계: 옛 행은 **저장할 때** '모름' 으로 적혀 있고(읽기 보정 없음), 엣지 레코드에는 싣지 않는다 — 중앙이 표지를 보고 자기 옛 행을 스스로 '모름' 으로 적는다
+  assert.equal(recs[0].portsPartial, true); assert.deepEqual(recs[0].ports.map((p) => p.name), ['Ethernet1']);
+  const { DatabaseSync } = await import('node:sqlite');
+  const raw = new DatabaseSync(path.join(tmp, 'cvp.db'));
+  assert.deepEqual(raw.prepare("SELECT port, oper, in_bps FROM port_latest WHERE cvp_id='dq' ORDER BY port").all().map((r) => [r.port, r.oper, r.in_bps]),
+    [['Ethernet1', 'up', null], ['Ethernet2', 'unknown', null], ['Ethernet3', 'unknown', null]], 'DB 에 모름으로 적힌다(모든 읽기 경로가 같은 값)');
+  // 다른 읽기 경로(2회차에 빠졌던 곳 — A2-F3)도 같은 값
+  assert.deepEqual((await cdb.portLatestRows({ cvpIds: ['dq'] })).rows.map((r) => [r.port, r.oper]).sort(), [['Ethernet1', 'up'], ['Ethernet2', 'unknown'], ['Ethernet3', 'unknown']]);
+  // 시한: PARTIAL_STALE_KEEP_MS 넘게 목록에 없던 옛 행은 지운다(A2-F9)
+  await cdb.saveDevices({ agent: '', cvpId: 'dq', devices: [{ key: 'Q', ts: t0 + 1000 + cdb.PARTIAL_STALE_KEEP_MS + 5000, hostname: 'q', portsPartial: true, ports: [port('Ethernet1')] }] });
+  assert.deepEqual(raw.prepare("SELECT port FROM port_latest WHERE cvp_id='dq' ORDER BY port").all().map((r) => r.port), ['Ethernet1']);
+  raw.close();
   // A2-F4: 장비 정리 뒤 같은 날 다시 적재하면 링크 날을 다시 적는다(기억이 막지 않는다)
   await cdb.pruneDevices('', { dq: [] }, { cvpIds: ['dq'] });
   await cdb.saveDevices({ agent: '', cvpId: 'dq', devices: [{ key: 'Q', ts: t0 + 2000, hostname: 'q', ports: [port('Ethernet1')] }] });
@@ -424,4 +474,106 @@ test('⑬ 2회차 반증 R8 · R9 — 옛 행 처리 경로 · 일부 표지 보
   const rec = (await cdb.deviceRecordsFor('', 'ds'))[0];
   assert.equal(rec.portsPartial, true); assert.equal(rec.info?.portsPartial, true);
   assert.equal(E.cleanDevice(rec, Date.now()).portsPartial, true, '중앙 정제도 표지를 옮긴다');
+});
+
+/* ── 3회차(5축) 확정분 — 2회차 수정이 만든 회귀 · 다시 설계 ───────────────────────────────────────────────── */
+test('⑭ 3회차 — 층 추정(두 MLAG) · 이름 색인(도메인) · 짧은 이름 하나 · 양끝 비교 · 전후 비교', () => {
+  const link = (ll, a, ap, b, bp) => { ll.push(L(a, ap, b, bp)); ll.push(L(b, bp, a, ap)); };
+  // A1-F1: 스파인 MLAG 쌍 + 리프 MLAG 쌍(리프 3 · 4대) — 리프 ↔ 스파인이 진짜 피어와 공유 수가 같아도(2 대 2) 비율로 가른다
+  const fab = (leaves, pairs) => { const ll = []; link(ll, 'sp1', 'E9', 'sp2', 'E9');
+    leaves.forEach((lf, i) => { link(ll, lf, 'E49', 'sp1', `E${i + 1}`); link(ll, lf, 'E50', 'sp2', `E${i + 1}`); });
+    for (const [x, y] of pairs) link(ll, x, 'E47', y, 'E47');
+    return layers(TP.buildTopology({ devices: ['sp1', 'sp2', ...leaves].map((k) => D(k, k)), lldp: ll })); };
+  assert.deepEqual(fab(['l1', 'l2', 'l3', 'l4'], [['l1', 'l2'], ['l3', 'l4']]), { sp1: 'spine', sp2: 'spine', l1: 'leaf', l2: 'leaf', l3: 'leaf', l4: 'leaf' });
+  assert.deepEqual(fab(['l1', 'l2', 'l3'], [['l1', 'l2']]), { sp1: 'spine', sp2: 'spine', l1: 'leaf', l2: 'leaf', l3: 'leaf' });
+  // A1-F4: 도메인까지 쓴 이름은 도메인이 다른 FQDN 장비의 짧은 이름으로 맞추지 않는다 · 장비 이름에 도메인이 없으면 맞춘다
+  const idx = TP.switchIndex([D('KA', 'spine1.kr.corp'), D('LB', 'leaf9')]);
+  assert.equal(idx.find('spine1.us.corp', '\u0000c1\u0000LB'), null);
+  assert.equal(idx.find('leaf9.kr.corp', '\u0000c1\u0000KA'), '\u0000c1\u0000LB', 'CVP 는 짧은 이름 · LLDP 는 FQDN');
+  assert.equal(idx.find('spine1', '\u0000c1\u0000LB'), '\u0000c1\u0000KA');
+  // A1-F5: 짧은 이름 함수는 하나(IP 이름은 통째로) — 포트 구성도 연결 근거도 같다
+  assert.equal(PM.shortOf, TP.shortOf);
+  assert.equal(PM.evidenceOf({ oper: 'up', desc: 'to 10.9.9.9' }, [{ sysName: '10.1.1.1' }], true).ev, 'mismatch', '다른 10.x 주소는 일치가 아니다');
+  assert.equal(PM.evidenceOf({ oper: 'up', desc: 'to 10.1.1.1' }, [{ sysName: '10.1.1.1' }], true).ev, 'match');
+  // A1-F7: 설명이 자기 이름으로 시작해도 상대 이름이 있으면 같음(포트 구성도와 같은 판정)
+  const isSw = (n) => ['leaf1', 'spine1', 'spine2'].includes(n);
+  const ce = (desc) => TP.compareEnds({ desc }, { desc: '' }, { aName: 'leaf1', bName: 'spine1', isSwitch: isSw }).filter((x) => x.field === 'descA');
+  assert.equal(ce('leaf1:Et49 <-> spine1:Et1').length, 0);
+  assert.equal(ce('to spine2 Et1').length, 1, '다른 알려진 스위치를 가리키면 다름');
+  assert.equal(ce('MLAG-PEER-1').length, 0);
+  // A1-F3 · A5-F6: 링크 상태를 한쪽만 못 읽은 포트가 있으면 '비교 못 함(포트 상태)' — '그대로' 로 세지 않는다
+  const b = (o) => SD.snapshotBody({ device: { hostname: 'x', portsRead: true }, ports: [{ port: 'E1', oper: o, admin: 'up' }] });
+  assert.ok(SD.diffDevice(b('up'), b('unknown')).na.includes('portState'));
+  assert.equal(SD.diffDevice(b('unknown'), b('unknown')).na.includes('portState'), false, '양쪽 다 모르면 잃은 비교가 없다');
+  assert.equal(SD.diffSnapshots(new Map([['k', b('up')]]), new Map([['k', b('unknown')]])).unchanged, 0);
+});
+
+test('⑮ 3회차 DB — 저장할 때 표시(엣지 → 중앙) · 일 기록 쪽 읽기 · 메모 · 스냅샷 삭제', async () => {
+  if (!(await cdb.available())) return;
+  const t0 = Date.now() - 120_000;
+  const port = (name, oper, x = {}) => ({ name, oper, admin: 'up', desc: '', speedBps: 25e9, ...x });
+  // 엣지 로컬: 온전한 목록 → 일부 목록(Ethernet2 빠짐)
+  await cdb.saveDevices({ agent: '', cvpId: 'de', devices: [{ key: 'E', ts: t0, hostname: 'e', ports: [port('Ethernet1', 'up', { inBps: 5 }), port('Ethernet2', 'up', { inBps: 7 })] }] });
+  await cdb.saveDevices({ agent: '', cvpId: 'de', devices: [{ key: 'E', ts: t0 + 1000, hostname: 'e', portsPartial: true, ports: [port('Ethernet1', 'up', { inBps: 5 })] }] });
+  const rec = (await cdb.deviceRecordsFor('', 'de'))[0];
+  assert.deepEqual(rec.ports.map((p) => p.name), ['Ethernet1'], '옛 행은 엣지 레코드에 싣지 않는다(A2-F1 · F2)');
+  // 중앙: 같은 장비를 엣지 이름으로 받는다 — 온전한 판 뒤 일부 판(정제 통과)
+  await cdb.saveDevices({ agent: 'edge-c', cvpId: 'de', devices: [{ key: 'E', ts: t0, hostname: 'e', ports: [port('Ethernet1', 'up', { inBps: 5 }), port('Ethernet2', 'up', { inBps: 7 })] }] });
+  await cdb.saveDevices({ agent: 'edge-c', cvpId: 'de', devices: [E.cleanDevice(rec, Date.now())] });
+  const { DatabaseSync } = await import('node:sqlite');
+  const raw = new DatabaseSync(path.join(tmp, 'cvp.db'));
+  const c2 = raw.prepare("SELECT oper, in_bps, ts FROM port_latest WHERE agent='edge-c' AND cvp_id='de' AND port='Ethernet2'").get();
+  assert.deepEqual([c2.oper, c2.in_bps, Number(c2.ts)], ['unknown', null, t0], '중앙도 스스로 모름으로 적고(처리량 비움) 시각은 마지막으로 본 때 그대로');
+  // 다음 온전한 목록이면 표지가 풀리고 사라진 포트는 지워진다
+  await cdb.saveDevices({ agent: '', cvpId: 'de', devices: [{ key: 'E', ts: t0 + 2000, hostname: 'e', ports: [port('Ethernet1', 'up')] }] });
+  assert.equal((await cdb.deviceRecordsFor('', 'de'))[0].portsPartial, undefined);
+  assert.equal(raw.prepare("SELECT COUNT(*) AS n FROM port_latest WHERE agent='' AND cvp_id='de'").get().n, 1);
+  // A4-F3: 일 기록은 쪽 단위로 읽는다 — 한 쪽(4,000행)을 넘는 날도 빠짐 · 중복 없이
+  const { dayIndex } = await import('../src/util/dayKey.js');
+  const today = dayIndex(Date.now());
+  await cdb.importNetHistory('', { flap: Array.from({ length: 9001 }, (_, i) => ['dp', 'P', `Ethernet${i}`, today, 1]) });
+  const fl = await cdb.flapWindow({ days: 1 });
+  assert.equal([...fl.map.keys()].filter((k) => k.startsWith('\u0000dp\u0000P\u0000')).length, 9001);
+  // A2-F4 · A4-F6: 지운 장비가 없으면 링크 날 기억을 비우지 않는다(주기마다 전 포트를 다시 쓰지 않는다) — 기억이 살아 있으면 같은 날 다시 적재해도 행이 그대로
+  raw.prepare("DELETE FROM port_lastlink WHERE cvp_id='de'").run();
+  await cdb.pruneDevices('', { de: ['E'] });
+  await cdb.saveDevices({ agent: '', cvpId: 'de', devices: [{ key: 'E', ts: t0 + 3000, hostname: 'e', ports: [port('Ethernet1', 'up')] }] });
+  assert.equal(raw.prepare("SELECT COUNT(*) AS n FROM port_lastlink WHERE cvp_id='de'").get().n, 0, '기억이 남아 다시 쓰지 않았다(지운 것이 없으므로)');
+  // A2-F8: 조각 삭제 사이에 다른 정리가 마지막 행을 먼저 지워도 '지웠다' 로 답한다
+  const body = SD.snapshotBody({ device: { hostname: 'x', portsRead: true }, ports: [] });
+  const sn = await cdb.createSnap({ by: 't', bodies: [{ agent: '', cvpId: 'de', key: 'E', body }] });
+  assert.equal((await cdb.deleteSnap(sn.id)).deleted, 1);
+  assert.equal((await cdb.deleteSnap(sn.id)).deleted, 0, '대조: 없는 것은 0');
+  raw.close();
+});
+
+test('⑯ 3회차 라우터 — 줄이 차면 429 · 검증이 먼저 · 위치 찾기는 줄 밖 · 업링크 채널 · 본문 배열', async () => {
+  if (!(await cdb.available())) return;
+  who = { username: 'adm', role: 'admin', scope: null };
+  const get = async (p) => { const r = await fetch(`${base}${p}`); return { s: r.status, j: await r.json().catch(() => null) }; };
+  // A3-F4: 형식 검증(404 · 400)은 줄과 무관하게 먼저
+  assert.equal((await get('/tools/cvp/linkq?cvpId=nope')).s, 404);
+  assert.equal((await get('/tools/cvp/compare')).s, 400);
+  // A3-F7: 본문이 배열이면 400
+  let r = await fetch(`${base}/tools/cvp/snapshots`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '[]' });
+  assert.equal(r.status, 400);
+  // 같은 조회 동시 3건 — 모두 200(합류)
+  const three = await Promise.all([get(`/tools/cvp/topology?cvpId=${cvpId}`), get(`/tools/cvp/topology?cvpId=${cvpId}`), get(`/tools/cvp/topology?cvpId=${cvpId}`)]);
+  assert.deepEqual(three.map((x) => x.s), [200, 200, 200]);
+  // A1-F6: 업링크 포트 채널로 배운 MAC 은 '지나는 곳'(가장자리가 아니다)
+  const ts = Date.now() - 5000;
+  const cfg = { vlan: ts, lag: ts };
+  await cdb.saveDevices({ agent: '', cvpId, devices: [
+    { key: 'UL', ts, hostname: 'ul-leaf', cfgReadAt: cfg, ports: [{ name: 'Ethernet49/1', oper: 'up', admin: 'up', lag: 'Port-Channel100', desc: '' }, { name: 'Ethernet5', oper: 'up', admin: 'up', lag: '', desc: '' }] },
+    { key: 'US', ts, hostname: 'ul-spine', cfgReadAt: cfg, ports: [{ name: 'Ethernet1', oper: 'up', admin: 'up', lag: '', desc: '' }] },
+  ] });
+  await cdb.saveL2('', cvpId, [
+    { key: 'UL', ts, lldp: [{ port: 'Ethernet49/1', idx: '1', sysName: 'ul-spine', portId: 'Ethernet1' }], fdb: [{ mac: '00aabbccdd01', vlan: 10, port: 'Port-Channel100' }, { mac: '00aabbccdd02', vlan: 10, port: 'Ethernet5' }] },
+    { key: 'US', ts, lldp: [{ port: 'Ethernet1', idx: '1', sysName: 'ul-leaf', portId: 'Ethernet49/1' }] },
+  ]);
+  const a = await get('/tools/cvp/locate?q=00:aa:bb:cc:dd:01');
+  assert.equal(a.s, 200);
+  assert.deepEqual([a.j.edge.length, a.j.transit.map((x) => x.port)], [0, ['Port-Channel100']], JSON.stringify(a.j.edge));
+  const e = await get('/tools/cvp/locate?q=00:aa:bb:cc:dd:02');
+  assert.deepEqual(e.j.edge.map((x) => x.port), ['Ethernet5'], '대조: 서버 포트는 가장자리');
 });
