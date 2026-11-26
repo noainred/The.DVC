@@ -259,6 +259,12 @@ async function pushInner() {
   // v2.620(RECENT2620-02): 한글 이름을 헤더에 원문으로 실으면 fetch 가 요청 자체를 던진다 — 안전할 때만 싣는다.
   const hdrs = { 'Content-Type': 'application/json', ...agentNameHeader(config.agent.name), 'X-Central-Token': config.agent.centralToken };
   let bytes = 0; let gz = 0; let drop = null; let touchedAt = null;
+  /*
+   * v3.42(버그 점검 4회차 A2-F3): 여러 청크 가운데 뒤 청크만 실패하면 앞 청크의 레코드는 중앙에 이미 적재됐다 — 그런데 '보낸 해시'(_sent)는 그대로라,
+   *   다음 주기에 장비 상태가 예전에 보낸 것과 같아져 있으면 touch 만 가서 중앙이 FULL_REFRESH_MS(최대 60분) 동안 틀린 상태로 남았다(복구된 포트가 down · 장애가 열린 채).
+   *   실패한 push 에 실었던 장비(레코드 · L2)는 보낸 해시를 지워 다음 주기에 해시와 상관없이 다시 보낸다. 이벤트 · 표본 · EndpointLocation 은 커서라 틈이 없다.
+   */
+  try {
   for (let i = 0; i < chunks.length; i++) {
     const c = chunks[i];
     const body = {
@@ -298,6 +304,11 @@ async function pushInner() {
     { const a = l2AckOf(reply); if (a === 'acked') l2Acked = true; else if (a === 'old-central') l2OldCentral = true; }   // v2.924(B-② · 반증 L-7)
     { const a = epAckOf(reply); if (a === 'acked') epAcked = true; else if (a === 'old-central') epOldCentral = true; }   // v2.935(C-③)
     drop = mergeDrop(drop, dropSummaryOf(reply));
+  }
+  } catch (e) {
+    for (const [k] of sentNow) _sent.delete(k);
+    for (const [k] of l2SentNow) _l2Sent.delete(k);   // 수정 검토 F3: LLDP · MAC 테이블 레코드도 같은 틈(앞 청크로 간 L2 는 중앙에 들어갔다)
+    throw e;
   }
   if (rows.length) saveCursor(maxRowid);
   for (const [c, m] of evMaxNow) _evSent.set(c, Math.max(_evSent.get(c) || 0, m));

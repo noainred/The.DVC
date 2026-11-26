@@ -54,28 +54,32 @@ export function idleText(r) {
 }
 export const RECLAIM_NOTE = '마지막 사용일은 링크가 올라온 날의 일 기록에서 옵니다. 기록 시작 전은 알 수 없어 **일수로 세지 않고** ‘기록 시작 뒤 사용 없음’ 으로 따로 둡니다. 포탈은 포트를 바꾸지 않습니다 — 회수는 현장에서 판단하세요.';
 /** 예측 상태 문장. */
-export function forecastText(r, { minDays, now = Date.now() } = {}) {
+/** 예측 지평선(일) → '1년' · '180일'(v3.42 D11 — 응답 값. 없으면 '예측 기간'). */
+export const horizonText = (d) => { const n = numOrNull(d); return n == null || n <= 0 ? '예측 기간' : n % 365 === 0 ? `${n / 365}년` : `${n}일`; };
+export function forecastText(r, { minDays, now = Date.now(), horizonDays } = {}) {
   switch (r.state) {
     case 'none': return '기록 없음';
     case 'short': return `기록 부족(${r.days ?? 0}/${minDays ?? '—'}일)`;
     case 'flat': return '늘지 않음 — 예측 없음';
     case 'already': return '이미 넘음';
-    case 'far': return '1년 넘게';
+    case 'far': return `${horizonText(horizonDays)} 넘게`;
+    // v3.42(버그 점검 1회차 A2-F3): 마지막 기록이 오래됐으면 그 값을 '지금' 으로 쓰지 않는다(예측하지 않는다).
+    case 'stale': return `기록 끊김(마지막 ${dateText(r.lastAt)})`;
     case 'eta': { const d = daysFrom(r.eta, now); return `${dateText(r.eta)} 무렵${d != null ? `(약 ${d < 60 ? `${Math.max(0, d)}일` : `${Math.round(d / 30)}개월`})` : ''}`; }
     default: return '—';
   }
 }
-export const FORECAST_TONE = Object.freeze({ already: TONE.red, eta: TONE.amber, far: TONE.blue, flat: TONE.dim, short: TONE.dim, none: TONE.dim, alreadyFault: TONE.red });
+export const FORECAST_TONE = Object.freeze({ already: TONE.red, eta: TONE.amber, far: TONE.blue, flat: TONE.dim, short: TONE.dim, none: TONE.dim, stale: TONE.dim, alreadyFault: TONE.red });
 export const perMonthText = (v, unit) => { const n = numOrNull(v); return n == null ? '—' : `${n >= 0 ? '+' : ''}${n.toFixed(Math.abs(n) < 1 ? 2 : 1)}${unit}/월`; };
 export const FORECAST_NOTE = '최근 기록의 **직선 추세**입니다. 기록이 모자라면 ‘기록 부족’, 늘지 않으면 ‘예측 없음’ 으로 두고 날짜를 지어내지 않습니다. 업링크는 **일 최대 사용률** 기준(95 백분위 아님)이고, LLDP 를 못 읽은 장비는 40G 이상 · 링크 있는 포트를 업링크로 봅니다(추정).';
 
 /* ── ⑮ GBIC 추세 ───────────────────────────────────────────────────────────────────────────────────────── */
-export function opticTrendText(r, { minDays, now = Date.now() } = {}) {
+export function opticTrendText(r, { minDays, now = Date.now(), horizonDays } = {}) {
   if (r.state === 'alreadyFault') return '이미 장애 임계 이하';
   if (r.state === 'already') return '이미 주의 임계 이하';
-  return forecastText({ ...r, eta: r.warnEta }, { minDays, now });
+  return forecastText({ ...r, eta: r.warnEta }, { minDays, now, horizonDays });
 }
-export const OPTIC_TREND_NOTE = '트랜시버마다 **링크가 올라온 날의 최저 수신 광량**을 쌓아 최근 직선 추세로 주의 임계 도달을 예상합니다. 하루 사이 크게 오르면(교체 · 청소) 그날부터 다시 봅니다. 링크 없는 날은 기록이 없습니다.';
+export const OPTIC_TREND_NOTE = '트랜시버마다 **링크가 올라온 날의 최저 수신 광량**을 쌓아 최근 직선 추세로 주의 임계 도달을 예상합니다. 하루 사이 크게 오르면(교체 · 청소) 그날부터 다시 봅니다. 링크 없는 날은 기록이 없습니다. 브레이크아웃 칸에서 레인 일부만 링크인 날도 기록하지 않습니다(칸 단위 값이 어느 레인 것인지 몰라서).';
 
 /* ── ⑥ ⑦ 토폴로지 ──────────────────────────────────────────────────────────────────────────────────────── */
 export const LAYER_DEFS = Object.freeze({
@@ -144,7 +148,7 @@ export const LOCATE_NOTE = 'MAC 은 스위치 **MAC 테이블**과 **CVP 위치(
 /* ── ⑬ 작업 전후 비교 ──────────────────────────────────────────────────────────────────────────────────── */
 export const CHANGE_KIND = Object.freeze({ device: '장비', port: '포트', bgp: 'BGP', xcvr: '트랜시버', lldp: 'LLDP 이웃' });
 const PORT_FIELD = Object.freeze({ oper: '링크', admin: '관리 상태', speed: '속도', vlan: 'VLAN', lag: '포트 채널', desc: '설명', mtu: 'MTU', added: '새로 생김', removed: '사라짐' });
-const NA_TEXT = Object.freeze({ ports: '포트', bgp: 'BGP', xcvr: '트랜시버', lldp: 'LLDP' });
+const NA_TEXT = Object.freeze({ ports: '포트', bgp: 'BGP', xcvr: '트랜시버', lldp: 'LLDP', portState: '일부 포트의 링크 상태', broken: '스냅샷 본문 손상' });
 export function changeLabel(c) {
   if (c.kind === 'device') return c.field === 'version' ? 'EOS 버전' : c.field;
   if (c.kind === 'port') return `${c.item} · ${PORT_FIELD[c.field] || c.field}`;
@@ -227,11 +231,12 @@ export function emptyColumnNotes(ports, { usedPaths = {}, missing = {}, seenFiel
 
 /* ── v3.41 ③ 버전 준수 · ⑧ 이중화 ──────────────────────────────────────────────────────────────────────── */
 export const CONFIG_DEFS = Object.freeze({ ok: ['준수', TONE.green], warn: ['불일치', TONE.amber], bad: ['오류', TONE.red], unknown: ['값 없음', 'var(--text-dim)'], unread: ['못 읽음', 'var(--text-dim)'] });
-export const BUG_DEFS = Object.freeze({ high: ['높음', TONE.red], low: ['낮음', TONE.amber], none: ['공지 없음', TONE.green], unread: ['못 읽음', 'var(--text-dim)'] });
+export const BUG_DEFS = Object.freeze({ high: ['높음', TONE.red], low: ['낮음', TONE.amber], none: ['노출 없음', TONE.green], norecord: ['기록 없음', 'var(--text-dim)'], unread: ['못 읽음', 'var(--text-dim)'] });
 export const LIFE_DEFS = Object.freeze({ passed: ['지원 종료 지남', TONE.red], soon: ['곧 종료', TONE.amber], ok: ['지원 중', TONE.green], none: ['공지 없음', 'var(--text-dim)'], unread: ['못 읽음', 'var(--text-dim)'] });
 export function bugText(b) {
   if (!b || b.state === 'unread') return '—';
   if (b.state === 'none') return '노출 없음';
+  if (b.state === 'norecord') return '—';
   const parts = [];
   if (b.bugCount != null) parts.push(`버그 ${b.bugCount}`);
   if (b.cveCount != null) parts.push(`CVE ${b.cveCount}`);
@@ -244,9 +249,35 @@ export function lifeText(l, now = Date.now()) {
   const which = l.first === l.swEnd ? '소프트웨어' : '하드웨어';
   return `${which} ${dateText(l.first)}${d == null ? '' : d < 0 ? `(${-d}일 지남)` : `(${d}일 남음)`}`;
 }
-export const COMPLIANCE_NOTE = '이 화면은 **CVP 가 준 값을 그대로** 보입니다 — 설정 준수(인벤토리 준수 코드) · 버그 · CVE 노출 · 수명주기(지원 종료). 포탈이 판정하거나 날짜를 지어내지 않습니다. CVP 가 그 항목을 읽었는데 장비 값이 없으면 ‘공지 없음’, 읽지 못했으면 ‘못 읽음’ 입니다.';
+export const COMPLIANCE_NOTE = '이 화면은 **CVP 가 준 값을 그대로** 보입니다 — 설정 준수(인벤토리 준수 코드) · 버그 · CVE 노출 · 수명주기(지원 종료). 포탈이 판정하거나 날짜를 지어내지 않습니다. CVP 가 그 항목을 읽었는데 장비 값이 없으면 ‘기록 없음’(수명주기는 ‘공지 없음’ — 노출 없음 · 지원 중으로 단정하지 않습니다), 읽지 못했으면 ‘못 읽음’ 입니다.';
 export const CHANNEL_DEFS = Object.freeze({ degraded: ['이중화 상실', TONE.red], down: ['전부 내려감', TONE.red], unknown: ['확인 불가', TONE.amber], ok: ['정상', TONE.green], off: ['관리상 꺼짐', 'var(--text-dim)'] });
 export const MLAG_DEFS = Object.freeze({ peerDown: ['피어 링크 내려감', TONE.red], notConnected: ['협상 안 됨', TONE.red], inactive: ['비활성', TONE.amber], unknown: ['확인 불가', TONE.amber],
   ok: ['정상', TONE.green], off: ['MLAG 안 씀', 'var(--text-dim)'], unread: ['못 읽음', 'var(--text-dim)'] });
 export const REDUNDANCY_NOTE = '포트 채널은 **관리상 켜진 멤버 중 링크가 올라온 수**로 봅니다 — 일부만 올라오면 이중화 상실입니다. 채널 소속 · MLAG 상태는 v3.41 부터 부품 주기에 따로 읽는 값이고 경로는 **실장비 미확인 추정**입니다. 소속을 못 읽은 장비는 ‘채널 없음’ 이 아니라 ‘소속 못 읽음’ 으로 따로 셉니다. 장애로 열지 않습니다(화면에만).';
 export const channelText = (c) => `${c.up}/${c.expected}${c.total !== c.expected ? ` (꺼짐 ${c.total - c.expected})` : ''}`;
+
+/** v3.42(버그 점검 1회차 D4): 장비 목록 상태 → 빈 목록일 때 문구('못 읽음' 을 '없음' 으로 말하지 않는다). loading 은 null(로딩 표시). */
+export function devListText(state) {
+  if (state === 'loading') return null;
+  if (state === 'error') return '장비 목록을 읽지 못했습니다 — 장비 탭의 오류를 확인하세요(장비가 없는 것이 아닙니다).';
+  if (state === 'unavailable') return '중앙 CVP DB 를 열지 못해 장비 목록이 비어 있습니다(장비 0대가 아니라 읽지 못함).';
+  return '수집된 CVP 장비가 없습니다.';
+}
+
+/** v3.42(D10): 문제 채널의 내려간 · 꺼진 멤버(글자) — 'Et1 내려감 · Et2 꺼짐'(앞 4개 + 나머지 수). */
+export function downMembersText(ch) {
+  const bad = (Array.isArray(ch?.members) ? ch.members : []).filter((m) => m && (m.admin === 'down' || m.oper !== 'up'));
+  if (!bad.length) return '';
+  // v3.42(2회차 F4): 서버는 못 읽은 oper 를 'unknown' 문자열로 준다 — '내려감' 으로 단정하지 않는다. nolink 는 '링크 없음'.
+  const word = (m) => (m.admin === 'down' ? '꺼짐' : m.oper == null || m.oper === 'unknown' ? '모름' : m.oper === 'nolink' ? '링크 없음' : '내려감');
+  const head = bad.slice(0, 4).map((m) => `${String(m.port || '').replace(/^Ethernet/i, 'Et')} ${word(m)}`);
+  return `${head.join(' · ')}${bad.length > 4 ? ` 외 ${bad.length - 4}` : ''}`;
+}
+
+/** v3.42(2회차 A5-F2 · 3회차 A5-F5): 이중화 '문제 있는 장비만' 이 비었을 때 문구 — 확인 불가 · 못 읽은 장비가 있으면 '문제 없음' 으로 단정하지 않는다. */
+export function noProblemText(unknownN, unreadN) {
+  const parts = [];
+  if (unknownN > 0) parts.push(`${unknownN}대는 상태를 다 읽지 못해 확인 불가(‘확인 불가’ 칩)`);
+  if (unreadN > 0) parts.push(`${unreadN}대는 MLAG · 채널 소속 · 포트 목록 중 못 읽은 것이 있습니다(‘문제 있는 장비만’ 을 끄면 보입니다)`);
+  return parts.length ? `확인된 문제는 없습니다 — 다만 ${parts.join(' · ')}.` : '문제 있는 장비가 없습니다.';
+}

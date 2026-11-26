@@ -11,11 +11,11 @@
  * 양끝 불일치는 **두 끝 포트를 다 아는 링크**(both · one 중 상대 포트를 LLDP portId 로 아는 것)만 — 속도 · MTU · Duplex · 관리 상태 · 포트 채널 소속 · 설명이 가리키는 상대.
  *   한쪽 값을 못 읽었으면 '비교 못 함'(na)이다 — 다름으로 세지 않는다.
  */
-import { deviceNameFromDesc } from './portmap.js';
+import { deviceNameFromDesc, deviceNamesFromDesc, descTokens, descMentions, stripIfSuffix, shortOf } from './portmap.js';
 
 const devKey = (a, c, k) => `${a}\u0000${c}\u0000${k}`;
 const lc = (s) => String(s ?? '').trim().toLowerCase();
-const shortOf = (s) => lc(s).split('.')[0];
+export { shortOf };   // 짧은 이름은 portmap.js 하나(IP 이름은 통째로 — 2회차 A3-F2 · 3회차 A1-F5)
 
 /** 인터페이스 이름 정규화 — 'Ethernet1/1' = 'Et1/1' = 'ethernet 1/1'. 포트 채널 'Port-Channel10' = 'Po10'. */
 export function normPort(s) {
@@ -23,29 +23,85 @@ export function normPort(s) {
   return t.replace(/^ethernet/, 'et').replace(/^port-channel/, 'po').replace(/^management/, 'ma');
 }
 
+/** 이름 색인의 '스위치 이름인데 하나로 못 고름' 표지 — 스위치 아님(기타 이웃)으로 세지 않고, 링크도 긋지 않는다(2회차 A1-F1). */
+export const AMBIG = '\u0001ambig';
 /**
- * 스위치 이름 색인 — 전체 이름(소문자) 우선, 짧은 이름(첫 점 앞)은 **하나뿐일 때만**(같은 짧은 이름이 둘이면 맞추지 않는다 — 다른 법인 동명 장비).
- * @param {Array<{agent,cvpId,key,hostname}>} devices
+ * 스위치 이름 색인 — 전체 이름(소문자) · 짧은 이름(첫 점 앞, IP 이름은 통째로).
+ * v3.42(버그 점검 1회차 A1-06 · 2회차 A1-F1 · F3): 고르는 순서 — ① 보고한 장비와 같은 담당 · CVP 의 전체 이름 → ② 같은 CVP 의 짧은 이름 →
+ *   ③ 전역에서 하나뿐인 전체 이름 → ④ 전역에서 하나뿐인 짧은 이름. 단계 안에서 여럿이면 스트리밍 중인 장비(streaming !== false — RMA 뒤 남은 옛 장비를 거른다)가
+ *   하나일 때 그것, 아니면 AMBIG(스위치 이름이지만 못 고름). 예전에는 같은 CVP 동명 2대를 null 로 돌려 '스위치 아님' 으로 세어 층이 뒤집혔고(F1),
+ *   다른 CVP 에 전체 이름이 하나 맞으면 같은 CVP 의 짧은 이름 후보를 보지 않았다(F3).
+ * @param {Array<{agent,cvpId,key,hostname,streaming?}>} devices
  */
 export function switchIndex(devices = []) {
-  const full = new Map(); const short = new Map();
+  const full = new Map(); const short = new Map(); const live = new Map(); const fullOf = new Map();
+  const add = (m, k, id) => { if (!m.has(k)) m.set(k, []); const a = m.get(k); if (!a.includes(id)) a.push(id); };
   for (const d of Array.isArray(devices) ? devices : []) {
     const id = devKey(d.agent, d.cvpId, d.key);
+    live.set(id, d.streaming !== false);
     const f = lc(d.hostname);
-    if (f) { if (!full.has(f)) full.set(f, id); }
+    fullOf.set(id, f);
+    if (f) add(full, f, id);
     const s = shortOf(d.hostname);
-    if (s.length >= 3) short.set(s, short.has(s) && short.get(s) !== id ? null : id);
+    if (s.length >= 3) add(short, s, id);
   }
+  const choose = (cands) => {
+    if (cands.length === 1) return cands[0];
+    const on = cands.filter((c) => live.get(c));
+    return on.length === 1 ? on[0] : AMBIG;
+  };
   return {
-    /** 이웃 이름 → 스위치 id 또는 null. */
-    find(name) {
+    /** 이웃 이름 → 스위치 id · AMBIG(스위치 이름이지만 못 고름) · null(스위치 아님). from = 보고한 장비 id. */
+    find(name, from = null) {
       const f = lc(name);
       if (!f) return null;
-      if (full.has(f)) return full.get(f);
       const s = shortOf(name);
-      return s.length >= 3 ? (short.get(s) ?? null) : null;
+      const fc = full.get(f) || [];
+      // 3회차 A1-F4: 도메인까지 쓴 이름(spine1.us.corp)은 **도메인이 다른 FQDN 장비**(spine1.kr.corp)의 짧은 이름으로 맞추지 않는다 —
+      //   짧은 이름 후보는 장비 쪽 이름에 도메인이 없을 때만(CVP 는 'spine1', LLDP 는 FQDN 인 흔한 경우).
+      //   4회차 A1-F1: '도메인이 없을 때만' 으로는 호스트 이름 자체에 점이 든 장비(CVP 'leaf1.dc1' ↔ LLDP 'leaf1.dc1.corp.com')가 스위치 아님이 됐다 —
+      //   한쪽이 다른 쪽의 **라벨 단위 접두**면 같은 이름으로 본다('spine1.kr.corp' ↔ 'spine1.us.corp' 는 접두가 아니다).
+      const labelPrefix = (a, b) => a === b || b.startsWith(`${a}.`);
+      const sc = (s.length >= 3 ? (short.get(s) || []) : []).filter((c) => { const cf = fullOf.get(c) || ''; return labelPrefix(cf, f) || labelPrefix(f, cf); });
+      if (!fc.length && !sc.length) return null;
+      // 2회차 반증 R5: 도메인까지 쓴 이름(spine1.us.corp)은 정확한 전체 이름이 같은 CVP 의 짧은 이름(spine1.kr.corp)보다 강하다.
+      //   짧은 이름(spine1)으로 온 경우만 같은 CVP 의 짧은 이름 후보를 다른 CVP 의 전체 이름보다 먼저 본다(A1-F3).
+      const qualified = f !== s;
+      if (from) {
+        const pre = from.slice(0, from.lastIndexOf('\u0000') + 1);   // agent␀cvp␀
+        const sf = fc.filter((c) => c.startsWith(pre));
+        if (sf.length) return choose(sf);
+        if (qualified && fc.length) return choose(fc);
+        const ss = sc.filter((c) => c.startsWith(pre));
+        if (ss.length) return choose(ss);
+      }
+      if (fc.length) return choose(fc);
+      return choose(sc);
     },
   };
+}
+
+/** v3.42(A1-05): 관리 포트(Management)의 LLDP 이웃은 데이터 망 연결이 아니다 — 층 추정 · 업링크 · 링크에서 뺀다. */
+const isMgmtPort = (np) => /^ma/.test(np);
+
+/**
+ * v3.42(버그 점검 1회차 A1-13): LLDP 이웃이 가상화 호스트(ESXi 이름)인 포트 — 위치 찾기가 'MAC 많음 = 지나는 곳' 규칙을 이 포트에는 쓰지 않는다
+ *   (VM 이 빽빽한 호스트 포트가 가장자리 답에서 빠졌다). CVP 밖 하위 스위치는 이름이 호스트 목록에 없으니 MAC 수 규칙이 그대로 잡는다.
+ * @param {Array} lldpRows @param {Set<string>} hostNames 짧은 이름(소문자)
+ * @returns {Map<string, Set<string>>} 장비 id → 정규화 포트 집합
+ */
+function hostPortRow(out, r, hostNames) {
+  const np = normPort(r.port);
+  if (isMgmtPort(np) || !hostNames.has(shortOf(r.sysName))) return;
+  const self = devKey(r.agent, r.cvpId, r.key);
+  if (!out.has(self)) out.set(self, new Set());
+  out.get(self).add(np);
+}
+export function hostPortsOf(lldpRows, hostNames = new Set()) {
+  const out = new Map();
+  if (!hostNames || !hostNames.size) return out;
+  for (const r of Array.isArray(lldpRows) ? lldpRows : []) hostPortRow(out, r, hostNames);
+  return out;
 }
 
 /** LLDP 행들 → Map(장비 id → Map(정규화 포트 → 이웃[])) */
@@ -66,23 +122,41 @@ function lldpByDev(rows) {
  * 장비별 업링크 포트(이웃이 CVP 스위치인 포트) — 위치 찾기 · 포트 계획이 같은 판정을 쓴다.
  * @returns {Map<string, Set<string>>} 장비 id → 정규화 포트 집합
  */
+function uplinkRow(out, r, idx) {
+  const self = devKey(r.agent, r.cvpId, r.key);
+  if (isMgmtPort(normPort(r.port)) || (r.portId && isMgmtPort(normPort(r.portId)))) return;   // 2회차 A1-F2: 상대 끝이 관리 포트(OOB 스위치 데이터 포트 ↔ 장비 Management1)여도 업링크 아님
+  const peer = idx.find(r.sysName, self);
+  if (!peer || peer === self) return;   // AMBIG 는 스위치 이름이라 업링크로 둔다
+  if (!out.has(self)) out.set(self, new Set());
+  out.get(self).add(normPort(r.port));
+}
 export function uplinkPortsOf(lldpRows, idx) {
   const out = new Map();
-  for (const r of Array.isArray(lldpRows) ? lldpRows : []) {
-    const peer = idx.find(r.sysName);
-    const self = devKey(r.agent, r.cvpId, r.key);
-    if (!peer || peer === self) continue;
-    if (!out.has(self)) out.set(self, new Set());
-    out.get(self).add(normPort(r.port));
-  }
+  for (const r of Array.isArray(lldpRows) ? lldpRows : []) uplinkRow(out, r, idx);
   return out;
 }
+/**
+ * 요청 경로용 — 전 LLDP 행을 한 번 훑어 업링크 · 호스트 포트를 함께 만들고 행마다 시간 기준 양보(yielder = createYielder(…)).
+ *   v3.42(3회차 반증 R1 · R12): 위치 찾기 · 예측이 이 구간을 한 덩어리(60~100ms)로 돌았다. keep(r) 로 범위 밖 행을 거른다. 결과는 동기판과 같다.
+ */
+export async function lldpPortSetsAsync(lldpRows, idx, { hostNames = null, keep = null, yielder = null } = {}) {
+  const uplinks = new Map(); const hostPorts = new Map();
+  const hn = hostNames && hostNames.size ? hostNames : null;
+  for (const r of Array.isArray(lldpRows) ? lldpRows : []) {
+    if (yielder) await yielder();
+    if (keep && !keep(r)) continue;
+    uplinkRow(uplinks, r, idx);
+    if (hn) hostPortRow(hostPorts, r, hn);
+  }
+  return { uplinks, hostPorts };
+}
 
-const duplexOf = (v) => { const s = lc(v); return !s ? null : s.includes('full') ? 'full' : s.includes('half') ? 'half' : s; };
+// v3.42(A1-11): 'unknown' · 'auto' 류는 못 읽은 값이다('full' 과 '다름' 이 아니다).
+const duplexOf = (v) => { const s = lc(v); return !s ? null : s.includes('full') ? 'full' : s.includes('half') ? 'half' : null; };
 const numOr = (v) => { const n = Number(v); return v == null || v === '' || !Number.isFinite(n) || n <= 0 ? null : n; };
 
 /** 두 끝 포트 행을 비교 — [{ field, a, b, state:'diff'|'na' }] (같으면 넣지 않는다). */
-export function compareEnds(pa, pb, { aName = '', bName = '' } = {}) {
+export function compareEnds(pa, pb, { aName = '', bName = '', isSwitch = null } = {}) {
   const out = [];
   const cmp = (field, a, b) => {
     if (a == null || b == null) { out.push({ field, a: a ?? null, b: b ?? null, state: 'na' }); return; }
@@ -98,12 +172,18 @@ export function compareEnds(pa, pb, { aName = '', bName = '' } = {}) {
   const inLag = (p) => (p.lag == null ? null : String(p.lag).trim() ? 'yes' : 'no');
   cmp('lag', inLag(pa), inLag(pb));
   // 설명이 가리키는 상대: 설명에서 뽑은 장비 이름이 있고, 그것이 실제 상대(B) 이름과 다르면 다름. 이름을 못 뽑으면 비교하지 않는다(na 도 아님).
-  for (const [side, p, peerName] of [['a', pa, bName], ['b', pb, aName]]) {
-    if (p.desc == null) continue;
-    const named = deviceNameFromDesc(p.desc);
-    if (!named || !peerName) continue;
-    const ok = lc(named) === lc(peerName) || shortOf(named) === shortOf(peerName);
-    if (!ok) out.push({ field: side === 'a' ? 'descA' : 'descB', a: side === 'a' ? named : peerName, b: side === 'a' ? peerName : named, state: 'diff' });
+  for (const [side, p, peerName, selfName] of [['a', pa, bName, aName], ['b', pb, aName, bName]]) {
+    if (p.desc == null || !peerName) continue;
+    // v3.42(3회차 A1-F7): 설명 어디에든 상대 이름이 있으면 같음(포트 구성도 연결 근거와 같은 판정 — portmap.descMentions). 예전에는 첫 낱말만 봐
+    //   자기 이름으로 시작하는 설명('leaf1:Et49 <-> spine1:Et1')이 거짓 '다름' 이었다.
+    if (descMentions(p.desc, peerName)) continue;
+    // 상대 이름이 없으면: 설명이 가리키는 **다른 알려진 스위치**(자기 자신 제외)가 있을 때만 다름. 'MLAG-PEER-1' · 'ISL-1' 같은 관례 낱말 · CVP 밖 이름은 비교하지 않는다(2회차 A1-F11 · R10).
+    let named;
+    // 낱말 그대로 + 인터페이스 접미를 뗀 꼴('spine2-et1' → 'spine2' — 3회차 반증 R7) 둘 다 본다
+    if (typeof isSwitch === 'function') named = descTokens(p.desc).flatMap((t) => { const u = stripIfSuffix(t); return u === t ? [t] : [t, u]; }).find((t) => !descMentions(t, selfName) && isSwitch(t));
+    else { named = deviceNameFromDesc(p.desc); if (named && selfName && descMentions(named, selfName)) named = ''; }   // isSwitch 없이 부르면(단위 테스트) 뽑은 첫 이름으로
+    if (!named) continue;
+    out.push({ field: side === 'a' ? 'descA' : 'descB', a: side === 'a' ? named : peerName, b: side === 'a' ? peerName : named, state: 'diff' });
   }
   return out;
 }
@@ -129,24 +209,40 @@ export function buildTopology({ devices = [], lldp = [], lldpMeta = new Map(), p
     if (!others.has(id)) others.set(id, { esxi: 0, other: 0 });
     others.get(id)[hostNames.has(n) ? 'esxi' : 'other']++;
   };
+  // v3.42(A1-12): 상대 포트(portId)를 모르는 행은 나중에 — 그 포트가 이미 다른 링크의 끝이면 같은 케이블이라 두 줄로 그리지 않는다.
+  const deferred = [];
+  const lldpEnds = new Set();
+  const addLink = (aId, aPort, r, bId, bPort) => {
+    // 맞은편 확인: B 의 그 포트(또는 B 전체)에 A 를 가리키는 이웃이 있나
+    const bMap = nb.get(bId);
+    const back = bMap && bPort ? (bMap.get(bPort) || []).find((x) => idx.find(x.sysName, bId) === aId && (!x.portId || normPort(x.portId) === aPort)) : null;
+    const kind = back ? 'both' : 'one';
+    const ends = [[aId, aPort], [bId, bPort || '?']].sort((x, y) => (x[0] + x[1] < y[0] + y[1] ? -1 : 1));
+    const lk = ends.map((e) => `${e[0]}\u0000${e[1]}`).join('\u0001');
+    const prev = links.get(lk);
+    if (prev && prev.kind === 'both') return;
+    links.set(lk, { a: aId, aPort, b: bId, bPort, kind, bLldpRead: !!(lldpMeta.get(bId)?.at != null) });
+    lldpEnds.add(`${aId}\u0000${aPort}`); if (bPort) lldpEnds.add(`${bId}\u0000${bPort}`);
+  };
   for (const [aId, pm] of nb) {
     for (const [aPort, list] of pm) {
+      if (isMgmtPort(aPort)) continue;   // v3.42(A1-05)
       for (const r of list) {
-        const bId = idx.find(r.sysName);
+        const bId = idx.find(r.sysName, aId);
         if (!bId) { if (String(r.sysName || '').trim()) addOther(aId, r.sysName); continue; }
-        if (bId === aId) continue;
+        if (bId === aId || bId === AMBIG) continue;   // 2회차 A1-F1: 못 고른 스위치 이름은 링크도 '기타' 도 아니다
         const bPort = r.portId ? normPort(r.portId) : null;
-        // 맞은편 확인: B 의 그 포트(또는 B 전체)에 A 를 가리키는 이웃이 있나
-        const bMap = nb.get(bId);
-        const back = bMap && bPort ? (bMap.get(bPort) || []).find((x) => idx.find(x.sysName) === aId && (!x.portId || normPort(x.portId) === aPort)) : null;
-        const kind = back ? 'both' : 'one';
-        const ends = [[aId, aPort], [bId, bPort || '?']].sort((x, y) => (x[0] + x[1] < y[0] + y[1] ? -1 : 1));
-        const lk = ends.map((e) => `${e[0]}\u0000${e[1]}`).join('\u0001');
-        const prev = links.get(lk);
-        if (prev && prev.kind === 'both') continue;
-        links.set(lk, { a: aId, aPort, b: bId, bPort, kind, bLldpRead: !!(lldpMeta.get(bId)?.at != null) });
+        if (bPort && isMgmtPort(bPort)) continue;   // 2회차 A1-F2: 상대 끝이 관리 포트면 관리망 링크
+        if (!bPort) { deferred.push([aId, aPort, r, bId]); continue; }
+        addLink(aId, aPort, r, bId, bPort);
       }
     }
+  }
+  for (const [aId, aPort, r, bId] of deferred) {
+    if (lldpEnds.has(`${aId}\u0000${aPort}`)) continue;
+    // 상대 쪽에서 이 장비 · 이 포트를 가리키는 링크가 이미 있으면 같은 케이블
+    if ([...(nb.get(bId)?.values() || [])].some((lst) => lst.some((x) => idx.find(x.sysName, bId) === aId && x.portId && normPort(x.portId) === aPort))) continue;
+    addLink(aId, aPort, r, bId, null);
   }
   // 설명만으로 가리킨 링크(LLDP 이웃이 없는 · 링크가 올라온 포트) — 이미 링크 끝인 포트는 건너뛴다(끝 집합으로 — 링크 수만큼 훑지 않게).
   const usedEnds = new Set();
@@ -155,42 +251,79 @@ export function buildTopology({ devices = [], lldp = [], lldpMeta = new Map(), p
     if (p.oper !== 'up' || p.desc == null) continue;
     const aId = devKey(p.agent, p.cvpId, p.key);
     const np = normPort(p.port);
-    if (nb.get(aId)?.has(np)) continue;
-    const named = deviceNameFromDesc(p.desc);
-    const bId = named ? idx.find(named) : null;
-    if (!bId || bId === aId) continue;
-    const lk = `${aId}\u0000${np}\u0001desc\u0000${bId}`;
+    if (isMgmtPort(np) || nb.get(aId)?.has(np)) continue;
+    // 4회차 A1-N2 → 수정 검토 F1 · F2: 설명의 **첫 장비 이름꼴 낱말**이 상대다(예전 그대로). 그 낱말이 자기 자신일 때만('leaf1:Et49 <-> spine1:Et1') 다음 낱말로 넘어간다.
+    //   낱말 전부에서 스위치를 찾았더니(4회차 첫 수정) 서버 포트 설명에 **언급만 된** 스위치('esx01 vmnic2 (moved from leaf2 Et10)')로 거짓 선을 긋고,
+    //   그 선이 층 추정까지 뒤집었다(리프 셋이 모두 스파인) · 포트마다 낱말 전부를 찾아 한 덩어리 시간도 두 배였다.
+    let bId = null;
+    for (const name of deviceNamesFromDesc(p.desc)) {
+      const id = idx.find(name, aId);
+      if (id === aId) continue;             // 자기 이름 — 다음 장비 이름꼴 낱말을 본다
+      if (id && id !== AMBIG) bId = id;
+      break;                                // 스위치가 아닌 장비(서버 · 방화벽) · 못 고른 이름이면 이 포트의 상대는 그것이다 — 거기서 멈춘다
+    }
+    if (!bId) continue;
     if (usedEnds.has(`${aId}\u0000${np}`)) continue;
     usedEnds.add(`${aId}\u0000${np}`);
-    links.set(lk, { a: aId, aPort: np, b: bId, bPort: null, kind: 'desc', bLldpRead: !!(lldpMeta.get(bId)?.at != null) });
+    // 양쪽 설명이 서로를 가리켜도 합치지 않는다(반증 판정 D-6 — 두 장비 사이 케이블이 여럿이면 어느 포트끼리인지 코드가 알 수 없어 짝을 지어내게 된다).
+    links.set(`${aId}\u0000${np}\u0001desc\u0000${bId}`, { a: aId, aPort: np, b: bId, bPort: null, kind: 'desc', bLldpRead: !!(lldpMeta.get(bId)?.at != null) });
   }
-  // 층 추정
+  // 층 추정(v3.42 버그 점검 1회차 A1-04 · 2회차 A1-F4 · F5): 스파인 후보는 **전체** 스위치 이웃 수로 고르고, 리프 판정에서만 MLAG 피어를 뺀다 —
+  //   '피어를 뺀 내 이웃이 전부 스파인 후보이고 그들의 전체 이웃 수가 내 (피어 뺀) 이웃 수보다 많으면 리프'. 1회차는 피어를 차수에서도 빼서
+  //   스파인 MLAG 쌍 + 리프 2대가 전부 스파인이 됐다(2회차 F4). 피어 판정은 '직접 연결 + 나머지 이웃 대부분 공유'(업링크 하나가 내려가도 쌍 — F5).
   const swNb = new Map();
   for (const l of links.values()) {
     for (const [x, y] of [[l.a, l.b], [l.b, l.a]]) { if (!swNb.has(x)) swNb.set(x, new Set()); swNb.get(x).add(y); }
   }
-  const degOf = (id) => swNb.get(id)?.size || 0;
+  // 피어 후보 점수(공유 이웃 수) — 서로의 **유일한 최고** 후보일 때만 쌍으로 본다(2회차 반증 R3: 동점이면 먼저 본 쌍을 골라
+  //   삼각형 — 코어 1 + 접속 MLAG 쌍 — 의 층이 장비 키 순서로 정해졌다). 동점이면 쌍을 정하지 않는다(결정적).
+  const cand = new Map();
+  for (const [x, set] of swNb) {
+    for (const y of set) {
+      if (x >= y) continue;
+      // 2회차 A4-F4: 공유 수는 작은 쪽 이웃 수를 넘지 못한다 — 크기만 보고 먼저 거른다(스파인 ↔ 리프 쌍마다 배열을 만들어 링크 수의 제곱이 됐다).
+      const nx = set.size - 1; const ny = (swNb.get(y)?.size || 1) - 1;
+      if (nx < 1 || ny < 1 || 2 * Math.min(nx, ny) < Math.max(nx, ny)) continue;
+      const oy = swNb.get(y);
+      let common = 0;
+      for (const z of set) if (z !== y && oy.has(z)) common++;
+      if (common < 1 || common * 2 < Math.max(nx, ny)) continue;
+      // 3회차 A1-F1: 점수 = 공유 비율(공유 ÷ 큰 쪽 이웃 수) 먼저 · 같으면 공유 수 — 공유 수만 보면 스파인 MLAG 쌍이 있을 때 리프 ↔ 스파인(2/4)이
+      //   진짜 피어(2/2)와 동점이 되어 리프 쌍이 사라졌다(리프가 전부 스파인).
+      const score = (common / Math.max(nx, ny)) * 1e6 + common;
+      for (const [u, v] of [[x, y], [y, x]]) { if (!cand.has(u)) cand.set(u, []); cand.get(u).push([v, score]); }
+    }
+  }
+  const bestOf = (u) => {
+    const c = cand.get(u); if (!c) return null;
+    const top = Math.max(...c.map((e) => e[1]));
+    const tops = c.filter((e) => e[1] === top);
+    return tops.length === 1 ? tops[0][0] : null;
+  };
+  const peerOf = new Map();
+  for (const u of cand.keys()) { const v = bestOf(u); if (v != null && bestOf(v) === u) peerOf.set(u, v); }
+  const degFull = (id) => swNb.get(id)?.size || 0;
+  const nbsOf = (id) => [...(swNb.get(id) || [])].filter((z) => z !== peerOf.get(id));
   const hostsOf = (id) => { const o = others.get(id); return o ? o.esxi + o.other : 0; };
   const ids = devices.map((d) => devKey(d.agent, d.cvpId, d.key));
-  const minSpineDeg = ids.some((id) => !hostsOf(id) && degOf(id) >= 3) ? 3 : 2;
-  const spines = new Set(ids.filter((id) => !hostsOf(id) && degOf(id) >= minSpineDeg));
+  const minSpineDeg = ids.some((id) => !hostsOf(id) && degFull(id) >= 3) ? 3 : 2;
+  const spines = new Set(ids.filter((id) => !hostsOf(id) && degFull(id) >= minSpineDeg));
   const layerOf = (id) => {
     if (hostsOf(id) > 0) return 'leaf';
-    const deg = degOf(id);
-    if (deg === 0) return 'isolated';
-    const nbs = [...(swNb.get(id) || [])];
+    if (degFull(id) === 0) return 'isolated';
+    const nbs = nbsOf(id);
     // 이웃이 전부 spine 후보이고 자기보다 이웃이 많은 장비들뿐이면 leaf(서버 LLDP 를 못 본 리프) — spine 끼리 맞물린 경우를 leaf 로 내리지 않게 차수를 비교한다.
-    if (nbs.length && nbs.every((n) => spines.has(n) && degOf(n) > deg)) return 'leaf';
+    if (nbs.length && nbs.every((n) => spines.has(n) && degFull(n) > nbs.length)) return 'leaf';
     return spines.has(id) ? 'spine' : 'other';
   };
   const nodes = devices.map((d) => {
     const id = devKey(d.agent, d.cvpId, d.key);
-    const deg = degOf(id);
     const oth = others.get(id) || { esxi: 0, other: 0 };
     const m = lldpMeta.get(id);
     const layer = layerOf(id);
     return { id, agent: d.agent, cvpId: d.cvpId, key: d.key, hostname: d.hostname || d.key, model: d.model || '', corpName: d.corpName || '',
-      layer, switchNeighbors: deg, esxi: oth.esxi, otherNeighbors: oth.other, lldpRead: !!(m && m.at != null), lldpAt: m?.at ?? null, lldpFailing: !!m?.failing };
+      // v3.42(2회차 F6): 화면의 '스위치 이웃' 은 MLAG 피어를 포함한 실제 수(층 추정만 피어를 뺀 차수를 쓴다) · 피어는 따로 싣는다.
+      layer, switchNeighbors: swNb.get(id)?.size || 0, mlagPeer: peerOf.has(id), esxi: oth.esxi, otherNeighbors: oth.other, lldpRead: !!(m && m.at != null), lldpAt: m?.at ?? null, lldpFailing: !!m?.failing };
   });
   // 링크 출력 + 불일치
   const out = [];
@@ -202,7 +335,7 @@ export function buildTopology({ devices = [], lldp = [], lldpMeta = new Map(), p
     const pb = l.bPort ? portRow.get(`${l.b}\u0000${l.bPort}`) || null : null;
     let items = null;
     if (l.kind !== 'desc' && l.bPort) {
-      items = compareEnds(pa, pb, { aName: da?.hostname || '', bName: db?.hostname || '' });
+      items = compareEnds(pa, pb, { aName: da?.hostname || '', bName: db?.hostname || '', isSwitch: (n) => idx.find(n) != null });
       counts.compared++;
       if (items.some((x) => x.state === 'diff')) counts.diff++;
       else if (items.some((x) => x.state === 'na')) counts.na++;

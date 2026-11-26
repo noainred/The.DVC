@@ -1,10 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import BoldText from '../../components/boldText.jsx';
-import { fetchJson } from '../../api.js';
-import { Loading, ErrorBox } from '../../components/ui.jsx';
+import { fetchHeavy } from './cvpHeavy.js';
 import { STable } from '../../components/STable.jsx';
-import { NOTE, MONO, ROW, GRID1, LINKBTN, Seg, Tiles, Spark, Pill } from './CvpNetParts.jsx';
-import { idleText, RECLAIM_NOTE, forecastText, FORECAST_TONE, FORECAST_NOTE, perMonthText, speedText, pctText, dateText, rowKey } from './cvpNetText.js';
+import { NOTE, MONO, ROW, GRID1, LINKBTN, Seg, Tiles, Spark, Pill, Pending } from './CvpNetParts.jsx';
+import { idleText, RECLAIM_NOTE, forecastText, FORECAST_TONE, FORECAST_NOTE, perMonthText, speedText, pctText, dateText, rowKey, horizonText } from './cvpNetText.js';
 
 /** 화면에 그리는 행 상한(서버는 더 많이 줄 수 있다 — 표가 정렬한 뒤 자른다). */
 const SHOW_MAX = 300;
@@ -21,11 +20,11 @@ export function ReclaimView({ onOpen }) {
   useEffect(() => {
     let active = true;
     setErr(null); setR(null);
-    fetchJson('/tools/cvp/portplan/reclaim', { idle }).then((x) => { if (active) setR(x); }).catch((e) => { if (active) setErr(e); });
-    return () => { active = false; };
+    const ac = new AbortController();   // v3.42(3회차 A5-F1): 화면이 버린 무거운 조회는 취소한다(서버 줄을 끝까지 차지하지 않게)
+    fetchHeavy('/tools/cvp/portplan/reclaim', { idle }, ac.signal).then((x) => { if (active) setR(x); }).catch((e) => { if (active) setErr(e); });
+    return () => { active = false; ac.abort(); };
   }, [idle, reload]);
-  if (err) return <ErrorBox error={err} />;
-  if (!r) return <Loading />;
+  if (err || !r) return <Pending err={err} onRetry={() => setReload((x) => x + 1)} />;
   const rows = (Array.isArray(r.rows) ? r.rows : []).filter((x) => never || !x.never);
   const c = r.counts || {};
   return (
@@ -65,12 +64,25 @@ export function ReclaimView({ onOpen }) {
           </tbody>
         </STable>
         {!rows.length && <div style={NOTE}>조건에 맞는 포트가 없습니다.</div>}
-        <div style={NOTE}>{rows.length > SHOW_MAX ? `${rows.length}개 중 정렬 순서 앞 ${SHOW_MAX}개 표시(제목을 눌러 정렬을 바꾸면 그 순서로 자릅니다)` : `${rows.length}개 표시`}{r.omitted ? ` · ⚠ 상위 ${r.rows.length}개만(${r.omitted}개 생략)` : ''}{r.truncated ? ' · ⚠ 포트 행이 상한을 넘어 일부만 봤습니다' : ''}</div>
+        <div style={NOTE}>{rows.length > SHOW_MAX ? `${rows.length}개 중 정렬 순서 앞 ${SHOW_MAX}개 표시(제목을 눌러 정렬을 바꾸면 그 순서로 자릅니다)` : `${rows.length}개 표시`}{r.omitted ? ` · ⚠ 상위 ${r.rows.length}개만(${r.omitted}개 생략)` : ''}{r.truncated ? ' · ⚠ 포트 행이 상한을 넘어 일부만 봤습니다' : ''}{r.lastLinkTruncated ? ' · ⚠ 마지막 사용일 기록이 상한을 넘어 일부만 읽었습니다(‘기록 시작 뒤 사용 없음’ 중 일부는 실제로 쓴 포트일 수 있습니다)' : ''}{r.portsUnread ? ` · 포트 목록을 못 읽은 장비 ${r.portsUnread}대는 빠졌습니다` : ''}</div>
       </div>
     </div>
   );
 }
 
+/** 예측 표 각주 — 보고 있는 표(part)의 것만. */
+function forecastNotes(part, ex, sat, r) {
+  const out = [];
+  if (part === 'exhaust') {
+    if (ex.pointsRows && ex.rows.length > ex.pointsRows) out.push(`추이 그림은 위험한 순서 앞 ${ex.pointsRows}대만 싣습니다(그 뒤는 ‘—’)`);
+  } else {
+    if (sat.truncated) out.push(`⚠ 업링크가 상한을 넘어 ${sat.seriesUnread ? `${sat.seriesUnread}개는 기록을 읽지 않았습니다(예측에서 뺌 — 기록 부족이 아님)` : '일부만 봤습니다'}`);
+    if (sat.omitted) out.push(`업링크 ${sat.omitted}개는 응답 상한을 넘어 뺐습니다(위험한 순서로 앞부분만)`);
+    if (sat.pointsRows && sat.rows.length > sat.pointsRows) out.push(`추이 그림은 위험한 순서 앞 ${sat.pointsRows}개만 싣습니다(그 뒤는 ‘—’)`);
+    if (r.portsUnread) out.push(`포트 목록을 못 읽은 장비 ${r.portsUnread}대는 업링크에서 뺐습니다`);
+  }
+  return out.length ? ` · ${out.join(' · ')}` : '';
+}
 export function ForecastView({ onOpen }) {
   const [r, setR] = useState(null);
   const [err, setErr] = useState(null);
@@ -79,11 +91,11 @@ export function ForecastView({ onOpen }) {
   useEffect(() => {
     let active = true;
     setErr(null); setR(null);
-    fetchJson('/tools/cvp/portplan/forecast').then((x) => { if (active) setR(x); }).catch((e) => { if (active) setErr(e); });
-    return () => { active = false; };
+    const ac = new AbortController();   // v3.42(3회차 A5-F1): 화면이 버린 무거운 조회는 취소한다(서버 줄을 끝까지 차지하지 않게)
+    fetchHeavy('/tools/cvp/portplan/forecast', {}, ac.signal).then((x) => { if (active) setR(x); }).catch((e) => { if (active) setErr(e); });
+    return () => { active = false; ac.abort(); };
   }, [reload]);
-  if (err) return <ErrorBox error={err} />;
-  if (!r) return <Loading />;
+  if (err || !r) return <Pending err={err} onRetry={() => setReload((x) => x + 1)} />;
   const ex = r.exhaust || { rows: [], counts: {} }; const sat = r.saturation || { rows: [], counts: {} };
   const cur = part === 'exhaust' ? ex : sat;
   const cc = cur.counts || {};
@@ -98,10 +110,10 @@ export function ForecastView({ onOpen }) {
       </div>
       <Tiles tiles={[
         ['이미 넘음', cc.already ?? 0, part === 'exhaust' ? '사용 포트 = 전체' : `일 최대 ${sat.satPct}% 이상`, FORECAST_TONE.already],
-        ['1년 안 도달', cc.eta ?? 0, '직선 추세 기준', FORECAST_TONE.eta],
-        ['1년 넘게', cc.far ?? 0, '', FORECAST_TONE.far],
+        [`${horizonText(r.horizonDays)} 안 도달`, cc.eta ?? 0, '직선 추세 기준', FORECAST_TONE.eta],
+        [`${horizonText(r.horizonDays)} 넘게`, cc.far ?? 0, '', FORECAST_TONE.far],
         ['늘지 않음', cc.flat ?? 0, '예측 없음', 'var(--text-dim)'],
-        ['기록 부족', (cc.short ?? 0) + (cc.none ?? 0), `${r.minDays}일 미만`, 'var(--text-dim)'],
+        ['기록 부족 · 끊김', (cc.short ?? 0) + (cc.none ?? 0) + (cc.stale ?? 0), `${r.minDays}일 미만 ${(cc.short ?? 0) + (cc.none ?? 0)} · 최근 기록 끊김 ${cc.stale ?? 0}`, 'var(--text-dim)'],
       ]} />
       <div className="card" style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
         {part === 'exhaust' ? (
@@ -113,10 +125,11 @@ export function ForecastView({ onOpen }) {
                   <td>{x.corpName || '법인 미지정'}</td>
                   <td data-sort={x.hostname}><button type="button" style={LINKBTN} onClick={() => onOpen && onOpen(x)}>{x.hostname}</button></td>
                   <td>{x.model || '—'}</td>
-                  <td data-sort={x.total ? x.used / x.total : ''} style={MONO}>{x.total == null ? '—' : `${x.used} / ${x.total}`}</td>
+                  {/* v3.42(2회차 F1): 기록이 끊긴 장비는 used 가 null — 'null / 48' 이나 0% 로 보이지 않게 */}
+                  <td data-sort={x.total && x.used != null ? x.used / x.total : ''} style={MONO}>{x.total == null || x.used == null ? (x.total == null ? '—' : `— / ${x.total}`) : `${x.used} / ${x.total}`}</td>
                   <td><Spark points={x.points} min={0} max={x.total ?? null} title="사용 포트 수" /></td>
                   <td data-sort={x.perMonth ?? ''} style={MONO}>{perMonthText(x.perMonth, '개')}</td>
-                  <td data-sort={x.eta ?? (x.state === 'already' ? 0 : '')}><Pill color={FORECAST_TONE[x.state] || 'var(--text-dim)'}>{forecastText(x, { minDays: r.minDays })}</Pill></td>
+                  <td data-sort={x.eta ?? (x.state === 'already' ? 0 : '')}><Pill color={FORECAST_TONE[x.state] || 'var(--text-dim)'}>{forecastText(x, { minDays: r.minDays, horizonDays: r.horizonDays })}</Pill></td>
                 </tr>
               ))}
             </tbody>
@@ -134,7 +147,7 @@ export function ForecastView({ onOpen }) {
                   <td data-sort={x.max30 ?? ''} style={MONO}>{pctText(x.max30)}</td>
                   <td><Spark points={x.points} min={0} max={100} refLine={sat.satPct} title="일 최대 사용률(%)" /></td>
                   <td data-sort={x.perMonth ?? ''} style={MONO}>{perMonthText(x.perMonth, '%p')}</td>
-                  <td data-sort={x.eta ?? (x.state === 'already' ? 0 : '')}><Pill color={FORECAST_TONE[x.state] || 'var(--text-dim)'}>{forecastText(x, { minDays: r.minDays })}</Pill></td>
+                  <td data-sort={x.eta ?? (x.state === 'already' ? 0 : '')}><Pill color={FORECAST_TONE[x.state] || 'var(--text-dim)'}>{forecastText(x, { minDays: r.minDays, horizonDays: r.horizonDays })}</Pill></td>
                 </tr>
               ))}
             </tbody>
@@ -142,7 +155,8 @@ export function ForecastView({ onOpen }) {
         )}
         {cur.rows.length > SHOW_MAX && <div style={NOTE}>{cur.rows.length}개 중 정렬 순서 앞 {SHOW_MAX}개 표시(제목을 눌러 정렬을 바꾸면 그 순서로 자릅니다)</div>}
         {!cur.rows.length && <div style={NOTE}>{part === 'exhaust' ? '장비가 없습니다.' : '업링크를 찾지 못했습니다(LLDP 이웃이 CVP 스위치인 포트 · LLDP 를 못 읽은 장비의 40G 이상 포트).'}</div>}
-        <div style={NOTE}>예상 날짜는 직선 추세의 추정이며 오늘 {dateText(Date.now())} 기준입니다{sat.truncated ? ' · ⚠ 업링크가 상한을 넘어 일부만 봤습니다' : ''}.</div>
+        {/* v3.42(3회차 A5-F3): 각주는 보고 있는 표의 것만 — 포화 표 각주가 고갈 탭에도 나오고 '추이 그림은 …' 이 두 번 나왔다 */}
+        <div style={NOTE}>예상 날짜는 직선 추세의 추정이며 오늘 {dateText(Date.now())} 기준입니다{forecastNotes(part, ex, sat, r)}.</div>
       </div>
     </div>
   );
