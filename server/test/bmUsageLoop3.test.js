@@ -76,9 +76,19 @@ async function coveredSlots(key) {
 test('D1 — 이름 · 사유만 고치기는 재확인이 아니다(만료 그대로 · 덮인 칸 0) · 목록 canConfirm = 재확인 라우트 판정', async (t) => {
   resetAll();
   const { call } = await setup(t);
-  // 규칙 전에 만든 운영자 창 둘(매일 00:00 · 12:00 각 12시간 — 93일 전 확인 → 둘 다 만료)
-  const A = await ST.addWindow(srvWin('MTAGA1', '옛 오전', { kind: 'weekly', days: all7, time: '00:00', durMin: 720 }), { by: 'opa', now: T0 - 93 * DAY });
-  const B = await ST.addWindow(srvWin('MTAGA1', '옛 오후', { kind: 'weekly', days: all7, time: '12:00', durMin: 720 }), { by: 'opa', now: T0 - 93 * DAY });
+  // 규칙 전에 만든 운영자 창 둘(매일 00:00 · 12:00 각 12시간 — 92일 16시간 전 확인 → 둘 다 16시간 전 만료)
+  // 확인 시각 = T0 − 92일 − 16시간(16시간 전 만료) — 2026-11-26 시험 위생 점검(재현 · 4회차에서 다시 정정): 합 규칙은 만료 전 발생을 '지금 − 1일' 까지만 보므로
+  //   만료된 두 창의 재확인은 만료 뒤 24 ~ 36시간에(둘 중 먼저 열리는 쪽 · 확인 시각의 KST 시각에 따라) 운영자에게 열린다 — 설계대로다.
+  //   예전 판(93일 전 정시 확인)은 판정 시각이 만료 + 24시간 + (라우트 시각 − T0)라 그 경계에 닿아, 실제 시각이 KST **0시대(창 B) · 12시대(창 A)** 에 실패했다.
+  //   ⚠ 정정의 정정: 3회차 뒤 '12시대만 · 0시대는 실패하지 않는다' 고 고쳐 적었던 것은 틀렸다 — 실측 스크립트가 창 A 만 보고 B 를 보지 않았다(4회차 지적 · 두 창 순수 계산으로 확인).
+  //   그때 넣은 '+ 7분' 도 T0(모듈 로드 시각)와 라우트 시각 사이 지연을 몰라 정시 1~2초 전 시작이면 KST 11시대 · 23시대 끝에서 아직 실패했다.
+  //   지금 판은 만료 뒤 16 ~ 17시간에 판정한다: 24시간(가장 이른 열림)보다 7시간 앞이고, 12시간(만료 때 진행 중이던 발생이 끝나는 가장 늦은 때 — 그 발생은 끝까지
+  //   억제한다)보다 4시간 뒤다. 4회차가 제안한 '방금 만료(2시간 전)' 는 진행 중이던 발생이 아직 억제해 '억제 없음' 단언이 실패했다(실측 KST 17:54 — 덮인 칸 13 ·
+  //   순수 계산으로는 하루 중 대부분 시간대 — 5회차).
+  //   정시 24개 × 지연 0 ~ 60분 순수 계산에서 열림 0 · 가짜 시계로 24시간 매시 + 정시 1초 전 실제 실행 통과.
+  const CONFIRMED = T0 - 92 * DAY - 16 * HOUR;
+  const A = await ST.addWindow(srvWin('MTAGA1', '옛 오전', { kind: 'weekly', days: all7, time: '00:00', durMin: 720 }), { by: 'opa', now: CONFIRMED });
+  const B = await ST.addWindow(srvWin('MTAGA1', '옛 오후', { kind: 'weekly', days: all7, time: '12:00', durMin: 720 }), { by: 'opa', now: CONFIRMED });
   assert.equal(await coveredSlots('MTAGA1'), 0, '둘 다 만료 — 억제 없음');
   // 목록 — 재확인 버튼은 재확인 라우트와 같은 판정(합 규칙: 두 창 합 24시간)
   const l0 = await call('opA', 'GET', '');
@@ -93,8 +103,8 @@ test('D1 — 이름 · 사유만 고치기는 재확인이 아니다(만료 그�
   const e2 = await call('opA', 'PUT', `/${B.id}`, { rev: B.rev, reason: '사유 고침' });
   assert.equal(e2.status, 200, JSON.stringify(e2.body));
   ST._resetMaintStoreForTest();
-  assert.equal(ST.getWindow(A.id).confirmedAt, T0 - 93 * DAY, 'confirmedAt 그대로(예전: 지금으로 — 92일 연장)');
-  assert.equal(ST.getWindow(B.id).confirmedAt, T0 - 93 * DAY);
+  assert.equal(ST.getWindow(A.id).confirmedAt, CONFIRMED, 'confirmedAt 그대로(예전: 지금으로 — 92일 연장)');
+  assert.equal(ST.getWindow(B.id).confirmedAt, CONFIRMED);
   assert.equal(await coveredSlots('MTAGA1'), 0, '재현 r3 — 예전 336/336(24시간 상시 억제)');
   const l1 = await call('opA', 'GET', '');
   assert.deepEqual([row(l1, A.id).status, row(l1, B.id).status], ['expired', 'expired'], '만료 그대로');

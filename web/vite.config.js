@@ -23,6 +23,8 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.{js,jsx}'],
+    // 웹 시험이 불러온 서버 모듈이 실제 server/config 에 쓰지 않게 — 임시 설정 폴더(vitest.globalSetup.js · 2026-11-26)
+    globalSetup: ['./vitest.globalSetup.js'],
   },
   build: {
     // 번들 청크 분리(v2.289 #8) — index(앱 진입) 청크에 뭉쳐 있던 공용 벤더(react·recharts)를

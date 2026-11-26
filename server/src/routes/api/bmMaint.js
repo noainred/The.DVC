@@ -273,6 +273,30 @@ export async function bmMaintOccurrences(req, snap, deps = {}) {
   return { ok: true, key, from, to, items, merged: merged.map((x) => ({ from: x.from, to: x.to, ids: x.ids })) };
 }
 
+/**
+ * 판정 + 저장을 한 단위로(2026-11-26 점검 — 재현 `test/bmMaintRace.test.js`): 합 규칙 판정(ownerGate)은 단계 사이에 양보하는데 판정과 저장 사이에
+ * 잠금이 없어, 운영자 요청 둘이 서로를 보지 못하고 둘 다 통과했다(각자 7시간 · 합치면 13시간 — 소유자 없이 200 · 200). 억제를 늘리는 쓰기
+ * (만들기 · 고치기 · 재확인)는 이 줄에 서서 앞 쓰기가 저장된 뒤에 판정한다. 끝내기 · 지우기는 억제를 줄이기만 해 줄 밖이다(겹쳐도 판정이 더 엄격해질 뿐).
+ * 줄 안은 이 노드의 파일 · 메모리만 본다(네트워크 대기 없음 — 법인 확인 같은 원격 조회는 줄 앞에서 끝낸다). 실패해도 다음 차례는 돈다.
+ */
+let _gateChain = Promise.resolve();
+function gateSerial(fn) {
+  const run = _gateChain.then(fn);
+  _gateChain = run.catch(() => {});
+  return run;
+}
+/**
+ * 판정에 쓴 판(cur.rev)으로만 저장한다(4회차 결함 1 — 재현): 줄 앞에서 읽은 cur 로 판정하고 저장은 보낸 rev 로만 대조했는데, rev 는 쓰기마다 1씩
+ * 늘어 **다음 판을 미리 넣을 수 있었다** — 재확인과 '다음 rev' 를 넣은 고치기를 함께 보내면 고치기는 재확인 전 수명(곧 만료)으로 판정받고, 앞에 줄 선
+ * 재확인이 저장된 뒤 rev 가 맞아 새 일정이 92일 수명에 저장됐다(200 · 200 — 차례대로면 403). 보낸 rev 는 cur.rev 와 같아야 하고(아니면 저장과 같은 409),
+ * 저장은 cur.rev 로 대조한다 — 판정과 저장 사이에 어떤 쓰기(줄 밖 끝내기 · 지우기 포함)가 끼면 409. 없으면 그대로 넘겨 저장이 rev-required 409.
+ */
+function judgedRev(ST, cur, rev) {
+  if (rev == null || rev === '') return rev;
+  ST.revCheck(cur, rev);
+  return cur.rev;
+}
+
 async function create(req, res, D) {
   try {
     const snap = store.get();
@@ -282,10 +306,12 @@ async function create(req, res, D) {
     const input = { name: b.name, reason: b.reason, tz: b.tz, schedule: b.schedule, scopes: b.scopes, target: g.target, vcenterId: g.vcenterId };
     const now = D.now();
     const probe = ST.normalizeWindow({ ...input, id: 'mw-probe0000', by: '', at: now, confirmedAt: now }, { strict: true, now, fresh: true });
-    await ownerGate(req, D, [probe], { combined: probe, now });
-    const owner = !!(await D.ownerTier(req));
     const by = String(req.user?.username || '');
-    const rec = await ST.addWindow(input, { by, approvedBy: owner ? by : '', now });
+    const { rec, owner } = await gateSerial(async () => {
+      await ownerGate(req, D, [probe], { combined: probe, now });
+      const own = !!(await D.ownerTier(req));
+      return { rec: await ST.addWindow(input, { by, approvedBy: own ? by : '', now }), owner: own };
+    });
     D.audit({ user: by, action: 'bm-perf.maintenance', target: rec.id, ip: req.ip || '', detail: auditOf('create', rec, { durMin: ST.durationMinOf(rec.schedule, rec.tz), owner }) });
     res.json({ ok: true, id: rec.id, rev: rec.rev });
   } catch (e) { errOut(res, e); }
@@ -305,11 +331,15 @@ async function edit(req, res, D) {
     //   ⚠ 정정(점검 반복 3회차 D1): 예전에는 store.editWindow 가 고치기마다 confirmedAt 을 지금으로 잡아 이 전제가 틀렸다(이름만 고쳐도 만료된 창이 되살아났다).
     //   이제 고치기는 confirmedAt 을 바꾸지 않는다 — 후보도 저장될 값 그대로(next.confirmedAt = 지금 값)로 본다. 시한 연장은 재확인 라우트 하나.
     const coverChanged = ['target', 'tz', 'schedule', 'scopes'].some((k) => JSON.stringify(next[k]) !== JSON.stringify(cur[k]));
-    await ownerGate(req, D, [cur, next], { combined: coverChanged ? { ...next, id: cur.id } : null, now });
-    const owner = !!(await D.ownerTier(req));
     const by = String(req.user?.username || '');
-    const rec = await ST.editWindow(cur.id, { name: next.name, reason: next.reason, tz: next.tz, schedule: next.schedule, scopes: next.scopes, target: next.target, vcenterId: next.vcenterId },
-      { by, approvedBy: owner ? by : '', rev: b.rev ?? null, now });
+    // cur 는 줄 앞에서 읽었다 — 저장은 판정에 쓴 판(cur.rev)으로 대조한다(그 사이 다른 쓰기가 있었으면 409 · 다음 판을 미리 넣어도 409)
+    const rev = judgedRev(ST, cur, b.rev ?? null);
+    const rec = await gateSerial(async () => {
+      await ownerGate(req, D, [cur, next], { combined: coverChanged ? { ...next, id: cur.id } : null, now });
+      const owner = !!(await D.ownerTier(req));
+      return ST.editWindow(cur.id, { name: next.name, reason: next.reason, tz: next.tz, schedule: next.schedule, scopes: next.scopes, target: next.target, vcenterId: next.vcenterId },
+        { by, approvedBy: owner ? by : '', rev, now });
+    });
     D.audit({ user: by, action: 'bm-perf.maintenance', target: rec.id, ip: req.ip || '', detail: auditOf('edit', rec, { fields: rec.edits?.at(-1)?.fields || [] }) });
     res.json({ ok: true, id: rec.id, rev: rec.rev });
   } catch (e) { errOut(res, e); }
@@ -322,9 +352,13 @@ async function change(req, res, D, op) {
     const b = bodyOf(req);
     const by = String(req.user?.username || '');
     const now = D.now();
-    if (op === 'confirm') await ownerGate(req, D, [cur], { combined: { ...cur, confirmedAt: now }, now });   // 재확인은 억제를 늘린다 — 만들 때와 같은 등급(합 규칙 포함)
     const fn = { end: ST.endWindowNow, confirm: ST.confirmWindow, delete: ST.deleteWindow }[op];
-    const rec = await fn(cur.id, { by, rev: b.rev ?? req.query?.rev ?? null, now });
+    const rev = judgedRev(ST, cur, b.rev ?? req.query?.rev ?? null);   // 판정에 쓴 판으로만(재확인 — 위 judgedRev)
+    const write = () => fn(cur.id, { by, rev, now });
+    // 재확인은 억제를 늘린다 — 만들 때와 같은 등급(합 규칙 포함) · 같은 줄
+    const rec = op === 'confirm'
+      ? await gateSerial(async () => { await ownerGate(req, D, [cur], { combined: { ...cur, confirmedAt: now }, now }); return write(); })
+      : await write();
     D.audit({ user: by, action: 'bm-perf.maintenance', target: cur.id, ip: req.ip || '', detail: auditOf(op, cur) });
     res.json({ ok: true, id: rec.id, rev: rec.rev });
   } catch (e) { errOut(res, e); }

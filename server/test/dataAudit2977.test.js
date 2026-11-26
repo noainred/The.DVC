@@ -17,7 +17,15 @@ process.env.DATA_SOURCE = 'live';
 delete process.env.CENTRAL_URL;
 test.after(() => fs.rmSync(DIR, { recursive: true, force: true }));
 const HOUR = 3_600_000; const DAY = 24 * HOUR;
-const NOW = Math.floor(Date.now() / HOUR) * HOUR - 30 * 60_000;
+const { portalParts, portalMs } = await import('../src/util/dayKey.js');
+// 기준 시각 = 정시 경계 − 30분(진행 중 칸이 있는 시각). 2026-11-26 시험 위생 점검(재현): 포탈 달(기본 KST)의 첫 시간(매달 마지막 날 16:00~16:59 UTC)에
+//   실행하면 끝난 정시 칸이 0개라 ① 이 '기대 시간 0' 으로 실패했다(② 는 그 경우를 건너뛰는 가드가 있었다). 달의 첫 3시간이면 하루 앞으로 옮긴다
+//   — 제품과 같은 포탈 시계(util/dayKey.js)로 달의 시작을 잰다.
+const NOW = (() => {
+  const n = Math.floor(Date.now() / HOUR) * HOUR - 30 * 60_000;
+  const p = portalParts(n);
+  return n - portalMs(p.y, p.mo, 1) < 3 * HOUR ? n - DAY : n;
+})();
 const A = await import('../src/bmusage/powerAgg.js');
 
 // idrac/db.js hourlyStats 와 같은 창 규칙(hb ∈ [floor(from/1h), ceil(to/1h)) · ts = hb × 1h). gap(hb) 이 참이면 그 시간은 측정 없음.

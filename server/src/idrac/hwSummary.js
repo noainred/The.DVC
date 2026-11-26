@@ -15,6 +15,7 @@ import { numOrNull } from '../util/numOrNull.js';
 import { capacityOfInventory } from './physicalCapacity.js';
 import { dedupNics, nicLinkState } from './nicPorts.js';
 import { ledOfInv as ledOfInvLocal } from './ledState.js';   // v3.50 위치 LED 상태
+import { ssdLifeRows, lifeSummaryOf, mediaKindOf } from './partLife.js';   // v3.51 부품 수명(⑧)
 
 const s = (v) => (v == null ? '' : String(v).trim());
 const pos = (v) => { const x = numOrNull(v); return x != null && x > 0 ? x : null; };
@@ -62,18 +63,13 @@ const present = (list) => (list ? list.filter((x) => !/^absent$/i.test(s(x?.stat
 /** 링크 속도(Mbps) → 표시 단위 Gbps(0.1 단위 반올림 — 100M/1G/10G/25G/100G). */
 const gbpsOf = (mbps) => { const v = pos(mbps); return v == null ? null : Math.round(v / 100) / 10; };
 
-/** 디스크 매체 — SSD · HDD(SMR 포함) · 모름. NVMe 는 인터페이스(protocol)로 따로 센다. */
-function mediaOf(d) {
-  const m = s(d?.media).toUpperCase();
-  if (m === 'SSD') return 'ssd';
-  if (m === 'HDD' || m === 'SMR') return 'hdd';
-  return '';
-}
+/** 디스크 매체 — SSD · HDD(SMR 포함) · 모름. NVMe 는 인터페이스(protocol)로 따로 센다. 판정은 partLife.js 하나(수명 요약과 같은 판정 — 반증 A14). */
+const mediaOf = mediaKindOf;
 
 /**
  * 요약(표 칸 · 엣지 push 계약). 인벤토리가 없으면 null.
  * @returns {null | { v:1, at:number|null,
- *   cpu:{sockets,cores,threads,model}|null, mem:{gib,dimms}|null, disk:{n,gb,ssd,hdd,nvme}|null,
+ *   cpu:{sockets,cores,threads,model}|null, mem:{gib,dimms}|null, disk:{n,gb,ssd,hdd,nvme,life?:{n,read,min}}|null,
  *   nic:{ports,up,maxGbps,speeds:[[gbps,n]]}|null, hba:{n,ports}|null, os:{name,ver}|null, host:string, fw:string }}
  */
 export function hwSummaryOf(inv) {
@@ -98,7 +94,9 @@ export function hwSummaryOf(inv) {
       const md = mediaOf(d); if (md === 'ssd') ssd += 1; else if (md === 'hdd') hdd += 1;
       if (/nvme/i.test(s(d.protocol))) nvme += 1;
     }
-    disk = { n: dl.length, gb: dl.length ? gb : 0, ssd, hdd, nvme };
+    // v3.51 부품 수명(⑧): SSD 가 있으면 { n, read, min } — 엣지 push 로도 간다(중앙은 요약만 받는다 · sanitizeHwSummary 짝)
+    const life = lifeSummaryOf(dl);
+    disk = { n: dl.length, gb: dl.length ? gb : 0, ssd, hdd, nvme, ...(life ? { life } : {}) };
   }
   const nicsRead = readInvArr(inv, 'nics', { emptyUnknown: true });
   let nic = null;
@@ -166,6 +164,8 @@ export function hwDetailOf(inv, { admin = false } = {}) {
     cpus: cpus ? groupBy(cpus, (c) => `${s(c.model)}|${pos(c.cores)}|${pos(c.threads)}`, (c) => ({ model: s(c.model).slice(0, 128), cores: pos(c.cores), threads: pos(c.threads), mhz: pos(c.maxSpeedMHz) })) : null,
     dimms: dimms ? groupBy(dimms, (d) => `${pos(d.sizeGB)}|${s(d.type)}|${pos(d.speedMHz)}|${s(d.manufacturer)}`, (d) => ({ gb: pos(d.sizeGB), type: s(d.type).slice(0, 32), mhz: pos(d.speedMHz), maker: s(d.manufacturer).slice(0, 64) })) : null,
     disks: disks ? groupBy(disks, (d) => `${s(d.model)}|${pos(d.capacityGB)}|${s(d.media)}|${s(d.protocol)}`, (d) => ({ model: s(d.model).slice(0, 128), gb: pos(d.capacityGB), media: s(d.media).slice(0, 16), proto: s(d.protocol).slice(0, 16) })) : null,
+    // v3.51 부품 수명(⑧) — SSD 한 개씩(묶지 않는다 · 혼자 빨리 닳는 것을 보려고). 디스크를 못 읽었으면 null · SSD 없음 []
+    life: ssdLifeRows(disks),
     ctrls: ctrls ? groupBy(ctrls, (c) => s(c.model) || s(c.name), (c) => ({ model: (s(c.model) || s(c.name)).slice(0, 128), fw: s(c.firmware).slice(0, 64) }), 8) : null,
     nics: nicsRead ? nicPortsOf(inv).adapters.map((n) => {
       const ports = arr(n.ports);
@@ -205,6 +205,14 @@ export function mgmtHostOf(v) {
 const capS = (v, n) => (typeof v === 'string' ? v.trim().slice(0, n) : '');
 const capN = (v, max = 1e7) => { const x = typeof v === 'number' ? numOrNull(v) : null; return x != null && x >= 0 && x <= max ? x : null; };
 const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : null);
+// v3.51: 디스크 요약의 SSD 수명 — 아는 키만 · 범위(0~100 · 개수 상한) · read ≤ n · 값이 없으면 키를 만들지 않는다(구버전 엣지)
+const lifeOf = (v, diskN = null) => {
+  const l = obj(v); if (!l) return {};
+  const n = capN(l.n, 1024); const read = capN(l.read, 1024); const min = capN(l.min, 100);
+  // 정수 · read ≤ n · n ≤ 디스크 수(디스크 수를 알면 — 반증 A16)
+  if (n == null || read == null || !Number.isInteger(n) || !Number.isInteger(read) || read > n || (diskN != null && n > diskN)) return {};
+  return { life: { n, read, min: read ? min : null } };
+};
 /** 엣지가 보낸 요약 → 아는 필드만. 형식이 아니면 null(지어내지 않는다). 문자열 수치는 받지 않는다(엣지는 수로 보낸다). */
 export function sanitizeHwSummary(x, { now = Date.now() } = {}) {
   const h = obj(x);
@@ -216,7 +224,7 @@ export function sanitizeHwSummary(x, { now = Date.now() } = {}) {
     at: at == null ? null : Math.min(at, now),   // 반증 F8: 엣지 시각은 수신 시각으로 자른다(미래 시각이면 '0초 전' 이 계속 나온다)
     cpu: cpu ? { sockets: capN(cpu.sockets, 64), cores: capN(cpu.cores, 4096), threads: capN(cpu.threads, 8192), model: capS(cpu.model, 128) } : null,
     mem: mem ? { gib: capN(mem.gib, 1e6), dimms: capN(mem.dimms, 256) } : null,
-    disk: disk ? { n: capN(disk.n, 1024), gb: capN(disk.gb, 1e8), ssd: capN(disk.ssd, 1024), hdd: capN(disk.hdd, 1024), nvme: capN(disk.nvme, 1024) } : null,
+    disk: disk ? { n: capN(disk.n, 1024), gb: capN(disk.gb, 1e8), ssd: capN(disk.ssd, 1024), hdd: capN(disk.hdd, 1024), nvme: capN(disk.nvme, 1024), ...lifeOf(disk.life, capN(disk.n, 1024)) } : null,
     nic: nic ? {
       ports: capN(nic.ports, 1024), up: capN(nic.up, 1024), maxGbps: capN(nic.maxGbps, 1e4),
       speeds: Array.isArray(nic.speeds) ? nic.speeds.slice(0, 3).filter((p) => Array.isArray(p) && capN(p[0], 1e4) != null && capN(p[1], 1024) != null).map((p) => [p[0], p[1]]) : [],

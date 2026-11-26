@@ -19,7 +19,7 @@
 - (원래 3227행) 의존 방향은 한쪽이다 — routes/ 는 index.js 만 import 하고, util/ 은 도메인을 모른다
 - 시간 비율(ReDoS · 선형 시간) 테스트는 크기 차이를 크게(8배) 두고 작은 쪽 · 큰 쪽을 번갈아 잰다
 - 공용 모듈은 `docs/COMMON.md`(생성물)에서 먼저 찾는다 — 새 헬퍼를 만들기 전에
-- 시험은 실제 설정 폴더(`server/config`)에 쓰지 않는다 — src 를 부르기 전에 `CONFIG_DIR` 을 임시 폴더로 · `npm test` 는 preload 로 파일마다 따로
+- 설정에 쓰는 시험은 파일 자체도 src 를 부르기 전에 `CONFIG_DIR` 을 임시 폴더로(정적 import 는 호이스팅) · 쓰는 시험 찾는 법
 
 ## 본문
 
@@ -349,6 +349,30 @@
     ② `readBodyPrefix` 의 스트림이 아닌 응답 폴백은 본문 전체를 읽는다(undici 응답은 스트림이라 실사용 경로는 아니라고 본다 — 추정)
     ③ `listAudit` 가 요청 경로에서 감사 파일을 동기로 통째 읽는다 ④ 사양 변경 창 1440px 라벨 줄바꿈 · Summary 가상화율 창 400px 가로 스크롤(외형)
     ⑤ 1차의 ②(상대시각 사본)는 그대로다.
+- **서버 시험은 실제 설정 폴더(`server/config`)에 쓰지 않는다 — `npm test` 는 시험 파일마다 임시 설정 폴더를 준다**(2026-11-26 사용자 요청 "테스트가 설정 폴더에 쓰는 것도 고쳐줘"):
+  `CONFIG_DIR` 을 잡지 않은 시험이 config.js 기본값(`server/config/`)에 시험 데이터 12종을 남겼고(gitignore 대상이라 눈에 띄지 않는다), 같은 체크아웃에서 다시 돌리면
+  그 잔여 파일을 읽어 `arch2582` BUG-2 가 **두 번째 실행부터** 실패했다(CI 는 새 체크아웃이라 드러나지 않는다 — v3.41.1). 이제 `server/package.json` 의 test 명령이
+  `--import ./test/_isolateConfig.js` 를 붙인다 — node 시험 실행기가 **시험 파일마다 자식 프로세스에서** 그 파일을 먼저 불러와 `CONFIG_DIR` 이 없으면 빈 임시 폴더를 잡고
+  끝날 때 지운다(있으면 건드리지 않는다). ⚠ 시험 파일 하나를 직접 돌릴 때도 붙일 것: `cd server && node --test --import ./test/_isolateConfig.js --experimental-sqlite test/<파일>`.
+  · 등록부처럼 **로드 시 경로를 굳히는 모듈**(`const FILE = path.join(config.configDir, …)`)은 나중에 `config.configDir` 를 바꿔도 따라오지 않는다 — 시험이 폴더를 바꾸려면
+    프로젝트 모듈을 하나라도 불러오기 **전에** `process.env.CONFIG_DIR` 을 잡는다. · 자식 프로세스는 `{ ...process.env }` 로 띄울 것(env 를 새로 짜면 이 보호 밖이다).
+  · 죽은 시험(파일 시한 초과 · Ctrl-C)은 exit 훅이 돌지 않아 폴더를 남긴다 — 상자는 `<tmp>/dvc-test-cfg-<uid>/<pid>-…` 이고 다음 실행이 pid 가 없고 10분 넘은 것을 지운다.
+    상위 폴더는 **계정마다 · 0700 · 심링크가 아닌 내 폴더일 때만** 쓴다(공용 이름 하나면 root 로 한 번 돈 뒤 다른 계정의 시험이 전부 EACCES · 심링크면 청소가 가리키는 곳을 지웠다 — 재현).
+  · **웹 시험(vitest)도** 서버 모듈을 불러오면 같은 일이 생긴다(`bmStage6Text` 가 auth.js 를 거쳐 실제 server/config 에 `auth-secret` 을 만들었다 — A/B 재현) — `web/vitest.globalSetup.js` 가 임시 설정 폴더를 준다(`<tmp>/dvc-vitest-cfg-<uid>/<pid>-…` · 죽은 실행의 폴더 청소까지 서버와 같은 `server/test/_tmpRoot.js` 하나).
+  회귀 `test/isolateConfig.test.js`.
+  · **같은 점검에서 찾은 날짜 의존 시험 3건**(가짜 시계 — `NODE_OPTIONS="--import <Date 만 미는 모듈>"` 로 시험 파일 하나를 실행 시각만 바꿔 돌려 찾았다. 셸 `date` · 파일 시각 · SQLite 현재 시각은
+    밀리지 않는다): ① 포탈 달의 첫 시간(매달 마지막 날 16시대 UTC)엔 '끝난 정시 칸' 이 0개 — 기준 시각이 달의 첫 몇 시간이면 하루 앞으로(`dataAudit2977`) ② 반복 정비 창은 확인 뒤 92일에 만료 —
+    '어떤 달에 맞닿는다' 는 단언은 그런 달이 92일 안에 들도록 판정 시각을 고른다(`bmMaint8aFix` ⑧) ③ 무작위 대조의 시각 목록에 실제 시각만 두지 말고 경계(시간대 전환 직후 등)를 고정 시각으로
+    함께 둔다(`bmUsageLoop6y` — 실제 시각이 그 며칠에 걸릴 때만 드러난 **제품 결함**이 있었다). 저장소 안 경로(`server/tmp` 등)에 쓰는 시험도 OS 임시 폴더로(`ciWorkflow2558`).
+    ④ 판정 시각을 '만료 + 정확히 24시간' 처럼 설계 경계에 두지 말 것 — 만료된 두 창의 재확인은 만료 뒤 24 ~ 36시간에 열리고(확인 시각에 따라) 판정이 그 경계에 닿아
+    실제 시각이 KST 0시대(창 B) · 12시대(창 A)에 실패했다(`bmUsageLoop3` D1). 모듈 로드 때 잡은 기준 시각(T0)과 라우트의 실제 시각 사이 지연(정시 직전 시작이면 다음 시간)도
+    경계 계산에 넣을 것 — '+ 7분' 으로 비켜 간 판이 정시 1~2초 전 시작에서 아직 실패했다. 반대쪽 경계도 있다: 만료 때 진행 중이던 발생은 끝까지 억제하므로(만료 뒤 최대 12시간)
+    '방금 만료' 는 '억제 없음' 단언이 깨진다(4회차 제안 — 실측 실패). 지금은 판정이 만료 뒤 16 ~ 17시간(두 경계 12 · 24시간 사이).
+    (정정의 정정: 3회차 뒤 '12시대만' 으로 고쳐 적었던 것은 실측 스크립트가 창 하나만 본 탓에 틀렸다 — 4회차 지적.)
+  · **임시 폴더(TMPDIR)도 같은 상자 안**(상자 `<pid>-…` 안에 `cfg` = CONFIG_DIR · `tmp` = TMPDIR): 시험이 `os.tmpdir()` 에 스스로 만든 폴더가 전량 한 번에 약 50개 `/tmp` 에
+    남았다(after() 가 없거나, 지운 뒤 프로세스 종료 저장 `util/exitFlush.js` 가 다시 만들거나 — `audit2603a` 재현). 상자째 지우므로 시험 파일은 예전처럼 `os.tmpdir()` 를 쓰면 된다.
+    다른 계정(uid)으로 자식을 띄우는 시험은 상자(0700) 밖 `DVC_TEST_ORIG_TMPDIR` 에 만든다(`isolateConfig` ⑤ · `audit2744vb` — root 로 돌릴 때만 드러난다: CI 는 비 root 라 건너뛴다).
+
 - **테스트가 띄운 프로세스를 PID 로 정리할 때는 소유를 확인하고 죽인다**(2026-10-26 PR #779 → v3.8.1 이식): `npm test` 는 파일을 병렬로 돌리므로, 로그에 남긴 PID 의
   프로세스가 이미 끝났다면 그 번호가 다른 테스트 파일의 자식에 재사용됐을 수 있다(이 컨테이너 `pid_max` 32768). 로그된 PID 를 무조건
   `process.kill` 하지 말 것 — 가짜 `ping` 은 `test/_fakePing.js`(`installFakePing(dir)` → `killOwned()`: exec 된 sleep 환경의
@@ -361,14 +385,14 @@
   부하로 부모가 밀리면 첫 묶음(STAT · MEM)만 버려져 'ok 인데 CPU · 메모리 없음' 이 됐다 — 이 컨테이너는 3.7KB 라 재현되지 않았다. 재현 · 회귀는 `bmTop8bBudget` ④
   (`BUD_STALL_MS` 로 spawn 직후 부모를 멈춘다 — 예전 하네스는 약 9KB 유실). 같은 형태의 `bmUsageLoop1` 도 고쳤다. 새 가짜 스트림은 이 형태를 따르거나 `PassThrough` 를 쓸 것.
 
-- **시험은 실제 설정 폴더(`server/config`)에 쓰지 않는다 — 프로젝트 모듈을 부르기 전에 `CONFIG_DIR` 을 임시 폴더로 잡는다**(2026-11-26):
-  전량 실행 뒤 `server/config` 에 시험 데이터 12종(auth-secret · datacenters.json · ping-monitor.db …)이 남았고 같은 체크아웃의 다음 실행이 그것을 읽었다
-  (v3.41.1 arch2582 BUG-2 는 그래서 두 번째 실행부터 실패했다 — CI 는 새 체크아웃이라 드러나지 않는다). 원인은 시험 12개가 `CONFIG_DIR` 없이 src 를 부른 것 —
-  `config.js` 와 `FILE = path.join(config.configDir, …)` 꼴 모듈은 **로드 때 경로를 굳히므로** 뒤에 바꿔도 따라오지 않고, **정적 import 는 호이스팅돼** 파일 본문의
-  대입보다 먼저 돈다(`gpuGuestIpOverride` 는 대입이 있었는데도 샜다). 규칙: 설정에 쓰는 시험은 파일 맨 위에서 `tmpDir` · `rmTmpDirs`(tmpCleanup3188 꼴)로
-  `process.env.CONFIG_DIR` 을 잡고 src 는 그 뒤 **동적 import** 로 부른다(`process.env.CONFIG_DIR || …` 로 물려받지 말 것 — 셸의 실제 설치본 폴더를 이어받는다).
-  재발 방지: `npm test` 는 `--import ./test/_isolateConfigDir.js` 로 **시험 파일 프로세스마다 새 임시 폴더**를 준다(밖에서 준 값도 바꾼다 · 시험이 잡은 값은 이긴다 ·
-  exit 에서 지운다). npm 스크립트에 공용 폴더 하나를 주는 방식은 쓰지 않았다 — `CONFIG_DIR ||` 꼴 시험 15개가 병렬 실행 중 같은 폴더를 나눠 쓰게 된다.
-  ⚠ preload 는 `node --test test/x.test.js` 직접 실행에는 걸리지 않는다 — 위 파일별 규칙이 여전히 필요하다. 고정 `test/configDirIsolation.test.js`(① 스크립트 ② preload 동작 ③ 고친 12개).
-  귀속 방법(다음에 또 남으면): fs 쓰기 함수와 `node:sqlite` `DatabaseSync` 를 감싸 경로가 `server/config` 아래면 `process.argv` 의 시험 파일 이름과 함께 기록하는 preload 를
-  `NODE_OPTIONS=--import=…` 로 걸고 전량을 돌린다(병렬이어도 파일별로 귀속된다) → 후보를 하나씩 깨끗한 폴더에서 단독 실행해 확정. 환경을 비우고 띄운 자식 프로세스는 이 방법으로 보이지 않는다.
+- **설정에 쓰는 시험은 파일 자체도 프로젝트 모듈을 부르기 전에 `CONFIG_DIR` 을 임시 폴더로 잡는다 — 미리 불러오기(`_isolateConfig.js`)만 믿지 말 것**(2026-11-26 · 위 항목의 보완):
+  위 미리 불러오기는 `npm test` 에만 붙는다 — `--import` 없이 `node --test test/x.test.js` 로 돌리면 기본 폴더(실제 `server/config`)로 풀린다. 그래서 위 12종을 실제로 쓰던
+  시험 12개를 파일 자체로도 고쳤다: arch2583 · bmUsage2550 · datacenterStore · edgeLog2549 · fleetStores · gpuGuestIpOverride · hwExport2967 · pingMonitor · rebut71 ·
+  roomTempCycle2634(남기던 것) · hangClear2560 · storageAuthGuard2528(perf-hangs.ndjson · storage-auth-stops.json 을 **쓰고 지우던** 것 — 남지 않아 눈에 안 띄지만 개발 PC 의 실제 파일을 지운다).
+  규칙: 파일 맨 위에서 `tmpDir` · `rmTmpDirs`(tmpCleanup3188 꼴)로 `process.env.CONFIG_DIR` 을 잡고 src 는 그 뒤 **동적 import** 로 부른다 — **정적 import 는 호이스팅돼**
+  파일 본문의 대입보다 먼저 돈다(`gpuGuestIpOverride` 는 대입이 있었는데도 샜다). 시험 안에서 나중에 바꾸는 것도 앞 시험이 config.js 를 이미 굳혔으면 닿지 않는다(`rebut71` R3).
+  고정 `test/configDirPerFile.test.js`(고친 12개 목록 — 되돌리면 실패: 변이 4/4).
+  쓰는 시험 찾는 법(다음에 또 남으면 — 2026-11-26 실측: 전량 1회로 12종 · 12개 귀속): fs 쓰기 함수(`writeFileSync` · `appendFileSync` · `renameSync` · `openSync`(쓰기 플래그) ·
+  `mkdirSync` · promises 판)와 `node:sqlite` `DatabaseSync` 를 감싸 경로가 `server/config` 아래면 `process.argv` 의 시험 파일 이름 · 호출 위치와 함께 한 줄 적는 preload 를
+  `NODE_OPTIONS=--import=<절대경로>` 로 걸고 `_isolateConfig.js` **없이** 전량을 돌린다(병렬이어도 파일별로 귀속된다 · 감싼 뒤 `syncBuiltinESMExports()` 로 이름 import 에도 반영)
+  → 후보를 하나씩 예제만 남긴 폴더에서 단독 실행해 확정. env 를 통째로 새로 짜서 띄운 자식 프로세스는 이 방법으로 보이지 않는다(전량 뒤 폴더 검사로만 잡힌다).
