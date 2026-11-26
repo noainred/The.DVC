@@ -17,6 +17,7 @@ import { collectDeviceNow } from '../storage/poller.js';
 import { flushSnapshotsNow } from '../storage/store.js'; // v2.733(C4-03): 재수집 묶음 끝에 한 번 쓴다
 import { pushStorageNow } from '../storage/push.js';
 import { runtimeIntervals, applyCentralIntervals, startAdaptiveTimer } from '../storage/intervals.js';
+import { markFirstConfigPullSettled } from '../storage/firstPullGate.js';
 import { readJsonCapped, EDGE_RESPONSE_MAX_BYTES } from '../util/readCapped.js'; // 87회차 ⓓ(85 E3 — 권장안): 중앙 응답은 상한 읽기(형제 pull 과 같게 — 상한 없는 res.json() 금지)
 
 // v2.409: 주기는 중앙 배포값(storage/intervals.js)을 매번 조회 — 모듈 로드 시 상수로 굳히지 않는다.
@@ -114,7 +115,9 @@ let running = false;
 export async function pullStorageConfigNow(...args) {
   if (running) return { ok: false, reason: '이전 pull 진행 중(겹침 방지)' };
   running = true;
-  try { return await _pullStorageConfigNow(...args); } finally { running = false; }
+  // v3.41.1(점검 2회차): 첫 시도가 끝났음을 폴러에 알린다(성공·실패 무관) — 엣지의 첫 수집이 중앙 값(PowerScale SSH 명령 대기)을 받은 뒤에 돌게.
+  //   가드를 푸는 줄(`finally { running = false; }`)의 모양은 그대로 둔다 — 소스 스윕(엣지 폴러 재진입 가드)이 그 모양을 고정한다.
+  try { return await _pullStorageConfigNow(...args).finally(markFirstConfigPullSettled); } finally { running = false; }
 }
 
 async function _pullStorageConfigNow() {
