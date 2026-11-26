@@ -108,7 +108,7 @@ async function openInner() {
     dropRoomFrags();   // 새 핸들 — 앞 핸들에서 읽은 조각을 믿지 않는다
     // 시리얼 키 색인(rack_place_key)은 한 번만 채운다 — 이 표가 없던 원장(업그레이드 전)에서 올라온 경우.
     // 법인별 '한 번이라도 원장에 있었던 시리얼'(rack_serial_seen)은 한 번만 채운다 — 지금 원장 + 남아 있는 판(법인마다 최대 30개)의 시리얼.
-    _seenReady = false; _seenRetryAt = 0;
+    _seenReady = false; _seenRetryAt = 0; _seenFails = 0;
     try { if (metaGet(conn, SEEN_META) !== 1) tx(conn, () => backfillSeen(conn)); _seenReady = true; } catch (e) { console.warn('[rack-db] 시리얼 기록(가림 재료)을 채우지 못했습니다(가림 재료를 읽을 때 다시 시도):', e.message); }
     DETAIL_CACHE.clear();   // 새 핸들 — 다른 원장의 같은 (법인, 판) 키가 섞이지 않게
     _keysReady = false; _keysRetryAt = 0;
@@ -133,7 +133,7 @@ async function openInner() {
 }
 
 /** 테스트 전용 — 핸들을 닫고 다음 호출이 다시 열게 한다. */
-export function _closeForTest() { try { _db?.close(); } catch { /* */ } _db = null; _initError = ''; dropRoomFrags(); _keysReady = false; _keysRetryAt = 0; _seenReady = false; _seenRetryAt = 0; DETAIL_CACHE.clear(); }
+export function _closeForTest() { try { _db?.close(); } catch { /* */ } _db = null; _initError = ''; dropRoomFrags(); _keysReady = false; _keysRetryAt = 0; _seenReady = false; _seenRetryAt = 0; _seenFails = 0; DETAIL_CACHE.clear(); }
 /** 테스트 전용 — 색인 다시 채우기의 재시도 대기를 없앤다(대기 시간을 기다리지 않고 '다음 시도' 를 보려고). */
 export function _keysRetryNowForTest() { _keysRetryAt = 0; }
 /** 테스트 전용 — SQL 로 원장을 직접 고친 뒤(전산실 rev 를 올리지 않는 변경) 조각 캐시와 시리얼 키 색인을 원장에 맞춘다. */
@@ -392,8 +392,14 @@ export async function corpSerials(corpId) {
     try { for (const x of JSON.parse(r.x || '[]')) if (typeof x === 'string' && x) out.push(x); } catch { /* */ }
   }
   // + 한 번이라도 이 법인 원장에 있었던 시리얼의 비교 키(뺀 장비 · 나중에 넣은 시리얼의 옛 글까지 가리려고 — rack_serial_seen)
-  if (!_seenReady && Date.now() >= _seenRetryAt) {   // 열 때 채우지 못했으면 여기서 다시(실패하면 KEYS_RETRY_MS 뒤에)
-    try { tx(db, () => backfillSeen(db)); _seenReady = true; } catch (e) { _seenRetryAt = Date.now() + KEYS_RETRY_MS; console.warn('[rack-db] 시리얼 기록(가림 재료)을 채우지 못했습니다:', e.message); }
+  if (!_seenReady && Date.now() >= _seenRetryAt) {   // 열 때 채우지 못했으면 여기서 다시
+    // 실패가 이어지면 간격을 두 배씩 늘린다(30초 → 1분 → … 최대 16분): 채우기는 판 전부를 풀어 읽은 **뒤에야** 쓰기에서 실패하므로(디스크 가득 등),
+    //   고정 30초면 그동안 범위 계정 조회 한 건이 30초마다 그 비용을 통째로 치른다(4회차 점검 성능 1 — 장비 5,600대 · 판 420개에서 재시도 1회 0.4~0.5초 실측).
+    try { tx(db, () => backfillSeen(db)); _seenReady = true; _seenFails = 0; } catch (e) {
+      const wait = KEYS_RETRY_MS * 2 ** Math.min(_seenFails, SEEN_RETRY_MAX_DOUBLINGS); _seenFails += 1;
+      _seenRetryAt = Date.now() + wait;
+      console.warn(`[rack-db] 시리얼 기록(가림 재료)을 채우지 못했습니다 — ${Math.round(wait / 1000)}초 뒤 다시 시도합니다:`, e.message);
+    }
   }
   for (const r of db.prepare('SELECT key FROM rack_serial_seen WHERE corp_id = ?').all(String(corpId || ''))) out.push(r.key);
   return out;
@@ -619,6 +625,8 @@ const nameOf = (p) => p.label || '이름 없는 장비';
 const SEEN_META = 'seenKeys';
 let _seenReady = false;   // 이 핸들에서 시리얼 기록 채우기가 끝났는가(열 때 실패했으면 false — corpSerials 가 다시 시도한다)
 let _seenRetryAt = 0;
+let _seenFails = 0;       // 읽을 때 다시 채우기가 이어서 실패한 횟수(간격을 늘리는 데 쓴다 — 성공 · 다시 열기에 0)
+const SEEN_RETRY_MAX_DOUBLINGS = 5;   // 30초 × 2^5 = 16분
 function seeSerials(db, corpId, keys) {
   if (!corpId || !keys || !keys.size) return;
   const ins = db.prepare('INSERT OR IGNORE INTO rack_serial_seen (corp_id, key) VALUES (?, ?)');

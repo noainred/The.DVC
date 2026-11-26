@@ -58,6 +58,21 @@ function projOf(text) {
 const isSep = isKeySep;
 const lensOf = (set) => { const l = new Set(); for (const s of set) l.add(s.length); return [...l].sort((a, b) => b - a); };   // 긴 것 먼저(짧은 것이 긴 것의 앞부분만 먹지 않게)
 
+const HEAD_LEN = 3;
+/**
+ * 앞머리 색인 — 앞머리(앞 `headLen` 글자) → 그 앞머리로 시작하는 항목의 길이 종류(긴 것 먼저). 위치마다 길이 종류를 전부 잘라 보지 않고,
+ * 앞머리가 맞는 자리에서만 그 묶음의 길이를 본다(주소 목록 · 태그 목록 공용 — `matchSpans`). 가장 짧은 항목이 `HEAD_LEN` 보다 짧으면 앞머리도 그만큼 짧다.
+ */
+function headsOf(set) {
+  let headLen = HEAD_LEN;
+  for (const s of set) if (s.length < headLen) headLen = s.length;
+  const groups = new Map();
+  for (const s of set) { const h = s.slice(0, headLen); let g = groups.get(h); if (!g) { g = new Set(); groups.set(h, g); } g.add(s.length); }
+  const heads = new Map();
+  for (const [h, g] of groups) heads.set(h, [...g].sort((a, b) => b - a));
+  return { heads, headLen };
+}
+
 /** 사영 구간 [a, b) 의 '구분자 자리 모양' — 키 글자 사이에 구분자가 끼어 있는 자리(키 안의 위치)를 쉼표로 이은 글자. 붙여 쓴 것은 ''. */
 function shapeOf(pos, a, b) {
   let sh = '';
@@ -82,7 +97,7 @@ export function tagIndexOf(tags) {
     let g = shapes.get(k); if (!g) { g = new Set(); shapes.set(k, g); }
     g.add(sh);
   }
-  return { set, lens: lensOf(set), shapes };
+  return { set, lens: lensOf(set), shapes, ...headsOf(set) };
 }
 
 /**
@@ -94,7 +109,10 @@ export function tagIndexOf(tags) {
 function matchSpans(proj, indexes, accept) {
   const spans = [];
   for (let a = 0; a < proj.length; a += 1) {
-    let end = 0;
+    // 이미 표시한 구간 안이면 그 구간을 **넘는** 일치만 본다(구간 안에서 끝나는 일치는 결과를 바꾸지 않는다 — 시리얼이 든 이름에서 위치마다 길이 종류를 전부 다시 자르던 비용 · 4회차 점검 성능 관찰).
+    const prev = spans[spans.length - 1];
+    const floor = prev && a < prev[1] ? prev[1] : 0;
+    let end = floor;
     for (const index of indexes) {
       if (!index || !index.set.size) continue;
       // 앞머리 색인이 있으면(주소 목록) 이 자리의 앞 몇 글자로 시작하는 항목의 길이 종류만 본다 — 없으면 그 자리는 건너뛴다.
@@ -105,9 +123,8 @@ function matchSpans(proj, indexes, accept) {
         if (a + len <= proj.length && index.set.has(proj.slice(a, a + len)) && (!accept || accept(a, a + len))) { end = a + len; break; }
       }
     }
-    if (!end) continue;
-    const last = spans[spans.length - 1];
-    if (last && a <= last[1]) { if (end > last[1]) last[1] = end; } else spans.push([a, end]);
+    if (end === floor) continue;
+    if (prev && a <= prev[1]) { if (end > prev[1]) prev[1] = end; } else spans.push([a, end]);
   }
   return spans;
 }
@@ -137,7 +154,6 @@ export function stripTags(text, ...indexes) {
   return out + text.slice(from);
 }
 
-const HEAD_LEN = 3;
 /**
  * 글자 그대로 찾을 목록(주소 원문) → 색인. 대소문자만 무시한다. `min` 자 미만은 뺀다.
  * `heads` = 앞머리(앞 `headLen` 글자) → 그 앞머리로 시작하는 항목의 길이 종류(긴 것 먼저). 관리 주소는 길이 종류가 많다(IP 7~15자 · FQDN · 'https://' 붙은 꼴 —
@@ -150,13 +166,7 @@ export function needleIndexOf(strings, { min = 1, max = 255 } = {}) {
     const s = lowSameLen(String(v ?? '').trim());
     if (s.length >= min && s.length <= max) set.add(s);
   }
-  let headLen = HEAD_LEN;
-  for (const s of set) if (s.length < headLen) headLen = s.length;
-  const groups = new Map();
-  for (const s of set) { const h = s.slice(0, headLen); let g = groups.get(h); if (!g) { g = new Set(); groups.set(h, g); } g.add(s.length); }
-  const heads = new Map();
-  for (const [h, g] of groups) heads.set(h, [...g].sort((a, b) => b - a));
-  return { set, lens: lensOf(set), heads, headLen };
+  return { set, lens: lensOf(set), ...headsOf(set) };
 }
 
 /**

@@ -25,6 +25,7 @@ const btnPri = { ...btn, background: 'var(--accent)', borderColor: 'var(--accent
 /** 잠긴 버튼의 모양(인라인 스타일에는 :disabled 가 없다 — 2회차 점검 화면 3: 잠긴 버튼이 평소와 똑같이 보였다). */
 const off = (st, d) => (d ? { ...st, opacity: 0.5, cursor: 'not-allowed' } : st);
 /** 저장 버튼 글자 — 이 창이 시작한 저장이면 '저장 중…', 다른 저장(끌어 놓기 등)을 기다리는 중이면 그렇게 말한다. */
+const SLOW_SAVE_MS = 700;
 const saveText = (busy, saving) => (saving ? '저장 중…' : busy ? '앞 저장을 기다리는 중…' : '저장');
 const lab = { fontSize: 11, color: 'var(--text-dim)', fontWeight: 600 };
 const sel = { height: 32, padding: '0 8px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--panel-deep)', color: 'var(--text)', minWidth: 0 };
@@ -491,6 +492,13 @@ export default function RackTool() {
   }, [modal]);
   const [busy, setBusy] = useState(false);
   const [busyModal, setBusyModal] = useState(null);   // 지금 가고 있는 저장을 시작한 창(끌어 놓기면 null)
+  // '저장 중' 한 줄은 저장이 SLOW_SAVE_MS 넘게 걸릴 때만 보인다 — 바로 끝나는 저장(끌어 놓기)마다 줄이 생겼다 사라져 랙 그림이 한 번 내려갔다 올라왔다(4회차 점검 화면 제안 1 · 실측 29px).
+  const [slowSave, setSlowSave] = useState(false);
+  useEffect(() => {
+    if (!busy) { setSlowSave(false); return undefined; }
+    const t = setTimeout(() => setSlowSave(true), SLOW_SAVE_MS);
+    return () => clearTimeout(t);
+  }, [busy]);
   // 저장 중에도 창은 닫을 수 있다 — 응답이 오지 않으면 갇히기 때문(2회차 점검 화면 3). 늦게 온 응답은 '그 저장을 시작한 창' 일 때만 창을 닫고 오류를 싣는다(run 의 sameModal).
   const closeModal = useCallback(() => { setModal(null); }, [setModal]);
   const corpIdRef = useRef('');
@@ -672,10 +680,13 @@ export default function RackTool() {
   };
 
   // 장비 · 랙 창의 저장 전 확인: 화면 자료가 있고, 그 창을 연 전산실을 지금도 보고 있는가(아니면 다른 전산실의 rev · 랙으로 쓰게 된다 — 3회차 점검 화면 1).
+  const ROOM_CHANGED_TEXT = '이 창을 연 뒤 보고 있는 전산실이 바뀌었습니다 — 창을 닫고 다시 여세요.';
+  // 전산실이 바뀐 창은 저장을 누르기 전에도 알린다(그 창의 '랙' 칸에는 지금 보고 있는 다른 전산실의 랙이 보인다 — 4회차 점검 화면 제안 3).
+  const roomChangedText = lostViewReason(view, modal) === 'roomChanged' ? ROOM_CHANGED_TEXT : '';
   const lostView = () => {
     const why = lostViewReason(view, modal);
     if (why === 'noView') setModalErr('전산실을 다시 불러오지 못했습니다 — 창을 닫고 새로 고친 뒤 다시 하세요.');
-    else if (why === 'roomChanged') setModalErr('이 창을 연 뒤 보고 있는 전산실이 바뀌었습니다 — 창을 닫고 다시 여세요.');
+    else if (why === 'roomChanged') setModalErr(ROOM_CHANGED_TEXT);
     return !!why;
   };
   const nothingChanged = () => { setModal(null); say('ok', '바뀐 것이 없어 저장하지 않았습니다.'); };
@@ -763,7 +774,7 @@ export default function RackTool() {
 
       {treeErr && tree ? <StaleBanner what="목록을" error={treeErr} onRetry={() => { loadTree(); loadRoom(roomIdRef.current); }} /> : null}
       {/* 저장 중 창을 닫았거나 끌어 놓은 직후 — 저장이 아직 가고 있음을 밝힌다(응답이 늦으면 다른 저장이 막히는 이유가 화면에 없었다 — 3회차 점검 화면 제안 1) */}
-      {busy && !modal ? <div role="status" style={{ fontSize: 12, color: 'var(--text-dim)', padding: '0 2px' }}>변경을 저장하는 중입니다… 끝날 때까지 다른 저장은 기다립니다.</div> : null}
+      {slowSave && !modal ? <div role="status" style={{ fontSize: 12, color: 'var(--text-dim)', padding: '0 2px' }}>변경을 저장하는 중입니다… 끝날 때까지 다른 저장은 기다립니다.</div> : null}
       {note ? (
         <div role={note.tone === 'err' ? 'alert' : 'status'} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '8px 12px', borderRadius: 8, fontSize: 12,
           border: `1px solid ${note.tone === 'ok' ? 'var(--green)' : note.tone === 'warn' ? 'var(--amber)' : 'var(--red)'}`,
@@ -873,7 +884,7 @@ export default function RackTool() {
       )}
 
       {modal?.kind === 'place' ? (
-        <PlaceModal init={modal.init} racks={racks} busy={busy} saving={busy && busyModal === modal} error={modalErr} onClose={closeModal} onSave={savePlace}
+        <PlaceModal init={modal.init} racks={racks} busy={busy} saving={busy && busyModal === modal} error={modalErr || roomChangedText} onClose={closeModal} onSave={savePlace}
           onRemove={async () => {
             if (lostView()) return;
             if (!window.confirm(`‘${modal.init.label || modal.init.serial || '이름 없음'}’ 을(를) 랙에서 뺄까요? 판 기록에서 되돌릴 수 있습니다.`)) return;
@@ -881,7 +892,7 @@ export default function RackTool() {
           }} />
       ) : null}
       {modal?.kind === 'rack' ? (
-        <RackModal init={modal.init} types={types} busy={busy} saving={busy && busyModal === modal} error={modalErr} onClose={closeModal}
+        <RackModal init={modal.init} types={types} busy={busy} saving={busy && busyModal === modal} error={modalErr || roomChangedText} onClose={closeModal}
           onSave={async (f, f0) => {
             if (lostView()) return;
             let r;

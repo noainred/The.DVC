@@ -174,4 +174,38 @@ test('5 라우트: IP 낱말의 앞뒤 문장 부호는 남고 같은 주소는 
   assert.ok(!labels.join('|').includes('10.20.31.1') && !labels.join('|').includes('10.9.8.2'));
 });
 
+test('6: 시리얼 기록 다시 채우기가 이어서 실패하면 간격이 두 배씩 늘어난다(30초 → 1분 → 2분 … 최대 16분) · 성공하면 풀리고 기록이 채워진다(4회차 점검 성능 1)', async () => {
+  let db = await R.openRackDb();
+  db.exec('DELETE FROM rack_serial_seen'); db.exec("DELETE FROM rack_meta WHERE k = 'seenKeys'");
+  db.exec("CREATE TRIGGER seen_fail BEFORE INSERT ON rack_serial_seen BEGIN SELECT RAISE(ABORT, 'probe'); END;");
+  R._closeForTest();
+  const realNow = Date.now; let now = realNow(); Date.now = () => now;
+  const warn = console.warn; const warns = []; console.warn = (...a) => { warns.push(a.join(' ')); };
+  const tries = async () => { const n = warns.length; await R.corpSerials('kr'); return warns.slice(n).filter((w) => w.includes('시리얼 기록')).length; };
+  try {
+    db = await R.openRackDb();                                   // 열 때 실패(1회)
+    assert.equal(warns.filter((w) => w.includes('시리얼 기록')).length, 1);
+    assert.equal(await tries(), 1, '열 때 실패한 뒤 첫 조회는 바로 다시 시도한다');
+    let wait = 30_000;
+    for (let step = 0; step < 8; step += 1) {
+      now += wait - 1000; assert.equal(await tries(), 0, `${step}: 간격 ${wait / 1000}초가 지나기 전에는 다시 시도하지 않는다`);
+      now += 2000; assert.equal(await tries(), 1, `${step}: 간격 ${wait / 1000}초가 지나면 한 번 시도한다`);
+      wait = Math.min(wait * 2, 30_000 * 32);
+    }
+    assert.equal(wait, 960_000, '상한 16분');
+    assert.ok(warns.some((w) => w.includes('960초 뒤')), '경고 글에 다음 시도까지의 시간을 적는다');
+    db.exec('DROP TRIGGER seen_fail');
+    now += 959_000; assert.ok(!(await R.corpSerials('kr')).includes('real001'), '아직 대기 중 — 기록은 비어 있다(지금 원장의 원문 시리얼만)');
+    now += 2000;
+    assert.ok((await R.corpSerials('kr')).includes('real001'), '원인이 사라진 뒤의 시도는 성공해 기록이 채워진다');
+    assert.equal(await tries(), 0);
+    // 다시 실패가 시작되면 간격은 처음(30초)부터
+    db.exec('DELETE FROM rack_serial_seen'); db.exec("DELETE FROM rack_meta WHERE k = 'seenKeys'");
+    db.exec("CREATE TRIGGER seen_fail BEFORE INSERT ON rack_serial_seen BEGIN SELECT RAISE(ABORT, 'probe'); END;");
+    R._closeForTest(); db = await R.openRackDb();
+    assert.equal(await tries(), 1); now += 31_000; assert.equal(await tries(), 1, '새 핸들에서는 30초부터');
+  } finally { Date.now = realNow; console.warn = warn; try { db.exec('DROP TRIGGER IF EXISTS seen_fail'); } catch { /* */ } }
+  R._closeForTest();
+});
+
 test.after(() => R._closeForTest());

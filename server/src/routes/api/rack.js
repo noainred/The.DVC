@@ -103,7 +103,14 @@ function sendErr(res, e) {
  * '1234' · '0000' 으로 읽혀 가림 재료에서 빠졌다).
  */
 const NON_ASCII = /[^\u0000-\u007f]/;
-export const usableTag = (t) => typeof t === 'string' && !!t && (NON_ASCII.test(t) || !isPlaceholderTag(t));
+// 판정은 글자만으로 정해진다 — 같은 태그를 요청마다 다시 판정하지 않는다(범위 계정 요청 하나에 태그 2만여 개 · 약 10ms 실측 — 4회차 점검 성능). 상한을 넘으면 통째로 비운다.
+const TAG_OK = new Map(); const TAG_OK_MAX = 200_000;
+export const usableTag = (t) => {
+  if (typeof t !== 'string' || !t) return false;
+  let ok = TAG_OK.get(t);
+  if (ok === undefined) { ok = NON_ASCII.test(t) || !isPlaceholderTag(t); if (TAG_OK.size >= TAG_OK_MAX) TAG_OK.clear(); TAG_OK.set(t, ok); }
+  return ok;
+};
 
 export const UNPLACED_MAX = 2000;   // 미배치 서버 목록에 싣는 최대 대수(법인 하나) — 넘으면 unplacedTotal 이 더 크고 화면이 밝힌다
 const HEALTH = { ok: 'ok', warning: 'warn', critical: 'crit' };
