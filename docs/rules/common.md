@@ -19,6 +19,7 @@
 - (원래 3227행) 의존 방향은 한쪽이다 — routes/ 는 index.js 만 import 하고, util/ 은 도메인을 모른다
 - 시간 비율(ReDoS · 선형 시간) 테스트는 크기 차이를 크게(8배) 두고 작은 쪽 · 큰 쪽을 번갈아 잰다
 - 공용 모듈은 `docs/COMMON.md`(생성물)에서 먼저 찾는다 — 새 헬퍼를 만들기 전에
+- 설정에 쓰는 시험은 파일 자체도 src 를 부르기 전에 `CONFIG_DIR` 을 임시 폴더로(정적 import 는 호이스팅) · 쓰는 시험 찾는 법
 - 경합(동시 요청) 시험은 순서를 `setTimeout` 짧은 대기에 맡기지 말고 주입 지점에서 붙잡아 차례를 정한다
 
 ## 본문
@@ -384,6 +385,18 @@
   (진짜 ssh2 채널은 스트림이라 버퍼에 둔다 — 가짜만의 결함). 주 명령 출력은 `head -c` 를 지나 4KB 묶음으로 나오므로 DF 앞 출력이 4KB 를 넘는 러너(디스크 · NIC 가 많은 CI)에서
   부하로 부모가 밀리면 첫 묶음(STAT · MEM)만 버려져 'ok 인데 CPU · 메모리 없음' 이 됐다 — 이 컨테이너는 3.7KB 라 재현되지 않았다. 재현 · 회귀는 `bmTop8bBudget` ④
   (`BUD_STALL_MS` 로 spawn 직후 부모를 멈춘다 — 예전 하네스는 약 9KB 유실). 같은 형태의 `bmUsageLoop1` 도 고쳤다. 새 가짜 스트림은 이 형태를 따르거나 `PassThrough` 를 쓸 것.
+
+- **설정에 쓰는 시험은 파일 자체도 프로젝트 모듈을 부르기 전에 `CONFIG_DIR` 을 임시 폴더로 잡는다 — 미리 불러오기(`_isolateConfig.js`)만 믿지 말 것**(2026-11-26 · 위 항목의 보완):
+  위 미리 불러오기는 `npm test` 에만 붙는다 — `--import` 없이 `node --test test/x.test.js` 로 돌리면 기본 폴더(실제 `server/config`)로 풀린다. 그래서 위 12종을 실제로 쓰던
+  시험 12개를 파일 자체로도 고쳤다: arch2583 · bmUsage2550 · datacenterStore · edgeLog2549 · fleetStores · gpuGuestIpOverride · hwExport2967 · pingMonitor · rebut71 ·
+  roomTempCycle2634(남기던 것) · hangClear2560 · storageAuthGuard2528(perf-hangs.ndjson · storage-auth-stops.json 을 **쓰고 지우던** 것 — 남지 않아 눈에 안 띄지만 개발 PC 의 실제 파일을 지운다).
+  규칙: 파일 맨 위에서 `tmpDir` · `rmTmpDirs`(tmpCleanup3188 꼴)로 `process.env.CONFIG_DIR` 을 잡고 src 는 그 뒤 **동적 import** 로 부른다 — **정적 import 는 호이스팅돼**
+  파일 본문의 대입보다 먼저 돈다(`gpuGuestIpOverride` 는 대입이 있었는데도 샜다). 시험 안에서 나중에 바꾸는 것도 앞 시험이 config.js 를 이미 굳혔으면 닿지 않는다(`rebut71` R3).
+  고정 `test/configDirPerFile.test.js`(고친 12개 목록 — 되돌리면 실패: 변이 4/4).
+  쓰는 시험 찾는 법(다음에 또 남으면 — 2026-11-26 실측: 전량 1회로 12종 · 12개 귀속): fs 쓰기 함수(`writeFileSync` · `appendFileSync` · `renameSync` · `openSync`(쓰기 플래그) ·
+  `mkdirSync` · promises 판)와 `node:sqlite` `DatabaseSync` 를 감싸 경로가 `server/config` 아래면 `process.argv` 의 시험 파일 이름 · 호출 위치와 함께 한 줄 적는 preload 를
+  `NODE_OPTIONS=--import=<절대경로>` 로 걸고 `_isolateConfig.js` **없이** 전량을 돌린다(병렬이어도 파일별로 귀속된다 · 감싼 뒤 `syncBuiltinESMExports()` 로 이름 import 에도 반영)
+  → 후보를 하나씩 예제만 남긴 폴더에서 단독 실행해 확정. env 를 통째로 새로 짜서 띄운 자식 프로세스는 이 방법으로 보이지 않는다(전량 뒤 폴더 검사로만 잡힌다).
 
 - **경합(동시 요청) 시험은 순서를 `setTimeout` 짧은 대기에 맡기지 말고, 주입 지점에서 한쪽을 붙잡아 차례를 정한다**(2026-11-26 — `bmMaintRace` '판정에 쓴 판으로만'):
   그 시험은 '고치기가 재확인 저장보다 먼저 cur 를 읽는다' 는 순서를 `setTimeout(5)` 로 기대했다 — 로컬 실측 여유는 약 13ms(재확인 82~100ms · 고치기 도착 70~86ms)라
