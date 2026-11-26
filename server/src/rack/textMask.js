@@ -57,7 +57,10 @@ function matchSpans(proj, indexes, accept) {
     let end = 0;
     for (const index of indexes) {
       if (!index || !index.set.size) continue;
-      for (const len of index.lens) {
+      // 앞머리 색인이 있으면(주소 목록) 이 자리의 앞 몇 글자로 시작하는 항목의 길이 종류만 본다 — 없으면 그 자리는 건너뛴다.
+      const lens = index.heads ? index.heads.get(proj.slice(a, a + index.headLen)) : index.lens;
+      if (!lens) continue;
+      for (const len of lens) {
         if (a + len <= end) break;   // 이 색인의 남은 길이는 더 짧다 — 이미 표시한 구간 안
         if (a + len <= proj.length && index.set.has(proj.slice(a, a + len)) && (!accept || accept(a, a + len))) { end = a + len; break; }
       }
@@ -97,14 +100,26 @@ export function stripTags(text, ...indexes) {
   return out + text.slice(from);
 }
 
-/** 글자 그대로 찾을 목록(주소 원문) → 색인. 대소문자만 무시한다. `min` 자 미만은 뺀다. */
+const HEAD_LEN = 3;
+/**
+ * 글자 그대로 찾을 목록(주소 원문) → 색인. 대소문자만 무시한다. `min` 자 미만은 뺀다.
+ * `heads` = 앞머리(앞 `headLen` 글자) → 그 앞머리로 시작하는 항목의 길이 종류(긴 것 먼저). 관리 주소는 길이 종류가 많다(IP 7~15자 · FQDN · 'https://' 붙은 꼴 —
+ *   7,000대 등록부에서 60종 이상). 위치마다 길이 종류를 전부 잘라 보면 '글 길이 × 길이 종류' 가 된다(3회차 점검 성능 2 — 96자 글 12,100개에 4.9초 · 실측).
+ *   앞머리가 맞는 자리에서만 그 묶음의 길이를 본다.
+ */
 export function needleIndexOf(strings, { min = 1, max = 255 } = {}) {
   const set = new Set();
   for (const v of strings || []) {
     const s = lowSameLen(String(v ?? '').trim());
     if (s.length >= min && s.length <= max) set.add(s);
   }
-  return { set, lens: lensOf(set) };
+  let headLen = HEAD_LEN;
+  for (const s of set) if (s.length < headLen) headLen = s.length;
+  const groups = new Map();
+  for (const s of set) { const h = s.slice(0, headLen); let g = groups.get(h); if (!g) { g = new Set(); groups.set(h, g); } g.add(s.length); }
+  const heads = new Map();
+  for (const [h, g] of groups) heads.set(h, [...g].sort((a, b) => b - a));
+  return { set, lens: lensOf(set), heads, headLen };
 }
 
 /**

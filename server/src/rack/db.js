@@ -625,15 +625,20 @@ function seeSerials(db, corpId, keys) {
   for (const k of keys) ins.run(corpId, k);
 }
 function backfillSeen(db) {
-  const ins = db.prepare('INSERT OR IGNORE INTO rack_serial_seen (corp_id, key) VALUES (?, ?)');
+  // 키를 법인별 집합으로 먼저 모아 **새 키만** 넣는다 — 판 30개에 같은 장비가 되풀이되므로 장비마다 넣으면 시도의 97% 가 중복이다
+  //   (3회차 점검 성능 4 실측: 장비 70,230대 · 판 420개에서 넣기 시도 253만 회 3.7초 → 집합으로 모으면 0.15초).
+  const byCorp = new Map();
+  const add = (c, k) => { let g = byCorp.get(c); if (!g) { g = new Set(); byCorp.set(c, g); } g.add(k); };
   for (const r of db.prepare(`SELECT t.corp_id AS c, p.serial AS serial, p.extra_serials AS extra_serials FROM rack_place p JOIN rack_rack r ON r.id = p.rack_id
     JOIN rack_room m ON m.id = r.room_id JOIN rack_site t ON t.id = m.site_id WHERE p.serial <> '' OR p.extra_serials <> '[]'`).all()) {
-    for (const k of keysOf(placeRow({ ...r, serial_key: '' }))) ins.run(r.c, k);
+    for (const k of keysOf(placeRow({ ...r, serial_key: '' }))) add(r.c, k);
   }
   for (const v of db.prepare('SELECT corp_id AS c, data FROM rack_version').all()) {
     const snap = unpackSnap(v.data, v.c);
-    for (const p of snap?.places || []) for (const k of keysOf(p)) ins.run(v.c, k);
+    for (const p of snap?.places || []) for (const k of keysOf(p)) add(v.c, k);
   }
+  const ins = db.prepare('INSERT OR IGNORE INTO rack_serial_seen (corp_id, key) VALUES (?, ?)');
+  for (const [c, g] of byCorp) for (const k of g) ins.run(c, k);
   db.prepare('INSERT INTO rack_meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v').run(SEEN_META, 1);
 }
 
