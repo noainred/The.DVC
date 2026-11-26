@@ -21,6 +21,10 @@ import {
 const card = { background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 12, minWidth: 0 };
 const btn = { height: 32, padding: '0 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--text)', fontWeight: 600, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap' };
 const btnPri = { ...btn, background: 'var(--accent)', borderColor: 'var(--accent)', color: '#04101f' };
+/** 잠긴 버튼의 모양(인라인 스타일에는 :disabled 가 없다 — 2회차 점검 화면 3: 잠긴 버튼이 평소와 똑같이 보였다). */
+const off = (st, d) => (d ? { ...st, opacity: 0.5, cursor: 'not-allowed' } : st);
+/** 저장 버튼 글자 — 이 창이 시작한 저장이면 '저장 중…', 다른 저장(끌어 놓기 등)을 기다리는 중이면 그렇게 말한다. */
+const saveText = (busy, saving) => (saving ? '저장 중…' : busy ? '앞 저장을 기다리는 중…' : '저장');
 const lab = { fontSize: 11, color: 'var(--text-dim)', fontWeight: 600 };
 const sel = { height: 32, padding: '0 8px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--panel-deep)', color: 'var(--text)', minWidth: 0 };
 const mono = { fontFamily: 'var(--mono)' };
@@ -37,11 +41,11 @@ function Seg({ items, value, onChange, label, wrap = false }) {
 }
 
 /** 데이터가 있는데 다시 불러오기만 실패했을 때의 한 줄 안내(화면 전체를 오류 상자로 바꾸지 않는다 — 점검 C22). */
-function StaleBanner({ what, error, onRetry }) {
+function StaleBanner({ what, error, onRetry, locked = false }) {
   const why = error?.serverReason || error?.message || '';
   return (
     <div role="alert" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', padding: '8px 12px', borderRadius: 8, fontSize: 12, border: '1px solid var(--amber)', background: 'rgba(245,158,11,.12)' }}>
-      <span style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}>{what} 다시 불러오지 못했습니다{why ? `(${String(why).slice(0, 160)})` : ''} — 아래는 직전에 불러온 내용입니다.</span>
+      <span style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}>{what} 다시 불러오지 못했습니다{why ? `(${String(why).slice(0, 160)})` : ''} — 아래는 직전에 불러온 내용입니다{locked ? '(다시 불러올 때까지 편집은 잠깁니다)' : ''}.</span>
       <button type="button" style={{ ...btn, height: 26 }} onClick={onRetry}>다시 시도</button>
     </div>
   );
@@ -199,7 +203,7 @@ function Detail({ p, rack, onEdit, edit }) {
 
 const EMPTY_PLACE = { face: 'full', uStart: '', uSize: '', kind: 'server', label: '', model: '', serial: '', extraSerials: '', note: '', opW: '', ratedW: '', weightKg: '' };
 
-function PlaceModal({ init, racks, onClose, onSave, onRemove, busy, error }) {
+function PlaceModal({ init, racks, onClose, onSave, onRemove, busy, saving, error }) {
   const [f0] = useState(() => ({ ...EMPTY_PLACE, ...init, extraSerials: Array.isArray(init.extraSerials) ? init.extraSerials.join(' / ') : (init.extraSerials || '') }));
   const [f, setF] = useState(f0);   // f0 = 창을 연 때의 값 — 고치기는 달라진 칸만 보낸다(onSave 가 대조)
   const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.value }));
@@ -235,17 +239,17 @@ function PlaceModal({ init, racks, onClose, onSave, onRemove, busy, error }) {
         <label style={{ ...row, flex: 'none' }}><span style={lab}>메모</span><input style={inp} value={f.note} onChange={set('note')} /></label>
         {error ? <div role="alert" style={{ fontSize: 12, color: '#fecaca', border: '1px solid var(--red)', background: 'rgba(239,68,68,.12)', borderRadius: 8, padding: '8px 10px' }}>{error}</div> : null}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {init.id ? <button type="button" style={{ ...btn, color: '#fecaca' }} disabled={busy} onClick={onRemove}>장비 빼기</button> : null}
+          {init.id ? <button type="button" style={off({ ...btn, color: '#fecaca' }, busy)} disabled={busy} onClick={onRemove}>장비 빼기</button> : null}
           <span style={{ flex: 1 }} />
-          <button type="button" style={btn} disabled={busy} onClick={onClose}>취소</button>
-          <button type="button" style={btnPri} disabled={busy} onClick={() => onSave(f, f0)}>{busy ? '저장 중…' : '저장'}</button>
+          <button type="button" style={btn} onClick={onClose}>취소</button>
+          <button type="button" style={off(btnPri, busy)} disabled={busy} onClick={() => onSave(f, f0)}>{saveText(busy, saving)}</button>
         </div>
       </div>
     </Modal>
   );
 }
 
-function RackModal({ init, types, onClose, onSave, onRemove, busy, error }) {
+function RackModal({ init, types, onClose, onSave, onRemove, busy, saving, error }) {
   const [f0] = useState(() => ({ name: '', row: '', role: '', typeId: '', heightU: 42, pduA: 2, pduB: 2, ...init }));
   const [f, setF] = useState(f0);   // f0 = 창을 연 때의 값 — 고치기는 달라진 칸만 보낸다
   const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.value }));
@@ -271,17 +275,17 @@ function RackModal({ init, types, onClose, onSave, onRemove, busy, error }) {
         </div>
         {error ? <div role="alert" style={{ fontSize: 12, color: '#fecaca', border: '1px solid var(--red)', background: 'rgba(239,68,68,.12)', borderRadius: 8, padding: '8px 10px' }}>{error}</div> : null}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {init.id ? <button type="button" style={{ ...btn, color: '#fecaca' }} disabled={busy} onClick={onRemove}>랙 지우기(빈 랙만)</button> : null}
+          {init.id ? <button type="button" style={off({ ...btn, color: '#fecaca' }, busy)} disabled={busy} onClick={onRemove}>랙 지우기(빈 랙만)</button> : null}
           <span style={{ flex: 1 }} />
-          <button type="button" style={btn} disabled={busy} onClick={onClose}>취소</button>
-          <button type="button" style={btnPri} disabled={busy} onClick={() => onSave(f, f0)}>{busy ? '저장 중…' : '저장'}</button>
+          <button type="button" style={btn} onClick={onClose}>취소</button>
+          <button type="button" style={off(btnPri, busy)} disabled={busy} onClick={() => onSave(f, f0)}>{saveText(busy, saving)}</button>
         </div>
       </div>
     </Modal>
   );
 }
 
-function NameModal({ title, init = '', extra = null, onClose, onSave, onRemove, removeLabel, busy, error }) {
+function NameModal({ title, init = '', extra = null, onClose, onSave, onRemove, removeLabel, busy, saving, error }) {
   const [v, setV] = useState(init);
   return (
     <Modal title={title} onClose={onClose} width={440}>
@@ -292,10 +296,10 @@ function NameModal({ title, init = '', extra = null, onClose, onSave, onRemove, 
         {extra}
         {error ? <div role="alert" style={{ fontSize: 12, color: '#fecaca' }}>{error}</div> : null}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {onRemove ? <button type="button" style={{ ...btn, color: '#fecaca' }} disabled={busy} onClick={onRemove}>{removeLabel}</button> : null}
+          {onRemove ? <button type="button" style={off({ ...btn, color: '#fecaca' }, busy)} disabled={busy} onClick={onRemove}>{removeLabel}</button> : null}
           <span style={{ flex: 1 }} />
-          <button type="button" style={btn} disabled={busy} onClick={onClose}>취소</button>
-          <button type="button" style={btnPri} disabled={busy || !v.trim()} onClick={() => onSave(v)}>{busy ? '저장 중…' : '저장'}</button>
+          <button type="button" style={btn} onClick={onClose}>취소</button>
+          <button type="button" style={off(btnPri, busy || !v.trim())} disabled={busy || !v.trim()} onClick={() => onSave(v)}>{saveText(busy, saving)}</button>
         </div>
       </div>
     </Modal>
@@ -311,14 +315,14 @@ function TypesModal({ types, onClose, onAdd, onRemove, busy, error }) {
           <thead><tr><th style={{ textAlign: 'left' }}>이름</th><th style={{ textAlign: 'right' }}>높이</th><th data-nosort="1" /></tr></thead>
           <tbody>{types.map((t) => (
             <tr key={t.id}><td>{t.name}</td><td style={{ textAlign: 'right' }} data-sort={t.heightU}>{t.heightU}U</td>
-              <td style={{ textAlign: 'right' }}><button type="button" style={btn} disabled={busy} onClick={() => onRemove(t.id)}>지우기</button></td></tr>
+              <td style={{ textAlign: 'right' }}><button type="button" style={off(btn, busy)} disabled={busy} onClick={() => onRemove(t.id)}>지우기</button></td></tr>
           ))}</tbody>
         </STable>
         {!types.length ? <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>아직 랙 종류가 없습니다. 랙을 추가할 때 높이를 직접 넣어도 됩니다.</div> : null}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-end' }}>
           <label style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: '2 1 160px' }}><span style={lab}>이름</span><input style={sel} value={name} onChange={(e) => setName(e.target.value)} placeholder="예: 스토리지 랙 40U" autoFocus /></label>
           <label style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: '1 1 80px' }}><span style={lab}>높이(U)</span><input style={sel} inputMode="numeric" value={h} onChange={(e) => setH(e.target.value)} /></label>
-          <button type="button" style={btnPri} disabled={busy || !name.trim()} onClick={() => onAdd(name, h).then((ok) => { if (ok) setName(''); })}>추가</button>
+          <button type="button" style={off(btnPri, busy || !name.trim())} disabled={busy || !name.trim()} onClick={() => onAdd(name, h).then((ok) => { if (ok) setName(''); })}>추가</button>
         </div>
         {error ? <div role="alert" style={{ fontSize: 12, color: '#fecaca' }}>{error}</div> : null}
       </div>
@@ -365,7 +369,7 @@ function VersionsModal({ corpId, corpName, onClose, onRestored }) {
       }
       await load();
       setSelVid(null);
-      onRestored(`판 #${r.restoredFrom} 상태로 되돌렸습니다(되돌린 결과는 새 판 #${r.latestId} — 다시 되돌릴 수 있습니다).`);
+      onRestored(`판 #${r.restoredFrom} 상태로 되돌렸습니다(되돌린 결과는 새 판 #${r.latestId} — 다시 되돌릴 수 있습니다).`, corpId);
     } catch (e) { setMsg(e?.serverReason || e?.message || '되돌리지 못했습니다.'); } finally { setBusy(false); }
   };
   const versions = list?.versions || [];
@@ -385,7 +389,7 @@ function VersionsModal({ corpId, corpName, onClose, onRestored }) {
     </ul>
   );
   return (
-    <Modal title={`판 기록 — ${corpName}`} onClose={() => { if (!busy) onClose(); }} width={980}>
+    <Modal title={`판 기록 — ${corpName}`} onClose={onClose} width={980}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>
           변경이 저장될 때마다 이 법인의 랙 실장도 전체(데이터센터 · 전산실 · 랙 · 장비 배치)를 한 판으로 남깁니다. 법인마다 {list?.keep != null ? `최근 ${list.keep}개만` : '정해진 개수의 최근 판만'} 남고 더 오래된 판은 지워집니다.
@@ -433,7 +437,7 @@ function VersionsModal({ corpId, corpName, onClose, onRestored }) {
                       ) : (
                         <>
                           <span style={{ fontSize: 12, flex: '1 1 260px' }}>{corpName} 의 랙 실장도 전체가 판 #{selVid} 의 모습으로 바뀝니다. 지금 모습도 판으로 남아 다시 되돌릴 수 있습니다. 열려 있는 다른 편집 화면은 다음 저장에서 최신을 다시 불러옵니다.</span>
-                          <button type="button" style={btn} disabled={busy} onClick={() => setConfirm(false)}>취소</button>
+                          <button type="button" style={off(btn, busy)} disabled={busy} onClick={() => setConfirm(false)}>취소</button>
                           <button type="button" style={{ ...btnPri, background: 'var(--red)', borderColor: 'var(--red)', color: '#ffffff' }} disabled={busy} onClick={restore}>{busy ? '되돌리는 중…' : '되돌리기 확인'}</button>
                         </>
                       )}
@@ -466,13 +470,26 @@ export default function RackTool() {
   const [q, setQ] = useState('');
   const [edit, setEdit] = useState(false);
   const [selId, setSelId] = useState('');
-  const [modal, setModal] = useState(null);   // { kind, ... }
+  const [modal, setModalRaw] = useState(null);   // { kind, ... }
   const modalRef = useRef(null);
   modalRef.current = modal;
+  // 창을 연 자리로 초점을 되돌린다(창 안 첫 칸으로 옮긴 초점이 닫은 뒤 문서 맨 앞으로 떨어지지 않게 — 2회차 점검 화면 6).
+  const lastFocus = useRef(null);
+  const setModal = useCallback((m) => {
+    if (m && !modalRef.current && typeof document !== 'undefined') lastFocus.current = document.activeElement;
+    setModalRaw(m);
+  }, []);
+  useEffect(() => {
+    if (modal) return;
+    const el = lastFocus.current; lastFocus.current = null;
+    if (el && el !== document.body && el.isConnected && typeof el.focus === 'function') el.focus();
+  }, [modal]);
   const [busy, setBusy] = useState(false);
-  const busyRef = useRef(false);
-  busyRef.current = busy;
-  const closeModal = useCallback(() => { if (!busyRef.current) setModal(null); }, []);
+  const [busyModal, setBusyModal] = useState(null);   // 지금 가고 있는 저장을 시작한 창(끌어 놓기면 null)
+  // 저장 중에도 창은 닫을 수 있다 — 응답이 오지 않으면 갇히기 때문(2회차 점검 화면 3). 늦게 온 응답은 '그 저장을 시작한 창' 일 때만 창을 닫고 오류를 싣는다(run 의 sameModal).
+  const closeModal = useCallback(() => { setModal(null); }, [setModal]);
+  const corpIdRef = useRef('');
+  corpIdRef.current = corpId;
   const [modalErr, setModalErr] = useState('');
   const [note, setNote] = useState(null);     // { tone, text }
   const [dragInfo, setDragInfo] = useState(null);
@@ -480,6 +497,8 @@ export default function RackTool() {
   const seq = useRef(0);
   const roomIdRef = useRef('');
   roomIdRef.current = roomId;
+  const viewRawRef = useRef(null);
+  viewRawRef.current = viewRaw;
   // 화면 · 쓰기에 쓰는 전산실 응답은 **지금 고른 전산실의 것만**(늦게 온 다른 전산실 응답 · 법인을 바꾼 뒤 남은 응답으로 보이지 않는 원장에 쓰지 않게 — 점검 C1).
   const view = viewRaw && viewRaw.room?.id === roomId ? viewRaw : null;
   const treeSeq = useRef(0);
@@ -497,7 +516,8 @@ export default function RackTool() {
   const loadRoom = useCallback(async (id) => {
     const my = ++seq.current;   // 빈 전산실로 바꿀 때도 올린다 — 앞 요청의 늦은 응답이 되살아나지 않게(점검 C1)
     if (!id) { setView(null); setViewErr(null); setLoadingRoom(false); return null; }
-    setLoadingRoom(true); setViewErr(null);
+    setLoadingRoom(true);
+    if (viewRawRef.current?.room?.id !== id) setViewErr(null);   // 같은 전산실을 다시 부르는 중이면 실패 표시(= 편집 잠금)는 성공할 때까지 둔다(2회차 점검 화면 4)
     try {
       const v = await fetchJson(`/tools/rack/room/${encodeURIComponent(id)}`);
       if (my !== seq.current || id !== roomIdRef.current) return null;   // 늦게 온 이전 응답 · 다른 전산실 응답은 버린다
@@ -526,7 +546,7 @@ export default function RackTool() {
   useEffect(() => { if (tree && !sites.some((s) => s.id === siteId)) setSiteId(sites[0]?.id || ''); }, [tree, sites, siteId]);
   useEffect(() => { if (tree && !rooms.some((r) => r.id === roomId)) setRoomId(rooms[0]?.id || ''); }, [tree, rooms, roomId]);
   // 전산실을 바꾸면 고른 장비 · 미리 보기 · 앞 전산실의 알림 줄을 지운다(다른 전산실 작업 결과가 남아 보이지 않게).
-  useEffect(() => { setSelId(''); setPreview(null); setNote(null); loadRoom(roomId); }, [roomId, loadRoom]);
+  useEffect(() => { setSelId(''); setPreview(null); loadRoom(roomId); }, [roomId, loadRoom]);
 
   const corp = (tree?.corps || []).find((c) => c.id === corpId);
   const canEdit = !!view?.canEdit && !viewErr;   // 다시 불러오지 못한(낡은) 화면에서는 편집을 잠근다 — ‘다시 시도’ 로 최신을 받은 뒤에
@@ -555,15 +575,15 @@ export default function RackTool() {
     const modalAtStart = modalRef.current;
     const sameModal = () => modalRef.current === modalAtStart;
     const sameRoom = () => !writeRoom || writeRoom === roomIdRef.current;
-    setBusy(true); setModalErr('');
+    setBusy(true); setBusyModal(modalAtStart); setModalErr('');
     try {
       const r = await postJson('/tools/rack/op', body);
       if (r?.ok === false) {
         const why = r.reason || '저장하지 못했습니다.';
         if (r.code === 'revConflict') {
-          await loadRoom(roomIdRef.current);
-          // 창을 닫지 않는다(입력 유지 — 점검 C20). 서버 사유가 이미 '최신 배치를 불러온 뒤 다시 하세요' 라 덧붙이지 않는다(Chromium 확인에서 같은 말이 두 번 나왔다).
-          if (sameModal()) setModalErr(`${why} 고친 칸은 그대로 두었습니다 — 다시 저장하면 고친 칸만 반영합니다.`);
+          const fresh = await loadRoom(roomIdRef.current);
+          // 창을 닫지 않는다(입력 유지 — 점검 C20). 최신 배치를 못 불러왔으면 그렇게 말한다(불러온 것처럼 '다시 저장하면 반영' 이라 하지 않는다 — 2회차 점검 화면 5).
+          if (sameModal()) setModalErr(fresh ? `${why} 고친 칸은 그대로 두었습니다 — 다시 저장하면 고친 칸만 반영합니다.` : `${why} 그런데 최신 배치를 불러오지 못했습니다 — 잠시 뒤 다시 저장하세요(고친 칸은 그대로 두었습니다).`);
           if (sameRoom()) say('warn', why);
           return null;
         }
@@ -582,8 +602,8 @@ export default function RackTool() {
       if (sameModal()) setModalErr(why);
       if (sameRoom()) say('err', why);
       return null;
-    } finally { setBusy(false); }
-  }, [loadRoom]);
+    } finally { setBusy(false); setBusyModal(null); }
+  }, [loadRoom, setModal]);
 
   // 쓰기 뒤 다시 불러올 전산실은 **그때 고른 전산실**(쓰는 동안 전산실을 바꿨으면 옛 전산실로 화면이 돌아가지 않게 — 점검 C2).
   const afterRoomWrite = async (r) => { if (r) await Promise.all([loadRoom(roomIdRef.current), loadTree()]); return r; };
@@ -686,7 +706,7 @@ export default function RackTool() {
         </span>
         <span style={{ ...grp, flexWrap: 'wrap' }}>
           <span style={lab}>전산실</span>
-          {rooms.length ? <Seg label="전산실" wrap items={rooms.map((r) => [r.id, `${r.name} · 랙 ${r.racks}`])} value={roomId} onChange={setRoomId} /> : <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>없음</span>}
+          {rooms.length ? <Seg label="전산실" wrap items={rooms.map((r) => [r.id, `${r.name} · 랙 ${r.racks}`])} value={roomId} onChange={(id) => { setNote(null); setRoomId(id); }} /> : <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>없음</span>}
         </span>
         <span style={grp}>
           <span style={lab}>겹쳐 보기</span>
@@ -730,7 +750,7 @@ export default function RackTool() {
       ) : !sites.length || !rooms.length ? (
         <div style={{ ...card, padding: 18, display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'flex-start' }}>
           <strong>{!sites.length ? `${corp?.name || ''} 에 등록된 데이터센터가 없습니다.` : '이 데이터센터에 전산실이 없습니다.'}</strong>
-          <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>{corpWritable ? '‘배치 편집’ 을 켜고 데이터센터 · 전산실 · 랙을 추가하세요.' : '관리자가 데이터센터 · 전산실 · 랙을 등록하면 여기에 실장도가 나옵니다.'}</span>
+          <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>{corpWritable ? (edit ? '아래 버튼으로 추가하세요.' : '‘배치 편집’ 을 켜고 데이터센터 · 전산실 · 랙을 추가하세요.') : '관리자가 데이터센터 · 전산실 · 랙을 등록하면 여기에 실장도가 나옵니다.'}</span>
           {corpWritable ? <button type="button" style={btnPri} onClick={() => { setEdit(true); setModalErr(''); setModal({ kind: !sites.length ? 'site' : 'room' }); }}>{!sites.length ? '데이터센터 추가' : '전산실 추가'}</button> : null}
         </div>
       ) : viewErr && !view ? <ErrorBox error={viewErr} /> : !view ? <Loading label="전산실" /> : (
@@ -746,7 +766,7 @@ export default function RackTool() {
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'flex-start' }}>
             <div style={{ ...card, flex: '999 1 560px' }}>
               {loadingRoom ? <div style={{ padding: '6px 14px', fontSize: 11, color: 'var(--text-dim)' }}>불러오는 중…</div> : null}
-              {viewErr ? <div style={{ padding: '6px 14px' }}><StaleBanner what="전산실을" error={viewErr} onRetry={() => loadRoom(roomIdRef.current)} /></div> : null}
+              {viewErr ? <div style={{ padding: '6px 14px' }}><StaleBanner what="전산실을" error={viewErr} locked onRetry={() => loadRoom(roomIdRef.current)} /></div> : null}
               {!racks.length ? (
                 <div style={{ padding: 18, fontSize: 13, color: 'var(--text-dim)' }}>이 전산실에 랙이 없습니다.{canEdit ? ' ‘배치 편집’ › ‘+ 랙’ 으로 추가하세요.' : ''}</div>
               ) : (
@@ -825,7 +845,7 @@ export default function RackTool() {
       )}
 
       {modal?.kind === 'place' ? (
-        <PlaceModal init={modal.init} racks={racks} busy={busy} error={modalErr} onClose={closeModal} onSave={savePlace}
+        <PlaceModal init={modal.init} racks={racks} busy={busy} saving={busy && busyModal === modal} error={modalErr} onClose={closeModal} onSave={savePlace}
           onRemove={async () => {
             if (lostView()) return;
             if (!window.confirm(`‘${modal.init.label || modal.init.serial || '이름 없음'}’ 을(를) 랙에서 뺄까요? 판 기록에서 되돌릴 수 있습니다.`)) return;
@@ -833,7 +853,7 @@ export default function RackTool() {
           }} />
       ) : null}
       {modal?.kind === 'rack' ? (
-        <RackModal init={modal.init} types={types} busy={busy} error={modalErr} onClose={closeModal}
+        <RackModal init={modal.init} types={types} busy={busy} saving={busy && busyModal === modal} error={modalErr} onClose={closeModal}
           onSave={async (f, f0) => {
             if (lostView()) return;
             let r;
@@ -856,26 +876,31 @@ export default function RackTool() {
           }} />
       ) : null}
       {modal?.kind === 'site' ? (
-        <NameModal title={`데이터센터 추가 — ${corp?.name || ''}`} busy={busy} error={modalErr} onClose={closeModal}
+        <NameModal title={`데이터센터 추가 — ${corp?.name || ''}`} busy={busy} saving={busy && busyModal === modal} error={modalErr} onClose={closeModal}
           onSave={async (name) => { const r = await run({ op: 'site.add', corpId, name }, { okText: '데이터센터를 추가했습니다.' }); if (r) { await loadTree(); setSiteId(r.id); } }} />
       ) : null}
       {modal?.kind === 'site-edit' ? (
-        <NameModal title="데이터센터 이름 · 삭제" init={sites.find((s) => s.id === siteId)?.name || ''} busy={busy} error={modalErr} onClose={closeModal}
+        <NameModal title="데이터센터 이름 · 삭제" init={sites.find((s) => s.id === siteId)?.name || ''} busy={busy} saving={busy && busyModal === modal} error={modalErr} onClose={closeModal}
           onSave={async (name) => { if (await run({ op: 'site.rename', id: siteId, name })) await loadTree(); }}
           onRemove={async () => { if (!window.confirm('이 데이터센터를 지울까요? 판 기록에서 되돌릴 수 있습니다.')) return; if (await run({ op: 'site.remove', id: siteId }, { okText: '데이터센터를 지웠습니다.' })) await loadTree(); }} removeLabel="데이터센터 지우기(전산실이 없을 때만)" />
       ) : null}
       {modal?.kind === 'room' ? (
-        <NameModal title="전산실 추가" busy={busy} error={modalErr} onClose={closeModal}
+        <NameModal title="전산실 추가" busy={busy} saving={busy && busyModal === modal} error={modalErr} onClose={closeModal}
           onSave={async (name) => { const r = await run({ op: 'room.add', siteId, name }, { okText: '전산실을 추가했습니다.' }); if (r) { await loadTree(); setRoomId(r.id); } }} />
       ) : null}
       {modal?.kind === 'room-edit' ? (
-        <NameModal title="전산실 이름 · 삭제" init={view?.room?.name || ''} busy={busy} error={modalErr} onClose={closeModal}
+        <NameModal title="전산실 이름 · 삭제" init={view?.room?.name || ''} busy={busy} saving={busy && busyModal === modal} error={modalErr} onClose={closeModal}
           onSave={async (name) => { if (await run({ op: 'room.rename', id: roomId, name })) { await loadTree(); await loadRoom(roomId); } }}
           onRemove={async () => { if (!window.confirm('이 전산실을 지울까요? 판 기록에서 되돌릴 수 있습니다.')) return; if (await run({ op: 'room.remove', id: roomId }, { okText: '전산실을 지웠습니다.' })) await loadTree(); }} removeLabel="전산실 지우기(랙이 없을 때만)" />
       ) : null}
       {modal?.kind === 'versions' ? (
         <VersionsModal corpId={corpId} corpName={corp?.name || corpId} onClose={closeModal}
-          onRestored={async (text) => { if (modalRef.current?.kind === 'versions') setModal(null); say('ok', text); await Promise.all([loadTree(), loadRoom(roomIdRef.current)]); }} />
+          onRestored={async (text, forCorp) => {
+            // 되돌리는 동안 창을 닫았거나 법인을 바꿨을 수 있다 — 그 창이 아직 열려 있을 때만 닫고, 그 법인을 보고 있을 때만 알린다.
+            if (modalRef.current === modal) setModal(null);
+            if (forCorp === corpIdRef.current) say('ok', text);
+            await Promise.all([loadTree(), loadRoom(roomIdRef.current)]);
+          }} />
       ) : null}
       {modal?.kind === 'types' ? (
         <TypesModal types={types} busy={busy} error={modalErr} onClose={closeModal}
