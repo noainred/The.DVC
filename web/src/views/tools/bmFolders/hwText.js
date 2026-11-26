@@ -48,11 +48,16 @@ export function diskText(disk) {
   const size = diskSizeText(disk.gb);
   return [parts.join(' · ') || `${n}개`, size].filter(Boolean).join(' · ');
 }
+/** NIC 속도 묶음 글자 — ['25G×2', '1G×2'](서버가 준 순서 그대로). 속도를 못 읽었으면 []. nicText 와 드로어 요약 칸이 같은 판정을 쓴다. */
+export function nicSpeedParts(nic) {
+  const sp = Array.isArray(nic?.speeds) ? nic.speeds.filter((x) => Array.isArray(x) && speedText(x[0]) && N(x[1]) != null) : [];
+  return sp.map(([g, c]) => `${speedText(g)}×${c}`);
+}
 /** NIC — 속도별 포트('25G×2 · 1G×2'). 속도를 못 읽었으면 포트 수만. */
 export function nicText(nic) {
   if (!nic) return '';
-  const sp = Array.isArray(nic.speeds) ? nic.speeds.filter((x) => Array.isArray(x) && speedText(x[0]) && N(x[1]) != null) : [];
-  if (sp.length) return sp.map(([g, c]) => `${speedText(g)}×${c}`).join(' · ');
+  const parts = nicSpeedParts(nic);
+  if (parts.length) return parts.join(' · ');
   const p = N(nic.ports);
   return p != null ? `${p}포트` : '';
 }

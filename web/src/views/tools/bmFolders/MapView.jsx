@@ -6,12 +6,12 @@
 import React, { useMemo } from 'react';
 import Select from '../../../components/Select.jsx';
 import { STable } from '../../../components/STable.jsx';
-import { mapGroups, cellTone, aggregate, pctText, wattsText } from '../bmFoldersText.js';
+import { mapGroups, cellTone, aggregate, pctText, wattsText, MAP_CELL_MAX } from '../bmFoldersText.js';
 import { UsageBar } from './parts.jsx';
 
 const GROUP_LABEL = { folder: '폴더', corp: '법인', model: '모델' };
 const COLOR_LABEL = { cpu: 'CPU 사용률', mem: '메모리 사용률', watts: '전력', fault: '부품 장애' };
-const CELL_MAX = 400;   // 묶음 하나에 그리는 칸 상한 — 넘치면 개수를 밝힌다(조용히 자르지 않는다)
+const CELL_MAX = MAP_CELL_MAX;   // 묶음 하나에 그리는 칸 상한(bmFoldersText.js — 드로어의 이전/다음 순서와 같은 값)
 
 export default function MapView({ rows, groupBy, setGroupBy, colorBy, setColorBy, corpName, onPick, picked }) {
   const groups = useMemo(() => mapGroups(rows, groupBy, corpName), [rows, groupBy, corpName]);
@@ -41,7 +41,7 @@ export default function MapView({ rows, groupBy, setGroupBy, colorBy, setColorBy
           <span className="bmf-lg"><i className="bmf-hx off" />꺼짐</span>
           <span className="bmf-lg"><i className="bmf-hx u2 bad" />부품 장애</span>
         </span>
-        <span className="muted" style={{ fontSize: 12, marginLeft: 'auto' }}>칸 하나 = 서버 한 대 · 누르면 옆 패널</span>
+        <span className="muted" style={{ fontSize: 12, marginLeft: 'auto' }}>칸 하나 = 서버 한 대 · 누르면 서버 상세</span>
       </div>
       {!rows.length ? <div className="muted" style={{ padding: 16 }}>서버가 없습니다.</div> : (
         <div className="bmf-map">

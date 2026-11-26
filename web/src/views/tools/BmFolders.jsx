@@ -12,7 +12,8 @@ import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import BoldText from '../../components/boldText.jsx';
 import BulkAdd from './bmFolders/BulkAdd.jsx';
-import SidePanel from './bmFolders/SidePanel.jsx';
+import BmDrawer from './bmFolders/BmDrawer.jsx'; // v3.44: 서버 상세 드로어(예전 400px 옆 패널 SidePanel · HwPanel 을 바꿈)
+import { rowTone, rowDotTitle, orderRows, TMPKEY_NOTE } from './bmFolders/drawerText.js';
 import MapView from './bmFolders/MapView.jsx';
 import EdgeView from './bmFolders/EdgeView.jsx'; // v2.996: 엣지 포탈 화면
 import { canMove, moveTargets, movedPath, followSel, moveNote } from './bmFolders/folderMove.js'; // v2.997: 폴더 옮기기
@@ -25,7 +26,7 @@ import { IdracConnect } from './bmFolders/IdracConnect.jsx'; // v3.3.0: iDRAC �
 import {
   INTRO, PLACE_LABEL, MISSING_WHY, pctText, wattsText, pathText, lastSeg, parentOf, ageText,
   rowsOf, aggregate, filterRows, resultNote, foldersByName, opErrorText, csvNameOf, trimPath,
-  VIEWS_KEY, parseViews, upsertView, cleanView, underPath,
+  VIEWS_KEY, parseViews, upsertView, cleanView, underPath, mapVisibleRows,
   renameNote, removeNote,
 } from './bmFoldersText.js';
 
@@ -48,6 +49,8 @@ export default function BmFolders() {
   const [sub, setSub] = useState(true);
   const [picked, setPicked] = useState(() => new Set());
   const [panel, setPanel] = useState('');
+  // v3.44: 표가 정렬한 '보이는 순서'(STable onOrder) — 드로어의 ‹ › · ↑↓ 가 이 순서를 따른다. 표가 그려지지 않으면(맵 · 좁은 화면 카드) 쓰지 않는다.
+  const [order, setOrder] = useState(null);
   const [bulk, setBulk] = useState(null);
   // v2.987 맵 보기 · 저장한 보기(브라우저 저장 — 이 사람의 편의만. 못 읽으면 빈 목록) · 입력 다시 읽기 진행 중
   const [view, setView] = useState('list');
@@ -142,6 +145,10 @@ export default function BmFolders() {
   const folderPaths = (corpRow?.folders || []).map((f) => f.path);
   const missingHere = (d.missing || []).filter((x) => (sel.type === 'corp' ? x.corp === sel.corp : sel.type === 'folder' ? x.corp === sel.corp && (sub ? (x.path === sel.path || x.path.startsWith(`${sel.path}\\`)) : x.path === sel.path) : false));
   const panelRow = panel ? servers.find((s) => s.key === panel) || null : null;
+  // 드로어의 이전/다음 순서 = **연 곳에 보이는 순서**: 맵은 묶음 순서대로 그린 칸(묶음당 상한까지 — mapVisibleRows) · 목록 표는 표가 정렬한 순서(상한으로 잘린 행 제외) · 좁은 화면 카드는 그린 카드 순서
+  const tableShown = sel.type !== 'all' && view !== 'map' && !narrow && rows.length > 0;
+  const mapRows = view === 'map' ? mapVisibleRows(sel.type === 'all' ? filterRows(servers, q, quick) : rows, groupBy, corpName) : null;
+  const drawerRows = mapRows || (sel.type === 'all' ? [] : tableShown ? orderRows(rows, order) : rows.slice(0, ROW_LIMIT));
   const pickedRows = rows.filter((r) => picked.has(r.key));
   const openBulk = (o = {}) => setBulk({ corp: '', path: '', text: '', ...o });
   // 서비스 인벤토리 연결 — 고른 폴더에 걸리는 가장 긴 물리서버 폴더 규칙(판정은 서비스 인벤토리가 한다 — 여기는 그 규칙을 보여 줄 뿐)
@@ -309,7 +316,7 @@ export default function BmFolders() {
                 {!rows.length ? <div className="muted" style={{ padding: 16 }}>{baseRows.length ? '거르기 조건에 맞는 서버가 없습니다.' : sel.type === 'folder' ? '이 폴더에 등록된 서버가 없습니다 — ‘서버 찾아 등록’ 으로 넣습니다.' : '서버가 없습니다.'}</div> : narrow ? (
                   <NarrowList rows={rows.slice(0, ROW_LIMIT)} writable={writable} picked={picked} setPicked={setPicked} onOpen={setPanel} scoped={!!d.scoped} />
                 ) : (
-                  <STable className="table bmf-t" minWidth={720} limit={ROW_LIMIT}>
+                  <STable className="table bmf-t" minWidth={720} limit={ROW_LIMIT} onOrder={setOrder}>
                     <thead>
                       <tr>
                         {writable ? <th data-nosort style={{ width: 30 }}><input type="checkbox" aria-label="보이는 서버 전체 선택" checked={rows.length > 0 && rows.every((r) => picked.has(r.key))} onChange={(e) => setPicked(e.target.checked ? new Set(rows.map((r) => r.key)) : new Set())} /></th> : null}
@@ -323,9 +330,9 @@ export default function BmFolders() {
                     </thead>
                     <tbody>
                       {rows.map((r) => (
-                        <tr key={r.key} className={picked.has(r.key) ? 'bmf-picked' : undefined} style={{ cursor: 'pointer' }} onClick={() => setPanel(r.key)}>
+                        <tr key={r.key} data-rowid={r.key} className={picked.has(r.key) ? 'bmf-picked' : undefined} style={{ cursor: 'pointer' }} onClick={() => setPanel(r.key)}>
                           {writable ? <td data-nosort onClick={(e) => e.stopPropagation()}><input type="checkbox" aria-label={`${r.name} 선택`} checked={picked.has(r.key)} onChange={(e) => setPicked((s) => { const n = new Set(s); if (e.target.checked) n.add(r.key); else n.delete(r.key); return n; })} /></td> : null}
-                          <td data-sort={r.name}><span className="bmf-nm"><StatusDot tone={r.faults > 0 ? 'red' : r.cpu == null && r.mem == null ? 'none' : r.powered === false ? 'gray' : 'green'} />{r.name}{r.kind === 'esxi' ? <span className="badge gray" style={{ marginLeft: 4 }}>ESXi</span> : null}{r.tmpKey ? <TmpKeyBadge /> : null}</span>
+                          <td data-sort={r.name}><span className="bmf-nm"><StatusDot tone={rowTone(r)} title={rowDotTitle(r)} />{r.name}{r.kind === 'esxi' ? <span className="badge gray" style={{ marginLeft: 4 }}>ESXi</span> : null}{r.tmpKey ? <TmpKeyBadge /> : null}</span>
                             {r.hw ? <OsLine os={r.hw.os} /> : null}</td>
                           {sel.type !== 'folder' || sub ? <td data-sort={r.place ? r.path : '￿'}>{r.place ? <span title={PLACE_LABEL[r.place]}>{pathText(r.path)}{r.place === 'rule' ? <span className="badge gray" style={{ marginLeft: 4 }}>규칙</span> : null}</span> : <span className="muted">(미분류)</span>}</td> : null}
                           <td data-sort={r.model || ''}>{r.model || '—'}{!d.scoped && r.serviceTag ? <div className="mono muted" style={{ fontSize: 11 }}>{r.serviceTag}</div> : null}</td>
@@ -343,7 +350,7 @@ export default function BmFolders() {
                 )}
                 <div className="muted" style={{ padding: '8px 14px', fontSize: 12 }}>
                   {rows.length > ROW_LIMIT ? `${rows.length}대 중 ${ROW_LIMIT}대만 그립니다(머리글을 누르면 전체를 정렬한 뒤 자릅니다 — 거르기로 좁히십시오). ` : `${rows.length}대 · `}
-                  못 읽은 값(‘—’)은 평균 · 합계에 넣지 않습니다 · 행을 누르면 옆 패널{writable ? ' · 고르면 옮기기 · 빼기' : ''}
+                  못 읽은 값(‘—’)은 평균 · 합계에 넣지 않습니다 · 행을 누르면 서버 상세{writable ? ' · 고르면 옮기기 · 빼기' : ''}
                 </div>
                 {missingHere.length ? (
                   <div style={{ padding: '8px 14px', borderTop: '1px solid var(--border)', fontSize: 12 }}>
@@ -367,7 +374,7 @@ export default function BmFolders() {
           )}
         </div>
       </div>
-      {panelRow ? <SidePanel r={panelRow} corps={corps} corpName={corpName} scoped={!!d.scoped} op={op} busy={busy} onClose={() => setPanel('')} /> : null}
+      {panelRow ? <BmDrawer r={panelRow} rows={drawerRows} corps={corps} corpName={corpName} scoped={!!d.scoped} op={op} busy={busy} onClose={() => setPanel('')} onMove={setPanel} note={note} /> : null}
       {bulk ? <BulkAdd init={bulk} d={d} corpName={corpName} op={op} busy={busy} onClose={() => setBulk(null)} /> : null}
     </div>
   );
@@ -749,7 +756,7 @@ function NarrowList({ rows, writable, picked, setPicked, onOpen, scoped }) {
             </label>
           ) : null}
           <button type="button" className="bmf-card-body" onClick={() => onOpen(r.key)}>
-            <span className="l1"><StatusDot tone={r.faults > 0 ? 'red' : r.cpu == null && r.mem == null ? 'none' : r.powered === false ? 'gray' : 'green'} /><b>{r.name}</b>
+            <span className="l1"><StatusDot tone={rowTone(r)} title={rowDotTitle(r)} /><b>{r.name}</b>
               {r.faults > 0 ? <span className="badge red">{r.faults}건</span> : null}<span style={{ marginLeft: 'auto' }}><SrcBadge src={r.src} small /></span></span>
             <span className="l2">{[r.place ? pathText(r.path) : '(미분류)', r.model, !scoped ? r.serviceTag : ''].filter(Boolean).join(' · ')}</span>
             <span className="l2">{r.cpu == null && r.mem == null && r.why?.code ? `사용률 — ${whyShort(r.why)}` : <>CPU {pctText(r.cpu)} · 메모리 {pctText(r.mem)}</>} · {wattsText(r.watts)}{SRC_SHORT[rowSrcClass(r)] ? ` · ${SRC_SHORT[rowSrcClass(r)]}` : ''}</span>
@@ -824,6 +831,6 @@ function hwCardText(hw) {
 
 /** v2.995(묶음 C): 서비스 태그를 아직 읽지 못한 서버 — 임시 키(이름 기반)로 등록된다. 태그가 읽히면 등록이 태그 키로 저절로 옮겨 간다. */
 function TmpKeyBadge() {
-  return <span className="badge gray" style={{ marginLeft: 4, fontSize: 10.5 }} title="서비스 태그를 아직 읽지 못해 임시 키(이름 기반)로 다룹니다. 태그가 읽히면 폴더 등록이 태그 키로 저절로 옮겨 가고 위치는 그대로입니다. 이름이 바뀌면 임시 키도 바뀌어 등록이 ‘목록에 없는 등록’ 으로 보일 수 있습니다.">태그 없음</span>;
+  return <span className="badge gray" style={{ marginLeft: 4, fontSize: 10.5 }} title={TMPKEY_NOTE}>태그 없음</span>;
 }
 

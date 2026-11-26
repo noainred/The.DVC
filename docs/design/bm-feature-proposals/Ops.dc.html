@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>물리서버 기능 제안 B — 진단 · 조작</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./fp.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+body{margin:0}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.opt{display:flex;align-items:flex-start;gap:10px;padding:9px 12px;border-top:1px solid #1f2a40;font-size:12.5px}
+.opt:first-child{border-top:0}
+.rd{width:16px;height:16px;border-radius:50%;border:2px solid #8b9bb4;flex:none;margin-top:1px;box-sizing:border-box}
+.rd.on{border-color:#3b82f6;background:radial-gradient(circle,#3b82f6 0 45%,transparent 50%)}
+.fl{display:flex;flex-direction:column;gap:4px;min-width:0}
+.fl label{font-size:11.5px;color:#8b9bb4;font-weight:600}
+</style>
+</helmet>
+<div class="board" style="width:2064px;height:700px">
+
+  <section class="pn" aria-label="하드웨어 이벤트 로그">
+    <div class="ph"><span class="no">5</span><b>하드웨어 이벤트 로그 보기</b><span class="at">서버 상세 구역</span></div>
+    <div class="pb">
+      <div class="row" style="justify-content:space-between">
+        <span class="seg"><span class="on">전체 128</span><span>위험 2</span><span>주의 9</span><span>정보 117</span></span>
+        <span class="seg"><span class="on">시스템 이벤트</span><span>수명주기 기록</span></span>
+      </div>
+      <span class="inp" style="width:100%">기록에서 찾기 — 부품 이름 · 내용</span>
+      <div class="t">
+        <div class="r h" style="grid-template-columns:96px 56px 1fr"><span>시각</span><span>등급</span><span>내용</span></div>
+        <div class="r" style="grid-template-columns:96px 56px 1fr"><span class="mono muted">11-25 03:12</span><span><span class="bd red">위험</span></span><span>전원 공급 장치 2 — 입력 전원을 잃었습니다</span></div>
+        <div class="r" style="grid-template-columns:96px 56px 1fr"><span class="mono muted">11-25 03:14</span><span><span class="bd gray">정보</span></span><span>전원 공급 장치 2 — 입력 전원이 돌아왔습니다</span></div>
+        <div class="r" style="grid-template-columns:96px 56px 1fr"><span class="mono muted">11-21 14:40</span><span><span class="bd amber">주의</span></span><span>디스크 Bay 4 — 예측 장애를 보고했습니다</span></div>
+        <div class="r" style="grid-template-columns:96px 56px 1fr"><span class="mono muted">11-18 09:02</span><span><span class="bd gray">정보</span></span><span>펌웨어 갱신 — iDRAC</span></div>
+        <div class="r" style="grid-template-columns:96px 56px 1fr"><span class="mono muted">11-02 22:51</span><span><span class="bd amber">주의</span></span><span>메모리 B3 — 교정한 오류가 장비 기준을 넘었습니다</span></div>
+        <div class="r" style="grid-template-columns:96px 56px 1fr"><span class="mono muted">10-30 08:15</span><span><span class="bd gray">정보</span></span><span>시스템 전원 켜짐</span></div>
+      </div>
+      <span class="note">열 때 1회 읽습니다. 포탈은 지금 이 기록을 디스크 배드 섹터 분석에만 씁니다 — 같은 읽기 경로(법인 엣지가 그 법인 안에서 읽음)로 전체 기록을 보여 주는 안입니다. 내용 문구는 그림용입니다.</span>
+    </div>
+  </section>
+
+  <section class="pn" aria-label="위치 LED · 가상 콘솔">
+    <div class="ph"><span class="no">6</span><b>위치 LED 켜기 · 가상 콘솔 바로 열기</b><span class="at">서버 상세 단추 줄</span></div>
+    <div class="pb">
+      <div class="card" style="padding:12px;display:flex;flex-direction:column;gap:10px">
+        <div class="row"><span class="dot" style="background:#22c55e"></span><b style="font-size:16px">SELSBPDPS09</b><span class="muted" style="font-size:12px">KR2 › KR2_Service › SBP › DP › Airflow</span></div>
+        <div class="row">
+          <button type="button" class="btn primary">iDRAC 접속</button>
+          <button type="button" class="btn">가상 콘솔</button>
+          <button type="button" class="btn">위치 LED 켜기</button>
+        </div>
+      </div>
+      <h3 class="sh">켠 뒤 모습</h3>
+      <div class="card" style="padding:12px;display:flex;flex-direction:column;gap:8px">
+        <div class="row">
+          <span class="bd blue"><span class="dot" style="width:7px;height:7px;background:#93c5fd"></span>위치 LED 깜빡이는 중</span>
+          <span class="muted" style="font-size:12px">10분 뒤 자동으로 끕니다 · 켠 사람 [계정] · 11:02</span>
+          <span style="flex:1"></span>
+          <button type="button" class="btn">지금 끄기</button>
+        </div>
+        <span class="note">전산실에서 같은 모델 서버 사이에 이 한 대를 찾을 때 씁니다. 랙 실장도에 놓인 서버는 위치도 함께 보입니다 — [전산실] › [랙] › [U].</span>
+      </div>
+      <span class="note">위치 LED 상태는 포탈이 이미 읽고 있지만 화면에 쓰지 않습니다. 켜고 끄는 것은 장비 상태를 바꾸는 동작이라 운영자 이상 · 감사 기록 대상입니다. 가상 콘솔은 새 탭으로 iDRAC 화면을 엽니다(내 PC 가 iDRAC 망에 닿아야 합니다).</span>
+    </div>
+  </section>
+
+  <section class="pn" aria-label="원격 전원 조작">
+    <div class="ph"><span class="no">7</span><b>원격 전원 조작</b><span class="at">서버 상세 단추 → 확인 창</span></div>
+    <div class="pb">
+      <div class="card" style="padding:0">
+        <div style="padding:12px 14px;border-bottom:1px solid #1f2a40"><b style="font-size:14px">전원 조작 — SELSBPDPS09</b></div>
+        <div>
+          <div class="opt"><span class="rd"></span><div><b class="muted">켜기</b><div class="note">지금 켜져 있어 고를 수 없습니다</div></div></div>
+          <div class="opt"><span class="rd on"></span><div><b>정상 종료</b><div class="note">OS 에 종료를 요청합니다 — OS 가 응답하지 않으면 꺼지지 않습니다</div></div></div>
+          <div class="opt"><span class="rd"></span><div><b>재시작</b><div class="note">정상 종료 뒤 다시 켭니다</div></div></div>
+          <div class="opt"><span class="rd"></span><div><b style="color:#fca5a5">강제 끄기</b><div class="note">전원을 바로 끊습니다 — 쓰던 데이터를 잃을 수 있습니다</div></div></div>
+        </div>
+        <div style="padding:12px 14px;border-top:1px solid #1f2a40;display:flex;flex-direction:column;gap:10px">
+          <div class="band amber">이 서버는 KR2_Service › SBP › DP › Airflow 폴더 9대 중 1대입니다. 지금 CPU 37% · 메모리 62% 로 일하고 있습니다.</div>
+          <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">
+            <div class="fl"><label>서버 이름 다시 입력</label><span class="inp">SELSBPDPS09</span></div>
+            <div class="fl"><label>OTP</label><span class="inp">6자리</span></div>
+          </div>
+          <div class="fl"><label>사유(감사 기록에 남습니다)</label><span class="inp">예: 메모리 B3 교체</span></div>
+          <div class="row" style="justify-content:flex-end"><button type="button" class="btn">취소</button><button type="button" class="btn danger">정상 종료 실행</button></div>
+        </div>
+      </div>
+      <span class="note">포탈에는 지금 물리서버 전원을 바꾸는 길이 없습니다(조회만). 넣는다면 전체 범위 관리자 · OTP · 이름 다시 입력 · 한 번에 한 대 · 법인 엣지가 그 법인 안에서 실행하는 조건을 기본으로 둡니다.</span>
+    </div>
+  </section>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":2064,"height":700}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

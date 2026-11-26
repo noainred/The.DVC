@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>물리서버 상세 — 400px 전체 화면 시트</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./pmd.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+body{margin:0}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.nw .dh{padding:12px 14px 10px}
+.nw .acts{padding:10px 14px}
+.nw .db{padding:12px 14px 16px}
+.nw .tiles{grid-template-columns:repeat(2,minmax(0,1fr))}
+.nw .kv{grid-template-columns:minmax(0,1fr)}
+.nw .pg{grid-template-columns:minmax(0,1fr);gap:6px}
+.nw .pr{grid-template-columns:34px minmax(0,1fr)}
+.nw .pr .x{grid-column:2;text-align:left;white-space:normal}
+.nw .df{padding:10px 14px}
+.nw .ib,.nw .btn{min-height:44px}
+.nw .ib{width:44px}
+.nw .sel{height:44px}
+</style>
+</helmet>
+<aside class="dw nw" aria-label="서버 상세 — SELSBPDPS09" style="width:400px;min-height:2300px;border-left:0;box-shadow:none">
+  <div class="dh">
+    <div class="ttl">
+      <span class="dot" style="background:#ef4444" title="부품 장애"></span>
+      <h2>SELSBPDPS09</h2>
+      <button type="button" class="ib" aria-label="이전 서버">‹</button>
+      <button type="button" class="ib" aria-label="다음 서버">›</button>
+      <button type="button" class="ib" aria-label="닫기">×</button>
+    </div>
+    <div class="sigs"><span class="bd red">부품 장애 1건</span></div>
+    <div class="crumb">
+      <span class="bd green">켜짐</span>
+      <b>KR2</b><span aria-hidden="true">›</span><span>KR2_Service › SBP › DP › Airflow</span>
+      <span aria-hidden="true">·</span><span>베어메탈</span>
+      <span aria-hidden="true">·</span><span>PowerEdge R740xd</span>
+      <span aria-hidden="true">·</span><span class="mono">7XK4P93</span>
+      <span class="pos">목록 3/9</span>
+    </div>
+  </div>
+  <div class="acts">
+    <button type="button" class="btn primary" style="flex:1 1 100%;justify-content:center"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 17l6-5-6-5"></path><path d="M12 19h8"></path></svg>iDRAC 접속</button>
+    <span class="sel" style="flex:1 1 150px"><span>옮길 폴더…</span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg></span>
+    <button type="button" class="btn" disabled>옮기기</button>
+    <button type="button" class="btn">폴더에서 빼기</button>
+  </div>
+  <div class="db">
+    <section class="sec" aria-label="한눈에">
+      <div class="sh"><h3>한눈에 · 지금 값</h3></div>
+      <div class="tiles">
+        <div class="tile"><span class="lb">CPU<span class="chip os">OS</span></span><span class="v">37<small>%</small></span><span class="bar"><i style="width:37%;background:#3b82f6"></i></span><span class="s">32코어 · 2×16C</span></div>
+        <div class="tile"><span class="lb">메모리<span class="chip os">OS</span></span><span class="v">62<small>%</small></span><span class="bar"><i style="width:62%;background:#3b82f6"></i></span><span class="s">512 GB</span></div>
+        <div class="tile"><span class="lb">전력</span><span class="v">462<small>W</small></span><span class="s">전원 켜짐</span></div>
+        <div class="tile" style="border-color:rgba(239,68,68,.5)"><span class="lb">부품 장애</span><span class="v" style="color:#fca5a5">1<small>건</small></span><span class="s"><a href="#">부품 장애에서 보기</a></span></div>
+      </div>
+    </section>
+
+    <section class="sec" aria-label="24시간 추이">
+      <div class="sh"><h3>CPU · 메모리 — 지난 24시간</h3></div>
+      <div class="card" style="padding:10px 12px 8px">
+        <svg viewBox="0 0 348 130" width="100%" height="130" role="img" aria-label="지난 24시간 CPU 마지막 37% · 메모리 마지막 62%">
+          <line x1="0" x2="306" y1="20" y2="20" stroke="#1f2a40"></line><line x1="0" x2="306" y1="65" y2="65" stroke="#1f2a40"></line><line x1="0" x2="306" y1="110" y2="110" stroke="#243049"></line>
+          <text x="312" y="23" font-size="10" fill="#8b9bb4">100%</text><text x="312" y="68" font-size="10" fill="#8b9bb4">50%</text><text x="312" y="113" font-size="10" fill="#8b9bb4">0%</text>
+          <rect x="146.3" y="20" width="40" height="90" fill="rgba(139,155,180,.10)"></rect>
+          <path d="M0,55.1 L13.3,55.1 L26.6,54.2 L39.9,54.2 L53.2,54.2 L66.5,55.1 L79.8,55.1 L93.1,56 L106.4,56 L119.7,56 L133,55.1 L146.3,55.1 M186.3,54.2 L199.6,54.2 L212.9,54.2 L226.2,53.3 L239.5,53.3 L252.8,54.2 L266.1,54.2 L279.4,54.2 L292.7,54.2 L306,54.2" fill="none" stroke="#22d3ee" stroke-width="1.5"></path>
+          <path d="M0,79.4 L13.3,77.6 L26.6,80.3 L39.9,75.8 L53.2,73.1 L66.5,74.9 L79.8,78.5 L93.1,82.1 L106.4,84.8 L119.7,85.7 L133,83.9 L146.3,83 M186.3,80.3 L199.6,76.7 L212.9,70.4 L226.2,63.2 L239.5,66.8 L252.8,71.3 L266.1,74 L279.4,75.8 L292.7,77.6 L306,76.7" fill="none" stroke="#3b82f6" stroke-width="2"></path>
+          <text x="0" y="126" font-size="10" fill="#8b9bb4">어제 18시</text><text x="153" y="126" font-size="10" fill="#8b9bb4" text-anchor="middle">6시</text><text x="306" y="126" font-size="10" fill="#8b9bb4" text-anchor="end">지금</text>
+        </svg>
+        <div style="display:flex;flex-wrap:wrap;gap:4px 14px;font-size:11.5px;margin-top:2px">
+          <span class="lg"><i style="background:#3b82f6"></i>CPU 37%</span>
+          <span class="lg"><i style="background:#22d3ee"></i>메모리 62%</span>
+          <span class="muted">못 읽은 구간은 선을 잇지 않습니다</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="sec" aria-label="신호">
+      <div class="sh"><h3>신호 1 — 봐야 할 것</h3></div>
+      <div class="sigrow" style="flex-wrap:wrap">
+        <span class="dot" style="background:#ef4444" aria-hidden="true"></span>
+        <div class="t"><b>부품 장애 1건</b><span>이 서버에 열린 부품 장애가 있습니다 — 어느 부품인지는 물리 부품 장애 화면에서 봅니다.</span></div>
+        <a class="btn" href="#" style="flex:1 1 100%;justify-content:center">부품 장애</a>
+      </div>
+    </section>
+
+    <section class="sec" aria-label="식별 · 배치">
+      <div class="sh"><h3>식별 · 배치</h3></div>
+      <div class="kv">
+        <div><span>법인</span><b>KR2</b></div>
+        <div><span>종류</span><b>베어메탈</b></div>
+        <div><span>폴더</span><b>KR2_Service › SBP › DP › Airflow <span class="bd blue" style="margin-left:4px">손 등록</span></b></div>
+        <div><span>모델</span><b>PowerEdge R740xd</b></div>
+        <div><span>서비스 태그</span><b class="mono">7XK4P93</b></div>
+        <div><span>전원</span><b>켜짐</b></div>
+        <div><span>받는 길</span><b><span class="bd teal">수집 서버</span> 수집 서버 KR2</b></div>
+        <div><span>OS</span><b>Red Hat Enterprise Linux Server release 7.8 (Maipo) · Kernel 3.10.0-1127.el7.x86_64</b></div>
+        <div class="last"><span>OS 호스트명</span><b class="mono">selsbpdps09</b></div>
+      </div>
+    </section>
+
+    <section class="sec" aria-label="iDRAC">
+      <div class="sh"><h3>iDRAC · 관리</h3><span class="muted">3분 전 읽음 · 수집 서버</span></div>
+      <div class="kv">
+        <div><span>iDRAC 주소</span><b><a href="#" class="mono" style="text-decoration:underline dotted;text-underline-offset:2px">10.20.42.98</a></b></div>
+        <div><span>관리 NIC IPv4</span><b class="mono">10.20.42.98</b></div>
+        <div><span>iDRAC 모델</span><b>14G Monolithic</b></div>
+        <div class="last"><span>iDRAC 펌웨어</span><b class="mono">7.00.00.183</b></div>
+      </div>
+    </section>
+
+    <section class="sec" aria-label="하드웨어 요약">
+      <div class="sh"><h3>하드웨어 요약</h3><span class="muted">iDRAC 인벤토리</span></div>
+      <div class="kv">
+        <div><span>CPU</span><b><span class="mono">2×16C</span> · 32코어 / 64스레드</b></div>
+        <div><span>메모리</span><b><span class="mono">512 GB</span> · DIMM 8개</b></div>
+        <div><span>디스크</span><b><span class="mono">48 TB</span> · HDD 12</b></div>
+        <div><span>NIC</span><b><span class="mono">10G×4</span> · 어댑터 3</b></div>
+        <div class="last"><span>FC HBA</span><b class="muted">없음(읽었고 0개)</b></div>
+      </div>
+    </section>
+
+    <section class="sec" aria-label="부품 목록">
+      <div class="sh"><h3>부품 목록</h3></div>
+      <div class="parts">
+        <div class="pg">
+          <span class="k">CPU</span>
+          <div class="rows"><div class="pr"><span class="n">2 ×</span><span class="m">Intel(R) Xeon(R) Gold 6246R CPU @ 3.40GHz</span><span class="x">16코어/32스레드 · 최대 4.0GHz</span></div></div>
+        </div>
+        <div class="pg">
+          <span class="k">메모리(DIMM)</span>
+          <div class="rows"><div class="pr"><span class="n">8 ×</span><span class="m">64 GB DDR4 2933MHz</span><span class="x">Micron Technology</span></div></div>
+        </div>
+        <div class="pg">
+          <span class="k">디스크</span>
+          <div class="rows">
+            <div class="pr"><span class="n">11 ×</span><span class="m">ST4000NM016A-2HZ</span><span class="x">4 TB · HDD(SATA)</span></div>
+            <div class="pr"><span class="n">1 ×</span><span class="m">TOSHIBA MG04ACA4</span><span class="x">4 TB · HDD(SATA)</span></div>
+          </div>
+        </div>
+        <div class="pg">
+          <span class="k">스토리지 컨트롤러</span>
+          <div class="rows">
+            <div class="pr"><span class="n">1 ×</span><span class="m">PERC H730P Adapter</span><span class="x">펌웨어 25.5.9.0001</span></div>
+            <div class="pr"><span class="n">1 ×</span><span class="m">C620 Series Chipset Family SATA Controller [AHCI mode]</span></div>
+            <div class="pr"><span class="n">1 ×</span><span class="m">C620 Series Chipset Family SSATA Controller [AHCI mode]</span></div>
+          </div>
+        </div>
+        <div class="pg">
+          <span class="k">NIC</span>
+          <div class="rows">
+            <div class="pr"><span class="n">1 ×</span><span class="m">BRCM GbE 4P 5720-t rNDC</span><span class="x">4포트 · 링크 업 0</span></div>
+            <div class="pr"><span class="n">1 ×</span><span class="m">Intel(R) 10GbE 2P X710 Adapter</span><span class="x">2포트 · 링크 업 2 · 10G</span></div>
+            <div class="pr"><span class="n">1 ×</span><span class="m">Intel(R) 10GbE 2P X710 Adapter</span><span class="x">2포트 · 링크 업 2 · 10G</span></div>
+          </div>
+        </div>
+        <div class="pg last">
+          <span class="k">FC HBA</span>
+          <div class="rows"><span class="muted" style="font-size:12.5px">없음</span></div>
+        </div>
+      </div>
+    </section>
+  </div>
+  <nav class="df" aria-label="바로가기">
+    <span class="muted">바로가기:</span>
+    <a href="#">베어메탈 사용률(추이)</a><a href="#">물리 부품 장애</a><a href="#">통합 서버 인벤토리</a><a href="#">서비스 인벤토리</a>
+  </nav>
+</aside>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":400,"height":2300}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

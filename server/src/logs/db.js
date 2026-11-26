@@ -258,7 +258,7 @@ function initSqlite() {
     };
     const powerStmt = db.prepare("SELECT entity, type, MAX(ts) AS ts FROM events WHERE vcenterId=? AND type IN ('VmPoweredOffEvent','VmPoweredOnEvent') GROUP BY entity, type"); // idx_events_power
     // v3.39.0 전원 달력: 한 VM(이름)의 전원 이벤트 — 같은 부분 인덱스(idx_events_power)를 타도록 같은 IN 리터럴 · 상한.
-    const powerOfStmt = db.prepare("SELECT type, ts, user FROM events WHERE vcenterId=? AND type IN ('VmPoweredOffEvent','VmPoweredOnEvent') AND entity=? AND ts>=? AND ts<=? ORDER BY ts LIMIT 5000");
+    const powerOfStmt = db.prepare("SELECT type, ts, user FROM events WHERE vcenterId=? AND type IN ('VmPoweredOffEvent','VmPoweredOnEvent') AND entity=? AND ts>=? AND ts<=? ORDER BY ts DESC LIMIT 5000");   // 상한에 걸리면 최근 것을 남긴다(호출부가 시간순으로 다시 정렬)
     const build = (where, params) => ({ where, params });
     function filterSql(f) {
       const w = []; const p = [];
@@ -818,7 +818,7 @@ function initJson() {
       if (rows.length) await onRows(rows);
       return { rows: rows.length, truncated, coveredSince: truncated && rows.length ? rows[rows.length - 1].ts : null };
     },
-    powerEventsOf: (vc, entity, fromTs, toTs) => rows.filter((r) => r.vcenterId === vc && r.entity === entity && (r.type === 'VmPoweredOffEvent' || r.type === 'VmPoweredOnEvent') && r.ts >= fromTs && r.ts <= toTs).sort((a, b) => a.ts - b.ts).slice(0, 5000).map((r) => ({ type: r.type, ts: r.ts, user: r.user || '' })),
+    powerEventsOf: (vc, entity, fromTs, toTs) => rows.filter((r) => r.vcenterId === vc && r.entity === entity && (r.type === 'VmPoweredOffEvent' || r.type === 'VmPoweredOnEvent') && r.ts >= fromTs && r.ts <= toTs).sort((a, b) => b.ts - a.ts).slice(0, 5000).map((r) => ({ type: r.type, ts: r.ts, user: r.user || '' })),
     lastPowerEvents: (vc) => { const m = new Map(); for (const r of rows) { if (r.vcenterId !== vc || (r.type !== 'VmPoweredOffEvent' && r.type !== 'VmPoweredOnEvent')) continue; const k = `${r.entity}|${r.type}`; if (!m.has(k) || m.get(k).ts < r.ts) m.set(k, { entity: r.entity, type: r.type, ts: r.ts }); } return [...m.values()]; },
     query: (f = {}, limit = 200, offset = 0) => rows.filter((r) => match(r, f)).sort((a, b) => b.ts - a.ts).slice(...((a) => [a[1], a[1] + a[0]])(clampPage(limit, offset))),
     queryAsync: async (f = {}, limit = 200) => api.query(f, limit, 0),   // v2.732(B6-03): SQLite 판과 같은 API

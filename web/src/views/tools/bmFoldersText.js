@@ -226,6 +226,16 @@ export function mapGroups(rows = [], groupBy = 'folder', corpName = (x) => x) {
   return [...m.values()].sort((a, b) => (a.un - b.un) || a.label.localeCompare(b.label, 'ko'));
 }
 
+/** 맵 묶음 하나에 그리는 칸 상한 — 넘치면 개수를 밝힌다(조용히 자르지 않는다). 맵 화면과 드로어 순서가 같은 값을 쓴다. */
+export const MAP_CELL_MAX = 400;
+/**
+ * 맵에 **보이는 순서**의 서버 행(v3.44 — 드로어의 ‹ › · ↑↓ 가 화면의 칸 순서를 따르게): 묶음 순서대로, 묶음마다 그린 칸(상한)까지만.
+ *   걸러진 행 순서를 그대로 쓰면 › 가 다른 묶음의 칸으로 뛰고 그리지 않은 서버로도 넘어갔다(반증 A8 · B2).
+ */
+export function mapVisibleRows(rows = [], groupBy = 'folder', corpName = (x) => x, cellMax = MAP_CELL_MAX) {
+  return mapGroups(rows, groupBy, corpName).flatMap((g) => g.rows.slice(0, cellMax));
+}
+
 /**
  * 맵 칸 색 — 'cpu' · 'mem'(밝기 5단 · 20% 단위) · 'watts'(보이는 서버 중 최대 대비 5단) · 'fault'(장애 · 정상 · 모름).
  * 못 읽은 값은 'na'(점선 빈 칸 — 0 으로 칠하지 않는다) · 꺼짐은 'off'. 장애가 있으면 bad = true(테두리 — 색과 따로).

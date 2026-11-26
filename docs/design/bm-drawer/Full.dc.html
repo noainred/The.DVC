@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>물리서버 상세 드로어 — 전체 정보 배치</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./pmd.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+body{margin:0}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+</style>
+</helmet>
+<aside class="dw" aria-label="서버 상세 — SELSBPDPS09" style="width:640px;min-height:2260px;border-left:0;box-shadow:none">
+  <div class="dh">
+    <div class="ttl">
+      <span class="dot" style="background:#ef4444" title="부품 장애"></span>
+      <h2>SELSBPDPS09</h2>
+      <button type="button" class="ib" aria-label="이전 서버">‹</button>
+      <button type="button" class="ib" aria-label="다음 서버">›</button>
+      <button type="button" class="ib" aria-label="닫기">×</button>
+    </div>
+    <div class="sigs"><span class="bd red">부품 장애 1건</span></div>
+    <div class="crumb">
+      <span class="bd green">켜짐</span>
+      <b>KR2</b><span aria-hidden="true">›</span><span>KR2_Service › SBP › DP › Airflow</span>
+      <span aria-hidden="true">·</span><span>베어메탈</span>
+      <span aria-hidden="true">·</span><span>PowerEdge R740xd</span>
+      <span aria-hidden="true">·</span><span class="mono">7XK4P93</span>
+      <span class="pos">목록 3/9</span>
+    </div>
+  </div>
+  <div class="acts">
+    <button type="button" class="btn primary"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 17l6-5-6-5"></path><path d="M12 19h8"></path></svg>iDRAC 접속</button>
+    <span style="flex:1 1 12px"></span>
+    <span class="sel" style="width:210px"><span>옮길 폴더…</span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg></span>
+    <button type="button" class="btn" disabled>옮기기</button>
+    <button type="button" class="btn">폴더에서 빼기</button>
+  </div>
+  <div class="db">
+    <section class="sec" aria-label="한눈에">
+      <div class="sh"><h3>한눈에 · 지금 값</h3><span class="muted">못 읽은 값은 ‘—’ 와 사유</span></div>
+      <div class="tiles">
+        <div class="tile"><span class="lb">CPU<span class="chip os">OS</span></span><span class="v">37<small>%</small></span><span class="bar"><i style="width:37%;background:#3b82f6"></i></span><span class="s">32코어 · 2×16C</span></div>
+        <div class="tile"><span class="lb">메모리<span class="chip os">OS</span></span><span class="v">62<small>%</small></span><span class="bar"><i style="width:62%;background:#3b82f6"></i></span><span class="s">512 GB</span></div>
+        <div class="tile"><span class="lb">전력</span><span class="v">462<small>W</small></span><span class="s" style="margin-top:12px">전원 켜짐</span></div>
+        <div class="tile" style="border-color:rgba(239,68,68,.5)"><span class="lb">부품 장애</span><span class="v" style="color:#fca5a5">1<small>건</small></span><span class="s" style="margin-top:12px"><a href="#">물리 부품 장애에서 보기</a></span></div>
+      </div>
+    </section>
+
+    <section class="sec" aria-label="24시간 추이">
+      <div class="sh"><h3>CPU · 메모리 — 지난 24시간</h3><span class="muted">열 때 1회 조회 · 구간 평균</span></div>
+      <div class="card" style="padding:10px 12px 8px">
+        <svg viewBox="0 0 604 150" width="100%" height="150" role="img" aria-label="지난 24시간 CPU 마지막 37% · 메모리 마지막 62%">
+          <line x1="0" x2="560" y1="20" y2="20" stroke="#1f2a40"></line><line x1="0" x2="560" y1="75" y2="75" stroke="#1f2a40"></line><line x1="0" x2="560" y1="130" y2="130" stroke="#243049"></line>
+          <text x="566" y="23" font-size="10" fill="#8b9bb4">100%</text><text x="566" y="78" font-size="10" fill="#8b9bb4">50%</text><text x="566" y="133" font-size="10" fill="#8b9bb4">0%</text>
+          <rect x="264" y="20" width="72" height="110" fill="rgba(139,155,180,.10)"></rect>
+          <text x="300" y="34" font-size="10" fill="#8b9bb4" text-anchor="middle">못 읽음</text>
+          <path d="M0,62.9 L24,62.9 L48,61.8 L72,61.8 L96,61.8 L120,62.9 L144,62.9 L168,64 L192,64 L216,64 L240,62.9 L264,62.9 M336,61.8 L360,61.8 L384,61.8 L408,60.7 L432,60.7 L456,61.8 L480,61.8 L504,61.8 L528,61.8 L552,61.8" fill="none" stroke="#22d3ee" stroke-width="1.5"></path>
+          <path d="M0,92.6 L24,90.4 L48,93.7 L72,88.2 L96,84.9 L120,87.1 L144,91.5 L168,95.9 L192,99.2 L216,100.3 L240,98.1 L264,97 M336,93.7 L360,89.3 L384,81.6 L408,72.8 L432,77.2 L456,82.7 L480,86 L504,88.2 L528,90.4 L552,89.3" fill="none" stroke="#3b82f6" stroke-width="2"></path>
+          <text x="0" y="146" font-size="10" fill="#8b9bb4">어제 18시</text><text x="140" y="146" font-size="10" fill="#8b9bb4" text-anchor="middle">0시</text><text x="280" y="146" font-size="10" fill="#8b9bb4" text-anchor="middle">6시</text><text x="420" y="146" font-size="10" fill="#8b9bb4" text-anchor="middle">12시</text><text x="560" y="146" font-size="10" fill="#8b9bb4" text-anchor="end">지금</text>
+        </svg>
+        <div style="display:flex;flex-wrap:wrap;gap:4px 14px;font-size:11.5px;margin-top:2px">
+          <span class="lg"><i style="background:#3b82f6"></i>CPU 37%</span>
+          <span class="lg"><i style="background:#22d3ee"></i>메모리 62%</span>
+          <span class="muted">점 240개 · 못 읽은 구간은 선을 잇지 않습니다</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="sec" aria-label="신호">
+      <div class="sh"><h3>신호 1 — 봐야 할 것</h3></div>
+      <div class="sigrow">
+        <span class="dot" style="background:#ef4444" aria-hidden="true"></span>
+        <div class="t"><b>부품 장애 1건</b><span>이 서버에 열린 부품 장애가 있습니다 — 어느 부품인지는 물리 부품 장애 화면에서 봅니다.</span></div>
+        <a class="btn" href="#">부품 장애</a>
+      </div>
+    </section>
+
+    <section class="sec" aria-label="식별 · 배치">
+      <div class="sh"><h3>식별 · 배치</h3></div>
+      <div class="kv">
+        <div><span>법인</span><b>KR2</b></div>
+        <div><span>종류</span><b>베어메탈</b></div>
+        <div class="full"><span>폴더</span><b>KR2_Service › SBP › DP › Airflow <span class="bd blue" style="margin-left:4px">손 등록</span></b></div>
+        <div><span>모델</span><b>PowerEdge R740xd</b></div>
+        <div><span>서비스 태그</span><b class="mono">7XK4P93</b></div>
+        <div><span>전원</span><b>켜짐</b></div>
+        <div><span>받는 길</span><b><span class="bd teal">수집 서버</span> 수집 서버 KR2</b></div>
+        <div class="full"><span>OS</span><b>Red Hat Enterprise Linux Server release 7.8 (Maipo) · Kernel 3.10.0-1127.el7.x86_64</b></div>
+        <div class="last"><span>OS 호스트명</span><b class="mono">selsbpdps09</b></div>
+        <div class="last"><span>부품 장애</span><b style="color:#fca5a5">1건</b></div>
+      </div>
+    </section>
+
+    <section class="sec" aria-label="iDRAC">
+      <div class="sh"><h3>iDRAC · 관리</h3><span class="muted">인벤토리 3분 전 읽음 · 수집 서버</span></div>
+      <div class="kv">
+        <div><span>iDRAC 주소</span><b><a href="#" class="mono" style="text-decoration:underline dotted;text-underline-offset:2px">10.20.42.98</a></b></div>
+        <div><span>관리 NIC IPv4</span><b class="mono">10.20.42.98</b></div>
+        <div class="last"><span>iDRAC 모델</span><b>14G Monolithic</b></div>
+        <div class="last"><span>iDRAC 펌웨어</span><b class="mono">7.00.00.183</b></div>
+      </div>
+    </section>
+
+    <section class="sec" aria-label="하드웨어 요약">
+      <div class="sh"><h3>하드웨어 요약</h3><span class="muted">iDRAC 인벤토리</span></div>
+      <div class="spec">
+        <div><span class="lb">CPU</span><span class="v">2×16C</span><span class="s">32코어 / 64스레드</span></div>
+        <div><span class="lb">메모리</span><span class="v">512 GB</span><span class="s">DIMM 8개</span></div>
+        <div><span class="lb">디스크</span><span class="v">48 TB</span><span class="s">HDD 12</span></div>
+        <div><span class="lb">NIC</span><span class="v">10G×4</span><span class="s">어댑터 3</span></div>
+        <div><span class="lb">FC HBA</span><span class="v muted" style="font-family:inherit;font-weight:600">없음</span><span class="s">읽었고 0개</span></div>
+      </div>
+    </section>
+
+    <section class="sec" aria-label="부품 목록">
+      <div class="sh"><h3>부품 목록</h3><span class="muted">같은 부품은 묶어 개수로</span></div>
+      <div class="parts">
+        <div class="pg">
+          <span class="k">CPU</span>
+          <div class="rows">
+            <div class="pr"><span class="n">2 ×</span><span class="m">Intel(R) Xeon(R) Gold 6246R CPU @ 3.40GHz</span><span class="x">16코어/32스레드 · 최대 4.0GHz</span></div>
+          </div>
+        </div>
+        <div class="pg">
+          <span class="k">메모리(DIMM)</span>
+          <div class="rows">
+            <div class="pr"><span class="n">8 ×</span><span class="m">64 GB DDR4 2933MHz</span><span class="x">Micron Technology</span></div>
+          </div>
+        </div>
+        <div class="pg">
+          <span class="k">디스크</span>
+          <div class="rows">
+            <div class="pr"><span class="n">11 ×</span><span class="m">ST4000NM016A-2HZ</span><span class="x">4 TB · HDD(SATA)</span></div>
+            <div class="pr"><span class="n">1 ×</span><span class="m">TOSHIBA MG04ACA4</span><span class="x">4 TB · HDD(SATA)</span></div>
+          </div>
+        </div>
+        <div class="pg">
+          <span class="k">스토리지 컨트롤러</span>
+          <div class="rows">
+            <div class="pr"><span class="n">1 ×</span><span class="m">PERC H730P Adapter</span><span class="x">펌웨어 25.5.9.0001</span></div>
+            <div class="pr"><span class="n">1 ×</span><span class="m">C620 Series Chipset Family SATA Controller [AHCI mode]</span><span class="x"></span></div>
+            <div class="pr"><span class="n">1 ×</span><span class="m">C620 Series Chipset Family SSATA Controller [AHCI mode]</span><span class="x"></span></div>
+          </div>
+        </div>
+        <div class="pg">
+          <span class="k">NIC</span>
+          <div class="rows">
+            <div class="pr"><span class="n">1 ×</span><span class="m">BRCM GbE 4P 5720-t rNDC</span><span class="x">4포트 · 링크 업 0</span></div>
+            <div class="pr"><span class="n">1 ×</span><span class="m">Intel(R) 10GbE 2P X710 Adapter</span><span class="x">2포트 · 링크 업 2 · 10G</span></div>
+            <div class="pr"><span class="n">1 ×</span><span class="m">Intel(R) 10GbE 2P X710 Adapter</span><span class="x">2포트 · 링크 업 2 · 10G</span></div>
+          </div>
+        </div>
+        <div class="pg last">
+          <span class="k">FC HBA</span>
+          <div class="rows"><span class="muted" style="font-size:12.5px">없음</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="sec" aria-label="추가 후보">
+      <div class="sh"><h3>추가 후보 — 컨펌하면 넣는 칸(이번 시안의 기본값에는 없음)</h3></div>
+      <div class="cand">
+        <span class="muted" style="font-size:11.5px">포탈이 이미 수집하는 값이지만 이 창의 응답(/tools/bm-folders/hw)에는 아직 실리지 않습니다. 넣으려면 응답을 넓혀야 하고, 엣지가 요약만 올린 서버는 비어 있을 수 있습니다.</span>
+        <div class="it"><b>온도</b><span class="muted">흡기 · CPU 최고 [값 ℃] — 서버 온도 화면과 같은 센서 값</span></div>
+        <div class="it"><b>전원 공급 장치</b><span class="muted">PSU [개수] · 상태 [값] · 펌웨어 [값]</span></div>
+        <div class="it"><b>부품 상태 배지</b><span class="muted">부품 목록 줄마다 정상 · 주의 · 장애 · 못 읽음(파트 장애와 같은 판정)</span></div>
+        <div class="it"><b>BIOS · 펌웨어</b><span class="muted">BIOS [버전] · 펌웨어 목록 [개수]</span></div>
+        <div class="it"><b>GPU</b><span class="muted">[모델] × [개수] — iDRAC 이 인식한 것만</span></div>
+        <div class="it"><b>랙 위치</b><span class="muted">[전산실] › [랙] › [U] — 랙 실장도에 배치된 서버만</span></div>
+        <div class="it"><b>성능 상세로 가기</b><span class="muted">베어메탈 사용률의 이 서버 화면으로 바로 이동(지금은 목록 화면으로만 갑니다)</span></div>
+      </div>
+    </section>
+  </div>
+  <nav class="df" aria-label="바로가기">
+    <span class="muted">바로가기:</span>
+    <a href="#">베어메탈 사용률(추이)</a><a href="#">물리 부품 장애</a><a href="#">통합 서버 인벤토리</a><a href="#">서비스 인벤토리</a>
+    <span class="keys">Esc 닫기 · ↑↓ 이전/다음</span>
+  </nav>
+</aside>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":640,"height":2260}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
