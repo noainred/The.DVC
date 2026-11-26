@@ -37,8 +37,9 @@ import { isCredReject } from './collectors/restCommon.js';
 import { ISI_NODE_LOAD_REST_KEYS, ISI_SUMMARY_PATHS, ISI_SAMPLE_CMDS, restSampleNodes, nodeIdMapOf, parseIsiSystemStats,
   parseClientRows, parseProtocolRows, parseDriveRows, buildNodeLoadSample } from './collectors/isilonNodeLoad.js';
 import { saveNodeLoadSample, saveNodeUnits } from './db.js';
-import { sampleArrayPerf, isFePerfType } from './collectors/arrayPerf.js'; // v2.952 어레이 프런트엔드(디렉터 · 노드 · SP) 표본
+import { sampleArrayPerf, isFePerfType, sampleCapableOf } from './collectors/arrayPerf.js'; // v2.952 어레이 프런트엔드(디렉터 · 노드 · SP) 표본
 import { noteSampleDiag } from './sampleDiag.js'; // v3.36.1 표본 진단
+import { sampleUnityAny } from './collectors/unityMetricsSsh.js'; // v3.46.0 SSH Unity 표본(REST 먼저 · 안 되면 uemcli)
 import { CLIENT_LIMIT_DEF, CLIENT_LIMIT_MAX, sanitizeNodeLoadSample } from './nodeLoad.js';
 import { isMockMode, isDemoId, demoNodeLoadSample } from '../mock/demo/storage.js';
 import { reqTimeoutMs } from '../agent/envTimeout.js'; // 시한 env 단일 관문(TIM2605-04 — [하한, 상한] 밖·NaN 은 기본값)
@@ -65,8 +66,7 @@ let _last = null;
  * 어레이 표본은 디렉터 · 노드 · SP 단위 성능(arrayPerf.js) — 같은 5분 주기 · 같은 시한 · 같은 인증 정지 레코드.
  */
 export function sampleTargets(devs) {
-  return (devs || []).filter((d) => d && d.enabled !== false && d.nodeLoadEnabled !== false
-    && (d.type === 'isilon' || (isFePerfType(d.type) && (d.collectMethod || 'api') === 'api')));
+  return (devs || []).filter((d) => d && d.enabled !== false && d.nodeLoadEnabled !== false && sampleCapableOf(d.type, d.collectMethod));   // v3.46.0 판정 하나
 }
 
 // ── REST ─────────────────────────────────────────────────────────────────────
@@ -234,7 +234,9 @@ async function sampleOne(dev) {
     else {
       try {
         sample = await withDeadline(SAMPLE_TIMEOUT_MS,
-          (signal) => (isFePerfType(full.type) ? sampleArrayPerf(full, { signal, now: t0 })
+          // v3.46.0: SSH 로 등록한 Unity 는 REST 먼저(SSH 계정 그대로) · 안 되면 uemcli(unityMetricsSsh.sampleUnityAny — REST 인증 거절은 그 안에서 삼킨다).
+          (signal) => (full.type === 'unity480' && full.collectMethod === 'ssh' ? sampleUnityAny({ ...full, _signal: signal }, { signal, now: t0 })
+            : isFePerfType(full.type) ? sampleArrayPerf(full, { signal, now: t0 })
             : full.collectMethod === 'api' ? sampleRest(full, signal, CLIENT_LIMIT_DEF) : sampleSsh(full, signal, CLIENT_LIMIT_DEF)), '표본 시한');
       } catch (e) { error = capErr(e); auth = isCredReject(e) || isSshAuthError(e); }
     }

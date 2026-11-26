@@ -14,6 +14,7 @@
  */
 import { isMockMode, demoHash, demoRand, demoIp } from './flags.js';
 import { demoCorps } from './pdu.js';
+import { dayIndex } from '../../util/dayKey.js';
 
 const HOUR = 3_600_000;
 const r2 = (v) => Math.round(v * 100) / 100;
@@ -498,8 +499,8 @@ async function backfillCvp(servers, now = Date.now()) {
  * v3.38 데모 일 기록 — 날짜 · 값은 전부 가상이다. 장비 hash 로 갈래를 나눠 '곧 고갈' · '늘지 않음' · 'GBIC 하강' · '플랩' · '오래 안 쓴 포트' 가 다 보이게.
  */
 async function demoNetHistory(servers, db, P, optics, now) {
-  const DAY = 86_400_000;
-  const today = Math.floor(now / DAY);
+  // v3.42(버그 점검 1회차 A4-F11): 적재 · 조회와 같은 날 기준(dayIndex — 현지 날짜). 예전 UTC 나눗셈은 KST 00~09시에 시드하면 하루 어긋났다.
+  const today = dayIndex(now);
   const devPort = []; const xcvr = []; const flap = []; const lastLink = []; const firstDay = []; const util = [];
   for (const srv of servers) {
     for (const sw of demoSwitchSpecs(srv)) {

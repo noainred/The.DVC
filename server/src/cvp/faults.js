@@ -136,7 +136,7 @@ function partObservation(p) {
   //   closeReason 'no-link' 로 닫는다(고쳐졌다는 'ok' 와 구분). 링크 상태를 모르면(portKnown false) 예전처럼 unknown 보류.
   const o = p?.optic && typeof p.optic === 'object' ? p.optic : null;
   let closeAs = null;
-  if (kind === 'xcvr' && o && o.portKnown === true && o.linked === false && st === 'unknown') { st = 'ok'; closeAs = NO_LINK; }
+  if (kind === 'xcvr' && o && o.portKnown === true && o.linked === false && o.lanesPartial !== true && st === 'unknown') { st = 'ok'; closeAs = NO_LINK; }
   return { faultKey: `${kind}:${name}`, kind, label: name, state: st, detail: capStr(p?.detail, 200), ...(closeAs ? { closeAs } : {}) };
 }
 

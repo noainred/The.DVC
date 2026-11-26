@@ -27,8 +27,10 @@ function OpticsNow({ servers = [], onOpen }) {
   useEffect(() => {
     let active = true;
     setErr(null);
+    // v3.42(D14): CVP 를 바꾸면 이전 CVP 의 표를 지운다(새 응답 전까지 이전 표가 새 선택 아래 보였다) — 같은 CVP 새로고침은 표를 유지한다.
+    setR((cur) => (cur && cur._cvp !== cvpId ? null : cur));
     fetchJson('/tools/cvp/optics', cvpId ? { cvpId } : {})
-      .then((x) => { if (active) setR(x); }).catch((e) => { if (active) { setErr(e); setR(null); } });
+      .then((x) => { if (active) setR(x && typeof x === 'object' ? { ...x, _cvp: cvpId } : x); }).catch((e) => { if (active) { setErr(e); setR(null); } });
     return () => { active = false; };
   }, [cvpId, reload]);
   const all = r && Array.isArray(r.optics) ? r.optics.filter((o) => o && typeof o === 'object') : [];
@@ -112,7 +114,8 @@ export default function CvpOpticsView({ servers = [], onOpen }) {
         <Seg label="보기" value={part} onChange={setPart} items={[['now', '현재'], ['trend', '추세'], ['stock', '재고']]} />
         <span style={NOTE}>{PART_NOTE[part]}</span>
       </div>
-      {part === 'now' ? <OpticsNow servers={servers} onOpen={onOpen} /> : <CvpOpticsTrendView key={part} part={part} onOpen={onOpen} />}
+      {/* v3.42(D14): 추세 ↔ 재고는 같은 응답이라 다시 부르지 않는다(key 를 두면 오갈 때마다 무거운 조회를 다시 했다). */}
+      {part === 'now' ? <OpticsNow servers={servers} onOpen={onOpen} /> : <CvpOpticsTrendView part={part} onOpen={onOpen} />}
     </div>
   );
 }

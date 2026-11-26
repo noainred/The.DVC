@@ -138,6 +138,8 @@ export default function CvpTool() {
   const edges = Array.isArray(data.edges) ? data.edges.filter((e) => e && typeof e === 'object') : [];
   const poller = data.poller && typeof data.poller === 'object' ? data.poller : {};
   const devList = devices && Array.isArray(devices.devices) ? devices.devices : [];
+  // v3.42(버그 점검 1회차 D4): 장비 목록을 못 읽었으면(오류 · DB 못 엶) 포트 구성도 · 인터페이스 탭이 '장비 없음' 으로 단정하지 않게 상태를 넘긴다.
+  const devListState = devErr && !devices ? 'error' : !devices ? 'loading' : devices.dbUnavailable ? 'unavailable' : 'ok';
   const scoped = cvpSel ? devList.filter((d) => String(d.cvpId) === cvpSel) : devList;
   const searched = filterDevices(scoped, q);
   // v2.645: 법인 × 모델 칩(스토리지 모니터링과 같은 DeviceFacetBar · deviceFacets 판정). 칩 목록은 검색만 적용한 집합에서.
@@ -220,8 +222,8 @@ export default function CvpTool() {
       {view === 'overview' && <CvpOverviewView ov={ov} err={ovErr} onGo={(k) => setView(k)} onCorp={goCorp} onOpenDevice={(t) => setDetailKey(t)} />}
       {view === 'models' && <CvpModelsView ov={ov} err={ovErr} onModel={goModel} />}
       {view === 'traffic' && <CvpTrafficView ov={ov} err={ovErr} onCorp={goCorp} onOpenDevice={(t) => setDetailKey(t)} />}
-      {view === 'intf' && <CvpInterfacesView devices={devList} initial={intfSel} />}
-      {view === 'portmap' && <CvpPortMapView devices={devList} />}
+      {view === 'intf' && <CvpInterfacesView devices={devList} listState={devListState} initial={intfSel} />}
+      {view === 'portmap' && <CvpPortMapView devices={devList} listState={devListState} />}
       {view === 'ports' && <PortUsageCard servers={servers} onOpen={(p) => setDetailKey({ cvpId: p.cvpId, key: p.key, hostname: p.hostname, tab: 'ports' })} />}
       {view === 'optics' && <CvpOpticsView servers={servers} onOpen={(t) => setDetailKey({ ...t, tab: 'parts' })} />}
       {view === 'power' && <CvpPowerView servers={servers} onOpen={(t) => setDetailKey({ ...t, tab: 'parts' })} />}

@@ -672,10 +672,10 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
       return ev;
     }
     /** v3.41: VLAN · 채널 소속 · MLAG(부품 주기) + 직전 값 기억(주기 사이 · 재시작 뒤 첫 부품 주기 전은 비어 있다 — 모름). */
-    async function readL2Cfg(dev, serial, cvpId) {
+    async function readL2Cfg(dev, serial, cvpId, { read = true } = {}) {
       const ck = `${cvpId}\u0000${serial}`;
       let c = _l2cfg.get(ck);
-      if (partsDue && ks.switchport && ks.lagMember && ks.mlag) {
+      if (read && partsDue && ks.switchport && ks.lagMember && ks.mlag) {
         const nx = { vlans: c?.vlans ?? null, members: c?.members ?? null, mlag: c?.mlag ?? null, vlanAt: c?.vlanAt ?? null, lagAt: c?.lagAt ?? null, mlagAt: c?.mlagAt ?? null,
           vlanPartial: c?.vlanPartial ?? false, lagPartial: c?.lagPartial ?? false };
         /*
@@ -721,27 +721,26 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
       if (dev.streaming === false) { dev.telemetry = 'not-streaming'; return; }
       const serial = dev.serial || dev.key;
       const intf = await readKind('interfaces', serial, (t) => { const x = P.parseInterfaces(t); return { value: x.ports, keys: x.keys, truncated: x.truncated }; });
-      if (intf.value) { dev.ports = intf.value; truncated.ports += intf.extra.truncated || 0; }
+      if (intf.value) {
+        dev.ports = intf.value; truncated.ports += intf.extra.truncated || 0;
+        // v3.42(반증 A2-P1): 포인터 추종 · 파서 상한에 잘린 목록이면 일부다 — 저장소가 '목록에 없는 포트' 를 지우지 않게(예전에는 지웠다 — 고갈 예측 used>total 의 근원).
+        if ((intf.followTruncated || 0) > 0 || (intf.extra.truncated || 0) > 0) dev.portsPartial = true;
+      }
       // v2.649: 설명 — 부품 주기에만(설정 노드). 못 읽으면 포트 desc 는 null 로 남고 저장소가 직전 값을 유지한다(COALESCE).
       if (partsDue && Array.isArray(dev.ports) && left() >= MIN_SLICE_MS) {
         const cfg = await readKind('intfConfig', serial, (t) => { const x = P.parseIntfConfig(t); return { value: x.descs, keys: x.keys }; });
         if (cfg.value) { dev.ports = P.mergeIntfConfig(dev.ports, cfg.value); dev.descsAt = now(); }
       }
-      if (left() < MIN_SLICE_MS) { dev.telemetry = budgetTelemetry(intf.value); return; } // v2.743(DEV-04): 인터페이스를 못 읽었으면 'budget'
+      if (left() < MIN_SLICE_MS) { dev.telemetry = budgetTelemetry(intf.value); await readL2Cfg(dev, serial, server.id, { read: false }); return; } // v2.743(DEV-04): 인터페이스를 못 읽었으면 'budget'
       const upSet = Array.isArray(dev.ports) ? new Set(dev.ports.filter((p) => p.oper === 'up').map((p) => p.name)) : null;
       const cnt = await readKind('counters', serial, (t) => { const x = P.parseCounters(t); return { value: x.counters, keys: x.keys }; }, upSet ? (k) => upSet.has(k) : null);
       if (cnt.value) { dev.counters = cnt.value; dev.countersAt = now(); }
       // v2.611(TIM2611-01): counters·bgp 앞에도 예산을 본다 — 시작해 놓고 잘리면 결과가 버려진다.
-      if (left() < MIN_SLICE_MS) { dev.telemetry = budgetTelemetry(intf.value || cnt.value); return; }
+      if (left() < MIN_SLICE_MS) { dev.telemetry = budgetTelemetry(intf.value || cnt.value); await readL2Cfg(dev, serial, server.id, { read: false }); return; }
       const bgp = await readKind('bgp', serial, (t) => { const x = P.parseBgp(t); return { value: x.peers, keys: x.keys, truncated: x.truncated }; });
       if (bgp.value) { dev.bgp = bgp.value; truncated.peers += bgp.extra.truncated || 0; }
       else if (bgp.empty) dev.bgpEmpty = true; // v2.641: 빈 응답 — '피어 없음' 도 '못 읽음' 도 아닌 '이 경로에 값 없음'(BGP 미설정일 수 있다)
       if (intf.empty) dev.portsEmpty = true;
-      /*
-       * v3.41: VLAN · 포트 채널 소속 · MLAG — 부품 주기에 읽고(이번에 못 읽으면 직전 값), 그 사이 주기에는 직전에 읽은 값을 쓴다(L2CFG_TTL_MS 안에서만).
-       *   반증 E2: 카운터 · BGP 뒤에 둔다(포인터 컬렉션이면 요청이 많아 앞에 두면 고RTT 직접 수집에서 처리량이 예산에 밀릴 수 있다).
-       */
-      await readL2Cfg(dev, serial, server.id);
       // v2.641 ③: CPU·메모리 — 장비당 요청 1~2회. 못 읽으면 null(0% 를 지어내지 않는다).
       if (left() >= MIN_SLICE_MS) {
         const cpu = await readKind('cpu', serial, (t) => { const x = P.parseCpu(t); return { value: x.pct != null || x.counters ? { pct: x.pct, counters: x.counters } : null, keys: x.keys }; });
@@ -774,6 +773,14 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
         dev.partsAttempted = attempted;
         if (failedKinds.length && anyRead) dev.partsMissingKinds = failedKinds;
       }
+      /*
+       * v3.41: VLAN · 포트 채널 소속 · MLAG — 부품 주기에 읽고(이번에 못 읽으면 직전 값), 그 사이 주기에는 직전에 읽은 값을 쓴다(L2CFG_TTL_MS 안에서만).
+       *   반증 E2: 카운터 · BGP 뒤에 둔다(포인터 컬렉션이면 요청이 많아 앞에 두면 고RTT 직접 수집에서 처리량이 예산에 밀릴 수 있다).
+       *   v3.42(버그 점검 1회차 A4-F5 · 2회차 A2-E1): 부품(전원 · 팬 · 온도 · 광 — 장애 판정) **뒤**, LLDP · FDB **앞** — 앞에 있으면 경로 추정이 틀린 CVP 에서
+       *   후보 6개 빈 응답이 부품 읽기 예산을 먹었다. 예산이 모자라 앞에서 돌아가는 경로도 직전 값은 얹는다(read:false).
+       *   '빈 응답 N대면 멈춤' 은 넣지 않았다 — 채널 · MLAG 를 안 쓰는 장비가 앞에 몰리면 쓰는 장비를 영영 못 읽는다(BGP 와 같은 이유).
+       */
+      await readL2Cfg(dev, serial, server.id);
       /*
        * v2.924(B-②): LLDP 이웃 · MAC 테이블 — 부품 주기에만. 값: 배열 = 읽음(빈 배열 = 이웃/학습 없음) · null = 시도했지만 못 읽음 · undefined = 이번에 안 읽음.
        *   저장소는 배열일 때만 그 장비의 이전 목록을 바꾸고, null·undefined 면 이전 목록을 그대로 둔다(시각으로 오래됨을 말한다).

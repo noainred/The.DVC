@@ -138,7 +138,8 @@ test('④ 버전 준수 · Overview 지원 종료', async () => {
   assert.equal(CP.lifeMs('2025-01-01T00:00:00Z'), Date.UTC(2025, 0, 1));
   assert.equal(CP.lifeMs('garbage'), null); assert.equal(CP.lifeMs(''), null); assert.equal(CP.lifeMs(null), null);
   const rk = ['enrich', 'lifecycle', 'bugs'];
-  assert.equal(CP.bugState({ readKinds: rk }).state, 'none', '읽었는데 장비 값이 없으면 공지 없음');
+  assert.equal(CP.bugState({ readKinds: rk }).state, 'norecord', '읽었는데 장비 값이 없으면 기록 없음(노출 없음 · 0 이 아니다 — v3.42 A2-F6)');
+  assert.equal(CP.bugState({ readKinds: rk }).bugCount, null);
   assert.equal(CP.bugState({ readKinds: ['enrich'] }).state, 'unread', '못 읽음은 0 이 아니다');
   assert.equal(CP.bugState({ readKinds: rk, bugs: { bugCount: 2, cveCount: 1, highestCve: 'high' } }).state, 'high');
   assert.equal(CP.lifeState({ readKinds: rk, lifecycle: { swEndOfSupport: NOW - DAY } }, NOW).state, 'passed');
@@ -155,7 +156,7 @@ test('④ 버전 준수 · Overview 지원 종료', async () => {
     { agent: '', cvpId: 'c', key: 'z', hostname: 'z', eosVersion: '4.31.2F', info: null },
   ], { now: NOW });
   assert.equal(f.rows[0].hostname, 'a', '지원 종료 지남 · 높음이 맨 위');
-  assert.deepEqual([f.counts.life.passed, f.counts.bugs.high, f.counts.bugs.none, f.counts.bugs.unread, f.counts.cveDevices], [1, 1, 1, 1, 1]);
+  assert.deepEqual([f.counts.life.passed, f.counts.bugs.high, f.counts.bugs.norecord, f.counts.bugs.none, f.counts.bugs.unread, f.counts.cveDevices], [1, 1, 1, 0, 1, 1], 'b 는 읽었는데 기록 없음(v3.42 A2-F6 — 노출 없음이 아니다)');
   assert.equal(f.versions.find((v) => v.version === '4.31.2F').devices, 2);
   // 점검 결함: 수명주기 날짜는 ms 숫자인데 Overview 가 Date.parse 로 읽어 '지원 종료 지남' 이 늘 0 이었다.
   const { buildCvpOverview } = await import('../src/cvp/overview.js');

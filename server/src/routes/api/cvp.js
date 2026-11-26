@@ -8,6 +8,8 @@
  *  - 등록부 CRUD·연결 테스트·설정: adminOnly(자격증명) + 감사로그(비밀 미기재).
  *  - 연결 테스트가 저장 비밀을 물려받으면 **host·계정·인증 방식을 저장값으로 고정**한다(v2.480 — 저장 비밀이 요청자 호스트로 가지 않게).
  */
+import { heavyJson, heavyKey } from '../../cvp/heavyGate.js';   // v3.42: 무거운 조회 동시 상한 + 같은 조회 합류
+import { createYielder } from '../../util/timeSlice.js';
 import { isDemoGuest } from '../../auth/demoGuest.js';
 import { requireRole, requirePerm } from '../../auth/auth.js';
 import { isAdminReq, maskPollerStatus, scrubHosts } from '../../auth/addressMask.js';
@@ -33,7 +35,7 @@ import { buildCvpOverview, corpResolver, freshnessBounds, RECENT_EVENTS_MAX, row
 import { cvpDeviceConfirm, cvpPartsStaleReason } from '../../cvp/confirm.js';
 import { runCvpFaultScan, cvpFaultScanStatus } from '../../cvp/faultScan.js';   // v2.640 ③ 장애 전이 판정(중앙)
 import { previewParse, PREVIEW_KINDS, PREVIEW_TEXT_MAX } from '../../cvp/preview.js'; // v2.640 ② 파서 시험(왕복 0)
-import { buildPortMap, summaryRow } from '../../cvp/portmap.js'; // v3.37 포트 구성도(판정 코어 — 웹은 그리기만)
+import { buildPortMap, summaryRow, shortOf } from '../../cvp/portmap.js'; // v3.37 포트 구성도(판정 코어 — 웹은 그리기만)
 import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { fileStamp, localStamp } from '../../util/dayKey.js';
 import { isMockMode } from '../../mock/demo/flags.js'; // v2.708 데모(mock 전용)
@@ -172,6 +174,22 @@ function maskPeers(peers, admin) {
  *   cvp/overview.js rowBelongs·rowOwnerOf 하나다(Overview 카드·전체 소비 전력이 같은 함수를 쓴다 — 이 파일에 사본을 두지 말 것).
  */
 
+/**
+ * v3.42(버그 점검 1회차 A3-F1): 비관리자 MLAG 문자열(도메인 · 피어 링크 · 로컬 인터페이스) 가림 — 그 값이 실리는 응답 전부(장비 목록 · 상세 · 포트 구성도 · 이중화)가
+ *   이 함수 하나를 쓴다. 예전에는 /tools/cvp/redundancy 만 가려 형제 세 경로로 원문이 나갔다.
+ */
+export function maskMlag(ms, admin, hosts = []) {
+  if (admin || !ms || typeof ms !== 'object') return ms;
+  const mk = (v) => (v == null ? v : maskErrText(String(v), hosts));
+  return { ...ms, domain: mk(ms.domain), peerLink: mk(ms.peerLink), localIntf: mk(ms.localIntf) };
+}
+function publicInfo(info, admin) {
+  if (!info) return null;
+  if (admin) return info;
+  const { mac, ...rest } = info;   // 관리 식별자 등급
+  return rest.mlagStatus ? { ...rest, mlagStatus: maskMlag(rest.mlagStatus, false, listServers().map((x) => x.host)) } : rest;
+}
+
 function publicDevice(d, admin, confirm = null) {
   return {
     // v2.720(감사 B1-02): 화면의 필터 KPI(cvpText.totalsFromDevices)가 같은 판정을 쓰도록 서버 판정 결과를 싣는다(판정은 한 벌).
@@ -183,7 +201,7 @@ function publicDevice(d, admin, confirm = null) {
     ports: d.ports, collectedAt: d.collectedAt, telemetry: d.telemetry,
     // v2.641 ②③: CPU·메모리 최신값(못 읽으면 null) · 개요(비-admin 에는 MAC 을 뺀다 — 관리 식별자 등급)
     cpuPct: d.cpuPct ?? null, memPct: d.memPct ?? null, sysAt: d.sysAt ?? null,
-    info: d.info ? (admin ? d.info : (({ mac, ...rest }) => rest)(d.info)) : null,
+    info: publicInfo(d.info, admin),
   };
 }
 
@@ -201,7 +219,8 @@ export function maskErrText(v, hosts = []) {
   if (typeof v !== 'string' || !v) return v;
   return scrubHosts(v, hosts)
     .replace(/\bhttps?:\/\/[^\s,)'"]{1,300}/g, '(주소 가림)')
-    .replace(/(?<![\d.])\d{1,3}(?:\.\d{1,3}){3}(?![\d.])/g, '(주소 가림)')
+    // v3.42(버그 점검 2회차 A3-F1): 끝 조건은 '숫자 · 점+숫자' 가 아닐 때 — 예전 (?![\d.]) 는 문장 끝 마침표가 붙은 '10.1.1.1.' 을 가리지 않았다.
+    .replace(/(?<![\d.])\d{1,3}(?:\.\d{1,3}){3}(?!\d|\.\d)/g, '(주소 가림)')
     .replace(IPV6_CAND, (m) => (isIpv6Like(m) ? '(주소 가림)' : m));
 }
 
@@ -442,7 +461,7 @@ api.get('/tools/cvp/portmap', toolsPerm, fullScopeOnly, async (req, res) => {
     cdb.lastLinkDays(agent, cvpId, key).catch(() => ({ last: new Map(), since: null, unavailable: true })),
     cdb.deviceNameIndex().catch(() => ({ rows: [] })),
   ]);
-  const switchNames = new Set((names.rows || []).map((r) => String(r.hostname || '').toLowerCase().split('.')[0]).filter(Boolean));
+  const switchNames = new Set((names.rows || []).map((r) => shortOf(r.hostname)).filter(Boolean));   // v3.42(3회차 반증 R8): 짧은 이름은 portmap.shortOf 하나(IP 이름은 통째로)
   const m = buildPortMap({ model: det.device.model, ports: det.ports, parts: det.device.partsList, lldp: ll.rows, lldpRead: ll.read, lastLink: days.last, switchNames });
   const hosts = listServers().map((x) => x.host);
   const mk = (v) => (admin || v == null ? v : maskErrText(v, hosts));
@@ -466,28 +485,36 @@ api.get('/tools/cvp/portmap/summary', toolsPerm, fullScopeOnly, async (req, res)
   const admin = isAdminReq(req);
   const servers = listServers();
   const own = rowOwnerOf(servers);
-  const { rows, unavailable } = await cdb.listDeviceRows();
-  if (unavailable) return res.status(503).json({ ok: false, reason: '중앙 CVP DB 를 열지 못했습니다.' });
-  const devs = rows.filter(own);
-  const pr = await cdb.portLatestRows({ limit: PORTMAP_SUMMARY_PORTS_MAX });
-  if (pr.unavailable) return res.status(503).json({ ok: false, reason: '중앙 CVP DB 를 열지 못했습니다.' });
-  const byDev = new Map();
-  for (const r of pr.rows) {
-    const k = `${r.agent}\u0000${r.cvp_id}\u0000${r.device_key}`;
-    if (!byDev.has(k)) byDev.set(k, []);
-    byDev.get(k).push({ name: r.port, oper: r.oper || 'unknown', admin: r.admin || 'unknown', desc: r.descr == null ? null : r.descr, speedBps: r.speed_bps });
-  }
-  const corpOf = corpResolver(servers, dcList());
-  const byId = new Map(servers.map((x) => [x.id, x]));
-  const list = devs.map((d) => {
-    const ports = d.portsRead ? (byDev.get(`${d.agent}\u0000${d.cvpId}\u0000${d.key}`) || []) : null;
-    const s = summaryRow({ model: d.model, ports, parts: d.partsList });
-    const c = corpOf(d.cvpId);
-    return { cvpId: d.cvpId, key: d.key, hostname: d.hostname || d.key, model: d.model || '', corpId: c.corpId, corpName: c.corpName,
-      cvpName: byId.get(d.cvpId)?.name || d.cvpId, portsRead: s.portsRead, counts: s.counts, spareHigh: s.spareHigh, source: s.source || null };
+  return heavyJson(req, res, heavyKey('portmap-summary', admin), async (hx) => {
+    const { rows, unavailable } = await cdb.listDeviceRows();
+    hx.check();
+    if (unavailable) return { status: 503, body: { ok: false, reason: '중앙 CVP DB 를 열지 못했습니다.' } };
+    const devs = rows.filter(own);
+    // v3.42(반증 C5): 포트 전량 한 번의 동기 조회 대신 장비별 PK 조회 + 시간 기준 양보(cdb.portRowsOf — 새 화면 라우트와 같은 함수 · 포트를 못 읽은 장비는 뺀다).
+    const pr = await cdb.portRowsOf(devs, { limit: PORTMAP_SUMMARY_PORTS_MAX });
+    hx.check();
+    if (pr.unavailable) return { status: 503, body: { ok: false, reason: '중앙 CVP DB 를 열지 못했습니다.' } };
+    const byDev = new Map();
+    for (const r of pr.rows) {
+      const k = `${r.agent}\u0000${r.cvpId}\u0000${r.key}`;
+      if (!byDev.has(k)) byDev.set(k, []);
+      byDev.get(k).push({ name: r.port, oper: r.oper, admin: r.admin, desc: r.desc, speedBps: r.speedBps });
+    }
+    const corpOf = corpResolver(servers, dcList());
+    const byId = new Map(servers.map((x) => [x.id, x]));
+    // v3.42(2회차 A4-F8): 장비마다 구성도 분류(summaryRow — 500대 45~100ms)를 시간 기준 양보로 나눈다.
+    const list = []; const y = createYielder(15);
+    for (const d of devs) {
+      const ports = d.portsRead ? (byDev.get(`${d.agent}\u0000${d.cvpId}\u0000${d.key}`) || []) : null;
+      const s = summaryRow({ model: d.model, ports, parts: d.partsList });
+      const c = corpOf(d.cvpId);
+      list.push({ cvpId: d.cvpId, key: d.key, hostname: d.hostname || d.key, model: d.model || '', corpId: c.corpId, corpName: c.corpName,
+        cvpName: byId.get(d.cvpId)?.name || d.cvpId, portsRead: s.portsRead, counts: s.counts, spareHigh: s.spareHigh, spareSpeedUnknown: s.spareSpeedUnknown || 0, source: s.source || null });
+      await y();
+    }
+    // 여유 부족 기준(예비 이 개수 이하) — 화면에 숫자를 박지 않고 이 값을 쓴다.
+    return { body: { devices: list, lowSpareMax: 4, ...(pr.truncated ? { truncated: true, portsMax: PORTMAP_SUMMARY_PORTS_MAX } : {}), ...(admin ? {} : { addressHidden: true }) } };
   });
-  // 여유 부족 기준(예비 이 개수 이하) — 화면에 숫자를 박지 않고 이 값을 쓴다.
-  res.json({ devices: list, lowSpareMax: 4, ...(pr.truncated ? { truncated: true, portsMax: PORTMAP_SUMMARY_PORTS_MAX } : {}), ...(admin ? {} : { addressHidden: true }) });
 });
 
 // ── v2.641 ③ CPU·메모리 추이 · ④ 이벤트 · ⑤ 포트 사용량 ──────────────────────────
@@ -609,13 +636,14 @@ api.get('/tools/cvp/optics', toolsPerm, fullScopeOnly, async (req, res) => {
       if (!p.dom && !o) { counts.noDom++; continue; }
       counts.withDom++;
       if (o && o.judged) { counts.judged++; if (o.rxState && Object.hasOwn(counts, o.rxState)) counts[o.rxState]++; }
+      else if (o && o.lanesPartial === true) counts.lanesPartial = (counts.lanesPartial || 0) + 1;   // v3.42(2회차 반증 R7): 링크 없음과 따로
       else if (o && !o.linked) counts.notLinked++;
       const c = corpOf(d.cvpId);
       list.push({
         cvpId: d.cvpId, cvpName: nameOf.get(String(d.cvpId)) || d.cvpId, key: d.key, hostname: d.hostname || '', corpId: c.corpId, corpName: c.corpName,
         intf: o?.intf || null, part: p.name, state: p.state, rx: o?.rx ?? p.dom?.rxPower ?? null, tx: o?.tx ?? p.dom?.txPower ?? null,
         temperature: p.dom?.temperature ?? null, voltage: p.dom?.voltage ?? null, txBias: p.dom?.txBias ?? null,
-        linked: o ? o.linked : null, judged: !!o?.judged, rxState: o?.rxState || null, basis: o?.basis || null, partsAt: d.partsAt, stale: false,
+        linked: o ? o.linked : null, ...(o?.lanesPartial === true ? { lanesPartial: true } : {}), judged: !!o?.judged, rxState: o?.rxState || null, basis: o?.basis || null, partsAt: d.partsAt, stale: false,
       });
     }
   }

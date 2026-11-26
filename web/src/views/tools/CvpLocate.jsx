@@ -23,7 +23,8 @@ export default function CvpLocateView({ onOpen }) {
     if (!v) return;
     const my = ++seq.current;
     setBusy(true); setErr(null);
-    try { const x = await fetchJson('/tools/cvp/locate', { q: v }); if (my === seq.current) setR(x); }
+    // v3.42(4회차 수정 검토): 줄이 차서 온 429 를 자동으로 다시 보내지 않는다(서버 cvp/heavyGate.js 머리말 — 공용 fetchJson 기본값은 429 도 두 번 더 보낸다)
+    try { const x = await fetchJson('/tools/cvp/locate', { q: v }, undefined, { retries: 0 }); if (my === seq.current) setR(x); }
     catch (e) { if (my === seq.current) { setErr(e); setR(null); } }
     finally { if (my === seq.current) setBusy(false); }
   };
@@ -104,6 +105,8 @@ export default function CvpLocateView({ onOpen }) {
             </STable>
           </>)}
           {r.fdbTruncated && <div style={NOTE}>⚠ MAC 테이블 결과가 상한을 넘어 일부만 봤습니다.</div>}
+          {/* v3.42(4회차 A5-F1): 답 장비가 상한을 넘으면 뒤 장비는 판정하지 않고 뺐다는 것을 밝힌다 */}
+          {r.devicesTruncated && <div style={NOTE}>⚠ 이 MAC 을 배운 스위치가 {r.devicesMax ?? '상한'}대를 넘어, 뒤 {r.devicesOmitted ?? '일부'}대의 포트는 판정하지 않고 뺐습니다(가장자리 · 지나는 곳 목록에 없습니다).</div>}
         </div>
       </>)}
     </div>

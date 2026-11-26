@@ -494,16 +494,36 @@ export function xcvrIntfOf(name) {
  */
 export function judgeOptics(parts, ports, { warnDbm = -10, faultDbm = -14 } = {}) {
   if (!Array.isArray(parts)) return parts;
-  const byName = new Map((Array.isArray(ports) ? ports : []).filter((p) => p && typeof p === 'object').map((p) => [String(p.name), p]));
+  const list = (Array.isArray(ports) ? ports : []).filter((p) => p && typeof p === 'object');
+  const byName = new Map(list.map((p) => [String(p.name), p]));
+  // v3.42(버그 점검 1회차 A1-03): QSFP 는 트랜시버 이름이 칸(Ethernet49)이고 포트는 레인(Ethernet49/1 · /2 …)이다 — 칸 이름으로만 찾아
+  //   100G 업링크 광모듈이 늘 '링크 없음' 이 되어 광량 판정 · 일 최저 기록 · 재고(예비로 셈)가 모두 틀렸다. 칸 이름 포트가 없으면 레인으로 본다(하나라도 up 이면 링크 있음).
+  const lanesOf = new Map();
+  for (const p of list) { const m = /^(.{1,60})\/\d{1,3}$/.exec(String(p.name)); if (m) { if (!lanesOf.has(m[1])) lanesOf.set(m[1], []); lanesOf.get(m[1]).push(p); } }
   const portsKnown = Array.isArray(ports);
   return parts.map((p) => {
     if (!p || p.kind !== 'xcvr' || !p.dom) return p;
     const intf = xcvrIntfOf(p.name);
-    const port = intf ? byName.get(intf) : null;
+    const port = intf ? byName.get(intf) || null : null;
+    const lanes = intf && !port ? (lanesOf.get(intf) || []) : [];
+    const known = !!port || lanes.length > 0;
     const rx = numOrNull(p.dom.rxPower);
-    const linked = !!port && port.oper === 'up';
+    /*
+     * 레인으로 링크를 보는 규칙(v3.42 — 2회차 A1-E1 → 3회차 A1-F2 로 고침):
+     *  · 레인 행이 하나거나 모두 올라옴 → 링크 있음.
+     *  · **첫 레인(/1)만 올라왔고 그 속도가 40G 이상이거나 모름** → 단일 포트 모드(40G/100G — /2~/4 는 비활성 레인) → 링크 있음.
+     *    2회차는 '모든 레인이 올라와야 링크' 라서 이 흔한 구성이 전부 '레인 일부' 가 되어 Rx 판정 · 일 기록이 사라졌다(1회차 C3 무효).
+     *  · 그 밖에 일부만 올라옴(브레이크아웃 — 첫 레인 속도 25G 이하 · 다른 레인이 올라옴) → lanesPartial: 칸 단위 DOM 값이 어두운 레인의 값일 수 있어
+     *    Rx 를 판정하지 않는다(실장비 미확인 — 안전한 쪽). 링크 없음도 아니다(재고는 '링크 있음').
+     */
+    const upLanes = lanes.filter((l) => l.oper === 'up');
+    const first = lanes.find((l) => /\/1$/.test(String(l.name))) || null;
+    const firstSpeed = first ? numOrNull(first.speedBps) : null;
+    const singleMode = upLanes.length === 1 && upLanes[0] === first && (firstSpeed == null || firstSpeed >= 40e9);
+    const linked = port ? port.oper === 'up' : lanes.length > 0 && (upLanes.length === lanes.length || singleMode);
+    const lanesPartial = !port && lanes.length > 1 && !linked && upLanes.length > 0;
     // v2.656: 링크가 내려간 것을 '확인한' 포트 — Rx 에 더해 Tx·바이어스도 판정하지 않는다(온도·전압만). 포트 상태를 모르면 예전 판정 그대로.
-    const linkDown = portsKnown && !!port && !linked;
+    const linkDown = portsKnown && known && !linked && !lanesPartial;
     const other = linkDown ? (p.domJudge?.envState ?? null) : (p.domJudge?.otherState ?? null);
     const basis = p.domJudge?.rxDevice ? 'device' : 'portal';
     let rxState = null;
@@ -512,11 +532,12 @@ export function judgeOptics(parts, ports, { warnDbm = -10, faultDbm = -14 } = {}
     let state = p.state;
     if (p.state !== 'absent' && judged) state = worse(other, rxState) || p.state;
     const optic = {
-      intf, rx, tx: numOrNull(p.dom.txPower), linked, portKnown: portsKnown && !!port, judged: rxState != null, rxState, basis: rxState != null ? basis : null,
+      intf, rx, tx: numOrNull(p.dom.txPower), linked, ...(lanesPartial ? { lanesPartial: true } : {}), portKnown: portsKnown && known, judged: rxState != null, rxState, basis: rxState != null ? basis : null,
       ...(basis === 'portal' && rxState != null ? { warnDbm, faultDbm } : {}),
     };
     let detail = p.detail || '';
     if (linkDown) detail = `${detail}${detail ? ' · ' : ''}링크 없음 — 광량·Tx·바이어스 판정 안 함`;
+    else if (lanesPartial) detail = `${detail}${detail ? ' · ' : ''}브레이크아웃 레인 일부만 링크 — 광량 판정 안 함(칸 단위 값이 어느 레인 것인지 모름)`;
     else if (rx != null && !linked) detail = `${detail}${detail ? ' · ' : ''}포트 상태 모름 — 광량 판정 안 함`;
     if (rxState === 'fault' || rxState === 'warn') detail = `${detail}${detail ? ' · ' : ''}수신 광량 ${rxState === 'fault' ? '약함(장애)' : '낮음(주의)'}`;
     const { domJudge, ...rest } = p; // 내부 판정 재료는 저장하지 않는다
@@ -907,7 +928,8 @@ export function parseMlag(text) {
     domain: (() => { const v = unwrap(pick(f, ['domainId', 'domain'])); return typeof v === 'string' || typeof v === 'number' ? str(String(v), 64) : null; })(),
     localIntf: (() => { const v = unwrap(pick(f, ['localInterface', 'localIntf', 'localIntfId'])); return typeof v === 'string' ? str(v, 64) : null; })(),
   };
-  if (Object.values(out).every((v) => v == null || v === '')) return { status: null, keys };
+  // v3.42(A2-F9): 엣지 정제(cvpEdge.cleanInfo)와 같은 조건 — 상태 · 협상 · 피어 링크 중 하나도 없으면 '못 읽음'(도메인만 있는 응답이 로컬에서는 '확인 불가', 중앙에서는 '못 읽음' 으로 갈렸다).
+  if (!out.state && !out.negotiation && !out.peerLinkState && !out.peerLink) return { status: null, keys };
   return { status: out, keys };
 }
 

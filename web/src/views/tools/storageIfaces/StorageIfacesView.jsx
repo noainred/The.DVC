@@ -62,7 +62,7 @@ export default function StorageIfacesView({ dcName = (x) => x || '미지정' }) 
       <div className="card" style={{ padding: '10px 14px', display: 'flex', gap: '8px 18px', flexWrap: 'wrap', alignItems: 'center', fontSize: 12.5 }}>
         <span><b>Unity {devs.length}대</b> <span className="muted">(SSH {methods.ssh} · REST {methods.api})</span></span>
         <span className="muted">포트 <b style={{ color: 'var(--text)' }}>{k.ports}</b> — FC {k.fc} · 이더넷 {k.eth}</span>
-        <span className="muted">속도 · 구성은 장비 수집 때마다, 사용량은 REST 장비의 <b style={{ color: 'var(--text)' }}>5분 표본</b>입니다</span>
+        <span className="muted">속도 · 구성은 장비 수집 때마다, 사용량은 <b style={{ color: 'var(--text)' }}>5분 표본</b>입니다(SSH 장비는 같은 계정으로 REST 먼저, 안 되면 SSH)</span>
         <span style={{ flexGrow: 1 }} />
         {collected.length > 0 && <span className="muted" style={{ fontFamily: 'var(--mono)' }}>마지막 수집 {timeText(Math.min(...collected))} ~ {timeText(Math.max(...collected))}</span>}
         <button type="button" className="tab" style={{ flex: 'none', padding: '4px 12px' }} disabled={loading} onClick={() => load(range)}>{loading ? '읽는 중…' : '새로 고침'}</button>
