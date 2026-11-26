@@ -107,8 +107,9 @@ export async function pushPartFaultsNow({ reason = 'timer' } = {}) {
     return _busy;
   }
   _busy = (async () => {
-    let r; let why = reason; let rounds = 0; let urgent = reason === 'event';
-    do { _again = false; r = await pushOnce(why, { urgent }); urgent = _urgentAgain; _urgentAgain = false; why = `${reason}+again`; rounds++; } while (_again && rounds < 5);
+    // urgent 가 실패한 push 에 실렸으면 다음 push(주기 포함)에 다시 싣는다 — 성공할 때까지(7회차 엣지 #3: 중앙 재시작 · 끊김 뒤 표지가 사라져 알림이 다음 중앙 주기까지 늦었다)
+    let r; let why = reason; let rounds = 0; let urgent = reason === 'event' || _urgentCarry;
+    do { _again = false; r = await pushOnce(why, { urgent }); if (urgent) _urgentCarry = !r?.ok; urgent = _urgentAgain || _urgentCarry; _urgentAgain = false; why = `${reason}+again`; rounds++; } while (_again && rounds < 5);
     if (_again) { _again = false; console.warn('[partfault-push] 재전송 요청이 5회 연속 겹쳤습니다 — 남은 요청은 다음 주기 push 에 실립니다'); }
     return r;
   })().finally(() => { _busy = null; });
@@ -116,6 +117,8 @@ export async function pushPartFaultsNow({ reason = 'timer' } = {}) {
 }
 
 let _urgentAgain = false;
+let _urgentCarry = false;   // 보내지 못한 urgent — 다음 push 에 싣는다(7회차 엣지 #3)
+export function _resetPushUrgentForTest() { _urgentAgain = false; _urgentCarry = false; }
 async function pushOnce(reason, { urgent = reason === 'event' } = {}) {
   if (!partFaultEnabled().enabled) return { ok: false, reason: '파트 장애 기능이 꺼져 있습니다' }; // 재전송 사이에 꺼졌을 수 있다
   const t0 = Date.now();

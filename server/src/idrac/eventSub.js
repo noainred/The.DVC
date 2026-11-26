@@ -33,7 +33,8 @@ export const EVT_RING = 200;
 export const EVT_DEBOUNCE_MS = 30_000;
 export const SUB_TIMEOUT_MS = 30_000;
 export const SUB_CONCURRENCY = 4;
-export const EVT_JUDGE_GAP_MS = 2_000;   // 한 묶음 안에서 판정 시작 사이 최소 간격(서버가 다시 읽힐 때마다 판정하되 이 간격으로 묶는다 — 디버깅 6회차 엣지 #2)
+export const EVT_JUDGE_FIRST_HOLD_MS = 1_000;   // 묶음의 첫 판정은 묶음이 끝나거나 이 시간이 지날 때까지 모은다(빠른 서버 여러 대를 한 보고에 — 7회차 엣지 #1)
+export const EVT_JUDGE_GAP_MS = 15_000;   // 한 묶음 안에서 앞 판정이 **끝난 뒤** 다음 판정까지 최소 간격(묶음 끝 판정은 이 간격 없이 한 번 — 6회차 엣지 #2 · 7회차 성능 P1: 2초 시작↔시작이면 큰 묶음에서 판정 · push 가 쉬지 않고 이어졌다)
 export const EVT_BATCH_MAX = 500;   // 한 번 ‘바로 점검’ 에서 다시 읽는 서버 상한(넘친 것은 정규 주기 — deferred 로 센다)
 export const SUB_SERVERS_MAX = 2000;
 // 글자 · 수만(객체 · 배열은 '' — String({toString:1}) 이 던지던 길 · 반증 A6)
@@ -160,6 +161,7 @@ const DEFAULT_DEPS = {
   now: () => Date.now(),
   debounceMs: EVT_DEBOUNCE_MS,
   judgeGapMs: EVT_JUDGE_GAP_MS,
+  judgeFirstHoldMs: EVT_JUDGE_FIRST_HOLD_MS,
   /** 부품 장애 판정(중앙) · push(엣지) — 진행 중이면 각 모듈이 끝난 뒤 한 번 더로 합친다. */
   judge: async (reason) => {
     if (config.agent.centralUrl) await (await import('../partfault/push.js')).pushPartFaultsNow({ reason });
@@ -186,26 +188,32 @@ const DEFAULT_DEPS = {
   },
 };
 /**
- * 묶음 안 판정 고리 — kick() 은 서버 하나를 다시 읽을 때마다. 판정이 돌고 있으면 끝난 뒤 한 번 더(몇 번 kick 해도 한 번) ·
- *   시작 사이는 judgeGapMs 이상(500대 묶음이 판정을 쉬지 않고 돌리지 않게). settle() 은 남은 판정까지 끝난 뒤 돌아온다.
+ * 묶음 안 판정 고리 — kick() 은 서버 하나를 다시 읽을 때마다. 첫 판정은 묶음이 끝나거나 judgeFirstHoldMs 까지 모아 한 번 · 그다음은 앞 판정이 끝난 뒤
+ *   judgeGapMs(15초) 마다 한 번까지 · 묶음이 끝나면(settle) 남은 것을 바로 한 번. 판정이 돌고 있으면 끝난 뒤 한 번 더(몇 번 kick 해도 한 번).
+ *   settle() 은 남은 판정까지 끝난 뒤 돌아온다.
  */
 function judgeLoop(reason) {
-  let dirty = false; let loop = null; let lastStart = -Infinity;
+  let dirty = false; let loop = null; let lastEnd = -Infinity; let first = true;
+  let wakeEnd = null; const ended = new Promise((res) => { wakeEnd = res; });
   const kick = () => {
     dirty = true;
     if (loop) return;
     loop = (async () => {
       try {
         while (dirty) {
-          const wait = lastStart + _deps.judgeGapMs - _deps.now();
-          if (wait > 0) await new Promise((res) => { setTimeout(res, wait).unref?.(); });
-          dirty = false; lastStart = _deps.now();
+          // 첫 판정은 묶음이 끝나거나 judgeFirstHoldMs 가 지날 때까지 모은다 — 빠른 서버 여러 대가 첫 보고 · 둘째 보고로 갈라지면 엣지에서는 둘째가 중앙 묶음 창을 기다렸다(7회차 엣지 #1)
+          if (first) { first = false; await Promise.race([ended, new Promise((res) => { setTimeout(res, _deps.judgeFirstHoldMs).unref?.(); })]); }
+          // 다음 판정은 앞 판정이 끝난 뒤 judgeGapMs — 묶음이 끝나면(settle) 기다리지 않고 남은 것을 한 번에(판정 수 ≤ 2 + 묶음 길이 / 간격)
+          const wait = lastEnd + _deps.judgeGapMs - _deps.now();
+          if (wait > 0) await Promise.race([ended, new Promise((res) => { setTimeout(res, wait).unref?.(); })]);
+          dirty = false;
           try { await _deps.judge(reason); } catch (e) { console.warn(`[bm-events] 판정 실패 — ${String(e?.message || e).slice(0, 160)}`); }
+          lastEnd = _deps.now();
         }
       } finally { loop = null; }
     })();
   };
-  return { kick, settle: async () => { while (loop) await loop; } };
+  return { kick, settle: async () => { wakeEnd(); while (loop) await loop; } };
 }
 let _deps = DEFAULT_DEPS;
 export function _setEventDepsForTest(d) { _deps = d ? { ...DEFAULT_DEPS, ...d } : DEFAULT_DEPS; }

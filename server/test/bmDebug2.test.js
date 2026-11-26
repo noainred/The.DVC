@@ -166,7 +166,7 @@ test('성능 — 정규 주기는 이벤트 읽기를 기다렸다 돈다(건너
   // 5회차 성능: 이벤트 읽기는 그 서버만 기다린다 · 정규 주기는 이벤트가 맡은 서버의 인벤토리를 넘긴다 · 동시 상한 하나
   assert.match(ps, /for \(let i = 0; i < 4 && _cycleInflight\.has\(sid\); i \+= 1\) await _cycleInflight\.get\(sid\);/);
   assert.match(ps, /inventoryStale\(s\.id, INVENTORY_MAX_AGE_MS\) && !_eventPending\.has\(String\(s\.id\)\)/);
-  assert.deepEqual([(ps.match(/await acquireSlot\(\);/g) || []).length, (ps.match(/await acquireSlot\('event'\);/g) || []).length], [1, 1], '정규 · 이벤트 둘 다 같은 상한(6회차 성능 P1 — 이벤트는 정규 대기자 뒤 · 동작은 bmDebug3)');
+  assert.deepEqual([(ps.match(/await acquireSlot\(\);/g) || []).length, (ps.match(/await acquireSlot\('event'\);/g) || []).length], [1, 2], '정규 · 이벤트 둘 다 같은 상한(6회차 성능 P1 — 이벤트는 정규 대기자 뒤 · 동작은 bmDebug3)');
   assert.match(ps, /if \(_cycleInflight\.has\(sid\)\) \{ skippedForCycle\.push\(sid\); return; \}/, '이벤트 읽기는 정규 주기가 읽는 서버를 빼고 돌려준다(5회차 엣지 #1)');
   assert.doesNotMatch(ps, /_runningEventP|_cycleWaiting/);
   assert.match(src('../src/routes/api/bmFolders.js'), /const drop = \(k\) => \{ const old = _trendMemo\.get\(k\); if \(old\?\.timer\) clearTimeout\(old\.timer\);/);

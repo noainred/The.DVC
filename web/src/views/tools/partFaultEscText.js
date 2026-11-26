@@ -11,7 +11,7 @@ export const DAY_LABEL = Object.freeze({ mon: '월', tue: '화', wed: '수', thu
 const DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 const int = (v) => (Number.isInteger(v) ? v : null);
 
-const WHY = Object.freeze({ off: '꺼짐', 'partfault-off': '부품 장애 점검이 꺼져 있어 보내지 않음', demo: '데모 점검이라 보내지 않음', 'state-unreadable': '진행 기록을 읽지 못해 보내지 않음' });
+const WHY = Object.freeze({ off: '꺼짐', 'partfault-off': '부품 장애 점검이 꺼져 있어 보내지 않음', demo: '데모 점검이라 보내지 않음', 'state-unreadable': '진행 기록을 읽지 못해 보내지 않음', 'settings-unreadable': '단계 · 당직 설정을 읽지 못해 보내지 않음' });
 /**
  * 행의 esc 표지 → { text, title, tone, canAck }. 표지가 없으면(구버전 응답 · 대상 아님 · 아무 단계도 없음) null.
  *  · step = 받는 곳에 간 가장 높은 단계 · tried = 그보다 높은데 가지 않은 단계(gaveUp = 다시 시도를 그만둠).
@@ -33,7 +33,10 @@ export function escMarkView(esc, { canAck = false, enabled = false } = {}) {
   if (live && (esc.paused || esc.held)) {
     // 풀리면 ‘다시 세는’ 것이 아니라 그동안 시각이 지난 단계 가운데 가장 높은 것을 그 회차에 바로 보낸다(건너뛴 단계는 결과에 밝힘 — 디버깅 2회차 판정 #4)
     const LATER = '그동안 시각이 지난 단계 가운데 가장 높은 단계를 바로 보냅니다(건너뛴 단계는 결과에 밝힙니다)';
-    const why = esc.held ? `정비 창 보류 중인 장비라 단계 알림을 보내지 않습니다 — 창이 끝나면 ${LATER}` : `${WHY[esc.paused] || '지금은 단계 알림을 보내지 않습니다'} — 사유가 풀리면 ${LATER}`;
+    // 멈춘 회차(점검 꺼짐 · 데모 · 설정 못 읽음)는 다시 켜기 · 새 정책의 시작 시각을 적지 않는다 — 풀린 첫 회차가 그것을 한다. 그래서 ‘바로 보냄’ 은 이 정책으로 이미 세던 장애만이고,
+    //   멈춘 동안 단계 알림을 켰거나(다시 켬 포함) 새 정책이 걸렸으면 풀린 때부터 1단계부터 센다(디버깅 7회차 화면 H1 — 문구가 늘 ‘바로 보냄’ 이라 말했다)
+    const why = esc.held ? `정비 창 보류 중인 장비라 단계 알림을 보내지 않습니다 — 창이 끝나면 ${LATER}`
+      : `${WHY[esc.paused] || '지금은 단계 알림을 보내지 않습니다'} — 사유가 풀리면 이 정책으로 이미 세던 장애는 ${LATER} · 멈춘 동안 단계 알림을 켰거나(다시 켬 포함) 새 정책이 걸렸으면 풀린 때부터 1단계부터 셉니다`;
     return { text: esc.held ? '정비 창 보류' : '보내지 않음', tone: 'gray', canAck: live && canAck && !!esc.ackId, title: `${why}${step ? ` · ${step}단계까지는 갔습니다` : ''}` };
   }
   const ack = live && canAck && !!esc.ackId;

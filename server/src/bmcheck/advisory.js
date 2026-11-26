@@ -88,6 +88,8 @@ export function parseAdvisoryCsv(text) {
       // 사유를 가른다 — 영문 · 숫자 모델 글자가 없음(‘-’ · ‘전체’) / 제조사 이름뿐(디버깅 5회차 화면 F2)
       if (mr && !rawToks(mr).length) { errors.push({ line, reason: '모델 칸에 영문 · 숫자 모델 이름이 없습니다 — 모든 모델이면 칸을 비우십시오.' }); continue; }
       if (mr && !toks(mr).length && !rawToks(mr).some((w) => FAMILY.has(w))) { errors.push({ line, reason: '모델 칸이 제조사 이름뿐이라 대조할 수 없습니다 — 모델(예: R740xd) · 제품군(예: PowerEdge)을 적거나 칸을 비우십시오(비우면 그 종류의 모든 서버).' }); continue; }
+      // 세대 · 판 낱말뿐(제조사 이름 + M5 · Gen10 · V2 — 제품군 · 모델 없음)이면 다른 제조사의 같은 세대 모델에도 맞는다 — 올릴 때 거절한다(디버깅 7회차 판정 #2)
+      if (mr && toks(mr).length && toks(mr).every((w) => VARIANT.test(w)) && !rawToks(mr).some((w) => FAMILY.has(w))) { errors.push({ line, reason: '모델 칸이 세대 · 판 낱말(M5 · Gen10 · V2 …)뿐이라 다른 제조사의 같은 세대 모델에도 맞습니다 — 제품군(예: PRIMERGY M5 · ProLiant Gen10)이나 모델(예: RX2540 M5)을 함께 적으십시오.' }); continue; }
     }
     if (!type) { errors.push({ line, reason: `종류는 ${FW_TYPES.join(' · ')} 중 하나여야 합니다.` }); continue; }
     if (!fixed || cmpVersion(fixed, fixed) == null) { errors.push({ line, reason: '고친 버전이 숫자 . 꼴이 아닙니다(순서를 정할 수 없습니다).' }); continue; }

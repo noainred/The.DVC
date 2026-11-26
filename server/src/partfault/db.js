@@ -291,6 +291,8 @@ export function partFaultDbExists() {
   try { return fs.existsSync(DB_PATH()); } catch { return false; }
 }
 
+/** openFaults 와 같되 DB 를 못 열면 null(‘열린 장애 0건’ 과 가른다 — 알림 단계 회차가 빈 목록으로 기록을 지우지 않게 · 디버깅 7회차 판정 #3). */
+export async function openFaultsOrNull(o = {}) { const h = await open(); return h ? openFaults(o) : null; }
 /** 지금 열려 있는 장애 전량 — 전이 계산의 입력. `agent` 열이 함께 나온다(법인 축). */
 export async function openFaults({ scope = '', limit = 20_000 } = {}) {
   const h = await open();

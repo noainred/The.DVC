@@ -8,7 +8,7 @@
  *  · 받는 곳 하나 이상에 ‘갔다’ 를 확인한 것만 ‘보냄’ — 메일 꺼짐 · 시간당 한도 · 채널 실패 · 당직 없음은 ‘안 감’ 으로 적고 다음 회차에 다시(ESC_RETRY_MAX 번까지 · 반증 A8 · B1).
  */
 import { config } from '../config.js';
-import { openFaults } from './db.js';
+import { openFaultsOrNull } from './db.js';
 import { alertOf } from './notify.js';
 import { notify as sendAlert, deliveryOutcome } from '../alerts.js';
 import { sendPortalMail } from '../mail/service.js';
@@ -77,7 +77,8 @@ async function sendOne(s, deps, now) {
 }
 
 const DEFAULT_DEPS = {
-  open: () => openFaults(), mail: (o) => sendPortalMail(o), channels: (a) => sendAlert(a), now: () => Date.now(),
+  // DB 를 못 열면 ‘열린 장애 0건’ 이 아니다 — 그 회차를 건너뛴다(빈 목록으로 계획하면 진행 · 확인 기록이 전부 지워지고 DB 가 돌아오면 확인한 장애에도 단계가 다시 갔다 — 디버깅 7회차 판정 #3)
+  open: async () => { const r = await openFaultsOrNull(); if (!r) throw new Error('부품 장애 DB 를 열지 못했습니다'); return r; }, mail: (o) => sendPortalMail(o), channels: (a) => sendAlert(a), now: () => Date.now(),
   partFaultSwitch: async () => (await import('./settings.js')).partFaultEnabled(),
   hold: async (open, now) => {
     const M = await import('../bmusage/maint/partfaultHold.js');
@@ -96,6 +97,8 @@ export async function runEscalationNow() {
     const deps = _deps;
     const now = deps.now();
     const settings = escalationStore.get();
+    // 단계 · 당직 설정을 못 읽은 회차는 계획 · 저장을 하지 않는다 — 빈 설정(꺼짐)으로 돌면 옛 기록의 그때 정책(lp)이 빈 목록으로 굳어 설정이 돌아온 뒤 같은 단계를 다시 보냈다(디버깅 7회차 판정 #1)
+    if (escalationStore.loadError()) { _heldKeys = new Set(); _last = { at: now, enabled: false, sent: 0, delivered: 0, failed: 0, deferred: 0, why: 'settings-unreadable', errors: ['단계 · 당직 설정을 읽지 못해 이번 회차를 건너뛰었습니다(빈 설정으로 진행 기록을 바꾸지 않습니다).'] }; return _last; }
     if (escalationStateUnreadable()) { _heldKeys = new Set(); _last = { at: now, enabled: settings.enabled, sent: 0, delivered: 0, failed: 0, deferred: 0, why: 'state-unreadable', errors: ['진행 기록을 읽지 못해 보내지 않았습니다(보낸 단계를 모르는 채 보내지 않는다).'] }; return _last; }
     const state = loadEscalationState();
     let open = [];

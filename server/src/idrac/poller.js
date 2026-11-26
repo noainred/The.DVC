@@ -109,28 +109,42 @@ const BUSY = Symbol('idrac-poll-busy'); // v2.591(감사 P1): 재진입 가드�
 //   · 정규 주기는 이벤트 읽기가 맡았거나 맡을 서버의 인벤토리는 읽지 않는다(이벤트 쪽이 읽는다) · 지금 읽고 있는 서버는 그 주기에 건너뛴다(eventBusy).
 //   · 두 쪽이 **동시 상한 하나**(pollConcurrency)를 함께 쓴다(각자 풀을 쓰면 세션이 상한의 두 배까지 갔다 — 5회차 성능 D2).
 //   · 자리가 나면 **정규 · 수동 주기 대기자에게 먼저** 넘긴다 — 이벤트 읽기(한 대에 인벤토리까지 요청 수 배)가 FIFO 로 번갈아 자리를 쥐면 상한이 작을 때
-//     느린 장비 하나의 이벤트만으로 함대 정규 수집이 밀렸다(6회차 성능 P1: 상한 1 에서 정규 4/12). 이벤트 읽기는 주기 사이 · 남는 자리에서 돈다.
+//     느린 장비 하나의 이벤트만으로 함대 정규 수집이 밀렸다(6회차 성능 P1: 상한 1 에서 정규 4/12).
+//   · 단 상한이 2 이상이면 이벤트 읽기에 **몫**(상한의 1/4 · 최소 1)을 둔다 — 정규 대기자가 있어도 그 몫까지는 이벤트에 먼저 넘긴다.
+//     몫이 없으면 함대가 상한보다 클 때 이벤트 읽기가 남은 정규 주기를 다 기다렸다(7회차 엣지 #4: 기본 16 · 함대 160 에서 이벤트 → 첫 요청 12.7초).
+//     상한 1 은 몫 0 — 정규 먼저(6회차 P1).
 let _eventRunning = false;
 const _eventIds = new Set();      // 이벤트 읽기가 지금 읽는 서버
 const _eventPending = new Set();  // 지금 이벤트 묶음이 맡은 서버(아직 안 읽은 것 포함)
 const _cycleInflight = new Map(); // 정규 주기가 지금 읽고 있는 서버 → 끝나면 풀리는 약속
-const _slot = { n: 0, q: [], qe: [] };    // 정규 · 이벤트가 함께 쓰는 동시 상한 · q = 정규 · 수동 대기 · qe = 이벤트 읽기 대기
+const _slot = { n: 0, ev: 0, q: [], qe: [] };    // 정규 · 이벤트가 함께 쓰는 동시 상한 · ev = 이벤트 읽기가 쥔 자리 · q = 정규 · 수동 대기 · qe = 이벤트 읽기 대기
+const slotMax = () => Math.max(1, Number(config.idrac.pollConcurrency) || 1);
+const eventShare = (max) => (max > 1 ? Math.max(1, Math.floor(max / 4)) : 0);   // 정규 대기자가 있어도 이벤트에 먼저 넘기는 자리 수(7회차 엣지 #4)
 async function acquireSlot(kind = 'cycle') {
-  const max = Math.max(1, Number(config.idrac.pollConcurrency) || 1);
-  if (_slot.n < max && (kind !== 'event' || !_slot.q.length)) { _slot.n += 1; return; }
-  await new Promise((r) => { (kind === 'event' ? _slot.qe : _slot.q).push(r); });   // 풀어 주는 쪽이 자리를 그대로 넘긴다(n 그대로)
+  const max = slotMax();
+  if (kind === 'event') {
+    // 바로 잡는 길은 이벤트 몫이 남았을 때만 — 몫 밖(상한 1 등)은 늘 줄에 서고 한 틱 늦게 받는다. 정규 주기가 읽던 그 서버를 기다리던 이벤트는
+    //   그 방문이 끝나는 순간(done) 깨어나 정규 작업자가 다음 서버 자리를 잡기 전에 빈 자리를 가로챘다(7회차 성능 P2 — 상한 1 에서 정규 2~3/12)
+    if (_slot.n < max && _slot.ev < eventShare(max)) { _slot.n += 1; _slot.ev += 1; return; }
+    await new Promise((r) => { _slot.qe.push(r); setImmediate(drainEventSlots); });   // 넘겨주는 쪽(drain · release)이 n · ev 를 맞춘다
+    return;
+  }
+  if (_slot.n < max) { _slot.n += 1; return; }
+  await new Promise((r) => { _slot.q.push(r); });   // 풀어 주는 쪽이 자리를 그대로 넘긴다(n 그대로)
 }
-// 정규 대기자 먼저(6회차 성능 P1). 정규 작업자는 서버 하나를 끝내고 다음 서버 자리를 **다음 마이크로태스크에** 잡으므로, 정규 대기자가 없을 때
-//   이벤트 대기자에게는 한 틱(setImmediate) 늦게 넘긴다 — 바로 넘기면 주기 도중 자리를 이벤트가 가로챘다.
-function releaseSlot() {
+// 정규 대기자 먼저(6회차 성능 P1) — 이벤트 몫이 남았으면 그 몫까지는 이벤트 먼저(7회차 엣지 #4). 정규 작업자는 서버 하나를 끝내고 다음 서버 자리를
+//   **다음 마이크로태스크에** 잡으므로, 정규 대기자가 없을 때 이벤트 대기자에게는 한 틱(setImmediate) 늦게 넘긴다 — 바로 넘기면 주기 도중 자리를 이벤트가 가로챘다.
+function releaseSlot(kind = 'cycle') {
+  if (kind === 'event') _slot.ev -= 1;
+  if (_slot.qe.length && _slot.ev < eventShare(slotMax())) { _slot.ev += 1; _slot.qe.shift()(); return; }   // n 그대로 넘긴다
   const r = _slot.q.shift();
   if (r) { r(); return; }
   _slot.n -= 1;
   if (_slot.qe.length) setImmediate(drainEventSlots);
 }
 function drainEventSlots() {
-  const max = Math.max(1, Number(config.idrac.pollConcurrency) || 1);
-  while (_slot.n < max && _slot.qe.length && !_slot.q.length) { _slot.n += 1; _slot.qe.shift()(); }
+  const max = slotMax();
+  while (_slot.n < max && _slot.qe.length && (!_slot.q.length || _slot.ev < eventShare(max))) { _slot.n += 1; _slot.ev += 1; _slot.qe.shift()(); }
 }
 async function pollOnce({ manual = false, only = null, onRefreshed = null } = {}) {
   if (only) {
@@ -226,9 +240,12 @@ async function pollOnceInner({ manual = false, only = null, onRefreshed = null }
       for (let i = 0; i < 4 && _cycleInflight.has(sid); i += 1) await _cycleInflight.get(sid);
       if (_cycleInflight.has(sid)) { skippedForCycle.push(sid); return; }   // 그래도 겹치면(새 주기가 다시 잡음) 이벤트 쪽이 다시 시도한다(5회차 엣지 #1)
       await acquireSlot('event');
-      if (_cycleInflight.has(sid)) { releaseSlot(); skippedForCycle.push(sid); return; }
+      // 자리를 기다리는 동안 정규 주기가 그 서버를 잡았으면 — 빼고 끝내지 않고 자리를 놓고 그 방문이 끝나기를 기다렸다 다시 잡는다(몇 번까지).
+      //   빼면 30초 뒤 다시 시도로 넘어가 주기 꼬리의 서버는 다시 시도 5번이 다 빠지기도 했다(7회차 엣지 #2: 42~58초)
+      for (let i = 0; i < 4 && _cycleInflight.has(sid); i += 1) { releaseSlot('event'); await _cycleInflight.get(sid); await acquireSlot('event'); }
+      if (_cycleInflight.has(sid)) { releaseSlot('event'); skippedForCycle.push(sid); return; }
       _eventIds.add(sid);
-      try { await pollServer(s); } finally { _eventIds.delete(sid); _eventPending.delete(sid); releaseSlot(); }
+      try { await pollServer(s); } finally { _eventIds.delete(sid); _eventPending.delete(sid); releaseSlot('event'); }
       return;
     }
     await acquireSlot();

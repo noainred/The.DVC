@@ -141,11 +141,12 @@ async function runOnce({ notify = true, reason = 'timer' } = {}) {
 }
 
 /**
- * v3.52 ⑬ — 엣지가 장비 이벤트 뒤 보낸 보고(urgent)를 받으면 판정을 곧 한 번(30초에 한 번으로 묶음 · 재진입 가드는 runPartFaultsNow 가).
+ * v3.52 ⑬ — 엣지가 장비 이벤트 뒤 보낸 보고(urgent)를 받으면 판정을 곧 한 번(PART_FAULT_SOON_MS 에 한 번으로 묶음 · 재진입 가드는 runPartFaultsNow 가).
  * 중앙 주기(기본 10분)를 기다리면 엣지의 ‘바로 받기’ 가 화면 · 알림에 늦게 닿았다(디버깅 1회차 엣지 #5).
+ * 묶음은 5초 — 엣지는 이벤트 묶음 안에서 서버를 다시 읽을 때마다 보고하므로(6회차 judgeLoop · 시작 사이 2초) 30초로 묶으면 둘째 보고부터 30초 뒤에 판정했다(7회차 엣지 #1).
  */
 let _soonTimer = null; let _soonAt = 0;
-export const PART_FAULT_SOON_MS = 30_000;
+export const PART_FAULT_SOON_MS = 5_000;
 export function runPartFaultsSoon(reason = 'edge-event') {
   if (isEdge() || _soonTimer) return false;
   const wait = Math.max(0, PART_FAULT_SOON_MS - (Date.now() - _soonAt));

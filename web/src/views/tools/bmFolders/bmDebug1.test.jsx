@@ -49,7 +49,8 @@ describe('디버깅 1회차 화면', () => {
     expect(demo).toMatchObject({ text: '보내지 않음', tone: 'gray', canAck: true });
     expect(demo.title).toContain('데모 점검이라 보내지 않음');
     expect(demo.title).not.toContain('2단계 시각에 보냅니다');
-    expect(demo.title).toContain('풀리면 그동안 시각이 지난 단계 가운데 가장 높은 단계를 바로 보냅니다');   // 2회차 판정 #4 — ‘다시 센다’ 가 아니다
+    expect(demo.title).toContain('풀리면 이 정책으로 이미 세던 장애는 그동안 시각이 지난 단계 가운데 가장 높은 단계를 바로 보냅니다');   // 2회차 판정 #4 — ‘다시 센다’ 가 아니다
+    expect(demo.title).toContain('멈춘 동안 단계 알림을 켰거나(다시 켬 포함) 새 정책이 걸렸으면 풀린 때부터 1단계부터 셉니다');   // 7회차 화면 H1 — 그 경우는 바로 보내지 않는다
     const held = escMarkView({ ackId: 'a', covered: true, step: 2, acked: false, held: true }, on);
     expect(held.text).toBe('정비 창 보류');
     expect(held.title).toContain('2단계까지는 갔습니다');
