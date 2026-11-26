@@ -20,6 +20,7 @@ import { config } from '../config.js';
 import { openSqlite, createLockRetry, chmodDbFiles } from '../util/sqliteOpen.js';
 import { placementIssue, overflowOnResize, serialKeyOf, LIMITS } from './layout.js';
 import { buildSnapshot, validateSnapshot, countsOf, diffSnapshots, VERSION_KEEP, capExceeded, restorableSnapshot } from './versions.js';
+import { tagIndexOf, stripTags } from './textMask.js';
 
 const lockRetry = createLockRetry();
 const fileOf = () => process.env.RACK_DB || path.join(config.dbDir || config.configDir, 'rack.db');
@@ -343,6 +344,18 @@ export async function corpOf(kind, id) {
 }
 
 /** 한 법인 원장에 이미 놓인 시리얼 키(미배치 계산용). */
+/** 그 법인 원장에 놓인 장비의 시리얼 **원문**(주 + 추가) — 시리얼을 가리는 판본의 글자 가림(textMask.js)에 쓴다. 응답에 그대로 싣지 말 것. */
+export async function corpSerials(corpId) {
+  const db = await need();
+  const out = [];
+  for (const r of db.prepare(`SELECT p.serial AS s, p.extra_serials AS x FROM rack_place p JOIN rack_rack r ON r.id = p.rack_id
+    JOIN rack_room m ON m.id = r.room_id JOIN rack_site t ON t.id = m.site_id WHERE t.corp_id = ? AND (p.serial <> '' OR p.extra_serials <> '[]')`).all(String(corpId || ''))) {
+    if (r.s) out.push(r.s);
+    try { for (const x of JSON.parse(r.x || '[]')) if (typeof x === 'string' && x) out.push(x); } catch { /* */ }
+  }
+  return out;
+}
+
 export async function placedSerialKeys(corpId) {
   const db = await need();
   const out = new Set();
@@ -680,16 +693,16 @@ export async function listVersions(corpId) {
  */
 const DETAIL_CACHE = new Map();   // `${corp}\0${vid}\0${latestId}` → 결과(최근 40개) — 최신 판이 바뀌면 키가 달라져 자연히 버려진다
 const DETAIL_CACHE_MAX = 40;
-export async function versionDetail(corpId, versionId) {
+export async function versionDetail(corpId, versionId, { hideTags = false } = {}) {
   const db = await need();
   const latest = db.prepare('SELECT id FROM rack_version WHERE corp_id = ? ORDER BY id DESC LIMIT 1').get(String(corpId))?.id ?? 0;
-  const key = `${corpId}\0${Number(versionId)}\0${latest}\0${typeGen}`;
+  const key = `${corpId}\0${Number(versionId)}\0${latest}\0${typeGen}\0${hideTags ? 1 : 0}`;
   if (DETAIL_CACHE.has(key)) return structuredClone(DETAIL_CACHE.get(key));
-  const out = versionDetailRaw(db, corpId, versionId);
+  const out = versionDetailRaw(db, corpId, versionId, { hideTags });
   if (out) { DETAIL_CACHE.set(key, out); while (DETAIL_CACHE.size > DETAIL_CACHE_MAX) DETAIL_CACHE.delete(DETAIL_CACHE.keys().next().value); }
   return out ? structuredClone(out) : out;
 }
-function versionDetailRaw(db, corpId, versionId) {
+function versionDetailRaw(db, corpId, versionId, { hideTags = false } = {}) {
   const v = db.prepare('SELECT id, ts, user, action, detail, data FROM rack_version WHERE id = ? AND corp_id = ?').get(Number(versionId), String(corpId));
   if (!v) return null;
   const snap = unpackSnap(v.data, corpId);
@@ -700,11 +713,19 @@ function versionDetailRaw(db, corpId, versionId) {
   const now = validateSnapshot(currentSnapshot(db, corpId), corpId);
   const typeOk = db.prepare('SELECT 1 AS x FROM rack_type WHERE id = ?');
   const target = restorableSnapshot(snap, (id) => !!typeOk.get(id));   // 되돌리면 실제로 들어갈 모습(점검 C10)
+  // 1회차 점검 S1: 시리얼을 가리는 판본은 차이의 이름(장비 표시 이름)에 든 시리얼도 걷어 낸다 — 판 세 개(앞 · 이 판 · 지금)에 있는 시리얼 전부로(지금 원장에 없는 옛 장비 포함).
+  const hide = (d) => {
+    if (!hideTags || !d) return d;
+    const tags = [];
+    for (const sn of [prevSnap, snap, now]) for (const p of sn?.places || []) { for (const x of [p.serial, ...(p.extraSerials || [])]) if (x) { tags.push(x); const k = serialKeyOf(x); if (k) tags.push(k); } }
+    const idx = tagIndexOf(tags);
+    return { ...d, items: d.items.map((it) => ({ ...it, name: stripTags(it.name, idx) })) };
+  };
   return {
     version: head, readable: true, counts: countsOf(snap),
-    changes: prevSnap ? diffSnapshots(prevSnap, snap) : null,
+    changes: prevSnap ? hide(diffSnapshots(prevSnap, snap)) : null,
     prevUnreadable: !!prev && !prevSnap,   // 점검 C13: 앞 판이 '없음' 과 '손상' 을 가른다(화면이 '가장 오래된 판' 으로 잘못 설명했다)
-    restore: now ? diffSnapshots(now, target) : null,
+    restore: now ? hide(diffSnapshots(now, target)) : null,
   };
 }
 

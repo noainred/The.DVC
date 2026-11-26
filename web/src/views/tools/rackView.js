@@ -137,6 +137,18 @@ export function matchUnplaced(u, q) {
   return [u?.name, u?.hostname, u?.model, u?.serviceTag].filter(Boolean).join(' ').toLowerCase().includes(s);
 }
 
+/**
+ * 미배치 서버를 놓을 때 입력 창에 채울 표시 이름 — 등록부 이름이 **주소 꼴**(IP 로 등록한 서버는 이름이 곧 관리 주소)이거나 서비스 태그 그대로면 비운다.
+ * 표시 이름은 조회 계정 모두에게 보이는 이름이라 관리 주소 · 태그를 기본값으로 넣지 않는다(1회차 점검 S1 — 서버도 비관리자 판본에서 다시 가린다).
+ */
+export function defaultLabelOf(u) {
+  const name = String(u?.name || '').trim();
+  if (!name) return '';
+  if (/^\[?[0-9a-f:.]+\]?(:\d+)?$/i.test(name) && /[.:]/.test(name) && /\d/.test(name)) return '';   // IPv4 · IPv6 리터럴(포트 포함)
+  if (u?.serviceTag && name.toLowerCase() === String(u.serviceTag).trim().toLowerCase()) return '';
+  return name;
+}
+
 /** 이력 action → 글자. */
 export const ACTION_LABEL = Object.freeze({
   'site.add': '데이터센터 추가', 'site.rename': '데이터센터 이름 변경', 'site.remove': '데이터센터 삭제',

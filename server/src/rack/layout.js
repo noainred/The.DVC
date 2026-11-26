@@ -33,8 +33,10 @@ export const LIMITS = Object.freeze({
   maxPlacesPerRack: 120,
 });
 
-const CTRL = /[\u0000-\u001f\u007f]/g;
-/** 한 줄 문자열 정리 — 제어 문자 제거 · 앞뒤 공백 · 길이 상한. 문자열이 아니면 ''(숫자는 문자열로). */
+// 1회차 점검 S3: C0 만 지우면 양방향(U+202A~202E · 2066~2069) · 폭 없는(U+200B~200F · 2060~2064 · FEFF) · C1(U+0080~009F) 문자가 이름에 남아
+//   눈으로 같은 이름이 둘 생기고(중복 검사 통과) 이력 · 감사 화면의 글자 순서가 뒤집힌다 — 다른 입력 정리(bmusage/annotations.js 등)와 같은 문자 집합.
+const CTRL = new RegExp('[\\u0000-\\u001f\\u007f-\\u009f\\u200b-\\u200f\\u202a-\\u202e\\u2060-\\u2069\\ufeff]', 'g');
+/** 한 줄 문자열 정리 — 제어 · 양방향 · 폭 없는 문자 제거 · 앞뒤 공백 · 길이 상한. 문자열이 아니면 ''(숫자는 문자열로). */
 export function cleanText(v, max) {
   const s = typeof v === 'string' ? v : (typeof v === 'number' && Number.isFinite(v) ? String(v) : '');
   return s.slice(0, max * 4).replace(CTRL, ' ').trim().slice(0, max);

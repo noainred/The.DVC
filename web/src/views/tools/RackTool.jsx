@@ -15,7 +15,7 @@ import { downloadFailText } from '../downloadFailText.js';
 import {
   U_PX, KIND_LABEL, FACE_LABEL, colorOf, legendOf, fmtU, placesForFace, placementIssue, dropStartU, boxOf, wattText,
   roomSummary, matchPlace, ACTION_LABEL, partChips, chipColor, statusKeyOf,
-  diffCountText, DIFF_OP_LABEL, DIFF_TYPE_LABEL, fieldsText, matchUnplaced, UNPLACED_PAGE,
+  diffCountText, DIFF_OP_LABEL, DIFF_TYPE_LABEL, fieldsText, matchUnplaced, UNPLACED_PAGE, defaultLabelOf,
 } from './rackView.js';
 
 const card = { background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 12, minWidth: 0 };
@@ -597,7 +597,7 @@ export default function RackTool() {
     } else if (d.type === 'server') {
       // 미배치 서버 — 높이를 모르므로 1U 로 가정하지 않고 입력 창을 연다(위치는 놓은 자리로 채운다).
       setModalErr('');
-      setModal({ kind: 'place', init: { rackId: rack.id, uStart: c.uStart, uSize: '', face: 'full', kind: 'server', label: d.name || '', model: d.model || '', serial: d.serviceTag || '' } });
+      setModal({ kind: 'place', init: { rackId: rack.id, uStart: c.uStart, uSize: '', face: 'full', kind: 'server', label: defaultLabelOf(d), model: d.model || '', serial: d.serviceTag || '' } });
     }
   };
 
@@ -751,7 +751,7 @@ export default function RackTool() {
                       <div style={{ ...mono, fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{u.name || u.hostname || u.serverId}</div>
                       <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>{[u.model, u.serviceTag].filter(Boolean).join(' · ') || '—'}</div>
                     </div>
-                    {edit && canEdit && racks.length ? <button type="button" style={{ ...btn, height: 26 }} onClick={() => { setModalErr(''); setModal({ kind: 'place', init: { rackId: racks[0].id, kind: 'server', label: u.name || '', model: u.model || '', serial: u.serviceTag || '' } }); }}>놓기</button> : null}
+                    {edit && canEdit && racks.length ? <button type="button" style={{ ...btn, height: 26 }} onClick={() => { setModalErr(''); setModal({ kind: 'place', init: { rackId: racks[0].id, kind: 'server', label: defaultLabelOf(u), model: u.model || '', serial: u.serviceTag || '' } }); }}>놓기</button> : null}
                   </div>
                 ))}
                 </div>

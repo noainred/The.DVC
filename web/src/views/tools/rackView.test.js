@@ -94,6 +94,19 @@ describe('rackView — 화면 계산', () => {
     expect(V.UNPLACED_PAGE).toBeGreaterThan(0);
   });
 
+  it('defaultLabelOf: 주소 꼴 · 서비스 태그 그대로인 이름은 기본 표시 이름으로 채우지 않는다', () => {
+    expect(V.defaultLabelOf({ name: 'kr-esx-01', serviceTag: 'ABC1234' })).toBe('kr-esx-01');
+    expect(V.defaultLabelOf({ name: '10.20.30.41', serviceTag: 'ABC1234' })).toBe('');
+    expect(V.defaultLabelOf({ name: '10.20.30.41:443' })).toBe('');
+    expect(V.defaultLabelOf({ name: 'fd00::1' })).toBe('');
+    expect(V.defaultLabelOf({ name: '[fd00::1]:443' })).toBe('');
+    expect(V.defaultLabelOf({ name: 'abc1234', serviceTag: 'ABC1234' })).toBe('');
+    expect(V.defaultLabelOf({ name: 'face', serviceTag: 'X' })).toBe('face');       // 16진 글자뿐이어도 . : 가 없으면 이름
+    expect(V.defaultLabelOf({ name: 'idrac-ABC1234', serviceTag: 'ABC1234' })).toBe('idrac-ABC1234');   // 태그가 든 이름은 서버가 가림 판본에서 걷어 낸다
+    expect(V.defaultLabelOf({ name: 'r1.dc' })).toBe('r1.dc');
+    expect(V.defaultLabelOf(null)).toBe('');
+  });
+
   it('diffCountText: 0 인 항목은 빼고, 바뀐 것이 없으면 그렇게 말한다', () => {
     expect(V.diffCountText({ placeAdd: 2, placeMove: 1, rackRemove: 1 })).toBe('랙 삭제 1 / 장비 추가 2 · 이동 1');
     expect(V.diffCountText({ placeAdd: 0 })).toBe('바뀐 것 없음');
