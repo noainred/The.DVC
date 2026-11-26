@@ -2,7 +2,7 @@
 //   못 읽은 것 · 판정하지 않은 것은 정상에도 문제에도 넣지 않고 따로 센다 · ‘뒤처짐’ ‘다수 값’ 이 옳고 그름이 아니라는 말을 화면에 쓴다.
 import { describe, it, expect } from 'vitest';
 import {
-  daysText, monthsText, chkQuickMatch, CHK_QUICK, chkCounts, chkChips, chkAsideText, chkSignals, warrantyView, fwView, biosView, biosLabel,
+  daysText, monthsText, chkQuickMatch, CHK_QUICK, chkCounts, chkChips, chkAsideText, chkNotices, chkSignals, warrantyView, fwView, biosView, biosLabel,
   importSummaryText, importRowNote, IMPORT_ACTION, WTY_TEXT, FW_TEXT, FW_ROW_TEXT, BIOS_TEXT, BIOS_ROW_TEXT,
 } from './checkText.js';
 import { filterRows, cleanView } from '../bmFoldersText.js';
@@ -67,9 +67,16 @@ describe('목록 — 거르기 · 요약', () => {
     expect(chkChips(chkCounts([]), 90)).toEqual([]);
   });
   it('따로 센 것 — 못 읽음 · 보내지 않음 · 기준 없음 · 미분류', () => {
-    expect(chkAsideText(chkCounts(rows))).toBe('펌웨어 못 읽음 1 · 엣지에서 받지 못함 1 / 펌웨어 기준 없음 1 / BIOS 못 읽음 0 · 엣지에서 받지 못함 1 / BIOS 미분류(판정 안 함) 1');
+    // BIOS ‘견줄 서버 없음’ 도 따로 센 것에 든다(반증 B8 — 펌웨어 기준 없음은 세는데 BIOS 는 빠져 판정되지 않은 서버가 어디에도 없었다)
+    expect(chkAsideText(chkCounts(rows))).toBe('펌웨어 못 읽음 1 · 엣지에서 받지 못함 1 / 펌웨어 기준 없음 1 / BIOS 못 읽음 0 · 엣지에서 받지 못함 1 / BIOS 견줄 서버 없음 1 / BIOS 미분류(판정 안 함) 1');
     expect(chkAsideText(chkCounts([row({ w: 'ok', fw: 'ok', bios: 'ok' })]))).toBe('');
     expect(chkAsideText(null)).toBe('');
+  });
+  it('목록 안내 — 서버가 판정하지 않았다고 실어 준 표지를 글자로(칩이 사라질 뿐 아무 말이 없지 않게 — 반증 B5)', () => {
+    expect(chkNotices({ soonDays: 90, assets: { n: 3, at: 1 } })).toEqual([]);
+    expect(chkNotices({ assets: { unreadable: true } })).toEqual(['자산 원장 파일을 읽지 못해 보증을 판정하지 않았습니다 — 원장이 비었다는 뜻이 아닙니다(서비스 점검에서 확인).']);
+    expect(chkNotices({ assets: {}, noHw: true, baselineUnreadable: true })).toEqual(['하드웨어 정보를 찾지 못해 펌웨어 · BIOS 를 판정하지 않았습니다.', '관리자 지정 펌웨어 기준 파일을 읽지 못해 다수 버전으로만 대조했습니다(서비스 점검에서 확인).']);
+    expect(chkNotices(null)).toEqual([]); expect(chkNotices(undefined)).toEqual([]); expect(chkNotices('x')).toEqual([]);
   });
 });
 
@@ -159,7 +166,18 @@ describe('펌웨어 기준선 구역', () => {
     const sp = fwView({ state: 'split', behind: 0, open: 2, rows: [FW.rows[3], FW.rows[4]] });
     expect(sp.badge).toEqual({ label: '갈림 — 판정 못 함', color: 'gray' }); expect(sp.head).toBe('판정하지 못한 구성요소 2개');
     expect(sp.why).toBe('뒤처진 구성요소는 없지만, 같은 모델 서버끼리 버전이 갈려 다수가 없거나 이 서버 안에서 버전이 섞인 구성요소가 2개 있습니다 — ‘뒤처진 것 없음’ 으로 보지 않습니다.');
-    expect(fwView({ state: 'split', rows: [] }).why).toMatch(/구성요소가 있습니다/); expect(fwView({ state: 'split', rows: [] }).head).toBe('판정하지 못한 구성요소 —개');
+    // 수를 모르면 단위를 붙이지 않는다(값 없는 ‘—개’ 를 만들지 않는다 — 반증 B13)
+    expect(fwView({ state: 'split', rows: [] }).why).toMatch(/구성요소가 있습니다/); expect(fwView({ state: 'split', rows: [] }).head).toBe('판정하지 못한 구성요소 있음');
+    // 기준보다 높은 구성요소만 있으면 ‘다른 구성요소 없음’ 이라 하지 않는다(반증 B7)
+    expect(fwView({ state: 'ok', behind: 0, ahead: 1, rows: [FW.rows[1]] }).head).toBe('뒤처진 것 없음 · 기준보다 높은 구성요소 1개');
+    expect(fwView({ state: 'ok', behind: 0, ahead: 0, rows: [FW.rows[1]] }).head).toBe('기준과 다른 구성요소 없음');
+    expect(fwView({ state: 'ok', behind: 0, rows: [FW.rows[1]] }).head).toBe('기준과 다른 구성요소 없음');
+    // ‘기준 없음’ 의 이유는 상황마다(반증 B9): 대조하는 구성요소가 없다 · 같은 모델이 이 서버뿐이다 · 그 밖
+    expect(fwView({ state: 'none', rows: [], peers: 3 }).why).toMatch(/대조하는 구성요소\(BIOS · iDRAC · NIC · 저장장치 컨트롤러 · HBA\)가 없습니다/);
+    expect(fwView({ state: 'none', rows: [], peers: 3 }).why).not.toMatch(/관리자가 기준을 지정/);
+    const lone = fwView({ state: 'none', rows: [FW.rows[4]], peers: 1 });
+    expect(lone.why).toBe('같은 법인에 같은 모델 서버가 이 서버뿐이라 다수 버전이 없습니다 — 관리자가 기준을 지정하면 대조합니다.');
+    expect(lone.note).not.toMatch(/1대로 냅니다/);   // 혼자인데 ‘다수 버전은 1대로 냅니다’ 라고 쓰지 않는다
     // 인벤토리 읽은 시각을 그대로 넘긴다(없으면 null — 0 으로 만들지 않는다)
     expect(fwView(FW, { invAt: 123 }).invAt).toBe(123); expect(fwView(FW, { invAt: '' }).invAt).toBeNull(); expect(fwView(FW).invAt).toBeNull(); expect(fwView(null, { invAt: 5 }).invAt).toBeNull();
     expect(fwView({ state: 'none', rows: [FW.rows[4]] }).why).toMatch(/대조할 기준이 없습니다/);
@@ -177,14 +195,14 @@ describe('BIOS 설정 편차 구역', () => {
   it('다른 설정이 먼저 — 다름 → 다수 없음 → 값 없음 → 같음(같은 것 안에서는 서버 순서)', () => {
     const v = biosView(B, { path: 'SVC\\DB', model: 'R750' });
     expect(v.badge).toEqual({ label: '다른 설정 2', color: 'amber' });
-    expect(v.head).toBe('같은 폴더 · 같은 모델 9대와 견줌 — 설정을 읽은 8대');
+    expect(v.head).toBe('같은 폴더 · 같은 모델 9대(이 서버 포함) 중 설정을 읽은 8대로 견줌');
     expect(v.rows.map((x) => [x.label, x.value, x.major, x.majorSub, x.stateText])).toEqual([
       ['System Profile', 'PerfPerWattOptimizedDapc', 'PerfOptimized', '7대', '다름'], ['Turbo Mode', 'Enabled', 'Disabled', '7대', '다름'],
       ['Secure Boot', 'Enabled', '—', '', '다수 없음'], ['Memory Operating Mode', '—', 'OptimizerMode', '8대', '값 없음'],
       ['Boot Mode', 'Uefi', 'Uefi', '8대', '같음'], ['UnknownKey', 'x', 'x', '8대', '같음']]);
     expect(v.note).toBe('다수 값이 옳다는 뜻은 아닙니다 — 같은 일을 하는 서버끼리 다른 점만 보여 줍니다.');
     expect(v.rows.map((x) => x.majorText)).toEqual(['다수 PerfOptimized · 7대', '다수 Disabled · 7대', '다수 없음', '다수 OptimizerMode · 8대', '다수 Uefi · 8대', '다수 x · 8대']);
-    expect(biosView({ ...B, group: { size: 9, known: 9 } }).head).toBe('같은 폴더 · 같은 모델 9대와 견줌');
+    expect(biosView({ ...B, group: { size: 9, known: 9 } }).head).toBe('같은 폴더 · 같은 모델 9대(이 서버 포함)를 견줌');
     expect(biosLabel('ProcVirtualization')).toBe('Virtualization Technology'); expect(biosLabel('Nope')).toBe('Nope'); expect(biosLabel(null)).toBe('');
   });
   it('미분류 · 못 읽음 · 보내지 않음 · 견줄 서버 없음은 이유를 쓴다', () => {
@@ -194,7 +212,14 @@ describe('BIOS 설정 편차 구역', () => {
     expect(biosView({ state: 'unsent', rows: [] }).why).toMatch(/엣지에서 BIOS 설정을 받지 못했습니다/);
     const sp = biosView({ state: 'split', diff: 0, open: 3, rows: [B.rows[0], B.rows[4]], group: { size: 2, known: 2 } });
     expect(sp.badge).toEqual({ label: '갈림 — 다수 없음', color: 'gray' }); expect(sp.why).toMatch(/‘다른 설정 없음’ 으로 보지 않습니다/);
-    expect(biosView({ state: 'none', rows: [B.rows[4]], group: { size: 1, known: 1 } }).why).toMatch(/2대 이상/);
+    // 견주지 않은 상태 옆에 ‘N대와 견줌’ 이라 쓰지 않는다 · ‘견줄 서버 없음’ 의 이유는 묶음 크기 · 읽은 대수에 맞게(반증 B6)
+    const alone = biosView({ state: 'none', rows: [B.rows[4]], group: { size: 1, known: 1 } });
+    expect([alone.head, alone.why]).toEqual(['', '같은 폴더에 같은 모델 서버가 이 서버뿐입니다 — 2대 이상 있어야 견줍니다.']);
+    const pair = biosView({ state: 'none', rows: [B.rows[4]], group: { size: 2, known: 1 } });
+    expect([pair.head, pair.why]).toEqual(['', '같은 폴더 · 같은 모델의 다른 서버 BIOS 설정을 읽지 못해 견줄 값이 없습니다.']);
+    expect(biosView({ state: 'none', rows: [], group: { size: 3, known: 3 } }).why).toMatch(/견줄 수 있는 설정이 없습니다/);
+    expect(biosView({ state: 'unread', rows: [], group: { size: 2, known: 1 } }).head).toBe('');
+    expect(biosView({ state: 'unsent', rows: [], group: { size: 2, known: 1 } }).head).toBe('');
     expect(biosView({ state: 'ok', rows: [B.rows[0]], diff: 0, group: { size: 2, known: 2 } }).badge).toEqual({ label: '다른 설정 없음', color: 'green' });
     expect(biosView(null).why).toBe('BIOS 설정 값을 받지 못했습니다.'); expect(biosView(null, { noHw: true }).why).toMatch(/하드웨어 정보를 찾지 못해/);
   });
@@ -215,5 +240,15 @@ describe('자산 원장 올리기 글자 · 상태 표', () => {
   });
   it('상태마다 글자와 배지 색이 있다(색만으로 가르지 않는다) · 문구에 백틱이 없다', () => {
     for (const t of [WTY_TEXT, FW_TEXT, FW_ROW_TEXT, BIOS_TEXT, BIOS_ROW_TEXT, IMPORT_ACTION]) for (const v of Object.values(t)) { expect(v.label).toBeTruthy(); expect(v.badge).toMatch(/^(red|amber|green|gray|blue)$/); expect(v.label).not.toContain('`'); }
+    // 글자 함수가 **내놓는 글자 전부**에 백틱이 없다(이름표만 보면 설명 · 이유 문구는 보지 않는다 — 반증 T2)
+    const out = JSON.stringify([
+      chkChips(chkCounts([row({ w: 'ok', fw: 'ok', bios: 'ok' })]), 90), chkAsideText(chkCounts([row({ fw: 'unread', bios: 'unplaced' }), row({ fw: 'split', bios: 'split' }), row({ fw: 'none', bios: 'none' }), row({ fw: 'unsent', bios: 'unsent' })])),
+      chkNotices({ assets: { unreadable: true }, noHw: true, baselineUnreadable: true }), chkSignals(row({ w: 'expired', wd: -1, fw: 'behind', fwn: 1, bios: 'diff', biosn: 1 })), chkSignals(row({ w: 'soon', wd: 3 })),
+      ...['expired', 'soon', 'ok', 'unknown'].map((st) => warrantyView({ state: st, why: 'no-end', end: '2027-01-01', daysLeft: 3 }, { soonDays: 90, admin: true })), warrantyView(null, { unreadable: true }), warrantyView(null),
+      ...['ok', 'behind', 'split', 'none', 'unread', 'unsent'].map((st) => fwView({ state: st, behind: 1, open: 1, peers: 3, skipped: 2, rows: [] }, { baselineUnreadable: true })), fwView(null), fwView(null, { noHw: true }),
+      ...['ok', 'diff', 'split', 'none', 'unread', 'unsent', 'unplaced'].map((st) => biosView({ state: st, diff: 1, rows: [], group: { size: 3, known: 2 } })), biosView(null), biosView(null, { noHw: true }),
+      importRowNote({ action: 'update', fields: ['a'], cleared: ['a'] }), importSummaryText({ add: 1, update: 1, same: 1, error: 1, remove: 1 }, { replace: true }),
+    ]);
+    expect(out).not.toContain('`'); expect(out.length).toBeGreaterThan(2000);
   });
 });

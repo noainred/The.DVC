@@ -3342,6 +3342,8 @@ table.bmf-t tr.bmf-picked td { background: rgba(59, 130, 246, .08); }
 /* white-space: normal — 전역 tbody td 가 nowrap 이라, 두지 않으면 긴 구성요소 이름이 한 줄로 버텨 400px 드로어에서 상태 열이 화면 밖으로 밀린다(스크린샷 판독) */
 .bmd-ct th, .bmd-ct td { padding: 6px 8px; vertical-align: top; white-space: normal; }
 .bmd-ct td { word-break: keep-all; overflow-wrap: anywhere; }
+/* 배지는 한 줄로 — 옆 칸이 길면 배지 칸이 좁아져 ‘오/류’ · ‘같/음’ 처럼 글자마다 꺾였다(반증 B4) */
+.bmd-ct .badge { white-space: nowrap; }
 .bmd-ct-nm { display: block; font-weight: 600; }
 .bmd-ct-sub { display: block; font-size: 11px; margin-top: 1px; }
 .bmd-ct-btn { display: block; margin-top: 4px; padding: 3px 8px; font-size: 11.5px; white-space: nowrap; }

@@ -89,7 +89,7 @@ const modalAbove = () => typeof document !== 'undefined' && !!document.querySele
  * @param note  호출부의 쓰기 결과 알림({ ok, warn, text }) — 호출부는 본문 위 카드에 그리는데 그 자리는 가림막 뒤다(좁은 화면은 화면 밖).
  *              드로어가 열린 뒤 · 서버를 넘긴 뒤에 **새로 온 것만** 단추 줄 아래에 보인다(반증 A6 — 실패가 드로어 안에서 보이지 않았다).
  */
-export default function BmDrawer({ r, rows, corps, corpName, scoped, op, busy, onClose, onMove, note = null, admin = false }) {
+export default function BmDrawer({ r, rows, corps, corpName, scoped, op, busy, onClose, onMove, note = null, admin = false, gen = '', onChanged = null }) {
   const rootRef = useRef(null);
   const backRef = useRef(null);
   const bodyRef = useRef(null);
@@ -108,7 +108,9 @@ export default function BmDrawer({ r, rows, corps, corpName, scoped, op, busy, o
   const [chkRev, setChkRev] = useState(0);
   const [baseBusy, setBaseBusy] = useState(false);
   const [baseNote, setBaseNote] = useState(null);   // { key(서버), ok, text } — 그 서버의 결과만 보인다
-  const chk = useOnce('/tools/bm-folders/check', r?.key || '', { n: chkRev }, !!r);
+  //   g = 목록의 세대(호출부가 준다) — 드로어에서 폴더에 넣기 · 빼기를 하면 목록이 다시 읽히고, 그때 점검도 다시 묻는다
+  //   (반증 B1: 폴더에 넣은 뒤에도 BIOS 구역이 ‘미분류 — 판정 안 함’ 그대로였다. 묶음은 배치로 정해진다).
+  const chk = useOnce('/tools/bm-folders/check', r?.key || '', { n: chkRev, g: gen }, !!r);
   // 열 때 포커스를 드로어로(키보드 ↑↓ · Esc) · 닫을 때 원래 자리로
   useEffect(() => {
     backRef.current = typeof document !== 'undefined' ? document.activeElement : null;
@@ -152,6 +154,8 @@ export default function BmDrawer({ r, rows, corps, corpName, scoped, op, busy, o
       if (!x || x.ok === false) throw new Error(x?.reason || '요청을 처리하지 못했습니다.');
       setBaseNote({ key: r.key, ok: true, text: version ? `‘${row.label}’ 기준을 ${version} 로 지정했습니다(모델 ${model}).` : `‘${row.label}’ 기준 지정을 해제했습니다 — 다수 버전으로 다시 대조합니다.` });
       setChkRev((n) => n + 1);
+      // 기준은 전 법인의 같은 모델에 걸린다 — 목록(칩 · 머리 배지 · 신호가 쓰는 행 값)도 다시 읽는다(반증 B2: 구역은 ‘뒤처진 것 없음’ 인데 머리 배지는 ‘펌웨어 뒤처짐 1’ 이었다)
+      try { onChanged?.(); } catch { /* 목록 다시 읽기 실패는 호출부가 알린다 */ }
     } catch (e) { setBaseNote({ key: r.key, ok: false, text: opErrorText(e) }); }
     finally { setBaseBusy(false); }
   };

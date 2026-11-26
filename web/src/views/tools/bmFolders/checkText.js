@@ -132,8 +132,23 @@ export function chkAsideText(counts) {
   const bNo = c.bios.unread + c.bios.unsent;
   if (bNo) p.push(`BIOS 못 읽음 ${c.bios.unread} · 엣지에서 받지 못함 ${c.bios.unsent}`);
   if (c.bios.split) p.push(`BIOS 갈림(다수 없음) ${c.bios.split}`);
+  if (c.bios.none) p.push(`BIOS 견줄 서버 없음 ${c.bios.none}`);
   if (c.bios.unplaced) p.push(`BIOS 미분류(판정 안 함) ${c.bios.unplaced}`);
   return p.join(' / ');
+}
+
+/**
+ * 목록 위 안내 — 서버가 ‘그 판정을 하지 않았다’ 고 실어 준 표지를 글자로(반증 B5: 칩이 사라질 뿐 아무 말이 없었다).
+ * @param {object|null} check 목록 응답의 check
+ * @returns {string[]}
+ */
+export function chkNotices(check) {
+  const c = check && typeof check === 'object' ? check : {};
+  const out = [];
+  if (c.assets?.unreadable) out.push('자산 원장 파일을 읽지 못해 보증을 판정하지 않았습니다 — 원장이 비었다는 뜻이 아닙니다(서비스 점검에서 확인).');
+  if (c.noHw) out.push('하드웨어 정보를 찾지 못해 펌웨어 · BIOS 를 판정하지 않았습니다.');
+  if (c.baselineUnreadable) out.push('관리자 지정 펌웨어 기준 파일을 읽지 못해 다수 버전으로만 대조했습니다(서비스 점검에서 확인).');
+  return out;
 }
 
 /** 드로어 신호 줄 — 목록 행의 chk 로(상세를 받기 전에도 같은 말). [{ kind, tone, badge, label, fact }] */
@@ -200,11 +215,20 @@ export function fwView(fw, { noHw = false, baselineUnreadable = false, invAt = n
     const n = numOrNull(fw.open);
     why = `뒤처진 구성요소는 없지만, 같은 모델 서버끼리 버전이 갈려 다수가 없거나 이 서버 안에서 버전이 섞인 구성요소가 ${n != null ? `${n}개 ` : ''}있습니다 — ‘뒤처진 것 없음’ 으로 보지 않습니다.`;
   }
-  else if (fw.state === 'none') why = '대조할 기준이 없습니다 — 같은 법인에 같은 모델 서버가 2대 이상 같은 버전을 쓰거나 관리자가 기준을 지정해야 합니다.';
+  else if (fw.state === 'none') {
+    // 이유는 상황마다 다르다(반증 B9): 대조하는 구성요소가 아예 없다 · 같은 모델이 이 서버뿐이다 · 그 밖(버전이 다 달라 다수가 없다 등)
+    if (!rows.length) why = '이 서버의 펌웨어 목록에 대조하는 구성요소(BIOS · iDRAC · NIC · 저장장치 컨트롤러 · HBA)가 없습니다 — 판정하지 않습니다.';
+    else if (numOrNull(fw.peers) != null && fw.peers <= 1) why = '같은 법인에 같은 모델 서버가 이 서버뿐이라 다수 버전이 없습니다 — 관리자가 기준을 지정하면 대조합니다.';
+    else why = '대조할 기준이 없습니다 — 같은 법인의 같은 모델 서버 2대 이상이 같은 버전을 쓰거나 관리자가 기준을 지정해야 합니다.';
+  }
   const peers = numOrNull(fw.peers);
-  const head = fw.state === 'behind' ? `기준과 다른 구성요소 ${fw.behind}개` : fw.state === 'ok' ? '기준과 다른 구성요소 없음' : fw.state === 'split' ? `판정하지 못한 구성요소 ${numOrNull(fw.open) ?? '—'}개` : '';
+  // 머리 글자: 기준보다 높은 것이 있으면 ‘다른 구성요소 없음’ 이라 하지 않는다(반증 B7) · 수를 모르면 단위를 붙이지 않는다(B13)
+  const ahead = numOrNull(fw.ahead); const openN = numOrNull(fw.open);
+  const head = fw.state === 'behind' ? `기준과 다른 구성요소 ${fw.behind}개`
+    : fw.state === 'ok' ? (ahead > 0 ? `뒤처진 것 없음 · 기준보다 높은 구성요소 ${ahead}개` : '기준과 다른 구성요소 없음')
+      : fw.state === 'split' ? (openN != null ? `판정하지 못한 구성요소 ${openN}개` : '판정하지 못한 구성요소 있음') : '';
   const notes = ['‘뒤처짐’ 은 기준과 다르다는 뜻이고 올려야 한다는 판정이 아닙니다.'];
-  if (peers != null && peers > 0) notes.push(`다수 버전은 같은 법인 · 같은 모델에서 펌웨어를 읽은 ${peers}대로 냅니다.`);
+  if (peers != null && peers >= 2) notes.push(`다수 버전은 같은 법인 · 같은 모델에서 펌웨어를 읽은 ${peers}대로 냅니다.`);
   if (numOrNull(fw.skipped) > 0) notes.push(`디스크 · 진단 등 ${fw.skipped}개는 대조하지 않습니다(같은 것끼리 묶을 수 없습니다).`);
   if (baselineUnreadable) notes.push('관리자 지정 기준 파일을 읽지 못해 다수 버전으로만 대조했습니다.');
   return { state: fw.state, badge: { label: fw.state === 'behind' ? `뒤처짐 ${fw.behind}` : t.label, color: t.badge }, head, rows, note: rows.length ? notes.join(' ') : '', why, invAt: numOrNull(invAt) };
@@ -229,8 +253,15 @@ export function biosView(bios, { noHw = false, path = '', model = '' } = {}) {
   else if (bios.state === 'unread') why = '이 서버의 BIOS 설정을 읽지 못했습니다 — 같음에도 다름에도 넣지 않습니다.';
   else if (bios.state === 'unsent') why = '이 서버를 수집하는 엣지에서 BIOS 설정을 받지 못했습니다(엣지 판이 낮거나 · 그 엣지가 아직 읽지 못했거나 · 중앙이 그 엣지의 이름을 확인하지 못했습니다) — 같음에도 다름에도 넣지 않습니다.';
   else if (bios.state === 'split') why = '다수 값과 다른 설정은 없지만, 같은 묶음 서버끼리 값이 갈려 다수가 없는 설정이 있습니다 — ‘다른 설정 없음’ 으로 보지 않습니다(어느 쪽이 옳다고도 하지 않습니다).';
-  else if (bios.state === 'none') why = '견줄 서버가 없습니다 — 같은 폴더에 같은 모델 서버가 2대 이상 있어야 다수 값이 생깁니다.';
-  const head = size != null && size > 0 ? `같은 폴더 · 같은 모델 ${size}대와 견줌${known != null && known < size ? ` — 설정을 읽은 ${known}대` : ''}` : '';
+  else if (bios.state === 'none') {
+    // 이유는 묶음 크기 · 읽은 대수에 따라 다르다(반증 B6 — 2대가 있는데 ‘2대 이상 있어야’ 라고 썼다)
+    if (size != null && size <= 1) why = '같은 폴더에 같은 모델 서버가 이 서버뿐입니다 — 2대 이상 있어야 견줍니다.';
+    else if (known != null && known <= 1) why = '같은 폴더 · 같은 모델의 다른 서버 BIOS 설정을 읽지 못해 견줄 값이 없습니다.';
+    else why = '견줄 수 있는 설정이 없습니다(같은 설정을 읽은 서버가 2대 이상이어야 다수 값이 생깁니다).';
+  }
+  // 머리 글자는 **견준 상태**(다름 · 갈림 · 없음)에만 — 못 읽음 · 받지 못함 · 견줄 서버 없음 옆에 ‘N대와 견줌’ 이라 쓰지 않는다. 대수는 이 서버를 포함한 묶음 크기
+  const compared = bios.state === 'ok' || bios.state === 'diff' || bios.state === 'split';
+  const head = compared && size != null && size > 0 ? `같은 폴더 · 같은 모델 ${size}대(이 서버 포함)${known != null && known < size ? ` 중 설정을 읽은 ${known}대로 견줌` : '를 견줌'}` : '';
   return { state: bios.state, badge: { label: bios.state === 'diff' ? `다른 설정 ${bios.diff}` : t.label, color: t.badge }, head, rows, path, model,
     note: rows.length ? '다수 값이 옳다는 뜻은 아닙니다 — 같은 일을 하는 서버끼리 다른 점만 보여 줍니다.' : '', why };
 }

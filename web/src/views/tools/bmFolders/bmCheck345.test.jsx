@@ -34,6 +34,10 @@ describe('보증 · 계약 구역', () => {
       '보증 만료일까지 90일 이하로 남으면 ‘곧 끝남’ 으로 봅니다.']) expect(t).toContain(s);
     const u = text(await warranty({ chk: { d: D({ warranty: { ...W, contract: '' } }), err: '' }, admin: false }));
     expect(u).not.toContain('유지보수 계약'); expect(u).not.toContain('SYNTH-C1');
+    // ‘곧’ 의 기준 일수는 서버 값 — 다른 값을 주면 그 값이 보인다(시험 자료가 90 뿐이면 화면에 90 을 박아도 통과한다: 반증 T3)
+    const d45 = text(await warranty({ chk: { d: D({ soonDays: 45 }), err: '' }, admin: true }));
+    expect(d45).toContain('보증 만료일까지 45일 이하로 남으면'); expect(d45).not.toContain('90일');
+    expect(await warranty({ chk: { d: D(), err: '' }, admin: true })).not.toContain('`');
   });
   it('모름 · 원장을 못 읽음 · 조회 실패는 그 말을 쓴다(빈 값 줄로 덮지 않는다)', async () => {
     const none = text(await warranty({ chk: { d: D({ warranty: { state: 'unknown', why: 'no-entry', end: '', daysLeft: null } }), err: '' } }));
@@ -52,7 +56,8 @@ describe('펌웨어 기준선 · BIOS 설정 편차 구역', () => {
     for (const s of ['펌웨어 기준선', '뒤처짐 1', '기준과 다른 구성요소 1개', '구성요소', '설치 버전 · 기준', 'BIOS BIOS 2.19.1 기준 2.21.2 · 다수 버전 · 3대 중 2대 뒤처짐',
       'Integrated Dell Remote Access Controller iDRAC 7.00.00.171 기준 7.00.00.171 · 관리자 지정 같음', 'Synth NIC NIC 섞임 기준 없음 섞임', 'Turbo Mode Enabled 다수 Disabled · 2대 다름',
       '‘뒤처짐’ 은 기준과 다르다는 뜻이고 올려야 한다는 판정이 아닙니다.', '디스크 · 진단 등 2개는 대조하지 않습니다',
-      'BIOS 설정 편차', '다른 설정 1', '같은 폴더 · 같은 모델 3대와 견줌', '다수 값이 옳다는 뜻은 아닙니다']) expect(t).toContain(s);
+      'BIOS 설정 편차', '다른 설정 1', '같은 폴더 · 같은 모델 3대(이 서버 포함)를 견줌', '다수 값이 옳다는 뜻은 아닙니다']) expect(t).toContain(s);
+    expect(html).not.toContain('`');   // 그려진 글자에 백틱이 없다(소스의 작은따옴표 문자열만 보던 스윕은 JSX 글자 · title 을 보지 않았다 — 반증 T2)
     expect(t.indexOf('Turbo Mode')).toBeLessThan(t.indexOf('Boot Mode'));   // 다른 설정이 먼저
     expect(t.indexOf('Turbo Mode')).toBeGreaterThan(0);
     // 판정에 쓴 인벤토리를 읽은 시각 — 두 구역 머리에(없으면 쓰지 않는다 · 0 을 지어내지 않는다)
@@ -73,6 +78,9 @@ describe('펌웨어 기준선 · BIOS 설정 편차 구역', () => {
     expect((html.match(/>지정 해제</g) || []).length).toBe(1);
     expect(html).toContain('전 법인의 같은 모델에 적용됩니다');
     expect(await fwbios({ chk: { d: D({ canBaseline: true }), err: '' } })).not.toContain('기준으로 지정');   // 처리기 없음
+    // 처리기가 있어도 **서버가 허용하지 않은 계정**(canBaseline false)에는 단추가 없다(변이 w26: 처리기만 보면 누구에게나 단추가 그려진다)
+    const denied = await fwbios({ chk: { d: D({ canBaseline: false }), err: '' }, onBaseline: () => {} });
+    expect(denied).not.toContain('기준으로 지정'); expect(denied).not.toContain('지정 해제');
     const busy = await fwbios({ chk: { d: D({ canBaseline: true }), err: '' }, onBaseline: () => {}, busy: true, baseNote: { ok: false, text: '저장하지 못했습니다.' } });
     expect(busy).toMatch(/<button[^>]*disabled=""[^>]*>기준으로 지정/); expect(busy).toContain('role="alert"'); expect(text(busy)).toContain('저장하지 못했습니다.');
   });
@@ -92,6 +100,8 @@ describe('펌웨어 기준선 · BIOS 설정 편차 구역', () => {
     expect(spHtml).not.toContain('>뒤처진 것 없음<'); expect(spHtml).not.toContain('>다른 설정 없음<'); expect(spHtml).not.toContain('badge green');
     expect(await fwbios({ chk: { d: null, err: '' } })).toBe('');
     expect(await fwbios({ chk: { d: null, err: 'x' } })).toBe('');
+    // 값이 남아 있는데 조회 실패가 서 있으면 그리지 않는다(위 줄은 d 가 null 이라 먼저 끝난다 — err 검사를 따로 고정: 반증 T1)
+    expect(await fwbios({ chk: { d: D(), err: '실패' } })).toBe('');
     expect(await fwbios({ r: { ...R, kind: 'esxi' }, chk: { d: D(), err: '' } })).toBe('');
   });
 });
@@ -113,7 +123,7 @@ describe('소스 스윕 — 연결 · 규약', () => {
   it('드로어 — 점검 1건 조회(열 때 · 기준을 지정하면 다시) · 구역 자리 · 관리자 판본 표지 · 훅은 조기 return 위', () => {
     const s = read('./BmDrawer.jsx');
     const early = s.indexOf('if (!r) return null;');
-    for (const hook of ["useOnce('/tools/bm-folders/check', r?.key || '', { n: chkRev }, !!r)", 'const [chkRev, setChkRev] = useState(0);', 'const [baseBusy, setBaseBusy] = useState(false);']) {
+    for (const hook of ["useOnce('/tools/bm-folders/check', r?.key || '', { n: chkRev, g: gen }, !!r)", 'const [chkRev, setChkRev] = useState(0);', 'const [baseBusy, setBaseBusy] = useState(false);']) {
       const i = s.indexOf(hook); expect(i, hook).toBeGreaterThan(0); expect(i, hook).toBeLessThan(early);
     }
     expect(s).toMatch(/afterIdent=\{<WarrantySection chk=\{chk\} admin=\{admin && !scoped\} \/>\}/);
@@ -124,7 +134,15 @@ describe('소스 스윕 — 연결 · 규약', () => {
     expect(at('aria-label="하드웨어 요약"')).toBeLessThan(at('{afterSpec}')); expect(at('{afterSpec}')).toBeLessThan(at('aria-label="부품 목록"'));
     // 기준 지정은 관리 라우트로 · 성공하면 다시 묻는다 · 다른 서버의 결과를 보이지 않는다
     expect(s).toMatch(/postJson\('\/admin\/bm-fw-baseline', \{ model, key: row\.key, label: row\.label, type: row\.type, version \}\)/);
-    expect(s).toMatch(/setChkRev\(\(n\) => n \+ 1\);/);
+    // 다시 묻기 · 목록 다시 읽기는 **성공 경로**(try 안 · catch 앞)에 있다 — 실패 쪽으로 옮기면 잡힌다(반증 T5) · 결과 글자는 그 서버 키로
+    const ob = s.slice(s.indexOf('const onBaseline = async'), s.indexOf('const onKey = (e) =>'));
+    const pos = (x) => { const i = ob.indexOf(x); expect(i, x).toBeGreaterThan(0); return i; };
+    expect(pos('setChkRev((n) => n + 1);')).toBeLessThan(pos('} catch (e) {'));
+    expect(pos('onChanged?.();')).toBeLessThan(pos('} catch (e) {'));
+    expect(pos("setBaseNote({ key: r.key, ok: true,")).toBeLessThan(pos('} catch (e) {'));
+    expect(pos('} catch (e) {')).toBeLessThan(pos('setBaseNote({ key: r.key, ok: false,'));
+    // 목록의 세대가 바뀌면 점검을 다시 묻는다(폴더에 넣기 · 빼기 뒤 BIOS 묶음이 달라진다 — 반증 B1)
+    expect(read('../BmFolders.jsx')).toMatch(/gen=\{`\$\{d\.rev \?\? ''\}:\$\{d\.at \?\? ''\}`\} onChanged=\{\(\) => load\(\)\}/);
   });
   it('목록 — 칩 · 따로 센 것 · 자산 원장 단추(전체 범위 관리자만) · 드로어에 관리자 표지', () => {
     const s = read('../BmFolders.jsx');
@@ -132,6 +150,9 @@ describe('소스 스윕 — 연결 · 규약', () => {
     expect(s).toMatch(/chkChips\(chkN, d\.check\?\.soonDays\)\.map\(/);
     expect(s).toMatch(/\{d\.canFleet \? <button type="button" className="logout-btn" style=\{btn\} onClick=\{\(\) => setLedger\(true\)\}/);
     expect(s).toMatch(/\{ledger \? <AssetLedger meta=\{d\.check\?\.assets\} onClose=\{\(\) => setLedger\(false\)\} onChanged=\{\(\) => load\(\)\} \/> : null\}/);
+    // 판정하지 않았다는 안내를 목록에도 쓴다 · 칩이 사라진 거르기는 푼다(반증 B5)
+    expect(s).toMatch(/\{chkNotices\(d\.check\)\.map\(/);
+    expect(s).toMatch(/if \(d && CHK_QUICK\.includes\(quick\) && !chkKeys\.split\(','\)\.includes\(quick\)\) setQuick\(''\);/);
     // 훅(chkN)은 조기 return 위
     const first = s.indexOf('const chkN = useMemo('); const ret = s.search(/\n {2}if \((?:err|!d)[^\n]*\) return /);
     expect(first).toBeGreaterThan(0); expect(ret).toBeGreaterThan(0); expect(first).toBeLessThan(ret);
@@ -140,6 +161,13 @@ describe('소스 스윕 — 연결 · 규약', () => {
     const s = read('./AssetLedger.jsx');
     expect(s).toMatch(/postJson\('\/admin\/bm-assets\/import', \{ csv: text, dryRun, replace, \.\.\.\(dryRun \? \{\} : \{ expect: res\?\.base \}\) \}\)/);
     expect(s).toMatch(/const checked = !!res && res\.sig === sig;/);   // 검증한 글자 · 바꾸기 선택과 같을 때만 적용이 열린다
+    // 바꾸기 + 오류 줄이면 적용이 잠긴다 · 적용이 끝나면 목록을 다시 읽고(onChanged) 다시 검증해야 적용이 열린다(반증 T4 · B11)
+    expect(s).toMatch(/const blocked = replace && s && s\.error > 0;/);
+    expect(s).toMatch(/if \(r\.changed\) onChanged\?\.\(\);/);
+    expect(s).toMatch(/setRes\(\{ \.\.\.r, sig: '', applied: true \}\);/);
+    // 파일은 바이트로 받아 글자 인코딩을 판별한다(f.text() 는 UTF-8 로만 읽는다 — 반증 B3) · 깨진 글자가 있으면 올리지 않는다
+    expect(s).toMatch(/decodeCsvBytes\(await f\.arrayBuffer\(\)\)/); expect(s).not.toMatch(/await f\.text\(\)/);
+    expect(s).toMatch(/if \(t\.includes\('\\uFFFD'\)\)/);
     expect(s).toMatch(/disabled=\{busy \|\| !csvOk \|\| !checked \|\| blocked/);
     expect(s).toMatch(/\{csvOk \? null : <div className="muted bmd-note" role="status">\{CSV_DENIED_NOTE\}<\/div>\}/);
   });
@@ -153,6 +181,25 @@ describe('소스 스윕 — 연결 · 규약', () => {
     expect(raw('../../../styles.css').split('\n').filter((l) => /\.bmd-(ct|al|chk)/.test(l)).join('\n')).not.toMatch(/text-transform/);
     // 전역 tbody td 가 nowrap 이다 — 드로어 표는 줄바꿈을 켠다(끄면 400px 에서 상태 열이 화면 밖으로 밀린다)
     expect(raw('../../../styles.css')).toMatch(/\.bmd-ct th, \.bmd-ct td \{[^}]*white-space: normal;/);
+    expect(raw('../../../styles.css')).toMatch(/\.bmd-ct \.badge \{ white-space: nowrap; \}/);   // 배지가 글자마다 꺾이지 않게(반증 B4)
     for (const cls of ['.bmd-ct {', '.bmd-ct-sub {', '.bmd-al {', '.bmd-chk-aside {', '.bmd-sh-sub {']) expect(raw('../../../styles.css')).toContain(cls);
+  });
+});
+
+describe('CSV 글자 인코딩 판별(공용 csvDecode — 자산 원장 올리기)', () => {
+  it('UTF-8 · EUC-KR(한국어 엑셀 저장본) · UTF-16 을 읽는다 — 한글이 깨진 채 올라가지 않는다(반증 B3)', async () => {
+    const { decodeCsvBytes } = await import('../csvDecode.js');
+    const utf8 = new TextEncoder().encode('service_tag,note\nSYNTH01,교체 검토');
+    expect(decodeCsvBytes(utf8)).toEqual({ text: 'service_tag,note\nSYNTH01,교체 검토', encoding: 'utf-8' });
+    // '교체' 의 EUC-KR 바이트(B1 B3 C3 BC) — UTF-8 로는 못 읽는 바이트열이다
+    const euckr = Uint8Array.from([...new TextEncoder().encode('service_tag,note\nSYNTH01,'), 0xb1, 0xb3, 0xc3, 0xbc]);
+    const r = decodeCsvBytes(euckr);
+    expect(r.encoding).toBe('euc-kr'); expect(r.text).toBe('service_tag,note\nSYNTH01,교체'); expect(r.text).not.toContain('\uFFFD');
+    const u16 = Uint8Array.from([0xff, 0xfe, 0x41, 0x00, 0x00, 0xac]);   // BOM + 'A' + '가'
+    expect(decodeCsvBytes(u16)).toEqual({ text: 'A가', encoding: 'utf-16' });
+    expect(decodeCsvBytes(utf8.buffer).encoding).toBe('utf-8');   // ArrayBuffer 도 받는다
+    // 집중 모니터링 쪽 import 는 그대로 같은 함수를 받는다(옮기며 두 벌이 되지 않았다)
+    const fm = await import('../focusMonText.js');
+    expect(fm.decodeCsvBytes).toBe(decodeCsvBytes);
   });
 });

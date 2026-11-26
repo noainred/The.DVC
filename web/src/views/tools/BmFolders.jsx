@@ -14,7 +14,7 @@ import BoldText from '../../components/boldText.jsx';
 import BulkAdd from './bmFolders/BulkAdd.jsx';
 import BmDrawer from './bmFolders/BmDrawer.jsx';
 import AssetLedger from './bmFolders/AssetLedger.jsx';   // v3.45 자산 원장(보증 · 계약) 올리기 — 전체 범위 관리자
-import { chkCounts, chkChips, chkAsideText } from './bmFolders/checkText.js'; // v3.44: 서버 상세 드로어(예전 400px 옆 패널 SidePanel · HwPanel 을 바꿈)
+import { chkCounts, chkChips, chkAsideText, chkNotices, CHK_QUICK } from './bmFolders/checkText.js'; // v3.44: 서버 상세 드로어(예전 400px 옆 패널 SidePanel · HwPanel 을 바꿈)
 import { rowTone, rowDotTitle, orderRows, TMPKEY_NOTE } from './bmFolders/drawerText.js';
 import MapView from './bmFolders/MapView.jsx';
 import EdgeView from './bmFolders/EdgeView.jsx'; // v2.996: 엣지 포탈 화면
@@ -101,6 +101,9 @@ export default function BmFolders() {
   const rows = useMemo(() => filterRows(baseRows, q, quick), [baseRows, q, quick]);
   const agg = useMemo(() => aggregate(baseRows), [baseRows]);
   const chkN = useMemo(() => chkCounts(baseRows), [baseRows]);   // v3.45 물리서버 점검 요약(보증 · 펌웨어 · BIOS — 판정은 서버가 한 행의 chk)
+  // 걸려 있는 점검 거르기의 칩이 사라졌으면(원장 · 찾기를 못 읽어 그 판정이 없어졌다) 거르기를 푼다 — 풀 칩이 화면에 없는 채 빈 표로 남지 않게(반증 B5)
+  const chkKeys = useMemo(() => chkChips(chkN, d?.check?.soonDays).map((x) => x[0]).join(','), [chkN, d]);
+  useEffect(() => { if (d && CHK_QUICK.includes(quick) && !chkKeys.split(',').includes(quick)) setQuick(''); }, [d, quick, chkKeys]);
   const byName = useMemo(() => foldersByName(corps), [corps]);
   const selKey = `${sel.type}|${sel.corp || ''}|${sel.path || ''}`;
   // 저장한 보기를 고르면 노드가 바뀌어 거르기가 비워진다 — 그 보기의 거르기는 이 효과가 넣는다(같은 틀에서 순서를 보장)
@@ -318,6 +321,7 @@ export default function BmFolders() {
                   {sel.type === 'folder' || sel.type === 'name' ? <label style={{ fontSize: 12, display: 'inline-flex', gap: 4, alignItems: 'center' }}><input type="checkbox" checked={sub} onChange={(e) => setSub(e.target.checked)} /> 하위 폴더 포함</label> : null}
                 </div>
                 {chkAsideText(chkN) ? <div className="muted bmd-chk-aside" title="정상에도 문제에도 넣지 않고 따로 센 것입니다">따로 센 것 — {chkAsideText(chkN)}</div> : null}
+                {chkNotices(d.check).map((x) => <div key={x} className="bmd-chk-aside" role="status" style={{ color: 'var(--amber)' }}>{x}</div>)}
                 <SrcSummary rows={baseRows} />
                 <WhyBand rows={baseRows} quick={quick} setQuick={setQuick} />
                 {writable && picked.size ? (
@@ -384,7 +388,7 @@ export default function BmFolders() {
           )}
         </div>
       </div>
-      {panelRow ? <BmDrawer r={panelRow} rows={drawerRows} corps={corps} corpName={corpName} scoped={!!d.scoped} op={op} busy={busy} onClose={() => setPanel('')} onMove={setPanel} note={note} admin={!!d.admin} /> : null}
+      {panelRow ? <BmDrawer r={panelRow} rows={drawerRows} corps={corps} corpName={corpName} scoped={!!d.scoped} op={op} busy={busy} onClose={() => setPanel('')} onMove={setPanel} note={note} admin={!!d.admin} gen={`${d.rev ?? ''}:${d.at ?? ''}`} onChanged={() => load()} /> : null}
       {ledger ? <AssetLedger meta={d.check?.assets} onClose={() => setLedger(false)} onChanged={() => load()} /> : null}
       {bulk ? <BulkAdd init={bulk} d={d} corpName={corpName} op={op} busy={busy} onClose={() => setBulk(null)} /> : null}
     </div>

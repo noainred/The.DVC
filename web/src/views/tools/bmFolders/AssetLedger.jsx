@@ -11,14 +11,17 @@ import { STable } from '../../../components/STable.jsx';
 import { postJson, downloadFile, canCsv, CSV_DENIED_NOTE } from '../../../api.js';
 import { opErrorText } from '../bmFoldersText.js';
 import { importSummaryText, importRowNote, IMPORT_ACTION } from './checkText.js';
+import { decodeCsvBytes } from '../csvDecode.js';   // UTF-8 로 못 읽으면 EUC-KR(한국어 엑셀의 ‘CSV(쉼표로 분리)’) · UTF-16
 
-const FILE_MAX = 900 * 1024;   // 서버 본문 한도(1MB) 안 — 원장 2만 줄이면 넉넉하다
+const FILE_MAX = 900 * 1024;   // 서버 본문 한도(1MB) 안 — 일곱 열을 채운 줄로 약 1만 줄(서버 줄 상한과 같은 크기)
+const ENC_TEXT = { 'euc-kr': 'EUC-KR(CP949 — 한국어 엑셀 저장본)', 'utf-16': 'UTF-16(엑셀 ‘유니코드 텍스트’)' };
 const sigOf = (s, replace) => { let h = 5381; for (let i = 0; i < s.length; i += 1) h = ((h << 5) + h + s.charCodeAt(i)) | 0; return `${s.length}:${h >>> 0}:${replace ? 1 : 0}`; };
 
 export default function AssetLedger({ meta, onClose, onChanged }) {
   const fileRef = useRef(null);
   const [text, setText] = useState('');
   const [name, setName] = useState('');
+  const [enc, setEnc] = useState('');       // 파일을 읽은 글자 인코딩(utf-8 이 아니면 화면에 밝힌다)
   const [replace, setReplace] = useState(false);
   const [busy, setBusy] = useState(false);
   const [res, setRes] = useState(null);     // 드라이런 결과 + 그때의 지문
@@ -30,7 +33,12 @@ export default function AssetLedger({ meta, onClose, onChanged }) {
     e.target.value = '';
     if (!f) return;
     if (f.size > FILE_MAX) { setMsg({ ok: false, text: `파일이 ${Math.round(f.size / 1024)}KB 입니다 — ${Math.round(FILE_MAX / 1024)}KB 이하로 나눠 올리십시오.` }); return; }
-    try { setText(await f.text()); setName(f.name); setRes(null); setMsg(null); } catch (ex) { setMsg({ ok: false, text: `파일을 읽지 못했습니다: ${ex?.message || ex}` }); }
+    try {
+      // f.text() 는 UTF-8 로만 읽는다 — 한국어 엑셀 기본 저장(CP949)의 한글이 깨진 채 원장에 저장됐다(반증 B3). 바이트로 받아 판별한다
+      const { text: t, encoding } = decodeCsvBytes(await f.arrayBuffer());
+      if (t.includes('\uFFFD')) { setText(''); setName(f.name); setEnc(''); setRes(null); setMsg({ ok: false, text: '파일의 글자를 읽지 못했습니다(깨진 글자가 있습니다) — UTF-8 또는 한국어 엑셀의 ‘CSV(쉼표로 분리)’ 로 저장해 다시 고르십시오.' }); return; }
+      setText(t); setName(f.name); setEnc(encoding); setRes(null); setMsg(null);
+    } catch (ex) { setMsg({ ok: false, text: `파일을 읽지 못했습니다: ${ex?.message || ex}` }); }
   };
   const run = async (dryRun) => {
     setBusy(true); setMsg(null);
@@ -40,7 +48,8 @@ export default function AssetLedger({ meta, onClose, onChanged }) {
       if (!r || r.ok === false) throw new Error(r?.reason || '요청을 처리하지 못했습니다.');
       if (dryRun) setRes({ ...r, sig });
       else {
-        setRes({ ...r, sig });
+        // 적용이 끝나면 다시 검증해야 적용이 열린다(sig '' — 같은 미리보기로 두 번 적용하지 않게: 반증 B11 — 둘째 누름은 ‘원장이 바뀌었습니다’ 가 됐다). 결과 표는 남긴다
+        setRes({ ...r, sig: '', applied: true });
         setMsg({ ok: true, text: r.changed ? `원장에 적용했습니다 — ${importSummaryText(r.summary, { replace })}.` : '바뀐 것이 없어 쓰지 않았습니다.' });
         if (r.changed) onChanged?.();
       }
@@ -65,7 +74,7 @@ export default function AssetLedger({ meta, onClose, onChanged }) {
         <div className="flex wrap gap" style={{ alignItems: 'center' }}>
           <input ref={fileRef} type="file" accept=".csv,.txt,text/csv,text/plain" style={{ display: 'none' }} onChange={pick} />
           <button type="button" className="logout-btn" disabled={busy || !csvOk} onClick={() => fileRef.current?.click()}>파일 고르기</button>
-          <span className="muted" style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{name || '고른 파일 없음'}</span>
+          <span className="muted" style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{name || '고른 파일 없음'}{ENC_TEXT[enc] ? ` · ${ENC_TEXT[enc]} 로 읽음` : ''}</span>
           <span style={{ flex: 1 }} />
           {csvOk ? <button type="button" className="logout-btn" disabled={busy} onClick={() => dl('/admin/bm-assets/sample.csv', 'bm-assets-sample.csv')}>샘플 CSV</button> : null}
           {csvOk ? <button type="button" className="logout-btn" disabled={busy || !!meta?.unreadable} onClick={() => dl('/admin/bm-assets.csv', 'bm-assets.csv')}>지금 원장 내려받기</button> : null}
@@ -79,13 +88,14 @@ export default function AssetLedger({ meta, onClose, onChanged }) {
           <button type="button" className="login-btn bmd-btn" disabled={busy || !text || !csvOk} onClick={() => run(true)}>검증</button>
           <button type="button" className="login-btn bmd-btn" disabled={busy || !csvOk || !checked || blocked || !s || (!s.add && !s.update && !(replace && s.remove))} onClick={() => run(false)}
             title={!checked ? '먼저 검증하십시오(검증 뒤 파일 · 바꾸기 선택을 바꿨으면 다시 검증)' : blocked ? '오류 줄이 있으면 ‘파일로 바꾸기’ 를 할 수 없습니다' : undefined}>적용</button>
-          {s && checked ? <span className="muted">{res.total}줄 — {importSummaryText(s, { replace })}</span> : null}
+          {s && (checked || res.applied) ? <span className="muted">{res.total}줄 — {importSummaryText(s, { replace })}</span> : null}
         </div>
         {blocked && checked ? <div className="bmd-note" style={{ color: 'var(--red)' }} role="alert">오류 줄이 {s.error}개 있어 ‘원장을 파일로 바꾸기’ 를 할 수 없습니다 — 오류 줄의 서버가 원장에서 사라지지 않게 전부 멈춥니다. 오류를 고치거나 바꾸기를 끄십시오.</div> : null}
         {msg ? <div className={`bmd-opnote ${msg.ok ? 'ok' : 'bad'}`} role={msg.ok ? 'status' : 'alert'} style={{ borderRadius: 8, borderBottom: 0 }}>{msg.text}</div> : null}
-        {res?.report?.length && checked ? (
+        {res?.report?.length && (checked || res.applied) ? (
           <>
-            <STable className="table bmd-ct" minWidth={520} limit={200}>
+            {/* 최소 폭을 작게 — 400px 화면에서 사유 열이 가로 스크롤 뒤로 가지 않게(칸은 줄바꿈된다) */}
+            <STable className="table bmd-ct" minWidth={300} limit={200}>
               <thead><tr><th>줄</th><th>서비스 태그</th><th>결과</th><th>사유 · 바뀌는 칸</th></tr></thead>
               <tbody>
                 {res.report.map((x, i) => {
