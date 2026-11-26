@@ -14,6 +14,7 @@ import {
   healthView, HWLOG_SEV, HWLOG_STATUS, HWLOG_WHY, HWLOG_SCOPE_NOTE, filterHwLog, hwLogHead,
   CASE_STATUS, caseStatusText, CASE_NOTE, advisoryView,
 } from './opsText.js';
+import { lifeView, memCeView, LIFE_NOTE, MEMCE_NOTE } from './lifeText.js';
 
 const when = (ms) => (Number.isFinite(ms) ? new Date(ms).toLocaleString() : '—');
 
@@ -94,6 +95,7 @@ export function HwLogSection({ r, initial = null }) {
                         </tbody>
                       </STable>
                     ) : <div className="muted bmd-note">{q || sev ? '찾는 조건에 맞는 기록이 없습니다.' : '읽은 기록이 없습니다.'}</div>}
+                    <MemCeBlock m={d.memCe} />
                     <div className="muted bmd-note">읽은 시각 {when(d.at)} · {HWLOG_SCOPE_NOTE}</div>
                   </>
                 )}
@@ -222,6 +224,57 @@ export function AdvisorySection({ r, chk }) {
         </STable>
       ) : null}
       <div className="muted bmd-note">{v.why}</div>
+    </section>
+  );
+}
+
+/** v3.51 ⑧ 메모리 교정 오류 경고 — 이벤트 로그를 읽은 뒤 슬롯별(서버가 센 값 · 오류 건수 자체가 아니다). */
+export function MemCeBlock({ m }) {
+  const v = memCeView(m);
+  if (!v) return null;
+  return (
+    <div className="bmd-memce" aria-label="메모리 교정 오류 경고">
+      <div className="bmd-memce-h"><b>메모리 교정 오류 경고</b> <span className="muted">— {v.head}</span></div>
+      {v.slots.length ? (
+        <div className="bmd-memce-grid">
+          {v.slots.map((x) => <span key={x.slot} className={`bmd-memce-c${x.n ? ' hot' : ''}`} title={`${x.slot} — 경고 기록 ${x.n}건`}><span className="mono">{x.slot}</span> <b>{x.n}</b></span>)}
+        </div>
+      ) : null}
+      {v.unknown ? <div className="muted bmd-note">슬롯을 알 수 없는 경고 기록 {v.unknown}건</div> : null}
+      {v.note ? <div className="muted bmd-note">{v.note}</div> : null}
+      <div className="muted bmd-note">{MEMCE_NOTE}</div>
+    </div>
+  );
+}
+
+/** v3.51 ⑧ 부품 수명 지표 — SSD 잔여 수명(장비가 보고한 값). /hw 응답(hw.d)을 그리기만 한다. */
+export function LifeSection({ r, hw }) {
+  if (r?.kind !== 'bm') return null;
+  if (!hw || hw.loading || (!hw.d && !hw.err)) return null;   // 읽는 중 · 오류는 하드웨어 요약 구역이 말한다
+  const v = hw.d ? lifeView(hw.d) : null;
+  if (!v) return null;
+  return (
+    <section className="vmh-sec" aria-label="부품 수명 지표">
+      <div className="sh"><h3>부품 수명 지표</h3><span className="muted bmd-sh-sub">{v.head}</span></div>
+      {v.kind === 'rows' ? (
+        <STable className="table bmd-ct" minWidth={300}>
+          <thead><tr><th>SSD</th><th>잔여 수명</th></tr></thead>
+          <tbody>
+            {v.rows.map((x) => (
+              <tr key={x.key}>
+                <td data-sort={x.name} style={{ overflowWrap: 'anywhere' }}>{x.name}<div className="muted" style={{ fontSize: 11 }}>{[x.model, x.gb != null ? `${x.gb} GB` : ''].filter(Boolean).join(' · ')}</div></td>
+                <td data-sort={x.life ?? ''}>
+                  <span className={`badge ${x.tone}`}>{x.lifeText}</span>
+                  {x.life != null ? <span className="bmd-life-bar" aria-hidden="true"><span style={{ width: `${Math.max(0, Math.min(100, x.life))}%` }} className={x.tone} /></span> : null}
+                  {x.note ? <div className="muted" style={{ fontSize: 11 }}>{x.note}</div> : null}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </STable>
+      ) : null}
+      {v.why ? <div className="muted bmd-note">{v.why}</div> : null}
+      <div className="muted bmd-note">{LIFE_NOTE}</div>
     </section>
   );
 }

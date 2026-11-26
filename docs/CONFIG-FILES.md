@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **342개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **344개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-11-26)
@@ -218,6 +218,8 @@
 | `packages` | 디렉터리 | 디렉터리 — 내려받은 설치/업그레이드 패키지 보관(PACKAGE_DIR) |  |  |  | config.js |
 | `packages.json` | 설정 | Web-editable package source settings — lets an admin change the package | ✅ |  | ✅ | upgrade/packageSettings.js |
 | `part-faults.db` | DB | 파트 장애 이력 DB(v2.547, 스키마 v2 는 v2.548). 파일 `part-faults.db`. |  |  | ✅ | partfault/db.js |
+| `partfault-escalation-state.json` | 설정 | 부품 장애 알림 단계 올리기 진행 기록(v3.51 — 장애마다 보낸 단계 · 확인한 사람 · 시각. 상태 파일) | ✅ |  |  | partfault/escalation.js |
+| `partfault-escalation.json` | 설정 | 부품 장애 알림 단계 올리기 · 당직 설정(v3.51 — 정책 · 단계 분 · 받는 메일 주소 · 요일별 당직 이름 · 메일. 기본 꺼짐. 비밀 없음) | ✅ |  |  | partfault/escalation.js |
 | `partfault-settings.json` | 설정 | 파트 장애 기능 스위치(v2.548 F3). | ✅ |  | ✅ | partfault/settings.js |
 | `pdu-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | pdu/poller.js |
 | `pdu-devices.json` | 설정 | PDU(APC Rack PDU 2G) 장비 등록 — `CONFIG_DIR/pdu-devices.json`(0600). | ✅ | ✅ | ✅ | pdu/registry.js |
@@ -380,6 +382,8 @@
 - **`upgrade-kept-bundles.json`** — 상태 파일(백업 감시 제외). 중앙이 자기 업그레이드를 적용한 번들(+서명 manifest)을 패키지 폴더(packages)에 복사해 두고 그 이름을 적는다 — 엣지 자동 업그레이드(뒤처진 엣지에 다시 push)와 /dl(엣지 자체 확인)이 그 번들을 쓴다. 여기 적힌 파일만 UPGRADE_KEEP_BUNDLES(기본 3)개를 넘으면 오래된 것부터 지운다(관리자가 내려받은 패키지는 건드리지 않는다). 지우면 정리 대상에서 빠질 뿐 동작에는 영향이 없다
 - **`bm-assets.json`** — 전체 범위 관리자가 CSV 로 올린다(특수 기능 › Bare Metal Server › 자산 원장). 지우면 모든 서버의 보증이 ‘모름’ 이 된다 — 같은 CSV 를 다시 올리면 복구된다. 손상이면 보존하고 쓰기(409)를 막는다
 - **`bm-fw-baseline.json`** — 지우면 지정 기준이 사라지고 같은 법인 · 같은 모델의 다수 버전으로만 대조한다. 손상이면 보존하고 쓰기(409)를 막으며 다수 버전으로만 대조했다고 화면에 밝힌다
+- **`partfault-escalation.json`** — 지우면 꺼짐(단계 알림이 멈춘다 — 지금 알림은 그대로). 손상이면 쓰기를 막는다(서비스 점검).
+- **`partfault-escalation-state.json`** — 지우면 열린 장애의 단계를 처음부터 다시 센다(보낸 단계를 다시 보낼 수 있다). 복원 때는 지금 것을 유지한다.
 - **`bm-cases.json`** — 지우면 케이스 기록이 사라진다(제조사 쪽 케이스는 그대로). 손상이면 쓰기를 막는다(서비스 점검).
 - **`bm-advisories.json`** — 지우면 권고 대조를 하지 않는다(‘대조하지 않았음’ 으로 보인다). 손상이면 쓰기를 막는다.
 - **`bareos-rehearsal.json`** — 기본은 꺼짐(검증은 VM 을 만들고 데이터스토어를 쓴다 — 전체 범위 관리자 + 본인 OTP 로 켠다). 손상이면 보존하고 검증 · 저장을 멈춘다. 지우면 꺼진 기본값

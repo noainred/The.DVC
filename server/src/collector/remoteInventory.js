@@ -60,7 +60,7 @@ const INV_SHAPE = {
   firmware: ['a', ['type', 'version', 'name']],
   nics: ['a', ['name', 'model', 'firmware'], { ports: ['id', 'link', 'speedMbps', 'mac'] }], // v2.682(R3E-01): mac — 엣지 compactInv 와 짝
   cpus: ['a', ['socket', 'model', 'cores', ...ST, 'threads', 'maxSpeedMHz', 'manufacturer']],
-  disks: ['a', ['name', 'model', 'capacityGB', 'media', 'protocol', ...ST, 'predictiveFailure', 'rpm']],
+  disks: ['a', ['name', 'model', 'capacityGB', 'media', 'protocol', ...ST, 'predictiveFailure', 'rpm', 'lifeLeftPct']],   // v3.51 lifeLeftPct(엣지 compactInv 와 짝)
   psus: ['a', ['name', 'model', 'manufacturer', 'capacityWatts', 'inputWatts', 'outputWatts', 'lineInputVoltage', ...ST, 'firmware']],
   memoryDimms: ['a', ['locator', 'sizeGB', 'type', 'speedMHz', 'manufacturer', 'partNumber', ...ST, 'rank']],
   storageControllers: ['a', ['name', 'model', 'firmware', 'health', 'speedGbps'], null, ['protocols']],

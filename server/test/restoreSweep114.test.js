@@ -109,7 +109,7 @@ const ASIS = {
     'db-location.json', 'dirusage.json', 'disk-bad-settings.json', 'finops.json', 'fleet-assign.json', 'fleet-tags.json', 'focusmon-alert-rules.json', 'guest-disk.json', 'guest-partition.json',
     'horizon-sessions.json', 'hw-export-prefs.json', 'idrac-scan-settings.json', 'ipam-annotations.json', 'ipam-overrides.json', 'ipam-range-policies.json', 'ipam-report.json', 'ipam-scan.json',
     'ipam-settings.json', 'ipam-subnet-notes.json', 'ipam-vcenter-ranges.json', 'isidu-settings.json', 'issue-alert-auto.json', 'issue-autocreate.json', 'issue-settings.json', 'issue-templates.json',
-    'linkcheck-settings.json', 'login-monitor.json', 'maintenance-windows.json', 'metrics.json', 'packages.json', 'partfault-settings.json', 'pdu-intervals.json', 'pdu-thresholds.json',
+    'linkcheck-settings.json', 'login-monitor.json', 'maintenance-windows.json', 'metrics.json', 'packages.json', 'partfault-escalation.json', 'partfault-settings.json', 'pdu-intervals.json', 'pdu-thresholds.json',
     'perf-monitor.json', 'permissions.json', 'ping-settings.json', 'ping-targets.json', 'power-off-check.json', 'power-settings.json', 'provision-saved.json', 'relaycheck-settings.json',
     'runtime.json', 'san-storage-map.json', 'san-storage-notify.json', 'san-storage-report.json', 'sanswitch-err-baseline.json', 'sanswitch-perf-settings.json', 'service-map.json',
     'storage-growth-settings.json', 'storage-inspect.json', 'storage-intervals.json', 'storage-perf-check.json', 'storage-usage-mail.json', 'svcmon-alert.json', 'svcmon-log.json',
