@@ -141,6 +141,13 @@ test('3 라우트(5회차 정확성 1): 보이지 않는 글자가 시리얼과 
   v = await room(ADMIN);
   assert.equal(v.places.find((x) => x.id === p9).link?.serverId, 'inv9');
   invCache.removeInventory('inv9');
+  // 등록부 태그에 보이지 않는 글자가 끼어 있어도(등록부는 trim 만 한다) 지운 값으로 잇고 · 싣고 · 가린다
+  registry.importServers([srv('zw1', 'idrac-ZWT\u200b0002', 'https://192.0.2.20', 'ZWT\u200b0002')], 'merge');
+  v = await room(ADMIN);
+  assert.ok(v.unplaced.some((u) => u.serverId === 'zw1' && u.serviceTag === 'ZWT0002'), JSON.stringify(v.unplaced.filter((u) => u.serverId === 'zw1')));
+  const pz = await place({ uStart: 22, label: 'zw', serial: 'ZWT0002' });
+  assert.equal((await room(ADMIN)).places.find((x) => x.id === pz).link?.serverId, 'zw1', '지운 값의 키로 이어진다');
+  assert.equal((await room(OP_A)).places.find((x) => x.id === pz).link?.name, 'idrac-•••', '범위 계정에게는 등록부 이름의 태그도 가려진다');
 });
 
 test('4 순수: 낱말 경계 = 글자 갈래가 바뀌는 자리 — 한글 조사는 경계 · 같은 갈래는 이어진 낱말', () => {

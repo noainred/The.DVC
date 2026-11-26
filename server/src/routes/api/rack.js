@@ -112,6 +112,9 @@ export const usableTag = (t) => {
   return ok;
 };
 
+// 가림 재료도 판정 대상 글과 **같은 눈으로** 본다 — 글에서만 보이지 않는 글자를 지우면, 그런 글자가 시리얼과 이름 양쪽에 든 옛 값이 서로 어긋나 가려지지 않았다(5회차 점검 정확성 1 · 재현).
+const cleanTag = (t) => (typeof t === 'string' ? dropInvisible(t).trim() : t);
+
 export const UNPLACED_MAX = 2000;   // 미배치 서버 목록에 싣는 최대 대수(법인 하나) — 넘으면 unplacedTotal 이 더 크고 화면이 밝힌다
 const HEALTH = { ok: 'ok', warning: 'warn', critical: 'crit' };
 const healthOf = (v) => HEALTH[String(v || '').toLowerCase()] || (v ? 'unknown' : '');
@@ -146,7 +149,8 @@ function corpServers(req, corpId, { invTags = false } = {}) {
     if (dc !== corpId) continue;
     let inv = null; try { inv = invForServer(s); } catch { inv = null; }
     // 등록부 칸이 자리표시 값('None' 등)이면 인벤토리의 진짜 태그로 넘어간다(5회차 점검 정확성 관찰 4 — 진짜 태그가 있는데도 잇지 못하는 서버가 됐다).
-    const regTag = String(s.serviceTag || '').trim(); const invTag = String(inv?.system?.serviceTag || '').trim();
+    //   태그는 보이지 않는 글자를 지우고 다듬은 값으로 본다(연결 키 · 화면에 싣는 태그 · 가림 재료가 같은 값 — 등록부는 trim 만 한다 · 5회차 점검 보안 1 의 남은 쪽).
+    const regTag = cleanTag(String(s.serviceTag || '')); const invTag = cleanTag(String(inv?.system?.serviceTag || ''));
     const tag = usableTag(regTag) ? regTag : usableTag(invTag) ? invTag : (regTag || invTag);
     // 자리표시 태그('To Be Filled By O.E.M.' 같은 화이트박스 기본값 · 'None' · '0000000')는 **연결 키가 아니다**(4회차 점검 정확성 4 — 재현): 서로 다른 서버 여러 대가 같은 값이라,
     //   키로 쓰면 원장의 장비가 그중 먼저 온 서버에 이어져 남의 상태를 보이고, 한 대를 놓는 순간 나머지가 미배치 목록에서 사라졌다. 태그를 못 읽은 서버와 함께 센다(serversNoTag).
@@ -193,8 +197,6 @@ function coreSpan(w) {
 const wordCore = (w) => { const { a, b } = coreSpan(w); return w.slice(a, b); };
 // 낱말 안에서 16진 구간의 이웃이 '이어지는 글자' 인가 — 라틴 글자 · 숫자만(한글 조사 'fe80::1에' · 문장 부호는 경계 — textMask.js 의 글자 갈래와 같은 기준).
 const isLatinLD = (ch) => charKind(ch) === 1;
-// 가림 재료도 판정 대상 글과 **같은 눈으로** 본다 — 글에서만 보이지 않는 글자를 지우면, 그런 글자가 시리얼과 이름 양쪽에 든 옛 값이 서로 어긋나 가려지지 않았다(5회차 점검 정확성 1 · 재현).
-const cleanTag = (t) => (typeof t === 'string' ? dropInvisible(t).trim() : t);
 const realTags = (arr) => (arr || []).map(cleanTag).filter(usableTag);
 /** 가린 낱말의 토큰 — 공용 함수는 'masked-' 로 시작하는 값을 이미 토큰으로 보고 그대로 돌려준다. 글에서는 그런 낱말도 원문이므로 한 번 감싼다(4회차 점검 보안 5). */
 const textToken = (v) => maskedIdToken(v.startsWith(MASK_TOKEN_PREFIX) ? `text:${v}` : v);
