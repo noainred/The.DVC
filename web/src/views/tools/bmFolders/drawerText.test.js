@@ -2,8 +2,8 @@
 //   못 읽은 값은 0 이 아니다('—' · 단위 없음 · 정상에도 장애에도 넣지 않는다).
 import { describe, it, expect } from 'vitest';
 import {
-  rowTone, noUsage, powerText, bmSignalRows, neighborOfKey, bmTiles, bmKvRows, specCells, partGroups, trendView, orderRows,
-  TMPKEY_NOTE, NO_SIGNAL_TEXT, SIG_BADGE, SIG_DOT,
+  rowTone, rowDotTitle, noUsage, powerText, bmSignalRows, bmUnknowns, noSignalText, neighborOfKey, freshNote, bmTiles, bmKvRows, specCells, partGroups, trendView, tickText, orderRows,
+  TMPKEY_NOTE, SIG_BADGE, SIG_DOT,
 } from './drawerText.js';
 import { whyOf } from './whyText.js';
 
@@ -35,20 +35,35 @@ describe('상태 점 · 전원 글자', () => {
 });
 
 describe('신호 줄 — 행에 이미 있는 값만', () => {
-  it('아무 것도 해당하지 않으면 0줄', () => {
+  it('아무 것도 해당하지 않으면 0줄 · 글자는 실제로 본 것만 나열한다', () => {
     expect(bmSignalRows(row())).toEqual([]);
-    expect(NO_SIGNAL_TEXT).toMatch(/부품 장애.*사용률 값 없음.*전원 꺼짐\/모름.*임시 키/);
+    expect(noSignalText(row())).toBe('신호 없음 — 부품 장애 · 사용률 값 없음(CPU · 메모리 둘 다) · 전원 꺼짐 · 임시 키에 해당하는 것이 없습니다.');
+    // 값이 없던 것(부품 장애 · 전원)을 '해당 없음' 이라고 하지 않는다(반증 A9)
+    expect(noSignalText(row({ faults: null, powered: null }))).toBe('신호 없음 — 사용률 값 없음(CPU · 메모리 둘 다) · 임시 키에 해당하는 것이 없습니다.');
+    expect(noSignalText(row({ faults: null }))).not.toMatch(/부품 장애/);
+    expect(noSignalText(row({ powered: undefined }))).not.toMatch(/전원/);
+    expect(noSignalText(row({ powered: false }))).toMatch(/전원 꺼짐/);   // 읽은 값이면 본 것이다
   });
   it('부품 장애 N건 — 건수와 바로가기', () => {
     const [s] = bmSignalRows(row({ faults: 3 }));
     expect(s).toMatchObject({ kind: 'fault', tone: 'crit', badge: '부품 장애 3건', link: ['#/tools/part-faults', '부품 장애'] });
   });
-  it('부품 장애를 못 읽었으면 없음으로 치지 않고 못 읽음 신호(등급 none)', () => {
-    const s = bmSignalRows(row({ faults: null }));
-    expect(s.map((x) => x.kind)).toEqual(['fault-unread']);
-    expect(s[0].tone).toBe('none');
-    expect(s[0].fact).toMatch(/없음으로 세지 않습니다/);
-    expect(bmSignalRows(row({ faults: undefined }))[0].kind).toBe('fault-unread');
+  it('값이 없는 것(부품 장애 · 전원)은 신호가 아니다 — 따로 밝힌다(구조적으로 비는 경로가 있다: ESXi 행 · 엣지 수집 · 기능 꺼짐)', () => {
+    // 반증 A2: 서버마다 뜨는 '전원 모름' · '부품 장애 못 읽음' 줄이 봐야 할 것을 가렸고, '읽지 못했다' 는 단정이었다
+    expect(bmSignalRows(row({ faults: null }))).toEqual([]);
+    expect(bmSignalRows(row({ faults: undefined }))).toEqual([]);
+    expect(bmSignalRows(row({ faults: '' }))).toEqual([]);          // '' 는 0 이 아니다
+    expect(bmSignalRows(row({ powered: null }))).toEqual([]);
+    expect(bmSignalRows(row({ powered: undefined }))).toEqual([]);
+    expect(bmUnknowns(row())).toEqual([]);
+    expect(bmUnknowns(row({ faults: 0 }))).toEqual([]);             // 0 은 읽은 값이다
+    expect(bmUnknowns(row({ faults: null }))).toEqual(['부품 장애']);
+    expect(bmUnknowns(row({ faults: '' }))).toEqual(['부품 장애']);
+    expect(bmUnknowns(row({ powered: null }))).toEqual(['전원']);
+    expect(bmUnknowns(row({ powered: undefined }))).toEqual(['전원']);
+    expect(bmUnknowns(row({ powered: false }))).toEqual([]);        // 꺼짐은 읽은 값이다
+    expect(bmUnknowns(row({ faults: undefined, powered: 'on' }))).toEqual(['부품 장애', '전원']);   // true/false 가 아니면 모름
+    expect(bmUnknowns(null)).toEqual(['부품 장애', '전원']);
   });
   it('사용률 값 없음 — 서버 사유 코드의 글자(whyText)를 그대로 · 등급은 사유 분류', () => {
     const [s] = bmSignalRows(row({ cpu: null, mem: null, why: { code: 'edge-no-record' } }));
@@ -77,21 +92,24 @@ describe('신호 줄 — 행에 이미 있는 값만', () => {
     // 꺼졌는데 사유가 다른 것이면 둘 다 말한다
     expect(bmSignalRows(row({ powered: false, cpu: null, mem: null, why: { code: 'no-idrac' } })).map((x) => x.kind)).toEqual(['usage', 'off']);
     // 전원을 모르는데 사유가 '꺼져 있음' 이면 사유 줄을 지우지 않는다(전원 줄이 대신 말해 주지 못한다)
-    expect(bmSignalRows(row({ powered: null, cpu: null, mem: null, why: { code: 'powered-off' } })).map((x) => x.kind)).toEqual(['usage', 'power-unknown']);
+    expect(bmSignalRows(row({ powered: null, cpu: null, mem: null, why: { code: 'powered-off' } })).map((x) => x.kind)).toEqual(['usage']);
+    expect(bmSignalRows(row({ powered: undefined, cpu: null, mem: null, why: { code: 'powered-off' } })).map((x) => x.kind)).toEqual(['usage']);
   });
-  it('전원 모름은 켜짐으로도 꺼짐으로도 세지 않는다', () => {
-    const [s] = bmSignalRows(row({ powered: null }));
-    expect(s).toMatchObject({ kind: 'power-unknown', tone: 'none', badge: '전원 모름' });
-    // 값이 아예 없는 행(undefined)도 모름이다 — null 만 모름으로 보면 '신호 없음' 이라고 말하게 된다(변이 08)
-    expect(bmSignalRows(row({ powered: undefined })).map((x) => x.kind)).toEqual(['power-unknown']);
+  it('상태 점 설명은 그 서버의 사실 — 값이 없는 것을 켜짐 · 장애 없음이라고 하지 않는다', () => {
+    expect(rowDotTitle(row())).toBe('전원 켜짐 · 부품 장애 없음');
+    expect(rowDotTitle(row({ powered: null, faults: null }))).toBe('전원 모름 · 부품 장애 값 없음');
+    expect(rowDotTitle(row({ powered: false, faults: 2 }))).toBe('전원 꺼짐 · 부품 장애 2건');
+    expect(rowDotTitle(row({ cpu: null, mem: null }))).toBe('전원 켜짐 · 부품 장애 없음 · 사용률 값 없음');
+    expect(rowDotTitle(row({ cpu: null }))).not.toMatch(/사용률/);   // 한쪽이라도 있으면 값이 있다
+    expect(rowDotTitle(row({ faults: '' }))).toMatch(/부품 장애 값 없음/);
   });
   it('임시 키 — 표의 태그 없음 배지와 같은 설명', () => {
     const [s] = bmSignalRows(row({ tmpKey: true }));
     expect(s).toMatchObject({ kind: 'tmpkey', tone: 'info', fact: TMPKEY_NOTE });
   });
   it('여러 신호는 장애 → 사용률 → 전원 → 임시 키 순서 · kind 가 겹치지 않는다(React key)', () => {
-    const s = bmSignalRows(row({ faults: 1, cpu: null, mem: null, why: { code: 'no-record' }, powered: null, tmpKey: true }));
-    expect(s.map((x) => x.kind)).toEqual(['fault', 'usage', 'power-unknown', 'tmpkey']);
+    const s = bmSignalRows(row({ faults: 1, cpu: null, mem: null, why: { code: 'no-record' }, powered: false, tmpKey: true }));
+    expect(s.map((x) => x.kind)).toEqual(['fault', 'usage', 'off', 'tmpkey']);
     expect(new Set(s.map((x) => x.kind)).size).toBe(s.length);
   });
   it('등급마다 배지 색 · 점 색이 정해져 있다(none 은 빈 원 — 색 없음)', () => {
@@ -109,8 +127,27 @@ describe('이웃(‹ › · ↑↓)', () => {
     expect(neighborOfKey(rows, 'c')).toMatchObject({ prev: { key: 'b' }, next: null, index: 2 });
   });
   it('목록에 없거나 목록이 없으면 잠긴다(index −1)', () => {
-    expect(neighborOfKey(rows, 'x')).toEqual({ prev: null, next: null, index: -1, total: 3 });
-    expect(neighborOfKey(null, 'a')).toEqual({ prev: null, next: null, index: -1, total: 0 });
+    expect(neighborOfKey(rows, 'x')).toEqual({ prev: null, next: null, index: -1, total: 3, gone: false });
+    expect(neighborOfKey(null, 'a')).toEqual({ prev: null, next: null, index: -1, total: 0, gone: false });
+    expect(neighborOfKey(rows, 'b').gone).toBe(false);
+  });
+  it('방금까지 있던 자리를 알면 목록에서 빠진 뒤에도 그 자리 앞뒤로 이어 간다(넣기 · 옮기기 · 빼기 뒤)', () => {
+    // b 가 1번 자리에 있다가 빠졌다 → 남은 목록 [a, c]: 이전 = a · 다음 = c(빠진 자리에 올라온 서버)
+    const left = [{ key: 'a' }, { key: 'c' }];
+    expect(neighborOfKey(left, 'b', 1)).toEqual({ prev: { key: 'a' }, next: { key: 'c' }, index: -1, total: 2, gone: true });
+    // 맨 앞에서 빠짐 → 이전 없음 · 다음 = 새 맨 앞
+    expect(neighborOfKey([{ key: 'b' }, { key: 'c' }], 'a', 0)).toMatchObject({ prev: null, next: { key: 'b' }, gone: true });
+    // 맨 끝에서 빠짐 → 다음 없음 · 이전 = 새 맨 끝
+    expect(neighborOfKey([{ key: 'a' }, { key: 'b' }], 'c', 2)).toMatchObject({ prev: { key: 'b' }, next: null, gone: true });
+    // 목록이 더 줄었으면(자리가 길이를 넘는다) 끝에 붙인다 — 범위 밖을 읽지 않는다
+    expect(neighborOfKey([{ key: 'a' }], 'c', 7)).toMatchObject({ prev: { key: 'a' }, next: null, gone: true });
+    expect(neighborOfKey([], 'c', 2)).toMatchObject({ prev: null, next: null, gone: true, total: 0 });
+    // 자리를 모르면(−1 · 정수가 아님) 이어 가지 않는다
+    expect(neighborOfKey(left, 'b', -1).gone).toBe(false);
+    expect(neighborOfKey(left, 'b', 1.5)).toMatchObject({ prev: null, next: null, gone: false });
+    expect(neighborOfKey(left, 'b', NaN).gone).toBe(false);
+    // 목록에 있으면 옛 자리는 쓰지 않는다
+    expect(neighborOfKey(rows, 'c', 0)).toMatchObject({ prev: { key: 'b' }, next: null, index: 2, gone: false });
   });
   it('표가 알려 준 순서로 다시 놓는다 — 순서에 없는 행(상한으로 잘림)은 빼고, 순서를 모르면 그대로', () => {
     expect(orderRows(rows, ['c', 'a']).map((x) => x.key)).toEqual(['c', 'a']);
@@ -118,6 +155,19 @@ describe('이웃(‹ › · ↑↓)', () => {
     expect(orderRows(rows, null)).toBe(rows);
     expect(orderRows(rows, [])).toEqual([]);
     expect(orderRows(null, ['a'])).toEqual([]);
+  });
+});
+
+describe('드로어 안 쓰기 결과 알림', () => {
+  it('연 뒤 · 넘긴 뒤에 새로 온 알림만 — 그때 이미 있던 알림 · 글자 없는 알림은 그리지 않는다', () => {
+    const old = { ok: true, text: '옮겼습니다' };
+    const fail = { ok: false, text: '쓰기 권한이 없습니다' };
+    expect(freshNote(old, old)).toBeNull();          // 열 때 이미 있던 것(이전 서버의 결과)
+    expect(freshNote(fail, old)).toBe(fail);          // 그 뒤에 온 것
+    expect(freshNote(fail, null)).toBe(fail);
+    expect(freshNote(null, old)).toBeNull();
+    expect(freshNote({ ok: false, text: '' }, old)).toBeNull();
+    expect(freshNote({ ...old }, old)).toEqual(old);  // 글자가 같아도 새 객체면 새 결과다(같은 동작을 두 번)
   });
 });
 
@@ -149,6 +199,20 @@ describe('타일 4장', () => {
   });
   it('소켓이 하나면 사양 글자가 코어 수와 같아 되풀이하지 않는다', () => {
     expect(bmTiles(row({ cores: 16, hw: { cpu: { sockets: 1, cores: 16 } } })).cpu.sub).toBe('16코어');
+  });
+  it('행에 용량이 없으면 같은 행의 iDRAC 요약으로 — 아래 하드웨어 요약은 32코어인데 타일만 모름이 되지 않게', () => {
+    // 반증 A14: 사용률을 못 받은 서버(cores · memGB null)는 타일이 '코어 수 모름 · 용량 모름' 이었고 같은 화면 아래에는 값이 있었다
+    const t = bmTiles(row({ cores: null, memGB: null, hw: { cpu: { sockets: 2, cores: 32 }, mem: { gib: 512, dimms: 8 } } }));
+    expect(t.cpu.sub).toBe('32코어 · 2×16C');
+    expect(t.mem.sub).toBe('512 GB');
+    expect(t.usage.cap).toBe('32코어 · 512 GB');
+    // 행 값이 있으면 행 값이 먼저다(사용률을 잰 쪽의 용량)
+    const u = bmTiles(row({ cores: 24, memGB: 256, hw: { cpu: { sockets: 2, cores: 32 }, mem: { gib: 512 } } }));
+    expect(u.cpu.sub).toMatch(/^24코어/);
+    expect(u.mem.sub).toBe('256 GB');
+    // 둘 다 없으면 모름(0 으로 쓰지 않는다)
+    const n = bmTiles(row({ cores: '', memGB: '', hw: null }));
+    expect(n.cpu.sub).toBe('코어 수 모름'); expect(n.mem.sub).toBe('용량 모름'); expect(n.usage.cap).toBe('용량 모름');
   });
 });
 
@@ -261,6 +325,20 @@ describe('24시간 추이 그림', () => {
     expect(trendView([])).toBeNull();
     expect(trendView(null)).toBeNull();
     expect(trendView([{ cpu: 1 }])).toBeNull();   // 시각 없는 점은 그리지 않는다
+    // 시각이 null · '' 인 점도 버린다 — Number(null) · Number('') 은 0(1970년)이라 눈금이 '1/1 9시' 가 됐다(반증 A13)
+    expect(trendView([{ ts: null, cpu: 1, mem: 1 }, { ts: '', cpu: 2, mem: 2 }, { ts: 0, cpu: 3, mem: 3 }])).toBeNull();
+    const v = trendView([{ ts: null, cpu: 99, mem: 99 }, { ts: NOW, cpu: 10, mem: 20 }, { ts: NOW + HOUR, cpu: 30, mem: 40 }], { w: 100, top: 0, h: 100 });
+    expect(v.n).toBe(2);
+    expect(v.cpu).toBe('M0.0,90.0 L100.0,70.0');
+  });
+  it('가로축 눈금 글자 — 첫 눈금만 날짜 · 브라우저 지역 시각 · 못 쓰는 시각은 빈 글자', () => {
+    // 지역 시각으로 만든 날짜를 넣는다(시험기의 시간대와 무관하게 같은 글자가 나온다)
+    const t = new Date(2026, 10, 25, 18, 0, 0).getTime();
+    expect(tickText(t)).toBe('18시');
+    expect(tickText(t, true)).toBe('11/25 18시');
+    expect(tickText(new Date(2026, 0, 5, 3, 0, 0).getTime(), true)).toBe('1/5 03시');   // 시각은 두 자리 · 월 · 일은 그대로
+    expect(tickText(NaN)).toBe('');
+    expect(tickText('x', true)).toBe('');
   });
   it('값은 0~100 을 세로로 · 마지막 값 · 점 개수', () => {
     const v = trendView(pts([[0, 100], [50, 50], [100, 0]]), { w: 200, top: 10, h: 100, fmt });

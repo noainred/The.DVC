@@ -11,7 +11,6 @@ import { cpuText, memText, memSizeText, diskSizeText, nicSpeedParts, speedText }
 
 /** 임시 키(서비스 태그를 아직 못 읽음) 설명 — 표의 '태그 없음' 배지와 드로어 신호가 같은 글자를 쓴다. */
 export const TMPKEY_NOTE = '서비스 태그를 아직 읽지 못해 임시 키(이름 기반)로 다룹니다. 태그가 읽히면 폴더 등록이 태그 키로 저절로 옮겨 가고 위치는 그대로입니다. 이름이 바뀌면 임시 키도 바뀌어 등록이 ‘목록에 없는 등록’ 으로 보일 수 있습니다.';
-export const NO_SIGNAL_TEXT = '신호 없음 — 부품 장애 · 사용률 값 없음 · 전원 꺼짐/모름 · 임시 키 모두 해당하지 않습니다.';
 
 /** CPU · 메모리 사용률이 둘 다 없는가(표 · 카드 · 드로어가 같은 기준). */
 export const noUsage = (r) => r?.cpu == null && r?.mem == null;
@@ -26,6 +25,28 @@ export function rowTone(r) {
 
 export const powerText = (r) => (r?.powered === true ? '켜짐' : r?.powered === false ? '꺼짐' : '모름');
 
+/**
+ * 상태 점의 설명 글자(title · aria-label) — 색이 뜻하는 것을 **그 서버의 사실로** 쓴다. 색 이름표('켜짐 · 장애 없음')를 그대로 쓰면
+ *   전원 · 부품 장애 값이 없는 서버(엣지 수집 · ESXi 행 · 부품 장애 기능 꺼짐)에서 없는 사실을 말하게 된다(반증 A5).
+ */
+export function rowDotTitle(r) {
+  const f = numOrNull(r?.faults);
+  return [`전원 ${powerText(r)}`, f == null ? '부품 장애 값 없음' : f > 0 ? `부품 장애 ${f}건` : '부품 장애 없음', noUsage(r) ? '사용률 값 없음' : ''].filter(Boolean).join(' · ');
+}
+
+/** 값이 없어 판단하지 않은 것 — 신호로 올리지 않고(봐야 할 것이 아니다) 따로 밝힌다. 정상으로 세지 않는다. */
+export function bmUnknowns(r) {
+  const out = [];
+  if (numOrNull(r?.faults) == null) out.push('부품 장애');
+  if (r?.powered !== true && r?.powered !== false) out.push('전원');
+  return out;
+}
+/** 신호가 없을 때의 글자 — **실제로 본 것만** 나열한다(값이 없던 것을 '해당 없음' 이라 하지 않는다). */
+export function noSignalText(r) {
+  const seen = [numOrNull(r?.faults) != null ? '부품 장애' : '', '사용률 값 없음(CPU · 메모리 둘 다)', r?.powered === true || r?.powered === false ? '전원 꺼짐' : '', '임시 키'].filter(Boolean);
+  return `신호 없음 — ${seen.join(' · ')}에 해당하는 것이 없습니다.`;
+}
+
 const WHY_TONE = { fail: 'crit', stale: 'warn', none: 'info', unknown: 'none' };
 /** 신호 등급 → 머리 배지 색 · 줄 앞 점(색만으로 가르지 않는다 — 글자가 함께 간다). */
 export const SIG_BADGE = Object.freeze({ crit: 'red', warn: 'amber', info: 'gray', none: 'gray' });
@@ -33,7 +54,8 @@ export const SIG_DOT = Object.freeze({ crit: 'var(--red)', warn: 'var(--amber)',
 
 /**
  * 신호 줄 — 행에 이미 있는 값만 쓴다. [{ kind, tone:'crit'|'warn'|'info'|'none', badge, label, fact, desc?, link?:[href, 글자] }]
- *   부품 장애를 못 읽은 서버는 '없음' 으로 치지 않고 '못 읽음' 신호로 남긴다(못 읽었는데 '신호 없음' 이라고 쓰지 않게).
+ *   ⚠ **값이 없는 것(부품 장애 · 전원)은 신호가 아니다**(반증 A2): 전원은 ESXi 행(서버가 null 고정) · 엣지가 수집한 베어메탈에서 구조적으로 비고,
+ *   부품 장애는 그 기능이 꺼져 있어도 빈다 — '읽지 못했다' 고 단정할 수 없고 서버마다 뜨는 줄은 봐야 할 것을 가린다. 그런 값은 bmUnknowns 로 따로 밝힌다.
  */
 export function bmSignalRows(r, now = Date.now()) {
   const out = [];
@@ -41,8 +63,6 @@ export function bmSignalRows(r, now = Date.now()) {
   if (faults != null && faults > 0) {
     out.push({ kind: 'fault', tone: 'crit', badge: `부품 장애 ${faults}건`, label: `부품 장애 ${faults}건`,
       fact: '이 서버에 열린 부품 장애가 있습니다 — 어느 부품인지는 물리 부품 장애 화면에서 봅니다.', link: ['#/tools/part-faults', '부품 장애'] });
-  } else if (faults == null) {
-    out.push({ kind: 'fault-unread', tone: 'none', badge: '부품 장애 못 읽음', label: '부품 장애 못 읽음', fact: '부품 장애를 읽지 못했습니다 — 없음으로 세지 않습니다.' });
   }
   const off = r?.powered === false;
   if (noUsage(r)) {
@@ -56,18 +76,30 @@ export function bmSignalRows(r, now = Date.now()) {
     }
   }
   if (off) out.push({ kind: 'off', tone: 'info', badge: '전원 꺼짐', label: '전원 꺼짐', fact: '서버 전원이 꺼져 있습니다.' });
-  else if (r?.powered !== true) out.push({ kind: 'power-unknown', tone: 'none', badge: '전원 모름', label: '전원 모름', fact: '전원 상태를 읽지 못했습니다 — 켜짐으로도 꺼짐으로도 세지 않습니다.' });
   if (r?.tmpKey) out.push({ kind: 'tmpkey', tone: 'info', badge: '태그 없음', label: '서비스 태그를 아직 읽지 못함', fact: TMPKEY_NOTE });
   return out;
 }
 
-/** ‹ › · ↑↓ 이웃 — rows 는 연 곳의 보이는 순서(행 객체 · key). 목록에 없으면 index −1(‹ › 잠김). */
-export function neighborOfKey(rows, key) {
+/**
+ * ‹ › · ↑↓ 이웃 — rows 는 연 곳의 보이는 순서(행 객체 · key).
+ * 목록에 없으면 index −1. 다만 **방금까지 있던 자리(lastIndex)** 를 알면 그 자리 앞뒤로 이어 간다(gone: true) — 미분류 · 폴더 보기에서
+ *   넣기 · 옮기기 · 빼기를 하면 그 서버가 목록에서 빠지는데, 그때 ‹ › 가 둘 다 잠기면 닫고 다시 눌러야 했다(반증 A4).
+ *   빠진 자리에는 다음 서버가 올라와 있으므로 '다음' = rows[lastIndex] · '이전' = rows[lastIndex − 1].
+ */
+export function neighborOfKey(rows, key, lastIndex = -1) {
   const list = Array.isArray(rows) ? rows : [];
   const i = list.findIndex((x) => x && x.key === key);
-  if (i < 0) return { prev: null, next: null, index: -1, total: list.length };
-  return { prev: list[i - 1] || null, next: list[i + 1] || null, index: i, total: list.length };
+  if (i >= 0) return { prev: list[i - 1] || null, next: list[i + 1] || null, index: i, total: list.length, gone: false };
+  const li = Number.isInteger(lastIndex) && lastIndex >= 0 ? Math.min(lastIndex, list.length) : -1;
+  if (li < 0) return { prev: null, next: null, index: -1, total: list.length, gone: false };
+  return { prev: list[li - 1] || null, next: list[li] || null, index: -1, total: list.length, gone: true };
 }
+
+/**
+ * 드로어 안에 보일 쓰기 결과 알림 — 드로어를 연 뒤 · 서버를 넘긴 뒤에 **새로 온 것만**(seen = 그때 이미 있던 알림 객체).
+ *   이전 서버의 '옮겼습니다' 를 다음 서버 것처럼 보이지 않게 하고, 글자가 없는 알림은 그리지 않는다.
+ */
+export const freshNote = (note, seen) => (note && note !== seen && note.text ? note : null);
 
 /** 사용률 출처 표지 — 값이 있을 때만. 행이 '지표마다 다름(구분 모름)' 이면 mixed. */
 const srcOf = (r, m, v) => (v == null ? '' : r?.usrc?.mixed ? 'mixed' : r?.usrc?.[m] || '');
@@ -75,13 +107,16 @@ const srcOf = (r, m, v) => (v == null ? '' : r?.usrc?.mixed ? 'mixed' : r?.usrc?
 /** 타일 4장의 값(그리기는 컴포넌트). 값이 없으면 pct · watts 가 null — '—' 로 그리고 단위를 붙이지 않는다. */
 export function bmTiles(r) {
   const cpu = numOrNull(r?.cpu); const mem = numOrNull(r?.mem);
-  const cores = numOrNull(r?.cores); const memGB = numOrNull(r?.memGB);
+  // 용량: 행 값(사용률 쪽) 먼저 · 없으면 같은 행의 iDRAC 요약(같은 화면의 '하드웨어 요약' 이 32코어인데 타일만 '모름' 이 되지 않게 — 반증 A14)
+  const cores = numOrNull(r?.cores) ?? numOrNull(r?.hw?.cpu?.cores);
+  const memGB = numOrNull(r?.memGB);
+  const memSub = memGB != null ? `${memGB} GB` : memText(r?.hw?.mem);
   const spec = cpuText(r?.hw?.cpu);
   const faults = numOrNull(r?.faults);
-  const capText = [cores != null ? `${cores}코어` : '', memGB != null ? `${memGB} GB` : ''].filter(Boolean).join(' · ');
+  const capText = [cores != null ? `${cores}코어` : '', memSub].filter(Boolean).join(' · ');
   return {
     cpu: { pct: cpu, src: srcOf(r, 'cpu', cpu), sub: [cores != null ? `${cores}코어` : '', spec && cores != null && spec !== `${cores}C` ? spec : ''].filter(Boolean).join(' · ') || '코어 수 모름' },
-    mem: { pct: mem, src: srcOf(r, 'mem', mem), sub: memGB != null ? `${memGB} GB` : '용량 모름' },
+    mem: { pct: mem, src: srcOf(r, 'mem', mem), sub: memSub || '용량 모름' },
     usage: { cap: capText || '용량 모름' },
     power: { watts: numOrNull(r?.watts), sub: `전원 ${powerText(r)}` },
     fault: faults == null ? { state: 'unread', n: null } : { state: faults > 0 ? 'bad' : 'ok', n: faults },
@@ -166,7 +201,8 @@ export function tickText(ts, withDate = false) {
  * @returns {{ cpu:string, mem:string, gaps:{x:number,w:number}[], ticks:{x:number,text:string,anchor:string}[], lastCpu:number|null, lastMem:number|null, n:number }|null}
  */
 export function trendView(rows, { w = 560, top = 20, h = 110, fmt = tickText } = {}) {
-  const list = (Array.isArray(rows) ? rows : []).filter((p) => p && Number.isFinite(Number(p.ts)));
+  // 시각도 numOrNull 로(Number(null) · Number('') 은 0 = 1970년이 된다 — 반증 A13)
+  const list = (Array.isArray(rows) ? rows : []).filter((p) => p && numOrNull(p.ts) > 0);
   if (!list.length) return null;
   const t0 = Number(list[0].ts); const t1 = Number(list[list.length - 1].ts);
   const span = Math.max(1, t1 - t0);

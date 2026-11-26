@@ -25,10 +25,11 @@
  * 셀에 컴포넌트가 있으면 텍스트 자식 → value/pct/label 순으로 값을 찾고, 정확한 값을 원하면 td 에 `data-sort` 를 준다.
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { headerSortable, sortChildren, nextSortState, rowIdsOf } from './sortableText.js';
+import { headerSortable, sortChildren, nextSortState, rowIdsOf, managesSort } from './sortableText.js';
 import { onPressKey } from './pressable.js';   // v3.13.2 정렬 머리 키보드(Enter/Space) — 역할(columnheader)은 그대로
 
 const ARROW = { asc: '▲', desc: '▼' };
+
 
 export function STable({ sortable = true, limit = 0, minWidth = 0, wrap, onOrder, children, ...rest }) {
   const [sort, setSort] = useState(null); // { col, dir } | null
@@ -65,11 +66,18 @@ export function STable({ sortable = true, limit = 0, minWidth = 0, wrap, onOrder
    * 쓰는 곳: 표 옆 드로어의 ‹ › · ↑↓ 가 '표에 보이는 순서' 로 넘어가게(물리서버 상세 드로어 — 정렬은 이 컴포넌트 안에서 일어나
    * 호출부는 순서를 모른다). 순서가 실제로 바뀔 때만 부른다(같은 순서의 리렌더에는 부르지 않는다 — 호출부가 setState 해도 돌지 않게).
    * `onOrder` 를 주지 않으면 아무 계산도 하지 않는다(다른 표의 비용 0). ⚠ 훅이라 조기 return 위에 둔다(위 주석과 같은 이유).
+   * 이 컴포넌트가 정렬 · 상한을 **맡지 않는** 표(`sortable={false}` · 자체 정렬 th · thead 가 없는 표)는 children 을 그대로 그리므로
+   *   (아래 조기 return 들 — `limit` 도 걸리지 않는다) 받은 순서를 상한 없이 알린다 — 화면과 다른 순서를 알리지 않게(반증 B4).
    */
+  const anyTbody = onOrder ? kids.find((c) => React.isValidElement(c) && c.type === 'tbody') : null;
+  const hasBody = !!anyTbody;
+  const rawKids = anyTbody?.props?.children;   // ⚠ 의존성은 이 참조로(anyTbody 는 Children.toArray 가 렌더마다 새로 만든다 — 그대로 넣으면 매 렌더 다시 계산한다)
+  const managed = !!thead && !!tbody && managesSort(thead);
   const orderKey = useMemo(() => {
-    if (!onOrder || tbodyKids === undefined) return null;
-    return rowIdsOf(sort ? sortedKids : tbodyKids, cap).join('\u0000');
-  }, [onOrder, sort, sortedKids, tbodyKids, cap]);
+    if (!onOrder || !hasBody) return null;
+    const ids = managed ? rowIdsOf(sort ? sortedKids : tbodyKids, cap) : rowIdsOf(rawKids, 0);
+    return ids.join('\u0000');
+  }, [onOrder, hasBody, rawKids, managed, sort, sortedKids, tbodyKids, cap]);
   const onOrderRef = useRef(onOrder);
   onOrderRef.current = onOrder;
   useEffect(() => { if (orderKey != null) onOrderRef.current?.(orderKey === '' ? [] : orderKey.split('\u0000')); }, [orderKey]);
@@ -84,16 +92,14 @@ export function STable({ sortable = true, limit = 0, minWidth = 0, wrap, onOrder
     return doWrap ? <div style={{ overflowX: 'auto', maxWidth: '100%' }}>{t}</div> : t;
   };
 
-  if (!thead || !tbody) return render(children);
+  // 이 표의 정렬을 맡지 않으면(thead · tbody 없음 · 머리글 줄 없음 · 자체 정렬 표 = 컴포넌트 th 또는 onClick th) 손대지 않는다.
+  //   판정은 한 곳(sortableText.js managesSort) — 위의 순서 알림(onOrder)이 같은 판정으로 '받은 순서 그대로' 를 알린다.
+  if (!managed) return render(children);
 
   const headKids = React.Children.toArray(thead.props.children);
   const headRows = headKids.filter((r) => React.isValidElement(r) && r.type === 'tr');
   const lastRow = headRows[headRows.length - 1];
-  if (!lastRow) return render(children);
   const ths = React.Children.toArray(lastRow.props.children);
-  // 자체 정렬 표(컴포넌트 th 또는 onClick th)는 손대지 않는다.
-  const selfSorted = ths.some((t) => React.isValidElement(t) && (typeof t.type !== 'string' || t.props?.onClick));
-  if (selfSorted) return render(children);
 
   let col = 0;
   const newThs = ths.map((th, idx) => {

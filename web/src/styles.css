@@ -3331,8 +3331,12 @@ table.bmf-t tr.bmf-picked td { background: rgba(59, 130, 246, .08); }
 .vmh-acts > .bmd-grow { flex: 1 1 8px; min-width: 0; }
 .vmh-acts > .bmd-ro { flex: 1 1 220px; min-width: 0; font-size: 12px; line-height: 1.5; }
 .vmh-acts > .bmd-sel { flex: 0 1 220px; min-width: 0; width: 220px; max-width: 100%; }
-.bmd-btn { padding: 7px 12px; width: auto; white-space: nowrap; }
-.bmd-idc-btn { padding: 7px 14px; width: auto; white-space: nowrap; }
+.bmd-btn { padding: 7px 12px; width: auto; margin: 0; white-space: nowrap; }
+/* margin: 0 — 공용 .login-btn 의 margin-top 4px 가 남아 옆 단추보다 2px 내려앉았다(이 단추는 span 안이라 .vmh-acts > .login-btn 규칙이 닿지 않는다 — 반증 B5) */
+.bmd-idc-btn { padding: 7px 14px; width: auto; margin: 0; white-space: nowrap; }
+.bmd-opnote { padding: 8px 18px; border-bottom: 1px solid var(--border-soft); font-size: 12.5px; line-height: 1.5; word-break: keep-all; overflow-wrap: anywhere; }
+.bmd-opnote.ok { color: var(--text); background: rgba(34, 197, 94, .10); }
+.bmd-opnote.bad { color: var(--text); background: rgba(239, 68, 68, .12); }
 .bmd-lb { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
 .bmd-tile2 { grid-column: span 2; }
 .bmd-vtext { font-family: inherit !important; font-size: 16px !important; line-height: 1.25 !important; }

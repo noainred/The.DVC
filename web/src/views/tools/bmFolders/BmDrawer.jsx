@@ -21,8 +21,8 @@ import { IdracConnect } from './IdracConnect.jsx';
 import { unitText } from '../../unitText.js';
 import { usageTone, TONE_COLOR, TONE_TEXT } from '../../vms/vmHubText.js';
 import {
-  rowTone, noUsage, powerText, bmSignalRows, neighborOfKey, bmTiles, bmKvRows, specCells, partGroups, trendView,
-  SIG_BADGE, SIG_DOT, NO_SIGNAL_TEXT,
+  rowTone, rowDotTitle, noUsage, powerText, bmSignalRows, bmUnknowns, noSignalText, neighborOfKey, freshNote, bmTiles, bmKvRows, specCells, partGroups, trendView,
+  SIG_BADGE, SIG_DOT,
 } from './drawerText.js';
 import '../../vms/vmHub.css';
 
@@ -81,10 +81,24 @@ function useBoxWidth(ref, fallback) {
   return w;
 }
 
-export default function BmDrawer({ r, rows, corps, corpName, scoped, op, busy, onClose, onMove }) {
+/** 드로어 위에 모달(포탈 공용 Modal — 웹 SSH 창)이 떠 있는가. 그동안 드로어는 키 · 포커스를 가져가지 않는다. */
+const modalAbove = () => typeof document !== 'undefined' && !!document.querySelector('.modal-overlay');
+
+/**
+ * @param note  호출부의 쓰기 결과 알림({ ok, warn, text }) — 호출부는 본문 위 카드에 그리는데 그 자리는 가림막 뒤다(좁은 화면은 화면 밖).
+ *              드로어가 열린 뒤 · 서버를 넘긴 뒤에 **새로 온 것만** 단추 줄 아래에 보인다(반증 A6 — 실패가 드로어 안에서 보이지 않았다).
+ */
+export default function BmDrawer({ r, rows, corps, corpName, scoped, op, busy, onClose, onMove, note = null }) {
   const rootRef = useRef(null);
   const backRef = useRef(null);
   const bodyRef = useRef(null);
+  const lastIdx = useRef(-1);        // 이 서버가 목록에서 방금까지 있던 자리(넣기 · 옮기기로 목록에서 빠져도 ‹ › 를 이어 간다)
+  // 열 때 · 넘길 때 이미 있던 알림은 이 서버 것이 아니다. ⚠ 렌더 중에 키로 갈아 낀다 — effect 에서 바꾸면 넘긴 첫 렌더에 이전 서버의 알림이 그려지고
+  //   (ref 는 다시 그리게 하지 않으므로) 다음 렌더까지 남는다.
+  const seen = useRef({ key: r?.key, note });
+  if (seen.current.key !== r?.key) seen.current = { key: r?.key, note };
+  const keyRef = useRef(null);       // 창 키 리스너가 부르는 지금 렌더의 처리기(아래 onKey)
+  keyRef.current = null;
   const [to, setTo] = useState('');
   const isBm = r?.kind === 'bm';
   const hw = useOnce('/tools/bm-folders/hw', r?.key || '', null, !!r && isBm);
@@ -97,30 +111,57 @@ export default function BmDrawer({ r, rows, corps, corpName, scoped, op, busy, o
   }, []);
   // 다른 서버로 넘어가면 고르던 폴더를 비우고 본문을 맨 위로
   useEffect(() => { setTo(''); if (bodyRef.current) bodyRef.current.scrollTop = 0; }, [r?.key]);
+  // ↑↓ 는 **창**에서 듣는다(EscClose 와 같은 방식) — 드로어 요소의 onKeyDown 으로 들으면 ① React 이벤트가 포털을 넘어 올라와 웹 SSH 창 안의 키가
+  //   서버를 넘겼고(반증 A1) ② 포커스가 body 로 빠지면(잠긴 단추 · 닫힌 창) 키가 죽었다(A3). 무엇을 넘길지는 아래 onKey 가 가른다.
+  useEffect(() => {
+    const h = (e) => keyRef.current?.(e);
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, []);
+  // 누른 단추가 잠기면(끝 서버의 ‹ › · 옮긴 뒤의 '옮기기') 포커스가 body 로 빠진다 — Tab 이 가림막 뒤 화면에서 시작하지 않게 드로어로 되돌린다(반증 A3).
+  //   body 일 때만(드로어 밖에서 포커스를 쓰는 것은 건드리지 않는다) · 드로어 위에 모달(웹 SSH 창)이 떠 있으면 가져오지 않는다.
+  useEffect(() => {
+    if (typeof document === 'undefined' || modalAbove()) return;
+    const a = document.activeElement;
+    if (!a || a === document.body) rootRef.current?.focus({ preventScroll: true });
+  });
   if (!r) return null;
 
   const corp = (corps || []).find((c) => c.vcenterId === r.corp) || null;
   const writable = !!corp?.writable;
   const folders = (corp?.folders || []).map((f) => f.path).filter((p) => !(r.place && p === r.path));
-  const nb = neighborOfKey(rows, r.key);
+  const nb = neighborOfKey(rows, r.key, lastIdx.current);
+  if (nb.index >= 0) lastIdx.current = nb.index;
   const sigs = bmSignalRows(r);
   const addr = hw.d?.addr || r.addr || '';
+  const opNote = freshNote(note, seen.current.note);
   const move = (x) => { if (x) onMove(x.key); };
   const onKey = (e) => {
-    const tag = String(e.target?.tagName || '').toLowerCase();
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    if (modalAbove()) return;   // 드로어 위에 모달(웹 SSH 창)이 떠 있는 동안은 드로어 키가 아니다 — 넘기면 창의 접속 대상과 화면이 어긋난다(반증 A1 실측)
+    const el = e.target;
+    const root = rootRef.current;
+    const inside = !!root && !!el && typeof el.nodeType === 'number' && root.contains(el);
+    // 드로어 **DOM 안**에서 난 키, 또는 포커스가 어디에도 없을 때(body)의 키만 — 그 밖의 요소(포털로 그린 창 등)에서 난 키는 넘기지 않는다
+    if (!inside && el !== document.body) return;
+    // 열린 상자(접속 · 사유) 안의 키도 넘기지 않는다
+    if (inside && typeof el.closest === 'function' && el.closest('.bmf-idc-pop, .bmf-why-pop')) return;
+    const tag = String(el?.tagName || '').toLowerCase();
     if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
     if (e.key === 'ArrowDown' && nb.next) { e.preventDefault(); move(nb.next); }
     else if (e.key === 'ArrowUp' && nb.prev) { e.preventDefault(); move(nb.prev); }
   };
+  keyRef.current = onKey;
 
   return (
     <>
       <div className="vmh-drawer-overlay" onClick={onClose} aria-hidden="true" />
-      <aside ref={rootRef} className="vmh-drawer" role="dialog" aria-modal="true" aria-label={`서버 상세 — ${r.name}`} tabIndex={-1} onKeyDown={onKey}>
+      <aside ref={rootRef} className="vmh-drawer" role="dialog" aria-modal="true" aria-label={`서버 상세 — ${r.name}`} tabIndex={-1}>
         <EscClose onClose={onClose} />
         <div className="vmh-dh">
           <div className="ttl">
-            <StatusDot tone={rowTone(r)} />
+            <StatusDot tone={rowTone(r)} title={rowDotTitle(r)} />
             <h2 title={r.name}>{r.name}</h2>
             <span className="grow" />
             <button type="button" className="vmh-icon-btn" aria-label="이전 서버" title="이전 서버(↑)" disabled={!nb.prev} onClick={() => move(nb.prev)}>‹</button>
@@ -138,12 +179,14 @@ export default function BmDrawer({ r, rows, corps, corpName, scoped, op, busy, o
             <span className="bmd-seg"><span aria-hidden="true">·</span><span>{isBm ? '베어메탈' : 'ESXi 호스트'}</span></span>
             {r.model ? <span className="bmd-seg"><span aria-hidden="true">·</span><span>{r.model}</span></span> : null}
             {!scoped && r.serviceTag ? <span className="bmd-seg"><span aria-hidden="true">·</span><span className="mono">{r.serviceTag}</span></span> : null}
-            {nb.index >= 0 && <span className="pos">목록 {nb.index + 1}/{nb.total}</span>}
+            {nb.index >= 0 ? <span className="pos">목록 {nb.index + 1}/{nb.total}</span>
+              : nb.gone ? <span className="pos" title="지금 보기의 목록에 이 서버가 없습니다(넣기 · 옮기기 · 빼기 뒤이거나 목록이 바뀌었습니다) — ‹ › 는 있던 자리의 앞뒤 서버로 갑니다">목록에서 빠짐</span> : null}
           </div>
         </div>
 
         <div className="vmh-acts bmd-acts">
-          {isBm && addr && !scoped ? <IdracConnect addr={addr} name={r.name} corp={r.corp} button /> : null}
+          {/* key = 서버 — 넘기면 접속 상자 · 웹 SSH 창의 상태를 다음 서버가 물려받지 않는다(반증 A7) */}
+          {isBm && addr && !scoped ? <IdracConnect key={r.key} addr={addr} name={r.name} corp={r.corp} button /> : null}
           <span className="bmd-grow" />
           {writable && r.corp ? (
             <>
@@ -161,6 +204,8 @@ export default function BmDrawer({ r, rows, corps, corpName, scoped, op, busy, o
             <span className="muted bmd-ro">{!r.corp ? '법인을 몰라 폴더에 넣을 수 없습니다.' : '이 법인은 조회 전용입니다 — 폴더를 옮기거나 뺄 수 없습니다.'}</span>
           )}
         </div>
+
+        {opNote ? <div className={`bmd-opnote${opNote.ok && !opNote.warn ? ' ok' : ' bad'}`} role={opNote.ok ? 'status' : 'alert'}>{opNote.text}</div> : null}
 
         <div className="vmh-db bmd-db" ref={bodyRef}>
           <DrawerSections r={r} hw={hw} trend={trend} corpName={corpName} scoped={scoped} onClose={onClose} />
@@ -184,15 +229,19 @@ export default function BmDrawer({ r, rows, corps, corpName, scoped, op, busy, o
  * @param hw     { d, err } — /tools/bm-folders/hw(읽는 중이면 d null · err '')
  * @param trend  { d, err } — /tools/bm-folders/trend
  */
-export function DrawerSections({ r, hw, trend, corpName, scoped, onClose }) {
+export function DrawerSections({ r, hw, trend, corpName, scoped, onClose, now }) {
   const isBm = r.kind === 'bm';
-  const sigs = bmSignalRows(r);
+  const at = now ?? Date.now();   // 나이 글자의 기준 시각(시험이 넣어 볼 수 있게 — 기본은 지금)
+  const sigs = bmSignalRows(r, at);
+  const unknowns = bmUnknowns(r);
   const tiles = bmTiles(r);
   const kv = bmKvRows(r, { corpName, scoped });
   const none = noUsage(r);
   const d = hw.d;
   const det = d?.detail || null;
-  const sum = det?.summary || d?.summary || r.hw || null;   // 상세를 받기 전 · 못 받았을 때는 목록 행의 요약(같은 값)
+  // 요약: 방금 받은 응답이 먼저 — 응답이 '인벤토리 없음' 이면 목록 행의 예전 요약을 내세우지 않는다(반증 A11: 위에는 값 · 아래에는 '위의 이유와 같다').
+  //   응답을 받기 전 · 조회 실패일 때만 목록 행의 요약(같은 출처의 값)을 쓴다.
+  const sum = d ? (det?.summary || d.summary || null) : (r.hw || null);
   const os = osText(det?.os || sum?.os);
   const osHost = det?.os?.host || sum?.host || '';
   const addr = d?.addr || r.addr || '';
@@ -215,7 +264,7 @@ export function DrawerSections({ r, hw, trend, corpName, scoped, onClose }) {
           {none && r.why?.code ? (
             <div className="vmh-dtile bmd-tile2">
               <span className="lb">CPU · 메모리 사용률</span>
-              <WhyTip why={r.why} what="CPU · 메모리 사용률" />
+              <WhyTip key={r.key} why={r.why} what="CPU · 메모리 사용률" />
               <span className="s wrap">{tiles.usage.cap} — 사유를 누르면 자세히</span>
             </div>
           ) : (<>{usageTile('CPU', tiles.cpu)}{usageTile('메모리', tiles.mem)}</>)}
@@ -229,7 +278,7 @@ export function DrawerSections({ r, hw, trend, corpName, scoped, onClose }) {
             {tiles.fault.state === 'unread' ? <span className="v" style={{ color: 'var(--text-dim)' }}>—</span>
               : tiles.fault.state === 'bad' ? <span className="v" style={{ color: '#fca5a5' }}>{tiles.fault.n}<small>건</small></span>
                 : <span className="v bmd-vtext">없음</span>}
-            <span className="s wrap">{tiles.fault.state === 'unread' ? '못 읽음 — 0건이 아닙니다' : tiles.fault.state === 'bad' ? <a href="#/tools/part-faults" onClick={onClose}>물리 부품 장애에서 보기</a> : '읽었고 0건'}</span>
+            <span className="s wrap">{tiles.fault.state === 'unread' ? '값 없음 — 0건이 아닙니다' : tiles.fault.state === 'bad' ? <a href="#/tools/part-faults" onClick={onClose}>물리 부품 장애에서 보기</a> : '읽었고 0건'}</span>
           </div>
         </div>
       </section>
@@ -255,7 +304,8 @@ export function DrawerSections({ r, hw, trend, corpName, scoped, onClose }) {
               </div>
             ))}
           </div>
-        ) : <div className="muted bmd-note">{NO_SIGNAL_TEXT}</div>}
+        ) : <div className="muted bmd-note">{noSignalText(r)}</div>}
+        {unknowns.length ? <div className="muted bmd-note">값이 없어 판단하지 않은 것: {unknowns.join(' · ')} — 정상으로 세지 않습니다.</div> : null}
       </section>
 
       <section className="vmh-sec" aria-label="식별 · 배치">
@@ -274,7 +324,7 @@ export function DrawerSections({ r, hw, trend, corpName, scoped, onClose }) {
           {isBm ? (
             <div className="full">
               <span>OS</span>
-              <b title={os.full || OS_WHY} style={os.full ? undefined : { color: 'var(--text-dim)' }}>{os.full || '—'}</b>
+              <b title={os.full || (sum ? OS_WHY : undefined)} style={os.full ? undefined : { color: 'var(--text-dim)' }}>{os.full || '—'}</b>
             </div>
           ) : null}
           {isBm && osHost ? <div className="full"><span>OS 호스트명</span><b className="mono">{osHost}</b></div> : null}
@@ -285,11 +335,11 @@ export function DrawerSections({ r, hw, trend, corpName, scoped, onClose }) {
       {isBm ? (
         <>
           <section className="vmh-sec" aria-label="iDRAC · 관리">
-            <div className="sh"><h3>iDRAC · 관리</h3>{sum?.at ? <span className="muted">인벤토리 {ageText(sum.at)} 읽음{d && VIA_TEXT[d.via] ? ` · ${VIA_TEXT[d.via]}` : ''}</span> : null}</div>
+            <div className="sh"><h3>iDRAC · 관리</h3>{sum ? <span className="muted">인벤토리 {sum.at ? `${ageText(sum.at, at)} 읽음` : '—'}{d && VIA_TEXT[d.via] ? ` · ${VIA_TEXT[d.via]}` : ''}</span> : null}</div>
             <div className="vmh-kv">
               <div>
                 <span>iDRAC 주소</span>
-                <b>{addr ? (scoped ? <span className="mono">{addr}</span> : <IdracConnect addr={addr} name={r.name} corp={r.corp} />)
+                <b>{addr ? (scoped ? <span className="mono">{addr}</span> : <IdracConnect key={r.key} addr={addr} name={r.name} corp={r.corp} />)
                   : <span className="muted" title="관리 주소는 관리자 판본에서만 보입니다(또는 이 서버의 iDRAC 주소를 모릅니다)">—</span>}</b>
               </div>
               <div><span>관리 NIC IPv4</span><b className="mono" style={det?.idrac?.ipv4 ? undefined : { color: 'var(--text-dim)' }}>{det?.idrac?.ipv4 || '—'}</b></div>

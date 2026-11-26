@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import React from 'react';
-import { textOf, sortKeyOf, compareKeys, sortChildren, nextSortState, headerSortable, cellText, rowIdsOf } from './sortableText.js';
+import { textOf, sortKeyOf, compareKeys, sortChildren, nextSortState, headerSortable, cellText, rowIdsOf, managesSort } from './sortableText.js';
 
 const h = React.createElement;
 
@@ -129,7 +129,53 @@ describe('rowIdsOf — 보이는 행의 data-rowid', () => {
     expect(rowIdsOf(undefined)).toEqual([]);
     expect(rowIdsOf([])).toEqual([]);
   });
-  it('중첩 배열(조각으로 나눠 그린 tbody)도 편다', () => {
+  it('중첩 배열(조각으로 나눠 그린 tbody)도 편다 — 깊이에 상관없이', () => {
     expect(rowIdsOf([[rows[0]], [rows[1], [rows[2]]]])).toEqual(['st:B', 'st:A', 'st:C']);
+    expect(rowIdsOf([[[[[rows[0]]]]], [[[[[[rows[1]]]]]]]])).toEqual(['st:B', 'st:A']);   // 깊이 4 이상도(예전에는 3 까지만 폈다)
+  });
+  it('상한은 id 를 거르기 전의 행 단위에 건다 — 표가 그린 줄만 알린다(id 없는 안내 줄도 한 줄로 센다)', () => {
+    // 표는 [안내 줄, B, A, C] 에서 앞 2줄(안내 줄 · B)만 그린다 → 알릴 것은 B 하나. 거른 뒤에 자르면 화면에 없는 A 까지 알린다(반증 B3 M2).
+    const note = h('tr', { key: 'note' }, h('td', null, '안내'));
+    expect(rowIdsOf([note, ...rows], 2)).toEqual(['st:B']);
+    expect(rowIdsOf([null, false, note, ...rows], 2)).toEqual(['st:B']);   // null · false 는 줄이 아니다(React 가 그리지 않는다)
+    expect(rowIdsOf([note, ...rows], 1)).toEqual([]);
+    expect(rowIdsOf(rows, 1.9)).toEqual(['st:B']);    // 상한은 내림
+    expect(rowIdsOf(rows, -1)).toHaveLength(3);        // 0 이하는 상한 없음
+    expect(rowIdsOf(rows, 'x')).toHaveLength(3);
+  });
+  it('조각(Fragment) · 감싼 컴포넌트 안의 행은 전부 알린다 — 첫 행만 보지 않는다', () => {
+    const frag = h(React.Fragment, { key: 'f' }, rows[0], rows[1]);
+    expect(rowIdsOf([frag, rows[2]])).toEqual(['st:B', 'st:A', 'st:C']);
+    // 조각 하나가 상한의 한 단위다(표의 상한도 조각 단위로 자른다)
+    expect(rowIdsOf([frag, rows[2]], 1)).toEqual(['st:B', 'st:A']);
+    // 행 안의 표(칸 안에 든 다른 표)의 행은 세지 않는다 — tr 을 만나면 그 안으로 들어가지 않는다
+    const nested = h('tr', { key: 'o', 'data-rowid': 'outer' }, h('td', null, h('table', null, h('tbody', null, h('tr', { 'data-rowid': 'inner' }, h('td', null, 'x'))))));
+    expect(rowIdsOf([nested])).toEqual(['outer']);
+    expect(rowIdsOf(['글자', 3, rows[0]])).toEqual(['st:B']);   // 글자 · 숫자 자식은 건너뛴다
+  });
+});
+
+describe('managesSort — 이 표의 정렬 · 상한을 STable 이 맡는가', () => {
+  const th = (label, props = {}) => h('th', { key: label, ...props }, label);
+  const thead = (...rows) => h('thead', null, ...rows);
+  it('글자 th 만 있는 마지막 머리글 줄 → 맡는다', () => {
+    expect(managesSort(thead(h('tr', null, th('이름'), th('값'))))).toBe(true);
+    expect(managesSort(thead(h('tr', null, th('이름', { 'data-nosort': true }))))).toBe(true);   // 정렬 끈 열이 있어도 표는 맡는다
+  });
+  it('자체 정렬 표(onClick th · 컴포넌트 th) → 맡지 않는다(손대지 않는다)', () => {
+    expect(managesSort(thead(h('tr', null, th('이름', { onClick: () => {} }), th('값'))))).toBe(false);
+    const SortTh = () => h('th', null, 'x');
+    expect(managesSort(thead(h('tr', null, h(SortTh, { key: 'c' }), th('값'))))).toBe(false);
+  });
+  it('판정은 마지막 머리글 줄로 — 윗줄(묶음 머리)의 onClick 은 보지 않는다', () => {
+    expect(managesSort(thead(h('tr', { key: 'g' }, th('묶음', { onClick: () => {} })), h('tr', { key: 'c' }, th('이름'))))).toBe(true);
+    expect(managesSort(thead(h('tr', { key: 'g' }, th('묶음')), h('tr', { key: 'c' }, th('이름', { onClick: () => {} }))))).toBe(false);
+  });
+  it('머리글 줄이 없거나 thead 가 아니면 → 맡지 않는다', () => {
+    expect(managesSort(thead())).toBe(false);
+    expect(managesSort(thead(null, false))).toBe(false);
+    expect(managesSort(null)).toBe(false);
+    expect(managesSort(undefined)).toBe(false);
+    expect(managesSort('thead')).toBe(false);
   });
 });

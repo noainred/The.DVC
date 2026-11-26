@@ -70,7 +70,7 @@ describe('bmFoldersText', () => {
   });
 });
 
-import { mapGroups, cellTone, parseViews, upsertView, cleanView, VIEWS_MAX } from './bmFoldersText.js';
+import { mapGroups, mapVisibleRows, MAP_CELL_MAX, cellTone, parseViews, upsertView, cleanView, VIEWS_MAX } from './bmFoldersText.js';
 
 describe('bmFoldersText v2.987 — 맵 · 저장한 보기', () => {
   const rows = [
@@ -83,6 +83,19 @@ describe('bmFoldersText v2.987 — 맵 · 저장한 보기', () => {
     expect(f.map((g) => [g.label, g.rows.length, g.un, g.corp])).toEqual([['DB', 1, false, 'A'], ['DB', 1, false, 'B'], ['(미분류)', 1, true, 'A']]);
     expect(mapGroups(rows, 'corp', (x) => `법인${x}`).map((g) => g.label)).toEqual(['법인A', '법인B']);
     expect(mapGroups(rows, 'model').map((g) => [g.label, g.un])).toEqual([['R650', false], ['(모델 모름)', true]]);
+  });
+  it('맵에 보이는 순서(v3.44 드로어 ‹ ›) — 묶음 순서대로 · 묶음마다 그린 칸까지만(걸러진 행 순서가 아니다)', () => {
+    // 걸러진 행 순서는 a(A·DB) · b(A·미분류) · c(B·DB) 인데 맵은 DB(A) · DB(B) · 미분류 순으로 그린다 → a · c · b
+    expect(mapVisibleRows(rows, 'folder').map((r) => r.key)).toEqual(['a', 'c', 'b']);
+    expect(mapVisibleRows(rows, 'corp', (x) => `법인${x}`).map((r) => r.key)).toEqual(['a', 'b', 'c']);
+    expect(mapVisibleRows(rows, 'model').map((r) => r.key)).toEqual(['a', 'c', 'b']);
+    // 묶음마다 상한까지만 — 맵이 그리지 않은 칸으로는 넘어가지 않는다
+    const many = [{ key: 'x1', corp: 'A', path: 'DB', place: 'manual' }, { key: 'x2', corp: 'A', path: 'DB', place: 'manual' }, { key: 'x3', corp: 'A', path: 'DB', place: 'manual' }, { key: 'y1', corp: 'A', path: 'WEB', place: 'manual' }];
+    expect(mapVisibleRows(many, 'folder', (x) => x, 2).map((r) => r.key)).toEqual(['x1', 'x2', 'y1']);
+    expect(mapVisibleRows(many, 'folder').map((r) => r.key)).toEqual(['x1', 'x2', 'x3', 'y1']);
+    expect(MAP_CELL_MAX).toBe(400);
+    expect(mapVisibleRows([], 'folder')).toEqual([]);
+    expect(mapVisibleRows(undefined)).toEqual([]);
   });
   it('칸 색 — 20% 단위 5단 · 못 읽음은 na(0 으로 칠하지 않음) · 꺼짐 · 장애는 색과 따로 테두리 · 전력은 최대 대비', () => {
     expect(cellTone({ cpu: 10 }, 'cpu').tone).toBe('u1');

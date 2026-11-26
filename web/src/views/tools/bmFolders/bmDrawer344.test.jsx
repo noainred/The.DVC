@@ -18,9 +18,9 @@ const read = (rel) => stripComments(fs.readFileSync(new URL(rel, import.meta.url
 const raw = (rel) => fs.readFileSync(new URL(rel, import.meta.url), 'utf8');
 const HOUR = 3_600_000;
 const NOW = Math.floor(Date.now() / HOUR) * HOUR;
-// 인벤토리 나이 글자('3분 전')는 화면이 지금 시각으로 계산한다(분은 반올림) — 읽은 시각을 '지금 − 3분 5초' 로 두어 시험이 도는 동안 글자가 바뀌지 않게 한다
-//   (3분 30초가 돼야 '4분 전' — 여유 25초. 정시 기준으로 두면 실행한 분에 따라 달라졌다: 첫 판본의 실수).
-const INV_AT = Date.now() - 3 * 60_000 - 5_000;
+// 인벤토리 나이 글자('3분 전')의 기준 시각은 구역 컴포넌트에 `now` 로 넣는다(아래 sections) — 실제 시각에 기대면 실행한 분 · 느린 실행에 따라 글자가 달라진다
+//   (첫 판본은 정시 기준으로 두어 실행한 분에 따라 깨졌고, 둘째 판본 '지금 − 3분 5초' 는 여유가 25초뿐이었다 — 반증 B7).
+const INV_AT = NOW - 3 * 60_000;
 const SUM = { v: 1, at: INV_AT, cpu: { sockets: 2, cores: 32, threads: 64, model: 'Xeon Gold 6246R' }, mem: { gib: 512, dimms: 8 }, disk: { n: 12, ssd: 0, hdd: 12, gb: 48000 },
   nic: { ports: 8, speeds: [[10, 4]] }, hba: { n: 0 }, os: { name: 'Red Hat Enterprise Linux Server', ver: '7.8' }, fw: '7.00.00.183', host: 'selsbpdps09' };
 const DETAIL = {
@@ -45,7 +45,7 @@ const render = async (props) => {
 };
 const sections = async (props) => {
   const { DrawerSections } = await import('./BmDrawer.jsx');
-  return renderToStaticMarkup(React.createElement(DrawerSections, { corpName, scoped: false, onClose: () => {}, hw: { d: null, err: '' }, trend: { d: null, err: '' }, ...props }));
+  return renderToStaticMarkup(React.createElement(DrawerSections, { corpName, scoped: false, onClose: () => {}, hw: { d: null, err: '' }, trend: { d: null, err: '' }, now: NOW, ...props }));
 };
 const text = (html) => html.replace(/<[^>]+>/g, ' ').replace(/&#x27;/g, "'").replace(/&amp;/g, '&').replace(/\s+/g, ' ');
 
@@ -126,8 +126,19 @@ describe('DrawerSections — 한눈에 · 추이 · 신호 · 값 줄', () => {
     const t = text(html);
     expect(html).not.toContain('class="vmh-bar"');
     expect(t).not.toMatch(/— ?%|— ?W|— ?건/);
-    expect(t).toContain('못 읽음 — 0건이 아닙니다');
+    expect(t).toContain('값 없음 — 0건이 아닙니다');
     expect(t).toContain('전원 모름');
+    // 값이 없는 것은 신호(봐야 할 것)로 올리지 않고 따로 밝힌다 — 정상으로도 세지 않는다(반증 A2)
+    expect(t).toContain('신호 1 — 봐야 할 것');
+    expect(t).toContain('값이 없어 판단하지 않은 것: 부품 장애 · 전원 — 정상으로 세지 않습니다.');
+    expect(t).not.toContain('전원 상태를 읽지 못했습니다');
+    expect(html).toContain('class="vmh-dot bmd-dot-none"');   // 사유를 받지 못한 사용률 신호: 등급 none 은 빈 원(색만으로 가르지 않는다)
+  });
+  it('전원 · 부품 장애 값이 없는 서버(엣지 수집 · 기능 꺼짐)는 신호 0 — 본 것만 나열하고 못 본 것은 따로', async () => {
+    const t = text(await sections({ r: row({ faults: null, powered: null }) }));
+    expect(t).toContain('신호 0');
+    expect(t).toContain('신호 없음 — 사용률 값 없음(CPU · 메모리 둘 다) · 임시 키에 해당하는 것이 없습니다.');
+    expect(t).toContain('값이 없어 판단하지 않은 것: 부품 장애 · 전원 — 정상으로 세지 않습니다.');
   });
   it('사용률 값 없음 — 타일 하나로 합치고 서버 사유를 그 자리에 · 신호 줄에 사유 전문', async () => {
     const why = whyOf('edge-no-record');
@@ -136,17 +147,17 @@ describe('DrawerSections — 한눈에 · 추이 · 신호 · 값 줄', () => {
     expect(html).toContain('class="vmh-dtile bmd-tile2"');
     expect(t).toContain('CPU · 메모리 사용률');
     expect(t).toContain('32코어 · 512 GB — 사유를 누르면 자세히');
-    expect(t).toContain('신호 2 — 봐야 할 것');
+    expect(t).toContain('신호 1 — 봐야 할 것');
     expect(t).toContain(`사용률 값 없음 — ${why.s}`);
     expect(t).toContain(why.l);
     expect(t).toContain(why.a);
-    expect(t).toContain('전원 상태를 읽지 못했습니다 — 켜짐으로도 꺼짐으로도 세지 않습니다.');
-    expect(html).toContain('class="vmh-dot bmd-dot-none"');   // 등급 none 은 빈 원(색만으로 가르지 않는다)
+    expect(t).toContain('값이 없어 판단하지 않은 것: 전원 — 정상으로 세지 않습니다.');
   });
   it('신호가 없으면 무엇을 봤는지 말한다', async () => {
     const t = text(await sections({ r: row({ faults: 0 }) }));
     expect(t).toContain('신호 0');
-    expect(t).toContain('신호 없음 — 부품 장애 · 사용률 값 없음 · 전원 꺼짐/모름 · 임시 키 모두 해당하지 않습니다.');
+    expect(t).toContain('신호 없음 — 부품 장애 · 사용률 값 없음(CPU · 메모리 둘 다) · 전원 꺼짐 · 임시 키에 해당하는 것이 없습니다.');
+    expect(t).not.toContain('값이 없어 판단하지 않은 것');   // 다 읽은 서버에는 그 줄이 없다
   });
   it('식별 · 배치 — 법인 · 종류 · 폴더(등록 방식) · 모델 · 태그 · 전원 · 받는 길 · OS · 호스트명', async () => {
     const t = text(await sections({ r: row(), hw: { d: { ok: true, kind: 'bm', via: 'remote', addr: '10.20.42.98', detail: DETAIL }, err: '' } }));
@@ -234,6 +245,15 @@ describe('DrawerSections — iDRAC · 하드웨어', () => {
     expect(t).toContain(OS_WHY);
     expect(t).not.toContain('OS 호스트명');
   });
+  it('OS 칸 설명 — 요약을 받지 못했으면(조회 실패 · 읽는 중) BMC 가 보고하지 않았다고 단정하지 않는다(반증 A10)', async () => {
+    const fail = await sections({ r: row({ hw: null }), hw: { d: null, err: '서버를 찾지 못했습니다.' } });
+    expect(fail).not.toContain(OS_WHY.slice(0, 20));
+    const loading = await sections({ r: row({ hw: null }) });
+    expect(loading).not.toContain(OS_WHY.slice(0, 20));
+    // 요약은 받았는데 OS 만 없을 때는 그 이유를 단다
+    const noOs = await sections({ r: row({ hw: { ...SUM, os: null } }), hw: { d: { ok: true, kind: 'bm', via: 'remote', detail: { ...DETAIL, os: { name: '', ver: '', host: '' }, summary: { ...SUM, os: null, host: '' } } }, err: '' } });
+    expect(noOs).toContain(`title="${OS_WHY.slice(0, 20)}`);
+  });
   it('주소를 모르면 — (관리자 판본이 아니거나 모름)', async () => {
     const html = await sections({ r: row({ addr: undefined }), hw: { d: { ok: true, kind: 'bm', via: 'remote', detail: DETAIL }, err: '' } });
     expect(html).toContain('title="관리 주소는 관리자 판본에서만 보입니다(또는 이 서버의 iDRAC 주소를 모릅니다)"');
@@ -256,7 +276,8 @@ describe('소스 스윕 — 틀 · 순서 · 훅 · 겹침', () => {
     expect(s).not.toMatch(/SidePanel|HwPanel/);
     expect(fs.existsSync(new URL('./SidePanel.jsx', import.meta.url))).toBe(false);
     expect(fs.existsSync(new URL('./HwPanel.jsx', import.meta.url))).toBe(false);
-    expect(s).toMatch(/<BmDrawer r=\{panelRow\} rows=\{drawerRows\}[^>]*onClose=\{\(\) => setPanel\(''\)\} onMove=\{setPanel\} \/>/);
+    // note = 쓰기 결과 알림 — 호출부의 카드는 가림막 뒤라(좁은 화면은 화면 밖) 드로어 안에도 보인다(반증 A6)
+    expect(s).toMatch(/<BmDrawer r=\{panelRow\} rows=\{drawerRows\}[^>]*onClose=\{\(\) => setPanel\(''\)\} onMove=\{setPanel\} note=\{note\} \/>/);
     // 표 행 · 맵 · 좁은 화면 카드 — 여는 곳은 setPanel 하나(설계 §5 결정 6)
     expect((s.match(/onPick=\{setPanel\}/g) || []).length).toBe(2);
     expect(s).toMatch(/onOpen=\{setPanel\}/);
@@ -268,20 +289,36 @@ describe('소스 스윕 — 틀 · 순서 · 훅 · 겹침', () => {
     expect(s).toMatch(/<tr key=\{r\.key\} data-rowid=\{r\.key\}/);
     expect(s).toMatch(/const tableShown = sel\.type !== 'all' && view !== 'map' && !narrow && rows\.length > 0;/);
     expect(s).toMatch(/tableShown \? orderRows\(rows, order\) : rows\.slice\(0, ROW_LIMIT\)/);
+    // 맵: 묶음 순서대로 그린 칸(묶음당 상한까지) — 걸러진 행 순서를 그대로 쓰면 ‹ › 가 맵의 다른 묶음으로 튄다(반증 A8 · B2)
+    expect(s).toMatch(/const mapRows = view === 'map' \? mapVisibleRows\(sel\.type === 'all' \? filterRows\(servers, q, quick\) : rows, groupBy, corpName\) : null;/);
+    expect(s).toMatch(/const drawerRows = mapRows \|\| \(sel\.type === 'all' \? \[\] : tableShown \?/);
+    expect(read('./MapView.jsx')).toMatch(/const CELL_MAX = MAP_CELL_MAX;/);   // 맵이 그리는 상한 = 순서가 쓰는 상한(한 값)
     const t = read('../../../components/STable.jsx');
-    expect(t).toMatch(/rowIdsOf\(sort \? sortedKids : tbodyKids, cap\)/);
-    // 훅(순서 계산 · 알림)은 조기 return 위
-    expect(t.indexOf('const orderKey = useMemo(')).toBeGreaterThan(0);
-    expect(t.indexOf('useEffect(() => { if (orderKey != null)')).toBeLessThan(t.indexOf('if (!thead || !tbody) return render(children);'));
+    // 정렬 · 상한을 이 표가 맡을 때만 그 결과를, 아니면(자체 정렬 · sortable=false · thead 없음) 받은 순서를 상한 없이(반증 B4)
+    expect(t).toMatch(/const ids = managed \? rowIdsOf\(sort \? sortedKids : tbodyKids, cap\) : rowIdsOf\(rawKids, 0\);/);
+    expect(t).toMatch(/const managed = !!thead && !!tbody && managesSort\(thead\);/);
+    // 훅(순서 계산 · 알림)은 조기 return 위 — 두 위치를 다 찾은 뒤에 견준다(못 찾은 −1 은 '앞' 으로 읽혀 헛통과한다: 반증 B3)
+    const memoAt = t.indexOf('const orderKey = useMemo(');
+    const effAt = t.indexOf('useEffect(() => { if (orderKey != null)');
+    const earlyAt = t.indexOf('if (!managed) return render(children);');
+    // 조기 return 은 하나 — '맡는가' 판정(managesSort)이 순서 알림과 같은 값을 쓴다(두 벌이면 화면과 다른 순서를 알린다)
+    expect((t.match(/return render\(children\);/g) || []).length).toBe(1);
+    expect(t).not.toMatch(/selfSorted/);
+    for (const at of [memoAt, effAt, earlyAt]) expect(at).toBeGreaterThan(0);
+    expect(memoAt).toBeLessThan(earlyAt);
+    expect(effAt).toBeLessThan(earlyAt);
+    // 알림은 순서 글자가 바뀔 때만(deps 가 [orderKey] 하나 — onOrder 를 넣으면 인라인 콜백에서 매 렌더 다시 부른다)
+    expect(t).toMatch(/useEffect\(\(\) => \{ if \(orderKey != null\) onOrderRef\.current\?\.\(orderKey === '' \? \[\] : orderKey\.split\('\\u0000'\)\); \}, \[orderKey\]\);/);
     // onOrder 를 주지 않은 표는 계산하지 않는다
-    expect(t).toMatch(/if \(!onOrder \|\| tbodyKids === undefined\) return null;/);
+    expect(t).toMatch(/if \(!onOrder \|\| !hasBody\) return null;/);
+    expect(t).toMatch(/const anyTbody = onOrder \? kids\.find\(/);
   });
   it('드로어 — 틀은 VM 드로어 · 훅은 조기 return 위 · 폴링 없음 · 넘기는 동안은 잠깐 기다렸다 묻는다', () => {
     const s = read('./BmDrawer.jsx');
     expect(s).toMatch(/import '\.\.\/\.\.\/vms\/vmHub\.css'/);
     const early = s.indexOf('if (!r) return null;');
     expect(early).toBeGreaterThan(0);
-    for (const hook of ["useOnce('/tools/bm-folders/hw'", "useOnce('/tools/bm-folders/trend'", 'useEffect(() => { setTo(\'\');', 'useState(\'\')', 'useRef(null)']) {
+    for (const hook of ["useOnce('/tools/bm-folders/hw'", "useOnce('/tools/bm-folders/trend'", 'useEffect(() => { setTo(\'\');', 'useState(\'\')', 'useRef(null)', "window.addEventListener('keydown', h)"]) {
       const i = s.indexOf(hook);
       expect(i, hook).toBeGreaterThan(0);
       expect(i, hook).toBeLessThan(early);
@@ -292,6 +329,60 @@ describe('소스 스윕 — 틀 · 순서 · 훅 · 겹침', () => {
     expect(s).toMatch(/return st\.key === key \? st : \{ key, d: null, err: '' \};/);   // 다른 서버의 응답을 이 서버 것으로 그리지 않는다
     // 입력 칸에서 누른 ↑↓ 는 서버를 넘기지 않는다
     expect(s).toMatch(/if \(tag === 'input' \|\| tag === 'textarea' \|\| tag === 'select'\) return;/);
+  });
+  it('↑↓ 는 드로어 DOM 안에서 난 키만 — 웹 SSH 창(포털) · 열린 상자 안의 키는 서버를 넘기지 않는다(반증 A1)', () => {
+    const s = read('./BmDrawer.jsx');
+    const onKey = s.slice(s.indexOf('const onKey = (e) => {'), s.indexOf('return (', s.indexOf('const onKey = (e) => {')));
+    const guards = ['if (modalAbove()) return;', 'if (!inside && el !== document.body) return;', "el.closest('.bmf-idc-pop, .bmf-why-pop')) return;",
+      'if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;', "if (tag === 'input' || tag === 'textarea' || tag === 'select') return;"];
+    const moveAt = onKey.indexOf("e.key === 'ArrowDown'");
+    expect(moveAt).toBeGreaterThan(0);
+    for (const g of guards) { const at = onKey.indexOf(g); expect(at, g).toBeGreaterThan(0); expect(at, g).toBeLessThan(moveAt); }
+    expect(s).toMatch(/const modalAbove = \(\) => typeof document !== 'undefined' && !!document\.querySelector\('\.modal-overlay'\);/);
+    expect(onKey).toMatch(/const inside = !!root && !!el && typeof el\.nodeType === 'number' && root\.contains\(el\);/);
+    // 창에서 듣는다 — 드로어 요소의 onKeyDown(포털을 넘어 올라오는 React 이벤트)은 쓰지 않는다 · 리스너는 한 번 달고 닫을 때 뗀다
+    expect(s).not.toMatch(/onKeyDown=/);
+    expect(s).toMatch(/const h = \(e\) => keyRef\.current\?\.\(e\);\n\s*window\.addEventListener\('keydown', h\);\n\s*return \(\) => window\.removeEventListener\('keydown', h\);\n\s*\}, \[\]\);/);
+    expect(s).toMatch(/keyRef\.current = onKey;/);
+    // 서버가 없으면(조기 return) 처리기를 비운다 — 이전 렌더의 처리기가 남아 닫힌 뒤의 키를 받지 않게
+    expect(s.indexOf('keyRef.current = null;')).toBeGreaterThan(0);
+    expect(s.indexOf('keyRef.current = null;')).toBeLessThan(s.indexOf('if (!r) return null;'));
+    // 가드가 가리키는 클래스가 실제로 그 상자 · 그 모달의 것이다(이름이 바뀌면 가드가 조용히 죽는다)
+    expect(read('./IdracConnect.jsx')).toMatch(/className="bmf-idc-pop"/);
+    expect(read('./parts.jsx')).toMatch(/bmf-why-pop/);
+    expect(read('../../../components/Modal.jsx')).toMatch(/className="modal-overlay"/);
+    // 서버가 바뀌면 접속 상자 · 사유 상자의 상태(열림 · 웹 SSH 창)를 물려받지 않는다 — key = 서버(반증 A7)
+    expect((s.match(/<IdracConnect key=\{r\.key\} /g) || []).length).toBe(2);
+    expect((s.match(/<IdracConnect /g) || []).length).toBe(2);
+    expect(s).toMatch(/<WhyTip key=\{r\.key\} /);
+  });
+  it('포커스 · 목록에서 빠진 서버 · 쓰기 결과 — 잠긴 단추에서 포커스를 되찾고, 빠진 자리에서 ‹ › 를 잇고, 결과를 드로어 안에 보인다', () => {
+    const s = read('./BmDrawer.jsx');
+    const early = s.indexOf('if (!r) return null;');
+    // 포커스 되찾기: body 로 빠졌을 때만 · 모달이 위에 있으면 가져오지 않는다 · 훅은 조기 return 위(반증 A3)
+    const fx = s.indexOf("if (typeof document === 'undefined' || modalAbove()) return;");
+    expect(fx).toBeGreaterThan(0); expect(fx).toBeLessThan(early);
+    expect(s).toMatch(/if \(!a \|\| a === document\.body\) rootRef\.current\?\.focus\(\{ preventScroll: true \}\);/);
+    // 방금까지 있던 자리(반증 A4)
+    expect(s).toMatch(/const nb = neighborOfKey\(rows, r\.key, lastIdx\.current\);\n\s*if \(nb\.index >= 0\) lastIdx\.current = nb\.index;/);
+    expect(s).toMatch(/nb\.gone \? <span className="pos"[^>]*>목록에서 빠짐<\/span>/);
+    // 쓰기 결과(반증 A6): 새로 온 것만 · 실패는 alert
+    expect(s).toMatch(/const opNote = freshNote\(note, seen\.current\.note\);/);
+    // 넘긴 첫 렌더부터 이전 서버의 알림을 그리지 않는다 — 렌더 중에 키로 갈아 낀다(effect 에서 바꾸면 한 박자 늦는다)
+    expect(s).toMatch(/if \(seen\.current\.key !== r\?\.key\) seen\.current = \{ key: r\?\.key, note \};/);
+    expect(s).toMatch(/role=\{opNote\.ok \? 'status' : 'alert'\}>\{opNote\.text\}/);
+  });
+  it('요약은 방금 받은 응답이 먼저 — 응답이 인벤토리 없음이면 목록 행의 예전 요약을 내세우지 않는다(반증 A11)', async () => {
+    const s = read('./BmDrawer.jsx');
+    expect(s).toMatch(/const sum = d \? \(det\?\.summary \|\| d\.summary \|\| null\) : \(r\.hw \|\| null\);/);
+    // 렌더로도: 목록 행에는 요약이 있는데 응답은 '인벤토리 없음' → 요약 칸을 채우지 않고 이유를 쓴다
+    const t = text(await sections({ r: row(), hw: { d: { ok: true, kind: 'bm', via: '', why: 'no-inv' }, err: '' } }));
+    expect(t).toContain('iDRAC 인벤토리를 아직 읽지 못했습니다');
+    expect(t).not.toContain('2×16C 32코어 / 64스레드');
+    // 읽은 시각이 없는 요약: '읽음' 을 지어내지 않고 — 로 · 받는 길은 그대로 보인다(반증 A12)
+    const noAt = text(await sections({ r: row(), hw: { d: { ok: true, kind: 'bm', via: 'edge', summary: { ...SUM, at: null }, why: 'summary-only' }, err: '' } }));
+    expect(noAt).toContain('인벤토리 — · 엣지 요약');
+    expect(noAt).not.toMatch(/전 읽음/);
   });
   it('문구에 백틱 · 대문자 변환이 없다(화면 규약)', () => {
     const s = read('./BmDrawer.jsx');
@@ -307,15 +398,37 @@ describe('소스 스윕 — 틀 · 순서 · 훅 · 겹침', () => {
     expect(drawerZ).toBeGreaterThan(0);
     expect(z(/\.bmf-why-pop \{[^}]*z-index: (\d+)/)).toBeGreaterThan(drawerZ);
     expect(z(/\.bmf-idc-pop \{[^}]*z-index: (\d+)/)).toBeGreaterThan(drawerZ);
-    // 포탈 웹 SSH 창(모달)은 드로어보다 위에서 열린다
-    expect(z(/\.modal-overlay \{[^}]*z-index: (\d+)/)).toBeGreaterThan(drawerZ);
+    // 포탈 웹 SSH 창(모달)은 드로어보다 위에서 열린다 — 그리고 떠 있는 상자는 그 모달보다 아래다(상자가 모달을 덮지 않게: 반증 B7)
+    const modalZ = z(/\.modal-overlay \{[^}]*z-index: (\d+)/);
+    expect(modalZ).toBeGreaterThan(drawerZ);
+    expect(z(/\.bmf-why-pop \{[^}]*z-index: (\d+)/)).toBeLessThan(modalZ);
+    expect(z(/\.bmf-idc-pop \{[^}]*z-index: (\d+)/)).toBeLessThan(modalZ);
+    // 단추 줄: 공용 .login-btn 의 위 여백이 남으면 옆 단추와 높이가 어긋난다(반증 B5)
+    expect(css).toMatch(/\.bmd-idc-btn \{[^}]*margin: 0;/);
+    expect(css).toMatch(/\.bmd-btn \{[^}]*margin: 0;/);
     // 좁은 화면 경계는 VM 드로어와 같은 값
     expect(css).toMatch(/@media \(max-width: 719px\) \{\n {2}\.vmh-acts > \.bmd-sel/);
   });
   it('상태 점 판정은 한 곳(rowTone) — 표 행 · 카드 · 드로어 머리', () => {
     const s = read('../BmFolders.jsx');
-    expect((s.match(/StatusDot tone=\{rowTone\(r\)\}/g) || []).length).toBe(2);
+    // 설명 글자도 한 곳(rowDotTitle) — 색 이름표('켜짐 · 장애 없음')를 그대로 쓰면 값이 없는 서버에서 없는 사실을 말한다(반증 A5)
+    expect((s.match(/<StatusDot tone=\{rowTone\(r\)\} title=\{rowDotTitle\(r\)\} \/>/g) || []).length).toBe(2);
+    expect((s.match(/tone=\{rowTone\(r\)\}/g) || []).length).toBe(2);   // 서버 행의 점은 이 둘뿐 — 설명 없는 판본이 따로 남지 않는다
     expect(s).not.toMatch(/r\.faults > 0 \? 'red' : r\.cpu == null/);
-    expect(read('./BmDrawer.jsx')).toMatch(/<StatusDot tone=\{rowTone\(r\)\} \/>/);
+    expect(read('./BmDrawer.jsx')).toMatch(/<StatusDot tone=\{rowTone\(r\)\} title=\{rowDotTitle\(r\)\} \/>/);
+  });
+  it('머리 상태 점의 설명 — 전원 · 부품 장애를 모르는 서버에 켜짐 · 장애 없음이라고 쓰지 않는다', async () => {
+    const html = await render({ r: row({ powered: null, faults: null }) });
+    expect(html).toContain('title="전원 모름 · 부품 장애 값 없음"');
+    expect(html).not.toContain('켜짐 · 장애 없음');
+    expect(await render({ r: row({ faults: 0 }) })).toContain('title="전원 켜짐 · 부품 장애 없음"');
+  });
+  it('iDRAC 접속 단추 — 주소가 접속 링크로 쓸 수 없는 값이면 단추를 그리지 않는다(누를 수 없는 단추를 두지 않는다)', async () => {
+    const { IdracConnect } = await import('./IdracConnect.jsx');
+    const btn = (addr) => renderToStaticMarkup(React.createElement(IdracConnect, { addr, name: 'X', corp: 'vc-kr2', button: true }));
+    expect(btn('10.20.42.98')).toContain('bmd-idc-btn');
+    expect(btn('')).toBe('');
+    expect(btn('javascript:alert(1)')).toBe('');
+    expect(btn('10.20.42.98/../x')).toBe('');
   });
 });
