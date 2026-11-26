@@ -508,6 +508,20 @@ tbody td { padding: 10px 14px; border-bottom: 1px solid rgba(36,48,73,.5); white
 tbody tr:hover { background: rgba(59,130,246,.06); }
 tbody tr:last-child td { border-bottom: none; }
 
+/* 스토리지 수집 주기 · 대기 시간 표(v3.41.1 — views/StorageIntervals.jsx). 대상 칸을 왼쪽에 고정한다(좁은 화면에서 가로로 밀어도 어느 행인지 보이게).
+   ⚠ 고정 칸은 **불투명 배경**이어야 한다(뒤 칸이 비친다) — 그래서 표 바탕 · 전역 행 · 고정 칸을 같은 변수로 못 박고, 행에 마우스를 올렸을 때의
+     옅은 파랑(tbody tr:hover)도 고정 칸에 **같은 색을 겹쳐** 입힌다. 인라인 스타일로 두면 hover 를 덮지 못해 그 칸만 어둡게 남았다(Chromium 판독).
+   · 고정 칸 오른쪽에 경계선(box-shadow) — 밀려 들어온 칸이 경계에서 잘린 것임을 보이게.
+   · 좁은 화면(≤560px)에서는 대상 설명 줄을 숨긴다(칸 폭 120px 에서 5~7줄로 접혀 행이 화면 절반을 차지했다) — 내용은 칸의 title 로 남는다. */
+.si-wrap { background: var(--panel); }
+.si-wrap .si-sticky { position: sticky; left: 0; z-index: 1; min-width: 120px; white-space: normal; word-break: keep-all; background: var(--panel); box-shadow: 1px 0 0 var(--border); }
+.si-wrap thead th.si-sticky { z-index: 3; background: var(--panel-2); }
+.si-wrap tbody tr.si-global, .si-wrap tbody tr.si-global .si-sticky { background: var(--panel-2); }
+.si-wrap tbody tr:hover .si-sticky { background: linear-gradient(rgba(59,130,246,.06), rgba(59,130,246,.06)), var(--panel); }
+.si-wrap tbody tr.si-global:hover .si-sticky { background: var(--panel-2); }
+.si-wrap .si-hint { font-size: 11px; }
+@media (max-width: 560px) { .si-wrap .si-hint { display: none; } }
+
 .badge { display: inline-block; padding: 2px 9px; border-radius: 20px; font-size: 11px; font-weight: 600; }
 .badge.green { background: rgba(34,197,94,.15); color: #4ade80; }
 .badge.amber { background: rgba(245,158,11,.15); color: #fbbf24; }
