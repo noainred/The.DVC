@@ -82,7 +82,7 @@ export function prepScript(key, { age = 'never', conn = null } = {}) {
 # 서버 집중 모니터링 — 접속 준비(수집 계정 · 공개키) 파일 · 포탈이 대상 서버에서 root 로 한 번 돌린다(v3.18.0)
 # 하는 일: sshd 설정 읽기(바꾸지 않음) → 수집 계정이 없으면 만들기(비밀번호 칸 '*'${age === 'default' ? '' : ' · 만료 없음'}) → 그 계정 권한으로 공개키 한 줄 넣기
 PATH=/usr/sbin:/usr/bin:/sbin:/bin; export PATH
-${selfTimeoutLines(PREP_REMOTE_LIMIT_S)}
+${selfTimeoutLines(PREP_REMOTE_LIMIT_S, 'prep')}
 umask 022
 if [ "$#" -ne 1 ]; then ${fail('args', 64)}; fi
 A="$1"
@@ -139,17 +139,22 @@ if E=$(getent passwd "$A"); then
   #   tty 를 요구하면 script(util-linux)로 가짜 터미널을 열어 다시 묻고, 그래도 모르면 넣지 않는다(acct-sudo-unknown).
   if command -v sudo >/dev/null 2>&1; then
     SK=0
+    # 반증 F3: 흔한 무해 경고(호스트 이름을 못 풂)는 판단에서 뺀다 — 이것 하나로 이미 있는 계정 전부가 '모름' 이 됐다
+    NOISE='unable to resolve host'
     for c in /bin/sh /bin/bash "$(command -v su 2>/dev/null || true)" "$(command -v env 2>/dev/null || true)"; do
       [ -n "$c" ] && [ -x "$c" ] || continue
       case "$c" in *[!A-Za-z0-9/._-]*) continue ;; esac
       # 변수 이름 주의: E 는 위의 getent 줄이다(아래 홈 판정이 쓴다) — 덮지 않는다(v3.54.0 시험이 잡은 결함)
-      if SE=$(sudo -n -l -U "$A" "$c" 2>&1 >/dev/null); then ${fail('acct-sudo', 66)}; fi
-      [ -z "$SE" ] && continue
+      SE=$(sudo -n -l -U "$A" "$c" 2>&1 >/dev/null); SR=$?
+      [ "$SR" = 0 ] && ${fail('acct-sudo', 66)}
+      SE=$(printf '%s\\n' "$SE" | grep -v "$NOISE" | grep -v '^[[:space:]]*$' || true)
+      # 반증 F2: '허용 안 됨' 은 종료값 1 + 다른 글 없음일 때만 — 다른 종료값은 모름(예전엔 허용 안 됨으로 읽었다)
+      [ "$SR" = 1 ] && [ -z "$SE" ] && continue
       if command -v script >/dev/null 2>&1; then
         # 종료값은 표지로(script 자체가 실패하면 표지가 없다 → 모름) · 허용 안 됨 = 종료값 1 + 다른 출력 없음
         Y=$(script -qc "sudo -n -l -U '$A' '$c'; echo DVC-SUDO-RC=\\$?" /dev/null </dev/null 2>/dev/null | tr -d '\\r' || true)
         case "$Y" in *DVC-SUDO-RC=0*) ${fail('acct-sudo', 66)} ;; esac
-        O=$(printf '%s\\n' "$Y" | grep -v '^DVC-SUDO-RC=' || true)
+        O=$(printf '%s\\n' "$Y" | grep -v '^DVC-SUDO-RC=' | grep -v "$NOISE" | grep -v '^[[:space:]]*$' || true)
         case "$Y" in *DVC-SUDO-RC=1*) [ -z "$O" ] && continue ;; esac
       fi
       SK=1

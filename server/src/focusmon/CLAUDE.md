@@ -66,5 +66,6 @@
   ⑩ **접속 자동 준비(v3.18.0 · 회귀 `focusMonPrep3180`)**: `focus-mon-prep` 을 직접 켠 키만 · `sshd -T` **읽기만** · 공개키는 **그 계정 권한으로**(runuser) · 있는 계정은 안 바꿈 · caps 'prep' + credPrep.
   ⑪ **v3.54.0 보강(회귀 `focusMonBundleA3540`)**: 엣지 root 작업은 맡은 서버 목록과 같은 접속처일 때만(`jobTargetKnown`) · 공통 계정은 **엣지가 아는 서버에만**(`installCredFor` 의 `local` — 엣지에서 빠지면 닫힘 'not-local') ·
      같은 서버 = `sameMachine.machineIndex`(주소 + **같은 노드의** 인벤토리 VM · 호스트 이름 — 새 근거를 노드 밖으로 넓히지 말 것) · 설치 · 준비 'lost' 는 lastInstall · lastPrep 에(lastError 아님) ·
-     sudo 판정은 **sudo 에게 명령으로** 묻고 모르면 넣지 않음(acct-sudo-unknown — 글자 검사로 되돌리지 말 것) · root 파일은 `selfTimeoutLines`(원격 시한 + KILL < exec 시한 — 시험 고정).
+     sudo 판정은 **sudo 에게 명령으로** 묻고 모르면 넣지 않음(acct-sudo-unknown — 글자 검사로 되돌리지 말 것) · root 파일은 `selfTimeoutLines`(원격 시한 + KILL < exec 시한 — 시험 고정 ·
+     **$0 이 포탈이 올린 그 파일의 절대 경로일 때만** 다시 돈다 — `sh -s` 로 현재 폴더의 'sh' 를 root 로 돌린 반증 F1) · 인벤토리를 못 읽은 엣지는 'local-unknown'(단정 금지).
   ⑨ ~ ⑪ 상세 · 반증 기록 `docs/rules/focusmon.md`.

@@ -237,8 +237,9 @@ function sandbox() {
   w('runuser', `echo "runuser $1 $2" >> '${log}'; shift 3; exec "$@"`);
   w('id', 'if [ "$1" = "-Gn" ]; then echo mon5; else echo 0; fi');
   // 실제 sudo 와 같은 꼴(이 개발 환경 sudo 1.9.15 로 확인): -l -U A <명령> 은 허용이면 경로를 찍고 0 · 아니면 아무것도 없이 1 · requiretty 면 터미널이 없을 때 오류 글 · 1
-  w('sudo', `if [ -f '${root}/tty' ] && [ -z "\${FAKE_TTY:-}" ]; then echo 'sudo: sorry, you must have a tty to run sudo' >&2; exit 1; fi
-if [ "$#" -ge 5 ]; then if grep -qxF -- "$5" '${root}/allow' 2>/dev/null; then echo "$5"; exit 0; fi; exit 1; fi
+  w('sudo', `[ -f '${root}/noise' ] && echo 'sudo: unable to resolve host srv01: Name or service not known' >&2
+if [ -f '${root}/tty' ] && [ -z "\${FAKE_TTY:-}" ]; then echo 'sudo: sorry, you must have a tty to run sudo' >&2; exit 1; fi
+if [ "$#" -ge 5 ]; then if grep -qxF -- "$5" '${root}/allow' 2>/dev/null; then echo "$5"; exit 0; fi; [ -f '${root}/rc2' ] && exit 2; exit 1; fi
 cat '${root}/list' 2>/dev/null`);
   return { root, bin, homes, log, w };
 }
@@ -270,8 +271,16 @@ test('⑧ sudo 판정은 sudo 에게 — 셸만 준 줄(별칭) · requiretty(�
   sb = sandbox(); sb.w('script', 'exit 1'); fs.writeFileSync(path.join(sb.root, 'tty'), '');
   r = runPrep(sb); assert.equal(r.p.fail, 'acct-sudo-unknown', r.out); assert.doesNotMatch(r.log, /runuser/);
   // 터미널에서 다른 오류(표지는 있으나 오류 글이 섞임) → 모름
-  sb = sandbox(); sb.w('script', 'echo "sudo: unable to resolve host"; echo DVC-SUDO-RC=1'); fs.writeFileSync(path.join(sb.root, 'tty'), '');
+  sb = sandbox(); sb.w('script', 'echo "sudo: PAM account management error: Authentication service cannot retrieve authentication info"; echo DVC-SUDO-RC=1'); fs.writeFileSync(path.join(sb.root, 'tty'), '');
   assert.equal(runPrep(sb).p.fail, 'acct-sudo-unknown');
+  // 반증 F3: 흔한 무해 경고(호스트 이름을 못 풂)만 있으면 판단은 그대로 — 허용 안 됨이면 넣는다 · 허용이면 막는다
+  sb = sandbox(); real(sb); fs.writeFileSync(path.join(sb.root, 'noise'), '');
+  r = runPrep(sb); assert.equal(r.p.ok, true, r.out);
+  sb = sandbox(); real(sb); fs.writeFileSync(path.join(sb.root, 'noise'), ''); fs.writeFileSync(path.join(sb.root, 'allow'), '/bin/bash\n');
+  assert.equal(runPrep(sb).p.fail, 'acct-sudo');
+  // 반증 F2: 종료값이 1이 아닌 실패(글 없음)는 '허용 안 됨' 이 아니다 — 모름
+  sb = sandbox(); real(sb); fs.writeFileSync(path.join(sb.root, 'rc2'), '');
+  r = runPrep(sb); assert.equal(r.p.fail, 'acct-sudo-unknown', r.out);
   // 웹 글 1:1
   for (const f of PR.PREP_FAILS) assert.ok(WP.PREP_FAIL_TEXT[f], f);
   assert.match(PR.prepScript(PR.keyLineFor(PUB), { conn: { caddr: '10.48.0.5', laddr: '10.1.0.1', lport: 22 } }), /SE=\$\(sudo -n -l -U "\$A" "\$c" 2>&1 >\/dev\/null\)/, '계정 줄(E)을 덮지 않는 변수');
@@ -286,10 +295,11 @@ test('⑧ 원격 시한 — 산수 · 설치 · 준비 파일이 스스로 timeo
   assert.ok(inst.includes(B.selfTimeoutLines(B.INSTALL_REMOTE_LIMIT_S)), '설치 파일'); assert.match(inst, /trap 'exit 143' TERM INT HUP/, 'TERM 에서도 임시 폴더를 지운다');
   assert.ok(inst.indexOf('selfTimeout') < 0 && inst.indexOf('exec timeout -k') < inst.indexOf('ACCT='), '인자 검사보다 먼저(같은 인자로 다시 돈다)');
   const prep = PR.prepScript(PR.keyLineFor(PUB), { conn: { caddr: '10.48.0.5', laddr: '10.1.0.1', lport: 22 } });
-  assert.ok(prep.includes(B.selfTimeoutLines(PR.PREP_REMOTE_LIMIT_S)), '준비 파일');
+  assert.ok(prep.includes(B.selfTimeoutLines(PR.PREP_REMOTE_LIMIT_S, 'prep')), '준비 파일');
+  assert.ok(inst.includes(B.selfTimeoutLines(B.INSTALL_REMOTE_LIMIT_S, 'install'))); assert.throws(() => B.selfTimeoutLines(30, 'evil'));
   const which = spawnSync('/bin/sh', ['-c', 'command -v timeout'], { encoding: 'utf8' }).stdout.trim();
   if (which) {
-    const d = tmpDir('fm3540to-'); const f = path.join(d, 'to.sh'); const mark = path.join(d, 'child');
+    const d = tmpDir('fm3540to-'); const f = path.join(d, '.dvc-da-install.0123456789abcdef.sh'); const mark = path.join(d, 'child');
     fs.writeFileSync(f, `#!/bin/sh\nset -eu\n${B.selfTimeoutLines(5)}\n(sleep 20; echo alive > '${mark}') &\nsleep 20\necho never\n`);
     const t0 = Date.now(); const r = spawnSync('/bin/sh', [f, 'x'], { encoding: 'utf8' });
     assert.equal(r.status, 124, r.stdout + r.stderr); assert.ok(Date.now() - t0 < 12_000); assert.doesNotMatch(r.stdout, /never/);
@@ -327,15 +337,27 @@ test('⑧ 원격 시한 — set -e 없는 파일(준비 파일)도 시한에 멈
   if (!which) return;
   const d = tmpDir('fm3540to2-');
   // 준비 파일처럼 set -e 가 없다 — exec 가 없으면 시한 뒤에 바깥 파일이 이어서 돈다
-  const f = path.join(d, 'noe.sh');
-  fs.writeFileSync(f, `#!/bin/sh\n${B.selfTimeoutLines(5)}\nsleep 20\necho never\n`);
+  const f = path.join(d, '.dvc-fm-prep.0123456789abcdef.sh');
+  fs.writeFileSync(f, `#!/bin/sh\n${B.selfTimeoutLines(5, 'prep')}\nsleep 20\necho never\n`);
   const t0 = Date.now(); const r = spawnSync('/bin/sh', [f], { encoding: 'utf8' });
   assert.equal(r.status, 124); assert.ok(Date.now() - t0 < 12_000); assert.doesNotMatch(r.stdout, /never/);
   // 금방 끝나는 파일은 한 번만(다시 도는 것은 timeout 아래의 한 번)
-  const g = path.join(d, 'once.sh'); const cnt = path.join(d, 'count');
-  fs.writeFileSync(g, `#!/bin/sh\nset -eu\n${B.selfTimeoutLines(30)}\necho run >> '${cnt}'\n`);
+  const g = path.join(d, '.dvc-da-install.fedcba9876543210.sh'); const cnt = path.join(d, 'count');
+  fs.writeFileSync(g, `#!/bin/sh\nset -eu\n${B.selfTimeoutLines(30)}\necho "run $DVC_FM_TO" >> '${cnt}'\n`);
   const r2 = spawnSync('/bin/sh', [g, 'a b'], { encoding: 'utf8' });
-  assert.equal(r2.status, 0); assert.equal(fs.readFileSync(cnt, 'utf8'), 'run\n', '한 번만 돈다');
+  assert.equal(r2.status, 0); assert.equal(fs.readFileSync(cnt, 'utf8'), 'run 1\n', '한 번만 · timeout 아래에서 돈다');
+  // 반증 F1(재현): 표준 입력으로 돌리면($0 = sh) 현재 폴더의 'sh' 파일을 root 로 다시 실행하던 것 — 포탈이 올린 그 파일(절대 경로 · 정해진 이름)일 때만 다시 돈다
+  const evil = path.join(d, 'sh'); const pwned = path.join(d, 'pwned');
+  fs.writeFileSync(evil, `#!/bin/sh\necho x > '${pwned}'\n`); fs.chmodSync(evil, 0o755);
+  const body = `#!/bin/sh\nset -eu\n${B.selfTimeoutLines(30)}\necho stdin-ok\n`;
+  const r3 = spawnSync('/bin/sh', ['-s', 'acct'], { cwd: d, input: body, encoding: 'utf8' });
+  assert.equal(r3.status, 0); assert.match(r3.stdout, /stdin-ok/); assert.equal(fs.existsSync(pwned), false, '현재 폴더의 sh 를 실행하지 않는다');
+  const r4 = spawnSync('/bin/sh', ['-c', body, 'sh'], { cwd: d, encoding: 'utf8' });
+  assert.equal(r4.status, 0); assert.equal(fs.existsSync(pwned), false);
+  // 손으로 받은 이름(다른 이름)은 시한 없이 그대로 한 번
+  const manual = path.join(d, 'dvc-disk-audit-install.sh'); const cnt2 = path.join(d, 'count2');
+  fs.writeFileSync(manual, `#!/bin/sh\nset -eu\n${B.selfTimeoutLines(30)}\necho "run \${DVC_FM_TO:-none}" >> '${cnt2}'\n`);
+  assert.equal(spawnSync('/bin/sh', [manual], { encoding: 'utf8' }).status, 0); assert.equal(fs.readFileSync(cnt2, 'utf8'), 'run none\n');
 });
 
 test('⑤ 라우트 — 준비 조회 · 설치 · 준비 접수가 같은 서버 색인(호스트 이름 근거)을 쓴다 · 데모 계정에는 실제 항목 이름 없음', async () => {

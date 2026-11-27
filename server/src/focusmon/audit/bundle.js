@@ -220,11 +220,20 @@ export const INSTALL_STEPS = Object.freeze(['dir', 'files', 'sudoers', 'old']);
  */
 export const REMOTE_KILL_S = 5;
 export const INSTALL_REMOTE_LIMIT_S = 80;
-/** 스스로 시한(셸 조각 — 파일 머리 PATH 다음에). 값은 이 파일의 상수 숫자뿐. */
-export function selfTimeoutLines(limitS) {
+/** 스스로 시한을 거는 파일 이름(포탈이 올린 난수 이름 — 절대 경로일 때만). */
+export const SELF_TIMEOUT_NAMES = Object.freeze({ install: '.dvc-da-install.*.sh', prep: '.dvc-fm-prep.*.sh' });
+/**
+ * 스스로 시한(셸 조각 — 파일 머리 PATH 다음에). 값은 이 파일의 상수뿐.
+ * 반증 F1(sudo-timeout · 재현): 처음 판은 `[ -f "$0" ]` 만 봐, `sh -s` · `curl … | sudo sh` 처럼 표준 입력으로 돌리면 $0 이 'sh' 가 되고
+ *   **현재 폴더의 'sh' 라는 파일을 root 로 다시 실행**했다 — 이제 $0 이 **포탈이 올린 그 파일의 절대 경로**(`/…/.dvc-da-install.<난수>.sh`)일 때만 다시 돈다.
+ *   손으로 받은 설치 파일(이름이 다르다)은 시한 없이 예전처럼 돈다(사람이 보고 있다).
+ */
+export function selfTimeoutLines(limitS, kind = 'install') {
   if (!Number.isInteger(limitS) || limitS < 5 || limitS > 600) throw new Error('원격 시한 값이 규칙에 맞지 않습니다');
-  return `# 시한: ${limitS}초 안에 끝나지 않으면 스스로 멈춘다(포탈 exec 시한보다 짧게 — 접속이 끊겨도 root 프로세스가 남지 않게)
-if [ -z "\${DVC_FM_TO:-}" ] && [ -f "$0" ] && command -v timeout >/dev/null 2>&1; then DVC_FM_TO=1; export DVC_FM_TO; exec timeout -k ${REMOTE_KILL_S} ${limitS} /bin/sh "$0" "$@"; fi`;
+  const name = SELF_TIMEOUT_NAMES[kind];
+  if (!name) throw new Error('원격 시한 파일 종류가 규칙에 맞지 않습니다');
+  return `# 시한: ${limitS}초 안에 끝나지 않으면 스스로 멈춘다(포탈 exec 시한보다 짧게 — 접속이 끊겨도 root 프로세스가 남지 않게 · 포탈이 올린 파일일 때만)
+case "$0" in /*/${name}) if [ -z "\${DVC_FM_TO:-}" ] && [ -f "$0" ] && [ ! -L "$0" ] && command -v timeout >/dev/null 2>&1; then DVC_FM_TO=1; export DVC_FM_TO; exec timeout -k ${REMOTE_KILL_S} ${limitS} /bin/sh "$0" "$@"; fi ;; esac`;
 }
 /** 네트워크 · 사용자 공간 파일시스템(stat -f %T 이름) — 설치하지 않는다. */
 const NETFS = ['nfs', 'nfs4', 'cifs', 'smb', 'smb2', 'smbfs', 'fuse', 'fuseblk', 'ceph', 'glusterfs', '9p', 'afs', 'lustre', 'gfs2', 'ocfs2', 'sshfs', 'davfs'];
@@ -293,7 +302,7 @@ set -eu
 umask 022
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
-${selfTimeoutLines(INSTALL_REMOTE_LIMIT_S)}
+${selfTimeoutLines(INSTALL_REMOTE_LIMIT_S, 'install')}
 ACCT="\${1:-}"
 case "$ACCT" in
   ''|-*|*[!A-Za-z0-9._-]*) echo '##DI fail args'; echo "사용법: sh $0 <수집 계정>   (계정 이름은 영문 · 숫자 · . _ - 만)"; exit 64 ;;
