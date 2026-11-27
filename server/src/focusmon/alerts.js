@@ -165,8 +165,9 @@ export function judge(pts, rule, prev = null, now = Date.now(), { holdAfterMs = 
   const lastIdle = !!(last && last[1] == null && last[2] === true);
   // 보류 — 표본이 없거나 오래됐거나 지금 값을 못 읽었다(조용한 표본은 보류가 아니다)
   if (!last || now - last[0] > holdAfterMs || (lastVal == null && !lastIdle)) {
-    if (st === 'hold') return { state: 'hold', since: prev.since, event: null, value: null, was: prev.was };
-    return { state: 'hold', since: now, event: 'hold', value: null, was: st };
+    const cut = !!(last && now - last[0] <= holdAfterMs && last[2] === 'cut') ? { cut: true } : {}; // 서비스 목록이 잘려 모름(수집은 된다)
+    if (st === 'hold') return { state: 'hold', since: prev.since, event: null, value: null, was: prev.was, ...cut };
+    return { state: 'hold', since: now, event: 'hold', value: null, was: st, ...cut };
   }
   const from = now - durMs;
   const win = pts.filter(([t]) => t >= from);
@@ -229,6 +230,16 @@ function forgetRuleState(ruleId) {
   for (const k of Object.keys(s)) if (k.startsWith(`${ruleId}|`)) { delete s[k]; changed = true; }
   if (changed) saveState(s);
 }
+/**
+ * v3.54.0 묶음 B(30회차 남긴 것 K): 대상의 **주소가 바뀌면** 그 대상의 알림 상태(`규칙|대상`)를 지운다 — 예전 기계의 '발생 중' 이 남아
+ *   새 기계에서 '[해제]' 가 나가거나 섞인 판정이 됐다. 다음 주기에 새로 판정한다(지우는 쪽이라 알림이 새로 '발생' 할 수는 있다).
+ */
+export function forgetTargetAlerts(targetId) {
+  const s = loadState(); let changed = false;
+  for (const k of Object.keys(s)) if (k.endsWith(`|${targetId}`)) { delete s[k]; changed = true; }
+  if (changed) saveState(s);
+  return changed;
+}
 export function _resetForTest() { rulesCache = null; stateCache = null; loadErr.clear(); }
 
 /* ── 판정 주기(중앙만 — 서비스 1분 틱) ─────────────────────────────────── */
@@ -257,7 +268,8 @@ export function pointsFor(store, rule, id, now) {
     for (const s of rows) {
       // 29회차 F6: 목록이 잘린 표본(allCut)에서 없는 이름은 0(죽음)이 아니라 모름(null — 판정 보류)
       //   30회차 E: 'nonsvc'(.service 가 아닌 단위만 잘림 — .service 는 먼저 실린다)이면 .service 이름의 부재는 0 이다
-      if (withAll) { if (s.apps.all && typeof s.apps.all === 'object') { const cut = s.apps.allCut === true || (s.apps.allCut === 'nonsvc' && !String(rule.app).endsWith('.service')); const v = Object.hasOwn(s.apps.all, rule.app) ? Number(s.apps.all[rule.app]) : (cut ? null : 0); out.push([s.t, Number.isFinite(v) ? v : null]); } continue; }
+      // v3.54.0 묶음 B(30회차 남긴 것): 잘린 목록 때문에 모르는 값은 세 번째 칸 'cut' — 보류 사건 문구가 '수집 끊김' 이 아니라 '목록 잘림' 을 말한다(판정은 그대로 보류)
+      if (withAll) { if (s.apps.all && typeof s.apps.all === 'object') { const cut = s.apps.allCut === true || (s.apps.allCut === 'nonsvc' && !String(rule.app).endsWith('.service')); const has = Object.hasOwn(s.apps.all, rule.app); const v = has ? Number(s.apps.all[rule.app]) : (cut ? null : 0); out.push(!has && cut ? [s.t, null, 'cut'] : [s.t, Number.isFinite(v) ? v : null]); } continue; }
       if (!Array.isArray(s.apps.sv)) { out.push([s.t, null]); continue; } // 서비스 지도 없음 — 모름
       const a = s.apps.sv.find((x) => x.k === rule.app);
       out.push([s.t, a ? a.n : (s.apps.sv.length < 20 ? 0 : null)]);
@@ -334,7 +346,7 @@ async function cycleOnce({ store, targets, recordIds, send, maintState, mock, no
     }
     if (f.retry > 0) continue; // 다시 보내는 것 — 사건은 처음 한 번만
     const kindText = j.event === 'fire' ? '발생' : j.event === 'resolve' ? '해제' : '판정 보류';
-    const valText = j.value != null ? ` · 값 ${fmtVal(r.metric, j.value)}` : j.idle ? ' · 값 없음(쓰기 없음)' : ' · 값을 못 읽음(수집 끊김 · 엣지 응답 없음)';
+    const valText = j.value != null ? ` · 값 ${fmtVal(r.metric, j.value)}` : j.idle ? ' · 값 없음(쓰기 없음)' : j.cut ? ' · 서비스 목록이 상한에서 잘려 이 이름을 못 봄(수집은 됨)' : ' · 값을 못 읽음(수집 끊김 · 엣지 응답 없음)';
     store.queueEvent(t.id, 'alert', `${r.name} — ${condText(r)} · ${kindText}${valText}${f.suppressed ? ' · 정비 창이라 보내지 않음' : ''}`.slice(0, 300), now, { id: `al:${r.id}:${t.id}:${j.event}:${now}`, scope: 'server' });
   }
   saveState(next);

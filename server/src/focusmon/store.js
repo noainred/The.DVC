@@ -45,7 +45,7 @@ const sessFile = () => path.join(config.configDir, SESS_FILE);
 /* ── 대상 메모리 ─────────────────────────────────────────────────────────────── */
 const T = new Map(); // id → { cur, recent:[closed], procs: Map(minute → [snap]), latest, latestProcs, hello, lastAt }
 const writeQ = [];   // { kind, target, minute, n?, data }
-const counters = { lateDropped: 0, rewrites: 0, closed: 0, eventsDropped: 0, kmCut: 0 };
+const counters = { lateDropped: 0, rewrites: 0, closed: 0, eventsDropped: 0, kmCut: 0, statusEventsHeld: 0, queueCut: 0 };
 /** 반증 M4: 사건은 데이터와 같은 대기열이지만 **따로 상한**(사건이 다른 서버의 분 묶음을 밀어내지 않게 — 넘치면 새 사건을 버리고 센다). */
 export const MAX_Q_EVENTS = 5000;
 let qEv = 0;
@@ -258,7 +258,7 @@ export function closeAll() { flushReopened(); for (const [id, e] of T) closeCur(
 export function memStats() {
   let blocks = 0; let values = 0;
   for (const e of T.values()) for (const b of [...e.recent, ...(e.cur ? [e.cur] : [])]) { blocks += 1; for (const a of b.cols.values()) values += a.length; }
-  return { targets: T.size, blocks, values, approxBytes: values * 4, ...counters, queue: writeQ.length };
+  return { targets: T.size, blocks, values, approxBytes: values * 4, ...counters, queue: writeQ.length, queuedEvents: qEv };
 }
 
 /* ── 수집(세션) ─────────────────────────────────────────────────────────────── */
@@ -559,7 +559,19 @@ function queueJson(kind, key, now, obj) {
   const row = { kind, target: key, minute, data };
   lastQueued.set(k, { minute, row });
   writeQ.push(row);
-  if (writeQ.length > 20_000) writeQ.splice(0, writeQ.length - 20_000);
+  if (writeQ.length > WRITEQ_MAX) cutWriteQ();
+}
+/**
+ * v3.54.0 묶음 B(29회차 남긴 것): 대기열을 자를 때 — 잘린 줄의 사건 수를 빼고(예전엔 qEv 가 그대로 남아 사건 상한이 일찍 찼다) ·
+ *   잘린 줄은 '쓴 것' 으로 표시한다(그 분의 새 값이 이미 버린 줄을 고치지 않게 — 그 분은 건너뛴다) · 몇 줄 잘랐는지 센다.
+ */
+export const WRITEQ_MAX = 20_000;
+function cutWriteQ() {
+  const gone = writeQ.splice(0, writeQ.length - WRITEQ_MAX);
+  let ev = 0;
+  for (const r of gone) { r.written = true; if (r.kind === 'e') ev += 1; }
+  if (ev) qEv = Math.max(0, qEv - ev);
+  counters.queueCut += gone.length;
 }
 export function setLoad(id, load, now = Date.now()) {
   if (!load || typeof load !== 'object') return;
@@ -587,6 +599,14 @@ const EDGE = new Map(); // agentLower → { agent, at, version, key, ok, error, 
 const KEYS_FILE = registerStateFile('focusmon-keys.json');
 let keysLoaded = false;
 
+/**
+ * v3.54.0 묶음 B(29회차 남긴 것 E1): 상태 사건(키 로그인 거부 · 호스트키)은 대상마다 STATUS_EVENT_WINDOW_MS(10분) 창에 STATUS_EVENT_BURST(6)건까지 —
+ *   엣지가 ok ↔ auth 를 번갈아 보내면(고장 · 토큰 탈취) 바뀔 때마다 사건이 쌓여 사건 대기열(MAX_Q_EVENTS 5000)이 차고 다른 서버의 사건이 버려졌다.
+ *   창 안의 상한을 넘은 것은 세고(statusEventsHeld) 적지 않는다. 처음 판(창에 하나)은 '호스트키 → 키 거부' 같은 정당한 연속 변화까지 버렸다(기존 시험이 잡음).
+ */
+export const STATUS_EVENT_WINDOW_MS = 10 * 60_000;
+export const STATUS_EVENT_BURST = 6;
+const STATUS_EV_AT = new Map(); // targetId → { from, n } — 창 시작 시각 · 그 창에 적은 상태 사건 수
 export function setStatus(id, st, now = Date.now()) {
   // v3.13.0(⑭ 자동 사건): 키 로그인 거부 · 호스트키 승인 필요로 **바뀐 순간**만(같은 상태가 이어지면 다시 적지 않는다)
   const prev = ST.get(String(id));
@@ -594,7 +614,15 @@ export function setStatus(id, st, now = Date.now()) {
   //   반증 F2: 다시 시도할 때마다 'connecting' 을 거쳐 같은 상태로 돌아온다 — 견주는 것은 'connecting' 을 뺀 **안정 상태**(호스트키 대기 중 60초마다 사건이 쌓였다)
   const stable = prev ? (prev.state === 'connecting' ? (prev.stable ?? null) : prev.state) : null;
   if ((st?.state === 'auth' || st?.state === 'hostkey') && stable && stable !== st.state) {
-    queueEvent(id, st.state, st.state === 'auth' ? '키 로그인 거부 — 수집을 멈췄습니다' : '호스트키 승인 필요 — 장비 신뢰 확인', now);
+    const k = String(id); let w = STATUS_EV_AT.get(k);
+    if (!w || now - w.from >= STATUS_EVENT_WINDOW_MS || now < w.from) w = { from: now, n: 0 }; // 새 창(시계가 거꾸로 가면 새로)
+    if (w.n >= STATUS_EVENT_BURST) counters.statusEventsHeld += 1;
+    else {
+      queueEvent(id, st.state, st.state === 'auth' ? '키 로그인 거부 — 수집을 멈췄습니다' : '호스트키 승인 필요 — 장비 신뢰 확인', now);
+      w.n += 1;
+    }
+    STATUS_EV_AT.delete(k); STATUS_EV_AT.set(k, w);
+    if (STATUS_EV_AT.size > 5000) STATUS_EV_AT.delete(STATUS_EV_AT.keys().next().value);
   }
   ST.set(String(id), { ...st, at: now, stable: st?.state === 'connecting' ? stable : (st?.state ?? null) });
 }
@@ -691,18 +719,21 @@ export function takeEdgeRetries(agent, now = Date.now()) {
  * 남겨 두면 IP 를 고친 뒤에도 예전 주소의 '연결됨' · 'RHEL 7.x' 가 새 주소의 결과처럼 보인다. 수집한 값(T)은 그대로 — 기록은 같은 id 로 이어진다.
  * 인증 정지는 여기서 다루지 않는다(접속처 + 키 지문 해시라 저절로 맞지 않는다 — 지우면 자동 재시도가 된다).
  */
-export function forgetTargetState(id) {
+export function forgetTargetState(id, { hostChanged = false } = {}) {
   const k = String(id);
-  ST.delete(k); TESTS.delete(k); RETRIES.delete(k);
+  ST.delete(k); TESTS.delete(k); RETRIES.delete(k); STATUS_EV_AT.delete(k);
   const e = T.get(k); if (e) { e.lastUp = undefined; e.lastUpAt = undefined; } // 반증 F9 — 접속처가 바뀌면 옛 서버의 가동 시간으로 '재부팅' 을 만들지 않게
   LOAD.delete(k); // v2.983 반증 F13 — 예전 주소의 수집 부하 창을 새 주소의 것처럼 보이지 않게
   // 전체 점검 29회차 F1(재현): v3.16.0 의 커널 메시지 기준(KMT 부팅 id · 누계) · 읽기 상태(KM) · OOM 상한(KMR)과 hello(OS · 코어)가 남아,
   //   새 서버의 첫 확인이 그 서버 버퍼의 오류 전부를 '커널 오류 N줄(재부팅 뒤 버퍼)' 사건으로 적고 상세 머리글에 예전 서버의 OS 가 보였다.
   KM.delete(k); KMT.delete(k); KMR.delete(k);
   if (e) e.hello = null;
+  // v3.54.0 묶음 B(30회차 남긴 것 K): **주소가 바뀌면** 메모리의 최근 표본(31분 · 프로세스 · 지금 값)도 버린다 — 다른 기계의 값이 알림 판정 · '지금' 칸에 섞였다.
+  //   계정 · 포트 · 담당 노드만 바뀌면 같은 기계라 남긴다. 이미 DB 에 쓴 분은 그대로(그 대상의 기록).
+  if (e && hostChanged) { e.cur = null; e.recent = []; e.reopen = new Map(); e.procs = new Map(); e.latest = null; e.latestProcs = null; e.lastAt = 0; LOAD.delete(k); }
 }
 
 export function _resetForTest() {
   T.clear(); writeQ.length = 0; qEv = 0; KM.clear(); KMT.clear(); KMR.clear(); S.clear(); lastView.clear(); ST.clear(); EDGE.clear(); WAKES.clear(); TESTS.clear(); RETRIES.clear(); ended.length = 0;
-  sessLoaded = false; keysLoaded = false; _sessReader.reset(); _sessReadErr = ''; _keysReader.reset(); counters.lateDropped = 0; counters.rewrites = 0; counters.closed = 0; loadFixes.length = 0;
+  sessLoaded = false; keysLoaded = false; _sessReader.reset(); _sessReadErr = ''; _keysReader.reset(); counters.lateDropped = 0; counters.rewrites = 0; counters.closed = 0; counters.statusEventsHeld = 0; counters.queueCut = 0; STATUS_EV_AT.clear(); loadFixes.length = 0;
 }
