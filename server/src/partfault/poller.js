@@ -100,7 +100,7 @@ export function _setNotifyDepsForTest(d) { ND = d ? { ...ND0, ...d } : ND0; }
 export async function _notifyIdleForTest() { while (_nqRunning || _q.size) await new Promise((r) => setTimeout(r, 5)); }
 export const _enqueueNotifyForTest = (tr, reason = 'test') => enqueueNotify(tr, reason);
 export const _notifyQueueStatusForTest = () => notifyQueueStatus();
-export function _resetNotifyForTest() { _q.clear(); _unmarked.clear(); _slotKey.clear(); Object.assign(_nqStat, NQ0()); }
+export function _resetNotifyForTest() { _q.clear(); _unmarked.clear(); Object.assign(_nqStat, NQ0()); }
 const keyOfAlert = (a) => `${String(a.agent || '').trim().toLowerCase()}|${a.partKey}`;
 const RESULTS_MAX = 200;
 function finishOne(view, at) {
@@ -113,7 +113,6 @@ function finishOne(view, at) {
 }
 // 보내지 못한(실패 · 건너뜀) 열림의 발송 표시 정보 — 같은 부품의 뒤 알림(해소가 아닌)이 받으면 그 행에 찍는다(보내는 중이라 대신될 수 없던 열림 — 반증 14b M2). 해소가 오면 버린다
 const _unmarked = new Map();
-const _slotKey = new Map();   // 물리 부품(slot) → 그 부품의 기다리는 알림 열쇠
 function enqueueNotify(tr, reason) {
   const { alerts, total, capped } = transitionAlerts(tr);
   const now = ND.now();
@@ -134,20 +133,19 @@ function enqueueNotify(tr, reason) {
       if (!a.closed && !mark && prev.mark) mark = prev.mark;
       replaced += (prev.replaced || 0) + 1;
     };
-    // 같은 물리 부품의 다른 열쇠(장비 키가 왕복) — 그 기다리던 알림도 대신한다(마지막 상태만 · 14b M3). 같은 열쇠면 **앞 알림의 차례를 그대로** 쓴다 —
-    //   맨 뒤로 보내면 대기열 한 바퀴보다 자주 바뀌는 부품이 대기가 이어지는 동안 한 번도 나가지 않았다(반증 15b S1)
-    const k2 = a.slot ? _slotKey.get(a.slot) : null;
+    // 판정이 키 이전으로 본 같은 장애(migratedFrom)의 옛 열쇠 — 그 기다리던 알림도 대신한다(마지막 상태만 · 14b M3 · 반증 16: 장비 id 로 묶지 않는다).
+    //   같은 열쇠면 **앞 알림의 차례를 그대로** 쓴다 — 맨 뒤로 보내면 대기열 한 바퀴보다 자주 바뀌는 부품이 대기가 이어지는 동안 한 번도 나가지 않았다(반증 15b S1)
+    const k2 = a.fromKey || '';
     if (k2 && k2 !== k && _q.has(k2)) { take(_q.get(k2)); _q.delete(k2); }
     const prev = _q.get(k);
     if (prev) take(prev);
-    _q.set(k, { key: k, partKey: a.partKey, agent: a.agent, closed: a.closed, slot: a.slot || '', alert: a.alert, judgedAt: now, reason, view, mark, enabledAtEnqueue: en?.enabled === true, replaced });
-    if (a.slot) _slotKey.set(a.slot, k);
+    _q.set(k, { key: k, partKey: a.partKey, agent: a.agent, closed: a.closed, alert: a.alert, judgedAt: now, reason, view, mark, enabledAtEnqueue: en?.enabled === true, replaced });
   }
   _nqStat.enqueued += alerts.length;
   // 상한 — 부품마다 하나라 보통은 닿지 않는다. 넘으면 가장 오래된 것부터 빼고 센다(조용히 버리지 않는다)
   let dropped = 0;
   while (_q.size > NOTIFY_QUEUE_MAX_ITEMS) {
-    const [k0, e0] = _q.entries().next().value; _q.delete(k0); if (e0.slot && _slotKey.get(e0.slot) === k0) _slotKey.delete(e0.slot);
+    const [k0, e0] = _q.entries().next().value; _q.delete(k0);
     e0.view.queueDropped += 1; finishOne(e0.view, now); _nqStat.overflowDropped += 1; dropped += 1;
   }
   if (dropped && now - _overflowWarnAt > 60_000) { _overflowWarnAt = now; console.warn(`[partfault] 알림 대기열이 넘쳐(${NOTIFY_QUEUE_MAX_ITEMS}건) 가장 오래된 알림 ${dropped}건을 보내지 않았습니다(누적 ${_nqStat.overflowDropped}) — 알림 채널 응답을 확인하십시오`); }
@@ -159,7 +157,7 @@ async function drainNotify() {
   _nqRunning = true;
   try {
     while (_q.size) {
-      const [k, e] = _q.entries().next().value; _q.delete(k); if (e.slot && _slotKey.get(e.slot) === k) _slotKey.delete(e.slot);
+      const [k, e] = _q.entries().next().value; _q.delete(k);
       // 판정 뒤 점검이 꺼졌으면(데모로만 켜짐 포함) 보내지 않는다 — 꺼진 채 수동 점검이 만든 판정은 그때처럼 보낸다(반증 12b #5)
       let en = null; try { en = ND.enabled(); } catch { en = null; }
       if ((e.enabledAtEnqueue && en && en.enabled === false) || en?.source === 'demo') {

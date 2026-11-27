@@ -360,7 +360,7 @@ test('14a H1 — 이벤트 뒤 다시 읽기에서 장비가 503 · 404 로 답�
   C.removeInventory('h1-x');
 });
 
-test('15b S1 · 14b M3 · M2 — 같은 열쇠의 새 알림은 앞 차례를 그대로(깜박이는 부품도 굶지 않음) · 같은 물리 부품의 다른 열쇠(키 왕복)는 함께 대신 · 보내는 중 받지 못한 열림은 뒤 알림이 받을 때 표시', async () => {
+test('15b S1 · 14b M3 · M2 · 16 — 같은 열쇠의 새 알림은 앞 차례를 그대로(깜박이는 부품도 굶지 않음) · 키 이전(migratedFrom)은 옛 열쇠 대기를 대신 · 주소가 같은 다른 서버는 묶지 않음 · 보내는 중 받지 못한 열림은 뒤 알림이 받을 때 표시', async () => {
   const PF = await import('../src/partfault/poller.js');
   PF._resetNotifyForTest();
   let release = null; let gate = new Promise((r) => { release = r; }); const order = []; const marks = [];
@@ -374,14 +374,17 @@ test('15b S1 · 14b M3 · M2 — 같은 열쇠의 새 알림은 앞 차례를 �
     PF._enqueueNotifyForTest({ opened: [p('a')], updated: [], closed: [] }, 'a-open');
     PF._enqueueNotifyForTest({ opened: [p('b')], updated: [], closed: [] }, 'b-open');
     PF._enqueueNotifyForTest({ opened: [], updated: [], closed: [{ ...p('a'), closeReason: 'ok' }] }, 'a-close');   // a 의 열림을 대신 — 앞 차례 그대로
-    // 키 왕복 — 같은 물리 부품(slot = synth-d · psu · PSU.K)이 열쇠 kA → kB → kA 로: 기다리던 다른 열쇠 알림도 대신(마지막 상태만)
+    // 키 왕복 — 판정이 키 이전(migratedFrom)으로 본 같은 장애 kA → kB: 기다리던 옛 열쇠 알림을 대신 · 뒤의 kA 해소는 그 뒤에(받는 쪽 마지막 상태 = 해소)
     PF._enqueueNotifyForTest({ opened: [p('kA', 'warn', 'PSU.K')], updated: [], closed: [] }, 'kA-open');
     PF._enqueueNotifyForTest({ opened: [{ ...p('kB', 'fault', 'PSU.K'), migratedFrom: 'kA', prevState: 'warn' }], updated: [], closed: [] }, 'kB-worse');
     PF._enqueueNotifyForTest({ opened: [], updated: [], closed: [{ ...p('kA', 'fault', 'PSU.K'), closeReason: 'ok' }] }, 'kA-close');
+    // 반증 16 — 주소(장비 id)가 같은 다른 서버의 같은 부품 id 는 묶지 않는다(판정이 키 이전으로 보지 않았으면 다른 장애)
+    PF._enqueueNotifyForTest({ opened: [p('srvA-psu', 'fault', 'PSU.Slot.1')], updated: [], closed: [] }, 'A');
+    PF._enqueueNotifyForTest({ opened: [p('srvB-psu', 'fault', 'PSU.Slot.1')], updated: [], closed: [] }, 'B');
     PF._enqueueNotifyForTest({ opened: [], updated: [{ ...p('z'), prevState: 'warn', sameState: false }], closed: [] }, 'z-change');
     release(); await PF._notifyIdleForTest();
-    assert.deepEqual(order, ['O:z', 'C:a', 'O:b', 'C:kA', 'O:z'], '대신한 알림은 앞 차례 · 키 왕복은 마지막(해소)만');
-    assert.deepEqual(marks.sort(), ['b|55', 'z|55'], '보내는 중 실패한 z 열림은 뒤 변화 알림이 받을 때 표시(14b M2) · 해소된 a · kA 는 표시 없음');
+    assert.deepEqual(order, ['O:z', 'C:a', 'O:b', 'O:kB', 'C:kA', 'O:srvA-psu', 'O:srvB-psu', 'O:z'], '대신한 알림은 앞 차례 · 키 이전은 옛 열쇠 대기를 대신 · 다른 서버는 둘 다');
+    assert.deepEqual(marks.sort(), ['b|55', 'kB|55', 'srvA-psu|55', 'srvB-psu|55', 'z|55'], '보내는 중 실패한 z 열림은 뒤 변화 알림이 받을 때 표시(14b M2) · 해소된 a 는 표시 없음');
     // 15b S1 — 대기열이 계속 차 있는 동안 X 가 한 건 보낼 때마다 깜박여도 X 는 자기 차례에 나간다
     order.length = 0; gate = new Promise((r) => { release = r; });
     PF._enqueueNotifyForTest({ opened: [p('head')], updated: [], closed: [] }, 'head');   // 보내는 중
