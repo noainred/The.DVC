@@ -18,7 +18,8 @@ import {
 import { accessMoved } from '../util/secretCarry.js';   // 98회차: 연결 시험의 비밀 승계 판정 — 저장 경로와 같은 판정 하나
 import { testDataplane, applyMapping } from '../proxy/dataplane.js';
 import { previewConfig, testDeploy, deployToProxy } from '../proxy/deploy.js';
-import { provision, deprovision, markDeployed } from '../proxy/provision.js';
+import { provision, deprovision, deployMappingsFor, finishSshDeploy, TEARDOWN_PENDING, TEARDOWN_PENDING_TEXT } from '../proxy/provision.js';
+import { isAdminDetailUser } from '../auth/demoGuest.js';   // 보안 잔여 11-27 M1: 관리자 판본 판정은 하나
 import { withSsh } from '../proxy/sshExec.js';
 import { issueRdpTicket, rdpCredsIssue } from '../proxy/rdpTicket.js';
 import { issueWsTicket } from '../proxy/wsTicket.js';   // 132회차: WS 주소에 세션 토큰 대신 1회용 티켓
@@ -422,9 +423,10 @@ remoteRouter.post('/deploy', adminOnly, async (req, res) => {
     if (onlyId && proxy.id !== onlyId) continue;
     if (proxyHiddenFor(allowed, proxy.id)) { omittedOutOfScope += 1; continue; }
     if (!proxy.deploy?.enabled) continue;
-    const ms = listMappings().filter((m) => (m.proxyId || 'default') === proxy.id);
+    // 보안 잔여 11-27 M1: 철거 보류 매핑은 블록에서 뺀다(성공하면 finishSshDeploy 가 그것을 등록부에서 지운다 — 블록에 없었으니 닫혔다)
+    const ms = deployMappingsFor(proxy.id);
     const r = await deployToProxy(proxy.deploy, ms, { bindAddress: proxy.dataplane?.bindAddress || '*' });
-    if (r.ok) markDeployed(ms); // v2.770(점검 R5-E5-4): 블록에서 건너뛴(형식이 깨진) 매핑은 active 가 아니라 error
+    if (r.ok) finishSshDeploy(proxy.id, ms); // v2.770(점검 R5-E5-4): 블록에서 건너뛴(형식이 깨진) 매핑은 active 가 아니라 error
     results.push({ proxy: proxy.name, ...r });
   }
   res.json({ ok: results.every((r) => r.ok), results, ...(allowed ? { scoped: true, omittedOutOfScope } : {}) });
@@ -514,7 +516,8 @@ remoteRouter.post('/quick-connect', requirePerm('remote.access'), textFields('ta
   //   그 판정은 listMappingsForUser(비-admin = 자기 소유만, admin = 전부) 하나를 쓴다 — 역할 비교를 여기 복제하지 않는다.
   let m = listMappingsForUser(req.user).find((x) => x.targetHost === targetHost && Number(x.targetPort) === targetPort && x.protocol === proto
     && String(x.proxyId || 'default') === pid && String(x.vcenterId || '') === vc
-    && (!x.owner || x.owner === req.user.username));
+    && (!x.owner || x.owner === req.user.username)
+    && x.status !== TEARDOWN_PENDING);   // 보안 잔여 11-27 M1: 삭제 · 만료했지만 포트를 닫지 못한(철거 보류) 매핑은 되살리지 않는다
   if (!m) {
     const r = addMapping({ name: name || `${proto.toUpperCase()} ${targetHost}`, vcenterId: vc, protocol: proto, targetHost, targetPort, owner: req.user.username, ephemeral: true });
     if (!r.ok) return res.status(400).json(r);
@@ -556,7 +559,14 @@ remoteRouter.delete('/mappings/:id', requirePerm('remote.access'), async (req, r
   if (req.user.role !== 'admin' && m.owner !== req.user.username) {
     return res.status(403).json({ ok: false, reason: '본인 접속 기록만 삭제할 수 있습니다(소유자 없는 매핑은 관리자만).' });
   }
-  await deprovision(m);
+  // 보안 잔여 11-27 M1(설계 반증 must): 철거가 거절되면(배포 명령이 허용 형식 밖) 등록부에서 지우지 않는다 — 지우면 열린 공개 포트가 화면에서 사라진다.
+  //   매핑은 '철거 보류' 로 남고 만료 작업이 다시 철거한다. 사유의 구성 단서(env 이름 · 명령)는 관리자에게만.
+  const d = await deprovision(m);
+  if (d?.held) {
+    const reason = isAdminDetailUser(req.user) ? d.reason : TEARDOWN_PENDING_TEXT;
+    return res.status(409).json({ ok: false, code: TEARDOWN_PENDING, reason, mapping: { id: m.id, status: TEARDOWN_PENDING } });
+  }
+  if (!getMapping(req.params.id)) return res.json({ ok: true });   // 같은 중계의 다른 철거 · 배포가 이미 정리했다
   res.json(removeMapping(req.params.id));
 });
 

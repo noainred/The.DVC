@@ -137,7 +137,8 @@ describe('스윕 — await delJson/putJson/patchJson/sendJson 의 반환값을 �
   //   MenuEditor 2 · SanHealthCheck · RemoteAccess 매핑 삭제 — 그리고 PortalBackup 삭제(200 {ok:false} — 없는 백업) · VCenterAdmin 데이터 소스(400 은 화면이 보내지 않는 값일 때만)는 그대로 둔다.
   const ALLOW = {
     'views/NsxAdmin.jsx': 1, 'views/PortalBackup.jsx': 1,
-    'views/RemoteAccess.jsx': 1, 'views/VCenterAdmin.jsx': 2, 'views/VmProvision.jsx': 1, 'views/VmSeriesSettings.jsx': 1,
+    // 보안 잔여 11-27 M1: RemoteAccess 매핑 삭제는 이제 409(철거 보류) 본문이 온다 — requireChanged 로 판정하고 목록에서 뺐다
+    'views/VCenterAdmin.jsx': 2, 'views/VmProvision.jsx': 1, 'views/VmSeriesSettings.jsx': 1,
     'views/sidebar/MenuEditor.jsx': 2,   // 95회차: PhysicalGpuManager 삭제는 반환값(ok:false)을 판정한다 — 목록에서 뺐다
     'views/tools/SanHealthCheck.jsx': 1,
   };

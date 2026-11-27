@@ -5,11 +5,12 @@ import { requireChanged } from './changeResult.js';   // 112회차: delJson 은 
 import { downloadFailText } from './downloadFailText.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { ProxyEditor, HealthDot } from './ProxySettings.jsx';
+import { MAPPING_STATUS_LABEL, MAPPING_TEARDOWN_TITLE } from './proxyDeployCmdText.js';
 import { STable } from '../components/STable.jsx';
 import Select from '../components/Select.jsx';
 
 const PROTOCOLS = [['ssh', 'SSH'], ['rdp', 'RDP']];
-const STATUS_BADGE = { active: 'green', manual: 'amber', pending: 'gray', error: 'red' };
+const STATUS_BADGE = { active: 'green', manual: 'amber', pending: 'gray', error: 'red', 'teardown-pending': 'amber' };
 
 /** 특수기능 → 원격 접속: 매핑 생성 + SSH/RDP 브라우저 접속. (중계서버 구성은 설정 → 중계 서버) */
 export default function RemoteAccess() {
@@ -66,7 +67,8 @@ export default function RemoteAccess() {
   };
   const remove = async (m) => {
     if (!window.confirm(`'${m.name}' 매핑을 삭제할까요? (HAProxy 설정에서도 제거)`)) return;
-    try { await delJson(`/remote/mappings/${m.id}`); } catch (e) { flash(false, `매핑 삭제 실패: ${e?.message || e}`); }
+    // 보안 잔여 11-27 M1: delJson 은 409(철거 보류)를 던지지 않고 본문을 준다 — 삭제 성공으로 읽지 않는다
+    try { requireChanged(await delJson(`/remote/mappings/${m.id}`)); } catch (e) { flash(false, `매핑 삭제 실패: ${e?.message || e}`); }
     await load();
   };
   const reapply = async (m) => {
@@ -158,7 +160,7 @@ export default function RemoteAccess() {
           <div className="flex between wrap" style={{ alignItems: 'center', marginBottom: 6 }}>
             <b style={{ fontSize: 14 }}>중계 서버(프록시) 목록</b>
             <button className="login-btn" style={{ flex: 'none', padding: '7px 14px' }}
-              onClick={() => setEditProxy({ name: '', proxyHost: '', publicPortBase: 20000, vcenterIds: [], dataplane: { enabled: false, url: '', basePath: '/v3', username: '', password: '' }, deploy: { enabled: false, host: '', port: 22, username: '', password: '', haproxyConfigPath: '/etc/haproxy/haproxy.cfg', reloadCmd: 'systemctl reload haproxy', validateCmd: 'haproxy -c -f {file}' }, guacd: { host: '', port: 4822 } })}>+ 중계 서버 추가</button>
+              onClick={() => setEditProxy({ name: '', proxyHost: '', publicPortBase: 20000, vcenterIds: [], dataplane: { enabled: false, url: '', basePath: '/v3', username: '', password: '' }, deploy: { enabled: false, host: '', port: 22, username: '', password: '', haproxyConfigPath: '/etc/haproxy/haproxy.cfg' }, guacd: { host: '', port: 4822 } })}>+ 중계 서버 추가</button>
           </div>
           <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>현재 설정된 중계 서버(HAProxy)입니다. 자세한 구성은 설정 → 중계 서버에서도 가능합니다.</div>
           <div className="table-wrap">
@@ -205,9 +207,9 @@ export default function RemoteAccess() {
                 <td>{m.targetHost}:{m.targetPort}</td>
                 <td className="muted" style={{ fontSize: 12 }}>{m.proxyGone ? '중계 서버 삭제됨' : (m.proxyName || '기본')}</td>
                 <td>{m.proxyGone ? '—' : (m.proxyHost ? `${m.proxyHost}:${m.publicPort}` : m.publicPort)}</td>
-                <td><span className={`badge ${STATUS_BADGE[m.status] || 'gray'}`}>{m.status}</span></td>
+                <td><span className={`badge ${STATUS_BADGE[m.status] || 'gray'}`} title={m.status === 'teardown-pending' ? MAPPING_TEARDOWN_TITLE : undefined}>{MAPPING_STATUS_LABEL[m.status] || m.status}</span></td>
                 <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                  {m.protocol === 'ssh'
+                  {m.status === 'teardown-pending' ? <span className="muted" style={{ fontSize: 12 }} title={MAPPING_TEARDOWN_TITLE}>접속 불가(철거 대기)</span> : m.protocol === 'ssh'
                     ? <button className="login-btn" style={{ flex: 'none', padding: '6px 12px' }} onClick={() => openRemoteSession({ kind: 'ssh', mapping: m })}>SSH 터미널</button>
                     : (m.guacdConfigured
                         ? <><button className="login-btn" style={{ flex: 'none', padding: '6px 12px' }} onClick={() => openRemoteSession({ kind: 'rdp', mapping: m })}>웹 RDP</button>{' '}<button className="logout-btn" style={{ padding: '6px 10px' }} onClick={() => downloadRdp(m)}>.rdp</button></>

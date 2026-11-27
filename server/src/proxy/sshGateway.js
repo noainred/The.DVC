@@ -37,7 +37,7 @@ export const SSH_WS_MAX_PAYLOAD = 256 * 1024;
 import { Client as SSHClient } from 'ssh2';
 import { resolveTokenUser, sessionInfoOf, touchSessionActivity, authDisabledRole } from '../auth/auth.js';
 import { userHasPermission } from '../auth/permissions.js';
-import { getMapping, touchMapping, resolveProxy, mappingProxyOf, MAPPING_PROXY_GONE_TEXT } from './registry.js';
+import { getMapping, touchMapping, resolveProxy, mappingProxyOf, MAPPING_PROXY_GONE_TEXT, MAPPING_TEARDOWN_PENDING, MAPPING_TEARDOWN_TEXT } from './registry.js';
 import { scopedVcenterIds } from '../auth/scope.js';
 import { store } from '../store.js';
 import { mappingTargetScopeIssue } from './targetHostScope.js'; // v2.579: 도메인은 routes 를 import 하지 않는다(ARCH-05)
@@ -165,6 +165,8 @@ export function attachSshGateway(server) {
  */
 export function mappingAccessIssue(user, m) {
   if (!user || !m) return '매핑을 찾을 수 없습니다.';
+  // 보안 잔여 11-27 M1: 삭제 · 만료했지만 포트를 닫지 못한(철거 보류) 매핑은 지운 것과 같다 — 접속도, 열린 세션의 재검사도 닫는다(접속이 사용 시각을 되살리지 않게)
+  if (m.status === MAPPING_TEARDOWN_PENDING) return MAPPING_TEARDOWN_TEXT;
   // v2.770(점검 R5-E5-1): 대상 문자열만이 아니라 (vcenterId, targetHost) 쌍 + 매핑이 실제로 나가는 중계가 그 vCenter 의 중계인지 본다 —
   //   예전에는 IP 만 다시 봐서 vcenterId 를 비워 기본 프록시(범위 밖 법인 망)로 만든 매핑도 통과했다. 판정은 targetHostScope.js 하나.
   const proxyIdOf = (vc) => resolveProxy(vc).id;
@@ -607,7 +609,7 @@ function handleConnection(ws, user, opts = {}) {
             collectHostnameLabel(hs, (h) => send({ type: 'hostname', name: h }));
           });
         } catch { /* optional */ }
-        ssh.shell({ term: 'xterm-256color', cols: msg.cols || 80, rows: msg.rows || 24 }, (err, s) => {
+        ssh.shell({ term: 'xterm-256color', cols: termDim(msg.cols) ?? 80, rows: termDim(msg.rows) ?? 24 }, (err, s) => {   // 보안 잔여 11-27 L6
           if (err) { send({ type: 'status', text: `셸 오류: ${err.message}` }); return closeAll(1011, 'shell error'); }
           if (closed) { try { s.end(); } catch { /* */ } return; }
           stream = s;
@@ -657,7 +659,10 @@ function handleConnection(ws, user, opts = {}) {
       session.touch(); // 키 입력 = 사용자 활동(서버측 유휴 — 그룹 F). 1분 1회로 묶는다.
       stream.write(msg.data);
     } else if (msg.type === 'resize' && stream) {
-      try { stream.setWindow(msg.rows, msg.cols, 0, 0); } catch { /* ignore */ }
+      // 보안 잔여 11-27 L6: 틀린 프레임은 무시한다(지금 창 유지 — 80x24 로 되돌리지 않는다)
+      const c = termDim(msg.cols); const r = termDim(msg.rows);
+      if (c == null || r == null) return;
+      try { stream.setWindow(r, c, 0, 0); } catch { /* ignore */ }
     }
   });
 
@@ -686,6 +691,13 @@ function handleConnection(ws, user, opts = {}) {
 
 /** 테스트 전용 — 실제 연결 처리기(가짜 ws·가짜 ssh2 로 백프레셔·폐기를 재현한다). */
 export const _handleConnectionForTest = handleConnection;
+
+/**
+ * 보안 잔여 11-27 L6: 터미널 창 크기(cols · rows) — 정수 1 이상만, TERM_DIM_MAX 로 자른다. 그 밖(음수 · 0 · 소수 · 글자 · 객체)은 null.
+ *   예전에는 'msg.cols || 80' 이라 -1 이 0xFFFFFFFF 로 · 1e9 · 1.5 가 그대로 대상 sshd 의 pty 요청 · 창 변경에 실렸다. 브라우저(xterm)는 정수를 보낸다.
+ */
+export const TERM_DIM_MAX = 1000;
+export function termDim(v) { return Number.isInteger(v) && v >= 1 ? Math.min(TERM_DIM_MAX, v) : null; }
 
 /** 현재 동시 SSH 세션 수(상태/진단용). */
 export function activeSshSessionCount() { return activeSessions; }

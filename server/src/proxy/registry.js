@@ -55,8 +55,9 @@ const DEFAULTS = {
     password: process.env.PROXY_SSH_PASS || '',
     privateKey: '', // optional PEM; takes precedence over password when set
     haproxyConfigPath: process.env.PROXY_HAPROXY_CFG || '/etc/haproxy/haproxy.cfg',
-    validateCmd: process.env.PROXY_VALIDATE_CMD || 'haproxy -c -f {file}',
-    reloadCmd: process.env.PROXY_RELOAD_CMD || 'systemctl reload haproxy',
+    // 보안 잔여 11-27 M1: validateCmd · reloadCmd 는 여기 두지 않는다 — 키가 없으면 기본값(호스트 운영자 env → 내장)이고, 실효 값은
+    //   resolveDeployCmd 가 **호출 시각에** 정한다. 예전에는 env 를 모듈 로드 때 이 객체에 복사해 저장 한 번이 그 값을 파일에 굳혔고(출처가 사라졌다),
+    //   normalizeProxy 가 모든 중계 서버 항목에 그 값을 채웠다.
   },
   proxyHost: process.env.PROXY_PUBLIC_HOST || '', // what users connect to (and the SSH gateway dials)
   publicPortBase: envPort(process.env.PROXY_PUBLIC_PORT_BASE, 20000),
@@ -141,6 +142,8 @@ export function getConfigSafe() {
     ...c,
     dataplane: { ...c.dataplane, password: c.dataplane.password ? REDACT : '' },
     deploy: { ...c.deploy, password: c.deploy.password ? REDACT : '', privateKey: c.deploy.privateKey ? REDACT : '' },
+    // 보안 잔여 11-27 M1: 실효 검증 · 재적재 명령 · 출처 · 문법 밖 사유 — deploy **밖** 형제 칸(화면이 deploy 를 다시 보내도 저장에 섞이지 않는다 · saveConfig 는 아는 키만 본다)
+    deployCommands: deployCommandsView(c.deploy),
     // ⚠ v2.503 (감사 S2, medium): `{...c}` 스프레드는 **최상위만** 가린다 — 프록시별 설정
     // (`c.proxies[].dataplane.password` · `deploy.password` · `deploy.privateKey`)은 복호된 평문
     // 그대로 응답에 실렸다. 형제 라우트 `/proxies/full` 은 이미 `redactProxy` 를 통과시킨다.
@@ -209,6 +212,8 @@ export function bindAddressIssue(v) {
 export function saveConfig(partial = {}) {
   const c = load();
   { const bad = deployTargetIssue(partial); if (bad) { const e = new Error(bad); e.status = 400; throw e; } } // v2.631 AX3-02
+  // 보안 잔여 11-27 M1: 검증 · 재적재 명령 — 바뀌지 않은 옛 값만 예외(c.deploy = 지금 저장값)
+  { const bad = deployCmdSaveIssue(partial.deploy, c.deploy); if (bad) { const e = new Error(bad); e.status = 400; throw e; } }
   if (partial.dataplane) {
     const dp = partial.dataplane;
     const bad = basePathIssue(dp.basePath) || bindAddressIssue(dp.bindAddress);
@@ -224,7 +229,7 @@ export function saveConfig(partial = {}) {
     const moved = accessMoved(c.deploy, dep, DEPLOY_ID_KEYS);
     if (dep.password === REDACT) delete dep.password;
     if (dep.privateKey === REDACT) delete dep.privateKey;
-    c.deploy = { ...c.deploy, ...dep };
+    c.deploy = normalizeDeployCmds({ ...c.deploy, ...dep });   // 보안 잔여 11-27 M1: 빈 칸은 키 삭제(기본값을 굳히지 않는다) · 통과값은 정규형
     if (moved) dropCarriedSecrets(c.deploy, dep, ['password', 'privateKey']);
   }
   if (partial.guacd) {
@@ -253,6 +258,179 @@ export function haproxyCfgPathIssue(v) {
   if (v === undefined || v === null || v === '') return null;
   if (typeof v !== 'string' || !HAPROXY_CFG_PATH_RE.test(v)) return 'HAProxy 설정 파일 경로는 ‘/’ 로 시작하는 절대 경로여야 하고 영숫자와 . _ - / 만 쓸 수 있습니다(공백 · 따옴표 · 기호 불가 · 255자까지).';
   return null;
+}
+
+/*
+ * ───────── 보안 잔여 11-27 M1 — SSH 자동 배포의 검증 · 재적재 명령(판정 코어 하나) ─────────
+ * deploy.js 는 이 두 명령을 **저장된 중계 서버 SSH 자격(root 일 수 있다)으로 셸에서** 돌린다. 예전에는 자유 문자열이라, 설정 소유자가 아닌 admin 이
+ *   (adminOnly 라우트 — PUT /config · POST /proxies) 'curl …|sh' 를 저장하고 POST /deploy 로 화면에 가려진 root 비밀번호로 중계 서버에서 임의 명령을 돌렸다
+ *   (2026-11-08 감사 axis-C C-1 · 157회차가 경로만 막고 남긴 것).
+ * 신뢰는 **값을 정한 주체**로 나눈다:
+ *   · 호스트 운영자 값(portal.env PROXY_VALIDATE_CMD · PROXY_RELOAD_CMD — root 소유)은 운영자 책임 — 그대로 실행한다(컨테이너 · SCL 같은 별난 현장의 탈출구).
+ *   · 화면/API 로 저장 · 요청된 값은 아래 **좁은 문법**만 받고, 토큰을 다시 이은 **정규형**을 실행한다(원문을 셸로 보내지 않는다).
+ * 저장(saveConfig · saveProxy) · 시험(testDeploy) · 상태 확인 · 배포(deployToProxy — 라우트 · provision · 만료 작업)가 모두 resolveDeployCmd 하나를 쓴다.
+ * 문법 밖의 **이미 저장된 값**은 조용히 버리지도 실행하지도 않는다 — 파일에 그대로 두고, 배포 · 시험이 접속 전에 사유와 함께 거절하며(deployCmdRefusal),
+ *   GET 응답의 deployCommands 가 그 사실을 실어 화면이 보인다. 문법이 남기는 능력은 'haproxy 설정 검증' 과 'haproxy 유닛 reload/restart' 뿐이다.
+ */
+export const DEPLOY_CMD_KINDS = Object.freeze(['validateCmd', 'reloadCmd']);
+export const DEPLOY_CMD_BUILTIN = Object.freeze({ validateCmd: 'haproxy -c -f {file}', reloadCmd: 'systemctl reload haproxy' });
+export const DEPLOY_CMD_ENV = Object.freeze({ validateCmd: 'PROXY_VALIDATE_CMD', reloadCmd: 'PROXY_RELOAD_CMD' });
+export const DEPLOY_CMD_LABEL = Object.freeze({ validateCmd: '검증 명령', reloadCmd: '재적재(reload) 명령' });
+/** 화면이 그대로 보이는 형식 안내(서버가 내려 준다 — 웹은 문법 · 상한을 복제하지 않는다). 백틱 금지 · 인용은 ‘ ’. */
+export const DEPLOY_CMD_HELP = Object.freeze({
+  validateCmd: '‘[sudo -n] haproxy -c -f {file}’ 꼴만 받습니다 — 실행 파일은 ‘haproxy’ 또는 /usr/sbin · /usr/bin · /usr/local/sbin · /usr/local/bin · /sbin · /bin 의 haproxy, /opt/rh/<이름>/root/usr/sbin/haproxy, /opt/haproxy/sbin/haproxy · 옵션은 -c(필수) · -q · -V 와 ‘-f {file}’ 한 번(순서 무관) · 추가 설정은 ‘-f /etc/haproxy/…’ 로 4개까지 · sudo 는 -n(비밀번호를 묻지 않음)으로 실행합니다. 셸 기호 · 따옴표 · 줄바꿈은 쓸 수 없습니다(300자까지).',
+  reloadCmd: '‘[sudo -n] systemctl reload|restart|reload-or-restart|try-reload-or-restart <유닛>’ 또는 ‘[sudo -n] service <이름> reload|restart’ 꼴만 받습니다 — 유닛 · 이름에는 ‘haproxy’ 가 들어가야 하고 영숫자와 @ . _ - 만(100자까지) · sudo 는 -n 으로 실행합니다. 셸 기호 · 따옴표 · 줄바꿈은 쓸 수 없습니다(300자까지).',
+});
+const DEPLOY_CMD_MAX = 300;
+const DEPLOY_CMD_CHARS = /^[A-Za-z0-9 ._/@{}-]+$/;   // 길이를 먼저 자른 뒤에만 — 문자 집합 하나라 선형
+const HAPROXY_BINS = new Set(['haproxy', '/usr/sbin/haproxy', '/usr/bin/haproxy', '/usr/local/sbin/haproxy', '/usr/local/bin/haproxy', '/sbin/haproxy', '/bin/haproxy', '/opt/haproxy/sbin/haproxy', '/opt/haproxy/bin/haproxy']);
+const SCL_SEG_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;   // 선행 '.' 불가 — '.' · '..' 단으로 /opt/rh 밖을 가리키지 못한다
+const VALIDATE_FLAGS = new Set(['-c', '-q', '-V']);
+const EXTRA_CFG_MAX = 4;
+const SYSTEMCTL_BINS = new Set(['systemctl', '/usr/bin/systemctl', '/bin/systemctl']);
+const SERVICE_BINS = new Set(['service', '/usr/sbin/service', '/sbin/service']);
+const SYSTEMCTL_VERBS = new Set(['reload', 'restart', 'reload-or-restart', 'try-reload-or-restart']);
+const SERVICE_VERBS = new Set(['reload', 'restart']);
+const UNIT_RE = /^[A-Za-z0-9][A-Za-z0-9@._-]{0,99}$/;   // 선행 '-' 불가(옵션 주입) · 글롭 불가
+
+/** 호스트 운영자 값(portal.env) — **호출 시각에** 읽는다(모듈 로드 때 굳히지 않는다). 비었으면 ''. */
+export function operatorDeployCmd(kind) {
+  const v = process.env[DEPLOY_CMD_ENV[kind]];
+  return typeof v === 'string' ? v.trim() : '';
+}
+function haproxyBinOk(t) {
+  if (HAPROXY_BINS.has(t)) return true;
+  // Red Hat SCL: /opt/rh/<이름>/root/usr/(s)bin/haproxy — 임의 /opt 경로는 받지 않는다(그 아래에 쓸 수 있는 저권한 계정 + sudo 결합 차단)
+  const s = t.split('/');
+  return s.length === 8 && s[0] === '' && s[1] === 'opt' && s[2] === 'rh' && SCL_SEG_RE.test(s[3]) && s[4] === 'root' && s[5] === 'usr'
+    && (s[6] === 'sbin' || s[6] === 'bin') && s[7] === 'haproxy';
+}
+/** 추가 '-f' 설정 경로 — /etc/haproxy/ 아래만('.' · '..' · 빈 단 불가). 다른 위치(/etc/shadow · /dev/stdin)를 읽게 하는 원시 기능을 남기지 않는다. */
+function extraCfgOk(p) {
+  if (haproxyCfgPathIssue(p) !== null || !p.startsWith('/etc/haproxy/')) return false;
+  return p.slice('/etc/haproxy/'.length).split('/').every((x, i, a) => (x !== '' || i === a.length - 1) && x !== '.' && x !== '..') && p !== '/etc/haproxy/';
+}
+
+/**
+ * 순수 문법 판정. → { ok: true, canonical } | { ok: false, issue }. canonical 은 검사한 토큰을 공백 하나로 다시 이은 것(sudo 는 'sudo -n').
+ * ReDoS: 길이를 먼저 자르고(300) 문자 집합 하나 · split 만 쓴다.
+ */
+export function parseDeployCmd(kind, s) {
+  if (typeof s !== 'string') return { ok: false, issue: '글자가 아닙니다.' };
+  if (s.length > DEPLOY_CMD_MAX) return { ok: false, issue: `${DEPLOY_CMD_MAX}자를 넘습니다.` };
+  const t = s.trim();
+  if (!t) return { ok: false, issue: '비어 있습니다.' };
+  if (!DEPLOY_CMD_CHARS.test(t)) return { ok: false, issue: '쓸 수 없는 글자가 있습니다(셸 기호 · 따옴표 · 백틱 · 줄바꿈 · 탭 불가).' };
+  const tk = t.split(' ').filter(Boolean);
+  const pre = [];
+  if (tk[0] === 'sudo') {
+    tk.shift();
+    if (tk[0] === '-n') tk.shift();
+    if (tk[0] && tk[0].startsWith('-')) return { ok: false, issue: 'sudo 옵션은 -n 만 쓸 수 있습니다.' };
+    pre.push('sudo', '-n');
+  }
+  if (kind === 'validateCmd') {
+    const [bin, ...rest] = tk;
+    if (!bin || !haproxyBinOk(bin)) return { ok: false, issue: '실행 파일이 허용된 haproxy 가 아닙니다.' };
+    const seen = new Set(); let files = 0; let extra = 0;
+    for (let i = 0; i < rest.length; i += 1) {
+      const a = rest[i];
+      if (VALIDATE_FLAGS.has(a)) { if (seen.has(a)) return { ok: false, issue: `옵션 ${a} 가 두 번 있습니다.` }; seen.add(a); continue; }
+      if (a !== '-f') return { ok: false, issue: `허용되지 않은 인자입니다(${a.slice(0, 40)}).` };
+      const p = rest[i + 1]; i += 1;
+      if (p === undefined) return { ok: false, issue: '-f 뒤에 파일이 없습니다.' };
+      if (p === '{file}') { files += 1; continue; }
+      if (!extraCfgOk(p)) return { ok: false, issue: '추가 -f 는 /etc/haproxy/ 아래 절대 경로만 쓸 수 있습니다.' };
+      extra += 1;
+    }
+    if (!seen.has('-c')) return { ok: false, issue: '-c(검사만) 옵션이 없습니다.' };
+    if (files !== 1) return { ok: false, issue: '‘-f {file}’ 가 정확히 한 번 있어야 합니다.' };
+    if (extra > EXTRA_CFG_MAX) return { ok: false, issue: `추가 -f 는 ${EXTRA_CFG_MAX}개까지입니다.` };
+    return { ok: true, canonical: [...pre, ...tk].join(' ') };
+  }
+  if (kind === 'reloadCmd') {
+    if (tk.length !== 3) return { ok: false, issue: '‘systemctl <동작> <유닛>’ 또는 ‘service <이름> <동작>’ 세 낱말이어야 합니다.' };
+    const [bin, a, b] = tk;
+    let unit;
+    if (SYSTEMCTL_BINS.has(bin)) { if (!SYSTEMCTL_VERBS.has(a)) return { ok: false, issue: `systemctl 동작은 reload · restart · reload-or-restart · try-reload-or-restart 만 쓸 수 있습니다(${a.slice(0, 40)}).` }; unit = b; }
+    else if (SERVICE_BINS.has(bin)) { if (!SERVICE_VERBS.has(b)) return { ok: false, issue: `service 동작은 reload · restart 만 쓸 수 있습니다(${b.slice(0, 40)}).` }; unit = a; }
+    else return { ok: false, issue: '실행 파일은 systemctl 또는 service 만 쓸 수 있습니다.' };
+    if (!UNIT_RE.test(unit) || !/haproxy/i.test(unit)) return { ok: false, issue: '유닛 · 이름은 영숫자로 시작하고 영숫자와 @ . _ - 만(100자까지) 쓸 수 있으며 ‘haproxy’ 가 들어가야 합니다.' };
+    return { ok: true, canonical: [...pre, ...tk].join(' ') };
+  }
+  return { ok: false, issue: '알 수 없는 명령 종류입니다.' };
+}
+
+/**
+ * 실효 명령 하나 — 배포 · 시험 · 화면이 부르는 **유일한** 판정. → { cmd, source: 'builtin'|'env'|'saved', stored, issue }.
+ *   저장값 없음 · 빈 칸 → 운영자 env(있으면) 또는 내장 기본 · 운영자 env 와 같은 글자 → 운영자 값(신뢰) · 그 밖 → 문법(통과면 정규형, 아니면 cmd null + issue).
+ */
+export function resolveDeployCmd(deploy, kind) {
+  const v = deploy && typeof deploy === 'object' ? deploy[kind] : undefined;
+  const env = operatorDeployCmd(kind);
+  if (v === undefined || v === null || (typeof v === 'string' && !v.trim())) {
+    return env ? { cmd: env, source: 'env', stored: null, issue: null } : { cmd: DEPLOY_CMD_BUILTIN[kind], source: 'builtin', stored: null, issue: null };
+  }
+  if (typeof v !== 'string') return { cmd: null, source: 'saved', stored: null, issue: '글자가 아닙니다.' };
+  if (env && v.trim() === env) return { cmd: env, source: 'env', stored: v, issue: null };
+  const p = parseDeployCmd(kind, v);
+  return p.ok ? { cmd: p.canonical, source: 'saved', stored: v, issue: null } : { cmd: null, source: 'saved', stored: v, issue: p.issue };
+}
+
+/** 접속 전 거절 문구(두 종류 모두 본다) 또는 null. 관리자 화면 · 배포 결과용(운영자 탈출구 안내 포함). */
+export function deployCmdRefusal(deploy) {
+  for (const kind of DEPLOY_CMD_KINDS) {
+    const r = resolveDeployCmd(deploy, kind);
+    if (r.issue) {
+      return `저장된 ${DEPLOY_CMD_LABEL[kind]}이 허용 형식 밖이라 중계 서버에 접속하지 않았습니다 — ${r.issue} ${DEPLOY_CMD_HELP[kind]} 화면(설정 › 중계 서버)에서 고치거나 비워 기본값을 쓰세요. 이 형식이 꼭 필요하면 호스트 운영자가 portal.env 의 ${DEPLOY_CMD_ENV[kind]} 에 두면 그대로 실행합니다(값을 비운 모든 중계 서버에 적용).`;
+    }
+  }
+  return null;
+}
+/** 철거 보류 매핑 상태(보안 잔여 11-27 M1 — proxy/provision.js): 삭제 · 만료했지만 배포 명령 거절로 HAProxy 포트를 닫지 못했다. 게이트웨이 · quick-connect 가 쓰지 않는다. */
+export const MAPPING_TEARDOWN_PENDING = 'teardown-pending';
+export const MAPPING_TEARDOWN_TEXT = '중계 서버의 자동 배포 명령 설정이 허용 형식 밖이라 HAProxy 포트를 닫지 못해 삭제를 보류했습니다 — 관리자가 설정 › 중계 서버에서 고치면 자동으로 정리됩니다.';
+/** 접속 전 거절이 매핑 상태(소유자 — 비관리자일 수 있다)에 남길 문구 — 구성 단서(env 이름 · 명령)를 싣지 않는다. */
+export const DEPLOY_CMD_MAPPING_TEXT = '중계 서버의 자동 배포 명령 설정이 허용 형식 밖이라 배포하지 않았습니다 — 관리자에게 문의하세요(설정 › 중계 서버에서 고칩니다).';
+
+/** 화면 표시용 — { validateCmd: { value, stored, source, issue, help }, reloadCmd: {…} }. value 는 실효 명령(문법 밖이면 null). */
+export function deployCommandsView(deploy) {
+  const out = {};
+  for (const kind of DEPLOY_CMD_KINDS) {
+    const r = resolveDeployCmd(deploy, kind);
+    out[kind] = { value: r.cmd, stored: typeof r.stored === 'string' ? r.stored.slice(0, 400) : null, source: r.source, issue: r.issue, help: DEPLOY_CMD_HELP[kind] };
+  }
+  return out;
+}
+
+/**
+ * 저장 판정 — 요청에 **있는** 종류만 본다. 빈 칸 · null 은 '기본값 사용' 으로 통과. 이미 저장된 값과 같은 글자는 통과(바뀌지 않은 옛 값 —
+ *   실행은 여전히 거절되고 화면에 보인다. 다른 칸 저장 · 비밀번호 교체가 막히지 않게). 그 밖은 resolveDeployCmd 의 판정(운영자 env 와 같은 글자 포함).
+ */
+export function deployCmdSaveIssue(incoming, prevStored) {
+  if (!incoming || typeof incoming !== 'object') return null;
+  for (const kind of DEPLOY_CMD_KINDS) {
+    if (!(kind in incoming)) continue;
+    const v = incoming[kind];
+    if (v === undefined || v === null || (typeof v === 'string' && !v.trim())) continue;
+    if (prevStored && typeof prevStored === 'object' && v === prevStored[kind]) continue;
+    const r = resolveDeployCmd({ [kind]: v }, kind);
+    if (r.issue) return `${DEPLOY_CMD_LABEL[kind]}: 허용 형식이 아닙니다 — ${r.issue} ${DEPLOY_CMD_HELP[kind]}`;
+  }
+  return null;
+}
+
+/** 저장 직전 정규화(새 객체): 빈 칸 · null → 키 삭제(기본값을 파일에 굳히지 않는다) · 문법 통과값 → 정규형 · 그 밖(운영자 값과 같은 글자 · 바뀌지 않은 옛 값)은 그대로. */
+export function normalizeDeployCmds(dep) {
+  const out = { ...(dep || {}) };
+  for (const kind of DEPLOY_CMD_KINDS) {
+    const v = out[kind];
+    if (v === undefined) continue;
+    if (v === null || (typeof v === 'string' && !v.trim())) { delete out[kind]; continue; }
+    const r = resolveDeployCmd({ [kind]: v }, kind);
+    if (r.source === 'saved' && !r.issue) out[kind] = r.cmd;
+  }
+  return out;
 }
 
 /**
@@ -340,6 +518,7 @@ const redactProxy = (p) => ({
   ...p,
   dataplane: { ...p.dataplane, password: p.dataplane.password ? REDACT : '' },
   deploy: { ...p.deploy, password: p.deploy.password ? REDACT : '', privateKey: p.deploy.privateKey ? REDACT : '' },
+  deployCommands: deployCommandsView(p.deploy),   // 보안 잔여 11-27 M1(getConfigSafe 와 같다 — deploy 밖 형제 칸)
 });
 
 export function listProxiesSafe() { return load().proxies.map(normalizeProxy).map(redactProxy); }
@@ -366,6 +545,7 @@ export function saveProxy(body = {}) {
   if (body.publicPortBase !== undefined) next.publicPortBase = portOrPrev(body.publicPortBase, base.publicPortBase); // v2.606 WEB2606-04
   { const bad = proxyHostIssue(body.proxyHost); if (bad) return { ok: false, reason: bad }; } // v2.537
   { const bad = deployTargetIssue(body); if (bad) return { ok: false, reason: bad }; } // v2.631 AX3-02
+  { const bad = deployCmdSaveIssue(body.deploy, existing?.deploy); if (bad) return { ok: false, reason: bad }; }   // 보안 잔여 11-27 M1: 옛 값 예외는 이 항목의 원본 저장값만
   if (body.dataplane) {
     const bad = basePathIssue(body.dataplane.basePath) || bindAddressIssue(body.dataplane.bindAddress);
     if (bad) return { ok: false, reason: bad };
@@ -375,7 +555,7 @@ export function saveProxy(body = {}) {
     const baseDep = base.deploy || DEFAULTS.deploy;
     const dep = { ...body.deploy };
     if ('port' in dep) dep.port = portOrPrev(dep.port, baseDep.port);
-    next.deploy = mergeSecrets(baseDep, dep, ['password', 'privateKey'], DEPLOY_ID_KEYS);
+    next.deploy = normalizeDeployCmds(mergeSecrets(baseDep, dep, ['password', 'privateKey'], DEPLOY_ID_KEYS));   // 보안 잔여 11-27 M1
   }
   if (body.guacd) {
     const baseG = base.guacd || DEFAULTS.guacd;

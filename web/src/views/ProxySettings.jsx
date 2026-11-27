@@ -1,10 +1,29 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson, postJson, putJson, delJson } from '../api.js';
-import { requireChanged } from './changeResult.js';   // 112회차: delJson 은 409 · 400 을 던지지 않고 본문을 준다 — 거절(등록부 읽기 오류 · 사용 중)을 삭제 성공으로 읽지 않는다
+import { requireChanged, changeFailText } from './changeResult.js';   // 112회차: delJson 은 409 · 400 을 던지지 않고 본문을 준다 — 거절(등록부 읽기 오류 · 사용 중)을 삭제 성공으로 읽지 않는다
 import { Loading, ErrorBox, Modal } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
 import { blankOr } from './blankOr.js';
 import { guacdFlag, guacdPlaintextRemote, GUACD_TEXT } from './proxyGuacdText.js';
+import { deployCmdNote, deployCmdPlaceholder, deployCmdHelp, deployResultText } from './proxyDeployCmdText.js';
+
+/*
+ * 보안 잔여 11-27 M1: SSH 자동배포의 검증 · 재적재 명령 칸 — 기본 프록시 · 추가 프록시 공용. 형식 판정은 서버 하나(registry.resolveDeployCmd)이고
+ *   화면은 서버가 실어 준 deployCommands(실효 명령 · 출처 · 형식 밖 사유 · 형식 안내)를 보인다. 빈 칸 = 기본값(호스트 운영자 값 또는 내장).
+ *   값은 표시에만 '' 로 채운다 — 손대지 않은 칸을 '' 로 보내면 범위 관리자의 공유 중계 저장이 '자동 구성 변경' 으로 읽혀 403 이 된다(반증 S-5).
+ */
+function DeployCmdField({ label, value, view, onChange, full }) {
+  const note = deployCmdNote(view);
+  const help = deployCmdHelp(view);
+  const color = note?.tone === 'error' ? 'var(--red)' : note?.tone === 'info' ? 'var(--blue, #60a5fa)' : undefined;
+  return (
+    <div style={{ minWidth: 0, ...(full ? { gridColumn: '1 / -1' } : {}) }}>
+      <label style={{ minWidth: 0 }}>{label}<input className="input" value={typeof value === 'string' ? value : ''} onChange={onChange} placeholder={deployCmdPlaceholder(view)} spellCheck={false} /></label>
+      {note && <div className={note.tone === 'muted' ? 'muted' : undefined} style={{ marginTop: 4, fontSize: 12, overflowWrap: 'anywhere', minWidth: 0, ...(color ? { color } : {}) }}>{note.tone === 'error' ? '⚠ ' : ''}{note.text}</div>}
+      {help && <div className="muted" style={{ marginTop: 2, fontSize: 11, overflowWrap: 'anywhere', minWidth: 0 }}>{help}</div>}
+    </div>
+  );
+}
 
 /** 48회차 F2(사용자 결정): guacd TLS · RDP 대상 인증서 검증 옵션 + 평문 원격 경고 — 기본 프록시 · 추가 프록시 공용. */
 // v3.18.6 화면 검증: 이 칸은 .spec-grid 안이라 그 label 규칙(flex-direction: column)이 체크박스를 글자 위로 띄운다 — 행 방향을 직접 준다.
@@ -74,9 +93,10 @@ export default function ProxySettings() {
   const flash = (ok, text) => { setMsg({ ok, text }); setTimeout(() => setMsg(null), 4500); };
 
   const saveCfg = async () => {
-    const r = await putJson('/remote/config', withPorts(cfg)).catch(() => ({ ok: false }));
+    // 보안 잔여 11-27 M1: putJson 은 400 을 던지지 않고 본문을 준다 — 서버 사유(명령 형식 · 경로 · 주소)를 보인다(예전에는 '저장 실패' 뿐)
+    const r = await putJson('/remote/config', withPorts(cfg)).catch((e) => ({ ok: false, reason: e?.message || String(e) }));
     if (r.config) setCfg(r.config);
-    flash(!!r.config, r.config ? '설정을 저장했습니다.' : '저장 실패');
+    flash(!!r.config, r.config ? '설정을 저장했습니다.' : `저장 실패: ${changeFailText(r) || '사유 미상'}`);
   };
   const testDp = async () => {
     const r = await postJson('/remote/test', { dataplane: cfg.dataplane }).catch((e) => ({ ok: false, reason: e.message }));
@@ -89,7 +109,8 @@ export default function ProxySettings() {
   const deployNow = async () => {
     if (!window.confirm('현재 모든 매핑을 프록시 HAProxy 설정으로 배포하고 reload할까요?')) return;
     const r = await postJson('/remote/deploy', {}).catch((e) => ({ ok: false, reason: e.message }));
-    flash(r.ok, r.ok ? '배포 완료(reload).' : `배포 실패: ${r.reason}`);
+    const t = deployResultText(r);   // 보안 잔여 11-27 M1: 응답은 results[] 라 r.reason 이 없다(예전 '배포 실패: undefined') — 중계 서버별 사유
+    flash(t.ok, t.text);
   };
   const saveProxyForm = async (p) => {
     const r = await postJson('/remote/proxies', p).catch((e) => ({ ok: false, reason: e.message }));
@@ -146,8 +167,8 @@ export default function ProxySettings() {
           <label>비밀번호<input className="input" type="password" value={cfg.deploy.password} onChange={(e) => setCfg({ ...cfg, deploy: { ...cfg.deploy, password: e.target.value } })} placeholder="********" /></label>
           <label style={{ gridColumn: '1 / -1' }}>개인키(PEM, 선택 — 입력 시 비밀번호 대신 사용)<textarea className="input" rows={2} value={cfg.deploy.privateKey} onChange={(e) => setCfg({ ...cfg, deploy: { ...cfg.deploy, privateKey: e.target.value } })} placeholder="-----BEGIN OPENSSH PRIVATE KEY-----" style={{ resize: 'vertical', fontFamily: 'monospace', fontSize: 11 }} /></label>
           <label>haproxy.cfg 경로<input className="input" value={cfg.deploy.haproxyConfigPath} onChange={(e) => setCfg({ ...cfg, deploy: { ...cfg.deploy, haproxyConfigPath: e.target.value } })} /></label>
-          <label>reload 명령<input className="input" value={cfg.deploy.reloadCmd} onChange={(e) => setCfg({ ...cfg, deploy: { ...cfg.deploy, reloadCmd: e.target.value } })} /></label>
-          <label style={{ gridColumn: '1 / -1' }}>검증 명령 ({'{file}'} = 임시 파일)<input className="input" value={cfg.deploy.validateCmd} onChange={(e) => setCfg({ ...cfg, deploy: { ...cfg.deploy, validateCmd: e.target.value } })} /></label>
+          <DeployCmdField full label="reload 명령(비우면 기본값)" value={cfg.deploy.reloadCmd} view={cfg.deployCommands?.reloadCmd} onChange={(e) => setCfg({ ...cfg, deploy: { ...cfg.deploy, reloadCmd: e.target.value } })} />
+          <DeployCmdField full label={<>검증 명령 ({'{file}'} = 임시 파일 · 비우면 기본값)</>} value={cfg.deploy.validateCmd} view={cfg.deployCommands?.validateCmd} onChange={(e) => setCfg({ ...cfg, deploy: { ...cfg.deploy, validateCmd: e.target.value } })} />
         </div>
         <div className="flex gap" style={{ marginTop: 10 }}>
           <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={saveCfg}>저장</button>
@@ -161,7 +182,7 @@ export default function ProxySettings() {
           <b style={{ fontSize: 14 }}>vCenter별 프록시 할당</b>
           <div className="flex gap">
             <button className="logout-btn" style={{ padding: '7px 14px' }} onClick={() => testAll()}>전체 상태 테스트</button>
-            <button className="login-btn" style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setEditProxy({ name: '', proxyHost: '', publicPortBase: 20000, vcenterIds: [], dataplane: { enabled: false, url: '', basePath: '/v3', username: '', password: '' }, deploy: { enabled: false, host: '', port: 22, username: '', password: '', haproxyConfigPath: '/etc/haproxy/haproxy.cfg', reloadCmd: 'systemctl reload haproxy', validateCmd: 'haproxy -c -f {file}' }, guacd: { host: '', port: 4822 } })}>+ 프록시 추가</button>
+            <button className="login-btn" style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setEditProxy({ name: '', proxyHost: '', publicPortBase: 20000, vcenterIds: [], dataplane: { enabled: false, url: '', basePath: '/v3', username: '', password: '' }, deploy: { enabled: false, host: '', port: 22, username: '', password: '', haproxyConfigPath: '/etc/haproxy/haproxy.cfg' }, guacd: { host: '', port: 4822 } })}>+ 프록시 추가</button>
           </div>
         </div>
         <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>법인(vCenter)별로 다른 프록시 서버를 지정합니다. VM 접속 시 해당 vCenter에 할당된 프록시를 자동 사용하며, 미할당 vCenter는 위 <b>기본 프록시</b>를 씁니다. <b>상태</b> 점등: 🟢 동작 · 🔴 실패 · ⚪ 수동/대기.</div>
@@ -273,6 +294,9 @@ export function ProxyEditor({ initial, onSave, onClose }) {
           <label>사용자<input className="input" value={p.deploy?.username || ''} onChange={setSub('deploy', 'username')} /></label>
           <label>비밀번호<input className="input" type="password" value={p.deploy?.password || ''} onChange={setSub('deploy', 'password')} placeholder="********" /></label>
           <label style={{ gridColumn: '1 / -1' }}>haproxy.cfg 경로<input className="input" value={p.deploy?.haproxyConfigPath || ''} onChange={setSub('deploy', 'haproxyConfigPath')} /></label>
+          {/* 보안 잔여 11-27 M1: 예전에는 이 두 칸이 없어 중계 서버의 형식 밖 옛 값을 화면에서 고칠 길이 없었다(받은 값을 보이지 않고 다시 보냈다) */}
+          <DeployCmdField full label="reload 명령(비우면 기본값)" value={p.deploy?.reloadCmd} view={initial.deployCommands?.reloadCmd} onChange={setSub('deploy', 'reloadCmd')} />
+          <DeployCmdField full label={<>검증 명령 ({'{file}'} = 임시 파일 · 비우면 기본값)</>} value={p.deploy?.validateCmd} view={initial.deployCommands?.validateCmd} onChange={setSub('deploy', 'validateCmd')} />
         </div>
       </div>
       <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,.08)' }}>

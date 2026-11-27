@@ -5,10 +5,36 @@
  * backs up the original, and reloads. Alternative to the Data Plane API.
  */
 
-import { withSsh } from './sshExec.js';
+import { withSsh as realWithSsh } from './sshExec.js';
 import { fileStamp } from '../util/dayKey.js';
 import { haproxyAddress } from '../util/hostPort.js';
-import { mappingConfigIssue, mappingNameText, haproxyCfgPathIssue } from './registry.js';
+import { mappingConfigIssue, mappingNameText, haproxyCfgPathIssue, deployCmdRefusal, resolveDeployCmd, deployCommandsView, DEPLOY_CMD_KINDS } from './registry.js';
+
+// 시험 이음새(보안 잔여 11-27 M1): 정상 배포의 명령 순서를 SFTP 없는 가짜 세션으로 확인한다. 운영 경로는 언제나 실제 withSsh.
+const deps = { withSsh: realWithSsh };
+export function _setDeployDepsForTest(o = null) { deps.withSsh = o?.withSsh || realWithSsh; }
+const withSsh = (...a) => deps.withSsh(...a);
+
+/** 원격 출력(검증 · reload 실패)을 응답 · 매핑 오류에 실을 때의 상한 — 보안 잔여 11-27 M1(반증 S-1): 큰 출력이 응답 · 설정 파일로 그대로 가지 않게 줄 · 길이로 자른다. */
+export const REMOTE_OUT_MAX_LINES = 6;
+export const REMOTE_OUT_MAX_CHARS = 600;
+export function remoteOutText(v) {
+  const s = String(v ?? '').slice(0, REMOTE_OUT_MAX_CHARS * 2);
+  const lines = s.split('\n').slice(0, REMOTE_OUT_MAX_LINES).join('\n').slice(0, REMOTE_OUT_MAX_CHARS);
+  return lines.length < s.length ? `${lines} …(잘림)` : lines;
+}
+
+/**
+ * 보안 잔여 11-27 M1: 검증 · 재적재 명령이 허용 형식 밖이면 **접속 전에** 거절한다(비밀이 이동하지 않고 원격에 임시 파일도 남지 않는다).
+ *   로그에는 칸 이름 · 출처만(값은 싣지 않는다). code 는 호출부(provision · 철거)가 '설정 문제' 를 일반 실패와 가르는 데 쓴다.
+ */
+function refuseBadCmds(deploy) {
+  const bad = deployCmdRefusal(deploy);
+  if (!bad) return null;
+  const which = DEPLOY_CMD_KINDS.filter((k) => resolveDeployCmd(deploy, k).issue).join(',');
+  console.warn(`[remote] HAProxy 자동 배포 거절(접속 전) — 저장된 ${which} 가 허용 형식 밖입니다(설정 › 중계 서버에서 확인).`);
+  return { ok: false, reason: bad, code: 'deploy-cmd-invalid' };
+}
 
 const BEGIN = '# >>> portal-remote-access (auto-generated — do not edit) >>>';
 const END = '# <<< portal-remote-access (auto-generated) <<<';
@@ -54,6 +80,9 @@ export function previewConfig(mappings, cfg) {
 export async function deployToProxy(deploy, mappings, opts = {}) {
   if (!deploy?.host || !deploy?.username) return { ok: false, reason: '배포 SSH 접속 정보(host/username)가 필요합니다.' };
   { const bad = haproxyCfgPathIssue(deploy.haproxyConfigPath); if (bad) return { ok: false, reason: bad }; }   // 157회차: 아래 셸 명령에 보간되는 값 — 접속 전에 거절
+  { const r = refuseBadCmds(deploy); if (r) return r; }   // 보안 잔여 11-27 M1
+  const validateCmd = resolveDeployCmd(deploy, 'validateCmd').cmd;   // 정규형(화면/API 값) 또는 운영자 env 원문 · 내장 기본
+  const reloadCmd = resolveDeployCmd(deploy, 'reloadCmd').cmd;
   const cfgPath = deploy.haproxyConfigPath || '/etc/haproxy/haproxy.cfg';
   const tmpPath = `${cfgPath}.portal.tmp`;
   const block = buildConfigBlock(mappings, { bindAddress: opts.bindAddress || '*' });
@@ -66,11 +95,11 @@ export async function deployToProxy(deploy, mappings, opts = {}) {
       const next = spliceConfig(original, block);
       await writeFile(tmpPath, next, 0o640);
 
-      const validate = (deploy.validateCmd || 'haproxy -c -f {file}').replace('{file}', tmpPath);
+      const validate = validateCmd.replace('{file}', tmpPath);
       const v = await exec(validate);
       if (v.code !== 0) {
         await exec(`rm -f ${tmpPath}`);
-        return { ok: false, reason: `HAProxy 설정 검증 실패: ${v.stderr || v.stdout || `exit ${v.code}`}` };
+        return { ok: false, reason: `HAProxy 설정 검증 실패: ${remoteOutText(v.stderr || v.stdout) || `exit ${v.code}`}` };
       }
       // backup original, swap in the validated file, reload
       // v2.590 D9: 사람이 롤백할 때 읽는 파일명이라 **포탈 시각**(기본 KST)으로 쓴다 — 예전 toISOString 은 'Z' 까지 잘려
@@ -79,8 +108,8 @@ export async function deployToProxy(deploy, mappings, opts = {}) {
       const stamp = `${fileStamp(now)}${String(new Date(now).getUTCSeconds()).padStart(2, '0')}`;
       await exec(`cp -a ${cfgPath} ${cfgPath}.bak.${stamp}`);
       await exec(`mv ${tmpPath} ${cfgPath}`);
-      const r = await exec(deploy.reloadCmd || 'systemctl reload haproxy');
-      if (r.code !== 0) return { ok: false, reason: `reload 실패: ${r.stderr || r.stdout || `exit ${r.code}`}` };
+      const r = await exec(reloadCmd);
+      if (r.code !== 0) return { ok: false, reason: `reload 실패: ${remoteOutText(r.stderr || r.stdout) || `exit ${r.code}`}` };
       return { ok: true, deployed: mappings.length, backup: `${cfgPath}.bak.${stamp}` };
     });
   } catch (err) {
@@ -93,12 +122,14 @@ export async function testDeploy(deploy) {
   if (!deploy?.host || !deploy?.username) return { ok: false, reason: 'host/username을 입력하세요.' };
   // 157회차(재현): 시험 라우트는 요청의 경로를 저장된 SSH 비밀과 함께 쓴다 — 경로 칸의 셸 문장이 중계 서버에서 그대로 돌았다. 접속 전에 거절한다(registry.haproxyCfgPathIssue).
   { const bad = haproxyCfgPathIssue(deploy.haproxyConfigPath); if (bad) return { ok: false, reason: bad }; }
+  // 보안 잔여 11-27 M1: 시험 · 상태 확인도 같은 판정 — 예전에는 두 명령을 보지 않아 '정상' 으로 보인 뒤 배포에서만 터졌다(요청 본문의 명령도 이 판정을 탄다)
+  { const r = refuseBadCmds(deploy); if (r) return r; }
   const creds = { host: deploy.host, port: deploy.port, username: deploy.username, password: deploy.password, privateKey: deploy.privateKey || undefined };
   try {
     return await withSsh(creds, async ({ exec }) => {
       const ver = await exec('haproxy -v 2>&1 | head -1');
       const cfg = await exec(`test -r ${deploy.haproxyConfigPath || '/etc/haproxy/haproxy.cfg'} && echo OK || echo MISSING`);
-      return { ok: true, haproxy: ver.stdout.trim(), configReadable: cfg.stdout.includes('OK') };
+      return { ok: true, haproxy: ver.stdout.trim(), configReadable: cfg.stdout.includes('OK'), commands: deployCommandsView(deploy) };
     });
   } catch (err) {
     return { ok: false, reason: err.message };
