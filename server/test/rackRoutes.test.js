@@ -258,6 +258,9 @@ test('범위: 같은 법인이라도 범위 밖 vCenter 의 서버는 범위 계
   assert.equal(mine.linkState, 'not-found'); assert.equal(mine.link, null, 'vc-c 서버의 iDRAC 정보가 vc-a 범위 계정에 새지 않는다');
   rev = (await op(ADMIN, { op: 'place.remove', id: p.body.id, rev })).body.rev;
   const o2 = (await call('GET /tools/rack/room/:id', { user: OP_A, params: { id: roomId } })).body;
-  assert.ok(!o2.unplaced.some((u) => u.serverId === 's4'), '범위 밖 서버는 미배치 목록에도 없다');
-  assert.ok((await call('GET /tools/rack/room/:id', { user: ADMIN, params: { id: roomId } })).body.unplaced.some((u) => u.serverId === 's4'));
+  // 2026-11-27: 조회 계정의 미배치 목록은 늘 비어 있다(관리자에게만 싣는다) — '서버 목록을 범위로 먼저 자른다' 는 이제 **대수**로 본다(예전 단언은 빈 목록에서 헛돌았다).
+  const a2 = (await call('GET /tools/rack/room/:id', { user: ADMIN, params: { id: roomId } })).body;
+  assert.ok(a2.unplaced.some((u) => u.serverId === 's4'), '관리자의 미배치 목록에는 있다');
+  assert.deepEqual(o2.unplaced, []);
+  assert.equal(o2.unplacedTotal, a2.unplacedTotal - 1, `범위 밖 서버(s4)는 범위 계정의 미배치 대수에 들지 않는다: 범위 ${o2.unplacedTotal} · 관리자 ${a2.unplacedTotal}`);
 });
