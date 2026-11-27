@@ -103,7 +103,7 @@ export function ingestSample(id, ts, sample, hello, now = Date.now()) {
   if (!sample || !(ts > 0)) return false;
   const e = entry(id);
   // 기계 경계(v3.57.0 묶음 B 반증 K1 · K2 · F1): 경계 앞 표본(예전 서버 — 엣지가 늦게 보낸 것)은 **기록(분 묶음)에만** 넣고 지금 값 · OS · 재부팅 · 커널 메시지 판정에는 쓰지 않는다
-  const fresh = !(ts < (e.resetAt || 0));
+  const fresh = !(ts < resetAtOf(id));
   if (hello && fresh) e.hello = hello;
   const minute = Math.floor(ts / 60_000);
   const { row, meta } = flattenSample(sample);
@@ -221,7 +221,7 @@ export function ingestProcs(id, ts, p) {
   const list = e.procs.get(minute) || [];
   if (list.length < PROC_PER_MIN) list.push({ t: ts, n: p.n ?? null, top: p.top || [], ...(p.da === true || p.da === false ? { da: p.da } : {}), ...(p.apps ? { apps: p.apps } : {}) }); // da: 지연 집계(v2.981 — 디스크 대기를 아는지) · apps: 앱 단위 묶음(v3.14.0 ⑮)
   e.procs.set(minute, list);
-  if (!(ts < (e.resetAt || 0)) && (!e.latestProcs || ts >= e.latestProcs.ts)) e.latestProcs = { ts, ...p }; // 기계 경계 앞(예전 서버)은 기록에만
+  if (!(ts < resetAtOf(id)) && (!e.latestProcs || ts >= e.latestProcs.ts)) e.latestProcs = { ts, ...p }; // 기계 경계 앞(예전 서버)은 기록에만
   return true;
 }
 
@@ -274,7 +274,21 @@ export function memBlocks(id) {
 }
 export function memProcs(id) { return T.get(id)?.procs || new Map(); }
 /** 기계 경계 시각(주소 · 담당 노드가 바뀐 순간 — 그 앞 표본은 예전 서버) · 없으면 0. 알림 판정은 이 뒤 표본만 본다. */
-export function resetAtOf(id) { return T.get(String(id))?.resetAt || 0; }
+export function resetAtOf(id) { return RESET.get(String(id)) || 0; }
+/**
+ * 기계 경계는 메모리 묶음과 따로 둔다(v3.57.0 반증 SD-3 재검증 — 묶음 기억(T)은 쉬는 대상을 31분 뒤 지운다) · 재시작하면 서비스가 DB 의 최근 24시간 '접속처 바뀜' 사건으로 되살린다
+ * (예전에는 재시작 뒤 경계가 사라져 가득 참 추정 · 구간 평균이 다시 예전 서버 값을 섞었다). 대상 5000 · 24시간이 지나면 뜻이 없다(조회 창 · 추정 창보다 길다).
+ */
+const RESET = new Map();
+export const RESET_KEEP_MS = 24 * 3600_000;
+export function noteResetAt(id, at, now = Date.now()) {
+  const k = String(id); const v = Number(at);
+  if (!Number.isFinite(v) || v <= 0 || now - v > RESET_KEEP_MS) return false;
+  if (v <= (RESET.get(k) || 0)) return false;
+  RESET.delete(k); RESET.set(k, v);
+  while (RESET.size > 5000) RESET.delete(RESET.keys().next().value);
+  return true;
+}
 export function latestOf(id) { return T.get(id)?.latest || null; }
 export function latestProcsOf(id) { return T.get(id)?.latestProcs || null; }
 export function helloOf(id) { return T.get(id)?.hello || null; }
@@ -783,8 +797,8 @@ export function forgetTargetState(id, { machineChanged = false, now = Date.now()
   const oldHost = typeof e?.hello?.hostname === 'string' && e.hello.hostname ? e.hello.hostname : null;   // 옛 엣지 울타리가 예전 서버 표본을 가르는 데 쓴다(아래)
   if (e) e.hello = null;
   if (machineChanged) {
-    const x = e || entry(k);
-    x.resetAt = Math.max(x.resetAt || 0, now); x.latest = null; x.latestProcs = null;
+    noteResetAt(k, now, now);
+    if (e) { e.latest = null; e.latestProcs = null; }
     EDGE_FENCE.set(k, { at: now, syncs: 0, oldHost });
     if (EDGE_FENCE.size > 5000) EDGE_FENCE.delete(EDGE_FENCE.keys().next().value);
   }
@@ -828,5 +842,5 @@ export function edgeFenceSynced(ids = []) { for (const id of ids) { const f = ED
 
 export function _resetForTest() {
   T.clear(); writeQ.length = 0; qEv = 0; KM.clear(); KMT.clear(); KMR.clear(); S.clear(); lastView.clear(); ST.clear(); EDGE.clear(); WAKES.clear(); TESTS.clear(); RETRIES.clear(); ended.length = 0;
-  sessLoaded = false; keysLoaded = false; _sessReader.reset(); _sessReadErr = ''; _keysReader.reset(); counters.lateDropped = 0; counters.rewrites = 0; counters.closed = 0; counters.statusEventsHeld = 0; counters.queueCut = 0; STATUS_EV_AT.clear(); EDGE_FENCE.clear(); STALE_TEST.clear(); loadFixes.length = 0;
+  sessLoaded = false; keysLoaded = false; _sessReader.reset(); _sessReadErr = ''; _keysReader.reset(); counters.lateDropped = 0; counters.rewrites = 0; counters.closed = 0; counters.statusEventsHeld = 0; counters.queueCut = 0; STATUS_EV_AT.clear(); EDGE_FENCE.clear(); STALE_TEST.clear(); RESET.clear(); loadFixes.length = 0;
 }

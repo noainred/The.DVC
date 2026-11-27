@@ -228,9 +228,18 @@ export function startFocusMon() {
     every(() => { minuteTick(Date.now(), { send: sendImpl, maintJudge: maintImpl }).catch((e) => console.warn(`[focusmon] 알림 · 자동 조절 실패: ${String(e?.message || e).slice(0, 160)}`)); }, 60_000), // v3.16.0 ⑯
   ];
   try { nodeTick(); } catch { /* 첫 창의 기준점 */ }
+  // v3.57.0 반증 SD-3: 기계 경계(메모리)를 DB 의 최근 24시간 '접속처 바뀜' 사건으로 되살린다 — 재시작 뒤 가득 참 추정 · 구간 평균이 예전 서버 값을 섞지 않게(못 읽으면 없이 간다)
+  restoreResets().catch(() => {});
   // 계속 수집 정의가 남아 있으면(재시작) 곧바로 이어 받는다 — 첫 틱이 desiredFor 로 읽는다.
   const resumed = store.listSessions().filter((x) => x.resumed).length;
   if (resumed) console.log(`[focusmon] 계속 수집 ${resumed}건을 이어 받습니다.`);
+}
+
+/** 최근 24시간 '접속처 바뀜' 사건 → 기계 경계(store.noteResetAt). 되살린 수. */
+export async function restoreResets(now = Date.now()) {
+  const rows = await db.readEventsOfKinds(now - store.RESET_KEEP_MS, now + 60_000, ['endpoint'], 5000);
+  let n = 0; for (const r of rows || []) if (store.noteResetAt(r.target, r.at, now)) n += 1;
+  return n;
 }
 
 export function stopFocusMon() {

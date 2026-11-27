@@ -479,6 +479,24 @@ test('S3 — 가득 찰 때까지 추정은 기계 경계 뒤 점만(예전 · �
   assert.equal(out.after, 'short', '수정 전: 경계 앞 19시간의 예전 서버 값으로 가득 참 날짜를 냈다'); assert.ok(out.afterSpan < 1.1);
 });
 
+test('S6 — 재시작해도 기계 경계는 DB 의 접속처 바뀜 사건으로 되살아난다(24시간 안) · 묶음 기억이 지워져도 남는다(반증 SD-3 재검증)', () => {
+  const out = sub(`const store = await import(${J('focusmon/store.js')}); const db = await import(${J('focusmon/db.js')}); const svc = await import(${J('focusmon/service.js')});
+    const now = Date.now(); const id = 'fm-s6s6s6s6s6';
+    const t = { id, name: 's', host: '10.6.6.1', port: 22, username: 'u', agent: '' };
+    svc.targetsEndpointChanged([[t, { ...t, host: '10.6.6.2' }]], now - 3600_000);
+    const at = store.resetAtOf(id);
+    await db.writeBlocks(store.drainWrites(1000));
+    store.closeMinutes(now, new Set());   // 쉬는 대상의 묶음 기억을 지운다
+    const afterIdle = store.resetAtOf(id);
+    store._resetForTest();                 // 재시작
+    const gone = store.resetAtOf(id);
+    const n = await svc.restoreResets(now);
+    store.noteResetAt('fm-old0000001', now - 25 * 3600_000, now);
+    console.log(JSON.stringify({ at: at === now - 3600_000, afterIdle: afterIdle === at, gone, n, back: store.resetAtOf(id) === at, old: store.resetAtOf('fm-old0000001') }));
+    svc.stopFocusMon?.();`, { DATA_SOURCE: 'live' });
+  assert.deepEqual(out, { at: true, afterIdle: true, gone: 0, n: 1, back: true, old: 0 });
+});
+
 test('S4 — 합쳐 쓴 분은 메모리 묶음 · 조회 기억도 합친 값(반증 SD-4) · 합치기는 트랜잭션 밖에서(SD-1)', () => {
   const out = sub(`const store = await import(${J('focusmon/store.js')}); const db = await import(${J('focusmon/db.js')}); const rec = await import(${J('focusmon/recorder.js')}); const Q = await import(${J('focusmon/query.js')});
     const M0 = Math.floor(Date.now() / 60_000) * 60_000 - 3 * 60_000; const id = 'fm-s4s4s4s4s4';
