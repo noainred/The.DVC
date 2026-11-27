@@ -143,11 +143,13 @@ describe('v3.54 반증 14c M2 — 닫힘을 확인할 수 없는 진행 기록',
   it('0 이면 아무 말도 하지 않고 · 있으면 이유와 결과를 말한다', () => {
     expect(escOrphanText(null)).toBe('');
     expect(escOrphanText({ orphans: 0 })).toBe('');
-    expect(escOrphanText({ orphans: 3 })).toMatch(/^닫힘을 확인할 수 없는 진행 기록 3건 — 그 장비가 다시 보이지 않습니다.*옛 확인과 단계를 이어받습니다\.$/);
+    expect(escOrphanText({ orphans: 3, orphanReasons: { unassigned: 2, unjudgeable: 1 } })).toBe('닫힘을 확인할 수 없는 진행 기록 3건 — 엣지 · 포탈 보고에서 장비가 빠짐(재배정 · 등록 삭제 등) 2건 · 판정할 재료가 없는 옛 기록 1건. 남아 있으면 같은 부품의 다음 장애가 옛 확인과 단계를 이어받습니다(장비 읽기 실패 · 정비 창 같은 일시적 보류는 세지 않습니다).');
+    expect(escOrphanText({ orphans: 1 })).toMatch(/^닫힘을 확인할 수 없는 진행 기록 1건\. 남아 있으면/);
   });
   it('패널은 정리 단추를 관리자 경로로 부른다(소스)', () => {
     const src = stripComments(fs.readFileSync(new URL('./PartFaultEscalation.jsx', import.meta.url), 'utf8'));
     expect(src).toMatch(/postJson\('\/tools\/part-faults\/escalation\/forget-orphans', \{\}\)/);
     expect(src).toMatch(/orphanText \? \(/);
+    expect(src).toMatch(/orphanMsg \? <div/);   // 결과는 그 줄 자리에
   });
 });

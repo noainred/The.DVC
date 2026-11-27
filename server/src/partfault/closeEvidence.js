@@ -8,7 +8,16 @@
  */
 let _keys = new Set();
 let _at = null;
-export function setJudgedClosed(keys, at = Date.now()) { _keys = new Set(keys); _at = at; }
+let _held = new Map();          // 열쇠 → 가상 전이의 보류 사유(HOLD_REASON — 정리 대상을 가르는 데 쓴다: 반증 15c P2)
+let _unjudgeable = new Set();   // 가상 장애를 만들 수 없는 기록(판정 재료 · sig 없음 — 닫힘을 영영 가릴 수 없다)
+export const PROCESS_STARTED_AT = Date.now();
+export function setJudgedClosed(keys, at = Date.now(), { held = null, unjudgeable = null } = {}) {
+  _keys = new Set(keys); _at = at;
+  _held = held instanceof Map ? held : new Map();
+  _unjudgeable = new Set(unjudgeable || []);
+}
 export const judgedClosedKeys = () => _keys;
 export const judgedClosedAt = () => _at;
-export function _resetJudgedClosedForTest() { _keys = new Set(); _at = null; }
+export const judgedHeldReasons = () => _held;
+export const judgedUnjudgeable = () => _unjudgeable;
+export function _resetJudgedClosedForTest() { _keys = new Set(); _at = null; _held = new Map(); _unjudgeable = new Set(); }

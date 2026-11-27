@@ -132,10 +132,14 @@ export function escRunText(run, tickMs = null) {
 /**
  * 닫힘을 확인할 수 없어 남긴 진행 기록(v3.54 반증 14c M2) — 0 이면 빈 문자열. 그 장비가 다시 보이지 않으면 영영 남고, 같은 부품의 다음 장애가 옛 확인 · 단계를 이어받는다.
  */
+const ORPHAN_WHY = { unassigned: '엣지 · 포탈 보고에서 장비가 빠짐(재배정 · 등록 삭제 등)', edgeStale: '엣지 보고가 오래됨', noReport: '엣지 보고가 1시간 넘게 없음', unjudgeable: '판정할 재료가 없는 옛 기록' };
 export function escOrphanText(run) {
   const n = int(run?.orphans) ?? 0;
   if (!n) return '';
-  return `닫힘을 확인할 수 없는 진행 기록 ${n}건 — 그 장비가 다시 보이지 않습니다(재배정 · 철수 · 등록 삭제 등). 남아 있으면 같은 부품의 다음 장애가 옛 확인과 단계를 이어받습니다.`;
+  // 사유를 단정하지 않고 판정이 본 대로 나눠 말한다(반증 15c P2 — 일시적 보류는 서버가 세지 않는다)
+  const r = run?.orphanReasons && typeof run.orphanReasons === 'object' ? run.orphanReasons : {};
+  const why = Object.keys(ORPHAN_WHY).filter((k) => int(r[k])).map((k) => `${ORPHAN_WHY[k]} ${int(r[k])}건`).join(' · ');
+  return `닫힘을 확인할 수 없는 진행 기록 ${n}건${why ? ` — ${why}` : ''}. 남아 있으면 같은 부품의 다음 장애가 옛 확인과 단계를 이어받습니다(장비 읽기 실패 · 정비 창 같은 일시적 보류는 세지 않습니다).`;
 }
 /** 마지막 회차의 보낸 결과 줄(최대 20) — 어디에 갔고 어디에 가지 않았는지(반증 B1). */
 export function escRunResults(run) {

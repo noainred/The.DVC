@@ -109,11 +109,17 @@ export const NOTIFY_MAX_PER_RUN = 200;   // 판정 한 번에 보내는 알림 �
  * 판정 → 보낼 알림(상한까지 · 본문을 지금 만든다). 발송 큐(poller.js 설계 ③)가 전이 전체(같은 상태 · 보류 목록)를 붙잡지 않게 알림만 담는다(반증 12b #2).
  * ⚠ 상한은 **버리는 것이 아니라 밝히는 것**이다 — 넘친 개수를 `capped` 로 돌려주고 화면 · 로그가 "N건은 보내지 않았습니다" 라고 말한다(조용한 상한 금지).
  */
+/** 물리 부품 열쇠 — 장비군 · 장비 id · 종류 · 부품 id 가 모두 있을 때만(하나라도 없으면 '' — 다른 부품끼리 묶이지 않게). */
+export const slotOf = (p) => {
+  const f = [p?.scope, p?.deviceId, p?.kind, p?.partId].map((x) => String(x ?? '').trim());
+  return f.every(Boolean) ? [String(p?.agent || '').trim().toLowerCase(), ...f].join('|') : '';
+};
 export function transitionAlerts(tr, { notifyClosed = true, max = NOTIFY_MAX_PER_RUN } = {}) {
   const items = transitionItems(tr, { notifyClosed });
   const take = items.slice(0, max);
   return {
-    alerts: take.map((it) => ({ partKey: it.p.partKey, agent: String(it.p.agent || ''), closed: it.closed, alert: alertOf(it.p, { closed: it.closed }) })),
+    // slot — 같은 물리 부품(수집 주체 · 장비군 · 장비 id · 종류 · 부품 id): 장비 키가 바뀌어 열쇠가 달라도 같은 부품의 기다리던 알림을 대신하는 데 쓴다(반증 15b S1 · 14b M3)
+    alerts: take.map((it) => ({ partKey: it.p.partKey, agent: String(it.p.agent || ''), closed: it.closed, slot: slotOf(it.p), alert: alertOf(it.p, { closed: it.closed }) })),
     total: items.length, capped: Math.max(0, items.length - take.length),
   };
 }

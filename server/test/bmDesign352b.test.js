@@ -216,9 +216,9 @@ test('13c N1 — 판정 폴러의 가상 전이: DB 에 없는 기록의 장비�
   const RUN = await import('../src/partfault/escalationRun.js');
   const CE = await import('../src/partfault/closeEvidence.js');
   PF._setNotifyDepsForTest({ sendAlerts: async (list) => ({ results: list.map((e) => ({ partKey: e.partKey, closed: e.closed, result: '', outcome: 'skipped' })) }) });
-  const rep = (ok, open, failedKinds = [], okParts = []) => ({
+  const rep = (ok, open, failedKinds = [], okParts = [], devId = 'synth-n1d') => ({
     v: 2, agent: 'synth-n1', version: '3.54.0', at: Date.now(), partIdents: 1, omitted: 0, scanned: { idrac: { devices: 1, ok: ok ? 1 : 0, failed: ok ? 0 : 1 } },
-    devices: [{ scope: 'idrac', deviceId: 'synth-n1d', deviceKey: 'SYNTHN1D', deviceKeyKind: 'serviceTag', deviceName: 'synth-n1d', ok, reason: ok ? '' : 'device-failed', failedKinds, capped: false, notCollected: [],
+    devices: [{ scope: 'idrac', deviceId: devId, deviceKey: 'SYNTHN1D', deviceKeyKind: 'serviceTag', deviceName: 'synth-n1d', ok, reason: ok ? '' : 'device-failed', failedKinds, capped: false, notCollected: [],
       states: { ok: ok ? ['fan:FAN.1', ...okParts] : [], unknown: [], absent: [] },
       open: open ? [{ kind: 'psu', partId: 'PSU.N1', keyKind: 'name', state: 'fault', rawState: 'Critical', label: 'PSU N1', detail: '' }] : [] }],
   });
@@ -242,12 +242,13 @@ test('13c N1 — 판정 폴러의 가상 전이: DB 에 없는 기록의 장비�
     const raw = new DatabaseSync(path.join(tmp, 'part-faults.db'));
     raw.prepare('DELETE FROM part_state WHERE agent=?').run('synth-n1');
     raw.close();
-    // ① 장비를 읽지 못함 → 가상 전이가 보류 → 근거 없음 → 기록 유지
+    // ① 장비를 읽지 못함 → 가상 전이가 보류 → 근거 없음 → 기록 유지 · 정리 대상으로 세지 않음(일시적 — 15c P2)
     await putEdgeReport('synth-n1', rep(false, false));
     await PF.runPartFaultsNow({ reason: 'n1-devfail' });
     assert.equal(CE.judgedClosedKeys().has(key), false, '장비 실패는 닫힘이 아니다');
-    await RUN.runEscalationNow();
+    const rDev = await RUN.runEscalationNow();
     assert.ok(Object.hasOwn(E.loadEscalationState().items, key), '기록을 남긴다(13c N1)');
+    assert.equal(rDev.orphans, 0, '장비 실패 보류는 정리 대상이 아니다');
     // ② 그 종류를 모으지 못함 → 보류
     await putEdgeReport('synth-n1', rep(true, false, ['psu']));
     await PF.runPartFaultsNow({ reason: 'n1-kindfail' });
@@ -256,22 +257,29 @@ test('13c N1 — 판정 폴러의 가상 전이: DB 에 없는 기록의 장비�
     await putEdgeReport('synth-n1', rep(true, false));
     await PF.runPartFaultsNow({ reason: 'n1-missing' });
     assert.equal(CE.judgedClosedKeys().has(key), false, '보고에서 빠진 부품도 닫힘이 아니다(전이의 누락 보류)');
-    // ④ 장비를 읽었고 그 부품이 정상 → 가상 전이가 닫음 → 근거 → 기록 정리
-    await putEdgeReport('synth-n1', rep(true, false, [], ['psu:PSU.N1']));
+    // ④ 장비를 읽었고 그 부품이 정상 — 장비 IP(deviceId)가 바뀌어도 부품 열쇠(서비스 태그 기반)로 맞춰 가상 전이가 닫음 → 근거 → 기록 정리(반증 15c P1)
+    await putEdgeReport('synth-n1', rep(true, false, [], ['psu:PSU.N1'], 'synth-n1d-newip'));
     await PF.runPartFaultsNow({ reason: 'n1-ok' });
     assert.equal(CE.judgedClosedKeys().has(key), true, '읽었고 정상이면 닫힘 근거');
     // 판정 재료가 없어도(sig) 닫힘을 가린다 — 이 회차는 기록을 정리한다(14c M1)
     await RUN.runEscalationNow();
     assert.equal(Object.hasOwn(E.loadEscalationState().items, key), false, '근거가 있으면 정리');
     // 14c M2 — 다시 보이지 않는 장비의 기록(근거가 영영 없음)은 관리자가 정리한다 · 회차가 센다
-    const ghost = 'synth-gone|idrac:SYNTHGONE:disk:Disk.Bay.9';
+    //   15c P2 — 셀 때는 스스로 풀리지 않는 것만: 보고는 있는데 장비가 빠짐(unassigned) · 판정 재료 없음. 일시적 보류(장비 실패)는 세지 않는다
+    const ghost = 'synth-n1|idrac:SYNTHGONE:disk:Disk.Bay.9';
+    const noMat = 'synth-n1|idrac:SYNTHNOMAT:disk:Disk.Bay.8';
     const st1 = JSON.parse(fs.readFileSync(stFile, 'utf8'));
-    st1.items[ghost] = { since: 1, sig: 'synth-gone|idrac|synth-gone-d|disk|Disk.Bay.9', sent: [], ackedAt: 2, ackBy: 'oper', pol: 'pf', ps: {} };
+    st1.items[ghost] = { since: 1, sig: 'synth-n1|idrac|synth-n1-gone|disk|Disk.Bay.9', sent: [], ackedAt: 2, ackBy: 'oper', pol: 'pf', ps: {} };
+    st1.items[noMat] = { since: 1, sig: 'x', sent: [], ackedAt: 2, ackBy: 'oper', pol: 'pf', ps: {} };
     fs.writeFileSync(stFile, JSON.stringify(st1)); E._resetEscalationStateForTest();
+    await putEdgeReport('synth-n1', rep(true, false, [], ['psu:PSU.N1']));
+    await PF.runPartFaultsNow({ reason: 'n1-ghost' });
+    assert.equal(CE.judgedHeldReasons().get(ghost), 'unassigned', '보고에서 장비가 빠짐');
     const r0 = await RUN.runEscalationNow();
-    assert.equal(r0.orphans, 1, '닫힘을 확인할 수 없는 기록 1건');
+    assert.equal(r0.orphans, 2, '닫힘을 확인할 수 없는 기록 2건');
+    assert.deepEqual(r0.orphanReasons, { unassigned: 1, unjudgeable: 1 });
     const f = await RUN.forgetEscalationOrphans();
-    assert.deepEqual([f.ok, f.removed], [true, 1]);
+    assert.deepEqual([f.ok, f.removed], [true, 2]);
     assert.equal(Object.hasOwn(E.loadEscalationState().items, ghost), false);
     assert.equal(RUN.escalationRunStatus().orphans, 0);
   } finally { RUN._setEscalationDepsForTest(null); PF._setNotifyDepsForTest(null); CE._resetJudgedClosedForTest(); await PF._notifyIdleForTest(); }
@@ -343,27 +351,46 @@ test('14a H1 — 이벤트 뒤 다시 읽기에서 장비가 503 · 404 로 답�
   assert.deepEqual(await readOf(), [true], '정상');
   const okColl = Object.entries(C.getInventory('h1-x')?.collections || {}).filter(([, v]) => v === 'ok').map(([k]) => k);
   mode = 'partial';
-  assert.deepEqual(await readOf(), okColl.some((k) => k !== 'system') ? [false] : [true], `앞에서 됐던 컬렉션(${okColl.join(',')})이 실패하면 못 읽음`);
+  assert.ok(okColl.some((k) => k !== 'system'), `정상 읽기에서 부품 컬렉션이 됐다(${okColl.join(',')})`);
+  assert.deepEqual(await readOf(), [false], '앞에서 됐던 컬렉션이 실패하면 못 읽음');
+  assert.deepEqual(await readOf(), [false], '바쁜 읽기가 이어져도 못 읽음 — 기준은 마지막으로 됐던 상태(반증 15a J1)');
+  assert.equal(C.isForcedStale('h1-x'), false, '표지는 호출부(eventSub)가 세운다 — 여기서는 판정만 본다');
+  mode = 'ok';
+  assert.deepEqual(await readOf(), [true], '다시 정상');
   C.removeInventory('h1-x');
 });
 
-test('14b M3 · M2 — 같은 부품의 새 알림은 맨 뒤로(받는 순서가 마지막 상태와 맞게) · 보내는 중 받지 못한 열림은 같은 부품의 뒤 알림이 받을 때 표시', async () => {
+test('15b S1 · 14b M3 · M2 — 같은 열쇠의 새 알림은 앞 차례를 그대로(깜박이는 부품도 굶지 않음) · 같은 물리 부품의 다른 열쇠(키 왕복)는 함께 대신 · 보내는 중 받지 못한 열림은 뒤 알림이 받을 때 표시', async () => {
   const PF = await import('../src/partfault/poller.js');
   PF._resetNotifyForTest();
-  let release = null; const gate = new Promise((r) => { release = r; }); const order = []; const marks = [];
+  let release = null; let gate = new Promise((r) => { release = r; }); const order = []; const marks = [];
   PF._setNotifyDepsForTest({
     sendAlerts: async (list) => { for (const e of list) order.push(`${e.closed ? 'C' : 'O'}:${e.partKey}`); await gate; return { results: list.map((e) => ({ partKey: e.partKey, closed: e.closed, result: '', outcome: e.partKey === 'z' && !e.closed && order.filter((x) => x === 'O:z').length === 1 ? 'failed' : 'delivered' })) }; },
     markNotified: async (k) => { marks.push(...k.map((m) => `${m.partKey}|${m.firstSeen}`)); }, enabled: () => ({ enabled: true, source: 'saved' }),
   });
   try {
-    const p = (k, state = 'fault') => ({ agent: '', partKey: k, state, scope: 'idrac', kind: 'psu', label: 'PSU', firstSeenAt: 55 });
+    const p = (k, state = 'fault', partId = k) => ({ agent: '', partKey: k, state, scope: 'idrac', deviceId: 'synth-d', kind: 'psu', partId, label: 'PSU', firstSeenAt: 55 });
     PF._enqueueNotifyForTest({ opened: [p('z')], updated: [], closed: [] }, 'z-open');   // 보내는 중(막힘) — 실패로 끝난다
     PF._enqueueNotifyForTest({ opened: [p('a')], updated: [], closed: [] }, 'a-open');
     PF._enqueueNotifyForTest({ opened: [p('b')], updated: [], closed: [] }, 'b-open');
-    PF._enqueueNotifyForTest({ opened: [], updated: [], closed: [{ ...p('a'), closeReason: 'ok' }] }, 'a-close');   // a 의 열림을 대신 — 맨 뒤로
+    PF._enqueueNotifyForTest({ opened: [], updated: [], closed: [{ ...p('a'), closeReason: 'ok' }] }, 'a-close');   // a 의 열림을 대신 — 앞 차례 그대로
+    // 키 왕복 — 같은 물리 부품(slot = synth-d · psu · PSU.K)이 열쇠 kA → kB → kA 로: 기다리던 다른 열쇠 알림도 대신(마지막 상태만)
+    PF._enqueueNotifyForTest({ opened: [p('kA', 'warn', 'PSU.K')], updated: [], closed: [] }, 'kA-open');
+    PF._enqueueNotifyForTest({ opened: [{ ...p('kB', 'fault', 'PSU.K'), migratedFrom: 'kA', prevState: 'warn' }], updated: [], closed: [] }, 'kB-worse');
+    PF._enqueueNotifyForTest({ opened: [], updated: [], closed: [{ ...p('kA', 'fault', 'PSU.K'), closeReason: 'ok' }] }, 'kA-close');
     PF._enqueueNotifyForTest({ opened: [], updated: [{ ...p('z'), prevState: 'warn', sameState: false }], closed: [] }, 'z-change');
     release(); await PF._notifyIdleForTest();
-    assert.deepEqual(order, ['O:z', 'O:b', 'C:a', 'O:z'], '대신한 알림은 맨 뒤(b 다음 a 해소)');
-    assert.deepEqual(marks, ['b|55', 'z|55'], '보내는 중 실패한 z 열림은 뒤 변화 알림이 받을 때 표시(14b M2) · 해소된 a 는 표시 없음');
+    assert.deepEqual(order, ['O:z', 'C:a', 'O:b', 'C:kA', 'O:z'], '대신한 알림은 앞 차례 · 키 왕복은 마지막(해소)만');
+    assert.deepEqual(marks.sort(), ['b|55', 'z|55'], '보내는 중 실패한 z 열림은 뒤 변화 알림이 받을 때 표시(14b M2) · 해소된 a · kA 는 표시 없음');
+    // 15b S1 — 대기열이 계속 차 있는 동안 X 가 한 건 보낼 때마다 깜박여도 X 는 자기 차례에 나간다
+    order.length = 0; gate = new Promise((r) => { release = r; });
+    PF._enqueueNotifyForTest({ opened: [p('head')], updated: [], closed: [] }, 'head');   // 보내는 중
+    PF._enqueueNotifyForTest({ opened: [p('x')], updated: [], closed: [] }, 'x-0');
+    for (let i = 1; i <= 6; i += 1) {
+      PF._enqueueNotifyForTest({ opened: [p(`o${i}`)], updated: [], closed: [] }, `o${i}`);
+      PF._enqueueNotifyForTest(i % 2 ? { opened: [], updated: [], closed: [{ ...p('x'), closeReason: 'ok' }] } : { opened: [p('x')], updated: [], closed: [] }, `x-${i}`);
+    }
+    release(); await PF._notifyIdleForTest();
+    assert.equal(order[1].endsWith(':x'), true, `x 는 자기 차례(두 번째)에 마지막 상태로 나간다(${order.join(' ')})`);
   } finally { release?.(); PF._setNotifyDepsForTest(null); PF._resetNotifyForTest(); }
 });

@@ -288,6 +288,7 @@ describe('notifyNote / lastRunText — 상한과 실패를 숨기지 않는다',
     expect(notifyNote({}, { waiting: 0, overflowDropped: 0 })).toBe('');
     // 반증 14b · Chromium — 대기 중엔 남은 수와 이미 끝난 것 · 0건 판정은 말하지 않음 · 같은 넘침 수는 한 번
     expect(notifyNote({ notify: { pending: true, queued: 3, left: 1, sent: 0, failed: 2 } })).toBe('알림 1건 발송 대기(차례로 보냅니다) · **2건은 채널 오류로 받지 못했습니다**');
+    expect(notifyNote({ notify: { pending: true, queued: 4, left: 2, skipped: 1, superseded: 1 } })).toBe('알림 2건 발송 대기(차례로 보냅니다) · 억제나 채널 미설정 등으로 1건 보내지 않음 · 채널 지연으로 같은 부품의 뒤 알림이 1건을 대신했습니다');
     expect(notifyNote({ notify: { pending: false, total: 0, queued: 0, sent: 0 } })).toBe('');
     expect(notifyNote({ notify: { pending: false, total: 0, queued: 0, sent: 0 } }, { waiting: 1 })).toBe('발송 대기 1건');
     expect(notifyNote({ notify: { pending: false, sent: 0, queueDropped: 7 } }, { waiting: 0, overflowDropped: 7 })).toBe('알림 0건 발송 · **알림 대기열이 넘쳐 7건은 보내지 않았습니다**');

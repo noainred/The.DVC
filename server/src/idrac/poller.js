@@ -355,20 +355,25 @@ async function pollOnceInner({ manual = false, only = null, onRefreshed = null, 
         // 이벤트를 보낸 서버는 인벤토리를 늘 다시 읽는다(그것이 이유다 — 강제 표지 상한과 무관) · 정규 주기는 이벤트 묶음이 맡은 서버의 인벤토리를 읽지 않는다(이벤트 쪽 — 5회차 성능 D1)
         if (only || (inventoryStale(s.id, INVENTORY_MAX_AGE_MS) && !_eventPending.has(String(s.id)))) {
           const forced = isForcedStale(s.id); const mark = staleMarkOf(s.id);   // 읽기 시작 때의 표지 순번 — 그 뒤에 선 표지는 남긴다(5회차 엣지 #1)
-          const prevColl = only ? (getInventory(s.id)?.collections || null) : null;   // 이벤트 읽기의 ‘읽음’ 판정 — 앞 읽기에서 됐던 컬렉션이 이번에 실패했는가
+          // 컬렉션마다 ‘마지막으로 됐던 상태’ 기준(collBase) — 바로 앞 읽기가 실패였어도 그 전에 ok 였으면 ok 로 남는다. 바로 앞 저장값을 기준으로 쓰면 바쁜 읽기 둘째부터
+          //   기준이 ‘실패’ 로 바뀌어 읽음으로 치고 표지까지 지웠다(반증 15a J1). 늘 실패하는 컬렉션(GPU 없음)은 기준이 실패라 세지 않는다
+          const prevInv = getInventory(s.id);
+          const prevBase = prevInv ? (prevInv.collBase && typeof prevInv.collBase === 'object' ? prevInv.collBase : (prevInv.collections || null)) : null;
           try {
             const inv = await fetchInventory(s);
             // 팬 파트 정보 — Thermal 은 fetchSensors 가 방금 받았으므로 재호출 없이 이관(추가 HTTP 0회).
             if (sensorFans?.length) inv.fans = sensorFans.map(({ name, model, partNumber, manufacturer, health, redundant, state }) => ({ name, model, partNumber, manufacturer, health, redundant, ...(state ? { state } : {}) })); // v2.612 COL2612-08: 빈 슬롯(state)
             // v2.548 F1: 팬은 Thermal 경로라 fetchInventory 의 컬렉션 메타에 없다 — 여기서 찍는다.
             if (inv.collections && typeof inv.collections === 'object') inv.collections.fans = sensorFans?.length ? 'ok' : (sensorErr ? 'failed' : 'ok');
+            // 기준 물려주기 — 이번에 ok 면 ok, 실패면 앞 기준 그대로(없으면 실패)
+            if (inv.collections && typeof inv.collections === 'object') inv.collBase = Object.fromEntries(Object.entries(inv.collections).map(([k, v]) => [k, v === 'ok' ? 'ok' : (prevBase?.[k] === 'ok' ? 'ok' : 'failed')]));
             setInventory(s.id, inv, { mark });
             invRefreshed += 1;
             // 이벤트 읽기는 장비에 닿았고 부품 컬렉션이 모두 읽혔을 때만 ‘읽음’ — fetchInventory 는 503 · 404 에도 던지지 않고 reachable:false · 컬렉션 failed 를 돌려줘
             //   읽음으로 쳐 재읽기 표지가 지워지고 30분 동안 다시 읽지 않았다(반증 14a H1). 못 읽음이면 호출부가 표지를 세워 다음 정규 주기가 한 번 다시 읽는다(urgent)
             //   늘 실패하는 컬렉션(GPU 없는 서버 등)은 세지 않는다 — 앞 읽기에서 ‘ok’ 였던 컬렉션이 이번에 실패했을 때만(장비가 잠시 바쁨 · 부분 응답). 앞 읽기가 없으면 닿았는지만 본다
             const coll = inv?.collections && typeof inv.collections === 'object' ? inv.collections : {};
-            const fullRead = inv?.reachable === true && !Object.entries(coll).some(([k, v]) => v === 'failed' && prevColl?.[k] === 'ok');
+            const fullRead = inv?.reachable === true && !Object.entries(coll).some(([k, v]) => v === 'failed' && prevBase?.[k] === 'ok');
             if (only) {
               if (fullRead) invRead.add(String(s.id));
               // 판정은 다시 읽은 서버마다 깨운다(6회차 엣지 #2) — 못 읽은 컬렉션은 전이가 보류하므로 깨워도 닫히지 않는다

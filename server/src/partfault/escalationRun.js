@@ -8,8 +8,9 @@
  *  · 받는 곳 하나 이상에 ‘갔다’ 를 확인한 것만 ‘보냄’ — 메일 꺼짐 · 시간당 한도 · 채널 실패 · 당직 없음은 ‘안 감’ 으로 적고 다음 회차에 다시(ESC_RETRY_MAX 번까지 · 반증 A8 · B1).
  */
 import { config } from '../config.js';
+import { numOrNull } from '../util/numOrNull.js';
 import { openFaultsOrNull, partFaultDbMissing, partFaultClosedKeysOrNull } from './db.js';
-import { judgedClosedKeys } from './closeEvidence.js';
+import { judgedClosedKeys, judgedClosedAt, judgedHeldReasons, judgedUnjudgeable, PROCESS_STARTED_AT } from './closeEvidence.js';
 import { alertOf } from './notify.js';
 import { notify as sendAlert, deliveryOutcome } from '../alerts.js';
 import { sendPortalMail } from '../mail/service.js';
@@ -19,8 +20,10 @@ export const ESC_TICK_MS = 60_000;   // 회차 주기 — 화면은 API 값(tick
 const TICK_MS = ESC_TICK_MS;
 let _timer = null; let _busy = false;
 let _last = null;
-let _orphans = [];   // 마지막 회차에서 닫힘을 확인할 수 없어 남긴 기록 열쇠(관리자 정리용 — 14c M2)
+let _orphans = [];   // 마지막 회차에서 닫힘을 확인할 수 없어 남긴 기록 가운데 스스로 풀리지 않는 것(관리자 정리용 — 14c M2 · 15c P2)
+let _orphanReasons = {}; let _orphansAt = 0;
 export const ESC_ORPHANS_MAX = 2_000;
+export const ESC_ORPHAN_NOREPORT_MS = 60 * 60_000;   // 포탈이 이만큼 돈 뒤에도 보고가 없는 엣지 — 엣지 push 주기(기본 10분)의 여러 배
 let _heldKeys = new Set();   // 마지막 회차에서 정비 창 보류로 보내지 않은 장애 열쇠(행 표지용 — 화면 U7)
 export const escalationRunMarks = () => (_last ? { why: _last.why || '', heldKeys: _heldKeys } : null);
 /**
@@ -156,8 +159,20 @@ export async function runEscalationNow() {
     if (!why) { try { const h = await deps.hold(open, now); hold = h?.hold || null; keyOf = h?.keyOf || null; } catch { hold = null; } }
     const plan = escalationPlan({ settings: why ? { ...settings, enabled: false } : settings, state, open, now, maxSends: ESC_SENDS_PER_RUN, hold, holdKeyOf: keyOf, closed });
     _heldKeys = new Set(plan.heldKeys || []);
-    // 닫힘을 확인할 수 없어 남긴 기록(열린 장애에 없음 · 근거 없음) — 장비가 다시 보이지 않으면(재배정 · 철수) 영영 남으므로 관리자가 정리할 수 있게 센다(반증 14c M2)
-    if (closed != null) { const openK = new Set(open.map(partKeyOf)); _orphans = Object.keys(plan.items).filter((k) => !openK.has(k)).slice(0, ESC_ORPHANS_MAX); } else _orphans = [];
+    // 닫힘을 확인할 수 없어 남긴 기록 가운데 **스스로 풀리지 않는 것**만 정리 대상으로 센다(반증 14c M2 · 15c P2): 판정이 본 보류 사유가 ‘보고에서 장비가 빠짐(unassigned)’
+    //   · ‘엣지 보고가 오래됨(edge-stale)’ · 포탈이 1시간 넘게 돌았는데 ‘보고 없음(no-report)’, 또는 가상 장애를 만들 수 없는 기록. 장비 읽기 실패 · 정비 창 · 재시작 직후
+    //   엣지 보고 전 같은 일시적 보류는 세지 않는다(그대로 정리하면 확인한 장애에 단계가 다시 갔다). 판정이 아직 한 번도 돌지 않았으면 세지 않는다
+    _orphans = []; _orphanReasons = {}; _orphansAt = now;
+    if (closed != null && judgedClosedAt() != null) {
+      const openK = new Set(open.map(partKeyOf)); const held = judgedHeldReasons(); const unj = judgedUnjudgeable();
+      const upLong = deps.now() - PROCESS_STARTED_AT > ESC_ORPHAN_NOREPORT_MS;
+      for (const k of Object.keys(plan.items)) {
+        if (openK.has(k)) continue;
+        const why = unj.has(k) ? 'unjudgeable' : held.get(k) === 'unassigned' ? 'unassigned' : held.get(k) === 'edge-stale' ? 'edgeStale' : (held.get(k) === 'no-report' && upLong) ? 'noReport' : '';
+        if (!why || _orphans.length >= ESC_ORPHANS_MAX) continue;
+        _orphans.push(k); _orphanReasons[why] = (_orphanReasons[why] || 0) + 1;
+      }
+    }
     const results = [];
     for (const s of plan.sends) {
       // 보내기 직전 — 그 사이 확인됐으면 보내지 않는다(확인 라우트가 메모리 기록을 바꾼다)
@@ -184,7 +199,7 @@ export async function runEscalationNow() {
     const saved = changed ? saveEscalationState(next) : true;
     const sentRes = results.filter((r) => !r.notSent);
     _last = { at: now, enabled: settings.enabled, ...(why ? { why } : {}), sent: sentRes.length, delivered: sentRes.filter((r) => r.delivered).length, failed: sentRes.filter((r) => !r.delivered).length,
-      deferred: plan.deferred, overCap: plan.overCap, held: plan.held, orphans: _orphans.length, errors: saved ? [] : ['진행 기록을 쓰지 못했습니다 — 다음 회차에 같은 단계를 다시 보낼 수 있습니다.'],
+      deferred: plan.deferred, overCap: plan.overCap, held: plan.held, orphans: _orphans.length, ...(_orphans.length ? { orphanReasons: { ..._orphanReasons } } : {}), errors: saved ? [] : ['진행 기록을 쓰지 못했습니다 — 다음 회차에 같은 단계를 다시 보낼 수 있습니다.'],
       // 보내지 않은 줄(그 사이 확인)은 건너뜀 · 안 감을 말하지 않는다(그 회차는 skip 을 적지 않았다 — 11회차 판정 관찰)
       results: plan.sends.map((s, i) => ({ part: `${s.part.deviceName || s.part.deviceId || ''} · ${s.part.label || ''}`.slice(0, 120), step: s.step + 2, ...(!results[i]?.notSent && (s.skippedNote || s.skipped)?.length ? { skipped: (s.skippedNote || s.skipped).map((k) => k + 2) } : {}), ...(!results[i]?.notSent && s.undeliveredNote?.length ? { undelivered: s.undeliveredNote.map((k) => k + 2) } : {}), result: results[i]?.text || '', delivered: !!results[i]?.delivered, ...(results[i]?.notSent ? { notSent: true } : {}) })).slice(0, 20) };   // notSent — 회차 도중 확인돼 보내지 않음(안 감 아님 · 10회차 화면 D5)
     return _last;
@@ -208,10 +223,11 @@ export async function forgetEscalationOrphans() {
     const openK = new Set(o.open.map(partKeyOf));
     const st = loadEscalationState();
     const items = { ...st.items }; let removed = 0;
-    for (const k of keys) if (!openK.has(k) && Object.hasOwn(items, k)) { delete items[k]; removed += 1; }
+    // 센 뒤에 확인 · 갱신된 기록은 건드리지 않는다(그 사이 다시 열려 확인된 장애 — 15c 추정)
+    for (const k of keys) if (!openK.has(k) && Object.hasOwn(items, k) && !((numOrNull(items[k]?.ackedAt) ?? 0) > _orphansAt)) { delete items[k]; removed += 1; }
     if (removed && !saveEscalationState({ ...st, items })) return { ok: false, reason: '진행 기록을 쓰지 못했습니다.' };
     _orphans = _orphans.filter((k) => Object.hasOwn(items, k) && !openK.has(k));
-    if (_last) _last = { ..._last, orphans: _orphans.length };
+    if (_last) { const { orphanReasons, ...rest } = _last; _last = { ...rest, orphans: _orphans.length, ...(_orphans.length && orphanReasons ? { orphanReasons } : {}) }; }
     return { ok: true, removed };
   } finally { _busy = false; }
 }

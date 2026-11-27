@@ -416,6 +416,9 @@ export function notifyNote(last, queue = null) {
       bits.push(`알림 ${left}건 발송 대기(차례로 보냅니다)`);
       if (num(nt.sent)) bits.push(`${num(nt.sent)}건 발송`);
       if (num(nt.failed)) bits.push(`**${num(nt.failed)}건은 채널 오류로 받지 못했습니다**`);
+      if (num(nt.skipped)) bits.push(`억제나 채널 미설정 등으로 ${num(nt.skipped)}건 보내지 않음`);   // 대기 중에도 끝난 것을 모두(반증 15b S4)
+      if (num(nt.queueDropped)) bits.push(`**알림 대기열이 넘쳐 ${num(nt.queueDropped)}건은 보내지 않았습니다**`);
+      if (num(nt.disabledSkipped)) bits.push(`부품 장애 점검이 꺼져 ${num(nt.disabledSkipped)}건은 보내지 않았습니다`);
       if (num(nt.capped)) bits.push(`**상한으로 ${num(nt.capped)}건은 보내지 않습니다**`);
     } else {
       bits.push(`알림 ${num(nt.sent)}건 발송`);

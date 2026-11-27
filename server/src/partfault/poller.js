@@ -100,7 +100,7 @@ export function _setNotifyDepsForTest(d) { ND = d ? { ...ND0, ...d } : ND0; }
 export async function _notifyIdleForTest() { while (_nqRunning || _q.size) await new Promise((r) => setTimeout(r, 5)); }
 export const _enqueueNotifyForTest = (tr, reason = 'test') => enqueueNotify(tr, reason);
 export const _notifyQueueStatusForTest = () => notifyQueueStatus();
-export function _resetNotifyForTest() { _q.clear(); _unmarked.clear(); Object.assign(_nqStat, NQ0()); }
+export function _resetNotifyForTest() { _q.clear(); _unmarked.clear(); _slotKey.clear(); Object.assign(_nqStat, NQ0()); }
 const keyOfAlert = (a) => `${String(a.agent || '').trim().toLowerCase()}|${a.partKey}`;
 const RESULTS_MAX = 200;
 function finishOne(view, at) {
@@ -113,6 +113,7 @@ function finishOne(view, at) {
 }
 // 보내지 못한(실패 · 건너뜀) 열림의 발송 표시 정보 — 같은 부품의 뒤 알림(해소가 아닌)이 받으면 그 행에 찍는다(보내는 중이라 대신될 수 없던 열림 — 반증 14b M2). 해소가 오면 버린다
 const _unmarked = new Map();
+const _slotKey = new Map();   // 물리 부품(slot) → 그 부품의 기다리는 알림 열쇠
 function enqueueNotify(tr, reason) {
   const { alerts, total, capped } = transitionAlerts(tr);
   const now = ND.now();
@@ -127,21 +128,26 @@ function enqueueNotify(tr, reason) {
     const k = keyOfAlert(a);
     let mark = a.closed ? null : (openedBy.get(k) || null);
     let replaced = 0;
-    const prev = _q.get(k);
-    if (prev) {
+    const take = (prev) => {
       // 같은 부품의 기다리던 앞 알림을 대신한다 — 앞 판정 표지에 대신됨으로 센다. 열림 표시는 해소가 아닌 뒤 알림이 넘겨받는다
       prev.view.superseded += 1; finishOne(prev.view, now); _nqStat.superseded += 1;
       if (!a.closed && !mark && prev.mark) mark = prev.mark;
-      replaced = (prev.replaced || 0) + 1;
-      _q.delete(k);   // 맨 뒤로 — 앞 알림의 차례를 쓰면 키가 왕복한 같은 부품의 해소가 뒤 키의 열림보다 먼저 나가 받는 쪽 마지막 상태가 틀렸다(반증 14b M3) · 넘침은 가장 오래 바뀌지 않은 부품부터
-    }
-    _q.set(k, { key: k, partKey: a.partKey, agent: a.agent, closed: a.closed, alert: a.alert, judgedAt: now, reason, view, mark, enabledAtEnqueue: en?.enabled === true, replaced });
+      replaced += (prev.replaced || 0) + 1;
+    };
+    // 같은 물리 부품의 다른 열쇠(장비 키가 왕복) — 그 기다리던 알림도 대신한다(마지막 상태만 · 14b M3). 같은 열쇠면 **앞 알림의 차례를 그대로** 쓴다 —
+    //   맨 뒤로 보내면 대기열 한 바퀴보다 자주 바뀌는 부품이 대기가 이어지는 동안 한 번도 나가지 않았다(반증 15b S1)
+    const k2 = a.slot ? _slotKey.get(a.slot) : null;
+    if (k2 && k2 !== k && _q.has(k2)) { take(_q.get(k2)); _q.delete(k2); }
+    const prev = _q.get(k);
+    if (prev) take(prev);
+    _q.set(k, { key: k, partKey: a.partKey, agent: a.agent, closed: a.closed, slot: a.slot || '', alert: a.alert, judgedAt: now, reason, view, mark, enabledAtEnqueue: en?.enabled === true, replaced });
+    if (a.slot) _slotKey.set(a.slot, k);
   }
   _nqStat.enqueued += alerts.length;
   // 상한 — 부품마다 하나라 보통은 닿지 않는다. 넘으면 가장 오래된 것부터 빼고 센다(조용히 버리지 않는다)
   let dropped = 0;
   while (_q.size > NOTIFY_QUEUE_MAX_ITEMS) {
-    const [k0, e0] = _q.entries().next().value; _q.delete(k0);
+    const [k0, e0] = _q.entries().next().value; _q.delete(k0); if (e0.slot && _slotKey.get(e0.slot) === k0) _slotKey.delete(e0.slot);
     e0.view.queueDropped += 1; finishOne(e0.view, now); _nqStat.overflowDropped += 1; dropped += 1;
   }
   if (dropped && now - _overflowWarnAt > 60_000) { _overflowWarnAt = now; console.warn(`[partfault] 알림 대기열이 넘쳐(${NOTIFY_QUEUE_MAX_ITEMS}건) 가장 오래된 알림 ${dropped}건을 보내지 않았습니다(누적 ${_nqStat.overflowDropped}) — 알림 채널 응답을 확인하십시오`); }
@@ -153,7 +159,7 @@ async function drainNotify() {
   _nqRunning = true;
   try {
     while (_q.size) {
-      const [k, e] = _q.entries().next().value; _q.delete(k);
+      const [k, e] = _q.entries().next().value; _q.delete(k); if (e.slot && _slotKey.get(e.slot) === k) _slotKey.delete(e.slot);
       // 판정 뒤 점검이 꺼졌으면(데모로만 켜짐 포함) 보내지 않는다 — 꺼진 채 수동 점검이 만든 판정은 그때처럼 보낸다(반증 12b #5)
       let en = null; try { en = ND.enabled(); } catch { en = null; }
       if ((e.enabledAtEnqueue && en && en.enabled === false) || en?.source === 'demo') {
@@ -216,14 +222,14 @@ async function runOnce({ notify = true, reason = 'timer' } = {}) {
     // 8a단계 ② 정비 창 — 전이 보류를 켠 창 안의 장비(판정 코어 maint/judge.js · 중앙 창). 못 만들면 빈 집합(평소대로 전이).
     // v3.54 반증 13c — 알림 단계 진행 기록 가운데 DB 에 열려 있지 않은 것을 ‘가상의 열린 장애’ 로 같은 전이에 넣는다. 전이가 닫은 것만 닫힘 근거(closeEvidence) —
     //   장비 실패 · 컬렉션 실패 · 정비 창 · 등록부 손상 · 보고 없음이면 전이가 보류하므로 기록이 남는다(수집 주체 단위 ‘보고함’ 은 ‘판정함’ 이 아니었다 — 13c N1).
-    let phantoms = [];
+    let phantoms = []; const unjudgeable = [];
     try {
       if (!escalationStateUnreadable()) {
         const openK = new Set(prev.map(escKeyOf));
         for (const [k, v] of Object.entries(loadEscalationState().items || {})) {
           if (openK.has(k)) continue;
           const ph = phantomOf(k, v);   // 판정 재료(pk)가 없으면 열쇠와 sig 로 — 업그레이드 전 기록 · 확인 단추가 만든 기록도 닫힘을 가린다(반증 14c M1)
-          if (ph) phantoms.push(ph);
+          if (ph) phantoms.push(ph); else unjudgeable.push(k);
         }
       }
     } catch { phantoms = []; }
@@ -235,10 +241,11 @@ async function runOnce({ notify = true, reason = 'timer' } = {}) {
     // 가상 전이 — DB 에 쓰지 않는다(근거만) · 판정마다 통째로 바꾼다. 그 장비들의 관측만 넘긴다(전체 관측으로 한 번 더 돌면 큰 함대에서 판정 몫이 두 배 — 14c M3) ·
     //   정비 창은 부수 효과 없는 엿보기로(보류 · 대상 모름 계수에 섞지 않는다 — 14c M4)
     try {
-      if (!phantoms.length) setJudgedClosed([]);
+      if (!phantoms.length) setJudgedClosed([], Date.now(), { unjudgeable });
       else {
         const devOf = (p) => `${String(p.agent || '').trim().toLowerCase()}|${String(p.deviceId || '').trim()}`;
         const phDev = new Set(phantoms.map(devOf));
+        const phKeys = new Set(phantoms.map(escKeyOf));   // 같은 부품이 다른 장비 id(IP 가 바뀜)로 관측돼도 열쇠로 맞춘다(반증 15c P1)
         let phHold = maint?.hold || null;
         try {
           const M = await import('../bmusage/maint/partfaultHold.js');
@@ -246,7 +253,8 @@ async function runOnce({ notify = true, reason = 'timer' } = {}) {
           if (r?.hold?.size) phHold = new Set([...(phHold || []), ...r.hold]);
         } catch { /* 엿보기 실패 — 실제 전이와 같은 집합만 */ }
         const scanPh = { ...scan, ...(phHold?.size ? { maintHold: phHold } : {}) };
-        setJudgedClosed(transition({ open: phantoms, observed: observed.filter((o) => phDev.has(devOf(o))), scan: scanPh }).closed.map(escKeyOf));
+        const ptr = transition({ open: phantoms, observed: observed.filter((o) => phDev.has(devOf(o)) || phKeys.has(escKeyOf(o))), scan: scanPh });
+        setJudgedClosed(ptr.closed.map(escKeyOf), Date.now(), { held: new Map(ptr.held.map((h) => [escKeyOf(h), String(h.holdReason || '')])), unjudgeable });
       }
     } catch { setJudgedClosed([]); }
     _lastJudgeCost = Date.now() - t0;   // 판정 몫(스캔 · 전이 · 적용)만 — 뒤의 알림 발송 대기는 넣지 않는다(곧 판정 간격의 비용 · 10회차 성능 #2)
