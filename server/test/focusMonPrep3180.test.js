@@ -113,7 +113,11 @@ function sandbox({ sshdT, passwd = '', sshdRc = 0 } = {}) {
   w('chage', `echo "chage $*" >> '${log}'`);
   w('runuser', `echo "runuser $1 $2" >> '${log}'; shift 3; exec "$@"`); // -u A -- /bin/sh -c W arg0 D LINE BLOB → 지금 계정으로 W 를 돌린다
   w('id', `if [ "$1" = "-Gn" ]; then cat '${root}/groups' 2>/dev/null; else echo 0; fi`);
-  w('sudo', `cat '${root}/sudol' 2>/dev/null`); // sudo -n -l -U A → 시험이 쓴 목록
+  // sudo -n -l -U A → 시험이 쓴 목록 · v3.54.0: sudo -n -l -U A <명령> → 허용(sudoallow 에 그 줄)이면 경로를 찍고 0 · 아니면 1(실제 sudo 와 같다 — 이 개발 환경 1.9.15 로 확인).
+  //   sudoerr 가 있으면 터미널이 없을 때(FAKE_TTY 없음) 그 글을 표준 오류로 · 1(Defaults requiretty 흉내)
+  w('sudo', `if [ "$#" -ge 5 ]; then if [ -f '${root}/sudoerr' ] && [ -z "\${FAKE_TTY:-}" ]; then cat '${root}/sudoerr' >&2; exit 1; fi; if grep -qxF -- "$5" '${root}/sudoallow' 2>/dev/null; then echo "$5"; exit 0; fi; exit 1; fi; if [ -f '${root}/sudoerr' ] && [ -z "\${FAKE_TTY:-}" ]; then cat '${root}/sudoerr' >&2; exit 1; fi; cat '${root}/sudol' 2>/dev/null`);
+  // script -qc CMD /dev/null → 가짜 터미널(FAKE_TTY)로 CMD — 실제 pty 없이(시험 환경마다 다르다)
+  w('script', `FAKE_TTY=1; export FAKE_TTY; exec /bin/sh -c "$2"`);
   return { root, bin, homes, pw, log, T };
 }
 /** 준비 파일을 가짜 bin 으로 — PATH 줄만 바꾼다(그 밖은 받은 그대로). */
@@ -502,7 +506,7 @@ test('⑦ 엣지 워커(caps · 준비 계정 보고 · 준비 줄) · SSH 공�
   const Wk = await import('../src/agent/focusMonWorker.js');
   const src = fs.readFileSync(new URL('../src/agent/focusMonWorker.js', import.meta.url), 'utf8');
   assert.deepEqual([...Wk.EDGE_AUDIT_CAPS], ['install', 'prep']); assert.match(src, /caps: \[\.\.\.EDGE_AUDIT_CAPS\]/);
-  assert.match(src, /exec: prepExec\(\{ edge: true, edgeVcs \}\)/, '엣지 준비는 엣지 스냅샷 법인으로');
+  assert.match(src, /exec: prepExec\(\{ edge: true, edgeVcs, edgeLocal \}\)/, '엣지 준비는 엣지 스냅샷 법인으로(v3.54.0 엣지가 아는 서버)');
   assert.match(src, /: j\.mode === 'prep'\n\s+\? prepRunner\.submit\(/, '준비 작업은 준비 줄로(점검 실행 줄이 아니다)');
   assert.match(src, /from: ex\.from === true, age: ex\.age === 'default' \? 'default' : 'never', audit: ex\.audit === true/, '중앙이 보낸 준비 값은 참거짓 · 정해 둔 값만');
   assert.match(src, /prep: \{ code: sub\.code === 'queue-full' \? 'queue-full' : 'busy', step: 0 \}/, '반증 D8 — 받지 못한 준비 작업은 busy · queue-full(접속 못 함 아님)');

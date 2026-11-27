@@ -146,7 +146,8 @@ export function PrepPanel({ setMsg, onDone }) {
             <dt>넣는 줄(한 줄)</dt><dd className="fm-mono fm-brk">{keyLinePreview(from)}</dd>
             <dt>서버에 생기는 것</dt><dd>수집 계정이 없던 서버에 계정 하나(홈 · 비밀번호 칸 ‘*’{age === 'never' ? ' · 만료 없음' : ''}) · 그 계정의 ~/.ssh(700) · authorized_keys(600)에 위의 한 줄. 같은 키가 이미 있으면 넣지 않습니다.</dd>
             <dt>건드리지 않는 것</dt><dd>sshd 설정 · 방화벽 · 패키지 · 다른 계정 · 그 계정에 이미 있던 줄(같은 키가 다른 옵션으로 있으면 그대로 두고 알립니다). 이미 있는 계정의 셸 · 그룹 · 비밀번호도 바꾸지 않습니다 — ~/.ssh · authorized_keys 권한만 700 · 600 으로 맞춥니다(sshd 가 넓은 권한을 거부).
-              sshd 판정은 이 노드가 그 서버에 닿은 주소 · 포트로 합니다. sudo 로 모든 명령을 할 수 있는 계정 · 준비 계정 자신에는 넣지 않습니다.</dd>
+              sshd 판정은 이 노드가 그 서버에 닿은 주소 · 포트로 합니다. sudo 로 root 와 같은 일을 할 수 있는 계정(모든 명령 · 셸 · su — sudo 에게 직접 묻습니다) · 준비 계정 자신에는 넣지 않습니다.
+              엣지 서버는 그 엣지가 아는 주소(그 엣지 vCenter 의 VM · SSH 공용 접속 서버)에만 법인 공통 계정을 씁니다.</dd>
           </dl>
           <div className="fm-row">
             <label className="fm-row"><span className="fm-lbl">본인 OTP</span><input className="fm-input fm-mono" style={{ width: 110 }} inputMode="numeric" maxLength={8} autoComplete="one-time-code" value={otp} onChange={(e) => setOtp(e.target.value)} /></label>
